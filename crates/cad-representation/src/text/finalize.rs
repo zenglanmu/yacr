@@ -1,4 +1,4 @@
-use cad_domain::{Point3, TextAlignH, TextAlignV};
+use cad_domain::{Point3, TextAlignH, TextAlignV, TextLineSpacing, TextLineSpacingStyle};
 
 use super::layout::{ShapedLine, LINE_SPACING};
 use super::model::TextFormatIssue;
@@ -8,8 +8,9 @@ use super::model::TextFormatIssue;
 ///
 /// Horizontal alignment is applied per line (so a multi-line block stays
 /// flush against its anchor); vertical placement uses the accumulated line
-/// heights with [`LINE_SPACING`]. Vertical alignment of a multi-line block is a
-/// documented approximation (see the module docs).
+/// heights with [`LINE_SPACING`] times the entity's line-spacing factor. Vertical
+/// alignment of a multi-line block is a documented approximation (see the module
+/// docs).
 #[cfg(test)]
 pub(super) fn finalize_lines(
     lines: Vec<ShapedLine>,
@@ -18,8 +19,18 @@ pub(super) fn finalize_lines(
     rotation: f64,
     h_align: TextAlignH,
     v_align: TextAlignV,
+    line_spacing: TextLineSpacing,
 ) -> Vec<Vec<Point3>> {
-    finalize_text(lines, size, origin, rotation, h_align, v_align).outlines
+    finalize_text(
+        lines,
+        size,
+        origin,
+        rotation,
+        h_align,
+        v_align,
+        line_spacing,
+    )
+    .outlines
 }
 
 pub(super) struct FinalizedText {
@@ -48,6 +59,7 @@ pub(super) fn finalize_text(
     rotation: f64,
     h_align: TextAlignH,
     v_align: TextAlignV,
+    line_spacing: TextLineSpacing,
 ) -> FinalizedText {
     let vertical_shift = match v_align {
         TextAlignV::Baseline => 0.0,
@@ -55,6 +67,9 @@ pub(super) fn finalize_text(
         TextAlignV::Middle => 0.5 * size,
         TextAlignV::Top => size,
     };
+    // The factor is a multiple of one single line height; the neutral default
+    // (1.0) reproduces the pre-line-spacing layout exactly.
+    let factor = line_spacing.effective_factor();
     let (sin, cos) = rotation.sin_cos();
     let mut polylines = Vec::new();
     let mut outlines = Vec::new();
@@ -119,13 +134,27 @@ pub(super) fn finalize_text(
                 }
             }
         }
-        baseline -= LINE_SPACING * line.height;
+        baseline -= LINE_SPACING * factor * advance_height(line_spacing.style, size, line.height);
     }
     FinalizedText {
         polylines,
         outlines,
         meshes,
         fill_failures: failures,
+    }
+}
+
+/// The single-line height a baseline advance is measured against.
+///
+/// * "At least" ([`TextLineSpacingStyle::AtLeast`]): the line's own tallest run,
+///   so a taller run pushes the following baselines down — the documented
+///   "at least" behaviour for a line with larger characters.
+/// * "Exactly" ([`TextLineSpacingStyle::Exactly`]): the entity's base height, so
+///   every baseline advances by the same amount no matter what the line holds.
+fn advance_height(style: TextLineSpacingStyle, size: f64, line_height: f64) -> f64 {
+    match style {
+        TextLineSpacingStyle::AtLeast => line_height,
+        TextLineSpacingStyle::Exactly => size,
     }
 }
 

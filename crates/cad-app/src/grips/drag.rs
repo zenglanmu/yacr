@@ -26,7 +26,7 @@ use super::{
 };
 use cad_domain::{
     BlockId, CadError, CadResult, Point3, SemanticGeometry, StyleId, TextAlignH, TextAlignV,
-    Transform3,
+    TextLineSpacing, Transform3,
 };
 use cad_geometry::{add, dot, length, scale, sub};
 
@@ -607,6 +607,7 @@ type TextParts<'a> = (
     TextAlignV,
     Option<f64>,
     f64,
+    TextLineSpacing,
 );
 
 /// The `TEXT`/`MTEXT` drag rule: the stored insertion point, every other field
@@ -635,6 +636,7 @@ fn apply_text(text: TextParts<'_>, id: &GripId, to: Point3) -> CadResult<Semanti
         v_align,
         wrap_width,
         width_factor,
+        line_spacing,
     ) = text;
     match (id.kind, id.index) {
         (GripKind::Insertion, 0) => {
@@ -655,6 +657,7 @@ fn apply_text(text: TextParts<'_>, id: &GripId, to: Point3) -> CadResult<Semanti
                 v_align,
                 wrap_width,
                 width_factor,
+                line_spacing,
             })
         }
         (GripKind::Insertion, index) => Err(stale_handle(format!(
@@ -868,6 +871,7 @@ pub fn apply_grip(
             v_align,
             wrap_width,
             width_factor,
+            line_spacing,
         } => apply_text(
             (
                 text.as_str(),
@@ -880,6 +884,7 @@ pub fn apply_grip(
                 *v_align,
                 *wrap_width,
                 *width_factor,
+                *line_spacing,
             ),
             id,
             to,

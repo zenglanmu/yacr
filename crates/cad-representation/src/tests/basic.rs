@@ -131,6 +131,7 @@ fn sfnt_text_provider_emits_meshes_without_outline_lines() {
         v_align: TextAlignV::Baseline,
         wrap_width: None,
         width_factor: 1.0,
+        line_spacing: cad_domain::TextLineSpacing::default(),
     };
     let r = ProviderRegistry::with_default_provider()
         .build(&e, &context().with_fonts(Arc::new(fonts)))
@@ -204,6 +205,7 @@ fn shx_text_provider_keeps_outline_lines_when_font_is_available() {
         v_align: TextAlignV::Baseline,
         wrap_width: None,
         width_factor: 1.0,
+        line_spacing: cad_domain::TextLineSpacing::default(),
     };
     let r = ProviderRegistry::with_default_provider()
         .build(&e, &context().with_fonts(Arc::new(fonts)))

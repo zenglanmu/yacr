@@ -149,6 +149,7 @@ impl Application {
                 v_align,
                 wrap_width,
                 width_factor,
+                line_spacing,
                 ..
             } => SemanticGeometry::Text {
                 text: text.clone(),
@@ -161,6 +162,9 @@ impl Application {
                 v_align: *v_align,
                 wrap_width: *wrap_width,
                 width_factor: *width_factor,
+                // ADDSELECTED clones the stored entity, so the spacing is kept
+                // bit for bit as well.
+                line_spacing: *line_spacing,
             },
             other => {
                 return Err(unsupported(

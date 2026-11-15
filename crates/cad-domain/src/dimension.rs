@@ -714,6 +714,9 @@ pub(crate) fn place_text(
         wrap_width: None,
         // Dimension text is not horizontally stretched.
         width_factor: crate::DEFAULT_TEXT_WIDTH_FACTOR,
+        // A synthesized dimension run has one line; the neutral spacing keeps
+        // the pre-line-spacing layout.
+        line_spacing: crate::TextLineSpacing::default(),
     }
 }
 
@@ -809,6 +812,7 @@ fn transform_child(
             v_align,
             wrap_width,
             width_factor,
+            line_spacing,
         } => SemanticGeometry::Text {
             text: text.clone(),
             position: p(*position),
@@ -823,6 +827,8 @@ fn transform_child(
             wrap_width: wrap_width.map(|width| width * scale_factor),
             // A dimensionless scale is unaffected by a similarity transform.
             width_factor: *width_factor,
+            // Both halves of the spacing are dimensionless ratios; keep them.
+            line_spacing: *line_spacing,
         },
         other => {
             return Err(CadError::Unsupported(format!(

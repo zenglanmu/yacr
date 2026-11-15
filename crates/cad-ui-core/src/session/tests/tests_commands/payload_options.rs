@@ -240,11 +240,25 @@ fn txt2mtext_grammar_builds_each_settings_toggle() {
         Some(Txt2MTextArgument::WordWrap)
     );
     assert_eq!(
-        parse_txt2mtext_argument("UNIFORM"),
-        Some(Txt2MTextArgument::Uniform)
+        parse_txt2mtext_argument("UNIFORM 2.5"),
+        Some(Txt2MTextArgument::Uniform(2.5))
+    );
+    assert_eq!(
+        parse_txt2mtext_argument("UNIFORM 0"),
+        Some(Txt2MTextArgument::Uniform(0.0)),
+        "the grammar takes any finite decimal; the command refuses an out-of-range factor by name"
     );
 
-    for refused in ["ORDER BOGUS", "ORDER", "COMBINE NOW", "BOGUS"] {
+    for refused in [
+        "ORDER BOGUS",
+        "ORDER",
+        "COMBINE NOW",
+        "UNIFORM",
+        "UNIFORM inf",
+        "UNIFORM nan",
+        "UNIFORM 1 2",
+        "BOGUS",
+    ] {
         assert_eq!(parse_txt2mtext_argument(refused), None, "{refused:?}");
     }
     let reason = invalid_txt2mtext_argument_reason("TXT2MTXT BOGUS");
@@ -305,8 +319,11 @@ fn option_payloads_reach_the_command_layer() {
     let session = fresh_session();
     // The command layer checks these settings before it reads the selection, so
     // the refusal is proof the built payload arrived with the typed value.
-    let error = session.command("TXT2MTXT UNIFORM").unwrap_err();
-    assert!(error.contains("txt2mtxt.uniform_line_spacing"), "{error}");
+    let error = session.command("TXT2MTXT UNIFORM 0").unwrap_err();
+    assert!(
+        error.contains("txt2mtxt.uniform_line_spacing_factor"),
+        "{error}"
+    );
     let error = session.command("TEXTMASK MASK SOLID").unwrap_err();
     assert!(error.contains("textmask.mask_type"), "{error}");
     let error = session.command("REVCLOUD STYLE CALLIGRAPHY").unwrap_err();

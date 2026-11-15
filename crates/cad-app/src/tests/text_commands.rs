@@ -44,6 +44,7 @@ fn text_entity(
             v_align: TextAlignV::Middle,
             wrap_width: None,
             width_factor: 1.0,
+            line_spacing: cad_domain::TextLineSpacing::default(),
         },
         draw_order: order,
     }
@@ -267,6 +268,7 @@ fn torient_most_readable_changes_only_rotation_and_is_one_undo_step() {
         v_align,
         wrap_width,
         width_factor,
+        line_spacing,
     } = &after.geometry
     else {
         panic!("expected Text");
@@ -282,10 +284,15 @@ fn torient_most_readable_changes_only_rotation_and_is_one_undo_step() {
         v_align: before_v,
         wrap_width: before_wrap,
         width_factor: before_factor,
+        line_spacing: before_spacing,
     } = &before.geometry
     else {
         panic!("expected Text");
     };
+    assert_eq!(
+        line_spacing, before_spacing,
+        "the line spacing is untouched"
+    );
     assert_eq!(text, before_text, "content is untouched");
     assert_eq!(position, before_position, "location is untouched");
     assert_eq!(style, before_style);
@@ -735,6 +742,7 @@ fn txt2mtxt_sorts_top_down_then_left_right_and_joins_raw_strings() {
         v_align,
         wrap_width,
         width_factor,
+        line_spacing,
     } = &combined.geometry
     else {
         panic!("expected Text geometry");
@@ -754,6 +762,7 @@ fn txt2mtxt_sorts_top_down_then_left_right_and_joins_raw_strings() {
         v_align: b_v,
         wrap_width: b_wrap,
         width_factor: b_factor,
+        line_spacing: b_spacing,
         ..
     } = &b.geometry
     else {
@@ -768,6 +777,7 @@ fn txt2mtxt_sorts_top_down_then_left_right_and_joins_raw_strings() {
     assert_eq!(v_align, b_v);
     assert_eq!(wrap_width, b_wrap, "None stays None; no width is invented");
     assert_eq!(width_factor, b_factor, "the neutral factor is preserved");
+    assert_eq!(line_spacing, b_spacing, "no uniform spacing was requested");
     assert_eq!(combined.layer, LayerId(7), "first source's layer");
     assert_eq!(combined.draw_order, 7, "first source's draw order");
     // All sources are gone, in the same transaction.

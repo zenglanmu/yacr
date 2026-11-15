@@ -618,6 +618,7 @@ fn text_transform_is_a_similarity_and_refuses_stretch_and_mirror() {
         v_align: TextAlignV::Middle,
         wrap_width: Some(2.0),
         width_factor: 1.5,
+        line_spacing: cad_domain::TextLineSpacing::default(),
     };
     // A translation + quarter turn + uniform scale keeps every Text field.
     let transform = Transform3 {
@@ -643,6 +644,7 @@ fn text_transform_is_a_similarity_and_refuses_stretch_and_mirror() {
             v_align,
             wrap_width,
             width_factor,
+            line_spacing,
         } => {
             assert_eq!(value, "AB");
             assert_eq!(style, StyleId(4));
@@ -658,6 +660,10 @@ fn text_transform_is_a_similarity_and_refuses_stretch_and_mirror() {
             assert!(
                 (width_factor - 1.5).abs() < 1e-12,
                 "a similarity keeps the dimensionless width factor: {width_factor}"
+            );
+            assert!(
+                line_spacing.is_default(),
+                "a similarity keeps the dimensionless line spacing"
             );
             assert!(
                 (position.x - 6.0).abs() < 1e-12

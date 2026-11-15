@@ -26,10 +26,16 @@
 //!   has no boundary, so a later MTEXT's declared width is not lost), and
 //!   `None` when no source declares one — no width is invented. Off stores
 //!   `None`.
-//! * **Force uniform line spacing**: AutoCAD stores an MTEXT line-spacing
-//!   factor; this build's `SemanticGeometry::Text` has no such field and MTEXT
-//!   `\P` is only a paragraph break, so the setting is a named
-//!   `txt2mtxt.uniform_line_spacing` `Unsupported` refusal before any write.
+//! * **Force uniform line spacing** (`UNIFORM <factor>`): every produced MTEXT
+//!   stores that line-spacing factor (DXF MTEXT group 44) with the **exactly**
+//!   style (group 73 = 2), so every baseline advances by the same amount instead
+//!   of each line following its own tallest run. The factor must be finite and
+//!   inside `0.25..=4.0` (AutoCAD's edit-box range); anything else is refused by
+//!   name (`txt2mtxt.uniform_line_spacing_factor`) before any write. Without
+//!   `UNIFORM` the combined object keeps the first ordered source's stored
+//!   spacing (the neutral factor `1.0` / "at least" for every source that has no
+//!   line-spacing data), i.e. the output is unchanged from before the field
+//!   existed.
 //!
 //! ## Write discipline
 //!
@@ -81,14 +87,33 @@ impl Application {
         command: &Command,
     ) -> CadResult<CommandOutcome> {
         let settings = options(command)?;
-        if settings.force_uniform_line_spacing {
-            return Err(CadError::Unsupported(
-                "txt2mtxt.uniform_line_spacing: MTEXT line-spacing is not modelled in this build \
-                 (SemanticGeometry::Text has no line-spacing field; \\P is a paragraph break, not \
-                 a 50%-larger paragraph spacing); the setting was not applied"
-                    .to_string(),
-            ));
-        }
+        // `UNIFORM <factor>`: an unusable factor is refused by name before any
+        // transaction, exactly like the other pre-write refusals.
+        let uniform_line_spacing = match settings.uniform_line_spacing {
+            None => None,
+            Some(factor) => {
+                let usable = factor.is_finite()
+                    && (cad_domain::MIN_TEXT_LINE_SPACING_FACTOR
+                        ..=cad_domain::MAX_TEXT_LINE_SPACING_FACTOR)
+                        .contains(&factor);
+                if !usable {
+                    return Err(CadError::InvalidInput(format!(
+                        "txt2mtxt.uniform_line_spacing_factor: UNIFORM needs a finite \
+                         line-spacing factor in {}..={} (the AutoCAD edit-box range), got \
+                         {factor}; nothing was written",
+                        cad_domain::MIN_TEXT_LINE_SPACING_FACTOR,
+                        cad_domain::MAX_TEXT_LINE_SPACING_FACTOR
+                    )));
+                }
+                Some(cad_domain::TextLineSpacing {
+                    factor,
+                    // "Uniform" means every baseline advances identically, which
+                    // is the "exactly" style: a taller run on one line must not
+                    // push the next one down.
+                    style: cad_domain::TextLineSpacingStyle::Exactly,
+                })
+            }
+        };
         let references = session.selection.refs().to_vec();
         if references.is_empty() {
             return Err(CadError::InvalidInput(
@@ -160,7 +185,7 @@ impl Application {
             });
         }
         let mut candidate = drawing.clone();
-        let plan = plan_replacements(&mut candidate, &sources, &settings)?;
+        let plan = plan_replacements(&mut candidate, &sources, &settings, uniform_line_spacing)?;
         let display_states: Vec<_> = plan
             .sources
             .iter()
@@ -239,14 +264,18 @@ impl Application {
             code: "drawing.txt2mtxt".into(),
             message: format!(
                 "TXT2MTXT: replaced {count} source(s) with {made} AcDbMText object(s); \
-                 combine = {}, order = {}, word-wrap = {}",
+                 combine = {}, order = {}, word-wrap = {}, uniform line spacing = {}",
                 settings.combine,
                 if settings.order == TextOrder::TopDown {
                     "top-down"
                 } else {
                     "selection"
                 },
-                settings.word_wrap
+                settings.word_wrap,
+                match uniform_line_spacing {
+                    Some(spacing) => format!("{:.4}x (exactly)", spacing.factor),
+                    None => "kept from the first source".to_string(),
+                }
             ),
         }];
         if !plan.height_override_skipped.is_empty() {
@@ -281,6 +310,7 @@ fn plan_replacements(
     candidate: &mut DrawingDatabase,
     sources: &[DbEntity],
     settings: &Txt2MTextOptions,
+    uniform_line_spacing: Option<TextLineSpacing>,
 ) -> CadResult<Plan> {
     let first = sources
         .first()
@@ -296,6 +326,7 @@ fn plan_replacements(
             font,
             h_align,
             v_align,
+            line_spacing: first_line_spacing,
             ..
         } = &first.geometry
         else {
@@ -350,14 +381,26 @@ fn plan_replacements(
             },
             // The folded MTEXT carries no per-source horizontal stretch.
             width_factor: 1.0,
+            // `UNIFORM <factor>` stamps the requested spacing; without it the
+            // first ordered source's stored spacing survives, exactly like its
+            // style/height/rotation.
+            line_spacing: uniform_line_spacing.unwrap_or(*first_line_spacing),
         };
         replacements.push(mtext_entity(candidate, first, geometry));
     } else {
         for source in sources {
             let mut geometry = source.geometry.clone();
-            if let SemanticGeometry::Text { wrap_width, .. } = &mut geometry {
+            if let SemanticGeometry::Text {
+                wrap_width,
+                line_spacing,
+                ..
+            } = &mut geometry
+            {
                 if !settings.word_wrap {
                     *wrap_width = None;
+                }
+                if let Some(spacing) = uniform_line_spacing {
+                    *line_spacing = spacing;
                 }
             }
             replacements.push(mtext_entity(candidate, source, geometry));

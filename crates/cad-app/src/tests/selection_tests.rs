@@ -582,6 +582,7 @@ fn text_without_font_is_explicitly_unknown() {
             v_align: cad_domain::TextAlignV::Baseline,
             wrap_width: None,
             width_factor: 1.0,
+            line_spacing: cad_domain::TextLineSpacing::default(),
         },
         LayerId(0),
     ))
@@ -780,6 +781,7 @@ fn text_geometry(text: &str) -> SemanticGeometry {
         v_align: cad_domain::TextAlignV::Baseline,
         wrap_width: None,
         width_factor: 1.0,
+        line_spacing: cad_domain::TextLineSpacing::default(),
     }
 }
 

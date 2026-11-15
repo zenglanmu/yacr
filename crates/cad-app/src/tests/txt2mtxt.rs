@@ -1,6 +1,7 @@
 //! `TXT2MTXT` settings contracts: combine on/off, text ordering, word-wrap
 //! (including the first *stored* boundary rule), per-source height preservation
-//! through the MTEXT `\H` code and the declared uniform-line-spacing refusal.
+//! through the MTEXT `\H` code, and `UNIFORM <factor>` line spacing (stored
+//! factor + one undo step, and the named refusal for an unusable factor).
 //!
 //! The base command contract lives in `tests/text_commands.rs`; these tests pin
 //! the 2026-11 settings payload and the one-transaction source replacement.
@@ -41,6 +42,7 @@ fn text_entity(
             v_align: TextAlignV::Middle,
             wrap_width: None,
             width_factor: 1.0,
+            line_spacing: cad_domain::TextLineSpacing::default(),
         },
         draw_order: order,
     }
@@ -152,7 +154,7 @@ fn txt2mtxt_combine_off_creates_one_mtext_per_source() {
             combine: false,
             order: crate::command_payload::TextOrder::TopDown,
             word_wrap: true,
-            force_uniform_line_spacing: false,
+            uniform_line_spacing: None,
         }),
     )
     .expect("one MTEXT per source");
@@ -198,7 +200,7 @@ fn txt2mtxt_selection_order_and_word_wrap_settings_are_honoured() {
             combine: true,
             order: crate::command_payload::TextOrder::Selection,
             word_wrap: true,
-            force_uniform_line_spacing: false,
+            uniform_line_spacing: None,
         }),
     )
     .unwrap();
@@ -222,7 +224,7 @@ fn txt2mtxt_selection_order_and_word_wrap_settings_are_honoured() {
             combine: true,
             order: crate::command_payload::TextOrder::TopDown,
             word_wrap: false,
-            force_uniform_line_spacing: false,
+            uniform_line_spacing: None,
         }),
     )
     .unwrap();
@@ -234,18 +236,12 @@ fn txt2mtxt_selection_order_and_word_wrap_settings_are_honoured() {
 }
 
 #[test]
-fn txt2mtxt_uniform_line_spacing_is_a_named_refusal_without_writing() {
-    let (mut app, mut session) = app_with(vec![text_entity(
-        1,
-        "A",
-        p3(0.0, 0.0, 0.0),
-        0.0,
-        0,
-        "AcDbText",
-    )]);
-    select(&mut session, &[1]);
-    let before = revision(&app);
-    let error = execute(
+fn txt2mtxt_uniform_line_spacing_stamps_the_factor_and_one_undo_step() {
+    let a = text_entity(1, "A", p3(0.0, 9.0, 0.0), 0.0, 0, "AcDbText");
+    let b = text_entity(2, "B", p3(0.0, 2.0, 0.0), 0.0, 1, "AcDbText");
+    let (mut app, mut session) = app_with(vec![a, b]);
+    select(&mut session, &[1, 2]);
+    let outcome = execute(
         &mut app,
         &mut session,
         CommandId::Txt2MText,
@@ -253,17 +249,108 @@ fn txt2mtxt_uniform_line_spacing_is_a_named_refusal_without_writing() {
             combine: true,
             order: crate::command_payload::TextOrder::TopDown,
             word_wrap: true,
-            force_uniform_line_spacing: true,
+            uniform_line_spacing: Some(1.5),
         }),
     )
-    .expect_err("the line-spacing factor is not modelled");
-    assert!(
-        matches!(error, CadError::Unsupported(ref message) if message.contains("txt2mtxt.uniform_line_spacing")),
-        "{error:?}"
+    .expect("UNIFORM combines with the requested factor");
+
+    // The documented combine semantics still hold: one AcDbMText joined with
+    // `\P`, in top-down order.
+    assert_eq!(outcome.objects.len(), 1, "one combined MTEXT");
+    let combined = entity(&app, outcome.objects[0].0).expect("the replacement exists");
+    assert_eq!(combined.object.type_key, "AcDbMText");
+    assert!(entity(&app, 1).is_none() && entity(&app, 2).is_none());
+    let SemanticGeometry::Text {
+        text, line_spacing, ..
+    } = &combined.geometry
+    else {
+        panic!("expected Text");
+    };
+    assert_eq!(text, "A\\PB", "the sources are still joined in order");
+    assert_eq!(line_spacing.factor, 1.5, "the requested factor is stored");
+    assert_eq!(
+        line_spacing.style,
+        cad_domain::TextLineSpacingStyle::Exactly,
+        "UNIFORM means every baseline advances identically"
     );
-    assert_eq!(revision(&app), before, "the refusal writes nothing");
-    assert_eq!(undo_depth(&app), 0);
-    assert!(entity(&app, 1).is_some());
+    assert_eq!(
+        undo_depth(&app),
+        1,
+        "the whole conversion is one transaction / one undo step"
+    );
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .unwrap();
+    assert!(entity(&app, 1).is_some() && entity(&app, 2).is_some());
+}
+
+#[test]
+fn txt2mtxt_without_uniform_keeps_the_first_source_spacing() {
+    // The first ordered source is the combined base for style/height/rotation,
+    // and its stored line spacing survives too (the default is `1.0 / at least`,
+    // so a source that never had one is unchanged).
+    let a = text_entity(1, "A", p3(0.0, 9.0, 0.0), 0.0, 0, "AcDbMText");
+    let b = text_entity(2, "B", p3(0.0, 2.0, 0.0), 0.0, 1, "AcDbMText");
+    let (mut app, mut session) = app_with(vec![a, b]);
+    select(&mut session, &[1, 2]);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::Txt2MText,
+        CommandPayload::None,
+    )
+    .expect("the bare form keeps the defaults");
+    let SemanticGeometry::Text { line_spacing, .. } = combined_geometry(&app, &outcome) else {
+        panic!("expected Text");
+    };
+    assert!(
+        line_spacing.is_default(),
+        "no UNIFORM means the neutral spacing, exactly as before the field existed"
+    );
+}
+
+#[test]
+fn txt2mtxt_uniform_refuses_an_unusable_factor_by_name_without_writing() {
+    for factor in [0.0, -1.0, 5.0, f64::NAN, f64::INFINITY] {
+        let (mut app, mut session) = app_with(vec![text_entity(
+            1,
+            "A",
+            p3(0.0, 0.0, 0.0),
+            0.0,
+            0,
+            "AcDbText",
+        )]);
+        select(&mut session, &[1]);
+        let before = revision(&app);
+        let error = execute(
+            &mut app,
+            &mut session,
+            CommandId::Txt2MText,
+            txt2mtext_payload(crate::command_payload::Txt2MTextOptions {
+                combine: true,
+                order: crate::command_payload::TextOrder::TopDown,
+                word_wrap: true,
+                uniform_line_spacing: Some(factor),
+            }),
+        )
+        .expect_err("an unusable line-spacing factor is refused");
+        assert!(
+            matches!(error, CadError::InvalidInput(ref message)
+                if message.contains("txt2mtxt.uniform_line_spacing_factor")),
+            "{factor}: {error:?}"
+        );
+        assert_eq!(
+            revision(&app),
+            before,
+            "{factor}: the refusal writes nothing"
+        );
+        assert_eq!(undo_depth(&app), 0, "{factor}: no undo entry");
+        assert!(entity(&app, 1).is_some(), "{factor}: the source survives");
+    }
 }
 
 // --- Content and height preservation ----------------------------------------
@@ -379,7 +466,7 @@ fn txt2mtxt_keeps_the_first_stored_wrap_width_when_the_first_source_has_none() {
             combine: true,
             order: crate::command_payload::TextOrder::TopDown,
             word_wrap: true,
-            force_uniform_line_spacing: false,
+            uniform_line_spacing: None,
         }),
     )
     .expect("combine with word-wrap on");
@@ -430,7 +517,7 @@ fn txt2mtxt_separate_preserves_each_source_height_and_clears_wrap_only_when_off(
             combine: false,
             order: crate::command_payload::TextOrder::TopDown,
             word_wrap: false,
-            force_uniform_line_spacing: false,
+            uniform_line_spacing: None,
         }),
     )
     .expect("separate");

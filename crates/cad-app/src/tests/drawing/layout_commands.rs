@@ -96,6 +96,7 @@ fn text_geometry(height: f64, wrap_width: Option<f64>) -> SemanticGeometry {
         v_align: TextAlignV::Baseline,
         wrap_width,
         width_factor: 1.0,
+        line_spacing: cad_domain::TextLineSpacing::default(),
     }
 }
 

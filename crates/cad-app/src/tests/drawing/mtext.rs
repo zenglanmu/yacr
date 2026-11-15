@@ -130,6 +130,7 @@ fn create_mtext_stores_one_acdbmtext_with_paragraph_breaks_in_one_transaction() 
             v_align,
             wrap_width,
             width_factor,
+            line_spacing,
         } => {
             assert_eq!(text, "a\\Pb", "`\\n` is stored as `\\P`");
             assert_eq!(*position, p3(1.0, 2.0, 0.0));
@@ -139,6 +140,10 @@ fn create_mtext_stores_one_acdbmtext_with_paragraph_breaks_in_one_transaction() 
             assert_eq!(*v_align, TextAlignV::Middle);
             assert_eq!(*wrap_width, Some(WIDTH), "the width is the wrap boundary");
             assert_eq!(*width_factor, 1.0, "a new MTEXT is not stretched");
+            assert!(
+                line_spacing.is_default(),
+                "a new MTEXT without spacing input carries the neutral spacing"
+            );
             // No STYLE table entry: the documented `StyleId(0)` fallback and no
             // fabricated font key.
             assert_eq!(*style, StyleId(0));
@@ -154,7 +159,6 @@ fn create_mtext_stores_one_acdbmtext_with_paragraph_breaks_in_one_transaction() 
         .find(|diagnostic| diagnostic.code == "drawing.mtext_created")
         .expect("the creation diagnostic");
     for reason in [
-        "text.line_spacing_style_unsupported",
         "text.columns_unsupported",
         "text.background_unsupported",
         "text.drawing_direction_unsupported",

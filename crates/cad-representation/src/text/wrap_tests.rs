@@ -134,6 +134,7 @@ fn wrap_centres_each_wrapped_line() {
         0.0,
         TextAlignH::Center,
         TextAlignV::Baseline,
+        cad_domain::TextLineSpacing::default(),
     );
     // Each line's glyphs share one baseline; group the output by it.
     let mut groups: Vec<(f64, f64)> = Vec::new();

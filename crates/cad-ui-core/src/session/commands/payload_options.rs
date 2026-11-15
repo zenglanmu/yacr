@@ -90,7 +90,7 @@ pub enum TextMaskArgument {
 }
 
 /// One parsed `TXT2MTXT` argument.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Txt2MTextArgument {
     /// `COMBINE` (`true`) / `SEPARATE` (`false`).
     Combine(bool),
@@ -98,8 +98,10 @@ pub enum Txt2MTextArgument {
     Order(TextOrder),
     /// `WRAP`: enable word-wrap.
     WordWrap,
-    /// `UNIFORM`: force uniform line spacing (refused by the command layer).
-    Uniform,
+    /// `UNIFORM <factor>`: the MTEXT line-spacing factor (DXF group 44) every
+    /// produced MTEXT is stamped with. The command refuses a value outside the
+    /// documented `0.25..=4.0` range by name.
+    Uniform(f64),
 }
 
 /// Parse the `OVERKILL` argument into the dialog's typed settings.
@@ -293,7 +295,7 @@ pub fn parse_textmask_argument(argument: &str) -> Option<TextMaskArgument> {
     }
 }
 
-/// Parse the `TXT2MTXT` argument: one settings toggle.
+/// Parse the `TXT2MTXT` argument: one settings toggle, or `UNIFORM <factor>`.
 pub fn parse_txt2mtext_argument(argument: &str) -> Option<Txt2MTextArgument> {
     let tokens: Vec<&str> = argument.split_whitespace().collect();
     if tokens.is_empty() {
@@ -308,7 +310,9 @@ pub fn parse_txt2mtext_argument(argument: &str) -> Option<Txt2MTextArgument> {
             _ => None,
         },
         "WRAP" if tokens.len() == 1 => Some(Txt2MTextArgument::WordWrap),
-        "UNIFORM" if tokens.len() == 1 => Some(Txt2MTextArgument::Uniform),
+        "UNIFORM" if tokens.len() == 2 => {
+            super::parse_signed_decimal(tokens[1]).map(Txt2MTextArgument::Uniform)
+        }
         _ => None,
     }
 }
@@ -356,7 +360,7 @@ pub fn invalid_textmask_argument_reason(text: &str) -> String {
 pub fn invalid_txt2mtext_argument_reason(text: &str) -> String {
     format!(
         "unsupported CAD command: {} (TXT2MTXT needs COMBINE, SEPARATE, ORDER TOPDOWN|SELECT, \
-         WRAP or UNIFORM; UNIFORM is refused by the command)",
+         WRAP or UNIFORM <line-spacing factor>)",
         text.trim()
     )
 }

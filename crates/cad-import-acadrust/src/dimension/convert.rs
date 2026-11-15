@@ -33,6 +33,7 @@ impl ImporterBuilder<'_> {
             // Dimension text has no source width boundary.
             wrap_width: None,
             width_factor: 1.0,
+            line_spacing: cad_domain::TextLineSpacing::default(),
         }
     }
 
@@ -388,6 +389,7 @@ fn place_dimension_member(
         v_align,
         wrap_width,
         width_factor,
+        line_spacing,
     } = geometry
     {
         let scale = transform.max_scale();
@@ -414,6 +416,8 @@ fn place_dimension_member(
             wrap_width: wrap_width.map(|width| width * scale),
             // A dimensionless stretch is unchanged by the placement scale.
             width_factor,
+            // Both halves of the spacing are dimensionless ratios.
+            line_spacing,
         });
     }
     cad_db::transform_geometry(&geometry, transform).ok()

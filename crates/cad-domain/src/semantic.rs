@@ -31,6 +31,76 @@ pub fn is_closed_spline(closed: bool, control_points: &[Point3], tolerance: f64)
         && (first.z - last.z).abs() <= tolerance
 }
 
+/// How an MTEXT line-spacing factor is applied to the baselines (DXF group 73).
+///
+/// AutoCAD's two documented styles are the whole domain: `1` = "At least" and
+/// `2` = "Exactly". The DXF reader normalises any other group-73 value to
+/// [`AtLeast`](Self::AtLeast) before it reaches the domain, so nothing about the
+/// style is left unrepresentable (see `docs/compatibility.md`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum TextLineSpacingStyle {
+    /// At least the stated spacing (DXF group 73 = 1, the DXF default): a line
+    /// whose runs are taller than the base height pushes the next baseline down
+    /// by that taller height times the factor.
+    #[default]
+    AtLeast,
+    /// Exactly the stated spacing (DXF group 73 = 2): every baseline advances by
+    /// the **base** text height times the factor, so a taller run on one line
+    /// does not change where the next line starts.
+    Exactly,
+}
+
+/// The multi-line vertical advance of a TEXT/MTEXT (DXF MTEXT groups 44 + 73).
+///
+/// [`SemanticGeometry::Text::line_spacing`] carries this. Both halves are
+/// dimensionless, so a similarity transform copies them unchanged, and the
+/// neutral value ([`TextLineSpacing::default`]: factor
+/// [`DEFAULT_TEXT_LINE_SPACING_FACTOR`] = `1.0`, style
+/// [`TextLineSpacingStyle::AtLeast`]) reproduces the pre-line-spacing layout
+/// exactly.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TextLineSpacing {
+    /// DXF group 44: the multiple of a single line height that separates
+    /// baselines. Must be finite and strictly positive (enforced by `cad-db`);
+    /// [`text_line_spacing_factor_from_dxf`] is the one import sanitization rule.
+    /// AutoCAD's edit box restricts the value to
+    /// [`MIN_TEXT_LINE_SPACING_FACTOR`]..=[`MAX_TEXT_LINE_SPACING_FACTOR`]; a
+    /// stored value outside that range still renders (the storage contract is
+    /// only "positive and finite").
+    pub factor: f64,
+    /// DXF group 73: which of the two styles applies the factor.
+    pub style: TextLineSpacingStyle,
+}
+
+impl Default for TextLineSpacing {
+    fn default() -> Self {
+        Self {
+            factor: DEFAULT_TEXT_LINE_SPACING_FACTOR,
+            style: TextLineSpacingStyle::AtLeast,
+        }
+    }
+}
+
+impl TextLineSpacing {
+    /// The factor guarded for layout: a non-finite or non-positive stored value
+    /// is treated as the neutral one instead of producing NaN geometry. (The
+    /// database rejects such values; this guard covers programmatic producers.)
+    pub fn effective_factor(&self) -> f64 {
+        if self.factor.is_finite() && self.factor > 0.0 {
+            self.factor
+        } else {
+            DEFAULT_TEXT_LINE_SPACING_FACTOR
+        }
+    }
+
+    /// Whether this is the neutral spacing, i.e. the value every text entity
+    /// had before line spacing was modelled.
+    pub fn is_default(&self) -> bool {
+        self.style == TextLineSpacingStyle::AtLeast
+            && (self.factor - DEFAULT_TEXT_LINE_SPACING_FACTOR).abs() <= f64::EPSILON
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum SemanticGeometry {
     Line {
@@ -128,6 +198,11 @@ pub enum SemanticGeometry {
         /// (`1.0`) means "not stretched"; [`text_width_factor_from_dxf`] is the
         /// one sanitization rule for imported values.
         width_factor: f64,
+        /// Baseline-to-baseline spacing for the paragraphs of this text (DXF
+        /// MTEXT groups 44 + 73). [`TextLineSpacing::default`] — factor `1.0`,
+        /// style "at least" — is the value every source without line-spacing
+        /// data carries and renders exactly as before the field existed.
+        line_spacing: TextLineSpacing,
     },
     /// A SHAPE entity: one glyph of a compiled SHX shape font, referenced by
     /// shape code (or, when `code` is 0, by `shape_name`). `font` is the style's

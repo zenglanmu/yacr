@@ -38,6 +38,7 @@ fn plain(position: Point3) -> SemanticGeometry {
         v_align: TextAlignV::Baseline,
         wrap_width: None,
         width_factor: 1.0,
+        line_spacing: cad_domain::TextLineSpacing::default(),
     }
 }
 
@@ -63,6 +64,7 @@ fn mtext_like() -> SemanticGeometry {
         v_align: TextAlignV::Middle,
         wrap_width: Some(MTEXT_WRAP),
         width_factor: 1.0,
+        line_spacing: cad_domain::TextLineSpacing::default(),
     }
 }
 
@@ -82,6 +84,7 @@ fn assert_untouched(actual: &SemanticGeometry, before: &SemanticGeometry) {
         v_align,
         wrap_width,
         width_factor,
+        line_spacing,
     } = actual
     else {
         panic!("expected a TEXT, got {actual:?}");
@@ -97,10 +100,15 @@ fn assert_untouched(actual: &SemanticGeometry, before: &SemanticGeometry) {
         v_align: expected_v,
         wrap_width: expected_wrap,
         width_factor: expected_width,
+        line_spacing: expected_spacing,
     } = before
     else {
         panic!("the reference geometry is not a TEXT: {before:?}");
     };
+    assert_eq!(
+        line_spacing, expected_spacing,
+        "the line spacing is bit-identical"
+    );
     assert_eq!(text, expected_text, "the string is bit-identical");
     assert_eq!(*style, *expected_style, "the style id is bit-identical");
     assert_eq!(
@@ -183,6 +191,7 @@ fn mtext_ish_text_exposes_the_same_single_insertion_grip() {
         v_align: TextAlignV::Top,
         wrap_width: Some(MTEXT_WRAP),
         width_factor: 1.0,
+        line_spacing: cad_domain::TextLineSpacing::default(),
     };
     let grips = grips_for_entity(&ent(73, right_top));
     assert_eq!(grips.len(), 1);
@@ -238,6 +247,7 @@ fn dragging_an_mtext_ish_text_keeps_wrap_width_and_every_other_field() {
         v_align,
         wrap_width,
         width_factor,
+        line_spacing,
     } = original
     else {
         panic!("the fixture is a TEXT");
@@ -255,6 +265,7 @@ fn dragging_an_mtext_ish_text_keeps_wrap_width_and_every_other_field() {
             v_align,
             wrap_width,
             width_factor,
+            line_spacing,
         },
         "only `position` changed"
     );
@@ -276,6 +287,7 @@ fn a_text_drag_keeps_wrap_width_none_and_some_apart() {
             v_align: TextAlignV::Baseline,
             wrap_width: wrap,
             width_factor: 1.0,
+            line_spacing: cad_domain::TextLineSpacing::default(),
         };
         let dragged = apply_grip(
             &original,

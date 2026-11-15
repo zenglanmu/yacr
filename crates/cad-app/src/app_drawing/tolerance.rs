@@ -233,6 +233,7 @@ fn frame_geometries(
             // explicit wrap boundary would only risk wrapping a cell that fits.
             wrap_width: None,
             width_factor: 1.0,
+            line_spacing: cad_domain::TextLineSpacing::default(),
         });
         cell_left += *width;
     }

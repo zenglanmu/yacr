@@ -31,6 +31,7 @@ fn text() -> SemanticGeometry {
         v_align: TextAlignV::Middle,
         wrap_width: Some(4.0),
         width_factor: 1.5,
+        line_spacing: cad_domain::TextLineSpacing::default(),
     }
 }
 
@@ -86,6 +87,7 @@ fn translation_rotation_and_uniform_scale_agree_across_both_faces() {
             v_align: write_v,
             wrap_width: write_wrap,
             width_factor: write_factor,
+            line_spacing: write_spacing,
         } = &write
         else {
             panic!("{label}: the write face must return Text, got {write:?}");
@@ -101,6 +103,7 @@ fn translation_rotation_and_uniform_scale_agree_across_both_faces() {
             v_align: snap_v,
             wrap_width: snap_wrap,
             width_factor: snap_factor,
+            line_spacing: snap_spacing,
         } = &snap
         else {
             panic!("{label}: the snap face must return Text, got {snap:?}");
@@ -115,6 +118,7 @@ fn translation_rotation_and_uniform_scale_agree_across_both_faces() {
         assert_eq!(write_v, snap_v, "{label}: vertical alignment");
         assert_eq!(write_wrap, snap_wrap, "{label}: wrap boundary");
         assert_eq!(write_factor, snap_factor, "{label}: width factor");
+        assert_eq!(write_spacing, snap_spacing, "{label}: line spacing");
         assert_eq!(
             *write_factor, 1.5,
             "{label}: a similarity keeps the dimensionless width factor"

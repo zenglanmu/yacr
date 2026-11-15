@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use cad_domain::{CadError, CadResult, Point3, TextAlignH, TextAlignV};
+use cad_domain::{CadError, CadResult, Point3, TextAlignH, TextAlignV, TextLineSpacing};
 use ttf_parser::OutlineBuilder;
 
 use crate::shx::ShxFont;
@@ -216,6 +216,8 @@ impl FontEngine {
     /// `width_factor` is the entity/style horizontal stretch (DXF TEXT group
     /// 41): every glyph advance and glyph x is multiplied by it. It must be
     /// finite and positive; `1.0` means "not stretched".
+    /// `line_spacing` is the entity's baseline advance (DXF MTEXT groups 44 + 73);
+    /// [`TextLineSpacing::default`] keeps the historical single-spacing layout.
     #[allow(clippy::too_many_arguments)]
     pub fn shape(
         &self,
@@ -228,6 +230,7 @@ impl FontEngine {
         v_align: TextAlignV,
         wrap_width: Option<f64>,
         width_factor: f64,
+        line_spacing: TextLineSpacing,
     ) -> CadResult<ShapedText> {
         self.shape_with(
             Some(font_key),
@@ -239,6 +242,7 @@ impl FontEngine {
             v_align,
             wrap_width,
             width_factor,
+            line_spacing,
         )
     }
 
@@ -248,8 +252,8 @@ impl FontEngine {
     /// registered fallback chain, exactly like a requested-but-unavailable font
     /// (the sanctioned fallback mechanism). When the chain holds no usable face
     /// the caller gets `ResourceMissing` and keeps the unshaped placeholder
-    /// instead of showing fabricated glyphs. `wrap_width` and `width_factor`
-    /// behave as in [`shape`](Self::shape).
+    /// instead of showing fabricated glyphs. `wrap_width`, `width_factor` and
+    /// `line_spacing` behave as in [`shape`](Self::shape).
     #[allow(clippy::too_many_arguments)]
     pub fn shape_unstyled(
         &self,
@@ -261,6 +265,7 @@ impl FontEngine {
         v_align: TextAlignV,
         wrap_width: Option<f64>,
         width_factor: f64,
+        line_spacing: TextLineSpacing,
     ) -> CadResult<ShapedText> {
         self.shape_with(
             None,
@@ -272,6 +277,7 @@ impl FontEngine {
             v_align,
             wrap_width,
             width_factor,
+            line_spacing,
         )
     }
 
@@ -287,6 +293,7 @@ impl FontEngine {
         v_align: TextAlignV,
         wrap_width: Option<f64>,
         width_factor: f64,
+        line_spacing: TextLineSpacing,
     ) -> CadResult<ShapedText> {
         let size = height.abs();
         if !size.is_finite() || size <= 0.0 {
@@ -397,7 +404,15 @@ impl FontEngine {
             outlines,
             meshes,
             fill_failures,
-        } = finalize_text(lines, size, origin, rotation, h_align, v_align);
+        } = finalize_text(
+            lines,
+            size,
+            origin,
+            rotation,
+            h_align,
+            v_align,
+            line_spacing,
+        );
         for failure in fill_failures {
             issues.push(TextFormatIssue::new(
                 "text.sfnt_fill_partial",
@@ -441,7 +456,16 @@ impl FontEngine {
     ) -> CadResult<Vec<Vec<Point3>>> {
         Ok(self
             .shape(
-                font_key, text, origin, height, rotation, h_align, v_align, None, 1.0,
+                font_key,
+                text,
+                origin,
+                height,
+                rotation,
+                h_align,
+                v_align,
+                None,
+                1.0,
+                TextLineSpacing::default(),
             )?
             .outlines)
     }

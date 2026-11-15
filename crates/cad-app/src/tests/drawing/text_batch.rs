@@ -47,6 +47,7 @@ fn text_entity(
             v_align,
             wrap_width: None,
             width_factor: 1.0,
+            line_spacing: cad_domain::TextLineSpacing::default(),
         },
         draw_order: order,
     }

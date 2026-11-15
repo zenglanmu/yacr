@@ -33,6 +33,7 @@ fn text_entity(id: u128, style: StyleId) -> DbEntity {
             v_align: TextAlignV::Baseline,
             wrap_width: None,
             width_factor: 1.0,
+            line_spacing: cad_domain::TextLineSpacing::default(),
         },
         draw_order: id as i64,
     }

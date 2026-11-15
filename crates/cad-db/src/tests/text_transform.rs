@@ -37,6 +37,11 @@ fn text_entity(id: u128) -> DbEntity {
             v_align: TextAlignV::Middle,
             wrap_width: Some(3.0),
             width_factor: 1.5,
+            // A non-default spacing proves a similarity copies it verbatim.
+            line_spacing: cad_domain::TextLineSpacing {
+                factor: 1.5,
+                style: cad_domain::TextLineSpacingStyle::Exactly,
+            },
         },
         draw_order: 1,
     }
@@ -55,12 +60,22 @@ fn stored_text(db: &DrawingDatabase) -> (String, Point3, f64, f64, Option<f64>) 
             v_align,
             wrap_width,
             width_factor,
+            line_spacing,
         } => {
             assert_eq!(*style, StyleId(7), "the style identity is preserved");
             assert_eq!(font.as_deref(), Some("arial.ttf"), "the font is preserved");
             assert_eq!(*h_align, TextAlignH::Center, "alignment is preserved");
             assert_eq!(*v_align, TextAlignV::Middle, "alignment is preserved");
             assert_eq!(*width_factor, 1.5, "the width factor is preserved");
+            assert_eq!(
+                line_spacing.factor, 1.5,
+                "the line-spacing factor is dimensionless and preserved"
+            );
+            assert_eq!(
+                line_spacing.style,
+                cad_domain::TextLineSpacingStyle::Exactly,
+                "the line-spacing style is preserved"
+            );
             (text.clone(), *position, *height, *rotation, *wrap_width)
         }
         other => panic!("expected text, got {other:?}"),

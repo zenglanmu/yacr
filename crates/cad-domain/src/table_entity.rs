@@ -27,8 +27,8 @@
 
 use crate::dimension_synthesis::{add, is_finite_point, length, line_between, normalize, scale};
 use crate::{
-    CadError, CadResult, Point3, SemanticGeometry, StyleId, TextAlignH, TextAlignV, Transform3,
-    DEFAULT_TEXT_WIDTH_FACTOR,
+    CadError, CadResult, Point3, SemanticGeometry, StyleId, TextAlignH, TextAlignV,
+    TextLineSpacing, Transform3, DEFAULT_TEXT_WIDTH_FACTOR,
 };
 
 /// Similarity tolerance for the table transform (the same ratio rule every
@@ -574,6 +574,9 @@ impl TableGeometry {
                         wrap_width: None,
                         // Table cells do not stretch their text.
                         width_factor: DEFAULT_TEXT_WIDTH_FACTOR,
+                        // An ACAD_TABLE cell has no line-spacing group; the
+                        // neutral spacing keeps the pre-line-spacing layout.
+                        line_spacing: TextLineSpacing::default(),
                     });
                 }
                 x += width;

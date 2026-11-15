@@ -25,6 +25,7 @@ mod dwg;
 mod entities;
 mod hatch;
 mod layers;
+mod mtext_spacing;
 mod point_style;
 mod report_limits;
 mod writer;

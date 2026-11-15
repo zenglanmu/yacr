@@ -328,6 +328,7 @@ impl DefaultRepresentationProvider {
                 v_align,
                 wrap_width,
                 width_factor,
+                line_spacing,
             } => {
                 let font_key = font.as_deref();
                 // Annotative TEXT/MTEXT: the active annotation scale factor
@@ -368,6 +369,7 @@ impl DefaultRepresentationProvider {
                             *v_align,
                             eff_wrap_width,
                             *width_factor,
+                            *line_spacing,
                         ),
                         None => engine.shape_unstyled(
                             text,
@@ -378,6 +380,7 @@ impl DefaultRepresentationProvider {
                             *v_align,
                             eff_wrap_width,
                             *width_factor,
+                            *line_spacing,
                         ),
                     };
                     match result {

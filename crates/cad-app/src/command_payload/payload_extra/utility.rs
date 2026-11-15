@@ -49,13 +49,17 @@ pub enum TextMaskKind {
 /// The document-level option set of `TXT2MTXT`.
 ///
 /// The defaults reproduce the documented initial settings: combine into one
-/// MTEXT, order top-down, no word-wrap and no forced uniform line spacing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// MTEXT, order top-down, word-wrap on and the sources' own line spacing kept.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Txt2MTextOptions {
     pub combine: bool,
     pub order: TextOrder,
     pub word_wrap: bool,
-    pub force_uniform_line_spacing: bool,
+    /// `UNIFORM <factor>`: the line-spacing factor every produced MTEXT is
+    /// stamped with, using the "exactly" style so all baselines advance by the
+    /// same amount. `None` (the default) leaves the combined object at the
+    /// neutral spacing, i.e. no uniform spacing is requested.
+    pub uniform_line_spacing: Option<f64>,
 }
 
 impl Default for Txt2MTextOptions {
@@ -64,7 +68,7 @@ impl Default for Txt2MTextOptions {
             combine: true,
             order: TextOrder::TopDown,
             word_wrap: true,
-            force_uniform_line_spacing: false,
+            uniform_line_spacing: None,
         }
     }
 }

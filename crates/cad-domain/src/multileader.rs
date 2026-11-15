@@ -861,6 +861,9 @@ impl MultiLeaderGeometry {
             v_align: self.text.v_align(),
             wrap_width: crate::wrap_width_from_dxf(self.text.width),
             width_factor: crate::DEFAULT_TEXT_WIDTH_FACTOR,
+            // MULTILEADER line spacing (CONTEXT_DATA 45/170) is outside this
+            // model; the neutral spacing matches what the exporter writes.
+            line_spacing: crate::TextLineSpacing::default(),
         }
     }
 

@@ -377,6 +377,8 @@ impl Mapper<'_> {
                         v_align: map_valign(*valign),
                         wrap_width: None,
                         width_factor,
+                        // A DGN text element carries no line-spacing groups.
+                        line_spacing: cad_domain::TextLineSpacing::default(),
                     },
                     partial: align_loss || plane_loss || width_loss,
                     type_key: "DgnText",
@@ -415,6 +417,7 @@ impl Mapper<'_> {
                         v_align,
                         wrap_width: cad_domain::wrap_width_from_dxf(*width),
                         width_factor: cad_domain::DEFAULT_TEXT_WIDTH_FACTOR,
+                        line_spacing: cad_domain::TextLineSpacing::default(),
                     },
                     // The stored markup is flattened to its plain text, so the
                     // row is always partial; `plane_loss` has its own diagnostic

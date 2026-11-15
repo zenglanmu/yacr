@@ -8,18 +8,81 @@ use super::*;
 /// The named, per-entity reasons an `MTEXT → Text` fold is `Partial` (ADR 0019
 /// decision H).
 ///
-/// The domain `Text` variant has no columns, background fill, line-spacing style
-/// or drawing direction, so those source properties are dropped. The old
-/// `Complete` claim was false; these four stable machine keys are the honest
-/// reasons, and the same set feeds a deduplicated import diagnostic.
-pub(crate) const MTEXT_UNMODELLED: [&str; 4] = [
+/// The domain `Text` variant has no columns, background fill or drawing
+/// direction, so those source properties are dropped. The old `Complete` claim
+/// was false; these three stable machine keys are the honest reasons, and the
+/// same set feeds a deduplicated import diagnostic.
+///
+/// Line spacing (DXF groups 44 + 73) used to be a fourth reason; it is now part
+/// of the domain model ([`TextLineSpacing`]) and is carried, not dropped. The
+/// only residual line-spacing gap is a degenerate factor, which has its own
+/// narrower reason ([`DEGENERATE_LINE_SPACING_FACTOR`]).
+pub(crate) const MTEXT_UNMODELLED: [&str; 3] = [
     "text.background_unsupported",
     "text.columns_unsupported",
-    "text.line_spacing_style_unsupported",
     "text.drawing_direction_unsupported",
 ];
 
+/// The named reason for an MTEXT whose line-spacing factor (DXF group 44) is
+/// zero, negative or non-finite: such a value cannot be stored (it would
+/// overlap or invert the baselines), so the neutral factor is used and the loss
+/// is reported.
+pub(crate) const DEGENERATE_LINE_SPACING_FACTOR: &str = "text.line_spacing_factor_degenerate";
+
+/// Map DXF MTEXT line spacing into the domain model.
+///
+/// Group 44 is the factor and group 73 the style. The style has only the two
+/// documented values and acadrust normalises every other group-73 value to "at
+/// least", so no style is unrepresentable. A factor that is zero, negative or
+/// non-finite cannot be stored (the write validator rejects it): the neutral
+/// factor is used and `degenerate` is `true` so the caller can widen its
+/// completeness and report the loss.
+pub(crate) fn map_mtext_line_spacing(
+    factor: f64,
+    style: acadrust::entities::LineSpacingStyle,
+) -> (TextLineSpacing, bool) {
+    let style = match style {
+        acadrust::entities::LineSpacingStyle::AtLeast => TextLineSpacingStyle::AtLeast,
+        acadrust::entities::LineSpacingStyle::Exactly => TextLineSpacingStyle::Exactly,
+    };
+    match text_line_spacing_factor_from_dxf(factor) {
+        Some(factor) => (TextLineSpacing { factor, style }, false),
+        None => (
+            TextLineSpacing {
+                factor: DEFAULT_TEXT_LINE_SPACING_FACTOR,
+                style,
+            },
+            true,
+        ),
+    }
+}
+
 impl<'a> ImporterBuilder<'a> {
+    /// [`map_mtext_line_spacing`] plus the once-per-import report of a
+    /// degenerate factor.
+    pub(crate) fn mtext_line_spacing(
+        &mut self,
+        factor: f64,
+        style: acadrust::entities::LineSpacingStyle,
+    ) -> (TextLineSpacing, bool) {
+        let (spacing, degenerate) = map_mtext_line_spacing(factor, style);
+        if degenerate
+            && self
+                .reported_reasons
+                .insert(DEGENERATE_LINE_SPACING_FACTOR.to_string())
+        {
+            self.diagnostics.push(Diagnostic {
+                object: None,
+                code: "import.text_partial".into(),
+                message: format!(
+                    "the MTEXT line-spacing factor (group 44) is {factor}, which cannot be stored; \
+                     the neutral factor {DEFAULT_TEXT_LINE_SPACING_FACTOR} is used instead"
+                ),
+            });
+        }
+        (spacing, degenerate)
+    }
+
     pub(crate) fn convert(
         &mut self,
         entity: &EntityType,
@@ -195,6 +258,8 @@ impl<'a> ImporterBuilder<'a> {
                         // DXF TEXT has no width boundary.
                         wrap_width: None,
                         width_factor,
+                        // A single-line TEXT has no line-spacing groups.
+                        line_spacing: TextLineSpacing::default(),
                     },
                     width_completeness,
                 )
@@ -202,11 +267,15 @@ impl<'a> ImporterBuilder<'a> {
             EntityType::MText(t) => {
                 let (h_align, v_align) = attach_align(t.attachment_point);
                 // ADR 0019 decision H: the domain `Text` variant has no columns,
-                // background fill, line-spacing style or drawing direction, so
-                // folding MTEXT into it is lossy. Report `Partial` with the named
-                // reasons instead of the old (false) `Complete`; no domain field is
-                // added in this phase. Each reason is reported once per import so a
-                // text-heavy drawing does not bury the report in duplicates.
+                // background fill or drawing direction, so folding MTEXT into it
+                // is lossy. Report `Partial` with the named reasons instead of
+                // the old (false) `Complete`. Line spacing is no longer one of
+                // them: it is modelled and carried below. Each reason is
+                // reported once per import so a text-heavy drawing does not bury
+                // the report in duplicates.
+                let mut completeness = Completeness::Partial(
+                    MTEXT_UNMODELLED.iter().map(|r| (*r).to_string()).collect(),
+                );
                 for reason in MTEXT_UNMODELLED {
                     if self.reported_reasons.insert(reason.to_string()) {
                         self.diagnostics.push(Diagnostic {
@@ -215,6 +284,14 @@ impl<'a> ImporterBuilder<'a> {
                             message: reason.to_string(),
                         });
                     }
+                }
+                // DXF groups 44 (factor) and 73 (style).
+                let (line_spacing, degenerate_line_spacing) =
+                    self.mtext_line_spacing(t.line_spacing_factor, t.line_spacing_style);
+                if degenerate_line_spacing {
+                    completeness = completeness.combine(Completeness::Partial(vec![
+                        DEGENERATE_LINE_SPACING_FACTOR.into(),
+                    ]));
                 }
                 (
                     SemanticGeometry::Text {
@@ -232,10 +309,9 @@ impl<'a> ImporterBuilder<'a> {
                         wrap_width: None,
                         // MTEXT has no width-factor group; the factor is neutral.
                         width_factor: DEFAULT_TEXT_WIDTH_FACTOR,
+                        line_spacing,
                     },
-                    Completeness::Partial(
-                        MTEXT_UNMODELLED.iter().map(|r| (*r).to_string()).collect(),
-                    ),
+                    completeness,
                 )
             }
             EntityType::Spline(s) => spline_semantics(s),

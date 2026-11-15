@@ -716,6 +716,7 @@ fn drawing_validate_geometry_covers_supported_kinds() {
             v_align: TextAlignV::Baseline,
             wrap_width: None,
             width_factor: 1.0,
+            line_spacing: cad_domain::TextLineSpacing::default(),
         },
         SemanticGeometry::Insert {
             block: BlockId(0),

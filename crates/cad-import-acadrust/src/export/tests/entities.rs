@@ -169,6 +169,7 @@ fn single_line_text_is_exact_and_newline_text_becomes_mtext() {
         v_align: TextAlignV::Baseline,
         wrap_width: None,
         width_factor: 1.0,
+        line_spacing: cad_domain::TextLineSpacing::default(),
     });
     assert!(matches!(&read_entities(&bytes)[0], EntityType::Text(_)));
     assert_eq!(report.counts.exact, 1);
@@ -184,6 +185,7 @@ fn single_line_text_is_exact_and_newline_text_becomes_mtext() {
         v_align: TextAlignV::Baseline,
         wrap_width: None,
         width_factor: 1.0,
+        line_spacing: cad_domain::TextLineSpacing::default(),
     });
     assert!(matches!(&read_entities(&bytes)[0], EntityType::MText(_)));
     assert_eq!(report.counts.converted, 1);
@@ -206,6 +208,7 @@ fn single_line_text_writes_the_width_factor_group_41() {
         v_align: TextAlignV::Baseline,
         wrap_width: None,
         width_factor: 2.5,
+        line_spacing: cad_domain::TextLineSpacing::default(),
     });
     assert_eq!(report.counts.exact, 1);
     match &read_entities(&bytes)[0] {
@@ -234,7 +237,11 @@ fn single_line_text_writes_the_width_factor_group_41() {
 /// The DXF branch must follow the entity type key, so these cases cannot use
 /// `export_one`: every entity produced by `db_with` carries the synthetic
 /// `"test"` type key.
-fn export_text_as(type_key: &str, text: &str, wrap_width: Option<f64>) -> (Vec<u8>, ExportReport) {
+pub(super) fn export_text_as(
+    type_key: &str,
+    text: &str,
+    wrap_width: Option<f64>,
+) -> (Vec<u8>, ExportReport) {
     export_one_as(
         type_key,
         SemanticGeometry::Text {
@@ -250,6 +257,7 @@ fn export_text_as(type_key: &str, text: &str, wrap_width: Option<f64>) -> (Vec<u
             v_align: TextAlignV::Top,
             wrap_width,
             width_factor: 1.0,
+            line_spacing: cad_domain::TextLineSpacing::default(),
         },
     )
 }
@@ -258,7 +266,7 @@ fn export_text_as(type_key: &str, text: &str, wrap_width: Option<f64>) -> (Vec<u
 ///
 /// Mirrors what the importer records: the class name survives in
 /// `DbObject::type_key` even when the geometry is a reduced semantic form.
-fn export_one_as(type_key: &str, geometry: SemanticGeometry) -> (Vec<u8>, ExportReport) {
+pub(super) fn export_one_as(type_key: &str, geometry: SemanticGeometry) -> (Vec<u8>, ExportReport) {
     let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
     builder
         .insert_layer(Layer {

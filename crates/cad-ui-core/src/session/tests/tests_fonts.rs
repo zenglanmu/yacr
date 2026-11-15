@@ -243,6 +243,7 @@ fn text_bearing_drawing() -> DrawingDatabase {
                 v_align: TextAlignV::Baseline,
                 wrap_width: None,
                 width_factor: 1.0,
+                line_spacing: cad_domain::TextLineSpacing::default(),
             },
             draw_order: 0,
         })

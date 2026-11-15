@@ -415,6 +415,33 @@ pub fn text_width_factor_from_dxf(factor: f64) -> Option<f64> {
     }
 }
 
+/// The neutral MTEXT line-spacing factor (DXF group 44): baselines advance by
+/// one single-line height, i.e. exactly the layout that existed before line
+/// spacing was modelled.
+pub const DEFAULT_TEXT_LINE_SPACING_FACTOR: f64 = 1.0;
+
+/// The lowest MTEXT line-spacing factor AutoCAD's edit box accepts.
+pub const MIN_TEXT_LINE_SPACING_FACTOR: f64 = 0.25;
+
+/// The highest MTEXT line-spacing factor AutoCAD's edit box accepts.
+pub const MAX_TEXT_LINE_SPACING_FACTOR: f64 = 4.0;
+
+/// Sanitize a DXF MTEXT line-spacing factor (group 44) into
+/// [`TextLineSpacing::factor`].
+///
+/// A usable factor is finite and strictly positive; every other value cannot be
+/// rendered (a zero or negative advance would overlap or invert the lines) and
+/// yields `None`, so the caller reports the degenerate input instead of silently
+/// storing it. The storage invariant is enforced by `cad-db`'s geometry
+/// validation. The CAD-neutral default is [`DEFAULT_TEXT_LINE_SPACING_FACTOR`].
+pub fn text_line_spacing_factor_from_dxf(factor: f64) -> Option<f64> {
+    if factor.is_finite() && factor > 0.0 {
+        Some(factor)
+    } else {
+        None
+    }
+}
+
 mod semantic;
 pub use semantic::*;
 #[derive(Debug, Clone, Default, PartialEq)]

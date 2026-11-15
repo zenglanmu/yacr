@@ -333,6 +333,7 @@ fn text_entity(id: u128, height: f64) -> DbEntity {
             v_align: TextAlignV::Baseline,
             wrap_width: None,
             width_factor: 1.0,
+            line_spacing: cad_domain::TextLineSpacing::default(),
         },
     );
     e.object.type_key = "AcDbText".into();

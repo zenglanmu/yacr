@@ -100,6 +100,7 @@ impl Application {
                 v_align,
                 wrap_width,
                 width_factor,
+                line_spacing,
                 ..
             } => SemanticGeometry::Text {
                 text: stored.clone(),
@@ -113,6 +114,8 @@ impl Application {
                 // Editing the string must not change the layout boundary.
                 wrap_width: *wrap_width,
                 width_factor: *width_factor,
+                // Editing the string must not change the stored line spacing.
+                line_spacing: *line_spacing,
             },
             SemanticGeometry::MultiLeader(leader) => {
                 SemanticGeometry::MultiLeader(Box::new(leader.with_text(&stored)?))

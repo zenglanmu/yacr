@@ -37,6 +37,11 @@ fn text_fixture() -> HostController {
             v_align: TextAlignV::Baseline,
             wrap_width: None,
             width_factor: 1.0,
+            // A non-default spacing proves the string edit copies it through.
+            line_spacing: cad_domain::TextLineSpacing {
+                factor: 1.25,
+                style: cad_domain::TextLineSpacingStyle::Exactly,
+            },
         },
         draw_order: 0,
     })
@@ -110,6 +115,14 @@ fn stored_text(controller: &HostController) -> String {
     }
 }
 
+fn stored_line_spacing(controller: &HostController) -> cad_domain::TextLineSpacing {
+    let drawing = controller.drawing().expect("a document");
+    match &drawing.entity(EntityId(201)).expect("the text").geometry {
+        SemanticGeometry::Text { line_spacing, .. } => *line_spacing,
+        other => panic!("expected text, got {other:?}"),
+    }
+}
+
 #[test]
 fn textedit_pick_prefills_and_commit_changes_only_the_string() {
     let mut controller = text_fixture();
@@ -141,6 +154,14 @@ fn textedit_pick_prefills_and_commit_changes_only_the_string() {
     let traced = controller.confirm_draw_traced().expect("the edit commits");
     assert!(traced.result.is_ok(), "{:?}", traced.result);
     assert_eq!(stored_text(&controller), "NEW");
+    assert_eq!(
+        stored_line_spacing(&controller),
+        cad_domain::TextLineSpacing {
+            factor: 1.25,
+            style: cad_domain::TextLineSpacingStyle::Exactly,
+        },
+        "editing the string changes nothing else, line spacing included"
+    );
     assert_eq!(
         controller
             .session
@@ -331,6 +352,7 @@ fn mtext_geometry(text: &str) -> SemanticGeometry {
         v_align: TextAlignV::Baseline,
         wrap_width: None,
         width_factor: 1.0,
+        line_spacing: cad_domain::TextLineSpacing::default(),
     }
 }
 
@@ -458,6 +480,7 @@ fn mixed_text_fixture() -> HostController {
             v_align: TextAlignV::Baseline,
             wrap_width: None,
             width_factor: 1.0,
+            line_spacing: cad_domain::TextLineSpacing::default(),
         },
         4,
     ))

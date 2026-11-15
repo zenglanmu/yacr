@@ -467,6 +467,7 @@ fn append_vendor_fragments(
                 v_align,
                 None,
                 1.0,
+                cad_domain::TextLineSpacing::default(),
             );
             match shaped {
                 Ok(shaped) => {

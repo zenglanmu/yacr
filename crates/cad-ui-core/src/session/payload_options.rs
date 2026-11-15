@@ -178,7 +178,7 @@ impl CadSession {
             Txt2MTextArgument::Combine(combine) => options.combine = combine,
             Txt2MTextArgument::Order(order) => options.order = order,
             Txt2MTextArgument::WordWrap => options.word_wrap = true,
-            Txt2MTextArgument::Uniform => options.force_uniform_line_spacing = true,
+            Txt2MTextArgument::Uniform(factor) => options.uniform_line_spacing = Some(factor),
         }
         let payload = CommandPayload::Annotation(Box::new(AnnotationBatchPayload::Utility(
             Box::new(UtilityPayload::Txt2MText(options)),

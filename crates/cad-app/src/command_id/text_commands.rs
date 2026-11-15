@@ -74,10 +74,11 @@
 //!   `Selection` keeps selection order.
 //! * **Word-wrap**: uses the existing `wrap_width`; off stores `None`, on
 //!   preserves each source's boundary (including `None` = no wrap).
-//! * **Force uniform line spacing**: AutoCAD's MTEXT line-spacing factor has no
-//!   field in this build (`\P` is only a paragraph break), so the setting is a
-//!   named `txt2mtxt.uniform_line_spacing` `Unsupported` refusal; nothing is
-//!   half-applied.
+//! * **Force uniform line spacing** (`UNIFORM <factor>`): the produced MTEXT
+//!   stores that DXF group-44 factor with the "exactly" style (group 73 = 2), so
+//!   every baseline advances identically. A factor that is not finite or outside
+//!   `0.25..=4.0` is a named `txt2mtxt.uniform_line_spacing_factor` refusal
+//!   before any write; without `UNIFORM` the first source's spacing is kept.
 //!
 //! Every source is deleted and the replacement(s) inserted in **one**
 //! transaction / undo step. A non-text source is `txt2mtxt.unsupported` and a

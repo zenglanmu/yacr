@@ -150,6 +150,7 @@ fn paper_build_keeps_unshaped_text_partial_with_a_precise_reason() {
             v_align: TextAlignV::Baseline,
             wrap_width: None,
             width_factor: 1.0,
+            line_spacing: cad_domain::TextLineSpacing::default(),
         },
         draw_order: 0,
     })

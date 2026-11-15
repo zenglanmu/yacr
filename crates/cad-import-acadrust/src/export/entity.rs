@@ -592,6 +592,7 @@ fn emit_leaf(
             v_align,
             wrap_width,
             width_factor,
+            line_spacing,
         } => {
             let style_name = ctx
                 .database
@@ -646,6 +647,14 @@ fn emit_leaf(
                 if let Some(reason) = align_reason {
                     reasons.push(reason);
                 }
+                // DXF groups 73 (style) and 44 (factor). The writer always emits
+                // both, so the neutral stored value writes exactly the bytes the
+                // pre-line-spacing exporter wrote (`1` / `1.0`, the DXF defaults).
+                mtext.line_spacing_style = match line_spacing.style {
+                    TextLineSpacingStyle::AtLeast => acadrust::entities::LineSpacingStyle::AtLeast,
+                    TextLineSpacingStyle::Exactly => acadrust::entities::LineSpacingStyle::Exactly,
+                };
+                mtext.line_spacing_factor = line_spacing.effective_factor();
                 mtext.common = common;
                 acc.push(EntityType::MText(Box::new(mtext)), ctx)?;
                 // An entity that already was MTEXT and whose value needs no
@@ -664,6 +673,13 @@ fn emit_leaf(
                 if wrap_width.is_some() {
                     reasons.push(
                         "single-line TEXT has no wrap boundary; the width is not exported".into(),
+                    );
+                }
+                if !line_spacing.is_default() {
+                    reasons.push(
+                        "single-line TEXT has no line-spacing groups (DXF 44/73); the stored \
+                         factor and style are not exported"
+                            .into(),
                     );
                 }
                 let mut dxf_text = DxfText::new();

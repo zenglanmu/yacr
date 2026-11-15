@@ -496,7 +496,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `FS` | 部分实现 | Express 工具：把与唯一选中种子**直接接触**的可见模型空间对象并入选择（`FSMODE=OFF`） | 无传递链（`FSMODE=ON`）；不展开块成员；命令行入口，无 ribbon |
 | `TORIENT` | 实现 | 裸命令 Most Readable（归一到 `(-π/2, π/2]`）、`TORIENT <角度>` 绝对旋转、`TORIENT REVERSE/R` 再加 180°（**本项目扩展**）；只改 TEXT/MTEXT rotation，位置不变 | ATTDEF/带属性块因无属性模型不适用（全局范围）；MULTILEADER/标注文字不在 AutoCAD TORIENT 范围内，报告跳过 |
 | `TCASE` | 部分实现 | 裸命令按 Title，`TCASE U/L/T/S/G` 分别大写/小写/标题/句首/切换；保留 MTEXT 转义序列 | 属性定义/标注文字未建模；MULTILEADER 只在可实现时改写 |
-| `TXT2MTXT` | 部分实现 | 选中 Text/MText 按上→下、左→右排序并以 `\P` 合并为一个 `AcDbMText`，同时删除来源（一条事务/一步撤销） | Settings 对话框、统一行距、分栏等未实现；保留原字符串转义 |
+| `TXT2MTXT` | 完整实现 | 选中 Text/MText 排序合并为一个 `AcDbMText`（含 `UNIFORM` 行距），同时删除来源（一条事务/一步撤销） | Settings 对话框与分栏未实现（全局范围）；保留原字符串转义 |
 | `HATCHGENERATEBOUNDARY` | 部分实现 | 每个选中 HATCH 的每个 loop 生成一条同层/同空间、非关联的闭合 LWPOLYLINE（保留 bulge） | 无关联性；无选项提示 |
 | `GRADIENT` | 部分实现 | 当前选择为闭合边界（整实体 Circle/完整 Ellipse/闭合 Polyline/LINE+ARC 边链），复用 HATCH 创建路径并强制渐变填充（会话 kind/角度/双色 ACI，默认线性 0°、ACI 1→5）；边界必须在 +Z 平面；一个 `AcDbHatch`、一条事务/一步撤销；边界实体保留 | 无渐变预览、无 `-GRADIENT` 选项提示、无 .pat/关联性；非 `+Z` 平面/非闭合/退化边界按名拒绝；证据只有 `cad-app`/`cad-ui-core`/前端契约测试 |
 | `HATCHEDIT` | 部分实现 | 恰好一个直接可寻址的模型空间 HATCH；`ANGLE`/`SCALE`/`SOLID`/`GRADIENT` 等既有选项；`ADDBOUNDARIES`/`REMOVEBOUNDARIES` 现在真实：一个选中 hatch + 其余选中闭合实体为边界，重建 loop 集，一条事务/一步撤销 | 无交互对话框；`Origin` 无字段、`Associate`/`Annotative` 无模型、Boundary draw order 拒绝；证据只有契约测试 |
@@ -1836,7 +1836,7 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `REVCLOUD` | 部分实现 | `Object`/`Rectangular`/`Polygonal`/`Freehand`/`Arc Length`/`Style`/`Modify`；等弦弧（106.26°）；默认弦长 = 源路径 bbox 对角线 5%（声明替代）；一条事务/一步撤销 | **`Calligraphy` 样式未实现**（多段线无样式字段）；`Modify` 用确定性规则替代交互拾取；`RECT/POLY/FREEHAND/MODIFY` 的路径来自唯一选中 LWPOLYLINE |
 | `WIPEOUT` | 部分实现 | `Frames ON/OFF/DISPLAY` 真实：ON = 填充 + 边框（显示与矢量出图边界折线），OFF = 仅填充，DISPLAY = 显示边框、出图不画；边框在 mask fill 之后用 Always-depth 线管线绘制；`Polyline` + `Erase Polyline Yes/No`、自由点串 | `FRAME` 覆盖无命令；遮罩填充在矢量出图仍无背景 flood（边界可出图）；无真实 GPU/像素验收 |
 | `TEXTMASK` | 部分实现 | 偏移因子（默认 0.35）、`Wipeout` 遮罩、文本+遮罩会话 `GROUP`、重跑替换旧遮罩、`TEXTUNMASK` 按组优先；一条事务/一步撤销 | **`3dface`/`Solid` 遮罩类型未实现**（无对应实体）；`GROUP` 为会话存储（DWG 不落关联记录） |
-| `TXT2MTXT` | 部分实现 | `COMBINE`/`SEPARATE`、`ORDER TOPDOWN/SELECT`、`WRAP`（`wrap_width`）、源对象在同一事务删除 | **`UNIFORM` 强制行距未实现**（文字无行距字段） |
+| `TXT2MTXT` | 完整实现 | `COMBINE`/`SEPARATE`、`ORDER TOPDOWN/SELECT`、`WRAP`（`wrap_width`）、`UNIFORM <factor>`（0.25–4.0，写入 MTEXT `TextLineSpacing` 且样式 `Exactly`）、源对象在同一事务删除 | `UNIFORM` 之外没有 Settings 对话框（全局范围）；导入的越界 factor 仍渲染（存储契约只要求正且有限）；行距仍以 `1.2×factor×行高` 近似，不是字体真实垂直度量 |
 
 ## Wave 26 边界更新（2026-11-12）
 

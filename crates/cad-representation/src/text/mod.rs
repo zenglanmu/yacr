@@ -30,9 +30,11 @@
 //!   feature consulted.
 //! - **MTEXT columns, paragraph indents and tab stops** are ignored. `\t`/`^I`
 //!   expand to a fixed run of spaces (see `TAB_STEP`).
-//! - **Exact vertical metrics** are not read from the font; line spacing is
-//!   [`LINE_SPACING`] times the tallest run on the line. Vertical alignment of a
-//!   multi-line block against its anchor remains an approximation.
+//! - **Exact vertical metrics** are not read from the font; the baseline advance
+//!   is [`LINE_SPACING`] times the entity's line-spacing factor times the line's
+//!   tallest run ("at least" style) or the entity height ("exactly" style).
+//!   Vertical alignment of a multi-line block against its anchor remains an
+//!   approximation.
 //! - **Stacked fractions** (`\S`) keep their structured numerator/denominator in
 //!   the run list, but the built-in layout draws them inline as `num<sep>den`
 //!   and reports [`text_issue::STACKED_FRACTION_FLAT`].
@@ -89,6 +91,8 @@ pub mod text_issue {
     pub const FONT_UNAVAILABLE: &str = "mtext.font_unavailable";
 }
 
+#[cfg(test)]
+mod line_spacing_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

@@ -47,6 +47,7 @@ fn text_entity(id: u128, font: Option<&str>, style: StyleId) -> DbEntity {
             v_align: TextAlignV::Baseline,
             wrap_width: None,
             width_factor: 1.0,
+            line_spacing: cad_domain::TextLineSpacing::default(),
         },
         draw_order: 0,
     }
@@ -471,6 +472,7 @@ fn chinese_document_prefers_a_cjk_face_before_the_latin_defaults() {
             TextAlignV::Baseline,
             None,
             1.0,
+            cad_domain::TextLineSpacing::default(),
         )
         .unwrap();
     assert!(
@@ -524,6 +526,7 @@ fn chinese_without_a_cjk_face_reports_one_named_gap_and_shapes_latin_anyway() {
             TextAlignV::Baseline,
             None,
             1.0,
+            cad_domain::TextLineSpacing::default(),
         )
         .unwrap();
     assert!(
@@ -544,6 +547,7 @@ fn chinese_without_a_cjk_face_reports_one_named_gap_and_shapes_latin_anyway() {
             TextAlignV::Baseline,
             None,
             1.0,
+            cad_domain::TextLineSpacing::default(),
         )
         .unwrap();
     assert!(cjk.outlines.is_empty());

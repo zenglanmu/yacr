@@ -328,6 +328,7 @@ impl Application {
                 v_align,
                 wrap_width,
                 width_factor,
+                line_spacing,
             } = before.geometry.clone()
             else {
                 return Err(CadError::Unsupported(format!(
@@ -385,6 +386,8 @@ impl Application {
                 wrap_width: new_width,
                 // A dimensionless stretch is unchanged by the height scale.
                 width_factor,
+                // Both halves of the line spacing are dimensionless ratios too.
+                line_spacing,
             };
             if after.geometry != before.geometry {
                 planned.push((before, after));

@@ -714,10 +714,12 @@ pub enum CommandPayload {
     ///   codes; `1` = Left/Top, `5` = Center/Middle, `9` = Right/Bottom), so
     ///   `TextAlignV::Baseline` is never produced by the interactive path.
     ///
-    /// **Not carried, because not modelled**: line-spacing style, columns,
-    /// background fill and drawing direction (the importer's `MTEXT_UNMODELLED`
-    /// facets). No field exists for any of them, so none can be believed to be
-    /// honoured.
+    /// **Not carried, because not modelled**: columns, background fill and
+    /// drawing direction (the importer's `MTEXT_UNMODELLED` facets). No field
+    /// exists for any of them, so none can be believed to be honoured. Line
+    /// spacing is modelled (`SemanticGeometry::Text::line_spacing`) but this
+    /// payload has no field for it: a created MTEXT stores the neutral
+    /// `1.0 / at least`, the value the layout has always used.
     ///
     /// The style/font resolution is the one `Text` creation uses, and the stored
     /// `type_key` is `AcDbMText` (not `Text`'s `AcDbText`), so this command can

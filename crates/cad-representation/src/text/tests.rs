@@ -259,6 +259,7 @@ fn bundled_osifont_sfnt_glyphs_fill_faces_and_preserve_even_odd_holes() {
             TextAlignV::Baseline,
             None,
             1.0,
+            cad_domain::TextLineSpacing::default(),
         )
         .unwrap();
     assert!(
@@ -324,6 +325,7 @@ fn bundled_osifont_sfnt_glyphs_fill_faces_and_preserve_even_odd_holes() {
             TextAlignV::Middle,
             None,
             1.0,
+            cad_domain::TextLineSpacing::default(),
         )
         .unwrap();
     assert!(
@@ -347,6 +349,7 @@ fn sfnt_fill_failure_is_retained_as_partial_diagnostic() {
         0.0,
         TextAlignH::Left,
         TextAlignV::Baseline,
+        cad_domain::TextLineSpacing::default(),
     );
     assert!(finalized.meshes.is_empty());
     assert_eq!(finalized.fill_failures.len(), 1);
@@ -383,6 +386,7 @@ fn even_odd_fill_is_refused_for_same_winding_nested_sfnt_contours() {
         0.0,
         TextAlignH::Left,
         TextAlignV::Baseline,
+        cad_domain::TextLineSpacing::default(),
     );
     assert!(finalized.meshes.is_empty());
     assert_eq!(
@@ -438,6 +442,7 @@ fn outlines_a_real_shx_when_provided() {
             TextAlignV::Baseline,
             None,
             1.0,
+            cad_domain::TextLineSpacing::default(),
         )
         .unwrap();
     let polys = shaped.polylines;
@@ -584,6 +589,7 @@ fn alignment_shifts_the_run_relative_to_its_anchor() {
         0.0,
         TextAlignH::Left,
         TextAlignV::Baseline,
+        cad_domain::TextLineSpacing::default(),
     );
     let center = finalize_lines(
         lines.clone(),
@@ -592,6 +598,7 @@ fn alignment_shifts_the_run_relative_to_its_anchor() {
         0.0,
         TextAlignH::Center,
         TextAlignV::Baseline,
+        cad_domain::TextLineSpacing::default(),
     );
     let right = finalize_lines(
         lines,
@@ -600,6 +607,7 @@ fn alignment_shifts_the_run_relative_to_its_anchor() {
         0.0,
         TextAlignH::Right,
         TextAlignV::Baseline,
+        cad_domain::TextLineSpacing::default(),
     );
     assert_eq!(left[0][0].x, 0.0);
     assert_eq!(center[0][0].x, -5.0);
@@ -795,6 +803,7 @@ fn layout_counts_lines_and_advances_them_by_line_spacing() {
         0.0,
         TextAlignH::Left,
         TextAlignV::Baseline,
+        cad_domain::TextLineSpacing::default(),
     );
     let (min_y, max_y) = out
         .iter()
@@ -821,6 +830,7 @@ fn layout_applies_per_run_height_to_line_spacing() {
         0.0,
         TextAlignH::Left,
         TextAlignV::Baseline,
+        cad_domain::TextLineSpacing::default(),
     );
     let min_y = out
         .iter()
@@ -853,6 +863,7 @@ fn shapes_mtext_runs_and_reports_approximations_when_font_provided() {
             TextAlignV::Baseline,
             None,
             1.0,
+            cad_domain::TextLineSpacing::default(),
         )
         .unwrap();
     // Two paragraphs plus a stacked-fraction run.
@@ -889,6 +900,7 @@ fn shapes_mtext_runs_and_reports_approximations_when_font_provided() {
             TextAlignV::Baseline,
             None,
             1.0,
+            cad_domain::TextLineSpacing::default(),
         )
         .unwrap();
     let plain = engine
@@ -949,6 +961,7 @@ fn committed_noto_cjk_cff_face_outlines_chinese_glyphs() {
             TextAlignV::Baseline,
             None,
             1.0,
+            cad_domain::TextLineSpacing::default(),
         )
         .expect("CJK text must shape through the committed face");
     assert!(shaped.has_renderable_content, "CJK run must be renderable");

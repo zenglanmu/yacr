@@ -74,6 +74,7 @@ fn text_at(id: u128, content: &str, position: Point3) -> DbEntity {
             v_align: TextAlignV::Baseline,
             wrap_width: None,
             width_factor: 1.0,
+            line_spacing: cad_domain::TextLineSpacing::default(),
         },
         draw_order: id as i64,
     }

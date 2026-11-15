@@ -510,6 +510,7 @@ fn text_geometry(position: Point3, rotation: f64) -> SemanticGeometry {
         v_align: cad_domain::TextAlignV::Baseline,
         wrap_width: None,
         width_factor: 1.0,
+        line_spacing: cad_domain::TextLineSpacing::default(),
     }
 }
 

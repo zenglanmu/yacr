@@ -25,6 +25,7 @@ fn text_geometry(text: &str) -> SemanticGeometry {
         v_align: TextAlignV::Top,
         wrap_width: None,
         width_factor: 1.0,
+        line_spacing: cad_domain::TextLineSpacing::default(),
     }
 }
 

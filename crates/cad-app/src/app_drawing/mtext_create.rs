@@ -27,14 +27,19 @@
 //! * `h_align` / `v_align` — the horizontal/vertical attachment of the text
 //!   relative to `position`.
 //!
-//! What is **NOT modelled** and therefore not accepted (the four stable reasons
+//! What is **NOT modelled** and therefore not accepted (the three stable reasons
 //! the importer already names — `cad_import_acadrust::entity::convert`'s
-//! `MTEXT_UNMODELLED`): line-spacing style (`text.line_spacing_style_unsupported`),
-//! columns (`text.columns_unsupported`), background fill
+//! `MTEXT_UNMODELLED`): columns (`text.columns_unsupported`), background fill
 //! (`text.background_unsupported`) and drawing direction
 //! (`text.drawing_direction_unsupported`). There is no payload field for any of
 //! them, and the create diagnostic repeats the list so the omission is stated
 //! rather than implied.
+//!
+//! Line spacing **is** modelled now (DXF groups 44/73 → `TextLineSpacing`), but
+//! this create payload carries no field for it, so a newly created MTEXT always
+//! stores the neutral spacing (factor `1.0`, "at least") — the same value the
+//! layout has always used. `TXT2MTXT ... UNIFORM <factor>` is the command that
+//! writes a non-default factor.
 //!
 //! The entity's stored `type_key` is **`AcDbMText`**, not `class_name()`'s
 //! `AcDbText`: the create funnel takes an explicit type-key override, which is
@@ -149,6 +154,9 @@ impl Application {
             wrap_width,
             // A newly created MTEXT has no horizontal stretch.
             width_factor: cad_domain::DEFAULT_TEXT_WIDTH_FACTOR,
+            // The create payload carries no line spacing, so the created MTEXT
+            // stores the neutral factor/style the layout has always used.
+            line_spacing: cad_domain::TextLineSpacing::default(),
         };
         let mut outcome = self.commit_new_entity_typed(
             session,
@@ -161,10 +169,11 @@ impl Application {
             object: outcome.objects.first().copied(),
             code: "drawing.mtext_created".into(),
             message: format!(
-                "MTEXT: one {MTEXT_TYPE_KEY} entity; NOT MODELLED and not accepted by this \
-                 command: line spacing style (text.line_spacing_style_unsupported), columns \
-                 (text.columns_unsupported), background fill (text.background_unsupported), \
-                 drawing direction (text.drawing_direction_unsupported)"
+                "MTEXT: one {MTEXT_TYPE_KEY} entity; line spacing is modelled but this command \
+                 writes the neutral factor 1.0 / \"at least\"; NOT MODELLED and not accepted by \
+                 this command: columns (text.columns_unsupported), background fill \
+                 (text.background_unsupported), drawing direction \
+                 (text.drawing_direction_unsupported)"
             ),
         });
         Ok(outcome)

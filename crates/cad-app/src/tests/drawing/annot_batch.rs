@@ -58,6 +58,7 @@ fn text(id: u128, text: &str, height: f64) -> DbEntity {
             v_align: TextAlignV::Baseline,
             wrap_width: None,
             width_factor: 1.0,
+            line_spacing: cad_domain::TextLineSpacing::default(),
         },
         0,
     )

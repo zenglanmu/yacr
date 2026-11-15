@@ -415,6 +415,7 @@ impl GeometryEngine for DefaultGeometryEngine {
                 v_align,
                 wrap_width,
                 width_factor,
+                line_spacing,
             } => {
                 // ADR 0019 decision B: this is the **second** transform surface
                 // (the snap path); `cad-db::transform_geometry` is the other. Both
@@ -451,6 +452,9 @@ impl GeometryEngine for DefaultGeometryEngine {
                     wrap_width: wrap_width.map(|width| width * uniform_scale(t)),
                     // A dimensionless stretch is invariant under a similarity.
                     width_factor: *width_factor,
+                    // Both halves of the spacing are dimensionless ratios; a
+                    // similarity keeps them, exactly like `cad-db`'s surface.
+                    line_spacing: *line_spacing,
                 }
             }
             G::Shape {

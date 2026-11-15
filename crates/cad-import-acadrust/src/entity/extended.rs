@@ -32,6 +32,7 @@ impl<'a> ImporterBuilder<'a> {
                     // RTEXT carries no width boundary.
                     wrap_width: None,
                     width_factor: 1.0,
+                    line_spacing: cad_domain::TextLineSpacing::default(),
                 };
                 let unhandled = rtext_unhandled_flags(d.flags);
                 let normal = p3(d.normal);
@@ -70,6 +71,7 @@ impl<'a> ImporterBuilder<'a> {
                     // Arc-aligned text carries no width boundary.
                     wrap_width: None,
                     width_factor: 1.0,
+                    line_spacing: cad_domain::TextLineSpacing::default(),
                 },
                 Completeness::Partial(vec![
                     "arc-aligned placement approximated as linear text".into()
@@ -77,6 +79,7 @@ impl<'a> ImporterBuilder<'a> {
             ),
             ExtendedEntityData::GeoPositionMarker(d) => {
                 let mut children: Vec<SemanticGeometry> = Vec::new();
+                let mut positionmarker_reasons: Vec<String> = Vec::new();
                 if d.radius.is_finite() && d.radius > 0.0 {
                     children.push(SemanticGeometry::Circle {
                         center: p3(d.position),
@@ -105,11 +108,23 @@ impl<'a> ImporterBuilder<'a> {
                         v_align: TextAlignV::Middle,
                         wrap_width: None,
                         width_factor: 1.0,
+                        line_spacing: cad_domain::TextLineSpacing::default(),
                     });
                 }
                 if d.mtext_visible {
                     if let Some(mtext) = &d.embedded_mtext {
                         let (h_align, v_align) = attach_align(mtext.attachment_point);
+                        // The embedded MTEXT carries the same groups 44/73 as a
+                        // standalone one. This arm is `Partial` regardless, so a
+                        // degenerate factor is reported as a reason below rather
+                        // than as a once-per-import diagnostic.
+                        let (line_spacing, degenerate_line_spacing) = map_mtext_line_spacing(
+                            mtext.line_spacing_factor,
+                            mtext.line_spacing_style,
+                        );
+                        if degenerate_line_spacing {
+                            positionmarker_reasons.push(DEGENERATE_LINE_SPACING_FACTOR.into());
+                        }
                         children.push(SemanticGeometry::Text {
                             text: mtext.value.clone(),
                             position: p3(mtext.insertion_point),
@@ -123,6 +138,7 @@ impl<'a> ImporterBuilder<'a> {
                             // this build; only MLEADER populates it.
                             wrap_width: None,
                             width_factor: 1.0,
+                            line_spacing,
                         });
                     }
                 }
@@ -135,14 +151,12 @@ impl<'a> ImporterBuilder<'a> {
                 } else {
                     SemanticGeometry::Compound(children)
                 };
-                (
-                    geometry,
-                    Completeness::Partial(vec![
-                        "geo position marker drawn as a radius circle plus notes text; \
-                         text_alignment, enable_frame_text and landing_gap are not applied"
-                            .into(),
-                    ]),
-                )
+                positionmarker_reasons.push(
+                    "geo position marker drawn as a radius circle plus notes text; \
+                     text_alignment, enable_frame_text and landing_gap are not applied"
+                        .into(),
+                );
+                (geometry, Completeness::Partial(positionmarker_reasons))
             }
             ExtendedEntityData::SectionObject(d) => {
                 let mut children: Vec<SemanticGeometry> = Vec::new();
@@ -230,6 +244,7 @@ impl<'a> ImporterBuilder<'a> {
             // ATTRIB/ATTDEF text has no width boundary.
             wrap_width: None,
             width_factor: 1.0,
+            line_spacing: cad_domain::TextLineSpacing::default(),
         }
     }
 }

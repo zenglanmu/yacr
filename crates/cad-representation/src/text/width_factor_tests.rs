@@ -31,6 +31,7 @@ fn entity_width_factor_multiplies_glyph_advances() {
                 TextAlignV::Baseline,
                 None,
                 width_factor,
+                cad_domain::TextLineSpacing::default(),
             )
             .expect("the bundled face shapes");
         let max_x = shaped
@@ -62,6 +63,7 @@ fn entity_width_factor_multiplies_glyph_advances() {
             TextAlignV::Baseline,
             None,
             1.25,
+            cad_domain::TextLineSpacing::default(),
         )
         .expect("shapes");
     assert!(shaped

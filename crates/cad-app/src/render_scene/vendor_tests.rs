@@ -283,6 +283,7 @@ fn vendor_text_is_shaped_with_the_host_font_engine() {
             cad_domain::TextAlignV::Baseline,
             None,
             1.0,
+            cad_domain::TextLineSpacing::default(),
         )
         .expect("shape A");
     eprintln!(
