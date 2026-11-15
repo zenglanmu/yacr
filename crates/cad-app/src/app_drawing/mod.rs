@@ -45,6 +45,7 @@ mod dimension_angular;
 mod dimension_chain;
 mod dimension_edit;
 mod dimension_ordinate;
+mod dimension_override;
 mod dimension_qdim;
 mod dimension_space;
 mod dimension_style;

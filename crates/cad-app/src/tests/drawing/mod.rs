@@ -298,6 +298,7 @@ mod dimension;
 mod dimension_angular_ordinate;
 mod dimension_chain;
 mod dimension_edit;
+mod dimension_edit_override;
 mod dimension_extra;
 mod dimension_qdim;
 mod dimension_radial;
