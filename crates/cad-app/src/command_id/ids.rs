@@ -909,9 +909,11 @@ pub enum CommandId {
     /// `VPMIN`: restore the maximized viewport; empty state is a named no-op.
     /// Contract: [`crate::command_id::layout`].
     VpMin,
-    /// `VPCLIP RECT <minx> <miny> <maxx> <maxy>`: named refusal for the
-    /// viewport clip write; polygonal clips are NOT IMPLEMENTED. Contract:
-    /// [`crate::command_id::layout`].
+    /// `VPCLIP RECT|POLY <points>`: write the viewport clip. Rectangles keep
+    /// the half-plane clippers; an N-point simple polygon is clipped
+    /// crossing-by-crossing and renders. A translation-free 3-point boundary
+    /// is the named `vpclip.ambiguous_triangle` refusal (it would be stored as
+    /// the legacy 3-point record). Contract: [`crate::command_id::layout`].
     VpClip,
     /// `VPSCALE <scale>`: named refusal for the viewport scale write; the
     /// drawing's scale table is the authority. Contract:
