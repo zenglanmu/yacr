@@ -3,11 +3,14 @@
 //! Declared deviation: sources come from the current selection and the target is
 //! the session's active layer (no interactive source/target prompts). Every
 //! entity on a source layer is rewritten to the active layer and the source
-//! layer rows are deleted in one transaction / one undo step; undo restores the
-//! rows and the entities' original layers. Refusals: empty selection, a payload,
-//! a source equal to the active layer, and the default layer `0`.
+//! layer rows are deleted in one transaction / one undo step; each deleted source
+//! layer's key is pruned from every paper viewport's `layer_overrides` map in that
+//! same step, so one undo restores the rows, the entities' original layers and the
+//! exact override maps. Refusals: empty selection, a payload, a source equal to
+//! the active layer, and the default layer `0`.
 
 use super::*;
+use cad_db::PaperViewport;
 
 fn layers() -> Vec<(LayerId, &'static str, LayerAttributes)> {
     vec![
@@ -97,6 +100,153 @@ fn laymrg_moves_every_entity_from_the_selected_layers_into_the_active_layer() {
     assert_eq!(entity_layer(&app, 1), LayerId(5));
     assert_eq!(entity_layer(&app, 2), LayerId(5));
     assert_eq!(entity_layer(&app, 3), LayerId(5));
+}
+
+/// Layers `0`/`WALLS`/`DOORS`, layout `Sheet1` with one paper viewport whose
+/// per-layer override map is `overrides`, entities 1 (model) and 2 (paper) on
+/// `WALLS` and the control entity 3 on `DOORS`.
+fn sheet_app(overrides: Vec<(LayerId, bool)>) -> (Application, SessionState) {
+    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
+    for (id, name) in [
+        (LayerId(0), "0"),
+        (LayerId(3), "WALLS"),
+        (LayerId(5), "DOORS"),
+    ] {
+        builder
+            .insert_layer(Layer {
+                id,
+                name: name.into(),
+                visible: true,
+            })
+            .unwrap();
+    }
+    builder
+        .insert_layout(Layout {
+            id: LayoutId(1),
+            name: "Sheet1".into(),
+            viewports: vec![PaperViewport {
+                clip: vec![
+                    point(0.0, 0.0),
+                    point(100.0, 0.0),
+                    point(100.0, 50.0),
+                    point(0.0, 50.0),
+                ],
+                model_to_paper: Transform3::scale(100.0),
+                completeness: Completeness::Complete,
+                layer_overrides: overrides.into_iter().collect(),
+            }],
+        })
+        .unwrap();
+    builder.insert_entity(line(1, LayerId(3), 0.0)).unwrap();
+    builder
+        .insert_entity(DbEntity {
+            space: SpaceId::Paper(LayoutId(1)),
+            ..line(2, LayerId(3), 5.0)
+        })
+        .unwrap();
+    builder.insert_entity(line(3, LayerId(5), 10.0)).unwrap();
+    app_with_database(builder.finish().unwrap())
+}
+
+#[test]
+fn laymrg_prunes_only_the_source_layers_viewport_overrides() {
+    let (mut app, mut session) = sheet_app(vec![(LayerId(3), true), (LayerId(5), false)]);
+    session.active_layer = LayerId(5);
+    select(&mut app, &mut session, &[1]);
+
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::LayMrg,
+        CommandPayload::None,
+    )
+    .expect("LAYMRG merges the selected layer");
+
+    let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
+    assert!(
+        drawing.layer(LayerId(3)).is_none(),
+        "the source row is gone"
+    );
+    assert_eq!(entity_layer(&app, 1), LayerId(5));
+    assert_eq!(
+        entity_layer(&app, 2),
+        LayerId(5),
+        "the paper-space member moves too"
+    );
+    assert_eq!(entity_layer(&app, 3), LayerId(5));
+    let overrides = &drawing.layout(LayoutId(1)).expect("layout").viewports[0].layer_overrides;
+    assert_eq!(
+        overrides.get(&LayerId(3)),
+        None,
+        "no override may outlive its layer row"
+    );
+    assert_eq!(
+        overrides.get(&LayerId(5)),
+        Some(&false),
+        "the surviving layer's override is untouched, false included"
+    );
+    assert_eq!(overrides.len(), 1, "only the source key was removed");
+}
+
+#[test]
+fn laymrg_undo_restores_the_pruned_viewport_overrides_and_redo_prunes_them() {
+    let (mut app, mut session) = sheet_app(vec![(LayerId(3), true), (LayerId(5), false)]);
+    session.active_layer = LayerId(5);
+    select(&mut app, &mut session, &[1]);
+    let before = state(&app);
+
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::LayMrg,
+        CommandPayload::None,
+    )
+    .expect("LAYMRG merges the selected layer");
+    assert_eq!(undo_depth(&app), before.1 + 1, "one undo step");
+
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .expect("undo LAYMRG");
+    let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
+    assert_eq!(
+        drawing.layer(LayerId(3)).map(|row| row.name.as_str()),
+        Some("WALLS"),
+        "the source row is back"
+    );
+    assert_eq!(entity_layer(&app, 1), LayerId(3));
+    assert_eq!(entity_layer(&app, 2), LayerId(3));
+    assert_eq!(entity_layer(&app, 3), LayerId(5));
+    let overrides = &drawing.layout(LayoutId(1)).expect("layout").viewports[0].layer_overrides;
+    assert_eq!(
+        overrides.get(&LayerId(3)),
+        Some(&true),
+        "restored with the row"
+    );
+    assert_eq!(overrides.get(&LayerId(5)), Some(&false));
+    assert_eq!(overrides.len(), 2, "the exact override map is back");
+
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Redo,
+        CommandPayload::None,
+    )
+    .expect("redo LAYMRG");
+    let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
+    assert!(drawing.layer(LayerId(3)).is_none());
+    assert_eq!(entity_layer(&app, 1), LayerId(5));
+    assert_eq!(entity_layer(&app, 2), LayerId(5));
+    let overrides = &drawing.layout(LayoutId(1)).expect("layout").viewports[0].layer_overrides;
+    assert_eq!(
+        overrides.get(&LayerId(3)),
+        None,
+        "redo prunes the source key again"
+    );
+    assert_eq!(overrides.get(&LayerId(5)), Some(&false));
 }
 
 #[test]

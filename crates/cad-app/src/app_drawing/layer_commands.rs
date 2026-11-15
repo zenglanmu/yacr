@@ -84,14 +84,16 @@
 //!
 //! ## `LAYTHW`
 //!
-//! "Thaws all layers." Takes **no selection** (a payload is refused with
-//! `laythw.payload`); every layer whose `frozen` flag is set is thawed in one
-//! layer-table pass, and an all-thawed drawing is `laythw.unchanged` with no
-//! write. This build has no viewport model, so **viewport-level frozen layers
-//! are not thawed** and `frozen_in_new_viewport` is left untouched; the same
-//! one-revision-bump-per-changed-layer rule applies, and the whole command is
-//! **one** undo step. Success is `laythw.applied` with the changed-layer count.
-//! Work-only.
+//! "Thaws all layers in the drawing." Takes **no selection** (a payload is
+//! refused with `laythw.payload`) and thaws in two places at once, like AutoCAD:
+//! every drawing-level `frozen` flag, and every per-viewport frozen override
+//! ([`cad_db::PaperViewport::layer_overrides`] — the state `LAYVPI`/`VPLAYER`
+//! write) in **every** layout. Only frozen state is cleared: viewport geometry,
+//! views and `frozen_in_new_viewport` are untouched, and an all-thawed drawing is
+//! `laythw.unchanged` with no write. Layer and layout rows are staged into one
+//! `DrawingUndoRecord`, so one undo restores every flag and override exactly
+//! (one revision per changed row). Success is `laythw.applied` with the
+//! changed-layer, cleared-override and changed-layout counts. Work-only.
 //!
 //! ## `LAYLCK` / `LAYULK`
 //!
@@ -127,6 +129,8 @@ use crate::{SelectionToolPayload, SetByLayerSettings};
 use cad_db::{
     EntityColor, EntityLineType, EntityLineWeight, EntityRenderAttributes, EntityTransparency,
 };
+
+use super::layer_record::layer_row;
 
 /// A named, non-capability refusal (`<command>.<code>: <detail>`).
 pub(super) fn invalid(prefix: &str, code: &str, detail: impl std::fmt::Display) -> CadError {
@@ -394,9 +398,7 @@ impl Application {
                 if attributes.frozen {
                     false
                 } else {
-                    // v1 freezes the layer in every viewport; the
-                    // `frozen_in_new_viewport` flag (the per-viewport model this
-                    // build does not have) is deliberately left untouched.
+                    // `frozen_in_new_viewport` is a separate flag; it stays.
                     attributes.frozen = true;
                     true
                 }
@@ -430,62 +432,112 @@ impl Application {
         })
     }
 
-    /// `LAYTHW`: thaw every frozen layer.
+    /// `LAYTHW`: thaw every frozen layer, in the layer table **and** in every
+    /// viewport of every layout.
     fn laythw(
         &mut self,
         _session: &mut SessionState,
         command: &Command,
     ) -> CadResult<CommandOutcome> {
         if !matches!(command.payload, CommandPayload::None) {
-            return Err(invalid(
-                "laythw",
-                "payload",
-                "LAYTHW takes no payload; it thaws every frozen layer and reads no selection",
-            ));
+            let message =
+                "LAYTHW takes no payload; it thaws every frozen layer and reads no selection";
+            return Err(invalid("laythw", "payload", message));
         }
         let document_id = command.document;
-        let drawing = self
-            .workspace
-            .documents
-            .get(&document_id)
-            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?
-            .drawing
-            .clone();
+        let drawing = self.drawing(document_id)?.clone();
         let layers: Vec<LayerId> = drawing.layers().map(|layer| layer.id).collect();
-
-        let (changes, count) =
-            self.write_layer_flags(document_id, &layers, "laythw", |attributes| {
-                if attributes.frozen {
-                    attributes.frozen = false;
-                    // `frozen_in_new_viewport` is the per-viewport flag this
-                    // build has no model for; thawing the layer leaves it alone.
-                    true
-                } else {
-                    false
+        // AutoCAD thaws every layer in *all* viewports, so each layout's frozen
+        // viewport overrides are cleared with the layer table. Only `true`
+        // (frozen) entries go: an explicit `false` override is not frozen.
+        let mut overrides = 0;
+        let thawed: Vec<(LayoutId, Vec<cad_db::PaperViewport>)> = drawing
+            .layouts()
+            .filter_map(|layout| {
+                let mut viewports = layout.viewports.clone();
+                let mut changed = false;
+                for viewport in &mut viewports {
+                    let known = viewport.layer_overrides.len();
+                    viewport.layer_overrides.retain(|_, frozen| !*frozen);
+                    overrides += known - viewport.layer_overrides.len();
+                    changed |= viewport.layer_overrides.len() != known;
                 }
-            })?;
-        if count == 0 {
+                changed.then_some((layout.id, viewports))
+            })
+            .collect();
+        let mut candidate = drawing.clone();
+        let transaction = next_transaction_id();
+        let mut layer_patches = Vec::new();
+        for id in &layers {
+            let before_row = layer_row(&drawing, *id);
+            let mut attributes = candidate.layer_attributes(*id);
+            if !attributes.frozen {
+                continue;
+            }
+            attributes.frozen = false;
+            // `frozen_in_new_viewport` is not a viewport model; it stays.
+            candidate.set_layer_attributes(*id, attributes, transaction, "laythw")?;
+            if let Some(before_row) = before_row {
+                let after = layer_row(&candidate, *id);
+                layer_patches.push(cad_history::layer_patch(*id, Some(before_row), after));
+            }
+        }
+        let mut layout_patches = Vec::with_capacity(thawed.len());
+        for (layout, viewports) in thawed {
+            let before_row = layout_row(&drawing, layout);
+            candidate.set_layout_viewports(layout, viewports, transaction, "laythw")?;
+            let after = layout_row(&candidate, layout);
+            layout_patches.push(cad_history::layout_patch(layout, before_row, after));
+        }
+        if layer_patches.is_empty() && layout_patches.is_empty() {
             return Ok(CommandOutcome {
                 objects: Vec::new(),
                 changes: None,
                 diagnostics: vec![Diagnostic {
                     object: None,
                     code: "laythw.unchanged".into(),
-                    message: "LAYTHW: no layer is frozen; nothing changed".into(),
+                    message: "LAYTHW: nothing is frozen in the layer table or a viewport".into(),
                 }],
                 measurement: None,
                 point_report: None,
             });
         }
+        let (changed_layers, changed_layouts) = (layer_patches.len(), layout_patches.len());
+        let changes = ChangeSet {
+            database: candidate.id(),
+            before: drawing.revision(),
+            after: candidate.revision(),
+            transaction,
+            reason: "laythw".to_string(),
+            changes: Vec::new(),
+        };
+        self.publish_candidate(
+            document_id,
+            candidate,
+            DrawingUndoRecord {
+                transaction,
+                label: "laythw".to_string(),
+                patches: Vec::new(),
+                block_patches: Vec::new(),
+                layer_patches,
+                layout_patches,
+                style_patches: Vec::new(),
+                dim_style_patches: Vec::new(),
+                mleader_style_patches: Vec::new(),
+                merge_key: None,
+            },
+        )?;
         Ok(CommandOutcome {
             objects: Vec::new(),
-            changes,
+            changes: Some(Arc::new(changes)),
             diagnostics: vec![Diagnostic {
                 object: None,
                 code: "laythw.applied".into(),
                 message: format!(
-                    "LAYTHW: thawed {count} layer(s) (viewport-level frozen layers are not \
-                     thawed; one transaction / one undo step)"
+                    "LAYTHW: thawed {changed_layers} layer(s) at drawing level and cleared \
+                     {overrides} frozen viewport override(s) in {changed_layouts} layout(s): no \
+                     layer stays frozen in any viewport (one transaction / one undo step; \
+                     `frozen_in_new_viewport` is left untouched)"
                 ),
             }],
             measurement: None,

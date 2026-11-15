@@ -629,7 +629,7 @@ pub enum CommandId {
     LayMCh,
     /// `LAYMRG` / `-LAYMRG`: merge the selection's layers into the active layer.
     LayMrg,
-    /// `LAYDEL` / `-LAYDEL`: delete the selection's layers and their model entities.
+    /// `LAYDEL` / `-LAYDEL`: delete the selection's layers and every entity referencing them.
     LayDel,
     /// `LAYERSTATE <option>`: bounded named layer states (`SAVE`/`RESTORE`/`LIST`/`DELETE`).
     LayerState,

@@ -68,8 +68,12 @@ fn app_with_display(
             .set_entity_render_attributes(id, attributes)
             .unwrap();
     }
-    let drawing = builder.finish().unwrap();
+    app_with_database(builder.finish().unwrap())
+}
 
+/// Wrap one already-built database (layouts, blocks and all) in a work-mode
+/// application, so a test can build the fixture its command actually needs.
+fn app_with_database(drawing: DrawingDatabase) -> (Application, SessionState) {
     let mut app = Application::new();
     app.workspace.documents.insert(
         DocumentId(1),

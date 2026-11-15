@@ -16,7 +16,10 @@
 //!   as the entity patches. A merge/delete is therefore one atomic undo step:
 //!   undo restores the deleted layer rows before (and together with) the entity
 //!   rows, and redo re-applies both. The published `ChangeSet` still spans the
-//!   entity commit plus the layer-table bumps.
+//!   entity commit plus the layer-table bumps. `LAYMRG`/`LAYDEL` prune the
+//!   per-viewport overrides naming the removed layers as [`cad_db::LayoutPatch`]
+//!   rows of that same record; `LAYDEL` also deletes entities in **every** space
+//!   (model, paper, block member — one `entities` table).
 //! * `LAYERSTATE RESTORE` applies stored attributes with `set_layer_attributes`
 //!   (one revision bump per changed layer) and records all changed rows as one
 //!   layer-patch undo step. The restored active layer and override set are
@@ -37,6 +40,7 @@ use super::layer_commands::{
 };
 use super::layer_edit::resolve_layer;
 use super::layer_record::layer_row;
+use super::layout_record::layout_row;
 use super::*;
 use crate::command_payload::LayerStateCommand;
 
@@ -205,6 +209,8 @@ impl Application {
     /// rewritten to the active layer in one transaction / one undo step; each
     /// source layer is then deleted from the layer table in the same transaction
     /// and the same undo record (entity patches + one layer patch per source row).
+    /// Every paper viewport override keyed by a source layer is pruned there too
+    /// (one layout patch per pruned layout), so no override outlives its layer.
     /// Sources
     /// equal to the active layer (`laymrg.source_is_active`) and the default layer
     /// `0` (`laymrg.default_layer`) are refused because the layer table cannot
@@ -300,6 +306,7 @@ impl Application {
         }
         let entity_count = patches.len();
         let before_revision = drawing.revision();
+        let layout_patches = prune_views(drawing.as_ref(), &mut candidate, &sources, transaction)?;
         // Each source row is recorded as a layer patch in the same undo step, so
         // undo restores the row before the entity rows are put back onto it.
         let mut layer_patches = Vec::with_capacity(sources.len());
@@ -332,7 +339,7 @@ impl Application {
                 style_patches: Vec::new(),
                 dim_style_patches: Vec::new(),
                 mleader_style_patches: Vec::new(),
-                layout_patches: Vec::new(),
+                layout_patches,
                 merge_key: None,
             },
         )?;
@@ -354,26 +361,32 @@ impl Application {
         })
     }
 
-    /// `LAYDEL` / `-LAYDEL`: delete the selection's layers and their model entities.
+    /// `LAYDEL` / `-LAYDEL`: delete the selection's layers and everything on them.
     ///
-    /// The source layers are the distinct layers of the current selection. Every
-    /// **model-space** entity on those layers is deleted in the **same candidate
-    /// / transaction / undo step** as the layer rows: the record carries both the
-    /// entity patches and one layer patch per deleted row, so undo restores the
-    /// rows and their entities together and redo removes both. Each source row's
-    /// session override is dropped (session state, not history). Entities in paper
-    /// space or block definitions are **not** deleted by this command: the
-    /// preflight refuses a source layer that still has such members
-    /// (`laydel.layer_in_use`) so the database delete cannot fail halfway. The
-    /// active layer and the default layer `0` are refused, as is an empty
-    /// selection.
+    /// The source layers are the distinct layers of the selection, which names a
+    /// layer through a **top-level** object in model space *or* a paper-space
+    /// layout (see [`laydel_layer_of`]). A layer is referenced by **one** table
+    /// here — `cad-db` stores model-space entities, every paper-space layout's
+    /// entities and every block definition's members in the same `entities` map —
+    /// so deleting by layer covers all three spaces and `delete_layer` afterwards
+    /// sees no reference. The other stored reference to a layer row is a paper
+    /// viewport's per-layer override map (`VPLAYER`/`LAYVPI`); those keys are
+    /// pruned in the same transaction so no override outlives its layer.
+    ///
+    /// Entities, the pruned viewport rows and the layer rows are all staged on
+    /// **one** candidate with **one** transaction and one undo record (entity
+    /// patches with the display state a delete prunes, one layout patch per pruned
+    /// layout, one layer patch per deleted row), so one undo restores all of it.
+    /// A delete the database refuses (a locked layer's entities: `layer.locked`)
+    /// publishes nothing, so a failure never becomes a silent success. The active
+    /// layer (`laydel.current_layer`), the default layer `0`
+    /// (`laydel.default_layer`) and an empty selection are refused.
     fn laydel(
         &mut self,
         session: &mut SessionState,
         command: &Command,
     ) -> CadResult<CommandOutcome> {
         ensure_no_payload(command, "laydel", "LAYDEL")?;
-        let references = selection_snapshot(session, "laydel", "LAYDEL")?;
         let document_id = command.document;
         let drawing = self
             .workspace
@@ -382,7 +395,21 @@ impl Application {
             .ok_or_else(|| CadError::InvalidInput("document not open".into()))?
             .drawing
             .clone();
-        let sources = selected_distinct_layers(drawing.as_ref(), command, &references, "laydel")?;
+        // A top-level drawing-space object names a layer (model or paper space).
+        let mut sources: Vec<LayerId> = Vec::new();
+        for reference in session.selection.refs() {
+            let layer = laydel_layer_of(drawing.as_ref(), command, reference)?;
+            if !sources.contains(&layer) {
+                sources.push(layer);
+            }
+        }
+        if sources.is_empty() {
+            return Err(invalid(
+                "laydel",
+                "selection",
+                "LAYDEL needs at least one selected object in model space or a paper-space layout",
+            ));
+        }
 
         let active_layer = session.active_layer;
         if sources.contains(&active_layer) {
@@ -418,50 +445,18 @@ impl Application {
                 ));
             }
         }
-        // References the entity delete below will not remove (paper space / block
-        // members) would make `delete_layer` fail after the entities were already
-        // gone. Refuse the whole command before any write instead.
-        let blocking = drawing
+        let entity_rows: Vec<DbEntity> = drawing
             .entities()
-            .filter(|entity| sources.contains(&entity.layer) && entity.space != SpaceId::Model)
-            .count();
-        if blocking > 0 {
-            return Err(invalid(
-                "laydel",
-                "layer_in_use",
-                format!(
-                    "{blocking} entity/entities in paper space or block definitions still reference \
-                     the selected layer(s); LAYDEL only deletes model-space entities"
-                ),
-            ));
-        }
-
-        let model_refs: Vec<SelectionRef> = drawing
-            .entities()
-            .filter(|entity| sources.contains(&entity.layer) && entity.space == SpaceId::Model)
-            .map(|entity| SelectionRef {
-                document: document_id,
-                entity: entity.id,
-                instance: cad_domain::InstancePath::default(),
-                sub_element: None,
-            })
+            .filter(|entity| sources.contains(&entity.layer))
+            .cloned()
             .collect();
-        let entity_rows: Vec<DbEntity> = model_refs
-            .iter()
-            .map(|reference| {
-                drawing
-                    .entity(reference.entity)
-                    .cloned()
-                    .ok_or_else(|| CadError::Invariant("LAYDEL: selected entity vanished".into()))
-            })
-            .collect::<CadResult<_>>()?;
         let display_states: Vec<_> = entity_rows
             .iter()
             .map(|entity| drawing.entity_display_state(entity.id))
             .collect();
         let before_revision = drawing.revision();
         let transaction = next_transaction_id();
-        // Both halves share one candidate, one transaction and one undo record;
+        // All halves share one candidate, one transaction and one undo record;
         // nothing is published until the layer rows are deleted below.
         let mut candidate = drawing.as_ref().clone();
         let change_set = {
@@ -476,6 +471,8 @@ impl Application {
         for (entity, state) in entity_rows.into_iter().zip(display_states) {
             patches.push(drawing_patch_deleted(entity.id, entity, state));
         }
+        let entity_count = patches.len();
+        let layout_patches = prune_views(drawing.as_ref(), &mut candidate, &sources, transaction)?;
         let mut layer_patches = Vec::with_capacity(sources.len());
         for source in &sources {
             let before = layer_row(drawing.as_ref(), *source);
@@ -506,27 +503,24 @@ impl Application {
                 style_patches: Vec::new(),
                 dim_style_patches: Vec::new(),
                 mleader_style_patches: Vec::new(),
-                layout_patches: Vec::new(),
+                layout_patches,
                 merge_key: None,
             },
         )?;
         // The deleted entities must not stay in the session selection.
         self.reconcile_selection(session);
-        let mut diagnostics = Vec::new();
-        diagnostics.push(Diagnostic {
-            object: None,
-            code: "laydel.applied".into(),
-            message: format!(
-                "LAYDEL: deleted {} model-space entities and {} layer(s) in one transaction / \
-                 one undo step; entities in paper space/block definitions are not deleted",
-                model_refs.len(),
-                sources.len()
-            ),
-        });
         Ok(CommandOutcome {
             objects: Vec::new(),
             changes: Some(Arc::new(combined)),
-            diagnostics,
+            diagnostics: vec![Diagnostic {
+                object: None,
+                code: "laydel.applied".into(),
+                message: format!(
+                    "LAYDEL: deleted {entity_count} entities (model space, paper space and block \
+                     definitions) and {} layer(s) in one transaction / one undo step",
+                    sources.len()
+                ),
+            }],
             measurement: None,
             point_report: None,
         })
@@ -938,4 +932,69 @@ impl Application {
         });
         Ok(outcome)
     }
+}
+
+/// `LAYDEL`'s selection rule: one top-level **drawing-space** object (model space
+/// or any paper-space layout — the delete covers every space) names one layer;
+/// block-instance members, sub-elements and block-definition members are refused
+/// by name (`laydel.block_space`).
+fn laydel_layer_of(
+    drawing: &DrawingDatabase,
+    command: &Command,
+    reference: &SelectionRef,
+) -> CadResult<LayerId> {
+    let id = reference.entity.0;
+    let blocked = format!(
+        "entity {id} is a block-instance member, a sub-element or a block-definition member; \
+         LAYDEL needs a top-level object in model space or a paper-space layout"
+    );
+    if reference.document != command.document {
+        return Err(invalid(
+            "laydel",
+            "not_addressable",
+            format!("the selected ref for entity {id} belongs to another document"),
+        ));
+    }
+    if !reference.instance.0.is_empty() || reference.sub_element.is_some() {
+        return Err(invalid("laydel", "block_space", &blocked));
+    }
+    match drawing.entity(reference.entity) {
+        None => Err(invalid(
+            "laydel",
+            "not_addressable",
+            format!("entity {id} does not exist in this drawing"),
+        )),
+        Some(entity) if matches!(entity.space, SpaceId::Model | SpaceId::Paper(_)) => {
+            Ok(entity.layer)
+        }
+        Some(_) => Err(invalid("laydel", "block_space", &blocked)),
+    }
+}
+
+/// Prune every deleted source layer from each layout viewport's `layer_overrides`
+/// map, staging the rewritten layouts on `candidate` as layout patches of its one
+/// undo step so **no override outlives its layer**.
+fn prune_views(
+    drawing: &DrawingDatabase,
+    candidate: &mut DrawingDatabase,
+    sources: &[LayerId],
+    transaction: TransactionId,
+) -> CadResult<Vec<cad_db::LayoutPatch>> {
+    let mut patches = Vec::new();
+    for layout in drawing.layouts() {
+        let mut viewports = layout.viewports.clone();
+        let mut pruned = false;
+        for viewport in &mut viewports {
+            for source in sources {
+                pruned |= viewport.layer_overrides.remove(source).is_some();
+            }
+        }
+        if pruned {
+            let before = layout_row(drawing, layout.id);
+            candidate.set_layout_viewports(layout.id, viewports, transaction, "prune overrides")?;
+            let after = layout_row(candidate, layout.id);
+            patches.push(cad_history::layout_patch(layout.id, before, after));
+        }
+    }
+    Ok(patches)
 }
