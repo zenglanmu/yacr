@@ -72,6 +72,65 @@ fn pan_accepts_a_delta_or_two_points() {
 }
 
 #[test]
+fn dash_pan_moves_the_same_camera_and_records_no_drawing_write() {
+    // `-PAN` is a pure alias row: it normalizes onto `PAN` and keeps the typed
+    // delta, so it must ride the existing camera path — never a second camera
+    // authority, and never a drawing write/revision bump/undo step.
+    let session = session(Rc::new(FakeFiles {
+        events: RefCell::new(Vec::new()),
+    }));
+    let (before, revision_before, undo_before) = {
+        let controller = session.core.controller.borrow();
+        (
+            viewport_camera(&session),
+            controller.drawing().expect("the demo document").revision(),
+            controller.application.can_undo(&controller.document_id),
+        )
+    };
+    session
+        .command("-PAN 10 -5")
+        .expect("-PAN dx dy is admitted through the shared parser");
+    let after = viewport_camera(&session);
+    assert_eq!(after.eye.x, before.eye.x - 10.0);
+    assert_eq!(after.eye.y, before.eye.y + 5.0);
+    assert_eq!(after.eye.z, before.eye.z);
+    assert_eq!(
+        {
+            let controller = session.core.controller.borrow();
+            controller.drawing().expect("the demo document").revision()
+        },
+        revision_before,
+        "-PAN writes no drawing"
+    );
+    assert_eq!(
+        {
+            let controller = session.core.controller.borrow();
+            controller.application.can_undo(&controller.document_id)
+        },
+        undo_before,
+        "-PAN records no undo step"
+    );
+    assert!(
+        recorded_pan_lines(&session) >= 1,
+        "-PAN echoes the canonical PAN selector"
+    );
+    // A malformed delta is refused by the PAN grammar through the same alias —
+    // not by the unsupported-command path.
+    let error = session.command("-PAN 1").unwrap_err();
+    assert!(error.contains("malformed PAN argument"), "{error}");
+}
+
+/// How many `PAN` lines the command log recorded.
+fn recorded_pan_lines(session: &CadSession) -> usize {
+    session
+        .snapshot(None, None, 0)
+        .command_log
+        .iter()
+        .filter(|entry| entry.command.as_deref() == Some("PAN"))
+        .count()
+}
+
+#[test]
 fn trace_needs_five_numbers_and_carries_its_width() {
     let Some(CommandPayload::Trace { start, end, width }) = parse_trace_argument("0 0 10 0 2.5")
     else {

@@ -725,6 +725,97 @@ fn hatch_set_boundary_refuses_open_missing_and_non_planar_inputs() {
 }
 
 #[test]
+fn hatch_set_boundary_accepts_a_full_ellipse_as_the_one_loop() {
+    // The boundary's input set is "one hatch + closed Polyline/Circle/full
+    // Ellipse". The rebuild test above pins the polyline+circle pair; a **full**
+    // ellipse must be sampled into one closed loop, and a partial one is the
+    // named `hatchsetboundary.open_ellipse` refusal with no transaction.
+    /// Replace the fixture drawing with the hatch plus one ellipse of `sweep`.
+    fn install_ellipse(app: &mut Application, sweep: f64) {
+        let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+        b.insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+        b.insert_entity(ent(GROUP_HATCH, hatch(10.0), 0)).unwrap();
+        b.insert_entity(ent(
+            960,
+            SemanticGeometry::Ellipse {
+                center: p3(0.0, 0.0, 0.0),
+                normal: p3(0.0, 0.0, 1.0),
+                major_axis: p3(4.0, 0.0, 0.0),
+                ratio: 0.5,
+                start: 0.0,
+                sweep,
+            },
+            1,
+        ))
+        .unwrap();
+        let drawing = b.finish().unwrap();
+        app.workspace
+            .documents
+            .get_mut(&DocumentId(1))
+            .unwrap()
+            .drawing = Arc::new(drawing);
+    }
+
+    let (mut app, mut session) = annot_app();
+    install_ellipse(&mut app, std::f64::consts::TAU);
+    select(&mut session, &[GROUP_HATCH, 960]);
+    let out = execute(
+        &mut app,
+        &mut session,
+        CommandId::HatchSetBoundary,
+        CommandPayload::None,
+    )
+    .expect("a full ellipse is a closed boundary");
+    assert_eq!(out.objects, vec![ObjectId(GROUP_HATCH)]);
+    assert_eq!(
+        hatch_loops(&app),
+        1,
+        "the ellipse replaces the old square loop"
+    );
+    let (point_count, bulges) = {
+        let entity = app.workspace.documents[&DocumentId(1)]
+            .drawing
+            .entity(EntityId(GROUP_HATCH))
+            .unwrap();
+        match &entity.geometry {
+            SemanticGeometry::Hatch(hatch) => {
+                let loop_ = &hatch.loops()[0];
+                (loop_.points.len(), loop_.bulges.clone())
+            }
+            other => panic!("expected a hatch, got {other:?}"),
+        }
+    };
+    assert_eq!(point_count, 64, "the ellipse is chord-sampled");
+    assert!(
+        bulges.iter().all(|bulge| *bulge == 0.0),
+        "a sampled ellipse carries no bulge arcs"
+    );
+    assert_eq!(undo_depth(&app), 1, "one transaction / one undo step");
+
+    // A partial ellipse is the named refusal and writes nothing.
+    let (mut app, mut session) = annot_app();
+    install_ellipse(&mut app, std::f64::consts::PI);
+    select(&mut session, &[GROUP_HATCH, 960]);
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::HatchSetBoundary,
+        CommandPayload::None,
+    )
+    .unwrap_err();
+    assert!(
+        format!("{error}").contains("hatchsetboundary.open_ellipse"),
+        "{error}"
+    );
+    assert_eq!(undo_depth(&app), 0, "the refusal opens no transaction");
+}
+
+#[test]
 fn hatch_set_origin_needs_a_pattern_fill_and_writes_nothing() {
     // `annot_app`'s hatch is a **solid** fill: there are no definition rows to
     // place, so the command is the per-target named refusal. The full

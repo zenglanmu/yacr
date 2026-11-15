@@ -346,6 +346,39 @@ fn option_payloads_reach_the_command_layer() {
 }
 
 #[test]
+fn dash_overkill_shares_the_option_grammar_and_the_command_layer() {
+    // `-OVERKILL` is a pure alias row, so the typed line must build the *same*
+    // settings, go through the *same* option-aware entry point and echo the
+    // canonical selector. A dropped/repointed alias row would fall through to
+    // "unsupported CAD command" and every assertion here would fail.
+    let session = fresh_session();
+    let alias = session.command("-OVERKILL TOLERANCE 1").unwrap_err();
+    assert!(
+        alias.contains("overkill.selection"),
+        "the alias reached the command layer, not the unsupported-command path: {alias}"
+    );
+    // The canonical spelling produces the identical outcome for the same options,
+    // which only holds while both spellings share the parser and the handler.
+    let canonical = session.command("OVERKILL TOLERANCE 1").unwrap_err();
+    assert_eq!(alias, canonical, "one implementation, one outcome");
+    assert_eq!(
+        recorded(&session),
+        vec!["OVERKILL".to_string(); 2],
+        "each line echoes the canonical selector once"
+    );
+
+    // A malformed option line is refused by the OVERKILL grammar reason (proving
+    // the shared parser ran) and records nothing.
+    let error = session.command("-OVERKILL TOLERANCE -1").unwrap_err();
+    assert!(error.contains("OVERKILL needs TOLERANCE"), "{error}");
+    assert_eq!(
+        recorded(&session),
+        vec!["OVERKILL".to_string(); 2],
+        "a malformed alias line is never recorded"
+    );
+}
+
+#[test]
 fn malformed_option_lines_are_refused_and_not_recorded() {
     let session = fresh_session();
     for (line, grammar) in [

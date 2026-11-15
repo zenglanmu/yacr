@@ -6,7 +6,7 @@
 //! (nothing written, no transaction) for an empty selection, an open boundary,
 //! a non-`+Z` plane, a non-coplanar selection, an ellipse arc and Viewer mode.
 
-use super::hatch::{circle, entity_count, hatch_app, square, the_hatch, undo_depth};
+use super::hatch::{circle, entity_count, hatch_app, set_number, square, the_hatch, undo_depth};
 use super::*;
 
 use cad_domain::{HatchFill, HatchGradient, HatchPatternType};
@@ -37,6 +37,61 @@ fn tilted_square(id: u128) -> (u128, SemanticGeometry) {
             width: 0.0,
         },
     )
+}
+
+#[test]
+fn gradient_fill_comes_from_the_session_gradient_channel() {
+    // The boundary's "forced gradient fill from the session kind/angle/two ACI
+    // stops" is a real channel, not a hard-coded default: configuring a spherical
+    // ramp at 45 degrees with the green -> white stops must be exactly what the
+    // one created hatch stores.
+    let (mut app, mut session) = hatch_app(vec![square(1, 0.0, 10.0, 0.0)]);
+    set_number(
+        &mut session,
+        ToolParameter::HatchGradientKind,
+        HATCH_GRADIENT_SPHERICAL,
+    );
+    set_number(&mut session, ToolParameter::HatchGradientAngle, 45.0);
+    set_number(&mut session, ToolParameter::HatchGradientColorA, 3.0);
+    set_number(&mut session, ToolParameter::HatchGradientColorB, 7.0);
+    select(&mut session, &[1]);
+
+    let out = gradient(&mut app, &mut session).expect("GRADIENT succeeds");
+    assert_eq!(out.objects.len(), 1, "one hatch entity");
+    let hatch = the_hatch(&app);
+    let HatchFill::Gradient(HatchGradient::TwoColor {
+        name,
+        angle_raw,
+        stops,
+        ..
+    }) = hatch.fill()
+    else {
+        panic!(
+            "GRADIENT must store a two-colour gradient, got {:?}",
+            hatch.fill()
+        );
+    };
+    assert_eq!(name, "SPHERICAL", "the session kind is written");
+    assert!(
+        (*angle_raw - 45.0f64.to_radians()).abs() < 1e-12,
+        "the session angle (degrees) is stored in radians: {angle_raw}"
+    );
+    assert_eq!(
+        stops,
+        &vec![
+            cad_domain::hatch::GradientStop {
+                value: 0.0,
+                rgb: [0, 255, 0],
+            },
+            cad_domain::hatch::GradientStop {
+                value: 1.0,
+                rgb: [255, 255, 255],
+            },
+        ],
+        "the two session ACI stops resolve to their palette colours"
+    );
+    assert_eq!(undo_depth(&app), 1, "one undo step");
+    assert_eq!(entity_count(&app), 2, "the boundary entity is retained");
 }
 
 #[test]

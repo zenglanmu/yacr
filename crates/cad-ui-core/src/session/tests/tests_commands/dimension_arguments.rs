@@ -520,6 +520,91 @@ fn typed_dimtedit_oblique_reaches_the_named_refusal_and_writes_nothing() {
     assert_eq!(revision, Revision(0), "the refusal wrote nothing");
 }
 
+/// The stored `text_height` of one dimension-style row, from the authoritative
+/// drawing (not from a session mirror).
+fn dim_style_text_height(session: &CadSession, name: &str) -> Option<f64> {
+    let drawing = session
+        .core
+        .controller
+        .borrow()
+        .drawing()
+        .expect("the document");
+    drawing
+        .dim_style_by_name(name)
+        .map(|style| style.text_height)
+}
+
+/// Every stored dimension-style name, in table order.
+fn dim_style_names(session: &CadSession) -> Vec<String> {
+    let drawing = session
+        .core
+        .controller
+        .borrow()
+        .drawing()
+        .expect("the document");
+    drawing
+        .dim_styles()
+        .map(|style| style.name.clone())
+        .collect()
+}
+
+#[test]
+fn dash_dimstyle_shares_every_option_with_the_canonical_selector() {
+    // `-DIMSTYLE` is a pure alias row (`COMMAND_ALIASES`), so the typed line must
+    // reach the *same* argument parser and the *same* command path for every
+    // option — not just for the two read-only reports. Each assertion below is an
+    // effect only the shared implementation can produce.
+    let session = dimension_session();
+    session
+        .command("-DIMSTYLE LIST")
+        .expect("-DIMSTYLE LIST keeps the read-only report");
+    session
+        .command("-DIMSTYLE CURRENT")
+        .expect("-DIMSTYLE CURRENT keeps the read-only report");
+    session
+        .command("-DIMSTYLE SET Standard")
+        .expect("-DIMSTYLE SET reports the current row");
+
+    // NEW copies a row (the fixture's `Standard` is a metric row: 2.5 text).
+    session
+        .command("-DIMSTYLE NEW DashCopy Standard")
+        .expect("-DIMSTYLE NEW creates a row");
+    assert_eq!(
+        dim_style_text_height(&session, "DashCopy"),
+        Some(2.5),
+        "the new row is a copy of the named base"
+    );
+
+    // MODIFY writes one stored variable on the (unreferenced) new row.
+    session
+        .command("-DIMSTYLE MODIFY DashCopy DIMTXT 3.5")
+        .expect("-DIMSTYLE MODIFY writes the field");
+    assert_eq!(dim_style_text_height(&session, "DashCopy"), Some(3.5));
+
+    session
+        .command("-DIMSTYLE RENAME DashCopy DashRenamed")
+        .expect("-DIMSTYLE RENAME moves the row");
+    assert_eq!(
+        dim_style_names(&session),
+        vec!["Standard".to_string(), "DashRenamed".to_string()]
+    );
+
+    session
+        .command("-DIMSTYLE DELETE DashRenamed")
+        .expect("-DIMSTYLE DELETE removes an unreferenced row");
+    assert_eq!(dim_style_names(&session), vec!["Standard".to_string()]);
+
+    // Every line echoed the canonical selector: the alias never became a second
+    // identity in the command log or in the table writes above.
+    let recorded: Vec<String> = session
+        .snapshot(None, None, 0)
+        .command_log
+        .iter()
+        .filter_map(|entry| entry.command.clone())
+        .collect();
+    assert_eq!(recorded, vec!["DIMSTYLE".to_string(); 7], "{recorded:?}");
+}
+
 #[test]
 fn typed_dimedit_rotates_and_homes_the_text_of_the_selection() {
     let session = dimension_session();

@@ -364,6 +364,60 @@ fn pagesetup_pagesetupin_and_mview_dispatch_their_real_writes() {
 }
 
 #[test]
+fn dash_psetupin_copies_the_same_stored_record_in_one_step() {
+    // `-PSETUPIN` is the command-line spelling of the same copy: the typed line
+    // must parse into the same `Layout(PageSetupIn)` payload and reach the same
+    // write path, so the target layout really stores a copy of the source row in
+    // exactly one revision.
+    let session = session_with_layouts(&[(2, "SheetOne", None), (3, "SheetTwo", None)]);
+    session
+        .command("-PAGESETUP SheetOne A3 420 297")
+        .expect("-PAGESETUP writes the source page setup");
+    let revision_before = session
+        .core
+        .controller
+        .borrow()
+        .drawing()
+        .expect("the document")
+        .revision();
+    session
+        .command("-PSETUPIN SheetOne SheetTwo")
+        .expect("-PSETUPIN copies the stored page setup");
+
+    let (paper, revision_after) = {
+        let controller = session.core.controller.borrow();
+        let drawing = controller.drawing().expect("the document");
+        (
+            drawing
+                .plot_settings(cad_domain::LayoutId(3))
+                .map(|record| record.paper_size_name.clone()),
+            drawing.revision(),
+        )
+    };
+    assert_eq!(
+        paper.as_deref(),
+        Some("A3"),
+        "the target layout stores the source paper size"
+    );
+    assert_eq!(
+        revision_after.0,
+        revision_before.0 + 1,
+        "one revision / one undo step for the copy"
+    );
+
+    let recorded: Vec<String> = session
+        .snapshot(None, None, 0)
+        .command_log
+        .iter()
+        .filter_map(|entry| entry.command.clone())
+        .collect();
+    assert!(
+        recorded.contains(&"-PSETUPIN".to_string()),
+        "the command-line spelling echoes its own selector: {recorded:?}"
+    );
+}
+
+#[test]
 fn bare_pagesetup_stays_a_report_while_bare_psetupin_and_mview_need_a_payload() {
     let session = session_with_layouts(&[(2, "SheetOne", None)]);
     session

@@ -505,6 +505,33 @@ fn selectcount_counts_by_the_template_signature_and_is_read_only() {
 }
 
 #[test]
+fn selectcount_is_model_space_only_and_refuses_paper_space_by_name() {
+    // The count is defined over model space; a paper layout is the stable named
+    // refusal `selectcount.model_space_only` (never a silently empty count), and
+    // the refusal writes nothing.
+    let (mut app, mut session) = filter_app();
+    session.selection.insert(model_ref(LINE_RED));
+    session.active_space = SpaceId::Paper(LayoutId(1));
+    let undo_before = undo_depth(&app);
+    let revision_before = revision(&app);
+    let selection_before = session.selection.clone();
+    let error = run(
+        &mut app,
+        &mut session,
+        CommandId::SelectCount,
+        CommandPayload::None,
+    )
+    .unwrap_err();
+    assert!(
+        matches!(error, CadError::Unsupported(ref message) if message.contains("selectcount.model_space_only")),
+        "{error:?}"
+    );
+    assert_eq!(session.selection, selection_before);
+    assert_eq!(revision(&app), revision_before);
+    assert_eq!(undo_depth(&app), undo_before);
+}
+
+#[test]
 fn ssx_and_selectcount_refuse_an_empty_selection() {
     let (mut app, mut session) = filter_app();
     let error = run(
