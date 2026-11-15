@@ -116,6 +116,64 @@
 > 新 → 旧。标题带日期与主题；每条末尾写证据边界（实跑 / NOT RUN / NOT VERIFIED）。
 > 再往前（`2026-11-12` 及更早）的条目见 `docs/handoff-archive/`。
 
+## 2026-11-15 晋升计划 P4/P5：`LAYDEL`/`LAYTHW`/`RENAME`/`LAYMRG`/`LAYOUTWIZARD` 升为完整实现（真机 GUI 证据）
+
+- **范围**：覆盖清单「部分实现 → 完整实现 晋升计划」的 7 个命令名晋升为**完整实现**
+  （总计 **107 → 115 完整 / 872 → 864 部分**，981 条总数不变）：
+  - `LAYDEL`/`-LAYDEL`：删除范围从「模型空间实体」扩到**模型空间 + 每个图纸布局 + 每个块定义内**的全部实体
+    （单一 `entities` 表按 `layer` 过滤），并剪除各图纸视口该层的 `layer_overrides` 键；选择输入也接受
+    **图纸空间顶层实体**（块内成员/子元素按 `laydel.block_space` 拒绝）；实体补丁 + 布局补丁 + 层行
+    一条事务/一步撤销，重做再次删除。`laydel.layer_in_use` 拒码删除；锁定层仍由 `layer.locked` 拒绝且不发布。
+  - `LAYTHW`：同时解开绘图级 `frozen` 与**每个图纸布局、每个视口**的冻结覆盖，保留显式 `false` 覆盖、
+    视口裁剪/矩阵与 `frozen_in_new_viewport`；层补丁 + 布局补丁一条事务/一步撤销。旧文档「本构建无视口模型」
+    是**陈旧借口**——先写测试再改实现时两个新测试确实失败。
+  - `LAYMRG`/`-LAYMRG`：合并时把源层从**每个图纸视口的 `layer_overrides`** 里剪除（此前留下指向已删层的死键、
+    `layout_patches` 硬编码为空），与实体重写、层行删除同一条记录/一步撤销；交互 Settings 属全局范围，
+    目标固定为当前层是声明的偏离。
+  - `LAYOUTWIZARD`：新增 `ARRANGE <Single|TwoVertical|TwoHorizontal|ThreeVertical|ThreeHorizontal|Four>`
+    等分格视口排列，铺在本次 Authored 纸张上（复用 `VPORTS` 的网格助手），布局行/视口/页面设置一条
+    `LayoutPatch`/一步撤销；未知排列/未知键/重复键/缺值具名拒绝且不写；打印设备/打印样式/标题栏逐条
+    `layoutwizard.*_not_implemented`（明说未应用）。
+  - `RENAME`/`-RENAME`：`LINETYPE` kind 不再是具名拒绝；改名与层属性/实体属性的线型引用级联在
+    `cad-db` 的**单次校验写入**内完成（一次 revision、一次 `ChangeSet`），撤销/重做对称。`Continuous`
+    不可改名，创建/删除线型仍不支持。
+- **真机 GUI 证据**（Linux Wayland `native-below`，Vulkan `Quadro P620`/驱动 580.178.04，Mailbox；
+  `scripts/collect-evidence.sh --backend wayland --lifecycle none`，Mutter ScreenCast 合成帧）：
+  - 新增通用证据钩子 `YACR_PROBE_CAD_SCRIPT`/`_FILE`/`_AT`（默认关，`[probe] cad script:` 行），
+    用真实 webview 的 `cad_command`/`cad_status`/`cad_layers` IPC 驱动命令，结果从宿主读回。
+  - `fixtures/dxf/qcad-flange/flange.dxf`（419 实体）：`PSPACE` + `QSELECT LAYER = border`（图纸空间 1 个）
+    → `LAYDEL` 成功，**419 → 337**（该层 82 个成员跨图纸/块空间删除）、层行消失 → `UNDO` **337 → 419**、
+    层与实体全部恢复、无错误（`/tmp/opencode/evidence-laydel-paper4/`）。
+  - 同图：`-LAYER FREEZE` 后 `LAYTHW` → 所有 `frozen` 转 false；`UNDO` 恢复（`/tmp/opencode/evidence-laythw/`）。
+  - 同图：`RENAME LINETYPE DASHDOT DASHDOT_RENAMED` → 使用该线型的 `center` 层读回 `DASHDOT_RENAMED`；
+    `UNDO` 恢复 `DASHDOT`（`/tmp/opencode/evidence-rename/`）。
+  - 同图：`QSELECT LAYER = hatch` + `LAYMRG` → `hatch` 并入当前层 `0`、层行消失、实体数不变（419）；
+    `UNDO` 恢复（`/tmp/opencode/evidence-laymrg/`）。
+  - 同图：`LAYOUTWIZARD SheetGui A5 148 210 ARRANGE Four` → 新增布局 `SheetGui`、`viewportCount=4`；
+    `UNDO` 移除；`ARRANGE ThreeRight` 按 `layoutwizard.unknown_arrangement` 拒绝且不建布局
+    （`/tmp/opencode/evidence-layoutwizard/`）。
+- **真机验证抓到两个契约测试没覆盖的真问题（已修）**：
+  1. `LAYDEL` 在图纸空间选择时被 `laydel.selection` 拒绝——选择预检写死模型空间。改为命令内自带的
+     「模型空间或任一图纸布局的顶层实体」规则（`layer_extended.rs` 本地 helper，不动共享
+     `layer_commands.rs` 的模型空间预检）。
+  2. `LAYDEL` 的撤销在真实图纸上失败：`Invariant("invalid entity geometry: line is zero length")`，
+     什么都没恢复。根因是**历史重放**会重新跑 `validate_geometry`，而导入器刻意宽松、能存下写入校验
+     拒绝的几何（该夹具的块/图纸里有零长度线）。`cad-db` 新增显式的**历史重放写模式**
+     （`EntityGeometryCheck::RestoreStored`，crate-private，只有 replay 入口能选）：重放按字节恢复
+     数据库自己曾持有的行，**仍**校验引用完整性（层/块/布局存在性、`SpaceId` 形状、INSERT 目标、
+     显示状态规则、块成员不变式、表批次规则、`layer.locked`），新写入路径的几何校验不变。ERASE 的同
+     类撤销也一并修复（`erase_undo_restores_an_imported_zero_length_line`）。
+- **测试**：`cargo test -p cad-app --locked laydel` **10 passed**、`laythw` **5 passed**、`laymrg` **6 passed**、
+  `layer_commands` **69 passed**、`rename` **15 passed**、`layout` **47 passed**、`layoutwizard` **7 passed**、
+  整个 `cad-app` **2661 passed / 3 ignored**、`history` 16 passed、`undo` 170 passed、`cad-ui-core
+  layout_arguments` 12 passed、`cad-db` 全量（245+13+5）passed、`cad-history` 28 passed；`cargo clippy -p cad-db -p cad-app --all-targets` 干净；
+  `cargo fmt` 干净；`check-file-size.py` / `check-i18n.py`（2913 键）/ `check-architecture.py` 通过。
+- **NOT RUN**：整仓 `cargo test --workspace`；全量门禁（`cargo fmt --all`、workspace clippy、
+  `check-tauri-capabilities.py`、`check-fixture-manifest.py`、`check-command-docs.py` 之外的 Python 门禁）；
+  Windows/macOS/Android/Web 运行时；真实鼠标（脚本是合成 DOM/IPC 输入）。GUI 截图来自
+  **同一 UID Mutter ScreenCast**、真实 GPU、真实 `--open` 路径，但只证明「命令在真机宿主上按预期提交并读回」，
+  不是像素/性能验收。
+
 ## 2026-11-15 3D orbit 灵敏度降到 0.0035 rad/px + `orbitSensitivityPercent` 设置
 
 - **问题**：3D 下鼠标拖拽与 Android 单指触控调整视角都过灵敏。原速率是宿主

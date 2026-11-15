@@ -485,7 +485,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | 命令 | 状态 | 结果 | 显式未实现 / 有意偏离 |
 |---|---|---|---|
 | `LAYCUR` / `LAYM C U R` | 部分实现 | LAYCUR 把每个选中模型空间实体移到会话当前层（一条事务/一步撤销）；LAYMCUR 以**第一个**选中实体的层为当前层（仅会话状态，复用既有的 locked/frozen/off 拒绝） | 无交互 Select objects；块实例成员/图纸空间/子图元按名拒绝；多选时 LAYMCUR 只用第一个（`laymcur.first_pick` 诊断） |
-| `LAYFRZ` / `LAYTHW` / `LAYLCK` / `LAYULK` | 部分实现 | 按选中实体所在层改 `LayerAttributes.frozen/locked`；LAYTHW 解冻所有冻结层。层表写**不可撤销**（每次改动一次 revision 提升，无 history patch） | 无 Settings/Viewports/Block Selection 选项；LAYFRZ 对所有视口生效且拒绝当前层；LAYTHW **不**解冻视口级冻结；无 per-layer 撤销 |
+| `LAYFRZ` / `LAYLCK` / `LAYULK` | 部分实现 | 按选中实体所在层写 `LayerAttributes.frozen/locked`；每个改动行一个 `LayerPatch`、单事务 ⇒ **一步撤销**（多行时每行一次 revision 提升） | 无 Settings/Viewports/Block Selection 选项；LAYFRZ 对所有视口生效且拒绝当前层 |
 | `SETBYLAYER` | 实现 | 恢复颜色/线型/线宽/**透明度**为随层；`Include blocks` 递归块成员的显示状态；一条事务/一步撤销 | 材质/命名打印样式未建模（全局范围）；锁定图层拒绝；无交互 ByBlock 询问（全局对话框范围） |
 | `REVERSE` | 部分实现 | 反转选中 LINE / LWPOLYLINE（含 bulge 与闭合映射）/ SPLINE（控制点+节点镜像）方向，一条事务/一步撤销 | 仅当前选择；无 helix/3D；其它种类按名拒绝 |
 | `OOPS` | 部分实现 | 恢复**最近一次 ERASE** 删除的实体（新 id；一条事务/一步撤销；第二次 OOPS 为空操作） | 只记录 ERASE，不覆盖 AutoCAD 的 BLOCK/WBLOCK 删除；撤销 OOPS 不恢复快照 |
@@ -533,8 +533,8 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 |---|---|---|---|
 | `-LAYER` | 实现（2026-11-11） | 裸命令/`?` 仍是只读图层表报告；写形式一行一个选项：`NEW\|N`、`MAKE\|M`、`SET\|S`、`RENAME\|R`、`DELETE\|D`、`ON`/`OFF`、`FREEZE\|F`/`THAW\|T`、`LOCK\|LO`/`UNLOCK\|U`、`COLOR\|C`（ACI 数字/七个标准色名/`aci:N`/`#RRGGBB`/`rgb:…`）、`LTYPE\|L`、`LWEIGHT\|LW`、`PLOT\|P`；名单逗号分隔，含空格的值/名称可加双引号；整行原子、一条事务/一步撤销（多行 patch 同一 `DrawingUndoRecord`）；写形式经 Work-only `SetLayerProperty` 载体，Viewer 拒绝，裸报告 Viewer-legal | 逐选项交互重提示属全局范围；多行 patch 仍按 `cad-db` 的 setter 规则每改一行升一次 revision；当前层选择/删除回落是会话状态，不进入层表撤销步；`?` 支持 `*`/`?` 通配符过滤，无匹配报 `layer.no_match` |
 | `LAYMCH` / `-LAYMCH` | 部分实现 | 选择式：第一个选中对象的图层为目标，其余对象移入该层（一条事务/一步撤销）；目标层锁定由 `cad-db` 拒绝 | 无 AutoCAD 的交互 `Select objects`；空选择、<2 个对象、非模型空间/块实例/子图元、任何 payload 按名拒绝 |
-| `LAYMRG` / `-LAYMRG` | 部分实现 | 选择式：把选中对象所在层上的所有实体（模型/图纸/块内）重写到当前层（一条事务/一步撤销），再删除每个源层行 | **声明式偏离**：源层来自选择、目标是当前层，无交互 source/target 提示；当前层与 `0` 层不能作源；层行删除不可撤销（撤销只恢复实体） |
-| `LAYDEL` / `-LAYDEL` | 部分实现 | 选择式：删除选中对象所在层的**模型空间**实体（一条事务/一步撤销），再删除层行 | 图纸空间/块内实体不删除，因此仍有成员的层按 `laydel.layer_in_use` 拒绝；当前层/`0` 层拒绝；层行删除不可撤销 |
+| `LAYMRG` / `-LAYMRG` | 完整实现 | 选择式：把选中对象所在层上的所有实体（模型/图纸/块内）重写到当前层，删除源层行并剪除各图纸视口该层 `layer_overrides` 键；实体/布局/层行一条事务/一步撤销（重做再次合并） | 声明的偏离：目标固定为当前层、无交互 source/target 提示，目标可以是 `0` 层；当前层与 `0` 层不能作源；会话 `LAYERSTATE` 不重写 |
+| `LAYDEL` / `-LAYDEL` | 完整实现 | 选择式（模型空间或任一图纸布局的顶层实体；块内成员/子元素拒绝）：删除选中对象所在层在模型空间、每个图纸布局与每个块定义内的**全部**实体，剪除各图纸视口的该层 `layer_overrides` 键，再删除层行；实体/布局/层行一条事务/一步撤销 | 当前层/`0` 层拒绝；锁定层的实体删除由数据库以 `layer.locked` 拒绝且不发布（不是静默成功） |
 | `LAYERSTATE` | 部分实现 | `LAYERSTATE SAVE/RESTORE/LIST/DELETE <name>`；会话内最多 32 个命名快照（逐层属性 + 当前层 + 覆盖），恢复通过 `set_layer_attributes` | 无 DWG 持久化、无 `.las` 文件、无图层状态管理器对话框；恢复是多行 revision 提升且**不可撤销**；未知/悬挂层与保存时隐藏的当前层拒绝 |
 | `LAYERPMODE` | 部分实现 | `LAYERPMODE ON\|OFF`；会话标志，`OFF` 时覆盖变更不推 `LAYERP` 快照；裸命令报告当前值 | 无 `LAYERPMODE` 持久化；不改变已应用的覆盖 |
 | `LTSCALE` | 部分实现 | 一个正有限小数；写内存 `$LTSCALE`（一次 revision、无撤销/历史） | 当前导出器不写 `$LTSCALE`，SAVE→OPEN 不往返；无 `CELTSCALE`/`PSLTSCALE`/`MSLTSCALE` 联动 |
@@ -564,7 +564,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | 命令 | 状态 | 结果 | 显式未实现 / 有意偏离 |
 |---|---|---|---|
 | `PURGE` / `-PURGE` | 部分实现 | 清理未使用的**图层**（复用 `DELETELAYER` 的引用拒绝），逐行报告删除/拒绝；层表写不可撤销 | `BLOCK`/`STYLE`/`LINETYPE` 没有删除 API，显式 kind 按名拒绝；裸 `PURGE` 只清图层并报告 `purge.kind_unsupported`；无对话框/嵌套清理选项 |
-| `RENAME` / `-RENAME` | 部分实现 | `RENAME <kind> <old> <new>`；LAYER 走既有 `RENAMELAYER`（同一未知/重复/非法名拒绝） | 其它 kind 按名 `rename.<kind>.unsupported`；无对话框；层表写不可撤销 |
+| `RENAME` / `-RENAME` | 完整实现 | `RENAME <kind> <old> <new>`：`LAYER`/`STYLE`/`DIMSTYLE`/`MLEADERSTYLE`/`BLOCK`/`LINETYPE` 真实写，一条表补丁/一步撤销；`LINETYPE` 改名在 `cad-db` 单次校验写入内把层属性与实体属性的引用一并级联（一次 revision、一次 `ChangeSet`），撤销/重做对称 | 创建/删除线型仍不支持（`linetype.delete_unsupported`）；`Continuous` 不可改名；无对话框 |
 | `SETVAR` | 部分实现 | `SETVAR <name>` 报告；`SETVAR <name> <value>` 写闭集 `PDMODE/PDSIZE/SNAPUNIT/LTSCALE/GRID/SNAP/ORTHO/TEXTSIZE`，全部复用既有命令/会话写路径 | 未知变量、越界值按名拒绝；不新增系统变量存储；不写 DWG 头的新变量 |
 | `TIME` | 部分实现 | 只读报告：文档 revision/实体数 + UTC 时钟 | 创建/编辑时间、会话 uptime、本地时区格式显式 NOT TRACKED；不发明日期 |
 | `DBLIST` | 部分实现 | 只读列出所有顶层模型/图纸实体（id/type/layer/space/draw order） | 块定义成员只计数并跳过；无分页/过滤对话框 |
@@ -620,7 +620,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 |---|---|---|---|
 | `LAYOUT` | 部分实现 | `LAYOUT LIST` 读布局表；`LAYOUT SET <name>` 切换活动空间（会话状态）；无数据库写/撤销 | `NEW`/`RENAME`/`DELETE` 校验名称/重复/末页后按 `layout.write_unsupported` 拒绝（无布局写 API）；无对话框/缩略图 |
 | `LAYOUTMERGE` | 部分实现 | 校验 source/target（缺失/同名）后按 `layoutmerge.write_unsupported` 拒绝 | 无布局/实体移动或布局删除 API；不移动任何实体 |
-| `LAYOUTWIZARD` | 部分实现 | 校验名称/可选纸张参数后按 `layoutwizard.write_unsupported` 拒绝 | 无布局/页面设置写 API；纸张尺寸不应用 |
+| `LAYOUTWIZARD` | 完整实现 | 创建布局 + Authored 纸张 + `ARRANGE <排列>` 等分格视口，布局行/视口/页面设置一条 `LayoutPatch`/一步撤销；未知排列/未知键/重复键/缺值具名拒绝且不写 | 打印设备/打印样式表/标题栏按请求逐条 `layoutwizard.*_not_implemented`（全局范围）；交互式向导提示未实现；仅等分格排列，无浮动视口与视口选择 |
 | `VPORTS` / `-VPORTS` | 部分实现 | 校验 `rows`/`cols` 正整数与图纸空间后按 `vports.write_unsupported` 拒绝 | 无 `PaperViewport` 创建 API；`-VPORTS` 是同一实现 |
 | `VPMAX` | 部分实现 | 会话标记活动图纸布局的第一个视口（无每视口选择模型）；不写库 | 不改变视口几何；真实最大化显示由宿主消费（未验证） |
 | `VPMIN` | 部分实现 | 恢复会话标记；空状态为 `vpmin.nothing_to_restore` | 同上；不写库 |
@@ -1774,12 +1774,12 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 
 | 命令 | 当前行为 | 剩余边界 |
 | --- | --- | --- |
-| `LAYDEL` / `-LAYDEL` | 删除模型空间实体 + 层行，实体与层行同一记录/一步撤销 | 当前层/0 层/图纸空间或块内实体仍拒绝 |
-| `LAYMRG` / `-LAYMRG` | 重写实体 + 删除源层，实体与层行同一记录/一步撤销 | 当前层/0 层不能作源；无交互 Settings |
+| `LAYDEL` / `-LAYDEL` | 删除全部空间（模型/图纸布局/块定义）的该层实体 + 各图纸视口该层覆盖键 + 层行，实体/布局/层行同一记录/一步撤销 | 当前层/`0` 层拒绝；锁定层由数据库拒绝 |
+| `LAYMRG` / `-LAYMRG` | 重写实体 + 删除源层 + 剪除视口覆盖键，同一记录/一步撤销 | 当前层/0 层不能作源；目标固定为当前层（声明的偏离） |
 | `LAYFRZ` | 冻结选中对象所在层，一步撤销 | 无 Settings/Viewports/Block 选项；当前层拒绝 |
 | `LAYLCK` / `LAYULK` | 锁定/解锁选中对象所在层，一步撤销 | 预选择输入；无 Settings |
-| `LAYTHW` | 解冻全部冻结层，一步撤销 | 无视口级冻结 |
-| `RENAME` / `-RENAME` | 图层重命名一步撤销 | 仅 LAYER 有重命名 API |
+| `LAYTHW` | 解冻全部层：绘图级标志 + 每个图纸布局/视口的冻结覆盖，层补丁 + 布局补丁一步撤销 | 保留 `frozen_in_new_viewport` 与显式 `false` 覆盖（不是冻结） |
+| `RENAME` / `-RENAME` | 六种 kind 真实重命名（含 `LINETYPE` 与引用级联），一步撤销 | 无对话框；创建/删除线型仍不支持 |
 | `LAYERSTATE RESTORE` | 恢复的图层属性写入一步撤销 | 状态仍为会话内、不持久化 DWG |
 | `PURGE` | **有意不记历史**（复用无历史删除体） | 只清未使用图层 |
 
@@ -1791,7 +1791,7 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | --- | --- | --- |
 | `LAYOUT` `NEW`/`RENAME`/`DELETE` | 真实创建/重命名/删除布局；删除级联 `plot_settings`，删除活动布局时回退到首个剩余布局或模型空间；一步撤销 | `COPY`/`TEMPLATE` 未实现 |
 | `LAYOUTMERGE` | 源布局的图纸空间实体移入目标，删除源布局并级联 plot settings；一步撤销；**升为完整实现** | 同一布局拒绝 |
-| `LAYOUTWIZARD` | 真实创建布局并应用 Authored 纸张设置，一步撤销 | 无视口向导/打印设备 |
+| `LAYOUTWIZARD` | 真实创建布局 + 纸张设置 + 等分格视口排列，一步撤销 | 打印设备/打印样式/标题栏（全局范围）；仅等分格 |
 | `VPORTS` / `-VPORTS` | 活动布局创建简单 rows×cols 网格（四角 clip、`model_per_paper=1`），一步撤销 | 命名/标准视口配置未实现 |
 | `VPCLIP RECT` | 对活动布局第一个视口应用矩形裁剪，一步撤销 | 无视口选择；多边形裁剪未实现 |
 | `VPSCALE` | 设置活动布局第一个视口比例（对角线 `1/factor`，保留模型锚点），一步撤销 | 无视口选择 |

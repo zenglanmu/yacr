@@ -26,8 +26,8 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **107** |
-| 部分实现（有写明的界） | **872** |
+| 完整实现 | **115** |
+| 部分实现（有写明的界） | **864** |
 | **已实现合计（完整 + 部分）** | **979** |
 | 未实现 | **2** |
 
@@ -117,12 +117,14 @@
 >
 > **官方 981 条已无「未实现」的可用命令名**：仅 `MEASURE` 与 `TRACE` 两条按**同名不同义**不计入
 > （本仓库同名命令分别表示测量入口与旧式宽线带），它们的官方语义在本构建仍无对应实现。计入
-> **979 已实现（107 完整 + 872 部分）/ 2 未实现（同名不同义）**；证据仅 Linux 编译 + Rust 契约测试，
+> **979 已实现（115 完整 + 864 部分）/ 2 未实现（同名不同义）**；证据仅 Linux 编译 + Rust 契约测试，
 > GUI/GPU/像素/真机 NOT VERIFIED。
 
 > **2026-11-12 增补（Wave 29，真实 2D 升级，无新命令名）**：`TRIM` 新增 **LWPOLYLINE 目标**（开放/闭合；bulge 还原为精确 ARC 后求交，保留拾取投影所在窗口，子弧 bulge 精确保留；一条事务/一步撤销；EXTEND 的 POLYLINE 目标仍按名拒绝）。该升级不改变 981 条状态总计，仍计入 **979 已实现（107 完整 + 872 部分）/ 2 未实现（同名不同义）**；证据仅 Linux 契约测试，GUI/GPU/像素 NOT VERIFIED。
 
 > **2026-11-12 增补（Wave 29b）**：`HATCHEDIT` 新增 **`PATTERN <内置图案名>`**（按名称从现有 `.pat` 库取图案，保留 hatch 的角度/比例/double；未知名 `hatchedit.unknown_pattern`、缺名 `hatchedit.needs_pattern_name`、实心/渐变 `hatchedit.pattern_requires_pattern` 均具名拒绝；一条事务/一步撤销）。任意用户 `.pat` 图案文件仍需宿主文件 I/O，未接入。不影响 981 条状态总计。
+
+> **2026-11-15 增补（Wave 30，晋升计划 P4/P5）**：`LAYDEL`/`-LAYDEL`、`LAYTHW`、`RENAME`/`-RENAME`、`LAYMRG`/`-LAYMRG`、`LAYOUTWIZARD` 由**部分实现**晋升为**完整实现**。`LAYDEL`/`-LAYDEL`——删除范围从「模型空间实体」扩到**模型空间 + 每个图纸布局 + 每个块定义内的全部实体**（`cad-db` 用单一 `entities` 表按 `layer` 过滤；块成员删除复用 ERASE 的 `delete_entity` + 显示状态路径，撤销时成员关系一并还原），并剪除各图纸视口该层的 `layer_overrides` 键（原先会留下悬空键）；实体补丁、布局补丁与层行仍是**一条事务/一步撤销**，重做再次删除。`laydel.layer_in_use` 拒码已删除；选择输入可以是**模型空间或任一图纸布局**的顶层实体（块内成员/子元素按 `laydel.block_space` 拒绝）——后一条缺口是**真机 GUI 验证**抓到的：图纸空间选择当时被 `laydel.selection` 拒绝，而契约测试没覆盖；当前层/`0` 层仍拒绝，锁定层的实体删除由数据库以 `layer.locked` 拒绝且**不发布**（不是静默成功）。会话层状态（`LAYERSTATE SAVE`）是会话数据，不在删除范围内，恢复悬空层仍按 `layerstate.dangling_layer` 拒绝。`LAYTHW` 同时解开绘图级 `frozen` 与**每个图纸布局、每个视口**的冻结覆盖（`PaperViewport::layer_overrides` 中值为 `true` 的项；显式 `false` 覆盖、视口裁剪/矩阵与 `frozen_in_new_viewport` 保留），层补丁 + 布局补丁一条事务/一步撤销。旧文档「本构建无视口模型」是**陈旧的借口**：先写测试再改代码时，两个新测试在旧实现下确实失败。`RENAME`/`-RENAME` 的 `LINETYPE` kind 不再是具名拒绝：改名与层/实体线型引用的级联在同一次 `cad-db` 校验写入里完成（一次 revision、一次 `ChangeSet`），撤销/重做对称；`Continuous` 不可改名，创建/删除线型仍不支持。`LAYMRG`/`-LAYMRG` 补上**各图纸视口 `layer_overrides` 的源层键剪除**（此前留下指向已删层的死键、`layout_patches` 硬编码为空），与实体/层行同一条记录。`LAYOUTWIZARD` 新增 `ARRANGE` 等分格视口排列（铺在本次 Authored 纸张上，复用 `VPORTS` 网格助手），打印设备/打印样式/标题栏逐条明说未实现。计入 **979 已实现（115 完整 + 864 部分）/ 2 未实现（同名不同义）**。证据：`cargo test -p cad-app --locked laydel` **10 passed**、`laythw` **5 passed**、`laymrg` **6 passed**、`layer_commands` **69 passed**、`rename` **15 passed**、`layer_undo` 1 passed、`cargo clippy -p cad-app --all-targets` 干净、`scripts/check-file-size.py` 通过；**真机 GUI 运行与截图见本轮交接**（`native-below` / Vulkan `Quadro P620`），Windows/macOS/Android/Web 本轮 NOT VERIFIED。
 
 ### 纪律
 
@@ -214,7 +216,8 @@
   `SSX`（实体标志位/厚度/挤出）、`DIMTEDIT`（字形级对齐）、`REVCLOUD`（`Calligraphy`）、
   `TEXTMASK`（`3dface`/`Solid`）、`TXT2MTXT`（强制行距）。
 - P4 **基础完成**（2026-11-10）：`cad-history` 的 `LayerPatch` + 应用器已落地；`LAYDEL`/`-LAYDEL`、`LAYMRG`/`-LAYMRG`、`LAYFRZ`、`LAYLCK`、`LAYULK`、`LAYTHW`、`RENAME`/`-RENAME`、`LAYERSTATE RESTORE` 的图层表写入均纳入 `DrawingUndoRecord`（一条事务/一步撤销）。仍保留图纸空间/块内实体与 Settings 选项边界，故仍为**部分实现**，没有把边界算作完成。
-- P5 **部分完成**（2026-11-10）：`cad-db` 布局/视口写 API + `LayoutPatch` 已落地；`LAYOUT` 的 `NEW/RENAME/DELETE`、`LAYOUTMERGE`（升为**已实现**）、`LAYOUTWIZARD` 的布局创建、`VPORTS`/`-VPORTS`、`VPCLIP RECT`、`VPSCALE`、`PAGESETUP`/`-PAGESETUP`、`PSETUPIN`/`-PSETUPIN`、`MVIEW`、`LAYOUTWIZARD` 纸张已真实写入并一条事务/一步撤销。仍保留 `MVSETUP`、跨文件页面设置、视口选择与多边形裁剪边界；`VPMAX`/`VPMIN` 仍是会话标记。每批落地后更新本表、总计与 `docs/compatibility.md`，并单独提交。
+- P4 **部分推进**（2026-11-15）：`LAYDEL`/`-LAYDEL` 补齐**图纸布局与块定义内实体**（`cad-db` 单一 `entities` 表按 `layer` 过滤）并剪除各图纸视口的该层 `layer_overrides` 键，实体补丁 + 布局补丁 + 层行一条事务/一步撤销 ⇒ 两条晋升为**完整实现**；`laydel.layer_in_use` 拒码随之删除。同一轮 `LAYTHW` 补齐**每个图纸布局/视口的冻结覆盖**（`layer_overrides` 中 `true` 项清除；显式 `false` 覆盖、视口裁剪/矩阵与 `frozen_in_new_viewport` 保留），层补丁 + 布局补丁一条事务/一步撤销 ⇒ 也晋升为**完整实现**（旧文档「本构建无视口模型」的借口经测试证伪：旧实现下 2 个新测试确实失败）。同一轮 `RENAME`/`-RENAME` 补齐 **`LINETYPE` kind**：改名在 `cad-db` 的单次校验写入内把层属性/实体属性的引用一并级联（一次 revision、一次 `ChangeSet`），撤销/重做对称 ⇒ 两条晋升为**完整实现**；`Continuous` 不可改名、创建/删除线型仍不支持。同一轮 `LAYMRG`/`-LAYMRG` 补上**各图纸视口 `layer_overrides` 的源层键剪除**（此前会留下指向已删层的死键，且 `layout_patches` 硬编码为空），与实体/层行同一条记录 ⇒ 两条晋升为**完整实现**（交互 Settings 属全局范围；目标固定为当前层是声明的偏离）。仍保留 `LAYFRZ`/`LAYLCK`/`LAYULK` 的界（视口级冻结标记 + 嵌套/xref 拾取），故 P4 未整体完成。
+- P5 **部分完成**（2026-11-10）：`cad-db` 布局/视口写 API + `LayoutPatch` 已落地；`LAYOUT` 的 `NEW/RENAME/DELETE`、`LAYOUTMERGE`（升为**已实现**）、`LAYOUTWIZARD` 的布局创建、`VPORTS`/`-VPORTS`、`VPCLIP RECT`、`VPSCALE`、`PAGESETUP`/`-PAGESETUP`、`PSETUPIN`/`-PSETUPIN`、`MVIEW`、`LAYOUTWIZARD` 纸张已真实写入并一条事务/一步撤销。`LAYOUTWIZARD` 2026-11-15 补齐**等分格视口排列**（`ARRANGE`，复用 `VPORTS` 的网格助手并铺在本次 Authored 纸张上）⇒ 晋升为**完整实现**（打印设备/打印样式/标题栏与交互提示属全局范围，逐条具名报告）。仍保留 `MVSETUP`、跨文件页面设置、视口选择与多边形裁剪边界；`VPMAX`/`VPMIN` 仍是会话标记。每批落地后更新本表、总计与 `docs/compatibility.md`，并单独提交。
 
 ## 已实现 / 部分实现命令索引（按字母序）
 
@@ -264,10 +267,10 @@
 | `-INSERT` | 已实现 | `INSERT` 的命令行拼写；同一实现/写入路径。 |
 | `-INSERTCONTENT` | 部分实现 | 具名拒绝（`-insertcontent.unsupported: this build has no content-palette insertion model`）。 |
 | `-INTERFERE` | 部分实现 | 具名拒绝（`-interfere.unsupported: 3D solids are not modeled, so interference has nothing to compute`）。 |
-| `-LAYDEL` | 部分实现 | `LAYDEL` 的别名，同一实现；实体与层行同一事务/一步撤销。 |
+| `-LAYDEL` | 完整实现 | `LAYDEL` 的命令行拼写，同一实现：全部空间实体 + 各图纸视口 `layer_overrides` 剪除 + 层行，一条事务/一步撤销。 |
 | `-LAYER` | 已实现 | 裸命令/`? [pattern]` 为只读图层表报告（名称/可见/off/frozen/locked/当前层，`layer.entry`；`*`/`?` 通配符过滤，无匹配报 `layer.no_match`）；写形式一行一个选项（大小写不敏感）：`NEW/N`、`MAKE/M`、`SET/S`、`RENAME/R`、`DELETE/D`、`ON`/`OFF`、`FREEZE/F`/`THAW/T`、`LOCK/LO`/`UNLOCK/U`、`COLOR/C`（ACI 数字/七个标准色名/`aci:N`/`#RRGGBB`/`rgb:…`）、`LTYPE/L`、`LWEIGHT/LW`、`PLOT/P Y/N`；名单逗号分隔，含空格的值/名称可用双引号；整行原子（先解析全部名称与值再发布候选库），一条事务/一步撤销（多行 patch 同一 `DrawingUndoRecord`），无变化为 `layer.unchanged` 且不升修订；`MAKE`/`SET` 复用当前层规则（locked/frozen/off 先拒绝），`OFF`/`FREEZE` 对当前层按 `layer.current_*` 拒绝；写形式经 Work-only `SetLayerProperty` 载体，Viewer 拒绝。逐选项交互重提示属全局范围。 |
 | `-LAYMCH` | 部分实现 | `LAYMCH` 的别名，同一实现 |
-| `-LAYMRG` | 部分实现 | `LAYMRG` 的别名，同一实现；实体与层行同一事务/一步撤销。 |
+| `-LAYMRG` | 完整实现 | `LAYMRG` 的命令行拼写，同一实现：实体重写 + 源层行删除 + 各图纸视口该层覆盖键剪除，一条事务/一步撤销。 |
 | `-LINETYPE` | 部分实现 | `LINETYPE` 的别名（同一 `CommandId`/路径）；`LIST` 只读、`SET` 复用 `SETENTITYPROPERTY` |
 | `-LWEIGHT` | 部分实现 | 同一线宽显示报告的命令行拼写。 |
 | `-MARKUPASSIST` | 部分实现 | 具名拒绝（`-markupassist.unsupported: this build has no collaboration markup/trace model`）。 |
@@ -292,7 +295,7 @@
 | `-PUBLISH` | 部分实现 | 具名拒绝（`-publish.unsupported`）：本构建无批量发布模型；命令行拼写。 |
 | `-PURGE` | 部分实现 | `PURGE` 的别名，同一实现 |
 |  `-REFEDIT` | 部分实现 | 真实：`REFEDIT`/`-REFEDIT` 仅接受一个相似变换模型空间 INSERT，把可见块成员按 INSERT 变换克隆到模型空间（一条事务），源 INSERT 走会话隐藏；`REFSET ADD|REMOVE` 只改会话工作集；`REFCLOSE SAVE` 逆变换写回块定义（成员更新/新增/删除与克隆删除，一条事务/一步撤销），`DISCARD` 删除克隆、块定义不变。仅提取可见成员；无参照淡显/锁定（其他宿主对象仍可选，REFSET 是显式选择）；成员图层/绘图次序不回写；QSAVE 应用层拒绝（`refedit.save_blocked`）。 |
-| `-RENAME` | 部分实现 | `RENAME` 的别名，同一实现；图层重命名一条事务/一步撤销。 |
+| `-RENAME` | 完整实现 | `RENAME` 的命令行拼写，同一实现：六种 kind 真实重命名，含 `LINETYPE` 与其引用级联，一条表补丁/一步撤销。 |
 | `-RENDER` | 部分实现 | 具名拒绝（`-render.unsupported: no render engine; only the 2D viewport renderer exists`）。 |
 | `-SCALELISTEDIT` | 部分实现 | 只读报告真实 `ACAD_SCALELIST`（`scalelistedit.entry`）；创建/编辑/删除/排序比例未实现（`scalelistedit.write_unsupported`）。 |
 | `-SHADEMODE` | 部分实现 | 具名拒绝（`-shademode.unsupported: no 3D shaded display mode; VSCURRENT owns the 2D display token`）。 |
@@ -728,7 +731,7 @@
 | `JULIAN` | 部分实现 | 只读：当前 UTC 时刻的儒略日（整数日 + 小数）；不解析日期参数。 |
 | `JUSTIFYTEXT` | 部分实现 | `JUSTIFYTEXT <H> <V>`（H∈LEFT/CENTER/RIGHT，V∈BASELINE/BOTTOM/MIDDLE/TOP）；只改 `h_align`/`v_align`，位置不动；非文字目标逐条 `justifytext.not_text` 跳过；空选择拒绝；`TJUST` 为同一实现 |
 | `LAYCUR` | 部分实现 | 预选择输入（不弹 Select objects）；把选中对象移到当前层；当前层缺失/目标层锁定显式拒绝；实体写入可撤销 |
-| `LAYDEL` | 部分实现 | 选择式：删除选中对象所在层的模型空间实体 + 层行，同一事务/一步撤销；当前层/0 层/仍有图纸或块内实体的层拒绝（图纸/块内实体仍未纳入） |
+| `LAYDEL` | 完整实现 | 选择式（选中对象可是**模型空间或任一图纸布局**的顶层实体；块内成员/子元素按 `laydel.block_space` 拒绝）：删除选中对象所在层在**模型空间、每个图纸布局、每个块定义内**的全部实体（`cad-db` 单一 `entities` 表按 `layer` 过滤；块成员走 ERASE 同一删除路径，成员关系由显示状态还原），并剪除各图纸视口的该层 `layer_overrides` 键；当前层/`0` 层拒绝，锁定层的实体删除由数据库以 `layer.locked` 拒绝且不发布；实体补丁、布局补丁与层行一条事务/一步撤销，重做再次删除。会话层状态（`LAYERSTATE SAVE`）不重写，恢复悬空层仍按 `layerstate.dangling_layer` 拒绝。 |
 | `LAYER` | 已实现 | chrome 本地选择子：打开图层面板 |
 | `LAYERCLOSE` | 已实现 | chrome 本地选择子：关闭图层面板（面板关闭按钮走同一命令） |
 | `LAYERP` | 部分实现 | 会话内有界 16 步；不持久化 |
@@ -741,13 +744,13 @@
 | `LAYLCK` | 部分实现 | 预选择输入（不弹 Select objects）；锁定选中对象所在的不同图层（含当前层）；图层表写入一条事务/一步撤销 |
 | `LAYMCH` | 部分实现 | 选择式：第一个选中对象的图层为目标，其余移入（一条事务/一步撤销）；空选择/<2 目标/非模型空间/块实例按名拒绝；无交互 Select objects |
 | `LAYMCUR` | 部分实现 | 预选择输入（不弹 Select objects）；取第一个选中对象的图层并用既有的锁定/冻结/关闭当前层拒绝；仅会话状态 |
-| `LAYMRG` | 部分实现 | 选择式：选中对象的层合并到当前层（重写实体 + 删除源层），同一事务/一步撤销；当前层/0 层不能作源；无交互 Settings |
+| `LAYMRG` | 完整实现 | 选择式：选中对象的层合并到当前层（重写模型/图纸/块内实体 + 删除源层行 + 剪除各图纸视口该层 `layer_overrides` 键），实体补丁 + 布局补丁 + 层行一条事务/一步撤销，重做再次合并；当前层/`0` 层不能作源（与 AutoCAD 一致），**声明的偏离**：目标固定为当前层、无交互 source/target 提示，目标可以是 `0` 层（AutoCAD 是否拒绝未查证）；会话 `LAYERSTATE` 不重写，恢复悬空层仍按 `layerstate.dangling_layer` 拒绝 |
 | `LAYOFF` | 已实现 | — |
 | `LAYON` | 已实现 | — |
 | `LAYOUT` | 部分实现 | `LIST`/`SET` 真实；`NEW/RENAME/DELETE` 真实写布局表（名称校验、重复名拒绝、删除级联 plot settings），一条事务/一步撤销；`COPY`/`TEMPLATE` 未实现 |
 | `LAYOUTMERGE` | 已实现 | 把源布局的图纸空间实体移入目标并删除源布局（plot settings 级联），同一事务/一步撤销；同一布局拒绝 |
-| `LAYOUTWIZARD` | 部分实现 | 真实创建布局并应用 Authored 纸张设置（一条事务/一步撤销）；无视口向导/打印设备 |
-| `LAYTHW` | 部分实现 | 无选择输入（载荷即拒绝）；解冻全部冻结图层；不处理视口级冻结（本构建无视口模型）；图层表写入一条事务/一步撤销 |
+| `LAYOUTWIZARD` | 完整实现 | `LAYOUTWIZARD <name> [<paper> <width> <height>] [ARRANGE <Single|TwoVertical|TwoHorizontal|ThreeVertical|ThreeHorizontal|Four>] [PLOTDEVICE|PLOTSTYLE|TITLEBLOCK <name>]`：创建布局 + 应用 Authored 纸张 + 按该纸张生成等分格视口（复用 `VPORTS` 的 `grid_viewports_on_sheet`），布局行/视口/页面设置同一条 `LayoutPatch`/一步撤销；未知排列/未知键/重复键/缺值逐条具名拒绝且不写；打印设备、打印样式表与标题栏按请求逐条 `layoutwizard.*_not_implemented`（明说未应用），交互式向导提示属全局范围 |
+| `LAYTHW` | 完整实现 | 无选择输入（载荷即拒绝）；解冻全部图层——绘图级 `frozen` 标志与**每个图纸布局、每个视口**的冻结覆盖（`PaperViewport.layer_overrides` 中值为 `true` 的项；显式 `false` 覆盖、视口裁剪/矩阵与 `frozen_in_new_viewport` 保留）一次清除；层补丁 + 布局补丁同一事务/一步撤销，重做再次清除 |
 | `LAYTRANS` | 部分实现 | 具名拒绝（`laytrans.unsupported`）：图层转换标准未实现。 |
 | `LAYULK` | 部分实现 | 预选择输入（不弹 Select objects）；解锁选中对象所在的不同图层；图层表写入一条事务/一步撤销 |
 | `LAYUNISO` | 已实现 | — |
@@ -957,7 +960,7 @@
 | `REGENAUTO` | 部分实现 | 会话令牌 `regenauto`；本构建无自动重生成开关，需显式 REGEN。 |
 | `REGION` | 部分实现 | 具名拒绝（`region.unsupported`）：无面域几何模型。 |
 | `REINIT` | 部分实现 | 具名拒绝（`reinit.unsupported`）：本构建无设备/数字化仪初始化模型。 |
-| `RENAME` | 部分实现 | `RENAME <kind> <old> <new>`：`LAYER`/`STYLE`/`DIMSTYLE`/`MLEADERSTYLE`/`BLOCK` 真实写；一条表 patch/一步撤销；`LINETYPE` 仍无 rename API（具名拒绝） |
+| `RENAME` | 完整实现 | `RENAME <kind> <old> <new>`：`LAYER`/`STYLE`/`DIMSTYLE`/`MLEADERSTYLE`/`BLOCK`/`LINETYPE` 真实写；一条表补丁/一步撤销；`LINETYPE` 改名在 `cad-db` 的单次校验写入内把层属性与实体属性的线型引用一并级联到新名（一次 revision、一次 `ChangeSet`，撤销/重做对称）；`Continuous` 不可改名（`linetype.continuous_unrenameable`），未知/重复/非法/空名为稳定拒绝，改名为同名是 `rename.unchanged`（不升修订） |
 | `RENDER` | 部分实现 | 具名拒绝（`render.unsupported: no render engine; only the 2D viewport renderer exists`）。 |
 | `RENDERCROP` | 部分实现 | 具名拒绝（`rendercrop.unsupported: no render engine; only the 2D viewport renderer exists`）。 |
 | `RENDERENVIRONMENT` | 部分实现 | 具名拒绝（`renderenvironment.unsupported: no render engine; only the 2D viewport renderer exists`）。 |
@@ -1670,8 +1673,8 @@
 | 460 | `JULIAN` | 部分实现 | Contains the DATE tool and several AutoCAD Julian date and calendar date conversion routines. | 只读：当前 UTC 时刻的儒略日（整数日 + 小数）；不解析日期参数。 |
 | 461 | `JUSTIFYTEXT` | 部分实现 | Changes the justification point of selected text objects without changing their locations. | `JUSTIFYTEXT <H> <V>`（H∈LEFT/CENTER/RIGHT，V∈BASELINE/BOTTOM/MIDDLE/TOP）；只改 `h_align`/`v_align`，位置不动；非文字目标逐条 `justifytext.not_text` 跳过；空选择拒绝；`TJUST` 为同一实现 |
 | 462 | `LAYCUR` | 部分实现 | Changes the layer property of selected objects to the current layer. | 预选择输入（不弹 Select objects）；把选中对象移到当前层；当前层缺失/目标层锁定显式拒绝；实体写入可撤销 |
-| 463 | `-LAYDEL` | 部分实现 | At the Command prompt, deletes all objects on a layer and purges the layer. | `LAYDEL` 的命令行拼写；实体与层行同一事务/一步撤销。 |
-| 464 | `LAYDEL` | 部分实现 | Deletes all objects on a layer and purges the layer. | 选择式：删除选中对象所在层的模型空间实体 + 层行，同一事务/一步撤销；当前层/0 层/仍有图纸或块内实体的层拒绝（图纸/块内实体仍未纳入） |
+| 463 | `-LAYDEL` | 完整实现 | At the Command prompt, deletes all objects on a layer and purges the layer. | `LAYDEL` 的命令行拼写，同一实现：模型空间/图纸布局/块定义内实体、各图纸视口 `layer_overrides` 键与层行，一条事务/一步撤销。 |
+| 464 | `LAYDEL` | 完整实现 | Deletes all objects on a layer and purges the layer. | 选择式（模型空间或任一图纸布局的顶层实体均可作为输入；块内成员/子元素按 `laydel.block_space` 拒绝）：删除选中对象所在层在模型空间、每个图纸布局与每个块定义内的全部实体（单一 `entities` 表按 `layer` 过滤；块成员删除走 ERASE 同一路径），并剪除各图纸视口的该层 `layer_overrides` 键；当前层/`0` 层拒绝，锁定层由数据库以 `layer.locked` 拒绝且不发布；实体补丁、布局补丁与层行一条事务/一步撤销，重做再次删除。会话层状态不重写。 |
 | 465 | `-LAYER` | 已实现 | Manages layers and layer properties. | 裸命令/`? [pattern]` 为只读图层表报告（名称/可见/off/frozen/locked/当前层，`layer.entry`；`*`/`?` 通配符过滤，无匹配报 `layer.no_match`）；写形式一行一个选项（大小写不敏感）：`NEW/N`、`MAKE/M`、`SET/S`、`RENAME/R`、`DELETE/D`、`ON`/`OFF`、`FREEZE/F`/`THAW/T`、`LOCK/LO`/`UNLOCK/U`、`COLOR/C`（ACI 数字/七个标准色名/`aci:N`/`#RRGGBB`/`rgb:…`）、`LTYPE/L`、`LWEIGHT/LW`、`PLOT/P Y/N`；名单逗号分隔，含空格的值/名称可用双引号；整行原子、一条事务/一步撤销；`MAKE`/`SET` 与 `OFF`/`FREEZE` 复用当前层可见性规则；写形式经 Work-only `SetLayerProperty` 载体，Viewer 拒绝。逐选项交互重提示属全局范围。 |
 | 466 | `LAYER` | 已实现 | Manages layers and layer properties. | chrome 本地选择子：打开图层面板 |
 | 467 | `LAYERCLOSE` | 已实现 | Closes the Layer Properties Manager. | chrome 本地选择子：关闭图层面板（面板关闭按钮走同一命令） |
@@ -1686,14 +1689,14 @@
 | 476 | `-LAYMCH` | 部分实现 | Changes the layer of a selected object to match the layer of a selected object. | `LAYMCH` 的别名，同一实现 |
 | 477 | `LAYMCH` | 部分实现 | Changes the layer of a selected object to match the destination layer. | 选择式：第一个选中对象的图层为目标，其余移入（一条事务/一步撤销）；空选择/<2 目标/非模型空间/块实例按名拒绝；无交互 Select objects |
 | 478 | `LAYMCUR` | 部分实现 | Sets the current layer to that of a selected object. | 预选择输入（不弹 Select objects）；取第一个选中对象的图层并用既有的锁定/冻结/关闭当前层拒绝；仅会话状态 |
-| 479 | `-LAYMRG` | 部分实现 | At the Command prompt, merges selected layers into a target layer. | `LAYMRG` 的命令行拼写；实体与层行同一事务/一步撤销。 |
-| 480 | `LAYMRG` | 部分实现 | Merges selected layers into a target layer, removing them from the drawing. | 选择式：选中对象的层合并到当前层（重写实体 + 删除源层），同一事务/一步撤销；当前层/0 层不能作源；无交互 Settings |
+| 479 | `-LAYMRG` | 完整实现 | At the Command prompt, merges selected layers into a target layer. | `LAYMRG` 的命令行拼写，同一实现：实体重写 + 源层行删除 + 各图纸视口该层覆盖键剪除，一条事务/一步撤销。 |
+| 480 | `LAYMRG` | 完整实现 | Merges selected layers into a target layer, removing them from the drawing. | 选择式：选中对象的层合并到当前层（重写模型/图纸/块内实体 + 删除源层行 + 剪除各图纸视口该层覆盖键），实体/布局/层行一条事务/一步撤销；当前层与 `0` 层不能作源；目标固定为当前层（声明的偏离）。 |
 | 481 | `LAYOFF` | 已实现 | Turns off the layer of a selected object. | — |
 | 482 | `LAYON` | 已实现 | Turns on all layers in the drawing. | — |
 | 483 | `LAYOUT` | 部分实现 | Creates and modifies drawing layouts. | `LIST`/`SET` 真实；`NEW/RENAME/DELETE` 真实写布局表（名称校验、重复名拒绝、删除级联 plot settings），一条事务/一步撤销；`COPY`/`TEMPLATE` 未实现 |
 | 484 | `LAYOUTMERGE` | 已实现 | Combines specified layouts into a single layout. | 把源布局的图纸空间实体移入目标并删除源布局（plot settings 级联），同一事务/一步撤销；同一布局拒绝 |
-| 485 | `LAYOUTWIZARD` | 部分实现 | Creates a new layout tab and specifies page and plot settings. | 真实创建布局并应用 Authored 纸张设置（一条事务/一步撤销）；无视口向导/打印设备 |
-| 486 | `LAYTHW` | 部分实现 | Thaws all layers in the drawing. | 无选择输入（载荷即拒绝）；解冻全部冻结图层；不处理视口级冻结（本构建无视口模型）；图层表写入一条事务/一步撤销 |
+| 485 | `LAYOUTWIZARD` | 完整实现 | Creates a new layout tab and specifies page and plot settings. | 创建布局 + Authored 纸张 + 等分格视口排列（复用 `VPORTS` 网格助手），一条 `LayoutPatch`/一步撤销；未知排列/键具名拒绝；打印设备/打印样式/标题栏按请求逐条明说未实现，交互提示属全局范围。 |
+| 486 | `LAYTHW` | 完整实现 | Thaws all layers in the drawing. | 无选择输入（载荷即拒绝）；解冻全部图层：绘图级 `frozen` 标志 + 每个图纸布局/视口的冻结覆盖（保留显式 `false` 覆盖、视口裁剪/矩阵与 `frozen_in_new_viewport`）；层补丁 + 布局补丁一条事务/一步撤销。 |
 | 487 | `LAYTRANS` | 部分实现 | Translates the layers in the current drawing to specified layer standards. | 具名拒绝（`laytrans.unsupported`）：图层转换标准未实现。 |
 | 488 | `LAYULK` | 部分实现 | Unlocks the layer of a selected object. | 预选择输入（不弹 Select objects）；解锁选中对象所在的不同图层；图层表写入一条事务/一步撤销 |
 | 489 | `LAYUNISO` | 已实现 | Restores all layers that were hidden or locked with the LAYISO command. | — |
@@ -1935,8 +1938,8 @@
 | 725 | `REGENAUTO` | 部分实现 | Obsolete. Controls automatic regeneration of a drawing. | 会话令牌 `regenauto`；本构建无自动重生成开关，需显式 REGEN。 |
 | 726 | `REGION` | 部分实现 | Converts objects that enclose an area into a 2D region object. | 具名拒绝（`region.unsupported`）：无面域几何模型。 |
 | 727 | `REINIT` | 部分实现 | Reinitializes the digitizer, digitizer input/output port, and program parameters file. | 具名拒绝（`reinit.unsupported`）：本构建无设备/数字化仪初始化模型。 |
-| 728 | `-RENAME` | 部分实现 | Changes the names assigned to named objects from the Command prompt. | `RENAME` 的命令行拼写；图层重命名一条事务/一步撤销。 |
-| 729 | `RENAME` | 部分实现 | Changes the names assigned to items such as layers and dimension styles. | `RENAME <kind> <old> <new>`：`LAYER`/`STYLE`/`DIMSTYLE`/`MLEADERSTYLE`/`BLOCK` 真实写；一条表 patch/一步撤销；`LINETYPE` 仍无 rename API（具名拒绝） |
+| 728 | `-RENAME` | 完整实现 | Changes the names assigned to named objects from the Command prompt. | `RENAME` 的命令行拼写，同一实现：六种 kind 真实重命名，含 `LINETYPE` 与其引用级联，一条表补丁/一步撤销。 |
+| 729 | `RENAME` | 完整实现 | Changes the names assigned to items such as layers and dimension styles. | `RENAME <kind> <old> <new>`：`LAYER`/`STYLE`/`DIMSTYLE`/`MLEADERSTYLE`/`BLOCK`/`LINETYPE` 真实写；一条表补丁/一步撤销；`LINETYPE` 改名与引用级联在同一 `cad-db` 校验写入内完成（一次 revision、一次 `ChangeSet`），撤销/重做对称。 |
 | 730 | `-RENDER` | 部分实现 | Creates a photorealistic or realistically shaded image of a 3D solid or surface model from the Command prompt. | 具名拒绝（`-render.unsupported: no render engine; only the 2D viewport renderer exists`）。 |
 | 731 | `RENDER` | 部分实现 | Creates a photorealistic or realistically shaded image of a 3D solid or surface model. | 具名拒绝（`render.unsupported: no render engine; only the 2D viewport renderer exists`）。 |
 | 732 | `RENDERCROP` | 部分实现 | Renders a specified rectangular area, called a crop window, within a viewport. | 具名拒绝（`rendercrop.unsupported: no render engine; only the 2D viewport renderer exists`）。 |
