@@ -22,6 +22,47 @@
 （Linux 原生 Wayland、Windows、macOS、Android）由 native 会话持有 `cad-db`，`dom-canvas`
 （X11/XWayland、Web）由 wasm 会话持有。细节与逐平台证据边界见 `AGENTS.md` 平台表。
 
+**命令覆盖推进（续，2026-11-16，本轮 wave 2）**
+
+覆盖表从 **139 完整 / 840 部分**推进到 **171 完整 / 808 部分**（wave 2 净晋升 **32 个命令名**）。
+晋升：`DIMTEDIT`、`FILL`、`QTEXT`、`VIEWRES`、`EXTRIM`、`OOPS`、`PURGE`、`DRAWORDER`、
+`TEXTTOFRONT`、`-DIMSTYLE`、`-OVERKILL`、`-PAN`、`COUNT`、`SELECTCOUNT`、`GRADIENT`、
+`HATCHSETBOUNDARY`、`-PSETUPIN`、`MLEADERCOLLECT`、`LINETYPE`、`-LINETYPE`、`LAYOUT`、
+`CHSPACE`、`PSPACE`、`PSBSCALE`、`PSTSCALE`、`SCALELISTEDIT`、`-SCALELISTEDIT`、`SETVAR`、
+`BASE`、`LIMITS`、`STATUS`、`TABLEDIT`、`TABLEEXPORT`。
+
+- 表格族：`TABLEEXPORT` 经宿主文件通道真写 CSV（RFC 4180/CRLF/合并锚点，临时文件+rename，
+  浏览器侧 `unsupported-runtime: table-export`）；`TABLESTYLE` 实体样式记录 + `ACAD_TABLESTYLE`
+  DXF 往返、按值相等继承；`MATCHCELL` 复制文字高/样式/边框；`TABLEDIT` 新增 `MERGE`/`UNMERGE`/`STYLE`。
+  `TABLE`/`TABLESTYLE`/`MATCHCELL` **仍是部分实现**：逐格对齐/旋转/颜色/线宽/填充、单元格块/字段、
+  标题/表头行样式在这些域里**没有字段**，按模型缺口写进行内。
+- 版面：`LAYOUT COPY`（视口 verbatim + 图纸实体新 id + 页面设置，一条校验批次）、`CHSPACE`
+  按活动视口已解析变换换空间、`PSPACE` 已在图纸空间时为 `pspace.noop`、`PSBSCALE`/`PSTSCALE`
+  覆盖 `MULTILEADER`/`TABLE` 文本。
+- 比例/系统变量：`SCALELISTEDIT` 获得真实写 API（`ADD`/`RENAME`/`DELETE`，改名级联
+  `CANNOSCALE` 与注释性覆盖，删除按名字引用拒绝）；`SETVAR` 闭集 9→13；`BASE`/`LIMITS` 为真实
+  `$INSBASE`/`$LIMMIN`/`$LIMMAX` 读写并导出回写；`STATUS` 报告真实基点/界限。
+- 显示令牌真正到达派生批次：`FILL OFF` 画边界环/奇偶边界边/宽折线偏移轮廓；`QTEXT ON` 用 bbox
+  矩形替代字形；`VIEWRES` 成为弦分段上限（解析圆锥不受影响）。`LWEIGHT` 因渲染器**无宽线光栅化**
+  保持部分实现；`VSCURRENT` 因线框是唯一实现模式保持具名拒绝。
+- 编辑广度：`EXTRIM` 目标集=TRIM 可裁集且不可裁目标逐对象跳过；`OOPS` 恢复 ERASE 整批并覆盖
+  `BLOCK` 移出的整批、重复执行具名空操作、撤销后快照重新可用；`PURGE` 新增块/样式/线型删除 API；
+  `DRAWORDER`/`TEXTTOFRONT` 按 `SpaceId` 逐范围。
+- `FIND`/`-FIND` 整图遍历与投影匹配；`COLOR`/`-COLOR` 令牌被创建漏斗消费。
+
+**门禁（本轮实跑）**：`cargo fmt --all -- --check`、`clippy --workspace -D warnings`、
+`cargo check --workspace --all-targets`、`check --lib --target wasm32-unknown-unknown`、
+`check-architecture.py`、`check-file-size.py`（2149）、`check-i18n.py`（2926）、
+`check-command-docs.py`（0 mismatch）+ 自测、`check-tauri-capabilities.py`、
+`check-fixture-manifest.py` 全绿。分 crate：cad-app 2858 lib、cad-domain 153、cad-db 271、
+cad-import-acadrust 430、cad-ui-core 744、cad-host 342、cad-representation 321、
+`cad-render-wgpu` 全 target（GPU 用例串行）。
+
+**声明边界（本轮新增）**：`BASE`/`LIMITS`/`SCALELISTEDIT` 的写入**没有撤销步**
+（`cad-history` 无 header/scale 补丁种类，诊断里声明 `*.no_history`）；导入侧仍不读
+`$INSBASE`/`$LIMMIN`/`$LIMMAX`；acadrust 的 DXF writer 不写 `$CANNOSCALE`，故改名级联不随导出保留。
+Windows/macOS/Android/Web 一律 **NOT VERIFIED**；无像素/GPU 性能结论。
+
 **命令覆盖推进（2026-11-15，本轮）**
 
 覆盖表 `docs/autocad-2026-command-coverage.md` 从 **123 完整 / 856 部分**推进到
