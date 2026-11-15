@@ -1,18 +1,37 @@
-//! `-FIND` / `FIND` (2026-11-07): report or replace text across model-space
-//! TEXT, MTEXT and MULTILEADER text.
+//! `-FIND` / `FIND` (2026-11-07): report or replace text across the whole
+//! drawing — model space and every paper-space layout.
 //!
 //! Search is a plain **ASCII case-insensitive substring** of what the viewport
-//! draws. Every `Text` entity is matched on the **plain-text projection** of its
-//! stored value — MTEXT, a text-bearing MULTILEADER (which stores the same
-//! `\P`/`\f…;` markup) and single-line `AcDbText` alike, because
+//! draws. Every text channel is matched on the **plain-text projection** of its
+//! stored value: MTEXT, a text-bearing MULTILEADER (which stores the same
+//! `\P`/`\f…;` markup), single-line `AcDbText` (and ATTRIB/ATTDEF, which the
+//! importer stores as `Text` geometry) and table cells — because
 //! `cad-representation`'s provider shapes all of them through the same
-//! `parse_mtext` (see [`mtext_preview_text`]). The projection is produced by that
-//! *same* tokenizer ([`cad_representation::mtext_projection`]): formatting runs
-//! contribute no characters, `\P`/`\N`/`^J`/literal newlines are one `'\n'`
-//! each, and escapes (`\~`, `%%d`, `\U+XXXX`, `\S`) contribute the character
-//! they draw. A needle that only exists in the markup (`\fArial|b1;`, `|b1;`)
-//! is therefore **not** a match, and a hit is reported with its plain-text
-//! context.
+//! `parse_mtext` (see [`mtext_preview_text`]; a table's display children are
+//! `SemanticGeometry::Text` values built by `TableGeometry::display`). The
+//! projection is produced by that *same* tokenizer
+//! ([`cad_representation::mtext_projection`]): formatting runs contribute no
+//! characters, `\P`/`\N`/`^J`/literal newlines are one `'\n'` each, and escapes
+//! (`\~`, `%%d`, `\U+XXXX`, `\S`) contribute the character they draw. A needle
+//! that only exists in the markup (`\fArial|b1;`, `|b1;`) is therefore **not** a
+//! match, and a hit is reported with its plain-text context.
+//!
+//! ## Traversal and the report
+//!
+//! Model space is searched first, then each layout in layout-id order (its
+//! entities are those whose `SpaceId` is `Paper(layout)`). The `find.result`
+//! message keeps the total and the per-entity ids but groups them per space
+//! (`model space: 2 match(es) (ids: 13, 14) ; layout 'Sheet1': 1 match(es)
+//! (ids: 21)`) so a hit's layout is visible, and still names the matched table
+//! cells and shows the first plain-text preview.
+//!
+//! Text stored **inside block definitions** is a declared, read-only channel: it
+//! is searched and **named** in the report with its per-block count
+//! (`.block definition 'Frame': 1 match(es)`), but `FIND` never edits it. One
+//! definition's text is shared by every INSERT in every space, so a replace there
+//! would silently rewrite geometry the user never selected, and anonymous
+//! definition blocks hold derived content (dimension/table/hatch displays) that
+//! other channels own. `BEDIT` is the channel for that edit, not `FIND`.
 //!
 //! Each projected character carries the byte range of the markup that produced
 //! it, so a replace can rebuild the markup instead of rewriting the whole
@@ -40,12 +59,16 @@
 //! [`cad_domain::MultiLeaderGeometry::with_text`], which rebuilds the derived
 //! display; a TEXT/MTEXT keeps every other field of its `Text` geometry.
 //!
+//! ## One step, all spaces
+//!
 //! `-FIND` is report-only. `FIND <needle>` reports; `FIND <needle> => <text>`
 //! replaces every occurrence on every match in **one** transaction / one undo
-//! step. An `AcDbText` target refuses a replacement containing `\r`/`\n`
-//! (`text.single_line_newline`); MTEXT/MULTILEADER store line breaks as `\P`
-//! via the one policy in [`super::text_policy`]. A refusal happens before the
-//! transaction is opened, so nothing is written and no undo entry is recorded.
+//! step — every space is planned first and only then staged, so a refusal (a
+//! named code refusal, a locked layer, a failed validation) writes nothing in
+//! **any** space and records no undo entry. A single-line target (`AcDbText`,
+//! table cell) refuses a replacement containing `\r`/`\n`
+//! (`text.single_line_newline`); MTEXT/MULTILEADER store line breaks as `\P` via
+//! the one policy in [`super::text_policy`].
 
 use super::*;
 use cad_domain::{MLeaderContent, SemanticGeometry};
@@ -92,38 +115,35 @@ impl Application {
             .drawing
             .clone();
 
-        // Search **cell by cell** for a table: a needle must never match across
-        // two cells (`id` + ` ` + `name`). Each hit records the cell it matched
-        // so the report can name it.
-        let hits: Vec<FindHit> = drawing
-            .model_space()
-            .into_iter()
-            .flat_map(|entity| find_hits(entity, needle))
-            .collect();
+        // Search the whole drawing: model space, then every paper-space layout.
+        // Block definitions are a separate, read-only channel.
+        let hits = collect_hits(&drawing, needle);
+        let block_hits = collect_block_hits(&drawing, needle);
 
         // Replacement works per entity; several cell hits on one table collapse
-        // into one update so the table is rebuilt once.
+        // into one update so the table is rebuilt once. The space travels with
+        // the entity so the outcome can name it.
         let mut seen = std::collections::HashSet::new();
-        let matches: Vec<DbEntity> = hits
+        let matches: Vec<(FindSpace, DbEntity)> = hits
             .iter()
             .filter(|hit| seen.insert(hit.entity.id.0))
-            .map(|hit| hit.entity.clone())
+            .map(|hit| (hit.space.clone(), hit.entity.clone()))
             .collect();
 
         let Some(replacement) = replacement else {
-            return Ok(report_outcome(&hits, needle));
+            return Ok(report_outcome(&hits, &block_hits, needle));
         };
         if matches.is_empty() {
-            return Ok(report_outcome(&hits, needle));
+            return Ok(report_outcome(&hits, &block_hits, needle));
         }
 
-        // Plan every replacement first: all-or-nothing, no transaction on a
-        // refusal.
-        let mut planned: Vec<(DbEntity, DbEntity)> = Vec::new();
-        for before in &matches {
+        // Plan every replacement in every space first: all-or-nothing, no
+        // transaction on a refusal, so a refusal writes nothing anywhere.
+        let mut planned: Vec<(FindSpace, DbEntity, DbEntity)> = Vec::new();
+        for (space, before) in &matches {
             let after = replace_in_entity(before, needle, replacement)?;
             if after != *before {
-                planned.push((before.clone(), after));
+                planned.push((space.clone(), before.clone(), after));
             }
         }
         if planned.is_empty() {
@@ -146,7 +166,7 @@ impl Application {
         let mut candidate = drawing.as_ref().clone();
         let change_set = {
             let mut staged = candidate.begin_drawing_transaction("find text", transaction)?;
-            for (_, after) in &planned {
+            for (_, _, after) in &planned {
                 staged.update_entity(after.clone())?;
             }
             staged.commit()?
@@ -154,7 +174,7 @@ impl Application {
 
         let mut patches = Vec::with_capacity(planned.len());
         let mut objects = Vec::with_capacity(planned.len());
-        for (before, _) in &planned {
+        for (_, before, _) in &planned {
             let after = candidate
                 .entity(before.id)
                 .cloned()
@@ -163,6 +183,20 @@ impl Application {
             patches.push(drawing_patch(before.id, Some(before.clone()), Some(after)));
         }
         let count = objects.len();
+        // Name the spaces this one undo step touches.
+        let mut spaces: Vec<(String, usize)> = Vec::new();
+        for (space, _, _) in &planned {
+            let label = space.label();
+            match spaces.iter_mut().find(|(name, _)| *name == label) {
+                Some((_, count)) => *count += 1,
+                None => spaces.push((label, 1)),
+            }
+        }
+        let spaces = spaces
+            .iter()
+            .map(|(name, count)| format!("{name}: {count}"))
+            .collect::<Vec<_>>()
+            .join(", ");
         self.publish_candidate(
             document_id,
             candidate,
@@ -185,7 +219,7 @@ impl Application {
             diagnostics: vec![Diagnostic {
                 object: None,
                 code: "find.replaced".into(),
-                message: format!("FIND: replaced text on {count} object(s)"),
+                message: format!("FIND: replaced text on {count} object(s) [{spaces}]"),
             }],
             measurement: None,
             point_report: None,
@@ -203,25 +237,69 @@ impl Application {
     }
 }
 
-/// One search hit: the entity, the matching cell when the entity is a table,
-/// and the raw text that matched.
+/// Where a hit lives. Everything except block definitions is editable; the
+/// label is resolved once at collection time so the report can group hits
+/// without another trip to the database.
+#[derive(Clone, PartialEq, Eq)]
+enum FindSpace {
+    Model,
+    Layout(LayoutId, String),
+    /// Text stored in a block definition: reported, never edited (see
+    /// [`collect_block_hits`]).
+    Block(BlockId, Option<String>),
+}
+
+impl FindSpace {
+    /// The report label for an editable space (`model space`, `layout 'Sheet1'`).
+    fn label(&self) -> String {
+        match self {
+            FindSpace::Model => "model space".to_string(),
+            FindSpace::Layout(_, name) => format!("layout '{name}'"),
+            FindSpace::Block(_, Some(name)) => format!("block definition '{name}'"),
+            FindSpace::Block(id, None) => format!("block definition #{} (unnamed)", id.0),
+        }
+    }
+
+    /// The bare name, used in the block-definition channel where the sentence
+    /// already says what these are.
+    fn name_label(&self) -> String {
+        match self {
+            FindSpace::Model => "model space".to_string(),
+            FindSpace::Layout(_, name) => format!("'{name}'"),
+            FindSpace::Block(_, Some(name)) => format!("'{name}'"),
+            FindSpace::Block(id, None) => format!("#{} (unnamed)", id.0),
+        }
+    }
+}
+
+/// One search hit: where it lives, the entity, the matching cell when the
+/// entity is a table, and the drawn text that matched.
 struct FindHit {
+    space: FindSpace,
     entity: DbEntity,
     cell: Option<(usize, usize)>,
     text: String,
 }
 
 impl FindHit {
-    fn entity_hit(entity: &DbEntity, text: String) -> Self {
+    fn entity_hit(entity: &DbEntity, space: FindSpace, text: String) -> Self {
         FindHit {
+            space,
             entity: entity.clone(),
             cell: None,
             text,
         }
     }
 
-    fn cell_hit(entity: &DbEntity, row: usize, column: usize, text: String) -> Self {
+    fn cell_hit(
+        entity: &DbEntity,
+        space: FindSpace,
+        row: usize,
+        column: usize,
+        text: String,
+    ) -> Self {
         FindHit {
+            space,
             entity: entity.clone(),
             cell: Some((row, column)),
             text,
@@ -229,17 +307,61 @@ impl FindHit {
     }
 }
 
+/// Every editable hit in the drawing: model space first, then each paper-space
+/// layout in layout-id order.
+fn collect_hits(drawing: &DrawingDatabase, needle: &str) -> Vec<FindHit> {
+    let mut hits = Vec::new();
+    for entity in drawing.model_space() {
+        hits.extend(find_hits(entity, FindSpace::Model, needle));
+    }
+    let mut layouts: Vec<_> = drawing.layouts().collect();
+    layouts.sort_by_key(|layout| layout.id.0);
+    for layout in layouts {
+        let space = FindSpace::Layout(layout.id, layout.name.clone());
+        for entity in drawing.layout_entities(layout.id) {
+            hits.extend(find_hits(entity, space.clone(), needle));
+        }
+    }
+    hits
+}
+
+/// Matches stored in **block definitions** — text the viewport only reaches
+/// through an `INSERT`.
+///
+/// This is a declared, read-only channel: `FIND` reports these matches with
+/// their block name and count but never edits them. A definition's text is
+/// shared by every instance in every space, so one replace would silently
+/// rewrite geometry the user never selected; and anonymous definition blocks
+/// hold derived content (dimension/table/hatch displays) owned by other
+/// channels. `BEDIT` is the editing channel.
+///
+/// Only the block's **drawn** members are searched
+/// ([`DrawingDatabase::block_entities`]), so a dynamic block's inactive
+/// visibility state is not reported — matching what the viewport draws.
+fn collect_block_hits(drawing: &DrawingDatabase, needle: &str) -> Vec<FindHit> {
+    let mut blocks: Vec<_> = drawing.blocks().collect();
+    blocks.sort_by_key(|block| block.id.0);
+    let mut hits = Vec::new();
+    for block in blocks {
+        let space = FindSpace::Block(block.id, drawing.block_name(block.id).map(str::to_string));
+        for entity in drawing.block_entities(block.id) {
+            hits.extend(find_hits(entity, space.clone(), needle));
+        }
+    }
+    hits
+}
+
 /// Every match in one entity. A table is searched cell by cell so a needle
 /// cannot span two cells; every other text-bearing entity contributes at most
 /// one hit.
-fn find_hits(entity: &DbEntity, needle: &str) -> Vec<FindHit> {
+fn find_hits(entity: &DbEntity, space: FindSpace, needle: &str) -> Vec<FindHit> {
     match &entity.geometry {
         SemanticGeometry::Text { text, .. } => {
             // Both MTEXT and single-line TEXT are matched against what they
             // draw: the viewport parses the same control content for each.
             let shown = mtext_preview_text(text);
             if contains(&shown, needle) {
-                vec![FindHit::entity_hit(entity, shown)]
+                vec![FindHit::entity_hit(entity, space, shown)]
             } else {
                 Vec::new()
             }
@@ -247,21 +369,28 @@ fn find_hits(entity: &DbEntity, needle: &str) -> Vec<FindHit> {
         SemanticGeometry::MultiLeader(leader) if leader.content() == MLeaderContent::Text => {
             let shown = mtext_preview_text(&leader.text().string);
             if contains(&shown, needle) {
-                vec![FindHit::entity_hit(entity, shown)]
+                vec![FindHit::entity_hit(entity, space, shown)]
             } else {
                 Vec::new()
             }
         }
         SemanticGeometry::Table(table) => {
+            // Cell text is drawn as a `Text` display child of the table, so it
+            // is matched on the projection like every other text channel.
             let mut hits = Vec::new();
             for (row_index, row) in table.rows().iter().enumerate() {
                 for (column_index, cell) in row.cells.iter().enumerate() {
-                    if !cell.text.is_empty() && contains(&cell.text, needle) {
+                    if cell.text.is_empty() {
+                        continue;
+                    }
+                    let shown = mtext_preview_text(&cell.text);
+                    if contains(&shown, needle) {
                         hits.push(FindHit::cell_hit(
                             entity,
+                            space.clone(),
                             row_index,
                             column_index,
-                            cell.text.clone(),
+                            shown,
                         ));
                     }
                 }
@@ -272,7 +401,23 @@ fn find_hits(entity: &DbEntity, needle: &str) -> Vec<FindHit> {
     }
 }
 
-fn report_outcome(hits: &[FindHit], needle: &str) -> CommandOutcome {
+/// Group consecutive hits by space, in traversal order.
+fn space_groups(hits: &[FindHit]) -> Vec<(&FindSpace, &[FindHit])> {
+    let mut groups: Vec<(&FindSpace, &[FindHit])> = Vec::new();
+    let mut start = 0;
+    while start < hits.len() {
+        let mut end = start + 1;
+        while end < hits.len() && hits[end].space == hits[start].space {
+            end += 1;
+        }
+        groups.push((&hits[start].space, &hits[start..end]));
+        start = end;
+    }
+    groups
+}
+
+/// The distinct entity ids of one group, truncated to ten with a count.
+fn id_list(hits: &[FindHit]) -> String {
     let mut ids: Vec<String> = Vec::new();
     for hit in hits {
         let id = hit.entity.id.0.to_string();
@@ -280,14 +425,30 @@ fn report_outcome(hits: &[FindHit], needle: &str) -> CommandOutcome {
             ids.push(id);
         }
     }
-    let total_ids = ids.len();
+    let more = ids.len().saturating_sub(10);
     ids.truncate(10);
-    let more = total_ids.saturating_sub(ids.len());
-    let ids = if more > 0 {
+    if more > 0 {
         format!("{}, +{more} more", ids.join(", "))
     } else {
         ids.join(", ")
-    };
+    }
+}
+
+fn report_outcome(hits: &[FindHit], blocks: &[FindHit], needle: &str) -> CommandOutcome {
+    // One section per space, so a hit's layout is visible while the total and
+    // the per-entity ids stay where they were.
+    let spaces = space_groups(hits)
+        .iter()
+        .map(|(space, group)| {
+            format!(
+                "{}: {} match(es) (ids: {})",
+                space.label(),
+                group.len(),
+                id_list(group)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" ; ");
     let preview = hits
         .first()
         .map(|hit| preview(&hit.text, needle))
@@ -305,6 +466,25 @@ fn report_outcome(hits: &[FindHit], needle: &str) -> CommandOutcome {
     } else {
         format!("; cells: {}", cells.join(", "))
     };
+    // Block definitions are declared, not hidden: they are named with their
+    // count because FIND does not edit them.
+    let blocks = space_groups(blocks)
+        .iter()
+        .map(|(space, group)| {
+            format!(
+                "{}: {} match(es) (ids: {})",
+                space.name_label(),
+                group.len(),
+                id_list(group)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let blocks = if blocks.is_empty() {
+        String::new()
+    } else {
+        format!("; block definitions, read-only (edit with BEDIT): {blocks}")
+    };
     CommandOutcome {
         objects: Vec::new(),
         changes: None,
@@ -312,9 +492,8 @@ fn report_outcome(hits: &[FindHit], needle: &str) -> CommandOutcome {
             object: None,
             code: "find.result".into(),
             message: format!(
-                "FIND: {} match(es) for '{needle}' [ids: {}] first: {preview}{cells}",
+                "FIND: {} match(es) for '{needle}' [{spaces}] first: {preview}{cells}{blocks}",
                 hits.len(),
-                ids
             ),
         }],
         measurement: None,
@@ -570,33 +749,6 @@ fn push_mtext_escaped(out: &mut String, ch: char) {
     }
 }
 
-/// Replace every non-overlapping ASCII case-insensitive occurrence.
-fn replace_all(haystack: &str, needle: &str, replacement: &str) -> String {
-    let mut out = String::with_capacity(haystack.len());
-    let bytes = haystack.as_bytes();
-    let needle_bytes = needle.as_bytes();
-    let needle_len = needle_bytes.len();
-    let mut index = 0;
-    while index < bytes.len() {
-        if index + needle_len <= bytes.len()
-            && bytes[index..index + needle_len].eq_ignore_ascii_case(needle_bytes)
-        {
-            out.push_str(replacement);
-            index += needle_len;
-        } else {
-            // Advance one **character**, not one byte, so a multi-byte character
-            // is copied whole.
-            let ch = haystack[index..]
-                .chars()
-                .next()
-                .expect("index is inside the string");
-            out.push(ch);
-            index += ch.len_utf8();
-        }
-    }
-    out
-}
-
 fn replace_in_entity(entity: &DbEntity, needle: &str, replacement: &str) -> CadResult<DbEntity> {
     let mut after = entity.clone();
     match &entity.geometry {
@@ -642,21 +794,25 @@ fn replace_in_entity(entity: &DbEntity, needle: &str, replacement: &str) -> CadR
             after.geometry = SemanticGeometry::MultiLeader(Box::new(leader.with_text(&replaced)?));
         }
         SemanticGeometry::Table(table) => {
-            // Cell text is single-line; a multi-line replacement is refused by
-            // the same policy the TEXT channel uses, before any transaction.
+            // A table's cell text is drawn through the same `Text` pipeline
+            // (`TableGeometry::display` pushes a `SemanticGeometry::Text` per
+            // non-empty cell), so it is matched, spliced and escaped like every
+            // other text channel. A cell is single-line: a multi-line
+            // replacement is refused by the same policy the TEXT channel uses,
+            // before any transaction.
             if has_line_break(replacement) {
                 return Err(text_policy::single_line_newline_error("FIND"));
             }
             let mut changes: Vec<(usize, usize, String)> = Vec::new();
             for (row_index, row) in table.rows().iter().enumerate() {
                 for (column_index, cell) in row.cells.iter().enumerate() {
-                    if cell.text.is_empty() || !contains(&cell.text, needle) {
+                    if cell.text.is_empty() || !contains(&mtext_preview_text(&cell.text), needle) {
                         continue;
                     }
                     changes.push((
                         row_index,
                         column_index,
-                        replace_all(&cell.text, needle, replacement),
+                        replace_mtext_markup(&cell.text, needle, replacement)?,
                     ));
                 }
             }

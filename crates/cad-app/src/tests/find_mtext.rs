@@ -1,9 +1,10 @@
-//! `FIND` over the text a stored value **draws** (2026-11-15).
+//! `FIND` over the text a stored value **draws** (2026-11-15), across the whole
+//! drawing.
 //!
-//! The search haystack for every `Text` geometry — MTEXT, MULTILEADER text and
-//! single-line `AcDbText` — is the plain-text projection produced by the same
-//! tokenizer that renders it (`cad_representation::mtext_projection`); a
-//! replacement is spliced back into the markup so every untouched formatting run
+//! The search haystack for every text channel — MTEXT, MULTILEADER text,
+//! single-line `AcDbText` and table cells — is the plain-text projection produced
+//! by the same tokenizer that renders it (`cad_representation::mtext_projection`);
+//! a replacement is spliced back into the markup so every untouched formatting run
 //! keeps its own codes, and the cases the control-content grammar cannot express
 //! are refused by name instead of written approximately.
 //!
@@ -12,10 +13,18 @@
 //! reported, ASCII case-insensitivity, one undo step for a replace across
 //! entities, an `AcDbText` matched on its drawn `%%d`/`\~` escapes, the
 //! `find.mtext_partial_code` refusal for a partial `\S` fraction and a partial
-//! `^I` tab, and the `find.mtext_replacement_not_literal` refusal.
+//! `^I` tab, the `find.mtext_replacement_not_literal` refusal, a layout text
+//! found/replaced with the layout named in the report, a replace touching model
+//! space plus two layouts in one undo step, a table cell matched on its drawn
+//! escape, a refusal that writes nothing in any space, and block-definition text
+//! reported as a read-only channel.
 
 use super::*;
-use cad_db::{DbEntity, DbObject, DrawingDatabaseBuilder, Layer};
+use cad_db::{BlockDefinition, DbEntity, DbObject, DrawingDatabaseBuilder, Layer, Layout};
+use cad_domain::{
+    TableCellBorders, TableCellGeometry, TableColumnGeometry, TableFrame, TableGeometry,
+    TableParts, TableRowGeometry,
+};
 
 const MTEXT_BOLD: EntityId = EntityId(21);
 const MTEXT_BREAK: EntityId = EntityId(22);
@@ -539,4 +548,411 @@ fn find_refuses_a_replacement_that_the_markup_would_redraw() {
         "{error:?}"
     );
     assert_eq!(stored(&app, TEXT_RAW), "Cold text");
+}
+
+// ---------------------------------------------------------------------------
+// Whole-drawing traversal: paper-space layouts, table cells, block definitions.
+// ---------------------------------------------------------------------------
+
+const MODEL_TEXT: EntityId = EntityId(31);
+const DETAIL_TEXT: EntityId = EntityId(32);
+const NOTES_MTEXT: EntityId = EntityId(33);
+const SHEET_FRACTION: EntityId = EntityId(34);
+const TABLE: EntityId = EntityId(35);
+const BLOCK_MEMBER: EntityId = EntityId(41);
+const BLOCK_INSERT: EntityId = EntityId(42);
+
+/// An application whose drawing is built by `build` on layer `0`.
+fn app_with(build: impl FnOnce(&mut DrawingDatabaseBuilder)) -> (Application, SessionState) {
+    let (mut app, session) = application_with_document();
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layer(Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
+    .unwrap();
+    build(&mut b);
+    let drawing = b.finish().unwrap();
+    app.workspace
+        .documents
+        .get_mut(&DocumentId(1))
+        .unwrap()
+        .drawing = Arc::new(drawing);
+    (app, session)
+}
+
+fn layout(id: LayoutId, name: &str) -> Layout {
+    Layout {
+        id,
+        name: name.into(),
+        viewports: Vec::new(),
+    }
+}
+
+fn entity_in_space(
+    id: EntityId,
+    type_key: &str,
+    geometry: SemanticGeometry,
+    space: SpaceId,
+) -> DbEntity {
+    let mut built = entity(id, type_key, geometry);
+    built.space = space;
+    built
+}
+
+/// One model-space TEXT and one paper-space TEXT on layout `Details`.
+fn layout_app() -> (Application, SessionState) {
+    app_with(|b| {
+        b.insert_layout(layout(LayoutId(1), "Details")).unwrap();
+        b.insert_entity(entity(MODEL_TEXT, "AcDbText", text("Model text", 0.0)))
+            .unwrap();
+        b.insert_entity(entity_in_space(
+            DETAIL_TEXT,
+            "AcDbText",
+            text("Sheet title", 10.0),
+            SpaceId::Paper(LayoutId(1)),
+        ))
+        .unwrap();
+    })
+}
+
+/// The same needle in model space, layout `Details` (TEXT) and layout `Notes`
+/// (MTEXT with a paragraph break).
+fn multi_space_app() -> (Application, SessionState) {
+    app_with(|b| {
+        b.insert_layout(layout(LayoutId(1), "Details")).unwrap();
+        b.insert_layout(layout(LayoutId(2), "Notes")).unwrap();
+        b.insert_entity(entity(MODEL_TEXT, "AcDbText", text("alpha one", 0.0)))
+            .unwrap();
+        b.insert_entity(entity_in_space(
+            DETAIL_TEXT,
+            "AcDbText",
+            text("alpha two", 0.0),
+            SpaceId::Paper(LayoutId(1)),
+        ))
+        .unwrap();
+        b.insert_entity(entity_in_space(
+            NOTES_MTEXT,
+            "AcDbMText",
+            text("alpha \\Pthree", 0.0),
+            SpaceId::Paper(LayoutId(2)),
+        ))
+        .unwrap();
+    })
+}
+
+/// A model-space TEXT that would be replaced, and a layout MTEXT whose `\S`
+/// fraction must refuse the same needle — so a refusal is proven to write
+/// nothing in the space that was planned first.
+fn refusal_app() -> (Application, SessionState) {
+    app_with(|b| {
+        b.insert_layout(layout(LayoutId(1), "Details")).unwrap();
+        b.insert_entity(entity(MODEL_TEXT, "AcDbText", text("1st model", 0.0)))
+            .unwrap();
+        b.insert_entity(entity_in_space(
+            SHEET_FRACTION,
+            "AcDbMText",
+            text("x\\S1/2;y", 0.0),
+            SpaceId::Paper(LayoutId(1)),
+        ))
+        .unwrap();
+    })
+}
+
+fn cell(text: &str) -> TableCellGeometry {
+    TableCellGeometry {
+        text: text.to_string(),
+        text_height: 2.5,
+        style_name: "Standard".into(),
+        style: StyleId(0),
+        font: None,
+        merge_width: 1,
+        merge_height: 1,
+        borders: TableCellBorders::default(),
+    }
+}
+
+/// A 1×1 table whose cell stores `20%%d hot` (drawn `20° hot`).
+fn table_app() -> (Application, SessionState) {
+    app_with(|b| {
+        let geometry = TableGeometry::new(TableParts {
+            frame: TableFrame::default(),
+            columns: vec![TableColumnGeometry {
+                width: 6.0,
+                name: "A".into(),
+            }],
+            rows: vec![TableRowGeometry {
+                height: 3.0,
+                cells: vec![cell("20%%d hot")],
+            }],
+            style_name: "Standard".into(),
+            name: "Data".into(),
+            description: String::new(),
+        })
+        .expect("valid table");
+        b.insert_entity(entity(
+            TABLE,
+            "AcDbTable",
+            SemanticGeometry::Table(Box::new(geometry)),
+        ))
+        .unwrap();
+    })
+}
+
+fn stored_cell(app: &Application, id: EntityId, row: usize, column: usize) -> String {
+    match &app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .entity(id)
+        .expect("entity exists")
+        .geometry
+    {
+        SemanticGeometry::Table(table) => table
+            .cell(row, column)
+            .map(|cell| cell.text.clone())
+            .expect("cell exists"),
+        other => panic!("expected a table, got {other:?}"),
+    }
+}
+
+/// Named block `Frame` with one TEXT member, inserted once in model space.
+fn block_app() -> (Application, SessionState) {
+    app_with(|b| {
+        b.insert_block(BlockDefinition {
+            id: BlockId(7),
+            entities: vec![BLOCK_MEMBER],
+            dynamic_visibility: None,
+        })
+        .unwrap();
+        b.set_block_metadata(BlockId(7), "Frame", point(0.0, 0.0))
+            .unwrap();
+        b.insert_entity(entity_in_space(
+            BLOCK_MEMBER,
+            "AcDbText",
+            text("frame label", 0.0),
+            SpaceId::Block(BlockId(7)),
+        ))
+        .unwrap();
+        b.insert_entity(entity(
+            BLOCK_INSERT,
+            "AcDbInsert",
+            SemanticGeometry::Insert {
+                block: BlockId(7),
+                transform: Transform3::identity(),
+            },
+        ))
+        .unwrap();
+    })
+}
+
+/// A layout's text is found and replaced, the report names the layout, and model
+/// space is untouched.
+#[test]
+fn find_finds_and_replaces_a_layout_text_and_names_the_layout() {
+    let (mut app, mut session) = layout_app();
+    let outcome = run(&mut app, &mut session, CommandId::FindReport, "Sheet", None).unwrap();
+    let message = report_message(&outcome);
+    assert!(message.contains("1 match(es)"), "{message}");
+    assert!(
+        message.contains("layout 'Details': 1 match(es)"),
+        "{message}"
+    );
+    assert!(
+        !message.contains("model space"),
+        "the report must not claim a model-space hit: {message}"
+    );
+
+    let undo_before = undo_depth(&app);
+    run(
+        &mut app,
+        &mut session,
+        CommandId::FindReplace,
+        "Sheet",
+        Some("Page"),
+    )
+    .unwrap();
+    assert_eq!(stored(&app, DETAIL_TEXT), "Page title");
+    assert_eq!(
+        stored(&app, MODEL_TEXT),
+        "Model text",
+        "model space untouched"
+    );
+    assert_eq!(undo_depth(&app), undo_before + 1);
+
+    app.execute(&mut session, command(CommandId::Undo, CommandPayload::None))
+        .unwrap();
+    assert_eq!(stored(&app, DETAIL_TEXT), "Sheet title");
+}
+
+/// One replace across model space and two layouts: one transaction, one undo
+/// step, and a full round trip back to the previous state.
+#[test]
+fn find_replace_touches_model_space_and_two_layouts_in_one_undo_step() {
+    let (mut app, mut session) = multi_space_app();
+    let revision_before = revision(&app);
+    let undo_before = undo_depth(&app);
+
+    let report = run(&mut app, &mut session, CommandId::FindReport, "alpha", None).unwrap();
+    let message = report_message(&report);
+    assert!(message.contains("3 match(es)"), "{message}");
+    assert!(message.contains("model space: 1 match(es)"), "{message}");
+    assert!(
+        message.contains("layout 'Details': 1 match(es)"),
+        "{message}"
+    );
+    assert!(message.contains("layout 'Notes': 1 match(es)"), "{message}");
+
+    let outcome = run(
+        &mut app,
+        &mut session,
+        CommandId::FindReplace,
+        "alpha",
+        Some("beta"),
+    )
+    .unwrap();
+    assert_eq!(outcome.objects.len(), 3, "all three spaces are edited");
+    assert_eq!(undo_depth(&app), undo_before + 1, "one transaction");
+    assert_ne!(revision(&app), revision_before);
+    let replaced = outcome
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "find.replaced")
+        .expect("a replace report");
+    assert!(
+        replaced.message.contains("model space: 1"),
+        "{}",
+        replaced.message
+    );
+    assert!(
+        replaced.message.contains("layout 'Notes': 1"),
+        "{}",
+        replaced.message
+    );
+    assert_eq!(stored(&app, MODEL_TEXT), "beta one");
+    assert_eq!(stored(&app, DETAIL_TEXT), "beta two");
+    // The MTEXT keeps its stored paragraph break.
+    assert_eq!(stored(&app, NOTES_MTEXT), "beta \\Pthree");
+
+    // One undo restores every space.
+    app.execute(&mut session, command(CommandId::Undo, CommandPayload::None))
+        .unwrap();
+    assert_eq!(stored(&app, MODEL_TEXT), "alpha one");
+    assert_eq!(stored(&app, DETAIL_TEXT), "alpha two");
+    assert_eq!(stored(&app, NOTES_MTEXT), "alpha \\Pthree");
+    assert_eq!(undo_depth(&app), undo_before);
+    // Undo replays as its own revision, so compare content, not the counter.
+    assert_ne!(revision(&app), revision_before);
+}
+
+/// A table cell is text too: it is matched on its drawn `°` (not the stored
+/// `%%d`), the report names the cell, and a replace rewrites the escape.
+#[test]
+fn find_matches_a_table_cell_on_its_drawn_escape() {
+    let (mut app, mut session) = table_app();
+    let outcome = run(&mut app, &mut session, CommandId::FindReport, "°", None).unwrap();
+    let message = report_message(&outcome);
+    assert!(message.contains("1 match(es)"), "{message}");
+    assert!(message.contains("cells: row 0, column 0"), "{message}");
+    // The preview starts at the match, on the drawn degree sign.
+    assert!(message.contains("first: ° hot"), "{message}");
+
+    // The stored escape is markup, so it is not a match.
+    let outcome = run(&mut app, &mut session, CommandId::FindReport, "%%d", None).unwrap();
+    assert!(
+        report_message(&outcome).contains("0 match(es)"),
+        "{}",
+        report_message(&outcome)
+    );
+
+    run(
+        &mut app,
+        &mut session,
+        CommandId::FindReplace,
+        "°",
+        Some("deg"),
+    )
+    .unwrap();
+    assert_eq!(stored_cell(&app, TABLE, 0, 0), "20deg hot");
+
+    // A cell is single-line: a line-breaking replacement is still refused.
+    let revision_before = revision(&app);
+    let error = run(
+        &mut app,
+        &mut session,
+        CommandId::FindReplace,
+        "hot",
+        Some("a\nb"),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(error, CadError::InvalidInput(ref message) if message.contains("text.single_line_newline")),
+        "{error:?}"
+    );
+    assert_eq!(revision(&app), revision_before);
+    assert_eq!(stored_cell(&app, TABLE, 0, 0), "20deg hot");
+}
+
+/// A refusal in one space writes nothing in **any** space: the model-space edit
+/// planned first is not committed, and no undo entry is recorded.
+#[test]
+fn find_refusal_writes_nothing_in_any_space() {
+    let (mut app, mut session) = refusal_app();
+    let revision_before = revision(&app);
+    let undo_before = undo_depth(&app);
+
+    // `1st model` (model space) would be replaced; `x\S1/2;y` (layout) only
+    // partly matches, which is the named refusal.
+    let error = run(
+        &mut app,
+        &mut session,
+        CommandId::FindReplace,
+        "1",
+        Some("2"),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(error, CadError::Unsupported(ref message) if message.contains("find.mtext_partial_code")),
+        "{error:?}"
+    );
+    assert_eq!(
+        stored(&app, MODEL_TEXT),
+        "1st model",
+        "model space untouched"
+    );
+    assert_eq!(stored(&app, SHEET_FRACTION), "x\\S1/2;y");
+    assert_eq!(revision(&app), revision_before);
+    assert_eq!(undo_depth(&app), undo_before);
+}
+
+/// Text inside a block definition is reported (named, with a count) but never
+/// edited by FIND: one definition's text is shared by every instance.
+#[test]
+fn find_reports_block_definition_text_as_a_read_only_channel() {
+    let (mut app, mut session) = block_app();
+    let revision_before = revision(&app);
+    let undo_before = undo_depth(&app);
+
+    let outcome = run(&mut app, &mut session, CommandId::FindReport, "frame", None).unwrap();
+    let message = report_message(&outcome);
+    // No editable hit: the INSERT carries no text of its own.
+    assert!(message.contains("0 match(es)"), "{message}");
+    assert!(
+        message.contains("block definitions, read-only (edit with BEDIT)"),
+        "{message}"
+    );
+    assert!(message.contains("'Frame': 1 match(es)"), "{message}");
+    assert!(message.contains("41"), "the member id is named: {message}");
+
+    // A replace edits nothing: the definition is not an editable channel.
+    run(
+        &mut app,
+        &mut session,
+        CommandId::FindReplace,
+        "frame",
+        Some("grid"),
+    )
+    .unwrap();
+    assert_eq!(stored(&app, BLOCK_MEMBER), "frame label");
+    assert_eq!(revision(&app), revision_before);
+    assert_eq!(undo_depth(&app), undo_before);
 }
