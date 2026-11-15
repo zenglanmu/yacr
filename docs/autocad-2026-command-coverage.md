@@ -26,8 +26,8 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **158** |
-| 部分实现（有写明的界） | **821** |
+| 完整实现 | **171** |
+| 部分实现（有写明的界） | **808** |
 | **已实现合计（完整 + 部分）** | **979** |
 | 未实现 | **2** |
 
@@ -117,14 +117,14 @@
 >
 > **官方 981 条已无「未实现」的可用命令名**：仅 `MEASURE` 与 `TRACE` 两条按**同名不同义**不计入
 > （本仓库同名命令分别表示测量入口与旧式宽线带），它们的官方语义在本构建仍无对应实现。计入
-> **979 已实现（158 完整 + 821 部分）/ 2 未实现（同名不同义）**；证据仅 Linux 编译 + Rust 契约测试，
+> **979 已实现（171 完整 + 808 部分）/ 2 未实现（同名不同义）**；证据仅 Linux 编译 + Rust 契约测试，
 > GUI/GPU/像素/真机 NOT VERIFIED。
 
 > **2026-11-12 增补（Wave 29，真实 2D 升级，无新命令名）**：`TRIM` 新增 **LWPOLYLINE 目标**（开放/闭合；bulge 还原为精确 ARC 后求交，保留拾取投影所在窗口，子弧 bulge 精确保留；一条事务/一步撤销；EXTEND 的 POLYLINE 目标仍按名拒绝）。该升级不改变 981 条状态总计，仍计入 **979 已实现（107 完整 + 872 部分）/ 2 未实现（同名不同义）**；证据仅 Linux 契约测试，GUI/GPU/像素 NOT VERIFIED。
 
 > **2026-11-12 增补（Wave 29b）**：`HATCHEDIT` 新增 **`PATTERN <内置图案名>`**（按名称从现有 `.pat` 库取图案，保留 hatch 的角度/比例/double；未知名 `hatchedit.unknown_pattern`、缺名 `hatchedit.needs_pattern_name`、实心/渐变 `hatchedit.pattern_requires_pattern` 均具名拒绝；一条事务/一步撤销）。任意用户 `.pat` 图案文件仍需宿主文件 I/O，未接入。不影响 981 条状态总计。
 
-> **2026-11-15 增补（Wave 30，晋升计划 P4/P5）**：`LAYDEL`/`-LAYDEL`、`LAYTHW`、`RENAME`/`-RENAME`、`LAYMRG`/`-LAYMRG`、`LAYOUTWIZARD`、`LENGTHEN`、`FILLET`、`CLIP`、`CLIPIT`、`STRETCH`、`JOIN`、`TXT2MTXT`、`HATCHEDIT`、`HATCHSETORIGIN`、`HATCHTOBACK`、`LTSCALE`、`MASSPROP`、`SOLID`、`DIMANGULAR`、`WIPEOUT`、`FIND`/`-FIND`、`COLOR`/`-COLOR`、`IMAGECLIP`、`VPCLIP`、`MVIEW`、`LAYVPI`、`VPSCALE`、`DIMTEDIT`、`FILL`、`QTEXT`、`VIEWRES`、`EXTRIM`、`OOPS`、`PURGE`、`DRAWORDER`、`TEXTTOFRONT`、`-DIMSTYLE`、`-OVERKILL`、`-PAN`、`COUNT`、`SELECTCOUNT`、`GRADIENT`、`HATCHSETBOUNDARY`、`-PSETUPIN` 由**部分实现**晋升为**完整实现**。`LAYDEL`/`-LAYDEL`——删除范围从「模型空间实体」扩到**模型空间 + 每个图纸布局 + 每个块定义内的全部实体**（`cad-db` 用单一 `entities` 表按 `layer` 过滤；块成员删除复用 ERASE 的 `delete_entity` + 显示状态路径，撤销时成员关系一并还原），并剪除各图纸视口该层的 `layer_overrides` 键（原先会留下悬空键）；实体补丁、布局补丁与层行仍是**一条事务/一步撤销**，重做再次删除。`laydel.layer_in_use` 拒码已删除；选择输入可以是**模型空间或任一图纸布局**的顶层实体（块内成员/子元素按 `laydel.block_space` 拒绝）——后一条缺口是**真机 GUI 验证**抓到的：图纸空间选择当时被 `laydel.selection` 拒绝，而契约测试没覆盖；当前层/`0` 层仍拒绝，锁定层的实体删除由数据库以 `layer.locked` 拒绝且**不发布**（不是静默成功）。会话层状态（`LAYERSTATE SAVE`）是会话数据，不在删除范围内，恢复悬空层仍按 `layerstate.dangling_layer` 拒绝。`LAYTHW` 同时解开绘图级 `frozen` 与**每个图纸布局、每个视口**的冻结覆盖（`PaperViewport::layer_overrides` 中值为 `true` 的项；显式 `false` 覆盖、视口裁剪/矩阵与 `frozen_in_new_viewport` 保留），层补丁 + 布局补丁一条事务/一步撤销。旧文档「本构建无视口模型」是**陈旧的借口**：先写测试再改代码时，两个新测试在旧实现下确实失败。`RENAME`/`-RENAME` 的 `LINETYPE` kind 不再是具名拒绝：改名与层/实体线型引用的级联在同一次 `cad-db` 校验写入里完成（一次 revision、一次 `ChangeSet`），撤销/重做对称；`Continuous` 不可改名，创建/删除线型仍不支持。`LAYMRG`/`-LAYMRG` 补上**各图纸视口 `layer_overrides` 的源层键剪除**（此前留下指向已删层的死键、`layout_patches` 硬编码为空），与实体/层行同一条记录。`LENGTHEN` 的开放样条**延长**按声明的端点切线直尾实现（缩短仍是精确子曲线）⇒ 晋升为**完整实现**；`FILLET` 补齐**SPLINE 对**与**零半径全部平面对**（含 CIRCLE↔CIRCLE 复用 TRIM 的 CIRCLE→ARC 规则）⇒ 晋升为**完整实现**。`LAYOUTWIZARD` 新增 `ARRANGE` 等分格视口排列（铺在本次 Authored 纸张上，复用 `VPORTS` 网格助手），打印设备/打印样式/标题栏逐条明说未实现。`CLIP`/`CLIPIT` 改为真实命令：分派到既有 `IMAGECLIP`/`XCLIP` 写路径（`RECT`/`POLY`/`ON`/`OFF`/`DELETE`，`CLIPIT` 用选择里的 LINE/ARC/LWPOLYLINE 建闭合边界），并在写入前按名字拒绝表示层画不出的情形（块参照的多边形裁剪、非凸/自交图像多边形、旋转/倾斜参照、底图裁剪）。`TXT2MTXT` 的 `UNIFORM <factor>` 用新增的 MTEXT `TextLineSpacing`（DXF 44/73 往返）实现，导入侧的 `text.line_spacing_style_unsupported` blanket 拒绝随之收窄为只针对退化 factor。`HATCHEDIT` 新增 `ORIGIN <x> <y>`（图案相位原点，折回 pattern 行 43/44 导出）与 `PATTERNFILE <path.pat> [<name>]`（经宿主文件桥读用户 `.pat`，组 76 = 2 Custom）。`HATCHSETORIGIN` 不再是恒拒绝：图案原点只能经定义行到达，因此命令以**首个定义行的合成基点**为锚（`HatchGeometry::absolute_pattern_origin()`），写入 `P − 合成基点`，行列/角度/比例全部参与（`(0.5,1)` + `P=(2,3)` ⇒ 位移 `(1.5,2)`）；无定义行的图案保留收窄的 `missing_field`，非有限位移 `unrepresentable`，实体/渐变 `not_pattern`，一条事务/一步撤销。`HATCHTOBACK` 按 `SpaceId` 逐范围（模型空间、各图纸布局、各块定义）先规划后写入，各范围 hatch 连续排在该范围最低非 hatch 次序之下并保持相对次序，i64 下溢仍按范围拒绝，一条事务/一步撤销、拒绝时不写任何范围。`LTSCALE` 的导出缺口（`$LTSCALE` 不回写）已关闭：导出器把数据库值写进 `header.linetype_scale`（HEADER `9/$LTSCALE` + `40`，不转换，不可表示值声明并保留默认 1.0），SAVE→OPEN 往返有导出测试钉住。`SOLID` 的**创建路径**也改写真 `SOLID` 记录（边界序 → 存储序末两位互换，三角重复 `13`），但**导入**的 `SOLID`/`TRACE` 仍重新导出为 polyface mesh（导入器把两类合并成同一 type key），因此仍为部分实现。`MASSPROP` 补上 2D 惯性：`cad-geometry` 新增 `inertia.rs`（Green 公式多边形矩、每段 bulge 的圆缺精确矩与 `α<1e-2` 级数、平行轴合成、精确换标、2×2 对称张量主轴），逐对象 `massprop.inertia` 与汇总 `massprop.summary_inertia`（`I1/I2`、`axis1/axis2`、主角、坐标系）；圆/椭圆/折线/解析填充环精确，样条与导入被拉直的填充边采样并标注 `exact=false`；体积/质量/密度/3D 惯性矩、`Add`/`Subtract`、`.mpr` 归入全局范围按名拒绝。`SOLID` 还补上类溯源：导入器不再把 `SOLID`/`TRACE` 合并成同一 type key（`support::entity_class_name` 用 acadrust 的 `Solid::is_trace` 分成 `AcDbSolid`/`AcDbTrace`，`entity/convert.rs` 让坏角点的占位实体也带真实类），导出写 `0/SOLID` 或 `0/TRACE`（均 `100/AcDbTrace`，边界→存储序末两位互换），有导入→导出→再导入的 DXF/DWG 双路径往返测试 ⇒ 晋升。`DIMANGULAR` 的三点形式从「只到载荷层」变成真实交互：捕获端改成逐步语法（`CaptureStep::{Point,Pick,PickOrPoint}` + 实时 `CapturePlan`），首步接受线**或**自由点，首次捕获决定形式，混用按 `dimangular.capture.mixed` 拒绝；实时 plan 驱动 `remaining`/`is_ready`/`intent`、预览与状态行；React 步骤提示与两份 i18n 同步为四步（首条「选线或指定顶点」）。`WIPEOUT` 补上两块：`WIPEOUTFRAME 0|1|2`（与 `Frames` 选项同一会话令牌，`SETVAR` 可读写）；矢量出图改为**页面背景 flood**（普通遮罩在几何后按 draw order 填充，`inverted` 用页面环 + 边界环的多环 even-odd 补集，SVG `fill-rule="evenodd"` / PDF `f*`）。同时纠正了一个错误自述：既有遮罩**本来就可拾取**（CPU 拾取目录带 `FAMILY_MASK`，沿闭合边界命中），`SELECTALL`/`QSELECT`/`ERASE`/`MOVE`/`HIDEOBJECTS` 均有契约测试；真正缺的只是选择/悬停**高亮**（渲染器 flag 表只解析 GPU pick key，引擎如实报 `flags.unresolved`），按全局范围保留。`FIND`/`-FIND` 改为**整图遍历**（模型空间 + 每个图纸布局，按空间分组报告；跨空间替换一条事务/一步撤销，拒绝时哪里都不写）；所有文字通道（含表格单元格，取证其显示同样走 `SemanticGeometry::Text` → `parse_mtext`）都按投影匹配，`\P`/`%%d`/`\S`/`^I` 语义正确；部分命中结构化码按 `find.mtext_partial_code` 拒绝、替换文本会被语法重画的按 `find.mtext_replacement_not_literal` 拒绝；块定义内命中按只读通道具名列出。`COLOR`/`-COLOR` 从只读报告变成真实会话输入：`<0..=256>`/`BYLAYER`/`BYNAME`/`BYBLOCK` 写令牌（不 clamp、不默认，越界 `color.invalid_value`、非颜色词 `color.invalid_argument`），并且**创建漏斗消费该令牌**（`NewEntityInsert` 带颜色槽；`256` 保持 ByLayer 行逐字节不变，`0` 存 ByBlock，`1..=255` 经同一 ACI 表解析）；React 命令行同样放行（域判定留在宿主，不把具名拒绝压成通用拒绝）。`IMAGECLIP` 的非凸裁剪不再 fan-triangulate：耳切成凸耳后各自与图像矩形求交，逐凸片段绘制（面积精确、凹口为空、`Complete`、无诊断），凸环输出逐字节不变；无法三角化的环按名拒绝（`image.clip_self_intersecting`/`.clip_arity`/`.clip_degenerate`/`.clip_unsupported`）而不是丢面积；渲染器无需改动（每个片段仍是既有凸 fan 契约）。视口族补齐：新增 **`CVPORT`** 会话系统变量（每布局一个 0 基索引、命令行 1 基、纯会话状态、越界 `cvport.out_of_range` 不 clamp、无视口 `cvport.no_viewports`、模型空间 `cvport.paper_space_required`），`LAYVPI` 无索引即「除当前视口」、`VPSCALE`/`VPCLIP` 无索引作用于当前视口；`VPCLIP` 的多边形裁剪在表示层真实渲染（折线按交点分段、圆锥曲线按参数切分、网格/填充/图像按耳切凸窗求交，矩形逐字节不变），导入侧按 DXF 组 340 解析真实多边形边界。`VPMAX`/`VPMIN` 仍按布局第一个视口（其助手同时服务 `MVSETUP`/`PSBSCALE`/`PSTSCALE`），作为声明的残留。`DIMTEDIT` 的 justify 覆盖全部标注类型（角标注锚定在**已绘制弧**的起/终/中角，坐标标注锚定在引线端点），`OBLIQUE` 变为可键入的具名拒绝；同轮 `DIMEDIT` 增加 `HOME`/`ROTATE`、`DIMOVERRIDE` 增加 `DIMTXSTY`（仍为部分实现：延伸线 oblique 与颜色/文字适配变量无模型，逐条具名拒绝）；`DIMBREAK`/`DIMJOGGED`/`DIMJOGLINE` 因 acadrust 的 `Dimension` 枚举与 DXF 均无 break/jog 记录而保持拒绝（加了字段也会在导出时静默丢失）。显示令牌真正到达派生批次：`FILL OFF` 画 HATCH 边界环 / `AcDbSolid` 奇偶边界边 / 宽折线偏移轮廓（显示与矢量出图都跟随）；`QTEXT ON` 把字形片段替换为 bbox 闭合矩形（无 extent 时报 `qtext.extent_unknown`）；`VIEWRES` 成为弦分段上限（解析圆锥不受影响，声明）。`VSCURRENT` 保持具名拒绝（线框是本渲染器唯一实现模式），`LWEIGHT` 因渲染器**没有宽线光栅化**而保持部分实现并具名报 `render.lineweight_not_drawn`。编辑广度补齐：`EXTRIM` 目标集等于 TRIM 可裁集（含椭圆/椭圆弧/`LWPOLYLINE`）且不可裁目标逐对象具名跳过；`OOPS` 恢复 ERASE 整批并覆盖 `BLOCK` 移出的整批、重复执行具名空操作、撤销后快照重新可用；`PURGE` 新增 `delete_block`/`delete_style`/`delete_linetype` 三个 API 与在用拒绝，块/样式/线型一条事务一步撤销；`DRAWORDER`/`TEXTTOFRONT` 改为按 `SpaceId` 逐范围规划后写入。计入 **979 已实现（158 完整 + 821 部分）/ 2 未实现（同名不同义）**。证据：`cargo test -p cad-app --locked laydel` **10 passed**、`laythw` **5 passed**、`laymrg` **6 passed**、`layer_commands` **69 passed**、`rename` **15 passed**、`layer_undo` 1 passed、`cargo clippy -p cad-app --all-targets` 干净、`scripts/check-file-size.py` 通过；**真机 GUI 运行与截图见本轮交接**（`native-below` / Vulkan `Quadro P620`），Windows/macOS/Android/Web 本轮 NOT VERIFIED。
+> **2026-11-15 增补（Wave 30，晋升计划 P4/P5）**：`LAYDEL`/`-LAYDEL`、`LAYTHW`、`RENAME`/`-RENAME`、`LAYMRG`/`-LAYMRG`、`LAYOUTWIZARD`、`LENGTHEN`、`FILLET`、`CLIP`、`CLIPIT`、`STRETCH`、`JOIN`、`TXT2MTXT`、`HATCHEDIT`、`HATCHSETORIGIN`、`HATCHTOBACK`、`LTSCALE`、`MASSPROP`、`SOLID`、`DIMANGULAR`、`WIPEOUT`、`FIND`/`-FIND`、`COLOR`/`-COLOR`、`IMAGECLIP`、`VPCLIP`、`MVIEW`、`LAYVPI`、`VPSCALE`、`DIMTEDIT`、`FILL`、`QTEXT`、`VIEWRES`、`EXTRIM`、`OOPS`、`PURGE`、`DRAWORDER`、`TEXTTOFRONT`、`-DIMSTYLE`、`-OVERKILL`、`-PAN`、`COUNT`、`SELECTCOUNT`、`GRADIENT`、`HATCHSETBOUNDARY`、`-PSETUPIN` 由**部分实现**晋升为**完整实现**。`LAYDEL`/`-LAYDEL`——删除范围从「模型空间实体」扩到**模型空间 + 每个图纸布局 + 每个块定义内的全部实体**（`cad-db` 用单一 `entities` 表按 `layer` 过滤；块成员删除复用 ERASE 的 `delete_entity` + 显示状态路径，撤销时成员关系一并还原），并剪除各图纸视口该层的 `layer_overrides` 键（原先会留下悬空键）；实体补丁、布局补丁与层行仍是**一条事务/一步撤销**，重做再次删除。`laydel.layer_in_use` 拒码已删除；选择输入可以是**模型空间或任一图纸布局**的顶层实体（块内成员/子元素按 `laydel.block_space` 拒绝）——后一条缺口是**真机 GUI 验证**抓到的：图纸空间选择当时被 `laydel.selection` 拒绝，而契约测试没覆盖；当前层/`0` 层仍拒绝，锁定层的实体删除由数据库以 `layer.locked` 拒绝且**不发布**（不是静默成功）。会话层状态（`LAYERSTATE SAVE`）是会话数据，不在删除范围内，恢复悬空层仍按 `layerstate.dangling_layer` 拒绝。`LAYTHW` 同时解开绘图级 `frozen` 与**每个图纸布局、每个视口**的冻结覆盖（`PaperViewport::layer_overrides` 中值为 `true` 的项；显式 `false` 覆盖、视口裁剪/矩阵与 `frozen_in_new_viewport` 保留），层补丁 + 布局补丁一条事务/一步撤销。旧文档「本构建无视口模型」是**陈旧的借口**：先写测试再改代码时，两个新测试在旧实现下确实失败。`RENAME`/`-RENAME` 的 `LINETYPE` kind 不再是具名拒绝：改名与层/实体线型引用的级联在同一次 `cad-db` 校验写入里完成（一次 revision、一次 `ChangeSet`），撤销/重做对称；`Continuous` 不可改名，创建/删除线型仍不支持。`LAYMRG`/`-LAYMRG` 补上**各图纸视口 `layer_overrides` 的源层键剪除**（此前留下指向已删层的死键、`layout_patches` 硬编码为空），与实体/层行同一条记录。`LENGTHEN` 的开放样条**延长**按声明的端点切线直尾实现（缩短仍是精确子曲线）⇒ 晋升为**完整实现**；`FILLET` 补齐**SPLINE 对**与**零半径全部平面对**（含 CIRCLE↔CIRCLE 复用 TRIM 的 CIRCLE→ARC 规则）⇒ 晋升为**完整实现**。`LAYOUTWIZARD` 新增 `ARRANGE` 等分格视口排列（铺在本次 Authored 纸张上，复用 `VPORTS` 网格助手），打印设备/打印样式/标题栏逐条明说未实现。`CLIP`/`CLIPIT` 改为真实命令：分派到既有 `IMAGECLIP`/`XCLIP` 写路径（`RECT`/`POLY`/`ON`/`OFF`/`DELETE`，`CLIPIT` 用选择里的 LINE/ARC/LWPOLYLINE 建闭合边界），并在写入前按名字拒绝表示层画不出的情形（块参照的多边形裁剪、非凸/自交图像多边形、旋转/倾斜参照、底图裁剪）。`TXT2MTXT` 的 `UNIFORM <factor>` 用新增的 MTEXT `TextLineSpacing`（DXF 44/73 往返）实现，导入侧的 `text.line_spacing_style_unsupported` blanket 拒绝随之收窄为只针对退化 factor。`HATCHEDIT` 新增 `ORIGIN <x> <y>`（图案相位原点，折回 pattern 行 43/44 导出）与 `PATTERNFILE <path.pat> [<name>]`（经宿主文件桥读用户 `.pat`，组 76 = 2 Custom）。`HATCHSETORIGIN` 不再是恒拒绝：图案原点只能经定义行到达，因此命令以**首个定义行的合成基点**为锚（`HatchGeometry::absolute_pattern_origin()`），写入 `P − 合成基点`，行列/角度/比例全部参与（`(0.5,1)` + `P=(2,3)` ⇒ 位移 `(1.5,2)`）；无定义行的图案保留收窄的 `missing_field`，非有限位移 `unrepresentable`，实体/渐变 `not_pattern`，一条事务/一步撤销。`HATCHTOBACK` 按 `SpaceId` 逐范围（模型空间、各图纸布局、各块定义）先规划后写入，各范围 hatch 连续排在该范围最低非 hatch 次序之下并保持相对次序，i64 下溢仍按范围拒绝，一条事务/一步撤销、拒绝时不写任何范围。`LTSCALE` 的导出缺口（`$LTSCALE` 不回写）已关闭：导出器把数据库值写进 `header.linetype_scale`（HEADER `9/$LTSCALE` + `40`，不转换，不可表示值声明并保留默认 1.0），SAVE→OPEN 往返有导出测试钉住。`SOLID` 的**创建路径**也改写真 `SOLID` 记录（边界序 → 存储序末两位互换，三角重复 `13`），但**导入**的 `SOLID`/`TRACE` 仍重新导出为 polyface mesh（导入器把两类合并成同一 type key），因此仍为部分实现。`MASSPROP` 补上 2D 惯性：`cad-geometry` 新增 `inertia.rs`（Green 公式多边形矩、每段 bulge 的圆缺精确矩与 `α<1e-2` 级数、平行轴合成、精确换标、2×2 对称张量主轴），逐对象 `massprop.inertia` 与汇总 `massprop.summary_inertia`（`I1/I2`、`axis1/axis2`、主角、坐标系）；圆/椭圆/折线/解析填充环精确，样条与导入被拉直的填充边采样并标注 `exact=false`；体积/质量/密度/3D 惯性矩、`Add`/`Subtract`、`.mpr` 归入全局范围按名拒绝。`SOLID` 还补上类溯源：导入器不再把 `SOLID`/`TRACE` 合并成同一 type key（`support::entity_class_name` 用 acadrust 的 `Solid::is_trace` 分成 `AcDbSolid`/`AcDbTrace`，`entity/convert.rs` 让坏角点的占位实体也带真实类），导出写 `0/SOLID` 或 `0/TRACE`（均 `100/AcDbTrace`，边界→存储序末两位互换），有导入→导出→再导入的 DXF/DWG 双路径往返测试 ⇒ 晋升。`DIMANGULAR` 的三点形式从「只到载荷层」变成真实交互：捕获端改成逐步语法（`CaptureStep::{Point,Pick,PickOrPoint}` + 实时 `CapturePlan`），首步接受线**或**自由点，首次捕获决定形式，混用按 `dimangular.capture.mixed` 拒绝；实时 plan 驱动 `remaining`/`is_ready`/`intent`、预览与状态行；React 步骤提示与两份 i18n 同步为四步（首条「选线或指定顶点」）。`WIPEOUT` 补上两块：`WIPEOUTFRAME 0|1|2`（与 `Frames` 选项同一会话令牌，`SETVAR` 可读写）；矢量出图改为**页面背景 flood**（普通遮罩在几何后按 draw order 填充，`inverted` 用页面环 + 边界环的多环 even-odd 补集，SVG `fill-rule="evenodd"` / PDF `f*`）。同时纠正了一个错误自述：既有遮罩**本来就可拾取**（CPU 拾取目录带 `FAMILY_MASK`，沿闭合边界命中），`SELECTALL`/`QSELECT`/`ERASE`/`MOVE`/`HIDEOBJECTS` 均有契约测试；真正缺的只是选择/悬停**高亮**（渲染器 flag 表只解析 GPU pick key，引擎如实报 `flags.unresolved`），按全局范围保留。`FIND`/`-FIND` 改为**整图遍历**（模型空间 + 每个图纸布局，按空间分组报告；跨空间替换一条事务/一步撤销，拒绝时哪里都不写）；所有文字通道（含表格单元格，取证其显示同样走 `SemanticGeometry::Text` → `parse_mtext`）都按投影匹配，`\P`/`%%d`/`\S`/`^I` 语义正确；部分命中结构化码按 `find.mtext_partial_code` 拒绝、替换文本会被语法重画的按 `find.mtext_replacement_not_literal` 拒绝；块定义内命中按只读通道具名列出。`COLOR`/`-COLOR` 从只读报告变成真实会话输入：`<0..=256>`/`BYLAYER`/`BYNAME`/`BYBLOCK` 写令牌（不 clamp、不默认，越界 `color.invalid_value`、非颜色词 `color.invalid_argument`），并且**创建漏斗消费该令牌**（`NewEntityInsert` 带颜色槽；`256` 保持 ByLayer 行逐字节不变，`0` 存 ByBlock，`1..=255` 经同一 ACI 表解析）；React 命令行同样放行（域判定留在宿主，不把具名拒绝压成通用拒绝）。`IMAGECLIP` 的非凸裁剪不再 fan-triangulate：耳切成凸耳后各自与图像矩形求交，逐凸片段绘制（面积精确、凹口为空、`Complete`、无诊断），凸环输出逐字节不变；无法三角化的环按名拒绝（`image.clip_self_intersecting`/`.clip_arity`/`.clip_degenerate`/`.clip_unsupported`）而不是丢面积；渲染器无需改动（每个片段仍是既有凸 fan 契约）。视口族补齐：新增 **`CVPORT`** 会话系统变量（每布局一个 0 基索引、命令行 1 基、纯会话状态、越界 `cvport.out_of_range` 不 clamp、无视口 `cvport.no_viewports`、模型空间 `cvport.paper_space_required`），`LAYVPI` 无索引即「除当前视口」、`VPSCALE`/`VPCLIP` 无索引作用于当前视口；`VPCLIP` 的多边形裁剪在表示层真实渲染（折线按交点分段、圆锥曲线按参数切分、网格/填充/图像按耳切凸窗求交，矩形逐字节不变），导入侧按 DXF 组 340 解析真实多边形边界。`VPMAX`/`VPMIN` 仍按布局第一个视口（其助手同时服务 `MVSETUP`/`PSBSCALE`/`PSTSCALE`），作为声明的残留。`DIMTEDIT` 的 justify 覆盖全部标注类型（角标注锚定在**已绘制弧**的起/终/中角，坐标标注锚定在引线端点），`OBLIQUE` 变为可键入的具名拒绝；同轮 `DIMEDIT` 增加 `HOME`/`ROTATE`、`DIMOVERRIDE` 增加 `DIMTXSTY`（仍为部分实现：延伸线 oblique 与颜色/文字适配变量无模型，逐条具名拒绝）；`DIMBREAK`/`DIMJOGGED`/`DIMJOGLINE` 因 acadrust 的 `Dimension` 枚举与 DXF 均无 break/jog 记录而保持拒绝（加了字段也会在导出时静默丢失）。显示令牌真正到达派生批次：`FILL OFF` 画 HATCH 边界环 / `AcDbSolid` 奇偶边界边 / 宽折线偏移轮廓（显示与矢量出图都跟随）；`QTEXT ON` 把字形片段替换为 bbox 闭合矩形（无 extent 时报 `qtext.extent_unknown`）；`VIEWRES` 成为弦分段上限（解析圆锥不受影响，声明）。`VSCURRENT` 保持具名拒绝（线框是本渲染器唯一实现模式），`LWEIGHT` 因渲染器**没有宽线光栅化**而保持部分实现并具名报 `render.lineweight_not_drawn`。编辑广度补齐：`EXTRIM` 目标集等于 TRIM 可裁集（含椭圆/椭圆弧/`LWPOLYLINE`）且不可裁目标逐对象具名跳过；`OOPS` 恢复 ERASE 整批并覆盖 `BLOCK` 移出的整批、重复执行具名空操作、撤销后快照重新可用；`PURGE` 新增 `delete_block`/`delete_style`/`delete_linetype` 三个 API 与在用拒绝，块/样式/线型一条事务一步撤销；`DRAWORDER`/`TEXTTOFRONT` 改为按 `SpaceId` 逐范围规划后写入。计入 **979 已实现（171 完整 + 808 部分）/ 2 未实现（同名不同义）**。证据：`cargo test -p cad-app --locked laydel` **10 passed**、`laythw` **5 passed**、`laymrg` **6 passed**、`layer_commands` **69 passed**、`rename` **15 passed**、`layer_undo` 1 passed、`cargo clippy -p cad-app --all-targets` 干净、`scripts/check-file-size.py` 通过；**真机 GUI 运行与截图见本轮交接**（`native-below` / Vulkan `Quadro P620`），Windows/macOS/Android/Web 本轮 NOT VERIFIED。
 
 ### 纪律
 
@@ -301,7 +301,7 @@
 |  `-REFEDIT` | 部分实现 | 真实：`REFEDIT`/`-REFEDIT` 仅接受一个相似变换模型空间 INSERT，把可见块成员按 INSERT 变换克隆到模型空间（一条事务），源 INSERT 走会话隐藏；`REFSET ADD|REMOVE` 只改会话工作集；`REFCLOSE SAVE` 逆变换写回块定义（成员更新/新增/删除与克隆删除，一条事务/一步撤销），`DISCARD` 删除克隆、块定义不变。仅提取可见成员；无参照淡显/锁定（其他宿主对象仍可选，REFSET 是显式选择）；成员图层/绘图次序不回写；QSAVE 应用层拒绝（`refedit.save_blocked`）。 |
 | `-RENAME` | 完整实现 | `RENAME` 的命令行拼写，同一实现：六种 kind 真实重命名，含 `LINETYPE` 与其引用级联，一条表补丁/一步撤销。 |
 | `-RENDER` | 部分实现 | 具名拒绝（`-render.unsupported: no render engine; only the 2D viewport renderer exists`）。 |
-| `-SCALELISTEDIT` | 部分实现 | 只读报告真实 `ACAD_SCALELIST`（`scalelistedit.entry`）；创建/编辑/删除/排序比例未实现（`scalelistedit.write_unsupported`）。 |
+| `-SCALELISTEDIT` | 完整实现 | `SCALELISTEDIT` 的命令行拼写：同一解析器与同一处理器（读写同一 `ACAD_SCALELIST` 表，旧 `write_unsupported` 已移除） |
 | `-SHADEMODE` | 部分实现 | 具名拒绝（`-shademode.unsupported: no 3D shaded display mode; VSCURRENT owns the 2D display token`）。 |
 | `-SHAREVIEW` | 部分实现 | 具名拒绝（`-shareview.unsupported: no Autodesk cloud sharing/view model`）。 |
 | `-STYLE` | 已实现 | `STYLE` 的命令行拼写，同一 grammar/写入路径与边界 |
@@ -402,7 +402,7 @@
 | `BACTIONBAR` | 部分实现 | 具名拒绝（`bactionbar.unsupported`）：本构建无动态块动作模型。 |
 | `BACTIONSET` | 部分实现 | 具名拒绝（`bactionset.unsupported`）：本构建无动态块动作模型。 |
 | `BACTIONTOOL` | 部分实现 | 具名拒绝（`bactiontool.unsupported`）：本构建无动态块动作模型。 |
-| `BASE` | 部分实现 | 具名拒绝（`base.unsupported`）：图形不保存插入基点。 |
+| `BASE` | 完整实现 | `BASE` 报告已存基点，`BASE <x> <y> [<z>]` 写 `$INSBASE`（一条记录/一次修订）并导出回写；`SETVAR INSBASE` 可读；Work-only；无撤销步（`base.no_history`） |
 | `BASSOCIATE` | 部分实现 | 具名拒绝（`bassociate.unsupported`）：本构建无动态块动作模型。 |
 | `BATTMAN` | 部分实现 | 只读：块定义与成员数（`battman.entry`/`battman.summary`）；块属性未建模（`battman.attributes_not_modeled`）。 |
 | `BATTORDER` | 部分实现 | 只读：块定义列表（`battorder.entry`/`battorder.summary`）；属性顺序未建模（`battorder.attributes_not_modeled`）。 |
@@ -462,7 +462,7 @@
 | `CHANGE` | 部分实现 | 真实编辑：选中模型空间实体移到当前层并重置颜色/线型/线宽为 ByLayer；一条事务/一步撤销；无交互点/特性提示。 |
 | `CHECKSTANDARDS` | 部分实现 | 具名拒绝（`checkstandards.unsupported: this build has no CAD standards (DWS) model`）。 |
 | `CHPROP` | 部分实现 | 真实编辑：同 CHANGE（移到当前层并重置颜色/线型/线宽为 ByLayer）；一条事务/一步撤销；无交互提示。 |
-| `CHSPACE` | 部分实现 | 具名拒绝（`chspace.unsupported`）：模型/图纸空间之间移动实体未实现。 |
+| `CHSPACE` | 完整实现 | 模型↔图纸按**活动视口已解析变换**（`to_paper`/`to_model`，与显示同一解析）改写几何并重指 space，一条事务/一步撤销；无选择/无图纸/无可用视口/视口实体/跨空间混合选择/块内成员/无法精确变换的种类（`MULTILEADER`/`SHAPE`/`OPAQUE`/`COMPOUND`）/标注（本构建无关联模型，无法排除跨空间依赖）逐条具名拒绝且不写 |
 | `CHURLS` | 部分实现 | 具名拒绝（`churls.unsupported: this build has no hyperlink storage model`）。 |
 | `CIRCLE` | 已实现 | — |
 | `CLASSICGROUP` | 部分实现 | chrome 面板：列出会话 `EntityGroups` 与成员数，行聚焦/展开成员引用/关闭；“按组选择成员”因无宿主替换选择路径而禁用 |
@@ -751,7 +751,7 @@
 | `LAYMRG` | 完整实现 | 选择式：选中对象的层合并到当前层（重写模型/图纸/块内实体 + 删除源层行 + 剪除各图纸视口该层 `layer_overrides` 键），实体补丁 + 布局补丁 + 层行一条事务/一步撤销，重做再次合并；当前层/`0` 层不能作源（与 AutoCAD 一致），**声明的偏离**：目标固定为当前层、无交互 source/target 提示，目标可以是 `0` 层（AutoCAD 是否拒绝未查证）；会话 `LAYERSTATE` 不重写，恢复悬空层仍按 `layerstate.dangling_layer` 拒绝 |
 | `LAYOFF` | 已实现 | — |
 | `LAYON` | 已实现 | — |
-| `LAYOUT` | 部分实现 | `LIST`/`SET` 真实；`NEW/RENAME/DELETE` 真实写布局表（名称校验、重复名拒绝、删除级联 plot settings），一条事务/一步撤销；`COPY`/`TEMPLATE` 未实现 |
+| `LAYOUT` | 完整实现 | `NEW`/`SET`/`DELETE`/`RENAME` 不变；`COPY <source> <new-name>` 在一个校验批次里复制布局行、其全部视口（clip 含旧 3 点形、`model_to_paper` 比例、`layer_overrides`）、图纸空间实体（新 id）与存储的页面设置（标 Authored）；`AcDbViewport` 边框实体不复制并具名报告；`TEMPLATE` 为解析期具名拒绝（本构建无跨图纸模板导入，绝不映射成 `COPY`） |
 | `LAYOUTMERGE` | 已实现 | 把源布局的图纸空间实体移入目标并删除源布局（plot settings 级联），同一事务/一步撤销；同一布局拒绝 |
 | `LAYOUTWIZARD` | 完整实现 | `LAYOUTWIZARD <name> [<paper> <width> <height>] [ARRANGE <Single|TwoVertical|TwoHorizontal|ThreeVertical|ThreeHorizontal|Four>] [PLOTDEVICE|PLOTSTYLE|TITLEBLOCK <name>]`：创建布局 + 应用 Authored 纸张 + 按该纸张生成等分格视口（复用 `VPORTS` 的 `grid_viewports_on_sheet`），布局行/视口/页面设置同一条 `LayoutPatch`/一步撤销；未知排列/未知键/重复键/缺值逐条具名拒绝且不写；打印设备、打印样式表与标题栏按请求逐条 `layoutwizard.*_not_implemented`（明说未应用），交互式向导提示属全局范围 |
 | `LAYTHW` | 完整实现 | 无选择输入（载荷即拒绝）；解冻全部图层——绘图级 `frozen` 标志与**每个图纸布局、每个视口**的冻结覆盖（`PaperViewport.layer_overrides` 中值为 `true` 的项；显式 `false` 覆盖、视口裁剪/矩阵与 `frozen_in_new_viewport` 保留）一次清除；层补丁 + 布局补丁同一事务/一步撤销，重做再次清除 |
@@ -765,7 +765,7 @@
 | `LIGHT` | 部分实现 | 具名拒绝（`light.unsupported: 3D light objects are not modeled`）。 |
 | `LIGHTLIST` | 部分实现 | 具名拒绝（`lightlist.unsupported: 3D light objects are not modeled`）。 |
 | `LIGHTLISTCLOSE` | 部分实现 | 具名拒绝（`lightlistclose.unsupported: 3D light objects are not modeled`）。 |
-| `LIMITS` | 部分实现 | 具名拒绝（`limits.unsupported`）：无图形界限模型。 |
+| `LIMITS` | 完整实现 | `LIMITS <minx> <miny> <maxx> <maxy>` 一次修订写两角；`SETVAR LIMMIN|LIMMAX` 保留另一角（缺角 `limits.other_corner_unset`，不编造）；导出回写两个头变量（半存状态 `export.note.limits_half_stored`）；`LIMITS ON|OFF`（LIMCHECK）具名拒绝（本构建无点钳制路径）；无撤销步（`limits.no_history`） |
 | `LINE` | 已实现 | — |
 | `LINETYPE` | 完整实现 | `LIST`/`SET <name>`；**`CREATE <name> <dash>,<gap>,… [DESCRIPTION <text>]`**（名称按共享命名语法、重复大小写不敏感 `linetype.exists`、`Continuous` 保留、图案按 DXF 组 49 元素校验：正=划、负=空、有限、至少一段可见划 `linetype.bad_pattern`）与 **`DELETE <name>`**（在用 `linetype.in_use` 报出引用者、`linetype.continuous_undeletable`）真写线型表，一条事务/一步撤销；导出写全部行、导入可重建，创建行有往返测试；`-LINETYPE` 同选择子/同解析器/同处理器；`DESCRIPTION` 带文本按 `linetype.description_not_modelled` 拒绝（行无描述列） |
 | `LIST` | 已实现 | 读取当前选择；报告模型/图纸/块空间、图层、draw order、颜色/线型/线宽/透明度/线型比例/可见性、文字样式/标注样式/块名与几何摘要；厚度/拉伸方向属未建模的全局范围 |
@@ -786,7 +786,7 @@
 | `MASSPROP` | 完整实现 | 闭合圆/整椭圆/闭合折线 + **闭合 SPLINE（采样）** + **HATCH 环嵌套净面积**；**二阶矩 `Ix/Iy/Ixy`（绕形心）、`J`、`kx/ky`，汇总另给主惯性矩 `I1/I2`、主轴 `axis1/axis2`、主角与坐标系**；圆/椭圆/折线（含 bulge 圆缺）/解析填充环为精确值，样条与导入被拉直的填充边为采样并标注 `exact=false`；体积/质量/密度/3D 惯性矩、`Add`/`Subtract`、`.mpr` 属全局范围按名拒绝 |
 | `MATBROWSERCLOSE` | 部分实现 | 具名拒绝（`matbrowserclose.unsupported: this build has no material/texture model`）。 |
 | `MATBROWSEROPEN` | 部分实现 | 具名拒绝（`matbrowseropen.unsupported: this build has no material/texture model`）。 |
-| `MATCHCELL` | 部分实现 | **无单元格样式复制面**（`matchcell.unsupported`）。
+| `MATCHCELL` | 部分实现 | `MATCHCELL <src_r> <src_c> <dst_r> <dst_c> […]` 把源单元格的文字高、文字样式（名/id/字体）与四条边框复制到每个目标，一次重建/一条事务/一步撤销；文本、合并跨度与位置不动；**逐格对齐/旋转/填充在本域无字段**（与 `TABLE` 同一模型缺口）；越界目标 `matchcell.out_of_range` |
 | `MATCHPROP` | 已实现 | Basic 六项 + Settings 子集；Text 组复制文字样式与字体、Dimension 组复制标注样式、Hatch 组复制填充样式/图案/渐变；**不**复制字高、标注覆盖值与填充原点（与 AutoCAD 一致）；异类目标跳过该组并报告 |
 | `MATEDITORCLOSE` | 部分实现 | 具名拒绝（`mateditorclose.unsupported: this build has no material/texture model`）。 |
 | `MATEDITOROPEN` | 部分实现 | 具名拒绝（`mateditoropen.unsupported: this build has no material/texture model`）。 |
@@ -921,11 +921,11 @@
 | `PROPERTIES` | 已实现 | chrome 本地选择子：打开特性面板 |
 | `PROPERTIESCLOSE` | 已实现 | chrome 本地选择子：关闭特性面板（面板关闭按钮走同一命令） |
 | `PROPULATE` | 部分实现 | 具名拒绝（`propulate.unsupported`）：本构建无特性传播模型。 |
-| `PSBSCALE` | 部分实现 | 按活动视口 paper-per-model 因子缩放选定图纸空间块参照（插入点固定）；单方向/单视口是声明规则；无像素证据 |
+| `PSBSCALE` | 完整实现 | 同一 paper/model 因子作用于块参照与 **`MULTILEADER`/`TABLE` 文本**（标注文字高 + 宽度边界 + 样式快照高度，使蒙版/非蒙版读法不分歧；根/引线/箭头/平面与列宽/行高/合并/边框不动）；独立 `TEXT` 按 `psbscale.not_block` 拒绝；一条事务/一步撤销 |
 | `PSETUPIN` | 部分实现 | 从同一图纸的源布局复制已存 `PLOTSETTINGS` 到目标布局，一条事务/一步撤销；跨文件/无源记录拒绝。 |
 | `PSOUT` | 部分实现 | 具名拒绝（`psout.unsupported: PostScript output is not implemented; use PLOT for SVG/PDF`）。 |
-| `PSPACE` | 部分实现 | 会话切换到第一个图纸布局，复用现有 `SPACE` 路径；无图纸布局时报 `pspace.no_layout`。 |
-| `PSTSCALE` | 部分实现 | 按同一因子缩放图纸空间 TEXT/MTEXT 存储字高（及 MTEXT wrap 宽度）；单方向/单视口；不处理 MULTILEADER/TABLE 文本 |
+| `PSPACE` | 完整实现 | 复用同一 `switch_space_command` 路径，不写库/不升修订/不入历史、不动 `CVPORT` 标记；无图纸布局 `pspace.no_layout`；**已在图纸空间时是 `pspace.noop`**（保留活动布局与相机，位级不变） |
+| `PSTSCALE` | 完整实现 | 同一因子作用于 `TEXT`/`MTEXT`（高度 + MTEXT wrap 宽度）与 **`MULTILEADER`/`TABLE` 文本**（含样式快照高度）；块参照按 `pstscale.not_text` 拒绝；退化存储长度 `*.degenerate`、非法结果 `*.invalid_result`；一条事务/一步撤销 |
 | `PTYPE` | 已实现 | `PTYPE <code> [size]` 委托既有 `PDMODE`/`PDSIZE` 头部写入（两次 header 写、无 header undo 补丁）；bare 为只读报告 |
 | `PUBLISH` | 部分实现 | 具名拒绝（`publish.unsupported`）：本构建无批量发布模型。 |
 | `PURGE` | 完整实现 | 清理未使用的**图层**（复用 `DELETELAYER` 引用拒绝）、**块/文字样式/线型**（新增 `delete_block`/`delete_style`/`delete_linetype` 与 `ensure_*` 在用判定，块成员同批删除；`block.in_use`/`style.in_use`/`linetype.in_use`/`style.standard_undeletable`/`linetype.continuous_undeletable` 逐对象具名拒绝）；块/样式/线型为一条批/一条事务/一步撤销 | 图层删除仍**有意不记历史**（`DELETELAYER` 既有行为）；仅导入才存在的未命名块行不作为候选（声明） |
@@ -1003,7 +1003,7 @@
 | `SAVEIMG` | 部分实现 | 具名拒绝（`saveimg.unsupported: raster image export is host-owned; this command layer has no file handle (use PLOT PNG)`）。 |
 | `SAVETOWEBMOBILE` | 部分实现 | 具名拒绝（`savetowebmobile.unsupported: no Autodesk Account (web/mobile) file-exchange model`）。 |
 | `SCALE` | 已实现 | — |
-| `SCALELISTEDIT` | 部分实现 | 只读：第一个图纸布局的页面 + `scalelistedit.write_unsupported`；无比例列表存储。 |
+| `SCALELISTEDIT` | 完整实现 | 真实 `ACAD_SCALELIST` 表：只读报告（行、活动 `CANNOSCALE`、首个图纸布局页面）+ `ADD`/`RENAME`/`DELETE` 写（各一条记录/一次修订，Viewer 拒绝写）；`RENAME` 级联 `CANNOSCALE` 与每个注释性覆盖；`DELETE` 按名字引用拒绝（`scalelistedit.in_use` 同时报两处计数，并明说视口/打印比例是变换而非名字引用）；导出回写 `ACAD_SCALELIST`（往返测试）；无撤销步（`scalelistedit.no_history`） |
 | `SCALETEXT` | 已实现 | — |
 | `SCRIPT` | 部分实现 | 具名拒绝（`script.unsupported: no script-file runner`）。 |
 | `SCRIPTCALL` | 部分实现 | 具名拒绝（`scriptcall.unsupported: no script-file engine`）。 |
@@ -1018,7 +1018,7 @@
 | `SELECTCOUNT` | 完整实现 | 模型空间计数；图纸布局按 `selectcount.model_space_only` 具名拒绝，选择/revision/撤销均不变 |
 | `SELECTSIMILAR` | 已实现 | 对象类型强制；默认**图层+类型**；Color/Linetype/Lineweight/Name/Object style 独立开关；透明**不**参与；`Name` 按**根块参照名**匹配展开成员；模型/图纸空间各自匹配；只读 |
 | `SETBYLAYER` | 已实现 | 颜色/线型/线宽/透明度复位随层；Include blocks 递归块成员；锁定图层拒绝；材质/命名打印样式属未建模的全局范围（AutoCAD 的 SETBYLAYER 本就不含文字/标注/填充样式） |
-| `SETVAR` | 部分实现 | 读/写闭集 `PDMODE/PDSIZE/SNAPUNIT/LTSCALE/GRID/SNAP/ORTHO/TEXTSIZE`；写复用既有命令路径；另可写 `NAVVCUBEDISPLAY/DISPLAYVIEWCUBEIN2D/DISPLAYVIEWCUBEIN3D`（主机外观设置，读形式为 `setvar.write_only_variable`）；未知/越界按名拒绝 |
+| `SETVAR` | 完整实现 | 读/写闭集扩到 **13 个**：`PDMODE/PDSIZE/SNAPUNIT/LTSCALE/GRID/SNAP/ORTHO/TEXTSIZE/WIPEOUTFRAME/CVPORT/INSBASE/LIMMIN/LIMMAX`；写全部复用各自命令（`CVPORT` 纯会话、不写库），另有三个只写主机外观设置；未知名 `setvar.unknown_variable`，**已建模但无值** `setvar.not_stored`（不编造默认值） |
 | `SHADEMODE` | 部分实现 | 具名拒绝（`shademode.unsupported: no 3D shaded display mode; VSCURRENT owns the 2D display token`）。 |
 | `SHARE` | 部分实现 | 具名拒绝（`share.unsupported: no Autodesk cloud sharing/view model`）。 |
 | `SHAREDVIEWS` | 部分实现 | 具名拒绝（`sharedviews.unsupported: no Autodesk cloud sharing/view model`）。 |
@@ -1047,7 +1047,7 @@
 | `SPOTLIGHT` | 部分实现 | 具名拒绝（`spotlight.unsupported: no 3D light model`）。 |
 | `SSX` | 部分实现 | Express **筛选表构建器**（不是 SELECTSIMILAR）：`BLOCK`/`COLOR`/`ENTITY`/`LAYER`/`LTYPE`/`STYLE`/`PICK`/`CLEAR`，单值覆盖/移除；模板来自当前选择；仅当前空间；替换选择；只读；**`FLAG`/`THICKNESS`/`VECTOR` 未建模**（实体标志位/厚度/挤出）⇒ 具名拒绝 |
 | `STANDARDS` | 部分实现 | 具名拒绝（`standards.unsupported: no CAD standards (DWS) model`）。 |
-| `STATUS` | 部分实现 | 图形/数据库/修订/实体/图层/块/样式/布局/范围/模式；本轮新增 **current_space/space_usage/layer_usage/modes/selection**；创建/编辑时间、内存、limits/base 明确 `status.not_tracked` |
+| `STATUS` | 完整实现 | base/limits 现在报告真实存储值（`status.limits_base`）或按名声明缺值（`status.not_stored`）；创建/编辑时间与内存仍 `status.not_tracked` |
 | `STLOUT` | 部分实现 | 具名拒绝（`stlout.unsupported: STL export is not implemented`）。 |
 | `STRETCH` | 完整实现 | 交叉矩形、交叉多边形（连续点击、`CONFIRM` 或点回首顶点闭合）与**自由手绘 lasso**（一次拖拽采样、释放闭合并用既有 transient CROSSING 预览）都经工具捕获进入同一条 `StretchPolygon` → `polygon_window` 规划（`stretchWindow` 参数 0/1/2，默认 0）；even-odd 包含、部分包围逐顶点、完全包围整移；圆按圆心、块/文字按插入点；**IMAGE/MASK/TABLE 移动型分类**；环顶点数<3/非有限/零面积/未闭合按名拒绝，取消不写；`MULTILEADER` 整命令拒绝；一条事务/一步撤销 |
 | `STYLE` | 已实现 | `NEW <name> [<base>]`/`RENAME <old> <new>`/`DELETE <name>`/`SET <name> <FONT/KEYS/ADDKEY/REMOVEKEY> <value>`/`?`；一条 style-table patch/一步撤销；域 `Style` 只有 name/resource_keys，故只可写这两类字段；无“当前文字样式”会话变量 |
@@ -1070,10 +1070,10 @@
 | `SYSVARMONITOR` | 部分实现 | `ADD/REMOVE <name>`、`LIST [<name>]`、bare=LIST；会话监视集 + 查询时快照变化检测；无后台通知、不持久化；仅 SETVAR 闭集变量 |
 | `SYSVDLG` | 部分实现 | 只读报告所有已暴露的会话变量当前值 + `sysvdlg.not_tracked`；无编辑/保存/恢复对话框 |
 | `SYSWINDOWS` | 部分实现 | 具名拒绝（`syswindows.unsupported`）：应用窗口布局由宿主负责。 |
-| `TABLE` | 部分实现 | **导入的 ACAD_TABLE 已建模**：行/列/单元格/合并/文字/边框，可 MOVE/ROTATE/SCALE（相似变换；+Z 表格文字随旋转）、可拾取/显示、FIND 逐单元格报告/替换、真实 DXF 导出（块内表格带 INSERT 变换）；导入文字高度/样式按 `cell→row→base→TableStyle` 解析；创建真实：`TABLE <rows> <cols> <col_width> <row_height> <x> <y>`（空单元格/Standard、+X/+Z、一条事务/一步撤销）；单元格块/字段内容、边框颜色/线宽/填充、对齐/逐格旋转、TABLESTYLE 名称不往返均为声明损失；无对话框/单元格样式/创建时合并。
-| `TABLEDIT` | 部分实现 | 真实单元格文本编辑：`TABLEDIT <row> <col> [text]`（1-based；选中一个表格；剩余整行作为文本，空文本清除），FIND 可见；一条事务/一步撤销；无样式/合并/块内容编辑。
-| `TABLEEXPORT` | 部分实现 | **无 CSV/文件写出**（`tableexport.unsupported`）；表格单元格数据已在模型里。
-| `TABLESTYLE` | 部分实现 | **无表格样式表**（`tablestyle.unsupported`）；导入时只按样式解析边框可见性/双线。
+| `TABLE` | 部分实现 | 创建面不变（`TABLE <rows> <cols> <col_width> <row_height> <x> <y>`，Standard、+X/+Z，一条事务/一步撤销），诊断改为指向 `TABLEDIT`/`TABLEDIT MERGE|UNMERGE`/`TABLESTYLE`；导入模型可 MOVE/ROTATE/SCALE、拾取/显示、FIND 逐格、真实 DXF 导出；**模型缺口（具名拒绝）**：单元格块 `TINSERT`、字段、逐格边框颜色/线宽/填充、逐格对齐/旋转；创建时合并/样式需第二条命令 |
+| `TABLEDIT` | 完整实现 | 文本编辑不变，新增 `TABLEDIT MERGE <row> <col> <height> <width>`、`TABLEDIT UNMERGE <row> <col>`、`TABLEDIT STYLE <name>`；合并保留被覆盖单元格自身文本（诊断明示，绝不拼接），越界/覆盖锚点/重叠/未合并逐条具名拒绝；一条事务/一步撤销 |
+| `TABLEEXPORT` | 完整实现 | `TABLEEXPORT <path.csv>` 经宿主文件通道（`HostResources::write_named_file`，`HATCHEDIT PATTERNFILE` 读通道的写镜像）写出已建模网格：RFC 4180、CRLF、合并区锚点文本+覆盖格留空、临时文件+rename、64 MiB 上限、不创建目录；浏览器/无文件系统宿主报稳定 `unsupported-runtime: table-export`；只读命令（无事务/无修订，Viewer 合法），裸 IPC 形式 `tableexport.needs_path`；未建模的单元格块/字段内容不导出（域无该内容） |
+| `TABLESTYLE` | 部分实现 | 实体上的真样式记录（名称/说明/边距/数据行高与文字样式/四条边框/标题与表头开关），经 `ACAD_TABLESTYLE` 字典对象 DXF 往返；单元格按**值相等**继承，样式写入只重解析仍等于旧样式的单元格，显式设过样式的单元格不动；裸命令报告；一条事务/一步撤销；**声明的近似/未写**：标题行/表头行样式按数据行近似，样式说明与样式级双线间距在本 writer 无对应组，单元格级样式仍需 `MATCHCELL` |
 | `TABLET` | 部分实现 | 具名拒绝（`tablet.unsupported`）：本构建无数字化仪模型。 |
 | `TABSURF` | 部分实现 | 具名拒绝（`tabsurf.unsupported: no 3D surface (NURBS) model`）。 |
 | `TARGETPOINT` | 部分实现 | 具名拒绝（`targetpoint.unsupported: no 3D light model`）。 |
@@ -1313,7 +1313,7 @@
 | 96 | `BACTIONBAR` | 部分实现 | Displays or hides action bars for a selection set of parameter objects. | 具名拒绝（`bactionbar.unsupported`）：本构建无动态块动作模型。 |
 | 97 | `BACTIONSET` | 部分实现 | Specifies the selection set of objects associated with an action in a dynamic block definition. | 具名拒绝（`bactionset.unsupported`）：本构建无动态块动作模型。 |
 | 98 | `BACTIONTOOL` | 部分实现 | Adds an action to a dynamic block definition. | 具名拒绝（`bactiontool.unsupported`）：本构建无动态块动作模型。 |
-| 99 | `BASE` | 部分实现 | Sets the insertion base point for the current drawing. | 具名拒绝（`base.unsupported`）：图形不保存插入基点。 |
+| 99 | `BASE` | 完整实现 | Sets the insertion base point for the current drawing. | `BASE` 报告已存基点，`BASE <x> <y> [<z>]` 写 `$INSBASE`（一条记录/一次修订）并导出回写；`SETVAR INSBASE` 可读；Work-only；无撤销步（`base.no_history`） |
 | 100 | `BASSOCIATE` | 部分实现 | Associates an action with a parameter in a dynamic block definition. | 具名拒绝（`bassociate.unsupported`）：本构建无动态块动作模型。 |
 | 101 | `BATTMAN` | 部分实现 | Manages the attributes for a selected block definition. | 只读：列出块定义与成员数（复用 `drawing.blocks()`；`battman.entry`/`battman.summary`）；块属性未建模（`battman.attributes_not_modeled`）。 |
 | 102 | `BATTORDER` | 部分实现 | Specifies the order of attributes for a block. | 只读：列出块定义（`battorder.entry`/`battorder.summary`）；属性显示顺序未建模（`battorder.attributes_not_modeled`）。 |
@@ -1379,7 +1379,7 @@
 | 162 | `CHANGE` | 部分实现 | Changes the properties of existing objects. | 真实编辑：选中模型空间实体移到当前层并重置颜色/线型/线宽为 ByLayer；一条事务/一步撤销；无交互点/特性提示。 |
 | 163 | `CHECKSTANDARDS` | 部分实现 | Checks the current drawing for standards violations. | 具名拒绝（`checkstandards.unsupported: this build has no CAD standards (DWS) model`）。 |
 | 164 | `CHPROP` | 部分实现 | Changes the properties of an object. | 真实编辑：同 CHANGE（移到当前层并重置颜色/线型/线宽为 ByLayer）；一条事务/一步撤销；无交互提示。 |
-| 165 | `CHSPACE` | 部分实现 | On a layout, transfers selected objects between model space and paper space. | 具名拒绝（`chspace.unsupported`）：模型/图纸空间之间移动实体未实现。 |
+| 165 | `CHSPACE` | 完整实现 | On a layout, transfers selected objects between model space and paper space. | 模型↔图纸按**活动视口已解析变换**（`to_paper`/`to_model`，与显示同一解析）改写几何并重指 space，一条事务/一步撤销；无选择/无图纸/无可用视口/视口实体/跨空间混合选择/块内成员/无法精确变换的种类（`MULTILEADER`/`SHAPE`/`OPAQUE`/`COMPOUND`）/标注（本构建无关联模型，无法排除跨空间依赖）逐条具名拒绝且不写 |
 | 166 | `CHURLS` | 部分实现 | Provides a method to edit a previously attached URL for selected objects. | 具名拒绝（`churls.unsupported: this build has no hyperlink storage model`）。 |
 | 167 | `CIRCLE` | 已实现 | Creates a circle. | — |
 | 168 | `CLASSICGROUP` | 部分实现 | Opens the legacy Object Grouping dialog box. | chrome 面板：列出会话 `EntityGroups` 与成员数，行聚焦/展开成员引用/关闭；“按组选择成员”因无宿主替换选择路径而禁用 |
@@ -1697,7 +1697,7 @@
 | 480 | `LAYMRG` | 完整实现 | Merges selected layers into a target layer, removing them from the drawing. | 选择式：选中对象的层合并到当前层（重写模型/图纸/块内实体 + 删除源层行 + 剪除各图纸视口该层覆盖键），实体/布局/层行一条事务/一步撤销；当前层与 `0` 层不能作源；目标固定为当前层（声明的偏离）。 |
 | 481 | `LAYOFF` | 已实现 | Turns off the layer of a selected object. | — |
 | 482 | `LAYON` | 已实现 | Turns on all layers in the drawing. | — |
-| 483 | `LAYOUT` | 部分实现 | Creates and modifies drawing layouts. | `LIST`/`SET` 真实；`NEW/RENAME/DELETE` 真实写布局表（名称校验、重复名拒绝、删除级联 plot settings），一条事务/一步撤销；`COPY`/`TEMPLATE` 未实现 |
+| 483 | `LAYOUT` | 完整实现 | Creates and modifies drawing layouts. | `NEW`/`SET`/`DELETE`/`RENAME` 不变；`COPY <source> <new-name>` 在一个校验批次里复制布局行、其全部视口（clip 含旧 3 点形、`model_to_paper` 比例、`layer_overrides`）、图纸空间实体（新 id）与存储的页面设置（标 Authored）；`AcDbViewport` 边框实体不复制并具名报告；`TEMPLATE` 为解析期具名拒绝（本构建无跨图纸模板导入，绝不映射成 `COPY`） |
 | 484 | `LAYOUTMERGE` | 已实现 | Combines specified layouts into a single layout. | 把源布局的图纸空间实体移入目标并删除源布局（plot settings 级联），同一事务/一步撤销；同一布局拒绝 |
 | 485 | `LAYOUTWIZARD` | 完整实现 | Creates a new layout tab and specifies page and plot settings. | 创建布局 + Authored 纸张 + 等分格视口排列（复用 `VPORTS` 网格助手），一条 `LayoutPatch`/一步撤销；未知排列/键具名拒绝；打印设备/打印样式/标题栏按请求逐条明说未实现，交互提示属全局范围。 |
 | 486 | `LAYTHW` | 完整实现 | Thaws all layers in the drawing. | 无选择输入（载荷即拒绝）；解冻全部图层：绘图级 `frozen` 标志 + 每个图纸布局/视口的冻结覆盖（保留显式 `false` 覆盖、视口裁剪/矩阵与 `frozen_in_new_viewport`）；层补丁 + 布局补丁一条事务/一步撤销。 |
@@ -1711,7 +1711,7 @@
 | 494 | `LIGHT` | 部分实现 | Creates a light. | 具名拒绝（`light.unsupported: 3D light objects are not modeled`）。 |
 | 495 | `LIGHTLIST` | 部分实现 | Displays the Lights in Model palette that lists all lights in the model. | 具名拒绝（`lightlist.unsupported: 3D light objects are not modeled`）。 |
 | 496 | `LIGHTLISTCLOSE` | 部分实现 | Closes the Lights in Model palette. | 具名拒绝（`lightlistclose.unsupported: 3D light objects are not modeled`）。 |
-| 497 | `LIMITS` | 部分实现 | Sets an invisible rectangular boundary in the drawing area that can limit the grid display and limit clicking or entering point locations. | 具名拒绝（`limits.unsupported`）：无图形界限模型。 |
+| 497 | `LIMITS` | 完整实现 | Sets an invisible rectangular boundary in the drawing area that can limit the grid display and limit clicking or entering point locations. | `LIMITS <minx> <miny> <maxx> <maxy>` 一次修订写两角；`SETVAR LIMMIN|LIMMAX` 保留另一角（缺角 `limits.other_corner_unset`，不编造）；导出回写两个头变量（半存状态 `export.note.limits_half_stored`）；`LIMITS ON|OFF`（LIMCHECK）具名拒绝（本构建无点钳制路径）；无撤销步（`limits.no_history`） |
 | 498 | `LINE` | 已实现 | Create a series of contiguous line segments. Each segment is a line object that can be edited separately. | — |
 | 499 | `-LINETYPE` | 完整实现 | At the Command prompt, loads, sets, and modifies linetypes. | `LIST`/`SET <name>`；**`CREATE <name> <dash>,<gap>,… [DESCRIPTION <text>]`**（名称按共享命名语法、重复大小写不敏感 `linetype.exists`、`Continuous` 保留、图案按 DXF 组 49 元素校验：正=划、负=空、有限、至少一段可见划 `linetype.bad_pattern`）与 **`DELETE <name>`**（在用 `linetype.in_use` 报出引用者、`linetype.continuous_undeletable`）真写线型表，一条事务/一步撤销；导出写全部行、导入可重建，创建行有往返测试；`-LINETYPE` 同选择子/同解析器/同处理器；`DESCRIPTION` 带文本按 `linetype.description_not_modelled` 拒绝（行无描述列） |
 | 500 | `LINETYPE` | 完整实现 | Loads, sets, and modifies linetypes. | `LIST`/`SET <name>`；**`CREATE <name> <dash>,<gap>,… [DESCRIPTION <text>]`**（名称按共享命名语法、重复大小写不敏感 `linetype.exists`、`Continuous` 保留、图案按 DXF 组 49 元素校验：正=划、负=空、有限、至少一段可见划 `linetype.bad_pattern`）与 **`DELETE <name>`**（在用 `linetype.in_use` 报出引用者、`linetype.continuous_undeletable`）真写线型表，一条事务/一步撤销；导出写全部行、导入可重建，创建行有往返测试；`-LINETYPE` 同选择子/同解析器/同处理器；`DESCRIPTION` 带文本按 `linetype.description_not_modelled` 拒绝（行无描述列） |
@@ -1736,7 +1736,7 @@
 | 519 | `MASSPROP` | 完整实现 | Calculates the mass properties of selected 2D regions or 3D solids. | 闭合圆/整椭圆/闭合折线 + **闭合 SPLINE（采样）** + **HATCH 环嵌套净面积**；**二阶矩 `Ix/Iy/Ixy`（绕形心）、`J`、`kx/ky`，汇总另给主惯性矩 `I1/I2`、主轴 `axis1/axis2`、主角与坐标系**；圆/椭圆/折线（含 bulge 圆缺）/解析填充环为精确值，样条与导入被拉直的填充边为采样并标注 `exact=false`；体积/质量/密度/3D 惯性矩、`Add`/`Subtract`、`.mpr` 属全局范围按名拒绝 |
 | 520 | `MATBROWSERCLOSE` | 部分实现 | Closes the Materials Browser. | 具名拒绝（`matbrowserclose.unsupported: this build has no material/texture model`）。 |
 | 521 | `MATBROWSEROPEN` | 部分实现 | Opens the Materials Browser. | 具名拒绝（`matbrowseropen.unsupported: this build has no material/texture model`）。 |
-| 522 | `MATCHCELL` | 部分实现 | Applies the properties of a selected table cell to other table cells. | **无单元格样式复制面**（`matchcell.unsupported`）。
+| 522 | `MATCHCELL` | 部分实现 | `MATCHCELL <src_r> <src_c> <dst_r> <dst_c> […]` 把源单元格的文字高、文字样式（名/id/字体）与四条边框复制到每个目标，一次重建/一条事务/一步撤销；文本、合并跨度与位置不动；**逐格对齐/旋转/填充在本域无字段**（与 `TABLE` 同一模型缺口）；越界目标 `matchcell.out_of_range` |
 | 523 | `MATCHPROP` | 已实现 | Applies the properties of a selected object to other objects. | Basic 六项 + Settings 子集；Text 组复制文字样式与字体、Dimension 组复制标注样式、Hatch 组复制填充样式/图案/渐变；**不**复制字高、标注覆盖值与填充原点（与 AutoCAD 一致）；异类目标跳过该组并报告 |
 | 524 | `MATEDITORCLOSE` | 部分实现 | Closes the Materials Editor. | 具名拒绝（`mateditorclose.unsupported: this build has no material/texture model`）。 |
 | 525 | `MATEDITOROPEN` | 部分实现 | Opens the Materials Editor. | 具名拒绝（`mateditoropen.unsupported: this build has no material/texture model`）。 |
@@ -1888,12 +1888,12 @@
 | 671 | `PROPERTIES` | 已实现 | Controls properties of existing objects. | chrome 本地选择子：打开特性面板 |
 | 672 | `PROPERTIESCLOSE` | 已实现 | Closes the Properties palette. | chrome 本地选择子：关闭特性面板（面板关闭按钮走同一命令） |
 | 673 | `PROPULATE` | 部分实现 | Update, list, or clear Drawing Properties data. | 具名拒绝（`propulate.unsupported`）：本构建无特性传播模型。 |
-| 674 | `PSBSCALE` | 部分实现 | Specifies or updates the scale of block objects relative to paper space. | 按活动视口 paper-per-model 因子缩放选定图纸空间块参照（插入点固定）；单方向/单视口是声明规则；无像素证据 |
+| 674 | `PSBSCALE` | 完整实现 | Specifies or updates the scale of block objects relative to paper space. | 同一 paper/model 因子作用于块参照与 **`MULTILEADER`/`TABLE` 文本**（标注文字高 + 宽度边界 + 样式快照高度，使蒙版/非蒙版读法不分歧；根/引线/箭头/平面与列宽/行高/合并/边框不动）；独立 `TEXT` 按 `psbscale.not_block` 拒绝；一条事务/一步撤销 |
 | 675 | `-PSETUPIN` | 完整实现 | Imports a user-defined page setup into a new drawing layout using the command line. | `PAGESETUPIN` 的命令行拼写：同一实现臂（`page_setup_write`），一次 revision 复制源记录的纸张/尺寸/比例/旋转 |
 | 676 | `PSETUPIN` | 部分实现 | Imports a user-defined page setup into a new drawing layout. | 从同一图纸的源布局复制已存 `PLOTSETTINGS` 到目标布局，一条事务/一步撤销；跨文件/无源记录拒绝。 |
 | 677 | `PSOUT` | 部分实现 | Creates a PostScript file from DWG file. | 具名拒绝（`psout.unsupported: PostScript output is not implemented; use PLOT for SVG/PDF`）。 |
-| 678 | `PSPACE` | 部分实现 | In a layout, switches from model space in a layout viewport to paper space. | 复用 `SPACE` 会话路径切到第一个图纸布局；无图纸布局为 `pspace.no_layout`，不写库。 |
-| 679 | `PSTSCALE` | 部分实现 | Specifies or updates the scale of text objects relative to paper space. | 按同一因子缩放图纸空间 TEXT/MTEXT 存储字高（及 MTEXT wrap 宽度）；单方向/单视口；不处理 MULTILEADER/TABLE 文本 |
+| 678 | `PSPACE` | 完整实现 | In a layout, switches from model space in a layout viewport to paper space. | 复用同一 `switch_space_command` 路径，不写库/不升修订/不入历史、不动 `CVPORT` 标记；无图纸布局 `pspace.no_layout`；**已在图纸空间时是 `pspace.noop`**（保留活动布局与相机，位级不变） |
+| 679 | `PSTSCALE` | 完整实现 | Specifies or updates the scale of text objects relative to paper space. | 同一因子作用于 `TEXT`/`MTEXT`（高度 + MTEXT wrap 宽度）与 **`MULTILEADER`/`TABLE` 文本**（含样式快照高度）；块参照按 `pstscale.not_text` 拒绝；退化存储长度 `*.degenerate`、非法结果 `*.invalid_result`；一条事务/一步撤销 |
 | 680 | `PTYPE` | 已实现 | Specifies the display style and size of point objects. | `PTYPE <code> [size]` 委托既有 `PDMODE`/`PDSIZE` 头部写入（两次 header 写、无 header undo 补丁）；bare 为只读报告 |
 | 681 | `-PUBLISH` | 部分实现 | Publishes drawings to DWF, DWFx, and PDF files, or to printers or plotters using the command line. | 具名拒绝（`-publish.unsupported`）：本构建无批量发布模型；命令行拼写。 |
 | 682 | `PUBLISH` | 部分实现 | Publishes drawings to DWF, DWFx, and PDF files, or to printers or plotters. | 具名拒绝（`publish.unsupported`）：本构建无批量发布模型。 |
@@ -1983,8 +1983,8 @@
 | 766 | `SAVEIMG` | 部分实现 | Saves a rendered image to a file. | 具名拒绝（`saveimg.unsupported: raster image export is host-owned; this command layer has no file handle (use PLOT PNG)`）。 |
 | 767 | `SAVETOWEBMOBILE` | 部分实现 | Saves a copy of the current drawing to your Autodesk Account. | 具名拒绝（`savetowebmobile.unsupported: no Autodesk Account (web/mobile) file-exchange model`）。 |
 | 768 | `SCALE` | 已实现 | Enlarges or reduces selected objects, keeping the proportions of the object the same after scaling. | — |
-| 769 | `-SCALELISTEDIT` | 部分实现 | Controls the list of scales available for layout viewports, page layouts, and plotting. | 只读报告真实 `ACAD_SCALELIST`（`scalelistedit.entry`）；创建/编辑/删除/排序比例未实现（`scalelistedit.write_unsupported`）。 |
-| 770 | `SCALELISTEDIT` | 部分实现 | Controls the list of scales available for layout viewports, page layouts, and plotting. | 只读：第一个图纸布局的页面 + `scalelistedit.write_unsupported`；无比例列表存储。 |
+| 769 | `-SCALELISTEDIT` | 完整实现 | Controls the list of scales available for layout viewports, page layouts, and plotting. | `SCALELISTEDIT` 的命令行拼写：同一解析器与同一处理器（读写同一 `ACAD_SCALELIST` 表，旧 `write_unsupported` 已移除） |
+| 770 | `SCALELISTEDIT` | 完整实现 | Controls the list of scales available for layout viewports, page layouts, and plotting. | 真实 `ACAD_SCALELIST` 表：只读报告（行、活动 `CANNOSCALE`、首个图纸布局页面）+ `ADD`/`RENAME`/`DELETE` 写（各一条记录/一次修订，Viewer 拒绝写）；`RENAME` 级联 `CANNOSCALE` 与每个注释性覆盖；`DELETE` 按名字引用拒绝（`scalelistedit.in_use` 同时报两处计数，并明说视口/打印比例是变换而非名字引用）；导出回写 `ACAD_SCALELIST`（往返测试）；无撤销步（`scalelistedit.no_history`） |
 | 771 | `SCALETEXT` | 已实现 | Enlarges or reduces selected text objects without changing their locations. | — |
 | 772 | `SCRIPT` | 部分实现 | Executes a sequence of commands from a script file. | 具名拒绝（`script.unsupported: no script-file runner`）。 |
 | 773 | `SCRIPTCALL` | 部分实现 | Executes a sequence of commands and nested scripts from a script file. | 具名拒绝（`scriptcall.unsupported: no script-file engine`）。 |
@@ -1999,7 +1999,7 @@
 | 782 | `SELECTCOUNT` | 完整实现 | Finds all objects within the current count that match the properties of the selected objects, and then adds them to the selection set. | 模型空间计数；图纸布局按 `selectcount.model_space_only` 具名拒绝，选择/revision/撤销均不变 |
 | 783 | `SELECTSIMILAR` | 已实现 | Finds all objects within the current drawing that match the properties of selected objects, and then adds them to the selection set. | 对象类型强制；默认**图层+类型**；Color/Linetype/Lineweight/Name/Object style 独立开关；透明**不**参与；`Name` 按**根块参照名**匹配展开成员；模型/图纸空间各自匹配；只读 |
 | 784 | `SETBYLAYER` | 已实现 | Changes the property overrides of selected objects to ByLayer. | 颜色/线型/线宽/透明度复位随层；Include blocks 递归块成员；锁定图层拒绝；材质/命名打印样式属未建模的全局范围（AutoCAD 的 SETBYLAYER 本就不含文字/标注/填充样式） |
-| 785 | `SETVAR` | 部分实现 | Lists or changes the values of system variables. | 读/写闭集 `PDMODE/PDSIZE/SNAPUNIT/LTSCALE/GRID/SNAP/ORTHO/TEXTSIZE`；写复用既有命令路径；另可写 `NAVVCUBEDISPLAY/DISPLAYVIEWCUBEIN2D/DISPLAYVIEWCUBEIN3D`（主机外观设置，读形式为 `setvar.write_only_variable`）；未知/越界按名拒绝 |
+| 785 | `SETVAR` | 完整实现 | Lists or changes the values of system variables. | 读/写闭集扩到 **13 个**：`PDMODE/PDSIZE/SNAPUNIT/LTSCALE/GRID/SNAP/ORTHO/TEXTSIZE/WIPEOUTFRAME/CVPORT/INSBASE/LIMMIN/LIMMAX`；写全部复用各自命令（`CVPORT` 纯会话、不写库），另有三个只写主机外观设置；未知名 `setvar.unknown_variable`，**已建模但无值** `setvar.not_stored`（不编造默认值） |
 | 786 | `-SHADEMODE` | 部分实现 | Provides simple shading for 3D solids and surfaces. | 具名拒绝（`-shademode.unsupported: no 3D shaded display mode; VSCURRENT owns the 2D display token`）。 |
 | 787 | `SHADEMODE` | 部分实现 | Controls the display of 3D objects. | 具名拒绝（`shademode.unsupported: no 3D shaded display mode; VSCURRENT owns the 2D display token`）。 |
 | 788 | `SHAPE` | 已实现 | Inserts a shape from a shape file (SHX file) that has been loaded using LOAD. | 真实 `SemanticGeometry::Shape` 字形：`SHAPE <name-or-code> <x> <y> [size] [rotation_deg]`，字体取显式 key 或 `Standard` 样式，缺省 size/rotation 取会话值；一条事务/一步撤销；按 name 建行但本构建 SHX 仅保留编号，表示层保持既有 `Partial` |
@@ -2032,7 +2032,7 @@
 | 815 | `SPOTLIGHT` | 部分实现 | Creates a spotlight that emits a directional cone of light. | 具名拒绝（`spotlight.unsupported: no 3D light model`）。 |
 | 816 | `SSX` | 部分实现 | Creates a selection set based on a selected object. | Express **筛选表构建器**（不是 SELECTSIMILAR）：`BLOCK`/`COLOR`/`ENTITY`/`LAYER`/`LTYPE`/`STYLE`/`PICK`/`CLEAR`，单值覆盖/移除；模板来自当前选择；仅当前空间；替换选择；只读；**`FLAG`/`THICKNESS`/`VECTOR` 未建模**（实体标志位/厚度/挤出）⇒ 具名拒绝 |
 | 817 | `STANDARDS` | 部分实现 | Manages the association of standards files with drawings. | 具名拒绝（`standards.unsupported: no CAD standards (DWS) model`）。 |
-| 818 | `STATUS` | 部分实现 | Displays drawing statistics, modes, and extents. | 图形/数据库/修订/实体/图层/块/样式/布局/范围/模式；本轮新增 **current_space/space_usage/layer_usage/modes/selection**；创建/编辑时间、内存、limits/base 明确 `status.not_tracked` |
+| 818 | `STATUS` | 完整实现 | Displays drawing statistics, modes, and extents. | base/limits 现在报告真实存储值（`status.limits_base`）或按名声明缺值（`status.not_stored`）；创建/编辑时间与内存仍 `status.not_tracked` |
 | 819 | `STLOUT` | 部分实现 | Stores 3D solids and watertight meshes in a format that can be used with stereolithography apparatus. | 具名拒绝（`stlout.unsupported: STL export is not implemented`）。 |
 | 820 | `STRETCH` | 完整实现 | Stretches objects crossed by a selection window or polygon. | 交叉矩形/多边形/自由手绘 lasso 的**交互捕获**都接线到同一 planner（`stretchWindow` 0/1/2）；even-odd 包含；退化/未闭合环具名拒绝；一条事务/一步撤销；`MULTILEADER` 整命令拒绝。 |
 | 821 | `-STYLE` | 已实现 | Creates, modifies, or specifies text styles. | `STYLE` 的命令行拼写，同一 grammar/写入路径与边界 |
@@ -2057,10 +2057,10 @@
 | 840 | `SYSVDLG` | 部分实现 | Allows you to view, edit, save, and restore system variable settings. | 只读报告所有已暴露的会话变量当前值 + `sysvdlg.not_tracked`；无编辑/保存/恢复对话框 |
 | 841 | `SYSWINDOWS` | 部分实现 | Arranges windows and icons when the application window is shared with external applications. | 具名拒绝（`syswindows.unsupported`）：应用窗口布局由宿主负责。 |
 | 842 | `-TABLE` | 部分实现 | Creates an empty table object. | `TABLE` 的命令行拼写；同一真实创建实现。
-| 843 | `TABLE` | 部分实现 | Creates an empty table object. | **导入模型 + 真实创建**：`TABLE <rows> <cols> <col_width> <row_height> <x> <y>` 创建空表格（Standard、+X/+Z、一条事务/一步撤销）；导入模型可 MOVE/ROTATE/SCALE、拾取/显示、FIND 逐单元格、真实 DXF 导出；无对话框/创建时合并/单元格样式。
-| 844 | `TABLEDIT` | 部分实现 | Edits text in a table cell. | 真实单元格文本编辑 `TABLEDIT <row> <col> [text]`（1-based、选中一个表格、剩余整行文本、空文本清除）；一条事务/一步撤销；无样式/合并/块内容编辑。
-| 845 | `TABLEEXPORT` | 部分实现 | Exports data from a table object in CSV file format. | **无 CSV/文件写出**（`tableexport.unsupported`）；表格单元格数据已在模型里。
-| 846 | `TABLESTYLE` | 部分实现 | Creates, modifies, or specifies table styles. | **无表格样式表**（`tablestyle.unsupported`）；导入时只按样式解析边框可见性/双线。
+| 843 | `TABLE` | 部分实现 | 创建面不变（`TABLE <rows> <cols> <col_width> <row_height> <x> <y>`，Standard、+X/+Z，一条事务/一步撤销），诊断改为指向 `TABLEDIT`/`TABLEDIT MERGE|UNMERGE`/`TABLESTYLE`；导入模型可 MOVE/ROTATE/SCALE、拾取/显示、FIND 逐格、真实 DXF 导出；**模型缺口（具名拒绝）**：单元格块 `TINSERT`、字段、逐格边框颜色/线宽/填充、逐格对齐/旋转；创建时合并/样式需第二条命令 |
+| 844 | `TABLEDIT` | 完整实现 | 文本编辑不变，新增 `TABLEDIT MERGE <row> <col> <height> <width>`、`TABLEDIT UNMERGE <row> <col>`、`TABLEDIT STYLE <name>`；合并保留被覆盖单元格自身文本（诊断明示，绝不拼接），越界/覆盖锚点/重叠/未合并逐条具名拒绝；一条事务/一步撤销 |
+| 845 | `TABLEEXPORT` | 完整实现 | `TABLEEXPORT <path.csv>` 经宿主文件通道（`HostResources::write_named_file`，`HATCHEDIT PATTERNFILE` 读通道的写镜像）写出已建模网格：RFC 4180、CRLF、合并区锚点文本+覆盖格留空、临时文件+rename、64 MiB 上限、不创建目录；浏览器/无文件系统宿主报稳定 `unsupported-runtime: table-export`；只读命令（无事务/无修订，Viewer 合法），裸 IPC 形式 `tableexport.needs_path`；未建模的单元格块/字段内容不导出（域无该内容） |
+| 846 | `TABLESTYLE` | 部分实现 | 实体上的真样式记录（名称/说明/边距/数据行高与文字样式/四条边框/标题与表头开关），经 `ACAD_TABLESTYLE` 字典对象 DXF 往返；单元格按**值相等**继承，样式写入只重解析仍等于旧样式的单元格，显式设过样式的单元格不动；裸命令报告；一条事务/一步撤销；**声明的近似/未写**：标题行/表头行样式按数据行近似，样式说明与样式级双线间距在本 writer 无对应组，单元格级样式仍需 `MATCHCELL` |
 | 847 | `TABLET` | 部分实现 | Calibrates, configures, and turns on and off an attached digitizing tablet. | 具名拒绝（`tablet.unsupported`）：本构建无数字化仪模型。 |
 | 848 | `TABSURF` | 部分实现 | Creates a mesh from a line or curve that is swept along a straight path. | 具名拒绝（`tabsurf.unsupported: no 3D surface (NURBS) model`）。 |
 | 849 | `TARGETPOINT` | 部分实现 | Creates a target point light. | 具名拒绝（`targetpoint.unsupported: no 3D light model`）。 |
