@@ -498,7 +498,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `TCASE` | 部分实现 | 裸命令按 Title，`TCASE U/L/T/S/G` 分别大写/小写/标题/句首/切换；保留 MTEXT 转义序列 | 属性定义/标注文字未建模；MULTILEADER 只在可实现时改写 |
 | `TXT2MTXT` | 完整实现 | 选中 Text/MText 排序合并为一个 `AcDbMText`（含 `UNIFORM` 行距），同时删除来源（一条事务/一步撤销） | Settings 对话框与分栏未实现（全局范围）；保留原字符串转义 |
 | `HATCHGENERATEBOUNDARY` | 部分实现 | 每个选中 HATCH 的每个 loop 生成一条同层/同空间、非关联的闭合 LWPOLYLINE（保留 bulge） | 无关联性；无选项提示 |
-| `GRADIENT` | 部分实现 | 当前选择为闭合边界（整实体 Circle/完整 Ellipse/闭合 Polyline/LINE+ARC 边链），复用 HATCH 创建路径并强制渐变填充（会话 kind/角度/双色 ACI，默认线性 0°、ACI 1→5）；边界必须在 +Z 平面；一个 `AcDbHatch`、一条事务/一步撤销；边界实体保留 | 无渐变预览、无 `-GRADIENT` 选项提示、无 .pat/关联性；非 `+Z` 平面/非闭合/退化边界按名拒绝；证据只有 `cad-app`/`cad-ui-core`/前端契约测试 |
+| `GRADIENT` | 完整实现 | 当前选择为闭合边界（整实体 Circle/完整 Ellipse/闭合 Polyline/LINE+ARC 边链），复用 HATCH 创建路径并强制渐变填充（会话 kind/角度/双色 ACI，默认线性 0°、ACI 1→5；测试钉住 SPHERICAL/45°/ACI 3→7 落到存储的 `AcDbHatch`）；一个 `AcDbHatch`、一条事务/一步撤销；边界实体保留 | 全局范围：无渐变预览、无 `-GRADIENT` 选项提示、无 .pat/关联性；非 `+Z` 平面/非闭合按名拒绝 |
 | `HATCHEDIT` | 部分实现 | 恰好一个直接可寻址的模型空间 HATCH；`ANGLE`/`SCALE`/`SOLID`/`GRADIENT` 等既有选项；`ADDBOUNDARIES`/`REMOVEBOUNDARIES` 现在真实：一个选中 hatch + 其余选中闭合实体为边界，重建 loop 集，一条事务/一步撤销 | 无交互对话框；`Origin` 无字段、`Associate`/`Annotative` 无模型、Boundary draw order 拒绝；证据只有契约测试 |
 | `HATCHTOBACK` | 完整实现 | 把所有 HATCH 的 draw order 排到其所在 `SpaceId` 范围内的所有非 HATCH 对象之后（模型空间、各图纸布局、各块定义逐范围规划后一次写入），保留相对顺序；一条事务/一步撤销 | 无 AutoCAD 独立的 Draw Order 表（沿用实体存储的 `draw_order`）；块定义重排对全部块参照生效（模型固有）；无 Draw Order 对话框 |
 | `WIPEOUT` | 部分实现 | 开放多边形捕获（≥3 点、`+Z` 平面）生成一个 `AcDbWipeout`（`Mask{inverted:false}`）；`Frames ON/OFF/DISPLAY` 真实（显示/出图分离） | 无 `FRAME` 覆盖、无 Polyline/Erase Polyline 选项、无自交拒绝、无既有 wipeout 拾取 |
@@ -548,7 +548,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `FILTER` | 部分实现 | 同 QSELECT 语法，但**并入**现有选择（空选择也可并入） | 无命名过滤器列表/对话框/逻辑组合；只枚举顶层模型空间 |
 | `GETSEL` | 部分实现 | `GETSEL LAYER\|TYPE <name>`；替换选择 | 仅 `LAYER`/`TYPE` 两种特性；无对话框；只枚举顶层模型空间 |
 | `SSX` | 部分实现 | 以**第一个选中对象**的五特性（类型/层/颜色/线型/空间）为模板，把匹配的模型空间对象并入选择 | 只枚举顶层模型空间；空选择/不可寻址模板拒绝；无交互选择提示 |
-| `SELECTCOUNT` | 部分实现 | 只读：统计与第一个选中对象五特性相同的模型空间对象数并报告 | 不修改选择、不写库、无事务；不展开块成员 |
+| `SELECTCOUNT` | 完整实现 | 只读：统计与第一个选中对象五特性相同的模型空间对象数并报告；图纸布局按 `selectcount.model_space_only` 具名拒绝 | 不修改选择、不写库、无事务；不展开块成员 |
 | `-FIND` | 部分实现 | `-FIND <needle>`；在模型空间 Text/MText/MULTILEADER 中做 ASCII 不区分大小写子串搜索并报告计数/ids | 只读；不解析 MTEXT 格式 run；不搜索属性定义/表格/标注文字 |
 | `FIND` | 完整实现 | `FIND <needle> [=> <replacement>]`：遍历模型空间与全部图纸布局（分组报告：`model space` / `layout 'X'`），跨空间替换一条事务/一步撤销，拒绝时任何空间都不写；MTEXT / 带文字 MULTILEADER / `AcDbText`（含导入为 `Text` 的 ATTRIB/ATTDEF）/ 表格单元格都按**画出来的文本**匹配与替换（`\P` 换行、`%%d`/`\~` 转义、`\S` 分数、`^I` 制表）；多 run 命中保留各段格式码，插入文本被转义 | **全局范围**：无 Find 对话框/逐项确认/缩放高亮；块定义内命中只读具名（`block definitions, read-only (edit with BEDIT)`，一份定义被所有实例绘制，FIND 不动它）；部分命中结构化码 `find.mtext_partial_code`、替换被语法重画 `find.mtext_replacement_not_literal`；单行目标拒绝换行 `text.single_line_newline`；动态块未激活可见性成员不搜索（不绘制） |
 | `HIDEOBJECTS` | 部分实现 | 会话隐藏集：隐藏当前选择；共享可见性谓词影响拾取与渲染（`FLAG_HIDDEN`） | 无数据库写/撤销；隐藏对象仍留在常驻场景，仅 fragment 丢弃；屏幕空间 POINT 标记 overlay 仍可能绘制（声明） |
@@ -584,7 +584,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `TREX` | 部分实现 | `TREX TRIM\|EXTEND`；选择集既是被处理对象又互为边界，复用既有 `plan_trim`/`plan_extend`；一条事务/一步撤销 | 无交互边界提示；TRIM 保留含中点的片段、EXTEND 只长 `u=1` 端 |
 | `EXTRIM` | 完整实现 | 第一个选中为边界、其余为被裁对象；目标集 = TRIM 可裁集（`LINE`/`ARC`/`CIRCLE`/`SPLINE`/`ELLIPSE`/椭圆弧/`LWPOLYLINE`）；不可裁目标按 `extrim.unsupported_target` 逐对象跳过并保留其余裁剪；采样近似切点以 `extrim.approximate_cut` 明示；一条事务/一步撤销 | 无边界拾取提示；载荷无侧点通道，按目标中点选侧（声明）；边界必须是单个可解析图元，否则整命令具名拒绝 |
 | `MPEDIT` | 部分实现 | 对每个选中 LWPOLYLINE 应用 `CLOSE\|OPEN\|REVERSE`，一条事务/一步撤销 | 非多段线/无变化逐条具名跳过；无 Join/Width/Fit/Spline/Decurve/Undo |
-| `-OVERKILL` | 部分实现 | `OVERKILL` 的别名（同一 `CommandId`/规划器） | 同 OVERKILL 的 v1 边界：仅完全重复，无部分重叠/共线合并 |
+| `-OVERKILL` | 完整实现 | `OVERKILL` 的命令行拼写：同一语法、同一去重实现，同输入字节级相同结果 | 同 `OVERKILL` 的边界：仅完全重复，无部分重叠/共线合并 |
 | `DRAWORDER` | 完整实现 | `FRONT`/`BACK`/`ABOVE`/`BELOW` 按 `SpaceId` 逐范围（模型空间、各图纸布局、各块定义）先规划后写入，范围内保持相对顺序，耗尽 `draworder.order_exhausted` 整批拒绝；ABOVE/BELOW 参照与移动对象跨范围时 `draworder.reference_scope`；一条事务/一步撤销 | 无 Draw Order 对话框 |
 
 > **证据边界**：以上 20 条只有 Rust 契约测试与前端纯函数/结构测试；**没有** GUI、像素、真实 GPU、
@@ -640,7 +640,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | 命令 | 状态 | 结果 | 显式未实现 / 有意偏离 |
 |---|---|---|---|
 | `DIMSTYLE` | 部分实现 | `LIST`/`CURRENT` 只读报告 `cad-db` 的 `dim_styles` | `SET <name>` 按 `dimstyle.set_unavailable` 拒绝（只有 builder 写 API）；未知名称 `dimstyle.unknown`；裸命令 `dimstyle.needs_option` |
-| `-DIMSTYLE` | 部分实现 | `DIMSTYLE` 的别名（同一 `CommandId`/路径） | 同上 |
+| `-DIMSTYLE` | 完整实现 | `DIMSTYLE` 的命令行拼写：同一解析器与同一处理器，七个选项逐项测试（无第二条路径） | 同 `DIMSTYLE` 的边界（`SET` 等若在该行有界，此处一致） |
 | `DIMTEDIT` | 完整实现 | 恰好一个选中标注；`MOVE`/`LEFT`/`RIGHT`/`CENTER`/`HOME`/`ANGLE`；Left/Right/Center 移动锚点并设置字形级 `h_align`，**角标注按已绘制弧的起/终/中角锚定、坐标标注按引线特征端/引线端/中点锚定**（覆盖全部标注类型）；`OBLIQUE <deg>` 可键入并按 `dimtedit.oblique_unsupported` 拒绝；一条事务/一步撤销；无变化 `dimtedit.unchanged` | 唯一残留：角标注显示为导入图片（无弧子图）时 `dimtedit.justify_unsupported`，不写；无交互文字拖动；导入默认 Center、导出不写组 72 |
 | `DIMEDIT` | 部分实现 | 所有选中标注；`TEXT <override>` 逐字存组 1（`<>` 占位，≤1024），`RESET` 删除；一条事务/一步撤销 | 延伸线编辑 NOT IMPLEMENTED；无对话框/逐项确认 |
 | `DIMOVERRIDE` | 部分实现 | 闭集的实体快照变量（`DIMTXT`…`DIMLUNIT`）；一条事务/一步撤销；样式表不改 | 未知变量、仅表变量、坏值、未实现值分别具名拒绝；无对话框 |
@@ -667,7 +667,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `GROUPEDIT` | 部分实现 | `<name> ADD|REMOVE|RENAME <arg>`；成员来自当前选择集或键入实体 id；`RENAME` 允许仅改大小写；单次会话变更 | 不写实体/数据库；无组选择对话框 |
 | `QLEADER` / `LEADER` | 部分实现 | `<arrow x,y> <landing x,y> <文本>` 创建**一个** `MULTILEADER`（旧实体映射为 MULTILEADER）；一条事务/一步撤销 | 无 QLEADER 设置对话框、引线样式、注释类型、多引线段/附着选项 |
 | `TEXTFIT` | 部分实现 | `<目标宽度>` 仅按 `height = target / char_count` 改字形高度 | 真实宽度拉伸/压缩 NOT IMPLEMENTED；坏宽度、空选择、非文字、空文本具名拒绝 |
-| `HATCHSETBOUNDARY` | 部分实现 | 恰好一个 hatch + 一条闭合 Polyline/整圆/完整 Ellipse；共面性校验；用 `HatchGeometry::new` 重建并丢弃旧种子；一条事务/一步撤销 | 失败为 `hatchsetboundary.rebuild_failed`；无交互边界选择、无关联边界、无样条/椭圆弧/块内边界 |
+| `HATCHSETBOUNDARY` | 完整实现 | 恰好一个 hatch + 一条闭合 Polyline/整圆/**完整 Ellipse**（整椭圆采样为单个 64 点环、无 bulge），共面性校验；`HatchGeometry::new` 重建并丢弃旧种子；一条事务/一步撤销 | 部分椭圆 `hatchsetboundary.open_ellipse` 拒绝且不开事务；无交互边界选择、无关联边界、无椭圆弧/块内边界 |
 | `HATCHSETORIGIN` | 完整实现 | `<x> <y>` 绝对图案原点：锚为首个定义行的合成基点（`absolute_pattern_origin()`），写入位移 `P − 锚`，行列/角度/比例参与；一条事务/一步撤销 | 无定义行的图案无法定位 → 收窄的 `hatchsetorigin.missing_field`；非有限位移 `unrepresentable`；非模型空间 hatch 不可寻址 |
 | `XDLIST` | 部分实现 | 只读；每个选中实体报告 `xdlist.not_retained` | 本构建不保留 xdata；不伪造条目 |
 
@@ -1438,7 +1438,7 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `PAGESETUP` | **部分实现**：只读报告每个布局的入库 `PLOTSETTINGS`（纸张/旋转/比例/出图类型/provenance）；修改未实现（`pagesetup.report_only`）。 | 不写库/不升修订/不入历史（报告类只读） |
 | `-PAGESETUP` | **部分实现**：同一只读页面设置报告的命令行拼写。 | 不写库/不升修订/不入历史（报告类只读） |
 | `PSETUPIN` | **部分实现**：具名拒绝（`psetupin.unsupported`）：从其他图纸导入页面设置未实现。 | 不写库/不升修订/不入历史（报告类只读） |
-| `-PSETUPIN` | **部分实现**：具名拒绝（`-psetupin.unsupported`）：同一页面设置导入的命令行拼写。 | 不写库/不升修订/不入历史（报告类只读） |
+| `-PSETUPIN` | 完整实现 | `PAGESETUPIN` 的命令行拼写：同一实现臂（`page_setup_write`），一次 revision 复制源记录的纸张/尺寸/比例/旋转 | 跨文件导入（`PSETUPIN` 的文件形式）未建模；无对话框 |
 | `PLOTSTYLE` | **部分实现**：具名拒绝（`plotstyle.unsupported`）：命名打印样式未实现（无 CTB/STB 表）。 | 不写库/不升修订/不入历史（报告类只读） |
 | `-PLOTSTYLE` | **部分实现**：具名拒绝（`-plotstyle.unsupported`）：打印样式列表的命令行拼写。 | 不写库/不升修订/不入历史（报告类只读） |
 | `CONVERTPSTYLES` | **部分实现**：具名拒绝（`convertpstyles.unsupported`）：打印样式转换未实现（无 CTB/STB 模型）。 | 不写库/不升修订/不入历史（报告类只读） |
