@@ -283,6 +283,139 @@ fn image_quad_uses_the_clip_polygon_instead_of_the_unit_square() {
     assert_eq!(read(3), [-0.8, 0.8, 0.0, 0.0, 0.0]);
 }
 
+/// One ear of a concave `IMAGECLIP` boundary: the provider emits a convex piece
+/// per ear, so a three-vertex piece must fan into exactly one triangle with the
+/// piece's own per-vertex UVs (the renderer needs no concave path of its own).
+#[test]
+fn a_three_vertex_clip_piece_draws_exactly_one_interpolated_triangle() {
+    use cad_representation::ImageVertex;
+    use std::sync::Arc;
+    let clip: Arc<[ImageVertex]> = Arc::from(
+        vec![
+            ImageVertex {
+                position: Point3 {
+                    x: 1.0,
+                    y: 2.0,
+                    z: 0.0,
+                },
+                uv: [0.0, 0.0],
+            },
+            ImageVertex {
+                position: Point3 {
+                    x: 3.0,
+                    y: 2.0,
+                    z: 0.0,
+                },
+                uv: [1.0, 0.0],
+            },
+            ImageVertex {
+                position: Point3 {
+                    x: 1.0,
+                    y: 5.0,
+                    z: 0.0,
+                },
+                uv: [0.0, 1.0],
+            },
+        ]
+        .into_boxed_slice(),
+    );
+    let batch = ImageBatch {
+        resource: ResourceKey("texture".into()),
+        transform: Transform3::identity(),
+        clip: Some(clip),
+        alpha: 1.0,
+        draw_order: 0,
+        sources: Vec::new(),
+        adjust: ImageAdjust::default(),
+    };
+    let (vertices, indices) = image_quad_vertices(&batch);
+    assert_eq!(vertices.len(), 3 * 20);
+    assert_eq!(indices, vec![0, 1, 2]);
+    let read = |i: usize| {
+        let mut out = [0.0f32; 5];
+        for (j, slot) in out.iter_mut().enumerate() {
+            let start = i * 20 + j * 4;
+            *slot = f32::from_le_bytes(vertices[start..start + 4].try_into().unwrap());
+        }
+        out
+    };
+    // World positions verbatim, UVs flipped to texture-row order.
+    assert_eq!(read(0), [1.0, 2.0, 0.0, 0.0, 1.0]);
+    assert_eq!(read(1), [3.0, 2.0, 0.0, 1.0, 1.0]);
+    assert_eq!(read(2), [1.0, 5.0, 0.0, 0.0, 0.0]);
+}
+
+/// A convex clip still fans in stored order, byte for byte: the concave path
+/// (one convex fragment per ear) cannot change the convex output.
+#[test]
+fn a_four_vertex_convex_clip_keeps_the_fan_bytes() {
+    use cad_representation::ImageVertex;
+    use std::sync::Arc;
+    let clip: Arc<[ImageVertex]> = Arc::from(
+        vec![
+            ImageVertex {
+                position: Point3 {
+                    x: 1.0,
+                    y: 2.0,
+                    z: 0.0,
+                },
+                uv: [0.0, 0.0],
+            },
+            ImageVertex {
+                position: Point3 {
+                    x: 3.0,
+                    y: 2.0,
+                    z: 0.0,
+                },
+                uv: [1.0, 0.0],
+            },
+            ImageVertex {
+                position: Point3 {
+                    x: 3.0,
+                    y: 5.0,
+                    z: 0.0,
+                },
+                uv: [1.0, 1.0],
+            },
+            ImageVertex {
+                position: Point3 {
+                    x: 1.0,
+                    y: 5.0,
+                    z: 0.0,
+                },
+                uv: [0.0, 1.0],
+            },
+        ]
+        .into_boxed_slice(),
+    );
+    let batch = ImageBatch {
+        resource: ResourceKey("texture".into()),
+        transform: Transform3::identity(),
+        clip: Some(clip),
+        alpha: 1.0,
+        draw_order: 0,
+        sources: Vec::new(),
+        adjust: ImageAdjust::default(),
+    };
+    let (vertices, indices) = image_quad_vertices(&batch);
+    assert_eq!(vertices.len(), 4 * 20);
+    assert_eq!(indices, vec![0, 1, 2, 0, 2, 3]);
+    let mut expected = Vec::with_capacity(4 * 20);
+    for component in [1.0f32, 2.0, 0.0, 0.0, 1.0] {
+        expected.extend_from_slice(&component.to_le_bytes());
+    }
+    for component in [3.0f32, 2.0, 0.0, 1.0, 1.0] {
+        expected.extend_from_slice(&component.to_le_bytes());
+    }
+    for component in [3.0f32, 5.0, 0.0, 1.0, 0.0] {
+        expected.extend_from_slice(&component.to_le_bytes());
+    }
+    for component in [1.0f32, 5.0, 0.0, 0.0, 0.0] {
+        expected.extend_from_slice(&component.to_le_bytes());
+    }
+    assert_eq!(vertices, expected);
+}
+
 #[test]
 fn cad_clear_color_is_pure_black_opaque() {
     // The React host requires the CAD render target to clear to actual pure

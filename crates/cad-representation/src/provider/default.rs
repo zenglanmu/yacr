@@ -1,7 +1,8 @@
 use crate::*;
 
 use super::image::{
-    image_basis_is_degenerate, image_clip_vertices, image_frame_corners, resolve_image_texture,
+    image_basis_is_degenerate, image_clip_pieces, image_clip_reason, image_frame_corners,
+    resolve_image_texture,
 };
 use super::registry::RepresentationProvider;
 
@@ -578,16 +579,28 @@ impl DefaultRepresentationProvider {
                 if *visible {
                     let (resource, decoded) =
                         resolve_image_texture(file.as_deref(), context.images.as_deref());
-                    // Map the entity-level clip once. A clip that cannot be
-                    // expressed as a visible-region polygon is reported below,
-                    // never silently ignored.
-                    let clip_vertices = clip
+                    // Map the entity-level clip once: a convex clip stays one
+                    // piece (byte-identical to the behaviour before concave clips
+                    // were supported), a concave clip becomes one convex piece per
+                    // ear of its triangulation. A clip that is not a usable region
+                    // is refused by name below, never silently widened.
+                    let clip = clip
                         .as_ref()
-                        .and_then(|clip| image_clip_vertices(clip, *origin, *u, *v, *pixels));
-                    let clip_representable = clip.is_none() || clip_vertices.is_some();
+                        .map(|clip| image_clip_pieces(clip, *origin, *u, *v, *pixels));
+                    // The clip's own verdict, independent of texture resolution.
+                    let clip_refusal: Option<(&'static str, String)> = match &clip {
+                        None | Some(Ok(Some(_))) => None,
+                        Some(Ok(None)) => Some((
+                            image_clip_reason::UNSUPPORTED,
+                            "the image clip has no area inside the image rectangle; only the \
+                             frame is drawn"
+                                .to_string(),
+                        )),
+                        Some(Err(refusal)) => Some((refusal.code, refusal.message.clone())),
+                    };
                     match (&resource, decoded) {
                         (Some(key), Some(_image))
-                            if clip_representable
+                            if clip_refusal.is_none()
                                 && !image_basis_is_degenerate(*u, *v, *pixels) =>
                         {
                             // The texture's unit square maps to the placed quad.
@@ -596,57 +609,66 @@ impl DefaultRepresentationProvider {
                                 cad_geometry::scale(*v, pixels[1]),
                                 *origin,
                             );
-                            representation.fragments.push(DisplayFragment {
-                                source,
-                                geometry_source,
-                                precision: Precision::Analytic,
-                                alpha: 1.0,
-                                draw_order: entity.draw_order,
-                                color: DEFAULT_RENDER_COLOR,
-                                color_unresolved: true,
-                                lineweight: DEFAULT_LINEWEIGHT_MM,
-                                lineweight_unresolved: true,
-                                linetype: LinetypePattern::continuous(),
-                                linetype_unresolved: true,
-                                linetype_scale: 1.0,
-                                primitive: DisplayPrimitive::Image {
-                                    resource: key.clone(),
-                                    transform,
-                                    clip: clip_vertices
-                                        .map(|vertices| Arc::from(vertices.into_boxed_slice())),
-                                    adjust: *adjust,
-                                },
-                            });
+                            // No clip draws the whole unit square; a clip draws one
+                            // fragment per convex piece, so the union of the
+                            // fragments is exactly the visible texture region (also
+                            // for a concave clip). The refusal cases are already
+                            // handled below, so they contribute nothing here.
+                            let pieces = match clip {
+                                None => vec![None],
+                                Some(Ok(Some(pieces))) => pieces.into_iter().map(Some).collect(),
+                                Some(Ok(None) | Err(_)) => Vec::new(),
+                            };
+                            for piece in pieces {
+                                representation.fragments.push(DisplayFragment {
+                                    source: source.clone(),
+                                    geometry_source: geometry_source.clone(),
+                                    precision: Precision::Analytic,
+                                    alpha: 1.0,
+                                    draw_order: entity.draw_order,
+                                    color: DEFAULT_RENDER_COLOR,
+                                    color_unresolved: true,
+                                    lineweight: DEFAULT_LINEWEIGHT_MM,
+                                    lineweight_unresolved: true,
+                                    linetype: LinetypePattern::continuous(),
+                                    linetype_unresolved: true,
+                                    linetype_scale: 1.0,
+                                    primitive: DisplayPrimitive::Image {
+                                        resource: key.clone(),
+                                        transform,
+                                        clip: piece
+                                            .map(|vertices| Arc::from(vertices.into_boxed_slice())),
+                                        adjust: *adjust,
+                                    },
+                                });
+                            }
                         }
                         (resource, decoded) => {
-                            // No usable texture, or an unrepresentable clip: draw
-                            // the frame only and report the honest reason instead
-                            // of a placeholder image.
-                            let (code, message) = match (resource, clip, decoded) {
+                            // No usable texture, or a clip that is not a usable
+                            // region: draw the frame only and report the honest
+                            // reason instead of a placeholder image.
+                            let (code, message) = match (resource, &clip_refusal, decoded) {
                                 (None, _, _) => (
                                     "image.unresolved",
                                     "image has no resolvable resource key; only the frame is drawn"
                                         .to_string(),
                                 ),
-                                // An outside/mask clip keeps the region *outside*
-                                // its boundary, which the visible-region polygon
-                                // cannot express.
-                                (Some(_), Some(_), _) if !clip_representable => (
-                                    "image.clip_unsupported",
-                                    "image clip is not representable as a visible-region polygon; \
-                                     only the frame is drawn"
-                                        .to_string(),
-                                ),
+                                // An outside/mask clip keeps the region *outside* its
+                                // boundary, which a visible-region polygon cannot
+                                // express; a self-intersecting ring or too few /
+                                // degenerate points has no interior to draw. Each
+                                // refusal names itself and draws no region at all.
+                                (Some(_), Some((code, message)), _) => (*code, message.clone()),
                                 // A cache miss is a missing texture, not a
                                 // host-confirmed decode failure.
-                                (Some(key), _, None) => (
+                                (Some(key), None, None) => (
                                     "image.unresolved",
                                     format!(
                                         "no decoded texture for '{}' was available; only the frame is drawn",
                                         key.0
                                     ),
                                 ),
-                                (Some(_), _, Some(_)) => (
+                                (Some(_), None, Some(_)) => (
                                     "image.degenerate_frame",
                                     "image frame has a degenerate basis; only the frame is drawn"
                                         .to_string(),

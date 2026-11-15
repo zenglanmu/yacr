@@ -228,36 +228,182 @@ fn convex_polygon_clip_yields_the_image_primitive() {
     );
 }
 
+/// The world-space pieces a built representation emits for one image: every
+/// fragment is a convex `Image` clip, and a concave boundary arrives as several
+/// of them.
+fn image_pieces(r: &DisplayRepresentation) -> Vec<Vec<ImageVertex>> {
+    let mut pieces = Vec::new();
+    for fragment in &r.fragments {
+        match &fragment.primitive {
+            DisplayPrimitive::Image {
+                clip: Some(clip), ..
+            } => pieces.push(clip.to_vec()),
+            other => panic!(
+                "an image clip must emit image pieces, found {:?}",
+                std::mem::discriminant(other)
+            ),
+        }
+    }
+    pieces
+}
+
+/// Twice the signed area of a piece's world-space boundary.
+fn piece_area(piece: &[ImageVertex]) -> f64 {
+    let mut sum = 0.0;
+    for index in 0..piece.len() {
+        let point = piece[index].position;
+        let next = piece[(index + 1) % piece.len()].position;
+        sum += point.x * next.y - next.x * point.y;
+    }
+    (sum * 0.5).abs()
+}
+
+/// Whether a piece (convex, CCW or CW) holds `point`, boundary included.
+fn piece_holds(piece: &[ImageVertex], point: [f64; 2]) -> bool {
+    if piece.len() < 3 {
+        return false;
+    }
+    let mut area = 0.0;
+    for index in 0..piece.len() {
+        let a = piece[index].position;
+        let b = piece[(index + 1) % piece.len()].position;
+        area += a.x * b.y - b.x * a.y;
+    }
+    let sign = if area >= 0.0 { 1.0 } else { -1.0 };
+    for index in 0..piece.len() {
+        let a = piece[index].position;
+        let b = piece[(index + 1) % piece.len()].position;
+        let cross = (b.x - a.x) * (point[1] - a.y) - (b.y - a.y) * (point[0] - a.x);
+        if sign * cross < -1e-9 {
+            return false;
+        }
+    }
+    true
+}
+
 #[test]
-fn non_convex_polygon_clip_falls_back_to_the_frame_and_reports_it() {
+fn non_convex_polygon_clip_draws_one_fragment_per_convex_piece() {
     let registry = ProviderRegistry::with_default_provider();
     // A concave "chevron": the turn at (1,1) reverses the edge cross-product
-    // sign, so the polygon is non-convex and the renderer's fan triangulation
-    // would fill a silently wrong region.
+    // sign, so the polygon cannot be fan-triangulated. It used to fall back to
+    // the frame with a `Partial` report; it is ear-clipped now.
     let clip = ImageClip {
         vertices: vec![[0.0, 0.0], [2.0, 0.0], [1.0, 1.0], [2.0, 2.0], [0.0, 2.0]],
         inside: true,
     };
     let e = image_entity_with_clip(14, Some("clip.png"), Some(clip));
-    // The texture is available, but the non-convex clip cannot be honoured.
     let ctx = image_context(&[("clip.png", white_pixel())]);
     let r = registry.build(&e, &ctx).unwrap();
-    assert!(
-        r.fragments
-            .iter()
-            .all(|f| !matches!(&f.primitive, DisplayPrimitive::Image { .. })),
-        "a non-convex clip must not draw the texture"
+    assert_eq!(
+        r.completeness,
+        Completeness::Complete,
+        "a triangulable clip is complete, not partial"
     );
-    assert_eq!(r.fragments.len(), 1);
-    assert!(matches!(
-        &r.fragments[0].primitive,
-        DisplayPrimitive::Lines(_)
-    ));
-    assert!(r
-        .diagnostics
-        .iter()
-        .any(|d| d.code == "image.clip_unsupported"));
-    assert!(matches!(r.completeness, Completeness::Partial(_)));
+    assert!(
+        r.diagnostics.is_empty(),
+        "no refusal for a clip that can be drawn: {:?}",
+        r.diagnostics
+    );
+
+    let pieces = image_pieces(&r);
+    assert!(
+        pieces.len() >= 2,
+        "a concave clip needs more than one convex piece, got {}",
+        pieces.len()
+    );
+    // 5 vertices ear-clip into 3 triangles, all inside the 2x3 image rectangle.
+    assert_eq!(pieces.len(), 3);
+    for piece in &pieces {
+        assert_eq!(piece.len(), 3);
+        assert!(piece_area(piece) > 0.0);
+        assert!(piece.iter().all(
+            |vertex| (0.0..=1.0).contains(&vertex.uv[0]) && (0.0..=1.0).contains(&vertex.uv[1])
+        ));
+    }
+    // The chevron's pixel area is 3 and the frame maps pixels one-to-one here.
+    let emitted: f64 = pieces.iter().map(|piece| piece_area(piece)).sum();
+    assert!((emitted - 3.0).abs() < 1e-9, "emitted {emitted}");
+
+    // The notch (u > 1 near v = 1) is empty; the two arms are covered.
+    let notch = [1.5 + 1.0, 1.0 + 2.0];
+    for piece in &pieces {
+        assert!(
+            !piece_holds(piece, notch),
+            "the notch at {notch:?} must stay uncovered"
+        );
+    }
+    for interior in [
+        [0.2 + 1.0, 0.2 + 2.0],
+        [0.2 + 1.0, 1.8 + 2.0],
+        [1.2 + 1.0, 0.2 + 2.0],
+    ] {
+        assert!(
+            pieces.iter().any(|piece| piece_holds(piece, interior)),
+            "{interior:?} is inside the chevron but no piece covers it"
+        );
+    }
+}
+
+#[test]
+fn a_concave_imageclip_through_a_real_database_builds_non_convex_correct_fragments() {
+    // The same path a host takes: a `DrawingDatabase` entity through the
+    // expanded display build, with a real concave `IMAGECLIP` boundary stored in
+    // pixel space.
+    let registry = ProviderRegistry::with_default_provider();
+    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
+    builder
+        .insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+    // An L inside the 2x3 pixel frame: the notch removes x in (1,2), y in (1,3).
+    let clip = ImageClip {
+        vertices: vec![
+            [0.0, 0.0],
+            [2.0, 0.0],
+            [2.0, 1.0],
+            [1.0, 1.0],
+            [1.0, 3.0],
+            [0.0, 3.0],
+        ],
+        inside: true,
+    };
+    let e = image_entity_with_clip(21, Some("notch.png"), Some(clip));
+    builder.insert_entity(e.clone()).unwrap();
+    let db = builder.finish().unwrap();
+    let ctx = image_context(&[("notch.png", white_pixel())]);
+    let r = registry.build_expanded(&db, &e, &ctx).unwrap();
+    assert_eq!(r.completeness, Completeness::Complete);
+    assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
+
+    // The image is placed at (1,2) with unit basis vectors, so world = pixel +
+    // (1,2) and areas are unchanged: 2x3 frame minus the 1x2 notch = 4.
+    let pieces = image_pieces(&r);
+    assert_eq!(pieces.len(), 4, "a hexagon ear-clips into four triangles");
+    let emitted: f64 = pieces.iter().map(|piece| piece_area(piece)).sum();
+    assert!((emitted - 4.0).abs() < 1e-9, "emitted {emitted}");
+    for piece in &pieces {
+        for vertex in piece {
+            let u = vertex.uv[0];
+            let v = vertex.uv[1];
+            assert!((0.0..=1.0).contains(&u) && (0.0..=1.0).contains(&v));
+        }
+    }
+    // Inside the left arm and the bottom arm; nothing in the notch.
+    for interior in [[1.5, 2.5], [1.5, 4.5], [2.5, 2.5], [2.5, 2.9]] {
+        assert!(
+            pieces.iter().any(|piece| piece_holds(piece, interior)),
+            "{interior:?} is inside the visible L but no fragment covers it"
+        );
+    }
+    for notch in [[2.5, 3.5], [2.9, 4.9], [2.1, 3.1]] {
+        assert!(
+            !pieces.iter().any(|piece| piece_holds(piece, notch)),
+            "{notch:?} is in the notch but a fragment covers it"
+        );
+    }
 }
 
 #[test]

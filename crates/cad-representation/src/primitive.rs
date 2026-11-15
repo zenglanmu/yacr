@@ -6,9 +6,11 @@ use super::*;
 /// texture coordinate that maps to it.
 ///
 /// An unclipped [`DisplayPrimitive::Image`] maps the texture's unit square
-/// through its `transform`. When a viewport clip cuts that square, the surviving
-/// polygon is carried in [`DisplayPrimitive::Image::clip`] so the texture is
-/// interpolated correctly (not stretched) and the hidden part is discarded.
+/// through its `transform`. When a viewport clip or an `IMAGECLIP` boundary cuts
+/// that square, the surviving polygon is carried in
+/// [`DisplayPrimitive::Image::clip`] so the texture is interpolated correctly
+/// (not stretched) and the hidden part is discarded. A concave clip boundary is
+/// carried as several convex pieces, one per fragment.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ImageVertex {
     pub position: Point3,
@@ -187,10 +189,16 @@ pub enum DisplayPrimitive {
         transform: Transform3,
         /// `None` while the whole image is drawn through its unit-square
         /// `transform`. `Some` when the image is bounded by an entity clip
-        /// and/or a viewport cut: a convex polygon (paper-space positions for a
-        /// viewport cut, world space otherwise) with per-vertex texture
+        /// and/or a viewport cut: a **convex** polygon (paper-space positions for
+        /// a viewport cut, world space otherwise) with per-vertex texture
         /// coordinates, so only the visible texture region is mapped and its
         /// UVs are interpolated at the new vertices.
+        ///
+        /// Convexity is part of the contract because the renderer triangulates
+        /// this list as a triangle fan. A concave `IMAGECLIP` boundary is
+        /// therefore not carried here: the provider ear-clips it and emits one
+        /// `Image` fragment per convex piece, so the fan stays exact and the
+        /// union of the fragments is the clip's visible region.
         clip: Option<Arc<[ImageVertex]>>,
         /// Display-only brightness/contrast/fade/monochrome transfer, carried
         /// verbatim from the entity so the renderer can apply it without reading
