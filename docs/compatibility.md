@@ -579,7 +579,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `DONUT` | 部分实现 | 类型化 `DONUT <cx> <cy> <inner> <outer>`；两个同心 `Circle`，一条事务/一步撤销 | 无中心点拾取提示（中心必须键入）；`inner=0` 只建外圆并报 `donut.inner_zero`；无宽度/填充环模型 |
 | `SOLID` | 完整实现 | 3-4 个 `x,y` 点 → 两三角 `Mesh`（type-key `AcDbSolid`），一条事务/一步撤销；导出写**真类记录**：`AcDbSolid`→`0/SOLID`、`AcDbTrace`→`0/TRACE`（均 `100/AcDbTrace`，边界→存储角序末两位互换，三角重复 `13`）；类溯源由导入器 `Solid::is_trace` 保留，DXF 与 DWG 双路径都有导入→导出→再导入往返测试 | 声明式边界：5+ 点、逐点颜色、不在 `+Z` 共面（3D 旋转块内无 OCS 重建）、异三角化 → 保留 polyface 并在 `export.converted.mesh` 里注明类；无厚度/挤出（导入侧标 Partial） |
 | `HELIX` | 部分实现 | 平面 2D 螺旋 `Polyline`（64 段/圈，上限 4096 顶点），一条事务/一步撤销 | `height>0` 的 3D 弹簧按 `helix.3d_not_implemented` 拒绝；无扭转/半径渐变 |
-| `MLINE` | 部分实现 | 恰好两条平行 `LINE`，围绕基线按当前 MLSTYLE 间距放置，一条事务/一步撤销 | 无 join/cap/元素表/多段基线；不是完整 MLINE 实体 |
+| `MLINE` | 部分实现 | 2..=1024 点基线，每段每元素一条 `LINE`，拐点按**斜接**偏移（默认接头）；180° 反向 `mline.join_degenerate` | 无 cap/fill/bevel/弧接头（需 `MLSTYLE` 元素/端帽表）；无存储的 `AcDbMline` 实体（导入折叠为 `Compound`） |
 | `MLSTYLE` | 部分实现 | 会话内最多 16 个命名多线样式（`LIST`/`SET`），喂 MLINE | 不写 DWG/不持久化；无对话框、无元素/接头样式 |
 | `TREX` | 部分实现 | `TREX TRIM\|EXTEND`；选择集既是被处理对象又互为边界，复用既有 `plan_trim`/`plan_extend`；一条事务/一步撤销 | 无交互边界提示；TRIM 保留含中点的片段、EXTEND 只长 `u=1` 端 |
 | `EXTRIM` | 完整实现 | 第一个选中为边界、其余为被裁对象；目标集 = TRIM 可裁集（`LINE`/`ARC`/`CIRCLE`/`SPLINE`/`ELLIPSE`/椭圆弧/`LWPOLYLINE`）；不可裁目标按 `extrim.unsupported_target` 逐对象跳过并保留其余裁剪；采样近似切点以 `extrim.approximate_cut` 明示；一条事务/一步撤销 | 无边界拾取提示；载荷无侧点通道，按目标中点选侧（声明）；边界必须是单个可解析图元，否则整命令具名拒绝 |
@@ -1336,8 +1336,8 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `UNITS` | **部分实现（只读报告）**：`units.report`（图纸单位 4 位小数、角度用度）；`units.dialog_not_implemented` | 无 UNITS 对话框/逐图纸单位表；不写入 |
 | `ARCTEXT` | **部分实现（具名拒绝）**：`arctext.unsupported: text along an arc is not modeled; no combined arc+text payload` | 不写库/不升修订/不入历史 |
 | `MLEADERALIGN` | **部分实现（具名拒绝）**：`mleaderalign.unsupported: no multileader alignment model` | 同上 |
-| `MLEADEREDIT` | **部分实现（具名拒绝）**：`mleaderedit.unsupported: no add/remove leader-line API` | 同上 |
-| `MLEADERCOLLECT` | **部分实现（具名拒绝）**：`mleadercollect.unsupported: no multileader collection/table model` | 同上 |
+| `MLEADEREDIT` | 部分实现 | `ADD <x> <y>` 给根 0 加一条；`REMOVE <index>` 删一条，**可清空一个根**（根保留落点与狗腿，导出无 `LEADER_LINE` 的 `LEADER{}`；整条最后一条 `mleaderedit.last_line`）；一条事务/一步撤销 | 无逐线覆盖/箭头编辑（需新的 `MLeadEditAction` 变体，载荷面冻结） |
+| `MLEADERCOLLECT` | 完整实现 | 合并 ≥2 MULTILEADER 为一条（根/线拼接、文本 `\P` 连接、根落点重定向）并删除源；样式/覆盖掩码/平面不一致的源**接受**：逐线路径类型（`170`/覆盖字 `93` bit1）与箭头大小（`40`/bit16）按逐线覆盖保留，各根保留自身狗腿，无逐线组的字段与平面框取自首条并逐项报告（`mleadercollect.style_adopted`/`.plane_adopted`）；一条事务/一步撤销，DXF 往返有测试 | 带 `reserved` 源数据（断口/背景/分栏）按名拒绝（无合并语义）；无对话框 |
 | `TOLERANCE` | **部分实现（具名拒绝）**：`tolerance.unsupported: no feature-control-frame (tolerance) object model` | 同上 |
 | `DIMARC` | **部分实现（具名拒绝）**：`dimarc.unsupported: the dimension domain has no arc-length kind` | 同上 |
 | `CAL` | **部分实现（具名拒绝）**：`cal.unsupported: no expression evaluator is implemented` | 同上 |
