@@ -345,8 +345,8 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | AUDIT | **只检测（2026-11-07）**：逐实体调用 `cad_db::validate_entity`，输出 `audit.clean` 或 `audit.summary` + 每个 `audit.invalid_entity`；只读，无事务/历史/revision | **不修复**（AutoCAD 的「corrects some errors」未实现）；不删除、不改写任何实体；只覆盖实体级校验，不是完整 DWG 修复器 |
 | JOIN | 合并当前选择为**一个**实体：共线且首尾相接/重叠的 `LINE` → 一条 `LINE`；同圆心/法向/半径且扫掠相续的 `ARC` → 一条 `ARC` | 一条事务、**一步撤销**，全有或全无（先全部校验，再删除 N + 插入 1）。**仅 LINE 与 ARC**：折线/样条/圆、需要桥接空隙、跨图层/跨空间、非同心弧、块内成员 ⇒ 显式拒绝（`join.needs_two`/`join.mixed_kinds`/`join.not_collinear`/`join.not_contiguous`/`join.layer_mismatch`/`join.space_mismatch`/`join.sweep_overflow`/`join.degenerate`）。合并 `LINE` 的端点按 `(x,y,z)` 升序归一（同一批拾取总得同一几何）；`draw_order` 取源最小值（原位替换，不跳到最上层）；扫掠和恰为一整圈时**保留 `2π` ARC**，不静默转成 `CIRCLE`；反向法向的弧按「不相续」拒绝而非重新推导 |
 
-| QTEXT | **会话令牌 v1（2026-11-09）**：`QTEXT` payload-free，翻转 `SessionState::drafting_extras.qtext`；会话状态 only，无事务/修订/历史，Viewer-legal | 渲染器**不消费**该标志：文字仍按几何绘制、无占位框、不切换绘图输出；`qtext.toggled` 明说「NOT IMPLEMENTED / 无视觉效果」 | 近似实现：仅命令路径/状态 |
-| FILL | **会话令牌 v1（2026-11-09）**：翻转 `fill`（默认 ON）；会话状态 only，Viewer-legal | 渲染器不按该标志切换填充/宽线显示；无视觉变化 | 近似实现：仅命令路径/状态 |
+| QTEXT | **完整实现（2026-11-16）**：`QTEXT` payload-free，翻转会话令牌；`qtext` 经 `DisplaySettings` → `RepresentationContext::qtext` 到达派生批次，字形片段被替换为按其本应绘制几何 bbox 的闭合 `Lines` 矩形；会话状态 only，无事务/修订/历史，Viewer-legal | 无法推导范围的文字保留原绘制并报 `qtext.extent_unknown`（不编造宽度）；出图与显示共用同一上下文；无像素证据 |
+| FILL | **完整实现（2026-11-16）**：翻转 `fill`（默认 ON），经 `DisplaySettings` → `RepresentationContext::fill` 到达派生批次；`FILL OFF` 时 HATCH 画边界环、`AcDbSolid` 画奇偶边界边、宽折线画闭合偏移轮廓；矢量出图同路径 | 声明不切换：裸内核/B-rep 网格、标注箭头、WIPEOUT 遮罩（自有令牌）、图像；会话状态 only，无库写/无撤销；无像素证据 |
 | TFRAMES | **会话令牌 v1（2026-11-09）**：翻转 `tframes`；会话状态 only，Viewer-legal | 不改变图像/外部参照/文字边框可见性 | 近似实现：仅命令路径/状态 |
 | REGENAUTO | **会话令牌 v1（2026-11-09）**：翻转 `regenauto`；会话状态 only，Viewer-legal | 本构建无自动重生成开关；需显式 `REGEN` | 近似实现：仅命令路径/状态 |
 | ISODRAFT | **会话令牌 v1（2026-11-09）**：翻转 `isodraft`；会话状态 only，Viewer-legal | 不切换等轴测平面或光标、不改变捕捉/正交行为 | 近似实现：仅命令路径/状态 |
@@ -689,7 +689,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `MOCORO` | 部分实现 | `MOVE|COPY dx dy`、`ROTATE bx by degrees`、`SCALE bx by factor` 作用于当前选择，委托既有 MOVE/COPY/ROTATE/SCALE 路径；COPY 一条事务/一步撤销 | 无交互 gizmo/选项循环；空选择 `mocoro.selection_required` |
 | `MSTRETCH` | 部分实现 | 仅 payload 多窗口列表（**无命令行语法**）；复用 STRETCH planner 的窗口并集；一条事务/一步撤销 | 无多边形交叉窗口；命令行不可达 |
 | `-PAN` / `PAN` | 部分实现 | `-PAN` 是 `PAN` 别名；`dx dy` 或两点，走既有相机路径 | 只改视图：不写库、不 bump 修订、不入历史 |
-| `VIEWRES` | 部分实现 | 整数 `1..=1000` 仅存会话 token；越界 `viewres.out_of_range` | 渲染器消费/圆 tessellation 效果 NOT IMPLEMENTED；NOT pixel-verified |
+| `VIEWRES` | 完整实现 | 整数 `1..=1000`（越界 `viewres.out_of_range`）成为弦分段上限：约束样条、折线 bulge 弧、非 SDF 圆锥的弦回退与宽折线带，`1..=2` 夹到 3 段下限；无库写/无撤销 | 声明：圆/弧/椭圆是解析 SDF，无弦可限，本变量不改变其平滑度；这是显示容差上限，不是平滑度设置；像素效果 NOT VERIFIED |
 | `VSCURRENT` | 部分实现 | 仅 `WIREFRAME` 存会话 token；其余样式 `vscurrent.style_not_implemented` | 无渲染器切换（当前渲染器本就是 2D wireframe）；NOT pixel-verified |
 | `REGEN3` | 部分实现 | `REGEN` 的别名（同一 `CommandId`/路径） | 不修复 3D 实体/曲面显示异常（无该能力） |
 | `LINETYPE` / `-LINETYPE` | 部分实现 | `LIST` 只读（Viewer 合法）；`SET <name>` 复用 `SETENTITYPROPERTY`、重新授权工作模式、一条事务/一步撤销 | 未知名 `property.unknown_linetype`；无线型表加载/新建/删除/改名 |
