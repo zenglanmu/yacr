@@ -315,7 +315,24 @@ impl<'a> ImporterBuilder<'a> {
                 )
             }
             EntityType::Spline(s) => spline_semantics(s),
-            EntityType::Solid(s) => solid_mesh_semantics(s),
+            EntityType::Solid(s) => {
+                let (geometry, completeness) = solid_mesh_semantics(s);
+                // The shared helper labels a non-finite corner with the combined
+                // `AcDbTrace` class. Keep SOLID and TRACE apart even in the
+                // unrepresentable placeholder, so nothing downstream (the export
+                // drop report included) sees the wrong class.
+                let geometry = match geometry {
+                    SemanticGeometry::Opaque {
+                        version, payload, ..
+                    } => SemanticGeometry::Opaque {
+                        type_key: entity_class_name(entity),
+                        version,
+                        payload,
+                    },
+                    other => other,
+                };
+                (geometry, completeness)
+            }
             EntityType::Face3D(f) => {
                 // A 3DFACE stores its corners in WCS and in boundary order
                 // (first, second, third, fourth), unlike SOLID/TRACE

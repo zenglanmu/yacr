@@ -161,9 +161,9 @@ fn header_variable_pairs(bytes: &[u8], name: &str) -> Vec<(i32, String)> {
         .collect()
 }
 
-/// The `10/20/30`, `11/21/31`, `12/22/32`, `13/23/33` points written inside the
-/// first entity record named `record_name`, read straight from the bytes.
-fn record_corner_points(bytes: &[u8], record_name: &str) -> Vec<(i32, [f64; 3])> {
+/// The `(code, value)` pairs written inside the first entity record named
+/// `record_name` (the `0/<name>` pair itself excluded).
+fn record_pairs_of(bytes: &[u8], record_name: &str) -> Vec<(i32, String)> {
     let pairs = dxf_pairs(bytes);
     let Some(start) = pairs
         .iter()
@@ -171,10 +171,20 @@ fn record_corner_points(bytes: &[u8], record_name: &str) -> Vec<(i32, [f64; 3])>
     else {
         panic!("no {record_name} record in the export");
     };
-    let record = &pairs[start + 1..];
+    pairs[start + 1..]
+        .iter()
+        .take_while(|(code, _)| *code != 0)
+        .cloned()
+        .collect()
+}
+
+/// The `10/20/30`, `11/21/31`, `12/22/32`, `13/23/33` points written inside the
+/// first entity record named `record_name`, read straight from the bytes.
+fn record_corner_points(bytes: &[u8], record_name: &str) -> Vec<(i32, [f64; 3])> {
+    let record = record_pairs_of(bytes, record_name);
     let mut corners = Vec::new();
     let mut index = 0;
-    while index < record.len() && record[index].0 != 0 {
+    while index < record.len() {
         let (code, _) = &record[index];
         if matches!(code, 10..=13) {
             let coordinates = |offset: i32| -> f64 {

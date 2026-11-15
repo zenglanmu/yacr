@@ -324,7 +324,18 @@ pub(crate) fn entity_class_name(e: &EntityType) -> String {
         EntityType::Text(_) => "AcDbText",
         EntityType::MText(_) => "AcDbMText",
         EntityType::Spline(_) => "AcDbSpline",
-        EntityType::Solid(_) => "AcDbTrace",
+        EntityType::Solid(s) => {
+            // acadrust models SOLID and TRACE with one geometry struct and keeps
+            // the class in `is_trace`. The two are different DXF entities (a
+            // TRACE plots as a filled outline, a SOLID fills), so the class must
+            // survive into the domain type key: collapsing both into
+            // `AcDbTrace` made a re-saved SOLID come out as a polyface mesh.
+            if s.is_trace {
+                "AcDbTrace"
+            } else {
+                "AcDbSolid"
+            }
+        }
         EntityType::Face3D(_) => "AcDbFace",
         EntityType::Insert(_) => "AcDbBlockReference",
         EntityType::Solid3D(_) => "AcDb3dSolid",

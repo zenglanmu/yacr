@@ -28,7 +28,7 @@ use super::common::{
     common_for, map_h_align, map_v_align, mtext_attachment, ocs_from_wcs, v3, with_reasons,
 };
 use super::report::{ExportCounts, ExportDiagnostic, ExportLimits, MappingOutcome};
-use super::solid_record::{solid_record_corners, SOLID_TYPE_KEY};
+use super::solid_record::{face_class, face_record};
 use super::tables::ensure_text_style;
 
 /// The largest polyface vertex index that fits `PolyfaceFace`'s signed `i16`
@@ -532,36 +532,42 @@ fn emit_leaf(
             );
         }
         SemanticGeometry::Mesh(mesh) => {
-            // A mesh created by the domain `SOLID` command keeps its source class
-            // name; 3–4 coplanar corners with the implied triangle fan are exactly
-            // a DXF SOLID, so write a real SOLID record instead of a polyface
-            // mesh. Anything else about that mesh (more corners, per-vertex
-            // colours, a different triangulation) keeps the polyface path below
-            // and is declared there.
-            let mut solid_refusal: Option<String> = None;
-            if entity.object.type_key == SOLID_TYPE_KEY {
-                match solid_record_corners(mesh) {
-                    Ok(corners) => {
+            // A mesh with a SOLID/TRACE source class (created by the domain
+            // `SOLID` command, or imported from DXF) whose 3–4 coplanar corners
+            // and implied triangle fan are exactly a filled-face record is
+            // written as that record — SOLID for SOLID, TRACE for TRACE — instead
+            // of a polyface mesh. Anything else about that mesh (more corners,
+            // per-vertex colours, a different triangulation, a tilted plane)
+            // keeps the polyface path below and is declared there with the class
+            // it wanted.
+            let mut face_refusal: Option<String> = None;
+            if let Some(class) = face_class(&entity.object.type_key) {
+                match face_record(mesh, class) {
+                    Ok(record) => {
                         let (common, reasons) = common_for(doc, entity, ctx);
                         let mut solid = DxfSolid::new(
-                            v3(corners[0]),
-                            v3(corners[1]),
-                            v3(corners[2]),
-                            v3(corners[3]),
+                            v3(record.corners[0]),
+                            v3(record.corners[1]),
+                            v3(record.corners[2]),
+                            v3(record.corners[3]),
                         );
-                        // DXF SOLID is planar in its own OCS; the created face is
-                        // in the +Z plane, so the extrusion is identity.
+                        // A filled-face record is planar in its own OCS; both the
+                        // created and the imported face are in the +Z plane, so the
+                        // extrusion is identity.
                         solid.normal = Vector3::UNIT_Z;
+                        // acadrust keeps the SOLID/TRACE class in this one flag and
+                        // the writer picks the record type from it.
+                        solid.is_trace = record.class.is_trace();
                         solid.common = common;
                         acc.push(EntityType::Solid(solid), ctx)?;
                         acc.record(
                             object,
-                            "solid",
+                            "filled_face",
                             with_reasons(MappingOutcome::Exact, reasons),
                         );
                         return Ok(());
                     }
-                    Err(reason) => solid_refusal = Some(reason),
+                    Err(reason) => face_refusal = Some(reason),
                 }
             }
             // Polyface face indices are signed i16 (1-based). A mesh outside that
@@ -601,10 +607,10 @@ fn emit_leaf(
             polyface.common = common;
             acc.push(EntityType::PolyfaceMesh(polyface), ctx)?;
             let mut reasons = reasons;
-            if let Some(reason) = solid_refusal {
+            if let Some(reason) = face_refusal {
                 reasons.push(format!(
-                    "a SOLID source could not be written as a DXF SOLID record: {reason}; written \
-                     as a polyface mesh"
+                    "this source could not be written as a filled-face record ({reason}); its \
+                     class is not preserved and it is written as a polyface mesh"
                 ));
             }
             reasons.push(
