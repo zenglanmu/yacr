@@ -537,7 +537,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `LAYDEL` / `-LAYDEL` | 完整实现 | 选择式（模型空间或任一图纸布局的顶层实体；块内成员/子元素拒绝）：删除选中对象所在层在模型空间、每个图纸布局与每个块定义内的**全部**实体，剪除各图纸视口的该层 `layer_overrides` 键，再删除层行；实体/布局/层行一条事务/一步撤销 | 当前层/`0` 层拒绝；锁定层的实体删除由数据库以 `layer.locked` 拒绝且不发布（不是静默成功） |
 | `LAYERSTATE` | 部分实现 | `LAYERSTATE SAVE/RESTORE/LIST/DELETE <name>`；会话内最多 32 个命名快照（逐层属性 + 当前层 + 覆盖），恢复通过 `set_layer_attributes` | 无 DWG 持久化、无 `.las` 文件、无图层状态管理器对话框；恢复是多行 revision 提升且**不可撤销**；未知/悬挂层与保存时隐藏的当前层拒绝 |
 | `LAYERPMODE` | 部分实现 | `LAYERPMODE ON\|OFF`；会话标志，`OFF` 时覆盖变更不推 `LAYERP` 快照；裸命令报告当前值 | 无 `LAYERPMODE` 持久化；不改变已应用的覆盖 |
-| `LTSCALE` | 部分实现 | 一个正有限小数；写内存 `$LTSCALE`（一次 revision、无撤销/历史） | 当前导出器不写 `$LTSCALE`，SAVE→OPEN 不往返；无 `CELTSCALE`/`PSLTSCALE`/`MSLTSCALE` 联动 |
+| `LTSCALE` | 完整实现 | 一个正有限小数；写数据库 `$LTSCALE`（一次 revision、无撤销/历史）；DXF/DWG 头经 `header.linetype_scale` 写出，SAVE→OPEN 往返（导出测试断言 group 40 与往返） | 无 `CELTSCALE`/`PSLTSCALE`/`MSLTSCALE` 联动（属全局变量族）；DWG 分支仍是实验性 `DwgWriter`，非 vendor 验证 |
 | `LAYWALK` | 部分实现 | 逗号分隔层名；只显示命名层 + 当前层，走与 `LAYISO` 相同的会话覆盖原子路径 | 仅覆盖、不写库；未知/空列表拒绝；由 `LAYUNISO`/`RESTORELAYERS` 清除，计一次 `LAYERP` 快照 |
 
 #### 2026-11-07 选择/过滤/查找/可见性批次（10 条）
@@ -577,7 +577,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | 命令 | 状态 | 结果 | 显式未实现 / 有意偏离 |
 |---|---|---|---|
 | `DONUT` | 部分实现 | 类型化 `DONUT <cx> <cy> <inner> <outer>`；两个同心 `Circle`，一条事务/一步撤销 | 无中心点拾取提示（中心必须键入）；`inner=0` 只建外圆并报 `donut.inner_zero`；无宽度/填充环模型 |
-| `SOLID` | 部分实现 | 3-4 个 `x,y` 点 → 两三角 `Mesh`（type-key `AcDbSolid`），一条事务/一步撤销 | DXF 导出写 polyface mesh，不是 SOLID 记录；无 3D 厚度/挤出 |
+| `SOLID` | 部分实现 | 3-4 个 `x,y` 点 → 两三角 `Mesh`（type-key `AcDbSolid`），一条事务/一步撤销；创建路径导出真 `SOLID` 记录（`0/SOLID` + `100/AcDbTrace`，边界→存储角序末两位互换，三角重复 `13`） | **导入**的 `SOLID`/`TRACE` 仍以 polyface mesh 重新导出（导入器合并两类 → 需类溯源）；不可表示几何保留 polyface 并声明；无 3D 厚度/挤出 |
 | `HELIX` | 部分实现 | 平面 2D 螺旋 `Polyline`（64 段/圈，上限 4096 顶点），一条事务/一步撤销 | `height>0` 的 3D 弹簧按 `helix.3d_not_implemented` 拒绝；无扭转/半径渐变 |
 | `MLINE` | 部分实现 | 恰好两条平行 `LINE`，围绕基线按当前 MLSTYLE 间距放置，一条事务/一步撤销 | 无 join/cap/元素表/多段基线；不是完整 MLINE 实体 |
 | `MLSTYLE` | 部分实现 | 会话内最多 16 个命名多线样式（`LIST`/`SET`），喂 MLINE | 不写 DWG/不持久化；无对话框、无元素/接头样式 |

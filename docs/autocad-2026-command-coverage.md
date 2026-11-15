@@ -26,8 +26,8 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **125** |
-| 部分实现（有写明的界） | **854** |
+| 完整实现 | **126** |
+| 部分实现（有写明的界） | **853** |
 | **已实现合计（完整 + 部分）** | **979** |
 | 未实现 | **2** |
 
@@ -117,14 +117,14 @@
 >
 > **官方 981 条已无「未实现」的可用命令名**：仅 `MEASURE` 与 `TRACE` 两条按**同名不同义**不计入
 > （本仓库同名命令分别表示测量入口与旧式宽线带），它们的官方语义在本构建仍无对应实现。计入
-> **979 已实现（125 完整 + 854 部分）/ 2 未实现（同名不同义）**；证据仅 Linux 编译 + Rust 契约测试，
+> **979 已实现（126 完整 + 853 部分）/ 2 未实现（同名不同义）**；证据仅 Linux 编译 + Rust 契约测试，
 > GUI/GPU/像素/真机 NOT VERIFIED。
 
 > **2026-11-12 增补（Wave 29，真实 2D 升级，无新命令名）**：`TRIM` 新增 **LWPOLYLINE 目标**（开放/闭合；bulge 还原为精确 ARC 后求交，保留拾取投影所在窗口，子弧 bulge 精确保留；一条事务/一步撤销；EXTEND 的 POLYLINE 目标仍按名拒绝）。该升级不改变 981 条状态总计，仍计入 **979 已实现（107 完整 + 872 部分）/ 2 未实现（同名不同义）**；证据仅 Linux 契约测试，GUI/GPU/像素 NOT VERIFIED。
 
 > **2026-11-12 增补（Wave 29b）**：`HATCHEDIT` 新增 **`PATTERN <内置图案名>`**（按名称从现有 `.pat` 库取图案，保留 hatch 的角度/比例/double；未知名 `hatchedit.unknown_pattern`、缺名 `hatchedit.needs_pattern_name`、实心/渐变 `hatchedit.pattern_requires_pattern` 均具名拒绝；一条事务/一步撤销）。任意用户 `.pat` 图案文件仍需宿主文件 I/O，未接入。不影响 981 条状态总计。
 
-> **2026-11-15 增补（Wave 30，晋升计划 P4/P5）**：`LAYDEL`/`-LAYDEL`、`LAYTHW`、`RENAME`/`-RENAME`、`LAYMRG`/`-LAYMRG`、`LAYOUTWIZARD`、`LENGTHEN`、`FILLET`、`CLIP`、`CLIPIT`、`STRETCH`、`JOIN`、`TXT2MTXT`、`HATCHEDIT`、`HATCHSETORIGIN`、`HATCHTOBACK` 由**部分实现**晋升为**完整实现**。`LAYDEL`/`-LAYDEL`——删除范围从「模型空间实体」扩到**模型空间 + 每个图纸布局 + 每个块定义内的全部实体**（`cad-db` 用单一 `entities` 表按 `layer` 过滤；块成员删除复用 ERASE 的 `delete_entity` + 显示状态路径，撤销时成员关系一并还原），并剪除各图纸视口该层的 `layer_overrides` 键（原先会留下悬空键）；实体补丁、布局补丁与层行仍是**一条事务/一步撤销**，重做再次删除。`laydel.layer_in_use` 拒码已删除；选择输入可以是**模型空间或任一图纸布局**的顶层实体（块内成员/子元素按 `laydel.block_space` 拒绝）——后一条缺口是**真机 GUI 验证**抓到的：图纸空间选择当时被 `laydel.selection` 拒绝，而契约测试没覆盖；当前层/`0` 层仍拒绝，锁定层的实体删除由数据库以 `layer.locked` 拒绝且**不发布**（不是静默成功）。会话层状态（`LAYERSTATE SAVE`）是会话数据，不在删除范围内，恢复悬空层仍按 `layerstate.dangling_layer` 拒绝。`LAYTHW` 同时解开绘图级 `frozen` 与**每个图纸布局、每个视口**的冻结覆盖（`PaperViewport::layer_overrides` 中值为 `true` 的项；显式 `false` 覆盖、视口裁剪/矩阵与 `frozen_in_new_viewport` 保留），层补丁 + 布局补丁一条事务/一步撤销。旧文档「本构建无视口模型」是**陈旧的借口**：先写测试再改代码时，两个新测试在旧实现下确实失败。`RENAME`/`-RENAME` 的 `LINETYPE` kind 不再是具名拒绝：改名与层/实体线型引用的级联在同一次 `cad-db` 校验写入里完成（一次 revision、一次 `ChangeSet`），撤销/重做对称；`Continuous` 不可改名，创建/删除线型仍不支持。`LAYMRG`/`-LAYMRG` 补上**各图纸视口 `layer_overrides` 的源层键剪除**（此前留下指向已删层的死键、`layout_patches` 硬编码为空），与实体/层行同一条记录。`LENGTHEN` 的开放样条**延长**按声明的端点切线直尾实现（缩短仍是精确子曲线）⇒ 晋升为**完整实现**；`FILLET` 补齐**SPLINE 对**与**零半径全部平面对**（含 CIRCLE↔CIRCLE 复用 TRIM 的 CIRCLE→ARC 规则）⇒ 晋升为**完整实现**。`LAYOUTWIZARD` 新增 `ARRANGE` 等分格视口排列（铺在本次 Authored 纸张上，复用 `VPORTS` 网格助手），打印设备/打印样式/标题栏逐条明说未实现。`CLIP`/`CLIPIT` 改为真实命令：分派到既有 `IMAGECLIP`/`XCLIP` 写路径（`RECT`/`POLY`/`ON`/`OFF`/`DELETE`，`CLIPIT` 用选择里的 LINE/ARC/LWPOLYLINE 建闭合边界），并在写入前按名字拒绝表示层画不出的情形（块参照的多边形裁剪、非凸/自交图像多边形、旋转/倾斜参照、底图裁剪）。`TXT2MTXT` 的 `UNIFORM <factor>` 用新增的 MTEXT `TextLineSpacing`（DXF 44/73 往返）实现，导入侧的 `text.line_spacing_style_unsupported` blanket 拒绝随之收窄为只针对退化 factor。`HATCHEDIT` 新增 `ORIGIN <x> <y>`（图案相位原点，折回 pattern 行 43/44 导出）与 `PATTERNFILE <path.pat> [<name>]`（经宿主文件桥读用户 `.pat`，组 76 = 2 Custom）。`HATCHSETORIGIN` 不再是恒拒绝：图案原点只能经定义行到达，因此命令以**首个定义行的合成基点**为锚（`HatchGeometry::absolute_pattern_origin()`），写入 `P − 合成基点`，行列/角度/比例全部参与（`(0.5,1)` + `P=(2,3)` ⇒ 位移 `(1.5,2)`）；无定义行的图案保留收窄的 `missing_field`，非有限位移 `unrepresentable`，实体/渐变 `not_pattern`，一条事务/一步撤销。`HATCHTOBACK` 按 `SpaceId` 逐范围（模型空间、各图纸布局、各块定义）先规划后写入，各范围 hatch 连续排在该范围最低非 hatch 次序之下并保持相对次序，i64 下溢仍按范围拒绝，一条事务/一步撤销、拒绝时不写任何范围。计入 **979 已实现（125 完整 + 854 部分）/ 2 未实现（同名不同义）**。证据：`cargo test -p cad-app --locked laydel` **10 passed**、`laythw` **5 passed**、`laymrg` **6 passed**、`layer_commands` **69 passed**、`rename` **15 passed**、`layer_undo` 1 passed、`cargo clippy -p cad-app --all-targets` 干净、`scripts/check-file-size.py` 通过；**真机 GUI 运行与截图见本轮交接**（`native-below` / Vulkan `Quadro P620`），Windows/macOS/Android/Web 本轮 NOT VERIFIED。
+> **2026-11-15 增补（Wave 30，晋升计划 P4/P5）**：`LAYDEL`/`-LAYDEL`、`LAYTHW`、`RENAME`/`-RENAME`、`LAYMRG`/`-LAYMRG`、`LAYOUTWIZARD`、`LENGTHEN`、`FILLET`、`CLIP`、`CLIPIT`、`STRETCH`、`JOIN`、`TXT2MTXT`、`HATCHEDIT`、`HATCHSETORIGIN`、`HATCHTOBACK`、`LTSCALE` 由**部分实现**晋升为**完整实现**。`LAYDEL`/`-LAYDEL`——删除范围从「模型空间实体」扩到**模型空间 + 每个图纸布局 + 每个块定义内的全部实体**（`cad-db` 用单一 `entities` 表按 `layer` 过滤；块成员删除复用 ERASE 的 `delete_entity` + 显示状态路径，撤销时成员关系一并还原），并剪除各图纸视口该层的 `layer_overrides` 键（原先会留下悬空键）；实体补丁、布局补丁与层行仍是**一条事务/一步撤销**，重做再次删除。`laydel.layer_in_use` 拒码已删除；选择输入可以是**模型空间或任一图纸布局**的顶层实体（块内成员/子元素按 `laydel.block_space` 拒绝）——后一条缺口是**真机 GUI 验证**抓到的：图纸空间选择当时被 `laydel.selection` 拒绝，而契约测试没覆盖；当前层/`0` 层仍拒绝，锁定层的实体删除由数据库以 `layer.locked` 拒绝且**不发布**（不是静默成功）。会话层状态（`LAYERSTATE SAVE`）是会话数据，不在删除范围内，恢复悬空层仍按 `layerstate.dangling_layer` 拒绝。`LAYTHW` 同时解开绘图级 `frozen` 与**每个图纸布局、每个视口**的冻结覆盖（`PaperViewport::layer_overrides` 中值为 `true` 的项；显式 `false` 覆盖、视口裁剪/矩阵与 `frozen_in_new_viewport` 保留），层补丁 + 布局补丁一条事务/一步撤销。旧文档「本构建无视口模型」是**陈旧的借口**：先写测试再改代码时，两个新测试在旧实现下确实失败。`RENAME`/`-RENAME` 的 `LINETYPE` kind 不再是具名拒绝：改名与层/实体线型引用的级联在同一次 `cad-db` 校验写入里完成（一次 revision、一次 `ChangeSet`），撤销/重做对称；`Continuous` 不可改名，创建/删除线型仍不支持。`LAYMRG`/`-LAYMRG` 补上**各图纸视口 `layer_overrides` 的源层键剪除**（此前留下指向已删层的死键、`layout_patches` 硬编码为空），与实体/层行同一条记录。`LENGTHEN` 的开放样条**延长**按声明的端点切线直尾实现（缩短仍是精确子曲线）⇒ 晋升为**完整实现**；`FILLET` 补齐**SPLINE 对**与**零半径全部平面对**（含 CIRCLE↔CIRCLE 复用 TRIM 的 CIRCLE→ARC 规则）⇒ 晋升为**完整实现**。`LAYOUTWIZARD` 新增 `ARRANGE` 等分格视口排列（铺在本次 Authored 纸张上，复用 `VPORTS` 网格助手），打印设备/打印样式/标题栏逐条明说未实现。`CLIP`/`CLIPIT` 改为真实命令：分派到既有 `IMAGECLIP`/`XCLIP` 写路径（`RECT`/`POLY`/`ON`/`OFF`/`DELETE`，`CLIPIT` 用选择里的 LINE/ARC/LWPOLYLINE 建闭合边界），并在写入前按名字拒绝表示层画不出的情形（块参照的多边形裁剪、非凸/自交图像多边形、旋转/倾斜参照、底图裁剪）。`TXT2MTXT` 的 `UNIFORM <factor>` 用新增的 MTEXT `TextLineSpacing`（DXF 44/73 往返）实现，导入侧的 `text.line_spacing_style_unsupported` blanket 拒绝随之收窄为只针对退化 factor。`HATCHEDIT` 新增 `ORIGIN <x> <y>`（图案相位原点，折回 pattern 行 43/44 导出）与 `PATTERNFILE <path.pat> [<name>]`（经宿主文件桥读用户 `.pat`，组 76 = 2 Custom）。`HATCHSETORIGIN` 不再是恒拒绝：图案原点只能经定义行到达，因此命令以**首个定义行的合成基点**为锚（`HatchGeometry::absolute_pattern_origin()`），写入 `P − 合成基点`，行列/角度/比例全部参与（`(0.5,1)` + `P=(2,3)` ⇒ 位移 `(1.5,2)`）；无定义行的图案保留收窄的 `missing_field`，非有限位移 `unrepresentable`，实体/渐变 `not_pattern`，一条事务/一步撤销。`HATCHTOBACK` 按 `SpaceId` 逐范围（模型空间、各图纸布局、各块定义）先规划后写入，各范围 hatch 连续排在该范围最低非 hatch 次序之下并保持相对次序，i64 下溢仍按范围拒绝，一条事务/一步撤销、拒绝时不写任何范围。`LTSCALE` 的导出缺口（`$LTSCALE` 不回写）已关闭：导出器把数据库值写进 `header.linetype_scale`（HEADER `9/$LTSCALE` + `40`，不转换，不可表示值声明并保留默认 1.0），SAVE→OPEN 往返有导出测试钉住。`SOLID` 的**创建路径**也改写真 `SOLID` 记录（边界序 → 存储序末两位互换，三角重复 `13`），但**导入**的 `SOLID`/`TRACE` 仍重新导出为 polyface mesh（导入器把两类合并成同一 type key），因此仍为部分实现。计入 **979 已实现（126 完整 + 853 部分）/ 2 未实现（同名不同义）**。证据：`cargo test -p cad-app --locked laydel` **10 passed**、`laythw` **5 passed**、`laymrg` **6 passed**、`layer_commands` **69 passed**、`rename` **15 passed**、`layer_undo` 1 passed、`cargo clippy -p cad-app --all-targets` 干净、`scripts/check-file-size.py` 通过；**真机 GUI 运行与截图见本轮交接**（`native-below` / Vulkan `Quadro P620`），Windows/macOS/Android/Web 本轮 NOT VERIFIED。
 
 ### 纪律
 
@@ -776,7 +776,7 @@
 | `LOGFILEON` | 部分实现 | 会话令牌置开（`logfileon.toggled`）；无日志文件。 |
 | `LSP` | 部分实现 | 具名拒绝（`lsp.unsupported: this build has no AutoLISP runtime or compiler`）。 |
 | `LSPSURF` | 部分实现 | 具名拒绝（`lspsurf.unsupported: this build has no AutoLISP runtime or compiler`）。 |
-| `LTSCALE` | 部分实现 | 一个正有限小数；写内存 `$LTSCALE`（一次 revision，无撤销）；当前导出器不写该变量，SAVE→OPEN 不往返 |
+| `LTSCALE` | 完整实现 | 一个正有限小数；写数据库 `$LTSCALE`（一次 revision，无撤销）；导出写 HEADER `9/$LTSCALE` + `40`，SAVE→OPEN 往返；不可表示的值声明为 `export.note.linetype_scale` 并保留 DXF 默认 1.0 |
 | `LWEIGHT` | 部分实现 | 只读报告会话线宽显示令牌（默认 ON，`lweight.report`）；渲染器不消费该标志，LWEIGHT 对话框未实现。 |
 | `MAKELISPAPP` | 部分实现 | 具名拒绝（`makelispapp.unsupported: this build has no AutoLISP runtime or compiler`）。 |
 | `MARKUP` | 部分实现 | 具名拒绝（`markup.unsupported: this build has no collaboration markup/trace model`）。 |
@@ -1035,7 +1035,7 @@
 | `SLICE` | 部分实现 | 具名拒绝（`slice.unsupported: no 3D slicing model`）。 |
 | `SNAP` | 已实现 | — |
 | `SOLDRAW` | 部分实现 | 具名拒绝（`soldraw.unsupported: no 3D solid-to-2D drawing view model`）。 |
-| `SOLID` | 部分实现 | 3-4 个 `x,y` 点 → 两三角 `Mesh`（`AcDbSolid`）；DXF 导出写 polyface mesh，不是 SOLID 记录 |
+| `SOLID` | 部分实现 | 3-4 个 `x,y` 点 → 两三角 `Mesh`（`AcDbSolid`）；创建路径导出为**真 `SOLID` 记录**（10/11/12/13，边界序与存储序末两位互换；三角 SOLID 重复 13），不可表示时保留 polyface 并按名声明 | **导入**的 `SOLID`/`TRACE` 仍以 polyface mesh 重新导出（导入器把两类合并成同一 type key，需要类溯源）；无厚度/挤出 |
 | `SOLIDEDIT` | 部分实现 | 具名拒绝（`solidedit.unsupported: no 3D solid-history/brep model`）。 |
 | `SOLPROF` | 部分实现 | 具名拒绝（`solprof.unsupported: no 3D solid-to-2D drawing view model`）。 |
 | `SOLVIEW` | 部分实现 | 具名拒绝（`solview.unsupported: no 3D solid-to-2D drawing view model`）。 |
@@ -1723,7 +1723,7 @@
 | 506 | `LOGFILEON` | 部分实现 | Writes the contents of the command history to a file. | 会话令牌置开（`logfileon.toggled`）；无日志文件。 |
 | 507 | `LSP` | 部分实现 | Displays a list of all available AutoLISP commands, functions, and variables. | 具名拒绝（`lsp.unsupported: this build has no AutoLISP runtime or compiler`）。 |
 | 508 | `LSPSURF` | 部分实现 | Displays the contents of an AutoLISP file by individual functions. | 具名拒绝（`lspsurf.unsupported: this build has no AutoLISP runtime or compiler`）。 |
-| 509 | `LTSCALE` | 部分实现 | Sets the global linetype scale factor. | 一个正有限小数；写内存 `$LTSCALE`（一次 revision，无撤销）；当前导出器不写该变量，SAVE→OPEN 不往返 |
+| 509 | `LTSCALE` | 完整实现 | Sets the global linetype scale factor. | 一个正有限小数；写数据库 `$LTSCALE`（一次 revision，无撤销）；DXF 导出写 `9/$LTSCALE` + `40`（不转换），SAVE→OPEN 往返；不可表示值声明 `export.note.linetype_scale` 并保留默认 1.0 |
 | 510 | `-LWEIGHT` | 部分实现 | Sets the current lineweight, lineweight display options, and lineweight units. | 同一线宽显示报告的命令行拼写。 |
 | 511 | `LWEIGHT` | 部分实现 | Sets the current lineweight, lineweight display options, and lineweight units. | 只读报告会话线宽显示令牌（默认 ON，`lweight.report`）；渲染器不消费该标志，LWEIGHT 对话框未实现。 |
 | 512 | `MAKELISPAPP` | 部分实现 | Compiles one or more AutoLISP (LSP) source files into an application (VLX) file that can be distributed to users and protect your code. | 具名拒绝（`makelispapp.unsupported: this build has no AutoLISP runtime or compiler`）。 |
@@ -2020,7 +2020,7 @@
 | 803 | `SLICE` | 部分实现 | Creates new 3D solids and surfaces by slicing, or dividing, existing objects. | 具名拒绝（`slice.unsupported: no 3D slicing model`）。 |
 | 804 | `SNAP` | 已实现 | Restricts cursor movement to specified intervals. | — |
 | 805 | `SOLDRAW` | 部分实现 | Generates profiles and sections in layout viewports created with SOLVIEW. | 具名拒绝（`soldraw.unsupported: no 3D solid-to-2D drawing view model`）。 |
-| 806 | `SOLID` | 部分实现 | Creates solid-filled triangles and quadrilaterals. | 3-4 个 `x,y` 点 → 两三角 `Mesh`（`AcDbSolid`）；DXF 导出写 polyface mesh，不是 SOLID 记录 |
+| 806 | `SOLID` | 部分实现 | Creates solid-filled triangles and quadrilaterals. | 3-4 个 `x,y` 点 → 两三角 `Mesh`（`AcDbSolid`），一条事务/一步撤销；**创建路径导出真 `SOLID` 记录**（`0/SOLID` + `100/AcDbTrace`，10/11/12/13 边界序，三角重复 13），5+ 点/带颜色/非共面/异三角化保留 polyface 并声明原因 | **导入的 `SOLID`/`TRACE`** 仍导出为 polyface mesh（导入器合并两类，需类溯源）；无厚度/挤出 |
 | 807 | `SOLIDEDIT` | 部分实现 | Edits faces and edges of 3D solid objects. | 具名拒绝（`solidedit.unsupported: no 3D solid-history/brep model`）。 |
 | 808 | `SOLPROF` | 部分实现 | Creates 2D profile images of 3D solids for display in a layout viewport. | 具名拒绝（`solprof.unsupported: no 3D solid-to-2D drawing view model`）。 |
 | 809 | `SOLVIEW` | 部分实现 | Creates orthographic views, layers, and layout viewports automatically for 3D solids. | 具名拒绝（`solview.unsupported: no 3D solid-to-2D drawing view model`）。 |
