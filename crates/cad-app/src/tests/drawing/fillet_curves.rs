@@ -450,7 +450,9 @@ fn fillet_curve_refusals_are_named_and_write_nothing() {
         "not_coplanar",
     );
 
-    // R = 0 has no sharp corner between two curves.
+    // R = 0 between two **tangent** circles: one crossing point means one cut, and a
+    // closed circle cut once is still the whole circle — named refusal. (Two circles
+    // with two crossings ARE cut into pick-side arcs; see `fillet_sharp_corner.rs`.)
     let (mut app, mut session) =
         curve_app(circle(point(0.0, 0.0), 5.0), circle(point(10.0, 0.0), 5.0));
     set_number(&mut session, ToolParameter::FilletRadius, 0.0);
@@ -458,24 +460,24 @@ fn fillet_curve_refusals_are_named_and_write_nothing() {
         &mut app,
         &mut session,
         fillet(1, 2, point(3.5, 3.5), point(6.5, 3.5)),
-        "radius_zero",
+        "FILLET.tangent_circles",
     );
 
-    // A genuinely unsupported participant still names the pair: a SPLINE has no
-    // control-frame trim in this build, so it stays a named refusal (ELLIPSE is
-    // implemented and has its own contracts below).
+    // A participant that is not a curve at all still names the pair: a 2D
+    // polyline is the separate FILLET POLYLINE command (SPLINE is implemented and
+    // has its own contracts in `fillet_spline.rs`).
     let (mut app, mut session) = curve_app(
         circle(point(0.0, 0.0), 5.0),
-        SemanticGeometry::Spline {
-            degree: 3,
-            knots: Vec::new(),
-            control_points: vec![
-                p3(6.0, 0.0, 0.0),
-                p3(8.0, 2.0, 0.0),
-                p3(10.0, 0.0, 0.0),
-                p3(12.0, 2.0, 0.0),
+        SemanticGeometry::Polyline {
+            points: vec![
+                point(6.0, 0.0),
+                point(8.0, 0.0),
+                point(8.0, 2.0),
+                point(6.0, 2.0),
             ],
-            weights: Vec::new(),
+            bulges: vec![0.0; 4],
+            closed: true,
+            width: 0.0,
         },
     );
     set_number(&mut session, ToolParameter::FilletRadius, 2.0);
@@ -484,7 +486,7 @@ fn fillet_curve_refusals_are_named_and_write_nothing() {
         &mut app,
         &mut session,
         CommandId::FilletLines,
-        fillet(1, 2, point(3.5, 3.5), point(6.5, 3.5)),
+        fillet(1, 2, point(3.5, 3.5), point(6.5, 1.0)),
     )
     .unwrap_err();
     assert!(matches!(error, CadError::Unsupported(_)), "{error:?}");
@@ -907,7 +909,9 @@ fn fillet_ellipse_line_trim_off_leaves_both_objects_untouched() {
 
 #[test]
 fn fillet_ellipse_refusals_are_named_and_write_nothing() {
-    // R = 0 has no sharp-corner form for an ellipse participant.
+    // R = 0 with no meeting point: this ellipse tops out at y = 2.5 and the line
+    // sits at y = 4, so the sharp corner has nothing to trim to (the R=0 pairs that
+    // DO intersect are covered in `fillet_sharp_corner.rs`).
     let (mut app, mut session) = curve_app(
         ellipse(
             point(0.0, 0.0),
@@ -926,7 +930,7 @@ fn fillet_ellipse_refusals_are_named_and_write_nothing() {
         &mut app,
         &mut session,
         fillet(1, 2, ellipse_point(point(0.0, 0.0), 1.2), point(3.0, 4.0)),
-        "FILLET.radius_zero",
+        "FILLET.no_corner_intersection",
     );
 
     // A tilted ellipse is not on the +Z work plane.
@@ -967,34 +971,5 @@ fn fillet_ellipse_refusals_are_named_and_write_nothing() {
         &mut session,
         fillet(1, 2, ellipse_point(point(0.0, 0.0), 0.3), point(3.0, 4.0)),
         "FILLET.no_tangent_arc",
-    );
-
-    // A SPLINE participant has no control-frame trim: stable named pair refusal.
-    let (mut app, mut session) = curve_app(
-        ellipse(
-            point(0.0, 0.0),
-            p3(5.0, 0.0, 0.0),
-            0.5,
-            0.0,
-            std::f64::consts::TAU,
-        ),
-        SemanticGeometry::Spline {
-            degree: 3,
-            knots: Vec::new(),
-            control_points: vec![
-                p3(6.0, 0.0, 0.0),
-                p3(8.0, 2.0, 0.0),
-                p3(10.0, 0.0, 0.0),
-                p3(12.0, 2.0, 0.0),
-            ],
-            weights: Vec::new(),
-        },
-    );
-    set_number(&mut session, ToolParameter::FilletRadius, 2.0);
-    assert_unsupported(
-        &mut app,
-        &mut session,
-        fillet(1, 2, ellipse_point(point(0.0, 0.0), 1.2), point(8.0, 2.0)),
-        "FILLET.unsupported_pair",
     );
 }

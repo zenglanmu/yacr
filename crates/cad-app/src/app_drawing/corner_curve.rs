@@ -75,6 +75,7 @@ impl RoundCurve {
             }),
             Curve::Line { .. } => None,
             Curve::Ellipse(_) => None,
+            Curve::Spline(_) => None,
         }
     }
 }
@@ -132,10 +133,14 @@ pub(super) fn plan_fillet_curve_curve(
     trim: bool,
     tol: f64,
 ) -> Result<TwoLinePlan, String> {
+    // `R = 0` is the sharp corner for every planar pair (including this one) and is
+    // planned by [`super::corner_sharp`] before this form is reached; a zero radius
+    // here is a caller bug, so it is refused by name instead of running the
+    // offset-circle construction with a degenerate radius.
     if !radius.is_finite() || radius <= 0.0 {
         return Err(
-            "FILLET.radius_zero: a curve↔curve fillet needs a positive radius (R=0 has no \
-             sharp corner between two curves)"
+            "FILLET.radius_zero: the curve↔curve tangency form needs a positive radius (R=0 \
+             is planned by the sharp-corner form, corner_sharp)"
                 .into(),
         );
     }

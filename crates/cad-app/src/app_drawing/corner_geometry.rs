@@ -14,6 +14,8 @@ use super::super::*;
 use super::corner_curve::{plan_fillet_curve_curve, positive_z_normal, RoundCurve};
 use super::corner_ellipse::{plan_fillet_with_ellipse, EllipseCurve};
 use super::corner_line_curve::{plan_fillet_line_curve, PlanArgs};
+use super::corner_sharp::plan_zero_radius;
+use super::corner_spline::{plan_fillet_with_spline, SplineCurve};
 use cad_geometry::{cross, infinite_line_intersection, length, normalize, scale, LineIntersection};
 
 /// Map the shared two-line planner's result onto this module's plan type.
@@ -46,7 +48,7 @@ pub(super) enum ChamferSpec {
 }
 
 /// The one geometry update a two-line edit applies to a picked entity.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(super) enum GeometryUpdate {
     Line {
         start: Point3,
@@ -63,6 +65,21 @@ pub(super) enum GeometryUpdate {
         start: f64,
         sweep: f64,
     },
+    /// Replace a SPLINE by the **exact** sub-curve on the trimmed pick side
+    /// (knot insertion + truncation in `cad_geometry::sub_curve`; same degree,
+    /// same weights, tangent point as an exact endpoint).
+    Spline {
+        geometry: SemanticGeometry,
+    },
+    /// Re-cut a CIRCLE into the ARC between its two crossings (the `R = 0`
+    /// CIRCLE↔CIRCLE sharp corner). `center`/`normal`/`radius` are the entity's own
+    /// and are preserved; the entity keeps its id, layer, space, draw order and
+    /// source `type_key` — exactly the in-place CIRCLE → ARC change TRIM makes for
+    /// a closed target with two cuts.
+    CircleToArc {
+        start: f64,
+        sweep: f64,
+    },
 }
 
 /// The resolved edit: optional updates for the two picks plus the optional new
@@ -74,7 +91,7 @@ pub(super) struct TwoLinePlan {
 }
 
 /// The geometric kind a FILLET pick resolved to.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(super) enum Curve {
     Line {
         start: Point3,
@@ -91,16 +108,27 @@ pub(super) enum Curve {
         sweep: f64,
     },
     Ellipse(EllipseCurve),
+    /// A validated, shorthand-expanded SPLINE (see [`super::corner_spline`]).
+    Spline(SplineCurve),
 }
 
 impl Curve {
-    fn label(self) -> &'static str {
+    pub(super) fn label(&self) -> &'static str {
         match self {
             Self::Line { .. } => "LINE",
             Self::Circle { .. } => "CIRCLE",
             Self::Arc { .. } => "ARC",
             Self::Ellipse(_) => "ELLIPSE",
+            Self::Spline(_) => "SPLINE",
         }
+    }
+
+    /// Whether this participant is a *profiled* curve, i.e. a smooth curve with a
+    /// one-parameter point/normal family: the numeric tangent forms own it as the
+    /// driver (ELLIPSE in [`super::corner_ellipse`], SPLINE in
+    /// [`super::corner_spline`]).
+    fn is_profiled(&self) -> bool {
+        matches!(self, Self::Ellipse(_) | Self::Spline(_))
     }
 }
 
@@ -421,9 +449,24 @@ pub(super) fn plan_fillet_two_line(
     if !radius.is_finite() || radius < 0.0 {
         return Err("FILLET.radius_negative: the radius must be finite and non-negative".into());
     }
+    // `R = 0` is the sharp corner for every planar pair whose corner is not the
+    // line/line one: the pair is trimmed to the nearest intersection and nothing is
+    // inserted (`corner_sharp`). LINE↔LINE keeps its documented extend-to-corner
+    // form (and the parallel auto-radius rule) below.
+    if radius == 0.0
+        && !(matches!(first, Curve::Line { .. }) && matches!(second, Curve::Line { .. }))
+    {
+        return plan_zero_radius(first, pick_first, second, pick_second, trim, tol);
+    }
+    // SPLINE participants use the numeric tangent family with the spline as the
+    // driver (`corner_spline`); the trim is an exact B-spline sub-curve. Checked
+    // before the ELLIPSE form so a spline↔ellipse pair is driven by the spline.
+    if matches!(first, Curve::Spline(_)) || matches!(second, Curve::Spline(_)) {
+        return plan_fillet_with_spline(first, pick_first, second, pick_second, radius, trim, tol);
+    }
     // ELLIPSE participants use the numeric one-parameter tangent search; every
     // other pair keeps the exact analytic construction below.
-    if matches!(first, Curve::Ellipse(_)) || matches!(second, Curve::Ellipse(_)) {
+    if first.is_profiled() || second.is_profiled() {
         return plan_fillet_with_ellipse(first, pick_first, second, pick_second, radius, trim, tol);
     }
     match (first, second) {
@@ -508,17 +551,25 @@ pub(super) fn plan_fillet_two_line(
             tol,
             line_is_first: false,
         }),
-        (first, second) => match (RoundCurve::resolve(first), RoundCurve::resolve(second)) {
-            (Some(first), Some(second)) => {
-                plan_fillet_curve_curve(first, pick_first, second, pick_second, radius, trim, tol)
+        (first, second) => {
+            let labels = (first.label(), second.label());
+            match (RoundCurve::resolve(first), RoundCurve::resolve(second)) {
+                (Some(first), Some(second)) => plan_fillet_curve_curve(
+                    first,
+                    pick_first,
+                    second,
+                    pick_second,
+                    radius,
+                    trim,
+                    tol,
+                ),
+                _ => Err(format!(
+                    "FILLET.unsupported_pair: {}/{} is not a documented FILLET pair (the \
+                     supported pairs are the LINE/CIRCLE/ARC/ELLIPSE/SPLINE combinations)",
+                    labels.0, labels.1
+                )),
             }
-            _ => Err(format!(
-                "FILLET.unsupported_pair: {}/{} fillets are not implemented (line↔line, \
-                 line↔circle, line↔arc, circle↔circle, circle↔arc and arc↔arc are)",
-                first.label(),
-                second.label()
-            )),
-        },
+        }
     }
 }
 
@@ -786,6 +837,8 @@ pub(super) fn trim_arc_to(
 /// A CIRCLE/ARC participant must store a `+Z` normal: imported curves preserve an
 /// arbitrary extrusion normal whose angles are in that frame, and this construction
 /// only models `+Z`; the refusal therefore also covers the line↔circle/arc form.
+/// A SPLINE is expanded from its stored (possibly shorthand) definition exactly as
+/// the tessellator does, and must be planar and parallel to the work plane.
 pub(super) fn fillet_curve(geometry: &SemanticGeometry) -> CadResult<Curve> {
     match geometry {
         SemanticGeometry::Line { start, end } => Ok(Curve::Line {
@@ -868,10 +921,20 @@ pub(super) fn fillet_curve(geometry: &SemanticGeometry) -> CadResult<Curve> {
                 sweep: *sweep,
             }))
         }
+        SemanticGeometry::Spline {
+            degree,
+            knots,
+            control_points,
+            weights,
+        } => Ok(Curve::Spline(SplineCurve::new(
+            *degree,
+            knots,
+            control_points,
+            weights,
+        )?)),
         other => Err(CadError::Unsupported(format!(
             "FILLET.unsupported_pair: {} is not a supported FILLET participant (LINE, CIRCLE, \
-             ARC and ELLIPSE are; a 2D polyline is the separate FILLET POLYLINE command, and \
-             SPLINE needs a control-frame edit this build does not model)",
+             ARC, ELLIPSE and SPLINE are; a 2D polyline is the separate FILLET POLYLINE command)",
             class_name(other)
         ))),
     }

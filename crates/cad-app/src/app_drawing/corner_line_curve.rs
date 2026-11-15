@@ -9,14 +9,12 @@
 //! side) with the circle of radius `r + R` about the circle centre; the tangent
 //! points are the perpendicular foot on the line and the point at ratio
 //! `r / (r + R)` toward the circle centre. A circle is never trimmed; an arc is
-//! trimmed at its tangent point on the pick side. `R = 0` trims the line to its
-//! nearest intersection with the circle and creates no arc.
+//! trimmed at its tangent point on the pick side. `R = 0` is not this form's job:
+//! it is the sharp corner, planned by [`super::corner_sharp`].
 
 use super::super::helpers::{distance, normalize_signed};
 use super::super::*;
-use super::corner_geometry::{
-    arc, pt, retarget_pick_side, trim_arc_to, unit_xy, GeometryUpdate, TwoLinePlan,
-};
+use super::corner_geometry::{arc, pt, retarget_pick_side, trim_arc_to, unit_xy, TwoLinePlan};
 
 /// The argument bundle of one line↔circle/arc fillet plan.
 pub(super) struct PlanArgs {
@@ -32,22 +30,6 @@ pub(super) struct PlanArgs {
     pub(super) tol: f64,
     /// Whether the retargeted line is the caller's first pick.
     pub(super) line_is_first: bool,
-}
-
-fn single_line_plan(update: GeometryUpdate, line_is_first: bool) -> TwoLinePlan {
-    if line_is_first {
-        TwoLinePlan {
-            first: Some(update),
-            second: None,
-            inserted: None,
-        }
-    } else {
-        TwoLinePlan {
-            first: None,
-            second: Some(update),
-            inserted: None,
-        }
-    }
 }
 
 /// Plan FILLET of one line and one circle (or arc).
@@ -78,26 +60,15 @@ pub(super) fn plan_fillet_line_curve(args: PlanArgs) -> Result<TwoLinePlan, Stri
     }
     let (ux, uy) = unit_xy(a, b, tol, "FILLET")?;
     let (nx, ny) = (-uy, ux);
+    // `R = 0` is the sharp corner and is planned by [`super::corner_sharp`] before
+    // this form is reached (it trims **both** the line and the picked arc, and
+    // leaves a circle whole); a zero radius here is a caller bug.
     if radius == 0.0 {
-        if !trim {
-            return Err(
-                "FILLET.trim_off_no_arc: with trim off the R=0 sharp corner creates nothing".into(),
-            );
-        }
-        // Sharp corner: trim the line to its nearest intersection with the circle.
-        let best = line_circle_intersections(a, (ux, uy), center, circle_radius)
-            .into_iter()
-            .min_by(|p, q| {
-                distance(*p, line_pick)
-                    .partial_cmp(&distance(*q, line_pick))
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-            .ok_or_else(|| {
-                "FILLET.line_does_not_meet_circle: the line does not intersect the circle"
-                    .to_string()
-            })?;
-        let update = retarget_pick_side((a, b), line_pick, best, tol, "FILLET")?;
-        return Ok(single_line_plan(update, line_is_first));
+        return Err(
+            "FILLET.radius_zero: the line↔circle/arc tangency form needs a positive radius \
+             (R=0 is planned by the sharp-corner form, corner_sharp)"
+                .into(),
+        );
     }
     // The fillet lies on the side of the line the circle is on; when the line
     // crosses the circle the pick side decides (declared).
@@ -190,24 +161,4 @@ pub(super) fn plan_fillet_line_curve(args: PlanArgs) -> Result<TwoLinePlan, Stri
             inserted: Some(inserted),
         },
     })
-}
-
-/// Intersections of the infinite line `(origin, dir)` with a circle.
-fn line_circle_intersections(
-    origin: Point3,
-    dir: (f64, f64),
-    center: Point3,
-    radius: f64,
-) -> Vec<Point3> {
-    let (wx, wy) = (origin.x - center.x, origin.y - center.y);
-    let half_b = wx * dir.0 + wy * dir.1;
-    let discriminant = half_b * half_b - (wx * wx + wy * wy - radius * radius);
-    if !discriminant.is_finite() || discriminant < 0.0 {
-        return Vec::new();
-    }
-    let root = discriminant.sqrt();
-    [-half_b - root, -half_b + root]
-        .into_iter()
-        .map(|t| pt(origin.x + dir.0 * t, origin.y + dir.1 * t, origin.z))
-        .collect()
 }

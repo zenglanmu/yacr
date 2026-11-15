@@ -61,26 +61,65 @@
 //!   deterministic. A chosen tangent outside a picked ARC is refused
 //!   (`FILLET.tangent_outside_arc`) even with trim off, and a circle/arc/ellipse
 //!   whose stored `normal` is not `+Z` is refused (`FILLET.unsupported_plane`).
-//!   `R = 0`, concentric curves, non-coplanar curves and a radius with no real
-//!   tangency are named refusals before any write.
+//!   Concentric curves, non-coplanar curves and a radius with no real tangency are
+//!   named refusals before any write.
 //! * **ELLIPSE participants** (ELLIPSE ↔ LINE/CIRCLE/ARC/ELLIPSE) are the numeric
 //!   form: the fillet centre is the one-parameter family `P(θ) ± R·n(θ)` and a
 //!   root of `distance(centre, other) − R` is a circle tangent to both. Roots are
 //!   bracketed on a dense parameter scan (sign changes and tangential minima) and
 //!   bisected/refined, so the construction is numeric but deterministic; the
 //!   nearest-pick candidate wins and the elliptical arc is trimmed by rewriting
-//!   its parametric `start`/`sweep` (never re-approximated). `R = 0` on an ellipse
-//!   is refused (`FILLET.radius_zero`; only line/line and line/circle implement the
-//!   sharp-corner form). SPLINE remains an explicit named `Unsupported` refusal
-//!   (`FILLET.unsupported_pair`) because the model has no control-frame trim.
+//!   its parametric `start`/`sweep` (never re-approximated). A non-planar ellipse
+//!   frame is refused (`FILLET.unsupported_plane`).
+//! * **SPLINE participants** (SPLINE ↔ LINE/CIRCLE/ARC/ELLIPSE/SPLINE) are the
+//!   same numeric form with the **spline** as the driver and an exact trim
+//!   (`cad_geometry::sub_curve`: knot insertion on the homogeneous control points,
+//!   so the tangent point becomes an exact endpoint and nothing is refitted). The
+//!   old `FILLET.unsupported_pair` "no control-frame trim" refusal was a planner
+//!   gap, not a model gap, and is gone. A non-planar spline control polygon, or one
+//!   on another Z, is refused (`FILLET.unsupported_plane` / `FILLET.not_coplanar`).
+//! * **`R = 0` is the sharp corner for every planar pair** ([`corner_sharp`], with
+//!   LINE↔LINE keeping the documented extend-to-corner form above): the picked pair
+//!   is trimmed to the intersection **nearest the two picks** and no ARC is created.
+//!   Coverage is LINE/LINE, LINE/CIRCLE, LINE/ARC, LINE/ELLIPSE, LINE/SPLINE,
+//!   CIRCLE/ARC, CIRCLE/ELLIPSE, CIRCLE/SPLINE, ARC/ARC, ARC/ELLIPSE, ARC/SPLINE,
+//!   ELLIPSE/ELLIPSE, ELLIPSE/SPLINE and SPLINE/SPLINE; elliptic arcs trim inside
+//!   their stored span. `LINE/CIRCLE/ARC` pairs take their intersections from
+//!   `cad_geometry`'s geometry engine (the analytic conic/conic and conic/segment
+//!   solutions TRIM/EXTEND use) with the line widened to its own infinite line, so
+//!   a line is trimmed **or extended** to the corner; a pair with an ELLIPSE/SPLINE
+//!   uses the same numeric root scan as the `R > 0` forms. A pair that does not
+//!   actually intersect is the named `FILLET.no_corner_intersection` refusal
+//!   (FILLET extends a LINE only; an arc, ellipse or spline is never extended past
+//!   its stored span).
+//!   **CIRCLE at `R = 0`**: a circle is a closed curve, so a single cut point leaves
+//!   the whole circle (`sweep = 2π`) — the identity, and the same reason TRIM
+//!   refuses to leave an arc when a closed target has fewer than two cuts. A circle
+//!   paired with a line/arc/ellipse/spline therefore stays whole and the corner is
+//!   written on the other object. **CIRCLE↔CIRCLE** is the one pair that gives each
+//!   circle *two* crossings: both are cut to the pick-side arc between them, through
+//!   TRIM's own two-cut plan (the CIRCLE → full-turn-ARC target, `periodic_piece`,
+//!   `with_span`), in place and in one transaction — the circles become ARCs on the
+//!   pick side, keeping centre/normal/radius, id, layer, space, draw order and source
+//!   `type_key` (undo restores the circles, redo the arcs). Tangent (one crossing) and
+//!   disjoint circles keep named refusals (`FILLET.tangent_circles` /
+//!   `FILLET.no_corner_intersection`).
+//! * **Multiple / multi-solution cycling** — AutoCAD's `Multiple` option and its
+//!   cycling between candidate fillets need the interactive option loop this build
+//!   does not have: one accepted invocation is exactly one pair, one solution
+//!   (nearest the picks), one transaction / one undo step, and the global `UNDO`
+//!   reverses it. This is global command-surface scope, not a geometry gap.
 //! * A negative radius is not documented and is refused
 //!   (`fillet.radius_negative`).
 //!
 //! Every accepted invocation commits in **one transaction / one undo step**. All
 //! refusals are resolved before the first write, so a refusal changes nothing.
 //! The pure planners live in the private [`corner_geometry`] (line forms),
-//! [`corner_curve`] (curve↔curve form), [`corner_line_curve`] (line↔circle/arc)
-//! and [`corner_ellipse`] (ellipse numeric form) submodules, all declared with an
+//! [`corner_curve`] (curve↔curve form), [`corner_line_curve`] (line↔circle/arc),
+//! [`corner_ellipse`] (ellipse numeric form), [`corner_spline`] (spline form),
+//! [`corner_sharp`] (`R = 0` for every planar pair), [`corner_participant`] (the
+//! participant rules the numeric and sharp-corner forms share) and [`corner_roots`]
+//! (the parameter scan the numeric forms share) submodules, all declared with an
 //! explicit `#[path]` so the shared `app_drawing/mod.rs` needs no edit.
 
 #[path = "corner_curve.rs"]
@@ -91,6 +130,14 @@ mod corner_ellipse;
 mod corner_geometry;
 #[path = "corner_line_curve.rs"]
 mod corner_line_curve;
+#[path = "corner_participant.rs"]
+mod corner_participant;
+#[path = "corner_roots.rs"]
+mod corner_roots;
+#[path = "corner_sharp.rs"]
+mod corner_sharp;
+#[path = "corner_spline.rs"]
+mod corner_spline;
 
 use super::helpers::corner_tolerance;
 use super::*;
@@ -318,7 +365,7 @@ impl Application {
         let change_set = {
             let mut staged = drawing.begin_drawing_transaction(label, transaction)?;
             for (before, update) in &updates {
-                staged.update_entity(apply_update(before, *update, command_name)?)?;
+                staged.update_entity(apply_update(before, update.clone(), command_name)?)?;
             }
             if let Some((_, entity)) = &inserted_entity {
                 staged.insert_entity(entity.clone())?;
@@ -411,6 +458,23 @@ fn apply_update(
             normal,
             major_axis,
             ratio,
+            start,
+            sweep,
+        },
+        (GeometryUpdate::Spline { geometry }, SemanticGeometry::Spline { .. }) => geometry,
+        // The `R = 0` CIRCLE↔CIRCLE cut: the circle becomes the arc between its two
+        // crossings, in place (the same conversion TRIM makes for a closed target).
+        (
+            GeometryUpdate::CircleToArc { start, sweep },
+            SemanticGeometry::Circle {
+                center,
+                normal,
+                radius,
+            },
+        ) => SemanticGeometry::Arc {
+            center,
+            normal,
+            radius,
             start,
             sweep,
         },

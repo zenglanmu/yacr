@@ -1810,7 +1810,7 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | 命令 | 状态 | 当前行为 | 剩余边界 |
 | --- | --- | --- | --- |
 | `CHAMFER` | **完整实现** | `Distance`/`Angle`/`Method`/`Trim`；双零 ⇒ 仅延伸相交；`CHAMFER POLYLINE` 全顶点、弧段替换、过短跳过、开口闭合 | `Multiple`/命令内 `Undo` 属逐选项提示全局范围；负距离未文档化 ⇒ 具名拒绝；圆弧/圆/样条 AutoCAD 也不接受 |
-| `FILLET` | 部分实现 | `Radius`/`Trim`/`Polyline` 全顶点；`R=0` 尖角；平行线自动半径 = 间隙/2；直线↔圆/弧相切且圆不修剪；**圆/弧两两组合**（偏移圆求交、最近拾取解、插入一段 ARC、ARC 侧修剪）一条事务/一步撤销 | 椭圆/椭圆弧/样条互选 ⇒ `fillet.unsupported_pair`；`Multiple`/多解循环未实现 |
+| `FILLET` | 完整实现 | 见 2026-11-15 行：任意 2D 平面对 `R>0` 相切弧 + `R=0` 尖角，一条事务/一步撤销 | 仅全局交互范围（`Multiple`/`Undo`/多解循环） |
 | `PEDIT` | 部分实现 | 全选项行；`Join` 接受线/弧/多段线；`Fit`/`Spline` 含闭合环；`Decurve`/`Reverse`/`Undo`；LINE/ARC/SPLINE 转换 | **`Width`/`Ltype gen`/`Edit vertex` 未实现**（多段线无宽度/`plinegen`/顶点子菜单模型）；偶数环无精确弧拟合 ⇒ `pedit.fit_closure` |
 | `JOIN` | 部分实现 | 源对象模式；`Multiple` 把 LINE/ARC/多段线/SPLINE/椭圆弧精确焊接为**有理 B 样条**（椭圆弧 = 圆有理二次的精确仿射像） | `JOIN CLOSE` 的混合 SPLINE 仍拒绝；非共面多段线属 3D 全局范围 |
 | `OFFSET` | **完整实现** | `Through`/`Erase`/`Layer`/`Multiple`（单步）/距离；椭圆与椭圆弧→样条；`OFFSETGAPTYPE` Sharp/**Fillet**/**Chamfer** | `OFFSET MULTIPLE` 的多点循环拒绝（单点捕获，属逐选项提示全局范围）；开放折线远端自交未检查（AutoCAD 未文档化） |
@@ -1845,7 +1845,7 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 
 | 命令 | 状态 | 当前行为 | 剩余边界 |
 | --- | --- | --- | --- |
-| `FILLET` | 部分实现 | 直线/圆/圆弧对 + **椭圆 ↔ LINE/CIRCLE/ARC/ELLIPSE** 数值圆角（采样 + Newton + 投影抛光，椭圆按参数区间修剪），一条事务/一步撤销 | `SPLINE` 对按名拒绝（无控制框修剪）；`Multiple`/多解循环未实现 |
+| `FILLET` | 完整实现 | `R>0`：LINE/ARC/CIRCLE/ELLIPSE（含椭圆弧）/SPLINE 任意两两组合——SPLINE 用精确 `sub_curve` 修剪（不重拟合），椭圆/样条走数值相切解 + 交替投影抛光；插入一段相切 ARC；`R=0`：全部 10 种平面对只修剪不插入，CIRCLE↔CIRCLE 复用 TRIM 的两交点 CIRCLE→ARC 规则把两个圆都切成拾取侧弧，LINE 可延伸到角点；被修剪对象保持 id/图层/空间/draw order；一条事务/一步撤销 | `Multiple`、命令内 `Undo` 与多解循环属全局交互范围；相切/不相交/非共面/非平面逐条具名拒绝；CIRCLE→ARC 后实体 `type_key` 仍为 `Circle`（与 TRIM 同一约定） |
 | `BREAK` | **完整实现** | `LINE`/`ARC`/`CIRCLE`/`SPLINE`/整椭圆/**椭圆弧**/`LWPOLYLINE`；`F` 首点覆盖；圆→弧；一条事务/一步撤销 | 无多段打断（AutoCAD 无此模式） |
 | `DIVIDE` | **完整实现** | 直线/弧/圆/样条/**椭圆与椭圆弧**/含 bulge 折线按等弧长；开放 `N−1`、闭合 `N`；块对齐 | 非曲线种类按名拒绝 |
 | `PEDIT` | 部分实现 | 全选项行 + **Edit vertex 子菜单**（NEXT/PREVIOUS/INSERT/MOVE/STRAIGHTEN）；JOIN 接受 SPLINE 拾取 | `WIDTH`/`LTYPE GEN`/`Edit vertex TANGENT` 无域字段 |

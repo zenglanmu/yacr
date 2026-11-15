@@ -26,8 +26,8 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **116** |
-| 部分实现（有写明的界） | **863** |
+| 完整实现 | **117** |
+| 部分实现（有写明的界） | **862** |
 | **已实现合计（完整 + 部分）** | **979** |
 | 未实现 | **2** |
 
@@ -117,14 +117,14 @@
 >
 > **官方 981 条已无「未实现」的可用命令名**：仅 `MEASURE` 与 `TRACE` 两条按**同名不同义**不计入
 > （本仓库同名命令分别表示测量入口与旧式宽线带），它们的官方语义在本构建仍无对应实现。计入
-> **979 已实现（116 完整 + 863 部分）/ 2 未实现（同名不同义）**；证据仅 Linux 编译 + Rust 契约测试，
+> **979 已实现（117 完整 + 862 部分）/ 2 未实现（同名不同义）**；证据仅 Linux 编译 + Rust 契约测试，
 > GUI/GPU/像素/真机 NOT VERIFIED。
 
 > **2026-11-12 增补（Wave 29，真实 2D 升级，无新命令名）**：`TRIM` 新增 **LWPOLYLINE 目标**（开放/闭合；bulge 还原为精确 ARC 后求交，保留拾取投影所在窗口，子弧 bulge 精确保留；一条事务/一步撤销；EXTEND 的 POLYLINE 目标仍按名拒绝）。该升级不改变 981 条状态总计，仍计入 **979 已实现（107 完整 + 872 部分）/ 2 未实现（同名不同义）**；证据仅 Linux 契约测试，GUI/GPU/像素 NOT VERIFIED。
 
 > **2026-11-12 增补（Wave 29b）**：`HATCHEDIT` 新增 **`PATTERN <内置图案名>`**（按名称从现有 `.pat` 库取图案，保留 hatch 的角度/比例/double；未知名 `hatchedit.unknown_pattern`、缺名 `hatchedit.needs_pattern_name`、实心/渐变 `hatchedit.pattern_requires_pattern` 均具名拒绝；一条事务/一步撤销）。任意用户 `.pat` 图案文件仍需宿主文件 I/O，未接入。不影响 981 条状态总计。
 
-> **2026-11-15 增补（Wave 30，晋升计划 P4/P5）**：`LAYDEL`/`-LAYDEL`、`LAYTHW`、`RENAME`/`-RENAME`、`LAYMRG`/`-LAYMRG`、`LAYOUTWIZARD` 由**部分实现**晋升为**完整实现**。`LAYDEL`/`-LAYDEL`——删除范围从「模型空间实体」扩到**模型空间 + 每个图纸布局 + 每个块定义内的全部实体**（`cad-db` 用单一 `entities` 表按 `layer` 过滤；块成员删除复用 ERASE 的 `delete_entity` + 显示状态路径，撤销时成员关系一并还原），并剪除各图纸视口该层的 `layer_overrides` 键（原先会留下悬空键）；实体补丁、布局补丁与层行仍是**一条事务/一步撤销**，重做再次删除。`laydel.layer_in_use` 拒码已删除；选择输入可以是**模型空间或任一图纸布局**的顶层实体（块内成员/子元素按 `laydel.block_space` 拒绝）——后一条缺口是**真机 GUI 验证**抓到的：图纸空间选择当时被 `laydel.selection` 拒绝，而契约测试没覆盖；当前层/`0` 层仍拒绝，锁定层的实体删除由数据库以 `layer.locked` 拒绝且**不发布**（不是静默成功）。会话层状态（`LAYERSTATE SAVE`）是会话数据，不在删除范围内，恢复悬空层仍按 `layerstate.dangling_layer` 拒绝。`LAYTHW` 同时解开绘图级 `frozen` 与**每个图纸布局、每个视口**的冻结覆盖（`PaperViewport::layer_overrides` 中值为 `true` 的项；显式 `false` 覆盖、视口裁剪/矩阵与 `frozen_in_new_viewport` 保留），层补丁 + 布局补丁一条事务/一步撤销。旧文档「本构建无视口模型」是**陈旧的借口**：先写测试再改代码时，两个新测试在旧实现下确实失败。`RENAME`/`-RENAME` 的 `LINETYPE` kind 不再是具名拒绝：改名与层/实体线型引用的级联在同一次 `cad-db` 校验写入里完成（一次 revision、一次 `ChangeSet`），撤销/重做对称；`Continuous` 不可改名，创建/删除线型仍不支持。`LAYMRG`/`-LAYMRG` 补上**各图纸视口 `layer_overrides` 的源层键剪除**（此前留下指向已删层的死键、`layout_patches` 硬编码为空），与实体/层行同一条记录。`LENGTHEN` 的开放样条**延长**按声明的端点切线直尾实现（缩短仍是精确子曲线）⇒ 晋升为**完整实现**。`LAYOUTWIZARD` 新增 `ARRANGE` 等分格视口排列（铺在本次 Authored 纸张上，复用 `VPORTS` 网格助手），打印设备/打印样式/标题栏逐条明说未实现。计入 **979 已实现（116 完整 + 863 部分）/ 2 未实现（同名不同义）**。证据：`cargo test -p cad-app --locked laydel` **10 passed**、`laythw` **5 passed**、`laymrg` **6 passed**、`layer_commands` **69 passed**、`rename` **15 passed**、`layer_undo` 1 passed、`cargo clippy -p cad-app --all-targets` 干净、`scripts/check-file-size.py` 通过；**真机 GUI 运行与截图见本轮交接**（`native-below` / Vulkan `Quadro P620`），Windows/macOS/Android/Web 本轮 NOT VERIFIED。
+> **2026-11-15 增补（Wave 30，晋升计划 P4/P5）**：`LAYDEL`/`-LAYDEL`、`LAYTHW`、`RENAME`/`-RENAME`、`LAYMRG`/`-LAYMRG`、`LAYOUTWIZARD` 由**部分实现**晋升为**完整实现**。`LAYDEL`/`-LAYDEL`——删除范围从「模型空间实体」扩到**模型空间 + 每个图纸布局 + 每个块定义内的全部实体**（`cad-db` 用单一 `entities` 表按 `layer` 过滤；块成员删除复用 ERASE 的 `delete_entity` + 显示状态路径，撤销时成员关系一并还原），并剪除各图纸视口该层的 `layer_overrides` 键（原先会留下悬空键）；实体补丁、布局补丁与层行仍是**一条事务/一步撤销**，重做再次删除。`laydel.layer_in_use` 拒码已删除；选择输入可以是**模型空间或任一图纸布局**的顶层实体（块内成员/子元素按 `laydel.block_space` 拒绝）——后一条缺口是**真机 GUI 验证**抓到的：图纸空间选择当时被 `laydel.selection` 拒绝，而契约测试没覆盖；当前层/`0` 层仍拒绝，锁定层的实体删除由数据库以 `layer.locked` 拒绝且**不发布**（不是静默成功）。会话层状态（`LAYERSTATE SAVE`）是会话数据，不在删除范围内，恢复悬空层仍按 `layerstate.dangling_layer` 拒绝。`LAYTHW` 同时解开绘图级 `frozen` 与**每个图纸布局、每个视口**的冻结覆盖（`PaperViewport::layer_overrides` 中值为 `true` 的项；显式 `false` 覆盖、视口裁剪/矩阵与 `frozen_in_new_viewport` 保留），层补丁 + 布局补丁一条事务/一步撤销。旧文档「本构建无视口模型」是**陈旧的借口**：先写测试再改代码时，两个新测试在旧实现下确实失败。`RENAME`/`-RENAME` 的 `LINETYPE` kind 不再是具名拒绝：改名与层/实体线型引用的级联在同一次 `cad-db` 校验写入里完成（一次 revision、一次 `ChangeSet`），撤销/重做对称；`Continuous` 不可改名，创建/删除线型仍不支持。`LAYMRG`/`-LAYMRG` 补上**各图纸视口 `layer_overrides` 的源层键剪除**（此前留下指向已删层的死键、`layout_patches` 硬编码为空），与实体/层行同一条记录。`LENGTHEN` 的开放样条**延长**按声明的端点切线直尾实现（缩短仍是精确子曲线）⇒ 晋升为**完整实现**；`FILLET` 补齐**SPLINE 对**与**零半径全部平面对**（含 CIRCLE↔CIRCLE 复用 TRIM 的 CIRCLE→ARC 规则）⇒ 晋升为**完整实现**。`LAYOUTWIZARD` 新增 `ARRANGE` 等分格视口排列（铺在本次 Authored 纸张上，复用 `VPORTS` 网格助手），打印设备/打印样式/标题栏逐条明说未实现。计入 **979 已实现（117 完整 + 862 部分）/ 2 未实现（同名不同义）**。证据：`cargo test -p cad-app --locked laydel` **10 passed**、`laythw` **5 passed**、`laymrg` **6 passed**、`layer_commands` **69 passed**、`rename` **15 passed**、`layer_undo` 1 passed、`cargo clippy -p cad-app --all-targets` 干净、`scripts/check-file-size.py` 通过；**真机 GUI 运行与截图见本轮交接**（`native-below` / Vulkan `Quadro P620`），Windows/macOS/Android/Web 本轮 NOT VERIFIED。
 
 ### 纪律
 
@@ -210,7 +210,8 @@
   **2026-11-15 补齐**：开放样条延长按声明的端点切线直尾实现（增量精确、原曲线逐点不变、接缝 C0/G1），
   `LENGTHEN` 晋升为**完整实现**。
 - P2 **已完成**（2026-11-09）：按严格口径 2 条晋升（`CHAMFER` `OFFSET`）；其余保留 `部分实现`：
-  `FILLET`（椭圆/样条曲线对）、`JOIN`（`JOIN CLOSE` 混合 SPLINE）、`STRETCH`（多边形/lasso 捕获未接线）、
+  **2026-11-15 补齐**：`FILLET` 的 SPLINE 对与零半径全部平面对（含 CIRCLE↔CIRCLE）已实现，晋升为**完整实现**。
+  `JOIN`（`JOIN CLOSE` 混合 SPLINE）、`STRETCH`（多边形/lasso 捕获未接线）、
   `PEDIT`（多段线宽度/`plinegen`/顶点子菜单）、`MIRROR`（`MIRRTEXT=1` 字形镜像）、
   `EXPLODE`（MULTILEADER 未导入内容）、`QSELECT`/`FILTER`（分类/自定义特性）。
 - P3 **已完成**（2026-11-09）：按严格口径 3 条晋升（`OVERKILL` `AUDIT` `QDIM`）；其余保留
@@ -648,7 +649,7 @@
 | `FILETAB` | 已实现 | chrome 本地选择子：显示文件/图形标签栏（单文档构建仍有该标签） |
 | `FILETABCLOSE` | 已实现 | chrome 本地选择子：隐藏文件/图形标签栏 |
 | `FILL` | 部分实现 | 会话令牌 `fill`（默认 ON）；渲染器不消费该标志，无视觉变化；不写库/不入历史。 |
-| `FILLET` | 部分实现 | `Radius`/`Trim`/`Polyline`、零半径尖角、平行线、圆/圆弧对曲线；本轮新增 **ELLIPSE ↔ LINE/CIRCLE/ARC/ELLIPSE** 数值圆角（采样+Newton+投影抛光，椭圆按参数区间修剪）；`SPLINE` 对按名拒绝；`Multiple`/多解循环未实现 |
+| `FILLET` | 完整实现 | `Radius`/`Trim`/`Polyline`、平行线自动半径；`R>0` 覆盖 **LINE/ARC/CIRCLE/ELLIPSE(+椭圆弧)/SPLINE** 的任意两两组合（SPLINE 用精确 `sub_curve` 修剪，椭圆/样条数值相切解 + 交替投影抛光）；`R=0` 是**全部 10 种平面对**的尖角（含 CIRCLE↔CIRCLE 用 TRIM 的两交点 CIRCLE→ARC 规则把两个圆都切成拾取侧弧、圆弧/椭圆/样条按自身区间修剪、LINE 可延伸到角点）；被修剪对象保持 id/图层/空间/draw order，一条事务/一步撤销；相切/不相交/非共面/非平面逐条具名拒绝。命令内 `Multiple`、`Undo` 与多解循环属全局交互范围 |
 | `FILLETEDGE` | 部分实现 | 具名拒绝（`filletedge.unsupported: no 3D edge fillet model`）。 |
 | `FILTER` | 部分实现 | `AND`/`OR`/`XOR`/`NOT` 递归逻辑树（括号、元数校验）、相对运算符、已建模属性集；只读；**分类/自定义特性未建模**；**命名 `.nfl` 过滤器未实现** |
 | `FIND` | 部分实现 | `FIND <needle> [=> <replacement>]`；替换形式一条事务/一步撤销；不解析 MTEXT 格式 run；TEXT 单行拒绝换行 |
@@ -1578,7 +1579,7 @@
 | 363 | `FILETAB` | 已实现 | Displays the file tabs at the top of the drawing area. | chrome 本地选择子：显示文件/图形标签栏（单文档构建仍有该标签） |
 | 364 | `FILETABCLOSE` | 已实现 | Hides the file tabs at the top of the drawing area. | chrome 本地选择子：隐藏文件/图形标签栏 |
 | 365 | `FILL` | 部分实现 | Controls the display of filled objects such as hatches, 2D solids, and wide polylines. | 会话令牌 `fill`（默认 ON）；渲染器不消费该标志，无视觉变化；不写库/不入历史。 |
-| 366 | `FILLET` | 部分实现 | Rounds or fillets the edges of two 2D objects or the adjacent faces of a 3D solid. | `Radius`/`Trim`/`Polyline`、零半径尖角、平行线、圆/圆弧对曲线；本轮新增 **ELLIPSE ↔ LINE/CIRCLE/ARC/ELLIPSE** 数值圆角（采样+Newton+投影抛光，椭圆按参数区间修剪）；`SPLINE` 对按名拒绝；`Multiple`/多解循环未实现 |
+| 366 | `FILLET` | 完整实现 | Rounds or fillets the edges of two 2D objects or the adjacent faces of a 3D solid. | `R>0`：LINE/ARC/CIRCLE/ELLIPSE/SPLINE 任意两两组合（SPLINE 精确子曲线修剪），插入一段相切 ARC；`R=0`：全部平面对（含 CIRCLE↔CIRCLE 双圆→拾取侧弧）只修剪不插入；一条事务/一步撤销；`Multiple`/`Undo`/多解循环属全局交互范围。 |
 | 367 | `FILLETEDGE` | 部分实现 | Rounds and fillets the edges of solid objects. | 具名拒绝（`filletedge.unsupported: no 3D edge fillet model`）。 |
 | 368 | `FILTER` | 部分实现 | Creates a list of requirements that an object must meet to be included in a selection set. | `AND`/`OR`/`XOR`/`NOT` 递归逻辑树（括号、元数校验）、相对运算符、已建模属性集；只读；**分类/自定义特性未建模**；**命名 `.nfl` 过滤器未实现** |
 | 369 | `-FIND` | 部分实现 | Searches for the text that you specify in the entire drawing, the current space or layout, or selected objects. | `-FIND <needle>`；在模型空间 Text/MText/MULTILEADER 中做 ASCII 不区分大小写子串搜索并报告；不写库 |

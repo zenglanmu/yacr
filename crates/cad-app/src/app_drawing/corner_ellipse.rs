@@ -20,20 +20,25 @@
 //! Only the `+Z` work plane is implemented (the ellipse frame is built from the
 //! stored normal). The elliptical arc is trimmed by rewriting its parametric
 //! `start`/`sweep`; a CIRCLE is never trimmed, a LINE is retargeted on the pick
-//! side and an ARC is trimmed at the tangent point. `R = 0` is a named refusal
-//! (the sharp-corner form is only implemented for line/line and line/circle).
+//! side and an ARC is trimmed at the tangent point. `R = 0` is not this form's job:
+//! it is the sharp corner, planned by [`super::corner_sharp`].
 //!
 //! **Declared rule**: a LINE participant's tangent must lie on the picked finite
 //! segment (in both trim modes), and an ARC/elliptical-arc participant's tangent
 //! must lie on its picked span. A candidate that would touch a carrier outside
 //! the picked object is never committed (`FILLET.tangent_outside_arc`), matching
 //! the analytic curve↔curve rule.
+//!
+//! The parameter scan itself lives in [`super::corner_roots`]: the SPLINE form
+//! ([`super::corner_spline`]) has the same structure with a different driver
+//! curve, so bracketing and refinement are shared instead of duplicated.
 
 use super::super::helpers::{distance, is_finite_point, normalize_signed};
 use super::super::*;
 use super::corner_geometry::{
     arc, arc_position, retarget_pick_side, trim_arc_to, Curve, GeometryUpdate, TwoLinePlan,
 };
+use super::corner_roots::scan_roots;
 use cad_geometry::{add, dot, length, scale, sub};
 
 /// One candidate fillet circle of an ellipse plan (the same ordering rule as
@@ -78,7 +83,7 @@ pub(super) struct EllipseCurve {
 
 impl EllipseCurve {
     /// The point at parametric angle `theta`.
-    fn point(self, theta: f64) -> Point3 {
+    pub(super) fn point(self, theta: f64) -> Point3 {
         add(
             self.center,
             add(
@@ -90,7 +95,7 @@ impl EllipseCurve {
 
     /// The outward unit normal at parametric angle `theta` (`None` if it has no
     /// direction, which cannot happen for a validated `a, b > tol`).
-    fn normal(self, theta: f64) -> Option<Point3> {
+    pub(super) fn normal(self, theta: f64) -> Option<Point3> {
         let normal = add(
             scale(self.major, self.b * theta.cos()),
             scale(self.minor, self.a * theta.sin()),
@@ -100,7 +105,7 @@ impl EllipseCurve {
     }
 
     /// The parametric angle of a point nominally on the ellipse.
-    fn theta_of(self, point: Point3) -> Option<f64> {
+    pub(super) fn theta_of(self, point: Point3) -> Option<f64> {
         if self.a <= 0.0 || self.b <= 0.0 {
             return None;
         }
@@ -110,7 +115,7 @@ impl EllipseCurve {
     }
 
     /// The along-sweep position of `theta` from `start` (`0..2π`).
-    fn position(self, theta: f64) -> f64 {
+    pub(super) fn position(self, theta: f64) -> f64 {
         let sign = self.sweep.signum();
         let mut value = (theta - self.start) * sign % std::f64::consts::TAU;
         if value < 0.0 {
@@ -119,7 +124,7 @@ impl EllipseCurve {
         value
     }
 
-    fn span(self) -> f64 {
+    pub(super) fn span(self) -> f64 {
         self.sweep.abs()
     }
 }
@@ -140,34 +145,42 @@ enum Participant {
 }
 
 /// The closest point of a participant's supporting curve.
-struct ClosestPoint {
-    distance: f64,
-    point: Point3,
+pub(super) struct ClosestPoint {
+    pub(super) distance: f64,
+    pub(super) point: Point3,
     /// The participant's own parameter at `point` (line projection / angle /
-    /// ellipse eccentric angle), used by the tangency polish.
-    parameter: f64,
+    /// ellipse eccentric angle / spline knot parameter), used by the tangency
+    /// polish and by an exact sub-curve trim.
+    pub(super) parameter: f64,
 }
 
 impl Participant {
-    fn from_curve(curve: Curve) -> Self {
+    /// Resolve one non-ELLIPSE participant of the numeric form.
+    ///
+    /// A SPLINE participant never reaches this form: the command dispatcher routes
+    /// any pair containing a SPLINE to [`super::corner_spline`] first (the spline
+    /// is the driver there). `None` keeps that refusal explicit instead of an
+    /// unreachable panic.
+    fn from_curve(curve: Curve) -> Option<Self> {
         match curve {
-            Curve::Line { start, end } => Self::Line { start, end },
-            Curve::Circle { center, radius } => Self::Round {
+            Curve::Line { start, end } => Some(Self::Line { start, end }),
+            Curve::Circle { center, radius } => Some(Self::Round {
                 center,
                 radius,
                 arc: None,
-            },
+            }),
             Curve::Arc {
                 center,
                 radius,
                 start,
                 sweep,
-            } => Self::Round {
+            } => Some(Self::Round {
                 center,
                 radius,
                 arc: Some((start, sweep)),
-            },
-            Curve::Ellipse(ellipse) => Self::Ellipse(ellipse),
+            }),
+            Curve::Ellipse(ellipse) => Some(Self::Ellipse(ellipse)),
+            Curve::Spline(_) => None,
         }
     }
 
@@ -320,7 +333,12 @@ impl Participant {
 }
 
 /// Whether the tangent and pick both lie on the picked ellipse arc span.
-fn ellipse_accepts(ellipse: EllipseCurve, tangent: Point3, pick: Point3, tol: f64) -> bool {
+pub(super) fn ellipse_accepts(
+    ellipse: EllipseCurve,
+    tangent: Point3,
+    pick: Point3,
+    tol: f64,
+) -> bool {
     let (Some(tangent_theta), Some(pick_theta)) =
         (ellipse.theta_of(tangent), ellipse.theta_of(pick))
     else {
@@ -333,7 +351,7 @@ fn ellipse_accepts(ellipse: EllipseCurve, tangent: Point3, pick: Point3, tol: f6
 }
 
 /// Trim an elliptical arc to the tangent parameter on the pick side.
-fn trim_ellipse(
+pub(super) fn trim_ellipse(
     ellipse: EllipseCurve,
     tangent: Point3,
     pick: Point3,
@@ -393,7 +411,7 @@ fn trim_ellipse(
 }
 
 /// The closest point of the supporting ellipse, by bounded numeric minimisation.
-fn closest_on_ellipse(ellipse: EllipseCurve, from: Point3) -> Option<ClosestPoint> {
+pub(super) fn closest_on_ellipse(ellipse: EllipseCurve, from: Point3) -> Option<ClosestPoint> {
     let samples = 256usize;
     let sweep = ellipse.sweep;
     if !sweep.is_finite() || sweep.abs() <= 1e-12 {
@@ -502,10 +520,12 @@ pub(super) fn plan_fillet_with_ellipse(
     trim: bool,
     tol: f64,
 ) -> Result<TwoLinePlan, String> {
+    // `R = 0` is the sharp corner and is planned by [`super::corner_sharp`] before
+    // this numeric form is reached; a zero radius here is a caller bug.
     if !radius.is_finite() || radius <= 0.0 {
         return Err(
-            "FILLET.radius_zero: an ellipse fillet needs a positive radius (the R=0 sharp \
-             corner is only implemented for line/line and line/circle)"
+            "FILLET.radius_zero: the ellipse tangency form needs a positive radius (R=0 is \
+             planned by the sharp-corner form, corner_sharp)"
                 .into(),
         );
     }
@@ -517,7 +537,13 @@ pub(super) fn plan_fillet_with_ellipse(
         }
     };
     let driver_participant = Participant::Ellipse(driver);
-    let other = Participant::from_curve(other_curve);
+    let Some(other) = Participant::from_curve(other_curve) else {
+        return Err(
+            "FILLET.unsupported_pair: the ELLIPSE numeric form does not take a SPLINE \
+             participant (a pair with a SPLINE is planned by the spline form)"
+                .into(),
+        );
+    };
     driver_participant.validate(tol)?;
     other.validate(tol)?;
     let (driver_low, driver_high) = driver_participant.z_range();
@@ -538,49 +564,13 @@ pub(super) fn plan_fillet_with_ellipse(
     let mut considered = false;
     const SAMPLES: usize = 720;
     for sign in [1.0f64, -1.0] {
-        let mut values: Vec<(f64, f64)> = Vec::with_capacity(SAMPLES + 1);
-        for index in 0..=SAMPLES {
-            let theta = driver.start + driver.sweep * (index as f64) / (SAMPLES as f64);
-            let residual = ellipse_residual(driver, other, theta, sign, radius).unwrap_or(f64::NAN);
-            values.push((theta, residual));
-        }
-        let mut roots: Vec<f64> = Vec::new();
-        for window in values.windows(2) {
-            let (low_theta, low) = window[0];
-            let (high_theta, high) = window[1];
-            if !low.is_finite() || !high.is_finite() {
-                continue;
-            }
-            if low == 0.0 && high == 0.0 {
-                roots.push(low_theta);
-                continue;
-            }
-            if low * high < 0.0 {
-                if let Some(root) =
-                    bisect_residual(driver, other, sign, radius, low_theta, high_theta)
-                {
-                    roots.push(root);
-                }
-            }
-        }
-        // A tangential (double) root does not change sign; refine every local
-        // minimum of |residual| and accept it only when it actually vanishes.
-        for index in 1..values.len() - 1 {
-            let (low_theta, low) = values[index - 1];
-            let (_, middle) = values[index];
-            let (high_theta, high) = values[index + 1];
-            if !low.is_finite() || !middle.is_finite() || !high.is_finite() {
-                continue;
-            }
-            if middle.abs() <= low.abs() && middle.abs() <= high.abs() {
-                if let Some(root) =
-                    refine_minimum(driver, other, sign, radius, low_theta, high_theta)
-                {
-                    roots.push(root);
-                }
-            }
-        }
-        for theta in roots {
+        let residual = |theta: f64| ellipse_residual(driver, other, theta, sign, radius);
+        for theta in scan_roots(
+            &residual,
+            driver.start,
+            driver.start + driver.sweep,
+            SAMPLES,
+        ) {
             if let Some(candidate) = ellipse_candidate(
                 driver,
                 other,
@@ -713,85 +703,4 @@ fn ellipse_candidate(
         first_tangent: point,
         second_tangent: closest.point,
     })
-}
-
-/// Bisect a sign-changing residual bracket.
-fn bisect_residual(
-    driver: EllipseCurve,
-    other: Participant,
-    sign: f64,
-    radius: f64,
-    low: f64,
-    high: f64,
-) -> Option<f64> {
-    let residual =
-        |theta: f64| ellipse_residual(driver, other, theta, sign, radius).unwrap_or(f64::NAN);
-    let (mut low, mut high) = (low, high);
-    let mut low_value = residual(low);
-    let high_value = residual(high);
-    if !low_value.is_finite() || !high_value.is_finite() {
-        return None;
-    }
-    for _ in 0..80 {
-        let middle = 0.5 * (low + high);
-        let middle_value = residual(middle);
-        if !middle_value.is_finite() {
-            return None;
-        }
-        if middle_value == 0.0 {
-            return Some(middle);
-        }
-        if low_value * middle_value < 0.0 {
-            high = middle;
-        } else {
-            low = middle;
-            low_value = middle_value;
-        }
-    }
-    Some(0.5 * (low + high))
-}
-
-/// Refine a local minimum of `|residual|` and accept it when it vanishes.
-fn refine_minimum(
-    driver: EllipseCurve,
-    other: Participant,
-    sign: f64,
-    radius: f64,
-    low: f64,
-    high: f64,
-) -> Option<f64> {
-    let residual =
-        |theta: f64| ellipse_residual(driver, other, theta, sign, radius).unwrap_or(f64::NAN);
-    // A tangential solution is a **minimum** of the residual: the signed
-    // residual itself is quadratic there, so solving `residual = 0` locates θ
-    // only to ~√ε. Newton on its derivative (`residual′ = 0`) is transverse and
-    // recovers the tangency to machine precision; the residual is then checked
-    // against the geometric tolerance.
-    let mut theta = 0.5 * (low + high);
-    for _ in 0..20 {
-        let step_size = 1e-6 * (1.0 + theta.abs());
-        let middle = residual(theta);
-        let plus = residual(theta + step_size);
-        let minus = residual(theta - step_size);
-        if !middle.is_finite() || !plus.is_finite() || !minus.is_finite() {
-            break;
-        }
-        let first = (plus - minus) / (2.0 * step_size);
-        let second = (plus - 2.0 * middle + minus) / (step_size * step_size);
-        if !first.is_finite() || !second.is_finite() || second <= 0.0 {
-            break;
-        }
-        let step = first / second;
-        if !step.is_finite() {
-            break;
-        }
-        theta -= step;
-        if step.abs() <= 1e-15 * (1.0 + theta.abs()) {
-            break;
-        }
-    }
-    let minimum = residual(theta);
-    let point = driver.point(theta);
-    let accept = 1e-9 * (1.0 + point.x.abs() + point.y.abs() + radius);
-    (minimum.is_finite() && minimum.abs() <= accept).then_some(theta)
 }
