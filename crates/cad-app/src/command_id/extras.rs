@@ -29,25 +29,33 @@
 //!
 //! `-PAN` is the typed argument form of the existing `PAN` path (same
 //! `CommandId::Pan`, same camera shift): no database write, revision bump, undo
-//! entry or `ZOOM PREVIOUS` step. `VIEWRES` stores a session percentage in
-//! `[1, 1000]` and `VSCURRENT WIREFRAME` stores a session visual-style token;
-//! neither touches the drawing. `REGEN3` is an **alias** of `REGEN` (same
+//! entry or `ZOOM PREVIOUS` step. `REGEN3` is an **alias** of `REGEN` (same
 //! `CommandId`), not a second regeneration path.
 //!
+//! `VIEWRES <1..=1000>` stores a session percentage and it **reaches the
+//! display**: the base build turns it into a ceiling on chord segments per curve
+//! ([`cad_representation::viewres_segment_ceiling`]). The command reports the
+//! honest boundary with the value — circles/arcs/ellipses are drawn as analytic
+//! conics and have no chords to bound, and the value is a ceiling on the display
+//! tolerance rather than a smoothness setting.
+//!
 //! `VSCURRENT` accepts only `WIREFRAME`; every 3D/shaded style is refused by
-//! name (`vscurrent.style_not_implemented`). No renderer change is made in this
-//! lane: the token is published as `SessionState::view_extras.visual_style` for
-//! a host to consume, and no pixel/GPU effect is verified.
+//! name (`vscurrent.style_not_implemented`), never mapped onto it. That is not a
+//! dead token: 2D wireframe (edges only, no shading, no hidden-line removal) is
+//! the one display mode this renderer implements, so the stored value describes
+//! what is really drawn. No pixel/GPU effect is claimed or verified for either
+//! token.
 //!
 //! `WIPEOUTFRAME [0|1|2]` is the **system-variable spelling** of the
 //! `WIPEOUT Frames` option: `0` hides every frame (the mask still masks), `1`
 //! displays and plots them, `2` displays without plotting. It writes the same
 //! `SessionState::drafting_extras.wipeout_frames` token through the same setter
 //! the option and the drawing-settings panel use, so the three paths cannot
-//! disagree — and, unlike `VSCURRENT`, that token has real consumers: the
-//! display scene and the vector-plot context. The bare selector reports the
-//! value; a number outside `0..=2` is `wipeoutframe.out_of_range` (never a
-//! clamp). `SETVAR WIPEOUTFRAME [<n>]` reads/writes the same variable.
+//! disagree — and the token has two distinct consumers: the display scene (which
+//! draws the frame for `1` and `2`) and the vector-plot context (which plots it
+//! only for `1`). The bare selector reports the value; a number outside `0..=2`
+//! is `wipeoutframe.out_of_range` (never a clamp). `SETVAR WIPEOUTFRAME [<n>]`
+//! reads/writes the same variable.
 //!
 //! # `CVPORT`: the session current-viewport marker
 //!
@@ -96,9 +104,23 @@
 //! `LINETYPE SET <name>` writes the named linetype to every currently selected
 //! entity through the existing `SETENTITYPROPERTY` / `property_value` path (one
 //! transaction, one undo step). An unknown name is the property path's own
-//! `property.unknown_linetype` refusal. There is **no** linetype-table write or
-//! load API: `LOAD`, `CREATE`, `DELETE`, `RENAME` and `SET` on a linetype table
-//! row are NOT IMPLEMENTED. `-LINETYPE` normalizes onto the same command.
+//! `property.unknown_linetype` refusal.
+//!
+//! `LINETYPE CREATE <name> <dash>,<gap>,…` and `LINETYPE DELETE <name>` write the
+//! **table** (one transaction / one undo step each) through the database's
+//! single-purpose APIs. The name grammar, the case-insensitive uniqueness rule
+//! (`linetype.exists`), the reserved default (`linetype.continuous_reserved`) and
+//! the renderable pattern subset (`linetype.bad_pattern`: at least one element,
+//! every element finite and non-zero, at least one visible dash — positive is a
+//! dash, negative a gap, DXF group 49) are validated before anything is staged.
+//! `DELETE` uses the same in-use rules as `PURGE LINETYPE`
+//! (`linetype.in_use` — a layer row or an entity name still references it;
+//! `linetype.continuous_undeletable`). A non-empty `DESCRIPTION` is the named
+//! `linetype.description_not_modelled` refusal: this build's linetype row stores
+//! name + pattern + `complex` only, so the value is never silently dropped.
+//! `RENAME` keeps its cascade. `-LINETYPE` normalizes onto the same command, so
+//! it shares every arm. `LOAD` (a `.lin` file) remains NOT IMPLEMENTED: there is
+//! no file-loading channel in this build.
 //!
 //! # Layer / history discipline
 //!

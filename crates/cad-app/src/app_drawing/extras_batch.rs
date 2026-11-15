@@ -242,13 +242,32 @@ impl Application {
         Ok(outcome)
     }
 
-    /// `LINETYPE LIST` / `LINETYPE SET <name>`.
+    /// `LINETYPE LIST|SET|CREATE|DELETE` (the `-LINETYPE` alias shares it).
     ///
     /// `LIST` reads the drawing's linetype table and writes nothing. `SET`
     /// re-authorizes the ordinary work-only entity-property write, then routes
     /// the name through [`Self::set_entity_property`] — the one property grammar
-    /// and the one transaction/undo path. There is no linetype-table write/load
-    /// API in this build.
+    /// and the one transaction/undo path.
+    ///
+    /// `CREATE <name> <dash>,<gap>,…` and `DELETE <name>` are real **table**
+    /// writes. Both validate everything before a transaction opens, write through
+    /// the database's single-purpose APIs ([`cad_db::DrawingDatabase::create_linetype`]
+    /// / `delete_linetype`), publish **one** linetype patch and therefore record
+    /// one undo step. Refusals (nothing written, no revision, no history):
+    ///
+    /// * `linetype.payload` — wrong payload shape;
+    /// * `linetype.description_not_modelled` — a non-empty `DESCRIPTION` (this
+    ///   build's linetype row has no description column; the value is never
+    ///   silently dropped);
+    /// * `linetype.name_empty` / `linetype.name_illegal_char` — name grammar;
+    /// * `linetype.exists` — the name already resolves (case-insensitive);
+    /// * `linetype.continuous_reserved` — `Continuous` is the drawing default;
+    /// * `linetype.bad_pattern` — empty, non-finite/zero-length element, or no
+    ///   visible dash;
+    /// * `linetype.unknown` / `linetype.ambiguous` — `DELETE` target;
+    /// * `linetype.in_use` / `linetype.continuous_undeletable` — `DELETE` safety
+    ///   (a layer row or entity name still references it, or it is the default);
+    /// * Viewer mode refuses both write forms (`PermissionDenied`).
     pub(crate) fn linetype(
         &mut self,
         session: &mut SessionState,
@@ -310,6 +329,148 @@ impl Application {
                         },
                     ),
                 )
+            }
+            LinetypeCommand::Create {
+                name,
+                description,
+                pattern,
+            } => {
+                // The row write is work-only. `LINETYPE` itself is Viewer-legal for
+                // LIST, so the gate is explicit here rather than a second mode rule
+                // on the command id (the same shape `RENAME LINETYPE` uses).
+                if session.app_mode() == AppMode::Viewer {
+                    return Err(CadError::PermissionDenied);
+                }
+                if let Some(description) = description {
+                    if !description.trim().is_empty() {
+                        return Err(refusal(
+                            "linetype.description_not_modelled",
+                            format!(
+                                "the linetype row this build stores has no description column, so \
+                                 '{}' was not created (nothing was written)",
+                                description.trim()
+                            ),
+                        ));
+                    }
+                }
+                let document_id = command.document;
+                let drawing = self
+                    .workspace
+                    .documents
+                    .get(&document_id)
+                    .ok_or_else(|| refusal("linetype.not_addressable", "document not open"))?
+                    .drawing
+                    .as_ref()
+                    .clone();
+                let transaction = next_transaction_id();
+                let mut candidate = drawing;
+                let (id, change_set) =
+                    candidate.create_linetype(name, pattern, transaction, "create linetype")?;
+                let created = candidate.linetype(id).cloned().ok_or_else(|| {
+                    CadError::Invariant(format!(
+                        "the created linetype row {} vanished after the write",
+                        id.0
+                    ))
+                })?;
+                self.publish_candidate_with_linetypes(
+                    document_id,
+                    candidate,
+                    DrawingUndoRecord {
+                        transaction,
+                        label: "create linetype".into(),
+                        patches: Vec::new(),
+                        block_patches: Vec::new(),
+                        layer_patches: Vec::new(),
+                        layout_patches: Vec::new(),
+                        style_patches: Vec::new(),
+                        dim_style_patches: Vec::new(),
+                        mleader_style_patches: Vec::new(),
+                        merge_key: None,
+                    },
+                    vec![cad_history::linetype_patch(id, None, Some(created.clone()))],
+                )?;
+                Ok(CommandOutcome {
+                    objects: Vec::new(),
+                    changes: Some(Arc::new(change_set)),
+                    diagnostics: vec![Diagnostic {
+                        object: None,
+                        code: "linetype.created".into(),
+                        message: format!(
+                            "LINETYPE CREATE: added linetype '{}' ({}) with {} pattern element(s) \
+                             and cycle {} in one transaction (one undo step)",
+                            created.name,
+                            id.0,
+                            created.pattern.elements.len(),
+                            created.pattern.cycle
+                        ),
+                    }],
+                    measurement: None,
+                    point_report: None,
+                })
+            }
+            LinetypeCommand::Delete { name } => {
+                if session.app_mode() == AppMode::Viewer {
+                    return Err(CadError::PermissionDenied);
+                }
+                let document_id = command.document;
+                let drawing = self
+                    .workspace
+                    .documents
+                    .get(&document_id)
+                    .ok_or_else(|| refusal("linetype.not_addressable", "document not open"))?
+                    .drawing
+                    .as_ref()
+                    .clone();
+                let id = crate::app_drawing::resolve_unique(
+                    "linetype",
+                    "linetype",
+                    name,
+                    drawing
+                        .linetypes()
+                        .map(|row| (row.id, row.name.clone()))
+                        .collect(),
+                )?;
+                let before = drawing.linetype(id).cloned().ok_or_else(|| {
+                    refusal(
+                        "linetype.unknown",
+                        format!("this drawing has no linetype named '{}'", name.trim()),
+                    )
+                })?;
+                let transaction = next_transaction_id();
+                let mut candidate = drawing;
+                let change_set = candidate.delete_linetype(id, transaction, "delete linetype")?;
+                self.publish_candidate_with_linetypes(
+                    document_id,
+                    candidate,
+                    DrawingUndoRecord {
+                        transaction,
+                        label: "delete linetype".into(),
+                        patches: Vec::new(),
+                        block_patches: Vec::new(),
+                        layer_patches: Vec::new(),
+                        layout_patches: Vec::new(),
+                        style_patches: Vec::new(),
+                        dim_style_patches: Vec::new(),
+                        mleader_style_patches: Vec::new(),
+                        merge_key: None,
+                    },
+                    vec![cad_history::linetype_patch(id, Some(before.clone()), None)],
+                )?;
+                Ok(CommandOutcome {
+                    objects: Vec::new(),
+                    changes: Some(Arc::new(change_set)),
+                    diagnostics: vec![Diagnostic {
+                        object: None,
+                        code: "linetype.deleted".into(),
+                        message: format!(
+                            "LINETYPE DELETE: removed unused linetype '{}' ({}) in one transaction \
+                             (one undo step)",
+                            before.name, id.0
+                        ),
+                    }],
+                    measurement: None,
+                    point_report: None,
+                })
             }
         }
     }

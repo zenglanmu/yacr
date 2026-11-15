@@ -115,12 +115,16 @@ fn setvar_refuses_a_bad_value_or_variable_by_name() {
 }
 
 #[test]
-fn purge_and_rename_arguments_are_admitted_then_refused_by_the_command_layer() {
+fn purge_and_rename_arguments_are_admitted_then_handled_by_the_command_layer() {
     let session = fresh_session();
-    // The default drawing has no block table delete API; the host refusal is the
-    // named boundary, never an empty success.
-    let error = session.command("PURGE BLOCK").unwrap_err();
-    assert!(error.contains("purge.block.unsupported"), "{error}");
+    // `PURGE BLOCK` is a real table purge now. The fresh drawing has no block row,
+    // so the command reports the named no-op (`purge.tables_none`) instead of
+    // inventing work, and the revision does not move.
+    let before = drawing(&session).revision();
+    session
+        .command("PURGE BLOCK")
+        .expect("PURGE BLOCK is admitted and finds nothing to remove");
+    assert_eq!(drawing(&session).revision(), before);
     let error = session.command("RENAME LAYER NOPE X").unwrap_err();
     assert!(error.contains("layer.unknown"), "{error}");
     let error = session.command("RENAME LAYER A").unwrap_err();

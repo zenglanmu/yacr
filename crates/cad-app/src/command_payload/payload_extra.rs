@@ -352,12 +352,33 @@ pub enum MocoroCommand {
 }
 
 /// The typed option of one `LINETYPE` line.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// `Create`/`Delete` write the drawing's linetype **table** (one transaction /
+/// one undo step each); `List` is read-only and `Set` delegates to the single
+/// entity-property write path. The pattern is the DXF group-49 element list: a
+/// positive length is a dash, a negative one a gap, `0.0` a dot.
+#[derive(Debug, Clone, PartialEq)]
 pub enum LinetypeCommand {
     /// `LINETYPE LIST`: read-only report of the drawing's linetype table.
     List,
     /// `LINETYPE SET <name>`: write that linetype to every selected entity.
     Set(String),
+    /// `LINETYPE CREATE <name> <dash>,<gap>,… [DESCRIPTION <text>]`.
+    ///
+    /// `description` is carried so the payload can express the DXF `2` field, but
+    /// this build's linetype row has no description column: a non-empty value is
+    /// the named `linetype.description_not_modelled` refusal rather than a silent
+    /// drop (see `app_drawing::extras_batch::linetype`).
+    Create {
+        name: String,
+        description: Option<String>,
+        /// Group-49 element lengths in drawing units (positive dash, negative
+        /// gap). Validated by the database: at least one element, every element
+        /// finite and non-zero, and at least one visible dash.
+        pattern: Vec<f64>,
+    },
+    /// `LINETYPE DELETE <name>`: remove one unused linetype row.
+    Delete { name: String },
 }
 
 /// The optional property dimensions `SELECTSIMILAR` compares.

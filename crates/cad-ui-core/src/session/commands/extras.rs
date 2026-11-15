@@ -27,8 +27,11 @@
 //!   layout, one-based; the bare selector reports it);
 //! * `COLOR <aci 0..=256>` / `COLOR BYLAYER|BYBLOCK` (the session current-colour
 //!   token every created entity inherits; the bare selector reports it);
-//! * `LINETYPE LIST` or `LINETYPE SET <name>` (the name takes the whole
-//!   remainder, spaces allowed).
+//! * `LINETYPE LIST` / `LINETYPE SET <name>` (the name takes the whole
+//!   remainder, spaces allowed) / `LINETYPE CREATE <name> <dash>,<gap>,…
+//!   [DESCRIPTION <text>]` / `LINETYPE DELETE <name>`. `CREATE`/`DELETE` are the
+//!   table writes; `-LINETYPE` is the alias of the same selector and therefore
+//!   the same grammar and the same handler.
 
 use cad_app::{CommandPayload, LinetypeCommand, MocoroCommand};
 use cad_domain::Point3;
@@ -53,7 +56,7 @@ pub const CVPORT_SELECTOR: &str = "CVPORT";
 pub const COLOR_SELECTOR: &str = "COLOR";
 /// `-COLOR <aci>|BYLAYER|BYBLOCK` — the prompt spelling of the same token.
 pub const DASH_COLOR_SELECTOR: &str = "-COLOR";
-/// `LINETYPE LIST|SET <name>`.
+/// `LINETYPE LIST|SET|CREATE|DELETE` (the `-LINETYPE` alias rides it too).
 pub const LINETYPE_SELECTOR: &str = "LINETYPE";
 
 /// `-PAN <dx> <dy>` or `-PAN <x1> <y1> <x2> <y2>`.
@@ -299,9 +302,23 @@ pub fn parse_color_argument(argument: &str) -> Result<CommandPayload, String> {
     Ok(CommandPayload::CurrentColor(value as i16))
 }
 
-/// `LINETYPE LIST` or `LINETYPE SET <name>` (the name may contain spaces).
+/// `LINETYPE LIST|SET|CREATE|DELETE` (the `-LINETYPE` alias shares this grammar).
+///
+/// * `LIST` — the table report;
+/// * `SET <name>` — the name takes the whole remainder (spaces allowed);
+/// * `CREATE <name> <dash>,<gap>,… [DESCRIPTION <text>]` — the name is one
+///   (optionally quoted) token, the pattern is one comma-separated token of
+///   decimal lengths (positive dash, negative gap, DXF group 49) and a trailing
+///   `DESCRIPTION` takes the rest of the line. The pattern's *semantic* rules
+///   (non-empty, non-zero lengths, at least one dash) live in the database
+///   (`linetype.bad_pattern`), so this parser only proves the shape;
+/// * `DELETE <name>` — the name takes the whole remainder (spaces allowed).
+///
+/// Anything else is a grammar refusal: nothing is defaulted and no keyword is
+/// silently ignored.
 pub fn parse_linetype_argument(argument: &str) -> Result<CommandPayload, String> {
-    let expected = "LINETYPE LIST or LINETYPE SET <name>";
+    let expected = "LINETYPE LIST, LINETYPE SET <name>, LINETYPE CREATE <name> <dash>,<gap>,… \
+                    [DESCRIPTION <text>] or LINETYPE DELETE <name>";
     let trimmed = argument.trim();
     let (word, rest) = match trimmed.find(char::is_whitespace) {
         Some(index) => (
@@ -318,7 +335,51 @@ pub fn parse_linetype_argument(argument: &str) -> Result<CommandPayload, String>
             rest.to_string(),
         )));
     }
+    if word.eq_ignore_ascii_case("DELETE") && !rest.is_empty() {
+        return Ok(CommandPayload::Linetype(LinetypeCommand::Delete {
+            name: rest.to_string(),
+        }));
+    }
+    if word.eq_ignore_ascii_case("CREATE") {
+        return parse_linetype_create(rest).ok_or_else(|| invalid("LINETYPE", expected));
+    }
     Err(invalid("LINETYPE", expected))
+}
+
+/// `CREATE <name> <pattern> [DESCRIPTION <text>]`.
+///
+/// `None` is a shape refusal (missing name/pattern, an empty comma entry, a
+/// non-numeric length, a trailing token that is not `DESCRIPTION`).
+fn parse_linetype_create(rest: &str) -> Option<CommandPayload> {
+    let tokens = crate::session::commands::arguments::split_quoted_tokens(rest)?;
+    let (name, remainder) = tokens.split_first()?;
+    let (pattern_token, remainder) = remainder.split_first()?;
+    if name.trim().is_empty() {
+        return None;
+    }
+    let mut pattern = Vec::new();
+    for entry in pattern_token.split(',') {
+        let entry = entry.trim();
+        if entry.is_empty() {
+            return None;
+        }
+        pattern.push(parse_signed_decimal(entry)?);
+    }
+    let description = match remainder {
+        [] => None,
+        [keyword, words @ ..] if keyword.eq_ignore_ascii_case("DESCRIPTION") => {
+            if words.is_empty() {
+                return None;
+            }
+            Some(words.join(" "))
+        }
+        _ => return None,
+    };
+    Some(CommandPayload::Linetype(LinetypeCommand::Create {
+        name: name.trim().to_string(),
+        description,
+        pattern,
+    }))
 }
 
 /// Split one argument into non-empty whitespace-delimited tokens.

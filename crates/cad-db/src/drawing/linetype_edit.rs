@@ -3,11 +3,13 @@
 //! The importer fills `DB.LTYPE` through
 //! [`crate::DrawingDatabaseBuilder::insert_linetype`]. Until this module existed
 //! that was the only writer, so `RENAME LINETYPE` had no API and was refused by
-//! name. This module is the sanctioned post-import path for the one linetype
-//! write this build models — a **rename**. Creating and deleting linetypes stay
-//! unsupported (`PURGE LINETYPE` is still a named refusal), so the batch below
-//! deliberately has no create/delete arm: a `None` entry is refused instead of
-//! silently deleting a row.
+//! name. This module is the sanctioned post-import path for the three linetype
+//! table writes this build models: **rename** (`RENAME LINETYPE`), **create**
+//! ([`DrawingDatabase::create_linetype`], the typed `LINETYPE CREATE` form) and
+//! **delete** ([`DrawingDatabase::delete_linetype`], `LINETYPE DELETE` and
+//! `PURGE LINETYPE`). A `None` batch entry is a validated delete; a `Some` entry
+//! at a missing id is a create (or the undo replay that reinstalls a deleted
+//! row).
 //!
 //! # A rename cascades, and the database owns the cascade
 //!
@@ -25,6 +27,15 @@
 //! references from the **stored** name to the new one, which also makes an undo
 //! replay (which installs the `before` row) cascade back automatically.
 //!
+//! # A create is validated against the renderable pattern subset
+//!
+//! [`DrawingDatabase::create_linetype`] refuses an empty pattern, a non-finite or
+//! zero-length element and a pattern with no visible dash
+//! (`linetype.bad_pattern`), because `LinetypePattern::from_elements` would
+//! otherwise silently drop an unrenderable entry. A **stored** row is not
+//! re-validated (a real drawing can carry importer patterns outside that subset,
+//! and undoing a delete must restore it verbatim).
+//!
 //! # The default linetype cannot be renamed
 //!
 //! [`DEFAULT_LINETYPE_NAME`] (`Continuous`) is the implicit value of every layer
@@ -33,7 +44,9 @@
 //! references are not rows this batch could retarget, so renaming the row would
 //! break them; the write is refused by name
 //! (`linetype.continuous_unrenameable`) exactly like the layer `0` / DIMSTYLE
-//! `Standard` protections.
+//! `Standard` protections; creating a row with that name is refused as
+//! `linetype.continuous_reserved`, and deleting it as
+//! `linetype.continuous_undeletable`.
 //!
 //! # One revision, one `ChangeSet`
 //!
@@ -54,7 +67,7 @@ use cad_domain::*;
 use super::style_edit::validated_style_name;
 use super::DrawingDatabase;
 use crate::change::ChangeSet;
-use crate::entity::EntityLineType;
+use crate::entity::{EntityLineType, LinetypePattern};
 use crate::tables::{LineType, DEFAULT_LINETYPE_NAME};
 
 /// A before/after record of one linetype table row.
@@ -189,6 +202,100 @@ impl DrawingDatabase {
         )
     }
 
+    /// Create one linetype table row from a typed name + group-49 pattern.
+    ///
+    /// The **single** create path (the typed `LINETYPE CREATE` form). Validation
+    /// happens before any mutation, so a refusal leaves the table, the layer rows,
+    /// the entity attributes and the revision untouched:
+    ///
+    /// | refusal | rule |
+    /// | --- | --- |
+    /// | `linetype.name_empty` / `linetype.name_illegal_char` | the name grammar the rename path uses |
+    /// | `linetype.exists` | the name already resolves (ASCII case-insensitive) |
+    /// | `linetype.continuous_reserved` | `Continuous` is the drawing default and is never created |
+    /// | `linetype.bad_pattern` | empty, non-finite, or an element with no length |
+    ///
+    /// # Ids
+    ///
+    /// This build has no linetype-id allocator (the importer numbers rows from
+    /// `0`), so a created row takes `max(stored id) + 1`. A create → delete →
+    /// create sequence can therefore reuse an id; the history patches carry the
+    /// **full** before/after row, so undo/redo stays exact either way.
+    ///
+    /// # Pattern grammar
+    ///
+    /// `pattern` is the DXF group-49 element list: a positive length is a dash, a
+    /// negative one a gap, `0.0` a dot. [`LinetypePattern::from_elements`] only
+    /// keeps finite elements, so a `NaN`/infinite entry would silently vanish —
+    /// that is why the raw list is validated here first, and why a list with no
+    /// visible dash (`>= 0.0`) is refused instead of stored as an invisible line.
+    ///
+    /// Returns the new id and the change set (one revision).
+    pub fn create_linetype(
+        &mut self,
+        name: &str,
+        pattern: &[f64],
+        transaction: TransactionId,
+        reason: &str,
+    ) -> CadResult<(LinetypeId, ChangeSet)> {
+        let name = validated_style_name(name.trim(), "linetype")?;
+        validate_linetype_pattern(pattern)?;
+        if name.eq_ignore_ascii_case(DEFAULT_LINETYPE_NAME) {
+            return Err(CadError::InvalidInput(format!(
+                "linetype.continuous_reserved: linetype '{DEFAULT_LINETYPE_NAME}' is the \
+                 drawing's default linetype and cannot be created as a table row"
+            )));
+        }
+        if let Some(existing) = self
+            .linetypes
+            .values()
+            .find(|row| row.name.trim().eq_ignore_ascii_case(&name))
+        {
+            return Err(CadError::InvalidInput(format!(
+                "linetype.exists: this drawing already has a linetype named '{}' ({}); names are \
+                 unique ASCII case-insensitively",
+                existing.name, existing.id.0
+            )));
+        }
+        let next_id = self
+            .linetypes
+            .keys()
+            .map(|row| row.0)
+            .max()
+            .map(|max| {
+                max.checked_add(1).ok_or_else(|| {
+                    CadError::Invariant(
+                        "linetype.id_exhausted: the linetype id space is full, so a create cannot \
+                         allocate a fresh id (an existing row is never overwritten)"
+                            .into(),
+                    )
+                })
+            })
+            .transpose()?
+            .unwrap_or(0);
+        let id = LinetypeId(next_id);
+        let row = LineType {
+            id,
+            name,
+            pattern: LinetypePattern::from_elements(pattern.iter().copied()),
+            complex: false,
+        };
+        let changes = [(id, Some(row))];
+        let change_set = self
+            .apply_drawing_changes_with_blocks_display_layers_layouts_styles_and_linetypes(
+                reason,
+                transaction,
+                &[],
+                Vec::new(),
+                &[],
+                &[],
+                &[],
+                super::StyleTableChanges::default(),
+                &changes,
+            )?;
+        Ok((id, change_set))
+    }
+
     /// Install one validated linetype row and cascade its name references.
     ///
     /// Returns the entity ids whose explicit linetype name was retargeted, so the
@@ -246,6 +353,48 @@ impl DrawingDatabase {
             }
         }
     }
+}
+
+/// Validate one typed group-49 pattern for a **new** linetype row.
+///
+/// The rules are the renderable subset the dash model can draw:
+///
+/// * at least one element (`linetype.bad_pattern` otherwise — an "empty pattern"
+///   is `Continuous`, which is a built-in name, not a creatable row);
+/// * every element finite and of non-zero length (a `0.0` is DXF's *dot*, which
+///   this model cannot distinguish from a gap, and a non-finite length would be
+///   silently dropped by `LinetypePattern::from_elements`);
+/// * at least one **visible** dash (positive length), so a row never stores an
+///   all-gap pattern that draws nothing.
+///
+/// A **stored** row is not re-validated here: a real drawing can carry importer
+/// patterns outside this subset, and an undo that restores such a row must not be
+/// refused (the same reason `EntityGeometryCheck::RestoreStored` exists).
+fn validate_linetype_pattern(pattern: &[f64]) -> CadResult<()> {
+    if pattern.is_empty() {
+        return Err(CadError::InvalidInput(
+            "linetype.bad_pattern: a linetype needs at least one dash length (an empty pattern is \
+             Continuous, which is a built-in name)"
+                .into(),
+        ));
+    }
+    if let Some(bad) = pattern
+        .iter()
+        .find(|element| !element.is_finite() || element.abs() <= 0.0)
+    {
+        return Err(CadError::InvalidInput(format!(
+            "linetype.bad_pattern: element {bad} is not a finite, non-zero length; positive is a \
+             dash, negative a gap"
+        )));
+    }
+    if !pattern.iter().any(|element| *element > 0.0) {
+        return Err(CadError::InvalidInput(
+            "linetype.bad_pattern: the pattern has no visible dash (every element is a gap); \
+             positive is a dash, negative a gap"
+                .into(),
+        ));
+    }
+    Ok(())
 }
 
 /// Validate the whole linetype batch.
@@ -320,21 +469,30 @@ pub(super) fn validate_linetype_batch(
                 row.id
             )));
         }
-        // A stored row is a **rename** and keeps its protections. A missing id is
-        // the **history replay of a delete** (undo reinstalls the row it removed);
-        // no command reaches this arm, because `RENAME LINETYPE` resolves the id in
-        // the live table and there is no create grammar.
-        if let Some(stored) = db.linetypes.get(id) {
-            if stored
-                .name
-                .trim()
-                .eq_ignore_ascii_case(DEFAULT_LINETYPE_NAME)
-            {
-                return Err(CadError::InvalidInput(format!(
-                    "linetype.continuous_unrenameable: linetype '{DEFAULT_LINETYPE_NAME}' is the \
-                     drawing's default linetype and the implicit value of every layer row with no \
-                     stored attributes, so it cannot be renamed"
-                )));
+        // A stored row is a **rename** and keeps its protections. A missing id is a
+        // **create** (`LINETYPE CREATE`) or the history replay of a delete (undo
+        // reinstalls the row it removed); neither may ever be the drawing default.
+        match db.linetypes.get(id) {
+            Some(stored) => {
+                if stored
+                    .name
+                    .trim()
+                    .eq_ignore_ascii_case(DEFAULT_LINETYPE_NAME)
+                {
+                    return Err(CadError::InvalidInput(format!(
+                        "linetype.continuous_unrenameable: linetype '{DEFAULT_LINETYPE_NAME}' is \
+                         the drawing's default linetype and the implicit value of every layer row \
+                         with no stored attributes, so it cannot be renamed"
+                    )));
+                }
+            }
+            None => {
+                if row.name.trim().eq_ignore_ascii_case(DEFAULT_LINETYPE_NAME) {
+                    return Err(CadError::InvalidInput(format!(
+                        "linetype.continuous_reserved: linetype '{DEFAULT_LINETYPE_NAME}' is the \
+                         drawing's default linetype and cannot be created as a table row"
+                    )));
+                }
             }
         }
         validated_style_name(&row.name, "linetype")?;

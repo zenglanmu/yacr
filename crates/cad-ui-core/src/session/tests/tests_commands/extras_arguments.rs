@@ -355,3 +355,77 @@ fn cvport_selector_is_admitted_and_reaches_the_command_layer() {
         .expect_err("model space has no current paper viewport");
     assert!(error.contains("cvport.paper_space_required"), "{error}");
 }
+
+#[test]
+fn linetype_create_and_delete_parse_the_documented_shapes() {
+    assert!(matches!(
+        parse_linetype_argument("CREATE CENTER 2,-0.5,0.5,-0.5"),
+        Ok(CommandPayload::Linetype(LinetypeCommand::Create {
+            name,
+            description: None,
+            pattern,
+        })) if name == "CENTER" && pattern == vec![2.0, -0.5, 0.5, -0.5]
+    ));
+    // A quoted name keeps its spaces; the pattern is still one token.
+    assert!(matches!(
+        parse_linetype_argument("CREATE \"Center Lines\" 2,-0.5"),
+        Ok(CommandPayload::Linetype(LinetypeCommand::Create { name, .. }))
+            if name == "Center Lines"
+    ));
+    // A trailing DESCRIPTION takes the rest of the line verbatim (the handler
+    // refuses it by name, because the row has no description column).
+    assert!(matches!(
+        parse_linetype_argument("CREATE DASH 1,-1 DESCRIPTION dash dash"),
+        Ok(CommandPayload::Linetype(LinetypeCommand::Create {
+            description: Some(text),
+            ..
+        })) if text == "dash dash"
+    ));
+    assert!(matches!(
+        parse_linetype_argument("DELETE Center Lines"),
+        Ok(CommandPayload::Linetype(LinetypeCommand::Delete { name }))
+            if name == "Center Lines"
+    ));
+    assert!(matches!(
+        parse_linetype_argument("DELETE DASHED"),
+        Ok(CommandPayload::Linetype(LinetypeCommand::Delete { name }))
+            if name == "DASHED"
+    ));
+
+    // Shape refusals: nothing is defaulted.
+    for text in [
+        "CREATE",
+        "CREATE DASH",
+        "CREATE DASH ",
+        "CREATE DASH 1,,2",
+        "CREATE DASH ",
+        "CREATE DASH one",
+        "CREATE DASH 1 extra",
+        "CREATE DASH 1 DESCRIPTION",
+        "DELETE",
+        "CREATE \"DASH",
+    ] {
+        assert!(
+            parse_linetype_argument(text).is_err(),
+            "`{text}` must be a grammar refusal"
+        );
+    }
+}
+
+#[test]
+fn dash_linetype_shares_the_create_and_delete_grammar() {
+    // `-LINETYPE` normalizes to the same selector, so it rides the same parser and
+    // the same handler (never a second implementation).
+    assert_eq!(
+        typed_command_argument("-LINETYPE CREATE DASH 1,-1"),
+        Some(("LINETYPE", "CREATE DASH 1,-1"))
+    );
+    assert_eq!(
+        typed_command_argument("-LINETYPE DELETE DASH"),
+        Some(("LINETYPE", "DELETE DASH"))
+    );
+    assert!(matches!(
+        parse_linetype_argument("CREATE DASH 1,-1"),
+        Ok(CommandPayload::Linetype(LinetypeCommand::Create { .. }))
+    ));
+}

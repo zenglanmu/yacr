@@ -282,3 +282,125 @@ fn a_linetype_referenced_by_a_layer_or_an_entity_is_refused_by_name() {
     );
     assert_eq!(db.revision(), before);
 }
+
+// ---------------------------------------------------------------------------
+// Linetype create
+// ---------------------------------------------------------------------------
+
+fn linetype_db() -> DrawingDatabase {
+    let mut b = base_builder();
+    b.insert_linetype(LineType {
+        id: LinetypeId(1),
+        name: "DASHED".into(),
+        pattern: LinetypePattern::from_elements([0.5, -0.25]),
+        complex: false,
+    })
+    .unwrap();
+    b.finish().unwrap()
+}
+
+#[test]
+fn creating_a_linetype_stores_the_pattern_and_bumps_once() {
+    let mut db = linetype_db();
+    let before = db.revision();
+
+    let (id, change_set) = db
+        .create_linetype(
+            "  CENTER  ",
+            &[2.0, -0.5, 0.5, -0.5],
+            TransactionId(1),
+            "create linetype",
+        )
+        .expect("a fresh legal name and pattern are accepted");
+
+    let row = db.linetype(id).expect("the created row");
+    assert_eq!(row.name, "CENTER", "the stored name is trimmed");
+    assert_eq!(row.pattern.elements, vec![2.0, -0.5, 0.5, -0.5]);
+    assert_eq!(row.pattern.cycle, 3.5);
+    assert!(!row.complex);
+    assert_eq!(id, LinetypeId(2), "max(stored id) + 1");
+    assert_eq!(change_set.after, Revision(before.0 + 1));
+    assert_eq!(db.revision(), change_set.after);
+}
+
+#[test]
+fn creating_a_duplicate_linetype_is_refused_by_name_and_changes_nothing() {
+    let mut db = linetype_db();
+    let before = db.revision();
+    let rows: Vec<String> = db.linetypes().map(|row| row.name.clone()).collect();
+
+    let error = db
+        .create_linetype("dashed", &[1.0], TransactionId(1), "duplicate")
+        .expect_err("DASHED exists, case-insensitively");
+    assert!(error.to_string().contains("linetype.exists"), "{error}");
+    assert_eq!(db.revision(), before);
+    assert_eq!(
+        db.linetypes()
+            .map(|row| row.name.clone())
+            .collect::<Vec<_>>(),
+        rows
+    );
+}
+
+#[test]
+fn creating_a_linetype_refuses_every_unrenderable_pattern() {
+    let mut db = linetype_db();
+    let before = db.revision();
+    for pattern in [
+        Vec::new(),
+        vec![0.0],
+        vec![f64::INFINITY],
+        vec![f64::NAN, 1.0],
+        vec![-1.0, -0.5],
+    ] {
+        let error = db
+            .create_linetype("BROKEN", &pattern, TransactionId(1), "bad pattern")
+            .expect_err("the pattern is outside the renderable subset");
+        assert!(
+            error.to_string().contains("linetype.bad_pattern"),
+            "{pattern:?} => {error}"
+        );
+    }
+    // The reserved default name is refused even when no such row is stored.
+    let error = db
+        .create_linetype("Continuous", &[1.0], TransactionId(2), "default")
+        .expect_err("Continuous is the drawing default");
+    assert!(
+        error.to_string().contains("linetype.continuous_reserved"),
+        "{error}"
+    );
+    assert_eq!(db.revision(), before);
+    assert_eq!(db.linetypes().count(), 1);
+}
+
+#[test]
+fn a_created_linetype_round_trips_through_a_delete_and_its_undo_shape() {
+    let mut db = linetype_db();
+    let (id, _) = db
+        .create_linetype("CENTER", &[2.0, -0.5], TransactionId(1), "create")
+        .expect("created");
+    db.delete_linetype(id, TransactionId(2), "delete")
+        .expect("nothing references CENTER");
+    assert!(db.linetype(id).is_none());
+    // Undo replays the delete's `before` row through the same batch: a `Some`
+    // entry at a missing id installs it again.
+    let row = LineType {
+        id,
+        name: "CENTER".into(),
+        pattern: LinetypePattern::from_elements([2.0, -0.5]),
+        complex: false,
+    };
+    db.apply_drawing_changes_with_blocks_display_layers_layouts_styles_and_linetypes(
+        "undo delete linetype",
+        TransactionId(3),
+        &[],
+        Vec::new(),
+        &[],
+        &[],
+        &[],
+        crate::drawing::StyleTableChanges::default(),
+        &[(id, Some(row))],
+    )
+    .expect("the replayed row is restored");
+    assert_eq!(db.linetype(id).expect("restored").name, "CENTER");
+}

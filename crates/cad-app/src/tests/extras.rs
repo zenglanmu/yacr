@@ -46,6 +46,14 @@ fn app_with(entities: Vec<DbEntity>) -> (Application, SessionState) {
         .unwrap();
     builder
         .insert_linetype(cad_db::LineType {
+            id: LinetypeId(0),
+            name: "Continuous".into(),
+            pattern: LinetypePattern::continuous(),
+            complex: false,
+        })
+        .unwrap();
+    builder
+        .insert_linetype(cad_db::LineType {
             id: LinetypeId(1),
             name: "DASHED".into(),
             pattern: LinetypePattern::from_elements([0.5, -0.25]),
@@ -599,4 +607,323 @@ fn linetype_set_re_authorizes_work_mode_even_though_list_is_viewer_legal() {
         "SET re-authorizes the work-only property write"
     );
     let _ = session;
+}
+
+// ------------------------------------------------- LINETYPE table writes ----
+
+fn linetype_rows(app: &Application) -> Vec<(u128, String, Vec<f64>)> {
+    let mut rows: Vec<(u128, String, Vec<f64>)> = drawing(app)
+        .linetypes()
+        .map(|row| (row.id.0, row.name.clone(), row.pattern.elements.clone()))
+        .collect();
+    rows.sort_by_key(|(id, _, _)| *id);
+    rows
+}
+
+fn revision(app: &Application) -> Revision {
+    drawing(app).revision()
+}
+
+fn undo_depth(app: &Application) -> usize {
+    app.history
+        .get(&DocumentId(1))
+        .map(|history| history.undo_depth())
+        .unwrap_or(0)
+}
+
+#[test]
+fn linetype_create_writes_the_typed_pattern_in_one_undo_step() {
+    let (mut app, mut session) = app_with(Vec::new());
+    let before_revision = revision(&app);
+    let before_depth = undo_depth(&app);
+
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::Linetype,
+        CommandPayload::Linetype(LinetypeCommand::Create {
+            name: "CENTER".into(),
+            description: None,
+            pattern: vec![2.0, -0.5, 0.5, -0.5],
+        }),
+    )
+    .expect("LINETYPE CREATE is admitted");
+    assert_eq!(outcome.diagnostics[0].code, "linetype.created");
+    assert_eq!(revision(&app).0, before_revision.0 + 1);
+    assert_eq!(undo_depth(&app), before_depth + 1, "one undo step");
+
+    let rows = linetype_rows(&app);
+    assert_eq!(rows.len(), 3, "Continuous, DASHED and the created row");
+    let (id, _name, elements) = rows
+        .iter()
+        .find(|(_, name, _)| name == "CENTER")
+        .expect("the row exists");
+    assert_eq!(*id, 2, "the created row takes max(id) + 1");
+    assert_eq!(elements, &vec![2.0, -0.5, 0.5, -0.5]);
+    assert_eq!(
+        drawing(&app).linetype(LinetypeId(2)).unwrap().pattern.cycle,
+        3.5,
+        "the cycle is the sum of the absolute lengths"
+    );
+
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .unwrap();
+    assert!(
+        linetype_rows(&app)
+            .iter()
+            .all(|(_, name, _)| name != "CENTER"),
+        "undo removes the row"
+    );
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Redo,
+        CommandPayload::None,
+    )
+    .unwrap();
+    assert!(linetype_rows(&app)
+        .iter()
+        .any(|(_, name, _)| name == "CENTER"));
+}
+
+#[test]
+fn linetype_create_refuses_a_duplicate_name_and_writes_nothing() {
+    let (mut app, mut session) = app_with(Vec::new());
+    let before_revision = revision(&app);
+    let before_depth = undo_depth(&app);
+    let before_rows = linetype_rows(&app);
+
+    // ASCII case-insensitive, exactly like the rename uniqueness rule.
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::Linetype,
+        CommandPayload::Linetype(LinetypeCommand::Create {
+            name: "dashed".into(),
+            description: None,
+            pattern: vec![1.0],
+        }),
+    )
+    .expect_err("DASHED already exists");
+    assert!(error.to_string().contains("linetype.exists"), "{error}");
+
+    assert_eq!(revision(&app), before_revision);
+    assert_eq!(undo_depth(&app), before_depth);
+    assert_eq!(linetype_rows(&app), before_rows);
+}
+
+#[test]
+fn linetype_create_refuses_a_bad_pattern_and_the_default_name() {
+    let (mut app, mut session) = app_with(Vec::new());
+    let before_revision = revision(&app);
+    let before_rows = linetype_rows(&app);
+
+    for pattern in [Vec::new(), vec![0.0], vec![f64::NAN, 1.0], vec![-1.0, -2.0]] {
+        let error = execute(
+            &mut app,
+            &mut session,
+            CommandId::Linetype,
+            CommandPayload::Linetype(LinetypeCommand::Create {
+                name: "BROKEN".into(),
+                description: None,
+                pattern: pattern.clone(),
+            }),
+        )
+        .expect_err("the pattern is not renderable");
+        assert!(
+            error.to_string().contains("linetype.bad_pattern"),
+            "{pattern:?} => {error}"
+        );
+    }
+
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::Linetype,
+        CommandPayload::Linetype(LinetypeCommand::Create {
+            name: "Continuous".into(),
+            description: None,
+            pattern: vec![1.0],
+        }),
+    )
+    .expect_err("Continuous is the drawing default");
+    assert!(
+        error.to_string().contains("linetype.continuous_reserved"),
+        "{error}"
+    );
+
+    assert_eq!(revision(&app), before_revision);
+    assert_eq!(linetype_rows(&app), before_rows);
+}
+
+#[test]
+fn linetype_create_refuses_a_description_the_row_cannot_store() {
+    let (mut app, mut session) = app_with(Vec::new());
+    let before_revision = revision(&app);
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::Linetype,
+        CommandPayload::Linetype(LinetypeCommand::Create {
+            name: "NOTED".into(),
+            description: Some("dash dot".into()),
+            pattern: vec![1.0, -0.5],
+        }),
+    )
+    .expect_err("the row has no description column");
+    assert!(
+        error
+            .to_string()
+            .contains("linetype.description_not_modelled"),
+        "{error}"
+    );
+    assert_eq!(revision(&app), before_revision);
+    assert!(linetype_rows(&app)
+        .iter()
+        .all(|(_, name, _)| name != "NOTED"));
+
+    // An empty description is the same as none.
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Linetype,
+        CommandPayload::Linetype(LinetypeCommand::Create {
+            name: "NOTED".into(),
+            description: Some("  ".into()),
+            pattern: vec![1.0, -0.5],
+        }),
+    )
+    .expect("a blank description is not a value to lose");
+}
+
+#[test]
+fn linetype_delete_refuses_an_in_use_row_and_undo_restores_a_freed_one() {
+    let (mut app, mut session) = app_with(Vec::new());
+    // Layer 0 names DASHED nowhere yet; another row is free to delete.
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Linetype,
+        CommandPayload::Linetype(LinetypeCommand::Create {
+            name: "FREEROW".into(),
+            description: None,
+            pattern: vec![1.0, -0.5],
+        }),
+    )
+    .unwrap();
+    let created_id = linetype_rows(&app)
+        .into_iter()
+        .find(|(_, name, _)| name == "FREEROW")
+        .map(|(id, _, _)| id)
+        .unwrap();
+
+    // Make DASHED referenced by the layer row, then DELETE must refuse by name.
+    let mut attributes = drawing(&app).layer_attributes(LayerId(0));
+    attributes.linetype = "DASHED".into();
+    app.workspace
+        .documents
+        .get_mut(&DocumentId(1))
+        .unwrap()
+        .drawing = Arc::new({
+        let mut db = drawing(&app).clone();
+        db.set_layer_attributes(LayerId(0), attributes, TransactionId(1), "fixture")
+            .unwrap();
+        db
+    });
+    let before_revision = revision(&app);
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::Linetype,
+        CommandPayload::Linetype(LinetypeCommand::Delete {
+            name: "DASHED".into(),
+        }),
+    )
+    .expect_err("layer 0 names DASHED");
+    let text = error.to_string();
+    assert!(text.contains("linetype.in_use"), "{text}");
+    assert!(text.contains("DASHED"), "{text}");
+    assert_eq!(revision(&app), before_revision);
+
+    // The drawing default is never deletable, even with no reference at all.
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::Linetype,
+        CommandPayload::Linetype(LinetypeCommand::Delete {
+            name: "Continuous".into(),
+        }),
+    )
+    .expect_err("Continuous is the drawing default");
+    assert!(
+        error
+            .to_string()
+            .contains("linetype.continuous_undeletable"),
+        "{error}"
+    );
+
+    // The free row deletes, and one undo step restores it.
+    let depth = undo_depth(&app);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::Linetype,
+        CommandPayload::Linetype(LinetypeCommand::Delete {
+            name: "FREEROW".into(),
+        }),
+    )
+    .expect("nothing references FREEROW");
+    assert_eq!(outcome.diagnostics[0].code, "linetype.deleted");
+    assert_eq!(undo_depth(&app), depth + 1);
+    assert!(linetype_rows(&app)
+        .iter()
+        .all(|(id, _, _)| *id != created_id));
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .unwrap();
+    let restored = linetype_rows(&app)
+        .into_iter()
+        .find(|(id, _, _)| *id == created_id)
+        .expect("undo restores the row");
+    assert_eq!(restored.1, "FREEROW");
+    assert_eq!(restored.2, vec![1.0, -0.5]);
+}
+
+#[test]
+fn linetype_table_writes_are_refused_in_viewer_mode_and_leave_no_history() {
+    let (mut app, _work) = app_with(Vec::new());
+    let mut viewer = SessionState::new(DocumentId(1), AppMode::Viewer);
+    let before_rows = linetype_rows(&app);
+    for payload in [
+        LinetypeCommand::Create {
+            name: "VIEWER".into(),
+            description: None,
+            pattern: vec![1.0],
+        },
+        LinetypeCommand::Delete {
+            name: "DASHED".into(),
+        },
+    ] {
+        let refused = execute(
+            &mut app,
+            &mut viewer,
+            CommandId::Linetype,
+            CommandPayload::Linetype(payload),
+        );
+        assert!(
+            matches!(refused, Err(CadError::PermissionDenied)),
+            "table writes are work-only"
+        );
+    }
+    assert_eq!(linetype_rows(&app), before_rows);
+    assert!(!app.can_undo(&DocumentId(1)));
 }

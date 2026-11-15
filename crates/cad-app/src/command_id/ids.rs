@@ -974,8 +974,9 @@ pub enum CommandId {
     WipeoutFrame,
     /// `VSCURRENT` (Viewer-legal): store the 2D wireframe visual-style token.
     VisualStyle,
-    /// `LINETYPE` (Viewer-legal for `LIST`; `SET` re-authorizes work mode):
-    /// list the drawing's linetypes or set one on the selection.
+    /// `LINETYPE` (Viewer-legal for `LIST`; `SET`/`CREATE`/`DELETE` are
+    /// work-only): list the drawing's linetypes, set one on the selection, or
+    /// create/delete a table row. Contract: [`crate::command_id::extras`].
     Linetype,
     /// `RECOVER`: read-only entity scan of the open document; repairs nothing. Contract: [`crate::app_recovery`].
     RecoverDrawing,
