@@ -432,10 +432,10 @@ impl CadSession {
     /// The typed selector argument forms are listed in [`ARGUMENT_SELECTORS`]
     /// (`ZOOM`, `SNAPUNIT`, `PDMODE`/`PDSIZE`, `SPACE`, `TORIENT`/`TCASE`, `PEDIT`,
     /// `HATCHEDIT`, `MEASUREGEOM`, `LAYERSTATE`, `LAYWALK`, `LTSCALE`, `IMAGEATTACH`,
-    /// `IMAGECLIP`, `LAYERPMODE`, `-LAYER`). An argument outside a selector's grammar
-    /// is refused with a stable reason, recorded for `cad_status.error`, and changes
-    /// nothing; a selector with **no** argument keeps the name-only payload refusal
-    /// below.
+    /// `IMAGECLIP`, `LAYERPMODE`, `COLOR`/`-COLOR`, `-LAYER`). An argument outside
+    /// a selector's grammar is refused with a stable reason, recorded for
+    /// `cad_status.error`, and changes nothing; a selector with **no** argument
+    /// keeps the name-only payload refusal below.
     pub fn command(&self, text: &str) -> Result<(), String> {
         // Session-only vocabulary control (`UNDEFINE`/`REDEFINE`/`ALIASEDIT`)
         // comes first: it changes how names resolve for the rest of the session

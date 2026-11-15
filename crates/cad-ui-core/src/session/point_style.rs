@@ -18,25 +18,26 @@
 //! budget; the argument-selector dispatch
 //! ([`CadSession::argument_command`]) lives here for the same reason.
 
-use cad_app::{CommandId, CommandPayload};
+use cad_app::{CommandId, CommandPayload, ExtendedCommandId};
 
 use super::annot_arguments::{
     GROUPEDIT_SELECTOR, GROUP_SELECTOR, HATCHSETORIGIN_SELECTOR, LEADER_SELECTOR, QLEADER_SELECTOR,
     TEXTFIT_SELECTOR, UNGROUP_SELECTOR,
 };
 use super::commands::{
-    parse_linetype_argument, parse_mocoro_argument, parse_pan_argument, parse_trace_argument,
-    parse_viewres_argument, parse_vscurrent_argument, parse_wipeoutframe_argument,
-    ARRAYPATH_SELECTOR, AUDIT_SELECTOR, CHAMFER_SELECTOR, DASH_IMAGEADJUST_SELECTOR,
-    DASH_TABLE_SELECTOR, DONUT_SELECTOR, DRAWORDER_SELECTOR, FILLET_SELECTOR, FILTER_SELECTOR,
-    FIND_REPORT_SELECTOR, FIND_SELECTOR, GETSEL_SELECTOR, HELIX_SELECTOR, IMAGEADJUST_SELECTOR,
-    IMAGEATTACH_SELECTOR, IMAGECLIP_SELECTOR, JOIN_SELECTOR, LINETYPE_SELECTOR, MIRROR_SELECTOR,
-    MLINE_SELECTOR, MLSTYLE_SELECTOR, MOCORO_SELECTOR, MPEDIT_SELECTOR, MREDO_SELECTOR,
-    MULTIPLE_SELECTOR, OFFSET_SELECTOR, OVERKILL_SELECTOR, PAN_SELECTOR, PURGE_SELECTOR,
-    QSELECT_SELECTOR, RENAME_SELECTOR, REVCLOUD_SELECTOR, SETVAR_SELECTOR, SOLID_SELECTOR,
-    SSX_SELECTOR, SYSVARMONITOR_SELECTOR, TABLEDIT_SELECTOR, TABLE_SELECTOR, TEXTMASK_SELECTOR,
-    TRACE_SELECTOR, TREX_SELECTOR, TXT2MTXT_SELECTOR, VIEWRES_SELECTOR, VSCURRENT_SELECTOR,
-    WIPEOUTFRAME_SELECTOR, WIPEOUT_SELECTOR,
+    parse_color_argument, parse_linetype_argument, parse_mocoro_argument, parse_pan_argument,
+    parse_trace_argument, parse_viewres_argument, parse_vscurrent_argument,
+    parse_wipeoutframe_argument, ARRAYPATH_SELECTOR, AUDIT_SELECTOR, CHAMFER_SELECTOR,
+    COLOR_SELECTOR, DASH_COLOR_SELECTOR, DASH_IMAGEADJUST_SELECTOR, DASH_TABLE_SELECTOR,
+    DONUT_SELECTOR, DRAWORDER_SELECTOR, FILLET_SELECTOR, FILTER_SELECTOR, FIND_REPORT_SELECTOR,
+    FIND_SELECTOR, GETSEL_SELECTOR, HELIX_SELECTOR, IMAGEADJUST_SELECTOR, IMAGEATTACH_SELECTOR,
+    IMAGECLIP_SELECTOR, JOIN_SELECTOR, LINETYPE_SELECTOR, MIRROR_SELECTOR, MLINE_SELECTOR,
+    MLSTYLE_SELECTOR, MOCORO_SELECTOR, MPEDIT_SELECTOR, MREDO_SELECTOR, MULTIPLE_SELECTOR,
+    OFFSET_SELECTOR, OVERKILL_SELECTOR, PAN_SELECTOR, PURGE_SELECTOR, QSELECT_SELECTOR,
+    RENAME_SELECTOR, REVCLOUD_SELECTOR, SETVAR_SELECTOR, SOLID_SELECTOR, SSX_SELECTOR,
+    SYSVARMONITOR_SELECTOR, TABLEDIT_SELECTOR, TABLE_SELECTOR, TEXTMASK_SELECTOR, TRACE_SELECTOR,
+    TREX_SELECTOR, TXT2MTXT_SELECTOR, VIEWRES_SELECTOR, VSCURRENT_SELECTOR, WIPEOUTFRAME_SELECTOR,
+    WIPEOUT_SELECTOR,
 };
 use super::diagnostics::cad_error_text;
 use super::dim_arguments::{
@@ -194,13 +195,16 @@ impl CadSession {
             | TEXTFIT_SELECTOR
             | HATCHSETORIGIN_SELECTOR => self.annot_argument(selector, argument, text),
             // The 2026-11-07 extras batch typed forms (`-PAN` normalizes to
-            // `PAN` before this dispatch, `-LINETYPE` to `LINETYPE`).
+            // `PAN` before this dispatch, `-LINETYPE` to `LINETYPE`). `COLOR` and
+            // its `-COLOR` prompt spelling are the session current-colour token.
             PAN_SELECTOR
             | TRACE_SELECTOR
             | MOCORO_SELECTOR
             | VIEWRES_SELECTOR
             | VSCURRENT_SELECTOR
             | WIPEOUTFRAME_SELECTOR
+            | COLOR_SELECTOR
+            | DASH_COLOR_SELECTOR
             | LINETYPE_SELECTOR => self.extras_argument(selector, argument, text),
             // The 2026-11-12 SHAPE family: SHAPE creation, the MINSERT block
             // array and the ADDSELECTED copy-of-type form.
@@ -331,6 +335,15 @@ impl CadSession {
             WIPEOUTFRAME_SELECTOR => (
                 CommandId::WipeoutFrame,
                 parse_wipeoutframe_argument(argument),
+            ),
+            // `COLOR <aci>|BYLAYER|BYBLOCK` (2026-11 Wave 10 token): one session
+            // current-colour value, carried by the extended `Color` command. The
+            // `-COLOR` prompt spelling is the same token, so both selectors ride
+            // this one arm (only the echoed name differs, and it never carries
+            // the typed value).
+            COLOR_SELECTOR | DASH_COLOR_SELECTOR => (
+                CommandId::Extended(ExtendedCommandId::Color),
+                parse_color_argument(argument),
             ),
             _ => {
                 debug_assert_eq!(selector, LINETYPE_SELECTOR);

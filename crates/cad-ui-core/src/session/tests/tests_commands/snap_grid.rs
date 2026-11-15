@@ -322,6 +322,9 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             "VSCURRENT",
             // The system-variable spelling of `WIPEOUT Frames` (same token).
             "WIPEOUTFRAME",
+            // The session current-colour token (`-COLOR` is its prompt spelling).
+            "COLOR",
+            "-COLOR",
             "LINETYPE",
             // The 2026-11 P3 option batch.
             "OVERKILL",

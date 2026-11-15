@@ -2,8 +2,8 @@
 //!
 //! These are **argument forms of canonical selectors**, never new IPC:
 //! [`PAN_SELECTOR`] (`-PAN`), [`TRACE_SELECTOR`], [`MOCORO_SELECTOR`],
-//! [`VIEWRES_SELECTOR`], [`VSCURRENT_SELECTOR`], [`WIPEOUTFRAME_SELECTOR`] and
-//! [`LINETYPE_SELECTOR`] are
+//! [`VIEWRES_SELECTOR`], [`VSCURRENT_SELECTOR`], [`WIPEOUTFRAME_SELECTOR`],
+//! [`COLOR_SELECTOR`] (`-COLOR` is the same token) and [`LINETYPE_SELECTOR`] are
 //! admitted by [`super::ARGUMENT_SELECTORS`], parsed here, and dispatched by the
 //! session as the matching [`cad_app::CommandId`] with a payload.
 //!
@@ -22,6 +22,8 @@
 //! * `VSCURRENT <style>` (the command layer names the unsupported styles);
 //! * `WIPEOUTFRAME <0|1|2>` (the system-variable spelling of `WIPEOUT Frames`;
 //!   the bare selector reports the current value);
+//! * `COLOR <aci 0..=256>` / `COLOR BYLAYER|BYBLOCK` (the session current-colour
+//!   token every created entity inherits; the bare selector reports it);
 //! * `LINETYPE LIST` or `LINETYPE SET <name>` (the name takes the whole
 //!   remainder, spaces allowed).
 
@@ -42,6 +44,10 @@ pub const VIEWRES_SELECTOR: &str = "VIEWRES";
 pub const VSCURRENT_SELECTOR: &str = "VSCURRENT";
 /// `WIPEOUTFRAME [0|1|2]` — the system-variable spelling of `WIPEOUT Frames`.
 pub const WIPEOUTFRAME_SELECTOR: &str = "WIPEOUTFRAME";
+/// `COLOR <aci>|BYLAYER|BYBLOCK` — the session current-colour token.
+pub const COLOR_SELECTOR: &str = "COLOR";
+/// `-COLOR <aci>|BYLAYER|BYBLOCK` — the prompt spelling of the same token.
+pub const DASH_COLOR_SELECTOR: &str = "-COLOR";
 /// `LINETYPE LIST|SET <name>`.
 pub const LINETYPE_SELECTOR: &str = "LINETYPE";
 
@@ -196,6 +202,65 @@ pub fn parse_wipeoutframe_argument(argument: &str) -> Result<CommandPayload, Str
         )
     })?;
     Ok(CommandPayload::WipeoutFrame(frames))
+}
+
+/// `256`: the ACI the handler and the create funnel read as `ByLayer`.
+const BY_LAYER_ACI: i16 = 256;
+
+/// `0`: the ACI the handler and the create funnel read as `ByBlock`.
+const BY_BLOCK_ACI: i16 = 0;
+
+/// The handler's own reason code for an ACI outside the closed domain.
+fn color_out_of_domain_reason(token: &str) -> String {
+    format!(
+        "color.invalid_value: COLOR needs an ACI in 0..=256 (0 = ByBlock, 1..=255 = ACI, 256 = \
+         ByLayer), got {token}; nothing was changed"
+    )
+}
+
+/// `COLOR <aci>|BYLAYER|BYBLOCK`: the session current-colour token.
+///
+/// The bare selector is the `color.report` and never reaches this parser, so only
+/// a real value is admitted. Two shapes are accepted:
+///
+/// * one ACI written as an integer in `0..=256` (`0` = ByBlock, `1..=255` = the
+///   palette entry, `256` = ByLayer);
+/// * one of the prompt's symbolic words, case-insensitive: `BYLAYER` (and its
+///   `BYNAME` spelling) → `256`, `BYBLOCK` → `0`.
+///
+/// Nothing is clamped or defaulted: a number outside the domain is refused by
+/// name with the handler's own `color.invalid_value` code, so `COLOR 257` can
+/// never read as "some colour", and a word that is not one of the two symbols
+/// (a palette name such as `RED`) is refused with `color.invalid_argument`
+/// because this build has no name→ACI table and must not invent one. The
+/// command layer's `set_current_color` keeps the same domain for direct payload
+/// callers, so both layers answer the same fact the same way.
+pub fn parse_color_argument(argument: &str) -> Result<CommandPayload, String> {
+    let token = argument.trim();
+    if token.eq_ignore_ascii_case("BYLAYER") || token.eq_ignore_ascii_case("BYNAME") {
+        return Ok(CommandPayload::CurrentColor(BY_LAYER_ACI));
+    }
+    if token.eq_ignore_ascii_case("BYBLOCK") {
+        return Ok(CommandPayload::CurrentColor(BY_BLOCK_ACI));
+    }
+    // A whole number is the only other admitted shape: one token, digits only
+    // after an optional sign (so `1.0`, `1e3`, `0x1` and `1 2` are not numbers
+    // here). The domain check is the same one the handler applies.
+    let digits = token.strip_prefix(['-', '+']).unwrap_or(token);
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(format!(
+            "color.invalid_argument: unsupported CAD command: COLOR {token} (COLOR needs one ACI \
+             in 0..=256, BYLAYER or BYBLOCK; a bare COLOR reports the current colour and a colour \
+             name has no table in this build)"
+        ));
+    }
+    let value: i64 = token
+        .parse()
+        .map_err(|_| color_out_of_domain_reason(token))?;
+    if !(0..=256).contains(&value) {
+        return Err(color_out_of_domain_reason(token));
+    }
+    Ok(CommandPayload::CurrentColor(value as i16))
 }
 
 /// `LINETYPE LIST` or `LINETYPE SET <name>` (the name may contain spaces).

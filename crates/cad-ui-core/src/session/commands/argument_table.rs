@@ -153,6 +153,11 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     // `WIPEOUTFRAME <0|1|2>`: the system-variable spelling of `WIPEOUT Frames`
     // (same session token, one setter). The bare selector reports the value.
     WIPEOUTFRAME_SELECTOR,
+    // `COLOR <aci>|BYLAYER|BYBLOCK` and its `-COLOR` prompt spelling: the session
+    // current-colour token the create funnel stamps on new entities. The bare
+    // selectors stay the read-only `color.report`.
+    COLOR_SELECTOR,
+    DASH_COLOR_SELECTOR,
     LINETYPE_SELECTOR,
     // The 2026-11 P3 option batch: OVERKILL's dialog set, REVCLOUD's mode/arc
     // length, WIPEOUT's Frames/Polyline pair, TEXTMASK's offset/mask type and
