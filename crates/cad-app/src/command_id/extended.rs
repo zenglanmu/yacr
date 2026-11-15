@@ -88,8 +88,9 @@ pub enum ExtendedCommandId {
     ViewPlotDetails,
     /// `VPLAYER`: no per-viewport layer state.
     VPlayer,
-    /// `MVIEW`: append one rectangular paper viewport to the active layout from
-    /// a two-corner `Points` payload (Work-only write).
+    /// `MVIEW`: append one paper viewport to the active layout from a `Points`
+    /// payload — two corners for the axis-aligned rectangle, three or more for a
+    /// simple polygon (Work-only write; both shapes are drawn).
     MView,
     /// `PSBSCALE`: no viewport scale write API.
     PsbScale,
