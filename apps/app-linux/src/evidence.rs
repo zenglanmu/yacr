@@ -39,6 +39,12 @@
 //!   three measured/chained points; `entityCount` +3 each);
 //! - [`hover`]: the `YACR_PROBE_HOVER` hover-cost driver;
 //! - [`box_select`]: the `YACR_PROBE_BOX_EVIDENCE` box-selection driver;
+//! - [`cad_script`]: the generic `YACR_PROBE_CAD_SCRIPT[_FILE]` driver that
+//!   evaluates one operator-supplied JavaScript source in the real webview at
+//!   `YACR_PROBE_CAD_SCRIPT_AT` seconds (default 12) and logs the eval's returned
+//!   string plus the real `window.__yacr_cad_script` snapshot read back 2 s
+//!   later — evidence-only, default OFF, synthetic IPC (not a real mouse),
+//!   nothing synthesized on the Rust side;
 //! - [`popup`]: the `YACR_PROBE_POPUP_EVIDENCE` modal-popup pipeline driver
 //!   (open → real gate refusal → close → real gate release);
 //! - [`popup_textedit`]: the same driver's `textEdit` phase (host-derived payload
@@ -62,6 +68,7 @@
 use std::time::{Duration, Instant};
 
 mod box_select;
+mod cad_script;
 mod draw;
 mod draw_baseline_continue;
 mod draw_baseline_continue_js;
@@ -90,6 +97,7 @@ mod ui_dialogs_steps;
 mod view3d;
 
 pub use box_select::{box_evidence_enabled, maybe_spawn_box_evidence};
+pub use cad_script::{cad_script_enabled, maybe_spawn_cad_script};
 pub use draw::{draw_evidence_enabled, maybe_spawn_draw_evidence};
 pub use edit::{edit_evidence_enabled, maybe_spawn_edit_evidence};
 pub use hover::{hover_evidence_enabled, maybe_spawn_hover_evidence};

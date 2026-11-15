@@ -43,6 +43,12 @@ pub fn maybe_spawn_tool_evidence(webview: Option<&tauri::Webview>) {
     // independent: its own env var, default OFF, spawned from this same entry
     // point so the evidence subsystem stays self-contained.
     crate::evidence::maybe_spawn_draw_evidence(webview);
+    // The generic CAD-script driver (`YACR_PROBE_CAD_SCRIPT` /
+    // `YACR_PROBE_CAD_SCRIPT_FILE`) is likewise independent: its own env vars,
+    // default OFF, and spawned from this same entry point so the evidence
+    // subsystem stays self-contained. It evaluates operator-supplied IPC
+    // (synthetic, not a real mouse) and logs the real host outcome.
+    crate::evidence::maybe_spawn_cad_script(webview);
     if !tool_evidence_enabled() {
         return;
     }
