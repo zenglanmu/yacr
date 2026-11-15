@@ -72,6 +72,52 @@ pub fn is_finite(p: Point3) -> bool {
     p.x.is_finite() && p.y.is_finite() && p.z.is_finite()
 }
 
+/// The eigen-decomposition of the symmetric 2×2 matrix `[[a, b], [b, c]]`.
+///
+/// This is the crate's **single** 2×2 symmetric eigen-solver: the affine
+/// ellipse decomposition ([`crate::transform`]'s `MᵀM`) and the planar inertia
+/// tensor ([`crate::PlanarInertia::principal`]) both use it, so their
+/// conventions cannot drift.
+///
+/// Both eigenvalues are returned in descending order and the eigenvector is the
+/// **unit** direction of the `major` one. `minor` is clamped at `0.0`: a
+/// negative value there is a rounding error of a semi-definite matrix, never a
+/// real negative second moment.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct SymmetricEigen2 {
+    /// The larger eigenvalue (unclamped; the affine ellipse path needs the raw
+    /// value to detect a fully collapsed plane).
+    pub major: f64,
+    /// The smaller eigenvalue, clamped at `0.0`.
+    pub minor: f64,
+    /// A unit eigenvector `(x, y)` for `major`.
+    pub axis: (f64, f64),
+}
+
+pub(crate) fn symmetric_eigen_2x2(a: f64, b: f64, c: f64) -> SymmetricEigen2 {
+    let trace = a + c;
+    let diff = a - c;
+    let disc = (diff * diff + 4.0 * b * b).sqrt();
+    let major = 0.5 * (trace + disc);
+    let minor = (0.5 * (trace - disc)).max(0.0);
+    // Eigenvector of the larger eigenvalue. With `b != 0` the first row
+    // `(a, b)` is guaranteed nonzero, so `(b, major − a)` is an eigenvector; for
+    // `b == 0` the matrix is already diagonal.
+    let axis = if b.abs() > 1e-300 {
+        let len = (b * b + (major - a) * (major - a)).sqrt();
+        if len > 1e-300 {
+            (b / len, (major - a) / len)
+        } else {
+            (1.0, 0.0)
+        }
+    } else if a >= c {
+        (1.0, 0.0)
+    } else {
+        (0.0, 1.0)
+    };
+    SymmetricEigen2 { major, minor, axis }
+}
+
 /// Whether every scalar and point in `geometry` is finite.
 ///
 /// Used after a transform to refuse poisoned output (audit B12/B23).

@@ -156,6 +156,14 @@ pub(super) fn mass_spline_region(
         )
     })?;
     let (min, max) = bulged_ring_bounds(&samples, &bulges, ring.plane);
+    let moments = cad_geometry::bulged_ring_moments(&flat, &bulges)
+        .ok_or_else(|| {
+            mass_degenerate(
+                entity,
+                "the sampled spline ring's second moments could not be derived",
+            )
+        })?
+        .with_positive_area();
     let mut closed = samples.clone();
     closed.push(samples[0]);
     let perimeter = polyline_length(&closed);
@@ -175,12 +183,16 @@ pub(super) fn mass_spline_region(
         centroid,
         normal,
         plane_point: ring.plane.origin,
+        u: ring.plane.u,
+        v: ring.plane.v,
+        moments,
+        exact: false,
         notes: vec![(
             "massprop.approx_spline_region",
             format!(
                 "MASSPROP: entity {} is measured from an adaptive {} vertex sample ring (chord \
-                 tolerance {sample_tolerance:.6e}); its area, perimeter, bounding box and centroid \
-                 are the sample ring's values, not closed-form B-spline integrals",
+                 tolerance {sample_tolerance:.6e}); its area, perimeter, bounding box, centroid and \
+                 second moments are the sample ring's values, not closed-form B-spline integrals",
                 entity.id.0,
                 samples.len()
             ),
@@ -256,6 +268,11 @@ pub(super) fn mass_hatch_region(
             bulged_ring_centroid(work_plane, &loop_.points, &bulges).ok_or_else(|| {
                 mass_degenerate(entity, "a hatch loop's centroid could not be derived")
             })?;
+        let moments = cad_geometry::bulged_ring_moments(&loop_.points, &bulges)
+            .ok_or_else(|| {
+                mass_degenerate(entity, "a hatch loop's second moments could not be derived")
+            })?
+            .with_positive_area();
         let (min, max) = bulged_ring_bounds(&points, &bulges, work_plane);
         measured.push(HatchLoopMetrics {
             area: ring.area,
@@ -265,6 +282,7 @@ pub(super) fn mass_hatch_region(
             ring: loop_.sampled_ring(),
             perimeter,
             centroid,
+            moments,
             min,
             max,
             external: (loop_.flags.bits() & cad_domain::HatchLoopFlags::EXTERNAL) != 0,
@@ -386,6 +404,16 @@ pub(super) fn mass_hatch_region(
             "the hatch's area-weighted centroid is not finite",
         ));
     }
+    // The net region's moments: every loop's positive-area moments carry the same
+    // nesting-parity sign as its area, so an island subtracts **its own** second
+    // moments about its own centroid (a hole's centroid is not the region's).
+    let mut total_moments = PlanarMoments::ZERO;
+    for loop_ in &measured {
+        let sign = if loop_.signed_area < 0.0 { -1.0 } else { 1.0 };
+        total_moments = total_moments + loop_.moments.scaled(sign);
+    }
+    let moments = total_moments.with_positive_area();
+    let exact = !measured.iter().any(|loop_| loop_.sampled);
     Ok(MassRegion {
         kind: "hatch region",
         area,
@@ -395,6 +423,10 @@ pub(super) fn mass_hatch_region(
         centroid,
         normal,
         plane_point: work_plane.origin,
+        u,
+        v,
+        moments,
+        exact,
         notes,
     })
 }
@@ -411,6 +443,9 @@ struct HatchLoopMetrics {
     ring: Vec<[f64; 2]>,
     perimeter: f64,
     centroid: Point3,
+    /// The loop's planar moments in the hatch plane, positive-area convention;
+    /// the net region sums them with the same parity sign as `signed_area`.
+    moments: PlanarMoments,
     min: Point3,
     max: Point3,
     external: bool,

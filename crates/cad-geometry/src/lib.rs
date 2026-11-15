@@ -10,6 +10,7 @@
 
 pub mod area;
 pub mod clip;
+pub mod inertia;
 pub mod mesh;
 pub mod nurbs;
 pub mod nurbs_edit;
@@ -20,6 +21,9 @@ pub use area::{
 };
 pub use clip::{clip_polyline_to_xy_rect, clip_segment_to_xy_rect};
 pub use dash::{dash_polyline, dash_polyline_segments, polyline_length, DashIssue, DashOutcome};
+pub use inertia::{
+    bulged_ring_moments, polygon_moments, reexpress, PlanarInertia, PlanarMoments, PrincipalAxes,
+};
 pub use mesh::{compute_vertex_normals, mesh_bounds};
 pub use nurbs::{clamped_uniform_knots, NurbsCurve};
 pub use nurbs_edit::{

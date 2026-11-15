@@ -8,7 +8,9 @@
 //! revision.
 
 use super::*;
-use cad_geometry::{measure_bulged_ring_area, polyline_length, AreaError};
+use cad_geometry::{
+    arbitrary_axis, measure_bulged_ring_area, polyline_length, AreaError, PlanarMoments,
+};
 
 use crate::app_measure_object::geometry_kind;
 
@@ -32,6 +34,8 @@ mod measuregeom;
 /// One measured region before it is formatted into diagnostics.
 struct MassRegion {
     kind: &'static str,
+    /// The region's exact area (a magnitude: every kind is a positive region; a
+    /// hatch's holes have already been subtracted inside its own loops).
     area: f64,
     /// `(value, approximate)`; the ellipse perimeter is the only approximate
     /// value in v1 (Ramanujan's second approximation).
@@ -42,6 +46,20 @@ struct MassRegion {
     /// The region's own plane normal (unit) and one point on that plane.
     normal: Point3,
     plane_point: Point3,
+    /// The region's own in-plane orthonormal basis. `plane_point` is its origin
+    /// and `moments` is integrated in it, so `(u, v, plane_point)` is the frame
+    /// every second moment below is expressed in.
+    u: Point3,
+    v: Point3,
+    /// `∫x² dA`, `∫y² dA`, `∫xy dA` (plus the area/first moments) about
+    /// `plane_point` in the `(u, v)` frame, in the geometric convention (a
+    /// clockwise winding is normalised away). `area` repeats the value above.
+    moments: PlanarMoments,
+    /// Whether `moments` is a closed-form integral of the entity's own geometry.
+    /// A sampled kind (a closed SPLINE's sample ring, an imported HATCH boundary
+    /// the importer flattened) is `false`: its second moments are the sample
+    /// polygon's, exactly like its area and perimeter.
+    exact: bool,
     /// Extra per-object diagnostics, emitted right after `massprop.object`.
     ///
     /// Only the sampled/loop-derived kinds carry notes: a closed SPLINE's values
@@ -113,8 +131,55 @@ impl Application {
         }
         self.ensure_coplanar(&regions)?;
 
-        let mut diagnostics = Vec::with_capacity(regions.len() * 2 + 1);
+        // --- 2D mass properties -------------------------------------------
+        //
+        // One common frame for the whole selection: the first selected region's
+        // plane origin and the AutoCAD arbitrary axis of its (unit) normal. Every
+        // region's moments were integrated in *its own* plane basis — which is
+        // what makes a bulge's sign mean the right thing — so they are
+        // re-expressed in the selection frame here, exactly (a rotation or
+        // reflection plus the parallel-axis translation). The per-region lines
+        // and the selection line are therefore directly comparable.
+        let frame = selection_frame(&regions[0].1);
+        let mut resolved = Vec::with_capacity(regions.len());
         for (entity, region) in &regions {
+            let moments = cad_geometry::reexpress(
+                region.moments,
+                WorkPlane {
+                    origin: region.plane_point,
+                    u: region.u,
+                    v: region.v,
+                },
+                frame,
+            )
+            .ok_or_else(|| {
+                CadError::InvalidInput(format!(
+                    "massprop.inertia_degenerate: entity {}'s region frame is not an orthonormal \
+                     basis of the selection plane, so its second moments cannot be placed in the \
+                     selection frame; no value is reported",
+                    entity.0
+                ))
+            })?
+            .with_positive_area();
+            let inertia = moments.centroidal().ok_or_else(|| {
+                CadError::InvalidInput(format!(
+                    "massprop.degenerate: entity {}'s area is zero or underflowed, so it has no \
+                     centroid to shift its second moments onto",
+                    entity.0
+                ))
+            })?;
+            if !inertia.is_finite_and_valid() {
+                return Err(mass_inertia_degenerate(
+                    "the region's second-moment tensor is not finite or not positive \
+                     semi-definite, so it cannot be a real region's inertia",
+                ));
+            }
+            resolved.push((moments, inertia));
+        }
+
+        let mut diagnostics = Vec::with_capacity(regions.len() * 3 + 3);
+        let mut total_moments = PlanarMoments::ZERO;
+        for ((entity, region), (moments, inertia)) in regions.iter().zip(&resolved) {
             diagnostics.push(Diagnostic {
                 object: Some(ObjectId(entity.0)),
                 code: "massprop.object".into(),
@@ -138,6 +203,41 @@ impl Application {
                     message: message.clone(),
                 });
             }
+            // `Ix` is the second moment about the centroidal axis parallel to the
+            // frame's `u` direction, i.e. `∫v² dA` in the frame's own
+            // coordinates, and `Iy = ∫u² dA`; both are exact for every analytic
+            // kind and the sample ring's for a sampled one.
+            let (kx, ky) = match (inertia.gyration_x(), inertia.gyration_y()) {
+                (Some(kx), Some(ky)) => (kx, ky),
+                _ => {
+                    return Err(mass_inertia_degenerate(
+                        "the region's radii of gyration are not finite",
+                    ))
+                }
+            };
+            diagnostics.push(Diagnostic {
+                object: Some(ObjectId(entity.0)),
+                code: "massprop.inertia".into(),
+                message: format!(
+                    "MASSPROP: entity {} ({}) second moments about its own centroid in the \
+                     selection frame: Ix={:.6} Iy={:.6} Ixy={:.6} J={:.6} kx={:.6} ky={:.6} \
+                     (Ix=∫v²dA, Iy=∫u²dA, Ixy=∫uv dA; {})",
+                    entity.0,
+                    region.kind,
+                    inertia.inertia_x,
+                    inertia.inertia_y,
+                    inertia.product_xy,
+                    inertia.polar(),
+                    kx,
+                    ky,
+                    if region.exact {
+                        "exact closed form"
+                    } else {
+                        "the sample polygon's values, not closed-form"
+                    },
+                ),
+            });
+            total_moments = total_moments + *moments;
         }
 
         let total_area: f64 = regions.iter().map(|(_, region)| region.area).sum();
@@ -149,31 +249,101 @@ impl Application {
             min = min_point(min, region.min);
             max = max_point(max, region.max);
         }
-        let centroid = if total_area.is_finite() && total_area > 0.0 {
-            let mut x = 0.0;
-            let mut y = 0.0;
-            let mut z = 0.0;
-            for (_, region) in &regions {
-                x += region.centroid.x * region.area;
-                y += region.centroid.y * region.area;
-                z += region.centroid.z * region.area;
-            }
-            Point3 {
-                x: x / total_area,
-                y: y / total_area,
-                z: z / total_area,
-            }
-        } else {
-            return Err(CadError::InvalidInput(
-                "massprop.degenerate: the summed area is not a positive finite value".into(),
+        // The selection's centroidal tensor: the summed raw moments are about the
+        // selection frame origin, so one parallel-axis shift moves them to the
+        // combined centroid — the same `A = Σaᵢ`, `c = Σaᵢcᵢ/A` combination the
+        // area line reports.
+        let total_inertia = total_moments.centroidal().ok_or_else(|| {
+            CadError::InvalidInput(
+                "massprop.degenerate: the summed area is not a positive finite value, so no \
+                 centroid can be derived"
+                    .into(),
+            )
+        })?;
+        if !total_inertia.is_finite_and_valid() {
+            return Err(mass_inertia_degenerate(
+                "the selection's summed second-moment tensor is not finite or not positive \
+                 semi-definite",
             ));
+        }
+        let (kx, ky, kz) = match (
+            total_inertia.gyration_x(),
+            total_inertia.gyration_y(),
+            total_inertia.gyration_polar(),
+        ) {
+            (Some(kx), Some(ky), Some(kz)) => (kx, ky, kz),
+            _ => {
+                return Err(mass_inertia_degenerate(
+                    "the selection's radii of gyration are not finite",
+                ))
+            }
         };
+        let principal = total_inertia.principal().ok_or_else(|| {
+            mass_inertia_degenerate("the selection's principal axes cannot be derived")
+        })?;
+        let centroid = camera::add(
+            frame.origin,
+            camera::add(
+                camera::scale3(frame.u, total_inertia.centroid[0]),
+                camera::scale3(frame.v, total_inertia.centroid[1]),
+            ),
+        );
+        // A principal axis is a direction in the plane: lift it back to world.
+        let axis_major = camera::add(
+            camera::scale3(frame.u, principal.major_axis[0]),
+            camera::scale3(frame.v, principal.major_axis[1]),
+        );
+        let minor_axis = principal.minor_axis();
+        let axis_minor = camera::add(
+            camera::scale3(frame.u, minor_axis[0]),
+            camera::scale3(frame.v, minor_axis[1]),
+        );
+        let normal = camera::normalize3(camera::cross(frame.u, frame.v))
+            .ok_or_else(|| mass_inertia_degenerate("the selection frame has no normal"))?;
+
+        diagnostics.push(Diagnostic {
+            object: None,
+            code: "massprop.summary_inertia".into(),
+            message: format!(
+                "MASSPROP: {} region(s) about the combined centroid {}: Ix={:.6} Iy={:.6} \
+                 Ixy={:.6} J={:.6} kx={:.6} ky={:.6} kz={:.6} principal I1={:.6} axis1={} \
+                 I2={:.6} axis2={} principal_angle_deg={:.6}; frame origin={} u={} v={} n={} \
+                 (the first selected region's plane; Ix is about the u-parallel axis, Iy about \
+                 the v-parallel one, and principal_angle_deg is measured from u in the plane)",
+                regions.len(),
+                format_point(centroid),
+                total_inertia.inertia_x,
+                total_inertia.inertia_y,
+                total_inertia.product_xy,
+                total_inertia.polar(),
+                kx,
+                ky,
+                kz,
+                principal.major,
+                format_point(axis_major),
+                principal.minor,
+                format_point(axis_minor),
+                principal.angle.to_degrees(),
+                format_point(frame.origin),
+                format_point(frame.u),
+                format_point(frame.v),
+                format_point(normal),
+            ),
+        });
+        diagnostics.push(Diagnostic {
+            object: None,
+            code: "massprop.solid_unsupported".into(),
+            message: "MASSPROP: volume, mass, density and 3D moments of inertia are NOT REPORTED \
+                      (this build has no 3D solid/region model); no value is computed or invented \
+                      for them"
+                .into(),
+        });
         diagnostics.push(Diagnostic {
             object: None,
             code: "massprop.not_implemented".into(),
-            message: "MASSPROP: moments/products of inertia, radii of gyration, principal moments \
-                      and axes, mass/volume/3D solids, density, Add/Subtract region composition and \
-                      .mpr output are NOT IMPLEMENTED; no value is reported for them"
+            message: "MASSPROP: Add/Subtract region composition and .mpr output are NOT \
+                      IMPLEMENTED; the reported values are the area-weighted combination of the \
+                      selected regions, not a CSG union"
                 .into(),
         });
         diagnostics.push(Diagnostic {
@@ -231,6 +401,9 @@ impl Application {
                     mass_degenerate(entity, "the circle's normal does not define a plane basis")
                 })?;
                 let extents = axis_extents(normal, u, v, *radius);
+                // A disc's second moments are the same about every centroidal
+                // axis in its plane: ∫x² = ∫y² = πr⁴/4, ∫xy = 0.
+                let second = std::f64::consts::FRAC_PI_4 * radius.powi(4);
                 Ok(MassRegion {
                     kind: "circle",
                     area,
@@ -248,6 +421,17 @@ impl Application {
                     centroid: *center,
                     normal,
                     plane_point: *center,
+                    u,
+                    v,
+                    moments: PlanarMoments {
+                        area,
+                        first_x: 0.0,
+                        first_y: 0.0,
+                        second_x: second,
+                        second_y: second,
+                        second_xy: 0.0,
+                    },
+                    exact: true,
                     notes: Vec::new(),
                 })
             }
@@ -327,6 +511,17 @@ impl Application {
                     y: (major * major_unit.y).hypot(minor * minor_unit.y),
                     z: (major * major_unit.z).hypot(minor * minor_unit.z),
                 };
+                let (u, v) = plane_basis(normal).ok_or_else(|| {
+                    mass_degenerate(entity, "the ellipse's normal does not define a plane basis")
+                })?;
+                // The ellipse's own principal second moments: with ξ along the
+                // major axis and η along the minor one, ∫ξ² = πa³b/4 and
+                // ∫η² = πab³/4, and ∫ξη = 0. Rotate that diagonal tensor into
+                // the region frame `(u, v)`.
+                let along_major = std::f64::consts::FRAC_PI_4 * major.powi(3) * minor;
+                let along_minor = std::f64::consts::FRAC_PI_4 * major * minor.powi(3);
+                let e1 = [camera::dot3(major_unit, u), camera::dot3(major_unit, v)];
+                let e2 = [camera::dot3(minor_unit, u), camera::dot3(minor_unit, v)];
                 Ok(MassRegion {
                     kind: "ellipse",
                     area,
@@ -344,13 +539,26 @@ impl Application {
                     centroid: *center,
                     normal,
                     plane_point: *center,
+                    u,
+                    v,
+                    moments: PlanarMoments {
+                        area,
+                        first_x: 0.0,
+                        first_y: 0.0,
+                        second_x: along_major * e1[0] * e1[0] + along_minor * e2[0] * e2[0],
+                        second_y: along_major * e1[1] * e1[1] + along_minor * e2[1] * e2[1],
+                        second_xy: along_major * e1[0] * e1[1] + along_minor * e2[0] * e2[1],
+                    },
+                    exact: true,
                     // The perimeter above is Ramanujan's second approximation, so the
-                    // ellipse — and only the ellipse — carries this note.
+                    // ellipse — and only the ellipse — carries this note. Its area and
+                    // second moments are exact and do not depend on it.
                     notes: vec![(
                         "massprop.approx_ellipse_perimeter",
                         format!(
                             "MASSPROP: entity {} perimeter is Ramanujan's second approximation of \
-                             the complete elliptic integral; it is not an exact value",
+                             the complete elliptic integral; it is not an exact value (the area, \
+                             centroid and second moments are exact)",
                             entity.id.0
                         ),
                     )],
@@ -407,6 +615,14 @@ impl Application {
                         )
                     })?;
                 let (min, max) = bulged_ring_bounds(points, bulges, ring.plane);
+                let moments = cad_geometry::bulged_ring_moments(&flat, bulges)
+                    .ok_or_else(|| {
+                        mass_degenerate(
+                            entity,
+                            "the closed polyline's second moments could not be derived",
+                        )
+                    })?
+                    .with_positive_area();
                 Ok(MassRegion {
                     kind: "closed polyline",
                     area: ring.area,
@@ -416,6 +632,10 @@ impl Application {
                     centroid,
                     normal,
                     plane_point: ring.plane.origin,
+                    u: ring.plane.u,
+                    v: ring.plane.v,
+                    moments,
+                    exact: true,
                     notes: Vec::new(),
                 })
             }
@@ -478,6 +698,23 @@ impl Application {
             }
         }
         Ok(())
+    }
+}
+
+/// The one frame the whole selection's second moments are reported in.
+///
+/// The origin is the first selected region's plane point and the axes are the
+/// AutoCAD arbitrary axis of its normal, i.e. the OCS basis a hatch already
+/// stores, so a region in a world-XY plane reports `u = +X`, `v = +Y` and its
+/// `Ix` is the familiar `∫y² dA`. Every region's own-frame moments are re-expressed
+/// in this frame before they are summed, so the per-object lines and the
+/// selection line are comparable.
+fn selection_frame(first: &MassRegion) -> WorkPlane {
+    let (u, v, _) = arbitrary_axis(first.normal);
+    WorkPlane {
+        origin: first.plane_point,
+        u,
+        v,
     }
 }
 
@@ -552,76 +789,13 @@ fn bulged_ring_perimeter(points: &[Point3], bulges: &[f64]) -> Option<f64> {
 
 /// Area-weighted centroid of a closed bulged ring, in the ring's own plane.
 ///
-/// The straight-edge contribution is the polygon first-moment integral
-/// `∬x dA = (1/6)Σ(x_i+x_{i+1})·cross_i`; every bulge adds one **circular
-/// segment** whose area is `(r²/2)(θ−sinθ)` and whose centroid lies on the apex
-/// direction at `y_c = 4r·sin³(θ/2) / (3(θ−sinθ))` from the arc centre. Both
-/// small-θ expressions use their series to avoid cancellation; the derivation is
-/// pinned by the `massprop` tests (semicircle centroid `4r/(3π)` etc.).
+/// This is [`cad_geometry::bulged_ring_moments`]'s first moment divided by its
+/// area: the straight-edge polygon integral plus one circular segment per bulge
+/// (whose first moments are the exact `sector − triangle` expressions). There is
+/// exactly **one** implementation of that arithmetic, in `cad-geometry`, so the
+/// centroid and the second moments reported next to it cannot drift apart.
 fn bulged_ring_centroid(plane: WorkPlane, flat: &[[f64; 2]], bulges: &[f64]) -> Option<Point3> {
-    if flat.len() != bulges.len() || flat.len() < 3 {
-        return None;
-    }
-    let mut signed_area = 0.0_f64;
-    let mut moment_x = 0.0_f64;
-    let mut moment_y = 0.0_f64;
-    for index in 0..flat.len() {
-        let a = flat[index];
-        let b = flat[(index + 1) % flat.len()];
-        let cross = a[0] * b[1] - a[1] * b[0];
-        signed_area += 0.5 * cross;
-        moment_x += (a[0] + b[0]) * cross / 6.0;
-        moment_y += (a[1] + b[1]) * cross / 6.0;
-        let bulge = bulges[index];
-        if bulge.abs() < 1e-12 {
-            continue;
-        }
-        let dx = b[0] - a[0];
-        let dy = b[1] - a[1];
-        let chord = dx.hypot(dy);
-        if !chord.is_finite() || chord <= 0.0 {
-            return None;
-        }
-        let theta = 4.0 * bulge.atan();
-        let half = theta * 0.5;
-        let sagitta = bulge * chord * 0.5;
-        let radius = (chord * chord * 0.25 + sagitta * sagitta) / (2.0 * sagitta.abs());
-        if !radius.is_finite() || radius <= 0.0 {
-            return None;
-        }
-        let side = if bulge > 0.0 { 1.0 } else { -1.0 };
-        // A positive bulge bows to the **right** of the chord (the same frame
-        // `bulge_arc_geometry` uses); `apex` points from the chord to the arc,
-        // so the arc centre is on the opposite side (for |θ| < π).
-        let left = [-dy / chord, dx / chord];
-        let apex = [-left[0] * side, -left[1] * side];
-        let center = [
-            (a[0] + b[0]) * 0.5 - apex[0] * radius * half.cos(),
-            (a[1] + b[1]) * 0.5 - apex[1] * radius * half.cos(),
-        ];
-        let segment_area = if theta.abs() < 1e-3 {
-            0.5 * radius * radius * theta.powi(3) / 6.0
-                * (1.0 - theta * theta / 20.0 + theta.powi(4) / 840.0)
-        } else {
-            0.5 * radius * radius * (theta - theta.sin())
-        };
-        let y_c = if theta.abs() < 1e-3 {
-            radius * (1.0 - 3.0 * theta * theta / 40.0)
-        } else {
-            4.0 * radius * half.sin().powi(3) / (3.0 * (theta - theta.sin()))
-        };
-        signed_area += segment_area;
-        moment_x += segment_area * (center[0] + apex[0] * y_c);
-        moment_y += segment_area * (center[1] + apex[1] * y_c);
-    }
-    if !signed_area.is_finite() || signed_area.abs() < 1e-15 {
-        return None;
-    }
-    let x = moment_x / signed_area;
-    let y = moment_y / signed_area;
-    if !x.is_finite() || !y.is_finite() {
-        return None;
-    }
+    let [x, y] = cad_geometry::bulged_ring_moments(flat, bulges)?.centroid()?;
     Some(camera::add(
         plane.origin,
         camera::add(camera::scale3(plane.u, x), camera::scale3(plane.v, y)),
@@ -757,6 +931,17 @@ fn mass_degenerate(entity: &cad_db::DbEntity, reason: &str) -> CadError {
     CadError::InvalidInput(format!(
         "massprop.degenerate: entity {} cannot be measured: {reason}",
         entity.id.0
+    ))
+}
+
+/// Refuse a second-moment report whose accumulated tensor is not a real region's.
+///
+/// Every exact path already refuses a zero/near-zero area before this point; this
+/// code exists so a numerically impossible tensor (non-finite, negative, or a
+/// product of inertia beyond `sqrt(Ix·Iy)`) is named rather than printed.
+fn mass_inertia_degenerate(reason: &str) -> CadError {
+    CadError::InvalidInput(format!(
+        "massprop.inertia_degenerate: {reason}; no second moment is reported"
     ))
 }
 

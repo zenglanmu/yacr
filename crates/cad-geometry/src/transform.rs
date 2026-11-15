@@ -150,30 +150,14 @@ pub(crate) fn affine_ellipse_arc(
     let uu = dot(u, u);
     let vv = dot(v, v);
     let uv = dot(u, v);
-    let trace = uu + vv;
-    let diff = uu - vv;
-    let disc = (diff * diff + 4.0 * uv * uv).sqrt();
-    let lam1 = 0.5 * (trace + disc);
-    let lam2 = (0.5 * (trace - disc)).max(0.0);
-    let s1 = lam1.max(0.0).sqrt();
-    let s2 = lam2.sqrt();
+    let eigen = crate::vector::symmetric_eigen_2x2(uu, uv, vv);
+    let s1 = eigen.major.max(0.0).sqrt();
+    let s2 = eigen.minor.sqrt();
     if s1 < 1e-300 {
         // The whole plane collapsed to a point.
         return SemanticGeometry::Point(c);
     }
-    // Eigenvector of the larger eigenvalue.
-    let (ex, ey) = if uv.abs() > 1e-300 {
-        let len = (uv * uv + (lam1 - uu) * (lam1 - uu)).sqrt();
-        if len > 1e-300 {
-            (uv / len, (lam1 - uu) / len)
-        } else {
-            (1.0, 0.0)
-        }
-    } else if uu >= vv {
-        (1.0, 0.0)
-    } else {
-        (0.0, 1.0)
-    };
+    let (ex, ey) = eigen.axis;
     let (e2x, e2y) = (-ey, ex);
     let w1 = scale(add(scale(u, ex), scale(v, ey)), 1.0 / s1);
     let w2 = if s2 > 1e-300 {

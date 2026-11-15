@@ -249,6 +249,7 @@ mod layout_page_setup;
 mod layout_wizard;
 mod locked_layers;
 mod measure_extra;
+mod measure_massprop;
 mod model_space;
 mod pedit;
 mod plan_view;

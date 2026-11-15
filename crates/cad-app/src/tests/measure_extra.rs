@@ -1,32 +1,41 @@
-//! `MASSPROP` / `MEASUREGEOM` contract tests (AutoCAD 2026 inquiry, 2026-11-07).
+//! `MEASUREGEOM` contract tests plus the shared inquiry-test fixtures.
 //!
-//! Pinned here: the exact analytic values (circle, ellipse, straight and bulged
-//! closed polylines), the coplanarity rule, every named refusal with **zero**
-//! state change, the fact that both commands are read-only (no transaction,
-//! revision bump or undo entry) and the explicit `VOLUME` not-implemented
-//! refusal.
+//! The `MASSPROP` contracts live in the sibling [`super::measure_massprop`]
+//! module (the split keeps both files inside the code-size limit); this module
+//! keeps the fixture database every one of those tests selects from and the
+//! `MEASUREGEOM RADIUS`/`VOLUME` reports.
+//!
+//! Pinned here: the radius family of a circle and an arc, the empty/multiple/
+//! wrong-kind refusals, the fact that both commands are read-only (no
+//! transaction, revision bump or undo entry) and the explicit `VOLUME`
+//! not-implemented refusal.
 
 use super::*;
 use cad_db::{DrawingDatabaseBuilder, Layer};
 
-const CIRCLE_R2: u128 = 1;
-const ELLIPSE_3X1: u128 = 2;
-const RECT_3X4: u128 = 3;
-const BULGED_RECT: u128 = 4;
-const OPEN_POLYLINE: u128 = 5;
-const ARC: u128 = 6;
-const CIRCLE_HIGH: u128 = 7;
-const CIRCLE_R5: u128 = 8;
-const NON_PLANAR_POLYLINE: u128 = 9;
+pub(super) const CIRCLE_R2: u128 = 1;
+pub(super) const ELLIPSE_3X1: u128 = 2;
+pub(super) const RECT_3X4: u128 = 3;
+pub(super) const BULGED_RECT: u128 = 4;
+pub(super) const OPEN_POLYLINE: u128 = 5;
+pub(super) const ARC: u128 = 6;
+pub(super) const CIRCLE_HIGH: u128 = 7;
+pub(super) const CIRCLE_R5: u128 = 8;
+pub(super) const NON_PLANAR_POLYLINE: u128 = 9;
 // Region-extension fixtures (MASSPROP): a closed degree-1 spline that is exactly
 // the 3x4 rectangle, its open twin, and three hatches.
-const SPLINE_SQUARE: u128 = 10;
-const SPLINE_OPEN: u128 = 11;
-const HATCH_CIRCLE: u128 = 12;
-const HATCH_ISLAND: u128 = 13;
-const HATCH_SAMPLED: u128 = 14;
+pub(super) const SPLINE_SQUARE: u128 = 10;
+pub(super) const SPLINE_OPEN: u128 = 11;
+pub(super) const HATCH_CIRCLE: u128 = 12;
+pub(super) const HATCH_ISLAND: u128 = 13;
+pub(super) const HATCH_SAMPLED: u128 = 14;
+// Mass-property fixtures: a rectangle rotated 45 degrees about its own centroid
+// (this one is not axis aligned, so its product of inertia is nonzero), and a
+// circle whose area underflows to zero.
+pub(super) const ROTATED_RECT: u128 = 15;
+pub(super) const TINY_CIRCLE: u128 = 16;
 
-fn entity(id: u128, geometry: SemanticGeometry) -> cad_db::DbEntity {
+pub(super) fn entity(id: u128, geometry: SemanticGeometry) -> cad_db::DbEntity {
     cad_db::DbEntity {
         object: cad_db::DbObject {
             id: ObjectId(id),
@@ -42,7 +51,7 @@ fn entity(id: u128, geometry: SemanticGeometry) -> cad_db::DbEntity {
     }
 }
 
-fn circle(id: u128, center: Point3, radius: f64) -> cad_db::DbEntity {
+pub(super) fn circle(id: u128, center: Point3, radius: f64) -> cad_db::DbEntity {
     entity(
         id,
         SemanticGeometry::Circle {
@@ -57,7 +66,12 @@ fn circle(id: u128, center: Point3, radius: f64) -> cad_db::DbEntity {
     )
 }
 
-fn polyline(id: u128, points: Vec<Point3>, bulges: Vec<f64>, closed: bool) -> cad_db::DbEntity {
+pub(super) fn polyline(
+    id: u128,
+    points: Vec<Point3>,
+    bulges: Vec<f64>,
+    closed: bool,
+) -> cad_db::DbEntity {
     entity(
         id,
         SemanticGeometry::Polyline {
@@ -70,7 +84,7 @@ fn polyline(id: u128, points: Vec<Point3>, bulges: Vec<f64>, closed: bool) -> ca
 }
 
 /// A clamped-uniform spline over `control_points` (`weights` empty = all 1).
-fn spline(id: u128, control_points: Vec<Point3>, degree: u32) -> cad_db::DbEntity {
+pub(super) fn spline(id: u128, control_points: Vec<Point3>, degree: u32) -> cad_db::DbEntity {
     entity(
         id,
         SemanticGeometry::Spline {
@@ -84,7 +98,7 @@ fn spline(id: u128, control_points: Vec<Point3>, degree: u32) -> cad_db::DbEntit
 }
 
 /// A solid hatch on the world XY plane (`z = 0`) with the given loops.
-fn hatch_entity(id: u128, loops: Vec<HatchLoop>) -> cad_db::DbEntity {
+pub(super) fn hatch_entity(id: u128, loops: Vec<HatchLoop>) -> cad_db::DbEntity {
     let hatch = HatchGeometry::new(
         loops,
         HatchPlane::new(
@@ -106,7 +120,7 @@ fn hatch_entity(id: u128, loops: Vec<HatchLoop>) -> cad_db::DbEntity {
 }
 
 /// A radius-1 circle at `(5, 3)` in the hatch plane: four exact quarter arcs.
-fn circle_loop() -> HatchLoop {
+pub(super) fn circle_loop() -> HatchLoop {
     HatchLoop::new(
         vec![[6.0, 3.0], [5.0, 4.0], [4.0, 3.0], [5.0, 2.0]],
         vec![std::f64::consts::FRAC_PI_8.tan(); 4],
@@ -116,7 +130,7 @@ fn circle_loop() -> HatchLoop {
 
 /// A loop whose stored `source_edges` names an arc: the import path samples such
 /// an edge into vertices, so the measurement must call itself approximate.
-fn sampled_loop() -> HatchLoop {
+pub(super) fn sampled_loop() -> HatchLoop {
     let mut loop_ = HatchLoop::new(
         vec![[8.0, 0.0], [10.0, 0.0], [10.0, 2.0], [8.0, 2.0]],
         vec![0.0; 4],
@@ -132,7 +146,7 @@ fn sampled_loop() -> HatchLoop {
     loop_
 }
 
-fn app_with_objects() -> (Application, SessionState) {
+pub(super) fn app_with_objects() -> (Application, SessionState) {
     let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
     b.insert_layer(Layer {
         id: LayerId(0),
@@ -284,6 +298,28 @@ fn app_with_objects() -> (Application, SessionState) {
     // boundary the importer sampled into vertices (reported as approximate).
     b.insert_entity(hatch_entity(HATCH_SAMPLED, vec![sampled_loop()]))
         .unwrap();
+    // The 3x4 rectangle rotated by 45 degrees about its centroid (30, 0). Its
+    // second moments are Ix = Iy = (9 + 16)/2 and Ixy = (9 - 16)/2.
+    let cos = std::f64::consts::FRAC_1_SQRT_2;
+    let sin = std::f64::consts::FRAC_1_SQRT_2;
+    let rotated: Vec<Point3> = [(-1.5, -2.0), (1.5, -2.0), (1.5, 2.0), (-1.5, 2.0)]
+        .iter()
+        .map(|(x, y)| point(30.0 + x * cos - y * sin, x * sin + y * cos))
+        .collect();
+    b.insert_entity(polyline(ROTATED_RECT, rotated, vec![0.0; 4], true))
+        .unwrap();
+    // A radius whose square underflows to zero: a named zero-area refusal, never
+    // a NaN moment.
+    b.insert_entity(circle(
+        TINY_CIRCLE,
+        Point3 {
+            x: 40.0,
+            y: 0.0,
+            z: 0.0,
+        },
+        1e-300,
+    ))
+    .unwrap();
     let drawing = b.finish().unwrap();
     let mut app = Application::new();
     app.workspace.documents.insert(
@@ -303,7 +339,7 @@ fn app_with_objects() -> (Application, SessionState) {
     (app, SessionState::new(DocumentId(1), AppMode::Work))
 }
 
-fn execute(
+pub(super) fn execute(
     app: &mut Application,
     session: &mut SessionState,
     id: CommandId,
@@ -312,7 +348,7 @@ fn execute(
     app.execute(session, command(id, payload))
 }
 
-fn select(
+pub(super) fn select(
     app: &mut Application,
     session: &mut SessionState,
     entities: &[u128],
@@ -334,11 +370,11 @@ fn select(
     )
 }
 
-fn revision(app: &Application) -> Revision {
+pub(super) fn revision(app: &Application) -> Revision {
     app.workspace.documents[&DocumentId(1)].drawing.revision()
 }
 
-fn assert_no_write(app: &Application, session: &SessionState, before: Revision) {
+pub(super) fn assert_no_write(app: &Application, session: &SessionState, before: Revision) {
     let after = app.workspace.documents[&DocumentId(1)].drawing.revision();
     assert_eq!(after, before, "no revision bump");
     assert!(
@@ -347,7 +383,7 @@ fn assert_no_write(app: &Application, session: &SessionState, before: Revision) 
     );
 }
 
-fn diagnostic_text(outcome: &CommandOutcome, code: &str) -> String {
+pub(super) fn diagnostic_text(outcome: &CommandOutcome, code: &str) -> String {
     outcome
         .diagnostics
         .iter()
@@ -355,259 +391,6 @@ fn diagnostic_text(outcome: &CommandOutcome, code: &str) -> String {
         .unwrap_or_else(|| panic!("missing diagnostic {code}: {:?}", outcome.diagnostics))
         .message
         .clone()
-}
-
-#[test]
-fn massprop_reports_a_circle_exactly_and_viewer_legal() {
-    let (mut app, _) = app_with_objects();
-    let mut session = SessionState::new(DocumentId(1), AppMode::Viewer);
-    assert!(!CommandId::MassProp.requires_work_mode());
-    let before = revision(&app);
-    select(&mut app, &mut session, &[CIRCLE_R2]).unwrap();
-    let outcome = execute(
-        &mut app,
-        &mut session,
-        CommandId::MassProp,
-        CommandPayload::None,
-    )
-    .expect("MASSPROP is Viewer-legal");
-
-    let object = diagnostic_text(&outcome, "massprop.object");
-    assert!(object.contains("area=12.566371"), "{object}");
-    assert!(object.contains("perimeter=12.566371"), "{object}");
-    assert!(
-        object.contains("bbox min=(-2.000000, -2.000000, 0.000000)"),
-        "{object}"
-    );
-    assert!(
-        object.contains("max=(2.000000, 2.000000, 0.000000)"),
-        "{object}"
-    );
-    assert!(
-        object.contains("centroid=(0.000000, 0.000000, 0.000000)"),
-        "{object}"
-    );
-    let not_implemented = diagnostic_text(&outcome, "massprop.not_implemented");
-    assert!(
-        not_implemented.contains("moments/products of inertia"),
-        "{not_implemented}"
-    );
-    assert!(
-        not_implemented.contains("NOT IMPLEMENTED"),
-        "{not_implemented}"
-    );
-    let summary = diagnostic_text(&outcome, "massprop.summary");
-    assert!(summary.contains("1 region(s)"), "{summary}");
-    assert!(
-        outcome.measurement.is_none(),
-        "no scalar measurement record"
-    );
-    assert!(outcome.point_report.is_none());
-    assert!(outcome.changes.is_none());
-    assert_no_write(&app, &session, before);
-}
-
-#[test]
-fn massprop_ellipse_perimeter_is_labelled_approximate() {
-    let (mut app, mut session) = app_with_objects();
-    let before = revision(&app);
-    select(&mut app, &mut session, &[ELLIPSE_3X1]).unwrap();
-    let outcome = execute(
-        &mut app,
-        &mut session,
-        CommandId::MassProp,
-        CommandPayload::None,
-    )
-    .expect("a full ellipse is supported");
-
-    let object = diagnostic_text(&outcome, "massprop.object");
-    assert!(object.contains("area=9.424778"), "{object}");
-    assert!(
-        object.contains("perimeter=~"),
-        "the ellipse perimeter is approximate: {object}"
-    );
-    let approx = diagnostic_text(&outcome, "massprop.approx_ellipse_perimeter");
-    assert!(approx.contains("Ramanujan"), "{approx}");
-    assert!(
-        object.contains("bbox min=(7.000000, -1.000000, 0.000000)"),
-        "{object}"
-    );
-    assert!(
-        object.contains("max=(13.000000, 1.000000, 0.000000)"),
-        "{object}"
-    );
-    assert_no_write(&app, &session, before);
-}
-
-#[test]
-fn massprop_closed_polyline_area_perimeter_and_centroid_are_exact() {
-    let (mut app, mut session) = app_with_objects();
-    let before = revision(&app);
-    select(&mut app, &mut session, &[RECT_3X4]).unwrap();
-    let outcome = execute(
-        &mut app,
-        &mut session,
-        CommandId::MassProp,
-        CommandPayload::None,
-    )
-    .expect("a closed straight polyline is supported");
-    let object = diagnostic_text(&outcome, "massprop.object");
-    assert!(object.contains("area=12.000000"), "{object}");
-    assert!(object.contains("perimeter=14.000000"), "{object}");
-    assert!(
-        object.contains("centroid=(1.500000, 2.000000, 0.000000)"),
-        "{object}"
-    );
-    assert_no_write(&app, &session, before);
-}
-
-#[test]
-fn massprop_bulged_polyline_uses_the_exact_arc_area_length_and_centroid() {
-    let (mut app, mut session) = app_with_objects();
-    let before = revision(&app);
-    select(&mut app, &mut session, &[BULGED_RECT]).unwrap();
-    let outcome = execute(
-        &mut app,
-        &mut session,
-        CommandId::MassProp,
-        CommandPayload::None,
-    )
-    .expect("a bulged closed polyline is supported");
-    let object = diagnostic_text(&outcome, "massprop.object");
-    // 3x4 chord ring + a semicircular cap (r = 1.5): 12 + pi*1.5^2/2.
-    let area = 12.0 + std::f64::consts::PI * 1.5 * 1.5 / 2.0;
-    assert!(object.contains(&format!("area={area:.6}")), "{object}");
-    // Straight edges 4 + 3 + 4 = 11 plus the semicircle's pi*1.5.
-    let perimeter = 11.0 + std::f64::consts::PI * 1.5;
-    assert!(
-        object.contains(&format!("perimeter={perimeter:.6}")),
-        "{object}"
-    );
-    // The cap bows outside the bottom edge, so the bounding box reaches y = -1.5
-    // (a vertex-only box would stop at y = 0).
-    assert!(
-        object.contains("bbox min=(0.000000, -1.500000, 0.000000)"),
-        "{object}"
-    );
-    assert!(
-        object.contains("max=(3.000000, 4.000000, 0.000000)"),
-        "{object}"
-    );
-    // Area-weighted centroid: (12*(1.5,2) + 1.5^2*pi/2*(1.5,-4r/3pi)) / area.
-    let cap_area = std::f64::consts::PI * 1.5 * 1.5 / 2.0;
-    let y = (12.0 * 2.0 + cap_area * (-4.0 * 1.5 / (3.0 * std::f64::consts::PI))) / area;
-    assert!(
-        object.contains(&format!("centroid=(1.500000, {y:.6}, 0.000000)")),
-        "{object}"
-    );
-    assert_no_write(&app, &session, before);
-}
-
-#[test]
-fn massprop_summary_combines_coplanar_regions_and_refuses_non_coplanar_ones() {
-    let (mut app, mut session) = app_with_objects();
-    select(&mut app, &mut session, &[CIRCLE_R2, RECT_3X4]).unwrap();
-    let outcome = execute(
-        &mut app,
-        &mut session,
-        CommandId::MassProp,
-        CommandPayload::None,
-    )
-    .expect("both regions are on z = 0");
-    let summary = diagnostic_text(&outcome, "massprop.summary");
-    let total = std::f64::consts::PI * 4.0 + 12.0;
-    assert!(summary.contains("2 region(s)"), "{summary}");
-    assert!(summary.contains(&format!("area={total:.6}")), "{summary}");
-
-    let (mut app, mut session) = app_with_objects();
-    select(&mut app, &mut session, &[CIRCLE_R2, CIRCLE_HIGH]).unwrap();
-    let error = execute(
-        &mut app,
-        &mut session,
-        CommandId::MassProp,
-        CommandPayload::None,
-    )
-    .expect_err("z = 0 and z = 5 are not coplanar");
-    let text = format!("{error:?}");
-    assert!(text.contains("massprop.not_coplanar"), "{text}");
-}
-
-#[test]
-fn massprop_names_every_unsupported_input() {
-    let (mut app, mut session) = app_with_objects();
-    let empty = execute(
-        &mut app,
-        &mut session,
-        CommandId::MassProp,
-        CommandPayload::None,
-    )
-    .expect_err("an empty selection is refused");
-    assert!(
-        format!("{empty:?}").contains("massprop.selection"),
-        "{empty:?}"
-    );
-
-    select(&mut app, &mut session, &[OPEN_POLYLINE]).unwrap();
-    let open = execute(
-        &mut app,
-        &mut session,
-        CommandId::MassProp,
-        CommandPayload::None,
-    )
-    .expect_err("an open polyline encloses no area");
-    assert!(
-        format!("{open:?}").contains("massprop.open_polyline"),
-        "{open:?}"
-    );
-
-    select(&mut app, &mut session, &[ARC]).unwrap();
-    let arc = execute(
-        &mut app,
-        &mut session,
-        CommandId::MassProp,
-        CommandPayload::None,
-    )
-    .expect_err("an arc is an open curve");
-    assert!(format!("{arc:?}").contains("massprop.arc"), "{arc:?}");
-
-    select(&mut app, &mut session, &[CIRCLE_R2]).unwrap();
-    let payload = execute(
-        &mut app,
-        &mut session,
-        CommandId::MassProp,
-        CommandPayload::Points(vec![point(0.0, 0.0)]),
-    )
-    .expect_err("MASSPROP takes no payload");
-    assert!(
-        format!("{payload:?}").contains("massprop.invalid_payload"),
-        "{payload:?}"
-    );
-
-    // A block-instance member has no addressable entity identity.
-    let refs = vec![SelectionRef {
-        document: DocumentId(1),
-        entity: EntityId(CIRCLE_R2),
-        instance: InstancePath(vec![EntityId(99)]),
-        sub_element: None,
-    }];
-    execute(
-        &mut app,
-        &mut session,
-        CommandId::Select,
-        CommandPayload::Selection(refs),
-    )
-    .unwrap();
-    let not_addressable = execute(
-        &mut app,
-        &mut session,
-        CommandId::MassProp,
-        CommandPayload::None,
-    )
-    .expect_err("a block member is not addressable");
-    assert!(
-        format!("{not_addressable:?}").contains("massprop.not_addressable"),
-        "{not_addressable:?}"
-    );
 }
 
 #[test]
@@ -750,217 +533,6 @@ fn measuregeom_volume_is_an_explicit_unsupported_and_bare_needs_option() {
     );
     assert_eq!(session.tool_snapshot(), ToolSnapshot::Idle);
     assert!(!app.can_undo(&session.document));
-}
-
-// --- MASSPROP region extension (2026-11-12) ------------------------------
-
-#[test]
-fn massprop_closed_spline_is_a_labelled_sample_ring() {
-    let (mut app, mut session) = app_with_objects();
-    let before = revision(&app);
-    select(&mut app, &mut session, &[SPLINE_SQUARE]).unwrap();
-    let outcome = execute(
-        &mut app,
-        &mut session,
-        CommandId::MassProp,
-        CommandPayload::None,
-    )
-    .expect("a closed spline is measured through its sample ring");
-
-    let object = diagnostic_text(&outcome, "massprop.object");
-    assert!(object.contains("(closed spline (sampled))"), "{object}");
-    // The degree-1 control net closes on itself, so the sample ring is exactly the
-    // 3x4 rectangle: 12 area, 14 perimeter, centroid in its centre.
-    assert!(object.contains("area=12.000000"), "{object}");
-    assert!(
-        object.contains("perimeter=~14.000000"),
-        "the sampled perimeter is labelled approximate: {object}"
-    );
-    assert!(
-        object.contains("centroid=(1.500000, 2.000000, 0.000000)"),
-        "{object}"
-    );
-    assert!(
-        object.contains("bbox min=(0.000000, 0.000000, 0.000000)"),
-        "{object}"
-    );
-    let note = diagnostic_text(&outcome, "massprop.approx_spline_region");
-    assert!(note.contains("sample ring"), "{note}");
-    assert!(note.contains("not closed-form"), "{note}");
-    assert!(
-        !outcome
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "massprop.approx_ellipse_perimeter"),
-        "a spline must not borrow the ellipse's approximation note"
-    );
-    // The summary counts it as approximate because its perimeter is sampled.
-    let summary = diagnostic_text(&outcome, "massprop.summary");
-    assert!(summary.contains("perimeter=~"), "{summary}");
-    assert_no_write(&app, &session, before);
-}
-
-#[test]
-fn massprop_refuses_an_open_or_unevaluable_spline_by_name() {
-    let (mut app, mut session) = app_with_objects();
-    let before = revision(&app);
-
-    select(&mut app, &mut session, &[SPLINE_OPEN]).unwrap();
-    let open = execute(
-        &mut app,
-        &mut session,
-        CommandId::MassProp,
-        CommandPayload::None,
-    )
-    .expect_err("an open spline encloses no region");
-    assert!(
-        format!("{open:?}").contains("massprop.open_spline"),
-        "{open:?}"
-    );
-    assert_no_write(&app, &session, before);
-
-    // A degree-0 spline cannot be evaluated; MASSPROP refuses instead of falling
-    // back to a clamped-uniform curve (the display tessellator's fallback).
-    let mut b = DrawingDatabaseBuilder::new(DatabaseId(2));
-    b.insert_layer(Layer {
-        id: LayerId(0),
-        name: "0".into(),
-        visible: true,
-    })
-    .unwrap();
-    b.insert_entity(spline(64, vec![point(0.0, 0.0), point(1.0, 0.0)], 0))
-        .unwrap();
-    let drawing = b.finish().unwrap();
-    let mut app = Application::new();
-    app.workspace.documents.insert(
-        DocumentId(1),
-        Document {
-            id: DocumentId(1),
-            drawing: Arc::new(drawing),
-            identity: DocumentIdentity::Sha256([72u8; 32]),
-            units: UnitContext::drawing_units(),
-            resource_keys: Vec::new(),
-        },
-    );
-    app.workspace.viewports.insert(
-        ViewportId(1),
-        Viewport::new(ViewportId(1), DocumentId(1), [800.0, 600.0]),
-    );
-    let mut session = SessionState::new(DocumentId(1), AppMode::Work);
-    select(&mut app, &mut session, &[64]).unwrap();
-    let invalid = execute(
-        &mut app,
-        &mut session,
-        CommandId::MassProp,
-        CommandPayload::None,
-    )
-    .expect_err("a degree-0 spline has no evaluable curve");
-    assert!(
-        format!("{invalid:?}").contains("massprop.spline_invalid"),
-        "{invalid:?}"
-    );
-}
-
-#[test]
-fn massprop_hatch_region_is_the_exact_net_loop_area() {
-    let (mut app, mut session) = app_with_objects();
-    let before = revision(&app);
-    select(&mut app, &mut session, &[HATCH_CIRCLE]).unwrap();
-    let outcome = execute(
-        &mut app,
-        &mut session,
-        CommandId::MassProp,
-        CommandPayload::None,
-    )
-    .expect("a hatch region is measured from its own loops");
-
-    let object = diagnostic_text(&outcome, "massprop.object");
-    assert!(object.contains("(hatch region)"), "{object}");
-    // Four exact quarter arcs of r = 1: area pi, perimeter 2*pi.
-    assert!(
-        object.contains(&format!("area={:.6}", std::f64::consts::PI)),
-        "{object}"
-    );
-    assert!(
-        object.contains(&format!("perimeter={:.6}", std::f64::consts::TAU)),
-        "{object}"
-    );
-    assert!(
-        object.contains("bbox min=(4.000000, 2.000000, 0.000000)"),
-        "{object}"
-    );
-    assert!(
-        object.contains("max=(6.000000, 4.000000, 0.000000)"),
-        "{object}"
-    );
-    assert!(
-        object.contains("centroid=(5.000000, 3.000000, 0.000000)"),
-        "{object}"
-    );
-    // A created hatch has analytic loop data, so nothing is labelled approximate.
-    assert!(
-        !outcome
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "massprop.approx_hatch_boundary"),
-        "{:?}",
-        outcome.diagnostics
-    );
-    assert_no_write(&app, &session, before);
-}
-
-#[test]
-fn massprop_hatch_subtracts_islands_by_nesting_parity_not_winding() {
-    let (mut app, mut session) = app_with_objects();
-    let before = revision(&app);
-    select(&mut app, &mut session, &[HATCH_ISLAND]).unwrap();
-    let outcome = execute(
-        &mut app,
-        &mut session,
-        CommandId::MassProp,
-        CommandPayload::None,
-    )
-    .expect("the two-loop hatch is a region");
-
-    let object = diagnostic_text(&outcome, "massprop.object");
-    // Both loops are written counter-clockwise; nesting parity still subtracts
-    // the 2x2 island from the 3x4 rectangle: 12 - 2 = 10.
-    assert!(object.contains("area=10.000000"), "{object}");
-    // Only the loop carrying the external flag contributes to the perimeter.
-    assert!(object.contains("perimeter=14.000000"), "{object}");
-    assert!(
-        object.contains("centroid=(1.500000, 2.000000, 0.000000)"),
-        "{object}"
-    );
-    assert!(
-        !outcome
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "massprop.hatch_perimeter_rule"),
-        "{:?}",
-        outcome.diagnostics
-    );
-    assert_no_write(&app, &session, before);
-}
-
-#[test]
-fn massprop_hatch_names_a_sampled_import_boundary_as_approximate() {
-    let (mut app, mut session) = app_with_objects();
-    select(&mut app, &mut session, &[HATCH_SAMPLED]).unwrap();
-    let outcome = execute(
-        &mut app,
-        &mut session,
-        CommandId::MassProp,
-        CommandPayload::None,
-    )
-    .expect("the imported hatch is still a region");
-    let note = diagnostic_text(&outcome, "massprop.approx_hatch_boundary");
-    assert!(note.contains("sampled"), "{note}");
-    assert!(note.contains("not exact"), "{note}");
-    // The fixture's loops carry no external flag bit, so the outer-boundary rule
-    // is stated instead of guessed silently.
-    let rule = diagnostic_text(&outcome, "massprop.hatch_perimeter_rule");
-    assert!(rule.contains("largest-area loop"), "{rule}");
 }
 
 #[test]

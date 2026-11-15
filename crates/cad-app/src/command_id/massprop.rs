@@ -22,7 +22,7 @@
 //! state it touches is the caller-visible diagnostic list. Viewer and Work both
 //! allow it (it is out of `CommandId::requires_work_mode`).
 //!
-//! ## What v1 measures
+//! ## What it measures
 //!
 //! Only **closed, planar** objects, all on **one common plane**:
 //!
@@ -45,6 +45,38 @@
 //! Bounding boxes are **exact** for the supported shapes: a circle/ellipse uses
 //! its plane basis, and a bulged polyline includes every arc's axis extremes
 //! inside the segment sweep, not just the stored vertices.
+//!
+//! ## 2D second moments (exact, since 2026-11-15)
+//!
+//! Every measured region also contributes its **planar second moments**
+//! `Ix = ∫y²dA`, `Iy = ∫x²dA` and `Ixy = ∫xy dA` about its own centroid, summed
+//! through the parallel-axis theorem into the selection's tensor:
+//!
+//! * a circle adds `Ix = Iy = πr⁴/4`, `Ixy = 0`;
+//! * a full ellipse adds `πa³b/4` along the major axis and `πab³/4` along the
+//!   minor one, with `Ixy = 0` in its own principal frame (rotated into the
+//!   reported frame exactly);
+//! * a closed polyline (any bulges) integrates the straight-edge Green's-theorem
+//!   moments plus one exact circular segment per bulge
+//!   ([`cad_geometry::bulged_ring_moments`]); the area is the same closed form
+//!   [`cad_geometry::measure_bulged_ring_area`] reports, so the two cannot drift
+//!   apart;
+//! * a HATCH sums its loops' moments with the same nesting-parity signs as their
+//!   areas, so an island subtracts its own second moments about its own centroid;
+//! * a closed SPLINE is a **sample ring**: its second moments are the sample
+//!   polygon's, exactly like its area and perimeter, and every run says so.
+//!
+//! There is no sampling or quadrature anywhere else: the analytic kinds are
+//! closed form. Every region's moments are integrated in its own plane basis and
+//! then re-expressed in **one selection frame** — the first selected region's
+//! plane point and the AutoCAD arbitrary axis of its normal — so the per-object
+//! lines and the selection line are comparable. The frame (`origin`/`u`/`v`/`n`)
+//! is printed with the selection report.
+//!
+//! Derived values are reported, never guessed: `J = Ix + Iy`, the radii of
+//! gyration `kx = √(Ix/A)`, `ky = √(Iy/A)`, `kz = √(J/A)`, the principal moments
+//! (eigenvalues of `[[Ix, −Ixy], [−Ixy, Iy]]`, so `I1 + I2 = J`) and the
+//! principal axis directions with the angle measured from `u` in the plane.
 //!
 //! ## Refusals (nothing is reported; every code is stable)
 //!
@@ -75,17 +107,23 @@
 //! One `massprop.object` diagnostic per selected entity, carrying the entity id,
 //! kind, exact **area**, **perimeter** (with an explicit `approximate` marker for
 //! the ellipse), exact **bounding box** `min`/`max`, and **centroid**. One
-//! `massprop.summary` diagnostic carries the object count, the summed area, the
-//! summed perimeter (marked approximate when any member is), the union bounding
-//! box and the area-weighted centroid of the per-object results. The summary is
-//! the **area-weighted combination of the reported regions**, not a CSG union
+//! `massprop.inertia` diagnostic per entity carries its centroidal `Ix`, `Iy`,
+//! `Ixy`, `J` and `kx`/`ky` in the selection frame, labelled `exact closed form`
+//! or `the sample polygon's values, not closed-form`. One `massprop.summary`
+//! diagnostic carries the object count, the summed area, the summed perimeter
+//! (marked approximate when any member is), the union bounding box and the
+//! combined centroid. `massprop.summary_inertia` carries the same combination's
+//! tensor, gyration radii, polar moment, principal moments, principal axes, the
+//! principal angle and the frame it is all expressed in. The summaries are the
+//! **area-weighted combination of the reported regions**, not a CSG union
 //! (overlapping regions are counted once per selected object), which is the same
 //! convention the per-object report exposes.
 //!
-//! A `massprop.not_implemented` diagnostic names the un-modelled AutoCAD half on
-//! every run (moments of inertia, principal axes, volume/density, composition and
-//! `.mpr` output), so the boundary is visible at run time as well as in these
-//! docs.
+//! Two diagnostics keep the un-modelled halves visible at run time:
+//! `massprop.solid_unsupported` (volume, mass, density and 3D moments of inertia
+//! — there is no 3D solid/region model in this build) and
+//! `massprop.not_implemented` (`Add`/`Subtract` region composition and `.mpr`
+//! output).
 //!
 //! `CommandOutcome::measurement` / `point_report` stay `None`: `MASSPROP` reports
 //! several properties and no single `MeasurementRecord` value can carry them
@@ -93,7 +131,12 @@
 //!
 //! ## NOT IMPLEMENTED (named, never fabricated)
 //!
-//! Moments and products of inertia, radii of gyration, principal moments and
-//! principal axes, mass/volume/3D solids, density, `Add`/`Subtract` region
-//! composition, and writing the analysis to a `.mpr` file. There is no payload
-//! field or command path for any of them.
+//! * `volume`, `mass`, `density` and **3D** moments of inertia: this build has no
+//!   3D solid/region model, so there is nothing to integrate. The
+//!   `massprop.solid_unsupported` diagnostic names them on every run, and no
+//!   value is computed.
+//! * `Add`/`Subtract` region composition and writing the analysis to a `.mpr`
+//!   file. There is no payload field or command path for either.
+//!
+//! The 2D second moments are **not** in this list any more: they are reported
+//! exactly for every measured kind (the sampled kinds are labelled).
