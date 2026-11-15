@@ -24,6 +24,7 @@ pub(crate) use entity::kind_name;
 mod hatch;
 mod multileader;
 mod report;
+mod solid_record;
 mod table;
 mod tables;
 
@@ -82,6 +83,7 @@ pub fn export(request: &ExportRequest<'_>) -> CadResult<(Vec<u8>, ExportReport)>
 
     write_units(&mut doc, request, &mut report);
     write_point_display_style(&mut doc, request.database);
+    write_linetype_scale(&mut doc, request.database, &mut report);
     tables::write_tables(&mut doc, request.database, &mut report);
 
     // Colour, lineweight, linetype and transparency **provenance** is preserved
@@ -242,6 +244,45 @@ fn write_units(doc: &mut CadDocument, request: &ExportRequest<'_>, report: &mut 
 fn write_point_display_style(doc: &mut CadDocument, database: &DrawingDatabase) {
     doc.header.point_display_mode = database.point_display_mode();
     doc.header.point_display_size = database.point_display_size();
+}
+
+/// Carry the drawing-global linetype scale (`$LTSCALE`) into the output document.
+///
+/// The value is the database's stored header value, written verbatim: it is a
+/// preserved value, not a lossy mapping, so a `LTSCALE` write — or an imported
+/// scale — is not dropped by a SAVE→OPEN cycle. Nothing is converted and, for a
+/// representable value, no diagnostic is emitted.
+///
+/// Representability: the DXF writer emits `$LTSCALE` unconditionally (group 40,
+/// double) for the AC1032 output this exporter always requests, so every finite
+/// positive scale is representable. Both sanctioned writes into the database —
+/// [`DrawingDatabaseBuilder::set_linetype_scale`] and `LTSCALE`'s
+/// `DrawingDatabase::set_linetype_scale` — refuse a non-finite or non-positive
+/// value, and the importer sanitises a corrupt source header to the DWG default
+/// of `1.0`, so no current path can reach the guard below. It is kept as the
+/// explicit rule for a future unchecked write: an unrepresentable value is
+/// **declared** in the report and the header keeps the DXF default, never
+/// written as `0`/`NaN` and never silently swapped.
+///
+/// [`DrawingDatabaseBuilder::set_linetype_scale`]: cad_db::DrawingDatabaseBuilder::set_linetype_scale
+fn write_linetype_scale(
+    doc: &mut CadDocument,
+    database: &DrawingDatabase,
+    report: &mut ExportReport,
+) {
+    let scale = database.linetype_scale();
+    if !scale.is_finite() || scale <= 0.0 {
+        report.notes.push(ExportDiagnostic {
+            object: None,
+            code: "export.note.linetype_scale".into(),
+            message: format!(
+                "stored linetype scale {scale} is not a positive finite number, so $LTSCALE is \
+                 left at the DXF default 1.0"
+            ),
+        });
+        return;
+    }
+    doc.header.linetype_scale = scale;
 }
 
 #[cfg(test)]

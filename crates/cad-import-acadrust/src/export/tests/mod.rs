@@ -25,9 +25,11 @@ mod dwg;
 mod entities;
 mod hatch;
 mod layers;
+mod linetype_scale;
 mod mtext_spacing;
 mod point_style;
 mod report_limits;
+mod solid;
 mod writer;
 mod xref;
 
@@ -116,6 +118,77 @@ fn read_entities(bytes: &[u8]) -> Vec<EntityType> {
         .entities()
         .cloned()
         .collect()
+}
+
+/// DXF group-code/value pairs of a text export, in file order.
+///
+/// The text writer emits `code\r\nvalue\r\n` pairs, so splitting on the line
+/// breaks and pairing them is enough to inspect what the writer actually wrote
+/// (no re-parsing through our own reader).
+fn dxf_pairs(bytes: &[u8]) -> Vec<(i32, String)> {
+    let text = String::from_utf8_lossy(bytes);
+    let lines: Vec<&str> = text
+        .split('\n')
+        .map(|line| line.trim_end_matches('\r'))
+        .collect();
+    lines
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .filter_map(|pair| {
+            let code: i32 = pair[0].trim().parse().ok()?;
+            Some((code, pair[1].trim().to_string()))
+        })
+        .collect()
+}
+
+/// The `(code, value)` pair of one `$HEADER` variable, from the raw bytes.
+///
+/// Header variables are `9` / `$NAME` followed by one or more value pairs, so
+/// the scan stops at the next variable (code `9`) or the section's `0 / ENDSEC`.
+fn header_variable_pairs(bytes: &[u8], name: &str) -> Vec<(i32, String)> {
+    let pairs = dxf_pairs(bytes);
+    let Some(start) = pairs
+        .iter()
+        .position(|(code, value)| *code == 9 && value == name)
+    else {
+        panic!("no {name} header variable in the export");
+    };
+    pairs[start + 1..]
+        .iter()
+        .take_while(|(code, _)| *code != 9 && *code != 0)
+        .cloned()
+        .collect()
+}
+
+/// The `10/20/30`, `11/21/31`, `12/22/32`, `13/23/33` points written inside the
+/// first entity record named `record_name`, read straight from the bytes.
+fn record_corner_points(bytes: &[u8], record_name: &str) -> Vec<(i32, [f64; 3])> {
+    let pairs = dxf_pairs(bytes);
+    let Some(start) = pairs
+        .iter()
+        .position(|(code, value)| *code == 0 && value == record_name)
+    else {
+        panic!("no {record_name} record in the export");
+    };
+    let record = &pairs[start + 1..];
+    let mut corners = Vec::new();
+    let mut index = 0;
+    while index < record.len() && record[index].0 != 0 {
+        let (code, _) = &record[index];
+        if matches!(code, 10..=13) {
+            let coordinates = |offset: i32| -> f64 {
+                record
+                    .get(index + offset as usize)
+                    .and_then(|(group, text)| (*group == *code + 10 * offset).then_some(text))
+                    .and_then(|text| text.parse().ok())
+                    .unwrap_or_else(|| panic!("group {code} at pair {index} is not a 3D point"))
+            };
+            corners.push((*code, [coordinates(0), coordinates(1), coordinates(2)]));
+        }
+        index += 1;
+    }
+    corners
 }
 
 fn assert_point(actual: Point3, expected: Point3) {

@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use acadrust::entities::{
     Arc as DxfArc, Circle as DxfCircle, Ellipse as DxfEllipse, EntityType, Line as DxfLine,
     LwPolyline, LwVertex, MText, Point as DxfPoint, PolyfaceFace, PolyfaceMesh, PolyfaceVertex,
-    Polyline3D, Spline as DxfSpline, Text as DxfText,
+    Polyline3D, Solid as DxfSolid, Spline as DxfSpline, Text as DxfText,
 };
 use acadrust::types::{Vector2, Vector3};
 use acadrust::CadDocument;
@@ -28,6 +28,7 @@ use super::common::{
     common_for, map_h_align, map_v_align, mtext_attachment, ocs_from_wcs, v3, with_reasons,
 };
 use super::report::{ExportCounts, ExportDiagnostic, ExportLimits, MappingOutcome};
+use super::solid_record::{solid_record_corners, SOLID_TYPE_KEY};
 use super::tables::ensure_text_style;
 
 /// The largest polyface vertex index that fits `PolyfaceFace`'s signed `i16`
@@ -531,6 +532,38 @@ fn emit_leaf(
             );
         }
         SemanticGeometry::Mesh(mesh) => {
+            // A mesh created by the domain `SOLID` command keeps its source class
+            // name; 3–4 coplanar corners with the implied triangle fan are exactly
+            // a DXF SOLID, so write a real SOLID record instead of a polyface
+            // mesh. Anything else about that mesh (more corners, per-vertex
+            // colours, a different triangulation) keeps the polyface path below
+            // and is declared there.
+            let mut solid_refusal: Option<String> = None;
+            if entity.object.type_key == SOLID_TYPE_KEY {
+                match solid_record_corners(mesh) {
+                    Ok(corners) => {
+                        let (common, reasons) = common_for(doc, entity, ctx);
+                        let mut solid = DxfSolid::new(
+                            v3(corners[0]),
+                            v3(corners[1]),
+                            v3(corners[2]),
+                            v3(corners[3]),
+                        );
+                        // DXF SOLID is planar in its own OCS; the created face is
+                        // in the +Z plane, so the extrusion is identity.
+                        solid.normal = Vector3::UNIT_Z;
+                        solid.common = common;
+                        acc.push(EntityType::Solid(solid), ctx)?;
+                        acc.record(
+                            object,
+                            "solid",
+                            with_reasons(MappingOutcome::Exact, reasons),
+                        );
+                        return Ok(());
+                    }
+                    Err(reason) => solid_refusal = Some(reason),
+                }
+            }
             // Polyface face indices are signed i16 (1-based). A mesh outside that
             // range must not be emitted with wrapped indices, which would corrupt
             // the file; drop it explicitly instead of erroring the whole export.
@@ -568,6 +601,12 @@ fn emit_leaf(
             polyface.common = common;
             acc.push(EntityType::PolyfaceMesh(polyface), ctx)?;
             let mut reasons = reasons;
+            if let Some(reason) = solid_refusal {
+                reasons.push(format!(
+                    "a SOLID source could not be written as a DXF SOLID record: {reason}; written \
+                     as a polyface mesh"
+                ));
+            }
             reasons.push(
                 "mesh written as a polyface mesh; per-vertex colours and normals are dropped"
                     .into(),
