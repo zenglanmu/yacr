@@ -207,9 +207,10 @@ const ID_POINT_PROMPT_KEY = 'tool.prompt.point';
  * The dimension commands capture named picks — the linear/aligned pair three
  * (two extension-line origins, then the dimension-line location), the radial
  * pair two (an arc/circle entity pick, then the dimension-line location),
- * DIMCENTER one (an arc/circle entity pick), DIMANGULAR three (two straight-line
- * entity picks, then the arc location) and DIMORDINATE two (a feature point, then
- * the leader endpoint) — and a bare point count ("1 point") does not tell the user
+ * DIMCENTER one (an arc/circle entity pick), DIMANGULAR four (a mixed first
+ * capture — a line pick **or** a vertex — then the remaining picks of whichever
+ * form that chooses) and DIMORDINATE two (a feature point, then the leader
+ * endpoint) — and a bare point count ("1 point") does not tell the user
  * *what* to pick next. This table names each pick; the step is derived from the
  * host's real `tool.key` and `tool.points` (the captured count), never inferred
  * from the pointer stream. Every other tool has no entry, so it renders no prompt
@@ -224,14 +225,22 @@ const ID_POINT_PROMPT_KEY = 'tool.prompt.point';
  * and the synthesis derives the text placement itself. Its prompt asks only for
  * the "dimension location" so it never claims the user places the text.
  *
- * DIMANGULAR is the **two-line** form only: its first two steps are line entity
- * picks, never a vertex point. The two lines' infinite intersection is the vertex
- * and the third pick is the arc location, which selects which of the four angles
- * is measured — the backend's rule is "the sector the location falls in". The copy
- * asks for the arc location and makes no quadrant-picker claim, because no such
- * picker exists. The three-point (vertex + two side points) construction is
- * supported by the command payload only and has **no interactive capture**, so no
- * prompt may imply a vertex-first workflow.
+ * DIMANGULAR is the **mixed** capture: its first step accepts either a
+ * straight-line entity pick (the two-line form — a second line pick, then the arc
+ * location) or a vertex point (the three-point form — the two side points, then
+ * the same arc location). `cad_app::DrawTool::pending_step` is `PickOrPoint`
+ * there, and a capture of the wrong kind is refused by name
+ * (`dimangular.capture.mixed`) rather than reinterpreted as the other form.
+ *
+ * The wire projects only `tool.points`/`tool.ready`, and a line pick counts as a
+ * point too, so the captured count cannot say which form is in force: 1 is
+ * "second line" **or** "first side point", 2 is "arc location" **or** "second
+ * side point". A form-dependent prompt source has nothing to branch on, so the
+ * list has four entries and the two middle ones name **both** branches — the
+ * only wording that is true in either form. The last entry is the three-point
+ * form's arc location, the only step that can still be pending at three
+ * captures. The arc-location copy asks for the location and makes no
+ * quadrant-picker claim, because no such picker exists.
  *
  * DIMORDINATE's two steps are free points (no entity pick) and the interactive
  * tool never forces an axis: the backend derives it from the documented auto rule
@@ -298,9 +307,16 @@ export const TOOL_STEP_PROMPTS: Readonly<Record<string, readonly string[]>> = Ob
   'draw.dimcenter': [
     'tool.prompt.dim.select_arc',
   ],
+  // DIMANGULAR (ADR 0017 P5e) is the **mixed** capture: the first step takes a
+  // line pick (two-line form) or a vertex point (three-point form), and the host
+  // refuses a capture of the wrong kind by name. The step list is chosen by the
+  // captured point count, which cannot tell the two forms apart (a line pick
+  // counts as a point), so entries 1 and 2 name both branches. See the block
+  // comment above.
   'draw.dimangular': [
-    'tool.prompt.dim.select_line',
-    'tool.prompt.dim.select_second_line',
+    'tool.prompt.dim.select_line_or_vertex',
+    'tool.prompt.dim.select_second_line_or_first_endpoint',
+    'tool.prompt.dim.second_endpoint_or_location',
     'tool.prompt.dim.location_angular',
   ],
   'draw.dimordinate': [

@@ -130,8 +130,8 @@ const P = {
   // angle glyph does, but with the dimension family's arrowheads on the arc the
   // pick selects — that pair of arrowheads is what tells the measuring glyph and
   // the dimension glyph apart. Both rays run past the arc (the measured lines are
-  // real lines, not stubs) and there is no vertex dot and no third ray: the tool
-  // selects two lines, never a vertex point.
+  // real lines, not stubs) and there is no vertex dot and no third ray: the glyph
+  // draws the two-line form, which shares this arc with the three-point form.
   dimangular: <><path d="M5 19h15" /><path d="M5 19 13 5.1" /><path d="M17 19A12 12 0 0 0 11 8.6" /><path d="M15.8 17.6 17 19l1.2-1.4" /><path d="M11.6 10.3 11 8.6 12.8 8.3" /></>,
   // Ordinate dimension: the feature point (the measured object) with a leader
   // leaving it at 45°, a horizontal landing line and the short end tick that

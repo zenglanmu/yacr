@@ -50,14 +50,17 @@ pub struct RadialDimensionCommand {
 
 /// The two supported DIMANGULAR constructions (ADR 0017 decision C, P5e).
 ///
-/// * [`Self::TwoLine`] — the interactive form: two picked straight lines plus the
-///   dimension-arc location. The vertex is the intersection of the two infinite
-///   lines (ADR 0017 U-8, pinned against the committed QCAD fixtures).
-/// * [`Self::ThreePoint`] — the command-level form: a vertex, the two side
-///   points and the dimension-arc location. It has no interactive capture yet:
-///   AutoCAD's first prompt ("select a line **or** specify a vertex") cannot be
-///   expressed by the fixed-step capture state machine. This is declared in the
-///   capability notes, not hidden.
+/// * [`Self::TwoLine`] — two picked straight lines plus the dimension-arc
+///   location. The vertex is the intersection of the two infinite lines
+///   (ADR 0017 U-8, pinned against the committed QCAD fixtures).
+/// * [`Self::ThreePoint`] — a vertex, the two side points and the dimension-arc
+///   location. The interactive capture supports it too: DIMANGULAR's first step
+///   is the mixed `CaptureStep::PickOrPoint` ("select a line **or** specify a
+///   vertex"), and the first capture selects the form. A capture of the kind the
+///   chosen form does not take is refused by name
+///   (`dimangular.capture.mixed`), never reinterpreted. This variant is the
+///   command-layer payload for that same interactive form, not a
+///   command-only construction.
 ///
 /// Which variant it is is part of the input, not a second command: both produce
 /// one `DIMENSION` entity through the same funnel.

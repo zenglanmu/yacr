@@ -1,8 +1,10 @@
 // Angular / ordinate dimension surface contract (ADR 0017 decision C, P5e):
-// DIMANGULAR is the **two-line** capture — two straight-line entity picks, then
-// the arc location that selects which of the four angles is measured — and
-// DIMORDINATE is a two-point capture (a feature point, then the leader endpoint)
-// whose axis the backend derives on its own.
+// DIMANGULAR is the **mixed** capture — its first step takes a straight-line
+// entity pick (two-line form: a second line, then the arc location that selects
+// which of the four angles is measured) or a vertex point (three-point form: the
+// two side points, then the same arc location) — and DIMORDINATE is a two-point
+// capture (a feature point, then the leader endpoint) whose axis the backend
+// derives on its own.
 //
 // The ribbon entry, the command catalog, the router selector and the per-step
 // status-bar prompt must all exist, and the step must stay derived from the
@@ -41,7 +43,15 @@ const loaded = { documentLabel: 'fixture.dwg', entityCount: 3, loading: false, c
 const ANGULAR_TOOL = {
   id: 'DIMANGULAR',
   toolKey: 'draw.dimangular',
-  steps: ['tool.prompt.dim.select_line', 'tool.prompt.dim.select_second_line', 'tool.prompt.dim.location_angular'],
+  // The mixed first step (line **or** vertex), then both forms' remaining picks:
+  // second line / first side point, second side point / arc location, and the
+  // three-point form's own arc location. Four entries, not one sequence.
+  steps: [
+    'tool.prompt.dim.select_line_or_vertex',
+    'tool.prompt.dim.select_second_line_or_first_endpoint',
+    'tool.prompt.dim.second_endpoint_or_location',
+    'tool.prompt.dim.location_angular',
+  ],
   ready: 'tool.prompt.dim.ready',
 };
 const ORDINATE_TOOL = {
@@ -147,8 +157,9 @@ test('the step prompt names each angular and ordinate pick from the host capture
     assert.equal(toolStepPromptKey({ key: toolKey, points: '1' }), steps[0], toolKey);
     assert.equal(toolStepPromptKey({ key: toolKey, points: -1 }), steps[0], toolKey);
   }
-  // Two line picks then the arc location; never a third point pick.
-  assert.equal(TOOL_STEP_PROMPTS['draw.dimangular'].length, 3);
+  // The mixed first capture plus both forms' remaining picks; the three-point
+  // form is the only one with a fourth capture.
+  assert.equal(TOOL_STEP_PROMPTS['draw.dimangular'].length, 4);
   // Feature point then leader endpoint.
   assert.equal(TOOL_STEP_PROMPTS['draw.dimordinate'].length, 2);
 });
@@ -172,37 +183,57 @@ test('both new commands keep the shared dimension ready copy, never the centre-m
   assert.equal(TOOL_READY_PROMPTS['draw.dimcenter'], 'tool.prompt.dim.center_ready');
 });
 
-test('the angular prompts describe the two-line capture and never a vertex workflow', () => {
-  const [first, second, location] = ANGULAR_TOOL.steps;
+test('the angular prompts name the mixed first step and cover both capture forms', () => {
+  const [first, second, third, location] = ANGULAR_TOOL.steps;
   for (const key of ANGULAR_TOOL.steps) {
     for (const locale of [zh, en]) {
       assert.equal(typeof locale[key], 'string', `missing ${key}`);
       assert.ok(locale[key].trim().length > 0, `empty ${key}`);
     }
   }
-  // The picks are lines, and the second prompt announces the second pick.
+  // The first step is a real choice — the host's `CaptureStep::PickOrPoint` — so
+  // it must offer the line pick **and** the vertex point, never one alone.
   assert.match(en[first], /line/i);
+  assert.match(en[first], /vertex/i);
+  assert.match(en[first], /or/i);
   assert.match(zh[first], /直线/);
-  assert.match(en[second], /second/i);
+  assert.match(zh[first], /顶点/);
+  // A line pick counts as a captured point, so the wire's count cannot tell the
+  // two forms apart: at one capture the pending step is the two-line form's
+  // second line *or* the three-point form's first side point, and at two it is
+  // the arc location *or* the second side point. Both middle prompts name both
+  // branches rather than claiming one form's step.
+  assert.match(en[second], /second line/i);
+  assert.match(en[second], /endpoint/i);
   assert.match(zh[second], /第二条直线/);
-  // Honest boundary: the interactive tool is the two-line form only. The
-  // three-point form has no interactive capture, so nothing may ask for a vertex
-  // (or any other point) first.
-  for (const key of [first, second]) {
-    assert.doesNotMatch(en[key], /vertex|point/i, key);
-    assert.doesNotMatch(zh[key], /顶点/, key);
-    assert.notEqual(key, 'tool.prompt.dim.origin_first');
-    assert.notEqual(key, 'tool.prompt.dim.origin_second');
-  }
-  // The third pick is the dimension arc location.
+  assert.match(zh[second], /端点/);
+  assert.match(en[third], /endpoint/i);
+  assert.match(en[third], /arc/i);
+  assert.match(zh[third], /端点/);
+  assert.match(zh[third], /弧/);
+  // The fourth entry is the arc location only the three-point form can still be
+  // waiting for: the two-line form has committed at its second line pick.
   assert.match(en[location], /arc/i);
   assert.match(zh[location], /弧/);
   // Honest boundary: the backend's rule is "the sector containing the pick".
-  // The copy must not promise a quadrant picker (or any discrete angle chooser)
-  // and must not claim the user places the text.
-  for (const locale of [zh, en]) {
-    assert.doesNotMatch(locale[location], /quadrant|picker|dropdown/i, location);
-    assert.doesNotMatch(locale[location], /象限|下拉|选择器/, location);
+  // Neither arc-location sentence may promise a quadrant picker (or any discrete
+  // angle chooser) or claim that the user places the text.
+  for (const key of [third, location]) {
+    for (const locale of [zh, en]) {
+      assert.doesNotMatch(locale[key], /quadrant|picker|dropdown/i, key);
+      assert.doesNotMatch(locale[key], /象限|下拉|选择器/, key);
+    }
+  }
+  // DIMANGULAR's own picks never borrow the linear or ordinate step copy: a
+  // vertex is not a dimension origin and not a DIMORDINATE feature point.
+  for (const key of ANGULAR_TOOL.steps) {
+    for (const foreign of [
+      'tool.prompt.dim.origin_first',
+      'tool.prompt.dim.origin_second',
+      'tool.prompt.dim.feature',
+    ]) {
+      assert.notEqual(key, foreign);
+    }
   }
 });
 

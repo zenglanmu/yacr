@@ -272,18 +272,16 @@ pub enum CommandId {
     /// non-arc/circle pick, an off-plane entity, a degenerate radius and a missing
     /// active layer. Work-only.
     DimCenter,
-    /// DIMANGULAR: draw an angular dimension (ADR 0017 decision C, P5e). The
-    /// interactive tool captures **two straight-line picks** plus the dimension-arc
-    /// location; the vertex is the intersection of the two infinite lines (U-8,
-    /// pinned against the committed QCAD fixtures) and the location pick selects
-    /// one of the four angles. The command also accepts the **three-point**
-    /// construction (vertex, two side points, arc location) through
-    /// [`crate::AngularDimensionInput::ThreePoint`] — it has no interactive capture
-    /// yet because the capture state machine cannot express AutoCAD's
-    /// "select a line *or* specify a vertex" first step. Refuses a non-line pick,
-    /// parallel/collinear lines, coincident points, an off-plane input, a location
-    /// at the vertex and a missing active layer. Built through the shared synthesis
-    /// from the resolved current style (`Standard`) and inserted as one
+    /// DIMANGULAR: draw an angular dimension (ADR 0017 decision C, P5e). One
+    /// interactive tool takes **two line picks** (the vertex is their infinite
+    /// intersection, U-8, pinned against the committed QCAD fixtures; the location
+    /// pick selects one of the four angles) **or** the **three-point** construction
+    /// (vertex, two side points, arc location): the mixed first step
+    /// (`CaptureStep::PickOrPoint`) decides the form, and a capture of the other
+    /// kind is the named `dimangular.capture.mixed` refusal. Refuses a non-line
+    /// pick, parallel/collinear lines, coincident points, an off-plane input, a
+    /// location at the vertex and a missing active layer. Built through the shared
+    /// synthesis from the resolved current style (`Standard`) and inserted as one
     /// `AcDbDimension` in one transaction / one undo step. Non-associative.
     /// Work-only.
     DimAngular,
