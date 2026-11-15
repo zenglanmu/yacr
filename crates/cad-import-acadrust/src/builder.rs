@@ -527,6 +527,11 @@ impl<'a> ImporterBuilder<'a> {
     /// Kept separate so `read_layouts` can order layouts without duplicating the
     /// viewport rules. The diagnostic message deliberately keeps the block name
     /// (it is the stable correlation key used elsewhere in the importer).
+    ///
+    /// A viewport whose clip boundary this build cannot store still appears in
+    /// the layout (its rectangle, transform and layer state are real data), but
+    /// it is `Partial` and its diagnostic names the refusal — see
+    /// [`viewport_reason_code`].
     fn read_layout_viewports(&mut self, block_name: &str) -> Vec<PaperViewport> {
         let mut viewports = Vec::new();
         for entity in self.acad.entities_in_block(block_name) {
@@ -546,7 +551,7 @@ impl<'a> ImporterBuilder<'a> {
                     .unwrap_or_else(|| "unsupported viewport state".to_string());
                 self.diagnostics.push(Diagnostic {
                     object: None,
-                    code: "import.viewport_unsupported".into(),
+                    code: viewport_reason_code(&why).into(),
                     message: format!("layout {block_name} viewport {}: {why}", v.id),
                 });
             }

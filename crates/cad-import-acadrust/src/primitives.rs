@@ -195,8 +195,12 @@ pub(crate) fn wipeout_semantics(
     )
 }
 
-/// A paper-space VIEWPORT's border rectangle. The viewport's model content is
-/// assembled by the plot path, not here; the border is drawable geometry.
+/// A paper-space VIEWPORT's own border rectangle. The viewport's model content
+/// is assembled by the plot path, not here; the border is drawable geometry.
+///
+/// This is the frame of an *unclipped* viewport. [`viewport_frame_semantics`] is
+/// what the dispatch site calls, because a `VPCLIP` viewport's drawn frame is its
+/// clip boundary, not this rectangle.
 pub(crate) fn viewport_semantics(v: &acadrust::entities::Viewport) -> SemanticGeometry {
     let c = p3(v.center);
     let hw = v.width.abs() / 2.0;
@@ -226,6 +230,28 @@ pub(crate) fn viewport_semantics(v: &acadrust::entities::Viewport) -> SemanticGe
         ],
         true,
     )
+}
+
+/// The drawn frame of a paper-space VIEWPORT: the clip boundary the file carries,
+/// or its own rectangle when it has none.
+///
+/// VPCLIP makes the boundary the visible frame, so drawing the full rectangle
+/// would show a frame the file does not have. A boundary that cannot be
+/// represented keeps the rectangle frame — the viewport still exists — but the
+/// capability row is `Partial` with the named refusal instead of a false
+/// `Complete`.
+pub(crate) fn viewport_frame_semantics(
+    v: &acadrust::entities::Viewport,
+    acad: &acadrust::CadDocument,
+) -> (SemanticGeometry, Completeness) {
+    match read_clip_boundary(v, acad) {
+        ClipBoundary::ViewportRectangle => (viewport_semantics(v), Completeness::Complete),
+        ClipBoundary::Area(points) => (polyline_semantics(points, true), Completeness::Complete),
+        ClipBoundary::Refused(refusal) => (
+            viewport_semantics(v),
+            Completeness::Partial(vec![refusal.reason()]),
+        ),
+    }
 }
 
 /// A geometric TOLERANCE: a frame rectangle plus the (font-dependent) text.

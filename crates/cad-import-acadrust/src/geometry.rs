@@ -2,6 +2,9 @@
 
 use super::*;
 
+mod clip_boundary;
+pub(crate) use clip_boundary::*;
+
 // ---- small helpers ----
 
 pub(crate) fn p3(v: acadrust::Vector3) -> Point3 {
@@ -22,109 +25,20 @@ pub(crate) fn world_z() -> Point3 {
     }
 }
 
-/// The axis-aligned paper rectangle enclosed by a clip-boundary LWPOLYLINE.
-///
-/// VPCLIP stores its boundary as a closed polyline, so a viewport whose clip
-/// handle is set is not necessarily non-rectangular. Only a closed, bulge-free,
-/// world-Z polyline whose unique vertices are exactly the four corners of an
-/// axis-aligned rectangle is provably rectangular; a curve, a rotated quad or
-/// extra corners returns `None` rather than being squared off.
-///
-/// Consecutive duplicate vertices are collapsed and a closing duplicate is
-/// dropped (real DWG files store both). The returned corners use the boundary's
-/// min/max extents on the paper plane, in counter-clockwise order.
-fn rectangular_clip_rectangle(p: &acadrust::entities::LwPolyline) -> Option<[Point3; 4]> {
-    if !p.is_closed || p.vertices.len() < 3 {
-        return None;
-    }
-    // Any bulge is an arc segment: the boundary is not a straight-edged
-    // rectangle, even if its vertices happen to line up.
-    if p.vertices.iter().any(|v| v.bulge.abs() > 1e-12) {
-        return None;
-    }
-    let normal = polyline_normal(p3(p.normal));
-    if !is_world_z(normal) {
-        // A tilted OCS projects onto paper as some other shape; do not guess.
-        return None;
-    }
-    let mut points: Vec<(f64, f64)> = Vec::with_capacity(p.vertices.len());
-    for v in &p.vertices {
-        let w = ocs_to_wcs(normal, p.elevation, v.location.x, v.location.y);
-        points.push((w.x, w.y));
-    }
-    if !points.iter().all(|(x, y)| x.is_finite() && y.is_finite()) {
-        return None;
-    }
-    let min_x = points.iter().map(|p| p.0).fold(f64::INFINITY, f64::min);
-    let max_x = points.iter().map(|p| p.0).fold(f64::NEG_INFINITY, f64::max);
-    let min_y = points.iter().map(|p| p.1).fold(f64::INFINITY, f64::min);
-    let max_y = points.iter().map(|p| p.1).fold(f64::NEG_INFINITY, f64::max);
-    let scale = (max_x - min_x).max(max_y - min_y);
-    // Relative tolerance: a real paper rectangle is many units across, so
-    // 1e-9 of its extent separates true corners from duplicate vertices
-    // without accepting a visibly non-rectangular outline.
-    let tol = 1e-9 * scale;
-    let mut unique: Vec<(f64, f64)> = Vec::with_capacity(points.len());
-    for (x, y) in points {
-        if unique
-            .last()
-            .is_some_and(|(qx, qy)| (*qx - x).abs() <= tol && (*qy - y).abs() <= tol)
-        {
-            continue;
-        }
-        unique.push((x, y));
-    }
-    if unique.len() > 1 {
-        let (first_x, first_y) = unique[0];
-        let (last_x, last_y) = *unique.last().expect("non-empty");
-        if (first_x - last_x).abs() <= tol && (first_y - last_y).abs() <= tol {
-            unique.pop();
-        }
-    }
-    if unique.len() != 4 || max_x - min_x <= tol || max_y - min_y <= tol {
-        return None;
-    }
-    for (x, y) in &unique {
-        let on_x = (*x - min_x).abs() <= tol || (*x - max_x).abs() <= tol;
-        let on_y = (*y - min_y).abs() <= tol || (*y - max_y).abs() <= tol;
-        if !on_x || !on_y {
-            return None;
-        }
-    }
-    Some([
-        Point3 {
-            x: min_x,
-            y: min_y,
-            z: 0.0,
-        },
-        Point3 {
-            x: max_x,
-            y: min_y,
-            z: 0.0,
-        },
-        Point3 {
-            x: max_x,
-            y: max_y,
-            z: 0.0,
-        },
-        Point3 {
-            x: min_x,
-            y: max_y,
-            z: 0.0,
-        },
-    ])
-}
-
 /// Convert a paper-space VIEWPORT entity into a database [`PaperViewport`].
 ///
 /// Returns `None` for the sheet viewport (`id == 1`), which frames the paper
 /// sheet itself rather than a model-space window, and for a viewport switched
 /// off: neither has drawable content.
 ///
-/// The clip is written as four axis-aligned paper corners. Without a clip
-/// boundary handle they are `center ± (width/2, height/2)`; with one, the
-/// boundary entity is resolved and used when it is provably a closed,
-/// bulge-free, axis-aligned rectangle (VPCLIP's own geometry). `model_to_paper`
+/// The clip is the boundary the file carries. Without a clip-boundary handle it
+/// is the viewport's own paper rectangle (`center ± (width/2, height/2)`); with
+/// one, [`read_clip_boundary`] resolves the referenced entity and stores that
+/// polygon verbatim — a rectangle as its canonical four corners (the bytes the
+/// rectangle-only reader stored) or an `N`-point simple polygon. A boundary this
+/// build cannot represent keeps the rectangle **and** makes the viewport
+/// `Partial` with a named refusal code, so the representation layer refuses it
+/// instead of drawing a rectangle the file does not have. `model_to_paper`
 /// is the real paper→model map
 /// `model = (paper - paper_center) * model_per_paper + anchor`,
 /// where `anchor` is the model point shown at the viewport centre, so the
@@ -141,10 +55,11 @@ fn rectangular_clip_rectangle(p: &acadrust::entities::LwPolyline) -> Option<[Poi
 /// the view centre is exactly `(0, 0)` and the target's x/y is not, the
 /// target's x/y become the anchor.
 ///
-/// Exact only for a top/plan view: a tilted view direction, a view twist, a
-/// perspective projection or a clip that cannot be proven rectangular is
-/// reported `Partial` with the specific reason. The representation layer then
-/// refuses it with a stable code instead of drawing model space wrong.
+/// Exact only for a top/plan view with a representable boundary: a tilted view
+/// direction, a view twist, a perspective projection or a clip boundary this
+/// build cannot store is reported `Partial` with the specific reason. The
+/// representation layer then refuses it with a stable code instead of drawing
+/// model space wrong.
 pub(crate) fn paper_viewport(
     v: &acadrust::entities::Viewport,
     acad: &acadrust::CadDocument,
@@ -153,22 +68,18 @@ pub(crate) fn paper_viewport(
         return None;
     }
     let mut reasons: Vec<String> = Vec::new();
-    // VPCLIP stores its boundary as a separate entity. Resolve it and accept
-    // only a shape that can be represented by four corners; anything else (a
-    // curve, a rotated quad, extra corners, a dangling handle) stays Partial.
-    let has_clip_boundary = !v.clip_boundary_handle.null_or_value_zero();
-    let boundary_clip = if has_clip_boundary {
-        acad.get_entity(v.clip_boundary_handle)
-            .and_then(|entity| match entity {
-                EntityType::LwPolyline(polyline) => rectangular_clip_rectangle(polyline),
-                _ => None,
-            })
-    } else {
-        None
+    // VPCLIP stores its boundary as a separate entity. The file's own polygon is
+    // stored verbatim; a boundary that cannot be represented is a named refusal
+    // (never a squared-off or chorded approximation, and never a silent Partial
+    // that a caller cannot see).
+    let boundary = match read_clip_boundary(v, acad) {
+        ClipBoundary::ViewportRectangle => None,
+        ClipBoundary::Area(points) => Some(points),
+        ClipBoundary::Refused(refusal) => {
+            reasons.push(refusal.reason());
+            None
+        }
     };
-    if has_clip_boundary && boundary_clip.is_none() {
-        reasons.push("non-rectangular viewport clip is not applied".into());
-    }
     if !is_world_z(p3(v.view_direction)) {
         reasons.push("viewport view direction is not perpendicular to the paper plane".into());
     }
@@ -217,31 +128,14 @@ pub(crate) fn paper_viewport(
     }
     let half_w = v.width / 2.0;
     let half_h = v.height / 2.0;
-    let clip = match boundary_clip {
-        Some(corners) => corners.to_vec(),
-        None => vec![
-            Point3 {
-                x: paper_center.x - half_w,
-                y: paper_center.y - half_h,
-                z: 0.0,
-            },
-            Point3 {
-                x: paper_center.x + half_w,
-                y: paper_center.y - half_h,
-                z: 0.0,
-            },
-            Point3 {
-                x: paper_center.x + half_w,
-                y: paper_center.y + half_h,
-                z: 0.0,
-            },
-            Point3 {
-                x: paper_center.x - half_w,
-                y: paper_center.y + half_h,
-                z: 0.0,
-            },
-        ],
-    };
+    let clip = boundary.unwrap_or_else(|| {
+        rectangle_corners(
+            paper_center.x - half_w,
+            paper_center.y - half_h,
+            paper_center.x + half_w,
+            paper_center.y + half_h,
+        )
+    });
     let mut matrix = Transform3::identity().matrix;
     matrix[0][0] = model_per_paper;
     matrix[1][1] = model_per_paper;

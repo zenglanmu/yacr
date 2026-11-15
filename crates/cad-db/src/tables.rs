@@ -299,8 +299,8 @@ pub struct Layout {
     pub viewports: Vec<PaperViewport>,
 }
 
-/// One paper-space viewport: its paper rectangle, the stored model↔paper view,
-/// and its own layer state.
+/// One paper-space viewport: its paper clip boundary, the stored model↔paper
+/// view, and its own layer state.
 ///
 /// [`PaperViewport::layer_overrides`] is **per-viewport** state, never the
 /// global layer table: a `true` value freezes (hides) that layer in this
@@ -308,6 +308,15 @@ pub struct Layout {
 /// [`Layer::visible`] state. Freezing a layer here never writes [`Layer`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct PaperViewport {
+    /// The paper-space clip boundary, as the source carries it.
+    ///
+    /// Four points that form an axis-aligned rectangle are the historical
+    /// rectangle encoding; any other **simple polygon** (three or more points, no
+    /// repeated closing vertex) is a `VPCLIP`/`MVIEW` boundary. The points are
+    /// stored in source order — winding is not normalized here — and consumers
+    /// validate the ring: the representation layer refuses a degenerate,
+    /// self-intersecting or non-planar one with a stable `viewport.polygon_*`
+    /// code rather than squaring it off.
     pub clip: Vec<Point3>,
     pub model_to_paper: Transform3,
     pub completeness: Completeness,

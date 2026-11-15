@@ -23,6 +23,12 @@ thiserror.workspace = true
 log.workspace = true
 sha2.workspace = true
 
+[dev-dependencies]
+# Test-only: the viewport-clip contract tests prove that an imported polygon
+# reaches the representation layer's own `parse_paper_clip` as a supported
+# polygon (and that a refused boundary is refused there, never drawn).
+cad-representation.workspace = true
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "=0.3.4", features = ["wasm_js"] }
 # `std::time::Instant` panics on wasm32-unknown-unknown; `web_time` uses

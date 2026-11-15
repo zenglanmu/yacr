@@ -416,7 +416,10 @@ impl<'a> ImporterBuilder<'a> {
             ),
             EntityType::Wipeout(w) => wipeout_semantics(w),
             EntityType::Helix(h) => spline_semantics(&h.spline),
-            EntityType::Viewport(v) => (viewport_semantics(v), Completeness::Complete),
+            // A VIEWPORT's drawn frame is its clip boundary when it has one
+            // (VPCLIP), so the frame follows the boundary entity (group 340)
+            // instead of always being the viewport rectangle.
+            EntityType::Viewport(v) => viewport_frame_semantics(v, self.acad),
             EntityType::MLine(m) => self.mline_semantics(m),
             EntityType::Tolerance(t) => {
                 let (frame, _width, _height) = tolerance_frame(t);

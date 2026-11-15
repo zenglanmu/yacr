@@ -51,17 +51,6 @@ fn closed_polyline(points: &[(f64, f64)]) -> acadrust::entities::LwPolyline {
     polyline
 }
 
-/// A closed LWPOLYLINE clip boundary plus a document that contains it.
-fn document_with_polyline(
-    polyline: acadrust::entities::LwPolyline,
-) -> (acadrust::CadDocument, acadrust::types::Handle) {
-    let mut doc = acadrust::CadDocument::new();
-    let handle = doc
-        .add_entity(acadrust::EntityType::LwPolyline(polyline))
-        .expect("clip boundary entity is accepted");
-    (doc, handle)
-}
-
 /// Attach a clip boundary handle to a viewport and resolve it against a fresh
 /// empty document (the handle then dangles).
 fn viewport_with_dangling_clip() -> acadrust::entities::Viewport {
@@ -188,157 +177,521 @@ fn non_perpendicular_view_is_partial_with_an_off_plane_reason() {
         other => panic!("expected Partial, got {other:?}"),
     }
 }
+// ---- VPCLIP / MVIEW clip boundary: the file's own polygon ----
 
-#[test]
-fn dangling_clip_boundary_handle_is_partial() {
-    // The handle references no entity: the clip cannot be proven rectangular,
-    // so the honest status is Partial (never a squared-off guess).
-    let vp = viewport_with_dangling_clip();
-    let doc = acadrust::CadDocument::new();
-    let pv = paper_viewport(&vp, &doc).unwrap();
-    match &pv.completeness {
-        Completeness::Partial(reasons) => {
-            assert!(reasons.iter().any(|r| r.contains("clip")), "{reasons:?}");
-        }
+/// A paper polygon as the point list a viewport clip stores.
+fn polygon(points: &[(f64, f64)]) -> Vec<Point3> {
+    points.iter().map(|(x, y)| paper_corner(*x, *y)).collect()
+}
+
+/// The L-shaped boundary used by the polygon tests: five vertices, one concave
+/// corner, counter-clockwise.
+fn l_shape() -> Vec<Point3> {
+    polygon(&[
+        (0.0, 0.0),
+        (100.0, 0.0),
+        (100.0, 25.0),
+        (50.0, 60.0),
+        (0.0, 50.0),
+    ])
+}
+
+/// The stored refusal code of a `Partial` viewport: the reason's code prefix.
+fn refusal_code(viewport: &cad_db::PaperViewport) -> &str {
+    match &viewport.completeness {
+        Completeness::Partial(reasons) => reasons[0]
+            .split_once(": ")
+            .map(|(code, _)| code)
+            .unwrap_or_else(|| panic!("a refusal reason names its code: {reasons:?}")),
         other => panic!("expected Partial, got {other:?}"),
     }
 }
 
+/// A document holding the given boundary entity (reached by handle) plus one
+/// content viewport on `Layout1`'s paper block.
+fn document_with_viewport(
+    boundary: Option<acadrust::EntityType>,
+    mut viewport: acadrust::entities::Viewport,
+) -> acadrust::CadDocument {
+    let mut doc = acadrust::CadDocument::new();
+    if let Some(entity) = boundary {
+        let handle = doc
+            .add_entity(entity)
+            .expect("the boundary entity is accepted");
+        viewport.clip_boundary_handle = handle;
+    }
+    doc.add_entity_to_layout(EntityType::Viewport(Box::new(viewport)), "Layout1")
+        .expect("the viewport is added to the paper layout");
+    doc
+}
+
+/// Import an in-memory acadrust document.
+///
+/// Bytes are irrelevant here: the contract under test is
+/// `read_layouts`/`read_entities`, and a writer/parser round trip would add a
+/// second system whose behaviour could mask a clip bug (the same reason the
+/// layout-order tests build the document in memory).
+fn import_document(doc: &acadrust::CadDocument) -> ImportedDrawing {
+    let request = request(Vec::new());
+    ImporterBuilder::new(&request, doc, ReadStats::default(), compute_identity(&[]))
+        .run()
+        .expect("the in-memory document imports")
+}
+
+/// The single content viewport of the imported drawing.
+fn only_viewport(drawing: &ImportedDrawing) -> &cad_db::PaperViewport {
+    let mut viewports = drawing
+        .database
+        .layouts()
+        .flat_map(|layout| layout.viewports.iter());
+    let viewport = viewports.next().expect("one content viewport was imported");
+    assert!(viewports.next().is_none(), "exactly one content viewport");
+    viewport
+}
+
 #[test]
-fn rectangular_clip_boundary_equals_the_viewport_rectangle() {
-    // VPCLIP stores a boundary entity even when it matches the viewport
-    // rectangle exactly; that must stay Complete and use the boundary corners.
-    let (doc, handle) = document_with_polyline(closed_polyline(&[
-        (0.0, 0.0),
-        (100.0, 0.0),
-        (100.0, 50.0),
-        (0.0, 50.0),
-    ]));
-    let mut vp = top_viewport((50.0, 25.0), 100.0, 50.0, 5000.0, (10.0, 20.0));
-    vp.clip_boundary_handle = handle;
+fn polygonal_clip_boundary_imports_as_that_polygon_and_is_drawn() {
+    // A five-vertex L-shaped VPCLIP boundary: the file's own polygon, not its
+    // envelope and not the viewport rectangle.
+    let doc = document_with_viewport(
+        Some(EntityType::LwPolyline(closed_polyline(&[
+            (0.0, 0.0),
+            (100.0, 0.0),
+            (100.0, 25.0),
+            (50.0, 60.0),
+            (0.0, 50.0),
+        ]))),
+        top_viewport((50.0, 25.0), 100.0, 50.0, 5000.0, (10.0, 20.0)),
+    );
+    let drawing = import_document(&doc);
+    let viewport = only_viewport(&drawing);
+
+    assert_eq!(viewport.completeness, Completeness::Complete);
+    assert_eq!(viewport.clip, l_shape());
+    // Nothing about the clip is downgraded in the report.
+    let codes: Vec<&str> = drawing
+        .report
+        .diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.code.as_str())
+        .collect();
+    assert!(
+        !codes.iter().any(|code| code.contains("viewport")),
+        "a stored polygon must not report a viewport loss: {codes:?}"
+    );
+
+    // ...and the representation layer reads the stored points as a supported
+    // simple polygon, not as a rectangle and not as `viewport.complex_clip`.
+    let state = cad_representation::layout::viewport_transform(viewport);
+    let cad_representation::layout::ViewportState::Supported(transform) = state else {
+        panic!("the polygon clip is drawable, got {state:?}");
+    };
+    assert_eq!(transform.paper_clip.as_rect(), None, "not squared off");
+    assert_eq!(
+        transform.paper_clip.boundary(),
+        l_shape()
+            .iter()
+            .map(|point| [point.x, point.y])
+            .collect::<Vec<_>>()
+            .as_slice()
+    );
+}
+
+#[test]
+fn axis_aligned_clip_boundary_is_byte_identical_to_the_plain_rectangle() {
+    // The pre-polygon reader stored the four canonical corners; a rectangular
+    // VPCLIP boundary must keep producing exactly those bytes.
+    let plain = top_viewport((50.0, 25.0), 100.0, 50.0, 5000.0, (10.0, 20.0));
+    let empty = acadrust::CadDocument::new();
+    let expected = paper_viewport(&plain, &empty)
+        .expect("a content viewport")
+        .clip;
+    assert_eq!(expected, rectangle(0.0, 0.0, 100.0, 50.0));
+
+    let doc = document_with_viewport(
+        Some(EntityType::LwPolyline(closed_polyline(&[
+            (0.0, 0.0),
+            (100.0, 0.0),
+            (100.0, 50.0),
+            (0.0, 50.0),
+        ]))),
+        plain,
+    );
+    let drawing = import_document(&doc);
+    let viewport = only_viewport(&drawing);
+    assert_eq!(viewport.completeness, Completeness::Complete);
+    assert_eq!(
+        viewport.clip, expected,
+        "a rectangular boundary stores the same four corners as the viewport rectangle"
+    );
+    let state = cad_representation::layout::viewport_transform(viewport);
+    let cad_representation::layout::ViewportState::Supported(transform) = state else {
+        panic!("the rectangle clip is drawable, got {state:?}");
+    };
+    assert_eq!(
+        transform.paper_clip.as_rect(),
+        Some(([0.0, 0.0], [100.0, 50.0])),
+        "a rectangle keeps the dedicated half-plane clipper path"
+    );
+}
+
+#[test]
+fn clockwise_rectangular_clip_boundary_still_canonicalizes() {
+    // Files do not promise a winding order; the stored bytes are the canonical
+    // counter-clockwise corners either way.
+    let doc = document_with_viewport(
+        Some(EntityType::LwPolyline(closed_polyline(&[
+            (0.0, 0.0),
+            (0.0, 50.0),
+            (100.0, 50.0),
+            (100.0, 0.0),
+        ]))),
+        top_viewport((50.0, 25.0), 100.0, 50.0, 5000.0, (10.0, 20.0)),
+    );
+    let drawing = import_document(&doc);
+    let viewport = only_viewport(&drawing);
+    assert_eq!(viewport.completeness, Completeness::Complete);
+    assert_eq!(viewport.clip, rectangle(0.0, 0.0, 100.0, 50.0));
+}
+
+#[test]
+fn rotated_clip_boundary_imports_as_a_polygon_not_a_rectangle() {
+    // A rotated square uses no corner of its envelope that a rectangle check
+    // could accept, so it must arrive as four polygon vertices.
+    let doc = document_with_viewport(
+        Some(EntityType::LwPolyline(closed_polyline(&[
+            (50.0, 0.0),
+            (100.0, 50.0),
+            (50.0, 100.0),
+            (0.0, 50.0),
+        ]))),
+        top_viewport((50.0, 50.0), 100.0, 100.0, 5000.0, (10.0, 20.0)),
+    );
+    let drawing = import_document(&doc);
+    let viewport = only_viewport(&drawing);
+    assert_eq!(viewport.completeness, Completeness::Complete);
+    assert_eq!(
+        viewport.clip,
+        polygon(&[(50.0, 0.0), (100.0, 50.0), (50.0, 100.0), (0.0, 50.0)])
+    );
+    let state = cad_representation::layout::viewport_transform(viewport);
+    let cad_representation::layout::ViewportState::Supported(transform) = state else {
+        panic!("a rotated square is a simple polygon, got {state:?}");
+    };
+    assert_eq!(transform.paper_clip.as_rect(), None);
+}
+
+#[test]
+fn dangling_clip_boundary_handle_is_refused_by_name() {
+    // The handle references no entity. The viewport keeps its own rectangle as
+    // data but is `Partial`, so the representation refuses it instead of
+    // drawing a full rectangle over a clipped window.
+    let vp = viewport_with_dangling_clip();
+    let doc = acadrust::CadDocument::new();
     let pv = paper_viewport(&vp, &doc).expect("still a content viewport");
-    assert_eq!(pv.completeness, Completeness::Complete);
+    assert_eq!(refusal_code(&pv), viewport_clip_reason::UNRESOLVED);
+    assert_eq!(pv.clip, rectangle(0.0, 0.0, 100.0, 50.0));
+    assert!(matches!(
+        cad_representation::layout::viewport_transform(&pv),
+        cad_representation::layout::ViewportState::Unsupported(_)
+    ));
+}
+
+#[test]
+fn circle_clip_boundary_is_refused_because_chording_would_invent_geometry() {
+    let mut circle = acadrust::entities::Circle::new();
+    circle.center = acadrust::types::Vector3::new(50.0, 25.0, 0.0);
+    circle.radius = 25.0;
+    let mut viewport = top_viewport((50.0, 25.0), 100.0, 50.0, 5000.0, (10.0, 20.0));
+    circle.common.handle = acadrust::types::Handle::NULL;
+    let mut doc = acadrust::CadDocument::new();
+    let handle = doc
+        .add_entity(EntityType::Circle(circle))
+        .expect("the circle is accepted");
+    viewport.clip_boundary_handle = handle;
+    let pv = paper_viewport(&viewport, &doc).expect("still a content viewport");
+    assert_eq!(refusal_code(&pv), viewport_clip_reason::UNSUPPORTED_ENTITY);
+    // The message names the class and says why it is not approximated.
+    let Completeness::Partial(reasons) = &pv.completeness else {
+        panic!("expected Partial, got {:?}", pv.completeness);
+    };
+    assert!(reasons[0].contains("AcDbCircle"), "{reasons:?}");
+    assert!(reasons[0].contains("chorded"), "{reasons:?}");
     assert_eq!(pv.clip, rectangle(0.0, 0.0, 100.0, 50.0));
 }
 
 #[test]
-fn offset_rectangular_clip_boundary_uses_the_boundary_rectangle() {
-    // The real VPCLIP semantics: the boundary is what is visible, and it may
-    // be smaller than (and offset from) the viewport rectangle. The transform
-    // still anchors on the viewport centre, not the clip centre.
-    let (doc, handle) = document_with_polyline(closed_polyline(&[
-        (20.0, 10.0),
-        (70.0, 10.0),
-        (70.0, 40.0),
-        (20.0, 40.0),
-    ]));
-    let mut vp = top_viewport((50.0, 25.0), 100.0, 50.0, 5000.0, (10.0, 20.0));
-    vp.clip_boundary_handle = handle;
-    let pv = paper_viewport(&vp, &doc).expect("still a content viewport");
-    assert_eq!(pv.completeness, Completeness::Complete);
-    assert_eq!(pv.clip, rectangle(20.0, 10.0, 70.0, 40.0));
-    // The viewport centre still lands on the view target at 1:100.
-    let m = &pv.model_to_paper.matrix;
-    assert!((m[0][0] - 100.0).abs() < 1e-9, "{m:?}");
-    assert!((m[1][1] - 100.0).abs() < 1e-9, "{m:?}");
-    let model_centre = pv.model_to_paper.apply_point(Point3 {
-        x: 50.0,
-        y: 25.0,
-        z: 0.0,
-    });
-    assert!((model_centre.x - 10.0).abs() < 1e-9, "{model_centre:?}");
-    assert!((model_centre.y - 20.0).abs() < 1e-9, "{model_centre:?}");
+fn self_intersecting_clip_boundary_is_refused_by_name() {
+    // A bow tie that uses the four corners of its envelope: it must not be
+    // squared off into a rectangle and must not be stored as a polygon.
+    let doc = document_with_viewport(
+        Some(EntityType::LwPolyline(closed_polyline(&[
+            (0.0, 0.0),
+            (100.0, 50.0),
+            (100.0, 0.0),
+            (0.0, 50.0),
+        ]))),
+        top_viewport((50.0, 25.0), 100.0, 50.0, 5000.0, (10.0, 20.0)),
+    );
+    let pv = paper_viewport(
+        match doc
+            .entities()
+            .find(|e| matches!(e, EntityType::Viewport(_)))
+        {
+            Some(EntityType::Viewport(viewport)) => viewport,
+            other => panic!("the document holds one viewport, got {other:?}"),
+        },
+        &doc,
+    )
+    .expect("still a content viewport");
+    assert_eq!(refusal_code(&pv), viewport_clip_reason::SELF_INTERSECTING);
+    assert_eq!(
+        pv.clip,
+        rectangle(0.0, 0.0, 100.0, 50.0),
+        "the refused viewport keeps its own rectangle as data, never a guess"
+    );
+    assert!(
+        matches!(
+            cad_representation::layout::viewport_transform(&pv),
+            cad_representation::layout::ViewportState::Unsupported(_)
+        ),
+        "a refused boundary is never drawn as a rectangle"
+    );
 }
 
 #[test]
-fn duplicate_clip_boundary_vertices_are_collapsed() {
-    // Real files store consecutive duplicate vertices plus a closing duplicate
-    // (7 stored vertices for 4 corners); that is still a rectangle.
-    let (doc, handle) = document_with_polyline(closed_polyline(&[
-        (10.0, 5.0),
-        (10.0, 5.0),
-        (90.0, 5.0),
-        (90.0, 45.0),
-        (90.0, 45.0),
-        (10.0, 45.0),
-        (10.0, 5.0),
-    ]));
-    let mut vp = top_viewport((50.0, 25.0), 100.0, 50.0, 5000.0, (10.0, 20.0));
-    vp.clip_boundary_handle = handle;
-    let pv = paper_viewport(&vp, &doc).expect("still a content viewport");
-    assert_eq!(pv.completeness, Completeness::Complete);
-    assert_eq!(pv.clip, rectangle(10.0, 5.0, 90.0, 45.0));
-}
-
-#[test]
-fn five_corner_clip_boundary_is_partial() {
-    let (doc, handle) = document_with_polyline(closed_polyline(&[
-        (0.0, 0.0),
-        (100.0, 0.0),
-        (100.0, 50.0),
-        (50.0, 60.0),
-        (0.0, 50.0),
-    ]));
-    let mut vp = top_viewport((50.0, 25.0), 100.0, 50.0, 5000.0, (10.0, 20.0));
-    vp.clip_boundary_handle = handle;
-    let pv = paper_viewport(&vp, &doc).unwrap();
-    match &pv.completeness {
-        Completeness::Partial(reasons) => {
-            assert!(reasons.iter().any(|r| r.contains("clip")), "{reasons:?}");
-        }
-        other => panic!("expected Partial, got {other:?}"),
-    }
-}
-
-#[test]
-fn curved_clip_boundary_is_partial() {
-    // A nonzero bulge makes at least one edge an arc, so the boundary is not a
-    // straight-edged rectangle even though its four vertices line up.
+fn arc_clip_boundary_is_refused_by_name() {
     let mut polyline = closed_polyline(&[(0.0, 0.0), (100.0, 0.0), (100.0, 50.0), (0.0, 50.0)]);
     polyline.vertices[0].bulge = 0.5;
-    let (doc, handle) = document_with_polyline(polyline);
-    let mut vp = top_viewport((50.0, 25.0), 100.0, 50.0, 5000.0, (10.0, 20.0));
-    vp.clip_boundary_handle = handle;
-    let pv = paper_viewport(&vp, &doc).unwrap();
-    match &pv.completeness {
-        Completeness::Partial(reasons) => {
-            assert!(reasons.iter().any(|r| r.contains("clip")), "{reasons:?}");
-        }
-        other => panic!("expected Partial, got {other:?}"),
-    }
+    let doc = document_with_viewport(
+        Some(EntityType::LwPolyline(polyline)),
+        top_viewport((50.0, 25.0), 100.0, 50.0, 5000.0, (10.0, 20.0)),
+    );
+    let drawing = import_document(&doc);
+    let viewport = only_viewport(&drawing);
+    assert_eq!(refusal_code(viewport), viewport_clip_reason::CURVED);
+    assert_eq!(viewport.clip, rectangle(0.0, 0.0, 100.0, 50.0));
 }
 
 #[test]
-fn open_clip_boundary_polyline_is_partial() {
+fn curve_fitted_clip_boundary_polyline_is_refused_by_name() {
+    // A 2D POLYLINE flagged curve-fit draws a fitted curve; its vertices are
+    // control points, so they are not the boundary.
+    let mut polyline = acadrust::entities::Polyline2D::new();
+    polyline.vertices.extend(
+        [(0.0, 0.0), (100.0, 0.0), (100.0, 50.0), (0.0, 50.0)].map(|(x, y)| {
+            acadrust::entities::Vertex2D::new(acadrust::types::Vector3::new(x, y, 0.0))
+        }),
+    );
+    polyline.flags =
+        acadrust::entities::PolylineFlags::CLOSED | acadrust::entities::PolylineFlags::CURVE_FIT;
+    let doc = document_with_viewport(
+        Some(EntityType::Polyline2D(polyline)),
+        top_viewport((50.0, 25.0), 100.0, 50.0, 5000.0, (10.0, 20.0)),
+    );
+    let drawing = import_document(&doc);
+    assert_eq!(
+        refusal_code(only_viewport(&drawing)),
+        viewport_clip_reason::CURVED
+    );
+}
+
+#[test]
+fn heavy_polyline_clip_boundary_imports_as_a_polygon() {
+    // R2000-era writers store the boundary as a 2D POLYLINE (OCS vertices, no
+    // bulges); it carries the same polygon as the LWPOLYLINE form.
+    let mut polyline = acadrust::entities::Polyline2D::new();
+    polyline.vertices.extend(
+        [
+            (0.0, 0.0),
+            (100.0, 0.0),
+            (100.0, 25.0),
+            (50.0, 60.0),
+            (0.0, 50.0),
+        ]
+        .map(|(x, y)| acadrust::entities::Vertex2D::new(acadrust::types::Vector3::new(x, y, 0.0))),
+    );
+    polyline.flags = acadrust::entities::PolylineFlags::CLOSED;
+    let doc = document_with_viewport(
+        Some(EntityType::Polyline2D(polyline)),
+        top_viewport((50.0, 25.0), 100.0, 50.0, 5000.0, (10.0, 20.0)),
+    );
+    let drawing = import_document(&doc);
+    let viewport = only_viewport(&drawing);
+    assert_eq!(viewport.completeness, Completeness::Complete);
+    assert_eq!(viewport.clip, l_shape());
+}
+
+#[test]
+fn open_clip_boundary_polyline_is_refused_by_name() {
     // A viewport clip must be a closed region; an open polyline is not one.
     let mut polyline = closed_polyline(&[(0.0, 0.0), (100.0, 0.0), (100.0, 50.0), (0.0, 50.0)]);
     polyline.is_closed = false;
-    let (doc, handle) = document_with_polyline(polyline);
-    let mut vp = top_viewport((50.0, 25.0), 100.0, 50.0, 5000.0, (10.0, 20.0));
-    vp.clip_boundary_handle = handle;
-    let pv = paper_viewport(&vp, &doc).unwrap();
-    match &pv.completeness {
-        Completeness::Partial(reasons) => {
-            assert!(reasons.iter().any(|r| r.contains("clip")), "{reasons:?}");
-        }
-        other => panic!("expected Partial, got {other:?}"),
-    }
+    let doc = document_with_viewport(
+        Some(EntityType::LwPolyline(polyline)),
+        top_viewport((50.0, 25.0), 100.0, 50.0, 5000.0, (10.0, 20.0)),
+    );
+    let drawing = import_document(&doc);
+    assert_eq!(
+        refusal_code(only_viewport(&drawing)),
+        viewport_clip_reason::NOT_CLOSED
+    );
 }
 
 #[test]
-fn tilted_clip_boundary_plane_is_partial() {
-    // A tilted OCS is not the paper plane; its projection is not provably the
-    // stored rectangle, so it must not be accepted as one.
+fn degenerate_clip_boundary_is_refused_by_name() {
+    // Two distinct vertices and a repeated close: no polygon exists.
+    let doc = document_with_viewport(
+        Some(EntityType::LwPolyline(closed_polyline(&[
+            (0.0, 0.0),
+            (100.0, 0.0),
+            (0.0, 0.0),
+        ]))),
+        top_viewport((50.0, 25.0), 100.0, 50.0, 5000.0, (10.0, 20.0)),
+    );
+    let drawing = import_document(&doc);
+    assert_eq!(
+        refusal_code(only_viewport(&drawing)),
+        viewport_clip_reason::DEGENERATE
+    );
+}
+
+#[test]
+fn tilted_clip_boundary_plane_is_refused_by_name() {
+    // A tilted OCS is not the paper plane; its projection is not the stored
+    // polygon, so it must not be accepted as one.
     let mut polyline = closed_polyline(&[(0.0, 0.0), (100.0, 0.0), (100.0, 50.0), (0.0, 50.0)]);
     polyline.normal = acadrust::types::Vector3::new(0.0, 0.5, 0.866_025_403_784_438_6);
-    let (doc, handle) = document_with_polyline(polyline);
-    let mut vp = top_viewport((50.0, 25.0), 100.0, 50.0, 5000.0, (10.0, 20.0));
-    vp.clip_boundary_handle = handle;
-    let pv = paper_viewport(&vp, &doc).unwrap();
-    match &pv.completeness {
-        Completeness::Partial(reasons) => {
-            assert!(reasons.iter().any(|r| r.contains("clip")), "{reasons:?}");
-        }
-        other => panic!("expected Partial, got {other:?}"),
-    }
+    let doc = document_with_viewport(
+        Some(EntityType::LwPolyline(polyline)),
+        top_viewport((50.0, 25.0), 100.0, 50.0, 5000.0, (10.0, 20.0)),
+    );
+    let drawing = import_document(&doc);
+    assert_eq!(
+        refusal_code(only_viewport(&drawing)),
+        viewport_clip_reason::NON_PLANAR
+    );
+}
+
+#[test]
+fn the_import_report_names_the_clip_refusal_and_the_drawing_is_partial() {
+    // A refusal must be visible in the report with its own code, and the drawing
+    // must not claim `Complete`.
+    let mut polyline = closed_polyline(&[(0.0, 0.0), (100.0, 0.0), (100.0, 50.0), (0.0, 50.0)]);
+    polyline.vertices[0].bulge = 0.5;
+    let doc = document_with_viewport(
+        Some(EntityType::LwPolyline(polyline)),
+        top_viewport((50.0, 25.0), 100.0, 50.0, 5000.0, (10.0, 20.0)),
+    );
+    let drawing = import_document(&doc);
+    let diagnostic = drawing
+        .report
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == viewport_clip_reason::CURVED)
+        .unwrap_or_else(|| {
+            panic!(
+                "the report names the refusal: {:?}",
+                drawing
+                    .report
+                    .diagnostics
+                    .iter()
+                    .map(|diagnostic| diagnostic.code.as_str())
+                    .collect::<Vec<_>>()
+            )
+        });
+    assert!(diagnostic.message.contains("viewport 2"), "{diagnostic:?}");
+    assert!(
+        !matches!(drawing.report.completeness, Completeness::Complete),
+        "a refused boundary is a declared loss"
+    );
+    // The AcDbViewport capability row is Partial too: its frame is not the
+    // file's clipped frame.
+    let capability = drawing
+        .report
+        .capabilities
+        .iter()
+        .find(|capability| capability.type_key == "AcDbViewport")
+        .expect("the viewport capability row exists");
+    assert_ne!(
+        capability.semantic,
+        SupportStatus::Verified,
+        "{capability:?}"
+    );
+}
+
+#[test]
+fn the_boundary_handle_survives_a_real_dxf_write_and_reimport() {
+    // acadrust writes the boundary handle as DXF group 340 and reads it back;
+    // this pins that the polygon reaches the database through real bytes, not
+    // only through an in-memory document.
+    let doc = document_with_viewport(
+        Some(EntityType::LwPolyline(closed_polyline(&[
+            (0.0, 0.0),
+            (100.0, 0.0),
+            (100.0, 25.0),
+            (50.0, 60.0),
+            (0.0, 50.0),
+        ]))),
+        top_viewport((50.0, 25.0), 100.0, 50.0, 5000.0, (10.0, 20.0)),
+    );
+    let bytes = acadrust::DxfWriter::new(&doc)
+        .write_to_vec()
+        .expect("the source document writes as DXF text");
+    assert!(
+        String::from_utf8_lossy(&bytes).contains("VIEWPORT"),
+        "the source bytes carry the viewport"
+    );
+    let drawing = AcadrustImporter::new()
+        .import(&request(bytes), &|| false)
+        .expect("the written bytes import");
+    let viewport = only_viewport(&drawing);
+    assert_eq!(viewport.clip, l_shape());
+    assert_eq!(viewport.completeness, Completeness::Complete);
+}
+
+#[test]
+fn the_exporter_writes_no_viewport_so_a_polygon_clip_does_not_survive_save_as() {
+    // `export` is a v1 lossy Save As of **model space only**: it writes no
+    // LAYOUT and no VIEWPORT record, so a paper-space clip boundary cannot
+    // round-trip through it (and this test documents that instead of pretending
+    // otherwise). The imported polygon itself is checked above.
+    let doc = document_with_viewport(
+        Some(EntityType::LwPolyline(closed_polyline(&[
+            (0.0, 0.0),
+            (100.0, 0.0),
+            (100.0, 25.0),
+            (50.0, 60.0),
+            (0.0, 50.0),
+        ]))),
+        top_viewport((50.0, 25.0), 100.0, 50.0, 5000.0, (10.0, 20.0)),
+    );
+    let imported = import_document(&doc);
+    assert_eq!(only_viewport(&imported).clip, l_shape());
+
+    let (bytes, _report) = crate::export::export(&crate::export::ExportRequest {
+        database: &imported.database,
+        document_id: DocumentId(1),
+        space: crate::export::ExportSpace::Model,
+        format: crate::export::ExportFormat::DxfText,
+        limits: crate::export::ExportLimits::default(),
+        units: None,
+    })
+    .expect("the imported database exports");
+    let text = String::from_utf8_lossy(&bytes);
+    assert!(
+        !text.contains("VIEWPORT"),
+        "v1 exports model space only, so a paper viewport is not written"
+    );
+
+    let reimported = AcadrustImporter::new()
+        .import(&request(bytes), &|| false)
+        .expect("the exported bytes import");
+    assert!(
+        reimported
+            .database
+            .layouts()
+            .all(|layout| layout.viewports.is_empty()),
+        "no viewport (and therefore no clip) survives a Save As"
+    );
 }
