@@ -289,6 +289,104 @@ fn dimangular_capture_picks_both_lines_then_the_arc_location() {
 }
 
 #[test]
+fn dimangular_three_point_capture_measures_the_angle_in_one_undo_step() {
+    // The **same** interactive tool reaches DIMANGULAR's other form: AutoCAD's
+    // first prompt is "select a line **or** specify a vertex", so a click that
+    // resolves no line is the three-point form's vertex. The created dimension
+    // measures the sector the arc-location pick selects, in one transaction.
+    let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+    controller.set_snap_enabled(false);
+    controller.new_blank_document().unwrap();
+    let count = controller.drawing().unwrap().entity_count();
+    let undo_before = undo_depth(&controller);
+
+    controller
+        .begin_draw_tool(DrawToolKind::DimAngular)
+        .unwrap();
+    let vertex = p(0.0, 0.0);
+    let first = p(10.0, 0.0);
+    let second = p(0.0, 10.0);
+    let location = p(1.0, 1.0);
+
+    controller.capture_tool_point(vertex).unwrap();
+    let preview = controller.session.draw_preview().unwrap();
+    assert!(preview.picks.is_empty(), "no line was picked");
+    assert_eq!(preview.points, vec![vertex]);
+    assert_eq!(
+        preview.remaining_points(),
+        Some(3),
+        "the three-point form needs the vertex's two sides and the location"
+    );
+    assert!(!preview.can_confirm());
+
+    controller.capture_tool_point(first).unwrap();
+    controller.capture_tool_point(second).unwrap();
+    assert!(
+        !controller.session.draw_preview().unwrap().can_confirm(),
+        "the arc location is still needed"
+    );
+    assert!(controller.confirm_draw().is_err());
+
+    controller.capture_tool_point(location).unwrap();
+    let intent = controller.session.draw_intent().unwrap();
+    assert_eq!(
+        intent,
+        crate::DrawIntent::DimAngular(crate::draw_tool::AngularPicks::ThreePoint {
+            vertex,
+            first,
+            second,
+            location,
+        })
+    );
+    let command = controller.command_for_draw_intent(intent, &[]).unwrap();
+    assert_eq!(command.id, crate::CommandId::DimAngular);
+    match command.payload {
+        crate::CommandPayload::DimAngular(input) => match input.as_ref() {
+            crate::AngularDimensionInput::ThreePoint {
+                vertex: v,
+                first: f,
+                second: s,
+                location: l,
+            } => assert_eq!((*v, *f, *s, *l), (vertex, first, second, location)),
+            other => panic!("expected the three-point input, got {other:?}"),
+        },
+        _ => panic!("expected a DimAngular payload"),
+    }
+
+    let outcome = controller.confirm_draw().unwrap();
+    assert_eq!(outcome.objects.len(), 1);
+    assert_eq!(controller.drawing().unwrap().entity_count(), count + 1);
+    assert_eq!(undo_depth(&controller), undo_before + 1, "one undo step");
+    let entity = controller
+        .drawing()
+        .unwrap()
+        .entity(cad_domain::EntityId(outcome.objects[0].0))
+        .cloned()
+        .expect("the created dimension");
+    assert_eq!(entity.object.type_key, "AcDbDimension");
+    match &entity.geometry {
+        SemanticGeometry::Dimension(dimension) => {
+            assert_eq!(dimension.kind(), cad_domain::DimensionKind::Angular3Pt);
+            assert!(
+                (dimension.measurement() - 90.0).abs() < 1e-9,
+                "the quarter sector measures 90 degrees: {}",
+                dimension.measurement()
+            );
+        }
+        other => panic!("expected a dimension, got {other:?}"),
+    }
+}
+
+fn undo_depth(controller: &HostController) -> usize {
+    controller
+        .application
+        .history
+        .get(&controller.document_id)
+        .map(|history| history.undo_depth())
+        .unwrap_or(0)
+}
+
+#[test]
 fn dimordinate_capture_takes_the_feature_and_leader_points() {
     let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
     controller.set_snap_enabled(false);

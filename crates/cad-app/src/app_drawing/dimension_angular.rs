@@ -1,18 +1,19 @@
 //! DIMANGULAR create command (ADR 0017 decision C, P5e).
 //!
-//! Two constructions share one command:
+//! Two constructions share one command, and **both are reachable interactively**
+//! (the capture state machine selects one from its first step, see
+//! [`crate::draw_tool::DrawToolKind::has_mixed_first_step`]):
 //!
-//! * **two-line** (the interactive tool): two straight-line entity picks; the
-//!   vertex is the intersection of the two infinite lines and the dimension-arc
-//!   location selects which of the four angles is measured. ADR 0017 U-8 is
-//!   resolved in favour of the acadrust struct/reader reading — line 1 is groups
-//!   13->14, line 2 is 15->10, the vertex is their intersection, group 16 selects
-//!   the sector — pinned against the committed QCAD fixtures (see
-//!   `angular_lines_synthesis` in `cad-domain`).
-//! * **three-point** (command payload only): vertex, two side points and the
-//!   dimension-arc location. There is **no interactive capture** for it yet: the
-//!   fixed-step capture state machine cannot express AutoCAD's "select a line
-//!   *or* specify a vertex" first step. This is a declared gap, not a silent one.
+//! * **two-line**: two straight-line entity picks. The vertex is the intersection
+//!   of the two infinite lines and the dimension-arc location selects which of the
+//!   four angles is measured. ADR 0017 U-8 is resolved in favour of the acadrust
+//!   struct/reader reading — line 1 is groups 13->14, line 2 is 15->10, the vertex
+//!   is their intersection, group 16 selects the sector — pinned against the
+//!   committed QCAD fixtures (see `angular_lines_synthesis` in `cad-domain`).
+//! * **three-point**: the vertex, the two side points and the dimension-arc
+//!   location, all clicked (AutoCAD's "select a line *or* specify a vertex" first
+//!   prompt). A mixed pick sequence never reaches this command: the capture refuses
+//!   it by name (`dimangular.capture.mixed`).
 //!
 //! The location pick's sector rule (ADR 0017 U-1, unverified in Autodesk's own
 //! documentation) is **our declared choice**: the measured angle is the sector

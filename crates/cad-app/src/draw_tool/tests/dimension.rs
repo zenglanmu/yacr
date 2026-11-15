@@ -94,12 +94,30 @@ fn dimangular_picks_two_lines_then_takes_the_arc_location() {
     assert_eq!(kind.arity(), PointArity::Exact(3));
     assert!(kind.needs_picked_entities());
     assert_eq!(kind.picked_step_count(), 2);
+    assert!(kind.has_mixed_first_step());
+    assert_eq!(kind.extended_point_count(), Some(4));
     assert!(!kind.requires_selection());
     let mut tool = DrawTool::new(kind, 0);
-    // Both leading steps are entity picks: free points are refused.
-    assert!(tool.push_point(p(0.0, 0.0)).is_err());
+    // The first step is **mixed**: it also accepts a free point (the vertex of
+    // the three-point form), but this test takes the two-line branch by picking.
+    assert_eq!(tool.pending_step(), CaptureStep::PickOrPoint);
+    assert!(tool.accepts_entity_pick());
+    assert!(tool.accepts_free_point());
+    assert!(
+        !tool.requires_entity_pick(),
+        "the first step is not pick-only"
+    );
     tool.push_pick(p(5.0, 0.0), pick(21)).unwrap();
-    assert!(tool.push_point(p(0.0, 0.0)).is_err());
+    // The form is now fixed: the second step is the second line, pick-only, so a
+    // free point is the named mixed refusal (never reinterpreted as a vertex).
+    assert_eq!(tool.pending_step(), CaptureStep::Pick);
+    assert!(tool.requires_entity_pick());
+    let mixed = match tool.push_point(p(0.0, 0.0)) {
+        Err(CadError::InvalidInput(message)) => message,
+        other => panic!("expected the mixed-capture refusal, got {other:?}"),
+    };
+    assert!(mixed.contains("dimangular.capture.mixed"), "{mixed}");
+    assert_eq!(tool.points().len(), 1, "the refused point was not captured");
     tool.push_pick(p(0.0, 5.0), pick(22)).unwrap();
     assert!(!tool.requires_entity_pick());
     assert!(!tool.is_ready(), "the arc location is still needed");
@@ -111,12 +129,63 @@ fn dimangular_picks_two_lines_then_takes_the_arc_location() {
     assert_eq!(tool.remaining(), Some(0));
     assert_eq!(
         tool.intent().unwrap(),
-        DrawIntent::DimAngular {
+        DrawIntent::DimAngular(AngularPicks::TwoLine {
             first: pick(21),
             second: pick(22),
             location: p(4.0, 4.0),
-        }
+        })
     );
+}
+
+/// The three-point form is the mixed first step's other branch: the vertex, the
+/// two side points and the arc location are all free points, and the intent is the
+/// `ThreePoint` payload input.
+#[test]
+fn dimangular_three_free_points_produce_the_three_point_form() {
+    let kind = DrawToolKind::DimAngular;
+    let mut tool = DrawTool::new(kind, 0);
+    assert_eq!(tool.remaining(), Some(3), "the shorter form is the minimum");
+    // The first click is a point: the capture commits to the three-point form.
+    tool.push_point(p(0.0, 0.0)).unwrap();
+    assert_eq!(tool.pending_step(), CaptureStep::Point);
+    assert!(!tool.requires_entity_pick());
+    assert_eq!(
+        tool.remaining(),
+        Some(3),
+        "the three-point form needs 4 captures, one more than the two-line form"
+    );
+    // A line pick from here is the named mixed refusal.
+    let mixed = match tool.push_pick(p(5.0, 0.0), pick(41)) {
+        Err(CadError::InvalidInput(message)) => message,
+        other => panic!("expected the mixed-capture refusal, got {other:?}"),
+    };
+    assert!(mixed.contains("dimangular.capture.mixed"), "{mixed}");
+    assert!(tool.picks().is_empty(), "no ref was captured");
+
+    tool.push_point(p(10.0, 0.0)).unwrap();
+    tool.push_point(p(0.0, 10.0)).unwrap();
+    assert!(!tool.is_ready(), "the arc location is still needed");
+    assert_eq!(tool.remaining(), Some(1));
+    tool.push_point(p(1.0, 1.0)).unwrap();
+    assert!(tool.is_ready());
+    assert_eq!(tool.remaining(), Some(0));
+    assert_eq!(
+        tool.intent().unwrap(),
+        DrawIntent::DimAngular(AngularPicks::ThreePoint {
+            vertex: p(0.0, 0.0),
+            first: p(10.0, 0.0),
+            second: p(0.0, 10.0),
+            location: p(1.0, 1.0),
+        })
+    );
+    // The three-point form has no refs at all, so an incomplete variant never
+    // reports ready.
+    let mut partial = DrawTool::new(kind, 0);
+    partial.push_point(p(0.0, 0.0)).unwrap();
+    partial.push_point(p(10.0, 0.0)).unwrap();
+    partial.push_point(p(0.0, 10.0)).unwrap();
+    assert!(!partial.is_ready());
+    assert!(partial.intent().is_err());
 }
 
 #[test]

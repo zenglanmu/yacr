@@ -73,6 +73,67 @@ impl HostController {
         })
     }
 
+    /// The entity ref a click resolves for a pending capture step that **accepts**
+    /// a pick, or `None` when that step is DIMANGULAR's **mixed** first step
+    /// ("select a line **or** specify a vertex") and the click hit nothing.
+    ///
+    /// A pick-only step keeps the strict refusal ([`Self::resolve_draw_pick`]), so
+    /// an empty-space click can never be captured as a point where the step demands
+    /// an entity. `None` therefore only ever means "the three-point form's vertex",
+    /// and the caller stores the click as the free point. Callers gate this on
+    /// `SessionState::draw_accepts_entity_pick`; a step that takes no pick at all is
+    /// never routed here.
+    pub(super) fn capture_draw_reference(&self, world: Point3) -> CadResult<Option<SelectionRef>> {
+        if self.session.draw_requires_entity_pick() {
+            return self.resolve_draw_pick(world).map(Some);
+        }
+        self.draw_pick_ref(world)
+    }
+
+    /// Route a click to the pending capture step when that step accepts a pick.
+    ///
+    /// Returns `true` when the click was consumed **entirely** here (the ref and
+    /// the raw point are stored atomically, plus the per-kind pick validation), and
+    /// `false` when the caller must still store it as a free point — either the
+    /// step takes no pick, or it is DIMANGULAR's **mixed** first step ("select a
+    /// line **or** specify a vertex") and the click hit nothing, which is that
+    /// form's vertex.
+    ///
+    /// A **pick-only** step keeps the strict refusal
+    /// ([`Self::resolve_draw_pick`]): an empty-space click can never be captured as
+    /// a point where the step demands an entity, so the two failures stay
+    /// distinguishable by name.
+    pub(super) fn capture_tool_pick(&mut self, point: Point3) -> CadResult<bool> {
+        if !self.session.draw_accepts_entity_pick() {
+            return Ok(false);
+        }
+        let Some(reference) = self.capture_draw_reference(point)? else {
+            return Ok(false);
+        };
+        // TEXTEDIT's pick must resolve to a single, directly addressable `Text`
+        // **before** the step is consumed: a wrong object is refused by name at
+        // capture time (never captured and refused later), and a valid one carries
+        // its current string as the UI prefill.
+        if self.session.draw_kind() == Some(DrawToolKind::TextEdit) {
+            let prefill = self.text_edit_prefill(&reference)?;
+            self.session.capture_draw_pick(point, reference)?;
+            self.session.set_draw_text_prefill(Some(prefill));
+        } else if matches!(
+            self.session.draw_kind(),
+            Some(DrawToolKind::DimBaseline | DrawToolKind::DimContinue)
+        ) {
+            // DIMBASELINE/DIMCONTINUE's pick must resolve to a directly addressable
+            // **linear** dimension before the step is consumed: a wrong object is
+            // refused by name at capture time (ADR 0017 decision C, P5f), so it can
+            // never be captured and refused later.
+            self.check_dimension_chain_base(reference.clone())?;
+            self.session.capture_draw_pick(point, reference)?;
+        } else {
+            self.session.capture_draw_pick(point, reference)?;
+        }
+        Ok(true)
+    }
+
     /// Strict capture-time validation for a DIMBASELINE/DIMCONTINUE base pick.
     ///
     /// The ref must resolve to a directly addressable `DimensionKind::Linear`

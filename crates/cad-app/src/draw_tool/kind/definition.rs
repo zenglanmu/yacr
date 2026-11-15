@@ -463,24 +463,30 @@ pub enum DrawToolKind {
     /// mark plus **gapped** centrelines; we draw a plain cross, the same declared
     /// approximation as the radial synthesis (ADR 0017 P5b deviation 3).
     DimCenter,
-    /// DIMANGULAR (two-line form): two straight-line entity picks followed by the
-    /// dimension-arc location (`Exact(3)`, ADR 0017 decision C, P5e).
+    /// DIMANGULAR: an angular dimension from **two line picks** or **three points**
+    /// (ADR 0017 decision C, P5e).
     ///
-    /// The first two steps are **entity picks** (the TRIM/EXTEND capture shape,
-    /// [`Self::picked_step_count`] is `2`); the last is a free point. The vertex is
-    /// the intersection of the two infinite lines and the location pick selects
-    /// which of the four angles is dimensioned (ADR 0017 U-1: our declared rule is
+    /// The first step is the one **mixed** capture step in the catalogue
+    /// ([`Self::has_mixed_first_step`], [`CaptureStep::PickOrPoint`]): AutoCAD asks
+    /// "select a line **or** specify a vertex", so a click that resolves a straight
+    /// line picks it, and a click that resolves nothing is a free point. The first
+    /// capture fixes the form:
+    ///
+    /// * **two-line** — two line picks then the dimension-arc location
+    ///   ([`Self::arity`] = 3 captures, [`Self::picked_step_count`] = 2 refs). The
+    ///   vertex is the intersection of the two infinite lines.
+    /// * **three-point** — the vertex, the two side points and the same location
+    ///   ([`Self::extended_point_count`] = 4 captures, no refs).
+    ///
+    /// A capture of the other kind is the named `dimangular.capture.mixed` refusal;
+    /// the two forms are never reinterpreted into each other. The location pick
+    /// selects the sector that is dimensioned (ADR 0017 U-1: our declared rule is
     /// "the sector containing the location pick"; U-8 is pinned by the committed
-    /// QCAD fixtures). The command layer owns every refusal (non-line pick,
-    /// parallel/collinear lines, coincident points, off-plane input, a location at
-    /// the vertex).
-    ///
-    /// Declared subset: only the **two-line** construction is captured here. The
-    /// **three-point** construction (vertex + two side points + arc location) is
-    /// supported by the command payload but has no interactive capture yet — the
-    /// fixed-step state machine cannot express AutoCAD's "select a line **or**
-    /// specify a vertex" first step. Arc/circle objects and angular dimensions
-    /// derived from them are NOT IMPLEMENTED.
+    /// QCAD fixtures), including the reflex sector for the three-point form. Both
+    /// forms end in one non-associative `DIMENSION` in one transaction. The command
+    /// layer owns every refusal (non-line pick, parallel/collinear lines, coincident
+    /// points, off-plane input, a location at the vertex). Arc/circle objects and
+    /// angular dimensions derived from them are NOT IMPLEMENTED.
     DimAngular,
     /// DIMORDINATE: a feature point and a leader endpoint (`Exact(2)`, ADR 0017
     /// decision C, P5e).

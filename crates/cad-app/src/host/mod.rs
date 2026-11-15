@@ -178,16 +178,12 @@ impl HostController {
     /// no candidate the raw point is used unchanged; a resolution error (for
     /// example a non-finite point) is propagated, never swallowed.
     ///
-    /// For a pending TRIM/EXTEND step the click is an **entity pick**: the
-    /// entity under the point is resolved here, at capture time, through the one
-    /// pick path ([`HostController::resolve_draw_pick`]). A miss is refused
-    /// immediately (no point stored, no step consumed), so the user can simply
-    /// click again; a hit stores the ref and the raw point together.
-    ///
-    /// Once both TRIM/EXTEND steps are resolved the tool is ready and the click
-    /// falls past the pick routing: it is refused with the "ready; press Enter
-    /// to confirm" reason (a machine string, see [`DrawTool::push_point`])
-    /// rather than the misleading entity-pick text. The click is never silently
+    /// A click on a step that **accepts** an entity pick is routed to the one pick
+    /// path ([`HostController::capture_tool_pick`]): a pick-only step refuses a
+    /// miss immediately (no point stored, no step consumed), and DIMANGULAR's mixed
+    /// first step keeps the same click as its three-point vertex. Once a
+    /// pick-capturing tool is complete the click falls past that routing and is
+    /// refused with the "ready; press Enter to confirm" reason, never silently
     /// ignored.
     pub fn capture_tool_point(&mut self, point: Point3) -> CadResult<bool> {
         let resolved = self.resolve_snap(point)?;
@@ -195,29 +191,7 @@ impl HostController {
             Some(candidate) => (candidate.point, Some(InputSnap::from_candidate(&candidate))),
             None => (point, None),
         };
-        if self.session.draw_requires_entity_pick() {
-            let reference = self.resolve_draw_pick(point)?;
-            // TEXTEDIT's pick must resolve to a single, directly addressable
-            // `Text` **before** the step is consumed: a wrong object is refused
-            // by name at capture time (never captured and refused later), and a
-            // valid one carries its current string as the UI prefill.
-            if self.session.draw_kind() == Some(DrawToolKind::TextEdit) {
-                let prefill = self.text_edit_prefill(&reference)?;
-                self.session.capture_draw_pick(point, reference)?;
-                self.session.set_draw_text_prefill(Some(prefill));
-            } else if matches!(
-                self.session.draw_kind(),
-                Some(DrawToolKind::DimBaseline | DrawToolKind::DimContinue)
-            ) {
-                // DIMBASELINE/DIMCONTINUE's pick must resolve to a directly
-                // addressable **linear** dimension before the step is consumed:
-                // a wrong object is refused by name at capture time (ADR 0017
-                // decision C, P5f), so it can never be captured and refused later.
-                self.check_dimension_chain_base(reference.clone())?;
-                self.session.capture_draw_pick(point, reference)?;
-            } else {
-                self.session.capture_draw_pick(point, reference)?;
-            }
+        if self.capture_tool_pick(point)? {
             return Ok(false);
         }
         // The captured point and the provenance of the pick travel together, so
@@ -237,7 +211,11 @@ impl HostController {
     pub fn move_tool_cursor(&mut self, point: Point3) -> CadResult<()> {
         let point = self.resolve_snap(point)?.map_or(point, |snap| snap.point);
         self.session.move_cursor(point)?;
-        let candidate = if self.session.draw_requires_entity_pick() {
+        // The candidate is resolved for a step that **accepts** a pick, which
+        // includes DIMANGULAR's mixed first step: the hover tint then shows the
+        // line a click would pick, while a click on empty space still captures the
+        // three-point form's vertex.
+        let candidate = if self.session.draw_accepts_entity_pick() {
             self.draw_pick_ref(point)?
         } else {
             None

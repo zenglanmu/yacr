@@ -562,22 +562,35 @@ impl HostController {
                 crate::CommandId::DimCenter,
                 crate::CommandPayload::DimCenter(target),
             ),
-            // DIMANGULAR: the two picked line refs and the arc-location point
-            // travel on the boxed payload; the handler resolves the lines and
-            // derives the vertex and the measured angle.
-            DrawIntent::DimAngular {
-                first,
-                second,
-                location,
-            } => (
+            // DIMANGULAR: both capture forms travel on the boxed payload. The
+            // two-line form carries the two picked refs plus the arc-location
+            // point; the three-point form carries the vertex, the two side points
+            // and the same location. The handler resolves the lines (when they are
+            // the input) and derives the vertex and the measured angle either way.
+            DrawIntent::DimAngular(picks) => (
                 crate::CommandId::DimAngular,
-                crate::CommandPayload::DimAngular(Box::new(
-                    crate::AngularDimensionInput::TwoLine {
+                crate::CommandPayload::DimAngular(Box::new(match picks {
+                    crate::draw_tool::AngularPicks::TwoLine {
+                        first,
+                        second,
+                        location,
+                    } => crate::AngularDimensionInput::TwoLine {
                         first,
                         second,
                         location,
                     },
-                )),
+                    crate::draw_tool::AngularPicks::ThreePoint {
+                        vertex,
+                        first,
+                        second,
+                        location,
+                    } => crate::AngularDimensionInput::ThreePoint {
+                        vertex,
+                        first,
+                        second,
+                        location,
+                    },
+                })),
             ),
             // DIMORDINATE: the feature and leader points travel on the payload;
             // the interactive form never forces an axis (`axis = None`).

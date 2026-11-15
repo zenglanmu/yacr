@@ -20,6 +20,7 @@
 
 use cad_domain::{CadError, CadResult, Point3, SelectionRef};
 
+mod capture;
 mod intent;
 mod kind;
 mod preview;
@@ -27,8 +28,9 @@ mod status;
 mod text;
 mod window;
 
-pub use self::intent::{AlignPairSet, DrawIntent};
-pub use self::kind::{DrawToolKind, PointArity};
+use self::capture::AngularForm;
+pub use self::intent::{AlignPairSet, AngularPicks, DrawIntent};
+pub use self::kind::{CaptureStep, DrawToolKind, PointArity};
 pub use self::preview::DrawPreview;
 pub use self::window::{
     validate_window_ring, StretchWindowMode, StretchWindowStep, STRETCH_MIN_WINDOW_VERTICES,
@@ -126,20 +128,6 @@ impl DrawTool {
         self.text_required = required;
     }
 
-    /// The capture arity actually in force (the parameter-selected target or the
-    /// kind's static arity).
-    fn capture_arity(&self) -> PointArity {
-        match self.point_target {
-            Some(target) => PointArity::Exact(target),
-            None => self.kind.arity(),
-        }
-    }
-
-    /// The minimum points actually required (the live plan's complement).
-    fn required_points_now(&self) -> usize {
-        self.capture_arity().minimum()
-    }
-
     /// Whether the capture's last step is typed text, including the
     /// parameter-selected DIVIDE block name.
     fn text_required_now(&self) -> bool {
@@ -191,118 +179,15 @@ impl DrawTool {
         self.candidate = candidate;
     }
 
-    /// Whether the pending step is an entity pick (TRIM/EXTEND, CHAMFER/FILLET,
-    /// the leading arc/circle pick of DIMRADIUS/DIMDIAMETER/DIMCENTER, or
-    /// TEXTEDIT's leading text pick).
-    pub fn requires_entity_pick(&self) -> bool {
-        self.points.len() < self.kind.picked_step_count()
-    }
-
-    /// Capture one free point, refusing non-finite input and overflow past the
-    /// exact complement (or the open-ended hard cap) rather than silently
-    /// resetting or dropping it.
-    ///
-    /// For a **pending entity-pick step** this refuses: a blind point that cannot
-    /// carry an entity must never be captured as one ([`Self::push_pick`] is the
-    /// only path for those steps). Once every entity-pick step is resolved the tool
-    /// is ready and waiting for confirmation, so a further click is refused with
-    /// **that** reason instead of the misleading "captures entity picks, not free
-    /// points" (which describes a step that is still un-captured). A kind whose
-    /// leading steps are picks but whose later steps are free points (the radial
-    /// pair) accepts the free point once the pick is behind it. The refusal is a
-    /// machine reason, never a silent drop.
-    pub fn push_point(&mut self, point: Point3) -> CadResult<()> {
-        // A STRETCH polygon/lasso capture collects its crossing-window ring
-        // **before** its fixed base/displacement run: every click there is another
-        // boundary vertex (or, for a lasso, refused — a lasso is a drag), so the
-        // ring never consumes a displacement slot.
-        if self.window_open() {
-            return self.push_window_vertex(point);
-        }
-        if self.kind.picked_step_count() > 0 {
-            // Only a **fixed-arity** kind can be past its complement: an
-            // open-ended kind with a leading pick (DIMBASELINE/DIMCONTINUE) keeps
-            // accepting measured points after the pick, up to the shared cap.
-            if !self.capture_arity().is_open_ended()
-                && self.points.len() >= self.required_points_now()
-            {
-                return Err(CadError::InvalidInput(format!(
-                    "draw kind '{}' is ready; press Enter to confirm",
-                    self.kind.key()
-                )));
-            }
-            if self.points.len() < self.kind.picked_step_count() {
-                return Err(CadError::InvalidInput(format!(
-                    "draw kind '{}' captures entity picks, not free points",
-                    self.kind.key()
-                )));
-            }
-        }
-        self.push_point_checked(point)
-    }
-
-    /// Capture one entity pick: the raw point and the ref resolved for it.
-    ///
-    /// This is the atomic capture for an entity-pick step — the point and the
-    /// entity it was resolved against are stored together, so the two can never
-    /// drift. A kind that does not take an entity pick for the **pending** step
-    /// (every free-point kind, or a radial capture whose pick is already behind it)
-    /// refuses it.
-    pub fn push_pick(&mut self, point: Point3, reference: SelectionRef) -> CadResult<()> {
-        if self.points.len() >= self.kind.picked_step_count() {
-            return Err(CadError::InvalidInput(format!(
-                "draw kind '{}' does not take an entity pick for this step",
-                self.kind.key()
-            )));
-        }
-        self.push_point_checked(point)?;
-        self.picks.push(reference);
-        // The next step starts with no candidate; it is re-resolved on the next
-        // cursor move rather than carried over from the previous step.
-        self.candidate = None;
-        Ok(())
-    }
-
-    /// Finite/overflow-checked point push shared by both capture paths.
-    ///
-    /// A fixed-arity kind refuses the `(n + 1)`-th point exactly as before; an
-    /// open-ended kind accepts points up to [`MAX_OPEN_CAPTURE_POINTS`] and then
-    /// refuses explicitly rather than growing without bound.
-    fn push_point_checked(&mut self, point: Point3) -> CadResult<()> {
-        if !point.x.is_finite() || !point.y.is_finite() || !point.z.is_finite() {
-            return Err(CadError::InvalidInput("draw point must be finite".into()));
-        }
-        match self.capture_arity() {
-            PointArity::Exact(n) => {
-                if self.points.len() >= n {
-                    return Err(CadError::InvalidInput(format!(
-                        "draw kind '{}' already has its {} points",
-                        self.kind.key(),
-                        n
-                    )));
-                }
-            }
-            PointArity::AtLeast(_) => {
-                if self.points.len() >= MAX_OPEN_CAPTURE_POINTS {
-                    return Err(CadError::InvalidInput(format!(
-                        "draw kind '{}' has reached its maximum of {} points",
-                        self.kind.key(),
-                        MAX_OPEN_CAPTURE_POINTS
-                    )));
-                }
-            }
-        }
-        self.points.push(point);
-        Ok(())
-    }
-
     /// How many more points the capture still requires, honestly per arity.
     ///
     /// `Some(k)`: exactly `k` more points are needed before the tool is
     /// confirmable (identical to the old fixed-arity complement for every fixed
-    /// kind). `None`: the minimum is met on an **open-ended** tool — more points
-    /// are still accepted and the capture is finished with Enter, so there is no
-    /// fixed count to report (never a fabricated `0`).
+    /// kind, and the **live** complement for DIMANGULAR, whose three-point form
+    /// needs one more than its two-line form). `None`: the minimum is met on an
+    /// **open-ended** tool — more points are still accepted and the capture is
+    /// finished with Enter, so there is no fixed count to report (never a
+    /// fabricated `0`).
     ///
     /// An open crossing-window ring is the same shape: the vertex run has no fixed
     /// complement, so it reports `None` until the ring is closed.
@@ -310,10 +195,10 @@ impl DrawTool {
         if self.window_open() {
             return None;
         }
-        let minimum = self.required_points_now();
-        if self.points.len() < minimum {
-            Some(minimum - self.points.len())
-        } else if self.capture_arity().is_open_ended() {
+        let plan = self.capture_plan();
+        if self.points.len() < plan.points {
+            Some(plan.points - self.points.len())
+        } else if plan.open_ended {
             None
         } else {
             Some(0)
@@ -324,16 +209,19 @@ impl DrawTool {
     ///
     /// The entity-picking kinds additionally require a resolved ref for **every**
     /// entity-pick step, so a radial capture with its pick missed is never
-    /// confirmable even once the location point is captured. A STRETCH capture in
-    /// a ring mode is never confirmable while its ring is still open: the window
-    /// is not defined yet.
+    /// confirmable even once the location point is captured. DIMANGULAR's live plan
+    /// supplies whichever complement its selected form needs (3 points / 2 refs for
+    /// two lines, 4 points / 0 refs for three points). A STRETCH capture in a ring
+    /// mode is never confirmable while its ring is still open: the window is not
+    /// defined yet.
     pub fn is_ready(&self) -> bool {
         if self.window_open() {
             return false;
         }
-        self.points.len() >= self.required_points_now()
+        let plan = self.capture_plan();
+        self.points.len() >= plan.points
             && (!self.kind.requires_selection() || self.selection_count > 0)
-            && self.picks.len() >= self.kind.picked_step_count()
+            && self.picks.len() >= plan.picks
     }
 
     pub fn preview(&self) -> DrawPreview {
@@ -371,17 +259,18 @@ impl DrawTool {
     /// The exact commit this tool describes, or an explicit error when a
     /// parameter is still missing. Never fabricates a point or a default delta.
     pub fn intent(&self) -> CadResult<DrawIntent> {
+        let plan = self.capture_plan();
         if self.kind.requires_selection() && self.selection_count == 0 {
             return Err(CadError::InvalidInput(format!(
                 "draw kind '{}' needs a non-empty selection",
                 self.kind.key()
             )));
         }
-        if self.points.len() < self.required_points_now() {
+        if self.points.len() < plan.points {
             return Err(CadError::InvalidInput(format!(
                 "draw kind '{}' needs at least {} point(s), has {}",
                 self.kind.key(),
-                self.required_points_now(),
+                plan.points,
                 self.points.len()
             )));
         }
@@ -395,11 +284,11 @@ impl DrawTool {
                     .into(),
             ));
         }
-        if self.picks.len() < self.kind.picked_step_count() {
+        if self.picks.len() < plan.picks {
             return Err(CadError::InvalidInput(format!(
                 "draw kind '{}' needs {} resolved entity pick(s), has {}",
                 self.kind.key(),
-                self.kind.picked_step_count(),
+                plan.picks,
                 self.picks.len()
             )));
         }
@@ -842,13 +731,32 @@ impl DrawTool {
             DrawToolKind::DimCenter => DrawIntent::DimCenter {
                 target: self.picks[0].clone(),
             },
-            // DIMANGULAR: the two refs resolved at capture time plus the free
-            // dimension-arc location. The intersection, the angle selection and
-            // every refusal live in the command layer.
-            DrawToolKind::DimAngular => DrawIntent::DimAngular {
-                first: self.picks[0].clone(),
-                second: self.picks[1].clone(),
-                location: self.points[2],
+            // DIMANGULAR: two interchangeable forms, chosen by the first capture.
+            // The two-line form carries the two refs resolved at capture time plus
+            // the free dimension-arc location; the three-point form carries the
+            // vertex, the two side points and the same location. The intersection,
+            // the angle selection and every refusal live in the command layer, so
+            // the capture never invents an intersection or an angle.
+            DrawToolKind::DimAngular => match self.angular_form() {
+                AngularForm::TwoLine => DrawIntent::DimAngular(AngularPicks::TwoLine {
+                    first: self.picks[0].clone(),
+                    second: self.picks[1].clone(),
+                    location: self.points[2],
+                }),
+                AngularForm::ThreePoint => DrawIntent::DimAngular(AngularPicks::ThreePoint {
+                    vertex: self.points[0],
+                    first: self.points[1],
+                    second: self.points[2],
+                    location: self.points[3],
+                }),
+                // The gates above admit only a complete form; refuse rather than
+                // index a point/ref that was never captured.
+                AngularForm::Undecided => {
+                    return Err(CadError::InvalidInput(format!(
+                        "draw kind '{}' has no complete capture yet",
+                        self.kind.key()
+                    )))
+                }
             },
             // DIMORDINATE: the feature point and the leader endpoint exactly as
             // clicked; the axis is derived by the command layer.

@@ -129,14 +129,19 @@ impl DrawPreview {
     /// While a STRETCH polygon/lasso **ring** is open this is `None` for the same
     /// reason (the vertex run has no fixed complement); once the ring is closed
     /// the two displacement points are the fixed run this reports.
+    ///
+    /// The count comes from [`DrawPreview::remaining`] — the state machine's
+    /// **live** complement — rather than from [`Self::arity`], because a kind with
+    /// a mixed capture (DIMANGULAR) takes one point more once its first step was a
+    /// point instead of a pick.
     pub fn remaining_points(&self) -> Option<usize> {
         if self.window_open {
             return None;
         }
-        let minimum = self.arity().minimum();
-        if self.points.len() < minimum {
-            Some(minimum - self.points.len())
-        } else if self.arity().is_open_ended() {
+        if self.remaining > 0 {
+            return Some(self.remaining);
+        }
+        if self.is_open_ended() {
             None
         } else {
             Some(0)

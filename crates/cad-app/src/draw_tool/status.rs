@@ -109,6 +109,28 @@ impl DrawPreview {
                 self.points.len()
             );
         }
+        if self.kind.has_mixed_first_step() {
+            // DIMANGULAR's first prompt is a real choice ("select a line **or**
+            // specify a vertex"), so the line names the pending step instead of
+            // counting points. Locale-neutral ASCII, like the other post-ADR-0015
+            // fallback lines: the catalog carries the chrome copy.
+            return if self.points.is_empty() {
+                format!("{}: pick a line, or specify the vertex", self.kind.key())
+            } else if self.picks.is_empty() {
+                format!(
+                    "{}: three-point form, {} point(s) captured, {} more needed",
+                    self.kind.key(),
+                    self.points.len(),
+                    self.remaining
+                )
+            } else if self.picks.len() < 2 {
+                format!("{}: pick the second line", self.kind.key())
+            } else if self.ready {
+                format!("{}: ready, press Enter to confirm", self.kind.key())
+            } else {
+                format!("{}: pick the dimension-arc location", self.kind.key())
+            };
+        }
         if self.kind.requires_selection() && self.selection_count == 0 {
             return format!("{}：请先选择对象", self.kind.label());
         }

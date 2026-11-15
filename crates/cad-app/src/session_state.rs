@@ -802,18 +802,6 @@ impl SessionState {
         }
     }
 
-    /// Whether the active drawing tool has a pending entity-pick step.
-    ///
-    /// True only for TRIM/EXTEND while a step is still un-captured; the host
-    /// uses it to route a click to the pick path and to know whether to resolve
-    /// a cursor-time candidate.
-    pub fn draw_requires_entity_pick(&self) -> bool {
-        matches!(
-            &self.tool,
-            ToolState::Drawing(capture) if capture.tool.requires_entity_pick()
-        )
-    }
-
     /// The active drawing tool's kind, or `None` when no drawing capture is
     /// active. The host reads it to apply kind-specific pick rules (TEXTEDIT
     /// validates its pick and records the current string).
@@ -873,7 +861,10 @@ impl SessionState {
             DrawToolKind::Polygon | DrawToolKind::PolygonCircumscribed
         )
         .then_some(self.polygon_sides());
-        let pending_pick = preview.points.len() < preview.kind.picked_step_count();
+        let pending_pick = matches!(
+            &self.tool,
+            ToolState::Drawing(capture) if capture.tool.requires_entity_pick()
+        );
         if !pending_pick {
             preview.cursor =
                 self.constrained_cursor(preview.points.last().copied(), preview.cursor);

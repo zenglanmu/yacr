@@ -39,6 +39,45 @@ impl PointArity {
     }
 }
 
+/// The accepted input of **one** capture step.
+///
+/// [`PointArity`] plus [`DrawToolKind::picked_step_count`] can only say "the first
+/// `n` steps are entity picks, every later step is a free point". AutoCAD's
+/// DIMANGULAR first prompt is a genuine mix — "select a line **or** specify a
+/// vertex" — so a per-step grammar needs a third state. The transition rules that
+/// read it live on [`crate::draw_tool::DrawTool`] (one form is chosen by the first
+/// capture, and a capture of the other kind is refused by name rather than
+/// silently reinterpreted).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaptureStep {
+    /// A free world point only.
+    Point,
+    /// An existing-entity pick only: a click that resolves no entity is refused
+    /// by name, never reinterpreted as a point.
+    Pick,
+    /// A line pick **or** a free point (the mixed step). Which one the click was
+    /// fixes the rest of that capture's grammar.
+    PickOrPoint,
+}
+
+impl CaptureStep {
+    /// Whether the step accepts a free point.
+    pub fn accepts_point(self) -> bool {
+        matches!(self, Self::Point | Self::PickOrPoint)
+    }
+
+    /// Whether the step accepts an existing-entity pick.
+    pub fn accepts_pick(self) -> bool {
+        matches!(self, Self::Pick | Self::PickOrPoint)
+    }
+
+    /// Whether the step accepts **only** one of the two inputs (`false` for the
+    /// mixed step, which accepts both).
+    pub fn is_only_pick(self) -> bool {
+        self == Self::Pick
+    }
+}
+
 /// The drawing/editing operation a tool captures for — see the
 /// [`definition`] submodule for the variant catalogue and each kind's documented
 /// subset.
@@ -463,7 +502,12 @@ impl DrawToolKind {
             // CIRCLE 3P: three points on the circle (the circumcircle is the
             // same construction ARC uses).
             | Self::Circle3P
-            // DIMANGULAR: two entity picks plus the dimension-arc location.
+            // DIMANGULAR: two entity picks plus the dimension-arc location. That
+            // is the **shorter** of its two forms and therefore the static
+            // minimum; the three-point form (vertex, two side points and the same
+            // location) takes one more capture, declared by
+            // [`Self::extended_point_count`] and resolved by the capture state
+            // machine once the first step is a point rather than a line pick.
             | Self::DimAngular => PointArity::Exact(3),
             // ALIGN: the first source point, its destination, then the second
             // source point and its destination (ADR 0016 decision F). STRETCH: the
@@ -613,7 +657,10 @@ impl DrawToolKind {
     /// The capture state machine reads this to route each step: a click is an
     /// entity pick while `points.len() < picked_step_count()`, and a free point
     /// after it. It replaces the old "all steps are picks" boolean, which could not
-    /// express a mixed capture.
+    /// express a mixed capture. A kind with a [`Self::has_mixed_first_step`] step
+    /// is routed by its **live plan** instead (the first capture chooses the
+    /// form), so for DIMANGULAR this count is the two-line reading, not a rule
+    /// that the first step must be a pick.
     pub fn picked_step_count(self) -> usize {
         match self {
             Self::Trim | Self::Extend | Self::Chamfer | Self::Fillet => self.required_points(),
@@ -630,10 +677,39 @@ impl DrawToolKind {
             Self::Break | Self::BreakAtPoint => 1,
             // TEXTEDIT picks the text entity it will edit as its only step.
             Self::TextEdit => 1,
-            // DIMANGULAR's two-line form picks both lines; its third step is the
-            // free dimension-arc location.
+            // DIMANGULAR's first step is the **mixed** line-pick-or-vertex step
+            // ([`Self::has_mixed_first_step`]) and its second is the second line;
+            // both count here so a two-line capture has two resolved refs. The
+            // three-point form resolves no ref at all, which is why the live
+            // capture plan — not this static count — is what readiness checks.
             Self::DimAngular => 2,
             _ => 0,
+        }
+    }
+
+    /// Whether the kind's capture starts with a **mixed** step: a line pick *or*
+    /// a free point ([`CaptureStep::PickOrPoint`]).
+    ///
+    /// Only DIMANGULAR has one today, because only its first prompt is a real
+    /// choice in AutoCAD ("select a line **or** specify a vertex"). The step's
+    /// transition rules (which form the first capture selects, and the named
+    /// refusal for a mixed sequence) live on the capture state machine.
+    pub fn has_mixed_first_step(self) -> bool {
+        matches!(self, Self::DimAngular)
+    }
+
+    /// The point complement of the kind's **extended** form, when the first step
+    /// captured a point instead of an entity pick, or `None` for every kind with
+    /// a single fixed complement.
+    ///
+    /// DIMANGULAR is the one kind: the two-line form is two line picks plus the
+    /// dimension-arc location ([`Self::arity`] = 3), and the three-point form is
+    /// the vertex, the two side points and the same location = one more point.
+    /// Both forms end in exactly one `DIMENSION` entity through the same command.
+    pub fn extended_point_count(self) -> Option<usize> {
+        match self {
+            Self::DimAngular => Some(4),
+            _ => None,
         }
     }
 

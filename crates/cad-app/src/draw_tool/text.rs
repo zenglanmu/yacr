@@ -43,7 +43,7 @@ impl DrawTool {
     /// after the text was submitted (which completes the command).
     pub fn awaiting_text(&self) -> bool {
         self.text_required_now()
-            && self.points.len() >= self.required_points_now()
+            && self.points.len() >= self.capture_plan().points
             && self.text.is_none()
     }
 
@@ -77,11 +77,12 @@ impl DrawTool {
                 self.kind.key()
             )));
         }
-        if self.points.len() < self.required_points_now() {
+        let points = self.capture_plan().points;
+        if self.points.len() < points {
             return Err(CadError::InvalidInput(format!(
                 "tool.text_points_incomplete: draw kind '{}' needs {} point(s) before text, has {}",
                 self.kind.key(),
-                self.required_points_now(),
+                points,
                 self.points.len()
             )));
         }

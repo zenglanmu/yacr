@@ -7,9 +7,9 @@
 //!   dimension-arc location (two different locations on the same two lines select
 //!   45 vs 135 degrees), and its definition points are groups 13/14 (line 1),
 //!   15/10 (line 2) and group 16 (arc location);
-//! * the three-point angular form (command payload) measures the sector the
-//!   location selects, including the reflex angle, with the vertex/side points in
-//!   groups 15/13/14;
+//! * the three-point angular form (the interactive three-point capture, and the
+//!   command payload) measures the sector the location selects, including the
+//!   reflex angle, with the vertex/side points in groups 15/13/14;
 //! * the ordinate measurement is the feature's world-origin-relative X or Y
 //!   **magnitude**, the auto axis follows "a greater Y difference measures X",
 //!   the unstated equal case is Y (our declared choice), and a forced axis wins;

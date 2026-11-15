@@ -44,6 +44,34 @@ pub enum AlignPairSet {
     },
 }
 
+/// The two DIMANGULAR capture forms (ADR 0017 decision C, P5e).
+///
+/// The capture state machine selects one of them from its **first** capture
+/// (a line pick or a free vertex point) and refuses a mixed sequence by name, so
+/// exactly one of these is ever produced. Both end in one `DIMENSION` entity
+/// through the same command.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AngularPicks {
+    /// The two-line form: the two straight-line refs resolved at capture time
+    /// plus the dimension-arc location. The vertex is the intersection of the two
+    /// infinite lines, and `location` selects which of the four sectors is
+    /// measured (the command layer's declared rule).
+    TwoLine {
+        first: SelectionRef,
+        second: SelectionRef,
+        location: Point3,
+    },
+    /// The three-point form: the vertex, the two side points and the
+    /// dimension-arc location, exactly as clicked. `location` selects the sector,
+    /// including the reflex one.
+    ThreePoint {
+        vertex: Point3,
+        first: Point3,
+        second: Point3,
+        location: Point3,
+    },
+}
+
 /// The pure description of a commit the command layer turns into exactly one
 /// drawing transaction.
 ///
@@ -376,19 +404,15 @@ pub enum DrawIntent {
     /// with `DIMCEN = 0`, nothing plus a diagnostic and no transaction) and owns
     /// every refusal. This is **not** a `DIMENSION` entity.
     DimCenter { target: SelectionRef },
-    /// DIMANGULAR: insert an angular dimension between the two picked straight
-    /// lines, with `location` selecting the dimensioned angle (ADR 0017 decision C,
-    /// P5e).
+    /// DIMANGULAR: insert an angular dimension from either capture form, with
+    /// `location` selecting the angle that is measured (ADR 0017 decision C, P5e).
     ///
-    /// `first`/`second` are the refs resolved at capture time (the vertex is their
-    /// intersection); `location` is the dimension-arc pick. The command layer
-    /// resolves the lines, builds the definition and owns every refusal, so the
-    /// capture never invents an intersection or an angle.
-    DimAngular {
-        first: SelectionRef,
-        second: SelectionRef,
-        location: Point3,
-    },
+    /// The two constructions are both reachable interactively
+    /// ([`AngularPicks`]): two line picks (the vertex is their intersection) or
+    /// three points (vertex, two side points). The command layer resolves the
+    /// lines/points, builds the definition and owns every refusal, so the capture
+    /// never invents an intersection or an angle.
+    DimAngular(AngularPicks),
     /// DIMORDINATE: insert an ordinate dimension for `feature` with the leader
     /// ending at `leader` (ADR 0017 decision C, P5e).
     ///
