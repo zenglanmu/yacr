@@ -80,6 +80,27 @@ fn layoutmerge_and_layoutwizard_apply_and_keep_their_name_grammar() {
         .command("LAYOUTWIZARD SheetThree A4 0 297")
         .expect_err("a zero paper width is refused before dispatch");
     assert!(bad_paper.contains("finite numbers > 0"), "{bad_paper}");
+
+    session
+        .command("LAYOUTWIZARD SheetArranged A5 148 210 arrange two-vertical")
+        .expect("the bounded ARRANGE option creates the layout and its cells");
+    let unknown_arrangement = session
+        .command("LAYOUTWIZARD SheetUnknown A4 210 297 ARRANGE ThreeRight")
+        .expect_err("an arrangement outside the bounded set is refused by name");
+    assert!(
+        unknown_arrangement.contains("layoutwizard.unknown_arrangement"),
+        "{unknown_arrangement}"
+    );
+    let unknown_option = session
+        .command("LAYOUTWIZARD SheetOption A4 210 297 FOO bar")
+        .expect_err("an unknown wizard key is refused instead of ignored");
+    assert!(
+        unknown_option.contains("layoutwizard.unknown_option"),
+        "{unknown_option}"
+    );
+    session
+        .command("LAYOUTWIZARD SheetDevice A4 210 297 PLOTDEVICE DWG_To_PDF.pc3")
+        .expect("the unavailable plot-device step is reported, not silently dropped");
 }
 
 #[test]

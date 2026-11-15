@@ -170,6 +170,20 @@ fn segments_intersect(a1: Point3, a2: Point3, b1: Point3, b2: Point3, tolerance:
         || on_segment(b2, a1, a2, d4)
 }
 
+/// The sheet size a layout's viewport grid is built on.
+///
+/// The stored page setup's **rotated** size when it is usable, otherwise the
+/// documented ISO A4 default (`210 x 297` mm) — the same page
+/// `DrawingDatabase::plot_settings_for` resolves. Never a guessed vendor size.
+pub(super) fn sheet_size(drawing: &DrawingDatabase, layout_id: LayoutId) -> (f64, f64) {
+    let (width, height) = drawing.plot_settings_for(layout_id).rotated_size();
+    if width.is_finite() && height.is_finite() && width > 0.0 && height > 0.0 {
+        (width, height)
+    } else {
+        (210.0, 297.0)
+    }
+}
+
 /// Build a `rows x cols` grid of axis-aligned viewports covering the sheet.
 ///
 /// The cells are equal, cover the sheet from its own origin, and each clip is the
@@ -186,13 +200,29 @@ pub(super) fn grid_viewports(
     cols: u32,
     total: u32,
 ) -> Vec<PaperViewport> {
-    let (width, height) = {
-        let (width, height) = drawing.plot_settings_for(layout_id).rotated_size();
-        if width.is_finite() && height.is_finite() && width > 0.0 && height > 0.0 {
-            (width, height)
-        } else {
-            (210.0, 297.0)
-        }
+    let (width, height) = sheet_size(drawing, layout_id);
+    grid_viewports_on_sheet(width, height, rows, cols, total)
+}
+
+/// [`grid_viewports`] on an explicit sheet.
+///
+/// `LAYOUTWIZARD` creates the layout **and** its arrangement in one revision, so
+/// the sheet to cover is the paper setup it is about to write, not a row that
+/// does not exist yet. `width`/`height` are the caller's validated millimetres;
+/// a non-usable pair still falls back to the documented ISO A4 default rather
+/// than producing a degenerate grid.
+pub(super) fn grid_viewports_on_sheet(
+    width: f64,
+    height: f64,
+    rows: u32,
+    cols: u32,
+    total: u32,
+) -> Vec<PaperViewport> {
+    let (width, height) = if width.is_finite() && height.is_finite() && width > 0.0 && height > 0.0
+    {
+        (width, height)
+    } else {
+        (210.0, 297.0)
     };
     let mut viewports = Vec::with_capacity(total as usize);
     for row in 0..rows {

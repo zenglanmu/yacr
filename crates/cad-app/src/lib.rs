@@ -431,7 +431,7 @@ mod layout_payload;
 pub mod ml_style;
 
 pub use draw2_payload::{Draw2Payload, DrawOrderMode, MlStyleCommand, TrexMode};
-pub use layout_payload::{LayoutPayload, PaperSetup};
+pub use layout_payload::{LayoutPayload, PaperSetup, UnavailableWizardStep, WizardArrangement};
 pub use ml_style::{MultilineStyle, MultilineStyleStore, MULTILINE_STYLE_CAP};
 
 pub use command_payload::{

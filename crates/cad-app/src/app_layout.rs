@@ -3,7 +3,8 @@
 //! The **read** commands (`LAYOUT LIST`, `LAYOUT SET`, `VPMAX`, `VPMIN`) are
 //! real, and so are the table/viewport **writes** promoted now that `cad-db`
 //! owns the sanctioned post-import layout write paths: `LAYOUT NEW|RENAME|DELETE`,
-//! `LAYOUTMERGE`, `LAYOUTWIZARD` (including its optional authored page setup),
+//! `LAYOUTMERGE`, `LAYOUTWIZARD` (including its optional authored page setup and
+//! bounded viewport arrangement),
 //! `MVIEW` (rectangular and polygonal), `VPORTS`/`-VPORTS`, `VPCLIP RECT` and
 //! `VPCLIP` polygon, `VPSCALE`, `LAYVPI` and the `ALIGNSPACE`/`VPSYNC`
 //! viewport-alignment writes each publish exactly one revision and one undo
@@ -34,7 +35,9 @@ use cad_db::{DrawingDatabase, PaperViewport, PlotRotation};
 use cad_history::{drawing_patch, layout_patch, DrawingUndoRecord};
 
 use crate::app_drawing::{layout_row, next_transaction_id};
-use crate::app_layout_geometry::{clip_center, grid_viewports, resolve_viewport_scale};
+use crate::app_layout_geometry::{
+    clip_center, grid_viewports, grid_viewports_on_sheet, resolve_viewport_scale, sheet_size,
+};
 use crate::app_layout_names::{
     find_layout_named, resolve_layout_name, validate_layout_name, LayoutSummary,
 };
@@ -304,7 +307,12 @@ impl Application {
                     point_report: None,
                 })
             }
-            LayoutPayload::Wizard { name, paper } => {
+            LayoutPayload::Wizard {
+                name,
+                paper,
+                arrangement,
+                unavailable,
+            } => {
                 let name = validate_layout_name(name)?;
                 let document_id = command.document;
                 let drawing = self.drawing(document_id)?.clone();
@@ -316,12 +324,26 @@ impl Application {
                 }
                 let transaction = next_transaction_id();
                 let mut candidate = drawing;
+                // The typed set is the only authority: a spelling outside it is
+                // refused here, before anything is written (no default fallback).
+                let arrangement = match arrangement {
+                    Some(spelling) => {
+                        Some(WizardArrangement::from_name(spelling).ok_or_else(|| {
+                            CadError::InvalidInput(WizardArrangement::unknown_name_refusal(
+                                spelling,
+                            ))
+                        })?)
+                    }
+                    None => None,
+                };
                 // Allocate the same monotonic id `create_layout` would, then
-                // install the row and its optional authored page setup in a
-                // **single** revision through the validated batch entry, so a
-                // wizard run with a paper setup is still one undo step.
+                // install the row, its optional authored page setup and its
+                // optional arrangement viewports in a **single** revision
+                // through the validated batch entry, so a wizard run with a
+                // paper setup and a viewport arrangement is still one undo
+                // step.
                 let id = LayoutId(candidate.next_layout_id().0.max(1));
-                let plot = match &paper {
+                let plot = match paper {
                     Some(paper) => Some(authored_plot_record(
                         id,
                         paper,
@@ -331,11 +353,25 @@ impl Application {
                     )?),
                     None => None,
                 };
+                // The arrangement is the same equal-cell grid `VPORTS` writes,
+                // built on the sheet this run is about to author (or the
+                // documented A4 default page when no paper setup is supplied).
+                let viewports = match arrangement {
+                    Some(arrangement) => {
+                        let (rows, cols) = arrangement.grid();
+                        let (width, height) = match paper {
+                            Some(paper) => (paper.width, paper.height),
+                            None => sheet_size(&candidate, id),
+                        };
+                        grid_viewports_on_sheet(width, height, rows, cols, rows * cols)
+                    }
+                    None => Vec::new(),
+                };
                 let row = cad_db::LayoutRow {
                     layout: cad_db::Layout {
                         id,
                         name: name.clone(),
-                        viewports: Vec::new(),
+                        viewports,
                     },
                     plot,
                 };
@@ -357,7 +393,7 @@ impl Application {
                     code: "layout.created".into(),
                     message: format!("LAYOUT: created layout {} ({:?})", id.0, name),
                 }];
-                if let Some(paper) = &paper {
+                if let Some(paper) = paper {
                     diagnostics.push(Diagnostic {
                         object: None,
                         code: "layoutwizard.paper_applied".into(),
@@ -365,6 +401,40 @@ impl Application {
                             "LAYOUTWIZARD: applied authored page setup {} ({} x {} mm, scale \
                              1:1, rotation 0) to layout {}",
                             paper.name, paper.width, paper.height, id.0
+                        ),
+                    });
+                }
+                if let Some(arrangement) = arrangement {
+                    let (rows, cols) = arrangement.grid();
+                    let count = rows * cols;
+                    diagnostics.push(Diagnostic {
+                        object: None,
+                        code: "layoutwizard.arrangement_applied".into(),
+                        message: format!(
+                            "LAYOUTWIZARD: created {count} viewport(s) for arrangement {} \
+                             ({rows} x {cols} equal cells) in layout {}; each cell is a \
+                             declared simple layout with the model origin at its centre, not an \
+                             AutoCAD asymmetric Standard configuration",
+                            arrangement.name(),
+                            id.0
+                        ),
+                    });
+                }
+                // Printer/plot device, plot style table and title block are not
+                // modelled by this build. The layout above is real and keeps the
+                // authored paper settings; each requested-but-unavailable step is
+                // named here with its own stable code and is never applied.
+                for step in unavailable {
+                    diagnostics.push(Diagnostic {
+                        object: None,
+                        code: step.code().into(),
+                        message: format!(
+                            "LAYOUTWIZARD: {} {:?} was NOT applied — this build has no plot \
+                             devices, plot-style tables or title-block insertion; layout {} was \
+                             created with the supported wizard steps only",
+                            step.step(),
+                            step.value(),
+                            id.0
                         ),
                     });
                 }

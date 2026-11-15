@@ -15,10 +15,16 @@
 //!   delete also cascades the plot settings and leaves the session on a valid
 //!   space when the deleted layout was active.
 //! * `LAYOUTMERGE` moves every source paper entity and deletes the source row in
-//!   one combined revision. `LAYOUTWIZARD` creates the layout and, when the
-//!   optional paper setup is supplied, writes it as one authored
-//!   `PLOTSETTINGS` row in the same revision and undo step
-//!   (`layoutwizard.paper_applied`).
+//!   one combined revision. `LAYOUTWIZARD` creates the layout, its optional
+//!   authored `PLOTSETTINGS` row (`layoutwizard.paper_applied`) and its optional
+//!   equal-cell viewport arrangement (`layoutwizard.arrangement_applied`) in the
+//!   same revision and undo step. The arrangement set is bounded
+//!   ([`crate::WizardArrangement`]); a name outside it is refused by name
+//!   (`layoutwizard.unknown_arrangement`). The wizard's printer/plot-device,
+//!   plot-style and title-block steps have no implementation: they are reported
+//!   with their own stable code (`layoutwizard.plot_device_not_implemented`,
+//!   `layoutwizard.plot_style_not_implemented`,
+//!   `layoutwizard.title_block_not_implemented`) and are never applied.
 //! * `VPORTS` creates a declared simple `rows * cols` grid; `VPCLIP RECT` and
 //!   `VPSCALE` edit the **first** viewport because this build has no
 //!   per-viewport selection model. That is a declared narrowing, not a

@@ -29,12 +29,26 @@ pub enum LayoutPayload {
     /// `LAYOUTMERGE <source> <target>`: move every source paper entity into the
     /// target and delete the source layout in one combined revision/undo step.
     Merge { source: String, target: String },
-    /// `LAYOUTWIZARD <name> [<paper> <width> <height>]`: validate the name and
-    /// paper numbers, create the layout, and (when a paper setup is supplied)
-    /// write one authored `PLOTSETTINGS` row in the same revision and undo step.
+    /// `LAYOUTWIZARD <name> [<paper> <width> <height>] [ARRANGE <arrangement>]`:
+    /// validate the name, paper numbers and arrangement, then create the layout
+    /// row, its optional authored `PLOTSETTINGS` row **and** its optional
+    /// arrangement viewports in one revision and one undo step.
+    ///
+    /// `arrangement` is the **spelling** the caller typed, exactly like
+    /// `VPSCALE`'s `name`: the application resolves it against the bounded
+    /// [`WizardArrangement`] set and refuses a miss by name
+    /// (`layoutwizard.unknown_arrangement`), so an arrangement outside that set
+    /// is never silently replaced by a default. `unavailable` carries the wizard
+    /// steps this build cannot perform (plot device, plot style table, title
+    /// block). They are **not** applied and are not silently dropped: the
+    /// outcome reports each one with its own stable code
+    /// ([`UnavailableWizardStep::code`]) while the layout is still created with
+    /// the authored paper settings.
     Wizard {
         name: String,
         paper: Option<PaperSetup>,
+        arrangement: Option<String>,
+        unavailable: Vec<UnavailableWizardStep>,
     },
     /// `PAGESETUP <layout> <paper> <width> <height> [<num>:<den>] [0|90|180|270]`:
     /// write one authored page setup for an existing layout as one revision and
@@ -101,6 +115,145 @@ pub enum LayoutPayload {
         layers: Vec<String>,
         viewport: usize,
     },
+}
+
+/// The bounded set of viewport arrangements `LAYOUTWIZARD` may create.
+///
+/// Every member is an **equal-cell grid** built by the same helper as `VPORTS`
+/// (`grid_viewports_on_sheet` in `crate::app_layout_geometry`), i.e. the same
+/// declared simple-layout geometry; this build has no per-cell sizing, so
+/// AutoCAD's asymmetric Standard configurations (`Three:Right`, `Three:Above`,
+/// …) are deliberately absent instead of being approximated. `(rows, cols)` in
+/// [`Self::grid`] is the `VPORTS` grid that produces the same cells.
+///
+/// `TwoVertical` / `TwoHorizontal` name the **divider**: a vertical divider
+/// produces two side-by-side cells (`1 x 2`), a horizontal divider two stacked
+/// cells (`2 x 1`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WizardArrangement {
+    /// One full-sheet viewport (`1 x 1`).
+    Single,
+    /// Two side-by-side cells (`1 x 2`).
+    TwoVertical,
+    /// Two stacked cells (`2 x 1`).
+    TwoHorizontal,
+    /// Three side-by-side cells (`1 x 3`).
+    ThreeVertical,
+    /// Three stacked cells (`3 x 1`).
+    ThreeHorizontal,
+    /// A `2 x 2` grid of four cells.
+    Four,
+}
+
+impl WizardArrangement {
+    /// Every supported arrangement, in the order a refusal message lists them.
+    pub const ALL: [Self; 6] = [
+        Self::Single,
+        Self::TwoVertical,
+        Self::TwoHorizontal,
+        Self::ThreeVertical,
+        Self::ThreeHorizontal,
+        Self::Four,
+    ];
+
+    /// The `(rows, cols)` grid of this arrangement (the `VPORTS` equivalent).
+    pub fn grid(self) -> (u32, u32) {
+        match self {
+            Self::Single => (1, 1),
+            Self::TwoVertical => (1, 2),
+            Self::TwoHorizontal => (2, 1),
+            Self::ThreeVertical => (1, 3),
+            Self::ThreeHorizontal => (3, 1),
+            Self::Four => (2, 2),
+        }
+    }
+
+    /// The stable spelling used by diagnostics and by the command grammar.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Single => "Single",
+            Self::TwoVertical => "TwoVertical",
+            Self::TwoHorizontal => "TwoHorizontal",
+            Self::ThreeVertical => "ThreeVertical",
+            Self::ThreeHorizontal => "ThreeHorizontal",
+            Self::Four => "Four",
+        }
+    }
+
+    /// Resolve one arrangement spelling, case-insensitively.
+    ///
+    /// The separator is normalized away, so `TwoVertical`, `two-vertical` and
+    /// `two_vertical` are the same member. Anything else is `None`; the caller
+    /// refuses it by name rather than falling back to a default.
+    pub fn from_name(text: &str) -> Option<Self> {
+        let normalized: String = text
+            .trim()
+            .chars()
+            .filter(|character| *character != '-' && *character != '_')
+            .collect::<String>()
+            .to_ascii_lowercase();
+        Self::ALL
+            .into_iter()
+            .find(|arrangement| arrangement.name().to_ascii_lowercase() == normalized)
+    }
+
+    /// The refusal sentence for a name outside [`Self::ALL`].
+    pub fn unknown_name_refusal(text: &str) -> String {
+        let supported: Vec<&str> = Self::ALL
+            .iter()
+            .map(|arrangement| arrangement.name())
+            .collect();
+        format!(
+            "layoutwizard.unknown_arrangement: {:?} is not a LAYOUTWIZARD arrangement; this build \
+             supports the equal-cell arrangements {} and nothing else",
+            text,
+            supported.join(", ")
+        )
+    }
+}
+
+/// One `LAYOUTWIZARD` step this build cannot perform.
+///
+/// The wizard's printer/plotter, plot-style-table and title-block pages have no
+/// implementation (and no plot device is ever opened), so the payload can only
+/// name the request: the handler creates the layout with the authored paper
+/// settings and reports the step with [`Self::code`], which is the refusal
+/// record. Nothing about the requested device, style or block is written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UnavailableWizardStep {
+    /// `PLOTDEVICE <name>`: printers and plot devices are not modelled.
+    PlotDevice(String),
+    /// `PLOTSTYLE <name>`: plot-style tables are not modelled.
+    PlotStyle(String),
+    /// `TITLEBLOCK <name>`: the wizard does not insert title blocks.
+    TitleBlock(String),
+}
+
+impl UnavailableWizardStep {
+    /// The stable diagnostic code that names this refusal.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::PlotDevice(_) => "layoutwizard.plot_device_not_implemented",
+            Self::PlotStyle(_) => "layoutwizard.plot_style_not_implemented",
+            Self::TitleBlock(_) => "layoutwizard.title_block_not_implemented",
+        }
+    }
+
+    /// The spelling the caller used for the step.
+    pub fn step(&self) -> &'static str {
+        match self {
+            Self::PlotDevice(_) => "PLOTDEVICE",
+            Self::PlotStyle(_) => "PLOTSTYLE",
+            Self::TitleBlock(_) => "TITLEBLOCK",
+        }
+    }
+
+    /// The value the caller attached to the step.
+    pub fn value(&self) -> &str {
+        match self {
+            Self::PlotDevice(value) | Self::PlotStyle(value) | Self::TitleBlock(value) => value,
+        }
+    }
 }
 
 /// The page setup of `PAGESETUP` / `LAYOUTWIZARD`.

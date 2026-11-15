@@ -246,6 +246,7 @@ mod layers_off;
 mod layers_previous;
 mod layout_commands;
 mod layout_page_setup;
+mod layout_wizard;
 mod locked_layers;
 mod measure_extra;
 mod model_space;

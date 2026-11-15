@@ -1,8 +1,11 @@
 //! Contract tests for the 2026-11-07 layout / viewport batch.
 //!
 //! The read commands (`LAYOUT LIST`, `LAYOUT SET`, `VPMAX`, `VPMIN`) and the
-//! promoted **writes** (`LAYOUT NEW|RENAME|DELETE`, `LAYOUTMERGE`,
-//! `LAYOUTWIZARD`, `VPORTS`, `VPCLIP RECT`, `VPSCALE`) are exercised end to end.
+//! promoted **writes** (`LAYOUT NEW|RENAME|DELETE`, `LAYOUTMERGE`, `VPORTS`,
+//! `VPCLIP RECT`, `VPSCALE`) are exercised end to end. `LAYOUTWIZARD` (its
+//! create, authored page setup and bounded viewport arrangement) lives in the
+//! sibling `layout_wizard` module, split out so this file stays inside the
+//! 1000-line code gate.
 //! Every write is one revision, one `ChangeSet` and one undo step; the round
 //! trips assert undo/redo and the status projection. `LAYVPI` freezes real
 //! per-viewport layer overrides; the global layer table is never written.
@@ -813,59 +816,6 @@ fn vpscale_refuses_invalid_scales_before_writing() {
     );
     assert_eq!(revision(&app), before);
     assert!(!undo_available(&app));
-}
-
-#[test]
-fn layoutwizard_creates_the_layout_and_applies_the_paper_setup() {
-    let (mut app, mut session) = standard_fixture();
-    let before = revision(&app);
-    let outcome = app
-        .execute(
-            &mut session,
-            command(
-                CommandId::LayoutWizard,
-                layout_payload(LayoutPayload::Wizard {
-                    name: "Sheet3".into(),
-                    paper: Some(PaperSetup {
-                        name: "A4".into(),
-                        width: 210.0,
-                        height: 297.0,
-                    }),
-                }),
-            ),
-        )
-        .expect("LAYOUTWIZARD creates the layout");
-    assert_eq!(
-        codes(&outcome),
-        vec!["layout.created", "layoutwizard.paper_applied"]
-    );
-    assert!(outcome.diagnostics[1].message.contains("A4"));
-    assert_eq!(revision(&app), Revision(before.0 + 1), "one undo step");
-    assert!(drawing(&app).layout(LayoutId(3)).is_some());
-    let stored = drawing(&app)
-        .plot_settings(LayoutId(3))
-        .expect("the wizard wrote the authored page setup");
-    assert_eq!(stored.layout, LayoutId(3));
-    assert_eq!(stored.paper_size_name, "A4");
-    assert_eq!((stored.paper_width, stored.paper_height), (210.0, 297.0));
-    assert_eq!(stored.provenance, cad_db::PlotProvenance::Authored);
-
-    undo(&mut app, &mut session);
-    assert!(drawing(&app).layout(LayoutId(3)).is_none());
-
-    let no_paper = app
-        .execute(
-            &mut session,
-            command(
-                CommandId::LayoutWizard,
-                layout_payload(LayoutPayload::Wizard {
-                    name: "Sheet4".into(),
-                    paper: None,
-                }),
-            ),
-        )
-        .expect("LAYOUTWIZARD without paper");
-    assert_eq!(codes(&no_paper), vec!["layout.created"]);
 }
 
 fn layvpi(layers: &[&str]) -> Command {

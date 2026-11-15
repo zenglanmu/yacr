@@ -9,7 +9,8 @@
 //!
 //! * `LAYOUT LIST|NEW <name>|RENAME <old> <new>|DELETE <name>|SET <name>`;
 //! * `LAYOUTMERGE <source> <target>`;
-//! * `LAYOUTWIZARD <name> [<paper> <width> <height>]`;
+//! * `LAYOUTWIZARD <name> [<paper> <width> <height>] [ARRANGE <arrangement>]
+//!   [PLOTDEVICE|PLOTSTYLE|TITLEBLOCK <name>]`;
 //! * `PAGESETUP|-PAGESETUP <layout> <paper> <width> <height> [<num>:<den>]
 //!   [0|90|180|270]`;
 //! * `PSETUPIN|-PSETUPIN <source-layout> <target-layout>`;
@@ -27,7 +28,7 @@
 //! reason. `-PAGESETUP`/`-PSETUPIN` are distinct extended selectors, not
 //! aliases, and share their canonical sibling's grammar.
 
-use cad_app::{LayoutPayload, PaperSetup};
+use cad_app::{LayoutPayload, PaperSetup, UnavailableWizardStep, WizardArrangement};
 use cad_db::PlotRotation;
 use cad_domain::Point3;
 
@@ -114,53 +115,136 @@ pub fn parse_layoutmerge_argument(argument: &str) -> Result<LayoutPayload, Strin
     })
 }
 
-/// Parse one `LAYOUTWIZARD <name> [<paper> <width> <height>]` argument.
+/// Parse one `LAYOUTWIZARD` argument.
+///
+/// Grammar:
+///
+/// ```text
+/// LAYOUTWIZARD <name> [<paper> <width> <height>] [ARRANGE <arrangement>]
+///              [PLOTDEVICE <name>] [PLOTSTYLE <name>] [TITLEBLOCK <name>]
+/// ```
+///
+/// * `<name>` is the first token.
+/// * The page setup is **positional** (no key) and comes before any keyed
+///   option; it is recognised as three tokens whose first token is not a
+///   reserved wizard key. Width and height are millimetres and must be finite
+///   and `> 0`.
+/// * `ARRANGE` takes one member of the bounded [`WizardArrangement`] set, so an
+///   arrangement outside that set is refused **by name**
+///   (`layoutwizard.unknown_arrangement`) — there is no default to fall back to.
+/// * `PLOTDEVICE`/`PLOTSTYLE`/`TITLEBLOCK` are accepted so the request is
+///   recorded instead of silently dropped: no plot device, plot-style table or
+///   title block is modelled, and the application reports each one with its own
+///   stable code. Their values are single tokens (a device name with a space is
+///   not addressable through this grammar — a documented boundary).
+/// * Every other key, a repeated key and a key without a value are refused by
+///   name (`layoutwizard.unknown_option`, `layoutwizard.duplicate_option`,
+///   `layoutwizard.missing_option_value`); nothing is ignored.
 pub fn parse_layoutwizard_argument(argument: &str) -> Result<LayoutPayload, String> {
     let tokens: Vec<&str> = argument.split_whitespace().collect();
-    let name = match tokens.as_slice() {
-        [] => {
-            return Err(invalid(
-                "layoutwizard",
-                "LAYOUTWIZARD needs <name> [<paper> <width> <height>]",
-            ))
-        }
-        [name] => (*name).to_string(),
-        [name, paper, width, height] => {
-            let width = width.parse::<f64>().map_err(|_| {
-                invalid(
-                    "layoutwizard",
-                    "LAYOUTWIZARD paper width and height must be finite numbers > 0",
-                )
-            })?;
-            let height = height.parse::<f64>().map_err(|_| {
-                invalid(
-                    "layoutwizard",
-                    "LAYOUTWIZARD paper width and height must be finite numbers > 0",
-                )
-            })?;
-            if !width.is_finite() || !height.is_finite() || width <= 0.0 || height <= 0.0 {
-                return Err(invalid(
-                    "layoutwizard",
-                    "LAYOUTWIZARD paper width and height must be finite numbers > 0",
-                ));
-            }
-            return Ok(LayoutPayload::Wizard {
-                name: (*name).to_string(),
-                paper: Some(PaperSetup {
-                    name: (*paper).to_string(),
-                    width,
-                    height,
-                }),
-            });
-        }
-        _ => {
-            return Err(invalid(
-                "layoutwizard",
-                "LAYOUTWIZARD needs <name> [<paper> <width> <height>]",
-            ))
-        }
+    let Some(name) = tokens.first() else {
+        return Err(invalid("layoutwizard", LAYOUTWIZARD_GRAMMAR));
     };
-    Ok(LayoutPayload::Wizard { name, paper: None })
+    let name = (*name).to_string();
+    let mut index = 1;
+    let mut paper = None;
+    // The paper triple carries no key, so it is only consumed when the token
+    // that would be its paper name is not a reserved wizard key.
+    if tokens.len() >= index + 3 && !is_layoutwizard_key(tokens[index]) {
+        let width = tokens[index + 1].parse::<f64>().map_err(|_| {
+            invalid(
+                "layoutwizard",
+                "LAYOUTWIZARD paper width and height must be finite numbers > 0",
+            )
+        })?;
+        let height = tokens[index + 2].parse::<f64>().map_err(|_| {
+            invalid(
+                "layoutwizard",
+                "LAYOUTWIZARD paper width and height must be finite numbers > 0",
+            )
+        })?;
+        if !width.is_finite() || !height.is_finite() || width <= 0.0 || height <= 0.0 {
+            return Err(invalid(
+                "layoutwizard",
+                "LAYOUTWIZARD paper width and height must be finite numbers > 0",
+            ));
+        }
+        paper = Some(PaperSetup {
+            name: tokens[index].to_string(),
+            width,
+            height,
+        });
+        index += 3;
+    }
+    let mut arrangement = None;
+    let mut unavailable: Vec<UnavailableWizardStep> = Vec::new();
+    while index < tokens.len() {
+        let key = tokens[index].to_ascii_uppercase();
+        let Some(value) = tokens.get(index + 1).copied() else {
+            return Err(format!(
+                "layoutwizard.missing_option_value: LAYOUTWIZARD {key} needs a value"
+            ));
+        };
+        match key.as_str() {
+            "ARRANGE" => {
+                if arrangement.is_some() {
+                    return Err(
+                        "layoutwizard.duplicate_option: LAYOUTWIZARD takes one ARRANGE".into(),
+                    );
+                }
+                // Fail fast on a spelling outside the bounded set; the
+                // application resolves the same spelling against the same set
+                // again before it writes anything.
+                if WizardArrangement::from_name(value).is_none() {
+                    return Err(WizardArrangement::unknown_name_refusal(value));
+                }
+                arrangement = Some(value.to_string());
+            }
+            "PLOTDEVICE" | "PLOTSTYLE" | "TITLEBLOCK" => {
+                if unavailable.iter().any(|step| step.step() == key) {
+                    return Err(format!(
+                        "layoutwizard.duplicate_option: LAYOUTWIZARD takes one {key}"
+                    ));
+                }
+                unavailable.push(match key.as_str() {
+                    "PLOTDEVICE" => UnavailableWizardStep::PlotDevice(value.to_string()),
+                    "PLOTSTYLE" => UnavailableWizardStep::PlotStyle(value.to_string()),
+                    _ => UnavailableWizardStep::TitleBlock(value.to_string()),
+                });
+            }
+            _ => {
+                return Err(format!(
+                    "layoutwizard.unknown_option: {:?} is not a LAYOUTWIZARD option; expected \
+                     {LAYOUTWIZARD_OPTIONS}, and a page setup is the positional \
+                     <paper> <width> <height> triple",
+                    tokens[index]
+                ))
+            }
+        }
+        index += 2;
+    }
+    Ok(LayoutPayload::Wizard {
+        name,
+        paper,
+        arrangement,
+        unavailable,
+    })
+}
+
+/// The full `LAYOUTWIZARD` argument grammar, as the refusal sentence spells it.
+const LAYOUTWIZARD_GRAMMAR: &str = "<name> [<paper> <width> <height>] \
+                                     [ARRANGE <arrangement>] [PLOTDEVICE <name>] \
+                                     [PLOTSTYLE <name>] [TITLEBLOCK <name>]";
+
+/// The keyed options of `LAYOUTWIZARD`, for the unknown-option refusal.
+const LAYOUTWIZARD_OPTIONS: &str = "ARRANGE, PLOTDEVICE, PLOTSTYLE or TITLEBLOCK";
+
+/// Whether `token` is a reserved `LAYOUTWIZARD` key rather than a paper name.
+fn is_layoutwizard_key(token: &str) -> bool {
+    matches!(
+        token.to_ascii_uppercase().as_str(),
+        "ARRANGE" | "PLOTDEVICE" | "PLOTSTYLE" | "TITLEBLOCK"
+    )
 }
 
 /// Parse one `PAGESETUP <layout> <paper> <width> <height> [<num>:<den>]
