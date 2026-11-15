@@ -488,7 +488,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `LAYFRZ` / `LAYLCK` / `LAYULK` | 部分实现 | 按选中实体所在层写 `LayerAttributes.frozen/locked`；每个改动行一个 `LayerPatch`、单事务 ⇒ **一步撤销**（多行时每行一次 revision 提升） | 无 Settings/Viewports/Block Selection 选项；LAYFRZ 对所有视口生效且拒绝当前层 |
 | `SETBYLAYER` | 实现 | 恢复颜色/线型/线宽/**透明度**为随层；`Include blocks` 递归块成员的显示状态；一条事务/一步撤销 | 材质/命名打印样式未建模（全局范围）；锁定图层拒绝；无交互 ByBlock 询问（全局对话框范围） |
 | `REVERSE` | 部分实现 | 反转选中 LINE / LWPOLYLINE（含 bulge 与闭合映射）/ SPLINE（控制点+节点镜像）方向，一条事务/一步撤销 | 仅当前选择；无 helix/3D；其它种类按名拒绝 |
-| `OOPS` | 部分实现 | 恢复**最近一次 ERASE** 删除的实体（新 id；一条事务/一步撤销；第二次 OOPS 为空操作） | 只记录 ERASE，不覆盖 AutoCAD 的 BLOCK/WBLOCK 删除；撤销 OOPS 不恢复快照 |
+| `OOPS` | 完整实现 | 恢复**最近一次 ERASE 的整批**实体，并覆盖 `BLOCK` 移出的整批行（定义保留成员、OOPS 放回独立副本）；新 id；一条事务/一步撤销；重复执行是具名空操作 `oops.already_restored`，**撤销该恢复会让快照重新可用** | `WBLOCK` 本构建无删除路径（声明）；`CUTCLIP/CUTBASE` 不记录快照 |
 | `OVERKILL` | 部分实现 | 删除同空间/同图层/同几何（1e-9）的**完全重复**选中对象，保留最低 draw order；一条事务/一步撤销 | 无部分重叠、共线合并、圆弧覆盖圆、折线段优化、容差选项、忽略图层/颜色选项 |
 | `BREAKATPOINT` | 部分实现 | 交互工具：拾取对象后指定断点（可投影到对象），把 LINE/ARC/开放 LWPOLYLINE 拆成两段 | 圆/闭合多段线/SPLINE 按名拒绝（闭合对象不在单点拆分）；无选项 |
 | `LIST` | 实现 | 读取当前选择；报告模型/图纸/块空间、id/handle/type/layer/space/draw order、颜色/线型/线宽/透明度/线型比例/可见性、文字样式/标注样式/块名与几何摘要；只读 | 不是交互 Select objects（输入是当前选择）；厚度/拉伸方向未建模（全局范围）；不可寻址引用逐条报告后继续 |
@@ -507,7 +507,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `DIMSPACE` | 实现 | 首个线性/对齐/角度标注为基准；显式间距（`0` = 对齐）或 Auto = **2 × 基准样式文字高度**；角度标注按同心弧半径步进；一条事务/一步撤销 | 模型空间；关联重排未实现（全局范围）；径向/坐标/混合类型按名拒绝 |
 | `PEDIT` | 部分实现 | 恰好一条可寻址模型空间 LWPOLYLINE；`PEDIT CLOSE/OPEN/REVERSE` 改闭合标志或反转顶点+bulge，一条事务/一步撤销；无变化时显式 no-op | 无 `Join`/`Width`/`Fit`/`Spline`/`Decurve`/`Ltype gen`/`Undo`/`Multiple`/`Edit vertex`，无交互选项提示、无 line/arc 转换；裸 `PEDIT` 或未知参数按名拒绝 |
 | `BOUNDARY` | 部分实现 | 一个内部点 → 复用 HATCHPOINT 发现（最小可见闭合边界 + 嵌套岛）；每个环在当前层创建一条闭合、非关联 `AcDbPolyline`（保留 bulge、丢重复末点、世界 `+Z`），一条事务/一步撤销；源对象保留 | 仅整实体圆/完整椭圆/闭合多段线、同 `+Z` 平面；`-BOUNDARY` 的边界集/关闭岛检测/面域输出/对象类型未实现；无 `BO`/`BPOLY` 别名；不关联 |
-| `TEXTTOFRONT` | 部分实现 | 选择式：仅可寻址模型空间 Text/MultiLeader/Dimension，按相对顺序连续排到所有非合格模型空间对象的最大 draw order 之上；其它选中对象逐条 `texttofront.skipped`；一条事务/一步撤销；已在前方时 `texttofront.unchanged` 不建事务 | 图纸空间/块内 draw order 不重排；选中非文字对象不移动；AutoCAD 的“全图文字”形式与 Draw Order 对话框未实现 |
+| `TEXTTOFRONT` | 完整实现 | 选择式；按 `SpaceId` 逐范围（模型空间、各图纸布局、各块定义）把 Text/MultiLeader/Dimension 相对连续排到该范围非合格对象之上；其它选中对象逐条 `texttofront.skipped`；一条事务/一步撤销，`texttofront.unchanged` 不建事务，耗尽 `texttofront.order_exhausted` | 载荷无「全图文字」选项（声明）；无 Draw Order 对话框 |
 
 #### 2026-11-07 文字编辑批次（10 条）
 
@@ -563,7 +563,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 
 | 命令 | 状态 | 结果 | 显式未实现 / 有意偏离 |
 |---|---|---|---|
-| `PURGE` / `-PURGE` | 部分实现 | 清理未使用的**图层**（复用 `DELETELAYER` 的引用拒绝），逐行报告删除/拒绝；层表写不可撤销 | `BLOCK`/`STYLE`/`LINETYPE` 没有删除 API，显式 kind 按名拒绝；裸 `PURGE` 只清图层并报告 `purge.kind_unsupported`；无对话框/嵌套清理选项 |
+| `PURGE` / `-PURGE` | 完整实现 | 清理未使用的**图层**（复用 `DELETELAYER` 引用拒绝，层表写不可撤销）、**块/文字样式/线型**（`delete_block`/`delete_style`/`delete_linetype` + `ensure_*` 在用判定，块成员同批删除），逐行报告删除/拒绝；块/样式/线型一条批/一条事务/一步撤销 | 图层删除刻意不记历史（`DELETELAYER` 既有行为）；仅导入才存在的未命名块行不作为候选；无对话框/嵌套清理选项 |
 | `RENAME` / `-RENAME` | 完整实现 | `RENAME <kind> <old> <new>`：`LAYER`/`STYLE`/`DIMSTYLE`/`MLEADERSTYLE`/`BLOCK`/`LINETYPE` 真实写，一条表补丁/一步撤销；`LINETYPE` 改名在 `cad-db` 单次校验写入内把层属性与实体属性的引用一并级联（一次 revision、一次 `ChangeSet`），撤销/重做对称 | 创建/删除线型仍不支持（`linetype.delete_unsupported`）；`Continuous` 不可改名；无对话框 |
 | `SETVAR` | 部分实现 | `SETVAR <name>` 报告；`SETVAR <name> <value>` 写闭集 `PDMODE/PDSIZE/SNAPUNIT/LTSCALE/GRID/SNAP/ORTHO/TEXTSIZE`，全部复用既有命令/会话写路径 | 未知变量、越界值按名拒绝；不新增系统变量存储；不写 DWG 头的新变量 |
 | `TIME` | 部分实现 | 只读报告：文档 revision/实体数 + UTC 时钟 | 创建/编辑时间、会话 uptime、本地时区格式显式 NOT TRACKED；不发明日期 |
@@ -582,10 +582,10 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `MLINE` | 部分实现 | 恰好两条平行 `LINE`，围绕基线按当前 MLSTYLE 间距放置，一条事务/一步撤销 | 无 join/cap/元素表/多段基线；不是完整 MLINE 实体 |
 | `MLSTYLE` | 部分实现 | 会话内最多 16 个命名多线样式（`LIST`/`SET`），喂 MLINE | 不写 DWG/不持久化；无对话框、无元素/接头样式 |
 | `TREX` | 部分实现 | `TREX TRIM\|EXTEND`；选择集既是被处理对象又互为边界，复用既有 `plan_trim`/`plan_extend`；一条事务/一步撤销 | 无交互边界提示；TRIM 保留含中点的片段、EXTEND 只长 `u=1` 端 |
-| `EXTRIM` | 部分实现 | 第一个选中为边界、其余为被裁对象；复用 trim 规划；一条事务/一步撤销 | 无边界拾取提示；仅 LINE/CIRCLE/ARC/POLYLINE 边界；其它边界/目标按名拒绝 |
+| `EXTRIM` | 完整实现 | 第一个选中为边界、其余为被裁对象；目标集 = TRIM 可裁集（`LINE`/`ARC`/`CIRCLE`/`SPLINE`/`ELLIPSE`/椭圆弧/`LWPOLYLINE`）；不可裁目标按 `extrim.unsupported_target` 逐对象跳过并保留其余裁剪；采样近似切点以 `extrim.approximate_cut` 明示；一条事务/一步撤销 | 无边界拾取提示；载荷无侧点通道，按目标中点选侧（声明）；边界必须是单个可解析图元，否则整命令具名拒绝 |
 | `MPEDIT` | 部分实现 | 对每个选中 LWPOLYLINE 应用 `CLOSE\|OPEN\|REVERSE`，一条事务/一步撤销 | 非多段线/无变化逐条具名跳过；无 Join/Width/Fit/Spline/Decurve/Undo |
 | `-OVERKILL` | 部分实现 | `OVERKILL` 的别名（同一 `CommandId`/规划器） | 同 OVERKILL 的 v1 边界：仅完全重复，无部分重叠/共线合并 |
-| `DRAWORDER` | 部分实现 | `FRONT\|BACK\|ABOVE\|BELOW` 重写选中模型空间实体的 `draw_order`，一条事务/一步撤销，保持相对顺序 | ABOVE/BELOW 以第一个选中为参照；图纸空间/块内顺序不重排；无 Draw Order 对话框 |
+| `DRAWORDER` | 完整实现 | `FRONT`/`BACK`/`ABOVE`/`BELOW` 按 `SpaceId` 逐范围（模型空间、各图纸布局、各块定义）先规划后写入，范围内保持相对顺序，耗尽 `draworder.order_exhausted` 整批拒绝；ABOVE/BELOW 参照与移动对象跨范围时 `draworder.reference_scope`；一条事务/一步撤销 | 无 Draw Order 对话框 |
 
 > **证据边界**：以上 20 条只有 Rust 契约测试与前端纯函数/结构测试；**没有** GUI、像素、真实 GPU、
 > 真机或 vendor-AutoCAD 证据。前端测试在主仓库合并后运行通过；worktree 内因缺 `node_modules`
