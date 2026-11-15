@@ -68,10 +68,12 @@ pub(super) fn emit_hatch(
             dxf.is_solid = true;
             dxf.pattern.name = "SOLID".to_string();
             reasons.push("a solid fill stores no pattern name; group 2 is written as SOLID".into());
+            reasons.extend(unwritable_pattern_origin(hatch));
         }
         HatchFill::Pattern(pattern) => {
             dxf.is_solid = false;
-            dxf.pattern = dxf_pattern(pattern);
+            let (dxf_pattern, pattern_origin_reason) = dxf_pattern(pattern, hatch.pattern_origin());
+            dxf.pattern = dxf_pattern;
             dxf.pattern_angle = pattern.angle;
             dxf.pattern_scale = pattern.scale;
             dxf.is_double = pattern.double;
@@ -81,12 +83,14 @@ pub(super) fn emit_hatch(
                 pattern.name,
                 pattern.lines.len()
             ));
+            reasons.extend(pattern_origin_reason);
         }
         HatchFill::Gradient(gradient) => {
             // A gradient HATCH is a solid fill plus the 450-470 block.
             dxf.is_solid = true;
             dxf.pattern.name = "SOLID".to_string();
             dxf.gradient_color = dxf_gradient(gradient);
+            reasons.extend(unwritable_pattern_origin(hatch));
             reasons.push(format!(
                 "gradient '{}' is written with {} stop(s); colour names \
                  (color_name/book_name) cannot be written (groups 63/421 only)",
@@ -279,8 +283,47 @@ fn dxf_edge(edge: &HatchBoundaryEdge) -> DxfEdge {
     }
 }
 
-fn dxf_pattern(pattern: &cad_domain::HatchPattern) -> DxfPattern {
-    DxfPattern {
+/// Map the domain pattern onto the DXF definition rows, folding the pattern
+/// origin in.
+///
+/// The format has no dedicated pattern-origin group: the DWG and DXF HATCH
+/// records store the pattern phase in each definition row's base point (groups
+/// 43/44), which is where AutoCAD's own HATCHEDIT ORIGIN writes it too. The
+/// domain keeps the phase as a hatch-plane displacement ([`HatchGeometry`]'s
+/// `pattern_origin`, see its type docs), so writing it means moving every row
+/// base point by the same amount in the *row* frame: the display composes a row
+/// as `R(angle) · scale · row` (`HatchPattern::families`), so the inverse is
+/// `R(-angle) · origin / scale`.
+fn dxf_pattern(
+    pattern: &cad_domain::HatchPattern,
+    origin: [f64; 2],
+) -> (DxfPattern, Option<String>) {
+    let (shift, reason) = if origin == [0.0, 0.0] {
+        ([0.0, 0.0], None)
+    } else {
+        match row_origin_shift(origin, pattern) {
+            Some(shift) => (
+                shift,
+                Some(format!(
+                    "pattern origin ({}, {}) is written into every row's base point (groups \
+                     43/44); the format has no separate origin group",
+                    origin[0], origin[1]
+                )),
+            ),
+            // The rows cannot carry the displacement when the stored pattern
+            // scale is unusable: `R(-angle) · origin / scale` has no finite
+            // value. Declared, never silently approximated.
+            None => (
+                [0.0, 0.0],
+                Some(format!(
+                    "pattern origin ({}, {}) cannot be written: the stored pattern scale {} is \
+                     unusable, so the rows keep their own base points",
+                    origin[0], origin[1], pattern.scale
+                )),
+            ),
+        }
+    };
+    let written = DxfPattern {
         name: pattern.name.clone(),
         description: String::new(),
         // Definition rows are pattern-space data and round-trip unchanged; the
@@ -290,12 +333,40 @@ fn dxf_pattern(pattern: &cad_domain::HatchPattern) -> DxfPattern {
             .iter()
             .map(|line| DxfPatternLine {
                 angle: line.angle,
-                base_point: Vector2::new(line.base_x, line.base_y),
+                base_point: Vector2::new(line.base_x + shift[0], line.base_y + shift[1]),
                 offset: Vector2::new(line.offset_x, line.offset_y),
                 dash_lengths: line.dashes.clone(),
             })
             .collect(),
+    };
+    (written, reason)
+}
+
+/// The row-frame shift that expresses a hatch-plane pattern-origin displacement
+/// (`R(-angle) · origin / scale`), or `None` when the pattern scale is unusable.
+fn row_origin_shift(origin: [f64; 2], pattern: &cad_domain::HatchPattern) -> Option<[f64; 2]> {
+    let scale = pattern.scale;
+    if !scale.is_finite() || scale.abs() <= f64::EPSILON {
+        return None;
     }
+    let (sin, cos) = pattern.angle.sin_cos();
+    let shift = [
+        (cos * origin[0] + sin * origin[1]) / scale,
+        (-sin * origin[0] + cos * origin[1]) / scale,
+    ];
+    (shift[0].is_finite() && shift[1].is_finite()).then_some(shift)
+}
+
+/// The declaration for a stored pattern origin on a fill that draws no pattern
+/// rows (solid/gradient): the value cannot be expressed at all.
+fn unwritable_pattern_origin(hatch: &HatchGeometry) -> Option<String> {
+    let [x, y] = hatch.pattern_origin();
+    (x != 0.0 || y != 0.0).then(|| {
+        format!(
+            "the stored pattern origin ({x}, {y}) is not written: a solid/gradient fill has no \
+             pattern definition rows to carry it"
+        )
+    })
 }
 
 fn dxf_gradient(gradient: &HatchGradient) -> HatchGradientPattern {

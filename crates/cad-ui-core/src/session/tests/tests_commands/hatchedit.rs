@@ -2,7 +2,8 @@
 //!
 //! Pins the argument grammar (`STYLE`, `ANGLE`, `SCALE`, `PATTERN`,
 //! `PATTERNTYPE`, `SOLID`, `GRADIENT`, `COLOR`, `TRANSPARENCY`, `LAYER`,
-//! `DRAWORDER`, `RECREATEBOUNDARY`, `SEPARATE` plus the named-refusal forms),
+//! `ORIGIN`, `DRAWORDER`, `RECREATEBOUNDARY`, `SEPARATE` plus the remaining
+//! named-refusal forms),
 //! the stable invalid-argument refusal, the two `PATTERN` name refusals, the
 //! Work-only capability and the one-canonical-selector rule (the option words
 //! are grammar, not names).
@@ -29,6 +30,25 @@ fn hatchedit_is_the_declared_work_only_typed_subset() {
         ("style ignore", HatchEditOption::Style(HatchStyle::Ignore)),
         ("PATTERN ANSI31", HatchEditOption::Pattern("ANSI31".into())),
         ("pattern ansi31", HatchEditOption::Pattern("ansi31".into())),
+        // `PATTERNFILE` parses to a payload with no content yet: the session
+        // reads the file through the host before dispatching (see
+        // `tests_commands::hatchedit_pattern_file`).
+        (
+            "PATTERNFILE /tmp/acad.pat",
+            HatchEditOption::PatternFile {
+                path: "/tmp/acad.pat".into(),
+                name: None,
+                text: None,
+            },
+        ),
+        (
+            "patternfile C:/data/acadiso.pat ladder",
+            HatchEditOption::PatternFile {
+                path: "C:/data/acadiso.pat".into(),
+                name: Some("ladder".into()),
+                text: None,
+            },
+        ),
         (
             "PATTERNTYPE PREDEFINED",
             HatchEditOption::PatternType(HatchPatternType::Predefined),
@@ -52,7 +72,8 @@ fn hatchedit_is_the_declared_work_only_typed_subset() {
         ("TRANSPARENCY 50", HatchEditOption::Transparency(50)),
         ("TRANSPARENCY BYLAYER", HatchEditOption::TransparencyByLayer),
         ("LAYER Walls", HatchEditOption::Layer("Walls".into())),
-        ("ORIGIN", HatchEditOption::Origin),
+        ("ORIGIN 1.5 -2", HatchEditOption::Origin { x: 1.5, y: -2.0 }),
+        ("origin 0 0", HatchEditOption::Origin { x: 0.0, y: 0.0 }),
         ("ASSOCIATE", HatchEditOption::Associate),
         ("DISASSOCIATE", HatchEditOption::Disassociate),
         ("ANNOTATIVE", HatchEditOption::Annotative),
@@ -71,6 +92,8 @@ fn hatchedit_is_the_declared_work_only_typed_subset() {
         "PATTERN?",
         "PATTERNLIST",
         "PATTERN ANSI 31",
+        "PATTERNFILE",
+        "PATTERNFILE a.pat b c",
         "COLOR",
         "COLOR 0",
         "COLOR 256",
@@ -91,6 +114,12 @@ fn hatchedit_is_the_declared_work_only_typed_subset() {
         "STYLE SIDEWAYS",
         "PATTERNTYPE",
         "LAYER",
+        "ORIGIN",
+        "ORIGIN 1",
+        "ORIGIN 1 2 3",
+        "ORIGIN 1e3 2",
+        "ORIGIN x 2",
+        "ORIGIN 1,",
         "SOLID 1",
         "GRADIENT X",
     ] {
@@ -111,6 +140,7 @@ fn hatchedit_is_the_declared_work_only_typed_subset() {
     // The refusal names the implemented forms and the named refusals.
     let reason = invalid_hatchedit_argument_reason("HATCHEDIT WAT");
     assert!(reason.contains("STYLE"), "{reason}");
+    assert!(reason.contains("PATTERNFILE"), "{reason}");
     assert!(reason.contains("PATTERN"), "{reason}");
     assert!(reason.contains("COLOR"), "{reason}");
     assert!(reason.contains("RECREATEBOUNDARY"), "{reason}");

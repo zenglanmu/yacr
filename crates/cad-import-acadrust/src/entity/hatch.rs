@@ -102,6 +102,11 @@ impl<'a> ImporterBuilder<'a> {
         // reader always yields an `f64`, so presence is inferred from a non-zero
         // finite value; 0 means "not present".
         let pixel_size = (h.pixel_size.is_finite() && h.pixel_size != 0.0).then_some(h.pixel_size);
+        // The pattern origin is not a separate group in the file: the HATCH
+        // record carries the phase in each definition row's base point (groups
+        // 43/44), which `import_pattern` copies verbatim. So the imported hatch
+        // starts at the zero displacement — `from_import`'s default — and the
+        // domain's `pattern_origin` measures a later HATCHEDIT ORIGIN move.
         let (geometry, mut reasons) = HatchGeometry::from_import(
             loops,
             plane,

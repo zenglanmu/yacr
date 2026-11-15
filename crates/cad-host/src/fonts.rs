@@ -7,11 +7,15 @@
 //! imports a platform type.
 use super::*;
 
-/// How a host installs the shaping fonts and raster images a drawing references.
+use cad_platform::NamedFileError;
+use std::path::Path;
+
+/// How a host installs the shaping fonts and raster images a drawing references,
+/// and reads a resource file the user names on the CAD command line.
 ///
-/// The core calls these from the open funnel ([`HostCore::deliver_open`] and the
-/// asynchronous publish in `poll_loading`); a host supplies its strategy when it
-/// builds the [`HostCore`]. A strategy that cannot resolve a resource must
+/// The core calls the two installers from the open funnel ([`HostCore::deliver_open`]
+/// and the asynchronous publish in `poll_loading`); a host supplies its strategy
+/// when it builds the [`HostCore`]. A strategy that cannot resolve a resource must
 /// refuse explicitly (`Unsupported`) rather than silently no-op.
 pub trait HostResources {
     /// (Re)load the shaping fonts the current drawing references onto `view`.
@@ -19,6 +23,21 @@ pub trait HostResources {
 
     /// (Re)load the drawing's raster images onto `view`.
     fn install_images(&self, core: &HostCore, render: &RenderSessionHandle) -> CadResult<()>;
+
+    /// Read one **user-named** host file, outside the drawing open/save funnels.
+    ///
+    /// This is the one channel a typed command has to a path the user typed
+    /// (`HATCHEDIT PATTERNFILE <path.pat>`): the command line is parsed in the
+    /// session, which must stay filesystem-free (it is also compiled to wasm), so
+    /// the strategy that already owns native file access supplies the bytes.
+    ///
+    /// The default refuses with [`NamedFileError::Unavailable`]: a runtime with no
+    /// filesystem (the browser) must say so instead of answering "missing file".
+    /// Native hosts override this and read through `cad_platform::read_named_file`.
+    fn read_named_file(&self, path: &Path) -> Result<Arc<[u8]>, NamedFileError> {
+        let _ = path;
+        Err(NamedFileError::Unavailable)
+    }
 }
 
 /// The host status key for a font/image installation failure.
@@ -284,6 +303,17 @@ impl HostResources for DesktopResources {
         }
         *core.last_image_report.borrow_mut() = Some(report);
         Ok(())
+    }
+
+    /// Read one user-named host file (a `.pat` pattern library named on the
+    /// command line) through the platform carrier.
+    ///
+    /// The path is read exactly as typed. The policy (a regular file, the
+    /// [`cad_platform::NAMED_FILE_MAX_BYTES`] bound) lives in
+    /// `cad_platform::read_named_file`, so the same rules apply to every native
+    /// host and a browser cannot claim them.
+    fn read_named_file(&self, path: &Path) -> Result<Arc<[u8]>, NamedFileError> {
+        cad_platform::read_named_file(path)
     }
 }
 

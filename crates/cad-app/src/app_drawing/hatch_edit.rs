@@ -22,11 +22,27 @@
 //!   `cad_domain::hatch::predefined_patterns`), matched ASCII
 //!   case-insensitively; an unknown name is `hatchedit.unknown_pattern` and a
 //!   missing name is `hatchedit.needs_pattern_name`;
+//! * `PATTERNFILE <path.pat> [<name>]` — the same edit from a **user** `.pat`
+//!   file, parsed by that same [`super::hatch_pattern::PatternLibrary`] reader and
+//!   recording group 76 as `Custom` (`2`, the DXF classification of a user-file
+//!   pattern). The host read the text (the payload carries it, see
+//!   [`crate::PatternFileText`]), so this command never touches the filesystem; a
+//!   payload without the text is `hatchedit.pattern_file_not_read`. With no name
+//!   the file must hold exactly one pattern (`hatchedit.pattern_file_ambiguous`
+//!   otherwise); with a name the file is searched first and the built-in table
+//!   second, and a name in neither is `hatchedit.unknown_pattern` naming both
+//!   sources;
 //! * `SOLID` / `GRADIENT` — the fill variant;
 //! * `COLOR <aci>` / `COLOR BYLAYER` — the entity display colour;
 //! * `TRANSPARENCY <percent>` / `TRANSPARENCY BYLAYER` — the entity opacity
 //!   (`0..=90` percent transparent, DXF/AutoCAD's entity bound);
 //! * `LAYER <name>` — the owning drawing layer;
+//! * `ORIGIN <x> <y>` — move the pattern origin (pattern fill only). The value is
+//!   a hatch-plane displacement of the pattern's definition rows, because
+//!   neither the DXF nor the DWG HATCH record has a dedicated origin group: both
+//!   store the phase in each row's base point (groups 43/44), which export
+//!   rewrites. `ORIGIN 0 0` is therefore the file's own origin, and the display
+//!   (pattern lines and dash phase) is rebuilt from the domain constructor;
 //! * `DRAWORDER BEHIND|FRONT|BOUNDARY` — model-space draw order
 //!   (`BOUNDARY` is a named refusal: there is no boundary record);
 //! * `RECREATEBOUNDARY` — one closed polyline per stored loop;
@@ -34,15 +50,17 @@
 //! * `ADDBOUNDARIES` / `REMOVEBOUNDARIES` — edit the stored loop set from the
 //!   selected closed entities (see below).
 //!
-//! Named refusals (global scope, before the selection is read): `ORIGIN`
-//! (`hatchedit.missing_field`: no pattern-origin field), `ASSOCIATE` /
+//! Named refusals (global scope, before the selection is read): `ASSOCIATE` /
 //! `DISASSOCIATE` (`hatchedit.no_association`) and `ANNOTATIVE`
 //! (`hatchedit.annotative_unsupported`). `PATTERN <name>` resolves its name
 //! against the built-in `.pat` library there too: an empty name is
 //! `hatchedit.needs_pattern_name`, an unknown name is
 //! `hatchedit.unknown_pattern` (with the accepted names), and both write
-//! nothing. A Solid/Gradient fill is the per-target
-//! `hatchedit.pattern_requires_pattern` refusal.
+//! nothing. A `.pat` file that does not parse is `hatchedit.pattern_file_invalid`
+//! (the parser's own refusal and the path in the detail). A Solid/Gradient fill
+//! is the per-target `hatchedit.pattern_requires_pattern` refusal for
+//! `PATTERN`/`PATTERNFILE`, and `hatchedit.not_pattern` for
+//! `ANGLE`/`SCALE`/`ORIGIN`.
 //!
 //! `ADDBOUNDARIES` / `REMOVEBOUNDARIES` use the pre-selection model: the
 //! selection must hold exactly **one** hatch (the target) plus one or more
@@ -68,7 +86,9 @@
 
 use super::*;
 
+use super::hatch_edit_draw_order::{behind_all_orders, front_all_orders, next_model_order};
 use super::hatch_edit_labels::option_label;
+use super::hatch_edit_pattern_file::{resolve_file_pattern, PatternChoice};
 use super::hatch_edit_pattern_name::resolve_builtin_pattern;
 use super::hatch_parameters::default_gradient;
 use super::hatch_utilities::loop_world_ring;
@@ -130,8 +150,10 @@ pub(super) struct NewEntity {
 }
 
 /// Rebuild one hatch with a new fill and pattern type, keeping every other
-/// stored field. `from_import` is the domain constructor that derives a fresh
-/// display without rejecting an already-stored boundary.
+/// stored field (the pattern origin included). `from_import` is the domain
+/// constructor that derives a fresh display without rejecting an already-stored
+/// boundary; it starts at the zero origin, so the stored displacement is applied
+/// back explicitly.
 fn rebuild(
     hatch: &HatchGeometry,
     fill: HatchFill,
@@ -146,6 +168,7 @@ fn rebuild(
         hatch.pixel_size(),
         pattern_type,
     );
+    let rebuilt = rebuilt.with_pattern_origin(hatch.pattern_origin());
     SemanticGeometry::Hatch(Box::new(rebuilt))
 }
 
@@ -157,13 +180,14 @@ impl Application {
     /// empty selection (`hatchedit.selection`), a duplicate ref
     /// (`hatchedit.duplicate`), a ref that is not directly addressable
     /// model-space (`hatchedit.not_addressable`), another geometry kind
-    /// (`hatchedit.not_hatch`), ANGLE/SCALE on a Solid/Gradient fill
-    /// (`hatchedit.not_pattern`), PATTERN on a Solid/Gradient fill
+    /// (`hatchedit.not_hatch`), ANGLE/SCALE/ORIGIN on a Solid/Gradient fill
+    /// (`hatchedit.not_pattern`), PATTERN/PATTERNFILE on a Solid/Gradient fill
     /// (`hatchedit.pattern_requires_pattern`), an empty/unknown pattern name
-    /// (`hatchedit.needs_pattern_name`/`unknown_pattern`), a bad
-    /// angle/scale/colour/transparency/layer
-    /// (`hatchedit.angle`/`scale`/`color`/`transparency`/`unknown_layer`) and
-    /// the global capability refusals listed in the module docs.
+    /// (`hatchedit.needs_pattern_name`/`unknown_pattern`), an unusable pattern
+    /// file (`hatchedit.pattern_file_*`), a bad
+    /// angle/scale/origin/colour/transparency/layer
+    /// (`hatchedit.angle`/`scale`/`origin`/`color`/`transparency`/`unknown_layer`)
+    /// and the global capability refusals listed in the module docs.
     pub(crate) fn hatch_edit(
         &mut self,
         session: &SessionState,
@@ -174,9 +198,9 @@ impl Application {
             CommandPayload::None => {
                 return Err(invalid(
                     "needs_option",
-                    "HATCHEDIT needs an option: STYLE, ANGLE, SCALE, PATTERNTYPE, SOLID, \
-                     GRADIENT, COLOR, TRANSPARENCY, LAYER, DRAWORDER, RECREATEBOUNDARY or \
-                     SEPARATE",
+                    "HATCHEDIT needs an option: STYLE, ANGLE, SCALE, ORIGIN, PATTERN, \
+                     PATTERNFILE, PATTERNTYPE, SOLID, GRADIENT, COLOR, TRANSPARENCY, LAYER, \
+                     DRAWORDER, RECREATEBOUNDARY or SEPARATE",
                 ));
             }
             _ => {
@@ -189,12 +213,6 @@ impl Application {
         // Global refusals: the same answer for every selection (and before it is
         // read), because the missing model is global.
         match &option {
-            HatchEditOption::Origin => {
-                return Err(unsupported(
-                    "missing_field",
-                    "the hatch model stores no pattern origin, so HATCHEDIT ORIGIN cannot set one",
-                ))
-            }
             HatchEditOption::Associate | HatchEditOption::Disassociate => {
                 return Err(unsupported(
                     "no_association",
@@ -216,16 +234,27 @@ impl Application {
             HatchEditOption::DrawOrder(HatchDrawOrder::BehindBoundary) => {
                 return Err(unsupported(
                     "draw_order_boundary",
-                    "DRAWORDER BOUNDARY needs a stored boundary/associativity record, which this \
-                     build does not have; use BEHIND or FRONT",
+                    "DRAWORDER BOUNDARY needs the hatch's boundary entities, and this build \
+                     stores none: the HATCH record's boundary handles (group 97/330) are read by \
+                     the importer but not kept in the domain hatch (only the derived loops are), \
+                     and an entity-id record would need the invalidation/reactor model this build \
+                     refuses. Use BEHIND or FRONT",
                 ))
             }
             _ => {}
         }
-        // The `PATTERN <name>` library lookup is global: an unknown (or missing)
-        // name is refused before the selection is read and opens no transaction.
-        let pattern_definition = match &option {
-            HatchEditOption::Pattern(name) => Some(resolve_builtin_pattern(name)?),
+        // The pattern-library lookup is global: an unknown (or missing) name, an
+        // unreadable/unparsable `.pat` file and an ambiguous file are all refused
+        // before the selection is read, and open no transaction.
+        let pattern_choice = match &option {
+            HatchEditOption::Pattern(name) => {
+                Some(PatternChoice::Builtin(resolve_builtin_pattern(name)?))
+            }
+            HatchEditOption::PatternFile { path, name, text } => Some(resolve_file_pattern(
+                path,
+                name.as_deref(),
+                text.as_ref().map(crate::PatternFileText::as_str),
+            )?),
             _ => None,
         };
 
@@ -335,16 +364,48 @@ impl Application {
                     );
                 }
             }
-            HatchEditOption::Pattern(_) => {
-                let definition =
-                    pattern_definition.expect("the pattern name was resolved before the selection");
+            HatchEditOption::Origin { x, y } => {
+                if !x.is_finite() || !y.is_finite() {
+                    return Err(invalid(
+                        "origin",
+                        format!(
+                            "HATCHEDIT ORIGIN needs finite hatch-plane coordinates, got ({x}, {y})"
+                        ),
+                    ));
+                }
+                let origin = [*x, *y];
+                for target in &targets {
+                    if !matches!(target.hatch.fill(), HatchFill::Pattern(_)) {
+                        return Err(unsupported(
+                            "not_pattern",
+                            format!(
+                                "HATCHEDIT ORIGIN applies to a pattern fill only; entity {} \
+                                 stores {}",
+                                target.entity.id.0,
+                                fill_kind(target.hatch.fill())
+                            ),
+                        ));
+                    }
+                    if target.hatch.pattern_origin() == origin {
+                        continue;
+                    }
+                    push_geometry_change(
+                        &mut changes,
+                        target,
+                        SemanticGeometry::Hatch(Box::new(target.hatch.with_pattern_origin(origin))),
+                    );
+                }
+            }
+            HatchEditOption::Pattern(_) | HatchEditOption::PatternFile { .. } => {
+                let choice = pattern_choice.expect("the pattern was resolved before the selection");
+                let definition = choice.definition();
                 for target in &targets {
                     let HatchFill::Pattern(pattern) = target.hatch.fill() else {
                         return Err(unsupported(
                             "pattern_requires_pattern",
                             format!(
-                                "HATCHEDIT PATTERN applies to a pattern fill only; entity {} \
-                                 stores {}",
+                                "HATCHEDIT {} applies to a pattern fill only; entity {} stores {}",
+                                option_label(&option),
                                 target.entity.id.0,
                                 fill_kind(target.hatch.fill())
                             ),
@@ -367,7 +428,7 @@ impl Application {
                         rebuild(
                             &target.hatch,
                             HatchFill::Pattern(replaced),
-                            HatchPatternType::Predefined,
+                            choice.pattern_type(),
                         ),
                     );
                 }
@@ -601,6 +662,7 @@ impl Application {
                         target.hatch.pixel_size(),
                         target.hatch.pattern_type(),
                     );
+                    let rebuilt = rebuilt.with_pattern_origin(target.hatch.pattern_origin());
                     push_geometry_change(
                         &mut changes,
                         target,
@@ -617,6 +679,8 @@ impl Application {
                             target.hatch.pixel_size(),
                             target.hatch.pattern_type(),
                         );
+                        // Every split part keeps the pattern phase of the original.
+                        let rebuilt = rebuilt.with_pattern_origin(target.hatch.pattern_origin());
                         let entity_id = candidate.allocate_entity_id();
                         inserts.push(NewEntity {
                             entity: DbEntity {
@@ -638,8 +702,7 @@ impl Application {
                     }
                 }
             }
-            HatchEditOption::Origin
-            | HatchEditOption::Associate
+            HatchEditOption::Associate
             | HatchEditOption::Disassociate
             | HatchEditOption::Annotative
             | HatchEditOption::AddBoundaries
@@ -873,87 +936,6 @@ fn resolve_layer(drawing: &DrawingDatabase, name: &str) -> CadResult<LayerId> {
             ),
         )),
     }
-}
-
-/// The first free draw order above every model-space row.
-fn next_model_order(drawing: &DrawingDatabase) -> i64 {
-    drawing
-        .entities()
-        .filter(|entity| entity.space == SpaceId::Model)
-        .map(|entity| entity.draw_order)
-        .max()
-        .map(|order| order.saturating_add(1))
-        .unwrap_or(0)
-}
-
-/// Target orders that put the selected hatches behind every other model-space
-/// object, keeping their relative order.
-fn behind_all_orders(
-    drawing: &DrawingDatabase,
-    selected: &std::collections::BTreeSet<EntityId>,
-) -> CadResult<Vec<(EntityId, i64)>> {
-    let min_other = drawing
-        .entities()
-        .filter(|entity| entity.space == SpaceId::Model && !selected.contains(&entity.id))
-        .map(|entity| entity.draw_order)
-        .min();
-    let Some(min_other) = min_other else {
-        return Ok(Vec::new());
-    };
-    let mut ordered: Vec<&DbEntity> = drawing
-        .entities()
-        .filter(|entity| selected.contains(&entity.id))
-        .collect();
-    ordered.sort_by_key(|entity| (entity.draw_order, entity.id.0));
-    if ordered.iter().all(|entity| entity.draw_order < min_other) {
-        return Ok(Vec::new());
-    }
-    let count = i64::try_from(ordered.len())
-        .map_err(|_| invalid("order_exhausted", "too many selected hatches to reorder"))?;
-    let first = min_other.checked_sub(count).ok_or_else(|| {
-        invalid(
-            "order_exhausted",
-            "the target draw orders would underflow i64",
-        )
-    })?;
-    Ok(ordered
-        .iter()
-        .enumerate()
-        .map(|(index, entity)| (entity.id, first + index as i64))
-        .collect())
-}
-
-/// Target orders that put the selected hatches in front of every other
-/// model-space object, keeping their relative order.
-fn front_all_orders(
-    drawing: &DrawingDatabase,
-    selected: &std::collections::BTreeSet<EntityId>,
-) -> CadResult<Vec<(EntityId, i64)>> {
-    let base = drawing
-        .entities()
-        .filter(|entity| entity.space == SpaceId::Model && !selected.contains(&entity.id))
-        .map(|entity| entity.draw_order)
-        .max()
-        .unwrap_or(0);
-    let mut ordered: Vec<&DbEntity> = drawing
-        .entities()
-        .filter(|entity| selected.contains(&entity.id))
-        .collect();
-    ordered.sort_by_key(|entity| (entity.draw_order, entity.id.0));
-    if ordered.iter().all(|entity| entity.draw_order > base) {
-        return Ok(Vec::new());
-    }
-    let mut out = Vec::with_capacity(ordered.len());
-    for (index, entity) in ordered.iter().enumerate() {
-        let target = base.checked_add(index as i64 + 1).ok_or_else(|| {
-            invalid(
-                "order_exhausted",
-                "the target draw orders would overflow i64",
-            )
-        })?;
-        out.push((entity.id, target));
-    }
-    Ok(out)
 }
 
 /// The human half of a fill refusal (the stored variant, never a pattern name).

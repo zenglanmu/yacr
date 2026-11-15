@@ -28,6 +28,7 @@ import {
   LOCAL_CHROME_COMMANDS, SELECTION_REQUIREMENTS,
 } from './gating.ts';
 import type { CommandStatusView, SelectionRequirement } from './gating.ts';
+import { hatchEditArgumentCarriesPath } from './argument-hatchedit.ts';
 
 /** A typed command line split into its base name and its argument. */
 export interface SplitCommandText {
@@ -146,6 +147,48 @@ export function splitCommandText(text: unknown): SplitCommandText {
   return match
     ? { name: match[1], argument: match[2], text: normalized }
     : { name: normalized, argument: null, text: normalized };
+}
+
+/**
+ * The typed-argument selectors whose argument tail carries a **filesystem path**,
+ * with the predicate that says whether *this* line's tail does.
+ *
+ * Everything else keeps the shared normal form (`normalizeCommandText`: trimmed,
+ * upper-cased), which the host's grammars read case-insensitively on both sides.
+ * A path is not a keyword: upper-casing it changes a real file name, and on a
+ * case-sensitive filesystem that is "missing". So for these selectors the tail is
+ * forwarded with the spelling the user typed while the selector itself stays
+ * upper-cased — the one exception, kept to paths only.
+ *
+ * * `IMAGEATTACH <file> <x> <y> <width_px> <height_px> <units_per_pixel>`: the
+ *   file is an opaque single-token path (`parse_imageattach_argument`).
+ * * `HATCHEDIT PATTERNFILE <path.pat> [<name>]`: the path is opaque (the host's
+ *   resource strategy reads it). The other `HATCHEDIT` forms stay upper-cased:
+ *   their tails are keywords, numbers or names the host matches
+ *   case-insensitively.
+ */
+const PATH_ARGUMENTS: Readonly<Record<string, (argument: string) => boolean>> = Object.freeze({
+  IMAGEATTACH: () => true,
+  HATCHEDIT: hatchEditArgumentCarriesPath,
+});
+
+/**
+ * The line as it will be sent to `cad_command`.
+ *
+ * `split.text` is the shared normal form, except when the selector's tail carries
+ * a path ([`PATH_ARGUMENTS`]): then the **selector** stays upper-cased and the
+ * tail keeps the typed text (including its internal separators, exactly like
+ * `split.text` keeps them). Nothing is resolved, quoted or re-spaced: the path is
+ * forwarded byte for byte and the host decides whether it exists.
+ */
+function commandTextForHost(split: SplitCommandText, text: unknown): string {
+  if (split.argument === null) return split.text;
+  const carriesPath = PATH_ARGUMENTS[split.name];
+  if (!carriesPath || !carriesPath(split.argument)) return split.text;
+  const typed = String(text ?? '').trim();
+  const separated = typed.search(/[ \t]/);
+  if (separated < 0) return split.text;
+  return `${split.name}${typed.slice(separated)}`;
 }
 
 /**
@@ -504,8 +547,12 @@ export function historyText(history: readonly string[], index: number | null, dr
  * A line may carry the one typed argument form ([`ARGUMENT_COMMANDS`]):
  * admission runs on the **base name** through the same vocabulary/capability
  * gates, and the returned `command` is the **full normalized line** so the host
- * receives (and validates) the value itself. An argument on a selector that
- * takes none, or an argument outside the local syntax predicate, is an explicit
+ * receives (and validates) the value itself. A path-carrying tail
+ * ([`PATH_ARGUMENTS`]: `IMAGEATTACH <file>`, `HATCHEDIT PATTERNFILE <path>`) is
+ * the one exception: its selector is upper-cased and the tail keeps the typed
+ * spelling, so a mixed-case path is not silently rewritten. An argument on a
+ * selector that takes none, or an argument outside the local syntax predicate,
+ * is an explicit
  * `unsupported` answer with the shared reason key — the host remains the
  * authority for semantics, and a bare `ZOOM` keeps its existing payload-refusal
  * path unchanged.
@@ -516,7 +563,10 @@ export function historyText(history: readonly string[], index: number | null, dr
  */
 export function admitCommandText(text: unknown, { status = null, pending = false }: AvailabilityOptions = {}): CommandAdmission {
   const split = splitCommandText(text);
-  const command = split.text;
+  // The wire text: the shared normal form, or the typed spelling of a path tail
+  // (see `commandTextForHost`). `whole` below still tests the normal form, because
+  // a whole-line selector is a name, never a path.
+  const command = commandTextForHost(split, text);
   // A canonical selector may contain a space (`MEASURE AREA`, `AREA OBJECT`,
   // `ZOOM EXTENTS`). The host router resolves the **whole** trimmed line against its
   // command table first and only then falls back to base-plus-argument, so the

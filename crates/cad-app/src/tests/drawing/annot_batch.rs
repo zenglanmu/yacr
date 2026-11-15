@@ -725,7 +725,7 @@ fn hatch_set_boundary_refuses_open_missing_and_non_planar_inputs() {
 }
 
 #[test]
-fn hatch_set_origin_is_a_named_missing_field_refusal() {
+fn hatch_set_origin_is_a_named_refusal() {
     let (mut app, mut session) = annot_app();
     select(&mut session, &[GROUP_HATCH]);
     let before = revision(&app);
@@ -740,8 +740,15 @@ fn hatch_set_origin_is_a_named_missing_field_refusal() {
     )
     .unwrap_err();
     let text = format!("{error}");
+    // The refusal names the unimplemented absolute-origin form and points at the
+    // implemented editor; it must never claim the domain lacks a pattern origin
+    // (it does: `HatchGeometry::pattern_origin`).
     assert!(text.contains("hatchsetorigin.missing_field"), "{text}");
-    assert!(text.contains("HatchGeometry"), "{text}");
+    assert!(text.contains("HATCHEDIT ORIGIN"), "{text}");
+    assert!(
+        !text.contains("has no hatch pattern-origin field"),
+        "{text}"
+    );
     assert_eq!(revision(&app), before);
     assert_eq!(undo_depth(&app), 0);
 }

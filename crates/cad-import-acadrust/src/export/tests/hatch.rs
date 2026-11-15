@@ -753,3 +753,102 @@ fn display_area(hatch: &HatchGeometry) -> f64 {
         })
         .sum()
 }
+
+// ---------------------------------------------------------------------------
+// Pattern origin (the HATCHEDIT ORIGIN phase displacement).
+// ---------------------------------------------------------------------------
+
+/// The phase displacement cannot be its own DXF group: the format stores it in
+/// the rows. With angle 0 and scale 1 the row-frame shift *is* the displacement.
+#[test]
+fn a_stored_pattern_origin_is_written_into_every_definition_row() {
+    let spec = Spec {
+        fill: pattern_fill("CUSTOM_RIDGE", 0.0, 1.0, false),
+        ..Spec::default()
+    };
+    let SemanticGeometry::Hatch(hatch) = build(spec) else {
+        unreachable!("build() returns a hatch")
+    };
+    let moved = hatch.with_pattern_origin([3.0, -4.0]);
+    let (bytes, report) = export_one(SemanticGeometry::Hatch(Box::new(moved)));
+    let record = hatch_record(&bytes);
+
+    // Row base (0.5, 0.25) + displacement (3, -4).
+    assert!((number(&record, "43") - 3.5).abs() < 1e-12);
+    assert!((number(&record, "44") + 3.75).abs() < 1e-12);
+    // The offset and the dashes are pattern-space data, untouched.
+    assert!(number(&record, "45").abs() < 1e-12);
+    assert!((number(&record, "46") - 1.5).abs() < 1e-12);
+    assert_eq!(values(&record, "49"), vec!["0.5", "-0.25"]);
+    assert!(
+        report
+            .entries
+            .iter()
+            .any(|entry| entry.message.contains("groups 43/44")),
+        "the fold into the rows is declared: {:?}",
+        report.entries
+    );
+}
+
+/// The row-frame shift is the exact inverse of the display composition
+/// (`R(angle) · scale · row`), so the two hatches below draw the same pattern.
+#[test]
+fn the_row_shift_inverts_the_display_composition() {
+    let angle = 30.0_f64.to_radians();
+    let scale = 2.5;
+    let origin = [3.0, 4.0];
+    let spec = || Spec {
+        fill: pattern_fill("CUSTOM_RIDGE", angle, scale, false),
+        ..Spec::default()
+    };
+    let SemanticGeometry::Hatch(plain) = build(spec()) else {
+        unreachable!()
+    };
+    let displaced = plain.with_pattern_origin(origin);
+
+    // `R(-angle) · origin / scale`, written out independently of the writer.
+    let (sin, cos) = angle.sin_cos();
+    let shift = [
+        (cos * origin[0] + sin * origin[1]) / scale,
+        (-sin * origin[0] + cos * origin[1]) / scale,
+    ];
+    let HatchFill::Pattern(pattern) = plain.fill() else {
+        unreachable!("pattern fill")
+    };
+    let mut rows = pattern.clone();
+    for row in &mut rows.lines {
+        row.base_x += shift[0];
+        row.base_y += shift[1];
+    }
+    let pre_shifted = plain.with_style_and_fill(
+        plain.style(),
+        HatchFill::Pattern(rows),
+        plain.pattern_type(),
+    );
+
+    let displaced_display = displaced.display();
+    let shifted_display = pre_shifted.display();
+    assert_eq!(
+        displaced_display.len(),
+        shifted_display.len(),
+        "the same number of pattern polylines"
+    );
+    for (left, right) in displaced_display.iter().zip(shifted_display) {
+        match (left, right) {
+            (
+                SemanticGeometry::Polyline { points: a, .. },
+                SemanticGeometry::Polyline { points: b, .. },
+            ) => {
+                assert_eq!(a.len(), b.len());
+                for (l, r) in a.iter().zip(b) {
+                    // Floating-point noise only: the row shift is `R(-angle) ·
+                    // origin / scale`, the exact inverse of the composition.
+                    assert!((l.x - r.x).abs() < 1e-9, "{l:?} != {r:?}");
+                    assert!((l.y - r.y).abs() < 1e-9, "{l:?} != {r:?}");
+                    assert!((l.z - r.z).abs() < 1e-9, "{l:?} != {r:?}");
+                }
+            }
+            _ => panic!("a pattern display is polylines, got {left:?} / {right:?}"),
+        }
+    }
+}

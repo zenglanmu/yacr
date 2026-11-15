@@ -668,7 +668,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `QLEADER` / `LEADER` | 部分实现 | `<arrow x,y> <landing x,y> <文本>` 创建**一个** `MULTILEADER`（旧实体映射为 MULTILEADER）；一条事务/一步撤销 | 无 QLEADER 设置对话框、引线样式、注释类型、多引线段/附着选项 |
 | `TEXTFIT` | 部分实现 | `<目标宽度>` 仅按 `height = target / char_count` 改字形高度 | 真实宽度拉伸/压缩 NOT IMPLEMENTED；坏宽度、空选择、非文字、空文本具名拒绝 |
 | `HATCHSETBOUNDARY` | 部分实现 | 恰好一个 hatch + 一条闭合 Polyline/整圆/完整 Ellipse；共面性校验；用 `HatchGeometry::new` 重建并丢弃旧种子；一条事务/一步撤销 | 失败为 `hatchsetboundary.rebuild_failed`；无交互边界选择、无关联边界、无样条/椭圆弧/块内边界 |
-| `HATCHSETORIGIN` | 部分实现 | `<x> <y>` 参数校验后按 `hatchsetorigin.missing_field` 拒绝 | `HatchGeometry` 无图案原点字段；不写入、不伪造 |
+| `HATCHSETORIGIN` | 部分实现 | `<x> <y>` 参数校验后按 `hatchsetorigin.missing_field` 拒绝（`HATCHEDIT ORIGIN` 已实现图案相位原点；本命令的**绝对**原点语义仍未建模） | 不写入、不伪造 |
 | `XDLIST` | 部分实现 | 只读；每个选中实体报告 `xdlist.not_retained` | 本构建不保留 xdata；不伪造条目 |
 
 > **证据边界**：以上 10 条只有 Rust 契约测试与前端纯函数/结构测试；**没有** GUI、像素、真实 GPU、
@@ -1832,7 +1832,7 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `SSX` | 部分实现 | Express **筛选表构建器**（非 SELECTSIMILAR）：`BLOCK/COLOR/ENTITY/LAYER/LTYPE/STYLE/PICK/CLEAR`，单值覆盖/移除；模板来自当前选择；当前空间；替换选择；只读 | **`FLAG`/`THICKNESS`/`VECTOR` 未建模**（实体标志位/厚度/挤出矢量）⇒ 具名拒绝；无 Previous 选择集，映射为替换当前选择 |
 | `QDIM` | **完整实现** | `Continuous`（默认）/`Staggered`/`Baseline`/`Ordinate`/`Radius`/`Diameter` + `Datum Point`/`Edit`/`Settings`；既有标注可作为输入；一条事务/一步撤销 | 无交互位置/选项循环（逐选项提示全局范围）；角度不是 QDIM 模式；Staggered 步长 = `DIMDLI`（声明）；`INTERSECTIONS` 只用选中 LINE 对 |
 | `DIMTEDIT` | 部分实现 | `MOVE`（新位置）/`LEFT`/`RIGHT`/`CENTER`/`HOME`/`ANGLE`；Left/Right/Center 仅线性/对齐/半径/直径；Angle 固定文字中心，`0` 复位；一条事务/一步撤销 | **字形级对齐未实现**（只移动锚点；标注模型无 `h_align`）；无 Oblique |
-| `HATCHEDIT` | 部分实现 | 多目标；`Style`/`PatternType`/`Angle`/`Scale`/`Solid`/`Gradient`/`Color`/`Transparency`/`Layer`/`DrawOrder Behind/Front`/`Recreate Boundary`/`Separate Hatches`；一条事务/一步撤销 | **`Add Boundaries`/`Remove Boundaries`** 无法从拾取重建环集；`Origin` 无字段；`Associate`/`Disassociate`/`Annotative` 无模型；Boundary draw order 拒绝 |
+| `HATCHEDIT` | 完整实现 | 多目标；`Style`/`PatternType`/`PATTERN <name>`/`PATTERNFILE <path.pat> [<name>]`/`ORIGIN <x> <y>`/`Angle`/`Scale`/`Solid`/`Gradient`/`Color`/`Transparency`/`Layer`/`DrawOrder`/`Recreate Boundary`/`Separate Hatches`/`Add|Remove Boundaries`；一条事务/一步撤销 | 全局范围：`Associate`/`Disassociate`/`Annotative`、`DRAWORDER BOUNDARY`（需边界实体 id 即反应器模型）、逐 loop 图案原点、交互对话框 |
 | `REVCLOUD` | 部分实现 | `Object`/`Rectangular`/`Polygonal`/`Freehand`/`Arc Length`/`Style`/`Modify`；等弦弧（106.26°）；默认弦长 = 源路径 bbox 对角线 5%（声明替代）；一条事务/一步撤销 | **`Calligraphy` 样式未实现**（多段线无样式字段）；`Modify` 用确定性规则替代交互拾取；`RECT/POLY/FREEHAND/MODIFY` 的路径来自唯一选中 LWPOLYLINE |
 | `WIPEOUT` | 部分实现 | `Frames ON/OFF/DISPLAY` 真实：ON = 填充 + 边框（显示与矢量出图边界折线），OFF = 仅填充，DISPLAY = 显示边框、出图不画；边框在 mask fill 之后用 Always-depth 线管线绘制；`Polyline` + `Erase Polyline Yes/No`、自由点串 | `FRAME` 覆盖无命令；遮罩填充在矢量出图仍无背景 flood（边界可出图）；无真实 GPU/像素验收 |
 | `TEXTMASK` | 部分实现 | 偏移因子（默认 0.35）、`Wipeout` 遮罩、文本+遮罩会话 `GROUP`、重跑替换旧遮罩、`TEXTUNMASK` 按组优先；一条事务/一步撤销 | **`3dface`/`Solid` 遮罩类型未实现**（无对应实体）；`GROUP` 为会话存储（DWG 不落关联记录） |

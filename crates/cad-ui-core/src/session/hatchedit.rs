@@ -19,19 +19,35 @@
 //!   `hatchedit.unknown_pattern` — both are refused **here**, before IPC; a
 //!   solid/gradient fill is refused by the command with
 //!   `hatchedit.pattern_requires_pattern`;
+//! * `PATTERNFILE <path.pat> [<name>]` — the same edit from a **user** `.pat`
+//!   file. The path is one whitespace-free token; a line whose second token is
+//!   itself a path is a spaced path the grammar cannot split from the name, so it
+//!   is refused by name (`hatchedit.pattern_file_path`). The optional name
+//!   selects one entry of the file, and without it the file must hold exactly one
+//!   pattern. This session reads the file through the host
+//!   strategy ([`cad_host::HostResources::read_named_file`]) — the command never
+//!   touches the filesystem — so a missing/unreadable file is
+//!   `hatchedit.pattern_file_missing`/`_unreadable`, a non-UTF-8 file is
+//!   `hatchedit.pattern_file_encoding`, and a host without a filesystem is the
+//!   stable `hatchedit.pattern_file_unavailable` (`unsupported-runtime:
+//!   pattern-file`). An unparsable file and an unknown name are refused by the
+//!   command (`hatchedit.pattern_file_invalid` / `hatchedit.unknown_pattern`);
 //! * `STYLE IGNORE|OUTER|NORMAL` — the island-detection style (group 75);
 //! * `SOLID`, `GRADIENT` — the fill variant;
 //! * `COLOR <aci>` or `COLOR BYLAYER`;
 //! * `TRANSPARENCY <percent>` (`0..=90`) or `TRANSPARENCY BYLAYER`;
 //! * `LAYER <name>` — the drawing layer name (spaces allowed);
+//! * `ORIGIN <x> <y>` — two finite signed decimals: the pattern-origin
+//!   displacement in the hatch plane (pattern fill only; a solid/gradient fill is
+//!   refused by the command with `hatchedit.not_pattern`);
 //! * `DRAWORDER BEHIND|FRONT|BOUNDARY`;
 //! * `RECREATEBOUNDARY`, `SEPARATE`;
 //! * `ADDBOUNDARIES`, `REMOVEBOUNDARIES` — the pre-selection boundary edit:
 //!   exactly one hatch plus the other selected closed entities, rewritten as one
 //!   transaction / one undo step;
-//! * the named-refusal forms `ORIGIN`, `ASSOCIATE`, `DISASSOCIATE`,
-//!   `ANNOTATIVE` (they parse so the application can name the missing model
-//!   instead of pretending the option word is invalid).
+//! * the named-refusal forms `ASSOCIATE`, `DISASSOCIATE`, `ANNOTATIVE` (they
+//!   parse so the application can name the missing model instead of pretending
+//!   the option word is invalid).
 //!
 //! A bare `HATCHEDIT` never reaches here (it keeps the name-only funnel and the
 //! application refuses it with `hatchedit.needs_option`). An argument outside
@@ -39,9 +55,12 @@
 //! [`super::invalid_hatchedit_argument_reason`], recorded for `cad_status.error`,
 //! and changes nothing.
 
-use cad_app::{CommandId, CommandPayload, HatchDrawOrder, HatchEditOption};
+use std::path::Path;
+
+use cad_app::{CommandId, CommandPayload, HatchDrawOrder, HatchEditOption, PatternFileText};
 use cad_domain::hatch::{predefined_pattern, predefined_patterns};
 use cad_domain::{HatchPatternType, HatchStyle};
+use cad_platform::NamedFileError;
 
 use super::commands::parse_signed_decimal;
 use super::diagnostics::cad_error_text;
@@ -58,6 +77,10 @@ pub enum HatchEditArgumentError {
     /// `PATTERN <name>` where the built-in `.pat` library has no such name:
     /// `hatchedit.unknown_pattern`, answered with the accepted name list.
     UnknownPattern(String),
+    /// `PATTERNFILE` whose second token is itself a path: the line is a path with
+    /// spaces, which this grammar cannot tell from `PATTERNFILE <path> <name>`.
+    /// `hatchedit.pattern_file_path`, answered with the rule.
+    PatternFilePath,
 }
 
 /// Parse the argument of a `HATCHEDIT` selector: one declared option.
@@ -79,6 +102,9 @@ pub fn parse_hatchedit_argument(argument: &str) -> Result<HatchEditOption, Hatch
     if word.eq_ignore_ascii_case("PATTERN") {
         return parse_pattern_name(rest);
     }
+    if word.eq_ignore_ascii_case("PATTERNFILE") {
+        return parse_pattern_file(rest);
+    }
     parse_declared_option(word, rest).ok_or(HatchEditArgumentError::Malformed)
 }
 
@@ -99,6 +125,39 @@ fn parse_pattern_name(text: &str) -> Result<HatchEditOption, HatchEditArgumentEr
     Ok(HatchEditOption::Pattern(text.to_string()))
 }
 
+/// Parse `PATTERNFILE <path.pat> [<name>]`.
+///
+/// One or two whitespace-separated tokens, never more. The content is **not**
+/// read here: this is the pure grammar, and the file is read by the host in
+/// [`CadSession::hatchedit_argument`] (the payload carries the text). An empty
+/// remainder, or a third token, is a malformed line; a second token carrying a
+/// path separator is a spaced path, refused by name
+/// ([`HatchEditArgumentError::PatternFilePath`]).
+fn parse_pattern_file(text: &str) -> Result<HatchEditOption, HatchEditArgumentError> {
+    let mut parts = text.split_whitespace();
+    let Some(path) = parts.next() else {
+        return Err(HatchEditArgumentError::Malformed);
+    };
+    let name = parts.next();
+    if parts.next().is_some() {
+        return Err(HatchEditArgumentError::Malformed);
+    }
+    // A pattern name never contains a path separator, so a second token that does
+    // is a **path with spaces**: refuse it by name instead of reading the first
+    // word as a path and the rest as a name.
+    if name.is_some_and(|name| name.contains(['/', '\\'])) {
+        return Err(HatchEditArgumentError::PatternFilePath);
+    }
+    let name = name.map(str::to_string);
+    Ok(HatchEditOption::PatternFile {
+        path: path.to_string(),
+        name,
+        // Filled by the host read below; a payload that reaches the command
+        // without it is refused (`hatchedit.pattern_file_not_read`).
+        text: None,
+    })
+}
+
 /// The word dispatch of the declared grammar (`PATTERN` is handled before it,
 /// because its name states are named refusals rather than a malformed line).
 fn parse_declared_option(word: &str, rest: &str) -> Option<HatchEditOption> {
@@ -115,7 +174,7 @@ fn parse_declared_option(word: &str, rest: &str) -> Option<HatchEditOption> {
         return rest.is_empty().then_some(HatchEditOption::SeparateHatches);
     }
     if word.eq_ignore_ascii_case("ORIGIN") {
-        return rest.is_empty().then_some(HatchEditOption::Origin);
+        return parse_origin(rest).map(|(x, y)| HatchEditOption::Origin { x, y });
     }
     if word.eq_ignore_ascii_case("ASSOCIATE") {
         return rest.is_empty().then_some(HatchEditOption::Associate);
@@ -215,6 +274,18 @@ fn parse_aci(text: &str) -> Option<u8> {
         .filter(|index| (1..=255).contains(index))
 }
 
+/// Two finite signed plain decimals: the `ORIGIN <x> <y>` pair.
+///
+/// Exactly two whitespace-separated tokens; `parse_signed_decimal` already
+/// refuses an empty value, exponents, a bare sign and every non-finite
+/// magnitude, so nothing about the number syntax is re-implemented here.
+fn parse_origin(text: &str) -> Option<(f64, f64)> {
+    let mut parts = text.split_whitespace();
+    let x = super::commands::parse_signed_decimal(parts.next()?)?;
+    let y = super::commands::parse_signed_decimal(parts.next()?)?;
+    parts.next().is_none().then_some((x, y))
+}
+
 /// The stable rejection reason for a `HATCHEDIT` argument outside the grammar.
 ///
 /// The typed line is echoed and the implemented options are named, together with
@@ -222,12 +293,21 @@ fn parse_aci(text: &str) -> Option<u8> {
 /// the subset as a promise that the whole dialog works.
 pub fn invalid_hatchedit_argument_reason(text: &str) -> String {
     format!(
-        "unsupported CAD command: {} (HATCHEDIT needs STYLE, ANGLE, SCALE, PATTERN, PATTERNTYPE, \
-         SOLID, GRADIENT, COLOR, TRANSPARENCY, LAYER, DRAWORDER, RECREATEBOUNDARY, SEPARATE, \
-         ADDBOUNDARIES or REMOVEBOUNDARIES; ORIGIN/ASSOCIATE/DISASSOCIATE/ANNOTATIVE are \
-         named refusals)",
+        "unsupported CAD command: {} (HATCHEDIT needs STYLE, ANGLE, SCALE, PATTERN, \
+         PATTERNFILE <path.pat> [<name>], PATTERNTYPE, SOLID, GRADIENT, COLOR, TRANSPARENCY, \
+         LAYER, ORIGIN <x> <y>, DRAWORDER, RECREATEBOUNDARY, SEPARATE, ADDBOUNDARIES or \
+         REMOVEBOUNDARIES; ASSOCIATE/DISASSOCIATE/ANNOTATIVE are named refusals)",
         text.trim()
     )
+}
+
+/// The `hatchedit.pattern_file_path` refusal: a `PATTERNFILE` line whose second
+/// token is a path, i.e. a spaced path the grammar cannot split from the name.
+pub fn pattern_file_path_reason() -> String {
+    "hatchedit.pattern_file_path: HATCHEDIT PATTERNFILE takes a whitespace-free `.pat` path and \
+     an optional pattern name; a path containing spaces cannot be split from the name — give a \
+     path without spaces"
+        .to_string()
 }
 
 /// The `hatchedit.needs_pattern_name` refusal: `PATTERN` with no name.
@@ -268,6 +348,28 @@ impl CadSession {
             Err(HatchEditArgumentError::UnknownPattern(name)) => {
                 return self.refuse_argument(unknown_pattern_reason(&name))
             }
+            Err(HatchEditArgumentError::PatternFilePath) => {
+                return self.refuse_argument(pattern_file_path_reason())
+            }
+        };
+        // `PATTERNFILE` is the one form whose payload needs a file: the host
+        // strategy reads it here (this session has no filesystem of its own, and
+        // the command must never read one). Every failure is a named refusal
+        // recorded before IPC, and nothing is dispatched.
+        let option = match option {
+            HatchEditOption::PatternFile {
+                path,
+                name,
+                text: None,
+            } => match self.read_pattern_file(&path) {
+                Ok(file_text) => HatchEditOption::PatternFile {
+                    path,
+                    name,
+                    text: Some(file_text),
+                },
+                Err(reason) => return self.refuse_argument(reason),
+            },
+            other => other,
         };
         // Echo the admitted selector (never the typed argument).
         self.core.record_command(HATCHEDIT_SELECTOR);
@@ -286,4 +388,57 @@ impl CadSession {
             }
         }
     }
+
+    /// Read a `PATTERNFILE` path through the host strategy.
+    ///
+    /// Viewer is refused **first**, through the same `SessionState::authorize`
+    /// gate the command layer uses, so a command that cannot write never performs
+    /// host I/O (and the refusal text cannot drift from the command's).
+    fn read_pattern_file(&self, path: &str) -> Result<PatternFileText, String> {
+        if let Err(error) = self
+            .core
+            .controller
+            .borrow()
+            .session
+            .authorize(CommandId::HatchEdit)
+        {
+            return Err(cad_error_text(&error));
+        }
+        let bytes = self
+            .core
+            .resources
+            .read_named_file(Path::new(path))
+            .map_err(|error| pattern_file_read_reason(path, &error))?;
+        match std::str::from_utf8(&bytes) {
+            // The text is borrowed from `bytes` and copied into the payload: the
+            // bytes must live past this call, so the copy is explicit.
+            Ok(text) => Ok(PatternFileText::new(text)),
+            Err(_) => Err(pattern_file_encoding_reason(path)),
+        }
+    }
+}
+
+/// The named refusal for a host read that did not deliver the pattern file.
+fn pattern_file_read_reason(path: &str, error: &NamedFileError) -> String {
+    match error {
+        NamedFileError::Unavailable => format!(
+            "hatchedit.pattern_file_unavailable: unsupported-runtime: pattern-file: this host \
+             cannot read the user-named file '{path}' ({})",
+            error.reason()
+        ),
+        NamedFileError::Missing(reason) => {
+            format!("hatchedit.pattern_file_missing: {path}: {reason}")
+        }
+        NamedFileError::Unreadable(reason) => {
+            format!("hatchedit.pattern_file_unreadable: {path}: {reason}")
+        }
+    }
+}
+
+/// The named refusal for a file that is not `.pat` text.
+fn pattern_file_encoding_reason(path: &str) -> String {
+    format!(
+        "hatchedit.pattern_file_encoding: {path} is not UTF-8 text; a `.pat` pattern library is \
+         text"
+    )
 }

@@ -807,7 +807,6 @@ fn hatchedit_global_capability_refusals_are_named_and_write_nothing() {
     let revision_before = revision(&app);
     let undo_before = undo_depth(&app);
     for (option, code) in [
-        (HatchEditOption::Origin, "hatchedit.missing_field"),
         (HatchEditOption::Associate, "hatchedit.no_association"),
         (HatchEditOption::Disassociate, "hatchedit.no_association"),
         (

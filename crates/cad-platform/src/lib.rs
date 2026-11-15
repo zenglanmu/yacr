@@ -52,8 +52,10 @@ pub trait FontLoader {
 mod font_keys;
 pub mod fonts;
 pub mod images;
+pub mod named_file;
 pub mod xref_loader;
 
+pub use named_file::{read_named_file, NamedFileError, NAMED_FILE_MAX_BYTES};
 #[cfg(not(target_arch = "wasm32"))]
 pub use xref_loader::FsXrefSource;
 pub use xref_loader::NoXrefSource;

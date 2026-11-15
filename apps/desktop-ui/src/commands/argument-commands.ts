@@ -5,7 +5,9 @@
 //
 // The clip-family predicates (`CLIP`/`XCLIP`) and the two token helpers they
 // share with this table live in `argument-clip-grammar.ts`, so the two clip
-// grammars sit side by side and this table stays inside the code-size gate.
+// grammars sit side by side and this table stays inside the code-size gate. The
+// `HATCHEDIT` option grammar lives in `argument-hatchedit.ts` for the same reason.
+import { isHatchEditArgument } from './argument-hatchedit.ts';
 import {
   isClipArgument,
   isSignedDecimal,
@@ -72,9 +74,9 @@ function isDecimalNumber(text: string): boolean {
  * Whether `text` is a finite decimal with an optional sign that is **greater
  * than zero** (`2`, `0.5`, `+3`; never `0`, `-1`).
  *
- * `HATCHEDIT SCALE` needs this shape: the host's grammar is the same plain
- * decimal plus the strict positivity rule, so a zero/negative factor is refused
- * locally instead of reaching the router.
+ * `MOCORO SCALE` needs this shape: the host's grammar is the same plain decimal
+ * plus the strict positivity rule, so a zero/negative factor is refused locally
+ * instead of reaching the router.
  */
 function isPositiveSignedDecimal(text: string): boolean {
   if (!/^\+?[0-9]+(\.[0-9]+)?$/.test(text)) return false;
@@ -175,35 +177,25 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
       .includes(argument.trim().toUpperCase()),
   }),
   /**
-   * `HATCHEDIT <option>` (AutoCAD 2026) is the typed v1 hatch edit. The
-   * implemented forms are `ANGLE <degrees>` (one finite signed decimal),
-   * `SCALE <factor>` (one finite decimal > 0), `PATTERN <name>` (one token, the
-   * built-in `.pat` pattern name), `SOLID`, `GRADIENT`, `ADDBOUNDARIES` and
-   * `REMOVEBOUNDARIES` (the other selected closed entities become loops, or the
-   * stored loops matching them are removed; one undo step). The bare
-   * `HATCHEDIT` is admitted by the base name and refused by the host with
-   * `hatchedit.needs_option`; every other AutoCAD dialog field (`Color`,
-   * `Properties`, `Draw order`, associativity) is NOT IMPLEMENTED and is
-   * refused locally. `PATTERN` admits any non-empty single token and forwards
-   * the name: this file carries no pattern-name list, so the host stays the
-   * semantic authority (an unknown name is its `hatchedit.unknown_pattern`).
+   * `HATCHEDIT <option>` (AutoCAD 2026): the typed hatch edit.
+   *
+   * The predicate is `isHatchEditArgument` (in `argument-hatchedit.ts`), which
+   * mirrors the host parser token for token: `STYLE IGNORE|OUTER|NORMAL`,
+   * `ANGLE <degrees>`, `SCALE <factor>`, `PATTERN <name>`,
+   * `PATTERNFILE <path.pat> [<name>]`, `PATTERNTYPE USER|PREDEFINED|CUSTOM`,
+   * `SOLID`, `GRADIENT`, `COLOR <aci>|BYLAYER`,
+   * `TRANSPARENCY <0..=90>|BYLAYER`, `LAYER <name>`,
+   * `ORIGIN <x> <y>`, `DRAWORDER BEHIND|FRONT|BOUNDARY`, `RECREATEBOUNDARY`,
+   * `SEPARATE`, `ADDBOUNDARIES`, `REMOVEBOUNDARIES`, plus the named-refusal forms
+   * `ASSOCIATE`/`DISASSOCIATE`/`ANNOTATIVE` (forwarded so the **host** names the
+   * missing model). The bare `HATCHEDIT` is admitted by the base name and refused
+   * by the host with `hatchedit.needs_option`.
+   *
+   * Nothing semantic is decided here: the pattern-name table, the pattern-fill
+   * requirement, layer existence and reading a `PATTERNFILE` path are all the
+   * host's.
    */
-  HATCHEDIT: Object.freeze({
-    parse: (argument: string) => {
-      const parts = argument.trim().toUpperCase().split(/\s+/).filter(part => part.length > 0);
-      const [word, ...rest] = parts;
-      if (word === 'SOLID' || word === 'GRADIENT' || word === 'ADDBOUNDARIES'
-        || word === 'REMOVEBOUNDARIES') {
-        return rest.length === 0;
-      }
-      if (word === 'ANGLE') return rest.length === 1 && isSignedDecimal(rest[0]);
-      if (word === 'SCALE') return rest.length === 1 && isPositiveSignedDecimal(rest[0]);
-      // The name itself is not validated here (no second name list): one
-      // non-empty token is admissible, the host answers for the name.
-      if (word === 'PATTERN') return rest.length === 1;
-      return false;
-    },
-  }),
+  HATCHEDIT: Object.freeze({ parse: isHatchEditArgument }),
   MEASUREGEOM: Object.freeze({
     parse: (argument: string) => ['DISTANCE', 'ANGLE', 'AREA', 'POLYLINE', 'RADIUS', 'VOLUME']
       .includes(argument.trim().toUpperCase()),

@@ -153,7 +153,11 @@ impl Application {
                 "hatchsetboundary.rebuild_failed",
                 format!("the domain constructor rejected the new boundary set: {error}"),
             )
-        })?;
+        })?
+        // The creation path starts at the zero pattern origin; a boundary edit
+        // must not move the pattern phase, so the stored displacement is applied
+        // back (`HatchGeometry::pattern_origin`, the HATCHEDIT ORIGIN value).
+        .with_pattern_origin(hatch.pattern_origin());
         if rebuilt.loops() == hatch.loops() {
             return Ok(unchanged(
                 "hatchsetboundary.unchanged",
@@ -179,8 +183,15 @@ impl Application {
         )
     }
 
-    /// `HATCHSETORIGIN <x> <y>`: parsed but unconditionally refused because the
-    /// hatch model has no pattern-origin field.
+    /// `HATCHSETORIGIN <x> <y>`: parsed and refused.
+    ///
+    /// The domain now carries a pattern origin (`HatchGeometry::pattern_origin`,
+    /// the phase displacement of the definition rows — see its type docs), but
+    /// this selector's own contract (an **absolute** origin for exactly one
+    /// selected hatch, with its own prompt/selection rules) is not implemented;
+    /// the implemented editor is `HATCHEDIT ORIGIN <x> <y>`, whose value is the
+    /// displacement from the stored rows. Refusing here keeps one definition of
+    /// the option rather than a second, silently different one.
     pub(crate) fn hatch_set_origin(
         &mut self,
         session: &mut SessionState,
@@ -257,10 +268,10 @@ impl Application {
             )));
         }
         Err(CadError::Unsupported(format!(
-            "hatchsetorigin.missing_field: cad_domain::HatchGeometry has no hatch \
-             pattern-origin field (only HatchPlane.elevation and per-line \
-             HatchPatternLine.base_x/base_y exist, neither of which is the group-10 origin), \
-             so the requested origin ({x}, {y}) changes nothing"
+            "hatchsetorigin.missing_field: HATCHSETORIGIN's absolute pattern-origin form is not \
+             implemented (the requested origin ({x}, {y}) changes nothing); the implemented \
+             editor is HATCHEDIT ORIGIN <x> <y>, whose value is the phase displacement of the \
+             pattern's definition rows"
         )))
     }
 }

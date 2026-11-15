@@ -56,7 +56,11 @@ impl Application {
                 invalid_code,
                 format!("the domain constructor rejected the new boundary set: {error}"),
             )
-        })?;
+        })?
+        // The creation path starts at the zero pattern origin; a boundary edit
+        // must not move the pattern phase, so the stored displacement is applied
+        // back.
+        .with_pattern_origin(target.hatch.pattern_origin());
         let mut after = target.entity.clone();
         after.geometry = SemanticGeometry::Hatch(Box::new(rebuilt));
         self.commit_hatch_edits(

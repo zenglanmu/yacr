@@ -2,6 +2,33 @@
 //! every code file inside the 1000-line gate.
 
 use cad_domain::{HatchPatternType, HatchStyle};
+use std::sync::Arc;
+
+/// The `.pat` library text a host read delivered for `PATTERNFILE`.
+///
+/// The command line is parsed in the session, which cannot read a filesystem
+/// (it is also compiled to wasm), so the host strategy reads the file and the
+/// text travels in the payload — exactly like an import request carries the bytes
+/// the host read. `Debug` prints the size only: the option is echoed into
+/// diagnostics, and a whole pattern library does not belong there.
+#[derive(Clone, PartialEq, Eq)]
+pub struct PatternFileText(Arc<str>);
+
+impl PatternFileText {
+    pub fn new(text: impl Into<Arc<str>>) -> Self {
+        Self(text.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for PatternFileText {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "PatternFileText(<{} bytes>)", self.0.len())
+    }
+}
 
 /// Where one `HATCHEDIT DRAWORDER` option places the selected hatches.
 ///
@@ -42,8 +69,26 @@ pub enum HatchEditOption {
     /// `hatchedit.pattern_requires_pattern`), the name is matched
     /// case-insensitively against the one library table, and an unknown name is
     /// `hatchedit.unknown_pattern`. A user `acad.pat`/`acadiso.pat` entry is not
-    /// selectable yet (host file I/O).
+    /// selectable through this form: use [`Self::PatternFile`].
     Pattern(String),
+    /// `PATTERNFILE <path.pat> [<name>]`: apply a pattern from a user `.pat`
+    /// file, keeping the hatch's stored angle/scale/`double` and recording the
+    /// fill as a custom pattern (`76=2`, what AutoCAD writes for a user-file
+    /// pattern).
+    ///
+    /// `text` is the file content the **host** read
+    /// (`cad_host::HostResources::read_named_file`): this command never touches
+    /// the filesystem. `None` means the payload was built without that read and
+    /// is refused as `hatchedit.pattern_file_not_read`, never treated as an empty
+    /// file. With no `name` the file must hold exactly one pattern
+    /// (`hatchedit.pattern_file_ambiguous` otherwise); with a name the file is
+    /// searched first and the built-in library second, and a name in neither is
+    /// `hatchedit.unknown_pattern` naming both sources.
+    PatternFile {
+        path: String,
+        name: Option<String>,
+        text: Option<PatternFileText>,
+    },
     /// `STYLE IGNORE|OUTER|NORMAL`: set the island-detection style (group 75).
     Style(HatchStyle),
     /// `DRAWORDER BEHIND|FRONT|BOUNDARY`: rewrite the stored draw order.
@@ -67,8 +112,12 @@ pub enum HatchEditOption {
     TransparencyByLayer,
     /// `LAYER <name>`: move every selected hatch to that drawing layer.
     Layer(String),
-    /// `ORIGIN`: named refusal — the domain stores no pattern origin.
-    Origin,
+    /// `ORIGIN <x> <y>`: move the pattern origin (the phase displacement of the
+    /// pattern's definition rows, see `cad_domain::HatchGeometry`).
+    ///
+    /// Only a [`Pattern`](Self::Pattern) fill draws rows, so a solid/gradient
+    /// fill is `hatchedit.not_pattern`, exactly like `ANGLE`/`SCALE`.
+    Origin { x: f64, y: f64 },
     /// `ASSOCIATE`: named refusal — there is no associativity model.
     Associate,
     /// `DISASSOCIATE`: named refusal — dimensions/hatches are non-associative.

@@ -14,6 +14,10 @@ pub(super) fn option_label(option: &HatchEditOption) -> String {
         HatchEditOption::Angle(degrees) => format!("ANGLE {degrees}"),
         HatchEditOption::Scale(factor) => format!("SCALE {factor}"),
         HatchEditOption::Pattern(name) => format!("PATTERN {name}"),
+        HatchEditOption::PatternFile { path, name, .. } => match name {
+            Some(name) => format!("PATTERNFILE {path} {name}"),
+            None => format!("PATTERNFILE {path}"),
+        },
         HatchEditOption::PatternType(pattern_type) => {
             format!("PATTERNTYPE {}", pattern_type_label(*pattern_type))
         }
@@ -28,7 +32,7 @@ pub(super) fn option_label(option: &HatchEditOption) -> String {
         HatchEditOption::Transparency(percent) => format!("TRANSPARENCY {percent}"),
         HatchEditOption::TransparencyByLayer => "TRANSPARENCY BYLAYER".into(),
         HatchEditOption::Layer(name) => format!("LAYER {name}"),
-        HatchEditOption::Origin => "ORIGIN".into(),
+        HatchEditOption::Origin { x, y } => format!("ORIGIN {x} {y}"),
         HatchEditOption::Associate => "ASSOCIATE".into(),
         HatchEditOption::Disassociate => "DISASSOCIATE".into(),
         HatchEditOption::Annotative => "ANNOTATIVE".into(),
