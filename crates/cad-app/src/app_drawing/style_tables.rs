@@ -338,7 +338,12 @@ fn modified_style_row(
 // Name resolution (one rule for the whole module)
 // ---------------------------------------------------------------------------
 
-fn resolve_unique<K: Copy + Eq + std::fmt::Debug>(
+/// Resolve one symbol-table name with the module's single rule: exact match
+/// first, then a **unique** ASCII case-insensitive match.
+///
+/// `pub(crate)` because `RENAME LINETYPE` resolves the drawing's linetype table
+/// through this same rule instead of a second copy.
+pub(crate) fn resolve_unique<K: Copy + Eq + std::fmt::Debug>(
     key: &str,
     label: &str,
     name: &str,

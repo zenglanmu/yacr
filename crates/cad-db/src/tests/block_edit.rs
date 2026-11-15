@@ -573,6 +573,7 @@ fn a_staged_block_is_a_valid_reference_target_only_inside_the_batch() {
         &staged,
         &no_layers,
         &no_layouts,
+        super::EntityGeometryCheck::NewWrite,
     )
     .expect("the staged block owns this member");
     crate::validate::validate_entity_in(
@@ -582,6 +583,7 @@ fn a_staged_block_is_a_valid_reference_target_only_inside_the_batch() {
         &staged,
         &no_layers,
         &no_layouts,
+        super::EntityGeometryCheck::NewWrite,
     )
     .expect("the staged block is an insert target");
 }

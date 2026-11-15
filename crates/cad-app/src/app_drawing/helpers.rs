@@ -600,37 +600,63 @@ pub(super) fn offset_arc(
     ))
 }
 
-/// Apply a list of drawing patches to a database (used by undo/redo).
+/// Apply one retained history step to a database (used by undo/redo).
 ///
 /// `forward` selects the `after` side (redo); otherwise the `before` side is
-/// applied (undo). The entity batch, the block batch, the layer batch and the
-/// layout batch are all selected the same way and committed through the
-/// database's single validated combined write path
-/// ([`DrawingDatabase::apply_drawing_changes_with_blocks_display_layers_and_layouts`]),
+/// applied (undo). The entity batch, the block batch, the layer batch, the
+/// layout batch, the style batch and the linetype batch are all selected the
+/// same way and committed through the database's **history-replay** write path
+/// ([`DrawingDatabase::replay_drawing_changes_with_blocks_display_layers_layouts_styles_and_linetypes`]),
 /// together with each re-applied side's captured display state, so a patch that
 /// no longer matches the store is refused, never silently force-written. That
 /// path owns the phase order (layout/layer/block creates before member moves,
 /// display states after the entity rows, block deletes, layer deletes and then
 /// layout deletes after the references leave), so undo and redo never reorder
-/// manually, and the display restore plus any layer/layout restore land in the
-/// **same** revision and `ChangeSet` instead of being second, unreported
-/// mutations.
-// The replay shape mirrors the record: one argument per patch kind, so a new
-// kind cannot be forgotten by a caller.
-#[allow(clippy::too_many_arguments)]
+/// manually, and the display restore plus any layer/layout/style/linetype
+/// restore land in the **same** revision and `ChangeSet` instead of being
+/// second, unreported mutations.
+///
+/// # New writes are geometry-validated; a replay restores stored rows
+///
+/// Both directions install rows that were **read out of this database** when the
+/// step was recorded, so they go through the replay entry point rather than the
+/// new-write one. The difference is exactly one rule: replay skips
+/// `validate_geometry` and writes the recorded row back byte-for-byte.
+///
+/// The reason is an asymmetry this crate does not hide: the importer is
+/// deliberately permissive and can store geometry the **write** validator
+/// rejects (the real-machine fixture has a zero-length line inside a block
+/// definition / paper layout). A command can never create such a row, but the
+/// database can already hold one. Re-validating on the way back in made undo
+/// refuse to restore the database's own previous state — `Invariant("invalid
+/// entity geometry: line is zero length")` with nothing restored, which broke the
+/// undo step for any drawing containing such content (not just LAYDEL: erasing
+/// and undoing that same row failed too).
+///
+/// Referential integrity is **not** relaxed by the replay: layer/block/layout
+/// existence (including ids the same step restores), the `SpaceId` shape, an
+/// `INSERT`'s block target, the display-state rules, the block member-list
+/// invariant, the table-batch rules and the layer-lock rule all still run, so a
+/// step that no longer matches the store is still refused. And no command gains a
+/// way to skip geometry validation: `validate_geometry` is unchanged and the
+/// replay mode is a crate-private parameter of the combined apply path.
+///
+/// The whole step is one argument (not one slice per kind) so a caller cannot
+/// forget the linetype rows the step carries.
 pub(crate) fn apply_drawing_patches(
     drawing: &mut DrawingDatabase,
     reason: &str,
     transaction: TransactionId,
-    patches: &[DrawingPatch],
-    block_patches: &[cad_db::BlockPatch],
-    layer_patches: &[cad_db::LayerPatch],
-    layout_patches: &[cad_db::LayoutPatch],
-    style_patches: &[cad_db::StylePatch],
-    dim_style_patches: &[cad_db::DimStylePatch],
-    mleader_style_patches: &[cad_db::MLeaderStylePatch],
+    step: &cad_history::DrawingHistoryStep,
     forward: bool,
 ) -> CadResult<ChangeSet> {
+    let patches = &step.record.patches;
+    let block_patches = &step.record.block_patches;
+    let layer_patches = &step.record.layer_patches;
+    let layout_patches = &step.record.layout_patches;
+    let style_patches = &step.record.style_patches;
+    let dim_style_patches = &step.record.dim_style_patches;
+    let mleader_style_patches = &step.record.mleader_style_patches;
     let changes: Vec<(EntityId, Option<DbEntity>)> = patches
         .iter()
         .map(|p| {
@@ -737,7 +763,21 @@ pub(crate) fn apply_drawing_patches(
                 )
             })
             .collect();
-    drawing.apply_drawing_changes_with_blocks_display_layers_and_layouts_and_styles(
+    let linetype_changes: Vec<(LinetypeId, Option<cad_db::LineType>)> = step
+        .linetype_patches
+        .iter()
+        .map(|p| {
+            (
+                p.id,
+                if forward {
+                    p.after.clone()
+                } else {
+                    p.before.clone()
+                },
+            )
+        })
+        .collect();
+    drawing.replay_drawing_changes_with_blocks_display_layers_layouts_styles_and_linetypes(
         reason,
         transaction,
         &block_changes,
@@ -750,6 +790,7 @@ pub(crate) fn apply_drawing_patches(
             dim_styles: &dim_style_changes,
             mleader_styles: &mleader_style_changes,
         },
+        &linetype_changes,
     )
 }
 

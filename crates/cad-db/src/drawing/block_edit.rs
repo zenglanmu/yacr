@@ -47,6 +47,33 @@
 //! untouched. A runtime create also cannot carry a dynamic-visibility descriptor:
 //! a descriptor mirrors a source parameter list, and nothing in a new block
 //! defines one.
+//!
+//! # Two write modes: a new write, and a history replay
+//!
+//! Every command/transaction commit is a **new write**: the entity row must be
+//! storable, so `validate_entity_in` runs `validate_geometry` on it and a
+//! degenerate row (zero-length line, empty polyline, zero radius, …) is refused.
+//!
+//! History replay is a different question. Undo/redo reinstalls rows the
+//! database itself held a moment ago, and the importer is deliberately
+//! permissive — a real drawing can contain geometry the write validator rejects
+//! (an imported zero-length line inside a block definition or a paper layout is
+//! the real-machine case). Re-validating such a row makes the database refuse to
+//! restore **its own** stored state, which breaks the whole undo step for that
+//! drawing. Replay therefore runs under
+//! [`EntityGeometryCheck::RestoreStored`]: geometry is written back
+//! byte-for-byte, while every reference rule here still applies —
+//!
+//! * the entity key/`ObjectId` identity relationship;
+//! * the layer exists (or is staged by the same batch);
+//! * `SpaceId::Model` / `Paper(existing-or-staged)` / `Block(existing-or-staged)`;
+//! * an `INSERT` names an existing-or-staged block;
+//! * the display-state, block membership, layer and layout batch rules below;
+//! * the layer-lock rule (`layer.locked`), which is replayed-state-independent.
+//!
+//! Only [`DrawingDatabase::replay_drawing_changes_with_blocks_display_layers_layouts_styles_and_linetypes`]
+//! selects the replay mode; the geometry rule is a crate-private parameter, not a
+//! flag a command can pass, and `validate_geometry` itself is unchanged.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -55,10 +82,10 @@ use cad_domain::*;
 use super::layer_patch::{validate_layer_batch, LayerRow};
 use super::layout_edit::{validate_layout_batch, LayoutRow};
 use super::style_edit::StyleTableChanges;
-use super::{DrawingDatabase, EntityDisplayState};
+use super::{DrawingDatabase, EntityDisplayState, EntityGeometryCheck};
 use crate::change::{ChangeMask, ChangeSet, ObjectChange};
 use crate::entity::DbEntity;
-use crate::tables::{BlockDefinition, BlockMetadata};
+use crate::tables::{BlockDefinition, BlockMetadata, LineType};
 use crate::validate::validate_entity_in;
 
 /// One block table row as a writable unit.
@@ -211,6 +238,8 @@ impl DrawingDatabase {
             &[],
             &[],
             StyleTableChanges::default(),
+            &[],
+            EntityGeometryCheck::NewWrite,
         )
     }
 
@@ -222,7 +251,15 @@ impl DrawingDatabase {
     /// layer batch, and
     /// [`Self::apply_drawing_changes_with_blocks_display_layers_and_layouts`]
     /// passes both; see `drawing::layer_patch` and `drawing::layout_edit` for the
-    /// table halves of the contract.
+    /// table halves of the contract. The style batch is validated/applied by
+    /// `drawing::style_edit` and the linetype batch (row rename + cascade) by
+    /// `drawing::linetype_edit`.
+    ///
+    /// `geometry_check` selects the entity geometry rule: [`EntityGeometryCheck::NewWrite`]
+    /// for every command/transaction commit, [`EntityGeometryCheck::RestoreStored`]
+    /// only for history replay (see the module docs). It changes **nothing** else:
+    /// the identity, reference, display-state, membership and table-batch checks
+    /// are the same in both modes.
     // The batch shape is the contract: every table is one argument so a caller
     // cannot silently omit a half of an atomic write.
     #[allow(clippy::too_many_arguments)]
@@ -236,6 +273,8 @@ impl DrawingDatabase {
         layer_changes: &[(LayerId, Option<LayerRow>)],
         layout_changes: &[(LayoutId, Option<LayoutRow>)],
         style_changes: StyleTableChanges<'_>,
+        linetype_changes: &[(LinetypeId, Option<LineType>)],
+        geometry_check: EntityGeometryCheck,
     ) -> CadResult<ChangeSet> {
         let before = self.revision;
         if block_changes.is_empty()
@@ -244,6 +283,7 @@ impl DrawingDatabase {
             && layer_changes.is_empty()
             && layout_changes.is_empty()
             && style_changes.is_empty()
+            && linetype_changes.is_empty()
         {
             // Nothing staged: no revision bump, no fabricated change.
             return Ok(ChangeSet {
@@ -353,6 +393,12 @@ impl DrawingDatabase {
         // Phase 1c: entity rows, with the same batch's block, layer **and
         // layout** ids staged as valid references (`SpaceId::Block(new)`,
         // `Insert { block: new }`, `layer: new` and `SpaceId::Paper(new)`).
+        //
+        // `geometry_check` decides the only difference between a new write and a
+        // history replay: a new write must pass `validate_geometry`, while a
+        // replayed row is restored byte-for-byte (the database already held it;
+        // see the module docs). Identity and every reference check below are
+        // unchanged in both modes.
         for (id, change) in &changes {
             match change {
                 Some(entity) => validate_entity_in(
@@ -362,6 +408,7 @@ impl DrawingDatabase {
                     &staged_blocks,
                     &staged_layers,
                     &staged_layouts,
+                    geometry_check,
                 )?,
                 None => {
                     if !self.entities.contains_key(id) {
@@ -378,6 +425,14 @@ impl DrawingDatabase {
             // The batch validators live in `style_edit` and are reused by the
             // public entry, so this path cannot drift from it.
             self.validate_style_batches_for_combined(style_changes)?;
+        }
+
+        // Phase 1b'': the linetype batch (row existence, the default-name
+        // protection, names and the final-set uniqueness). It has no entity
+        // reference to validate: the mutation cascades every stored name
+        // reference itself, so a rename can never leave a dangling one.
+        if !linetype_changes.is_empty() {
+            super::linetype_edit::validate_linetype_batch(self, linetype_changes)?;
         }
 
         // Phase 1d: the insert-only bounds fast path.
@@ -403,6 +458,12 @@ impl DrawingDatabase {
         // style and a text row in one revision never exposes a dangling style
         // name in between.
         self.install_style_batches(style_changes);
+
+        // 2a-pre-2: linetype-table upserts, with their name cascade. The cascade
+        // rewrites the stored layer/entity name references in this same mutation
+        // (see `drawing::linetype_edit`); the ids it retargeted are announced as
+        // `STYLE` updates below, once the entity batch and display states exist.
+        let linetype_touched = self.install_linetype_batch(linetype_changes);
 
         // 2a: layout creates/updates **first**, so an entity restored in the
         // same record already has its layout row when it lands.
@@ -476,6 +537,18 @@ impl DrawingDatabase {
             }
         }
 
+        // 2e-2: the entities the linetype cascade retargeted are style changes
+        // too. Their row did not change, so the batch has no `Update` for them
+        // unless one was staged; announce each exactly once.
+        for id in linetype_touched {
+            match ordered.iter_mut().find(
+                |change| matches!(change, ObjectChange::Update(object, _) if object.0 == id.0),
+            ) {
+                Some(ObjectChange::Update(_, mask)) => *mask = mask.union(ChangeMask::STYLE),
+                _ => ordered.push(ObjectChange::Update(ObjectId(id.0), ChangeMask::STYLE)),
+            }
+        }
+
         // 2f: block deletes, once nothing references them any more.
         for (id, change) in block_changes {
             if change.is_none() {
@@ -521,7 +594,11 @@ impl DrawingDatabase {
 
         let after = Revision(before.0 + 1);
         self.revision = after;
-        if !layer_changes.is_empty() || !layout_changes.is_empty() || !style_changes.is_empty() {
+        if !layer_changes.is_empty()
+            || !layout_changes.is_empty()
+            || !style_changes.is_empty()
+            || !linetype_changes.is_empty()
+        {
             self.invalidate_bounds_cache();
         }
         if let Some(bounds) = incremental_bounds {

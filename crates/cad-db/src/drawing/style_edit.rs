@@ -158,6 +158,8 @@ impl DrawingDatabase {
             layer_changes,
             layout_changes,
             style_changes,
+            &[],
+            super::EntityGeometryCheck::NewWrite,
         )
     }
 

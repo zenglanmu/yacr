@@ -149,9 +149,9 @@ pub struct GripStretchCommand {
 
 /// The named-object kind a `PURGE`/`RENAME` line targets.
 ///
-/// The database exposes delete/rename APIs for **layers only**; the other kinds
-/// are modelled so an explicit request can be refused by name instead of being
-/// silently ignored or treated as a layer.
+/// `RENAME` addresses every kind with a post-import write API; `PURGE` still has
+/// a delete API for layers only, so any other kind is refused by name rather
+/// than silently ignored or treated as a layer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NamedObjectKind {
     Layer,

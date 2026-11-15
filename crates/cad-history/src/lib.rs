@@ -123,6 +123,19 @@ pub fn mleader_style_patch(
     cad_db::MLeaderStylePatch { id, before, after }
 }
 
+/// Build a reversible linetype-table patch from the before/after rows.
+///
+/// The linetype table has a rename but no create/delete API in this build, so
+/// both sides are normally `Some`; the shape still mirrors the other table
+/// patches so a future create/delete cannot need a second type.
+pub fn linetype_patch(
+    id: LinetypeId,
+    before: Option<cad_db::LineType>,
+    after: Option<cad_db::LineType>,
+) -> cad_db::LinetypePatch {
+    cad_db::LinetypePatch { id, before, after }
+}
+
 /// A reversible batch of drawing-entity changes.
 ///
 /// The patches carry the full before/after [`DbEntity`]; `transaction` is the
@@ -192,21 +205,22 @@ impl DrawingUndoRecord {
         }
     }
 
-    fn validate(&self) -> CadResult<()> {
-        if self.patches.is_empty()
+    /// Whether every batch of this record is empty.
+    fn is_empty(&self) -> bool {
+        self.patches.is_empty()
             && self.block_patches.is_empty()
             && self.layer_patches.is_empty()
             && self.layout_patches.is_empty()
             && self.style_patches.is_empty()
             && self.dim_style_patches.is_empty()
             && self.mleader_style_patches.is_empty()
-        {
-            return Err(CadError::InvalidInput(
-                "a drawing undo record needs at least one patch, block patch, layer patch or \
-                 layout patch"
-                    .into(),
-            ));
-        }
+    }
+
+    /// Validate the batch shape and the duplicate/coalescing rules.
+    ///
+    /// Does **not** require a non-empty batch: a linetype-only step carries its
+    /// row beside the record (see [`DrawingHistoryStep`]).
+    fn validate_batches(&self) -> CadResult<()> {
         // Block, layer and layout rows are not orthogonal per-key edits like a
         // drag: coalescing them into the previous record could silently drop a
         // definition or its members/attributes. Refuse the combination instead
@@ -404,6 +418,72 @@ impl DrawingUndoRecord {
     }
 }
 
+/// One retained history step: the drawing record plus the linetype-table rows
+/// committed with it.
+///
+/// Every other named table is a field of [`DrawingUndoRecord`]. The linetype
+/// table is the one symbol table with a **rename but no create/delete API**, so
+/// exactly one command writes it; carrying its row here keeps the record's
+/// exhaustive batch list (which every command's record literal names) unchanged.
+/// If a second linetype write ever lands, promote this to a record field.
+///
+/// The step is the unit undo and redo move: the entity/row record and the
+/// linetype row are applied through the database's combined write path in one
+/// revision, so `RENAME LINETYPE` is one undo step.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DrawingHistoryStep {
+    pub record: DrawingUndoRecord,
+    pub linetype_patches: Vec<cad_db::LinetypePatch>,
+}
+
+impl DrawingHistoryStep {
+    /// Validate the step as a whole: at least one entity/table row or linetype
+    /// row, the record's own batch rules, and no duplicate linetype id.
+    fn validate(&self) -> CadResult<()> {
+        if self.record.is_empty() && self.linetype_patches.is_empty() {
+            return Err(CadError::InvalidInput(
+                "a drawing undo step needs at least one entity, block, layer, layout, style or \
+                 linetype row"
+                    .into(),
+            ));
+        }
+        self.record.validate_batches()?;
+        let mut ids = HashSet::new();
+        for patch in &self.linetype_patches {
+            if !ids.insert(patch.id) {
+                return Err(CadError::InvalidInput(
+                    "a drawing undo record cannot contain duplicate linetype ids".into(),
+                ));
+            }
+            if patch.before.is_none() && patch.after.is_none() {
+                return Err(CadError::InvalidInput(
+                    "a linetype patch needs a before or after state".into(),
+                ));
+            }
+        }
+        // A linetype row is not an orthogonal per-key edit: coalescing it into a
+        // drag would drop the row. Refuse the combination like the other tables.
+        if self.record.merge_key.is_some() && !self.linetype_patches.is_empty() {
+            return Err(CadError::InvalidInput(
+                "a drawing undo record with linetype patches cannot be merged".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn approx_bytes(&self) -> usize {
+        let mut bytes = self.record.approx_bytes();
+        for patch in &self.linetype_patches {
+            bytes += std::mem::size_of::<cad_db::LinetypePatch>();
+            for row in patch.before.iter().chain(patch.after.iter()) {
+                bytes += std::mem::size_of::<cad_db::LineType>() + row.name.len();
+                bytes += row.pattern.elements.len() * std::mem::size_of::<f64>();
+            }
+        }
+        bytes
+    }
+}
+
 /// Undo/redo stacks with an approximate budget on retained undo entries.
 ///
 /// The newest undo entry is retained even if it exceeds the budget. The byte
@@ -412,8 +492,8 @@ impl DrawingUndoRecord {
 /// fully accounted for.
 pub struct History {
     pub memory_budget_bytes: usize,
-    undo: VecDeque<DrawingUndoRecord>,
-    redo: Vec<DrawingUndoRecord>,
+    undo: VecDeque<DrawingHistoryStep>,
+    redo: Vec<DrawingHistoryStep>,
     pending: Option<PendingDrawing>,
     used_bytes: usize,
 }
@@ -465,20 +545,42 @@ impl History {
     /// An empty patch list is rejected, so a command can never claim success
     /// while recording nothing.
     pub fn record_drawing(&mut self, record: DrawingUndoRecord) -> CadResult<()> {
+        self.record_drawing_with_linetypes(record, Vec::new())
+    }
+
+    /// Record a committed drawing change plus the linetype-table rows it wrote.
+    ///
+    /// [`Self::record_drawing`] is the common shape (no linetype rows). The
+    /// linetype batch is carried beside the record (see [`DrawingHistoryStep`]),
+    /// is never coalesced, and counts toward "this step records something", so a
+    /// linetype-only rename is still one real undo step.
+    pub fn record_drawing_with_linetypes(
+        &mut self,
+        record: DrawingUndoRecord,
+        linetype_patches: Vec<cad_db::LinetypePatch>,
+    ) -> CadResult<()> {
         self.ensure_no_pending_drawing()?;
-        record.validate()?;
-        if let Some(key) = &record.merge_key {
+        let mut step = DrawingHistoryStep {
+            record,
+            linetype_patches,
+        };
+        step.validate()?;
+        if let Some(key) = step.record.merge_key.clone() {
             if let Some(last) = self.undo.back_mut() {
-                if last.merge_key.as_deref() == Some(key.as_str()) {
-                    for patch in record.patches {
-                        if let Some(existing) = last.patches.iter_mut().find(|p| p.id == patch.id) {
+                if last.record.merge_key.as_deref() == Some(key.as_str()) {
+                    for patch in std::mem::take(&mut step.record.patches) {
+                        if let Some(existing) =
+                            last.record.patches.iter_mut().find(|p| p.id == patch.id)
+                        {
                             existing.after = patch.after;
                         } else {
-                            last.patches.push(patch);
+                            last.record.patches.push(patch);
                         }
                     }
-                    last.patches.retain(|patch| patch.before != patch.after);
-                    if last.patches.is_empty() {
+                    last.record
+                        .patches
+                        .retain(|patch| patch.before != patch.after);
+                    if last.record.patches.is_empty() {
                         self.undo.pop_back();
                     }
                     self.recompute_used_bytes();
@@ -488,15 +590,15 @@ impl History {
                 }
             }
         }
-        self.used_bytes += record.approx_bytes();
-        self.undo.push_back(record);
+        self.used_bytes += step.approx_bytes();
+        self.undo.push_back(step);
         self.redo.clear();
         self.enforce_budget();
         Ok(())
     }
 
     fn recompute_used_bytes(&mut self) {
-        self.used_bytes = self.undo.iter().map(|r| r.approx_bytes()).sum();
+        self.used_bytes = self.undo.iter().map(|step| step.approx_bytes()).sum();
     }
 
     fn enforce_budget(&mut self) {
@@ -516,40 +618,40 @@ impl History {
         self.used_bytes = 0;
     }
 
-    /// Undo the most recent drawing record, returning its patches.
+    /// Undo the most recent drawing step, returning its patches.
     ///
     /// The caller applies the `before` entities through the drawing database's
-    /// own validated write path; the record is only moved to the redo stack
-    /// after the caller reports success via [`History::finish_drawing`].
-    /// This method pops the record and holds it until finished, so a failed
+    /// own validated write path; the step is only moved to the redo stack after
+    /// the caller reports success via [`History::finish_drawing`].
+    /// This method pops the step and holds it until finished, so a failed
     /// apply cannot silently lose or duplicate the step.
     /// Other history writes are rejected until this step is finished or canceled.
-    pub fn begin_drawing_undo(&mut self) -> CadResult<DrawingUndoRecord> {
+    pub fn begin_drawing_undo(&mut self) -> CadResult<DrawingHistoryStep> {
         self.ensure_no_pending_drawing()?;
-        let record = self
+        let step = self
             .undo
             .pop_back()
             .ok_or_else(|| CadError::InvalidInput("nothing to undo".into()))?;
-        self.used_bytes = self.used_bytes.saturating_sub(record.approx_bytes());
+        self.used_bytes = self.used_bytes.saturating_sub(step.approx_bytes());
         self.pending = Some(PendingDrawing {
-            record: record.clone(),
+            step: step.clone(),
             direction: UndoDirection::Undo,
         });
-        Ok(record)
+        Ok(step)
     }
 
-    /// Redo the most recently undone drawing record, returning its patches.
-    pub fn begin_drawing_redo(&mut self) -> CadResult<DrawingUndoRecord> {
+    /// Redo the most recently undone drawing step, returning its patches.
+    pub fn begin_drawing_redo(&mut self) -> CadResult<DrawingHistoryStep> {
         self.ensure_no_pending_drawing()?;
-        let record = self
+        let step = self
             .redo
             .pop()
             .ok_or_else(|| CadError::InvalidInput("nothing to redo".into()))?;
         self.pending = Some(PendingDrawing {
-            record: record.clone(),
+            step: step.clone(),
             direction: UndoDirection::Redo,
         });
-        Ok(record)
+        Ok(step)
     }
 
     /// Commit the pending drawing undo/redo after the database accepted it.
@@ -559,10 +661,10 @@ impl History {
             .take()
             .ok_or_else(|| CadError::Invariant("no pending drawing undo".into()))?;
         match pending.direction {
-            UndoDirection::Undo => self.redo.push(pending.record),
+            UndoDirection::Undo => self.redo.push(pending.step),
             UndoDirection::Redo => {
-                self.used_bytes += pending.record.approx_bytes();
-                self.undo.push_back(pending.record);
+                self.used_bytes += pending.step.approx_bytes();
+                self.undo.push_back(pending.step);
                 self.enforce_budget();
             }
         }
@@ -580,11 +682,11 @@ impl History {
         };
         match pending.direction {
             UndoDirection::Undo => {
-                self.used_bytes += pending.record.approx_bytes();
-                self.undo.push_back(pending.record);
+                self.used_bytes += pending.step.approx_bytes();
+                self.undo.push_back(pending.step);
             }
             UndoDirection::Redo => {
-                self.redo.push(pending.record);
+                self.redo.push(pending.step);
             }
         }
     }
@@ -605,7 +707,7 @@ enum UndoDirection {
 }
 
 struct PendingDrawing {
-    record: DrawingUndoRecord,
+    step: DrawingHistoryStep,
     direction: UndoDirection,
 }
 

@@ -9,6 +9,7 @@ mod builder;
 mod drawing;
 mod drawing_clip;
 mod drawing_display;
+mod history_replay;
 mod layer_attributes;
 mod layer_inherit;
 mod layer_patch;

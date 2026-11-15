@@ -20,7 +20,7 @@ impl Application {
     /// accepted the `before` entities, so a failed apply leaves the step pending
     /// and the database unchanged.
     fn undo_drawing(&mut self, document_id: DocumentId) -> CadResult<CommandOutcome> {
-        let record = self
+        let step = self
             .history
             .entry(document_id)
             .or_default()
@@ -33,15 +33,9 @@ impl Application {
         let drawing = Arc::make_mut(&mut document.drawing);
         let changes = match crate::app_drawing::apply_drawing_patches(
             drawing,
-            &format!("undo: {}", record.label),
-            record.transaction,
-            &record.patches,
-            &record.block_patches,
-            &record.layer_patches,
-            &record.layout_patches,
-            &record.style_patches,
-            &record.dim_style_patches,
-            &record.mleader_style_patches,
+            &format!("undo: {}", step.record.label),
+            step.record.transaction,
+            &step,
             false,
         ) {
             Ok(changes) => changes,
@@ -70,7 +64,7 @@ impl Application {
 
     /// Redo the next drawing record against the drawing database.
     fn redo_drawing(&mut self, document_id: DocumentId) -> CadResult<CommandOutcome> {
-        let record = self
+        let step = self
             .history
             .entry(document_id)
             .or_default()
@@ -83,15 +77,9 @@ impl Application {
         let drawing = Arc::make_mut(&mut document.drawing);
         let changes = match crate::app_drawing::apply_drawing_patches(
             drawing,
-            &format!("redo: {}", record.label),
-            record.transaction,
-            &record.patches,
-            &record.block_patches,
-            &record.layer_patches,
-            &record.layout_patches,
-            &record.style_patches,
-            &record.dim_style_patches,
-            &record.mleader_style_patches,
+            &format!("redo: {}", step.record.label),
+            step.record.transaction,
+            &step,
             true,
         ) {
             Ok(changes) => changes,

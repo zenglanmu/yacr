@@ -20,6 +20,7 @@
 
 use cad_domain::*;
 
+use crate::drawing::EntityGeometryCheck;
 use crate::entity::DbEntity;
 use crate::math::{cross, length, transform_is_finite};
 
@@ -679,6 +680,7 @@ pub fn validate_entity(
         &std::collections::BTreeSet::new(),
         &std::collections::BTreeSet::new(),
         &std::collections::BTreeSet::new(),
+        EntityGeometryCheck::NewWrite,
     )
 }
 
@@ -695,6 +697,9 @@ pub fn validate_entity(
 /// exists after the batch. Every other reference still has to resolve against
 /// the stored table, so the staged sets widen the check by exactly the batch,
 /// never by a guess.
+///
+/// `geometry_check` selects the geometry rule ([`EntityGeometryCheck`]); nothing
+/// else about the check depends on it.
 pub(crate) fn validate_entity_in(
     db: &crate::DrawingDatabase,
     id: EntityId,
@@ -702,6 +707,7 @@ pub(crate) fn validate_entity_in(
     staged_blocks: &std::collections::BTreeSet<BlockId>,
     staged_layers: &std::collections::BTreeSet<LayerId>,
     staged_layouts: &std::collections::BTreeSet<LayoutId>,
+    geometry_check: EntityGeometryCheck,
 ) -> CadResult<()> {
     if entity.id != id {
         return Err(CadError::Invariant(format!(
@@ -715,7 +721,12 @@ pub(crate) fn validate_entity_in(
             entity.object.id
         )));
     }
-    validate_geometry(&entity.geometry)?;
+    // The only mode-dependent step: a history replay reinstalls a row the
+    // database already held, whose geometry the importer may have stored without
+    // this validator's approval.
+    if geometry_check == EntityGeometryCheck::NewWrite {
+        validate_geometry(&entity.geometry)?;
+    }
     if !db.layers.contains_key(&entity.layer) && !staged_layers.contains(&entity.layer) {
         return Err(CadError::Invariant(format!(
             "entity {id:?} references missing layer {:?}",

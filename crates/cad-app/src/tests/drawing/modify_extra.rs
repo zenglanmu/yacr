@@ -553,6 +553,82 @@ fn oops_is_refused_in_viewer_mode() {
     assert_eq!(undo_depth(&app), 0);
 }
 
+// --- ERASE + history replay of imported degenerate rows ----------------------
+
+/// ERASE + one UNDO on an **imported** zero-length line.
+///
+/// A delete has no geometry to validate, so it succeeds; the undo puts the row
+/// back through the history-replay write mode, which restores rows the database
+/// itself held verbatim instead of re-validating their geometry. This is the same
+/// generic path the LAYDEL fix uses (not a LAYDEL special case): before the replay
+/// mode existed, this undo failed with
+/// `Invariant("invalid entity geometry: line is zero length")`.
+#[test]
+fn erase_undo_restores_an_imported_zero_length_line() {
+    // The importer permissively stores what the write validator refuses.
+    let degenerate = SemanticGeometry::Line {
+        start: point(2.0, 3.0),
+        end: point(2.0, 3.0),
+    };
+    let (mut app, mut session) = build(vec![ent(1, degenerate, 1)], AppMode::Work);
+    let stored = app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .entity(EntityId(1))
+        .expect("the imported row exists")
+        .clone();
+    session.selection = SelectionSet::from_refs(vec![ref_of(1)]);
+
+    app.execute(
+        &mut session,
+        command(CommandId::EraseEntities, CommandPayload::None),
+    )
+    .expect("erasing the imported row is a normal write");
+    assert!(app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .entity(EntityId(1))
+        .is_none());
+    assert_eq!(undo_depth(&app), 1);
+
+    app.execute(&mut session, command(CommandId::Undo, CommandPayload::None))
+        .expect("undo restores the database's own row");
+    assert_eq!(
+        app.workspace.documents[&DocumentId(1)]
+            .drawing
+            .entity(EntityId(1)),
+        Some(&stored),
+        "the row and its degenerate geometry come back unchanged"
+    );
+
+    // A brand-new insert of that geometry is still refused: the replay mode is
+    // not reachable from a command (checked on a clone of this same database).
+    let mut drawing = (*app.workspace.documents[&DocumentId(1)].drawing).clone();
+    assert_eq!(
+        drawing
+            .apply_drawing_changes(
+                "new write",
+                TransactionId(9),
+                vec![(
+                    EntityId(2),
+                    Some(DbEntity {
+                        object: DbObject {
+                            id: ObjectId(2),
+                            type_key: "AcDbLine".into(),
+                            revision: Revision(0),
+                            source_handle: None,
+                        },
+                        id: EntityId(2),
+                        layer: LayerId(0),
+                        space: SpaceId::Model,
+                        geometry: stored.geometry.clone(),
+                        draw_order: 2,
+                    }),
+                )],
+            )
+            .unwrap_err(),
+        CadError::Invariant("invalid entity geometry: line is zero length".into())
+    );
+}
+
 // --- BREAKATPOINT ------------------------------------------------------------
 
 fn break_at_point(

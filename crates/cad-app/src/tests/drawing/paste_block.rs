@@ -658,12 +658,13 @@ fn pasteblock_history_record_is_one_block_patch_plus_entity_patches() {
     paste_block(&mut app, &mut session, point(0.0, 0.0)).unwrap();
     let new_block = drawing(&app).block_by_name("PasteBlock1").unwrap().id;
 
-    let record = app
+    let step = app
         .history
         .get_mut(&DocumentId(1))
         .unwrap()
         .begin_drawing_undo()
         .unwrap();
+    let record = step.record;
     assert_eq!(record.label, "paste block");
     assert_eq!(record.block_patches.len(), 1);
     assert_eq!(record.block_patches[0].id, new_block);

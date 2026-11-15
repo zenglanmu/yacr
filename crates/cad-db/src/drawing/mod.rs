@@ -26,6 +26,7 @@ mod layer_edit;
 mod layer_inherit;
 mod layer_patch;
 mod layout_edit;
+mod linetype_edit;
 mod linetype_scale;
 mod lock;
 mod point_style;
@@ -41,12 +42,49 @@ pub use layer_edit::{DEFAULT_LAYER_NAME, ILLEGAL_LAYER_NAME_CHARS};
 pub use layer_inherit::LayerScope;
 pub use layer_patch::{LayerPatch, LayerRow};
 pub use layout_edit::{LayoutPatch, LayoutRow, ILLEGAL_LAYOUT_NAME_CHARS, MAX_LAYOUT_NAME_CHARS};
+pub use linetype_edit::LinetypePatch;
 pub use style_edit::{
     DimStylePatch, MLeaderStylePatch, StylePatch, StyleTableChanges, DEFAULT_DIM_STYLE_NAME,
 };
 pub use transaction::DrawingTransaction;
 
 pub(crate) use bounds::BoundsCache;
+
+/// Which geometry rule an entity batch of a drawing write is checked under.
+///
+/// The two write kinds are not the same question:
+///
+/// * [`EntityGeometryCheck::NewWrite`] — a command, a transaction commit or any
+///   direct `apply_drawing_changes*` call. The stored geometry must be drawable
+///   and measurable, so `validate_geometry` runs and a degenerate row
+///   (zero-length line, empty polyline, zero radius, …) is refused.
+/// * [`EntityGeometryCheck::RestoreStored`] — history replay (undo/redo of a
+///   recorded patch). The batch reinstalls rows **this database already held**,
+///   so their geometry is written back byte-for-byte. The importer is
+///   deliberately permissive (it records whatever the file holds and reports
+///   completeness), so a real drawing can contain geometry the write validator
+///   rejects — an imported zero-length line inside a block definition or a paper
+///   layout is the real-machine case. Re-validating it would make the database
+///   refuse to restore its own previous state, breaking the whole undo step for
+///   that drawing. That is why this mode exists.
+///
+/// Referential integrity is **not** relaxed by the replay mode: layer, block and
+/// layout existence (widened by the ids the same batch stages), the `SpaceId`
+/// shape, an `INSERT`'s block target, the entity identity relationship, the
+/// display-state rules, the block member-list invariant, the layer/layout/style/
+/// linetype batch rules and the layer-lock rule all still run.
+///
+/// The type is crate-private and is selected by exactly one entry point
+/// (`DrawingDatabase::replay_drawing_changes_with_blocks_display_layers_layouts_styles_and_linetypes`),
+/// so no command can reach the relaxed rule and `validate_geometry` itself stays
+/// unchanged. See `drawing::block_edit` for the phase-level contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EntityGeometryCheck {
+    /// A new or edited row: geometry must survive `crate::validate_geometry`.
+    NewWrite,
+    /// A row read back out of this database: geometry is restored verbatim.
+    RestoreStored,
+}
 
 /// The authoritative, read-only-after-import drawing database.
 #[derive(Debug, Clone)]

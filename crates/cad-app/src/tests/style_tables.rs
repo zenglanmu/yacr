@@ -7,8 +7,8 @@
 
 use super::*;
 use cad_db::{
-    BlockDefinition, DbEntity, DbObject, DimStyle, DrawingDatabaseBuilder, Layer, MLeaderStyle,
-    Style,
+    BlockDefinition, DbEntity, DbObject, DimStyle, DrawingDatabaseBuilder, EntityLineType,
+    EntityRenderAttributes, Layer, LayerAttributes, LineType, LinetypePattern, MLeaderStyle, Style,
 };
 
 fn text_entity(id: u128, style: StyleId) -> DbEntity {
@@ -622,7 +622,9 @@ fn rename_covers_every_writable_kind_and_refuses_unknown_names() {
     let error = rename(&mut app, &mut session, NamedObjectKind::Style, "Nope", "X").unwrap_err();
     assert!(format!("{error}").contains("style.unknown"), "{error}");
 
-    // LINETYPE still has no write API: the refusal is named, not silent.
+    // LINETYPE is addressed by the same rule; this fixture has no linetype table,
+    // so the unknown name is its own refusal (`rename_linetype_*` below pins the
+    // real write).
     let error = rename(
         &mut app,
         &mut session,
@@ -631,10 +633,7 @@ fn rename_covers_every_writable_kind_and_refuses_unknown_names() {
         "Dashed",
     )
     .unwrap_err();
-    assert!(
-        format!("{error}").contains("rename.linetype.unsupported"),
-        "{error}"
-    );
+    assert!(format!("{error}").contains("linetype.unknown"), "{error}");
 }
 
 #[test]
@@ -686,4 +685,263 @@ fn a_written_table_command_is_refused_in_viewer_mode() {
         CommandPayload::None,
     )
     .expect("STYLE report is Viewer-legal");
+}
+
+// ---------------------------------------------------------------------------
+// RENAME LINETYPE
+// ---------------------------------------------------------------------------
+
+fn line_entity(id: u128, layer: LayerId) -> DbEntity {
+    DbEntity {
+        object: DbObject {
+            id: ObjectId(id),
+            type_key: "AcDbLine".into(),
+            revision: Revision(0),
+            source_handle: None,
+        },
+        id: EntityId(id),
+        layer,
+        space: SpaceId::Model,
+        geometry: SemanticGeometry::Line {
+            start: point(0.0, 0.0),
+            end: point(4.0, 0.0),
+        },
+        draw_order: id as i64,
+    }
+}
+
+/// Layers `0`/`WALLS`, linetypes `Continuous`(0) and `DASHED`(1), where `WALLS`
+/// **and** entity 1 both name `DASHED`: the two stores a rename must retarget.
+fn linetype_app() -> (Application, SessionState) {
+    let (mut app, session) = application_with_document();
+    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
+    for (id, name) in [(LayerId(0), "0"), (LayerId(3), "WALLS")] {
+        builder
+            .insert_layer(Layer {
+                id,
+                name: name.into(),
+                visible: true,
+            })
+            .unwrap();
+    }
+    builder
+        .insert_linetype(LineType {
+            id: LinetypeId(0),
+            name: "Continuous".into(),
+            pattern: LinetypePattern::continuous(),
+            complex: false,
+        })
+        .unwrap();
+    let dashed_pattern = LinetypePattern::from_elements([0.5, -0.25]);
+    builder
+        .insert_linetype(LineType {
+            id: LinetypeId(1),
+            name: "DASHED".into(),
+            pattern: dashed_pattern.clone(),
+            complex: false,
+        })
+        .unwrap();
+    let walls = LayerAttributes {
+        linetype: "DASHED".into(),
+        ..Default::default()
+    };
+    builder.set_layer_attributes(LayerId(3), walls).unwrap();
+    builder.insert_entity(line_entity(1, LayerId(3))).unwrap();
+    builder
+        .set_entity_render_attributes(
+            EntityId(1),
+            EntityRenderAttributes {
+                linetype: EntityLineType::Explicit {
+                    name: "DASHED".into(),
+                    pattern: dashed_pattern,
+                    scale: 1.0,
+                },
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    app.workspace
+        .documents
+        .get_mut(&DocumentId(1))
+        .unwrap()
+        .drawing = Arc::new(builder.finish().unwrap());
+    (app, session)
+}
+
+/// Requirement: after **any** write, every stored linetype name resolves in the
+/// row's table — the check a later save/export depends on.
+fn linetype_references_resolve(drawing: &cad_db::DrawingDatabase) -> bool {
+    let resolves = |name: &str| {
+        drawing
+            .linetypes()
+            .any(|row| row.name.eq_ignore_ascii_case(name))
+    };
+    drawing
+        .layers()
+        .all(|layer| resolves(&drawing.layer_attributes(layer.id).linetype))
+        && drawing.entities().all(|entity| {
+            match &drawing.entity_render_attributes(entity.id).linetype {
+                EntityLineType::Explicit { name, .. } => resolves(name),
+                EntityLineType::ByBlock | EntityLineType::ByLayer => true,
+            }
+        })
+}
+
+#[test]
+fn rename_linetype_moves_the_row_cascades_and_is_one_undo_step() {
+    let (mut app, mut session) = linetype_app();
+    assert!(
+        linetype_references_resolve(drawing(&app)),
+        "the fixture starts with every reference valid"
+    );
+    let depth = undo_depth(&app);
+    let start = revision(&app);
+
+    let outcome = rename(
+        &mut app,
+        &mut session,
+        NamedObjectKind::Linetype,
+        "DASHED",
+        "DASHED-X",
+    )
+    .expect("RENAME LINETYPE");
+    assert!(
+        outcome
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "rename.linetype"),
+        "{:?}",
+        outcome.diagnostics
+    );
+
+    let after = drawing(&app);
+    assert!(after.linetype(LinetypeId(1)).is_some());
+    assert_eq!(after.linetype(LinetypeId(1)).unwrap().name, "DASHED-X");
+    assert!(
+        after.linetypes().all(|row| row.name != "DASHED"),
+        "the old name no longer exists"
+    );
+    assert_eq!(after.layer_attributes(LayerId(3)).linetype, "DASHED-X");
+    match &after.entity_render_attributes(EntityId(1)).linetype {
+        EntityLineType::Explicit { name, .. } => assert_eq!(name, "DASHED-X"),
+        other => panic!("the entity keeps its explicit linetype: {other:?}"),
+    }
+    assert!(
+        linetype_references_resolve(after),
+        "every reference still resolves after the cascade"
+    );
+    // The retargeted entity is announced as a representation rebuild, so the
+    // renderer redraws it with the renamed linetype.
+    let changes = outcome
+        .changes
+        .as_ref()
+        .expect("the rename publishes a change set");
+    let announced = changes
+        .changes
+        .iter()
+        .find(|change| matches!(change, cad_db::ObjectChange::Update(object, _) if object.0 == 1))
+        .expect("the retargeted entity is announced");
+    match announced {
+        cad_db::ObjectChange::Update(_, mask) => assert!(
+            mask.invalidates_representation(),
+            "the cascade must invalidate the entity's representation"
+        ),
+        other => panic!("expected an Update for the entity, got {other:?}"),
+    }
+    assert_eq!(revision(&app), Revision(start.0 + 1), "one revision");
+    assert_eq!(undo_depth(&app), depth + 1, "one undo step");
+
+    // One undo restores the row and both cascaded references.
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .expect("undo");
+    let restored = drawing(&app);
+    assert_eq!(restored.linetype(LinetypeId(1)).unwrap().name, "DASHED");
+    assert_eq!(restored.layer_attributes(LayerId(3)).linetype, "DASHED");
+    match &restored.entity_render_attributes(EntityId(1)).linetype {
+        EntityLineType::Explicit { name, .. } => assert_eq!(name, "DASHED"),
+        other => panic!("undo restores the explicit name: {other:?}"),
+    }
+    assert!(linetype_references_resolve(restored));
+
+    // Redo re-applies the whole step.
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Redo,
+        CommandPayload::None,
+    )
+    .expect("redo");
+    let redone = drawing(&app);
+    assert_eq!(redone.linetype(LinetypeId(1)).unwrap().name, "DASHED-X");
+    assert_eq!(redone.layer_attributes(LayerId(3)).linetype, "DASHED-X");
+    match &redone.entity_render_attributes(EntityId(1)).linetype {
+        EntityLineType::Explicit { name, .. } => assert_eq!(name, "DASHED-X"),
+        other => panic!("redo re-applies the explicit name: {other:?}"),
+    }
+    assert!(linetype_references_resolve(redone));
+    assert_eq!(undo_depth(&app), depth + 1, "redo is still one step");
+}
+
+#[test]
+fn rename_linetype_refusals_are_named_and_write_nothing() {
+    let (mut app, mut session) = linetype_app();
+    let start = revision(&app);
+    let depth = undo_depth(&app);
+
+    for (old, new, code) in [
+        ("NOPE", "X", "linetype.unknown"),
+        ("DASHED", "continuous", "linetype.duplicate_name"),
+        ("Continuous", "Solid", "linetype.continuous_unrenameable"),
+        ("DASHED", "A/B", "linetype.name_illegal_char"),
+        ("DASHED", "  ", "linetype.name_empty"),
+        ("  ", "X", "linetype.name_empty"),
+    ] {
+        let error = rename(&mut app, &mut session, NamedObjectKind::Linetype, old, new)
+            .expect_err("named refusal");
+        assert!(
+            format!("{error}").contains(code),
+            "RENAME LINETYPE '{old}' -> '{new}': {error}"
+        );
+        assert_eq!(revision(&app), start, "a refusal writes no revision");
+        assert_eq!(undo_depth(&app), depth, "a refusal records no history");
+    }
+
+    // An authoritative no-op writes nothing and records nothing.
+    let outcome = rename(
+        &mut app,
+        &mut session,
+        NamedObjectKind::Linetype,
+        "DASHED",
+        "DASHED",
+    )
+    .expect("unchanged rename is a report");
+    assert!(
+        outcome
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "rename.unchanged"),
+        "{:?}",
+        outcome.diagnostics
+    );
+    assert_eq!(revision(&app), start);
+    assert_eq!(undo_depth(&app), depth);
+
+    // The write is Work-only, exactly like the other table commands.
+    session.switch_mode(AppMode::Viewer).unwrap();
+    let error = rename(
+        &mut app,
+        &mut session,
+        NamedObjectKind::Linetype,
+        "DASHED",
+        "DASHED-X",
+    )
+    .unwrap_err();
+    assert!(matches!(error, CadError::PermissionDenied), "{error:?}");
+    assert_eq!(revision(&app), start);
+    assert_eq!(undo_depth(&app), depth);
 }

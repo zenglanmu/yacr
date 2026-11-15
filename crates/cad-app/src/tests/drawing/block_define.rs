@@ -367,12 +367,13 @@ fn block_define_history_record_is_one_block_patch_plus_entity_patches() {
     // without touching the drawing. A record with block patches cannot carry a
     // merge key (history validation refuses that combination), so a successful
     // publish already proves `merge_key == None`; this pins the shape anyway.
-    let record = app
+    let step = app
         .history
         .get_mut(&DocumentId(1))
         .unwrap()
         .begin_drawing_undo()
         .unwrap();
+    let record = step.record;
     assert_eq!(record.label, "define block");
     assert_eq!(record.block_patches.len(), 1);
     assert_eq!(record.block_patches[0].id, new_block);

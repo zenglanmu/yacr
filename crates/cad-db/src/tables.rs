@@ -60,6 +60,14 @@ pub enum LayerLineWeight {
     ByLayer,
 }
 
+/// The drawing's default linetype name.
+///
+/// It is the implicit `DXF 6` value of a layer row that has no stored
+/// attributes (`LayerAttributes::default`) and the pattern the representation
+/// falls back to for an unresolvable name, so it is the one linetype row a
+/// rename refuses (`linetype.continuous_unrenameable`).
+pub const DEFAULT_LINETYPE_NAME: &str = "Continuous";
+
 /// Import-time attributes of a layer table row.
 ///
 /// These live **beside** [`Layer`] in the database (map keyed by [`LayerId`]),
@@ -149,7 +157,7 @@ impl Default for LayerAttributes {
             xref_dependent: false,
             plottable: true,
             color: LayerColor::default(),
-            linetype: "Continuous".to_string(),
+            linetype: DEFAULT_LINETYPE_NAME.to_string(),
             lineweight: LayerLineWeight::ByLayer,
             opacity: 1.0,
             plot_style: None,

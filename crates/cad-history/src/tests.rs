@@ -47,15 +47,15 @@ fn create_then_undo_moves_to_redo_and_redo_restores() {
     assert!(history.can_undo());
     assert!(!history.can_redo());
 
-    let record = history.begin_drawing_undo().unwrap();
-    assert_eq!(record.patches[0].id, EntityId(5));
+    let step = history.begin_drawing_undo().unwrap();
+    assert_eq!(step.record.patches[0].id, EntityId(5));
     assert_eq!(history.undo_depth(), 0);
     assert!(!history.can_undo());
     history.finish_drawing().unwrap();
     assert!(history.can_redo());
 
     let redone = history.begin_drawing_redo().unwrap();
-    assert_eq!(redone.transaction, TransactionId(5));
+    assert_eq!(redone.record.transaction, TransactionId(5));
     history.finish_drawing().unwrap();
     assert!(history.can_undo());
     assert!(!history.can_redo());
@@ -96,8 +96,8 @@ fn merge_key_coalesces_records() {
     assert_eq!(history.undo_depth(), 1);
     // The merged record keeps the earliest before and latest after.
     let back = history.begin_drawing_undo().unwrap();
-    assert_eq!(back.patches[0].before, Some(entity(1, 0.0)));
-    assert_eq!(back.patches[0].after, Some(entity(1, 2.0)));
+    assert_eq!(back.record.patches[0].before, Some(entity(1, 0.0)));
+    assert_eq!(back.record.patches[0].after, Some(entity(1, 2.0)));
 }
 
 #[test]
@@ -224,7 +224,7 @@ fn pending_drawing_rejects_reentrant_history_mutations() {
     history.cancel_pending_drawing();
     assert_eq!(history.undo_depth(), 2);
     assert_eq!(
-        history.begin_drawing_undo().unwrap().transaction,
+        history.begin_drawing_undo().unwrap().record.transaction,
         TransactionId(2)
     );
     history.finish_drawing().unwrap();
@@ -232,7 +232,7 @@ fn pending_drawing_rejects_reentrant_history_mutations() {
     assert!(history.begin_drawing_undo().is_err());
     history.cancel_pending_drawing();
     assert_eq!(
-        history.begin_drawing_redo().unwrap().transaction,
+        history.begin_drawing_redo().unwrap().record.transaction,
         TransactionId(2)
     );
 }
@@ -341,10 +341,10 @@ fn block_only_record_is_accepted_and_round_trips() {
     assert!(history.used_bytes() > 0);
 
     let back = history.begin_drawing_undo().unwrap();
-    assert_eq!(back, record, "the block patch is retained verbatim");
+    assert_eq!(back.record, record, "the block patch is retained verbatim");
     history.finish_drawing().unwrap();
     let forward = history.begin_drawing_redo().unwrap();
-    assert_eq!(forward, record);
+    assert_eq!(forward.record, record);
     history.finish_drawing().unwrap();
     assert_eq!(history.undo_depth(), 1);
 }
@@ -492,10 +492,10 @@ fn layer_only_record_is_accepted_and_round_trips() {
     );
 
     let back = history.begin_drawing_undo().unwrap();
-    assert_eq!(back, record, "the layer patch is retained verbatim");
+    assert_eq!(back.record, record, "the layer patch is retained verbatim");
     history.finish_drawing().unwrap();
     let forward = history.begin_drawing_redo().unwrap();
-    assert_eq!(forward, record);
+    assert_eq!(forward.record, record);
     history.finish_drawing().unwrap();
     assert_eq!(history.undo_depth(), 1);
 }
@@ -611,10 +611,10 @@ fn layout_only_record_is_accepted_and_round_trips() {
     assert_eq!(history.used_bytes(), record.approx_bytes());
 
     let back = history.begin_drawing_undo().unwrap();
-    assert_eq!(back, record, "the layout patch is retained verbatim");
+    assert_eq!(back.record, record, "the layout patch is retained verbatim");
     history.finish_drawing().unwrap();
     let forward = history.begin_drawing_redo().unwrap();
-    assert_eq!(forward, record);
+    assert_eq!(forward.record, record);
     history.finish_drawing().unwrap();
     assert_eq!(history.undo_depth(), 1);
 }
@@ -670,4 +670,128 @@ fn merge_key_with_layout_patches_is_refused_without_touching_history() {
     assert_eq!(history.undo_depth(), 1, "no record was merged or added");
     assert_eq!(history.used_bytes(), bytes);
     assert!(!history.can_redo());
+}
+
+// ---------------------------------------------------------------------------
+// Linetype-table steps
+// ---------------------------------------------------------------------------
+
+fn linetype_row(id: u128, name: &str) -> cad_db::LineType {
+    cad_db::LineType {
+        id: LinetypeId(id),
+        name: name.into(),
+        pattern: cad_db::LinetypePattern::from_elements([0.5, -0.25]),
+        complex: false,
+    }
+}
+
+/// The linetype row rides beside the record: a step with no entity/table rows is
+/// still one real undo step, and undo/redo move the row with it.
+#[test]
+fn a_linetype_only_step_is_one_undo_step() {
+    let mut history = History::default();
+    let patch = cad_db::LinetypePatch {
+        id: LinetypeId(1),
+        before: Some(linetype_row(1, "DASHED")),
+        after: Some(linetype_row(1, "DASHED-X")),
+    };
+    history
+        .record_drawing_with_linetypes(
+            DrawingUndoRecord::entity_only(TransactionId(9), "rename linetype", Vec::new()),
+            vec![patch.clone()],
+        )
+        .unwrap();
+    assert_eq!(history.undo_depth(), 1);
+    assert!(history.used_bytes() > 0, "the row is accounted for");
+
+    let back = history.begin_drawing_undo().unwrap();
+    assert_eq!(back.linetype_patches, vec![patch.clone()]);
+    assert_eq!(back.record.label, "rename linetype");
+    history.finish_drawing().unwrap();
+    assert!(history.can_redo());
+
+    let forward = history.begin_drawing_redo().unwrap();
+    assert_eq!(forward.linetype_patches, vec![patch]);
+    history.finish_drawing().unwrap();
+    assert_eq!(history.undo_depth(), 1);
+}
+
+/// An empty record plus a linetype row is a step; an empty record plus no row is
+/// still rejected, exactly like an empty record before this batch existed.
+#[test]
+fn an_empty_record_needs_a_linetype_row_to_be_a_step() {
+    let mut history = History::default();
+    assert!(matches!(
+        history.record_drawing_with_linetypes(
+            DrawingUndoRecord::entity_only(TransactionId(1), "noop", Vec::new()),
+            Vec::new(),
+        ),
+        Err(CadError::InvalidInput(_))
+    ));
+    assert!(!history.can_undo());
+
+    history
+        .record_drawing_with_linetypes(
+            DrawingUndoRecord::entity_only(TransactionId(1), "rename linetype", Vec::new()),
+            vec![cad_db::LinetypePatch {
+                id: LinetypeId(1),
+                before: None,
+                after: Some(linetype_row(1, "DASHED")),
+            }],
+        )
+        .unwrap();
+    assert_eq!(history.undo_depth(), 1);
+}
+
+/// A linetype patch with no side, a duplicate id, or a merge key is refused and
+/// the retained history is untouched.
+#[test]
+fn malformed_linetype_steps_are_refused() {
+    let mut history = History::default();
+    let empty = || DrawingUndoRecord::entity_only(TransactionId(2), "rename linetype", Vec::new());
+
+    assert!(matches!(
+        history.record_drawing_with_linetypes(
+            empty(),
+            vec![cad_db::LinetypePatch {
+                id: LinetypeId(1),
+                before: None,
+                after: None,
+            }],
+        ),
+        Err(CadError::InvalidInput(_))
+    ));
+    assert!(matches!(
+        history.record_drawing_with_linetypes(
+            empty(),
+            vec![
+                cad_db::LinetypePatch {
+                    id: LinetypeId(1),
+                    before: Some(linetype_row(1, "A")),
+                    after: Some(linetype_row(1, "B")),
+                },
+                cad_db::LinetypePatch {
+                    id: LinetypeId(1),
+                    before: Some(linetype_row(1, "B")),
+                    after: Some(linetype_row(1, "C")),
+                },
+            ],
+        ),
+        Err(CadError::InvalidInput(_))
+    ));
+
+    let mut merged = empty();
+    merged.merge_key = Some("drag".into());
+    assert!(matches!(
+        history.record_drawing_with_linetypes(
+            merged,
+            vec![cad_db::LinetypePatch {
+                id: LinetypeId(1),
+                before: Some(linetype_row(1, "A")),
+                after: Some(linetype_row(1, "B")),
+            }],
+        ),
+        Err(CadError::InvalidInput(_))
+    ));
+    assert!(!history.can_undo());
 }

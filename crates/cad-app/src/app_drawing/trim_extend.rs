@@ -797,6 +797,32 @@ impl Application {
         document.drawing = Arc::new(candidate);
         Ok(())
     }
+
+    /// [`Self::publish_candidate`] for a step that also wrote linetype-table rows.
+    ///
+    /// The linetype row is validated and recorded **with** the record, before
+    /// the candidate is published, so a refused step leaves the open document,
+    /// its revision and history untouched — the same contract as the plain
+    /// variant.
+    pub(crate) fn publish_candidate_with_linetypes(
+        &mut self,
+        document_id: DocumentId,
+        candidate: DrawingDatabase,
+        record: DrawingUndoRecord,
+        linetype_patches: Vec<cad_db::LinetypePatch>,
+    ) -> CadResult<()> {
+        let document = self
+            .workspace
+            .documents
+            .get_mut(&document_id)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+        self.history
+            .entry(document_id)
+            .or_default()
+            .record_drawing_with_linetypes(record, linetype_patches)?;
+        document.drawing = Arc::new(candidate);
+        Ok(())
+    }
 }
 
 /// The named TRIM **target** gaps: the kinds the shared planners cannot

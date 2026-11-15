@@ -396,6 +396,8 @@ impl DrawingDatabase {
             layer_changes,
             layout_changes,
             super::style_edit::StyleTableChanges::default(),
+            &[],
+            super::EntityGeometryCheck::NewWrite,
         )
     }
 

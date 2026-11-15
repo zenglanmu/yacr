@@ -10,9 +10,12 @@
 //!   unsupported kind as a diagnostic. Layer rows are removed through the
 //!   existing `DELETELAYER` command path, which is also why a layer in use is
 //!   refused (the database never re-points an entity's layer).
-//! * **RENAME** has a database API for layers only (`rename_layer`). `RENAME
-//!   LAYER` is routed to the existing `RENAMELAYER` command; the other kinds are
-//!   explicit `Unsupported` refusals.
+//! * **RENAME** addresses every kind that has a post-import write API: `LAYER`
+//!   rides the existing `RENAMELAYER` command, the three style tables use the
+//!   shared style-table batch, `BLOCK` renames the block definition, and
+//!   `LINETYPE` renames the linetype row plus every stored name reference to it
+//!   (see [`Self::rename_linetype_command`]). No `RENAME` kind is silently
+//!   ignored; an unknown/duplicate/illegal name is a stable named refusal.
 //! * **SETVAR** only *reports* here. The typed write form is parsed in
 //!   `cad-ui-core` and dispatched to the existing `PDMODE`/`PDSIZE`/`LTSCALE`/
 //!   `SNAPUNIT`/`GRID`/`SNAP`/`ORTHO` handlers, so this module never becomes a
@@ -44,6 +47,7 @@
 
 use super::*;
 
+use crate::app_drawing::next_transaction_id;
 use cad_db::DEFAULT_LAYER_NAME;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -197,8 +201,10 @@ impl Application {
     /// `RENAME` / `-RENAME`: rename one named object.
     ///
     /// `RENAME LAYER` reuses the ordinary `RENAMELAYER` command (same database
-    /// write, same refusals for unknown, duplicate and illegal names). The other
-    /// three kinds have no rename API and are explicit refusals.
+    /// write, same refusals for unknown, duplicate and illegal names). The three
+    /// style tables use the shared style-table batch and `BLOCK` the block-row
+    /// patch; `LINETYPE` renames the table row and cascades every stored name
+    /// reference in the same revision.
     fn rename(
         &mut self,
         session: &mut SessionState,
@@ -253,12 +259,132 @@ impl Application {
             NamedObjectKind::Block => {
                 self.rename_block_command(session, command, &rename.old, &rename.new)
             }
-            NamedObjectKind::Linetype => Err(CadError::Unsupported(format!(
-                "rename.{}.unsupported: this build has no rename API for {}; nothing changed",
-                kind_key(rename.kind),
-                kind_label(rename.kind)
-            ))),
+            NamedObjectKind::Linetype => {
+                self.rename_linetype_command(session, command, &rename.old, &rename.new)
+            }
         }
+    }
+
+    /// `RENAME LINETYPE <old> <new>`: rename one linetype table row.
+    ///
+    /// The table write and its cascade are one [`cad_db`] batch
+    /// ([`cad_db::DrawingDatabase::apply_linetype_rename`]): the row's name, every
+    /// layer attribute that names the old linetype and every entity whose
+    /// explicit linetype keeps the name are retargeted in the same revision, so a
+    /// later save/export can never contain a dangling linetype name.
+    ///
+    /// Refusals (nothing written, no revision, no history): unknown and ambiguous
+    /// names (`linetype.unknown`/`linetype.ambiguous`), an empty/illegal new name
+    /// (`linetype.name_empty`/`linetype.name_illegal_char`), a duplicate
+    /// (`linetype.duplicate_name`), the drawing default `Continuous`
+    /// (`linetype.continuous_unrenameable` — it is the implicit value of every
+    /// layer row without stored attributes) and Viewer mode
+    /// ([`CadError::PermissionDenied`]). Renaming to the stored spelling is an
+    /// authoritative no-op (`rename.unchanged`) that records nothing.
+    fn rename_linetype_command(
+        &mut self,
+        session: &mut SessionState,
+        command: &Command,
+        old: &str,
+        new: &str,
+    ) -> CadResult<CommandOutcome> {
+        use crate::app_reports_ext::{diagnostic, report_outcome};
+
+        if session.app_mode() == AppMode::Viewer {
+            return Err(CadError::PermissionDenied);
+        }
+        let drawing = document_drawing(self, command)?;
+        let id = crate::app_drawing::resolve_unique(
+            "linetype",
+            "linetype",
+            old,
+            drawing
+                .linetypes()
+                .map(|row| (row.id, row.name.clone()))
+                .collect(),
+        )?;
+        let before = drawing.linetype(id).cloned().ok_or_else(|| {
+            CadError::InvalidInput(format!(
+                "linetype.unknown: this drawing has no linetype named '{}'",
+                old.trim()
+            ))
+        })?;
+        let trimmed = new.trim();
+        if before.name == trimmed {
+            return Ok(report_outcome(vec![diagnostic(
+                "rename.unchanged",
+                format!(
+                    "RENAME LINETYPE: '{}' already has that name; nothing changed",
+                    before.name
+                ),
+            )]));
+        }
+        // Count the cascade from the current state so the report describes what
+        // the batch really retargeted, never a guess.
+        let layer_refs = drawing
+            .layers()
+            .filter(|layer| {
+                drawing
+                    .layer_attributes(layer.id)
+                    .linetype
+                    .eq_ignore_ascii_case(&before.name)
+            })
+            .count();
+        let entity_refs = drawing
+            .entities()
+            .filter(|entity| {
+                matches!(
+                    &drawing.entity_render_attributes(entity.id).linetype,
+                    cad_db::EntityLineType::Explicit { name, .. }
+                        if name.eq_ignore_ascii_case(&before.name)
+                )
+            })
+            .count();
+
+        let mut after = before.clone();
+        after.name = trimmed.to_string();
+        let transaction = next_transaction_id();
+        let mut candidate = drawing.as_ref().clone();
+        let change_set = candidate.apply_linetype_rename("rename linetype", transaction, &after)?;
+        let stored = candidate.linetype(id).cloned().ok_or_else(|| {
+            CadError::Invariant("the renamed linetype row vanished after the write".into())
+        })?;
+        self.publish_candidate_with_linetypes(
+            command.document,
+            candidate,
+            cad_history::DrawingUndoRecord {
+                transaction,
+                label: "rename linetype".to_string(),
+                patches: Vec::new(),
+                block_patches: Vec::new(),
+                layer_patches: Vec::new(),
+                layout_patches: Vec::new(),
+                style_patches: Vec::new(),
+                dim_style_patches: Vec::new(),
+                mleader_style_patches: Vec::new(),
+                merge_key: None,
+            },
+            vec![cad_history::linetype_patch(
+                id,
+                Some(before.clone()),
+                Some(stored.clone()),
+            )],
+        )?;
+        Ok(CommandOutcome {
+            objects: Vec::new(),
+            changes: Some(Arc::new(change_set)),
+            diagnostics: vec![diagnostic(
+                "rename.linetype",
+                format!(
+                    "RENAME LINETYPE: renamed '{}' to '{}' and retargeted {layer_refs} layer \
+                     row(s) and {entity_refs} entity attribute reference(s) in the same \
+                     transaction (one undo step)",
+                    before.name, stored.name
+                ),
+            )],
+            measurement: None,
+            point_report: None,
+        })
     }
 
     /// `MREDO [n]`: apply up to `n` existing redo records.
