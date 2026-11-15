@@ -463,6 +463,66 @@ fn mline_reads_the_current_mlstyle_spacing_and_applies_the_offset() {
 }
 
 #[test]
+fn mline_miters_a_multi_segment_baseline() {
+    let (mut app, mut session) = build(Vec::new());
+    let outcome = exec(
+        &mut app,
+        &mut session,
+        CommandId::Mline,
+        Draw2Payload::Mline {
+            spacing: Some(2.0),
+            offset: 0.0,
+            points: vec![p3(0.0, 0.0, 0.0), p3(10.0, 0.0, 0.0), p3(10.0, 10.0, 0.0)],
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        outcome.objects.len(),
+        4,
+        "one LINE per element per segment (two elements, two segments)"
+    );
+    let segments: Vec<((f64, f64), (f64, f64))> = outcome
+        .objects
+        .iter()
+        .map(|object| match &entity(&app, object.0).geometry {
+            SemanticGeometry::Line { start, end } => ((start.x, start.y), (end.x, end.y)),
+            other => panic!("expected a line, got {other:?}"),
+        })
+        .collect();
+    let near = |point: (f64, f64), target: (f64, f64)| {
+        (point.0 - target.0).abs() < 1e-9 && (point.1 - target.1).abs() < 1e-9
+    };
+    // The +1 element turns at the intersection of its two offset lines (9,1);
+    // the -1 element at (11,-1). A bevelled or unjoined corner would end at
+    // (10,1)/(10,-1) and leave a notch.
+    assert!(
+        segments
+            .iter()
+            .any(|(start, end)| near(*start, (0.0, 1.0)) && near(*end, (9.0, 1.0))),
+        "{segments:?}"
+    );
+    assert!(
+        segments
+            .iter()
+            .any(|(start, end)| near(*start, (9.0, 1.0)) && near(*end, (9.0, 10.0))),
+        "{segments:?}"
+    );
+    assert!(
+        segments
+            .iter()
+            .any(|(start, end)| near(*start, (0.0, -1.0)) && near(*end, (11.0, -1.0))),
+        "{segments:?}"
+    );
+    assert!(
+        segments
+            .iter()
+            .any(|(start, end)| near(*start, (11.0, -1.0)) && near(*end, (11.0, 10.0))),
+        "{segments:?}"
+    );
+    assert_eq!(undo_depth(&app), 1, "one transaction / one undo step");
+}
+
+#[test]
 fn mline_refuses_a_degenerate_baseline_and_bad_spacing() {
     let (mut app, mut session) = build(Vec::new());
     assert_refused_unchanged(
@@ -486,6 +546,18 @@ fn mline_refuses_a_degenerate_baseline_and_bad_spacing() {
             points: vec![p3(0.0, 0.0, 0.0), p3(0.0, 0.0, 0.0)],
         },
         "mline.degenerate_baseline",
+    );
+    // An exact 180° reversal has no finite miter corner.
+    assert_refused_unchanged(
+        &mut app,
+        &mut session,
+        CommandId::Mline,
+        Draw2Payload::Mline {
+            spacing: Some(1.0),
+            offset: 0.0,
+            points: vec![p3(0.0, 0.0, 0.0), p3(10.0, 0.0, 0.0), p3(0.0, 0.0, 0.0)],
+        },
+        "mline.join_degenerate",
     );
 }
 
@@ -615,95 +687,6 @@ fn trex_refuses_a_single_object() {
     );
 }
 
-// --------------------------------------------------------------- EXTRIM ----
-
-#[test]
-fn extrim_trims_every_target_at_the_boundary_in_one_undo() {
-    let (mut app, mut session) = build(vec![
-        ent(
-            10,
-            SemanticGeometry::Circle {
-                center: p3(0.0, 0.0, 0.0),
-                normal: p3(0.0, 0.0, 1.0),
-                radius: 5.0,
-            },
-            0,
-        ),
-        ent(
-            1,
-            SemanticGeometry::Line {
-                start: p3(-10.0, 0.0, 0.0),
-                end: p3(10.0, 0.0, 0.0),
-            },
-            1,
-        ),
-        ent(
-            2,
-            SemanticGeometry::Line {
-                start: p3(-10.0, 1.0, 0.0),
-                end: p3(10.0, 1.0, 0.0),
-            },
-            2,
-        ),
-    ]);
-    let before = revision(&app);
-    let outcome = exec(
-        &mut app,
-        &mut session,
-        CommandId::Extrim,
-        Draw2Payload::Extrim {
-            boundary: ref_of(10),
-            targets: vec![ref_of(1), ref_of(2)],
-        },
-    )
-    .unwrap();
-    assert_eq!(outcome.objects.len(), 2);
-    assert_eq!(revision(&app).0, before.0 + 1);
-    assert_eq!(undo_depth(&app), 1);
-    for id in [1, 2] {
-        match entity(&app, id).geometry {
-            SemanticGeometry::Line { start, end } => {
-                assert!(start.x.abs() < 5.0 + 1e-9, "trimmed inside the circle");
-                assert!(end.x.abs() < 5.0 + 1e-9);
-            }
-            other => panic!("expected a line, got {other:?}"),
-        }
-    }
-    undo(&mut app, &mut session);
-    match entity(&app, 1).geometry {
-        SemanticGeometry::Line { start, end } => {
-            assert_eq!(start.x, -10.0);
-            assert_eq!(end.x, 10.0);
-        }
-        other => panic!("expected a line, got {other:?}"),
-    }
-}
-
-#[test]
-fn extrim_refuses_an_unsupported_boundary_by_name() {
-    let (mut app, mut session) = build(vec![
-        ent(10, SemanticGeometry::Point(p3(0.0, 0.0, 0.0)), 0),
-        ent(
-            1,
-            SemanticGeometry::Line {
-                start: p3(-10.0, 0.0, 0.0),
-                end: p3(10.0, 0.0, 0.0),
-            },
-            1,
-        ),
-    ]);
-    assert_refused_unchanged(
-        &mut app,
-        &mut session,
-        CommandId::Extrim,
-        Draw2Payload::Extrim {
-            boundary: ref_of(10),
-            targets: vec![ref_of(1)],
-        },
-        "extrim.unsupported_boundary",
-    );
-}
-
 // --------------------------------------------------------------- MPEDIT ----
 
 #[test]
@@ -785,6 +768,14 @@ fn order(app: &Application, id: u128) -> i64 {
     entity(app, id).draw_order
 }
 
+/// A simple LINE for the per-scope DRAWORDER fixtures.
+fn line_geometry() -> SemanticGeometry {
+    SemanticGeometry::Line {
+        start: p3(0.0, 0.0, 0.0),
+        end: p3(1.0, 0.0, 0.0),
+    }
+}
+
 #[test]
 fn draworder_front_and_back_move_the_selection_as_a_block() {
     let (mut app, mut session) = order_fixture();
@@ -856,5 +847,140 @@ fn draworder_above_needs_a_reference_object() {
         CommandId::DrawOrder,
         Draw2Payload::DrawOrder(DrawOrderMode::Above),
         "draworder.reference_required",
+    );
+}
+
+/// FRONT/BACK are planned **per draw-order scope**: a block definition's and a
+/// paper layout's rows move within their own sequence and never against model
+/// space (the pre-promotion behaviour only ever looked at `SpaceId::Model`).
+#[test]
+fn draworder_front_moves_block_and_paper_rows_inside_their_own_scope() {
+    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
+    builder
+        .insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+    builder
+        .insert_layout(cad_db::Layout {
+            id: cad_domain::LayoutId(1),
+            name: "Sheet1".into(),
+            viewports: Vec::new(),
+        })
+        .unwrap();
+    builder
+        .insert_block(cad_db::BlockDefinition {
+            id: BlockId(7),
+            entities: vec![EntityId(11), EntityId(12), EntityId(13)],
+            dynamic_visibility: None,
+        })
+        .unwrap();
+    // Model space: one line at order 0 that must not move.
+    builder.insert_entity(ent(1, line_geometry(), 0)).unwrap();
+    // Block members: 11 (order 0, selected), 12 (order 1, selected), 13 (order 9).
+    for (id, order) in [(11u128, 0i64), (12, 1), (13, 9)] {
+        let mut member = ent(id, line_geometry(), order);
+        member.space = SpaceId::Block(BlockId(7));
+        builder.insert_entity(member).unwrap();
+    }
+    // Paper rows: 21 (order 0, selected) and 22 (order 4).
+    for (id, order) in [(21u128, 0i64), (22, 4)] {
+        let mut paper = ent(id, line_geometry(), order);
+        paper.space = SpaceId::Paper(cad_domain::LayoutId(1));
+        builder.insert_entity(paper).unwrap();
+    }
+    let drawing = builder.finish().unwrap();
+    let mut app = Application::new();
+    app.workspace.documents.insert(
+        DocumentId(1),
+        Document {
+            id: DocumentId(1),
+            drawing: Arc::new(drawing),
+            identity: DocumentIdentity::Sha256([0u8; 32]),
+            units: UnitContext::drawing_units(),
+            resource_keys: Vec::new(),
+        },
+    );
+    app.workspace.viewports.insert(
+        ViewportId(1),
+        Viewport::new(ViewportId(1), DocumentId(1), [800.0, 600.0]),
+    );
+    let mut session = SessionState::new(DocumentId(1), AppMode::Work);
+    select(&mut session, &[11, 12, 21]);
+
+    let outcome = exec(
+        &mut app,
+        &mut session,
+        CommandId::DrawOrder,
+        Draw2Payload::DrawOrder(DrawOrderMode::Front),
+    )
+    .expect("per-scope FRONT is planned");
+    assert_eq!(outcome.objects.len(), 3);
+    // Block scope: above its own member 13 (order 9), relative order kept.
+    assert_eq!((order(&app, 11), order(&app, 12)), (10, 11));
+    assert_eq!(order(&app, 13), 9, "the non-selected member stays");
+    // Paper scope: above its own row 22 (order 4).
+    assert_eq!(order(&app, 21), 5);
+    assert_eq!(order(&app, 22), 4);
+    // Model space is a different sequence and is untouched.
+    assert_eq!(order(&app, 1), 0);
+    assert_eq!(undo_depth(&app), 1);
+
+    undo(&mut app, &mut session);
+    assert_eq!((order(&app, 11), order(&app, 12)), (0, 1));
+    assert_eq!(order(&app, 21), 0);
+}
+
+/// `ABOVE`/`BELOW` has one reference and one sequence: a moving object in another
+/// scope is the named `draworder.reference_scope` refusal, not a silent cross-space
+/// comparison.
+#[test]
+fn draworder_above_refuses_a_mover_in_another_scope() {
+    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
+    builder
+        .insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+    builder
+        .insert_block(cad_db::BlockDefinition {
+            id: BlockId(7),
+            entities: vec![EntityId(11)],
+            dynamic_visibility: None,
+        })
+        .unwrap();
+    let mut member = ent(11, line_geometry(), 0);
+    member.space = SpaceId::Block(BlockId(7));
+    builder.insert_entity(member).unwrap();
+    builder.insert_entity(ent(1, line_geometry(), 0)).unwrap();
+    let drawing = builder.finish().unwrap();
+    let mut app = Application::new();
+    app.workspace.documents.insert(
+        DocumentId(1),
+        Document {
+            id: DocumentId(1),
+            drawing: Arc::new(drawing),
+            identity: DocumentIdentity::Sha256([0u8; 32]),
+            units: UnitContext::drawing_units(),
+            resource_keys: Vec::new(),
+        },
+    );
+    app.workspace.viewports.insert(
+        ViewportId(1),
+        Viewport::new(ViewportId(1), DocumentId(1), [800.0, 600.0]),
+    );
+    let mut session = SessionState::new(DocumentId(1), AppMode::Work);
+    // Reference is the model-space line; the mover is a block member.
+    select(&mut session, &[1, 11]);
+    assert_refused_unchanged(
+        &mut app,
+        &mut session,
+        CommandId::DrawOrder,
+        Draw2Payload::DrawOrder(DrawOrderMode::Above),
+        "draworder.reference_scope",
     );
 }

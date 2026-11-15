@@ -801,10 +801,10 @@ pub enum CommandId {
     IsolateObjects,
     UnisolateObjects,
     /// `PURGE` / `-PURGE`: remove unused named objects through the database's
-    /// sanctioned delete APIs. Layers are the only kind with a delete API in
-    /// this build; block/linetype/style are explicit named refusals. Work-only;
-    /// layer deletions made by PURGE are not undoable (out of scope for the
-    /// layer-patch lane).
+    /// sanctioned delete APIs — layers (`DELETELAYER`, not undoable by design),
+    /// block definitions (with their members), text styles and linetypes (one
+    /// batch / one undo step). Each in-use row is a named per-object refusal that
+    /// removes nothing. Work-only.
     Purge,
     /// `RENAME` / `-RENAME`: rename one named object. Only layers have a rename
     /// API (reusing `RENAMELAYER`, one layer-patch undo step); the other kinds

@@ -480,17 +480,19 @@ fn oops_restores_the_last_erased_rectangle_with_a_new_id_and_one_undo_step() {
         "the render attributes are restored"
     );
 
-    // The snapshot is consumed: a second OOPS is a no-op that writes nothing.
+    // The snapshot is re-armed: a second OOPS is a named no-op that writes
+    // nothing while the restored copies are still present.
     let rev = revision(&app);
     let outcome = app
         .execute(&mut session, command(CommandId::Oops, CommandPayload::None))
         .unwrap();
-    assert_eq!(outcome.diagnostics[0].code, "oops.nothing");
+    assert_eq!(outcome.diagnostics[0].code, "oops.already_restored");
     assert!(outcome.changes.is_none());
     assert_eq!(revision(&app), rev);
     assert_eq!(undo_depth(&app), 2);
 
-    // Undo of OOPS removes the restored copy but does not recreate the snapshot.
+    // Undo of OOPS removes the restored copy and puts the same ERASE set back on
+    // offer: the next OOPS restores it again (fresh id, one more undo step).
     app.execute(&mut session, command(CommandId::Undo, CommandPayload::None))
         .unwrap();
     assert_eq!(
@@ -499,10 +501,93 @@ fn oops_restores_the_last_erased_rectangle_with_a_new_id_and_one_undo_step() {
             .entity_count(),
         0
     );
+    let again = app
+        .execute(&mut session, command(CommandId::Oops, CommandPayload::None))
+        .unwrap();
+    assert_eq!(again.diagnostics[0].code, "oops.applied");
+    assert_eq!(again.objects.len(), 1);
+    let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
+    let restored: Vec<_> = drawing.entities().collect();
+    assert_eq!(restored.len(), 1);
+    assert_ne!(
+        restored[0].id,
+        EntityId(1),
+        "the second restore also allocates a fresh id"
+    );
+    assert_eq!(restored[0].geometry, closed_rectangle());
+    assert_eq!(undo_depth(&app), 2);
+}
+
+/// `BLOCK` re-homes the selected rows into the definition. AutoCAD's OOPS also
+/// restores the objects a block definition removed, so this build records the
+/// pre-BLOCK model-space copies and puts them back as independent entities — the
+/// definition keeps its own members.
+#[test]
+fn oops_restores_the_set_a_block_command_re_homed() {
+    let (mut app, mut session) = build(
+        vec![
+            ent(1, closed_rectangle(), 0),
+            ent(
+                2,
+                SemanticGeometry::Line {
+                    start: p3(0.0, 0.0, 0.0),
+                    end: p3(3.0, 4.0, 0.0),
+                },
+                1,
+            ),
+        ],
+        AppMode::Work,
+    );
+    session.selection = SelectionSet::from_refs(vec![ref_of(1), ref_of(2)]);
+    let outcome = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::DefineBlock,
+                CommandPayload::DefineBlock {
+                    refs: vec![ref_of(1), ref_of(2)],
+                    base: p3(0.0, 0.0, 0.0),
+                    name: "OOPSBLK".into(),
+                },
+            ),
+        )
+        .unwrap();
+    assert_eq!(outcome.diagnostics[0].code, "drawing.block");
+    let members: Vec<EntityId> = app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .block_by_name("OOPSBLK")
+        .expect("the definition exists")
+        .entities
+        .clone();
+    assert_eq!(members.len(), 2);
+    assert_eq!(undo_depth(&app), 1);
+
     let outcome = app
         .execute(&mut session, command(CommandId::Oops, CommandPayload::None))
         .unwrap();
-    assert_eq!(outcome.diagnostics[0].code, "oops.nothing");
+    assert_eq!(outcome.diagnostics[0].code, "oops.applied");
+    assert_eq!(outcome.objects.len(), 2);
+    assert_eq!(undo_depth(&app), 2);
+    let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
+    // The block definition is untouched and still owns its members…
+    assert_eq!(
+        drawing
+            .block_by_name("OOPSBLK")
+            .expect("the definition exists")
+            .entities,
+        members
+    );
+    // …while the restored copies are new model-space rows.
+    let restored: Vec<&DbEntity> = drawing
+        .entities()
+        .filter(|entity| entity.space == SpaceId::Model)
+        .filter(|entity| !matches!(entity.geometry, SemanticGeometry::Insert { .. }))
+        .collect();
+    assert_eq!(restored.len(), 2);
+    assert!(restored.iter().all(|entity| !members.contains(&entity.id)));
+    assert!(restored
+        .iter()
+        .any(|entity| entity.geometry == closed_rectangle()));
 }
 
 #[test]
@@ -539,6 +624,7 @@ fn oops_refuses_a_payload_and_never_stores_a_foreign_document_snapshot() {
     session.set_last_erase(Some(crate::session_state::EraseSnapshot {
         document: DocumentId(2),
         entries: Vec::new(),
+        restored: Vec::new(),
     }));
     assert!(session.last_erase().is_none());
     assert_eq!(undo_depth(&app), 0);

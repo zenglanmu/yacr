@@ -6,7 +6,8 @@
 //! * [`crate::CommandId::Reverse`] — reverse the vertices/direction of selected
 //!   LINEs, LWPOLYLINEs and SPLINEs (selection-based, one transaction);
 //! * [`crate::CommandId::Oops`] — reinsert the entities removed by the last
-//!   ERASE (selection-free, one transaction with fresh ids).
+//!   ERASE (or re-homed by `BLOCK`) (selection-free, one transaction with fresh
+//!   ids; the snapshot is re-armed, not consumed — see the handler).
 //!
 //! `OVERKILL` lives in [`super::overkill`] because its documented model
 //! (tolerance, ignore toggles, collinear combines, polyline optimisation) is a
@@ -139,18 +140,27 @@ impl Application {
         })
     }
 
-    /// `OOPS`: reinsert the entities removed by the **last ERASE** in one
-    /// transaction / one undo step, with fresh entity ids.
+    /// `OOPS`: reinsert the entities removed by the **last ERASE** (or by `BLOCK`)
+    /// in one transaction / one undo step, with fresh entity ids.
     ///
     /// The snapshot is session state ([`crate::session_state::EraseSnapshot`])
-    /// written by ERASE **after** its delete committed. It belongs to one
-    /// document and is consumed by the first OOPS, so a second OOPS reports
-    /// `oops.nothing` and writes nothing. Undo of OOPS removes the restored
-    /// copies but does **not** recreate the snapshot (the user would have to use
-    /// REDO to get the copies back).
+    /// written by ERASE **after** its delete committed and by `BLOCK` after its
+    /// members moved into the new definition. It belongs to one document.
     ///
-    /// AutoCAD also restores objects removed by BLOCK/WBLOCK; this build records
-    /// **ERASE only** (the declared v1 boundary), and the docs say so.
+    /// # Repeat and undo
+    ///
+    /// The snapshot is **kept**, not consumed, and records the ids the last
+    /// restore inserted:
+    ///
+    /// * while those ids are still in the drawing, a second OOPS is a named
+    ///   `oops.already_restored` no-op (no revision, no transaction, no write);
+    /// * after an UNDO of the restore the ids are gone, so OOPS restores the same
+    ///   set again (fresh ids, one new undo step). Undo therefore puts the
+    ///   drawing and the OOPS state back in agreement instead of silently
+    ///   disarming the command.
+    ///
+    /// AutoCAD also restores objects removed by WBLOCK; this build has no
+    /// `WBLOCK` delete path, so there is nothing to record for it.
     pub(crate) fn oops_restore(
         &mut self,
         session: &mut SessionState,
@@ -203,17 +213,43 @@ impl Application {
         let mut candidate = document.drawing.as_ref().clone();
         let drawing = &mut candidate;
 
+        // Is the previous restore still in the drawing? Only then is a repeat a
+        // no-op; a partially surviving set is restored again from scratch rather
+        // than left half-restored.
+        if !snapshot.restored.is_empty()
+            && snapshot
+                .restored
+                .iter()
+                .all(|id| drawing.entity(*id).is_some())
+        {
+            return Ok(CommandOutcome {
+                objects: Vec::new(),
+                changes: None,
+                diagnostics: vec![Diagnostic {
+                    object: None,
+                    code: "oops.already_restored".into(),
+                    message: format!(
+                        "OOPS: the last ERASE set is already restored ({} object(s) present); \
+                         nothing was written. Undo the restore to make the set available again",
+                        snapshot.restored.len()
+                    ),
+                }],
+                measurement: None,
+                point_report: None,
+            });
+        }
+
         // Allocate every fresh id before the transaction opens. The row keeps the
         // erased layer/space/draw order/type key; only its identity is new and the
         // import-only source handle is cleared (it described the erased row).
         let mut planned = Vec::with_capacity(snapshot.entries.len());
-        for entry in snapshot.entries {
+        for entry in &snapshot.entries {
             let new_id = drawing.allocate_entity_id();
-            let mut entity = entry.entity;
+            let mut entity = entry.entity.clone();
             entity.object.id = ObjectId(new_id.0);
             entity.object.source_handle = None;
             entity.id = new_id;
-            planned.push((new_id, entity, entry.display));
+            planned.push((new_id, entity, entry.display.clone()));
         }
 
         let transaction = next_transaction_id();
@@ -254,9 +290,13 @@ impl Application {
                 merge_key: None,
             },
         )?;
-        // Consumed only after the restore committed: a refused OOPS must leave the
-        // snapshot intact for the next attempt.
-        session.set_last_erase(None);
+        // Re-armed, not consumed: a repeat while the copies are present is
+        // `oops.already_restored`, and an UNDO of the restore makes the same set
+        // available again. Written only after the restore committed, so a refused
+        // OOPS leaves the snapshot exactly as it was.
+        let mut kept = snapshot;
+        kept.restored = planned.iter().map(|(id, _, _)| *id).collect();
+        session.set_last_erase(Some(kept));
 
         Ok(CommandOutcome {
             objects,
@@ -264,7 +304,11 @@ impl Application {
             diagnostics: vec![Diagnostic {
                 object: None,
                 code: "oops.applied".into(),
-                message: format!("OOPS: restored {count} entity/entities from the last ERASE"),
+                message: format!(
+                    "OOPS: restored {count} entity/entities from the last ERASE/BLOCK in one \
+                     transaction (one undo step); undo the restore to make the set available \
+                     again"
+                ),
             }],
             measurement: None,
             point_report: None,

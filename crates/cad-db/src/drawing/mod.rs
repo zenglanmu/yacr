@@ -29,6 +29,7 @@ mod layout_edit;
 mod linetype_edit;
 mod linetype_scale;
 mod lock;
+mod named_delete;
 mod point_style;
 mod style_edit;
 mod transaction;
@@ -187,8 +188,26 @@ pub struct DrawingDatabase {
     /// databases stay valid without a migration.
     pub(crate) layer_attributes: BTreeMap<LayerId, LayerAttributes>,
     /// Named annotation scales from the drawing's `ACAD_SCALELIST`. Empty for
-    /// hand-built databases; the importer fills it from the source drawing.
+    /// hand-built databases; the importer fills it from the source drawing. After
+    /// import the `SCALELISTEDIT` writes are the only writer (see
+    /// [`scale_edit`]).
     pub(crate) scales: BTreeMap<ScaleId, Scale>,
+    /// Model-space insertion base point (`$INSBASE`), or `None` when this
+    /// database carries no value.
+    ///
+    /// `None` is the honest state: the importer does not read the variable, so a
+    /// fabricated `(0,0,0)` would be indistinguishable from a real origin base.
+    /// Written only by [`DrawingDatabase::set_insertion_base`] and exported from
+    /// here.
+    pub(crate) insertion_base: Option<Point3>,
+    /// Model-space limits minimum corner (`$LIMMIN`), or `None` when unset.
+    ///
+    /// Independent from [`Self::limits_max`] because DXF models the two corners
+    /// as separate header variables; [`DrawingDatabase::model_limits`] only
+    /// returns a rectangle when both are stored.
+    pub(crate) limits_min: Option<[f64; 2]>,
+    /// Model-space limits maximum corner (`$LIMMAX`), or `None` when unset.
+    pub(crate) limits_max: Option<[f64; 2]>,
     /// DIMSTYLE table entries (ADR 0017 B.1). Always contains a `Standard`
     /// (the pinned metric default for a hand-built database, or the source
     /// `Standard` when one was imported). Read-only after import: P5b provides
@@ -243,6 +262,9 @@ pub struct DrawingDatabase {
     pub(crate) next_dim_style_id: u128,
     /// Next multileader-style id to hand out (same monotonic rule).
     pub(crate) next_mleader_style_id: u128,
+    /// Next annotation-scale id to hand out (same monotonic rule: initialised by
+    /// the builder from `max(stored) + 1`, bumped by every create, never rewound).
+    pub(crate) next_scale_id: u128,
     /// External-reference metadata/provenance, keyed by the xref block name.
     ///
     /// Import-only, like every other table: it is populated by

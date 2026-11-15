@@ -632,7 +632,7 @@ fn validate_mleader_style_batch(
 }
 
 /// Whether an entity's geometry carries this text-style identity.
-fn entity_uses_text_style(geometry: &SemanticGeometry, id: StyleId) -> bool {
+pub(super) fn entity_uses_text_style(geometry: &SemanticGeometry, id: StyleId) -> bool {
     match geometry {
         SemanticGeometry::Text { style, .. } => *style == id,
         SemanticGeometry::Dimension(dimension) => dimension.style().text_style == id,

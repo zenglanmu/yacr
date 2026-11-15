@@ -3,13 +3,18 @@
 //!
 //! # Honest boundaries
 //!
-//! * **PURGE** can only remove what the database exposes a delete API for. This
-//!   build has `DrawingDatabase::delete_layer`; block definitions, linetypes and
-//!   text styles have **no delete API**, so an explicit `PURGE BLOCK|STYLE|
-//!   LINETYPE` is a named `Unsupported` refusal and the bare `PURGE` reports each
-//!   unsupported kind as a diagnostic. Layer rows are removed through the
-//!   existing `DELETELAYER` command path, which is also why a layer in use is
-//!   refused (the database never re-points an entity's layer).
+//! * **PURGE** removes unused rows from four tables. Layers ride the existing
+//!   `DELETELAYER` command path (which is also why a layer in use is refused: the
+//!   database never re-points an entity's layer) and, as before, stay outside the
+//!   undo lane. Block definitions, text styles and linetypes go through the
+//!   database's single-purpose delete APIs
+//!   ([`cad_db::DrawingDatabase::delete_block`] / `delete_style` /
+//!   `delete_linetype`) and are staged as **one batch / one transaction / one undo
+//!   step** per invocation, so undo restores every purged row and every purged
+//!   block member. Each in-use object is a named per-object refusal
+//!   (`block.in_use`, `style.in_use`, `style.standard_undeletable`,
+//!   `linetype.in_use`, `linetype.continuous_undeletable`) reported as
+//!   `purge.<kind>_refused`; a refusal removes nothing.
 //! * **RENAME** addresses every kind that has a post-import write API: `LAYER`
 //!   rides the existing `RENAMELAYER` command, the three style tables use the
 //!   shared style-table batch, `BLOCK` renames the block definition, and
@@ -42,13 +47,13 @@
 //!
 //! `RENAME LAYER` reuses the ordinary `RENAMELAYER` command, so it records the
 //! same one-step layer patch; `PURGE` still publishes its layer deletes without
-//! history (out of scope for the layer-undo lane). Every report path writes
-//! nothing, bumps no revision and records no history.
+//! history (out of scope for the layer-undo lane), while its block/style/linetype
+//! deletes are one undo step. Every report path writes nothing, bumps no revision
+//! and records no history.
 
 use super::*;
 
 use crate::app_drawing::next_transaction_id;
-use cad_db::DEFAULT_LAYER_NAME;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 impl Application {
@@ -86,120 +91,6 @@ impl Application {
         }
     }
 
-    /// `PURGE` / `-PURGE`: remove unused named objects through the sanctioned
-    /// delete paths.
-    ///
-    /// Layer rows go through [`Self::layer_command_without_history`] with the
-    /// ordinary `DELETELAYER` payload, so the active-layer fallback and override
-    /// cleanup are the existing ones while PURGE keeps its documented
-    /// non-undoable behaviour (it is out of scope for the one-step layer lane).
-    /// Each non-default layer is reported as removed or refused (an in-use layer
-    /// is refused by the database). Block/linetype/style have no delete API: an
-    /// explicit kind is a named `Unsupported`; the bare `PURGE` reports each
-    /// unsupported kind and still purges what it can.
-    fn purge(
-        &mut self,
-        session: &mut SessionState,
-        command: &Command,
-    ) -> CadResult<CommandOutcome> {
-        let target = match &command.payload {
-            CommandPayload::None => PurgeTarget::All,
-            CommandPayload::Purge(target) => *target,
-            _ => {
-                return Err(CadError::InvalidInput(
-                    "PURGE takes no payload or one named kind".into(),
-                ))
-            }
-        };
-        if let Some(kind) = unsupported_purge_kind(target) {
-            return Err(CadError::Unsupported(format!(
-                "purge.{}.unsupported: this build has no delete API for {}; nothing was removed",
-                kind_key(kind),
-                kind_label(kind)
-            )));
-        }
-
-        let drawing = document_drawing(self, command)?;
-        let names: Vec<String> = drawing
-            .layers()
-            .filter(|layer| layer.name != DEFAULT_LAYER_NAME)
-            .map(|layer| layer.name.clone())
-            .collect();
-
-        let mut diagnostics = Vec::new();
-        let mut last_changes: Option<Arc<ChangeSet>> = None;
-        let mut removed = 0usize;
-        for name in names {
-            let inner = with_payload(
-                command,
-                CommandId::DeleteLayer,
-                CommandPayload::DeleteLayer {
-                    layer: name.clone(),
-                },
-            );
-            match self.layer_command_without_history(session, &inner) {
-                Ok(outcome) => {
-                    removed += 1;
-                    if outcome.changes.is_some() {
-                        last_changes = outcome.changes;
-                    }
-                    diagnostics.extend(outcome.diagnostics);
-                    diagnostics.push(Diagnostic {
-                        object: None,
-                        code: "purge.layer_removed".into(),
-                        message: format!("PURGE: removed unused layer '{name}'"),
-                    });
-                }
-                Err(error) => diagnostics.push(Diagnostic {
-                    object: None,
-                    code: "purge.layer_refused".into(),
-                    message: format!("PURGE: layer '{name}' was not removed: {error}"),
-                }),
-            }
-        }
-
-        if target == PurgeTarget::All {
-            for kind in [
-                NamedObjectKind::Block,
-                NamedObjectKind::Style,
-                NamedObjectKind::Linetype,
-            ] {
-                diagnostics.push(Diagnostic {
-                    object: None,
-                    code: "purge.kind_unsupported".into(),
-                    message: format!(
-                        "PURGE: {} has no delete API in this build; unused {} entries were not \
-                         removed",
-                        kind_label(kind),
-                        kind_label(kind)
-                    ),
-                });
-            }
-        }
-
-        diagnostics.push(Diagnostic {
-            object: None,
-            code: if removed == 0 {
-                "purge.none".into()
-            } else {
-                "purge.summary".into()
-            },
-            message: format!(
-                "PURGE: {removed} unused layer row(s) removed; PURGE layer deletions are not \
-                 undoable"
-            ),
-        });
-        Ok(CommandOutcome {
-            objects: Vec::new(),
-            changes: last_changes,
-            diagnostics,
-            measurement: None,
-            point_report: None,
-        })
-    }
-
-    /// `RENAME` / `-RENAME`: rename one named object.
-    ///
     /// `RENAME LAYER` reuses the ordinary `RENAMELAYER` command (same database
     /// write, same refusals for unknown, duplicate and illegal names). The three
     /// style tables use the shared style-table batch and `BLOCK` the block-row
@@ -489,39 +380,6 @@ impl Application {
         })
     }
 
-    /// `SETVAR <name>`: report one modelled variable's current value.
-    fn setvar_report(
-        &self,
-        session: &mut SessionState,
-        command: &Command,
-    ) -> CadResult<CommandOutcome> {
-        let CommandPayload::SetVar(name) = &command.payload else {
-            return Err(CadError::InvalidInput(
-                "setvar.needs_name: SETVAR needs a variable name, e.g. `SETVAR PDMODE`".into(),
-            ));
-        };
-        let drawing = document_drawing(self, command)?;
-        let name = name.trim().to_ascii_uppercase();
-        let (value, kind) =
-            modelled_system_variable(&drawing, session, &name).ok_or_else(|| {
-                CadError::InvalidInput(format!(
-                    "setvar.unknown_variable: SETVAR does not model '{name}'; the closed set is {}",
-                    MODELLED_SYSTEM_VARIABLES.join(", ")
-                ))
-            })?;
-        Ok(CommandOutcome {
-            objects: Vec::new(),
-            changes: None,
-            diagnostics: vec![Diagnostic {
-                object: None,
-                code: "setvar.value".into(),
-                message: format!("SETVAR {name} = {value} ({kind})"),
-            }],
-            measurement: None,
-            point_report: None,
-        })
-    }
-
     /// `TIME`: read-only document/clock report.
     ///
     /// One line per AutoCAD `TIME` field. Only the fields this build really has a
@@ -709,38 +567,27 @@ impl Application {
     }
 }
 
-fn unsupported_purge_kind(target: PurgeTarget) -> Option<NamedObjectKind> {
+/// The named-object kinds one `PURGE` target covers.
+///
+/// `PURGE LAYER` touches no table; the bare `PURGE` covers all three tables. An
+/// unsupported kind can no longer be requested: `PurgeTarget` has no DIMSTYLE /
+/// MLEADERSTYLE variant, and `NamedObjectKind`'s other arms are refused by the
+/// `RENAME`/`-PURGE` grammar rather than silently ignored.
+pub(crate) fn purge_table_kinds(target: PurgeTarget) -> Vec<NamedObjectKind> {
     match target {
-        PurgeTarget::Block => Some(NamedObjectKind::Block),
-        PurgeTarget::Style => Some(NamedObjectKind::Style),
-        PurgeTarget::Linetype => Some(NamedObjectKind::Linetype),
-        PurgeTarget::All | PurgeTarget::Layer => None,
+        PurgeTarget::All => vec![
+            NamedObjectKind::Block,
+            NamedObjectKind::Style,
+            NamedObjectKind::Linetype,
+        ],
+        PurgeTarget::Block => vec![NamedObjectKind::Block],
+        PurgeTarget::Style => vec![NamedObjectKind::Style],
+        PurgeTarget::Linetype => vec![NamedObjectKind::Linetype],
+        PurgeTarget::Layer => Vec::new(),
     }
 }
 
-fn kind_label(kind: NamedObjectKind) -> &'static str {
-    match kind {
-        NamedObjectKind::Layer => "LAYER",
-        NamedObjectKind::Block => "BLOCK",
-        NamedObjectKind::Style => "STYLE",
-        NamedObjectKind::Linetype => "LINETYPE",
-        NamedObjectKind::DimStyle => "DIMSTYLE",
-        NamedObjectKind::MLeaderStyle => "MLEADERSTYLE",
-    }
-}
-
-fn kind_key(kind: NamedObjectKind) -> &'static str {
-    match kind {
-        NamedObjectKind::Layer => "layer",
-        NamedObjectKind::Block => "block",
-        NamedObjectKind::Style => "style",
-        NamedObjectKind::Linetype => "linetype",
-        NamedObjectKind::DimStyle => "dimstyle",
-        NamedObjectKind::MLeaderStyle => "mleaderstyle",
-    }
-}
-
-fn with_payload(command: &Command, id: CommandId, payload: CommandPayload) -> Command {
+pub(crate) fn with_payload(command: &Command, id: CommandId, payload: CommandPayload) -> Command {
     Command {
         schema_version: command.schema_version,
         id,
@@ -748,53 +595,6 @@ fn with_payload(command: &Command, id: CommandId, payload: CommandPayload) -> Co
         viewport: command.viewport,
         payload,
     }
-}
-
-/// The `SETVAR` closed set: the system variables this build really models, in
-/// report order. `SETVAR` and the `SYSVARMONITOR`/`SYSVDLG` reports read exactly
-/// this list, so a report can never advertise a variable the router does not
-/// model.
-pub(crate) const MODELLED_SYSTEM_VARIABLES: [&str; 9] = [
-    "PDMODE",
-    "PDSIZE",
-    "SNAPUNIT",
-    "LTSCALE",
-    "GRID",
-    "SNAP",
-    "ORTHO",
-    "TEXTSIZE",
-    "WIPEOUTFRAME",
-];
-
-/// Read one modelled system variable as `(value, kind)`, or `None` when the name
-/// is outside [`MODELLED_SYSTEM_VARIABLES`].
-pub(crate) fn modelled_system_variable(
-    drawing: &cad_db::DrawingDatabase,
-    session: &SessionState,
-    name: &str,
-) -> Option<(String, &'static str)> {
-    let value = match name {
-        "PDMODE" => (drawing.point_display_mode().to_string(), "integer"),
-        "PDSIZE" => (drawing.point_display_size().to_string(), "real"),
-        "SNAPUNIT" => (session.snap_spacing().to_string(), "real"),
-        "LTSCALE" => (drawing.linetype_scale().to_string(), "real"),
-        "GRID" => (session.grid_enabled().to_string(), "boolean"),
-        "SNAP" => (session.snap_grid_enabled().to_string(), "boolean"),
-        "ORTHO" => (session.ortho_enabled().to_string(), "boolean"),
-        "TEXTSIZE" => match session.tool_parameter(ToolParameter::TextHeight) {
-            ToolValue::Number(height) => (height.to_string(), "real"),
-            ToolValue::Flag(flag) => (flag.to_string(), "boolean"),
-        },
-        // `WIPEOUTFRAME` is session display state (`0`/`1`/`2`), not a drawing
-        // header value: the report reads the same token the
-        // `WIPEOUTFRAME`/`WIPEOUT Frames` commands write.
-        "WIPEOUTFRAME" => (
-            session.drafting_extras.wipeout_frames().value().to_string(),
-            "integer",
-        ),
-        _ => return None,
-    };
-    Some(value)
 }
 
 pub(crate) fn document_drawing(

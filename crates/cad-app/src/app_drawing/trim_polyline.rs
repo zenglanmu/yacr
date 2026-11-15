@@ -132,6 +132,31 @@ pub(crate) fn plan_trim_polyline(
     })
 }
 
+/// The **arc-length midpoint** of a stored polyline.
+///
+/// `EXTRIM` has no pick channel (its payload carries a boundary and the crossing
+/// targets, no side point), so it needs one deterministic pick per target. The
+/// arc-length midpoint is that pick: it is the point a user would click to select
+/// the object, it is independent of vertex count and bulge distribution, and it is
+/// computed on the shared [`PolylineCurve`] model so a bulged polyline is measured
+/// along its real arcs rather than its chords.
+///
+/// The refusal is the caller's own prefix-free reason: a degenerate polyline has no
+/// midpoint to pick.
+pub(crate) fn polyline_midpoint(
+    points: &[Point3],
+    bulges: &[f64],
+    closed: bool,
+) -> Result<Point3, String> {
+    let curve = validate(points, bulges, closed)
+        .map_err(|reason| format!("the target polyline has no midpoint: {reason:?}"))?;
+    let total = curve.total_length();
+    if !total.is_finite() || total <= 0.0 {
+        return Err("the target polyline has no measurable length".into());
+    }
+    Ok(curve.point_at_distance(total / 2.0))
+}
+
 /// Validate and normalise the stored polyline through the **shared** model, so
 /// TRIM reads bulges exactly like BREAK/DIVIDE (`0.0` = straight segment).
 ///

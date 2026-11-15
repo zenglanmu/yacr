@@ -269,3 +269,75 @@ fn viewer_mode_refuses_texttofront_without_writing() {
     assert_eq!(revision(&app), before_revision);
     assert!(!app.can_undo(&DocumentId(1)));
 }
+
+/// The reorder is planned **per scope**: a block definition's text moves inside
+/// its own definition and never against model-space rows (the pre-promotion
+/// behaviour skipped it entirely).
+#[test]
+fn text_in_a_block_definition_moves_within_its_own_scope_only() {
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layer(Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
+    .unwrap();
+    b.insert_block(BlockDefinition {
+        id: BlockId(7),
+        entities: vec![EntityId(11), EntityId(12)],
+        dynamic_visibility: None,
+    })
+    .unwrap();
+    let mut member_text = ent(11, text(11), 0);
+    member_text.space = SpaceId::Block(BlockId(7));
+    let mut member_line = ent(12, line(point(0.0, 0.0), point(1.0, 0.0)), 5);
+    member_line.space = SpaceId::Block(BlockId(7));
+    b.insert_entity(member_text).unwrap();
+    b.insert_entity(member_line).unwrap();
+    // Model space gets a much higher baseline; it must not lift the member.
+    b.insert_entity(ent(1, line(point(0.0, 0.0), point(1.0, 0.0)), 50))
+        .unwrap();
+    b.insert_entity(ent(2, text(2), 0)).unwrap();
+    let drawing = b.finish().unwrap();
+    let mut app = Application::new();
+    app.workspace.documents.insert(
+        DocumentId(1),
+        Document {
+            id: DocumentId(1),
+            drawing: Arc::new(drawing),
+            identity: DocumentIdentity::Sha256([8u8; 32]),
+            units: UnitContext::drawing_units(),
+            resource_keys: Vec::new(),
+        },
+    );
+    app.workspace.viewports.insert(
+        ViewportId(1),
+        Viewport::new(ViewportId(1), DocumentId(1), [800.0, 600.0]),
+    );
+    let mut session = SessionState::new(DocumentId(1), AppMode::Work);
+    select(&mut session, &[2, 11]);
+
+    let outcome = run_text_front(&mut app, &mut session).expect("both scopes are planned");
+    assert_eq!(outcome.objects.len(), 2);
+    // Block scope baseline is the member line at 5 -> member text 6.
+    assert_eq!(order_of(&app, 11), 6);
+    // Model-space baseline is 50 -> model text 51.
+    assert_eq!(order_of(&app, 2), 51);
+    assert_eq!(
+        order_of(&app, 12),
+        5,
+        "the non-eligible member does not move"
+    );
+    assert_eq!(order_of(&app, 1), 50, "model-space rows do not move");
+    assert_eq!(undo_depth(&app), 1);
+
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .unwrap();
+    assert_eq!(order_of(&app, 11), 0);
+    assert_eq!(order_of(&app, 2), 0);
+}

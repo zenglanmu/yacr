@@ -203,8 +203,9 @@ impl DrawingDatabase {
         let mut touched = BTreeSet::new();
         for (id, change) in rows {
             let Some(row) = change else {
-                // Validation refuses deletes; keep the mutation total instead of
-                // panicking so a future caller cannot crash the host.
+                // A validated delete: the row had no surviving name reference
+                // (validation refused otherwise), so removing it cannot dangle.
+                self.linetypes.remove(id);
                 continue;
             };
             let previous = self
@@ -249,15 +250,18 @@ impl DrawingDatabase {
 
 /// Validate the whole linetype batch.
 ///
-/// Returns the staged (renamed) ids. Every refusal happens before the first
-/// mutation: the table, the layer rows, the entity attributes and the revision
-/// are untouched.
+/// Returns the ids of the rows that stay in the table (creates/renames); a
+/// `None` row is a delete and is validated against the same in-use rules
+/// [`DrawingDatabase::ensure_linetype_deletable`] states for a caller. Every
+/// refusal happens before the first mutation: the table, the layer rows, the
+/// entity attributes and the revision are untouched.
 pub(super) fn validate_linetype_batch(
     db: &DrawingDatabase,
     rows: &[(LinetypeId, Option<LineType>)],
 ) -> CadResult<BTreeSet<LinetypeId>> {
     let mut seen = BTreeSet::new();
     let mut staged = BTreeSet::new();
+    let mut deleted = BTreeSet::new();
     for (id, change) in rows {
         if !seen.insert(*id) {
             return Err(CadError::Invariant(format!(
@@ -265,10 +269,50 @@ pub(super) fn validate_linetype_batch(
             )));
         }
         let Some(row) = change else {
-            return Err(CadError::InvalidInput(format!(
-                "linetype.delete_unsupported: this build has no linetype delete API; row {id:?} \
-                 was not removed"
-            )));
+            // Delete: the row must exist, must not be the drawing default and must
+            // have no surviving name reference — the exact rules the public
+            // `delete_linetype` predicate states for the user.
+            let stored = db.linetypes.get(id).ok_or_else(|| {
+                CadError::Invariant(format!(
+                    "linetype.unknown_id: cannot delete linetype {id:?}; it does not exist"
+                ))
+            })?;
+            if stored
+                .name
+                .trim()
+                .eq_ignore_ascii_case(DEFAULT_LINETYPE_NAME)
+            {
+                return Err(CadError::InvalidInput(format!(
+                    "linetype.continuous_undeletable: linetype '{DEFAULT_LINETYPE_NAME}' is the \
+                     drawing's default linetype and the implicit value of every layer row with no \
+                     stored attributes, so it cannot be deleted"
+                )));
+            }
+            let layers = db
+                .layer_attributes
+                .values()
+                .filter(|attributes| attributes.linetype.eq_ignore_ascii_case(stored.name.trim()))
+                .count();
+            let entities = db
+                .render_attributes
+                .values()
+                .filter(|attributes| {
+                    matches!(
+                        &attributes.linetype,
+                        EntityLineType::Explicit { name, .. }
+                            if name.eq_ignore_ascii_case(stored.name.trim())
+                    )
+                })
+                .count();
+            if layers + entities > 0 {
+                return Err(CadError::InvalidInput(format!(
+                    "linetype.in_use: linetype '{}' ({}) is still referenced by {layers} layer \
+                     row(s) and {entities} entity attribute(s); retarget them first",
+                    stored.name, id.0
+                )));
+            }
+            deleted.insert(*id);
+            continue;
         };
         if row.id != *id {
             return Err(CadError::Invariant(format!(
@@ -276,31 +320,35 @@ pub(super) fn validate_linetype_batch(
                 row.id
             )));
         }
-        let stored = db.linetypes.get(id).ok_or_else(|| {
-            CadError::Invariant(format!(
-                "linetype.unknown_id: cannot rename linetype {id:?}; it does not exist and this \
-                 build has no create API"
-            ))
-        })?;
-        if stored
-            .name
-            .trim()
-            .eq_ignore_ascii_case(DEFAULT_LINETYPE_NAME)
-        {
-            return Err(CadError::InvalidInput(format!(
-                "linetype.continuous_unrenameable: linetype '{DEFAULT_LINETYPE_NAME}' is the \
-                 drawing's default linetype and the implicit value of every layer row with no \
-                 stored attributes, so it cannot be renamed"
-            )));
+        // A stored row is a **rename** and keeps its protections. A missing id is
+        // the **history replay of a delete** (undo reinstalls the row it removed);
+        // no command reaches this arm, because `RENAME LINETYPE` resolves the id in
+        // the live table and there is no create grammar.
+        if let Some(stored) = db.linetypes.get(id) {
+            if stored
+                .name
+                .trim()
+                .eq_ignore_ascii_case(DEFAULT_LINETYPE_NAME)
+            {
+                return Err(CadError::InvalidInput(format!(
+                    "linetype.continuous_unrenameable: linetype '{DEFAULT_LINETYPE_NAME}' is the \
+                     drawing's default linetype and the implicit value of every layer row with no \
+                     stored attributes, so it cannot be renamed"
+                )));
+            }
         }
         validated_style_name(&row.name, "linetype")?;
         staged.insert(*id);
     }
 
-    // Uniqueness is checked against the **final** name set: a name freed by the
-    // same batch would be available, but rename-only batches never free one.
+    // Uniqueness is checked against the **final** name set, so a name freed by a
+    // delete in the same batch is available to the same batch.
     let mut final_names: BTreeMap<String, String> = BTreeMap::new();
-    for row in db.linetypes.values().filter(|row| !seen.contains(&row.id)) {
+    for row in db
+        .linetypes
+        .values()
+        .filter(|row| !staged.contains(&row.id) && !deleted.contains(&row.id))
+    {
         final_names.insert(row.name.trim().to_lowercase(), row.name.clone());
     }
     for (id, change) in rows {

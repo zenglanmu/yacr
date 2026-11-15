@@ -17,6 +17,7 @@ mod layers;
 mod layout_edit;
 mod layout_patch;
 mod locked_layers;
+mod named_delete;
 mod plot;
 mod point_style;
 mod scale;

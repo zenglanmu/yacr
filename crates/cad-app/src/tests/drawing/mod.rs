@@ -306,6 +306,7 @@ mod divide;
 mod draw2_batch;
 mod ellipse;
 mod explode;
+mod extrim;
 // The imported-content (picture-branch DIMENSION / spline-path MULTILEADER)
 // decomposition tests, split out of `explode` so both files stay inside the
 // code-size limit.

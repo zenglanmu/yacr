@@ -152,6 +152,10 @@ mod addselected;
 mod minsert;
 // TEXTTOFRONT (2026-11-07): rewrite the selected text/leader/dimension draw order.
 mod text_front;
+// DRAWORDER (split out of `draw2_edit`): the per-`SpaceId` reorder planner.
+mod draw_order_scope;
+// PURGE (split out of `app_utility`): the block/style/linetype table half.
+mod purge_named;
 // The three selection-based text commands (TORIENT / TCASE / TXT2MTXT) and
 // their one pure case transformer.
 mod text_commands;

@@ -16,7 +16,12 @@ use super::trim_boundary::{collect_boundaries, BoundarySet};
 use super::trim_curves::{
     cut_tolerance, plan_extend, plan_trim, PlanRefusal, TargetCurve, TrimPlan,
 };
+use super::trim_polyline::{plan_trim_polyline, polyline_midpoint};
 use super::*;
+
+/// The target kinds `EXTRIM` cuts, named in the one refusal that lists them.
+const EXTRIM_TARGETS: &str =
+    "a LINE, ARC, CIRCLE, ELLIPSE (or elliptical arc), LWPOLYLINE or SPLINE";
 
 fn refusal(code: &str, detail: impl std::fmt::Display) -> CadError {
     CadError::InvalidInput(format!("{code}: {detail}"))
@@ -327,27 +332,76 @@ impl Application {
             }
             let mut changes = Vec::new();
             for target in &target_entities {
-                let curve =
-                    TargetCurve::new(&target.geometry, "EXTRIM", "a LINE, ARC, CIRCLE or SPLINE")
-                        .map_err(|error| match error {
-                        CadError::Unsupported(message) | CadError::InvalidInput(message) => {
-                            refusal("extrim.unsupported_target", message)
+                // The support domain is exactly the geometry TRIM can cut: the
+                // shared parameter planner for LINE/ARC/CIRCLE/ELLIPSE(+elliptical
+                // arc)/SPLINE, and the shared polyline planner for LWPOLYLINE.
+                // Anything else is a *named per-target skip* — the boundary stays a
+                // whole-command refusal — so one un-cuttable neighbour (an INSERT,
+                // HATCH, POINT, …) can neither abort the rest of the trim nor be
+                // silently ignored.
+                let resolved = match &target.geometry {
+                    SemanticGeometry::Polyline {
+                        points,
+                        bulges,
+                        closed,
+                        ..
+                    } => match polyline_midpoint(points, bulges, *closed) {
+                        Ok(pick) => plan_trim_polyline(
+                            points,
+                            bulges,
+                            *closed,
+                            pick,
+                            &boundaries,
+                            &policy,
+                            tol,
+                        )
+                        .map_err(plan_reason),
+                        Err(reason) => {
+                            diagnostics.push(skipped(
+                                "extrim.unsupported_target",
+                                target.id,
+                                &reason,
+                            ));
+                            continue;
                         }
-                        other => other,
-                    })?;
-                match plan_trim(&curve, curve.point_at(0.5), &boundaries, &policy, tol) {
-                    Ok(resolution) => match resolution.plan {
-                        TrimPlan::Replace(geometry) => {
-                            changes.push(CurveChange::Replace(target.clone(), geometry))
-                        }
-                        TrimPlan::Delete => changes.push(CurveChange::Delete(
-                            target.clone(),
-                            drawing.entity_display_state(target.id),
-                        )),
                     },
-                    Err(reason) => {
-                        diagnostics.push(skipped("extrim.skipped", target.id, &plan_reason(reason)))
+                    other => match TargetCurve::new_trim_extend(other, "EXTRIM", EXTRIM_TARGETS) {
+                        Ok(curve) => {
+                            plan_trim(&curve, curve.point_at(0.5), &boundaries, &policy, tol)
+                                .map_err(plan_reason)
+                        }
+                        Err(error) => {
+                            diagnostics.push(skipped(
+                                "extrim.unsupported_target",
+                                target.id,
+                                &refusal_detail(error),
+                            ));
+                            continue;
+                        }
+                    },
+                };
+                match resolved {
+                    Ok(resolution) => {
+                        // A sampled SPLINE cut is approximate in the same way TRIM
+                        // reports it; EXTRIM must not drop that note.
+                        for note in resolution.notes {
+                            diagnostics.push(Diagnostic {
+                                object: Some(ObjectId(target.id.0)),
+                                code: "extrim.approximate_cut".into(),
+                                message: note,
+                            });
+                        }
+                        match resolution.plan {
+                            TrimPlan::Replace(geometry) => {
+                                changes.push(CurveChange::Replace(target.clone(), geometry))
+                            }
+                            TrimPlan::Delete => changes.push(CurveChange::Delete(
+                                target.clone(),
+                                drawing.entity_display_state(target.id),
+                            )),
+                        }
                     }
+                    Err(reason) => diagnostics.push(skipped("extrim.skipped", target.id, &reason)),
                 }
             }
             changes
@@ -509,243 +563,6 @@ impl Application {
         self.commit_curve_changes_inner(document_id, changes, diagnostics, "mpedit", true)
     }
 
-    /// `DRAWORDER FRONT|BACK|ABOVE|BELOW` over the current selection.
-    pub(crate) fn draw_order(
-        &mut self,
-        session: &SessionState,
-        command: &Command,
-    ) -> CadResult<CommandOutcome> {
-        let mode = match &command.payload {
-            CommandPayload::Draw2(payload) => match **payload {
-                Draw2Payload::DrawOrder(mode) => mode,
-                _ => {
-                    return Err(refusal(
-                        "draworder.payload",
-                        "DRAWORDER needs a Draw2::DrawOrder(Front|Back|Above|Below) payload",
-                    ));
-                }
-            },
-            _ => {
-                return Err(refusal(
-                    "draworder.payload",
-                    "DRAWORDER needs a Draw2::DrawOrder(Front|Back|Above|Below) payload",
-                ));
-            }
-        };
-        let refs = session.selection.refs();
-        if refs.is_empty() {
-            return Err(refusal(
-                "draworder.selection",
-                "DRAWORDER needs at least one selected model-space object",
-            ));
-        }
-        if matches!(mode, DrawOrderMode::Above | DrawOrderMode::Below) && refs.len() < 2 {
-            return Err(refusal(
-                "draworder.reference_required",
-                "DRAWORDER ABOVE/BELOW uses the first selected object as the reference and \
-                 needs at least one more selected object to move",
-            ));
-        }
-        let document_id = command.document;
-        let (entities, diagnostics) =
-            self.resolve_batch_no_space(document_id, refs, "draworder")?;
-        let mut selected: Vec<DbEntity> = entities;
-        selected.sort_by_key(|entity| (entity.draw_order, entity.id.0));
-        let selected_ids: BTreeSet<EntityId> = selected.iter().map(|entity| entity.id).collect();
-
-        let document = self
-            .workspace
-            .documents
-            .get(&document_id)
-            .ok_or_else(|| refusal("draworder.not_addressable", "document not open"))?;
-        let drawing = document.drawing.as_ref();
-        let mut others: Vec<DbEntity> = drawing
-            .entities()
-            .filter(|entity| entity.space == SpaceId::Model)
-            .filter(|entity| !selected_ids.contains(&entity.id))
-            .cloned()
-            .collect();
-        others.sort_by_key(|entity| (entity.draw_order, entity.id.0));
-
-        let mut planned: Vec<(DbEntity, i64)> = Vec::new();
-        match mode {
-            DrawOrderMode::Front | DrawOrderMode::Back => {
-                if others.is_empty() {
-                    return Ok(unchanged_order(
-                        diagnostics,
-                        "there is no other model-space object",
-                    ));
-                }
-                let mut target = if matches!(mode, DrawOrderMode::Front) {
-                    others
-                        .iter()
-                        .map(|entity| entity.draw_order)
-                        .max()
-                        .unwrap_or(0)
-                        .checked_add(1)
-                        .ok_or_else(order_exhausted)?
-                } else {
-                    others
-                        .iter()
-                        .map(|entity| entity.draw_order)
-                        .min()
-                        .unwrap_or(0)
-                        .checked_sub(selected.len() as i64)
-                        .ok_or_else(order_exhausted)?
-                };
-                for entity in &selected {
-                    planned.push((entity.clone(), target));
-                    target = target.checked_add(1).ok_or_else(order_exhausted)?;
-                }
-            }
-            DrawOrderMode::Above | DrawOrderMode::Below => {
-                let reference_id = refs[0].entity;
-                let reference = selected
-                    .iter()
-                    .find(|entity| entity.id == reference_id)
-                    .ok_or_else(|| {
-                        refusal(
-                            "draworder.reference_required",
-                            "the first selected object is not a model-space entity",
-                        )
-                    })?
-                    .clone();
-                let moving: Vec<DbEntity> = selected
-                    .iter()
-                    .filter(|entity| entity.id != reference.id)
-                    .cloned()
-                    .collect();
-                let n = moving.len() as i64;
-                let reference_order = reference.draw_order;
-                let above = matches!(mode, DrawOrderMode::Above);
-                let side: Vec<DbEntity> = others
-                    .iter()
-                    .filter(|entity| {
-                        if above {
-                            entity.draw_order > reference_order
-                        } else {
-                            entity.draw_order < reference_order
-                        }
-                    })
-                    .cloned()
-                    .collect();
-                let gap: i64 = if above {
-                    side.iter()
-                        .map(|entity| entity.draw_order)
-                        .min()
-                        .map(|next| next - reference_order - 1)
-                        .unwrap_or(i64::MAX / 4)
-                } else {
-                    side.iter()
-                        .map(|entity| entity.draw_order)
-                        .max()
-                        .map(|previous| reference_order - previous - 1)
-                        .unwrap_or(i64::MAX / 4)
-                };
-                let shift = if gap >= n { 0 } else { n - gap };
-                let base = if above {
-                    reference_order.checked_add(1).ok_or_else(order_exhausted)?
-                } else {
-                    reference_order.checked_sub(n).ok_or_else(order_exhausted)?
-                };
-                for (index, entity) in moving.iter().enumerate() {
-                    planned.push((
-                        entity.clone(),
-                        base.checked_add(index as i64).ok_or_else(order_exhausted)?,
-                    ));
-                }
-                if shift > 0 {
-                    for entity in side {
-                        planned.push((
-                            entity.clone(),
-                            if above {
-                                entity
-                                    .draw_order
-                                    .checked_add(shift)
-                                    .ok_or_else(order_exhausted)?
-                            } else {
-                                entity
-                                    .draw_order
-                                    .checked_sub(shift)
-                                    .ok_or_else(order_exhausted)?
-                            },
-                        ));
-                    }
-                }
-            }
-        }
-
-        let mut changed: Vec<(DbEntity, i64)> = planned
-            .into_iter()
-            .filter(|(entity, order)| entity.draw_order != *order)
-            .collect();
-        changed.sort_by_key(|(entity, _)| (entity.draw_order, entity.id.0));
-        if changed.is_empty() {
-            return Ok(unchanged_order(
-                diagnostics,
-                "every target already has its draw order",
-            ));
-        }
-        let mut candidate = drawing.clone();
-        let drawing = &mut candidate;
-        let transaction = next_transaction_id();
-        let change_set = {
-            let mut staged = drawing.begin_drawing_transaction("draw order", transaction)?;
-            for (entity, order) in &changed {
-                let mut after = entity.clone();
-                after.draw_order = *order;
-                staged.update_entity(after)?;
-            }
-            staged.commit()?
-        };
-        let patches: Vec<DrawingPatch> = changed
-            .iter()
-            .map(|(entity, _)| {
-                let after = drawing.entity(entity.id).cloned().ok_or_else(|| {
-                    CadError::Invariant(format!(
-                        "DRAWORDER: entity {} vanished after commit",
-                        entity.id.0
-                    ))
-                })?;
-                Ok(drawing_patch(entity.id, Some(entity.clone()), Some(after)))
-            })
-            .collect::<CadResult<Vec<_>>>()?;
-        let ids: Vec<ObjectId> = changed
-            .iter()
-            .map(|(entity, _)| ObjectId(entity.id.0))
-            .collect();
-        let moved = ids.len();
-        self.publish_candidate(
-            document_id,
-            candidate,
-            DrawingUndoRecord {
-                transaction: change_set.transaction,
-                label: "draw order".into(),
-                patches,
-                block_patches: Vec::new(),
-                layer_patches: Vec::new(),
-                style_patches: Vec::new(),
-                dim_style_patches: Vec::new(),
-                mleader_style_patches: Vec::new(),
-                layout_patches: Vec::new(),
-                merge_key: None,
-            },
-        )?;
-        let mut diagnostics = diagnostics;
-        diagnostics.push(Diagnostic {
-            object: None,
-            code: "draworder.applied".into(),
-            message: format!("DRAWORDER: rewrote the draw order of {moved} model-space object(s)"),
-        });
-        Ok(CommandOutcome {
-            objects: ids,
-            changes: Some(Arc::new(change_set)),
-            diagnostics,
-            measurement: None,
-            point_report: None,
-        })
-    }
-
     /// Resolve refs to direct model-space entities, refusing anything else.
     ///
     /// `label` is the refusal prefix (`trex`, `extrim`, `mpedit`).
@@ -772,7 +589,7 @@ impl Application {
     }
 
     /// Resolve refs to direct entities in any space (DRAWORDER filters below).
-    fn resolve_batch_no_space(
+    pub(crate) fn resolve_batch_no_space(
         &self,
         document_id: DocumentId,
         refs: &[SelectionRef],
@@ -952,25 +769,11 @@ fn plan_reason(reason: PlanRefusal) -> String {
     }
 }
 
-fn unchanged_order(diagnostics: Vec<Diagnostic>, detail: &str) -> CommandOutcome {
-    let mut diagnostics = diagnostics;
-    diagnostics.push(Diagnostic {
-        object: None,
-        code: "draworder.unchanged".into(),
-        message: format!("DRAWORDER: {detail}; nothing was written"),
-    });
-    CommandOutcome {
-        objects: Vec::new(),
-        changes: None,
-        diagnostics,
-        measurement: None,
-        point_report: None,
+/// The human-readable detail of a per-target capability error, without the
+/// `Unsupported:`/`Invalid input:` wrapper a [`CadError`] display carries.
+fn refusal_detail(error: CadError) -> String {
+    match error {
+        CadError::Unsupported(message) | CadError::InvalidInput(message) => message,
+        other => other.to_string(),
     }
-}
-
-fn order_exhausted() -> CadError {
-    refusal(
-        "draworder.order_exhausted",
-        "a target draw order would overflow i64",
-    )
 }

@@ -98,35 +98,43 @@ pub struct SolidCommand;
 /// * `helix.3d_not_implemented` — `height > 0`.
 pub struct HelixCommand;
 
-/// `MLINE` — a partial multiline: two parallel LINEs around a baseline.
+/// `MLINE` — a partial multiline: the mitered element LINEs around a baseline.
 ///
 /// # Input
 ///
-/// [`crate::Draw2Payload::Mline`] carries the baseline endpoints, an optional
-/// spacing and a lateral offset. The command-line form is
-/// `MLINE <spacing> <offset> <x1,y1> <x2,y2>`. When `spacing` is `None`, the
-/// current `MLSTYLE` style's spacing is used (the style store feeds the
-/// command); an explicit spacing overrides it for this invocation only.
+/// [`crate::Draw2Payload::Mline`] carries the baseline vertices (2..=1024), an
+/// optional spacing and a lateral offset. The command-line form is
+/// `MLINE <spacing> <offset> <x1,y1> <x2,y2> [<x3,y3> …]`. When `spacing` is
+/// `None`, the current `MLSTYLE` style's spacing is used (the style store feeds
+/// the command); an explicit spacing overrides it for this invocation only.
 ///
 /// # Write
 ///
-/// Exactly **two** `SemanticGeometry::Line` entities are created, parallel to
-/// the baseline at `±spacing/2 + offset` measured along the baseline's XY
-/// normal. One transaction / one undo step on the active layer. The two-line
-/// count is this v1's fixed element count: MLINE styles carry a name and a
-/// spacing but no element table.
+/// **One `SemanticGeometry::Line` per element per segment** — `2·(N-1)` lines
+/// for an `N`-point baseline — parallel to each baseline segment at
+/// `±spacing/2 + offset` measured along the segment's XY normal. Interior
+/// vertices are **mitered** (the offset lines' intersection), which is MLINE's
+/// default join, so an element turns a corner without a notch or a doubled
+/// segment. One transaction / one undo step on the active layer.
+///
+/// The two-line count per segment is this build's fixed element count: MLINE
+/// styles carry a name and a spacing but no element table.
 ///
 /// # NOT IMPLEMENTED
 ///
-/// Joins, caps, miter/bevel corners, style element definitions, and a
-/// multi-segment baseline. The command is a declared partial MLINE.
+/// The stored `AcDbMline` entity (so joins/caps/fill cannot be *edited* later),
+/// caps and fill, style element definitions, and bevel/arc joins (miter only).
+/// An `MLSTYLE` element/cap table does not exist, so caps cannot be requested:
+/// the written geometry is the default uncapped, mitered multiline. The command
+/// is a declared partial MLINE.
 ///
 /// # Refusals (before any write)
 ///
 /// * `mline.payload` — wrong payload shape;
-/// * `mline.point_count` — not exactly two baseline points;
+/// * `mline.point_count` — fewer than two or more than 1024 baseline points;
 /// * `mline.invalid_point` — a non-finite point;
-/// * `mline.degenerate_baseline` — the two points coincide;
+/// * `mline.degenerate_baseline` — a baseline segment of zero length;
+/// * `mline.join_degenerate` — an exact 180° reversal (no finite miter);
 /// * `mline.invalid_spacing` — non-positive/non-finite spacing;
 /// * `mline.invalid_offset` — non-finite offset.
 pub struct MlineCommand;
@@ -199,21 +207,42 @@ pub struct TrexCommand;
 ///
 /// # Reuse and write
 ///
-/// Each target is trimmed with the existing `plan_trim` planner, keeping the
-/// piece that contains the target's parametric midpoint. The boundary may be a
-/// `Line`, `Circle`, `Arc` or `Polyline` (the collector's supported set); any
-/// target kind outside LINE/ARC/CIRCLE/SPLINE is refused by name. All targets
-/// change in one transaction / one undo step.
+/// Each target is trimmed with the existing `plan_trim` planner (LINE, ARC,
+/// CIRCLE, ELLIPSE/elliptical arc, SPLINE) or, for an `LWPOLYLINE` target, with
+/// the shared `plan_trim_polyline` planner — there is no second trim
+/// implementation, and the support domain is exactly TRIM's cuttable set. The
+/// boundary may be a `Line`, `Circle`, `Arc`, `Ellipse`, `Polyline` (straight or
+/// bulged) or `Spline` (the collector's supported set); any boundary outside it
+/// is refused by name before anything is planned.
+///
+/// # The side rule (declared divergence)
+///
+/// AutoCAD asks for a side point and deletes the crossing portions on that side.
+/// This payload has no side channel, so each target keeps the window containing
+/// its **own parametric midpoint** (a polyline uses its arc-length midpoint) and
+/// discards the rest. That is the project's existing TRIM keep-window rule, it is
+/// deterministic, and it trims the outside of a closed boundary when the target's
+/// midpoint lies inside it.
+///
+/// # Per-target skips
+///
+/// A target kind outside the domain (INSERT, HATCH, MESH, POINT, …) is a **named
+/// per-object skip** (`extrim.unsupported_target`, carrying the planner's own
+/// reason) and the remaining targets are still cut, so one un-cuttable neighbour
+/// cannot silently discard the rest of the trim. A plan-level refusal for a
+/// supported kind is `extrim.skipped`; sampled (approximate) cut points from a
+/// SPLINE boundary are reported per target as `extrim.approximate_cut`. When no
+/// target needed a change the outcome is `extrim.nothing_changed` with no
+/// transaction. Every write is one transaction / one undo step.
 ///
 /// # Refusals (before any write)
 ///
 /// * `extrim.payload` — wrong payload shape;
-/// * `extrim.selection` — no targets;
+/// * `extrim.selection` — no boundary or no targets;
+/// * `extrim.boundary_is_target` — the boundary is also listed as a target;
 /// * `extrim.not_addressable` — a foreign ref, block member, sub-element,
 ///   missing entity or non-model-space row;
-/// * `extrim.unsupported_boundary` — the boundary geometry cannot bound a cut;
-/// * `extrim.unsupported_target` — a target kind the trim planner does not
-///   accept.
+/// * `extrim.unsupported_boundary` — the boundary geometry cannot bound a cut.
 pub struct ExtrimCommand;
 
 /// `MPEDIT` — apply one `PEDIT` option to every selected polyline.
@@ -240,30 +269,39 @@ pub struct ExtrimCommand;
 /// * `mpedit.selection` — an empty selection.
 pub struct MpeditCommand;
 
-/// `DRAWORDER` — rewrite model-space draw order.
+/// `DRAWORDER` — rewrite draw order **within each draw-order scope**.
 ///
 /// # Input
 ///
 /// `DRAWORDER FRONT|BACK|ABOVE|BELOW` over the current selection
-/// ([`crate::Draw2Payload::DrawOrder`]). The selection must be direct
-/// model-space refs.
+/// ([`crate::Draw2Payload::DrawOrder`]). Refs must be directly addressable (no
+/// block instance, no sub-element) but may live in any scope.
+///
+/// # Scopes
+///
+/// A scope is one `SpaceId`: model space, one paper layout, or one block
+/// definition — the only sequences every consumer of `DbEntity::draw_order`
+/// groups by (the rule `HATCHTOBACK` already follows). Each scope is planned
+/// against its **own** non-selected rows, so a layout's order is never compared
+/// with model space and a block definition's members only with each other.
 ///
 /// # Semantics
 ///
-/// * `FRONT` moves every selected object above every non-selected model-space
-///   object, preserving the selection's relative order.
-/// * `BACK` moves every selected object below every non-selected model-space
-///   object, preserving the selection's relative order.
+/// * `FRONT` moves the selected objects of each scope above that scope's highest
+///   non-selected order, preserving the selection's relative order; a scope with
+///   no non-selected row is left alone (nothing to be in front of).
+/// * `BACK` is the mirrored rule below the scope's lowest non-selected order.
 /// * `ABOVE` / `BELOW` use the **first selected** object as the reference and
-///   move the rest (the moving set) immediately above/below it, preserving the
-///   moving set's relative order. Objects already in the way are shifted by the
-///   needed amount in the same transaction, so no two unrelated rows silently
-///   swap places.
+///   move the rest immediately above/below it **in the reference's scope**,
+///   preserving the moving set's relative order; that scope's rows on the same
+///   side are shifted by the needed amount. A mover in a different scope from the
+///   reference is refused (`draworder.reference_scope`), because "above object X"
+///   has no meaning across two independent sequences.
 ///
-/// When every selected and shifted row already has its target order the command
-/// is a `draworder.unchanged` no-op. Otherwise all changed rows are staged in one
-/// transaction / one undo step. Paper-space and block draw order is not
-/// reordered.
+/// Every scope is planned before anything is staged, so an `i64` overflow in any
+/// scope refuses the whole run. When no row really changes the command is a
+/// `draworder.unchanged` no-op; otherwise all changed rows are one transaction /
+/// one undo step.
 ///
 /// # Refusals (before any write)
 ///
@@ -271,7 +309,8 @@ pub struct MpeditCommand;
 /// * `draworder.selection` — an empty selection;
 /// * `draworder.reference_required` — `ABOVE`/`BELOW` with fewer than two
 ///   selected objects (there is no separate reference prompt);
-/// * `draworder.not_addressable` — a foreign ref, block member, sub-element,
-///   missing entity or non-model-space row;
+/// * `draworder.reference_scope` — a mover in another scope from the reference;
+/// * `draworder.not_addressable` — a foreign ref, block-instance member,
+///   sub-element or missing entity;
 /// * `draworder.order_exhausted` — a target order would overflow `i64`.
 pub struct DrawOrderCommand;

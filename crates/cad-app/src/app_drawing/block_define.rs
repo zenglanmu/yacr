@@ -321,6 +321,24 @@ impl Application {
             },
         )?;
 
+        // AutoCAD's OOPS also restores the objects BLOCK removed. The selected
+        // rows were re-homed into the new definition (their geometry is
+        // bit-for-bit), so the pre-BLOCK model-space copies are exactly what OOPS
+        // puts back — as new independent entities, while the definition keeps its
+        // own members.
+        session.set_last_erase(Some(crate::session_state::EraseSnapshot {
+            document: document_id,
+            entries: sources
+                .iter()
+                .zip(before_displays.iter())
+                .map(|(entity, display)| crate::session_state::EraseEntry {
+                    entity: entity.clone(),
+                    display: display.clone(),
+                })
+                .collect(),
+            restored: Vec::new(),
+        }));
+
         // 8. The selected ids are now block members, not selectable model-space
         //    objects; clear the selection exactly like `select_all` replaces it.
         session.selection = SelectionSet::new();

@@ -7,7 +7,7 @@
 //! untouched.
 
 use super::*;
-use cad_db::{DbEntity, DbObject, DrawingDatabaseBuilder, Layer};
+use cad_db::{BlockDefinition, DbEntity, DbObject, DrawingDatabaseBuilder, Layer};
 
 fn entity(id: u128, layer: LayerId) -> DbEntity {
     DbEntity {
@@ -116,7 +116,9 @@ fn purge_removes_only_unused_layers_and_refuses_referenced_ones() {
     let codes = codes(&outcome);
     assert!(codes.contains(&"purge.layer_removed"), "{codes:?}");
     assert!(codes.contains(&"purge.layer_refused"), "{codes:?}");
-    assert!(codes.contains(&"purge.kind_unsupported"), "{codes:?}");
+    // There is no block/style/linetype row in this fixture, so the table half is
+    // a named no-op rather than a refusal.
+    assert!(codes.contains(&"purge.tables_none"), "{codes:?}");
     let refused = outcome
         .diagnostics
         .iter()
@@ -128,7 +130,7 @@ fn purge_removes_only_unused_layers_and_refuses_referenced_ones() {
 }
 
 #[test]
-fn purge_layer_narrows_to_the_layer_kind_and_refuses_unsupported_kinds_by_name() {
+fn purge_layer_narrows_to_the_layer_kind() {
     let (mut app, mut session) = app_with_purge_fixture();
     let outcome = execute(
         &mut app,
@@ -138,22 +140,199 @@ fn purge_layer_narrows_to_the_layer_kind_and_refuses_unsupported_kinds_by_name()
     )
     .expect("PURGE LAYER is implemented");
     assert_eq!(layer_names(&app), vec!["0", "WALLS"]);
-    assert!(!codes(&outcome).contains(&"purge.kind_unsupported"));
+    assert!(!codes(&outcome).contains(&"purge.tables_none"));
+    assert!(!codes(&outcome).contains(&"purge.block_removed"));
+}
 
-    for target in [
-        PurgeTarget::Block,
-        PurgeTarget::Style,
-        PurgeTarget::Linetype,
-    ] {
-        let error = execute(
-            &mut app,
-            &mut session,
-            CommandId::Purge,
-            CommandPayload::Purge(target),
-        )
-        .expect_err("no delete API for this kind");
-        assert!(error.to_string().contains("unsupported"), "{error}");
+/// The three table kinds a `PURGE` now really removes: an unused block
+/// definition (with its members), an unused text style and an unused linetype.
+/// Each in-use row is a named per-object refusal that removes nothing, and the
+/// whole table half is one undo step that restores rows *and* block members.
+fn purge_table_fixture() -> (Application, SessionState) {
+    let (mut app, session) = application_with_document();
+    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
+    for (id, name) in [(LayerId(0), "0"), (LayerId(3), "WALLS")] {
+        builder
+            .insert_layer(Layer {
+                id,
+                name: name.into(),
+                visible: true,
+            })
+            .unwrap();
     }
+    builder.insert_entity(entity(1, LayerId(3))).unwrap();
+
+    // Blocks: 7 is unreferenced (member 5), 8 is used by INSERT 7.
+    builder
+        .insert_block(BlockDefinition {
+            id: BlockId(7),
+            entities: vec![EntityId(5)],
+            dynamic_visibility: None,
+        })
+        .unwrap();
+    builder
+        .set_block_metadata(BlockId(7), "UNUSED", point(0.0, 0.0))
+        .unwrap();
+    let mut member = entity(5, LayerId(0));
+    member.space = SpaceId::Block(BlockId(7));
+    builder.insert_entity(member).unwrap();
+    builder
+        .insert_block(BlockDefinition {
+            id: BlockId(8),
+            entities: vec![EntityId(6)],
+            dynamic_visibility: None,
+        })
+        .unwrap();
+    builder
+        .set_block_metadata(BlockId(8), "USED", point(0.0, 0.0))
+        .unwrap();
+    let mut used_member = entity(6, LayerId(0));
+    used_member.space = SpaceId::Block(BlockId(8));
+    builder.insert_entity(used_member).unwrap();
+    let mut reference = entity(7, LayerId(0));
+    reference.geometry = SemanticGeometry::Insert {
+        block: BlockId(8),
+        transform: Transform3::translation(point(0.0, 0.0)),
+    };
+    builder.insert_entity(reference).unwrap();
+
+    // Text styles: Standard, an unused NOTES and a used TITLE.
+    for (id, name) in [(1u128, "Standard"), (2, "NOTES"), (3, "TITLE")] {
+        builder
+            .insert_style(cad_db::Style {
+                id: StyleId(id),
+                name: name.into(),
+                resource_keys: Vec::new(),
+            })
+            .unwrap();
+    }
+    let mut title = entity(9, LayerId(0));
+    title.geometry = SemanticGeometry::Text {
+        position: point(0.0, 0.0),
+        height: 1.0,
+        text: "title".into(),
+        style: StyleId(3),
+        rotation: 0.0,
+        font: None,
+        h_align: TextAlignH::Left,
+        v_align: TextAlignV::Baseline,
+        wrap_width: None,
+        line_spacing: TextLineSpacing::default(),
+        width_factor: 1.0,
+    };
+    builder.insert_entity(title).unwrap();
+
+    // Linetypes: Continuous, an unused DASHED and a used PHANTOM (by layer 0).
+    for (id, name) in [(1u128, "Continuous"), (2, "DASHED"), (3, "PHANTOM")] {
+        builder
+            .insert_linetype(cad_db::LineType {
+                id: LinetypeId(id),
+                name: name.into(),
+                pattern: cad_db::LinetypePattern::default(),
+                complex: false,
+            })
+            .unwrap();
+    }
+    let mut drawing = builder.finish().unwrap();
+    drawing
+        .set_layer_attributes(
+            LayerId(0),
+            cad_db::LayerAttributes {
+                linetype: "PHANTOM".into(),
+                ..cad_db::LayerAttributes::default()
+            },
+            TransactionId(1),
+            "fixture layer attributes",
+        )
+        .unwrap();
+    app.workspace
+        .documents
+        .get_mut(&DocumentId(1))
+        .unwrap()
+        .drawing = Arc::new(drawing);
+    (app, session)
+}
+
+#[test]
+fn purge_removes_unused_block_style_and_linetype_rows_in_one_undo_step() {
+    let (mut app, mut session) = purge_table_fixture();
+    let depth_before = undo_depth(&app);
+
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::Purge,
+        CommandPayload::None,
+    )
+    .expect("bare PURGE purges every table");
+    let codes = codes(&outcome);
+    assert!(codes.contains(&"purge.block_removed"), "{codes:?}");
+    assert!(codes.contains(&"purge.style_removed"), "{codes:?}");
+    assert!(codes.contains(&"purge.linetype_removed"), "{codes:?}");
+    assert!(codes.contains(&"purge.block_refused"), "{codes:?}");
+    assert!(codes.contains(&"purge.style_refused"), "{codes:?}");
+    assert!(codes.contains(&"purge.linetype_refused"), "{codes:?}");
+
+    let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
+    assert!(drawing.block(BlockId(7)).is_none(), "block 7 is unused");
+    assert!(
+        drawing.entity(EntityId(5)).is_none(),
+        "its member went with it"
+    );
+    assert!(drawing.block(BlockId(8)).is_some(), "INSERT 7 uses block 8");
+    assert!(drawing.entity(EntityId(6)).is_some());
+    assert!(drawing.style(StyleId(2)).is_none(), "NOTES is unused");
+    assert!(drawing.style(StyleId(1)).is_some(), "Standard stays");
+    assert!(
+        drawing.style(StyleId(3)).is_some(),
+        "TITLE is used by text 9"
+    );
+    assert!(
+        drawing.linetype(LinetypeId(2)).is_none(),
+        "DASHED is unused"
+    );
+    assert!(
+        drawing.linetype(LinetypeId(3)).is_some(),
+        "PHANTOM is used by layer 0"
+    );
+    assert_eq!(undo_depth(&app), depth_before + 1);
+
+    // One undo step restores the rows and the block member.
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .unwrap();
+    let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
+    assert!(drawing.block(BlockId(7)).is_some());
+    assert_eq!(
+        drawing.block(BlockId(7)).unwrap().entities,
+        vec![EntityId(5)]
+    );
+    assert!(drawing.entity(EntityId(5)).is_some());
+    assert!(drawing.style(StyleId(2)).is_some());
+    assert!(drawing.linetype(LinetypeId(2)).is_some());
+}
+
+#[test]
+fn purge_of_a_named_kind_touches_only_that_table() {
+    let (mut app, mut session) = purge_table_fixture();
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Purge,
+        CommandPayload::Purge(PurgeTarget::Style),
+    )
+    .expect("PURGE STYLE is implemented");
+    let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
+    assert!(drawing.style(StyleId(2)).is_none());
+    assert!(
+        drawing.block(BlockId(7)).is_some(),
+        "PURGE STYLE must not touch blocks"
+    );
+    assert!(drawing.linetype(LinetypeId(2)).is_some());
 }
 
 // ---------------------------------------------------------------------------
@@ -308,6 +487,115 @@ fn setvar_reports_the_closed_set_and_refuses_unknown_or_missing_names() {
     )
     .expect_err("missing name");
     assert!(error.to_string().contains("setvar.needs_name"), "{error}");
+}
+
+/// The four Wave-31 additions are modelled but a fresh drawing stores no value,
+/// so the report names the absence instead of printing a default.
+#[test]
+fn setvar_names_the_modelled_variables_a_fresh_drawing_cannot_value() {
+    let (mut app, mut session) = app_with_purge_fixture();
+    let before = revision(&app);
+    for name in ["INSBASE", "LIMMIN", "LIMMAX", "CVPORT"] {
+        let error = execute(
+            &mut app,
+            &mut session,
+            CommandId::SetVar,
+            CommandPayload::SetVar(name.into()),
+        )
+        .expect_err("a modelled value with no stored data is refused by name, not defaulted");
+        let text = error.to_string();
+        assert!(
+            text.contains("setvar.not_stored"),
+            "{name}: {text} must name the absence"
+        );
+        assert!(
+            text.contains(name),
+            "{name}: the refusal must name the variable: {text}"
+        );
+    }
+    assert_eq!(revision(&app), before, "a report writes nothing");
+    assert!(!app.can_undo(&DocumentId(1)));
+}
+
+/// After `BASE`/`LIMITS` write the header, the same four names report the real
+/// stored values through the one reader.
+#[test]
+fn setvar_reports_the_header_values_base_and_limits_stored() {
+    let (mut app, mut session) = app_with_purge_fixture();
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Extended(ExtendedCommandId::BasePoint),
+        CommandPayload::Points(vec![point(4.0, 5.0)]),
+    )
+    .expect("BASE writes the insertion base point");
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Extended(ExtendedCommandId::DrawingLimits),
+        CommandPayload::Points(vec![point(0.0, 0.0), point(210.0, 297.0)]),
+    )
+    .expect("LIMITS writes both corners");
+    for (name, expected) in [
+        ("INSBASE", "4,5,0"),
+        ("LIMMIN", "0,0"),
+        ("LIMMAX", "210,297"),
+    ] {
+        let outcome = execute(
+            &mut app,
+            &mut session,
+            CommandId::SetVar,
+            CommandPayload::SetVar(name.into()),
+        )
+        .expect("the stored header value reports");
+        let report = outcome
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "setvar.value")
+            .expect("setvar.value diagnostic");
+        assert!(
+            report.message.contains(expected),
+            "{name}: {}",
+            report.message
+        );
+        assert!(
+            report.message.contains("(point)"),
+            "{name} must name its kind: {}",
+            report.message
+        );
+    }
+}
+
+/// `CVPORT` reads the session's current-viewport marker of the **active paper
+/// layout**, one-based, and has no value in model space.
+#[test]
+fn setvar_reports_cvport_only_inside_a_paper_layout_with_a_viewport() {
+    let (mut app, mut session) = application_with_layouts();
+    session.active_space = SpaceId::Paper(cad_domain::LayoutId(1));
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::SetVar,
+        CommandPayload::SetVar("CVPORT".into()),
+    )
+    .expect("CVPORT reports inside a paper layout with a viewport");
+    let report = &outcome.diagnostics[0];
+    assert!(report.message.contains("CVPORT = 1"), "{}", report.message);
+    assert!(report.message.contains("(integer)"), "{}", report.message);
+
+    // Model space has no current viewport.
+    session.active_space = SpaceId::Model;
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::SetVar,
+        CommandPayload::SetVar("CVPORT".into()),
+    )
+    .expect_err("model space has no CVPORT");
+    assert!(
+        error.to_string().contains("setvar.not_stored"),
+        "{error}"
+    );
 }
 
 // ---------------------------------------------------------------------------

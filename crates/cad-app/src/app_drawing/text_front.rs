@@ -1,26 +1,33 @@
 //! `TEXTTOFRONT` (AutoCAD 2026): bring the **selected** text, leaders and
-//! dimensions in front of every other model-space object.
+//! dimensions in front of every other object of their own draw-order scope.
 //!
 //! The current selection is the input (a declared divergence from AutoCAD's
 //! interactive `Select objects` prompt). Eligible entities are directly
-//! addressable model-space `SemanticGeometry::Text`, `MultiLeader` and
-//! `Dimension` rows; every other selected object and every non-addressable ref is
-//! reported as a per-entity `texttofront.skipped` diagnostic and skipped without
-//! failing the command.
+//! addressable `SemanticGeometry::Text`, `MultiLeader` and `Dimension` rows; every
+//! other selected object and every non-addressable ref is reported as a
+//! per-entity `texttofront.skipped` diagnostic and skipped without failing the
+//! command.
 //!
-//! `base` is the current maximum `draw_order` over all model-space **non-eligible**
-//! entities (`0` when there is none). Eligible entities are sorted by
-//! `(draw_order, entity id)` and receive the contiguous orders `base + 1 ..=` in
-//! that order, preserving their relative order. When every eligible is already
-//! above `base` the command is `texttofront.unchanged`: no transaction, no
-//! revision bump and no undo entry. Otherwise only changed rows are staged with
-//! one `update_entity` each in **one transaction / one undo step**, so an undo
-//! restores every exact prior order.
+//! # Scopes
 //!
-//! Declared limits: model space only (paper/block draw order is not reordered),
-//! selected non-text objects are not moved, and AutoCAD's all-text-in-drawing form
-//! and Draw Order dialog are **NOT IMPLEMENTED**. Full contract:
-//! [`crate::command_id::texttofront`].
+//! The reorder is planned **per [`SpaceId`]** — model space, each paper layout and
+//! each block definition — exactly like `HATCHTOBACK` and `DRAWORDER`: a layout's
+//! draw order is only meaningful against that layout's rows, and a block
+//! definition's members only against each other. For every scope, `base` is the
+//! maximum `draw_order` over that scope's **non-eligible** entities (`0` when
+//! there is none); the eligible selected entities of that scope are sorted by
+//! `(draw_order, entity id)` and receive the contiguous orders `base + 1 ..=`,
+//! preserving their relative order.
+//!
+//! When every eligible object is already above its own scope's `base` the command
+//! is `texttofront.unchanged`: no transaction, no revision bump and no undo entry.
+//! Otherwise only changed rows are staged with one `update_entity` each in **one
+//! transaction / one undo step**, so an undo restores every exact prior order.
+//!
+//! Declared limits: selected non-text objects are not moved, and AutoCAD's
+//! all-text-in-drawing form and Draw Order dialog are **NOT IMPLEMENTED** (the
+//! payload carries no "all text" option, so there is no channel to request it).
+//! Full contract: [`crate::command_id::texttofront`].
 
 use std::collections::BTreeSet;
 
@@ -57,15 +64,25 @@ impl Application {
         let mut candidate = document.drawing.as_ref().clone();
         let drawing = &mut candidate;
 
-        // Every model-space row is a possible order authority; only the
-        // non-eligible rows define the "in front of everything else" baseline.
-        let base = drawing
-            .entities()
-            .filter(|entity| entity.space == SpaceId::Model)
-            .filter(|entity| !is_eligible_text_object(&entity.geometry))
-            .map(|entity| entity.draw_order)
-            .max()
-            .unwrap_or(0);
+        // Per-scope baselines: only the non-eligible rows of a scope define "in
+        // front of everything else" *within that scope*.
+        let mut scopes: Vec<SpaceId> = Vec::new();
+        for entity in drawing.entities() {
+            if !scopes.contains(&entity.space) {
+                scopes.push(entity.space.clone());
+            }
+        }
+        let mut base_by_scope: Vec<(SpaceId, i64)> = Vec::new();
+        for space in scopes {
+            let base = drawing
+                .entities()
+                .filter(|entity| entity.space == space)
+                .filter(|entity| !is_eligible_text_object(&entity.geometry))
+                .map(|entity| entity.draw_order)
+                .max()
+                .unwrap_or(0);
+            base_by_scope.push((space, base));
+        }
 
         let mut skipped = Vec::new();
         let mut seen = BTreeSet::new();
@@ -92,13 +109,6 @@ impl Application {
                 ));
                 continue;
             };
-            if source.space != SpaceId::Model {
-                skipped.push(skipped_diagnostic(
-                    reference.entity,
-                    "it is not in model space (paper-space/block draw order is not reordered)",
-                ));
-                continue;
-            }
             if !is_eligible_text_object(&source.geometry) {
                 skipped.push(skipped_diagnostic(
                     reference.entity,
@@ -114,34 +124,58 @@ impl Application {
         if eligible.is_empty() {
             return Ok(unchanged_outcome(
                 skipped,
-                "the selection holds no text, multileader or dimension in model space",
-            ));
-        }
-        // `base` is a strict lower bound: every eligible order must be above it.
-        if eligible.iter().all(|entity| entity.draw_order > base) {
-            return Ok(unchanged_outcome(
-                skipped,
-                "every eligible object is already in front of every other object",
+                "the selection holds no text, multileader or dimension",
             ));
         }
 
-        eligible.sort_by_key(|entity| (entity.draw_order, entity.id.0));
+        // Plan every scope before writing: an overflow in one scope refuses the
+        // whole run, so a partial reorder can never be published.
         let mut planned: Vec<(DbEntity, DbEntity)> = Vec::with_capacity(eligible.len());
-        for (index, before) in eligible.into_iter().enumerate() {
-            let target = base
-                .checked_add(i64::try_from(index).map_err(|_| order_exhausted())? + 1)
-                .ok_or_else(order_exhausted)?;
-            if before.draw_order == target {
+        let mut changed_scopes = 0usize;
+        let mut scope_spaces: Vec<SpaceId> = Vec::new();
+        for entity in &eligible {
+            if !scope_spaces.contains(&entity.space) {
+                scope_spaces.push(entity.space.clone());
+            }
+        }
+        for space in scope_spaces {
+            let base = base_by_scope
+                .iter()
+                .find(|(scope, _)| *scope == space)
+                .map(|(_, base)| *base)
+                .unwrap_or(0);
+            let mut scope_eligible: Vec<DbEntity> = eligible
+                .iter()
+                .filter(|entity| entity.space == space)
+                .cloned()
+                .collect();
+            scope_eligible.sort_by_key(|entity| (entity.draw_order, entity.id.0));
+            // Already above the scope's baseline: the exact orders are kept (the
+            // command never compacts a sequence that is already in front).
+            if scope_eligible.iter().all(|entity| entity.draw_order > base) {
                 continue;
             }
-            let mut after = before.clone();
-            after.draw_order = target;
-            planned.push((before, after));
+            let mut scope_planned = Vec::new();
+            for (index, before) in scope_eligible.into_iter().enumerate() {
+                let target = base
+                    .checked_add(i64::try_from(index).map_err(|_| order_exhausted())? + 1)
+                    .ok_or_else(order_exhausted)?;
+                if before.draw_order == target {
+                    continue;
+                }
+                let mut after = before.clone();
+                after.draw_order = target;
+                scope_planned.push((before, after));
+            }
+            if !scope_planned.is_empty() {
+                changed_scopes += 1;
+            }
+            planned.extend(scope_planned);
         }
         if planned.is_empty() {
             return Ok(unchanged_outcome(
                 skipped,
-                "every eligible object already has its target order",
+                "every eligible object is already in front of every other object of its scope",
             ));
         }
 
@@ -185,7 +219,8 @@ impl Application {
             code: "texttofront.applied".into(),
             message: format!(
                 "TEXTTOFRONT: moved {moved} text/leader/dimension object(s) above every \
-                 non-eligible model-space object"
+                 non-eligible object of their own scope in {changed_scopes} scope(s), in one \
+                 transaction (one undo step)"
             ),
         });
         Ok(CommandOutcome {
