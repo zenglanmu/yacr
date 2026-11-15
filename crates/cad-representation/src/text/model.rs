@@ -120,6 +120,45 @@ pub struct ParsedText {
     pub issues: Vec<TextFormatIssue>,
 }
 
+/// One character of the plain text an MTEXT value draws, with the byte range of
+/// the raw markup that produced it.
+///
+/// A formatting code that draws nothing (`\f`, `\H`, `{`, `}`, …) owns no entry.
+/// A code that *does* draw text (`\~`, `%%d`, `\U+XXXX`, `^I`, `\S`) owns one
+/// range shared by every character it produces, so those characters can only be
+/// edited as a unit. A paragraph break is projected as `'\n'` and owns the bytes
+/// of the code that broke the paragraph (`\P`, `\N`, `^J` or a literal newline).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProjectedChar {
+    /// The character the viewport draws at this position.
+    pub ch: char,
+    /// Byte offset into the raw string where the producing markup starts.
+    pub start: usize,
+    /// Byte offset into the raw string just past the producing markup.
+    pub end: usize,
+}
+
+/// The plain text an MTEXT value draws, character by character, with the raw
+/// markup byte range each character came from.
+///
+/// This is the search/replace view of the same tokenizer that
+/// [`parse_mtext`](crate::parse_mtext) uses for rendering: it exists so a caller
+/// can match against what the viewport shows (formatting codes contribute no
+/// characters) and still map a hit back to the markup it must edit. It never
+/// replaces a second MTEXT parser.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct MTextProjection {
+    /// Projected characters in reading order.
+    pub chars: Vec<ProjectedChar>,
+}
+
+impl MTextProjection {
+    /// The plain text, with `'\n'` for every paragraph break.
+    pub fn text(&self) -> String {
+        self.chars.iter().map(|projected| projected.ch).collect()
+    }
+}
+
 /// The result of shaping a text run, including the style overrides that shaped
 /// it and an honest report of anything approximated.
 #[derive(Debug, Clone)]

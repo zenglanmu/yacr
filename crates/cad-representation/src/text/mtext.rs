@@ -1,5 +1,8 @@
 use super::finalize::dedupe_issues;
-use super::model::{ParsedText, StackedFraction, TextColor, TextFormatIssue, TextLine, TextRun};
+use super::model::{
+    MTextProjection, ParsedText, ProjectedChar, StackedFraction, TextColor, TextFormatIssue,
+    TextLine, TextRun,
+};
 use super::text_issue;
 
 /// Spaces a tab expands to.
@@ -35,6 +38,20 @@ pub(super) fn skip_param_code(chars: &[char], start: usize) -> usize {
 /// recognised code with a bad value is consumed and reported.
 pub fn parse_mtext(raw: &str, base_height: f64) -> ParsedText {
     MTextParser::new(raw, base_height).run()
+}
+
+/// Project an MTEXT/TEXT control value onto the plain text it draws.
+///
+/// Runs the **same** tokenizer as [`parse_mtext`] — it is not a second parser —
+/// and records, for every drawn character, the raw markup byte range that
+/// produced it. Formatting codes therefore contribute no characters, `\P`/`\N`/
+/// `^J`/literal newlines contribute one `'\n'` each, and escapes (`\~`, `%%d`,
+/// `\U+XXXX`) contribute the character they decode to.
+///
+/// The result is for search/replace: it changes no rendering behaviour, and
+/// [`parse_mtext`] remains the only path that produces drawable geometry.
+pub fn mtext_projection(raw: &str) -> MTextProjection {
+    MTextParser::new(raw, 1.0).projection()
 }
 
 /// Active span style while parsing; `{`/`}` push and pop a clone of this.
@@ -74,6 +91,14 @@ impl ParseState {
 struct MTextParser {
     chars: Vec<char>,
     pos: usize,
+    /// Byte offset of every input character plus the input length, so a char
+    /// index can be reported as a byte range in the original string.
+    raw_offsets: Vec<usize>,
+    /// Char index where the token currently being parsed starts.
+    token_start: usize,
+    /// Whether the plain-text projection is being recorded (search/replace).
+    record: bool,
+    projected: Vec<ProjectedChar>,
     base_height: f64,
     stack: Vec<ParseState>,
     current: ParseState,
@@ -90,9 +115,15 @@ impl MTextParser {
         } else {
             1.0
         };
+        let mut raw_offsets: Vec<usize> = raw.char_indices().map(|(offset, _)| offset).collect();
+        raw_offsets.push(raw.len());
         MTextParser {
             chars: raw.chars().collect(),
             pos: 0,
+            raw_offsets,
+            token_start: 0,
+            record: false,
+            projected: Vec::new(),
             base_height: base,
             stack: Vec::new(),
             current: ParseState::new(),
@@ -111,6 +142,47 @@ impl MTextParser {
         }
     }
 
+    /// Parse for the plain-text projection instead of for rendering.
+    fn projection(mut self) -> MTextProjection {
+        self.record = true;
+        self.parse_all();
+        MTextProjection {
+            chars: self.projected,
+        }
+    }
+
+    /// The raw byte range of the token being parsed, clamped to the input.
+    fn token_span(&self) -> (usize, usize) {
+        let last = self.raw_offsets.len() - 1;
+        (
+            self.raw_offsets[self.token_start.min(last)],
+            self.raw_offsets[self.pos.min(last)],
+        )
+    }
+
+    /// Record one drawn character against the token being parsed.
+    fn record_char(&mut self, ch: char) {
+        if !self.record {
+            return;
+        }
+        let (start, end) = self.token_span();
+        self.projected.push(ProjectedChar { ch, start, end });
+    }
+
+    /// Draw one character.
+    fn emit(&mut self, ch: char) {
+        self.buf.push(ch);
+        self.record_char(ch);
+    }
+
+    /// Draw a literal string; every character shares the token's markup range.
+    fn emit_str(&mut self, text: &str) {
+        self.buf.push_str(text);
+        for ch in text.chars() {
+            self.record_char(ch);
+        }
+    }
+
     fn issue(&mut self, code: &'static str, message: impl Into<String>) {
         self.issues.push(TextFormatIssue::new(code, message));
     }
@@ -121,6 +193,7 @@ impl MTextParser {
 
     fn parse_all(&mut self) {
         while self.pos < self.chars.len() {
+            self.token_start = self.pos;
             let ch = self.chars[self.pos];
             match ch {
                 '\\' => {
@@ -146,12 +219,12 @@ impl MTextParser {
                 '^' => self.caret(),
                 c if (c as u32) < 0x20 => {
                     // Any other control character renders as a space.
-                    self.buf.push(' ');
                     self.pos += 1;
+                    self.emit(' ');
                 }
                 _ => {
-                    self.buf.push(ch);
                     self.pos += 1;
+                    self.emit(ch);
                 }
             }
         }
@@ -164,6 +237,9 @@ impl MTextParser {
 
     fn paragraph(&mut self) {
         self.flush_run();
+        // A paragraph break draws a line break; the projection keeps it as
+        // `'\n'` and attributes it to the code that produced it.
+        self.record_char('\n');
         self.lines.push(TextLine {
             runs: std::mem::take(&mut self.runs),
         });
@@ -231,19 +307,19 @@ impl MTextParser {
     fn parse_code(&mut self) {
         let next = self.pos + 1;
         if next >= self.chars.len() {
-            self.buf.push('\\');
             self.issue(text_issue::MALFORMED_CODE, "trailing '\\' with no code");
             self.pos += 1;
+            self.emit('\\');
             return;
         }
         let code = self.chars[next];
         self.pos = next + 1;
         match code {
-            '\\' => self.buf.push('\\'),
-            '{' => self.buf.push('{'),
-            '}' => self.buf.push('}'),
-            ';' => self.buf.push(';'),
-            '~' => self.buf.push('\u{00A0}'),
+            '\\' => self.emit('\\'),
+            '{' => self.emit('{'),
+            '}' => self.emit('}'),
+            ';' => self.emit(';'),
+            '~' => self.emit('\u{00A0}'),
             'P' => self.paragraph(),
             'p' => self.paragraph_code(),
             'N' => {
@@ -336,8 +412,8 @@ impl MTextParser {
             }
             'U' if self.peek() == Some('+') => self.unicode_escape(),
             _ => {
-                self.buf.push('\\');
-                self.buf.push(code);
+                self.emit('\\');
+                self.emit(code);
                 self.issue(
                     text_issue::UNKNOWN_CODE,
                     format!("unrecognised MTEXT code '\\{code}' rendered literally"),
@@ -375,32 +451,32 @@ impl MTextParser {
     fn special_char(&mut self) {
         let first = self.pos;
         if self.chars.get(first + 1) != Some(&'%') {
-            self.buf.push('%');
             self.pos = first + 1;
+            self.emit('%');
             return;
         }
         let code_index = first + 2;
         if self.chars.get(code_index) == Some(&'%') && self.chars.get(code_index + 1) == Some(&'%')
         {
-            self.buf.push('%');
             self.pos = code_index + 2;
+            self.emit('%');
             return;
         }
         if let Some(&code) = self.chars.get(code_index) {
             match code.to_ascii_lowercase() {
                 'd' => {
-                    self.buf.push('°');
                     self.pos = code_index + 1;
+                    self.emit('°');
                     return;
                 }
                 'p' => {
-                    self.buf.push('±');
                     self.pos = code_index + 1;
+                    self.emit('±');
                     return;
                 }
                 'c' => {
-                    self.buf.push('⌀');
                     self.pos = code_index + 1;
+                    self.emit('⌀');
                     return;
                 }
                 _ => {}
@@ -413,8 +489,8 @@ impl MTextParser {
                 let digits: String = self.chars[code_index..end].iter().collect();
                 if let Ok(value) = digits.parse::<u32>() {
                     if let Some(ch) = char::from_u32(value) {
-                        self.buf.push(ch);
                         self.pos = end;
+                        self.emit(ch);
                         return;
                     }
                 }
@@ -422,18 +498,18 @@ impl MTextParser {
         }
         // Unknown `%%x` — emit both percent signs literally and let the code
         // character fall through as normal text.
-        self.buf.push('%');
-        self.buf.push('%');
         self.pos = first + 2;
+        self.emit('%');
+        self.emit('%');
     }
 
     fn caret(&mut self) {
         match self.chars.get(self.pos + 1).copied() {
             Some('I') => {
-                for _ in 0..TAB_STEP {
-                    self.buf.push(' ');
-                }
                 self.pos += 2;
+                for _ in 0..TAB_STEP {
+                    self.emit(' ');
+                }
             }
             Some('J') => {
                 self.pos += 2;
@@ -441,8 +517,8 @@ impl MTextParser {
             }
             Some('M') => self.pos += 2,
             _ => {
-                self.buf.push('^');
                 self.pos += 1;
+                self.emit('^');
             }
         }
     }
@@ -456,7 +532,7 @@ impl MTextParser {
         }
         let hex: String = self.chars[start..self.pos].iter().collect();
         match u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32) {
-            Some(ch) => self.buf.push(ch),
+            Some(ch) => self.emit(ch),
             None => self.issue(
                 text_issue::MALFORMED_CODE,
                 format!("\\U+{hex} is not a valid code point"),
@@ -633,6 +709,12 @@ impl MTextParser {
     fn apply_fraction(&mut self, value: &str, terminated: bool) {
         match split_fraction(value) {
             Some((numerator, denominator, separator)) => {
+                // The built-in layout draws `num<sep>den` inline, so that is
+                // what the projection must contain; both of those characters
+                // and the ones between them map back to the whole `\S…;` code.
+                let recorded = self
+                    .record
+                    .then(|| format!("{numerator}{separator}{denominator}"));
                 let run = self.make_run(
                     String::new(),
                     Some(StackedFraction {
@@ -642,6 +724,11 @@ impl MTextParser {
                     }),
                 );
                 self.runs.push(run);
+                if let Some(text) = recorded {
+                    for ch in text.chars() {
+                        self.record_char(ch);
+                    }
+                }
                 self.issue(
                     text_issue::STACKED_FRACTION_FLAT,
                     "stacked fraction drawn inline as 'num<sep>den' (no bar/stacking)",
@@ -652,7 +739,7 @@ impl MTextParser {
                     text_issue::MALFORMED_CODE,
                     format!("\\S value '{value}' has no '/', '#' or '^' separator"),
                 );
-                self.buf.push_str(value);
+                self.emit_str(value);
             }
         }
         if !terminated {

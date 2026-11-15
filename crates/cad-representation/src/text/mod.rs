@@ -57,9 +57,10 @@ mod sanitize;
 pub use engine::FontEngine;
 pub use layout::LINE_SPACING;
 pub use model::{
-    ParsedText, ShapedText, StackedFraction, TextColor, TextFormatIssue, TextLine, TextRun,
+    MTextProjection, ParsedText, ProjectedChar, ShapedText, StackedFraction, TextColor,
+    TextFormatIssue, TextLine, TextRun,
 };
-pub use mtext::parse_mtext;
+pub use mtext::{mtext_projection, parse_mtext};
 pub use sanitize::sanitize_text;
 
 /// Stable, machine-readable codes for MTEXT parsing/layout [`TextFormatIssue`]s.
@@ -93,6 +94,8 @@ pub mod text_issue {
 
 #[cfg(test)]
 mod line_spacing_tests;
+#[cfg(test)]
+mod projection_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

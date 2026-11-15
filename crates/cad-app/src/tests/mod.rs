@@ -185,6 +185,7 @@ mod drawing_space;
 // The 2026-11-07 extras batch contract tests.
 mod extra_reports;
 mod extras;
+mod find_mtext;
 // Run-time lookup for the third-party SHX faces (never `include_bytes!`).
 mod font_fixture;
 // The 2026-11-09 Wave 2 extended-command contracts.

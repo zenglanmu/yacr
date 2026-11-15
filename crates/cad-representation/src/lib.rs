@@ -54,8 +54,9 @@ pub use plot_vector::{
     vector_diagnostic, VectorDocument, VectorPage, VectorPath, PAPER_BACKGROUND,
 };
 pub use text::{
-    parse_mtext, sanitize_text, text_issue, FontEngine, ParsedText, ShapedText, StackedFraction,
-    TextColor, TextFormatIssue, TextLine, TextRun,
+    mtext_projection, parse_mtext, sanitize_text, text_issue, FontEngine, MTextProjection,
+    ParsedText, ProjectedChar, ShapedText, StackedFraction, TextColor, TextFormatIssue, TextLine,
+    TextRun,
 };
 mod primitive;
 mod provider;
