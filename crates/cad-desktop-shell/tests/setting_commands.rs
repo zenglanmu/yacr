@@ -31,6 +31,7 @@ fn snapshot_with_snap_spacing(snap_spacing: f64) -> CadSettings {
         ortho_enabled: false,
         snap_spacing,
         left_drag_pans: false,
+        orbit_sensitivity_percent: 100.0,
         background_model: "#000000".to_string(),
         background_paper: "#ffffff".to_string(),
         crosshair_percent: 25,
@@ -155,6 +156,66 @@ fn an_unknown_key_is_still_an_unknown_key_for_a_fractional_number() {
         .expect_err("an unknown key is refused before the value shape");
     assert_eq!(error.as_str(), SETTINGS_UNKNOWN_KEY);
     assert!(queued_settings(&shared).is_empty());
+}
+
+#[test]
+fn a_fractional_orbit_sensitivity_is_admitted_and_mirrored() {
+    let shared = new_shared(LaunchOptions::default());
+    cad_set_setting_impl(&shared, "orbitSensitivityPercent", &json!(150.0))
+        .expect("150 is a legal orbit sensitivity");
+    assert_eq!(
+        queued_settings(&shared),
+        vec![(
+            CadSettingKey::OrbitSensitivityPercent,
+            CadSettingValue::Real(150.0)
+        )],
+        "the fractional percentage must cross the IPC as a real"
+    );
+
+    // An integer percentage is the same key in the integer shape.
+    let integer = new_shared(LaunchOptions::default());
+    cad_set_setting_impl(&integer, "orbitSensitivityPercent", &json!(100))
+        .expect("100 is a legal orbit sensitivity");
+    assert_eq!(
+        queued_settings(&integer),
+        vec![(
+            CadSettingKey::OrbitSensitivityPercent,
+            CadSettingValue::Number(100)
+        )]
+    );
+
+    // The range is the host table's: 24.9 and 200.1 are refused before the queue.
+    for out_of_range in [json!(24.9), json!(200.1), json!(0), json!(201)] {
+        let refused = new_shared(LaunchOptions::default());
+        let error = cad_set_setting_impl(&refused, "orbitSensitivityPercent", &out_of_range)
+            .expect_err("an out-of-range sensitivity is refused");
+        assert_eq!(
+            error.as_str(),
+            SETTINGS_INVALID_VALUE,
+            "orbitSensitivityPercent {out_of_range} must be refused"
+        );
+        assert!(
+            queued_settings(&refused).is_empty(),
+            "a refused request never reaches the queue"
+        );
+    }
+
+    // The owner tick mirrors the applied snapshot; the read must publish the
+    // number under the same camelCase leaf, never a string or a truncated int.
+    {
+        let mut state = lock(&shared);
+        let mut snapshot = snapshot_with_snap_spacing(10.0);
+        snapshot.orbit_sensitivity_percent = 150.0;
+        state.cad_settings = Some(snapshot);
+    }
+    let settings = cad_settings_impl(&shared).expect("the mirrored snapshot");
+    assert_eq!(settings.orbit_sensitivity_percent, 150.0);
+    let wire = serde_json::to_value(&settings).expect("settings serialize");
+    assert_eq!(
+        wire.get("orbitSensitivityPercent"),
+        Some(&json!(150.0)),
+        "cad_settings must publish the orbit sensitivity: {wire}"
+    );
 }
 
 #[test]

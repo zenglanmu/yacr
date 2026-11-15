@@ -10,7 +10,7 @@
 //!
 //! * glTF 2.0 is **metres, +Y up** (spec). `rvt` writes exactly that: its
 //!   element nodes are in feet, and one root node carries
-//!   `Z_UP_FEET_TO_Y_UP_METRES` (`rvt` `src/ifc/gltf.rs:242`), a `0.3048`
+//!   `Z_UP_FEET_TO_Y_UP_METRES` (`rvt` `src/ifc/gltf.rs:286`), a `0.3048`
 //!   scale with a `(x, y, z) -> (x, z, -y)` axis swap. World transforms are
 //!   therefore applied first, then the glTF frame is mapped back to the CAD
 //!   convention `(x, y, z) -> (x, -z, y)`, so stored coordinates are **metres,
@@ -26,10 +26,10 @@
 //! **Materials are colours only.** `rvt` emits one `glTF` material per Revit
 //! category, per layer colour (RE-53) and per element whose type draws in one
 //! material (RE-82), each carrying a linear `pbrMetallicRoughness.
-//! baseColorFactor` (`rvt` `src/ifc/gltf.rs:324-400`, `:477`). The factor is
+//! baseColorFactor` (`rvt` `src/ifc/gltf.rs:352-396`, `:616-646`). The factor is
 //! converted back to the sRGB bytes `cad_db::EntityColor::Explicit` stores
 //! (the exact inverse of `rvt`'s own `colour_material` linearisation, `rvt`
-//! `src/ifc/gltf.rs:665`), and its alpha becomes
+//! `src/ifc/gltf.rs:828`), and its alpha becomes
 //! `cad_db::EntityTransparency::Explicit` (opacity: `1.0` opaque). `rvt` emits
 //! **no textures at all** — no `images`/`textures`/`samplers`, no `TEXCOORD_0`
 //! — and `cad_domain::Mesh` has no UV channel, so texture loss is a property of
@@ -254,7 +254,7 @@ fn visit_node(
         // material is used only when all of them agree on it. Differing
         // materials keep the layer colour and are counted (`conflicting`):
         // silently applying one primitive's colour to the others would invent
-        // a colour for geometry the source did not give it. `rvt` 0.22.0 emits
+        // a colour for geometry the source did not give it. `rvt` 0.24.0 emits
         // exactly one primitive per mesh, so this only fires on foreign input.
         let mut agreed: Option<PrimitiveMaterial> = None;
         let mut conflict = false;
@@ -533,7 +533,7 @@ pub(crate) fn validate_factor(
 ///
 /// This is the IEC 61966-2-1 transfer function, i.e. the exact inverse of the
 /// linearisation `rvt` applies to its own sRGB materials (`rvt`
-/// `src/ifc/gltf.rs:665-675`), not a `powf(1.0 / 2.2)` shortcut: linear below
+/// `src/ifc/gltf.rs:828-836`), not a `powf(1.0 / 2.2)` shortcut: linear below
 /// `0.0031308`, `1.055 * c^(1/2.4) - 0.055` above it. Rounded to nearest and
 /// clamped to `0..=255` (callers reject out-of-range factors first; the clamp
 /// is defence in depth).

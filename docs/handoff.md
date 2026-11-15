@@ -12,25 +12,75 @@
 > **不在这里重复**：平台验收状态与证据边界以 `AGENTS.md` 平台表和 `docs/compatibility.md` 为准；
 > 架构不变量见 `docs/architecture.md`、`docs/core-invariants.md`。
 
-## 当前状态（截至 2026-11-14）
+## 当前状态（截至 2026-11-15）
 
 **版本与产物**：工作区 `0.1.13`，tag `v0.1.13` → `7600b316`，Release 与落地页 `v0.1.13` 已发布
-（11/11 job 绿）。tag 树里 `rvt` 仍是 0.17.0，而 `main` 已把补丁 rebase 到 **0.22.0**
-（`ed14d147`）——**tag 产物与 main 源码不完全同源**。
+（11/11 job 绿）。tag 树里 `rvt` 仍是 0.17.0，`main` 已把补丁依次 rebase 到 **0.22.0**
+（`ed14d147`）再到 **0.24.0**（本轮）——**tag 产物与 main 源码不完全同源**。
 
 **载体**：一棵 React 树 + 多种载体（`apps/desktop-ui` 是唯一 React UI 包）；`native-below`
 （Linux 原生 Wayland、Windows、macOS、Android）由 native 会话持有 `cad-db`，`dom-canvas`
 （X11/XWayland、Web）由 wasm 会话持有。细节与逐平台证据边界见 `AGENTS.md` 平台表。
 
-**最近完成（2026-11-13 → 2026-11-14）**
+**最近完成（2026-11-13 → 2026-11-15）**
 
+- 3D orbit 灵敏度基础值 0.008 → **0.0035 rad/逻辑像素**，并新增设置
+  `interaction.orbitSensitivityPercent`（25–200，默认 100，Options → Drafting「三维旋转灵敏度」，
+  鼠标与触控共用同一倍率；ViewCube 经 `cad_status.navigation` 取同一值）。真实手感 **NOT VERIFIED**。
+- `vendor/rvt` 透明度补丁由 0.22.0 重挂到 **0.24.0**（本轮）：上游 `src/ifc/gltf.rs` 只多了
+  material 索引越界过滤，已合并进我们的选择链；`SHA256SUMS` 209 个文件重生成；
+  台账 `docs/rvt-patches.md` / ADR-0035 / `THIRD_PARTY_NOTICES.md` / `AGENTS.md` 同步。
+  证据：`scripts/test-rvt-patch.sh` **7 passed**、`cargo test -p cad-import-rvt --locked`
+  **33 passed**、本地 `rmeadvancedsampleproject.rvt` 导入 `explicit_opacity = 746`
+  （与 0.22.0 补丁同值），逐像素/GPU 与 Windows/macOS/Android/Web 运行时本轮 **NOT RUN**。
+- 第三方依赖补丁级升级（本轮，2026-11-15，与上面的 `vendor/rvt` 0.24.0 同一轮）：
+  - STEP 解析器 `cadmpeg-codec-step`/`cadmpeg-ir`/`cadmpeg-tessellate` **0.6.11 → 0.6.12**
+    （workspace 直接依赖，三处版本串 + 注释同步）。0.6.12 在 IR 里新增 feature-tree operation
+    `insert_components`/`component_transfer`（`IR_VERSION` 不变）：本仓库**不消费**
+    `cadmpeg_ir::features`（`cadmpeg-codec-step` 0.6.12 也不解码 AP242 feature tree），所以新变体
+    到不了 `cad-import-step`；本 crate 唯一的穷尽 IR `match`（`placement.rs` 的 `OccurrenceParent`）
+    没有 `_` 兜底，新增变体会是**编译错误**而不是静默丢弃（已写进 crate 模块文档）。0.6.12 的三条
+    STEP 侧改动（pole-bounded spindle torus 导出、保留整块闭合曲面、在表示不确定度内保留开放边）
+    在现有夹具上**不改变**结果：`cargo test -p cad-import-step --locked` **13 passed**，断言未放宽。
+  - 精确钉住：`wgpu` 30.0.1 → **30.0.2**（`naga` 30.0.1 → **30.0.2**，必须成对；同一补丁轨的
+    `wgpu-core`/`wgpu-hal`/`wgpu-types`/`naga-types` 也一并 30.0.1 → **30.0.2**——`wgpu` 30.0.2 对它们
+    只要求 caret `30.0.0`，但 30.0.2 的修复实际落在这些子 crate 里，半升会留下 30.0.1 的运行时；
+    升后 `cargo check --workspace --all-targets` 与 `wgsl_validation` 12 passed 复跑通过）、`tauri`
+    2.12.3 → **2.12.5**、`tauri-build` 2.7.2 → **2.7.4**（runtime 家族解析值不变：tauri-runtime
+    2.12.2、tauri-runtime-wry 2.12.3、tauri-macros/codegen 2.7.4、tauri-utils 2.10.2、tao 0.37.1、
+    wry 0.57.0、webview2-com 0.39.1）、`objc2` 0.6.4 → **0.6.5**、`wasm-bindgen` 0.2.129 →
+    **0.2.130**（连带 `wasm-bindgen-futures` 0.4.79 → **0.4.80**、`js-sys`/`web-sys` 0.3.106 →
+    **0.3.107**）。
+  - caret 内只动 lock：`rstar` 0.13.0 → **0.13.1**、`glam` 0.33.11 → **0.34.3**（manifest `"0.33"`
+    → `"0.34"`；只被 `cad-proxy`/`cad-render-wgpu` 声明，源码零改动。lock 里仍留着 `glam 0.33.11`
+    这一条，它是 `nalgebra` 的可选 feature 边，与同条目里的 0.30/0.31/0.32 同性质，`cargo tree -i`
+    已解析不到）、`encoding_rs` 0.8.42 → 0.8.44、`cc` 1.5.1 → 1.11.2（连带 `find-msvc-tools`
+    0.1.14 → 0.1.15）、`log` 0.4.34 → 0.4.35、`flate2` 1.1.10 → 1.1.11、`serde_json` 1.0.151 →
+    1.0.154。
+  - 机械升级：`sha2` 0.10.9 → **0.11.1**（`Digest`/`Sha256::new/update/finalize` 用法不变；
+    `tauri-codegen` 仍依赖 0.10.9，锁里因此有两个 `sha2`）、`pollster` 0.4.0 → **1.0.1**
+    （`block_on` 不变）。
+  - wasm 工具链同步：`scripts/lib/wasm-toolchain.sh` 的 pin、`build.yml`（2 处）与 `core.yml`
+    （1 处）的 SHA-256 分支改为 0.2.130；sha256 =
+    `9687f3bb551b9f66f37ed32a40d7913a00f7962db653054e56857bc306c3227f`，**本轮从官方 release 资产实测**
+    （`curl -fsSL .../wasm-bindgen-0.2.130-x86_64-unknown-linux-musl.tar.gz | sha256sum`，11,860,397 B），
+    不是沿用旧值或编造。`docs/ci.md`、`docs/build.md`、`README.md`、`README.zh-CN.md` 的 0.2.129 说法同步。
+  - **明确不升**：`uuid` 1.29.2（MSRV 1.89）、`rstar` 0.14.0（MSRV 1.90）、`ashpd` 0.14.0
+    （MSRV 1.89 + 0.12→0.14 portal API 破坏性）、`gtk`/`gdk`/`gdkx11`/`gdkwayland-sys` 0.19
+    （MSRV 1.92，且必须与 tauri 解析到的 0.18 家族一致）、`jni` 0.22.4 / `android_logger` 0.15.1
+    （Android-only，本机无法编译验证；jni 0.22 是破坏性重写）、`getrandom`（`cad-import-acadrust`
+    精确钉 `=0.3.4`，受 acadrust 约束）。workspace 的 `rust-version = "1.88"` 未变：`tauri` 2.12.5
+    与 2.12.3 一样声明 1.90，不是本轮引入的偏差。
+  - **NOT RUN**：整仓 `cargo test --workspace`；Android（`aarch64-linux-android`）/Windows/macOS
+    目标只到 `--workspace --all-targets` 的 cfg 层面（未交叉编译）；wasm-bindgen CLI 0.2.130
+    **本机未安装**，因此没有跑 bindgen 后处理、`wasm-opt` 与 bundle 构建/冒烟；真实 GPU/像素/性能
+    证据未重跑（`wgsl_validation` 是离线 WGSL/naga 校验，不是渲染证据）。
 - DGN V7/V8 矢量导入 lane（`cad-import-dgn`，`cadkit-dgn =0.5.2`，合并提交 `7e9ff9f4`）。
 - 插件 API 可用：写通道 + 实体读 + 装载/命令派发 + 异步提示通道 + `documentManager`/`revision`
   （`ts-api` 工作树合并；ADR 0034）。
 - 多格式导入接入 `.skp` 预览 lane；OS 文件关联注册完整 importer 集（单源 `formats.json`）。
 - canvas ViewCube + `cad_orbit` + 跨载体 pinch；右侧导航坞改为浮动覆盖。
-- `vendor/rvt` 透明度补丁 rebase 到 0.22.0；`[probe] status` 1 Hz 证据行改为默认关闭
-  （`YACR_PROBE_CAD_LOG` 存在性门禁）。
+- `[probe] status` 1 Hz 证据行改为默认关闭（`YACR_PROBE_CAD_LOG` 存在性门禁）。
 
 **未闭环 / 下一轮候选**（都能在下面条目里找到出处）
 
@@ -65,6 +115,40 @@
 
 > 新 → 旧。标题带日期与主题；每条末尾写证据边界（实跑 / NOT RUN / NOT VERIFIED）。
 > 再往前（`2026-11-12` 及更早）的条目见 `docs/handoff-archive/`。
+
+## 2026-11-15 3D orbit 灵敏度降到 0.0035 rad/px + `orbitSensitivityPercent` 设置
+
+- **问题**：3D 下鼠标拖拽与 Android 单指触控调整视角都过灵敏。原速率是宿主
+  `ORBIT_RADIANS_PER_PIXEL = 0.008`（≈0.46°/逻辑像素）：桌面 1200px 全宽拖拽 ≈550°（1.5 圈），
+  手机 380px 划一下 ≈183°——两处抱怨都能由这个数字解释。触控更糟是因为同一个"每逻辑像素"的速率
+  在只有 380 个逻辑像素宽的屏上，每厘米划动转过的角度是桌面的数倍；Android 触控与鼠标走同一条
+  `cad-host` 指针路径（3D + Primary），没有第二套原生手势。
+- **默认值**：`0.0035 rad/逻辑像素`（≈0.20°/px）→ 桌面 1200px ≈241°、手机 380px ≈76°，
+  150–250px 的拇指划动是 30–50°。`orbit_delta` 仍保持 `yaw = -dx·K`、`pitch = +dy·K`。
+- **设置项**：新 `interaction.orbitSensitivityPercent`（f64 闭区间 **25.0..=200.0**，默认 **100.0**，
+  越界/非有限**拒绝**而不是 clamp）→ `CadSettingKey::OrbitSensitivityPercent`（`ALL` 23→**24**）→
+  `cad_settings.orbitSensitivityPercent`；有效速率 `0.0035 × percent/100`，倍率再防御性 clamp 到
+  `[0.25, 2.0]`，NaN/∞/非正回落 100%。写盘失败回滚，**实时生效**，无需重开文档。
+  Options → Drafting 在「左键拖动平移」之后新增「三维旋转灵敏度」（`kind:'real'` 而不是 `number`：
+  宿主接受 f64，整数控件会把手工写进 `config.json` 的 `60.5` seed 成"未报告"且无法覆盖）。
+- **ViewCube**：`cad_status.navigation.orbitSensitivityPercent`（`CadNavigation`，缺省 100.0）是前端唯一
+  来源，`cad/orbit.ts` 增 `orbitRadiansPerPixel()`，`orbitDelta(from,to,rate)` 接速率参数；旧宿主缺该字段
+  按 100 回落（不整条 `CAD_STATUS_INVALID`）。`CadNavigationSettings`/`parseCadNavigation` 抽到新的
+  `cad/navigation.ts`（`cad-status.ts` 曾因改动涨到 1050 行，拆分后 982，过 1000 行门禁）。
+- **结构**：新增 `crates/cad-host/src/orbit_sensitivity.rs`（读取器 + 写入/回滚）；
+  `HOST_ALLOWED_PATHS_JSON` 迁到 `settings_root.rs`（crate 根仍 `pub use`，调用点不变）——
+  `settings.rs` 978 行、`lib.rs` 971 行。
+- **证据（实跑）**：`cargo test -p cad-host` **330 passed**（含 `settings_orbit` 8 项与
+  `orbit_rate_tests` 5 项）、`cad-ui-core` **678**、`cad-app` **2642**、`cad-desktop-shell` **49**；
+  速率实测 dx=100px 时 100%→yaw **-0.35 rad**、50%→**-0.175**、200%→**-0.700**，竖直 100px 的
+  pitch **+0.35**；边界 25/200 接受、24.9/200.1/NaN/∞ 拒绝，持久化 `900` 在启动时被拒并回落 100%；
+  前端 `npm test` **1755 passed**、`tsc --noEmit` 通过（新增 `options-orbit-sensitivity.test.ts` 覆盖
+  `60.5` 的 seed/写入）；`check-file-size` / `check-i18n` / `check-architecture` /
+  `check-fixture-manifest` 通过；`cargo check --workspace --all-targets`、`--lib --target
+  wasm32-unknown-unknown`、`clippy -D warnings`、`cargo fmt --all -- --check` 通过。
+- **NOT RUN / 边界**：真实鼠标与触控手感 **NOT VERIFIED**（无设备手势采样、无 Android 设备运行）；
+  `0.0035` 来自几何推算（全宽 ≈240°、半屏 ≈120°），不是用户测试结论；若真机仍觉偏快，下一轮动基础值
+  （0.0030–0.0032）而不是动区间；全量 `cargo test --workspace` 与 GPU/像素证据未跑。
 
 ## 2026-11-14 Bentley DGN V7/V8 矢量文档导入（`cadkit-dgn`）
 

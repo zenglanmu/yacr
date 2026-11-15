@@ -49,9 +49,10 @@ pub enum IfcEntity {
         #[serde(default)]
         predefined_type: Option<String>,
         /// Index into `IfcModel.building_storeys` — which storey
-        /// contains this element. `None` means the writer should
-        /// default it to the first storey (common when the element's
-        /// `level_id` wasn't resolved yet).
+        /// contains this element. `None`, or an index past the storeys,
+        /// leaves it in no storey: the writer places it and contains it in
+        /// the building (RE-27, #267), rather than in a storey it was never
+        /// bound to.
         #[serde(default)]
         storey_index: Option<usize>,
         /// Index into `IfcModel.materials` — which material this
@@ -314,8 +315,8 @@ pub enum IfcEntity {
     },
     /// A pocket of the edited elevation profile of the wall at `host` against
     /// the profile's convex hull: the opening Revit's export writes for it
-    /// (#1607, RE-380), tagged with the highest ElementId of the profile's
-    /// lines it follows. Placed as a [`IfcEntity::WallProfileOpening`] is. It
+    /// (#1607, RE-380), tagged with the ElementId of the first of the
+    /// profile's lines it follows, walking the outline counter-clockwise. Placed as a [`IfcEntity::WallProfileOpening`] is. It
     /// is not written as it stands: the pass that makes the profile's cut in the
     /// wall's body turns it into a [`IfcEntity::WallProfileOpening`] once it
     /// has, so that the openings a wall carries are Revit's.

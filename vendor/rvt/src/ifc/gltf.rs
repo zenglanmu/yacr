@@ -718,25 +718,30 @@ pub fn build_gltf(model: &IfcModel) -> (GltfDocument, Vec<u8>) {
         let drawn = drawn.filter(|(_, matrix)| matrix.iter().all(|v| v.is_finite()));
         let (mesh, matrix) = match drawn {
             Some(((position, indices), matrix)) => {
-                let material =
-                    match material_index.or_else(|| single_material.get(&entity_index).copied()) {
-                        Some(material) => Some(material),
-                        None => {
-                            let alpha = element_alpha.get(&entity_index).copied();
-                            let key = (ifc_type.clone(), alpha.map_or(u32::MAX, f32::to_bits));
-                            let index = *category_alpha_materials.entry(key).or_insert_with(|| {
-                                let mut material = category_material(ifc_type);
-                                if let Some(alpha) = alpha {
-                                    material.pbr_metallic_roughness.base_color_factor[3] = alpha;
-                                    material.alpha_mode = Some("BLEND".into());
-                                    material.double_sided = true;
-                                }
-                                doc.materials.push(material);
-                                doc.materials.len() - 1
-                            });
-                            Some(index)
-                        }
-                    };
+                // An index past the model's materials names none, as the STEP
+                // writer drops it: in glTF it would point past `materials[]`
+                // and make the whole file invalid.
+                let material = match material_index
+                    .filter(|&index| index < model.materials.len())
+                    .or_else(|| single_material.get(&entity_index).copied())
+                {
+                    Some(material) => Some(material),
+                    None => {
+                        let alpha = element_alpha.get(&entity_index).copied();
+                        let key = (ifc_type.clone(), alpha.map_or(u32::MAX, f32::to_bits));
+                        let index = *category_alpha_materials.entry(key).or_insert_with(|| {
+                            let mut material = category_material(ifc_type);
+                            if let Some(alpha) = alpha {
+                                material.pbr_metallic_roughness.base_color_factor[3] = alpha;
+                                material.alpha_mode = Some("BLEND".into());
+                                material.double_sided = true;
+                            }
+                            doc.materials.push(material);
+                            doc.materials.len() - 1
+                        });
+                        Some(index)
+                    }
+                };
                 let mut attributes = std::collections::BTreeMap::new();
                 attributes.insert("POSITION".into(), position);
                 let mesh_idx = doc.meshes.len();

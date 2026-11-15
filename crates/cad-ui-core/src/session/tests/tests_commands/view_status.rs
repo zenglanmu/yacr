@@ -109,6 +109,23 @@ fn the_theme_and_navigation_switches_are_host_truth() {
             view_cube_display: 2,
             view_cube_in_2d: true,
             view_cube_in_3d: true,
+            orbit_sensitivity_percent: 100.0,
         }
+    );
+    // The orbit sensitivity is part of the navigation block: a write is reported
+    // verbatim (the same percentage `cad_settings` publishes).
+    session
+        .apply_setting(
+            CadSettingKey::OrbitSensitivityPercent,
+            CadSettingValue::Real(150.0),
+        )
+        .expect("an in-range sensitivity write is accepted");
+    let status = session.snapshot(None, None, 0);
+    assert_eq!(status.navigation.orbit_sensitivity_percent, 150.0);
+    let wire = serde_json::to_value(status.navigation).expect("navigation serializes");
+    assert_eq!(
+        wire["orbitSensitivityPercent"],
+        serde_json::json!(150.0),
+        "the navigation block must publish the camelCase percentage: {wire}"
     );
 }

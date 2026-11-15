@@ -22,7 +22,7 @@
 //! * A file whose every face is refused is a [`CadError::Unsupported`], never an
 //!   empty success.
 //!
-//! Two facts come from the verified `cadmpeg-ir` 0.6.11 source, not from
+//! Two facts come from the verified `cadmpeg-ir` 0.6.12 source, not from
 //! guesses:
 //!
 //! * **Units.** The IR stores every length in **millimetres** and its canonical
@@ -41,6 +41,15 @@
 //!   report, a multi-body file is refused with
 //!   [`ASSEMBLY_PLACEMENT_UNSUPPORTED`] rather than stacking every body at the
 //!   origin.
+//!
+//! `cadmpeg-ir` 0.6.12 added two feature-tree operations
+//! (`FeatureOperation::InsertComponents` / `ComponentTransfer`) without changing
+//! `IR_VERSION`. This adapter reads geometry, topology, products and the decode
+//! report only — never `Model::features` — and `cadmpeg-codec-step` 0.6.12 does
+//! not decode AP242 feature trees, so neither operation can reach this crate and
+//! nothing is dropped silently here. The one exhaustive IR match in this crate
+//! (`OccurrenceParent`, `placement.rs`) has no `_` arm, so a new variant there is
+//! a compile error rather than a silent fallback.
 //!
 //! IFC files also start with `ISO-10303-21;`. `detect_format` separates them
 //! into `DrawingFormat::Ifc`, and the dispatcher routes them to

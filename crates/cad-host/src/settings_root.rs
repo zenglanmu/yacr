@@ -27,6 +27,39 @@ pub const THEME_DARK_BACKGROUND: &str = "#000000";
 /// The model/paper canvas background the `light` theme applies.
 pub const THEME_LIGHT_BACKGROUND: &str = "#ffffff";
 
+/// Host policy mirroring the web host: users may persist the two dock panels'
+/// initial-open flags and the Options-dialog settings that have real behavioural
+/// backing (overlay visibility, the plot default, the five persisted interaction
+/// values — object snap, hover preview, `SNAP` grid snap, `ORTHO` and the
+/// `SNAPUNIT` spacing —, the 2D left-drag input scheme, the 3D orbit
+/// sensitivity, the model/paper backgrounds, the crosshair size and the
+/// pickbox/aperture sizes). A host `config.json` replaces this policy wholesale.
+///
+/// The settings leaves are listed individually (never a `view.overlays` prefix)
+/// so no other configuration field becomes user-writable by inheritance.
+pub const HOST_ALLOWED_PATHS_JSON: &str = r#"{"ui":{"userCustomization":{"allowedPaths":[
+    "ui.components.layerPanel.initiallyOpen",
+    "ui.components.propertiesPanel.initiallyOpen",
+    "view.overlays.grid",
+    "view.overlays.axes",
+    "view.overlays.selectionHighlight",
+    "view.overlays.snapHints",
+    "view.background.model",
+    "view.background.paper",
+    "view.crosshair.sizePercent",
+    "view.pickbox.sizePixels",
+    "view.aperture.sizePixels",
+    "view.gpuBudget.percent",
+    "ui.export.plotFormat",
+    "interaction.snapEnabled",
+    "interaction.hoverPreview",
+    "interaction.gridSnapEnabled",
+    "interaction.orthoEnabled",
+    "interaction.snapSpacing",
+    "interaction.leftDragPans",
+    "interaction.orbitSensitivityPercent"
+]}}}"#;
+
 /// The five host-owned appearance/navigation preference keys.
 ///
 /// They are **root-level** leaves of `preference.json`, exactly like

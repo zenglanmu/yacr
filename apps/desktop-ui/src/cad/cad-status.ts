@@ -11,6 +11,8 @@
 
 import { parseSelection } from './selection-wire.ts';
 import { parseOrbitCapability } from './host-profile.ts';
+import { parseCadNavigation } from './navigation.ts';
+import type { CadNavigationSettings } from './navigation.ts';
 import type { Translator } from '../i18n.ts';
 
 /** The `invoke` callable the shell threads in (Tauri IPC, or a test double). */
@@ -44,20 +46,6 @@ export interface CadViewOrientation {
   readonly eye: WorldPoint;
   readonly target: WorldPoint;
   readonly up: WorldPoint;
-}
-
-/**
- * The host's navigation-chrome switches (`cad_status.navigation`): AutoCAD's
- * `NAVVCUBEDISPLAY` bit code plus the two `DISPLAYVIEWCUBEIN2D/3D` registry
- * gates and the navbar visibility. Always host truth — the chrome only hides
- * or shows from these values.
- */
-export interface CadNavigationSettings {
-  readonly navbarVisible: boolean;
-  /** `0..=3`: 1 = 3D styles, 2 = 2D styles, 3 = both (AutoCAD bit code). */
-  readonly viewCubeDisplay: number;
-  readonly viewCubeIn2d: boolean;
-  readonly viewCubeIn3d: boolean;
 }
 
 /** Live import progress; present only while an import is genuinely running. */
@@ -397,7 +385,7 @@ export interface CadStatus {
   /**
    * The host's navigation-chrome switches, or absent on an older host (the
    * readers then apply the AutoCAD defaults: navbar on, ViewCube display 3,
-   * 2D gate off, 3D gate on).
+   * 2D gate off, 3D gate on, orbit sensitivity 100 %).
    */
   readonly navigation?: CadNavigationSettings;
   readonly selection: CadSelection;
@@ -603,23 +591,6 @@ export function parseCadPendingPrompt(value: unknown): CadPendingPrompt {
   return value as CadPendingPrompt;
 }
 
-/** Parse the navigation switches: both real booleans and a 0..3 bit code. */
-export function parseCadNavigation(value: unknown): CadNavigationSettings {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw Error('CAD_STATUS_INVALID');
-  }
-  const navigation = value as Record<string, unknown>;
-  const display = navigation.viewCubeDisplay;
-  if (typeof navigation.navbarVisible !== 'boolean'
-    || typeof navigation.viewCubeIn2d !== 'boolean'
-    || typeof navigation.viewCubeIn3d !== 'boolean'
-    || typeof display !== 'number' || !Number.isInteger(display)
-    || display < 0 || display > 3) {
-    throw Error('CAD_STATUS_INVALID');
-  }
-  return value as CadNavigationSettings;
-}
-
 /** Whether `value` is one well-formed `layouts[]` row. */
 function isLayoutTab(value: unknown): boolean {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -753,6 +724,10 @@ export function parseCadStatus(value: unknown): CadStatus {
     || !(camera === null || isCamera(camera))) {
     throw Error('CAD_STATUS_INVALID');
   }
+  // The payload as the chrome reads it. Only one block can need normalising
+  // (the orbit sensitivity, see below), so a valid payload is returned as the
+  // very object it came in as.
+  let normalized: unknown = value;
   // The grid-snap spacing is required and must be a real, usable spacing: a
   // finite number strictly greater than zero. The host never sends 0/NaN (the
   // session setter refuses those), so a malformed value is a contract violation
@@ -887,8 +862,16 @@ export function parseCadStatus(value: unknown): CadStatus {
     parseCadPendingPrompt(status.pendingPrompt);
   }
   // The navigation switches are optional for an older host, but a present block
-  // must be complete: a partial block would hide a real host state.
-  if (status.navigation !== undefined) parseCadNavigation(status.navigation);
+  // must be complete: a partial block would hide a real host state. The one
+  // normalising field is the orbit sensitivity, read as 100 when malformed; the
+  // status is then a copy of the payload with that block replaced, so readers see
+  // the value the chrome acts on.
+  if (status.navigation !== undefined) {
+    const navigation = parseCadNavigation(status.navigation);
+    if (navigation !== status.navigation) {
+      normalized = { ...(value as Record<string, unknown>), navigation };
+    }
+  }
   // The cursor's world coordinate is required: `null` (no reliable 2D cursor) or
   // exactly three finite numbers. Anything else is rejected outright — a
   // malformed point (a string, a 2-element array, a NaN) is never rendered as a
@@ -911,7 +894,7 @@ export function parseCadStatus(value: unknown): CadStatus {
       throw Error('CAD_STATUS_INVALID');
     }
   }
-  return value as CadStatus;
+  return normalized as CadStatus;
 }
 
 /** The catalog label for a locale-independent import phase key. */

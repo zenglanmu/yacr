@@ -65,6 +65,17 @@ impl ViewerConfig {
                 ));
             }
         }
+        // The 3D orbit sensitivity is a percentage of the base rate: a
+        // non-finite or out-of-`25..=200` value is refused by name, never
+        // clamped — a configuration that asks for a rate the host does not
+        // support must be visible, not silently rewritten.
+        let orbit_percent = self.interaction.orbit_sensitivity_percent;
+        if !orbit_percent.is_finite() || !(25.0..=200.0).contains(&orbit_percent) {
+            return Err(ConfigError::new(
+                "interaction.orbitSensitivityPercent",
+                "orbit sensitivity must be a finite percentage from 25 to 200",
+            ));
+        }
         for key in self.ui.command_overrides.keys() {
             if !is_known_command(key) {
                 return Err(ConfigError::new(

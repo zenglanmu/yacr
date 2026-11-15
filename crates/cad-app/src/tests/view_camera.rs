@@ -576,7 +576,7 @@ fn orbit_from_plan_tilts_the_eye_by_the_pitch_angle() {
 /// gesture ended a few milliradians off top-down - the cube's `+Z` face rendered
 /// as a rotated square with no internal edges. 36 increments of the measured
 /// drag (`dx = +90, dy = +51` in the probe) must therefore land on the same
-/// 0.41 rad polar angle a single combined orbit produces.
+/// 0.18 rad polar angle a single combined orbit produces.
 #[test]
 fn incremental_orbit_accumulates_the_pitch() {
     let (mut app, mut session) = application_with_document();
@@ -598,13 +598,15 @@ fn incremental_orbit_accumulates_the_pitch() {
         command(CommandId::Switch2d3d, CommandPayload::None),
     )
     .unwrap();
-    let distance = app.workspace.viewports[&ViewportId(1)].camera.distance();
+    let camera_before = app.workspace.viewports[&ViewportId(1)].camera;
+    let distance = camera_before.distance();
 
-    // 90 px right / 51 px down at 0.008 rad/px over 36 moves: exactly what the
-    // live primary drag produced.
+    // 90 px right / 51 px down at the host's 100 % rate (0.0035 rad/px) over 36
+    // moves: the same drag the live primary gesture produces at the default
+    // sensitivity (`interaction.orbitSensitivityPercent = 100`).
     const MOVES: usize = 36;
-    let total_yaw = -90.0 * 0.008;
-    let total_pitch = 51.0 * 0.008;
+    let total_yaw = -90.0 * 0.0035;
+    let total_pitch = 51.0 * 0.0035;
     for _ in 0..MOVES {
         app.execute(
             &mut session,
@@ -632,8 +634,13 @@ fn incremental_orbit_accumulates_the_pitch() {
         "the increments must preserve the eye-target distance"
     );
 
-    // The tilted camera's own projection of the cube is a hexagon, so the frame
-    // can no longer be a square face.
+    // The tilted camera's own projection of the cube no longer matches the
+    // top-down square face the cancelled pitch used to leave behind: the top face
+    // is foreshortened and a side face shows, so the outline moves by whole
+    // pixels. (The old six-vertex hexagon expectation belonged to the 0.008 rad/px
+    // rate's ~0.41 rad tilt; at the current 0.0035 rad/px base rate the same
+    // measured drag tilts by ~0.18 rad, which exposes one side face — a
+    // quadrilateral outline — not two.)
     let size = [926.0, 341.0];
     let corners = [
         [-1.0, -1.0, -1.0],
@@ -645,25 +652,38 @@ fn incremental_orbit_accumulates_the_pitch() {
         [1.0, 1.0, 1.0],
         [-1.0, 1.0, 1.0],
     ];
-    let projected: Vec<[f64; 2]> = corners
-        .iter()
-        .map(|c| {
-            camera
-                .world_to_screen(
-                    Point3 {
-                        x: c[0],
-                        y: c[1],
-                        z: c[2],
-                    },
-                    size,
-                )
-                .expect("every cube corner is in front of the camera")
-        })
-        .collect();
+    let project = |camera: &crate::Camera| -> Vec<[f64; 2]> {
+        corners
+            .iter()
+            .map(|c| {
+                camera
+                    .world_to_screen(
+                        Point3 {
+                            x: c[0],
+                            y: c[1],
+                            z: c[2],
+                        },
+                        size,
+                    )
+                    .expect("every cube corner is in front of the camera")
+            })
+            .collect()
+    };
+    let projected = project(&camera);
+    let top_down = project(&camera_before);
     assert_eq!(
         hull_len(&projected),
-        6,
-        "an obliquely orbited cube must project to a hexagon, projected {projected:?}"
+        4,
+        "the foreshortened frame projects to a quadrilateral outline, projected {projected:?}"
+    );
+    assert!(
+        projected
+            .iter()
+            .zip(top_down.iter())
+            .any(|(tilted, square)| (tilted[0] - square[0]).abs() > 1.0
+                || (tilted[1] - square[1]).abs() > 1.0),
+        "the orbited outline must differ from the top-down square face: \
+         {projected:?} vs {top_down:?}"
     );
     // Nothing degenerates into the camera's own up hint.
     assert!(camera.camera3d_params().is_ok());

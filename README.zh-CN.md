@@ -278,7 +278,7 @@ python3 scripts/serve-web.py --directory apps/app-web/dist-ui --port 8090
 两份 bundle 默认都把字体包 staged 到 `fonts/`：`WITH_FONTS=1` 用 `scripts/fetch-fonts.sh` 组装
 mlightcad 全量（需网络），`WITH_FONTS=0` 只放提交包（离线），`FONTS_DIR=<dir>` 复用预置目录。
 页面仍在打开图纸后从同源 `fonts/` 懒加载。wasm 构建另需 `wasm32-unknown-unknown` target 与钉住的
-`wasm-bindgen 0.2.129`。
+`wasm-bindgen 0.2.130`。
 
 ### 其他平台
 

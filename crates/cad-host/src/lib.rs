@@ -60,6 +60,7 @@ mod core;
 mod fonts;
 mod input;
 mod open;
+mod orbit_sensitivity;
 mod p4;
 pub mod policy;
 mod recent;
@@ -76,11 +77,12 @@ pub use recent::{
 };
 pub use settings::{
     normalize_wgpu_backend, CadSettingKey, CadSettingValue, HostSettings,
-    SETTINGS_INVALID_PLOT_FORMAT, SETTINGS_INVALID_VALUE, SETTINGS_NOT_PERSISTED,
-    SETTINGS_UNKNOWN_KEY, WGPU_BACKEND_PREFERENCE_KEY, WGPU_BACKEND_VALUES,
+    DEFAULT_ORBIT_SENSITIVITY_PERCENT, SETTINGS_INVALID_PLOT_FORMAT, SETTINGS_INVALID_VALUE,
+    SETTINGS_NOT_PERSISTED, SETTINGS_UNKNOWN_KEY, WGPU_BACKEND_PREFERENCE_KEY, WGPU_BACKEND_VALUES,
 };
 pub use settings_root::{
-    ROOT_PREFERENCE_KEYS, THEME_DARK_BACKGROUND, THEME_LIGHT_BACKGROUND, THEME_VALUES,
+    HOST_ALLOWED_PATHS_JSON, ROOT_PREFERENCE_KEYS, THEME_DARK_BACKGROUND, THEME_LIGHT_BACKGROUND,
+    THEME_VALUES,
 };
 #[cfg(test)]
 mod tests;
@@ -95,38 +97,6 @@ pub use core::{HostCore, HostOptions, HostPlatform, RequestClock};
 #[cfg(not(target_arch = "wasm32"))]
 pub use fonts::DesktopResources;
 pub use fonts::{HostResources, UnsupportedResources};
-
-/// Host policy mirroring the web host: users may persist the two dock panels'
-/// initial-open flags and the Options-dialog settings that have real behavioural
-/// backing (overlay visibility, the plot default, the five persisted interaction
-/// values — object snap, hover preview, `SNAP` grid snap, `ORTHO` and the
-/// `SNAPUNIT` spacing —, the 2D left-drag input scheme, the model/paper
-/// backgrounds, the crosshair size and the pickbox/aperture sizes). A host
-/// `config.json` replaces this policy wholesale.
-///
-/// The settings leaves are listed individually (never a `view.overlays` prefix)
-/// so no other configuration field becomes user-writable by inheritance.
-pub const HOST_ALLOWED_PATHS_JSON: &str = r#"{"ui":{"userCustomization":{"allowedPaths":[
-    "ui.components.layerPanel.initiallyOpen",
-    "ui.components.propertiesPanel.initiallyOpen",
-    "view.overlays.grid",
-    "view.overlays.axes",
-    "view.overlays.selectionHighlight",
-    "view.overlays.snapHints",
-    "view.background.model",
-    "view.background.paper",
-    "view.crosshair.sizePercent",
-    "view.pickbox.sizePixels",
-    "view.aperture.sizePixels",
-    "view.gpuBudget.percent",
-    "ui.export.plotFormat",
-    "interaction.snapEnabled",
-    "interaction.hoverPreview",
-    "interaction.gridSnapEnabled",
-    "interaction.orthoEnabled",
-    "interaction.snapSpacing",
-    "interaction.leftDragPans"
-]}}}"#;
 
 /// A user-facing rendering of a command error.
 ///

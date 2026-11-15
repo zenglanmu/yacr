@@ -35,7 +35,8 @@
 // The canonical **front** view (`eye −Y`, `up +Z`) is therefore the identity
 // basis, and TOP/RIGHT match the columns the old CSS `matrix3d` produced — the
 // cube shows the host camera's real orientation, not a decorative spin.
-import type { CadNavigationSettings, CadViewOrientation } from './cad-status.ts';
+import type { CadViewOrientation } from './cad-status.ts';
+import type { CadNavigationSettings } from './navigation.ts';
 
 /** A finite 3D vector; the host's basis uses the same `[x, y, z]` shape. */
 export type Vec3 = readonly [number, number, number];
@@ -66,12 +67,16 @@ export const DEFAULT_NAVIGATION: CadNavigationSettings = Object.freeze({
 });
 
 /**
- * The navigation switches the chrome acts on.
+ * The navigation switches the chrome acts on (visibility only).
  *
  * `cad_status` validates the block when it is present, so this only fills in the
  * documented defaults for an **absent** block (an older host). A field that is
  * somehow missing from a present block keeps its default rather than becoming
  * `undefined`; the stylesheet and the rail must still agree.
+ *
+ * The 3D drag rate (`orbitSensitivityPercent`) is deliberately **not** copied
+ * here: the ViewCube reads it from the status block together with the gesture it
+ * scales (`?? 100`), so this visibility reader keeps no second copy of it.
  */
 export function navigationSettings(
   navigation: CadNavigationSettings | null | undefined,

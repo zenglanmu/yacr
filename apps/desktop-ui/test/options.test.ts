@@ -67,6 +67,8 @@ function snapshot(overrides = {}) {
     apertureSize: 12,
     // The 2D input scheme: left drag box-selects by default.
     leftDragPans: false,
+    // The 3D drag rate as a percentage of the host's base rate (100 = base).
+    orbitSensitivityPercent: 100,
     gpuBudgetPercent: 90,
     plotFormat: 'svg',
     fontsDir: '/usr/share/fonts',
@@ -126,6 +128,7 @@ test('every field sits on a declared tab exactly once and nothing else exists', 
   ]);
   assert.deepEqual(fieldsForTab('drafting').map(field => field.id), [
     'snapEnabled', 'hoverPreview', 'snapSpacing', 'pickboxSize', 'apertureSize', 'leftDragPans',
+    'orbitSensitivity',
   ]);
   assert.deepEqual(fieldsForTab('plot').map(field => field.id), ['plotFormat']);
   assert.deepEqual(fieldsForTab('files').map(field => field.id), ['fontsDir']);
@@ -148,6 +151,7 @@ test('each control is the editor its backend value really needs', () => {
     pickboxSize: 'number',
     apertureSize: 'number',
     leftDragPans: 'bool',
+    orbitSensitivity: 'real',
     gpuBudgetPercent: 'number',
     plotFormat: 'select',
     fontsDir: 'readonly',
@@ -158,6 +162,12 @@ test('each control is the editor its backend value really needs', () => {
   assert.deepEqual(
     OPTIONS_FIELDS.filter(field => field.kind === 'number').map(field => [field.id, field.min, field.max]),
     [['crosshairSize', 1, 100], ['gpuBudgetPercent', 10, 100], ['pickboxSize', 1, 50], ['apertureSize', 1, 50]],
+  );
+  // The orbit sensitivity is the `real` percentage (the host range is f64, not an
+  // integer set); it carries the same inclusive bounds as a number row.
+  assert.deepEqual(
+    OPTIONS_FIELDS.filter(field => field.kind === 'real').map(field => [field.id, field.min, field.max]),
+    [['snapSpacing', Number.MIN_VALUE, 1_000_000], ['orbitSensitivity', 25, 200]],
   );
   for (const field of OPTIONS_FIELDS.filter(entry => entry.kind === 'number' || entry.kind === 'real')) {
     assert.ok(field.unitKey, `${field.id} needs a unit`);
@@ -272,6 +282,20 @@ test('the validation table matches the host ranges and codes', () => {
     ['gpuBudgetPercent', '101', SETTINGS_ERROR.invalidValue],
     ['gpuBudgetPercent', '', SETTINGS_ERROR.invalidValue],
     ['gpuBudgetPercent', '90.5', SETTINGS_ERROR.invalidValue],
+    // The orbit sensitivity is the host's closed f64 percentage range, inclusive:
+    // a fraction is legal, and nothing outside 25–200 is clamped.
+    ['orbitSensitivity', '25', null],
+    ['orbitSensitivity', '100', null],
+    ['orbitSensitivity', '200', null],
+    ['orbitSensitivity', 60, null],
+    ['orbitSensitivity', '60.5', null],
+    ['orbitSensitivity', '70.5', null],
+    ['orbitSensitivity', '24', SETTINGS_ERROR.invalidValue],
+    ['orbitSensitivity', '24.9', SETTINGS_ERROR.invalidValue],
+    ['orbitSensitivity', '201', SETTINGS_ERROR.invalidValue],
+    ['orbitSensitivity', '200.1', SETTINGS_ERROR.invalidValue],
+    ['orbitSensitivity', '0', SETTINGS_ERROR.invalidValue],
+    ['orbitSensitivity', '', SETTINGS_ERROR.invalidValue],
     ['backgroundModel', '#abc', SETTINGS_ERROR.invalidValue],
     ['backgroundModel', '#aabb', SETTINGS_ERROR.invalidValue],
     ['backgroundModel', '#aabbcc', null],

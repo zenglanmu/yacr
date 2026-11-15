@@ -1,6 +1,6 @@
 //! Contract tests for the RVT preview lane.
 //!
-//! Unit 1 (`rvt` -> GLB) runs against the upstream `rvt` 0.22.0 scaffold
+//! Unit 1 (`rvt` -> GLB) runs against the upstream `rvt` 0.24.0 scaffold
 //! fixture: Apache-2.0, metadata-only, and honestly **zero** geometry. Unit 2
 //! (GLB -> mesh) runs against a synthetic two-node GLB authored in this
 //! repository; it is the test that proves node world transforms are applied.
@@ -399,7 +399,7 @@ fn a_glb_without_a_scene_is_refused() {
 
 #[test]
 fn linear_base_colours_use_the_srgb_transfer_function() {
-    // `rvt` linearises its sRGB materials (`src/ifc/gltf.rs:665-675`); this is
+    // `rvt` linearises its sRGB materials (`src/ifc/gltf.rs:828-836`); this is
     // the exact inverse, not a `powf(1.0 / 2.2)` shortcut.
     assert_eq!(linear_to_srgb_byte(0.0), 0);
     assert_eq!(linear_to_srgb_byte(1.0), 255);

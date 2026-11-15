@@ -46,10 +46,10 @@ serde_json.workspace = true
 
 # Objective-C bindings for the native child `NSView` (frame, subview ordering,
 # visibility) and the in-process `NSOpenPanel`. Pinned to the exact objc2 family
-# that `tauri 2.12.3`/`wry 0.57.0` already put in `Cargo.lock` (objc2 0.6.4 /
+# that `tauri 2.12.5`/`wry 0.57.0` already put in `Cargo.lock` (objc2 0.6.5 /
 # objc2-foundation 0.3.2 / objc2-app-kit 0.3.2), so no second binding set enters
 # the graph.
-objc2 = { version = "=0.6.4" }
+objc2 = { version = "=0.6.5" }
 objc2-foundation = { version = "=0.3.2" }
 objc2-app-kit = { version = "=0.3.2" }
 

@@ -1,6 +1,6 @@
 //! Typed settings wire surface for the Options dialog.
 //!
-//! The session exposes the same closed twenty-three-key surface the host
+//! The session exposes the same closed twenty-four-key surface the host
 //! persists; it adds no second validation and no raw-JSON entry point. A UI
 //! writes one typed key/value pair, the host validates it against the closed
 //! table, persists the matching preference leaf and applies it to the live
@@ -20,10 +20,11 @@ pub use cad_host::{
 ///
 /// A flat camelCase wire object (like the status/session types). `fontsDir` is
 /// read-only display data sourced from the host's `--fonts-dir`; the other
-/// twenty-two fields correspond one-to-one with [`CadSettingKey`], the two
+/// twenty-three fields correspond one-to-one with [`CadSettingKey`], the two
 /// backgrounds as canonical `#rrggbb` strings, the crosshair and the GPU memory
 /// budget as integer percentages, the pickbox/aperture as integer pixel counts,
-/// the snap spacing as a real number of drawing units, the graphics backend as
+/// the snap spacing as a real number of drawing units, the orbit sensitivity as
+/// a real percentage of the host's base rate, the graphics backend as
 /// one of `auto`/`vulkan`/`dx12`, the theme as `dark`/`light` and the
 /// navigation/ViewCube switches as their host-owned values.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -49,6 +50,12 @@ pub struct CadSettings {
     /// instead of box-selecting. Persisted as `interaction.leftDragPans`,
     /// default `false`.
     pub left_drag_pans: bool,
+    /// 3D orbit sensitivity as a **percentage** of the host's base rate: `100`
+    /// (the default) is the base rate, `50` halves the rotation per logical
+    /// pixel and `200` doubles it. Persisted as
+    /// `interaction.orbitSensitivityPercent`. Finite and `25.0..=200.0`; the
+    /// preference is read per gesture, so a write is live on the next drag.
+    pub orbit_sensitivity_percent: f64,
     /// Model-space canvas background, canonical lower-case `#rrggbb`.
     pub background_model: String,
     /// Paper-space canvas background, canonical lower-case `#rrggbb`.
@@ -105,6 +112,7 @@ impl From<HostSettings> for CadSettings {
             ortho_enabled: value.ortho_enabled,
             snap_spacing: value.snap_spacing,
             left_drag_pans: value.left_drag_pans,
+            orbit_sensitivity_percent: value.orbit_sensitivity_percent,
             background_model: value.background_model,
             background_paper: value.background_paper,
             crosshair_percent: value.crosshair_percent,

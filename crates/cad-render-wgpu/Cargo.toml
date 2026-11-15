@@ -24,9 +24,9 @@ log.workspace = true
 
 [dev-dependencies]
 # Used only by the offline WGSL validation test; pinned to the exact naga that
-# wgpu 30.0.1 embeds so validation matches the runtime parser. `glsl-out` backs
+# wgpu 30.0.2 embeds so validation matches the runtime parser. `glsl-out` backs
 # the GLSL ES 3.00 (WebGL2) back-translation test of the color shaders.
-naga = { version = "=30.0.1", features = ["wgsl-in", "glsl-out"] }
+naga = { version = "=30.0.2", features = ["wgsl-in", "glsl-out"] }
 # Tests construct `ImageBatch::clip` polygons, whose `ImageVertex` type is
 # defined by `cad-representation` and re-exported through `cad-scene`'s public
 # `ImageBatch` field. Test-only (downward) edge; the crate itself does not
@@ -37,7 +37,7 @@ cad-representation.workspace = true
 # adapter/device requests and PNG-encoding the readback for golden inspection.
 #
 # `png`/`futures-lite` are the shared native headless path. `ash` is the exact
-# Vulkan loader binding wgpu-hal 30.0.1 already resolves — `Cargo.lock` must keep
+# Vulkan loader binding wgpu-hal 30.0.2 already resolves — `Cargo.lock` must keep
 # exactly one `ash` version (0.38.0+1.3.281). It backs the single read-only
 # `vkGetPhysicalDeviceMemoryProperties` query in `gpu_memory::vram` that wgpu
 # does not expose (wgpu-hal's own `MemoryProperties` type is private).
@@ -58,7 +58,7 @@ ash = "=0.38.0"
 # `wgpu/webgl` is enabled **only on this wasm32 dependency edge**: Cargo features
 # are additive per package, so the native build (which does not activate a
 # wasm32-target dependency) keeps exactly the workspace declaration
-# `wgpu = "=30.0.1"` with its default features — no `default-features = false`,
+# `wgpu = "=30.0.2"` with its default features — no `default-features = false`,
 # no workspace-wide feature flip, nothing that changes a native backend. `webgl`
 # is what compiles wgpu's GLES/WebGL2 backend (`wgpu` → `web` + `wgpu-core/webgl`
 # + `wgpu-hal`), and WebGL2 is the only backend the target runtimes have: neither

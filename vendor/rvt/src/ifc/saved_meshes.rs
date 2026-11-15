@@ -56,14 +56,17 @@
 //! one whose mesh starts at its base.
 
 use super::IfcModel;
-use super::entities::{BrepTriangle, IfcEntity, Property, PropertySet, PropertyValue, SolidShape};
+use super::entities::{
+    BrepTriangle, IfcEntity, ProfileDef, Property, PropertySet, PropertyValue, SolidShape,
+};
 use super::export_content::{
     BEAM_AXIS_BODY_SOURCE, BEAM_BOX_BODY_SOURCE, INSTANCE_ORIENTED_BODY_SOURCE,
     INSTANCE_TURNED_BODY_SOURCE, RECORD_BBOX_BODY_SOURCE, SAVED_MESH_ELEMENT_ID_SHARED,
     SAVED_MESH_NO_GRAPHICS, SAVED_MESH_NO_MESH, SAVED_MESH_NO_TRIANGLES,
     SAVED_MESH_NOT_CANDIDATE_PREFIX, SAVED_MESH_NOT_OFFERED_PREFIX, SAVED_MESH_PARTIAL_PREFIX,
     SAVED_MESH_REFUSAL_PROPERTY, SLAB_SHAPE_REFUSAL_PROPERTY, SPACE_OUTLINE_SAVED_MESH,
-    SPACE_OUTLINE_SOURCE_PROPERTY, WALL_BASE_SOURCE_PROPERTY, WALL_TOP_STEPPED_BODY_HEIGHT_SOURCE,
+    SPACE_OUTLINE_SOURCE_PROPERTY, WALL_BASE_SOURCE_PROPERTY, WALL_TOP_SLOPED_BODY_HEIGHT_SOURCE,
+    WALL_TOP_STEPPED_BODY_HEIGHT_SOURCE,
 };
 use super::mesh_volume::{
     BeamQuantities, ColumnQuantities, MESH_LENGTH_REACH, Placed, Prism, all_faces_flat,
@@ -78,6 +81,13 @@ use std::collections::{BTreeMap, BTreeSet};
 /// `BodySource` of a body drawn from the element's saved graphics.
 pub const SAVED_MESH_BODY_SOURCE: &str = "saved_graphics_mesh";
 
+/// The record-geometry property that says an element of the Roofs category is
+/// written as another entity than `IfcRoof` by its "Export to IFC As" value
+/// (#1713: the BIM4LCA timber office's 8 roofs written as `IfcSlab`). It is the
+/// element's category kept past the redirect, which the record's schema class
+/// (`ProfileRoof` for a footprint roof, RE-76) names for only some roofs.
+pub const REDIRECTED_ROOF_PROPERTY: &str = "RedirectedRoof";
+
 /// RE-443: only duct fittings meet the measured native-reference body bound.
 const COLLAPSED_RULED_CATEGORY_REFUSAL: &str =
     "collapsed ruled profile outside the measured duct fittings";
@@ -90,6 +100,12 @@ const COLLAPSED_RULED_CATEGORY_REFUSAL: &str =
 /// 9.514 ft above their base, the curtain wall's height, and the other 99 on
 /// it to within 0.001 ft.
 const EMBED_RAISE_MIN_FEET: f64 = 0.5;
+
+/// The releases whose walls' native records name what embeds in them, and so
+/// the releases a wall that embeds a curtain wall is drawn from its saved mesh
+/// on (RE-340): the walls' records of 2023 name no embed step, so the rule
+/// found none there and the scope's 2023 was never exercised (#1945).
+const EMBED_HOST_REVIT_VERSIONS: std::ops::RangeInclusive<u32> = 2024..=2027;
 
 /// What [`attach`] did.
 #[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize)]
@@ -169,8 +185,11 @@ fn partial_refusal(meshes: &GraphicsMeshes) -> Option<String> {
 /// mullion's box along its own axes (RE-106, RE-421: 327 mullions of the BIM4LCA
 /// timber office at permit, whose Revit solids have mitred ends), each a
 /// stand-in for the mesh; and a roof's level block, whose record box holds the
-/// reference surface and not the slope or thickness (#1612). A resolved outline
-/// is the body of any other class (a floor's plan, a ceiling's).
+/// reference surface and not the slope or thickness (#1612), whatever entity the
+/// roof is exported as: a roof whose "Export to IFC As" says `IfcSlab` is the
+/// same element with the same record box and the same mesh, and carries
+/// [`REDIRECTED_ROOF_PROPERTY`] (#1713). A resolved
+/// outline is the body of any other class (a floor's plan, a ceiling's).
 fn is_replaceable_box(ifc_type: &str, properties: &[Property]) -> bool {
     let source = properties
         .iter()
@@ -181,6 +200,11 @@ fn is_replaceable_box(ifc_type: &str, properties: &[Property]) -> bool {
     let profile_resolved = properties.iter().any(|property| {
         property.name == "ProfileResolved" && matches!(property.value, PropertyValue::Boolean(true))
     });
+    let roof = ifc_type == "IFCROOF"
+        || properties.iter().any(|property| {
+            property.name == REDIRECTED_ROOF_PROPERTY
+                && matches!(property.value, PropertyValue::Boolean(true))
+        });
     matches!(
         source,
         Some(
@@ -189,7 +213,7 @@ fn is_replaceable_box(ifc_type: &str, properties: &[Property]) -> bool {
                 | INSTANCE_TURNED_BODY_SOURCE
                 | INSTANCE_ORIENTED_BODY_SOURCE
         )
-    ) && !(profile_resolved && ifc_type != "IFCROOF")
+    ) && !(profile_resolved && !roof)
 }
 
 /// Say on each box body that no pass offered a saved mesh why none did
@@ -329,13 +353,20 @@ pub fn attach_scoped_with_control(
 
     let mut by_id: BTreeMap<u64, Vec<usize>> = BTreeMap::new();
     // A stair or curtain wall is drawn by its parts; its own saved graphics
-    // would draw it twice.
+    // would draw it twice. A ramp is not: its railings are parts beside its
+    // own body (#1988), which Revit's export draws from the same saved mesh.
     let wholes: BTreeSet<usize> = model
         .entities
         .iter()
         .filter_map(|entity| match entity {
             IfcEntity::Aggregate { whole, .. } => Some(*whole),
             _ => None,
+        })
+        .filter(|&whole| {
+            !matches!(
+                model.entities.get(whole),
+                Some(IfcEntity::BuildingElement { ifc_type, .. }) if ifc_type == "IFCRAMP"
+            )
         })
         .collect();
     // #1645: why each box that keeps its box does; a box the pass does not take
@@ -438,7 +469,7 @@ pub fn attach_scoped_with_control(
     // over the record's height (a resolved profile, which the pass leaves alone:
     // `is_replaceable_box`), whose base quantities their saved mesh gives all the
     // same. That body is Revit's own form for a plain section and stays so, as a
-    // beam's does.
+    // beam's does, unless the mesh shows another section (#1710).
     let mut column_rectangles: BTreeMap<u64, Vec<usize>> = BTreeMap::new();
     for (index, entity) in model.entities.iter().enumerate() {
         if wholes.contains(&index) {
@@ -592,6 +623,9 @@ pub fn attach_scoped_with_control(
                     beams.push((*index, found));
                 }
             }
+            // #1710: a column whose mesh is a vertical prism of another section
+            // than its type's rectangle is drawn from its mesh, as a box is.
+            let mut mesh_body: Option<[usize; 1]> = None;
             if let Some([index]) = column_rectangles
                 .get(&element.identity.element_id)
                 .map(Vec::as_slice)
@@ -601,19 +635,28 @@ pub fn attach_scoped_with_control(
                     .then(|| column_mesh_quantities(&element.meshes.primitives))
                     .flatten();
                 if let Some(found) = found {
-                    columns.push((*index, found));
+                    if section_not_rectangle(&model.entities[*index], found.cross_section_area) {
+                        report.candidates += 1;
+                        mesh_body = Some([*index]);
+                    } else {
+                        columns.push((*index, found));
+                    }
                 }
             }
             if let Some(&index) = hosts.get(&element.identity.element_id) {
                 raise_embed_host(model, index, &element.meshes, &mut report);
                 return Ok(());
             }
-            let Some(indices) = by_id.get(&element.identity.element_id) else {
-                return Ok(());
+            let indices: &[usize] = match &mesh_body {
+                Some(index) => index,
+                None => match by_id.get(&element.identity.element_id) {
+                    Some(indices) => indices,
+                    None => return Ok(()),
+                },
             };
             // A Tag carried by several entities (a slab's pieces) is ambiguous:
             // leave them as they are.
-            let [index] = indices.as_slice() else {
+            let [index] = indices else {
                 refusals.extend(
                     indices
                         .iter()
@@ -778,6 +821,40 @@ pub fn attach_scoped_with_control(
         note_refusal(model, index, reason);
     }
     Ok(report)
+}
+
+/// How far, relative to the rectangle's, the section of a column's mesh may
+/// differ from its type's rectangle and the rectangle still be the column's
+/// section (#1710): the mesh's single-precision corners move a section's area
+/// by far less, and the BIM4LCA housing's chamfered columns are 0.3% and 1.1%
+/// under their rectangles.
+const COLUMN_SECTION_TOLERANCE: f64 = 1e-3;
+
+/// Whether `entity`, a column drawn as its type's rectangle, has a mesh whose
+/// section, of area `mesh_area` (square feet), is not that rectangle (#1710):
+/// a chamfered or thin-walled section, which the mesh draws and the rectangle
+/// does not. False where the body is not a rectangle's extrusion.
+fn section_not_rectangle(entity: &IfcEntity, mesh_area: f64) -> bool {
+    let IfcEntity::BuildingElement {
+        extrusion: Some(extrusion),
+        ..
+    } = entity
+    else {
+        return false;
+    };
+    let (width, depth) = match &extrusion.profile_override {
+        None => (extrusion.width_feet, extrusion.depth_feet),
+        Some(ProfileDef::Rectangle {
+            width_feet,
+            depth_feet,
+        }) => (*width_feet, *depth_feet),
+        Some(_) => return false,
+    };
+    let area = width * depth;
+    area.is_finite()
+        && area > 0.0
+        && mesh_area.is_finite()
+        && (mesh_area - area).abs() > COLUMN_SECTION_TOLERANCE * area
 }
 
 /// How far a column's box volume may differ from the volume of the mesh Revit
@@ -1415,11 +1492,12 @@ fn wall_frame_and_openings(model: &IfcModel) -> BTreeMap<usize, WallOpenings> {
             [cut.x_dim_feet, cut.y_dim_feet]
         });
         let [cx, cy] = cut.map_or([0.0, 0.0], |cut| cut.centre_feet);
+        // `z_range_feet` is where the opening starts and how high it is (RE-93),
+        // as the writer extrudes it: its top is `start + height`, so the start
+        // is added once, below.
         let [start, height] = cut
             .and_then(|cut| cut.z_range_feet)
-            .map_or([0.0, body.height_feet], |[start, height]| {
-                [start, start + height]
-            });
+            .unwrap_or([0.0, body.height_feet]);
         let (sin, cos) = rotation_radians.unwrap_or(0.0).sin_cos();
         let mut x = [f64::INFINITY, f64::NEG_INFINITY];
         let mut y = [f64::INFINITY, f64::NEG_INFINITY];
@@ -1487,13 +1565,30 @@ fn add_wall_quantities(model: &mut IfcModel, found: &[(usize, WallMeshQuantities
         let Some(&position) = held.get(index) else {
             continue;
         };
-        // The height of the wall's body, where it is the extrusion of its box.
+        // The height of the wall's body, where it is the extrusion of its box,
+        // or where its top is cut along a sloped roof (#1478): that solid keeps
+        // the box's extrusion, whose height is the record's, and Revit's export
+        // writes that height as the wall's `Height` (25 of 25 on the R2025
+        // models, which matched it before the cut).
         let body_height = match model.entities.get(*index) {
             Some(IfcEntity::BuildingElement {
                 extrusion: Some(body),
                 solid_shape: None,
                 ..
             }) => Some(body.height_feet),
+            Some(IfcEntity::BuildingElement {
+                extrusion: Some(body),
+                solid_shape: Some(_),
+                property_set: Some(own),
+                ..
+            }) if has_text_property(
+                own,
+                "BodyHeightSource",
+                WALL_TOP_SLOPED_BODY_HEIGHT_SOURCE,
+            ) =>
+            {
+                Some(body.height_feet)
+            }
             _ => None,
         };
         let Some(IfcEntity::ElementPropertySet { set, .. }) = model.entities.get_mut(position)
@@ -1631,13 +1726,20 @@ fn plain_or_stepped(solid_shape: &Option<SolidShape>, property_set: &Option<Prop
 /// hosted in them but the opening their own curtain wall cuts (an
 /// `IfcEntity::WallCutOpening` whose Tag is the curtain wall's: Revit's export
 /// holds that void and the raised strip both). Nothing where the model has no
-/// curtain wall, so a file without one reads no wall record here. An `Err`
+/// curtain wall, so a file without one reads no wall record here, and nothing
+/// on a release outside [`EMBED_HOST_REVIT_VERSIONS`]. An `Err`
 /// names why the walls' native records were not read.
 fn embed_hosts(
     rf: &mut crate::RevitFile,
     model: &IfcModel,
     taken: &BTreeMap<u64, Vec<usize>>,
 ) -> Result<BTreeMap<u64, usize>, String> {
+    if !rf
+        .basic_file_info()
+        .is_ok_and(|info| EMBED_HOST_REVIT_VERSIONS.contains(&info.version))
+    {
+        return Ok(BTreeMap::new());
+    }
     let element_id = |entity: &IfcEntity, wanted: &str| match entity {
         IfcEntity::BuildingElement {
             ifc_type,

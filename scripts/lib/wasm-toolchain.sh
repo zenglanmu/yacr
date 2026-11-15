@@ -44,7 +44,7 @@ readonly YACR_WASM_TARGET="wasm32-unknown-unknown"
 # below and must still agree: if someone moves `wasm-bindgen` in `Cargo.toml`,
 # these scripts have to be re-checked rather than silently producing a mismatched
 # module.
-readonly YACR_PINNED_WASM_BINDGEN="0.2.129"
+readonly YACR_PINNED_WASM_BINDGEN="0.2.130"
 # `wasm-opt` (binaryen) shrinks the bindgen output; Cloudflare Pages rejects any
 # single file over 25 MiB, so `web-deploy` cannot publish a larger module. The
 # binaryen release is pinned and CI downloads exactly that archive (SHA-256
@@ -98,7 +98,7 @@ yacr_init_wasm_toolchain() {
     yacr_die "wasm-bindgen CLI not found; install the pinned version with: cargo install wasm-bindgen-cli --version $YACR_PINNED_WASM_BINDGEN"
   fi
 
-  # The Cargo pin: `wasm-bindgen = "=0.2.129"` in the workspace dependency table.
+  # The Cargo pin: `wasm-bindgen = "=0.2.130"` in the workspace dependency table.
   cargo_pin="$(
     sed -n 's/^[[:space:]]*wasm-bindgen[[:space:]]*=[[:space:]]*"=\([0-9][0-9.]*\)".*/\1/p' \
       "$manifest" | head -n 1
@@ -108,7 +108,7 @@ yacr_init_wasm_toolchain() {
     yacr_die "wasm-bindgen pin moved: Cargo.toml says $cargo_pin, these entry points expect $YACR_PINNED_WASM_BINDGEN (re-review the wasm contract first)"
   fi
 
-  # `wasm-bindgen --version` prints e.g. `wasm-bindgen 0.2.129` (first line only:
+  # `wasm-bindgen --version` prints e.g. `wasm-bindgen 0.2.130` (first line only:
   # a wrong binary can print arbitrary multi-line output).
   YACR_WASM_BINDGEN_VERSION="$("$YACR_WASM_BINDGEN_BIN" --version | head -n 1 | awk '{print $NF}')"
   if [ "$YACR_WASM_BINDGEN_VERSION" != "$cargo_pin" ]; then

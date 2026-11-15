@@ -275,19 +275,35 @@ pub fn curtain_wall_type_names(
     rf: &mut RevitFile,
     types: &BTreeSet<u64>,
 ) -> anyhow::Result<BTreeMap<u64, String>> {
+    Ok(curtain_wall_types(rf, types, Options::default().releases)?
+        .into_iter()
+        .filter_map(|(id, name)| Some((id, name?)))
+        .collect())
+}
+
+/// Each type in `types` whose native record is a `NewCurtainWallType`, with
+/// its `SymbolInfo.m_name` where the record holds one, read on `releases`. The
+/// class alone says the type is a curtain wall's; the name is only its label
+/// (RE-440).
+pub fn curtain_wall_types(
+    rf: &mut RevitFile,
+    types: &BTreeSet<u64>,
+    releases: std::ops::RangeInclusive<u32>,
+) -> anyhow::Result<BTreeMap<u64, Option<String>>> {
     let mut out = BTreeMap::new();
     if types.is_empty() {
         return Ok(out);
     }
     let options = Options {
         selected_ids: types.clone(),
+        releases,
         ..Options::default()
     };
     extract_graphs(rf, &options, |record| {
         if record.class_name.as_deref() != Some("NewCurtainWallType") {
             return Ok(());
         }
-        if let Some(name) = record.graph.as_ref().and_then(|graph| {
+        let name = record.graph.as_ref().and_then(|graph| {
             graph
                 .objects
                 .iter()
@@ -295,9 +311,9 @@ pub fn curtain_wall_type_names(
                 .fields
                 .get("m_name")?
                 .as_str()
-        }) {
-            out.insert(record.identity.element_id, name.to_string());
-        }
+                .map(str::to_string)
+        });
+        out.insert(record.identity.element_id, name);
         Ok(())
     })?;
     Ok(out)
@@ -541,6 +557,21 @@ fn is_top_joined(graph: &crate::native_parameters::ObjectGraph) -> bool {
     })
 }
 
+/// Whether a wall is the host panel of another curtain wall's grid: its record
+/// holds a `HostPanelInfo` object, which names the placeholder panel of the
+/// owner's cell it fills (RE-462). Revit's exporter writes no such wall as
+/// itself: `WallExporter.Export` returns for a wall whose owner is a curtain
+/// wall, and `CurtainSystemExporter.GetVisiblePanelsForGrid` folds it into
+/// the owner's parts (revit-ifc, CLEANROOM.md source 5). Only the object's
+/// presence is read, so the field list the projected graph builds is
+/// unchanged.
+fn is_host_panel(graph: &crate::native_parameters::ObjectGraph) -> bool {
+    graph
+        .objects
+        .iter()
+        .any(|object| object.class_name == "HostPanelInfo")
+}
+
 /// The fields of an `SWall` and an `ArcWall` graph that [`wall_facts`] reads
 /// (`wall_type_id`: `m_WallAttributesId`; `is_top_joined`: `m_baseOrTop`;
 /// `wall_load_bearing`: `m_isStructuralSignificant`, `m_wallStructuralUsage`),
@@ -564,6 +595,9 @@ pub struct WallFacts {
     pub top_joined: bool,
     /// Whether Revit calls the wall load bearing (`wall_load_bearing`).
     pub load_bearing: Option<bool>,
+    /// Whether the wall is the host panel of another curtain wall's grid
+    /// (`is_host_panel`, RE-462).
+    pub host_panel: bool,
 }
 
 /// [`WallFacts`] of a wall's graph: the only reader of the graph
@@ -574,6 +608,7 @@ pub fn wall_facts(graph: &crate::native_parameters::ObjectGraph) -> WallFacts {
         type_id: wall_type_id(graph),
         top_joined: is_top_joined(graph),
         load_bearing: wall_load_bearing(graph),
+        host_panel: is_host_panel(graph),
     }
 }
 
@@ -630,6 +665,9 @@ pub fn wall_facts_only_reads() -> u64 {
 pub struct WallReads {
     type_ids: BTreeMap<u64, u64>,
     type_ids_read: BTreeSet<u64>,
+    /// The walls read with their type ids whose record holds a
+    /// `HostPanelInfo` (RE-462).
+    host_panels: BTreeSet<u64>,
     top_joined: BTreeMap<u64, bool>,
     top_joins_read: BTreeSet<u64>,
     functions: BTreeMap<u64, i64>,
@@ -699,6 +737,7 @@ impl WallReads {
             ..Options::default()
         };
         let mut type_ids: BTreeMap<u64, u64> = BTreeMap::new();
+        let mut host_panels: BTreeSet<u64> = BTreeSet::new();
         let mut top_joined: BTreeMap<u64, bool> = BTreeMap::new();
         let mut bearing: BTreeMap<u64, bool> = BTreeMap::new();
         extract_graphs(rf, &options, |record| {
@@ -710,6 +749,11 @@ impl WallReads {
             if types.contains(&id) {
                 if let Some(type_id) = facts.type_id {
                     type_ids.insert(id, type_id);
+                }
+                if facts.host_panel
+                    && matches!(record.class_name.as_deref(), Some("SWall" | "ArcWall"))
+                {
+                    host_panels.insert(id);
                 }
             }
             if joins.contains(&id)
@@ -728,6 +772,7 @@ impl WallReads {
         })?;
         self.type_ids.extend(type_ids);
         self.type_ids_read.extend(types);
+        self.host_panels.extend(host_panels);
         self.top_joined.extend(top_joined);
         self.top_joins_read.extend(joins);
         self.bearing.extend(bearing);
@@ -748,6 +793,33 @@ impl WallReads {
             .iter()
             .filter_map(|id| Some((*id, *self.bearing.get(id)?)))
             .collect())
+    }
+
+    /// The type (`m_WallAttributesId`) of each of `walls` whose record names
+    /// one, reading only the walls not read already: the same read
+    /// [`Self::type_functions`] and `read_wall_records` share (#1335, RE-440).
+    pub fn type_ids(
+        &mut self,
+        rf: &mut RevitFile,
+        walls: &BTreeSet<u64>,
+    ) -> anyhow::Result<BTreeMap<u64, u64>> {
+        self.read(rf, walls, &BTreeSet::new())?;
+        Ok(walls
+            .iter()
+            .filter_map(|id| Some((*id, *self.type_ids.get(id)?)))
+            .collect())
+    }
+
+    /// Each of `walls` whose `SWall` or `ArcWall` record holds a
+    /// `HostPanelInfo` (`is_host_panel`, RE-462), reading only the walls not
+    /// read already: the same read [`Self::type_ids`] makes.
+    pub fn host_panels(
+        &mut self,
+        rf: &mut RevitFile,
+        walls: &BTreeSet<u64>,
+    ) -> anyhow::Result<BTreeSet<u64>> {
+        self.read(rf, walls, &BTreeSet::new())?;
+        Ok(walls.intersection(&self.host_panels).copied().collect())
     }
 
     /// [`wall_top_joins`], reading only the walls not read already.
@@ -847,6 +919,7 @@ pub fn native_walls_and_top_joins_into(
         return Ok(WallRecords::default());
     }
     let mut type_ids: BTreeMap<u64, u64> = BTreeMap::new();
+    let mut host_panels: BTreeSet<u64> = BTreeSet::new();
     let mut functions: BTreeMap<u64, i64> = BTreeMap::new();
     let mut functions_read: BTreeSet<u64> = BTreeSet::new();
     let mut top_joined: BTreeMap<u64, bool> = BTreeMap::new();
@@ -877,6 +950,9 @@ pub fn native_walls_and_top_joins_into(
             if walls.contains(&id) || facts_only.contains(&id) {
                 if let Some(type_id) = wall_type_id(graph) {
                     type_ids.insert(id, type_id);
+                }
+                if is_host_panel(graph) {
+                    host_panels.insert(id);
                 }
             }
         }
@@ -1121,6 +1197,7 @@ pub fn native_walls_and_top_joins_into(
     }
     reads.type_ids.extend(type_ids);
     reads.type_ids_read.extend(walls.iter().copied());
+    reads.host_panels.extend(host_panels);
     reads.functions.extend(functions);
     reads.functions_read.extend(functions_read);
     reads.bearing.extend(bearing);

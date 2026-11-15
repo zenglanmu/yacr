@@ -33,26 +33,32 @@ pub struct CadViewOrientation {
 ///
 /// These are the same values the Options surface persists, projected without a
 /// second derivation: `navbar_visible` is the navigation-bar switch,
-/// `view_cube_display` the two-bit ViewCube class mask (bit 1 = 3D, bit 2 = 2D)
-/// and the two `view_cube_in_*` flags the per-class visibility.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+/// `view_cube_display` the two-bit ViewCube class mask (bit 1 = 3D, bit 2 = 2D),
+/// the two `view_cube_in_*` flags the per-class visibility and
+/// `orbit_sensitivity_percent` the 3D orbit rate as a percentage of the host's
+/// base rate (`100` = the base rate, the same value `cad_settings` reports under
+/// `orbitSensitivityPercent`).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CadNavigation {
     pub navbar_visible: bool,
     pub view_cube_display: u32,
     pub view_cube_in_2d: bool,
     pub view_cube_in_3d: bool,
+    /// 3D orbit sensitivity as a percentage of the base rate (`100` = base).
+    pub orbit_sensitivity_percent: f64,
 }
 
 impl Default for CadNavigation {
     /// The documented host defaults (no user choice yet): navigation bar on,
-    /// both ViewCube view classes on.
+    /// both ViewCube view classes on, orbit at the base rate (`100` %).
     fn default() -> Self {
         Self {
             navbar_visible: true,
             view_cube_display: 3,
             view_cube_in_2d: true,
             view_cube_in_3d: true,
+            orbit_sensitivity_percent: cad_host::DEFAULT_ORBIT_SENSITIVITY_PERCENT,
         }
     }
 }

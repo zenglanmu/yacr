@@ -140,15 +140,15 @@ dispatch 的 publisher 里。publisher 全绿只代表 **artifact 上传成功**
 |---|---|---|
 | Rust | `1.99.1` | `rust-toolchain.toml` |
 | Node | 见 workflow `NODE_VERSION` | React 前端构建/测试、Playwright、wrangler |
-| wasm-bindgen CLI | `0.2.129`（预编译 musl release，SHA-256 固定） | `scripts/lib/wasm-toolchain.sh` 的 pin + `Cargo.lock` |
+| wasm-bindgen CLI | `0.2.130`（预编译 musl release，SHA-256 固定） | `scripts/lib/wasm-toolchain.sh` 的 pin + `Cargo.lock` |
 | binaryen (`wasm-opt`) | `version_120`（GitHub release，SHA-256 固定） | `scripts/lib/wasm-toolchain.sh` 的 pin；Cloudflare Pages 单文件 25 MiB 上限 |
 | Playwright | `1.64.1`（npm 钉住；不缓存浏览器二进制） | `web-smoke` job |
 
-`web-build` 从 `wasm-bindgen` 官方 release 下载 `wasm-bindgen-0.2.129-x86_64-unknown-linux-musl`、
+`web-build` 从 `wasm-bindgen` 官方 release 下载 `wasm-bindgen-0.2.130-x86_64-unknown-linux-musl`、
 从 binaryen 官方 release 下载 `binaryen-version_120-x86_64-linux`，都用固定 SHA-256 校验，再断言
 CLI 版本与 pin 一致——不依赖 runner 上恰好存在的工具。**本地** bundle 构建（`scripts/build-web.sh`，
 与 `scripts/build-canvas-wasm.sh` 共用 `scripts/lib/wasm-toolchain.sh`）自己校验 wasm-bindgen 与
-`Cargo.toml` 的 `=0.2.129`、`wasm-opt` 与 binaryen `120` **完全一致**，不一致即硬失败；产物用
+`Cargo.toml` 的 `=0.2.130`、`wasm-opt` 与 binaryen `120` **完全一致**，不一致即硬失败；产物用
 `wasm-opt -Oz --skip-pass=merge-similar-functions --strip-debug --strip-producers` 压缩后仍 > 26,214,400 字节（Cloudflare Pages 单文件
 25 MiB 上限）也是硬失败。`check-workflows.py` 断言这些 pin 检查、
 `cargo build -p app-web --target wasm32-unknown-unknown --profile wasm --locked`、`wasm-opt` 与

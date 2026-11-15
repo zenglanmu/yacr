@@ -29,6 +29,10 @@ fn session_settings_report_the_effective_defaults() {
         !settings.left_drag_pans,
         "left drag box-selects until the user opts in"
     );
+    assert_eq!(
+        settings.orbit_sensitivity_percent, 100.0,
+        "3D orbit starts at the base rate (100 %)"
+    );
     assert_eq!(settings.background_model, "#000000");
     assert_eq!(settings.background_paper, "#000000");
     assert_eq!(
@@ -351,6 +355,50 @@ fn session_left_drag_pans_round_trips_and_reads_the_startup_preference() {
         r#"{"interaction":{"leftDragPans":true}}"#,
     )));
     assert!(seeded.settings().left_drag_pans);
+}
+
+/// The persisted `interaction.orbitSensitivityPercent` 3D orbit rate is a plain
+/// preference too: 100 % (the base rate) by default, camelCased on the wire as a
+/// JSON number, reported after a write, and honoured from a startup preference.
+#[test]
+fn session_orbit_sensitivity_round_trips_and_reads_the_startup_preference() {
+    let session = plain_session();
+    assert_eq!(session.settings().orbit_sensitivity_percent, 100.0);
+    assert_eq!(
+        serde_json::to_value(session.settings()).expect("settings serialize")
+            ["orbitSensitivityPercent"],
+        serde_json::json!(100.0),
+        "the default is reported under the camelCase wire key"
+    );
+
+    let settings = session
+        .apply_setting(
+            CadSettingKey::OrbitSensitivityPercent,
+            CadSettingValue::Real(150.0),
+        )
+        .expect("an allowed interaction write");
+    assert_eq!(settings.orbit_sensitivity_percent, 150.0);
+    assert_eq!(session.settings().orbit_sensitivity_percent, 150.0);
+    assert_eq!(
+        serde_json::to_value(&settings).expect("settings serialize")["orbitSensitivityPercent"],
+        serde_json::json!(150.0)
+    );
+
+    // The schema range is enforced by the host's one table: 200.1 is a refusal,
+    // not a clamp, and the reported value is unchanged.
+    let error = session
+        .apply_setting(
+            CadSettingKey::OrbitSensitivityPercent,
+            CadSettingValue::Real(200.1),
+        )
+        .unwrap_err();
+    assert_eq!(error, SETTINGS_INVALID_VALUE);
+    assert_eq!(session.settings().orbit_sensitivity_percent, 150.0);
+
+    let seeded = session_with_config(Rc::new(StaticConfig::preference(
+        r#"{"interaction":{"orbitSensitivityPercent":50}}"#,
+    )));
+    assert_eq!(seeded.settings().orbit_sensitivity_percent, 50.0);
 }
 
 #[test]

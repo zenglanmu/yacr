@@ -635,8 +635,9 @@ const VIEW3D_CLICK_TEMPLATE: &str = r#"
 /// Press at 35% width / 50% height, then move right/down over `DURATION` ms and
 /// **always** release with a `pointerup`. The documented target is ~60% width /
 /// 65% height; on a wide partition that would be a multi-radian yaw, so the
-/// pixel delta is capped at ~90 px right and ~70 px down (0.008 rad/px -> ~0.72
-/// rad yaw / ~0.56 rad pitch), which shows a clearly oblique cube. The real
+/// pixel delta is capped at ~90 px right and ~70 px down (0.0035 rad/px at the
+/// default `orbitSensitivityPercent = 100` -> ~0.32 rad yaw / ~0.25 rad pitch),
+/// which shows a clearly oblique cube. The real
 /// pixel start/end/deltas are recorded, never a computed angle.
 ///
 /// A timer stall-guard keeps the gesture advancing when rAF is throttled or

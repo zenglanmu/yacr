@@ -131,6 +131,7 @@ impl CadSession {
             view_cube_display: settings.navvcube_display,
             view_cube_in_2d: settings.view_cube_in_2d,
             view_cube_in_3d: settings.view_cube_in_3d,
+            orbit_sensitivity_percent: settings.orbit_sensitivity_percent,
         };
         let theme = settings.theme;
         let has_document = drawing.is_some();

@@ -437,6 +437,17 @@ pub struct InteractionConfig {
     /// above this is a plain preference: the gesture reads the effective config
     /// per dispatch, so there is no session state to seed.
     pub left_drag_pans: bool,
+    /// 3D orbit sensitivity as a **percentage** of the host's base rate: `100`
+    /// (the default) is the base rate, `50` halves the rotation per logical
+    /// pixel and `200` doubles it. A plain preference like [`Self::left_drag_pans`]:
+    /// the orbit path reads the effective config per event, so there is no
+    /// session state to seed and a write is live on the next drag.
+    ///
+    /// Valid range is `25.0..=200.0` inclusive; a non-finite or out-of-range
+    /// value is rejected by [`ViewerConfig::validate`], never clamped. The
+    /// gesture additionally clamps the multiplier defensively, so a value that
+    /// was hand-edited past validation can never produce a runaway angle.
+    pub orbit_sensitivity_percent: f64,
 }
 impl Default for InteractionConfig {
     fn default() -> Self {
@@ -450,6 +461,7 @@ impl Default for InteractionConfig {
             ortho_enabled: None,
             snap_spacing: None,
             left_drag_pans: false,
+            orbit_sensitivity_percent: 100.0,
         }
     }
 }

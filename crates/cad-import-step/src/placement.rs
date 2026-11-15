@@ -5,7 +5,7 @@
 //! `NEXT_ASSEMBLY_USAGE_OCCURRENCE` records; `cadmpeg-ir` resolves those into a
 //! canonical occurrence tree (`Model::occurrences`), each entry carrying the
 //! placement relative to its parent. Editing that tree was verified against the
-//! real `cadmpeg-ir` 0.6.11 source, not guessed:
+//! real `cadmpeg-ir` 0.6.12 source, not guessed:
 //!
 //! * `Occurrence::prototype` names the local `ProductDefinition` it instances;
 //! * `ProductDefinition::bodies` lists the shape bodies owned by that definition;

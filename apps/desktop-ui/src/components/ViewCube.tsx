@@ -35,7 +35,7 @@ import type { ViewCubeBasis } from '../cad/viewcube.ts';
 import type { CadViewOrientation } from '../cad/cad-status.ts';
 import { CUBE_FACES, drawCube, pickFace, projectCube, readCubePalette } from '../cad/viewcube-canvas.ts';
 import type { CubeFaceId, CubePalette, CubePoint, CubeQuad } from '../cad/viewcube-canvas.ts';
-import { OrbitDrag, orbitAvailable, orbitDelta, orbitUnavailableReasonKey, ORBIT_NEEDS_3D_KEY } from '../cad/orbit.ts';
+import { OrbitDrag, orbitAvailable, orbitDelta, orbitRadiansPerPixel, orbitUnavailableReasonKey, ORBIT_NEEDS_3D_KEY } from '../cad/orbit.ts';
 import { standardViewAvailable, standardViewUnavailableReasonKey } from '../cad/view3d.ts';
 import { THEME_ATTRIBUTE } from '../theme/theme.ts';
 import './viewcube.css';
@@ -158,6 +158,12 @@ function CubeStage({ basis, view }: { readonly basis: ViewCubeBasis; readonly vi
   const title = t('viewcube.title');
   const orbitEnabled = orbitAvailable({ ...shell, view });
   const orbitReasonKey = orbitUnavailableReasonKey({ ...shell, view });
+  // The user's 3D drag rate (`cad_status.navigation`), a single multiplier for
+  // the mouse and for touch. A host that predates the field keeps the base rate
+  // (`?? 100`), and `orbitRadiansPerPixel` refuses a malformed percentage.
+  const orbitRate = orbitRadiansPerPixel(
+    shell.status?.navigation?.orbitSensitivityPercent ?? 100,
+  );
   // The cube's own 3D sentence is more useful here than the shared ribbon one;
   // every other reason (no document, carrier refusal) is already cube-neutral.
   const orbitHint = orbitEnabled
@@ -290,7 +296,7 @@ function CubeStage({ basis, view }: { readonly basis: ViewCubeBasis; readonly vi
       setHover(null);
     }
     if (!gesture.orbit) return;
-    const delta = orbitDelta(from, to);
+    const delta = orbitDelta(from, to, orbitRate);
     gesture.orbit.push(delta.yaw, delta.pitch);
   };
 

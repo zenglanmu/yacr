@@ -10,7 +10,9 @@
 //! the GPU memory budget percentage the renderer lane reads
 //! (`view.gpuBudget.percent`), the five host-owned appearance/navigation leaves
 //! (`theme`, `navbarVisible`, `navvcubeDisplay`, `viewCubeIn2d`,
-//! `viewCubeIn3d`) and the read-only `--fonts-dir` display value.
+//! `viewCubeIn3d`), the 3D orbit sensitivity percentage
+//! (`interaction.orbitSensitivityPercent`) and the read-only `--fonts-dir`
+//! display value.
 //! Every write goes through the same validated store/persistence path as
 //! [`HostCore::apply_user_preference_json`] — the backend leaf and the five
 //! appearance/navigation leaves are merged into the same durable preference
@@ -45,6 +47,10 @@ pub const SETTINGS_INVALID_PLOT_FORMAT: &str = "settings.invalid_plot_format";
 /// next start.
 pub const SETTINGS_NOT_PERSISTED: &str = "settings.not_persisted";
 
+/// The documented 3D orbit sensitivity: `100` means the host's base rate
+/// (`0.0035` rad per logical pixel). A percentage, never a raw radians value.
+pub const DEFAULT_ORBIT_SENSITIVITY_PERCENT: f64 = 100.0;
+
 /// The closed set of settings the Options dialog may write.
 ///
 /// Everything else AutoCAD's Options dialog exposes has no behavioural backing
@@ -68,6 +74,9 @@ pub enum CadSettingKey {
     /// 2D input scheme: a primary-button drag pans instead of box-selecting
     /// (`interaction.leftDragPans`).
     LeftDragPans,
+    /// 3D orbit sensitivity as a percentage of the base rate
+    /// (`interaction.orbitSensitivityPercent`, default `100`).
+    OrbitSensitivityPercent,
     BackgroundModel,
     BackgroundPaper,
     CrosshairSize,
@@ -94,7 +103,7 @@ pub enum CadSettingKey {
 
 impl CadSettingKey {
     /// Every writable key, in a stable order.
-    pub const ALL: [Self; 23] = [
+    pub const ALL: [Self; 24] = [
         Self::Grid,
         Self::Axes,
         Self::SelectionHighlight,
@@ -106,6 +115,7 @@ impl CadSettingKey {
         Self::OrthoEnabled,
         Self::SnapSpacing,
         Self::LeftDragPans,
+        Self::OrbitSensitivityPercent,
         Self::BackgroundModel,
         Self::BackgroundPaper,
         Self::CrosshairSize,
@@ -141,6 +151,7 @@ impl CadSettingKey {
             Self::OrthoEnabled => "orthoEnabled",
             Self::SnapSpacing => "snapSpacing",
             Self::LeftDragPans => "leftDragPans",
+            Self::OrbitSensitivityPercent => "orbitSensitivityPercent",
             Self::BackgroundModel => "backgroundModel",
             Self::BackgroundPaper => "backgroundPaper",
             Self::CrosshairSize => "crosshairSize",
@@ -175,7 +186,9 @@ impl CadSettingKey {
     /// `gpuBudgetPercent` an integer percentage of the graphics card's memory in
     /// `10..=100` (all four rejected, never clamped), `snapSpacing` a finite
     /// spacing greater than zero drawing units (an integer or a real; `0`,
-    /// negative, non-finite and a wrong shape are rejected, never defaulted), and
+    /// negative, non-finite and a wrong shape are rejected, never defaulted),
+    /// `orbitSensitivityPercent` a finite percentage in `25..=200` (again an
+    /// integer or a real, rejected rather than clamped), and
     /// every switch (including `gridSnapEnabled`, `orthoEnabled` and
     /// `leftDragPans`) is a boolean.
     pub fn validate(self, value: &CadSettingValue) -> Result<(), &'static str> {
@@ -212,6 +225,20 @@ impl CadSettingKey {
             Self::SnapSpacing => match value {
                 CadSettingValue::Number(spacing) if *spacing > 0 => Ok(()),
                 CadSettingValue::Real(spacing) if cad_app::snap_spacing_is_valid(*spacing) => {
+                    Ok(())
+                }
+                _ => Err(SETTINGS_INVALID_VALUE),
+            },
+            // The 3D orbit sensitivity: a percentage of the host's base rate,
+            // refused outside `25..=200` rather than clamped. Both an integer wire
+            // number and a fractional one are accepted; a non-finite real is
+            // refused (the parser already rejects it, this is the table's own
+            // guarantee).
+            Self::OrbitSensitivityPercent => match value {
+                CadSettingValue::Number(percent) if (25..=200).contains(percent) => Ok(()),
+                CadSettingValue::Real(percent)
+                    if percent.is_finite() && (25.0..=200.0).contains(percent) =>
+                {
                     Ok(())
                 }
                 _ => Err(SETTINGS_INVALID_VALUE),
@@ -312,6 +339,10 @@ pub struct HostSettings {
     /// 2D input scheme: `true` means a primary-button drag pans instead of
     /// box-selecting (`interaction.leftDragPans`, default `false`).
     pub left_drag_pans: bool,
+    /// 3D orbit sensitivity as a percentage of the host's base rate
+    /// (`interaction.orbitSensitivityPercent`, default `100`, valid
+    /// `25.0..=200.0`).
+    pub orbit_sensitivity_percent: f64,
     /// Canonical lower-case `#rrggbb` of the model-space background.
     pub background_model: String,
     /// Canonical lower-case `#rrggbb` of the paper-space background.
@@ -390,6 +421,7 @@ impl HostCore {
             .effective()
             .interaction
             .left_drag_pans;
+        let orbit_sensitivity_percent = self.orbit_sensitivity_percent();
         let (snap_enabled, hover_preview, grid_snap_enabled, ortho_enabled, snap_spacing) = {
             let controller = self.controller.borrow();
             (
@@ -412,6 +444,7 @@ impl HostCore {
             ortho_enabled,
             snap_spacing,
             left_drag_pans,
+            orbit_sensitivity_percent,
             background_model,
             background_paper,
             crosshair_percent,
@@ -512,6 +545,7 @@ impl HostCore {
             }
             CadSettingKey::SnapSpacing => self.apply_snap_spacing(&value),
             CadSettingKey::LeftDragPans => self.apply_interaction_flag("leftDragPans", &value),
+            CadSettingKey::OrbitSensitivityPercent => self.apply_orbit_sensitivity_percent(&value),
             CadSettingKey::BackgroundModel => self.apply_background_preference("model", &value),
             CadSettingKey::BackgroundPaper => self.apply_background_preference("paper", &value),
             CadSettingKey::CrosshairSize => self.apply_crosshair_size(&value),

@@ -343,6 +343,30 @@ export const OPTIONS_FIELDS: readonly OptionField[] = Object.freeze<OptionField[
     helpKey: 'options.help.leftDragPans',
   },
   {
+    // The 3D orbit drag rate as a percentage of the base rate: 100 is the base
+    // rate (`ORBIT_RADIANS_PER_PIXEL` in `cad/orbit.ts`), 25 is a quarter of it
+    // and 200 twice. One multiplier for both mouse drags and touch swipes, so
+    // the ViewCube and a one-finger drag across the surface speed up together.
+    // Read from `cad_settings.orbitSensitivityPercent`, written through the
+    // `cad_set_setting` key of the same spelling; the host re-validates `25..=200`
+    // and its refusal is authoritative.
+    //
+    // `real`, not `number`: the host's rule is a closed **f64** interval
+    // (`25.0..=200.0`, no integer requirement), so a hand-edited `60.5` is a
+    // legal host value. The integer editor would seed it as "not reported" and
+    // make the real setting uneditable; the decimal editor seeds and writes it.
+    id: 'orbitSensitivity',
+    tab: 'drafting',
+    kind: 'real',
+    wire: 'orbitSensitivityPercent',
+    key: 'orbitSensitivityPercent',
+    min: 25,
+    max: 200,
+    unitKey: 'options.unit.percent',
+    labelKey: 'options.field.orbitSensitivity',
+    helpKey: 'options.help.orbitSensitivity',
+  },
+  {
     id: 'plotFormat',
     tab: 'plot',
     kind: 'select',

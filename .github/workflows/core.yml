@@ -315,8 +315,8 @@ jobs:
           pin="$(sed -n 's/^readonly YACR_PINNED_WASM_BINDGEN="\(.*\)"$/\1/p' scripts/lib/wasm-toolchain.sh)"
           test -n "$pin" || { echo "no wasm-bindgen pin in scripts/lib/wasm-toolchain.sh" >&2; exit 1; }
           case "$pin" in
-            0.2.129)
-              sha="82d12bb940e2d4e72e0d5605387fc1b8ca179044e012b620f0ce4e7440e8320e" ;;
+            0.2.130)
+              sha="9687f3bb551b9f66f37ed32a40d7913a00f7962db653054e56857bc306c3227f" ;;
             *)
               echo "no verified download for wasm-bindgen $pin; add its release SHA-256 to this step" >&2
               exit 1 ;;

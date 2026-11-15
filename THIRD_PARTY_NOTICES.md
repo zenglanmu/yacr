@@ -17,12 +17,12 @@
   `docs/dgn.md` 声明的边界提供**矢量文档导入**，不宣称 V8i/CONNECT/ORD 或真实 MicroStation
   兼容；其传递依赖（`flate2`/`miniz_oxide`、`encoding_rs`、`serde`/`serde_json`、
   `thiserror` 等）的实际版本与许可证见 Cargo.lock，分发前需做完整依赖审计。
-- cadmpeg-codec-step 0.6.11：ISO 10303-21（STEP，AP203/AP214/AP242）Part 21 解码器，
+- cadmpeg-codec-step 0.6.12：ISO 10303-21（STEP，AP203/AP214/AP242）Part 21 解码器，
   Apache-2.0，上游 <https://github.com/cadmpeg/cadmpeg>。仅由 `cad-import-step` 依赖；未修改。
-- cadmpeg-ir 0.6.11：cadmpeg 的中立 CAD IR（拓扑、单位、产品/occurrence、loss 报告与
+- cadmpeg-ir 0.6.12：cadmpeg 的中立 CAD IR（拓扑、单位、产品/occurrence、loss 报告与
   `Codec` 契约），Apache-2.0，同一上游。仅由 `cad-import-step` 直接依赖（`Codec`/
   `DecodeOptions` 定义在此 crate，不在 codec crate）；未修改。
-- cadmpeg-tessellate 0.6.11：cadmpeg 的 B-rep 逐面三角化器，Apache-2.0，同一上游。
+- cadmpeg-tessellate 0.6.12：cadmpeg 的 B-rep 逐面三角化器，Apache-2.0，同一上游。
   仅由 `cad-import-step` 依赖；未修改。三个 cadmpeg crate 都未启用额外 feature。
 - ifc-lite-core / ifc-lite-geometry 28.2.0：IFC（IFC2X3/IFC4/IFC4X3）Part 21 读取器与
   建筑几何网格化器，**MPL-2.0**，上游 <https://github.com/LTplus-AG/ifc-lite>。仅由
@@ -31,11 +31,12 @@
   文件级 copyleft：披露义务针对被修改的源文件，本仓库不作任何修改，仅以编译产物形式链接；
   其源码可从上游与 crates.io 取得。该 crate 内含若干传递依赖（如 `i_overlay`、
   `geometry-predicates`、`nalgebra`）；实际版本与许可证见 Cargo.lock，分发前需做完整依赖审计。
-- rvt 0.22.0：Autodesk Revit（`.rvt`/`.rte`/`.rfa`/`.rft`）的 clean-room 读取器与
+- rvt 0.24.0：Autodesk Revit（`.rvt`/`.rte`/`.rfa`/`.rft`）的 clean-room 读取器与
   IFC4/glTF/plan-SVG 导出器，**Apache-2.0**，上游 <https://github.com/DrunkOnJava/rvt-rs>。
-  仅由 `cad-import-rvt` 依赖；版本在 workspace 中**精确固定**（`=0.22.0`），未启用额外
-  feature。**源码有本地补丁**：上游 0.22.0 的一份完整副本以固定路径 `vendor/rvt` 引入
-  （Apache-2.0 允许修改与再分发），只改 `src/ifc/gltf.rs` 的透明度选择（材质来源标记 `extras` 已包含在上游 0.22.0）；改动、
+  仅由 `cad-import-rvt` 依赖；版本在 workspace 中**精确固定**（`=0.24.0`），未启用额外
+  feature。**源码有本地补丁**：上游 0.24.0 的一份完整副本以固定路径 `vendor/rvt` 引入
+  （Apache-2.0 允许修改与再分发），只改 `src/ifc/gltf.rs` 的透明度选择（材质来源标记 `extras`
+  与 material 索引越界过滤都已包含在上游 0.24.0）；改动、
   理由、测试与移除条件见 `docs/rvt-patches.md` 与 ADR-0035，补丁文件本身随仓库分发。
   它是 **preview** 读取器：2008–2023 的构件体是包围盒，2024/2025 为 `partial`，
   2026/2027 为 `experimental`，家族文件没有几何；本仓库不把其输出用于测量。

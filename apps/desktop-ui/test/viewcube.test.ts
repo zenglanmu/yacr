@@ -150,6 +150,13 @@ test('the component is a canvas with hidden real faces, Home and an orbit drag',
   assert.ok(source.includes('pickFace('), 'a click hit-tests the visible faces');
   assert.ok(source.includes('new OrbitDrag('), 'a drag goes through the one coalescer');
   assert.ok(source.includes('orbitDelta('), 'the drag uses the host-mirroring delta');
+  assert.ok(source.includes('orbitRadiansPerPixel('), 'the drag rate comes from the sensitivity helper');
+  assert.ok(source.includes('orbitDelta(from, to, orbitRate)'), 'the chosen rate is passed to the delta');
+  // The rate is host truth from `cad_status.navigation`, with the documented
+  // 100 % fallback for an older host: no localStorage, no second singleton.
+  assert.ok(source.includes('navigation?.orbitSensitivityPercent'), 'the percentage is read from the status block');
+  assert.ok(source.includes('?? 100'), 'an absent field keeps the base rate');
+  assert.equal(source.includes('localStorage'), false, 'a setting is host truth, never a local copy');
   assert.ok(source.includes('orbitAvailable('), 'the carrier/view gate is shared, not local');
   assert.ok(source.includes('onLostPointerCapture') && source.includes('onPointerCancel'), 'a cancelled gesture ends without a camera move');
   // The honest states.

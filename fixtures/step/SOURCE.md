@@ -8,7 +8,7 @@ contract only; they are **not** compatibility or product-acceptance evidence.
 `ap214-sheet.p21` and `ap203-sheet.p21` are byte-for-byte copies of the upstream
 test fixtures:
 
-- crate: `cadmpeg-codec-step` 0.6.11
+- crate: `cadmpeg-codec-step` 0.6.12 (the two files are byte-identical in 0.6.11 and 0.6.12)
 - local path in the crates.io package:
   `tests/fixtures/ap214_sheet.p21`, `tests/fixtures/ap203_sheet.p21`
 - upstream: <https://github.com/cadmpeg/cadmpeg>

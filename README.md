@@ -329,7 +329,7 @@ Both bundles stage the font package into `fonts/` by default: `WITH_FONTS=1` ass
 mlightcad catalogue with `scripts/fetch-fonts.sh` (network), `WITH_FONTS=0` keeps the committed package
 (offline) and `FONTS_DIR=<dir>` reuses a prepared one. The page still resolves fonts lazily, after a
 document opens, from that same-origin `fonts/`. Wasm builds additionally need the
-`wasm32-unknown-unknown` target and the pinned `wasm-bindgen 0.2.129`.
+`wasm32-unknown-unknown` target and the pinned `wasm-bindgen 0.2.130`.
 
 ### Other platforms
 

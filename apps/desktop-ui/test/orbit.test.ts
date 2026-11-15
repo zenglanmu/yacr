@@ -19,6 +19,7 @@ import {
   orbitAvailable,
   orbitFailure,
   orbitDelta,
+  orbitRadiansPerPixel,
   orbitUnavailableReasonKey,
   requestOrbit,
   submitOrbit,
@@ -61,17 +62,44 @@ function manualFrames() {
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
 test('the drag delta mirrors cad-host: right yaws negative, down pitches positive', () => {
-  assert.equal(ORBIT_RADIANS_PER_PIXEL, 0.008);
+  assert.equal(ORBIT_RADIANS_PER_PIXEL, 0.0035);
   const delta = orbitDelta([10, 10], [20, 22]);
   assert.equal(delta.yaw, -10 * ORBIT_RADIANS_PER_PIXEL);
   assert.equal(delta.pitch, 12 * ORBIT_RADIANS_PER_PIXEL);
   // A pure horizontal drag never pitches, and a pure vertical drag never yaws.
-  assert.deepEqual(orbitDelta([5, 5], [15, 5]), { yaw: -0.08, pitch: 0 });
-  assert.deepEqual(orbitDelta([5, 5], [5, 15]), { yaw: 0, pitch: 0.08 });
+  assert.deepEqual(orbitDelta([5, 5], [15, 5]), { yaw: -10 * ORBIT_RADIANS_PER_PIXEL, pitch: 0 });
+  assert.deepEqual(orbitDelta([5, 5], [5, 15]), { yaw: 0, pitch: 10 * ORBIT_RADIANS_PER_PIXEL });
   // Non-finite input poisons nothing.
   assert.deepEqual(orbitDelta([0, 0], [Number.NaN, 10]), { yaw: 0, pitch: 0 });
   assert.deepEqual(orbitDelta([0, 0], [10, Infinity]), { yaw: 0, pitch: 0 });
   assert.deepEqual(orbitDelta([0, 0], [10, 10]), orbitDelta([100, 100], [110, 110]), 'only the difference matters');
+});
+
+test('the sensitivity scales the host base rate, and a bad percentage reads as 100', () => {
+  // 100 % is exactly the host's base rate: one number, no second tuning knob.
+  assert.equal(orbitRadiansPerPixel(100), ORBIT_RADIANS_PER_PIXEL);
+  assert.equal(orbitRadiansPerPixel(25), ORBIT_RADIANS_PER_PIXEL * 0.25);
+  assert.equal(orbitRadiansPerPixel(200), ORBIT_RADIANS_PER_PIXEL * 2);
+  // Out-of-range or non-finite percentages are the default, never a NaN/0 rate
+  // (the coalescer would silently drop every delta and the drag would look dead).
+  for (const bad of [24, 201, 0, -100, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+    assert.equal(orbitRadiansPerPixel(bad), ORBIT_RADIANS_PER_PIXEL, String(bad));
+  }
+
+  // The third argument is what the ViewCube passes: only the magnitude changes,
+  // the host's signs are untouched.
+  const base = orbitDelta([10, 10], [20, 22]);
+  const slow = orbitDelta([10, 10], [20, 22], orbitRadiansPerPixel(50));
+  const fast = orbitDelta([10, 10], [20, 22], orbitRadiansPerPixel(200));
+  assert.ok(slow.yaw < 0 && slow.pitch > 0, 'right yaws negative and down pitches positive');
+  assert.ok(fast.yaw < 0 && fast.pitch > 0);
+  assert.equal(slow.yaw, base.yaw / 2);
+  assert.equal(slow.pitch, base.pitch / 2);
+  assert.equal(fast.yaw, base.yaw * 2);
+  assert.equal(fast.pitch, base.pitch * 2);
+  // A non-finite/non-positive rate falls back to the base rate.
+  assert.deepEqual(orbitDelta([10, 10], [20, 22], Number.NaN), base);
+  assert.deepEqual(orbitDelta([10, 10], [20, 22], 0), base);
 });
 
 test('orbit needs a loaded 3D drawing and a carrier that did not refuse it', () => {

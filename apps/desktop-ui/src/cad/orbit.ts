@@ -9,11 +9,13 @@
 //
 // # The gesture mirrors the host
 //
-// `crates/cad-host/src/input/pointer.rs` maps a drag delta to radians with
-// `ORBIT_RADIANS_PER_PIXEL = 0.008`, `yaw = -dx * K`, `pitch = +dy * K` (yaw about
-// world +Z, pitch about the view's right axis). The same constant and signs live
-// here so a drag on the ViewCube and a drag on the native surface rotate the same
-// way. Non-finite input yields `(0, 0)` instead of poisoning a camera.
+// `crates/cad-host/src/input/pointer.rs` maps a drag delta to radians with one
+// base rate, `yaw = -dx * K`, `pitch = +dy * K` (yaw about world +Z, pitch about
+// the view's right axis), where
+// `K = ORBIT_RADIANS_PER_PIXEL * orbitSensitivityPercent / 100`. The same base
+// rate, multiplier and signs live here so a drag on the ViewCube and a drag on
+// the native surface rotate the same way, at the speed chosen in Options.
+// Non-finite input yields `(0, 0)` instead of poisoning a camera.
 //
 // # Carrier capability: `cad_status.hostProfile.orbit`
 //
@@ -28,11 +30,43 @@ import type { Translator } from '../i18n.ts';
 import type { Invoke } from './view3d.ts';
 
 /**
- * Radians of orbit per CSS pixel of drag — the host's own constant
- * (`cad-host/src/input/pointer.rs`). The gesture must feel identical on both
- * surfaces, so this is a mirror, not a second tuning knob.
+ * Radians of orbit per CSS pixel of drag at **100 %** sensitivity — the host's
+ * own base rate (`cad-host/src/input/pointer.rs`). 0.0035 rad/px is about
+ * 0.20°/px, so a full-width desktop drag (≈1200 px) turns about 240° — under a
+ * full turn — and a thumb-length phone swipe (≈380 px) about 76°.
+ *
+ * The user's `orbitSensitivityPercent` multiplies this base rate on **both**
+ * surfaces (`orbitRadiansPerPixel`), so this stays the one base value the host
+ * also uses; it is a mirror, not a second tuning knob.
  */
-export const ORBIT_RADIANS_PER_PIXEL = 0.008;
+export const ORBIT_RADIANS_PER_PIXEL = 0.0035;
+
+/** The sensitivity the host applies when it was never changed (100 %). */
+export const ORBIT_SENSITIVITY_DEFAULT_PERCENT = 100;
+/** The slowest rate the host accepts (a quarter of the base rate). */
+export const ORBIT_SENSITIVITY_MIN_PERCENT = 25;
+/** The fastest rate the host accepts (twice the base rate). */
+export const ORBIT_SENSITIVITY_MAX_PERCENT = 200;
+
+/**
+ * The base rate scaled by the user's sensitivity (`25..=200` percent).
+ *
+ * The value is a comfort setting, not a capability: a non-finite or
+ * out-of-range percentage falls back to [`ORBIT_SENSITIVITY_DEFAULT_PERCENT`]
+ * instead of making every delta non-finite (which the coalescer would drop
+ * silently, leaving the gesture looking dead). An older host that omits the
+ * status field is handled the same way by the caller (`?? 100`).
+ */
+export function orbitRadiansPerPixel(percent: number): number {
+  const chosen = Number.isFinite(percent)
+    && percent >= ORBIT_SENSITIVITY_MIN_PERCENT
+    && percent <= ORBIT_SENSITIVITY_MAX_PERCENT
+    ? percent
+    : ORBIT_SENSITIVITY_DEFAULT_PERCENT;
+  // Divide first so 100 % is *exactly* the base constant (`100 / 100 === 1`),
+  // not a re-rounded multiply-then-divide.
+  return ORBIT_RADIANS_PER_PIXEL * (chosen / 100);
+}
 
 /** A refused request whose angles were not finite; never sent. */
 export const CAD_ORBIT_NOT_FINITE = 'CAD_ORBIT_NOT_FINITE';
@@ -186,19 +220,30 @@ export async function submitOrbit({ invoke, yaw, pitch, t, report }: OrbitSubmis
   return result;
 }
 
-/** The radians a drag from `from` to `to` should orbit by (host signs). */
+/**
+ * The radians a drag from `from` to `to` should orbit by (host signs).
+ *
+ * `radiansPerPixel` defaults to the base rate; the ViewCube passes the user's
+ * `orbitRadiansPerPixel(...)` so the cube drag respects the sensitivity setting.
+ * A non-finite or non-positive rate falls back to the base rate: otherwise every
+ * delta would be non-finite and the coalescer would drop it silently.
+ */
 export function orbitDelta(
   from: readonly [number, number],
   to: readonly [number, number],
+  radiansPerPixel: number = ORBIT_RADIANS_PER_PIXEL,
 ): { readonly yaw: number; readonly pitch: number } {
   const dx = to[0] - from[0];
   const dy = to[1] - from[1];
   if (!Number.isFinite(dx) || !Number.isFinite(dy)) return { yaw: 0, pitch: 0 };
+  const rate = Number.isFinite(radiansPerPixel) && radiansPerPixel > 0
+    ? radiansPerPixel
+    : ORBIT_RADIANS_PER_PIXEL;
   // `dx === 0` keeps the result a real `0`, never `-0`: the value is compared
   // (and serialised) downstream, and `-0` is noise from `-dx * K`.
   return {
-    yaw: dx === 0 ? 0 : -dx * ORBIT_RADIANS_PER_PIXEL,
-    pitch: dy === 0 ? 0 : dy * ORBIT_RADIANS_PER_PIXEL,
+    yaw: dx === 0 ? 0 : -dx * rate,
+    pitch: dy === 0 ? 0 : dy * rate,
   };
 }
 

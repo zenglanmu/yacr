@@ -47,6 +47,7 @@ mod settings_backend;
 mod settings_drafting;
 mod settings_gpu;
 mod settings_input;
+mod settings_orbit;
 mod snap_marker;
 mod text_tool;
 mod tolerance;

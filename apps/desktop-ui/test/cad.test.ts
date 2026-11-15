@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { commandEnabled, handleCommandKey, queueCadCommand } from '../src/cad/cad-command.ts';
 import { importProgressView, parseCadStatus, requestImportCancel } from '../src/cad/cad-status.ts';
+import { parseCadNavigation } from '../src/cad/navigation.ts';
 import { setCommandCatalog } from '../src/commands/commands.ts';
 import { readAppSource, readComponentsSource, readModule } from './helpers.ts';
 
@@ -97,6 +98,58 @@ test('the standard-view list is validated inside hostProfile: null or an array o
       /CAD_STATUS_INVALID/,
       `standardViews ${JSON.stringify(standardViews)}`,
     );
+  }
+});
+
+test('the orbit sensitivity is read leniently: absent or unusable means 100', () => {
+  const navigation = {
+    navbarVisible: true, viewCubeDisplay: 3, viewCubeIn2d: true, viewCubeIn3d: true,
+  };
+  // An older host omits the field: the block parses, the field stays absent and
+  // every reader applies the documented 100 (`?? 100`).
+  const absent = { ...empty, navigation };
+  assert.equal(parseCadStatus(absent), absent);
+  assert.equal(parseCadStatus(absent).navigation.orbitSensitivityPercent, undefined);
+  assert.equal(parseCadNavigation(navigation), navigation, 'a valid block keeps its identity');
+
+  // Legal values pass straight through. The host's own rule is a finite `f64`
+  // in `25..=200`, so a fractional percentage from a hand-edited config is a
+  // legal status value even though the Options row edits whole numbers.
+  const legal = { ...empty, navigation: { ...navigation, orbitSensitivityPercent: 150 } };
+  assert.equal(parseCadStatus(legal), legal);
+  assert.equal(parseCadStatus(legal).navigation.orbitSensitivityPercent, 150);
+  for (const percent of [25, 60.5, 100, 200]) {
+    assert.equal(parseCadNavigation({ ...navigation, orbitSensitivityPercent: percent }).orbitSensitivityPercent, percent);
+  }
+
+  // Out of range, non-finite or not a number is read as 100 instead of taking
+  // the whole status down: it only scales a drag rate.
+  for (const percent of [24, 201, 0, -50, Number.NaN, Infinity, '150', null, {}]) {
+    const block = { ...navigation, orbitSensitivityPercent: percent };
+    assert.equal(
+      parseCadNavigation(block).orbitSensitivityPercent,
+      100,
+      `parseCadNavigation(${String(percent)})`,
+    );
+    const status = { ...empty, navigation: block };
+    assert.equal(
+      parseCadStatus(status).navigation.orbitSensitivityPercent,
+      100,
+      `parseCadStatus(${String(percent)})`,
+    );
+    // Normalising is a copy, never a mutation of the payload the host sent.
+    assert.deepEqual(block.orbitSensitivityPercent, percent);
+  }
+
+  // The four switches stay strict: a partial block is still a contract
+  // violation, so a missing switch cannot silently take a default.
+  for (const block of [
+    { ...navigation, navbarVisible: 'yes' },
+    { ...navigation, viewCubeDisplay: 4 },
+    { ...navigation, viewCubeIn2d: 'true' },
+    { navbarVisible: true, viewCubeDisplay: 3 },
+  ]) {
+    assert.throws(() => parseCadStatus({ ...empty, navigation: block }), /CAD_STATUS_INVALID/);
   }
 });
 

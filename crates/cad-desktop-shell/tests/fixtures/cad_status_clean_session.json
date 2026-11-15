@@ -36,6 +36,7 @@
   "loading": false,
   "navigation": {
     "navbarVisible": true,
+    "orbitSensitivityPercent": 100.0,
     "viewCubeDisplay": 3,
     "viewCubeIn2d": true,
     "viewCubeIn3d": true

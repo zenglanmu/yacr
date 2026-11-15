@@ -244,7 +244,10 @@ impl HostCore {
             // A 3D orbit is navigation, never a window: an arm that predates the
             // 3D switch is dropped rather than kept for some later 2D drag.
             self.disarm_zoom_window();
-            let (yaw, pitch) = orbit_delta(from, point);
+            // The user's sensitivity preference is read per event (like
+            // `leftDragPans`), so a settings write is live on the next drag.
+            let radians_per_pixel = orbit_radians_per_pixel(self.orbit_sensitivity_percent());
+            let (yaw, pitch) = orbit_delta(from, point, radians_per_pixel);
             self.orbit(yaw, pitch)?;
         } else {
             self.disarm_zoom_window();
@@ -751,23 +754,56 @@ impl HostCore {
     }
 }
 
-/// Radians of orbit per logical pixel of drag.
+/// Base rate of 3D orbit: radians per **logical** pixel at `100` % sensitivity.
 ///
-/// Mirrors the shared navigation constant; the UI-free host owns the orbit
-/// decision under the engine boundary.
-const ORBIT_RADIANS_PER_PIXEL: f64 = 0.008;
+/// This is only the base rate; the user's multiplier is
+/// `interaction.orbitSensitivityPercent` (`100` = this rate), applied by
+/// [`orbit_radians_per_pixel`]. The unit is deliberately **logical pixels**, not
+/// physical pixels and not "per DPI": a surface already applies its scale factor
+/// to the pointer positions, so a per-physical-pixel rate would make the same
+/// hand movement rotate twice as fast on a HiDPI display.
+const ORBIT_RADIANS_PER_PIXEL: f64 = 0.0035;
+
+/// Defensive bounds on the user multiplier: `25` % and `200` %, the schema's own
+/// accepted range. A preference that was hand-edited past validation can never
+/// produce a runaway orbit angle.
+const ORBIT_SENSITIVITY_MIN_MULTIPLIER: f64 = 0.25;
+const ORBIT_SENSITIVITY_MAX_MULTIPLIER: f64 = 2.0;
+
+/// Effective radians of orbit per logical pixel for a sensitivity `percent`.
+///
+/// `100` is [`ORBIT_RADIANS_PER_PIXEL`], `50` halves it and `200` doubles it. A
+/// non-finite or non-positive percentage falls back to the base rate; a finite
+/// percentage is clamped into the schema range (`25..=200`, as a multiplier
+/// `0.25..=2.0`) rather than trusted, because the orbit path must not depend on
+/// the durable document having been validated.
+pub(crate) fn orbit_radians_per_pixel(percent: f64) -> f64 {
+    let percent = if percent.is_finite() && percent > 0.0 {
+        percent
+    } else {
+        crate::DEFAULT_ORBIT_SENSITIVITY_PERCENT
+    };
+    let multiplier = (percent / crate::DEFAULT_ORBIT_SENSITIVITY_PERCENT).clamp(
+        ORBIT_SENSITIVITY_MIN_MULTIPLIER,
+        ORBIT_SENSITIVITY_MAX_MULTIPLIER,
+    );
+    ORBIT_RADIANS_PER_PIXEL * multiplier
+}
 
 /// Convert a 3D orbit drag delta (logical pixels) into `(yaw, pitch)` radians.
 ///
 /// Horizontal drag yaws about world `+Z`; vertical drag pitches about the view
-/// right axis. Non-finite input yields `(0, 0)` rather than poisoning a camera.
-fn orbit_delta(from: [f64; 2], to: [f64; 2]) -> (f64, f64) {
+/// right axis. `radians_per_pixel` is the effective rate
+/// ([`orbit_radians_per_pixel`]). A non-finite input or rate yields `(0, 0)`
+/// rather than poisoning a camera with a NaN angle — the same finite-only
+/// contract the shared `OrbitDelta` wire type applies to `cad_orbit`.
+pub(crate) fn orbit_delta(from: [f64; 2], to: [f64; 2], radians_per_pixel: f64) -> (f64, f64) {
     let dx = to[0] - from[0];
     let dy = to[1] - from[1];
-    if !dx.is_finite() || !dy.is_finite() {
+    if !dx.is_finite() || !dy.is_finite() || !radians_per_pixel.is_finite() {
         return (0.0, 0.0);
     }
-    (-dx * ORBIT_RADIANS_PER_PIXEL, dy * ORBIT_RADIANS_PER_PIXEL)
+    (-dx * radians_per_pixel, dy * radians_per_pixel)
 }
 
 /// Euclidean distance between two logical positions.
@@ -775,4 +811,77 @@ fn logical_distance(a: [f64; 2], b: [f64; 2]) -> f64 {
     let dx = a[0] - b[0];
     let dy = a[1] - b[1];
     (dx * dx + dy * dy).sqrt()
+}
+
+#[cfg(test)]
+mod orbit_rate_tests {
+    //! The rate arithmetic itself: the base rate, the user multiplier and the
+    //! defensive clamp. The end-to-end camera effect is pinned by
+    //! `crate::tests::settings_orbit`.
+
+    use super::*;
+
+    /// `100` % is the documented `0.0035` rad per logical pixel.
+    #[test]
+    fn the_base_rate_is_the_hundred_percent_rate() {
+        assert!((orbit_radians_per_pixel(100.0) - 0.0035).abs() < 1e-15);
+    }
+
+    /// The multiplier is linear across the accepted range (`25..=200`).
+    #[test]
+    fn the_multiplier_is_linear_between_25_and_200() {
+        assert!((orbit_radians_per_pixel(50.0) - 0.00175).abs() < 1e-15);
+        assert!((orbit_radians_per_pixel(25.0) - 0.000875).abs() < 1e-15);
+        assert!((orbit_radians_per_pixel(200.0) - 0.007).abs() < 1e-15);
+    }
+
+    /// A hand-edited preference outside the schema range cannot run away: the
+    /// multiplier is clamped to `[0.25, 2.0]`, and a non-finite percentage falls
+    /// back to the base rate.
+    #[test]
+    fn an_out_of_range_or_non_finite_percentage_cannot_run_away() {
+        assert_eq!(
+            orbit_radians_per_pixel(500.0),
+            orbit_radians_per_pixel(200.0)
+        );
+        assert_eq!(orbit_radians_per_pixel(1.0), orbit_radians_per_pixel(25.0));
+        assert_eq!(
+            orbit_radians_per_pixel(f64::NAN),
+            orbit_radians_per_pixel(100.0)
+        );
+        assert_eq!(
+            orbit_radians_per_pixel(f64::INFINITY),
+            orbit_radians_per_pixel(100.0)
+        );
+        assert_eq!(
+            orbit_radians_per_pixel(-50.0),
+            orbit_radians_per_pixel(100.0)
+        );
+    }
+
+    /// A 100 px drag at 100 % is `0.35` rad yaw; vertical drag pitches with the
+    /// opposite sign convention and the same magnitude.
+    #[test]
+    fn a_hundred_pixel_drag_yaws_the_base_rate() {
+        let rate = orbit_radians_per_pixel(100.0);
+        let (yaw, pitch) = orbit_delta([100.0, 100.0], [200.0, 100.0], rate);
+        assert!((yaw + 0.35).abs() < 1e-12, "{yaw}");
+        assert_eq!(pitch, 0.0);
+
+        let (yaw, pitch) = orbit_delta([0.0, 0.0], [0.0, 100.0], rate);
+        assert_eq!(yaw, 0.0);
+        assert!((pitch - 0.35).abs() < 1e-12, "{pitch}");
+    }
+
+    /// A non-finite delta or rate produces no rotation rather than a NaN angle.
+    #[test]
+    fn a_non_finite_delta_or_rate_yields_no_rotation() {
+        let rate = orbit_radians_per_pixel(100.0);
+        assert_eq!(orbit_delta([0.0, 0.0], [f64::NAN, 0.0], rate), (0.0, 0.0));
+        assert_eq!(orbit_delta([0.0, 0.0], [10.0, f64::NAN], rate), (0.0, 0.0));
+        assert_eq!(
+            orbit_delta([0.0, 0.0], [10.0, 10.0], f64::INFINITY),
+            (0.0, 0.0)
+        );
+    }
 }

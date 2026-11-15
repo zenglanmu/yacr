@@ -45,7 +45,7 @@ serde_json.workspace = true
 
 # Hand-rolled Win32 child window (class, z-order, sizing) + WebView2 runtime
 # detection (registry queries). Version-matched to the `windows`/`webview2-com`
-# that `tauri 2.12.3`/`wry 0.57.0` put in `Cargo.lock` (windows 0.62 /
+# that `tauri 2.12.5`/`wry 0.57.0` put in `Cargo.lock` (windows 0.62 /
 # webview2-com 0.39), so this adds no duplicate COM bindings. The tauri bump
 # forced this retarget (0.61/0.38); the code needed no changes.
 windows = { version = "0.62", features = [
