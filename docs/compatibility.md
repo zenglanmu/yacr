@@ -624,9 +624,9 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `VPORTS` / `-VPORTS` | 部分实现 | 校验 `rows`/`cols` 正整数与图纸空间后按 `vports.write_unsupported` 拒绝 | 无 `PaperViewport` 创建 API；`-VPORTS` 是同一实现 |
 | `VPMAX` | 部分实现 | 会话标记活动图纸布局的第一个视口（无每视口选择模型）；不写库 | 不改变视口几何；真实最大化显示由宿主消费（未验证） |
 | `VPMIN` | 部分实现 | 恢复会话标记；空状态为 `vpmin.nothing_to_restore` | 同上；不写库 |
-| `VPCLIP` | 部分实现 | 校验 `RECT <minx> <miny> <maxx> <maxy>`；非矩形按 `vpclip.polygonal_not_implemented` 拒绝；合法矩形后按 `vpclip.viewport_selection_unsupported` 拒绝 | 无选中视口/裁剪写 API；多边形裁剪未实现 |
-| `VPSCALE` | 部分实现 | 校验零/非有限/未知比例；解析后按 `vpscale.write_unsupported` 拒绝 | 无视口比例写 API；不修改视口 |
-| `LAYVPI` | 部分实现 | 真实写入活动布局所有视口的 `PaperViewport.layer_overrides`，纸空间表示按视口过滤模型几何；一条事务/一步撤销；**绝不**全局冻结 | 无视口选择（应用到全部视口）；导入 VPLAYER 未解析 |
+| `VPCLIP` | 完整实现 | 矩形（`RECT`）与多边形（N 点）clip 都写入并真实渲染：表示层把矩形分派到原半平面裁剪器（输出逐字节不变），多边形按交点分段 / 圆锥曲线参数切分 / 网格与填充与图像耳切凸窗求交；无索引时作用于 `CVPORT` 当前视口，显式索引优先；一条事务/一步撤销 | 声明的边界：无平移的 3 点边界按 `*.ambiguous_triangle` 拒绝（否则会存成旧 3 点记录）；视口「孔洞」（多环裁剪）不建模；退化/自交/非共面按 `viewport.polygon_*` 具名拒绝 |
+| `VPSCALE` | 完整实现 | 写目标视口的比例：无索引 = `CVPORT` 当前视口，显式索引可指定；存对角线 `1/factor` 并重算平移以保留模型锚点；零/非有限/未知比例与越界索引按名拒绝；一条事务/一步撤销 | 无「按视口比例统一图纸单位」的 `PSLTSCALE` 联动；无比例列表对话框（`SCALELISTEDIT` 另计） |
+| `LAYVPI` | 完整实现 | 无索引 = 冻结所选图层于**除 `CVPORT` 当前视口外的全部视口**（写入各视口 `layer_overrides`，纸空间表示按视口过滤模型几何），显式索引形式优先；当前视口是唯一视口时 `layvpi.no_other_viewport`；一条事务/一步撤销；**绝不**全局冻结 | 导入的 VPLAYER 记录未解析（属导入侧，不在本命令范围）；无 `Settings` 提示环 |
 
 > **证据边界**：以上 10 条只有 Rust 契约测试与前端纯函数/结构测试；**没有** GUI、像素、真实 GPU、
 > 真机或 vendor-AutoCAD 证据。layout-batch 的前端测试在主仓库合并后运行通过；worktree 内因缺
@@ -1857,7 +1857,7 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `ARCTEXT` | **完整实现** | 沿选中 ARC 等角步逐字符 `TEXT`（切线旋转/倒置翻转）；源文字消费 | 每字符一个 TEXT（表示偏离）；仅 +Z、单行 |
 | `VPLAYER` | **完整实现** | `FREEZE/THAW <layer,...> [<index>]` 写单视口 `layer_overrides`；bare 报告；命令行 grammar 已接 | 一次一个视口（无交互多视口循环）；全局层表不动 |
 | `VPMAX`/`VPMIN` | **完整实现** | 真实最大化编辑态：相机+视图模式+工作平面+空间快照，`VPMIN` 位级恢复 | 一次一个视口；宿主无差异化渲染（无像素证据） |
-| `VPCLIP`/`MVIEW` | 部分实现 | 矩形 + **多边形 clip 真实写入**（N 点、共面/自交校验） | representation 只接受 3/4 点 clip ⇒ 多边形 `*.polygon_not_renderable`；无视口孔洞 |
+| `VPCLIP`/`MVIEW` | 完整实现 | 矩形与多边形 clip/视口都写入并真实渲染（多边形裁剪对折线/圆锥曲线/网格/填充/图像全覆盖，矩形输出逐字节不变）；`CVPORT` 当前视口定位；导入侧按 DXF 组 340 解析真实多边形边界 | 声明的边界：多环「孔洞」视口不建模；无平移的 3 点边界 `*.ambiguous_triangle`；无交互拖拽改视口顶点 |
 | `PSBSCALE`/`PSTSCALE` | 部分实现 | 按活动视口 paper-per-model 因子缩放图纸空间块/文字 | 单一方向/单一视口（声明）；不处理 MULTILEADER/TABLE 文本 |
 | `SHAPE` | **完整实现** | `SHAPE <name-or-code> <x> <y> [size] [rotation_deg]` 创建 `SemanticGeometry::Shape` | 按 name 只建行不解析（本构建 SHX 只保留编号）；表示层保持既有 `Partial` |
 | `SHP2BLK` | **完整实现** | 选中 SHAPE → `(font, code)` 块（轮廓多段线）+ 每个源位置 INSERT，删除源 | 需宿主安装字体引擎；块不链接回 SHX 字体 |
