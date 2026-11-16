@@ -1336,7 +1336,7 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `UNITS` | **部分实现（只读报告）**：`units.report`（图纸单位 4 位小数、角度用度）；`units.dialog_not_implemented` | 无 UNITS 对话框/逐图纸单位表；不写入 |
 | `ARCTEXT` | **部分实现（具名拒绝）**：`arctext.unsupported: text along an arc is not modeled; no combined arc+text payload` | 不写库/不升修订/不入历史 |
 | `MLEADERALIGN` | **部分实现（具名拒绝）**：`mleaderalign.unsupported: no multileader alignment model` | 同上 |
-| `MLEADEREDIT` | 部分实现 | `ADD <x> <y>` 给根 0 加一条；`REMOVE <index>` 删一条，**可清空一个根**（根保留落点与狗腿，导出无 `LEADER_LINE` 的 `LEADER{}`；整条最后一条 `mleaderedit.last_line`）；一条事务/一步撤销 | 无逐线覆盖/箭头编辑（需新的 `MLeadEditAction` 变体，载荷面冻结） |
+| `MLEADEREDIT` | 完整实现 | `ADD <x> <y>` / `REMOVE <index>`（可清空一个根；整条最后一条 `mleaderedit.last_line`）+ `PATHTYPE <i> LINE\|SPLINE\|INVISIBLE`（组 `170`+`93` bit1）、`ARROWSIZE <i> <size>`（组 `40`+bit16）、`BYSTYLE <i> PATH\|ARROW`（清位并从样式重盖）；全部经唯一 MULTILEADER 写入器往返；一条事务/一步撤销 | 逐线颜色/线型/线宽与自定义箭头块句柄无可用语义模型，按名拒绝；无逐顶点 setter（顶点由 `ADD`/`MLEADERALIGN` 改） |
 | `MLEADERCOLLECT` | 完整实现 | 合并 ≥2 MULTILEADER 为一条（根/线拼接、文本 `\P` 连接、根落点重定向）并删除源；样式/覆盖掩码/平面不一致的源**接受**：逐线路径类型（`170`/覆盖字 `93` bit1）与箭头大小（`40`/bit16）按逐线覆盖保留，各根保留自身狗腿，无逐线组的字段与平面框取自首条并逐项报告（`mleadercollect.style_adopted`/`.plane_adopted`）；一条事务/一步撤销，DXF 往返有测试 | 带 `reserved` 源数据（断口/背景/分栏）按名拒绝（无合并语义）；无对话框 |
 | `TOLERANCE` | **部分实现（具名拒绝）**：`tolerance.unsupported: no feature-control-frame (tolerance) object model` | 同上 |
 | `DIMARC` | **部分实现（具名拒绝）**：`dimarc.unsupported: the dimension domain has no arc-length kind` | 同上 |
@@ -1445,13 +1445,13 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `CONVERTCTB` | **部分实现**：具名拒绝（`convertctb.unsupported`）：CTB 转换未实现（无 CTB/STB 模型）。 | 不写库/不升修订/不入历史（报告类只读） |
 | `CONVERTPOLY` | **部分实现**：只读报告（`convertpoly.single_representation`）：本构建只存一种 `LWPOLYLINE` 表示，无旧式多段线可转换。 | 不写库/不升修订/不入历史（报告类只读） |
 | `CONVERT` | **部分实现**：具名拒绝（`convert.unsupported`）：通用对象转换未实现。 | 不写库/不升修订/不入历史（报告类只读） |
-| `TABLE` | 部分实现 | 创建 `TABLE <rows> <cols> <col_width> <row_height> <x> <y>`（Standard、+X/+Z，一条事务/一步撤销）；导入模型可 MOVE/ROTATE/SCALE、拾取/显示、FIND 逐格、真实 DXF 导出 | **模型缺口**：单元格块 `TINSERT`、字段、逐格边框颜色/线宽/填充、逐格对齐/旋转；创建时合并/样式需第二条命令（`TABLEDIT`/`TABLESTYLE`） |
+| `TABLE` | 部分实现 | 创建 `TABLE <rows> <cols> <col_width> <row_height> <x> <y>`；导入模型可 MOVE/ROTATE/SCALE、拾取/显示、FIND 逐格、真实 DXF 导出；**逐格对齐/旋转已建模且可写**（`TABLEDIT FORMAT`、`TABLESTYLE [ROW k] ALIGN`、`MATCHCELL` 复制） | **逐格颜色/填充/边框线宽**：DXF 有组、旧写入器也发中性值，但本构建显示为「每实体一色、无填充区域」，存了会静默消失 → 按名拒绝；单元格块 `TINSERT`、字段、`TABLEDIT` 对话框仍缺 |
 | `-TABLE` | **部分实现（真实创建）**：命令行拼写，与 `TABLE` 同实现 | 同 `TABLE` |
 | `TABLEDIT` | 完整实现 | `TABLEDIT <row> <col> [text]`（1-based、选中一个表格、剩余整行文本、空文本清除）+ `MERGE <row> <col> <height> <width>` / `UNMERGE <row> <col>` / `STYLE <name>`；合并保留被覆盖单元格自身文本（诊断明示，不拼接），越界/覆盖锚点/重叠/未合并逐条具名拒绝；一条事务/一步撤销 | 无交互单元格对话框；块内容/字段单元格未建模（`TINSERT`/字段=全局） |
 | `TABLEEXPORT` | 完整实现 | `TABLEEXPORT <path.csv>` 经宿主文件通道（`HostResources::write_named_file`）写已建模网格：RFC 4180、CRLF、合并区锚点+覆盖格留空、临时文件+rename、64 MiB 上限、不建目录；只读（无事务/无修订、Viewer 合法）；浏览器宿主 `unsupported-runtime: table-export` | 单元格块/字段内容未建模，故不导出；裸 IPC 形式 `tableexport.needs_path` |
-| `TABLESTYLE` | 部分实现 | 实体上的真样式记录（名称/说明/边距/数据行高与文字样式/四条边框/标题与表头开关），经 `ACAD_TABLESTYLE` DXF 往返；单元格按值相等继承，样式写入只重解析仍等于旧样式的单元格；裸命令报告；一条事务/一步撤销 | 标题行/表头行样式按数据行近似；样式说明与样式级双线间距在本 writer 无对应组；单元格级样式需 `MATCHCELL` |
+| `TABLESTYLE` | 完整实现 | 实体样式记录（名称/说明/边距/**数据行/标题行/表头行三套**文字高与对齐/四条边框/标题与表头开关），经 `ACAD_TABLESTYLE` 三条行记录 DXF 往返；单元格按值相等继承；`TABLESTYLE [ROW k] …` 可只改一套；裸命令报告三套；一条事务/一步撤销 | 样式说明与样式级双线间距在本 writer 无对应组（声明）；单元格颜色/填充/线宽不在显示模型；无样式对话框 |
 | `TINSERT` | **部分实现（拒绝）**：无块进入单元格的创建；导入单元格块内容未建模 | `tinsert.unsupported` |
-| `MATCHCELL` | 部分实现 | `MATCHCELL <src_r> <src_c> <dst_r> <dst_c> […]` 复制源单元格文字高、文字样式（名/id/字体）与四条边框，一次重建/一条事务/一步撤销；文本、合并跨度与位置不动 | 逐格对齐/旋转/填充在本域无字段（与 `TABLE` 同一模型缺口）；越界目标 `matchcell.out_of_range` |
+| `MATCHCELL` | 完整实现 | `MATCHCELL <src_r> <src_c> <dst_r> <dst_c> […]` 复制源单元格的**完整逐格格式**：文字高、样式（名/id/字体）、四条边框、对齐（1–9）与文字旋转；文本、合并跨度、位置不动；一次重建/一条事务/一步撤销 | 逐格颜色/填充/边框线宽不在模型（与 `TABLE` 同一显示模型限制）；越界目标 `matchcell.out_of_range` |
 | `FIELD` | **部分实现**：具名拒绝（`field.unsupported`）：字段未实现（无字段模型）。 | 不写库/不升修订/不入历史（报告类只读） |
 | `RTEXT` | **部分实现**：具名拒绝（`rtext.unsupported`）：远程文字未实现（无 RTEXT 模型）。 | 不写库/不升修订/不入历史（报告类只读） |
 | `RTEDIT` | **部分实现**：具名拒绝（`rtedit.unsupported`）：远程文字未实现（无 RTEXT 模型）。 | 不写库/不升修订/不入历史（报告类只读） |
@@ -2014,7 +2014,7 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `PARTIALOAD` | **部分实现（具名拒绝）**：`partiaload.unsupported: no partial layer-index open/load model` | 不写库/不升修订/不入历史 |
 | `SHELL` | **部分实现（具名拒绝）**：`shell.unsupported: the host owns process spawning; this command layer has no OS shell` | 不写库/不升修订/不入历史 |
 | `SECURITYOPTIONS` | **部分实现（具名拒绝）**：`securityoptions.unsupported: no security/executable-trust settings model` | 不写库/不升修订/不入历史 |
-| `XCLIP` | 部分实现 | 真实（display-only）：`XCLIP RECT|POLY|ON|OFF|DELETE|?`；**矩形、旋转矩形与任意简单多边形都真实裁剪**（边界=一个矩形或若干不相交简单多边形的世界区域；折线按交点分段、圆锥曲线解析切分、网格/填充经耳切凸窗、图像经 `visible_image`）；轴对齐矩形输出与旧路径相等（有断言）；嵌套参照取交集（矩形∩矩形仍矩形，矩形∩多边形细化为真实碎片）；一条事务/一步撤销 | **缺口**：裁剪边界不落 DXF（导入不读、导出不写）；`INVERT`（补集无界）与倾斜块平面按名拒绝；块内文字/`WIPEOUT` 遮罩不裁并具名；`CLIP POLY`/`CLIPIT` 对块参照仍拒绝（`clip.polygon_block_not_renderable` 文案已过时） |
+| `XCLIP` | 部分实现 | 真实（display-only）+ **导入真实**：矩形/旋转矩形/任意简单多边形都真实裁剪（嵌套取交集）；导入经 `INSERT → ACAD_XDICTIONARY → ACAD_FILTER → SPATIAL → SPATIAL_FILTER` 解析边界并映射进块局部空间（含 `display_enabled` 与嵌套块） | **导出缺失**：本导出器不写 `INSERT`（块参照一律展开），无实体可挂 filter 链 ⇒ 裁剪随 SAVE 丢失（`export.xclip_clip_dropped` 具名 + 往返测试）；裁剪模式无字段（`import.xclip_mode_unmodelled`）；`CLIP POLY` 对块参照仍拒绝 |
 | `PASTESPEC` | **部分实现（具名拒绝）**：`pastespec.unsupported: clipboard special-paste (OLE/format selection) is not modeled; use PASTECLIP or PASTEBLOCK` | 不写库/不升修订/不入历史 |
 ## Wave 28 边界更新（2026-11-12，官方名收尾：39 条具名拒绝）
 
