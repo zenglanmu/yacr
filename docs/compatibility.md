@@ -1445,7 +1445,7 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `CONVERTCTB` | **部分实现**：具名拒绝（`convertctb.unsupported`）：CTB 转换未实现（无 CTB/STB 模型）。 | 不写库/不升修订/不入历史（报告类只读） |
 | `CONVERTPOLY` | **部分实现**：只读报告（`convertpoly.single_representation`）：本构建只存一种 `LWPOLYLINE` 表示，无旧式多段线可转换。 | 不写库/不升修订/不入历史（报告类只读） |
 | `CONVERT` | **部分实现**：具名拒绝（`convert.unsupported`）：通用对象转换未实现。 | 不写库/不升修订/不入历史（报告类只读） |
-| `TABLE` | 部分实现 | 创建 `TABLE <rows> <cols> <col_width> <row_height> <x> <y>`；导入模型可 MOVE/ROTATE/SCALE、拾取/显示、FIND 逐格、真实 DXF 导出；**逐格对齐/旋转已建模且可写**（`TABLEDIT FORMAT`、`TABLESTYLE [ROW k] ALIGN`、`MATCHCELL` 复制） | **逐格颜色/填充/边框线宽**：DXF 有组、旧写入器也发中性值，但本构建显示为「每实体一色、无填充区域」，存了会静默消失 → 按名拒绝；单元格块 `TINSERT`、字段、`TABLEDIT` 对话框仍缺 |
+| `TABLE` | 部分实现 | 创建 + 导入模型可 MOVE/ROTATE/SCALE、FIND 逐格、真实 DXF 导出；**逐格对齐/文字旋转/文字颜色/背景填充/逐边边框颜色与线宽**都能存储、绘制、导出并由 `TABLEDIT FORMAT|BORDERCOLOR|LINEWEIGHT`、`TABLESTYLE [ROW k]`、`MATCHCELL` 编辑（未设置时几何与图元逐字节不变） | 逐边**线型**无模型；边框线宽渲染器只画 1 像素（具名）；块/FIELD 单元格、`GRIDFORMAT`、`TABLECONTENT` 名称描述、交互对话框缺；导入无法区分「显式关闭填充 vs 继承填充」；真彩色规范化为最近 ACI（具名） |
 | `-TABLE` | **部分实现（真实创建）**：命令行拼写，与 `TABLE` 同实现 | 同 `TABLE` |
 | `TABLEDIT` | 完整实现 | `TABLEDIT <row> <col> [text]`（1-based、选中一个表格、剩余整行文本、空文本清除）+ `MERGE <row> <col> <height> <width>` / `UNMERGE <row> <col>` / `STYLE <name>`；合并保留被覆盖单元格自身文本（诊断明示，不拼接），越界/覆盖锚点/重叠/未合并逐条具名拒绝；一条事务/一步撤销 | 无交互单元格对话框；块内容/字段单元格未建模（`TINSERT`/字段=全局） |
 | `TABLEEXPORT` | 完整实现 | `TABLEEXPORT <path.csv>` 经宿主文件通道（`HostResources::write_named_file`）写已建模网格：RFC 4180、CRLF、合并区锚点+覆盖格留空、临时文件+rename、64 MiB 上限、不建目录；只读（无事务/无修订、Viewer 合法）；浏览器宿主 `unsupported-runtime: table-export` | 单元格块/字段内容未建模，故不导出；裸 IPC 形式 `tableexport.needs_path` |
