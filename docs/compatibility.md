@@ -1331,7 +1331,7 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `BLEND` | **部分实现（真实 2D 编辑）**：两条开放 `LINE`/`ARC`/`LWPOLYLINE` 最近端点间一条三次 `SPLINE` | 内部控制点沿源切线取间隙 1/3（声明规则）；无曲线连续性/多段混合；仅开放曲线 |
 | `BREAKLINE` | **部分实现（真实 2D 编辑）**：两点间一条开放折线含锯齿折断符号（15% 宽 / 5% 深） | 符号是声明式规则，不是 AutoCAD 块式折断符号；无尺寸选项 |
 | `-BLOCK` / `-INSERT` | **已实现（别名）**：调用唯一 `BLOCK` / `INSERT` 处理器 | 同一事务/撤销；无第二套实现 |
-| `-BOUNDARY` / `-HATCH` / `-HATCHEDIT` / `EXOFFSET` | **部分实现（别名）**：调用唯一 `BOUNDARY`/`HATCH`/`HATCHEDIT`/`OFFSET` 处理器 | 边界与各自父命令完全一致 |
+| `-BOUNDARY` / `-HATCH` / `-HATCHEDIT` / `EXOFFSET` | 别名（各自父命令同一处理器） | `-BOUNDARY` 与 `EXOFFSET` **完整实现**（与已完成的 `BOUNDARY`/`OFFSET` 完全一致，含边界集/岛屿检测与全部偏移种类）；`-HATCHEDIT` **完整实现**（与 `HATCHEDIT` 一致，含 `ORIGIN`/`PATTERNFILE`）；`-HATCH` **部分实现**，边界与 `HATCH` 相同（创建期关联性无模型） |
 | `DIM` | **部分实现（只读路由报告）**：`dim.available` 列出已实现 `DIM*` 选择子；`dim.router_only` | 不创建标注；无交互式类型提示 |
 | `UNITS` | **部分实现（只读报告）**：`units.report`（图纸单位 4 位小数、角度用度）；`units.dialog_not_implemented` | 无 UNITS 对话框/逐图纸单位表；不写入 |
 | `ARCTEXT` | **部分实现（具名拒绝）**：`arctext.unsupported: text along an arc is not modeled; no combined arc+text payload` | 不写库/不升修订/不入历史 |
