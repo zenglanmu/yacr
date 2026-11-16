@@ -10,6 +10,7 @@ use cad_db::{
     BlockDefinition, DbEntity, DbObject, DimStyle, DrawingDatabaseBuilder, EntityLineType,
     EntityRenderAttributes, Layer, LayerAttributes, LineType, LinetypePattern, MLeaderStyle, Style,
 };
+mod dimstyle;
 
 fn text_entity(id: u128, style: StyleId) -> DbEntity {
     DbEntity {
@@ -367,111 +368,6 @@ fn style_rename_cascades_into_dim_and_leader_text_style_names() {
             .unwrap()
             .text_style_name,
         "Body"
-    );
-}
-
-// ---------------------------------------------------------------------------
-// DIMSTYLE
-// ---------------------------------------------------------------------------
-
-#[test]
-fn dimstyle_set_makes_the_row_current_and_survives_rename() {
-    let (mut app, mut session) = style_app();
-    let outcome = dimstyle_command(&mut app, &mut session, DimStyleCommand::Set("Fancy".into()))
-        .expect("DIMSTYLE SET");
-    assert!(outcome.diagnostics.iter().any(|d| d.code == "dimstyle.set"));
-    assert_eq!(session.current_dim_style_name(), "Fancy");
-    assert!(outcome.changes.is_none(), "SET is session-only");
-
-    dimstyle_command(
-        &mut app,
-        &mut session,
-        DimStyleCommand::Rename {
-            old: "Fancy".into(),
-            new: "Detail".into(),
-        },
-    )
-    .expect("DIMSTYLE RENAME");
-    assert_eq!(
-        session.current_dim_style_name(),
-        "Detail",
-        "the session follows the rename"
-    );
-    assert!(drawing(&app).dim_style_by_name("Fancy").is_none());
-    assert_eq!(
-        drawing(&app).dim_style_by_name("detail").unwrap().id,
-        DimStyleId(1)
-    );
-}
-
-#[test]
-fn dimstyle_new_modify_delete_round_trip_and_standard_is_undeletable() {
-    let (mut app, mut session) = style_app();
-    let start = revision(&app);
-
-    dimstyle_command(
-        &mut app,
-        &mut session,
-        DimStyleCommand::New {
-            name: "Detail".into(),
-            from: Some("Fancy".into()),
-        },
-    )
-    .expect("DIMSTYLE NEW");
-    let id = drawing(&app).dim_style_by_name("Detail").unwrap().id;
-    assert_eq!(revision(&app), Revision(start.0 + 1));
-
-    let outcome = dimstyle_command(
-        &mut app,
-        &mut session,
-        DimStyleCommand::Modify {
-            name: "Detail".into(),
-            assignments: vec![
-                ("DIMTXT".into(), "4.0".into()),
-                ("DIMDEC".into(), "3".into()),
-            ],
-        },
-    )
-    .expect("DIMSTYLE MODIFY");
-    assert!(outcome
-        .diagnostics
-        .iter()
-        .any(|d| d.code == "dimstyle.modified"));
-    let row = drawing(&app).dim_style(id).unwrap();
-    assert_eq!(row.text_height, 4.0);
-    assert_eq!(row.decimals, 3);
-
-    let error = dimstyle_command(
-        &mut app,
-        &mut session,
-        DimStyleCommand::Modify {
-            name: "Detail".into(),
-            assignments: vec![("DIMTXT".into(), "0".into())],
-        },
-    )
-    .unwrap_err();
-    assert!(
-        format!("{error}").contains("dimstyle.value_range"),
-        "{error}"
-    );
-
-    dimstyle_command(
-        &mut app,
-        &mut session,
-        DimStyleCommand::Delete("Detail".into()),
-    )
-    .expect("DIMSTYLE DELETE");
-    assert!(drawing(&app).dim_style(id).is_none());
-
-    let error = dimstyle_command(
-        &mut app,
-        &mut session,
-        DimStyleCommand::Delete("Standard".into()),
-    )
-    .unwrap_err();
-    assert!(
-        format!("{error}").contains("dimstyle.standard_undeletable"),
-        "{error}"
     );
 }
 

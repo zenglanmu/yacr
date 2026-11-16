@@ -29,7 +29,9 @@
 //! 3. **deletes**: the row must exist; a DIMSTYLE/MLEADERSTYLE named `Standard`
 //!    is refused (dimension/leader creation resolves it), and a style that a
 //!    dimension, multileader, text entity or another style row still references
-//!    is refused by name instead of leaving a dangling reference;
+//!    is refused by name instead of leaving a dangling reference. A DIMSTYLE
+//!    row that a stored dimension's snapshot still names is also refused for a
+//!    **rename** (group 3 would dangle; ADR 0017 snapshots are not rewritten);
 //! 4. **reserved ids**: a style row may not be *created* with an id that still
 //!    exists in the other side of the patch (an upsert of an existing id is an
 //!    update, which is fine).
@@ -161,6 +163,34 @@ impl DrawingDatabase {
             style_changes,
             &[],
             super::EntityGeometryCheck::NewWrite,
+        )
+    }
+
+    /// Apply one DIMSTYLE row write: `Some(row)` creates or updates it, `None`
+    /// deletes it.
+    ///
+    /// This is the single-row spelling of
+    /// [`Self::apply_style_table_changes`], and it delegates to that batch so
+    /// the two cannot disagree about any rule: names are trimmed and unique
+    /// case-insensitively, `Standard` is undeletable, a row a stored dimension's
+    /// snapshot still names is refused for delete/rename, and re-staging the
+    /// stored row (a re-spelling) is an authoritative no-op. One real write is
+    /// one revision; a refusal mutates nothing.
+    pub fn apply_dim_style_change(
+        &mut self,
+        reason: &str,
+        transaction: TransactionId,
+        id: DimStyleId,
+        row: Option<&DimStyle>,
+    ) -> CadResult<ChangeSet> {
+        let change = (id, row.cloned());
+        self.apply_style_table_changes(
+            reason,
+            transaction,
+            StyleTableChanges {
+                dim_styles: std::slice::from_ref(&change),
+                ..Default::default()
+            },
         )
     }
 
@@ -611,6 +641,40 @@ fn validate_dim_style_batch(
         }
     }
     validate_name_set("dimstyle", existing, staged)?;
+    // A rename retargets the table name, not the stored dimensions: each
+    // dimension keeps a **snapshot** that names the style it resolved
+    // (ADR 0017), so renaming a referenced row would leave `style_name()`
+    // dangling. Refuse it by name instead of writing a table no dimension can
+    // be traced back to. The same check covers `MODIFY NAME`.
+    for (id, change) in rows {
+        let Some(row) = change else {
+            continue;
+        };
+        let Some(stored) = db.dim_styles.get(id) else {
+            continue;
+        };
+        if stored.name == row.name.trim() {
+            continue;
+        }
+        let referencing = db
+            .entities
+            .values()
+            .filter(|entity| match &entity.geometry {
+                SemanticGeometry::Dimension(dimension) => dimension
+                    .style_name()
+                    .eq_ignore_ascii_case(stored.name.trim()),
+                _ => false,
+            })
+            .count();
+        if referencing > 0 {
+            return Err(CadError::InvalidInput(format!(
+                "dimstyle.in_use: dimension style '{}' ({}) is named by {referencing} \
+                 dimension(s); renaming it would leave their stored style name dangling \
+                 (each dimension keeps its resolved snapshot, ADR 0017)",
+                stored.name, id.0
+            )));
+        }
+    }
     for (id, change) in rows {
         if change.is_some() {
             continue;

@@ -91,7 +91,7 @@ fn only_the_four_writing_edits_require_work_mode() {
 }
 
 #[test]
-fn dimstyle_grammar_is_list_current_or_set_name() {
+fn dimstyle_grammar_covers_the_reports_and_every_write_form() {
     assert_eq!(parse_dimstyle_argument("LIST"), Some(DimStyleCommand::List));
     assert_eq!(
         parse_dimstyle_argument(" current "),
@@ -105,7 +105,51 @@ fn dimstyle_grammar_is_list_current_or_set_name() {
         parse_dimstyle_argument("set My Style"),
         Some(DimStyleCommand::Set("My Style".into()))
     );
-    for bad in ["", "LIST extra", "SET", "SET   ", "SHOW"] {
+    assert_eq!(
+        parse_dimstyle_argument("NEW Detail"),
+        Some(DimStyleCommand::New {
+            name: "Detail".into(),
+            from: None,
+        })
+    );
+    assert_eq!(
+        parse_dimstyle_argument("new Detail Fancy"),
+        Some(DimStyleCommand::New {
+            name: "Detail".into(),
+            from: Some("Fancy".into()),
+        })
+    );
+    assert_eq!(
+        parse_dimstyle_argument("RENAME Fancy Detail"),
+        Some(DimStyleCommand::Rename {
+            old: "Fancy".into(),
+            new: "Detail".into(),
+        })
+    );
+    assert_eq!(
+        parse_dimstyle_argument("DELETE Detail"),
+        Some(DimStyleCommand::Delete("Detail".into()))
+    );
+    assert_eq!(
+        parse_dimstyle_argument("MODIFY Fancy DIMTXT 4 DIMDEC 3"),
+        Some(DimStyleCommand::Modify {
+            name: "Fancy".into(),
+            assignments: vec![("DIMTXT".into(), "4".into()), ("DIMDEC".into(), "3".into()),],
+        })
+    );
+    for bad in [
+        "",
+        "LIST extra",
+        "SET",
+        "SET   ",
+        "SHOW",
+        "NEW",
+        "NEW a b c",
+        "RENAME a",
+        "DELETE",
+        "MODIFY Fancy DIMTXT",
+        "MODIFY Fancy DIMTXT 4 DIMDEC",
+    ] {
         assert_eq!(parse_dimstyle_argument(bad), None, "{bad:?}");
     }
 }

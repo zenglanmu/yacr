@@ -8,13 +8,17 @@
 //!
 //! # `DIMSTYLE` / `-DIMSTYLE`
 //!
-//! Payload is [`crate::DimensionBatchPayload::Style`] with three typed forms:
+//! Payload is [`crate::DimensionBatchPayload::Style`] with the typed forms:
 //!
 //! | argument | behaviour |
 //! | --- | --- |
 //! | `DIMSTYLE LIST` | one `dimstyle.entry` diagnostic per stored DIMSTYLE row (read-only) |
 //! | `DIMSTYLE CURRENT` | report the style dimension creation resolves (`Standard`, ADR 0017 B.3) |
-//! | `DIMSTYLE SET <name>` | named refusal: `cad-db` has **no post-import dim-style write API** |
+//! | `DIMSTYLE SET <name>` | make the row the session's current style (no table write) |
+//! | `DIMSTYLE NEW <name> [<base>]` | create a row from `<base>` or the stored `Standard` |
+//! | `DIMSTYLE RENAME <old> <new>` | rename an unreferenced row |
+//! | `DIMSTYLE DELETE <name>` | delete an unreferenced row (`Standard` is undeletable) |
+//! | `DIMSTYLE MODIFY <name> <var> <value> …` | write stored `DimStyle` fields |
 //!
 //! `-DIMSTYLE` is an alias in
 //! [`cad_ui_core::session::COMMAND_ALIASES`](https://docs.rs/cad-ui-core), not a
@@ -23,12 +27,19 @@
 //! `dimstyle.needs_option` refusal, never a defaulted `LIST`.
 //!
 //! `LIST`/`CURRENT` write nothing (no revision bump, no history step), so Viewer
-//! mode admits them. `SET` is refused before any write with
-//! `dimstyle.set_unavailable`: the live [`cad_db::DrawingDatabase`] exposes
-//! read-only `dim_styles()`/`dim_style_by_name()` accessors, and only
-//! `DrawingDatabaseBuilder::insert_dim_style` can add a row. A requested name
-//! that does not exist is the distinct `dimstyle.unknown` refusal. No command in
-//! this module edits the DIMSTYLE table; a style row is never invented.
+//! mode admits them. The write forms go through
+//! [`cad_db::DrawingDatabase::apply_style_table_changes`] and are exactly one
+//! revision / one undo step each; a refusal writes nothing. `SET` writes only
+//! [`crate::SessionState::current_dim_style`] — it touches neither the drawing
+//! nor history, and only dimensions created afterwards resolve it.
+//!
+//! Every style edit is **non-retroactive** (ADR 0017): a stored dimension keeps
+//! its resolved `DimensionStyleValues` snapshot, so `MODIFY` changes what new
+//! dimensions use, never an existing dimension's geometry. A row still named by
+//! a dimension is refused for `DELETE` and `RENAME`/`MODIFY NAME`
+//! (`dimstyle.in_use`) rather than leaving a dangling snapshot name. A variable
+//! the stored [`cad_db::DimStyle`] does not carry is refused by name
+//! (`dimstyle.unknown_field`) instead of being silently dropped.
 //!
 //! # `DIMTEDIT`
 //!

@@ -304,7 +304,7 @@ pub(super) fn edit_payload(command: DimEditCommand) -> CommandPayload {
 }
 
 #[test]
-fn dimstyle_reports_are_read_only_and_set_is_a_named_capability_refusal() {
+fn dimstyle_reports_are_read_only_and_set_is_a_session_write() {
     let (mut app, mut session) = dimension_edit_app();
     let before = revision(&app);
     let out = execute(

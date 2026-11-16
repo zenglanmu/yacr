@@ -70,6 +70,256 @@ fn table_db() -> DrawingDatabase {
     b.finish().unwrap()
 }
 
+/// A stored linear dimension whose resolved snapshot names `style_name`.
+///
+/// The snapshot is what ADR 0017 pins: the dimension keeps the values it
+/// resolved, so a later table edit must not change this entity.
+fn dimension_entity(id: u128, style_name: &str, text_height: f64) -> DbEntity {
+    let template = DimStyle::standard_metric(DimStyleId(0));
+    let mut values = template.resolved(style_name.to_string(), StyleId(0), None);
+    values.text_height = text_height;
+    let definition = DimensionDefinition {
+        kind: DimensionKind::Linear { rotation: 0.0 },
+        points: DimensionPoints::Linear {
+            first: point(0.0, 0.0),
+            second: point(10.0, 0.0),
+            dimension_line: point(0.0, 5.0),
+        },
+        text_middle: point(0.0, 0.0),
+        text_rotation: 0.0,
+        normal: Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 1.0,
+        },
+    };
+    let geometry = SemanticGeometry::Dimension(Box::new(
+        DimensionGeometry::synthesized(definition, style_name.to_string(), values, None)
+            .expect("the fixture dimension synthesizes"),
+    ));
+    raw_entity(id, SpaceId::Model, geometry)
+}
+
+/// The `(style name, DIMTXT)` a stored dimension snapshot carries.
+fn dimension_snapshot(entity: &DbEntity) -> (String, f64) {
+    match &entity.geometry {
+        SemanticGeometry::Dimension(dimension) => (
+            dimension.style_name().to_string(),
+            dimension.style().text_height,
+        ),
+        other => panic!("expected a dimension, got {other:?}"),
+    }
+}
+
+/// `table_db()` plus one dimension whose snapshot names `Fancy`.
+fn dim_style_in_use_db() -> DrawingDatabase {
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layer(crate::Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
+    .unwrap();
+    b.insert_style(style(0, "Standard", &["txt.shx"])).unwrap();
+    b.insert_dim_style(DimStyle::standard_metric(DimStyleId(0)))
+        .unwrap();
+    let mut fancy = DimStyle::standard_metric(DimStyleId(1));
+    fancy.name = "Fancy".into();
+    b.insert_dim_style(fancy).unwrap();
+    b.insert_entity(dimension_entity(50, "Fancy", 2.5)).unwrap();
+    b.finish().unwrap()
+}
+
+#[test]
+fn the_single_dim_style_api_delegates_to_the_batch() {
+    let mut db = table_db();
+    let start = db.revision();
+    let mut created = db.dim_style(DimStyleId(0)).expect("Standard").clone();
+    created.id = db.next_dim_style_id();
+    created.name = "Detail".into();
+    let id = created.id;
+    let change = db
+        .apply_dim_style_change("dim create", TransactionId(1), id, Some(&created))
+        .unwrap();
+    assert_eq!(change.after, Revision(start.0 + 1), "one revision");
+    assert_eq!(db.dim_style_by_name("Detail").unwrap().text_height, 2.5);
+
+    // The same validation applies: `Standard` stays undeletable.
+    let error = db
+        .apply_dim_style_change("dim delete standard", TransactionId(2), DimStyleId(0), None)
+        .unwrap_err();
+    assert!(
+        format!("{error}").contains("dimstyle.standard_undeletable"),
+        "{error}"
+    );
+    assert_eq!(
+        db.revision(),
+        Revision(start.0 + 1),
+        "the refusal wrote nothing"
+    );
+}
+
+#[test]
+fn dim_style_create_modify_and_re_spelling_commit_one_revision_each() {
+    let mut db = table_db();
+    let start = db.revision();
+
+    // NEW with no base copies the stored `Standard` row, not a fixed constant.
+    let mut created = db.dim_style(DimStyleId(0)).expect("Standard").clone();
+    created.id = db.next_dim_style_id();
+    created.name = "Detail".into();
+    let id = created.id;
+    let change = db
+        .apply_style_table_changes(
+            "dim create",
+            TransactionId(1),
+            StyleTableChanges {
+                dim_styles: &[(id, Some(created))],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(change.after, Revision(start.0 + 1), "one revision");
+    assert!(change.changes.is_empty(), "no entity geometry change");
+    let stored = db.dim_style_by_name("Detail").expect("created row");
+    assert_eq!(stored.id, id);
+    assert_eq!(stored.text_height, 2.5);
+    assert_eq!(stored.text_style_name, "Standard");
+
+    // MODIFY writes only the field it is given.
+    let mut modified = stored.clone();
+    modified.text_height = 4.0;
+    let change = db
+        .apply_style_table_changes(
+            "dim modify",
+            TransactionId(2),
+            StyleTableChanges {
+                dim_styles: &[(id, Some(modified))],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(change.after, Revision(start.0 + 2), "one revision");
+    let stored = db.dim_style(id).unwrap();
+    assert_eq!(stored.text_height, 4.0);
+    assert_eq!(stored.arrow_size, 2.5, "untouched fields keep their values");
+
+    // A re-spelling of the stored row is an authoritative no-op: it is dropped
+    // before any mutation, so the revision does not move.
+    let mut respelled = stored.clone();
+    respelled.name = "  Detail  ".into();
+    let change = db
+        .apply_style_table_changes(
+            "dim re-spell",
+            TransactionId(3),
+            StyleTableChanges {
+                dim_styles: &[(id, Some(respelled))],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(change.before, change.after, "no revision for a re-spelling");
+    assert_eq!(db.revision(), Revision(start.0 + 2));
+}
+
+#[test]
+fn dim_style_rename_and_delete_refuse_while_a_dimension_names_the_row() {
+    let mut db = dim_style_in_use_db();
+    let start = db.revision();
+    let fancy = db.dim_style_by_name("Fancy").expect("Fancy").clone();
+    let entity_before = db.entity(EntityId(50)).cloned().expect("dimension");
+    let (before_style_name, before_text_height) = dimension_snapshot(&entity_before);
+    assert_eq!(
+        before_style_name, "Fancy",
+        "the fixture dimension names the row"
+    );
+    assert_eq!(before_text_height, 2.5);
+
+    let mut renamed = fancy.clone();
+    renamed.name = "Detail".into();
+    let error = db
+        .apply_style_table_changes(
+            "dim rename",
+            TransactionId(1),
+            StyleTableChanges {
+                dim_styles: &[(fancy.id, Some(renamed))],
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+    assert!(format!("{error}").contains("dimstyle.in_use"), "{error}");
+    assert!(db.dim_style_by_name("Fancy").is_some());
+
+    let error = db
+        .apply_style_table_changes(
+            "dim delete",
+            TransactionId(2),
+            StyleTableChanges {
+                dim_styles: &[(fancy.id, None)],
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+    assert!(format!("{error}").contains("dimstyle.in_use"), "{error}");
+
+    // An unreferenced row is deletable, and `Standard` never is.
+    let unreferenced = db.dim_style(DimStyleId(0)).unwrap().id;
+    let mut extra = db.dim_style(unreferenced).unwrap().clone();
+    extra.id = db.next_dim_style_id();
+    extra.name = "Copy".into();
+    db.apply_style_table_changes(
+        "dim copy",
+        TransactionId(3),
+        StyleTableChanges {
+            dim_styles: &[(extra.id, Some(extra.clone()))],
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    db.apply_style_table_changes(
+        "dim delete copy",
+        TransactionId(4),
+        StyleTableChanges {
+            dim_styles: &[(extra.id, None)],
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert!(db.dim_style(extra.id).is_none());
+
+    for (transaction, id) in [
+        (TransactionId(5), unreferenced),
+        (TransactionId(6), DimStyleId(42)),
+    ] {
+        let error = db
+            .apply_style_table_changes(
+                "dim delete refusal",
+                transaction,
+                StyleTableChanges {
+                    dim_styles: &[(id, None)],
+                    ..Default::default()
+                },
+            )
+            .unwrap_err();
+        let text = format!("{error}");
+        assert!(
+            text.contains("dimstyle.standard_undeletable") || text.contains("dimstyle.unknown_id"),
+            "{text}"
+        );
+    }
+
+    // Every refusal above left the entity and the row set alone. The two real
+    // writes (copy + delete) are the only revision advances.
+    assert_eq!(db.revision(), Revision(start.0 + 2));
+    let entity_after = db.entity(EntityId(50)).cloned().expect("dimension");
+    assert_eq!(entity_before, entity_after, "the snapshot is untouched");
+    assert_eq!(
+        dimension_snapshot(&entity_after),
+        ("Fancy".to_string(), 2.5),
+        "the stored dimension keeps the snapshot values it resolved"
+    );
+}
+
 #[test]
 fn create_rename_and_delete_commit_one_revision_each() {
     let mut db = table_db();
