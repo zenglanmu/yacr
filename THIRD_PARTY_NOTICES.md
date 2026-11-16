@@ -17,6 +17,18 @@
   `docs/dgn.md` 声明的边界提供**矢量文档导入**，不宣称 V8i/CONNECT/ORD 或真实 MicroStation
   兼容；其传递依赖（`flate2`/`miniz_oxide`、`encoding_rs`、`serde`/`serde_json`、
   `thiserror` 等）的实际版本与许可证见 Cargo.lock，分发前需做完整依赖审计。
+- solidcore-ops / solidcore-record 0.1.0（git）：SMLib 的纯 Rust 移植（NURBS B-rep 内核与其
+  可移植 record），**Apache-2.0**（上游 `LICENSE` + `NOTICE`，版权 NVIDIA CORPORATION &
+  AFFILIATES 的上游 SMLib 移植来源见上游 `ATTRIBUTION.md`），上游
+  <https://github.com/tangency-labs/solidcore>，**固定 git revision**
+  `55ae49ef919b606bf77901df626ed9bb543e5212`。仅由 `cad-kernel-solidcore` 依赖（`solidcore-ops`
+  传递引入内核 `solidcore` 与转换层 `solidcore-convert`；`solidcore-tess` 未被本仓库使用）。
+  选择 git 而非 crates.io：crates.io 1.0.1 是更旧的单 crate 发布，不含本接缝需要的
+  `solidcore-ops`（`Body`/记录构建）与 `CancelToken` 取消钩子，这两个 crate 上游声明
+  `publish = false`。**未修改上游源码、无 Cargo patch、无 vendoring**；`Cargo.lock` 记录该 git
+  revision。它是 API 自陈 experimental 的内核，本仓库只按 ADR-0036 的 P1 范围（平面体、基本体、
+  布尔、质量属性；曲面 lift 显式拒绝）使用它，其传递依赖的实际版本与许可证见 Cargo.lock，
+  分发前需做完整依赖审计。
 - cadmpeg-codec-step 0.6.12：ISO 10303-21（STEP，AP203/AP214/AP242）Part 21 解码器，
   Apache-2.0，上游 <https://github.com/cadmpeg/cadmpeg>。仅由 `cad-import-step` 依赖；未修改。
 - cadmpeg-ir 0.6.12：cadmpeg 的中立 CAD IR（拓扑、单位、产品/occurrence、loss 报告与

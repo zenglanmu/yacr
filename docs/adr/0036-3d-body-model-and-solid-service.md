@@ -1,11 +1,19 @@
 # ADR 0036：3D 实体模型（wireframe / surface / solid）与 solidcore 无状态建模服务
 
-- 状态：**Accepted（2026-11-16）**。实现进度：P0 已落地；P0.1（存储边线直送
-  `RenderBatch.edges`）已完成，仅有 Linux 上的契约/单元证据（尚无 GPU/像素证据）；
-  P1–P3 **NOT IMPLEMENTED**。
-  验证边界：本轮只有 Linux 上的契约/单元证据；Windows/macOS/Android/Web 的
-  solidcore 运行状态、任何 GPU/像素结论一律 **NOT VERIFIED**。
-- 日期：2026-11-16。
+- 状态：**Accepted（2026-11-16）**，**P1 部分实现**（2026-11-17，B2 增补）：
+  - P0 已落地；P0.1（存储边线直送 `RenderBatch.edges`）已完成（Linux 契约/单元证据）；
+  - P1/B1：`SolidModeler` 无内核接缝已落地（`cad-kernel-adapter`）；
+  - P1/B2（本轮，见 §7）：`cad-kernel-solidcore` 让**平面体**路径可用——基本体
+    （BOX/WEDGE/PYRAMID 本仓精确平面 B-rep；CYLINDER/SPHERE/CONE/TORUS 走上游构造器）、
+    UNION/SUBTRACT/INTERSECT、体积/面积/质心/惯性、相似变换；
+  - **曲面 body**（含 cylinder/cone/sphere/torus 面）的布尔与质量属性**显式拒绝**
+    （`solid.lift_requires_planar`），曲面 lift 是 P2；
+  - P1/C（`3DSOLID`/`REGION` 创建命令、`MASSPROP` 接线、face_sources、VSCURRENT）、
+    P2、P3 **NOT IMPLEMENTED**。
+  验证边界：只有 Linux x86-64 上的契约/单元证据——测试进程里跑的是**真实**固定 revision 的
+  `solidcore` 内核（无 mock、不引用上游 golden）；Windows/macOS/Android/Web 的 solidcore
+  运行状态、任何 GPU/像素/性能结论一律 **NOT VERIFIED**。
+- 日期：2026-11-16（P1/B2 增补 2026-11-17）。
 - 相关：[ADR-0033](0033-multi-format-import.md)（多格式导入；D2/D9 的 BRep 边界）、
   [ADR-0031](0031-acadrust-vendored-patch-policy.md)（依赖补丁策略）、
   `docs/kernel-acis.md`（现有 ACIS 契约）、`docs/compatibility.md`（逐命令能力表）、
@@ -185,3 +193,50 @@ pub struct Body3d { pub kind: BodyKind, pub exact: BodyExact, pub display: BodyD
   `Body3d` 的 `Solid ⇒ Exact`、非均匀缩放降级、存储边线、包围盒。
 - P1 起：`cad-kernel-solidcore` 的转换层测试（`BrepData ↔ solidcore Brep`）+ 一条
   真实运行链（create → boolean → mass properties → tessellate），失败必须显式。
+
+## 7. P1/B2 落地事实（2026-11-17）
+
+本轮只落**一个 crate** 与它的文档/门禁，不接命令、不改 `cad-app`（那是 P1/C）。
+
+| 项 | 事实 |
+|---|---|
+| crate | `crates/cad-kernel-solidcore`（唯一允许命名 `solidcore` 的包，`#![cfg(not(target_arch = "wasm32"))]`） |
+| 依赖 | `solidcore-ops` + `solidcore-record`（`ops` 传递引入内核与 `solidcore-convert`），git revision `55ae49ef919b606bf77901df626ed9bb543e5212`，Apache-2.0，目标表 `cfg(not(wasm32))`；无 `[patch.crates-io]` |
+| 注册 | `type_key = yacr.kernel.solidcore`，`priority = 10`，`entity_types = 3DSOLID/BODY`（**只有**这两类：`REGION`/`SURFACE` 是零厚度 sheet body，本切面既不创建也不接受为操作数，声明它们会过度承诺；P2 的 SURFACE 家族再加）；`Registration::version` 是 `u32`（本适配器契约版本 `1`），上游版本串 `1.0.1+55ae49ef919b` 由 `SolidCoreModeler::UPSTREAM_VERSION` 与 capabilities 声明 |
+| 能力 | primitives 全真（7 族）、booleans 真、mass_properties 真；fillet/shell/nurbs 假。**booleans 是 family 级声明**：单个操作数不可 lift（曲面 body、开放 sheet、多于一个 shell、空腔、结构不一致）时，该次调用返回 `Unsupported` 并带稳定码，调用方**必须**逐次处理，不得把 family 级 `true` 当成「每个操作数都能算」 |
+| 转换 | `BrepData → record`：仅平面面 + `Line` 环、单 shell、可烘焙 placement；`record → BrepData`：Plane/PlaneThrough/Cylinder/Cone/Sphere/Torus + Line/整圆 |
+| 精确性 | 作者化 box/wedge/pyramid 由内核 `Body::from_record(.., false)` 验证后才交出；体积用闭式断言（1.0 / l·w·h、l·w·h/2、s²·h/3） |
+| 结构一致性 | lift 之后除 record 的 `validate` 还做：每条边**恰好两次**使用且两个面在**壳的朝向**下反向遍历（拒绝反向面/重复面/把 sheet 当 solid）、每个环按精确位首尾相接、以及 `solidcore_ops::record_check::agreement` 的几何一致性检查。任一失败 → `Unsupported` + `solid.lift_unsupported`（不是「可算但算错」） |
+| 拒绝码 | `solid.lift_requires_planar` **只**用于两处非平面（非 `Plane` 面 / 非 `Line` 边）；结构/退化/空/容差/记录校验 → `solid.lift_unsupported`；placement 或平面 frame 不可烘焙（镜像、非正/非有限缩放、奇异或含剪切矩阵）→ `solid.placement_not_supported`；非相似变换 → `solid.nonuniform_transform` |
+| 内核错误 | `Unsupported`/`Unported` → `Unsupported`；`UnsureRegion` → `Failed(solid.unsure_region)`；`Empty` → `Failed(solid.empty_result)`；`Internal`（会话捕获的内核 panic）→ `Failed(solid.kernel_panic)` 且**不回传 panic 文本**；`Cancelled` → `Err(Cancelled)` |
+| 质量属性 | `Body::mass_properties(1e-6)`，报 `MassAccuracy::Requested`（估计，不证明），**不**标 `Analytic` |
+| 取消 | 前/后检查 + 布尔用 `solidcore_ops::cancel::{CancelToken, within}`（看门狗线程每 50 ms 轮询接缝回调，即**检测粒度**；调用结束用 `unpark` 立即唤醒，成功路径不额外等 50 ms；`StopGuard` 在 `Drop` 里置位并唤醒，内核调用 panic 也不会把 `thread::scope` 卡在睡着的看门狗上），`Error::Cancelled → CadError::Cancelled`，无 `aborted` 产物 |
+| 证据 | `cargo test -p cad-kernel-solidcore`（真实内核）、clippy `-D warnings`、`check-architecture.py`；完整命令与退出码见 `docs/handoff.md` 2026-11-17 条目 |
+
+**本轮学到并写进代码的事实**（不是上游文档的推断）：
+
+1. 记录里的边曲线端点可能与它的顶点相差 1 ULP（booleans 产物见到
+   `1.0` vs `0.9999999999999999`）。`record → BrepData` 必须用**顶点**而不是曲线端点，
+   否则中性环不再精确闭合，反向转换会报 `disconnected loop`。
+2. 面域（area/质心/惯性）是在**参数域**上按 pcurve 裁剪积分：用占位 pcurve 时体积仍正确
+   但面积返回 `0`。因此 `BrepData → record` 写的是每条边在该面 `(u, v)` 里的**精确**一次
+   spline 像，而不是占位。
+3. 曲面 primitives 的记录形状：cylinder/cone 侧面是"两条整圆 + 接缝线"的一个环，sphere/torus
+   是"只有接缝边"的单面。中性剖分器要求 cylinder/cone 每环一条整圆、sphere/torus **无环**，
+   所以 `record → BrepData` 会先验证接缝（线在曲面上、球面端点在两极、环面边全部闭合）再丢弃它。
+4. 上游 `1.0.1` 版本串在固定 revision 上没有变化，**不能**用它识别 revision。
+5. **布尔的合法产物可能超出本切面的 lift 能力，且两个失效点不同**：
+   - **空腔（void region）**：内核把腔存成 void region，`from_record` 不接，所以结果**在布尔本身**
+     就被拒绝（`Unsupported` + `solid.lift_unsupported`）；
+   - **多于一个 shell**（例如不相交的两个体 `UNION`）：`BrepData` 能表达，布尔**返回成功的 body**
+     （2 个 shell），直到**下一次 lift**（质量属性或再次布尔）才被拒绝，因为 `to_record` 只接
+     单闭合壳。所以"mass 需要恰好一个闭合壳"是调用方会遇到的真实约束，而不是布尔会提前拦住它。
+
+   实测的反向症状是：反向面的 body 会给出**看似合理**的面积（40 vs 52），重复面的 body 会给出
+   36 vs 24 的体积——所以 lift 之后必须做结构一致性检查，而不能只信 `record.validate`。
+6. **质量属性要求恰好一个闭合壳**：空腔与多壳（例如另有一个分离的体）都不算；多壳的 body 是
+   布尔返回的合法产物，`mass_properties` 在对它 lift 时返回 `Unsupported` + `solid.lift_unsupported`，
+   绝不把两块的体积相加当结果。
+
+**仍未做**（P2/P3）：NURBS 曲面/曲线与 pcurve 的中性表达、曲面 body 的布尔/质量属性、
+圆角/倒角/抽壳、`SURFACE` 家族、ACIS SAT/SAB 写出、任何命令接线。

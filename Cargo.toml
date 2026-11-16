@@ -13,6 +13,7 @@ members = [
     "crates/cad-history",
     "crates/cad-geometry",
     "crates/cad-kernel-adapter",
+    "crates/cad-kernel-solidcore",
     "crates/cad-representation",
     "crates/cad-spatial",
     "crates/cad-scene",

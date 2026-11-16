@@ -125,41 +125,72 @@ solidcore 1.0.1 的公开 API 覆盖（详见 ADR-0036 与 docs.rs）：
 
 ### 4.3 P1：接入内核（最小可用建模）
 
-1. **新 crate `cad-kernel-solidcore`**
-   - 唯一允许 `use solidcore` 的包；其他 `cad-*` 一律禁止（`check-architecture.py` 新增
-     forbid 规则，形状对齐 `cad-import-acadrust` ↔ `acadrust`）。
-   - 固定 git revision；`Registration { type_key, version, priority }` 记录实际版本。
-   - 只做三件事：`SolidModeler` 实现、`BrepData ↔ solidcore Brep` 双向转换、能力报告。
-   - 转换器必须有独立测试：单位、placement、面/环/边顺序、`forward` 方向、容差。
-2. **接缝（`cad-kernel-adapter`）**
+- 状态（2026-11-17）：**B2 已落地，P1 仍只完成一半**。`cad-kernel-solidcore` 存在并实现
+  `SolidModeler`；**平面体**的创建/布尔/质量属性/相似变换可用；曲面 primitives 可创建、可显示、
+  可导出，但其布尔与质量属性**显式拒绝**。命令接线（`3DSOLID`/`REGION`、`MASSPROP`、
+  `face_sources`、`VSCURRENT`）**NOT IMPLEMENTED**。证据只有 Linux 契约/单元（真实内核，
+  无 mock）；其它载体 NOT VERIFIED。详见 ADR-0036 §7。
+- **拒绝边界（能力是 family 级，不是逐操作数）**：`capabilities().booleans` /
+  `mass_properties` 为 true 只表示"这一族有实现"，每次调用仍可能对单个操作数返回
+  `Unsupported`，调用方必须处理：
+  - 曲面 body（非 `Plane` 面或非 `Line` 边）→ `solid.lift_requires_planar`；
+  - **结构不一致**（开放 sheet、每条边只用一次、反向面/重复面、环有缺口）→
+    `solid.lift_unsupported`（这类输入若放行会给出看似合理的面积/体积，实测 40 vs 52、
+    36 vs 24，所以 lift 后做结构一致性检查）；
+  - **空腔（void region）的结果在布尔本身就被拒绝**（`solid.lift_unsupported`）；
+    **多壳结果**（例如不相交的两个体 `UNION`）**会作为 body 成功返回**（2 个 shell），
+    直到**下一次 lift**（质量属性 / 再次布尔）才被拒绝——所以**质量属性要求恰好一个闭合壳**
+    （空腔/多壳都不算，不把两块体积相加）；
+  - 不可烘焙的 placement/平面 frame → `solid.placement_not_supported`；非相似变换 →
+    `solid.nonuniform_transform`。
+
+1. **新 crate `cad-kernel-solidcore`**（已实现）
+   - 唯一允许命名 `solidcore` 的包；其它 `cad-*` 被 `check-architecture.py` 拒绝
+     （形状对齐 `cad-import-acadrust` ↔ `acadrust`）。
+   - 固定 git revision `55ae49ef919b606bf77901df626ed9bb543e5212`（`solidcore-ops` +
+     `solidcore-record`，Apache-2.0，目标表 `cfg(not(wasm32))`，无 Cargo patch）；
+     `Registration` 记 `yacr.kernel.solidcore`，上游版本串 `1.0.1+55ae49ef919b` 由
+     `UPSTREAM_VERSION` 与 capabilities 声明（上游未 bump 该串）。
+   - 只做三件事：`SolidModeler` 实现、`BrepData ↔ record` 双向转换（平面面 + `Line` 环、
+     `Plane/PlaneThrough/Cylinder/Cone/Sphere/Torus` + `Line`/整圆）、能力报告。
+   - 转换器有独立测试：单位（原样透传，记录按 mm 语义）、placement（相似 placement 烘焙；
+     镜像拒绝）、面/环/边 canonical 顺序、`forward` 方向、顶点/边按精确位去重、容差、
+     pcurve（必须是面 `(u, v)` 的精确一次 spline，否则面积积分返回 0）。
+2. **接缝（`cad-kernel-adapter`）**（已实现，B1）
    ```rust
-   pub trait SolidModeler {
+   pub trait SolidModeler: Send + Sync {
        fn registration(&self) -> Registration;
        fn capabilities(&self) -> ModelerCapabilities;
        fn execute(&self, request: &SolidRequest<'_>,
-                  cancelled: &dyn Fn() -> bool) -> CadResult<SolidOutcome>;
+                  cancelled: &(dyn Fn() -> bool + Sync)) -> CadResult<SolidResult>;
    }
-   pub enum SolidRequest<'a> {
-       Tessellate { body: &'a BrepData, tolerance: TessellationTolerance },
-       Primitive  { kind: PrimitiveKind, params: PrimitiveParams },
-       Boolean    { op: BooleanOp, operands: Vec<&'a BrepData>, tolerance: TessellationTolerance },
+   pub enum SolidOperation<'a> {
+       Primitive { spec: PrimitiveSpec },
+       Boolean { op: BooleanOp, left: &'a BrepData, right: &'a BrepData },
+       Transform { brep: &'a BrepData, transform: &'a Transform3 },
+       MassProperties { brep: &'a BrepData, density: f64 },
    }
    ```
-   结果 `SolidOutcome { body, display, degradation, diagnostics, aborted }`。
-   **`BodyId`/revision 不进内核**：身份是 `cad-db` 的 `EntityId` + `ObjectId.revision`；
-   缓存键是 `BrepData` 的内容摘要（`BodyKey { codec, digest }`），不是 handle。
-3. **命令接入**（`cad-app`）
+   结果 `SolidOutcome { Success(Body { brep, diagnostics } | Mass(..)) | Unsupported { reason } |
+   Failed { diagnostics } }`：**没有** `aborted` 标志、没有"空成功"；剖分仍由既有
+   `BrepTessellator` 在模型器之外完成（模型器不做显示网格）。
+   身份是 `cad-db` 的 `EntityId` + `ObjectId.revision`；跨接缝只传 `BrepData` 快照。
+3. **命令接入**（`cad-app`，**NOT IMPLEMENTED**，Phase C）
    - 补目录里缺失的 `3DSOLID`/`BODY`；把 `BOX/CYLINDER/SPHERE/CONE/TORUS/WEDGE/PYRAMID`
      从拒绝改成创建；`UNION/SUBTRACT/INTERSECT` 作用于 `Body3d(Solid)`；
      `REGION` 用 `BodyKind::Sheet`。
-   - 每个命令：输入 → `SolidRequest` → `SolidOutcome.body` → 新 `DbEntity` 经
+   - 每个命令：输入 → `SolidRequest` → `SolidOutcome` 的 body → 新 `DbEntity` 经
      `apply_drawing_changes` 落库 → `ChangeMask::GEOMETRY` 触发显示失效。
    - 逐命令契约测试 + `compatibility.md` 行；i18n 两个 catalog 同步。
-4. **质量属性**：`MASSPROP` 走 `brep_mass_properties`；体积/面积/质心/惯性都标
-   `Precision`，不得把网格值当精确值。
-5. **`face_sources`**：由 `BrepFace.id` 填充 `Mesh.face_sources`，解冻子面拾取。
-6. **`VSCURRENT`**：`2D wireframe`/`shaded` 落到 `RenderTopology::MeshEdges` + 会话状态，
-   不写 `cad-db`。
+4. **质量属性**（模型器已实现；命令 **NOT IMPLEMENTED**）：`MASSPROP` 仍未接线，
+   对 body 继续显式 `massprop.body_requires_kernel`。模型器返回
+   `MassAccuracy::Requested { relative }`（估计，不是证明），不得标 `Analytic`。
+   成功条件是**恰好一个闭合壳**（空腔/多壳 → `Unsupported` + `solid.lift_unsupported`）；
+   内核"不确定该 region 是否材料"时返回 `Failed(solid.unsure_region)`，不是 `Unsupported`。
+5. **`face_sources`**（**NOT IMPLEMENTED**）：应由 `BrepFace.id` 填充
+   `Mesh.face_sources`，解冻子面拾取。
+6. **`VSCURRENT`**（**NOT IMPLEMENTED**）：`2D wireframe`/`shaded` 落到
+   `RenderTopology::MeshEdges` + 会话状态，不写 `cad-db`。
 
 ### 4.4 P2：曲面、圆角与 NURBS
 
@@ -434,14 +465,16 @@ StepImporter::import
 | P-STEP-1a | `cadmpeg-ir → BrepData` 解析曲面 lifter（Plane/Cylinder/Cone/Sphere/Torus + Line/Circle） | 解析样本 → `Body3d{Solid,Exact}`；三角面与现 `StepTessellatedMesh` 一致；失败面显式 |
 | P-STEP-1b | NURBS/椭圆/部分圆弧/pcurve | 依赖 P2；逐面计数，禁止无样本证据的"全部精确" |
 | P-STEP-2 | STEP 装配改为 `BlockDefinition` + `Insert` | 同一 body 两次实例 → 两个 `Insert`，不是两份网格 |
-| P1 | `cad-kernel-solidcore` + `SolidModeler` + 基本体/布尔/质量属性 | 一条真实链：create → boolean → massprops → tessellate；失败必须显式 |
+| P1 | `cad-kernel-solidcore` + `SolidModeler` + 基本体/布尔/质量属性（**模型器部分已完成 2026-11-17**；命令接线 NOT IMPLEMENTED） | 模型器侧已有真实链：create → boolean → massprops（Linux 单元/契约，真实内核）；命令侧（含剖分/落库）未接线 |
 | P2 | NURBS 面、圆角/倒角/抽壳、SURFACE 家族 | 逐命令契约 + 能力表；圆角产物是否为有理 NURBS 必须实测 |
 | P3 | ACIS SAT/SAB 写出 | DXF/DWG 往返样本；否则不声称往返 |
 
 **证据边界**：
 
-- solidcore 的任何操作在本仓库**尚未执行**；其 API 存在性来自 docs.rs，行为正确性
-  **NOT VERIFIED**。
+- solidcore 的**平面体**路径已在 `cad-kernel-solidcore` 的 Linux 测试进程里真实执行
+  （真实内核，create → boolean → mass properties；体积/面积/质心/惯性用闭式值断言），
+  这是**有界契约/单元证据**，不是其它载体/GPU/性能结论。曲面 lift、圆角/倒角/抽壳、
+  NURBS、SURFACE 家族与命令接线均**未实现**；其行为仍是 **NOT VERIFIED**。
 - SKP/STL 的映射结论基于已提交的导入器代码；`P-SKP-*` 与 `P-MESH-1` 均未实现。
 - STEP 的 §6 是**方案**：lifter 未实现。"`cadmpeg-ir` 已含精确拓扑"来自 0.6.12 源码
   （`topology.rs` / `geometry.rs` 的公开枚举），不是运行结果；样本上的保留率/精确率

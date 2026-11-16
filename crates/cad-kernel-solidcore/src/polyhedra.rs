@@ -1,0 +1,287 @@
+//! Exact planar B-rep data for the polyhedral primitives.
+//!
+//! `solidcore` has constructors for the cylinder, sphere, cone and torus but
+//! **none for the wedge**, and its pyramid takes a square base only. Those three
+//! families are therefore authored here as exact neutral B-rep data: every face
+//! is a plane, every boundary curve a straight line, so the body lifts to a
+//! kernel record without loss (and the modeler lifts it once to prove the kernel
+//! accepts it before handing it out).
+//!
+//! Every face is wound counter-clockwise seen from outside the material, which is
+//! what makes the record's shell normals point out of the material and the
+//! resulting solid volume positive. Face ids are sequential in authoring order.
+//!
+//! Volumes are the closed forms the unit tests assert against: `l·w·h` (box),
+//! `l·w·h/2` (wedge, a right triangular prism), `s²·h/3` (pyramid).
+
+use cad_domain::{BrepCurve, BrepData, BrepFace, BrepLoop, BrepShell, BrepSurface, Point3};
+
+/// A point from plain coordinates.
+fn p(x: f64, y: f64, z: f64) -> Point3 {
+    Point3 { x, y, z }
+}
+
+fn add(a: Point3, b: Point3) -> Point3 {
+    p(a.x + b.x, a.y + b.y, a.z + b.z)
+}
+
+fn sub(a: Point3, b: Point3) -> Point3 {
+    p(a.x - b.x, a.y - b.y, a.z - b.z)
+}
+
+fn cross(a: Point3, b: Point3) -> Point3 {
+    p(
+        a.y * b.z - a.z * b.y,
+        a.z * b.x - a.x * b.z,
+        a.x * b.y - a.y * b.x,
+    )
+}
+
+fn is_zero(v: Point3) -> bool {
+    v.x == 0.0 && v.y == 0.0 && v.z == 0.0
+}
+
+fn normalize(v: Point3) -> Point3 {
+    let length = (v.x * v.x + v.y * v.y + v.z * v.z).sqrt();
+    if length > 1e-12 {
+        p(v.x / length, v.y / length, v.z / length)
+    } else {
+        p(0.0, 0.0, 0.0)
+    }
+}
+
+/// One planar face from its outward-wound vertex cycle.
+///
+/// The plane frame is built from the first edge (`u`) and the cycle's own normal
+/// (`v = n × u`), so the record's `u_axis`/`v_axis` are orthonormal by
+/// construction — the kernel refuses a skewed plane frame, and deriving `v` from
+/// a second edge would skew it on a slightly non-planar cycle.
+fn face(id: u32, cycle: &[Point3]) -> BrepFace {
+    let origin = cycle[0];
+    let u_dir = cycle
+        .iter()
+        .map(|corner| normalize(sub(*corner, origin)))
+        .find(|direction| !is_zero(*direction))
+        .unwrap_or(p(1.0, 0.0, 0.0));
+    let mut normal = p(0.0, 0.0, 0.0);
+    for i in 1..cycle.len() {
+        for j in (i + 1)..cycle.len() {
+            let candidate = normalize(cross(sub(cycle[i], origin), sub(cycle[j], origin)));
+            if !is_zero(candidate) {
+                normal = candidate;
+                break;
+            }
+        }
+        if !is_zero(normal) {
+            break;
+        }
+    }
+    let edges = (0..cycle.len())
+        .map(|i| BrepCurve::Line {
+            start: cycle[i],
+            end: cycle[(i + 1) % cycle.len()],
+        })
+        .collect();
+    BrepFace {
+        id,
+        surface: BrepSurface::Plane {
+            origin,
+            normal,
+            u_dir,
+        },
+        reversed: false,
+        loops: vec![BrepLoop { edges }],
+    }
+}
+
+fn body(cycles: &[&[usize]], corners: &[Point3]) -> BrepData {
+    let faces = cycles
+        .iter()
+        .enumerate()
+        .map(|(id, cycle)| {
+            let points: Vec<Point3> = cycle.iter().map(|&index| corners[index]).collect();
+            face(id as u32, &points)
+        })
+        .collect();
+    BrepData {
+        shells: vec![BrepShell { id: 0, faces }],
+        placement: None,
+    }
+}
+
+/// An axis-aligned box: `origin` is the lower corner, positive dimensions.
+///
+/// Volume `length · width · height` (`length` along +X, `width` along +Y,
+/// `height` along +Z).
+pub fn box_brep(origin: Point3, length: f64, width: f64, height: f64) -> BrepData {
+    let o = origin;
+    let corners = [
+        o,
+        add(o, p(length, 0.0, 0.0)),
+        add(o, p(length, width, 0.0)),
+        add(o, p(0.0, width, 0.0)),
+        add(o, p(0.0, 0.0, height)),
+        add(o, p(length, 0.0, height)),
+        add(o, p(length, width, height)),
+        add(o, p(0.0, width, height)),
+    ];
+    // Outward-wound cycles: -Z, +Z, -Y, +X, +Y, -X.
+    let cycles: [&[usize]; 6] = [
+        &[0, 3, 2, 1],
+        &[4, 5, 6, 7],
+        &[0, 1, 5, 4],
+        &[1, 2, 6, 5],
+        &[2, 3, 7, 6],
+        &[3, 0, 4, 7],
+    ];
+    body(&cycles, &corners)
+}
+
+/// A right triangular prism: the base rectangle `length × width` in the XY
+/// plane, full `height` on the edge at `x = origin.x`, tapering to zero at
+/// `x = origin.x + length`.
+///
+/// Volume `length · width · height / 2`.
+pub fn wedge_brep(origin: Point3, length: f64, width: f64, height: f64) -> BrepData {
+    let o = origin;
+    // Cross-section in XZ (a right triangle), extruded along +Y.
+    let corners = [
+        o,                             // a
+        add(o, p(length, 0.0, 0.0)),   // b
+        add(o, p(0.0, 0.0, height)),   // c
+        add(o, p(0.0, width, 0.0)),    // d
+        add(o, p(length, width, 0.0)), // e
+        add(o, p(0.0, width, height)), // f
+    ];
+    // Outward: -Y triangle, +Y triangle, bottom (-Z), back (-X), slope.
+    let cycles: [&[usize]; 5] = [
+        &[0, 1, 2],
+        &[3, 5, 4],
+        &[0, 3, 4, 1],
+        &[0, 2, 5, 3],
+        &[1, 4, 5, 2],
+    ];
+    body(&cycles, &corners)
+}
+
+/// A square pyramid: base side `side` centred on `base_center` in the plane
+/// `z = base_center.z`, apex `height` above the centre.
+///
+/// Volume `side² · height / 3`.
+pub fn pyramid_brep(base_center: Point3, side: f64, height: f64) -> BrepData {
+    let half = side / 2.0;
+    let c = base_center;
+    let corners = [
+        p(c.x - half, c.y - half, c.z),
+        p(c.x + half, c.y - half, c.z),
+        p(c.x + half, c.y + half, c.z),
+        p(c.x - half, c.y + half, c.z),
+        p(c.x, c.y, c.z + height),
+    ];
+    // Outward: base (-Z), then the four side triangles.
+    let cycles: [&[usize]; 5] = [
+        &[0, 3, 2, 1],
+        &[0, 1, 4],
+        &[1, 2, 4],
+        &[2, 3, 4],
+        &[3, 0, 4],
+    ];
+    body(&cycles, &corners)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::record;
+
+    fn volume(brep: &BrepData) -> f64 {
+        let record = record::to_record(brep, record::DEFAULT_TOLERANCE)
+            .unwrap_or_else(|refusal| panic!("{refusal:?}"));
+        let (body, _) = solidcore_ops::Body::from_record(&record, false)
+            .unwrap_or_else(|error| panic!("kernel refused the authored body: {error}"));
+        body.volume(1e-10)
+            .unwrap_or_else(|error| panic!("volume: {error}"))
+    }
+
+    fn counts(brep: &BrepData) -> (usize, usize, usize) {
+        let record = record::to_record(brep, record::DEFAULT_TOLERANCE).expect("record");
+        (brep.face_count(), record.edges.len(), record.vertices.len())
+    }
+
+    #[test]
+    fn box_has_six_faces_twelve_edges_eight_vertices_and_unit_volume() {
+        let brep = box_brep(p(0.0, 0.0, 0.0), 1.0, 1.0, 1.0);
+        assert_eq!(counts(&brep), (6, 12, 8));
+        assert!((volume(&brep) - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn box_volume_is_length_times_width_times_height() {
+        let brep = box_brep(p(-1.0, 2.0, 0.5), 3.0, 2.0, 4.0);
+        assert!((volume(&brep) - 24.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn wedge_is_a_right_triangular_prism() {
+        let brep = wedge_brep(p(0.0, 0.0, 0.0), 2.0, 3.0, 4.0);
+        // 5 faces (2 triangles + 3 quads), 9 edges, 6 vertices.
+        assert_eq!(counts(&brep), (5, 9, 6));
+        assert!((volume(&brep) - 12.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn pyramid_is_a_square_base_pyramid() {
+        let brep = pyramid_brep(p(0.0, 0.0, 0.0), 2.0, 3.0);
+        // 5 faces (1 base + 4 triangles), 8 edges, 5 vertices.
+        assert_eq!(counts(&brep), (5, 8, 5));
+        assert!((volume(&brep) - 4.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn every_authored_normal_points_out_of_the_material() {
+        // The centroid of the solid lies behind every face plane: a point on the
+        // face, offset by the outward normal, points away from the interior.
+        let centroid = p(1.0, 2.0, 3.0);
+        let brep = box_brep(p(0.0, 0.0, 0.0), 2.0, 4.0, 6.0);
+        for face in &brep.shells[0].faces {
+            let BrepSurface::Plane {
+                origin,
+                normal,
+                u_dir,
+            } = &face.surface
+            else {
+                panic!("authored face is not a plane");
+            };
+            // Outward: the face origin is on the far side of the centroid.
+            assert!(
+                (origin.x - centroid.x) * normal.x
+                    + (origin.y - centroid.y) * normal.y
+                    + (origin.z - centroid.z) * normal.z
+                    > 0.0,
+                "face {} points into the box",
+                face.id
+            );
+            // Orthonormal frame: unit axes, perpendicular to each other.
+            let n = (normal.x * normal.x + normal.y * normal.y + normal.z * normal.z).sqrt();
+            let u = (u_dir.x * u_dir.x + u_dir.y * u_dir.y + u_dir.z * u_dir.z).sqrt();
+            assert!((n - 1.0).abs() < 1e-12 && (u - 1.0).abs() < 1e-12);
+            assert!((normal.x * u_dir.x + normal.y * u_dir.y + normal.z * u_dir.z).abs() < 1e-12);
+        }
+
+        let pyramid = pyramid_brep(p(0.0, 0.0, 0.0), 2.0, 2.0);
+        let interior = p(0.0, 0.0, 0.25);
+        for face in &pyramid.shells[0].faces {
+            let BrepSurface::Plane { origin, normal, .. } = &face.surface else {
+                panic!("authored face is not a plane");
+            };
+            assert!(
+                (origin.x - interior.x) * normal.x
+                    + (origin.y - interior.y) * normal.y
+                    + (origin.z - interior.z) * normal.z
+                    > 0.0,
+                "face {} points into the pyramid",
+                face.id
+            );
+        }
+    }
+}

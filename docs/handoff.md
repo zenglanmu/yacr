@@ -12,7 +12,7 @@
 > **不在这里重复**：平台验收状态与证据边界以 `AGENTS.md` 平台表和 `docs/compatibility.md` 为准；
 > 架构不变量见 `docs/architecture.md`、`docs/core-invariants.md`。
 
-## 当前状态（截至 2026-11-16）
+## 当前状态（截至 2026-11-17）
 
 **版本与产物**：工作区 `0.1.14`，tag `v0.1.14` → `44913c7c`，Release 与落地页 `v0.1.14` 已发布
 （`CI build layers` 11/11 job 绿）。notes 与落地页清单在出包后单独提交（`a09f8ef3`），**tag 树不含**
@@ -21,6 +21,60 @@
 **载体**：一棵 React 树 + 多种载体（`apps/desktop-ui` 是唯一 React UI 包）；`native-below`
 （Linux 原生 Wayland、Windows、macOS、Android）由 native 会话持有 `cad-db`，`dom-canvas`
 （X11/XWayland、Web）由 wasm 会话持有。细节与逐平台证据边界见 `AGENTS.md` 平台表。
+
+**3D 实体：solidcore 模型器 P1/B2（2026-11-17）**
+
+- **新 crate `crates/cad-kernel-solidcore`**：唯一允许命名 `solidcore*` 的包；两个依赖
+  （`solidcore-ops` + `solidcore-record`）只在
+  `[target.'cfg(not(target_arch = "wasm32"))'.dependencies]`，固定 git revision
+  `55ae49ef919b606bf77901df626ed9bb543e5212`（Apache-2.0；`solidcore-ops` 传递引入内核与
+  `solidcore-convert`），**无 `[patch.crates-io]`**，crate 根 `#![cfg(not(target_arch = "wasm32"))]`；
+  `Cargo.lock` 从该 git source 解析。
+- **能力（诚实 P1 切面）**：BOX/WEDGE/PYRAMID 由本仓精确平面 B-rep 作者化，并经内核
+  `Body::from_record(.., false)` 验证后才交出；CYLINDER/SPHERE/CONE/TORUS 走上游构造器、
+  映射回解析 `BrepSurface`（可显示/导出）。UNION/SUBTRACT/INTERSECT、体积/面积/质心/惯性、
+  相似变换只对**平面体**成立；任何需要把曲面 `BrepData` 重新 lift 进内核的操作返回
+  `Unsupported` + `solid.lift_requires_planar`（绝不近似）。fillet/shell/nurbs 声明为 false。
+  **`booleans`/`mass_properties` 是 family 级声明**：单个操作数不可 lift 时逐次返回
+  `Unsupported`，调用方必须处理。**两个失效点不同**：布尔结果含**空腔（void region）**时在
+  **布尔本身**就被拒绝；**多壳结果**（例如不相交的两个体 `UNION`）会**作为 body 成功返回**
+  （2 个 shell），直到**下一次 lift**（质量属性 / 再次布尔）才被拒绝——所以**质量属性要求恰好
+  一个闭合壳**，且绝不把两块体积相加。两半都有测试钉住：
+  `a_cavity_result_is_refused_at_the_boolean_itself`、
+  `a_disjoint_union_is_a_body_whose_next_lift_is_refused`。
+  `entity_types` 只声明 `3DSOLID`/`BODY`（`REGION`/`SURFACE` 是 sheet body，本切面不创建也不消费）。
+- **结构一致性（gate B 补）**：lift 之后除 record 的 `validate` 还查——每条边**恰好两次**使用且
+  两个面在**壳的朝向**下反向遍历（拒反向面/重复面/把 sheet 当 solid）、每个环按精确位首尾相接、
+  以及 `solidcore_ops::record_check::agreement`。反向面 body 实测会给出 40（真值 52）的面积、
+  重复面会给出 36（真值 24）的体积，所以这类输入现在返回 `Unsupported` 而不是一个"像样"的数字。
+- **拒绝码不再混用**：`solid.lift_requires_planar` 只用于两处非平面（非 `Plane` 面 / 非 `Line`
+  边）；结构/退化/空/容差/记录校验 → `solid.lift_unsupported`；不可烘焙的 placement/平面 frame
+  （镜像、非正/非有限缩放、奇异或含剪切矩阵）→ `solid.placement_not_supported`。
+  内核错误：`UnsureRegion → Failed(solid.unsure_region)`、`Internal（panic）→
+  Failed(solid.kernel_panic)`（不回传 panic 文本）。
+- **取消**：前后检查 + 布尔走 `solidcore_ops::cancel::{CancelToken, within}`（看门狗线程每
+  50 ms 轮询接缝回调＝检测粒度，`unpark` 让完成路径立即唤醒；`StopGuard::drop` 置位并唤醒，
+  内核 panic 时 `thread::scope` 也不会卡在睡着的看门狗上）；`Error::Cancelled →
+  CadError::Cancelled`，无 `aborted` 产物。实测：一个 2.4 s 的布尔在第 40 ms 请求取消后
+  **165 ms** 返回 `Cancelled`（低于基线一半，证明确实是中途停止，不是跑完再丢弃）。
+- **本轮实测**（Linux x86-64，真实内核、无 mock）：unit box 体积 1.0、wedge 12.0、pyramid 4.0、
+  subtract-corner **0.875**、空交集 `Failed(solid.empty_result)`、单位立方体 mass 面积 6.0 /
+  质心 (0.5,0.5,0.5) / 惯性 diag(1/6)、两个线程共享一个 `Arc<dyn SolidModeler>` 都成功；
+  四类曲面 primitive 的参数（半径/轴/锥斜度/环面 R、r）与请求一致；七类创建体经**本仓**
+  `tessellate_exchange` 全部 `Success`（无缺面/开边/丢壳）；mass 在 1e-3..1e5 尺度与 1e6 偏移下
+  体积/面积/质心相对误差 < 1e-5。
+- **实测教训**（已写进代码注释）：kernel 产出的 record 里边曲线端点可能与顶点差 1 ULP
+  （`1.0` vs `0.9999999999999999`），`record → BrepData` 必须用**顶点**，否则反向转换报
+  `disconnected loop`；面的面积/质心/惯性按 pcurve 在参数域裁剪积分，占位 pcurve 会让面积返回
+  `0`（体积仍对），所以 `BrepData → record` 写的是精确 `(u, v)` 一次 spline。
+- **门禁**：`scripts/check-architecture.py` 新增 solidcore 单所有权规则与
+  `cad-kernel-solidcore` 的允许/禁止依赖；`scripts/test-ui-migration-guards.py` 增加该 crate 的
+  fixture 与正/负控制。
+- **未做**：命令接线（`3DSOLID`/`REGION` 创建、布尔命令、`MASSPROP`、face_sources、VSCURRENT）
+  属 Phase C；曲面/NURBS lift、圆角/倒角/抽壳、SURFACE 家族、ACIS SAT/SAB 写出属 P2/P3。
+- **证据边界**：只有 Linux 契约/单元（真实内核断言的体积/面积/质心/惯性）；
+  **NOT RUN**：全 workspace 测试（`cargo test --workspace`）、GPU/像素/性能、Linux 以外任何载体
+  （Windows/macOS/Android/Web 全部 **NOT VERIFIED**）；本条目不改变 `AGENTS.md` 平台表。
 
 **3D body model P0（2026-11-16）**
 

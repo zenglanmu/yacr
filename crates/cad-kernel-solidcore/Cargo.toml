@@ -1,0 +1,30 @@
+[package]
+name = "cad-kernel-solidcore"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "solidcore adapter: the SolidModeler seam over the pinned solidcore B-rep kernel."
+
+[dependencies]
+cad-domain.workspace = true
+cad-kernel-adapter.workspace = true
+
+# `solidcore` is a git dependency, not a crates.io one, because the seam needs
+# the multi-crate workspace at the pin: `solidcore-ops` (the `Body`/`Body::from_record`
+# boundary and the `CancelToken` cancellation hook) and `solidcore-tess` are
+# `publish = false` and only exist in the repository, while crates.io 1.0.1 is a
+# single crate from an older commit with no cancellation token. Licence
+# Apache-2.0 (upstream LICENSE + NOTICE, SMLib port). Upstream repository
+# <https://github.com/tangency-labs/solidcore>, pinned to revision
+# 55ae49ef919b606bf77901df626ed9bb543e5212 (ADR-0036 D1, unchanged by this
+# crate). Only `solidcore-ops` and `solidcore-record` are named: `solidcore-ops`
+# pulls the kernel (`solidcore`) and the record converter (`solidcore-convert`)
+# transitively, so nothing here depends on a kernel crate directly.
+# `cad-kernel-solidcore` is the only consumer in this workspace
+# (`scripts/check-architecture.py` enforces that); no `[patch.crates-io]` entry.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+solidcore-ops = { git = "https://github.com/tangency-labs/solidcore", rev = "55ae49ef919b606bf77901df626ed9bb543e5212" }
+solidcore-record = { git = "https://github.com/tangency-labs/solidcore", rev = "55ae49ef919b606bf77901df626ed9bb543e5212" }

@@ -180,8 +180,16 @@ face-with-hole 1/8、instance-scaled 3/36；theater-2017 1246 实体/96,333 三�
   `3DSOLID`/`BODY`/`REGION` 记录。
 - **证据**：cube 夹具 **12 三角形**、顶点界 `[-1,1]³`、闭合体积 **8.0**（解析 8.0，误差 < 1e-9）。
 - **仍未做**：NURBS/样条曲面、一般裁剪 B-rep、完整 ACIS 内核；SAT/SAB **源字节仍不保留**
-  （只保留 lift 后的中性 B-Rep）；布尔/圆角/抽壳/`MASSPROP` 需要 P1 的 solidcore 服务
-  （当前 `MASSPROP` 对 body 显式 `massprop.body_requires_kernel`）。
+  （只保留 lift 后的中性 B-Rep）。**2026-11-17 更新**：`cad-kernel-solidcore` 模型器（P1/B2）
+  已能在 Linux 契约/单元里对**平面体**创建/布尔/算体积·面积·质心·惯性，曲面 body 的布尔与
+  质量属性显式拒绝（`solid.lift_requires_planar`）；但**命令层尚未接线**（Phase C），
+  所以 `BOX`/`UNION` 等命令仍拒绝、`MASSPROP` 对 body 仍显式 `massprop.body_requires_kernel`，
+  圆角/倒角/抽壳仍无实现。模型器的能力是 **family 级**：`booleans`/`mass_properties` 为 true
+  不等于每个操作数都能算——曲面 body、开放 sheet、反向面/重复面等结构不一致的操作数逐次返回
+  `Unsupported`（`solid.lift_unsupported`）；**空腔（void region）的结果在布尔本身就被拒绝**，
+  而**多壳结果**（例如不相交的两个体 `UNION`）会作为 body 成功返回、在**下一次 lift**
+  （质量属性/再次布尔）才被拒绝，所以质量属性要求**恰好一个闭合壳**。这些拒绝不是命令层行为，
+  命令层接线（Phase C）必须逐次处理。
 
 ### DIMENSION 族（ADR-0017 P5a，逐行，非脚注）
 
@@ -1176,7 +1184,7 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 
 | 命令 | 结果 | 明示未实现 / 证据边界 |
 | --- | --- | --- |
-| `MASSPROP` | **完整实现（只读，2D）**：逐对象与汇总报告面积、周长、精确包围盒、形心，以及 **`Ix`/`Iy`/`Ixy`（绕各自形心）、`J`、`kx`/`ky`**；汇总再给出**主惯性矩 `I1`/`I2`、主轴 `axis1`/`axis2`、主角 `principal_angle_deg`** 与所用坐标系（`origin/u/v/n`）。二阶矩：圆 `πr⁴/4`、整椭圆 `πa³b/4`/`πab³/4`（旋转到区域系）、闭合折线用 Green 公式 + 每段 bulge 的**圆缺精确矩**（扇形 − 等腰三角形；`α<1e-2` 用级数避免抵消）、HATCH 按环嵌套奇偶符号求和（岛取自身形心矩）、闭合 SPLINE 与导入时被拉直的填充边为**采样并标注**（`exact=false`）；各区域矩先平移到形心，再经一次精确换标 `reexpress` 汇入同一选择坐标系，平动/旋转写错即拒。当前选择为**闭合、共面**的 `CIRCLE` / 完整 `ELLIPSE`（`|sweep| >= 2π − 1e-9`）/ 闭合 `POLYLINE`（任意 bulge，同一平面）。逐对象与汇总诊断报告**面积、周长、精确包围盒（min/max）、形心**；圆/椭圆用解析值，bulged 闭合折线用 `cad_geometry::measure_bulged_ring_area` 的精确面积、直线+圆弧精确周长、直线边+圆缺一阶矩形心。椭圆周长是 **Ramanujan 第二近似**，以 `massprop.approx_ellipse_perimeter` 明示，不是精确椭圆积分。空选择 `massprop.selection`；跨对象法向（符号无关）/标高不一致 `massprop.not_coplanar`；开放折线/圆弧/椭圆弧/样条/文字/块参照/填充/标注/3D/不可寻址引用分别按名拒绝。**无**数据库写、revision、撤销或 `ChangeSet`；Viewer 与 Work 均可用 | **全局范围**（按名拒绝，稳定码）：体积/质量/密度/3D 惯性矩（`massprop.solid_unsupported` —— 本构建无 3D 实体）、`Add`/`Subtract` 区域组合与 `.mpr` 文件（交互提示环/文件输出通道，本构建不建模）。退化面积 `massprop.inertia_degenerate`。证据为源码 + `cad_app`/`cad_geometry` 契约测试（矩形 `Ix=bh³/12`、椭圆 `3π/4`/`27π/4`、旋转 3×4 的 `Ix=Iy=12.5`/`Ixy=−3.5`/主轴 16/9 与 45°、平行轴合成、样条采样标注、带岛填充 `Ix=16−2/3`）；无 GUI/真实图纸/像素证据 |
+| `MASSPROP` | **完整实现（只读，2D）**：逐对象与汇总报告面积、周长、精确包围盒、形心，以及 **`Ix`/`Iy`/`Ixy`（绕各自形心）、`J`、`kx`/`ky`**；汇总再给出**主惯性矩 `I1`/`I2`、主轴 `axis1`/`axis2`、主角 `principal_angle_deg`** 与所用坐标系（`origin/u/v/n`）。二阶矩：圆 `πr⁴/4`、整椭圆 `πa³b/4`/`πab³/4`（旋转到区域系）、闭合折线用 Green 公式 + 每段 bulge 的**圆缺精确矩**（扇形 − 等腰三角形；`α<1e-2` 用级数避免抵消）、HATCH 按环嵌套奇偶符号求和（岛取自身形心矩）、闭合 SPLINE 与导入时被拉直的填充边为**采样并标注**（`exact=false`）；各区域矩先平移到形心，再经一次精确换标 `reexpress` 汇入同一选择坐标系，平动/旋转写错即拒。当前选择为**闭合、共面**的 `CIRCLE` / 完整 `ELLIPSE`（`|sweep| >= 2π − 1e-9`）/ 闭合 `POLYLINE`（任意 bulge，同一平面）。逐对象与汇总诊断报告**面积、周长、精确包围盒（min/max）、形心**；圆/椭圆用解析值，bulged 闭合折线用 `cad_geometry::measure_bulged_ring_area` 的精确面积、直线+圆弧精确周长、直线边+圆缺一阶矩形心。椭圆周长是 **Ramanujan 第二近似**，以 `massprop.approx_ellipse_perimeter` 明示，不是精确椭圆积分。空选择 `massprop.selection`；跨对象法向（符号无关）/标高不一致 `massprop.not_coplanar`；开放折线/圆弧/椭圆弧/样条/文字/块参照/填充/标注/3D/不可寻址引用分别按名拒绝。**无**数据库写、revision、撤销或 `ChangeSet`；Viewer 与 Work 均可用 | **全局范围**（按名拒绝，稳定码）：体积/质量/密度/3D 惯性矩（`massprop.solid_unsupported` —— 本命令路径无 3D 实体；`cad-kernel-solidcore` 模型器已能算**平面体**的体积/面积/质心/惯性，要求**恰好一个闭合壳**（空腔/多壳拒绝），但模型器**尚未接线到本命令**，接线是 Phase C，见 ADR-0036 §7）、`Add`/`Subtract` 区域组合与 `.mpr` 文件（交互提示环/文件输出通道，本构建不建模）。退化面积 `massprop.inertia_degenerate`。证据为源码 + `cad_app`/`cad_geometry` 契约测试（矩形 `Ix=bh³/12`、椭圆 `3π/4`/`27π/4`、旋转 3×4 的 `Ix=Iy=12.5`/`Ixy=−3.5`/主轴 16/9 与 45°、平行轴合成、样条采样标注、带岛填充 `Ix=16−2/3`）；无 GUI/真实图纸/像素证据 |
 | `MEASUREGEOM` | **部分实现（选项路由）**：`MEASUREGEOM DISTANCE\|ANGLE\|AREA\|POLYLINE` 发送与 `DIST`/`MEASUREANGLE`/`AREA`/`MEASUREPOLYLINE` **相同**的 `BeginMeasurement` 请求（不是第二套测量引擎）；`MEASUREGEOM RADIUS` 只读报告当前选择中**恰好一个** `ARC`/`CIRCLE` 的圆心、半径、直径、圆周长（圆弧另报弧长，代码 `measuregeom.radius`）。裸名 `measuregeom.needs_option`；未知/缩写选项由 `invalid_measuregeom_argument_reason` 列出六个完整选项。只接受完整选项词（大小写不敏感），**不接受**单字母缩写 | **未实现**：`VOLUME`（本构建无 3D 实体/体积模型，显式 `Unsupported` `measuregeom.volume_unsupported`，绝不编造数值）；AutoCAD 其它 `MEASUREGEOM` 选项与动态测量未接线。证据为 `cad-ui-core` 路由契约（每个选项启动与基选择子相同的 `tool.key`）+ `cad_app` RADIUS/VOLUME 契约测试；无真机/像素/性能证据 |
 
 ### 2026-11-09 Wave 4 扩展命令（真实 2D 编辑 + 具名拒绝）

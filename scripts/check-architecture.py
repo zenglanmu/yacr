@@ -292,6 +292,30 @@ def check(root: pathlib.Path) -> int:
         forbid_dependency("cad-engine", dependency)
     forbid_dependency("cad-app", "cad-engine")
 
+    # Solid modelling adapter (ADR-0036 D1): `cad-kernel-solidcore` implements
+    # the `SolidModeler` seam (`cad-kernel-adapter`) over the pinned kernel. It
+    # sits on the neutral domain and the seam only: it must not reach the
+    # database, the application/host layers, the renderer or any platform
+    # binding, so the modeler stays a stateless content-in/content-out service.
+    require_dependency("cad-kernel-solidcore", "cad-domain")
+    require_dependency("cad-kernel-solidcore", "cad-kernel-adapter")
+    forbidden_solidcore_dependencies = {
+        "cad-db",
+        "cad-app",
+        "cad-host",
+        "cad-ui-core",
+        "cad-desktop-shell",
+        "cad-render-wgpu",
+        "tauri",
+        "wgpu",
+        "web-sys",
+        "jni",
+        "ndk",
+        "android-activity",
+    }
+    for dependency in sorted(forbidden_solidcore_dependencies):
+        forbid_dependency("cad-kernel-solidcore", dependency)
+
     # Shared UI layer boundary: the platform-independent UI logic (`cad-ui-core`)
     # sits above the UI-free application/host contracts it consumes — it depends on
     # `cad-host` (the owner-thread session wraps `HostCore`) — and below every
@@ -351,8 +375,29 @@ def check(root: pathlib.Path) -> int:
     for name, manifest in packages.items():
         visit(name)
         deps = runtime_dependencies(manifest, workspace_dependencies)
+        # Every named dependency table, ordinary or target-specific, runtime,
+        # build or dev: used by the bans that must not be evadable through a
+        # build script or a test target.
+        declared = declared_dependencies(manifest, workspace_dependencies)
         if name != "cad-import-acadrust":
             assert "acadrust" not in deps, f"parser escaped importer: {name}"
+        # The modelling kernel (ADR-0036 D1) is owned by `cad-kernel-solidcore`
+        # alone, exactly as `acadrust` is owned by the importer: no other crate
+        # may name the kernel, its portable record, its converter or its mesher,
+        # so no kernel type can cross the `SolidModeler` seam. `acadrust` is
+        # checked on runtime dependencies only (a build-time parser helper is a
+        # deliberate carve-out); the kernel names are checked on **every**
+        # declared table, because a kernel in a test or build target is still a
+        # second consumer of the pin.
+        if name != "cad-kernel-solidcore":
+            escaped = declared & {
+                "solidcore",
+                "solidcore-ops",
+                "solidcore-record",
+                "solidcore-convert",
+                "solidcore-tess",
+            }
+            assert not escaped, f"solid kernel escaped adapter: {name} -> {sorted(escaped)}"
         # The cadkit DGN reader (and its neutral document model) is owned by
         # `cad-import-dgn` only. `cadkit-core` is not a shared domain model: it
         # is the parser's document type, and leaking it into another crate would
@@ -368,7 +413,6 @@ def check(root: pathlib.Path) -> int:
         # Every package is banned from the toolkit, including build and dev
         # dependency tables (the runtime graph alone would miss a build-time
         # toolkit) and workspace-inherited aliases.
-        declared = declared_dependencies(manifest, workspace_dependencies)
         toolkit = declared & TOOLKIT_PACKAGES
         assert not toolkit, f"UI/toolkit dependency leaked into {name}: {sorted(toolkit)}"
         if name != "cad-render-wgpu":

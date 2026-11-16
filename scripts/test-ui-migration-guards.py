@@ -80,6 +80,15 @@ ARCH_MEMBERS: dict[str, str] = {
         '[package]\nname = "cad-import-acadrust"\nversion = "0.1.0"\n\n'
         '[dependencies]\nacadrust = "0.6.3"\n'
     ),
+    "crates/cad-kernel-adapter": (
+        '[package]\nname = "cad-kernel-adapter"\nversion = "0.1.0"\n\n'
+        '[dependencies]\ncad-domain = { path = "../cad-domain" }\n'
+    ),
+    "crates/cad-kernel-solidcore": (
+        '[package]\nname = "cad-kernel-solidcore"\nversion = "0.1.0"\n\n'
+        '[dependencies]\ncad-domain = { path = "../cad-domain" }\n'
+        'cad-kernel-adapter = { path = "../cad-kernel-adapter" }\n'
+    ),
     "crates/cad-ui-core": (
         '[package]\nname = "cad-ui-core"\nversion = "0.1.0"\n\n'
         '[dependencies]\ncad-app = { path = "../cad-app" }\n'
@@ -225,6 +234,57 @@ class ArchitectureGuardContract(unittest.TestCase):
         completed = run_guard(ARCHITECTURE_GUARD, self.root)
         self.assert_rejected(completed)
         self.assertIn("iced", completed.stderr)
+
+    # ---- solid kernel single-owner rule (ADR-0036 D1) ----------------------
+
+    def test_solidcore_dependency_outside_the_adapter_is_rejected(self) -> None:
+        # Only `cad-kernel-solidcore` may name the kernel: a second consumer
+        # would let a kernel type cross the seam.
+        for dependency in ("solidcore", "solidcore-ops", "solidcore-record"):
+            with self.subTest(dependency=dependency):
+                self.append_to(
+                    "crates/cad-app", f'\n[dependencies]\n{dependency} = "0.1.0"\n'
+                )
+                completed = run_guard(ARCHITECTURE_GUARD, self.root)
+                self.assert_rejected(completed)
+                self.assertIn("solid kernel escaped adapter", completed.stderr)
+                # Restore the accepted baseline for the next sub-case.
+                manifest = self.root / "crates/cad-app/Cargo.toml"
+                text = manifest.read_text(encoding="utf-8")
+                manifest.write_text(
+                    text.replace(
+                        f'\n[dependencies]\n{dependency} = "0.1.0"\n', ""
+                    ),
+                    encoding="utf-8",
+                )
+
+    def test_solidcore_in_a_dev_or_build_dependency_is_rejected(self) -> None:
+        # The kernel ban covers every declared table: a test-only or build-time
+        # consumer is still a second consumer of the pinned kernel.
+        for table in ("dev-dependencies", "build-dependencies"):
+            with self.subTest(table=table):
+                self.append_to(
+                    "crates/cad-app",
+                    f'\n[{table}]\nsolidcore-ops = "0.1.0"\n',
+                )
+                completed = run_guard(ARCHITECTURE_GUARD, self.root)
+                self.assert_rejected(completed)
+                self.assertIn("solid kernel escaped adapter", completed.stderr)
+                manifest = self.root / "crates/cad-app/Cargo.toml"
+                text = manifest.read_text(encoding="utf-8")
+                manifest.write_text(
+                    text.replace(f'\n[{table}]\nsolidcore-ops = "0.1.0"\n', ""),
+                    encoding="utf-8",
+                )
+
+    def test_solidcore_adapter_may_not_reach_the_database(self) -> None:
+        # The fixture's manifest ends inside its `[dependencies]` table.
+        self.append_to(
+            "crates/cad-kernel-solidcore",
+            'cad-db = { path = "../cad-db" }\ntauri = "2"\n',
+        )
+        completed = run_guard(ARCHITECTURE_GUARD, self.root)
+        self.assert_rejected(completed)
 
     # ---- `[patch.crates-io]` policy (ADR-0031 / ADR-0035) -----------------
 

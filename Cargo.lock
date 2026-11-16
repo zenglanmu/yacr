@@ -957,6 +957,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "cad-kernel-solidcore"
+version = "0.1.14"
+dependencies = [
+ "cad-domain",
+ "cad-kernel-adapter",
+ "solidcore-ops",
+ "solidcore-record",
+]
+
+[[package]]
 name = "cad-measure"
 version = "0.1.14"
 dependencies = [
@@ -4989,6 +4999,44 @@ dependencies = [
  "wasm-bindgen",
  "web-sys",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "solidcore"
+version = "1.0.1"
+source = "git+https://github.com/tangency-labs/solidcore?rev=55ae49ef919b606bf77901df626ed9bb543e5212#55ae49ef919b606bf77901df626ed9bb543e5212"
+dependencies = [
+ "serde",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "solidcore-convert"
+version = "0.1.0"
+source = "git+https://github.com/tangency-labs/solidcore?rev=55ae49ef919b606bf77901df626ed9bb543e5212#55ae49ef919b606bf77901df626ed9bb543e5212"
+dependencies = [
+ "solidcore",
+ "solidcore-record",
+]
+
+[[package]]
+name = "solidcore-ops"
+version = "0.1.0"
+source = "git+https://github.com/tangency-labs/solidcore?rev=55ae49ef919b606bf77901df626ed9bb543e5212#55ae49ef919b606bf77901df626ed9bb543e5212"
+dependencies = [
+ "solidcore",
+ "solidcore-convert",
+ "solidcore-record",
+]
+
+[[package]]
+name = "solidcore-record"
+version = "0.1.0"
+source = "git+https://github.com/tangency-labs/solidcore?rev=55ae49ef919b606bf77901df626ed9bb543e5212#55ae49ef919b606bf77901df626ed9bb543e5212"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
