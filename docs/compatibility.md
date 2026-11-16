@@ -493,7 +493,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `BREAKATPOINT` | 部分实现 | 交互工具：拾取对象后指定断点（可投影到对象），把 LINE/ARC/开放 LWPOLYLINE 拆成两段 | 圆/闭合多段线/SPLINE 按名拒绝（闭合对象不在单点拆分）；无选项 |
 | `LIST` | 实现 | 读取当前选择；报告模型/图纸/块空间、id/handle/type/layer/space/draw order、颜色/线型/线宽/透明度/线型比例/可见性、文字样式/标注样式/块名与几何摘要；只读 | 不是交互 Select objects（输入是当前选择）；厚度/拉伸方向未建模（全局范围）；不可寻址引用逐条报告后继续 |
 | `STATUS` | 完整实现 | 报告数据库/修订/实体与表计数、模型空间范围、当前层、会话模式与绘图开关，**以及存储的基点/图形界限真实值**（`status.limits_base`），缺值时按名声明（`status.not_stored`） | 创建/编辑时间与内存仍不跟踪（`status.not_tracked`） |
-| `FS` | 部分实现 | 取当前唯一选择为种子并入接触对象；**`FSMODE=ON` 走传递相切链**（解析切线；样条用精确 NURBS 导数），`OFF` 与旧直接接触逐字节一致；`fs.chain_nontangent`/`fs.chain_ambiguous`/`fs.chain_bound`（上限 64，不截断）全部在选择变更前拒绝；`fs.mode` 报告模式/实体数/接触数 | **`FSMODE ON|OFF` 的键入 setter 未接线**（会话 token 与 `set_fs_mode` 已存在并有测试，缺 cad-ui-core 选择子与 payload 变体，两个目标文件都在 1000 行门禁）；无功能区按钮（Express 工具，仅命令行） |
+| `FS` | 完整实现 | 取当前唯一选择为种子并入接触对象；`FSMODE=ON` 走传递相切链（解析切线，样条精确 NURBS 导数），`OFF` 与旧直接接触逐字节一致；`fs.chain_nontangent`/`.chain_ambiguous`/`.chain_bound`（上限 64，不截断）在选择变更前拒绝；`FSMODE ON|OFF|1|0` 是真实命令、`SETVAR FSMODE` 读写同一令牌；`fs.mode` 报告模式/实体数/接触数 | 无功能区按钮（Express 工具，仅命令行）；无对话框 |
 | `TORIENT` | 实现 | 裸命令 Most Readable（归一到 `(-π/2, π/2]`）、`TORIENT <角度>` 绝对旋转、`TORIENT REVERSE/R` 再加 180°（**本项目扩展**）；只改 TEXT/MTEXT rotation，位置不变 | ATTDEF/带属性块因无属性模型不适用（全局范围）；MULTILEADER/标注文字不在 AutoCAD TORIENT 范围内，报告跳过 |
 | `TCASE` | 部分实现 | 裸命令按 Title，`TCASE U/L/T/S/G` 分别大写/小写/标题/句首/切换；保留 MTEXT 转义序列 | 属性定义/标注文字未建模；MULTILEADER 只在可实现时改写 |
 | `TXT2MTXT` | 完整实现 | 选中 Text/MText 排序合并为一个 `AcDbMText`（含 `UNIFORM` 行距），同时删除来源（一条事务/一步撤销） | Settings 对话框与分栏未实现（全局范围）；保留原字符串转义 |
@@ -687,7 +687,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `SKETCH` | 部分实现 | 仅 `CommandPayload::Points`：一条活动层开放 LWPOLYLINE；少于两点或非有限点拒绝；一条事务/一步撤销 | 交互式定时采样 NOT IMPLEMENTED（采样由宿主负责） |
 | `TRACE` | 同名不同义（不计入） | 旧式宽线带：`TRACE x1 y1 x2 y2 width` 生成闭合 4 顶点 LWPOLYLINE；一条事务/一步撤销 | 不是 AutoCAD 2026 的协作 `TRACE`；无 trace/标记/评审模型 |
 | `MOCORO` | 部分实现 | `MOVE|COPY dx dy`、`ROTATE bx by degrees`、`SCALE bx by factor` 作用于当前选择，委托既有 MOVE/COPY/ROTATE/SCALE 路径；COPY 一条事务/一步撤销 | 无交互 gizmo/选项循环；空选择 `mocoro.selection_required` |
-| `MSTRETCH` | 部分实现 | 仅 payload 多窗口列表（**无命令行语法**）；复用 STRETCH planner 的窗口并集；一条事务/一步撤销 | 无多边形交叉窗口；命令行不可达 |
+| `MSTRETCH` | 完整实现 | `MSTRETCH <base_x> <base_y> <delta_x> <delta_y> <x1> <y1> <x2> <y2> […]` 与载荷一一对应（窗口逻辑像素、base/delta 世界点）；一个包络计划、一条事务/一步撤销 | 奇数 token `mstretch.argument_odd`（绝不截断半窗）；退化窗口/零位移在事务前拒绝 |
 | `-PAN` / `PAN` | 部分实现 | `-PAN` 是 `PAN` 别名；`dx dy` 或两点，走既有相机路径 | 只改视图：不写库、不 bump 修订、不入历史 |
 | `VIEWRES` | 完整实现 | 整数 `1..=1000`（越界 `viewres.out_of_range`）成为弦分段上限：约束样条、折线 bulge 弧、非 SDF 圆锥的弦回退与宽折线带，`1..=2` 夹到 3 段下限；无库写/无撤销 | 声明：圆/弧/椭圆是解析 SDF，无弦可限，本变量不改变其平滑度；这是显示容差上限，不是平滑度设置；像素效果 NOT VERIFIED |
 | `VSCURRENT` | 部分实现 | 仅 `WIREFRAME` 存会话 token；其余样式 `vscurrent.style_not_implemented` | 无渲染器切换（当前渲染器本就是 2D wireframe）；NOT pixel-verified |
@@ -1310,7 +1310,7 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 
 | 命令 | 结果 | 明示未实现 / 证据边界 |
 | --- | --- | --- |
-| `ELEV` | **部分实现（只读）**：报告会话标高档位（默认 0.0，`elev.value`） | `ELEV <height>` 设置形式未实现；不按标高创建对象；不写库/不升修订 |
+| `ELEV` | 完整实现 | `ELEV <height>`（有限小数，可负）与会话令牌；`SETVAR ELEV` 可读写；创建漏斗三个入口在事务开启前按标高做纯 z 平移（唯一变换权威），`ELEV 0.0` 与旧构建逐字节相同；复制/编辑路径保留源 z（`app_drawing/elevation.rs` 逐条列出） | 不适用于块内成员/复制类命令（声明）；非有限值 `elev.invalid_value` 且不开事务 |
 | `UCSICON` | **部分实现（会话开关）**：翻转 `ucsicon`（默认关，`ucsicon.toggled`） | 本构建不渲染 UCS 图标，不声称图标可见性/位置/外观；不写库/不升修订 |
 | `UCS` | **部分实现（具名拒绝）**：`ucs.unsupported: this build has no UCS model` | 不写库/不升修订/不入历史 |
 | `UCSMAN` | **部分实现（具名拒绝）**：`ucsman.unsupported: this build has no UCS model` | 同上 |
@@ -1457,7 +1457,7 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `RTEDIT` | **部分实现**：具名拒绝（`rtedit.unsupported`）：远程文字未实现（无 RTEXT 模型）。 | 不写库/不升修订/不入历史（报告类只读） |
 | `SPELL` | **部分实现**：具名拒绝（`spell.unsupported`）：无拼写检查词典/模型。 | 不写库/不升修订/不入历史（报告类只读） |
 | `SUPERHATCH` | **部分实现**：具名拒绝（`superhatch.unsupported`）：基于图像/块的超级填充未实现。 | 不写库/不升修订/不入历史（报告类只读） |
-| `ALIGNSPACE` | **部分实现**：具名拒绝（`alignspace.unsupported`）：视口对齐未实现（无视口对齐 API）。 | 不写库/不升修订/不入历史（报告类只读） |
+| `ALIGNSPACE` | 完整实现 | 键入形式为**八位小数**（两对模型↔图纸点，处理器需要两对推出比例）；构造与载荷相同的 `Points`，写 `model_to_paper`，一条事务/一步撤销 | 旋转按 `alignspace.rotation_ignored` 声明（视口模型无旋转字段）；需 Work 模式 + 图纸空间 + 可用视口 |
 | `VPSYNC` | **部分实现**：具名拒绝（`vpsync.unsupported`）：视口同步未实现（无视口组模型）。 | 不写库/不升修订/不入历史（报告类只读） |
 | `LAYTRANS` | **部分实现**：具名拒绝（`laytrans.unsupported`）：图层转换标准未实现。 | 不写库/不升修订/不入历史（报告类只读） |
 
