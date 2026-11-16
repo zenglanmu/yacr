@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Rust CAD **查看/测量**系统，**开发中，无可交付产品**。需求唯一权威是
+Rust CAD 系统，**开发中，无可交付产品**。需求唯一权威是
 `CAD_IMPLEMENTATION_SPEC.md`（v2.0）；逐轮交接入口 `docs/handoff.md`；桌面 UI 决策见
 `docs/adr/0010-react-linux-host.md`，合成方向见 ADR 0023/0024，Android 载体见
 ADR 0027。

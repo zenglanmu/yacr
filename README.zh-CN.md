@@ -94,6 +94,10 @@ Wayland**（宿主自建 app-owned `wl_surface` + `wl_subsurface`，经 `apps/ap
   - **查看**：模型空间与受支持布局切换；图层显隐、搜索、恢复；图元选择、高亮与基本属性。
   - **导航**：平移、缩放、适应图纸、重置；**2D 与 3D 观察**（轨道旋转、标准视图、正交/透视）。
   - **测量**：距离、折线长度、角度、多边形面积，单位/精度/几何来源可追踪。
+  - **绘制与编辑**：LINE/POLYLINE/CIRCLE/ARC/ELLIPSE/SPLINE/POINT/RECTANGLE/POLYGON、
+    文字/引线/表格/填充，以及移动/复制/旋转/缩放/镜像、修剪/延伸/打断、偏移、圆角/倒角、
+    阵列、块引用、图层与属性写入，经 `cad-db` 写事务与撤销历史；逐命令边界见
+    `docs/compatibility.md`。**三维实体建模未实现**（显式拒绝）。
   - **图元显示**：覆盖全部可绘制 DXF 图元（LINE/POLYLINE/CIRCLE/ARC/ELLIPSE/SPLINE/INSERT/TEXT/
     MTEXT/HATCH/DIMENSION/LEADER/MULTILEADER/MLINE/TABLE/…）。TEXT/MTEXT 用真实字体整形为线段
     （TTF/OTF/WOFF 与 SHX）；HATCH 支持多环实心填充与渐变；DIMENSION 对线性/对齐/半径/直径/角度/
@@ -316,8 +320,9 @@ GPU 验收。
   - ACIS 完整几何内核（3DSOLID/REGION/BODY/SURFACE 仅子集离散）、点云点数据（仅范围盒）。
   - 绘制顺序 `draw_order` 未贯通（=上传顺序）；WIPEOUT 掩码填充未渲染；线宽显式不绘制。
   - 图像不支持编解码器（TIFF/CCITT/EPS）、亮度/对比/淡出、outside/mask 裁剪。
-  - 出图仅光栅 PNG（CLI 另有 SVG/PDF）；无 CTB/HPGL；不写回 DWG、不修改原始实体。
-  - 用户批注已整体移除；增强模式只含测量。
+  - 出图仅光栅 PNG（CLI 另有 SVG/PDF）；无 CTB/HPGL；不写回 DWG 文件。
+  - 用户批注已整体移除；2D 绘制/编辑已实现（逐命令边界见 `docs/compatibility.md`）；
+    三维实体建模未实现。
 - 未支持项逐项标注在 `docs/compatibility.md`，图元逐项状态见 `docs/dxf-entity-coverage.md`；
   **未验证即未验证**，不冒充完成。
 

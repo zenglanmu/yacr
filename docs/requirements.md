@@ -10,15 +10,16 @@
 | F04 | Layout/PaperViewport、SpaceId | 视口裁剪/比例/不支持报告 |
 | F05 | SelectionRef、SpatialIndex、properties | 不同 INSERT 独立选择、只读属性 |
 | F06 | MeasurementEngine、MeasurementRecord | 单位未知、自交/共面、2D/3D/纸空间、代理精度 |
-| F07 | AnnotationGeometry、AnnotationService | 六类批注、预览确认、手势冲突 |
-| F08 | AnnotationTransaction、History、authorize | 创建/修改/删除、撤销重做、模式权限 |
-| F09 | AnnotationFile、Persistence、AnnotationRow | 指纹映射、迁移、往返、导出失败不标保存 |
+| F07 | **已移除**（2026-10-05） | 批注子系统整体删除，不再要求 |
+| F08 | **已移除**（2026-10-05）；撤销/重做改由 2D 绘制/编辑使用 | 见 F16 |
+| F09 | **已移除**（2026-10-05） | 批注持久化随 crate 删除 |
 | F10 | ResourceResolver、ResourceLimits | 缺字体/SHX/外参、恶意路径与资源预算 |
 | F11 | ImportReport、ProxyOutput、DiagnosticsModel | 缺缓存/未知状态不报完整、脱敏 |
 | F12 | BackendPreference、Renderer、UnsavedDecision | Auto 初始化检测、强制失败、恢复/设备丢失 |
 | F13 | Projection、StandardView、WorkPlane | 轨道、正交/透视、回到 2D、近平面 |
 | F14 | Mesh、DisplayPrimitive、PickHit | 法向/绕序/透明/镜像、后端对照 |
 | F15 | SolidTessellator、TessellationResult | ACIS 分项样本、缺面/边线降级、误差 |
+| F16 | `DrawingTransaction`/`apply_drawing_changes`、`ChangeSet`、`cad-history`、`app_drawing::*` | 逐命令边界见 `docs/compatibility.md`；原子失败、撤销全链、不写回 DWG；三维实体建模显式拒绝 |
 
 ## 横切要求
 

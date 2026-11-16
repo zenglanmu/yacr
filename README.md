@@ -11,7 +11,8 @@ is intended for Linux (native Wayland or X11/`dom-canvas`), Windows, macOS, Andr
 
 yacr is under active development, and **preview builds are available now** — Linux Flatpak, Windows
 zip, macOS tarball, Android APK, and a browser build. It opens DWG/DXF/DGN, imports mesh/STEP/IFC files
-for display, previews Revit projects and SketchUp models, views 2D/3D drawings with wgpu, measures,
+for display, previews Revit projects and SketchUp models, draws and edits 2D drawings, views 3D
+with wgpu, measures,
 and has an implementation path for 979 of 981 commands (185 complete, 794 partial); the remaining
 two names (MEASURE, TRACE) are counted as same-name-different-meaning, and unsupported options are
 rejected by name instead of silently succeeding. It is **not yet a production CAD system**;
@@ -116,6 +117,11 @@ fallback**. See ADR 0010 and ADR 0011.
     orthographic/perspective).
   - **Measure**: distance, polyline length, angle and polygon area, with traceable
     unit/precision/geometry source.
+  - **Draw & edit (2D)**: LINE/POLYLINE/CIRCLE/ARC/ELLIPSE/SPLINE/POINT/RECTANGLE/POLYGON,
+    text/leader/table/hatch, plus move/copy/rotate/scale/mirror, trim/extend/break, offset,
+    fillet/chamfer, array, block references and layer/property writes, all through
+    `cad-db` transactions and undo history; per-command boundaries in
+    `docs/compatibility.md`. **3D solid modelling is not implemented** (explicit refusal).
   - **Entity display**: all drawable DXF entity types (LINE/POLYLINE/CIRCLE/ARC/ELLIPSE/SPLINE/
     INSERT/TEXT/MTEXT/HATCH/DIMENSION/LEADER/MULTILEADER/MLINE/TABLE/…). TEXT/MTEXT is shaped into
     line segments with real fonts (TTF/OTF/WOFF and SHX); HATCH supports multi-loop solid fill and
@@ -375,8 +381,9 @@ and `docs/validation*.md`.
     rendered; line width is explicitly not drawn.
   - Images: unsupported codecs (TIFF/CCITT/EPS), brightness/contrast/fade, and outside/mask clipping.
   - Plot is raster PNG only (the CLI also has SVG/PDF); no CTB/HPGL; drawings are never written back
-    and original entities are never modified.
-  - User annotations were removed as a whole; the enhanced mode contains measurement only.
+    to DWG (in-memory 2D editing is supported through transactions).
+  - User annotations were removed as a whole; 2D drawing/editing is implemented (per-command
+    boundaries in `docs/compatibility.md`); 3D solid modelling is not implemented.
 - Per-item status is in `docs/compatibility.md` and `docs/dxf-entity-coverage.md`; **unverified is
   stated as unverified** and never reported as complete.
 

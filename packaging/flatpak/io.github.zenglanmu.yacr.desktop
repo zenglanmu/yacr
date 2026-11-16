@@ -2,11 +2,11 @@
 Type=Application
 Name=Yacr
 Name[zh_CN]=Yacr
-Comment=View, measure and annotate DWG/DXF drawings
-Comment[zh_CN]=查看、测量与批注 DWG/DXF 图纸
+Comment=View, measure, draw and edit DWG/DXF drawings
+Comment[zh_CN]=查看、测量与绘制/编辑 DWG/DXF 图纸
 Exec=yacr %F
 Icon=io.github.zenglanmu.yacr
 Terminal=false
 Categories=Graphics;Engineering;
 MimeType=image/vnd.dwg;application/acad;application/dwg;application/x-dwg;application/autocad_dwg;image/vnd.dxf;application/dxf;model/obj;model/stl;model/ply;application/x-ply;model/off;application/x-geomview-coff;model/step;application/step;application/x-ifc;application/x-revit;application/x-revit-template;application/x-revit-family;application/x-revit-family-template;application/vnd.sketchup.skp;application/x-dgn;image/vnd.dgn;application/dgn;
-Keywords=CAD;DWG;DXF;drawing;measure;annotate;
+Keywords=CAD;DWG;DXF;drawing;measure;draw;edit;
