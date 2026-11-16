@@ -42,7 +42,11 @@
 //!   face is drawn iff `Mesh::face_sources[triangle]` equals the selected id;
 //!   otherwise nothing is drawn and `highlight.face-missing` is reported. An
 //!   edge has no source id in the domain mesh at all, so an edge sub-element is
-//!   always unresolved.
+//!   always unresolved. When the target fragment is **not a mesh** at all
+//!   (wireframe `LineSegments`, a polyline, a conic) the distinct
+//!   `highlight.primitive-unsupported` reason is reported instead: the face
+//!   highlight needs a shaded body, and `face-missing` is reserved for a mesh
+//!   whose source ids really do not contain the selection.
 //! - **Hidden selections contribute nothing.** A ref rejected by the caller's
 //!   `visible` predicate is skipped silently (a session choice, not a gap,
 //!   exactly like the annotation overlay). A visible sub-element whose fragments
@@ -218,6 +222,7 @@ where
         let mut drawn = 0usize;
         let mut opaque = 0usize;
         let mut unsupported = false;
+        let mut primitive_unsupported = false;
         for fragment in &matching {
             if sanitize_alpha(fragment.alpha) <= 0.0 {
                 continue;
@@ -237,22 +242,33 @@ where
                     drawn += 1;
                 }
                 None => {
-                    if reference.sub_element.is_some()
-                        && matches!(
-                            &fragment.primitive,
+                    if reference.sub_element.is_some() {
+                        match &fragment.primitive {
                             DisplayPrimitive::Text { .. }
-                                | DisplayPrimitive::Image { .. }
-                                | DisplayPrimitive::Instance { .. }
-                        )
-                    {
-                        unsupported = true;
-                        scene.partial(
-                            "highlight.unsupported",
-                            format!(
-                                "selection {} is a primitive the scene cannot batch",
-                                SelectionLabel(reference)
-                            ),
-                        );
+                            | DisplayPrimitive::Image { .. }
+                            | DisplayPrimitive::Instance { .. } => {
+                                unsupported = true;
+                                scene.partial(
+                                    "highlight.unsupported",
+                                    format!(
+                                        "selection {} is a primitive the scene cannot batch",
+                                        SelectionLabel(reference)
+                                    ),
+                                );
+                            }
+                            // A drawable non-mesh fragment (wireframe line
+                            // segments, a polyline, a conic) has no triangle to
+                            // tint: the face highlight needs the shaded mesh.
+                            DisplayPrimitive::Lines(_)
+                            | DisplayPrimitive::LineSegments(_)
+                            | DisplayPrimitive::Conic(_)
+                            | DisplayPrimitive::Mask { .. } => {
+                                primitive_unsupported = true;
+                            }
+                            DisplayPrimitive::Mesh(_)
+                            | DisplayPrimitive::MeshWithoutEdgeOverlay(_)
+                            | DisplayPrimitive::MeshWithStoredEdges { .. } => {}
+                        }
                     }
                 }
             }
@@ -264,6 +280,15 @@ where
                     "highlight.invisible",
                     format!(
                         "selection {} is fully transparent and contributes no batch",
+                        SelectionLabel(reference)
+                    ),
+                );
+            } else if primitive_unsupported {
+                scene.partial(
+                    "highlight.primitive-unsupported",
+                    format!(
+                        "selection {} cannot be highlighted: the display fragment is not a mesh \
+                         and this style cannot draw a sub-element overlay",
                         SelectionLabel(reference)
                     ),
                 );
@@ -636,6 +661,86 @@ mod tests {
         assert_eq!(scene.batches[1].indices, vec![[0, 1, 2]]);
         // Different local origins prove the two faces are distinct geometry.
         assert_ne!(scene.batches[0].local_origin, scene.batches[1].local_origin);
+    }
+
+    /// A body's display cache is emitted as `MeshWithStoredEdges`; its
+    /// `face_sources` (B-rep face ids from the tessellator) must highlight the
+    /// same way a plain mesh's do.
+    #[test]
+    fn two_faces_of_one_body_highlight_independently() {
+        let mut mesh = two_face_mesh();
+        mesh.face_sources = vec![Some(face("brep:face:0/0")), Some(face("brep:face:0/1"))];
+        let primitive = DisplayPrimitive::MeshWithStoredEdges {
+            mesh: Arc::new(mesh),
+            edges: Arc::from(Vec::new().into_boxed_slice()),
+        };
+        let reps = vec![rep(50, Vec::new(), primitive, 1.0)];
+        let selection = [
+            reference(50, Vec::new(), Some(face("brep:face:0/0"))),
+            reference(50, Vec::new(), Some(face("brep:face:0/1"))),
+        ];
+        let scene = highlight(&selection, &reps);
+        assert_eq!(scene.drawn(), 2, "both body faces highlight");
+        assert_eq!(scene.completeness, Completeness::Complete);
+        assert!(scene.diagnostics.is_empty());
+        // Deterministic paint order, like any other sub-element overlay.
+        assert_eq!(scene.batches[0].draw_order, HIGHLIGHT_DRAW_ORDER);
+        assert_eq!(scene.batches[1].draw_order, HIGHLIGHT_DRAW_ORDER + 1);
+        // Each batch is the one triangle carrying that face source, so the two
+        // body faces are distinct, not a whole-body overlay.
+        assert_eq!(scene.batches[0].indices, vec![[0, 1, 2]]);
+        assert_eq!(scene.batches[1].indices, vec![[0, 1, 2]]);
+        for (batch, key) in scene.batches.iter().zip(["brep:face:0/0", "brep:face:0/1"]) {
+            assert_eq!(
+                batch.sources[0]
+                    .sub_element
+                    .as_ref()
+                    .map(|s| s.source_key.as_str()),
+                Some(key)
+            );
+        }
+    }
+
+    #[test]
+    fn wireframe_body_face_reports_primitive_unsupported_not_face_missing() {
+        // VSCURRENT WIREFRAME emits a body as `LineSegments`, not a mesh. The
+        // face id it names is real in the stored exact mesh, so `face-missing`
+        // would be a false reason; the honest one is "needs a shaded body".
+        let primitive = DisplayPrimitive::LineSegments(Arc::from(
+            vec![
+                p(0.0, 0.0, 0.0),
+                p(1.0, 0.0, 0.0),
+                p(1.0, 0.0, 0.0),
+                p(0.0, 1.0, 0.0),
+            ]
+            .into_boxed_slice(),
+        ));
+        let reps = vec![rep(50, Vec::new(), primitive, 1.0)];
+        let scene = highlight(
+            &[reference(50, Vec::new(), Some(face("brep:face:0/0")))],
+            &reps,
+        );
+        assert!(
+            scene.is_empty(),
+            "an edges-only fragment emits no face batch"
+        );
+        assert!(
+            scene
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "highlight.primitive-unsupported"),
+            "{:?}",
+            scene.diagnostics
+        );
+        assert!(
+            !scene
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "highlight.face-missing"),
+            "the source id exists; the primitive is the limitation: {:?}",
+            scene.diagnostics
+        );
+        assert!(matches!(scene.completeness, Completeness::Partial(_)));
     }
 
     #[test]

@@ -583,7 +583,9 @@ impl DefaultRepresentationProvider {
                     }
                 }
             }
-            SemanticGeometry::Body3d(b) => body_fragment(entity, b, source, &mut representation),
+            SemanticGeometry::Body3d(b) => {
+                body_fragment(entity, b, context, source, &mut representation)
+            }
             other => push_chord_fragment(
                 entity,
                 other,

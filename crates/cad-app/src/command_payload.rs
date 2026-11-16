@@ -879,7 +879,8 @@ pub enum CommandPayload {
     },
     /// `VIEWRES`: the session circle-tessellation percentage (`1..=1000`).
     ViewRes(u32),
-    /// `VSCURRENT`: the session visual-style token (`WIREFRAME` only).
+    /// `VSCURRENT`: the session visual-style token (`WIREFRAME`/`2DWIREFRAME`/
+    /// `2D` or `SHADED`/`SHADEDWITHEDGES`; session-only, bodies only).
     VisualStyle(String),
     /// `WIPEOUTFRAME <0|1|2>`: the session frame state for every wipeout.
     ///

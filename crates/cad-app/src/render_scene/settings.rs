@@ -19,7 +19,11 @@ use super::*;
 ///   their outline instead of their fill;
 /// * [`Self::qtext`] — `QTEXT`: shaped text draws one placeholder rectangle;
 /// * [`Self::curve_segments`] — `VIEWRES`: a ceiling on chord segments per
-///   curve (`None` keeps the build's own tessellation budget).
+///   curve (`None` keeps the build's own tessellation budget);
+/// * [`Self::body_wireframe`] — `VSCURRENT`: `WIREFRAME`/`2DWIREFRAME`/`2D`
+///   draw 3D bodies as edge segments only, `SHADED`/`SHADEDWITHEDGES` (the
+///   default) keep the filled mesh plus stored edges. Only `Body3d` display
+///   changes; every other entity keeps its primitive.
 ///
 /// The struct is `Copy` and compared as a whole in
 /// [`SceneVersion`](super::prepared::SceneVersion): one flip rebuilds the base
@@ -35,6 +39,12 @@ pub struct DisplaySettings {
     pub qtext: bool,
     /// `VIEWRES` chord-segment ceiling per curve; `None` = build default.
     pub curve_segments: Option<usize>,
+    /// Draw 3D bodies as edge segments only (`VSCURRENT WIREFRAME`).
+    ///
+    /// `false` is the session default (`SHADED`) and the pre-`VSCURRENT`
+    /// display: a body keeps its filled mesh plus stored-edge overlay. This
+    /// affects `Body3d` fragments only.
+    pub body_wireframe: bool,
 }
 
 impl Default for DisplaySettings {
@@ -47,6 +57,10 @@ impl Default for DisplaySettings {
             fill: true,
             qtext: false,
             curve_segments: None,
+            // The session visual style starts at `SHADED` (this build's
+            // deliberate divergence from AutoCAD's 2D-wireframe initial value),
+            // which is the pre-`VSCURRENT` filled body display.
+            body_wireframe: false,
         }
     }
 }
@@ -62,6 +76,7 @@ impl DisplaySettings {
             .with_fill(self.fill)
             .with_qtext(self.qtext)
             .with_curve_segments(self.curve_segments)
+            .with_body_wireframe(self.body_wireframe)
     }
 }
 

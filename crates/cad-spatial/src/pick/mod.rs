@@ -18,9 +18,11 @@
 //! * `Mesh` — Möller–Trumbore triangle intersection with an explicit
 //!   [`BackFacePolicy`];
 //! * `Body3d` — its display cache: the tessellation mesh picks like `Mesh` and
-//!   the display edge polylines like a `Polyline` (nearest wins). A body's face
-//!   identity is P1, so a face hit reports
-//!   `body-face-identity-unmodelled` rather than an invented sub-element;
+//!   the display edge polylines like a `Polyline` (nearest wins). A display
+//!   triangle resolves its face identity through the cache's
+//!   [`Mesh::face_sources`] (B-rep face ids stamped by the tessellator); without
+//!   a source the hit reports the helper's `mesh-face-source*` reason instead of
+//!   inventing one;
 //! * `Compound` — recurses and keeps the closest child.
 //!
 //! # What is explicitly *not* supported here

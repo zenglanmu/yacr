@@ -105,8 +105,9 @@ pub const REASON_BODY_WIRE_WITHOUT_GEOMETRY: &str = "body.wire_without_geometry"
 /// non-finite uniform width ([`REASON_POLYLINE_WIDTH`]), a non-positive
 /// circle/arc radius, a collapsed ellipse axis, a spline with too few control
 /// points or an inconsistent knot/weight definition, a mesh with out-of-range or
-/// repeated triangle indices, a text run with a non-positive height, and a
-/// singular insert transform.
+/// repeated triangle indices or a `face_sources` list that is not parallel to the
+/// triangles, a text run with a non-positive height, and a singular insert
+/// transform.
 ///
 /// `Opaque` payloads and `Compound` are accepted recursively: an opaque entity
 /// has no numeric content this build can judge, and rejecting it would block a
@@ -806,6 +807,15 @@ fn validate_mesh(mesh: &Mesh) -> CadResult<()> {
         if tri[0] == tri[1] || tri[1] == tri[2] || tri[0] == tri[2] {
             return Err(degenerate("mesh triangle is degenerate"));
         }
+    }
+    // A face-source list is either absent (not face-addressable) or parallel to
+    // the triangle list, one entry per triangle. The ids themselves stay opaque
+    // to the database: a source key is a producer-owned stable string (for a
+    // B-rep body, the face id the tessellator stamped), not database data.
+    if !mesh.face_sources.is_empty() && mesh.face_sources.len() != mesh.triangles.len() {
+        return Err(degenerate(
+            "mesh face sources do not match the triangle count",
+        ));
     }
     Ok(())
 }

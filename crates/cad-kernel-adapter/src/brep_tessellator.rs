@@ -128,6 +128,21 @@ impl SolidTessellator for BrepTessellator {
 
 /// Tessellate a neutral B-rep, enforcing the request budget and reporting
 /// degradation exactly (missing faces, open edges, dropped shells).
+///
+/// Every produced triangle is stamped with a stable
+/// [`SubElementId`] of the form `brep:face:<shell id>/<face id>`, one entry per
+/// triangle in [`Mesh::face_sources`], so a pick on a display triangle can be
+/// mapped back to the B-rep face that produced it. The `topology_revision` is
+/// `Revision(0)`: this tessellator has no entity revision at facet time (the
+/// same documented convention `cad-measure` uses when it synthesises a
+/// sub-element from a pick key — see its `snap/resolve.rs`). It is therefore a
+/// placeholder, not a claim that the face set is at database revision 0. **No
+/// invalidation is implemented today**: these ids do not change when a body's
+/// exact topology changes, and nothing re-stamps `face_sources` on a revision
+/// bump or drops a stale one. A face-level **edit** (or any consumer that binds
+/// persistent data to a face id) must therefore not ship until the producer
+/// stamps the real revision and invalidates the source list when it changes; a
+/// display-only pick can use the placeholder as it does now.
 fn tessellate_brep(
     tolerance: TessellationTolerance,
     budget: TessellationBudget,
@@ -158,9 +173,16 @@ fn tessellate_brep(
                     }
                     let base = vertices.len() as u32;
                     let produced = fm.triangles.len();
+                    // One stable source id per produced triangle. `Revision(0)`
+                    // is the documented placeholder for a producer with no
+                    // entity revision (see the function doc).
+                    let source = SubElementId {
+                        source_key: format!("brep:face:{}/{}", shell.id, face.id),
+                        topology_revision: Revision(0),
+                    };
                     for t in &fm.triangles {
                         triangles.push([base + t[0], base + t[1], base + t[2]]);
-                        face_sources.push(None);
+                        face_sources.push(Some(source.clone()));
                     }
                     vertices.extend(fm.vertices.iter().map(|p| placement.apply(*p)));
                     normals.extend(fm.normals.iter().map(|n| placement.apply_direction(*n)));

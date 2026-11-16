@@ -25,16 +25,16 @@ mod regions;
 #[path = "app_massprop_measuregeom.rs"]
 mod measuregeom;
 
+// The 3D-body half (ADR-0036 phase C3a): the exact-B-rep path through the
+// injected `SolidModeler`. Also a sibling, for the same code-size reason.
+#[path = "app_massprop_body.rs"]
+mod body;
+
 // --- MASSPROP (2026-11-07) ------------------------------------------------
 //
 // The contract (input, supported kinds, every refusal, the report shape and
 // every un-modelled AutoCAD property) is documented in
 // [`crate::command_id::massprop`]; this module owns the arithmetic.
-
-/// Stable refusal reason: a 3D body's mass properties need the exact B-rep
-/// kernel, which this build does not link. Its display tessellation is never
-/// substituted for the solid (a mesh volume is not the body's volume).
-pub const REASON_MASSPROP_BODY_REQUIRES_KERNEL: &str = "massprop.body_requires_kernel";
 
 /// One measured region before it is formatted into diagnostics.
 struct MassRegion {
@@ -94,45 +94,26 @@ impl Application {
         let references = session.selection.refs().to_vec();
         if references.is_empty() {
             return Err(CadError::InvalidInput(
-                "massprop.selection: MASSPROP measures the selected closed planar regions; \
-                 select at least one"
+                "massprop.selection: MASSPROP measures the selected closed planar regions or \
+                 exact 3D solid bodies; select at least one"
                     .into(),
             ));
         }
-        let mut regions = Vec::with_capacity(references.len());
-        for reference in &references {
-            if reference.document != command.document {
-                return Err(CadError::InvalidInput(format!(
-                    "massprop.target_missing: the selected ref for entity {} belongs to another \
-                     document",
-                    reference.entity.0
-                )));
-            }
-            if !reference.instance.0.is_empty() || reference.sub_element.is_some() {
-                return Err(CadError::Unsupported(
-                    "massprop.not_addressable: block-instance members and sub-elements have no \
-                     addressable entity identity, so they have no mass properties"
-                        .into(),
-                ));
-            }
-            let entity = {
-                let document = self
-                    .workspace
-                    .documents
-                    .get(&command.document)
-                    .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
-                document
-                    .drawing
-                    .entity(reference.entity)
-                    .cloned()
-                    .ok_or_else(|| {
-                        CadError::InvalidInput(format!(
-                            "massprop.target_missing: entity {} does not exist in this drawing",
-                            reference.entity.0
-                        ))
-                    })?
-            };
-            regions.push((reference.entity, self.mass_region(&entity)?));
+        // Route by geometry without cloning a whole row: a body is measured from
+        // its exact B-rep, a planar row by `mass_region`. The helper owns the
+        // face-ref rule (a body face resolves to its owning body, once).
+        let routed = body::route(self, command.document, &references)?;
+        // A 3D body and a planar region have different reports (`volume` versus
+        // `area`), so one MASSPROP run measures one kind of object rather than
+        // printing a summary whose `massprop.solid_unsupported` line would
+        // contradict the body rows beside it.
+        if !routed.bodies.is_empty() {
+            body::require_single_kind(routed.bodies.len(), &routed.regions)?;
+            return self.mass_prop_bodies(session, command, &routed.bodies);
+        }
+        let mut regions = Vec::with_capacity(routed.regions.len());
+        for entity in &routed.regions {
+            regions.push((entity.id, self.mass_region(entity)?));
         }
         self.ensure_coplanar(&regions)?;
 
@@ -339,8 +320,8 @@ impl Application {
             object: None,
             code: "massprop.solid_unsupported".into(),
             message: "MASSPROP: volume, mass, density and 3D moments of inertia are NOT REPORTED \
-                      (this build has no linked B-rep kernel); no value is computed or invented \
-                      for them"
+                      for a planar-region report (a region has no volume); select exact 3D solid \
+                      bodies for body mass properties, and no value is computed or invented here"
                 .into(),
         });
         diagnostics.push(Diagnostic {
@@ -667,18 +648,11 @@ impl Application {
                 hatch,
                 self.measurement.tolerance.computation_world,
             ),
-            // A body's mass properties are never derived from its display
-            // tessellation: a mesh volume is not the solid's volume. No kernel is
-            // linked in this build, so the refusal is explicit and stable.
-            SemanticGeometry::Body3d(body) => Err(CadError::Unsupported(format!(
-                "{}: entity {} ({}) is a 3D BODY (kind {:?}); its mass properties need the exact \
-                 B-rep kernel, which is not linked in this build, so no display-mesh volume is \
-                 reported",
-                REASON_MASSPROP_BODY_REQUIRES_KERNEL,
-                entity.id.0,
-                entity.object.type_key,
-                body.kind
-            ))),
+            // Bodies are routed away before this point (`mass_prop_bodies`); a
+            // body reaching the planar-region path would be a dispatch bug.
+            SemanticGeometry::Body3d(_) => Err(CadError::Invariant(
+                "massprop.body_missing_route: a 3D body reached the planar-region path".into(),
+            )),
             other => Err(CadError::Unsupported(format!(
                 "massprop.unsupported_kind: MASSPROP measures closed CIRCLE, full ELLIPSE, closed \
                  POLYLINE, closed SPLINE or a HATCH region; entity {} is {}",

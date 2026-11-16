@@ -116,13 +116,10 @@ fn body_is_its_own_pick_family_and_its_mesh_is_hit() {
                     error_bound: Some(0.01)
                 }
             );
-            // A body's face identity is P1: no `SubElementId` is invented from
-            // the display triangle, and the machine reason says so.
+            // The display triangle carries no face map, so no `SubElementId` is
+            // invented; the helper's absent-sources reason says why.
             assert!(hit.sub_element.is_none());
-            assert_eq!(
-                hit.sub_element_reason,
-                Some(REASON_BODY_FACE_IDENTITY_UNMODELLED)
-            );
+            assert_eq!(hit.sub_element_reason, Some(REASON_FACE_SOURCES_ABSENT));
         }
         other => panic!("expected a body face hit, got {other:?}"),
     }

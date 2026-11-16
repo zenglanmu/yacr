@@ -8,9 +8,13 @@ use super::*;
 /// produces no `ChangeSet`. `WIPEOUTFRAME` maps its display/plot split here (the
 /// display draws the frame for `ON` and `Display but not plot`; the plot path
 /// resolves its own value), `FILL`/`QTEXT` are the two session toggles their
-/// commands flip, and `VIEWRES` is the validated 1..=1000 percentage the base
-/// build turns into a chord-segment ceiling.
-fn display_settings(session: &cad_app::SessionState) -> cad_app::render_scene::DisplaySettings {
+/// commands flip, `VIEWRES` is the validated 1..=1000 percentage the base
+/// build turns into a chord-segment ceiling, and `VSCURRENT` maps to
+/// `body_wireframe` (only `Wireframe` sets it; the default `Shaded` keeps the
+/// filled body display).
+pub(crate) fn display_settings(
+    session: &cad_app::SessionState,
+) -> cad_app::render_scene::DisplaySettings {
     cad_app::render_scene::DisplaySettings {
         wipeout_frames: matches!(
             session.drafting_extras.wipeout_frames(),
@@ -21,6 +25,7 @@ fn display_settings(session: &cad_app::SessionState) -> cad_app::render_scene::D
         curve_segments: Some(cad_representation::viewres_segment_ceiling(
             session.view_extras.viewres_percent,
         )),
+        body_wireframe: session.view_extras.visual_style == cad_app::VisualStyleToken::Wireframe,
     }
 }
 

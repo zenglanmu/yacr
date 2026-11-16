@@ -488,3 +488,33 @@ fn body_non_uniform_scale_keeps_display_and_demotes_exact_and_solid_kind() {
         "a direction-dependent deflection is recorded as unknown"
     );
 }
+
+#[test]
+fn body_face_sources_must_be_parallel_to_its_triangles() {
+    use cad_domain::{Revision, SubElementId};
+
+    let source = |key: &str| SubElementId {
+        source_key: key.into(),
+        topology_revision: Revision(0),
+    };
+
+    // Empty is "not face-addressable" and stays valid.
+    let mut body = sheet_body();
+    assert!(body.display.mesh.face_sources.is_empty());
+    assert!(validate_geometry(&body_geometry(body.clone())).is_ok());
+
+    // One B-rep face source per triangle is the populated form: accepted, and
+    // the id itself stays opaque to the database.
+    body.display.mesh.face_sources = vec![Some(source("brep:face:0/3"))];
+    assert!(validate_geometry(&body_geometry(body.clone())).is_ok());
+
+    // A source list that is not parallel to the triangles is unrepresentable.
+    body.display.mesh.face_sources = vec![Some(source("brep:face:0/3")), None];
+    let message = validate_geometry(&body_geometry(body))
+        .expect_err("a mismatched face-source list must be rejected")
+        .to_string();
+    assert!(
+        message.contains("face sources"),
+        "the refusal must name the face-source rule: {message}"
+    );
+}

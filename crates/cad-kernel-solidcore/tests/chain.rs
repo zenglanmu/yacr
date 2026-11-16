@@ -453,14 +453,58 @@ fn mass_properties_of_a_unit_box_are_its_closed_forms() {
         mass.accuracy,
         cad_kernel_adapter::MassAccuracy::Requested { .. }
     ));
-    // Inertia about the centroid of a unit cube of mass 1: diag((1+1)/12).
+    // Inertia is the **mass** inertia at the requested density: the kernel's
+    // unit-density tensor (diag((1+1)/12)) scaled by 7.85.
     let inertia = mass.inertia.expect("inertia tensor");
     for (axis, row) in inertia.iter().enumerate() {
         for (column, value) in row.iter().enumerate() {
-            let expected = if axis == column { 1.0 / 6.0 } else { 0.0 };
+            let expected = if axis == column { 7.85 / 6.0 } else { 0.0 };
             assert!(
-                (value - expected).abs() < 1e-6,
+                (value - expected).abs() < 1e-5,
                 "inertia[{axis}][{column}] = {value}, expected {expected}"
+            );
+        }
+    }
+}
+
+#[test]
+fn density_scales_the_inertia_tensor_but_not_the_geometry() {
+    let modeler = SolidCoreModeler::new();
+    let brep = body(execute(
+        &modeler,
+        SolidOperation::Primitive {
+            spec: box_spec(p(0.0, 0.0, 0.0), 1.0, 1.0, 1.0),
+        },
+    ));
+    let at = |density: f64| {
+        *execute(
+            &modeler,
+            SolidOperation::MassProperties {
+                brep: &brep,
+                density,
+            },
+        )
+        .mass()
+        .expect("mass product")
+    };
+    let unit = at(1.0);
+    let doubled = at(2.0);
+    assert!(
+        (doubled.volume - unit.volume).abs() < 1e-12,
+        "volume is geometric"
+    );
+    assert!(
+        (doubled.surface_area - unit.surface_area).abs() < 1e-12,
+        "area is geometric"
+    );
+    assert_eq!(doubled.centroid, unit.centroid, "centroid is geometric");
+    let unit_tensor = unit.inertia.expect("unit tensor");
+    let doubled_tensor = doubled.inertia.expect("doubled tensor");
+    for axis in 0..3 {
+        for column in 0..3 {
+            assert!(
+                (doubled_tensor[axis][column] - 2.0 * unit_tensor[axis][column]).abs() < 1e-9,
+                "inertia[{axis}][{column}] must double at density 2"
             );
         }
     }

@@ -65,10 +65,11 @@
 //!
 //! # What is *not* here
 //!
-//! `MASSPROP`/`face_sources`/`VSCURRENT` are C3, curved-operand booleans are P2
-//! (the modeler refuses them), and `3DSOLID`/`BODY` remain **entity type keys**,
-//! not AutoCAD commands: the modeler advertises them in its registration, and no
-//! command variant is added for them.
+//! `face_sources`/`VSCURRENT` stay C3, `MASSPROP` for exact bodies is C3a
+//! (`crate::app_massprop_body`), curved-operand booleans are P2 (the modeler
+//! refuses them), and `3DSOLID`/`BODY` remain **entity type keys**, not AutoCAD
+//! commands: the modeler advertises them in its registration, and no command
+//! variant is added for them.
 
 use super::*;
 use crate::app_utility::require_none_payload;

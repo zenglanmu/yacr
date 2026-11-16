@@ -250,6 +250,20 @@ pub struct RepresentationContext {
     /// take the analytic path, and the wide-polyline stroke band. See
     /// `provider::default::chord_tessellation_params`.
     pub curve_segments: Option<usize>,
+    /// Draw `SemanticGeometry::Body3d` as **2D wireframe for bodies**: edges
+    /// only (`VSCURRENT WIREFRAME`/`2DWIREFRAME`/`2D`).
+    ///
+    /// `false` (the session default, `VSCURRENT SHADED`) keeps the filled mesh
+    /// plus the stored-edge overlay — exactly the pre-`VSCURRENT` body display.
+    /// `true` makes the body fragment emit
+    /// [`DisplayPrimitive::LineSegments`] from the body's stored edges, or from
+    /// unique triangle-derived segments when a primitive (a sphere/torus) has no
+    /// stored boundary edges, so the body is never invisible.
+    ///
+    /// The flag is **body-only**: every other entity takes its normal path,
+    /// there is no hidden-line removal, and no database write, revision,
+    /// history entry or `ChangeSet` comes from it.
+    pub body_wireframe: bool,
 }
 
 /// The active annotation scale a host applies while building representations.
@@ -293,6 +307,9 @@ impl RepresentationContext {
             // that never received a `VIEWRES` value builds exactly the scene it
             // built before the token was consumed.
             curve_segments: None,
+            // `false` keeps the filled-mesh + stored-edge body display, which is
+            // the pre-`VSCURRENT` scene (the session default is `SHADED`).
+            body_wireframe: false,
         }
     }
 
@@ -368,6 +385,16 @@ impl RepresentationContext {
     /// curves are affected — see [`Self::curve_segments`].
     pub fn with_curve_segments(mut self, ceiling: Option<usize>) -> Self {
         self.curve_segments = ceiling;
+        self
+    }
+
+    /// Draw 3D bodies as edges only: `VSCURRENT WIREFRAME`.
+    ///
+    /// The default is `false` (`SHADED`, the pre-`VSCURRENT` filled display). A
+    /// caller passes the session visual-style token through as this one flag;
+    /// it affects `Body3d` fragments only — see [`Self::body_wireframe`].
+    pub fn with_body_wireframe(mut self, enabled: bool) -> Self {
+        self.body_wireframe = enabled;
         self
     }
 }

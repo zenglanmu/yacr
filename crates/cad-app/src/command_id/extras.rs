@@ -41,12 +41,18 @@
 //! conics and have no chords to bound, and the value is a ceiling on the display
 //! tolerance rather than a smoothness setting.
 //!
-//! `VSCURRENT` accepts only `WIREFRAME`; every 3D/shaded style is refused by
-//! name (`vscurrent.style_not_implemented`), never mapped onto it. That is not a
-//! dead token: 2D wireframe (edges only, no shading, no hidden-line removal) is
-//! the one display mode this renderer implements, so the stored value describes
-//! what is really drawn. No pixel/GPU effect is claimed or verified for either
-//! token.
+//! `VSCURRENT` stores a session-only 3D **body** visual style. `WIREFRAME`
+//! (also spelled `2DWIREFRAME`/`2D`) draws bodies as edges only; `SHADED` (also
+//! `SHADEDWITHEDGES`, and the session default) keeps the filled mesh plus its
+//! stored edges. Two declared divergences from AutoCAD: the `SHADED` token
+//! **includes** the stored-edge overlay (AutoCAD's shaded style has no edges, and
+//! this build has no separate edge-free spelling), and a curved body shows only
+//! its stored edge loops in wireframe (it has no silhouette generator, so the
+//! outer contour can differ from AutoCAD's). Every other style is refused by
+//! name (`vscurrent.style_not_implemented`), never mapped onto either token. The
+//! token reaches the representation as
+//! [`cad_representation::RepresentationContext::body_wireframe`], changes no
+//! other geometry and writes no database row, revision or history entry.
 //!
 //! `WIPEOUTFRAME [0|1|2]` is the **system-variable spelling** of the
 //! `WIPEOUT Frames` option: `0` hides every frame (the mask still masks), `1`

@@ -246,6 +246,61 @@ fn body_edges_only_fragment_becomes_a_line_batch_with_no_triangles() {
 }
 
 #[test]
+fn body_wireframe_edges_only_fragment_is_a_line_batch_with_no_triangles() {
+    // The `VSCURRENT WIREFRAME` body path emits `LineSegments` (stored edges or
+    // unique triangle-derived edges). Whatever the source, the scene must build
+    // a line batch: no indices, no triangles, and one vertex per endpoint.
+    let segments = vec![
+        Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        },
+        Point3 {
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
+        },
+        Point3 {
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
+        },
+        Point3 {
+            x: 1.0,
+            y: 1.0,
+            z: 0.0,
+        },
+        Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        },
+        Point3 {
+            x: 1.0,
+            y: 1.0,
+            z: 0.0,
+        },
+    ];
+    let mut representation = line_representation(24, unit_points());
+    representation.fragments[0].primitive =
+        DisplayPrimitive::LineSegments(Arc::from(segments.into_boxed_slice()));
+    let delta = SceneCache::default()
+        .build(&representation, stamp())
+        .unwrap();
+    assert_eq!(delta.added.len(), 1);
+    let batch = &delta.added[0];
+    assert_eq!(batch.topology, RenderTopology::Lines);
+    assert!(batch.indices.is_empty());
+    assert_eq!(batch.triangle_count(), 0);
+    assert_eq!(
+        batch.vertices.len(),
+        6,
+        "three endpoint pairs, not a polyline"
+    );
+}
+
+#[test]
 fn lines_batch_has_no_triangles_or_normals() {
     let mut cache = SceneCache::default();
     let rep = line_representation(

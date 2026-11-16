@@ -558,33 +558,6 @@ fn wipeoutframe_is_viewer_legal() {
 }
 
 #[test]
-fn vscurrent_stores_wireframe_and_refuses_other_styles_by_name() {
-    let (mut app, mut session) = application_with_document();
-    execute(
-        &mut app,
-        &mut session,
-        CommandId::VisualStyle,
-        CommandPayload::VisualStyle("wireframe".into()),
-    )
-    .expect("VSCURRENT WIREFRAME is admitted");
-    assert_eq!(
-        session.view_extras.visual_style,
-        VisualStyleToken::Wireframe
-    );
-    let refused = execute(
-        &mut app,
-        &mut session,
-        CommandId::VisualStyle,
-        CommandPayload::VisualStyle("SHADED".into()),
-    );
-    let error = format!("{}", refused.expect_err("SHADED is not implemented"));
-    assert!(
-        error.contains("vscurrent.style_not_implemented"),
-        "the refusal must be named: {error}"
-    );
-}
-
-#[test]
 fn linetype_lists_and_sets_the_selection_then_refuses_unknown_names() {
     let (mut app, mut session) = app_with(vec![ent(
         1,

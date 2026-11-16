@@ -6,8 +6,11 @@
 //! not implemented here: it rides the existing `CommandId::Pan` camera path with
 //! a `Points` delta, so it has no second camera authority.
 //!
-//! `VSCURRENT` stores a token for a host/renderer to consume; this lane wires no
-//! renderer change, so no pixel/GPU effect is claimed or verified.
+//! `VSCURRENT` stores the session 3D-body visual style and it **reaches the
+//! display**: `Wireframe` becomes
+//! [`cad_representation::RepresentationContext::body_wireframe`], the one flag
+//! the body fragment builder reads. No pixel/GPU effect is claimed or verified;
+//! the flag changes only `Body3d` display, never drawing data.
 //!
 //! `WIPEOUTFRAME` is **not** a passive token: the display scene and the
 //! vector-plot context both read it (`cad-representation`'s
@@ -79,17 +82,24 @@ impl Application {
         ))
     }
 
-    /// `VSCURRENT WIREFRAME`: store the session visual-style token.
+    /// `VSCURRENT <style>`: store the session visual-style token.
     ///
-    /// Every non-wireframe style is refused by name
+    /// Accepted spellings are `WIREFRAME`/`2DWIREFRAME`/`2D` (3D bodies draw
+    /// their edges only) and `SHADED`/`SHADEDWITHEDGES` (filled body meshes plus
+    /// stored edges, the session default). Every other style is refused by name
     /// (`vscurrent.style_not_implemented`), never silently mapped.
     ///
-    /// `WIREFRAME` is not a no-op token in disguise: it is the one style this
-    /// build's renderer actually draws (edges only, no shading, no hidden-line
-    /// removal), so storing it states the truth about the display and nothing
-    /// else in `1..=1000`-style range is implied. The other styles need a
-    /// shaded/hidden display model this build does not have, which is why they
-    /// are named refusals rather than tokens.
+    /// Two divergences are declared, not silently papered over: the `SHADED`
+    /// token **includes** the stored-edge overlay (AutoCAD's shaded style has no
+    /// edges; this build has no separate edge-free token), and a curved body in
+    /// `WIREFRAME` shows only its stored edge loops — there is no silhouette
+    /// generator, so the outer contour can differ from AutoCAD's.
+    ///
+    /// The token is session-only and affects **3D bodies only**: `DisplaySettings`
+    /// turns `Wireframe` into
+    /// [`cad_representation::RepresentationContext::body_wireframe`], whose sole
+    /// consumer is the body fragment builder. No other geometry changes and the
+    /// drawing is never written.
     pub(crate) fn vscurrent(
         &mut self,
         session: &mut SessionState,
@@ -97,18 +107,28 @@ impl Application {
     ) -> CadResult<CommandOutcome> {
         let CommandPayload::VisualStyle(style) = &command.payload else {
             return Err(CadError::InvalidInput(
-                "VSCURRENT needs one style name (WIREFRAME)".into(),
+                "VSCURRENT needs one style name (WIREFRAME, 2DWIREFRAME, 2D, SHADED or \
+                 SHADEDWITHEDGES)"
+                    .into(),
             ));
         };
         session.view_extras.set_visual_style(style)?;
+        let active = session.view_extras.visual_style;
         Ok(view_outcome(
             "vscurrent",
             format!(
-                "VSCURRENT: visual style set to {} (session state only; the drawing was not \
-                 written) — 2D wireframe is the only display mode this renderer implements (edges \
-                 only: no shading, no hidden-line removal), so no pixel effect is claimed; every \
-                 shaded/hidden style is refused by name instead of being mapped onto it",
-                session.view_extras.visual_style.name()
+                "VSCURRENT: visual style is now {} (session state only; the drawing was not \
+                 written and no revision or history entry was recorded) — {}",
+                active.name(),
+                match active {
+                    VisualStyleToken::Wireframe =>
+                        "3D bodies draw their edge segments only (stored body edges, or \
+                         triangle-derived segments when a primitive has no stored boundary \
+                         edges); other geometry keeps its display",
+                    VisualStyleToken::Shaded =>
+                        "3D bodies draw their filled mesh plus stored-edge overlay; other geometry \
+                         keeps its display",
+                }
             ),
         ))
     }

@@ -733,3 +733,61 @@ fn importing_two_acis_solids_keeps_each_exact_body_and_its_source_class() {
         drawing.report.diagnostics
     );
 }
+
+/// An imported ACIS body's display cache carries the B-rep face identity: one
+/// `brep:face:<shell>/<face>` source per display triangle, and every stamped
+/// face id exists in the exact B-rep the import kept.
+#[test]
+fn imported_acis_body_carries_brep_face_sources_after_tessellation() {
+    let sat = include_str!("../../../../fixtures/acis/cube.sat");
+    let acad = acadrust::CadDocument::new();
+    let req = request(Vec::new());
+    let mut builder = builder(&req, &acad);
+
+    let entity = EntityType::Solid3D(acadrust::entities::Solid3D::from_sat(sat));
+    let common = entity.common();
+    let (geometry, _) = builder.convert(&entity, common);
+    let SemanticGeometry::Body3d(body) = geometry else {
+        panic!("a tessellated 3DSOLID must become a Body3d, got {geometry:?}");
+    };
+    // The body is storable as-is: the populated vector must pass validation.
+    assert!(
+        cad_db::validate_geometry(&SemanticGeometry::Body3d(body.clone())).is_ok(),
+        "a display mesh with one face source per triangle is valid"
+    );
+
+    let mesh = &body.display.mesh;
+    assert_eq!(mesh.triangles.len(), 12);
+    assert_eq!(
+        mesh.face_sources.len(),
+        mesh.triangles.len(),
+        "one source per display triangle"
+    );
+    assert!(mesh.face_sources.iter().all(|s| s.is_some()));
+
+    let brep = body.exact_brep().expect("the lifted B-Rep is exact");
+    let face_ids: Vec<u32> = brep
+        .shells
+        .iter()
+        .flat_map(|shell| shell.faces.iter().map(|face| face.id))
+        .collect();
+    let mut keys: Vec<&str> = Vec::new();
+    for source in &mesh.face_sources {
+        let key = &source.as_ref().unwrap().source_key;
+        assert!(key.starts_with("brep:face:"), "unexpected key {key:?}");
+        let face_id: u32 = key
+            .rsplit('/')
+            .next()
+            .expect("key has a face id")
+            .parse()
+            .expect("face id is numeric");
+        assert!(
+            face_ids.contains(&face_id),
+            "stamped face id {face_id} is not in the box's face set {face_ids:?}"
+        );
+        if !keys.contains(&key.as_str()) {
+            keys.push(key);
+        }
+    }
+    assert_eq!(keys.len(), 6, "a box has six distinct faces: {keys:?}");
+}

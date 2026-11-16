@@ -197,12 +197,17 @@ fn vscurrent_admits_one_word_and_linetype_has_list_and_set_forms() {
         parse_vscurrent_argument("WIREFRAME"),
         Ok(CommandPayload::VisualStyle(style)) if style == "WIREFRAME"
     ));
-    // The command layer is what names the unsupported style (SHADED); the parser
-    // only requires one word so that refusal can reach the user.
-    assert!(matches!(
-        parse_vscurrent_argument("SHADED"),
-        Ok(CommandPayload::VisualStyle(style)) if style == "SHADED"
-    ));
+    // The parser only requires one word; the command layer maps the accepted
+    // spellings and refuses every other style by name.
+    for spelling in ["SHADED", "2DWIREFRAME", "2D", "SHADEDWITHEDGES"] {
+        assert!(
+            matches!(
+                parse_vscurrent_argument(spelling),
+                Ok(CommandPayload::VisualStyle(style)) if style == spelling
+            ),
+            "`{spelling}` is one token"
+        );
+    }
     assert!(parse_vscurrent_argument("SHADED WITH EDGES").is_err());
 
     assert!(matches!(

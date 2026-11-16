@@ -65,6 +65,49 @@ fn fill_and_qtext_tokens_reach_the_render_session() {
     assert!(core.render.input_revision() > after_qtext);
 }
 
+/// `VSCURRENT` maps to the one body-display flag: `Wireframe` sets
+/// `body_wireframe`, `Shaded` (the session default) clears it.
+#[test]
+fn vscurrent_maps_to_the_body_wireframe_display_flag() {
+    let mut session = cad_app::SessionState::new(cad_domain::DocumentId(1), cad_app::AppMode::Work);
+    assert_eq!(
+        session.view_extras.visual_style,
+        cad_app::VisualStyleToken::Shaded,
+        "the session default must be SHADED"
+    );
+    assert!(
+        !crate::state::display_settings(&session).body_wireframe,
+        "SHADED keeps the filled body display"
+    );
+
+    session
+        .view_extras
+        .set_visual_style("WIREFRAME")
+        .expect("WIREFRAME is admitted");
+    assert!(
+        crate::state::display_settings(&session).body_wireframe,
+        "WIREFRAME requests edges-only bodies"
+    );
+
+    session
+        .view_extras
+        .set_visual_style("2D")
+        .expect("2D is an accepted wireframe spelling");
+    assert!(
+        crate::state::display_settings(&session).body_wireframe,
+        "2D is the same wireframe token"
+    );
+
+    session
+        .view_extras
+        .set_visual_style("SHADEDWITHEDGES")
+        .expect("SHADEDWITHEDGES is admitted");
+    assert!(
+        !crate::state::display_settings(&session).body_wireframe,
+        "SHADEDWITHEDGES maps back to the shaded body display"
+    );
+}
+
 /// `VIEWRES` is a session percentage with a display consumer: a value below the
 /// analytic-conic default schedules a rebuild, and an unchanged value does not.
 #[test]

@@ -4,7 +4,7 @@
 //! Split out of `command_id.rs` to keep that catalogue inside the code-size
 //! limit; the variant keeps a compact doc and links here. Nothing here is
 //! implemented in this module: the report lives in
-//! `crate::app_measure_object` (`Application::mass_prop`) and the selection
+//! `crate::app_massprop` (`Application::mass_prop`) and the selection
 //! checks reuse the existing measurement funnel.
 //!
 //! ## Input: the current selection (declared divergence)
@@ -78,12 +78,47 @@
 //! (eigenvalues of `[[Ix, −Ixy], [−Ixy, Iy]]`, so `I1 + I2 = J`) and the
 //! principal axis directions with the angle measured from `u` in the plane.
 //!
+//! ## 3D bodies (ADR-0036 phase C3a)
+//!
+//! A selection made only of [`cad_domain::SemanticGeometry::Body3d`] rows is
+//! measured through the carrier-injected
+//! [`cad_kernel_adapter::SolidModeler`]'s `MassProperties` operation, never from
+//! the display tessellation. Only `BodyKind::Solid` with a non-empty
+//! `BodyExact::Exact` is measurable. The density is `1.0` (AutoCAD's unitless
+//! default), the call is **synchronous** and shares the process-global kernel
+//! mutex with the primitive/boolean paths; while a background boolean holds that
+//! slot the command refuses (`massprop.kernel_busy`) instead of blocking. Each
+//! body produces one `massprop.object` row with volume, surface area, centroid,
+//! `Ixx`/`Iyy`/`Izz`, the products `Iyz`/`Izx`/`Ixy` and the **requested**
+//! relative accuracy ("estimated at requested relative accuracy X, not a proved
+//! bound"; never analytic).
+//!
+//! A **body-face** sub-element ref is measurable: it resolves to its owning body
+//! (a body has one mass regardless of the clicked face) and refs to the same
+//! body count once. A sub-element on any other geometry, and a block-instance
+//! member, keep `massprop.not_addressable`. A mixed body/region selection is
+//! `massprop.mixed_selection`: the two report shapes are not combined into one
+//! summary, and the message names the distinct non-body kinds and counts.
+//!
+//! Body refusals (all stable, nothing reported):
+//! `massprop.body_modeler_unavailable` (no exact B-rep kernel in this carrier),
+//! `massprop.body_not_liftable` (the modeler's structured reason, e.g.
+//! `solid.lift_requires_planar` for curved bodies before phase P2),
+//! `massprop.body_kernel_failed` (the first kernel diagnostic),
+//! `massprop.body_not_exact` (`BodyExact::Unavailable` or an empty B-rep),
+//! `massprop.body_not_solid` (wire/sheet/unknown topology),
+//! `massprop.body_not_positive_volume` (a reflected/inside-out body whose
+//! enclosed volume is not finite and positive) and `massprop.kernel_busy`
+//! (a background boolean owns the kernel). A failure on any body refuses the
+//! whole run: no earlier body row survives, so there is no partial report.
+//!
 //! ## Refusals (nothing is reported; every code is stable)
 //!
 //! * `massprop.selection` — no selected object.
 //! * `massprop.invalid_payload` — a payload other than `None`.
-//! * `massprop.not_addressable` — a ref with an instance path or sub-element:
-//!   block members and sub-elements have no addressable identity/geometry.
+//! * `massprop.not_addressable` — a ref with an instance path, or a sub-element
+//!   on non-body geometry: block members have no addressable identity, and only
+//!   a body face has a measurable owner.
 //! * `massprop.target_missing` — the ref names an entity that no longer exists
 //!   (or belongs to another document).
 //! * `massprop.open_polyline` — an open LWPOLYLINE encloses no area.
@@ -91,7 +126,7 @@
 //! * `massprop.unsupported_kind` — every other kind, named in the message:
 //!   `ARC`, `LINE`, `SPLINE`, `TEXT`, `INSERT`, `HATCH`, `DIMENSION`, `MESH`,
 //!   `OPAQUE`, `COMPOUND`, `MULTILEADER`, `IMAGE`, `MASK`, `SHAPE`, `POINT`.
-//!   There is no 3D-solid/region model in `cad-db`, so no solid is measured.
+//!   A `Body3d` is **not** in this list: it has the exact path below.
 //! * `massprop.non_planar` — the polyline's own vertices do not lie in one
 //!   plane within the computation tolerance.
 //! * `massprop.not_coplanar` — two selected regions have different plane
@@ -119,13 +154,13 @@
 //! (overlapping regions are counted once per selected object), which is the same
 //! convention the per-object report exposes.
 //!
-//! Two diagnostics keep the un-modelled halves visible at run time:
+//! Two diagnostics keep the un-modelled halves visible on a **region** run:
 //! `massprop.solid_unsupported` (volume, mass, density and 3D moments of inertia
-//! — no B-rep kernel is linked in this build) and
-//! `massprop.not_implemented` (`Add`/`Subtract` region composition and `.mpr`
-//! output). A selected `Body3d` is refused by its own stable reason,
-//! `massprop.body_requires_kernel`: its display tessellation is never measured
-//! as if it were the solid.
+//! — a region is not a solid) and `massprop.not_implemented`
+//! (`Add`/`Subtract` region composition and `.mpr` output). An exact `Body3d`
+//! is not refused any more: it takes the C3a path above and reports volume,
+//! surface area, centroid and the 3D inertia tensor, or one of the named body
+//! refusals. Its display tessellation is never measured as if it were the solid.
 //!
 //! `CommandOutcome::measurement` / `point_report` stay `None`: `MASSPROP` reports
 //! several properties and no single `MeasurementRecord` value can carry them
@@ -133,12 +168,16 @@
 //!
 //! ## NOT IMPLEMENTED (named, never fabricated)
 //!
-//! * `volume`, `mass`, `density` and **3D** moments of inertia: no B-rep kernel
-//!   is linked, so there is nothing to integrate. The
-//!   `massprop.solid_unsupported` diagnostic names them on every run, and no
-//!   value is computed; a 3D body is refused with `massprop.body_requires_kernel`.
 //! * `Add`/`Subtract` region composition and writing the analysis to a `.mpr`
 //!   file. There is no payload field or command path for either.
+//! * 3D bodies on a carrier that injects no modeler
+//!   (`massprop.body_modeler_unavailable`), and curved bodies until the modeler
+//!   can lift them in phase P2 (`massprop.body_not_liftable`, reason
+//!   `solid.lift_requires_planar`). No mesh volume is ever substituted.
+//!
+//! On a region run, `volume`, `mass`, `density` and 3D moments of inertia stay
+//! un-modelled (`massprop.solid_unsupported`): a 2D region has no volume, and no
+//! value is computed or invented for it.
 //!
 //! The 2D second moments are **not** in this list any more: they are reported
 //! exactly for every measured kind (the sampled kinds are labelled).

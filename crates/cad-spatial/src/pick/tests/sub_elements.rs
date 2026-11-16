@@ -167,3 +167,94 @@ fn line_hits_have_no_sub_element_and_no_reason() {
         "lines are not face-addressable"
     );
 }
+
+/// A body's display mesh resolves the same stable face ids a mesh does, so a
+/// display triangle whose cache carries B-rep face sources is face-addressable.
+#[test]
+fn body_face_hit_resolves_the_stable_sub_element() {
+    let options = PickOptions::new(1e-6).unwrap();
+    let geometry = body(BodyKind::Solid, two_face_mesh(), Vec::new());
+    let transform = Transform3::identity();
+
+    let left = ray(p(-1.0, 0.0, 0.0), p(0.0, 0.0, 1.0));
+    match hit_geometry(&left, &geometry, &transform, &options).unwrap() {
+        PickOutcome::Hit(hit) => {
+            assert_eq!(
+                hit.sub_element.as_ref().map(|s| s.source_key.as_str()),
+                Some("face-a")
+            );
+            assert!(hit.sub_element_reason.is_none());
+            assert_eq!(hit.geometry_source, GeometrySource::DirectMesh);
+        }
+        other => panic!("expected a body face hit, got {other:?}"),
+    }
+
+    let right = ray(p(1.0, 0.0, 0.0), p(0.0, 0.0, 1.0));
+    match hit_geometry(&right, &geometry, &transform, &options).unwrap() {
+        PickOutcome::Hit(hit) => assert_eq!(
+            hit.sub_element.as_ref().map(|s| s.source_key.as_str()),
+            Some("face-b"),
+            "each display triangle maps to its own B-rep face source"
+        ),
+        other => panic!("expected a body face hit, got {other:?}"),
+    }
+}
+
+/// A body whose display cache predates the B-rep face map reports the helper's
+/// absent-sources reason instead of inventing an id.
+#[test]
+fn body_face_without_sources_is_unresolved_with_a_reason() {
+    let options = PickOptions::new(1e-6).unwrap();
+    let transform = Transform3::identity();
+    let r = ray(p(-1.0, 0.0, 0.0), p(0.0, 0.0, 1.0));
+
+    let mut absent = two_face_mesh();
+    absent.face_sources = Vec::new();
+    let geometry = body(BodyKind::Solid, absent, Vec::new());
+    match hit_geometry(&r, &geometry, &transform, &options).unwrap() {
+        PickOutcome::Hit(hit) => {
+            assert!(hit.sub_element.is_none());
+            assert_eq!(hit.sub_element_reason, Some(REASON_FACE_SOURCES_ABSENT));
+        }
+        other => panic!("expected a body face hit, got {other:?}"),
+    }
+
+    let mut short = two_face_mesh();
+    short.face_sources = vec![Some(face("brep:face:0/0"))];
+    let geometry = body(BodyKind::Solid, short, Vec::new());
+    let right = ray(p(1.0, 0.0, 0.0), p(0.0, 0.0, 1.0));
+    match hit_geometry(&right, &geometry, &transform, &options).unwrap() {
+        PickOutcome::Hit(hit) => {
+            assert!(hit.sub_element.is_none());
+            assert_eq!(
+                hit.sub_element_reason,
+                Some(REASON_FACE_SOURCE_OUT_OF_RANGE)
+            );
+        }
+        other => panic!("expected a body face hit, got {other:?}"),
+    }
+}
+
+/// An edge-only body hit keeps today's behaviour: no sub-element and no reason.
+#[test]
+fn body_edge_hits_have_no_sub_element_and_no_reason() {
+    let options = PickOptions::new(1e-6).unwrap();
+    let geometry = body(
+        BodyKind::Wire,
+        Mesh::default(),
+        vec![vec![p(1.0, -2.0, 3.0), p(1.0, 2.0, 3.0)]],
+    );
+    let r = ray(p(1.0, 0.0, 2.0), p(0.0, 0.0, 1.0));
+    match hit_geometry(&r, &geometry, &Transform3::identity(), &options).unwrap() {
+        PickOutcome::Hit(hit) => {
+            assert!(hit.sub_element.is_none());
+            assert!(hit.sub_element_reason.is_none());
+            assert!(
+                (hit.distance - 1.0).abs() < 1e-9,
+                "the display edge at z = 3 is hit, got {}",
+                hit.distance
+            );
+        }
+        other => panic!("expected an edge-only body hit, got {other:?}"),
+    }
+}

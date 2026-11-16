@@ -11,6 +11,17 @@
 //! `Precision::Analytic`. (Closed forms exist for a box or sphere, but they are a
 //! test oracle, not a kernel guarantee.)
 //!
+//! # Density
+//!
+//! `Body::mass_properties` integrates the **unit-density** tensor (the geometric
+//! `∫(y²+z²)dV`, … about the centroid). `volume`, `surface_area` and `centroid`
+//! are therefore geometric and density-independent, while the seam's
+//! [`cad_kernel_adapter::SolidMassProperties::inertia`] is a **mass** inertia:
+//! this module multiplies every tensor entry by the requested `density`, which is
+//! an exact scale factor for a homogeneous body. `density` is echoed on the
+//! result, so `mass = volume · density` and the inertia is in mass · units².
+//! `MASSPROP` requests density `1.0`, where the two readings coincide.
+//!
 //! Units pass straight through: volume in drawing-units³, area in
 //! drawing-units², the centroid in model coordinates (see the crate docs).
 
@@ -70,8 +81,10 @@ pub(crate) fn mass(brep: &cad_domain::BrepData, density: f64) -> CadResult<Solid
             z: estimate.centroid[2],
         },
         // The kernel's tensor is about the centroid with the negated products
-        // off the diagonal — the standard inertia tensor.
-        inertia: Some(estimate.tensor),
+        // off the diagonal — the standard inertia tensor — integrated at unit
+        // density. The requested density is an exact scale factor for a
+        // homogeneous body; volume/area/centroid stay geometric.
+        inertia: Some(estimate.tensor.map(|row| row.map(|value| value * density))),
         density,
         accuracy: MassAccuracy::Requested {
             relative: estimate.requested_accuracy,

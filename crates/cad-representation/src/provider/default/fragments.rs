@@ -190,9 +190,30 @@ pub(super) fn push_mesh_fragment(
 /// re-deriving an overlay from the triangle topology. A cache with no stored
 /// edges keeps the plain [`DisplayPrimitive::Mesh`] (legacy triangle-derived
 /// overlay, and the text-LOD classification is unchanged).
+///
+/// # `VSCURRENT WIREFRAME`
+///
+/// [`RepresentationContext::body_wireframe`] switches the **body only** to a
+/// 2D-wireframe display: the fragment becomes
+/// [`DisplayPrimitive::LineSegments`] instead of a mesh.
+///
+/// * stored body edges are used as they are (the same flattened endpoint pairs
+///   the shaded variant carries);
+/// * a triangulated body with **no** stored edges (a sphere/torus full primitive
+///   has no boundary edges in its cache) gets the unique triangle-edge segments
+///   derived from the display mesh, de-duplicated by unordered endpoint pair in
+///   first-occurrence order — deterministic, and never an empty fragment that
+///   would make the body invisible;
+/// * a wire body (no mesh) keeps its [`DisplayPrimitive::LineSegments`], exactly
+///   as when shaded;
+/// * a body with neither a mesh nor edges stays the explicit `Missing` verdict.
+///
+/// The flag changes nothing for other entities: there is no hidden-line removal
+/// and no DB write.
 pub(super) fn body_fragment(
     entity: &DbEntity,
     body: &Body3d,
+    context: &RepresentationContext,
     source: SelectionRef,
     representation: &mut DisplayRepresentation,
 ) {
@@ -216,6 +237,47 @@ pub(super) fn body_fragment(
         linetype_scale: 1.0,
         primitive,
     };
+    // `VSCURRENT WIREFRAME`: edges only, from the stored body edges when the
+    // cache has them, otherwise from the display mesh's unique triangle edges.
+    if context.body_wireframe {
+        let stored = body_edge_segments(&body.display.edges);
+        let segments = if stored.is_empty() {
+            triangle_edge_segments(&body.display.mesh)
+        } else {
+            stored
+        };
+        if !segments.is_empty() {
+            representation
+                .fragments
+                .push(fragment(DisplayPrimitive::LineSegments(Arc::from(
+                    segments.into_boxed_slice(),
+                ))));
+            representation.completeness = body.display.completeness.clone();
+            return;
+        }
+        // A triangulated cache whose every edge is degenerate still must not
+        // fall back to a filled mesh: the wireframe request was explicit.
+        if !body.display.mesh.triangles.is_empty() {
+            representation.completeness =
+                body.display
+                    .completeness
+                    .clone()
+                    .combine(Completeness::Missing(vec![format!(
+                        "the {:?} body's display mesh produced no drawable wireframe segment",
+                        body.kind
+                    )]));
+            representation.diagnostics.push(Diagnostic {
+                object: Some(ObjectId(entity.id.0)),
+                code: "representation.body_wireframe_empty".into(),
+                message: format!(
+                    "{} is a {:?} body whose display mesh has no drawable triangle edge; \
+                     WIREFRAME draws nothing rather than a filled fallback",
+                    entity.object.type_key, body.kind
+                ),
+            });
+            return;
+        }
+    }
     // A cache with no triangles draws nothing as a filled mesh, and the scene
     // reads an index-less `RenderTopology::Mesh` batch as `vertices.len() / 3`
     // triangles, which would fabricate topology. Only a triangulated cache takes
@@ -282,6 +344,62 @@ fn body_edge_segments(edges: &[Vec<Point3>]) -> Vec<Point3> {
             segments.push(pair[0]);
             segments.push(pair[1]);
         }
+    }
+    segments
+}
+
+/// Derive the **unique** triangle-edge segments of a display mesh.
+///
+/// Used only by `VSCURRENT WIREFRAME` for a triangulated body whose cache has no
+/// stored boundary edges (sphere/torus full primitives). Every triangle
+/// contributes its three edges; a shared edge (a quad diagonal, a sphere mesh
+/// seam) appears once, keyed by its unordered endpoint pair in first-occurrence
+/// order, so the output is deterministic for a given mesh. Non-finite endpoints
+/// and zero-length pairs are dropped rather than forwarded to the renderer. A
+/// triangle index outside the vertex array is skipped — the provider never reads
+/// past the mesh it was handed.
+fn triangle_edge_segments(mesh: &Mesh) -> Vec<Point3> {
+    use std::collections::HashSet;
+
+    fn key(point: Point3) -> Option<[u64; 3]> {
+        let coords = [point.x, point.y, point.z];
+        if coords.iter().any(|value| !value.is_finite()) {
+            return None;
+        }
+        Some([point.x.to_bits(), point.y.to_bits(), point.z.to_bits()])
+    }
+
+    let mut seen: HashSet<[[u64; 3]; 2]> = HashSet::new();
+    let mut segments = Vec::new();
+    fn push(a: Point3, b: Point3, seen: &mut HashSet<[[u64; 3]; 2]>, segments: &mut Vec<Point3>) {
+        let (Some(a_key), Some(b_key)) = (key(a), key(b)) else {
+            return;
+        };
+        if a_key == b_key {
+            return;
+        }
+        let pair = if a_key <= b_key {
+            [a_key, b_key]
+        } else {
+            [b_key, a_key]
+        };
+        if seen.insert(pair) {
+            segments.push(a);
+            segments.push(b);
+        }
+    }
+    for triangle in &mesh.triangles {
+        let [i, j, k] = *triangle;
+        let (Some(a), Some(b), Some(c)) = (
+            mesh.vertices.get(i as usize),
+            mesh.vertices.get(j as usize),
+            mesh.vertices.get(k as usize),
+        ) else {
+            continue;
+        };
+        push(*a, *b, &mut seen, &mut segments);
+        push(*b, *c, &mut seen, &mut segments);
+        push(*c, *a, &mut seen, &mut segments);
     }
     segments
 }

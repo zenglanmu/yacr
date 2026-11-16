@@ -615,3 +615,105 @@ fn brep_tessellator_honours_cancellation() {
         CadError::Cancelled
     );
 }
+
+// ---- B-rep face identity on produced facets (ADR-0036 C3b) ----
+
+/// Every facet a B-rep face produces carries that face's stable source id, one
+/// entry per triangle, so a pick can map a display triangle back to the face.
+#[test]
+fn brep_cube_facets_carry_stable_face_sources() {
+    let brep = cube_brep(1.0);
+    let face_ids: Vec<u32> = brep
+        .shells
+        .iter()
+        .flat_map(|shell| shell.faces.iter().map(|f| f.id))
+        .collect();
+    let req = brep_request(brep);
+    let result = BrepTessellator.tessellate(&req, &no_cancel).unwrap();
+    let mesh = result.outcome.mesh().expect("cube must produce a mesh");
+
+    assert_eq!(
+        mesh.mesh.face_sources.len(),
+        mesh.mesh.triangles.len(),
+        "one source per triangle"
+    );
+    assert!(
+        mesh.mesh.face_sources.iter().all(|s| s.is_some()),
+        "every cube facet belongs to a face"
+    );
+
+    let mut keys: Vec<&str> = Vec::new();
+    for source in &mesh.mesh.face_sources {
+        let source = source.as_ref().unwrap();
+        assert!(
+            source.source_key.starts_with("brep:face:0/"),
+            "unexpected source key {:?}",
+            source.source_key
+        );
+        if !keys.contains(&source.source_key.as_str()) {
+            keys.push(&source.source_key);
+        }
+    }
+    assert_eq!(keys.len(), 6, "a box has six distinct faces: {keys:?}");
+
+    // Every stamped face id is a real face of the input B-rep.
+    for key in &keys {
+        let face_id: u32 = key
+            .rsplit('/')
+            .next()
+            .expect("key has a face id")
+            .parse()
+            .expect("face id is numeric");
+        assert!(
+            face_ids.contains(&face_id),
+            "stamped face id {face_id} is not in the B-rep face set {face_ids:?}"
+        );
+    }
+}
+
+/// A curved face's facets all resolve to the cylinder face that produced them.
+#[test]
+fn brep_cylinder_facets_carry_the_face_id() {
+    let ring = |z: f64| BrepLoop {
+        edges: vec![BrepCurve::Circle {
+            center: pt(0.0, 0.0, z),
+            normal: pt(0.0, 0.0, 1.0),
+            u_dir: pt(1.0, 0.0, 0.0),
+            radius: 1.0,
+        }],
+    };
+    let brep = BrepData {
+        shells: vec![BrepShell {
+            id: 1,
+            faces: vec![BrepFace {
+                id: 7,
+                surface: BrepSurface::Cylinder {
+                    origin: pt(0.0, 0.0, 0.0),
+                    axis: pt(0.0, 0.0, 1.0),
+                    ref_dir: pt(1.0, 0.0, 0.0),
+                    radius: 1.0,
+                },
+                reversed: false,
+                loops: vec![ring(0.0), ring(1.0)],
+            }],
+        }],
+        placement: None,
+    };
+    let req = brep_request(brep);
+    let result = BrepTessellator.tessellate(&req, &no_cancel).unwrap();
+    let mesh = result.outcome.mesh().expect("cylinder side must mesh");
+    assert!(mesh.mesh.triangles.len() > 2, "the strip is many facets");
+    assert_eq!(mesh.mesh.face_sources.len(), mesh.mesh.triangles.len());
+    for source in &mesh.mesh.face_sources {
+        assert_eq!(
+            source.as_ref().map(|s| s.source_key.as_str()),
+            Some("brep:face:1/7"),
+            "every strip facet belongs to the cylinder face"
+        );
+        assert_eq!(
+            source.as_ref().map(|s| s.topology_revision),
+            Some(Revision(0)),
+            "Revision(0) is the documented no-entity-revision placeholder"
+        );
+    }
+}

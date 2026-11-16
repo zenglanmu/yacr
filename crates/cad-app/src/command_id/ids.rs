@@ -681,7 +681,7 @@ pub enum CommandId {
     ViewRes,
     /// `WIPEOUTFRAME [0|1|2]` (Viewer-legal): the session frame state every wipeout uses; contract: [`crate::command_id::extras`].
     WipeoutFrame,
-    /// `VSCURRENT` (Viewer-legal): store the 2D wireframe visual-style token.
+    /// `VSCURRENT` (Viewer-legal): store the session 3D-body visual-style token.
     VisualStyle,
     /// `LINETYPE` (Viewer-legal for `LIST`; `SET`/`CREATE`/`DELETE` are work-only): list the drawing's linetypes, set one on the selection, or
     /// create/delete a table row. Contract: [`crate::command_id::extras`].

@@ -30,8 +30,10 @@ pub struct SolidUnsupportedReason {
 /// Accuracy of a mass-properties result.
 ///
 /// Only the **requested** relative accuracy is available: the kernel estimates
-/// mass properties numerically, so there is no proved bound to report. Callers
-/// must not promote this to [`cad_domain::Precision::Analytic`].
+/// the geometric integral numerically, so there is no proved bound to report.
+/// The requested `density` is an exact scale factor on the inertia, not part of
+/// the accuracy claim. Callers must not promote this to
+/// [`cad_domain::Precision::Analytic`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MassAccuracy {
     /// The estimate was requested at this relative accuracy (`1e-6` = 0.0001 %).
@@ -43,8 +45,14 @@ pub enum MassAccuracy {
 /// Lengths are model units (drawing units), so `volume` is units³, `surface_area`
 /// units², `centroid` in model coordinates and `density` in mass per unit³. The
 /// seam performs no unit conversion; `cad-db`/`cad-app` own the unit context.
-/// `inertia` is the 3×3 inertia tensor about the centroid, when the kernel could
-/// provide it (mass · units²).
+///
+/// `volume`, `surface_area` and `centroid` are **geometric**: the kernel
+/// integrates the body's shape and they do not depend on `density`. `inertia`
+/// is the 3×3 **mass** inertia tensor about the centroid at `density`
+/// (mass · units²), so a modeler must scale the unit-density kernel tensor by
+/// `density` before returning it. `mass` is not carried separately: it is
+/// `volume · density`. `MASSPROP` requests density `1.0` (AutoCAD's unitless
+/// default), where the geometric and mass readings coincide.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SolidMassProperties {
     pub volume: f64,

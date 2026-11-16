@@ -84,9 +84,16 @@ pub const REASON_FACE_SOURCE_OUT_OF_RANGE: &str = "mesh-face-source-index-out-of
 /// Machine key: `face_sources[triangle]` is explicitly `None`: the producer did
 /// not attach a stable id to that face.
 pub const REASON_FACE_SOURCE_MISSING: &str = "mesh-face-source-missing";
-/// Machine key: a 3D body's display triangle is not a stable face identity.
-/// Body face identity needs the exact B-rep face map (P1), so the hit resolves
-/// no `SubElementId` instead of inventing one from the tessellation.
+/// Machine key: a 3D body's display triangle could not be mapped to a stable
+/// face identity.
+///
+/// Retained as a stable wire/API key for display caches produced before the
+/// B-rep face map existed. Once a body's display mesh carries
+/// [`Mesh::face_sources`] (see `cad-kernel-adapter`'s B-rep tessellator) the
+/// body pick arm resolves the face exactly like a `Mesh` and reports the more
+/// specific `mesh-face-sources-absent` / `mesh-face-source-missing` /
+/// `mesh-face-source-index-out-of-range` codes when it cannot, so this key is no
+/// longer produced by that arm.
 pub const REASON_BODY_FACE_IDENTITY_UNMODELLED: &str = "body-face-identity-unmodelled";
 
 /// A precise hit with its depth along the ray.

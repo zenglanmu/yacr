@@ -23,7 +23,8 @@
 //!   `MOCORO SCALE <bx> <by> <factor>`;
 //! * `MSTRETCH <base_x> <base_y> <delta_x> <delta_y> <x1> <y1> <x2> <y2> […]`;
 //! * `VIEWRES <integer 1..=1000>`;
-//! * `VSCURRENT <style>` (the command layer names the unsupported styles);
+//! * `VSCURRENT <WIREFRAME|2DWIREFRAME|2D|SHADED|SHADEDWITHEDGES>` (the command
+//!   layer names the unsupported styles);
 //! * `WIPEOUTFRAME <0|1|2>` (the system-variable spelling of `WIPEOUT Frames`;
 //!   the bare selector reports the current value);
 //! * `CVPORT <n>` (the session current-viewport marker of the active paper
@@ -52,7 +53,7 @@ pub const TRACE_SELECTOR: &str = "TRACE";
 pub const MOCORO_SELECTOR: &str = "MOCORO";
 /// `VIEWRES <1..=1000>`.
 pub const VIEWRES_SELECTOR: &str = "VIEWRES";
-/// `VSCURRENT <style>`.
+/// `VSCURRENT <WIREFRAME|2DWIREFRAME|2D|SHADED|SHADEDWITHEDGES>`.
 pub const VSCURRENT_SELECTOR: &str = "VSCURRENT";
 /// `WIPEOUTFRAME [0|1|2]` — the system-variable spelling of `WIPEOUT Frames`.
 pub const WIPEOUTFRAME_SELECTOR: &str = "WIPEOUTFRAME";
@@ -187,12 +188,19 @@ pub fn parse_viewres_argument(argument: &str) -> Result<CommandPayload, String> 
     Ok(CommandPayload::ViewRes(percent))
 }
 
-/// `VSCURRENT <style>`: the parser admits one word; the command refuses every
-/// style except `WIREFRAME` by name.
+/// `VSCURRENT <style>`: the parser admits one word; the command maps the
+/// accepted spellings and refuses every other style by name.
+///
+/// Accepted: `WIREFRAME`/`2DWIREFRAME`/`2D` (bodies as edges only) and
+/// `SHADED`/`SHADEDWITHEDGES` (filled bodies plus stored edges, the session
+/// default). The style token is session-only and changes 3D body display only.
 pub fn parse_vscurrent_argument(argument: &str) -> Result<CommandPayload, String> {
     let style = argument.trim();
     if style.is_empty() || style.split_whitespace().count() != 1 {
-        return Err(invalid("VSCURRENT", "VSCURRENT <style> (only WIREFRAME)"));
+        return Err(invalid(
+            "VSCURRENT",
+            "VSCURRENT <WIREFRAME|2DWIREFRAME|2D|SHADED|SHADEDWITHEDGES>",
+        ));
     }
     Ok(CommandPayload::VisualStyle(style.to_string()))
 }

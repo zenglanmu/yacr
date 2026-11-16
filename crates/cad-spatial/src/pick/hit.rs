@@ -11,8 +11,8 @@ use super::math::{add, scale3};
 use super::ray::{ray_segment_closest, ray_triangle, validate_ray};
 use super::types::{
     GeometryHit, PickItem, PickOptions, PickOutcome, PickReport, SkippedGeometry,
-    MAX_PICK_SEGMENTS, REASON_BODY_FACE_IDENTITY_UNMODELLED, REASON_FACE_SOURCES_ABSENT,
-    REASON_FACE_SOURCE_MISSING, REASON_FACE_SOURCE_OUT_OF_RANGE,
+    MAX_PICK_SEGMENTS, REASON_FACE_SOURCES_ABSENT, REASON_FACE_SOURCE_MISSING,
+    REASON_FACE_SOURCE_OUT_OF_RANGE,
 };
 
 const FAMILY_LINE: usize = 0;
@@ -329,8 +329,10 @@ fn hit_validated(
         // the pick ray tests: the cached tessellation like a `Mesh`, plus its
         // edge polylines like a `Polyline`, keeping the nearest hit. A body with
         // no display geometry honestly misses; no analytic surface is invented
-        // from the display. Face identity needs the B-rep face map (P1), so no
-        // `SubElementId` is fabricated from a display triangle.
+        // from the display. A display triangle resolves its face identity only
+        // through the cached `face_sources` (populated from the B-rep face map
+        // by the tessellator); a cache without that mapping reports the helper's
+        // `mesh-face-source*` reason instead of inventing a face.
         SemanticGeometry::Body3d(body) => {
             // The display cache's own verdicts, never upgraded: a kernel-derived
             // cache is a `KernelMesh`, a display-only one a `DirectMesh`, and the
@@ -343,15 +345,16 @@ fn hit_validated(
             };
             let mut best: Option<GeometryHit> = None;
             let display = &body.display;
-            if let Some((t, point, _triangle)) = mesh_hit(ray, &display.mesh, transform, options) {
+            if let Some((t, point, triangle)) = mesh_hit(ray, &display.mesh, transform, options) {
+                let (sub_element, sub_element_reason) = face_sub_element(&display.mesh, triangle);
                 best = Some(GeometryHit {
                     point,
                     distance: t,
                     offset: 0.0,
                     precision: display.precision.clone(),
                     geometry_source: geometry_source.clone(),
-                    sub_element: None,
-                    sub_element_reason: Some(REASON_BODY_FACE_IDENTITY_UNMODELLED),
+                    sub_element,
+                    sub_element_reason,
                 });
             }
             for edge in &display.edges {

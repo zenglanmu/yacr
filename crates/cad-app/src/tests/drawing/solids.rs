@@ -108,7 +108,7 @@ fn solid_command(ext: ExtendedCommandId, points: Vec<Point3>) -> Command {
     command(CommandId::Extended(ext), CommandPayload::Points(points))
 }
 
-fn p(x: f64, y: f64, z: f64) -> Point3 {
+pub(super) fn p(x: f64, y: f64, z: f64) -> Point3 {
     Point3 { x, y, z }
 }
 
@@ -183,7 +183,7 @@ fn plane_face(id: u32, cycle: &[Point3]) -> BrepFace {
 
 /// A closed planar unit box `[0,1]³`: the minimal body the real tessellator
 /// turns into a complete facet set (no missing faces, no open edges).
-fn unit_box() -> BrepData {
+pub(super) fn unit_box() -> BrepData {
     let corners = [
         p(0.0, 0.0, 0.0),
         p(1.0, 0.0, 0.0),

@@ -10,10 +10,12 @@
 //!   [`cad_representation::RepresentationContext::curve_segments`]). The ceiling
 //!   is deliberately partial — analytic conics (circles/arcs/ellipses) have no
 //!   chords — so the command reports exactly that.
-//! * `VSCURRENT` stores the one style the renderer implements. It is not a dead
-//!   token: `WIREFRAME` describes what is actually drawn (edges only), and every
-//!   shaded/hidden style is refused by name because no such display model
-//!   exists. No pixel/GPU effect is claimed or verified for either token.
+//! * `VSCURRENT` stores the 3D **body** display style. It is not a dead token:
+//!   `WIREFRAME` makes every `Body3d` draw its edges only, `SHADED` keeps the
+//!   filled mesh plus its stored-edge overlay
+//!   ([`cad_representation::RepresentationContext::body_wireframe`]). The token
+//!   is session-only and affects 3D bodies only; other geometry keeps its
+//!   display. No pixel/GPU effect is claimed or verified for either token.
 
 use cad_domain::{CadError, CadResult};
 
@@ -26,16 +28,26 @@ pub const VIEWRES_DEFAULT: u32 = 1000;
 
 /// The visual styles `VSCURRENT` can store.
 ///
-/// Only the 2D wireframe token exists, because 2D wireframe is the only display
-/// mode this build's renderer implements: it draws entity edges, with no
-/// shading, no face fill and no hidden-line removal. AutoCAD's `Conceptual`,
-/// `Realistic`, `Shaded`, `Shaded with edges`, `Hidden`, `Sketchy` and the 3D
-/// wireframe forms are **NOT IMPLEMENTED** and are refused by name at the
-/// command layer — a refusal, never a silent mapping onto `Wireframe`.
+/// Two tokens exist because this build implements two 3D-body display modes:
+///
+/// * [`Self::Shaded`] — the filled mesh plus the body's stored-edge overlay.
+///   This is the **default**, which preserves the display this build had before
+///   `VSCURRENT` was wired to the representation. AutoCAD's own initial value for
+///   a new drawing is 2D wireframe; this build deliberately diverges so the
+///   existing filled body display does not change behind a user's back.
+/// * [`Self::Wireframe`] — the 3D-wireframe form: body edges only (stored edges,
+///   or triangle-derived segments when a primitive has no stored boundary
+///   edges, so a sphere/torus does not vanish).
+///
+/// AutoCAD's `Conceptual`, `Realistic`, `Hidden`, `Sketchy`, `X-ray`, the flat
+/// forms and every other style are **NOT IMPLEMENTED** and are refused by name
+/// at the command layer — a refusal, never a silent mapping onto either token.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VisualStyleToken {
-    /// 2D wireframe.
+    /// 3D body wireframe: edges only.
     Wireframe,
+    /// 3D body shaded display: filled mesh plus stored edges (the default).
+    Shaded,
 }
 
 impl VisualStyleToken {
@@ -43,6 +55,7 @@ impl VisualStyleToken {
     pub fn name(self) -> &'static str {
         match self {
             Self::Wireframe => "WIREFRAME",
+            Self::Shaded => "SHADED",
         }
     }
 }
@@ -64,7 +77,11 @@ impl Default for ViewExtras {
     fn default() -> Self {
         Self {
             viewres_percent: VIEWRES_DEFAULT,
-            visual_style: VisualStyleToken::Wireframe,
+            // Deliberate divergence from AutoCAD's 2D-wireframe initial value:
+            // `Shaded` is exactly the filled-mesh + stored-edge display this
+            // build had before `VSCURRENT` reached the body representation, so
+            // the default is pixel-identical to the pre-token scene.
+            visual_style: VisualStyleToken::Shaded,
         }
     }
 }
@@ -83,15 +100,34 @@ impl ViewExtras {
         Ok(())
     }
 
-    /// Store the 2D wireframe token. Any other style is a named refusal.
+    /// Store one `VSCURRENT` style token.
+    ///
+    /// Accepted spellings (case-insensitive, one token):
+    ///
+    /// * `WIREFRAME`, `2DWIREFRAME`, `2D` → [`VisualStyleToken::Wireframe`];
+    /// * `SHADED`, `SHADEDWITHEDGES` → [`VisualStyleToken::Shaded`].
+    ///
+    /// Every other style is a named refusal (`vscurrent.style_not_implemented`),
+    /// never a silent mapping. Session-only: the drawing is not written and no
+    /// revision, history entry or `ChangeSet` is produced.
     pub fn set_visual_style(&mut self, style: &str) -> CadResult<()> {
-        if !style.eq_ignore_ascii_case("WIREFRAME") {
+        let token = if style.eq_ignore_ascii_case("WIREFRAME")
+            || style.eq_ignore_ascii_case("2DWIREFRAME")
+            || style.eq_ignore_ascii_case("2D")
+        {
+            VisualStyleToken::Wireframe
+        } else if style.eq_ignore_ascii_case("SHADED")
+            || style.eq_ignore_ascii_case("SHADEDWITHEDGES")
+        {
+            VisualStyleToken::Shaded
+        } else {
             return Err(CadError::Unsupported(format!(
-                "vscurrent.style_not_implemented: VSCURRENT only supports WIREFRAME in this \
-                 build; `{style}` is NOT IMPLEMENTED and the visual style was not changed"
+                "vscurrent.style_not_implemented: VSCURRENT accepts WIREFRAME, 2DWIREFRAME, 2D, \
+                 SHADED or SHADEDWITHEDGES in this build; `{style}` is NOT IMPLEMENTED and the \
+                 visual style was not changed"
             )));
-        }
-        self.visual_style = VisualStyleToken::Wireframe;
+        };
+        self.visual_style = token;
         Ok(())
     }
 }

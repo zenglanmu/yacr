@@ -45,9 +45,10 @@ impl Application {
 
     /// Whether a background solid boolean is currently running.
     ///
-    /// The C1 primitives refuse while it is true: they call the same modeler
-    /// synchronously, so sharing the kernel mutex would block the command thread
-    /// instead of failing fast (`solid.boolean_busy`).
+    /// The C1 primitive creates and the C3a body MASSPROP refuse while it is
+    /// true: they call the same modeler synchronously, so sharing the kernel
+    /// mutex would block the command thread instead of failing fast
+    /// (`solid.boolean_busy` / `massprop.kernel_busy`).
     pub(crate) fn solid_boolean_running(&self) -> bool {
         self.solid_booleans.is_running()
     }

@@ -40,10 +40,14 @@ fn body_entity(id: u128, kind: BodyKind, exact: BodyExact, display: BodyDisplay)
 /// Build through the real expansion path, so the entity's default
 /// `geometry_source == Analytic` attribute is in play.
 fn expanded_body(entity: DbEntity) -> DisplayRepresentation {
+    expanded_body_with(entity, &context())
+}
+
+fn expanded_body_with(entity: DbEntity, context: &RepresentationContext) -> DisplayRepresentation {
     let id = entity.id;
     let db = geometry_db(entity);
     ProviderRegistry::with_default_provider()
-        .build_expanded(&db, db.entity(id).expect("inserted body"), &context())
+        .build_expanded(&db, db.entity(id).expect("inserted body"), context)
         .unwrap()
 }
 
@@ -145,6 +149,159 @@ fn body_mesh_without_stored_edges_keeps_the_plain_mesh_primitive() {
         matches!(&rep.fragments[0].primitive, DisplayPrimitive::Mesh(_)),
         "no stored edges keeps the legacy plain Mesh (triangle-derived overlay)"
     );
+}
+
+#[test]
+fn body_wireframe_emits_the_stored_edges_as_segments_only() {
+    // `VSCURRENT WIREFRAME`: a body with stored edges draws exactly those pairs;
+    // no mesh fragment is emitted at all.
+    let display = BodyDisplay {
+        mesh: plane_mesh(),
+        edges: vec![
+            vec![p(0.0, 0.0), p(1.0, 0.0)],
+            vec![p3(0.0, 0.0, 1.0), p3(1.0, 0.0, 1.0), p3(1.0, 1.0, 1.0)],
+        ],
+        tolerance: None,
+        precision: Precision::Analytic,
+        completeness: Completeness::Complete,
+    };
+    let rep = expanded_body_with(
+        body_entity(
+            98,
+            BodyKind::Sheet,
+            BodyExact::Exact(Box::new(square_brep(false))),
+            display,
+        ),
+        &context().with_body_wireframe(true),
+    );
+    assert_eq!(rep.fragments.len(), 1);
+    assert_eq!(rep.completeness, Completeness::Complete);
+    assert_eq!(
+        rep.fragments[0].geometry_source,
+        GeometrySource::KernelMesh,
+        "wireframe does not change the geometry source"
+    );
+    match &rep.fragments[0].primitive {
+        DisplayPrimitive::LineSegments(points) => {
+            assert_eq!(points.len(), 6, "1 + 2 stored segments");
+            assert_eq!(points[0], p(0.0, 0.0));
+            assert_eq!(points[1], p(1.0, 0.0));
+            assert_eq!(points[2], p3(0.0, 0.0, 1.0));
+            assert_eq!(points[3], p3(1.0, 0.0, 1.0));
+            assert_eq!(points[4], p3(1.0, 0.0, 1.0));
+            assert_eq!(points[5], p3(1.0, 1.0, 1.0));
+        }
+        _ => panic!("WIREFRAME must emit LineSegments"),
+    }
+    assert!(
+        !rep.fragments
+            .iter()
+            .any(|f| matches!(&f.primitive, DisplayPrimitive::Mesh(_))),
+        "no mesh fragment travels with a wireframe body"
+    );
+}
+
+#[test]
+fn body_wireframe_without_stored_edges_derives_unique_triangle_segments() {
+    // A sphere/torus full primitive has triangles but no stored boundary edges.
+    // WIREFRAME derives the triangle edges, de-duplicated by unordered pair, so
+    // the body is neither invisible nor drawn twice on its shared diagonal.
+    let display = BodyDisplay {
+        mesh: plane_mesh(),
+        edges: Vec::new(),
+        tolerance: None,
+        precision: Precision::Analytic,
+        completeness: Completeness::Complete,
+    };
+    let rep = expanded_body_with(
+        body_entity(
+            99,
+            BodyKind::Sheet,
+            BodyExact::Exact(Box::new(square_brep(false))),
+            display,
+        ),
+        &context().with_body_wireframe(true),
+    );
+    assert_eq!(rep.fragments.len(), 1);
+    let points = match &rep.fragments[0].primitive {
+        DisplayPrimitive::LineSegments(points) => points.to_vec(),
+        _ => panic!("WIREFRAME must emit LineSegments"),
+    };
+    // A quad: four boundary edges + one loaded diagonal = five unique segments.
+    // The second triangle's (0,2) edge is the first triangle's (2,0) edge.
+    assert_eq!(points.len(), 10, "five unique unordered pairs");
+    let mut pairs = std::collections::HashSet::new();
+    for pair in points.as_chunks::<2>().0 {
+        let key = |point: Point3| [point.x.to_bits(), point.y.to_bits(), point.z.to_bits()];
+        let (a, b) = (key(pair[0]), key(pair[1]));
+        let unordered = if a <= b { [a, b] } else { [b, a] };
+        assert!(pairs.insert(unordered), "duplicate segment {pair:?}");
+    }
+    assert_eq!(pairs.len(), 5);
+}
+
+#[test]
+fn body_wireframe_off_keeps_the_mesh_with_stored_edges() {
+    // The default (`SHADED`) path is untouched: the same cache still carries its
+    // filled mesh plus the stored-edge overlay.
+    let display = BodyDisplay {
+        mesh: plane_mesh(),
+        edges: vec![vec![p(0.0, 0.0), p(1.0, 0.0)]],
+        tolerance: None,
+        precision: Precision::Analytic,
+        completeness: Completeness::Complete,
+    };
+    let rep = expanded_body_with(
+        body_entity(
+            100,
+            BodyKind::Sheet,
+            BodyExact::Exact(Box::new(square_brep(false))),
+            display,
+        ),
+        &context().with_body_wireframe(false),
+    );
+    assert_eq!(rep.fragments.len(), 1);
+    match &rep.fragments[0].primitive {
+        DisplayPrimitive::MeshWithStoredEdges { mesh, edges } => {
+            assert_eq!(mesh.triangles.len(), 2);
+            assert_eq!(edges.len(), 2);
+        }
+        _ => panic!("SHADED keeps MeshWithStoredEdges"),
+    }
+}
+
+#[test]
+fn body_wireframe_leaves_a_wire_body_as_its_line_segments() {
+    // A wire body (no mesh) already draws as `LineSegments`; the visual style
+    // must not change that or invent a mesh.
+    let display = BodyDisplay {
+        mesh: Mesh::default(),
+        edges: vec![vec![p(0.0, 0.0), p(1.0, 0.0)]],
+        tolerance: None,
+        precision: Precision::Analytic,
+        completeness: Completeness::Partial(vec!["wire body has no exact brep".into()]),
+    };
+    let rep = expanded_body_with(
+        body_entity(
+            101,
+            BodyKind::Wire,
+            BodyExact::Unavailable {
+                reason: "wire".into(),
+            },
+            display,
+        ),
+        &context().with_body_wireframe(true),
+    );
+    assert_eq!(rep.fragments.len(), 1);
+    assert_eq!(
+        rep.completeness,
+        Completeness::Partial(vec!["wire body has no exact brep".into()]),
+        "completeness is still the body's own"
+    );
+    match &rep.fragments[0].primitive {
+        DisplayPrimitive::LineSegments(points) => assert_eq!(points.len(), 2),
+        _ => panic!("a wire body stays LineSegments"),
+    }
 }
 
 #[test]
