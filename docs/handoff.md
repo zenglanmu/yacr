@@ -22,6 +22,29 @@
 （Linux 原生 Wayland、Windows、macOS、Android）由 native 会话持有 `cad-db`，`dom-canvas`
 （X11/XWayland、Web）由 wasm 会话持有。细节与逐平台证据边界见 `AGENTS.md` 平台表。
 
+**wave 6（2026-11-16）**
+
+覆盖表 **180 → 183 完整 / 799 → 796 部分**（本波晋升 3：`MATCHCELL`、`TABLESTYLE`、`MLEADEREDIT`；累计自 123 起 **60 个**）。
+
+- **表格逐格格式**：逐格**对齐（DXF 组 170，1–9 全码）与文字旋转（组 145，帧相对）**真存真画；`TableStyleValues` 拆成**数据行/标题行/表头行三套**值，
+  「标题行按数据行近似」的损失消失（三条行记录逐条写读、按值相等继承）。`TABLEDIT FORMAT <row> <col> [ALIGN …] [ROTATION deg]`、`TABLESTYLE [ROW k] …`、`MATCHCELL` 全部可用。
+  **逐格颜色/填充/边框线宽按名拒绝**：DXF 有组、旧写入器还会发中性值，但本构建显示是「每实体一色、无填充区域」—— 存了就是会静默消失的字段。
+- **`XCLIP` 的导入成真**：acadrust 0.6.8 完整建模 `SpatialFilter`（边界点/逆块变换/前后裁剪面/`display_enabled`），导入走
+  `INSERT → ACAD_XDICTIONARY → ACAD_FILTER → SPATIAL → SPATIAL_FILTER`，映射进块局部空间；8 条测试含 ACAD 风格字面 DXF、writer 产物、矩形/多边形/关闭/无裁剪/嵌套块。
+  **导出仍缺，但原因变了**：**我们的导出器根本不写 `INSERT`**（块参照一律展开，丢块身份），所以没有实体可挂 filter 链；损失以 `export.xclip_clip_dropped` 具名并有往返测试证明。
+  裁剪**模式**（inside/inverted）在 0.6.8 结构体/DXF/DWG 中均无字段（`import.xclip_mode_unmodelled`）。
+- **`MLEADEREDIT` 逐线覆盖**：`PATHTYPE`（组 `170`+覆盖字 `93` bit1）、`ARROWSIZE`（组 `40`+bit16）、`BYSTYLE`（清位并从样式重盖）全部经唯一 MULTILEADER 写入器往返；
+  一条事务/一步撤销；逐线颜色/线型/线宽与自定义箭头块句柄无可用语义模型，按名拒绝。
+- **`MLEADER` 创建选项**：`DOGLEG`/`DOGLEGANGLE`/`ATTACH` 落库到组 `40`/`11`/`179`/`173`/`171`/`174`，经唯一派生规则 `created_with_options`；`174` **角度约束**仍具名拒绝
+  （字段应在 `MLeaderStyleValues`，改动波及约 20 文件/29 处字面量，且现在存了会被导出丢弃）。
+- 机械拆分（门禁）：`cad-domain/multileader_create.rs`、`table_entity/format.rs`、`app_drawing/mleader_line_override.rs`。
+
+**已知全局缺口（本轮确认，非单命令可补）**：**SAVE 会丢失块参照本身** —— 导出器没有 `BLOCKS`/`INSERT` 写入能力，一律展开成员几何。这条同时是
+`XCLIP` 持久化的根因，也是 `BLOCK`/`INSERT` 创建侧「无块表写入」的根因。已单独派 lane 实现 `BLOCKS`+`INSERT` 与裁剪链（wave 7 收尾）。
+
+**门禁（wave 6 实跑）**：fmt / clippy `-D warnings` / `check --workspace --all-targets` / architecture / file-size（2193）/ i18n / command-docs 全绿。
+测试：cad-domain 136、cad-import-acadrust 438、cad-app table 106 + mleader 52、cad-ui-core 777、cad-db 274、cad-representation 335。真机 GUI 本波 **NOT RUN**。
+
 **wave 5（2026-11-16）**
 
 覆盖表 **174 → 180 完整 / 805 → 799 部分**（本波晋升 6：`FS`、`ELEV`、`ALIGNSPACE`、`MSTRETCH`、`EXOFFSET`、`-HATCHEDIT`；
