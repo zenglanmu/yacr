@@ -22,6 +22,26 @@
 （Linux 原生 Wayland、Windows、macOS、Android）由 native 会话持有 `cad-db`，`dom-canvas`
 （X11/XWayland、Web）由 wasm 会话持有。细节与逐平台证据边界见 `AGENTS.md` 平台表。
 
+**wave 5（2026-11-16）**
+
+覆盖表 **174 → 180 完整 / 805 → 799 部分**（本波晋升 6：`FS`、`ELEV`、`ALIGNSPACE`、`MSTRETCH`、`EXOFFSET`、`-HATCHEDIT`；
+累计自 123 起 **57 个**）。
+
+- **键入通道批次**：`FSMODE ON|OFF|1|0` 成为真实命令（写 `FS` 已读的会话令牌），`SETVAR FSMODE` 读写同一值 ⇒ **`FS` 的相切链现在从命令行可达**；
+  `ELEV <height>` 有了**真实消费者**（创建漏斗三个入口在事务开启前做纯 z 平移，走唯一变换权威；复制/编辑路径保留源 z，逐条列在 `app_drawing/elevation.rs`；`ELEV 0.0` 与旧构建逐字节相同）；
+  `ALIGNSPACE` 的键入形式是**八位小数**（两对模型↔图纸点）而不是四位数 —— 处理器需要两对才能推出比例，编 1:1 是造假，已在行内声明；
+  `MSTRETCH` 与载荷一一对应（奇数 token 按名拒绝，绝不截断半窗）。
+- **`TRIM` 补上 HATCH 目标**（单边界环经共享折线规划器切开，保留窗口沿直线切边闭合，保留 id/图层/空间/绘制顺序/显示状态/平面/样式/填充/种子/图案原点），
+  **块参照仍是具名拒绝**且理由改成诚实的那个：块参照只存摆放，成员是共享定义的行，切开等于为所有实例改写定义 —— 那不是「裁剪这个参照」。
+  多环/曲线切边/倾斜含弧环同样具名拒绝。
+- **`EXOFFSET` 晋升**：查明它本来就完全继承唯一 OFFSET 规划器，5 条契约逐类 + `Multiple` + 拒绝钉住。顺带修正文档里 `OFFSET` 的 `ELLIPSE` 陈旧缺口描述（实际早已实现）。
+- **`-HATCHEDIT` 晋升**：父命令 `HATCHEDIT` 早已完整，别名行忘了跟着改。
+- 门禁减压（纯机械迁移，无行为变化）：`command_payload/text_payloads.rs`（payload 967 行）、`app_drawing/create_inputs.rs`（`trim_extend` 966 行）。
+
+**门禁（wave 5 实跑）**：fmt / clippy `-D warnings` / `check --workspace --all-targets` / `check --lib --target wasm32-unknown-unknown` /
+architecture / file-size（2187）/ i18n / command-docs 全绿。测试：cad-ui-core 770（+13 payload-reachability）、cad-app 2904
+（fs 112、elev 11、trim 141、exoffset 5、alignspace 4、mstretch 2）、cad-db 274、cad-representation 335。真机 GUI 本波 **NOT RUN**。
+
 **wave 4（2026-11-16）**
 
 覆盖表 **171 → 174 完整 / 808 → 805 部分**（本波晋升 3 个命令名：`DIMSTYLE`、`BOUNDARY`、`-BOUNDARY`；
