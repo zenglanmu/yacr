@@ -22,6 +22,35 @@
 （Linux 原生 Wayland、Windows、macOS、Android）由 native 会话持有 `cad-db`，`dom-canvas`
 （X11/XWayland、Web）由 wasm 会话持有。细节与逐平台证据边界见 `AGENTS.md` 平台表。
 
+**wave 4（2026-11-16）**
+
+覆盖表 **171 → 174 完整 / 808 → 805 部分**（本波晋升 3 个命令名：`DIMSTYLE`、`BOUNDARY`、`-BOUNDARY`；
+累计自 123 起 **51 个**）。
+
+- `XCLIP`（`792e957b`）：矩形/旋转矩形/任意简单多边形**真实裁剪**（世界区域 = 一个矩形或若干不相交简单多边形；
+  折线按交点分段、圆锥曲线解析切分、网格/填充耳切凸窗、图像 `visible_image`；轴对齐矩形输出与旧路径**相等**有断言；
+  嵌套参照取交集，矩形∩矩形仍矩形）。**仍是部分实现**：裁剪边界不落 DXF（导入不读、导出不写）。退休
+  `xclip_polygon_not_renderable`/`xclip_rotation_unsupported`，新增 `xclip_boundary_arity`/`.xclip_self_intersecting`。
+- `DIMSTYLE`（`4deafc06`）：`apply_dim_style_change` 单行写；`SET`/`NEW`/`RENAME`/`DELETE`/`MODIFY` 真写；
+  被已存标注快照引用的行**不可改名**（`dimstyle.in_use`）；`NEW` 以**存储的** `Standard` 为模板；非追溯（ADR-0017）写进诊断。
+  同时把编号表里早就写着「已实现」的两行与审计表的「现状拒绝」统一，并把缺口清单该条标为**已关闭**。
+- `BOUNDARY`/`-BOUNDARY`（`0e394dd2`）：`BoundaryInput { seed, options }`；`Boundary set` 命名子集替换全图发现
+  （空集/非候选具名拒绝，**绝不放宽**）；`Island detection` 开启时外层+每个内层各一条折线并用 `boundary.islands`
+  明说「闭合折线不携带孔洞列表」，关闭时逐条具名跳过；整组一条事务/一步撤销。
+- 键入通道（不改变晋升状态，但关掉「实现了却敲不出来」）：
+  - `HATCH`/`-HATCH` 新增 `PATTERN <name>` 与 `PATTERNFILE <path.pat> [<name>]`（复用 `HATCHEDIT` 解析，
+    文件优先→内置回退，组 76 = 2/1）。**仍部分实现**：创建期关联性无模型。
+  - `ARRAY`/`-ARRAY`/`ARRAYCLASSIC` 新增 `RECT`/`POLAR` 键入形式（写同一会话通道并重派发既有载荷）。
+    **仍部分实现**：关联性、`Levels`、旋转网格 `ANGLE`、`Path` 无模型/无通道。
+  - `FS` 的 `FSMODE=ON` 传递相切链已实现（`fs.chain_nontangent`/`.chain_ambiguous`/`.chain_bound` 上限 64，
+    只在选择变更前拒绝）。**仍部分实现**：`FSMODE ON|OFF` 的**键入 setter 未接线**（会话 token 与 `set_fs_mode`
+    已存在并有测试，缺 cad-ui-core 选择子与 payload 变体 —— `command_payload.rs` 与 `command_id/ids.rs` 都在 1000 行门禁）。
+
+**门禁（wave 4 实跑）**：fmt / clippy `-D warnings` / `check --workspace --all-targets` /
+`check --lib --target wasm32-unknown-unknown` / architecture / file-size（2178 文件）/ i18n / command-docs
+全绿。测试：cad-ui-core 757、cad-app hatch 179、array 44、boundary 76、fs 105、dimstyle 6、cad-db 274+13+5、
+cad-representation 335（26 个 XCLIP）、cad-render-wgpu 全 target（串行）。真机 GUI 本波 **NOT RUN**。
+
 **wave 3（2026-11-16，部分完成）**
 
 覆盖表不变（**171 完整 / 808 部分**，本轮无新晋升），但修掉了一条**已实现却不可达**的整类缺陷，并留下两条未完成的 lane。
