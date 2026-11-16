@@ -19,7 +19,7 @@
 //! more arms.
 
 use super::*;
-use cad_kernel_adapter::PrimitiveKind;
+use cad_kernel_adapter::{BooleanOp, PrimitiveKind};
 
 impl Application {
     /// Dispatch an [`ExtendedCommandId`], or `None` when the command is not one.
@@ -438,15 +438,22 @@ impl Application {
             ExtendedCommandId::Pyramid => {
                 self.create_solid_primitive(session, command, PrimitiveKind::Pyramid)?
             }
+            // ADR-0036 phase C2: the three booleans are real background jobs. The
+            // command only validates/refuses and starts the worker; the host
+            // commits the body when it polls a current, non-stale result.
+            ExtendedCommandId::Union => self.boolean_solids(session, command, BooleanOp::Union)?,
+            ExtendedCommandId::Subtract => {
+                self.boolean_solids(session, command, BooleanOp::Subtract)?
+            }
+            ExtendedCommandId::Intersect => {
+                self.boolean_solids(session, command, BooleanOp::Intersect)?
+            }
             // Wave 14: stable named refusals.
             ExtendedCommandId::PolySolid
             | ExtendedCommandId::Extrude
             | ExtendedCommandId::Revolve
             | ExtendedCommandId::Sweep
             | ExtendedCommandId::Loft
-            | ExtendedCommandId::Intersect
-            | ExtendedCommandId::Union
-            | ExtendedCommandId::Subtract
             | ExtendedCommandId::Slice
             | ExtendedCommandId::Thicken
             | ExtendedCommandId::PressPull

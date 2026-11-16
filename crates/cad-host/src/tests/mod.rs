@@ -51,6 +51,7 @@ mod settings_gpu;
 mod settings_input;
 mod settings_orbit;
 mod snap_marker;
+mod solid_boolean;
 mod stretch_lasso;
 mod text_tool;
 mod tolerance;

@@ -22,6 +22,7 @@ mod polygon;
 mod properties;
 mod snap;
 mod snap_grid;
+mod solids;
 mod status;
 mod stretch;
 mod text_edit;

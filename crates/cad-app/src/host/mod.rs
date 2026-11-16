@@ -31,6 +31,7 @@ mod draw_pick;
 mod open_import;
 mod properties;
 mod render_edit;
+mod solids;
 mod tolerance;
 mod vendor_properties;
 
@@ -52,6 +53,8 @@ pub use databases::{
     blank_database, demo_database, snap_candidates_near, snap_candidates_near_uncached,
     snap_candidates_near_with_policy,
 };
+/// The poll result of the background solid boolean (ADR-0036 phase C2).
+pub use solids::SolidBooleanPoll;
 
 /// Result of a successful drawing open, for status lines and diagnostics.
 #[derive(Debug, Clone)]

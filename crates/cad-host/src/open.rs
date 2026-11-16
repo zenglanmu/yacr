@@ -1,12 +1,29 @@
 //! The open pipeline: picker/read → begin_async_open (or sync) → poll → install.
 use super::*;
-use cad_app::host::XrefOptions;
+use cad_app::host::{SolidBooleanPoll, XrefOptions};
 use cad_app::AsyncOpenPoll;
 #[cfg(not(target_arch = "wasm32"))]
 use cad_platform::FsXrefSource;
 use cad_platform::{FileEvent, FilePurpose};
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
+
+/// The status argument for a failed solid boolean.
+///
+/// A worker panic is reported as its stable code only: the task seam drops the
+/// panic payload, so nothing internal can leak into the status line.
+fn solid_boolean_error_text(error: &CadError) -> String {
+    match error {
+        CadError::Invariant(reason)
+            if reason.starts_with(cad_app::tasks::SOLID_BOOLEAN_WORKER_PANICKED) =>
+        {
+            // Generic sentence: the panic payload was dropped at the task seam and
+            // must not be reconstructed here.
+            "the solid boolean worker stopped unexpectedly; the drawing is unchanged".to_string()
+        }
+        other => error_text(other),
+    }
+}
 
 /// Default total byte budget for every external reference in one open (1 GiB).
 #[cfg(not(target_arch = "wasm32"))]
@@ -416,6 +433,53 @@ impl HostCore {
         self.drain_files()?;
         self.poll_loading()?;
         self.grade_pending_open()?;
+        Ok(())
+    }
+
+    /// Advance the background solid boolean and publish a current result.
+    ///
+    /// The controller commits the body (one transaction/one undo step) before
+    /// this returns `Done`; the render side is then told to rebuild from the new
+    /// document, exactly like an opened drawing. `Idle`/`Running` change no status
+    /// and no document; `Stale` is reported explicitly (the drawing is unchanged),
+    /// and `Failed` is reported without republishing anything.
+    pub(crate) fn poll_solid_boolean(&self) -> CadResult<()> {
+        let poll = self.controller.borrow_mut().poll_solid_boolean();
+        self.apply_solid_boolean_poll(poll)
+    }
+
+    /// The status/document half of [`Self::poll_solid_boolean`].
+    ///
+    /// Split out so the `Stale`/`Failed` status contracts can be exercised
+    /// without a kernel modeler: the poll itself is covered end-to-end by
+    /// `cad-app`'s host contracts, and this function owns everything the host
+    /// does with its answer.
+    pub(crate) fn apply_solid_boolean_poll(&self, poll: SolidBooleanPoll) -> CadResult<()> {
+        match poll {
+            SolidBooleanPoll::Idle | SolidBooleanPoll::Running => {}
+            SolidBooleanPoll::Stale => {
+                // Explicit, not silent: the result was discarded because an
+                // operand changed, and the drawing is exactly as it was.
+                self.set_catalog_status("solid.boolean_stale", &[])?;
+            }
+            SolidBooleanPoll::Done { .. } => {
+                self.controller.borrow_mut().cancel_tool()?;
+                self.render.sync_drawing(self.controller.borrow().drawing());
+                self.full_dirty.set(true);
+                self.set_catalog_status("solid.boolean_done", &[])?;
+            }
+            SolidBooleanPoll::Cancelled => {
+                self.set_catalog_status("solid.boolean_cancelled", &[])?;
+            }
+            SolidBooleanPoll::Failed { error } => {
+                // A failed boolean provably changed nothing: republishing the
+                // drawing would only invalidate every derived cache for a no-op.
+                self.set_catalog_status(
+                    "solid.boolean_failed",
+                    &[("error", &solid_boolean_error_text(&error))],
+                )?;
+            }
+        }
         Ok(())
     }
 

@@ -165,9 +165,9 @@ pub mod table_payload;
 // shape→outline-block conversion.
 mod shape;
 // ADR-0036 phase C1: BOX/WEDGE/PYRAMID/CYLINDER/SPHERE/CONE/TORUS create one
-// real exact `Body3d` through the injected `SolidModeler` (no boolean, no
-// mass-properties, no display-style wiring here).
-mod solids;
+// real exact `Body3d` through the injected `SolidModeler`; phase C2 adds the
+// background `UNION`/`SUBTRACT`/`INTERSECT` job (`tasks::solid`).
+pub(crate) mod solids;
 // The 2026-11-12 block/copy writes: `MINSERT` (block array) and `ADDSELECTED`.
 mod addselected;
 mod minsert;

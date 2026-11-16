@@ -1,6 +1,6 @@
 # ADR 0036：3D 实体模型（wireframe / surface / solid）与 solidcore 无状态建模服务
 
-- 状态：**Accepted（2026-11-16）**，**P1 部分实现**（2026-11-17，B2 + C1 增补）：
+- 状态：**Accepted（2026-11-16）**，**P1 部分实现**（2026-11-17，B2 + C1 + C2 增补）：
   - P0 已落地；P0.1（存储边线直送 `RenderBatch.edges`）已完成（Linux 契约/单元证据）；
   - P1/B1：`SolidModeler` 无内核接缝已落地（`cad-kernel-adapter`）；
   - P1/B2（见 §7）：`cad-kernel-solidcore` 让**平面体**路径可用——基本体
@@ -17,15 +17,32 @@
     **同步豁免（仅 C1）**：图元命令在**命令线程内同步**执行模型器 + 剖分，理由是工作有界
     （单个图元 + 形状相对剖分，三角形数近似恒定）且取消探针恒为 `false`。**C2 的布尔不得沿用
     该豁免**：布尔必须放到 worker 线程并接活取消探针，否则一条长操作会阻塞命令线程且无法取消。
+  - **P1/C2（2026-11-17）**：`UNION`/`SUBTRACT`/`INTERSECT` 由具名拒绝变成**真实后台布尔**：
+    命令线程只校验（≥2 个去重实体、整实体引用、同图层/同空间、`AcDb3dSolid` 且
+    `Body3d{Solid, Exact}`）并快照操作数，然后启动 `tasks::solid::SolidBooleanJob`
+    （`CancellationToken` + 真 worker；UNION/INTERSECT 左折叠，SUBTRACT 第一个减其余；最终
+    `BrepData` 用与 C1 相同的形状相对容差剖分）；`HostController::poll_solid_boolean` 在
+    document/generation/操作数快照都仍一致时以**一条事务 + 一步撤销**删除操作数并插入一个新
+    `AcDb3dSolid`，否则报 `Stale` 且图纸不变；`cancel_solid_boolean` 与文档关闭/新建都不发布。
+    由于本构建的写路径不推进 `DbObject.revision`，陈旧检查比较整行 `DbEntity` 快照，而不只
+    revision；丢弃结果会写 `solid.boolean_stale` 状态（不是静默丢弃），`Cancelled` 另有状态。
+    worker 的 panic（通道断开/`join` 为 `Err`）映射为 `solid.boolean_worker_panicked` 的
+    `Invariant`，只有取消 token 已置位且线程干净退出才是 `Cancelled`（panic 不冒充取消，宿主也
+    不泄漏 panic payload）。结果继承**第一个操作数**的显式显示状态（同一事务的
+    `update_entity_display_state`，redo 也恢复）；无覆盖则不写。布尔运行期间 C1 的同步图元创建
+    按 `solid.boolean_busy: a boolean is running; wait for it to settle before creating another
+    solid` 拒绝（共用内核互斥锁，不能阻塞命令线程），拒绝在模型器调用与事务之前。曲面操作数由
+    模型器给出 `Unsupported`（`solid.lift_requires_planar`），P2 前显式拒绝；
+    `MASSPROP`/`face_sources`/`VSCURRENT` 仍是 C3。
   - **曲面 body**（含 cylinder/cone/sphere/torus 面）的布尔与质量属性**显式拒绝**
     （`solid.lift_requires_planar`），曲面 lift 是 P2；
-  - **仍未实现**：AutoCAD 的交互式尺寸提示；布尔命令 `UNION`/`SUBTRACT`/`INTERSECT`（C2）；
-    `MASSPROP` 接线、`face_sources`、`VSCURRENT`（C3）；P2、P3。`3DSOLID`/`BODY` 是**实体类型键**
-    （模型器在 `Registration::entity_types` 声明），不新增同名命令。
+  - **仍未实现**：AutoCAD 的交互式尺寸提示；`MASSPROP` 接线、`face_sources`、`VSCURRENT`
+    （C3）；曲面布尔（P2）、P2、P3。`UNION`/`SUBTRACT`/`INTERSECT` 已在 C2 接成后台任务（见下）；
+    `3DSOLID`/`BODY` 是**实体类型键**（模型器在 `Registration::entity_types` 声明），不新增同名命令。
   验证边界：只有 Linux x86-64 上的契约/单元证据——测试进程里跑的是**真实**固定 revision 的
   `solidcore` 内核（无 mock、不引用上游 golden）；Windows/macOS/Android/Web 的 solidcore
   运行状态与模型器注入、任何 GPU/像素/性能结论一律 **NOT VERIFIED**。
-- 日期：2026-11-16（P1/B2 增补 2026-11-17，P1/C1 增补 2026-11-17）。
+- 日期：2026-11-16（P1/B2 增补 2026-11-17，P1/C1 增补 2026-11-17，P1/C2 增补 2026-11-17）。
 - 相关：[ADR-0033](0033-multi-format-import.md)（多格式导入；D2/D9 的 BRep 边界）、
   [ADR-0031](0031-acadrust-vendored-patch-policy.md)（依赖补丁策略）、
   `docs/kernel-acis.md`（现有 ACIS 契约）、`docs/compatibility.md`（逐命令能力表）、

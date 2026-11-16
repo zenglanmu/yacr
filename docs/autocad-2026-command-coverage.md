@@ -731,7 +731,7 @@
 | `INSERT` | 已实现 | — |
 | `INSERTOBJ` | 部分实现 | 具名拒绝（`insertobj.unsupported: this build has no OLE object storage model`）。 |
 | `INTERFERE` | 部分实现 | 具名拒绝（`interfere.unsupported: 3D solids are not modeled, so interference has nothing to compute`）。 |
-| `INTERSECT` | 部分实现 | 具名拒绝（`intersect.unsupported: no 3D boolean model`）。 |
+| `INTERSECT` | 部分实现 | 后台布尔（C2）：选中 ≥2 个平面 `AcDb3dSolid` 实体，worker 折叠后一条事务/一步撤销替换为一个实体；曲面操作数按 `solid.lift_requires_planar` 拒绝；无模型器按 `unsupported-runtime: solid-modeler` 拒绝；操作数被编辑则 `Stale`（状态 `solid.boolean_stale`，图纸不变）；布尔运行期间图元创建按 `solid.boolean_busy` 拒绝。 |
 | `ISODRAFT` | 部分实现 | 会话令牌 `isodraft`；不切换等轴测平面/光标，无视觉变化。 |
 | `ISOLATEOBJECTS` | 部分实现 | 会话隐藏集：隐藏除当前选择外的模型空间对象；无数据库写/撤销 |
 | `ISOPLANE` | 部分实现 | 循环会话令牌 LEFT→TOP→RIGHT；无等轴测光标/捕捉变化。 |
@@ -1057,7 +1057,7 @@
 | `STRETCH` | 完整实现 | 交叉矩形、交叉多边形（连续点击、`CONFIRM` 或点回首顶点闭合）与**自由手绘 lasso**（一次拖拽采样、释放闭合并用既有 transient CROSSING 预览）都经工具捕获进入同一条 `StretchPolygon` → `polygon_window` 规划（`stretchWindow` 参数 0/1/2，默认 0）；even-odd 包含、部分包围逐顶点、完全包围整移；圆按圆心、块/文字按插入点；**IMAGE/MASK/TABLE 移动型分类**；环顶点数<3/非有限/零面积/未闭合按名拒绝，取消不写；`MULTILEADER` 整命令拒绝；一条事务/一步撤销 |
 | `STYLE` | 已实现 | `NEW <name> [<base>]`/`RENAME <old> <new>`/`DELETE <name>`/`SET <name> <FONT/KEYS/ADDKEY/REMOVEKEY> <value>`/`?`；一条 style-table patch/一步撤销；域 `Style` 只有 name/resource_keys，故只可写这两类字段；无“当前文字样式”会话变量 |
 | `STYLESMANAGER` | 部分实现 | 具名拒绝（`stylesmanager.unsupported`）：本构建无 CTB/STB 打印样式模型。 |
-| `SUBTRACT` | 部分实现 | 具名拒绝（`subtract.unsupported: no 3D boolean model`）。 |
+| `SUBTRACT` | 部分实现 | 后台布尔（C2）：选中 ≥2 个平面 `AcDb3dSolid` 实体，worker 折叠后一条事务/一步撤销替换为一个实体；曲面操作数按 `solid.lift_requires_planar` 拒绝；无模型器按 `unsupported-runtime: solid-modeler` 拒绝；操作数被编辑则 `Stale`（状态 `solid.boolean_stale`，图纸不变）；布尔运行期间图元创建按 `solid.boolean_busy` 拒绝。（第一个实体减其余）。 |
 | `SUNPROPERTIES` | 部分实现 | 具名拒绝（`sunproperties.unsupported: no sun/sky lighting model`）。 |
 | `SUNPROPERTIESCLOSE` | 部分实现 | 具名拒绝（`sunpropertiesclose.unsupported: no sun/sky lighting model`）。 |
 | `SUPERHATCH` | 部分实现 | 具名拒绝（`superhatch.unsupported`）：基于图像/块的超级填充未实现。 |
@@ -1127,7 +1127,7 @@
 | `ULAYERS` | 部分实现 | 具名拒绝（`ulayers.unsupported: no DWF/PDF/DGN underlay layer-display model`）。 |
 | `UNDO` | 已实现 | — |
 | `UNGROUP` | 部分实现 | 仅移除一个组名并保留全部实体；未知组名拒绝；不写实体/数据库 |
-| `UNION` | 部分实现 | 具名拒绝（`union.unsupported: no 3D boolean model`）。 |
+| `UNION` | 部分实现 | 后台布尔（C2）：选中 ≥2 个平面 `AcDb3dSolid` 实体，worker 折叠后一条事务/一步撤销替换为一个实体；曲面操作数按 `solid.lift_requires_planar` 拒绝；无模型器按 `unsupported-runtime: solid-modeler` 拒绝；操作数被编辑则 `Stale`（状态 `solid.boolean_stale`，图纸不变）；布尔运行期间图元创建按 `solid.boolean_busy` 拒绝。 |
 | `UNISOLATEOBJECTS` | 部分实现 | 清空会话隐藏集；无数据库写/撤销 |
 | `UNITS` | 部分实现 | 只读报告（`units.report`/`units.dialog_not_implemented`）：图纸单位 4 位小数、角度用度；UNITS 对话框与逐图纸单位表未实现。 |
 | `UPDATEFIELD` | 部分实现 | 具名拒绝（`updatefield.unsupported`）：未建模字段。 |
@@ -1673,7 +1673,7 @@
 | 451 | `INSERTOBJ` | 部分实现 | Inserts a linked or embedded object. | 具名拒绝（`insertobj.unsupported: this build has no OLE object storage model`）。 |
 | 452 | `-INTERFERE` | 部分实现 | At the Command prompt, creates a temporary 3D solid from the interferences between two sets of selected 3D solids | 具名拒绝（`-interfere.unsupported: 3D solids are not modeled, so interference has nothing to compute`）。 |
 | 453 | `INTERFERE` | 部分实现 | Creates a temporary 3D solid from the interferences between two sets of selected 3D solids. | 具名拒绝（`interfere.unsupported: 3D solids are not modeled, so interference has nothing to compute`）。 |
-| 454 | `INTERSECT` | 部分实现 | Creates a 3D solid, surface, or 2D region from overlapping solids, surfaces, or regions. | 具名拒绝（`intersect.unsupported: no 3D boolean model`）。 |
+| 454 | `INTERSECT` | 部分实现 | Creates a 3D solid, surface, or 2D region from overlapping solids, surfaces, or regions. | 后台布尔（C2）：选中 ≥2 个平面 `AcDb3dSolid` 实体，worker 折叠后一条事务/一步撤销替换为一个实体；曲面操作数按 `solid.lift_requires_planar` 拒绝；无模型器按 `unsupported-runtime: solid-modeler` 拒绝；操作数被编辑则 `Stale`（状态 `solid.boolean_stale`，图纸不变）；布尔运行期间图元创建按 `solid.boolean_busy` 拒绝。 |
 | 455 | `ISODRAFT` | 部分实现 | Turns isometric drafting settings on or off, and specifies the current 2D isometric drafting plane. | 会话令牌 `isodraft`；不切换等轴测平面/光标，无视觉变化。 |
 | 456 | `ISOLATEOBJECTS` | 部分实现 | Temporarily suppresses the display of all objects except those you select. | 会话隐藏集：隐藏除当前选择外的模型空间对象；无数据库写/撤销 |
 | 457 | `ISOPLANE` | 部分实现 | Specifies the current plane for 2D isometric drawing. | 循环会话令牌 LEFT→TOP→RIGHT；无等轴测光标/捕捉变化。 |
@@ -2043,7 +2043,7 @@
 | 821 | `-STYLE` | 已实现 | Creates, modifies, or specifies text styles. | `STYLE` 的命令行拼写，同一 grammar/写入路径与边界 |
 | 822 | `STYLE` | 已实现 | Creates, modifies, or specifies text styles. | `NEW <name> [<base>]`/`RENAME <old> <new>`/`DELETE <name>`/`SET <name> <FONT/KEYS/ADDKEY/REMOVEKEY> <value>`/`?`；一条 style-table patch/一步撤销；域 `Style` 只有 name/resource_keys，故只可写这两类字段；无“当前文字样式”会话变量 |
 | 823 | `STYLESMANAGER` | 部分实现 | Displays the Plot Style Manager, where you can revise plot style tables. | 具名拒绝（`stylesmanager.unsupported`）：本构建无 CTB/STB 打印样式模型。 |
-| 824 | `SUBTRACT` | 部分实现 | Creates as a new object by subtracting one overlapping region or 3D solid from another. | 具名拒绝（`subtract.unsupported: no 3D boolean model`）。 |
+| 824 | `SUBTRACT` | 部分实现 | Creates as a new object by subtracting one overlapping region or 3D solid from another. | 后台布尔（C2）：选中 ≥2 个平面 `AcDb3dSolid` 实体，worker 折叠后一条事务/一步撤销替换为一个实体；曲面操作数按 `solid.lift_requires_planar` 拒绝；无模型器按 `unsupported-runtime: solid-modeler` 拒绝；操作数被编辑则 `Stale`（状态 `solid.boolean_stale`，图纸不变）；布尔运行期间图元创建按 `solid.boolean_busy` 拒绝。（第一个实体减其余）。 |
 | 825 | `SUNPROPERTIES` | 部分实现 | Displays the Sun Properties palette. | 具名拒绝（`sunproperties.unsupported: no sun/sky lighting model`）。 |
 | 826 | `SUNPROPERTIESCLOSE` | 部分实现 | Closes the Sun Properties palette | 具名拒绝（`sunpropertiesclose.unsupported: no sun/sky lighting model`）。 |
 | 827 | `SUPERHATCH` | 部分实现 | Hatches an area using a selected image, block, xref, or wipeout object. | 具名拒绝（`superhatch.unsupported`）：基于图像/块的超级填充未实现。 |
@@ -2118,7 +2118,7 @@
 | 896 | `UNDEFINE` | 已实现 | Allows an application-defined command to override an internal command. | `UNDEFINE <name>` 会话内禁用内建命令；被禁用名按 `command.undefined: <NAME>` 拒绝且不派发；静态/运行时别名指向禁用目标时同样禁用；不写图 |
 | 897 | `UNDO` | 已实现 | Reverses the effect of commands. | — |
 | 898 | `UNGROUP` | 部分实现 | Disassociates the objects from a group. | 仅移除一个组名并保留全部实体；未知组名拒绝；不写实体/数据库 |
-| 899 | `UNION` | 部分实现 | Combines two or more 3D solids, surfaces, or 2D regions into a single, composite 3D solid, surface, or region. | 具名拒绝（`union.unsupported: no 3D boolean model`）。 |
+| 899 | `UNION` | 部分实现 | Combines two or more 3D solids, surfaces, or 2D regions into a single, composite 3D solid, surface, or region. | 后台布尔（C2）：选中 ≥2 个平面 `AcDb3dSolid` 实体，worker 折叠后一条事务/一步撤销替换为一个实体；曲面操作数按 `solid.lift_requires_planar` 拒绝；无模型器按 `unsupported-runtime: solid-modeler` 拒绝；操作数被编辑则 `Stale`（状态 `solid.boolean_stale`，图纸不变）；布尔运行期间图元创建按 `solid.boolean_busy` 拒绝。 |
 | 900 | `UNISOLATEOBJECTS` | 部分实现 | Displays objects previously hidden with the ISOLATEOBJECTS or HIDEOBJECTS command. | 清空会话隐藏集；无数据库写/撤销 |
 | 901 | `-UNITS` | 部分实现 | Controls the precision and display formats for coordinates, distances, and angles. | 只读报告固定单位显示规则（`-units.*` 诊断码）；Units 对话框/逐图纸单位表未实现。 |
 | 902 | `UNITS` | 部分实现 | Controls the precision and display formats for coordinates, distances, and angles. | 只读报告（`units.report`/`units.dialog_not_implemented`）：图纸单位 4 位小数、角度用度；UNITS 对话框与逐图纸单位表未实现。 |

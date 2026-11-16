@@ -13,6 +13,8 @@ impl Application {
             // No kernel is linked here: a carrier injects its modeler (ADR-0036
             // phase C1). Without one every primitive command refuses by name.
             solid_modeler: None,
+            // Adopted from the first plan's document at `start`.
+            solid_booleans: crate::tasks::SolidBooleanManager::new(cad_domain::DocumentId(0)),
         }
     }
 
@@ -27,6 +29,44 @@ impl Application {
         modeler: Option<Arc<dyn cad_kernel_adapter::SolidModeler>>,
     ) {
         self.solid_modeler = modeler;
+    }
+
+    /// Start the controller's single background boolean (ADR-0036 phase C2).
+    ///
+    /// `Err` means the worker thread could not be created; the manager stays
+    /// empty and nothing was written.
+    pub(crate) fn start_solid_boolean(
+        &mut self,
+        plan: crate::tasks::SolidBooleanPlan,
+        modeler: Arc<dyn cad_kernel_adapter::SolidModeler>,
+    ) -> CadResult<()> {
+        self.solid_booleans.start(plan, modeler).map(|_| ())
+    }
+
+    /// Whether a background solid boolean is currently running.
+    ///
+    /// The C1 primitives refuse while it is true: they call the same modeler
+    /// synchronously, so sharing the kernel mutex would block the command thread
+    /// instead of failing fast (`solid.boolean_busy`).
+    pub(crate) fn solid_boolean_running(&self) -> bool {
+        self.solid_booleans.is_running()
+    }
+
+    /// Take the background boolean's terminal state (never commits).
+    pub(crate) fn poll_solid_boolean_take(&mut self) -> crate::tasks::SolidBooleanTake {
+        self.solid_booleans.poll()
+    }
+
+    /// Ask a running boolean to stop at its next operation boundary; the slot is
+    /// kept so the terminal `Cancelled` state is still observable.
+    pub(crate) fn cancel_solid_boolean(&mut self) {
+        self.solid_booleans.request_cancel();
+    }
+
+    /// Cancel and release a running boolean without a terminal report. Used when
+    /// the document is replaced or closed: no later poll may publish it.
+    pub(crate) fn abort_solid_boolean(&mut self) {
+        self.solid_booleans.cancel();
     }
 
     /// Execute a command. This is the single entry point shared by UI and CLI.

@@ -43,6 +43,13 @@ use cad_platform::CancellationToken;
 
 use crate::host::HostController;
 
+mod solid;
+
+pub use solid::SOLID_BOOLEAN_WORKER_PANICKED;
+pub(crate) use solid::{
+    SolidBooleanManager, SolidBooleanOperand, SolidBooleanPlan, SolidBooleanTake,
+};
+
 /// How a job reached its terminal state.
 enum Terminal {
     /// The import finished and produced a database.

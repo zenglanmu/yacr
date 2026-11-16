@@ -9,6 +9,8 @@
 //! (`BOX`/`WEDGE`/`PYRAMID`/`CYLINDER`/`SPHERE`/`CONE`/`TORUS`) out of this
 //! list: they are real body creators now (`app_drawing::solids`) and are
 //! dispatched before this refusal arm, so they no longer appear in `reason`.
+//! Phase C2 did the same for `UNION`/`SUBTRACT`/`INTERSECT`: they start a
+//! background boolean job (`tasks::solid`) and are dispatched ahead of this arm.
 //! Everything else here is still a refusal.
 
 use super::*;
@@ -35,9 +37,6 @@ fn reason(ext: ExtendedCommandId) -> String {
         ExtendedCommandId::Revolve => "revolve.unsupported: 3D revolution is not implemented",
         ExtendedCommandId::Sweep => "sweep.unsupported: 3D sweep is not implemented",
         ExtendedCommandId::Loft => "loft.unsupported: 3D loft is not implemented",
-        ExtendedCommandId::Intersect => "intersect.unsupported: no 3D boolean model",
-        ExtendedCommandId::Union => "union.unsupported: no 3D boolean model",
-        ExtendedCommandId::Subtract => "subtract.unsupported: no 3D boolean model",
         ExtendedCommandId::Slice => "slice.unsupported: no 3D slicing model",
         ExtendedCommandId::Thicken => "thicken.unsupported: no surface-to-solid model",
         ExtendedCommandId::PressPull => "presspull.unsupported: no press/pull model",

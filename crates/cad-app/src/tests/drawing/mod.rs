@@ -383,6 +383,8 @@ mod scale_text;
 mod selection_reconcile;
 // ADR-0036 phase C1: the seven primitive create commands (fake modeler).
 mod solids;
+// ADR-0036 phase C2: the three boolean commands (validation + job start).
+mod solids_bool;
 mod spline;
 mod stretch;
 mod stretch_curves;

@@ -22,6 +22,79 @@
 （Linux 原生 Wayland、Windows、macOS、Android）由 native 会话持有 `cad-db`，`dom-canvas`
 （X11/XWayland、Web）由 wasm 会话持有。细节与逐平台证据边界见 `AGENTS.md` 平台表。
 
+**3D 实体 P1/C2：`UNION`/`SUBTRACT`/`INTERSECT` 真实后台布尔（2026-11-17）**
+
+- **后台任务**：新 `crates/cad-app/src/tasks/solid.rs`（`SolidBooleanJob`/`SolidBooleanManager`，
+  结构镜像 `ImportJob`）：`TaskStamp`（document+generation）、`CancellationToken`、
+  `Receiver<Terminal>`、`JoinHandle`、`consumed`、`Drop` 取消。命令线程只做校验与快照；worker 按
+  顺序折叠（UNION/INTERSECT 左折叠，SUBTRACT 用第一个减其余），每次 `execute_solid(Boolean, cancelled)`，
+  再以**共享形状相对容差**剖分最终 `BrepData` 并构造与 C1 相同的 `Body3d`（复用
+  `app_drawing::solids::solid_body`）。C1 的同步豁免**没有**被沿用。
+- **命令**：`Application::boolean_solids`（`app_drawing/solids.rs`）。payload 必须为 `None`；
+  经 `resolve_selection` 去重；<2 个去重实体 → `boolean.needs_two`；子图元/实例路径 →
+  `boolean.sub_element_not_supported`；非 `AcDb3dSolid`/非 `Body3d{Solid, Exact}` →
+  `boolean.non_solid_operand`；首个操作数的图层/空间不同 → `boolean.layer_mismatch` /
+  `boolean.space_mismatch`；无模型器 → `unsupported-runtime: solid-modeler`。全部拒绝发生在
+  任务启动前。成功时返回 `CommandOutcome::none()` + `solid.boolean_started` 诊断，**不写库、
+  不升修订、不入历史**。曲面操作数**不预判**，由模型器返回 `Unsupported`（映射到任务的
+  `Failed` 终止态）。**布尔运行期间**（`SolidBooleanManager::is_running`）C1 图元创建按
+  `solid.boolean_busy: a boolean is running; wait for it to settle before creating another solid`
+  拒绝（模型器共用一把内核互斥锁，同步创建会阻塞命令线程），拒绝发生在模型器调用与任何事务之前。
+- **提交（poll）**：`HostController::poll_solid_boolean() -> SolidBooleanPoll`（`host/solids.rs`，
+  `Idle/Running/Done{object,diagnostics}/Cancelled/Stale/Failed{error}`；`Stale` 是“结果作废、
+  图纸未改”的显式终态，与 `Cancelled` 分开），由 `HostCore::tick` 在 `poll_open` 之后调用
+  （`cad-host/src/open.rs::poll_solid_boolean`，状态半部是 `apply_solid_boolean_poll`）。
+  `Done` 时 `cancel_tool` + `render.sync_drawing` + `full_dirty`，并写 `solid.boolean_done`；
+  `Cancelled` 写 `solid.boolean_cancelled`；**`Stale` 不是静默的**——写 `solid.boolean_stale`
+  （操作数变化、图纸未改）；`Failed` 写 `solid.boolean_failed`（带 `{error}`）且**不**重发图纸
+  （失败路径可证明未写库）。四个状态键均已加入两份 i18n 目录。
+- **worker panic ≠ cancel**：`tasks::solid` 在通道 `Disconnected` 或 `join()` 返回 `Err` 时映射为
+  `CadError::Invariant("solid.boolean_worker_panicked: …")`（panic payload 直接丢弃），只有
+  `Cancelled` token 已置位**且**线程干净退出才是 `Cancelled`；宿主把该错误作为
+  `solid.boolean_failed` 的 `{error}`，但只给一句通用文案
+  “the solid boolean worker stopped unexpectedly; the drawing is unchanged”（不泄漏 payload）。
+- **显示状态继承**：结果继承**第一个操作数**的显式显示状态（颜色/线型/线宽/透明度/可见性），
+  在同一事务里用 `DrawingTransaction::update_entity_display_state(new_id, …)` 落到新行；
+  插入 patch 记录 `after_state`，所以 redo 也恢复该覆盖。无覆盖的操作数不写任何显示状态。
+- **提交形状**：仅当 document id 一致、任务 generation 未被取代、且每个操作数仍存在且与启动
+  快照一致时发布。**注意**：本构建的写路径**不在每次编辑时推进 `DbObject.revision`**（新建行也是
+  `Revision(0)`），所以除 revision 外还比较整行 `DbEntity` 快照（移动/改几何后 revision 仍是 0，
+  只有行内容能识别陈旧）；任一不一致 → `CadError::StaleResult` → `SolidBooleanPoll::Stale`，
+  图纸不变。提交在克隆图纸上开**一条事务**：删除操作数 + 插入新 `AcDb3dSolid`（图层/空间/
+  `draw_order` 取计划值，revision 0），patches = 每个删除的 `drawing_patch_deleted`（含显示状态）
+  + 插入 patch，`publish_candidate` 一条 `DrawingUndoRecord`；一次 undo 恢复全部操作数。
+- **取消/文档替换**：`HostController::cancel_solid_boolean()` 只翻 token（保留槽位，下一次 poll
+  报 `Cancelled`，绝不发布）；`close_document`/`new_blank_document`/`publish_imported` 经
+  `reset_for_new_content` 调 `abort_solid_boolean`（取消并释放槽位，结果无法发布）。
+  **当前没有 UI 入口**：`CancelLoading`/`cancel_tool` 都不会调用它，也没有布尔专用的取消命令；
+  它目前只由宿主/契约测试使用（取消语义已在 `cad-app` 契约中钉住）。
+- **调度/门禁**：`app_dispatch.rs` 把三条命令路由到 `boolean_solids`，从
+  `app_extended_w14_refusals.rs` 删除三条原因串；`requires_work_mode()` 对三条返回 `true`；
+  w14 拒绝清单从 18 条降为 15 条（测试同步）。前端 `SELECTION_REQUIREMENTS` 增加
+  `UNION`/`SUBTRACT`/`INTERSECT`（`count: 2`，hint 为各自 `draw.kind.<name>.hint`），catalog 文案
+  不再是“not implemented / Named refusal”，改为“≥2 个实体、后台任务、曲面体 P2 前拒绝”。
+- **证据（Linux x86-64，本轮实跑，退出码 0）**：`cargo test -p cad-app --locked`
+  （2997 passed / 3 ignored；含 fake-modeler 契约：命令校验与 `boolean.non_solid_operand` 措辞、
+  任务启动 Running 且不写库、一次 undo 恢复操作数 + redo 恢复结果、Unsupported 无写入、
+  操作数在任务中被 MOVE → `Stale`、第二个布尔取代第一个且旧结果不发布、panic → `Failed`
+  而非 `Cancelled`、取消不发布、New 取消、结果继承首个操作数的图层/空间/`draw_order` 与显式
+  颜色覆盖（undo 还原各操作数、redo 还原结果）、布尔运行期间图元创建按 `solid.boolean_busy`
+  拒绝）；`cargo test -p cad-host --lib --locked`（346 passed；`solid.boolean_stale` /
+  panic → 稳定码 / 失败不重发图纸的状态契约）；
+  `cargo test -p cad-cli-tools --test solid_command --locked`（10 passed；真实
+  solidcore：重叠 BOX 的 `UNION`/`SUBTRACT` 经公共 poll 到 `Done`，只剩一个 `AcDb3dSolid`，
+  UNION 后一次 undo 恢复两个体）；`cargo check -p app-linux --all-targets --locked`；
+  `cargo clippy -p cad-app -p cad-cli-tools -p app-linux --all-targets --locked -- -D warnings`；
+  `cargo fmt --all -- --check`；`python3 scripts/check-i18n.py`；`check-architecture.py`；
+  `check-command-docs.py`；`check-file-size.py`；`cargo check --workspace --lib --target
+  wasm32-unknown-unknown --locked`（`app-web` 有既有 dead_code 警告，非本轮引入）；前端
+  `npm test`（1810 passed，含更新后的 `test/extended-wave14.test.ts`）。
+- **NOT RUN**：全 workspace 测试（`cargo test --workspace --locked -- --test-threads=1`）、
+  真实 GPU/像素/性能证据、Linux 以外任何载体的运行。
+- **NOT VERIFIED**：Linux `dom-canvas`/Web/Windows/macOS/Android 无模型器注入，布尔在这些载体
+  按 `unsupported-runtime: solid-modeler` 具名拒绝（仅编译/契约证据，运行 **NOT VERIFIED**）；
+  曲面体布尔（P2）、`MASSPROP`/`face_sources`/`VSCURRENT`（C3）未做；GPU/像素/性能结论未做。
+
 **3D 实体 P1/C1：七种图元命令真实创建（2026-11-17）**
 
 - **注入（trait-only）**：`cad-app::Application` 新增私有

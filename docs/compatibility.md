@@ -182,9 +182,10 @@ face-with-hole 1/8、instance-scaled 3/36；theater-2017 1246 实体/96,333 三�
 - **仍未做**：NURBS/样条曲面、一般裁剪 B-rep、完整 ACIS 内核；SAT/SAB **源字节仍不保留**
   （只保留 lift 后的中性 B-Rep）。**2026-11-17 更新**：`cad-kernel-solidcore` 模型器（P1/B2）
   已能在 Linux 契约/单元里对**平面体**创建/布尔/算体积·面积·质心·惯性，曲面 body 的布尔与
-  质量属性显式拒绝（`solid.lift_requires_planar`）；**命令层只接线了七种图元的创建（阶段 C1）**，
-  所以 `BOX` 等已能建体，但 `UNION`/`SUBTRACT`/`INTERSECT`（C2）仍拒绝、
-  `MASSPROP` 对 body 仍显式 `massprop.body_requires_kernel`（C3），
+  质量属性显式拒绝（`solid.lift_requires_planar`）；**命令层已接线七种图元的创建（C1）与三个
+  布尔（C2，真实后台任务）**，所以 `BOX` 等能建体、`UNION`/`SUBTRACT`/`INTERSECT` 能对平面体
+  合并/相减/取交（任务 settle 后一条事务/一步撤销；曲面操作数按 `solid.lift_requires_planar`
+  拒绝），`MASSPROP` 对 body 仍显式 `massprop.body_requires_kernel`（C3），
   圆角/倒角/抽壳仍无实现。模型器的能力是 **family 级**：`booleans`/`mass_properties` 为 true
   不等于每个操作数都能算——曲面 body、开放 sheet、反向面/重复面等结构不一致的操作数逐次返回
   `Unsupported`（`solid.lift_unsupported`）；**空腔（void region）的结果在布尔本身就被拒绝**，
@@ -1488,10 +1489,16 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 > **ADR-0036 阶段 C1（2026-11-17）**：`BOX`/`CONE`/`CYLINDER`/`SPHERE`/`TORUS`/`WEDGE`/`PYRAMID`
 > 从具名拒绝晋升为**真实创建命令**：显式点 → `SolidRequest` → 模型器（`SolidModeler`）→
 > 中性 B-Rep → 既有 `BrepTessellator` 显示缓存 → 一条 `AcDb3dSolid` 实体（一条事务/一步撤销）。
-> **仍未实现**：AutoCAD 的交互式尺寸提示、布尔运算（C2）、`MASSPROP`/`face_sources`/`VSCURRENT`（C3）、
-> 圆角/倒角/抽壳与曲面 lift（P2）。**代码事实**：只有 Linux 的 **`native-below`**（原生 Wayland）
+> **ADR-0036 阶段 C2（2026-11-17）**：`UNION`/`SUBTRACT`/`INTERSECT` 从具名拒绝晋升为**真实后台
+> 任务**：命令只校验/拒绝并快照操作数（≥2 个整实体、同图层/同空间、`AcDb3dSolid` + 精确
+> `Body3d{Solid, Exact}`），worker 折叠模型器结果并剖分，宿主 poll 到当前且未陈旧的结果后
+> 在**一条事务/一步撤销**里删除操作数并插入一个 `AcDb3dSolid`；曲面操作数由模型器拒绝
+> （`solid.lift_requires_planar`，P2 前不预判），操作数在任务期间被编辑则整条结果按 `Stale`（状态 `solid.boolean_stale`，
+> 不静默）丢弃；布尔运行期间图元创建按 `solid.boolean_busy` 拒绝。**仍未实现**：AutoCAD 的交互式尺寸提示、`MASSPROP`/`face_sources`/`VSCURRENT`（C3）、
+> 圆角/倒角/抽壳与曲面 lift/曲面布尔（P2）。**代码事实**：只有 Linux 的 **`native-below`**（原生 Wayland）
 > 会话注入模型器；Linux `dom-canvas`（X11/XWayland，其 CAD 会话在 WebView 里是 wasm）、Web、
-> Windows、macOS、Android **不注入**，七条命令按 `unsupported-runtime: solid-modeler` 具名拒绝。
+> Windows、macOS、Android **不注入**，七条图元命令与三条布尔命令都按
+> `unsupported-runtime: solid-modeler` 具名拒绝。
 > **证据仅 Linux 契约/单元**（真实 solidcore，无 GPU/像素）；非 Linux 载体与 `dom-canvas` 的运行时
 > 行为 **NOT VERIFIED**（仅编译/契约证据），不得写成可用。`3DSOLID`/`BODY` 仍是**实体类型键**，
 > 不是命令。
@@ -1511,9 +1518,9 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `REVOLVE` | **部分实现（具名拒绝）**：`revolve.unsupported: 3D revolution is not implemented` | 不写库/不升修订/不入历史 |
 | `SWEEP` | **部分实现（具名拒绝）**：`sweep.unsupported: 3D sweep is not implemented` | 不写库/不升修订/不入历史 |
 | `LOFT` | **部分实现（具名拒绝）**：`loft.unsupported: 3D loft is not implemented` | 不写库/不升修订/不入历史 |
-| `INTERSECT` | **部分实现（具名拒绝）**：`intersect.unsupported: no 3D boolean model` | 不写库/不升修订/不入历史 |
-| `UNION` | **部分实现（具名拒绝）**：`union.unsupported: no 3D boolean model` | 不写库/不升修订/不入历史 |
-| `SUBTRACT` | **部分实现（具名拒绝）**：`subtract.unsupported: no 3D boolean model` | 不写库/不升修订/不入历史 |
+| `INTERSECT` | **部分实现（后台布尔，C2）**：选中 ≥2 个平面 `AcDb3dSolid` 实体 → worker 左折叠 → poll 在一条事务/一步撤销里删除操作数并插入交集实体 | 曲面操作数拒绝（`solid.lift_requires_planar`）；`boolean.needs_two`/`boolean.non_solid_operand`/`boolean.sub_element_not_supported`/`boolean.layer_mismatch`/`boolean.space_mismatch`；操作数被编辑 → `Stale`（图纸不变）；无模型器 → `unsupported-runtime: solid-modeler`；证据仅 Linux 契约（真实 solidcore），GPU/像素 NOT VERIFIED |
+| `UNION` | **部分实现（后台布尔，C2）**：选中 ≥2 个平面 `AcDb3dSolid` 实体 → worker 左折叠 → poll 提交一个合并实体（一条事务/一步撤销） | 同上：曲面操作数拒绝、具名校验码、`Stale` 丢弃（`solid.boolean_stale` 状态）、`solid.boolean_busy` 拒绝、无模型器拒绝；证据仅 Linux 契约，GPU/像素 NOT VERIFIED |
+| `SUBTRACT` | **部分实现（后台布尔，C2）**：第一个选中实体减去其余实体 → poll 提交差集实体（一条事务/一步撤销） | 同上：曲面操作数拒绝、具名校验码、`Stale` 丢弃（`solid.boolean_stale` 状态）、`solid.boolean_busy` 拒绝、无模型器拒绝；证据仅 Linux 契约，GPU/像素 NOT VERIFIED |
 | `SLICE` | **部分实现（具名拒绝）**：`slice.unsupported: no 3D slicing model` | 不写库/不升修订/不入历史 |
 | `THICKEN` | **部分实现（具名拒绝）**：`thicken.unsupported: no surface-to-solid model` | 不写库/不升修订/不入历史 |
 | `PRESSPULL` | **部分实现（具名拒绝）**：`presspull.unsupported: no press/pull model` | 不写库/不升修订/不入历史 |

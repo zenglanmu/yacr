@@ -55,6 +55,9 @@ impl HostController {
     /// no longer reach across documents, and stale selections/overrides/tools
     /// cannot point at new objects.
     pub(super) fn reset_for_new_content(&mut self) {
+        // A boolean result computed against the old document must never publish
+        // into the replacement: cancel and drop the job before the slot changes.
+        self.application.abort_solid_boolean();
         let tool_generation = self.session.tool_generation.saturating_add(1);
         self.application.history.remove(&self.document_id);
         self.application.query = cad_query::QueryService::new();

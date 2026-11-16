@@ -756,11 +756,14 @@ pub enum ExtendedCommandId {
     Sweep,
     /// `LOFT`: 3D loft is not implemented.
     Loft,
-    /// `INTERSECT`: no 3D boolean model.
+    /// `INTERSECT`: keeps the common volume of >=2 selected solid bodies
+    /// (Work-only, real background job; ADR-0036 phase C2).
     Intersect,
-    /// `UNION`: no 3D boolean model.
+    /// `UNION`: combines >=2 selected solid bodies into one (Work-only,
+    /// background job).
     Union,
-    /// `SUBTRACT`: no 3D boolean model.
+    /// `SUBTRACT`: removes every later selected body from the first (Work-only,
+    /// background job).
     Subtract,
     /// `SLICE`: no 3D slicing model.
     Slice,

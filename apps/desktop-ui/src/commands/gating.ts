@@ -757,6 +757,15 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
   // through locally and the host decides coplanarity/kind by name); the sentence
   // is the command's own hint, so the disabled button and the refusal agree.
   MASSPROP: Object.freeze({ count: 1, reasonKey: 'draw.kind.massprop.hint' }),
+  // UNION / SUBTRACT / INTERSECT (ADR-0036 phase C2) replace at least two solid
+  // bodies with one combined body, so two is the real minimum. The table states
+  // the minimum; the host refuses a non-body, a curved operand, a layer/space
+  // mismatch and every input-shape error by name (`boolean.*`), and the job only
+  // commits when it settles. The sentence is the command's own hint, so the
+  // disabled row and the refusal word the rule once.
+  UNION: Object.freeze({ count: 2, reasonKey: 'draw.kind.union.hint' }),
+  SUBTRACT: Object.freeze({ count: 2, reasonKey: 'draw.kind.subtract.hint' }),
+  INTERSECT: Object.freeze({ count: 2, reasonKey: 'draw.kind.intersect.hint' }),
   // MEASUREGEOM itself takes no selection up front: its tool options capture
   // their own points and only RADIUS reads the selection, so pre-gating the
   // command would disable the tool entries with an unrelated sentence. The host

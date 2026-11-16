@@ -14,9 +14,12 @@
 
 use std::sync::Arc;
 
-use cad_app::host::HostController;
-use cad_app::{Command, CommandId, CommandPayload, ExtendedCommandId};
-use cad_domain::{Body3d, Completeness, DocumentId, Point3, Precision, SemanticGeometry};
+use cad_app::host::{HostController, SolidBooleanPoll};
+use cad_app::{Command, CommandId, CommandPayload, ExtendedCommandId, SelectionSet};
+use cad_domain::{
+    Body3d, Completeness, DocumentId, EntityId, InstancePath, Point3, Precision, SelectionRef,
+    SemanticGeometry,
+};
 use cad_kernel_adapter::SolidModeler;
 use cad_kernel_solidcore::SolidCoreModeler;
 
@@ -360,4 +363,165 @@ fn an_absurdly_large_sphere_stays_bounded() {
         triangles < 20_000,
         "a 1e6-radius sphere must stay shape-relative, got {triangles} triangles"
     );
+}
+
+// ---- ADR-0036 phase C2: UNION / SUBTRACT through the real kernel ----------
+//
+// The command starts a real worker (`tasks::solid`), the controller polls it and
+// commits one body in one transaction. **Evidence boundary**: Linux x86-64
+// contract only; no GPU, window or carrier, and no pixel/performance claim.
+
+/// Create two overlapping `BOX` bodies (two undo steps) and return their ids.
+fn overlapping_boxes(controller: &mut HostController) -> (EntityId, EntityId) {
+    run_body(
+        controller,
+        ExtendedCommandId::Box,
+        vec![p(0.0, 0.0, 0.0), p(2.0, 2.0, 2.0)],
+    );
+    run_body(
+        controller,
+        ExtendedCommandId::Box,
+        vec![p(1.0, 1.0, 1.0), p(3.0, 3.0, 3.0)],
+    );
+    let ids: Vec<EntityId> = controller.application.workspace.documents[&controller.document_id]
+        .drawing
+        .entities()
+        .map(|entity| entity.id)
+        .collect();
+    assert_eq!(ids.len(), 2, "two boxes");
+    (ids[0], ids[1])
+}
+
+fn select_bodies(controller: &mut HostController, ids: &[EntityId]) {
+    let document = controller.document_id;
+    controller.session.selection = SelectionSet::from_refs(ids.iter().map(|id| SelectionRef {
+        document,
+        entity: *id,
+        instance: InstancePath::default(),
+        sub_element: None,
+    }));
+}
+
+/// Start one boolean and assert the command itself wrote nothing.
+fn start_boolean(controller: &mut HostController, ext: ExtendedCommandId) {
+    let document = controller.document_id;
+    let viewport = controller.viewport_id;
+    let solids_before = solid_count(controller);
+    let outcome = controller
+        .application
+        .execute(
+            &mut controller.session,
+            command(
+                document,
+                viewport,
+                CommandId::Extended(ext),
+                CommandPayload::None,
+            ),
+        )
+        .unwrap_or_else(|error| panic!("{ext:?} starts: {error:?}"));
+    assert!(outcome.objects.is_empty(), "{ext:?} commits only on poll");
+    assert!(
+        outcome
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "solid.boolean_started"),
+        "{ext:?} reports the job start"
+    );
+    assert_eq!(
+        solid_count(controller),
+        solids_before,
+        "{ext:?} wrote nothing"
+    );
+}
+
+/// Poll the controller until the worker settles (the real kernel is slower than
+/// the fake one, so this waits on the public poll contract, not a fixed sleep).
+fn wait_boolean_done(controller: &mut HostController) -> cad_domain::ObjectId {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    loop {
+        match controller.poll_solid_boolean() {
+            SolidBooleanPoll::Running => {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "the real boolean did not settle"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            SolidBooleanPoll::Done { object, .. } => return object,
+            other => panic!("the real kernel should fold two boxes, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn union_commits_one_body_through_the_background_job() {
+    let mut controller = modeler_controller();
+    let (first, second) = overlapping_boxes(&mut controller);
+    select_bodies(&mut controller, &[first, second]);
+    start_boolean(&mut controller, ExtendedCommandId::Union);
+    assert_eq!(solid_count(&controller), 2, "the command wrote nothing yet");
+
+    let object = wait_boolean_done(&mut controller);
+    assert_eq!(solid_count(&controller), 1, "one combined body");
+    let document = controller.document_id;
+    let entity = controller.application.workspace.documents[&document]
+        .drawing
+        .entities()
+        .find(|entity| entity.object.id == object)
+        .expect("the combined row exists");
+    assert_eq!(entity.object.type_key, "AcDb3dSolid");
+    let SemanticGeometry::Body3d(body) = &entity.geometry else {
+        panic!("UNION must commit a Body3d");
+    };
+    assert_eq!(body.kind, cad_domain::BodyKind::Solid);
+    assert!(
+        body.exact_brep().is_some(),
+        "the result keeps exact geometry"
+    );
+    assert!(!body.display.mesh.triangles.is_empty());
+
+    // One undo restores both operands.
+    controller
+        .application
+        .execute(
+            &mut controller.session,
+            command(
+                document,
+                controller.viewport_id,
+                CommandId::Undo,
+                CommandPayload::None,
+            ),
+        )
+        .expect("undo");
+    assert_eq!(solid_count(&controller), 2, "one undo restores the group");
+    assert!(
+        !controller.application.workspace.documents[&document]
+            .drawing
+            .entities()
+            .any(|entity| entity.object.id == object),
+        "the combined body is gone after undo"
+    );
+}
+
+#[test]
+fn subtract_commits_one_body_through_the_background_job() {
+    let mut controller = modeler_controller();
+    let (first, second) = overlapping_boxes(&mut controller);
+    select_bodies(&mut controller, &[first, second]);
+    start_boolean(&mut controller, ExtendedCommandId::Subtract);
+
+    let object = wait_boolean_done(&mut controller);
+    assert_eq!(solid_count(&controller), 1, "first minus second");
+    let document = controller.document_id;
+    let entity = controller.application.workspace.documents[&document]
+        .drawing
+        .entities()
+        .find(|entity| entity.object.id == object)
+        .expect("the difference row exists");
+    assert_eq!(entity.object.type_key, "AcDb3dSolid");
+    let SemanticGeometry::Body3d(body) = &entity.geometry else {
+        panic!("SUBTRACT must commit a Body3d");
+    };
+    assert_eq!(body.kind, cad_domain::BodyKind::Solid);
+    assert!(body.exact_brep().is_some());
 }

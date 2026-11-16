@@ -7,13 +7,17 @@
 //! `tests/drawing/solids.rs`) and a carrier without a modeler refuses them with
 //! `unsupported-runtime: solid-modeler`.
 //!
+//! Phase C2 graduated `UNION`/`SUBTRACT`/`INTERSECT` the same way: each starts a
+//! background boolean job (contracts in `tests/drawing/solids_bool.rs` and
+//! `host::tests::solids`) and is a Work-only drawing write.
+//!
 //! Every **remaining** name is admitted by the vocabulary and refused with
 //! `CadError::Unsupported` carrying a stable reason; nothing is written, no
 //! revision is bumped and no history entry appears. All are Viewer-legal.
 
 use super::*;
 
-const REFUSALS: [(ExtendedCommandId, &str); 18] = [
+const REFUSALS: [(ExtendedCommandId, &str); 15] = [
     (
         ExtendedCommandId::PolySolid,
         "polysolid.unsupported: 3D solid primitives are not implemented",
@@ -33,18 +37,6 @@ const REFUSALS: [(ExtendedCommandId, &str); 18] = [
     (
         ExtendedCommandId::Loft,
         "loft.unsupported: 3D loft is not implemented",
-    ),
-    (
-        ExtendedCommandId::Intersect,
-        "intersect.unsupported: no 3D boolean model",
-    ),
-    (
-        ExtendedCommandId::Union,
-        "union.unsupported: no 3D boolean model",
-    ),
-    (
-        ExtendedCommandId::Subtract,
-        "subtract.unsupported: no 3D boolean model",
     ),
     (
         ExtendedCommandId::Slice,
@@ -86,6 +78,13 @@ const REFUSALS: [(ExtendedCommandId, &str); 18] = [
         ExtendedCommandId::Rotate3D,
         "rotate3d.unsupported: no 3D rotate-axis model",
     ),
+];
+
+/// The three booleans that became background jobs in phase C2.
+const BOOLEANS: [ExtendedCommandId; 3] = [
+    ExtendedCommandId::Union,
+    ExtendedCommandId::Subtract,
+    ExtendedCommandId::Intersect,
 ];
 
 /// The seven primitives that became real body creators in phase C1.
@@ -148,6 +147,54 @@ fn the_seven_primitives_are_drawing_writes_not_viewer_refusals() {
             ext.requires_work_mode(),
             "{ext:?} creates a body, so it is Work-only"
         );
+    }
+}
+
+#[test]
+fn the_three_booleans_are_drawing_writes_not_viewer_refusals() {
+    for ext in BOOLEANS {
+        assert!(
+            ext.requires_work_mode(),
+            "{ext:?} replaces the operands, so it is Work-only"
+        );
+    }
+}
+
+#[test]
+fn a_viewer_cannot_run_a_boolean() {
+    for ext in BOOLEANS {
+        let (mut app, mut session) = application_with_document();
+        session
+            .switch_mode(AppMode::Viewer)
+            .expect("Viewer is legal");
+        let error = app
+            .execute(
+                &mut session,
+                command(CommandId::Extended(ext), CommandPayload::None),
+            )
+            .expect_err("Viewer is read-only");
+        assert_eq!(error, CadError::PermissionDenied, "{ext:?}");
+    }
+}
+
+#[test]
+fn booleans_without_a_modeler_refuse_by_name_and_start_nothing() {
+    for ext in BOOLEANS {
+        let (mut app, mut session) = application_with_document();
+        let before = revision(&app);
+        let error = app
+            .execute(
+                &mut session,
+                command(CommandId::Extended(ext), CommandPayload::None),
+            )
+            .expect_err("no modeler, no boolean");
+        assert_eq!(
+            error,
+            CadError::Unsupported("unsupported-runtime: solid-modeler".into()),
+            "{ext:?}"
+        );
+        assert_eq!(revision(&app), before, "{ext:?} writes nothing");
+        assert!(!app.can_undo(&DocumentId(1)), "{ext:?} records no undo");
     }
 }
 

@@ -537,6 +537,12 @@ pub struct Application {
     /// fabricating a body. The modeler is stateless (content in, content out), so
     /// it is shared as `Arc` and holds no document state.
     solid_modeler: Option<Arc<dyn cad_kernel_adapter::SolidModeler>>,
+    /// The single current background solid boolean (ADR-0036 phase C2).
+    ///
+    /// One slot per live controller (`Application` is 1:1 with a
+    /// `HostController`). The worker only computes; the host publishes the body
+    /// when it polls a current, non-stale result.
+    solid_booleans: crate::tasks::SolidBooleanManager,
 }
 
 impl Default for Application {

@@ -926,6 +926,12 @@ impl ExtendedCommandId {
                 | Self::Sphere
                 | Self::Cone
                 | Self::Torus
+                // ADR-0036 phase C2: the three booleans replace selected bodies
+                // with one combined body (one transaction / one undo step), so
+                // they are drawing writes too.
+                | Self::Union
+                | Self::Subtract
+                | Self::Intersect
         )
     }
 }

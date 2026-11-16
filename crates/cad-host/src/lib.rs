@@ -963,6 +963,7 @@ impl HostCore {
     pub fn tick(&self) -> CadResult<()> {
         self.apply_due_hover();
         self.poll_open()
+            .and_then(|_| self.poll_solid_boolean())
             .and_then(|_| self.poll_pending_save())
             .and_then(|_| self.metrics())
             .and_then(|_| self.sync_view())

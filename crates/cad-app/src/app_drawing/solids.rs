@@ -1,4 +1,4 @@
-//! ADR-0036 phase C1: the seven primitive commands create **real exact bodies**.
+//! ADR-0036 phase C1/C2: real exact bodies and real background booleans.
 //!
 //! `BOX`, `WEDGE`, `PYRAMID`, `CYLINDER`, `SPHERE`, `CONE` and `TORUS` stop
 //! being named refusals. Each handler turns an explicit point payload into one
@@ -7,6 +7,11 @@
 //! the existing `cad-kernel-adapter` tessellator (the modeler never builds a
 //! display mesh) and commits **one** `Body3d { kind: Solid, exact, display }` row
 //! with the ACIS class key `AcDb3dSolid` — one transaction, one undo step.
+//!
+//! `UNION`/`SUBTRACT`/`INTERSECT` (phase C2) validate at least two selected exact
+//! solid bodies and start a background job; the worker folds them through the
+//! modeler and the host commits the result in one transaction (see
+//! [`Application::boolean_solids`] and `crate::tasks::SolidBooleanJob`).
 //!
 //! # Point contract (this build; no interactive prompt yet)
 //!
@@ -47,29 +52,38 @@
 //!
 //! # Cancellation
 //!
-//! The seam is called **synchronously on the command thread** with an
-//! always-`false` cancellation probe: this is a deliberate, bounded carve-out
-//! (one primitive, shape-relative tessellation, so the facet count stays
-//! ~constant regardless of the dimensions). Mid-command cancellation is **not
-//! wired** in C1. A C2 boolean must not reuse this carve-out: it needs a worker
-//! thread and a live cancellation probe (ADR-0036 P1/C1).
+//! The **primitive** seam is called synchronously on the command thread with an
+//! always-`false` cancellation probe: a deliberate, bounded carve-out (one
+//! primitive, shape-relative tessellation, so the facet count stays ~constant
+//! regardless of the dimensions). Mid-command cancellation is **not** wired for
+//! the primitives (C1).
+//!
+//! The C2 booleans (`boolean_solids`) deliberately do **not** reuse it: they only
+//! validate and snapshot here, then start a real worker job
+//! (`crate::tasks::SolidBooleanJob`) with a live cancellation token
+//! (ADR-0036 P1/C1). The host commits when it polls a current, non-stale result.
 //!
 //! # What is *not* here
 //!
-//! Booleans (`UNION`/`SUBTRACT`/`INTERSECT`) are C2, `MASSPROP`/`face_sources`/
-//! `VSCURRENT` are C3, and `3DSOLID`/`BODY` remain **entity type keys**, not
-//! AutoCAD commands: the modeler advertises them in its registration, and no
+//! `MASSPROP`/`face_sources`/`VSCURRENT` are C3, curved-operand booleans are P2
+//! (the modeler refuses them), and `3DSOLID`/`BODY` remain **entity type keys**,
+//! not AutoCAD commands: the modeler advertises them in its registration, and no
 //! command variant is added for them.
 
 use super::*;
+use crate::app_utility::require_none_payload;
+use crate::tasks::{SolidBooleanOperand, SolidBooleanPlan};
 use cad_kernel_adapter::{
-    execute_solid, tessellate_exchange, PrimitiveKind, PrimitiveSpec, SolidExchange,
+    execute_solid, tessellate_exchange, BooleanOp, PrimitiveKind, PrimitiveSpec, SolidExchange,
     SolidOperation, SolidOutcome, SolidProduct, SolidRequest, TessellationBudget,
     TessellationOutcome,
 };
 
 /// The stable refusal a carrier without a modeler reports.
 pub(crate) const SOLID_MODELER_UNSUPPORTED: &str = "unsupported-runtime: solid-modeler";
+
+/// The ACIS class key every created/combined body is stored under.
+pub(crate) const SOLID_TYPE_KEY: &str = "AcDb3dSolid";
 
 impl Application {
     /// Create one primitive solid body and commit it as an `AcDb3dSolid` row.
@@ -96,6 +110,15 @@ impl Application {
         // is an input error, never an `Unsupported`/`Failed` kernel answer.
         let spec = primitive_spec(kind, points)?;
 
+        // Both sides of the seam share one kernel mutex: a synchronous create
+        // issued while a boolean worker owns it would block the command thread.
+        // Refuse by name, before the modeler call and before any staging.
+        if self.solid_boolean_running() {
+            return Err(CadError::Unsupported(
+                "solid.boolean_busy: a boolean is running; wait for it to settle before creating another solid"
+                    .into(),
+            ));
+        }
         let Some(modeler) = self.solid_modeler.clone() else {
             return Err(CadError::Unsupported(SOLID_MODELER_UNSUPPORTED.into()));
         };
@@ -135,7 +158,7 @@ impl Application {
             session,
             command,
             SemanticGeometry::Body3d(Box::new(body)),
-            "AcDb3dSolid",
+            SOLID_TYPE_KEY,
             match kind {
                 PrimitiveKind::Box => "create box",
                 PrimitiveKind::Wedge => "create wedge",
@@ -151,6 +174,232 @@ impl Application {
         outcome.diagnostics.extend(kernel_diagnostics);
         Ok(outcome)
     }
+
+    /// `UNION` / `SUBTRACT` / `INTERSECT` as a real **background** job (C2).
+    ///
+    /// Everything that can refuse happens here, before any worker or staging:
+    /// payload shape, selection arity, whole-body refs, layer/space agreement and
+    /// every operand's `Body3d { Solid, Exact }` (stored as `AcDb3dSolid`). A
+    /// curved/unliftable operand is deliberately **not** pre-judged: the modeler
+    /// decides, and its `Unsupported` answer becomes the job's `Failed` terminal.
+    ///
+    /// On success this starts the job and returns [`CommandOutcome::none`] with a
+    /// `solid.boolean_started` diagnostic: the drawing, its revision and history
+    /// stay untouched until the host polls a current, non-stale result and commits
+    /// it in one transaction.
+    pub(crate) fn boolean_solids(
+        &mut self,
+        session: &SessionState,
+        command: &Command,
+        op: BooleanOp,
+    ) -> CadResult<CommandOutcome> {
+        require_none_payload(command, op_name(op))?;
+        let Some(modeler) = self.solid_modeler.clone() else {
+            return Err(CadError::Unsupported(SOLID_MODELER_UNSUPPORTED.into()));
+        };
+        let refs = session.selection.refs().to_vec();
+        // A boolean combines bodies, never a face/edge of one or a block member.
+        if refs
+            .iter()
+            .any(|reference| reference.sub_element.is_some() || !reference.instance.0.is_empty())
+        {
+            return Err(invalid(
+                "boolean.sub_element_not_supported",
+                format!(
+                    "{} combines whole bodies; a sub-element or instance-path reference is not a body",
+                    op_label(op)
+                ),
+            ));
+        }
+        if refs.len() < 2 {
+            return Err(invalid(
+                "boolean.needs_two",
+                format!(
+                    "{} needs at least two selected solid bodies, got {}",
+                    op_label(op),
+                    refs.len()
+                ),
+            ));
+        }
+        let (plan, mut diagnostics) = {
+            let Some(document) = self.workspace.documents.get(&command.document) else {
+                return Err(CadError::InvalidInput("document not open".into()));
+            };
+            let drawing = document.drawing.as_ref();
+            let (operands, diagnostics) = Self::resolve_selection(
+                drawing,
+                command.document,
+                &refs,
+                "boolean",
+                op_name(op),
+                "boolean",
+                false,
+            )?;
+            if operands.len() < 2 {
+                return Err(invalid(
+                    "boolean.needs_two",
+                    format!(
+                        "{} needs at least two distinct selected solid bodies",
+                        op_label(op)
+                    ),
+                ));
+            }
+            let layer = operands[0].layer;
+            let space = operands[0].space.clone();
+            let mut snapshots = Vec::with_capacity(operands.len());
+            for entity in &operands {
+                if entity.layer != layer {
+                    return Err(invalid(
+                        "boolean.layer_mismatch",
+                        format!(
+                            "entity {} is on layer {} but the first operand is on layer {}",
+                            entity.id.0, entity.layer.0, layer.0
+                        ),
+                    ));
+                }
+                if entity.space != space {
+                    return Err(invalid(
+                        "boolean.space_mismatch",
+                        format!(
+                            "entity {} is in another space than the first operand; a boolean never \
+                             crosses model/paper space",
+                            entity.id.0
+                        ),
+                    ));
+                }
+                let snapshot = entity.clone();
+                let brep = boolean_operand_brep(&snapshot).ok_or_else(|| {
+                    invalid(
+                        "boolean.non_solid_operand",
+                        format!(
+                            "entity {} is {}; {} needs exact {SOLID_TYPE_KEY} solid bodies",
+                            entity.id.0,
+                            describe_operand(entity),
+                            op_label(op)
+                        ),
+                    )
+                })?;
+                snapshots.push(SolidBooleanOperand {
+                    id: snapshot.id,
+                    revision: snapshot.object.revision,
+                    brep,
+                    snapshot,
+                });
+            }
+            let plan = SolidBooleanPlan {
+                document: command.document,
+                op,
+                layer,
+                space,
+                // The result replaces the group in place: inherit the lowest
+                // draw order instead of jumping above every entity.
+                draw_order: operands
+                    .iter()
+                    .map(|entity| entity.draw_order)
+                    .min()
+                    .unwrap_or(0),
+                operands: snapshots,
+            };
+            (plan, diagnostics)
+        };
+        let operand_count = plan.operands.len();
+        self.start_solid_boolean(plan, modeler)?;
+        diagnostics.push(Diagnostic {
+            object: None,
+            code: "solid.boolean_started".into(),
+            message: format!(
+                "{}: started in the background for {operand_count} bodies; the drawing changes when \
+                 the job settles",
+                op_label(op)
+            ),
+        });
+        Ok(CommandOutcome {
+            objects: Vec::new(),
+            changes: None,
+            diagnostics,
+            measurement: None,
+            point_report: None,
+        })
+    }
+}
+
+/// The lower-case stable tag of a boolean (diagnostic/selection stem).
+pub(crate) fn op_name(op: BooleanOp) -> &'static str {
+    match op {
+        BooleanOp::Union => "union",
+        BooleanOp::Subtract => "subtract",
+        BooleanOp::Intersect => "intersect",
+    }
+}
+
+/// The upper-case command word of a boolean.
+fn op_label(op: BooleanOp) -> &'static str {
+    match op {
+        BooleanOp::Union => "UNION",
+        BooleanOp::Subtract => "SUBTRACT",
+        BooleanOp::Intersect => "INTERSECT",
+    }
+}
+
+/// A plan-level boolean refusal: `InvalidInput` carrying its stable code.
+fn invalid(code: &str, detail: impl std::fmt::Display) -> CadError {
+    CadError::InvalidInput(format!("{code}: {detail}"))
+}
+
+/// The exact B-rep of a boolean operand, or `None` when the row is not one.
+///
+/// The stored class key, the topological kind and the exact geometry are all
+/// required: a `Sheet`/`Wire`/`Unknown` body or a `BodyExact::Unavailable` row
+/// would give the kernel nothing exact to combine.
+fn boolean_operand_brep(entity: &DbEntity) -> Option<BrepData> {
+    if entity.object.type_key != SOLID_TYPE_KEY {
+        return None;
+    }
+    let SemanticGeometry::Body3d(body) = &entity.geometry else {
+        return None;
+    };
+    if body.kind != BodyKind::Solid {
+        return None;
+    }
+    match &body.exact {
+        BodyExact::Exact(brep) => Some(brep.as_ref().clone()),
+        BodyExact::Unavailable { .. } => None,
+    }
+}
+
+/// A short honest description of a rejected operand row.
+///
+/// Only an `AcDb3dSolid` row holding an exact `Body3d { Solid, Exact }` is an
+/// operand, so the sentence names the stored type **and** what its geometry
+/// actually is. An exact solid stored under another key (for example an
+/// imported `AcDbBody` row) is described as such instead of being called a
+/// malformed `AcDb3dSolid`.
+pub(crate) fn describe_operand(entity: &DbEntity) -> String {
+    let type_key = &entity.object.type_key;
+    match &entity.geometry {
+        SemanticGeometry::Body3d(body) => {
+            let kind = match body.kind {
+                BodyKind::Solid => "solid",
+                BodyKind::Sheet => "sheet",
+                BodyKind::Wire => "wire",
+                BodyKind::Unknown => "unknown-topology",
+            };
+            let exact = if body.exact_brep().is_some() {
+                "exact"
+            } else {
+                "non-exact"
+            };
+            if type_key == SOLID_TYPE_KEY {
+                format!("a row of type {type_key} holding a {exact} {kind} body")
+            } else {
+                format!(
+                    "a row of type {type_key} holding a {exact} {kind} body (only {SOLID_TYPE_KEY} \
+                     rows are operands)"
+                )
+            }
+        }
+        _ => format!("a row of type {type_key} that is not a body"),
+    }
 }
 
 /// Build the committed [`Body3d`] from the modeler's exact B-rep.
@@ -159,7 +408,7 @@ impl Application {
 /// missing or empty is refused (`solid.tessellation_failed`) instead of being
 /// committed as a `Solid` with an empty display — `cad-db` would accept that and
 /// the representer would then draw nothing.
-fn solid_body(brep: BrepData) -> CadResult<Body3d> {
+pub(crate) fn solid_body(brep: BrepData) -> CadResult<Body3d> {
     // The **shared** shape-relative rule (`1e-3 x bbox diagonal`): the same
     // policy the importer uses, so a created body's facet density does not
     // depend on the drawing unit, and a huge primitive asks for a chord budget
@@ -233,7 +482,7 @@ fn tessellation_failure(outcome: &TessellationOutcome) -> String {
 /// The outer `solid.kernel_failed:` prefix already names the situation, so
 /// repeating a diagnostic whose own code is `solid.kernel_failed` would read
 /// `solid.kernel_failed: solid.kernel_failed: …`.
-fn kernel_failure_message(diagnostics: &[Diagnostic]) -> String {
+pub(crate) fn kernel_failure_message(diagnostics: &[Diagnostic]) -> String {
     diagnostics
         .first()
         .map(|diagnostic| diagnostic.message.clone())
