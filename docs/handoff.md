@@ -12,11 +12,11 @@
 > **不在这里重复**：平台验收状态与证据边界以 `AGENTS.md` 平台表和 `docs/compatibility.md` 为准；
 > 架构不变量见 `docs/architecture.md`、`docs/core-invariants.md`。
 
-## 当前状态（截至 2026-11-15）
+## 当前状态（截至 2026-11-16）
 
-**版本与产物**：工作区 `0.1.13`，tag `v0.1.13` → `7600b316`，Release 与落地页 `v0.1.13` 已发布
-（11/11 job 绿）。tag 树里 `rvt` 仍是 0.17.0，`main` 已把补丁依次 rebase 到 **0.22.0**
-（`ed14d147`）再到 **0.24.0**（本轮）——**tag 产物与 main 源码不完全同源**。
+**版本与产物**：工作区 `0.1.14`，tag `v0.1.14` → `44913c7c`，Release 与落地页 `v0.1.14` 已发布
+（`CI build layers` 11/11 job 绿）。notes 与落地页清单在出包后单独提交（`a09f8ef3`），**tag 树不含**
+`docs/release-notes/v0.1.14.md`；tag 树与 `main` 源码同源（`rvt` 0.24.0 补丁已在 tag 内）。
 
 **载体**：一棵 React 树 + 多种载体（`apps/desktop-ui` 是唯一 React UI 包）；`native-below`
 （Linux 原生 Wayland、Windows、macOS、Android）由 native 会话持有 `cad-db`，`dom-canvas`
@@ -566,6 +566,52 @@ cad-host 340、`cad-render-wgpu` 全 target（GPU 用例串行 `-- --test-thread
   4.02 写出，不是 MicroStation**）；契约测试证明容器/单位/level/文字/块/插入/group 扁平化/
   UOR 线型缩放/栅格 u-v/Unknown 诊断与写路径，**不证明** V8i/CONNECT/ORD、真实 MicroStation、
   level 显示标志、references、Item Types、尺寸/多线/网格/实体、栅格像素或字体度量。
+
+## 2026-11-16 发布 v0.1.14（78 条命令部分→完整 + SAVE 写块/裁剪链 + DGN V7/V8 导入）
+
+- **版本**：workspace `Cargo.toml`、`Cargo.lock`（37 处，无依赖漂移）、四个 `tauri.conf.json`、
+  Flatpak metainfo 全部 `0.1.13` → `0.1.14`（commit `44913c7c`）。
+- **tag / run**：`v0.1.14`（annotated，指向 `44913c7c`）→ `CI build layers` run
+  [`43840127429`](https://github.com/zenglanmu/yacr/actions/runs/43840127429) **11/11 job 绿**
+  （四个 release + 三个 check + shader + web-build/smoke/deploy）；`CI`（core）run
+  [`43840127558`](https://github.com/zenglanmu/yacr/actions/runs/43840127558) 全绿；版本 bump 的
+  main 推送 run [`43840127432`](https://github.com/zenglanmu/yacr/actions/runs/43840127432) /
+  [`43840127512`](https://github.com/zenglanmu/yacr/actions/runs/43840127512) 也全绿。
+- **本轮用户可见内容**：覆盖表 **107 完整 / 872 部分 → 185 / 794**（tag→HEAD 共 **78 条**命令从
+  「部分实现」晋升「完整实现」；`docs/autocad-2026-command-coverage.md` 的计数行只加不减，历史
+  增补段落未改写）。非命令变化：`SAVE` 真写 `BLOCK_RECORD`/`BLOCK`/`INSERT` + XCLIP
+  `ACAD_FILTER`/`SPATIAL_FILTER` 链、表格逐格外观进显示、`MLEADER` 四种内容类型、DGN V7/V8 导入。
+- **顺序（沿用 v0.1.13 教训）**：先 bump → tag → 出包 → 发布 → 再补 notes + 落地页
+  （`a09f8ef3`）。tag 树不含 notes，`core-quality` 的 `test-landing-site.py` 因此通过。
+- **发布**：`publish-release` run
+  [`43852049670`](https://github.com/zenglanmu/yacr/actions/runs/43852049670) 绿 →
+  <https://github.com/zenglanmu/yacr/releases/tag/v0.1.14>（非 draft / 非 prerelease；先用自动生成
+  notes 建 Release，随后用 `docs/release-notes/v0.1.14.md` 覆盖）。
+- **artifact（Release API 核对）**：`yacr-0.1.14-linux-x86_64.flatpak` **114,616,424 B**
+  + `.sha256` + `.flatpak.gpg`（GPG 签名）；`yacr-0.1.14-windows-x86_64.zip` **111,462,473 B**
+  + `.sha256`（`yacr-windows-release-unsigned`，无 `.cer`）；`yacr-0.1.14-macos-universal.tar.gz`
+  **159,563,068 B** + `.sha256`（ad-hoc、未公证）；`app-universal-release.apk` **118,576,797 B**
+  + `.sha256`（仓库自签名，v2/v3 verified）。合计 504,218,762 B（≈480.9 MiB）。
+- **落地页（提交侧）**：commit `a09f8ef3`；`downloads.json` → v0.1.14（R2 自定义域 + GitHub
+  fallback，真实 size/sha256）、`changelog.json` 由 notes 生成、`site.yml` 默认
+  `release_tag=v0.1.14` 与 481 MiB 注释、`index.html` 版本/日期/文件名/尺寸/SHA fallback 与
+  覆盖数（185/794，含 aria 与图例）、`README.md`/`README.zh-CN.md` 同数、
+  `docs/landing-site.md`、`scripts/test-landing-site.py` 同步。本地实跑
+  `build-landing-changelog.py --check`、`test-landing-site.py`、`check-workflows.py`、
+  `node --check apps/landing/main.js` 全绿。
+- **落地页部署**：`site.yml` run
+  [`43852380531`](https://github.com/zenglanmu/yacr/actions/runs/43852380531) 绿。线上复核：
+  <https://yacr.pages.dev/downloads.json> = v0.1.14（size/sha256 与 Release 一致）、
+  `/changelog.json` 首版 v0.1.14（2026-11-16）、首页含 `v0.1.14` ×21 与 `185 完整` / `794 部分`；
+  R2 HEAD `releases/v0.1.14/*` 四个包全部 **200** 且 `content-length` 与 Release 字节数一致
+  （114,616,424 / 111,462,473 / 159,563,068 / 118,576,797）。
+- **观察（未修，供下一轮）**：`docs/autocad-2026-command-coverage.md` 的总计表写 185 完整 / 794 部分，
+  而逐行状态列相加为 184 / 795（106 行仍是旧词「已实现」+ 78 行「完整实现」）。发布文案引用的是
+  总计表；该文档内部的差一需要单独核对，不要在下一轮直接用逐行求和覆盖总计。
+- **本轮未运行**：全量 `cargo test --workspace`、`fmt --all --check`、`clippy -D warnings` 未在本地
+  全量重跑（改动只含版本号、文档与落地页数据；门禁由 tag 上的 `CI`/`CI build layers` 全绿承担）。
+  **NOT VERIFIED**：Windows/macOS/Android 真机、真实 GPU、像素与性能；发布、打包、签名、上传与
+  落地页部署成功都不是运行时验收。
 
 ## 2026-11-14 发布 v0.1.13（插件 API 可用 + canvas ViewCube/cad_orbit + 跨载体 pinch + SKP 导入 + OS 文件关联）
 
