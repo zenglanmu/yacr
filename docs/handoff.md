@@ -22,6 +22,41 @@
 （Linux 原生 Wayland、Windows、macOS、Android）由 native 会话持有 `cad-db`，`dom-canvas`
 （X11/XWayland、Web）由 wasm 会话持有。细节与逐平台证据边界见 `AGENTS.md` 平台表。
 
+**wave 3（2026-11-16，部分完成）**
+
+覆盖表不变（**171 完整 / 808 部分**，本轮无新晋升），但修掉了一条**已实现却不可达**的整类缺陷，并留下两条未完成的 lane。
+
+- **UI admission 补齐**（`68f67ae9`）：`LINETYPE`/`-LINETYPE` 的 `CREATE`/`DELETE`（`DESCRIPTION` 作为内容尾巴保留原大小写）、
+  多段 `MLINE`（2+ 坐标对，1024 上限仍留在命令层）、`LAYOUT COPY`（`TEMPLATE` 仍准入，让宿主自己给出
+  `layout.template_not_implemented`）、`TABLEEXPORT <path.csv>`（路径尾巴保留大小写，UI 不解析不 stat）。
+  新谓词放在 `argument-extras-grammar.ts`（批量表已到尺寸门禁）。同时修正 6 条**假 i18n 提示**
+  （`draw.kind.mline(.hint)` 与 `tableexport`/`tablestyle`/`matchcell` 的标签与提示都还写着「未实现」），
+  以及 `catalog.ts` 里「表格批次不涉及文件 I/O」的注释。
+- 表格文案契约测试从「禁止出现 refusal/拒绝」改为「禁止 not implemented / 未实现 + 必须描述真实效果」——
+  提示里说明「坏输入按名拒绝」是诚实的错误文案，原正则把它一并禁掉了。
+- `catalog.ts` 拆分出 `catalog-tables.ts`（998 行，回到 1000 行门禁内）。
+- **DIMSTYLE 导出增量**（`9b98fe14`）：DXF 表段现在为每条存储的 `DIMSTYLE` 行写一条记录（逐字段），
+  所以 `DIMSTYLE NEW` 行或「唯一使用者被删」的行不再随 SAVE 消失；无法表示的行在导出报告里声明。
+  `style_edit` 的批次把「重新暂存存储行本身」判为权威空操作（按存储名 trim 后比较），重拼写不再升 revision。
+  **`DIMSTYLE` 命令侧写路径未落地，仍是部分实现。**
+- **未完成并已回退**：`XCLIP` 多边形/旋转块裁剪。lane 写了 `provider/clip.rs` 的新边界 API 与 `layout/polygon.rs`
+  的辅助函数，但 `expand.rs` 尚未改造、且 `layout::WorldRectBoundary` 未实现，crate 无法编译；
+  为使 HEAD 保持可编译，这部分工作已整体回退，`XCLIP` 的文档边界维持原样。重做时的正确顺序：
+  先在 `layout/polygon.rs` 落地 `WorldRectBoundary`/`clip_from_boundary`/`validate_simple_polygon`，
+  再把 `expand.rs` 的 `WorldRect` 链换成「矩形或简单多边形」的有效裁剪，最后逐图元接 `clip_*_to_polygon`。
+
+**环境问题（必须知道）**：本轮子 lane 全部被一条**磁盘守卫**中断（报 96.5–96.8% overloaded），
+但实测 `/` 32%、`/home` 43%（155G 可用）、`/tmp` 3%、`target` 4.8G —— 该指标与宿主机磁盘不符，
+清理 `target/debug`（60G）也没有改变报错数字。因此 wave 3 的剩余工作改为**在主会话直接完成**。
+后续若继续派 lane，先确认该守卫是否已恢复，否则会重演「写了一半就被杀」。
+
+**门禁（wave 3 实跑）**：`cargo fmt --all -- --check`、`clippy --workspace -D warnings`、
+`cargo check --workspace --all-targets`、`check --lib --target wasm32-unknown-unknown`、
+`check-architecture.py`、`check-file-size.py`（2177 文件）、`check-i18n.py`、`check-command-docs.py`、
+`check-tauri-capabilities.py`、`check-fixture-manifest.py` 全绿；前端 `tsc --noEmit` + **1810 测试全通过**；
+`cargo test -p cad-db`（271+13+5）与 `-p cad-import-acadrust`（424+6）全绿。
+真机 GUI 本轮 **NOT RUN**（改动不含 Rust 行为变化，除导出增量外无新命令路径）。
+
 **命令覆盖推进（续，2026-11-16，本轮 wave 2）**
 
 覆盖表从 **139 完整 / 840 部分**推进到 **171 完整 / 808 部分**（wave 2 净晋升 **32 个命令名**）。
