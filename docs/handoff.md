@@ -22,6 +22,29 @@
 （Linux 原生 Wayland、Windows、macOS、Android）由 native 会话持有 `cad-db`，`dom-canvas`
 （X11/XWayland、Web）由 wasm 会话持有。细节与逐平台证据边界见 `AGENTS.md` 平台表。
 
+**wave 8（2026-11-16）**
+
+覆盖表 **183 → 185 完整 / 796 → 794 部分**（本波晋升 2：`XCLIP`、`MLEADER`；累计自 123 起 **62 个**）。
+
+- **`XCLIP` 晋升**：裁剪深度端到端 —— `BlockClip` 存块局部 z 区间（`None` = 历史 2D-only，逐字节不变），DXF `40`/`41` + 使能位 `72`/`73` 读写往返，
+  显示**真过滤**（完全在外丢弃/完全在内照常/**跨区间整块保留并逐图元具名** `representation.xclip_depth_straddle`），`XCLIP CLIPDEPTH <front> <back>|OFF` 一条事务。
+  声明边界：`INVERT` 无模式字段（按名拒绝）、`40/41` 按 z 区间读写**不镜像** AutoCAD 的「back 沿 −normal」约定、跨区间不按深度面切割（2D 优先，逐图元具名）。
+- **`MLEADER` 晋升**：四种内容类型（实体 `172` / 样式 `170`：`0 none`/`1 block`/`2 MText`/`3 tolerance`）+ 块内容写真实 `BLOCK_RECORD` 并**按块基点摆放**
+  （`T(loc)·R·S·T(−base)`，基点创建时从 `BlockMetadata` 解析并存入载荷，显示与导出都不回读定义）+ 公差框与 `TOLERANCE` 共用同一域规则 + `STYLE`/`TEXTANGLE` 选项。
+  关键技术发现：acadrust 的**实体**读取器把 `172 = 3` 折成 `None`，所以公差 leader 必须同时写 `172 = 3` + `CONTEXT_DATA` 文本 + **样式 `170 = 3`**，重载时从样式记录解析种类 —— 否则就是「存了会消失」的字段。
+  声明边界：块属性不应用（全局范围）、`CONTEXT_DATA 47/14/93` 无模型归属、供方公差识别受上游限制、`MLEADERALIGN/COLLECT/TEXTEDIT` 仅文本语义、无 `Options` 子提示、`15`↔块基点配对未用供方文件核对。
+- **`TABLE` 仍部分实现**，但缺口收窄且证据化：**逐格边距**（`TABLECONTENT` 的 `171`+`301 MARGIN`+四个 `40`，显示内缩、无覆盖时逐字节不变）与**逐边双线间距**（`GRIDFORMAT` `91`+`40`）都已存/画/往返/可编辑；
+  **逐边框线型三重阻塞**（组是 LTYPE 句柄而域内无绘图级 LTYPE 表、实体写入器不发逐格线型、`expand.rs` 会用实体线型覆盖片段线型）→ 具名拒绝。
+  剩余：边框线宽渲染器只画 1px、块/`FIELD` 单元格、`TABLECONTENT` 名称描述、`annotative`、逐行边距。
+
+**真机 GUI 证据（Linux Wayland + Vulkan `Quadro P620`）**：`/tmp/opencode/evidence-wave8/` —— `TABLE 2 2 10 5 0 0` 创建成功（419 → 420），
+`TABLEDIT FORMAT 1 1 MARGIN 1 1 1 1` 解析通过后按 `tabledit.no_selection` 诚实拒绝（该命令需选中一个表格），
+`MLEADER CONTENT MTEXT …` 与无内容 `MLEADER …` 各创建一个实体（420 → 422），`XCLIP CLIPDEPTH -1 2` 在无选中 INSERT 时按 `xclip.no_selection` 拒绝。
+注：探针里的 `TABLEDIT FORMAT 0 0 ALIGN TL` 被按畸形拒绝是**正确的** —— 该地址是 1 基，0 不是合法单元格。
+
+**门禁（wave 8 实跑）**：fmt / clippy `-D warnings` / `check --workspace --all-targets` / `check --lib --target wasm32-unknown-unknown` / architecture / file-size（2222）/ i18n / command-docs 全绿。
+测试：cad-domain 160、cad-representation 344、cad-render-wgpu 537（串行）、cad-import-acadrust 469、cad-app table 116 + mleader 74 + xclip 12、cad-ui-core 782、cad-db 275。
+
 **wave 7（2026-11-16）—— 结构性缺口修复，无新增晋升**
 
 覆盖表仍是 **183 完整 / 796 部分**：本波修的是**根因**，四条命令（`XCLIP`/`TABLE`/`MLEADER`/`SAVE`）的残留边界也随之改写成更精确的事实，但没有一条满足「支持域内无可写缺口」的晋升条件。
