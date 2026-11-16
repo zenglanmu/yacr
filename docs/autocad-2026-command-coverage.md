@@ -596,7 +596,7 @@
 | `DIMREGEN` | 部分实现 | payload-free；本构建非关联，`dimregen.non_associative` 且不改变任何状态 |
 | `DIMROTATED` | 部分实现 | 三点拾取（两尺寸界线原点 + 尺寸线位置）；尺寸线角度来自会话 `dimRotation` 参数（度，任意有限值，不回绕/不归一化）；无交互角度提示、无对象选择/文字覆盖/关联 |
 | `DIMSPACE` | 已实现 | 首个线性/对齐/角度标注为基准；显式间距（`0` = 对齐）或 Auto = **2 × 基准样式文字高度**；角度标注按同心弧半径步进；模型空间；关联重排属全局范围 |
-| `DIMSTYLE` | 已实现 | `LIST`/`CURRENT`/`SET <name>`/`NEW`/`RENAME`/`DELETE`/`MODIFY <field> <value>`；一条 dim-style patch/一步撤销；`Standard` 不可删、被标注引用的行不可改删；`MODIFY` 不回写已烘焙的标注快照（无 DIMREGEN 级联） |
+| `DIMSTYLE` | 完整实现 | `LIST`/`CURRENT` 报告存储行；`SET <name>` 写会话当前样式（只影响**新**建标注）、`NEW <name>`（以**存储的** `Standard` 或指定基准为模板）、`RENAME`、`DELETE`、`MODIFY <var> <value>` 都真写样式表（`apply_dim_style_change`，一条记录/一次修订；重拼写为权威空操作；`Standard` 不可删）；被已存标注快照引用的行不可改名（`dimstyle.in_use`）；**非追溯**（ADR-0017）：既有标注保留解析快照并在诊断中说明；行内没有的字段按名拒绝；SAVE→OPEN 往返有测试 |
 | `DIMTEDIT` | 完整实现 | `MOVE`/`LEFT`/`RIGHT`/`CENTER`/`HOME`/`ANGLE`（`ROTATE`→`ANGLE`）；Left/Right/Center 移动锚点并设置字形级 `h_align`，**角标注按已绘制弧的起/终/中角锚定、坐标标注按引线特征端/引线端/中点锚定**（全部标注类型覆盖）；Angle 固定文字中心、`0` 复位；`OBLIQUE <deg>` 可键入并按 `dimtedit.oblique_unsupported` 具名拒绝（字形倾斜无字段 = 全局范围）；一条事务/一步撤销 | 唯一残留：角标注的显示是导入图片（无弧子图）时按 `dimtedit.justify_unsupported` 拒绝且不写 |
 | `DIST` | 已实现 | — |
 | `DISTANTLIGHT` | 部分实现 | 具名拒绝（`distantlight.unsupported: 3D light objects are not modeled`）。 |
@@ -1522,7 +1522,7 @@
 | 305 | `DIMROTATED` | 部分实现 | Creates a rotated linear dimension. | 三点拾取（两尺寸界线原点 + 尺寸线位置）；角度为会话 `dimRotation` 参数（度，任意有限值，不回绕/不归一化）；无交互角度提示、无对象选择/文字覆盖/关联 |
 | 306 | `DIMSPACE` | 已实现 | Adjusts the spacing between linear dimensions or angular dimensions. | 首个线性/对齐/角度标注为基准；显式间距（`0` = 对齐）或 Auto = **2 × 基准样式文字高度**；角度标注按同心弧半径步进；模型空间；关联重排属全局范围 |
 | 307 | `-DIMSTYLE` | 完整实现 | At the Command prompt, creates and modifies dimension styles. | `DIMSTYLE` 的命令行拼写：同一解析器与同一处理器，七个选项（`LIST`/`CURRENT`/`SET`/`NEW`/`MODIFY`/`RENAME`/`DELETE`）逐项测试证明无第二条路径 |
-| 308 | `DIMSTYLE` | 已实现 | Creates and modifies dimension styles. | `LIST`/`CURRENT`/`SET <name>`/`NEW`/`RENAME`/`DELETE`/`MODIFY <field> <value>`；一条 dim-style patch/一步撤销；`Standard` 不可删、被标注引用的行不可改删；`MODIFY` 不回写已烘焙的标注快照（无 DIMREGEN 级联） |
+| 308 | `DIMSTYLE` | 完整实现 | Creates and modifies dimension styles. | `LIST`/`CURRENT` 报告存储行；`SET <name>` 写会话当前样式（只影响**新**建标注）、`NEW <name>`（以**存储的** `Standard` 或指定基准为模板）、`RENAME`、`DELETE`、`MODIFY <var> <value>` 都真写样式表（`apply_dim_style_change`，一条记录/一次修订；重拼写为权威空操作；`Standard` 不可删）；被已存标注快照引用的行不可改名（`dimstyle.in_use`）；**非追溯**（ADR-0017）：既有标注保留解析快照并在诊断中说明；行内没有的字段按名拒绝；SAVE→OPEN 往返有测试 |
 | 309 | `DIMTEDIT` | 部分实现 | Moves and rotates dimension text and relocates the dimension line. | `MOVE`/`LEFT`/`RIGHT`/`CENTER`/`HOME`/`ANGLE`；Left/Right/Center 同时移动锚点并设置字形级 `h_align`（仅线性/对齐/半径/直径）；Angle 固定文字中心，`0` 复位；一条事务/一步撤销；角/坐标标注 justify 与 Oblique 未实现 |
 | 310 | `DIST` | 已实现 | Measures the distance and angle between two points. | — |
 | 311 | `DISTANTLIGHT` | 部分实现 | Creates a distant light. | 具名拒绝（`distantlight.unsupported: 3D light objects are not modeled`）。 |
@@ -2294,7 +2294,7 @@
 | `DIMORDINATE` | 实现 | 特征点 + 引线端点；自动 X/Y 规则为**我们的规则**（`\|Δy\| > \|Δx\|` ⇒ X） |
 | `DIMCENTER` | 实现 | 产出**普通 `LINE` 几何**，**不是** DIMENSION 实体；`DIMCEN = 0` ⇒ 0 实体 + 具名诊断 |
 | `DIMBASELINE` / `DIMCONTINUE` | 实现 | **显式拾取基准线性标注**（零跨命令状态）、N 点 + Enter、**一条事务/一步撤销**、`DIMDLI` 行距；**仅线性基准**、**不写 `DIMCONTINUEMODE`**、非关联、无文字覆盖 |
-| `DIMSTYLE` | **部分** | `LIST`/`CURRENT` 只读报告 `cad-db` 的 `dim_styles`；`SET <name>` 在名称校验后按 `dimstyle.set_unavailable` **具名拒绝**（无 post-import 样式表写 API）。实体存**已解析快照**，编辑样式**不追溯** |
+| `DIMSTYLE` | 完整实现 | `LIST`/`CURRENT` 报告存储行；`SET <name>` 写会话当前样式（只影响**新**建标注）、`NEW <name>`（以**存储的** `Standard` 或指定基准为模板）、`RENAME`、`DELETE`、`MODIFY <var> <value>` 都真写样式表（`apply_dim_style_change`，一条记录/一次修订；重拼写为权威空操作；`Standard` 不可删）；被已存标注快照引用的行不可改名（`dimstyle.in_use`）；**非追溯**（ADR-0017）：既有标注保留解析快照并在诊断中说明；行内没有的字段按名拒绝；SAVE→OPEN 往返有测试 |
 | `DIMEDIT` / `DIMTEDIT` / `DIMOVERRIDE` / `DIMBREAK` / `QDIM` / `DIMSPACE` | **部分** | `DIMEDIT` 文字覆盖/复位、`DIMTEDIT` 文字移动/旋转/复位、`DIMOVERRIDE` 实体快照变量、`QDIM` 直线 v1、`DIMSPACE` 等距重排是真实写路径（一条事务/一步撤销）；`DIMBREAK` 无打断记录，按 `dimbreak.unsupported` 拒绝。逐条见上方索引 |
 | `DIMJOGLINE` | **部分** | `ADD`/`REMOVE` 语法校验后按 `dimjogline.unsupported` 拒绝（域无 jog 字段/存储） |
 | `DIMARC` / `DIMJOGGED` / `DIMREASSOCIATE` | **未实现** | 无弧长/折弯标注字段与关联模型 |
@@ -2407,7 +2407,7 @@
 | `XREF` 命令面 | **L** | 只读导入期合并 v1 + Wave 5 的 `XREF`/`-XREF`/`EXTERNALREFERENCES` 溯源报告已落地；仍缺附着/卸载/重载/绑定、xref 记录与路径往返、`XCLIP`/完整 `VISRETAIN` 与选项板 |
 | `IMPORT` | **L** | 依赖 acadrust 格式能力与迁移策略；打开 DWG/DXF 走 `OPEN`，不是 `IMPORT` |
 | `PUBLISH` | **L** | 多布局/多图幅批量出图 + 设备/图幅/打印样式；`PLOT` 只到矢量单页 |
-| `DIMSTYLE` 样式表写入与追溯语义 | **M** | `LIST`/`CURRENT` 只读、`SET` 具名拒绝；缺 post-import 样式表写 API 与“改样式是否回写实体”的产品决策（ADR-0017 定为不追溯） |
+| `DIMSTYLE` 样式表写入与追溯语义 | **已关闭（2026-11-16）** | `apply_dim_style_change` 提供 post-import 单行写；`SET`/`NEW`/`RENAME`/`DELETE`/`MODIFY` 真写，被引用的行不可改名，`Standard` 不可删；ADR-0017 的「不追溯」写进每条诊断并有快照不变测试 |
 | 标注 jog / break / 弧长 / 折弯 / 关联 | **M–L** | `DIMJOGLINE`/`DIMBREAK` 无域字段（具名拒绝）；`DIMARC`/`DIMJOGGED`/`DIMREASSOCIATE` 与 `DIMASSOC=2` 未实现 |
 | HATCH 自定义 `76=2` / `.pat` 加载 | **M** | 需要 `.pat` 解析器 + 名称解析 + 缺失图案的显式拒绝；当前只有三项内置图案 |
 | HATCH 关联性 | **L** | 需要边界→填充持久引用并定义边界编辑后的重生成/失效规则；与现有非关联边界冲突，需 ADR |
