@@ -79,6 +79,7 @@
 | `Circle`、`Arc`、`Ellipse`、`Spline` | `cad_geometry::tessellate_geometry` 离散后逐段测距 | `Approximate { error_bound = tolerance }` |
 | `Text` | 同上（占位框边，非真实字形轮廓） | `Approximate` |
 | `Mesh` | 逐三角形 Möller–Trumbore，取最近；命中三角形经 `face_sources` 映射为子元素 | `Analytic` |
+| `Body3d` | **显示缓存**：逐三角形 Möller–Trumbore（与 `Mesh` 同路径）+ 存储边线折线逐段测距，**取最近**；命中三角形经显示缓存 `face_sources` 映射为子元素；缓存为空则如实 `Miss`（不从显示几何反推解析面） | 取**显示缓存**的 `precision`（剖分缓存通常是 `Approximate`）；来源标签按 body 精确性（精确体 `KernelMesh`、仅显示 `DirectMesh`） |
 | `Compound` | 递归取最近子命中；至少一个子几何可测即视为可测 | 取子命中精度 |
 | `Insert` | **本层不测**，由 `cad-app` 展开后逐子几何测试 | — |
 | `Opaque` | **跳过**，`skipped.reason = "opaque"` | — |
@@ -109,6 +110,13 @@ Möller–Trumbore 找到最近的三角形索引 `i`（`Mesh::triangles` 的下
 - `Some(None)` → `None` + `sub_element_reason = "mesh-face-source-missing"`；
 - 列表比三角形少（下标越界）→ `None` + `"mesh-face-source-index-out-of-range"`；
 - 根本没有 `face_sources`（空列表）→ `None` + `"mesh-face-sources-absent"`。
+
+**`Body3d` 面**走**同一条**映射：`BrepTessellator` 为每个显示三角形写
+`brep:face:<shell>/<face>`（`topology_revision` 是占位 `Revision(0)`，不是拓扑版本），因此
+body 的整实体拾取与子面高亮复用 mesh 路径，不需要第二套面身份。缺失 / 过短 / 该三角形为
+`None` 时同样报 `mesh-face-sources-absent` / `mesh-face-source-missing` /
+`mesh-face-source-index-out-of-range`；`body-face-identity-unmodelled` **不再**由 body 分支产出
+（只为旧显示缓存保留）。
 
 `GeometryHit::sub_element` / `PickHit::sub_element_reason` 都携带该结果；
 `pick_closest` 把子元素合并进 `source`：若 `PickItem` 已经给出 `sub_element`（调用方
@@ -146,7 +154,9 @@ edge 源键，属于后续工作。
 - **完全透明**（`alpha <= 0`，渲染器判为不可见）→ 不产生批次，记 `highlight.invisible`；
 - 选中项不在表示中 → `highlight.unresolved`（`Missing`）；面找不到稳定源 →
   `highlight.face-missing`（`Missing`）；Text/Image/Instance 图元 →
-  `highlight.unsupported`（`Partial`）。
+  `highlight.unsupported`（`Partial`）；子元素引用的目标片段不是网格（如
+  `VSCURRENT WIREFRAME` 下的边线 only body）→ `highlight.primitive-unsupported`（`Partial`，
+  不会误报 `face-missing`）。
 
 进程确定性：选择按给定顺序、片段按迭代顺序、三角形按升序处理，相同输入必产出相同的
 批次序列。
@@ -206,7 +216,10 @@ edge 源键，属于后续工作。
 `mesh_face_without_a_source_is_unresolved_with_a_reason`、
 `pick_closest_puts_the_resolved_sub_element_on_the_hit_source`、
 `two_faces_of_one_mesh_are_distinct_identities`、
-`line_hits_have_no_sub_element_and_no_reason`。
+`line_hits_have_no_sub_element_and_no_reason`、
+`body_face_hit_resolves_the_stable_sub_element`、
+`body_face_without_sources_is_unresolved_with_a_reason`、
+`body_edge_hits_have_no_sub_element_and_no_reason`。
 
 `cad-scene` 高亮（`crates/cad-scene/src/highlight.rs`）：
 `empty_selection_is_an_explicit_empty_overlay`、

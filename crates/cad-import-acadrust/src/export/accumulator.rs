@@ -47,6 +47,14 @@ pub(crate) struct ExportAccumulator {
     /// name: one `MLEADERSTYLE` object per distinct name, first snapshot wins
     /// (ADR 0019 decision D).
     pub mleader_styles: BTreeMap<String, (String, MLeaderStyleValues)>,
+    /// `true` once any `3DSOLID` record was queued — including one emitted as a
+    /// block member and then drained into a `BLOCK_RECORD`.
+    ///
+    /// The DXF writer serialises a `3DSOLID` payload inline as SAT text only
+    /// before AC1027 (see `export::export`), so the format decision must see a
+    /// solid wherever it was emitted; reading this flag on `entities` alone would
+    /// miss a body written inside a block definition.
+    pub written_solid3d: bool,
     /// Source objects whose `XCLIP` boundary was already reported. A clipped
     /// reference reaches the entity mapper once per array cell and once per
     /// block-member walk with the same source object, so the loss is recorded
@@ -68,6 +76,7 @@ impl ExportAccumulator {
             dim_block_counter: 0,
             suppress_records: false,
             mleader_styles: BTreeMap::new(),
+            written_solid3d: false,
             reported_clips: BTreeSet::new(),
         }
     }
@@ -128,6 +137,33 @@ impl ExportAccumulator {
         }
     }
 
+    /// Record a conversion under an explicit stable code.
+    ///
+    /// Most conversions use the derived `export.converted.<kind>` spelling. This
+    /// entry point exists for outcomes whose code is itself the contract and
+    /// names the missing feature (`acis.curved_face_not_written`,
+    /// `acis.dwg_3dsolid_unsupported`, ...) rather than only the entity kind. It
+    /// still counts as one converted geometry, so the report can never stay
+    /// `Complete`.
+    pub(crate) fn record_converted_code(
+        &mut self,
+        object: Option<ObjectId>,
+        code: &str,
+        reasons: Vec<String>,
+    ) {
+        if self.suppress_records {
+            return;
+        }
+        self.counts.converted += 1;
+        for reason in reasons {
+            self.entries.push(ExportDiagnostic {
+                object,
+                code: code.to_string(),
+                message: reason,
+            });
+        }
+    }
+
     /// Record a source `XCLIP` boundary the output cannot carry.
     ///
     /// A boundary is a **display attribute** of a block reference. It is written
@@ -173,6 +209,9 @@ impl ExportAccumulator {
                 "export exceeds the {} entity output limit",
                 ctx.limits.max_output_entities
             )));
+        }
+        if matches!(entity, EntityType::Solid3D(_)) {
+            self.written_solid3d = true;
         }
         self.entities.push(entity);
         Ok(())

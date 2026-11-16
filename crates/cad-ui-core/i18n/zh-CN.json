@@ -653,6 +653,8 @@
   "plot.no_document": "未打开图纸",
   "save.exported": "已保存 DXF 到 {path}",
   "save.exported_partial": "已保存 DXF 到 {path}（部分：转换 {converted} 项，丢弃 {dropped} 项）",
+  "save.exported_acis_sat": "已保存 DXF 到 {path}（含 3DSOLID：为保留内联 ACIS SAT 文本，整个文件按 AC1024 写出）",
+  "save.exported_acis_sat_partial": "已保存 DXF 到 {path}（部分：转换 {converted} 项，丢弃 {dropped} 项；含 3DSOLID：为保留内联 ACIS SAT 文本，整个文件按 AC1024 写出）",
   "save.export_failed": "保存失败：{reason}",
   "save.refused_source_path": "已拒绝：目标是被打开的源图纸文件",
   "save.cancelled": "已取消保存，未写入任何文件",

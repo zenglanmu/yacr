@@ -45,6 +45,12 @@ const ACIS_TESSELLATED_TYPE_KEYS: [&str; 4] =
 pub(crate) struct EntityContext<'a> {
     pub database: &'a DrawingDatabase,
     pub limits: ExportLimits,
+    /// Whether the output format can carry an exact ACIS `3DSOLID` payload.
+    ///
+    /// `true` only for [`ExportFormat::DxfText`](super::ExportFormat::DxfText):
+    /// the DWG path keeps the POLYFACE display cache and records
+    /// `acis.dwg_3dsolid_unsupported` per exact body.
+    pub allow_3dsolid: bool,
 }
 
 /// Type keys whose source entity is an infinite construct line.
@@ -540,10 +546,12 @@ fn emit_leaf(
             }
             emit_polyface_mesh(doc, entity, mesh, base_reasons, ctx, acc)?;
         }
-        // A 3D body keeps its exact B-rep in the database, but this exporter has
-        // no ACIS encoder: only the derived display cache is written (a polyface
-        // mesh for facets, LINE/POLYLINE3D for edge-only bodies). Never a
-        // fabricated `3DSOLID`/`BODY`/`REGION` record; the loss is recorded.
+        // A 3D body keeps its exact B-rep in the database. An exact, single-shell,
+        // planar, line-bounded solid is written as a real `3DSOLID` carrying ACIS
+        // SAT text (see `super::acis`); everything else falls back to the derived
+        // display cache (a polyface mesh for facets, LINE/POLYLINE3D for
+        // edge-only bodies). Never a fabricated payload: any refusal is recorded
+        // by name.
         SemanticGeometry::Body3d(body) => emit_body3d(doc, entity, body, ctx, acc)?,
         SemanticGeometry::Text {
             text,

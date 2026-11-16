@@ -40,10 +40,15 @@
 - 但：
   - `cad-kernel-adapter` 只会 **BRep → 网格**（`BrepTessellator`），没有创建/布尔/圆角；
   - `BrepSurface` 只有 `Plane|Sphere|Torus|Cylinder|Cone|Unsupported`，**没有 NURBS 曲面**；
-  - `UNION`/`SUBTRACT`/`INTERSECT`/`BOX`/`EXTRUDE`/`FILETEDGE` 等全部是具名拒绝；
-  - `MASSPROP` 对 body 显式 `massprop.body_requires_kernel`；
+  - `UNION`/`SUBTRACT`/`INTERSECT`/`BOX` 等已由 C1/C2 接成真实命令（见 §4.3）；
+    `EXTRUDE`/`REVOLVE`/`SWEEP`/`LOFT`/`FILEDGE` 等仍是具名拒绝；
   - 仓库里**没有任何**网格布尔/修复/mesh→BRep 依赖（`manifold3d`/`baby_shark`/`parry3d`/
     `truck`/`opencascade` 均未出现）。
+
+**2026-11-17 更新（命令侧）**：`MASSPROP` 已对精确 `Body3d{Solid, Exact}` 接线（C3a，见 §4.3）；
+`face_sources` 已由 `BrepTessellator` 写入 `brep:face:<shell>/<face>`（C3b）；`VSCURRENT` 已是
+会话级 3D body 视觉样式（C3c，默认 SHADED，与 AutoCAD 的 2D-wireframe 初始值有意偏离）；
+**剩余 C3 项：无**。曲面 lift/曲面布尔、圆角/倒角/抽壳仍是 P2。
 
 ---
 
@@ -83,8 +88,10 @@ solidcore 1.0.1 的公开 API 覆盖（详见 ADR-0036 与 docs.rs）：
   路径）。STEP 仍只能由 `cadmpeg-codec-step` 离散显示；要精确 STEP 实体，只有 OCCT。
 - **精确算术谓词**：SMLib 靠 `SmTol` 容差模型，不是 CGAL/GMP/Shewchuk，鲁棒性是容差驱动。
 - **网格处理**：没有 half-edge、平滑、细分、参数化、曲率、测地线、谱分析。
-- **SAT/SAB 写出**：solidcore 只有原生 `.smb/.smp`，不能写 ACIS；DWG 里的 3DSOLID 往返仍需
-  自研 writer（P3）。
+- **SAT/SAB 写出**：solidcore 只有原生 `.smb/.smp`，不能写 ACIS。**P3a（2026-11-17）已实现一个
+  受限子集**：DXF 导出对**单壳全平面直线**的精确体写回 `3DSOLID` 的 ACIS **SAT 文本**（自研
+  `SatDocument` 构建，非 solidcore），其余 body 按名拒绝并退回 POLYFACE；**SAB** 与 **DWG
+  `3DSOLID`** 仍不写（P3b）。
 
 ### 3.4 成本与风险
 
@@ -107,9 +114,9 @@ solidcore 1.0.1 的公开 API 覆盖（详见 ADR-0036 与 docs.rs）：
 |---|---|
 | `cad-domain` | `Body3d`/`BodyKind`/`BodyExact`/`BodyDisplay`；`BrepData` 等中性数据下沉；`SemanticGeometry::Body3d` |
 | `cad-db` | `validate_body`（Solid⇒Exact、边线、容差）、bounds、相似变换复合 `BrepPlacement::composed_with` |
-| `cad-import-acadrust` | ACIS 发出 `Body3d`，保留 `exact`/`edges`/`tolerance`；导出仍写 `POLYFACE` |
+| `cad-import-acadrust` | ACIS 发出 `Body3d`，保留 `exact`/`edges`/`tolerance`；导出：P0 只写 `POLYFACE`，**P3a 起**单壳全平面直线体的精确 B-Rep 写回 `3DSOLID`（SAT 文本），其余仍 `POLYFACE` 并记 `acis.*` |
 | `cad-representation`/`cad-scene` | body → `Mesh` / `LineSegments` / `Missing`；精度与来源透传 |
-| `cad-spatial`/`cad-measure`/`cad-app` | 独立 pick family `body`；无 snap；`MASSPROP` 显式拒绝；`select_filter` 用 `type_key` |
+| `cad-spatial`/`cad-measure`/`cad-app` | 独立 pick family `body`；无 snap；`MASSPROP` 显式拒绝（P0 时；C3a 已改为精确测量，见 §4.3）；`select_filter` 用 `type_key` |
 | 文档 | ADR-0036、`kernel-acis.md`、`compatibility.md`、`dxf-entity-coverage.md`、`handoff.md` |
 
 ### 4.2 P0.1（已完成）
@@ -125,7 +132,7 @@ solidcore 1.0.1 的公开 API 覆盖（详见 ADR-0036 与 docs.rs）：
 
 ### 4.3 P1：接入内核（最小可用建模）
 
-- 状态（2026-11-17）：**B2 已落地、C1 已落地（七种图元创建），P1 仍只完成一半到三分之二**。
+- 状态（2026-11-17）：**B2 已落地、命令侧 C1/C2/C3 已落地**；曲面 lift/曲面布尔属 P2。
   `cad-kernel-solidcore` 存在并实现 `SolidModeler`；**平面体**的创建/布尔/质量属性/相似变换可用；
   曲面 primitives 可创建、可显示、可导出，但其布尔与质量属性**显式拒绝**。
   **阶段 C1**：`BOX`/`WEDGE`/`PYRAMID`/`CYLINDER`/`SPHERE`/`CONE`/`TORUS` 七条命令由具名拒绝改为
@@ -136,7 +143,12 @@ solidcore 1.0.1 的公开 API 覆盖（详见 ADR-0036 与 docs.rs）：
   显示剖分用与导入共享的**形状相对容差**（1e-3 × 包围盒对角线），平面体 `Complete`、
   曲面体 `Partial`（“离散网格、缩放不细化”）。图元同步跑在命令线程（**C1 豁免**，工作有界）；
   C2 布尔必须 worker + 取消探针，不得沿用。
-  **仍 NOT IMPLEMENTED**：交互式尺寸提示、布尔命令（C2）、`MASSPROP`/`face_sources`/`VSCURRENT`（C3）。
+  **阶段 C2**：`UNION`/`SUBTRACT`/`INTERSECT` 是真实后台布尔任务（ADR-0036 §3 C2）。
+  **阶段 C3（2026-11-17 完成）**：**C3a** `MASSPROP` 已对精确 `Body3d{Solid, Exact}` 接线
+  （注入模型器同步测量，density 1.0、请求相对精度 1e-6、显示网格不参与）；**C3b**
+  `face_sources` 已由 `BrepTessellator` 写入 `brep:face:<shell>/<face>`；**C3c** `VSCURRENT`
+  已是会话级 3D body 视觉样式（默认 SHADED）。**剩余 C3 项：无**；曲面 lift 仍是 **P2**。
+  **仍 NOT IMPLEMENTED**：AutoCAD 的交互式尺寸提示、曲面 lift/曲面布尔（P2）、圆角/倒角/抽壳（P2）。
   证据只有 Linux 契约/单元（真实内核，无 mock）；其它载体 NOT VERIFIED。详见 ADR-0036 §7。
 - **拒绝边界（能力是 family 级，不是逐操作数）**：`capabilities().booleans` /
   `mass_properties` 为 true 只表示"这一族有实现"，每次调用仍可能对单个操作数返回
@@ -183,7 +195,7 @@ solidcore 1.0.1 的公开 API 覆盖（详见 ADR-0036 与 docs.rs）：
    Failed { diagnostics } }`：**没有** `aborted` 标志、没有"空成功"；剖分仍由既有
    `BrepTessellator` 在模型器之外完成（模型器不做显示网格）。
    身份是 `cad-db` 的 `EntityId` + `ObjectId.revision`；跨接缝只传 `BrepData` 快照。
-3. **命令接入**（`cad-app`，C1 **已实现**；C2/C3 **NOT IMPLEMENTED**）
+3. **命令接入**（`cad-app`，C1/C2/C3 **已实现**）
    - **C1（本轮）**：`BOX/CYLINDER/SPHERE/CONE/TORUS/WEDGE/PYRAMID` 从拒绝改成创建：
      `CommandPayload::Points` → `PrimitiveSpec`（显式点契约见
      `crates/cad-app/src/app_drawing/solids.rs` 模块文档）→ `execute_solid` → 中性 B-Rep →
@@ -192,21 +204,33 @@ solidcore 1.0.1 的公开 API 覆盖（详见 ADR-0036 与 docs.rs）：
      Linux `native-below` 注入；无模型器载体报 `unsupported-runtime: solid-modeler`。
      剖分容差是共享的形状相对规则（`cad_kernel_adapter::shape_relative_tolerance`），
      曲面体的 `BodyDisplay.completeness` 是 `Partial([discrete_mesh_reason])`。
-   - **C2（NOT IMPLEMENTED）**：`UNION/SUBTRACT/INTERSECT` 作用于 `Body3d(Solid)`；
-     替换操作数 + 插入结果要在一条事务/一条 undo 记录里。
-   - **C3（NOT IMPLEMENTED）**：`MASSPROP` 接线、`face_sources`（用 `BrepFace.id`）、`VSCURRENT`。
+   - **C2（已实现）**：`UNION/SUBTRACT/INTERSECT` 作用于 `Body3d(Solid)`，是真实后台任务；
+     替换操作数 + 插入结果在一条事务/一条 undo 记录里（细节见 ADR-0036 的 C2 段）。
+   - **C3（2026-11-17 完成，剩余项无）**：
+     - **C3a `MASSPROP`**：精确 body 经注入模型器同步报体积/表面积/质心/惯性张量；
+     - **C3b `face_sources`**：`BrepTessellator` 用 `BrepFace.id` 写 `brep:face:<shell>/<face>`；
+     - **C3c `VSCURRENT`**：会话级 3D body 视觉样式（见下条 6）。
    - `3DSOLID`/`BODY` 是**实体类型键**（模型器 `Registration::entity_types` 声明），不是 AutoCAD
      命令：不新增同名 `CommandId`。
    - 逐命令契约测试 + `compatibility.md` 行；i18n 两个 catalog 同步。
-4. **质量属性**（模型器已实现；命令 **NOT IMPLEMENTED**）：`MASSPROP` 仍未接线，
-   对 body 继续显式 `massprop.body_requires_kernel`。模型器返回
+4. **质量属性**（模型器已实现；命令 **C3a 已接线**）：`MASSPROP` 选择**全部**为精确
+   `Body3d{Solid, Exact}` 时，逐体经注入模型器**同步**报体积/表面积/质心/惯性
+   （density 1.0、请求相对精度 1e-6，报告明写“估计、不是已证明的界”），**显示网格永不积分**。
+   稳定拒绝：`massprop.body_modeler_unavailable` / `body_not_liftable`（曲面 P1 →
+   `solid.lift_requires_planar`）/ `body_kernel_failed` / `body_not_exact` / `body_not_solid` /
+   `mixed_selection`（与平面区域混选）/ `kernel_busy` / `body_not_positive_volume`；body 面子元素
+   引用解析到所属 body。模型器返回
    `MassAccuracy::Requested { relative }`（估计，不是证明），不得标 `Analytic`。
    成功条件是**恰好一个闭合壳**（空腔/多壳 → `Unsupported` + `solid.lift_unsupported`）；
    内核"不确定该 region 是否材料"时返回 `Failed(solid.unsure_region)`，不是 `Unsupported`。
-5. **`face_sources`**（**NOT IMPLEMENTED**）：应由 `BrepFace.id` 填充
-   `Mesh.face_sources`，解冻子面拾取。
-6. **`VSCURRENT`**（**NOT IMPLEMENTED**）：`2D wireframe`/`shaded` 落到
-   `RenderTopology::MeshEdges` + 会话状态，不写 `cad-db`。
+5. **`face_sources`**（**C3b 已实现**）：`BrepTessellator` 用 `BrepFace.id` 为每个显示三角形写
+   `Mesh.face_sources`，键 `brep:face:<shell>/<face>`，`topology_revision` 是占位 `Revision(0)`；
+   子面拾取与子面高亮复用 mesh 路径（缺失/过短/`None` 报 `mesh-face-source*`）。`cad-db` 只校验
+   列表为空或与三角形等长。
+6. **`VSCURRENT`**（**C3c 已实现**）：会话级 3D body 视觉样式，**默认 SHADED**（与 AutoCAD 的
+   2D-wireframe 初始值有意偏离，保留 token 前的填充网格显示）；wireframe 落成
+   `DisplayPrimitive::LineSegments` → `RenderTopology::Lines`（`MeshEdges` 仍未被本路径使用），
+   不写 `cad-db`、不升修订、不入历史。
 
 ### 4.4 P2：曲面、圆角与 NURBS
 
@@ -219,8 +243,19 @@ solidcore 1.0.1 的公开 API 覆盖（详见 ADR-0036 与 docs.rs）：
 
 ### 4.5 P3：ACIS 写出
 
-- 今天完全没有 SAT/SAB writer；没有它，`3DSOLID` 只能读不能往返。
-- 这是独立的大工程，**不要**与 P1 混做；在此之前导出继续写 `POLYFACE` 并显式记录。
+- **P3a（已实现，2026-11-17）**：`crates/cad-import-acadrust/src/export/acis.rs` 用中性 `BrepData`
+  构建 `SatDocument`（body→lump→shell→face→loop→coedge→edge→vertex→point；几何边跨面焊接、
+  每条边两个 coedge、平面框架归一化并校验正交、外环绕向与面朝向一致），`DxfWriter` 写成
+  `3DSOLID` 的内联 SAT 文本。子集：单壳、全平面、直线边界、真相似放置（无剪切/镜像）。
+  拒绝码：`acis.curved_face_not_written` / `acis.non_line_curve_not_written` /
+  `acis.no_shell_not_written` / `acis.multi_shell_not_written` / `acis.placement_not_written` /
+  `acis.invalid_topology_not_written`，退回显示缓存（POLYFACE / LINE / POLYLINE3D）。
+- **DWG 与 SAB 仍显式拒绝**：任一体分支在 DWG 都记 `acis.dwg_3dsolid_unsupported`；不写 SAB。
+- **版本**：文件含任一 `3DSOLID`（含块定义内）即整份 DXF 按 AC1024 写出（内联 SAT、避免
+  AC1027+ 的 `ACDSDATA` SAB），记 `export.note.acis_sat_text_version`；这是文档级约束。
+- 证据：自写→acadrust 解析→自读往返（盒/楔/棱锥/带孔面，几何 ≤1e-9·对角线、体积 ≤0.1%）+
+  真实 solidcore BOX 的 DXF 存盘/再导入（精确体、体积 1±1e-3）。**无第三方 CAD 读取器证据**，
+  无 vendor/像素/非 Linux 证据；P3b（SAB、DWG 3DSOLID、曲面/NURBS 面）仍未做。
 
 ### 4.6 载体影响
 
@@ -427,7 +462,7 @@ solidcore 1.0.1 的公开 API 覆盖（详见 ADR-0036 与 docs.rs）：
 
 - P-STEP-1a：一个解析曲面 STEP（盒体 + 圆柱）→ `Body3d{kind: Solid, exact: Exact}`，
   三角面与今天的 `StepTessellatedMesh` 一致；`MASSPROP` 仍 `Unsupported`（P1 未接）；
-  导出仍 `POLYFACE`；**不**声称往返。
+  导出仍按显示缓存（`POLYFACE`，P3a 不覆盖 STEP 来源）；**不**声称往返。
 - P-STEP-1b：NIST/ABC 样本逐面比较 `exact` 面数、`Unsupported` 面数与诊断；任何
   "全部面精确"的声明必须有该样本的实测数字。
 - 装配：同一 body 出现两次时得到两个 `Insert` 实例，而不是两份独立网格（P-STEP-2）。
@@ -481,7 +516,7 @@ StepImporter::import
 | P-STEP-1a | `cadmpeg-ir → BrepData` 解析曲面 lifter（Plane/Cylinder/Cone/Sphere/Torus + Line/Circle） | 解析样本 → `Body3d{Solid,Exact}`；三角面与现 `StepTessellatedMesh` 一致；失败面显式 |
 | P-STEP-1b | NURBS/椭圆/部分圆弧/pcurve | 依赖 P2；逐面计数，禁止无样本证据的"全部精确" |
 | P-STEP-2 | STEP 装配改为 `BlockDefinition` + `Insert` | 同一 body 两次实例 → 两个 `Insert`，不是两份网格 |
-| P1 | `cad-kernel-solidcore` + `SolidModeler` + 基本体/布尔/质量属性（**模型器部分已完成 2026-11-17**；命令接线 NOT IMPLEMENTED） | 模型器侧已有真实链：create → boolean → massprops（Linux 单元/契约，真实内核）；命令侧（含剖分/落库）未接线 |
+| P1 | `cad-kernel-solidcore` + `SolidModeler` + 基本体/布尔/质量属性（**模型器与命令侧 C1/C2/C3 均已实现 2026-11-17**） | 命令侧：C1 创建、C2 后台布尔、C3a `MASSPROP`、C3b `face_sources`、C3c `VSCURRENT`（Linux 契约/单元，真实内核；body 含 `cad-cli-tools` BOX/CYLINDER 用例）；曲面 lift/曲面布尔仍 P2 |
 | P2 | NURBS 面、圆角/倒角/抽壳、SURFACE 家族 | 逐命令契约 + 能力表；圆角产物是否为有理 NURBS 必须实测 |
 | P3 | ACIS SAT/SAB 写出 | DXF/DWG 往返样本；否则不声称往返 |
 

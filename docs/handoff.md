@@ -22,6 +22,105 @@
 （Linux 原生 Wayland、Windows、macOS、Android）由 native 会话持有 `cad-db`，`dom-canvas`
 （X11/XWayland、Web）由 wasm 会话持有。细节与逐平台证据边界见 `AGENTS.md` 平台表。
 
+**3D 实体 P3a：精确平面体写出 DXF `3DSOLID`（ACIS SAT 文本，2026-11-17）**
+
+- **写出器**：新 `crates/cad-import-acadrust/src/export/acis.rs`（唯一 ACIS 写出路径）。`BrepData`
+  → acadrust `SatDocument`：body → lump → shell → face → loop → coedge → edge → vertex → point；
+  几何点/边按 `1e-9·对角线` 焊接（一条几何边一条 `edge`，正反两个 coedge 且互为 partner），
+  平面法向/`u_dir` 归一化并拒绝非正交框架，每个面的**外环**（绝对面积最大）Newell 绕向须与面
+  朝向一致（`forward` CCW / `reversed` CW），面的净带符号面积为正；内环（洞）按构造反向。循环
+  记录索引在布局阶段直接分配（不再 O(n²) 查找 + 静默回退），`SatPointer::NULL` 表示链尾。
+- **可达子集**：恰好一个 shell、全平面面、直线边界、真相似放置（正交列 + `det > 0`），放置**烘焙**
+  进点与曲面框架（不写 `transform`）。镜像（`det < 0`）与剪切一样按 `acis.placement_not_written`
+  拒绝——烘焙镜像会把壳写反，而改法向符号是读者必须同意的第二套约定。
+- **拒绝即退回显示缓存**（每体一个稳定码）：`acis.curved_face_not_written`、
+  `acis.non_line_curve_not_written`、`acis.no_shell_not_written`、`acis.multi_shell_not_written`、
+  `acis.placement_not_written`、`acis.invalid_topology_not_written`（开放/非流形边、面朝向反转、
+  退化环）。成功路径记 `export.converted.acis_solid`，明示「无第三方 CAD 读取器验证」「载荷由保留
+  的精确 B-Rep 重建、非原始 SAT/SAB 字节」及被丢弃的显示缓存。
+- **DWG 不写 `3DSOLID`**：网格/仅边线/无显示几何三条分支都保留显示缓存并记
+  `acis.dwg_3dsolid_unsupported`（同一体只计一次 converted 或 dropped）；**不写 SAB**。
+- **版本是文档级选择**：`3DSOLID` 的载荷只在 AC1027 前内联为 SAT 文本，故**文件含任一 3DSOLID**
+  （模型空间或**已写出的块定义内**）即整份 DXF 按 **AC1024** 写出（`$ACADVER`）并记
+  `export.note.acis_sat_text_version`。此决定由 `ExportAccumulator::written_solid3d` 在 `push` 时
+  置位，块成员被 `split_off` 进 `BLOCK_RECORD` 也不会漏；`cad-host` 的 SAVEAS 状态新增
+  `save.exported_acis_sat[_partial]`（两份 i18n 已加键），把「因含 3DSOLID 而按 AC1024 写出」
+  显示给用户，而不是只留在报告里。**约束**：今后任何需要 AC1027+ 的实体特性都必须重审这条路径。
+- **测试证据（Linux，本轮实际运行）**：`cargo test -p cad-import-acadrust --offline`
+  **496 passed / 1 ignored**（含新 `export::tests::acis` + `export::tests::acis_export` **22 passed**：盒/楔/棱锥往返 + 体积
+  ≤0.1%、旋转+缩放+平移的解析 bbox/每环平面距离/法向保留、方孔夹具（10 面含内环）+ 体积 336、
+  coedge 环闭合与 partner 对称、镜像/剪切/多壳/无壳/开放壳/翻转面拒绝、块内 3DSOLID 仍 AC1024、
+  混合文档（solid+MTEXT+polyline）AC1024 且无 `ACDSDATA`、DWG 三条分支的具名拒绝）；
+  `cargo test -p cad-cli-tools --test solid_command --locked` **13 passed**（真实 solidcore BOX →
+  `export` DXF → `AcadrustImporter` 再导入，得到唯一 `Body3d{Solid, Exact}`，显示网格体积 1±1e-3，
+  且报告明写无第三方读取器验证）；`cargo test -p cad-host --lib file_open_save` **18 passed**
+  （含新的 `saving_a_drawing_with_a_3dsolid_says_the_file_is_written_as_ac1024`：
+  `fixtures/dxf/synthetic-acis-cube.dxf` → SAVEAS → 状态键 `save.exported_acis_sat_partial`，
+  写出的字节含 `AC1024`/`3DSOLID` 且无 `ACDSDATA`）。另 `cargo test -p cad-host --lib`
+  **348 passed**（全 lib）；`cargo check -p cad-host -p app-linux --all-targets --locked`、
+  `clippy -p cad-import-acadrust -p cad-cli-tools -p cad-host --all-targets -- -D warnings`、
+  `check-command-docs.py` / `check-i18n.py` / `check-architecture.py` / `check-file-size.py` /
+  `cargo fmt --all -- --check` 全部 rc=0。
+- **NOT RUN**：全量 `cargo test --workspace --locked`、全量发布门禁、任何 GPU/像素/性能结论、
+  **任何第三方 CAD 读取器打开导出的 SAT/3DSOLID**（AutoCAD/ODA/BricsCAD 均未运行）、非 Linux
+  载体（Windows/macOS/Android/Web 与 Linux `dom-canvas`）的运行时行为——本切片证据**只有**本仓库
+  自写/自读往返与 Linux 契约测试，其余一律 **NOT VERIFIED**。
+- **仍未做**：P3b（SAB 二进制、DWG `3DSOLID`、曲面/NURBS/一般裁剪 B-rep 的 SAT 文本）；P2
+  （圆角/倒角/抽壳、NURBS、`SURFACE` 家族）。`BODY`/`REGION`/`SURFACE` 仍不写回。
+
+**3D 实体 P1/C3a/C3b/C3c：body 质量属性、面身份与视觉样式（2026-11-17）**
+
+- **C3a `MASSPROP`（精确 body）**：新 `crates/cad-app/src/app_massprop_body.rs`。选择**全部**为
+  `Body3d{Solid, Exact(非空)}` 时，逐体经 `Application::solid_modeler`（注入的 `SolidModeler`）
+  以 `SolidOperation::MassProperties { density: 1.0 }` **同步**测量（读操作，无 worker、探针恒
+  `false`；布尔 worker 运行时以 `massprop.kernel_busy` 具名拒绝，不等待内核互斥锁）。每体一行 `massprop.object`：体积、
+  表面积、质心、绕形心的 `Ixx/Iyy/Izz/Iyz/Izx/Ixy`（张量的 off-diagonal 取负得到乘积，负零打印
+  为 0）、密度/质量，以及“estimated at requested relative accuracy 1e-6, not a proved bound”。
+  **显示网格永不积分**：无精确 B-Rep 时按 `body_not_exact` 拒绝，而不是拿三角形近似。
+  稳定拒绝：`massprop.body_modeler_unavailable`（无模型器载体）、`body_not_liftable`（模型器
+  返回 `Unsupported`，曲面 P1 为 `solid.lift_requires_planar`）、`body_kernel_failed`（`Failed`
+  的首条诊断）、`body_not_exact`、`body_not_solid`、`mixed_selection`（body 与平面区域混选）、
+  `kernel_busy`（布尔 worker 占用内核时快速拒绝）、`body_not_positive_volume`（反射/内外翻转体）。
+  body 面的子元素引用解析到其所属 body（同一 body 的重复引用只计一次）；非 body 几何的子元素
+  引用仍按 `not_addressable` 拒绝。
+  全部拒绝发生在第一条诊断构建之前，**零 revision / 零撤销**；模型器的“恰好一个闭合壳”约束
+  不变（空腔/多壳 → `solid.lift_unsupported`）。
+- **C3b `face_sources`**：`cad-kernel-adapter` 的 `BrepTessellator` 为每个显示三角形写
+  `Mesh.face_sources = Some(SubElementId { source_key: "brep:face:<shell>/<face>",
+  topology_revision: Revision(0) })`；`Revision(0)` 是**占位**，不是拓扑版本。`cad-spatial` 的
+  body 拾取分支用与 `Mesh` 相同的 `face_sub_element` 映射（整实体拾取与子面高亮复用 mesh 路径），
+  无法解析时报 `mesh-face-sources-absent` / `mesh-face-source-missing` /
+  `mesh-face-source-index-out-of-range`，**不再**产出 `body-face-identity-unmodelled`。
+  `cad-db::validate_body` 只校验 `face_sources` 为空或与三角形等长，不校验键内容。
+- **C3c `VSCURRENT`**：`app_view_extras.rs` + `session_state/view_extras.rs` 存
+  `VisualStyleToken::{Wireframe, Shaded}`，**默认 Shaded**——刻意偏离 AutoCAD 的 2D-wireframe
+  初始值，因为 Shaded 正是 token 之前的填充网格显示，改默认会改变所有既有 body 的显示。接受
+  `WIREFRAME`/`2DWIREFRAME`/`2D` → wireframe，`SHADED`/`SHADEDWITHEDGES` → 填充，其余样式
+  `vscurrent.style_not_implemented`。`cad-host::state::display_settings` 映射为
+  `RepresentationContext::body_wireframe`，表示层只改 `Body3d`：wireframe 发
+  `DisplayPrimitive::LineSegments` → `RenderTopology::Lines`（有存储边线用边线，否则去重三角形
+  边段），`MeshEdges` 仍未被该路径使用。会话状态：无库写/无 revision/无历史；**保存与矢量出图
+  上下文不接收 `body_wireframe`**，`PLOT` 的 SVG/PDF 仍按阴影/填充显示。
+- **测试证据（Linux，本轮实际运行）**：`cargo test -p cad-app --locked` **3003 passed**；
+  `-p cad-representation` **357 passed**；`-p cad-host` **347 passed**；`-p cad-scene`
+  **70 passed**；`cargo test -p cad-cli-tools --test solid_command --locked`（真实内核：
+  `massprop_reports_a_real_box_volume_area_and_requested_accuracy` 的 `volume=1.000000` /
+  `surface_area=6.000000` / 形心 0.5³，与
+  `massprop_refuses_a_real_curved_cylinder_as_not_liftable` 的 `massprop.body_not_liftable` +
+  `solid.lift_requires_planar`）；`cad-db` `body_face_sources_must_be_parallel_to_its_triangles`、
+  `cad-spatial` `body_face_hit_resolves_the_stable_sub_element`、
+  `cad-kernel-adapter` `brep_cube_facets_carry_stable_face_sources` /
+  `brep_cylinder_facets_carry_the_face_id`；`cad-import-acadrust`
+  `imported_acis_body_carries_brep_face_sources_after_tessellation`。VSCURRENT 契约在
+  `crates/cad-app/src/tests/extras_vscurrent.rs` 与 `crates/cad-host/src/tests/display_modes.rs`。
+- **NOT RUN**：全量 workspace 测试/门禁（`cargo test --workspace --locked`、全量
+  fmt/clippy/架构/i18n 之外的检查）、任何 GPU/像素/性能结论、非 Linux 载体（Windows/macOS/
+  Android/Web 与 Linux `dom-canvas`）的运行时行为——那些只有编译/契约证据，标
+  **NOT VERIFIED**。
+- **边界**：`MASSPROP` 的区域路径不变（仍无体积）；曲面 lift/曲面布尔、圆角/倒角/抽壳仍属 P2；
+  模型器仍只在 Linux `native-below` 注入，其余载体 `MASSPROP` 报
+  `massprop.body_modeler_unavailable`。
+
 **3D 实体 P1/C2：`UNION`/`SUBTRACT`/`INTERSECT` 真实后台布尔（2026-11-17）**
 
 - **后台任务**：新 `crates/cad-app/src/tasks/solid.rs`（`SolidBooleanJob`/`SolidBooleanManager`，

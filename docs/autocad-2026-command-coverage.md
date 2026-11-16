@@ -74,10 +74,14 @@
 > **2026-11-09 增补（Wave 13）**：`PAGESETUP`/`-PAGESETUP` 只读页面设置报告、`CONVERTPOLY` 只读单一多段线表示报告，以及 `PSETUPIN`…`LAYTRANS` 二十二个具名拒绝（页面设置导入/打印样式/表格/字段/远程文字/拼写/超级填充/视口对齐同步/图层转换；表格已真实落地（模型 + 创建 + TABLEDIT）；TABLESTYLE/TINSERT/MATCHCELL/TABLEEXPORT 仍拒绝）计入 **548 已实现（66 完整 + 482 部分）/ 433 未实现**；无 GUI/GPU/像素证据。
 > **2026-11-09 增补（Wave 14）**：`BOX`…`ROTATE3D` 二十五个 3D 实体图元/布尔/剖切/边编辑名全部按**具名拒绝**计入（稳定原因串，不写库/不升修订/不入历史）；3D 仍低于 2D，不计为可用 3D 功能。计入 **573 已实现（66 完整 + 507 部分）/ 408 未实现**。
 >
-> **2026-11-17 增补（ADR-0036 阶段 C1）**：`BOX`/`CONE`/`CYLINDER`/`SPHERE`/`TORUS`/`WEDGE`/`PYRAMID`
-> 七种图元改为**真实创建**（显式点 → 模型器 → 一条 `AcDb3dSolid` 实体）；状态仍是**部分实现**
-> （交互式尺寸提示与布尔 C2 未实现），所以计数不变。证据仅 Linux 契约/单元，GPU/像素与
-> 非 Linux 载体 **NOT VERIFIED**；`3DSOLID`/`BODY` 仍是实体类型键，不是命令。
+> **2026-11-17 增补（ADR-0036 阶段 C1/C2/C3）**：`BOX`/`CONE`/`CYLINDER`/`SPHERE`/`TORUS`/`WEDGE`/`PYRAMID`
+> 七种图元改为**真实创建**（显式点 → 模型器 → 一条 `AcDb3dSolid` 实体）；`UNION`/`SUBTRACT`/`INTERSECT`
+> 改为**真实后台布尔任务**（**C1/C2**）；**C3a `MASSPROP` 对精确 body 接线、C3b `face_sources`
+> 由 `BrepTessellator` 写入 `brep:face:<shell>/<face>`、C3c `VSCURRENT` 成为会话级 3D body
+> 视觉样式（默认 SHADED，与 AutoCAD 的 2D-wireframe 初始值有意偏离）**（均 2026-11-17 完成）。
+> 状态仍是**部分实现**（交互式尺寸提示、曲面 lift/曲面布尔、圆角/倒角/抽壳未实现），所以计数不变。
+> 证据仅 Linux 契约/单元（真实 solidcore，body 含 `cad-cli-tools` 的 BOX/CYLINDER 用例），
+> GPU/像素、性能与非 Linux 载体 **NOT VERIFIED**（仅编译/契约）；`3DSOLID`/`BODY` 仍是实体类型键，不是命令。
 > **2026-11-09 增补（Wave 15）**：`SURFBLEND`…`MESHUNCREASE` 二十五个曲面/网格名全部按**具名拒绝**计入（稳定原因串，不写库/不升修订/不入历史）；3D 仍低于 2D。计入 **598 已实现（66 完整 + 532 部分）/ 383 未实现**。
 > **2026-11-09 增补（Wave 16）**：`IMAGE`…`DGNADJUST` 二十五个图像/PDF/DGN 底图名全部按**具名拒绝**计入（`IMAGE`/`-IMAGE`/`IMAGEATTACH`/`IMAGECLIP`/`IMAGEADJUST`/`-IMAGEADJUST` 已于 2026-11-10 晋升：前两者只读报告，其余真实写入；其余仍拒绝）（稳定原因串，不写库/不升修订/不入历史）。计入 **623 已实现（66 完整 + 557 部分）/ 358 未实现**。
 > **2026-11-10 增补（Wave 17）**：24 个名字按**具名拒绝**计入 + `ARRAYPATH` 真实（`CadError::Unsupported` + 稳定原因串，不写库/不升修订/不入历史；`ACTBASEPOINT`…`ASSISTANTOPEN`）：`ACTBASEPOINT`/`ACTIVITYINSIGHTSCLOSE`/`ACTIVITYINSIGHTSOPEN`/`ACTMANAGER`/`ACTRECORD`/`-ACTSTOP`/`ACTSTOP`/`ACTUSERINPUT`/`-ACTUSERMESSAGE`/`ACTUSERMESSAGE`/`ADCCLOSE`/`ADCENTER`/`ADCNAVIGATE`/`ADJUST`/`AMECONVERT`/`ANALYSISCURVATURE`/`ANALYSISDRAFT`/`ANALYSISOPTIONS`/`ANALYSISZEBRA`/`ANIPATH`/`APPAUTOLOADER`/`APPSTORE`/`ASSISTANTCLOSE`/`ASSISTANTOPEN`（`ARRAYPATH` 在同日晋升为真实 path array，见其命令行）。计入 **648 已实现（67 完整 + 581 部分）/ 333 未实现**。具名拒绝是「命令路径存在且如实拒绝」的部分实现，不是可用功能。
@@ -788,7 +792,7 @@
 | `MARKUPASSIST` | 部分实现 | 具名拒绝（`markupassist.unsupported: this build has no collaboration markup/trace model`）。 |
 | `MARKUPCLOSE` | 部分实现 | 具名拒绝（`markupclose.unsupported: this build has no collaboration markup/trace model`）。 |
 | `MARKUPIMPORT` | 部分实现 | 具名拒绝（`markupimport.unsupported: this build has no collaboration markup/trace model`）。 |
-| `MASSPROP` | 完整实现 | 闭合圆/整椭圆/闭合折线 + **闭合 SPLINE（采样）** + **HATCH 环嵌套净面积**；**二阶矩 `Ix/Iy/Ixy`（绕形心）、`J`、`kx/ky`，汇总另给主惯性矩 `I1/I2`、主轴 `axis1/axis2`、主角与坐标系**；圆/椭圆/折线（含 bulge 圆缺）/解析填充环为精确值，样条与导入被拉直的填充边为采样并标注 `exact=false`；体积/质量/密度/3D 惯性矩、`Add`/`Subtract`、`.mpr` 属全局范围按名拒绝 |
+| `MASSPROP` | 完整实现 | 闭合圆/整椭圆/闭合折线 + **闭合 SPLINE（采样）** + **HATCH 环嵌套净面积**；**二阶矩 `Ix/Iy/Ixy`（绕形心）、`J`、`kx/ky`，汇总另给主惯性矩 `I1/I2`、主轴 `axis1/axis2`、主角与坐标系**；圆/椭圆/折线（含 bulge 圆缺）/解析填充环为精确值，样条与导入被拉直的填充边为采样并标注 `exact=false`；**3D body（C3a，2026-11-17）**：精确 `Body3d{Solid, Exact}` 经注入模型器**同步**报体积/表面积/质心/`Ixx`/`Iyy`/`Izz`/`Iyz`/`Izx`/`Ixy`（density 1.0、请求相对精度 1e-6、**显示网格不参与**），稳定拒绝 `massprop.body_modeler_unavailable`/`body_not_liftable`（曲面 → `solid.lift_requires_planar`）/`body_kernel_failed`/`body_not_exact`/`body_not_solid`/`mixed_selection`；区域的体积/质量/密度/3D 惯性矩仍按名拒绝（`massprop.solid_unsupported`），`Add`/`Subtract`、`.mpr` 仍未建模；证据仅 Linux 契约/单元（body 含 `cad-cli-tools` 真实内核的 BOX/CYLINDER 用例），无 GPU/像素 |
 | `MATBROWSERCLOSE` | 部分实现 | 具名拒绝（`matbrowserclose.unsupported: this build has no material/texture model`）。 |
 | `MATBROWSEROPEN` | 部分实现 | 具名拒绝（`matbrowseropen.unsupported: this build has no material/texture model`）。 |
 | `MATCHCELL` | 完整实现 | `MATCHCELL <src_r> <src_c> <dst_r> <dst_c> […]` 复制源单元格的**完整逐格格式**：文字高、文字样式（名/id/字体）、四条边框、**对齐（1–9）与文字旋转**；文本、合并跨度与位置不动；一次重建/一条事务/一步撤销 |
@@ -1169,7 +1173,7 @@
 | `VPORTS` | 部分实现 | 在活动图纸布局创建简单 rows×cols 视口网格（四角 clip、`model_per_paper=1`），一条事务/一步撤销；命名/标准视口配置未实现 |
 | `VPSCALE` | 完整实现 | 设置 **`CVPORT` 当前视口**的比例（无索引），显式索引可指定视口；存储对角线 `1/factor` 并重算平移以保留模型锚点；越界索引 `vpscale.unknown_viewport`；一条事务/一步撤销 |
 | `VPSYNC` | 部分实现 | 把 viewport 0 的 `model_to_paper` 复制到其余视口；主视口不可选择（无逐视口选择模型） |
-| `VSCURRENT` | 部分实现 | 仅 `WIREFRAME` 存会话 token；其余样式 `vscurrent.style_not_implemented` | 本渲染器只实现 2D 线框（仅边、无着色、无隐藏线消除），因此该令牌描述的是**真实绘制内容**而非死存储；着色/隐藏线等样式无实现，NOT pixel-verified |
+| `VSCURRENT` | 部分实现 | 会话级 **3D body 视觉样式**（**默认 SHADED**，与 AutoCAD 的 2D-wireframe 初始值**有意偏离**，以保留 token 前的填充网格显示）；接受 `WIREFRAME`/`2DWIREFRAME`/`2D` → wireframe（有存储 body 边线用边线，否则用去重三角形边段），`SHADED`/`SHADEDWITHEDGES` → 填充；其余样式 `vscurrent.style_not_implemented` | **仅 body**（只切 `RepresentationContext::body_wireframe`，其它几何不变）；无库写/无 revision/无历史；保存与矢量出图**不接收**该标志（出图仍为阴影/填充）；契约证据 only，像素/GPU NOT VERIFIED |
 | `VSLIDE` | 部分实现 | 具名拒绝（`vslide.unsupported: no slide (.sld) format model`）。 |
 | `VSSAVE` | 部分实现 | 具名拒绝（`vssave.unsupported: no slide (.sld) format model`）。 |
 | `VTOPTIONS` | 部分实现 | 只读：视图过渡设置未建模（`vtoptions.not_tracked`），不杜撰平滑/时长数值。 |
@@ -1738,7 +1742,7 @@
 | 516 | `MARKUPCLOSE` | 部分实现 | Closes the Markup Set Manager. | 具名拒绝（`markupclose.unsupported: this build has no collaboration markup/trace model`）。 |
 | 517 | `-MARKUPIMPORT` | 部分实现 | At the command prompt, imports a marked up drawing (image/pdf) in-place into your DWG as a new trace. | 具名拒绝（`-markupimport.unsupported: this build has no collaboration markup/trace model`）。 |
 | 518 | `MARKUPIMPORT` | 部分实现 | Imports a marked up drawing (image/pdf) in-place into your DWG as a new trace. | 具名拒绝（`markupimport.unsupported: this build has no collaboration markup/trace model`）。 |
-| 519 | `MASSPROP` | 完整实现 | Calculates the mass properties of selected 2D regions or 3D solids. | 闭合圆/整椭圆/闭合折线 + **闭合 SPLINE（采样）** + **HATCH 环嵌套净面积**；**二阶矩 `Ix/Iy/Ixy`（绕形心）、`J`、`kx/ky`，汇总另给主惯性矩 `I1/I2`、主轴 `axis1/axis2`、主角与坐标系**；圆/椭圆/折线（含 bulge 圆缺）/解析填充环为精确值，样条与导入被拉直的填充边为采样并标注 `exact=false`；体积/质量/密度/3D 惯性矩、`Add`/`Subtract`、`.mpr` 属全局范围按名拒绝 |
+| 519 | `MASSPROP` | 完整实现 | Calculates the mass properties of selected 2D regions or 3D solids. | 闭合圆/整椭圆/闭合折线 + **闭合 SPLINE（采样）** + **HATCH 环嵌套净面积**；**二阶矩 `Ix/Iy/Ixy`（绕形心）、`J`、`kx/ky`，汇总另给主惯性矩 `I1/I2`、主轴 `axis1/axis2`、主角与坐标系**；圆/椭圆/折线（含 bulge 圆缺）/解析填充环为精确值，样条与导入被拉直的填充边为采样并标注 `exact=false`；**3D body（C3a，2026-11-17）**：精确 `Body3d{Solid, Exact}` 经注入模型器**同步**报体积/表面积/质心/`Ixx`/`Iyy`/`Izz`/`Iyz`/`Izx`/`Ixy`（density 1.0、请求相对精度 1e-6、**显示网格不参与**），稳定拒绝 `massprop.body_modeler_unavailable`/`body_not_liftable`（曲面 → `solid.lift_requires_planar`）/`body_kernel_failed`/`body_not_exact`/`body_not_solid`/`mixed_selection`；区域的体积/质量/密度/3D 惯性矩仍按名拒绝（`massprop.solid_unsupported`），`Add`/`Subtract`、`.mpr` 仍未建模；证据仅 Linux 契约/单元（body 含 `cad-cli-tools` 真实内核的 BOX/CYLINDER 用例），无 GPU/像素 |
 | 520 | `MATBROWSERCLOSE` | 部分实现 | Closes the Materials Browser. | 具名拒绝（`matbrowserclose.unsupported: this build has no material/texture model`）。 |
 | 521 | `MATBROWSEROPEN` | 部分实现 | Opens the Materials Browser. | 具名拒绝（`matbrowseropen.unsupported: this build has no material/texture model`）。 |
 | 522 | `MATCHCELL` | 完整实现 | `MATCHCELL <src_r> <src_c> <dst_r> <dst_c> […]` 复制源单元格的**完整逐格格式**：文字高、文字样式（名/id/字体）、四条边框、**对齐（1–9）与文字旋转**；文本、合并跨度与位置不动；一次重建/一条事务/一步撤销 |
@@ -2165,7 +2169,7 @@
 | 943 | `VPORTS` | 部分实现 | Creates multiple viewports in model space or in a layout (paper space). | 在活动图纸布局创建简单 rows×cols 视口网格（四角 clip、`model_per_paper=1`），一条事务/一步撤销；命名/标准视口配置未实现 |
 | 944 | `VPSCALE` | 完整实现 | On a layout, displays the scale of the current viewport or of a selected layout viewport. | 目标为 `CVPORT` 当前视口（无索引）或显式索引；写对角线 `1/factor` 并保留模型锚点；越界 `vpscale.unknown_viewport`；一条事务/一步撤销 |
 | 945 | `VPSYNC` | 部分实现 | Aligns the views in one or more adjacent layout viewports with a master layout viewport. | 把 viewport 0 的 `model_to_paper` 复制到其余视口；主视口不可选择（无逐视口选择模型） |
-| 946 | `VSCURRENT` | 部分实现 | Sets the visual style in the current viewport. | 仅 `WIREFRAME` 被接受（即本渲染器唯一实现模式：边渲染），其余样式 `vscurrent.style_not_implemented`；不映射到未实现的行为 |
+| 946 | `VSCURRENT` | 部分实现 | Sets the visual style in the current viewport. | 会话级 **3D body 视觉样式**（**默认 SHADED**，与 AutoCAD 的 2D-wireframe 初始值**有意偏离**，以保留 token 前的填充网格显示）；接受 `WIREFRAME`/`2DWIREFRAME`/`2D` → wireframe（有存储 body 边线用边线，否则用去重三角形边段），`SHADED`/`SHADEDWITHEDGES` → 填充，其余样式 `vscurrent.style_not_implemented`；**仅 body**（只切 `RepresentationContext::body_wireframe`，其它几何不变），无库写/无 revision/无历史，保存与矢量出图不接收该标志；契约证据 only，像素/GPU NOT VERIFIED |
 | 947 | `VSLIDE` | 部分实现 | Displays an image slide file in the current viewport. | 具名拒绝（`vslide.unsupported: no slide (.sld) format model`）。 |
 | 948 | `VSSAVE` | 部分实现 | Saves the current visual style under a new name. | 具名拒绝（`vssave.unsupported: no slide (.sld) format model`）。 |
 | 949 | `VTOPTIONS` | 部分实现 | Displays a change in view as a smooth transition. | 只读：视图过渡设置未建模（`vtoptions.not_tracked`），不杜撰平滑/时长数值。 |

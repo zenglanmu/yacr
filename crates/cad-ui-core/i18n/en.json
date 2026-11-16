@@ -653,6 +653,8 @@
   "plot.no_document": "No drawing is open",
   "save.exported": "Saved DXF to {path}",
   "save.exported_partial": "Saved DXF to {path} (partial: {converted} converted, {dropped} dropped)",
+  "save.exported_acis_sat": "Saved DXF to {path} (a 3DSOLID is present, so the whole file is written as AC1024 to keep its ACIS SAT text inline)",
+  "save.exported_acis_sat_partial": "Saved DXF to {path} (partial: {converted} converted, {dropped} dropped; a 3DSOLID is present, so the whole file is written as AC1024 to keep its ACIS SAT text inline)",
   "save.export_failed": "Save failed: {reason}",
   "save.refused_source_path": "Refused: the target is the opened source drawing",
   "save.cancelled": "Save cancelled; nothing was written",

@@ -525,3 +525,228 @@ fn subtract_commits_one_body_through_the_background_job() {
     assert_eq!(body.kind, cad_domain::BodyKind::Solid);
     assert!(body.exact_brep().is_some());
 }
+
+// ---- ADR-0036 phase C3a: MASSPROP through the real kernel -----------------
+//
+// MASSPROP is a read: the modeler runs on the command thread against the stored
+// exact B-rep. **Evidence boundary**: Linux x86-64 contract only; no GPU,
+// window, carrier, pixel or performance claim.
+
+/// Every stored `AcDb3dSolid` row id, in insertion order.
+fn solid_ids(controller: &HostController) -> Vec<EntityId> {
+    controller.application.workspace.documents[&controller.document_id]
+        .drawing
+        .entities()
+        .filter(|entity| entity.object.type_key == "AcDb3dSolid")
+        .map(|entity| entity.id)
+        .collect()
+}
+
+/// The first `massprop.object` row, or a panic naming what was reported.
+fn massprop_object(controller: &mut HostController) -> cad_domain::Diagnostic {
+    let document = controller.document_id;
+    let viewport = controller.viewport_id;
+    let outcome = controller
+        .application
+        .execute(
+            &mut controller.session,
+            command(
+                document,
+                viewport,
+                CommandId::MassProp,
+                CommandPayload::None,
+            ),
+        )
+        .expect("MASSPROP measures an exact solid body");
+    outcome
+        .diagnostics
+        .into_iter()
+        .find(|diagnostic| diagnostic.code == "massprop.object")
+        .unwrap_or_else(|| panic!("no massprop.object row"))
+}
+
+#[test]
+fn massprop_reports_a_real_box_volume_area_and_requested_accuracy() {
+    let mut controller = modeler_controller();
+    run_body(
+        &mut controller,
+        ExtendedCommandId::Box,
+        vec![p(0.0, 0.0, 0.0), p(1.0, 1.0, 1.0)],
+    );
+    let ids = solid_ids(&controller);
+    assert_eq!(ids.len(), 1, "one unit box");
+    select_bodies(&mut controller, &ids);
+
+    let row = massprop_object(&mut controller);
+    assert_eq!(row.object.map(|object| object.0), Some(ids[0].0));
+    let text = row.message;
+    assert!(text.contains("volume=1.000000"), "{text}");
+    assert!(text.contains("surface_area=6.000000"), "{text}");
+    assert!(
+        text.contains("centroid=(0.500000, 0.500000, 0.500000)"),
+        "{text}"
+    );
+    assert!(
+        text.contains("estimated at requested relative accuracy 1e-6, not a proved bound"),
+        "{text}"
+    );
+    assert!(!text.contains("analytic"), "{text}");
+    assert_eq!(solid_count(&controller), 1, "a read writes nothing");
+}
+
+#[test]
+fn massprop_refuses_a_real_curved_cylinder_as_not_liftable() {
+    let mut controller = modeler_controller();
+    let document = controller.document_id;
+    let viewport = controller.viewport_id;
+    run_body(
+        &mut controller,
+        ExtendedCommandId::Cylinder,
+        vec![p(0.0, 0.0, 0.0), p(2.0, 0.0, 0.0), p(0.0, 0.0, 5.0)],
+    );
+    let ids = solid_ids(&controller);
+    select_bodies(&mut controller, &ids);
+    let revision = controller.application.workspace.documents[&document]
+        .drawing
+        .revision();
+
+    let error = controller
+        .application
+        .execute(
+            &mut controller.session,
+            command(
+                document,
+                viewport,
+                CommandId::MassProp,
+                CommandPayload::None,
+            ),
+        )
+        .expect_err("P1 cannot lift a curved body");
+    let cad_domain::CadError::Unsupported(text) = error else {
+        panic!("a curved body is an Unsupported refusal, got {error:?}");
+    };
+    assert!(text.starts_with("massprop.body_not_liftable:"), "{text}");
+    assert!(text.contains("solid.lift_requires_planar"), "{text}");
+    assert_eq!(
+        controller.application.workspace.documents[&document]
+            .drawing
+            .revision(),
+        revision,
+        "a refusal writes nothing"
+    );
+    assert_eq!(solid_count(&controller), 1, "the cylinder stays");
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0036 P3a: a real modeler BOX survives a DXF save/open as an exact body.
+// ---------------------------------------------------------------------------
+
+/// Signed volume of a closed, outward-wound triangle mesh (divergence formula).
+fn mesh_volume(mesh: &cad_domain::Mesh) -> f64 {
+    let mut volume = 0.0;
+    for triangle in &mesh.triangles {
+        let a = mesh.vertices[triangle[0] as usize];
+        let b = mesh.vertices[triangle[1] as usize];
+        let c = mesh.vertices[triangle[2] as usize];
+        volume += a.x * (b.y * c.z - b.z * c.y) - a.y * (b.x * c.z - b.z * c.x)
+            + a.z * (b.x * c.y - b.y * c.x);
+    }
+    volume / 6.0
+}
+
+/// BOX → DXF bytes → re-import keeps a single `Body3d` whose exact B-rep is the
+/// planar box, written as ACIS SAT text in a `3DSOLID`.
+///
+/// **Evidence boundary**: this is a Linux x86-64 contract test proving our own
+/// writer/reader agreement. No third-party CAD application opens the file, and
+/// nothing here is GPU, pixel or vendor-compatibility evidence.
+#[test]
+fn a_modeler_box_survives_a_dxf_round_trip_as_an_exact_solid3d() {
+    use cad_import_acadrust::export::{
+        export, ExportFormat, ExportLimits, ExportRequest, ExportSpace,
+    };
+    use cad_import_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
+
+    let mut controller = modeler_controller();
+    let document = controller.document_id;
+    let body = run_body(
+        &mut controller,
+        ExtendedCommandId::Box,
+        vec![p(0.0, 0.0, 0.0), p(1.0, 1.0, 1.0)],
+    );
+    assert!(body.is_exact(), "the modeler BOX carries an exact B-rep");
+
+    let database = controller.application.workspace.documents[&document]
+        .drawing
+        .clone();
+    let (bytes, report) = export(&ExportRequest {
+        database: &database,
+        document_id: document,
+        space: ExportSpace::Model,
+        format: ExportFormat::DxfText,
+        limits: ExportLimits::default(),
+        units: None,
+    })
+    .expect("the drawing exports as DXF text");
+    let text = String::from_utf8_lossy(&bytes);
+    assert!(
+        text.contains("3DSOLID"),
+        "the exact body is written as a 3DSOLID record"
+    );
+    let messages: Vec<&str> = report
+        .entries
+        .iter()
+        .filter(|entry| entry.code == "export.converted.acis_solid")
+        .map(|entry| entry.message.as_str())
+        .collect();
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("no third-party CAD reader was used to verify")),
+        "the report states the evidence boundary: {messages:?}"
+    );
+    assert!(
+        messages.iter().all(|message| !message.contains("AutoCAD")
+            && !message.contains("verified by a CAD application")),
+        "the report never claims third-party verification: {messages:?}"
+    );
+
+    let imported = AcadrustImporter::new()
+        .import(
+            &ImportRequest {
+                document: DocumentId(2),
+                database: cad_domain::DatabaseId(2),
+                bytes: std::sync::Arc::from(bytes.into_boxed_slice()),
+                limits: ImportLimits::default(),
+                generation: 0,
+                xref: None,
+            },
+            &|| false,
+        )
+        .expect("the exported DXF re-imports")
+        .database;
+
+    let bodies: Vec<&Body3d> = imported
+        .entities()
+        .filter_map(|entity| match &entity.geometry {
+            SemanticGeometry::Body3d(body) => Some(body.as_ref()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(bodies.len(), 1, "one body row, not a mesh copy");
+    let imported_body = bodies[0];
+    assert_eq!(
+        imported_body.kind,
+        cad_domain::BodyKind::Solid,
+        "a 3DSOLID with an exact B-rep lifts back as a Solid"
+    );
+    assert!(
+        imported_body.is_exact(),
+        "the SAT payload is the exact planar B-rep, not a display cache"
+    );
+    let volume = mesh_volume(&imported_body.display.mesh);
+    assert!(
+        (volume - 1.0).abs() < 1e-3,
+        "a 1×1×1 BOX keeps volume 1 through the round trip, got {volume}"
+    );
+}

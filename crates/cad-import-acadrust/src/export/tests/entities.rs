@@ -709,7 +709,7 @@ fn tilted_circle_and_bulge_polyline_round_trip_through_ocs() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn a_tessellated_acis_solid_exports_as_a_polyface_mesh_not_a_3dsolid() {
+fn an_imported_planar_acis_solid_exports_as_a_rebuilt_3dsolid_payload() {
     use acadrust::io::dwg::dwg_writer::DwgWriter;
 
     let sat = include_str!("../../../../../fixtures/acis/cube.sat");
@@ -729,39 +729,58 @@ fn a_tessellated_acis_solid_exports_as_a_polyface_mesh_not_a_3dsolid() {
 
     let (bytes, report) = export_db(&db);
     let entities = read_entities(&bytes);
+    let solids: Vec<&acadrust::entities::Solid3D> = entities
+        .iter()
+        .filter_map(|entity| match entity {
+            EntityType::Solid3D(solid) => Some(solid),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        solids.len(),
+        1,
+        "a planar imported solid is rebuilt as an ACIS SAT text 3DSOLID"
+    );
     assert!(
-        entities
-            .iter()
-            .any(|entity| matches!(entity, EntityType::PolyfaceMesh(_))),
-        "a tessellated solid must export as a polyface mesh"
+        solids[0].acis_data.has_data(),
+        "the 3DSOLID carries a non-empty payload"
+    );
+    assert!(
+        solids[0].acis_data.parse().is_some(),
+        "the rebuilt payload parses back as SAT"
     );
     assert!(
         !entities
             .iter()
-            .any(|entity| matches!(entity, EntityType::Solid3D(_))),
-        "no ACIS source is retained, so a 3DSOLID cannot be round-tripped"
+            .any(|entity| matches!(entity, EntityType::PolyfaceMesh(_))),
+        "the exact record replaces the display cache, it is not written twice"
     );
     assert_eq!(
         report.counts.exact, 0,
-        "the body's exact B-Rep is not written, so nothing may be reported exact"
+        "the payload is rebuilt from the lifted B-Rep, so nothing is reported exact"
     );
 
-    let conversion = report
+    let messages: Vec<&str> = report
         .entries
         .iter()
-        .find(|entry| {
-            entry.code == "export.converted.mesh" && entry.message.contains("not as a 3DSOLID")
-        })
-        .expect("the body conversion must be recorded by name");
+        .filter(|entry| entry.code == "export.converted.acis_solid")
+        .map(|entry| entry.message.as_str())
+        .collect();
     assert!(
-        conversion.message.contains("original SAT/SAB source"),
-        "the conversion must state the lost 3DSOLID round trip: {}",
-        conversion.message
+        !messages.is_empty(),
+        "the 3DSOLID conversion is recorded by name"
     );
     assert!(
-        !conversion.message.contains("3DSOLID record was written"),
-        "the report must not claim exact geometry was written: {}",
-        conversion.message
+        messages
+            .iter()
+            .any(|message| message.contains("rebuilt from the retained exact B-Rep")),
+        "the conversion must state that the original byte stream is not retained: {messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("no third-party CAD reader was used to verify")),
+        "the conversion must not imply vendor verification: {messages:?}"
     );
 }
 

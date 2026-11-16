@@ -24,6 +24,11 @@ struct SaveOutcome {
     dropped: usize,
     completeness: Completeness,
     wrote_dwg: bool,
+    /// The export wrote a `3DSOLID`, so the whole DXF was written as AC1024 to
+    /// keep the ACIS payload as inline SAT text (`export.note.acis_sat_text_version`).
+    /// The status names that choice instead of leaving it in a report the SAVE
+    /// path never shows.
+    acis_sat_ac1024: bool,
 }
 
 /// Why a lossy save could not be performed, for a graded status.
@@ -210,18 +215,32 @@ impl HostCore {
                         }
                     }
                     // Clean success only when the export report is Complete; the
-                    // UI never re-derives the verdict from the counts.
+                    // UI never re-derives the verdict from the counts. A file that
+                    // carries a `3DSOLID` was written as AC1024 (see
+                    // `ExportReport.notes`), which the status says out loud.
                     Ok(outcome) if outcome.completeness == Completeness::Complete => {
-                        catalog("save.exported", &[("path", &target.display_name)])
+                        let key = if outcome.acis_sat_ac1024 {
+                            "save.exported_acis_sat"
+                        } else {
+                            "save.exported"
+                        };
+                        catalog(key, &[("path", &target.display_name)])
                     }
-                    Ok(outcome) => catalog(
-                        "save.exported_partial",
-                        &[
-                            ("path", &target.display_name),
-                            ("converted", &outcome.converted.to_string()),
-                            ("dropped", &outcome.dropped.to_string()),
-                        ],
-                    ),
+                    Ok(outcome) => {
+                        let key = if outcome.acis_sat_ac1024 {
+                            "save.exported_acis_sat_partial"
+                        } else {
+                            "save.exported_partial"
+                        };
+                        catalog(
+                            key,
+                            &[
+                                ("path", &target.display_name),
+                                ("converted", &outcome.converted.to_string()),
+                                ("dropped", &outcome.dropped.to_string()),
+                            ],
+                        )
+                    }
                     Err(SaveFailure::RefusedSourcePath) => catalog("save.refused_source_path", &[]),
                     Err(SaveFailure::Reason(reason)) => {
                         catalog("save.export_failed", &[("reason", &reason)])
@@ -296,6 +315,10 @@ impl HostCore {
             dropped: report.counts.dropped,
             completeness: report.completeness,
             wrote_dwg,
+            acis_sat_ac1024: report
+                .notes
+                .iter()
+                .any(|note| note.code == "export.note.acis_sat_text_version"),
         })
     }
 

@@ -51,6 +51,55 @@ fn a_synchronous_save_completes_inside_the_gesture() {
     );
 }
 
+/// SAVEAS of a drawing that carries a `3DSOLID` states that the file is written as
+/// AC1024, because the ACIS payload is inline SAT text. The choice is made in the
+/// exporter (`export.note.acis_sat_text_version`) and surfaces on the save status
+/// instead of staying buried in the report.
+#[test]
+fn saving_a_drawing_with_a_3dsolid_says_the_file_is_written_as_ac1024() {
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/dxf/synthetic-acis-cube.dxf");
+    let bytes = std::fs::read(&fixture).expect("committed ACIS DXF fixture");
+    let files = Rc::new(SyncSaveFiles::default());
+    let core = core_with_caps(files.clone(), capabilities(false));
+    core.controller
+        .borrow_mut()
+        .open_bytes(Arc::from(bytes), "synthetic-acis-cube.dxf")
+        .expect("the ACIS fixture opens");
+    core.request_save().unwrap();
+
+    let written = files.written.borrow();
+    assert_eq!(written.len(), 1, "exactly one file is written");
+    let text = String::from_utf8_lossy(&written[0].1);
+    assert!(
+        text.contains("3DSOLID"),
+        "the imported exact body is written back as a 3DSOLID"
+    );
+    assert!(
+        text.contains("AC1024"),
+        "the file is written as AC1024 so the payload stays inline SAT text"
+    );
+    assert!(
+        !text.contains("ACDSDATA"),
+        "no ACDSDATA SAB blob is written"
+    );
+    drop(written);
+
+    let status = core.last_status().expect("the save grades a status");
+    let (key, args) = catalog(&status);
+    // The fixture's drawing is a saved DXF with its own conversions, so the
+    // status may be the partial variant; both variants must name the AC1024
+    // choice instead of the plain "Saved DXF" line.
+    assert_eq!(
+        key, "save.exported_acis_sat_partial",
+        "the save status names the AC1024 choice"
+    );
+    assert!(
+        args.get("path").is_some_and(|path| path.ends_with(".dxf")),
+        "the status still names the written path: {args:?}"
+    );
+}
+
 #[test]
 fn a_synchronous_plot_writes_real_vector_content() {
     // A committed fixture with one paper-space layout, so the vector plot has

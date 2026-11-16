@@ -194,3 +194,47 @@ alpha)` 把 `TessellationResult` 转为显示图元：
 * 默认内核仍为 `Unsupported`；本文件不把 `BrepTessellator` 的可达子集等同于
   F15 整体完成。
 * 未列于 §4 的曲面/曲线/退化情形一律按 §5 缺面上报。
+
+## 11. 写回（P3a 已实现子集）
+
+本节描述**导出**方向：`cad-import-acadrust` 的 `export::acis` 用中性 `BrepData`
+构建 acadrust `SatDocument`，再由 `DxfWriter` 写成 DXF `3DSOLID` 的内联 ACIS SAT
+文本。它是本仓库唯一的 ACIS 写出路径；SAB 与 DWG `3DSOLID` **不写**。
+
+**可达子集（闭集）**
+
+* 恰好**一个** shell，且该 shell 有面（多壳 = 空腔/多 lump，拒绝）；
+* 每个面都由 `BrepSurface::Plane` 支撑（曲面/未知面拒绝）；
+* 环的每一段都是 `BrepCurve::Line`（圆/椭圆/样条段拒绝）；
+* 每条几何边恰好被**两个** coedge 使用（开放壳、非流形拒绝），且两个面沿该边
+  走向相反、同一环内不重复使用同一条边；
+* 每个面的**外环**（绝对面积最大者）绕向须与面朝向一致（`forward` 面绕平面法向
+  CCW、`reversed` 面 CW），面的净带符号面积在朝向侧为正 —— 单个面被写反即拒绝；
+  内环（洞）按构造反向绕；
+* 放置只能是**真相似变换**（正交列 + 正行列式：允许旋转/均匀缩放/平移，拒绝
+  剪切与镜像），并**烘焙进点与曲面框架**，不写 `transform` 记录；
+* 所有几何有限；焊缝容差 = 体对角线 × 1e-9（用于把同一几何点/边只写一次）。
+
+**稳定拒绝码**（导出报告逐条记录，同时退回显示缓存）
+
+| 码 | 含义 |
+|---|---|
+| `acis.curved_face_not_written` | 非平面面（圆柱/圆锥/球/环面/未知） |
+| `acis.non_line_curve_not_written` | 非直线边界段 |
+| `acis.no_shell_not_written` | 无壳 / 空壳 |
+| `acis.multi_shell_not_written` | 多壳（空腔、多 lump） |
+| `acis.placement_not_written` | 剪切/非均匀缩放/镜像/非有限放置 |
+| `acis.invalid_topology_not_written` | 开放/非流形边、面朝向反转、退化环、面框架非正交 |
+| `acis.dwg_3dsolid_unsupported` | DWG 格式（任一体分支）不写 3DSOLID |
+
+**DXF 版本（文档级选择）**：`3DSOLID` 的 ACIS 载荷只在 AC1027 之前内联为 SAT
+文本；AC1027+ 由上游 writer 改写成 `ACDSDATA` 里的 SAB。因此**只要文件含任一
+`3DSOLID`**（模型空间或已写出的块定义内），整个 DXF 按 **AC1024 (R2010)** 写出，
+并记 note `export.note.acis_sat_text_version`（SAVEAS 状态行同义）。这条约束是
+文档级的，未来任何需要 AC1027+ 的实体特性都必须重新审视 SAT 文本路径。
+
+**证据边界**：往返只经「本仓库构建 → acadrust `SatWriter` → acadrust
+`SatDocument::parse` → 本仓库 `sat_to_brep`」，覆盖盒/楔/棱锥/带方孔面的拓扑计数、
+曲面参数精确相等、几何 ≤ 1e-9·对角线、`BrepTessellator` 体积 ≤ 0.1%；真实
+solidcore BOX 经 DXF 存盘→再导入得到精确体、体积 1±1e-3。**没有第三方 CAD 读取器
+验证过这些字节**，也没有 vendor/像素/非 Linux 证据。

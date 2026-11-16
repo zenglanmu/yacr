@@ -157,6 +157,33 @@ auto/high/low 选择与回退）、`cad-cli-tools` `scene_budget_fails_explicitl
 旧 UI crate（已删除）不在主机运行测试（Linux 宿主缺 fontconfig/freetype 开发头与
 pkg-config，本环境无 sudo）；其外壳编译由 Android target 检查覆盖。
 
+### 2026-11-17 ADR-0036 C3 契约测试（Linux，契约/单元证据）
+
+> 只记录本轮新增/改动的契约测试名；证据边界与 NOT RUN 项见 `docs/handoff.md` 同日条目。
+> **没有** GPU/像素/性能或非 Linux 载体结论。
+
+- C3a `MASSPROP`（`cad-app/src/tests/drawing/massprop_solid.rs`）：
+  `massprop_measures_an_exact_unit_box_body_through_the_modeler`、
+  `a_carrier_without_a_modeler_refuses_a_body_by_name`、
+  `an_unsupported_lift_reports_the_modeler_reason`、
+  `a_kernel_failure_reports_the_first_diagnostic`、
+  `a_body_without_exact_geometry_refuses_and_never_measures_the_display_mesh`、
+  `two_selected_bodies_report_two_object_rows`；真实内核在 `cad-cli-tools`
+  `massprop_reports_a_real_box_volume_area_and_requested_accuracy`、
+  `massprop_refuses_a_real_curved_cylinder_as_not_liftable`。
+- C3b `face_sources`：`cad-db` `body_face_sources_must_be_parallel_to_its_triangles`；
+  `cad-spatial` `body_face_hit_resolves_the_stable_sub_element`、
+  `body_face_without_sources_is_unresolved_with_a_reason`、
+  `body_edge_hits_have_no_sub_element_and_no_reason`；`cad-kernel-adapter`
+  `brep_cube_facets_carry_stable_face_sources`、`brep_cylinder_facets_carry_the_face_id`；
+  `cad-import-acadrust` `imported_acis_body_carries_brep_face_sources_after_tessellation`。
+- C3c `VSCURRENT`：`cad-app` `vscurrent_defaults_to_shaded_and_maps_the_accepted_spellings`、
+  `vscurrent_sets_the_session_token_and_refuses_other_styles_by_name`；`cad-host`
+  `vscurrent_maps_to_the_body_wireframe_display_flag`；`cad-representation`
+  `body_wireframe_emits_the_stored_edges_as_segments_only`、
+  `body_wireframe_without_stored_edges_derives_unique_triangle_segments`；`cad-scene`
+  `body_wireframe_edges_only_fragment_is_a_line_batch_with_no_triangles`。
+
 ## 已执行的构建
 
 - `cargo check --target aarch64-linux-android -p app-android`：通过。

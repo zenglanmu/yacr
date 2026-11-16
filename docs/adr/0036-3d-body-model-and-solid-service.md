@@ -1,6 +1,6 @@
 # ADR 0036：3D 实体模型（wireframe / surface / solid）与 solidcore 无状态建模服务
 
-- 状态：**Accepted（2026-11-16）**，**P1 部分实现**（2026-11-17，B2 + C1 + C2 增补）：
+- 状态：**Accepted（2026-11-16）**，**P1 已实现到 C3**（2026-11-17，B2 + C1 + C2 + C3a/C3b/C3c 增补）：
   - P0 已落地；P0.1（存储边线直送 `RenderBatch.edges`）已完成（Linux 契约/单元证据）；
   - P1/B1：`SolidModeler` 无内核接缝已落地（`cad-kernel-adapter`）；
   - P1/B2（见 §7）：`cad-kernel-solidcore` 让**平面体**路径可用——基本体
@@ -32,17 +32,45 @@
     `update_entity_display_state`，redo 也恢复）；无覆盖则不写。布尔运行期间 C1 的同步图元创建
     按 `solid.boolean_busy: a boolean is running; wait for it to settle before creating another
     solid` 拒绝（共用内核互斥锁，不能阻塞命令线程），拒绝在模型器调用与事务之前。曲面操作数由
-    模型器给出 `Unsupported`（`solid.lift_requires_planar`），P2 前显式拒绝；
-    `MASSPROP`/`face_sources`/`VSCURRENT` 仍是 C3。
+    模型器给出 `Unsupported`（`solid.lift_requires_planar`），P2 前显式拒绝。
+  - **P1/C3（2026-11-17，C3a + C3b + C3c）**：
+    - **C3a `MASSPROP`**：精确 `Body3d{Solid, Exact}` 经**注入的**模型器**同步**测量
+      （`SolidOperation::MassProperties`，density 1.0、请求相对精度 1e-6；报告明写“估计、
+      不是已证明的界”，绝不标 `Analytic`），**显示网格永不积分**；稳定拒绝
+      `massprop.body_modeler_unavailable` / `body_not_liftable` / `body_kernel_failed` /
+      `body_not_exact` / `body_not_solid` / `mixed_selection` / `kernel_busy` /
+      `body_not_positive_volume`；一次 `massprop.object` 行/体，
+      无库写/无 revision/无历史；
+    - **C3b `face_sources`**：`BrepTessellator` 为每个显示三角形写 `brep:face:<shell>/<face>`
+      （`topology_revision = Revision(0)` 占位），body 拾取与子面高亮复用 mesh 路径；
+      `cad-db` 只校验空或等长；
+    - **C3c `VSCURRENT`**：会话级 3D body 视觉样式（见 D6），不写 `cad-db`。
   - **曲面 body**（含 cylinder/cone/sphere/torus 面）的布尔与质量属性**显式拒绝**
     （`solid.lift_requires_planar`），曲面 lift 是 P2；
-  - **仍未实现**：AutoCAD 的交互式尺寸提示；`MASSPROP` 接线、`face_sources`、`VSCURRENT`
-    （C3）；曲面布尔（P2）、P2、P3。`UNION`/`SUBTRACT`/`INTERSECT` 已在 C2 接成后台任务（见下）；
+  - **P3a（2026-11-17，已实现一个受限子集）**：DXF 导出把**单壳、全平面、直线边界、真相似
+    放置**的精确 `Body3d{Solid, Exact}` 写成真 `3DSOLID`，载荷是本仓库用 acadrust SAT 构建器
+    生成的 **ACIS SAT 文本**（`crates/cad-import-acadrust/src/export/acis.rs`）。其余 body
+    （曲面面、非直线边界、多壳/空腔、剪切/镜像放置、开放/非流形/反转拓扑）**按名拒绝**并退回
+    既有 POLYFACE 显示缓存：`acis.curved_face_not_written`、`acis.non_line_curve_not_written`、
+    `acis.no_shell_not_written`、`acis.multi_shell_not_written`、`acis.placement_not_written`、
+    `acis.invalid_topology_not_written`。**DWG 不写 `3DSOLID`**（任一体分支都记
+    `acis.dwg_3dsolid_unsupported`），**SAB 不写**。因为 `3DSOLID` 的 ACIS 载荷只在 AC1027
+    之前内联为 SAT 文本，**只要文件含任一 3DSOLID（含块定义内）整个 DXF 按 AC1024 写出**并记
+    `export.note.acis_sat_text_version`（SAVEAS 状态行同义）——这是**文档级**约束，未来任何需要
+    AC1027+ 的实体特性必须重审该路径。证据：本仓库自写→acadrust 解析→自读往返（盒/楔/棱锥/
+    带孔面；拓扑计数、面参数精确、几何 ≤1e-9·对角线、`BrepTessellator` 体积 ≤0.1%）+
+    `solid_command` 的真实 solidcore BOX 存盘/再导入（精确体、体积 1±1e-3）；**无第三方 CAD
+    读取器、无 SAB、无 vendor/像素/非 Linux 证据**。
+  - **仍未实现**：AutoCAD 的交互式尺寸提示；曲面布尔、曲面 lift/质量属性与 P2 全部内容
+    （圆角/倒角/抽壳、NURBS、`SURFACE` 家族）、**P3b（SAB 写出、DWG `3DSOLID`、曲面/NURBS
+    面与一般裁剪 B-rep 的 SAT 文本）**。`UNION`/`SUBTRACT`/`INTERSECT` 已是 C2 后台任务（见下）；
     `3DSOLID`/`BODY` 是**实体类型键**（模型器在 `Registration::entity_types` 声明），不新增同名命令。
+  - **阶段总结**：**P0/P0.1/P1（内核 + C1/C2/C3）已实现**；**P3a（平面子集 SAT 文本）已实现**；
+    **P2 未实现**；**P3b（SAB/DWG/曲面）明确拒绝**。
   验证边界：只有 Linux x86-64 上的契约/单元证据——测试进程里跑的是**真实**固定 revision 的
   `solidcore` 内核（无 mock、不引用上游 golden）；Windows/macOS/Android/Web 的 solidcore
   运行状态与模型器注入、任何 GPU/像素/性能结论一律 **NOT VERIFIED**。
-- 日期：2026-11-16（P1/B2 增补 2026-11-17，P1/C1 增补 2026-11-17，P1/C2 增补 2026-11-17）。
+- 日期：2026-11-16（P1/B2 2026-11-17，P1/C1 2026-11-17，P1/C2 2026-11-17，P1/C3 2026-11-17）。
 - 相关：[ADR-0033](0033-multi-format-import.md)（多格式导入；D2/D9 的 BRep 边界）、
   [ADR-0031](0031-acadrust-vendored-patch-policy.md)（依赖补丁策略）、
   `docs/kernel-acis.md`（现有 ACIS 契约）、`docs/compatibility.md`（逐命令能力表）、
@@ -174,10 +202,17 @@ pub struct Body3d { pub kind: BodyKind, pub exact: BodyExact, pub display: BodyD
 
 ### D6 视觉样式属于会话，不属于数据库
 
-- `VSCURRENT` 与 `FILL`/`QTEXT`/`VIEWRES` 同层（`cad-representation` 的显示模式 +
-  `cad-ui-core` 会话校验），不写入 `cad-db`、不推进 revision。
-- `RenderTopology::MeshEdges`（今天从未被场景产出）作为 2D wireframe 的落点。
-  P0 不实现视觉样式，只保留该方向。
+- `VSCURRENT` 与 `FILL`/`QTEXT`/`VIEWRES` 同层（`cad-app` 会话状态 + `cad-host` 映射），
+  不写入 `cad-db`、不推进 revision、不入历史。
+- **落地（C3c，2026-11-17）**：3D body 的 2D wireframe 落成
+  `DisplayPrimitive::LineSegments` → `RenderTopology::Lines`（有存储 body 边线就用边线，否则用
+  去重的三角形边段）；`RenderTopology::MeshEdges` **仍未被该路径使用**（渲染器支持该拓扑，
+  但 body wireframe 不走它）。
+- **默认 SHADED**：本构建**刻意偏离** AutoCAD 的 2D-wireframe 初始值——`Shaded` 正是 token
+  之前的填充网格显示，改成 2D wireframe 会改变所有既有 body 的显示。接受
+  `WIREFRAME`/`2DWIREFRAME`/`2D` 与 `SHADED`/`SHADEDWITHEDGES`，其余样式
+  `vscurrent.style_not_implemented`；会话级、**仅 body**，保存与矢量出图不接收该标志。
+- 证据：`cad-app`/`cad-host`/`cad-representation`/`cad-scene` 契约测试；**无 GPU/像素证据**。
 
 ### D7 分阶段（诚实的能力增长）
 
@@ -192,7 +227,10 @@ pub struct Body3d { pub kind: BodyKind, pub exact: BodyExact, pub display: BodyD
 - **P2**：圆角/倒角/抽壳；`BrepSurface::Nurbs`（有理 B 样条 + 权重）与 NURBS 显示；
   `SURFACE` 家族（PLANESURF/EXTRUDEDSURF/LOFTEDSURF/REVOLVEDSURF/SWEPTSURF）。
   曲线/曲面评估优先走 solidcore 服务，避免在域内再写第二套评估器。
-- **P3**：ACIS SAT/SAB 写出（今天完全没有），才谈得上 `3DSOLID` 往返。
+- **P3**：ACIS 写出。**P3a（已实现）**：平面子集的 SAT 文本（DXF `3DSOLID`），见上方状态块；
+  **P3b（未实现，显式拒绝）**：SAB 二进制（`acis.sab_write_unsupported`）、DWG `3DSOLID`
+  （`acis.dwg_3dsolid_unsupported`）、曲面/NURBS/一般裁剪 B-rep 的 SAT 文本
+  （`acis.curved_face_not_written` / `acis.non_line_curve_not_written`）。
 
 ## 4. 后果与风险
 
@@ -268,4 +306,6 @@ pub struct Body3d { pub kind: BodyKind, pub exact: BodyExact, pub display: BodyD
    绝不把两块的体积相加当结果。
 
 **仍未做**（P2/P3）：NURBS 曲面/曲线与 pcurve 的中性表达、曲面 body 的布尔/质量属性、
-圆角/倒角/抽壳、`SURFACE` 家族、ACIS SAT/SAB 写出、任何命令接线。
+圆角/倒角/抽壳、`SURFACE` 家族、ACIS SAB 写出、DWG `3DSOLID`、曲面/NURBS 面的 SAT 文本
+（P3a 只覆盖单壳全平面直线体，见上方状态块）。
+（命令接线 C1/C2/C3a/C3b/C3c 已落地，见上方状态块与 D6。）

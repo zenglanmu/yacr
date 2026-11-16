@@ -53,7 +53,7 @@ N 点 + 回车、**一条事务/一步撤销**提交 N 个标注；基线按 `DI
 | EXTENDED(RTEXT/ARCALIGNEDTEXT/GEOPOSITIONMARKER/SECTIONOBJECT/POINTCLOUD) | 实现(基础字段) | 部分 | 基础表示(Text/圆/折线/范围盒) | 部分 | 不支持 |
 | **AEC Arch（AEC_WALL/DOOR/WINDOW/STAIR/SPACE/…，2026-11-03）** | **实现（acadrust 0.6.8 已类型化）**：`ExtendedEntityData::Arch` 携带 `ArchKind`、类名、**proxy-graphics 预览轮廓（世界坐标）**与原始 DWG/DXF 体 | **部分**：只有轮廓是真实的；开洞、3D 体量、类参数、样式/锚点对象未建模 | 每个 ≥2 点轮廓画成**开放折线**（记录无闭合标志，不臆造 `closed`）；无轮廓 ⇒ `Opaque` + 具名 `Partial` | 按折线 | 不支持 |
 | CAMERA / 动态块参数与夹点 / OLEFRAME / LAYOUTPRINTCONFIG / FORMAT / LEGACY / REGISTEREDCLASS | 实现(仅 common 或无语义) | 显式无显示 | 不绘制(`Opaque`/`Unverified`) | — | — |
-| 3DSOLID / BODY / REGION / SURFACE (ACIS) | 实现(acadrust 解析 SAT/SAB；导入期离散为**显示网格**；解析成功时**保留中性 B-Rep**） | `SemanticGeometry::Body3d`：`exact`（中性 B-Rep，仅当 lift 成功）+ `display`（网格 + 边线 + 弦高） | **会绘制**：导入期经 `cad-kernel-adapter` 离散，容差 = 包围盒对角线的 **0.1 %**；精确 B-Rep 保留时平面体可 `Complete`，曲面体 `Partial`（声明离散近似）；超出子集/原始 SAT/SAB 被拒 ⇒ 仍 `Opaque` + 内核具名码 | 经显示网格 | 不支持 |
+| 3DSOLID / BODY / REGION / SURFACE (ACIS) | 实现(acadrust 解析 SAT/SAB；导入期离散为**显示网格**；解析成功时**保留中性 B-Rep**；**导出（P3a，2026-11-17）**：单壳全平面直线精确体的 B-Rep 写回真 `3DSOLID` 的 ACIS SAT 文本，其余退回 POLYFACE 并记 `acis.*`） | `SemanticGeometry::Body3d`：`exact`（中性 B-Rep，仅当 lift 成功）+ `display`（网格 + 边线 + 弦高） | **会绘制**：导入期经 `cad-kernel-adapter` 离散，容差 = 包围盒对角线的 **0.1 %**；精确 B-Rep 保留时平面体可 `Complete`，曲面体 `Partial`（声明离散近似）；超出子集/原始 SAT/SAB 被拒 ⇒ 仍 `Opaque` + 内核具名码 | 经显示网格 | 不支持 |
 | TEXT/MTEXT 格式 | 实现(格式 run 解析) | 部分(堆叠分数/颜色/装饰/行对齐为显式 Partial) | 按 run 整形/换行 | — | — |
 | 实体颜色/线宽 | 实现(ByObject/ByLayer/ByBlock，ACI/RGB) | 实现(颜色)；线宽仅携带 | 颜色进入 shader；线宽**显式不绘制** | — | — |
 | LINETYPE 虚线 | 实现(名称/表/线型比例) | 实现(ByObject/ByLayer/ByBlock) | 按弧长细分 dash/gap；复杂线型仅 dash、显式 Partial | — | — |
@@ -171,13 +171,37 @@ face-with-hole 1/8、instance-scaled 3/36；theater-2017 1246 实体/96,333 三�
 - **边线不再丢弃**：`TessellationMesh.edges` 进入 `BodyDisplay.edges`。有显示网格时表示层把它作为
   `DisplayPrimitive::MeshWithStoredEdges` 直送 `RenderBatch.edges`（P0.1 已完成，表示/场景契约与
   单元证据；渲染器的 GPU/像素结果 **NOT VERIFIED**）。
+- **面身份（C3b，2026-11-17）**：`BrepTessellator` 为每个显示三角形写 `Mesh.face_sources`，键为
+  `brep:face:<shell>/<face>`，`topology_revision` 是占位 `Revision(0)`（**不是**拓扑版本；
+  拓扑改变后不得沿用）。body 的**整实体拾取**与**子面高亮**复用 mesh 路径；`face_sources`
+  缺失 / 列表短于三角形 / 该三角形为 `None` 时如实报 `mesh-face-sources-absent` /
+  `mesh-face-source-missing` / `mesh-face-source-index-out-of-range`；body 拾取分支**不再**
+  产出 `body-face-identity-unmodelled`（该键只为旧显示缓存保留）。`cad-db` 只校验列表为
+  **空或与三角形等长**，不校验键内容。
 - **完整性**：精确 B-Rep + 解析离散 ⇒ `Complete`；曲面/近似离散 ⇒ `Partial` 并带具名近似理由；
   只离散不保留精确几何 ⇒ `Partial`。**只离散的实体不再报 `Verified/Verified`**。
 - **拒绝保持原状**：超出子集、或原始 SAT/SAB 被内核拒绝 ⇒ 仍是 `Opaque` + 内核具名码
   （如 `kernel.no_acis_kernel`），**不把失败改成空成功**。
-- **导出**：body 的显示网格写 **POLYFACE**（仅边线时写 `LINE`/`POLYLINE3D`），并记录具名转换
-  （`export.converted.mesh` / `export.converted.wire_body`，说明"精确几何未写出"）；**不伪造**
-  `3DSOLID`/`BODY`/`REGION` 记录。
+- **导出（P3a，2026-11-17：精确平面体写回 `3DSOLID`）**：`Body3d{Solid, Exact}` 且 B-Rep 属于
+  **单壳 / 全平面 / 直线边界 / 相似变换（无剪切、无镜像）** 子集时，导出为真 DXF `3DSOLID`，载荷是
+  本仓库用 acadrust SAT 构建器生成的 **ACIS SAT 文本**（`crates/cad-import-acadrust/src/export/acis.rs`：
+  body → lump → shell → face → loop → coedge → edge → vertex → point，几何边跨两面焊接、每条边恰好两个
+  coedge，平面法向/`u_dir` 归一化并校验正交、每个面的外环 Newell 方向须与面朝向一致）。报告记
+  `export.converted.acis_solid`，含「无第三方 CAD 读取器验证」「载荷由保留的精确 B-Rep 重建、非原始
+  SAT/SAB 字节」两条明示，以及被丢弃的显示缓存（三角形/边线）说明。
+  - **拒绝即退回显示缓存**，每条一个稳定码：`acis.curved_face_not_written`（曲面/未知面）、
+    `acis.non_line_curve_not_written`（非直线边界）、`acis.no_shell_not_written`、`acis.multi_shell_not_written`
+    （多壳/空腔）、`acis.placement_not_written`（剪切/镜像/非均匀）、`acis.invalid_topology_not_written`
+    （开放/非流形边、面朝向反转、退化环）。退回时仍写 POLYFACE（仅边线时 `LINE`/`POLYLINE3D`）。
+  - **DWG 不写 `3DSOLID`**：任一体分支（网格/仅边线/无显示几何）都保留显示缓存并记
+    `acis.dwg_3dsolid_unsupported`；**不写 SAB**；`BODY`/`REGION`/`SURFACE` 也仍不写回。
+  - **版本是文档级选择**：只要文件里有任一 `3DSOLID`（模型空间**或**已写出的块定义内），整个 DXF 按
+    **AC1024** 写出（`$ACADVER`），使载荷保持内联 SAT 文本而不是 AC1027+ 的 `ACDSDATA` SAB 块；报告
+    note `export.note.acis_sat_text_version`，SAVEAS 状态行也会明说（`save.exported_acis_sat[_partial]`）。
+  - **证据**：仅本仓库自己的写入→acadrust 解析→本仓库再 lift 的往返（盒/楔/棱锥/带方孔面拓扑计数、
+    面参数精确、几何 ≤1e-9·对角线、`BrepTessellator` 体积 ≤0.1%）；`cad-cli-tools` 用**真实 solidcore**
+    建 BOX → 导出 DXF → 再导入得到**精确体、体积 1±1e-3**。**没有第三方 CAD 打开过这些字节**，
+    无 vendor/像素/非 Linux 证据。
 - **证据**：cube 夹具 **12 三角形**、顶点界 `[-1,1]³`、闭合体积 **8.0**（解析 8.0，误差 < 1e-9）。
 - **仍未做**：NURBS/样条曲面、一般裁剪 B-rep、完整 ACIS 内核；SAT/SAB **源字节仍不保留**
   （只保留 lift 后的中性 B-Rep）。**2026-11-17 更新**：`cad-kernel-solidcore` 模型器（P1/B2）
@@ -185,13 +209,20 @@ face-with-hole 1/8、instance-scaled 3/36；theater-2017 1246 实体/96,333 三�
   质量属性显式拒绝（`solid.lift_requires_planar`）；**命令层已接线七种图元的创建（C1）与三个
   布尔（C2，真实后台任务）**，所以 `BOX` 等能建体、`UNION`/`SUBTRACT`/`INTERSECT` 能对平面体
   合并/相减/取交（任务 settle 后一条事务/一步撤销；曲面操作数按 `solid.lift_requires_planar`
-  拒绝），`MASSPROP` 对 body 仍显式 `massprop.body_requires_kernel`（C3），
-  圆角/倒角/抽壳仍无实现。模型器的能力是 **family 级**：`booleans`/`mass_properties` 为 true
+  拒绝），`MASSPROP` 已对**精确 `Body3d{Solid, Exact}`** 接线（C3a，2026-11-17）：经**注入的**
+  模型器**同步**测量（density 1.0、请求相对精度 1e-6，报告明写“估计、不是已证明的界”），
+  **显示网格永不参与**积分；稳定拒绝为 `massprop.body_modeler_unavailable`（载体无模型器）、
+  `body_not_liftable`（曲面 P1 body → 模型器的 `solid.lift_requires_planar`）、
+  `body_kernel_failed`、`body_not_exact`（无精确 B-Rep）、`body_not_solid`、
+  `mixed_selection`（body 与平面区域混选）、`kernel_busy`（布尔 worker 占用内核时快速拒绝）、
+  `body_not_positive_volume`（反射/内外翻转体）。body 面的子元素引用解析到其所属 body（同一
+  body 的重复引用只计一次）；非 body 几何的子元素仍 `not_addressable`。证据仅 Linux 契约/单元（真实内核路径见
+  `cad-cli-tools` 的 BOX/CYLINDER），圆角/倒角/抽壳仍无实现。模型器的能力是 **family 级**：`booleans`/`mass_properties` 为 true
   不等于每个操作数都能算——曲面 body、开放 sheet、反向面/重复面等结构不一致的操作数逐次返回
   `Unsupported`（`solid.lift_unsupported`）；**空腔（void region）的结果在布尔本身就被拒绝**，
   而**多壳结果**（例如不相交的两个体 `UNION`）会作为 body 成功返回、在**下一次 lift**
-  （质量属性/再次布尔）才被拒绝，所以质量属性要求**恰好一个闭合壳**。这些拒绝不是命令层行为，
-  命令层接线（Phase C）必须逐次处理。
+  （质量属性/再次布尔）才被拒绝，所以质量属性要求**恰好一个闭合壳**。这些拒绝是**模型器**行为，
+  命令层必须逐次处理（C3a 已把 `Unsupported` 映射为 `massprop.body_not_liftable`）。
 
 ### DIMENSION 族（ADR-0017 P5a，逐行，非脚注）
 
@@ -314,7 +345,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | **CTB/STB 绘图样式编解码** | 新增 `acadrust::plot_style::PlotStyleTable`（`from_bytes`/`to_bytes`/`resolve_color`/`resolve_lineweight`），**文件级**编解码；DXF/DWG 文档内 `PlotSettings` 仍只有样式表**名**与标志，无逐 ACI 解析值 | **未消费**：yacr 打印用显示解析色，不读 `.ctb`/`.stb` ⇒ 上方 plot-style 行仍为显式 Unsupported（颜色/线宽/alpha 不应用） |
 | **图层透明度 XDATA 解码** | 新增 `Transparency::from_layer_alpha_value`：图层 `AcCmTransparency` 值 `0` = **不透明**（0.6.3 会解成 `ByLayer`），未知 method 字节不再被默认成已知模式（DXF 与 DWG 读取器均改用）；实体侧 `from_alpha_value` 未变 | 导入的 `layer_opacity` 直接消费该值 ⇒ 对带显式 `AcCmTransparency` XDATA 的图层，**透明度解析结果会变**（更符合"图层 0 = 不透明"）。**无专门夹具验证**，不声称已回归 |
 | **审计与恢复** | `CadDocument::audit()`、`DxfReader::recover()`、`DwgReader::recover()`（保留有界辅助记录、孤立几何不入模型空间） | **未消费**：导入失败仍走既有显式错误/诊断，不把恢复结果当成功 |
-| **R12 原生写出 / 动态块默认值 / ACIS 颜色** | `DxfWriter::with_version(AC1009)` 真 R12；动态块默认值与实例属性；ACIS 面/边颜色 | **未消费**：导出固定默认版本（AC1024）；动态块仍按既有代理/部分支持记录；ACIS 颜色未接入 |
+| **R12 原生写出 / 动态块默认值 / ACIS 颜色** | `DxfWriter::with_version(AC1009)` 真 R12；动态块默认值与实例属性；ACIS 面/边颜色 | **未消费**：导出默认 AC1032，含 `3DSOLID` 时按 AC1024 写出内联 SAT 文本（P3a）；动态块仍按既有代理/部分支持记录；ACIS 颜色未接入 |
 
 ## Linux 宿主（2026-10-03 新增，主验收入口）
 
@@ -703,7 +734,8 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 > **重要**：`TRACE` 在 AutoCAD 2026 是**协作追踪**（打开/管理 trace），本构建的同名命令是
 > **旧式宽线带**（闭合 4 顶点 LWPOLYLINE）。二者语义不同，因此该条按“同名不同义”处理，
 > **不计入覆盖**（与 `MEASURE` 同一口径）；其余 9 条按下列边界计入。
-> `VIEWRES`/`VSCURRENT` 只存会话 token，渲染器不消费，像素/GPU 效果 NOT VERIFIED。
+> `VIEWRES` 的 token 已被显示构建消费；`VSCURRENT`（2026-11-17 起）只切 **3D body** 的视觉样式
+> （`RepresentationContext::body_wireframe`），其余几何不变，像素/GPU 效果 NOT VERIFIED。
 
 | 命令 | 状态 | 结果 | 显式未实现 / 有意偏离 |
 |---|---|---|---|
@@ -713,7 +745,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `MSTRETCH` | 完整实现 | `MSTRETCH <base_x> <base_y> <delta_x> <delta_y> <x1> <y1> <x2> <y2> […]` 与载荷一一对应（窗口逻辑像素、base/delta 世界点）；一个包络计划、一条事务/一步撤销 | 奇数 token `mstretch.argument_odd`（绝不截断半窗）；退化窗口/零位移在事务前拒绝 |
 | `-PAN` / `PAN` | 部分实现 | `-PAN` 是 `PAN` 别名；`dx dy` 或两点，走既有相机路径 | 只改视图：不写库、不 bump 修订、不入历史 |
 | `VIEWRES` | 完整实现 | 整数 `1..=1000`（越界 `viewres.out_of_range`）成为弦分段上限：约束样条、折线 bulge 弧、非 SDF 圆锥的弦回退与宽折线带，`1..=2` 夹到 3 段下限；无库写/无撤销 | 声明：圆/弧/椭圆是解析 SDF，无弦可限，本变量不改变其平滑度；这是显示容差上限，不是平滑度设置；像素效果 NOT VERIFIED |
-| `VSCURRENT` | 部分实现 | 仅 `WIREFRAME` 存会话 token；其余样式 `vscurrent.style_not_implemented` | 无渲染器切换（当前渲染器本就是 2D wireframe）；NOT pixel-verified |
+| `VSCURRENT` | 部分实现 | 会话级 **3D body 视觉样式**（**默认 SHADED**，与 AutoCAD 的 2D-wireframe 初始值**有意偏离**，以保留 token 之前的填充网格显示）；接受 `WIREFRAME`/`2DWIREFRAME`/`2D` → wireframe（有存储 body 边线就用它，否则用去重的三角形边段），`SHADED`/`SHADEDWITHEDGES` → 填充；其余样式 `vscurrent.style_not_implemented` | **仅 body**：只切 `RepresentationContext::body_wireframe`（唯一消费者是 body 片段构建器），其它几何不变；无库写/无 revision/无历史；保存与矢量出图**不接收** `body_wireframe`（出图仍为阴影/填充）；契约证据 only，像素/GPU NOT VERIFIED |
 | `REGEN3` | 部分实现 | `REGEN` 的别名（同一 `CommandId`/路径） | 不修复 3D 实体/曲面显示异常（无该能力） |
 | `LINETYPE` / `-LINETYPE` | 完整实现 | `LIST`、`SET <name>`、`CREATE <name> <dash>,<gap>,… [DESCRIPTION <text>]`、`DELETE <name>`；两条写命令各一条事务/一步撤销，Viewer 拒绝写入而 `LIST` 仍合法；名称语法/重复/保留名/图案元素（组 49，正划负空、有限、至少一段可见划）与在用引用逐条具名拒绝；`-LINETYPE` 经别名表归一化到同选择子/同解析器/同处理器；导出写全部行、导入可重建（创建行有往返测试） | `DESCRIPTION` 带文本按 `linetype.description_not_modelled` 拒绝（行无描述列，需域字段+导入导出扩展）；`LOAD`（`.lin` 文件）仍 NOT IMPLEMENTED（无文件装载通道，独立命令）；id 分配为 `max(id)+1`（无分配器字段，补丁携带整行故撤销/重做仍精确） |
 
@@ -1186,7 +1218,7 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 
 | 命令 | 结果 | 明示未实现 / 证据边界 |
 | --- | --- | --- |
-| `MASSPROP` | **完整实现（只读，2D）**：逐对象与汇总报告面积、周长、精确包围盒、形心，以及 **`Ix`/`Iy`/`Ixy`（绕各自形心）、`J`、`kx`/`ky`**；汇总再给出**主惯性矩 `I1`/`I2`、主轴 `axis1`/`axis2`、主角 `principal_angle_deg`** 与所用坐标系（`origin/u/v/n`）。二阶矩：圆 `πr⁴/4`、整椭圆 `πa³b/4`/`πab³/4`（旋转到区域系）、闭合折线用 Green 公式 + 每段 bulge 的**圆缺精确矩**（扇形 − 等腰三角形；`α<1e-2` 用级数避免抵消）、HATCH 按环嵌套奇偶符号求和（岛取自身形心矩）、闭合 SPLINE 与导入时被拉直的填充边为**采样并标注**（`exact=false`）；各区域矩先平移到形心，再经一次精确换标 `reexpress` 汇入同一选择坐标系，平动/旋转写错即拒。当前选择为**闭合、共面**的 `CIRCLE` / 完整 `ELLIPSE`（`|sweep| >= 2π − 1e-9`）/ 闭合 `POLYLINE`（任意 bulge，同一平面）。逐对象与汇总诊断报告**面积、周长、精确包围盒（min/max）、形心**；圆/椭圆用解析值，bulged 闭合折线用 `cad_geometry::measure_bulged_ring_area` 的精确面积、直线+圆弧精确周长、直线边+圆缺一阶矩形心。椭圆周长是 **Ramanujan 第二近似**，以 `massprop.approx_ellipse_perimeter` 明示，不是精确椭圆积分。空选择 `massprop.selection`；跨对象法向（符号无关）/标高不一致 `massprop.not_coplanar`；开放折线/圆弧/椭圆弧/样条/文字/块参照/填充/标注/3D/不可寻址引用分别按名拒绝。**无**数据库写、revision、撤销或 `ChangeSet`；Viewer 与 Work 均可用 | **全局范围**（按名拒绝，稳定码）：体积/质量/密度/3D 惯性矩（`massprop.solid_unsupported` —— 本命令路径无 3D 实体；`cad-kernel-solidcore` 模型器已能算**平面体**的体积/面积/质心/惯性，要求**恰好一个闭合壳**（空腔/多壳拒绝），但模型器**尚未接线到本命令**，接线是 Phase C，见 ADR-0036 §7）、`Add`/`Subtract` 区域组合与 `.mpr` 文件（交互提示环/文件输出通道，本构建不建模）。退化面积 `massprop.inertia_degenerate`。证据为源码 + `cad_app`/`cad_geometry` 契约测试（矩形 `Ix=bh³/12`、椭圆 `3π/4`/`27π/4`、旋转 3×4 的 `Ix=Iy=12.5`/`Ixy=−3.5`/主轴 16/9 与 45°、平行轴合成、样条采样标注、带岛填充 `Ix=16−2/3`）；无 GUI/真实图纸/像素证据 |
+| `MASSPROP` | **完整实现（只读；2D 区域 + 精确 3D body）**：逐对象与汇总报告面积、周长、精确包围盒、形心，以及 **`Ix`/`Iy`/`Ixy`（绕各自形心）、`J`、`kx`/`ky`**；汇总再给出**主惯性矩 `I1`/`I2`、主轴 `axis1`/`axis2`、主角 `principal_angle_deg`** 与所用坐标系（`origin/u/v/n`）。二阶矩：圆 `πr⁴/4`、整椭圆 `πa³b/4`/`πab³/4`（旋转到区域系）、闭合折线用 Green 公式 + 每段 bulge 的**圆缺精确矩**（扇形 − 等腰三角形；`α<1e-2` 用级数避免抵消）、HATCH 按环嵌套奇偶符号求和（岛取自身形心矩）、闭合 SPLINE 与导入时被拉直的填充边为**采样并标注**（`exact=false`）；各区域矩先平移到形心，再经一次精确换标 `reexpress` 汇入同一选择坐标系，平动/旋转写错即拒。当前选择为**闭合、共面**的 `CIRCLE` / 完整 `ELLIPSE`（`|sweep| >= 2π − 1e-9`）/ 闭合 `POLYLINE`（任意 bulge，同一平面）。逐对象与汇总诊断报告**面积、周长、精确包围盒（min/max）、形心**；圆/椭圆用解析值，bulged 闭合折线用 `cad_geometry::measure_bulged_ring_area` 的精确面积、直线+圆弧精确周长、直线边+圆缺一阶矩形心。椭圆周长是 **Ramanujan 第二近似**，以 `massprop.approx_ellipse_perimeter` 明示，不是精确椭圆积分。空选择 `massprop.selection`；跨对象法向（符号无关）/标高不一致 `massprop.not_coplanar`；开放折线/圆弧/椭圆弧/样条/文字/块参照/填充/标注/无精确 B-Rep 的 3D 几何/不可寻址引用分别按名拒绝。**无**数据库写、revision、撤销或 `ChangeSet`；Viewer 与 Work 均可用 | **body 与区域是两条报告形状（C3a，2026-11-17）**：选择**全部**为 `Body3d{Solid, Exact}` 时，逐体经**注入的**模型器**同步**报**体积、表面积、质心、`Ixx`/`Iyy`/`Izz`/`Iyz`/`Izx`/`Ixy`（绕形心）、密度与质量**（density 1.0、请求相对精度 1e-6，明写“估计、不是已证明的界”；无惯性张量时写 `NOT REPORTED`；**显示网格永不积分**），行码 `massprop.object`；稳定拒绝 `massprop.body_modeler_unavailable`（载体无模型器）/`body_not_liftable`（曲面 P1 → `solid.lift_requires_planar`）/`body_kernel_failed`/`body_not_exact`/`body_not_solid`/`mixed_selection`（body 与平面区域混选）。**区域报告仍无体积**：`massprop.solid_unsupported` 仍是区域路径对体积/质量/密度/3D 惯性矩的具名拒绝；`Add`/`Subtract` 区域组合与 `.mpr` 文件（交互提示环/文件输出通道）仍未建模。退化面积 `massprop.inertia_degenerate`。证据：区域为源码 + `cad_app`/`cad_geometry` 契约测试（矩形 `Ix=bh³/12`、椭圆 `3π/4`/`27π/4`、旋转 3×4 的 `Ix=Iy=12.5`/`Ixy=−3.5`/主轴 16/9 与 45°、平行轴合成、样条采样标注、带岛填充 `Ix=16−2/3`）；body 为 `cad-app` 契约 + `cad-cli-tools` **真实内核**的 `solid_command` 契约（BOX 报 `volume=1.000000`/`surface_area=6.000000`/形心 0.5³，CYLINDER 报 `massprop.body_not_liftable` + `solid.lift_requires_planar`）；无 GUI/真实图纸/像素证据 |
 | `MEASUREGEOM` | **部分实现（选项路由）**：`MEASUREGEOM DISTANCE\|ANGLE\|AREA\|POLYLINE` 发送与 `DIST`/`MEASUREANGLE`/`AREA`/`MEASUREPOLYLINE` **相同**的 `BeginMeasurement` 请求（不是第二套测量引擎）；`MEASUREGEOM RADIUS` 只读报告当前选择中**恰好一个** `ARC`/`CIRCLE` 的圆心、半径、直径、圆周长（圆弧另报弧长，代码 `measuregeom.radius`）。裸名 `measuregeom.needs_option`；未知/缩写选项由 `invalid_measuregeom_argument_reason` 列出六个完整选项。只接受完整选项词（大小写不敏感），**不接受**单字母缩写 | **未实现**：`VOLUME`（本构建无 3D 实体/体积模型，显式 `Unsupported` `measuregeom.volume_unsupported`，绝不编造数值）；AutoCAD 其它 `MEASUREGEOM` 选项与动态测量未接线。证据为 `cad-ui-core` 路由契约（每个选项启动与基选择子相同的 `tool.key`）+ `cad_app` RADIUS/VOLUME 契约测试；无真机/像素/性能证据 |
 
 ### 2026-11-09 Wave 4 扩展命令（真实 2D 编辑 + 具名拒绝）
@@ -1494,11 +1526,17 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 > `Body3d{Solid, Exact}`），worker 折叠模型器结果并剖分，宿主 poll 到当前且未陈旧的结果后
 > 在**一条事务/一步撤销**里删除操作数并插入一个 `AcDb3dSolid`；曲面操作数由模型器拒绝
 > （`solid.lift_requires_planar`，P2 前不预判），操作数在任务期间被编辑则整条结果按 `Stale`（状态 `solid.boolean_stale`，
-> 不静默）丢弃；布尔运行期间图元创建按 `solid.boolean_busy` 拒绝。**仍未实现**：AutoCAD 的交互式尺寸提示、`MASSPROP`/`face_sources`/`VSCURRENT`（C3）、
+> 不静默）丢弃；布尔运行期间图元创建按 `solid.boolean_busy` 拒绝。
+> **ADR-0036 阶段 C3a/C3b/C3c（2026-11-17）**：`MASSPROP` 对精确 body 接线（体积/表面积/质心/
+> `Ixx/Iyy/Izz/Iyz/Izx/Ixy`，模型器同步、density 1.0、请求相对精度 1e-6、显示网格不参与）、
+> `face_sources` 由 `BrepTessellator` 写入 `brep:face:<shell>/<face>`、`VSCURRENT` 成为真实会话级
+> 3D body 视觉样式（默认 SHADED）。**仍未实现**：AutoCAD 的交互式尺寸提示、
 > 圆角/倒角/抽壳与曲面 lift/曲面布尔（P2）。**代码事实**：只有 Linux 的 **`native-below`**（原生 Wayland）
 > 会话注入模型器；Linux `dom-canvas`（X11/XWayland，其 CAD 会话在 WebView 里是 wasm）、Web、
 > Windows、macOS、Android **不注入**，七条图元命令与三条布尔命令都按
-> `unsupported-runtime: solid-modeler` 具名拒绝。
+> `unsupported-runtime: solid-modeler` 具名拒绝；无模型器的载体上 `MASSPROP` 对 body 按
+> `massprop.body_modeler_unavailable` 拒绝（不是 `unsupported-runtime`），`VSCURRENT` 只要会话状态、
+> 各载体都接受（它只改 `Body3d` 显示）。
 > **证据仅 Linux 契约/单元**（真实 solidcore，无 GPU/像素）；非 Linux 载体与 `dom-canvas` 的运行时
 > 行为 **NOT VERIFIED**（仅编译/契约证据），不得写成可用。`3DSOLID`/`BODY` 仍是**实体类型键**，
 > 不是命令。

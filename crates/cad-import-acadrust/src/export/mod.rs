@@ -16,6 +16,7 @@
 //! self-roundtrip — never a claim that AutoCAD or any vendor opens the file.
 
 mod accumulator;
+mod acis;
 mod body;
 mod common;
 mod dimension;
@@ -118,6 +119,11 @@ pub fn export(request: &ExportRequest<'_>) -> CadResult<(Vec<u8>, ExportReport)>
     let ctx = EntityContext {
         database: request.database,
         limits: request.limits,
+        // Only the SAT text DXF output can carry a `3DSOLID` payload. DWG keeps
+        // the POLYFACE display cache and records
+        // `acis.dwg_3dsolid_unsupported` per body (the DWG ACIS path is not
+        // written by this slice).
+        allow_3dsolid: request.format == ExportFormat::DxfText,
     };
     let mut acc = ExportAccumulator::new();
 
@@ -199,10 +205,33 @@ pub fn export(request: &ExportRequest<'_>) -> CadResult<(Vec<u8>, ExportReport)>
     report.counts = acc.counts;
 
     // Add every mapped entity to the document (handles are allocated here, never
-    // fabricated by us) and route it to model space.
+    // fabricated by us) and route it to model space. The accumulator already
+    // knows whether a `3DSOLID` was queued — including a body emitted inside a
+    // block definition and drained into its `BLOCK_RECORD` below, which never
+    // passes through this loop.
+    let has_solid3d = acc.written_solid3d;
     for entity in std::mem::take(&mut acc.entities) {
         doc.add_entity(entity)
             .map_err(|error| CadError::InvalidInput(format!("add entity failed: {error}")))?;
+    }
+
+    // A `3DSOLID` carries its ACIS payload inline as SAT text only before
+    // R2013. From AC1027 on the upstream writer would convert the payload to a
+    // binary SAB blob in `ACDSDATA`; this slice writes SAT text, never SAB, so
+    // the file is declared as AC1024 (R2010) whenever a 3DSOLID is present —
+    // in model space or in a written block definition, because the DXF version
+    // is a single document-wide header.
+    if request.format == ExportFormat::DxfText && has_solid3d {
+        doc.version = acadrust::DxfVersion::AC1024;
+        report.notes.push(ExportDiagnostic {
+            object: None,
+            code: "export.note.acis_sat_text_version".into(),
+            message: "a 3DSOLID was written with an inline ACIS SAT text payload, so the whole \
+                      file is written as AC1024 (R2010): from AC1027 (R2013) on the payload would \
+                      move into a binary SAB blob in ACDSDATA, and this exporter writes SAT text, \
+                      never SAB"
+                .into(),
+        });
     }
 
     let bytes = match request.format {
@@ -211,8 +240,9 @@ pub fn export(request: &ExportRequest<'_>) -> CadResult<(Vec<u8>, ExportReport)>
             .map_err(|error| CadError::InvalidInput(format!("DXF write failed: {error}")))?,
         // Upstream acadrust DWG writer. The same reverse-mapped, already-lossy
         // document is the input, so DWG inherits every recorded conversion/drop.
-        // Version follows `CadDocument::version` (AC1032 here). Experimental:
-        // no vendor/AutoCAD verification exists for this output.
+        // Version follows `CadDocument::version` (AC1032; the AC1024 choice above
+        // is DXF-only because DWG never carries a 3DSOLID from this exporter).
+        // Experimental: no vendor/AutoCAD verification exists for this output.
         ExportFormat::Dwg => acadrust::DwgWriter::write_to_vec(&doc)
             .map_err(|error| CadError::InvalidInput(format!("DWG write failed: {error}")))?,
     };
@@ -265,8 +295,9 @@ fn write_point_display_style(doc: &mut CadDocument, database: &DrawingDatabase) 
 /// representable value, no diagnostic is emitted.
 ///
 /// Representability: the DXF writer emits `$LTSCALE` unconditionally (group 40,
-/// double) for the AC1032 output this exporter always requests, so every finite
-/// positive scale is representable. Both sanctioned writes into the database —
+/// double) for the version this exporter requests (AC1032, or AC1024 when a
+/// `3DSOLID` is written so its ACIS payload stays inline SAT text), so every
+/// finite positive scale is representable. Both sanctioned writes into the database —
 /// [`DrawingDatabaseBuilder::set_linetype_scale`] and `LTSCALE`'s
 /// `DrawingDatabase::set_linetype_scale` — refuse a non-finite or non-positive
 /// value, and the importer sanitises a corrupt source header to the DWG default

@@ -1,5 +1,6 @@
-//! `SemanticGeometry::Body3d` export contract: only the display cache is
-//! written, never a fabricated ACIS record.
+//! `SemanticGeometry::Body3d` export contract: an exact planar solid becomes a
+//! `3DSOLID` with ACIS SAT text; every other body is written as its display
+//! cache, never as a fabricated ACIS record.
 
 use super::*;
 
