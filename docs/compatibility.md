@@ -2014,7 +2014,7 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `PARTIALOAD` | **部分实现（具名拒绝）**：`partiaload.unsupported: no partial layer-index open/load model` | 不写库/不升修订/不入历史 |
 | `SHELL` | **部分实现（具名拒绝）**：`shell.unsupported: the host owns process spawning; this command layer has no OS shell` | 不写库/不升修订/不入历史 |
 | `SECURITYOPTIONS` | **部分实现（具名拒绝）**：`securityoptions.unsupported: no security/executable-trust settings model` | 不写库/不升修订/不入历史 |
-| `XCLIP` | **部分实现（具名拒绝）**：`xclip.unsupported: no block/xref clip-boundary model; IMAGECLIP clips raster images only` | 不写库/不升修订/不入历史 |
+| `XCLIP` | 部分实现 | 真实（display-only）：`XCLIP RECT|POLY|ON|OFF|DELETE|?`；**矩形、旋转矩形与任意简单多边形都真实裁剪**（边界=一个矩形或若干不相交简单多边形的世界区域；折线按交点分段、圆锥曲线解析切分、网格/填充经耳切凸窗、图像经 `visible_image`）；轴对齐矩形输出与旧路径相等（有断言）；嵌套参照取交集（矩形∩矩形仍矩形，矩形∩多边形细化为真实碎片）；一条事务/一步撤销 | **缺口**：裁剪边界不落 DXF（导入不读、导出不写）；`INVERT`（补集无界）与倾斜块平面按名拒绝；块内文字/`WIPEOUT` 遮罩不裁并具名；`CLIP POLY`/`CLIPIT` 对块参照仍拒绝（`clip.polygon_block_not_renderable` 文案已过时） |
 | `PASTESPEC` | **部分实现（具名拒绝）**：`pastespec.unsupported: clipboard special-paste (OLE/format selection) is not modeled; use PASTECLIP or PASTEBLOCK` | 不写库/不升修订/不入历史 |
 ## Wave 28 边界更新（2026-11-12，官方名收尾：39 条具名拒绝）
 
