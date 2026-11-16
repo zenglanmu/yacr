@@ -548,6 +548,25 @@ fn clip_on_a_block_reference_wires_rect_on_off_and_delete() {
         })
     );
 
+    // A 45-degree reference maps it to a rotated world quad, which is a
+    // renderable region: the rectangle form is stored, not refused.
+    select(&mut session, &[5]);
+    execute(
+        &mut app,
+        &mut session,
+        clip_id(),
+        rect(-2.0, -2.0, 2.0, 2.0),
+    )
+    .unwrap();
+    assert_eq!(
+        stored_block_clip(&app, 5),
+        Some(BlockClip {
+            vertices: vec![[-2.0, -2.0], [2.0, 2.0]],
+            inside: true,
+            visible: true,
+        })
+    );
+
     // ON/OFF switch the stored boundary; DELETE removes it — each one undo step.
     select(&mut session, &[3]);
     let depth = undo_depth(&app);
@@ -628,13 +647,9 @@ fn every_clip_refusal_names_its_reason_and_writes_nothing() {
             vec![3],
             polygon(&[(0.0, 0.0), (4.0, 0.0), (4.0, 4.0)]),
         ),
-        // A rectangle that maps to a rotated/sheared world quad is refused exactly
-        // like XCLIP refuses it (the representation keeps only axis-aligned ones).
-        (
-            "xclip.rotation_not_renderable",
-            vec![5],
-            rect(0.0, 0.0, 4.0, 4.0),
-        ),
+        // A rectangle that maps to a rotated/sheared world quad is *rendered* as
+        // that quad, so it is accepted (see the positive test above); only a
+        // boundary with no world-XY region is refused here.
         // A reference tilted out of world XY has no world rectangle at all.
         ("xclip.non_xy_plane", vec![6], rect(0.0, 0.0, 4.0, 4.0)),
         ("xclip.degenerate_rect", vec![3], rect(4.0, 4.0, 0.0, 0.0)),

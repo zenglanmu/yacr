@@ -218,10 +218,34 @@ fn every_xclip_refusal_writes_nothing() {
             payload(rect(0.0, 0.0, 1.0, 1.0)),
         ),
         (
-            "xclip.rotation_not_renderable",
-            || insert_app(rotation_z(45.0)),
+            "xclip.non_xy_plane",
+            || insert_app(tilt_out_of_plane()),
             vec![3],
             payload(rect(0.0, 0.0, 1.0, 1.0)),
+        ),
+        (
+            // A zero-area ring has no interior: refused before the write, exactly
+            // like the shared representation validator would refuse to draw it.
+            "xclip.degenerate_polygon",
+            xclip_app,
+            vec![3],
+            payload(XClipCommand::Polygon(vec![
+                [0.0, 0.0],
+                [1.0, 0.0],
+                [2.0, 0.0],
+            ])),
+        ),
+        (
+            // A repeated vertex is not a simple ring.
+            "xclip.degenerate_polygon",
+            xclip_app,
+            vec![3],
+            payload(XClipCommand::Polygon(vec![
+                [0.0, 0.0],
+                [1.0, 0.0],
+                [1.0, 0.0],
+                [0.0, 1.0],
+            ])),
         ),
         (
             "xclip.invert_not_renderable",
@@ -422,7 +446,7 @@ fn the_report_reads_the_stored_boundary_without_writing() {
 }
 
 #[test]
-fn a_polygon_is_stored_and_reported_not_renderable() {
+fn a_polygon_is_stored_and_rendered_as_a_region() {
     let (mut app, mut session) = xclip_app();
     session.selection.replace([ref_of(3)]);
     let outcome = execute(
@@ -431,19 +455,77 @@ fn a_polygon_is_stored_and_reported_not_renderable() {
         CommandId::Extended(ExtendedCommandId::Xclip),
         payload(XClipCommand::Polygon(vec![
             [0.0, 0.0],
-            [1.0, 0.0],
-            [0.5, 1.0],
+            [8.0, 0.0],
+            [8.0, 2.0],
+            [3.0, 2.0],
+            [3.0, 8.0],
+            [0.0, 8.0],
         ])),
     )
     .unwrap();
     assert_eq!(
         stored_clip(&app, 3).map(|clip| clip.vertices.len()),
-        Some(3)
+        Some(6)
     );
-    assert!(outcome
+    assert!(
+        outcome
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.code != "xclip.polygon_not_renderable"),
+        "a polygon boundary is rendered now: {:?}",
+        outcome.diagnostics
+    );
+    let applied = outcome
         .diagnostics
         .iter()
-        .any(|diagnostic| diagnostic.code == "xclip.polygon_not_renderable"));
+        .find(|diagnostic| diagnostic.code == "xclip.applied")
+        .expect("xclip.applied");
+    assert!(
+        applied.message.contains("polygonal clip")
+            && applied.message.contains("clips the expanded"),
+        "{}",
+        applied.message
+    );
+}
+
+#[test]
+fn a_rotated_reference_accepts_a_rectangle_and_reports_its_quad() {
+    let (mut app, mut session) = insert_app(rotation_z(30.0));
+    session.selection.replace([ref_of(3)]);
+    // The block plane is still parallel to world XY, so the rectangle maps to a
+    // rotated world quad — a renderable region, not a refusal.
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Extended(ExtendedCommandId::Xclip),
+        payload(rect(0.0, 0.0, 2.0, 1.0)),
+    )
+    .unwrap();
+    assert_eq!(
+        stored_clip(&app, 3),
+        Some(BlockClip {
+            vertices: vec![[0.0, 0.0], [2.0, 1.0]],
+            inside: true,
+            visible: true,
+        })
+    );
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::Extended(ExtendedCommandId::Xclip),
+        payload(XClipCommand::Report),
+    )
+    .unwrap();
+    let report = outcome
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "xclip.report")
+        .expect("xclip.report");
+    assert!(
+        report.message.contains("world 4-point clip ring"),
+        "a rotated rectangle is reported as the quad it is: {}",
+        report.message
+    );
 }
 
 #[test]

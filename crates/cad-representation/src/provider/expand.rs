@@ -1,9 +1,11 @@
-use crate::layout::{clip_image_polygon_to_rect, image_polygon_is_convex};
+use crate::layout::{
+    clip_conic, clip_mesh, clip_polyline, visible_image, ImageRegion, WorldRectBoundary,
+};
 use crate::*;
 
 use cad_db::LayerScope;
 
-use super::clip::{block_clip_rect, rejection_code, rejection_message, WorldRect};
+use super::clip::{block_clip_boundary, rejection_code, rejection_message};
 use super::default::chord_tessellation_params;
 use super::registry::ProviderRegistry;
 
@@ -35,11 +37,15 @@ impl ProviderRegistry {
         // scale: a `ByBlock` child inherits both.
         parent_linetype: Option<(&LinetypePattern, f32)>,
         global_lt_scale: f64,
-        // The world-space rectangle inherited from a containing INSERT's
+        // The world-space clip region inherited from a containing INSERT's
         // `XCLIP` boundary (`None` when nothing clips this branch). A block
-        // member is clipped by its own INSERT's rectangle, intersected with
-        // every ancestor's, exactly like nested viewport cuts.
-        inherited_clip: Option<WorldRect>,
+        // member is clipped by its own INSERT's region, intersected with every
+        // ancestor's, exactly like nested viewport cuts. The region is a
+        // rectangle or a (possibly concave) simple polygon — several disjoint
+        // polygons when two boundaries intersect — so every primitive is cut
+        // piece by piece and the union of the pieces is exactly
+        // `primitive ∩ clip`.
+        inherited_clip: Option<&WorldRectBoundary>,
         stack: &mut Vec<BlockId>,
         out: &mut DisplayRepresentation,
     ) -> CadResult<()> {
@@ -139,15 +145,18 @@ impl ProviderRegistry {
                     // leaves the branch clipped by its ancestors only.
                     let mut empty_clip = false;
                     let child_clip = match attributes.clip.as_ref() {
-                        None => inherited_clip,
-                        Some(stored) => match block_clip_rect(stored, &composed) {
-                            Ok(Some(rect)) => match inherited_clip {
-                                None => Some(rect),
+                        None => inherited_clip.cloned(),
+                        Some(stored) => match block_clip_boundary(stored, &composed) {
+                            Ok(Some(region)) => match inherited_clip {
+                                None => Some(region),
                                 // An empty intersection means nothing of this
                                 // instance can be inside both boundaries: the
                                 // children are omitted exactly (like a fully
-                                // outside line), never drawn unclipped.
-                                Some(outer) => match outer.intersect(&rect) {
+                                // outside line), never drawn unclipped. A
+                                // rectangle ∩ rectangle stays a rectangle; any
+                                // other pair becomes the disjoint polygon
+                                // pieces of the real intersection.
+                                Some(outer) => match outer.intersect(&region) {
                                     Some(intersection) => Some(intersection),
                                     None => {
                                         empty_clip = true;
@@ -155,7 +164,7 @@ impl ProviderRegistry {
                                     }
                                 },
                             },
-                            Ok(None) => inherited_clip,
+                            Ok(None) => inherited_clip.cloned(),
                             Err(rejection) => {
                                 report_xclip(
                                     out,
@@ -163,7 +172,7 @@ impl ProviderRegistry {
                                     rejection_code(rejection),
                                     rejection_message(rejection),
                                 );
-                                inherited_clip
+                                inherited_clip.cloned()
                             }
                         },
                     };
@@ -193,7 +202,7 @@ impl ProviderRegistry {
                                 Some(own_lineweight),
                                 Some((&own_linetype, linetype_scale)),
                                 global_lt_scale,
-                                child_clip,
+                                child_clip.as_ref(),
                                 stack,
                                 out,
                             )?;
@@ -269,12 +278,12 @@ impl ProviderRegistry {
                                 draw_order,
                                 primitive: DisplayPrimitive::Conic(transformed),
                             }),
-                            Some(rect) => {
+                            Some(region) => {
                                 // Analytic slicing: the visible parameter
-                                // intervals stay circles/arcs, never chords.
-                                let (center, half) = rect.center_half();
-                                match crate::layout::clip_conic_to_rect(&transformed, center, half)
-                                {
+                                // intervals stay circles/arcs, never chords. A
+                                // multi-piece region (a nested intersection)
+                                // yields several slices, one per piece.
+                                match clip_conic_region(&transformed, region) {
                                     Ok(pieces) => {
                                         for piece in pieces {
                                             out.fragments.push(DisplayFragment {
@@ -400,8 +409,8 @@ impl ProviderRegistry {
                     };
                     match inherited_clip {
                         None => emit(primitive, out),
-                        Some(rect) => {
-                            emit_clipped(entity, primitive, rect, &emit, out);
+                        Some(region) => {
+                            emit_clipped(entity, primitive, region, &emit, out);
                         }
                     }
                 }
@@ -411,128 +420,133 @@ impl ProviderRegistry {
     }
 }
 
-/// Emit one already-transformed primitive through the rectangle clip.
+/// Emit one already-transformed primitive through the block-clip region.
 ///
-/// Lines and conics are handled by their own arms (they keep their analytic or
-/// tessellated representation); this helper covers meshes, images, text and
-/// masks. A primitive with no exact clip path is **kept** and reported, never
-/// dropped or silently drawn as clipped.
+/// Meshes (including filled meshes and the wide-polyline stroke band), images
+/// and — through their own arms — lines and conics are cut exactly. A region
+/// with several disjoint pieces (a nested intersection) is clipped piece by
+/// piece and each surviving piece is emitted as its own fragment, so the union
+/// of the fragments is exactly `primitive ∩ clip`.
+///
+/// A primitive with no exact clip path is **kept** and reported, never dropped
+/// or silently drawn as clipped; a clipper that refuses makes the whole
+/// primitive stay unclipped (never a partial cut) and report its stable code.
 fn emit_clipped(
     entity: &DbEntity,
     primitive: DisplayPrimitive,
-    rect: WorldRect,
+    region: &WorldRectBoundary,
     emit: &dyn Fn(DisplayPrimitive, &mut DisplayRepresentation),
     out: &mut DisplayRepresentation,
 ) {
-    let (center, half) = rect.center_half();
     match primitive {
-        DisplayPrimitive::Mesh(mesh) => match clip_mesh_to_rect(&mesh, center, half) {
-            Ok(Some(clipped)) => emit(DisplayPrimitive::Mesh(Arc::new(clipped)), out),
-            Ok(None) => {}
+        DisplayPrimitive::Mesh(mesh) => match clip_mesh_region(&mesh, region) {
+            Ok(pieces) => {
+                for piece in pieces {
+                    emit(DisplayPrimitive::Mesh(Arc::new(piece)), out);
+                }
+            }
             Err(_) => {
                 report_xclip(
                     out,
                     entity,
                     "representation.xclip_mesh_unclippable",
-                    "the mesh cannot be clipped exactly (missing index or non-finite vertex), so \
-                     it is kept unclipped",
+                    "the mesh cannot be clipped exactly (missing index or non-finite vertex), \
+                         so it is kept unclipped",
                 );
                 emit(DisplayPrimitive::Mesh(mesh), out);
             }
         },
-        DisplayPrimitive::MeshWithoutEdgeOverlay(mesh) => {
-            match clip_mesh_to_rect(&mesh, center, half) {
-                Ok(Some(clipped)) => {
+        DisplayPrimitive::MeshWithoutEdgeOverlay(mesh) => match clip_mesh_region(&mesh, region) {
+            Ok(pieces) => {
+                for piece in pieces {
                     emit(
-                        DisplayPrimitive::MeshWithoutEdgeOverlay(Arc::new(clipped)),
+                        DisplayPrimitive::MeshWithoutEdgeOverlay(Arc::new(piece)),
                         out,
                     );
-                }
-                Ok(None) => {}
-                Err(_) => {
-                    report_xclip(
-                        out,
-                        entity,
-                        "representation.xclip_mesh_unclippable",
-                        "the mesh cannot be clipped exactly (missing index or non-finite \
-                         vertex), so it is kept unclipped",
-                    );
-                    emit(DisplayPrimitive::MeshWithoutEdgeOverlay(mesh), out);
                 }
             }
-        }
+            Err(_) => {
+                report_xclip(
+                    out,
+                    entity,
+                    "representation.xclip_mesh_unclippable",
+                    "the mesh cannot be clipped exactly (missing index or non-finite \
+                         vertex), so it is kept unclipped",
+                );
+                emit(DisplayPrimitive::MeshWithoutEdgeOverlay(mesh), out);
+            }
+        },
         DisplayPrimitive::Image {
             resource,
             transform,
             clip,
             adjust,
-        } => match clip {
-            Some(polygon) => {
-                if image_polygon_is_convex(&polygon) {
-                    let clipped = clip_image_polygon_to_rect(polygon.to_vec(), center, half);
-                    if clipped.len() >= 3 {
-                        emit(
-                            DisplayPrimitive::Image {
-                                resource,
-                                transform,
-                                clip: Some(Arc::from(clipped.into_boxed_slice())),
-                                adjust,
-                            },
-                            out,
-                        );
+        } => {
+            // The shared image path cuts the quad (or the entity's own clip
+            // ring) against each region piece and hands back convex pieces with
+            // interpolated texture coordinates — one fragment each, over the
+            // same resource, so a concave clip is the union of its pieces.
+            let mut whole: Option<Option<Arc<[ImageVertex]>>> = None;
+            let mut pieces: Vec<Vec<ImageVertex>> = Vec::new();
+            let mut refusal = None;
+            for piece in region.pieces() {
+                match visible_image(&transform, clip.as_deref(), piece) {
+                    Ok(ImageRegion::Empty) => {}
+                    Ok(ImageRegion::Whole { entity }) => {
+                        // The whole quad survives this piece. Pieces are
+                        // disjoint, so at most one can hold it; keeping the
+                        // first is the exact answer.
+                        whole.get_or_insert(entity);
                     }
-                } else {
-                    report_xclip(
-                        out,
-                        entity,
-                        "representation.xclip_image_unclippable",
-                        "the image's own clip polygon is not convex, so it cannot be intersected \
-                         with the block clip; the image is kept unclipped",
-                    );
+                    Ok(ImageRegion::Pieces(parts)) => pieces.extend(parts),
+                    Err(clip_refusal) => {
+                        refusal = Some(clip_refusal);
+                        break;
+                    }
+                }
+            }
+            if let Some(clip_refusal) = refusal {
+                report_xclip(
+                    out,
+                    entity,
+                    "representation.xclip_image_unclippable",
+                    &clip_refusal.message,
+                );
+                emit(
+                    DisplayPrimitive::Image {
+                        resource,
+                        transform,
+                        clip,
+                        adjust,
+                    },
+                    out,
+                );
+            } else if let Some(entity_clip) = whole {
+                emit(
+                    DisplayPrimitive::Image {
+                        resource,
+                        transform,
+                        clip: entity_clip,
+                        adjust,
+                    },
+                    out,
+                );
+            } else {
+                for piece in pieces {
                     emit(
                         DisplayPrimitive::Image {
-                            resource,
+                            resource: resource.clone(),
                             transform,
-                            clip: Some(polygon),
+                            clip: Some(Arc::from(piece.into_boxed_slice())),
                             adjust,
                         },
                         out,
                     );
                 }
             }
-            None => match clip_image_quad_to_rect(&transform, center, half) {
-                Ok(vertices) if vertices.len() >= 3 => emit(
-                    DisplayPrimitive::Image {
-                        resource,
-                        transform,
-                        clip: Some(Arc::from(vertices.into_boxed_slice())),
-                        adjust,
-                    },
-                    out,
-                ),
-                Ok(_) => {}
-                Err(_) => {
-                    report_xclip(
-                        out,
-                        entity,
-                        "representation.xclip_image_unclippable",
-                        "the image transform maps the quad to a non-finite position, so the \
-                         image is kept unclipped",
-                    );
-                    emit(
-                        DisplayPrimitive::Image {
-                            resource,
-                            transform,
-                            clip: None,
-                            adjust,
-                        },
-                        out,
-                    );
-                }
-            },
-        },
+        }
         // Text needs a shaped font outline and a mask is an erase region with
-        // its own fill rule; neither has an exact rectangle cut here.
+        // its own fill rule; neither has an exact region cut here.
         other => {
             let name = match &other {
                 DisplayPrimitive::Text { .. } => "text",
@@ -551,6 +565,38 @@ fn emit_clipped(
             emit(other, out);
         }
     }
+}
+
+/// Clip one mesh against every piece of `region`.
+///
+/// `Ok(pieces)` holds the surviving meshes (empty when the whole mesh is outside,
+/// an exact omission); `Err` is the shared clipper's refusal and means the
+/// caller must keep the source mesh untouched.
+fn clip_mesh_region(mesh: &Mesh, region: &WorldRectBoundary) -> Result<Vec<Mesh>, ClipRefusal> {
+    let mut pieces = Vec::new();
+    for piece in region.pieces() {
+        if let Some(clipped) = clip_mesh(mesh, piece)? {
+            pieces.push(clipped);
+        }
+    }
+    Ok(pieces)
+}
+
+/// Clip one analytic conic against every piece of `region`.
+///
+/// A rectangle piece goes through `clip_conic_to_rect`, so an axis-aligned
+/// block clip produces exactly the parameter slices it always did. `Err` is the
+/// shared clipper's refusal (non-finite parameters): the caller keeps the whole
+/// conic, never the slices it happened to get.
+fn clip_conic_region(
+    conic: &ConicSegment,
+    region: &WorldRectBoundary,
+) -> Result<Vec<ConicSegment>, ClipRefusal> {
+    let mut pieces = Vec::new();
+    for piece in region.pieces() {
+        pieces.extend(clip_conic(conic, piece)?);
+    }
+    Ok(pieces)
 }
 
 /// Record one `XCLIP` degradation: a `Partial` completeness plus a diagnostic.
@@ -613,10 +659,11 @@ fn emit_polyline(
     // Inherited display order (see `expand_entity`): the INSERT's order for a
     // block's children, the entity's own at the root.
     draw_order: i64,
-    // World rectangle of the containing INSERT's `XCLIP` boundary, if any. The
-    // polyline is clipped **after** dash subdivision so a dash crossing the
-    // boundary is cut exactly and a fully outside dash disappears.
-    clip: Option<WorldRect>,
+    // World-space clip region of the containing INSERT's `XCLIP` boundary, if
+    // any. The polyline is clipped **after** dash subdivision so a dash crossing
+    // the boundary is cut exactly and a fully outside dash disappears; a
+    // multi-piece region is clipped piece by piece.
+    clip: Option<&WorldRectBoundary>,
     packed_configured: bool,
     global_lt_scale: f64,
     out: &mut DisplayRepresentation,
@@ -659,7 +706,7 @@ fn emit_polyline(
         });
     }
     let runs = match clip {
-        Some(rect) => clip_polyline_runs(runs, rect, packed),
+        Some(region) => clip_polyline_runs(runs, region, packed),
         None => runs,
     };
     let runs = if packed {
@@ -720,22 +767,32 @@ fn emit_polyline(
     }
 }
 
-/// Clip every run of a polyline bundle to `rect`.
+/// Clip every run of a polyline bundle to `region`.
 ///
 /// A packed bundle is a flat list of independent endpoint pairs (`LineSegments`
 /// semantics), so each pair is clipped on its own; an unpacked run is one
 /// continuous polyline and is clipped as a whole so the surviving pieces stay
-/// joined.
-fn clip_polyline_runs(runs: Vec<Vec<Point3>>, rect: WorldRect, packed: bool) -> Vec<Vec<Point3>> {
-    let (center, half) = rect.center_half();
+/// joined. A multi-piece region (a nested intersection) is clipped piece by
+/// piece: the union of the surviving runs is exactly the visible part.
+///
+/// A rectangle piece goes through `clip_polyline_to_rect` (Liang–Barsky), so a
+/// rectangular block clip produces exactly the runs it produced before polygons
+/// were supported.
+fn clip_polyline_runs(
+    runs: Vec<Vec<Point3>>,
+    region: &WorldRectBoundary,
+    packed: bool,
+) -> Vec<Vec<Point3>> {
     let mut out = Vec::new();
-    for run in runs {
-        if packed {
-            for pair in run.as_chunks::<2>().0 {
-                out.extend(clip_polyline_to_rect(pair, center, half));
+    for piece in region.pieces() {
+        for run in &runs {
+            if packed {
+                for pair in run.as_chunks::<2>().0 {
+                    out.extend(clip_polyline(pair, piece));
+                }
+            } else {
+                out.extend(clip_polyline(run, piece));
             }
-        } else {
-            out.extend(clip_polyline_to_rect(&run, center, half));
         }
     }
     out

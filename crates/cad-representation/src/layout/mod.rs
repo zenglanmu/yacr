@@ -70,6 +70,19 @@
 //! off the paper plane or singular is unsupported here and reported, never
 //! applied as an approximation.
 //!
+//! ## The same clippers cut a block reference
+//!
+//! A block reference's `XCLIP` boundary is a **world-space** region, and it uses
+//! this module rather than a second clipping implementation: the provider maps
+//! the stored block-local ring through the composed INSERT transform into a
+//! [`WorldRectBoundary`] (`cad_representation::provider::block_clip_boundary`),
+//! which is one axis-aligned rectangle or one/more simple polygons, and then
+//! calls [`clip_polyline`], [`clip_conic`], [`clip_mesh`], [`clip_filled_polygon`]
+//! and the image path (`visible_image`). An axis-aligned rectangle keeps
+//! the half-plane clippers, a concave or rotated boundary is cut exactly, and a
+//! boundary that is not a usable simple ring is refused by name so the caller
+//! keeps the geometry unclipped.
+//!
 //! Paper-space measurement is wired in `cad-measure` through
 //! [`ViewportTransform::paper_to_model`]; this module only provides the single
 //! verified source for that inverse.
@@ -92,8 +105,8 @@ pub use clip_polygon::{
     clip_polyline, clip_polyline_to_polygon,
 };
 pub use image::clip_image_quad_to_rect;
-pub(crate) use image::{clip_image_polygon_to_rect, image_polygon_is_convex};
-pub use polygon::PaperClip;
+pub(crate) use image::{visible_image, ImageRegion};
+pub use polygon::{validate_simple_polygon, PaperClip, WorldRectBoundary};
 pub use selection::{
     enumerate_layouts, ClipRefusal, LayoutDescriptor, SpaceSelection, ViewportState,
     ViewportUnsupported,

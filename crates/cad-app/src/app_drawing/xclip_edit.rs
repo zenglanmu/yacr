@@ -3,25 +3,29 @@
 //! The boundary is stored in the selected `INSERT`'s render attributes
 //! (`cad_domain::BlockClip`), in the **block definition's local coordinate
 //! space**. That is what makes it follow the reference through move/rotate/scale
-//! — the representation layer maps the corners through the composed INSERT
+//! — the representation layer maps the ring through the composed INSERT
 //! transform at expansion time and cuts the expanded geometry there.
 //!
 //! # Typed grammar
 //!
 //! * `XCLIP RECT <minx> <miny> <maxx> <maxy>` — block-local rectangle
-//!   (`minx < maxx`, `miny < maxy`). The four corners must map to an
-//!   **axis-aligned world-XY rectangle** for this INSERT (0/90/180/270 degree
-//!   rotations pass); anything else is `xclip.rotation_not_renderable` and
-//!   writes nothing, because the renderer only cuts axis-aligned world
-//!   rectangles exactly.
-//! * `XCLIP POLY <x1> <y1> …` — at least three block-local points. The N-gon is
-//!   validated and stored verbatim, but there is no exact polygon clip path in
-//!   this build, so the command reports `xclip.polygon_not_renderable` and never
-//!   claims the boundary is drawn (the same declared boundary `VPCLIP` has).
+//!   (`minx < maxx`, `miny < maxy`). It is stored verbatim and rendered as the
+//!   **quad its four corners span**: an axis-aligned world rectangle keeps the
+//!   dedicated half-plane clippers (byte-identical output), and a reference
+//!   rotated or sheared in world XY is cut by that rotated/sheared quad, never
+//!   by its axis-aligned envelope. Only a boundary that maps off the world-XY
+//!   plane or through a degenerate transform is refused (`xclip.non_xy_plane`,
+//!   `xclip.degenerate_transform`), because a region needs a plane.
+//! * `XCLIP POLY <x1> <y1> …` — at least three block-local points, validated as
+//!   one **simple** ring (no repeated vertex, no self-intersection, non-zero
+//!   area) and rendered as that polygon, concave included. A ring that fails
+//!   validation is refused by name (`xclip.degenerate_polygon`,
+//!   `xclip.self_intersecting`, `xclip.non_coplanar`) and nothing is written.
 //! * `XCLIP ON|OFF` — switch the stored boundary on/off.
 //! * `XCLIP DELETE` — remove the boundary.
 //! * `XCLIP INVERT` — refused (`xclip.invert_not_renderable`), never stored
-//!   invisibly: an inverted region has no exact render path here.
+//!   invisibly: the region an inverted clip keeps is the unbounded complement of
+//!   its boundary, which has no region polygon here.
 //! * `XCLIP ?` — read-only report of the selected INSERT's stored boundary.
 //!
 //! # Write contract
@@ -39,20 +43,26 @@
 //! `xclip.payload` / `.no_selection` / `.multiple` / `.not_insert` /
 //! `.no_boundary` / `.degenerate_rect` / `.degenerate_polygon` /
 //! `.non_coplanar` / `.self_intersecting` / `.degenerate_transform` /
-//! `.non_xy_plane` / `.invert_not_renderable` / `.rotation_not_renderable`, and
-//! the no-op `.unchanged`.
+//! `.non_xy_plane` / `.invert_not_renderable`, and the no-op `.unchanged`.
 //!
 //! # Boundaries (declared, not hidden)
 //!
 //! Picking, selection and bounds still see the unclipped geometry; the clip is a
 //! **display** filter only. Nothing is persisted to DXF/DWG (import/export are
-//! untouched), and a polygonal boundary is stored but not renderable.
+//! untouched).
+//!
+//! Text and `WIPEOUT` masks inside a clipped block have no exact region cut
+//! (a mask is an erase region with its own fill rule), so they stay drawn and
+//! are reported by the representation layer under
+//! `representation.xclip_primitive_unsupported` — the clip is never claimed for
+//! them.
 
 use super::*;
 
 use crate::command_payload::XClipCommand;
 use cad_domain::{BlockClip, SpaceId};
-use cad_representation::{block_clip_rect, BlockClipRejection};
+use cad_representation::layout::WorldRectBoundary;
+use cad_representation::{block_clip_boundary, BlockClipRejection};
 
 impl Application {
     /// Dispatch one typed `XCLIP` command (Work-only).
@@ -101,11 +111,8 @@ impl Application {
                 } else {
                     format!("{}-point polygon block-local", clip.vertices.len())
                 };
-                let world = match block_clip_rect(clip, transform) {
-                    Ok(Some(rect)) => format!(
-                        "world rect ({}, {})..({}, {})",
-                        rect.min[0], rect.min[1], rect.max[0], rect.max[1]
-                    ),
+                let world = match block_clip_boundary(clip, transform) {
+                    Ok(Some(region)) => xclip_region_note(&region),
                     Ok(None) => "not applied (XCLIP OFF)".to_string(),
                     Err(rejection) => xclip_rejection_note(rejection).to_string(),
                 };
@@ -166,17 +173,18 @@ impl Application {
             }
         }
         if let XClipCommand::Polygon(points) = request {
-            let world: Vec<Point3> = points
-                .iter()
-                .map(|p| Point3 {
-                    x: p[0],
-                    y: p[1],
-                    z: 0.0,
-                })
-                .collect();
-            // The shared validator owns the three polygon refusals; its
-            // `xclip.` prefix makes them the documented codes.
-            crate::app_layout_geometry::validate_clip_polygon(&world, "xclip")?;
+            // The representation layer owns the one "is this a usable ring" rule
+            // (`validate_simple_polygon`), so a ring it would refuse is refused
+            // here, before a transaction, with this command's code prefix. That
+            // covers `<3` points, a repeated vertex, zero area and a
+            // self-intersection; the block plane is z = 0, so coplanarity is not
+            // in question.
+            if let Err(refusal) = cad_representation::layout::validate_simple_polygon(points) {
+                return Err(xclip_refusal(
+                    xclip_polygon_refusal_code(refusal.code),
+                    refusal.message,
+                ));
+            }
         }
         Ok(())
     }
@@ -206,21 +214,32 @@ impl Application {
                     inside: true,
                     visible: true,
                 };
-                // Rectangles must stay axis-aligned in world XY; otherwise the
-                // renderer would have to guess. `block_clip_rect` is the same
-                // rule the representation layer applies, so the command cannot
-                // accept a boundary that would then render unclipped.
-                match block_clip_rect(&clip, transform) {
+                // The render path must accept the boundary, otherwise the
+                // command would store a clip that never cuts. `block_clip_boundary`
+                // is exactly the map the representation layer applies, so a
+                // rotated/sheared rectangle passes (as the quad it is) and only a
+                // boundary with no world-XY region is refused.
+                match block_clip_boundary(&clip, transform) {
                     Ok(Some(_)) => Some(clip),
                     Ok(None) => unreachable!("a fresh ON/inside clip is always active"),
                     Err(rejection) => return Err(xclip_boundary_refusal(rejection)),
                 }
             }
-            XClipCommand::Polygon(points) => Some(BlockClip {
-                vertices: points.clone(),
-                inside: true,
-                visible: true,
-            }),
+            XClipCommand::Polygon(points) => {
+                let clip = BlockClip {
+                    vertices: points.clone(),
+                    inside: true,
+                    visible: true,
+                };
+                // Same rule as the rectangle: the mapped region must exist. The
+                // pre-write validator already refused a ring with no interior, so
+                // this only catches the reference's own transform.
+                match block_clip_boundary(&clip, transform) {
+                    Ok(Some(_)) => Some(clip),
+                    Ok(None) => unreachable!("a fresh ON/inside clip is always active"),
+                    Err(rejection) => return Err(xclip_boundary_refusal(rejection)),
+                }
+            }
             XClipCommand::On => match current.as_ref() {
                 None => return Err(xclip_no_boundary(before.id.0, "ON")),
                 Some(clip) => Some(BlockClip {
@@ -310,26 +329,15 @@ impl Application {
         )?;
 
         let mut diagnostics = Vec::new();
-        if matches!(request, XClipCommand::Polygon(_)) {
-            // The boundary is real stored data but has no exact render path.
-            diagnostics.push(Diagnostic {
-                object,
-                code: "xclip.polygon_not_renderable".into(),
-                message: format!(
-                    "XCLIP: stored a block-local polygonal boundary on INSERT {}; this build has \
-                     no exact polygon clip path, so the reference still renders unclipped and no \
-                     draw is claimed here",
-                    before.id.0
-                ),
-            });
-        }
         let (code, message) = match &new_clip {
             Some(clip) if clip.is_rect() => (
                 "xclip.applied",
                 format!(
                     "XCLIP: INSERT {} has a block-local rectangular clip ({}, {})..({}, {}), {}; \
-                     the representation layer maps it to a world rectangle at expansion time, so \
-                     it follows the reference through move/rotate/scale",
+                     the representation layer maps its four corners at expansion time (an \
+                     axis-aligned world rectangle keeps the half-plane clippers, any other angle \
+                     is cut as the quad it really is), so it follows the reference through \
+                     move/rotate/scale",
                     before.id.0,
                     clip.vertices[0][0],
                     clip.vertices[0][1],
@@ -341,7 +349,9 @@ impl Application {
             Some(clip) => (
                 "xclip.applied",
                 format!(
-                    "XCLIP: INSERT {} stored a {}-point block-local polygonal clip, {}",
+                    "XCLIP: INSERT {} stored a {}-point block-local polygonal clip, {}; the \
+                     representation layer clips the expanded members to that ring (concave \
+                     boundaries included) at expansion time",
                     before.id.0,
                     clip.vertices.len(),
                     if clip.visible { "ON" } else { "OFF" }
@@ -461,44 +471,97 @@ fn xclip_refusal(code: impl std::fmt::Display, detail: impl std::fmt::Display) -
     CadError::InvalidInput(format!("{code}: {detail}"))
 }
 
-/// The refusal for a boundary the render path cannot map exactly.
+/// The refusal for a boundary the render path cannot map to a world region.
+///
+/// `Polygon` and `Rotation` are the **axis-aligned oracle**'s answers, not
+/// degradations: a polygon boundary and a rotated/sheared rectangle are both
+/// rendered regions now, so [`block_clip_boundary`] never returns them and these
+/// two arms exist only so the exhaustive match stays honest about that
+/// distinction.
 fn xclip_boundary_refusal(rejection: BlockClipRejection) -> CadError {
     match rejection {
         BlockClipRejection::Rotation => xclip_refusal(
-            "xclip.rotation_not_renderable",
-            "the block-local rectangle maps to a rotated or sheared world quad; only \
-             0/90/180/270 degree rotations are renderable, so nothing was written",
+            "xclip.rotation_unsupported_internal",
+            "the block-local rectangle maps to a rotated or sheared world quad; that quad is a \
+             renderable region, so this answer is not a refusal and no boundary was written",
+        ),
+        BlockClipRejection::Polygon => xclip_refusal(
+            "xclip.polygon_unsupported_internal",
+            "the boundary is a polygon; polygons are renderable regions, so this answer is not a \
+             refusal and no boundary was written",
         ),
         BlockClipRejection::NonXyPlane => xclip_refusal(
             "xclip.non_xy_plane",
-            "the block-local rectangle does not map onto a world-XY plane, so nothing was \
-             written",
+            "the block-local boundary does not map onto a plane parallel to world XY; the \
+             representation clippers cut in world XY, so a tilted boundary has no region they \
+             can express and nothing was written",
         ),
         BlockClipRejection::Degenerate => xclip_refusal(
             "xclip.degenerate_transform",
-            "the INSERT transform is singular/non-finite or the mapped rectangle has no extent, \
-             so nothing was written",
+            "the INSERT transform is singular/non-finite or the mapped boundary has a repeated \
+             vertex or no area, so nothing was written",
         ),
         BlockClipRejection::Inverted => xclip_refusal(
             "xclip.invert_not_renderable",
-            "an inverted clip region has no exact render path in this build, so nothing was \
-             written",
+            "an inverted clip region keeps the unbounded outside of its boundary, which has no \
+             region polygon in this build, so nothing was written",
         ),
-        BlockClipRejection::Polygon => xclip_refusal(
-            "xclip.polygon_not_renderable",
-            "a polygonal boundary has no exact render path in this build, so nothing was written",
+        BlockClipRejection::Arity => xclip_refusal(
+            "xclip.degenerate_polygon",
+            "the block-local boundary has fewer than three points, so it is not a region and \
+             nothing was written",
         ),
+        BlockClipRejection::SelfIntersecting => xclip_refusal(
+            "xclip.self_intersecting",
+            "the block-local boundary crosses or touches itself, so it has no well-defined \
+             interior and nothing was written",
+        ),
+    }
+}
+
+/// The `xclip.*` code one ring-validation refusal maps to.
+///
+/// The validator's own codes are the shared `viewport.*` family; this command's
+/// contract keeps its `xclip.*` spelling, so the two stable code sets stay one
+/// statement about the same rule.
+fn xclip_polygon_refusal_code(code: &str) -> &'static str {
+    match code {
+        cad_representation::viewport_reason::POLYGON_SELF_INTERSECTING => "xclip.self_intersecting",
+        cad_representation::viewport_reason::POLYGON_NON_PLANAR => "xclip.non_coplanar",
+        _ => "xclip.degenerate_polygon",
     }
 }
 
 /// One short note describing why a stored boundary is not rendered.
 fn xclip_rejection_note(rejection: BlockClipRejection) -> &'static str {
     match rejection {
-        BlockClipRejection::Polygon => "stored but not renderable (polygon)",
-        BlockClipRejection::Rotation => "stored but not renderable (rotated world quad)",
+        BlockClipRejection::Polygon => "rendered as a polygonal region (oracle answer only)",
+        BlockClipRejection::Rotation => "rendered as the rotated quad (oracle answer only)",
         BlockClipRejection::NonXyPlane => "stored but not renderable (non-XY block plane)",
         BlockClipRejection::Degenerate => "stored but not renderable (degenerate transform)",
         BlockClipRejection::Inverted => "stored but not renderable (inverted)",
+        BlockClipRejection::Arity => "stored but not renderable (fewer than three points)",
+        BlockClipRejection::SelfIntersecting => "stored but not renderable (self-intersecting)",
+    }
+}
+
+/// The world-space region a stored boundary maps to, as one report phrase.
+///
+/// A rectangle keeps its historical `world rect (…)..(…)` wording so an existing
+/// reader cannot be surprised; every other shape names the ring it really is.
+fn xclip_region_note(region: &WorldRectBoundary) -> String {
+    if let Some((min, max)) = region.as_rect() {
+        return format!(
+            "world rect ({}, {})..({}, {})",
+            min[0], min[1], max[0], max[1]
+        );
+    }
+    match region.pieces() {
+        [only] => format!(
+            "world {}-point clip ring (concave/rotated boundaries included)",
+            only.boundary().len()
+        ),
+        pieces => format!("world clip region of {} disjoint pieces", pieces.len()),
     }
 }
 

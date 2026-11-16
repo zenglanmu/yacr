@@ -1,17 +1,24 @@
-//! The paper-space clip **boundary**: a simple polygon, its fill rule and a
-//! triangulation.
+//! The clip **boundary**: a simple polygon, its fill rule and a triangulation.
 //!
-//! A viewport clip is no longer restricted to an axis-aligned rectangle. A
-//! stored `Vec<Point3>` is validated here as one **simple** (non
-//! self-intersecting) polygon and carried as [`PaperClip`]; the clippers in
-//! [`super::clip_polygon`] then limit every primitive to that region.
+//! A clip is not restricted to an axis-aligned rectangle. A stored ring is
+//! validated here as one **simple** (non self-intersecting) polygon and carried
+//! as [`PaperClip`]; the clippers in [`super::clip_polygon`] then limit every
+//! primitive to that region. Two consumers share this module:
+//!
+//! * the **paper-space viewport** boundary (`MVIEW`/`VPCLIP`), built by
+//!   [`super::build`] from a stored `Vec<Point3>`;
+//! * the **world-space block-reference** boundary (`XCLIP`), built by
+//!   [`crate::provider::block_clip_boundary`] by mapping the stored block-local
+//!   ring through the composed INSERT transform. It is carried as
+//!   [`WorldRectBoundary`], the rectangle-or-simple-polygon region a block clip
+//!   keeps (nested references can intersect into several disjoint pieces).
 //!
 //! Two shapes are distinguished, and the distinction is behavioural, not
 //! cosmetic:
 //!
 //! * an **axis-aligned rectangle** keeps the dedicated half-plane clippers
-//!   (`super::clip`), so a rectangular viewport produces exactly the geometry
-//!   and diagnostics it produced before polygons were supported;
+//!   (`super::clip`), so a rectangular clip produces exactly the geometry and
+//!   diagnostics it produced before polygons were supported;
 //! * anything else is clipped with a general even-odd / crossing algorithm.
 //!
 //! A boundary that cannot be used is refused with a stable
@@ -188,6 +195,14 @@ impl PaperClip {
         triangulate(&self.boundary)
     }
 
+    /// Wrap a **validated**, counter-clockwise boundary, re-detecting the
+    /// axis-aligned rectangle case so [`Self::as_rect`] keeps the half-plane
+    /// clippers in use for it.
+    fn from_validated_boundary(boundary: Vec<[f64; 2]>) -> Self {
+        let rect = rect_of_boundary(&boundary);
+        PaperClip::new(boundary, rect)
+    }
+
     /// The tolerance this clip's own extent justifies.
     fn tolerance(&self) -> f64 {
         RELATIVE_TOLERANCE
@@ -197,17 +212,112 @@ impl PaperClip {
     }
 }
 
-/// Validate a stored clip as one simple, planar paper polygon.
+/// Validate a stored clip ring as one simple polygon in the clip plane.
 ///
-/// Stable refusals, all in the `viewport.polygon_*` family (plus the existing
-/// arity/non-finite codes):
+/// This is the **one** rule that decides whether a stored ring can be used,
+/// shared by the paper-space viewport boundary ([`validate_paper_polygon`]) and
+/// by the world-space block-reference (`XCLIP`) boundary built in
+/// [`crate::provider::block_clip_boundary`]. A ring that fails is refused by
+/// name — never squared off, widened or drawn partially.
+///
+/// Stable refusals, all in the `viewport.` family:
 ///
 /// * [`viewport_reason::CLIP_ARITY`] — fewer than three points;
 /// * [`viewport_reason::NON_FINITE`] — a non-finite coordinate;
-/// * [`viewport_reason::POLYGON_NON_PLANAR`] — the points leave the paper plane;
 /// * [`viewport_reason::POLYGON_DEGENERATE`] — a repeated vertex or zero area;
 /// * [`viewport_reason::POLYGON_SELF_INTERSECTING`] — two non-adjacent edges
 ///   cross or touch.
+///
+/// The returned ring is counter-clockwise, has no repeated closing vertex and is
+/// ready for [`PaperClip::new`] / [`WorldRectBoundary::ring`].
+pub fn validate_simple_polygon(points: &[[f64; 2]]) -> Result<Vec<[f64; 2]>, ViewportUnsupported> {
+    if points.len() < 3 {
+        return Err(ViewportUnsupported::new(
+            viewport_reason::CLIP_ARITY,
+            format!(
+                "a clip polygon needs at least three points; found {}",
+                points.len()
+            ),
+        ));
+    }
+    if !points
+        .iter()
+        .all(|point| point[0].is_finite() && point[1].is_finite())
+    {
+        return Err(ViewportUnsupported::new(
+            viewport_reason::NON_FINITE,
+            "a clip polygon has non-finite coordinates",
+        ));
+    }
+    let (min, max) = envelope(points);
+    let extent = (max[0] - min[0]).max(max[1] - min[1]);
+    if extent <= 0.0 {
+        return Err(ViewportUnsupported::new(
+            viewport_reason::POLYGON_DEGENERATE,
+            "clip polygon has no extent; every vertex coincides",
+        ));
+    }
+    let tolerance = RELATIVE_TOLERANCE * extent;
+    let count = points.len();
+    for index in 0..count {
+        let next = (index + 1) % count;
+        let (a, b) = (points[index], points[next]);
+        if (a[0] - b[0]).abs() <= tolerance && (a[1] - b[1]).abs() <= tolerance {
+            return Err(ViewportUnsupported::new(
+                viewport_reason::POLYGON_DEGENERATE,
+                format!("clip vertices {index} and {next} coincide"),
+            ));
+        }
+    }
+    for first in 0..count {
+        let first_next = (first + 1) % count;
+        for second in (first + 1)..count {
+            let second_next = (second + 1) % count;
+            // Adjacent edges share a vertex by construction; only an edge that
+            // meets an edge it shares no vertex with is a self-intersection.
+            if second == first_next || second_next == first {
+                continue;
+            }
+            if properly_crosses(
+                points[first],
+                points[first_next],
+                points[second],
+                points[second_next],
+                tolerance,
+            ) {
+                return Err(ViewportUnsupported::new(
+                    viewport_reason::POLYGON_SELF_INTERSECTING,
+                    format!(
+                        "clip edges {first}-{first_next} and {second}-{second_next} cross or \
+                         touch; the boundary is not a simple polygon"
+                    ),
+                ));
+            }
+        }
+    }
+    // A symmetric bow tie already failed the self-intersection test above, so
+    // only a genuinely collinear boundary reaches this check.
+    let area = signed_area(points);
+    if area.abs() <= tolerance * extent {
+        return Err(ViewportUnsupported::new(
+            viewport_reason::POLYGON_DEGENERATE,
+            "clip polygon has zero area (collinear vertices)",
+        ));
+    }
+    let mut boundary = points.to_vec();
+    if area < 0.0 {
+        boundary.reverse();
+    }
+    Ok(boundary)
+}
+
+/// Validate a stored clip as one simple, planar paper polygon.
+///
+/// The planarity half is paper-specific (a viewport clip must lie on its own
+/// sheet); the ring itself is validated by [`validate_simple_polygon`], so a
+/// viewport clip and a block clip accept exactly the same simple rings. Stable
+/// refusals are that function's codes plus
+/// [`viewport_reason::POLYGON_NON_PLANAR`].
 ///
 /// The returned boundary is counter-clockwise, has no repeated closing vertex
 /// and is ready for [`PaperClip::new`].
@@ -255,57 +365,7 @@ pub(super) fn validate_paper_polygon(
         ));
     }
     let boundary: Vec<[f64; 2]> = points.iter().map(|p| [p.x, p.y]).collect();
-    let count = boundary.len();
-    for index in 0..count {
-        let next = (index + 1) % count;
-        let (a, b) = (boundary[index], boundary[next]);
-        if (a[0] - b[0]).abs() <= tolerance && (a[1] - b[1]).abs() <= tolerance {
-            return Err(ViewportUnsupported::new(
-                viewport_reason::POLYGON_DEGENERATE,
-                format!("viewport clip vertices {index} and {next} coincide"),
-            ));
-        }
-    }
-    for first in 0..count {
-        let first_next = (first + 1) % count;
-        for second in (first + 1)..count {
-            let second_next = (second + 1) % count;
-            // Adjacent edges share a vertex by construction; only an edge that
-            // meets an edge it shares no vertex with is a self-intersection.
-            if second == first_next || second_next == first {
-                continue;
-            }
-            if properly_crosses(
-                boundary[first],
-                boundary[first_next],
-                boundary[second],
-                boundary[second_next],
-                tolerance,
-            ) {
-                return Err(ViewportUnsupported::new(
-                    viewport_reason::POLYGON_SELF_INTERSECTING,
-                    format!(
-                        "viewport clip edges {first}-{first_next} and {second}-{second_next} \
-                         cross or touch; the boundary is not a simple polygon"
-                    ),
-                ));
-            }
-        }
-    }
-    // A symmetric bow tie already failed the self-intersection test above, so
-    // only a genuinely collinear boundary reaches this check.
-    let area = signed_area(&boundary);
-    if area.abs() <= tolerance * extent {
-        return Err(ViewportUnsupported::new(
-            viewport_reason::POLYGON_DEGENERATE,
-            "viewport clip polygon has zero area (collinear vertices)",
-        ));
-    }
-    let mut boundary = boundary;
-    if area < 0.0 {
-        boundary.reverse();
-    }
-    Ok(boundary)
+    validate_simple_polygon(&boundary)
 }
 
 /// The axis-aligned envelope of a boundary.
@@ -484,4 +544,157 @@ fn triangulate(boundary: &[[f64; 2]]) -> Vec<[[f64; 2]; 3]> {
         boundary[indices[2]],
     ]);
     triangles
+}
+
+/// The axis-aligned rectangle a validated ring is, if it is exactly one.
+///
+/// A simple four-vertex ring that uses all four corners of its own envelope can
+/// only be that rectangle (any other ordering either leaves a corner unused or
+/// crosses itself, and a crossing ring never reaches this function). The test is
+/// therefore structural, not a comparison against an assumed corner order.
+fn rect_of_boundary(boundary: &[[f64; 2]]) -> Option<([f64; 2], [f64; 2])> {
+    if boundary.len() != 4 {
+        return None;
+    }
+    let (min, max) = envelope(boundary);
+    let width = max[0] - min[0];
+    let height = max[1] - min[1];
+    if width <= 0.0 || height <= 0.0 {
+        return None;
+    }
+    let tolerance = RELATIVE_TOLERANCE * width.max(height);
+    let mut seen = [false; 4];
+    for point in boundary {
+        let x = if (point[0] - min[0]).abs() <= tolerance {
+            0
+        } else if (point[0] - max[0]).abs() <= tolerance {
+            1
+        } else {
+            return None;
+        };
+        let y = if (point[1] - min[1]).abs() <= tolerance {
+            0
+        } else if (point[1] - max[1]).abs() <= tolerance {
+            1
+        } else {
+            return None;
+        };
+        let corner = x * 2 + y;
+        if seen[corner] {
+            return None;
+        }
+        seen[corner] = true;
+    }
+    seen.iter().all(|used| *used).then_some((min, max))
+}
+
+/// The world-space region a block reference's `XCLIP` boundary keeps.
+///
+/// The region is **one or more simple polygons** whose union is exactly what the
+/// stored boundary maps to:
+///
+/// * a boundary that maps to an axis-aligned world-XY rectangle is stored as a
+///   single rectangle piece, so the dedicated half-plane clippers
+///   (`super::clip`) run and the output is byte-for-byte the pre-polygon
+///   behaviour;
+/// * anything else — a concave polygon, a **rotated or sheared rectangle** — is
+///   the ring its own points span, never its axis-aligned envelope;
+/// * more than one piece appears only when a nested reference's boundary is
+///   intersected with its parent's (`rect ∩ concave ring` can leave two
+///   disjoint lobes). The pieces are disjoint and their union is the exact
+///   intersection, so a primitive is clipped piece by piece and the union of the
+///   results is `primitive ∩ clip`.
+///
+/// Every clipper that produces geometry goes through [`Self::pieces`] and the
+/// shared dispatchers in [`super::clip_polygon`] — there is no second clipper.
+/// [`Self::contains`] is only the point-classification view of the same region
+/// (tests and reports use it; the clippers never need it).
+#[derive(Debug, Clone, PartialEq)]
+pub struct WorldRectBoundary {
+    pieces: Vec<PaperClip>,
+}
+
+impl WorldRectBoundary {
+    /// The region that is exactly the axis-aligned rectangle `[min, max]`.
+    ///
+    /// `min`/`max` must already be ordered and non-degenerate; the provider's
+    /// axis-aligned oracle ([`crate::provider::block_clip_rect`]) guarantees both.
+    pub fn rect(min: [f64; 2], max: [f64; 2]) -> Self {
+        WorldRectBoundary {
+            pieces: vec![PaperClip::rect(min, max)],
+        }
+    }
+
+    /// Validate and wrap a world-XY ring (any winding) as the kept region.
+    ///
+    /// The ring is validated by [`validate_simple_polygon`], so `<3` points, a
+    /// repeated vertex, zero area or a self-intersection is refused by name while
+    /// the caller's geometry stays unclipped. An axis-aligned rectangle is
+    /// recognized here and keeps the half-plane clippers.
+    pub fn ring(points: &[[f64; 2]]) -> Result<Self, ViewportUnsupported> {
+        let boundary = validate_simple_polygon(points)?;
+        Ok(WorldRectBoundary {
+            pieces: vec![PaperClip::from_validated_boundary(boundary)],
+        })
+    }
+
+    /// The disjoint simple polygons whose union is the region.
+    pub fn pieces(&self) -> &[PaperClip] {
+        &self.pieces
+    }
+
+    /// The rectangle this region is, when it is exactly one.
+    pub fn as_rect(&self) -> Option<([f64; 2], [f64; 2])> {
+        match self.pieces.as_slice() {
+            [only] => only.as_rect(),
+            _ => None,
+        }
+    }
+
+    /// Whether `point` is inside the region (boundary inclusive).
+    pub fn contains(&self, point: [f64; 2]) -> bool {
+        self.pieces.iter().any(|piece| piece.contains(point))
+    }
+
+    /// The exact intersection of two regions, or `None` when they are disjoint.
+    ///
+    /// Rectangle ∩ rectangle is computed as a rectangle (so a nested pair of
+    /// rectangular clips stays on the byte-identical half-plane path);
+    /// everything else is the existing filled-polygon clipper
+    /// ([`super::clip_polygon::clip_filled_polygon`]) applied to one ring at a
+    /// time, whose convex pieces are the exact intersection. A
+    /// rectangle ∩ polygon pair is therefore refined into its real pieces rather
+    /// than being widened to the rectangle or dropped.
+    pub fn intersect(&self, other: &WorldRectBoundary) -> Option<WorldRectBoundary> {
+        let mut pieces = Vec::new();
+        for left in &self.pieces {
+            for right in &other.pieces {
+                pieces.extend(intersect_pieces(left, right));
+            }
+        }
+        if pieces.is_empty() {
+            None
+        } else {
+            Some(WorldRectBoundary { pieces })
+        }
+    }
+}
+
+/// One piece ∩ one piece, as disjoint simple polygon pieces.
+fn intersect_pieces(left: &PaperClip, right: &PaperClip) -> Vec<PaperClip> {
+    if let (Some((left_min, left_max)), Some((right_min, right_max))) =
+        (left.as_rect(), right.as_rect())
+    {
+        let min = [left_min[0].max(right_min[0]), left_min[1].max(right_min[1])];
+        let max = [left_max[0].min(right_max[0]), left_max[1].min(right_max[1])];
+        if max[0] <= min[0] || max[1] <= min[1] {
+            return Vec::new();
+        }
+        return vec![PaperClip::rect(min, max)];
+    }
+    super::clip_polygon::clip_filled_polygon(left.boundary(), right)
+        .into_iter()
+        .filter(|piece| piece.len() >= 3 && signed_area(piece) != 0.0)
+        .map(PaperClip::from_validated_boundary)
+        .collect()
 }

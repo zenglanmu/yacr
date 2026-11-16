@@ -8,7 +8,7 @@ mod image;
 mod registry;
 mod stroke;
 
-pub use clip::{block_clip_rect, BlockClipRejection, WorldRect};
+pub use clip::{block_clip_boundary, block_clip_rect, BlockClipRejection, WorldRect};
 pub use default::DefaultRepresentationProvider;
 pub use display_modes::{viewres_segment_ceiling, VIEWRES_MAX, VIEWRES_MIN, VIEWRES_MIN_SEGMENTS};
 pub use registry::{ProviderRegistry, RepresentationProvider};
