@@ -614,6 +614,8 @@ fn tabledit_format_sets_alignment_and_rotation_in_one_undo_step() {
             fill: None,
             lineweight: None,
             border_color: None,
+            border: None,
+            margin: None,
         })),
     )
     .expect("TABLEDIT FORMAT writes");
@@ -647,6 +649,8 @@ fn tabledit_format_sets_alignment_and_rotation_in_one_undo_step() {
             fill: None,
             lineweight: None,
             border_color: None,
+            border: None,
+            margin: None,
         })),
     )
     .expect("a rotation-only write");
@@ -673,6 +677,8 @@ fn a_tabledit_format_refusal_writes_nothing() {
                 fill: None,
                 lineweight: None,
                 border_color: None,
+                border: None,
+                margin: None,
             },
             "tabledit.format_empty",
         ),
@@ -685,6 +691,8 @@ fn a_tabledit_format_refusal_writes_nothing() {
                 fill: None,
                 lineweight: None,
                 border_color: None,
+                border: None,
+                margin: None,
             },
             "tabledit.out_of_range",
         ),
@@ -697,6 +705,8 @@ fn a_tabledit_format_refusal_writes_nothing() {
                 fill: None,
                 lineweight: None,
                 border_color: None,
+                border: None,
+                margin: None,
             },
             "tabledit.unchanged",
         ),

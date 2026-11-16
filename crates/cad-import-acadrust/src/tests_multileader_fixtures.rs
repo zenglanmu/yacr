@@ -700,7 +700,7 @@ pub(crate) fn rich_geometry(geometries: &[MultiLeaderGeometry]) -> &MultiLeaderG
 pub(crate) fn empty_text_geometry(geometries: &[MultiLeaderGeometry]) -> &MultiLeaderGeometry {
     geometries
         .iter()
-        .find(|geometry| geometry.content() == MLeaderContent::None)
+        .find(|geometry| *geometry.content() == MLeaderContent::None)
         .expect("the empty-text imported geometry")
 }
 
@@ -726,7 +726,7 @@ pub(crate) fn with_inconsistent_break_mirrors(
         style: geometry.style().clone(),
         style_name: geometry.style_name().to_string(),
         override_mask: geometry.override_mask(),
-        content: geometry.content(),
+        content: geometry.content().clone(),
         text: geometry.text().clone(),
         roots: geometry.roots().to_vec(),
         lines: geometry.lines().to_vec(),

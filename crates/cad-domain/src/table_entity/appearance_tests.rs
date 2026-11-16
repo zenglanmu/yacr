@@ -17,6 +17,7 @@ fn full_appearance() -> TableCellAppearanceEdit {
         fill: TableFieldEdit::Set(YELLOW),
         border_color: TableFieldEdit::Set([0, 0, 255]),
         border_lineweight: TableFieldEdit::Set(50),
+        ..TableCellAppearanceEdit::default()
     }
 }
 
@@ -65,6 +66,7 @@ fn appearance_never_changes_the_derived_geometry() {
         fill: TableFieldEdit::Keep,
         border_color: TableFieldEdit::Set([0, 0, 255]),
         border_lineweight: TableFieldEdit::Set(50),
+        ..TableCellAppearanceEdit::default()
     };
     let styled = table
         .with_cell_appearance(0, 0, appearance)
@@ -85,6 +87,7 @@ fn appearance_never_changes_the_derived_geometry() {
                 fill: TableFieldEdit::Clear,
                 border_color: TableFieldEdit::Clear,
                 border_lineweight: TableFieldEdit::Clear,
+                ..TableCellAppearanceEdit::default()
             },
         )
         .expect("in grid");

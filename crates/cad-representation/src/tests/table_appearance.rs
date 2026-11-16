@@ -120,6 +120,7 @@ fn a_cell_colour_reaches_its_fragment_as_a_concrete_value() {
                 fill: TableFieldEdit::Set(YELLOW),
                 border_color: TableFieldEdit::Set(BLUE),
                 border_lineweight: TableFieldEdit::Set(50),
+                ..TableCellAppearanceEdit::default()
             },
         )
         .expect("in grid");

@@ -68,6 +68,27 @@ impl<'a> ImporterBuilder<'a> {
             });
         let snapshot = table_style_snapshot(table_style);
 
+        // The per-cell `GRIDFORMAT`/`CELLMARGIN` values live on the companion
+        // `TABLECONTENT` object this build's exporter writes beside the entity
+        // (the `ACAD_TABLE` entity record carries no such block). The object is
+        // owned by this entity, which is the pair rule; when it is absent the
+        // table keeps exactly the values the entity record carries.
+        let table_content = self
+            .acad
+            .objects
+            .iter()
+            .find_map(|(_, object)| match object {
+                acadrust::objects::ObjectType::TableContent(content)
+                    if !t.common.handle.is_null()
+                        && content.common.owner_handle == t.common.handle =>
+                {
+                    Some(content)
+                }
+                _ => None,
+            });
+        let mut margin_overrides: Vec<((usize, usize), TableCellMargins)> = Vec::new();
+        let mut malformed_margins = false;
+
         // Whether any cell/row/base/table style was found; only then is the
         // border-fidelity reason reported instead of the plain-grid one.
         let mut styled = false;
@@ -106,6 +127,38 @@ impl<'a> ImporterBuilder<'a> {
                     .copied()
                     .unwrap_or_default()
                     .with_resolved_appearance(&level_sets);
+
+                // The cell's own `GRIDFORMAT` block, when the companion
+                // `TABLECONTENT` object carries one. Its double-line spacing is
+                // the border **type** this build stores (a spacing above zero is
+                // the DXF `Double` type) and its `CELLMARGIN` block is the only
+                // source of a per-cell margin override.
+                let content_style = table_content
+                    .and_then(|content| content.rows.get(row_index))
+                    .and_then(|row| row.cells.get(column_index))
+                    .and_then(|cell| cell.style.as_ref());
+                let cell_borders = {
+                    let mut borders = TableCellBorders {
+                        top: border_view(borders.top),
+                        right: border_view(borders.right),
+                        bottom: border_view(borders.bottom),
+                        left: border_view(borders.left),
+                    };
+                    if let Some(spacing) = content_style.and_then(grid_spacing) {
+                        borders.top.double_spacing = spacing[0];
+                        borders.right.double_spacing = spacing[1];
+                        borders.bottom.double_spacing = spacing[2];
+                        borders.left.double_spacing = spacing[3];
+                    }
+                    borders
+                };
+                if let Some(style) = content_style {
+                    let (margins, malformed) = cell_margins_from_style(style);
+                    malformed_margins |= malformed;
+                    if let Some(margins) = margins {
+                        margin_overrides.push(((row_index, column_index), margins));
+                    }
+                }
 
                 // Text height/style precedence: cell -> row -> base -> resolved
                 // TableStyle row -> the cell content -> the importer default. The
@@ -205,12 +258,7 @@ impl<'a> ImporterBuilder<'a> {
                     },
                     merge_width: clamp_source_span(cell.merge_width, t.columns.len(), column_index),
                     merge_height: clamp_source_span(cell.merge_height, t.rows.len(), row_index),
-                    borders: TableCellBorders {
-                        top: border_view(borders.top),
-                        right: border_view(borders.right),
-                        bottom: border_view(borders.bottom),
-                        left: border_view(borders.left),
-                    },
+                    borders: cell_borders,
                     text_color,
                     fill_color,
                 });
@@ -241,11 +289,46 @@ impl<'a> ImporterBuilder<'a> {
                     .table_style_handle
                     .and_then(|handle| self.style_name_of_object(handle))
                     .unwrap_or_default(),
-                name: t.name.clone(),
-                description: t.description.clone(),
+                // The linked-data name/description are written on the companion
+                // `TABLECONTENT` object (the entity record has no group for
+                // them in this writer), so the object's values are the ones that
+                // come back; the entity's own are used when it carries any.
+                name: if t.name.is_empty() {
+                    table_content
+                        .map(|content| content.name.clone())
+                        .unwrap_or_default()
+                } else {
+                    t.name.clone()
+                },
+                description: if t.description.is_empty() {
+                    table_content
+                        .map(|content| content.description.clone())
+                        .unwrap_or_default()
+                } else {
+                    t.description.clone()
+                },
             },
             snapshot,
         );
+        // The `CELLMARGIN` overrides are stored sparsely, so they are applied in
+        // one write (one display rebuild) rather than one per cell.
+        let mut margin_refused: Option<String> = None;
+        let geometry = if margin_overrides.is_empty() {
+            geometry
+        } else {
+            match geometry.with_cell_margins_bulk(margin_overrides) {
+                Ok(updated) => updated,
+                Err(error) => {
+                    // A margin the model refuses is a source defect, never a
+                    // silent drop: the cells keep their inherited placement and
+                    // the reason names the loss.
+                    margin_refused = Some(format!(
+                        "a per-cell CELLMARGIN block was not applied: {error}"
+                    ));
+                    geometry
+                }
+            }
+        };
         if geometry.display().is_empty() {
             return (
                 opaque(),
@@ -265,15 +348,29 @@ impl<'a> ImporterBuilder<'a> {
         // Named limitations of the modelling itself, kept separate so a caller
         // can see exactly what was not applied.
         reasons.push(
-            "per-cell text colour, background fill and border colour/lineweight are stored and \
-             drawn, but a cell that turns an inherited background fill *off* over a style row that \
-             enables one re-resolves to the row's fill on re-import (the DXF cell record has no \
-             'fill explicitly off' value this reader can tell from 'not written'); a per-border \
-             line **type** is not modelled (this writer emits no per-cell border line type), and \
-             the renderer draws every border one pixel wide, so a stored lineweight reaches the \
-             batch but no wider stroke"
+            "per-cell text colour, background fill, border colour/lineweight, border type \
+             (double-line spacing) and CELLMARGIN margins are stored and drawn, but a cell that \
+             turns an inherited background fill *off* over a style row that enables one re-resolves \
+             to the row's fill on re-import (the DXF cell record has no 'fill explicitly off' value \
+             this reader can tell from 'not written'); the CELLMARGIN block's two *content* \
+             spacings (horizontal/vertical spacing, not the text inset) are not modelled; a \
+             per-border line **type** is not modelled \
+             (the only DXF group is an LTYPE handle, this writer emits no per-cell border line type \
+             and this build's fragment expansion has no per-primitive dash source), and the \
+             renderer draws every border one pixel wide, so a stored lineweight reaches the batch \
+             but no wider stroke"
                 .to_string(),
         );
+        if malformed_margins {
+            reasons.push(
+                "a per-cell CELLMARGIN value was negative or not finite and was dropped; the cell \
+                 keeps its inherited margin"
+                    .to_string(),
+            );
+        }
+        if let Some(reason) = margin_refused {
+            reasons.push(reason);
+        }
         if table_style.is_some() {
             reasons.push(
                 "table-style row value sets are applied per row type from the style's title/header \
@@ -316,6 +413,66 @@ impl<'a> ImporterBuilder<'a> {
             _ => None,
         }
     }
+}
+
+/// The four edges' double-line spacing from a `GRIDFORMAT` cell style, in
+/// `[top, right, bottom, left]` order, or `None` when no edge carries one.
+///
+/// Only an edge the style marks as applied has a `GRIDFORMAT` block; a spacing
+/// above zero is the DXF `Double` border type, and a `Double` type with no
+/// spacing draws a single line, so a zero spacing stores nothing.
+fn grid_spacing(style: &acadrust::entities::CellStyle) -> Option<[f64; 4]> {
+    use acadrust::entities::CellEdgeFlags;
+    let spacing = |border: &acadrust::entities::CellBorder, flag: CellEdgeFlags| {
+        (style.applied_border_edges.contains(flag)
+            && border.double_spacing.is_finite()
+            && border.double_spacing > 0.0)
+            .then_some(border.double_spacing)
+    };
+    let edges = [
+        spacing(&style.top_border, CellEdgeFlags::TOP),
+        spacing(&style.right_border, CellEdgeFlags::RIGHT),
+        spacing(&style.bottom_border, CellEdgeFlags::BOTTOM),
+        spacing(&style.left_border, CellEdgeFlags::LEFT),
+    ];
+    if edges.iter().all(Option::is_none) {
+        return None;
+    }
+    Some(edges.map(|value| value.unwrap_or(0.0)))
+}
+
+/// One cell's `CELLMARGIN` override, and whether a stored value had to be
+/// dropped.
+///
+/// Only a margin the style's `margin_override_flags` marks as overridden is
+/// stored (the block carries a value for all four edges, including the ones the
+/// source never set). A negative or non-finite value cannot be drawn, so it is
+/// dropped and reported rather than clamped.
+fn cell_margins_from_style(
+    style: &acadrust::entities::CellStyle,
+) -> (Option<TableCellMargins>, bool) {
+    use acadrust::entities::CellStylePropertyFlags as Flags;
+    let flags = style.margin_override_flags;
+    let overrides = |flag: Flags| flags & (flag.bits() as i16) != 0;
+    let mut malformed = false;
+    let mut pick = |overridden: bool, value: f64| -> Option<f64> {
+        if !overridden {
+            return None;
+        }
+        if value.is_finite() && value >= 0.0 {
+            Some(value)
+        } else {
+            malformed = true;
+            None
+        }
+    };
+    let margins = TableCellMargins {
+        left: pick(overrides(Flags::MARGIN_LEFT), style.margin_left),
+        top: pick(overrides(Flags::MARGIN_TOP), style.margin_top),
+        right: pick(overrides(Flags::MARGIN_RIGHT), style.margin_right),
+        bottom: pick(overrides(Flags::MARGIN_BOTTOM), style.margin_bottom),
+    };
+    ((!margins.is_inherit()).then_some(margins), malformed)
 }
 
 /// The resolved border for one edge view (visibility, spacing, colour and

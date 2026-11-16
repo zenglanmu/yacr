@@ -25,13 +25,18 @@
 //! filled quad behind the text) and each border edge's colour and lineweight are
 //! stored, drawn and written back to DXF. A cell that sets none of them emits
 //! [`TableDisplayAppearance::NONE`] for every primitive, so its draw is exactly
-//! what it was before the channel existed. What still cannot be carried: a
-//! border **linetype** (this writer emits no per-cell border line type), and the
-//! renderer draws every line one pixel wide, so a stored border lineweight
-//! reaches the batch but no wider stroke (`render.lineweight_not_drawn`). A
-//! merged range is stored as the anchor cell's `merge_width`/`merge_height`;
-//! covered cells are still present in [`TableRowGeometry::cells`] (as the source
-//! stores them) and contribute no display.
+//! what it was before the channel existed. The cell's `GRIDFORMAT` **margins** are
+//! a second, sparse channel ([`TableCellMargins`]): an override insets the cell's
+//! text anchor, and a cell that sets none draws at the anchor it always had.
+//! What still cannot be carried: a **border linetype** (the only DXF group is an
+//! `LTYPE` handle, this writer emits no per-cell border line type, and the
+//! fragment expansion has no per-primitive dash source — a stored value could
+//! neither draw nor round-trip, so the commands refuse it by name), and the
+//! renderer draws every line one pixel wide, so a stored border lineweight reaches
+//! the batch but no wider stroke (`render.lineweight_not_drawn`). A merged range
+//! is stored as the anchor cell's `merge_width`/`merge_height`; covered cells are
+//! still present in [`TableRowGeometry::cells`] (as the source stores them) and
+//! contribute no display.
 
 use crate::dimension_synthesis::{is_finite_point, length, normalize};
 use crate::{CadError, CadResult, Point3, SemanticGeometry, StyleId, Transform3};
@@ -40,13 +45,19 @@ pub use appearance::{TableCellAppearanceEdit, TableDisplayAppearance, TableField
 pub use format::{
     TableCellAlignH, TableCellAlignV, TableCellAlignment, TableRowKind, TableRowStyle,
 };
+pub use grid::{TableCellMargins, TableCellMarginsEdit};
 pub use style::{TableStyleValues, DEFAULT_TABLE_MARGIN, DEFAULT_TABLE_STYLE_NAME};
+
+use grid::CellMarginTable;
 
 mod appearance;
 mod csv;
 mod display;
 mod edit;
 mod format;
+mod grid;
+#[cfg(test)]
+mod grid_tests;
 mod style;
 
 /// Similarity tolerance for the table transform (the same ratio rule every
@@ -274,6 +285,10 @@ pub struct TableGeometry {
     /// The table style snapshot (`TABLESTYLE`): the name, the data-row values
     /// and (when a row type is distinguished) the title/header row values.
     style: TableStyleValues,
+    /// The sparse per-cell `GRIDFORMAT` margin overrides. A cell that sets no
+    /// margin has no entry, so a table without margins stores nothing and emits
+    /// no `CELLMARGIN` block ([`TableCellMargins`]).
+    margins: CellMarginTable,
     name: String,
     description: String,
     display: display::TableDisplay,
@@ -328,6 +343,7 @@ impl TableGeometry {
             columns: parts.columns,
             rows: parts.rows,
             style,
+            margins: CellMarginTable::new(),
             name: parts.name,
             description: parts.description,
             display: display::TableDisplay::default(),
@@ -457,6 +473,11 @@ impl TableGeometry {
             columns,
             rows,
             style: self.style.scaled(s),
+            margins: self
+                .margins
+                .iter()
+                .map(|(address, margins)| (*address, margins.scaled(s)))
+                .collect(),
             name: self.name.clone(),
             description: self.description.clone(),
             display: display::TableDisplay::default(),
@@ -516,6 +537,34 @@ impl TableGeometry {
         self.rows.get(row).and_then(|row| row.cells.get(column))
     }
 
+    /// One cell's `GRIDFORMAT` margin override (DXF `CELLMARGIN`), or
+    /// [`TableCellMargins::INHERIT`] when the cell sets none.
+    ///
+    /// `None` for an address outside the grid, so a caller can tell "no
+    /// override" from "no such cell".
+    pub fn cell_margins(&self, row: usize, column: usize) -> Option<TableCellMargins> {
+        self.cell(row, column)?;
+        Some(
+            self.margins
+                .get(&(row, column))
+                .copied()
+                .unwrap_or(TableCellMargins::INHERIT),
+        )
+    }
+
+    /// Every cell that stores a margin override, in row-major order.
+    ///
+    /// The exporter writes exactly these cells' `CELLMARGIN` blocks, so the file
+    /// carries no block for a cell that inherits — that is what keeps an
+    /// unset-margin table's file byte-identical to the pre-margin export.
+    pub fn margin_overrides(
+        &self,
+    ) -> impl Iterator<Item = ((usize, usize), TableCellMargins)> + '_ {
+        self.margins
+            .iter()
+            .map(|(address, margins)| (*address, *margins))
+    }
+
     /// The style snapshot the cells inherit from (`TABLESTYLE`).
     pub fn style(&self) -> &TableStyleValues {
         &self.style
@@ -572,7 +621,7 @@ impl TableGeometry {
     /// themselves, so no caller can leave a display that disagrees with the
     /// definition.
     pub(crate) fn rebuild_display(&mut self) {
-        self.display = display::build(&self.frame, &self.columns, &self.rows);
+        self.display = display::build(&self.frame, &self.columns, &self.rows, &self.margins);
     }
 }
 

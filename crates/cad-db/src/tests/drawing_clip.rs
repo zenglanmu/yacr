@@ -19,11 +19,7 @@ fn writable_db_with_line() -> DrawingDatabase {
 }
 
 fn sample_clip() -> BlockClip {
-    BlockClip {
-        vertices: vec![[0.0, 0.0], [2.0, 1.0]],
-        inside: true,
-        visible: true,
-    }
+    BlockClip::new(vec![[0.0, 0.0], [2.0, 1.0]], true, true)
 }
 
 #[test]

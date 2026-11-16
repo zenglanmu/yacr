@@ -44,29 +44,14 @@ pub enum MLeaderPathType {
     Spline,
 }
 
-/// Content kind of a migrated multileader.
-///
-/// ADR 0019 C.3 migrates only MText content (`172 = 2`) and content-less
-/// leaders (`172 = 0`). Block and tolerance content deliberately stay on the
-/// pre-P7b `Compound` path, so they never reach this type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum MLeaderContent {
-    /// `172 = 0`: leaders without annotation content.
-    #[default]
-    None,
-    /// `172 = 2`: the string lives in [`MultiLeaderText`].
-    Text,
-}
-
-impl MLeaderContent {
-    /// The DXF `172` code of this content kind (`0` none, `2` MText).
-    pub fn dxf(self) -> i16 {
-        match self {
-            Self::None => 0,
-            Self::Text => 2,
-        }
-    }
-}
+// The content kind and its per-kind payload live in `multileader_content.rs`
+// (code-size gate); their display derivation is called from `build_display`
+// below, so this module stays the one display owner.
+pub use crate::multileader_content::{
+    tolerance_frame_geometries, MLeaderBlockContent, MLeaderContent, MLeaderContentKind,
+    MLeaderCreateContent, MLeaderToleranceContent, TOLERANCE_CELL_PADDING_FACTOR,
+    TOLERANCE_CHAR_WIDTH_FACTOR, TOLERANCE_ROW_HEIGHT_FACTOR,
+};
 
 /// A plane frame: the DXF `110`/`111`/`112` base point, direction and vertical,
 /// plus group `297` (normal reversed).
@@ -471,10 +456,18 @@ impl MultiLeaderGeometry {
                 ));
             }
         }
-        if parts.content == MLeaderContent::Text && parts.text.string.trim().is_empty() {
+        if parts.content.kind() == MLeaderContentKind::Text && parts.text.string.trim().is_empty() {
             return Err(CadError::InvalidInput(
                 "mleader.text_required: a created multileader needs a non-empty text".into(),
             ));
+        }
+        // The content's own refusals, then the height the annotation stores: for
+        // tolerance content the frame height (`CONTEXT_DATA 41`) is the content's
+        // and the stored text height mirrors it, so the two can never disagree.
+        let height = parts.content.validate(&parts.text)?;
+        let mut parts = parts;
+        if parts.content.kind() == MLeaderContentKind::Tolerance {
+            parts.text.height = height;
         }
         let (geometry, _reasons) = Self::from_import(parts);
         if geometry.display.is_empty() {
@@ -561,6 +554,14 @@ impl MultiLeaderGeometry {
         // The text rotation is the display's in-plane angle; a rigid motion adds
         // the same XY rotation the other display kinds accumulate.
         text.rotation += delta;
+        // Block content carries its own placement (the block instance the display
+        // expands), so the rigid motion moves its insertion point and adds the
+        // same in-plane rotation; a rigid motion never changes a scale factor.
+        let mut content = self.content.clone();
+        if let MLeaderContent::Block(block) = &mut content {
+            block.location = p(block.location);
+            block.rotation += delta;
+        }
         let plane = PlaneFrame {
             origin: p(self.plane.origin),
             u: v(self.plane.u),
@@ -571,7 +572,7 @@ impl MultiLeaderGeometry {
             style: self.style.clone(),
             style_name: self.style_name.clone(),
             override_mask: self.override_mask,
-            content: self.content,
+            content,
             text,
             roots,
             lines,
@@ -602,13 +603,12 @@ impl MultiLeaderGeometry {
     /// Refusals (the receiver is unchanged; the caller opens no transaction):
     ///
     /// * `mleader.content_not_text` — the leader has no text content to replace
-    ///   (this build models only [`MLeaderContent::Text`] and
-    ///   [`MLeaderContent::None`]; block/tolerance content stays on the
-    ///   `Compound` path and never reaches this type);
+    ///   (only [`MLeaderContent::Text`] carries a replaceable string; a
+    ///   content-less, block-content or tolerance-content leader has none);
     /// * `mleader.text_required` — the replacement is empty or whitespace-only,
     ///   the same rule [`Self::new`] applies to created leaders.
     pub fn with_text(&self, string: &str) -> CadResult<Self> {
-        if self.content != MLeaderContent::Text {
+        if self.content.kind() != MLeaderContentKind::Text {
             return Err(CadError::Unsupported(
                 "mleader.content_not_text: this multileader carries no text content to replace"
                     .into(),
@@ -638,8 +638,19 @@ impl MultiLeaderGeometry {
         self.override_mask
     }
 
-    pub fn content(&self) -> MLeaderContent {
-        self.content
+    pub fn content(&self) -> &MLeaderContent {
+        &self.content
+    }
+
+    /// The block payload, when the annotation content is an inserted block.
+    pub fn block_content(&self) -> Option<&MLeaderBlockContent> {
+        self.content.block()
+    }
+
+    /// The tolerance payload, when the annotation content is a feature-control
+    /// frame.
+    pub fn tolerance_content(&self) -> Option<&MLeaderToleranceContent> {
+        self.content.tolerance()
     }
 
     pub fn text(&self) -> &MLeaderText {
@@ -674,11 +685,13 @@ impl MultiLeaderGeometry {
             .filter(move |line| line.root_index == root_index)
     }
 
-    /// Derive the display from `style + text + roots + lines`.
+    /// Derive the display from `style + content + text + roots + lines`.
     ///
-    /// This is a verbatim move of the pre-P7b importer synthesis; the order is
-    /// root by root (path, arrowhead, dogleg), then the annotation text. Returns
-    /// the display and the honest reasons for preserved-but-unrendered data.
+    /// The leader paths/arrowheads/doglegs are a verbatim move of the pre-P7b
+    /// importer synthesis (root by root), and the annotation is drawn by its
+    /// content kind: MText here (it honours the stored text angle type), block and
+    /// tolerance content through [`MLeaderContent::display`]. Returns the display
+    /// and the honest reasons for preserved-but-unrendered data.
     fn build_display(&self) -> (Vec<SemanticGeometry>, Vec<String>) {
         let mut children: Vec<SemanticGeometry> = Vec::new();
         let mut custom_arrowhead = false;
@@ -720,8 +733,26 @@ impl MultiLeaderGeometry {
                 }
             }
         }
-        if self.content == MLeaderContent::Text && !self.text.string.is_empty() {
-            children.push(self.text_geometry());
+        // The annotation content: MText draws the string at its stored placement
+        // (the text-angle-aware child), while block and tolerance content draw
+        // their own derivation through the content module — one display owner,
+        // no second synthesis.
+        let mut content_reasons: Vec<String> = Vec::new();
+        match self.content.kind() {
+            MLeaderContentKind::Text => {
+                if !self.text.string.is_empty() {
+                    children.push(self.text_geometry());
+                }
+            }
+            _ => {
+                let (mut content, mut reasons) = self.content.display(
+                    &self.text,
+                    self.style.text_style,
+                    self.style.text_font.clone(),
+                );
+                children.append(&mut content);
+                content_reasons.append(&mut reasons);
+            }
         }
 
         let mut reasons: Vec<String> = vec![
@@ -729,6 +760,7 @@ impl MultiLeaderGeometry {
              applied (the representation carries one colour per entity)"
                 .into(),
         ];
+        reasons.append(&mut content_reasons);
         if let Some(background) = &self.reserved.background {
             if background.fill_enabled {
                 reasons.push("multileader background fill is not applied".into());

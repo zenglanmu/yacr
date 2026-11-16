@@ -43,6 +43,26 @@ fn xclip_argument_is_a_block_local_boundary_or_a_switch_or_a_report() {
             [10.0, 5.0],
         ]))
     );
+    // `CLIPDEPTH` is the front/back depth band of the stored boundary; `OFF`
+    // clears it. The numbers are plain decimals and their ordering is the
+    // command's `xclip.depth_range` refusal, not a syntax rule.
+    assert_eq!(
+        parse_xclip_argument("CLIPDEPTH -1 2.5"),
+        Some(XClipCommand::ClipDepth([-1.0, 2.5]))
+    );
+    assert_eq!(
+        parse_xclip_argument("clipdepth 0 0"),
+        Some(XClipCommand::ClipDepth([0.0, 0.0])),
+        "the keyword is case-insensitive and a zero-width band is syntax-valid"
+    );
+    assert_eq!(
+        parse_xclip_argument("CLIPDEPTH OFF"),
+        Some(XClipCommand::ClipDepthOff)
+    );
+    assert_eq!(
+        parse_xclip_argument("clipdepth off"),
+        Some(XClipCommand::ClipDepthOff)
+    );
     // Ordering and polygon validity are the command's named refusals, not
     // syntax: any four finite numbers or three point pairs are admitted here.
     assert_eq!(
@@ -60,6 +80,11 @@ fn xclip_argument_is_a_block_local_boundary_or_a_switch_or_a_report() {
         "POLY 0 0 10 0 x 5",
         "ON EXTRA",
         "? EXTRA",
+        "CLIPDEPTH",
+        "CLIPDEPTH 1",
+        "CLIPDEPTH 1 2 3",
+        "CLIPDEPTH a 2",
+        "CLIPDEPTH OFF 1",
         "NONE",
         "REC 0 0 1 1",
     ] {
@@ -93,6 +118,8 @@ fn typed_xclip_reaches_the_command_layer_and_refuses_no_selection() {
         "XCLIP RECT 0 0 10 5",
         "XCLIP POLY 0 0 10 0 10 5",
         "XCLIP ON",
+        "XCLIP CLIPDEPTH 0 1",
+        "XCLIP CLIPDEPTH OFF",
         "XCLIP ?",
     ] {
         let error = session.command(line).expect_err(line);

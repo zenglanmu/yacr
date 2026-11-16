@@ -5,8 +5,14 @@ use crate::*;
 
 use cad_db::LayerScope;
 
-use super::clip::{block_clip_boundary, rejection_code, rejection_message};
+use super::clip::{
+    block_clip_boundary, block_clip_depth, rejection_code, rejection_message, ClipDepth,
+};
 use super::default::chord_tessellation_params;
+use super::depth::{
+    conic_depth_span, depth_straddle_message, filter_runs_by_depth, primitive_depth_kind,
+    primitive_depth_span,
+};
 use super::registry::ProviderRegistry;
 
 impl ProviderRegistry {
@@ -46,6 +52,10 @@ impl ProviderRegistry {
         // piece by piece and the union of the pieces is exactly
         // `primitive ∩ clip`.
         inherited_clip: Option<&WorldRectBoundary>,
+        // The world z band inherited from a containing INSERT's `XCLIP` **clip
+        // depth** (front/back distances). `None` means the branch is not depth
+        // clipped, which is what every clip without those distances keeps.
+        inherited_depth: Option<ClipDepth>,
         stack: &mut Vec<BlockId>,
         out: &mut DisplayRepresentation,
     ) -> CadResult<()> {
@@ -163,6 +173,42 @@ impl ProviderRegistry {
                     // a boundary this build cannot render exactly is reported and
                     // leaves the branch clipped by its ancestors only.
                     let mut empty_clip = false;
+                    // The depth band is resolved on its own: it is a z range, not
+                    // a region, so a boundary whose depth cannot be mapped keeps
+                    // its 2D cut and names the depth loss, while a boundary that
+                    // has no renderable region is not depth-clipped either (the
+                    // whole boundary was refused, reported below).
+                    let mut child_depth = inherited_depth;
+                    if let Some(stored) = attributes.clip.as_ref() {
+                        if stored.visible {
+                            match block_clip_depth(stored, &composed) {
+                                Ok(Some(own)) => {
+                                    child_depth = match inherited_depth {
+                                        None => Some(own),
+                                        Some(outer) => match outer.intersect(own) {
+                                            Some(band) => Some(band),
+                                            // Disjoint bands: nothing of this
+                                            // instance can be inside both, so
+                                            // the children are omitted exactly.
+                                            None => {
+                                                empty_clip = true;
+                                                None
+                                            }
+                                        },
+                                    };
+                                }
+                                Ok(None) => {}
+                                Err(_) => report_xclip(
+                                    out,
+                                    entity,
+                                    "representation.xclip_depth_unsupported",
+                                    "the clip's front/back depth distances cannot be mapped to a \
+                                     world z band (the reference transform is singular or not a \
+                                     finite plan map), so the reference is clipped in XY only",
+                                ),
+                            }
+                        }
+                    }
                     let child_clip = match attributes.clip.as_ref() {
                         None => inherited_clip.cloned(),
                         Some(stored) => match block_clip_boundary(stored, &composed) {
@@ -222,6 +268,7 @@ impl ProviderRegistry {
                                 Some((&own_linetype, linetype_scale)),
                                 global_lt_scale,
                                 child_clip.as_ref(),
+                                child_depth,
                                 stack,
                                 out,
                             )?;
@@ -247,6 +294,7 @@ impl ProviderRegistry {
                         linetype_scale,
                         draw_order,
                         inherited_clip,
+                        inherited_depth,
                         context.packed_line_segments,
                         global_lt_scale,
                         out,
@@ -270,6 +318,27 @@ impl ProviderRegistry {
                             DisplayPrimitive::Conic(transformed) => transformed,
                             _ => unreachable!("transforming a conic yields a conic"),
                         };
+                    // The depth band is a z filter on the transformed geometry, so
+                    // it is decided once here and both draw paths below obey it.
+                    if let Some(band) = inherited_depth {
+                        match conic_depth_span(&transformed) {
+                            Some((min, max)) if band.excludes(min, max) => continue,
+                            Some((min, max)) if !band.contains(min, max) => report_xclip(
+                                out,
+                                entity,
+                                "representation.xclip_depth_straddle",
+                                &depth_straddle_message(band),
+                            ),
+                            Some(_) => {}
+                            None => report_xclip(
+                                out,
+                                entity,
+                                "representation.xclip_depth_unsupported",
+                                "the conic's z extent is not finite, so the clip depth band is not \
+                                 applied to it and it is kept",
+                            ),
+                        }
+                    }
                     let geometric = transformed.is_sdf_circle_arc();
                     let eligible = own_alpha == 1.0
                         && own_linetype.is_continuous()
@@ -369,6 +438,7 @@ impl ProviderRegistry {
                             linetype_scale,
                             draw_order,
                             inherited_clip,
+                            inherited_depth,
                             context.packed_line_segments,
                             global_lt_scale,
                             out,
@@ -408,6 +478,34 @@ impl ProviderRegistry {
                     // rectangle (already in world space) and the geometry share
                     // one coordinate system.
                     let primitive = primitive.transformed(transform);
+                    // The depth band is a z filter, applied before the XY region
+                    // clip: a primitive wholly outside the band is omitted exactly
+                    // (the same answer a fully-outside line already gets), and one
+                    // that straddles it is kept whole and reported — this build
+                    // filters by z extent, it does not cut a primitive at a depth
+                    // plane.
+                    if let Some(band) = inherited_depth {
+                        match primitive_depth_span(&primitive) {
+                            Some((min, max)) if band.excludes(min, max) => continue,
+                            Some((min, max)) if !band.contains(min, max) => report_xclip(
+                                out,
+                                entity,
+                                "representation.xclip_depth_straddle",
+                                &depth_straddle_message(band),
+                            ),
+                            Some(_) => {}
+                            None => report_xclip(
+                                out,
+                                entity,
+                                "representation.xclip_depth_unsupported",
+                                &format!(
+                                    "the {} geometry has no finite z extent, so the clip depth \
+                                     band is not applied to it and it is kept",
+                                    primitive_depth_kind(&primitive)
+                                ),
+                            ),
+                        }
+                    }
                     let emit = |primitive: DisplayPrimitive, out: &mut DisplayRepresentation| {
                         let mut source = fragment.source.clone();
                         source.instance = path.clone();
@@ -451,6 +549,10 @@ impl ProviderRegistry {
 /// A primitive with no exact clip path is **kept** and reported, never dropped
 /// or silently drawn as clipped; a clipper that refuses makes the whole
 /// primitive stay unclipped (never a partial cut) and report its stable code.
+///
+/// The clip **depth** band is a separate filter applied before this one (see
+/// `primitive_depth_span`): it drops whole primitives outside the band and keeps
+/// a straddling primitive whole, reported by name.
 fn emit_clipped(
     entity: &DbEntity,
     primitive: DisplayPrimitive,
@@ -620,7 +722,12 @@ fn clip_conic_region(
 }
 
 /// Record one `XCLIP` degradation: a `Partial` completeness plus a diagnostic.
-fn report_xclip(out: &mut DisplayRepresentation, entity: &DbEntity, code: &str, message: &str) {
+pub(super) fn report_xclip(
+    out: &mut DisplayRepresentation,
+    entity: &DbEntity,
+    code: &str,
+    message: &str,
+) {
     out.completeness = weaker_completeness(
         &out.completeness,
         &Completeness::Partial(vec![message.to_string()]),
@@ -684,6 +791,10 @@ fn emit_polyline(
     // the boundary is cut exactly and a fully outside dash disappears; a
     // multi-piece region is clipped piece by piece.
     clip: Option<&WorldRectBoundary>,
+    // World-space clip **depth** band of the containing INSERT's `XCLIP`, if any.
+    // Applied per run (per dash in packed mode) before the XY cut: a run wholly
+    // outside the band disappears, a run crossing it is kept whole and reported.
+    depth: Option<ClipDepth>,
     packed_configured: bool,
     global_lt_scale: f64,
     out: &mut DisplayRepresentation,
@@ -725,6 +836,10 @@ fn emit_polyline(
             message: format!("linetype dashes fell back to continuous: {reason}"),
         });
     }
+    let runs = match depth {
+        Some(band) => filter_runs_by_depth(entity, runs, band, packed, out),
+        None => runs,
+    };
     let runs = match clip {
         Some(region) => clip_polyline_runs(runs, region, packed),
         None => runs,

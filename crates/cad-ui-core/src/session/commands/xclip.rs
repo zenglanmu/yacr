@@ -16,7 +16,8 @@ use super::arguments::parse_signed_decimal;
 pub const XCLIP_SELECTOR: &str = "XCLIP";
 
 /// `XCLIP RECT <minx> <miny> <maxx> <maxy>` / `XCLIP POLY <x1> <y1> …` /
-/// `XCLIP ON|OFF|DELETE|INVERT` / `XCLIP ?`.
+/// `XCLIP ON|OFF|DELETE|INVERT` / `XCLIP CLIPDEPTH <front> <back>|OFF` /
+/// `XCLIP ?`.
 ///
 /// The four rectangle coordinates are block-local signed plain decimals; their
 /// ordering (`minx < maxx`, `miny < maxy`) is the command's
@@ -25,6 +26,12 @@ pub const XCLIP_SELECTOR: &str = "XCLIP";
 /// `POLY` takes at least three block-local point pairs (`z = 0`): the command
 /// validates the ring with the shared `validate_clip_polygon` rule
 /// (`xclip.degenerate_polygon` / `.non_coplanar` / `.self_intersecting`).
+///
+/// `CLIPDEPTH` sets the kept block-local z band (`front <= back`), and
+/// `CLIPDEPTH OFF` clears it; finiteness and ordering are the command's
+/// `xclip.depth_range` refusal, and a reference without a stored boundary is
+/// `xclip.no_boundary`. Both are the same single display transaction as
+/// `RECT`/`ON`/`OFF`.
 ///
 /// `ON`/`OFF`/`DELETE`/`INVERT` are the one-token switch forms and `?` is the
 /// read-only report; anything else is outside the grammar.
@@ -48,6 +55,20 @@ pub fn parse_xclip_argument(argument: &str) -> Option<XClipCommand> {
             return Some(XClipCommand::Report);
         }
         return None;
+    }
+    if first.eq_ignore_ascii_case("CLIPDEPTH") {
+        if rest.len() == 1 {
+            return rest[0]
+                .eq_ignore_ascii_case("OFF")
+                .then_some(XClipCommand::ClipDepthOff);
+        }
+        if rest.len() != 2 {
+            return None;
+        }
+        return Some(XClipCommand::ClipDepth([
+            parse_signed_decimal(rest[0])?,
+            parse_signed_decimal(rest[1])?,
+        ]));
     }
     if first.eq_ignore_ascii_case("RECT") {
         if rest.len() != 4 {

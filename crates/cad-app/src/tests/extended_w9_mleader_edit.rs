@@ -433,6 +433,7 @@ fn create_payload(
         dogleg_angle,
         attachment,
         text_angle: None,
+        content: None,
     }
 }
 

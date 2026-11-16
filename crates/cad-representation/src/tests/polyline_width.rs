@@ -214,11 +214,7 @@ fn distance_to_polyline(point: &Point3, polyline: &[Point3]) -> f64 {
 
 /// A block-local `XCLIP` rectangle (the xclip tests' minimal boundary).
 fn clip_rect(minx: f64, miny: f64, maxx: f64, maxy: f64) -> BlockClip {
-    BlockClip {
-        vertices: vec![[minx, miny], [maxx, maxy]],
-        inside: true,
-        visible: true,
-    }
+    BlockClip::new(vec![[minx, miny], [maxx, maxy]], true, true)
 }
 
 #[test]

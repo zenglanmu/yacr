@@ -156,6 +156,9 @@ pub(crate) mod text_batch;
 mod text_edit;
 // TABLE / -TABLE creation and TABLEDIT cell-text editing (2026-11-10).
 mod table_edit;
+// The table commands' shared report/write-diagnostic labels, split out so
+// `table_ops` stays inside the code-size limit.
+mod table_format;
 mod table_ops;
 pub mod table_payload;
 // The 2026-11-12 SHAPE family: `SHAPE` glyph creation and the `SHP2BLK`

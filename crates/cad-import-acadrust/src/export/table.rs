@@ -33,7 +33,9 @@
 //! represent (a tilt, mirror, or non-uniform scale) is recorded as a named
 //! `Dropped` reason rather than written at block-local coordinates.
 
-use acadrust::entities::{CellEdgeFlags, CellStyle, EntityType, Table as AcadTable, TableCell};
+use acadrust::entities::{
+    CellEdgeFlags, CellStyle, CellStylePropertyFlags, EntityType, Table as AcadTable, TableCell,
+};
 use acadrust::objects::{ObjectType, TableCellBorder, TableStyle as AcadTableStyle};
 use acadrust::{CadDocument, Handle};
 use cad_db::{transform_geometry, DbEntity};
@@ -58,17 +60,15 @@ const REASON_CELL_LINEWEIGHT: &str =
     "a stored border lineweight is written back exactly (1/100 mm, groups 275-279) but this build \
      draws every line one pixel wide, so the width is a stored/exported value rather than a drawn \
      stroke";
-/// Named conversion reason: the per-cell border geometry the writer cannot emit.
+/// Named conversion reason: where the per-cell `GRIDFORMAT` values are written.
 const REASON_CELL_GRID: &str =
-    "a cell's border double-line spacing, border type and margin overrides are not written (the \
-     DXF writer emits no per-cell GRIDFORMAT for a plain TABLE entity), so a re-import resolves \
-     them from the table style";
-/// Named conversion reason: acadrust's DXF writer stores the linked-data
-/// name/description on a separate `TABLECONTENT` object it does not emit for a
-/// plain `TABLE` entity, so the values are dropped by the writer.
-const REASON_NAME_DESCRIPTION: &str =
-    "the linked table-data name and description are not written by the DXF writer (it stores \
-     them on a separate TABLECONTENT object this export does not emit)";
+    "a cell's double-line spacing (its border type), margins and the table's linked-data name/\
+     description ride the TABLECONTENT object written beside the ACAD_TABLE entity: the DXF \
+     writer emits no per-cell GRIDFORMAT/CELLMARGIN block on the entity record itself, so a reader \
+     that ignores that object sees the legacy grid (geometry, text, colour, lineweight and \
+     visibility are all still exact) but not the spacing/margins. The CELLMARGIN block's two \
+     *content* spacings (horizontal/vertical spacing, not the text inset) are written as zero \
+     because this build does not model them, and a per-border line type is not modelled at all";
 
 /// Write a TABLE entity from the domain definition.
 pub(super) fn emit_table(
@@ -184,14 +184,120 @@ pub(super) fn emit_table(
     out.table_style_handle = Some(style_handle);
     reasons.extend(style_notes);
 
+    // The companion `TABLECONTENT` object is only written when the table stores
+    // one of the fields that object carries. Its owner is the entity, so the
+    // entity's own handle is fixed here first (a writer that allocated its own
+    // handle would break the pair); a table with none of those fields keeps its
+    // handle unassigned, exactly as before this channel existed, so its file
+    // stays byte-for-byte what it was.
+    let content_written = table_needs_content(table);
+    if content_written {
+        out.common.handle = doc.allocate_handle();
+        let entity_handle = out.common.handle;
+        reasons.extend(emit_table_content(doc, &out, table, entity_handle));
+    }
+
     acc.push(EntityType::Table(Box::new(out)), ctx)?;
     reasons.push(REASON_CONTENT_KINDS.to_string());
     reasons.push(REASON_CELL_APPEARANCE.to_string());
     reasons.push(REASON_CELL_LINEWEIGHT.to_string());
-    reasons.push(REASON_CELL_GRID.to_string());
-    reasons.push(REASON_NAME_DESCRIPTION.to_string());
+    if content_written {
+        reasons.push(REASON_CELL_GRID.to_string());
+    }
     acc.record(object, "table", MappingOutcome::Converted(reasons));
     Ok(())
+}
+
+/// Write the `TABLECONTENT` object that carries the values the `ACAD_TABLE`
+/// entity record cannot: the linked-data name/description and each cell's
+/// `GRIDFORMAT` double-line spacing and `CELLMARGIN` margin override.
+///
+/// The object is a copy of the entity's own table record — same frame, columns,
+/// rows, cell texts and styles — so it is a self-consistent table for a reader
+/// that prefers it, with the per-cell `CELLMARGIN` block added for the cells that
+/// store a margin override. It is owned by the entity (hard `330`), which is the
+/// pair the importer resolves; a reader that ignores the object still sees the
+/// complete legacy grid on the entity. The caller asks
+/// [`table_needs_content`] first, so this only runs when there is something the
+/// entity record would lose.
+fn emit_table_content(
+    doc: &mut CadDocument,
+    entity: &AcadTable,
+    table: &TableGeometry,
+    entity_handle: Handle,
+) -> Vec<String> {
+    let mut notes = Vec::new();
+    let mut content = entity.clone();
+    content.common.handle = doc.allocate_handle();
+    content.common.owner_handle = entity_handle;
+    content.name = table.name().to_string();
+    content.description = table.description().to_string();
+    for ((row, column), margins) in table.margin_overrides() {
+        let Some(cell) = content
+            .rows
+            .get_mut(row)
+            .and_then(|row| row.cells.get_mut(column))
+        else {
+            // The model and the written grid are the same grid; a missing cell
+            // here would mean the two disagreed, which is reported rather than
+            // silently skipped.
+            notes.push(format!(
+                "the margin override of cell ({row}, {column}) is not written: the exported grid \
+                 has no such cell"
+            ));
+            continue;
+        };
+        let style = cell
+            .style
+            .get_or_insert_with(acadrust::entities::CellStyle::new);
+        let mut flags = 0i16;
+        if let Some(top) = margins.top {
+            flags |= CellStylePropertyFlags::MARGIN_TOP.bits() as i16;
+            style.margin_top = top;
+        }
+        if let Some(left) = margins.left {
+            flags |= CellStylePropertyFlags::MARGIN_LEFT.bits() as i16;
+            style.margin_left = left;
+        }
+        if let Some(bottom) = margins.bottom {
+            flags |= CellStylePropertyFlags::MARGIN_BOTTOM.bits() as i16;
+            style.margin_bottom = bottom;
+        }
+        if let Some(right) = margins.right {
+            flags |= CellStylePropertyFlags::MARGIN_RIGHT.bits() as i16;
+            style.margin_right = right;
+        }
+        style.margin_override_flags = flags;
+    }
+    let handle = content.common.handle;
+    doc.objects
+        .insert(handle, ObjectType::TableContent(content));
+    notes
+}
+
+/// Whether this table stores a field the companion `TABLECONTENT` object carries
+/// and the `ACAD_TABLE` entity record cannot: a per-cell `GRIDFORMAT`
+/// double-line spacing (the border type), a `CELLMARGIN` margin override, or the
+/// linked-data name/description.
+///
+/// A table with none of them writes no object at all, which is what keeps its
+/// file byte-for-byte what it was before the channel existed.
+fn table_needs_content(table: &TableGeometry) -> bool {
+    table.margin_overrides().next().is_some()
+        || !table.name().is_empty()
+        || !table.description().is_empty()
+        || table.rows().iter().any(|row| {
+            row.cells.iter().any(|cell| {
+                [
+                    cell.borders.top,
+                    cell.borders.right,
+                    cell.borders.bottom,
+                    cell.borders.left,
+                ]
+                .into_iter()
+                .any(|border| border.double_spacing > 0.0)
+            })
+        })
 }
 
 /// Named conversion reason: two `TABLESTYLE` fields have no DXF group in the
@@ -605,249 +711,5 @@ fn apply_cell(target: &mut TableCell, cell: &TableCellGeometry) {
 }
 
 #[cfg(test)]
-mod tests {
-    //! The per-cell/row appearance round trip: a stored colour, fill, border
-    //! colour and border lineweight must be **written as the DXF groups** and
-    //! read back unchanged, and a cell/row without an override must write the
-    //! neutral `ByBlock`/no-fill/`ByLayer` values (so a table that never set one
-    //! keeps its pre-appearance file byte-for-byte).
-
-    use super::*;
-    use crate::tests_multileader_fixtures::{export_one, import_bytes};
-
-    const RED: [u8; 3] = [255, 0, 0];
-    const YELLOW: [u8; 3] = [255, 255, 0];
-    const BLUE: [u8; 3] = [0, 0, 255];
-    const GREEN: [u8; 3] = [0, 255, 0];
-
-    fn cell(text: &str) -> TableCellGeometry {
-        TableCellGeometry {
-            text: text.to_string(),
-            text_height: 2.5,
-            style_name: "Standard".into(),
-            style: StyleId(0),
-            font: None,
-            alignment: TableCellAlignment::DEFAULT,
-            rotation: 0.0,
-            merge_width: 1,
-            merge_height: 1,
-            borders: TableCellBorders {
-                top: TableBorder::VISIBLE,
-                right: TableBorder::VISIBLE,
-                bottom: TableBorder::VISIBLE,
-                left: TableBorder::VISIBLE,
-            },
-            text_color: None,
-            fill_color: None,
-        }
-    }
-
-    /// A 1 x 2 table whose first cell carries every per-cell appearance field and
-    /// whose style carries per-row appearance too. The second cell stays neutral.
-    fn styled_table() -> TableGeometry {
-        let mut styled = cell("styled");
-        styled.text_color = Some(RED);
-        styled.fill_color = Some(YELLOW);
-        for border in [
-            &mut styled.borders.top,
-            &mut styled.borders.right,
-            &mut styled.borders.bottom,
-            &mut styled.borders.left,
-        ] {
-            border.color = Some(BLUE);
-            border.lineweight_hundredths = Some(50);
-        }
-        let mut style = TableStyleValues::named("Report");
-        // Both other row types are suppressed, so every row of this table is a
-        // data row: the plain cell inherits the data row's appearance and the
-        // title value set is carried only as the style's own record.
-        style.title_suppressed = true;
-        style.header_suppressed = true;
-        style.text_color = Some(GREEN);
-        style.fill_color = Some(RED);
-        style.borders.top.color = Some(YELLOW);
-        style.borders.top.lineweight_hundredths = Some(35);
-        let mut title = style.data_row();
-        title.text_color = Some(BLUE);
-        title.fill_color = None;
-        style.set_row_style(TableRowKind::Title, title);
-        TableGeometry::from_import_with_style(
-            TableParts {
-                frame: TableFrame::default(),
-                columns: vec![
-                    TableColumnGeometry {
-                        width: 4.0,
-                        name: "A".into(),
-                    },
-                    TableColumnGeometry {
-                        width: 4.0,
-                        name: "B".into(),
-                    },
-                ],
-                rows: vec![TableRowGeometry {
-                    height: 3.0,
-                    cells: vec![styled, cell("plain")],
-                }],
-                style_name: "Report".into(),
-                name: String::new(),
-                description: String::new(),
-            },
-            style,
-        )
-    }
-
-    fn written_table(bytes: &[u8]) -> acadrust::entities::Table {
-        let document = acadrust::DxfReader::from_reader(std::io::Cursor::new(bytes.to_vec()))
-            .expect("reader")
-            .read()
-            .expect("written DXF parses");
-        let table = document
-            .entities()
-            .find_map(|entity| match entity {
-                acadrust::EntityType::Table(table) => Some(table.as_ref().clone()),
-                _ => None,
-            })
-            .expect("one TABLE entity");
-        table
-    }
-
-    fn written_style(bytes: &[u8], name: &str) -> acadrust::objects::TableStyle {
-        let document = acadrust::DxfReader::from_reader(std::io::Cursor::new(bytes.to_vec()))
-            .expect("reader")
-            .read()
-            .expect("written DXF parses");
-        let style = document
-            .objects
-            .iter()
-            .find_map(|(_, object)| match object {
-                ObjectType::TableStyle(style) if style.name.eq_ignore_ascii_case(name) => {
-                    Some(style.clone())
-                }
-                _ => None,
-            })
-            .expect("the TABLESTYLE record");
-        style
-    }
-
-    #[test]
-    fn the_per_cell_appearance_is_written_as_its_dxf_groups() {
-        let (bytes, report) = export_one(SemanticGeometry::Table(Box::new(styled_table())));
-        let written = written_table(&bytes);
-        let style = written.rows[0].cells[0]
-            .style
-            .as_ref()
-            .expect("the styled cell keeps a CellStyle record");
-        // Group 64 / 63 / 283: content colour, background colour, fill enabled.
-        assert_eq!(style.content_color, acadrust::Color::Index(1), "red");
-        assert_eq!(style.background_color, acadrust::Color::Index(2), "yellow");
-        assert!(style.fill_enabled);
-        // Groups 69/275 (top), 65/279 (right), 66/276 (bottom), 68/278 (left).
-        for border in [
-            &style.top_border,
-            &style.right_border,
-            &style.bottom_border,
-            &style.left_border,
-        ] {
-            assert_eq!(border.color, acadrust::Color::Index(5), "blue");
-            assert_eq!(border.line_weight, acadrust::LineWeight::Value(50));
-        }
-
-        // The neutral cell writes the neutral values, so nothing is implied.
-        let plain = written.rows[0].cells[1]
-            .style
-            .as_ref()
-            .expect("every cell gets a CellStyle record");
-        assert_eq!(plain.content_color, acadrust::Color::ByBlock);
-        assert_eq!(plain.background_color, acadrust::Color::ByBlock);
-        assert!(!plain.fill_enabled);
-        assert_eq!(plain.top_border.color, acadrust::Color::ByBlock);
-        assert_eq!(plain.top_border.line_weight, acadrust::LineWeight::ByLayer);
-
-        // The style object carries its row value sets (groups 62/63/283 and
-        // 64-69/274-279 of each row record).
-        let record = written_style(&bytes, "Report");
-        assert_eq!(record.data_row_style.text_color, acadrust::Color::Index(3));
-        assert_eq!(record.data_row_style.fill_color, acadrust::Color::Index(1));
-        assert!(record.data_row_style.fill_enabled);
-        assert_eq!(
-            record.data_row_style.top_border.color,
-            acadrust::Color::Index(2)
-        );
-        assert_eq!(
-            record.data_row_style.top_border.line_weight,
-            acadrust::LineWeight::Value(35)
-        );
-        assert_eq!(record.title_row_style.text_color, acadrust::Color::Index(5));
-        assert!(!record.title_row_style.fill_enabled);
-
-        // The conversion report no longer claims the fields are dropped.
-        assert!(
-            report
-                .entries
-                .iter()
-                .any(|entry| entry.message.contains("nearest ACI index")),
-            "{report:?}"
-        );
-    }
-
-    #[test]
-    fn the_per_cell_and_per_row_appearance_round_trips() {
-        let source = styled_table();
-        let (bytes, _report) = export_one(SemanticGeometry::Table(Box::new(source.clone())));
-        let reimported = import_bytes(&bytes);
-        let entity = reimported
-            .model_space()
-            .into_iter()
-            .find(|entity| entity.object.type_key == "AcDbTable")
-            .expect("AcDbTable re-imported");
-        let SemanticGeometry::Table(table) = &entity.geometry else {
-            panic!("expected a Table variant");
-        };
-
-        // Per cell: colour, fill and every edge's colour/lineweight.
-        let styled = table.cell(0, 0).expect("styled cell");
-        assert_eq!(styled.text_color, Some(RED));
-        assert_eq!(styled.fill_color, Some(YELLOW));
-        for border in [
-            styled.borders.top,
-            styled.borders.right,
-            styled.borders.bottom,
-            styled.borders.left,
-        ] {
-            assert_eq!(border.color, Some(BLUE));
-            assert_eq!(border.lineweight_hundredths, Some(50));
-        }
-        // The plain cell inherited the data row's appearance (it never had an
-        // override of its own), and the inherited values are real values.
-        let plain = table.cell(0, 1).expect("plain cell");
-        assert_eq!(plain.text_color, Some(GREEN));
-        assert_eq!(plain.fill_color, Some(RED));
-        assert_eq!(plain.borders.top.color, Some(YELLOW));
-        assert_eq!(plain.borders.top.lineweight_hundredths, Some(35));
-
-        // Per style row: the data row and the distinguished title row.
-        let style = table.style();
-        assert_eq!(style.text_color, Some(GREEN));
-        assert_eq!(style.fill_color, Some(RED));
-        assert_eq!(style.borders.top.color, Some(YELLOW));
-        assert_eq!(style.borders.top.lineweight_hundredths, Some(35));
-        let title = style.row_style(TableRowKind::Title);
-        assert_eq!(title.text_color, Some(BLUE));
-        assert_eq!(title.fill_color, None);
-        // The header row never differed, so it stays linked to the data row.
-        assert_eq!(style.header_row, None);
-
-        // The derived display follows the re-imported appearance, so the colour
-        // is not merely stored.
-        let appearances = table.display_appearances();
-        assert!(
-            appearances
-                .iter()
-                .any(|appearance| appearance.color == Some(YELLOW)),
-            "the fill colour reaches the display: {appearances:?}"
-        );
-        assert!(appearances
-            .iter()
-            .any(|appearance| appearance.color == Some(RED)));
-    }
-}
+#[path = "table_tests.rs"]
+mod tests;

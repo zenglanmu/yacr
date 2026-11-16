@@ -669,7 +669,7 @@ fn two_root_leader(id: u128) -> DbEntity {
         style: existing.style().clone(),
         style_name: existing.style_name().to_string(),
         override_mask: existing.override_mask(),
-        content: existing.content(),
+        content: existing.content().clone(),
         text: existing.text().clone(),
         roots: existing.roots().to_vec(),
         lines: existing.lines().to_vec(),

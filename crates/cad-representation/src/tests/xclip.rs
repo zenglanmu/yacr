@@ -14,20 +14,12 @@ use crate::layout::{clip_polyline_to_rect, WorldRectBoundary};
 
 /// A block-local rectangle boundary.
 fn clip_rect(minx: f64, miny: f64, maxx: f64, maxy: f64, visible: bool) -> BlockClip {
-    BlockClip {
-        vertices: vec![[minx, miny], [maxx, maxy]],
-        inside: true,
-        visible,
-    }
+    BlockClip::new(vec![[minx, miny], [maxx, maxy]], true, visible)
 }
 
 /// A block-local polygon boundary.
 fn clip_polygon(vertices: &[[f64; 2]]) -> BlockClip {
-    BlockClip {
-        vertices: vertices.to_vec(),
-        inside: true,
-        visible: true,
-    }
+    BlockClip::new(vertices.to_vec(), true, true)
 }
 
 /// A concave six-point **L** in block space: a 10x10 square with the top-right
@@ -877,19 +869,11 @@ fn a_boundary_with_a_repeated_vertex_is_refused_and_drawn_unclipped() {
 #[test]
 fn a_boundary_with_fewer_than_three_points_is_refused_and_drawn_unclipped() {
     assert_refused(
-        BlockClip {
-            vertices: vec![[0.0, 0.0]],
-            inside: true,
-            visible: true,
-        },
+        BlockClip::new(vec![[0.0, 0.0]], true, true),
         "representation.xclip_boundary_arity",
     );
     assert_refused(
-        BlockClip {
-            vertices: Vec::new(),
-            inside: true,
-            visible: true,
-        },
+        BlockClip::new(Vec::new(), true, true),
         "representation.xclip_boundary_arity",
     );
 }

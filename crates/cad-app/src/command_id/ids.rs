@@ -201,7 +201,7 @@ pub enum CommandId {
     /// undo step on the active layer. Work-only. Contract:
     /// `crate::app_drawing::shape`.
     CreateShape,
-    /// `MLEADER`: arrow -> landing -> text; single cluster/line; text required.
+    /// `MLEADER`: arrow -> landing plus MText / block / tolerance / no content.
     /// Full contract: `crate::app_drawing::mleader` and `docs/compatibility.md`.
     MLeader,
     /// TEXTEDIT: replace the text string of an **existing text-bearing entity**

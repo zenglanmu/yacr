@@ -36,6 +36,8 @@ fn tabledit_format_sets_every_appearance_field_in_one_undo_step() {
             fill: Some(TableColorValue::Aci(2)),  // yellow
             lineweight: Some(TableLineweightValue::Millimetres(0.35)),
             border_color: Some(TableColorValue::Aci(5)), // blue
+            border: None,
+            margin: None,
         })),
     )
     .expect("the appearance write");
@@ -99,6 +101,8 @@ fn tabledit_format_sets_every_appearance_field_in_one_undo_step() {
             fill: Some(TableColorValue::None),
             lineweight: Some(TableLineweightValue::ByLayer),
             border_color: Some(TableColorValue::None),
+            border: None,
+            margin: None,
         })),
     )
     .expect("the clearing write");
@@ -127,6 +131,8 @@ fn a_table_appearance_write_combines_with_alignment_in_one_step() {
             fill: None,
             lineweight: None,
             border_color: None,
+            border: None,
+            margin: None,
         })),
     )
     .expect("alignment + colour is one write");
@@ -155,6 +161,8 @@ fn a_non_canonical_appearance_value_is_refused_by_name_and_writes_nothing() {
                 fill: None,
                 lineweight: Some(TableLineweightValue::Millimetres(0.37)),
                 border_color: None,
+                border: None,
+                margin: None,
             },
             "tabledit.format_lineweight",
         ),
@@ -167,6 +175,8 @@ fn a_non_canonical_appearance_value_is_refused_by_name_and_writes_nothing() {
                 fill: None,
                 lineweight: None,
                 border_color: None,
+                border: None,
+                margin: None,
             },
             "tabledit.format_color",
         ),
@@ -194,6 +204,8 @@ fn a_non_canonical_appearance_value_is_refused_by_name_and_writes_nothing() {
         fill: None,
         lineweight: None,
         border_color: None,
+        border: None,
+        margin: None,
     };
     execute(
         &mut app,

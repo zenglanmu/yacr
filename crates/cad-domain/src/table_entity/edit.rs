@@ -15,7 +15,7 @@ use std::collections::HashSet;
 
 use crate::{CadError, CadResult, StyleId, TableCellAlignment, TableGeometry, TableStyleValues};
 
-use super::TableCellAppearanceEdit;
+use super::{TableCellAppearanceEdit, TableCellMargins, TableCellMarginsEdit};
 
 impl TableGeometry {
     /// The cell address that owns `(row, column)`: its own address when it is
@@ -166,7 +166,8 @@ impl TableGeometry {
     /// The copied fields are the whole per-cell format this build models: text
     /// height, text style identity/name/font, the four border edges (visibility,
     /// double-line spacing, colour and lineweight), the text alignment, the text
-    /// rotation and the cell's text colour and background fill.
+    /// rotation, the cell's text colour and background fill, and the cell's
+    /// `GRIDFORMAT` margin override.
     ///
     /// Text, merge spans and position are untouched: this is a style copy, not a
     /// content copy. The display is rebuilt once for the whole batch, so N
@@ -182,6 +183,11 @@ impl TableGeometry {
         let Some(style_source) = self.cell(source_row, source_column).cloned() else {
             return Err(out_of_range(source_row, source_column, self));
         };
+        let margin_source = self
+            .margins
+            .get(&(source_row, source_column))
+            .copied()
+            .unwrap_or(TableCellMargins::INHERIT);
         if targets.is_empty() {
             return Err(CadError::InvalidInput(
                 "table.matchcell_no_targets: MATCHCELL needs at least one destination cell".into(),
@@ -210,6 +216,7 @@ impl TableGeometry {
             target.rotation = style_source.rotation;
             target.text_color = style_source.text_color;
             target.fill_color = style_source.fill_color;
+            geometry.store_margins(*row, *column, margin_source);
         }
         geometry.rebuild_display();
         Ok(geometry)
@@ -256,6 +263,87 @@ impl TableGeometry {
         }
         geometry.rebuild_display();
         Ok(geometry)
+    }
+
+    /// Set one cell's `GRIDFORMAT` margin override and rebuild the display once
+    /// (`TABLEDIT FORMAT MARGIN …`).
+    ///
+    /// Each field is a [`TableFieldEdit`](super::TableFieldEdit): `Keep` leaves
+    /// the stored value, `Clear` returns the field to "inherit" and `Set` stores
+    /// a value. An edit that leaves every field inheriting removes the cell's
+    /// entry, so "explicitly inherit" and "never set" are one stored state (the
+    /// sparse table cannot disagree with the values).
+    ///
+    /// The address must be inside the grid (`table.cell_out_of_range`) and every
+    /// stored value must be finite and non-negative (`table.cell_margin`); on a
+    /// refusal the receiver is unchanged.
+    pub fn with_cell_margins(
+        &self,
+        row: usize,
+        column: usize,
+        edit: TableCellMarginsEdit,
+    ) -> CadResult<Self> {
+        if self.cell(row, column).is_none() {
+            return Err(out_of_range(row, column, self));
+        }
+        let mut geometry = self.clone();
+        let mut margins = self
+            .margins
+            .get(&(row, column))
+            .copied()
+            .unwrap_or(TableCellMargins::INHERIT);
+        edit.left.apply(&mut margins.left);
+        edit.top.apply(&mut margins.top);
+        edit.right.apply(&mut margins.right);
+        edit.bottom.apply(&mut margins.bottom);
+        if !margins.is_valid() {
+            return Err(CadError::InvalidInput(format!(
+                "table.cell_margin: the margins of cell ({row}, {column}) must be finite and \
+                 non-negative, got {}",
+                margins.label()
+            )));
+        }
+        geometry.store_margins(row, column, margins);
+        geometry.rebuild_display();
+        Ok(geometry)
+    }
+
+    /// Replace the whole margin override set in **one** rebuild (the import path).
+    ///
+    /// Every address is validated against the grid first (`table.
+    /// cell_out_of_range`) and every margin must be finite and non-negative
+    /// (`table.cell_margin`), so a malformed source block can never store a
+    /// negative inset. An inherited entry is dropped, which is what makes the
+    /// stored table sparse.
+    pub fn with_cell_margins_bulk(
+        &self,
+        entries: Vec<((usize, usize), TableCellMargins)>,
+    ) -> CadResult<Self> {
+        let mut geometry = self.clone();
+        for ((row, column), margins) in entries {
+            if geometry.cell(row, column).is_none() {
+                return Err(out_of_range(row, column, &geometry));
+            }
+            if !margins.is_valid() {
+                return Err(CadError::InvalidInput(format!(
+                    "table.cell_margin: the margins of cell ({row}, {column}) must be finite and \
+                     non-negative, got {}",
+                    margins.label()
+                )));
+            }
+            geometry.store_margins(row, column, margins);
+        }
+        geometry.rebuild_display();
+        Ok(geometry)
+    }
+
+    /// Store (or drop) one cell's margin override without rebuilding the display.
+    fn store_margins(&mut self, row: usize, column: usize, margins: TableCellMargins) {
+        if margins.is_inherit() {
+            self.margins.remove(&(row, column));
+        } else {
+            self.margins.insert((row, column), margins);
+        }
     }
 
     /// Set one cell's alignment and/or text rotation and rebuild the display

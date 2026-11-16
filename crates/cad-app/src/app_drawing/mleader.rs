@@ -22,8 +22,16 @@
 //!   re-stamped, so there is no second derivation). With two vertices a spline and
 //!   a straight run are geometrically identical, so the outcome says so
 //!   (`mleader.spline_two_vertices`) instead of claiming a bend;
-//! * **content / text** — MText content only, non-empty, bounded (the shared
-//!   `tool.text_*` rules);
+//! * **content kind** — `content` selects the annotation: `CONTENT MTEXT` (the
+//!   default) stores MText, an empty text creates a content-less leader, and the
+//!   two non-text kinds are `CONTENT BLOCK <name>` (the annotation is an inserted
+//!   block, resolved against the drawing's block table — unknown name
+//!   `mleader.block_missing`, and the text field must be empty or
+//!   `mleader.block_text_unexpected`) and `CONTENT TOLERANCE` (the text field is
+//!   the `|`-separated feature-control frame string, drawn by the same frame rule
+//!   the `TOLERANCE` command uses). All four kinds are stored, drawn and written
+//!   to entity `172` / style `170`; a text-bearing kind is bounded by the shared
+//!   `tool.text_too_long` rule;
 //! * **maximum points** — creation derives exactly
 //!   [`MAX_CREATED_LEADER_POINTS`](crate::app_drawing::annot_batch::leader::MAX_CREATED_LEADER_POINTS)
 //!   vertices, and a higher request is the named `mleader.option_max_points`
@@ -51,6 +59,23 @@
 //!   case; the entity content kind `172` is written verbatim and the `0x400`
 //!   override bit is set only when it differs from the style's `170`.
 //!
+//! ## The four content kinds (they are all creatable)
+//!
+//! | `CONTENT` token | entity `172` | stored payload | drawn |
+//! |---|---|---|---|
+//! | `MTEXT` (default) | `2` | [`cad_domain::MLeaderText`] | the annotation string |
+//! | (empty text) | `0` | none | arrow, leader line, dogleg |
+//! | `BLOCK <name>` | `1` | [`cad_domain::MLeaderBlockContent`] | the block instance at the content point |
+//! | `TOLERANCE` | `3` | [`cad_domain::MLeaderToleranceContent`] | the feature-control frame |
+//!
+//! Block content needs a real `BLOCK_RECORD` in the output, so `SAVE` writes the
+//! definition too and refuses (flattening the leader with a named reason) when
+//! the definition cannot be written. Tolerance content is `172 = 3` plus the
+//! `CONTEXT_DATA` text fields; acadrust 0.6.8's DXF **reader** reports `172 = 3`
+//! as "no content", so a reload resolves the kind from the `MLEADERSTYLE 170`
+//! record the same writer sets to `3` (see `cad-import-acadrust`'s multileader
+//! module docs).
+//!
 //! Deliberate subset (see [`crate::CommandId::MLeader`]): the typed line has
 //! exactly two coordinates, so a created leader has two vertices
 //! ([`MAX_CREATED_LEADER_POINTS`]); more leader *lines* come from
@@ -62,11 +87,11 @@ use super::*;
 use crate::app_drawing::annot_batch::leader::{
     options_report, plan_leader_options, MAX_CREATED_LEADER_POINTS,
 };
+use crate::command_payload::MLeaderContentSpec;
 use cad_domain::{
-    MLeaderContent, MLeaderCreateOptions, MLeaderPathType, MultiLeaderGeometry, MultiLeaderParts,
-    MASK_CONTENT_TYPE, MASK_TEXT_ANGLE,
+    MLeaderContentKind, MLeaderCreateContent, MLeaderCreateOptions, MLeaderPathType,
+    MultiLeaderGeometry, MultiLeaderParts, MASK_CONTENT_TYPE, MASK_TEXT_ANGLE,
 };
-
 // `MLEADERSTYLE SET <name>` writes `SessionState::current_mleader_style`, so
 // creation reads the session name (default `Standard`, which the builder pins).
 // A missing row is a named refusal rather than a silent fallback.
@@ -89,10 +114,14 @@ impl Application {
     /// * `mleader.style_missing` — the drawing has no `MLEADERSTYLE` with the
     ///   requested name (the typed `STYLE` selector) or the session's current one
     ///   (the builder pins `Standard`, so the latter is a corrupt-database case);
-    /// * the option plan's refusals: `mleader.content_unsupported` (a block or
-    ///   tolerance style), `mleader.path_type` (invisible path),
-    ///   `mleader.option_arrowhead_off`, `mleader.option_max_points`,
-    ///   `mleader.style_invalid`;
+    /// * the option plan's refusals: `mleader.content_unsupported` (a style row
+    ///   whose `170` is outside the four known kinds), `mleader.path_type`
+    ///   (invisible path), `mleader.option_arrowhead_off`,
+    ///   `mleader.option_max_points`, `mleader.style_invalid`;
+    /// * the content refusals: `mleader.block_missing` (unknown block name),
+    ///   `mleader.block_text_unexpected` (block content plus annotation text),
+    ///   `mleader.tolerance_text_required` (an empty frame) and
+    ///   `mleader.tolerance_height`;
     /// * the creation options' refusals: `mleader.option_dogleg` (a non-finite or
     ///   non-positive `dogleg_length`), `mleader.option_angle` (a non-finite
     ///   `dogleg_angle`), `mleader.option_attachment` (a horizontal code outside
@@ -115,14 +144,27 @@ impl Application {
             dogleg_angle,
             attachment,
             text_angle,
+            content,
         } = &command.payload
         else {
             return Err(CadError::InvalidInput(
                 "mleader.payload: CreateMLeader needs a MLeader { arrow, landing, text, \
-                 style_name, dogleg_length, dogleg_angle, attachment, text_angle } payload"
+                 style_name, dogleg_length, dogleg_angle, attachment, text_angle, content } \
+                 payload"
                     .into(),
             ));
         };
+        // A block-content leader carries no annotation string: the text field is
+        // only the MText value (or the tolerance frame). Refusing here keeps the
+        // two from being silently dropped.
+        if matches!(content, Some(MLeaderContentSpec::Block(_))) && !text.trim().is_empty() {
+            return Err(CadError::InvalidInput(format!(
+                "mleader.block_text_unexpected: CONTENT BLOCK creates a leader whose annotation \
+                 is the inserted block, so it takes no annotation text (got {} character(s)); \
+                 nothing was written",
+                text.chars().count()
+            )));
+        }
         let characters = text.chars().count();
         if characters > MAX_TOOL_TEXT_CHARS {
             return Err(CadError::InvalidInput(format!(
@@ -187,25 +229,26 @@ impl Application {
             left_attachment: attachment.map(|pair| pair.left),
             text_angle: *text_angle,
         };
-        let geometry = MultiLeaderGeometry::created_with_options(
+        let create_content = self.resolve_mleader_content(content, text, &command.document)?;
+        let geometry = MultiLeaderGeometry::created_with_content(
             values,
             resolved_style_name.clone(),
             resolution.left_attachment,
             *arrow,
             *landing,
-            text.clone(),
+            create_content,
             create_options,
         )?;
         // The entity content kind (`172`) overrides the style kind (`170`) only
-        // when it actually differs, so a content-less leader under an MText style
-        // (and the reverse) reloads as what was created.
-        let content_mask = if created_content_code(geometry.content()) != row.content_type {
+        // when it actually differs, so a content-less or block/tolerance leader
+        // under an MText style (and the reverse) reloads as what was created.
+        let content_mask = if created_content_code(geometry.content().kind()) != row.content_type {
             MASK_CONTENT_TYPE
         } else {
             0
         };
         let geometry = with_created_adjustments(geometry, options.path, content_mask)?;
-        let content = geometry.content();
+        let content = geometry.content().kind();
         let options_row = create_options_report(create_options, &geometry);
         let mut outcome = self.commit_new_entity(
             session,
@@ -229,7 +272,33 @@ impl Application {
                 ),
             });
         }
-        if content == MLeaderContent::None {
+        if content == MLeaderContentKind::Block {
+            outcome.diagnostics.push(Diagnostic {
+                object: outcome.objects.first().copied(),
+                code: "mleader.content_block".into(),
+                message: format!(
+                    "MLEADER: the annotation is an inserted block (content kind Block, entity \
+                     172 = 1, override mask 0x{content_mask:X} against the style's kind {}) — \
+                     the block is stored in CONTEXT_DATA 341/15/16/46 and entity 344/10/43/176, \
+                     so a reload resolves the same block and placement",
+                    row.content_type
+                ),
+            });
+        }
+        if content == MLeaderContentKind::Tolerance {
+            outcome.diagnostics.push(Diagnostic {
+                object: outcome.objects.first().copied(),
+                code: "mleader.content_tolerance".into(),
+                message: format!(
+                    "MLEADER: the annotation is a feature-control frame (content kind Tolerance, \
+                     entity 172 = 3, override mask 0x{content_mask:X} against the style's kind \
+                     {}); the frame string and cell height are stored in the CONTEXT_DATA text \
+                     fields because DXF has no separate tolerance payload",
+                    row.content_type
+                ),
+            });
+        }
+        if content == MLeaderContentKind::None {
             outcome.diagnostics.push(Diagnostic {
                 object: outcome.objects.first().copied(),
                 code: "mleader.content_none".into(),
@@ -350,7 +419,7 @@ fn with_created_adjustments(
         style: geometry.style().clone(),
         style_name: geometry.style_name().to_string(),
         override_mask: mask,
-        content: geometry.content(),
+        content: geometry.content().clone(),
         text: geometry.text().clone(),
         roots: geometry.roots().to_vec(),
         lines: geometry.lines().to_vec(),
@@ -366,6 +435,59 @@ fn with_created_adjustments(
 
 /// The DXF `172` code of a created content kind, to compare with the style's
 /// `170` value.
-fn created_content_code(content: MLeaderContent) -> i16 {
+fn created_content_code(content: MLeaderContentKind) -> i16 {
     content.dxf()
+}
+
+impl Application {
+    /// Resolve the typed `CONTENT` selection into the domain's creation content.
+    ///
+    /// * no selection / `CONTENT MTEXT` — the text argument is the annotation
+    ///   (the pre-existing rule: empty creates a content-less leader);
+    /// * `CONTENT BLOCK <name>` — the name is resolved against the drawing's
+    ///   block table and the resolved identity plus the table's own name travel
+    ///   into the definition, so the exporter can write the `BLOCK_RECORD` the
+    ///   content handle refers to. An unknown name is `mleader.block_missing`
+    ///   (nothing written, no transaction);
+    /// * `CONTENT TOLERANCE` — the text argument is the `|`-separated frame
+    ///   string; an empty one is the domain's `mleader.tolerance_text_required`.
+    pub(crate) fn resolve_mleader_content(
+        &self,
+        spec: &Option<MLeaderContentSpec>,
+        text: &str,
+        document: &crate::DocumentId,
+    ) -> CadResult<MLeaderCreateContent> {
+        match spec {
+            None | Some(MLeaderContentSpec::MText) => {
+                Ok(MLeaderCreateContent::Text(text.to_string()))
+            }
+            Some(MLeaderContentSpec::Tolerance) => Ok(MLeaderCreateContent::Tolerance {
+                text: text.to_string(),
+            }),
+            Some(MLeaderContentSpec::Block(name)) => {
+                let requested = name.trim();
+                let document = self
+                    .workspace
+                    .documents
+                    .get(document)
+                    .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+                let drawing = document.drawing.as_ref();
+                let definition = drawing.block_by_name(requested).ok_or_else(|| {
+                    CadError::InvalidInput(format!(
+                        "mleader.block_missing: the drawing has no block named '{requested}', so \
+                         the leader has no content to place; nothing was written"
+                    ))
+                })?;
+                let block = definition.id;
+                let stored_name = drawing
+                    .block_metadata(block)
+                    .map(|metadata| metadata.name.clone())
+                    .unwrap_or_else(|| requested.to_string());
+                Ok(MLeaderCreateContent::Block {
+                    block,
+                    name: stored_name,
+                })
+            }
+        }
+    }
 }

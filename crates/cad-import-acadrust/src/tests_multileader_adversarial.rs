@@ -105,7 +105,7 @@ fn empty_text_content_normalises_to_no_content() {
     let imported = import_bytes(&source_bytes);
     let geometries = imported_geometries(&imported);
     let geometry = empty_text_geometry(&geometries).clone();
-    assert_eq!(geometry.content(), MLeaderContent::None);
+    assert_eq!(*geometry.content(), MLeaderContent::None);
     assert!(geometry.text().string.is_empty());
 
     let (bytes, _) = export_one(SemanticGeometry::MultiLeader(Box::new(geometry)));

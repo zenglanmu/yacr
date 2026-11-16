@@ -37,9 +37,10 @@ pub(crate) fn invalid_mleader_argument_reason(text: &str) -> String {
     format!(
         "mleader.argument: unsupported or malformed MLEADER argument in `{}`: the typed form is \
          `MLEADER [STYLE <name>] [DOGLEG <positive length>] [DOGLEGANGLE <degrees>] [ATTACH \
-         <1-3> <0-10>] [TEXTANGLE HORIZONTAL|PARALLEL|OPTIMIZED] <arrow_x> <arrow_y> \
-         <landing_x> <landing_y> [text]` (options first, the text may be empty); nothing was \
-         changed",
+         <1-3> <0-10>] [TEXTANGLE HORIZONTAL|PARALLEL|OPTIMIZED] [CONTENT MTEXT|BLOCK <name>| \
+         TOLERANCE] <arrow_x> <arrow_y> <landing_x> <landing_y> [text]` (options first, the text \
+         may be empty; `CONTENT TOLERANCE` reads it as the frame string and `CONTENT BLOCK` \
+         takes none); nothing was changed",
         text.trim()
     )
 }
@@ -111,6 +112,7 @@ impl CadSession {
                                 dogleg_angle: input.dogleg_angle,
                                 attachment: input.attachment,
                                 text_angle: input.text_angle,
+                                content: input.content,
                             },
                         )
                     }

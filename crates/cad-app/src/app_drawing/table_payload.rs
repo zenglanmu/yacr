@@ -60,6 +60,32 @@ impl TableCellAddress {
     }
 }
 
+/// One cell `GRIDFORMAT` margin assignment (`TABLEDIT FORMAT … MARGIN …`).
+///
+/// `Inherit` clears the cell's override (the cell goes back to the placement it
+/// had before margins existed); `Values` stores the four insets in drawing
+/// units, in left/top/right/bottom order — the order the typed line writes them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TableMarginValue {
+    /// `MARGIN INHERIT`: no override.
+    Inherit,
+    /// `MARGIN <left> <top> <right> <bottom>`.
+    Values(cad_domain::TableCellMargins),
+}
+
+/// One cell border **type** assignment (`TABLEDIT FORMAT … BORDER …`).
+///
+/// The DXF record's border type is derived from the double-line spacing (a
+/// spacing above zero *is* `Double`), so the two typed words map onto these two
+/// optional fields: `ON`/`OFF` set the visibility, `SINGLE` sets the spacing to
+/// zero, and `DOUBLE [<spacing>]` sets it (keeping the stored spacing when the
+/// line carries none).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TableCellBorderCommand {
+    pub visible: Option<bool>,
+    pub spacing: Option<f64>,
+}
+
 /// Which edge of a table-style cell border an assignment addresses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TableStyleEdge {
@@ -185,9 +211,11 @@ pub enum TablePayload {
     Unmerge { cell: TableCellAddress },
     /// `TABLEDIT FORMAT <row> <col> [ALIGN <code>] [ROTATION <degrees>]
     /// [COLOR <aci|BYLAYER>] [FILL <aci|NONE>] [LINEWEIGHT <mm|BYLAYER>]
-    /// [BORDERCOLOR <aci|BYLAYER>]`: set the cell's own alignment, text
-    /// rotation and appearance (text colour, background fill, border colour and
-    /// border lineweight, the latter two on all four edges).
+    /// [BORDERCOLOR <aci|BYLAYER>] [BORDER <ON|OFF|SINGLE|DOUBLE> [<spacing>]]
+    /// [MARGIN <l> <t> <r> <b>|INHERIT]`: set the cell's own alignment, text
+    /// rotation and appearance (text colour, background fill, border
+    /// colour/lineweight/visibility/type on all four edges) plus its
+    /// `GRIDFORMAT` margins.
     Format {
         cell: TableCellAddress,
         alignment: Option<TableCellAlignment>,
@@ -201,6 +229,11 @@ pub enum TablePayload {
         lineweight: Option<TableLineweightValue>,
         /// All four border edges' colour.
         border_color: Option<TableColorValue>,
+        /// All four border edges' visibility/double-line spacing (the border
+        /// **type**).
+        border: Option<TableCellBorderCommand>,
+        /// The cell's `GRIDFORMAT` margin override.
+        margin: Option<TableMarginValue>,
     },
     /// `MATCHCELL <src_row> <src_col> <dst_row> <dst_col> [...]`: copy the first
     /// cell's format onto every other cell.

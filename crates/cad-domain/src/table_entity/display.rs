@@ -15,8 +15,21 @@
 //! [`TableDisplayAppearance::NONE`] for all of its primitives, so the geometry
 //! **and** the appearance of such a table are exactly what they were before the
 //! channel existed.
+//!
+//! # Cell margins
+//!
+//! A cell's `GRIDFORMAT` margin override insets its text anchor: the text is
+//! placed inside the cell rectangle shrunk by the stored margins, so a
+//! left-aligned cell starts at `x + left`, a right-aligned one ends at
+//! `x + width - right`, and a centred one sits in the middle of the remaining
+//! box; the vertical rule is the same with `top`/`bottom`. A cell with **no**
+//! margin override ([`TableCellMargins::INHERIT`](super::TableCellMargins))
+//! keeps the anchor it always had, so a table without margins derives the
+//! pre-margin geometry byte for byte. A margin larger than the cell cannot
+//! invert the box: the inset is clamped so the two edges meet at the cell centre
+//! at worst, which keeps the text inside its own cell.
 
-use super::{TableCellBorders, TableFrame, TableRowGeometry};
+use super::{CellMarginTable, TableCellBorders, TableCellMargins, TableFrame, TableRowGeometry};
 use crate::dimension_synthesis::{add, length, line_between, normalize, scale};
 use crate::{
     Mesh, Point3, SemanticGeometry, TableBorder, TableColumnGeometry, TableDisplayAppearance,
@@ -65,6 +78,7 @@ pub(super) fn build(
     frame: &TableFrame,
     columns: &[TableColumnGeometry],
     rows: &[TableRowGeometry],
+    margins: &CellMarginTable,
 ) -> TableDisplay {
     let mut out = TableDisplay::default();
     if columns.is_empty() || rows.is_empty() {
@@ -151,15 +165,31 @@ pub(super) fn build(
                 // starts at the cell's left edge, a top-aligned one hangs from
                 // its top edge. The default (centre/middle) reproduces the
                 // pre-alignment cell centre exactly.
+                //
+                // A `GRIDFORMAT` margin override shrinks that box first, so the
+                // anchor is the aligned edge of the inset rectangle; with no
+                // override the box is the cell itself and the anchor is exactly
+                // what it was before margins existed.
+                let cell_margins = margins
+                    .get(&(row_index, column_index))
+                    .copied()
+                    .unwrap_or(TableCellMargins::INHERIT);
+                let (left, right) = inset_pair(cell_margins.left, cell_margins.right, span_w);
+                let (bottom, top) = inset_pair(cell_margins.bottom, cell_margins.top, span_h);
                 let (anchor_x, h_align) = match cell.alignment.horizontal {
-                    super::TableCellAlignH::Left => (x, TextAlignH::Left),
-                    super::TableCellAlignH::Center => (x + span_w * 0.5, TextAlignH::Center),
-                    super::TableCellAlignH::Right => (x + span_w, TextAlignH::Right),
+                    super::TableCellAlignH::Left => (x + left, TextAlignH::Left),
+                    super::TableCellAlignH::Center => {
+                        (x + left + (span_w - left - right) * 0.5, TextAlignH::Center)
+                    }
+                    super::TableCellAlignH::Right => (x + span_w - right, TextAlignH::Right),
                 };
                 let (anchor_y, v_align) = match cell.alignment.vertical {
-                    super::TableCellAlignV::Top => (y + span_h, TextAlignV::Top),
-                    super::TableCellAlignV::Middle => (y + span_h * 0.5, TextAlignV::Middle),
-                    super::TableCellAlignV::Bottom => (y, TextAlignV::Bottom),
+                    super::TableCellAlignV::Top => (y + span_h - top, TextAlignV::Top),
+                    super::TableCellAlignV::Middle => (
+                        y + bottom + (span_h - bottom - top) * 0.5,
+                        TextAlignV::Middle,
+                    ),
+                    super::TableCellAlignV::Bottom => (y + bottom, TextAlignV::Bottom),
                 };
                 out.push(
                     SemanticGeometry::Text {
@@ -196,6 +226,32 @@ pub(super) fn build(
         y += height;
     }
     out
+}
+
+/// The two insets of one cell axis, clamped so they cannot cross.
+///
+/// A margin pair wider than the cell would invert the text box; the clamp keeps
+/// the lower edge at or below the upper one (they meet at the centre at worst),
+/// so an over-large margin can never place the text outside its own cell. The
+/// unset side is `0.0`, which is exactly the pre-margin anchor.
+fn inset_pair(low: Option<f64>, high: Option<f64>, extent: f64) -> (f64, f64) {
+    let extent = extent.max(0.0);
+    let mut low = low
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .unwrap_or(0.0);
+    let mut high = high
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .unwrap_or(0.0);
+    if low + high > extent {
+        // Shrink both proportionally so their ratio is kept; a zero total is
+        // already the no-inset case.
+        let total = low + high;
+        if total > 0.0 {
+            low = low * extent / total;
+            high = high * extent / total;
+        }
+    }
+    (low, high)
 }
 
 /// One cell rectangle in the table plane, as the fill emitter needs it.

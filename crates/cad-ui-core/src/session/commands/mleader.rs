@@ -14,11 +14,12 @@
 //!   parallel lines;
 //! * `-MLEDIT …` — the same grammar under the command-line spelling;
 //! * `MLEADER [STYLE <name>] [DOGLEG <length>] [DOGLEGANGLE <degrees>]
-//!   [ATTACH <1-3> <0-10>] [TEXTANGLE <mode>] <arrow_x> <arrow_y> <landing_x>
-//!   <landing_y> [text…]` — create one leader, optionally from a named
-//!   `MLEADERSTYLE`, overriding the style's dogleg length/direction, text
-//!   attachment pair and text angle mode; an empty text creates a content-less
-//!   leader;
+//!   [ATTACH <1-3> <0-10>] [TEXTANGLE <mode>] [CONTENT MTEXT|BLOCK <name>|
+//!   TOLERANCE] <arrow_x> <arrow_y> <landing_x> <landing_y> [text…]` — create one
+//!   leader, optionally from a named `MLEADERSTYLE`, overriding the style's
+//!   dogleg length/direction, text attachment pair, text angle mode and
+//!   annotation content kind; an empty text creates a content-less leader, and
+//!   `CONTENT TOLERANCE` reads the trailing text as the frame string;
 //! * `MLEADERALIGN LEFT|RIGHT|CENTER [spacing]` — align and optionally re-space
 //!   the selected leaders' text;
 //! * `MLEADEREDIT ADD <x> <y>` / `REMOVE <index>`, `PATHTYPE <index>
@@ -33,8 +34,9 @@
 //! the whole input.
 
 use cad_app::{
-    MLeaderAlignCommand, MLeaderAlignMode, MLeaderAttachment, MLeaderEditAction,
-    MLeaderEditCommand, MLeaderLineOverrideField, MlEditCommand, MlEditMode, ToleranceCommand,
+    MLeaderAlignCommand, MLeaderAlignMode, MLeaderAttachment, MLeaderContentSpec,
+    MLeaderEditAction, MLeaderEditCommand, MLeaderLineOverrideField, MlEditCommand, MlEditMode,
+    ToleranceCommand,
 };
 use cad_domain::{MLeaderPathType, MLeaderTextAngle, Point3};
 
@@ -126,7 +128,7 @@ pub fn parse_mleaderalign_argument(argument: &str) -> Option<MLeaderAlignCommand
 }
 
 /// `MLEADER [STYLE <name>] [DOGLEG <length>] [DOGLEGANGLE <degrees>]
-/// [ATTACH <1-3> <0-10>] [TEXTANGLE <mode>]
+/// [ATTACH <1-3> <0-10>] [TEXTANGLE <mode>] [CONTENT MTEXT|BLOCK <name>|TOLERANCE]
 /// <arrow_x> <arrow_y> <landing_x> <landing_y> [text…]`.
 ///
 /// The options are optional, order-independent and may each appear once; they
@@ -143,6 +145,14 @@ pub fn parse_mleaderalign_argument(argument: &str) -> Option<MLeaderAlignCommand
 /// covers it) and resolves against the drawing's table in the command layer,
 /// which refuses an unknown name by name.
 ///
+/// `CONTENT <kind>` selects the annotation: `MTEXT` (the default, storing the
+/// trailing text), `TOLERANCE` (the trailing text is the `|`-separated
+/// feature-control frame string) or `BLOCK <name>` (one name token; the leader
+/// carries the inserted block and takes no trailing text — the command layer
+/// refuses text by name and resolves the block against the drawing). The
+/// command layer owns the semantic refusals (`mleader.block_missing`,
+/// `mleader.block_text_unexpected`, `mleader.tolerance_text_required`).
+///
 /// `TEXTANGLE <mode>` (alias: `ANGLE`) is the AutoCAD **angle constraint**. It
 /// takes a **mode**, not an angle, because DXF `174`/`175` stores an angle
 /// *type*: `HORIZONTAL` (`1`), `PARALLEL` (`0`) or `OPTIMIZED` (`2`). A number is
@@ -156,6 +166,7 @@ pub fn parse_mleader_argument(argument: &str) -> Result<MLeaderCreateInput, MLea
     let mut dogleg_angle: Option<f64> = None;
     let mut attachment: Option<MLeaderAttachment> = None;
     let mut text_angle: Option<MLeaderTextAngle> = None;
+    let mut content: Option<MLeaderContentSpec> = None;
     loop {
         let Some((word, after_word)) = split_first_token(rest) else {
             return Err(MLeaderParseError::Invalid);
@@ -187,6 +198,28 @@ pub fn parse_mleader_argument(argument: &str) -> Result<MLeaderCreateInput, MLea
             let degrees = parse_signed_decimal(value).ok_or(MLeaderParseError::Invalid)?;
             dogleg_angle = Some(degrees.to_radians());
             rest = after_value;
+        } else if word.eq_ignore_ascii_case("CONTENT") {
+            if content.is_some() {
+                return Err(MLeaderParseError::Invalid);
+            }
+            // The three spellings are the stored content kinds: `MTEXT` (the
+            // default), `BLOCK <name>` (one name token — a name with spaces is
+            // outside this line grammar, as with `STYLE`) and `TOLERANCE` (whose
+            // frame text is the ordinary trailing remainder).
+            if value.eq_ignore_ascii_case("MTEXT") {
+                content = Some(MLeaderContentSpec::MText);
+                rest = after_value;
+            } else if value.eq_ignore_ascii_case("TOLERANCE") {
+                content = Some(MLeaderContentSpec::Tolerance);
+                rest = after_value;
+            } else if value.eq_ignore_ascii_case("BLOCK") {
+                let (name, after_name) =
+                    split_first_token(after_value).ok_or(MLeaderParseError::Invalid)?;
+                content = Some(MLeaderContentSpec::Block(name.to_string()));
+                rest = after_name;
+            } else {
+                return Err(MLeaderParseError::Invalid);
+            }
         } else if word.eq_ignore_ascii_case("ATTACH") {
             if attachment.is_some() {
                 return Err(MLeaderParseError::Invalid);
@@ -225,6 +258,7 @@ pub fn parse_mleader_argument(argument: &str) -> Result<MLeaderCreateInput, MLea
         dogleg_angle,
         attachment,
         text_angle,
+        content,
     })
 }
 
@@ -274,6 +308,9 @@ pub struct MLeaderCreateInput {
     pub attachment: Option<MLeaderAttachment>,
     /// The requested text angle type, or `None` for the resolved style value.
     pub text_angle: Option<MLeaderTextAngle>,
+    /// The requested annotation content kind, or `None` for the text-driven
+    /// default (MText, or content-less for an empty text).
+    pub content: Option<MLeaderContentSpec>,
 }
 
 /// Why a `MLEADER` typed line produced no creation payload.

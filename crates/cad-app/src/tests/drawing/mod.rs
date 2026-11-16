@@ -353,6 +353,9 @@ mod mleader_create;
 // creation, split out of `mleader_create` so both files stay inside the
 // code-size limit.
 mod mleader_options;
+// Block and tolerance content kinds (`172 = 1` / `172 = 3`), split out of
+// `mleader_create` for the code-size limit.
+mod mleader_content;
 // The 2026-11-12 SHAPE/MINSERT/ADDSELECTED contracts.
 mod addselected;
 mod minsert;
@@ -389,6 +392,7 @@ mod stretch_polygon;
 mod table;
 mod table_appearance;
 mod table_edit;
+mod table_grid;
 mod table_ops;
 mod text;
 mod text_batch;

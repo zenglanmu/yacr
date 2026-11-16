@@ -16,8 +16,9 @@ use crate::session::commands::{
     MLEADEREDIT_SELECTOR, MLEADER_SELECTOR, MLEDIT_SELECTOR, TOLERANCE_SELECTOR,
 };
 use cad_app::{
-    MLeaderAlignCommand, MLeaderAlignMode, MLeaderAttachment, MLeaderEditAction,
-    MLeaderEditCommand, MLeaderLineOverrideField, MlEditCommand, MlEditMode, ToleranceCommand,
+    MLeaderAlignCommand, MLeaderAlignMode, MLeaderAttachment, MLeaderContentSpec,
+    MLeaderEditAction, MLeaderEditCommand, MLeaderLineOverrideField, MlEditCommand, MlEditMode,
+    ToleranceCommand,
 };
 use cad_domain::{MLeaderContent, MLeaderPathType, MLeaderTextAngle, Point3};
 
@@ -211,6 +212,7 @@ fn mleader_argument_is_the_creation_line_with_an_optional_option_prefix() {
             dogleg_angle: None,
             attachment: None,
             text_angle: None,
+            content: None,
         })
     );
     // The text is the remainder: internal and trailing spaces survive, the leading
@@ -226,6 +228,7 @@ fn mleader_argument_is_the_creation_line_with_an_optional_option_prefix() {
             dogleg_angle: None,
             attachment: None,
             text_angle: None,
+            content: None,
         })
     );
     // The option prefix, in any order; `DOGLEGANGLE` is degrees on the line and
@@ -259,6 +262,7 @@ fn mleader_argument_is_the_creation_line_with_an_optional_option_prefix() {
             dogleg_angle: None,
             attachment: None,
             text_angle: Some(MLeaderTextAngle::ParallelToLastLeaderLine),
+            content: None,
         })
     );
     assert_eq!(
@@ -306,6 +310,46 @@ fn mleader_argument_is_the_creation_line_with_an_optional_option_prefix() {
         Err(MLeaderParseError::Invalid)
     );
 
+    // `CONTENT` selects the annotation kind: `MTEXT` (the default), `TOLERANCE`
+    // (the trailing text is the frame string) and `BLOCK <name>` (one name token).
+    assert_eq!(
+        parse_mleader_argument("CONTENT MTEXT 0 0 10 2 Note")
+            .expect("CONTENT MTEXT")
+            .content,
+        Some(MLeaderContentSpec::MText)
+    );
+    assert_eq!(
+        parse_mleader_argument("content block Door 0 0 10 2")
+            .expect("CONTENT BLOCK")
+            .content,
+        Some(MLeaderContentSpec::Block("Door".into()))
+    );
+    let frame =
+        parse_mleader_argument("CONTENT TOLERANCE 0 0 10 2 |0.05|A|B").expect("CONTENT TOLERANCE");
+    assert_eq!(frame.content, Some(MLeaderContentSpec::Tolerance));
+    assert_eq!(frame.text, "|0.05|A|B");
+    assert_eq!(
+        parse_mleader_argument("0 0 10 2 Note")
+            .expect("no CONTENT option")
+            .content,
+        None
+    );
+    for refused in [
+        // a duplicated option
+        "CONTENT MTEXT CONTENT BLOCK A 0 0 10 2",
+        // an unknown kind (the three stored kinds are the whole set)
+        "CONTENT TEXT 0 0 10 2 Note",
+        // `BLOCK` needs its name token, so the coordinates cannot follow directly
+        "CONTENT BLOCK 0 0 10 2",
+        "CONTENT",
+    ] {
+        assert_eq!(
+            parse_mleader_argument(refused),
+            Err(MLeaderParseError::Invalid),
+            "{refused}"
+        );
+    }
+
     // A missing text is *not* a grammar error either: it creates a content-less
     // leader, so the parser hands over an empty string.
     assert_eq!(
@@ -319,6 +363,7 @@ fn mleader_argument_is_the_creation_line_with_an_optional_option_prefix() {
             dogleg_angle: None,
             attachment: None,
             text_angle: None,
+            content: None,
         })
     );
     for refused in [
@@ -429,6 +474,52 @@ fn typed_tolerance_dispatches_a_real_frame() {
 }
 
 #[test]
+fn typed_mleader_content_selects_the_tolerance_kind_and_refuses_an_unknown_block() {
+    let session = fresh_session();
+    session
+        .command("MLEADER CONTENT TOLERANCE 0 0 10 2 |0.05|A|B")
+        .expect("the typed tolerance content creates one leader");
+    let controller = session.core.controller.borrow();
+    let drawing = controller.drawing().expect("a drawing is open");
+    assert!(
+        drawing
+            .model_space()
+            .iter()
+            .any(|entity| match &entity.geometry {
+                SemanticGeometry::MultiLeader(leader) => {
+                    *leader.content()
+                        == MLeaderContent::Tolerance(cad_domain::MLeaderToleranceContent {
+                            text: "|0.05|A|B".into(),
+                            height: 0.18,
+                        })
+                }
+                _ => false,
+            }),
+        "the stored leader carries the tolerance content kind"
+    );
+    let revision = drawing.revision();
+    drop(controller);
+
+    // An unknown block is the command layer's named refusal (the typed line is
+    // admitted, the write is not).
+    let error = session
+        .command("MLEADER CONTENT BLOCK Nope 0 0 10 2")
+        .expect_err("an unknown block refuses by name");
+    assert!(error.contains("mleader.block_missing"), "{error}");
+    // A missing frame text is the tolerance content's own refusal.
+    let error = session
+        .command("MLEADER CONTENT TOLERANCE 0 0 10 2")
+        .expect_err("an empty frame refuses by name");
+    assert!(error.contains("mleader.tolerance_text_required"), "{error}");
+    let controller = session.core.controller.borrow();
+    assert_eq!(
+        controller.drawing().expect("a drawing is open").revision(),
+        revision,
+        "both refusals wrote nothing"
+    );
+}
+
+#[test]
 fn typed_mleader_creates_a_leader_and_refuses_an_unstorable_angle() {
     let session = fresh_session();
     session
@@ -493,7 +584,7 @@ fn typed_mleader_creates_a_leader_and_refuses_an_unstorable_angle() {
     assert!(
         leaders
             .iter()
-            .any(|leader| leader.content() == MLeaderContent::None),
+            .any(|leader| *leader.content() == MLeaderContent::None),
         "the typed line without text creates a content-less leader"
     );
     drop(controller);

@@ -112,8 +112,8 @@ use crate::app_extended_w9_reports::text_explode::{replace_entities, ProducedEnt
 use crate::command_payload::{MLeaderAlignMode, MLeaderEditAction};
 use cad_db::DbEntity;
 use cad_domain::{
-    MLeaderContent, MLeaderLine, MLeaderReserved, MLeaderText, MultiLeaderGeometry,
-    MultiLeaderParts,
+    MLeaderContent, MLeaderContentKind, MLeaderLine, MLeaderReserved, MLeaderText,
+    MultiLeaderGeometry, MultiLeaderParts,
 };
 
 /// The relative tolerance for coincidence and coplanarity tests.
@@ -169,13 +169,14 @@ impl Application {
             ));
         }
         for resolved in &leaders {
-            if resolved.leader.content() != MLeaderContent::Text {
+            if resolved.leader.content().kind() != MLeaderContentKind::Text {
                 return Err(unsupported(
                     "mleaderalign",
                     "content",
                     format!(
-                        "entity {} carries no text content, so it has no annotation to align",
-                        resolved.entity.id.0
+                        "entity {} carries {} content, not text, so it has no annotation text to                          align",
+                        resolved.entity.id.0,
+                        resolved.leader.content().kind().token()
                     ),
                 ));
             }
@@ -440,14 +441,17 @@ impl Application {
         let base = &leaders[0].leader;
         for resolved in &leaders {
             let leader = &resolved.leader;
-            if leader.content() != MLeaderContent::Text || leader.text().string.trim().is_empty() {
+            if leader.content().kind() != MLeaderContentKind::Text
+                || leader.text().string.trim().is_empty()
+            {
                 return Err(unsupported(
                     "mleadercollect",
                     "content",
                     format!(
-                        "entity {} carries no text content; a collected leader needs one \
-                         annotation",
-                        resolved.entity.id.0
+                        "entity {} carries {} content, not text; collecting merges the annotation \
+                         strings, so every source must be an MText leader",
+                        resolved.entity.id.0,
+                        leader.content().kind().token()
                     ),
                 ));
             }
@@ -872,7 +876,7 @@ pub(super) fn parts_of(leader: &MultiLeaderGeometry) -> MultiLeaderParts {
         style: leader.style().clone(),
         style_name: leader.style_name().to_string(),
         override_mask: leader.override_mask(),
-        content: leader.content(),
+        content: leader.content().clone(),
         text: leader.text().clone(),
         roots: leader.roots().to_vec(),
         lines: leader.lines().to_vec(),

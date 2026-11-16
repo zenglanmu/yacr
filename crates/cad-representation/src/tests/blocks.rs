@@ -144,3 +144,93 @@ fn self_referencing_block_is_cut_with_partial_report() {
         .iter()
         .any(|d| d.code == "representation.instance_cycle"));
 }
+
+/// A MULTILEADER whose annotation content is a block draws the block's geometry:
+/// the content kind reaches the provider as an ordinary block instance child, so
+/// there is no second expansion path for it.
+#[test]
+fn a_multileader_block_content_expands_the_block_members() {
+    let mut b = empty_db();
+    b.insert_block(BlockDefinition {
+        id: BlockId(2),
+        entities: vec![EntityId(12)],
+        dynamic_visibility: None,
+    })
+    .unwrap();
+    b.insert_entity(line_entity(
+        12,
+        SpaceId::Block(BlockId(2)),
+        p(0.0, 0.0),
+        p(2.0, 0.0),
+    ))
+    .unwrap();
+    let leader = cad_domain::MultiLeaderGeometry::created_with_content(
+        cad_domain::MLeaderStyleValues {
+            path_type: cad_domain::MLeaderPathType::StraightLineSegments,
+            enable_landing: true,
+            enable_dogleg: true,
+            landing_distance: 1.0,
+            landing_gap: 0.1,
+            arrowhead_size: 0.5,
+            text_height: 0.2,
+            text_style: StyleId(0),
+            text_style_name: "Standard".into(),
+            text_font: None,
+            scale_factor: 1.0,
+            text_angle_type: cad_domain::MLeaderTextAngle::Horizontal,
+        },
+        "Standard".into(),
+        2,
+        p(0.0, 0.0),
+        p(10.0, 5.0),
+        cad_domain::MLeaderCreateContent::Block {
+            block: BlockId(2),
+            name: "Door".into(),
+        },
+        Default::default(),
+    )
+    .expect("a valid block-content leader");
+    b.insert_entity(DbEntity {
+        object: DbObject {
+            id: ObjectId(1),
+            type_key: "AcDbMultiLeader".into(),
+            revision: Revision(0),
+            source_handle: None,
+        },
+        id: EntityId(1),
+        layer: LayerId(0),
+        space: SpaceId::Model,
+        geometry: SemanticGeometry::MultiLeader(Box::new(leader)),
+        draw_order: 1,
+    })
+    .unwrap();
+    let db = b.finish().unwrap();
+
+    let registry = ProviderRegistry::with_default_provider();
+    let rep = registry
+        .build_expanded(&db, db.entity(EntityId(1)).unwrap(), &context())
+        .unwrap();
+    // The block member line is drawn with the content placement composed in: the
+    // leader's leader-line/arrowhead/dogleg fragments plus the block's line.
+    let closes = |a: Point3, b: Point3| {
+        (a.x - b.x).abs() < 1e-9 && (a.y - b.y).abs() < 1e-9 && (a.z - b.z).abs() < 1e-9
+    };
+    let block_line = rep
+        .fragments
+        .iter()
+        .find_map(|fragment| match &fragment.primitive {
+            DisplayPrimitive::Lines(points) if points.len() == 2 => {
+                let (a, b) = (points[0], points[1]);
+                closes(a, p(10.0, 5.0)).then_some((a, b))
+            }
+            _ => None,
+        });
+    let (_, end) = block_line.expect("the block's member line at the content point");
+    assert!(closes(end, p(12.0, 5.0)), "{end:?}");
+    assert!(
+        !rep.fragments
+            .iter()
+            .any(|fragment| matches!(fragment.primitive, DisplayPrimitive::Instance { .. })),
+        "the instance is expanded, not handed to the renderer"
+    );
+}

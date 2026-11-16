@@ -123,6 +123,77 @@ fn leader(id: u128, space: SpaceId, height: f64) -> cad_db::DbEntity {
     )
 }
 
+/// A straight-line MULTILEADER whose annotation is a feature-control frame.
+fn tolerance_leader(id: u128, space: SpaceId, height: f64) -> cad_db::DbEntity {
+    let geometry = MultiLeaderGeometry::created_with_content(
+        MLeaderStyleValues {
+            path_type: MLeaderPathType::StraightLineSegments,
+            enable_landing: true,
+            enable_dogleg: true,
+            landing_distance: 1.0,
+            landing_gap: 0.1,
+            arrowhead_size: 0.5,
+            text_height: height,
+            text_style: StyleId(0),
+            text_style_name: "Standard".into(),
+            text_font: None,
+            scale_factor: 1.0,
+            text_angle_type: MLeaderTextAngle::Horizontal,
+        },
+        "Standard".into(),
+        2,
+        p3(0.0, 0.0, 0.0),
+        p3(5.0, 5.0, 0.0),
+        cad_domain::MLeaderCreateContent::Tolerance {
+            text: "|0.05".into(),
+        },
+        Default::default(),
+    )
+    .expect("a valid tolerance leader");
+    entity(
+        id,
+        space,
+        "AcDbMultiLeader",
+        SemanticGeometry::MultiLeader(Box::new(geometry)),
+    )
+}
+
+/// A straight-line MULTILEADER whose annotation is an inserted block.
+fn block_leader(id: u128, space: SpaceId, height: f64) -> cad_db::DbEntity {
+    let geometry = MultiLeaderGeometry::created_with_content(
+        MLeaderStyleValues {
+            path_type: MLeaderPathType::StraightLineSegments,
+            enable_landing: true,
+            enable_dogleg: true,
+            landing_distance: 1.0,
+            landing_gap: 0.1,
+            arrowhead_size: 0.5,
+            text_height: height,
+            text_style: StyleId(0),
+            text_style_name: "Standard".into(),
+            text_font: None,
+            scale_factor: 1.0,
+            text_angle_type: MLeaderTextAngle::Horizontal,
+        },
+        "Standard".into(),
+        2,
+        p3(0.0, 0.0, 0.0),
+        p3(5.0, 5.0, 0.0),
+        cad_domain::MLeaderCreateContent::Block {
+            block: BlockId(7),
+            name: "Door".into(),
+        },
+        Default::default(),
+    )
+    .expect("a valid block leader");
+    entity(
+        id,
+        space,
+        "AcDbMultiLeader",
+        SemanticGeometry::MultiLeader(Box::new(geometry)),
+    )
+}
+
 fn cell(text: &str) -> TableCellGeometry {
     TableCellGeometry {
         text: text.to_string(),
@@ -310,6 +381,41 @@ fn assert_near(actual: f64, expected: f64, what: &str) {
         (actual - expected).abs() < 1e-12,
         "{what}: expected {expected}, got {actual}"
     );
+}
+
+#[test]
+fn pstscale_scales_the_multileader_content_payloads_too() {
+    // A tolerance frame's cell height and a block content's placement scale are
+    // annotation-scaled values: leaving them unscaled would make the stored
+    // definition disagree with the scaled text height.
+    let (mut app, mut session) = fixture(vec![
+        tolerance_leader(30, SpaceId::Paper(LayoutId(1)), 0.2),
+        block_leader(31, SpaceId::Paper(LayoutId(1)), 0.2),
+    ]);
+    select(&mut session, &[30, 31]);
+    app.execute(&mut session, command_with(ExtendedCommandId::PstScale))
+        .expect("PSTSCALE scales both content payloads");
+
+    // 1:100 ⇒ 0.01 paper units per model unit.
+    match geometry(&app, 30) {
+        SemanticGeometry::MultiLeader(leader) => {
+            let tolerance = leader.tolerance_content().expect("the frame payload");
+            assert_near(tolerance.height, 0.002, "the frame cell height");
+            assert_near(leader.text().height, 0.002, "the mirrored text height");
+            assert_eq!(tolerance.text, "|0.05", "the frame string is untouched");
+        }
+        other => panic!("the entity stays a MULTILEADER, got {other:?}"),
+    }
+    match geometry(&app, 31) {
+        SemanticGeometry::MultiLeader(leader) => {
+            let block = leader.block_content().expect("the block payload");
+            assert_near(block.scale.x, 0.01, "the block x scale");
+            assert_near(block.scale.y, 0.01, "the block y scale");
+            assert_near(block.scale.z, 0.01, "the block z scale");
+            assert_eq!(block.name, "Door", "the block identity is untouched");
+        }
+        other => panic!("the entity stays a MULTILEADER, got {other:?}"),
+    }
 }
 
 #[test]

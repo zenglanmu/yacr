@@ -71,7 +71,7 @@
 //! the one policy in [`super::text_policy`].
 
 use super::*;
-use cad_domain::{MLeaderContent, SemanticGeometry};
+use cad_domain::{MLeaderContentKind, SemanticGeometry};
 use cad_representation::mtext_projection;
 use cad_representation::text::ProjectedOrigin;
 use text_policy::{has_line_break, newlines_to_paragraph_breaks};
@@ -366,7 +366,9 @@ fn find_hits(entity: &DbEntity, space: FindSpace, needle: &str) -> Vec<FindHit> 
                 Vec::new()
             }
         }
-        SemanticGeometry::MultiLeader(leader) if leader.content() == MLeaderContent::Text => {
+        SemanticGeometry::MultiLeader(leader)
+            if leader.content().kind() == MLeaderContentKind::Text =>
+        {
             let shown = mtext_preview_text(&leader.text().string);
             if contains(&shown, needle) {
                 vec![FindHit::entity_hit(entity, space, shown)]

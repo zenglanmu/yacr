@@ -51,15 +51,19 @@
 //! refusals: this build has no block-in-cell or field model.
 
 use super::table_edit::{commit_table_geometry, select_table, table_refusal, TableSelection};
+use super::table_format::{
+    borders_color_label, borders_label, borders_lineweight_label, color_label, row_sets_label,
+    suppression_label, STYLE_GAPS,
+};
 use super::*;
 use crate::app_drawing::table_payload::{
     aci_srgb, canonical_lineweight_hundredths, TableCellAddress, TableColorValue,
-    TableLineweightValue, TablePayload, TableRowStyleCommand, TableStyleCommand, TableStyleEdge,
-    TableStyleRowScope,
+    TableLineweightValue, TableMarginValue, TablePayload, TableRowStyleCommand, TableStyleCommand,
+    TableStyleEdge, TableStyleRowScope,
 };
 use cad_domain::{
-    StyleId, TableCellAppearanceEdit, TableFieldEdit, TableGeometry, TableRowKind, TableRowStyle,
-    TableStyleValues,
+    StyleId, TableCellAppearanceEdit, TableCellMargins, TableCellMarginsEdit, TableFieldEdit,
+    TableGeometry, TableRowKind, TableRowStyle, TableStyleValues,
 };
 
 impl Application {
@@ -95,12 +99,14 @@ impl Application {
 
     /// `TABLEDIT FORMAT <row> <col> [ALIGN <code>] [ROTATION <degrees>]
     /// [COLOR <aci|BYLAYER>] [FILL <aci|NONE>] [LINEWEIGHT <mm|BYLAYER>]
-    /// [BORDERCOLOR <aci|BYLAYER>]`.
+    /// [BORDERCOLOR <aci|BYLAYER>] [BORDER <ON|OFF|SINGLE|DOUBLE> [<spacing>]]
+    /// [MARGIN <l> <t> <r> <b>|INHERIT]`.
     ///
     /// Sets the per-cell formatting this build stores *and draws*: the text
-    /// alignment, the text rotation (relative to the table frame) and the cell's
+    /// alignment, the text rotation (relative to the table frame), the cell's
     /// appearance — text colour, background fill, and the four border edges'
-    /// colour and lineweight. Every field combines in **one** write, so any
+    /// colour, lineweight, visibility and type (double-line spacing) — and the
+    /// cell's `GRIDFORMAT` margins. Every field combines in **one** write, so any
     /// combination is one transaction / one undo step. A field this build cannot
     /// represent (a border line type) is refused by the parser before this point,
     /// with its own named reason; the payload has no slot for it, so it can never
@@ -125,6 +131,8 @@ impl Application {
             fill,
             lineweight,
             border_color,
+            border,
+            margin,
         } = payload.as_ref()
         else {
             return Err(table_refusal(
@@ -141,22 +149,35 @@ impl Application {
             && fill.is_none()
             && lineweight.is_none()
             && border_color.is_none()
+            && border.is_none()
+            && margin.is_none()
         {
             return Err(table_refusal(
                 "tabledit.format_empty",
                 "TABLEDIT FORMAT needs at least one of ALIGN <code>, ROTATION <degrees>, \
-                 COLOR <aci|BYLAYER>, FILL <aci|NONE>, LINEWEIGHT <mm|BYLAYER> or \
-                 BORDERCOLOR <aci|BYLAYER>",
+                 COLOR <aci|BYLAYER>, FILL <aci|NONE>, LINEWEIGHT <mm|BYLAYER>, \
+                 BORDERCOLOR <aci|BYLAYER>, BORDER <ON|OFF|SINGLE|DOUBLE> [<spacing>] or \
+                 MARGIN <l> <t> <r> <b>|INHERIT",
             ));
         }
-        // Resolve every colour/lineweight **before** the write: an ACI index or a
-        // non-canonical weight is refused here, so nothing half-applies.
+        // Resolve every colour/lineweight/margin **before** the write: an ACI
+        // index, a non-canonical weight or a negative margin is refused here, so
+        // nothing half-applies.
         let appearance = TableCellAppearanceEdit {
             text_color: color_edit(*color)?,
             fill: color_edit(*fill)?,
             border_color: color_edit(*border_color)?,
             border_lineweight: lineweight_edit(*lineweight)?,
+            border_visible: match border.and_then(|border| border.visible) {
+                None => TableFieldEdit::Keep,
+                Some(visible) => TableFieldEdit::Set(visible),
+            },
+            border_spacing: match border.and_then(|border| border.spacing) {
+                None => TableFieldEdit::Keep,
+                Some(spacing) => TableFieldEdit::Set(spacing),
+            },
         };
+        let margin_edit = margin_edit(*margin)?;
         let selection = select_table(self, session, command, "tabledit")?;
         let (row, column) = resolve_cell(*cell, &selection, "tabledit")?;
         let before = selection.table.cell(row, column).cloned().ok_or_else(|| {
@@ -177,7 +198,21 @@ impl Application {
         appearance.text_color.apply(&mut wanted.text_color);
         appearance.fill.apply(&mut wanted.fill_color);
         appearance.apply_borders(&mut wanted.borders);
-        if wanted == before {
+        let mut wanted_margins = selection
+            .table
+            .cell_margins(row, column)
+            .unwrap_or(TableCellMargins::INHERIT);
+        margin_edit.left.apply(&mut wanted_margins.left);
+        margin_edit.top.apply(&mut wanted_margins.top);
+        margin_edit.right.apply(&mut wanted_margins.right);
+        margin_edit.bottom.apply(&mut wanted_margins.bottom);
+        if wanted == before
+            && wanted_margins
+                == selection
+                    .table
+                    .cell_margins(row, column)
+                    .unwrap_or(TableCellMargins::INHERIT)
+        {
             return Err(table_refusal(
                 "tabledit.unchanged",
                 format!(
@@ -194,7 +229,13 @@ impl Application {
         if alignment.is_some() || rotation.is_some() {
             updated = updated.with_cell_format(row, column, *alignment, *rotation)?;
         }
+        if !margin_edit.is_keep() || !wanted_margins.is_inherit() {
+            updated = updated.with_cell_margins(row, column, margin_edit)?;
+        }
         let after = updated.cell(row, column).cloned().unwrap_or(before);
+        let after_margins = updated
+            .cell_margins(row, column)
+            .unwrap_or(TableCellMargins::INHERIT);
         commit_table_geometry(
             self,
             command.document,
@@ -205,7 +246,7 @@ impl Application {
             format!(
                 "TABLEDIT FORMAT: cell {} of table {} now has alignment {}, rotation {}° \
                  (relative to the table frame), text colour {}, fill {}, border colour {}, border \
-                 lineweight {}; one transaction / one undo step",
+                 lineweight {}, borders {}, margins {}; one transaction / one undo step",
                 address_label(*cell),
                 selection.before.id.0,
                 after.alignment.label(),
@@ -213,7 +254,9 @@ impl Application {
                 color_label(after.text_color, "BYLAYER"),
                 color_label(after.fill_color, "NONE"),
                 borders_color_label(&after.borders),
-                borders_lineweight_label(&after.borders)
+                borders_lineweight_label(&after.borders),
+                borders_label(&after.borders),
+                after_margins.label()
             ),
         )
     }
@@ -329,8 +372,8 @@ impl Application {
         // The whole per-cell format this build models — text height, text style
         // identity/name/font, the four border edges (visibility, spacing, colour
         // and lineweight), the text alignment, the text rotation, the cell's text
-        // colour and its background fill. Text and merge spans are not part of
-        // it.
+        // colour, its background fill and its `GRIDFORMAT` margin override. Text
+        // and merge spans are not part of it.
         let source_style = selection
             .table
             .cell(source_row, source_column)
@@ -353,6 +396,7 @@ impl Application {
                     format!("the source cell {} does not exist", address_label(*source)),
                 )
             })?;
+        let source_margins = selection.table.cell_margins(source_row, source_column);
         let unchanged = target_cells.iter().all(|(row, column)| {
             selection.table.cell(*row, *column).is_some_and(|cell| {
                 (
@@ -366,6 +410,7 @@ impl Application {
                     cell.text_color,
                     cell.fill_color,
                 ) == source_style
+                    && selection.table.cell_margins(*row, *column) == source_margins
             })
         });
         if unchanged {
@@ -395,7 +440,8 @@ impl Application {
             format!(
                 "MATCHCELL: copied the format of {} (text height {}, style `{}`, border \
                  visibility/spacing/colour/lineweight, alignment {}, rotation {}°, text colour \
-                 {}, fill {}) onto {addresses} of table {}; one transaction / one undo step",
+                 {}, fill {}, margins {}) onto {addresses} of table {}; one transaction / one undo \
+                 step",
                 address_label(*source),
                 source_style.0,
                 source_style.1,
@@ -403,6 +449,7 @@ impl Application {
                 source_style.6.to_degrees(),
                 color_label(source_style.7, "BYLAYER"),
                 color_label(source_style.8, "NONE"),
+                source_margins.unwrap_or(TableCellMargins::INHERIT).label(),
                 selection.before.id.0
             ),
         )
@@ -545,73 +592,6 @@ impl Application {
                 STYLE_GAPS
             ),
         )
-    }
-}
-
-/// How the report and the write message summarise the three row value sets.
-fn row_sets_label(style: &TableStyleValues) -> String {
-    let data = style.data_row();
-    let mut parts = Vec::with_capacity(3);
-    for kind in [
-        TableRowKind::Data,
-        TableRowKind::Title,
-        TableRowKind::Header,
-    ] {
-        let row = style.row_style(kind);
-        let linked = if kind != TableRowKind::Data && row == data {
-            " = data row"
-        } else {
-            ""
-        };
-        parts.push(format!(
-            "{} row: text height {}, text style `{}`, alignment {}, borders {}, text colour {}, \
-             fill {}{linked}",
-            kind.label(),
-            row.text_height,
-            row.text_style_name,
-            row.alignment.label(),
-            borders_label(&row.borders),
-            color_label(row.text_color, "BYLAYER"),
-            color_label(row.fill_color, "NONE")
-        ));
-    }
-    parts.join("; ")
-}
-
-/// `top/right/bottom/left` edge labels, in one short form.
-fn borders_label(borders: &cad_domain::TableCellBorders) -> String {
-    format!(
-        "{}/{}/{}/{}",
-        edge_label(borders.top.visible, borders.top.double_spacing),
-        edge_label(borders.right.visible, borders.right.double_spacing),
-        edge_label(borders.bottom.visible, borders.bottom.double_spacing),
-        edge_label(borders.left.visible, borders.left.double_spacing)
-    )
-}
-
-fn suppression_label(suppressed: bool) -> &'static str {
-    if suppressed {
-        "suppressed"
-    } else {
-        "shown"
-    }
-}
-
-/// The style fields this build does not model (named, never implied).
-const STYLE_GAPS: &str =
-    "; a per-border line type is not modelled, a stored border lineweight is exported but drawn \
-     one pixel wide, and the style's annotative flag is not stored";
-
-/// The `tablestyle.report` gap sentence's first character is joined mid-line, so
-/// the constant starts there rather than with a space of its own.
-fn edge_label(visible: bool, double_spacing: f64) -> String {
-    if !visible {
-        return "hidden".to_string();
-    }
-    if double_spacing > 0.0 {
-        format!("double({double_spacing})")
-    } else {
-        "single".to_string()
     }
 }
 
@@ -941,36 +921,31 @@ fn resolve_lineweight_choice(choice: TableLineweightValue) -> CadResult<Option<u
     }
 }
 
-/// `BYLAYER`/`NONE` for an absent override, `#RRGGBB` for a stored colour.
-fn color_label(color: Option<[u8; 3]>, absent: &str) -> String {
-    match color {
-        None => absent.to_string(),
-        Some([r, g, b]) => format!("#{r:02X}{g:02X}{b:02X}"),
+/// The margin edit a typed `TABLEDIT FORMAT … MARGIN …` names.
+///
+/// `INHERIT` clears all four edges (back to the placement the cell had before
+/// margins existed); four numbers set them. A negative or non-finite value is
+/// refused here, before the write, with the field's own code.
+fn margin_edit(choice: Option<TableMarginValue>) -> CadResult<TableCellMarginsEdit> {
+    match choice {
+        None => Ok(TableCellMarginsEdit::default()),
+        Some(TableMarginValue::Inherit) => Ok(TableCellMarginsEdit::CLEAR),
+        Some(TableMarginValue::Values(margins)) => {
+            if !margins.is_valid() {
+                return Err(table_refusal(
+                    "tabledit.format_margin",
+                    format!(
+                        "the cell margins must be finite and non-negative, got {}",
+                        margins.label()
+                    ),
+                ));
+            }
+            Ok(TableCellMarginsEdit {
+                left: TableFieldEdit::Set(margins.left.unwrap_or(0.0)),
+                top: TableFieldEdit::Set(margins.top.unwrap_or(0.0)),
+                right: TableFieldEdit::Set(margins.right.unwrap_or(0.0)),
+                bottom: TableFieldEdit::Set(margins.bottom.unwrap_or(0.0)),
+            })
+        }
     }
-}
-
-/// The four edges' colours, in top/right/bottom/left order.
-fn borders_color_label(borders: &cad_domain::TableCellBorders) -> String {
-    format!(
-        "{}/{}/{}/{}",
-        color_label(borders.top.color, "BYLAYER"),
-        color_label(borders.right.color, "BYLAYER"),
-        color_label(borders.bottom.color, "BYLAYER"),
-        color_label(borders.left.color, "BYLAYER")
-    )
-}
-
-/// The four edges' lineweights, in top/right/bottom/left order.
-fn borders_lineweight_label(borders: &cad_domain::TableCellBorders) -> String {
-    let label = |weight: Option<u16>| match weight {
-        None => "BYLAYER".to_string(),
-        Some(hundredths) => format!("{:.2}mm", f64::from(hundredths) / 100.0),
-    };
-    format!(
-        "{}/{}/{}/{}",
-        label(borders.top.lineweight_hundredths),
-        label(borders.right.lineweight_hundredths),
-        label(borders.bottom.lineweight_hundredths),
-        label(borders.left.lineweight_hundredths)
-    )
 }

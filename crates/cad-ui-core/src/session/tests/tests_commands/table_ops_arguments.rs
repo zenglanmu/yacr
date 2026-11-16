@@ -26,10 +26,10 @@ use crate::session::commands::{
     TABLEEXPORT_SELECTOR, TABLESTYLE_SELECTOR,
 };
 use cad_app::{
-    TableCellAddress, TableColorValue, TableLineweightValue, TablePayload, TableStyleCommand,
-    TableStyleEdge, TableStyleRowScope,
+    TableCellAddress, TableCellBorderCommand, TableColorValue, TableLineweightValue,
+    TableMarginValue, TablePayload, TableStyleCommand, TableStyleEdge, TableStyleRowScope,
 };
-use cad_domain::{TableCellAlignment, TableRowKind};
+use cad_domain::{TableCellAlignment, TableCellMargins, TableRowKind};
 
 // ---------------------------------------------------------------------------
 // Grammars.
@@ -457,6 +457,8 @@ fn tabledit_format_parses_alignment_and_rotation_in_degrees() {
             fill: None,
             lineweight: None,
             border_color: None,
+            border: None,
+            margin: None,
         }
     );
     // Each field alone is legal...
@@ -504,6 +506,8 @@ fn tabledit_format_parses_the_cell_appearance_fields() {
             fill: Some(TableColorValue::Aci(3)),
             lineweight: Some(TableLineweightValue::Millimetres(0.35)),
             border_color: Some(TableColorValue::None),
+            border: None,
+            margin: None,
         }
     );
     // `BYLAYER` clears a text colour, `NONE` clears a fill; a lineweight may be
@@ -558,6 +562,13 @@ fn the_border_line_type_is_the_one_named_format_refusal() {
         );
         assert!(reason.contains("LINETYPE"), "{reason}");
         assert!(reason.contains("nothing was changed"), "{reason}");
+        // The reason is the verified one: the DXF group is an LTYPE handle, the
+        // entity writer emits no per-cell line type, and the fragment expansion
+        // has no per-primitive dash source — not "not implemented".
+        assert!(
+            reason.contains("LTYPE handle") && reason.contains("no per-primitive dash source"),
+            "{reason}"
+        );
     }
     // ...while every field the appearance channel supports is not.
     assert_eq!(tabledit_format_refusal("FORMAT 1 1 ALIGN TL"), None);
@@ -606,4 +617,158 @@ fn tablestyle_refuses_a_bad_row_scope_or_alignment() {
     assert_eq!(parse_tablestyle_argument("ROW"), None);
     assert_eq!(parse_tablestyle_argument("ALIGN MIDDLE"), None);
     assert_eq!(parse_tablestyle_argument("ROW TITLE ALIGN"), None);
+}
+
+#[test]
+fn tabledit_format_parses_the_cell_border_type_and_margins() {
+    // `BORDER` reaches all four edges (the cell has no per-edge selector), and the
+    // four states are the border type: visible/off, explicitly single, doubled
+    // with and without a spacing.
+    assert_eq!(
+        parse_tabledit_option_argument("FORMAT 1 1 BORDER DOUBLE 0.4").map(format_border),
+        Some(Some(TableCellBorderCommand {
+            visible: Some(true),
+            spacing: Some(0.4),
+        }))
+    );
+    assert_eq!(
+        parse_tabledit_option_argument("FORMAT 1 1 BORDER SINGLE").map(format_border),
+        Some(Some(TableCellBorderCommand {
+            visible: Some(true),
+            spacing: Some(0.0),
+        })),
+        "SINGLE is the explicit `single line, no spacing` state"
+    );
+    assert_eq!(
+        parse_tabledit_option_argument("FORMAT 1 1 BORDER OFF").map(format_border),
+        Some(Some(TableCellBorderCommand {
+            visible: Some(false),
+            spacing: None,
+        }))
+    );
+    assert_eq!(
+        parse_tabledit_option_argument("FORMAT 1 1 BORDER DOUBLE").map(format_border),
+        Some(Some(TableCellBorderCommand {
+            visible: Some(true),
+            spacing: None,
+        })),
+        "a DOUBLE with no spacing keeps the edge's stored spacing"
+    );
+    // A spacing that follows `DOUBLE` may not be a field word, so
+    // `BORDER DOUBLE MARGIN 1 1 1 1` reads as one border and one margin.
+    let parsed = parse_tabledit_option_argument("FORMAT 1 1 BORDER DOUBLE MARGIN 1 1 1 1")
+        .expect("both fields");
+    assert_eq!(
+        parsed,
+        TablePayload::Format {
+            cell: TableCellAddress { row: 1, col: 1 },
+            alignment: None,
+            rotation: None,
+            color: None,
+            fill: None,
+            lineweight: None,
+            border_color: None,
+            border: Some(TableCellBorderCommand {
+                visible: Some(true),
+                spacing: None,
+            }),
+            margin: Some(TableMarginValue::Values(TableCellMargins::new(
+                1.0, 1.0, 1.0, 1.0
+            ))),
+        }
+    );
+    assert_eq!(
+        parse_tabledit_option_argument("FORMAT 2 2 MARGIN 0.1 0.2 0.3 0.4").map(format_margin),
+        Some(Some(TableMarginValue::Values(TableCellMargins::new(
+            0.1, 0.2, 0.3, 0.4
+        ))))
+    );
+    assert_eq!(
+        parse_tabledit_option_argument("FORMAT 2 2 MARGIN INHERIT").map(format_margin),
+        Some(Some(TableMarginValue::Inherit))
+    );
+    // Malformed: an unknown border state, a single number where four belong, a
+    // negative margin, a repeated field and a spacing after `SINGLE`.
+    assert_eq!(
+        parse_tabledit_option_argument("FORMAT 1 1 BORDER MAYBE"),
+        None
+    );
+    assert_eq!(
+        parse_tabledit_option_argument("FORMAT 1 1 BORDER DOUBLE -1"),
+        None
+    );
+    assert_eq!(
+        parse_tabledit_option_argument("FORMAT 1 1 MARGIN 1 1 1"),
+        None
+    );
+    assert_eq!(
+        parse_tabledit_option_argument("FORMAT 1 1 MARGIN -1 0 0 0"),
+        None
+    );
+    assert_eq!(
+        parse_tabledit_option_argument("FORMAT 1 1 MARGIN 1 1 1 1 MARGIN INHERIT"),
+        None
+    );
+    assert_eq!(
+        parse_tabledit_option_argument("FORMAT 1 1 BORDER SINGLE 0.5"),
+        None
+    );
+    // `BORDER ALL <state>` is the explicit spelling of the same four-edge write.
+    assert_eq!(
+        parse_tabledit_option_argument("FORMAT 1 1 BORDER ALL DOUBLE 0.25").map(format_border),
+        Some(Some(TableCellBorderCommand {
+            visible: Some(true),
+            spacing: Some(0.25),
+        }))
+    );
+    // A per-edge word is a recognised spelling this form does not have, so it is
+    // refused by name instead of silently widening to all four edges.
+    let reason = tabledit_format_refusal("FORMAT 1 1 BORDER TOP ON")
+        .expect("a single edge is refused by name");
+    assert!(
+        reason.starts_with("tabledit.format_edge_unsupported:"),
+        "{reason}"
+    );
+    assert!(reason.contains("TOP"), "{reason}");
+    assert!(reason.contains("TABLESTYLE ROW"), "{reason}");
+    assert!(reason.contains("nothing was changed"), "{reason}");
+    assert!(parse_tabledit_option_argument("FORMAT 1 1 BORDER TOP ON").is_none());
+    // Both fields are supported, so neither is a named refusal.
+    assert_eq!(
+        tabledit_format_refusal("FORMAT 1 1 BORDER DOUBLE 0.5"),
+        None
+    );
+    assert_eq!(
+        tabledit_format_refusal("FORMAT 1 1 MARGIN 0.1 0.1 0.1 0.1"),
+        None
+    );
+}
+
+/// The `border` slot of a parsed `FORMAT` payload.
+fn format_border(payload: TablePayload) -> Option<TableCellBorderCommand> {
+    match payload {
+        TablePayload::Format { border, .. } => border,
+        other => panic!("expected a FORMAT payload, got {other:?}"),
+    }
+}
+
+/// The `margin` slot of a parsed `FORMAT` payload.
+fn format_margin(payload: TablePayload) -> Option<TableMarginValue> {
+    match payload {
+        TablePayload::Format { margin, .. } => margin,
+        other => panic!("expected a FORMAT payload, got {other:?}"),
+    }
+}
+
+#[test]
+fn tablestyle_border_accepts_the_explicit_single_state() {
+    let parsed = parse_tablestyle_argument("ROW DATA BORDER ALL SINGLE")
+        .expect("the single state is admitted");
+    assert_eq!(
+        parsed.rows[0].borders,
+        vec![(TableStyleEdge::All, true, Some(0.0))]
+    );
+    // `SINGLE` takes no spacing: a following number is not a field word, so the
+    // line is refused rather than silently dropping the value.
+    assert_eq!(parse_tablestyle_argument("BORDER TOP SINGLE 0.5"), None);
 }

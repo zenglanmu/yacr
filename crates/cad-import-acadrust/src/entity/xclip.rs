@@ -37,9 +37,12 @@
 //!   so every imported clip is stored as inside-mode and the model gap is
 //!   reported once per import (`import.xclip_mode_unmodelled`). An inverted clip
 //!   cannot be distinguished from an inside clip in this build.
-//! * **Depth planes.** `BlockClip` has no front/back plane, so a filter that
-//!   sets one is reported (`import.xclip_depth_planes`) and the stored clip is
-//!   the 2D region only.
+//! * **Depth planes.** The front/back distances (flags `72`/`73`, groups
+//!   `40`/`41`) are read into `BlockClip` as a block-local `z` band. A filter
+//!   whose normal is not the block's `+Z`, whose inverse transform has no usable
+//!   `z` scale, or whose pair is non-finite/`front > back` cannot be stored
+//!   faithfully; it is reported (`import.xclip_depth_normal`/`_scale`/
+//!   `_direction`/`_invalid`) and the 2D region alone is stored.
 //! * **Off-plane boundaries.** A boundary whose block-space points do not share
 //!   one z is projected onto the block XY plane and reported
 //!   (`import.xclip_plane_projected`); the region is still 2D.
@@ -59,8 +62,15 @@ pub(crate) mod xclip_reason {
     pub const ARITY: &str = "import.xclip_boundary_arity";
     /// The boundary is not parallel to the block XY plane; its ring was projected.
     pub const PLANE: &str = "import.xclip_plane_projected";
-    /// The filter sets a front/back clipping plane, which `BlockClip` cannot hold.
-    pub const DEPTH: &str = "import.xclip_depth_planes";
+    /// The clipping plane normal is not the block's `+Z`, so the distances
+    /// measure another axis and are not stored.
+    pub const DEPTH_NORMAL: &str = "import.xclip_depth_normal";
+    /// The inverse block transform has no usable `z` scale for the distances.
+    pub const DEPTH_SCALE: &str = "import.xclip_depth_scale";
+    /// The inverse block transform reverses the block's `+Z`.
+    pub const DEPTH_DIRECTION: &str = "import.xclip_depth_direction";
+    /// The source pair is non-finite or `front > back`, so it names no band.
+    pub const DEPTH_INVALID: &str = "import.xclip_depth_invalid";
     /// The inside/inverted clip mode is not a field of the source model.
     pub const MODE: &str = "import.xclip_mode_unmodelled";
 }
@@ -151,14 +161,7 @@ pub(crate) fn read_insert_clip(
             ),
         ));
     }
-    if filter.front_clip.is_some() || filter.back_clip.is_some() {
-        gaps.push((
-            xclip_reason::DEPTH,
-            "the spatial filter sets a front/back clipping plane; this build stores the 2D \
-             boundary only, so content outside that depth range stays visible"
-                .into(),
-        ));
-    }
+    let (front_clip, back_clip) = read_depth(filter, &mut gaps);
     gaps.push((
         xclip_reason::MODE,
         "the source's clip mode (inside/inverted) is not a field of the \
@@ -173,9 +176,111 @@ pub(crate) fn read_insert_clip(
             // No clip-mode field exists in the source model; see `MODE` above.
             inside: true,
             visible: filter.display_enabled,
+            front_clip,
+            back_clip,
         }),
         gaps,
     }
+}
+
+/// The clip depths a source filter carries, in block-local `+Z`.
+///
+/// `SPATIAL_FILTER` groups `40`/`41` hold the front/back distances along the
+/// boundary plane's normal (`210`), each enabled by its own flag (`72`/`73`);
+/// acadrust turns a set flag plus its distance into an `Option`, so an unset flag
+/// and an absent distance are the same `None` and a distance cannot be read
+/// without its flag. [`cad_domain::BlockClip`] stores the pair as the block-local
+/// **z band** `[front, back]`, so the direction and the unit are checked here
+/// rather than assumed:
+///
+/// * the normal must be the block's `+Z` (`(0, 0, +n)`). A normal in, or against,
+///   the block plane means the two distances measure another axis; they are
+///   reported (`import.xclip_depth_normal`) and not stored;
+/// * the distances are WCS lengths, so they are converted to block-local `z`
+///   through the filter's own inverse block transform (its `z` scale). A
+///   singular or mirrored `z` scale is reported (`import.xclip_depth_scale` /
+///   `import.xclip_depth_direction`), never guessed;
+/// * the pair must be finite and ordered `front <= back` — the rule
+///   `cad_domain::BlockClip::with_depth` enforces. A source pair that fails it is
+///   reported (`import.xclip_depth_invalid`) and the 2D boundary is stored alone.
+///
+/// A one-sided filter is honoured: the missing side is `None` (unbounded), not
+/// zero, which is exactly what a single set flag means.
+fn read_depth(
+    filter: &SpatialFilter,
+    gaps: &mut Vec<(&'static str, String)>,
+) -> (Option<f64>, Option<f64>) {
+    if filter.front_clip.is_none() && filter.back_clip.is_none() {
+        return (None, None);
+    }
+    let normal = filter.normal;
+    let length = normal.x.hypot(normal.y).hypot(normal.z);
+    let along_plane = length.is_finite() && length > 1e-12;
+    if !along_plane
+        || normal.x.abs() > 1e-9 * length
+        || normal.y.abs() > 1e-9 * length
+        || normal.z < 0.0
+    {
+        gaps.push((
+            xclip_reason::DEPTH_NORMAL,
+            format!(
+                "the filter's clipping plane normal is ({}, {}, {}), not the block's +Z; its \
+                 front/back distances measure another axis, so they are not stored and only the \
+                 2D boundary is kept",
+                normal.x, normal.y, normal.z
+            ),
+        ));
+        return (None, None);
+    }
+    // WCS distance → block-local +Z distance. The boundary points sit on the WCS
+    // z = 0 plane, so the difference of the two mapped points is the scale.
+    let origin_z = filter
+        .inverse_block_transform
+        .transform_point(Vector3::new(0.0, 0.0, 0.0))
+        .z;
+    let unit_z = filter
+        .inverse_block_transform
+        .transform_point(Vector3::new(0.0, 0.0, 1.0))
+        .z;
+    let scale = unit_z - origin_z;
+    if !scale.is_finite() || scale.abs() <= 1e-12 {
+        gaps.push((
+            xclip_reason::DEPTH_SCALE,
+            format!(
+                "the filter's inverse block transform maps +Z to a {} scale, so its front/back \
+                 distances have no block-local length; the 2D boundary alone is stored",
+                if scale.is_finite() {
+                    "zero".to_string()
+                } else {
+                    "non-finite".to_string()
+                }
+            ),
+        ));
+        return (None, None);
+    }
+    if scale < 0.0 {
+        gaps.push((
+            xclip_reason::DEPTH_DIRECTION,
+            "the filter's inverse block transform reverses the block's +Z, so the front/back \
+             distances run the other way; they are not stored and only the 2D boundary is kept"
+                .into(),
+        ));
+        return (None, None);
+    }
+    let local = |distance: f64| distance * scale;
+    let front = filter.front_clip.map(local);
+    let back = filter.back_clip.map(local);
+    if let Err(error) = cad_domain::validate_clip_depth(front, back) {
+        gaps.push((
+            xclip_reason::DEPTH_INVALID,
+            format!(
+                "the filter's front/back distances are not a storable depth band ({error}); the 2D \
+                 boundary is stored without them"
+            ),
+        ));
+        return (None, None);
+    }
+    (front, back)
 }
 
 /// Walk `INSERT → ACAD_FILTER → SPATIAL` and return the filter object.

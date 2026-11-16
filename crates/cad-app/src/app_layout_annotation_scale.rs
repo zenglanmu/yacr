@@ -144,11 +144,34 @@ fn scaled_multileader_text(
             text.width
         )));
     };
+    // The content payload scales with the annotation: a tolerance frame's cell
+    // height (`CONTEXT_DATA 41`) and a block content's placement scale are
+    // annotation-scaled values too, and leaving them alone would make the stored
+    // definition disagree with the scaled text height.
+    let mut content = leader.content().clone();
+    match &mut content {
+        cad_domain::MLeaderContent::Tolerance(tolerance) => tolerance.height = new_height,
+        cad_domain::MLeaderContent::Block(block) => {
+            for (axis, value) in [
+                ("x", &mut block.scale.x),
+                ("y", &mut block.scale.y),
+                ("z", &mut block.scale.z),
+            ] {
+                *value = scaled_length(
+                    *value,
+                    factor,
+                    &format!("the multileader block content {axis} scale"),
+                    prefix,
+                )?;
+            }
+        }
+        cad_domain::MLeaderContent::None | cad_domain::MLeaderContent::Text => {}
+    }
     let mut parts = cad_domain::MultiLeaderParts {
         style: leader.style().clone(),
         style_name: leader.style_name().to_string(),
         override_mask: leader.override_mask(),
-        content: leader.content(),
+        content,
         text: text.clone(),
         roots: leader.roots().to_vec(),
         lines: leader.lines().to_vec(),

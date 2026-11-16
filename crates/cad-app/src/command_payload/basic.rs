@@ -330,6 +330,48 @@ pub struct MLeaderAttachment {
     pub left: i16,
 }
 
+/// The annotation **content kind** a typed `MLEADER CONTENT …` option asks for.
+///
+/// The stored payload stays minimal on purpose: the kind is the *choice*, while
+/// every value (the block name, the frame text) comes from a field the payload
+/// already has —
+///
+/// * [`Self::MText`] is the default and the pre-existing behaviour: the `text`
+///   field is the annotation, and an empty one creates a content-less leader;
+/// * [`Self::Block`] names the block to insert; the leader's `text` field must be
+///   empty (a block-content leader has no annotation string) and the command
+///   layer resolves the name against the drawing's block table, refusing an
+///   unknown one by name (`mleader.block_missing`);
+/// * [`Self::Tolerance`] turns the `text` field into the `|`-separated
+///   feature-control frame string (the `TOLERANCE` command's own grammar); the
+///   cell height is the resolved `MLEADERSTYLE` text height.
+///
+/// The two codes DXF stores are entity `172` (`0` none, `1` block, `2` MText,
+/// `3` tolerance) and the style default `170`; the command writes the entity code
+/// and sets the `0x400` override bit only when the kind differs from the style
+/// row's, exactly like the pre-existing text/content-less choice.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MLeaderContentSpec {
+    /// `CONTENT MTEXT` (the default): the `text` field is MText content.
+    MText,
+    /// `CONTENT BLOCK <name>`: the annotation is an inserted block, resolved by
+    /// name against the drawing's block table.
+    Block(String),
+    /// `CONTENT TOLERANCE`: the `text` field is the feature-control frame string.
+    Tolerance,
+}
+
+impl MLeaderContentSpec {
+    /// The upper-case token the typed line used (echoed in diagnostics).
+    pub fn token(&self) -> &'static str {
+        match self {
+            Self::MText => "MTEXT",
+            Self::Block(_) => "BLOCK",
+            Self::Tolerance => "TOLERANCE",
+        }
+    }
+}
+
 /// The input of `TOLERANCE`: the feature-control-frame insertion point (the
 /// frame's lower-left corner) and the typed frame text.
 ///

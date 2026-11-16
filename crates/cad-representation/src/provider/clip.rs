@@ -16,6 +16,12 @@
 //! (and refuses everything else with a stable reason), and
 //! [`block_clip_boundary`] calls it first so the rectangle case cannot drift.
 //!
+//! [`block_clip_depth`] is the second half of the same `XCLIP`: the stored
+//! front/back **clip distances** (`SPATIAL_FILTER` groups `40`/`41`, flags
+//! `72`/`73`) are a z band in the block's plane, mapped here to a world
+//! [`ClipDepth`]. A clip that carries no depth distance resolves to `None`, so
+//! every existing 2D-only clip keeps exactly its old behaviour.
+//!
 //! Refusals are for states this build can genuinely not draw as a region, and
 //! each one names itself so the caller keeps the geometry **unclipped** and
 //! reports it — never a guessed, widened or partially cut region:
@@ -71,6 +77,109 @@ pub enum BlockClipRejection {
     Arity,
     /// The ring crosses or touches itself, so it has no well-defined interior.
     SelfIntersecting,
+}
+
+/// The kept **world-space z band** of a block clip's front/back depth distances.
+///
+/// The source expresses the two distances along the clip boundary plane's
+/// normal, which [`block_clip_depth`] fixes at the block's `+Z`: `front_clip` is
+/// the lower bound and `back_clip` the upper one, both mapped through the
+/// reference's z scale into world z. An absent side is `±∞` (that side is
+/// unbounded), so a one-sided clip is still one band.
+///
+/// The band is **world z**, the coordinate the expanded (already transformed)
+/// primitives carry, so the same band clips nested references correctly: a
+/// nested clip's own band is intersected with the inherited one.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ClipDepth {
+    pub min: f64,
+    pub max: f64,
+}
+
+impl ClipDepth {
+    /// The band both `self` and `other` keep, or `None` when they are disjoint
+    /// (nothing of that branch can be inside both).
+    pub fn intersect(self, other: Self) -> Option<Self> {
+        let min = self.min.max(other.min);
+        let max = self.max.min(other.max);
+        // Both bounds inclusive: a shared plane is a degenerate but valid band.
+        (min <= max).then_some(Self { min, max })
+    }
+
+    /// Whether `[min, max]` lies entirely inside the band (bounds inclusive).
+    pub fn contains(self, min: f64, max: f64) -> bool {
+        min >= self.min && max <= self.max
+    }
+
+    /// Whether `[min, max]` lies entirely outside the band. Only a strictly
+    /// outside span is dropped: a primitive that merely touches a plane is kept.
+    pub fn excludes(self, min: f64, max: f64) -> bool {
+        max < self.min || min > self.max
+    }
+}
+
+/// Map a clip's front/back distances (block-local `+Z`) into a world z band.
+///
+/// * `Ok(None)` — the clip is switched off, or it carries no depth plane at all
+///   (the historical 2D boundary: nothing changes for it);
+/// * `Ok(Some(band))` — the kept world z band, exact for a plan INSERT (its z
+///   scale is a real number; a mirrored z scale flips which distance is the
+///   lower bound, and is handled rather than assumed away);
+/// * `Err(Degenerate)` — the reference has no invertible plan transform (or its
+///   z axis is not finite/zero), so the distances name no world band. The caller
+///   keeps the **2D** region clip and reports the depth band by name; the two
+///   halves of one boundary are never half-applied silently.
+pub fn block_clip_depth(
+    clip: &BlockClip,
+    transform: &Transform3,
+) -> Result<Option<ClipDepth>, BlockClipRejection> {
+    if !clip.visible {
+        return Ok(None);
+    }
+    if clip.front_clip.is_none() && clip.back_clip.is_none() {
+        return Ok(None);
+    }
+    if transform.inverse().is_none() {
+        return Err(BlockClipRejection::Degenerate);
+    }
+    let origin = transform.apply_point(Point3 {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+    });
+    let unit = transform.apply_point(Point3 {
+        x: 0.0,
+        y: 0.0,
+        z: 1.0,
+    });
+    let scale = unit.z - origin.z;
+    if !origin.z.is_finite()
+        || !unit.z.is_finite()
+        || !origin.x.is_finite()
+        || !origin.y.is_finite()
+        || scale == 0.0
+    {
+        return Err(BlockClipRejection::Degenerate);
+    }
+    // The distances are measured from the boundary plane, which sits at the
+    // reference's local z = 0; the reference maps it to `origin.z`.
+    let map = |distance: f64| origin.z + scale * distance;
+    let front = clip.front_clip.map(map);
+    let back = clip.back_clip.map(map);
+    let (min, max) = match (front, back) {
+        (Some(front), Some(back)) => (front.min(back), front.max(back)),
+        // A single plane: the absent side is unbounded in world z, and a
+        // mirrored z scale swaps which side that is.
+        (Some(front), None) if scale > 0.0 => (front, f64::INFINITY),
+        (Some(front), None) => (f64::NEG_INFINITY, front),
+        (None, Some(back)) if scale > 0.0 => (f64::NEG_INFINITY, back),
+        (None, Some(back)) => (back, f64::INFINITY),
+        (None, None) => unreachable!("the guard above returned early"),
+    };
+    if min.is_nan() || max.is_nan() {
+        return Err(BlockClipRejection::Degenerate);
+    }
+    Ok(Some(ClipDepth { min, max }))
 }
 
 /// An axis-aligned world-space rectangle a block clip keeps.

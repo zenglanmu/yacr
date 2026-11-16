@@ -99,13 +99,13 @@ fn table_exports_as_an_acadtable_entity_with_cells_and_merges() {
     assert!((written.columns[0].width - 4.0).abs() < 1e-9);
     assert!((written.columns[1].width - 6.0).abs() < 1e-9);
     assert_eq!(written.rows[0].cells[0].merge_width, 2);
-    // The table name/description live on a `TABLECONTENT` object that acadrust's
-    // DXF writer does not emit for a plain entity; the report must say so
-    // instead of implying they round-tripped.
+    // The entity record has no group for the linked-data name/description, so
+    // they ride the `TABLECONTENT` object written beside it; the report names
+    // that channel (and what a reader that ignores it still sees).
     assert!(
         report.entries.iter().any(|entry| entry
             .message
-            .contains("linked table-data name and description")),
+            .contains("ride the TABLECONTENT object written beside the ACAD_TABLE entity")),
         "{report:?}"
     );
 
@@ -153,6 +153,10 @@ fn table_exports_as_an_acadtable_entity_with_cells_and_merges() {
         table.texts(),
         vec!["Total".to_string(), "x".to_string(), "y".to_string()]
     );
+    // The linked-data name/description now round-trip through the companion
+    // `TABLECONTENT` object, so the pair is not silently dropped any more.
+    assert_eq!(table.name(), "Data");
+    assert_eq!(table.description(), "linked");
 }
 
 fn imported_table(database: &cad_db::DrawingDatabase) -> &TableGeometry {
@@ -497,11 +501,14 @@ fn the_table_style_object_round_trips_through_dxf() {
     let cell = table.cell(0, 0).expect("the cell");
     assert!((cell.text_height - 3.5).abs() < 1e-9);
     assert_eq!(cell.borders.bottom, TableBorder::HIDDEN);
-    assert_eq!(cell.borders.left.double_spacing, 0.0);
+    // The cell's own double-line spacing (its border **type**) rides the
+    // companion `TABLECONTENT` object's `GRIDFORMAT` block, so that override now
+    // round-trips instead of re-resolving to the style row's value.
+    assert_eq!(cell.borders.left.double_spacing, 0.25);
     assert!(
         report.entries.iter().any(|entry| entry
             .message
-            .contains("border double-line spacing, border type and margin overrides")),
+            .contains("ride the TABLECONTENT object written beside the ACAD_TABLE entity")),
         "{report:?}"
     );
 }

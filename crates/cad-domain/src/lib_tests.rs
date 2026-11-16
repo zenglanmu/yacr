@@ -199,11 +199,7 @@ mod tests {
 
     #[test]
     fn block_clip_distinguishes_rectangles_and_switches() {
-        let mut clip = BlockClip {
-            vertices: vec![[0.0, 0.0], [1.0, 2.0]],
-            inside: true,
-            visible: true,
-        };
+        let mut clip = BlockClip::new(vec![[0.0, 0.0], [1.0, 2.0]], true, true);
         assert!(clip.is_rect());
         assert!(clip.is_active());
         clip.visible = false;

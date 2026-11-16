@@ -28,8 +28,10 @@
 //! The cell width and row height use the same declared estimate the importer's
 //! frame uses — width `chars · height · 0.62 + height`, row height
 //! `height · 1.6` — because exact glyph metrics are a representation-layer
-//! concern. The height is the session `textHeight` typed channel, not a payload
-//! field.
+//! concern. The rule itself lives in `cad_domain`
+//! (`tolerance_frame_geometries`), which is also what a MULTILEADER's tolerance
+//! content draws, so the two frames cannot drift apart. The height is the session
+//! `textHeight` typed channel, not a payload field.
 //!
 //! ## Refusals (named, nothing written, no transaction)
 //!
@@ -45,16 +47,7 @@
 
 use super::*;
 use crate::draw_tool::ToolParameter;
-use cad_domain::{TextAlignH, TextAlignV};
-
-/// The declared char-width estimate (the importer's `tolerance_frame` rule).
-const TOLERANCE_CHAR_WIDTH_FACTOR: f64 = 0.62;
-
-/// The declared row-height factor (the importer's `tolerance_frame` rule).
-const TOLERANCE_ROW_HEIGHT_FACTOR: f64 = 1.6;
-
-/// The horizontal padding on each side of a cell, as a fraction of the height.
-const TOLERANCE_CELL_PADDING_FACTOR: f64 = 0.5;
+use cad_domain::{Point3, SemanticGeometry, StyleId};
 
 /// The compartment cap of one frame. A feature-control frame has at most the
 /// symbol, the tolerance, three datums and one optional extra cell; a longer
@@ -170,6 +163,10 @@ impl Application {
 }
 
 /// Build border + divider + cell-text geometry for one frame.
+///
+/// The frame's **single rule** lives in `cad_domain` (`tolerance_frame_geometries`):
+/// the same estimate sizes the `TOLERANCE` command's entities and a MULTILEADER's
+/// tolerance content, so the two can never draw different frames.
 fn frame_geometries(
     origin: Point3,
     cells: &[&str],
@@ -177,65 +174,6 @@ fn frame_geometries(
     style: StyleId,
     font: Option<String>,
 ) -> CadResult<Vec<SemanticGeometry>> {
-    let row_height = height * TOLERANCE_ROW_HEIGHT_FACTOR;
-    let padding = height * TOLERANCE_CELL_PADDING_FACTOR;
-    let widths: Vec<f64> = cells
-        .iter()
-        .map(|cell| {
-            let chars = cell.chars().count().max(1) as f64;
-            chars * height * TOLERANCE_CHAR_WIDTH_FACTOR + 2.0 * padding
-        })
-        .collect();
-    let total_width: f64 = widths.iter().sum();
-    if !total_width.is_finite() || total_width <= 0.0 || !row_height.is_finite() {
-        return Err(invalid(
-            "height",
-            "the frame extent is not finite; check the session text height",
-        ));
-    }
-    let z = origin.z;
-    let corner = |x: f64, y: f64| Point3 { x, y, z };
-    let mut geometries = Vec::with_capacity(1 + cells.len().saturating_sub(1) + cells.len());
-    // The border: one closed rectangle.
-    geometries.push(SemanticGeometry::Polyline {
-        points: vec![
-            corner(origin.x, origin.y),
-            corner(origin.x + total_width, origin.y),
-            corner(origin.x + total_width, origin.y + row_height),
-            corner(origin.x, origin.y + row_height),
-        ],
-        bulges: vec![0.0; 4],
-        closed: true,
-        width: 0.0,
-    });
-    // One internal divider per compartment boundary.
-    let mut x = origin.x;
-    for width in widths.iter().take(cells.len().saturating_sub(1)) {
-        x += *width;
-        geometries.push(SemanticGeometry::Line {
-            start: corner(x, origin.y),
-            end: corner(x, origin.y + row_height),
-        });
-    }
-    // One TEXT per compartment: left aligned, vertically centred in the cell.
-    let mut cell_left = origin.x;
-    for (cell, width) in cells.iter().zip(&widths) {
-        geometries.push(SemanticGeometry::Text {
-            text: (*cell).to_string(),
-            position: corner(cell_left + padding, origin.y + row_height * 0.5),
-            style,
-            height,
-            rotation: 0.0,
-            font: font.clone(),
-            h_align: TextAlignH::Left,
-            v_align: TextAlignV::Middle,
-            // The cell is already sized from the declared width estimate; an
-            // explicit wrap boundary would only risk wrapping a cell that fits.
-            wrap_width: None,
-            width_factor: 1.0,
-            line_spacing: cad_domain::TextLineSpacing::default(),
-        });
-        cell_left += *width;
-    }
-    Ok(geometries)
+    let cells: Vec<String> = cells.iter().map(|cell| (*cell).to_string()).collect();
+    cad_domain::tolerance_frame_geometries(origin, &cells, height, style, font)
 }

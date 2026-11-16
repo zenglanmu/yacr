@@ -677,7 +677,7 @@ fn a_contentless_multileader_writes_172_zero_and_round_trips() {
             _ => None,
         })
         .expect("contentless MULTILEADER re-imports");
-    assert_eq!(geometry.content(), MLeaderContent::None);
+    assert_eq!(*geometry.content(), MLeaderContent::None);
     assert_eq!(geometry.override_mask(), 0);
     assert_eq!(geometry.lines().len(), 1);
 }

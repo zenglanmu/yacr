@@ -27,6 +27,12 @@
 ///   clip path, so the command reports `xclip.polygon_not_renderable` and never
 ///   claims the boundary is drawn (the same declared boundary `VPCLIP` has).
 /// * [`Self::On`] / [`Self::Off`] — switch the stored boundary on or off.
+/// * [`Self::ClipDepth`] — `XCLIP CLIPDEPTH <front> <back>`: the kept
+///   **block-local z band** of the stored boundary (DXF `SPATIAL_FILTER`
+///   groups `40`/`41`, flags `72`/`73`). Both distances must be finite and
+///   `front <= back`; an absent side is unbounded, which is what a one-sided
+///   source (only one flag set) carries.
+/// * [`Self::ClipDepthOff`] — clear the depth band, keeping the 2D boundary.
 /// * [`Self::Delete`] — remove the boundary entirely.
 /// * [`Self::Invert`] — refused (`xclip.invert_not_renderable`), never stored
 ///   invisibly: an inverted region is not something this build can draw.
@@ -41,6 +47,10 @@ pub enum XClipCommand {
     On,
     /// `XCLIP OFF`: keep the boundary but stop clipping.
     Off,
+    /// `XCLIP CLIPDEPTH <front> <back>`: keep only that block-local z band.
+    ClipDepth([f64; 2]),
+    /// `XCLIP CLIPDEPTH OFF`: clear the depth band, keep the 2D boundary.
+    ClipDepthOff,
     /// `XCLIP DELETE`: remove the stored boundary.
     Delete,
     /// `XCLIP INVERT`: refused by the command (not renderable here).

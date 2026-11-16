@@ -29,7 +29,7 @@
 
 use super::*;
 use cad_db::{MLeaderStyle, MLeaderStyleResolution};
-use cad_domain::{MLeaderContent, MLeaderPathType};
+use cad_domain::{MLeaderContentKind, MLeaderPathType};
 
 /// The number of vertices a created leader derives.
 ///
@@ -57,9 +57,9 @@ pub(crate) struct LeaderOptions {
     /// arrowhead-off row is refused).
     pub(crate) arrowhead: bool,
     /// The style row's declared content kind (`170`). The created entity's own
-    /// kind comes from the typed text; the command sets the `0x400` override bit
-    /// only when the two differ.
-    pub(crate) style_content: MLeaderContent,
+    /// kind comes from the typed `CONTENT` option (or the typed text); the
+    /// command sets the `0x400` override bit only when the two differ.
+    pub(crate) style_content: MLeaderContentKind,
 }
 
 /// Resolve and validate the creation options from the drawing's style row.
@@ -69,14 +69,15 @@ pub(crate) struct LeaderOptions {
 /// arrowhead-off style), `resolution` the single resolved snapshot the created
 /// entity stores.
 ///
-/// The annotation kind is **not** decided here: the typed text decides whether
-/// the created entity carries MText content or none (a content-less leader is a
-/// real AutoCAD case). What this plan refuses is a style whose content kind this
-/// build cannot create at all.
+/// The annotation kind is **not** decided here: the typed `CONTENT` option (or,
+/// without one, the typed text) decides what the created entity carries, and
+/// every one of the four kinds is creatable now — a block/tolerance **style row**
+/// is therefore a default, not a refusal.
 ///
 /// Refusals (named, nothing written):
 ///
-/// * `mleader.content_unsupported` — block/tolerance annotation content;
+/// * `mleader.content_unsupported` — a style row whose content code is outside
+///   the four known kinds (`0`..`3`);
 /// * `mleader.option_arrowhead_off` — the row disables the arrowhead (size `0`);
 /// * `mleader.path_type` — an invisible leader path (no line at all);
 /// * `mleader.option_max_points` — a requested vertex count above
@@ -86,23 +87,13 @@ pub(crate) fn plan_leader_options(
     row: &MLeaderStyle,
     resolution: &MLeaderStyleResolution,
 ) -> CadResult<LeaderOptions> {
-    let style_content = match row.content_type {
-        MLeaderStyle::CONTENT_NONE => MLeaderContent::None,
-        MLeaderStyle::CONTENT_MTEXT => MLeaderContent::Text,
-        MLeaderStyle::CONTENT_BLOCK | MLeaderStyle::CONTENT_TOLERANCE => {
-            return Err(CadError::Unsupported(format!(
-                "mleader.content_unsupported: the resolved MLEADERSTYLE declares content kind {} \
-                 (block/tolerance); only MText and content-less leaders are created",
-                row.content_type
-            )))
-        }
-        other => {
-            return Err(CadError::Unsupported(format!(
-                "mleader.content_unsupported: the resolved MLEADERSTYLE declares unknown content \
-                 kind {other}; only MText and content-less leaders are created"
-            )))
-        }
-    };
+    let style_content = MLeaderContentKind::from_dxf(row.content_type).ok_or_else(|| {
+        CadError::Unsupported(format!(
+            "mleader.content_unsupported: the resolved MLEADERSTYLE declares unknown content kind \
+             {} (the DXF codes are 0 none, 1 block, 2 MText, 3 tolerance)",
+            row.content_type
+        ))
+    })?;
     if !row.arrowhead_size.is_finite() {
         return Err(CadError::InvalidInput(format!(
             "mleader.style_invalid: the arrowhead size must be finite, got {}",
@@ -159,15 +150,17 @@ pub(crate) fn check_leader_points(requested: usize) -> CadResult<()> {
 }
 
 /// The `mleader.options` report row: the option set the created leader honours.
-pub(crate) fn options_report(options: LeaderOptions, content: MLeaderContent) -> Diagnostic {
+pub(crate) fn options_report(options: LeaderOptions, content: MLeaderContentKind) -> Diagnostic {
     let path = match options.path {
         MLeaderPathType::StraightLineSegments => "straight-line",
         MLeaderPathType::Spline => "spline",
         MLeaderPathType::Invisible => "invisible",
     };
     let annotation = match content {
-        MLeaderContent::Text => "text (MText)",
-        MLeaderContent::None => "none (content-less: no annotation, arrow and dogleg only)",
+        MLeaderContentKind::Text => "text (MText)",
+        MLeaderContentKind::None => "none (content-less: no annotation, arrow and dogleg only)",
+        MLeaderContentKind::Block => "block (an inserted block reference)",
+        MLeaderContentKind::Tolerance => "tolerance (a feature-control frame)",
     };
     Diagnostic {
         object: None,
@@ -256,6 +249,8 @@ impl Application {
                 dogleg_angle: None,
                 attachment: None,
                 text_angle: None,
+                // QLEADER/LEADER always create MText (or content-less) leaders.
+                content: None,
             },
         };
         self.create_mleader(session, &mleader)

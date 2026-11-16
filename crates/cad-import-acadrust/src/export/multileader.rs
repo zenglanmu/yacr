@@ -114,6 +114,12 @@ const REASON_SEEDS: &str =
 const REASON_CONTEXT_DEFAULTS: &str =
     "CONTEXT_DATA text colour, flow direction, alignment, line spacing and the text \
      normal/direction are not modelled; they are written from defaults or derived values";
+/// Named deviation: the tolerance kind reloads through the style record.
+const REASON_TOLERANCE_READER: &str =
+    "tolerance content is written as entity 172 = 3 plus the CONTEXT_DATA text fields (DXF has no \
+     separate tolerance payload) and the MLEADERSTYLE 170 record is written as 3, because \
+     acadrust 0.6.8's DXF reader reports 172 = 3 as no content and the reload resolves the kind \
+     from the style record";
 /// Standing named deviation: parsed source groups the model never reads.
 const REASON_UNMODELLED_GROUPS: &str =
     "these parsed MULTILEADER groups have no model field, so they are written as acadrust \
@@ -205,6 +211,60 @@ pub(super) fn emit_multileader(
     let (common, common_reasons) = common_for(doc, entity, ctx);
     reasons.extend(common_reasons);
 
+    // Block content references a BLOCK_RECORD, so the definition has to exist in
+    // the output document before the handle can be written. A definition the
+    // exporter refuses (an xref, a cycle, a depth overflow, a name the document
+    // already owns, an unresolved identity) leaves no dangling handle: the leader
+    // is flattened to its display primitives with the reason, exactly like the
+    // scaling/mirroring fallback below.
+    let mut content_block_handle: Option<Handle> = None;
+    if let Some(block) = geometry.content().block() {
+        let refusal = match block.block {
+            None => Some(
+                "the multileader's block content identity did not resolve to a block definition"
+                    .to_string(),
+            ),
+            Some(block_id) => {
+                match super::insert::ensure_block_written(doc, block_id, ctx, acc, stack) {
+                    Ok(written) => match doc.block_records.get(&written.name) {
+                        Some(record) => {
+                            content_block_handle = Some(record.handle);
+                            None
+                        }
+                        None => Some(format!(
+                            "block '{}' was written without a BLOCK_RECORD",
+                            written.name
+                        )),
+                    },
+                    Err(super::insert::BlockWriteError::Refused(reason)) => Some(reason),
+                    Err(super::insert::BlockWriteError::Failed(error)) => return Err(error),
+                }
+            }
+        };
+        if let Some(reason) = refusal {
+            super::entity::flatten_children(
+                doc,
+                entity,
+                geometry.display(),
+                &Transform3::identity(),
+                depth,
+                ctx,
+                acc,
+                stack,
+            )?;
+            acc.record(
+                object,
+                "multileader_flattened",
+                MappingOutcome::Converted(vec![format!(
+                    "the multileader's block content cannot be written as a BLOCK_RECORD: \
+                     {reason}; flattened to its display primitives and no longer a MULTILEADER \
+                     on round trip"
+                )]),
+            );
+            return Ok(());
+        }
+    }
+
     let mut ml = AcadMultiLeader::new();
     ml.common = common;
     ml.style_handle = Some(style_handle);
@@ -229,10 +289,23 @@ pub(super) fn emit_multileader(
     ml.scale_factor = style.scale_factor;
 
     let mut context = build_context(geometry, style, text, text_style_handle);
+    if geometry.content().block().is_some() {
+        context.block_content_handle = content_block_handle;
+    }
     context.leader_roots = build_roots(geometry);
     ml.context = context;
 
-    if geometry.content() == MLeaderContent::Text && text.string.is_empty() {
+    // The entity's own block placement (entity `344`/`10`/`43`/`176`): the same
+    // values the `CONTEXT_DATA` mirror carries, so a reader that prefers either
+    // group reloads one placement.
+    if let Some(block) = geometry.content().block() {
+        ml.block_content_handle = content_block_handle;
+        ml.block_scale = v3(block.scale);
+        ml.block_rotation = block.rotation;
+        ml.block_connection_type =
+            acadrust::entities::BlockContentConnectionType::from(block.connection);
+    }
+    if geometry.content().kind() == MLeaderContentKind::Text && text.string.is_empty() {
         reasons.push(
             "empty text content is written as MText content; a reload treats an empty string as \
              no content"
@@ -281,6 +354,31 @@ pub(super) fn emit_multileader(
              to an exported LINETYPE record"
                 .into(),
         );
+    }
+
+    // A tolerance kind is written as entity `172 = 3` **and** the style record's
+    // `170 = 3`: acadrust 0.6.8's DXF reader maps `172 = 3` to "no content", so the
+    // reload resolves the kind from the style record this writer controls. When
+    // the shared record belongs to another entity and carries a different kind,
+    // the reload cannot recover it and the loss is named.
+    if let MLeaderContent::Tolerance(_) = geometry.content() {
+        let style_kind = doc
+            .objects
+            .get(&style_handle)
+            .and_then(|object| match object {
+                ObjectType::MultiLeaderStyle(record) => Some(record.content_type),
+                _ => None,
+            });
+        match style_kind {
+            Some(StyleContentType::Tolerance) => reasons.push(REASON_TOLERANCE_READER.into()),
+            other => reasons.push(format!(
+                "this leader's tolerance content kind cannot round-trip: it is written as entity \
+                 172 = 3, but acadrust 0.6.8's DXF reader reports 172 = 3 as no content and the \
+                 shared MLEADERSTYLE record '{style_name}' carries content kind {:?}, so a reload \
+                 reads this leader as text/none content instead of a tolerance frame",
+                other
+            )),
+        }
     }
 
     acc.push(acadrust::EntityType::MultiLeader(Box::new(ml)), ctx)?;
@@ -502,17 +600,29 @@ fn style_record(
     record
 }
 
-fn content_type(content: MLeaderContent) -> acadrust::entities::LeaderContentType {
-    match content {
-        MLeaderContent::None => acadrust::entities::LeaderContentType::None,
-        MLeaderContent::Text => acadrust::entities::LeaderContentType::MText,
+/// The entity `172` code of a content kind (`0` none, `1` block, `2` MText,
+/// `3` tolerance).
+///
+/// The writer emits the code verbatim, including `3`: acadrust's writer has no
+/// opinion about it, so a tolerance leader is a real `172 = 3` record. Its
+/// **reader** is the narrow end (see [`REASON_TOLERANCE_READER`]).
+fn content_type(content: &MLeaderContent) -> acadrust::entities::LeaderContentType {
+    match content.kind() {
+        MLeaderContentKind::None => acadrust::entities::LeaderContentType::None,
+        MLeaderContentKind::Block => acadrust::entities::LeaderContentType::Block,
+        MLeaderContentKind::Text => acadrust::entities::LeaderContentType::MText,
+        MLeaderContentKind::Tolerance => acadrust::entities::LeaderContentType::Tolerance,
     }
 }
 
-fn style_content_type(content: MLeaderContent) -> StyleContentType {
-    match content {
-        MLeaderContent::None => StyleContentType::None,
-        MLeaderContent::Text => StyleContentType::MText,
+/// The style `170` code of a content kind — the same value, in the style
+/// record's own enum.
+fn style_content_type(content: &MLeaderContent) -> StyleContentType {
+    match content.kind() {
+        MLeaderContentKind::None => StyleContentType::None,
+        MLeaderContentKind::Block => StyleContentType::Block,
+        MLeaderContentKind::Text => StyleContentType::MText,
+        MLeaderContentKind::Tolerance => StyleContentType::Tolerance,
     }
 }
 
@@ -633,8 +743,19 @@ fn build_context(
     context.text_left_attachment = TextAttachmentType::from(text.left_attachment);
     context.text_right_attachment = UNMODELLED_RIGHT_ATTACHMENT;
     context.text_alignment = acadrust::entities::TextAlignmentType::Left;
-    context.has_text_contents = geometry.content() == MLeaderContent::Text;
-    context.text_string = text.string.clone();
+    let content = geometry.content();
+    // The text fields carry the annotation string of **both** text-bearing kinds:
+    // DXF has no separate tolerance payload, so a tolerance leader stores its
+    // frame string (and cell height) in exactly the MText fields, with entity
+    // `172 = 3` naming how to draw it.
+    context.has_text_contents = matches!(
+        content.kind(),
+        MLeaderContentKind::Text | MLeaderContentKind::Tolerance
+    );
+    context.text_string = match content.tolerance() {
+        Some(tolerance) => tolerance.text.clone(),
+        None => text.string.clone(),
+    };
     context.text_normal = plane_normal(&plane);
     context.text_location = v3(text.location);
     context.text_direction = text_direction(&plane, text.rotation);
@@ -664,6 +785,18 @@ fn build_context(
         context.column_gutter = columns.gutter;
         context.column_flow_reversed = columns.flow_reversed;
         context.column_sizes = columns.sizes.clone();
+    }
+    if let Some(block) = content.block() {
+        // `block_content_handle` is filled by the caller (it allocates the
+        // BLOCK_RECORD first); the placement groups are the model's own values.
+        context.has_block_contents = true;
+        context.block_content_location = v3(block.location);
+        context.block_content_scale = v3(block.scale);
+        context.block_rotation = block.rotation;
+        context.block_content_color = Color::ByBlock;
+        context.block_connection_type =
+            acadrust::entities::BlockContentConnectionType::from(block.connection);
+        context.content_base_point = v3(block.location);
     }
     context.base_point = v3(plane.origin);
     context.base_direction = v3(plane.u);

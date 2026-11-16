@@ -199,6 +199,8 @@ impl ProviderRegistry {
             None,
             database.linetype_scale(),
             None,
+            // No depth band at the root: only a clipped INSERT introduces one.
+            None,
             &mut stack,
             &mut out,
         )?;

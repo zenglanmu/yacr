@@ -504,11 +504,7 @@ fn clip_on_a_block_reference_wires_rect_on_off_and_delete() {
     assert_eq!(undo_depth(&app), 1);
     assert_eq!(
         stored_block_clip(&app, 3),
-        Some(BlockClip {
-            vertices: vec![[0.0, 0.0], [4.0, 4.0]],
-            inside: true,
-            visible: true,
-        })
+        Some(BlockClip::new(vec![[0.0, 0.0], [4.0, 4.0]], true, true))
     );
 
     // A reference translated by (5, 5) reads the same block-local rectangle.
@@ -522,11 +518,7 @@ fn clip_on_a_block_reference_wires_rect_on_off_and_delete() {
     .unwrap();
     assert_eq!(
         stored_block_clip(&app, 4),
-        Some(BlockClip {
-            vertices: vec![[0.0, 0.0], [10.0, 10.0]],
-            inside: true,
-            visible: true,
-        })
+        Some(BlockClip::new(vec![[0.0, 0.0], [10.0, 10.0]], true, true))
     );
 
     // A 90-degree reference still maps the rectangle to an axis-aligned world
@@ -541,11 +533,7 @@ fn clip_on_a_block_reference_wires_rect_on_off_and_delete() {
     .unwrap();
     assert_eq!(
         stored_block_clip(&app, 7),
-        Some(BlockClip {
-            vertices: vec![[-2.0, -2.0], [2.0, 2.0]],
-            inside: true,
-            visible: true,
-        })
+        Some(BlockClip::new(vec![[-2.0, -2.0], [2.0, 2.0]], true, true))
     );
 
     // A 45-degree reference maps it to a rotated world quad, which is a
@@ -560,11 +548,7 @@ fn clip_on_a_block_reference_wires_rect_on_off_and_delete() {
     .unwrap();
     assert_eq!(
         stored_block_clip(&app, 5),
-        Some(BlockClip {
-            vertices: vec![[-2.0, -2.0], [2.0, 2.0]],
-            inside: true,
-            visible: true,
-        })
+        Some(BlockClip::new(vec![[-2.0, -2.0], [2.0, 2.0]], true, true))
     );
 
     // ON/OFF switch the stored boundary; DELETE removes it — each one undo step.

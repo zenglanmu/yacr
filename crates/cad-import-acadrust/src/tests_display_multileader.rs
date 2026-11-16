@@ -618,37 +618,77 @@ fn multileader_refuses_scale_mirror_and_non_uniform_transform() {
     assert!(multileader.transformed(&non_uniform).is_err());
 }
 
-/// Block and tolerance content stay on the pre-P7b `Compound` path, so their
-/// rendering does not regress (ADR 0019 C.3).
+/// Block and tolerance content are first-class too: every `172` kind maps onto
+/// the one `MultiLeader` variant, and the content payload is stored.
 #[test]
-fn block_and_tolerance_content_stay_on_the_compound_path() {
-    let (doc, mut ml) = mleader_with_style();
-    ml.content_type = acadrust::entities::LeaderContentType::Tolerance;
+fn block_and_tolerance_content_reach_the_one_variant() {
+    // A tolerance leader: the entity kind reads as `None` in acadrust 0.6.8 for
+    // `172 = 3`, so the kind comes from the style record (`170 = 3`) plus the text
+    // payload — the only encoding DXF has.
+    let (mut doc, mut ml) = mleader_with_style();
+    ml.content_type = acadrust::entities::LeaderContentType::None; // what `172 = 3` parses as
     ml.context.has_text_contents = true;
-    ml.context.text_string = "Tol".into();
+    ml.context.text_string = "|0.05|A|B".into();
+    ml.context.text_height = 0.25;
     ml.context.text_location = acadrust::types::Vector3::new(10.0, 2.0, 0.0);
+    if let Some(acadrust::objects::ObjectType::MultiLeaderStyle(style)) =
+        ml.style_handle.and_then(|handle| doc.objects.get(&handle))
+    {
+        let mut style = style.clone();
+        style.content_type = acadrust::objects::LeaderContentType::Tolerance;
+        doc.objects.insert(
+            ml.style_handle.expect("style handle"),
+            acadrust::objects::ObjectType::MultiLeaderStyle(style),
+        );
+    }
     let req = request();
     let builder = ImporterBuilder::new(&req, &doc, ReadStats::default(), compute_identity(&[]));
     let (geometry, completeness) = builder.multileader_semantics(&ml);
-    assert!(
-        matches!(geometry, SemanticGeometry::Compound(_)),
-        "tolerance content stays a compound: {geometry:?}"
+    let SemanticGeometry::MultiLeader(leader) = &geometry else {
+        panic!("tolerance content belongs to the variant: {geometry:?}");
+    };
+    assert_eq!(
+        *leader.content(),
+        MLeaderContent::Tolerance(cad_domain::MLeaderToleranceContent {
+            text: "|0.05|A|B".into(),
+            height: 0.25,
+        })
     );
-    assert!(has_spline(&geometry));
-    assert!(find_text(&geometry).is_some());
     assert!(matches!(completeness, Completeness::Partial(_)));
+    // The frame is drawn: a closed border plus one text per compartment.
+    assert!(leader
+        .display()
+        .iter()
+        .any(|child| matches!(child, SemanticGeometry::Polyline { closed: true, .. })));
 
-    // A block-content multileader also keeps the compound path (the handle does
-    // not resolve here, which is reported rather than silently dropped).
+    // A block-content leader whose handle does not resolve keeps the kind and the
+    // raw handle, and names the loss instead of silently dropping the annotation.
     let (doc, mut ml) = mleader_with_style();
     ml.content_type = acadrust::entities::LeaderContentType::Block;
     ml.context.has_block_contents = true;
+    ml.context.block_content_handle = Some(acadrust::types::Handle::new(0x2A));
+    ml.context.block_content_location = acadrust::types::Vector3::new(10.0, 2.0, 0.0);
+    ml.context.block_content_scale = acadrust::types::Vector3::new(2.0, 3.0, 1.0);
+    ml.context.block_rotation = 0.5;
     let req = request();
     let builder = ImporterBuilder::new(&req, &doc, ReadStats::default(), compute_identity(&[]));
     let (geometry, completeness) = builder.multileader_semantics(&ml);
+    let SemanticGeometry::MultiLeader(leader) = &geometry else {
+        panic!("block content belongs to the variant: {geometry:?}");
+    };
+    assert_eq!(leader.content().kind(), MLeaderContentKind::Block);
+    let block = leader.block_content().expect("the block payload");
+    assert_eq!(block.handle, Some(0x2A));
+    assert_eq!(block.block, None, "an unknown handle resolves no block");
+    assert_eq!(block.scale.x, 2.0);
+    assert_eq!(block.scale.y, 3.0);
+    assert!((block.rotation - 0.5).abs() < 1e-12);
     assert!(
-        matches!(geometry, SemanticGeometry::Compound(_)),
-        "block content stays a compound: {geometry:?}"
+        !leader
+            .display()
+            .iter()
+            .any(|child| matches!(child, SemanticGeometry::Insert { .. })),
+        "an unresolved block draws no instance"
     );
     match completeness {
         Completeness::Partial(reasons) => assert!(

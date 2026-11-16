@@ -21,9 +21,18 @@
 //! back; a cell that sets none of them derives exactly the pre-appearance draw.
 //!
 //! What a row value set can supply is the same list: text colour, fill and the
-//! four edges' colour/lineweight. A row's text **rotation** stays absent — a
-//! `TABLESTYLE` row record has no rotation group in this DXF writer, so a
-//! per-row rotation could never come back.
+//! four edges' colour/lineweight, **plus** their double-line spacing (the border
+//! type). A row's text **rotation** stays absent — a `TABLESTYLE` row record has
+//! no rotation group in this DXF writer, so a per-row rotation could never come
+//! back. A row's double-line spacing has no group in the row record either, but it
+//! does reach the cells that inherit it, and their own `GRIDFORMAT` blocks carry
+//! it, so the drawn result round-trips even though the row record does not
+//! ([`TableBorder::double_spacing`]).
+//!
+//! Per-cell **margins** live on their own sparse channel
+//! ([`TableCellMargins`](crate::TableCellMargins)) rather than on
+//! [`TableRowStyle`]: a `TABLESTYLE` row record has no margin group in this
+//! writer, so a row-level margin could never round-trip either.
 //!
 //! A bare cell rotation is *relative* to the table frame (DXF stores it in the
 //! table's own coordinate system), which is why it survives a

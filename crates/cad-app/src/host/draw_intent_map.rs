@@ -218,6 +218,9 @@ impl HostController {
                     dogleg_angle: None,
                     attachment: None,
                     text_angle: None,
+                    // The interactive tool captures points and text only, so the
+                    // content kind is the text-driven default (MText / none).
+                    content: None,
                 },
             ),
             DrawIntent::Move { delta } => (

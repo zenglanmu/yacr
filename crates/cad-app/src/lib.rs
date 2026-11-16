@@ -445,10 +445,10 @@ pub use command_payload::{
     FilterLogic, FilterRequest, GripStretchCommand, GroupCommand, GroupEditCommand, HatchDrawOrder,
     HatchEditOption, HatchOriginCommand, ImageAdjustCommand, ImageAttachCommand, ImageClipCommand,
     JoinMode, JoinOptions, JustifyTextCommand, LayerStateCommand, LeaderCommand, LinetypeCommand,
-    MInsertCommand, MLeaderAlignCommand, MLeaderAlignMode, MLeaderAttachment, MLeaderEditAction,
-    MLeaderEditCommand, MLeaderLineOverrideField, MatchPropSettings, MeasureGeomOption,
-    MirrorOptions, MlEditCommand, MlEditMode, MocoroCommand, NamedObjectKind, OffsetGapType,
-    OffsetLayer, OffsetMode, OffsetOptions, OrdinateAxis, OrdinateDimensionCommand,
+    MInsertCommand, MLeaderAlignCommand, MLeaderAlignMode, MLeaderAttachment, MLeaderContentSpec,
+    MLeaderEditAction, MLeaderEditCommand, MLeaderLineOverrideField, MatchPropSettings,
+    MeasureGeomOption, MirrorOptions, MlEditCommand, MlEditMode, MocoroCommand, NamedObjectKind,
+    OffsetGapType, OffsetLayer, OffsetMode, OffsetOptions, OrdinateAxis, OrdinateDimensionCommand,
     PatternFileText, PeditEditCommand, PeditEditOption, PeditOption, PeditVertexAction,
     PeditVertexCommand, PurgeTarget, QDimCommand, QDimMode, QDimSnap, QSelectRequest,
     RadialDimensionCommand, RefCloseOption, RefSetOption, RenameCommand, RevCloudStyle,
@@ -465,8 +465,9 @@ pub use command_payload::{
 
 pub use app_audit::AuditRequest;
 pub use app_drawing::table_payload::{
-    TableCellAddress, TableColorValue, TableLineweightValue, TablePayload, TableRowStyleCommand,
-    TableStyleCommand, TableStyleEdge, TableStyleRowScope,
+    TableCellAddress, TableCellBorderCommand, TableColorValue, TableLineweightValue,
+    TableMarginValue, TablePayload, TableRowStyleCommand, TableStyleCommand, TableStyleEdge,
+    TableStyleRowScope,
 };
 pub use app_drawing::OverkillSettings;
 pub use ssx::{SsxCriterion, SsxCriterionKind, SsxFilter, SsxRequest};

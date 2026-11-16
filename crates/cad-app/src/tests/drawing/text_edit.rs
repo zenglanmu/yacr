@@ -485,6 +485,7 @@ fn textedit_on_a_multileader_writes_one_transaction_and_a_consistent_display() {
             dogleg_angle: None,
             attachment: None,
             text_angle: None,
+            content: None,
         },
     )
     .unwrap();

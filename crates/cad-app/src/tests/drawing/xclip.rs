@@ -253,6 +253,33 @@ fn every_xclip_refusal_writes_nothing() {
             vec![3],
             payload(XClipCommand::Invert),
         ),
+        (
+            // The depth band is an attribute of a stored boundary, so setting or
+            // clearing it on a reference with none is the same refusal ON/OFF get.
+            "xclip.no_boundary",
+            xclip_app,
+            vec![3],
+            payload(XClipCommand::ClipDepth([0.0, 1.0])),
+        ),
+        (
+            "xclip.no_boundary",
+            xclip_app,
+            vec![3],
+            payload(XClipCommand::ClipDepthOff),
+        ),
+        (
+            // A backwards band names no z range at all.
+            "xclip.depth_range",
+            xclip_app,
+            vec![3],
+            payload(XClipCommand::ClipDepth([5.0, 1.0])),
+        ),
+        (
+            "xclip.depth_range",
+            xclip_app,
+            vec![3],
+            payload(XClipCommand::ClipDepth([f64::NAN, 1.0])),
+        ),
     ];
     for (code, build, selection, command_payload) in cases {
         let (mut app, mut session) = build();
@@ -316,11 +343,7 @@ fn rect_on_off_and_delete_are_one_undo_step_each() {
     assert_eq!(undo_depth(&app), 1);
     assert_eq!(
         stored_clip(&app, 3),
-        Some(BlockClip {
-            vertices: vec![[0.0, 0.0], [1.0, 1.0]],
-            inside: true,
-            visible: true,
-        })
+        Some(BlockClip::new(vec![[0.0, 0.0], [1.0, 1.0]], true, true))
     );
     assert!(outcome
         .diagnostics
@@ -503,11 +526,7 @@ fn a_rotated_reference_accepts_a_rectangle_and_reports_its_quad() {
     .unwrap();
     assert_eq!(
         stored_clip(&app, 3),
-        Some(BlockClip {
-            vertices: vec![[0.0, 0.0], [2.0, 1.0]],
-            inside: true,
-            visible: true,
-        })
+        Some(BlockClip::new(vec![[0.0, 0.0], [2.0, 1.0]], true, true))
     );
     let outcome = execute(
         &mut app,
@@ -576,4 +595,161 @@ fn the_boundary_follows_a_translated_insert() {
     assert!((world.min[1]).abs() < 1e-9);
     assert!((world.max[0] - 101.0).abs() < 1e-9);
     assert!((world.max[1] - 1.0).abs() < 1e-9);
+}
+
+#[test]
+fn clipdepth_sets_and_clears_the_band_in_one_undo_step() {
+    let (mut app, mut session) = xclip_app();
+    session.selection.replace([ref_of(3)]);
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Extended(ExtendedCommandId::Xclip),
+        payload(rect(0.0, 0.0, 10.0, 10.0)),
+    )
+    .unwrap();
+    let base = revision(&app);
+    let depth = undo_depth(&app);
+
+    // CLIPDEPTH stores the block-local band on the existing boundary: one
+    // revision, one undo step, the 2D corners untouched.
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::Extended(ExtendedCommandId::Xclip),
+        payload(XClipCommand::ClipDepth([1.0, 4.0])),
+    )
+    .unwrap();
+    assert_eq!(outcome.objects, vec![ObjectId(3)]);
+    assert_eq!(revision(&app), Revision(base.0 + 1));
+    assert_eq!(undo_depth(&app), depth + 1);
+    let stored = stored_clip(&app, 3).expect("the boundary is kept");
+    assert_eq!(stored.vertices, vec![[0.0, 0.0], [10.0, 10.0]]);
+    assert_eq!(
+        (stored.front_clip, stored.back_clip),
+        (Some(1.0), Some(4.0))
+    );
+    assert!(
+        outcome
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "xclip.applied" && d.message.contains("depth band block-local z")),
+        "the applied report states the band: {:?}",
+        outcome.diagnostics
+    );
+
+    // UNDO restores the previous (depthless) display state in one step.
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .unwrap();
+    let restored = stored_clip(&app, 3).expect("the boundary survives the undo");
+    assert_eq!((restored.front_clip, restored.back_clip), (None, None));
+    assert_eq!(undo_depth(&app), depth);
+
+    // Re-apply, then CLIPDEPTH OFF clears both sides and nothing else.
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Extended(ExtendedCommandId::Xclip),
+        payload(XClipCommand::ClipDepth([1.0, 4.0])),
+    )
+    .unwrap();
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Extended(ExtendedCommandId::Xclip),
+        payload(XClipCommand::ClipDepthOff),
+    )
+    .unwrap();
+    let cleared = stored_clip(&app, 3).expect("the boundary is kept");
+    assert_eq!((cleared.front_clip, cleared.back_clip), (None, None));
+    assert_eq!(cleared.vertices, vec![[0.0, 0.0], [10.0, 10.0]]);
+    assert_eq!(undo_depth(&app), depth + 2);
+}
+
+#[test]
+fn a_refused_depth_range_leaves_the_stored_band_untouched() {
+    let (mut app, mut session) = xclip_app();
+    session.selection.replace([ref_of(3)]);
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Extended(ExtendedCommandId::Xclip),
+        payload(rect(0.0, 0.0, 10.0, 10.0)),
+    )
+    .unwrap();
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Extended(ExtendedCommandId::Xclip),
+        payload(XClipCommand::ClipDepth([1.0, 4.0])),
+    )
+    .unwrap();
+    let before = revision(&app);
+    let depth = undo_depth(&app);
+    for (line, command) in [
+        ("xclip.depth_range", XClipCommand::ClipDepth([4.0, 1.0])),
+        (
+            "xclip.depth_range",
+            XClipCommand::ClipDepth([f64::INFINITY, 4.0]),
+        ),
+    ] {
+        let error = execute(
+            &mut app,
+            &mut session,
+            CommandId::Extended(ExtendedCommandId::Xclip),
+            payload(command),
+        )
+        .expect_err("a bad band must not write");
+        assert!(
+            matches!(&error, CadError::InvalidInput(message) if message.starts_with(line)),
+            "expected {line}, got {error:?}"
+        );
+        assert_eq!(revision(&app), before, "{line} bumps no revision");
+        assert_eq!(undo_depth(&app), depth, "{line} records no undo entry");
+        let stored = stored_clip(&app, 3).expect("the boundary is untouched");
+        assert_eq!(
+            (stored.front_clip, stored.back_clip),
+            (Some(1.0), Some(4.0))
+        );
+    }
+}
+
+#[test]
+fn redefining_the_boundary_keeps_the_stored_depth_band() {
+    // The band belongs to the reference's clip, not to its ring: `XCLIP RECT`
+    // replaces the ring and must not silently drop a band the file carries.
+    let (mut app, mut session) = xclip_app();
+    session.selection.replace([ref_of(3)]);
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Extended(ExtendedCommandId::Xclip),
+        payload(rect(0.0, 0.0, 10.0, 10.0)),
+    )
+    .unwrap();
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Extended(ExtendedCommandId::Xclip),
+        payload(XClipCommand::ClipDepth([1.0, 4.0])),
+    )
+    .unwrap();
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Extended(ExtendedCommandId::Xclip),
+        payload(rect(2.0, 2.0, 8.0, 8.0)),
+    )
+    .unwrap();
+    let stored = stored_clip(&app, 3).expect("the clip");
+    assert_eq!(stored.vertices, vec![[2.0, 2.0], [8.0, 8.0]]);
+    assert_eq!(
+        (stored.front_clip, stored.back_clip),
+        (Some(1.0), Some(4.0))
+    );
 }

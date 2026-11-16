@@ -46,15 +46,20 @@
 //! # Declared boundaries of the clip chain
 //!
 //! The written `SPATIAL_FILTER` carries the boundary ring, the boundary plane
-//! normal (`+Z`), the display-enabled flag (`71`) and the inverse block
-//! transform. Everything [`cad_domain::BlockClip`] stores round-trips; what the
+//! normal (`+Z`), the display-enabled flag (`71`), the inverse block transform
+//! and the front/back **clip distances** with their enabled flags (`40`/`72`,
+//! `41`/`73`). Everything [`cad_domain::BlockClip`] stores round-trips; what the
 //! object does not carry is declared rather than invented:
 //!
 //! * the boundary's local `origin` and `clip_bound_transform` are written as the
 //!   neutral values (the boundary points are already in container space, which
 //!   is what the reader maps back through the inverse block transform);
-//! * `BlockClip` has no front/back depth plane, so groups 72/73 are written
-//!   unset;
+//! * a stored depth band is written as the WCS distance along `+Z` (the stored
+//!   block-local value times the reference's `z` scale), and each `Some` side
+//!   writes **its own flag plus distance** — a one-sided band cannot become a
+//!   distance without a flag. A reference with no positive finite `z` scale has
+//!   no such length: the boundary is still written and the depth-only loss is
+//!   reported (`export.xclip_depth_dropped`), never invented;
 //! * an **inverted** clip (`inside == false`) is refused by name: the format has
 //!   no clip-mode field, so an inverted boundary cannot be told apart from an
 //!   inside one;
@@ -84,7 +89,7 @@ pub(super) enum InsertEmission {
 }
 
 /// Why a referenced definition could not be written.
-enum BlockWriteError {
+pub(super) enum BlockWriteError {
     /// A declared refusal: the reference converts (explodes) with this reason.
     Refused(String),
     /// A hard export failure (output limit, document add, ...).
@@ -149,7 +154,25 @@ pub(super) fn emit_insert(
 
     if let Some(clip) = ctx.database.entity_render_attributes(entity.id).clip {
         match write_clip(doc, handle, &clip, placement) {
-            Ok(xdict) => insert.common.xdictionary_handle = Some(xdict),
+            Ok((xdict, depth_loss)) => {
+                insert.common.xdictionary_handle = Some(xdict);
+                if let Some(reason) = depth_loss {
+                    // The boundary itself was written; only the depth band could
+                    // not be carried, and it says so under its own code.
+                    acc.record_dropped_code(
+                        Some(entity.object.id),
+                        "export.xclip_depth_dropped",
+                        vec![format!(
+                            "the block reference's XCLIP boundary is written, but its depth band \
+                             (block-local z {}..{}) is not: {reason}",
+                            clip.front_clip
+                                .map_or("-inf".to_string(), |value| value.to_string()),
+                            clip.back_clip
+                                .map_or("inf".to_string(), |value| value.to_string())
+                        )],
+                    );
+                }
+            }
             Err(reason) => acc.record_dropped_code(
                 Some(entity.object.id),
                 "export.xclip_clip_dropped",
@@ -280,7 +303,7 @@ fn decompose(placement: &Transform3, base: Point3) -> Result<Reference, String> 
 /// nested `INSERT` member is placed exactly as it is stored. Members are drained
 /// into the block record as they are emitted, which is what keeps the block's
 /// output order and lets a member's own `INSERT`/clip resolve immediately.
-fn ensure_block_written(
+pub(super) fn ensure_block_written(
     doc: &mut CadDocument,
     block: BlockId,
     ctx: &EntityContext,
@@ -445,12 +468,17 @@ fn refuse(acc: &mut ExportAccumulator, block: BlockId, reason: String) -> BlockW
 /// points are written in the reference's container space — the space the
 /// inverse block transform maps back from — so the reader recovers exactly the
 /// stored block-local ring.
+///
+/// The second return value is a **depth-only** loss: the boundary was written,
+/// but `BlockClip`'s front/back distances could not be expressed as WCS lengths
+/// (the reference has no positive finite `z` scale). The caller records it as
+/// `export.xclip_depth_dropped`, so a depth-only loss never reads as "no clip".
 fn write_clip(
     doc: &mut CadDocument,
     insert: Handle,
     clip: &BlockClip,
     placement: &Transform3,
-) -> Result<Handle, String> {
+) -> Result<(Handle, Option<String>), String> {
     if !clip.inside {
         return Err(
             "the stored clip is inverted (XCLIP INVERT), and AcDbSpatialFilter as modelled and \
@@ -508,6 +536,20 @@ fn write_clip(
     spatial.normal = Vector3::UNIT_Z;
     spatial.display_enabled = clip.visible;
     spatial.inverse_block_transform = Matrix4 { m: inverse.matrix };
+    // Front/back clip distances (groups 72/40 and 73/41). `BlockClip` stores them
+    // as a block-local z band, so each present side becomes the WCS length the
+    // filter carries (the reference's positive z scale) **and** its enabled flag:
+    // acadrust writes flag `72`/`73` from `Some`, which is exactly the
+    // "distance only with its flag" rule the format requires — a one-sided band
+    // sets one flag and one distance, never a distance without a flag.
+    let mut depth_loss = None;
+    match depth_world(placement, clip) {
+        Ok((front, back)) => {
+            spatial.front_clip = front;
+            spatial.back_clip = back;
+        }
+        Err(reason) => depth_loss = Some(reason),
+    }
 
     doc.objects
         .insert(xdict_handle, ObjectType::Dictionary(xdict));
@@ -515,5 +557,51 @@ fn write_clip(
         .insert(filter_handle, ObjectType::Dictionary(filter));
     doc.objects
         .insert(spatial_handle, ObjectType::SpatialFilter(spatial));
-    Ok(xdict_handle)
+    Ok((xdict_handle, depth_loss))
+}
+
+/// Convert a stored block-local depth band into the WCS distances the filter
+/// carries, or name why the format cannot carry them.
+///
+/// The filter's distances run along the boundary's normal (written as `+Z`) from
+/// the boundary plane, which is the reference's local `z = 0`, so the length is
+/// the reference's `z` scale times the stored distance. A reference whose `z`
+/// axis is not a positive finite scale (a degenerate or mirrored placement) has
+/// no such length; the caller keeps the written boundary and reports the depth
+/// band by name instead of inventing a value.
+pub(super) fn depth_world(
+    placement: &Transform3,
+    clip: &BlockClip,
+) -> Result<(Option<f64>, Option<f64>), String> {
+    if clip.front_clip.is_none() && clip.back_clip.is_none() {
+        return Ok((None, None));
+    }
+    let origin = placement.apply_point(Point3 {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+    });
+    let unit = placement.apply_point(Point3 {
+        x: 0.0,
+        y: 0.0,
+        z: 1.0,
+    });
+    let scale = unit.z - origin.z;
+    if !scale.is_finite() || scale <= 0.0 {
+        return Err(format!(
+            "the reference maps the block's +Z to a {} z scale, so the stored front/back \
+             distances ({}..{}) have no WCS length the SPATIAL_FILTER groups 40/41 can carry",
+            if scale.is_finite() {
+                scale.to_string()
+            } else {
+                "non-finite".to_string()
+            },
+            clip.front_clip
+                .map_or("-inf".to_string(), |value| value.to_string()),
+            clip.back_clip
+                .map_or("inf".to_string(), |value| value.to_string())
+        ));
+    }
+    let map = |distance: Option<f64>| distance.map(|value| value * scale);
+    Ok((map(clip.front_clip), map(clip.back_clip)))
 }

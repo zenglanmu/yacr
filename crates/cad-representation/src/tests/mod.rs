@@ -31,6 +31,7 @@ mod mask;
 mod polyline_width;
 mod table_appearance;
 mod xclip;
+mod xclip_depth;
 
 fn entity(id: u128, geometry: SemanticGeometry) -> DbEntity {
     DbEntity {

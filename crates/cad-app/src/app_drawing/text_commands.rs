@@ -30,7 +30,7 @@
 
 use super::*;
 use crate::TextCaseMode;
-use cad_domain::MLeaderContent;
+use cad_domain::MLeaderContentKind;
 
 /// The half-open rotation interval `(-π/2, π/2]` used by Most Readable.
 ///
@@ -529,7 +529,7 @@ impl Application {
                     planned.push((before, after));
                 }
                 SemanticGeometry::MultiLeader(leader)
-                    if leader.content() == MLeaderContent::Text =>
+                    if leader.content().kind() == MLeaderContentKind::Text =>
                 {
                     let changed = apply_text_case(&leader.text().string, mode);
                     if changed == leader.text().string {

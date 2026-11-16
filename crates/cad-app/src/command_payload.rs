@@ -710,6 +710,7 @@ pub enum CommandPayload {
         dogleg_angle: Option<f64>,
         attachment: Option<MLeaderAttachment>,
         text_angle: Option<MLeaderTextAngle>,
+        content: Option<MLeaderContentSpec>,
     },
     /// TEXTEDIT: replace the string of an existing text-bearing entity (ADR 0020
     /// amendment A/B; ADR-0021 D4 generalises it to MTEXT and MULTILEADER text).

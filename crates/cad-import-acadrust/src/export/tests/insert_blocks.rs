@@ -82,7 +82,7 @@ fn assert_transform_close(actual: &Transform3, expected: &Transform3, what: &str
     }
 }
 
-fn assert_vertices_close(actual: &[[f64; 2]], expected: &[[f64; 2]]) {
+pub(super) fn assert_vertices_close(actual: &[[f64; 2]], expected: &[[f64; 2]]) {
     assert_eq!(actual.len(), expected.len(), "vertex count: {actual:?}");
     for (a, b) in actual.iter().zip(expected.iter()) {
         assert!(
@@ -510,7 +510,15 @@ fn a_definition_without_a_table_name_still_explodes_with_its_reason() {
 // ---------------------------------------------------------------------------
 
 /// A database with a named block and one clipped model-space reference.
-fn clipped_database(clip: cad_domain::BlockClip) -> DrawingDatabase {
+pub(super) fn clipped_database(clip: cad_domain::BlockClip) -> DrawingDatabase {
+    clipped_database_with_scale(clip, [1.0; 3])
+}
+
+/// The same, with an explicit reference scale (used by the depth-band tests).
+pub(super) fn clipped_database_with_scale(
+    clip: cad_domain::BlockClip,
+    scale: [f64; 3],
+) -> DrawingDatabase {
     let mut builder = base_builder();
     builder
         .insert_block(BlockDefinition {
@@ -538,7 +546,7 @@ fn clipped_database(clip: cad_domain::BlockClip) -> DrawingDatabase {
             1,
             SemanticGeometry::Insert {
                 block: BlockId(1),
-                transform: placement(p(10.0, 20.0, 0.0), std::f64::consts::FRAC_PI_6, [1.0; 3]),
+                transform: placement(p(10.0, 20.0, 0.0), std::f64::consts::FRAC_PI_6, scale),
             },
             SpaceId::Model,
             0,
@@ -556,7 +564,7 @@ fn clipped_database(clip: cad_domain::BlockClip) -> DrawingDatabase {
     builder.finish().unwrap()
 }
 
-fn model_clip(database: &DrawingDatabase) -> Option<BlockClip> {
+pub(super) fn model_clip(database: &DrawingDatabase) -> Option<BlockClip> {
     database
         .entities()
         .filter(|entity| entity.space == SpaceId::Model)
@@ -566,11 +574,7 @@ fn model_clip(database: &DrawingDatabase) -> Option<BlockClip> {
 
 #[test]
 fn a_rotated_clipped_reference_round_trips_its_block_local_boundary() {
-    let stored = BlockClip {
-        vertices: vec![[-2.0, -1.0], [3.0, 4.0]],
-        inside: true,
-        visible: true,
-    };
+    let stored = BlockClip::new(vec![[-2.0, -1.0], [3.0, 4.0]], true, true);
     let database = clipped_database(stored.clone());
     let (bytes, report) = export_db(&database);
     assert!(
@@ -596,11 +600,7 @@ fn a_rotated_clipped_reference_round_trips_its_block_local_boundary() {
 fn an_inverted_clip_is_declared_and_not_written() {
     // The format has no clip-mode field, so an inverted region cannot be stored;
     // the reference is still a real INSERT, and the boundary is refused by name.
-    let database = clipped_database(BlockClip {
-        vertices: vec![[-2.0, -1.0], [3.0, 4.0]],
-        inside: false,
-        visible: true,
-    });
+    let database = clipped_database(BlockClip::new(vec![[-2.0, -1.0], [3.0, 4.0]], false, true));
     let (bytes, report) = export_db(&database);
     let dropped: Vec<&crate::export::ExportDiagnostic> = report
         .entries
@@ -665,11 +665,7 @@ fn a_clip_on_an_exploded_reference_is_reported_with_the_explosion_reason() {
         .set_entity_render_attributes(
             EntityId(1),
             EntityRenderAttributes {
-                clip: Some(BlockClip {
-                    vertices: vec![[-1.0, -1.0], [1.0, 1.0]],
-                    inside: true,
-                    visible: true,
-                }),
+                clip: Some(BlockClip::new(vec![[-1.0, -1.0], [1.0, 1.0]], true, true)),
                 ..Default::default()
             },
         )

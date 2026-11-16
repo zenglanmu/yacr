@@ -33,7 +33,7 @@
 //!   model-space entities only — block instance members are not expanded, and
 //!   hidden layers are skipped.
 
-use cad_domain::TolerancePolicy;
+use cad_domain::{MLeaderContentKind, TolerancePolicy};
 use cad_geometry::{distance, DefaultGeometryEngine};
 
 use super::*;
@@ -304,9 +304,11 @@ fn geometry_summary(database: &cad_db::DrawingDatabase, geometry: &SemanticGeome
             )
         }
         SemanticGeometry::MultiLeader(leader) => {
-            let content = match leader.content() {
-                MLeaderContent::None => "none",
-                MLeaderContent::Text => "text",
+            let content = match leader.content().kind() {
+                MLeaderContentKind::None => "none",
+                MLeaderContentKind::Text => "text",
+                MLeaderContentKind::Block => "block",
+                MLeaderContentKind::Tolerance => "tolerance",
             };
             format!(
                 "multileader style={} content={content} roots={} lines={}",

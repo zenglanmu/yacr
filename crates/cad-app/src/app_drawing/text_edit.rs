@@ -27,7 +27,7 @@
 //!   this edits the raw string, it is not a rich-text editor.
 
 use super::*;
-use cad_domain::MLeaderContent;
+use cad_domain::MLeaderContentKind;
 use text_policy::newlines_to_paragraph_breaks;
 
 impl Application {
@@ -216,7 +216,7 @@ fn apply_newline_policy(entity: &DbEntity, text: &str) -> CadResult<String> {
 ///   or sub-object, which has no entity identity of its own), a `Compound`
 ///   (where block/tolerance leader content stays) or any other geometry kind;
 /// * `textedit.mleader_content_not_text` — a first-class MULTILEADER whose
-///   content is not [`MLeaderContent::Text`] (a content-less leader), which has
+///   content is not [`MLeaderContentKind::Text`] (a content-less leader), which has
 ///   no string to replace.
 ///
 /// It is shared by the interactive pick (which uses it to fill the prefill) and
@@ -240,7 +240,9 @@ pub(crate) fn resolve_text_edit_target(
     })?;
     match &entity.geometry {
         SemanticGeometry::Text { .. } => Ok(entity),
-        SemanticGeometry::MultiLeader(leader) if leader.content() == MLeaderContent::Text => {
+        SemanticGeometry::MultiLeader(leader)
+            if leader.content().kind() == MLeaderContentKind::Text =>
+        {
             Ok(entity)
         }
         SemanticGeometry::MultiLeader(leader) => Err(CadError::Unsupported(format!(

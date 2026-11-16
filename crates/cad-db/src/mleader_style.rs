@@ -58,9 +58,11 @@ pub struct MLeaderStyle {
     pub name: String,
     /// DXF style `173`: the leader path type.
     pub path_type: MLeaderPathType,
-    /// DXF style `170`: the content kind ([`Self::CONTENT_MTEXT`] and friends).
-    /// Creation accepts only [`Self::CONTENT_MTEXT`]; a content-less row is
-    /// refused as such and block/tolerance rows are refused by name.
+    /// DXF style `170`: the default content kind ([`Self::CONTENT_MTEXT`] and
+    /// friends). It is a **default**, not a restriction: the typed
+    /// `MLEADER CONTENT` option decides what an entity carries, and every stored
+    /// kind is creatable. A code outside `0..=3` is the named
+    /// `mleader.content_unsupported` refusal.
     pub content_type: i16,
     /// DXF style `45`: the annotation text height.
     pub text_height: f64,
@@ -98,14 +100,13 @@ impl MLeaderStyle {
     /// The pinned `Standard` row ([`Self::standard_metric`]) with no id, for a
     /// caller that only needs the constants.
     pub const STANDARD_NAME: &'static str = "Standard";
-    /// DXF style `170 = 0`: leaders without annotation content (not creatable).
+    /// DXF style `170 = 0`: leaders without annotation content.
     pub const CONTENT_NONE: i16 = 0;
-    /// DXF style `170 = 1`: block content (not creatable here; block content
-    /// stays on the import/display/export path).
+    /// DXF style `170 = 1`: block content (the annotation is an inserted block).
     pub const CONTENT_BLOCK: i16 = 1;
-    /// DXF style `170 = 2`: MText content — the only creatable kind.
+    /// DXF style `170 = 2`: MText content (the pinned `Standard` default).
     pub const CONTENT_MTEXT: i16 = 2;
-    /// DXF style `170 = 3`: tolerance content (not creatable here).
+    /// DXF style `170 = 3`: tolerance content (a feature-control frame).
     pub const CONTENT_TOLERANCE: i16 = 3;
 
     /// The pinned default MLEADERSTYLE row (see the module docs).

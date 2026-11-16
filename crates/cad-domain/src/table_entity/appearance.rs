@@ -113,10 +113,11 @@ impl<T: Copy> TableFieldEdit<T> {
 /// One cell's appearance write (`TABLEDIT FORMAT`'s colour/fill/lineweight
 /// fields).
 ///
-/// The two border fields reach **all four edges** of the cell's resolved border
-/// set: the typed grammar has no per-edge selector, and a per-edge colour would
-/// need a second address (`<edge>`) this build's table record does not require.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// The border fields reach **all four edges** of the cell's resolved border set:
+/// the typed grammar has no per-edge selector, and a per-edge colour would need
+/// a second address (`<edge>`) this build's table record does not require. The
+/// per-edge selector lives on the row-level `TABLESTYLE BORDER <edge> …` form.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct TableCellAppearanceEdit {
     /// The cell's text (content) colour, DXF group 64.
     pub text_color: TableFieldEdit<[u8; 3]>,
@@ -126,6 +127,13 @@ pub struct TableCellAppearanceEdit {
     pub border_color: TableFieldEdit<[u8; 3]>,
     /// All four edges' border lineweight in 1/100 mm, DXF groups 275-279.
     pub border_lineweight: TableFieldEdit<u16>,
+    /// All four edges' visibility (`false` hides the edge), DXF groups
+    /// 285-289 of a cell record / `GRIDFORMAT` group 93.
+    pub border_visible: TableFieldEdit<bool>,
+    /// All four edges' double-line spacing in drawing units — the border
+    /// **type** this build stores. A spacing above zero *is* the DXF `Double`
+    /// border type (`GRIDFORMAT` groups 91 + 40); `Set(0.0)` is a single line.
+    pub border_spacing: TableFieldEdit<f64>,
 }
 
 impl TableCellAppearanceEdit {
@@ -136,9 +144,11 @@ impl TableCellAppearanceEdit {
             && self.fill.is_keep()
             && self.border_color.is_keep()
             && self.border_lineweight.is_keep()
+            && self.border_visible.is_keep()
+            && self.border_spacing.is_keep()
     }
 
-    /// Apply the two border fields to every edge of `borders`.
+    /// Apply the border fields to every edge of `borders`.
     pub fn apply_borders(&self, borders: &mut TableCellBorders) {
         for edge in [
             &mut borders.top,
@@ -149,6 +159,18 @@ impl TableCellAppearanceEdit {
             self.border_color.apply(&mut edge.color);
             self.border_lineweight
                 .apply(&mut edge.lineweight_hundredths);
+            // Visibility and spacing are plain fields, not overrides, so their
+            // neutral state is "visible" / "single line" rather than a `None`.
+            match self.border_visible {
+                TableFieldEdit::Keep => {}
+                TableFieldEdit::Clear => edge.visible = true,
+                TableFieldEdit::Set(visible) => edge.visible = visible,
+            }
+            match self.border_spacing {
+                TableFieldEdit::Keep => {}
+                TableFieldEdit::Clear => edge.double_spacing = 0.0,
+                TableFieldEdit::Set(spacing) => edge.double_spacing = spacing,
+            }
         }
     }
 }

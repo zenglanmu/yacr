@@ -106,6 +106,7 @@ fn payload(arrow: Point3, landing: Point3, text: &str) -> CommandPayload {
         dogleg_angle: None,
         attachment: None,
         text_angle: None,
+        content: None,
     }
 }
 
@@ -140,7 +141,7 @@ fn create_mleader_inserts_one_acdbmultileader_in_one_transaction_and_one_undo_st
     assert_eq!(EntityId(outcome.objects[0].0), entity_id);
 
     // ─── Definition ───
-    assert_eq!(leader.content(), MLeaderContent::Text);
+    assert_eq!(*leader.content(), MLeaderContent::Text);
     assert_eq!(leader.style_name(), "Standard");
     assert_eq!(
         leader.override_mask(),
@@ -358,6 +359,7 @@ fn create_mleader_refuses_bad_text_points_and_payloads_without_writing() {
                 dogleg_angle: None,
                 attachment: None,
                 text_angle: None,
+                content: None,
             },
         ),
         (
@@ -578,7 +580,7 @@ fn leader_option_plan_names_the_point_limit_and_the_vertex_carrier() {
     assert!(options.arrowhead);
     assert_eq!(
         options.style_content,
-        MLeaderContent::Text,
+        MLeaderContentKind::Text,
         "the plan reports the style's declared content kind"
     );
     let mut off = row.clone();
@@ -606,34 +608,37 @@ fn leader_option_plan_names_the_point_limit_and_the_vertex_carrier() {
     none.content_type = MLeaderStyle::CONTENT_NONE;
     let resolution = none.resolved("Standard".into(), StyleId(0), None);
     let options = plan_leader_options(&none, &resolution).expect("a content-less style plans");
-    assert_eq!(options.style_content, MLeaderContent::None);
+    assert_eq!(options.style_content, MLeaderContentKind::None);
 }
 
 #[test]
-fn create_mleader_refuses_block_and_tolerance_styles_without_writing() {
+fn a_block_or_tolerance_style_row_is_no_longer_a_refusal() {
+    use crate::app_drawing::annot_batch::leader::plan_leader_options;
+    // The style's `170` content kind is a **default**: all four kinds are
+    // creatable, so a block/tolerance row plans the same way an MText row does.
+    // The typed `CONTENT` option decides what is actually created (the command
+    // tests in `mleader_content` pin that per kind).
     for content in [MLeaderStyle::CONTENT_BLOCK, MLeaderStyle::CONTENT_TOLERANCE] {
         let mut standard = MLeaderStyle::standard_metric(MLeaderStyleId(0));
         standard.content_type = content;
-        let (mut app, mut session) = mleader_app(Vec::new(), Some(standard));
-        let rev = revision(&app);
-        let error = execute(
-            &mut app,
-            &mut session,
-            CommandId::MLeader,
-            payload(p3(0.0, 0.0, 0.0), p3(10.0, 2.0, 0.0), "Note"),
-        )
-        .unwrap_err();
-        let message = match error {
-            CadError::Unsupported(message) | CadError::InvalidInput(message) => message,
-            other => panic!("expected a named refusal for content {content}, got {other:?}"),
-        };
-        assert!(
-            message.contains("mleader.content_unsupported"),
-            "content {content} must refuse by name: {message}"
+        let resolution = standard.resolved("Standard".into(), StyleId(0), None);
+        let options = plan_leader_options(&standard, &resolution).expect("every stored kind plans");
+        assert_eq!(
+            options.style_content,
+            MLeaderContentKind::from_dxf(content).expect("a stored code"),
+            "the plan reports the style's declared kind for {content}"
         );
-        assert_eq!(revision(&app), rev, "content {content} must not write");
-        assert!(!app.can_undo(&DocumentId(1)));
     }
+    // A code outside the four known kinds stays a named refusal.
+    let mut unknown = MLeaderStyle::standard_metric(MLeaderStyleId(0));
+    unknown.content_type = 9;
+    let resolution = unknown.resolved("Standard".into(), StyleId(0), None);
+    let error = plan_leader_options(&unknown, &resolution).unwrap_err();
+    assert!(
+        matches!(error, CadError::Unsupported(ref message)
+            if message.contains("mleader.content_unsupported")),
+        "{error:?}"
+    );
 }
 
 #[test]
@@ -651,7 +656,7 @@ fn a_content_less_style_row_creates_text_and_sets_the_content_override_bit() {
     )
     .expect("a typed text wins over the style's content kind");
     let (_, leader) = the_leader(&app);
-    assert_eq!(leader.content(), MLeaderContent::Text);
+    assert_eq!(*leader.content(), MLeaderContent::Text);
     assert_eq!(leader.text().string, "Note");
     assert_ne!(
         leader.override_mask() & MASK_CONTENT_TYPE,
@@ -727,7 +732,7 @@ fn a_content_less_command_stores_an_empty_text_and_renders_arrow_and_dogleg() {
         outcome.diagnostics
     );
     let (_, leader) = the_leader(&app);
-    assert_eq!(leader.content(), MLeaderContent::None);
+    assert_eq!(*leader.content(), MLeaderContent::None);
     assert_eq!(
         leader.text().string,
         "",
@@ -778,7 +783,7 @@ fn a_content_less_command_stores_an_empty_text_and_renders_arrow_and_dogleg() {
             _ => None,
         })
         .expect("the content-less leader re-imports as a MULTILEADER");
-    assert_eq!(reimported.content(), MLeaderContent::None);
+    assert_eq!(*reimported.content(), MLeaderContent::None);
     assert_eq!(reimported.text().string, "");
     assert_eq!(reimported.lines().len(), 1);
     assert_eq!(reimported.lines()[0].points.len(), 2);
@@ -891,7 +896,7 @@ fn a_created_multileader_exports_as_a_real_multileader_and_reimports() {
         })
         .expect("the created leader re-imports as a MULTILEADER variant");
     assert_eq!(reimported.override_mask(), 0);
-    assert_eq!(reimported.content(), MLeaderContent::Text);
+    assert_eq!(*reimported.content(), MLeaderContent::Text);
     assert_eq!(reimported.style_name(), "Standard");
     assert_eq!(reimported.roots().len(), 1);
     assert_eq!(reimported.lines().len(), 1);

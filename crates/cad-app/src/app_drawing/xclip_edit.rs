@@ -21,7 +21,19 @@
 //!   area) and rendered as that polygon, concave included. A ring that fails
 //!   validation is refused by name (`xclip.degenerate_polygon`,
 //!   `xclip.self_intersecting`, `xclip.non_coplanar`) and nothing is written.
-//! * `XCLIP ON|OFF` — switch the stored boundary on/off.
+//! * `XCLIP CLIPDEPTH <front> <back>` — the **kept block-local z band** of the
+//!   stored boundary (the DXF `SPATIAL_FILTER` front/back clip distances, groups
+//!   `40`/`41` with flags `72`/`73`). The clip plane normal is the block's `+Z`,
+//!   so the pair is a z range: geometry below `front` or above `back` is dropped.
+//!   Both distances must be finite with `front <= back`; otherwise the command
+//!   refuses (`xclip.depth_range`) and writes nothing. A reference with no stored
+//!   boundary is `xclip.no_boundary`.
+//! * `XCLIP CLIPDEPTH OFF` — clear both distances, keeping the 2D boundary.
+//!   Redefining the ring (`RECT`/`POLY`) **keeps** a stored band: the band is a
+//!   property of the reference's clip, not of its boundary, so re-cutting the
+//!   ring never drops a value the file carries.
+//! * `XCLIP ON|OFF` — switch the stored boundary on/off (the depth band is part
+//!   of the boundary: `OFF` applies neither half).
 //! * `XCLIP DELETE` — remove the boundary.
 //! * `XCLIP INVERT` — refused (`xclip.invert_not_renderable`), never stored
 //!   invisibly: the region an inverted clip keeps is the unbounded complement of
@@ -43,25 +55,39 @@
 //! `xclip.payload` / `.no_selection` / `.multiple` / `.not_insert` /
 //! `.no_boundary` / `.degenerate_rect` / `.degenerate_polygon` /
 //! `.non_coplanar` / `.self_intersecting` / `.degenerate_transform` /
-//! `.non_xy_plane` / `.invert_not_renderable`, and the no-op `.unchanged`.
+//! `.non_xy_plane` / `.depth_range` / `.invert_not_renderable`, and the no-op
+//! `.unchanged`.
 //!
 //! # Boundaries (declared, not hidden)
 //!
 //! Picking, selection and bounds still see the unclipped geometry; the clip is a
 //! **display** filter only.
 //!
-//! Persistence is one-sided: the importer reads an existing `XCLIP` from the
-//! INSERT's `ACAD_FILTER`/`SPATIAL_FILTER` chain into the same `BlockClip` (in
-//! block-local space, incl. the switched-off state), but SAVE does not write one
-//! back — the v1 exporter explodes every block reference, so no INSERT exists to
-//! own that chain. The loss is named in the export report
-//! (`export.xclip_clip_dropped`), never silent.
+//! The depth band is a **z-extent filter, not a 3D cut**: the display layer drops
+//! a primitive whose whole geometry lies outside `[front, back]`, and a primitive
+//! that *straddles* a plane is kept whole and reported
+//! (`representation.xclip_depth_straddle`) — it is never silently kept and never
+//! cut at the depth plane. A primitive whose z extent cannot be derived (a
+//! non-finite coordinate) is likewise kept and named
+//! (`representation.xclip_depth_unsupported`). The stored pair is the block-local
+//! z band `[front, back]`, read from and written to groups `40`/`41` in that
+//! order: this build does not mirror AutoCAD's "back distance measured along the
+//! other side of the plane normal" sign, so a source that stores the two
+//! distances that way is read as written.
+//!
+//! Persistence: the importer reads an existing `XCLIP` from the INSERT's
+//! `ACAD_FILTER`/`SPATIAL_FILTER` chain into the same `BlockClip` (in block-local
+//! space, incl. the switched-off state and both depth distances), and SAVE writes
+//! the chain back (boundary + depth flags/distances) for every reference the
+//! exporter can express as one `INSERT`. A depth band the filter cannot carry is
+//! reported by name (`export.xclip_depth_dropped`), and a reference the exporter
+//! must explode reports the whole clip (`export.xclip_clip_dropped`).
 //!
 //! Text and `WIPEOUT` masks inside a clipped block have no exact region cut
 //! (a mask is an erase region with its own fill rule), so they stay drawn and
 //! are reported by the representation layer under
 //! `representation.xclip_primitive_unsupported` — the clip is never claimed for
-//! them.
+//! them. Their **depth** band is still honoured (their z extent is known).
 
 use super::*;
 
@@ -123,9 +149,10 @@ impl Application {
                     Err(rejection) => xclip_rejection_note(rejection).to_string(),
                 };
                 format!(
-                    "XCLIP ?: INSERT {} has a {kind} clip ({}, inside), {world}",
+                    "XCLIP ?: INSERT {} has a {kind} clip ({}, inside), {world}{}",
                     before.id.0,
-                    if clip.visible { "ON" } else { "OFF" }
+                    if clip.visible { "ON" } else { "OFF" },
+                    depth_note(clip)
                 )
             }
         };
@@ -178,6 +205,19 @@ impl Application {
                 ));
             }
         }
+        if let XClipCommand::ClipDepth([front, back]) = request {
+            // The model's own rule (`cad_domain::validate_clip_depth`) is the one
+            // the constructor applies, so a pair it would refuse is refused here
+            // — before a transaction — with this command's code prefix.
+            if let Err(reason) = cad_domain::validate_clip_depth(Some(*front), Some(*back)) {
+                return Err(xclip_refusal(
+                    "xclip.depth_range",
+                    format!(
+                        "XCLIP CLIPDEPTH needs two finite distances with front <= back: {reason}"
+                    ),
+                ));
+            }
+        }
         if let XClipCommand::Polygon(points) = request {
             // The representation layer owns the one "is this a usable ring" rule
             // (`validate_simple_polygon`), so a ring it would refuse is refused
@@ -215,11 +255,13 @@ impl Application {
         let current = candidate.entity_render_attributes(before.id).clip;
         let new_clip = match request {
             XClipCommand::Rect([minx, miny, maxx, maxy]) => {
-                let clip = BlockClip {
-                    vertices: vec![[*minx, *miny], [*maxx, *maxy]],
-                    inside: true,
-                    visible: true,
-                };
+                // A redefined ring keeps the reference's stored depth band: the
+                // band is a property of the clip, not of the boundary, so cutting
+                // a new ring must not silently drop a value the file carries
+                // (`CLIPDEPTH OFF` is how it is cleared).
+                let clip = BlockClip::new(vec![[*minx, *miny], [*maxx, *maxy]], true, true)
+                    .with_depth(current_depth(&current).0, current_depth(&current).1)
+                    .expect("a stored band is already validated");
                 // The render path must accept the boundary, otherwise the
                 // command would store a clip that never cuts. `block_clip_boundary`
                 // is exactly the map the representation layer applies, so a
@@ -232,11 +274,9 @@ impl Application {
                 }
             }
             XClipCommand::Polygon(points) => {
-                let clip = BlockClip {
-                    vertices: points.clone(),
-                    inside: true,
-                    visible: true,
-                };
+                let clip = BlockClip::new(points.clone(), true, true)
+                    .with_depth(current_depth(&current).0, current_depth(&current).1)
+                    .expect("a stored band is already validated");
                 // Same rule as the rectangle: the mapped region must exist. The
                 // pre-write validator already refused a ring with no interior, so
                 // this only catches the reference's own transform.
@@ -257,6 +297,25 @@ impl Application {
                 None => return Err(xclip_no_boundary(before.id.0, "OFF")),
                 Some(clip) => Some(BlockClip {
                     visible: false,
+                    ..clip.clone()
+                }),
+            },
+            XClipCommand::ClipDepth([front, back]) => match current.as_ref() {
+                None => return Err(xclip_no_boundary(before.id.0, "CLIPDEPTH")),
+                // The shape was validated before the selection; the band is a
+                // display attribute of the stored boundary, so it is one
+                // `update_entity_display` stage like ON/OFF.
+                Some(clip) => Some(BlockClip {
+                    front_clip: Some(*front),
+                    back_clip: Some(*back),
+                    ..clip.clone()
+                }),
+            },
+            XClipCommand::ClipDepthOff => match current.as_ref() {
+                None => return Err(xclip_no_boundary(before.id.0, "CLIPDEPTH OFF")),
+                Some(clip) => Some(BlockClip {
+                    front_clip: None,
+                    back_clip: None,
                     ..clip.clone()
                 }),
             },
@@ -370,6 +429,12 @@ impl Application {
                     before.id.0
                 ),
             ),
+        };
+        // `CLIPDEPTH` writes are the same display transaction as the boundary
+        // forms, so the one diagnostic states the resulting depth band too.
+        let message = match &new_clip {
+            Some(clip) => format!("{message}{}", depth_note(clip)),
+            None => message,
         };
         diagnostics.push(Diagnostic {
             object,
@@ -535,6 +600,34 @@ fn xclip_polygon_refusal_code(code: &str) -> &'static str {
         cad_representation::viewport_reason::POLYGON_SELF_INTERSECTING => "xclip.self_intersecting",
         cad_representation::viewport_reason::POLYGON_NON_PLANAR => "xclip.non_coplanar",
         _ => "xclip.degenerate_polygon",
+    }
+}
+
+/// The stored depth band of an optional clip (`None` when there is no clip).
+///
+/// Used to carry the band across a boundary redefinition: a stored pair is
+/// already validated, so re-applying it cannot fail.
+fn current_depth(clip: &Option<BlockClip>) -> (Option<f64>, Option<f64>) {
+    match clip {
+        Some(clip) => (clip.front_clip, clip.back_clip),
+        None => (None, None),
+    }
+}
+
+/// One phrase stating a stored clip's depth band.
+///
+/// An absent side prints as `-inf`/`inf` because that is what it means: that side
+/// of the band is unbounded, not zero. `no depth band` is the historical 2D
+/// boundary, which every clip without groups 40/41 (and every clip stored before
+/// clip depth existed) carries.
+fn depth_note(clip: &BlockClip) -> String {
+    match (clip.front_clip, clip.back_clip) {
+        (None, None) => ", no depth band".to_string(),
+        (front, back) => format!(
+            ", depth band block-local z {}..{}",
+            front.map_or("-inf".to_string(), |value| value.to_string()),
+            back.map_or("inf".to_string(), |value| value.to_string())
+        ),
     }
 }
 

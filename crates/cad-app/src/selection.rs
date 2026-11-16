@@ -18,7 +18,7 @@
 
 use cad_db::{DbEntity, DrawingDatabase};
 use cad_domain::{
-    EntityId, HatchFill, InstancePath, MLeaderContent, Point3, SelectionRef, SemanticGeometry,
+    EntityId, HatchFill, InstancePath, MLeaderContentKind, Point3, SelectionRef, SemanticGeometry,
     SpaceId,
 };
 use std::collections::BTreeSet;
@@ -470,7 +470,9 @@ pub(crate) fn editable_text_source(entity: &DbEntity) -> Option<(&str, bool)> {
         SemanticGeometry::Text { text, .. } => {
             Some((text.as_str(), entity.object.type_key == "AcDbMText"))
         }
-        SemanticGeometry::MultiLeader(leader) if leader.content() == MLeaderContent::Text => {
+        SemanticGeometry::MultiLeader(leader)
+            if leader.content().kind() == MLeaderContentKind::Text =>
+        {
             Some((leader.text().string.as_str(), true))
         }
         _ => None,

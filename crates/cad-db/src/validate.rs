@@ -577,6 +577,19 @@ pub fn validate_geometry(geometry: &SemanticGeometry) -> CadResult<()> {
                     }
                 }
             }
+            // A stored `GRIDFORMAT` margin override must address a real cell and
+            // hold finite non-negative lengths: a negative inset cannot drive a
+            // text anchor and could not be written to a `CELLMARGIN` block.
+            for ((row, column), margins) in table.margin_overrides() {
+                if table.cell(row, column).is_none() {
+                    return Err(degenerate("table margin override points outside the grid"));
+                }
+                if !margins.is_valid() {
+                    return Err(degenerate(
+                        "table cell margin must be finite and non-negative",
+                    ));
+                }
+            }
             // Merge coverage must be deterministic and non-overlapping. A cell
             // already inside an earlier anchor is a covered cell (skipped); an
             // anchor whose range reaches an already-covered cell is an overlap

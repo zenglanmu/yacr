@@ -24,11 +24,16 @@
 //! * `TABLEDIT UNMERGE <row> <col>` — split the range covering the cell.
 //! * `TABLEDIT FORMAT <row> <col> [ALIGN <TL|TC|TR|ML|MC|MR|BL|BC|BR>]
 //!   [ROTATION <degrees>] [COLOR <aci|BYLAYER>] [FILL <aci|NONE>]
-//!   [LINEWEIGHT <mm|BYLAYER>] [BORDERCOLOR <aci|BYLAYER>]` — set the cell's own
-//!   text alignment, rotation, text colour, background fill and the four border
-//!   edges' colour/lineweight. A **border line type** stays refused by name
-//!   (`tabledit.format_unsupported`): this build's table model has no field for
-//!   it and the DXF writer emits no per-cell border line type.
+//!   [LINEWEIGHT <mm|BYLAYER>] [BORDERCOLOR <aci|BYLAYER>]
+//!   [BORDER [ALL] <ON|OFF|SINGLE|DOUBLE> [<spacing>]]
+//!   [MARGIN <l> <t> <r> <b>|INHERIT]` — set the cell's own text alignment,
+//!   rotation, text colour, background fill, the four border edges'
+//!   colour/lineweight/visibility/type (a spacing above zero is the `Double`
+//!   border type) and the cell's `GRIDFORMAT` margins. A **border line type**
+//!   stays refused by name (`tabledit.format_unsupported`): the only DXF group is
+//!   an `LTYPE` handle, this writer emits no per-cell border line type, and this
+//!   build's fragment expansion has no per-primitive dash source, so a stored
+//!   value could neither draw nor round-trip.
 //! * `TABLEDIT STYLE <name>` — assign the table's style (the `TABLESTYLE <name>`
 //!   write through the `TABLEDIT` selector).
 //! * `MATCHCELL <src_row> <src_col> <dst_row> <dst_col> [<dst_row> <dst_col> …]`
@@ -37,7 +42,7 @@
 //!   [MARGIN <h> <v>] [ROW <DATA|TITLE|HEADER>] [HEIGHT <h>] [TEXTSTYLE <name>]
 //!   [ALIGN <code>] [COLOR <aci|BYLAYER>] [FILL <aci|NONE>]
 //!   [LINEWEIGHT <mm|BYLAYER>] [BORDERCOLOR <aci|BYLAYER>]
-//!   [BORDER <TOP|RIGHT|BOTTOM|LEFT|ALL> <ON|OFF|DOUBLE> [<spacing>]]
+//!   [BORDER <TOP|RIGHT|BOTTOM|LEFT|ALL> <ON|OFF|SINGLE|DOUBLE> [<spacing>]]
 //!   [TITLE <ON|OFF>] [HEADER <ON|OFF>]` — the style write. `ROW` scopes the
 //!   **following** row-scoped fields (`HEIGHT`, `TEXTSTYLE`, `ALIGN`, `COLOR`,
 //!   `FILL`, `LINEWEIGHT`, `BORDERCOLOR`, `BORDER`) to one row type; without it
@@ -46,10 +51,11 @@
 //!   (see `super::table_export`).
 
 use cad_app::{
-    TableCellAddress, TableColorValue, TableCreateCommand, TableEditCommand, TableLineweightValue,
-    TablePayload, TableRowStyleCommand, TableStyleCommand, TableStyleEdge, TableStyleRowScope,
+    TableCellAddress, TableCellBorderCommand, TableColorValue, TableCreateCommand,
+    TableEditCommand, TableLineweightValue, TableMarginValue, TablePayload, TableRowStyleCommand,
+    TableStyleCommand, TableStyleEdge, TableStyleRowScope,
 };
-use cad_domain::{Point3, TableCellAlignment, TableRowKind};
+use cad_domain::{Point3, TableCellAlignment, TableCellMargins, TableRowKind};
 
 use super::arguments::{parse_positive_decimal, parse_signed_decimal};
 
@@ -198,7 +204,8 @@ pub fn parse_tabledit_option_argument(argument: &str) -> Option<TablePayload> {
 
 /// Parse `FORMAT <row> <col> [ALIGN <code>] [ROTATION <degrees>]
 /// [COLOR <aci|BYLAYER>] [FILL <aci|NONE>] [LINEWEIGHT <mm|BYLAYER>]
-/// [BORDERCOLOR <aci|BYLAYER>]`.
+/// [BORDERCOLOR <aci|BYLAYER>] [BORDER <ON|OFF|SINGLE|DOUBLE> [<spacing>]]
+/// [MARGIN <l> <t> <r> <b>|INHERIT]`.
 ///
 /// Every field may appear once, in any order; a repeated field, an unknown word
 /// or a malformed value is `None` (the caller refuses the whole line by name,
@@ -220,6 +227,8 @@ fn parse_tabledit_format(rest: &str) -> Option<TablePayload> {
     let mut fill = None;
     let mut lineweight = None;
     let mut border_color = None;
+    let mut border = None;
+    let mut margin = None;
     let mut index = 2;
     while index < tokens.len() {
         let word = tokens[index];
@@ -279,6 +288,24 @@ fn parse_tabledit_format(rest: &str) -> Option<TablePayload> {
             index += 1;
             continue;
         }
+        if word.eq_ignore_ascii_case("BORDER") {
+            if border.is_some() {
+                return None;
+            }
+            let (command, consumed) = parse_cell_border(&tokens[index..])?;
+            border = Some(command);
+            index += consumed;
+            continue;
+        }
+        if word.eq_ignore_ascii_case("MARGIN") {
+            if margin.is_some() {
+                return None;
+            }
+            let (value, consumed) = parse_cell_margin(&tokens[index..])?;
+            margin = Some(value);
+            index += consumed;
+            continue;
+        }
         return None;
     }
     if alignment.is_none()
@@ -287,6 +314,8 @@ fn parse_tabledit_format(rest: &str) -> Option<TablePayload> {
         && fill.is_none()
         && lineweight.is_none()
         && border_color.is_none()
+        && border.is_none()
+        && margin.is_none()
     {
         return None;
     }
@@ -298,7 +327,105 @@ fn parse_tabledit_format(rest: &str) -> Option<TablePayload> {
         fill,
         lineweight,
         border_color,
+        border,
+        margin,
     })
+}
+
+/// One `TABLEDIT FORMAT … BORDER [ALL] <ON|OFF|SINGLE|DOUBLE> [<spacing>]`
+/// assignment and how many tokens it consumed.
+///
+/// The four edges are the cell's own resolved border set (the typed grammar has
+/// no per-edge selector here — that lives on the row-level `TABLESTYLE BORDER
+/// <edge> …` form). `ON`/`OFF` set only the visibility, `SINGLE` also clears the
+/// double-line spacing, and `DOUBLE` sets a spacing when one follows (otherwise
+/// the edge keeps the spacing it already had).
+fn parse_cell_border(tokens: &[&str]) -> Option<(TableCellBorderCommand, usize)> {
+    // `BORDER ALL <state>` is the explicit spelling of the only scope this form
+    // has; a single-edge word is refused by name (see
+    // [`tabledit_format_refusal`]) rather than silently reaching all four edges.
+    let (tokens, consumed_all) = match tokens.first() {
+        Some(token) if token.eq_ignore_ascii_case("ALL") => (&tokens[1..], 1),
+        _ => (tokens, 0),
+    };
+    let state = *tokens.first()?;
+    if state.eq_ignore_ascii_case("ON") {
+        return Some((
+            TableCellBorderCommand {
+                visible: Some(true),
+                spacing: None,
+            },
+            consumed_all + 1,
+        ));
+    }
+    if state.eq_ignore_ascii_case("OFF") {
+        return Some((
+            TableCellBorderCommand {
+                visible: Some(false),
+                spacing: None,
+            },
+            consumed_all + 1,
+        ));
+    }
+    if state.eq_ignore_ascii_case("SINGLE") {
+        return Some((
+            TableCellBorderCommand {
+                visible: Some(true),
+                spacing: Some(0.0),
+            },
+            consumed_all + 1,
+        ));
+    }
+    if state.eq_ignore_ascii_case("DOUBLE") {
+        let spacing = match tokens.get(1) {
+            Some(token) if !is_format_field(token) => Some(parse_non_negative_decimal(token)?),
+            _ => None,
+        };
+        let consumed = usize::from(spacing.is_some()) + 1;
+        return Some((
+            TableCellBorderCommand {
+                visible: Some(true),
+                spacing,
+            },
+            consumed_all + consumed,
+        ));
+    }
+    None
+}
+
+/// One `TABLEDIT FORMAT … MARGIN <left> <top> <right> <bottom> | INHERIT`
+/// assignment and how many tokens it consumed.
+fn parse_cell_margin(tokens: &[&str]) -> Option<(TableMarginValue, usize)> {
+    let first = *tokens.first()?;
+    if first.eq_ignore_ascii_case("INHERIT") {
+        return Some((TableMarginValue::Inherit, 1));
+    }
+    let left = parse_non_negative_decimal(first)?;
+    let top = parse_non_negative_decimal(tokens.get(1)?)?;
+    let right = parse_non_negative_decimal(tokens.get(2)?)?;
+    let bottom = parse_non_negative_decimal(tokens.get(3)?)?;
+    Some((
+        TableMarginValue::Values(TableCellMargins::new(left, top, right, bottom)),
+        4,
+    ))
+}
+
+/// The field words a `TABLEDIT FORMAT` line can carry, so a `DOUBLE` without an
+/// explicit spacing does not swallow the next field.
+fn is_format_field(token: &str) -> bool {
+    const FIELDS: [&str; 10] = [
+        "ALIGN",
+        "ROTATION",
+        "COLOR",
+        "COLOUR",
+        "FILL",
+        "LINEWEIGHT",
+        "BORDERCOLOR",
+        "BORDERCOLOUR",
+        "BORDER",
+        "MARGIN",
+    ];
+    FIELDS.iter().any(|field| token.eq_ignore_ascii_case(field))
 }
 
 /// One table colour token: an ACI index `1..=255`, or the field's own symbolic
@@ -320,13 +447,21 @@ fn parse_cell_color(token: &str, symbolic: &str) -> Option<TableColorValue> {
 /// The named refusal for a `TABLEDIT FORMAT` field this build cannot store.
 ///
 /// The one recognised word is the DXF per-cell **border line type** (the border
-/// record's line-type handle): this build's table model has no field for it and
-/// the DXF writer emits no per-cell border line type for a plain `TABLE`, so a
-/// stored value could neither be drawn nor round-trip. It is refused with a
-/// stable code and the reason, never parsed and dropped.
+/// record's line-type handle, `GRIDFORMAT` group `340`). It stays refused because
+/// none of the three links can carry it:
 ///
-/// `COLOR`, `FILL`, `LINEWEIGHT` and `BORDERCOLOR` are **supported** (the cell
-/// appearance channel stores and draws them) and are therefore not refused here.
+/// * the value is an `LTYPE` **handle**, and the domain has no drawing-level
+///   linetype table, so a stored name could not be turned into a dash pattern;
+/// * the DXF writer emits no per-cell border line type on an `ACAD_TABLE`
+///   entity (only on a `TABLECONTENT` object, whose `GRIDFORMAT` block still
+///   carries a handle, not a name); and
+/// * this build's fragment expansion replaces a fragment's own linetype with the
+///   entity-resolved one, so a per-border dash source could not reach the
+///   renderer even if it were stored.
+///
+/// It is refused with a stable code and that reason, never parsed and dropped.
+/// Every other `TABLEDIT FORMAT` field (`COLOR`, `FILL`, `LINEWEIGHT`,
+/// `BORDERCOLOR`, `BORDER`, `MARGIN`) is supported and therefore not refused here.
 /// `None` when the line carries no unsupported field.
 pub fn tabledit_format_refusal(argument: &str) -> Option<String> {
     let text = argument.trim_start();
@@ -334,15 +469,42 @@ pub fn tabledit_format_refusal(argument: &str) -> Option<String> {
     if !word.eq_ignore_ascii_case("FORMAT") {
         return None;
     }
+    // A single-edge word after `BORDER` is a recognised spelling this form does
+    // not have: its border fields reach all four edges by design, so accepting
+    // it would silently widen the write. It is refused by name, with the shapes
+    // that do work.
+    let tokens: Vec<&str> = rest.split_whitespace().collect();
+    for (index, token) in tokens.iter().enumerate() {
+        if !token.eq_ignore_ascii_case("BORDER") {
+            continue;
+        }
+        let Some(edge) = tokens.get(index + 1) else {
+            continue;
+        };
+        let single_edge = ["TOP", "RIGHT", "BOTTOM", "LEFT"]
+            .iter()
+            .any(|name| edge.eq_ignore_ascii_case(name));
+        if single_edge {
+            return Some(format!(
+                "tabledit.format_edge_unsupported: TABLEDIT FORMAT cannot set one border edge: \
+                 its border fields reach all four edges of the cell. Use BORDER ALL \
+                 <ON|OFF|SINGLE|DOUBLE> [<spacing>] here, or TABLESTYLE ROW <DATA|TITLE|HEADER> \
+                 BORDER <TOP|RIGHT|BOTTOM|LEFT|ALL> ... for a single edge of a row's value set; \
+                 nothing was changed (edge `{}` was not applied)",
+                edge.to_uppercase()
+            ));
+        }
+    }
     for token in rest.split_whitespace() {
         let (field, reason) = if token.eq_ignore_ascii_case("LINETYPE")
             || token.eq_ignore_ascii_case("BORDERLINETYPE")
         {
             (
                 "LINETYPE",
-                "a cell border's line type has no field in this build's table model and the DXF \
-                 writer emits no per-cell border line type for a plain TABLE, so a stored value \
-                 could never be drawn or written back",
+                "the DXF group is an LTYPE handle (this build has no drawing-level linetype table \
+                 to resolve a name into a dash pattern), this writer emits no per-cell border line \
+                 type on the entity record, and the fragment expansion has no per-primitive dash \
+                 source, so a stored value could neither be drawn nor round-trip",
             )
         } else {
             continue;
@@ -350,7 +512,9 @@ pub fn tabledit_format_refusal(argument: &str) -> Option<String> {
         return Some(format!(
             "tabledit.format_unsupported: TABLEDIT FORMAT cannot set {field}: {reason}; use ALIGN \
              <TL|TC|TR|ML|MC|MR|BL|BC|BR>, ROTATION <degrees>, COLOR <aci|BYLAYER>, FILL <aci|NONE>, \
-             LINEWEIGHT <mm|BYLAYER> or BORDERCOLOR <aci|BYLAYER> instead; nothing was changed"
+             LINEWEIGHT <mm|BYLAYER>, BORDERCOLOR <aci|BYLAYER>, \
+             BORDER <ON|OFF|SINGLE|DOUBLE> [<spacing>] or MARGIN <l> <t> <r> <b>|INHERIT instead; \
+             nothing was changed"
         ));
     }
     None
@@ -406,8 +570,9 @@ pub fn parse_matchcell_argument(argument: &str) -> Option<TablePayload> {
 /// * `COLOR <aci|BYLAYER>` — the row's cell text colour; `FILL <aci|NONE>` — the
 ///   row's background fill; `LINEWEIGHT <mm|BYLAYER>` — the four border edges'
 ///   lineweight; `BORDERCOLOR <aci|BYLAYER>` — the four border edges' colour;
-/// * `BORDER <TOP|RIGHT|BOTTOM|LEFT|ALL> <ON|OFF|DOUBLE> [<spacing>]` — one edge
-///   (or all), visible/off or doubled with an optional spacing;
+/// * `BORDER <TOP|RIGHT|BOTTOM|LEFT|ALL> <ON|OFF|SINGLE|DOUBLE> [<spacing>]` —
+///   one edge (or all), visible/off, explicitly single (clears a stored
+///   double-line spacing) or doubled with an optional spacing;
 /// * `TITLE <ON|OFF>`, `HEADER <ON|OFF>` — the row suppression flags.
 ///
 /// A sign, a fraction where an integer belongs, an unknown field word, an
@@ -520,10 +685,15 @@ pub fn parse_tablestyle_argument(argument: &str) -> Option<TableStyleCommand> {
             let edge = parse_style_edge(edge_word)?;
             let state = *tokens.get(index)?;
             index += 1;
+            // `SINGLE` is the explicit "one line, no double-line spacing" state:
+            // it is the only way to clear a spacing a `DOUBLE` write stored, which
+            // is why the border type needs its own word rather than `ON`.
             let (visible, mut spacing) = if state.eq_ignore_ascii_case("ON") {
                 (true, None)
             } else if state.eq_ignore_ascii_case("OFF") {
                 (false, None)
+            } else if state.eq_ignore_ascii_case("SINGLE") {
+                (true, Some(0.0))
             } else if state.eq_ignore_ascii_case("DOUBLE") {
                 (true, None)
             } else {
@@ -536,6 +706,15 @@ pub fn parse_tablestyle_argument(argument: &str) -> Option<TableStyleCommand> {
                     if !is_tablestyle_field(token) {
                         spacing = Some(parse_non_negative_decimal(token)?);
                         index += 1;
+                    }
+                }
+            }
+            // A `SINGLE` write stores "single line" for that edge; a spacing on
+            // the same line would contradict it.
+            if state.eq_ignore_ascii_case("SINGLE") {
+                if let Some(token) = tokens.get(index) {
+                    if !is_tablestyle_field(token) {
+                        return None;
                     }
                 }
             }

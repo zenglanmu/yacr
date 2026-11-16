@@ -120,7 +120,7 @@ fn with_text_preserves_the_mask_style_width_and_attachment() {
     assert_eq!(after.override_mask(), before.override_mask());
     assert_eq!(after.style(), before.style());
     assert_eq!(after.style_name(), before.style_name());
-    assert_eq!(after.content(), MLeaderContent::Text);
+    assert_eq!(*after.content(), MLeaderContent::Text);
     assert_eq!(after.text().width, before.text().width);
     assert_eq!(after.text().location, before.text().location);
     assert_eq!(after.text().rotation, before.text().rotation);

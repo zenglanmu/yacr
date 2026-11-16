@@ -479,3 +479,147 @@ fn export_writes_a_switched_off_clip_as_a_disabled_boundary() {
     assert_eq!(clip.vertices, vec![[-2.0, -2.0], [2.0, 2.0]]);
     assert!(!clip.is_active());
 }
+
+// ---- clip depth (front/back distances) ----
+
+/// The 24 code-40 doubles ACAD writes for the two 4×3 transforms of the fixture
+/// INSERT at (10, 20): inverse block transform, then clip-bound transform.
+const DEPTH_MATRIX_GROUPS: &str = "\
+40\n1.0\n40\n0.0\n40\n0.0\n40\n-10.0\n40\n0.0\n40\n1.0\n40\n0.0\n40\n-20.0\n\
+40\n0.0\n40\n0.0\n40\n1.0\n40\n0.0\n\
+40\n1.0\n40\n0.0\n40\n0.0\n40\n10.0\n40\n0.0\n40\n1.0\n40\n0.0\n40\n20.0\n\
+40\n0.0\n40\n0.0\n40\n1.0\n40\n0.0\n";
+
+/// A literal `SPATIAL_FILTER` document in the group order ACAD writes, with the
+/// depth groups (`71`/`72`/`40`/`73`/`41`) supplied verbatim.
+fn acad_depth_document(depth_groups: &str) -> Vec<u8> {
+    let dxf = format!(
+        "\
+0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1015\n0\nENDSEC\n\
+0\nSECTION\n2\nBLOCKS\n\
+0\nBLOCK\n5\n20\n330\n1F\n8\n0\n2\nXBLK\n70\n0\n10\n0.0\n20\n0.0\n30\n0.0\n3\nXBLK\n\
+0\nLINE\n5\n21\n330\n20\n8\n0\n10\n0.0\n20\n0.0\n30\n0.0\n11\n1.0\n21\n1.0\n31\n0.0\n\
+0\nENDBLK\n5\n22\n330\n20\n8\n0\n\
+0\nENDSEC\n\
+0\nSECTION\n2\nENTITIES\n\
+0\nINSERT\n5\n30\n330\n1F\n8\n0\n2\nXBLK\n10\n10.0\n20\n20.0\n30\n0.0\n\
+102\n{{ACAD_XDICTIONARY\n360\n40\n102\n}}\n\
+0\nENDSEC\n\
+0\nSECTION\n2\nOBJECTS\n\
+0\nDICTIONARY\n5\n40\n330\n30\n100\nAcDbDictionary\n280\n0\n281\n1\n3\nACAD_FILTER\n350\n41\n\
+0\nDICTIONARY\n5\n41\n330\n40\n100\nAcDbDictionary\n280\n0\n281\n1\n3\nSPATIAL\n350\n42\n\
+0\nSPATIAL_FILTER\n5\n42\n330\n41\n100\nAcDbFilter\n100\nAcDbSpatialFilter\n\
+70\n4\n10\n8.0\n20\n18.0\n10\n12.0\n20\n18.0\n10\n12.0\n20\n22.0\n10\n8.0\n20\n22.0\n\
+210\n0.0\n220\n0.0\n230\n1.0\n11\n0.0\n21\n0.0\n31\n0.0\n\
+{depth_groups}\
+{DEPTH_MATRIX_GROUPS}\
+0\nENDSEC\n0\nEOF\n",
+        depth_groups = depth_groups,
+        DEPTH_MATRIX_GROUPS = DEPTH_MATRIX_GROUPS,
+    );
+    dxf.into_bytes()
+}
+
+/// Patches the fixture's `SPATIAL_FILTER`, as a source with those field values
+/// would have written it.
+fn with_filter_fields(
+    mut doc: acadrust::CadDocument,
+    front: Option<f64>,
+    back: Option<f64>,
+    normal: [f64; 3],
+) -> acadrust::CadDocument {
+    for object in doc.objects.values_mut() {
+        if let acadrust::objects::ObjectType::SpatialFilter(filter) = object {
+            filter.front_clip = front;
+            filter.back_clip = back;
+            filter.normal = acadrust::types::Vector3::new(normal[0], normal[1], normal[2]);
+        }
+    }
+    doc
+}
+
+fn has_code(codes: &[String], prefix: &str) -> bool {
+    codes.iter().any(|code| code.starts_with(prefix))
+}
+
+#[test]
+fn acad_written_depth_flags_and_distances_are_read() {
+    let drawing = import_bytes(acad_depth_document(
+        "71\n1\n72\n1\n40\n-1.5\n73\n1\n41\n2.5\n",
+    ));
+    let clip = model_insert_clip(&drawing).expect("the boundary is read");
+    assert_eq!(
+        clip.vertices,
+        vec![[-2.0, -2.0], [2.0, -2.0], [2.0, 2.0], [-2.0, 2.0]],
+        "the boundary still comes from the same transform"
+    );
+    assert_eq!(clip.front_clip, Some(-1.5), "group 40 under flag 72");
+    assert_eq!(clip.back_clip, Some(2.5), "group 41 under flag 73");
+    assert_eq!(clip.depth_bounds(), Some((-1.5, 2.5)));
+    assert!(
+        !has_code(&diagnostic_codes(&drawing), "import.xclip_depth_"),
+        "a storable band is not a declared loss: {:?}",
+        diagnostic_codes(&drawing)
+    );
+}
+
+#[test]
+fn a_one_sided_depth_flag_is_read_as_an_unbounded_side() {
+    // Only the front flag is set: the source carries no back distance at all, so
+    // the absent side must stay `None` (unbounded), never zero.
+    let drawing = import_bytes(acad_depth_document("71\n1\n72\n1\n40\n-2.0\n73\n0\n"));
+    let clip = model_insert_clip(&drawing).expect("the boundary is read");
+    assert_eq!(clip.front_clip, Some(-2.0));
+    assert_eq!(clip.back_clip, None);
+    assert_eq!(clip.depth_bounds(), Some((-2.0, f64::INFINITY)));
+}
+
+#[test]
+fn a_depth_filter_whose_normal_is_not_the_block_z_is_reported_by_name() {
+    let doc = with_filter_fields(
+        clipped_insert_document(
+            "W",
+            [10.0, 20.0],
+            Some((&[[8.0, 18.0], [12.0, 22.0]], true)),
+        ),
+        Some(-1.0),
+        Some(1.0),
+        [0.0, 0.0, -1.0],
+    );
+    let drawing = import_document(&doc);
+    let clip = model_insert_clip(&drawing).expect("the 2D boundary is still stored");
+    assert_eq!(
+        (clip.front_clip, clip.back_clip),
+        (None, None),
+        "the distances measure another axis, so they are not reinterpreted"
+    );
+    assert!(
+        has_code(&diagnostic_codes(&drawing), "import.xclip_depth_normal"),
+        "the loss is named: {:?}",
+        diagnostic_codes(&drawing)
+    );
+}
+
+#[test]
+fn a_backwards_depth_pair_is_reported_and_not_stored() {
+    // `front > back` names an empty z band: the model refuses it, so the import
+    // must say so and keep the 2D boundary rather than storing an impossible one.
+    let doc = with_filter_fields(
+        clipped_insert_document(
+            "W",
+            [10.0, 20.0],
+            Some((&[[8.0, 18.0], [12.0, 22.0]], true)),
+        ),
+        Some(5.0),
+        Some(1.0),
+        [0.0, 0.0, 1.0],
+    );
+    let drawing = import_document(&doc);
+    let clip = model_insert_clip(&drawing).expect("the 2D boundary is still stored");
+    assert_eq!((clip.front_clip, clip.back_clip), (None, None));
+    assert!(
+        has_code(&diagnostic_codes(&drawing), "import.xclip_depth_invalid"),
+        "the loss is named: {:?}",
+        diagnostic_codes(&drawing)
+    );
+}

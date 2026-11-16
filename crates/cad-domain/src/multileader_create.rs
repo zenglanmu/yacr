@@ -9,9 +9,10 @@
 
 use crate::dimension_synthesis::{is_finite_point, sub};
 use crate::multileader::{
-    length3, MLeaderContent, MLeaderCreateOptions, MLeaderLine, MLeaderPathType, MLeaderReserved,
-    MLeaderRoot, MLeaderStyleValues, MLeaderText, MultiLeaderGeometry, MultiLeaderParts,
-    PlaneFrame, CREATED_TEXT_ATTACHMENT_POINT,
+    length3, MLeaderBlockContent, MLeaderContent, MLeaderCreateContent, MLeaderCreateOptions,
+    MLeaderLine, MLeaderPathType, MLeaderReserved, MLeaderRoot, MLeaderStyleValues, MLeaderText,
+    MLeaderToleranceContent, MultiLeaderGeometry, MultiLeaderParts, PlaneFrame,
+    CREATED_TEXT_ATTACHMENT_POINT,
 };
 use crate::{CadError, CadResult, Point3};
 
@@ -103,6 +104,47 @@ impl MultiLeaderGeometry {
         text: String,
         options: MLeaderCreateOptions,
     ) -> CadResult<Self> {
+        Self::created_with_content(
+            style,
+            style_name,
+            style_left_attachment,
+            arrow,
+            landing,
+            MLeaderCreateContent::Text(text),
+            options,
+        )
+    }
+
+    /// [`Self::created_with_options`] with an explicit annotation **content
+    /// kind** (block / MText / tolerance).
+    ///
+    /// [`MLeaderCreateContent::Text`] is the pre-existing rule, byte for byte: an
+    /// empty string creates the content-less leader and a non-empty one MText
+    /// content. The other two kinds are the typed `MLEADER CONTENT …` options:
+    ///
+    /// * **block** — the leader's content is the resolved block placed at the
+    ///   landing point with unit scale and no rotation
+    ///   ([`MLeaderBlockContent::placed`]). The blocker resolution happens in the
+    ///   command layer, which owns the drawing's block table; the domain only
+    ///   stores the identity it is given.
+    /// * **tolerance** — the leader's content is a feature-control frame whose
+    ///   string is the typed `|`-separated text and whose cell height is the
+    ///   resolved style's text height (the `TOLERANCE` command's own rule is the
+    ///   session `textHeight`; a created leader has no session parameter channel,
+    ///   so the style is the one authority).
+    ///
+    /// Refusals beyond [`Self::created`]'s (all named, nothing written):
+    /// `mleader.block_content_invalid`, `mleader.tolerance_text_required`,
+    /// `mleader.tolerance_height`.
+    pub fn created_with_content(
+        style: MLeaderStyleValues,
+        style_name: String,
+        style_left_attachment: i16,
+        arrow: Point3,
+        landing: Point3,
+        content: MLeaderCreateContent,
+        options: MLeaderCreateOptions,
+    ) -> CadResult<Self> {
         if !is_finite_point(arrow) || !is_finite_point(landing) {
             return Err(CadError::InvalidInput(
                 "mleader.points_not_finite: the arrow and landing points must be finite".into(),
@@ -116,12 +158,43 @@ impl MultiLeaderGeometry {
         }
         // An empty text is a real AutoCAD case: the leader keeps its arrow, line
         // and dogleg and stores no annotation. The content kind is derived from
-        // the typed text, and the normalised empty string is stored so a reload
-        // reads the same content kind back.
-        let (content, text) = if text.trim().is_empty() {
-            (MLeaderContent::None, String::new())
-        } else {
-            (MLeaderContent::Text, text)
+        // the typed text for `MLeaderCreateContent::Text`, and the normalised
+        // empty string is stored so a reload reads the same content kind back.
+        // The other two kinds carry their own payload and never store an
+        // annotation string.
+        let (content, text) = match content {
+            MLeaderCreateContent::Text(text) => {
+                if text.trim().is_empty() {
+                    (MLeaderContent::None, String::new())
+                } else {
+                    (MLeaderContent::Text, text)
+                }
+            }
+            MLeaderCreateContent::Block { block, name } => (
+                MLeaderContent::Block(MLeaderBlockContent::placed(block, name, landing)),
+                String::new(),
+            ),
+            MLeaderCreateContent::Tolerance { text } => {
+                // The frame's height is the resolved style's text height (a
+                // created leader has no session height channel). A height that
+                // cannot size a frame is the tolerance's own named refusal rather
+                // than the generic style one, so the caller learns which value
+                // was unusable.
+                if !style.text_height.is_finite() || style.text_height <= 0.0 {
+                    return Err(CadError::InvalidInput(format!(
+                        "mleader.tolerance_height: the tolerance frame height (the resolved \
+                         style text height) must be finite and positive, got {}",
+                        style.text_height
+                    )));
+                }
+                (
+                    MLeaderContent::Tolerance(MLeaderToleranceContent {
+                        text,
+                        height: style.text_height,
+                    }),
+                    String::new(),
+                )
+            }
         };
         if style.path_type != MLeaderPathType::StraightLineSegments {
             return Err(CadError::Unsupported(

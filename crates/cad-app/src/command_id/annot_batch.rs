@@ -95,10 +95,15 @@
 //! Refusals happen before the transaction opens: `qleader.payload` /
 //! `leader.payload`, the two coordinate-pair grammars (an unparsable pair is
 //! refused by the session before IPC), and every refusal the MLEADER creation
-//! path already names (`tool.text_too_long`, `mleader.content_unsupported`,
-//! `mleader.style_missing`, a non-finite point, a landing point too close to the
-//! dogleg, a missing active layer). One entity / one transaction / one undo step.
-//! Work-only.
+//! path already names (`tool.text_too_long`, `mleader.style_missing`, a non-finite
+//! point, a landing point too close to the dogleg, a missing active layer). One
+//! entity / one transaction / one undo step. Work-only.
+//!
+//! `QLEADER`/`LEADER` always create the **text** content kind (MText, or a
+//! content-less leader for an empty text) because their payload has no `CONTENT`
+//! field; the block and tolerance kinds are reached through `MLEADER CONTENT …`
+//! ([`crate::app_drawing::mleader`]), which writes the same `MULTILEADER` entity
+//! (entity `172` `1`/`2`/`3`, style `170`).
 //!
 //! # `TEXTFIT`
 //!

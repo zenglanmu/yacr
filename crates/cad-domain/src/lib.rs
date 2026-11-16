@@ -12,8 +12,11 @@ mod multileader;
 mod multileader_angle;
 // The MULTILEADER creation path (ADR 0019 F.2), split out for the code-size gate.
 mod multileader_create;
+// The MULTILEADER annotation content kinds and their payloads (block / MText /
+// tolerance), split out for the code-size gate; `multileader` re-exports them.
+mod multileader_content;
 pub mod table_entity;
-pub use block_clip::BlockClip;
+pub use block_clip::{validate_clip_depth, BlockClip, ClipDepthError};
 pub use hatch_entity::*;
 pub use multileader::*;
 pub use multileader_angle::*;

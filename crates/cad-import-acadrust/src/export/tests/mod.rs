@@ -26,6 +26,7 @@ mod entities;
 mod hatch;
 mod header_points_scales;
 mod insert_blocks;
+mod insert_depth;
 mod layers;
 mod linetype_scale;
 mod linetype_table;

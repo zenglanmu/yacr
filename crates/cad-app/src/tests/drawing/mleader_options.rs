@@ -54,6 +54,7 @@ fn payload(arrow: Point3, landing: Point3, text: &str) -> CommandPayload {
         dogleg_angle: None,
         attachment: None,
         text_angle: None,
+        content: None,
     }
 }
 
