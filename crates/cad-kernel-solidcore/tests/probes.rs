@@ -13,8 +13,9 @@ use std::time::{Duration, Instant};
 
 use cad_domain::{BrepSurface, CadError};
 use cad_kernel_adapter::{
-    execute_solid, tessellate_exchange, BooleanOp, PrimitiveSpec, SolidExchange, SolidModeler,
-    SolidOperation, SolidRequest, TessellationBudget, TessellationOutcome, TessellationTolerance,
+    execute_solid, tessellate_exchange, BooleanOp, PrimitiveSpec, SolidEdgeSelector, SolidExchange,
+    SolidModeler, SolidOperation, SolidRequest, TessellationBudget, TessellationOutcome,
+    TessellationTolerance,
 };
 use cad_kernel_solidcore::SolidCoreModeler;
 
@@ -392,5 +393,64 @@ fn probe_mass_survives_scale_and_offset_sweeps() {
         (mass.centroid.x - (offset + 0.5)).abs() < 1e-6,
         "centroid {:?}",
         mass.centroid
+    );
+}
+
+#[test]
+fn probe_chamfer_then_union_then_mass_keeps_the_body_liftable() {
+    let modeler = SolidCoreModeler::new();
+    let unit = body(execute(
+        &modeler,
+        SolidOperation::Primitive {
+            spec: box_spec(p(0.0, 0.0, 0.0), 1.0, 1.0, 1.0),
+        },
+    ));
+    // Chamfer the (0,0,0)-(0,1,0) edge at 0.1: volume 1 - 0.1^2/2.
+    let chamfered = body(execute(
+        &modeler,
+        SolidOperation::Chamfer {
+            brep: &unit,
+            selector: SolidEdgeSelector::NearestToPoint(p(0.0, 0.5, 0.0)),
+            distance: 0.1,
+            second: None,
+        },
+    ));
+    let chamfered_volume = volume(&modeler, &chamfered);
+    assert!(
+        (chamfered_volume - 0.995).abs() < 1e-6,
+        "chamfered volume {chamfered_volume}"
+    );
+
+    // The chamfered body is a normal planar operand: a boolean must accept it.
+    let block = body(execute(
+        &modeler,
+        SolidOperation::Primitive {
+            spec: box_spec(p(0.5, 0.0, 0.0), 1.0, 1.0, 1.0),
+        },
+    ));
+    let union = body(execute(
+        &modeler,
+        SolidOperation::Boolean {
+            op: BooleanOp::Union,
+            left: &chamfered,
+            right: &block,
+        },
+    ));
+    assert_eq!(union.shells.len(), 1, "the union overlaps into one shell");
+
+    // 0.995 + 1 - 0.5 (the shared x in [0.5, 1]) = 1.495.
+    let mass = *execute(
+        &modeler,
+        SolidOperation::MassProperties {
+            brep: &union,
+            density: 1.0,
+        },
+    )
+    .mass()
+    .expect("the union of a chamfered body lifts again");
+    assert!(
+        (mass.volume - 1.495).abs() < 1e-6,
+        "union volume {}",
+        mass.volume
     );
 }

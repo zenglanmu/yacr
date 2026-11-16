@@ -61,16 +61,18 @@ impl ModelerPrimitives {
 
 /// The full capability declaration of a modeler.
 ///
-/// `fillet`, `shell` and `nurbs` are phase P2 (ADR-0036 D7); a `false` flag
-/// there means [`crate::SolidOutcome::Unsupported`] today, never a degraded
-/// approximation. `mass_properties` covers volume, surface area, centroid and
-/// inertia at a **requested** relative accuracy (see
+/// `chamfer` is the P2.0 straight-chamfer capability (planar bodies only at
+/// this pin); `fillet`, `shell` and `nurbs` are the rest of phase P2
+/// (ADR-0036 D7). A `false` flag means [`crate::SolidOutcome::Unsupported`]
+/// today, never a degraded approximation. `mass_properties` covers volume,
+/// surface area, centroid and inertia at a **requested** relative accuracy (see
 /// [`crate::MassAccuracy`]): the estimate is not a proved error bound.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ModelerCapabilities {
     pub primitives: ModelerPrimitives,
     pub booleans: bool,
     pub mass_properties: bool,
+    pub chamfer: bool,
     pub fillet: bool,
     pub shell: bool,
     pub nurbs: bool,
@@ -82,7 +84,7 @@ impl ModelerCapabilities {
     /// This is a cheap probe: it answers per operation *family* and per
     /// primitive kind, not whether a specific operand is representable. Refusing
     /// an individual operand (an unsupported surface, a non-identity placement,
-    /// a non-similarity transform) happens in
+    /// a non-similarity transform, a curved body at a chamfer) happens in
     /// [`crate::SolidModeler::execute`] and is reported as
     /// [`crate::SolidOutcome::Unsupported`] with a stable reason code.
     ///
@@ -93,6 +95,7 @@ impl ModelerCapabilities {
         match operation {
             SolidOperation::Primitive { spec } => self.primitives.supports(spec.kind()),
             SolidOperation::Boolean { .. } => self.booleans,
+            SolidOperation::Chamfer { .. } => self.chamfer,
             SolidOperation::Transform { .. } => true,
             SolidOperation::MassProperties { .. } => self.mass_properties,
         }

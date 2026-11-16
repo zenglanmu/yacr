@@ -22,6 +22,78 @@
 （Linux 原生 Wayland、Windows、macOS、Android）由 native 会话持有 `cad-db`，`dom-canvas`
 （X11/XWayland、Web）由 wasm 会话持有。细节与逐平台证据边界见 `AGENTS.md` 平台表。
 
+**3D 实体 P2.0：平面体单边直线倒角模型器能力（2026-11-17）**
+
+- **范围**：只落**模型器能力**，**不接 CHAMFEREDGE 命令**（该命令仍是有名字的拒绝
+  `chamferedge.unsupported: no 3D edge chamfer model`，用户不可达）。无 NURBS/曲面 lift、
+  无圆角、无 SHELL、无 `SURFACE` 家族改动。
+- **接缝（`cad-kernel-adapter`）**：`SolidOperation::Chamfer { brep, selector: SolidEdgeSelector,
+  distance, second: Option<f64> }`、`SolidEdgeSelector::NearestToPoint(Point3)`、
+  `SolidOperationFamily::Chamfer`（`"chamfer"`）、`ModelerCapabilities.chamfer`（`Default` 为
+  `false`）与 `MAX_CHAMFER_DISTANCE = 1e6`。预检：operand 非空；`distance` 与可选 `second`
+  必须有限、`> 0` 且 `<= 1e6`（`solid.invalid_dimension`）；selector 点必须有限
+  （`solid.invalid_point`）。
+- **模型器（`cad-kernel-solidcore`）**：新 `src/ops/chamfer.rs`。lift 与布尔同门
+  （`BrepData → record → Body::from_record(.., false)`，平面体才通过，曲面仍是
+  `solid.lift_requires_planar`）；边由**最近 `Line` 边**解析（点段距离，容差
+  `max(1e-9, 1e-3 × 包围盒对角线)`，超差 → `solid.edge_not_found`；同距按记录下标）；
+  `along` 面取 `record.edges[i].uses[0].face`（`list_uses` 按面下标→环→位置追加）；
+  调用 `solidcore_ops::chamfer_sides_ordered(&body, &order, &[edge], &[face], distance,
+  second)`，`second` 缺省为同一距离（对称 45°），非对称时被倒角棱柱截面以两段退距为直角边。
+  取消看门狗从 `boolean.rs` 抽成 `ops::watched`（`CancelToken` + scoped watcher + panic-safe
+  `StopGuard`，50 ms 检测粒度），布尔与倒角共用。错误归属：`Cancelled → Err(Cancelled)`；
+  `Internal → Failed(solid.kernel_panic)`；`Empty → Failed(solid.empty_result)`；
+  `UnsureRegion → Failed(solid.unsure_region)`；`Unsupported/Unported →
+  Unsupported(solid.unsupported)`；几何拒绝（`NoRoom`/`TooLarge`/`NoEffect`/`Refused`/
+  `Status`/blend 族）→ `Unsupported(solid.chamfer_failed)`；内核完整性类（`Record`/
+  `NotSolid`/`NotExact`/`Degenerate`/`Argument`，以及无法在本仓命名的 non-exhaustive
+  `NotSolidBecause` 与 `Exception`/`Invariant`）→ `Failed(solid.kernel_failed)`，绝不把
+  内核故障说成能力缺失。产物 `Body::to_record() → from_record → BrepData`；`to_record`
+  失败走通用的 `from_ops`（→ `Failed(solid.kernel_failed)`）；空面 →
+  `Failed(solid.empty_result)`，多壳 → `Unsupported(solid.lift_unsupported)`。
+- **能力边界（实测）**：凸 **90° 平面边**——单位 box 底边与 wedge（直角三角棱柱）的底/背面交线；
+  对称与非对称（`distance=0.1, second=0.2`）都跑过真实内核并对照闭式体积。**凹边、非 90° 二面角
+  未测**，不据此声明。
+- **一个必须的记录事实**：上游把倒角的直线边写成**共线三次 Bézier**（knots `[t0×4, t1×4]`，
+  4 个共线控制点；倒角截面边 `interval` 长度 0.1414…）。原位 `from_record` 只认 `Line`/整圆，
+  会把整个倒角产物拒成 `solid.lift_unsupported`。修法（`record/curve.rs::straight_spline`）：
+  只有**全部控制点落在弦上（边容差内）且曲线端点就是该边顶点**时才映射为 `Line`（几何上精确，
+  不是 NURBS/曲面 lift），其它样条仍拒绝；新增两条单元测试（共线→Line、离弦→拒绝）。
+- **测试证据（Linux，本轮实际运行，真实固定 revision 内核）**：
+  - `cargo test -p cad-kernel-adapter --locked` → **46 passed / 0 failed**（含
+    `chamfer_validation_rejects_bad_distances_and_selectors`：0/负/NaN/∞/1e6+1 距离、非法
+    `second`、非有限选择点、空 operand；能力探针里 `chamfer` 默认 false、置 true 才 true，
+    且不连带 fillet/shell/nurbs）。
+  - `cargo test -p cad-kernel-solidcore --locked` → lib **35 passed**、`tests/chain.rs`
+    **23 passed**、`tests/probes.rs` **5 passed**、doc-tests 0，全 0 failed。新增：
+    `chamfered_unit_edge_removes_its_triangular_prism`（单位立方体一边、d=0.1 →
+    体积 `1 − 0.1²/2 = 0.995`（闭式，误差 <1e-6）、结果全平面、单壳、`tessellate_exchange`
+    水密、再 lift 质量属性）；`chamfer_with_an_asymmetric_second_distance_removes_its_prism`
+    （`distance=0.1, second=0.2` → `1 − 0.1·0.2/2 = 0.99`，闭式，证明 `second` 真的作用在另一面）；
+    `chamfer_on_a_wedge_base_edge_removes_its_prism`（wedge 底/背面凸 90° 交线 → 
+    `2·3·4/2 − 0.1²/2·3 = 11.985`）；`chamfer_refuses_a_point_far_from_every_edge`
+    （`solid.edge_not_found`）；`chamfer_refuses_bad_sizes_and_curved_bodies_and_honours_cancellation`
+    （0/负距离 → `InvalidInput`、cylinder → `solid.lift_requires_planar`、预取消 → `Cancelled`）；
+    `chamfer_refusals_name_the_chamfer_family`（2.0 距离 → `Unsupported` 且码就是
+    `solid.chamfer_failed`）；`probe_chamfer_then_union_then_mass_keeps_the_body_liftable`
+    （0.995 → UNION → 1.495）；`error` 单元测试同时覆盖两类归属
+    （`chamfer_geometric_refusals_are_unsupported_not_plausible_bodies`、
+    `chamfer_integrity_failures_are_failed_not_capability_refusals`）。
+  - `cargo clippy -p cad-kernel-adapter -p cad-kernel-solidcore --all-targets --locked -- -D warnings`
+    → rc=0；`cargo check --workspace --lib --target wasm32-unknown-unknown --locked` → rc=0
+    （`cad-kernel-solidcore` 整体 `cfg(not(wasm32))`，未进入 wasm 构建）；
+    `cargo fmt --all -- --check` → rc=0；`python3 scripts/check-file-size.py` → rc=0
+    （2293 files，≤1000 行）；`python3 scripts/check-architecture.py` → rc=0（38 packages）；
+    另跑 `cargo check -p cad-app --tests --locked` → rc=0（仅给 6 处测试用
+    `ModelerCapabilities` 字面量补 `chamfer: false`，未改行为）。
+- **NOT RUN**：全量 `cargo test --workspace --locked`；全量发布门禁；任何 GPU/像素/性能结论；
+  非 Linux 载体（Windows/macOS/Android/Web 与 Linux `dom-canvas`）的运行时行为；真实用户
+  命令路径（CHAMFEREDGE 未接线，无法从 UI/CLI 触发倒角）。
+- **边界**：`ModelerCapabilities.chamfer = true` 只对**平面单闭合壳**体成立，曲面操作数仍在
+  每次调用被拒；P2.0 不改变 `fillet`/`shell`/`nurbs` 的 `false`，也不改变 `entity_types`
+  （仍 `3DSOLID`/`BODY`）。非倒角边的选择容差是启发式（1e-3 × 对角线），不构成 CAD 级
+  吸附语义。
+
 **3D 实体 P3a：精确平面体写出 DXF `3DSOLID`（ACIS SAT 文本，2026-11-17）**
 
 - **写出器**：新 `crates/cad-import-acadrust/src/export/acis.rs`（唯一 ACIS 写出路径）。`BrepData`

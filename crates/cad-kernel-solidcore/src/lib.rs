@@ -26,6 +26,10 @@
 //!   accepted;
 //! - `UNION`/`SUBTRACT`/`INTERSECT` of bodies whose faces are all planes with
 //!   `Line` boundary curves;
+//! - a straight **chamfer on one edge** of such a planar body (P2.0,
+//!   [`cad_kernel_adapter::SolidOperation::Chamfer`]): the product is still
+//!   all-planar, so it re-lifts; NURBS, fillets, shells and the `SURFACE` family
+//!   remain unimplemented and are refused, not approximated;
 //! - mass properties of the same planar bodies;
 //! - similarity transforms of **any** body this module can describe, including
 //!   the curved primitives below: the map is baked into the neutral B-rep
@@ -38,19 +42,19 @@
 //! [`cad_domain::BrepSurface`]/[`cad_domain::BrepCurve`] variants.
 //!
 //! **Refused, never approximated**: any operation that has to *lift* a
-//! `BrepData` back into the kernel — a boolean or mass-properties request — on a
-//! body with a non-planar face or a non-`Line` boundary curve. Those return
-//! [`cad_kernel_adapter::SolidOutcome::Unsupported`] with the stable reason
-//! [`LIFT_REQUIRES_PLANAR`]. Lifting curved shells losslessly needs NURBS
-//! surfaces *and* their pcurves in the neutral model, which is phase P2.
+//! `BrepData` back into the kernel — a boolean, mass-properties or chamfer
+//! request — on a body with a non-planar face or a non-`Line` boundary curve.
+//! Those return [`cad_kernel_adapter::SolidOutcome::Unsupported`] with the stable
+//! reason [`LIFT_REQUIRES_PLANAR`]. Lifting curved shells losslessly needs NURBS
+//! surfaces *and* their pcurves in the neutral model, which is phase P2.1.
 //!
 //! # Family-level capabilities, per-operand refusals
 //!
-//! [`cad_kernel_adapter::ModelerCapabilities::booleans`] and `mass_properties`
-//! being `true` means "this family is implemented", **not** "every operand can be
-//! evaluated": each execution still re-lifts its operands and may refuse. The
-//! planar lift accepts exactly **one closed, consistently oriented shell**
-//! (`[LIFT_UNSUPPORTED]` otherwise):
+//! [`cad_kernel_adapter::ModelerCapabilities::booleans`], `mass_properties` and
+//! `chamfer` being `true` means "this family is implemented", **not** "every
+//! operand can be evaluated": each execution still re-lifts its operands and may
+//! refuse. The planar lift accepts exactly **one closed, consistently oriented
+//! shell** (`[LIFT_UNSUPPORTED]` otherwise):
 //!
 //! - a boolean result with a **void region (a cavity)** is refused **at the
 //!   boolean itself** (the kernel stores a cavity as a void region, which this
@@ -124,8 +128,9 @@ pub mod polyhedra;
 mod record;
 
 pub use error::{
-    EMPTY_RESULT, KERNEL_FAILED, KERNEL_PANIC, LIFT_REQUIRES_PLANAR, LIFT_UNSUPPORTED,
-    NONUNIFORM_TRANSFORM, PLACEMENT_NOT_SUPPORTED, UNSURE_REGION,
+    CHAMFER_FAILED, EDGE_NOT_FOUND, EMPTY_RESULT, KERNEL_FAILED, KERNEL_PANIC,
+    LIFT_REQUIRES_PLANAR, LIFT_UNSUPPORTED, NONUNIFORM_TRANSFORM, PLACEMENT_NOT_SUPPORTED,
+    UNSURE_REGION,
 };
 pub use modeler::{SolidCoreModeler, TYPE_KEY, UPSTREAM_REVISION, UPSTREAM_VERSION};
 pub use polyhedra::{box_brep, pyramid_brep, wedge_brep};

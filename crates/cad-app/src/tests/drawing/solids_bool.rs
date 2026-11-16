@@ -36,6 +36,7 @@ impl SolidModeler for FakeModeler {
             primitives: ModelerPrimitives::all(),
             booleans: true,
             mass_properties: false,
+            chamfer: false,
             fillet: false,
             shell: false,
             nurbs: false,

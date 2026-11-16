@@ -38,7 +38,8 @@ pub const KERNEL_CANCELLED: &str = "kernel.cancelled";
 // tessellate, and vice versa.
 // ---------------------------------------------------------------------------
 
-/// A primitive length/radius was non-finite or not strictly positive.
+/// A primitive length/radius or a chamfer set-back was non-finite,
+/// non-positive, or above the seam's limit.
 pub const SOLID_INVALID_DIMENSION: &str = "solid.invalid_dimension";
 /// A primitive origin/base centre coordinate was not finite.
 pub const SOLID_INVALID_POINT: &str = "solid.invalid_point";

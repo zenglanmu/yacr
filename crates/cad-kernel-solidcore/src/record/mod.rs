@@ -53,6 +53,7 @@ mod units;
 
 pub(crate) use from_record::from_record;
 pub(crate) use to_record::{to_record, DEFAULT_TOLERANCE};
+pub(crate) use units::point;
 
 use cad_domain::{
     BrepCurve, BrepData, BrepFace, BrepLoop, BrepPlacement, BrepShell, BrepSurface, Point3,

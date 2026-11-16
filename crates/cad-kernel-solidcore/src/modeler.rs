@@ -45,16 +45,18 @@ impl SolidCoreModeler {
 
 /// The capability declaration of this build.
 ///
-/// `booleans` and `mass_properties` are `true` for **planar** operands; a curved
-/// operand is still refused at execution time with
-/// [`crate::LIFT_REQUIRES_PLANAR`] (curved lift is P2). `fillet`, `shell` and
-/// `nurbs` are `false`: this build links no such operation, so they must not be
-/// claimed.
+/// `booleans`, `mass_properties` and `chamfer` are `true` for **planar**
+/// operands; a curved operand is still refused at execution time with
+/// [`crate::LIFT_REQUIRES_PLANAR`] (curved lift is P2.1). `chamfer` is the
+/// straight-section, one-edge capability of P2.0 — it does not imply a fillet,
+/// a shell or a NURBS body. `fillet`, `shell` and `nurbs` are `false`: this
+/// build links no such operation, so they must not be claimed.
 fn declared_capabilities() -> ModelerCapabilities {
     ModelerCapabilities {
         primitives: ModelerPrimitives::all(),
         booleans: true,
         mass_properties: true,
+        chamfer: true,
         fillet: false,
         shell: false,
         nurbs: false,
@@ -87,6 +89,7 @@ impl SolidModeler for SolidCoreModeler {
                 "boolean.union".into(),
                 "boolean.subtract".into(),
                 "boolean.intersect".into(),
+                "chamfer.sides".into(),
                 "mass_properties".into(),
                 "transform.similarity".into(),
                 format!("solidcore.version={UPSTREAM_VERSION}"),
@@ -119,6 +122,12 @@ impl SolidModeler for SolidCoreModeler {
                 SolidOperation::Boolean { op, left, right } => {
                     ops::boolean::boolean(*op, left, right, cancelled)?
                 }
+                SolidOperation::Chamfer {
+                    brep,
+                    selector,
+                    distance,
+                    second,
+                } => ops::chamfer::chamfer(brep, *selector, *distance, *second, cancelled)?,
                 SolidOperation::Transform { brep, transform } => {
                     ops::transform::transform(brep, transform)?
                 }

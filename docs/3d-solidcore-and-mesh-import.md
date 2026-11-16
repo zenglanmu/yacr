@@ -48,7 +48,7 @@
 **2026-11-17 更新（命令侧）**：`MASSPROP` 已对精确 `Body3d{Solid, Exact}` 接线（C3a，见 §4.3）；
 `face_sources` 已由 `BrepTessellator` 写入 `brep:face:<shell>/<face>`（C3b）；`VSCURRENT` 已是
 会话级 3D body 视觉样式（C3c，默认 SHADED，与 AutoCAD 的 2D-wireframe 初始值有意偏离）；
-**剩余 C3 项：无**。曲面 lift/曲面布尔、圆角/倒角/抽壳仍是 P2。
+**剩余 C3 项：无**。**P2.0** 单边直线倒角已作为**模型器能力**落地（`SolidOperation::Chamfer`，仅平面体，CHAMFEREDGE 命令仍未接线）；曲面 lift/曲面布尔（P2.1）、圆角/抽壳仍是 P2。
 
 ---
 
@@ -63,7 +63,7 @@ solidcore 1.0.1 的公开 API 覆盖（详见 ADR-0036 与 docs.rs）：
 | 基本体 | `create_box`/`create_sphere`/`create_cylinder`/`create_cone`/`create_torus`/`create_pyramid` | 全部拒绝 |
 | 拉伸/旋转/扫掠 | `sweep` 模块、`primitive_creation` | 全部拒绝 |
 | 布尔 | `boolean_union`/`boolean_difference`/`boolean_intersection`/`boolean_merge`/`non_manifold_boolean` | 无模型 |
-| 圆角/倒角 | `fillet_edges`/`circular_fillet`/`variable_radius_fillet`/`chamfer_fillet`/`remove_fillet` | 只有 2D 线线 |
+| 圆角/倒角 | `fillet_edges`/`circular_fillet`/`variable_radius_fillet`/`chamfer_fillet`/`remove_fillet` | 2D 线线；P2.0 **平面体单边直线倒角**（`chamfer_sides_ordered`，无命令接线）；圆角无 |
 | 抽壳/偏置 | `api_shell_brep_full`/`offset_brep` | 无 |
 | 精确质量属性 | `brep_mass_properties`/`brep_volume`/`brep_area` | body 显式拒绝 |
 | 拓扑遍历 | `Brep::{faces,edges,vertices,loops,shells,regions}` + 公开字段 | 只有中性子集 |
@@ -147,11 +147,13 @@ solidcore 1.0.1 的公开 API 覆盖（详见 ADR-0036 与 docs.rs）：
   **阶段 C3（2026-11-17 完成）**：**C3a** `MASSPROP` 已对精确 `Body3d{Solid, Exact}` 接线
   （注入模型器同步测量，density 1.0、请求相对精度 1e-6、显示网格不参与）；**C3b**
   `face_sources` 已由 `BrepTessellator` 写入 `brep:face:<shell>/<face>`；**C3c** `VSCURRENT`
-  已是会话级 3D body 视觉样式（默认 SHADED）。**剩余 C3 项：无**；曲面 lift 仍是 **P2**。
-  **仍 NOT IMPLEMENTED**：AutoCAD 的交互式尺寸提示、曲面 lift/曲面布尔（P2）、圆角/倒角/抽壳（P2）。
+  已是会话级 3D body 视觉样式（默认 SHADED）。**剩余 C3 项：无**；曲面 lift 仍是 **P2.1**。
+  **P2.0（2026-11-17）**：平面体单边直线倒角是模型器能力（Linux 契约/单元），**没有命令接线**。
+  **仍 NOT IMPLEMENTED**：AutoCAD 的交互式尺寸提示、曲面 lift/曲面布尔（P2.1）、
+  圆角/抽壳/SURFACE 家族（P2）、**CHAMFEREDGE 命令**。
   证据只有 Linux 契约/单元（真实内核，无 mock）；其它载体 NOT VERIFIED。详见 ADR-0036 §7。
 - **拒绝边界（能力是 family 级，不是逐操作数）**：`capabilities().booleans` /
-  `mass_properties` 为 true 只表示"这一族有实现"，每次调用仍可能对单个操作数返回
+  `mass_properties` / `chamfer` 为 true 只表示"这一族有实现"，每次调用仍可能对单个操作数返回
   `Unsupported`，调用方必须处理：
   - 曲面 body（非 `Plane` 面或非 `Line` 边）→ `solid.lift_requires_planar`；
   - **结构不一致**（开放 sheet、每条边只用一次、反向面/重复面、环有缺口）→
@@ -517,15 +519,17 @@ StepImporter::import
 | P-STEP-1b | NURBS/椭圆/部分圆弧/pcurve | 依赖 P2；逐面计数，禁止无样本证据的"全部精确" |
 | P-STEP-2 | STEP 装配改为 `BlockDefinition` + `Insert` | 同一 body 两次实例 → 两个 `Insert`，不是两份网格 |
 | P1 | `cad-kernel-solidcore` + `SolidModeler` + 基本体/布尔/质量属性（**模型器与命令侧 C1/C2/C3 均已实现 2026-11-17**） | 命令侧：C1 创建、C2 后台布尔、C3a `MASSPROP`、C3b `face_sources`、C3c `VSCURRENT`（Linux 契约/单元，真实内核；body 含 `cad-cli-tools` BOX/CYLINDER 用例）；曲面 lift/曲面布尔仍 P2 |
-| P2 | NURBS 面、圆角/倒角/抽壳、SURFACE 家族 | 逐命令契约 + 能力表；圆角产物是否为有理 NURBS 必须实测 |
+| P2.0 | **已实现（2026-11-17，仅模型器能力）**：平面体上的单边直线倒角（`SolidOperation::Chamfer`；边由最近点选、两距离、对称 45° 缺省；产物仍全平面并可再 lift） | Linux 契约/单元（真实内核）：单位立方体一边 0.1 倒角 → 体积 `1 - 0.1²/2`（闭式）、全平面、`tessellate_exchange` 水密、再 lift 质量属性；非对称 `distance=0.1, second=0.2` → `1 - 0.1·0.2/2 = 0.99`；wedge 底/背面凸 90° 交线 → `L·W·H/2 - d²/2·W = 11.985`；倒角→UNION→质量属性链；拒绝：离边过远 `solid.edge_not_found`、距离 0/负 InvalidInput、曲面 `solid.lift_requires_planar`、预取消 Cancelled；几何拒绝 `solid.chamfer_failed` vs 内核完整性 `solid.kernel_failed`。**凹边/非 90° 二面角未测**；**CHAMFEREDGE 命令未接线（仍是具名拒绝）**；GPU/像素/非 Linux **NOT VERIFIED** |
+| P2 | NURBS 面（P2.1）、圆角、抽壳、SURFACE 家族（**未实现**） | 逐命令契约 + 能力表；圆角产物是否为有理 NURBS 必须实测 |
 | P3 | ACIS SAT/SAB 写出 | DXF/DWG 往返样本；否则不声称往返 |
 
 **证据边界**：
 
 - solidcore 的**平面体**路径已在 `cad-kernel-solidcore` 的 Linux 测试进程里真实执行
-  （真实内核，create → boolean → mass properties；体积/面积/质心/惯性用闭式值断言），
-  这是**有界契约/单元证据**，不是其它载体/GPU/性能结论。曲面 lift、圆角/倒角/抽壳、
-  NURBS、SURFACE 家族与命令接线均**未实现**；其行为仍是 **NOT VERIFIED**。
+  （真实内核，create → boolean → chamfer → mass properties；体积/面积/质心/惯性用闭式值断言），
+  这是**有界契约/单元证据**，不是其它载体/GPU/性能结论。曲面 lift（P2.1）、圆角、抽壳、
+  NURBS、SURFACE 家族与**所有命令接线**（含 CHAMFEREDGE）均**未实现**；其行为仍是
+  **NOT VERIFIED**。P2.0 的倒角只是模型器能力，用户不可达。
 - SKP/STL 的映射结论基于已提交的导入器代码；`P-SKP-*` 与 `P-MESH-1` 均未实现。
 - STEP 的 §6 是**方案**：lifter 未实现。"`cadmpeg-ir` 已含精确拓扑"来自 0.6.12 源码
   （`topology.rs` / `geometry.rs` 的公开枚举），不是运行结果；样本上的保留率/精确率

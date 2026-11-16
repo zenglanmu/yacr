@@ -18,6 +18,14 @@
 //! panic's message is an implementation detail (and may quote internals), so it
 //! is replaced by a fixed sentence and the stable [`KERNEL_PANIC`] code.
 //!
+//! Chamfer has its own mapping ([`from_chamfer`]) because its outcomes split by
+//! cause: a **geometric** refusal (`NoRoom`, `TooLarge`, `NoEffect`, `Refused`,
+//! `Status`, blend refusals) becomes `Unsupported` with [`CHAMFER_FAILED`], while
+//! a **kernel-integrity** failure (`Record`, `NotSolid`, `NotExact`, `Degenerate`,
+//! `Argument`, and the non-exhaustive `NotSolidBecause` through the catch-all)
+//! stays `Failed` with [`KERNEL_FAILED`]. A kernel failure must never be reported
+//! as a missing capability.
+//!
 //! # Refusal codes (conversion, before the kernel runs)
 //!
 //! | code | used for | sites |
@@ -67,6 +75,19 @@ pub const PLACEMENT_NOT_SUPPORTED: &str = "solid.placement_not_supported";
 /// cannot be folded into [`cad_domain::BrepPlacement`] and is not baked
 /// approximately (ADR-0036 D4).
 pub const NONUNIFORM_TRANSFORM: &str = "solid.nonuniform_transform";
+
+/// The kernel refused the chamfer itself: a size too large for its faces, no
+/// room, an edge it cannot blend, a size with no effect, or an argument it
+/// rejected. Reported as `Unsupported` (never as a plausible body): this build
+/// cannot build the requested chamfer exactly.
+pub const CHAMFER_FAILED: &str = "solid.chamfer_failed";
+
+/// No edge of the lifted body lies within the selector's resolution tolerance of
+/// the point (`max(1e-9, 1e-3 · bounding-box diagonal)`), so nothing was picked.
+///
+/// Reported as `Unsupported` rather than chamfering the nearest edge anyway: a
+/// fuzzy pick would cut geometry the caller did not name.
+pub const EDGE_NOT_FOUND: &str = "solid.edge_not_found";
 
 /// The kernel ran but produced no usable product: a non-closed solid, a refused
 /// input, a non-finite mass property. Never a success, never an empty body.
@@ -187,6 +208,99 @@ pub(crate) fn from_ops(error: Error, operation: SolidOperationFamily) -> CadResu
     }
 }
 
+/// Map an upstream chamfer error onto the seam contract.
+///
+/// A chamfer is an *edit*, so its refusals fall into two very different classes:
+///
+/// | upstream | seam | why |
+/// |---|---|---|
+/// | `Error::Cancelled` | `Err(CadError::Cancelled)` | no product |
+/// | `Error::Internal(_)` | `Ok(Failed)` with [`KERNEL_PANIC`], generic text | caught kernel panic |
+/// | `Error::Empty` | `Ok(Failed)` with [`EMPTY_RESULT`] | a chamfer that produced nothing |
+/// | `Error::UnsureRegion` | `Ok(Failed)` with [`UNSURE_REGION`] | ran, could not decide |
+/// | `Error::Unsupported` / `Unported` | `Ok(Unsupported)` with [`codes::SOLID_UNSUPPORTED`] | not ported/built |
+/// | `NoRoom`, `TooLarge`, `NoEffect`, `Refused`, `Status`, blend refusals | `Ok(Unsupported)` with [`CHAMFER_FAILED`] | the kernel refused this geometric edit |
+/// | `Record`, `NotSolid`, `NotSolidBecause`, `NotExact`, `Degenerate`, `Argument` | `Ok(Failed)` with [`KERNEL_FAILED`] | the kernel could not vouch for the body/record it ran on |
+///
+/// The distinction matters: `Unsupported` says "this build cannot build it",
+/// while `Failed` says "the kernel ran and produced no trustworthy product" —
+/// never an empty success. The non-exhaustive `Error::NotSolidBecause` variant
+/// cannot be named outside `solidcore-ops`, so it lands in the `Failed`
+/// catch-all along with `Exception`, `Invariant`, `Reentered` and refusals of
+/// operations a chamfer never runs.
+pub(crate) fn from_chamfer(error: Error) -> CadResult<SolidOutcome> {
+    match error {
+        Error::Cancelled => Err(CadError::Cancelled),
+        Error::Internal(_) => Ok(failed(
+            KERNEL_PANIC,
+            "the kernel panicked during this call; the session replaced it, please retry",
+        )),
+        Error::Empty => Ok(failed(EMPTY_RESULT, "the chamfer result is empty")),
+        Error::UnsureRegion { region } => Ok(failed(
+            UNSURE_REGION,
+            format!("the kernel is unsure whether region {region} is material"),
+        )),
+        Error::Unsupported(what) | Error::Unported(what) => Ok(unsupported(
+            LiftRefusal {
+                code: codes::SOLID_UNSUPPORTED,
+                detail: format!("solidcore does not build this yet: {what}"),
+            },
+            SolidOperationFamily::Chamfer,
+        )),
+        // Geometric refusals of this chamfer: no room, too large, no effect, an
+        // argument the kernel rejects, a status it reports as a refusal, or a
+        // blend refusal (the chamfer is a blend at the kernel's level).
+        error @ (Error::NoRoom
+        | Error::TooLarge { .. }
+        | Error::NoEffect
+        | Error::Refused { .. }
+        | Error::Status(_)
+        | Error::ChamferAngleTooLarge { .. }
+        | Error::EdgeNotBlendable { .. }
+        | Error::ContinuesInto { .. }
+        | Error::RoundTooSmall { .. }
+        | Error::SetbackTooShort { .. }
+        | Error::SetbackTooLong { .. }
+        | Error::CornerRefused { .. }
+        | Error::CornerUnsupported
+        | Error::RoundsCross { .. }
+        | Error::BlendFailed { .. }
+        | Error::BlendNotCertified { .. }) => chamfer_refusal(error),
+        // Kernel-integrity failures: the kernel ran on a record/body it cannot
+        // vouch for, or produced a result it cannot certify. These are `Failed`,
+        // exactly as the boolean path reports them.
+        error @ (Error::Record(_)
+        | Error::NotSolid
+        | Error::NotExact
+        | Error::Degenerate
+        | Error::Argument) => Ok(failed(
+            KERNEL_FAILED,
+            format!("solidcore failed the chamfer: {error}"),
+        )),
+        // Anything not named above is a kernel failure, never a capability
+        // claim. That includes `Error::NotSolidBecause`, which is a
+        // `#[non_exhaustive]` tuple variant and cannot be named from this crate,
+        // plus `Exception`/`Invariant`/`Reentered` and refusals of operations a
+        // chamfer never runs.
+        other => Ok(failed(
+            KERNEL_FAILED,
+            format!("solidcore failed the chamfer: {other}"),
+        )),
+    }
+}
+
+/// The chamfer-specific `Unsupported`: this build cannot build the request
+/// exactly, and an `Unsupported` outcome can never be mistaken for a body.
+fn chamfer_refusal(error: Error) -> CadResult<SolidOutcome> {
+    Ok(unsupported(
+        LiftRefusal {
+            code: CHAMFER_FAILED,
+            detail: format!("solidcore refused the chamfer: {error}"),
+        },
+        SolidOperationFamily::Chamfer,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -266,6 +380,80 @@ mod tests {
             Error::Degenerate,
         ] {
             assert_eq!(failed_code(&outcome(error)), KERNEL_FAILED);
+        }
+    }
+
+    #[test]
+    fn chamfer_geometric_refusals_are_unsupported_not_plausible_bodies() {
+        // A chamfer the kernel will not build for this geometry is a
+        // capability-style refusal: Unsupported, never a made-up body.
+        for error in [
+            Error::Status(1001),
+            Error::NoRoom,
+            Error::NoEffect,
+            Error::Refused {
+                operation: "chamfer_sides",
+                reason: "the faces make no wedge",
+            },
+            Error::TooLarge {
+                size: 0.2,
+                kind: solidcore_ops::FitKind::Distance,
+                at: None,
+                why: None,
+            },
+        ] {
+            let outcome = from_chamfer(error).expect("only cancellation is an Err");
+            assert_eq!(
+                outcome.unsupported().map(|reason| reason.code),
+                Some(CHAMFER_FAILED),
+                "{outcome:?}"
+            );
+            assert_eq!(
+                outcome.unsupported().map(|reason| reason.operation),
+                Some(SolidOperationFamily::Chamfer)
+            );
+            assert!(outcome.body().is_none() && outcome.mass().is_none());
+        }
+    }
+
+    #[test]
+    fn chamfer_integrity_failures_are_failed_not_capability_refusals() {
+        // The kernel ran on a record/body it cannot vouch for (or produced a
+        // result it cannot certify): that is a failure, not "this build cannot
+        // do chamfers". Same class the boolean path reports as KERNEL_FAILED.
+        for error in [
+            Error::Record("a record the conversion cannot carry".into()),
+            Error::NotSolid,
+            Error::NotExact,
+            Error::Degenerate,
+            Error::Argument,
+        ] {
+            let outcome = from_chamfer(error).expect("only cancellation is an Err");
+            assert!(
+                outcome.unsupported().is_none(),
+                "an integrity failure must not be Unsupported: {outcome:?}"
+            );
+            assert_eq!(failed_code(&outcome), KERNEL_FAILED, "{outcome:?}");
+            assert!(outcome.body().is_none() && outcome.mass().is_none());
+        }
+    }
+
+    #[test]
+    fn chamfer_keeps_cancellation_and_panic_mappings() {
+        assert_eq!(
+            from_chamfer(Error::Cancelled).unwrap_err(),
+            CadError::Cancelled
+        );
+        let panic = from_chamfer(Error::Internal("panicked at x.rs".into())).expect("not an Err");
+        assert_eq!(failed_code(&panic), KERNEL_PANIC);
+        // A capability the kernel does not have stays SOLID_UNSUPPORTED, so a
+        // caller can tell "not ported" from "wrong size for this geometry".
+        for error in [Error::Unsupported("chamfer"), Error::Unported("blend")] {
+            let outcome = from_chamfer(error).expect("not an Err");
+            assert_eq!(
+                outcome.unsupported().map(|reason| reason.code),
+                Some(codes::SOLID_UNSUPPORTED)
+            );
         }
     }
 }

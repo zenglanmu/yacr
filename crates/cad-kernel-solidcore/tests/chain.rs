@@ -13,12 +13,12 @@ use std::sync::Arc;
 
 use cad_domain::{BrepSurface, CadError, DocumentId, TaskStamp, Transform3};
 use cad_kernel_adapter::{
-    execute_solid, BooleanOp, PrimitiveKind, PrimitiveSpec, SolidModeler, SolidOperation,
-    SolidOutcome, SolidRequest, SolidResult,
+    execute_solid, BooleanOp, PrimitiveKind, PrimitiveSpec, SolidEdgeSelector, SolidModeler,
+    SolidOperation, SolidOutcome, SolidRequest, SolidResult,
 };
 use cad_kernel_solidcore::{
-    SolidCoreModeler, LIFT_REQUIRES_PLANAR, LIFT_UNSUPPORTED, NONUNIFORM_TRANSFORM, TYPE_KEY,
-    UPSTREAM_VERSION,
+    SolidCoreModeler, CHAMFER_FAILED, EDGE_NOT_FOUND, LIFT_REQUIRES_PLANAR, LIFT_UNSUPPORTED,
+    NONUNIFORM_TRANSFORM, TYPE_KEY, UPSTREAM_VERSION,
 };
 
 use common::*;
@@ -59,8 +59,17 @@ fn registration_and_capabilities_are_honest() {
     }
     assert!(capabilities.booleans);
     assert!(capabilities.mass_properties);
-    // P2 capabilities are explicitly not claimed.
+    // P2.0: exactly the straight chamfer on one edge, nothing else from P2.
+    assert!(capabilities.chamfer);
     assert!(!capabilities.fillet && !capabilities.shell && !capabilities.nurbs);
+    assert!(
+        registration
+            .capabilities
+            .iter()
+            .any(|entry| entry == "chamfer.sides"),
+        "the chamfer capability is advertised: {:?}",
+        registration.capabilities
+    );
 }
 
 #[test]
@@ -662,4 +671,306 @@ fn probe_a_duplicated_face_is_refused_not_measured() {
     );
     assert_eq!(unsupported_code(&outcome), LIFT_UNSUPPORTED);
     assert!(outcome.mass().is_none());
+}
+
+// ---- P2.0: straight chamfer on one planar edge ----------------------------
+
+/// The unit cube's edge from (0, 0, 0) to (0, 1, 0): the bottom/left corner
+/// along Y, shared by the `z = 0` and `x = 0` faces.
+fn chamfer_selector() -> SolidEdgeSelector {
+    SolidEdgeSelector::NearestToPoint(p(0.0, 0.5, 0.0))
+}
+
+#[test]
+fn chamfered_unit_edge_removes_its_triangular_prism() {
+    let modeler = SolidCoreModeler::new();
+    let unit = body(execute(
+        &modeler,
+        SolidOperation::Primitive {
+            spec: box_spec(p(0.0, 0.0, 0.0), 1.0, 1.0, 1.0),
+        },
+    ));
+
+    let distance = 0.1;
+    let chamfered = body(execute(
+        &modeler,
+        SolidOperation::Chamfer {
+            brep: &unit,
+            selector: chamfer_selector(),
+            distance,
+            second: None,
+        },
+    ));
+
+    // P2.0's whole point: a straight chamfer between two planes produces only
+    // planes, so the neutral model can carry it and it re-lifts.
+    assert!(
+        faces(&chamfered).all(|face| matches!(face.surface, BrepSurface::Plane { .. })),
+        "a straight chamfer must stay all-planar"
+    );
+    assert!(
+        chamfered.face_count() > unit.face_count(),
+        "the chamfer must add the cut face ({} -> {})",
+        unit.face_count(),
+        chamfered.face_count()
+    );
+    assert_eq!(chamfered.shells.len(), 1, "one closed shell");
+
+    // Closed form for a symmetric 45 degree chamfer of one box edge:
+    //   V = L * W * H - (d^2 / 2) * len(edge)
+    // The cross-section perpendicular to the edge is a right isosceles triangle
+    // with legs d (the two set-backs), extruded along the edge.
+    let edge_length = 1.0;
+    let expected = 1.0 - (distance * distance / 2.0) * edge_length;
+    let mass = *execute(
+        &modeler,
+        SolidOperation::MassProperties {
+            brep: &chamfered,
+            density: 1.0,
+        },
+    )
+    .mass()
+    .expect("the chamfered body lifts again for mass properties");
+    assert!(
+        (mass.volume - expected).abs() < 1e-6,
+        "volume {} != {expected}",
+        mass.volume
+    );
+
+    // Watertight through this repository's own tessellator: no missing face, no
+    // open edge, no dropped shell.
+    match cad_kernel_adapter::tessellate_exchange(
+        &cad_kernel_adapter::SolidExchange::Brep(chamfered.clone()),
+        cad_kernel_adapter::TessellationTolerance::default(),
+        cad_kernel_adapter::TessellationBudget::default(),
+    ) {
+        cad_kernel_adapter::TessellationOutcome::Success { geometry, .. } => {
+            assert!(!geometry.is_empty(), "empty chamfer mesh");
+        }
+        other => panic!("chamfered body is not watertight: {other:?}"),
+    }
+}
+
+#[test]
+fn chamfer_with_an_asymmetric_second_distance_removes_its_prism() {
+    // The non-symmetric path is a real kernel path, not a silent
+    // "second = distance". For set-backs `a` along the first face and `b` along
+    // the second (perpendicular planes), the removed prism's cross-section is a
+    // right triangle with legs a and b, so
+    //   V = L·W·H − (a·b / 2) · len(edge).
+    // The formula is symmetric in a and b, so it holds whichever face the kernel
+    // measures first; a kernel that ignored `second` would leave 0.995, not 0.99.
+    let modeler = SolidCoreModeler::new();
+    let unit = body(execute(
+        &modeler,
+        SolidOperation::Primitive {
+            spec: box_spec(p(0.0, 0.0, 0.0), 1.0, 1.0, 1.0),
+        },
+    ));
+    let chamfered = body(execute(
+        &modeler,
+        SolidOperation::Chamfer {
+            brep: &unit,
+            selector: chamfer_selector(),
+            distance: 0.1,
+            second: Some(0.2),
+        },
+    ));
+    assert!(
+        faces(&chamfered).all(|face| matches!(face.surface, BrepSurface::Plane { .. })),
+        "an asymmetric straight chamfer must stay all-planar"
+    );
+    assert_eq!(chamfered.shells.len(), 1, "one closed shell");
+
+    let expected = 1.0 - (0.1 * 0.2 / 2.0) * 1.0;
+    let mass = *execute(
+        &modeler,
+        SolidOperation::MassProperties {
+            brep: &chamfered,
+            density: 1.0,
+        },
+    )
+    .mass()
+    .expect("the asymmetric chamfer lifts again");
+    assert!(
+        (mass.volume - expected).abs() < 1e-6,
+        "asymmetric volume {} != {expected}",
+        mass.volume
+    );
+}
+
+#[test]
+fn chamfer_on_a_wedge_base_edge_removes_its_prism() {
+    // A second planar solid, so the capability is not "works on a box only".
+    // The wedge's bottom face (z = 0) and back face (x = 0) meet at a convex
+    // 90-degree dihedral along the edge from (0, 0, 0) to (0, 3, 0).
+    let modeler = SolidCoreModeler::new();
+    let length = 2.0;
+    let width = 3.0;
+    let height = 4.0;
+    let wedge = body(execute(
+        &modeler,
+        SolidOperation::Primitive {
+            spec: PrimitiveSpec::Wedge {
+                origin: p(0.0, 0.0, 0.0),
+                length,
+                width,
+                height,
+            },
+        },
+    ));
+    let distance = 0.1;
+    let chamfered = body(execute(
+        &modeler,
+        SolidOperation::Chamfer {
+            brep: &wedge,
+            selector: SolidEdgeSelector::NearestToPoint(p(0.0, width / 2.0, 0.0)),
+            distance,
+            second: None,
+        },
+    ));
+    assert!(
+        faces(&chamfered).all(|face| matches!(face.surface, BrepSurface::Plane { .. })),
+        "a chamfered wedge must stay all-planar"
+    );
+    assert_eq!(chamfered.shells.len(), 1, "one closed shell");
+
+    // The wedge is a right triangular prism, V = L·W·H/2. The symmetric chamfer
+    // removes a prism whose cross-section is a right isosceles triangle of legs
+    // d along the edge's full length W:
+    //   V = L·W·H/2 − (d² / 2) · W.
+    let expected = length * width * height / 2.0 - (distance * distance / 2.0) * width;
+    let mass = *execute(
+        &modeler,
+        SolidOperation::MassProperties {
+            brep: &chamfered,
+            density: 1.0,
+        },
+    )
+    .mass()
+    .expect("the chamfered wedge lifts again");
+    assert!(
+        (mass.volume - expected).abs() < 1e-6,
+        "wedge volume {} != {expected}",
+        mass.volume
+    );
+}
+
+#[test]
+fn chamfer_refuses_a_point_far_from_every_edge() {
+    let modeler = SolidCoreModeler::new();
+    let unit = body(execute(
+        &modeler,
+        SolidOperation::Primitive {
+            spec: box_spec(p(0.0, 0.0, 0.0), 1.0, 1.0, 1.0),
+        },
+    ));
+    // The cube's centre is 0.5 from every edge: far outside the pick tolerance
+    // (1e-3 of the bounding-box diagonal), so nothing may be chamfered.
+    let outcome = execute(
+        &modeler,
+        SolidOperation::Chamfer {
+            brep: &unit,
+            selector: SolidEdgeSelector::NearestToPoint(p(0.5, 0.5, 0.5)),
+            distance: 0.1,
+            second: None,
+        },
+    );
+    assert_eq!(unsupported_code(&outcome), EDGE_NOT_FOUND);
+    let reason = outcome.unsupported().expect("a structured refusal");
+    assert_eq!(reason.operation.as_str(), "chamfer");
+    assert!(reason.detail.contains("no edge lies within"), "{reason:?}");
+    assert!(outcome.body().is_none(), "no body may be invented");
+}
+
+#[test]
+fn chamfer_refuses_bad_sizes_and_curved_bodies_and_honours_cancellation() {
+    let modeler = SolidCoreModeler::new();
+    let unit = body(execute(
+        &modeler,
+        SolidOperation::Primitive {
+            spec: box_spec(p(0.0, 0.0, 0.0), 1.0, 1.0, 1.0),
+        },
+    ));
+
+    // A zero or negative set-back is invalid input, rejected before the kernel.
+    for distance in [0.0, -0.1] {
+        let req = request(SolidOperation::Chamfer {
+            brep: &unit,
+            selector: chamfer_selector(),
+            distance,
+            second: None,
+        });
+        match execute_solid(&modeler, &req, &never()).unwrap_err() {
+            CadError::InvalidInput(message) => {
+                assert!(message.contains("solid.invalid_dimension"), "{message}");
+            }
+            other => panic!("expected InvalidInput, got {other:?}"),
+        }
+    }
+
+    // A curved body cannot be lifted in this cut: the same refusal as a boolean,
+    // never an approximated chamfer.
+    let cylinder = body(execute(
+        &modeler,
+        SolidOperation::Primitive {
+            spec: PrimitiveSpec::Cylinder {
+                origin: p(0.0, 0.0, 0.0),
+                radius: 1.0,
+                height: 2.0,
+            },
+        },
+    ));
+    let outcome = execute(
+        &modeler,
+        SolidOperation::Chamfer {
+            brep: &cylinder,
+            selector: SolidEdgeSelector::NearestToPoint(p(1.0, 0.0, 0.0)),
+            distance: 0.1,
+            second: None,
+        },
+    );
+    assert_eq!(unsupported_code(&outcome), LIFT_REQUIRES_PLANAR);
+    assert!(outcome.body().is_none());
+
+    // Cancellation wins before any work and leaves no product.
+    let req = request(SolidOperation::Chamfer {
+        brep: &unit,
+        selector: chamfer_selector(),
+        distance: 0.1,
+        second: None,
+    });
+    assert_eq!(
+        execute_solid(&modeler, &req, &|| true).unwrap_err(),
+        CadError::Cancelled
+    );
+}
+
+#[test]
+fn chamfer_refusals_name_the_chamfer_family() {
+    // A size the kernel cannot fit (larger than the unit box) is a geometric
+    // chamfer refusal: `Unsupported` with the chamfer-specific code, never a
+    // silent success or a plausible smaller cut.
+    let modeler = SolidCoreModeler::new();
+    let unit = body(execute(
+        &modeler,
+        SolidOperation::Primitive {
+            spec: box_spec(p(0.0, 0.0, 0.0), 1.0, 1.0, 1.0),
+        },
+    ));
+    let outcome = execute(
+        &modeler,
+        SolidOperation::Chamfer {
+            brep: &unit,
+            selector: chamfer_selector(),
+            distance: 2.0,
+            second: None,
+        },
+    );
+    assert!(outcome.body().is_none(), "{outcome:?}");
+    let reason = outcome.unsupported().unwrap_or_else(|| {
+        panic!("a size too large for the faces must be Unsupported, got {outcome:?}")
+    });
+    assert_eq!(reason.code, CHAMFER_FAILED);
+    assert_eq!(reason.operation.as_str(), "chamfer");
 }

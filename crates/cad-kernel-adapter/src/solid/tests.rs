@@ -321,6 +321,87 @@ fn request_validation_rejects_empty_operands() {
 }
 
 #[test]
+fn chamfer_validation_rejects_bad_distances_and_selectors() {
+    let brep = cube_brep();
+    let selector = SolidEdgeSelector::NearestToPoint(p(0.0, 0.5, 0.0));
+
+    for distance in [
+        0.0,
+        -1.0,
+        f64::NAN,
+        f64::INFINITY,
+        MAX_CHAMFER_DISTANCE + 1.0,
+    ] {
+        let req = request(SolidOperation::Chamfer {
+            brep: &brep,
+            selector,
+            distance,
+            second: None,
+        });
+        let error = req
+            .validate()
+            .expect_err("a non-positive/oversized distance must be rejected");
+        assert_eq!(error.code, codes::SOLID_INVALID_DIMENSION, "{error}");
+        assert!(error.message.contains("distance"), "{error}");
+    }
+
+    // The second set-back has exactly the same rule as the first.
+    for second in [0.0, -0.5, f64::NAN, MAX_CHAMFER_DISTANCE + 1.0] {
+        let req = request(SolidOperation::Chamfer {
+            brep: &brep,
+            selector,
+            distance: 0.1,
+            second: Some(second),
+        });
+        let error = req
+            .validate()
+            .expect_err("an invalid second distance must be rejected");
+        assert_eq!(error.code, codes::SOLID_INVALID_DIMENSION, "{error}");
+        assert!(error.message.contains("second"), "{error}");
+    }
+
+    // A non-finite selector point is bad input, not an unsupported operation.
+    let req = request(SolidOperation::Chamfer {
+        brep: &brep,
+        selector: SolidEdgeSelector::NearestToPoint(p(f64::NAN, 0.0, 0.0)),
+        distance: 0.1,
+        second: None,
+    });
+    let error = req
+        .validate()
+        .expect_err("a non-finite selector point must be rejected");
+    assert_eq!(error.code, codes::SOLID_INVALID_POINT, "{error}");
+
+    // An empty operand is rejected before any selector work.
+    let empty = BrepData::default();
+    let error = request(SolidOperation::Chamfer {
+        brep: &empty,
+        selector,
+        distance: 0.1,
+        second: None,
+    })
+    .validate()
+    .expect_err("an empty chamfer operand must be rejected");
+    assert_eq!(error.code, codes::SOLID_EMPTY_OPERAND, "{error}");
+
+    // Well-formed requests pass, including the maximum accepted distance.
+    for (distance, second) in [
+        (0.1, None),
+        (0.1, Some(0.2)),
+        (MAX_CHAMFER_DISTANCE, Some(MAX_CHAMFER_DISTANCE)),
+    ] {
+        request(SolidOperation::Chamfer {
+            brep: &brep,
+            selector,
+            distance,
+            second,
+        })
+        .validate()
+        .unwrap_or_else(|error| panic!("({distance}, {second:?}): {error}"));
+    }
+}
+
+#[test]
 fn request_validation_rejects_invalid_transforms() {
     let brep = cube_brep();
     let identity = Transform3::identity();
@@ -377,11 +458,18 @@ fn capability_probe_reports_per_family_flags() {
         brep: &brep,
         density: 1.0,
     };
+    let chamfer_op = SolidOperation::Chamfer {
+        brep: &brep,
+        selector: SolidEdgeSelector::NearestToPoint(p(0.0, 0.0, 0.0)),
+        distance: 0.1,
+        second: None,
+    };
 
     let mut caps = ModelerCapabilities::default();
     assert!(!caps.supports(&box_op));
     assert!(!caps.supports(&cylinder_op));
     assert!(!caps.supports(&boolean_op));
+    assert!(!caps.supports(&chamfer_op));
     assert!(!caps.supports(&mass_op));
     // A similarity transform is the seam's baseline, not a declared capability.
     assert!(caps.supports(&transform_op));
@@ -389,6 +477,7 @@ fn capability_probe_reports_per_family_flags() {
     caps.primitives.box_primitive = true;
     assert!(caps.supports(&box_op));
     assert!(!caps.supports(&cylinder_op));
+    assert!(!caps.supports(&chamfer_op));
 
     caps.primitives = ModelerPrimitives::all();
     assert!(caps.supports(&cylinder_op));
@@ -399,10 +488,17 @@ fn capability_probe_reports_per_family_flags() {
     assert!(caps.supports(&boolean_op));
     caps.mass_properties = true;
     assert!(caps.supports(&mass_op));
+    // Chamfer is its own family flag: booleans/mass do not imply it.
+    assert!(!caps.supports(&chamfer_op));
+    caps.chamfer = true;
+    assert!(caps.supports(&chamfer_op));
+    // ... and the flag does not imply the P2 families that are still absent.
+    assert!(!caps.fillet && !caps.shell && !caps.nurbs);
 
     // Family tags are stable contract values.
     assert_eq!(box_op.family().as_str(), "primitive");
     assert_eq!(boolean_op.family(), SolidOperationFamily::Boolean);
+    assert_eq!(chamfer_op.family().as_str(), "chamfer");
     assert_eq!(transform_op.family().as_str(), "transform");
     assert_eq!(mass_op.family().as_str(), "mass_properties");
 }
@@ -488,6 +584,7 @@ impl ToyModeler {
                 primitives,
                 booleans: false,
                 mass_properties: true,
+                chamfer: false,
                 fillet: false,
                 shell: false,
                 nurbs: false,

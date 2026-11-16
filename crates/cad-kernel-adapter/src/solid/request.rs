@@ -214,6 +214,7 @@ impl BooleanOp {
 pub enum SolidOperationFamily {
     Primitive,
     Boolean,
+    Chamfer,
     Transform,
     MassProperties,
 }
@@ -224,6 +225,7 @@ impl SolidOperationFamily {
         match self {
             SolidOperationFamily::Primitive => "primitive",
             SolidOperationFamily::Boolean => "boolean",
+            SolidOperationFamily::Chamfer => "chamfer",
             SolidOperationFamily::Transform => "transform",
             SolidOperationFamily::MassProperties => "mass_properties",
         }
@@ -233,6 +235,40 @@ impl SolidOperationFamily {
 impl std::fmt::Display for SolidOperationFamily {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
+    }
+}
+
+/// A seam-level sanity bound on a chamfer set-back.
+///
+/// This is **not** a geometric claim and not a copy of a kernel limit: it exists
+/// so a caller's unit mistake (or an absurd dimension) is rejected before any
+/// kernel work. Within the bound the kernel still decides whether the size fits
+/// the faces it cuts, and may refuse it (`solid.chamfer_failed`).
+pub const MAX_CHAMFER_DISTANCE: f64 = 1e6;
+
+/// How a modeler picks the single edge a [`SolidOperation::Chamfer`] cuts.
+///
+/// P2.0 deliberately keeps the seam free of kernel record ids: a caller that
+/// only has the neutral B-rep names a point, and the modeler resolves it against
+/// the body it lifted. A record-id selector would leak a kernel-side numbering
+/// that `BrepData` does not carry.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SolidEdgeSelector {
+    /// The edge whose curve is nearest to this model-space point.
+    ///
+    /// The modeler accepts the nearest edge only when it lies within a small
+    /// tolerance of the point (a fraction of the body's bounding-box diagonal);
+    /// otherwise the request is refused with the stable reason
+    /// `solid.edge_not_found` instead of chamfering an unrelated edge.
+    NearestToPoint(Point3),
+}
+
+impl SolidEdgeSelector {
+    /// The model-space point this selector names.
+    pub fn point(self) -> Point3 {
+        match self {
+            SolidEdgeSelector::NearestToPoint(point) => point,
+        }
     }
 }
 
@@ -250,6 +286,19 @@ pub enum SolidOperation<'a> {
         op: BooleanOp,
         left: &'a BrepData,
         right: &'a BrepData,
+    },
+    /// Cut one edge with a straight chamfer.
+    ///
+    /// `distance` is the set-back along the face the kernel picks (the edge's
+    /// primary use); `second` is the set-back along the other face and defaults
+    /// to the same distance, giving the symmetric 45° chamfer. P2.0 is a
+    /// **planar** capability: a body whose lift needs NURBS surfaces or pcurves
+    /// is refused with `solid.lift_requires_planar`, never approximated.
+    Chamfer {
+        brep: &'a BrepData,
+        selector: SolidEdgeSelector,
+        distance: f64,
+        second: Option<f64>,
     },
     /// Map a body through a transform.
     ///
@@ -270,6 +319,7 @@ impl SolidOperation<'_> {
         match self {
             SolidOperation::Primitive { .. } => SolidOperationFamily::Primitive,
             SolidOperation::Boolean { .. } => SolidOperationFamily::Boolean,
+            SolidOperation::Chamfer { .. } => SolidOperationFamily::Chamfer,
             SolidOperation::Transform { .. } => SolidOperationFamily::Transform,
             SolidOperation::MassProperties { .. } => SolidOperationFamily::MassProperties,
         }
@@ -300,7 +350,8 @@ impl SolidRequest<'_> {
     /// Pre-flight validation, run before any kernel work.
     ///
     /// Rejects malformed primitives (non-finite/non-positive dimensions),
-    /// empty boolean/transform/mass operands, a non-finite, non-affine or
+    /// empty boolean/transform/mass/chamfer operands, a non-finite
+    /// chamfer distance or selector point, a non-finite, non-affine or
     /// singular transform, and a non-positive mass density. It deliberately does
     /// **not** reject a non-similarity transform (that is a capability refusal,
     /// `Unsupported`), a non-identity [`cad_domain::BrepPlacement`] (also a
@@ -314,6 +365,19 @@ impl SolidRequest<'_> {
             SolidOperation::Boolean { left, right, .. } => {
                 require_operand("left", left)?;
                 require_operand("right", right)
+            }
+            SolidOperation::Chamfer {
+                brep,
+                selector,
+                distance,
+                second,
+            } => {
+                require_operand("brep", brep)?;
+                require_chamfer_distance("distance", *distance)?;
+                if let Some(second) = second {
+                    require_chamfer_distance("second", *second)?;
+                }
+                require_finite_point("selector point", selector.point())
             }
             SolidOperation::Transform { brep, transform } => {
                 require_operand("brep", brep)?;
@@ -370,6 +434,21 @@ fn require_finite_point(name: &str, point: Point3) -> Result<(), SolidInputError
                 message: format!("{name}.{axis} must be finite, got {value}"),
             });
         }
+    }
+    Ok(())
+}
+
+/// A chamfer set-back: finite, strictly positive and at most
+/// [`MAX_CHAMFER_DISTANCE`] (a seam sanity bound, not a kernel limit). Zero is a
+/// no-op and is rejected rather than executed as one.
+fn require_chamfer_distance(name: &str, value: f64) -> Result<(), SolidInputError> {
+    if !value.is_finite() || value <= 0.0 || value > MAX_CHAMFER_DISTANCE {
+        return Err(SolidInputError {
+            code: codes::SOLID_INVALID_DIMENSION,
+            message: format!(
+                "{name} must be finite and in (0, {MAX_CHAMFER_DISTANCE}], got {value}"
+            ),
+        });
     }
     Ok(())
 }

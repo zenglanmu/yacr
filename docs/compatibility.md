@@ -1564,8 +1564,8 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `PRESSPULL` | **部分实现（具名拒绝）**：`presspull.unsupported: no press/pull model` | 不写库/不升修订/不入历史 |
 | `IMPRINT` | **部分实现（具名拒绝）**：`imprint.unsupported: no 3D imprint model` | 不写库/不升修订/不入历史 |
 | `OFFSETEDGE` | **部分实现（具名拒绝）**：`offsetedge.unsupported: no 3D face/edge offset model` | 不写库/不升修订/不入历史 |
-| `CHAMFEREDGE` | **部分实现（具名拒绝）**：`chamferedge.unsupported: no 3D edge chamfer model` | 不写库/不升修订/不入历史 |
-| `FILLETEDGE` | **部分实现（具名拒绝）**：`filletedge.unsupported: no 3D edge fillet model` | 不写库/不升修订/不入历史 |
+| `CHAMFEREDGE` | **部分实现（具名拒绝）**：`chamferedge.unsupported: no 3D edge chamfer model`。**注意**：模型器已有 P2.0 单边直线倒角能力（`SolidOperation::Chamfer`，仅平面体；Linux 契约测试，实测凸 90° 平面边——box 与 wedge，含非对称退距；凹边/非 90° 未测），但**没有命令接线**，本命令仍拒绝、用户不可达 | 不写库/不升修订/不入历史 |
+| `FILLETEDGE` | **部分实现（具名拒绝）**：`filletedge.unsupported: no 3D edge fillet model`。模型器 `chamfer` 就绪不等于圆角就绪：`ModelerCapabilities.fillet` 仍为 `false` | 不写库/不升修订/不入历史 |
 | `EDGE` | **部分实现（具名拒绝）**：`edge.unsupported: no 3D face-edge visibility model` | 不写库/不升修订/不入历史 |
 | `MIRROR3D` | **部分实现（具名拒绝）**：`mirror3d.unsupported: no 3D mirror-plane model` | 不写库/不升修订/不入历史 |
 | `ROTATE3D` | **部分实现（具名拒绝）**：`rotate3d.unsupported: no 3D rotate-axis model` | 不写库/不升修订/不入历史 |

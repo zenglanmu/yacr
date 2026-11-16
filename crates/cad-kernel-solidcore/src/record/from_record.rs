@@ -577,6 +577,86 @@ mod tests {
     }
 
     #[test]
+    fn a_straight_spline_edge_maps_to_its_chord() {
+        // The pinned kernel writes a chamfer's straight edges as a cubic Bézier
+        // whose control points are collinear on the segment. That curve *is* the
+        // segment, so the planar lift must read it as a `Line`.
+        let mut record = unit_box();
+        let (i0, i1) = {
+            let edge = &record.edges[0];
+            (edge.vertices[0] as usize, edge.vertices[1] as usize)
+        };
+        let a = record.vertices[i0].point;
+        let b = record.vertices[i1].point;
+        let at = |t: f64| {
+            [
+                a[0] + (b[0] - a[0]) * t,
+                a[1] + (b[1] - a[1]) * t,
+                a[2] + (b[2] - a[2]) * t,
+            ]
+        };
+        record.edges[0].curve = Curve::Spline {
+            knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+            points: vec![a, at(1.0 / 3.0), at(2.0 / 3.0), b],
+        };
+        let brep = from_record(&record).expect("a straight spline maps to a line");
+        let mut mapped = false;
+        for face in &brep.shells[0].faces {
+            for loop_ in &face.loops {
+                for curve in &loop_.edges {
+                    if let BrepCurve::Line { start, end } = curve {
+                        let s = [start.x, start.y, start.z];
+                        let e = [end.x, end.y, end.z];
+                        if (s == a && e == b) || (s == b && e == a) {
+                            mapped = true;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(mapped, "the straight spline edge did not map to its chord");
+    }
+
+    #[test]
+    fn a_curved_spline_edge_is_still_refused() {
+        // Same endpoints, but the control polygon leaves the chord: a real curve,
+        // which the neutral model has no variant for in P1.
+        let mut record = unit_box();
+        let (i0, i1) = {
+            let edge = &record.edges[0];
+            (edge.vertices[0] as usize, edge.vertices[1] as usize)
+        };
+        let a = record.vertices[i0].point;
+        let b = record.vertices[i1].point;
+        let along = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+        let probe = if along[0].abs() < 0.5 {
+            [1.0, 0.0, 0.0]
+        } else {
+            [0.0, 1.0, 0.0]
+        };
+        let across = [
+            along[1] * probe[2] - along[2] * probe[1],
+            along[2] * probe[0] - along[0] * probe[2],
+            along[0] * probe[1] - along[1] * probe[0],
+        ];
+        let length = (across[0] * across[0] + across[1] * across[1] + across[2] * across[2]).sqrt();
+        let at = |t: f64, bulge: f64| {
+            [
+                a[0] + along[0] * t + across[0] / length * bulge,
+                a[1] + along[1] * t + across[1] / length * bulge,
+                a[2] + along[2] * t + across[2] / length * bulge,
+            ]
+        };
+        record.edges[0].curve = Curve::Spline {
+            knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+            points: vec![a, at(1.0 / 3.0, 0.3), at(2.0 / 3.0, 0.3), b],
+        };
+        let refusal = refusal(&record);
+        assert_eq!(refusal.code, LIFT_UNSUPPORTED);
+        assert!(refusal.detail.contains("spline"), "{}", refusal.detail);
+    }
+
+    #[test]
     fn a_void_region_is_refused() {
         let mut record = unit_box();
         record.regions[1].void = true;

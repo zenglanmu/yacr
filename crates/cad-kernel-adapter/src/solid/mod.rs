@@ -2,11 +2,12 @@
 //!
 //! [`SolidModeler`] is the sibling of [`crate::SolidTessellator`]. The
 //! tessellator turns an imported payload into facets; the modeler creates and
-//! combines **exact** bodies (primitives, booleans, similarity transforms and
-//! mass properties) and returns a neutral [`BrepData`](cad_domain::BrepData)
-//! that callers commit through `cad-db`. No kernel type crosses this seam: the
-//! only implementation allowed to name `solidcore` is `cad-kernel-solidcore`
-//! (phase B2), exactly as `cad-import-acadrust` is the only `acadrust` consumer.
+//! combines **exact** bodies (primitives, booleans, a straight chamfer on one
+//! edge, similarity transforms and mass properties) and returns a neutral
+//! [`BrepData`](cad_domain::BrepData) that callers commit through `cad-db`. No
+//! kernel type crosses this seam: the only implementation allowed to name
+//! `solidcore` is `cad-kernel-solidcore` (phase B2), exactly as
+//! `cad-import-acadrust` is the only `acadrust` consumer.
 //!
 //! # Honest status
 //!
