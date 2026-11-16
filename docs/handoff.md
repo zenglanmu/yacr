@@ -22,6 +22,25 @@
 （Linux 原生 Wayland、Windows、macOS、Android）由 native 会话持有 `cad-db`，`dom-canvas`
 （X11/XWayland、Web）由 wasm 会话持有。细节与逐平台证据边界见 `AGENTS.md` 平台表。
 
+**wave 7（2026-11-16）—— 结构性缺口修复，无新增晋升**
+
+覆盖表仍是 **183 完整 / 796 部分**：本波修的是**根因**，四条命令（`XCLIP`/`TABLE`/`MLEADER`/`SAVE`）的残留边界也随之改写成更精确的事实，但没有一条满足「支持域内无可写缺口」的晋升条件。
+
+- **导出器能力缺口已修**（`c9f1a7a8`）：`SAVE` 现在真写 `BLOCK_RECORD`/`BLOCK`/`ENDBLK` + 真实 `INSERT`（块名/插入点/旋转/**三个独立缩放因子**/渲染属性，由存储摆放逆分解）+ **XCLIP 的 `ACAD_FILTER`/`SPATIAL_FILTER` 链**（环在容器空间、带逆块变换，导入导出往返边界/`visible`/`inside` 三者相等）。
+  仍展开的参照逐条具名（镜像/倾斜/剪切/零或非有限缩放/非仿射/定义环/嵌套超限/xref/重名）；真夹具 `qcad-examples/entities.dxf` 的两个命名块实例与定义经保存后保持。
+  这条同时修掉了 `SAVE` 的「块身份丢失」、`BLOCK`/`INSERT` 的「无块表写入」与 `XCLIP` 的「裁剪随 SAVE 丢失」三处口径。
+- **表格逐格外观**（`47d6313d`）：给显示层加了**最小诚实的逐图元外观通道**（与几何同源构建的 `TableDisplayAppearance`，provider 盖章、`expand_entity` 保留 provider 解析值）——
+  **没有**新增 `SemanticGeometry` 字段/变体（709 处 `Line` + 353 处 `Text` 构造点未动）、**没有**新增 `DisplayPrimitive` 变体、**渲染器零改动**。
+  逐格文字颜色（组 64）/背景填充（63+283，填充四边形）/逐边边框颜色（65–69）与线宽（275–279，DXF 1/100 mm 存储不四舍五入）都能存储、绘制、导出并可由 `TABLEDIT FORMAT|BORDERCOLOR|LINEWEIGHT`、`TABLESTYLE [ROW k]`、`MATCHCELL` 编辑；未设置时几何**与图元**逐字节不变（有断言）。
+- **`MLEADER` 的 `174`**（`47d6313d`）：`text_angle_type` 进样式行 `175` + 实体 `174`（掩码 `0x2000`），`TEXTANGLE HORIZONTAL|PARALLEL|OPTIMIZED` 与 `STYLE <name>`、无内容创建（`172 = 0`）全部实现并往返；默认 `174/175 = 1`、掩码 0，与旧写入器逐字节相同。
+
+**为什么仍不晋升（逐条）**：`XCLIP` 缺**裁剪深度面**（`BlockClip` 无前后裁剪面字段，AutoCAD 的 XCLIP 确有 clip depth）、inverted 模式无 DXF 字段、`CLIP POLY` 对块参照仍拒绝；
+`TABLE` 缺逐边**线型**、边框线宽**渲染器只画 1 像素**、块/FIELD 单元格、`GRIDFORMAT`、`TABLECONTENT`；
+`MLEADER` 缺**块/公差内容类型**（`MLeaderContent` 只有 MText/None）、无 `Options` 交互提示、2 点输入上限（多引线走 `MLEADEREDIT ADD`）。
+
+**门禁（wave 7 实跑）**：fmt / clippy `-D warnings` / `check --workspace --all-targets` / `check --lib --target wasm32-unknown-unknown` / architecture / file-size（2203）/ i18n / command-docs 全绿。
+测试：cad-domain 173、cad-representation 338、cad-render-wgpu 537（串行）、cad-import-acadrust 458、cad-app table 111 + mleader 60 + xclip 9、cad-ui-core 786、cad-db 275。真机 GUI 本波 **NOT RUN**。
+
 **wave 6（2026-11-16）**
 
 覆盖表 **180 → 183 完整 / 799 → 796 部分**（本波晋升 3：`MATCHCELL`、`TABLESTYLE`、`MLEADEREDIT`；累计自 123 起 **60 个**）。
