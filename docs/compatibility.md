@@ -1445,7 +1445,7 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `CONVERTCTB` | **部分实现**：具名拒绝（`convertctb.unsupported`）：CTB 转换未实现（无 CTB/STB 模型）。 | 不写库/不升修订/不入历史（报告类只读） |
 | `CONVERTPOLY` | **部分实现**：只读报告（`convertpoly.single_representation`）：本构建只存一种 `LWPOLYLINE` 表示，无旧式多段线可转换。 | 不写库/不升修订/不入历史（报告类只读） |
 | `CONVERT` | **部分实现**：具名拒绝（`convert.unsupported`）：通用对象转换未实现。 | 不写库/不升修订/不入历史（报告类只读） |
-| `TABLE` | 部分实现 | 创建 + 导入模型可 MOVE/ROTATE/SCALE、FIND 逐格、真实 DXF 导出；**逐格对齐/文字旋转/文字颜色/背景填充/逐边边框颜色与线宽**都能存储、绘制、导出并由 `TABLEDIT FORMAT|BORDERCOLOR|LINEWEIGHT`、`TABLESTYLE [ROW k]`、`MATCHCELL` 编辑（未设置时几何与图元逐字节不变） | 逐边**线型**无模型；边框线宽渲染器只画 1 像素（具名）；块/FIELD 单元格、`GRIDFORMAT`、`TABLECONTENT` 名称描述、交互对话框缺；导入无法区分「显式关闭填充 vs 继承填充」；真彩色规范化为最近 ACI（具名） |
+| `TABLE` | 部分实现 | 创建 + 导入模型可 MOVE/ROTATE/SCALE、FIND 逐格、真实 DXF 导出；逐格对齐/旋转/文字色/填充/逐边边框颜色与线宽、**逐格边距**、**逐边双线间距**都能存储、绘制、导出并可由 `TABLEDIT FORMAT|BORDERCOLOR|LINEWEIGHT`、`TABLESTYLE [ROW k]`、`MATCHCELL` 编辑；未设置时文件与几何逐字节不变 | 逐边框**线型**三重阻塞（LTYPE 句柄/实体写入器不发/`expand.rs` 覆盖片段线型）→ 具名拒绝；边框线宽渲染器只画 1px；块/FIELD 单元格、`TABLECONTENT` 名称描述、`annotative`、逐行边距缺；互操作：边距/间距挂在 `TABLECONTENT` 对象上 |
 | `-TABLE` | **部分实现（真实创建）**：命令行拼写，与 `TABLE` 同实现 | 同 `TABLE` |
 | `TABLEDIT` | 完整实现 | `TABLEDIT <row> <col> [text]`（1-based、选中一个表格、剩余整行文本、空文本清除）+ `MERGE <row> <col> <height> <width>` / `UNMERGE <row> <col>` / `STYLE <name>`；合并保留被覆盖单元格自身文本（诊断明示，不拼接），越界/覆盖锚点/重叠/未合并逐条具名拒绝；一条事务/一步撤销 | 无交互单元格对话框；块内容/字段单元格未建模（`TINSERT`/字段=全局） |
 | `TABLEEXPORT` | 完整实现 | `TABLEEXPORT <path.csv>` 经宿主文件通道（`HostResources::write_named_file`）写已建模网格：RFC 4180、CRLF、合并区锚点+覆盖格留空、临时文件+rename、64 MiB 上限、不建目录；只读（无事务/无修订、Viewer 合法）；浏览器宿主 `unsupported-runtime: table-export` | 单元格块/字段内容未建模，故不导出；裸 IPC 形式 `tableexport.needs_path` |
@@ -2014,7 +2014,7 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `PARTIALOAD` | **部分实现（具名拒绝）**：`partiaload.unsupported: no partial layer-index open/load model` | 不写库/不升修订/不入历史 |
 | `SHELL` | **部分实现（具名拒绝）**：`shell.unsupported: the host owns process spawning; this command layer has no OS shell` | 不写库/不升修订/不入历史 |
 | `SECURITYOPTIONS` | **部分实现（具名拒绝）**：`securityoptions.unsupported: no security/executable-trust settings model` | 不写库/不升修订/不入历史 |
-| `XCLIP` | 部分实现 | 真实（display-only）+ **导入真实**：矩形/旋转矩形/任意简单多边形都真实裁剪（嵌套取交集）；导入经 `INSERT → ACAD_XDICTIONARY → ACAD_FILTER → SPATIAL → SPATIAL_FILTER` 解析边界并映射进块局部空间（含 `display_enabled` 与嵌套块） | **导出缺失**：本导出器不写 `INSERT`（块参照一律展开），无实体可挂 filter 链 ⇒ 裁剪随 SAVE 丢失（`export.xclip_clip_dropped` 具名 + 往返测试）；裁剪模式无字段（`import.xclip_mode_unmodelled`）；`CLIP POLY` 对块参照仍拒绝 |
+| `XCLIP` | 完整实现 | 真实（display-only）+ **导入/导出双向**：矩形/旋转矩形/任意简单多边形真实裁剪（嵌套取交集）；**裁剪深度** `front/back` 存块局部 z 区间（`None` 逐字节不变），DXF `40`/`41`+`72`/`73` 往返，显示真过滤（跨区间整块保留并具名）；导入解析 `ACAD_FILTER`/`SPATIAL_FILTER` 链（含 `display_enabled`），导出写同一链 ⇒ 导入→导出→再导入边界/`visible`/`inside`/深度相等；`XCLIP CLIPDEPTH` 一条事务/一步撤销 | 声明边界：`INVERT` 无模式字段（按名拒绝）；`40`/`41` 按 z 区间读写、不镜像 AutoCAD 的「back 沿 −normal」约定；跨区间不按深度面切割（2D 优先，逐图元具名）；`CLIP POLY` 对块参照仍是 `CLIP` 的边界 |
 | `PASTESPEC` | **部分实现（具名拒绝）**：`pastespec.unsupported: clipboard special-paste (OLE/format selection) is not modeled; use PASTECLIP or PASTEBLOCK` | 不写库/不升修订/不入历史 |
 ## Wave 28 边界更新（2026-11-12，官方名收尾：39 条具名拒绝）
 
