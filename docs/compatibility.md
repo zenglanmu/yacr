@@ -312,7 +312,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 > 「不实现 DWG 回写、原始实体移动/删除/修改」，完整编辑亦被排除在初期之外。因此 MOVE/COPY/ERASE/
 > TRIM/EXTEND/ROTATE/SCALE/MIRROR/OFFSET/CLIPBOARD/MATCHPROP、各类创建命令、夹点拖拽
 > **全部是项目自选范围**：行为选择标为**我们的选择**，不得表述为「符合规范」。与 DIMENSION 创建行
-> （「创建无 spec 授权」）同一口径。这些命令**只改内存文档**：`SAVE` 是有损 DXF 另存，源为
+> （「创建无 spec 授权」）同一口径。这些命令**只改内存文档**：`SAVE` 是有损 DXF 另存（**块定义与 `INSERT` 以及 XCLIP 的 `ACAD_FILTER`/`SPATIAL_FILTER` 链现已写出**；无法表达为单条 INSERT 的摆放仍展开并逐条声明），源为
 > `.dwg` 时写**实验性新 DWG 文件**（默认 `<stem>-export.dwg`）；**没有任何 DWG 原地回写**。
 
 | 命令 | 能力 | 诚实边界 |
@@ -427,7 +427,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
   AutoCAD 的**交互式**流程（先选源、再逐个选目标并显示“特性刷”光标）**未实现**——它需要新的
   draw-tool 类型与绘制光标，本项只实现选择式变体。命令无 payload（`CommandPayload::None`），
   选择在应用时从会话读取。
-- **导出**：`SAVE` 默认是**有损 DXF 另存**（`Partial`，逐条记录转换/丢弃，**非** DWG 往返保存）；
+- **导出**：`SAVE` 默认是**有损 DXF 另存**（`Partial`，逐条记录转换/丢弃，**非** DWG 往返保存）；**块定义 + `INSERT`（含嵌套、动态块活动可见性、非均匀缩放）与 XCLIP 裁剪链已可写出**，损失面收窄为「无法表达为单条 INSERT 的摆放（镜像/倾斜/剪切/零或非有限缩放/非仿射/定义环/嵌套超限/xref/重名）」与「inverted 裁剪、裁剪深度面」；
   若打开源是 `.dwg`（或用户选择 `.dwg` 目标），则写入**实验性 DWG 导出**（上游
   `acadrust::DwgWriter`）：有损、不完整、**不是**原地回写，默认建议新文件名 `<stem>-export.dwg`，
   且**绝不覆盖被打开的源文件**（平台 device+inode/SAF URI 守卫 + 宿主归一化路径/名回退守卫）；
