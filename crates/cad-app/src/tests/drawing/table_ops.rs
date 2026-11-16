@@ -16,7 +16,8 @@ use cad_domain::{
 };
 
 use crate::app_drawing::table_payload::{
-    TableCellAddress, TablePayload, TableStyleCommand, TableStyleEdge,
+    TableCellAddress, TablePayload, TableRowStyleCommand, TableStyleCommand, TableStyleEdge,
+    TableStyleRowScope,
 };
 use crate::command_payload::TableCreateCommand;
 
@@ -246,6 +247,8 @@ fn table_with_explicit_cell_app() -> (Application, SessionState) {
     source.rows[0].cells[0].text_height = 5.0;
     source.rows[0].cells[0].style_name = "Title".into();
     source.rows[0].cells[0].borders.top = cad_domain::TableBorder::HIDDEN;
+    source.rows[0].cells[0].alignment = cad_domain::TableCellAlignment::from_dxf_code(3); // TR
+    source.rows[0].cells[0].rotation = 0.25;
     let geometry = TableGeometry::new(source).expect("valid table");
 
     let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
@@ -314,6 +317,8 @@ fn plain_cell() -> TableCellGeometry {
         style_name: "Standard".into(),
         style: StyleId(0),
         font: None,
+        alignment: cad_domain::TableCellAlignment::DEFAULT,
+        rotation: 0.0,
         merge_width: 1,
         merge_height: 1,
         borders: TableCellBorders::default(),
@@ -352,7 +357,9 @@ fn matchcell_copies_the_source_cell_style_to_every_target_in_one_step() {
         assert_eq!(target.style_name, source.style_name);
         assert_eq!(target.style, source.style);
         assert_eq!(target.borders, source.borders);
-        // A style copy never moves text.
+        assert_eq!(target.alignment, source.alignment);
+        assert_eq!(target.rotation, source.rotation);
+        // A format copy never moves text.
         assert_eq!(target.text, "");
     }
     assert_eq!(table.cell(0, 0).unwrap().text, "source");
@@ -420,14 +427,17 @@ fn tablestyle_reports_without_writing_and_writes_the_style_once() {
     assert_no_write(&app, before_revision, before_undo);
 
     // The write assigns a named snapshot and re-resolves the inheriting cells.
-    let mut command = TableStyleCommand {
+    let command = TableStyleCommand {
         name: Some("Report".into()),
+        horizontal_margin: Some(0.2),
+        rows: vec![TableRowStyleCommand {
+            text_height: Some(4.5),
+            text_style_name: Some("Standard".into()),
+            borders: vec![(TableStyleEdge::Bottom, false, None)],
+            ..TableRowStyleCommand::default()
+        }],
         ..TableStyleCommand::default()
     };
-    command.text_height = Some(4.5);
-    command.text_style_name = Some("Standard".into());
-    command.horizontal_margin = Some(0.2);
-    command.borders = vec![(TableStyleEdge::Bottom, false, None)];
     let outcome = execute(
         &mut app,
         &mut session,
@@ -482,7 +492,10 @@ fn a_tablestyle_refusal_writes_nothing() {
     // A non-positive height and a negative margin.
     for command in [
         TableStyleCommand {
-            text_height: Some(0.0),
+            rows: vec![TableRowStyleCommand {
+                text_height: Some(0.0),
+                ..TableRowStyleCommand::default()
+            }],
             ..TableStyleCommand::default()
         },
         TableStyleCommand {
@@ -551,7 +564,10 @@ fn the_post_creation_table_commands_need_one_selected_table() {
         (
             ExtendedCommandId::TableStyleList,
             TablePayload::Style(Box::new(TableStyleCommand {
-                text_height: Some(4.0),
+                rows: vec![TableRowStyleCommand {
+                    text_height: Some(4.0),
+                    ..TableRowStyleCommand::default()
+                }],
                 ..TableStyleCommand::default()
             })),
             "tablestyle.no_selection",
@@ -570,4 +586,151 @@ fn the_post_creation_table_commands_need_one_selected_table() {
         );
         assert_no_write(&app, before_revision, before_undo);
     }
+}
+
+#[test]
+fn tabledit_format_sets_alignment_and_rotation_in_one_undo_step() {
+    let (mut app, mut session) = application_with_document();
+    let id = create_table(&mut app, &mut session, 2, 2);
+    let undo_before = undo_depth(&app);
+    let before = revision(&app);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::Extended(ExtendedCommandId::TableEdit),
+        CommandPayload::Table(Box::new(TablePayload::Format {
+            cell: address(1, 2),
+            alignment: Some(cad_domain::TableCellAlignment::from_dxf_code(7)), // BL
+            rotation: Some(0.5),
+        })),
+    )
+    .expect("TABLEDIT FORMAT writes");
+    assert_eq!(undo_depth(&app), undo_before + 1, "one undo step");
+    assert_eq!(
+        outcome.changes.as_ref().expect("change set").after.0,
+        before.0 + 1
+    );
+    assert!(outcome
+        .diagnostics
+        .iter()
+        .any(|row| row.code == "tabledit.format"));
+    let cell = stored_table_of(&app, id).cell(0, 1).cloned().expect("cell");
+    assert_eq!(cell.alignment.dxf_code(), 7);
+    assert_eq!(cell.rotation, 0.5);
+    // The neighbour is untouched.
+    let neighbour = stored_table_of(&app, id).cell(0, 0).cloned().expect("cell");
+    assert_eq!(neighbour.alignment, cad_domain::TableCellAlignment::DEFAULT);
+    assert_eq!(neighbour.rotation, 0.0);
+
+    // `ALIGN` and `ROTATION` alone each write their own field only.
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Extended(ExtendedCommandId::TableEdit),
+        CommandPayload::Table(Box::new(TablePayload::Format {
+            cell: address(1, 2),
+            alignment: None,
+            rotation: Some(0.75),
+        })),
+    )
+    .expect("a rotation-only write");
+    let cell = stored_table_of(&app, id).cell(0, 1).cloned().expect("cell");
+    assert_eq!(cell.alignment.dxf_code(), 7, "the alignment is kept");
+    assert_eq!(cell.rotation, 0.75);
+    assert_eq!(undo_depth(&app), undo_before + 2, "one step per write");
+}
+
+#[test]
+fn a_tabledit_format_refusal_writes_nothing() {
+    let (mut app, mut session) = application_with_document();
+    let _id = create_table(&mut app, &mut session, 2, 2);
+    let before_revision = revision(&app);
+    let before_undo = undo_depth(&app);
+
+    for (payload, code) in [
+        (
+            TablePayload::Format {
+                cell: address(1, 1),
+                alignment: None,
+                rotation: None,
+            },
+            "tabledit.format_empty",
+        ),
+        (
+            TablePayload::Format {
+                cell: address(3, 1),
+                alignment: Some(cad_domain::TableCellAlignment::DEFAULT),
+                rotation: None,
+            },
+            "tabledit.out_of_range",
+        ),
+        (
+            TablePayload::Format {
+                cell: address(1, 1),
+                alignment: Some(cad_domain::TableCellAlignment::DEFAULT),
+                rotation: Some(0.0),
+            },
+            "tabledit.unchanged",
+        ),
+    ] {
+        let error = execute(
+            &mut app,
+            &mut session,
+            CommandId::Extended(ExtendedCommandId::TableEdit),
+            CommandPayload::Table(Box::new(payload)),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&error, CadError::InvalidInput(message) if message.starts_with(code)),
+            "{code}: {error:?}"
+        );
+        assert_no_write(&app, before_revision, before_undo);
+    }
+}
+
+#[test]
+fn a_tablestyle_row_scope_writes_only_that_row_value_set() {
+    let (mut app, mut session) = application_with_document();
+    let id = create_table(&mut app, &mut session, 3, 1);
+    let undo_before = undo_depth(&app);
+    let command = TableStyleCommand {
+        rows: vec![TableRowStyleCommand {
+            scope: Some(TableStyleRowScope::One(TableRowKind::Title)),
+            text_height: Some(6.0),
+            alignment: Some(cad_domain::TableCellAlignment::from_dxf_code(2)), // TC
+            ..TableRowStyleCommand::default()
+        }],
+        ..TableStyleCommand::default()
+    };
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Extended(ExtendedCommandId::TableStyleList),
+        CommandPayload::Table(Box::new(TablePayload::Style(Box::new(command)))),
+    )
+    .expect("a row-scoped TABLESTYLE write");
+    assert_eq!(undo_depth(&app), undo_before + 1, "one undo step");
+    let table = stored_table_of(&app, id);
+    let style = table.style();
+    assert_eq!(style.row_style(TableRowKind::Title).text_height, 6.0);
+    assert_eq!(
+        style.data_row().text_height,
+        cad_domain::DEFAULT_CELL_TEXT_HEIGHT,
+        "the data row is untouched"
+    );
+    // Row 0 is the title row, so only its cells re-resolve.
+    assert_eq!(table.cell(0, 0).unwrap().text_height, 6.0);
+    assert_eq!(
+        table.cell(0, 0).unwrap().alignment.dxf_code(),
+        2,
+        "the title row's alignment reached its cells"
+    );
+    assert_eq!(
+        table.cell(1, 0).unwrap().text_height,
+        cad_domain::DEFAULT_CELL_TEXT_HEIGHT
+    );
+    assert_eq!(
+        table.cell(1, 0).unwrap().alignment,
+        cad_domain::TableCellAlignment::DEFAULT
+    );
 }

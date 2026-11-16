@@ -7,6 +7,8 @@ fn cell(text: &str) -> TableCellGeometry {
         style_name: "Standard".into(),
         style: StyleId(0),
         font: None,
+        alignment: TableCellAlignment::DEFAULT,
+        rotation: 0.0,
         merge_width: 1,
         merge_height: 1,
         borders: TableCellBorders::default(),
@@ -526,4 +528,348 @@ fn a_style_name_only_write_keeps_the_cells() {
     let renamed = table.with_style_name("Header").expect("valid name");
     assert_eq!(renamed.style_name(), "Header");
     assert_eq!(renamed.cell(0, 0).unwrap(), table.cell(0, 0).unwrap());
+}
+
+// ---------------------------------------------------------------------------
+// Per-cell formatting (alignment + rotation).
+// ---------------------------------------------------------------------------
+
+/// The one `Text` child a single-cell table draws, with its anchor.
+fn drawn_text(table: &TableGeometry) -> (Point3, f64, TextAlignH, TextAlignV) {
+    table
+        .display()
+        .iter()
+        .find_map(|child| match child {
+            SemanticGeometry::Text {
+                position,
+                rotation,
+                h_align,
+                v_align,
+                ..
+            } => Some((*position, *rotation, *h_align, *v_align)),
+            _ => None,
+        })
+        .expect("a cell text")
+}
+
+#[test]
+fn the_default_cell_format_is_the_pre_formatting_display() {
+    let mut parts = grid(1, 1);
+    parts.rows[0].cells[0].text = "x".into();
+    let table = TableGeometry::new(parts).expect("valid table");
+    let cell = table.cell(0, 0).unwrap();
+    assert_eq!(cell.alignment, TableCellAlignment::DEFAULT);
+    assert_eq!(cell.alignment.dxf_code(), 5);
+    assert_eq!(cell.rotation, 0.0);
+    // Centre/middle of the 4 x 3 cell, rotation 0, centred justification: the
+    // pre-formatting output.
+    let (position, rotation, h_align, v_align) = drawn_text(&table);
+    assert!((position.x - 2.0).abs() < 1e-12, "{position:?}");
+    assert!((position.y - 1.5).abs() < 1e-12, "{position:?}");
+    assert_eq!(rotation, 0.0);
+    assert_eq!(h_align, TextAlignH::Center);
+    assert_eq!(v_align, TextAlignV::Middle);
+}
+
+#[test]
+fn a_cell_alignment_moves_the_anchor_and_the_justification() {
+    let mut parts = grid(1, 1);
+    parts.rows[0].cells[0].text = "x".into();
+    let table = TableGeometry::new(parts).expect("valid table");
+
+    let left_top = TableCellAlignment {
+        horizontal: TableCellAlignH::Left,
+        vertical: TableCellAlignV::Top,
+    };
+    let top_left = table
+        .with_cell_format(0, 0, Some(left_top), None)
+        .expect("in range");
+    let (position, _, h_align, v_align) = drawn_text(&top_left);
+    assert_eq!(h_align, TextAlignH::Left);
+    assert_eq!(v_align, TextAlignV::Top);
+    assert!(position.x.abs() < 1e-12, "{position:?}");
+    assert!((position.y - 3.0).abs() < 1e-12, "{position:?}");
+
+    let bottom_right = TableCellAlignment {
+        horizontal: TableCellAlignH::Right,
+        vertical: TableCellAlignV::Bottom,
+    };
+    let right_bottom = table
+        .with_cell_format(0, 0, Some(bottom_right), None)
+        .expect("in range");
+    let (position, _, h_align, v_align) = drawn_text(&right_bottom);
+    assert_eq!(h_align, TextAlignH::Right);
+    assert_eq!(v_align, TextAlignV::Bottom);
+    assert!((position.x - 4.0).abs() < 1e-12, "{position:?}");
+    assert!(position.y.abs() < 1e-12, "{position:?}");
+}
+
+#[test]
+fn a_cell_rotation_is_added_to_the_frame_rotation() {
+    let mut parts = grid(1, 1);
+    parts.rows[0].cells[0].text = "x".into();
+    let table = TableGeometry::new(parts).expect("valid table");
+    let rotated = table
+        .with_cell_format(0, 0, None, Some(std::f64::consts::FRAC_PI_6))
+        .expect("in range");
+    let (_, rotation, _, _) = drawn_text(&rotated);
+    assert!((rotation - std::f64::consts::FRAC_PI_6).abs() < 1e-12);
+
+    // The frame's own rotation still adds on top of the cell's.
+    let turn = Transform3::from_basis(
+        Point3 {
+            x: 0.0,
+            y: 1.0,
+            z: 0.0,
+        },
+        Point3 {
+            x: -1.0,
+            y: 0.0,
+            z: 0.0,
+        },
+        Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        },
+    );
+    let moved = rotated.transformed(&turn).expect("a rotation");
+    let (_, rotation, _, _) = drawn_text(&moved);
+    let expected = std::f64::consts::FRAC_PI_2 + std::f64::consts::FRAC_PI_6;
+    assert!((rotation - expected).abs() < 1e-12, "{rotation}");
+    assert_eq!(
+        moved.cell(0, 0).unwrap().rotation,
+        rotated.cell(0, 0).unwrap().rotation
+    );
+}
+
+#[test]
+fn a_cell_format_write_refuses_out_of_range_and_non_finite() {
+    let table = TableGeometry::new(grid(2, 2)).expect("valid table");
+    let error = table
+        .with_cell_format(9, 0, Some(TableCellAlignment::DEFAULT), None)
+        .expect_err("out of range");
+    assert!(
+        matches!(error, CadError::InvalidInput(ref message) if message.starts_with("table.cell_out_of_range")),
+        "{error:?}"
+    );
+    let error = table
+        .with_cell_format(0, 0, None, Some(f64::NAN))
+        .expect_err("non-finite rotation");
+    assert!(
+        matches!(error, CadError::InvalidInput(ref message) if message.starts_with("table.cell_rotation")),
+        "{error:?}"
+    );
+    // A refused write leaves the receiver untouched.
+    assert_eq!(table, TableGeometry::new(grid(2, 2)).unwrap());
+    // A structural cell rotation must also be refused by the creation path.
+    let mut parts = grid(1, 1);
+    parts.rows[0].cells[0].rotation = f64::INFINITY;
+    assert!(TableGeometry::new(parts).is_err());
+}
+
+#[test]
+fn an_alignment_code_round_trips_through_its_label() {
+    for code in 1..=9 {
+        let alignment = TableCellAlignment::from_dxf_code(code);
+        assert_eq!(alignment.dxf_code(), code);
+        assert_eq!(
+            TableCellAlignment::from_label(alignment.label()),
+            Some(alignment)
+        );
+    }
+    // 0 is the value a style with no group 170 carries, and 10 is out of range:
+    // both are the DXF default, never an invented corner.
+    assert_eq!(
+        TableCellAlignment::from_dxf_code(0),
+        TableCellAlignment::DEFAULT
+    );
+    assert_eq!(
+        TableCellAlignment::from_dxf_code(10),
+        TableCellAlignment::DEFAULT
+    );
+    assert_eq!(TableCellAlignment::from_label("middle centre"), None);
+}
+
+#[test]
+fn a_cell_style_copy_moves_alignment_and_rotation_too() {
+    let mut parts = grid(2, 2);
+    parts.rows[0].cells[0].alignment = TableCellAlignment {
+        horizontal: TableCellAlignH::Right,
+        vertical: TableCellAlignV::Top,
+    };
+    parts.rows[0].cells[0].rotation = 0.25;
+    parts.rows[1].cells[1].text = "target".into();
+    let table = TableGeometry::new(parts).expect("valid table");
+    let copied = table.with_cell_styles((0, 0), &[(1, 1)]).expect("in grid");
+    let target = copied.cell(1, 1).expect("target");
+    assert_eq!(target.alignment, table.cell(0, 0).unwrap().alignment);
+    assert_eq!(target.rotation, 0.25);
+    assert_eq!(target.text, "target", "a format copy keeps the text");
+}
+
+// ---------------------------------------------------------------------------
+// Row value sets (data / title / header) and their inheritance.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn the_three_row_value_sets_default_to_the_data_row() {
+    let style = TableStyleValues::standard();
+    assert_eq!(style.title_row, None);
+    assert_eq!(style.header_row, None);
+    for row in 0..3 {
+        assert_eq!(style.row_style(style.row_kind(row, 3)), style.data_row());
+    }
+    // With both row types shown, row 0 is the title and row 1 the header.
+    assert_eq!(style.row_kind(0, 3), TableRowKind::Title);
+    assert_eq!(style.row_kind(1, 3), TableRowKind::Header);
+    assert_eq!(style.row_kind(2, 3), TableRowKind::Data);
+    // Suppressing the title moves the header up and leaves one data row.
+    let mut suppressed = style.clone();
+    suppressed.title_suppressed = true;
+    assert_eq!(suppressed.row_kind(0, 3), TableRowKind::Header);
+    assert_eq!(suppressed.row_kind(1, 3), TableRowKind::Data);
+    // A one-row table has no header row to classify.
+    assert_eq!(suppressed.row_kind(0, 1), TableRowKind::Header);
+    let mut no_rows = style.clone();
+    no_rows.header_suppressed = true;
+    assert_eq!(no_rows.row_kind(1, 3), TableRowKind::Data);
+}
+
+#[test]
+fn a_row_value_set_equal_to_the_data_row_stays_linked() {
+    let mut style = TableStyleValues::standard();
+    let mut title = style.data_row();
+    title.text_height = 6.0;
+    style.set_row_style(TableRowKind::Title, title.clone());
+    assert_eq!(style.title_row.as_ref(), Some(&title));
+    // Writing the same values back as the data row re-links the title row.
+    style.set_row_style(TableRowKind::Data, title);
+    assert_eq!(style.title_row, None);
+    assert_eq!(style.text_height, 6.0);
+    // A data-row write also reloads the data-row alignment.
+    let mut row = style.data_row();
+    row.alignment = TableCellAlignment {
+        horizontal: TableCellAlignH::Left,
+        vertical: TableCellAlignV::Bottom,
+    };
+    style.set_row_style(TableRowKind::Data, row);
+    assert_eq!(
+        style.data_row_alignment,
+        TableCellAlignment {
+            horizontal: TableCellAlignH::Left,
+            vertical: TableCellAlignV::Bottom,
+        }
+    );
+}
+
+#[test]
+fn a_title_row_style_edit_re_resolves_only_its_own_rows() {
+    let mut parts = grid(3, 1);
+    parts.rows[0].cells[0].text = "title".into();
+    parts.rows[1].cells[0].text = "header".into();
+    parts.rows[2].cells[0].text = "body".into();
+    let table = TableGeometry::new(parts).expect("valid table");
+
+    let mut style = table.style().clone();
+    let mut title = style.row_style(TableRowKind::Title);
+    title.text_height = 6.0;
+    title.alignment = TableCellAlignment {
+        horizontal: TableCellAlignH::Center,
+        vertical: TableCellAlignV::Top,
+    };
+    style.set_row_style(TableRowKind::Title, title);
+    let styled = table
+        .with_style_resolved(style, resolve_none)
+        .expect("valid");
+
+    assert_eq!(styled.cell(0, 0).unwrap().text_height, 6.0);
+    assert_eq!(
+        styled.cell(0, 0).unwrap().alignment.vertical,
+        TableCellAlignV::Top
+    );
+    // The header and data rows still inherit the data row.
+    assert_eq!(
+        styled.cell(1, 0).unwrap().text_height,
+        DEFAULT_CELL_TEXT_HEIGHT
+    );
+    assert_eq!(
+        styled.cell(1, 0).unwrap().alignment,
+        TableCellAlignment::DEFAULT
+    );
+    assert_eq!(
+        styled.cell(2, 0).unwrap().text_height,
+        DEFAULT_CELL_TEXT_HEIGHT
+    );
+    // ...and the drawn title text really moved to the top of its cell.
+    let (position, _, _, v_align) = drawn_text(&styled);
+    assert_eq!(v_align, TextAlignV::Top);
+    assert!((position.y - 3.0).abs() < 1e-12, "{position:?}");
+}
+
+#[test]
+fn a_data_row_value_set_still_reaches_the_title_and_header_rows() {
+    // The pre-row-style behaviour: with no distinguished row sets, every row
+    // inherits the data row, so one `TABLESTYLE HEIGHT` write reaches all rows.
+    let table = TableGeometry::new(grid(3, 2)).expect("valid table");
+    let mut style = table.style().clone();
+    style.text_height = 4.5;
+    let styled = table
+        .with_style_resolved(style, resolve_none)
+        .expect("valid");
+    for row in 0..3 {
+        for column in 0..2 {
+            assert_eq!(
+                styled.cell(row, column).unwrap().text_height,
+                4.5,
+                "({row}, {column})"
+            );
+        }
+    }
+}
+
+#[test]
+fn an_explicit_alignment_override_survives_a_style_edit() {
+    let mut parts = grid(2, 1);
+    let own = TableCellAlignment {
+        horizontal: TableCellAlignH::Right,
+        vertical: TableCellAlignV::Bottom,
+    };
+    parts.rows[1].cells[0].alignment = own;
+    let table = TableGeometry::new(parts).expect("valid table");
+    let mut style = table.style().clone();
+    let mut data = style.data_row();
+    data.alignment = TableCellAlignment {
+        horizontal: TableCellAlignH::Left,
+        vertical: TableCellAlignV::Top,
+    };
+    style.set_row_style(TableRowKind::Data, data);
+    let styled = table
+        .with_style_resolved(style, resolve_none)
+        .expect("valid");
+    assert_eq!(
+        styled.cell(0, 0).unwrap().alignment,
+        TableCellAlignment {
+            horizontal: TableCellAlignH::Left,
+            vertical: TableCellAlignV::Top,
+        },
+        "the inheriting cell follows the style"
+    );
+    assert_eq!(
+        styled.cell(1, 0).unwrap().alignment,
+        own,
+        "the explicitly formatted cell keeps its own alignment"
+    );
+}
+
+#[test]
+fn a_transform_scales_every_row_value_set() {
+    let mut style = TableStyleValues::standard();
+    let mut title = style.data_row();
+    title.text_height = 6.0;
+    style.set_row_style(TableRowKind::Title, title);
+    let table = TableGeometry::from_import_with_style(grid(2, 1), style);
+    let scaled = table.transformed(&Transform3::scale(2.0)).expect("uniform");
+    assert!((scaled.style().text_height - DEFAULT_CELL_TEXT_HEIGHT * 2.0).abs() < 1e-12);
+    assert!((scaled.style().title_row.as_ref().unwrap().text_height - 12.0).abs() < 1e-12);
 }

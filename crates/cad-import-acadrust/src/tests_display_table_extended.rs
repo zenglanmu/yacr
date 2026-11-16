@@ -178,7 +178,9 @@ fn table_style_object_is_resolved_from_objects_by_handle() {
     let handle = acad.allocate_handle();
     let mut style = acadrust::objects::TableStyle::new("S");
     style.handle = handle;
-    style.data_row_style.top_border.is_invisible = true;
+    // A one-row table's row 0 is the **title** row (both row types are shown by
+    // default), so the title value set is the one that reaches it.
+    style.title_row_style.top_border.is_invisible = true;
     acad.objects
         .insert(handle, acadrust::objects::ObjectType::TableStyle(style));
 
@@ -199,8 +201,14 @@ fn table_style_object_is_resolved_from_objects_by_handle() {
     assert!(
         reasons
             .iter()
-            .any(|r| r.contains("table-style header/title row borders are approximated")),
-        "{reasons:?}"
+            .any(|r| r.contains("applied per row type") && r.contains("suppression flags")),
+        "the per-row resolution must be named: {reasons:?}"
+    );
+    assert!(
+        !reasons
+            .iter()
+            .any(|r| r.contains("approximated by the data-row style")),
+        "the data-row approximation is gone: {reasons:?}"
     );
 }
 

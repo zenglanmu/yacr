@@ -1,5 +1,5 @@
-//! The post-creation table commands: `TABLEDIT MERGE|UNMERGE`, `MATCHCELL` and
-//! `TABLESTYLE`.
+//! The post-creation table commands: `TABLEDIT MERGE|UNMERGE|FORMAT`, `MATCHCELL`
+//! and `TABLESTYLE`.
 //!
 //! All three are **Work-only** and share the same shape as the cell-text edit in
 //! [`super::table_edit`]: the pre-selection is the object input (exactly one
@@ -12,8 +12,10 @@
 //! Stable refusal codes (each carries the command's own prefix):
 //!
 //! * `tabledit.payload` / `.no_selection` / `.multiple` / `.not_table` /
-//!   `.out_of_range` / `.unchanged` — the shared pre-selection and addressing
-//!   refusals, byte-identical to the cell-text form;
+//!   `.out_of_range` / `.unchanged` / `.format_empty` — the shared pre-selection
+//!   and addressing refusals, byte-identical to the cell-text form;
+//! * `tabledit.format_unsupported` — a recognised `TABLEDIT FORMAT` field this
+//!   build cannot store (colour, fill, lineweight), with the reason;
 //! * `table.merge_span` / `.merge_out_of_grid` / `.merge_covered` /
 //!   `.merge_overlap` / `.not_merged` — the domain writers' structural merge
 //!   refusals, kept under the model's own stable `table.*` prefix so the model
@@ -28,13 +30,15 @@
 //!
 //! * `TABLEDIT MERGE <row> <col> <height> <width>`
 //! * `TABLEDIT UNMERGE <row> <col>`
+//! * `TABLEDIT FORMAT <row> <col> [ALIGN <TL|TC|TR|ML|MC|MR|BL|BC|BR>]
+//!   [ROTATION <degrees>]`
 //! * `TABLEDIT STYLE <name>` — the `TABLESTYLE <name>` write, reached through the
 //!   `TABLEDIT` selector
 //! * `MATCHCELL <src_row> <src_col> <dst_row> <dst_col> [<dst_row> <dst_col> ...]`
 //! * `TABLESTYLE` (read-only report) and `TABLESTYLE [<name>] [DESC <text>]
-//!   [MARGIN <h> <v>] [HEIGHT <h>] [TEXTSTYLE <name>] [BORDER
-//!   <TOP|RIGHT|BOTTOM|LEFT|ALL> <ON|OFF|DOUBLE> [<spacing>]] [TITLE <ON|OFF>]
-//!   [HEADER <ON|OFF>]`
+//!   [MARGIN <h> <v>] [ROW <DATA|TITLE|HEADER>] [HEIGHT <h>] [TEXTSTYLE <name>]
+//!   [ALIGN <code>] [BORDER <TOP|RIGHT|BOTTOM|LEFT|ALL> <ON|OFF|DOUBLE>
+//!   [<spacing>]] [TITLE <ON|OFF>] [HEADER <ON|OFF>]`
 //!
 //! `TABLEDIT <row> <col> [text]` itself is unchanged and still lives in
 //! [`super::table_edit`]. Cell blocks/fields (`TINSERT`, `FIELD`) stay named
@@ -43,9 +47,10 @@
 use super::table_edit::{commit_table_geometry, select_table, table_refusal, TableSelection};
 use super::*;
 use crate::app_drawing::table_payload::{
-    TableCellAddress, TablePayload, TableStyleCommand, TableStyleEdge,
+    TableCellAddress, TablePayload, TableRowStyleCommand, TableStyleCommand, TableStyleEdge,
+    TableStyleRowScope,
 };
-use cad_domain::{StyleId, TableGeometry, TableStyleValues};
+use cad_domain::{StyleId, TableGeometry, TableRowKind, TableRowStyle, TableStyleValues};
 
 impl Application {
     /// Dispatch one post-creation table command.
@@ -56,16 +61,19 @@ impl Application {
         ext: ExtendedCommandId,
     ) -> CadResult<CommandOutcome> {
         match ext {
-            // `TABLEDIT` carries both the merge forms and the style assignment;
-            // which one this line is comes from its payload, so the two never
-            // answer each other's refusal.
+            // `TABLEDIT` carries the merge forms, the format form and the style
+            // assignment; which one this line is comes from its payload, so the
+            // forms never answer each other's refusal.
             ExtendedCommandId::TableEdit => match &command.payload {
-                CommandPayload::Table(payload)
-                    if matches!(payload.as_ref(), TablePayload::Style(_)) =>
-                {
-                    self.table_style(session, command)
-                }
-                _ => self.table_edit_merge(session, command),
+                CommandPayload::Table(payload) => match payload.as_ref() {
+                    TablePayload::Style(_) => self.table_style(session, command),
+                    TablePayload::Format { .. } => self.table_edit_format(session, command),
+                    _ => self.table_edit_merge(session, command),
+                },
+                _ => Err(table_refusal(
+                    "tabledit.payload",
+                    "TABLEDIT needs a table payload (MERGE/UNMERGE/FORMAT) or the cell-text form",
+                )),
             },
             ExtendedCommandId::MatchCell => self.match_cell(session, command),
             ExtendedCommandId::TableStyleList => self.table_style(session, command),
@@ -73,6 +81,89 @@ impl Application {
                 "not a table operation: {other:?}"
             ))),
         }
+    }
+
+    /// `TABLEDIT FORMAT <row> <col> [ALIGN <code>] [ROTATION <degrees>]`.
+    ///
+    /// Sets the two per-cell formatting fields this build stores *and draws*:
+    /// the text alignment and the text rotation (relative to the table frame).
+    /// Both fields combine in one write, so `ALIGN` + `ROTATION` is one
+    /// transaction / one undo step. A field this build cannot represent (colour,
+    /// fill, lineweight) is refused by the parser before this point, with its own
+    /// named reason; the payload has no slot for it, so it can never be silently
+    /// accepted here.
+    fn table_edit_format(
+        &mut self,
+        session: &SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        let CommandPayload::Table(payload) = &command.payload else {
+            return Err(table_refusal(
+                "tabledit.payload",
+                "TABLEDIT FORMAT needs a table payload (cell address, alignment, rotation)",
+            ));
+        };
+        let TablePayload::Format {
+            cell,
+            alignment,
+            rotation,
+        } = payload.as_ref()
+        else {
+            return Err(table_refusal(
+                "tabledit.payload",
+                format!(
+                    "TABLEDIT FORMAT does not accept the {} form",
+                    payload_name(payload)
+                ),
+            ));
+        };
+        if alignment.is_none() && rotation.is_none() {
+            return Err(table_refusal(
+                "tabledit.format_empty",
+                "TABLEDIT FORMAT needs at least one of ALIGN <code> or ROTATION <degrees>",
+            ));
+        }
+        let selection = select_table(self, session, command, "tabledit")?;
+        let (row, column) = resolve_cell(*cell, &selection, "tabledit")?;
+        let before = selection.table.cell(row, column).cloned().ok_or_else(|| {
+            table_refusal(
+                "tabledit.out_of_range",
+                format!("the cell {} does not exist", address_label(*cell)),
+            )
+        })?;
+        if alignment.is_some_and(|value| value == before.alignment)
+            && rotation.is_some_and(|value| value == before.rotation)
+        {
+            return Err(table_refusal(
+                "tabledit.unchanged",
+                format!(
+                    "cell {} of table {} already carries this alignment and rotation; nothing was \
+                     written",
+                    address_label(*cell),
+                    selection.before.id.0
+                ),
+            ));
+        }
+        let updated = selection
+            .table
+            .with_cell_format(row, column, *alignment, *rotation)?;
+        let after = updated.cell(row, column).cloned().unwrap_or(before);
+        commit_table_geometry(
+            self,
+            command.document,
+            &selection,
+            updated,
+            "format table cell",
+            "tabledit.format",
+            format!(
+                "TABLEDIT FORMAT: cell {} of table {} now has alignment {} and rotation {}° \
+                 (relative to the table frame); one transaction / one undo step",
+                address_label(*cell),
+                selection.before.id.0,
+                after.alignment.label(),
+                after.rotation.to_degrees()
+            ),
+        )
     }
 
     /// `TABLEDIT MERGE …` / `TABLEDIT UNMERGE …`.
@@ -183,6 +274,9 @@ impl Application {
         for target in targets {
             target_cells.push(resolve_cell(*target, &selection, "matchcell")?);
         }
+        // The whole per-cell format this build models — text height, text style
+        // identity/name/font, the four border edges, the text alignment and the
+        // text rotation. Text and merge spans are not part of it.
         let source_style = selection
             .table
             .cell(source_row, source_column)
@@ -193,6 +287,8 @@ impl Application {
                     cell.style,
                     cell.font.clone(),
                     cell.borders,
+                    cell.alignment,
+                    cell.rotation,
                 )
             })
             .ok_or_else(|| {
@@ -209,6 +305,8 @@ impl Application {
                     cell.style,
                     cell.font.clone(),
                     cell.borders,
+                    cell.alignment,
+                    cell.rotation,
                 ) == source_style
             })
         });
@@ -216,7 +314,7 @@ impl Application {
             return Err(table_refusal(
                 "matchcell.unchanged",
                 format!(
-                    "every destination cell already carries the style of {}; nothing was written",
+                    "every destination cell already carries the format of {}; nothing was written",
                     address_label(*source)
                 ),
             ));
@@ -234,14 +332,17 @@ impl Application {
             command.document,
             &selection,
             updated,
-            "match table cell style",
+            "match table cell format",
             "matchcell.applied",
             format!(
-                "MATCHCELL: copied the style of {} (text height {}, style `{}`, border \
-                 visibility/spacing) onto {addresses} of table {}; one transaction / one undo step",
+                "MATCHCELL: copied the format of {} (text height {}, style `{}`, border \
+                 visibility/spacing, alignment {}, rotation {}°) onto {addresses} of table {}; \
+                 one transaction / one undo step",
                 address_label(*source),
                 source_style.0,
                 source_style.1,
+                source_style.5.label(),
+                source_style.6.to_degrees(),
                 selection.before.id.0
             ),
         )
@@ -284,9 +385,8 @@ impl Application {
                     object: Some(ObjectId(selection.before.id.0)),
                     code: "tablestyle.report".into(),
                     message: format!(
-                        "TABLESTYLE: table {} uses style `{}` ({}, margins {} x {}, text height \
-                         {}, text style `{}`, borders top/right/bottom/left {}{}{}{}, title row {}, \
-                         header row {}){}",
+                        "TABLESTYLE: table {} uses style `{}` ({}, margins {} x {}; {}; title row \
+                         {}, header row {}){}",
                         selection.before.id.0,
                         style.name,
                         if style.description.is_empty() {
@@ -296,28 +396,9 @@ impl Application {
                         },
                         style.horizontal_margin,
                         style.vertical_margin,
-                        style.text_height,
-                        style.text_style_name,
-                        edge_label(style.borders.top.visible, style.borders.top.double_spacing),
-                        edge_label(
-                            style.borders.right.visible,
-                            style.borders.right.double_spacing
-                        ),
-                        edge_label(
-                            style.borders.bottom.visible,
-                            style.borders.bottom.double_spacing
-                        ),
-                        edge_label(style.borders.left.visible, style.borders.left.double_spacing),
-                        if style.title_suppressed {
-                            "suppressed"
-                        } else {
-                            "shown"
-                        },
-                        if style.header_suppressed {
-                            "suppressed"
-                        } else {
-                            "shown"
-                        },
+                        row_sets_label(style),
+                        suppression_label(style.title_suppressed),
+                        suppression_label(style.header_suppressed),
                         STYLE_GAPS,
                     ),
                 }],
@@ -358,12 +439,20 @@ impl Application {
         }
         // Resolve every text style name the new snapshot can stamp **before** the
         // commit takes `&mut self`: the domain writer needs the id/font pair and
-        // the commit needs the workspace mutably.
-        let mut resolved: Vec<(String, StyleId, Option<String>)> = Vec::new();
-        for name in [
-            style.text_style_name.clone(),
-            current.text_style_name.clone(),
+        // the commit needs the workspace mutably. The three row value sets can
+        // name three different styles, and the old sets' names are resolved too so
+        // a cell that stops inheriting keeps a real id/font pair.
+        let mut names: Vec<String> = Vec::new();
+        for kind in [
+            TableRowKind::Data,
+            TableRowKind::Title,
+            TableRowKind::Header,
         ] {
+            names.push(style.row_style(kind).text_style_name);
+            names.push(current.row_style(kind).text_style_name);
+        }
+        let mut resolved: Vec<(String, StyleId, Option<String>)> = Vec::new();
+        for name in names {
             if name.is_empty() || resolved.iter().any(|(seen, _, _)| *seen == name) {
                 continue;
             }
@@ -387,22 +476,69 @@ impl Application {
             "edit table style",
             "tablestyle.applied",
             format!(
-                "TABLESTYLE: table {} now uses `{}` (text height {}, text style `{}`); \
-                 {re_resolved} inheriting cell(s) re-resolved to the new values, explicitly styled \
-                 cells kept theirs; one transaction / one undo step{}",
+                "TABLESTYLE: table {} now uses `{}` ({}); {re_resolved} inheriting cell(s) \
+                 re-resolved to the new values, explicitly formatted cells kept theirs; one \
+                 transaction / one undo step{}",
                 selection.before.id.0,
                 style.name,
-                style.text_height,
-                style.text_style_name,
+                row_sets_label(&style),
                 STYLE_GAPS
             ),
         )
     }
 }
 
-/// The style fields this build stores but does not apply (named, never implied).
-const STYLE_GAPS: &str = "; the title/header row styles, per-cell border colours/lineweights/\
-fills and the annotative flag are not part of this build's table-style model";
+/// How the report and the write message summarise the three row value sets.
+fn row_sets_label(style: &TableStyleValues) -> String {
+    let data = style.data_row();
+    let mut parts = Vec::with_capacity(3);
+    for kind in [
+        TableRowKind::Data,
+        TableRowKind::Title,
+        TableRowKind::Header,
+    ] {
+        let row = style.row_style(kind);
+        let linked = if kind != TableRowKind::Data && row == data {
+            " = data row"
+        } else {
+            ""
+        };
+        parts.push(format!(
+            "{} row: text height {}, text style `{}`, alignment {}, borders {}{linked}",
+            kind.label(),
+            row.text_height,
+            row.text_style_name,
+            row.alignment.label(),
+            borders_label(&row.borders)
+        ));
+    }
+    parts.join("; ")
+}
+
+/// `top/right/bottom/left` edge labels, in one short form.
+fn borders_label(borders: &cad_domain::TableCellBorders) -> String {
+    format!(
+        "{}/{}/{}/{}",
+        edge_label(borders.top.visible, borders.top.double_spacing),
+        edge_label(borders.right.visible, borders.right.double_spacing),
+        edge_label(borders.bottom.visible, borders.bottom.double_spacing),
+        edge_label(borders.left.visible, borders.left.double_spacing)
+    )
+}
+
+fn suppression_label(suppressed: bool) -> &'static str {
+    if suppressed {
+        "suppressed"
+    } else {
+        "shown"
+    }
+}
+
+/// The style fields this build does not model (named, never implied).
+const STYLE_GAPS: &str =
+    "; per-cell text colour, border colour/lineweight and background fill are not part of this \
+     build's table model (the display has one colour per entity and no filled area), and the \
+     annotative flag is not stored";
 
 /// The `tablestyle.report` gap sentence's first character is joined mid-line, so
 /// the constant starts there rather than with a space of its own.
@@ -418,6 +554,11 @@ fn edge_label(visible: bool, double_spacing: f64) -> String {
 }
 
 /// Apply the present fields of a `TABLESTYLE` write onto `style`.
+///
+/// The row-scoped groups apply in typed order, so `ROW TITLE HEIGHT 6 ROW DATA
+/// ALIGN MC` writes exactly what it reads. A group with no explicit `ROW` scope
+/// reaches all three value sets (the pre-row-style behaviour: one height, one
+/// text style and one border set for every row).
 fn apply_style_command(style: &mut TableStyleValues, command: &TableStyleCommand) -> CadResult<()> {
     if let Some(description) = &command.description {
         style.description = description.clone();
@@ -428,44 +569,81 @@ fn apply_style_command(style: &mut TableStyleValues, command: &TableStyleCommand
     if let Some(vertical) = command.vertical_margin {
         style.vertical_margin = vertical;
     }
-    if let Some(height) = command.text_height {
-        style.text_height = height;
-    }
-    if let Some(name) = &command.text_style_name {
-        style.text_style_name = name.clone();
-    }
     if let Some(suppressed) = command.title_suppressed {
         style.title_suppressed = suppressed;
     }
     if let Some(suppressed) = command.header_suppressed {
         style.header_suppressed = suppressed;
     }
-    for (edge, visible, spacing) in &command.borders {
-        let spacing = spacing.unwrap_or(0.0);
-        if !spacing.is_finite() || spacing < 0.0 {
-            return Err(table_refusal(
-                "tablestyle.invalid",
-                format!("the double-line spacing must be finite and non-negative, got {spacing}"),
-            ));
+    for group in &command.rows {
+        apply_row_style_command(style, group)?;
+    }
+    Ok(())
+}
+
+/// Apply one row-scoped `TABLESTYLE` group.
+fn apply_row_style_command(
+    style: &mut TableStyleValues,
+    group: &TableRowStyleCommand,
+) -> CadResult<()> {
+    let kinds: &[TableRowKind] = group.scope.unwrap_or(TableStyleRowScope::All).kinds();
+    // Each targeted row starts from its **current effective** values, so a group
+    // that only sets a height keeps that row's text style, alignment and borders.
+    let mut rows: Vec<(TableRowKind, TableRowStyle)> = kinds
+        .iter()
+        .map(|kind| (*kind, style.row_style(*kind)))
+        .collect();
+    for (kind, row) in &mut rows {
+        if let Some(height) = group.text_height {
+            if !height.is_finite() || height <= 0.0 {
+                return Err(table_refusal(
+                    "tablestyle.invalid",
+                    format!(
+                        "the {} row text height must be finite and positive, got {height}",
+                        kind.label()
+                    ),
+                ));
+            }
+            row.text_height = height;
         }
-        let border = cad_domain::TableBorder {
-            visible: *visible,
-            double_spacing: spacing,
-        };
-        match edge {
-            TableStyleEdge::Top => style.borders.top = border,
-            TableStyleEdge::Right => style.borders.right = border,
-            TableStyleEdge::Bottom => style.borders.bottom = border,
-            TableStyleEdge::Left => style.borders.left = border,
-            TableStyleEdge::All => {
-                style.borders = cad_domain::TableCellBorders {
-                    top: border,
-                    right: border,
-                    bottom: border,
-                    left: border,
+        if let Some(name) = &group.text_style_name {
+            row.text_style_name = name.clone();
+        }
+        if let Some(alignment) = group.alignment {
+            row.alignment = alignment;
+        }
+        for (edge, visible, spacing) in &group.borders {
+            let spacing = spacing.unwrap_or(0.0);
+            if !spacing.is_finite() || spacing < 0.0 {
+                return Err(table_refusal(
+                    "tablestyle.invalid",
+                    format!(
+                        "the double-line spacing must be finite and non-negative, got {spacing}"
+                    ),
+                ));
+            }
+            let border = cad_domain::TableBorder {
+                visible: *visible,
+                double_spacing: spacing,
+            };
+            match edge {
+                TableStyleEdge::Top => row.borders.top = border,
+                TableStyleEdge::Right => row.borders.right = border,
+                TableStyleEdge::Bottom => row.borders.bottom = border,
+                TableStyleEdge::Left => row.borders.left = border,
+                TableStyleEdge::All => {
+                    row.borders = cad_domain::TableCellBorders {
+                        top: border,
+                        right: border,
+                        bottom: border,
+                        left: border,
+                    }
                 }
             }
         }
+    }
+    for (kind, row) in rows {
+        style.set_row_style(kind, row);
     }
     Ok(())
 }
@@ -524,6 +702,7 @@ fn re_resolved_cells(before: &TableGeometry, after: &TableGeometry) -> usize {
                 updated.text_height != cell.text_height
                     || updated.style_name != cell.style_name
                     || updated.borders != cell.borders
+                    || updated.alignment != cell.alignment
             }) {
                 changed += 1;
             }
@@ -568,6 +747,7 @@ fn payload_name(payload: &TablePayload) -> &'static str {
     match payload {
         TablePayload::Merge { .. } => "MERGE",
         TablePayload::Unmerge { .. } => "UNMERGE",
+        TablePayload::Format { .. } => "FORMAT",
         TablePayload::MatchCell { .. } => "MATCHCELL",
         TablePayload::Style(_) => "STYLE",
     }

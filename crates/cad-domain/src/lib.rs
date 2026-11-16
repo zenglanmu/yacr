@@ -7,6 +7,8 @@ mod dimension_synthesis;
 pub mod hatch;
 pub mod hatch_entity;
 mod multileader;
+// The MULTILEADER creation path (ADR 0019 F.2), split out for the code-size gate.
+mod multileader_create;
 pub mod table_entity;
 pub use block_clip::BlockClip;
 pub use hatch_entity::*;

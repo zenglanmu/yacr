@@ -48,8 +48,14 @@
 //! # Boundaries (declared, not hidden)
 //!
 //! Picking, selection and bounds still see the unclipped geometry; the clip is a
-//! **display** filter only. Nothing is persisted to DXF/DWG (import/export are
-//! untouched).
+//! **display** filter only.
+//!
+//! Persistence is one-sided: the importer reads an existing `XCLIP` from the
+//! INSERT's `ACAD_FILTER`/`SPATIAL_FILTER` chain into the same `BlockClip` (in
+//! block-local space, incl. the switched-off state), but SAVE does not write one
+//! back — the v1 exporter explodes every block reference, so no INSERT exists to
+//! own that chain. The loss is named in the export report
+//! (`export.xclip_clip_dropped`), never silent.
 //!
 //! Text and `WIPEOUT` masks inside a clipped block have no exact region cut
 //! (a mask is an erase region with its own fill rule), so they stay drawn and

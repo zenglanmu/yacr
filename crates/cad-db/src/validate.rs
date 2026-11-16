@@ -572,6 +572,9 @@ pub fn validate_geometry(geometry: &SemanticGeometry) -> CadResult<()> {
                             "table cell text height must be positive and finite",
                         ));
                     }
+                    if !cell.rotation.is_finite() {
+                        return Err(degenerate("table cell text rotation must be finite"));
+                    }
                 }
             }
             // Merge coverage must be deterministic and non-overlapping. A cell

@@ -142,6 +142,8 @@ mod tests {
             style_name: "Standard".into(),
             style: StyleId(0),
             font: Some("arial.ttf".into()),
+            alignment: cad_domain::TableCellAlignment::DEFAULT,
+            rotation: 0.0,
             merge_width: 1,
             merge_height: 1,
             borders: TableCellBorders::default(),

@@ -22,7 +22,7 @@
 //! vertices, every root's landing point and the text location all move by the
 //! same delta. That is a real leader reshape, not a whole-entity move.
 //!
-//! ## `MLEADEREDIT ADD <x> <y>` / `MLEADEREDIT REMOVE <index>`
+//! ## `MLEADEREDIT ADD <x> <y>` / `REMOVE <index>`
 //!
 //! `ADD` appends one leader line to the first root, from the typed arrow position
 //! to that root's existing dogleg vertex (the last vertex of its first line), so
@@ -33,6 +33,43 @@
 //! The only structural floor is the multileader itself: its **last** remaining
 //! line is refused by name (`mleaderedit.last_line`), because
 //! [`MultiLeaderGeometry::new`] requires at least one line.
+//!
+//! ## `MLEADEREDIT PATHTYPE <index> LINE|SPLINE|INVISIBLE`
+//!
+//! Sets one line's **own** path type (`LEADER_LINE 170`) and stamps override word
+//! (`93`) bit `1`. DXF carries that override per line and the exporter writes both
+//! verbatim, so the requested path survives a reload instead of re-resolving from
+//! the entity/style value. `INVISIBLE` is admitted: it is a real per-line DXF
+//! state (the line draws no path and no arrowhead) and the display honours it.
+//!
+//! ## `MLEADEREDIT ARROWSIZE <index> <size>`
+//!
+//! Sets one line's **own** arrowhead size (`LEADER_LINE 40`) and stamps override
+//! word bit `16`. The size must be finite and strictly positive
+//! (`mleaderedit.arrowhead_size`); a stored per-line `0` has no unambiguous
+//! meaning in the format — this display would draw no arrowhead, AutoCAD's own
+//! reading is unverified — so it is refused rather than guessed.
+//!
+//! ## `MLEADEREDIT BYSTYLE <index> PATH|ARROW`
+//!
+//! Clears the line's override bit (`1` / `16`) and re-stamps the stored value from
+//! the resolved style snapshot, so the entity/style value applies again and the
+//! field never keeps a stale value. Without it the override word would be
+//! one-way: a line forced to `SPLINE` could never follow its style again.
+//!
+//! Every action edits **one stored definition per selected leader** and stages all
+//! of them in one transaction / one undo step; a refusal on any selected leader
+//! refuses the whole command and writes nothing. An action whose requested state
+//! a leader already stores is a declared no-op (`mleaderedit.unchanged`, no
+//! transaction).
+//!
+//! The other per-line data this build stores is **not** editable here and is not
+//! silently dropped, because it has no editable semantic model: per-line colour /
+//! linetype / lineweight and the break records live in the opaque `reserved` bag as
+//! verbatim source data, and the custom arrowhead **block** handle (`341`) names a
+//! block this build cannot create or reference. The typed grammar therefore refuses
+//! those tokens by name (`mleaderedit.argument`) instead of accepting a value it
+//! could not write.
 //!
 //! ## `MLEADERCOLLECT`
 //!
@@ -64,9 +101,11 @@
 //! Every refusal is named (`mleaderalign.*`, `mleaderedit.*`,
 //! `mleadercollect.*`), happens before anything is staged, and the whole edit is
 //! all-or-nothing.
-
 use super::mleader_collect::{
     effective_line_arrowhead, effective_line_path, same_measure, CollectAdoption,
+};
+use super::mleader_line_override::{
+    clear_line_override, line_index_refusal, set_line_arrowhead_size, set_line_path_type,
 };
 use super::*;
 use crate::app_extended_w9_reports::text_explode::{replace_entities, ProducedEntity};
@@ -81,7 +120,7 @@ use cad_domain::{
 pub(super) const MLEADER_EDIT_EPS: f64 = 1e-9;
 
 /// A named invalid-input refusal (`<prefix>.<code>: …`).
-fn invalid(prefix: &str, code: &str, detail: impl std::fmt::Display) -> CadError {
+pub(super) fn invalid(prefix: &str, code: &str, detail: impl std::fmt::Display) -> CadError {
     CadError::InvalidInput(format!("{prefix}.{code}: {detail}"))
 }
 
@@ -282,13 +321,16 @@ impl Application {
         Ok(outcome)
     }
 
-    /// `MLEADEREDIT`: add or remove one leader line on every selected leader.
+    /// `MLEADEREDIT`: add, remove or re-override one leader line on every
+    /// selected leader.
     ///
     /// Refusals (named, nothing written): `mleaderedit.payload`,
     /// `mleaderedit.selection`, `mleaderedit.not_addressable`,
     /// `mleaderedit.target_missing`, `mleaderedit.space`,
     /// `mleaderedit.not_mleader`, `mleaderedit.arrow`, `mleaderedit.degenerate`,
-    /// `mleaderedit.path_type`, `mleaderedit.index`, `mleaderedit.last_line`.
+    /// `mleaderedit.path_type`, `mleaderedit.index`, `mleaderedit.last_line`,
+    /// `mleaderedit.arrowhead_size`. No-op: `mleaderedit.unchanged` (no
+    /// transaction).
     pub(crate) fn mleader_edit(
         &mut self,
         session: &mut SessionState,
@@ -311,28 +353,49 @@ impl Application {
             ));
         }
         let mut targets: Vec<(DbEntity, DbEntity)> = Vec::with_capacity(leaders.len());
+        let mut unchanged = 0usize;
         for resolved in &leaders {
-            let leader = match &payload.action {
-                MLeaderEditAction::Add { arrow } => add_leader_line(&resolved.leader, *arrow)?,
-                MLeaderEditAction::Remove { line_index } => {
-                    remove_leader_line(&resolved.leader, *line_index)?
-                }
+            // `None` is the declared no-op: the stored line already carries
+            // exactly the requested state, so staging it would bump the revision
+            // and the undo stack for nothing.
+            let Some(leader) = edit_leader_lines(&resolved.leader, &payload.action)? else {
+                unchanged += 1;
+                continue;
             };
             let mut after = resolved.entity.clone();
             after.geometry = SemanticGeometry::MultiLeader(Box::new(leader));
             targets.push((resolved.entity.clone(), after));
         }
+        if targets.is_empty() {
+            return Ok(CommandOutcome {
+                objects: Vec::new(),
+                changes: None,
+                diagnostics: vec![Diagnostic {
+                    object: None,
+                    code: "mleaderedit.unchanged".into(),
+                    message: format!(
+                        "MLEADEREDIT {}: every selected leader already stores that value; no \
+                         transaction",
+                        payload.action.token()
+                    ),
+                }],
+                measurement: None,
+                point_report: None,
+            });
+        }
+        let rewritten = targets.len();
         let mut outcome = self.update_entities(command, targets, "mleaderedit")?;
         outcome.diagnostics.push(Diagnostic {
             object: None,
             code: "mleaderedit.applied".into(),
             message: format!(
-                "MLEADEREDIT {}: rewritten {} leader(s)",
-                match payload.action {
-                    MLeaderEditAction::Add { .. } => "ADD",
-                    MLeaderEditAction::Remove { .. } => "REMOVE",
-                },
-                leaders.len()
+                "MLEADEREDIT {}: rewritten {rewritten} leader(s){}",
+                payload.action.token(),
+                if unchanged > 0 {
+                    format!("; {unchanged} already stored that value")
+                } else {
+                    String::new()
+                }
             ),
         });
         Ok(outcome)
@@ -678,6 +741,34 @@ fn move_annotation(leader: &MultiLeaderGeometry, target: Point3) -> CadResult<Mu
     MultiLeaderGeometry::new(parts)
 }
 
+/// Apply one typed action to one leader's stored line list.
+///
+/// `Ok(None)` is the declared **no-op**: the stored data already carries exactly
+/// the requested state, so staging it would bump the revision and the undo stack
+/// for nothing. Every refusal is an `Err` and leaves the leader untouched, so a
+/// selection-wide edit stays all-or-nothing.
+fn edit_leader_lines(
+    leader: &MultiLeaderGeometry,
+    action: &MLeaderEditAction,
+) -> CadResult<Option<MultiLeaderGeometry>> {
+    match action {
+        MLeaderEditAction::Add { arrow } => add_leader_line(leader, *arrow).map(Some),
+        MLeaderEditAction::Remove { line_index } => {
+            remove_leader_line(leader, *line_index).map(Some)
+        }
+        MLeaderEditAction::SetPathType {
+            line_index,
+            path_type,
+        } => set_line_path_type(leader, *line_index, *path_type),
+        MLeaderEditAction::SetArrowheadSize { line_index, size } => {
+            set_line_arrowhead_size(leader, *line_index, *size)
+        }
+        MLeaderEditAction::ClearOverride { line_index, field } => {
+            clear_line_override(leader, *line_index, *field)
+        }
+    }
+}
+
 /// Append one leader line to the first root, ending on that root's dogleg
 /// vertex.
 fn add_leader_line(leader: &MultiLeaderGeometry, arrow: Point3) -> CadResult<MultiLeaderGeometry> {
@@ -757,16 +848,9 @@ fn remove_leader_line(
     leader: &MultiLeaderGeometry,
     line_index: usize,
 ) -> CadResult<MultiLeaderGeometry> {
-    let Some(_line) = leader.lines().get(line_index) else {
-        return Err(invalid(
-            "mleaderedit",
-            "index",
-            format!(
-                "leader line index {line_index} is out of range; the leader stores {} line(s)",
-                leader.lines().len()
-            ),
-        ));
-    };
+    if leader.lines().get(line_index).is_none() {
+        return Err(line_index_refusal(leader, line_index));
+    }
     if leader.lines().len() <= 1 {
         return Err(unsupported(
             "mleaderedit",
@@ -783,7 +867,7 @@ fn remove_leader_line(
 }
 
 /// The definition parts of one stored leader (every field the constructor reads).
-fn parts_of(leader: &MultiLeaderGeometry) -> MultiLeaderParts {
+pub(super) fn parts_of(leader: &MultiLeaderGeometry) -> MultiLeaderParts {
     MultiLeaderParts {
         style: leader.style().clone(),
         style_name: leader.style_name().to_string(),

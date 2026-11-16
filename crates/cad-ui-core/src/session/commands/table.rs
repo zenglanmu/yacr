@@ -7,7 +7,7 @@
 //! the selected table) and is the authority for the named refusals.
 //!
 //! Full contracts: `crate::app_drawing::table_edit` (creation and cell text) and
-//! `crate::app_drawing::table_ops` (merge/style/match), re-exported from
+//! `crate::app_drawing::table_ops` (merge/format/style/match), re-exported from
 //! `cad-app`; `crate::session::table_export` owns `TABLEEXPORT`.
 //!
 //! * `TABLE <rows> <cols> <col_width> <row_height> <x> <y>` — an empty grid on
@@ -22,22 +22,29 @@
 //! * `TABLEDIT MERGE <row> <col> <height> <width>` — merge the range anchored at
 //!   the 1-based cell.
 //! * `TABLEDIT UNMERGE <row> <col>` — split the range covering the cell.
+//! * `TABLEDIT FORMAT <row> <col> [ALIGN <TL|TC|TR|ML|MC|MR|BL|BC|BR>]
+//!   [ROTATION <degrees>]` — set the cell's own text alignment and rotation.
+//!   `COLOR`, `FILL` and `LINEWEIGHT` are recognised and **refused by name**
+//!   (`tabledit.format_unsupported`): this build's display has one colour per
+//!   entity and no filled area, so there is no field to store them in.
 //! * `TABLEDIT STYLE <name>` — assign the table's style (the `TABLESTYLE <name>`
 //!   write through the `TABLEDIT` selector).
 //! * `MATCHCELL <src_row> <src_col> <dst_row> <dst_col> [<dst_row> <dst_col> …]`
-//!   — copy the source cell's style onto every destination cell.
+//!   — copy the source cell's whole format onto every destination cell.
 //! * `TABLESTYLE` — the read-only report; `TABLESTYLE [<name>] [DESC <text>]
-//!   [MARGIN <h> <v>] [HEIGHT <h>] [TEXTSTYLE <name>] [BORDER
-//!   <TOP|RIGHT|BOTTOM|LEFT|ALL> <ON|OFF|DOUBLE> [<spacing>]] [TITLE <ON|OFF>]
-//!   [HEADER <ON|OFF>]` — the style write.
+//!   [MARGIN <h> <v>] [ROW <DATA|TITLE|HEADER>] [HEIGHT <h>] [TEXTSTYLE <name>]
+//!   [ALIGN <code>] [BORDER <TOP|RIGHT|BOTTOM|LEFT|ALL> <ON|OFF|DOUBLE>
+//!   [<spacing>]] [TITLE <ON|OFF>] [HEADER <ON|OFF>]` — the style write. `ROW`
+//!   scopes the **following** row-scoped fields (`HEIGHT`, `TEXTSTYLE`, `ALIGN`,
+//!   `BORDER`) to one row type; without it they reach all three value sets.
 //! * `TABLEEXPORT <path.csv>` — one CSV file; the whole remainder is the path
 //!   (see `super::table_export`).
 
 use cad_app::{
-    TableCellAddress, TableCreateCommand, TableEditCommand, TablePayload, TableStyleCommand,
-    TableStyleEdge,
+    TableCellAddress, TableCreateCommand, TableEditCommand, TablePayload, TableRowStyleCommand,
+    TableStyleCommand, TableStyleEdge, TableStyleRowScope,
 };
-use cad_domain::Point3;
+use cad_domain::{Point3, TableCellAlignment, TableRowKind};
 
 use super::arguments::{parse_positive_decimal, parse_signed_decimal};
 
@@ -124,12 +131,19 @@ fn parse_positive_integer(text: &str) -> Option<u32> {
 }
 
 /// Parse the `TABLEDIT MERGE <row> <col> <height> <width>` /
-/// `TABLEDIT UNMERGE <row> <col>` forms.
+/// `TABLEDIT UNMERGE <row> <col>` / `TABLEDIT FORMAT <row> <col> …` forms.
 ///
-/// `None` when the first token is not one of those two words, so the caller can
-/// fall through to the cell-text grammar. A recognised word with a malformed
-/// remainder is also `None` (the caller then refuses the whole line by name):
-/// nothing is repaired or defaulted.
+/// `None` when the first token is not one of those words (or `STYLE`), so the
+/// caller can fall through to the cell-text grammar. A recognised word with a
+/// malformed remainder is also `None` (the caller then refuses the whole line by
+/// name): nothing is repaired or defaulted.
+///
+/// `TABLEDIT FORMAT` takes a 1-based cell address followed by at least one of
+/// `ALIGN <code>` (one of the nine DXF cell-alignment codes) and
+/// `ROTATION <degrees>`; the rotation is converted to the model's radians here.
+/// A recognised but unrepresentable field word (`COLOR`, `FILL`, `LINEWEIGHT`) is
+/// not handled here — [`tabledit_format_refusal`] names it instead, so it can
+/// never be silently dropped.
 pub fn parse_tabledit_option_argument(argument: &str) -> Option<TablePayload> {
     let text = argument.trim_start();
     let (word, rest) = split_first_token(text)?;
@@ -146,6 +160,9 @@ pub fn parse_tabledit_option_argument(argument: &str) -> Option<TablePayload> {
             height: parse_positive_integer(tokens[2])?,
             width: parse_positive_integer(tokens[3])?,
         });
+    }
+    if word.eq_ignore_ascii_case("FORMAT") {
+        return parse_tabledit_format(rest);
     }
     if word.eq_ignore_ascii_case("STYLE") {
         // `TABLEDIT STYLE <name>`: assign the table's style by name, the same
@@ -170,6 +187,97 @@ pub fn parse_tabledit_option_argument(argument: &str) -> Option<TablePayload> {
                 col: parse_positive_integer(tokens[1])?,
             },
         });
+    }
+    None
+}
+
+/// Parse `FORMAT <row> <col> [ALIGN <code>] [ROTATION <degrees>]`.
+fn parse_tabledit_format(rest: &str) -> Option<TablePayload> {
+    let tokens: Vec<&str> = rest.split_whitespace().collect();
+    if tokens.len() < 4 {
+        return None;
+    }
+    let cell = TableCellAddress {
+        row: parse_positive_integer(tokens[0])?,
+        col: parse_positive_integer(tokens[1])?,
+    };
+    let mut alignment = None;
+    let mut rotation = None;
+    let mut index = 2;
+    while index < tokens.len() {
+        let word = tokens[index];
+        index += 1;
+        if word.eq_ignore_ascii_case("ALIGN") {
+            if alignment.is_some() {
+                return None;
+            }
+            alignment = Some(TableCellAlignment::from_label(tokens.get(index)?)?);
+            index += 1;
+            continue;
+        }
+        if word.eq_ignore_ascii_case("ROTATION") {
+            if rotation.is_some() {
+                return None;
+            }
+            // Degrees on the wire (what a user types and what AutoCAD shows);
+            // the model stores radians like every other rotation.
+            rotation = Some(parse_signed_decimal(tokens.get(index)?)?.to_radians());
+            index += 1;
+            continue;
+        }
+        return None;
+    }
+    if alignment.is_none() && rotation.is_none() {
+        return None;
+    }
+    Some(TablePayload::Format {
+        cell,
+        alignment,
+        rotation,
+    })
+}
+
+/// The named refusal for a `TABLEDIT FORMAT` field this build cannot store.
+///
+/// The recognised words are the DXF per-cell appearance fields the **model** has
+/// no room for: `COLOR` (content colour, group 64), `FILL` (background colour
+/// 63 + fill flag 283) and `LINEWEIGHT` (border lineweight, groups 275-279).
+/// They are refused with a stable code and the reason, never parsed and dropped.
+/// `None` when the line carries no such field (it is then either a supported
+/// `FORMAT` line or an ordinary malformed one).
+pub fn tabledit_format_refusal(argument: &str) -> Option<String> {
+    let text = argument.trim_start();
+    let (word, rest) = split_first_token(text)?;
+    if !word.eq_ignore_ascii_case("FORMAT") {
+        return None;
+    }
+    for token in rest.split_whitespace() {
+        let (field, reason) =
+            if token.eq_ignore_ascii_case("COLOR") || token.eq_ignore_ascii_case("COLOUR") {
+                (
+                    "COLOR",
+                    "a cell's text colour has no field in this build's table model (the display \
+                 carries one colour per entity), so a stored value could never be drawn",
+                )
+            } else if token.eq_ignore_ascii_case("FILL") {
+                (
+                "FILL",
+                "a cell's background fill has no field in this build's table model (the display \
+                 has no filled area), so a stored value could never be drawn",
+            )
+            } else if token.eq_ignore_ascii_case("LINEWEIGHT") {
+                (
+                "LINEWEIGHT",
+                "a cell border's lineweight has no field in this build's table model (the display \
+                 draws every table border with the entity's lineweight)",
+            )
+            } else {
+                continue;
+            };
+        return Some(format!(
+            "tabledit.format_unsupported: TABLEDIT FORMAT cannot set {field}: {reason}; use ALIGN \
+             <TL|TC|TR|ML|MC|MR|BL|BC|BR> or ROTATION <degrees> instead; nothing was changed"
+        ));
     }
     None
 }
@@ -215,14 +323,19 @@ pub fn parse_matchcell_argument(argument: &str) -> Option<TablePayload> {
 /// * `DESC <text>` — the description; it takes the rest of the line, so it must
 ///   be the last field;
 /// * `MARGIN <h> <v>` — the horizontal/vertical cell margins;
-/// * `HEIGHT <h>` — the data-row text height;
-/// * `TEXTSTYLE <name>` — the data-row text style name;
+/// * `ROW <DATA|TITLE|HEADER>` — scope the **following** row-scoped fields to one
+///   row value set. Without it they reach all three (the pre-row-style
+///   behaviour). A second `ROW` starts a new group, so the typed order is kept;
+/// * `HEIGHT <h>` — the row's text height;
+/// * `TEXTSTYLE <name>` — the row's text style name;
+/// * `ALIGN <TL|TC|TR|ML|MC|MR|BL|BC|BR>` — the row's cell alignment;
 /// * `BORDER <TOP|RIGHT|BOTTOM|LEFT|ALL> <ON|OFF|DOUBLE> [<spacing>]` — one edge
 ///   (or all), visible/off or doubled with an optional spacing;
 /// * `TITLE <ON|OFF>`, `HEADER <ON|OFF>` — the row suppression flags.
 ///
-/// A sign, a fraction where an integer belongs, an unknown field word or a
-/// missing value is `None`: the whole line is refused, never partially applied.
+/// A sign, a fraction where an integer belongs, an unknown field word, an
+/// unknown alignment code or a missing value is `None`: the whole line is
+/// refused, never partially applied.
 pub fn parse_tablestyle_argument(argument: &str) -> Option<TableStyleCommand> {
     let tokens: Vec<&str> = argument.split_whitespace().collect();
     let mut command = TableStyleCommand::default();
@@ -256,16 +369,13 @@ pub fn parse_tablestyle_argument(argument: &str) -> Option<TableStyleCommand> {
             command.vertical_margin = Some(vertical);
             continue;
         }
-        if word.eq_ignore_ascii_case("HEIGHT") {
-            let height = parse_positive_decimal(tokens.get(index)?)?;
+        if word.eq_ignore_ascii_case("ROW") {
+            let kind = TableRowKind::from_label(tokens.get(index)?)?;
             index += 1;
-            command.text_height = Some(height);
-            continue;
-        }
-        if word.eq_ignore_ascii_case("TEXTSTYLE") {
-            let name = *tokens.get(index)?;
-            index += 1;
-            command.text_style_name = Some(name.to_string());
+            command.rows.push(TableRowStyleCommand {
+                scope: Some(TableStyleRowScope::One(kind)),
+                ..TableRowStyleCommand::default()
+            });
             continue;
         }
         if word.eq_ignore_ascii_case("TITLE") || word.eq_ignore_ascii_case("HEADER") {
@@ -276,6 +386,26 @@ pub fn parse_tablestyle_argument(argument: &str) -> Option<TableStyleCommand> {
             } else {
                 command.header_suppressed = Some(suppressed);
             }
+            continue;
+        }
+        // Everything below is row-scoped: it lands in the group the last `ROW`
+        // opened, or in one implicit "all rows" group.
+        if word.eq_ignore_ascii_case("HEIGHT") {
+            let height = parse_positive_decimal(tokens.get(index)?)?;
+            index += 1;
+            current_row_group(&mut command).text_height = Some(height);
+            continue;
+        }
+        if word.eq_ignore_ascii_case("TEXTSTYLE") {
+            let name = *tokens.get(index)?;
+            index += 1;
+            current_row_group(&mut command).text_style_name = Some(name.to_string());
+            continue;
+        }
+        if word.eq_ignore_ascii_case("ALIGN") {
+            let alignment = TableCellAlignment::from_label(tokens.get(index)?)?;
+            index += 1;
+            current_row_group(&mut command).alignment = Some(alignment);
             continue;
         }
         if word.eq_ignore_ascii_case("BORDER") {
@@ -303,7 +433,9 @@ pub fn parse_tablestyle_argument(argument: &str) -> Option<TableStyleCommand> {
                     }
                 }
             }
-            command.borders.push((edge, visible, spacing));
+            current_row_group(&mut command)
+                .borders
+                .push((edge, visible, spacing));
             continue;
         }
         return None;
@@ -311,13 +443,28 @@ pub fn parse_tablestyle_argument(argument: &str) -> Option<TableStyleCommand> {
     Some(command)
 }
 
+/// The row group a row-scoped `TABLESTYLE` field belongs to.
+///
+/// Only a `ROW` token opens a new group; every row-scoped field then extends the
+/// last one, so `ROW TITLE HEIGHT 6 ALIGN TC` is one group. A line with no `ROW`
+/// token at all gets one implicit group with no scope, which the command applies
+/// to all three value sets.
+fn current_row_group(command: &mut TableStyleCommand) -> &mut TableRowStyleCommand {
+    if command.rows.is_empty() {
+        command.rows.push(TableRowStyleCommand::default());
+    }
+    command.rows.last_mut().expect("the group is present")
+}
+
 /// The `TABLESTYLE` field words (so a style name never swallows one).
 fn is_tablestyle_field(token: &str) -> bool {
-    const FIELDS: [&str; 7] = [
+    const FIELDS: [&str; 9] = [
         "DESC",
         "MARGIN",
+        "ROW",
         "HEIGHT",
         "TEXTSTYLE",
+        "ALIGN",
         "BORDER",
         "TITLE",
         "HEADER",
@@ -380,8 +527,9 @@ pub fn invalid_matchcell_argument_reason(text: &str) -> String {
 pub fn invalid_tablestyle_argument_reason(text: &str) -> String {
     format!(
         "tablestyle.argument: `{}` is not `TABLESTYLE [<name>] [DESC <text>] [MARGIN <h> <v>] \
-         [HEIGHT <h>] [TEXTSTYLE <name>] [BORDER <TOP|RIGHT|BOTTOM|LEFT|ALL> <ON|OFF|DOUBLE> \
-         [<spacing>]] [TITLE <ON|OFF>] [HEADER <ON|OFF>]`; nothing was changed",
+         [ROW <DATA|TITLE|HEADER>] [HEIGHT <h>] [TEXTSTYLE <name>] \
+         [ALIGN <TL|TC|TR|ML|MC|MR|BL|BC|BR>] [BORDER <TOP|RIGHT|BOTTOM|LEFT|ALL> \
+         <ON|OFF|DOUBLE> [<spacing>]] [TITLE <ON|OFF>] [HEADER <ON|OFF>]`; nothing was changed",
         text.trim()
     )
 }

@@ -6,19 +6,23 @@
 use super::*;
 
 impl<'a> ImporterBuilder<'a> {
-    /// A TABLE as its first-class cell grid plus cell text.
+    /// A TABLE as its first-class cell grid plus per-cell formatting.
     ///
     /// Each cell's effective style (`cell.style` -> `row.style` -> `base_style`
-    /// -> the `TableStyle` object) decides which of its four edges are visible,
-    /// with double-line borders drawn as a second parallel line; merged interior
-    /// edges are suppressed. The representation carries one colour per entity,
-    /// so per-cell border colours/lineweights and background fills cannot be
-    /// applied: the result is always `Partial` and the reason states exactly
-    /// what is omitted.
+    /// -> the `TableStyle` object's value set for that row's kind) decides which
+    /// of its four edges are visible, its text height/style, its text alignment
+    /// and its rotation. Cells whose style still equals the table style's values
+    /// for their row therefore count as inheriting, which is what `TABLESTYLE`
+    /// re-resolves.
     ///
-    /// The grid, the merge coverage and the two degradation reasons are
-    /// unchanged from the pre-table-entity `Compound` output; the display itself
-    /// is derived by [`TableGeometry`] from the neutral definition.
+    /// The representation carries one colour per entity and no filled area, so
+    /// per-cell text colours, border colours/lineweights and background fills
+    /// cannot be applied and are not stored: the result is always `Partial` and
+    /// the reason states exactly what is omitted.
+    ///
+    /// The grid and the merge coverage are unchanged from the pre-table-entity
+    /// `Compound` output; the display itself is derived by [`TableGeometry`]
+    /// from the neutral definition.
     pub(crate) fn table_semantics(
         &self,
         t: &acadrust::entities::Table,
@@ -49,9 +53,10 @@ impl<'a> ImporterBuilder<'a> {
 
         // Base styling for cells without an override of their own: the table
         // style object reached through `table_style_handle`. Table styles live in
-        // `self.acad.objects` (there is no typed table for them); its data-row
-        // style is used because the entity does not record title/header row
-        // counts here, an approximation reported in the reason below.
+        // `self.acad.objects` (there is no typed table for them). The object
+        // carries one value set per row type, and the snapshot's suppression
+        // flags say which rows are title/header rows, so each row resolves from
+        // its own set instead of from the data row.
         let table_style = t
             .table_style_handle
             .and_then(|handle| self.acad.objects.get(&handle))
@@ -59,16 +64,21 @@ impl<'a> ImporterBuilder<'a> {
                 acadrust::objects::ObjectType::TableStyle(style) => Some(style),
                 _ => None,
             });
-        let table_style_borders =
-            table_style.map(|style| CellBorderSet::from_row_style(&style.data_row_style));
+        let snapshot = table_style_snapshot(table_style);
 
         // Whether any cell/row/base/table style was found; only then is the
         // border-fidelity reason reported instead of the plain-grid one.
         let mut styled = false;
         let mut unresolved_style = false;
         let mut dropped_extra_contents = false;
-        let mut rows: Vec<TableRowGeometry> = Vec::with_capacity(t.rows.len());
+        let row_count = t.rows.len();
+        let mut rows: Vec<TableRowGeometry> = Vec::with_capacity(row_count);
         for (row_index, row) in t.rows.iter().enumerate() {
+            // The row's own value set from the style object, if the object is
+            // there at all.
+            let table_row_style = table_style
+                .map(|style| row_style_for(style, snapshot.row_kind(row_index, row_count)));
+            let table_style_borders = table_row_style.map(CellBorderSet::from_row_style);
             let mut cells: Vec<TableCellGeometry> = Vec::with_capacity(row.cells.len());
             for (column_index, cell) in row.cells.iter().enumerate() {
                 // Effective style precedence: cell -> row -> base -> table style.
@@ -89,16 +99,16 @@ impl<'a> ImporterBuilder<'a> {
                 };
 
                 // Text height/style precedence: cell -> row -> base -> resolved
-                // TableStyle data row -> the cell content -> the importer
-                // default. The DXF reader stores group 140/7 on `cell.style`, not
-                // on the content (content defaults are 0.18 / ""), so reading the
+                // TableStyle row -> the cell content -> the importer default. The
+                // DXF reader stores group 140/7 on `cell.style`, not on the
+                // content (content defaults are 0.18 / ""), so reading the
                 // content first would silently lose every source value.
                 let content = cell.contents.first();
                 let text_height = resolve_text_height(
                     cell.style.as_ref(),
                     row.style.as_ref(),
                     t.base_style.as_ref(),
-                    table_style.map(|style| &style.data_row_style),
+                    table_row_style,
                     content,
                 )
                 .unwrap_or(DEFAULT_CELL_TEXT_HEIGHT);
@@ -106,7 +116,7 @@ impl<'a> ImporterBuilder<'a> {
                     cell.style.as_ref(),
                     row.style.as_ref(),
                     t.base_style.as_ref(),
-                    table_style.map(|style| &style.data_row_style),
+                    table_row_style,
                     content,
                 )
                 .unwrap_or_default();
@@ -122,6 +132,16 @@ impl<'a> ImporterBuilder<'a> {
                 } else {
                     None
                 };
+                // Alignment follows the same precedence, but a level only counts
+                // when it actually overrides the property: a cell style that
+                // exists only to hide a border must not reset the table style's
+                // alignment to the DXF default.
+                let alignment = resolve_alignment(
+                    cell.style.as_ref(),
+                    row.style.as_ref(),
+                    t.base_style.as_ref(),
+                    table_row_style,
+                );
 
                 if cell.contents.len() > 1
                     || cell.contents.iter().any(|content| {
@@ -148,6 +168,16 @@ impl<'a> ImporterBuilder<'a> {
                     style_name,
                     style,
                     font,
+                    alignment,
+                    // Group 145 is the cell's own rotation in the table's
+                    // coordinate system, i.e. relative to the frame. A
+                    // non-finite source value has no placement and resolves to
+                    // the neutral rotation.
+                    rotation: if cell.rotation.is_finite() {
+                        cell.rotation
+                    } else {
+                        0.0
+                    },
                     merge_width: clamp_source_span(cell.merge_width, t.columns.len(), column_index),
                     merge_height: clamp_source_span(cell.merge_height, t.rows.len(), row_index),
                     borders: TableCellBorders {
@@ -187,7 +217,7 @@ impl<'a> ImporterBuilder<'a> {
                 name: t.name.clone(),
                 description: t.description.clone(),
             },
-            table_style_snapshot(table_style),
+            snapshot,
         );
         if geometry.display().is_empty() {
             return (
@@ -197,30 +227,28 @@ impl<'a> ImporterBuilder<'a> {
         }
         let mut reasons = vec![if styled {
             "table borders drawn from cell styles; per-cell border colours/lineweights and cell \
-             background fills are not applied (one colour per entity); merged ranges emit only \
-             their anchor text; table-style header/title row borders are approximated by the \
-             data-row style; double-line border offset direction is assumed inward; \
+             background fills are not applied (one colour per entity, no filled area) and are not \
+             stored, so the writer emits the neutral ByBlock/no-fill values; merged ranges emit \
+             only their anchor text; the double-line border offset direction is assumed inward; \
              border_type/override_flags are not honoured; each cell takes its whole border set \
              from the highest-priority style"
                 .to_string()
         } else {
             "table grid and cell text drawn; merged cells and borders are approximated".to_string()
         }];
-        // Explicit limitations of the flat-text display, kept as separate named
-        // reasons so a caller can see exactly what was not applied.
+        // Named limitations of the modelling itself, kept separate so a caller
+        // can see exactly what was not applied.
         reasons.push(
-            "table cell text alignment is forced to Center/Middle; the source alignment is not \
-             applied"
-                .to_string(),
-        );
-        reasons.push(
-            "per-cell text rotation is ignored; every cell text uses the table frame's rotation"
+            "per-cell text colour, background fill and border colour/lineweight have no field in \
+             this build's table model (one colour per entity, no filled area), so those DXF \
+             groups are read and dropped by name rather than stored"
                 .to_string(),
         );
         if table_style.is_some() {
             reasons.push(
-                "table-style title/header row text height and style are approximated by the \
-                 data-row style (the entity does not record the title/header row counts here)"
+                "table-style row value sets are applied per row type from the style's title/header \
+                 suppression flags; a table that overrides which rows are title/header in \
+                 TABLECONTENT data is not recoverable from this entity"
                     .to_string(),
             );
         }
@@ -273,7 +301,8 @@ fn border_view(border: BorderView) -> TableBorder {
 /// The style is stored on the entity (there is no drawing-level table-style
 /// table in this build; the `MLEADERSTYLE` decision of ADR 0019 C/D). Every
 /// field written here is also written back by the exporter, so the snapshot is a
-/// real round-trip and not a display-only copy.
+/// real round-trip and not a display-only copy — including the object's three
+/// row value sets, one per row type.
 fn table_style_snapshot(resolved: Option<&acadrust::objects::TableStyle>) -> TableStyleValues {
     let name = resolved
         .map(|style| style.name.clone())
@@ -288,20 +317,79 @@ fn table_style_snapshot(resolved: Option<&acadrust::objects::TableStyle>) -> Tab
     snapshot.vertical_margin = style.vertical_margin;
     snapshot.title_suppressed = style.title_suppressed;
     snapshot.header_suppressed = style.header_suppressed;
-    let row = &style.data_row_style;
+    // The data row keeps its own fields so the long-standing accessors and the
+    // "inherit from the data row" default stay one value set.
+    let data_row = row_style_snapshot(&style.data_row_style);
+    snapshot.text_height = data_row.text_height;
+    snapshot.text_style_name = data_row.text_style_name;
+    snapshot.borders = data_row.borders;
+    snapshot.data_row_alignment = data_row.alignment;
+    // The other two rows are stored only when the source distinguishes them;
+    // `set_row_style` canonicalises "same as the data row" to `None` so value
+    // identity decides the linkage (no flag to disagree with the values).
+    snapshot.set_row_style(
+        TableRowKind::Title,
+        row_style_snapshot(&style.title_row_style),
+    );
+    snapshot.set_row_style(
+        TableRowKind::Header,
+        row_style_snapshot(&style.header_row_style),
+    );
+    snapshot
+}
+
+/// One `TABLESTYLE` row record as the neutral row value set.
+fn row_style_snapshot(row: &acadrust::objects::RowCellStyle) -> TableRowStyle {
+    let mut out = TableRowStyle::default();
     if row.text_height.is_finite() && row.text_height > 0.0 {
-        snapshot.text_height = row.text_height;
+        out.text_height = row.text_height;
     }
     if !row.text_style_name.is_empty() {
-        snapshot.text_style_name = row.text_style_name.clone();
+        out.text_style_name = row.text_style_name.clone();
     }
-    snapshot.borders = TableCellBorders {
+    out.alignment = TableCellAlignment::from_dxf_code(i32::from(row.alignment as i16));
+    out.borders = TableCellBorders {
         top: border_view(BorderView::from_table_border(&row.top_border)),
         right: border_view(BorderView::from_table_border(&row.right_border)),
         bottom: border_view(BorderView::from_table_border(&row.bottom_border)),
         left: border_view(BorderView::from_table_border(&row.left_border)),
     };
-    snapshot
+    out
+}
+
+/// The `TABLESTYLE` row record a row of `kind` resolves from.
+fn row_style_for(
+    style: &acadrust::objects::TableStyle,
+    kind: TableRowKind,
+) -> &acadrust::objects::RowCellStyle {
+    match kind {
+        TableRowKind::Title => &style.title_row_style,
+        TableRowKind::Header => &style.header_row_style,
+        TableRowKind::Data => &style.data_row_style,
+    }
+}
+
+/// Resolve a cell's effective text alignment from the source levels.
+///
+/// Unlike the height/style name, an alignment level only wins when it actually
+/// overrides the property: a cell style that exists only to hide a border stores
+/// the neutral `0` alignment code, which must not shadow the table style row's
+/// real alignment. The DXF reader sets the property bit from the group's
+/// presence, so `sets` is exactly "the source wrote group 170 here".
+fn resolve_alignment(
+    cell_style: Option<&acadrust::entities::CellStyle>,
+    row_style: Option<&acadrust::entities::CellStyle>,
+    base_style: Option<&acadrust::entities::CellStyle>,
+    table_row_style: Option<&acadrust::objects::RowCellStyle>,
+) -> TableCellAlignment {
+    for style in [cell_style, row_style, base_style].into_iter().flatten() {
+        if style.sets(acadrust::entities::CellStylePropertyFlags::ALIGNMENT) {
+            return TableCellAlignment::from_dxf_code(style.alignment);
+        }
+    }
+    table_row_style
+        .map(|row| TableCellAlignment::from_dxf_code(i32::from(row.alignment as i16)))
+        .unwrap_or(TableCellAlignment::DEFAULT)
 }
 
 /// Resolve a cell's effective text height from source levels, in precedence

@@ -14,13 +14,16 @@
 //! The display derivation is a **verbatim move** of the pre-table-entity
 //! importer's `cad-import-acadrust::entity::table` cell-grid synthesis: one
 //! `Line` per visible cell edge (a double border adds a second, inward-offset
-//! line) and one `Text` per anchoring cell with content (cell centre, centred
-//! horizontally and vertically, rotation 0). The acceptance for this migration
-//! is display equivalence with that `Compound` output, not a new rendering.
+//! line) and one `Text` per anchoring cell with content. The acceptance for that
+//! migration was display equivalence with the old `Compound` output; the two
+//! formatting fields added since — [`TableCellAlignment`] and the per-cell text
+//! rotation — default to the old drawing exactly (centre/middle, frame rotation),
+//! so a table that never sets them still derives the pre-formatting display.
 //!
-//! Honest boundary: per-cell border colours, lineweights and background fills
-//! are not part of this representation (one colour per entity); the importer
-//! reports that gap in its `Completeness::Partial` reasons. A merged range is
+//! Honest boundary: per-cell border colours, lineweights, text colours and
+//! background fills are not part of this representation (one colour per entity,
+//! no filled area); the importer and the exporter report that gap by name in
+//! their `Completeness::Partial` / conversion reasons. A merged range is
 //! stored as the anchor cell's `merge_width`/`merge_height`; covered cells are
 //! still present in [`TableRowGeometry::cells`] (as the source stores them) and
 //! contribute no display.
@@ -31,10 +34,14 @@ use crate::{
     TextLineSpacing, Transform3, DEFAULT_TEXT_WIDTH_FACTOR,
 };
 
+pub use format::{
+    TableCellAlignH, TableCellAlignV, TableCellAlignment, TableRowKind, TableRowStyle,
+};
 pub use style::{TableStyleValues, DEFAULT_TABLE_MARGIN, DEFAULT_TABLE_STYLE_NAME};
 
 mod csv;
 mod edit;
+mod format;
 mod style;
 
 /// Similarity tolerance for the table transform (the same ratio rule every
@@ -139,7 +146,8 @@ pub struct TableCellBorders {
     pub left: TableBorder,
 }
 
-/// One cell: its first content's text, text-style identity and merge span.
+/// One cell: its first content's text, text-style identity, merge span and the
+/// two formatting fields this build can draw.
 ///
 /// Only the first content is modelled (the importer has always drawn only the
 /// first content). `text` is the *effective* string: `formatted_value` when the
@@ -164,6 +172,14 @@ pub struct TableCellGeometry {
     pub style: StyleId,
     /// The style's font resource key, when known.
     pub font: Option<String>,
+    /// Horizontal/vertical text placement inside the cell (DXF cell-alignment
+    /// code, group 170). [`TableCellAlignment::DEFAULT`] is centre/middle: the
+    /// placement every cell had before alignment was modelled.
+    pub alignment: TableCellAlignment,
+    /// Text rotation in radians **relative to the table frame** (DXF group 145
+    /// of the cell record). `0.0` is the neutral value and keeps the frame
+    /// rotation the display has always used.
+    pub rotation: f64,
     /// Number of columns this cell spans (including itself); `>= 1`.
     pub merge_width: u32,
     /// Number of rows this cell spans (including itself); `>= 1`.
@@ -211,15 +227,15 @@ pub struct TableParts {
 /// [`Self::from_import`], [`Self::from_import_with_style`],
 /// [`Self::transformed`], [`Self::with_cell_text`], [`Self::with_cell_texts`],
 /// [`Self::with_merge`], [`Self::with_unmerge`], [`Self::with_cell_styles`],
-/// [`Self::with_style_resolved`] and [`Self::with_style_name`]. `display` is
-/// derived from the other fields.
+/// [`Self::with_cell_format`], [`Self::with_style_resolved`] and
+/// [`Self::with_style_name`]. `display` is derived from the other fields.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableGeometry {
     frame: TableFrame,
     columns: Vec<TableColumnGeometry>,
     rows: Vec<TableRowGeometry>,
-    /// The table style snapshot (`TABLESTYLE`): the name plus the data-row
-    /// values the cells inherit.
+    /// The table style snapshot (`TABLESTYLE`): the name, the data-row values
+    /// and (when a row type is distinguished) the title/header row values.
     style: TableStyleValues,
     name: String,
     description: String,
@@ -380,6 +396,10 @@ impl TableGeometry {
                         style_name: cell.style_name.clone(),
                         style: cell.style,
                         font: cell.font.clone(),
+                        // An alignment and a frame-relative rotation are both
+                        // invariant under a rotation + uniform scale.
+                        alignment: cell.alignment,
+                        rotation: cell.rotation,
                         merge_width: cell.merge_width,
                         merge_height: cell.merge_height,
                         borders: TableCellBorders {
@@ -503,9 +523,11 @@ impl TableGeometry {
 
     /// Derive the display from `frame + columns + rows`.
     ///
-    /// Verbatim from the pre-table-entity importer, in the same order: row by
-    /// row, cell by cell; each anchoring cell contributes its visible edges and
-    /// then its first-content text.
+    /// Same order as the pre-table-entity importer: row by row, cell by cell;
+    /// each anchoring cell contributes its visible edges and then its
+    /// first-content text. The text anchor, its justification and its rotation
+    /// come from the cell's own [`TableCellAlignment`] and rotation, whose
+    /// defaults reproduce the old cell-centre/centred/frame-rotation output.
     fn build_display(&self) -> Vec<SemanticGeometry> {
         let mut children: Vec<SemanticGeometry> = Vec::new();
         if self.columns.is_empty() || self.rows.is_empty() {
@@ -578,20 +600,40 @@ impl TableGeometry {
                 push_cell_borders(&mut children, &corner, x, y, span_w, span_h, &cell.borders);
 
                 if !cell.text.is_empty() {
+                    // The alignment decides both where the text anchors and which
+                    // `Text` justification it carries, so the drawn result is the
+                    // same rectangle a user sees in AutoCAD: a left-aligned cell
+                    // starts at the cell's left edge, a top-aligned one hangs
+                    // from its top edge. The default (centre/middle) reproduces
+                    // the pre-alignment cell centre exactly.
+                    let (anchor_x, h_align) = match cell.alignment.horizontal {
+                        TableCellAlignH::Left => (x, TextAlignH::Left),
+                        TableCellAlignH::Center => (x + span_w * 0.5, TextAlignH::Center),
+                        TableCellAlignH::Right => (x + span_w, TextAlignH::Right),
+                    };
+                    let (anchor_y, v_align) = match cell.alignment.vertical {
+                        TableCellAlignV::Top => (y + span_h, TextAlignV::Top),
+                        TableCellAlignV::Middle => (y + span_h * 0.5, TextAlignV::Middle),
+                        TableCellAlignV::Bottom => (y, TextAlignV::Bottom),
+                    };
                     children.push(SemanticGeometry::Text {
                         text: cell.text.clone(),
-                        position: corner(x + span_w * 0.5, y + span_h * 0.5),
+                        position: corner(anchor_x, anchor_y),
                         style: cell.style,
                         height: if cell.text_height > 0.0 {
                             cell.text_height
                         } else {
                             DEFAULT_CELL_TEXT_HEIGHT
                         },
-                        rotation: text_rotation,
+                        // The stored rotation is relative to the frame, so it is
+                        // added to it here. On a tilted source plane the frame
+                        // part is 0 (world XY text, reported by the importer) and
+                        // the cell's own part still applies.
+                        rotation: text_rotation + cell.rotation,
                         font: cell.font.clone(),
-                        h_align: TextAlignH::Center,
-                        v_align: TextAlignV::Middle,
-                        // Table cell text is placed at a fixed cell centre; the
+                        h_align,
+                        v_align,
+                        // Table cell text is placed at a fixed cell anchor; the
                         // cell width is not a text wrap boundary.
                         wrap_width: None,
                         // Table cells do not stretch their text.
@@ -796,6 +838,11 @@ fn validate_parts(parts: &TableParts) -> CadResult<()> {
             if !cell.text_height.is_finite() || cell.text_height <= 0.0 {
                 return Err(CadError::InvalidInput(
                     "table.structure: cell text heights must be finite and positive".into(),
+                ));
+            }
+            if !cell.rotation.is_finite() {
+                return Err(CadError::InvalidInput(
+                    "table.structure: cell text rotations must be finite".into(),
                 ));
             }
         }

@@ -479,6 +479,9 @@ fn textedit_on_a_multileader_writes_one_transaction_and_a_consistent_display() {
             arrow: p3(0.0, 0.0, 0.0),
             landing: p3(10.0, 2.0, 0.0),
             text: "OLD".into(),
+            dogleg_length: None,
+            dogleg_angle: None,
+            attachment: None,
         },
     )
     .unwrap();

@@ -254,9 +254,12 @@ impl CadSession {
                 self.shape_block_argument(selector, argument, text)
             }
             // The 2026-11-12 MULTILEADER edits, the MLEDIT two-LINE subset and the
-            // TOLERANCE frame. Each payload rides the existing selection.
+            // TOLERANCE frame. Each payload rides the existing selection. `MLEADER`
+            // joins them: its typed line is the *creation* form (four coordinates,
+            // the text last and the optional DOGLEG/DOGLEGANGLE/ATTACH prefix).
             super::commands::MLEDIT_SELECTOR
             | super::commands::DASH_MLEDIT_SELECTOR
+            | super::commands::MLEADER_SELECTOR
             | super::commands::MLEADERALIGN_SELECTOR
             | super::commands::MLEADEREDIT_SELECTOR
             | super::commands::TOLERANCE_SELECTOR => {

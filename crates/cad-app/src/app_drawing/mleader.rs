@@ -29,18 +29,31 @@
 //!   vertices, and a higher request is the named `mleader.option_max_points`
 //!   refusal (the payload carries no vertex list);
 //! * **arrowhead** — the style's arrowhead size draws it; a style that disables the
-//!   arrowhead (size `0`) is refused by name (`mleader.option_arrowhead_off`).
+//!   arrowhead (size `0`) is refused by name (`mleader.option_arrowhead_off`);
+//! * **dogleg length** — `dogleg_length` overrides the style's landing distance
+//!   for the created root; it lands on the root's `LEADER 40` and the dogleg
+//!   start vertex is derived from it, so it round-trips
+//!   (`mleader.options_applied`);
+//! * **dogleg direction** — `dogleg_angle` (radians about `+Z`, the direction the
+//!   dogleg travels toward the annotation) replaces the arrow/text side
+//!   derivation; it lands on the root's `LEADER 11` and round-trips;
+//! * **attachment pair** — `attachment` sets the horizontal (`179` /
+//!   `CONTEXT_DATA 171`) and vertical (`173` / `CONTEXT_DATA 174`) text
+//!   attachment codes; both are written verbatim, so they round-trip.
 //!
 //! Still deliberate subsets (see [`crate::CommandId::MLeader`]): **no style
-//! selector**, no dogleg or attachment override, **no angular constraint**, and **no
-//! content-less creation** — a MULTILEADER without text is import/display/export
-//! only (decision F.2).
+//! selector** and **no content-less creation** — a MULTILEADER without text is
+//! import/display/export only (decision F.2) — and the AutoCAD **angle
+//! constraint** (text angle type, DXF entity `174` / style `175`) has **no field
+//! in this domain**: the `MULTILEADER` writer declares it as an unmodelled group,
+//! so creation refuses it by name (`mleader.option_text_angle`) instead of adding
+//! a field the exporter would silently drop.
 
 use super::*;
 use crate::app_drawing::annot_batch::leader::{
     options_report, plan_leader_options, MAX_CREATED_LEADER_POINTS,
 };
-use cad_domain::{MLeaderPathType, MultiLeaderGeometry, MultiLeaderParts};
+use cad_domain::{MLeaderCreateOptions, MLeaderPathType, MultiLeaderGeometry, MultiLeaderParts};
 
 // `MLEADERSTYLE SET <name>` writes `SessionState::current_mleader_style`, so
 // creation reads the session name (default `Standard`, which the builder pins).
@@ -68,9 +81,13 @@ impl Application {
     ///   `mleader.content_unsupported` (annotation type), `mleader.path_type`
     ///   (invisible path), `mleader.option_arrowhead_off`,
     ///   `mleader.option_max_points`, `mleader.style_invalid`;
+    /// * the creation options' refusals: `mleader.option_dogleg` (a non-finite or
+    ///   non-positive `dogleg_length`), `mleader.option_angle` (a non-finite
+    ///   `dogleg_angle`), `mleader.option_attachment` (a horizontal code outside
+    ///   `1..=3` or a vertical code outside `0..=10`);
     /// * every refusal [`MultiLeaderGeometry::created`] raises: non-finite or
-    ///   non-`+Z`-coplanar points, a landing point no farther than the style's
-    ///   dogleg length, or an unusable style size;
+    ///   non-`+Z`-coplanar points, a landing point no farther than the dogleg
+    ///   length, or an unusable style size;
     /// * a missing active layer (the shared create funnel).
     pub(crate) fn create_mleader(
         &mut self,
@@ -81,10 +98,14 @@ impl Application {
             arrow,
             landing,
             text,
+            dogleg_length,
+            dogleg_angle,
+            attachment,
         } = &command.payload
         else {
             return Err(CadError::InvalidInput(
-                "mleader.payload: CreateMLeader needs a MLeader { arrow, landing, text } payload"
+                "mleader.payload: CreateMLeader needs a MLeader { arrow, landing, text, \
+                 dogleg_length, dogleg_angle, attachment } payload"
                     .into(),
             ));
         };
@@ -139,15 +160,23 @@ impl Application {
         // than re-derived here (one derivation rule, not two).
         let mut values = resolution.values.clone();
         values.path_type = MLeaderPathType::StraightLineSegments;
-        let geometry = MultiLeaderGeometry::created(
+        let create_options = MLeaderCreateOptions {
+            dogleg_length: *dogleg_length,
+            dogleg_angle: *dogleg_angle,
+            attachment_point: attachment.map(|pair| pair.point),
+            left_attachment: attachment.map(|pair| pair.left),
+        };
+        let geometry = MultiLeaderGeometry::created_with_options(
             values,
             style_name,
             resolution.left_attachment,
             *arrow,
             *landing,
             text.clone(),
+            create_options,
         )?;
         let geometry = with_leader_path_type(geometry, options.path)?;
+        let options_row = create_options_report(create_options, &geometry);
         let mut outcome = self.commit_new_entity(
             session,
             command,
@@ -155,6 +184,9 @@ impl Application {
             "create mleader",
         )?;
         outcome.diagnostics.push(options_report(options));
+        if let Some(row) = options_row {
+            outcome.diagnostics.push(row);
+        }
         if options.path == MLeaderPathType::Spline {
             outcome.diagnostics.push(Diagnostic {
                 object: outcome.objects.first().copied(),
@@ -170,6 +202,62 @@ impl Application {
         }
         Ok(outcome)
     }
+}
+
+/// The report row for the creation options that were actually applied.
+///
+/// Every explicit option lands in a stored field the exporter writes verbatim, so
+/// this row names the value and the group it went to; no option is applied
+/// silently. `None` when the payload asked for none.
+fn create_options_report(
+    options: MLeaderCreateOptions,
+    geometry: &MultiLeaderGeometry,
+) -> Option<Diagnostic> {
+    let mut rows: Vec<String> = Vec::new();
+    if options.dogleg_length.is_some() {
+        let root = geometry.roots().first();
+        rows.push(format!(
+            "dogleg length {} (LEADER 40)",
+            root.map(|root| root.dogleg_length).unwrap_or(f64::NAN)
+        ));
+    }
+    if options.dogleg_angle.is_some() {
+        let vector = geometry
+            .roots()
+            .first()
+            .map(|root| root.dogleg_vector)
+            .unwrap_or(cad_domain::Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            });
+        rows.push(format!(
+            "dogleg direction {}° (LEADER 11: {}, {})",
+            vector.y.atan2(vector.x).to_degrees(),
+            vector.x,
+            vector.y
+        ));
+    }
+    if options.left_attachment.is_some() || options.attachment_point.is_some() {
+        let text = geometry.text();
+        rows.push(format!(
+            "text attachment pair {} / {} (entity 179/173, CONTEXT_DATA 171/174)",
+            text.attachment_point, text.left_attachment
+        ));
+    }
+    if rows.is_empty() {
+        return None;
+    }
+    Some(Diagnostic {
+        object: None,
+        code: "mleader.options_applied".into(),
+        message: format!(
+            "MLEADER: the typed creation option(s) replaced the resolved style values: {}. Every \
+             one of them is stored on the entity in the group named above and written verbatim, so \
+             it round-trips",
+            rows.join("; ")
+        ),
+    })
 }
 
 /// Re-stamp the derived definition's leader path type.

@@ -19,6 +19,8 @@ fn cell(text: &str) -> TableCellGeometry {
         style_name: "Standard".into(),
         style: StyleId(0),
         font: None,
+        alignment: TableCellAlignment::DEFAULT,
+        rotation: 0.0,
         merge_width: 1,
         merge_height: 1,
         borders: TableCellBorders::default(),
@@ -114,14 +116,21 @@ fn table_exports_as_an_acadtable_entity_with_cells_and_merges() {
             .any(|entry| entry.code == "export.converted.table"),
         "{report:?}"
     );
-    // The style object **is** written now; the remaining named loss is the
-    // title/header row styles being approximated by the data-row style.
+    // The style object **is** written with all three row value sets; the named
+    // losses that remain are the model's own (colours/fills) and the writer's.
     assert!(
         report
             .entries
             .iter()
-            .any(|entry| entry.message.contains("title/header row styles")),
+            .any(|entry| entry.message.contains("per-cell text colour")),
         "{report:?}"
+    );
+    assert!(
+        !report
+            .entries
+            .iter()
+            .any(|entry| entry.message.contains("title/header row styles")),
+        "the title/header row value sets are written now: {report:?}"
     );
 
     // 3. Re-import preserves the cells, text and merge span.
@@ -487,7 +496,135 @@ fn the_table_style_object_round_trips_through_dxf() {
     assert!(
         report.entries.iter().any(|entry| entry
             .message
-            .contains("border visibility and double-line spacing are not written")),
+            .contains("border double-line spacing, border type and margin overrides")),
         "{report:?}"
     );
+}
+
+/// A one-row table from one already-built cell, so a formatting field can be
+/// round-tripped in isolation.
+fn single_cell_table(cell: TableCellGeometry) -> TableGeometry {
+    TableGeometry::from_import(TableParts {
+        frame: TableFrame::default(),
+        columns: vec![TableColumnGeometry {
+            width: 6.0,
+            name: "A".into(),
+        }],
+        rows: vec![TableRowGeometry {
+            height: 3.0,
+            cells: vec![cell],
+        }],
+        style_name: "Standard".into(),
+        name: String::new(),
+        description: String::new(),
+    })
+}
+
+#[test]
+fn a_cell_alignment_survives_export_and_reimport() {
+    for code in 1..=9 {
+        let mut styled = cell("x");
+        styled.alignment = cad_domain::TableCellAlignment::from_dxf_code(code);
+        let table = single_cell_table(styled);
+        let (bytes, _report) = export_one(SemanticGeometry::Table(Box::new(table)));
+        let reimported = import_bytes(&bytes);
+        let imported = imported_table(&reimported);
+        let written = imported.cell(0, 0).expect("the cell");
+        assert_eq!(
+            written.alignment.dxf_code(),
+            code,
+            "alignment code {code} must round-trip"
+        );
+    }
+}
+
+#[test]
+fn a_cell_text_rotation_survives_export_and_reimport() {
+    let mut styled = cell("x");
+    styled.rotation = -0.5;
+    let table = single_cell_table(styled);
+    let (bytes, _report) = export_one(SemanticGeometry::Table(Box::new(table)));
+    let reimported = import_bytes(&bytes);
+    let imported = imported_table(&reimported);
+    let written = imported.cell(0, 0).expect("the cell");
+    assert!(
+        (written.rotation - -0.5).abs() < 1e-12,
+        "the per-cell rotation (group 145) must round-trip: {written:?}"
+    );
+}
+
+#[test]
+fn the_title_and_header_row_value_sets_round_trip_through_the_style_object() {
+    let mut style = TableStyleValues::named("Report");
+    let mut title = style.data_row();
+    title.text_height = 6.0;
+    title.alignment = cad_domain::TableCellAlignment::from_dxf_code(2); // TC
+    title.borders.top = TableBorder::HIDDEN;
+    style.set_row_style(cad_domain::TableRowKind::Title, title.clone());
+    let mut header = style.data_row();
+    header.text_height = 4.0;
+    header.alignment = cad_domain::TableCellAlignment::from_dxf_code(8); // BC
+    style.set_row_style(cad_domain::TableRowKind::Header, header.clone());
+    style.title_suppressed = true;
+    let mut body = cell("body");
+    body.text_height = style.text_height;
+    let table = TableGeometry::from_import_with_style(
+        TableParts {
+            frame: TableFrame::default(),
+            columns: vec![TableColumnGeometry {
+                width: 6.0,
+                name: "A".into(),
+            }],
+            rows: vec![TableRowGeometry {
+                height: 3.0,
+                cells: vec![body],
+            }],
+            style_name: "Report".into(),
+            name: String::new(),
+            description: String::new(),
+        },
+        style,
+    );
+    let (bytes, _report) = export_one(SemanticGeometry::Table(Box::new(table)));
+    let reimported = import_bytes(&bytes);
+    let imported = imported_table(&reimported);
+    let stored = imported.style();
+    assert_eq!(stored.name, "Report");
+    assert_eq!(stored.title_row.as_ref(), Some(&title), "{stored:?}");
+    assert_eq!(stored.header_row.as_ref(), Some(&header), "{stored:?}");
+    assert!(stored.title_suppressed);
+}
+
+#[test]
+fn an_unrepresentable_cell_appearance_is_a_named_reason_not_a_field() {
+    // The model has no per-cell colour/fill field, so the writer emits the
+    // neutral values and the report names the gap. The test pins both halves:
+    // nothing was invented, and the loss is stated.
+    let table = single_cell_table(cell("x"));
+    let (bytes, report) = export_one(SemanticGeometry::Table(Box::new(table)));
+    assert!(
+        report.entries.iter().any(|entry| entry
+            .message
+            .contains("per-cell text colour, border colour/lineweight")
+            && entry.message.contains("neutral ByBlock/no-fill")),
+        "the colour/fill gap must be named: {report:?}"
+    );
+    let document = DxfReader::from_reader(Cursor::new(bytes))
+        .expect("reader")
+        .read()
+        .expect("written DXF parses");
+    let written = document
+        .entities()
+        .find_map(|entity| match entity {
+            EntityType::Table(table) => Some(table.as_ref()),
+            _ => None,
+        })
+        .expect("one TABLE entity");
+    let style = written.rows[0].cells[0]
+        .style
+        .as_ref()
+        .expect("the written cell style");
+    assert!(!style.fill_enabled, "no fill was invented");
+    assert_eq!(style.background_color, acadrust::types::Color::ByBlock);
+    assert_eq!(style.content_color, acadrust::types::Color::ByBlock);
 }

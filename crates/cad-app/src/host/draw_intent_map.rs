@@ -199,7 +199,9 @@ impl HostController {
             ),
             // MLEADER: the two captured points and the terminal text. The style
             // values are resolved by the command from the drawing's
-            // `MLeaderStyle` table, so nothing style-shaped travels here.
+            // `MLeaderStyle` table, so nothing style-shaped travels here; the
+            // creation options (`DOGLEG`/`DOGLEGANGLE`/`ATTACH`) are typed-line
+            // only, so the interactive path keeps the style values.
             DrawIntent::MLeader {
                 arrow,
                 landing,
@@ -210,6 +212,9 @@ impl HostController {
                     arrow,
                     landing,
                     text,
+                    dogleg_length: None,
+                    dogleg_angle: None,
+                    attachment: None,
                 },
             ),
             DrawIntent::Move { delta } => (

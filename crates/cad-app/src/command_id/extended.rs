@@ -476,8 +476,10 @@ pub enum ExtendedCommandId {
     /// `MLEADERALIGN`: align/space the selected MULTILEADERs' text
     /// (`app_drawing::mleader_edit`).
     MLeaderAlign,
-    /// `MLEADEREDIT`: add/remove one leader line on the selected MULTILEADERs
-    /// (`app_drawing::mleader_edit`).
+    /// `MLEADEREDIT`: add/remove a leader line, and set/clear one line's own
+    /// path type (`LEADER_LINE 170`) and arrowhead size (`40`) behind the `93`
+    /// override word (`app_drawing::mleader_edit`,
+    /// `app_drawing::mleader_line_override`).
     MLeaderEdit,
     /// `MLEADERCOLLECT`: collect the selected MULTILEADERs into one
     /// (`app_drawing::mleader_edit`).

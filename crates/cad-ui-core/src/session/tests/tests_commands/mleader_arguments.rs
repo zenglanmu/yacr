@@ -1,21 +1,24 @@
-//! `MLEDIT` / `-MLEDIT` / `MLEADERALIGN` / `MLEADEREDIT` / `TOLERANCE`
-//! typed-argument grammars.
+//! `MLEDIT` / `-MLEDIT` / `MLEADER` / `MLEADERALIGN` / `MLEADEREDIT` /
+//! `TOLERANCE` typed-argument grammars.
 //!
 //! The parsers are pure and strict; the command layer is the authority for every
-//! semantic refusal (`mledit.*`, `mleaderalign.*`, `mleaderedit.*`,
+//! semantic refusal (`mledit.*`, `mleader.*`, `mleaderalign.*`, `mleaderedit.*`,
 //! `tolerance.*`). These tests pin the admitted token shapes and prove every
-//! selector is an argument selector (`MLEADERCOLLECT` deliberately is not).
+//! selector is an argument selector (`MLEADERCOLLECT` deliberately is not). The
+//! one admitted token the domain cannot carry (`MLEADER TEXTANGLE`, the angle
+//! constraint of DXF 174) is pinned as a *named* refusal, never a silent drop.
 
 use crate::session::commands::{
-    parse_mleaderalign_argument, parse_mleaderedit_argument, parse_mledit_argument,
-    parse_tolerance_argument, ARGUMENT_SELECTORS, DASH_MLEDIT_SELECTOR, MLEADERALIGN_SELECTOR,
-    MLEADEREDIT_SELECTOR, MLEDIT_SELECTOR, TOLERANCE_SELECTOR,
+    parse_mleader_argument, parse_mleaderalign_argument, parse_mleaderedit_argument,
+    parse_mledit_argument, parse_tolerance_argument, MLeaderCreateInput, MLeaderParseError,
+    MLeaderUnmodelledOption, ARGUMENT_SELECTORS, DASH_MLEDIT_SELECTOR, MLEADERALIGN_SELECTOR,
+    MLEADEREDIT_SELECTOR, MLEADER_SELECTOR, MLEDIT_SELECTOR, TOLERANCE_SELECTOR,
 };
 use cad_app::{
-    MLeaderAlignCommand, MLeaderAlignMode, MLeaderEditAction, MLeaderEditCommand, MlEditCommand,
-    MlEditMode, ToleranceCommand,
+    MLeaderAlignCommand, MLeaderAlignMode, MLeaderAttachment, MLeaderEditAction,
+    MLeaderEditCommand, MLeaderLineOverrideField, MlEditCommand, MlEditMode, ToleranceCommand,
 };
-use cad_domain::Point3;
+use cad_domain::{MLeaderPathType, Point3};
 
 use super::super::super::*;
 use super::super::test_support::*;
@@ -131,8 +134,153 @@ fn mleaderedit_argument_adds_at_a_point_or_removes_a_zero_based_index() {
         "REMOVE 1.0",
         "REMOVE 1 2",
         "DELETE 1",
+        // The per-line override forms are strict too: one index, one value.
+        "PATHTYPE",
+        "PATHTYPE 0",
+        "PATHTYPE 0 CURVE",
+        "PATHTYPE 0 SPLINE 1",
+        "PATHTYPE -1 SPLINE",
+        "ARROWSIZE 0",
+        "ARROWSIZE 0 0",
+        "ARROWSIZE 0 -1",
+        "ARROWSIZE 0 x",
+        "BYSTYLE 0",
+        "BYSTYLE 0 COLOR",
+        "BYSTYLE 0 PATH 1",
     ] {
         assert_eq!(parse_mleaderedit_argument(refused), None, "{refused}");
+    }
+}
+
+#[test]
+fn mleaderedit_argument_sets_and_clears_one_lines_own_overrides() {
+    // The three path types map onto the DXF `170` codes; the two clearable fields
+    // onto the two `93` override bits this build models.
+    for (token, path_type) in [
+        ("LINE", MLeaderPathType::StraightLineSegments),
+        ("spline", MLeaderPathType::Spline),
+        ("Invisible", MLeaderPathType::Invisible),
+    ] {
+        assert_eq!(
+            parse_mleaderedit_argument(&format!("PATHTYPE 2 {token}")),
+            Some(MLeaderEditCommand {
+                action: MLeaderEditAction::SetPathType {
+                    line_index: 2,
+                    path_type,
+                },
+            })
+        );
+    }
+    assert_eq!(
+        parse_mleaderedit_argument("ARROWSIZE 0 2.5"),
+        Some(MLeaderEditCommand {
+            action: MLeaderEditAction::SetArrowheadSize {
+                line_index: 0,
+                size: 2.5,
+            },
+        })
+    );
+    for (token, field) in [
+        ("PATH", MLeaderLineOverrideField::PathType),
+        ("arrow", MLeaderLineOverrideField::ArrowheadSize),
+    ] {
+        assert_eq!(
+            parse_mleaderedit_argument(&format!("BYSTYLE 1 {token}")),
+            Some(MLeaderEditCommand {
+                action: MLeaderEditAction::ClearOverride {
+                    line_index: 1,
+                    field,
+                },
+            })
+        );
+    }
+}
+
+#[test]
+fn mleader_argument_is_the_creation_line_with_an_optional_option_prefix() {
+    // The plain form: four coordinates and the text remainder.
+    assert_eq!(
+        parse_mleader_argument("0 0 10 2 Note"),
+        Ok(MLeaderCreateInput {
+            arrow: point(0.0, 0.0),
+            landing: point(10.0, 2.0),
+            text: "Note".into(),
+            dogleg_length: None,
+            dogleg_angle: None,
+            attachment: None,
+        })
+    );
+    // The text is the remainder: internal and trailing spaces survive, the leading
+    // separator does not (the same policy `TOLERANCE` documents).
+    assert_eq!(
+        parse_mleader_argument("0 0 10 2  two  words "),
+        Ok(MLeaderCreateInput {
+            arrow: point(0.0, 0.0),
+            landing: point(10.0, 2.0),
+            text: "two  words ".into(),
+            dogleg_length: None,
+            dogleg_angle: None,
+            attachment: None,
+        })
+    );
+    // The option prefix, in any order; `DOGLEGANGLE` is degrees on the line and
+    // radians in the payload.
+    let parsed = parse_mleader_argument("attach 1 4 DOGLEGANGLE 90 dogleg 2.5 -3 1 7 2 label")
+        .expect("the option prefix is admitted");
+    assert_eq!(parsed.arrow, point(-3.0, 1.0));
+    assert_eq!(parsed.landing, point(7.0, 2.0));
+    assert_eq!(parsed.text, "label");
+    assert_eq!(parsed.dogleg_length, Some(2.5));
+    let angle = parsed.dogleg_angle.expect("DOGLEGANGLE is stored");
+    assert!(
+        (angle - std::f64::consts::FRAC_PI_2).abs() < 1e-12,
+        "{angle}"
+    );
+    assert_eq!(
+        parsed.attachment,
+        Some(MLeaderAttachment { point: 1, left: 4 })
+    );
+
+    // The angle constraint is admitted as a token and refused by name: this
+    // domain has no field for DXF 174, so the payload never carries it.
+    assert_eq!(
+        parse_mleader_argument("TEXTANGLE 2 0 0 10 2 Note"),
+        Err(MLeaderParseError::Unmodelled(
+            MLeaderUnmodelledOption::TextAngle
+        ))
+    );
+
+    // A missing text is *not* a grammar error: the command layer answers with its
+    // own `tool.text_empty` refusal, so the parser hands over an empty string.
+    assert_eq!(
+        parse_mleader_argument("0 0 10 2"),
+        Ok(MLeaderCreateInput {
+            arrow: point(0.0, 0.0),
+            landing: point(10.0, 2.0),
+            text: String::new(),
+            dogleg_length: None,
+            dogleg_angle: None,
+            attachment: None,
+        })
+    );
+    for refused in [
+        "",
+        "0",
+        "0 0",
+        "0 0 10",
+        "DOGLEG",
+        "DOGLEG 0 0 0 10 2 Note", // a dogleg length must be positive
+        "DOGLEGANGLE x 0 0 10 2 Note",
+        "DOGLEG 1 DOGLEG 2 0 0 10 2 Note",
+        "ATTACH 1 0 0 10 2 Note", // the pair needs two codes
+        "ATTACH x 1 0 0 10 2 Note",
+        "Note 0 0 10 2", // the options are a prefix, not a suffix
+    ] {
+        assert_eq!(
+            parse_mleader_argument(refused),
+            Err(MLeaderParseError::Invalid),
+            "{refused}"
+        );
     }
 }
 
@@ -171,6 +319,7 @@ fn every_typed_selector_is_an_argument_selector_and_the_bare_forms_are_not() {
     for selector in [
         MLEDIT_SELECTOR,
         DASH_MLEDIT_SELECTOR,
+        MLEADER_SELECTOR,
         MLEADERALIGN_SELECTOR,
         MLEADEREDIT_SELECTOR,
         TOLERANCE_SELECTOR,
@@ -219,6 +368,62 @@ fn typed_tolerance_dispatches_a_real_frame() {
         })
         .collect();
     assert_eq!(texts.len(), 2, "one TEXT per compartment");
+}
+
+#[test]
+fn typed_mleader_creates_a_leader_and_refuses_the_unmodelled_angle_constraint() {
+    let session = fresh_session();
+    session
+        .command("MLEADER 0 0 10 2 Note")
+        .expect("the typed MLEADER creates one leader");
+    session
+        .command("MLEADER DOGLEG 2.5 DOGLEGANGLE 90 ATTACH 1 4 -3 1 7 2 Typed")
+        .expect("the typed creation options are admitted");
+    let controller = session.core.controller.borrow();
+    let drawing = controller.drawing().expect("a drawing is open");
+    let leaders: Vec<_> = drawing
+        .model_space()
+        .into_iter()
+        .filter_map(|entity| match &entity.geometry {
+            SemanticGeometry::MultiLeader(leader) => Some(leader.as_ref()),
+            _ => None,
+        })
+        .collect();
+    // The fixture drawing may carry its own entities; the two created leaders are
+    // identified by their annotation strings.
+    let plain = leaders
+        .iter()
+        .find(|leader| leader.text().string == "Note")
+        .expect("the plain typed leader");
+    assert!(plain.roots()[0].dogleg_length > 0.0);
+    let typed = leaders
+        .iter()
+        .find(|leader| leader.text().string == "Typed")
+        .expect("the leader with the typed options");
+    assert_eq!(typed.roots()[0].dogleg_length, 2.5);
+    // 90° is `+Y`; `cos(π/2)` leaves a ~6e-17 residue, so compare with tolerance.
+    assert!(typed.roots()[0].dogleg_vector.x.abs() < 1e-12);
+    assert!((typed.roots()[0].dogleg_vector.y - 1.0).abs() < 1e-12);
+    assert_eq!(typed.text().attachment_point, 1);
+    assert_eq!(typed.text().left_attachment, 4);
+    drop(controller);
+
+    // The angle constraint has no domain field: the line is refused by name and
+    // nothing is written.
+    let before = {
+        let controller = session.core.controller.borrow();
+        controller.drawing().expect("a drawing is open").revision()
+    };
+    let error = session
+        .command("MLEADER TEXTANGLE 2 0 0 10 2 Note")
+        .expect_err("the angle constraint is refused by name");
+    assert!(error.contains("mleader.option_text_angle"), "{error}");
+    assert!(error.contains("174"), "{error}");
+    let after = {
+        let controller = session.core.controller.borrow();
+        controller.drawing().expect("a drawing is open").revision()
+    };
+    assert_eq!(before, after, "the refusal wrote nothing");
 }
 
 #[test]

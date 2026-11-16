@@ -13,7 +13,7 @@
 
 use std::collections::HashSet;
 
-use crate::{CadError, CadResult, StyleId, TableGeometry, TableStyleValues};
+use crate::{CadError, CadResult, StyleId, TableCellAlignment, TableGeometry, TableStyleValues};
 
 impl TableGeometry {
     /// The cell address that owns `(row, column)`: its own address when it is
@@ -159,8 +159,11 @@ impl TableGeometry {
         Ok(geometry)
     }
 
-    /// Copy one cell's **style** (text height, text style identity/name/font and
-    /// the four border edges) onto every target cell (`MATCHCELL`).
+    /// Copy one cell's **format** onto every target cell (`MATCHCELL`).
+    ///
+    /// The copied fields are the whole per-cell format this build models: text
+    /// height, text style identity/name/font, the four border edges, the text
+    /// alignment and the text rotation.
     ///
     /// Text, merge spans and position are untouched: this is a style copy, not a
     /// content copy. The display is rebuilt once for the whole batch, so N
@@ -200,6 +203,53 @@ impl TableGeometry {
             target.style = style_source.style;
             target.font = style_source.font.clone();
             target.borders = style_source.borders;
+            target.alignment = style_source.alignment;
+            target.rotation = style_source.rotation;
+        }
+        geometry.rebuild_display();
+        Ok(geometry)
+    }
+
+    /// Set one cell's alignment and/or text rotation and rebuild the display
+    /// (`TABLEDIT FORMAT`).
+    ///
+    /// `None` leaves that field untouched, so the two typed fields combine in one
+    /// write (`TABLEDIT FORMAT 1 2 ALIGN TL ROTATION 30`). The address must be
+    /// inside the grid (`table.cell_out_of_range`) and a rotation must be finite
+    /// (`table.cell_rotation`); on a refusal the receiver is unchanged.
+    ///
+    /// The rotation is stored **relative to the table frame** (DXF group 145 is
+    /// in the table's coordinate system), in radians.
+    pub fn with_cell_format(
+        &self,
+        row: usize,
+        column: usize,
+        alignment: Option<TableCellAlignment>,
+        rotation: Option<f64>,
+    ) -> CadResult<Self> {
+        let mut geometry = self.clone();
+        let row_count = geometry.rows.len();
+        let row_geometry = geometry.rows.get_mut(row).ok_or_else(|| {
+            CadError::InvalidInput(format!(
+                "table.cell_out_of_range: row {row} is outside the table's {row_count} rows"
+            ))
+        })?;
+        let cell_count = row_geometry.cells.len();
+        let cell = row_geometry.cells.get_mut(column).ok_or_else(|| {
+            CadError::InvalidInput(format!(
+                "table.cell_out_of_range: column {column} is outside row {row}'s {cell_count} cells"
+            ))
+        })?;
+        if let Some(rotation) = rotation {
+            if !rotation.is_finite() {
+                return Err(CadError::InvalidInput(
+                    "table.cell_rotation: the cell text rotation must be finite".into(),
+                ));
+            }
+            cell.rotation = rotation;
+        }
+        if let Some(alignment) = alignment {
+            cell.alignment = alignment;
         }
         geometry.rebuild_display();
         Ok(geometry)
@@ -214,10 +264,13 @@ impl TableGeometry {
     /// resolves to [`StyleId(0)`](StyleId) with no font, which is exactly what
     /// the importer stores for a cell whose style name is not in the table.
     ///
-    /// A cell is "inheriting" when its borders, text height and text style name
-    /// still equal the old style's values (value-identity, see
+    /// A cell is "inheriting" when its borders, text height, text style name and
+    /// alignment still equal **its row's** old values (value-identity, see
     /// [`TableStyleValues`]). Such a cell takes the new value for each of the
-    /// three, so an explicit override on the cell survives the style edit.
+    /// four, so an explicit override on the cell survives the style edit. The
+    /// row's value set is classified by the style itself, so a `TITLE OFF` that
+    /// removes the title row moves the old title row into the header/data set it
+    /// now belongs to.
     pub fn with_style_resolved(
         &self,
         style: TableStyleValues,
@@ -225,22 +278,28 @@ impl TableGeometry {
     ) -> CadResult<Self> {
         style.validate()?;
         let old = self.style().clone();
+        let row_count = self.rows().len();
         let mut geometry = self.clone();
-        for row in &mut geometry.rows {
+        for (row_index, row) in geometry.rows.iter_mut().enumerate() {
+            let old_row = old.row_style(old.row_kind(row_index, row_count));
+            let new_row = style.row_style(style.row_kind(row_index, row_count));
             for cell in &mut row.cells {
-                let inherited = old.supplies(cell);
+                let inherited = old.supplies_row(cell, &old_row);
                 if inherited.borders {
-                    cell.borders = style.borders;
+                    cell.borders = new_row.borders;
                 }
                 if inherited.text_height {
-                    cell.text_height = style.text_height;
+                    cell.text_height = new_row.text_height;
+                }
+                if inherited.alignment {
+                    cell.alignment = new_row.alignment;
                 }
                 if inherited.text_style {
-                    cell.style_name = style.text_style_name.clone();
-                    let (id, font) = if style.text_style_name.is_empty() {
+                    cell.style_name = new_row.text_style_name.clone();
+                    let (id, font) = if new_row.text_style_name.is_empty() {
                         (StyleId(0), None)
                     } else {
-                        resolve(&style.text_style_name)
+                        resolve(&new_row.text_style_name)
                     };
                     cell.style = id;
                     cell.font = font;

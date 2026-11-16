@@ -12,6 +12,7 @@ mod hatch;
 mod insert;
 mod push;
 mod table;
+mod xclip;
 
 // Re-export every moved module-scope item so the paths that resolved inside the
 // former single-file `entity` module keep resolving. Most of these items are
@@ -29,3 +30,5 @@ use insert::*;
 use push::*;
 #[allow(unused_imports)]
 use table::*;
+#[allow(unused_imports)]
+use xclip::*;

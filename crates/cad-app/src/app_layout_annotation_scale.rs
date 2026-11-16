@@ -192,6 +192,16 @@ fn scaled_table_text(
         "the table style text height",
         prefix,
     )?;
+    // The title/header value sets carry their own text height, so they scale with
+    // the data row; leaving them alone would make a row-specific height disagree
+    // with the paper scale.
+    for row in [&mut style.title_row, &mut style.header_row]
+        .into_iter()
+        .flatten()
+    {
+        row.text_height =
+            scaled_length(row.text_height, factor, "a table row text height", prefix)?;
+    }
     let parts = cad_domain::TableParts {
         frame: table.frame(),
         columns: table.columns().to_vec(),

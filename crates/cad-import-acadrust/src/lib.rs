@@ -426,6 +426,10 @@ mod tests_multileader_export;
 #[cfg(test)]
 mod tests_multileader_fixtures;
 #[cfg(test)]
+mod tests_multileader_line_edit_roundtrip;
+#[cfg(test)]
 mod tests_table_export;
+#[cfg(test)]
+mod tests_xclip;
 #[cfg(test)]
 mod tests_xref;

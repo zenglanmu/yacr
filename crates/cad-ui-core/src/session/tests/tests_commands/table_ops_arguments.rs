@@ -22,10 +22,13 @@ use std::path::{Path, PathBuf};
 
 use crate::session::commands::{
     parse_matchcell_argument, parse_tabledit_option_argument, parse_tablestyle_argument,
-    ARGUMENT_SELECTORS, MATCHCELL_SELECTOR, TABLEDIT_SELECTOR, TABLEEXPORT_SELECTOR,
-    TABLESTYLE_SELECTOR,
+    tabledit_format_refusal, ARGUMENT_SELECTORS, MATCHCELL_SELECTOR, TABLEDIT_SELECTOR,
+    TABLEEXPORT_SELECTOR, TABLESTYLE_SELECTOR,
 };
-use cad_app::{TableCellAddress, TablePayload, TableStyleCommand, TableStyleEdge};
+use cad_app::{
+    TableCellAddress, TablePayload, TableStyleCommand, TableStyleEdge, TableStyleRowScope,
+};
+use cad_domain::{TableCellAlignment, TableRowKind};
 
 // ---------------------------------------------------------------------------
 // Grammars.
@@ -106,26 +109,52 @@ fn tablestyle_parses_a_name_and_its_fields() {
     )
     .expect("a valid field list");
     assert_eq!(command.name.as_deref(), Some("Project"));
-    assert_eq!(command.text_height, Some(3.5));
-    assert_eq!(command.horizontal_margin, Some(0.2));
-    assert_eq!(command.vertical_margin, Some(0.3));
-    assert_eq!(command.text_style_name.as_deref(), Some("RomanS"));
+    let rows = command.rows.first().expect("one implicit all-rows group");
+    assert_eq!(rows.scope, None, "no ROW token reaches every row type");
+    assert_eq!(rows.text_height, Some(3.5));
+    assert_eq!(rows.text_style_name.as_deref(), Some("RomanS"));
     assert_eq!(
-        command.borders,
+        rows.borders,
         vec![
             (TableStyleEdge::Left, true, Some(0.25)),
             (TableStyleEdge::Top, false, None),
         ]
     );
+    assert_eq!(command.horizontal_margin, Some(0.2));
+    assert_eq!(command.vertical_margin, Some(0.3));
     assert_eq!(command.title_suppressed, Some(true));
     assert_eq!(command.header_suppressed, Some(false));
+}
+
+#[test]
+fn tablestyle_scopes_fields_to_the_row_after_row() {
+    let command = parse_tablestyle_argument(
+        "Report ROW TITLE HEIGHT 6 ALIGN TC ROW HEADER HEIGHT 4 ALIGN BC BORDER TOP OFF",
+    )
+    .expect("a valid row-scoped list");
+    assert_eq!(command.rows.len(), 2, "{command:?}");
+    let title = &command.rows[0];
+    assert_eq!(
+        title.scope,
+        Some(TableStyleRowScope::One(TableRowKind::Title))
+    );
+    assert_eq!(title.text_height, Some(6.0));
+    assert_eq!(title.alignment, Some(TableCellAlignment::from_dxf_code(2)));
+    let header = &command.rows[1];
+    assert_eq!(
+        header.scope,
+        Some(TableStyleRowScope::One(TableRowKind::Header))
+    );
+    assert_eq!(header.text_height, Some(4.0));
+    assert_eq!(header.alignment, Some(TableCellAlignment::from_dxf_code(8)));
+    assert_eq!(header.borders, vec![(TableStyleEdge::Top, false, None)]);
 }
 
 #[test]
 fn tablestyle_keeps_the_current_name_when_the_line_starts_with_a_field() {
     let command = parse_tablestyle_argument("HEIGHT 4").expect("a field list");
     assert_eq!(command.name, None);
-    assert_eq!(command.text_height, Some(4.0));
+    assert_eq!(command.rows[0].text_height, Some(4.0));
 }
 
 #[test]
@@ -403,6 +432,7 @@ fn a_viewer_cannot_write_table_style_or_match_a_cell() {
         "TABLESTYLE HEIGHT 4",
         "MATCHCELL 1 1 2 2",
         "TABLEDIT MERGE 1 1 1 2",
+        "TABLEDIT FORMAT 1 1 ALIGN TL",
     ] {
         let error = session.command(line).expect_err("Viewer cannot write");
         assert!(
@@ -410,4 +440,76 @@ fn a_viewer_cannot_write_table_style_or_match_a_cell() {
             "{line}: {error}"
         );
     }
+}
+
+#[test]
+fn tabledit_format_parses_alignment_and_rotation_in_degrees() {
+    let parsed = parse_tabledit_option_argument("FORMAT 2 3 ALIGN TL ROTATION 30")
+        .expect("a supported format line");
+    assert_eq!(
+        parsed,
+        TablePayload::Format {
+            cell: TableCellAddress { row: 2, col: 3 },
+            alignment: Some(TableCellAlignment::from_dxf_code(1)),
+            rotation: Some(30f64.to_radians()),
+        }
+    );
+    // Each field alone is legal...
+    assert!(matches!(
+        parse_tabledit_option_argument("FORMAT 2 3 ALIGN br"),
+        Some(TablePayload::Format { rotation: None, .. })
+    ));
+    assert!(matches!(
+        parse_tabledit_option_argument("FORMAT 2 3 ROTATION -45"),
+        Some(TablePayload::Format {
+            alignment: None,
+            ..
+        })
+    ));
+    // ...but neither of them is not (the caller refuses it by name), an unknown
+    // alignment code is refused, and so is a repeated field.
+    assert_eq!(parse_tabledit_option_argument("FORMAT 2 3"), None);
+    assert_eq!(
+        parse_tabledit_option_argument("FORMAT 2 3 ALIGN MIDDLE"),
+        None
+    );
+    assert_eq!(
+        parse_tabledit_option_argument("FORMAT 2 3 ALIGN TL ALIGN TC"),
+        None
+    );
+    assert_eq!(
+        parse_tabledit_option_argument("FORMAT 2 3 ROTATION 10 ROTATION 20"),
+        None
+    );
+}
+
+#[test]
+fn each_unrepresentable_format_field_has_its_own_named_refusal() {
+    for (line, field) in [
+        ("FORMAT 1 1 COLOR 5", "COLOR"),
+        ("FORMAT 1 1 FILL 3", "FILL"),
+        ("FORMAT 1 1 LINEWEIGHT 25", "LINEWEIGHT"),
+    ] {
+        let reason = tabledit_format_refusal(line)
+            .unwrap_or_else(|| panic!("{line} must be refused by name"));
+        assert!(
+            reason.starts_with("tabledit.format_unsupported:"),
+            "{reason}"
+        );
+        assert!(reason.contains(field), "{line}: {reason}");
+        assert!(reason.contains("nothing was changed"), "{reason}");
+    }
+    // A supported line is not a refusal, and the helper never speaks for another
+    // selector.
+    assert_eq!(tabledit_format_refusal("FORMAT 1 1 ALIGN TL"), None);
+    assert_eq!(tabledit_format_refusal("MERGE 1 1 2 2"), None);
+    assert_eq!(tabledit_format_refusal("COLOR 5"), None);
+}
+
+#[test]
+fn tablestyle_refuses_a_bad_row_scope_or_alignment() {
+    assert_eq!(parse_tablestyle_argument("ROW BODY HEIGHT 3"), None);
+    assert_eq!(parse_tablestyle_argument("ROW"), None);
+    assert_eq!(parse_tablestyle_argument("ALIGN MIDDLE"), None);
+    assert_eq!(parse_tablestyle_argument("ROW TITLE ALIGN"), None);
 }

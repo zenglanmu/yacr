@@ -4,22 +4,24 @@
 //! (`frame + columns + rows + style/name/description`), never from the derived
 //! display: the display is what this build renders, the `ACAD_TABLE` record is
 //! what AutoCAD recomputes. Row heights, column widths/names, cell text, cell
-//! text height and style name, merge spans and the table name/description are
-//! written from the model.
+//! text height and style name, cell alignment and text rotation, merge spans and
+//! the table name/description are written from the model.
 //!
 //! Honest deviations (always `Converted`, never `Exact`):
 //!
-//! * the `TABLESTYLE` object **is** written (data-row values, margins and the
-//!   title/header suppression flags) and the entity points at it, so the style
-//!   name and its modelled values round-trip; the title/header **row styles**
-//!   are not written as their own records because the entity does not record the
-//!   row counts this build could resolve, so every row is written from the
-//!   data-row style;
+//! * the `TABLESTYLE` object **is** written (all three row value sets — data,
+//!   title and header — plus the margins and the title/header suppression flags)
+//!   and the entity points at it, so the style name, its per-row values and the
+//!   title/header row classification round-trip;
 //! * block content and FIELD references are not representable (the model keeps
 //!   only the first content's text), so they are not written;
-//! * per-cell border colours, lineweights, line types and background fills are
-//!   lost (one colour per entity). The edge visibility, the double-line spacing
-//!   and the single/double border type **are** written.
+//! * per-cell text colours, border colours, lineweights, line types and
+//!   background fills are not part of the model (one colour per entity, no
+//!   filled area), so the writer emits this build's neutral `ByBlock`/no-fill
+//!   values; the conversion reason states that instead of implying a round trip;
+//! * a cell's border double-line spacing and border type have no per-cell group
+//!   in the writer this build links against (it emits no per-cell `GRIDFORMAT`),
+//!   so they re-resolve from the style object on re-import.
 //!
 //! A block-embedded table is written at its placed coordinates: the accumulated
 //! INSERT transform is applied through [`cad_db::transform_geometry`]
@@ -42,11 +44,17 @@ use super::tables::ensure_text_style;
 const REASON_CONTENT_KINDS: &str =
     "cell block content and FIELD references are not representable; only the first content's \
      text is written";
-/// Named conversion reason: per-cell appearance is dropped.
-const REASON_BORDER_ATTRIBUTES: &str =
-    "per-cell border colours, lineweights, line types, background fills, border visibility and \
-     double-line spacing are not written by this DXF writer (it emits no per-cell GRIDFORMAT, so \
-     a cell's border set re-resolves from the table style on re-import); one colour per entity";
+/// Named conversion reason: the per-cell appearance fields this build does not
+/// model.
+const REASON_CELL_APPEARANCE: &str =
+    "per-cell text colour, border colour/lineweight and background fill are not part of this \
+     build's table model (one colour per entity, no filled area), so the writer emits the neutral \
+     ByBlock/no-fill values and a source value cannot survive";
+/// Named conversion reason: the per-cell border geometry the writer cannot emit.
+const REASON_CELL_GRID: &str =
+    "a cell's border double-line spacing, border type and margin overrides are not written (the \
+     DXF writer emits no per-cell GRIDFORMAT for a plain TABLE entity), so a re-import resolves \
+     them from the table style";
 /// Named conversion reason: acadrust's DXF writer stores the linked-data
 /// name/description on a separate `TABLECONTENT` object it does not emit for a
 /// plain `TABLE` entity, so the values are dropped by the writer.
@@ -170,18 +178,12 @@ pub(super) fn emit_table(
 
     acc.push(EntityType::Table(Box::new(out)), ctx)?;
     reasons.push(REASON_CONTENT_KINDS.to_string());
-    reasons.push(REASON_BORDER_ATTRIBUTES.to_string());
+    reasons.push(REASON_CELL_APPEARANCE.to_string());
+    reasons.push(REASON_CELL_GRID.to_string());
     reasons.push(REASON_NAME_DESCRIPTION.to_string());
     acc.record(object, "table", MappingOutcome::Converted(reasons));
     Ok(())
 }
-
-/// Named conversion reason: the title/header row styles of a table style are
-/// approximated by the written data-row style.
-const REASON_STYLE_ROW_KINDS: &str =
-    "the TABLESTYLE title/header row styles are not written as their own records (the entity \
-     does not record the title/header row counts this build could resolve); every row is written \
-     from the data-row style";
 
 /// Named conversion reason: two `TABLESTYLE` fields have no DXF group in the
 /// writer this build uses.
@@ -190,24 +192,44 @@ const REASON_STYLE_TEXT_LOSSES: &str =
      writer emits neither a description group nor a style-border spacing); re-import resolves \
      both to their defaults";
 
+/// The text style each of the three row records points at.
+struct RowTextStyle {
+    style_name: String,
+    handle: Handle,
+}
+
 /// Write (or reuse) the `TABLESTYLE` object `style` names and return its handle.
 ///
 /// The object goes into the document's `ACAD_TABLESTYLE` dictionary — the place
-/// AutoCAD and this reader look for it — with the data-row values the display
-/// resolved. A record that already exists with the **same** values is reused as
-/// is (the document's `Standard` object is created by `CadDocument::new`); one
-/// with different values for the same name keeps the first snapshot and reports
-/// the disagreement.
+/// AutoCAD and this reader look for it — with the three row value sets (data,
+/// title, header) the display resolved. A record that already exists with the
+/// **same** values is reused as is (the document's `Standard` object is created
+/// by `CadDocument::new`); one with different values for the same name keeps the
+/// first snapshot and reports the disagreement.
 fn ensure_table_style(doc: &mut CadDocument, style: &TableStyleValues) -> (Handle, Vec<String>) {
     let mut reasons = Vec::new();
-    let text_style = if style.text_style_name.trim().is_empty() {
-        "Standard".to_string()
-    } else {
-        style.text_style_name.trim().to_string()
-    };
-    let (_name, notes) = ensure_text_style(doc, &text_style, None);
-    reasons.extend(notes);
-    let text_handle = text_style_handle(doc, &text_style);
+    // Every row record names its own text style, so each distinct name must
+    // exist in the STYLE table with a handle the record can point at.
+    let mut resolved: Vec<RowTextStyle> = Vec::new();
+    for kind in [
+        TableRowKind::Data,
+        TableRowKind::Title,
+        TableRowKind::Header,
+    ] {
+        let row = style.row_style(kind);
+        let text_style = if row.text_style_name.trim().is_empty() {
+            "Standard".to_string()
+        } else {
+            row.text_style_name.trim().to_string()
+        };
+        let (_name, notes) = ensure_text_style(doc, &text_style, None);
+        reasons.extend(notes);
+        let handle = text_style_handle(doc, &text_style);
+        resolved.push(RowTextStyle {
+            style_name: text_style,
+            handle,
+        });
+    }
 
     match existing_table_style_handle(doc, &style.name) {
         Some(handle) => {
@@ -216,20 +238,19 @@ fn ensure_table_style(doc: &mut CadDocument, style: &TableStyleValues) -> (Handl
                 _ => None,
             });
             let matches =
-                existing.is_some_and(|existing| table_style_matches(existing, style, &text_style));
+                existing.is_some_and(|existing| table_style_matches(existing, style, &resolved));
             let untouched_default = existing.is_some_and(is_document_default_style);
             if !matches && untouched_default {
                 // The document's own `Standard` record (created by
                 // `CadDocument::new`) has never been written by a table, so this
                 // table's snapshot replaces it in place: the first table that
                 // names a style owns that record.
-                let mut record = table_style_record(style, &text_style, text_handle);
+                let mut record = table_style_record(style, &resolved);
                 record.handle = handle;
                 record.owner_handle = existing
                     .map(|existing| existing.owner_handle)
                     .unwrap_or(Handle::NULL);
                 doc.objects.insert(handle, ObjectType::TableStyle(record));
-                reasons.push(REASON_STYLE_ROW_KINDS.to_string());
                 reasons.push(REASON_STYLE_TEXT_LOSSES.to_string());
             } else if !matches {
                 reasons.push(format!(
@@ -242,7 +263,7 @@ fn ensure_table_style(doc: &mut CadDocument, style: &TableStyleValues) -> (Handl
             (handle, reasons)
         }
         None => {
-            let mut record = table_style_record(style, &text_style, text_handle);
+            let mut record = table_style_record(style, &resolved);
             let handle = doc.allocate_handle();
             record.handle = handle;
             match table_style_dictionary(doc) {
@@ -259,7 +280,6 @@ fn ensure_table_style(doc: &mut CadDocument, style: &TableStyleValues) -> (Handl
                 ),
             }
             doc.objects.insert(handle, ObjectType::TableStyle(record));
-            reasons.push(REASON_STYLE_ROW_KINDS.to_string());
             reasons.push(REASON_STYLE_TEXT_LOSSES.to_string());
             (handle, reasons)
         }
@@ -312,31 +332,61 @@ fn text_style_handle(doc: &mut CadDocument, name: &str) -> Handle {
 }
 
 /// Build the `TABLESTYLE` record from the entity's snapshot.
-fn table_style_record(
-    style: &TableStyleValues,
-    text_style: &str,
-    text_handle: Handle,
-) -> AcadTableStyle {
+///
+/// One `AcDbTableStyle` row record per row type, written in the order the DXF
+/// reader expects them back (data, title, header), which is also the order
+/// acadrust's writer emits them in.
+fn table_style_record(style: &TableStyleValues, text_styles: &[RowTextStyle]) -> AcadTableStyle {
     let mut record = AcadTableStyle::new(&style.name);
     record.description = style.description.clone();
     record.horizontal_margin = style.horizontal_margin;
     record.vertical_margin = style.vertical_margin;
     record.title_suppressed = style.title_suppressed;
     record.header_suppressed = style.header_suppressed;
-    let row = &mut record.data_row_style;
-    row.text_height = style.text_height;
-    row.text_style_name = text_style.to_string();
-    row.text_style_handle = (!text_handle.is_null()).then_some(text_handle);
-    row.top_border = table_cell_border(style.borders.top);
-    row.right_border = table_cell_border(style.borders.right);
-    row.bottom_border = table_cell_border(style.borders.bottom);
-    row.left_border = table_cell_border(style.borders.left);
+    let data = &mut record.data_row_style;
+    write_row_style(data, &style.data_row(), &text_styles[0]);
     // The inside borders are the separators between cells of a range; the model
-    // has one border set per cell edge, so the inside edges repeat the data-row
-    // edges rather than being left at the record default.
-    row.horizontal_inside_border = table_cell_border(style.borders.bottom);
-    row.vertical_inside_border = table_cell_border(style.borders.right);
+    // has one border set per cell edge, so the inside edges repeat the row's
+    // outer edges rather than being left at the record default.
+    data.horizontal_inside_border = table_cell_border(style.borders.bottom);
+    data.vertical_inside_border = table_cell_border(style.borders.right);
+    let title = &mut record.title_row_style;
+    write_row_style(
+        title,
+        &style.row_style(TableRowKind::Title),
+        &text_styles[1],
+    );
+    title.horizontal_inside_border =
+        table_cell_border(style.row_style(TableRowKind::Title).borders.bottom);
+    title.vertical_inside_border =
+        table_cell_border(style.row_style(TableRowKind::Title).borders.right);
+    let header = &mut record.header_row_style;
+    write_row_style(
+        header,
+        &style.row_style(TableRowKind::Header),
+        &text_styles[2],
+    );
+    header.horizontal_inside_border =
+        table_cell_border(style.row_style(TableRowKind::Header).borders.bottom);
+    header.vertical_inside_border =
+        table_cell_border(style.row_style(TableRowKind::Header).borders.right);
     record
+}
+
+/// Copy one neutral row value set into an `AcDbTableStyle` row record.
+fn write_row_style(
+    target: &mut acadrust::objects::RowCellStyle,
+    row: &TableRowStyle,
+    text_style: &RowTextStyle,
+) {
+    target.text_height = row.text_height;
+    target.text_style_name = text_style.style_name.clone();
+    target.text_style_handle = (!text_style.handle.is_null()).then_some(text_style.handle);
+    target.alignment = acadrust::objects::CellAlignment::from(row.alignment.dxf_code() as i16);
+    target.top_border = table_cell_border(row.borders.top);
+    target.right_border = table_cell_border(row.borders.right);
+    target.bottom_border = table_cell_border(row.borders.bottom);
+    target.left_border = table_cell_border(row.borders.left);
 }
 
 /// One style-object border from the neutral edge.
@@ -348,23 +398,48 @@ fn table_cell_border(border: TableBorder) -> TableCellBorder {
 }
 
 /// Whether an existing `TABLESTYLE` record already holds this snapshot.
+///
+/// All three row records are compared on the fields the writer emits, so a
+/// record written from a *different* table's snapshot (including a different
+/// title/header row set) is reported instead of silently reused.
 fn table_style_matches(
     existing: &AcadTableStyle,
     style: &TableStyleValues,
-    text_style: &str,
+    text_styles: &[RowTextStyle],
 ) -> bool {
-    let row = &existing.data_row_style;
     existing.name.eq_ignore_ascii_case(&style.name)
         && existing.horizontal_margin == style.horizontal_margin
         && existing.vertical_margin == style.vertical_margin
         && existing.title_suppressed == style.title_suppressed
         && existing.header_suppressed == style.header_suppressed
-        && row.text_height == style.text_height
-        && row.text_style_name.eq_ignore_ascii_case(text_style)
-        && border_matches(&row.top_border, style.borders.top)
-        && border_matches(&row.right_border, style.borders.right)
-        && border_matches(&row.bottom_border, style.borders.bottom)
-        && border_matches(&row.left_border, style.borders.left)
+        && row_style_matches(&existing.data_row_style, &style.data_row(), &text_styles[0])
+        && row_style_matches(
+            &existing.title_row_style,
+            &style.row_style(TableRowKind::Title),
+            &text_styles[1],
+        )
+        && row_style_matches(
+            &existing.header_row_style,
+            &style.row_style(TableRowKind::Header),
+            &text_styles[2],
+        )
+}
+
+/// Compare one written row record on the fields the writer emits.
+fn row_style_matches(
+    existing: &acadrust::objects::RowCellStyle,
+    row: &TableRowStyle,
+    text_style: &RowTextStyle,
+) -> bool {
+    existing.text_height == row.text_height
+        && existing
+            .text_style_name
+            .eq_ignore_ascii_case(&text_style.style_name)
+        && i32::from(existing.alignment as i16) == row.alignment.dxf_code()
+        && border_matches(&existing.top_border, row.borders.top)
+        && border_matches(&existing.right_border, row.borders.right)
+        && border_matches(&existing.bottom_border, row.borders.bottom)
+        && border_matches(&existing.left_border, row.borders.left)
 }
 
 /// Compare only the border fields the writer emits: the visibility. The style
@@ -378,7 +453,9 @@ fn border_matches(existing: &TableCellBorder, border: TableBorder) -> bool {
 ///
 /// The document's untouched `Standard` record is the place the first table's
 /// snapshot is written; a record that no longer equals those defaults was
-/// written by an earlier entity of this export and keeps its values.
+/// written by an earlier entity of this export and keeps its values. **All three**
+/// row records are checked: a record whose title/header row was written by an
+/// earlier table is not "untouched" even when its data row still matches.
 fn is_document_default_style(style: &AcadTableStyle) -> bool {
     let default = AcadTableStyle::standard();
     style.name.eq_ignore_ascii_case(&default.name)
@@ -387,24 +464,38 @@ fn is_document_default_style(style: &AcadTableStyle) -> bool {
         && style.vertical_margin == default.vertical_margin
         && !style.title_suppressed
         && !style.header_suppressed
-        && style.data_row_style.text_height == default.data_row_style.text_height
-        && style
-            .data_row_style
+        && row_is_record_default(&style.data_row_style, &default.data_row_style)
+        && row_is_record_default(&style.title_row_style, &default.title_row_style)
+        && row_is_record_default(&style.header_row_style, &default.header_row_style)
+}
+
+/// Whether one row record still equals the `CadDocument::new` default for it.
+fn row_is_record_default(
+    row: &acadrust::objects::RowCellStyle,
+    default: &acadrust::objects::RowCellStyle,
+) -> bool {
+    row.text_height == default.text_height
+        && row
             .text_style_name
-            .eq_ignore_ascii_case(&default.data_row_style.text_style_name)
-        && !style.data_row_style.top_border.is_invisible
-        && !style.data_row_style.right_border.is_invisible
-        && !style.data_row_style.bottom_border.is_invisible
-        && !style.data_row_style.left_border.is_invisible
+            .eq_ignore_ascii_case(&default.text_style_name)
+        && row.alignment == default.alignment
+        && !row.top_border.is_invisible
+        && !row.right_border.is_invisible
+        && !row.bottom_border.is_invisible
+        && !row.left_border.is_invisible
 }
 
 /// Copy one neutral cell into the acadrust cell record.
 ///
-/// The borders are written through a `CellStyle`: with `override_flags == 0`
-/// the DXF writer emits all four edge visibilities, which is exactly what the
-/// model resolved. A doubled edge also writes its `double_spacing` and the
-/// `Double` border type, so the second line survives the round trip. Text height
-/// and style name ride on the same style record.
+/// The borders, the text height/style and the cell alignment are written through
+/// a `CellStyle`: with `override_flags == 0` the DXF writer emits the alignment
+/// (group 170), the text height/style (groups 140/7), the four edge visibilities
+/// (groups 285/286/288/289) and this build's neutral `ByBlock`/no-fill colour
+/// values, which is exactly what the model resolved. The cell's own text
+/// rotation rides on the cell record itself (group 145). A doubled edge also
+/// writes its `double_spacing` and the `Double` border type, so a reader that
+/// looks at the record sees the values this build resolved — the DXF **writer**
+/// emits no per-cell `GRIDFORMAT`, which the entity's conversion reason states.
 fn apply_cell(target: &mut TableCell, cell: &TableCellGeometry) {
     if !cell.text.is_empty() {
         target.set_text(&cell.text);
@@ -415,10 +506,12 @@ fn apply_cell(target: &mut TableCell, cell: &TableCellGeometry) {
     }
     target.merge_width = cell.merge_width.max(1) as i32;
     target.merge_height = cell.merge_height.max(1) as i32;
+    target.rotation = cell.rotation;
 
     let mut style = CellStyle::new();
     style.text_style_name = cell.style_name.clone();
     style.text_height = cell.text_height;
+    style.alignment = cell.alignment.dxf_code();
     let apply = |border: TableBorder| {
         let mut out = acadrust::entities::CellBorder::new();
         out.invisible = !border.visible;

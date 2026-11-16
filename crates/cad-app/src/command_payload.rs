@@ -674,14 +674,33 @@ pub enum CommandPayload {
     /// (non-empty, at most [`crate::draw_tool::MAX_TOOL_TEXT_CHARS`] characters —
     /// re-validated here so a programmatic caller cannot bypass the capture).
     ///
-    /// Every style value (dogleg length, landing gap, arrowhead size, text
-    /// height, text style, vertical attachment, path type, content kind) is read
-    /// from the drawing's `MLeaderStyle` table, so none of them is a payload
-    /// field: a caller cannot smuggle a second, contradictory style source in.
+    /// The three `Option` fields are the **creation options** the domain can
+    /// carry; `None` means "use the resolved `MLeaderStyle` row", and a set value
+    /// is stored on the created entity in a group the exporter already writes
+    /// verbatim, so it round-trips:
+    ///
+    /// * `dogleg_length` → the root's dogleg length (`LEADER 40`; the style's
+    ///   `MLEADERSTYLE 43` / entity `41` value when `None`);
+    /// * `dogleg_angle` → the dogleg direction in radians about `+Z`, the
+    ///   direction the dogleg travels **toward the annotation** (`LEADER 11`;
+    ///   derived from the arrow/text side when `None`);
+    /// * `attachment` → the annotation text attachment pair (horizontal entity
+    ///   `179` / `CONTEXT_DATA 171`, vertical entity `173` / `CONTEXT_DATA 174`;
+    ///   centred / the style's left attachment when `None`).
+    ///
+    /// Every other style value (landing gap, arrowhead size, text height, text
+    /// style, path type, content kind) is read from the drawing's `MLeaderStyle`
+    /// table, so none of them is a payload field: a caller cannot smuggle a
+    /// second, contradictory style source in. The AutoCAD *angle constraint*
+    /// (entity `174`, text angle type) is deliberately absent — this build's
+    /// MULTILEADER domain has no field for it (`mleader.option_text_angle`).
     MLeader {
         arrow: Point3,
         landing: Point3,
         text: String,
+        dogleg_length: Option<f64>,
+        dogleg_angle: Option<f64>,
+        attachment: Option<MLeaderAttachment>,
     },
     /// TEXTEDIT: replace the string of an existing text-bearing entity (ADR 0020
     /// amendment A/B; ADR-0021 D4 generalises it to MTEXT and MULTILEADER text).

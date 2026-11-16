@@ -4,7 +4,7 @@
 //! 1000-line code gate. `command_payload.rs` re-exports every item, so the
 //! public paths are unchanged.
 
-use cad_domain::{Point3, SelectionRef};
+use cad_domain::{MLeaderLine, MLeaderPathType, Point3, SelectionRef};
 
 /// The two straight-line picks of a CHAMFER/FILLET command (ADR 0016 decisions
 /// B/C): the two picked refs in pick order and the raw click point that selects
@@ -227,6 +227,12 @@ pub struct MLeaderAlignCommand {
 }
 
 /// The action of `MLEADEREDIT`.
+///
+/// The four addressable fields of one leader line in this model are its two
+/// per-line overrides (path type `LEADER_LINE 170` behind override word `93` bit
+/// `1`, arrowhead size `40` behind bit `16`) and its vertices (written by `ADD`,
+/// moved by `MLEADERALIGN`). Every action below writes **one** stored definition,
+/// rebuilt through `MultiLeaderGeometry::new`, in one transaction / one undo step.
 #[derive(Debug, Clone, PartialEq)]
 pub enum MLeaderEditAction {
     /// `MLEADEREDIT ADD <x> <y>`: add one leader line to root 0, from the typed
@@ -235,12 +241,93 @@ pub enum MLeaderEditAction {
     /// `MLEADEREDIT REMOVE <index>`: remove one leader line by its 0-based index
     /// in the leader's stored line list.
     Remove { line_index: usize },
+    /// `MLEADEREDIT PATHTYPE <index> LINE|SPLINE|INVISIBLE`: set one line's own
+    /// path type (`LEADER_LINE 170`) and stamp override word bit `1`, so the line
+    /// keeps that path even when the entity/style value differs.
+    SetPathType {
+        line_index: usize,
+        path_type: MLeaderPathType,
+    },
+    /// `MLEADEREDIT ARROWSIZE <index> <size>`: set one line's own arrowhead size
+    /// (`LEADER_LINE 40`) and stamp override word bit `16`. The size must be
+    /// finite and strictly positive: this build draws no arrowhead for a
+    /// non-positive per-line size, and a stored `0` has no unambiguous meaning in
+    /// the format, so it is refused instead of guessed.
+    SetArrowheadSize { line_index: usize, size: f64 },
+    /// `MLEADEREDIT BYSTYLE <index> PATH|ARROW`: clear one line's override bit
+    /// (`1` / `16`) and re-stamp the stored value from the resolved style, so the
+    /// entity/style value applies again and the field never keeps a stale value
+    /// the style could not reach.
+    ClearOverride {
+        line_index: usize,
+        field: MLeaderLineOverrideField,
+    },
+}
+
+impl MLeaderEditAction {
+    /// The upper-case token the typed line used (echoed in diagnostics).
+    pub fn token(&self) -> &'static str {
+        match self {
+            Self::Add { .. } => "ADD",
+            Self::Remove { .. } => "REMOVE",
+            Self::SetPathType { .. } => "PATHTYPE",
+            Self::SetArrowheadSize { .. } => "ARROWSIZE",
+            Self::ClearOverride { .. } => "BYSTYLE",
+        }
+    }
+}
+
+/// The one per-line override word bit an `MLEADEREDIT BYSTYLE` clears.
+///
+/// These are the only two per-line values this model stores on the line itself
+/// (`path_type`, `arrowhead_size`) instead of the opaque `reserved` bag, so they
+/// are the two the command can write and therefore also the two it can clear. The
+/// word's other bits (line colour `2`, linetype `4`, lineweight `8`) describe
+/// source data this build only preserves: those live in `reserved` and have no
+/// editable semantic model, so the typed grammar refuses them by name rather than
+/// clearing a bit whose value it could not write.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MLeaderLineOverrideField {
+    /// Override word bit `1`: the line's own path type (`LEADER_LINE 170`).
+    PathType,
+    /// Override word bit `16`: the line's own arrowhead size (`LEADER_LINE 40`).
+    ArrowheadSize,
+}
+
+impl MLeaderLineOverrideField {
+    /// The DXF `93` override word bit this field owns.
+    pub fn bit(self) -> u32 {
+        match self {
+            Self::PathType => MLeaderLine::PATH_TYPE,
+            Self::ArrowheadSize => MLeaderLine::ARROWHEAD_SIZE,
+        }
+    }
+
+    /// The upper-case token the typed line used (echoed in diagnostics).
+    pub fn token(self) -> &'static str {
+        match self {
+            Self::PathType => "PATH",
+            Self::ArrowheadSize => "ARROW",
+        }
+    }
 }
 
 /// The input of `MLEADEREDIT`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MLeaderEditCommand {
     pub action: MLeaderEditAction,
+}
+
+/// The annotation text attachment pair a created multileader stores.
+///
+/// Both codes are the stored ones — `point` is the horizontal side (entity `179`
+/// / `CONTEXT_DATA 171`: `1` left, `2` centre, `3` right) and `left` the vertical
+/// attachment (entity `173` / `CONTEXT_DATA 174`: `0`..`10`). They travel together
+/// because a `MULTILEADER` carries exactly one pair, never a per-side one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MLeaderAttachment {
+    pub point: i16,
+    pub left: i16,
 }
 
 /// The input of `TOLERANCE`: the feature-control-frame insertion point (the

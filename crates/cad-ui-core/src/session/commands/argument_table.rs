@@ -224,6 +224,9 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     // takes no argument, so it is deliberately absent.
     MLEDIT_SELECTOR,
     DASH_MLEDIT_SELECTOR,
+    // `MLEADER [DOGLEG <length>] [DOGLEGANGLE <degrees>] [ATTACH <h> <v>] <four
+    // coordinates> <text>`: the option prefix rides the ordinary create payload.
+    MLEADER_SELECTOR,
     MLEADERALIGN_SELECTOR,
     MLEADEREDIT_SELECTOR,
     TOLERANCE_SELECTOR,

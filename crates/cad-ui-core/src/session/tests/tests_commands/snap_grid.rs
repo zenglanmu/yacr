@@ -373,6 +373,8 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             // The 2026-11-12 MULTILEADER/MLEDIT/TOLERANCE typed forms.
             "MLEDIT",
             "-MLEDIT",
+            // `MLEADER`'s typed creation line (2026-11-16).
+            "MLEADER",
             "MLEADERALIGN",
             "MLEADEREDIT",
             "TOLERANCE",

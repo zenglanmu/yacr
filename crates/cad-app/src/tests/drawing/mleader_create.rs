@@ -89,6 +89,9 @@ fn payload(arrow: Point3, landing: Point3, text: &str) -> CommandPayload {
         arrow,
         landing,
         text: text.to_string(),
+        dogleg_length: None,
+        dogleg_angle: None,
+        attachment: None,
     }
 }
 
@@ -344,6 +347,9 @@ fn create_mleader_refuses_bad_text_points_and_payloads_without_writing() {
                 arrow: p3(0.0, 0.0, 0.0),
                 landing: p3(10.0, 2.0, 0.0),
                 text: "a".repeat(MAX_TOOL_TEXT_CHARS + 1),
+                dogleg_length: None,
+                dogleg_angle: None,
+                attachment: None,
             },
         ),
         (

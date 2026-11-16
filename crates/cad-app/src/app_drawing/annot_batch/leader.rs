@@ -243,6 +243,11 @@ impl Application {
                 arrow: request.arrow,
                 landing: request.landing,
                 text: request.text,
+                // `QLEADER`/`LEADER` have no typed option line: the style row is
+                // their only option source, exactly as documented in this module.
+                dogleg_length: None,
+                dogleg_angle: None,
+                attachment: None,
             },
         };
         self.create_mleader(session, &mleader)

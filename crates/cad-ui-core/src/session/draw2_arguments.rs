@@ -18,12 +18,12 @@ use super::commands::{
     parse_imageclip_argument, parse_matchcell_argument, parse_mline_argument,
     parse_mlstyle_argument, parse_mpedit_argument, parse_solid_argument,
     parse_table_create_argument, parse_tabledit_argument, parse_tabledit_option_argument,
-    parse_tablestyle_argument, parse_trex_argument, parse_xclip_argument, ArrayArgument,
-    ARRAYCLASSIC_SELECTOR, ARRAYPATH_SELECTOR, ARRAY_SELECTOR, CLIP_SELECTOR, DASH_ARRAY_SELECTOR,
-    DASH_IMAGEADJUST_SELECTOR, DASH_TABLE_SELECTOR, DONUT_SELECTOR, HELIX_SELECTOR,
-    IMAGEATTACH_SELECTOR, IMAGECLIP_SELECTOR, MATCHCELL_SELECTOR, MLINE_SELECTOR, MLSTYLE_SELECTOR,
-    MPEDIT_SELECTOR, SOLID_SELECTOR, TABLEDIT_SELECTOR, TABLESTYLE_SELECTOR, TABLE_SELECTOR,
-    TREX_SELECTOR, XCLIP_SELECTOR,
+    parse_tablestyle_argument, parse_trex_argument, parse_xclip_argument, tabledit_format_refusal,
+    ArrayArgument, ARRAYCLASSIC_SELECTOR, ARRAYPATH_SELECTOR, ARRAY_SELECTOR, CLIP_SELECTOR,
+    DASH_ARRAY_SELECTOR, DASH_IMAGEADJUST_SELECTOR, DASH_TABLE_SELECTOR, DONUT_SELECTOR,
+    HELIX_SELECTOR, IMAGEATTACH_SELECTOR, IMAGECLIP_SELECTOR, MATCHCELL_SELECTOR, MLINE_SELECTOR,
+    MLSTYLE_SELECTOR, MPEDIT_SELECTOR, SOLID_SELECTOR, TABLEDIT_SELECTOR, TABLESTYLE_SELECTOR,
+    TABLE_SELECTOR, TREX_SELECTOR, XCLIP_SELECTOR,
 };
 use super::diagnostics::cad_error_text;
 use super::CadSession;
@@ -113,7 +113,8 @@ pub(crate) fn invalid_table_argument_reason(selector: &str, text: &str) -> Strin
         "{code}: unsupported or malformed {selector} argument in `{}`: the typed forms are \
          `TABLE <rows> <cols> <col_width> <row_height> <x> <y>` (`-TABLE` accepts the same \
          grammar), `TABLEDIT <row> <col> [text...]` with a 1-based cell address, \
-         `TABLEDIT MERGE <row> <col> <height> <width>` and `TABLEDIT UNMERGE <row> <col>`; \
+         `TABLEDIT MERGE <row> <col> <height> <width>`, `TABLEDIT UNMERGE <row> <col>` and \
+         `TABLEDIT FORMAT <row> <col> [ALIGN <TL|TC|TR|ML|MC|MR|BL|BC|BR>] [ROTATION <degrees>]`; \
          nothing was changed",
         text.trim()
     )
@@ -402,9 +403,16 @@ impl CadSession {
     ) -> Result<(), String> {
         let (id, payload) = match selector {
             TABLEDIT_SELECTOR => {
-                // `TABLEDIT MERGE …` / `TABLEDIT UNMERGE …` first: their first
-                // token is a word, so they can never be mistaken for the 1-based
-                // cell address the text form starts with.
+                // A recognised `TABLEDIT FORMAT` field this build cannot store is
+                // refused by name before any parsing: it must never be treated as
+                // a malformed line (which would hide the real reason) nor be
+                // accepted and dropped.
+                if let Some(reason) = tabledit_format_refusal(argument) {
+                    return self.refuse_argument(reason);
+                }
+                // `TABLEDIT MERGE …` / `TABLEDIT UNMERGE …` / `TABLEDIT FORMAT …`
+                // first: their first token is a word, so they can never be
+                // mistaken for the 1-based cell address the text form starts with.
                 if let Some(payload) = parse_tabledit_option_argument(argument) {
                     (
                         CommandId::Extended(ExtendedCommandId::TableEdit),

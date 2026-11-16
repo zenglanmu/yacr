@@ -66,6 +66,10 @@ pub(crate) struct ExportAccumulator {
     /// name: one `MLEADERSTYLE` object per distinct name, first snapshot wins
     /// (ADR 0019 decision D).
     pub mleader_styles: BTreeMap<String, (String, MLeaderStyleValues)>,
+    /// Source objects whose `XCLIP` boundary was already reported. A clipped
+    /// reference reaches [`emit`] once per array cell and once per block-member
+    /// walk with the same source object, so the loss is recorded once.
+    pub reported_clips: BTreeSet<ObjectId>,
 }
 
 impl ExportAccumulator {
@@ -79,6 +83,7 @@ impl ExportAccumulator {
             dim_block_counter: 0,
             suppress_records: false,
             mleader_styles: BTreeMap::new(),
+            reported_clips: BTreeSet::new(),
         }
     }
 
@@ -137,6 +142,40 @@ impl ExportAccumulator {
         }
     }
 
+    /// Record a source `XCLIP` boundary the output cannot carry.
+    ///
+    /// The boundary is a **display attribute** of a block reference, and this
+    /// exporter writes no `INSERT` record at all (every block reference is
+    /// exploded into model-space entities), so there is no block reference to
+    /// own the `ACAD_FILTER`/`SPATIAL_FILTER` object chain. The loss is named
+    /// instead of silently exporting the block content unclipped. Deduped per
+    /// source object: an array reference and every block-member walk reach
+    /// `emit` with the same object identity.
+    pub(super) fn record_clip_dropped(&mut self, entity: &DbEntity, ctx: &EntityContext) {
+        if self.suppress_records {
+            return;
+        }
+        let Some(clip) = ctx.database.entity_render_attributes(entity.id).clip else {
+            return;
+        };
+        if !self.reported_clips.insert(entity.object.id) {
+            return;
+        }
+        self.record_dropped_code(
+            Some(entity.object.id),
+            "export.xclip_clip_dropped",
+            vec![format!(
+                "the block reference's XCLIP boundary ({} point(s), switched {}) is not \
+                 written: the v1 DXF exporter emits no INSERT record (block references are \
+                 exploded), so no block reference exists to own the \
+                 ACAD_FILTER/SPATIAL_FILTER object chain, and the block content is exported \
+                 unclipped",
+                clip.vertices.len(),
+                if clip.visible { "on" } else { "off" }
+            )],
+        );
+    }
+
     pub(super) fn push(&mut self, entity: EntityType, ctx: &EntityContext) -> CadResult<()> {
         if self.entities.len() >= ctx.limits.max_output_entities {
             return Err(CadError::InvalidInput(format!(
@@ -190,6 +229,11 @@ pub(super) fn emit(
     acc: &mut ExportAccumulator,
     stack: &mut Vec<BlockId>,
 ) -> CadResult<()> {
+    // A block reference's `XCLIP` boundary is a display attribute of the source
+    // entity, and this emitter never writes an INSERT record to attach it to.
+    // Reported from every shape (Insert, the Compound of an array MINSERT, and
+    // any leaf that somehow carries one) so no clip disappears silently.
+    acc.record_clip_dropped(entity, ctx);
     match &entity.geometry {
         SemanticGeometry::Insert {
             block,

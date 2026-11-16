@@ -26,7 +26,13 @@ impl<'a> ImporterBuilder<'a> {
             .copied()
             .unwrap_or_else(|| self.layer_ids.get("0").copied().unwrap_or(LayerId(0)));
 
-        let (geometry, completeness) = self.convert(entity, common);
+        let (geometry, mut completeness) = self.convert(entity, common);
+        // An INSERT's `XCLIP` boundary lives in the OBJECTS-section
+        // `ACAD_FILTER/SPATIAL_FILTER` chain, not in an entity group code, so it
+        // is read here rather than in `convert`. A boundary that exists but
+        // cannot be stored is refused by name and downgrades the entity to
+        // `Partial`; the clip is never invented.
+        let (clip, clip_gaps) = self.entity_clip(entity);
 
         // Track the model-space extent as entities are imported so RAY/XLINE
         // construct lines can be clipped to it (a fixed viewport has no clip).
@@ -86,6 +92,23 @@ impl<'a> ImporterBuilder<'a> {
                 class_name: class_name.clone(),
                 space: space.clone(),
                 insert_blocks: insert_blocks.clone(),
+            });
+        }
+
+        // Every clip gap is a real loss on this entity, so it downgrades the
+        // verdict to `Partial`. The one model-wide gap (the source's clip mode)
+        // is reported once per import instead of once per clipped reference.
+        for (code, message) in clip_gaps {
+            if code == xclip::xclip_reason::MODE && !self.reported_reasons.insert(message.clone()) {
+                continue;
+            }
+            completeness = completeness
+                .clone()
+                .combine(Completeness::Partial(vec![message.clone()]));
+            self.diagnostics.push(Diagnostic {
+                object: Some(object_id),
+                code: code.to_string(),
+                message,
             });
         }
 
@@ -191,7 +214,7 @@ impl<'a> ImporterBuilder<'a> {
             });
         }
         let attributes = EntityRenderAttributes {
-            clip: None,
+            clip,
             transparency: resolve_entity_transparency(common.transparency),
             color: resolve_entity_color(common.color),
             lineweight: resolve_entity_lineweight(common.line_weight),

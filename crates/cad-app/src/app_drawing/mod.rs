@@ -115,6 +115,8 @@ mod mleader;
 // `MLEADERCOLLECT` rebuild the stored definition through `MultiLeaderGeometry`.
 mod mleader_collect;
 mod mleader_edit;
+// `MLEADEREDIT`'s two per-line overrides (path type `170`, arrowhead size `40`).
+mod mleader_line_override;
 // `MLEDIT` / `-MLEDIT`: the two-LINE subset of multiline editing.
 mod mledit;
 // `TOLERANCE`: one feature-control frame as separate border/divider/text rows.
