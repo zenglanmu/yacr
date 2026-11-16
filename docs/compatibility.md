@@ -639,7 +639,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 
 | 命令 | 状态 | 结果 | 显式未实现 / 有意偏离 |
 |---|---|---|---|
-| `DIMSTYLE` | 部分实现 | `LIST`/`CURRENT` 只读报告 `cad-db` 的 `dim_styles` | `SET <name>` 按 `dimstyle.set_unavailable` 拒绝（只有 builder 写 API）；未知名称 `dimstyle.unknown`；裸命令 `dimstyle.needs_option` |
+| `DIMSTYLE` | 完整实现 | `LIST`/`CURRENT` 报告存储行；`SET`（会话当前样式，只影响新建标注）、`NEW`（以**存储的** `Standard` 或指定基准为模板）、`RENAME`、`DELETE`、`MODIFY <var> <value>` 都真写样式表，一条记录/一次修订，重拼写为权威空操作；被已存标注快照引用的行不可改名（`dimstyle.in_use`）；**非追溯**（ADR-0017）：既有标注保留解析快照并在诊断中说明；SAVE→OPEN 往返有测试 | 行内没有的字段按名拒绝；`Standard` 不可删除；无标注样式对话框 |
 | `-DIMSTYLE` | 完整实现 | `DIMSTYLE` 的命令行拼写：同一解析器与同一处理器，七个选项逐项测试（无第二条路径） | 同 `DIMSTYLE` 的边界（`SET` 等若在该行有界，此处一致） |
 | `DIMTEDIT` | 完整实现 | 恰好一个选中标注；`MOVE`/`LEFT`/`RIGHT`/`CENTER`/`HOME`/`ANGLE`；Left/Right/Center 移动锚点并设置字形级 `h_align`，**角标注按已绘制弧的起/终/中角锚定、坐标标注按引线特征端/引线端/中点锚定**（覆盖全部标注类型）；`OBLIQUE <deg>` 可键入并按 `dimtedit.oblique_unsupported` 拒绝；一条事务/一步撤销；无变化 `dimtedit.unchanged` | 唯一残留：角标注显示为导入图片（无弧子图）时 `dimtedit.justify_unsupported`，不写；无交互文字拖动；导入默认 Center、导出不写组 72 |
 | `DIMEDIT` | 部分实现 | 所有选中标注；`TEXT <override>` 逐字存组 1（`<>` 占位，≤1024），`RESET` 删除；一条事务/一步撤销 | 延伸线编辑 NOT IMPLEMENTED；无对话框/逐项确认 |
