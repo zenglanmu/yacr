@@ -24,14 +24,14 @@ BUILD_CHANGELOG = ROOT / "scripts" / "build-landing-changelog.py"
 CHANGELOG = LANDING / "changelog.json"
 HEADERS = LANDING / "_headers"
 
-RELEASE = "v0.1.13"
-GITHUB_BASE = "https://github.com/zenglanmu/yacr/releases/download/v0.1.13/"
-CDN_BASE = "https://dl-yacr.snakeheartgo.top/releases/v0.1.13"
+RELEASE = "v0.1.14"
+GITHUB_BASE = "https://github.com/zenglanmu/yacr/releases/download/v0.1.14/"
+CDN_BASE = "https://dl-yacr.snakeheartgo.top/releases/v0.1.14"
 KNOWN_ASSETS = {
-    "linux": ("yacr-0.1.13-linux-x86_64.flatpak", 113559224),
-    "windows": ("yacr-0.1.13-windows-x86_64.zip", 108573995),
-    "macos": ("yacr-0.1.13-macos-universal.tar.gz", 155080263),
-    "android": ("app-universal-release.apk", 115516961),
+    "linux": ("yacr-0.1.14-linux-x86_64.flatpak", 114616424),
+    "windows": ("yacr-0.1.14-windows-x86_64.zip", 111462473),
+    "macos": ("yacr-0.1.14-macos-universal.tar.gz", 159563068),
+    "android": ("app-universal-release.apk", 118576797),
 }
 
 # The page shows one genuine product screenshot; the asset must exist, be a PNG
@@ -261,9 +261,9 @@ def check_index(text: str, errors: list[str]) -> None:
         "725K",
         "979",
         "981",
-        "107",
-        "872",
-        "872 partial, 2 not implemented",
+        "185",
+        "794",
+        "794 partial, 2 not implemented",
         "Rust",
         "React",
         "Tauri",

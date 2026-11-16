@@ -10,7 +10,7 @@ IFC 与 Revit 导入）、几何、命令与渲染，React + Tauri 提供界面�
 
 yacr 处于活跃开发中，**预览版现在即可下载**：Linux Flatpak、Windows zip、macOS tarball、Android APK
 与浏览器版本。它可以打开 DWG/DXF/DGN，可导入网格/STEP/IFC 文件用于显示、可预览 Revit 工程，能用 wgpu
-查看 2D/3D 图纸、做测量，命令清单 981 条中有 979 条有实现路径（107 完整 + 872 部分），其余 2 条
+查看 2D/3D 图纸、做测量，命令清单 981 条中有 979 条有实现路径（185 完整 + 794 部分），其余 2 条
 （MEASURE / TRACE）按同名不同义不计入；未支持的选项按名拒绝，不静默成功。它**还不是生产级 CAD**；
 各平台状态与证据边界见 `docs/handoff.md` 与 `docs/compatibility.md`。
 

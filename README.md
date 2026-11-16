@@ -12,7 +12,7 @@ is intended for Linux (native Wayland or X11/`dom-canvas`), Windows, macOS, Andr
 yacr is under active development, and **preview builds are available now** — Linux Flatpak, Windows
 zip, macOS tarball, Android APK, and a browser build. It opens DWG/DXF/DGN, imports mesh/STEP/IFC files
 for display, previews Revit projects and SketchUp models, views 2D/3D drawings with wgpu, measures,
-and has an implementation path for 979 of 981 commands (107 complete, 872 partial); the remaining
+and has an implementation path for 979 of 981 commands (185 complete, 794 partial); the remaining
 two names (MEASURE, TRACE) are counted as same-name-different-meaning, and unsupported options are
 rejected by name instead of silently succeeding. It is **not yet a production CAD system**;
 per-platform status and evidence boundaries are in `docs/handoff.md` and `docs/compatibility.md`.

@@ -2,6 +2,59 @@
   "generatedFrom": "docs/release-notes",
   "releases": [
     {
+      "version": "v0.1.14",
+      "title": "yacr v0.1.14",
+      "date": "2026-11-16",
+      "url": "https://github.com/zenglanmu/yacr/releases/tag/v0.1.14",
+      "sections": [
+        {
+          "heading": "命令覆盖：78 条从「部分实现」晋升「完整实现」 / Command coverage",
+          "items": [
+            "表格：TABLEDIT、TABLESTYLE、MATCHCELL、TABLEEXPORT —— 合并/拆分、行类型样式、逐格格式复制、CSV 导出；逐格边距与逐边双线间距存、画、往返并可由命令编辑。",
+            "引线：MLEADER、MLEADERCOLLECT、MLEADEREDIT —— MTEXT / 块 / 公差 / 无内容四种内容类型，块内容按块基点摆放，逐线路径类型与箭头尺寸覆盖。",
+            "布局与视口：LAYOUT、MVIEW、VPCLIP、VPSCALE、LAYVPI、ALIGNSPACE、CHSPACE、PSPACE、PSBSCALE、PSTSCALE —— LAYOUT COPY、多边形视口裁剪真实渲染、模型/图纸空间换算。",
+            "标注：DIMANGULAR、DIMSTYLE、-DIMSTYLE、DIMTEDIT —— 三点捕获、导入后样式表可写、全部标注类型的文字对齐。",
+            "图层 / 线型 / 比例：LAYDEL、LAYMRG、LAYTHW、RENAME、LINETYPE、PURGE、LTSCALE、SCALELISTEDIT（含别名）—— 线型的创建/删除与引用级联、$LTSCALE 往返、真实 ACAD_SCALELIST 写入。",
+            "显示：FILL、QTEXT、VIEWRES、WIPEOUT —— 令牌真正到达派生批次，矢量遮罩含反向填充。",
+            "编辑：EXTRIM、OOPS、DRAWORDER、TEXTTOFRONT、MSTRETCH、EXOFFSET、ELEV、-OVERKILL、-PAN —— 按空间逐范围绘制顺序、擦除整批恢复、ELEV 在创建时生效。",
+            "图案填充：HATCHSETORIGIN、HATCHTOBACK、HATCHSETBOUNDARY、GRADIENT。",
+            "查找 / 选择 / 计数：FIND、-FIND、FS、COUNT、SELECTCOUNT —— 整图遍历，文字按投影匹配。",
+            "查询与常量：MASSPROP（2D 惯性矩与主轴）、STATUS、BASE、LIMITS、SETVAR。",
+            "块裁剪 / 图像 / 边界：XCLIP、IMAGECLIP、BOUNDARY、-BOUNDARY —— XCLIP 裁剪深度端到端，非凸图像裁剪面积精确，边界集与孤岛识别。"
+          ]
+        },
+        {
+          "heading": "保存 / Save",
+          "items": [
+            "SAVE 现在写真实 BLOCK_RECORD / BLOCK / INSERT（块名、插入点、旋转、三个独立缩放因子）以及 XCLIP 的 ACAD_FILTER / SPATIAL_FILTER 链：块身份与裁剪随保存保留，不再一律展开成成员几何。",
+            "仍展开的参照逐条具名（镜像、倾斜、剪切、零或非有限缩放、非仿射、嵌套超限、重名、xref）。"
+          ]
+        },
+        {
+          "heading": "导入 / Import",
+          "items": [
+            "新增 DGN V7/V8 文档导入，可像其它 16 种格式一样打开。",
+            "表格逐格外观（文字颜色、背景填充、逐边边框颜色与线宽）进入显示与导出。",
+            "MLEADER 的 174 文字角度类型、DIMSTYLE 行的 DXF 写入。"
+          ]
+        },
+        {
+          "heading": "交互 / Interaction",
+          "items": [
+            "命令行放行宿主已经解析的类型化形式与选择器，不再按「未实现」拒绝。",
+            "3D 轨道速率下调并暴露为可配置设置。"
+          ]
+        },
+        {
+          "heading": "仍为部分实现 / Still partial",
+          "items": [
+            "LWEIGHT：渲染器没有宽线光栅化。TRIM 按名拒绝块参照（成员是共享定义行）。",
+            "TABLE：逐边线型、块/FIELD 单元格；XCLIP：INVERT 无模式字段。"
+          ]
+        }
+      ]
+    },
+    {
       "version": "v0.1.13",
       "title": "yacr v0.1.13",
       "date": "2026-11-14",
