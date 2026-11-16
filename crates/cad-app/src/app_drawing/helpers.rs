@@ -27,6 +27,11 @@ pub(crate) fn class_name(geometry: &SemanticGeometry) -> &'static str {
         SemanticGeometry::Point(_) => "AcDbPoint",
         SemanticGeometry::Image { .. } => "AcDbRasterImage",
         SemanticGeometry::Mask { .. } => "AcDbWipeout",
+        // A body's real source class is `AcDb3dSolid`/`AcDbSurface`/`AcDbRegion`
+        // or `AcDbBody`, and the geometry variant cannot tell them apart; an
+        // imported entity keeps its own `type_key`. This is the generic ACIS
+        // body class, never a guessed subtype.
+        SemanticGeometry::Body3d(_) => "AcDbBody",
         SemanticGeometry::Opaque { .. } => "AcDbUnknown",
         SemanticGeometry::Compound(_) => "AcDbCompound",
         // A hatch keeps its source type key so EXPLODE's `type_key` refusal and

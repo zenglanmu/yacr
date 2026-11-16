@@ -164,6 +164,11 @@ pub enum SemanticGeometry {
     },
     Point(Point3),
     Mesh(Mesh),
+    /// A 3D body (wire/sheet/solid): its topological class, its exact neutral
+    /// B-rep when available, and the derived display cache. See [`Body3d`].
+    ///
+    /// Boxed for the same reason as `Dimension`: the payload is large.
+    Body3d(Box<Body3d>),
     Insert {
         block: BlockId,
         transform: Transform3,

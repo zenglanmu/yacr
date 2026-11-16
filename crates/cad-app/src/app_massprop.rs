@@ -31,6 +31,11 @@ mod measuregeom;
 // every un-modelled AutoCAD property) is documented in
 // [`crate::command_id::massprop`]; this module owns the arithmetic.
 
+/// Stable refusal reason: a 3D body's mass properties need the exact B-rep
+/// kernel, which this build does not link. Its display tessellation is never
+/// substituted for the solid (a mesh volume is not the body's volume).
+pub const REASON_MASSPROP_BODY_REQUIRES_KERNEL: &str = "massprop.body_requires_kernel";
+
 /// One measured region before it is formatted into diagnostics.
 struct MassRegion {
     kind: &'static str,
@@ -334,7 +339,7 @@ impl Application {
             object: None,
             code: "massprop.solid_unsupported".into(),
             message: "MASSPROP: volume, mass, density and 3D moments of inertia are NOT REPORTED \
-                      (this build has no 3D solid/region model); no value is computed or invented \
+                      (this build has no linked B-rep kernel); no value is computed or invented \
                       for them"
                 .into(),
         });
@@ -662,6 +667,18 @@ impl Application {
                 hatch,
                 self.measurement.tolerance.computation_world,
             ),
+            // A body's mass properties are never derived from its display
+            // tessellation: a mesh volume is not the solid's volume. No kernel is
+            // linked in this build, so the refusal is explicit and stable.
+            SemanticGeometry::Body3d(body) => Err(CadError::Unsupported(format!(
+                "{}: entity {} ({}) is a 3D BODY (kind {:?}); its mass properties need the exact \
+                 B-rep kernel, which is not linked in this build, so no display-mesh volume is \
+                 reported",
+                REASON_MASSPROP_BODY_REQUIRES_KERNEL,
+                entity.id.0,
+                entity.object.type_key,
+                body.kind
+            ))),
             other => Err(CadError::Unsupported(format!(
                 "massprop.unsupported_kind: MASSPROP measures closed CIRCLE, full ELLIPSE, closed \
                  POLYLINE, closed SPLINE or a HATCH region; entity {} is {}",

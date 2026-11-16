@@ -83,3 +83,104 @@ fn mesh_pick_returns_the_closest_triangle() {
         other => panic!("expected a hit, got {other:?}"),
     }
 }
+
+/// A triangle at z = 2 facing -z, so a ray travelling +z always sees its front.
+fn body_triangle_mesh() -> Mesh {
+    Mesh {
+        vertices: vec![p(-1.0, -1.0, 2.0), p(0.0, 1.0, 2.0), p(1.0, -1.0, 2.0)],
+        triangles: vec![[0, 1, 2]],
+        normals: Vec::new(),
+        face_sources: Vec::new(),
+        colors: Vec::new(),
+    }
+}
+
+#[test]
+fn body_is_its_own_pick_family_and_its_mesh_is_hit() {
+    use super::super::hit::geometry_family_name;
+    let geometry = body(BodyKind::Solid, body_triangle_mesh(), Vec::new());
+    assert_eq!(geometry_family_name(&geometry), "body");
+    assert_ne!(geometry_family_name(&geometry), "mesh");
+
+    let r = ray(p(0.0, 0.0, 0.0), p(0.0, 0.0, 1.0));
+    let options = PickOptions::new(1e-6).unwrap();
+    match hit_geometry(&r, &geometry, &Transform3::identity(), &options).unwrap() {
+        PickOutcome::Hit(hit) => {
+            assert!((hit.distance - 2.0).abs() < 1e-9, "the display face is hit");
+            assert_eq!(hit.geometry_source, GeometrySource::DirectMesh);
+            // The stored (approximate) display precision is carried through, not
+            // upgraded to analytic.
+            assert_eq!(
+                hit.precision,
+                Precision::Approximate {
+                    error_bound: Some(0.01)
+                }
+            );
+            // A body's face identity is P1: no `SubElementId` is invented from
+            // the display triangle, and the machine reason says so.
+            assert!(hit.sub_element.is_none());
+            assert_eq!(
+                hit.sub_element_reason,
+                Some(REASON_BODY_FACE_IDENTITY_UNMODELLED)
+            );
+        }
+        other => panic!("expected a body face hit, got {other:?}"),
+    }
+}
+
+#[test]
+fn wire_body_with_only_edges_is_hit_testable() {
+    // No tessellation at all: only one boundary polyline at z = 3, running
+    // along +x. A body must still be pickable through its display edges.
+    let edge = vec![p(1.0, -2.0, 3.0), p(1.0, 2.0, 3.0)];
+    let geometry = body(
+        BodyKind::Wire,
+        Mesh {
+            vertices: Vec::new(),
+            triangles: Vec::new(),
+            normals: Vec::new(),
+            face_sources: Vec::new(),
+            colors: Vec::new(),
+        },
+        vec![edge],
+    );
+    let r = ray(p(1.0, 0.0, 0.0), p(0.0, 0.0, 1.0));
+    let options = PickOptions::new(1e-6).unwrap();
+    match hit_geometry(&r, &geometry, &Transform3::identity(), &options).unwrap() {
+        PickOutcome::Hit(hit) => {
+            assert!((hit.distance - 3.0).abs() < 1e-9, "the display edge is hit");
+            assert!((hit.point.y).abs() < 1e-9);
+            assert_eq!(hit.geometry_source, GeometrySource::DirectMesh);
+            assert_eq!(
+                hit.precision,
+                Precision::Approximate {
+                    error_bound: Some(0.01)
+                }
+            );
+            assert!(hit.sub_element.is_none());
+            assert_eq!(hit.sub_element_reason, None);
+        }
+        other => panic!("expected a wire-body edge hit, got {other:?}"),
+    }
+}
+
+#[test]
+fn body_with_an_empty_display_honestly_misses() {
+    let geometry = body(
+        BodyKind::Unknown,
+        Mesh {
+            vertices: Vec::new(),
+            triangles: Vec::new(),
+            normals: Vec::new(),
+            face_sources: Vec::new(),
+            colors: Vec::new(),
+        },
+        Vec::new(),
+    );
+    let r = ray(p(0.0, 0.0, 0.0), p(0.0, 0.0, 1.0));
+    let options = PickOptions::new(1e-6).unwrap();
+    assert_eq!(
+        hit_geometry(&r, &geometry, &Transform3::identity(), &options).unwrap(),
+        PickOutcome::Miss
+    );
+}

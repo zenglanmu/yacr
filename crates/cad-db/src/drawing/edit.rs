@@ -107,8 +107,8 @@ impl DrawingDatabase {
     // -----------------------------------------------------------------------
     // Controlled drawing write path (docs/drawing-edit.md §1)
     //
-    // The base drawing is read-only after import (spec §4.3); these methods are
-    // the single sanctioned mutation path, mirroring
+    // The base drawing is mutated only through this path (spec §4.3); these methods
+    // are the single sanctioned mutation path, mirroring
     // `set_block_visibility_state`: validate everything first, then mutate, then
     // raise the revision and publish an ordered ChangeSet. A failure at any point
     // leaves the database and its revision untouched.

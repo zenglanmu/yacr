@@ -2,6 +2,8 @@
 use std::fmt;
 
 mod block_clip;
+pub mod body;
+pub mod brep;
 mod dimension;
 mod dimension_synthesis;
 pub mod hatch;
@@ -17,6 +19,8 @@ mod multileader_create;
 mod multileader_content;
 pub mod table_entity;
 pub use block_clip::{validate_clip_depth, BlockClip, ClipDepthError};
+pub use body::{Body3d, BodyDisplay, BodyExact, BodyKind};
+pub use brep::{BrepCurve, BrepData, BrepFace, BrepLoop, BrepPlacement, BrepShell, BrepSurface};
 pub use hatch_entity::*;
 pub use multileader::*;
 pub use multileader_angle::*;

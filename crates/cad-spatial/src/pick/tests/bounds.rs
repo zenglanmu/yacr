@@ -543,3 +543,64 @@ fn bulge_pick_bounds_use_the_analytic_centre_side() {
         );
     }
 }
+
+/// A body's bound is the union of its display cache: mesh vertices and edge
+/// polyline points. An empty body contributes no box at all.
+#[test]
+fn body_bounds_union_the_mesh_and_its_edges() {
+    let with_edges_only = body(
+        BodyKind::Wire,
+        Mesh {
+            vertices: Vec::new(),
+            triangles: Vec::new(),
+            normals: Vec::new(),
+            face_sources: Vec::new(),
+            colors: Vec::new(),
+        },
+        vec![vec![p(-1.0, -3.0, 0.0), p(4.0, 2.0, 5.0)]],
+    );
+    let (min, max) = pick_world_bounds(&with_edges_only, &Transform3::identity())
+        .expect("an edge-only body has a bound");
+    let near = |a: f64, b: f64| (a - b).abs() < 1e-6;
+    assert!(near(min.x, -1.0), "min.x = {}", min.x);
+    assert!(near(min.y, -3.0), "min.y = {}", min.y);
+    assert!(near(min.z, 0.0), "min.z = {}", min.z);
+    assert!(near(max.x, 4.0), "max.x = {}", max.x);
+    assert!(near(max.y, 2.0), "max.y = {}", max.y);
+    assert!(near(max.z, 5.0), "max.z = {}", max.z);
+
+    // The mesh and the edges both contribute: the union grows to hold both.
+    let mixed = body(
+        BodyKind::Sheet,
+        Mesh {
+            vertices: vec![p(0.0, 0.0, 10.0)],
+            triangles: Vec::new(),
+            normals: Vec::new(),
+            face_sources: Vec::new(),
+            colors: Vec::new(),
+        },
+        vec![vec![p(-2.0, 0.0, 0.0), p(0.0, 3.0, 0.0)]],
+    );
+    let (min, max) =
+        pick_world_bounds(&mixed, &Transform3::identity()).expect("a mixed body has a bound");
+    assert!(near(min.x, -2.0), "min.x = {}", min.x);
+    assert!(near(min.y, 0.0), "min.y = {}", min.y);
+    assert!(near(min.z, 0.0), "min.z = {}", min.z);
+    assert!(near(max.x, 0.0), "max.x = {}", max.x);
+    assert!(near(max.y, 3.0), "max.y = {}", max.y);
+    assert!(near(max.z, 10.0), "max.z = {}", max.z);
+
+    // Empty display: no invented box, exactly like an empty mesh.
+    let empty = body(
+        BodyKind::Unknown,
+        Mesh {
+            vertices: Vec::new(),
+            triangles: Vec::new(),
+            normals: Vec::new(),
+            face_sources: Vec::new(),
+            colors: Vec::new(),
+        },
+        Vec::new(),
+    );
+    assert_eq!(pick_world_bounds(&empty, &Transform3::identity()), None);
+}

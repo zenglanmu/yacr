@@ -723,8 +723,8 @@ fn a_tessellated_acis_solid_exports_as_a_polyface_mesh_not_a_3dsolid() {
     let db = import_bytes(&dwg);
     assert!(
         db.entities()
-            .any(|entity| matches!(entity.geometry, SemanticGeometry::Mesh(_))),
-        "the importer must have tessellated the 3DSOLID"
+            .any(|entity| matches!(entity.geometry, SemanticGeometry::Body3d(_))),
+        "the importer must have lifted the 3DSOLID into a body"
     );
 
     let (bytes, report) = export_db(&db);
@@ -741,6 +741,10 @@ fn a_tessellated_acis_solid_exports_as_a_polyface_mesh_not_a_3dsolid() {
             .any(|entity| matches!(entity, EntityType::Solid3D(_))),
         "no ACIS source is retained, so a 3DSOLID cannot be round-tripped"
     );
+    assert_eq!(
+        report.counts.exact, 0,
+        "the body's exact B-Rep is not written, so nothing may be reported exact"
+    );
 
     let conversion = report
         .entries
@@ -748,10 +752,15 @@ fn a_tessellated_acis_solid_exports_as_a_polyface_mesh_not_a_3dsolid() {
         .find(|entry| {
             entry.code == "export.converted.mesh" && entry.message.contains("not as a 3DSOLID")
         })
-        .expect("the mesh conversion must be recorded by name");
+        .expect("the body conversion must be recorded by name");
     assert!(
         conversion.message.contains("original SAT/SAB source"),
         "the conversion must state the lost 3DSOLID round trip: {}",
+        conversion.message
+    );
+    assert!(
+        !conversion.message.contains("3DSOLID record was written"),
+        "the report must not claim exact geometry was written: {}",
         conversion.message
     );
 }

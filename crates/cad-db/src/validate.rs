@@ -65,6 +65,39 @@ pub const REASON_TEXT_LINE_SPACING: &str = "text.line_spacing_factor";
 /// and `>= 0`.
 pub const REASON_POLYLINE_WIDTH: &str = "polyline.width";
 
+/// Stable reason code: a [`BodyKind::Solid`] body does not carry exact geometry
+/// ([`BodyExact::Exact`]).
+///
+/// A solid claims a closed volumetric B-Rep, so a display mesh alone is not the
+/// same claim: without the exact B-rep the body cannot be measured, picked
+/// exactly or edited. The refusal names the code rather than storing a solid
+/// whose only surviving evidence is a cache.
+pub const REASON_BODY_SOLID_WITHOUT_EXACT: &str = "body.solid_without_exact";
+
+/// Stable reason code: a [`BodyKind::Solid`] body carries an exact B-rep with no
+/// faces (`BrepData::face_count() == 0`).
+///
+/// `Exact` without any face is an empty shell masquerading as a solid; it cannot
+/// bound a volume and would tessellate to nothing, so it is refused.
+pub const REASON_BODY_SOLID_WITH_EMPTY_BREP: &str = "body.solid_with_empty_brep";
+
+/// Stable reason code: a [`BodyDisplay::edges`] polyline is malformed.
+///
+/// Every polyline must have at least two points and every point must be finite;
+/// a shorter or non-finite one cannot be drawn and must not be stored silently.
+pub const REASON_BODY_EDGE_POLYLINE: &str = "body.edge_polyline";
+
+/// Stable reason code: a [`BodyDisplay::tolerance`] is not finite and strictly
+/// positive.
+///
+/// The tolerance is the linear deflection the mesh was built at, so zero,
+/// negative and non-finite values cannot describe a real tessellation.
+pub const REASON_BODY_TOLERANCE: &str = "body.tolerance";
+
+/// Stable reason code: a [`BodyKind::Wire`] body has neither display edges nor
+/// exact geometry, so it draws nothing at all.
+pub const REASON_BODY_WIRE_WITHOUT_GEOMETRY: &str = "body.wire_without_geometry";
+
 /// Validate a [`SemanticGeometry`] before it is written.
 ///
 /// Rejects non-finite coordinates and degenerate/unsupported-for-write cases:
@@ -313,6 +346,9 @@ pub fn validate_geometry(geometry: &SemanticGeometry) -> CadResult<()> {
         }
         SemanticGeometry::Mesh(mesh) => {
             validate_mesh(mesh)?;
+        }
+        SemanticGeometry::Body3d(body) => {
+            validate_body(body)?;
         }
         SemanticGeometry::Insert { transform, .. } => {
             if !transform_is_finite(transform) {
@@ -661,6 +697,90 @@ pub fn validate_geometry(geometry: &SemanticGeometry) -> CadResult<()> {
                 validate_geometry(child)?;
             }
         }
+    }
+    Ok(())
+}
+
+/// Validate a [`Body3d`] before it is written.
+///
+/// A body is a derived display on top of (optional) exact geometry, so the rules
+/// keep the two consistent instead of judging the cache alone:
+///
+/// - the display mesh is validated exactly like a standalone mesh
+///   ([`validate_mesh`]);
+/// - every display edge polyline has at least two finite points
+///   ([`REASON_BODY_EDGE_POLYLINE`]);
+/// - a stored `tolerance` is finite and strictly positive
+///   ([`REASON_BODY_TOLERANCE`]);
+/// - a [`BodyKind::Solid`] requires [`BodyExact::Exact`] and a non-empty B-rep
+///   ([`REASON_BODY_SOLID_WITHOUT_EXACT`], [`REASON_BODY_SOLID_WITH_EMPTY_BREP`]);
+/// - a [`BodyKind::Wire`] may have an empty mesh, but must still have display
+///   edges or exact geometry ([`REASON_BODY_WIRE_WITHOUT_GEOMETRY`]).
+///
+/// `Sheet` and `Unknown` bodies are accepted with either exact or unavailable
+/// geometry: a surface may legitimately be display-only, and `Unknown` is the
+/// honest class for a body whose exact shape is missing.
+pub fn validate_body(body: &Body3d) -> CadResult<()> {
+    let finite = |p: Point3| p.x.is_finite() && p.y.is_finite() && p.z.is_finite();
+    validate_mesh(&body.display.mesh)?;
+    for (index, polyline) in body.display.edges.iter().enumerate() {
+        if polyline.len() < 2 {
+            return Err(degenerate_reason(
+                REASON_BODY_EDGE_POLYLINE,
+                &format!(
+                    "edge polyline {index} has {} point(s); at least two are required",
+                    polyline.len()
+                ),
+            ));
+        }
+        if !polyline.iter().all(|p| finite(*p)) {
+            return Err(degenerate_reason(
+                REASON_BODY_EDGE_POLYLINE,
+                &format!("edge polyline {index} has a non-finite point"),
+            ));
+        }
+    }
+    if let Some(tolerance) = body.display.tolerance {
+        if !tolerance.is_finite() || tolerance <= 0.0 {
+            return Err(degenerate_reason(
+                REASON_BODY_TOLERANCE,
+                &format!("body display tolerance must be positive and finite, got {tolerance}"),
+            ));
+        }
+    }
+    match body.kind {
+        BodyKind::Solid => match &body.exact {
+            BodyExact::Exact(brep) if !brep.is_empty() => {}
+            BodyExact::Exact(_) => {
+                return Err(degenerate_reason(
+                    REASON_BODY_SOLID_WITH_EMPTY_BREP,
+                    "a solid requires an exact B-rep with at least one face",
+                ));
+            }
+            BodyExact::Unavailable { .. } => {
+                return Err(degenerate_reason(
+                    REASON_BODY_SOLID_WITHOUT_EXACT,
+                    "a solid requires an exact B-rep; the display mesh alone is not enough",
+                ));
+            }
+        },
+        BodyKind::Wire => {
+            let has_edges = body
+                .display
+                .edges
+                .iter()
+                .any(|polyline| polyline.len() >= 2);
+            let has_exact = body.exact_brep().is_some_and(|brep| !brep.is_empty());
+            if !has_edges && !has_exact {
+                return Err(degenerate_reason(
+                    REASON_BODY_WIRE_WITHOUT_GEOMETRY,
+                    "a wire body needs display edges or exact geometry",
+                ));
+            }
+        }
+        // A sheet may be display-only, and `Unknown` is the honest class for a
+        // body whose exact shape is missing; neither adds a rule here.
+        BodyKind::Sheet | BodyKind::Unknown => {}
     }
     Ok(())
 }

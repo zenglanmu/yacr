@@ -237,6 +237,18 @@ fn validate_geometry(geometry: &SemanticGeometry, opaque_is_vendor_backed: bool)
             }
             Ok(())
         }
+        // A body is enumerated only when its display cache has pickable
+        // geometry (a tessellation triangle or an edge polyline); an empty
+        // display is refused by name instead of being silently listed.
+        SemanticGeometry::Body3d(body) => {
+            if body.display.mesh.triangles.is_empty() && body.display.edges.is_empty() {
+                Err(CadError::Unsupported(
+                    "SelectAll cannot pick a body with no display geometry".into(),
+                ))
+            } else {
+                Ok(())
+            }
+        }
         _ => Ok(()),
     }
 }

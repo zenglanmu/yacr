@@ -101,6 +101,20 @@ impl BoundsAccumulator {
                     self.add_point(transform.apply_point(*p));
                 }
             }
+            // A body's extent covers both the display mesh and the edge
+            // polylines: an edge-only body (empty mesh) still has real bounds,
+            // and a body with neither contributes nothing (never an invented
+            // box).
+            SemanticGeometry::Body3d(body) => {
+                for p in &body.display.mesh.vertices {
+                    self.add_point(transform.apply_point(*p));
+                }
+                for polyline in &body.display.edges {
+                    for p in polyline {
+                        self.add_point(transform.apply_point(*p));
+                    }
+                }
+            }
             // Inserts are expanded by `DrawingDatabase::bounds`, which owns the
             // block definitions; a bare insert contributes no bounds here.
             SemanticGeometry::Insert { .. } => {}

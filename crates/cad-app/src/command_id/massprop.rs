@@ -121,9 +121,11 @@
 //!
 //! Two diagnostics keep the un-modelled halves visible at run time:
 //! `massprop.solid_unsupported` (volume, mass, density and 3D moments of inertia
-//! — there is no 3D solid/region model in this build) and
+//! — no B-rep kernel is linked in this build) and
 //! `massprop.not_implemented` (`Add`/`Subtract` region composition and `.mpr`
-//! output).
+//! output). A selected `Body3d` is refused by its own stable reason,
+//! `massprop.body_requires_kernel`: its display tessellation is never measured
+//! as if it were the solid.
 //!
 //! `CommandOutcome::measurement` / `point_report` stay `None`: `MASSPROP` reports
 //! several properties and no single `MeasurementRecord` value can carry them
@@ -131,10 +133,10 @@
 //!
 //! ## NOT IMPLEMENTED (named, never fabricated)
 //!
-//! * `volume`, `mass`, `density` and **3D** moments of inertia: this build has no
-//!   3D solid/region model, so there is nothing to integrate. The
+//! * `volume`, `mass`, `density` and **3D** moments of inertia: no B-rep kernel
+//!   is linked, so there is nothing to integrate. The
 //!   `massprop.solid_unsupported` diagnostic names them on every run, and no
-//!   value is computed.
+//!   value is computed; a 3D body is refused with `massprop.body_requires_kernel`.
 //! * `Add`/`Subtract` region composition and writing the analysis to a `.mpr`
 //!   file. There is no payload field or command path for either.
 //!

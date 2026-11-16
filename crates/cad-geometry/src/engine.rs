@@ -397,6 +397,56 @@ impl GeometryEngine for DefaultGeometryEngine {
                 }
                 G::Mesh(m2)
             }
+            G::Body3d(body) => {
+                let mut display = body.display.clone();
+                display.mesh = {
+                    let mut m2 = body.display.mesh.clone();
+                    m2.vertices = body.display.mesh.vertices.iter().map(|p| tp(*p)).collect();
+                    if is_uniform(t) {
+                        m2.normals = body.display.mesh.normals.iter().map(|n| td(*n)).collect();
+                    } else {
+                        m2.normals = mesh::compute_vertex_normals(&m2);
+                    }
+                    m2
+                };
+                display.edges = body
+                    .display
+                    .edges
+                    .iter()
+                    .map(|polyline| polyline.iter().map(|p| tp(*p)).collect())
+                    .collect();
+                let similarity = is_uniform(t);
+                display.tolerance = body
+                    .display
+                    .tolerance
+                    .filter(|_| similarity)
+                    .map(|tolerance| tolerance * uniform_scale(t));
+                let exact = match &body.exact {
+                    BodyExact::Exact(brep) if similarity => BodyExact::Exact(Box::new(BrepData {
+                        shells: brep.shells.clone(),
+                        placement: Some(
+                            brep.placement
+                                .unwrap_or_else(BrepPlacement::identity)
+                                .composed_with(t),
+                        ),
+                    })),
+                    BodyExact::Exact(_) => BodyExact::Unavailable {
+                        reason: "body.nonuniform_scale".to_string(),
+                    },
+                    BodyExact::Unavailable { reason } => BodyExact::Unavailable {
+                        reason: reason.clone(),
+                    },
+                };
+                let kind = match (&exact, &body.kind) {
+                    (BodyExact::Unavailable { .. }, BodyKind::Solid) => BodyKind::Unknown,
+                    (_, kind) => kind.clone(),
+                };
+                G::Body3d(Box::new(Body3d {
+                    kind,
+                    exact,
+                    display,
+                }))
+            }
             G::Insert {
                 block,
                 transform: inner,

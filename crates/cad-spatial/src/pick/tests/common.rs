@@ -59,6 +59,28 @@ pub(super) fn two_face_mesh() -> Mesh {
     }
 }
 
+/// A display-only body: `kind`, a tessellation mesh and edge polylines.
+///
+/// Its exact B-rep is `Unavailable` on purpose: everything the tests exercise
+/// (bounds, picking) must come from the display cache, never from a B-rep.
+pub(super) fn body(kind: BodyKind, mesh: Mesh, edges: Vec<Vec<Point3>>) -> SemanticGeometry {
+    SemanticGeometry::Body3d(Box::new(Body3d {
+        kind,
+        exact: BodyExact::Unavailable {
+            reason: "pick-test-display-only".into(),
+        },
+        display: BodyDisplay {
+            mesh,
+            edges,
+            tolerance: Some(0.01),
+            precision: Precision::Approximate {
+                error_bound: Some(0.01),
+            },
+            completeness: Completeness::Partial(vec!["exact-brep".into()]),
+        },
+    }))
+}
+
 /// A first-class solid HATCH over a 10x10 square in the world plane.
 pub(super) fn hatch_semantics() -> SemanticGeometry {
     let hatch = HatchGeometry::new(

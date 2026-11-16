@@ -3,7 +3,9 @@
 //! Moved out of `validate.rs` when the source file reached the 1000-line gate.
 
 use crate::validate::{
-    validate_geometry, REASON_POLYLINE_WIDTH, REASON_TEXT_LINE_SPACING, REASON_TEXT_WIDTH_FACTOR,
+    validate_geometry, REASON_BODY_EDGE_POLYLINE, REASON_BODY_SOLID_WITHOUT_EXACT,
+    REASON_BODY_SOLID_WITH_EMPTY_BREP, REASON_BODY_TOLERANCE, REASON_POLYLINE_WIDTH,
+    REASON_TEXT_LINE_SPACING, REASON_TEXT_WIDTH_FACTOR,
 };
 use cad_domain::*;
 
@@ -257,4 +259,232 @@ fn rejects_out_of_range_image_adjustment_and_accepts_the_edges() {
             "{adjust:?} must be rejected"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// `SemanticGeometry::Body3d` contract tests.
+//
+// The fixtures are deliberately small: one planar face with a square boundary
+// loop is enough to exercise "exact geometry exists" and "the solid rules see a
+// non-empty B-rep"; the display side is one triangle plus one edge polyline.
+// ---------------------------------------------------------------------------
+
+fn square_loop() -> BrepLoop {
+    let corners = [p(0.0, 0.0), p(10.0, 0.0), p(10.0, 10.0), p(0.0, 10.0)];
+    BrepLoop {
+        edges: (0..4)
+            .map(|i| BrepCurve::Line {
+                start: corners[i],
+                end: corners[(i + 1) % 4],
+            })
+            .collect(),
+    }
+}
+
+/// A one-face plane B-rep (an exact `Sheet`).
+fn plane_brep() -> BrepData {
+    BrepData {
+        shells: vec![BrepShell {
+            id: 0,
+            faces: vec![BrepFace {
+                id: 0,
+                surface: BrepSurface::Plane {
+                    origin: p(0.0, 0.0),
+                    normal: Point3 {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 1.0,
+                    },
+                    u_dir: Point3 {
+                        x: 1.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                },
+                reversed: false,
+                loops: vec![square_loop()],
+            }],
+        }],
+        placement: None,
+    }
+}
+
+fn triangle_mesh() -> Mesh {
+    Mesh {
+        vertices: vec![p(0.0, 0.0), p(1.0, 0.0), p(0.0, 1.0)],
+        triangles: vec![[0, 1, 2]],
+        normals: Vec::new(),
+        face_sources: Vec::new(),
+        colors: Vec::new(),
+    }
+}
+
+fn sheet_body() -> Body3d {
+    Body3d {
+        kind: BodyKind::Sheet,
+        exact: BodyExact::Exact(Box::new(plane_brep())),
+        display: BodyDisplay {
+            mesh: triangle_mesh(),
+            edges: vec![vec![p(0.0, 0.0), p(10.0, 0.0)]],
+            tolerance: Some(0.1),
+            precision: Precision::Analytic,
+            completeness: Completeness::Complete,
+        },
+    }
+}
+
+fn body_geometry(body: Body3d) -> SemanticGeometry {
+    SemanticGeometry::Body3d(Box::new(body))
+}
+
+#[test]
+fn body_sheet_with_exact_face_and_display_passes() {
+    assert!(validate_geometry(&body_geometry(sheet_body())).is_ok());
+}
+
+#[test]
+fn body_solid_requires_an_exact_brep() {
+    let mut body = sheet_body();
+    body.kind = BodyKind::Solid;
+    body.exact = BodyExact::Unavailable {
+        reason: "synthetic: no exact body".into(),
+    };
+    let message = validate_geometry(&body_geometry(body))
+        .expect_err("a solid without exact geometry is rejected")
+        .to_string();
+    assert!(
+        message.contains(REASON_BODY_SOLID_WITHOUT_EXACT),
+        "the refusal must carry the stable reason: {message}"
+    );
+}
+
+#[test]
+fn body_solid_with_an_empty_brep_is_rejected() {
+    let mut body = sheet_body();
+    body.kind = BodyKind::Solid;
+    body.exact = BodyExact::Exact(Box::default());
+    let message = validate_geometry(&body_geometry(body))
+        .expect_err("an empty exact B-rep is not a solid")
+        .to_string();
+    assert!(
+        message.contains(REASON_BODY_SOLID_WITH_EMPTY_BREP),
+        "the refusal must carry the stable reason: {message}"
+    );
+}
+
+#[test]
+fn body_display_edges_and_tolerance_are_validated() {
+    let body_with = |edges: Vec<Vec<Point3>>, tolerance: Option<f64>| {
+        let mut body = sheet_body();
+        body.display.edges = edges;
+        body.display.tolerance = tolerance;
+        body_geometry(body)
+    };
+    // Baseline: one valid polyline and a positive tolerance.
+    assert!(validate_geometry(&body_with(vec![vec![p(0.0, 0.0), p(1.0, 1.0)]], Some(0.5))).is_ok());
+
+    let single_point = validate_geometry(&body_with(vec![vec![p(0.0, 0.0)]], Some(0.5)))
+        .expect_err("a one-point polyline is not an edge")
+        .to_string();
+    assert!(
+        single_point.contains(REASON_BODY_EDGE_POLYLINE),
+        "the refusal must name the edge rule: {single_point}"
+    );
+
+    let non_finite = validate_geometry(&body_with(
+        vec![vec![p(0.0, 0.0), p(f64::NAN, 0.0)]],
+        Some(0.5),
+    ))
+    .expect_err("a non-finite edge point is not storable")
+    .to_string();
+    assert!(
+        non_finite.contains(REASON_BODY_EDGE_POLYLINE),
+        "the refusal must name the edge rule: {non_finite}"
+    );
+
+    for bad in [Some(0.0), Some(-1.0), Some(f64::NAN), Some(f64::INFINITY)] {
+        let message = validate_geometry(&body_with(vec![vec![p(0.0, 0.0), p(1.0, 1.0)]], bad))
+            .expect_err("the tolerance must be finite and positive")
+            .to_string();
+        assert!(
+            message.contains(REASON_BODY_TOLERANCE),
+            "the refusal must name the tolerance rule: {message}"
+        );
+    }
+    // `None` means "not known" and is representable.
+    assert!(validate_geometry(&body_with(vec![vec![p(0.0, 0.0), p(1.0, 1.0)]], None)).is_ok());
+}
+
+#[test]
+fn body_bounds_include_edges_when_the_mesh_is_empty() {
+    let mut body = sheet_body();
+    body.display.mesh = Mesh::default();
+    body.display.edges = vec![vec![p(-2.0, 3.0), p(4.0, -1.0)]];
+    let mut bounds = crate::BoundsAccumulator::new();
+    bounds.add_geometry(&body_geometry(body));
+    let (min, max) = bounds.finish().expect("edges bound the body");
+    assert_eq!(
+        min,
+        Point3 {
+            x: -2.0,
+            y: -1.0,
+            z: 0.0
+        }
+    );
+    assert_eq!(
+        max,
+        Point3 {
+            x: 4.0,
+            y: 3.0,
+            z: 0.0
+        }
+    );
+}
+
+#[test]
+fn body_uniform_scale_transforms_display_and_keeps_exact() {
+    let moved = crate::transform_geometry(&body_geometry(sheet_body()), &Transform3::scale(2.0))
+        .expect("a uniform scale is representable");
+    let SemanticGeometry::Body3d(moved) = moved else {
+        panic!("expected a body");
+    };
+    assert!(moved.is_exact(), "a similarity keeps the exact B-rep");
+    assert_eq!(moved.display.mesh.vertices[1], p(2.0, 0.0));
+    assert_eq!(moved.display.edges[0][1], p(20.0, 0.0));
+    let placement = moved
+        .exact_brep()
+        .expect("exact B-rep")
+        .placement
+        .expect("the composed placement is stored");
+    assert!((placement.scale - 2.0).abs() < 1e-12);
+    // The placement and the display agree: the source corner (10, 0, 0) maps to
+    // the same world point the edge polyline now ends at.
+    let corner = placement.apply(p(10.0, 0.0));
+    assert!((corner.x - 20.0).abs() < 1e-9, "{corner:?}");
+}
+
+#[test]
+fn body_non_uniform_scale_keeps_display_and_demotes_exact_and_solid_kind() {
+    let mut body = sheet_body();
+    body.kind = BodyKind::Solid;
+    let mut matrix = Transform3::identity().matrix;
+    matrix[0][0] = 2.0;
+    matrix[1][1] = 3.0;
+    let moved = crate::transform_geometry(&body_geometry(body), &Transform3 { matrix })
+        .expect("the display is still transformable");
+    let SemanticGeometry::Body3d(moved) = moved else {
+        panic!("expected a body");
+    };
+    assert!(matches!(
+        &moved.exact,
+        BodyExact::Unavailable { reason } if reason == "body.nonuniform_scale"
+    ));
+    assert_eq!(moved.kind, BodyKind::Unknown);
+    // The display cache is still the transformed one, not the source.
+    assert_eq!(moved.display.mesh.vertices[1], p(2.0, 0.0));
+    assert_eq!(moved.display.edges[0][1], p(20.0, 0.0));
+    assert_eq!(
+        moved.display.tolerance, None,
+        "a direction-dependent deflection is recorded as unknown"
+    );
 }

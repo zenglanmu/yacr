@@ -835,6 +835,13 @@ fn geometry_property_rows(geometry: &SemanticGeometry) -> Vec<PropertyRow> {
             ),
             PropertyRow::new("name", table.name().to_string()),
         ],
+        // Stored display-cache facts only. The body's source class lives in the
+        // entity `type_key` (it is not re-derived from the geometry), and no
+        // volume/area row is invented from the display tessellation.
+        SemanticGeometry::Body3d(body) => vec![
+            PropertyRow::new("vertices", body.display.mesh.vertices.len().to_string()),
+            PropertyRow::new("triangles", body.display.mesh.triangle_count().to_string()),
+        ],
     }
 }
 

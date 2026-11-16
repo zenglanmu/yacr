@@ -16,6 +16,7 @@
 //! self-roundtrip — never a claim that AutoCAD or any vendor opens the file.
 
 mod accumulator;
+mod body;
 mod common;
 mod dimension;
 mod entity;

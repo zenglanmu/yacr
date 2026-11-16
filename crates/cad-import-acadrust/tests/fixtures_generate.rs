@@ -323,7 +323,8 @@ fn mesh_bounds(mesh: &Mesh) -> ([f64; 3], [f64; 3]) {
 
 /// Round-trips the bytes through *our* importer, which is the property that
 /// makes the fixture fit for a real-display check: the `3DSOLID` must arrive as
-/// tessellated [`SemanticGeometry::Mesh`] geometry, not as an opaque proxy.
+/// a [`SemanticGeometry::Body3d`] with a tessellated display cache, not as an
+/// opaque proxy.
 fn assert_imports_as_tessellated_cube(bytes: &[u8]) {
     let request = ImportRequest {
         document: DocumentId(1),
@@ -341,14 +342,14 @@ fn assert_imports_as_tessellated_cube(bytes: &[u8]) {
         .database
         .entities()
         .filter_map(|entity| match &entity.geometry {
-            SemanticGeometry::Mesh(mesh) => Some(mesh),
+            SemanticGeometry::Body3d(body) => Some(&body.display.mesh),
             _ => None,
         })
         .collect();
     assert_eq!(
         meshes.len(),
         1,
-        "the single 3DSOLID must arrive as exactly one Mesh"
+        "the single 3DSOLID must arrive as exactly one 3D body"
     );
 
     let mesh = meshes[0];

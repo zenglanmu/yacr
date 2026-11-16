@@ -11,8 +11,8 @@ use super::math::{add, scale3};
 use super::ray::{ray_segment_closest, ray_triangle, validate_ray};
 use super::types::{
     GeometryHit, PickItem, PickOptions, PickOutcome, PickReport, SkippedGeometry,
-    MAX_PICK_SEGMENTS, REASON_FACE_SOURCES_ABSENT, REASON_FACE_SOURCE_MISSING,
-    REASON_FACE_SOURCE_OUT_OF_RANGE,
+    MAX_PICK_SEGMENTS, REASON_BODY_FACE_IDENTITY_UNMODELLED, REASON_FACE_SOURCES_ABSENT,
+    REASON_FACE_SOURCE_MISSING, REASON_FACE_SOURCE_OUT_OF_RANGE,
 };
 
 const FAMILY_LINE: usize = 0;
@@ -30,9 +30,10 @@ const FAMILY_TEXT: usize = 11;
 const FAMILY_SHAPE: usize = 12;
 const FAMILY_MASK: usize = 13;
 const FAMILY_IMAGE: usize = 14;
-const PICK_FAMILIES: [&str; 15] = [
+const FAMILY_BODY: usize = 15;
+const PICK_FAMILIES: [&str; 16] = [
     "line", "polyline", "circle", "arc", "ellipse", "spline", "point", "mesh", "insert", "opaque",
-    "compound", "text", "shape", "mask", "image",
+    "compound", "text", "shape", "mask", "image", "body",
 ];
 
 struct PickProfile {
@@ -106,6 +107,15 @@ fn pick_profile_enabled() -> bool {
     *ENABLED.get_or_init(|| std::env::var_os("YACR_PROFILE_PICK").is_some())
 }
 
+/// The stable profile/report name of a geometry's pick family.
+///
+/// Exposed to the crate's tests so the family a body is charged to (`"body"`,
+/// never `"mesh"`) is asserted directly instead of inferred from a profile log.
+#[cfg(test)]
+pub(super) fn geometry_family_name(geometry: &SemanticGeometry) -> &'static str {
+    PICK_FAMILIES[geometry_family(geometry)]
+}
+
 fn geometry_family(geometry: &SemanticGeometry) -> usize {
     match geometry {
         SemanticGeometry::Line { .. } => FAMILY_LINE,
@@ -137,6 +147,10 @@ fn geometry_family(geometry: &SemanticGeometry) -> usize {
         SemanticGeometry::Shape { .. } => FAMILY_SHAPE,
         SemanticGeometry::Mask { .. } => FAMILY_MASK,
         SemanticGeometry::Image { .. } => FAMILY_IMAGE,
+        // A body is its own family: reporting it as `mesh` would hide that the
+        // exact B-rep is what the body *is*, and the display cache is only a
+        // tessellation of it.
+        SemanticGeometry::Body3d(_) => FAMILY_BODY,
     }
 }
 
@@ -311,6 +325,60 @@ fn hit_validated(
             }
             None => PickOutcome::Miss,
         },
+        // A body's display cache is exactly what the user sees, so it is what
+        // the pick ray tests: the cached tessellation like a `Mesh`, plus its
+        // edge polylines like a `Polyline`, keeping the nearest hit. A body with
+        // no display geometry honestly misses; no analytic surface is invented
+        // from the display. Face identity needs the B-rep face map (P1), so no
+        // `SubElementId` is fabricated from a display triangle.
+        SemanticGeometry::Body3d(body) => {
+            // The display cache's own verdicts, never upgraded: a kernel-derived
+            // cache is a `KernelMesh`, a display-only one a `DirectMesh`, and the
+            // stored precision (approximate when tessellated) is carried through
+            // unchanged — exactly what the representation lane reports.
+            let geometry_source = if body.is_exact() {
+                GeometrySource::KernelMesh
+            } else {
+                GeometrySource::DirectMesh
+            };
+            let mut best: Option<GeometryHit> = None;
+            let display = &body.display;
+            if let Some((t, point, _triangle)) = mesh_hit(ray, &display.mesh, transform, options) {
+                best = Some(GeometryHit {
+                    point,
+                    distance: t,
+                    offset: 0.0,
+                    precision: display.precision.clone(),
+                    geometry_source: geometry_source.clone(),
+                    sub_element: None,
+                    sub_element_reason: Some(REASON_BODY_FACE_IDENTITY_UNMODELLED),
+                });
+            }
+            for edge in &display.edges {
+                let points = transform_polyline(edge.clone(), transform);
+                if let Some((t, offset, point)) = polyline_hit(ray, &points, options.tolerance) {
+                    let better = best
+                        .as_ref()
+                        .map(|b| (t, offset) < (b.distance, b.offset))
+                        .unwrap_or(true);
+                    if better {
+                        best = Some(GeometryHit {
+                            point,
+                            distance: t,
+                            offset,
+                            precision: display.precision.clone(),
+                            geometry_source: geometry_source.clone(),
+                            sub_element: None,
+                            sub_element_reason: None,
+                        });
+                    }
+                }
+            }
+            match best {
+                Some(hit) => PickOutcome::Hit(hit),
+                None => PickOutcome::Miss,
+            }
+        }
         SemanticGeometry::Compound(children) => {
             let mut best: Option<GeometryHit> = None;
             let mut unsupported: Option<&'static str> = None;

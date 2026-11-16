@@ -72,6 +72,55 @@ fn text_glyph_class_is_an_indexed_mesh_without_edge_overlay() {
 }
 
 #[test]
+fn body_mesh_batch_has_mesh_topology_and_triangle_derived_edges() {
+    // A `Body3d` with a display mesh arrives as `DisplayPrimitive::Mesh`. Its
+    // stored edge polylines are deferred (P0.1), so this triangle-derived
+    // overlay is the only edge source for a body today.
+    let delta = SceneCache::default()
+        .build(&mesh_representation(20, quad()), stamp())
+        .unwrap();
+    let batch = &delta.added[0];
+    assert_eq!(batch.topology, RenderTopology::Mesh);
+    assert_eq!(batch.indices, vec![[0, 1, 2], [0, 2, 3]]);
+    assert!(!batch.edges.is_empty(), "body mesh carries an edge overlay");
+}
+
+#[test]
+fn body_edges_only_fragment_becomes_a_line_batch_with_no_triangles() {
+    // A zero-triangle body with non-empty edges arrives as `LineSegments`
+    // (consecutive segment endpoint pairs), which builds as a line batch. It
+    // never reaches the index-less `RenderTopology::Mesh` path whose
+    // `triangle_count` fallback would read `vertices.len() / 3` as invented
+    // triangles.
+    let mut representation = line_representation(21, unit_points());
+    let mut edges = unit_points();
+    edges.extend([
+        Point3 {
+            x: 0.0,
+            y: 1.0,
+            z: 0.0,
+        },
+        Point3 {
+            x: 1.0,
+            y: 1.0,
+            z: 0.0,
+        },
+    ]);
+    representation.fragments[0].primitive =
+        DisplayPrimitive::LineSegments(Arc::from(edges.into_boxed_slice()));
+    let delta = SceneCache::default()
+        .build(&representation, stamp())
+        .unwrap();
+    assert_eq!(delta.added.len(), 1);
+    let batch = &delta.added[0];
+    assert_eq!(batch.topology, RenderTopology::Lines);
+    assert!(batch.indices.is_empty());
+    assert_eq!(batch.triangle_count(), 0);
+    // Two endpoint pairs are four vertices, and none are joined into a polyline.
+    assert_eq!(batch.vertices.len(), 4);
+}
+
+#[test]
 fn lines_batch_has_no_triangles_or_normals() {
     let mut cache = SceneCache::default();
     let rep = line_representation(

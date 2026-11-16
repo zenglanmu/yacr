@@ -849,6 +849,7 @@ fn child_kind(geometry: &SemanticGeometry) -> &'static str {
         SemanticGeometry::Spline { .. } => "Spline",
         SemanticGeometry::Point(_) => "Point",
         SemanticGeometry::Mesh(_) => "Mesh",
+        SemanticGeometry::Body3d(_) => "Body3d",
         SemanticGeometry::Insert { .. } => "Insert",
         SemanticGeometry::Text { .. } => "Text",
         SemanticGeometry::Shape { .. } => "Shape",

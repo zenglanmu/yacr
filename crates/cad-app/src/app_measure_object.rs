@@ -408,5 +408,9 @@ pub(crate) fn geometry_kind(geometry: &SemanticGeometry) -> &'static str {
         SemanticGeometry::Table(_) => "a TABLE",
         SemanticGeometry::Image { .. } => "an IMAGE",
         SemanticGeometry::Mask { .. } => "a MASK",
+        // The source class (AcDb3dSolid/AcDbSurface/AcDbRegion/AcDbBody) stays
+        // on the entity's `type_key`; the geometry variant alone only says it is
+        // a 3D body.
+        SemanticGeometry::Body3d(_) => "a 3D BODY",
     }
 }

@@ -357,7 +357,7 @@ fn mesh_bounds(mesh: &cad_domain::Mesh) -> (Point3, Point3) {
 }
 
 #[test]
-fn supported_acis_solid_tessellates_to_a_mesh_at_a_derived_tolerance() {
+fn supported_acis_solid_becomes_an_exact_body_with_a_tessellated_display() {
     let sat = include_str!("../../../../fixtures/acis/cube.sat");
     let acad = acadrust::CadDocument::new();
     let req = request(Vec::new());
@@ -367,17 +367,25 @@ fn supported_acis_solid_tessellates_to_a_mesh_at_a_derived_tolerance() {
     let common = entity.common();
     let (geometry, completeness) = builder.convert(&entity, common);
 
-    let SemanticGeometry::Mesh(mesh) = geometry else {
-        panic!("a tessellated 3DSOLID must become Mesh geometry, got {geometry:?}");
+    let SemanticGeometry::Body3d(body) = geometry else {
+        panic!("a tessellated 3DSOLID must become a Body3d, got {geometry:?}");
     };
+    assert_eq!(body.kind, BodyKind::Solid);
+    // The lifted ACIS B-Rep is kept as the exact geometry, never replaced by
+    // the facets.
+    let brep = body
+        .exact_brep()
+        .expect("the lifted B-Rep must be the exact geometry");
+    assert_eq!(brep.face_count(), 6, "a box has six faces");
+
+    // The kernel's facets are the display cache.
     assert_eq!(
-        mesh.triangles.len(),
+        body.display.mesh.triangles.len(),
         12,
         "a box tessellates to 12 triangles"
     );
-
     // The unit cube fixture spans [-1, 1] on every axis.
-    let (min, max) = mesh_bounds(&mesh);
+    let (min, max) = mesh_bounds(&body.display.mesh);
     for (actual, expected) in [
         (min.x, -1.0),
         (min.y, -1.0),
@@ -391,17 +399,28 @@ fn supported_acis_solid_tessellates_to_a_mesh_at_a_derived_tolerance() {
             "bounds {min:?}..{max:?} do not match the fixture extent"
         );
     }
-
-    // Exact for a planar box; the stated tolerance is 0 (analytic precision).
-    let volume = mesh_volume(&mesh);
+    let volume = mesh_volume(&body.display.mesh);
     assert!(
         (volume - 8.0).abs() < 1e-9,
         "closed-mesh volume {volume} != analytic 8.0"
     );
 
-    // The tolerance rule is a deliberate fraction of the body diagonal.
-    let brep = sat_to_brep(&acadrust::entities::acis::SatDocument::parse(sat).unwrap());
-    let (tolerance, diagonal) = crate::solid::acis_tolerance(&brep);
+    // The boundary polylines are kept instead of dropped.
+    assert!(
+        !body.display.edges.is_empty(),
+        "the tessellated body must keep its boundary edges"
+    );
+    assert!(
+        body.display
+            .edges
+            .iter()
+            .all(|polyline| polyline.len() >= 2),
+        "every display edge polyline has at least two points"
+    );
+
+    // The tolerance rule is a deliberate fraction of the body diagonal, and the
+    // deflection actually requested is recorded on the display.
+    let (tolerance, diagonal) = crate::solid::acis_tolerance(brep);
     assert!(
         (diagonal - 2.0 * 3.0_f64.sqrt()).abs() < 1e-9,
         "cube diagonal {diagonal}"
@@ -411,26 +430,211 @@ fn supported_acis_solid_tessellates_to_a_mesh_at_a_derived_tolerance() {
         "tolerance {} must be 0.1% of {diagonal}",
         tolerance.linear_deflection
     );
+    assert_eq!(body.display.tolerance, Some(tolerance.linear_deflection));
 
-    // Exactly the two declared reasons, in order, and never Complete.
-    let reasons = partial_reasons(&completeness);
+    // A planar box tessellates analytically: nothing is approximated and
+    // nothing is missing. The support status is therefore `Verified`, which a
+    // tessellated-only (no exact B-Rep) body may never claim.
+    assert_eq!(body.display.precision, Precision::Analytic);
+    assert_eq!(body.display.completeness, Completeness::Complete);
+    assert_eq!(completeness, Completeness::Complete);
     assert_eq!(
-        reasons,
-        vec![
-            crate::support::acis_approximation_reason(tolerance.linear_deflection),
-            crate::support::ACIS_SOURCE_NOT_RETAINED_REASON.to_string(),
-        ]
+        display_support(&SemanticGeometry::Body3d(body.clone())),
+        (SupportStatus::Verified, SupportStatus::Verified)
     );
-    assert!(!matches!(completeness, Completeness::Complete));
+    assert!(
+        !builder
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "import.acis_tessellated"),
+        "a planar exact body reports no approximation: {:?}",
+        builder.diagnostics
+    );
+}
 
-    // Recorded once per import (this builder has not seen a second solid yet).
-    let reported: Vec<&str> = builder
+#[test]
+fn curved_acis_body_keeps_its_exact_geometry_and_declares_the_approximation() {
+    let sat = include_str!("../../../../fixtures/acis/cone.sat");
+    let acad = acadrust::CadDocument::new();
+    let req = request(Vec::new());
+    let mut builder = builder(&req, &acad);
+
+    let entity = EntityType::Solid3D(acadrust::entities::Solid3D::from_sat(sat));
+    let common = entity.common();
+    let (geometry, completeness) = builder.convert(&entity, common);
+
+    let SemanticGeometry::Body3d(body) = geometry else {
+        panic!("a tessellated 3DSOLID must become a Body3d, got {geometry:?}");
+    };
+    assert_eq!(body.kind, BodyKind::Solid);
+    assert!(body.is_exact(), "the cone fixture lifts to a known B-Rep");
+    assert!(matches!(
+        body.display.precision,
+        Precision::Approximate {
+            error_bound: Some(bound)
+        } if bound > 0.0
+    ));
+    // A curved body's facets are an approximation; the reason names the
+    // deflection actually requested and the display stays `Partial`.
+    let deflection = body.display.tolerance.expect("a requested deflection");
+    let reason = crate::support::acis_approximation_reason(deflection);
+    let reasons = partial_reasons(&completeness);
+    assert_eq!(reasons, vec![reason.clone()]);
+    assert_eq!(body.display.completeness, completeness);
+    let count = builder
         .diagnostics
         .iter()
         .filter(|diagnostic| diagnostic.code == "import.acis_tessellated")
-        .map(|diagnostic| diagnostic.message.as_str())
+        .count();
+    assert_eq!(count, 1, "the approximation is reported once per body");
+    // Exact geometry exists, so the display is drawable without over-claiming
+    // the facets are exact.
+    assert_eq!(
+        display_support(&SemanticGeometry::Body3d(body.clone())),
+        (SupportStatus::Verified, SupportStatus::Verified)
+    );
+}
+
+#[test]
+fn acis_entity_classes_map_to_the_body_kind_they_prove() {
+    use acadrust::entities::acis::primitives::build_box;
+    use acadrust::entities::{AcisData, Body, Region, Solid3D, Surface};
+    let sat = build_box([0.0, 0.0, 0.0], 2.0, 2.0, 2.0).to_sat_string();
+    let surface = Surface {
+        acis_data: AcisData::from_sat(&sat),
+        ..Surface::default()
+    };
+    let cases = [
+        (
+            EntityType::Solid3D(Solid3D::from_sat(&sat)),
+            "AcDb3dSolid",
+            BodyKind::Solid,
+        ),
+        (
+            EntityType::Region(Region::from_sat(&sat)),
+            "AcDbRegion",
+            BodyKind::Sheet,
+        ),
+        (
+            EntityType::Body(Body::from_sat(&sat)),
+            "AcDbBody",
+            BodyKind::Unknown,
+        ),
+        (
+            EntityType::Surface(Box::new(surface)),
+            "AcDbSurface",
+            BodyKind::Sheet,
+        ),
+    ];
+    let acad = acadrust::CadDocument::new();
+    let req = request(Vec::new());
+    let mut builder = builder(&req, &acad);
+    for (entity, type_key, kind) in cases {
+        // The source entity class (the stored type key) is unchanged.
+        assert_eq!(entity_class_name(&entity), type_key);
+        let common = entity.common();
+        let (geometry, _completeness) = builder.convert(&entity, common);
+        let SemanticGeometry::Body3d(body) = geometry else {
+            panic!("{type_key} must become a Body3d, got {geometry:?}");
+        };
+        assert_eq!(body.kind, kind, "{type_key}");
+        assert!(body.is_exact(), "{type_key} carries the lifted B-Rep");
+        assert!(!body.display.mesh.triangles.is_empty(), "{type_key}");
+    }
+}
+
+#[test]
+fn importing_a_curved_acis_solid_keeps_the_body_and_reports_the_approximation() {
+    use acadrust::entities::Solid3D;
+    use acadrust::io::dwg::dwg_writer::DwgWriter;
+
+    let sat = include_str!("../../../../fixtures/acis/cone.sat");
+    let mut doc = acadrust::CadDocument::new();
+    doc.add_entity(EntityType::Solid3D(Solid3D::from_sat(sat)))
+        .unwrap();
+    let bytes = DwgWriter::write_to_vec(&doc).unwrap();
+
+    let drawing = AcadrustImporter::new()
+        .import(&request(bytes), &|| false)
+        .expect("synthetic DWG with a 3DSOLID imports");
+
+    let bodies: Vec<&cad_domain::Body3d> = drawing
+        .database
+        .entities()
+        .filter_map(|entity| match &entity.geometry {
+            SemanticGeometry::Body3d(body) => Some(body.as_ref()),
+            _ => None,
+        })
         .collect();
-    assert_eq!(reported.len(), 2, "{reported:?}");
+    assert_eq!(bodies.len(), 1);
+    let body = bodies[0];
+    assert_eq!(body.kind, BodyKind::Solid);
+    assert!(body.is_exact());
+    // A curved body is drawable and exact, but its display is an approximation.
+    assert!(matches!(
+        body.display.precision,
+        Precision::Approximate { .. }
+    ));
+    assert!(matches!(
+        body.display.completeness,
+        Completeness::Partial(_)
+    ));
+    assert!(
+        !body.display.edges.is_empty(),
+        "the cone's circular cap/seam polylines must survive"
+    );
+
+    let reason = crate::support::acis_approximation_reason(
+        body.display.tolerance.expect("a requested deflection"),
+    );
+    let count = drawing
+        .report
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.message == reason)
+        .count();
+    assert_eq!(count, 1, "the approximation is reported once per import");
+}
+
+#[test]
+fn a_solid_without_exact_geometry_is_demoted_to_unknown() {
+    use acadrust::entities::acis::primitives::build_box;
+    use acadrust::entities::Solid3D;
+
+    let sat_doc = build_box([0.0, 0.0, 0.0], 2.0, 2.0, 2.0);
+    let sat = sat_doc.to_sat_string();
+    let entity = EntityType::Solid3D(Solid3D::from_sat(&sat));
+
+    // A `Solid` claim needs an exact B-rep; without one the class is demoted
+    // (cad-db would reject a solid whose exact geometry is unavailable).
+    assert_eq!(
+        crate::support::acis_body_class(
+            &entity,
+            &BodyExact::Unavailable {
+                reason: "test".into()
+            }
+        ),
+        BodyKind::Unknown
+    );
+    assert_eq!(
+        crate::support::acis_body_class(
+            &entity,
+            &BodyExact::Exact(Box::new(sat_to_brep(&sat_doc)))
+        ),
+        BodyKind::Solid
+    );
+
+    // A sheet never depends on exact geometry to keep its class.
+    let region = EntityType::Region(acadrust::entities::Region::from_sat(&sat));
+    assert_eq!(
+        crate::support::acis_body_class(
+            &region,
+            &BodyExact::Unavailable {
+                reason: "test".into()
+            }
+        ),
+        BodyKind::Sheet
+    );
 }
 
 #[test]
@@ -470,7 +674,7 @@ fn raw_unparseable_acis_stays_opaque_with_the_kernel_reason_and_no_mesh() {
 }
 
 #[test]
-fn importing_two_acis_solids_reports_each_reason_once_and_never_complete() {
+fn importing_two_acis_solids_keeps_each_exact_body_and_its_source_class() {
     use acadrust::io::dwg::dwg_writer::DwgWriter;
 
     let sat = include_str!("../../../../fixtures/acis/cube.sat");
@@ -487,30 +691,45 @@ fn importing_two_acis_solids_reports_each_reason_once_and_never_complete() {
         .import(&request(bytes), &|| false)
         .expect("synthetic DWG with 3DSOLIDs imports");
 
-    assert!(
-        !matches!(drawing.report.completeness, Completeness::Complete),
-        "tessellated ACIS content may never report Complete: {:?}",
-        drawing.report.completeness
-    );
-    let meshes = drawing
+    let bodies: Vec<(&str, &cad_domain::Body3d)> = drawing
         .database
         .entities()
-        .filter(|entity| matches!(entity.geometry, SemanticGeometry::Mesh(_)))
-        .count();
-    assert_eq!(meshes, 2, "both 3DSOLIDs must be drawn as meshes");
+        .filter_map(|entity| match &entity.geometry {
+            SemanticGeometry::Body3d(body) => {
+                Some((entity.object.type_key.as_str(), body.as_ref()))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(bodies.len(), 2, "both 3DSOLIDs must be imported as bodies");
+    for (type_key, body) in bodies {
+        // The source entity class survives as the stored type key.
+        assert_eq!(type_key, "AcDb3dSolid");
+        assert_eq!(body.kind, BodyKind::Solid);
+        assert!(body.is_exact(), "the lifted B-Rep must be retained");
+        assert_eq!(body.exact_brep().map(|brep| brep.face_count()), Some(6));
+        assert_eq!(body.display.mesh.triangles.len(), 12);
+        assert!(!body.display.edges.is_empty());
+        // A planar solid tessellates analytically, so nothing is approximated.
+        assert_eq!(body.display.precision, Precision::Analytic);
+        assert_eq!(body.display.completeness, Completeness::Complete);
+    }
 
-    let brep = sat_to_brep(&acadrust::entities::acis::SatDocument::parse(sat).unwrap());
-    let (tolerance, _) = crate::solid::acis_tolerance(&brep);
-    for reason in [
-        crate::support::acis_approximation_reason(tolerance.linear_deflection),
-        crate::support::ACIS_SOURCE_NOT_RETAINED_REASON.to_string(),
-    ] {
-        let count = drawing
+    // The exact B-Rep is retained for a planar solid, and the approximation is
+    // not among the reported import losses. (The report can still be `Partial`
+    // for unrelated drawing-wide reasons such as an annotation scale.)
+    assert!(
+        !matches!(drawing.report.completeness, Completeness::Missing(_)),
+        "{:?}",
+        drawing.report.completeness
+    );
+    assert!(
+        !drawing
             .report
             .diagnostics
             .iter()
-            .filter(|diagnostic| diagnostic.message == reason)
-            .count();
-        assert_eq!(count, 1, "{reason:?} must be reported once per import");
-    }
+            .any(|diagnostic| diagnostic.code == "import.acis_tessellated"),
+        "{:?}",
+        drawing.report.diagnostics
+    );
 }

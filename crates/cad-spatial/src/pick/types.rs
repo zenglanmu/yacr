@@ -84,6 +84,10 @@ pub const REASON_FACE_SOURCE_OUT_OF_RANGE: &str = "mesh-face-source-index-out-of
 /// Machine key: `face_sources[triangle]` is explicitly `None`: the producer did
 /// not attach a stable id to that face.
 pub const REASON_FACE_SOURCE_MISSING: &str = "mesh-face-source-missing";
+/// Machine key: a 3D body's display triangle is not a stable face identity.
+/// Body face identity needs the exact B-rep face map (P1), so the hit resolves
+/// no `SubElementId` instead of inventing one from the tessellation.
+pub const REASON_BODY_FACE_IDENTITY_UNMODELLED: &str = "body-face-identity-unmodelled";
 
 /// A precise hit with its depth along the ray.
 #[derive(Debug, Clone, PartialEq)]

@@ -417,6 +417,14 @@ impl SceneCache {
                         // segment per triangle edge. Duplicated edges are not
                         // removed yet; that is a documented follow-up (edges are
                         // only uploaded when a caller asks for the wireframe).
+                        //
+                        // For a `Body3d` this triangle-derived overlay is the
+                        // only edge source today: a body's stored edge
+                        // polylines are not carried by `DisplayPrimitive::Mesh`.
+                        // P0.1 will replace the overlay with those stored edges
+                        // (`MeshWithStoredEdges`); until then the body's
+                        // edge-only display arrives as a separate `LineSegments`
+                        // fragment and is unaffected by this list.
                         let mut edge_positions = Vec::new();
                         if include_edge_overlay {
                             edge_positions.reserve(kept.len() * 6);

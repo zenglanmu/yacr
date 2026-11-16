@@ -34,6 +34,8 @@ pub(super) const HATCH_SAMPLED: u128 = 14;
 // circle whose area underflows to zero.
 pub(super) const ROTATED_RECT: u128 = 15;
 pub(super) const TINY_CIRCLE: u128 = 16;
+/// A 3D body fixture added by one test only (MASSPROP's kernel refusal).
+pub(super) const BODY_SOLID: u128 = 17;
 
 pub(super) fn entity(id: u128, geometry: SemanticGeometry) -> cad_db::DbEntity {
     cad_db::DbEntity {

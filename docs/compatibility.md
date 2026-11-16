@@ -53,7 +53,7 @@ N 点 + 回车、**一条事务/一步撤销**提交 N 个标注；基线按 `DI
 | EXTENDED(RTEXT/ARCALIGNEDTEXT/GEOPOSITIONMARKER/SECTIONOBJECT/POINTCLOUD) | 实现(基础字段) | 部分 | 基础表示(Text/圆/折线/范围盒) | 部分 | 不支持 |
 | **AEC Arch（AEC_WALL/DOOR/WINDOW/STAIR/SPACE/…，2026-11-03）** | **实现（acadrust 0.6.8 已类型化）**：`ExtendedEntityData::Arch` 携带 `ArchKind`、类名、**proxy-graphics 预览轮廓（世界坐标）**与原始 DWG/DXF 体 | **部分**：只有轮廓是真实的；开洞、3D 体量、类参数、样式/锚点对象未建模 | 每个 ≥2 点轮廓画成**开放折线**（记录无闭合标志，不臆造 `closed`）；无轮廓 ⇒ `Opaque` + 具名 `Partial` | 按折线 | 不支持 |
 | CAMERA / 动态块参数与夹点 / OLEFRAME / LAYOUTPRINTCONFIG / FORMAT / LEGACY / REGISTEREDCLASS | 实现(仅 common 或无语义) | 显式无显示 | 不绘制(`Opaque`/`Unverified`) | — | — |
-| 3DSOLID / BODY / REGION / SURFACE (ACIS) | 实现(acadrust 解析 SAT/SAB；**导入期离散**为中性网格) | 中性网格（**源 ACIS 不保留**） | **会绘制**：导入期经 `cad-kernel-adapter` 离散，容差 = 包围盒对角线的 **0.1 %**，恒 `Partial` 并声明「离散近似不随缩放细化 + 源不保留」；超出子集/原始 SAT/SAB 被拒 ⇒ 仍 `Opaque` + 内核具名码 | 经网格 | 不支持 |
+| 3DSOLID / BODY / REGION / SURFACE (ACIS) | 实现(acadrust 解析 SAT/SAB；导入期离散为**显示网格**；解析成功时**保留中性 B-Rep**） | `SemanticGeometry::Body3d`：`exact`（中性 B-Rep，仅当 lift 成功）+ `display`（网格 + 边线 + 弦高） | **会绘制**：导入期经 `cad-kernel-adapter` 离散，容差 = 包围盒对角线的 **0.1 %**；精确 B-Rep 保留时平面体可 `Complete`，曲面体 `Partial`（声明离散近似）；超出子集/原始 SAT/SAB 被拒 ⇒ 仍 `Opaque` + 内核具名码 | 经显示网格 | 不支持 |
 | TEXT/MTEXT 格式 | 实现(格式 run 解析) | 部分(堆叠分数/颜色/装饰/行对齐为显式 Partial) | 按 run 整形/换行 | — | — |
 | 实体颜色/线宽 | 实现(ByObject/ByLayer/ByBlock，ACI/RGB) | 实现(颜色)；线宽仅携带 | 颜色进入 shader；线宽**显式不绘制** | — | — |
 | LINETYPE 虚线 | 实现(名称/表/线型比例) | 实现(ByObject/ByLayer/ByBlock) | 按弧长细分 dash/gap；复杂线型仅 dash、显式 Partial | — | — |
@@ -154,21 +154,33 @@ face-with-hole 1/8、instance-scaled 3/36；theater-2017 1246 实体/96,333 三�
 | **`AREA OBJECT`（2026-10-27 新增）** | 对**当前选择的一个**闭合实体求**精确**面积：`Circle` ⇒ πr²、**完整** `Ellipse` ⇒ π·a·b、**闭合** `Polyline` ⇒ 平面内 **bulge 感知**的环面积（弧段用解析式，不采样） | **选择式**，不是 AutoCAD 的交互 Object 拾取（与 MATCHPROP 同型的声明式偏离）；`AREA` 的 `Add`/`Subtract` 未实现。拒绝面（全部按名、零改动）：0 或 >1 选择、开放折线、`Arc`（即使整圈）、`Spline`/`Line`/其它种类、折线平面不可定（含**两顶点**闭合 bulge 折线——仅凭顶点无法定平面与 bulge 符号）、非共面、弦环自交、椭圆弧、退化/零面积。`inputs` 诚实：圆/椭圆为空（不造点）、闭合折线为**自身顶点**且带自身平面；`precision = Analytic`。测量**不产生事务/撤销/revision** |
 | **`ID`（2026-10-26 新增）** | **单点拾取 → 该点世界坐标 X/Y/Z + 空间（`model`/`paper`）+ 捕捉来源 + 精度 token**，作为一条 `point` 回显行（不是 `measurement`：点坐标不是标量测量） | **无 spec 授权**：§3.3 只要求距离/折线长度/三点角度/面积，「点坐标查询」是**项目自选范围**（与 DIMENSION 创建同一口径）。**`ID` 故意跳过栅格捕捉与 `ORTHO`**——报告的就是捕捉点本身，两者都不会把坐标挪走（**我们的规则**，见 `crates/cad-app/src/point_report.rs`）。`precision` = 捕捉几何的精度，无捕捉时 `Analytic`；`pixelDistance` = 原拾取到捕捉点的逻辑像素距离（无捕捉为 `null`）。拒绝面：块空间、透视/非正交视图、`Points` 载荷路径（`InvalidInput`，只接受真实拾取）。**不写库、不进历史、无撤销步** |
 
-### ACIS 实体显示状态（3DSOLID / BODY / REGION / SURFACE，2026-10-21：**已接线**）
+### ACIS 实体状态（3DSOLID / BODY / REGION / SURFACE，2026-11-16：一级 3D body）
 
-这些实体**现在会画**：导入期用 `cad-kernel-adapter` 的离散器把 SAT/SAB 转成**中性网格**，
-以既有的 `SemanticGeometry::Mesh` 发出（**不新增域变体**，因此没有匹配臂风暴）。
+这些实体**会画**，并且不再伪装成普通网格：导入期用 `cad-kernel-adapter` 的离散器把 SAT/SAB 转成
+显示缓存，再以 `SemanticGeometry::Body3d` 发出（ADR-0036）。`3DFACE`/`POLYFACE`/`POLYGON MESH`/
+`MESH` **仍是 `Mesh`**——它们是面片/细分网格，不是 B-Rep。
 
-- **容差是规则，不是魔数**：线性偏差 = 该实体**世界包围盒对角线的 0.1 %（1e-3）**；角度偏差取内核默认 0.35 rad。
-  `fixtures/acis/cube.sat`：对角线 3.4641016 ⇒ 容差 **3.464102e-3**。
-- **完整性恒 `Partial`，两条具名理由**：①按容差 T 的**离散近似，缩放不会细化**；
-  ②**源 ACIS 不保留**——实体携带网格而非原始 SAT/SAB 字节 ⇒ **不能作为 3DSOLID 往返**。
+- **类别按能证明的事实取**：`3DSOLID → BodyKind::Solid`、`REGION`/`SURFACE → Sheet`、
+  `BODY`/其它 → `Unknown`。`Solid` 只有在精确 B-Rep 存在时才成立；否则降为 `Unknown`
+  并把原因留在 `display.completeness` 里。
+- **精确几何**：`SolidExchange::Brep` 且 B-Rep 非空时存 `BodyExact::Exact`；否则
+  `BodyExact::Unavailable { reason }`（复用 `ACIS_SOURCE_NOT_RETAINED_REASON`）。**绝不**从三角形
+  反推 B-Rep。
+- **容差是规则**：线性偏差 = 该实体**世界包围盒对角线的 0.1 %（1e-3）**，角度偏差取内核默认 0.35 rad；
+  `BodyDisplay.tolerance` 记录实际请求值。`fixtures/acis/cube.sat` 对角线 3.4641016 ⇒ **3.464102e-3**。
+- **边线不再丢弃**：`TessellationMesh.edges` 进入 `BodyDisplay.edges`。P0 的显示仍由三角形重推
+  边线覆盖层；直接把存储边线送进 `RenderBatch.edges` 是 P0.1。
+- **完整性**：精确 B-Rep + 解析离散 ⇒ `Complete`；曲面/近似离散 ⇒ `Partial` 并带具名近似理由；
+  只离散不保留精确几何 ⇒ `Partial`。**只离散的实体不再报 `Verified/Verified`**。
 - **拒绝保持原状**：超出子集、或原始 SAT/SAB 被内核拒绝 ⇒ 仍是 `Opaque` + 内核具名码
   （如 `kernel.no_acis_kernel`），**不把失败改成空成功**。
-- **导出**：网格的源类型是 `AcDb3dSolid`/`AcDbRegion`/`AcDbBody`/`AcDbSurface` 时，写 **POLYFACE 网格**
-  并记录具名转换（"tessellated from ACIS at import … not as a 3DSOLID"，`export.converted.mesh`）。
+- **导出**：body 的显示网格写 **POLYFACE**（仅边线时写 `LINE`/`POLYLINE3D`），并记录具名转换
+  （`export.converted.mesh` / `export.converted.wire_body`，说明"精确几何未写出"）；**不伪造**
+  `3DSOLID`/`BODY`/`REGION` 记录。
 - **证据**：cube 夹具 **12 三角形**、顶点界 `[-1,1]³`、闭合体积 **8.0**（解析 8.0，误差 < 1e-9）。
-- **仍未做**：样条曲面 / 一般裁剪 B-rep / 完整 ACIS 内核（超出范围）；离散**不随缩放细化**；**源字节不保留**。
+- **仍未做**：NURBS/样条曲面、一般裁剪 B-rep、完整 ACIS 内核；SAT/SAB **源字节仍不保留**
+  （只保留 lift 后的中性 B-Rep）；布尔/圆角/抽壳/`MASSPROP` 需要 P1 的 solidcore 服务
+  （当前 `MASSPROP` 对 body 显式 `massprop.body_requires_kernel`）。
 
 ### DIMENSION 族（ADR-0017 P5a，逐行，非脚注）
 

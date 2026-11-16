@@ -843,3 +843,55 @@ fn find_replacement_rebuilds_the_multileader_display() {
 }
 
 mod select_filter_query;
+
+/// A 3D body is named from its stored AutoCAD source class, never from the
+/// geometry variant: `AcDb3dSolid`/`AcDbSurface`/`AcDbRegion` each answer their
+/// own type name, and every body answers the neutral `BODY` alias. Nothing is
+/// ever reported as `MESH`.
+#[test]
+fn body_type_names_come_from_the_stored_source_class() {
+    let body_geometry = || {
+        SemanticGeometry::Body3d(Box::new(Body3d {
+            kind: BodyKind::Unknown,
+            exact: BodyExact::Unavailable {
+                reason: "select-filter-test".into(),
+            },
+            display: BodyDisplay {
+                mesh: Mesh {
+                    vertices: Vec::new(),
+                    triangles: Vec::new(),
+                    normals: Vec::new(),
+                    face_sources: Vec::new(),
+                    colors: Vec::new(),
+                },
+                edges: Vec::new(),
+                tolerance: None,
+                precision: Precision::Unknown,
+                completeness: Completeness::Unverified,
+            },
+        }))
+    };
+    for (type_key, alias) in [
+        ("AcDb3dSolid", "SOLID"),
+        ("AcDbSurface", "SURFACE"),
+        ("AcDbRegion", "REGION"),
+        ("AcDbBody", "BODY"),
+        ("AcDbVendorBody", "BODY"),
+    ] {
+        let entity = entity(EntityId(90), type_key, LayerId(0), body_geometry());
+        assert!(
+            crate::select_filter::type_matches(&entity, alias),
+            "{type_key} must answer {alias}"
+        );
+        assert!(
+            crate::select_filter::type_matches(&entity, "BODY"),
+            "{type_key} must answer the neutral BODY alias"
+        );
+        assert!(
+            !crate::select_filter::type_matches(&entity, "MESH"),
+            "{type_key} is not a MESH"
+        );
+    }
+    // The geometry alias is the neutral discriminant, not a guessed subtype.
+    assert_eq!(crate::select_filter::geometry_key(&body_geometry()), "BODY");
+}

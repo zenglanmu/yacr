@@ -51,21 +51,33 @@
 //! match; an invalid tree is a named refusal and changes nothing. Named filters
 //! (`filter.nfl`) are host file I/O: this build has no host bridge and refuses
 //! them by name (`filter.named_unsupported`).
+//!
+//! The object-type table, the predicate/expression evaluation and the legacy
+//! `PROPERTY VALUE` parsing live in the `types`, `predicate` and `parse`
+//! submodules of this file; `type_matches` and `geometry_key` are re-exported
+//! here so their paths are unchanged.
 
 use crate::command_payload::{
-    validate_expression, validate_predicate, FilterExpression, FilterLogic, SelectionApply,
-    SelectionOperator, SelectionPredicate, SelectionProperty, SelectionScope,
+    validate_expression, validate_predicate, SelectionApply, SelectionScope,
 };
 use crate::property_value::property_value;
 use crate::{
-    Application, Command, CommandId, CommandOutcome, CommandPayload, SelectionMode, SelectionRef,
-    SelectionSet, SelectionToolPayload, SessionState,
+    Application, Command, CommandId, CommandOutcome, CommandPayload, SelectionRef, SelectionSet,
+    SelectionToolPayload, SessionState,
 };
 use cad_db::{DbEntity, DrawingDatabase};
 use cad_domain::{
-    CadError, CadResult, Diagnostic, DocumentId, EntityId, InstancePath, LayerId, SemanticGeometry,
-    SpaceId,
+    CadError, CadResult, Diagnostic, DocumentId, EntityId, InstancePath, LayerId, SpaceId,
 };
+
+mod parse;
+mod predicate;
+mod types;
+
+use parse::{is_named_filter_query, legacy_apply, legacy_predicate, named_filter_refusal};
+use predicate::SelectionQuery;
+
+pub use types::{geometry_key, type_matches};
 
 /// Whether `id` belongs to this batch (the dispatch arm in `Application::execute`).
 pub(crate) fn batch(id: CommandId) -> bool {
@@ -417,253 +429,6 @@ impl Application {
     }
 }
 
-/// One selection query: either one predicate (QSELECT's one-row form) or a
-/// FILTER expression tree.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum SelectionQuery {
-    Predicate {
-        object_type: Option<String>,
-        predicate: SelectionPredicate,
-    },
-    Expression(FilterExpression),
-}
-
-impl SelectionQuery {
-    fn matches(&self, database: &DrawingDatabase, entity: &DbEntity) -> bool {
-        match self {
-            SelectionQuery::Predicate {
-                object_type,
-                predicate,
-            } => {
-                if let Some(object_type) = object_type {
-                    if !type_matches(entity, object_type) {
-                        return false;
-                    }
-                }
-                predicate.matches(database, entity)
-            }
-            SelectionQuery::Expression(expression) => {
-                expression_matches(expression, database, entity)
-            }
-        }
-    }
-}
-
-fn expression_matches(
-    expression: &FilterExpression,
-    database: &DrawingDatabase,
-    entity: &DbEntity,
-) -> bool {
-    match expression {
-        FilterExpression::Predicate(predicate) => predicate.matches(database, entity),
-        FilterExpression::Group { logic, members } => match logic {
-            FilterLogic::And => members
-                .iter()
-                .all(|member| expression_matches(member, database, entity)),
-            FilterLogic::Or => members
-                .iter()
-                .any(|member| expression_matches(member, database, entity)),
-            // Arity is validated before matching; the `get` calls stay defensive.
-            FilterLogic::Xor => match (members.first(), members.get(1)) {
-                (Some(first), Some(second)) => {
-                    expression_matches(first, database, entity)
-                        != expression_matches(second, database, entity)
-                }
-                _ => false,
-            },
-            FilterLogic::Not => members
-                .first()
-                .is_some_and(|member| !expression_matches(member, database, entity)),
-        },
-    }
-}
-
-impl SelectionProperty {
-    fn string_value(self, database: &DrawingDatabase, entity: &DbEntity) -> Option<String> {
-        match self {
-            Self::Type => Some(entity.object.type_key.clone()),
-            Self::Layer => database.layer(entity.layer).map(|layer| layer.name.clone()),
-            Self::Color | Self::Linetype | Self::Lineweight | Self::Transparency => {
-                property_value(database, entity, key(self))
-            }
-            Self::LinetypeScale => Some(format!(
-                "{}",
-                cad_db::sanitize_linetype_scale(
-                    database.entity_render_attributes(entity.id).linetype_scale
-                )
-            )),
-            Self::Space => Some(space_name(database, &entity.space)),
-            Self::Text => match &entity.geometry {
-                SemanticGeometry::Text { text, .. } => Some(text.clone()),
-                SemanticGeometry::MultiLeader(leader) => Some(leader.text().string.clone()),
-                // A table's searchable text is every non-empty cell, joined by
-                // one space (the same string FIND searches).
-                SemanticGeometry::Table(table) => {
-                    let texts = table.texts();
-                    if texts.is_empty() {
-                        None
-                    } else {
-                        Some(texts.join(" "))
-                    }
-                }
-                _ => None,
-            },
-            Self::Name => match &entity.geometry {
-                SemanticGeometry::Insert { block, .. } => {
-                    database.block_name(*block).map(str::to_string)
-                }
-                _ => None,
-            },
-        }
-    }
-
-    fn numeric_value(self, database: &DrawingDatabase, entity: &DbEntity) -> Option<f64> {
-        match self {
-            Self::Lineweight | Self::Transparency => self
-                .string_value(database, entity)
-                .and_then(|value| value.trim().parse::<f64>().ok()),
-            Self::LinetypeScale => Some(cad_db::sanitize_linetype_scale(
-                database.entity_render_attributes(entity.id).linetype_scale,
-            )),
-            _ => None,
-        }
-    }
-
-    /// The property key `cad_app::property_value` uses, or `None`.
-    fn property_key(self) -> Option<&'static str> {
-        match self {
-            Self::Color => Some("color"),
-            Self::Linetype => Some("linetype"),
-            Self::Lineweight => Some("lineweight"),
-            Self::Transparency => Some("transparency"),
-            _ => None,
-        }
-    }
-}
-
-fn key(property: SelectionProperty) -> &'static str {
-    property.property_key().unwrap_or("")
-}
-
-impl SelectionPredicate {
-    fn matches(&self, database: &DrawingDatabase, entity: &DbEntity) -> bool {
-        if self.operator == SelectionOperator::SelectAll {
-            return true;
-        }
-        if self.property == SelectionProperty::Type {
-            return self.matches_type(entity);
-        }
-        let Some(candidate) = self.property.string_value(database, entity) else {
-            return false;
-        };
-        self.compare(database, entity, &candidate)
-    }
-
-    fn matches_type(&self, entity: &DbEntity) -> bool {
-        match self.operator {
-            SelectionOperator::Equals => type_matches(entity, &self.value),
-            SelectionOperator::NotEqual => !type_matches(entity, &self.value),
-            SelectionOperator::WildcardMatch => type_names(entity)
-                .iter()
-                .any(|name| wildcard_match(&self.value, name)),
-            // Relative operators are refused for the type property.
-            _ => false,
-        }
-    }
-
-    fn compare(&self, database: &DrawingDatabase, entity: &DbEntity, candidate: &str) -> bool {
-        match self.operator {
-            SelectionOperator::Equals | SelectionOperator::NotEqual => {
-                let equal = if self.property.is_numeric() {
-                    match (
-                        self.property.numeric_value(database, entity),
-                        self.value.trim().parse::<f64>(),
-                    ) {
-                        (Some(left), Ok(right)) => (left - right).abs() <= f64::EPSILON * 16.0,
-                        _ => candidate.eq_ignore_ascii_case(&self.value),
-                    }
-                } else {
-                    candidate.eq_ignore_ascii_case(&self.value)
-                };
-                if self.operator == SelectionOperator::Equals {
-                    equal
-                } else {
-                    !equal
-                }
-            }
-            SelectionOperator::WildcardMatch => wildcard_match(&self.value, candidate),
-            SelectionOperator::SelectAll => true,
-            relative => {
-                let Ok(rhs) = self.value.trim().parse::<f64>() else {
-                    return false;
-                };
-                let Some(lhs) = self.property.numeric_value(database, entity) else {
-                    return false;
-                };
-                match relative {
-                    SelectionOperator::GreaterThan => lhs > rhs,
-                    SelectionOperator::LessThan => lhs < rhs,
-                    SelectionOperator::GreaterThanOrEqual => lhs >= rhs,
-                    SelectionOperator::LessThanOrEqual => lhs <= rhs,
-                    _ => false,
-                }
-            }
-        }
-    }
-}
-
-/// Parse one legacy `PROPERTY VALUE` line into the shared predicate.
-fn legacy_predicate(id: CommandId, property: &str, value: &str) -> CadResult<SelectionPredicate> {
-    let prefix = prefix(id);
-    if value.trim().is_empty() {
-        return Err(CadError::InvalidInput(format!(
-            "{prefix}.empty_value: the filter value must not be empty"
-        )));
-    }
-    let Some(property) = SelectionProperty::parse(property) else {
-        let accepted = if id == CommandId::GetSelection {
-            "LAYER or TYPE"
-        } else {
-            "TYPE, LAYER, COLOR, LINETYPE, LINEWEIGHT, LINETYPESCALE, TRANSPARENCY, SPACE, \
-             TEXT or NAME"
-        };
-        return Err(CadError::InvalidInput(format!(
-            "{prefix}.unknown_property: '{property}' is not a filter property ({accepted})"
-        )));
-    };
-    if id == CommandId::GetSelection
-        && !matches!(property, SelectionProperty::Layer | SelectionProperty::Type)
-    {
-        return Err(CadError::InvalidInput(
-            "getsel.unknown_property: GETSEL accepts LAYER or TYPE only".into(),
-        ));
-    }
-    Ok(SelectionPredicate {
-        property,
-        operator: SelectionOperator::Equals,
-        value: value.trim().to_string(),
-    })
-}
-
-/// Map the legacy `SelectionMode` onto the dialog apply modes.
-fn legacy_apply(id: CommandId, mode: SelectionMode) -> CadResult<SelectionApply> {
-    let apply = match (id, mode) {
-        (CommandId::QSelect, SelectionMode::Replace) => SelectionApply::IncludeNew,
-        (CommandId::QSelect, SelectionMode::Add) => SelectionApply::Append,
-        (CommandId::QSelect, SelectionMode::Remove) => SelectionApply::ExcludeNew,
-        (CommandId::GetSelection, SelectionMode::Replace) => SelectionApply::IncludeNew,
-        (CommandId::FilterSelect, SelectionMode::Add) => SelectionApply::Append,
-        _ => {
-            return Err(CadError::InvalidInput(format!(
-                "{}.invalid_mode: {mode:?} is not an apply mode for {}",
-                prefix(id),
-                command_name(id)
-            )))
-        }
-    };
-    Ok(apply)
-}
-
 /// The candidate entities of a query. Only **top-level** refs are ever
 /// candidates: a block-instance member (non-empty instance path) or a
 /// sub-element is not selected or counted by QSELECT/FILTER.
@@ -704,32 +469,6 @@ fn query_candidates<'a>(
     }
 }
 
-/// Whether a legacy property word asks for a **named filter** (`.nfl`).
-///
-/// Named filters are host file I/O (the AutoCAD `filter.nfl` store) and this
-/// build has no host bridge for it, so it is a stable named refusal rather than
-/// a silently empty selection.
-fn is_named_filter_query(property: &str) -> bool {
-    property.trim().eq_ignore_ascii_case("NAMED")
-        || property.trim().eq_ignore_ascii_case("NFILTER")
-        || property.trim().eq_ignore_ascii_case("FILTER.NFL")
-}
-
-/// The named-filter refusal: `.nfl` loading/saving belongs to the host, not the
-/// command layer.
-fn named_filter_refusal(name: &str) -> CadError {
-    let name = name.trim();
-    let detail = if name.is_empty() {
-        "no filter name given".to_string()
-    } else {
-        format!("'{name}'")
-    };
-    CadError::Unsupported(format!(
-        "filter.named_unsupported: named filter {detail} is host file I/O (filter.nfl); this \
-         build has no host bridge for it"
-    ))
-}
-
 fn no_match_message(id: CommandId, space: &SpaceId) -> String {
     let scope = match space {
         SpaceId::Model => "model-space",
@@ -737,68 +476,6 @@ fn no_match_message(id: CommandId, space: &SpaceId) -> String {
         SpaceId::Block(_) => "block-space",
     };
     format!("{}: no {scope} entity matches the filter", command_name(id))
-}
-
-fn type_names(entity: &DbEntity) -> Vec<String> {
-    let mut names = vec![entity.object.type_key.clone()];
-    match &entity.geometry {
-        SemanticGeometry::Text { .. } => {
-            if entity.object.type_key.eq_ignore_ascii_case("AcDbMText") {
-                names.push("MTEXT".into());
-            } else {
-                names.push("TEXT".into());
-            }
-        }
-        SemanticGeometry::Mask { .. } => names.push("WIPEOUT".into()),
-        other => names.push(geometry_key(other).to_string()),
-    }
-    names
-}
-
-fn space_name(database: &DrawingDatabase, space: &SpaceId) -> String {
-    match space {
-        SpaceId::Model => "Model".to_string(),
-        SpaceId::Paper(layout) => database
-            .layout(*layout)
-            .map(|layout| layout.name.clone())
-            .unwrap_or_else(|| "Paper".to_string()),
-        SpaceId::Block(block) => format!("Block:{}", block.0),
-    }
-}
-
-/// Anchored, ASCII case-insensitive `*`/`?` wildcard match.
-///
-/// This is the `*Wildcard Match*` operator's core grammar. The other AutoCAD
-/// wildcard tokens (`#`, `@`, `.`, `[...]`, `~`) are **not** implemented and are
-/// literal characters here; that boundary is documented rather than silently
-/// guessed.
-fn wildcard_match(pattern: &str, text: &str) -> bool {
-    let pattern: Vec<char> = pattern.chars().flat_map(char::to_lowercase).collect();
-    let text: Vec<char> = text.chars().flat_map(char::to_lowercase).collect();
-    // Iterative backtracking: `star` remembers the last `*` and `mark` the text
-    // position it may still extend.
-    let (mut pi, mut ti) = (0usize, 0usize);
-    let (mut star, mut mark) = (None, 0usize);
-    while ti < text.len() {
-        if pi < pattern.len() && (pattern[pi] == '?' || pattern[pi] == text[ti]) {
-            pi += 1;
-            ti += 1;
-        } else if pi < pattern.len() && pattern[pi] == '*' {
-            star = Some(pi);
-            mark = ti;
-            pi += 1;
-        } else if let Some(star_index) = star {
-            pi = star_index + 1;
-            mark += 1;
-            ti = mark;
-        } else {
-            return false;
-        }
-    }
-    while pi < pattern.len() && pattern[pi] == '*' {
-        pi += 1;
-    }
-    pi == pattern.len()
 }
 
 /// The five-property signature `SSX`/`SELECTCOUNT` compare.
@@ -914,58 +591,6 @@ fn selection_outcome(code: String, message: String) -> CommandOutcome {
         }],
         measurement: None,
         point_report: None,
-    }
-}
-
-/// Whether an entity's stored type key **or** friendly geometry alias matches
-/// `value` (ASCII case-insensitive).
-///
-/// `MTEXT` is a friendly alias for a `Text` geometry stamped `AcDbMText`; the
-/// other aliases come from the geometry discriminant. A `Mask` matches both
-/// `MASK` and its AutoCAD name `WIPEOUT`.
-pub fn type_matches(entity: &DbEntity, value: &str) -> bool {
-    if entity.object.type_key.eq_ignore_ascii_case(value) {
-        return true;
-    }
-    match &entity.geometry {
-        // TEXT and MTEXT are the same geometry variant; the stored type key is
-        // the only distinction, so each alias names exactly one source class.
-        SemanticGeometry::Text { .. } => {
-            if entity.object.type_key.eq_ignore_ascii_case("AcDbMText") {
-                value.eq_ignore_ascii_case("MTEXT")
-            } else {
-                value.eq_ignore_ascii_case("TEXT")
-            }
-        }
-        SemanticGeometry::Mask { .. } => {
-            value.eq_ignore_ascii_case("MASK") || value.eq_ignore_ascii_case("WIPEOUT")
-        }
-        other => geometry_key(other).eq_ignore_ascii_case(value),
-    }
-}
-
-/// The stable friendly name of one geometry discriminant (`LINE`, `CIRCLE`, …).
-pub fn geometry_key(geometry: &SemanticGeometry) -> &'static str {
-    match geometry {
-        SemanticGeometry::Line { .. } => "LINE",
-        SemanticGeometry::Polyline { .. } => "POLYLINE",
-        SemanticGeometry::Circle { .. } => "CIRCLE",
-        SemanticGeometry::Arc { .. } => "ARC",
-        SemanticGeometry::Ellipse { .. } => "ELLIPSE",
-        SemanticGeometry::Spline { .. } => "SPLINE",
-        SemanticGeometry::Point(_) => "POINT",
-        SemanticGeometry::Mesh(_) => "MESH",
-        SemanticGeometry::Insert { .. } => "INSERT",
-        SemanticGeometry::Text { .. } => "TEXT",
-        SemanticGeometry::Shape { .. } => "SHAPE",
-        SemanticGeometry::Opaque { .. } => "OPAQUE",
-        SemanticGeometry::Compound(_) => "COMPOUND",
-        SemanticGeometry::Dimension(_) => "DIMENSION",
-        SemanticGeometry::Hatch(_) => "HATCH",
-        SemanticGeometry::MultiLeader(_) => "MULTILEADER",
-        SemanticGeometry::Table(_) => "TABLE",
-        SemanticGeometry::Image { .. } => "IMAGE",
-        SemanticGeometry::Mask { .. } => "MASK",
     }
 }
 

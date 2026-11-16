@@ -208,4 +208,36 @@ mod tests {
         clip.vertices.push([0.5, 3.0]);
         assert!(!clip.is_rect(), "three points are a polygon");
     }
+
+    #[test]
+    fn body_exposes_its_exact_brep_only_when_available() {
+        let display = BodyDisplay {
+            mesh: Mesh::default(),
+            edges: vec![vec![point(0.0, 0.0, 0.0), point(1.0, 0.0, 0.0)]],
+            tolerance: None,
+            precision: Precision::Unknown,
+            completeness: Completeness::Missing(vec!["exact".into()]),
+        };
+        let mut body = Body3d {
+            kind: BodyKind::Wire,
+            exact: BodyExact::Unavailable {
+                reason: "synthetic".into(),
+            },
+            display: display.clone(),
+        };
+        assert!(!body.is_exact());
+        assert!(body.exact_brep().is_none());
+
+        body.exact = BodyExact::Exact(Box::default());
+        assert!(body.is_exact());
+        assert_eq!(body.exact_brep().map(BrepData::face_count), Some(0));
+        // The neutral B-rep data is reachable at the documented crate paths.
+        assert!(brep::BrepData::default().is_empty());
+        // The variant is a first-class member of the semantic enum.
+        let geometry = SemanticGeometry::Body3d(Box::new(body));
+        assert!(matches!(
+            &geometry,
+            SemanticGeometry::Body3d(body) if body.is_exact()
+        ));
+    }
 }

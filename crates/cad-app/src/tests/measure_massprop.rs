@@ -714,3 +714,80 @@ fn massprop_refuses_a_zero_area_region_by_name() {
     assert!(text.contains("massprop.degenerate"), "{text}");
     assert!(!text.contains("NaN"), "no NaN is ever reported: {text}");
 }
+
+/// A 3D body's mass properties are the one thing the display cache must never
+/// stand in for: MASSPROP refuses it with the stable `massprop.body_requires_kernel`
+/// reason instead of reporting the tessellation's mesh volume as the solid's.
+#[test]
+fn massprop_refuses_a_body_with_the_kernel_reason() {
+    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
+    builder
+        .insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+    // A closed unit-ish solid body whose display cache *could* be integrated as a
+    // mesh if the code took the dishonest path.
+    let mut solid = entity(
+        BODY_SOLID,
+        SemanticGeometry::Body3d(Box::new(Body3d {
+            kind: BodyKind::Solid,
+            exact: BodyExact::Unavailable {
+                reason: "test-no-kernel".into(),
+            },
+            display: BodyDisplay {
+                mesh: Mesh {
+                    vertices: vec![
+                        point(0.0, 0.0),
+                        point(1.0, 0.0),
+                        point(0.0, 1.0),
+                        Point3 {
+                            x: 0.0,
+                            y: 0.0,
+                            z: 1.0,
+                        },
+                    ],
+                    triangles: vec![[0, 1, 2], [0, 1, 3], [1, 2, 3], [2, 0, 3]],
+                    normals: Vec::new(),
+                    face_sources: Vec::new(),
+                    colors: Vec::new(),
+                },
+                edges: vec![vec![point(0.0, 0.0), point(1.0, 0.0)]],
+                tolerance: Some(0.01),
+                precision: Precision::Approximate {
+                    error_bound: Some(0.01),
+                },
+                completeness: Completeness::Partial(vec!["exact-brep".into()]),
+            },
+        })),
+    );
+    solid.object.type_key = "AcDb3dSolid".into();
+    builder.insert_entity(solid).unwrap();
+    let (mut app, mut session, _) = super::inquiry::app_from_builder(builder);
+    let before = revision(&app);
+    select(&mut app, &mut session, &[BODY_SOLID]).unwrap();
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::MassProp,
+        CommandPayload::None,
+    )
+    .expect_err("a body has no mass properties without a linked kernel");
+    match error {
+        CadError::Unsupported(message) => {
+            assert!(
+                message.starts_with(crate::app_massprop::REASON_MASSPROP_BODY_REQUIRES_KERNEL),
+                "the stable reason leads the message: {message}"
+            );
+            // The source class is the stored `type_key`, and the refusal names
+            // the body rather than pretending the geometry is a mesh.
+            assert!(message.contains("AcDb3dSolid"), "{message}");
+            assert!(message.contains("3D BODY"), "{message}");
+        }
+        other => panic!("expected the explicit body refusal, got {other:?}"),
+    }
+    // A refusal writes nothing: no revision bump, no undo entry.
+    assert_no_write(&app, &session, before);
+}

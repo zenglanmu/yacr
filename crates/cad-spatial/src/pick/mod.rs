@@ -17,6 +17,10 @@
 //!   [`Precision::Approximate`] (see `docs/picking-3d.md`);
 //! * `Mesh` — Möller–Trumbore triangle intersection with an explicit
 //!   [`BackFacePolicy`];
+//! * `Body3d` — its display cache: the tessellation mesh picks like `Mesh` and
+//!   the display edge polylines like a `Polyline` (nearest wins). A body's face
+//!   identity is P1, so a face hit reports
+//!   `body-face-identity-unmodelled` rather than an invented sub-element;
 //! * `Compound` — recurses and keeps the closest child.
 //!
 //! # What is explicitly *not* supported here
@@ -41,8 +45,8 @@ pub use hit::{hit_geometry, pick_closest, pick_closest_borrowed};
 pub use ray::{ray_segment_closest, ray_triangle, validate_ray};
 pub use types::{
     BackFacePolicy, GeometryHit, PickItem, PickOptions, PickOutcome, PickReport, SkippedGeometry,
-    MAX_PICK_SEGMENTS, MIN_RAY_DIRECTION, REASON_FACE_SOURCES_ABSENT, REASON_FACE_SOURCE_MISSING,
-    REASON_FACE_SOURCE_OUT_OF_RANGE,
+    MAX_PICK_SEGMENTS, MIN_RAY_DIRECTION, REASON_BODY_FACE_IDENTITY_UNMODELLED,
+    REASON_FACE_SOURCES_ABSENT, REASON_FACE_SOURCE_MISSING, REASON_FACE_SOURCE_OUT_OF_RANGE,
 };
 
 pub(crate) use bounds::ray_intersects_expanded_bounds;

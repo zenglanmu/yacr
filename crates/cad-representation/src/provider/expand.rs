@@ -509,10 +509,28 @@ impl ProviderRegistry {
                     let emit = |primitive: DisplayPrimitive, out: &mut DisplayRepresentation| {
                         let mut source = fragment.source.clone();
                         source.instance = path.clone();
+                        // A `Body3d` carries its own derived display cache, and
+                        // its precision and producer live on that cache
+                        // (`BodyDisplay`), not on the entity-level
+                        // `geometry_source` attribute (whose default is
+                        // `Analytic`). For this one class the provider-resolved
+                        // values therefore win: an analytic body display still
+                        // reports `Analytic`, and an approximate one is never
+                        // upgraded to it.
+                        let body_owns_precision =
+                            matches!(&entity.geometry, SemanticGeometry::Body3d(_));
+                        let (geometry_source, precision) = if body_owns_precision {
+                            (fragment.geometry_source.clone(), fragment.precision.clone())
+                        } else {
+                            (
+                                attributes.geometry_source.clone(),
+                                precision_for_source(&attributes.geometry_source),
+                            )
+                        };
                         out.fragments.push(DisplayFragment {
                             source,
-                            geometry_source: attributes.geometry_source.clone(),
-                            precision: precision_for_source(&attributes.geometry_source),
+                            geometry_source,
+                            precision,
                             alpha: own_alpha,
                             color: fragment_color,
                             color_unresolved: fragment_color_unresolved,

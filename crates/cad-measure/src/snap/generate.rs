@@ -104,6 +104,11 @@ pub(super) fn generate(
         }
         G::Mesh(_)
         | G::Insert { .. }
+        // A body's display cache is a tessellation, not an analytic surface:
+        // like `Mesh`, it contributes no snap vertices here rather than
+        // inventing endpoints on a fabricated plane. (Body edge snapping is a
+        // later concern; the display edges stay pickable via `cad-spatial`.)
+        | G::Body3d(_)
         | G::Text { .. }
         | G::Shape { .. }
         | G::Opaque { .. }

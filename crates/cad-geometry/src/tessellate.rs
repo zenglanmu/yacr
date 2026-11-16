@@ -141,9 +141,12 @@ pub fn tessellate_geometry(geometry: &SemanticGeometry, params: TessellationPara
                 },
             ]
         }
-        G::Mesh(_) | G::Insert { .. } | G::Opaque { .. } | G::Shape { .. } | G::Image { .. } => {
-            Vec::new()
-        }
+        G::Mesh(_)
+        | G::Body3d(_)
+        | G::Insert { .. }
+        | G::Opaque { .. }
+        | G::Shape { .. }
+        | G::Image { .. } => Vec::new(),
         // A dimension is drawn from its derived display children, which the
         // representation layer handles one primitive at a time.
         G::Dimension(_) => Vec::new(),

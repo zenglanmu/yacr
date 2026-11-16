@@ -165,6 +165,118 @@ pub(super) fn push_mesh_fragment(
     });
 }
 
+/// Emit a [`SemanticGeometry::Body3d`]'s derived display cache with the existing
+/// primitives.
+///
+/// A body reaches the display through the cache `cad-db` stores beside its exact
+/// geometry, never by re-tessellating the B-rep here: a filled mesh when the
+/// cache has triangles, otherwise its boundary/feature edges as independent
+/// segments (the `BodyKind::Wire` / edge-only case). Rebuilding geometry at draw
+/// time would be a second source of truth beside the cache.
+///
+/// Precision and completeness are the body's own and are never assumed or
+/// upgraded: an approximate cache stays approximate, and a `Partial`/`Missing`
+/// display verdict is carried through unchanged. The geometry source separates a
+/// body whose exact B-rep is present ([`GeometrySource::KernelMesh`]: the cache
+/// was derived from the kernel) from a display-only body
+/// ([`GeometrySource::DirectMesh`]).
+///
+/// A body with neither a mesh nor drawable edges is missing geometry with an
+/// explicit diagnostic — never an empty success.
+///
+/// P0.1: a body's **stored** edge polylines are not uploaded while it has a
+/// display mesh, because carrying them needs a
+/// `DisplayPrimitive::MeshWithStoredEdges` variant (deferred: adding it forces
+/// edits in the import/spatial/measure lanes). Until then the scene draws the
+/// triangle-derived edge overlay of [`DisplayPrimitive::Mesh`] for a body,
+/// exactly as it does for any other mesh; see `cad_scene::cache`.
+pub(super) fn body_fragment(
+    entity: &DbEntity,
+    body: &Body3d,
+    source: SelectionRef,
+    representation: &mut DisplayRepresentation,
+) {
+    let geometry_source = if body.is_exact() {
+        GeometrySource::KernelMesh
+    } else {
+        GeometrySource::DirectMesh
+    };
+    let fragment = |primitive: DisplayPrimitive| DisplayFragment {
+        source: source.clone(),
+        geometry_source: geometry_source.clone(),
+        precision: body.display.precision.clone(),
+        alpha: 1.0,
+        draw_order: entity.draw_order,
+        color: DEFAULT_RENDER_COLOR,
+        color_unresolved: true,
+        lineweight: DEFAULT_LINEWEIGHT_MM,
+        lineweight_unresolved: true,
+        linetype: LinetypePattern::continuous(),
+        linetype_unresolved: true,
+        linetype_scale: 1.0,
+        primitive,
+    };
+    // A cache with no triangles draws nothing as a filled mesh, and the scene
+    // reads an index-less `RenderTopology::Mesh` batch as `vertices.len() / 3`
+    // triangles, which would fabricate topology. Only a triangulated cache takes
+    // the mesh path; a vertices-only cache falls through to its edges.
+    if !body.display.mesh.triangles.is_empty() {
+        representation
+            .fragments
+            .push(fragment(DisplayPrimitive::Mesh(Arc::new(
+                body.display.mesh.clone(),
+            ))));
+        representation.completeness = body.display.completeness.clone();
+        return;
+    }
+    let segments = body_edge_segments(&body.display.edges);
+    if !segments.is_empty() {
+        representation
+            .fragments
+            .push(fragment(DisplayPrimitive::LineSegments(Arc::from(
+                segments.into_boxed_slice(),
+            ))));
+        representation.completeness = body.display.completeness.clone();
+        return;
+    }
+    // No mesh and no drawable edges: the cache carries no display geometry at
+    // all, so this is the crate's missing-geometry verdict, never an empty
+    // success. `combine` keeps the body's own reasons and appends this one.
+    representation.completeness = body
+        .display
+        .completeness
+        .clone()
+        .combine(Completeness::Missing(vec![format!(
+            "the {:?} body has neither a display mesh nor edge polylines",
+            body.kind
+        )]));
+    representation.diagnostics.push(Diagnostic {
+        object: Some(ObjectId(entity.id.0)),
+        code: "representation.body_empty".into(),
+        message: format!(
+            "{} is a {:?} body with no display mesh and no drawable edge polylines",
+            entity.object.type_key, body.kind
+        ),
+    });
+}
+
+/// Flatten a body's edge polylines into independent endpoint pairs.
+///
+/// Each polyline becomes its consecutive segments, and a polyline with fewer
+/// than two points has no segment and is dropped — the provider never invents a
+/// vertex. The pairs are unordered, which is exactly what
+/// [`DisplayPrimitive::LineSegments`] draws.
+fn body_edge_segments(edges: &[Vec<Point3>]) -> Vec<Point3> {
+    let mut segments = Vec::new();
+    for polyline in edges {
+        for pair in polyline.windows(2) {
+            segments.push(pair[0]);
+            segments.push(pair[1]);
+        }
+    }
+    segments
+}
+
 /// Tessellate a curve-like entity into a chord polyline and push it as a
 /// `Lines` fragment (the pre-conic display path).
 ///

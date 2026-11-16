@@ -1,15 +1,16 @@
 use crate::*;
 
-use super::image::{
-    image_basis_is_degenerate, image_clip_pieces, image_clip_reason, image_frame_corners,
-    resolve_image_texture,
-};
 use super::registry::RepresentationProvider;
 
 mod fragments;
+mod raster;
+mod table;
+mod text;
 
 pub(crate) use fragments::chord_tessellation_params;
-use fragments::{conic_from_geometry, push_chord_fragment, push_mesh_fragment};
+use fragments::{body_fragment, conic_from_geometry, push_chord_fragment, push_mesh_fragment};
+use raster::{image_fragment, ImageGeometry};
+use text::{shape_fragment, text_fragment, ShapeGeometry, TextGeometry};
 
 /// The built-in provider for the core entity set (spec §3.2).
 #[derive(Debug, Default, Clone, Copy)]
@@ -20,11 +21,11 @@ pub struct DefaultRepresentationProvider;
 /// `factor` is the active scale's paper/drawing factor; `position`/`rotation`/
 /// `height` are an optional per-scale override (applied as-is when present).
 #[derive(Debug, Clone, Copy)]
-struct TextScale {
-    factor: f64,
-    position: Option<Point3>,
-    rotation: Option<f64>,
-    height: Option<f64>,
+pub(super) struct TextScale {
+    pub(super) factor: f64,
+    pub(super) position: Option<Point3>,
+    pub(super) rotation: Option<f64>,
+    pub(super) height: Option<f64>,
 }
 
 impl RepresentationProvider for DefaultRepresentationProvider {
@@ -123,102 +124,6 @@ impl RepresentationProvider for DefaultRepresentationProvider {
 }
 
 impl DefaultRepresentationProvider {
-    /// Build a table's fragments, stamping each derived primitive's own
-    /// appearance onto the fragments it produced.
-    ///
-    /// The derived display is one geometry per drawn primitive **plus** a
-    /// parallel appearance list of the same length (the domain builds both
-    /// together), so the zip cannot drift. A primitive with
-    /// [`TableDisplayAppearance::NONE`] keeps the entity's resolved colour and
-    /// lineweight, i.e. its fragments are byte-identical to the pre-appearance
-    /// build.
-    ///
-    /// The one thing the display cannot honour is a border **lineweight**: every
-    /// line in this build is drawn one pixel wide, so a stored weight reaches the
-    /// batch (where the renderer reports `render.lineweight_not_drawn`) but no
-    /// wider stroke. That gap is reported here, once per build, and only when a
-    /// weight is actually modelled.
-    fn build_table(
-        &self,
-        entity: &DbEntity,
-        table: &cad_domain::TableGeometry,
-        context: &RepresentationContext,
-        annotative: Option<TextScale>,
-    ) -> DisplayRepresentation {
-        let mut representation = DisplayRepresentation {
-            fragments: Vec::new(),
-            completeness: Completeness::Complete,
-            diagnostics: Vec::new(),
-        };
-        let appearances = table.display_appearances();
-        let mut lineweight_modelled = false;
-        for (index, child) in table.display().iter().enumerate() {
-            let appearance = appearances
-                .get(index)
-                .copied()
-                .unwrap_or(cad_domain::TableDisplayAppearance::NONE);
-            let child_representation = match self.build_geometry(entity, child, context, annotative)
-            {
-                Ok(child) => child,
-                Err(error) => {
-                    // A child that cannot be built is reported, never silently
-                    // dropped: the table's other cells still draw.
-                    representation.completeness =
-                        representation
-                            .completeness
-                            .combine(Completeness::Partial(vec![format!(
-                                "a table display primitive could not be built: {error}"
-                            )]));
-                    representation.diagnostics.push(Diagnostic {
-                        object: Some(ObjectId(entity.id.0)),
-                        code: "representation.table_primitive_failed".into(),
-                        message: format!("table display primitive {index} was not drawn: {error}"),
-                    });
-                    continue;
-                }
-            };
-            if appearance.lineweight_hundredths.is_some() {
-                lineweight_modelled = true;
-            }
-            for mut fragment in child_representation.fragments {
-                if let Some(rgb) = appearance.color {
-                    fragment.color = [
-                        rgb[0] as f32 / 255.0,
-                        rgb[1] as f32 / 255.0,
-                        rgb[2] as f32 / 255.0,
-                    ];
-                    fragment.color_unresolved = false;
-                }
-                if let Some(hundredths) = appearance.lineweight_hundredths {
-                    fragment.lineweight = hundredths as f32 / 100.0;
-                    fragment.lineweight_unresolved = false;
-                }
-                representation.fragments.push(fragment);
-            }
-            representation
-                .diagnostics
-                .extend(child_representation.diagnostics);
-            representation.completeness = representation
-                .completeness
-                .combine(child_representation.completeness);
-        }
-        if lineweight_modelled {
-            representation.completeness = representation
-                .completeness
-                .combine(Completeness::Partial(vec![
-                    "a table cell border lineweight is stored and exported but drawn one pixel                      wide: this build draws every line at one width"
-                        .into(),
-                ]));
-            representation.diagnostics.push(Diagnostic {
-                object: Some(ObjectId(entity.id.0)),
-                code: "representation.table_lineweight_not_drawn".into(),
-                message: "per-cell table border lineweights reach the batch but the renderer draws                           every line one pixel wide"
-                    .into(),
-            });
-        }
-        representation
-    }
-
     fn build_inner(
         &self,
         entity: &DbEntity,
@@ -405,186 +310,27 @@ impl DefaultRepresentationProvider {
                 wrap_width,
                 width_factor,
                 line_spacing,
-            } => {
-                let font_key = font.as_deref();
-                // Annotative TEXT/MTEXT: the active annotation scale factor
-                // scales the glyph size about the anchor, and a per-scale
-                // placement override (when imported) replaces the base
-                // position/rotation. Non-annotative entities use the base
-                // geometry unchanged.
-                let (eff_position, eff_height, eff_rotation) = match annotative {
-                    Some(a) => (
-                        a.position.unwrap_or(*position),
-                        a.height.unwrap_or(height.abs() * a.factor),
-                        a.rotation.unwrap_or(*rotation),
-                    ),
-                    None => (*position, height.abs(), *rotation),
-                };
-                // The wrap boundary is a world-space length like the glyph
-                // height, so the annotation scale factor scales it too; leaving
-                // it fixed would re-flow the text at every annotation scale.
-                let eff_wrap_width = match annotative {
-                    Some(a) => wrap_width.map(|width| width * a.factor),
-                    None => *wrap_width,
-                };
-                let mut shaped = false;
-                // A style that names no font still shapes through the engine's
-                // fallback chain: dropping the text because the drawing has no
-                // font-bearing STYLE entry would silently hide every created
-                // dimension's measurement.
-                if let Some(engine) = &context.fonts {
-                    let font_label = font_key.unwrap_or("the text style's font");
-                    let result = match font_key {
-                        Some(key) => engine.shape(
-                            key,
-                            text,
-                            eff_position,
-                            eff_height,
-                            eff_rotation,
-                            *h_align,
-                            *v_align,
-                            eff_wrap_width,
-                            *width_factor,
-                            *line_spacing,
-                        ),
-                        None => engine.shape_unstyled(
-                            text,
-                            eff_position,
-                            eff_height,
-                            eff_rotation,
-                            *h_align,
-                            *v_align,
-                            eff_wrap_width,
-                            *width_factor,
-                            *line_spacing,
-                        ),
-                    };
-                    match result {
-                        Ok(shaped_text) => {
-                            let has_renderable_content = shaped_text.has_renderable_content;
-                            for mesh in shaped_text.meshes {
-                                representation.fragments.push(DisplayFragment {
-                                    source: source.clone(),
-                                    geometry_source: geometry_source.clone(),
-                                    precision: Precision::Analytic,
-                                    alpha: 1.0,
-                                    draw_order: entity.draw_order,
-                                    color: DEFAULT_RENDER_COLOR,
-                                    color_unresolved: true,
-                                    lineweight: DEFAULT_LINEWEIGHT_MM,
-                                    lineweight_unresolved: true,
-                                    linetype: LinetypePattern::continuous(),
-                                    linetype_unresolved: true,
-                                    linetype_scale: 1.0,
-                                    primitive: DisplayPrimitive::MeshWithoutEdgeOverlay(Arc::new(
-                                        mesh,
-                                    )),
-                                });
-                            }
-                            for polyline in shaped_text.polylines {
-                                if polyline.len() >= 2 {
-                                    representation.fragments.push(DisplayFragment {
-                                        source: source.clone(),
-                                        geometry_source: geometry_source.clone(),
-                                        precision: Precision::Analytic,
-                                        alpha: 1.0,
-                                        draw_order: entity.draw_order,
-                                        color: DEFAULT_RENDER_COLOR,
-                                        color_unresolved: true,
-                                        lineweight: DEFAULT_LINEWEIGHT_MM,
-                                        lineweight_unresolved: true,
-                                        linetype: LinetypePattern::continuous(),
-                                        linetype_unresolved: true,
-                                        linetype_scale: 1.0,
-                                        primitive: DisplayPrimitive::Lines(Arc::from(
-                                            polyline.into_boxed_slice(),
-                                        )),
-                                    });
-                                }
-                            }
-                            shaped = true;
-                            if representation.fragments.is_empty() && has_renderable_content {
-                                representation.completeness = Completeness::Missing(vec![
-                                    "text produced no drawable outlines".into(),
-                                ]);
-                                representation.diagnostics.push(Diagnostic {
-                                    object: Some(ObjectId(entity.id.0)),
-                                    code: "text.empty_outline".into(),
-                                    message: format!(
-                                        "font '{font_label}' produced no outline for the text"
-                                    ),
-                                });
-                            }
-                            // MTEXT formatting that shaped only approximately
-                            // (color, decorations, stacked fractions, ...) is
-                            // reported in the completeness verdict and
-                            // diagnostics rather than silently ignored.
-                            if !shaped_text.issues.is_empty() {
-                                let reasons: Vec<String> = shaped_text
-                                    .issues
-                                    .iter()
-                                    .map(|issue| issue.message.clone())
-                                    .collect();
-                                representation.completeness = representation
-                                    .completeness
-                                    .combine(Completeness::Partial(reasons));
-                                for issue in &shaped_text.issues {
-                                    representation.diagnostics.push(Diagnostic {
-                                        object: Some(ObjectId(entity.id.0)),
-                                        code: issue.code.into(),
-                                        message: issue.message.clone(),
-                                    });
-                                }
-                            }
-                        }
-                        Err(error) => {
-                            representation.completeness = Completeness::Partial(vec![format!(
-                                "text font '{font_label}' unavailable: {error}"
-                            )]);
-                            representation.diagnostics.push(Diagnostic {
-                                object: Some(ObjectId(entity.id.0)),
-                                code: "text.font_unavailable".into(),
-                                message: error.to_string(),
-                            });
-                        }
-                    }
-                }
-                if !shaped {
-                    representation.fragments.push(DisplayFragment {
-                        source,
-                        geometry_source,
-                        precision: Precision::Analytic,
-                        alpha: 1.0,
-                        draw_order: entity.draw_order,
-                        color: DEFAULT_RENDER_COLOR,
-                        color_unresolved: true,
-                        lineweight: DEFAULT_LINEWEIGHT_MM,
-                        lineweight_unresolved: true,
-                        linetype: LinetypePattern::continuous(),
-                        linetype_unresolved: true,
-                        linetype_scale: 1.0,
-                        primitive: DisplayPrimitive::Text {
-                            text: text.clone(),
-                            origin: eff_position,
-                            font: ResourceKey(
-                                font_key
-                                    .map(str::to_string)
-                                    .unwrap_or_else(|| format!("style:{}", style.0)),
-                            ),
-                            height: eff_height,
-                        },
-                    });
-                }
-                // `QTEXT`: replace the glyph geometry that was just built with
-                // one placeholder rectangle derived from it. The text is shaped
-                // either way — this build claims a display change, not a
-                // redraw-speed improvement — and a text whose extent cannot be
-                // derived keeps its own draw plus a `qtext.extent_unknown`
-                // diagnostic (see `display_modes::apply_qtext`).
-                if context.qtext {
-                    super::display_modes::apply_qtext(&mut representation, entity.id.0);
-                }
-            }
+            } => text_fragment(
+                entity,
+                context,
+                annotative,
+                TextGeometry {
+                    text,
+                    position,
+                    style,
+                    height,
+                    rotation,
+                    font,
+                    h_align,
+                    v_align,
+                    wrap_width,
+                    width_factor,
+                    line_spacing,
+                },
+                source,
+                geometry_source,
+                &mut representation,
+            ),
             SemanticGeometry::Shape {
                 shape_name,
                 code,
@@ -592,54 +338,21 @@ impl DefaultRepresentationProvider {
                 size,
                 rotation,
                 font,
-            } => {
-                if *code == 0 {
-                    representation.completeness = Completeness::Partial(vec![format!(
-                        "shape '{shape_name}' is referenced by name; only shape codes are resolved"
-                    )]);
-                } else if let (Some(engine), Some(key)) = (&context.fonts, font.as_deref()) {
-                    match engine.shape_glyph(key, *code, *position, size.abs(), *rotation) {
-                        Ok(polylines) => {
-                            for polyline in polylines {
-                                if polyline.len() >= 2 {
-                                    representation.fragments.push(DisplayFragment {
-                                        source: source.clone(),
-                                        geometry_source: geometry_source.clone(),
-                                        precision: Precision::Analytic,
-                                        alpha: 1.0,
-                                        draw_order: entity.draw_order,
-                                        color: DEFAULT_RENDER_COLOR,
-                                        color_unresolved: true,
-                                        lineweight: DEFAULT_LINEWEIGHT_MM,
-                                        lineweight_unresolved: true,
-                                        linetype: LinetypePattern::continuous(),
-                                        linetype_unresolved: true,
-                                        linetype_scale: 1.0,
-                                        primitive: DisplayPrimitive::Lines(Arc::from(
-                                            polyline.into_boxed_slice(),
-                                        )),
-                                    });
-                                }
-                            }
-                        }
-                        Err(error) => {
-                            representation.completeness = Completeness::Partial(vec![format!(
-                                "shape font '{key}' unavailable: {error}"
-                            )]);
-                            representation.diagnostics.push(Diagnostic {
-                                object: Some(ObjectId(entity.id.0)),
-                                code: "shape.font_unavailable".into(),
-                                message: error.to_string(),
-                            });
-                        }
-                    }
-                } else {
-                    representation.completeness =
-                        Completeness::Partial(
-                            vec!["shape has no resolvable SHX shape font".into()],
-                        );
-                }
-            }
+            } => shape_fragment(
+                entity,
+                context,
+                ShapeGeometry {
+                    shape_name,
+                    code,
+                    position,
+                    size,
+                    rotation,
+                    font,
+                },
+                source,
+                geometry_source,
+                &mut representation,
+            ),
             SemanticGeometry::Opaque { type_key, .. } => {
                 representation.completeness =
                     Completeness::Missing(vec!["no display representation in this build".into()]);
@@ -658,138 +371,23 @@ impl DefaultRepresentationProvider {
                 clip,
                 visible,
                 adjust,
-            } => {
-                // A hidden image draws nothing; never substitute a fake frame.
-                if *visible {
-                    let (resource, decoded) =
-                        resolve_image_texture(file.as_deref(), context.images.as_deref());
-                    // Map the entity-level clip once: a convex clip stays one
-                    // piece (byte-identical to the behaviour before concave clips
-                    // were supported), a concave clip becomes one convex piece per
-                    // ear of its triangulation. A clip that is not a usable region
-                    // is refused by name below, never silently widened.
-                    let clip = clip
-                        .as_ref()
-                        .map(|clip| image_clip_pieces(clip, *origin, *u, *v, *pixels));
-                    // The clip's own verdict, independent of texture resolution.
-                    let clip_refusal: Option<(&'static str, String)> = match &clip {
-                        None | Some(Ok(Some(_))) => None,
-                        Some(Ok(None)) => Some((
-                            image_clip_reason::UNSUPPORTED,
-                            "the image clip has no area inside the image rectangle; only the \
-                             frame is drawn"
-                                .to_string(),
-                        )),
-                        Some(Err(refusal)) => Some((refusal.code, refusal.message.clone())),
-                    };
-                    match (&resource, decoded) {
-                        (Some(key), Some(_image))
-                            if clip_refusal.is_none()
-                                && !image_basis_is_degenerate(*u, *v, *pixels) =>
-                        {
-                            // The texture's unit square maps to the placed quad.
-                            let transform = Transform3::from_basis(
-                                cad_geometry::scale(*u, pixels[0]),
-                                cad_geometry::scale(*v, pixels[1]),
-                                *origin,
-                            );
-                            // No clip draws the whole unit square; a clip draws one
-                            // fragment per convex piece, so the union of the
-                            // fragments is exactly the visible texture region (also
-                            // for a concave clip). The refusal cases are already
-                            // handled below, so they contribute nothing here.
-                            let pieces = match clip {
-                                None => vec![None],
-                                Some(Ok(Some(pieces))) => pieces.into_iter().map(Some).collect(),
-                                Some(Ok(None) | Err(_)) => Vec::new(),
-                            };
-                            for piece in pieces {
-                                representation.fragments.push(DisplayFragment {
-                                    source: source.clone(),
-                                    geometry_source: geometry_source.clone(),
-                                    precision: Precision::Analytic,
-                                    alpha: 1.0,
-                                    draw_order: entity.draw_order,
-                                    color: DEFAULT_RENDER_COLOR,
-                                    color_unresolved: true,
-                                    lineweight: DEFAULT_LINEWEIGHT_MM,
-                                    lineweight_unresolved: true,
-                                    linetype: LinetypePattern::continuous(),
-                                    linetype_unresolved: true,
-                                    linetype_scale: 1.0,
-                                    primitive: DisplayPrimitive::Image {
-                                        resource: key.clone(),
-                                        transform,
-                                        clip: piece
-                                            .map(|vertices| Arc::from(vertices.into_boxed_slice())),
-                                        adjust: *adjust,
-                                    },
-                                });
-                            }
-                        }
-                        (resource, decoded) => {
-                            // No usable texture, or a clip that is not a usable
-                            // region: draw the frame only and report the honest
-                            // reason instead of a placeholder image.
-                            let (code, message) = match (resource, &clip_refusal, decoded) {
-                                (None, _, _) => (
-                                    "image.unresolved",
-                                    "image has no resolvable resource key; only the frame is drawn"
-                                        .to_string(),
-                                ),
-                                // An outside/mask clip keeps the region *outside* its
-                                // boundary, which a visible-region polygon cannot
-                                // express; a self-intersecting ring or too few /
-                                // degenerate points has no interior to draw. Each
-                                // refusal names itself and draws no region at all.
-                                (Some(_), Some((code, message)), _) => (*code, message.clone()),
-                                // A cache miss is a missing texture, not a
-                                // host-confirmed decode failure.
-                                (Some(key), None, None) => (
-                                    "image.unresolved",
-                                    format!(
-                                        "no decoded texture for '{}' was available; only the frame is drawn",
-                                        key.0
-                                    ),
-                                ),
-                                (Some(_), None, Some(_)) => (
-                                    "image.degenerate_frame",
-                                    "image frame has a degenerate basis; only the frame is drawn"
-                                        .to_string(),
-                                ),
-                            };
-                            representation.completeness = representation
-                                .completeness
-                                .combine(Completeness::Partial(vec![message.clone()]));
-                            representation.diagnostics.push(Diagnostic {
-                                object: Some(ObjectId(entity.id.0)),
-                                code: code.into(),
-                                message,
-                            });
-                            let corners = image_frame_corners(*origin, *u, *v, *pixels);
-                            if corners.len() >= 2 {
-                                representation.fragments.push(DisplayFragment {
-                                    source,
-                                    geometry_source,
-                                    precision: Precision::Analytic,
-                                    alpha: 1.0,
-                                    draw_order: entity.draw_order,
-                                    color: DEFAULT_RENDER_COLOR,
-                                    color_unresolved: true,
-                                    lineweight: DEFAULT_LINEWEIGHT_MM,
-                                    lineweight_unresolved: true,
-                                    linetype: LinetypePattern::continuous(),
-                                    linetype_unresolved: true,
-                                    linetype_scale: 1.0,
-                                    primitive: DisplayPrimitive::Lines(Arc::from(
-                                        corners.into_boxed_slice(),
-                                    )),
-                                });
-                            }
-                        }
-                    }
-                }
-            }
+            } => image_fragment(
+                entity,
+                context,
+                ImageGeometry {
+                    origin,
+                    u,
+                    v,
+                    pixels,
+                    file,
+                    clip,
+                    visible,
+                    adjust,
+                },
+                source,
+                geometry_source,
+                &mut representation,
+            ),
             SemanticGeometry::Circle { .. }
             | SemanticGeometry::Arc { .. }
             | SemanticGeometry::Ellipse { .. } => {
@@ -985,6 +583,7 @@ impl DefaultRepresentationProvider {
                     }
                 }
             }
+            SemanticGeometry::Body3d(b) => body_fragment(entity, b, source, &mut representation),
             other => push_chord_fragment(
                 entity,
                 other,

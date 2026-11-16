@@ -16,6 +16,7 @@ mod annotative;
 mod attributes;
 mod basic;
 mod blocks;
+mod body3d;
 mod bulge_arcs;
 mod bylayer_color;
 mod bylayer_style;

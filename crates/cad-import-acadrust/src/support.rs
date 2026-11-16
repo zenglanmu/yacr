@@ -38,9 +38,11 @@ impl<'a> ImporterBuilder<'a> {
     /// Lift + tessellate one ACIS entity at import time.
     ///
     /// The importer is the only crate above the kernel seam that may parse
-    /// SAT/SAB, so this is where the four ACIS entity types become displayable
-    /// [`SemanticGeometry::Mesh`]. Success is never reported `Complete`: the
-    /// facets are a discrete approximation and the ACIS source is dropped.
+    /// SAT/SAB, so this is where the four ACIS entity types become a
+    /// [`SemanticGeometry::Body3d`]: the lifted neutral B-rep is kept as the
+    /// **exact** geometry and the kernel's facet set plus boundary polylines
+    /// become the **display** cache. The display is never promoted to exact and
+    /// the original SAT/SAB bytes are still not retained.
     /// A payload the kernel refuses stays [`SemanticGeometry::Opaque`] with the
     /// kernel's own named reason instead of an empty success.
     pub(crate) fn acis_semantics(
@@ -61,22 +63,9 @@ impl<'a> ImporterBuilder<'a> {
         };
         let outcome = tessellate_exchange(&exchange, tolerance, TessellationBudget::default());
 
-        if let Some(mesh) = outcome.mesh() {
-            if !mesh.is_empty() {
-                let mut reasons = vec![
-                    acis_approximation_reason(tolerance.linear_deflection),
-                    ACIS_SOURCE_NOT_RETAINED_REASON.to_string(),
-                ];
-                // A partially tessellated body keeps the kernel's degradation
-                // reasons (missing faces / open edges), never hides them.
-                reasons.extend(
-                    outcome
-                        .diagnostics()
-                        .iter()
-                        .map(|diagnostic| format!("{}: {}", diagnostic.code, diagnostic.message)),
-                );
-                let completeness = self.acis_partial("import.acis_tessellated", reasons);
-                return (SemanticGeometry::Mesh(mesh.mesh.clone()), completeness);
+        if let Some(geometry) = outcome.mesh() {
+            if !geometry.is_empty() {
+                return self.acis_body(entity, &exchange, &outcome, geometry, tolerance);
             }
         }
 
@@ -93,6 +82,73 @@ impl<'a> ImporterBuilder<'a> {
         )
     }
 
+    /// Build the [`Body3d`] for a payload the kernel could tessellate.
+    ///
+    /// The exact claim is the neutral B-rep itself, never the facets: the
+    /// tessellation is only the derived display cache and keeps its own
+    /// precision. When the exchange is raw SAT/SAB (no B-rep to keep) the body
+    /// declares [`BodyExact::Unavailable`] with the retained-source reason, and
+    /// a `Solid` is demoted to `Unknown` because `cad-db` refuses a solid
+    /// without exact geometry. A `BODY` never claims a topology class the source
+    /// entity does not prove.
+    fn acis_body(
+        &mut self,
+        entity: &EntityType,
+        exchange: &cad_kernel_adapter::SolidExchange,
+        outcome: &cad_kernel_adapter::TessellationOutcome,
+        geometry: &cad_kernel_adapter::TessellationMesh,
+        tolerance: cad_kernel_adapter::TessellationTolerance,
+    ) -> (SemanticGeometry, Completeness) {
+        let exact = match exchange {
+            cad_kernel_adapter::SolidExchange::Brep(brep) if !brep.is_empty() => {
+                BodyExact::Exact(Box::new(brep.clone()))
+            }
+            // Never fabricate a B-rep: the display facets are not exact geometry.
+            _ => BodyExact::Unavailable {
+                reason: ACIS_SOURCE_NOT_RETAINED_REASON.to_string(),
+            },
+        };
+        let kind = acis_body_class(entity, &exact);
+        let mut reasons: Vec<String> = Vec::new();
+        if let BodyExact::Unavailable { reason } = &exact {
+            reasons.push(reason.clone());
+        }
+        // A curved body's facets are a discrete approximation at the deflection
+        // actually requested; a planar body's facets are analytic.
+        if matches!(geometry.precision, Precision::Approximate { .. }) {
+            reasons.push(acis_approximation_reason(tolerance.linear_deflection));
+        }
+        // A partially tessellated body keeps the kernel's degradation reasons
+        // (missing faces / open edges / dropped shells), never hides them.
+        reasons.extend(
+            outcome
+                .diagnostics()
+                .iter()
+                .map(|diagnostic| format!("{}: {}", diagnostic.code, diagnostic.message)),
+        );
+        let completeness = if reasons.is_empty() {
+            Completeness::Complete
+        } else {
+            self.acis_partial("import.acis_tessellated", reasons)
+        };
+
+        let display = BodyDisplay {
+            mesh: geometry.mesh.clone(),
+            edges: geometry.edges.clone(),
+            tolerance: Some(tolerance.linear_deflection),
+            precision: geometry.precision.clone(),
+            completeness: completeness.clone(),
+        };
+        (
+            SemanticGeometry::Body3d(Box::new(Body3d {
+                kind,
+                exact,
+                display,
+            })),
+            completeness,
+        )
+    }
+
     /// Record each named reason once per import and return the entity verdict.
     fn acis_partial(&mut self, code: &str, reasons: Vec<String>) -> Completeness {
         for reason in &reasons {
@@ -105,6 +161,34 @@ impl<'a> ImporterBuilder<'a> {
             }
         }
         Completeness::Partial(reasons)
+    }
+}
+
+/// The topology class the source ACIS entity class actually proves.
+///
+/// `3DSOLID` is a closed volumetric body; `REGION` (a planar 2D region) and
+/// `SURFACE` are 2D sheets. An `AcDbBody` may be a wire, sheet or solid, so it
+/// stays [`BodyKind::Unknown`] rather than guessing a class from the payload.
+fn acis_body_kind(entity: &EntityType) -> BodyKind {
+    match entity {
+        EntityType::Solid3D(_) => BodyKind::Solid,
+        EntityType::Region(_) | EntityType::Surface(_) => BodyKind::Sheet,
+        _ => BodyKind::Unknown,
+    }
+}
+
+/// The class a body may claim, given the exact geometry it actually kept.
+///
+/// A `Solid` claim rests on an exact B-rep (`cad-db` refuses a solid without
+/// one), so a solid whose exact geometry is `Unavailable` is demoted to
+/// [`BodyKind::Unknown`] — the reason stays on its display verdict. `Sheet` and
+/// `Unknown` need no exact geometry to keep the class the source proves.
+pub(crate) fn acis_body_class(entity: &EntityType, exact: &BodyExact) -> BodyKind {
+    let kind = acis_body_kind(entity);
+    if kind == BodyKind::Solid && !matches!(exact, BodyExact::Exact(_)) {
+        BodyKind::Unknown
+    } else {
+        kind
     }
 }
 
@@ -133,13 +217,15 @@ fn acis_refusal_reasons(outcome: &cad_kernel_adapter::TessellationOutcome) -> Ve
 ///
 /// Text has no scene batching yet and opaque geometry has no representation, so
 /// neither is `Verified`; an INSERT depends on its block contents and is
-/// resolved by the caller. A tessellated ACIS solid is a real [`Mesh`] and is
-/// therefore drawable (`Verified`); only a refused ACIS payload stays `Opaque`.
+/// resolved by the caller. A [`Body3d`] draws from its own derived display
+/// cache, so whether that is `Verified` depends on its exact geometry (see
+/// [`body_display_support`]); only a refused ACIS payload stays `Opaque`.
 pub(crate) fn display_support(geometry: &SemanticGeometry) -> (SupportStatus, SupportStatus) {
     match geometry {
         SemanticGeometry::Opaque { .. } => (SupportStatus::Unsupported, SupportStatus::Unsupported),
-        // Tessellated ACIS solids (3DSOLID/BODY/REGION/SURFACE) arrive as Mesh:
-        // they now have a display, so they must not inherit the Opaque refusal.
+        // Tessellated ACIS solids (3DSOLID/BODY/REGION/SURFACE) arrive as a body
+        // whose display cache is drawable; see `body_display_support`.
+        SemanticGeometry::Body3d(body) => body_display_support(body),
         SemanticGeometry::Mesh(_) => (SupportStatus::Verified, SupportStatus::Verified),
         // Text is a supported entity kind whose display is conditional on a
         // host font: the host registers arbitrary `name=path` keys and legacy
@@ -217,6 +303,30 @@ pub(crate) fn display_support(geometry: &SemanticGeometry) -> (SupportStatus, Su
             (render, pick)
         }
         _ => (SupportStatus::Verified, SupportStatus::Verified),
+    }
+}
+
+/// Whether a [`Body3d`]'s derived display cache is drawable, honestly.
+///
+/// The display cache is a facet mesh plus boundary polylines, so it draws when
+/// it has either. It is `Verified` only while the exact B-rep it was derived
+/// from is retained; a body whose exact geometry is `Unavailable` is a
+/// tessellated-only approximation and reports `Partial` instead of claiming
+/// exactness it does not have (audit B20).
+fn body_display_support(body: &Body3d) -> (SupportStatus, SupportStatus) {
+    let drawable = !body.display.mesh.triangles.is_empty()
+        || body
+            .display
+            .edges
+            .iter()
+            .any(|polyline| polyline.len() >= 2);
+    if !drawable {
+        return (SupportStatus::Unsupported, SupportStatus::Unsupported);
+    }
+    if body.is_exact() {
+        (SupportStatus::Verified, SupportStatus::Verified)
+    } else {
+        (SupportStatus::Partial, SupportStatus::Partial)
     }
 }
 
@@ -412,6 +522,104 @@ pub(crate) trait HandleExt {
 impl HandleExt for acadrust::Handle {
     fn null_or_value_zero(&self) -> bool {
         self.value() == 0
+    }
+}
+
+#[cfg(test)]
+mod body_support_tests {
+    use super::*;
+    use cad_domain::brep::{BrepData, BrepFace, BrepShell, BrepSurface};
+
+    /// A minimal, genuinely non-empty B-rep: one planar shell with one face.
+    fn planar_brep() -> BrepData {
+        BrepData {
+            shells: vec![BrepShell {
+                id: 0,
+                faces: vec![BrepFace {
+                    id: 0,
+                    surface: BrepSurface::Plane {
+                        origin: Point3::default(),
+                        normal: Point3 {
+                            x: 0.0,
+                            y: 0.0,
+                            z: 1.0,
+                        },
+                        u_dir: Point3 {
+                            x: 1.0,
+                            y: 0.0,
+                            z: 0.0,
+                        },
+                    },
+                    reversed: false,
+                    loops: Vec::new(),
+                }],
+            }],
+            placement: None,
+        }
+    }
+
+    fn body(exact: BodyExact, edges: Vec<Vec<Point3>>) -> SemanticGeometry {
+        SemanticGeometry::Body3d(Box::new(Body3d {
+            kind: BodyKind::Sheet,
+            exact,
+            display: BodyDisplay {
+                mesh: Mesh::default(),
+                edges,
+                tolerance: None,
+                precision: Precision::Unknown,
+                completeness: Completeness::Partial(vec!["display only".into()]),
+            },
+        }))
+    }
+
+    fn segment() -> Vec<Vec<Point3>> {
+        vec![vec![
+            Point3::default(),
+            Point3 {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        ]]
+    }
+
+    #[test]
+    fn exact_body_with_a_display_is_drawable() {
+        let geometry = body(BodyExact::Exact(Box::new(planar_brep())), segment());
+        assert_eq!(
+            display_support(&geometry),
+            (SupportStatus::Verified, SupportStatus::Verified)
+        );
+    }
+
+    /// A body with a tessellated display but no retained exact geometry is an
+    /// approximation: it must not report `Verified/Verified`.
+    #[test]
+    fn tessellated_only_body_is_not_reported_verified() {
+        let geometry = body(
+            BodyExact::Unavailable {
+                reason: "no exact geometry".into(),
+            },
+            segment(),
+        );
+        assert_eq!(
+            display_support(&geometry),
+            (SupportStatus::Partial, SupportStatus::Partial)
+        );
+    }
+
+    #[test]
+    fn body_without_any_display_is_unsupported() {
+        let geometry = body(
+            BodyExact::Unavailable {
+                reason: "no exact geometry".into(),
+            },
+            Vec::new(),
+        );
+        assert_eq!(
+            display_support(&geometry),
+            (SupportStatus::Unsupported, SupportStatus::Unsupported)
+        );
     }
 }
 

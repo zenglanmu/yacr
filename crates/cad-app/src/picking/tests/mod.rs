@@ -673,3 +673,58 @@ fn filter_by_index_narrows_a_ray_that_misses_every_item() {
 }
 mod differential;
 mod vendor_pick;
+
+/// A `Wire` body with **only** edge polylines (empty tessellation) still goes
+/// through the broad-phase index and precise pick: the display edges bound the
+/// item and are hit as geometry, so it is not silently unpickable.
+#[test]
+fn wire_body_with_only_edges_is_pickable() {
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(7));
+    b.insert_layer(Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
+    .unwrap();
+    b.insert_entity(entity(
+        5,
+        SemanticGeometry::Body3d(Box::new(cad_domain::Body3d {
+            kind: cad_domain::BodyKind::Wire,
+            exact: cad_domain::BodyExact::Unavailable {
+                reason: "pick-test-display-only".into(),
+            },
+            display: cad_domain::BodyDisplay {
+                mesh: Mesh {
+                    vertices: Vec::new(),
+                    triangles: Vec::new(),
+                    normals: Vec::new(),
+                    face_sources: Vec::new(),
+                    colors: Vec::new(),
+                },
+                edges: vec![vec![p(-1.0, 0.0, 2.0), p(1.0, 0.0, 2.0)]],
+                tolerance: Some(0.01),
+                precision: Precision::Approximate {
+                    error_bound: Some(0.01),
+                },
+                completeness: Completeness::Partial(vec!["exact-brep".into()]),
+            },
+        })),
+        0,
+    ))
+    .unwrap();
+    let db = b.finish().unwrap();
+    let options = PickOptions::new(0.05).unwrap();
+    let ray = Ray3 {
+        origin: p(0.0, 0.0, 0.0),
+        direction: p(0.0, 0.0, 1.0),
+    };
+    let report = pick_ray(&db, DocumentId(1), &ray, &options).unwrap();
+    assert!(
+        report.skipped.is_empty(),
+        "a body is not skipped: {:?}",
+        report.skipped
+    );
+    let hit = report.hit.expect("the display edge is pickable");
+    assert_eq!(hit.source.entity, EntityId(5));
+    assert!((hit.distance - 2.0).abs() < 1e-9, "hit = {}", hit.distance);
+}

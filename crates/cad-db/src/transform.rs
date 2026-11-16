@@ -8,6 +8,13 @@
 //! Scope, stated honestly:
 //! - `Line`, `Polyline`, `Point`, `Mesh` accept any finite non-singular affine
 //!   transform (a straight segment maps to a straight segment).
+//! - `Body3d` maps its display mesh and edge polylines exactly like `Mesh`, then
+//!   composes the transform onto the exact B-rep's placement only when the
+//!   transform is a similarity (uniform scale, rotation/reflection,
+//!   translation). Any other transform keeps the transformed display but
+//!   downgrades the exact geometry to [`BodyExact::Unavailable`] with the stable
+//!   reason `body.nonuniform_scale` (and demotes a `Solid` to `Unknown`), so an
+//!   exact claim never outlives the geometry it described.
 //! - `Circle` accepts a **similarity** (translation + rotation + uniform scale,
 //!   no shear). Under a mirror the linear part flips the stored `normal`, which
 //!   is the honest representation of the reflected circle.
@@ -73,6 +80,10 @@ use crate::math::{
 
 /// Similarity judgement tolerance for `Transform3::is_uniform_scale`.
 const SIMILARITY_TOLERANCE: f64 = 1e-9;
+
+/// Stable reason stored when a body's exact geometry cannot be carried through
+/// a transform: a non-uniform scale or shear has no placement representation.
+const NONUNIFORM_BODY_REASON: &str = "body.nonuniform_scale";
 
 /// Apply `transform` to `geometry`, returning the transformed geometry.
 ///
@@ -214,19 +225,54 @@ pub fn transform_geometry(
             }
         }
         SemanticGeometry::Point(p) => SemanticGeometry::Point(transform.apply_point(*p)),
-        SemanticGeometry::Mesh(mesh) => {
-            let mut out = mesh.clone();
-            out.vertices = mesh
-                .vertices
+        SemanticGeometry::Mesh(mesh) => SemanticGeometry::Mesh(transform_mesh(mesh, transform)),
+        // A body's display cache is mapped exactly like a standalone mesh. The
+        // exact B-rep is composed through its placement only under a similarity
+        // (translation + rotation/reflection + uniform scale): any other
+        // transform would make the exact geometry disagree with the displayed
+        // geometry, so the display is kept but the exact claim is downgraded to
+        // an explicit `Unavailable` — never silently baked and never left stale.
+        SemanticGeometry::Body3d(body) => {
+            let mut display = body.display.clone();
+            display.mesh = transform_mesh(&body.display.mesh, transform);
+            display.edges = body
+                .display
+                .edges
                 .iter()
-                .map(|p| transform.apply_point(*p))
+                .map(|polyline| polyline.iter().map(|p| transform.apply_point(*p)).collect())
                 .collect();
-            out.normals = mesh
-                .normals
-                .iter()
-                .map(|n| normalize(apply_vector(transform, *n)))
-                .collect();
-            SemanticGeometry::Mesh(out)
+            // The stored deflection is the mesh's build tolerance. Under a
+            // similarity it scales by that one factor; under a non-uniform
+            // transform it becomes direction-dependent, so it is recorded as
+            // unknown instead of guessed.
+            let similarity = transform.is_uniform_scale(SIMILARITY_TOLERANCE);
+            display.tolerance = body
+                .display
+                .tolerance
+                .filter(|_| similarity)
+                .map(|tolerance| tolerance * uniform_scale(transform));
+            let exact = match &body.exact {
+                BodyExact::Exact(brep) if similarity => {
+                    BodyExact::Exact(Box::new(transform_brep(brep, transform)))
+                }
+                BodyExact::Exact(_) => BodyExact::Unavailable {
+                    reason: NONUNIFORM_BODY_REASON.to_string(),
+                },
+                BodyExact::Unavailable { reason } => BodyExact::Unavailable {
+                    reason: reason.clone(),
+                },
+            };
+            // A solid's `Solid` claim rests on its exact B-rep; once that is
+            // gone the topology class is no longer known.
+            let kind = match (&exact, &body.kind) {
+                (BodyExact::Unavailable { .. }, BodyKind::Solid) => BodyKind::Unknown,
+                (_, kind) => kind.clone(),
+            };
+            SemanticGeometry::Body3d(Box::new(Body3d {
+                kind,
+                exact,
+                display,
+            }))
         }
         SemanticGeometry::Insert {
             block,
@@ -434,6 +480,43 @@ fn uniform_scale(transform: &Transform3) -> f64 {
     let sy = (m[0][1] * m[0][1] + m[1][1] * m[1][1] + m[2][1] * m[2][1]).sqrt();
     let sz = (m[0][2] * m[0][2] + m[1][2] * m[1][2] + m[2][2] * m[2][2]).sqrt();
     ((sx + sy + sz) / 3.0).max(1e-12)
+}
+
+/// Map a mesh's points and rotate + renormalise its normals.
+///
+/// Shared by the standalone `Mesh` arm and a body's display cache so the two
+/// cannot drift.
+fn transform_mesh(mesh: &Mesh, transform: &Transform3) -> Mesh {
+    let mut out = mesh.clone();
+    out.vertices = mesh
+        .vertices
+        .iter()
+        .map(|p| transform.apply_point(*p))
+        .collect();
+    out.normals = mesh
+        .normals
+        .iter()
+        .map(|n| normalize(apply_vector(transform, *n)))
+        .collect();
+    out
+}
+
+/// Compose a similarity transform onto a body's placement.
+///
+/// A placement is `y = s·B·p + t` with `B = Mᵀ` (the ACIS row-vector
+/// convention). For a similarity `L = σ·R` (`R` orthogonal, possibly a
+/// reflection) the composition `L·(s·B·p + t) + u` is `s'·B'·p + t'` with
+/// `s' = s·σ`, `B' = R·B`, `t' = L·t + u`, i.e. `M' = M·Rᵀ` and the shell data
+/// stays untouched. The caller has already established that the transform is a
+/// similarity.
+fn transform_brep(brep: &BrepData, transform: &Transform3) -> BrepData {
+    let placement = brep.placement.unwrap_or_else(BrepPlacement::identity);
+    BrepData {
+        shells: brep.shells.clone(),
+        // Composition lives in `cad-domain` so the geometry engine and the
+        // database path cannot drift.
+        placement: Some(placement.composed_with(transform)),
+    }
 }
 
 fn mapped_normal(transform: &Transform3, normal: Point3) -> Point3 {

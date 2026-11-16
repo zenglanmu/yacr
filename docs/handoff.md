@@ -22,6 +22,43 @@
 （Linux 原生 Wayland、Windows、macOS、Android）由 native 会话持有 `cad-db`，`dom-canvas`
 （X11/XWayland、Web）由 wasm 会话持有。细节与逐平台证据边界见 `AGENTS.md` 平台表。
 
+**3D body model P0（2026-11-16）**
+
+- **域模型**：`SemanticGeometry::Body3d(Box<Body3d>)` = `BodyKind{Wire,Sheet,Solid,Unknown}` +
+  `BodyExact{Exact|Unavailable}` + `BodyDisplay{mesh,edges,tolerance,precision,completeness}`。
+  中性 B-Rep 数据（`BrepData`/`BrepFace`/…）从 `cad-kernel-adapter` 下沉到 `cad-domain`，
+  adapter 用重导出保持原有路径；所有权变更见 ADR-0036。
+- **不变量**：`cad-db` 强校验 `Solid ⇒ Exact 且 B-Rep 非空`、边线 ≥2 点且有限、容差 >0；
+  包围盒并入 body 边线；相似变换复合 `BrepPlacement`（实现下沉为
+  `cad_domain::BrepPlacement::composed_with`），非均匀缩放降级为 `Unavailable`、`Solid` 降
+  `Unknown`，**不烘焙网格**。
+- **ACIS 导入**：`3DSOLID→Solid`、`REGION`/`SURFACE→Sheet`、`BODY→Unknown`；
+  `SolidExchange::Brep` 时保留 `exact`，否则 `Unavailable{reason}` 且 `Solid` 降级；
+  `TessellationMesh.edges` 不再丢弃；仅离散体不再报 `Verified/Verified`。
+- **显示**：有三角形 → `Mesh`；仅边线 → `LineSegments`；都没有 → `Missing` +
+  `representation.body_empty`。精度/来源原样透传（`KernelMesh`/`DirectMesh`）。
+  存储边线直送 `RenderBatch.edges` 是 P0.1（当前仍由三角形重推）。
+- **下游**：`cad-spatial` 新增 pick family `body`（子面身份 `body-face-identity-unmodelled`）；
+  `cad-measure` 与 `Mesh` 一样不给 snap；`MASSPROP` 显式 `massprop.body_requires_kernel`；
+  `select_filter` 用 `type_key` 区分 SOLID/SURFACE/REGION/BODY；body 编辑触发全量表示重建。
+- **导出**：body 写 `POLYFACE`（仅边线写 `LINE`/`POLYLINE3D`），显式记录"精确几何未写出"，
+  **不伪造** `3DSOLID`。
+- **文件行数**：本轮触碰到的顶格文件已拆分到 ≤750 行（`provider/default.rs` 1000→598、
+  `select_filter.rs` 999→603、`cad-engine/render/runtime/session.rs` 1000→249、
+  `app-linux/src/host/tick.rs` 1000→57、`command_id/ids.rs` 1000→707、
+  `app_drawing/layer_extended.rs` 1000→679、`layer_commands.rs` 1000→557、
+  `draw_tool/tests.rs` 1000→137、`tests/drawing/chamfer_fillet.rs` 1000→215）。
+  均纯搬移/文档重排，公开路径与测试名不变。
+- **证据**：Linux 上 `cargo check --workspace --all-targets --locked`、
+  `cargo check --workspace --lib --target wasm32-unknown-unknown --locked`、
+  `cargo clippy --workspace --exclude app-android --exclude app-web --all-targets -D warnings`、
+  `cargo fmt --all -- --check`、`check-architecture.py`、`check-file-size.py`、`check-i18n.py`
+  全部通过。逐 crate 测试：`cad-domain`/`cad-db`/`cad-geometry`/`cad-kernel-adapter`/
+  `cad-representation`/`cad-scene`/`cad-import-acadrust`/`cad-spatial`/`cad-measure`/`cad-app` 全绿。
+- **NOT RUN**：`cargo test --workspace --locked -- --test-threads=1` 全量、GPU/像素、真机。
+- **NOT VERIFIED**：真实第三方 ACIS 样本的 B-Rep 保留率；Windows/macOS/Android/Web 运行；
+  solidcore 未接线（P1）。
+
 **wave 8（2026-11-16）**
 
 覆盖表 **183 → 185 完整 / 796 → 794 部分**（本波晋升 2：`XCLIP`、`MLEADER`；累计自 123 起 **62 个**）。

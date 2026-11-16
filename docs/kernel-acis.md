@@ -11,10 +11,12 @@ Tianzheng / TSSD 等第三方实体的兼容性。
 ## 1. 边界
 
 `cad-kernel-adapter` 是工作区中**唯一**允许持有内核/ACIS 交换数据的 crate。
-跨边界只传递纯数据：
+中性 `BrepData`（纯数据、无 ACIS 句柄）自 ADR-0036 起定义在 `cad-domain`，由本
+crate 重导出，因为 `cad-db` 只允许依赖 `cad-domain`，而实体几何必须能被数据库
+拥有、校验、变换与包围盒计算。跨边界只传递纯数据：
 
 * `TessellationRequest` / `TessellationResult`（原始契约）；
-* `SolidExchange`（见 §2）与其中的中性 `BrepData`。
+* `SolidExchange`（见 §2）与其中的中性 `BrepData`（`cad_domain::brep`）。
 
 `cad-import-acadrust` 是唯一依赖 acadrust 的 crate；它把 SAT/SAB 解析为
 `BrepData`，此后再无 acadrust 类型越过内核 seam。`cad-kernel-adapter` 自身
@@ -134,9 +136,11 @@ TessellationOutcome::Failed     { diagnostics }
   `Brep(SolidExchange)`；解析失败保留原始 `Sat`/`Sab` 字节。
 * `acis_exchange(&AcisData) -> SolidExchange`、`sat_to_brep(&SatDocument)`、
   `sab_to_brep(&[u8])` 为可单测的底层入口。
-* 导入时**不再保留**原始 SAT/SAB：实体在导入期被离散为中性网格（`SemanticGeometry::Mesh`），
-  **源字节不保留** ⇒ 不能作为 3DSOLID 往返。显示支持因此是 **`Verified`（网格）**；
-  只有超出子集或被内核拒绝的负载才是 `Unsupported`/`Missing`，见 `docs/compatibility.md`「ACIS 实体显示状态」。
+* 导入时**不保留**原始 SAT/SAB 字节，但保留 lift 后的中性 B-Rep：实体以
+  `SemanticGeometry::Body3d` 发出（`exact` + `display`，ADR-0036）。`display` 是中性显示缓存
+  （网格 + 边线 + 弦高）；**SAT/SAB 源字节仍不保留** ⇒ 仍不能作为 3DSOLID 原样往返，导出写
+  POLYFACE。无法 lift 时 `exact = Unavailable`，`3DSOLID` 同时降为 `Unknown`，不伪造实体。
+  完整性：平面精确体可 `Complete`，曲面体 `Partial`；见 `docs/compatibility.md`「ACIS 实体状态」。
 
 acadrust API 使用：`entities::acis::{SatDocument, SabReader, SatFace, SatLoop,
 SatCoedge, SatEdge, SatVertex, SatPoint, SatPlaneSurface, SatConeSurface,
@@ -146,10 +150,12 @@ SatSphereSurface, SatTorusSurface, SatEllipseCurve, Sense}`，以及
 
 ## 8. 显示路径
 
-**已接线（2026-10-21，导入期）**：导入调用 `solid_exchange_from_entity` + 内核新增的
-无 stamp 入口 `tessellate_exchange`，把结果直接作为 `SemanticGeometry::Mesh` 发出；
-`cad-representation::DisplayRepresentation::from_tessellation` 仍只有测试调用者（导入不经该转换器）。
-容差 = 包围盒对角线的 0.1 %，恒 `Partial` 并声明「离散不细化 + 源不保留」。
+**已接线（2026-10-21；2026-11-16 改为一级 body）**：导入调用 `solid_exchange_from_entity` +
+内核无 stamp 入口 `tessellate_exchange`，把 `TessellationMesh` 封装成
+`SemanticGeometry::Body3d`（`exact` 来自 `SolidExchange::Brep`，`display` 带网格/边线/弦高）。
+`DisplayRepresentation::from_tessellation` 仍只有测试调用者（导入不经该转换器）。
+容差 = 包围盒对角线的 0.1 %；完整性按 `docs/compatibility.md`「ACIS 实体状态」的规则给出
+（精确平面体可 `Complete`，曲面体 `Partial`）。
 
 转换器本身的行为（供接线时使用）：`DisplayRepresentation::from_tessellation(result, source,
 alpha)` 把 `TessellationResult` 转为显示图元：

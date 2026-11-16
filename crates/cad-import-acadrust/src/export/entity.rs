@@ -16,8 +16,8 @@
 
 use acadrust::entities::{
     Arc as DxfArc, Circle as DxfCircle, Ellipse as DxfEllipse, EntityType, Line as DxfLine,
-    LwPolyline, LwVertex, MText, Point as DxfPoint, PolyfaceFace, PolyfaceMesh, PolyfaceVertex,
-    Polyline3D, Solid as DxfSolid, Spline as DxfSpline, Text as DxfText,
+    LwPolyline, LwVertex, MText, Point as DxfPoint, Polyline3D, Solid as DxfSolid,
+    Spline as DxfSpline, Text as DxfText,
 };
 use acadrust::types::{Vector2, Vector3};
 use acadrust::CadDocument;
@@ -25,6 +25,7 @@ use cad_db::{DbEntity, DrawingDatabase};
 use cad_domain::*;
 
 pub(crate) use super::accumulator::ExportAccumulator;
+use super::body::{emit_body3d, emit_polyface_mesh};
 use super::common::{
     common_for, map_h_align, map_v_align, mtext_attachment, ocs_from_wcs, v3, with_reasons,
 };
@@ -32,14 +33,11 @@ use super::report::{ExportLimits, MappingOutcome};
 use super::solid_record::{face_class, face_record};
 use super::tables::ensure_text_style;
 
-/// The largest polyface vertex index that fits `PolyfaceFace`'s signed `i16`
-/// fields (1-based, so a 0-based index must be `< 32767`).
-const MAX_POLYFACE_INDEX: usize = 32766;
-
-/// Source entity classes whose ACIS payload the importer tessellates into a
-/// plain [`SemanticGeometry::Mesh`]. Their original SAT/SAB bytes are gone, so
-/// an export writes a polyface and must say so rather than imply a 3DSOLID
-/// round trip.
+/// Source entity classes whose ACIS payload an *older* import tessellated into a
+/// plain [`SemanticGeometry::Mesh`]. Current imports produce a
+/// [`SemanticGeometry::Body3d`] instead, so this list only keeps legacy database
+/// content honest: its original SAT/SAB bytes are gone, so an export writes a
+/// polyface and must say so rather than imply a 3DSOLID round trip.
 const ACIS_TESSELLATED_TYPE_KEYS: [&str; 4] =
     ["AcDb3dSolid", "AcDbRegion", "AcDbBody", "AcDbSurface"];
 
@@ -526,62 +524,27 @@ fn emit_leaf(
                     Err(reason) => face_refusal = Some(reason),
                 }
             }
-            // Polyface face indices are signed i16 (1-based). A mesh outside that
-            // range must not be emitted with wrapped indices, which would corrupt
-            // the file; drop it explicitly instead of erroring the whole export.
-            let index_in_range = mesh.vertices.len() <= MAX_POLYFACE_INDEX + 1
-                && mesh
-                    .triangles
-                    .iter()
-                    .all(|triangle| triangle.iter().all(|i| (*i as usize) <= MAX_POLYFACE_INDEX));
-            if !index_in_range {
-                acc.record(
-                    object,
-                    "polyface_index_range",
-                    MappingOutcome::Dropped(vec![format!(
-                        "mesh has {} vertices or a face index beyond the polyface mesh i16 range \
-                         (max {MAX_POLYFACE_INDEX}); not emitted",
-                        mesh.vertices.len()
-                    )]),
-                );
-                return Ok(());
-            }
-            let (common, reasons) = common_for(doc, entity, ctx);
-            let mut polyface = PolyfaceMesh::new();
-            for vertex in &mesh.vertices {
-                polyface.add_vertex(PolyfaceVertex::new(v3(*vertex)));
-            }
-            for triangle in &mesh.triangles {
-                polyface.add_face(PolyfaceFace {
-                    index1: triangle[0] as i16 + 1,
-                    index2: triangle[1] as i16 + 1,
-                    index3: triangle[2] as i16 + 1,
-                    index4: 0,
-                    ..PolyfaceFace::default()
-                });
-            }
-            polyface.common = common;
-            acc.push(EntityType::PolyfaceMesh(polyface), ctx)?;
-            let mut reasons = reasons;
+            let mut base_reasons = Vec::new();
             if let Some(reason) = face_refusal {
-                reasons.push(format!(
+                base_reasons.push(format!(
                     "this source could not be written as a filled-face record ({reason}); its \
                      class is not preserved and it is written as a polyface mesh"
                 ));
             }
-            reasons.push(
-                "mesh written as a polyface mesh; per-vertex colours and normals are dropped"
-                    .into(),
-            );
             if ACIS_TESSELLATED_TYPE_KEYS.contains(&entity.object.type_key.as_str()) {
-                reasons.push(
+                base_reasons.push(
                     "this mesh was tessellated from ACIS at import; the original SAT/SAB source \
                      is not retained, so it is exported as a polyface mesh, not as a 3DSOLID"
                         .into(),
                 );
             }
-            acc.record(object, "mesh", MappingOutcome::Converted(reasons));
+            emit_polyface_mesh(doc, entity, mesh, base_reasons, ctx, acc)?;
         }
+        // A 3D body keeps its exact B-rep in the database, but this exporter has
+        // no ACIS encoder: only the derived display cache is written (a polyface
+        // mesh for facets, LINE/POLYLINE3D for edge-only bodies). Never a
+        // fabricated `3DSOLID`/`BODY`/`REGION` record; the loss is recorded.
+        SemanticGeometry::Body3d(body) => emit_body3d(doc, entity, body, ctx, acc)?,
         SemanticGeometry::Text {
             text,
             position,
@@ -871,6 +834,7 @@ pub(crate) fn kind_name(geometry: &SemanticGeometry) -> &'static str {
         SemanticGeometry::Spline { .. } => "Spline",
         SemanticGeometry::Point(_) => "Point",
         SemanticGeometry::Mesh(_) => "Mesh",
+        SemanticGeometry::Body3d(_) => "Body3d",
         SemanticGeometry::Insert { .. } => "Insert",
         SemanticGeometry::Text { .. } => "Text",
         SemanticGeometry::Shape { .. } => "Shape",

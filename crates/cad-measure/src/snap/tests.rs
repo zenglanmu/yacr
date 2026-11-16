@@ -365,3 +365,34 @@ fn image_and_mask_yield_no_snap_candidates() {
     assert!(snaps(&[target(image)], 0.0, 0.0, 1.0).is_empty());
     assert!(snaps(&[target(mask)], 5.0, 5.0, 1.0).is_empty());
 }
+
+/// A body's display cache is a tessellation, not an analytic surface: like a
+/// `Mesh` it contributes no snap candidates rather than inventing endpoints on a
+/// fabricated plane.
+#[test]
+fn body_yields_no_snap_candidates() {
+    let body = SemanticGeometry::Body3d(Box::new(Body3d {
+        kind: BodyKind::Solid,
+        exact: BodyExact::Unavailable {
+            reason: "snap-test-display-only".into(),
+        },
+        display: BodyDisplay {
+            mesh: Mesh {
+                vertices: vec![flat(0.0, 0.0), flat(10.0, 0.0), flat(0.0, 10.0)],
+                triangles: vec![[0, 1, 2]],
+                normals: Vec::new(),
+                face_sources: Vec::new(),
+                colors: Vec::new(),
+            },
+            edges: vec![vec![flat(0.0, 0.0), flat(10.0, 0.0)]],
+            tolerance: Some(0.01),
+            precision: Precision::Approximate {
+                error_bound: Some(0.01),
+            },
+            completeness: Completeness::Partial(vec!["exact-brep".into()]),
+        },
+    }));
+    // Hovering exactly over a display vertex/edge midpoint still yields nothing.
+    assert!(snaps(&[target(body.clone())], 0.0, 0.0, 1.0).is_empty());
+    assert!(snaps(&[target(body)], 5.0, 0.0, 1.0).is_empty());
+}

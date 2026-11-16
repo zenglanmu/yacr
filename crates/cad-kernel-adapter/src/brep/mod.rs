@@ -1,10 +1,12 @@
-//! Neutral B-rep data and its tessellation.
+//! B-rep evaluation and tessellation seam.
 //!
-//! This module owns the *only* representation of imported solid geometry that
-//! crosses the kernel seam. It is plain data: no ACIS handle, no parser and no
-//! acadrust type appears here. The importer (`cad-import-acadrust`, the sole
-//! acadrust consumer) lifts a SAT/SAB record graph into these types; this
-//! module turns them into a [`cad_domain::Mesh`](crate::TessellationMesh).
+//! The neutral B-rep **data** model (`BrepPlacement`, `BrepSurface`,
+//! `BrepCurve`, `BrepLoop`, `BrepFace`, `BrepShell`, `BrepData`) now lives in
+//! `cad-domain` ([`cad_domain::brep`]) — a body's exact geometry is domain data,
+//! not a kernel-implementation detail. This module re-exports those types
+//! unchanged and owns the **evaluation/tessellation seams**: it turns imported
+//! B-rep data into a [`cad_domain::Mesh`](crate::TessellationMesh).
+
 //!
 //! # Supported subset (honest)
 //!

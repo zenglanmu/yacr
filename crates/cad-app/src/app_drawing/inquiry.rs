@@ -333,6 +333,22 @@ fn geometry_summary(database: &cad_db::DrawingDatabase, geometry: &SemanticGeome
             table.columns().len(),
             table.display().len()
         ),
+        // A body reports its stored topology class, whether the exact B-rep is
+        // present, and the display cache's own counts; no volume, area or
+        // bounding box is derived from the tessellation.
+        SemanticGeometry::Body3d(body) => {
+            let exact = match &body.exact {
+                BodyExact::Exact(_) => "brep".to_string(),
+                BodyExact::Unavailable { reason } => format!("unavailable({reason})"),
+            };
+            format!(
+                "body kind={:?} exact={exact} mesh_vertices={} mesh_triangles={} edges={}",
+                body.kind,
+                body.display.mesh.vertices.len(),
+                body.display.mesh.triangle_count(),
+                body.display.edges.len()
+            )
+        }
     }
 }
 

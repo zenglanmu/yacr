@@ -350,6 +350,11 @@ fn appends_like_full_rebuild(geometry: &SemanticGeometry) -> bool {
     match geometry {
         SemanticGeometry::Point(_) => false,
         SemanticGeometry::Image { .. } | SemanticGeometry::Mask { .. } => false,
+        // A body's display cache (tessellation + fixed-edge polylines) is not
+        // proven equivalent through the scene append path, so a body insert or
+        // update always invalidates like a geometry change; it is never a
+        // silent no-op.
+        SemanticGeometry::Body3d(_) => false,
         SemanticGeometry::Line { .. }
         | SemanticGeometry::Polyline { .. }
         | SemanticGeometry::Circle { .. }

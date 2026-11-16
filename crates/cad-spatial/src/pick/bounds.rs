@@ -41,7 +41,10 @@ pub(super) fn local_pick_bounds(geometry: &SemanticGeometry) -> Option<(Point3, 
         // The triangle predicate intentionally permits 1e-12 barycentric
         // slack; for very large triangles that can accept points outside even
         // a tolerance-expanded vertex bound. Preserve that established result.
-        SemanticGeometry::Mesh(_) => return None,
+        // A body is unbounded here for the same reason as a mesh (its display
+        // tessellation keeps the triangle predicate's slack), even when it also
+        // carries edge polylines.
+        SemanticGeometry::Mesh(_) | SemanticGeometry::Body3d(_) => return None,
         SemanticGeometry::Polyline {
             points: vertices,
             bulges,
@@ -572,6 +575,24 @@ fn index_local_bounds(geometry: &SemanticGeometry) -> Option<(Point3, Point3)> {
                     ),
                     None => child,
                 });
+            }
+        }
+        // A body's display cache is its only display geometry: the union of the
+        // cached tessellation vertices and the edge polylines. A body with an
+        // empty display (no mesh, no edges) contributes `None`, exactly like an
+        // empty mesh: no box is invented for a body that draws nothing.
+        SemanticGeometry::Body3d(body) => {
+            for point in &body.display.mesh.vertices {
+                if !include_bound_point(&mut bounds, *point) {
+                    return None;
+                }
+            }
+            for edge in &body.display.edges {
+                for point in edge {
+                    if !include_bound_point(&mut bounds, *point) {
+                        return None;
+                    }
+                }
             }
         }
         // A dimension's conservative bound is the union of its display

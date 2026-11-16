@@ -181,6 +181,23 @@ pub fn geometry_is_finite(geometry: &SemanticGeometry) -> bool {
                     .iter()
                     .all(|t| t.iter().all(|i| (*i as usize) < m.vertices.len()))
         }
+        G::Body3d(body) => {
+            all_points(&body.display.mesh.vertices)
+                && body.display.mesh.normals.iter().all(|n| finite(*n))
+                && body.display.mesh.triangles.iter().all(|t| {
+                    t.iter()
+                        .all(|i| (*i as usize) < body.display.mesh.vertices.len())
+                })
+                && body
+                    .display
+                    .edges
+                    .iter()
+                    .all(|edge| edge.len() >= 2 && all_points(edge))
+                && body
+                    .display
+                    .tolerance
+                    .is_none_or(|tolerance| tolerance.is_finite() && tolerance > 0.0)
+        }
         G::Insert { transform, .. } => transform.matrix.iter().flatten().all(|v| v.is_finite()),
         G::Text {
             position,
