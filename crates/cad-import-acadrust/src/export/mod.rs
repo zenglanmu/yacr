@@ -1,12 +1,13 @@
 //! Lossy Save As export: reverse-map the domain database to an acadrust document.
 //!
 //! This is a **Save As**, never a round-trip save. The domain database is a
-//! resolved display model — `ByLayer` **linetype and lineweight** are flattened,
-//! block names and base points are dropped, and several kinds arrive pre-lossy —
-//! so the returned [`ExportReport`] records every conversion and every drop
-//! explicitly. `ByLayer` **colour** is the exception: it is preserved
-//! symbolically on import and written back symbolically, so a layer colour
-//! survives the round trip. The caller (host/CLI) owns file I/O; this module only
+//! resolved display model — `ByLayer` **linetype and lineweight** are flattened
+//! and several kinds arrive pre-lossy — so the returned [`ExportReport`] records
+//! every conversion and every drop explicitly. `ByLayer` **colour** is the
+//! exception: it is preserved symbolically on import and written back
+//! symbolically, so a layer colour survives the round trip, and block identity
+//! is preserved by writing real `BLOCK_RECORD`s and `INSERT` records (see the
+//! `insert` module). The caller (host/CLI) owns file I/O; this module only
 //! produces bytes.
 //!
 //! [`ExportFormat::Dwg`] writes the same reverse-mapped document through
@@ -14,6 +15,7 @@
 //! **experimental and lossy**, and its only evidence is a synthetic acadrust
 //! self-roundtrip — never a claim that AutoCAD or any vendor opens the file.
 
+mod accumulator;
 mod common;
 mod dimension;
 mod entity;
@@ -22,6 +24,7 @@ mod entity;
 #[cfg(test)]
 pub(crate) use entity::kind_name;
 mod hatch;
+mod insert;
 mod multileader;
 mod report;
 mod solid_record;
@@ -37,7 +40,8 @@ use acadrust::CadDocument;
 use cad_db::{DbEntity, DrawingDatabase};
 use cad_domain::{CadError, CadResult, Completeness, DocumentId, SpaceId, Transform3, UnitContext};
 
-use entity::{emit, EntityContext, ExportAccumulator};
+use accumulator::ExportAccumulator;
+use entity::{emit, EntityContext};
 
 /// A lossy Save As export request.
 ///
@@ -149,15 +153,19 @@ pub fn export(request: &ExportRequest<'_>) -> CadResult<(Vec<u8>, ExportReport)>
         }
     }
 
-    // Block definitions not reached by any INSERT expansion are reported, so a
-    // block's content is never silently missing from the output. Xref-owned
-    // definitions are a separate case: their members are an external drawing,
-    // and an INSERT of one is already refused with `export.xref_content_dropped`
-    // (and marked expanded). A definition with no INSERT still must not be
-    // called a generic unreferenced block, because the reason it is not written
-    // is that v1 cannot emit an xref record/path at all.
+    // Block definitions not reached by any written block reference are reported,
+    // so a block's content is never silently missing from the output. Definitions
+    // that were written as `BLOCK_RECORD`s, or that were reached and exploded,
+    // are handled. Xref-owned definitions are a separate case: their members are
+    // an external drawing, and an INSERT of one is already refused with
+    // `export.xref_content_dropped` (and marked expanded). A definition with no
+    // INSERT still must not be called a generic unreferenced block, because the
+    // reason it is not written is that v1 cannot emit an xref record/path at all.
     for block in request.database.blocks() {
-        if acc.expanded_blocks.contains(&block.id) {
+        if acc.written_blocks.contains_key(&block.id)
+            || acc.expanded_blocks.contains(&block.id)
+            || acc.refused_blocks.contains_key(&block.id)
+        {
             continue;
         }
         if let Some(reference) = request.database.external_reference_for_block(block.id) {

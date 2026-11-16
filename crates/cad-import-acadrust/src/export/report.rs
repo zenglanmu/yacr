@@ -2,9 +2,11 @@
 //!
 //! This is a *Save As* report, not a round-trip-save report: the domain database
 //! is a resolved display model (`ByLayer` linetype and lineweight flattened,
-//! `ByLayer` colour kept symbolic, block names and base points dropped, several
-//! kinds arriving pre-lossy), so every conversion and every drop is recorded
-//! explicitly here rather than silently swallowed.
+//! `ByLayer` colour kept symbolic, several kinds arriving pre-lossy), so every
+//! conversion and every drop is recorded explicitly here rather than silently
+//! swallowed. Block identity is preserved (real `BLOCK_RECORD`s and `INSERT`
+//! records), so only the references that genuinely cannot be one record are
+//! reported as conversions.
 
 use cad_domain::{Completeness, ObjectId};
 
@@ -56,6 +58,10 @@ pub struct ExportLimits {
     /// Maximum number of output entities before the export fails explicitly.
     pub max_output_entities: usize,
     /// Maximum INSERT explode depth before the export fails explicitly.
+    ///
+    /// The same bound limits the block-definition nest written into the BLOCKS
+    /// section: a definition nested deeper than this is not written, and its
+    /// reference then takes the declared explode path instead.
     pub max_explode_depth: usize,
 }
 

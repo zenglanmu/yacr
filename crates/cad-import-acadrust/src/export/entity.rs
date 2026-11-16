@@ -7,12 +7,12 @@
 //!
 //! "Exact" means **faithful to the domain database**, not faithful to the source
 //! DWG: the database has already dropped information (per-entity `ByLayer`
-//! transparency, block names, spline closed/periodic flags), and a `Spline` is
-//! therefore reported as `Converted`, never `Exact`. Colour, lineweight and
-//! linetype **provenance** is not among the losses: a symbolic `ByLayer`/
-//! `ByBlock` value is written back symbolically (see [`common_for`]).
-
-use std::collections::{BTreeMap, BTreeSet};
+//! transparency, spline closed/periodic flags), and a `Spline` is therefore
+//! reported as `Converted`, never `Exact`. Colour, lineweight and linetype
+//! **provenance** is not among the losses: a symbolic `ByLayer`/`ByBlock` value
+//! is written back symbolically (see [`common_for`]). Block identity is no
+//! longer a loss either: a representable reference is written as a real
+//! `INSERT` record naming a written `BLOCK_RECORD` (see [`super::insert`]).
 
 use acadrust::entities::{
     Arc as DxfArc, Circle as DxfCircle, Ellipse as DxfEllipse, EntityType, Line as DxfLine,
@@ -24,10 +24,11 @@ use acadrust::CadDocument;
 use cad_db::{DbEntity, DrawingDatabase};
 use cad_domain::*;
 
+pub(crate) use super::accumulator::ExportAccumulator;
 use super::common::{
     common_for, map_h_align, map_v_align, mtext_attachment, ocs_from_wcs, v3, with_reasons,
 };
-use super::report::{ExportCounts, ExportDiagnostic, ExportLimits, MappingOutcome};
+use super::report::{ExportLimits, MappingOutcome};
 use super::solid_record::{face_class, face_record};
 use super::tables::ensure_text_style;
 
@@ -46,146 +47,6 @@ const ACIS_TESSELLATED_TYPE_KEYS: [&str; 4] =
 pub(crate) struct EntityContext<'a> {
     pub database: &'a DrawingDatabase,
     pub limits: ExportLimits,
-}
-
-/// Mutable output accumulated while mapping.
-pub(crate) struct ExportAccumulator {
-    pub entities: Vec<EntityType>,
-    pub counts: ExportCounts,
-    pub entries: Vec<ExportDiagnostic>,
-    pub notes: Vec<ExportDiagnostic>,
-    /// Block definitions reached by an INSERT expansion.
-    pub expanded_blocks: BTreeSet<BlockId>,
-    /// Monotonic counter for generated `*D...` dimension content-block names.
-    pub dim_block_counter: usize,
-    /// While true, [`ExportAccumulator::record`] drops its entry: used to write
-    /// a dimension's content-block members without counting each one as a
-    /// separate source geometry (the dimension itself is one outcome).
-    pub suppress_records: bool,
-    /// MULTILEADER style records written so far, keyed by the lower-cased style
-    /// name: one `MLEADERSTYLE` object per distinct name, first snapshot wins
-    /// (ADR 0019 decision D).
-    pub mleader_styles: BTreeMap<String, (String, MLeaderStyleValues)>,
-    /// Source objects whose `XCLIP` boundary was already reported. A clipped
-    /// reference reaches [`emit`] once per array cell and once per block-member
-    /// walk with the same source object, so the loss is recorded once.
-    pub reported_clips: BTreeSet<ObjectId>,
-}
-
-impl ExportAccumulator {
-    pub(crate) fn new() -> Self {
-        ExportAccumulator {
-            entities: Vec::new(),
-            counts: ExportCounts::default(),
-            entries: Vec::new(),
-            notes: Vec::new(),
-            expanded_blocks: BTreeSet::new(),
-            dim_block_counter: 0,
-            suppress_records: false,
-            mleader_styles: BTreeMap::new(),
-            reported_clips: BTreeSet::new(),
-        }
-    }
-
-    pub(crate) fn record(&mut self, object: Option<ObjectId>, kind: &str, outcome: MappingOutcome) {
-        if self.suppress_records {
-            return;
-        }
-        match outcome {
-            MappingOutcome::Exact => self.counts.exact += 1,
-            MappingOutcome::Converted(reasons) => {
-                self.counts.converted += 1;
-                for reason in reasons {
-                    self.entries.push(ExportDiagnostic {
-                        object,
-                        code: format!("export.converted.{kind}"),
-                        message: reason,
-                    });
-                }
-            }
-            MappingOutcome::Dropped(reasons) => {
-                self.counts.dropped += 1;
-                for reason in reasons {
-                    self.entries.push(ExportDiagnostic {
-                        object,
-                        code: format!("export.dropped.{kind}"),
-                        message: reason,
-                    });
-                }
-            }
-        }
-    }
-
-    /// Record a drop under an explicit stable code.
-    ///
-    /// Most drops use the derived `export.dropped.<kind>` spelling. This entry
-    /// point exists for losses whose code is itself the contract and names the
-    /// missing feature (`export.xref_content_dropped`,
-    /// `export.xref_definition_not_written`) rather than only the entity kind.
-    /// It still counts as a drop, so the report can never stay `Complete`.
-    pub(crate) fn record_dropped_code(
-        &mut self,
-        object: Option<ObjectId>,
-        code: &str,
-        reasons: Vec<String>,
-    ) {
-        if self.suppress_records {
-            return;
-        }
-        self.counts.dropped += 1;
-        for reason in reasons {
-            self.entries.push(ExportDiagnostic {
-                object,
-                code: code.to_string(),
-                message: reason,
-            });
-        }
-    }
-
-    /// Record a source `XCLIP` boundary the output cannot carry.
-    ///
-    /// The boundary is a **display attribute** of a block reference, and this
-    /// exporter writes no `INSERT` record at all (every block reference is
-    /// exploded into model-space entities), so there is no block reference to
-    /// own the `ACAD_FILTER`/`SPATIAL_FILTER` object chain. The loss is named
-    /// instead of silently exporting the block content unclipped. Deduped per
-    /// source object: an array reference and every block-member walk reach
-    /// `emit` with the same object identity.
-    pub(super) fn record_clip_dropped(&mut self, entity: &DbEntity, ctx: &EntityContext) {
-        if self.suppress_records {
-            return;
-        }
-        let Some(clip) = ctx.database.entity_render_attributes(entity.id).clip else {
-            return;
-        };
-        if !self.reported_clips.insert(entity.object.id) {
-            return;
-        }
-        self.record_dropped_code(
-            Some(entity.object.id),
-            "export.xclip_clip_dropped",
-            vec![format!(
-                "the block reference's XCLIP boundary ({} point(s), switched {}) is not \
-                 written: the v1 DXF exporter emits no INSERT record (block references are \
-                 exploded), so no block reference exists to own the \
-                 ACAD_FILTER/SPATIAL_FILTER object chain, and the block content is exported \
-                 unclipped",
-                clip.vertices.len(),
-                if clip.visible { "on" } else { "off" }
-            )],
-        );
-    }
-
-    pub(super) fn push(&mut self, entity: EntityType, ctx: &EntityContext) -> CadResult<()> {
-        if self.entities.len() >= ctx.limits.max_output_entities {
-            return Err(CadError::InvalidInput(format!(
-                "export exceeds the {} entity output limit",
-                ctx.limits.max_output_entities
-            )));
-        }
-        self.entities.push(entity);
-        Ok(())
-    }
 }
 
 /// Type keys whose source entity is an infinite construct line.
@@ -229,11 +90,20 @@ pub(super) fn emit(
     acc: &mut ExportAccumulator,
     stack: &mut Vec<BlockId>,
 ) -> CadResult<()> {
-    // A block reference's `XCLIP` boundary is a display attribute of the source
-    // entity, and this emitter never writes an INSERT record to attach it to.
-    // Reported from every shape (Insert, the Compound of an array MINSERT, and
-    // any leaf that somehow carries one) so no clip disappears silently.
-    acc.record_clip_dropped(entity, ctx);
+    // A clip is only ever stored on a block reference (the `XCLIP` command and
+    // the importer both enforce that). The Insert and Compound arms report their
+    // own clip loss on the paths that do not write the reference; anything else
+    // carrying one is a database inconsistency and must not be dropped silently.
+    if !matches!(
+        entity.geometry,
+        SemanticGeometry::Insert { .. } | SemanticGeometry::Compound(_)
+    ) {
+        acc.record_clip_dropped(
+            entity,
+            ctx,
+            "only a block reference can own an XCLIP boundary, and this entity is not one",
+        );
+    }
     match &entity.geometry {
         SemanticGeometry::Insert {
             block,
@@ -247,6 +117,11 @@ pub(super) fn emit(
                     MappingOutcome::Dropped(vec![format!(
                         "block reference cycle at {block:?}; not expanded"
                     )]),
+                );
+                acc.record_clip_dropped(
+                    entity,
+                    ctx,
+                    "the reference is not written (block-reference cycle)",
                 );
                 return Ok(());
             }
@@ -272,15 +147,30 @@ pub(super) fn emit(
                         reference.status.as_str()
                     )],
                 );
+                acc.record_clip_dropped(
+                    entity,
+                    ctx,
+                    "the reference is not written (an external reference attachment has no \
+                     output record)",
+                );
                 return Ok(());
             }
+            // Real `INSERT` + `BLOCK_RECORD` when the reference can be one record.
+            let placement = transform.matrix_mul(insert_transform);
+            let reason =
+                match super::insert::emit_insert(doc, entity, *block, &placement, ctx, acc, stack)?
+                {
+                    super::insert::InsertEmission::Written => return Ok(()),
+                    super::insert::InsertEmission::Explode(reason) => reason,
+                };
+            // Declared fallback: this reference genuinely cannot be one `INSERT`,
+            // so its members are expanded in place and the reason is recorded.
             if depth + 1 > ctx.limits.max_explode_depth {
                 return Err(CadError::InvalidInput(format!(
                     "insert explode depth exceeds the {} limit",
                     ctx.limits.max_explode_depth
                 )));
             }
-            let composed = transform.matrix_mul(insert_transform);
             let Some(definition) = ctx.database.block(*block) else {
                 acc.record(
                     object,
@@ -288,6 +178,11 @@ pub(super) fn emit(
                     MappingOutcome::Dropped(vec![
                         "insert references a block definition that is not in the database".into(),
                     ]),
+                );
+                acc.record_clip_dropped(
+                    entity,
+                    ctx,
+                    "the reference is not written (its block definition is not in the database)",
                 );
                 return Ok(());
             };
@@ -308,7 +203,7 @@ pub(super) fn emit(
             stack.push(*block);
             for member in &members {
                 match ctx.database.entity(*member) {
-                    Some(child) => emit(doc, child, &composed, depth + 1, ctx, acc, stack)?,
+                    Some(child) => emit(doc, child, &placement, depth + 1, ctx, acc, stack)?,
                     // A member id that no longer resolves is explicit, never a
                     // silent omission (mirrors the missing-definition arm). The
                     // database builder and validated change path keep block
@@ -323,10 +218,14 @@ pub(super) fn emit(
                 }
             }
             stack.pop();
-            let mut reasons = vec![
-                "block reference exploded; block identity, name and base point are lost"
-                    .to_string(),
-            ];
+            acc.record_clip_dropped(
+                entity,
+                ctx,
+                &format!("the reference is exported exploded ({reason})"),
+            );
+            let mut reasons = vec![format!(
+                "block reference exploded: {reason}; block identity, name and base point are lost"
+            )];
             if let Some(reason) = visibility_reason {
                 reasons.push(reason);
             }
@@ -335,14 +234,27 @@ pub(super) fn emit(
         }
         SemanticGeometry::Compound(children) => {
             let object = Some(entity.object.id);
+            // An array (`MINSERT`) reference reaches this arm as one compound of
+            // one `Insert` per cell, so each cell is written as its own `INSERT`
+            // record by the arm above. The array header (row/column count and
+            // spacing) is not reconstructed, which the outcome states.
+            let all_cells = !children.is_empty()
+                && children
+                    .iter()
+                    .all(|child| matches!(child, SemanticGeometry::Insert { .. }));
+            let before = acc.written_inserts;
             flatten_children(doc, entity, children, transform, depth, ctx, acc, stack)?;
-            acc.record(
-                object,
-                "compound",
-                MappingOutcome::Converted(vec![
-                    "compound flattened into separate output entities".into()
-                ]),
-            );
+            let written_cells = acc.written_inserts - before;
+            let reason = if all_cells && written_cells == children.len() {
+                format!(
+                    "{} array cell(s) written as independent INSERT records; the MINSERT \
+                     row/column count and spacing are not reconstructed",
+                    children.len()
+                )
+            } else {
+                "compound flattened into separate output entities".to_string()
+            };
+            acc.record(object, "compound", MappingOutcome::Converted(vec![reason]));
             Ok(())
         }
         // A first-class MULTILEADER is written as a real `MULTILEADER` entity

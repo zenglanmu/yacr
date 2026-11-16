@@ -37,11 +37,17 @@ pub(super) fn emit_dimension(
     let definition = dimension.definition();
 
     // A DIMENSION without a content block is not opened by AutoCAD, so always
-    // generate one whose members are the display children.
-    let block_name = {
+    // generate one whose members are the display children. The name must not
+    // collide with a block definition already written for the drawing (a block
+    // reference may legitimately be named `*D0`), so an occupied name is skipped
+    // rather than replaced.
+    let block_name = loop {
         let counter = acc.dim_block_counter;
         acc.dim_block_counter += 1;
-        format!("*D{counter}")
+        let candidate = format!("*D{counter}");
+        if doc.block_records.get(&candidate).is_none() {
+            break candidate;
+        }
     };
     let block_handle = doc.allocate_handle();
     let block_entity_handle = doc.allocate_handle();

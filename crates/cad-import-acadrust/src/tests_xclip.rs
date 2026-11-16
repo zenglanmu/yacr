@@ -403,14 +403,19 @@ fn nested_block_reference_clip_is_stored_on_the_inner_insert() {
 // ---- export ----
 
 #[test]
-fn export_names_the_clip_it_cannot_write() {
+fn export_writes_the_clip_chain_so_an_imported_clip_round_trips() {
+    // This test used to assert the loss: the exporter wrote no INSERT at all, so
+    // a stored XCLIP had nowhere to go (`export.xclip_clip_dropped`). Block
+    // references are now written as real INSERT records, and a representable
+    // clip is written as its ACAD_FILTER/SPATIAL/SPATIAL_FILTER chain.
     let doc = clipped_insert_document(
         "CLIPPED",
         [10.0, 20.0],
         Some((&[[8.0, 18.0], [12.0, 22.0]], true)),
     );
     let imported = import_document(&doc);
-    assert!(model_insert_clip(&imported).is_some(), "precondition");
+    let before = model_insert_clip(&imported).expect("precondition: the source clip is read");
+    assert_eq!(before.vertices, vec![[-2.0, -2.0], [2.0, 2.0]]);
 
     let (bytes, report) = crate::export::export(&crate::export::ExportRequest {
         database: &imported.database,
@@ -422,28 +427,55 @@ fn export_names_the_clip_it_cannot_write() {
     })
     .expect("the drawing exports");
 
-    let dropped: Vec<&crate::export::ExportDiagnostic> = report
-        .entries
-        .iter()
-        .filter(|entry| entry.code == "export.xclip_clip_dropped")
-        .collect();
-    assert_eq!(
-        dropped.len(),
-        1,
-        "exactly one clip loss is reported: {:?}",
+    assert!(
+        report
+            .entries
+            .iter()
+            .all(|entry| entry.code != "export.xclip_clip_dropped"),
+        "the clip is written, so no clip loss may be reported: {:?}",
         report.entries
     );
-    assert!(
-        dropped[0].message.contains("ACAD_FILTER"),
-        "the reason names the object chain that has nowhere to go: {}",
-        dropped[0].message
-    );
+    let text = std::str::from_utf8(&bytes).expect("ASCII DXF is valid UTF-8");
+    for marker in ["INSERT", "SPATIAL_FILTER", "ACAD_FILTER", "SPATIAL"] {
+        assert!(
+            text.contains(marker),
+            "the chain is written: missing {marker}"
+        );
+    }
 
-    // The recorded loss is real, not cosmetic: the exported file carries no
-    // clip, because it carries no block reference at all.
+    // The boundary comes back in the referenced block's local space, with the
+    // enabled state it was stored with.
     let reimported = import_bytes(bytes);
-    assert!(
-        !any_stored_clip(&reimported),
-        "this exporter writes no INSERT, so the boundary cannot come back"
+    let after = model_insert_clip(&reimported).expect("the exported clip is read back");
+    assert_eq!(after.vertices, before.vertices);
+    assert_eq!(after.visible, before.visible);
+    assert_eq!(after.inside, before.inside);
+    assert!(after.is_active());
+}
+
+#[test]
+fn export_writes_a_switched_off_clip_as_a_disabled_boundary() {
+    // XCLIP OFF stores a boundary that is not applied: group 71 = 0. It must
+    // round-trip as a boundary that is present but inactive, never as "no clip".
+    let doc = clipped_insert_document(
+        "CLIPPED",
+        [10.0, 20.0],
+        Some((&[[8.0, 18.0], [12.0, 22.0]], false)),
     );
+    let imported = import_document(&doc);
+    let (bytes, _) = crate::export::export(&crate::export::ExportRequest {
+        database: &imported.database,
+        document_id: DocumentId(1),
+        space: crate::export::ExportSpace::Model,
+        format: crate::export::ExportFormat::DxfText,
+        limits: crate::export::ExportLimits::default(),
+        units: None,
+    })
+    .expect("the drawing exports");
+
+    let reimported = import_bytes(bytes);
+    let clip = model_insert_clip(&reimported).expect("the boundary is still stored");
+    assert!(!clip.visible, "group 71 = 0 round-trips");
+    assert_eq!(clip.vertices, vec![[-2.0, -2.0], [2.0, 2.0]]);
+    assert!(!clip.is_active());
 }
