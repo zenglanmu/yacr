@@ -259,9 +259,10 @@ impl Application {
             | ExtendedCommandId::DcForm
             | ExtendedCommandId::DcHorizontal
             | ExtendedCommandId::DcLinear => self.extended_refusal7(command, ext)?,
-            // Wave 8 session tokens: ELEV reports one token, UCSICON flips one.
-            // Both are session-only and never write the drawing.
-            ExtendedCommandId::Elev | ExtendedCommandId::UcsIcon => {
+            // Wave 8 session tokens: ELEV reports or sets one token, FSMODE sets
+            // the `FS` chain mode and UCSICON flips one flag. All are session-only
+            // and never write the drawing.
+            ExtendedCommandId::Elev | ExtendedCommandId::FsMode | ExtendedCommandId::UcsIcon => {
                 self.extended_session8(session, command, ext)?
             }
             // Wave 8 named refusals: a stable `Unsupported` reason per name.

@@ -9,12 +9,16 @@
 //!
 //! # ALIGNSPACE
 //!
-//! Input is a [`CommandPayload::Points`] payload of **exactly four**
-//! coordinates, read as two alignment points:
+//! Input is a [`CommandPayload::Points`] payload of **exactly four** points, read
+//! as two alignment point pairs:
 //!
 //! ```text
 //! [model_a, paper_a, model_b, paper_b]
 //! ```
+//!
+//! The typed command line `ALIGNSPACE <model_ax> <model_ay> <paper_ax> <paper_ay>
+//! <model_bx> <model_by> <paper_bx> <paper_by>` (eight decimals, `z = 0`) builds
+//! exactly this payload — one grammar, one handler.
 //!
 //! The model point `model_a` is placed on the paper point `paper_a`, and the
 //! pair distance ratio `|paper_b - paper_a| / |model_b - model_a|` is the

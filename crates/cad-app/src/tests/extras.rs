@@ -346,6 +346,66 @@ fn mstretch_applies_the_planner_across_multiple_windows_in_one_undo_step() {
 }
 
 #[test]
+fn mstretch_refuses_a_degenerate_window_and_a_zero_displacement_without_writing() {
+    // The typed line mirrors the payload, so its semantic refusals live here:
+    // a window with no extent and a base equal to the delta both refuse before the
+    // transaction opens and leave the drawing untouched.
+    let (mut app, mut session) = app_with(vec![ent(
+        1,
+        SemanticGeometry::Line {
+            start: point(0.0, 0.0),
+            end: point(10.0, 0.0),
+        },
+        0,
+    )]);
+    let vp = Viewport::new(ViewportId(1), DocumentId(1), [800.0, 600.0]);
+    let logical = |world: Point3| vp.camera.world_to_screen(world, vp.logical_size).unwrap();
+    let corner = logical(point(1.0, 1.0));
+    let revision = drawing(&app).revision();
+    let depth = app.history.get(&DocumentId(1)).map(|h| h.undo_depth());
+
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::MStretch,
+        CommandPayload::MStretch {
+            rects_logical: vec![[corner, corner]],
+            base: point(0.0, 0.0),
+            delta: point(0.0, 5.0),
+        },
+    )
+    .expect_err("a zero-size window is refused");
+    assert!(
+        error.to_string().contains("mstretch.degenerate_window"),
+        "{error}"
+    );
+
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::MStretch,
+        CommandPayload::MStretch {
+            rects_logical: vec![[logical(point(-1.0, -1.0)), logical(point(1.0, 1.0))]],
+            base: point(2.0, 2.0),
+            delta: point(2.0, 2.0),
+        },
+    )
+    .expect_err("a zero displacement is refused");
+    assert!(
+        error.to_string().contains("mstretch.zero_displacement"),
+        "{error}"
+    );
+
+    assert_eq!(drawing(&app).revision(), revision, "nothing was written");
+    assert_eq!(
+        app.history.get(&DocumentId(1)).map(|h| h.undo_depth()),
+        depth,
+        "no undo step was recorded"
+    );
+    assert_eq!(entity_count(&app), 1);
+}
+
+#[test]
 fn typed_pan_is_view_only() {
     let (mut app, mut session) = application_with_document();
     let revision = drawing(&app).revision();

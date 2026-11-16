@@ -20,6 +20,8 @@ use crate::{
 mod text_batch;
 pub use text_batch::*;
 
+mod text_payloads;
+
 mod clip;
 pub use clip::ClipCommand;
 
@@ -641,26 +643,9 @@ pub enum CommandPayload {
     },
     /// TEXT: one single-line text entity (ADR 0019 F.1, P7a).
     ///
-    /// `position` is the captured insertion point, `text` the typed string
-    /// (non-empty, at most [`crate::draw_tool::MAX_TOOL_TEXT_CHARS`] characters —
-    /// re-validated here so a programmatic caller cannot bypass the capture), and
-    /// `height` its glyph height in world units (finite, `> 0`). The capture reads
-    /// the height from [`crate::draw_tool::ToolParameter::TextHeight`]; it is a
-    /// payload field because the command is the single construction point and the
-    /// value must travel with it (never re-read from a session the caller does not
-    /// own). The **rotation** deliberately has no payload field: the command reads
-    /// it from the session it is handed through the typed channel
-    /// [`crate::draw_tool::ToolParameter::TextRotation`] (**degrees**, any finite
-    /// value) and stores the radians, so a session at its default stores `0.0`
-    /// exactly like the previously fixed unrotated text. The style is the
-    /// drawing's `Standard` text style with the style default alignment
-    /// (left/baseline).
-    ///
-    /// Single-line means single-line: a `text` containing `\r`/`\n` is **refused**
-    /// (`text.single_line_newline`), because an `AcDbText` does not interpret
-    /// `\P` — storing one would render over several lines and could never be
-    /// re-edited through `TEXTEDIT`. Use the [`Self::MText`] payload for
-    /// multi-line text.
+    /// Full contract: `command_payload::text_payloads` (the `Text` section) — the
+    /// field rules, the session rotation channel and the single-line newline
+    /// refusal.
     Text {
         position: Point3,
         text: String,
@@ -668,43 +653,9 @@ pub enum CommandPayload {
     },
     /// MTEXT: one multiline text entity stored as **`AcDbMText`**.
     ///
-    /// This is the command core: the interactive `DrawToolKind::MText` tool
-    /// (first corner → opposite corner → typed text) builds exactly this payload,
-    /// and a direct caller (CLI, host IPC) supplies the whole construction:
-    ///
-    /// * `text` — the draft string. `\r\n`, `\r` and `\n` are stored as `\P`, the
-    ///   form the viewport's MTEXT parser and AutoCAD both interpret, by the one
-    ///   newline policy `TEXTEDIT` shares. A later `TEXTEDIT` of this entity
-    ///   accepts line breaks again because the entity is `AcDbMText`;
-    /// * `position` — insertion point (world, must be finite);
-    /// * `width` — the automatic wrap boundary (DXF group `41`
-    ///   `rectangle_width`; the **two-corner** model: the caller passes the
-    ///   width it captured from the second corner). `None` = no wrap and is
-    ///   stored as `None`; `Some(w)` must be finite and `> 0` and is refused
-    ///   otherwise (never clamped, never dropped) and sanitized through
-    ///   [`cad_domain::wrap_width_from_dxf`] like every other wrap boundary;
-    /// * `height` — glyph height in world units (finite, `> 0`);
-    /// * `rotation` — rotation in radians (finite; `0.0` = unrotated). The
-    ///   interactive capture fills it from
-    ///   [`crate::draw_tool::ToolParameter::TextRotation`] (**degrees**, any finite
-    ///   value) and converts once; a programmatic caller supplies the radians
-    ///   directly, exactly as before this parameter existed;
-    /// * `h_align` / `v_align` — horizontal/vertical attachment relative to
-    ///   `position`. The interactive capture fills them from
-    ///   [`crate::draw_tool::ToolParameter::MTextAttachment`] (AutoCAD's `1..=9`
-    ///   codes; `1` = Left/Top, `5` = Center/Middle, `9` = Right/Bottom), so
-    ///   `TextAlignV::Baseline` is never produced by the interactive path.
-    ///
-    /// **Not carried, because not modelled**: columns, background fill and
-    /// drawing direction (the importer's `MTEXT_UNMODELLED` facets). No field
-    /// exists for any of them, so none can be believed to be honoured. Line
-    /// spacing is modelled (`SemanticGeometry::Text::line_spacing`) but this
-    /// payload has no field for it: a created MTEXT stores the neutral
-    /// `1.0 / at least`, the value the layout has always used.
-    ///
-    /// The style/font resolution is the one `Text` creation uses, and the stored
-    /// `type_key` is `AcDbMText` (not `Text`'s `AcDbText`), so this command can
-    /// never produce a single-line entity that claims to be multiline.
+    /// Full contract: `command_payload::text_payloads` (the `MText` section) — the
+    /// newline policy, the wrap/height/rotation fields, the attachment codes and
+    /// the facets this build does not model.
     MText {
         position: Point3,
         width: Option<f64>,
@@ -918,6 +869,22 @@ pub enum CommandPayload {
     /// no database write, revision bump, `cad-history` entry or `ChangeSet`.
     /// Contract: [`crate::command_id::extras`].
     Cvport(u32),
+    /// `ELEV <height>`: the session elevation new objects are created at.
+    ///
+    /// The bare selector carries [`CommandPayload::None`] and reports the stored
+    /// token. The value is the z offset the shared create funnel applies to every
+    /// entity a create command inserts, so `ELEV` does AutoCAD's job. The token is
+    /// session state only — no database write, revision bump, `cad-history` entry
+    /// or `ChangeSet` — and a non-finite value is refused by the session setter
+    /// (`elev.invalid_value`), never clamped.
+    Elevation(f64),
+    /// `FSMODE ON|OFF` (also `1`/`0`): the session `FS` chain mode.
+    ///
+    /// The bare selector reports the token; the typed line is the only setter, so
+    /// `FS`'s two passes become reachable from the command line. Session state
+    /// only: no database write, revision bump, `cad-history` entry or undo step.
+    /// Contract: [`crate::command_id::fs`].
+    FsMode(bool),
     /// `COLOR <aci>`: the session current-colour ACI the create funnel stamps
     /// (`0` = ByBlock, `1..=255` = ACI, `256` = ByLayer); the bare selector keeps
     /// its report. Out of domain and Viewer are refused by the handler.

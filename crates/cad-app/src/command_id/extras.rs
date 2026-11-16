@@ -20,10 +20,12 @@
 //! * `MOCORO` is the **typed** combined transform only. AutoCAD's in-command
 //!   gizmo/prompt loop is NOT IMPLEMENTED; the caller supplies the complete
 //!   operation (`MOVE`/`COPY` delta, or a `ROTATE`/`SCALE` base plus amount).
-//! * `MSTRETCH` takes the windows in a payload. Its command-line form has no
-//!   parser here (the rectangle list is not expressible in the one-argument
-//!   selector grammar without inventing a delimiter); hosts/IPC supply
-//!   `CommandPayload::MStretch`.
+//! * `MSTRETCH` takes the windows in a payload, and its typed command line
+//!   builds that same payload:
+//!   `MSTRETCH <base_x> <base_y> <delta_x> <delta_y> <x1> <y1> <x2> <y2> […]`
+//!   (world base/delta, then one or more logical-pixel crossing windows). An odd
+//!   window-token count is `mstretch.argument_odd` and a zero-size window is the
+//!   handler's `mstretch.degenerate_window` — both before any write.
 //!
 //! # View-only commands
 //!

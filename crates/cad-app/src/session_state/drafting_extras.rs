@@ -11,7 +11,9 @@
 //! effect is not implemented rather than pretending the drawing changed. Several
 //! do: `FILL`, `QTEXT` and `WIPEOUTFRAME` reach the derived display through
 //! [`crate::render_scene::DisplaySettings`], `COLOR` reaches every entity the
-//! create funnel inserts, and two are consumed where they are stored:
+//! create funnel inserts, `ELEV` is the elevation that same funnel creates new
+//! entities at (`crate::app_drawing::elevation`), `FSMODE` selects which `FS`
+//! contact pass runs, and two are consumed where they are stored:
 //! `APERTURE` is the object-snap aperture
 //! ([`crate::SessionState::interaction_tolerance`], once set explicitly) and
 //! `REVCLOUDPROPERTIES` is the `REVCLOUD` chord token.
@@ -573,17 +575,29 @@ impl DraftingExtras {
 
     /// The session `ELEV` elevation token (default 0.0).
     ///
-    /// This build stores the value but has no elevation consumer: the typed
-    /// setter form `ELEV <height>` is NOT IMPLEMENTED and no new object is
-    /// created at an elevation. The handler says exactly that.
+    /// Consumed by the shared create funnel (`app_drawing::elevation`): every
+    /// entity a create command inserts is offset in z by this token, so the token
+    /// is AutoCAD's "current elevation for new objects". Session state only — it
+    /// is never written to the drawing.
     pub fn elev(&self) -> f64 {
         self.elev
     }
 
-    /// Set the session `ELEV` token (only the report path would use this today;
-    /// the typed setter is NOT IMPLEMENTED).
-    pub fn set_elev(&mut self, value: f64) {
+    /// Set the session `ELEV` token (`ELEV <height>` / `SETVAR ELEV <height>`).
+    ///
+    /// Only a **finite** height is stored: a NaN/infinite value would poison every
+    /// created coordinate, so it is refused by name (`elev.invalid_value`) rather
+    /// than clamped. Session state only: no database write, revision bump,
+    /// history entry or undo step.
+    pub fn set_elev(&mut self, value: f64) -> crate::CadResult<()> {
+        if !value.is_finite() {
+            return Err(crate::CadError::InvalidInput(format!(
+                "elev.invalid_value: the ELEV height must be finite, got {value}; nothing was \
+                 changed"
+            )));
+        }
         self.elev = value;
+        Ok(())
     }
 
     /// The session `UCSICON` flag (default OFF, i.e. no icon).
@@ -614,11 +628,11 @@ impl DraftingExtras {
         self.fs_mode
     }
 
-    /// Store the session `FSMODE` chain mode.
+    /// Store the session `FSMODE` chain mode (`FSMODE ON|OFF`, `SETVAR FSMODE`).
     ///
-    /// The typed `FSMODE ON|OFF` command line is not wired in this build (the
-    /// argument grammar lives in `cad-ui-core`), so this setter is the single
-    /// storage point an `FSMODE` selector must call; `FS` itself only reads it.
+    /// `FS` reads the token; `FSMODE` is the only setter, so both passes are
+    /// reachable from the command line. Session state only: no drawing write,
+    /// revision, history entry or undo step.
     pub fn set_fs_mode(&mut self, value: bool) {
         self.fs_mode = value;
     }

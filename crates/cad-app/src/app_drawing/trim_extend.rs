@@ -1,61 +1,12 @@
 use super::extend_spline::plan_extend_spline;
 use super::trim_boundary::{collect_boundaries, BoundarySet};
 use super::trim_curves::{cut_tolerance, plan_extend, plan_trim, TargetCurve, TrimPlan};
+use super::trim_hatch::plan_trim_hatch;
 use super::trim_polyline::plan_trim_polyline;
 use super::*;
 use crate::command_payload::{OffsetGapType, OffsetLayer, OffsetMode, OffsetOptions};
 
-/// The per-insertion options of the shared create funnel
-/// ([`Application::insert_new_entities`]).
-///
-/// Bundled instead of six positional parameters so the stored `type_key` override
-/// fits without a second, near-identical funnel. `type_key: None` is exactly the
-/// pre-existing behaviour ([`class_name`]'s answer).
-struct NewEntityInsert<'a> {
-    layer: LayerId,
-    space: SpaceId,
-    /// A captured display state (render attributes + dynamic-visibility
-    /// membership); only the single-entity OFFSET path captures one.
-    display: Option<cad_db::EntityDisplayState>,
-    /// The session `COLOR` colour stamped on the inserted rows; `None` stages no
-    /// display state at all, which is exactly the pre-`COLOR` behaviour (the
-    /// entity keeps the symbolic `ByLayer` default).
-    color: Option<cad_db::EntityColor>,
-    /// The stored `type_key` override; `None` = [`class_name`].
-    type_key: Option<&'a str>,
-    /// The transaction / undo label (also used in refusal messages).
-    label: &'a str,
-}
-
-/// The session `COLOR` colour the create funnel stamps on a new entity.
-///
-/// `256` is AutoCAD's ByLayer token and `0` its ByBlock token. ByLayer is the
-/// **absence** of a per-entity override, so it returns `None` and the inserted
-/// row keeps exactly the pre-`COLOR` behaviour; `0` stays symbolic (`ByBlock`)
-/// because the block-reference resolution is the model's, not this funnel's.
-/// `1..=255` resolves through the one ACI table the build owns
-/// ([`crate::property_value::rgb_for_aci`]) — the same table
-/// `SETENTITYPROPERTY color aci:N` writes — so a created entity and a recoloured
-/// one store the identical value and both export the same way.
-///
-/// The token's closed domain is enforced by
-/// [`crate::session_state::DraftingExtras::set_current_color`], so an
-/// unresolvable index here is an invariant violation, never a silent fallback to
-/// ByLayer.
-fn new_entity_color(session: &SessionState) -> CadResult<Option<cad_db::EntityColor>> {
-    match session.drafting_extras.current_color() {
-        256 => Ok(None),
-        0 => Ok(Some(cad_db::EntityColor::ByBlock)),
-        aci => crate::property_value::rgb_for_aci(aci as u16)
-            .map(|rgb| Some(cad_db::EntityColor::Explicit(rgb)))
-            .ok_or_else(|| {
-                CadError::Invariant(format!(
-                    "color.invalid_value: the session COLOR token {aci} is outside the ACI palette \
-                     this build resolves, so a created entity's colour cannot be derived from it"
-                ))
-            }),
-    }
-}
+use super::create_inputs::{new_entity_color, NewEntityInsert};
 
 impl Application {
     /// Create an offset copy of a single selected LINE, CIRCLE, ARC, ELLIPSE,
@@ -129,7 +80,18 @@ impl Application {
     /// open sampled curve with no boundary plane), so a target wholly inside a
     /// closed spline is refused explicitly (`Unsupported`) rather than deleted.
     ///
-    /// INSERT/Opaque/Mesh/Hatch **targets** (each refused by name, see
+    /// A **HATCH** target is trimmed through its boundary loop: the loop is a
+    /// closed polyline in the hatch plane, so the same shared polyline planner
+    /// resolves the kept window and the hatch is rebuilt from it
+    /// (`super::trim_hatch`). The window is re-closed along the straight cutting
+    /// edge between its two cut points, which is the exact boundary of the kept
+    /// region; a curved cutting edge, a loop set with islands, a tilted bulged
+    /// loop and a region the hatch domain rejects are named refusals that write
+    /// nothing. The rebuilt hatch keeps its id/layer/space/draw order/display
+    /// state and its pattern phase, and the fill display is rebuilt from the new
+    /// loop.
+    ///
+    /// INSERT/Opaque/Mesh **targets** (each refused by name, see
     /// [`trim_target_gap`]), INSERT/Opaque/Mesh boundaries, degenerate input, a
     /// pick whose projection falls outside the target's span, a pick with no radial
     /// direction on an ARC/CIRCLE/ELLIPSE (it lies on the target's axis) and
@@ -250,6 +212,15 @@ impl Application {
                         "polyline"
                     },
                 )
+            }
+            // A HATCH has no parameterised source curve, but its boundary loop is a
+            // closed polyline in the hatch plane: the shared polyline planner
+            // resolves the kept window and the hatch is rebuilt from it.
+            SemanticGeometry::Hatch(hatch) => {
+                let resolution =
+                    plan_trim_hatch(hatch.as_ref(), *pick_point, &boundaries, &policy, tol)
+                        .map_err(|reason| reason.into_cad_error())?;
+                (resolution.plan, resolution.notes, "hatch")
             }
             other => {
                 let curve = TargetCurve::new_trim_extend(
@@ -525,6 +496,7 @@ impl Application {
         geometry: SemanticGeometry,
         label: &str,
     ) -> CadResult<CommandOutcome> {
+        let geometry = Self::elevate_new_geometry(geometry, session.drafting_extras.elev())?;
         self.commit_new_entity_in(
             command,
             geometry,
@@ -553,6 +525,7 @@ impl Application {
         type_key: &str,
         label: &str,
     ) -> CadResult<CommandOutcome> {
+        let geometry = Self::elevate_new_geometry(geometry, session.drafting_extras.elev())?;
         self.insert_new_entities(
             command,
             vec![geometry],
@@ -583,6 +556,7 @@ impl Application {
         geometries: Vec<SemanticGeometry>,
         label: &str,
     ) -> CadResult<CommandOutcome> {
+        let geometries = Self::elevate_new_geometries(geometries, session.drafting_extras.elev())?;
         self.commit_new_entities_in(
             command,
             geometries,
@@ -917,21 +891,21 @@ impl Application {
 /// instead of the constructor's generic "not supported" string.
 ///
 /// `None` means "this is a target kind TRIM models" (LINE, ARC, CIRCLE, ELLIPSE,
-/// SPLINE, LWPOLYLINE), so the caller proceeds to the matching planner. Every arm
-/// here is a **capability gap**, not bad input: the caller has already resolved the
-/// entity, and the refusal writes nothing.
+/// SPLINE, LWPOLYLINE and — through its boundary loop — HATCH), so the caller
+/// proceeds to the matching planner. Every arm here is a **capability gap**, not
+/// bad input: the caller has already resolved the entity, and the refusal writes
+/// nothing.
 fn trim_target_gap(geometry: &SemanticGeometry) -> Option<CadError> {
     let reason = match geometry {
         SemanticGeometry::Insert { .. } => {
-            "trim.target_insert: TRIM cannot trim an INSERT target (AcDbBlockReference): a block \
-             reference stores a placement, not cuttable geometry, and editing the block \
-             definition is not a TRIM; only directly addressable LINE, ARC, CIRCLE, ELLIPSE, \
-             LWPOLYLINE or SPLINE targets are supported"
-        }
-        SemanticGeometry::Hatch(_) => {
-            "trim.target_hatch: TRIM cannot trim a HATCH target: a hatch's display is derived \
-             from its boundary loops and fill, so there is no source curve to cut; only LINE, \
-             ARC, CIRCLE, ELLIPSE, LWPOLYLINE or SPLINE targets are supported"
+            "trim.target_insert: TRIM cannot trim an INSERT target (AcDbBlockReference). A \
+             reference stores only a placement plus its dynamic parameters; its members are rows \
+             of the shared block definition, and this build has no per-instance geometry override. \
+             Cutting a member would therefore either rewrite the definition (changing every \
+             insertion of that block, nested ones included) or require a new definition plus a \
+             per-instance replacement — neither is a TRIM of this reference. Only directly \
+             addressable LINE, ARC, CIRCLE, ELLIPSE, LWPOLYLINE, SPLINE or HATCH targets are \
+             supported; nothing was written"
         }
         SemanticGeometry::Mesh(_) => {
             "trim.target_mesh: TRIM cannot trim a MESH target: a 3D face has no modeled 2D curve \

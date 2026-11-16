@@ -16,9 +16,10 @@
 use cad_app::{CommandId, CommandPayload, ExtendedCommandId};
 
 use super::commands::{
-    parse_layout_argument, parse_layoutmerge_argument, parse_layoutwizard_argument,
-    parse_layvpi_argument, parse_mview_argument, parse_pagesetup_argument, parse_psetupin_argument,
-    parse_vpclip_argument, parse_vports_argument, parse_vpscale_argument, DASH_PAGESETUP_SELECTOR,
+    parse_alignspace_argument, parse_layout_argument, parse_layoutmerge_argument,
+    parse_layoutwizard_argument, parse_layvpi_argument, parse_mview_argument,
+    parse_pagesetup_argument, parse_psetupin_argument, parse_vpclip_argument,
+    parse_vports_argument, parse_vpscale_argument, ALIGNSPACE_SELECTOR, DASH_PAGESETUP_SELECTOR,
     DASH_PSETUPIN_SELECTOR, LAYOUTMERGE_SELECTOR, LAYOUTWIZARD_SELECTOR, LAYOUT_SELECTOR,
     LAYVPI_SELECTOR, MVIEW_SELECTOR, PAGESETUP_SELECTOR, PSETUPIN_SELECTOR, VPCLIP_SELECTOR,
     VPORTS_SELECTOR, VPSCALE_SELECTOR,
@@ -33,6 +34,20 @@ impl CadSession {
         argument: &str,
         _text: &str,
     ) -> Result<(), String> {
+        // `ALIGNSPACE <model_a> <paper_a> <model_b> <paper_b>` rides the ordinary
+        // four-point [`CommandPayload::Points`] channel, so it is not a
+        // `LayoutPayload` and takes its own arm.
+        if selector == ALIGNSPACE_SELECTOR {
+            let points = match parse_alignspace_argument(argument) {
+                Ok(points) => points,
+                Err(reason) => return self.refuse_argument(reason),
+            };
+            self.core.record_command(selector);
+            return self.dispatch_payload(
+                CommandId::Extended(ExtendedCommandId::AlignSpace),
+                CommandPayload::Points(points),
+            );
+        }
         let (id, payload) = match selector {
             LAYOUT_SELECTOR => (CommandId::Layout, parse_layout_argument(argument)),
             LAYOUTMERGE_SELECTOR => (CommandId::LayoutMerge, parse_layoutmerge_argument(argument)),

@@ -595,11 +595,13 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("DCFORM", CommandId::Extended(ExtendedCommandId::DcForm)),
     ("DCHORIZONTAL", CommandId::Extended(ExtendedCommandId::DcHorizontal)),
     ("DCLINEAR", CommandId::Extended(ExtendedCommandId::DcLinear)),
-    // Wave 8 (2026-11-09): session tokens and stable named refusals. ELEV is a
-    // read-only elevation-token report and UCSICON flips a session flag; the
-    // rest refuse the absent UCS/tablet/menu models and host-owned chrome. All
-    // Viewer-legal.
+    // Wave 8 (2026-11-09): session tokens and stable named refusals. `ELEV` is
+    // the session elevation new objects are created at (report + `ELEV <height>`),
+    // `FSMODE ON|OFF` is the `FS` chain mode (report + setter) and UCSICON flips a
+    // session flag; the rest refuse the absent UCS/tablet/menu models and
+    // host-owned chrome. All Viewer-legal — none writes the drawing.
     ("ELEV", CommandId::Extended(ExtendedCommandId::Elev)),
+    ("FSMODE", CommandId::Extended(ExtendedCommandId::FsMode)),
     ("UCSICON", CommandId::Extended(ExtendedCommandId::UcsIcon)),
     ("UCS", CommandId::Extended(ExtendedCommandId::Ucs)),
     ("UCSMAN", CommandId::Extended(ExtendedCommandId::UcsMan)),

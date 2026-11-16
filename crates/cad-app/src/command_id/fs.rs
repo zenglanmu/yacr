@@ -35,9 +35,10 @@
 //!   tessellation; parallel **and** antiparallel tangents count as one tangent line
 //!   (an orientation-reversing cusp is not distinguished from a smooth
 //!   continuation);
-//! * the typed `FSMODE ON|OFF` command line is **not wired** in this build: the
-//!   argument grammar lives in `cad-ui-core`'s session layer, and no selector maps
-//!   to the setter yet. The stored token is what `FS` reads.
+//! * the typed `FSMODE ON|OFF` line is the token's **only setter** (the argument
+//!   grammar lives in `cad-ui-core`'s session layer and `SETVAR FSMODE` writes the
+//!   same token), so both passes are reachable from the command line. The stored
+//!   token is what `FS` reads; the write is session state only.
 //!
 //! # Refusals (all named, all before the selection changes)
 //!

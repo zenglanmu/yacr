@@ -445,6 +445,10 @@ pub enum ExtendedCommandId {
     DcLinear,
 
     // Wave 8: two session tokens and eight named refusals (all Viewer-legal).
+    /// `FSMODE ON|OFF`: the session `FS` chain mode (`FS` reads the token; this
+    /// is the only setter). Session state only — no drawing write, revision bump,
+    /// history entry or undo step. Contract: [`crate::command_id::fs`].
+    FsMode,
     Elev,
     UcsIcon,
     Ucs,

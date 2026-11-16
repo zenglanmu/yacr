@@ -24,6 +24,8 @@
 //! | `INSBASE` | drawing header (`cad-db`) | `BASE` command |
 //! | `LIMMIN`, `LIMMAX` | drawing header (`cad-db`) | `LIMITS` command |
 //! | `CVPORT` | session (`SessionState`) | `CVPORT` command — **nothing is written to the drawing** |
+//! | `ELEV` | session (`SessionState::drafting_extras`) | `ELEV` command — **nothing is written to the drawing** |
+//! | `FSMODE` | session (`SessionState::drafting_extras`) | `FSMODE` command — **nothing is written to the drawing** |
 //! | `GRID`, `SNAP`, `ORTHO` | session flags | the `GRID`/`SNAP`/`ORTHO` toggles |
 //! | `TEXTSIZE` | session tool parameter | the shared `set_tool_parameter` |
 //! | `WIPEOUTFRAME` | session display token | the `WIPEOUTFRAME` command |
@@ -52,7 +54,7 @@ use crate::app_utility::document_drawing;
 /// report order. `SETVAR`, `SYSVDLG` and the `SYSVARMONITOR` watch set read
 /// exactly this list, so a report can never advertise a variable the router does
 /// not model.
-pub(crate) const MODELLED_SYSTEM_VARIABLES: [&str; 13] = [
+pub(crate) const MODELLED_SYSTEM_VARIABLES: [&str; 15] = [
     "PDMODE",
     "PDSIZE",
     "SNAPUNIT",
@@ -68,6 +70,12 @@ pub(crate) const MODELLED_SYSTEM_VARIABLES: [&str; 13] = [
     "INSBASE",
     "LIMMIN",
     "LIMMAX",
+    // Wave 32: the two session tokens the create funnel and `FS` read. Both are
+    // session-only (their writers write nothing to the drawing), and both are
+    // reported here so `SETVAR`/`SYSVDLG`/`SYSVARMONITOR` cannot advertise a name
+    // the router does not model.
+    "ELEV",
+    "FSMODE",
 ];
 
 /// What a modelled variable reads as right now.
@@ -96,6 +104,11 @@ pub(crate) fn modelled_system_variable(
         "GRID" => ModelledValue::Value(session.grid_enabled().to_string(), "boolean"),
         "SNAP" => ModelledValue::Value(session.snap_grid_enabled().to_string(), "boolean"),
         "ORTHO" => ModelledValue::Value(session.ortho_enabled().to_string(), "boolean"),
+        // `ELEV` is the session elevation the create funnel applies to every new
+        // entity; `FSMODE` is the `FS` chain mode. Neither is drawing state: the
+        // values live in `SessionState::drafting_extras`.
+        "ELEV" => ModelledValue::Value(session.drafting_extras.elev().to_string(), "real"),
+        "FSMODE" => ModelledValue::Value(session.drafting_extras.fs_mode().to_string(), "boolean"),
         "TEXTSIZE" => match session.tool_parameter(ToolParameter::TextHeight) {
             ToolValue::Number(height) => ModelledValue::Value(height.to_string(), "real"),
             ToolValue::Flag(flag) => ModelledValue::Value(flag.to_string(), "boolean"),

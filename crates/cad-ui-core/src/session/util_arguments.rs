@@ -49,6 +49,13 @@ const MODELLED_VARIABLES: &[&str] = &[
     "INSBASE",
     "LIMMIN",
     "LIMMAX",
+    // The two session tokens the create funnel and `FS` read: `ELEV` (the
+    // elevation new objects are created at) and `FSMODE` (the `FS` chain mode).
+    // Both are session-only: the write goes through the very command the typed
+    // `ELEV <height>` / `FSMODE ON|OFF` line dispatches and never touches the
+    // drawing.
+    "ELEV",
+    "FSMODE",
 ];
 
 /// The three shell settings `SETVAR` can **write** but not read.
@@ -292,6 +299,25 @@ impl CadSession {
                 Ok(payload) => {
                     self.dispatch_typed_argument(SETVAR_SELECTOR, CommandId::Cvport, payload)
                 }
+                Err(reason) => self.refuse_argument(reason),
+            },
+            // `ELEV` and `FSMODE` are session tokens (the create funnel and `FS`
+            // read them): each write rides the same command the typed setter line
+            // dispatches, so there is exactly one setter and no drawing write.
+            "ELEV" => match super::commands::parse_elev_argument(value) {
+                Ok(payload) => self.dispatch_typed_argument(
+                    SETVAR_SELECTOR,
+                    CommandId::Extended(ExtendedCommandId::Elev),
+                    payload,
+                ),
+                Err(reason) => self.refuse_argument(reason),
+            },
+            "FSMODE" => match super::commands::parse_fsmode_argument(value) {
+                Ok(payload) => self.dispatch_typed_argument(
+                    SETVAR_SELECTOR,
+                    CommandId::Extended(ExtendedCommandId::FsMode),
+                    payload,
+                ),
                 Err(reason) => self.refuse_argument(reason),
             },
             // `INSBASE` is the model-space insertion base point, written by the

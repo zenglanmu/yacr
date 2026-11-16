@@ -138,7 +138,11 @@ fn sysvdlg_lists_every_exposed_variable_and_marks_the_rest_not_tracked() {
     let before = revision(&app);
     let outcome = execute(&mut app, &mut session, ExtendedCommandId::SysVarDialog)
         .expect("SYSVDLG is admitted");
-    assert_eq!(count_code(&outcome, "sysvdlg.value"), 9);
+    // Nine pre-existing values plus the two session tokens `ELEV`/`FSMODE`
+    // (modelled, always have a value, and are listed like every other modelled
+    // variable). `CVPORT`/`INSBASE`/`LIMMIN`/`LIMMAX` stay `not_stored` in the
+    // demo document, so they add no `sysvdlg.value` row.
+    assert_eq!(count_code(&outcome, "sysvdlg.value"), 11);
     assert_eq!(count_code(&outcome, "sysvarmonitor.value"), 0);
     for name in [
         "PDMODE",
@@ -150,6 +154,8 @@ fn sysvdlg_lists_every_exposed_variable_and_marks_the_rest_not_tracked() {
         "ORTHO",
         "TEXTSIZE",
         "WIPEOUTFRAME",
+        "ELEV",
+        "FSMODE",
     ] {
         assert!(
             outcome

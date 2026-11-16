@@ -60,6 +60,11 @@ mod draw2_batch;
 mod draw2_edit;
 mod drawing_edit;
 mod drawing_transform;
+// The shared create funnel's input bundle and session-COLOUR resolution.
+mod create_inputs;
+// `ELEV`: the session elevation the shared create funnel offsets new entities by
+// (one rule, one transform authority; copies are deliberately excluded).
+mod elevation;
 // SPLINE EXTEND: one declared tangent-continuation rule (TRIM of a SPLINE lives
 // in `trim_spline`; this is the continuation half, not a second trim model).
 mod extend_spline;
@@ -183,6 +188,10 @@ mod trim_curves;
 // inside the code-size limit.
 mod trim_cuts;
 mod trim_extend;
+// TRIM of a HATCH target: the boundary loop through the shared polyline planner,
+// re-closed along the straight cutting edge (split out so both files stay inside
+// the code-size limit).
+mod trim_hatch;
 mod trim_polyline;
 mod trim_spline;
 

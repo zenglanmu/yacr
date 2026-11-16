@@ -25,20 +25,21 @@ use super::annot_arguments::{
     TEXTFIT_SELECTOR, UNGROUP_SELECTOR,
 };
 use super::commands::{
-    parse_color_argument, parse_cvport_argument, parse_linetype_argument, parse_mocoro_argument,
-    parse_pan_argument, parse_trace_argument, parse_viewres_argument, parse_vscurrent_argument,
+    parse_color_argument, parse_cvport_argument, parse_elev_argument, parse_fsmode_argument,
+    parse_linetype_argument, parse_mocoro_argument, parse_mstretch_argument, parse_pan_argument,
+    parse_trace_argument, parse_viewres_argument, parse_vscurrent_argument,
     parse_wipeoutframe_argument, ARRAYPATH_SELECTOR, AUDIT_SELECTOR, CHAMFER_SELECTOR,
     COLOR_SELECTOR, CVPORT_SELECTOR, DASH_COLOR_SELECTOR, DASH_IMAGEADJUST_SELECTOR,
-    DASH_TABLE_SELECTOR, DONUT_SELECTOR, DRAWORDER_SELECTOR, FILLET_SELECTOR, FILTER_SELECTOR,
-    FIND_REPORT_SELECTOR, FIND_SELECTOR, GETSEL_SELECTOR, HELIX_SELECTOR, IMAGEADJUST_SELECTOR,
-    IMAGEATTACH_SELECTOR, IMAGECLIP_SELECTOR, JOIN_SELECTOR, LINETYPE_SELECTOR, MATCHCELL_SELECTOR,
-    MIRROR_SELECTOR, MLINE_SELECTOR, MLSTYLE_SELECTOR, MOCORO_SELECTOR, MPEDIT_SELECTOR,
-    MREDO_SELECTOR, MULTIPLE_SELECTOR, OFFSET_SELECTOR, OVERKILL_SELECTOR, PAN_SELECTOR,
-    PURGE_SELECTOR, QSELECT_SELECTOR, RENAME_SELECTOR, REVCLOUD_SELECTOR, SETVAR_SELECTOR,
-    SOLID_SELECTOR, SSX_SELECTOR, SYSVARMONITOR_SELECTOR, TABLEDIT_SELECTOR, TABLEEXPORT_SELECTOR,
-    TABLESTYLE_SELECTOR, TABLE_SELECTOR, TEXTMASK_SELECTOR, TRACE_SELECTOR, TREX_SELECTOR,
-    TXT2MTXT_SELECTOR, VIEWRES_SELECTOR, VSCURRENT_SELECTOR, WIPEOUTFRAME_SELECTOR,
-    WIPEOUT_SELECTOR,
+    DASH_TABLE_SELECTOR, DONUT_SELECTOR, DRAWORDER_SELECTOR, ELEV_SELECTOR, FILLET_SELECTOR,
+    FILTER_SELECTOR, FIND_REPORT_SELECTOR, FIND_SELECTOR, FSMODE_SELECTOR, GETSEL_SELECTOR,
+    HELIX_SELECTOR, IMAGEADJUST_SELECTOR, IMAGEATTACH_SELECTOR, IMAGECLIP_SELECTOR, JOIN_SELECTOR,
+    LINETYPE_SELECTOR, MATCHCELL_SELECTOR, MIRROR_SELECTOR, MLINE_SELECTOR, MLSTYLE_SELECTOR,
+    MOCORO_SELECTOR, MPEDIT_SELECTOR, MREDO_SELECTOR, MSTRETCH_SELECTOR, MULTIPLE_SELECTOR,
+    OFFSET_SELECTOR, OVERKILL_SELECTOR, PAN_SELECTOR, PURGE_SELECTOR, QSELECT_SELECTOR,
+    RENAME_SELECTOR, REVCLOUD_SELECTOR, SETVAR_SELECTOR, SOLID_SELECTOR, SSX_SELECTOR,
+    SYSVARMONITOR_SELECTOR, TABLEDIT_SELECTOR, TABLEEXPORT_SELECTOR, TABLESTYLE_SELECTOR,
+    TABLE_SELECTOR, TEXTMASK_SELECTOR, TRACE_SELECTOR, TREX_SELECTOR, TXT2MTXT_SELECTOR,
+    VIEWRES_SELECTOR, VSCURRENT_SELECTOR, WIPEOUTFRAME_SELECTOR, WIPEOUT_SELECTOR,
 };
 use super::diagnostics::cad_error_text;
 use super::dim_arguments::{
@@ -198,7 +199,10 @@ impl CadSession {
             | super::commands::VPORTS_SELECTOR
             | super::commands::VPCLIP_SELECTOR
             | super::commands::VPSCALE_SELECTOR
-            | super::commands::LAYVPI_SELECTOR => self.layout_argument(selector, argument, text),
+            | super::commands::LAYVPI_SELECTOR
+            | super::commands::ALIGNSPACE_SELECTOR => {
+                self.layout_argument(selector, argument, text)
+            }
             // `MVIEW <minx> <miny> <maxx> <maxy>` carries a two-corner point
             // payload, so it takes its own typed path.
             super::commands::MVIEW_SELECTOR => self.mview_argument(argument, text),
@@ -232,10 +236,13 @@ impl CadSession {
             PAN_SELECTOR
             | TRACE_SELECTOR
             | MOCORO_SELECTOR
+            | MSTRETCH_SELECTOR
             | VIEWRES_SELECTOR
             | VSCURRENT_SELECTOR
             | WIPEOUTFRAME_SELECTOR
             | CVPORT_SELECTOR
+            | ELEV_SELECTOR
+            | FSMODE_SELECTOR
             | COLOR_SELECTOR
             | DASH_COLOR_SELECTOR
             | LINETYPE_SELECTOR => self.extras_argument(selector, argument, text),
@@ -370,6 +377,20 @@ impl CadSession {
                 parse_wipeoutframe_argument(argument),
             ),
             CVPORT_SELECTOR => (CommandId::Cvport, parse_cvport_argument(argument)),
+            // `ELEV <height>` / `FSMODE ON|OFF`: the two session tokens of the
+            // create funnel and of `FS`. Both bare selectors are read-only
+            // reports, so only their argument forms reach this dispatch.
+            ELEV_SELECTOR => (
+                CommandId::Extended(ExtendedCommandId::Elev),
+                parse_elev_argument(argument),
+            ),
+            FSMODE_SELECTOR => (
+                CommandId::Extended(ExtendedCommandId::FsMode),
+                parse_fsmode_argument(argument),
+            ),
+            // `MSTRETCH <base_x> <base_y> <delta_x> <delta_y> <x1> <y1> <x2> <y2> …`:
+            // the typed line mirrors the payload the STRETCH planner already took.
+            MSTRETCH_SELECTOR => (CommandId::MStretch, parse_mstretch_argument(argument)),
             // `COLOR <aci>|BYLAYER|BYBLOCK` (2026-11 Wave 10 token): one session
             // current-colour value, carried by the extended `Color` command. The
             // `-COLOR` prompt spelling is the same token, so both selectors ride

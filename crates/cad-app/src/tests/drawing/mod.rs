@@ -391,6 +391,9 @@ mod text_edit;
 mod text_front;
 mod transform;
 mod trim_extend_curves;
+// The HATCH target: the boundary loop through the shared polyline planner, the
+// straight-edge re-closure and its named refusals.
+mod trim_hatch;
 // The ELLIPSE targets and the named target-kind refusals, split out of
 // `trim_extend_curves` so both files stay inside the code-size limit.
 mod trim_spline_boundary;

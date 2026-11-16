@@ -104,6 +104,53 @@ fn fs_chain_mode_off_adds_only_the_direct_contact_of_the_same_input() {
 }
 
 #[test]
+fn fsmode_set_through_the_command_line_changes_what_fs_does() {
+    // End to end: the typed/session `FSMODE` command is the only setter, and `FS`
+    // reads exactly that token. The same input selects two or four entities
+    // depending on the mode, and neither pass writes the drawing.
+    let (mut app, mut session, document) = fs_chain_fixture();
+    assert!(!session.drafting_extras.fs_mode(), "OFF is the default");
+
+    app.execute(
+        &mut session,
+        command(
+            CommandId::Extended(ExtendedCommandId::FsMode),
+            CommandPayload::FsMode(true),
+        ),
+    )
+    .expect("FSMODE ON is admitted");
+    assert!(session.drafting_extras.fs_mode());
+
+    let outcome = app
+        .execute(&mut session, command(CommandId::Fs, CommandPayload::None))
+        .expect("FS chains the collinear tangent contacts");
+    assert_eq!(
+        session.selection.len(),
+        4,
+        "the mode set through the command turns on the chain pass"
+    );
+    assert!(diagnostic(&outcome, "fs.mode")[0].contains("FSMODE=ON"));
+    assert!(!app.can_undo(&document), "FSMODE + FS write nothing");
+
+    // Back to OFF through the same command: the direct-contact pass again.
+    session.selection = SelectionSet::from_refs([model_ref(document, EntityId(1))]);
+    app.execute(
+        &mut session,
+        command(
+            CommandId::Extended(ExtendedCommandId::FsMode),
+            CommandPayload::FsMode(false),
+        ),
+    )
+    .expect("FSMODE OFF is admitted");
+    let outcome = app
+        .execute(&mut session, command(CommandId::Fs, CommandPayload::None))
+        .expect("FS adds the directly touching segment only");
+    assert_eq!(session.selection.len(), 2);
+    assert!(diagnostic(&outcome, "fs.mode")[0].contains("FSMODE=OFF"));
+    assert!(!app.can_undo(&document), "still no drawing write");
+}
+
+#[test]
 fn fs_chain_mode_refuses_a_non_tangent_contact_and_writes_nothing() {
     let (mut app, mut session, document) = fs_fixture();
     session.drafting_extras.set_fs_mode(true);

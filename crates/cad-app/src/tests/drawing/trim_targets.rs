@@ -614,24 +614,21 @@ fn extend_refuses_a_polyline_target_by_name() {
 }
 
 #[test]
-fn trim_and_extend_refuse_a_hatch_target_by_name() {
-    // A HATCH's display is derived from its loops and fill: there is no source
-    // curve to cut or extend, so both commands refuse by name and write nothing.
+fn extend_refuses_a_hatch_target_by_name() {
+    // EXTEND still has nothing to extend: a hatch loop is closed and its display
+    // is derived from the loops, so there is no source curve with ends.
+    // (TRIM cuts the loop instead — see `trim_hatch.rs`.)
     let mut app = app_of(vec![
         ent(1, solid_hatch(), 0),
         line(2, point(5.0, -2.0), point(5.0, 2.0), 1),
     ]);
     let before = snapshot(&app);
-    for error in [
-        trim(&mut app, 1, &[2], point(2.0, 1.0)).unwrap_err(),
-        extend(&mut app, 1, &[2], point(4.0, 1.0)).unwrap_err(),
-    ] {
-        assert!(matches!(error, CadError::Unsupported(_)), "{error:?}");
-        assert!(
-            error.to_string().contains(".target_hatch"),
-            "the named target refusal: {error:?}"
-        );
-    }
+    let error = extend(&mut app, 1, &[2], point(4.0, 1.0)).unwrap_err();
+    assert!(matches!(error, CadError::Unsupported(_)), "{error:?}");
+    assert!(
+        error.to_string().contains("extend.target_hatch"),
+        "the named target refusal: {error:?}"
+    );
     assert_eq!(snapshot(&app), before);
     assert_eq!(undo_depth(&app), 0);
 }

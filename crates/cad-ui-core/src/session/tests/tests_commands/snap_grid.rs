@@ -298,6 +298,14 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             "VIEWGO",
             "VPOINT",
             "CVPORT",
+            // The session tokens and the two payload-only commands that gained a
+            // typed form: `ELEV` (create-funnel elevation), `FSMODE` (the `FS`
+            // chain mode), `MSTRETCH` (base + delta + logical windows) and
+            // `ALIGNSPACE` (two model<->paper point pairs).
+            "ELEV",
+            "FSMODE",
+            "MSTRETCH",
+            "ALIGNSPACE",
             // The 2026-11-07 layout/viewport batch plus the typed page-setup
             // writes and MVIEW. The dash spellings are distinct selectors.
             "LAYOUT",

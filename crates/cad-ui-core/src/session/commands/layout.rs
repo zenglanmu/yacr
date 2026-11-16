@@ -56,6 +56,8 @@ pub const VPORTS_SELECTOR: &str = "VPORTS";
 pub const VPCLIP_SELECTOR: &str = "VPCLIP";
 /// `VPSCALE`: set the selected viewport's scale.
 pub const VPSCALE_SELECTOR: &str = "VPSCALE";
+/// `ALIGNSPACE`: the typed two-pair pan+zoom alignment of the first viewport.
+pub const ALIGNSPACE_SELECTOR: &str = "ALIGNSPACE";
 /// `LAYVPI`: freeze layers in every viewport of the active paper layout (per-viewport override).
 pub const LAYVPI_SELECTOR: &str = "LAYVPI";
 
@@ -388,6 +390,61 @@ pub fn parse_psetupin_argument(argument: &str) -> Result<LayoutPayload, String> 
         source: (*source).to_string(),
         target: (*target).to_string(),
     })
+}
+
+/// Parse one `ALIGNSPACE <model_a> <paper_a> <model_b> <paper_b>` argument.
+///
+/// Eight decimals: the four 2D points [`cad_app::CommandPayload::Points`] carries,
+/// in the handler's documented order —
+///
+/// * `model_a` (x, y) — the model-space point that must land on `paper_a`;
+/// * `paper_a` (x, y) — its paper-space position;
+/// * `model_b` (x, y) — the second model-space point (fixes the scale);
+/// * `paper_b` (x, y) — its paper-space position.
+///
+/// The first pair places the viewport and the ratio of the two pair distances is
+/// the uniform paper-per-model scale. A plan viewport cannot rotate, so a
+/// non-parallel pair is not a grammar error: the handler applies the pan+zoom and
+/// reports the named `alignspace.rotation_ignored` diagnostic (the rotation has no
+/// field to live in). `z` is not part of the grammar — paper alignment is planar.
+///
+/// Wrong arity, a non-decimal token or a non-finite value is `alignspace.argument`
+/// and changes nothing. The semantic refusals (paper space required, degenerate
+/// pair, no viewport, Work mode) stay in the handler.
+pub fn parse_alignspace_argument(argument: &str) -> Result<Vec<Point3>, String> {
+    let tokens: Vec<&str> = argument.split_whitespace().collect();
+    let expected = "alignspace.argument: ALIGNSPACE needs eight decimals — \
+                    <model_ax> <model_ay> <paper_ax> <paper_ay> <model_bx> <model_by> \
+                    <paper_bx> <paper_by> — and nothing was changed";
+    let [model_ax, model_ay, paper_ax, paper_ay, model_bx, model_by, paper_bx, paper_by] =
+        tokens.as_slice()
+    else {
+        return Err(expected.to_string());
+    };
+    let value = |text: &str| {
+        text.parse::<f64>()
+            .ok()
+            .filter(|value| value.is_finite())
+            .ok_or_else(|| {
+                format!(
+                    "alignspace.argument: ALIGNSPACE needs finite decimals, got '{text}'; nothing \
+                     was changed"
+                )
+            })
+    };
+    let point = |x: &str, y: &str| -> Result<Point3, String> {
+        Ok(Point3 {
+            x: value(x)?,
+            y: value(y)?,
+            z: 0.0,
+        })
+    };
+    Ok(vec![
+        point(model_ax, model_ay)?,
+        point(paper_ax, paper_ay)?,
+        point(model_bx, model_by)?,
+        point(paper_bx, paper_by)?,
+    ])
 }
 
 /// Parse one `MVIEW <minx> <miny> <maxx> <maxy>` argument.

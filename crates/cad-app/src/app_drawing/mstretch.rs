@@ -8,9 +8,11 @@
 //! when it lies inside any window. One transaction and one undo step cover the
 //! whole command; every refusal happens before the transaction opens.
 //!
-//! `MSTRETCH` has no command-line argument grammar in this build (a rectangle
-//! list needs a delimiter the one-argument selector grammar does not define);
-//! hosts/IPC supply [`crate::CommandPayload::MStretch`].
+//! `MSTRETCH` has a typed command line:
+//! `MSTRETCH <base_x> <base_y> <delta_x> <delta_y> <x1> <y1> <x2> <y2> […]`
+//! (the world base/delta points, then one or more logical-pixel crossing
+//! windows). It builds exactly [`crate::CommandPayload::MStretch`], so a host/IPC
+//! payload and the command line reach this one handler.
 
 use super::*;
 

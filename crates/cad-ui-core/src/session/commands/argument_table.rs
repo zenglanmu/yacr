@@ -134,6 +134,16 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     // `CVPORT <n>`: the session current-viewport marker of the active paper
     // layout (one-based position; the bare selector reports it).
     CVPORT_SELECTOR,
+    // `ELEV <height>` and `FSMODE ON|OFF`: the two session tokens a create / `FS`
+    // reads. Both bare selectors keep their read-only report.
+    ELEV_SELECTOR,
+    FSMODE_SELECTOR,
+    // `MSTRETCH <base_x> <base_y> <delta_x> <delta_y> <x1> <y1> <x2> <y2> …`: the
+    // typed line builds the very payload the STRETCH planner already consumed.
+    MSTRETCH_SELECTOR,
+    // `ALIGNSPACE <model_a> <paper_a> <model_b> <paper_b>`: the two alignment
+    // point pairs the handler documents, as four 2D points.
+    ALIGNSPACE_SELECTOR,
     // The 2026-11-07 layout/viewport batch argument forms, plus the typed
     // `PAGESETUP`/`PSETUPIN`/`MVIEW` writes. The dash spellings are distinct
     // extended selectors, not aliases, so each has its own row.

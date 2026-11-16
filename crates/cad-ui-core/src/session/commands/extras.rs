@@ -2,15 +2,17 @@
 //!
 //! These are **argument forms of canonical selectors**, never new IPC:
 //! [`PAN_SELECTOR`] (`-PAN`), [`TRACE_SELECTOR`], [`MOCORO_SELECTOR`],
-//! [`VIEWRES_SELECTOR`], [`VSCURRENT_SELECTOR`], [`WIPEOUTFRAME_SELECTOR`],
-//! [`CVPORT_SELECTOR`], [`COLOR_SELECTOR`] (`-COLOR` is the same token) and
+//! [`MSTRETCH_SELECTOR`], [`VIEWRES_SELECTOR`], [`VSCURRENT_SELECTOR`],
+//! [`WIPEOUTFRAME_SELECTOR`], [`CVPORT_SELECTOR`], [`ELEV_SELECTOR`],
+//! [`FSMODE_SELECTOR`], [`COLOR_SELECTOR`] (`-COLOR` is the same token) and
 //! [`LINETYPE_SELECTOR`] are admitted by [`super::ARGUMENT_SELECTORS`], parsed
 //! here, and dispatched by the session as the matching [`cad_app::CommandId`]
 //! with a payload.
 //!
-//! `SKETCH` and `MSTRETCH` have **no** command-line grammar in this build:
-//! their complete input (a sampled point sequence / a rectangle list) is carried
-//! by a host/IPC payload, not by one selector argument.
+//! `SKETCH` has **no** command-line grammar in this build: its complete input (a
+//! sampled point sequence) is carried by a host/IPC payload, not by one selector
+//! argument. `MSTRETCH`'s typed form (base, delta, then one or more logical
+//! windows) is [`parse_mstretch_argument`].
 //!
 //! Grammar:
 //!
@@ -19,12 +21,16 @@
 //! * `TRACE <x1> <y1> <x2> <y2> <width>` (five finite numbers, width > 0);
 //! * `MOCORO MOVE|COPY <dx> <dy>` / `MOCORO ROTATE <bx> <by> <degrees>` /
 //!   `MOCORO SCALE <bx> <by> <factor>`;
+//! * `MSTRETCH <base_x> <base_y> <delta_x> <delta_y> <x1> <y1> <x2> <y2> […]`;
 //! * `VIEWRES <integer 1..=1000>`;
 //! * `VSCURRENT <style>` (the command layer names the unsupported styles);
 //! * `WIPEOUTFRAME <0|1|2>` (the system-variable spelling of `WIPEOUT Frames`;
 //!   the bare selector reports the current value);
 //! * `CVPORT <n>` (the session current-viewport marker of the active paper
 //!   layout, one-based; the bare selector reports it);
+//! * `ELEV <height>` (the session elevation new objects are created at; the bare
+//!   selector reports the token);
+//! * `FSMODE ON|OFF` (the session `FS` chain mode; the bare selector reports it);
 //! * `COLOR <aci 0..=256>` / `COLOR BYLAYER|BYBLOCK` (the session current-colour
 //!   token every created entity inherits; the bare selector reports it);
 //! * `LINETYPE LIST` / `LINETYPE SET <name>` (the name takes the whole
@@ -52,6 +58,16 @@ pub const VSCURRENT_SELECTOR: &str = "VSCURRENT";
 pub const WIPEOUTFRAME_SELECTOR: &str = "WIPEOUTFRAME";
 /// `CVPORT [<n>]` — the session current-viewport marker of the active layout.
 pub const CVPORT_SELECTOR: &str = "CVPORT";
+/// `ELEV [<height>]` — the session elevation new objects are created at.
+///
+/// A bare `ELEV` is the read-only report (the name-only funnel); only
+/// [`parse_elev_argument`]'s value form is listed in
+/// [`super::ARGUMENT_SELECTORS`].
+pub const ELEV_SELECTOR: &str = "ELEV";
+/// `FSMODE ON|OFF` — the session `FS` chain mode (`FS` reads it).
+pub const FSMODE_SELECTOR: &str = "FSMODE";
+/// `MSTRETCH <base_x> <base_y> <delta_x> <delta_y> <x1> <y1> <x2> <y2> …`.
+pub const MSTRETCH_SELECTOR: &str = "MSTRETCH";
 /// `COLOR <aci>|BYLAYER|BYBLOCK` — the session current-colour token.
 pub const COLOR_SELECTOR: &str = "COLOR";
 /// `-COLOR <aci>|BYLAYER|BYBLOCK` — the prompt spelling of the same token.
@@ -380,6 +396,127 @@ fn parse_linetype_create(rest: &str) -> Option<CommandPayload> {
         description,
         pattern,
     }))
+}
+
+/// `ELEV <height>`: the session elevation the create funnel offsets new objects
+/// by.
+///
+/// One finite decimal, in drawing units; a negative height is legal (objects
+/// below the XY plane). The bare selector is the report and never reaches this
+/// parser. A non-number, a multi-token line or a non-finite value is the stable
+/// `elev.argument` refusal — nothing is clamped and no default is invented.
+pub fn parse_elev_argument(argument: &str) -> Result<CommandPayload, String> {
+    let tokens = tokens(argument);
+    let [height] = tokens.as_slice() else {
+        return Err(
+            "elev.argument: ELEV needs one finite height in drawing units (`ELEV <height>`); \
+             nothing was changed"
+                .into(),
+        );
+    };
+    let height = parse_signed_decimal(height).ok_or_else(|| {
+        "elev.argument: ELEV needs one finite decimal height in drawing units; nothing was changed"
+            .to_string()
+    })?;
+    Ok(CommandPayload::Elevation(height))
+}
+
+/// `FSMODE ON|OFF`: the session `FS` chain mode.
+///
+/// `ON`/`1` follows the transitive tangent chain, `OFF`/`0` (AutoCAD's initial
+/// value) adds only the directly touching objects. The two symbolic words and the
+/// two numeric spellings are the whole grammar: anything else is
+/// `fsmode.invalid_value`, never a toggle, and the bare selector is the report.
+pub fn parse_fsmode_argument(argument: &str) -> Result<CommandPayload, String> {
+    let tokens = tokens(argument);
+    let [value] = tokens.as_slice() else {
+        return Err(
+            "fsmode.invalid_value: FSMODE needs ON or OFF (1 or 0 also parse); nothing was changed"
+                .into(),
+        );
+    };
+    match crate::session::commands::parse_sysvar_toggle(value) {
+        Some(enabled) => Ok(CommandPayload::FsMode(enabled)),
+        None => Err(format!(
+            "fsmode.invalid_value: FSMODE needs ON or OFF (1 or 0 also parse), got '{value}'; \
+             nothing was changed"
+        )),
+    }
+}
+
+/// `MSTRETCH <base_x> <base_y> <delta_x> <delta_y> <x1> <y1> <x2> <y2> […]`:
+/// the STRETCH planner over one or more logical crossing windows.
+///
+/// The typed line mirrors [`CommandPayload::MStretch`] field for field: the four
+/// leading decimals are the world `base` point and the world `delta` point (the
+/// handler moves by `delta - base`), and every following group of four decimals is
+/// one crossing window in **canvas logical pixels**, the same convention as
+/// `STRETCH`'s `rect_logical` and `ZOOM WINDOW`. The windows are a flat list, so:
+///
+/// * fewer than two window groups (eight decimals) is `mstretch.argument`;
+/// * a token count that cannot be split into whole four-decimal windows is
+///   `mstretch.argument_odd` (never a truncated window);
+/// * a token that is not a finite decimal is `mstretch.invalid_number`.
+///
+/// The **semantic** checks stay in the handler, before its transaction:
+/// `mstretch.degenerate_window` (zero width/height after the viewport mapping),
+/// `mstretch.zero_displacement` (`base == delta`) and the plan-view/model-space
+/// requirements. Nothing here defaults a missing window or a missing delta.
+pub fn parse_mstretch_argument(argument: &str) -> Result<CommandPayload, String> {
+    let tokens = tokens(argument);
+    let (displacement, windows) = tokens.split_at(tokens.len().min(4));
+    if displacement.len() < 4 {
+        return Err(
+            "mstretch.argument: MSTRETCH needs <base_x> <base_y> <delta_x> <delta_y> and at least \
+             one <x1> <y1> <x2> <y2> window; nothing was changed"
+                .into(),
+        );
+    }
+    if windows.len() % 4 != 0 {
+        return Err(format!(
+            "mstretch.argument_odd: MSTRETCH needs every crossing window as exactly four decimals \
+             (x1 y1 x2 y2); {} window token(s) cannot be split into whole windows and nothing was \
+             changed",
+            windows.len()
+        ));
+    }
+    if windows.is_empty() {
+        return Err(
+            "mstretch.argument: MSTRETCH needs at least one crossing window (x1 y1 x2 y2) after \
+             the base and delta points; nothing was changed"
+                .into(),
+        );
+    }
+    let number = |text: &str| {
+        parse_signed_decimal(text).ok_or_else(|| {
+            format!(
+                "mstretch.invalid_number: MSTRETCH needs finite decimals, got '{text}'; nothing \
+                 was changed"
+            )
+        })
+    };
+    let base = Point3 {
+        x: number(displacement[0])?,
+        y: number(displacement[1])?,
+        z: 0.0,
+    };
+    let delta = Point3 {
+        x: number(displacement[2])?,
+        y: number(displacement[3])?,
+        z: 0.0,
+    };
+    let mut rects_logical = Vec::with_capacity(windows.len() / 4);
+    for window in windows.as_chunks::<4>().0 {
+        rects_logical.push([
+            [number(window[0])?, number(window[1])?],
+            [number(window[2])?, number(window[3])?],
+        ]);
+    }
+    Ok(CommandPayload::MStretch {
+        rects_logical,
+        base,
+        delta,
+    })
 }
 
 /// Split one argument into non-empty whitespace-delimited tokens.
