@@ -15,6 +15,7 @@ export interface CommandCatalogEntry {
 import { EXTENDED_COMMAND_CATALOG } from './catalog-extended.ts';
 import { INTERFACE_COMMAND_CATALOG } from './catalog-interface.ts';
 import { REFUSAL_COMMAND_CATALOG } from './catalog-refusals.ts';
+import { TABLE_COMMAND_CATALOG } from './catalog-tables.ts';
 
 /**
  * Every command name the app exposes in the chrome, in AutoCAD-style listing
@@ -900,13 +901,7 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'CONVERTCTB', labelKey: 'draw.kind.convertctb', icon: 'printer', group: 'file' },
   { id: 'CONVERTPOLY', labelKey: 'draw.kind.convertpoly', icon: 'polyline', group: 'modify' },
   { id: 'CONVERT', labelKey: 'draw.kind.convert', icon: 'settings', group: 'modify' },
-  { id: 'TABLE', labelKey: 'draw.kind.table', icon: 'properties', group: 'annotate' },
-  { id: '-TABLE', labelKey: 'draw.kind.dashtable', icon: 'properties', group: 'annotate' },
-  { id: 'TABLEDIT', labelKey: 'draw.kind.tabledit', icon: 'properties', group: 'annotate' },
-  { id: 'TABLEEXPORT', labelKey: 'draw.kind.tableexport', icon: 'save', group: 'annotate' },
-  { id: 'TABLESTYLE', labelKey: 'draw.kind.tablestyle', icon: 'properties', group: 'annotate' },
-  { id: 'TINSERT', labelKey: 'draw.kind.tinsert', icon: 'properties', group: 'annotate' },
-  { id: 'MATCHCELL', labelKey: 'draw.kind.matchcell', icon: 'matchprop', group: 'annotate' },
+  ...TABLE_COMMAND_CATALOG,
   { id: 'FIELD', labelKey: 'draw.kind.field', icon: 'text', group: 'annotate' },
   { id: 'RTEXT', labelKey: 'draw.kind.rtext', icon: 'text', group: 'annotate' },
   { id: 'RTEDIT', labelKey: 'draw.kind.rtedit', icon: 'text', group: 'annotate' },
