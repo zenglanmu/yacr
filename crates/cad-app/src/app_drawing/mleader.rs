@@ -65,7 +65,7 @@
 //! |---|---|---|---|
 //! | `MTEXT` (default) | `2` | [`cad_domain::MLeaderText`] | the annotation string |
 //! | (empty text) | `0` | none | arrow, leader line, dogleg |
-//! | `BLOCK <name>` | `1` | [`cad_domain::MLeaderBlockContent`] | the block instance at the content point |
+//! | `BLOCK <name>` | `1` | [`cad_domain::MLeaderBlockContent`] | the block instance, its **base point** on the content point (`T·R·S·T(−base)`, the `INSERT` rule) |
 //! | `TOLERANCE` | `3` | [`cad_domain::MLeaderToleranceContent`] | the feature-control frame |
 //!
 //! Block content needs a real `BLOCK_RECORD` in the output, so `SAVE` writes the
@@ -445,10 +445,13 @@ impl Application {
     /// * no selection / `CONTENT MTEXT` — the text argument is the annotation
     ///   (the pre-existing rule: empty creates a content-less leader);
     /// * `CONTENT BLOCK <name>` — the name is resolved against the drawing's
-    ///   block table and the resolved identity plus the table's own name travel
-    ///   into the definition, so the exporter can write the `BLOCK_RECORD` the
-    ///   content handle refers to. An unknown name is `mleader.block_missing`
-    ///   (nothing written, no transaction);
+    ///   block table and the resolved identity, the table's own name and the
+    ///   definition's **base point** travel into the definition, so the placement
+    ///   is `T(content point) · R · S · T(−base point)` (the `INSERT` rule) and the
+    ///   exporter can write the `BLOCK_RECORD` the content handle refers to. An
+    ///   unknown name is `mleader.block_missing`, and a definition with no stored
+    ///   base point is `mleader.block_metadata_missing` (never a guessed origin);
+    ///   nothing is written by either;
     /// * `CONTENT TOLERANCE` — the text argument is the `|`-separated frame
     ///   string; an empty one is the domain's `mleader.tolerance_text_required`.
     pub(crate) fn resolve_mleader_content(
@@ -479,13 +482,19 @@ impl Application {
                     ))
                 })?;
                 let block = definition.id;
-                let stored_name = drawing
-                    .block_metadata(block)
-                    .map(|metadata| metadata.name.clone())
-                    .unwrap_or_else(|| requested.to_string());
+                // The placement rule is `INSERT`'s: the content point receives the
+                // block's **base point**, so the metadata has to supply it. A
+                // definition without one is never given an invented origin (the
+                // same refusal `INSERT` makes, `insert.block_metadata_missing`).
+                let metadata = drawing.block_metadata(block).ok_or_else(|| {
+                    CadError::InvalidInput(format!(
+                        "mleader.block_metadata_missing: block {block:?} has no stored name/base                          point, so its content cannot be placed at the landing point; nothing was                          written"
+                    ))
+                })?;
                 Ok(MLeaderCreateContent::Block {
                     block,
-                    name: stored_name,
+                    name: metadata.name.clone(),
+                    base_point: Some(metadata.base_point),
                 })
             }
         }

@@ -34,6 +34,19 @@ fn style() -> MLeaderStyleValues {
     }
 }
 
+/// The raw creation result (for the refusal tests).
+fn created_result(content: MLeaderCreateContent) -> cad_domain::CadResult<MultiLeaderGeometry> {
+    MultiLeaderGeometry::created_with_content(
+        style(),
+        "Standard".into(),
+        2,
+        point(0.0, 0.0),
+        point(10.0, 5.0),
+        content,
+        Default::default(),
+    )
+}
+
 fn created(content: MLeaderCreateContent) -> MultiLeaderGeometry {
     MultiLeaderGeometry::created_with_content(
         style(),
@@ -59,6 +72,12 @@ fn block_insert(leader: &MultiLeaderGeometry) -> (BlockId, cad_domain::Transform
         .expect("block content draws one block instance")
 }
 
+/// The stored base point a created block content uses (`base_point` argument of
+/// every `MLeaderCreateContent::Block` in these tests unless stated otherwise).
+fn origin() -> Point3 {
+    point(0.0, 0.0)
+}
+
 #[test]
 fn the_four_content_kinds_use_the_dxf_codes() {
     for (kind, code) in [
@@ -79,6 +98,7 @@ fn block_content_stores_its_identity_and_draws_one_block_instance() {
     let leader = created(MLeaderCreateContent::Block {
         block: BlockId(7),
         name: "Door".into(),
+        base_point: Some(origin()),
     });
     assert_eq!(leader.content().kind(), MLeaderContentKind::Block);
     let block = leader.block_content().expect("the block payload");
@@ -105,6 +125,260 @@ fn block_content_stores_its_identity_and_draws_one_block_instance() {
 }
 
 #[test]
+fn a_non_zero_base_point_lands_on_the_content_point() {
+    // The content point receives the block's **base point**, exactly like an
+    // `INSERT`: `T(location) · R(rotation) · S(scale) · T(−base)`.
+    let base = point(3.0, -2.0);
+    let leader = created(MLeaderCreateContent::Block {
+        block: BlockId(7),
+        name: "Door".into(),
+        base_point: Some(base),
+    });
+    let block = leader.block_content().expect("the payload");
+    assert_eq!(block.base_point, Some(base));
+    assert_eq!(block.location, point(10.0, 5.0));
+    let (_, transform) = block_insert(&leader);
+    // The base point is what lands on the content point…
+    let placed = transform.apply_point(base);
+    assert!((placed.x - 10.0).abs() < 1e-12, "{placed:?}");
+    assert!((placed.y - 5.0).abs() < 1e-12, "{placed:?}");
+    // …and the definition origin moves by the negated base point.
+    let origin_placed = transform.apply_point(origin());
+    assert!((origin_placed.x - 7.0).abs() < 1e-12, "{origin_placed:?}");
+    assert!((origin_placed.y - 7.0).abs() < 1e-12, "{origin_placed:?}");
+}
+
+#[test]
+fn the_block_placement_composes_rotation_and_scale_before_the_base_offset() {
+    // A stored payload with rotation and non-uniform scale: the linear part is
+    // `R · S`, and the translation is `location − R · S · base`.
+    let base = point(1.0, 2.0);
+    let (leader, _) = MultiLeaderGeometry::from_import(MultiLeaderParts {
+        style: style(),
+        style_name: "Standard".into(),
+        override_mask: 0,
+        content: MLeaderContent::Block(MLeaderBlockContent {
+            block: Some(BlockId(7)),
+            name: "Door".into(),
+            handle: None,
+            base_point: Some(base),
+            location: point(10.0, 5.0),
+            scale: Point3 {
+                x: 2.0,
+                y: 3.0,
+                z: 1.0,
+            },
+            rotation: std::f64::consts::FRAC_PI_2,
+            connection: 0,
+        }),
+        text: MLeaderText {
+            string: String::new(),
+            location: point(10.0, 5.0),
+            rotation: 0.0,
+            height: 0.2,
+            width: 0.0,
+            attachment_point: 2,
+            left_attachment: 2,
+        },
+        roots: vec![MLeaderRoot {
+            leader_index: 0,
+            landing_point: point(10.0, 5.0),
+            dogleg_vector: point(1.0, 0.0),
+            dogleg_length: 2.0,
+        }],
+        lines: vec![MLeaderLine {
+            root_index: 0,
+            index: 0,
+            points: vec![point(0.0, 0.0), point(8.0, 5.0)],
+            path_type: MLeaderPathType::StraightLineSegments,
+            override_flags: 0,
+            arrowhead_size: 0.5,
+            arrowhead_handle: None,
+        }],
+        reserved: MLeaderReserved::default(),
+        plane: PlaneFrame::default(),
+    });
+    let (_, transform) = block_insert(&leader);
+    // R(90°) · S(2,3) maps (x, y) to (-3y, 2x).
+    assert!(
+        (transform.matrix[0][0] - 0.0).abs() < 1e-12,
+        "{:?}",
+        transform.matrix
+    );
+    assert!(
+        (transform.matrix[0][1] + 3.0).abs() < 1e-12,
+        "{:?}",
+        transform.matrix
+    );
+    assert!(
+        (transform.matrix[1][0] - 2.0).abs() < 1e-12,
+        "{:?}",
+        transform.matrix
+    );
+    assert!(
+        (transform.matrix[1][1] - 0.0).abs() < 1e-12,
+        "{:?}",
+        transform.matrix
+    );
+    // base (1,2) → (-6, 2); the content point (10,5) places it: t = (16, 3).
+    let placed = transform.apply_point(base);
+    assert!((placed.x - 10.0).abs() < 1e-12, "{placed:?}");
+    assert!((placed.y - 5.0).abs() < 1e-12, "{placed:?}");
+    assert!(
+        (transform.matrix[0][3] - 16.0).abs() < 1e-12,
+        "{:?}",
+        transform.matrix
+    );
+    assert!(
+        (transform.matrix[1][3] - 3.0).abs() < 1e-12,
+        "{:?}",
+        transform.matrix
+    );
+}
+
+#[test]
+fn a_zero_base_point_placement_is_the_identity_base_factor() {
+    // The pre-compensation formula was `T(location) · R · S`; with a zero base
+    // point the new composition is that same matrix, byte for byte.
+    let (leader, _) = MultiLeaderGeometry::from_import(MultiLeaderParts {
+        style: style(),
+        style_name: "Standard".into(),
+        override_mask: 0,
+        content: MLeaderContent::Block(MLeaderBlockContent {
+            block: Some(BlockId(7)),
+            name: "Door".into(),
+            handle: None,
+            base_point: Some(origin()),
+            location: point(10.0, 5.0),
+            scale: Point3 {
+                x: 2.0,
+                y: 3.0,
+                z: 1.0,
+            },
+            rotation: 0.25,
+            connection: 0,
+        }),
+        text: MLeaderText {
+            string: String::new(),
+            location: point(10.0, 5.0),
+            rotation: 0.0,
+            height: 0.2,
+            width: 0.0,
+            attachment_point: 2,
+            left_attachment: 2,
+        },
+        roots: vec![MLeaderRoot {
+            leader_index: 0,
+            landing_point: point(10.0, 5.0),
+            dogleg_vector: point(1.0, 0.0),
+            dogleg_length: 2.0,
+        }],
+        lines: vec![MLeaderLine {
+            root_index: 0,
+            index: 0,
+            points: vec![point(0.0, 0.0), point(8.0, 5.0)],
+            path_type: MLeaderPathType::StraightLineSegments,
+            override_flags: 0,
+            arrowhead_size: 0.5,
+            arrowhead_handle: None,
+        }],
+        reserved: MLeaderReserved::default(),
+        plane: PlaneFrame::default(),
+    });
+    let (_, transform) = block_insert(&leader);
+    // The old formula, written out independently.
+    let (sin, cos) = 0.25_f64.sin_cos();
+    let expected = [
+        [cos * 2.0, -sin * 3.0, 0.0, 10.0],
+        [sin * 2.0, cos * 3.0, 0.0, 5.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ];
+    for row in 0..4 {
+        for column in 0..4 {
+            assert!(
+                (transform.matrix[row][column] - expected[row][column]).abs() < 1e-12,
+                "({row}, {column}): {:?} != {expected:?}",
+                transform.matrix
+            );
+        }
+    }
+}
+
+#[test]
+fn block_content_without_a_base_point_is_refused_by_name() {
+    let error = created_result(MLeaderCreateContent::Block {
+        block: BlockId(7),
+        name: "Door".into(),
+        base_point: None,
+    })
+    .unwrap_err();
+    assert!(
+        matches!(error, CadError::InvalidInput(ref message)
+            if message.contains("mleader.block_metadata_missing")),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn an_imported_block_without_a_base_point_draws_nothing_and_says_so() {
+    let (leader, reasons) = MultiLeaderGeometry::from_import(MultiLeaderParts {
+        style: style(),
+        style_name: "Standard".into(),
+        override_mask: 0,
+        content: MLeaderContent::Block(MLeaderBlockContent {
+            block: Some(BlockId(7)),
+            name: "Door".into(),
+            handle: Some(0x2A),
+            base_point: None,
+            location: point(10.0, 5.0),
+            scale: point(1.0, 1.0),
+            rotation: 0.0,
+            connection: 0,
+        }),
+        text: MLeaderText {
+            string: String::new(),
+            location: point(10.0, 5.0),
+            rotation: 0.0,
+            height: 0.2,
+            width: 0.0,
+            attachment_point: 2,
+            left_attachment: 2,
+        },
+        roots: vec![MLeaderRoot {
+            leader_index: 0,
+            landing_point: point(10.0, 5.0),
+            dogleg_vector: point(1.0, 0.0),
+            dogleg_length: 2.0,
+        }],
+        lines: vec![MLeaderLine {
+            root_index: 0,
+            index: 0,
+            points: vec![point(0.0, 0.0), point(8.0, 5.0)],
+            path_type: MLeaderPathType::StraightLineSegments,
+            override_flags: 0,
+            arrowhead_size: 0.5,
+            arrowhead_handle: None,
+        }],
+        reserved: MLeaderReserved::default(),
+        plane: PlaneFrame::default(),
+    });
+    assert!(
+        !leader
+            .display()
+            .iter()
+            .any(|child| matches!(child, SemanticGeometry::Insert { .. })),
+        "a block with no base point is never placed at a guessed origin"
+    );
+    assert!(
+        reasons
+            .iter()
+            .any(|reason| reason.contains("no stored base point")),
+        "{reasons:?}"
+    );
+}
+
+#[test]
 fn an_unresolved_block_content_keeps_the_kind_and_reports_the_loss() {
     let leader = MultiLeaderGeometry::from_import(MultiLeaderParts {
         style: style(),
@@ -114,6 +388,7 @@ fn an_unresolved_block_content_keeps_the_kind_and_reports_the_loss() {
             block: None,
             name: "GONE".into(),
             handle: Some(0x2A),
+            base_point: None,
             location: point(10.0, 5.0),
             scale: point(1.0, 1.0),
             rotation: 0.0,
@@ -399,6 +674,7 @@ fn block_content_refuses_a_non_finite_or_collapsing_scale() {
             MLeaderCreateContent::Block {
                 block: BlockId(1),
                 name: "Door".into(),
+                base_point: Some(origin()),
             },
             Default::default(),
         );
@@ -413,6 +689,7 @@ fn block_content_refuses_a_non_finite_or_collapsing_scale() {
                 block: Some(BlockId(1)),
                 name: "Door".into(),
                 handle: None,
+                base_point: Some(origin()),
                 location: point(10.0, 5.0),
                 scale,
                 rotation: 0.0,
@@ -489,6 +766,7 @@ fn mtext_and_content_less_creation_are_unchanged_by_the_content_channel() {
         MLeaderCreateContent::Block {
             block: BlockId(1),
             name: "Door".into(),
+            base_point: Some(origin()),
         },
         MLeaderCreateContent::Tolerance {
             text: "|0.05".into(),
@@ -509,6 +787,7 @@ fn a_rigid_transform_moves_the_block_and_tolerance_content() {
     let leader = created(MLeaderCreateContent::Block {
         block: BlockId(3),
         name: "Door".into(),
+        base_point: Some(origin()),
     });
     let moved = leader
         .transformed(&cad_domain::Transform3::translation(point(1.0, 2.0)))

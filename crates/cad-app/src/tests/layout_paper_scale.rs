@@ -182,6 +182,7 @@ fn block_leader(id: u128, space: SpaceId, height: f64) -> cad_db::DbEntity {
         cad_domain::MLeaderCreateContent::Block {
             block: BlockId(7),
             name: "Door".into(),
+            base_point: Some(point(0.0, 0.0)),
         },
         Default::default(),
     )

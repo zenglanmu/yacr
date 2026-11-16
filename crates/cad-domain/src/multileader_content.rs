@@ -217,9 +217,20 @@ impl MLeaderContent {
             }
             Self::Block(block) => match block.display() {
                 Some(insert) => (vec![insert], Vec::new()),
-                None => (
+                // Two distinct losses, each named: an unresolved identity cannot
+                // draw anything, and a resolved identity without a base point
+                // cannot be placed without inventing an origin.
+                None if block.block.is_none() => (
                     Vec::new(),
                     vec!["multileader block content handle did not resolve to a block".to_string()],
+                ),
+                None => (
+                    Vec::new(),
+                    vec![
+                        "multileader block content has no stored base point, so its placement \
+                         cannot be derived"
+                            .to_string(),
+                    ],
                 ),
             },
             Self::Tolerance(tolerance) => {
@@ -258,6 +269,21 @@ impl MLeaderContent {
 /// a reload resolves again. `block` is `None` for a source whose block handle did
 /// not resolve — the content kind is still preserved and the display reports it,
 /// instead of silently dropping the annotation.
+///
+/// ## Placement (`base_point`)
+///
+/// The content point receives the **block's own base point**, exactly like a
+/// block reference: the placement is
+/// `T(location) · R(rotation) · S(scale) · T(−base_point)` (see
+/// [`Self::transform`]), which is the composition `INSERT` uses
+/// (`crates/cad-app/src/app_drawing/insert_block.rs`: `T(insertion) · T(−base)`)
+/// and the one the importer builds for an `AcDbBlockReference`
+/// (`insert_array_transform`). `base_point` is therefore **stored** — the display
+/// and the exporter never re-read the block definition to place the content.
+///
+/// `base_point` is `None` only when the definition's metadata is unavailable (an
+/// import whose block name/handle did not resolve): the display then refuses to
+/// draw the block rather than guessing an origin.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MLeaderBlockContent {
     /// The drawing-local block the display expands, when the handle/name resolved.
@@ -266,7 +292,10 @@ pub struct MLeaderBlockContent {
     pub name: String,
     /// The source `BLOCK_RECORD` handle, preserved verbatim for round-trip.
     pub handle: Option<u64>,
-    /// The block's insertion point (`CONTEXT_DATA 15`; `10` for the base point).
+    /// The definition's insertion base point (`BlockMetadata::base_point`): the
+    /// point the placement puts on [`Self::location`]. `None` = unavailable.
+    pub base_point: Option<Point3>,
+    /// The content point (`CONTEXT_DATA 15`), i.e. where the base point lands.
     pub location: Point3,
     /// The three scale factors (`CONTEXT_DATA 16`, entity `10`).
     pub scale: Point3,
@@ -280,11 +309,16 @@ pub struct MLeaderBlockContent {
 impl MLeaderBlockContent {
     /// A block content placed at `location` with unit scale and no rotation —
     /// the created leader's definition.
-    pub fn placed(block: BlockId, name: String, location: Point3) -> Self {
+    ///
+    /// `base_point` is the definition's stored base point (`BlockMetadata`): the
+    /// caller resolves it from the drawing's block table, which is what keeps the
+    /// placement identical to an `INSERT` of the same block.
+    pub fn placed(block: BlockId, name: String, base_point: Point3, location: Point3) -> Self {
         MLeaderBlockContent {
             block: Some(block),
             name,
             handle: None,
+            base_point: Some(base_point),
             location,
             scale: Point3 {
                 x: 1.0,
@@ -305,6 +339,11 @@ impl MLeaderBlockContent {
                     .into(),
             ));
         }
+        if self.base_point.is_some_and(|base| !is_finite_point(base)) {
+            return Err(CadError::InvalidInput(
+                "mleader.block_content_invalid: the block's base point must be finite".into(),
+            ));
+        }
         if !is_finite_point(self.scale) {
             return Err(CadError::InvalidInput(
                 "mleader.block_content_invalid: the block content scale factors must be finite"
@@ -321,12 +360,17 @@ impl MLeaderBlockContent {
         Ok(())
     }
 
-    /// The placement transform the display expands the block with.
+    /// The placement transform the display expands the block with, when the
+    /// definition's base point is known.
     ///
-    /// `T(location) · R(rotation) · S(scale)`: the block's own base point is
-    /// placed at the stored content point (the same composition the pre-P7b
-    /// `Compound` path used, so an imported leader renders where it did before).
-    pub fn transform(&self) -> Transform3 {
+    /// `T(location) · R(rotation) · S(scale) · T(−base_point)`, the same
+    /// composition `INSERT` and the importer's `AcDbBlockReference` expansion use:
+    /// the block's base point lands on the stored content point.
+    /// `transform.apply_point(base_point) == location` holds for every finite
+    /// input, and for a zero base point the base-point factor is the identity (so
+    /// a zero-base block draws exactly as it did before the compensation).
+    pub fn transform(&self) -> Option<Transform3> {
+        let base = self.base_point?;
         let (sin, cos) = self.rotation.sin_cos();
         let mut matrix = [[0.0f64; 4]; 4];
         matrix[0][0] = cos * self.scale.x;
@@ -334,11 +378,15 @@ impl MLeaderBlockContent {
         matrix[1][0] = sin * self.scale.x;
         matrix[1][1] = cos * self.scale.y;
         matrix[2][2] = self.scale.z;
-        matrix[0][3] = self.location.x;
-        matrix[1][3] = self.location.y;
-        matrix[2][3] = self.location.z;
+        // `T(location) · R · S · T(−base)`: the rotation/scale act on the
+        // base-point offset, then the content point places the result.
+        matrix[0][3] =
+            self.location.x - (cos * self.scale.x * base.x - sin * self.scale.y * base.y);
+        matrix[1][3] =
+            self.location.y - (sin * self.scale.x * base.x + cos * self.scale.y * base.y);
+        matrix[2][3] = self.location.z - self.scale.z * base.z;
         matrix[3][3] = 1.0;
-        Transform3 { matrix }
+        Some(Transform3 { matrix })
     }
 
     /// The one display child of block content: the block instance.
@@ -346,7 +394,7 @@ impl MLeaderBlockContent {
         let block = self.block?;
         Some(SemanticGeometry::Insert {
             block,
-            transform: self.transform(),
+            transform: self.transform()?,
         })
     }
 }
@@ -494,12 +542,19 @@ pub fn tolerance_frame_geometries(
 pub enum MLeaderCreateContent {
     /// `CONTENT MTEXT` (the default): the annotation text.
     Text(String),
-    /// `CONTENT BLOCK <name>`: the resolved block identity and its stored name.
+    /// `CONTENT BLOCK <name>`: the resolved block identity, its stored name and
+    /// the definition's base point (the point the placement puts on the content
+    /// point).
     Block {
         /// The drawing-local block the display expands.
         block: BlockId,
         /// The block name the DXF record carries.
         name: String,
+        /// The definition's insertion base point (`BlockMetadata::base_point`), or
+        /// `None` when the drawing has no metadata for it — which the creation
+        /// refuses (`mleader.block_metadata_missing`) instead of guessing an
+        /// origin.
+        base_point: Option<Point3>,
     },
     /// `CONTENT TOLERANCE <text>`: the frame string; the height is the resolved
     /// style's text height.

@@ -217,7 +217,17 @@ pub(super) fn emit_multileader(
     // already owns, an unresolved identity) leaves no dangling handle: the leader
     // is flattened to its display primitives with the reason, exactly like the
     // scaling/mirroring fallback below.
+    //
+    // The placement is written the way an `INSERT` is: `CONTEXT_DATA 15` is the
+    // **insertion point** (the leader's content point) and the block's base point
+    // is the `BLOCK` record's own group `10`, so a reader composes
+    // `T(15) · R · S · T(−base)` — exactly the display's `transform()`. The DXF
+    // reference names group 15 "block content location" without spelling out the
+    // base-point rule; the INSERT-consistent reading is the one this build writes
+    // **and** reads, and it is unverified against a vendor MULTILEADER whose
+    // content block has a non-zero base point.
     let mut content_block_handle: Option<Handle> = None;
+    let mut content_base_point_reasons: Vec<String> = Vec::new();
     if let Some(block) = geometry.content().block() {
         let refusal = match block.block {
             None => Some(
@@ -225,6 +235,24 @@ pub(super) fn emit_multileader(
                     .to_string(),
             ),
             Some(block_id) => {
+                // The DXF placement is `CONTEXT_DATA 15` (an insertion point)
+                // against the `BLOCK` record's own base point (group `10`), so the
+                // file places the block exactly the way the display does — as long
+                // as the definition's metadata base point is the one the stored
+                // payload used. A disagreement is named, never silent.
+                let definition_base = ctx
+                    .database
+                    .block_metadata(block_id)
+                    .map(|metadata| metadata.base_point);
+                if definition_base != block.base_point {
+                    content_base_point_reasons.push(format!(
+                        "the stored block content base point {:?} differs from the definition's \
+                         metadata base point {definition_base:?}; the display places the block by \
+                         the stored one and the written file places it by the definition's (BLOCK \
+                         group 10), so a reload can move the content",
+                        block.base_point
+                    ));
+                }
                 match super::insert::ensure_block_written(doc, block_id, ctx, acc, stack) {
                     Ok(written) => match doc.block_records.get(&written.name) {
                         Some(record) => {
@@ -294,6 +322,8 @@ pub(super) fn emit_multileader(
     }
     context.leader_roots = build_roots(geometry);
     ml.context = context;
+
+    reasons.append(&mut content_base_point_reasons);
 
     // The entity's own block placement (entity `344`/`10`/`43`/`176`): the same
     // values the `CONTEXT_DATA` mirror carries, so a reader that prefers either

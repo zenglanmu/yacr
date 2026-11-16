@@ -170,10 +170,28 @@ impl MultiLeaderGeometry {
                     (MLeaderContent::Text, text)
                 }
             }
-            MLeaderCreateContent::Block { block, name } => (
-                MLeaderContent::Block(MLeaderBlockContent::placed(block, name, landing)),
-                String::new(),
-            ),
+            MLeaderCreateContent::Block {
+                block,
+                name,
+                base_point,
+            } => {
+                // The content point receives the block's **base point**, exactly
+                // like an `INSERT`; without a stored base point there is nothing
+                // to place it by, and a zero would be a guess.
+                let Some(base_point) = base_point else {
+                    return Err(CadError::InvalidInput(format!(
+                        "mleader.block_metadata_missing: block {block:?} has no stored base \
+                         point, so its content cannot be placed at the landing point; nothing \
+                         was written"
+                    )));
+                };
+                (
+                    MLeaderContent::Block(MLeaderBlockContent::placed(
+                        block, name, base_point, landing,
+                    )),
+                    String::new(),
+                )
+            }
             MLeaderCreateContent::Tolerance { text } => {
                 // The frame's height is the resolved style's text height (a
                 // created leader has no session height channel). A height that

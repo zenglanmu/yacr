@@ -186,6 +186,8 @@ fn a_multileader_block_content_expands_the_block_members() {
         cad_domain::MLeaderCreateContent::Block {
             block: BlockId(2),
             name: "Door".into(),
+            // The definition's base point is what lands on the content point.
+            base_point: Some(p(1.5, 0.0)),
         },
         Default::default(),
     )
@@ -215,18 +217,21 @@ fn a_multileader_block_content_expands_the_block_members() {
     let closes = |a: Point3, b: Point3| {
         (a.x - b.x).abs() < 1e-9 && (a.y - b.y).abs() < 1e-9 && (a.z - b.z).abs() < 1e-9
     };
+    // The member line is (0,0)-(2,0) in block space and the definition's base
+    // point is (1.5, 0), so the base lands on the content point (10, 5) and the
+    // member runs from (8.5, 5) to (10.5, 5).
     let block_line = rep
         .fragments
         .iter()
         .find_map(|fragment| match &fragment.primitive {
             DisplayPrimitive::Lines(points) if points.len() == 2 => {
                 let (a, b) = (points[0], points[1]);
-                closes(a, p(10.0, 5.0)).then_some((a, b))
+                closes(a, p(8.5, 5.0)).then_some((a, b))
             }
             _ => None,
         });
-    let (_, end) = block_line.expect("the block's member line at the content point");
-    assert!(closes(end, p(12.0, 5.0)), "{end:?}");
+    let (_, end) = block_line.expect("the block's member line placed by its base point");
+    assert!(closes(end, p(10.5, 5.0)), "{end:?}");
     assert!(
         !rep.fragments
             .iter()

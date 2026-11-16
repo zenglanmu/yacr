@@ -13,8 +13,10 @@ use cad_domain::{MLeaderContentKind, MLeaderStyleId, MLeaderToleranceContent, Tr
 use cad_import_acadrust::export::{export, ExportFormat, ExportLimits, ExportRequest, ExportSpace};
 use cad_import_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
 
-/// One named block (`Door`, id 7) with a single member line, plus layer 0.
-fn block_app() -> (Application, SessionState) {
+/// The app's one named block (`Door`, id 7) with a single member line, plus
+/// layer 0. `base` is the definition's stored base point — the point a block
+/// reference (and block content) puts on its insertion point.
+fn block_app_with(base: Point3, standard: Option<MLeaderStyle>) -> (Application, SessionState) {
     let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
     b.insert_layer(Layer {
         id: LayerId(0),
@@ -28,8 +30,7 @@ fn block_app() -> (Application, SessionState) {
         dynamic_visibility: None,
     })
     .unwrap();
-    b.set_block_metadata(BlockId(7), "Door", p3(0.0, 0.0, 0.0))
-        .unwrap();
+    b.set_block_metadata(BlockId(7), "Door", base).unwrap();
     b.insert_entity(DbEntity {
         object: DbObject {
             id: ObjectId(100),
@@ -40,13 +41,18 @@ fn block_app() -> (Application, SessionState) {
         id: EntityId(100),
         layer: LayerId(0),
         space: SpaceId::Block(BlockId(7)),
+        // A member line that starts *at* the definition's origin, so the base
+        // point offset is visible in the expanded geometry.
         geometry: SemanticGeometry::Line {
             start: p3(0.0, 0.0, 0.0),
-            end: p3(1.0, 0.0, 0.0),
+            end: p3(2.0, 0.0, 0.0),
         },
         draw_order: 0,
     })
     .unwrap();
+    if let Some(standard) = standard {
+        b.insert_mleader_style(standard).unwrap();
+    }
     let drawing = b.finish().unwrap();
     let mut app = Application::new();
     app.workspace.documents.insert(
@@ -66,51 +72,15 @@ fn block_app() -> (Application, SessionState) {
     (app, SessionState::new(DocumentId(1), AppMode::Work))
 }
 
+/// The common fixture: `Door` with a zero base point and the pinned `Standard`
+/// style row.
+fn block_app() -> (Application, SessionState) {
+    block_app_with(p3(0.0, 0.0, 0.0), None)
+}
+
 /// [`block_app`] with a replacement `Standard` MLEADERSTYLE row.
 fn block_app_with_style(standard: MLeaderStyle) -> (Application, SessionState) {
-    let (mut app, session) = block_app();
-    // Rebuild the drawing with the row: the builder is the only authority for the
-    // style table, so the row is inserted through a fresh database.
-    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
-    b.insert_layer(Layer {
-        id: LayerId(0),
-        name: "0".into(),
-        visible: true,
-    })
-    .unwrap();
-    b.insert_block(BlockDefinition {
-        id: BlockId(7),
-        entities: vec![EntityId(100)],
-        dynamic_visibility: None,
-    })
-    .unwrap();
-    b.set_block_metadata(BlockId(7), "Door", p3(0.0, 0.0, 0.0))
-        .unwrap();
-    b.insert_entity(DbEntity {
-        object: DbObject {
-            id: ObjectId(100),
-            type_key: "AcDbLine".into(),
-            revision: Revision(0),
-            source_handle: None,
-        },
-        id: EntityId(100),
-        layer: LayerId(0),
-        space: SpaceId::Block(BlockId(7)),
-        geometry: SemanticGeometry::Line {
-            start: p3(0.0, 0.0, 0.0),
-            end: p3(1.0, 0.0, 0.0),
-        },
-        draw_order: 0,
-    })
-    .unwrap();
-    b.insert_mleader_style(standard).unwrap();
-    let drawing = b.finish().unwrap();
-    app.workspace
-        .documents
-        .get_mut(&DocumentId(1))
-        .unwrap()
-        .drawing = Arc::new(drawing);
-    (app, session)
+    block_app_with(p3(0.0, 0.0, 0.0), Some(standard))
 }
 
 fn request(content: Option<MLeaderContentSpec>, text: &str) -> CommandPayload {
@@ -319,6 +289,166 @@ fn content_block_round_trips_through_the_one_writer_and_reader() {
 }
 
 #[test]
+fn content_block_places_the_blocks_base_point_on_the_content_point() {
+    // The definition's base point is (1.5, -0.75), not the origin: the content
+    // point must receive *it*, exactly like an INSERT of the same block.
+    let base = p3(1.5, -0.75, 0.0);
+    let (mut app, mut session) = block_app_with(base, None);
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::MLeader,
+        request(Some(MLeaderContentSpec::Block("Door".into())), ""),
+    )
+    .expect("a named block creates block content");
+    let leader = the_leader(&app);
+    let block = leader.block_content().expect("the block payload");
+    assert_eq!(block.base_point, Some(base), "the base point is stored");
+    assert!(approx_point(block.location, p3(10.0, 2.0, 0.0)));
+
+    // The child instance places the base point on the content point…
+    let insert = leader
+        .display()
+        .iter()
+        .find_map(|child| match child {
+            SemanticGeometry::Insert { block, transform } => Some((*block, *transform)),
+            _ => None,
+        })
+        .expect("the content block instance");
+    let placed = insert.1.apply_point(base);
+    assert!(approx_point(placed, p3(10.0, 2.0, 0.0)), "{placed:?}");
+
+    // …and the written file says the same: `BLOCK` group 10 is the base point and
+    // `CONTEXT_DATA` group 15 the insertion point, so a reader subtracts the base
+    // exactly as the display does.
+    let (written_base, written_insertion) = written_block_placement(&export_bytes(&app), "Door");
+    assert!(approx_point(written_base, base), "{written_base:?}");
+    assert!(
+        approx_point(written_insertion, p3(10.0, 2.0, 0.0)),
+        "{written_insertion:?}"
+    );
+
+    // The reload resolves the same definition base point and draws there.
+    let reimported = round_trip(&app);
+    let block = reimported.block_content().expect("the re-imported payload");
+    assert!(approx_point(block.base_point.expect("a base point"), base));
+    let insert = reimported
+        .display()
+        .iter()
+        .find_map(|child| match child {
+            SemanticGeometry::Insert { block, transform } => Some((*block, *transform)),
+            _ => None,
+        })
+        .expect("the re-imported block instance");
+    assert!(approx_point(insert.1.apply_point(base), p3(10.0, 2.0, 0.0)));
+}
+
+#[test]
+fn a_zero_base_point_block_writes_the_same_groups_as_before() {
+    // With a zero base point the compensation factor is the identity, so the
+    // placement and every written group are the pre-fix ones: `T(location) · R · S`
+    // and `BLOCK 10 = (0, 0, 0)` against `CONTEXT_DATA 15 = content point`.
+    let (mut app, mut session) = block_app();
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::MLeader,
+        request(Some(MLeaderContentSpec::Block("Door".into())), ""),
+    )
+    .expect("a zero-base block creates block content");
+    let leader = the_leader(&app);
+    let block = leader.block_content().expect("the payload");
+    assert_eq!(block.base_point, Some(p3(0.0, 0.0, 0.0)));
+    let insert = leader
+        .display()
+        .iter()
+        .find_map(|child| match child {
+            SemanticGeometry::Insert { block, transform } => Some((*block, *transform)),
+            _ => None,
+        })
+        .expect("the content block instance");
+    // The old formula, written out independently: T(10, 2) with unit rotation and
+    // scale is a pure translation.
+    let expected = Transform3::translation(p3(10.0, 2.0, 0.0));
+    assert_eq!(
+        insert.1, expected,
+        "a zero base point is the identity factor"
+    );
+
+    let (written_base, written_insertion) = written_block_placement(&export_bytes(&app), "Door");
+    assert!(
+        approx_point(written_base, p3(0.0, 0.0, 0.0)),
+        "{written_base:?}"
+    );
+    assert!(
+        approx_point(written_insertion, p3(10.0, 2.0, 0.0)),
+        "{written_insertion:?}"
+    );
+}
+
+#[test]
+fn a_block_definition_without_metadata_is_refused_by_name() {
+    // `cad-db` resolves a block *name* through its name/base-point metadata, so a
+    // definition with no metadata is not addressable: the content creation refuses
+    // by name and writes nothing (the domain's `mleader.block_metadata_missing`
+    // covers a caller that resolves the id another way; see
+    // `cad-domain/tests/multileader_content.rs`).
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layer(Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
+    .unwrap();
+    b.insert_block(BlockDefinition {
+        id: BlockId(9),
+        entities: Vec::new(),
+        dynamic_visibility: None,
+    })
+    .unwrap();
+    let drawing = b.finish().unwrap();
+    let mut app = Application::new();
+    app.workspace.documents.insert(
+        DocumentId(1),
+        Document {
+            id: DocumentId(1),
+            drawing: Arc::new(drawing),
+            identity: DocumentIdentity::Sha256([9u8; 32]),
+            units: UnitContext::drawing_units(),
+            resource_keys: Vec::new(),
+        },
+    );
+    app.workspace.viewports.insert(
+        ViewportId(1),
+        Viewport::new(ViewportId(1), DocumentId(1), [800.0, 600.0]),
+    );
+    let mut session = SessionState::new(DocumentId(1), AppMode::Work);
+    let before = revision(&app);
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::MLeader,
+        request(Some(MLeaderContentSpec::Block("Door".into())), ""),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(error, CadError::InvalidInput(ref message)
+            if message.contains("mleader.block_missing")),
+        "{error:?}"
+    );
+    assert_eq!(revision(&app), before, "the refusal writes nothing");
+    assert!(!app.can_undo(&DocumentId(1)));
+    assert!(
+        !app.workspace.documents[&DocumentId(1)]
+            .drawing
+            .model_space()
+            .iter()
+            .any(|entity| matches!(entity.geometry, SemanticGeometry::MultiLeader(_))),
+        "no leader was inserted"
+    );
+}
+
+#[test]
 fn content_block_refusals_write_nothing() {
     // An unknown block name.
     let (mut app, mut session) = block_app();
@@ -518,6 +648,82 @@ fn mtext_and_content_less_creation_are_unchanged() {
     let content_less = the_leader(&app);
     assert_eq!(content_less.content().kind(), MLeaderContentKind::None);
     assert!(content_less.text().string.is_empty());
+}
+
+/// The `(group code, value)` pairs of a DXF text file, in order (DXF is strictly
+/// code/value pairs, so a blind pairing is exact).
+fn dxf_pairs(text: &str) -> Vec<(i16, String)> {
+    let mut lines = text.lines().map(str::trim);
+    let mut pairs = Vec::new();
+    while let (Some(code), Some(value)) = (lines.next(), lines.next()) {
+        if let Ok(code) = code.parse::<i16>() {
+            pairs.push((code, value.to_string()));
+        }
+    }
+    pairs
+}
+
+/// The groups of the record that starts with `(0, kind)` and matches `keep`.
+fn record<'a>(
+    pairs: &'a [(i16, String)],
+    kind: &str,
+    keep: impl Fn(&[(i16, String)]) -> bool,
+) -> &'a [(i16, String)] {
+    let mut start = 0;
+    while start < pairs.len() {
+        if pairs[start].0 == 0 && pairs[start].1 == kind {
+            let end = pairs[start + 1..]
+                .iter()
+                .position(|(code, _)| *code == 0)
+                .map(|offset| start + 1 + offset)
+                .unwrap_or(pairs.len());
+            let candidate = &pairs[start..end];
+            if keep(candidate) {
+                return candidate;
+            }
+            start = end;
+        } else {
+            start += 1;
+        }
+    }
+    panic!("no {kind} record matches");
+}
+
+fn first_value(record: &[(i16, String)], code: i16) -> Option<f64> {
+    record
+        .iter()
+        .find(|(candidate, _)| *candidate == code)
+        .and_then(|(_, value)| value.parse::<f64>().ok())
+}
+
+fn triple(record: &[(i16, String)], x: i16, y: i16, z: i16) -> Point3 {
+    Point3 {
+        x: first_value(record, x).unwrap_or(f64::NAN),
+        y: first_value(record, y).unwrap_or(f64::NAN),
+        z: first_value(record, z).unwrap_or(f64::NAN),
+    }
+}
+
+/// The written placement of the leader's block content: the `BLOCK` record's
+/// base point (`10/20/30`) and the `MULTILEADER`'s `CONTEXT_DATA` insertion point
+/// (`15/25/35`), which is the group pair a reader subtracts the base from.
+fn written_block_placement(bytes: &[u8], block_name: &str) -> (Point3, Point3) {
+    let text = std::str::from_utf8(bytes).expect("ASCII DXF");
+    let pairs = dxf_pairs(text);
+    let block = record(&pairs, "BLOCK", |candidate| {
+        candidate
+            .iter()
+            .any(|(code, value)| *code == 2 && value == block_name)
+    });
+    let base = triple(block, 10, 20, 30);
+    let leader = record(&pairs, "MULTILEADER", |_| true);
+    let context_start = leader
+        .iter()
+        .position(|(code, value)| *code == 300 && value.starts_with("CONTEXT_DATA"))
+        .expect("the CONTEXT_DATA block");
+    let context = &leader[context_start..];
+    let insertion = triple(context, 15, 25, 35);
+    (base, insertion)
 }
 
 /// A content block the exporter cannot write leaves no dangling handle: the

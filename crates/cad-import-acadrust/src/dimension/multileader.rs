@@ -450,10 +450,15 @@ impl ImporterBuilder<'_> {
                         .contains_key(&record.name)
                         .then(|| self.block_id(&record.name))
                 });
+                // The definition's own base point is what the placement puts on
+                // `CONTEXT_DATA 15` (the same rule an `AcDbBlockReference` uses),
+                // so the display stores it instead of re-reading the definition.
+                let base_point = self.block_base_points.get(&name).copied();
                 MLeaderContent::Block(MLeaderBlockContent {
                     block,
                     name,
                     handle,
+                    base_point,
                     location: p3(context.block_content_location),
                     scale: p3(context.block_content_scale),
                     rotation: context.block_rotation,
