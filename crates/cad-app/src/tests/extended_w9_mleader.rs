@@ -45,6 +45,7 @@ fn leader(id: u128, text: &str, text_position: Point3, arrow: Point3, dogleg: Po
             text_style_name: "Standard".into(),
             text_font: None,
             scale_factor: 1.0,
+            text_angle_type: MLeaderTextAngle::Horizontal,
         },
         style_name: "Standard".into(),
         override_mask: 0,

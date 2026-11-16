@@ -40,20 +40,32 @@
 //! * **attachment pair** — `attachment` sets the horizontal (`179` /
 //!   `CONTEXT_DATA 171`) and vertical (`173` / `CONTEXT_DATA 174`) text
 //!   attachment codes; both are written verbatim, so they round-trip.
+//! * **style selector** — `style_name` resolves that `MLEADERSTYLE` row instead
+//!   of the session's current style; an unknown name is the named
+//!   `mleader.style_missing` refusal and writes nothing;
+//! * **text angle type** — `text_angle` is the DXF **mode** (`PARALLEL` `0`,
+//!   `HORIZONTAL` `1`, `OPTIMIZED` `2`), stored on the entity's `174` with the
+//!   `0x2000` override bit when it differs from the style's `175`;
+//! * **content-less creation** — an empty text stores `MLeaderContent::None`
+//!   with no annotation (arrow, leader line and dogleg only), the real AutoCAD
+//!   case; the entity content kind `172` is written verbatim and the `0x400`
+//!   override bit is set only when it differs from the style's `170`.
 //!
-//! Still deliberate subsets (see [`crate::CommandId::MLeader`]): **no style
-//! selector** and **no content-less creation** — a MULTILEADER without text is
-//! import/display/export only (decision F.2) — and the AutoCAD **angle
-//! constraint** (text angle type, DXF entity `174` / style `175`) has **no field
-//! in this domain**: the `MULTILEADER` writer declares it as an unmodelled group,
-//! so creation refuses it by name (`mleader.option_text_angle`) instead of adding
-//! a field the exporter would silently drop.
+//! Deliberate subset (see [`crate::CommandId::MLeader`]): the typed line has
+//! exactly two coordinates, so a created leader has two vertices
+//! ([`MAX_CREATED_LEADER_POINTS`]); more leader *lines* come from
+//! `MLEADEREDIT ADD`, which is the AutoCAD path too — the DXF `LEADER_LINE` and
+//! the domain `MLeaderLine` both carry a real vertex list, so the ceiling is an
+//! **input** limit, not a model limit.
 
 use super::*;
 use crate::app_drawing::annot_batch::leader::{
     options_report, plan_leader_options, MAX_CREATED_LEADER_POINTS,
 };
-use cad_domain::{MLeaderCreateOptions, MLeaderPathType, MultiLeaderGeometry, MultiLeaderParts};
+use cad_domain::{
+    MLeaderContent, MLeaderCreateOptions, MLeaderPathType, MultiLeaderGeometry, MultiLeaderParts,
+    MASK_CONTENT_TYPE, MASK_TEXT_ANGLE,
+};
 
 // `MLEADERSTYLE SET <name>` writes `SessionState::current_mleader_style`, so
 // creation reads the session name (default `Standard`, which the builder pins).
@@ -72,15 +84,15 @@ impl Application {
     /// Refusals (named, nothing written, no transaction):
     ///
     /// * `mleader.payload` — a payload that is not `MLeader { .. }`;
-    /// * `tool.text_empty` / `tool.text_too_long` — the text rules shared with
-    ///   `TEXT` (empty/whitespace-only or more than
-    ///   [`MAX_TOOL_TEXT_CHARS`] characters);
-    /// * `mleader.style_missing` — the drawing has no `Standard` MLEADERSTYLE
-    ///   (the builder pins one, so this is a corrupt-database case);
-    /// * the option plan's refusals: `mleader.text_required` /
-    ///   `mleader.content_unsupported` (annotation type), `mleader.path_type`
-    ///   (invisible path), `mleader.option_arrowhead_off`,
-    ///   `mleader.option_max_points`, `mleader.style_invalid`;
+    /// * `tool.text_too_long` — more than [`MAX_TOOL_TEXT_CHARS`] characters (an
+    ///   empty text is *not* a refusal: it creates a content-less leader);
+    /// * `mleader.style_missing` — the drawing has no `MLEADERSTYLE` with the
+    ///   requested name (the typed `STYLE` selector) or the session's current one
+    ///   (the builder pins `Standard`, so the latter is a corrupt-database case);
+    /// * the option plan's refusals: `mleader.content_unsupported` (a block or
+    ///   tolerance style), `mleader.path_type` (invisible path),
+    ///   `mleader.option_arrowhead_off`, `mleader.option_max_points`,
+    ///   `mleader.style_invalid`;
     /// * the creation options' refusals: `mleader.option_dogleg` (a non-finite or
     ///   non-positive `dogleg_length`), `mleader.option_angle` (a non-finite
     ///   `dogleg_angle`), `mleader.option_attachment` (a horizontal code outside
@@ -98,24 +110,19 @@ impl Application {
             arrow,
             landing,
             text,
+            style_name,
             dogleg_length,
             dogleg_angle,
             attachment,
+            text_angle,
         } = &command.payload
         else {
             return Err(CadError::InvalidInput(
                 "mleader.payload: CreateMLeader needs a MLeader { arrow, landing, text, \
-                 dogleg_length, dogleg_angle, attachment } payload"
+                 style_name, dogleg_length, dogleg_angle, attachment, text_angle } payload"
                     .into(),
             ));
         };
-        if text.trim().is_empty() {
-            return Err(CadError::InvalidInput(
-                "tool.text_empty: a multileader needs a non-empty, non-whitespace text; \
-                 content-less leaders are not created"
-                    .into(),
-            ));
-        }
         let characters = text.chars().count();
         if characters > MAX_TOOL_TEXT_CHARS {
             return Err(CadError::InvalidInput(format!(
@@ -123,14 +130,22 @@ impl Application {
                  got {characters}"
             )));
         }
-        let (row, resolution, style_name) = {
+        let (row, resolution, resolved_style_name, style_requested) = {
             let document = self
                 .workspace
                 .documents
                 .get(&command.document)
                 .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
             let drawing = document.drawing.as_ref();
-            let style_name_query = session.current_mleader_style_name();
+            // The typed `STYLE` selector wins over the session's current style;
+            // an empty selector is treated as absent (the grammar cannot produce
+            // one, a programmatic caller might).
+            let style_requested = style_name
+                .as_deref()
+                .map(str::trim)
+                .filter(|name| !name.is_empty());
+            let style_name_query =
+                style_requested.unwrap_or_else(|| session.current_mleader_style_name().trim());
             let row = drawing
                 .mleader_style_by_name(style_name_query)
                 .ok_or_else(|| {
@@ -151,7 +166,12 @@ impl Application {
                          resolve"
                     ))
                 })?;
-            (row.clone(), resolution, style_name)
+            (
+                row.clone(),
+                resolution,
+                style_name,
+                style_requested.is_some(),
+            )
         };
         let options = plan_leader_options(&row, &resolution)?;
         // The definition is derived by the one `created` rule, which only accepts
@@ -165,17 +185,27 @@ impl Application {
             dogleg_angle: *dogleg_angle,
             attachment_point: attachment.map(|pair| pair.point),
             left_attachment: attachment.map(|pair| pair.left),
+            text_angle: *text_angle,
         };
         let geometry = MultiLeaderGeometry::created_with_options(
             values,
-            style_name,
+            resolved_style_name.clone(),
             resolution.left_attachment,
             *arrow,
             *landing,
             text.clone(),
             create_options,
         )?;
-        let geometry = with_leader_path_type(geometry, options.path)?;
+        // The entity content kind (`172`) overrides the style kind (`170`) only
+        // when it actually differs, so a content-less leader under an MText style
+        // (and the reverse) reloads as what was created.
+        let content_mask = if created_content_code(geometry.content()) != row.content_type {
+            MASK_CONTENT_TYPE
+        } else {
+            0
+        };
+        let geometry = with_created_adjustments(geometry, options.path, content_mask)?;
+        let content = geometry.content();
         let options_row = create_options_report(create_options, &geometry);
         let mut outcome = self.commit_new_entity(
             session,
@@ -183,9 +213,34 @@ impl Application {
             SemanticGeometry::MultiLeader(Box::new(geometry)),
             "create mleader",
         )?;
-        outcome.diagnostics.push(options_report(options));
+        outcome.diagnostics.push(options_report(options, content));
         if let Some(row) = options_row {
             outcome.diagnostics.push(row);
+        }
+        if style_requested {
+            outcome.diagnostics.push(Diagnostic {
+                object: outcome.objects.first().copied(),
+                code: "mleader.style_selected".into(),
+                message: format!(
+                    "MLEADER: the typed STYLE selector resolved the MLEADERSTYLE \
+                     '{resolved_style_name}'; every style-derived value (dogleg length, landing \
+                     gap, arrowhead and text height, text style, path type, text angle type) is \
+                     that row's resolved snapshot"
+                ),
+            });
+        }
+        if content == MLeaderContent::None {
+            outcome.diagnostics.push(Diagnostic {
+                object: outcome.objects.first().copied(),
+                code: "mleader.content_none".into(),
+                message: format!(
+                    "MLEADER: created without annotation text (a real content-less leader): \
+                     content kind None (entity 172 = 0, override mask 0x{content_mask:X} against \
+                     the style's kind {}), so the entity carries the arrow, the leader line and \
+                     the dogleg and no text",
+                    row.content_type
+                ),
+            });
         }
         if options.path == MLeaderPathType::Spline {
             outcome.diagnostics.push(Diagnostic {
@@ -195,8 +250,9 @@ impl Application {
                     "MLEADER: the style's leader type is spline and it is stored as such, but a \
                      created leader has only {MAX_CREATED_LEADER_POINTS} vertices (the captured \
                      arrow and the style dogleg start), so the drawn path is the straight run \
-                     between them; a bending spline needs three or more vertices, which the payload \
-                     does not carry"
+                     between them; a bending spline needs three or more vertices, and the typed \
+                     line has exactly two coordinates (more leader lines come from MLEADEREDIT \
+                     ADD, the AutoCAD path)"
                 ),
             });
         }
@@ -245,6 +301,15 @@ fn create_options_report(
             text.attachment_point, text.left_attachment
         ));
     }
+    if options.text_angle.is_some() {
+        let mode = geometry.style().text_angle_type;
+        rows.push(format!(
+            "text angle type {} (entity 174 = {}, style 175 mirror, mask 0x{:X})",
+            mode.token(),
+            mode.dxf(),
+            geometry.override_mask() & MASK_TEXT_ANGLE
+        ));
+    }
     if rows.is_empty() {
         return None;
     }
@@ -260,24 +325,31 @@ fn create_options_report(
     })
 }
 
-/// Re-stamp the derived definition's leader path type.
+/// Re-stamp the derived definition's leader path type and add the entity's
+/// content-type override bit.
 ///
-/// The straight case is the derivation as-is. The spline case rewrites the stored
-/// style snapshot **and** every leader line's own path type (the per-line override
-/// bit stays clear, so the style value is what the display and a reload read), then
-/// rebuilds the derived display through [`MultiLeaderGeometry::new`] — the same
-/// single display builder every other writer uses.
-fn with_leader_path_type(
+/// Both adjustments are properties `created_with_options` cannot decide alone:
+/// the path type comes from the style plan (a spline style is stored, but the
+/// derived definition is straight) and the content bit needs the **stored** style
+/// row's content kind, which the command closes over. Everything else is the one
+/// derivation, and the rebuild goes through [`MultiLeaderGeometry::new`] — the
+/// same single display builder every other writer uses.
+///
+/// The derived display is rebuilt even when only the mask changes, so a stored
+/// display can never disagree with the definition.
+fn with_created_adjustments(
     geometry: MultiLeaderGeometry,
     path: MLeaderPathType,
+    extra_mask: u32,
 ) -> CadResult<MultiLeaderGeometry> {
-    if path == MLeaderPathType::StraightLineSegments {
+    let mask = geometry.override_mask() | extra_mask;
+    if path == MLeaderPathType::StraightLineSegments && mask == geometry.override_mask() {
         return Ok(geometry);
     }
     let mut parts = MultiLeaderParts {
         style: geometry.style().clone(),
         style_name: geometry.style_name().to_string(),
-        override_mask: geometry.override_mask(),
+        override_mask: mask,
         content: geometry.content(),
         text: geometry.text().clone(),
         roots: geometry.roots().to_vec(),
@@ -290,4 +362,10 @@ fn with_leader_path_type(
         line.path_type = path;
     }
     MultiLeaderGeometry::new(parts)
+}
+
+/// The DXF `172` code of a created content kind, to compare with the style's
+/// `170` value.
+fn created_content_code(content: MLeaderContent) -> i16 {
+    content.dxf()
 }

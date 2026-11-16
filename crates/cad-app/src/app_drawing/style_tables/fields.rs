@@ -11,7 +11,7 @@
 //! ASCII case-insensitive.
 
 use cad_db::{DimStyle, MLeaderStyle};
-use cad_domain::MLeaderPathType;
+use cad_domain::{MLeaderPathType, MLeaderTextAngle};
 
 /// Apply one `<field> <value>` pair to a stored dimension style.
 ///
@@ -167,6 +167,25 @@ pub(crate) fn apply_mleader_style_field(
                 ));
             }
             style.left_attachment = parsed;
+        }
+        // DXF style `175` (the entity `174` mirror): a three-way mode, never a
+        // rotation, so a number outside `0..=2` is refused rather than clamped.
+        "text_angle_type" | "text_angle" | "175" => {
+            style.text_angle_type = if value.eq_ignore_ascii_case("PARALLEL")
+                || value.eq_ignore_ascii_case("LAST_SEGMENT")
+                || value == "0"
+            {
+                MLeaderTextAngle::ParallelToLastLeaderLine
+            } else if value.eq_ignore_ascii_case("HORIZONTAL") || value == "1" {
+                MLeaderTextAngle::Horizontal
+            } else if value.eq_ignore_ascii_case("OPTIMIZED") || value == "2" {
+                MLeaderTextAngle::Optimized
+            } else {
+                return Err(format!(
+                    "mleaderstyle.value_range: text_angle_type must be PARALLEL, HORIZONTAL or \
+                     OPTIMIZED, got {value}"
+                ));
+            };
         }
         other => {
             return Err(format!(

@@ -11,13 +11,19 @@
 //!   `TABLECELL`). It is added to the table frame's own rotation and becomes the
 //!   `Text` child's `rotation`.
 //!
-//! Everything else a DXF cell record can carry — content colour (group 64),
-//! background fill (groups 63 + 283), border colour/lineweight (groups 65-69,
-//! 275-279) — is **not** modelled here on purpose: this build's display has one
-//! colour per entity and no filled area, so a stored colour would be a field
-//! that no renderer can honour. The importer and the exporter report each of
-//! those by name instead of storing a value that silently vanishes
-//! (`docs/compatibility.md`, the `TABLE` row).
+//! The remaining per-cell appearance fields — content colour (group 64),
+//! background fill (groups 63 + 283) and border colour/lineweight (groups
+//! 65-69, 275-279) — are modelled as well:
+//! [`TableCellGeometry::text_color`](crate::TableCellGeometry::text_color),
+//! [`TableCellGeometry::fill_color`](crate::TableCellGeometry::fill_color) and
+//! [`TableBorder`]'s own `color`/`lineweight_hundredths`. They ride this table's
+//! per-primitive appearance channel, so each one is stored, drawn and written
+//! back; a cell that sets none of them derives exactly the pre-appearance draw.
+//!
+//! What a row value set can supply is the same list: text colour, fill and the
+//! four edges' colour/lineweight. A row's text **rotation** stays absent — a
+//! `TABLESTYLE` row record has no rotation group in this DXF writer, so a
+//! per-row rotation could never come back.
 //!
 //! A bare cell rotation is *relative* to the table frame (DXF stores it in the
 //! table's own coordinate system), which is why it survives a
@@ -184,8 +190,15 @@ pub struct TableRowStyle {
     pub text_style_name: String,
     /// Cell text alignment (row group 170).
     pub alignment: TableCellAlignment,
-    /// The four edges' visibility and double-line spacing (row groups 284-289).
+    /// The four edges' visibility, double-line spacing, colour and lineweight
+    /// (row groups 64-69 colours, 274-279 lineweights, 284-289 visibility).
     pub borders: TableCellBorders,
+    /// The row's cell text colour, sRGB (row group 62). `None` inherits the
+    /// entity colour, exactly like a `ByBlock` row record.
+    pub text_color: Option<[u8; 3]>,
+    /// The row's cell background fill, sRGB (row groups 63 + 283). `None` means
+    /// the row enables no fill.
+    pub fill_color: Option<[u8; 3]>,
 }
 
 impl Default for TableRowStyle {
@@ -200,6 +213,8 @@ impl Default for TableRowStyle {
                 bottom: TableBorder::VISIBLE,
                 left: TableBorder::VISIBLE,
             },
+            text_color: None,
+            fill_color: None,
         }
     }
 }

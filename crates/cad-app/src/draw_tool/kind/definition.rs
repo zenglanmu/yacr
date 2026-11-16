@@ -621,17 +621,19 @@ pub enum DrawToolKind {
     /// (`MultiLeaderGeometry::created`), never captured.
     ///
     /// Every style value (dogleg length, landing gap, arrowhead size, text
-    /// height, text style, vertical attachment) comes from the drawing's
-    /// `MLeaderStyle` table. Text is **required**: content-less MULTILEADER is
-    /// import/display/export only, so an empty text is refused and `Confirm`
-    /// while the text prompt is open is refused by name.
+    /// height, text style, vertical attachment, text angle type) comes from the
+    /// drawing's `MLeaderStyle` table. This **interactive** capture requires the
+    /// text (`tool.text_required`); the typed `MLEADER` line accepts an empty
+    /// remainder and creates a content-less leader, and carries the
+    /// `STYLE`/`DOGLEG`/`DOGLEGANGLE`/`ATTACH`/`TEXTANGLE` options.
     ///
-    /// Deliberate subset (NOT IMPLEMENTED): **no `Options` sub-prompt** — no
-    /// leader type (straight/spline), no content type (block/tolerance), no
-    /// maximum-points/angular-constraint option and no per-invocation dogleg or
-    /// attachment prompt; the UI must not imply them. Multi-column text,
-    /// background masks, per-line overrides, associativity and editing an
-    /// existing leader are likewise not offered.
+    /// Deliberate subset of the interactive path (NOT IMPLEMENTED here): **no
+    /// `Options` sub-prompt** — no leader type (straight/spline), no content type
+    /// (block/tolerance), no maximum-points/angular-constraint option and no
+    /// per-invocation dogleg or attachment prompt; the UI must not imply them for
+    /// the interactive flow. Multi-column text, background masks, per-line
+    /// overrides, associativity and editing an existing leader are likewise not
+    /// offered.
     MLeader,
     /// TEXTEDIT: pick **one existing single-line `Text`** entity, then replace its
     /// string (ADR 0020 amendment options A+B).

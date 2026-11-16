@@ -360,7 +360,7 @@ fn textedit_is_work_only() {
 
 use cad_domain::{
     MLeaderContent, MLeaderLine, MLeaderPathType, MLeaderReserved, MLeaderRoot, MLeaderStyleValues,
-    MLeaderText, MultiLeaderGeometry, MultiLeaderParts, PlaneFrame,
+    MLeaderText, MLeaderTextAngle, MultiLeaderGeometry, MultiLeaderParts, PlaneFrame,
 };
 
 /// A drawing whose entity 7 is an MTEXT (`Text` geometry + `AcDbMText` type key).
@@ -409,6 +409,7 @@ fn content_less_leader() -> SemanticGeometry {
             text_style_name: "Standard".into(),
             text_font: None,
             scale_factor: 1.0,
+            text_angle_type: MLeaderTextAngle::Horizontal,
         },
         style_name: "Standard".into(),
         override_mask: 0,
@@ -479,9 +480,11 @@ fn textedit_on_a_multileader_writes_one_transaction_and_a_consistent_display() {
             arrow: p3(0.0, 0.0, 0.0),
             landing: p3(10.0, 2.0, 0.0),
             text: "OLD".into(),
+            style_name: None,
             dogleg_length: None,
             dogleg_angle: None,
             attachment: None,
+            text_angle: None,
         },
     )
     .unwrap();

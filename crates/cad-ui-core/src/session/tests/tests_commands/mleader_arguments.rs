@@ -5,20 +5,21 @@
 //! semantic refusal (`mledit.*`, `mleader.*`, `mleaderalign.*`, `mleaderedit.*`,
 //! `tolerance.*`). These tests pin the admitted token shapes and prove every
 //! selector is an argument selector (`MLEADERCOLLECT` deliberately is not). The
-//! one admitted token the domain cannot carry (`MLEADER TEXTANGLE`, the angle
-//! constraint of DXF 174) is pinned as a *named* refusal, never a silent drop.
+//! `MLEADER` angle constraint takes one of the three stored modes; a numeric
+//! rotation and an unknown mode are pinned as *named* refusals, never silent
+//! drops.
 
 use crate::session::commands::{
     parse_mleader_argument, parse_mleaderalign_argument, parse_mleaderedit_argument,
     parse_mledit_argument, parse_tolerance_argument, MLeaderCreateInput, MLeaderParseError,
-    MLeaderUnmodelledOption, ARGUMENT_SELECTORS, DASH_MLEDIT_SELECTOR, MLEADERALIGN_SELECTOR,
+    MLeaderTextAngleError, ARGUMENT_SELECTORS, DASH_MLEDIT_SELECTOR, MLEADERALIGN_SELECTOR,
     MLEADEREDIT_SELECTOR, MLEADER_SELECTOR, MLEDIT_SELECTOR, TOLERANCE_SELECTOR,
 };
 use cad_app::{
     MLeaderAlignCommand, MLeaderAlignMode, MLeaderAttachment, MLeaderEditAction,
     MLeaderEditCommand, MLeaderLineOverrideField, MlEditCommand, MlEditMode, ToleranceCommand,
 };
-use cad_domain::{MLeaderPathType, Point3};
+use cad_domain::{MLeaderContent, MLeaderPathType, MLeaderTextAngle, Point3};
 
 use super::super::super::*;
 use super::super::test_support::*;
@@ -205,9 +206,11 @@ fn mleader_argument_is_the_creation_line_with_an_optional_option_prefix() {
             arrow: point(0.0, 0.0),
             landing: point(10.0, 2.0),
             text: "Note".into(),
+            style: None,
             dogleg_length: None,
             dogleg_angle: None,
             attachment: None,
+            text_angle: None,
         })
     );
     // The text is the remainder: internal and trailing spaces survive, the leading
@@ -218,9 +221,11 @@ fn mleader_argument_is_the_creation_line_with_an_optional_option_prefix() {
             arrow: point(0.0, 0.0),
             landing: point(10.0, 2.0),
             text: "two  words ".into(),
+            style: None,
             dogleg_length: None,
             dogleg_angle: None,
             attachment: None,
+            text_angle: None,
         })
     );
     // The option prefix, in any order; `DOGLEGANGLE` is degrees on the line and
@@ -241,26 +246,79 @@ fn mleader_argument_is_the_creation_line_with_an_optional_option_prefix() {
         Some(MLeaderAttachment { point: 1, left: 4 })
     );
 
-    // The angle constraint is admitted as a token and refused by name: this
-    // domain has no field for DXF 174, so the payload never carries it.
+    // The angle constraint takes a **mode** (DXF 174/175 stores an angle type)
+    // and both spellings are admitted; a numeric rotation is refused by name.
     assert_eq!(
-        parse_mleader_argument("TEXTANGLE 2 0 0 10 2 Note"),
-        Err(MLeaderParseError::Unmodelled(
-            MLeaderUnmodelledOption::TextAngle
+        parse_mleader_argument("TEXTANGLE PARALLEL 0 0 10 2 Note"),
+        Ok(MLeaderCreateInput {
+            arrow: point(0.0, 0.0),
+            landing: point(10.0, 2.0),
+            text: "Note".into(),
+            style: None,
+            dogleg_length: None,
+            dogleg_angle: None,
+            attachment: None,
+            text_angle: Some(MLeaderTextAngle::ParallelToLastLeaderLine),
+        })
+    );
+    assert_eq!(
+        parse_mleader_argument("angle optimized 0 0 10 2 Note")
+            .expect("the ANGLE alias")
+            .text_angle,
+        Some(MLeaderTextAngle::Optimized)
+    );
+    assert_eq!(
+        parse_mleader_argument("TEXTANGLE 90 0 0 10 2 Note"),
+        Err(MLeaderParseError::TextAngle(
+            MLeaderTextAngleError::RotationAngle("90".to_string())
         ))
     );
+    for non_finite in ["nan", "inf", "-inf"] {
+        assert_eq!(
+            parse_mleader_argument(&format!("TEXTANGLE {non_finite} 0 0 10 2 Note")),
+            Err(MLeaderParseError::TextAngle(
+                MLeaderTextAngleError::RotationAngle(non_finite.to_string())
+            )),
+            "{non_finite}"
+        );
+    }
+    assert_eq!(
+        parse_mleader_argument("TEXTANGLE diagonal 0 0 10 2 Note"),
+        Err(MLeaderParseError::TextAngle(
+            MLeaderTextAngleError::UnknownMode("diagonal".to_string())
+        ))
+    );
+    // `STYLE` takes one name token (a single token, like the rest of the line).
+    assert_eq!(
+        parse_mleader_argument("STYLE Callout 0 0 10 2 Note")
+            .expect("the style selector")
+            .style
+            .as_deref(),
+        Some("Callout")
+    );
+    // A duplicated option is outside the grammar either way.
+    assert_eq!(
+        parse_mleader_argument("STYLE A STYLE B 0 0 10 2 Note"),
+        Err(MLeaderParseError::Invalid)
+    );
+    assert_eq!(
+        parse_mleader_argument("TEXTANGLE PARALLEL ANGLE HORIZONTAL 0 0 10 2 Note"),
+        Err(MLeaderParseError::Invalid)
+    );
 
-    // A missing text is *not* a grammar error: the command layer answers with its
-    // own `tool.text_empty` refusal, so the parser hands over an empty string.
+    // A missing text is *not* a grammar error either: it creates a content-less
+    // leader, so the parser hands over an empty string.
     assert_eq!(
         parse_mleader_argument("0 0 10 2"),
         Ok(MLeaderCreateInput {
             arrow: point(0.0, 0.0),
             landing: point(10.0, 2.0),
             text: String::new(),
+            style: None,
             dogleg_length: None,
             dogleg_angle: None,
             attachment: None,
+            text_angle: None,
         })
     );
     for refused in [
@@ -371,14 +429,20 @@ fn typed_tolerance_dispatches_a_real_frame() {
 }
 
 #[test]
-fn typed_mleader_creates_a_leader_and_refuses_the_unmodelled_angle_constraint() {
+fn typed_mleader_creates_a_leader_and_refuses_an_unstorable_angle() {
     let session = fresh_session();
     session
         .command("MLEADER 0 0 10 2 Note")
         .expect("the typed MLEADER creates one leader");
     session
-        .command("MLEADER DOGLEG 2.5 DOGLEGANGLE 90 ATTACH 1 4 -3 1 7 2 Typed")
+        .command("MLEADER DOGLEG 2.5 DOGLEGANGLE 90 ATTACH 1 4 TEXTANGLE PARALLEL -3 1 7 2 Typed")
         .expect("the typed creation options are admitted");
+    session
+        .command("MLEADER STYLE Standard ANGLE OPTIMIZED 0 0 10 2 Selected")
+        .expect("the typed style selector is admitted");
+    session
+        .command("MLEADER 0 0 10 2")
+        .expect("an empty text creates a content-less leader");
     let controller = session.core.controller.borrow();
     let drawing = controller.drawing().expect("a drawing is open");
     let leaders: Vec<_> = drawing
@@ -389,7 +453,7 @@ fn typed_mleader_creates_a_leader_and_refuses_the_unmodelled_angle_constraint() 
             _ => None,
         })
         .collect();
-    // The fixture drawing may carry its own entities; the two created leaders are
+    // The fixture drawing may carry its own entities; the created leaders are
     // identified by their annotation strings.
     let plain = leaders
         .iter()
@@ -406,24 +470,63 @@ fn typed_mleader_creates_a_leader_and_refuses_the_unmodelled_angle_constraint() 
     assert!((typed.roots()[0].dogleg_vector.y - 1.0).abs() < 1e-12);
     assert_eq!(typed.text().attachment_point, 1);
     assert_eq!(typed.text().left_attachment, 4);
+    // The typed mode is the stored snapshot, with the entity override bit.
+    assert_eq!(
+        typed.style().text_angle_type,
+        MLeaderTextAngle::ParallelToLastLeaderLine
+    );
+    assert_ne!(
+        typed.override_mask() & cad_domain::MASK_TEXT_ANGLE,
+        0,
+        "an entity value that differs from the style's names 0x2000"
+    );
+    let selected = leaders
+        .iter()
+        .find(|leader| leader.text().string == "Selected")
+        .expect("the leader created from the typed style");
+    assert_eq!(selected.style_name(), "Standard");
+    assert_eq!(
+        selected.style().text_angle_type,
+        MLeaderTextAngle::Optimized
+    );
+    // The empty text is a content-less leader, not a refusal.
+    assert!(
+        leaders
+            .iter()
+            .any(|leader| leader.content() == MLeaderContent::None),
+        "the typed line without text creates a content-less leader"
+    );
     drop(controller);
 
-    // The angle constraint has no domain field: the line is refused by name and
-    // nothing is written.
+    // A numeric angle has no storable mode: refused by name, nothing written.
     let before = {
         let controller = session.core.controller.borrow();
         controller.drawing().expect("a drawing is open").revision()
     };
+    for line in [
+        "MLEADER TEXTANGLE 2 0 0 10 2 Note",
+        "MLEADER TEXTANGLE nan 0 0 10 2 Note",
+        "MLEADER TEXTANGLE diagonal 0 0 10 2 Note",
+    ] {
+        let error = session
+            .command(line)
+            .expect_err("an unstorable angle is refused by name");
+        assert!(
+            error.contains("mleader.option_text_angle"),
+            "{line}: {error}"
+        );
+        assert!(error.contains("174"), "{line}: {error}");
+    }
+    // An unknown style name is refused by name too.
     let error = session
-        .command("MLEADER TEXTANGLE 2 0 0 10 2 Note")
-        .expect_err("the angle constraint is refused by name");
-    assert!(error.contains("mleader.option_text_angle"), "{error}");
-    assert!(error.contains("174"), "{error}");
+        .command("MLEADER STYLE NoSuchStyle 0 0 10 2 Note")
+        .expect_err("an unknown style is refused");
+    assert!(error.contains("mleader.style_missing"), "{error}");
     let after = {
         let controller = session.core.controller.borrow();
         controller.drawing().expect("a drawing is open").revision()
     };
-    assert_eq!(before, after, "the refusal wrote nothing");
+    assert_eq!(before, after, "the refusals wrote nothing");
 }
 
 #[test]

@@ -80,6 +80,8 @@ fn table_geometry() -> SemanticGeometry {
         merge_width: 1,
         merge_height: 1,
         borders: TableCellBorders::default(),
+        text_color: None,
+        fill_color: None,
     };
     let table = TableGeometry::new(TableParts {
         frame: TableFrame::default(),

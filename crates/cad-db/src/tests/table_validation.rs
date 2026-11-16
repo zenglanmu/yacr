@@ -14,6 +14,8 @@ fn cell(text: &str) -> TableCellGeometry {
         merge_width: 1,
         merge_height: 1,
         borders: TableCellBorders::default(),
+        text_color: None,
+        fill_color: None,
     }
 }
 

@@ -10,6 +10,7 @@
 //! `multileader` module).
 
 use super::*;
+use crate::mleader_style::domain_text_angle;
 use acadrust::entities::{
     LeaderLinePropertyOverrideFlags, MultiLeaderPathType as AcadPathType,
     MultiLeaderPropertyOverrideFlags, TextAttachmentPointType, TextAttachmentType,
@@ -601,6 +602,20 @@ impl ImporterBuilder<'_> {
         } else {
             context.text_left_attachment
         };
+        // Entity `174` / style `175`: the entity value wins only when the `90`
+        // mask carries the text-angle override bit, exactly like the other
+        // overridable fields above.
+        let text_angle_type = if ml
+            .property_override_flags
+            .contains(MultiLeaderPropertyOverrideFlags::TEXT_ANGLE)
+        {
+            domain_text_angle(ml.text_angle_type as i16)
+        } else {
+            match style {
+                Some(style) => domain_text_angle(style.text_angle_type as i16),
+                None => domain_text_angle(ml.text_angle_type as i16),
+            }
+        };
 
         let mut roots = Vec::with_capacity(context.leader_roots.len());
         let mut lines = Vec::new();
@@ -681,6 +696,7 @@ impl ImporterBuilder<'_> {
                 text_style_name: text_style_name.clone(),
                 text_font: self.style_font(&text_style_name),
                 scale_factor: ml.scale_factor,
+                text_angle_type,
             },
             style_name,
             override_mask: mask,

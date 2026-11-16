@@ -1,8 +1,8 @@
 use super::*;
 use cad_db::{BlockDefinition, DbEntity, DbObject, DrawingDatabaseBuilder, Layer};
 use cad_domain::{
-    BlockId, DatabaseId, DocumentId, EntityId, InstancePath, LayerId, ObjectId, Revision, StyleId,
-    Transform3,
+    BlockId, DatabaseId, DocumentId, EntityId, InstancePath, LayerId, MLeaderTextAngle, ObjectId,
+    Revision, StyleId, Transform3,
 };
 
 fn entity(id: u128, geometry: SemanticGeometry, layer: LayerId) -> DbEntity {
@@ -656,6 +656,7 @@ fn leader_geometry(text: Option<&str>) -> SemanticGeometry {
             text_style_name: "Standard".into(),
             text_font: None,
             scale_factor: 1.0,
+            text_angle_type: MLeaderTextAngle::Horizontal,
         },
         style_name: "Standard".into(),
         override_mask: 0,

@@ -15,10 +15,12 @@ impl<'a> ImporterBuilder<'a> {
     /// for their row therefore count as inheriting, which is what `TABLESTYLE`
     /// re-resolves.
     ///
-    /// The representation carries one colour per entity and no filled area, so
-    /// per-cell text colours, border colours/lineweights and background fills
-    /// cannot be applied and are not stored: the result is always `Partial` and
-    /// the reason states exactly what is omitted.
+    /// The per-cell appearance is modelled: the text colour (cell content colour,
+    /// group 64), the background fill (groups 63 + 283) and each border edge's
+    /// colour/lineweight (groups 65-69 and 275-279) are resolved through the same
+    /// cell -> row -> base -> `TABLESTYLE` row precedence and stored on the cell,
+    /// so the display and the exporter both carry them. The result is still
+    /// `Partial` and the reasons state exactly what is *not* applied.
     ///
     /// The grid and the merge coverage are unchanged from the pre-table-entity
     /// `Compound` output; the display itself is derived by [`TableGeometry`]
@@ -82,21 +84,28 @@ impl<'a> ImporterBuilder<'a> {
             let mut cells: Vec<TableCellGeometry> = Vec::with_capacity(row.cells.len());
             for (column_index, cell) in row.cells.iter().enumerate() {
                 // Effective style precedence: cell -> row -> base -> table style.
-                let borders = if let Some(style) = cell.style.as_ref() {
+                // Visibility and spacing come from the **highest level that has a
+                // style record at all** (a level with no record sets nothing),
+                // while a colour/lineweight is only meaningful when it is
+                // concrete, so those two resolve per property from the first
+                // level that carries a value — a cell style that exists only to
+                // hide an edge cannot wipe the row's border colour.
+                let level_sets: [Option<CellBorderSet>; 4] = [
+                    cell.style.as_ref().map(CellBorderSet::from_cell_style),
+                    row.style.as_ref().map(CellBorderSet::from_cell_style),
+                    t.base_style.as_ref().map(CellBorderSet::from_cell_style),
+                    table_style_borders,
+                ];
+                if level_sets.iter().any(Option::is_some) {
                     styled = true;
-                    CellBorderSet::from_cell_style(style)
-                } else if let Some(style) = row.style.as_ref() {
-                    styled = true;
-                    CellBorderSet::from_cell_style(style)
-                } else if let Some(style) = t.base_style.as_ref() {
-                    styled = true;
-                    CellBorderSet::from_cell_style(style)
-                } else if let Some(borders) = table_style_borders {
-                    styled = true;
-                    borders
-                } else {
-                    CellBorderSet::default()
-                };
+                }
+                let borders = level_sets
+                    .iter()
+                    .flatten()
+                    .next()
+                    .copied()
+                    .unwrap_or_default()
+                    .with_resolved_appearance(&level_sets);
 
                 // Text height/style precedence: cell -> row -> base -> resolved
                 // TableStyle row -> the cell content -> the importer default. The
@@ -132,6 +141,22 @@ impl<'a> ImporterBuilder<'a> {
                 } else {
                     None
                 };
+                // Per-property appearance: unlike the border set (one level wins
+                // for all four edges), a colour resolves from the highest level
+                // that carries a **concrete** value, so a cell style that exists
+                // only to set a text height cannot wipe the row's colour.
+                let text_color = resolve_text_color(
+                    cell.style.as_ref(),
+                    row.style.as_ref(),
+                    t.base_style.as_ref(),
+                    table_row_style,
+                );
+                let fill_color = resolve_fill(
+                    cell.style.as_ref(),
+                    row.style.as_ref(),
+                    t.base_style.as_ref(),
+                    table_row_style,
+                );
                 // Alignment follows the same precedence, but a level only counts
                 // when it actually overrides the property: a cell style that
                 // exists only to hide a border must not reset the table style's
@@ -186,6 +211,8 @@ impl<'a> ImporterBuilder<'a> {
                         bottom: border_view(borders.bottom),
                         left: border_view(borders.left),
                     },
+                    text_color,
+                    fill_color,
                 });
             }
             rows.push(TableRowGeometry {
@@ -226,12 +253,11 @@ impl<'a> ImporterBuilder<'a> {
             );
         }
         let mut reasons = vec![if styled {
-            "table borders drawn from cell styles; per-cell border colours/lineweights and cell \
-             background fills are not applied (one colour per entity, no filled area) and are not \
-             stored, so the writer emits the neutral ByBlock/no-fill values; merged ranges emit \
-             only their anchor text; the double-line border offset direction is assumed inward; \
-             border_type/override_flags are not honoured; each cell takes its whole border set \
-             from the highest-priority style"
+            "table borders drawn from cell styles; merged ranges emit only their anchor text; the \
+             double-line border offset direction is assumed inward; border_type/override_flags are \
+             not honoured; each cell takes its border visibility/spacing from the highest-priority \
+             style level that has a record, and each edge's colour/lineweight from the first level \
+             that carries a concrete value"
                 .to_string()
         } else {
             "table grid and cell text drawn; merged cells and borders are approximated".to_string()
@@ -239,9 +265,13 @@ impl<'a> ImporterBuilder<'a> {
         // Named limitations of the modelling itself, kept separate so a caller
         // can see exactly what was not applied.
         reasons.push(
-            "per-cell text colour, background fill and border colour/lineweight have no field in \
-             this build's table model (one colour per entity, no filled area), so those DXF \
-             groups are read and dropped by name rather than stored"
+            "per-cell text colour, background fill and border colour/lineweight are stored and \
+             drawn, but a cell that turns an inherited background fill *off* over a style row that \
+             enables one re-resolves to the row's fill on re-import (the DXF cell record has no \
+             'fill explicitly off' value this reader can tell from 'not written'); a per-border \
+             line **type** is not modelled (this writer emits no per-cell border line type), and \
+             the renderer draws every border one pixel wide, so a stored lineweight reaches the \
+             batch but no wider stroke"
                 .to_string(),
         );
         if table_style.is_some() {
@@ -288,12 +318,59 @@ impl<'a> ImporterBuilder<'a> {
     }
 }
 
-/// The neutral border for one resolved edge view.
+/// The resolved border for one edge view (visibility, spacing, colour and
+/// lineweight).
 fn border_view(border: BorderView) -> TableBorder {
     TableBorder {
         visible: !border.invisible,
         double_spacing: border.double_spacing,
+        color: border.color,
+        lineweight_hundredths: border.lineweight_hundredths,
     }
+}
+
+/// The cell/row text colour: the first level that carries a **concrete** colour
+/// (an ACI index or a true colour). A symbolic `ByBlock`/`ByLayer`/`None` means
+/// "inherit", exactly like the DXF default, so it is skipped rather than stored
+/// as black.
+fn resolve_text_color(
+    cell_style: Option<&acadrust::entities::CellStyle>,
+    row_style: Option<&acadrust::entities::CellStyle>,
+    base_style: Option<&acadrust::entities::CellStyle>,
+    table_row_style: Option<&acadrust::objects::RowCellStyle>,
+) -> Option<[u8; 3]> {
+    [
+        cell_style.map(|style| style.content_color),
+        row_style.map(|style| style.content_color),
+        base_style.map(|style| style.content_color),
+        table_row_style.map(|row| row.text_color),
+    ]
+    .into_iter()
+    .flatten()
+    .find_map(crate::style::concrete_rgb)
+}
+
+/// The cell/row background fill: the first level that **enables** a fill and
+/// carries a concrete colour.
+///
+/// A level with the fill switched off is "no override" (every source that never
+/// wrote the group reads exactly that way), so it is skipped; the lowest level is
+/// the `TABLESTYLE` row set, whose fill is the table style's own default.
+fn resolve_fill(
+    cell_style: Option<&acadrust::entities::CellStyle>,
+    row_style: Option<&acadrust::entities::CellStyle>,
+    base_style: Option<&acadrust::entities::CellStyle>,
+    table_row_style: Option<&acadrust::objects::RowCellStyle>,
+) -> Option<[u8; 3]> {
+    [
+        cell_style.map(|style| (style.fill_enabled, style.background_color)),
+        row_style.map(|style| (style.fill_enabled, style.background_color)),
+        base_style.map(|style| (style.fill_enabled, style.background_color)),
+        table_row_style.map(|row| (row.fill_enabled, row.fill_color)),
+    ]
+    .into_iter()
+    .flatten()
+    .find_map(|(enabled, color)| enabled.then(|| crate::style::concrete_rgb(color)).flatten())
 }
 
 /// The table's `TABLESTYLE` snapshot: the resolved object, or the named default.
@@ -324,6 +401,8 @@ fn table_style_snapshot(resolved: Option<&acadrust::objects::TableStyle>) -> Tab
     snapshot.text_style_name = data_row.text_style_name;
     snapshot.borders = data_row.borders;
     snapshot.data_row_alignment = data_row.alignment;
+    snapshot.text_color = data_row.text_color;
+    snapshot.fill_color = data_row.fill_color;
     // The other two rows are stored only when the source distinguishes them;
     // `set_row_style` canonicalises "same as the data row" to `None` so value
     // identity decides the linkage (no flag to disagree with the values).
@@ -354,6 +433,13 @@ fn row_style_snapshot(row: &acadrust::objects::RowCellStyle) -> TableRowStyle {
         bottom: border_view(BorderView::from_table_border(&row.bottom_border)),
         left: border_view(BorderView::from_table_border(&row.left_border)),
     };
+    out.text_color = crate::style::concrete_rgb(row.text_color);
+    // A row record always carries a fill colour; only the enable flag says
+    // whether the row paints one, so an index without the flag is not a fill.
+    out.fill_color = row
+        .fill_enabled
+        .then(|| crate::style::concrete_rgb(row.fill_color))
+        .flatten();
     out
 }
 
@@ -447,19 +533,29 @@ fn clamp_source_span(span: i32, extent: usize, anchor: usize) -> u32 {
 struct BorderView {
     invisible: bool,
     double_spacing: f64,
+    /// The edge's own colour, when the source carries a concrete one.
+    color: Option<[u8; 3]>,
+    /// The edge's lineweight in 1/100 mm, when the source carries a real weight
+    /// (a symbolic `ByLayer`/`ByBlock`/`Default` is not a value).
+    lineweight_hundredths: Option<u16>,
 }
 
 impl BorderView {
-    /// A visible single border with no double-line spacing.
+    /// A visible single border with no double-line spacing and no
+    /// colour/lineweight override.
     const VISIBLE: BorderView = BorderView {
         invisible: false,
         double_spacing: 0.0,
+        color: None,
+        lineweight_hundredths: None,
     };
 
     fn from_cell_border(border: &acadrust::entities::CellBorder) -> Self {
         BorderView {
             invisible: border.invisible,
             double_spacing: border.double_spacing,
+            color: crate::style::concrete_rgb(border.color),
+            lineweight_hundredths: lineweight_hundredths(border.line_weight),
         }
     }
 
@@ -467,7 +563,18 @@ impl BorderView {
         BorderView {
             invisible: border.is_invisible,
             double_spacing: border.double_line_spacing,
+            color: crate::style::concrete_rgb(border.color),
+            lineweight_hundredths: lineweight_hundredths(border.line_weight),
         }
+    }
+}
+
+/// The concrete 1/100 mm weight a DXF border carries, or `None` for a symbolic
+/// one (`ByLayer`/`ByBlock`/`Default`, which are not weights).
+fn lineweight_hundredths(weight: acadrust::LineWeight) -> Option<u16> {
+    match weight {
+        acadrust::LineWeight::Value(hundredths) if hundredths >= 0 => Some(hundredths as u16),
+        _ => None,
     }
 }
 
@@ -492,6 +599,40 @@ impl Default for CellBorderSet {
 }
 
 impl CellBorderSet {
+    /// The four edges in `[top, right, bottom, left]` order.
+    fn edges(&self) -> [BorderView; 4] {
+        [self.top, self.right, self.bottom, self.left]
+    }
+
+    /// This set's visibility/spacing with every edge's colour and lineweight
+    /// taken from the first level (in precedence order) that carries a concrete
+    /// value for that edge.
+    fn with_resolved_appearance(self, levels: &[Option<CellBorderSet>; 4]) -> Self {
+        let resolved = |edge: usize, pick: fn(&BorderView) -> Option<[u8; 3]>| {
+            levels
+                .iter()
+                .flatten()
+                .find_map(|level| pick(&level.edges()[edge]))
+        };
+        let resolved_weight = |edge: usize| {
+            levels
+                .iter()
+                .flatten()
+                .find_map(|level| level.edges()[edge].lineweight_hundredths)
+        };
+        let mut edges = self.edges();
+        for (index, edge) in edges.iter_mut().enumerate() {
+            edge.color = resolved(index, |view| view.color);
+            edge.lineweight_hundredths = resolved_weight(index);
+        }
+        CellBorderSet {
+            top: edges[0],
+            right: edges[1],
+            bottom: edges[2],
+            left: edges[3],
+        }
+    }
+
     fn from_cell_style(style: &acadrust::entities::CellStyle) -> Self {
         CellBorderSet {
             top: BorderView::from_cell_border(&style.top_border),

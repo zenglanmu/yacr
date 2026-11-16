@@ -300,6 +300,7 @@ fn a_multileader_whose_display_is_the_clamped_uniform_spline_is_writable() {
             text_style_name: "Standard".into(),
             text_font: None,
             scale_factor: 1.0,
+            text_angle_type: MLeaderTextAngle::Horizontal,
         },
         style_name: "Standard".into(),
         override_mask: 0,

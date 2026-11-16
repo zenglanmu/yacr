@@ -38,6 +38,7 @@ fn style() -> MLeaderStyleValues {
         text_style_name: "Standard".into(),
         text_font: None,
         scale_factor: 1.0,
+        text_angle_type: MLeaderTextAngle::Horizontal,
     }
 }
 
@@ -97,6 +98,7 @@ fn created_with_typed_options() -> MultiLeaderGeometry {
             dogleg_angle: Some(std::f64::consts::FRAC_PI_2),
             attachment_point: Some(1),
             left_attachment: Some(4),
+            text_angle: None,
         },
     )
     .expect("the creation options are usable")

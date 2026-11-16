@@ -11,7 +11,9 @@ use cad_db::{
     DbEntity, DbObject, DrawingDatabaseBuilder, EntityColor, EntityLineWeight,
     EntityRenderAttributes, EntityTransparency, Layer,
 };
-use cad_domain::{MLeaderPathType, MLeaderStyleValues, MultiLeaderGeometry, StyleId};
+use cad_domain::{
+    MLeaderPathType, MLeaderStyleValues, MLeaderTextAngle, MultiLeaderGeometry, StyleId,
+};
 
 /// The fixture ids, in insertion order.
 const LINE_RED: EntityId = EntityId(10);
@@ -73,6 +75,7 @@ fn leader_style() -> MLeaderStyleValues {
         text_style_name: "Standard".into(),
         text_font: Some("arial.ttf".into()),
         scale_factor: 1.0,
+        text_angle_type: MLeaderTextAngle::Horizontal,
     }
 }
 

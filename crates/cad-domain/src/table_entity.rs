@@ -3,7 +3,7 @@
 //! display geometry.
 //!
 //! [`TableGeometry`] is the single builder of a table's display: it is derived
-//! from `frame + columns + rows` by [`TableGeometry::build_display`], and the
+//! from `frame + columns + rows` by the private `display::build`, and the
 //! only writers are [`TableGeometry::new`] (creation path),
 //! [`TableGeometry::from_import`] (import path, which never rejects),
 //! [`TableGeometry::transformed`], [`TableGeometry::with_cell_text`] and
@@ -20,26 +20,31 @@
 //! rotation — default to the old drawing exactly (centre/middle, frame rotation),
 //! so a table that never sets them still derives the pre-formatting display.
 //!
-//! Honest boundary: per-cell border colours, lineweights, text colours and
-//! background fills are not part of this representation (one colour per entity,
-//! no filled area); the importer and the exporter report that gap by name in
-//! their `Completeness::Partial` / conversion reasons. A merged range is
-//! stored as the anchor cell's `merge_width`/`merge_height`; covered cells are
-//! still present in [`TableRowGeometry::cells`] (as the source stores them) and
-//! contribute no display.
+//! Honest boundary: the display carries a **per-primitive appearance** channel
+//! ([`TableDisplayAppearance`]): a cell's text colour, its background fill (a
+//! filled quad behind the text) and each border edge's colour and lineweight are
+//! stored, drawn and written back to DXF. A cell that sets none of them emits
+//! [`TableDisplayAppearance::NONE`] for every primitive, so its draw is exactly
+//! what it was before the channel existed. What still cannot be carried: a
+//! border **linetype** (this writer emits no per-cell border line type), and the
+//! renderer draws every line one pixel wide, so a stored border lineweight
+//! reaches the batch but no wider stroke (`render.lineweight_not_drawn`). A
+//! merged range is stored as the anchor cell's `merge_width`/`merge_height`;
+//! covered cells are still present in [`TableRowGeometry::cells`] (as the source
+//! stores them) and contribute no display.
 
-use crate::dimension_synthesis::{add, is_finite_point, length, line_between, normalize, scale};
-use crate::{
-    CadError, CadResult, Point3, SemanticGeometry, StyleId, TextAlignH, TextAlignV,
-    TextLineSpacing, Transform3, DEFAULT_TEXT_WIDTH_FACTOR,
-};
+use crate::dimension_synthesis::{is_finite_point, length, normalize};
+use crate::{CadError, CadResult, Point3, SemanticGeometry, StyleId, Transform3};
 
+pub use appearance::{TableCellAppearanceEdit, TableDisplayAppearance, TableFieldEdit};
 pub use format::{
     TableCellAlignH, TableCellAlignV, TableCellAlignment, TableRowKind, TableRowStyle,
 };
 pub use style::{TableStyleValues, DEFAULT_TABLE_MARGIN, DEFAULT_TABLE_STYLE_NAME};
 
+mod appearance;
 mod csv;
+mod display;
 mod edit;
 mod format;
 mod style;
@@ -47,6 +52,11 @@ mod style;
 /// Similarity tolerance for the table transform (the same ratio rule every
 /// other similarity-only display entity uses).
 const SIMILARITY_TOLERANCE: f64 = 1e-9;
+
+/// The largest border lineweight a DXF record can carry, in 1/100 mm (group
+/// 275-279 range `0..=211`, i.e. 0.00-2.11 mm). A larger stored value would be
+/// written back truncated, so the model refuses it instead.
+pub const MAX_BORDER_LINEWEIGHT_HUNDREDTHS: u16 = 211;
 
 /// The fallback cell text height when neither the cell/row/table style nor the
 /// content supplies a positive value.
@@ -104,7 +114,7 @@ impl TableFrame {
     }
 }
 
-/// Visibility and double-line spacing of one cell edge.
+/// Visibility, colour, lineweight and double-line spacing of one cell edge.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TableBorder {
     /// Whether the edge is drawn at all (`CellBorder.invisible` inverted).
@@ -112,6 +122,16 @@ pub struct TableBorder {
     /// Inward offset of the second line of a double border; `0.0` is a single
     /// line.
     pub double_spacing: f64,
+    /// The edge's own sRGB colour (DXF groups 65-69 of a cell record, 64-69 of a
+    /// `TABLESTYLE` row record). `None` means "no override": the edge is drawn in
+    /// the entity's resolved colour, exactly as every table border was before a
+    /// per-edge colour existed. `Some` is stored and written back verbatim.
+    pub color: Option<[u8; 3]>,
+    /// The edge's own lineweight in **1/100 mm** (DXF groups 275-279, the DXF
+    /// unit). `None` keeps the entity's resolved lineweight. The renderer draws
+    /// every line one pixel wide, so a stored weight reaches the batch but no
+    /// wider stroke (`render.lineweight_not_drawn`).
+    pub lineweight_hundredths: Option<u16>,
 }
 
 impl Default for TableBorder {
@@ -119,6 +139,8 @@ impl Default for TableBorder {
         TableBorder {
             visible: true,
             double_spacing: 0.0,
+            color: None,
+            lineweight_hundredths: None,
         }
     }
 }
@@ -128,12 +150,16 @@ impl TableBorder {
     pub const HIDDEN: TableBorder = TableBorder {
         visible: false,
         double_spacing: 0.0,
+        color: None,
+        lineweight_hundredths: None,
     };
 
-    /// A visible single edge.
+    /// A visible single edge with no colour/lineweight override.
     pub const VISIBLE: TableBorder = TableBorder {
         visible: true,
         double_spacing: 0.0,
+        color: None,
+        lineweight_hundredths: None,
     };
 }
 
@@ -185,6 +211,17 @@ pub struct TableCellGeometry {
     /// Number of rows this cell spans (including itself); `>= 1`.
     pub merge_height: u32,
     pub borders: TableCellBorders,
+    /// The cell's own text (content) colour, sRGB (DXF cell group 64). `None`
+    /// means "no override": the cell text is drawn in the entity's resolved
+    /// colour, which is what every table did before a per-cell colour existed.
+    ///
+    /// The importer stores the **resolved** value (cell style, then row style,
+    /// then the table's base style, then the `TABLESTYLE` row set), so a cell
+    /// whose value equals its row's is still an inheriting cell.
+    pub text_color: Option<[u8; 3]>,
+    /// The cell's background fill colour, sRGB (DXF groups 63 + 283). `None`
+    /// means "no background": no filled primitive is derived for the cell.
+    pub fill_color: Option<[u8; 3]>,
 }
 
 /// One table row.
@@ -239,7 +276,7 @@ pub struct TableGeometry {
     style: TableStyleValues,
     name: String,
     description: String,
-    display: Vec<SemanticGeometry>,
+    display: display::TableDisplay,
 }
 
 impl TableGeometry {
@@ -256,7 +293,7 @@ impl TableGeometry {
     pub fn new(parts: TableParts) -> CadResult<Self> {
         validate_parts(&parts)?;
         let geometry = Self::from_import(parts);
-        if geometry.display.is_empty() {
+        if geometry.display.geometry().is_empty() {
             return Err(CadError::InvalidInput(
                 "table.structure: the definition yields an empty display".into(),
             ));
@@ -293,10 +330,10 @@ impl TableGeometry {
             style,
             name: parts.name,
             description: parts.description,
-            display: Vec::new(),
+            display: display::TableDisplay::default(),
         };
         geometry.clamp_merge_spans();
-        geometry.display = geometry.build_display();
+        geometry.rebuild_display();
         geometry
     }
 
@@ -408,6 +445,9 @@ impl TableGeometry {
                             bottom: scale_border(cell.borders.bottom, s),
                             left: scale_border(cell.borders.left, s),
                         },
+                        // Colours are invariant under a similarity.
+                        text_color: cell.text_color,
+                        fill_color: cell.fill_color,
                     })
                     .collect(),
             })
@@ -419,9 +459,9 @@ impl TableGeometry {
             style: self.style.scaled(s),
             name: self.name.clone(),
             description: self.description.clone(),
-            display: Vec::new(),
+            display: display::TableDisplay::default(),
         };
-        geometry.display = geometry.build_display();
+        geometry.rebuild_display();
         Ok(geometry)
     }
 
@@ -456,7 +496,7 @@ impl TableGeometry {
             })?;
             cell.text = text;
         }
-        geometry.display = geometry.build_display();
+        geometry.rebuild_display();
         Ok(geometry)
     }
 
@@ -507,9 +547,23 @@ impl TableGeometry {
             .collect()
     }
 
-    /// The derived display: grid lines and cell text.
+    /// The derived display: grid lines, background fills and cell text.
+    ///
+    /// The appearance each primitive carries is a **parallel** list
+    /// ([`Self::display_appearances`]); `display()` alone is the geometry
+    /// projection every non-rendering consumer (bounds, picking, export) uses.
     pub fn display(&self) -> &[SemanticGeometry] {
-        &self.display
+        self.display.geometry()
+    }
+
+    /// The appearance of every primitive of [`Self::display`], in the same
+    /// order (always the same length).
+    ///
+    /// [`TableDisplayAppearance::NONE`] means "no per-primitive override": the
+    /// primitive is drawn in the entity's resolved colour/lineweight, so a table
+    /// that never sets a colour derives the pre-appearance draw exactly.
+    pub fn display_appearances(&self) -> &[TableDisplayAppearance] {
+        self.display.appearance()
     }
 
     /// Rebuild the derived display after a definition edit.
@@ -518,136 +572,7 @@ impl TableGeometry {
     /// themselves, so no caller can leave a display that disagrees with the
     /// definition.
     pub(crate) fn rebuild_display(&mut self) {
-        self.display = self.build_display();
-    }
-
-    /// Derive the display from `frame + columns + rows`.
-    ///
-    /// Same order as the pre-table-entity importer: row by row, cell by cell;
-    /// each anchoring cell contributes its visible edges and then its
-    /// first-content text. The text anchor, its justification and its rotation
-    /// come from the cell's own [`TableCellAlignment`] and rotation, whose
-    /// defaults reproduce the old cell-centre/centred/frame-rotation output.
-    fn build_display(&self) -> Vec<SemanticGeometry> {
-        let mut children: Vec<SemanticGeometry> = Vec::new();
-        if self.columns.is_empty() || self.rows.is_empty() {
-            return children;
-        }
-        let vertical = self.frame.vertical();
-        if length(self.frame.horizontal) < 1e-9 || length(vertical) < 1e-9 {
-            return children;
-        }
-        let corner = |x: f64, y: f64| {
-            add(
-                self.frame.origin,
-                add(scale(self.frame.horizontal, x), scale(vertical, y)),
-            )
-        };
-        // Cell text is a flat `Text` child: it can only rotate within world XY.
-        // For a +Z plane that is the frame's horizontal direction; a tilted
-        // source plane is drawn with world-XY text (rotation 0) and the importer
-        // reports that limit.
-        let text_rotation = if (self.frame.normal.z - 1.0).abs() <= SIMILARITY_TOLERANCE {
-            self.frame.horizontal.y.atan2(self.frame.horizontal.x)
-        } else {
-            0.0
-        };
-
-        // Cells covered by a merge anchor (all but the top-left cell). Their
-        // interior edges belong to the merged range and are not drawn. The one
-        // coverage rule lives in `edit::merge_coverage`, which clamps a malformed
-        // span to the remaining grid: a raw `i32` span near 2^31 must never
-        // drive this loop.
-        let covered = edit::merge_coverage(&self.rows, self.columns.len());
-
-        let mut y = 0.0;
-        for (row_index, row) in self.rows.iter().enumerate() {
-            let height = row.height.max(0.0);
-            let mut x = 0.0;
-            for (column_index, cell) in row.cells.iter().enumerate() {
-                let width = self
-                    .columns
-                    .get(column_index)
-                    .map(|column| column.width.max(0.0))
-                    .unwrap_or(0.0);
-                if covered.contains(&(row_index, column_index)) {
-                    x += width;
-                    continue;
-                }
-                // A merge anchor spans its covered columns/rows; clamp the
-                // stored span to the remaining grid.
-                let span_w_cells = edit::span(cell.merge_width, self.columns.len(), column_index);
-                let span_h_cells = edit::span(cell.merge_height, self.rows.len(), row_index);
-                let span_w: f64 = (0..span_w_cells)
-                    .map(|dc| {
-                        self.columns
-                            .get(column_index + dc)
-                            .map(|column| column.width.max(0.0))
-                            .unwrap_or(0.0)
-                    })
-                    .sum();
-                let span_h: f64 = (0..span_h_cells)
-                    .map(|dr| {
-                        self.rows
-                            .get(row_index + dr)
-                            .map(|row| row.height.max(0.0))
-                            .unwrap_or(0.0)
-                    })
-                    .sum();
-
-                // Each cell contributes the four edges its effective style
-                // leaves visible; a double border adds a second parallel line.
-                push_cell_borders(&mut children, &corner, x, y, span_w, span_h, &cell.borders);
-
-                if !cell.text.is_empty() {
-                    // The alignment decides both where the text anchors and which
-                    // `Text` justification it carries, so the drawn result is the
-                    // same rectangle a user sees in AutoCAD: a left-aligned cell
-                    // starts at the cell's left edge, a top-aligned one hangs
-                    // from its top edge. The default (centre/middle) reproduces
-                    // the pre-alignment cell centre exactly.
-                    let (anchor_x, h_align) = match cell.alignment.horizontal {
-                        TableCellAlignH::Left => (x, TextAlignH::Left),
-                        TableCellAlignH::Center => (x + span_w * 0.5, TextAlignH::Center),
-                        TableCellAlignH::Right => (x + span_w, TextAlignH::Right),
-                    };
-                    let (anchor_y, v_align) = match cell.alignment.vertical {
-                        TableCellAlignV::Top => (y + span_h, TextAlignV::Top),
-                        TableCellAlignV::Middle => (y + span_h * 0.5, TextAlignV::Middle),
-                        TableCellAlignV::Bottom => (y, TextAlignV::Bottom),
-                    };
-                    children.push(SemanticGeometry::Text {
-                        text: cell.text.clone(),
-                        position: corner(anchor_x, anchor_y),
-                        style: cell.style,
-                        height: if cell.text_height > 0.0 {
-                            cell.text_height
-                        } else {
-                            DEFAULT_CELL_TEXT_HEIGHT
-                        },
-                        // The stored rotation is relative to the frame, so it is
-                        // added to it here. On a tilted source plane the frame
-                        // part is 0 (world XY text, reported by the importer) and
-                        // the cell's own part still applies.
-                        rotation: text_rotation + cell.rotation,
-                        font: cell.font.clone(),
-                        h_align,
-                        v_align,
-                        // Table cell text is placed at a fixed cell anchor; the
-                        // cell width is not a text wrap boundary.
-                        wrap_width: None,
-                        // Table cells do not stretch their text.
-                        width_factor: DEFAULT_TEXT_WIDTH_FACTOR,
-                        // An ACAD_TABLE cell has no line-spacing group; the
-                        // neutral spacing keeps the pre-line-spacing layout.
-                        line_spacing: TextLineSpacing::default(),
-                    });
-                }
-                x += width;
-            }
-            y += height;
-        }
-        children
+        self.display = display::build(&self.frame, &self.columns, &self.rows);
     }
 }
 
@@ -680,81 +605,15 @@ fn normalize_frame(frame: TableFrame) -> TableFrame {
     }
 }
 
-/// Emit the four edges of one cell rectangle for the resolved style.
-///
-/// An edge is drawn only when it is visible; a double border adds a second
-/// parallel line offset toward the cell interior by its spacing. `corner` maps
-/// the cell's local `(u, v)` plane onto world space.
-fn push_cell_borders(
-    children: &mut Vec<SemanticGeometry>,
-    corner: &impl Fn(f64, f64) -> Point3,
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
-    borders: &TableCellBorders,
-) {
-    let bottom = borders.bottom;
-    if bottom.visible {
-        push_edge(children, corner(x, y), corner(x + width, y));
-        if bottom.double_spacing > 0.0 {
-            let s = bottom.double_spacing;
-            push_edge(children, corner(x, y + s), corner(x + width, y + s));
-        }
-    }
-    let top = borders.top;
-    if top.visible {
-        push_edge(
-            children,
-            corner(x, y + height),
-            corner(x + width, y + height),
-        );
-        if top.double_spacing > 0.0 {
-            let s = top.double_spacing;
-            push_edge(
-                children,
-                corner(x, y + height - s),
-                corner(x + width, y + height - s),
-            );
-        }
-    }
-    let left = borders.left;
-    if left.visible {
-        push_edge(children, corner(x, y), corner(x, y + height));
-        if left.double_spacing > 0.0 {
-            let s = left.double_spacing;
-            push_edge(children, corner(x + s, y), corner(x + s, y + height));
-        }
-    }
-    let right = borders.right;
-    if right.visible {
-        push_edge(
-            children,
-            corner(x + width, y),
-            corner(x + width, y + height),
-        );
-        if right.double_spacing > 0.0 {
-            let s = right.double_spacing;
-            push_edge(
-                children,
-                corner(x + width - s, y),
-                corner(x + width - s, y + height),
-            );
-        }
-    }
-}
-
-/// Push a non-degenerate line segment between two points.
-fn push_edge(children: &mut Vec<SemanticGeometry>, start: Point3, end: Point3) {
-    if let Some(line) = line_between(start, end) {
-        children.push(line);
-    }
-}
-
+/// Scale a border's geometric part by the entity transform. The colour and the
+/// lineweight are **not** geometric: a print width and a colour are invariant
+/// under a scale, exactly like a DXF border override.
 fn scale_border(border: TableBorder, factor: f64) -> TableBorder {
     TableBorder {
         visible: border.visible,
         double_spacing: border.double_spacing * factor,
+        color: border.color,
+        lineweight_hundredths: border.lineweight_hundredths,
     }
 }
 
@@ -764,6 +623,26 @@ fn uniform_scale(transform: &Transform3) -> f64 {
     let sy = (m[0][1] * m[0][1] + m[1][1] * m[1][1] + m[2][1] * m[2][1]).sqrt();
     let sz = (m[0][2] * m[0][2] + m[1][2] * m[1][2] + m[2][2] * m[2][2]).sqrt();
     ((sx + sy + sz) / 3.0).max(1e-12)
+}
+
+/// The structural rule one border must satisfy: its double-line spacing is a
+/// finite non-negative length and its lineweight fits the DXF group range.
+pub(crate) fn validate_border(border: TableBorder) -> CadResult<()> {
+    if !border.double_spacing.is_finite() || border.double_spacing < 0.0 {
+        return Err(CadError::InvalidInput(
+            "table.structure: border double-line spacing must be finite and non-negative".into(),
+        ));
+    }
+    if border
+        .lineweight_hundredths
+        .is_some_and(|hundredths| hundredths > MAX_BORDER_LINEWEIGHT_HUNDREDTHS)
+    {
+        return Err(CadError::InvalidInput(format!(
+            "table.structure: border lineweights must be 0..={MAX_BORDER_LINEWEIGHT_HUNDREDTHS} \
+             hundredths of a millimetre (the DXF group 275-279 range)"
+        )));
+    }
+    Ok(())
 }
 
 /// Structural validation shared by [`TableGeometry::new`].
@@ -845,6 +724,14 @@ fn validate_parts(parts: &TableParts) -> CadResult<()> {
                     "table.structure: cell text rotations must be finite".into(),
                 ));
             }
+            for border in [
+                cell.borders.top,
+                cell.borders.right,
+                cell.borders.bottom,
+                cell.borders.left,
+            ] {
+                validate_border(border)?;
+            }
         }
     }
     // Merge ranges must not overlap. Rows are visited top to bottom and cells
@@ -877,4 +764,8 @@ fn validate_parts(parts: &TableParts) -> CadResult<()> {
 }
 
 #[cfg(test)]
+mod appearance_tests;
+#[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_support;

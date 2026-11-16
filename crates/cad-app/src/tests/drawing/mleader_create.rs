@@ -20,6 +20,15 @@ fn mleader_app(
     styles: Vec<cad_db::Style>,
     standard: Option<MLeaderStyle>,
 ) -> (Application, SessionState) {
+    mleader_app_rows(styles, standard, Vec::new())
+}
+
+/// [`mleader_app`] plus additional MLEADERSTYLE rows (the style-selector tests).
+fn mleader_app_rows(
+    styles: Vec<cad_db::Style>,
+    standard: Option<MLeaderStyle>,
+    extra_rows: Vec<MLeaderStyle>,
+) -> (Application, SessionState) {
     let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
     for (id, name) in [(LayerId(0), "0"), (LayerId(3), "WALLS")] {
         b.insert_layer(Layer {
@@ -34,6 +43,9 @@ fn mleader_app(
     }
     if let Some(style) = standard {
         b.insert_mleader_style(style).unwrap();
+    }
+    for row in extra_rows {
+        b.insert_mleader_style(row).unwrap();
     }
     let drawing = b.finish().unwrap();
     let mut app = Application::new();
@@ -89,9 +101,11 @@ fn payload(arrow: Point3, landing: Point3, text: &str) -> CommandPayload {
         arrow,
         landing,
         text: text.to_string(),
+        style_name: None,
         dogleg_length: None,
         dogleg_angle: None,
         attachment: None,
+        text_angle: None,
     }
 }
 
@@ -334,22 +348,16 @@ fn create_mleader_refuses_bad_text_points_and_payloads_without_writing() {
     let rev = revision(&app);
     let cases: Vec<(&str, CommandPayload)> = vec![
         (
-            "tool.text_empty",
-            payload(p3(0.0, 0.0, 0.0), p3(10.0, 2.0, 0.0), ""),
-        ),
-        (
-            "tool.text_empty",
-            payload(p3(0.0, 0.0, 0.0), p3(10.0, 2.0, 0.0), "  \t\n"),
-        ),
-        (
             "tool.text_too_long",
             CommandPayload::MLeader {
                 arrow: p3(0.0, 0.0, 0.0),
                 landing: p3(10.0, 2.0, 0.0),
                 text: "a".repeat(MAX_TOOL_TEXT_CHARS + 1),
+                style_name: None,
                 dogleg_length: None,
                 dogleg_angle: None,
                 attachment: None,
+                text_angle: None,
             },
         ),
         (
@@ -538,28 +546,27 @@ fn qleader_and_leader_inherit_the_shared_option_plan() {
 }
 
 #[test]
-fn leader_option_plan_names_the_point_limit_and_the_annotation_type() {
+fn leader_option_plan_names_the_point_limit_and_the_vertex_carrier() {
     use crate::app_drawing::annot_batch::leader::{
-        check_annotation_type, check_leader_points, plan_leader_options, MAX_CREATED_LEADER_POINTS,
+        check_leader_points, plan_leader_options, MAX_CREATED_LEADER_POINTS,
     };
 
     assert!(check_leader_points(MAX_CREATED_LEADER_POINTS).is_ok());
     let error = check_leader_points(MAX_CREATED_LEADER_POINTS + 1).unwrap_err();
+    let message = match error {
+        CadError::Unsupported(ref message) if message.contains("mleader.option_max_points") => {
+            message.clone()
+        }
+        other => panic!("{other:?}"),
+    };
+    // The refusal states *why* the ceiling exists: the typed input's two
+    // coordinates, not a limit of DXF LEADER_LINE or of the stored line.
+    assert!(message.contains("exactly two coordinates"), "{message}");
+    assert!(message.contains("MLEADEREDIT ADD"), "{message}");
     assert!(
-        matches!(error, CadError::Unsupported(ref message)
-            if message.contains("mleader.option_max_points")),
-        "{error:?}"
+        message.contains("vertex list"),
+        "the row must say the format carries a multi-vertex line: {message}"
     );
-    assert!(check_annotation_type(MLeaderContent::Text).is_ok());
-    {
-        let content = MLeaderContent::None;
-        let error = check_annotation_type(content).unwrap_err();
-        assert!(
-            matches!(error, CadError::Unsupported(ref message)
-                if message.contains("mleader.content_unsupported")),
-            "{error:?}"
-        );
-    }
 
     // The plan reads the **stored** row (the resolution clamps a `0` arrowhead
     // size to the pinned default), so an arrowhead-off style is named, not drawn.
@@ -569,6 +576,11 @@ fn leader_option_plan_names_the_point_limit_and_the_annotation_type() {
     assert_eq!(options.path, MLeaderPathType::StraightLineSegments);
     assert_eq!(options.max_points, MAX_CREATED_LEADER_POINTS);
     assert!(options.arrowhead);
+    assert_eq!(
+        options.style_content,
+        MLeaderContent::Text,
+        "the plan reports the style's declared content kind"
+    );
     let mut off = row.clone();
     off.arrowhead_size = 0.0;
     let resolution = off.resolved("Standard".into(), StyleId(0), None);
@@ -588,18 +600,18 @@ fn leader_option_plan_names_the_point_limit_and_the_annotation_type() {
             if message.contains("mleader.path_type")),
         "{error:?}"
     );
+    // A content-less style is *not* refused any more: the typed text decides the
+    // content kind and the plan reports the style's declared kind.
+    let mut none = row.clone();
+    none.content_type = MLeaderStyle::CONTENT_NONE;
+    let resolution = none.resolved("Standard".into(), StyleId(0), None);
+    let options = plan_leader_options(&none, &resolution).expect("a content-less style plans");
+    assert_eq!(options.style_content, MLeaderContent::None);
 }
 
 #[test]
-fn create_mleader_refuses_block_tolerance_and_content_less_styles_without_writing() {
-    for (content, code) in [
-        (MLeaderStyle::CONTENT_BLOCK, "mleader.content_unsupported"),
-        (
-            MLeaderStyle::CONTENT_TOLERANCE,
-            "mleader.content_unsupported",
-        ),
-        (MLeaderStyle::CONTENT_NONE, "mleader.text_required"),
-    ] {
+fn create_mleader_refuses_block_and_tolerance_styles_without_writing() {
+    for content in [MLeaderStyle::CONTENT_BLOCK, MLeaderStyle::CONTENT_TOLERANCE] {
         let mut standard = MLeaderStyle::standard_metric(MLeaderStyleId(0));
         standard.content_type = content;
         let (mut app, mut session) = mleader_app(Vec::new(), Some(standard));
@@ -616,12 +628,36 @@ fn create_mleader_refuses_block_tolerance_and_content_less_styles_without_writin
             other => panic!("expected a named refusal for content {content}, got {other:?}"),
         };
         assert!(
-            message.contains(code),
-            "content {content} must refuse with {code:?}: {message}"
+            message.contains("mleader.content_unsupported"),
+            "content {content} must refuse by name: {message}"
         );
         assert_eq!(revision(&app), rev, "content {content} must not write");
         assert!(!app.can_undo(&DocumentId(1)));
     }
+}
+
+#[test]
+fn a_content_less_style_row_creates_text_and_sets_the_content_override_bit() {
+    // The style's content kind is a *default*: a typed text overrides it through
+    // entity `172` plus the `0x400` mask bit, so the reload reads what was made.
+    let mut standard = MLeaderStyle::standard_metric(MLeaderStyleId(0));
+    standard.content_type = MLeaderStyle::CONTENT_NONE;
+    let (mut app, mut session) = mleader_app(Vec::new(), Some(standard));
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::MLeader,
+        payload(p3(0.0, 0.0, 0.0), p3(10.0, 2.0, 0.0), "Note"),
+    )
+    .expect("a typed text wins over the style's content kind");
+    let (_, leader) = the_leader(&app);
+    assert_eq!(leader.content(), MLeaderContent::Text);
+    assert_eq!(leader.text().string, "Note");
+    assert_ne!(
+        leader.override_mask() & MASK_CONTENT_TYPE,
+        0,
+        "the content kind overrides the style's, so the mask names it"
+    );
 }
 
 #[test]
@@ -669,23 +705,90 @@ fn create_mleader_refuses_a_missing_layer_and_viewer_mode_without_writing() {
 }
 
 #[test]
-fn the_text_less_path_is_unreachable() {
-    // The command refuses an empty/whitespace text (no content-less creation).
+fn a_content_less_command_stores_an_empty_text_and_renders_arrow_and_dogleg() {
+    // An empty (or whitespace-only) text is the real AutoCAD content-less case:
+    // the leader keeps its arrow, leader line and dogleg and carries no
+    // annotation. It is *not* a refusal any more.
     let (mut app, mut session) = mleader_app(Vec::new(), None);
-    for text in ["", "   "] {
-        let error = execute(
-            &mut app,
-            &mut session,
-            CommandId::MLeader,
-            payload(p3(0.0, 0.0, 0.0), p3(10.0, 2.0, 0.0), text),
-        )
-        .unwrap_err();
-        assert!(
-            matches!(error, CadError::InvalidInput(ref message) if message.contains("tool.text_empty")),
-            "{error:?}"
-        );
-    }
-    // The pure tool cannot produce an intent without the text either.
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::MLeader,
+        payload(p3(0.0, 0.0, 0.0), p3(10.0, 2.0, 0.0), "   "),
+    )
+    .expect("an empty text creates a content-less leader");
+    assert_eq!(outcome.objects.len(), 1);
+    assert!(
+        outcome
+            .diagnostics
+            .iter()
+            .any(|row| row.code == "mleader.content_none"),
+        "the content-less outcome is reported: {:?}",
+        outcome.diagnostics
+    );
+    let (_, leader) = the_leader(&app);
+    assert_eq!(leader.content(), MLeaderContent::None);
+    assert_eq!(
+        leader.text().string,
+        "",
+        "the whitespace is normalised away"
+    );
+    // The style declares MText, so the entity's own content kind overrides it.
+    assert_ne!(leader.override_mask() & MASK_CONTENT_TYPE, 0);
+    // The display is the arrow path, the arrowhead and the dogleg — no text.
+    assert_eq!(leader.display().len(), 3, "{:?}", leader.display());
+    assert!(
+        leader
+            .display()
+            .iter()
+            .all(|child| !matches!(child, SemanticGeometry::Text { .. })),
+        "{:?}",
+        leader.display()
+    );
+    assert!(app.can_undo(&DocumentId(1)));
+
+    // It round-trips as a content-less MULTILEADER (entity 172 = 0), not as an
+    // MText with an empty string.
+    let (bytes, _) = export(&ExportRequest {
+        database: &app.workspace.documents[&DocumentId(1)].drawing,
+        document_id: DocumentId(1),
+        space: ExportSpace::Model,
+        format: ExportFormat::DxfText,
+        limits: ExportLimits::default(),
+        units: None,
+    })
+    .expect("the drawing exports");
+    let request = ImportRequest {
+        document: DocumentId(2),
+        database: DatabaseId(2),
+        bytes: Arc::from(bytes.into_boxed_slice()),
+        limits: ImportLimits::default(),
+        generation: 0,
+        xref: None,
+    };
+    let imported = AcadrustImporter::new()
+        .import(&request, &|| false)
+        .expect("the exported drawing re-imports");
+    let reimported = imported
+        .database
+        .model_space()
+        .iter()
+        .find_map(|entity| match &entity.geometry {
+            SemanticGeometry::MultiLeader(leader) => Some(leader.as_ref()),
+            _ => None,
+        })
+        .expect("the content-less leader re-imports as a MULTILEADER");
+    assert_eq!(reimported.content(), MLeaderContent::None);
+    assert_eq!(reimported.text().string, "");
+    assert_eq!(reimported.lines().len(), 1);
+    assert_eq!(reimported.lines()[0].points.len(), 2);
+}
+
+#[test]
+fn the_interactive_capture_still_requires_the_text() {
+    // The **typed command** accepts a content-less leader; the interactive
+    // capture (a different contract, driven by the desktop UI) still needs the
+    // terminal text before it can produce an intent, and says so by name.
     let mut tool = crate::DrawTool::new(crate::draw_tool::DrawToolKind::MLeader, 0);
     tool.push_point(p3(0.0, 0.0, 0.0)).unwrap();
     tool.push_point(p3(10.0, 2.0, 0.0)).unwrap();
@@ -695,22 +798,6 @@ fn the_text_less_path_is_unreachable() {
         matches!(error, CadError::InvalidInput(ref message) if message.contains("tool.text_required")),
         "{error:?}"
     );
-    // And the creation constructor itself has no content-less arm: it always
-    // stores `MLeaderContent::Text`.
-    let resolution = app.workspace.documents[&DocumentId(1)]
-        .drawing
-        .resolve_mleader_style("Standard")
-        .unwrap();
-    let created = MultiLeaderGeometry::created(
-        resolution.values,
-        "Standard".into(),
-        resolution.left_attachment,
-        p3(0.0, 0.0, 0.0),
-        p3(10.0, 2.0, 0.0),
-        "Note".into(),
-    )
-    .expect("created");
-    assert_eq!(created.content(), MLeaderContent::Text);
 }
 
 #[test]

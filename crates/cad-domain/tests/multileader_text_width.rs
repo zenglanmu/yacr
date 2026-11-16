@@ -8,8 +8,8 @@
 
 use cad_domain::{
     MLeaderContent, MLeaderLine, MLeaderPathType, MLeaderReserved, MLeaderRoot, MLeaderStyleValues,
-    MLeaderText, MultiLeaderGeometry, MultiLeaderParts, PlaneFrame, Point3, SemanticGeometry,
-    StyleId,
+    MLeaderText, MLeaderTextAngle, MultiLeaderGeometry, MultiLeaderParts, PlaneFrame, Point3,
+    SemanticGeometry, StyleId,
 };
 
 fn point(x: f64, y: f64) -> Point3 {
@@ -29,6 +29,7 @@ fn style() -> MLeaderStyleValues {
         text_style_name: "Standard".into(),
         text_font: Some("arial.ttf".into()),
         scale_factor: 1.0,
+        text_angle_type: MLeaderTextAngle::Horizontal,
     }
 }
 

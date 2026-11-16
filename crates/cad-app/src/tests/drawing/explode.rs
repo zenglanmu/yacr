@@ -807,6 +807,7 @@ fn explode_multileader_produces_leader_lines_text_and_arrow_mesh() {
         text_style_name: "Standard".into(),
         text_font: None,
         scale_factor: 1.0,
+        text_angle_type: MLeaderTextAngle::Horizontal,
     };
     let leader = MultiLeaderGeometry::created(
         style,

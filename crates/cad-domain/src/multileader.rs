@@ -23,6 +23,7 @@
 use crate::dimension_synthesis::{
     add, arrowhead, is_finite_point, length, line_between, normalize, scale, sub,
 };
+use crate::multileader_angle::MLeaderTextAngle;
 use crate::{
     CadError, CadResult, Point3, SemanticGeometry, StyleId, TextAlignH, TextAlignV, Transform3,
 };
@@ -55,6 +56,16 @@ pub enum MLeaderContent {
     None,
     /// `172 = 2`: the string lives in [`MultiLeaderText`].
     Text,
+}
+
+impl MLeaderContent {
+    /// The DXF `172` code of this content kind (`0` none, `2` MText).
+    pub fn dxf(self) -> i16 {
+        match self {
+            Self::None => 0,
+            Self::Text => 2,
+        }
+    }
 }
 
 /// A plane frame: the DXF `110`/`111`/`112` base point, direction and vertical,
@@ -121,6 +132,14 @@ pub struct MLeaderStyleValues {
     pub text_font: Option<String>,
     /// Entity scale factor (DXF tail `45`).
     pub scale_factor: f64,
+    /// Effective annotation text angle type (entity `174`, style `175`; the
+    /// `0x2000` override bit decides which one applied).
+    ///
+    /// The default is [`MLeaderTextAngle::Horizontal`] — the value every leader
+    /// this build wrote before the field existed carries, i.e. the one the
+    /// created leader's own geometry (text rotation `0`) already produced, so
+    /// existing files stay byte-identical.
+    pub text_angle_type: MLeaderTextAngle,
 }
 
 /// The annotation text of a migrated multileader.
@@ -355,7 +374,7 @@ pub const CREATED_TEXT_ATTACHMENT_POINT: i16 = 2;
 /// `MLEADERSTYLE` snapshot (ADR 0019 decision F.2).
 ///
 /// Every field is `None` by default, which means "use the resolved style value";
-/// the four fields are exactly the creation inputs that have a stored home and a
+/// the five fields are exactly the creation inputs that have a stored home and a
 /// DXF group the existing exporter already writes verbatim, so setting one is
 /// never silently dropped:
 ///
@@ -365,11 +384,7 @@ pub const CREATED_TEXT_ATTACHMENT_POINT: i16 = 2;
 /// | dogleg direction | [`MLeaderRoot::dogleg_vector`] | `LEADER 11` |
 /// | vertical attachment | [`MLeaderText::left_attachment`] | entity `173` / `CONTEXT_DATA 174` |
 /// | horizontal attachment | [`MLeaderText::attachment_point`] | entity `179` / `CONTEXT_DATA 171` |
-///
-/// The AutoCAD *angle constraint* (DXF entity `174`, text angle type) is **not**
-/// here: this model has no field for it, and adding one without the matching
-/// export/import mapping would let the writer drop it silently. Creation therefore
-/// refuses that option by name instead (`mleader.option_text_angle`).
+/// | text angle type | [`MLeaderStyleValues::text_angle_type`] | entity `174` (mask `0x2000`) |
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct MLeaderCreateOptions {
     /// The root's own dogleg/landing length (`LEADER 40`); `None` uses the
@@ -387,6 +402,10 @@ pub struct MLeaderCreateOptions {
     /// The vertical text attachment (`0`..`10`; entity `173` /
     /// `CONTEXT_DATA 174`); `None` uses the style's resolved left attachment.
     pub left_attachment: Option<i16>,
+    /// The annotation text angle type (entity `174`, style `175`); `None` uses
+    /// the resolved style's value. A mode that differs from the style sets the
+    /// `0x2000` override bit, so the entity value is the one a reload resolves.
+    pub text_angle: Option<MLeaderTextAngle>,
 }
 
 /// The parts accepted by [`MultiLeaderGeometry::from_import`].
@@ -741,13 +760,22 @@ impl MultiLeaderGeometry {
     }
 
     /// The annotation text as a `Text` display child (the pre-P7b placement).
+    ///
+    /// The drawn rotation honours the effective text angle type (`174`/`175`):
+    /// [`MLeaderTextAngle::Horizontal`] keeps the stored rotation (the writer's
+    /// default, so every existing leader is unchanged), and the two
+    /// leader-relative modes take the last leader segment's in-plane angle —
+    /// `Optimized` additionally flips it upright. The mapping of `174` onto the
+    /// drawn rotation is **unverified against AutoCAD** (the same standing
+    /// limitation as the attachment-to-alignment mapping), and the stored
+    /// `MLeaderText::rotation` is still what the exporter writes.
     fn text_geometry(&self) -> SemanticGeometry {
         SemanticGeometry::Text {
             text: self.text.string.clone(),
             position: self.text.location,
             style: self.style.text_style,
             height: self.text.height,
-            rotation: self.text.rotation,
+            rotation: self.display_text_rotation(),
             font: self.style.text_font.clone(),
             h_align: self.text.h_align(),
             v_align: self.text.v_align(),
@@ -757,6 +785,50 @@ impl MultiLeaderGeometry {
             // model; the neutral spacing matches what the exporter writes.
             line_spacing: crate::TextLineSpacing::default(),
         }
+    }
+
+    /// The rotation the display draws the annotation at, per the effective text
+    /// angle type.
+    fn display_text_rotation(&self) -> f64 {
+        match self.style.text_angle_type {
+            MLeaderTextAngle::Horizontal => self.text.rotation,
+            mode => match self.last_segment_angle() {
+                Some(angle) if mode == MLeaderTextAngle::Optimized => {
+                    // Upright: a segment pointing left would draw the text
+                    // upside down, so the optimized mode turns it half a turn.
+                    if angle > std::f64::consts::FRAC_PI_2 || angle <= -std::f64::consts::FRAC_PI_2
+                    {
+                        angle + std::f64::consts::PI
+                    } else {
+                        angle
+                    }
+                }
+                Some(angle) => angle,
+                // No usable segment: fall back to the stored rotation instead of
+                // inventing one.
+                None => self.text.rotation,
+            },
+        }
+    }
+
+    /// The in-plane angle of the last leader segment, when one exists.
+    fn last_segment_angle(&self) -> Option<f64> {
+        let points = self
+            .lines
+            .iter()
+            .rev()
+            .find_map(|line| (line.points.len() >= 2).then_some(&line.points))?;
+        let end = *points.last()?;
+        let start = points[points.len() - 2];
+        if !is_finite_point(start) || !is_finite_point(end) {
+            return None;
+        }
+        let dx = end.x - start.x;
+        let dy = end.y - start.y;
+        if dx == 0.0 && dy == 0.0 {
+            return None;
+        }
+        Some(dy.atan2(dx))
     }
 
     /// The dogleg / landing segment at the content end of a leader root.

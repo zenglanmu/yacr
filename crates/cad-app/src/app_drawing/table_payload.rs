@@ -15,6 +15,35 @@
 
 use cad_domain::{TableCellAlignment, TableRowKind};
 
+/// One colour a typed table command assigns.
+///
+/// The typed grammar spells the same two states for every colour field: an ACI
+/// index (the form a DXF cell/row record carries) or the symbolic "no colour"
+/// token, which means `BYLAYER` for `COLOR` (inherit the entity colour) and
+/// `NONE` for `FILL` (no background). Both clear the stored override, so one
+/// value type covers both fields.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TableColorValue {
+    /// An AutoCAD Color Index, `1..=255`.
+    Aci(u8),
+    /// No colour: `COLOR BYLAYER` / `FILL NONE`.
+    None,
+}
+
+/// One border lineweight a typed table command assigns.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TableLineweightValue {
+    /// A weight in millimetres as typed (`TABLEDIT FORMAT … LINEWEIGHT 0.35`).
+    ///
+    /// The command maps it onto the canonical AutoCAD weight list
+    /// ([`canonical_lineweight_hundredths`]) — exactly the set the DXF 1/100 mm
+    /// groups can carry — and refuses anything else, so the stored integer and
+    /// the value written back are the same number with no rounding.
+    Millimetres(f32),
+    /// `BYLAYER`: no override (the entity's resolved lineweight).
+    ByLayer,
+}
+
 /// One 1-based cell address.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TableCellAddress {
@@ -86,6 +115,14 @@ pub struct TableRowStyleCommand {
     pub alignment: Option<TableCellAlignment>,
     /// `(edge, visible, double-line spacing)` border assignments.
     pub borders: Vec<(TableStyleEdge, bool, Option<f64>)>,
+    /// The row's cell text colour (`TABLESTYLE [ROW k] COLOR`).
+    pub text_color: Option<TableColorValue>,
+    /// The row's cell background fill (`TABLESTYLE [ROW k] FILL`).
+    pub fill_color: Option<TableColorValue>,
+    /// All four border edges' colour (`TABLESTYLE [ROW k] BORDERCOLOR`).
+    pub border_color: Option<TableColorValue>,
+    /// All four border edges' lineweight (`TABLESTYLE [ROW k] LINEWEIGHT`).
+    pub border_lineweight: Option<TableLineweightValue>,
 }
 
 impl TableRowStyleCommand {
@@ -95,6 +132,10 @@ impl TableRowStyleCommand {
             && self.text_style_name.is_none()
             && self.alignment.is_none()
             && self.borders.is_empty()
+            && self.text_color.is_none()
+            && self.fill_color.is_none()
+            && self.border_color.is_none()
+            && self.border_lineweight.is_none()
     }
 }
 
@@ -142,13 +183,24 @@ pub enum TablePayload {
     },
     /// `TABLEDIT UNMERGE <row> <col>`: split the range covering the cell.
     Unmerge { cell: TableCellAddress },
-    /// `TABLEDIT FORMAT <row> <col> [ALIGN <code>] [ROTATION <degrees>]`: set the
-    /// cell's own alignment and/or text rotation.
+    /// `TABLEDIT FORMAT <row> <col> [ALIGN <code>] [ROTATION <degrees>]
+    /// [COLOR <aci|BYLAYER>] [FILL <aci|NONE>] [LINEWEIGHT <mm|BYLAYER>]
+    /// [BORDERCOLOR <aci|BYLAYER>]`: set the cell's own alignment, text
+    /// rotation and appearance (text colour, background fill, border colour and
+    /// border lineweight, the latter two on all four edges).
     Format {
         cell: TableCellAddress,
         alignment: Option<TableCellAlignment>,
         /// Degrees, converted to the model's radians by the parser.
         rotation: Option<f64>,
+        /// The cell's text (content) colour.
+        color: Option<TableColorValue>,
+        /// The cell's background fill.
+        fill: Option<TableColorValue>,
+        /// All four border edges' lineweight.
+        lineweight: Option<TableLineweightValue>,
+        /// All four border edges' colour.
+        border_color: Option<TableColorValue>,
     },
     /// `MATCHCELL <src_row> <src_col> <dst_row> <dst_col> [...]`: copy the first
     /// cell's format onto every other cell.
@@ -158,4 +210,30 @@ pub enum TablePayload {
     },
     /// `TABLESTYLE [<name>] [<field> <value> ...]`: assign the table's style.
     Style(Box<TableStyleCommand>),
+}
+
+/// The canonical sRGB triple of an ACI index, from the crate's **one** palette
+/// table (`crate::property_value`), so a table cell colour and an entity colour
+/// can never disagree about what `aci:30` looks like.
+///
+/// `None` for `0`/`256`, which are the symbolic `ByBlock`/`ByLayer` variants
+/// rather than colours; the payload never carries them as an index.
+pub fn aci_srgb(index: u8) -> Option<[u8; 3]> {
+    crate::property_value::rgb_for_aci(u16::from(index))
+}
+
+/// The 1/100 mm integer of a **canonical** AutoCAD lineweight, from the crate's
+/// one weight list.
+///
+/// Only the canonical values are accepted: a weight the DXF record cannot carry
+/// exactly (the groups are 1/100 mm integers) is refused, never snapped, so the
+/// stored value and the value written back are the same number.
+pub fn canonical_lineweight_hundredths(millimetres: f32) -> Option<u16> {
+    if !millimetres.is_finite() {
+        return None;
+    }
+    crate::property_value::LINEWEIGHTS_MM
+        .into_iter()
+        .find(|canonical| (canonical - millimetres).abs() < 1e-4)
+        .map(|canonical| (canonical * 100.0).round() as u16)
 }

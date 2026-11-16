@@ -15,6 +15,8 @@ use std::collections::HashSet;
 
 use crate::{CadError, CadResult, StyleId, TableCellAlignment, TableGeometry, TableStyleValues};
 
+use super::TableCellAppearanceEdit;
+
 impl TableGeometry {
     /// The cell address that owns `(row, column)`: its own address when it is
     /// not covered, otherwise the merge anchor's.
@@ -162,8 +164,9 @@ impl TableGeometry {
     /// Copy one cell's **format** onto every target cell (`MATCHCELL`).
     ///
     /// The copied fields are the whole per-cell format this build models: text
-    /// height, text style identity/name/font, the four border edges, the text
-    /// alignment and the text rotation.
+    /// height, text style identity/name/font, the four border edges (visibility,
+    /// double-line spacing, colour and lineweight), the text alignment, the text
+    /// rotation and the cell's text colour and background fill.
     ///
     /// Text, merge spans and position are untouched: this is a style copy, not a
     /// content copy. The display is rebuilt once for the whole batch, so N
@@ -205,6 +208,51 @@ impl TableGeometry {
             target.borders = style_source.borders;
             target.alignment = style_source.alignment;
             target.rotation = style_source.rotation;
+            target.text_color = style_source.text_color;
+            target.fill_color = style_source.fill_color;
+        }
+        geometry.rebuild_display();
+        Ok(geometry)
+    }
+
+    /// Set one cell's own appearance — text colour, background fill, border
+    /// colour and border lineweight — and rebuild the display once
+    /// (`TABLEDIT FORMAT COLOR/FILL/LINEWEIGHT/BORDERCOLOR`).
+    ///
+    /// Each field is a [`TableFieldEdit`](super::TableFieldEdit): `Keep` leaves
+    /// the stored value, `Clear` returns it to "no override" (`COLOR BYLAYER`,
+    /// `FILL NONE`) and `Set` stores a value. The border fields reach all four
+    /// edges of the cell's resolved border set. The address must be inside the
+    /// grid (`table.cell_out_of_range`); on a refusal the receiver is unchanged.
+    pub fn with_cell_appearance(
+        &self,
+        row: usize,
+        column: usize,
+        edit: TableCellAppearanceEdit,
+    ) -> CadResult<Self> {
+        let mut geometry = self.clone();
+        let row_count = geometry.rows.len();
+        let row_geometry = geometry.rows.get_mut(row).ok_or_else(|| {
+            CadError::InvalidInput(format!(
+                "table.cell_out_of_range: row {row} is outside the table's {row_count} rows"
+            ))
+        })?;
+        let cell_count = row_geometry.cells.len();
+        let cell = row_geometry.cells.get_mut(column).ok_or_else(|| {
+            CadError::InvalidInput(format!(
+                "table.cell_out_of_range: column {column} is outside row {row}'s {cell_count} cells"
+            ))
+        })?;
+        edit.text_color.apply(&mut cell.text_color);
+        edit.fill.apply(&mut cell.fill_color);
+        edit.apply_borders(&mut cell.borders);
+        for border in [
+            cell.borders.top,
+            cell.borders.right,
+            cell.borders.bottom,
+            cell.borders.left,
+        ] {
+            super::validate_border(border)?;
         }
         geometry.rebuild_display();
         Ok(geometry)
@@ -264,10 +312,11 @@ impl TableGeometry {
     /// resolves to [`StyleId(0)`](StyleId) with no font, which is exactly what
     /// the importer stores for a cell whose style name is not in the table.
     ///
-    /// A cell is "inheriting" when its borders, text height, text style name and
-    /// alignment still equal **its row's** old values (value-identity, see
-    /// [`TableStyleValues`]). Such a cell takes the new value for each of the
-    /// four, so an explicit override on the cell survives the style edit. The
+    /// A cell is "inheriting" when its borders (visibility, spacing, colour and
+    /// lineweight), text height, text style name, alignment, text colour and
+    /// background fill still equal **its row's** old values (value-identity, see
+    /// [`TableStyleValues`]). Such a cell takes the new value for each of those
+    /// fields, so an explicit override on the cell survives the style edit. The
     /// row's value set is classified by the style itself, so a `TITLE OFF` that
     /// removes the title row moves the old title row into the header/data set it
     /// now belongs to.
@@ -293,6 +342,12 @@ impl TableGeometry {
                 }
                 if inherited.alignment {
                     cell.alignment = new_row.alignment;
+                }
+                if inherited.text_color {
+                    cell.text_color = new_row.text_color;
+                }
+                if inherited.fill_color {
+                    cell.fill_color = new_row.fill_color;
                 }
                 if inherited.text_style {
                     cell.style_name = new_row.text_style_name.clone();

@@ -365,6 +365,13 @@ pub struct DisplayFragment {
     /// resolved colour — an explicit value, `ByBlock` inheritance, or the owning
     /// layer's colour for `ByLayer` (see [`resolve_color`]). Alpha stays in
     /// [`Self::alpha`] so the two channels cannot diverge.
+    ///
+    /// The one provider case that is **not** replaced is a provider that resolved
+    /// a **primitive's own** concrete colour: it emits that value with
+    /// `color_unresolved == false`, and `build_expanded` keeps it. That is the
+    /// per-cell appearance channel of a TABLE (one entity, several colours); an
+    /// entity without such an override is unaffected, because every provider
+    /// fragment starts unresolved.
     pub color: [f32; 3],
     /// `true` when the source colour was symbolic and no concrete value was
     /// available, so `color` is a fallback: a `ByBlock` with no enclosing INSERT,
@@ -376,6 +383,11 @@ pub struct DisplayFragment {
     /// (flagged unresolved); [`ProviderRegistry::build_expanded`] resolves the
     /// stored provenance: an explicit weight, `ByBlock` inheritance, or the
     /// owning layer's weight for `ByLayer` (see [`resolve_lineweight`]).
+    ///
+    /// A provider-resolved per-primitive weight (a table cell's border
+    /// lineweight) is emitted with `lineweight_unresolved == false` and kept,
+    /// mirroring [`Self::color`]. The renderer carries the value but draws every
+    /// line at one pixel (`render.lineweight_not_drawn`).
     pub lineweight: f32,
     /// `true` when the source lineweight was symbolic and no concrete value was
     /// available, so `lineweight` is a fallback: a `ByBlock` with no enclosing

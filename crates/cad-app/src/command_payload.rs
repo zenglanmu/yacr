@@ -10,7 +10,8 @@
 //! documentation).
 
 use cad_domain::{
-    LayerId, Point3, SelectionRef, SemanticGeometry, SpaceId, TextAlignH, TextAlignV,
+    LayerId, MLeaderTextAngle, Point3, SelectionRef, SemanticGeometry, SpaceId, TextAlignH,
+    TextAlignV,
 };
 
 use crate::{
@@ -665,20 +666,25 @@ pub enum CommandPayload {
         h_align: TextAlignH,
         v_align: TextAlignV,
     },
-    /// MLEADER: one straight-line multileader with text content (ADR 0019
+    /// MLEADER: one straight-line multileader with text or no content (ADR 0019
     /// decision F.2, P7c).
     ///
     /// `arrow` is the captured arrow position (the first leader vertex `10`),
     /// `landing` the captured landing/content-connection point (the root's
-    /// `LEADER{}` group `10`), and `text` the terminal typed string
-    /// (non-empty, at most [`crate::draw_tool::MAX_TOOL_TEXT_CHARS`] characters —
-    /// re-validated here so a programmatic caller cannot bypass the capture).
+    /// `LEADER{}` group `10`), and `text` the terminal typed string (at most
+    /// [`crate::draw_tool::MAX_TOOL_TEXT_CHARS`] characters — re-validated here so
+    /// a programmatic caller cannot bypass the capture). An empty (or
+    /// whitespace-only) `text` creates a **content-less** leader: the arrow,
+    /// leader line and dogleg without annotation, stored as
+    /// `MLeaderContent::None` with an empty string.
     ///
-    /// The three `Option` fields are the **creation options** the domain can
-    /// carry; `None` means "use the resolved `MLeaderStyle` row", and a set value
-    /// is stored on the created entity in a group the exporter already writes
+    /// The `Option` fields are the **creation options** the domain can carry;
+    /// `None` means "use the resolved `MLeaderStyle` row", and a set value is
+    /// stored on the created entity in a group the exporter already writes
     /// verbatim, so it round-trips:
     ///
+    /// * `style_name` → the `MLEADERSTYLE` table row to resolve (matched exactly
+    ///   then case-insensitively; `None` uses the session's current style);
     /// * `dogleg_length` → the root's dogleg length (`LEADER 40`; the style's
     ///   `MLEADERSTYLE 43` / entity `41` value when `None`);
     /// * `dogleg_angle` → the dogleg direction in radians about `+Z`, the
@@ -686,21 +692,24 @@ pub enum CommandPayload {
     ///   derived from the arrow/text side when `None`);
     /// * `attachment` → the annotation text attachment pair (horizontal entity
     ///   `179` / `CONTEXT_DATA 171`, vertical entity `173` / `CONTEXT_DATA 174`;
-    ///   centred / the style's left attachment when `None`).
+    ///   centred / the style's left attachment when `None`);
+    /// * `text_angle` → the annotation text angle **type** (entity `174` /
+    ///   style `175`; the three DXF modes, not a rotation in degrees), with the
+    ///   `0x2000` override bit when it differs from the style's.
     ///
     /// Every other style value (landing gap, arrowhead size, text height, text
     /// style, path type, content kind) is read from the drawing's `MLeaderStyle`
     /// table, so none of them is a payload field: a caller cannot smuggle a
-    /// second, contradictory style source in. The AutoCAD *angle constraint*
-    /// (entity `174`, text angle type) is deliberately absent — this build's
-    /// MULTILEADER domain has no field for it (`mleader.option_text_angle`).
+    /// second, contradictory style source in.
     MLeader {
         arrow: Point3,
         landing: Point3,
         text: String,
+        style_name: Option<String>,
         dogleg_length: Option<f64>,
         dogleg_angle: Option<f64>,
         attachment: Option<MLeaderAttachment>,
+        text_angle: Option<MLeaderTextAngle>,
     },
     /// TEXTEDIT: replace the string of an existing text-bearing entity (ADR 0020
     /// amendment A/B; ADR-0021 D4 generalises it to MTEXT and MULTILEADER text).

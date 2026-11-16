@@ -349,6 +349,10 @@ mod lengthen;
 mod match_prop;
 mod mirror_curves;
 mod mleader_create;
+// The text angle type (`174`/`175`), the `STYLE` selector and content-less
+// creation, split out of `mleader_create` so both files stay inside the
+// code-size limit.
+mod mleader_options;
 // The 2026-11-12 SHAPE/MINSERT/ADDSELECTED contracts.
 mod addselected;
 mod minsert;
@@ -383,6 +387,7 @@ mod stretch_insert;
 mod stretch_kinds;
 mod stretch_polygon;
 mod table;
+mod table_appearance;
 mod table_edit;
 mod table_ops;
 mod text;

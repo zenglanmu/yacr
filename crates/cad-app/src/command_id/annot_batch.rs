@@ -87,17 +87,18 @@
 //! The typed grammar is
 //! `QLEADER <arrow x,y> <landing x,y> <text>` (or the `LEADER` spelling); the
 //! text is the whole trimmed remainder and must satisfy the shared `TEXT` rules
-//! (non-empty/ non-whitespace and at most
-//! [`crate::MAX_TOOL_TEXT_CHARS`] characters). Points are flattened to the `+Z`
-//! work plane (`z = 0`), exactly like the other typed point forms.
+//! (at most [`crate::MAX_TOOL_TEXT_CHARS`] characters). An empty remainder
+//! creates a **content-less** leader (arrow, leader line and dogleg only).
+//! Points are flattened to the `+Z` work plane (`z = 0`), exactly like the other
+//! typed point forms.
 //!
 //! Refusals happen before the transaction opens: `qleader.payload` /
 //! `leader.payload`, the two coordinate-pair grammars (an unparsable pair is
 //! refused by the session before IPC), and every refusal the MLEADER creation
-//! path already names (`tool.text_empty`, `tool.text_too_long`,
-//! `mleader.style_missing`, `mleader.text_required`, a non-finite point, a
-//! landing point too close to the dogleg, a missing active layer). One entity /
-//! one transaction / one undo step. Work-only.
+//! path already names (`tool.text_too_long`, `mleader.content_unsupported`,
+//! `mleader.style_missing`, a non-finite point, a landing point too close to the
+//! dogleg, a missing active layer). One entity / one transaction / one undo step.
+//! Work-only.
 //!
 //! # `TEXTFIT`
 //!

@@ -24,6 +24,8 @@ fn cell(text: &str) -> TableCellGeometry {
         merge_width: 1,
         merge_height: 1,
         borders: TableCellBorders::default(),
+        text_color: None,
+        fill_color: None,
     }
 }
 
@@ -116,13 +118,14 @@ fn table_exports_as_an_acadtable_entity_with_cells_and_merges() {
             .any(|entry| entry.code == "export.converted.table"),
         "{report:?}"
     );
-    // The style object **is** written with all three row value sets; the named
-    // losses that remain are the model's own (colours/fills) and the writer's.
+    // The style object **is** written with all three row value sets, and the
+    // per-cell appearance is stored/drawn/written; the loss that remains is the
+    // sRGB -> nearest-ACI canonicalisation (plus the writer's own gaps).
     assert!(
         report
             .entries
             .iter()
-            .any(|entry| entry.message.contains("per-cell text colour")),
+            .any(|entry| entry.message.contains("nearest ACI index")),
         "{report:?}"
     );
     assert!(
@@ -396,6 +399,7 @@ fn styled_table() -> TableGeometry {
     parts_cell.borders.left = TableBorder {
         visible: true,
         double_spacing: 0.25,
+        ..TableBorder::default()
     };
     parts_cell.borders.bottom = TableBorder::HIDDEN;
     parts_cell.borders.top = parts_cell.borders.left;
@@ -410,6 +414,7 @@ fn styled_table() -> TableGeometry {
     style.borders.left = TableBorder {
         visible: true,
         double_spacing: 0.25,
+        ..TableBorder::default()
     };
     style.borders.bottom = TableBorder::HIDDEN;
     style.title_suppressed = true;
@@ -596,18 +601,33 @@ fn the_title_and_header_row_value_sets_round_trip_through_the_style_object() {
 }
 
 #[test]
-fn an_unrepresentable_cell_appearance_is_a_named_reason_not_a_field() {
-    // The model has no per-cell colour/fill field, so the writer emits the
-    // neutral values and the report names the gap. The test pins both halves:
-    // nothing was invented, and the loss is stated.
+fn a_cell_without_an_appearance_writes_the_neutral_values_and_names_the_gaps() {
+    // A cell that never set a colour/fill/lineweight writes the neutral
+    // `ByBlock`/no-fill/`ByLayer` values (so a re-import invents nothing), and
+    // the conversion report names the gaps that remain: the sRGB -> nearest ACI
+    // canonicalisation, the undrawn border width, and the missing per-border
+    // line type. Those are stated, never stored as a field that cannot survive.
     let table = single_cell_table(cell("x"));
     let (bytes, report) = export_one(SemanticGeometry::Table(Box::new(table)));
     assert!(
+        report
+            .entries
+            .iter()
+            .any(|entry| entry.message.contains("nearest ACI index")),
+        "the colour canonicalisation must be named: {report:?}"
+    );
+    assert!(
+        report
+            .entries
+            .iter()
+            .any(|entry| entry.message.contains("drawn stroke")),
+        "the undrawn border lineweight must be named: {report:?}"
+    );
+    assert!(
         report.entries.iter().any(|entry| entry
             .message
-            .contains("per-cell text colour, border colour/lineweight")
-            && entry.message.contains("neutral ByBlock/no-fill")),
-        "the colour/fill gap must be named: {report:?}"
+            .contains("per-border line type is not modelled")),
+        "the missing border line type must be named: {report:?}"
     );
     let document = DxfReader::from_reader(Cursor::new(bytes))
         .expect("reader")
@@ -627,4 +647,6 @@ fn an_unrepresentable_cell_appearance_is_a_named_reason_not_a_field() {
     assert!(!style.fill_enabled, "no fill was invented");
     assert_eq!(style.background_color, acadrust::types::Color::ByBlock);
     assert_eq!(style.content_color, acadrust::types::Color::ByBlock);
+    assert_eq!(style.top_border.color, acadrust::types::Color::ByBlock);
+    assert_eq!(style.top_border.line_weight, acadrust::LineWeight::ByLayer);
 }

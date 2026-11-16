@@ -4,8 +4,8 @@
 //! resolves by name, the symmetric counterpart of the `DIMSTYLE` table's
 //! `resolve_dim_style`. The table deliberately carries **only** the fields
 //! creation reads — text height, arrowhead size, landing gap, dogleg length, the
-//! text style reference, the vertical text attachment, the path type and the
-//! content type — plus an identity and a name.
+//! text style reference, the vertical text attachment, the text angle type, the
+//! path type and the content type — plus an identity and a name.
 //!
 //! ## The pinned `Standard` is a constant set, not a real style table
 //!
@@ -25,6 +25,7 @@
 //! | text height | `0.18` | style `45` |
 //! | text style | `Standard` | style `342` |
 //! | text left attachment | `1` (middle of top line) | style `174` |
+//! | text angle type | horizontal | style `175` |
 //! | path type | straight-line segments | style `173` |
 //! | content type | `2` (MText) | style `170` |
 //!
@@ -48,7 +49,7 @@
 //! Per-line override data is not part of the style at all: `MLeaderSTYLE` has no
 //! per-line overrides, and the created entity writes `override_mask = 0`.
 
-use cad_domain::{MLeaderPathType, MLeaderStyleId, MLeaderStyleValues, StyleId};
+use cad_domain::{MLeaderPathType, MLeaderStyleId, MLeaderStyleValues, MLeaderTextAngle, StyleId};
 
 /// One MLEADERSTYLE table entry: the fields the `MLEADER` creation path reads.
 #[derive(Debug, Clone, PartialEq)]
@@ -74,6 +75,9 @@ pub struct MLeaderStyle {
     pub text_style_name: String,
     /// DXF style `174`: the vertical text attachment (`0`..=`10`).
     pub left_attachment: i16,
+    /// DXF style `175`: the annotation text angle type (the entity `174` mirror,
+    /// behind property-override bit `0x2000`).
+    pub text_angle_type: MLeaderTextAngle,
 }
 
 /// The resolved creation snapshot: the effective values a created entity stores
@@ -121,6 +125,7 @@ impl MLeaderStyle {
             dogleg_length: 0.36,
             text_style_name: "Standard".to_string(),
             left_attachment: 1,
+            text_angle_type: MLeaderTextAngle::Horizontal,
         }
     }
 
@@ -156,6 +161,9 @@ impl MLeaderStyle {
                 text_style_name,
                 text_font,
                 scale_factor: 1.0,
+                // No clamp: the value is a three-way mode, so any stored field
+                // is already one of the representable DXF codes.
+                text_angle_type: self.text_angle_type,
             },
             left_attachment: if (0..=10).contains(&self.left_attachment) {
                 self.left_attachment
@@ -206,6 +214,34 @@ mod tests {
         assert!(approx(style.dogleg_length, 0.36));
         assert_eq!(style.text_style_name, "Standard");
         assert_eq!(style.left_attachment, 1);
+        assert_eq!(style.text_angle_type, MLeaderTextAngle::Horizontal);
+    }
+
+    #[test]
+    fn the_text_angle_type_defaults_to_the_writer_base_code_and_resolves() {
+        // Style `175` defaults to `1` (horizontal), which is exactly what the
+        // writer emitted before the field existed: a style row built by hand is
+        // byte-identical.
+        assert_eq!(
+            MLeaderStyle::standard_metric(MLeaderStyleId(0))
+                .text_angle_type
+                .dxf(),
+            1
+        );
+        let mut style = MLeaderStyle::standard_metric(MLeaderStyleId(0));
+        style.text_angle_type = MLeaderTextAngle::Optimized;
+        let resolved = style.resolved("Standard".to_string(), StyleId(0), None);
+        assert_eq!(resolved.values.text_angle_type, MLeaderTextAngle::Optimized);
+        // The three DXF codes round-trip through the enum both ways.
+        for mode in [
+            MLeaderTextAngle::ParallelToLastLeaderLine,
+            MLeaderTextAngle::Horizontal,
+            MLeaderTextAngle::Optimized,
+        ] {
+            assert_eq!(MLeaderTextAngle::from_dxf(mode.dxf()), mode);
+        }
+        // An out-of-range source code reads as the file default, like acadrust.
+        assert_eq!(MLeaderTextAngle::from_dxf(9), MLeaderTextAngle::Horizontal);
     }
 
     #[test]
@@ -232,6 +268,11 @@ mod tests {
         assert_eq!(resolved.values.text_style, StyleId(0));
         assert!(resolved.values.text_font.is_none());
         assert_eq!(resolved.values.text_style_name, "Standard");
+        assert_eq!(
+            resolved.values.text_angle_type,
+            MLeaderTextAngle::Horizontal,
+            "a hand-built Standard keeps the horizontal default"
+        );
     }
 
     #[test]

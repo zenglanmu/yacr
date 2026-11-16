@@ -83,6 +83,7 @@ fn leader(id: u128, space: SpaceId, height: f64) -> cad_db::DbEntity {
             text_style_name: "Standard".into(),
             text_font: None,
             scale_factor: 1.0,
+            text_angle_type: MLeaderTextAngle::Horizontal,
         },
         style_name: "Standard".into(),
         override_mask: 0,
@@ -134,6 +135,8 @@ fn cell(text: &str) -> TableCellGeometry {
         merge_width: 1,
         merge_height: 1,
         borders: TableCellBorders::default(),
+        text_color: None,
+        fill_color: None,
     }
 }
 

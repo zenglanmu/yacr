@@ -15,10 +15,10 @@
 //! includes the object's **three row value sets** — the data row
 //! ([`TableStyleValues::data_row`]), the title row and the header row — because
 //! the DXF writer emits one `AcDbTableStyle` row record per row type (groups
-//! 7/140/170 and six border records each) and the reader fills all three. The
-//! per-cell border colours/lineweights/fills and the annotative flag are *not*
-//! part of it (the display has one colour per entity and no filled area); the
-//! importer/export report those gaps by name.
+//! 7/62/63/140/170/283 and six border records each) and the reader fills all
+//! three. The **annotative** flag is the one style field still not stored (the
+//! entity carries no annotative model in this build); the importer/exporter
+//! report that gap by name.
 //!
 //! # Which rows use which value set
 //!
@@ -85,6 +85,12 @@ pub struct TableStyleValues {
     pub borders: TableCellBorders,
     /// Data-row cell text alignment (row style group 170).
     pub data_row_alignment: TableCellAlignment,
+    /// Data-row cell text colour, sRGB (row style group 62). `None` inherits the
+    /// entity colour.
+    pub text_color: Option<[u8; 3]>,
+    /// Data-row cell background fill, sRGB (row style groups 63 + 283). `None`
+    /// means the row enables no fill.
+    pub fill_color: Option<[u8; 3]>,
     /// The title row's value set; `None` means "the data row's values".
     pub title_row: Option<TableRowStyle>,
     /// The header row's value set; `None` means "the data row's values".
@@ -131,6 +137,8 @@ impl TableStyleValues {
                 left: TableBorder::VISIBLE,
             },
             data_row_alignment: TableCellAlignment::DEFAULT,
+            text_color: None,
+            fill_color: None,
             title_row: None,
             header_row: None,
             title_suppressed: false,
@@ -145,6 +153,8 @@ impl TableStyleValues {
             text_style_name: self.text_style_name.clone(),
             alignment: self.data_row_alignment,
             borders: self.borders,
+            text_color: self.text_color,
+            fill_color: self.fill_color,
         }
     }
 
@@ -188,6 +198,8 @@ impl TableStyleValues {
                 self.text_style_name = row.text_style_name;
                 self.borders = row.borders;
                 self.data_row_alignment = row.alignment;
+                self.text_color = row.text_color;
+                self.fill_color = row.fill_color;
                 // A row that already held exactly the old data-row values was
                 // indistinguishable from "follows the data row"; keep it linked
                 // when the data row has caught up with it.
@@ -241,6 +253,14 @@ impl TableStyleValues {
                         .into(),
                 ));
             }
+            for border in [
+                row.borders.top,
+                row.borders.right,
+                row.borders.bottom,
+                row.borders.left,
+            ] {
+                super::validate_border(border)?;
+            }
         }
         Ok(())
     }
@@ -256,6 +276,8 @@ impl TableStyleValues {
             text_height: cell.text_height == row.text_height,
             text_style: cell.style_name == row.text_style_name,
             alignment: cell.alignment == row.alignment,
+            text_color: cell.text_color == row.text_color,
+            fill_color: cell.fill_color == row.fill_color,
         }
     }
 
@@ -275,6 +297,8 @@ impl TableStyleValues {
                 left: scale_border(self.borders.left, factor),
             },
             data_row_alignment: self.data_row_alignment,
+            text_color: self.text_color,
+            fill_color: self.fill_color,
             title_row: self.title_row.as_ref().map(|row| scale_row(row, factor)),
             header_row: self.header_row.as_ref().map(|row| scale_row(row, factor)),
             title_suppressed: self.title_suppressed,
@@ -290,6 +314,8 @@ pub(crate) struct CellInheritance {
     pub text_height: bool,
     pub text_style: bool,
     pub alignment: bool,
+    pub text_color: bool,
+    pub fill_color: bool,
 }
 
 fn scale_row(row: &TableRowStyle, factor: f64) -> TableRowStyle {
@@ -303,12 +329,17 @@ fn scale_row(row: &TableRowStyle, factor: f64) -> TableRowStyle {
             bottom: scale_border(row.borders.bottom, factor),
             left: scale_border(row.borders.left, factor),
         },
+        text_color: row.text_color,
+        fill_color: row.fill_color,
     }
 }
 
+/// Scale a border's geometric part; its colour and lineweight are invariant.
 fn scale_border(border: TableBorder, factor: f64) -> TableBorder {
     TableBorder {
         visible: border.visible,
         double_spacing: border.double_spacing * factor,
+        color: border.color,
+        lineweight_hundredths: border.lineweight_hundredths,
     }
 }

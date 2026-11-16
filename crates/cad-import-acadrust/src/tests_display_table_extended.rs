@@ -102,10 +102,12 @@ fn table_cell_style_hides_invisible_edge_and_doubles_bottom() {
             .any(|r| r.contains("table borders drawn from cell styles")),
         "{reasons:?}"
     );
+    // The appearance is modelled now, so the named gap is what the model and the
+    // renderer genuinely cannot carry, not the colours themselves.
     assert!(
-        reasons
-            .iter()
-            .any(|r| r.contains("per-cell border colours/lineweights and cell background fills")),
+        reasons.iter().any(|r| r.contains(
+            "per-cell text colour, background fill and border colour/lineweight are stored and drawn"
+        )),
         "{reasons:?}"
     );
 }

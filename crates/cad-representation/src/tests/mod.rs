@@ -29,6 +29,7 @@ mod layer_zero_inheritance;
 mod linetype;
 mod mask;
 mod polyline_width;
+mod table_appearance;
 mod xclip;
 
 fn entity(id: u128, geometry: SemanticGeometry) -> DbEntity {

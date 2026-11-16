@@ -21,14 +21,14 @@ use crate::app_drawing::table_payload::{
 };
 use crate::command_payload::TableCreateCommand;
 
-fn undo_depth(app: &Application) -> usize {
+pub(super) fn undo_depth(app: &Application) -> usize {
     app.history
         .get(&DocumentId(1))
         .map(History::undo_depth)
         .unwrap_or(0)
 }
 
-fn create_table(
+pub(super) fn create_table(
     app: &mut Application,
     session: &mut SessionState,
     rows: u32,
@@ -52,7 +52,7 @@ fn create_table(
     id
 }
 
-fn stored_table_of(app: &Application, id: EntityId) -> TableGeometry {
+pub(super) fn stored_table_of(app: &Application, id: EntityId) -> TableGeometry {
     let entity = app.workspace.documents[&DocumentId(1)]
         .drawing
         .entity(id)
@@ -63,7 +63,7 @@ fn stored_table_of(app: &Application, id: EntityId) -> TableGeometry {
     }
 }
 
-fn assert_no_write(app: &Application, before_revision: Revision, before_undo: usize) {
+pub(super) fn assert_no_write(app: &Application, before_revision: Revision, before_undo: usize) {
     assert_eq!(
         revision(app),
         before_revision,
@@ -72,7 +72,7 @@ fn assert_no_write(app: &Application, before_revision: Revision, before_undo: us
     assert_eq!(undo_depth(app), before_undo, "a refusal records no undo");
 }
 
-fn address(row: u32, col: u32) -> TableCellAddress {
+pub(super) fn address(row: u32, col: u32) -> TableCellAddress {
     TableCellAddress { row, col }
 }
 
@@ -249,6 +249,10 @@ fn table_with_explicit_cell_app() -> (Application, SessionState) {
     source.rows[0].cells[0].borders.top = cad_domain::TableBorder::HIDDEN;
     source.rows[0].cells[0].alignment = cad_domain::TableCellAlignment::from_dxf_code(3); // TR
     source.rows[0].cells[0].rotation = 0.25;
+    source.rows[0].cells[0].text_color = Some([255, 0, 0]);
+    source.rows[0].cells[0].fill_color = Some([255, 255, 0]);
+    source.rows[0].cells[0].borders.left.color = Some([0, 0, 255]);
+    source.rows[0].cells[0].borders.left.lineweight_hundredths = Some(50);
     let geometry = TableGeometry::new(source).expect("valid table");
 
     let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
@@ -322,6 +326,8 @@ fn plain_cell() -> TableCellGeometry {
         merge_width: 1,
         merge_height: 1,
         borders: TableCellBorders::default(),
+        text_color: None,
+        fill_color: None,
     }
 }
 
@@ -358,6 +364,8 @@ fn matchcell_copies_the_source_cell_style_to_every_target_in_one_step() {
         assert_eq!(target.style, source.style);
         assert_eq!(target.borders, source.borders);
         assert_eq!(target.alignment, source.alignment);
+        assert_eq!(target.text_color, source.text_color);
+        assert_eq!(target.fill_color, source.fill_color);
         assert_eq!(target.rotation, source.rotation);
         // A format copy never moves text.
         assert_eq!(target.text, "");
@@ -602,6 +610,10 @@ fn tabledit_format_sets_alignment_and_rotation_in_one_undo_step() {
             cell: address(1, 2),
             alignment: Some(cad_domain::TableCellAlignment::from_dxf_code(7)), // BL
             rotation: Some(0.5),
+            color: None,
+            fill: None,
+            lineweight: None,
+            border_color: None,
         })),
     )
     .expect("TABLEDIT FORMAT writes");
@@ -631,6 +643,10 @@ fn tabledit_format_sets_alignment_and_rotation_in_one_undo_step() {
             cell: address(1, 2),
             alignment: None,
             rotation: Some(0.75),
+            color: None,
+            fill: None,
+            lineweight: None,
+            border_color: None,
         })),
     )
     .expect("a rotation-only write");
@@ -653,6 +669,10 @@ fn a_tabledit_format_refusal_writes_nothing() {
                 cell: address(1, 1),
                 alignment: None,
                 rotation: None,
+                color: None,
+                fill: None,
+                lineweight: None,
+                border_color: None,
             },
             "tabledit.format_empty",
         ),
@@ -661,6 +681,10 @@ fn a_tabledit_format_refusal_writes_nothing() {
                 cell: address(3, 1),
                 alignment: Some(cad_domain::TableCellAlignment::DEFAULT),
                 rotation: None,
+                color: None,
+                fill: None,
+                lineweight: None,
+                border_color: None,
             },
             "tabledit.out_of_range",
         ),
@@ -669,6 +693,10 @@ fn a_tabledit_format_refusal_writes_nothing() {
                 cell: address(1, 1),
                 alignment: Some(cad_domain::TableCellAlignment::DEFAULT),
                 rotation: Some(0.0),
+                color: None,
+                fill: None,
+                lineweight: None,
+                border_color: None,
             },
             "tabledit.unchanged",
         ),

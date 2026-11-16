@@ -42,9 +42,13 @@ impl MultiLeaderGeometry {
     /// resolved-style default; the derivation itself lives there (one rule, not
     /// two).
     ///
+    /// An empty (or whitespace-only) `text` creates a **content-less** leader —
+    /// arrow, leader line, dogleg and no annotation, a real AutoCAD case — and
+    /// stores [`MLeaderContent::None`] with an empty string.
+    ///
     /// Refusals (each changes nothing; the caller opens no transaction):
-    /// non-finite points, a pair that is not coplanar on one `+Z` plane, an empty
-    /// text, a non-straight path type, a non-positive or non-finite style size,
+    /// non-finite points, a pair that is not coplanar on one `+Z` plane, a
+    /// non-straight path type, a non-positive or non-finite style size,
     /// a landing point no farther than the style's dogleg length, and a
     /// degenerate leader segment.
     pub fn created(
@@ -80,7 +84,11 @@ impl MultiLeaderGeometry {
     ///   side otherwise. It is stored verbatim as `LEADER 11`, so a reload reads
     ///   exactly the direction that was asked for;
     /// * the text carries the effective attachment pair (see
-    ///   [`MLeaderCreateOptions`]).
+    ///   [`MLeaderCreateOptions`]) and the effective text angle type: the
+    ///   option's mode when set (with the `0x2000` override bit only when it
+    ///   differs from the style's), the style's mode otherwise;
+    /// * an empty text creates a content-less leader ([`MLeaderContent::None`],
+    ///   empty string) instead of being refused.
     ///
     /// Refusals beyond [`Self::created`]'s (all named, nothing written):
     /// `mleader.option_dogleg` (non-finite or non-positive length),
@@ -106,11 +114,15 @@ impl MultiLeaderGeometry {
                 "mleader.plane: the arrow and landing points must lie in one +Z plane".into(),
             ));
         }
-        if text.trim().is_empty() {
-            return Err(CadError::InvalidInput(
-                "mleader.text_required: a created multileader needs a non-empty text".into(),
-            ));
-        }
+        // An empty text is a real AutoCAD case: the leader keeps its arrow, line
+        // and dogleg and stores no annotation. The content kind is derived from
+        // the typed text, and the normalised empty string is stored so a reload
+        // reads the same content kind back.
+        let (content, text) = if text.trim().is_empty() {
+            (MLeaderContent::None, String::new())
+        } else {
+            (MLeaderContent::Text, text)
+        };
         if style.path_type != MLeaderPathType::StraightLineSegments {
             return Err(CadError::Unsupported(
                 "mleader.path_type: only straight-line leaders can be created; the resolved \
@@ -223,12 +235,25 @@ impl MultiLeaderGeometry {
                     .into(),
             ));
         }
+        // The text angle type: the option's mode when set, the style's otherwise.
+        // The entity value only needs the `0x2000` override bit when it actually
+        // differs from the style, so a request equal to the style stays an
+        // inherited value (and a plain creation keeps `override_mask == 0`).
+        let text_angle_type = options.text_angle.unwrap_or(style.text_angle_type);
+        let mut override_mask = 0u32;
+        if text_angle_type != style.text_angle_type {
+            override_mask |= crate::MASK_TEXT_ANGLE;
+        }
+        let style = MLeaderStyleValues {
+            text_angle_type,
+            ..style
+        };
         let height = style.text_height;
         let parts = MultiLeaderParts {
             style: style.clone(),
             style_name,
-            override_mask: 0,
-            content: MLeaderContent::Text,
+            override_mask,
+            content,
             text: MLeaderText {
                 string: text,
                 location: landing,

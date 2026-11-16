@@ -483,6 +483,11 @@ fn empty_cell() -> TableCellGeometry {
             bottom: TableBorder::VISIBLE,
             left: TableBorder::VISIBLE,
         },
+        // No per-cell appearance: every cell draws in the entity's resolved
+        // colour with no background, exactly like a table created before the
+        // per-cell colours existed.
+        text_color: None,
+        fill_color: None,
     }
 }
 

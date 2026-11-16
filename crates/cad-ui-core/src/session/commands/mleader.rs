@@ -13,10 +13,12 @@
 //! * `MLEDIT BREAK <x1> <y1> <x2> <y2>` — remove the picked band from two
 //!   parallel lines;
 //! * `-MLEDIT …` — the same grammar under the command-line spelling;
-//! * `MLEADER [DOGLEG <length>] [DOGLEGANGLE <degrees>] [ATTACH <1-3> <0-10>]
-//!   <arrow_x> <arrow_y> <landing_x> <landing_y> <text…>` — create one leader,
-//!   optionally overriding the style's dogleg length/direction and text
-//!   attachment pair;
+//! * `MLEADER [STYLE <name>] [DOGLEG <length>] [DOGLEGANGLE <degrees>]
+//!   [ATTACH <1-3> <0-10>] [TEXTANGLE <mode>] <arrow_x> <arrow_y> <landing_x>
+//!   <landing_y> [text…]` — create one leader, optionally from a named
+//!   `MLEADERSTYLE`, overriding the style's dogleg length/direction, text
+//!   attachment pair and text angle mode; an empty text creates a content-less
+//!   leader;
 //! * `MLEADERALIGN LEFT|RIGHT|CENTER [spacing]` — align and optionally re-space
 //!   the selected leaders' text;
 //! * `MLEADEREDIT ADD <x> <y>` / `REMOVE <index>`, `PATHTYPE <index>
@@ -34,7 +36,7 @@ use cad_app::{
     MLeaderAlignCommand, MLeaderAlignMode, MLeaderAttachment, MLeaderEditAction,
     MLeaderEditCommand, MLeaderLineOverrideField, MlEditCommand, MlEditMode, ToleranceCommand,
 };
-use cad_domain::{MLeaderPathType, Point3};
+use cad_domain::{MLeaderPathType, MLeaderTextAngle, Point3};
 
 use super::arguments::{parse_positive_decimal, parse_signed_decimal};
 
@@ -123,8 +125,9 @@ pub fn parse_mleaderalign_argument(argument: &str) -> Option<MLeaderAlignCommand
     Some(MLeaderAlignCommand { mode, spacing })
 }
 
-/// `MLEADER [DOGLEG <length>] [DOGLEGANGLE <degrees>] [ATTACH <1-3> <0-10>]
-/// <arrow_x> <arrow_y> <landing_x> <landing_y> <text…>`.
+/// `MLEADER [STYLE <name>] [DOGLEG <length>] [DOGLEGANGLE <degrees>]
+/// [ATTACH <1-3> <0-10>] [TEXTANGLE <mode>]
+/// <arrow_x> <arrow_y> <landing_x> <landing_y> [text…]`.
 ///
 /// The options are optional, order-independent and may each appear once; they
 /// must come **before** the four coordinates, and everything after them is the
@@ -135,36 +138,43 @@ pub fn parse_mleaderalign_argument(argument: &str) -> Option<MLeaderAlignCommand
 /// `DOGLEGANGLE` takes **degrees** on the line and converts once to the radian
 /// payload field; `ATTACH` takes the raw DXF attachment codes (horizontal, then
 /// vertical) and leaves the range check to the command layer, which refuses by
-/// name with the accepted codes.
+/// name with the accepted codes. `STYLE` takes one `MLEADERSTYLE` name token
+/// (a name containing spaces is outside this line grammar; `MLEADERSTYLE SET`
+/// covers it) and resolves against the drawing's table in the command layer,
+/// which refuses an unknown name by name.
 ///
-/// `TEXTANGLE` (the AutoCAD angle constraint, DXF entity `174` / style `175`) is
-/// admitted as a token but answered with [`MLeaderUnmodelledOption::TextAngle`]:
-/// this build's MULTILEADER domain has no field for it, so the command layer
-/// refuses it by name instead of dropping it.
+/// `TEXTANGLE <mode>` (alias: `ANGLE`) is the AutoCAD **angle constraint**. It
+/// takes a **mode**, not an angle, because DXF `174`/`175` stores an angle
+/// *type*: `HORIZONTAL` (`1`), `PARALLEL` (`0`) or `OPTIMIZED` (`2`). A number is
+/// refused by name ([`MLeaderTextAngleError::RotationAngle`]) rather than guessed
+/// into a mode, and so is an unknown word
+/// ([`MLeaderTextAngleError::UnknownMode`]).
 pub fn parse_mleader_argument(argument: &str) -> Result<MLeaderCreateInput, MLeaderParseError> {
     let mut rest = argument.trim_start();
+    let mut style: Option<String> = None;
     let mut dogleg_length: Option<f64> = None;
     let mut dogleg_angle: Option<f64> = None;
     let mut attachment: Option<MLeaderAttachment> = None;
+    let mut text_angle: Option<MLeaderTextAngle> = None;
     loop {
         let Some((word, after_word)) = split_first_token(rest) else {
             return Err(MLeaderParseError::Invalid);
         };
-        if word.eq_ignore_ascii_case("TEXTANGLE") {
-            return Err(MLeaderParseError::Unmodelled(
-                MLeaderUnmodelledOption::TextAngle,
-            ));
-        }
-        let is_option = word.eq_ignore_ascii_case("DOGLEG")
-            || word.eq_ignore_ascii_case("DOGLEGANGLE")
-            || word.eq_ignore_ascii_case("ATTACH");
-        if !is_option {
-            // The first non-option token is the arrow X: the options are a prefix.
-            break;
-        }
         let (value, after_value) =
             split_first_token(after_word).ok_or(MLeaderParseError::Invalid)?;
-        if word.eq_ignore_ascii_case("DOGLEG") {
+        if word.eq_ignore_ascii_case("TEXTANGLE") || word.eq_ignore_ascii_case("ANGLE") {
+            if text_angle.is_some() {
+                return Err(MLeaderParseError::Invalid);
+            }
+            text_angle = Some(parse_text_angle_mode(value)?);
+            rest = after_value;
+        } else if word.eq_ignore_ascii_case("STYLE") {
+            if style.is_some() {
+                return Err(MLeaderParseError::Invalid);
+            }
+            style = Some(value.to_string());
+            rest = after_value;
+        } else if word.eq_ignore_ascii_case("DOGLEG") {
             if dogleg_length.is_some() {
                 return Err(MLeaderParseError::Invalid);
             }
@@ -177,7 +187,7 @@ pub fn parse_mleader_argument(argument: &str) -> Result<MLeaderCreateInput, MLea
             let degrees = parse_signed_decimal(value).ok_or(MLeaderParseError::Invalid)?;
             dogleg_angle = Some(degrees.to_radians());
             rest = after_value;
-        } else {
+        } else if word.eq_ignore_ascii_case("ATTACH") {
             if attachment.is_some() {
                 return Err(MLeaderParseError::Invalid);
             }
@@ -187,6 +197,9 @@ pub fn parse_mleader_argument(argument: &str) -> Result<MLeaderCreateInput, MLea
             let left = parse_attachment_code(left_token).ok_or(MLeaderParseError::Invalid)?;
             attachment = Some(MLeaderAttachment { point, left });
             rest = after_left;
+        } else {
+            // The first non-option token is the arrow X: the options are a prefix.
+            break;
         }
     }
     let mut coordinates = [0.0_f64; 4];
@@ -207,10 +220,31 @@ pub fn parse_mleader_argument(argument: &str) -> Result<MLeaderCreateInput, MLea
             z: 0.0,
         },
         text: rest.trim_start().to_string(),
+        style,
         dogleg_length,
         dogleg_angle,
         attachment,
+        text_angle,
     })
+}
+
+/// One `TEXTANGLE` mode token.
+///
+/// A numeric token is answered with its own refusal: the stored group is an
+/// angle *type*, so `90` (or `nan`/`inf`) names a quantity the field cannot hold,
+/// and clamping it into a mode would be a guess.
+fn parse_text_angle_mode(token: &str) -> Result<MLeaderTextAngle, MLeaderParseError> {
+    if let Some(mode) = MLeaderTextAngle::from_token(token) {
+        return Ok(mode);
+    }
+    // A number (finite or not) is a different quantity; `parse::<f64>` admits
+    // `90`, `1e2`, `nan` and `inf` alike, and each is refused as a rotation.
+    let error = if token.parse::<f64>().is_ok() {
+        MLeaderTextAngleError::RotationAngle(token.to_string())
+    } else {
+        MLeaderTextAngleError::UnknownMode(token.to_string())
+    };
+    Err(MLeaderParseError::TextAngle(error))
 }
 
 /// One raw DXF attachment code (a plain non-negative integer).
@@ -226,51 +260,66 @@ fn parse_attachment_code(token: &str) -> Option<i16> {
 pub struct MLeaderCreateInput {
     pub arrow: Point3,
     pub landing: Point3,
-    /// The annotation text (may be empty, so the command layer answers with its
-    /// own `tool.text_empty` refusal instead of a grammar error).
+    /// The annotation text. An empty remainder is **not** a grammar error: it
+    /// creates a content-less leader (arrow, leader line and dogleg only).
     pub text: String,
+    /// The requested `MLEADERSTYLE` name, or `None` for the session's current
+    /// style (resolved and refused in the command layer).
+    pub style: Option<String>,
     /// The requested dogleg length, or `None` for the resolved style value.
     pub dogleg_length: Option<f64>,
     /// The requested dogleg direction in radians, or `None` for the derived side.
     pub dogleg_angle: Option<f64>,
     /// The requested text attachment pair, or `None` for the style/default pair.
     pub attachment: Option<MLeaderAttachment>,
+    /// The requested text angle type, or `None` for the resolved style value.
+    pub text_angle: Option<MLeaderTextAngle>,
 }
 
 /// Why a `MLEADER` typed line produced no creation payload.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MLeaderParseError {
     /// Tokens outside the documented grammar (nothing to write).
     Invalid,
-    /// An admitted token that names a field this domain does not model.
-    Unmodelled(MLeaderUnmodelledOption),
+    /// The `TEXTANGLE`/`ANGLE` option named a value the stored field cannot hold.
+    TextAngle(MLeaderTextAngleError),
 }
 
-/// A `MLEADER` option this build's MULTILEADER domain cannot carry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MLeaderUnmodelledOption {
-    /// The AutoCAD **angle constraint**: DXF entity `174` (text angle type) and
-    /// its `MLEADERSTYLE` mirror `175`, with property-override mask bit `0x2000`.
-    TextAngle,
+/// A `TEXTANGLE` token this line cannot store.
+///
+/// The group (`174` entity, `175` style) holds an angle **type** — one of three
+/// codes — so both a word outside the three modes and a numeric rotation are
+/// named refusals rather than guesses.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MLeaderTextAngleError {
+    /// A word that is not `HORIZONTAL`, `PARALLEL` or `OPTIMIZED`.
+    UnknownMode(String),
+    /// A numeric token (degrees, exponent, `nan` or `inf`): the field stores a
+    /// mode, not a rotation.
+    RotationAngle(String),
 }
 
-impl MLeaderUnmodelledOption {
+impl MLeaderTextAngleError {
     /// The stable refusal code of this option.
-    pub fn code(self) -> &'static str {
-        match self {
-            Self::TextAngle => "mleader.option_text_angle",
-        }
+    pub fn code(&self) -> &'static str {
+        "mleader.option_text_angle"
     }
 
-    /// Why the option cannot be written, naming the missing field and groups.
-    pub fn detail(self) -> &'static str {
+    /// Why the token cannot be stored, naming the group and the accepted modes.
+    pub fn detail(&self) -> String {
         match self {
-            Self::TextAngle => {
-                "the angle constraint (text angle type: entity-tail group 174, MLEADERSTYLE \
-                 group 175, override mask bit 0x2000) has no field in this build's MULTILEADER \
-                 domain, and the writer declares that group unmodelled — storing a value the \
-                 exporter would silently drop is refused instead"
-            }
+            Self::UnknownMode(token) => format!(
+                "'{token}' is not a text angle mode; group 174 (entity) / 175 (MLEADERSTYLE, \
+                 mask 0x2000) stores an angle *type*, not a rotation, and the three accepted \
+                 modes are HORIZONTAL (1), PARALLEL (0) and OPTIMIZED (2)"
+            ),
+            Self::RotationAngle(token) => format!(
+                "'{token}' is a rotation angle, but group 174 (entity) / 175 (MLEADERSTYLE, mask \
+                 0x2000) stores an angle *type*; nothing in this build writes a per-entity text \
+                 rotation for a created leader, so the value cannot be stored — use HORIZONTAL \
+                 (1), PARALLEL (0) or OPTIMIZED (2). A non-finite angle is refused for the same \
+                 reason"
+            ),
         }
     }
 }

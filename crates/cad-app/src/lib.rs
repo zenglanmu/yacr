@@ -465,8 +465,8 @@ pub use command_payload::{
 
 pub use app_audit::AuditRequest;
 pub use app_drawing::table_payload::{
-    TableCellAddress, TablePayload, TableRowStyleCommand, TableStyleCommand, TableStyleEdge,
-    TableStyleRowScope,
+    TableCellAddress, TableColorValue, TableLineweightValue, TablePayload, TableRowStyleCommand,
+    TableStyleCommand, TableStyleEdge, TableStyleRowScope,
 };
 pub use app_drawing::OverkillSettings;
 pub use ssx::{SsxCriterion, SsxCriterionKind, SsxFilter, SsxRequest};

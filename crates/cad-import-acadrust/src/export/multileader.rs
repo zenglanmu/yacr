@@ -19,12 +19,11 @@
 //!   that snapshot on load.
 //! * The parsed source groups with no model field — entity-tail text frame
 //!   (`292`), annotation scale (`293`), text direction negative (`294`), text
-//!   angle type (`174`), text align in IPE (`178`), extend leader to text
-//!   (`295`) and context text boundary height (`44`), text height automatic
-//!   (`293`) and word break (`295`) — are **normalised to acadrust defaults by
-//!   design** and are not round-tripped. The report names them unconditionally
-//!   because the writer never reads them and so cannot tell whether a source
-//!   file set them.
+//!   align in IPE (`178`), extend leader to text (`295`) and context text
+//!   boundary height (`44`), text height automatic (`293`) and word break
+//!   (`295`) — are **normalised to acadrust defaults by design** and are not
+//!   round-tripped. The report names them unconditionally because the writer
+//!   never reads them and so cannot tell whether a source file set them.
 //!
 //! These named deviations are **exhaustive for what the writer knows about**,
 //! not a claim that the file loses nothing: the writer can only report what the
@@ -56,8 +55,9 @@ use acadrust::entities::multileader::LeaderLineBreakInfo;
 use acadrust::entities::{
     LeaderLine as AcadLeaderLine, LeaderRoot as AcadLeaderRoot, MultiLeader as AcadMultiLeader,
     MultiLeaderAnnotContext, MultiLeaderPathType as AcadPathType,
-    MultiLeaderPropertyOverrideFlags as AcadMask, StartEndPointPair, TextAttachmentDirectionType,
-    TextAttachmentPointType, TextAttachmentType,
+    MultiLeaderPropertyOverrideFlags as AcadMask, StartEndPointPair,
+    TextAngleType as AcadTextAngle, TextAttachmentDirectionType, TextAttachmentPointType,
+    TextAttachmentType,
 };
 use acadrust::objects::{
     LeaderContentType as StyleContentType, MultiLeaderPathType as StylePathType, MultiLeaderStyle,
@@ -118,9 +118,8 @@ const REASON_CONTEXT_DEFAULTS: &str =
 const REASON_UNMODELLED_GROUPS: &str =
     "these parsed MULTILEADER groups have no model field, so they are written as acadrust \
      defaults and are not round-tripped: entity-tail text frame (292), annotation scale (293), \
-     text direction negative (294), text angle type (174), text align in IPE (178) and extend \
-     leader to text (295), plus context text boundary height (44), text height automatic (293) \
-     and word break (295)";
+     text direction negative (294), text align in IPE (178) and extend leader to text (295), \
+     plus context text boundary height (44), text height automatic (293) and word break (295)";
 
 /// Write one MULTILEADER entity plus the style record and class entries it
 /// needs (ADR 0019 decision E).
@@ -220,6 +219,10 @@ pub(super) fn emit_multileader(
     ml.text_height = style.text_height;
     ml.text_left_attachment = TextAttachmentType::from(text.left_attachment);
     ml.text_attachment_point = TextAttachmentPointType::from(text.attachment_point);
+    // Entity `174`: the effective text angle type. It is written verbatim and
+    // gated by the `0x2000` bit of the verbatim `90` mask, so an entity override
+    // and an inherited style value both survive a reload.
+    ml.text_angle_type = acad_text_angle(style.text_angle_type);
     ml.text_attachment_direction = reserved_root(geometry, 0)
         .map(|extras| attachment_direction(extras.text_attachment_direction))
         .unwrap_or(TextAttachmentDirectionType::Horizontal);
@@ -484,7 +487,9 @@ fn style_record(
     record.text_style_handle = Some(text_style_handle);
     record.text_left_attachment = StyleTextAttachment::from(text.left_attachment);
     record.text_right_attachment = UNMODELLED_STYLE_RIGHT_ATTACHMENT;
-    record.text_angle_type = StyleTextAngle::Horizontal;
+    // Style `175`: the same effective mode the entity writes as `174`, so a
+    // mask-unset field re-resolves to the value the entity shows.
+    record.text_angle_type = style_text_angle(style.text_angle_type);
     record.text_alignment = StyleTextAlignment::Left;
     record.text_color = Color::ByBlock;
     // The effective text height the entity shows (CONTEXT_DATA 41) wins over the
@@ -524,6 +529,24 @@ fn style_path_type(path_type: MLeaderPathType) -> StylePathType {
         MLeaderPathType::Invisible => StylePathType::Invisible,
         MLeaderPathType::StraightLineSegments => StylePathType::StraightLineSegments,
         MLeaderPathType::Spline => StylePathType::Spline,
+    }
+}
+
+/// The entity mirror of the text angle type (`174`).
+fn acad_text_angle(angle: MLeaderTextAngle) -> AcadTextAngle {
+    match angle {
+        MLeaderTextAngle::ParallelToLastLeaderLine => AcadTextAngle::ParallelToLastLeaderLine,
+        MLeaderTextAngle::Horizontal => AcadTextAngle::Horizontal,
+        MLeaderTextAngle::Optimized => AcadTextAngle::Optimized,
+    }
+}
+
+/// The style mirror of the text angle type (`175`).
+fn style_text_angle(angle: MLeaderTextAngle) -> StyleTextAngle {
+    match angle {
+        MLeaderTextAngle::ParallelToLastLeaderLine => StyleTextAngle::ParallelToLastLeaderLine,
+        MLeaderTextAngle::Horizontal => StyleTextAngle::Horizontal,
+        MLeaderTextAngle::Optimized => StyleTextAngle::Optimized,
     }
 }
 

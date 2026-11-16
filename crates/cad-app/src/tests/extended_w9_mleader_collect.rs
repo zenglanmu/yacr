@@ -37,6 +37,7 @@ fn standard_style() -> MLeaderStyleValues {
         text_style_name: "Standard".into(),
         text_font: None,
         scale_factor: 1.0,
+        text_angle_type: MLeaderTextAngle::Horizontal,
     }
 }
 

@@ -123,6 +123,102 @@ impl RepresentationProvider for DefaultRepresentationProvider {
 }
 
 impl DefaultRepresentationProvider {
+    /// Build a table's fragments, stamping each derived primitive's own
+    /// appearance onto the fragments it produced.
+    ///
+    /// The derived display is one geometry per drawn primitive **plus** a
+    /// parallel appearance list of the same length (the domain builds both
+    /// together), so the zip cannot drift. A primitive with
+    /// [`TableDisplayAppearance::NONE`] keeps the entity's resolved colour and
+    /// lineweight, i.e. its fragments are byte-identical to the pre-appearance
+    /// build.
+    ///
+    /// The one thing the display cannot honour is a border **lineweight**: every
+    /// line in this build is drawn one pixel wide, so a stored weight reaches the
+    /// batch (where the renderer reports `render.lineweight_not_drawn`) but no
+    /// wider stroke. That gap is reported here, once per build, and only when a
+    /// weight is actually modelled.
+    fn build_table(
+        &self,
+        entity: &DbEntity,
+        table: &cad_domain::TableGeometry,
+        context: &RepresentationContext,
+        annotative: Option<TextScale>,
+    ) -> DisplayRepresentation {
+        let mut representation = DisplayRepresentation {
+            fragments: Vec::new(),
+            completeness: Completeness::Complete,
+            diagnostics: Vec::new(),
+        };
+        let appearances = table.display_appearances();
+        let mut lineweight_modelled = false;
+        for (index, child) in table.display().iter().enumerate() {
+            let appearance = appearances
+                .get(index)
+                .copied()
+                .unwrap_or(cad_domain::TableDisplayAppearance::NONE);
+            let child_representation = match self.build_geometry(entity, child, context, annotative)
+            {
+                Ok(child) => child,
+                Err(error) => {
+                    // A child that cannot be built is reported, never silently
+                    // dropped: the table's other cells still draw.
+                    representation.completeness =
+                        representation
+                            .completeness
+                            .combine(Completeness::Partial(vec![format!(
+                                "a table display primitive could not be built: {error}"
+                            )]));
+                    representation.diagnostics.push(Diagnostic {
+                        object: Some(ObjectId(entity.id.0)),
+                        code: "representation.table_primitive_failed".into(),
+                        message: format!("table display primitive {index} was not drawn: {error}"),
+                    });
+                    continue;
+                }
+            };
+            if appearance.lineweight_hundredths.is_some() {
+                lineweight_modelled = true;
+            }
+            for mut fragment in child_representation.fragments {
+                if let Some(rgb) = appearance.color {
+                    fragment.color = [
+                        rgb[0] as f32 / 255.0,
+                        rgb[1] as f32 / 255.0,
+                        rgb[2] as f32 / 255.0,
+                    ];
+                    fragment.color_unresolved = false;
+                }
+                if let Some(hundredths) = appearance.lineweight_hundredths {
+                    fragment.lineweight = hundredths as f32 / 100.0;
+                    fragment.lineweight_unresolved = false;
+                }
+                representation.fragments.push(fragment);
+            }
+            representation
+                .diagnostics
+                .extend(child_representation.diagnostics);
+            representation.completeness = representation
+                .completeness
+                .combine(child_representation.completeness);
+        }
+        if lineweight_modelled {
+            representation.completeness = representation
+                .completeness
+                .combine(Completeness::Partial(vec![
+                    "a table cell border lineweight is stored and exported but drawn one pixel                      wide: this build draws every line at one width"
+                        .into(),
+                ]));
+            representation.diagnostics.push(Diagnostic {
+                object: Some(ObjectId(entity.id.0)),
+                code: "representation.table_lineweight_not_drawn".into(),
+                message: "per-cell table border lineweights reach the batch but the renderer draws                           every line one pixel wide"
+                    .into(),
+            });
+        }
+        representation
+    }
+
     fn build_inner(
         &self,
         entity: &DbEntity,
@@ -167,6 +263,18 @@ impl DefaultRepresentationProvider {
                 return Ok(representation);
             }
         }
+        // A TABLE renders its derived display with the **per-primitive
+        // appearance** each primitive carries (a cell's text colour, its
+        // background fill and its border colour/lineweight). The provider is the
+        // one layer that can state a concrete per-primitive value, so it stamps
+        // the fragment's colour/lineweight and clears the matching `unresolved`
+        // flag; `expand_entity` keeps a value the provider resolved instead of
+        // applying the entity's own `ByLayer`/`ByBlock` provenance. A primitive
+        // with no override (the default for every table that never set one) is
+        // left untouched, so its fragment is exactly what it was before.
+        if let SemanticGeometry::Table(table) = geometry {
+            return Ok(self.build_table(entity, table, context, annotative));
+        }
         // A compound entity (for example a HATCH) renders as a group; recurse
         // over borrowed children. Cloning the parent for each child copies the
         // entire compound repeatedly and makes large hatches quadratic. A
@@ -179,9 +287,6 @@ impl DefaultRepresentationProvider {
             // A multileader renders its display children, exactly like the
             // compound it used to be (ADR 0019 decision G).
             SemanticGeometry::MultiLeader(multileader) => Some(multileader.display()),
-            // A table renders its display children (grid lines and cell text),
-            // exactly like the compound it used to be.
-            SemanticGeometry::Table(table) => Some(table.display()),
             _ => None,
         };
         if let Some(children) = grouped {

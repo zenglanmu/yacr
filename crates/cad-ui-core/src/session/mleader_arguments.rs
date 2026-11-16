@@ -4,8 +4,9 @@
 //! admitted selector to its [`CommandId`] and dispatches the payload through the
 //! same `HostCore::command` funnel every other typed form uses. An argument
 //! outside a selector's grammar is refused before IPC with a stable reason, and an
-//! admitted `MLEADER` option this build's MULTILEADER domain cannot carry is
-//! refused by name (`mleader.option_text_angle`) rather than dropped.
+//! admitted `MLEADER` option this build's MULTILEADER domain cannot carry (a
+//! numeric `TEXTANGLE`, or an unknown text angle mode) is refused by name
+//! (`mleader.option_text_angle`) rather than dropped.
 //!
 //! `MLEADERCOLLECT` takes no argument, so it never reaches this module: its bare
 //! selector dispatches with [`CommandPayload::None`] and the current selection.
@@ -35,9 +36,10 @@ pub(crate) fn invalid_mledit_argument_reason(text: &str) -> String {
 pub(crate) fn invalid_mleader_argument_reason(text: &str) -> String {
     format!(
         "mleader.argument: unsupported or malformed MLEADER argument in `{}`: the typed form is \
-         `MLEADER [DOGLEG <positive length>] [DOGLEGANGLE <degrees>] [ATTACH <1-3> <0-10>] \
-         <arrow_x> <arrow_y> <landing_x> <landing_y> <text>` (options first, text last); nothing \
-         was changed",
+         `MLEADER [STYLE <name>] [DOGLEG <positive length>] [DOGLEGANGLE <degrees>] [ATTACH \
+         <1-3> <0-10>] [TEXTANGLE HORIZONTAL|PARALLEL|OPTIMIZED] <arrow_x> <arrow_y> \
+         <landing_x> <landing_y> [text]` (options first, the text may be empty); nothing was \
+         changed",
         text.trim()
     )
 }
@@ -104,20 +106,23 @@ impl CadSession {
                                 arrow: input.arrow,
                                 landing: input.landing,
                                 text: input.text,
+                                style_name: input.style,
                                 dogleg_length: input.dogleg_length,
                                 dogleg_angle: input.dogleg_angle,
                                 attachment: input.attachment,
+                                text_angle: input.text_angle,
                             },
                         )
                     }
-                    // An admitted option the MULTILEADER domain cannot carry: a
-                    // named refusal that writes nothing, never a dropped field.
-                    Err(MLeaderParseError::Unmodelled(option)) => self.refuse_argument(format!(
+                    // An admitted option value the MULTILEADER domain cannot
+                    // carry: a named refusal that writes nothing, never a
+                    // dropped field.
+                    Err(MLeaderParseError::TextAngle(error)) => self.refuse_argument(format!(
                         "{}: the MLEADER option in `{}` cannot be written: {}; nothing was \
-                             changed",
-                        option.code(),
+                         changed",
+                        error.code(),
                         text.trim(),
-                        option.detail()
+                        error.detail()
                     )),
                     Err(MLeaderParseError::Invalid) => {
                         self.refuse_argument(invalid_mleader_argument_reason(text))

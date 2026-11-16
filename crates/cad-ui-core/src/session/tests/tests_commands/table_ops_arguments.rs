@@ -26,7 +26,8 @@ use crate::session::commands::{
     TABLEEXPORT_SELECTOR, TABLESTYLE_SELECTOR,
 };
 use cad_app::{
-    TableCellAddress, TablePayload, TableStyleCommand, TableStyleEdge, TableStyleRowScope,
+    TableCellAddress, TableColorValue, TableLineweightValue, TablePayload, TableStyleCommand,
+    TableStyleEdge, TableStyleRowScope,
 };
 use cad_domain::{TableCellAlignment, TableRowKind};
 
@@ -452,6 +453,10 @@ fn tabledit_format_parses_alignment_and_rotation_in_degrees() {
             cell: TableCellAddress { row: 2, col: 3 },
             alignment: Some(TableCellAlignment::from_dxf_code(1)),
             rotation: Some(30f64.to_radians()),
+            color: None,
+            fill: None,
+            lineweight: None,
+            border_color: None,
         }
     );
     // Each field alone is legal...
@@ -484,26 +489,115 @@ fn tabledit_format_parses_alignment_and_rotation_in_degrees() {
 }
 
 #[test]
-fn each_unrepresentable_format_field_has_its_own_named_refusal() {
-    for (line, field) in [
-        ("FORMAT 1 1 COLOR 5", "COLOR"),
-        ("FORMAT 1 1 FILL 3", "FILL"),
-        ("FORMAT 1 1 LINEWEIGHT 25", "LINEWEIGHT"),
-    ] {
-        let reason = tabledit_format_refusal(line)
-            .unwrap_or_else(|| panic!("{line} must be refused by name"));
+fn tabledit_format_parses_the_cell_appearance_fields() {
+    let parsed = parse_tabledit_option_argument(
+        "FORMAT 1 2 COLOR 5 FILL 3 LINEWEIGHT 0.35 BORDERCOLOR BYLAYER",
+    )
+    .expect("a supported format line");
+    assert_eq!(
+        parsed,
+        TablePayload::Format {
+            cell: TableCellAddress { row: 1, col: 2 },
+            alignment: None,
+            rotation: None,
+            color: Some(TableColorValue::Aci(5)),
+            fill: Some(TableColorValue::Aci(3)),
+            lineweight: Some(TableLineweightValue::Millimetres(0.35)),
+            border_color: Some(TableColorValue::None),
+        }
+    );
+    // `BYLAYER` clears a text colour, `NONE` clears a fill; a lineweight may be
+    // symbolic too.
+    assert!(matches!(
+        parse_tabledit_option_argument("FORMAT 1 1 COLOR BYLAYER"),
+        Some(TablePayload::Format {
+            color: Some(TableColorValue::None),
+            ..
+        })
+    ));
+    assert!(matches!(
+        parse_tabledit_option_argument("FORMAT 1 1 FILL NONE"),
+        Some(TablePayload::Format {
+            fill: Some(TableColorValue::None),
+            ..
+        })
+    ));
+    assert!(matches!(
+        parse_tabledit_option_argument("FORMAT 1 1 LINEWEIGHT BYLAYER"),
+        Some(TablePayload::Format {
+            lineweight: Some(TableLineweightValue::ByLayer),
+            ..
+        })
+    ));
+    // An ACI index is `1..=255` (0/256 are the symbolic DXF values, not
+    // colours), a repeated field and an unknown word are malformed lines.
+    assert_eq!(parse_tabledit_option_argument("FORMAT 1 1 COLOR 0"), None);
+    assert_eq!(parse_tabledit_option_argument("FORMAT 1 1 COLOR 256"), None);
+    assert_eq!(parse_tabledit_option_argument("FORMAT 1 1 COLOR 300"), None);
+    assert_eq!(
+        parse_tabledit_option_argument("FORMAT 1 1 COLOR 1 COLOR 2"),
+        None
+    );
+    assert_eq!(
+        parse_tabledit_option_argument("FORMAT 1 1 BACKDROP 3"),
+        None
+    );
+}
+
+#[test]
+fn the_border_line_type_is_the_one_named_format_refusal() {
+    // A per-cell border line type has no field in the table model and no group
+    // in this writer, so it stays a named refusal...
+    for field in ["LINETYPE", "BORDERLINETYPE"] {
+        let line = format!("FORMAT 1 1 {field} CONTINUOUS");
+        let reason = tabledit_format_refusal(&line)
+            .unwrap_or_else(|| panic!("{field} must be refused by name"));
         assert!(
             reason.starts_with("tabledit.format_unsupported:"),
             "{reason}"
         );
-        assert!(reason.contains(field), "{line}: {reason}");
+        assert!(reason.contains("LINETYPE"), "{reason}");
         assert!(reason.contains("nothing was changed"), "{reason}");
     }
-    // A supported line is not a refusal, and the helper never speaks for another
-    // selector.
+    // ...while every field the appearance channel supports is not.
     assert_eq!(tabledit_format_refusal("FORMAT 1 1 ALIGN TL"), None);
+    assert_eq!(tabledit_format_refusal("FORMAT 1 1 COLOR 5"), None);
+    assert_eq!(tabledit_format_refusal("FORMAT 1 1 FILL 3"), None);
+    assert_eq!(tabledit_format_refusal("FORMAT 1 1 LINEWEIGHT 0.35"), None);
+    assert_eq!(tabledit_format_refusal("FORMAT 1 1 BORDERCOLOR 5"), None);
     assert_eq!(tabledit_format_refusal("MERGE 1 1 2 2"), None);
     assert_eq!(tabledit_format_refusal("COLOR 5"), None);
+}
+
+#[test]
+fn tablestyle_parses_the_row_scoped_appearance_fields() {
+    let parsed = parse_tablestyle_argument(
+        "ROW TITLE COLOR 5 FILL 2 LINEWEIGHT 0.5 BORDERCOLOR 1 ROW DATA FILL NONE",
+    )
+    .expect("a supported style line");
+    assert_eq!(parsed.rows.len(), 2);
+    let title = &parsed.rows[0];
+    assert_eq!(
+        title.scope,
+        Some(TableStyleRowScope::One(TableRowKind::Title))
+    );
+    assert_eq!(title.text_color, Some(TableColorValue::Aci(5)));
+    assert_eq!(title.fill_color, Some(TableColorValue::Aci(2)));
+    assert_eq!(
+        title.border_lineweight,
+        Some(TableLineweightValue::Millimetres(0.5))
+    );
+    assert_eq!(title.border_color, Some(TableColorValue::Aci(1)));
+    let data = &parsed.rows[1];
+    assert_eq!(
+        data.scope,
+        Some(TableStyleRowScope::One(TableRowKind::Data))
+    );
+    assert_eq!(data.fill_color, Some(TableColorValue::None));
+    // An unknown token still refuses the whole line.
+    assert_eq!(parse_tablestyle_argument("COLOR 0"), None);
+    assert_eq!(parse_tablestyle_argument("FILL 256"), None);
+    assert_eq!(parse_tablestyle_argument("LINEWEIGHT -1"), None);
 }
 
 #[test]

@@ -18,8 +18,8 @@
 //! | AutoCAD option | Representation | Behaviour |
 //! |---|---|---|
 //! | leader line type (straight / spline) | style `173` (`MLeaderPathType`) | honoured: a spline style creates a spline-path leader |
-//! | maximum points | line vertex list | declared limit [`MAX_CREATED_LEADER_POINTS`]; a request above it is refused by name |
-//! | annotation type (text) | style `170` content kind | honoured: MText content only, block/tolerance/none refused by name |
+//! | maximum points | line vertex list | declared limit [`MAX_CREATED_LEADER_POINTS`] (the typed line has two coordinates); a request above it is refused by name |
+//! | annotation type (text) | style `170` content kind + typed text | honoured: a block/tolerance style is refused by name; the typed text decides MText content versus a content-less leader |
 //! | arrowhead on/off | style `44` arrowhead size | an arrowhead-off row (`0`) is refused by name instead of silently drawing one |
 //!
 //! The refusal codes are the shared `mleader.*` ones: there is exactly one
@@ -34,11 +34,16 @@ use cad_domain::{MLeaderContent, MLeaderPathType};
 /// The number of vertices a created leader derives.
 ///
 /// [`MultiLeaderGeometry::created`] is the single derivation: vertex 1 is the
-/// captured arrow position and vertex 2 the style-derived dogleg start. The
-/// payload has no vertex list, so no caller can request more; this constant and
-/// [`plan_leader_options`]'s refusal exist so that the limit is **named** rather
-/// than implied, and so a future multi-vertex payload cannot silently grow an
-/// unbounded line.
+/// captured arrow position and vertex 2 the style-derived dogleg start. The typed
+/// line has exactly two coordinates, so no caller can request more; this constant
+/// and [`plan_leader_options`]'s refusal exist so that the limit is **named**
+/// rather than implied.
+///
+/// The ceiling is an **input** limit, not a model limit: DXF `LEADER_LINE` carries
+/// a vertex list, the domain [`cad_domain::MLeaderLine`] stores it as a `Vec`, and
+/// the importer/exporter round-trip a multi-vertex line. Only the creation
+/// grammar is two-point — the AutoCAD way to get a second leader line is
+/// `MLEADEREDIT ADD`, which this build implements.
 pub(crate) const MAX_CREATED_LEADER_POINTS: usize = 2;
 
 /// The effective creation options of one leader, after validation.
@@ -51,6 +56,10 @@ pub(crate) struct LeaderOptions {
     /// Whether the created leader draws the style arrowhead (always `true`: an
     /// arrowhead-off row is refused).
     pub(crate) arrowhead: bool,
+    /// The style row's declared content kind (`170`). The created entity's own
+    /// kind comes from the typed text; the command sets the `0x400` override bit
+    /// only when the two differ.
+    pub(crate) style_content: MLeaderContent,
 }
 
 /// Resolve and validate the creation options from the drawing's style row.
@@ -60,10 +69,14 @@ pub(crate) struct LeaderOptions {
 /// arrowhead-off style), `resolution` the single resolved snapshot the created
 /// entity stores.
 ///
+/// The annotation kind is **not** decided here: the typed text decides whether
+/// the created entity carries MText content or none (a content-less leader is a
+/// real AutoCAD case). What this plan refuses is a style whose content kind this
+/// build cannot create at all.
+///
 /// Refusals (named, nothing written):
 ///
 /// * `mleader.content_unsupported` — block/tolerance annotation content;
-/// * `mleader.text_required` — a content-less style (no annotation type);
 /// * `mleader.option_arrowhead_off` — the row disables the arrowhead (size `0`);
 /// * `mleader.path_type` — an invisible leader path (no line at all);
 /// * `mleader.option_max_points` — a requested vertex count above
@@ -73,31 +86,23 @@ pub(crate) fn plan_leader_options(
     row: &MLeaderStyle,
     resolution: &MLeaderStyleResolution,
 ) -> CadResult<LeaderOptions> {
-    let annotation = match row.content_type {
+    let style_content = match row.content_type {
+        MLeaderStyle::CONTENT_NONE => MLeaderContent::None,
         MLeaderStyle::CONTENT_MTEXT => MLeaderContent::Text,
-        MLeaderStyle::CONTENT_NONE => {
-            return Err(CadError::InvalidInput(
-                "mleader.text_required: the resolved MLEADERSTYLE declares no content; a \
-                 content-less MULTILEADER is only imported, displayed and exported"
-                    .into(),
-            ))
-        }
         MLeaderStyle::CONTENT_BLOCK | MLeaderStyle::CONTENT_TOLERANCE => {
             return Err(CadError::Unsupported(format!(
                 "mleader.content_unsupported: the resolved MLEADERSTYLE declares content kind {} \
-                 (block/tolerance); only MText content is created",
+                 (block/tolerance); only MText and content-less leaders are created",
                 row.content_type
             )))
         }
         other => {
             return Err(CadError::Unsupported(format!(
                 "mleader.content_unsupported: the resolved MLEADERSTYLE declares unknown content \
-                 kind {other}; only MText content is created"
+                 kind {other}; only MText and content-less leaders are created"
             )))
         }
     };
-    debug_assert_eq!(annotation, MLeaderContent::Text);
-    check_annotation_type(annotation)?;
     if !row.arrowhead_size.is_finite() {
         return Err(CadError::InvalidInput(format!(
             "mleader.style_invalid: the arrowhead size must be finite, got {}",
@@ -127,56 +132,57 @@ pub(crate) fn plan_leader_options(
         path,
         max_points,
         arrowhead: true,
+        style_content,
     })
 }
 
 /// Refuse a vertex count above the creation limit.
 ///
 /// Split from [`plan_leader_options`] so the limit has one named refusal that a
-/// future multi-vertex payload can reuse without re-deriving the rule.
+/// future multi-vertex payload can reuse without re-deriving the rule. The reason
+/// is stated in the refusal: the ceiling is the **typed input's** two coordinates,
+/// not a limit of DXF `LEADER_LINE` or of the stored `MLeaderLine` (both carry a
+/// real vertex list); a second leader *line* is `MLEADEREDIT ADD`'s job.
 pub(crate) fn check_leader_points(requested: usize) -> CadResult<()> {
     if requested > MAX_CREATED_LEADER_POINTS {
         return Err(CadError::Unsupported(format!(
-            "mleader.option_max_points: a created leader has {MAX_CREATED_LEADER_POINTS} vertices \
-             (the captured arrow and the style-derived dogleg start); {requested} were requested \
-             and the payload has no vertex list, so nothing was written"
+            "mleader.option_max_points: a created leader has {MAX_CREATED_LEADER_POINTS} \
+             vertices because the typed creation line carries exactly two coordinates (the \
+             captured arrow and the landing point) and the dogleg start is derived from them; \
+             {requested} were requested. DXF LEADER_LINE and the stored MLeaderLine do carry a \
+             vertex list (import and export round-trip a multi-vertex line) and additional \
+             leader lines come from MLEADEREDIT ADD, so this is an input limit, not a model \
+             limit — nothing was written"
         )));
     }
     Ok(())
 }
 
 /// The `mleader.options` report row: the option set the created leader honours.
-pub(crate) fn options_report(options: LeaderOptions) -> Diagnostic {
+pub(crate) fn options_report(options: LeaderOptions, content: MLeaderContent) -> Diagnostic {
     let path = match options.path {
         MLeaderPathType::StraightLineSegments => "straight-line",
         MLeaderPathType::Spline => "spline",
         MLeaderPathType::Invisible => "invisible",
+    };
+    let annotation = match content {
+        MLeaderContent::Text => "text (MText)",
+        MLeaderContent::None => "none (content-less: no annotation, arrow and dogleg only)",
     };
     Diagnostic {
         object: None,
         code: "mleader.options".into(),
         message: format!(
             "MLEADER options: leader type {path} (from the MLEADERSTYLE path type), annotation \
-             type text (style content kind MText), {} point(s) (creation derives the captured \
-             arrow plus the style dogleg start), arrowhead on (style size); QLEADER and LEADER \
-             share this one plan",
+             type {annotation} (entity 172, style kind {}; the entity value wins with override \
+             bit 0x400 when the two differ), {} point(s) (creation derives the captured arrow \
+             plus the style dogleg start; the typed line carries exactly two coordinates, more \
+             leader lines come from MLEADEREDIT ADD and multi-vertex lines only arrive by \
+             import), arrowhead on (style size); QLEADER and LEADER share this one plan",
+            options.style_content.dxf(),
             options.max_points
         ),
     }
-}
-
-/// Refuse an annotation type the model cannot create.
-///
-/// Exposed for the same reason as [`check_leader_points`]: the content-kind rule
-/// has one named implementation, and the typed grammar cannot ask for a second
-/// annotation type today.
-pub(crate) fn check_annotation_type(content: MLeaderContent) -> CadResult<()> {
-    if content != MLeaderContent::Text {
-        return Err(CadError::Unsupported(
-            "mleader.content_unsupported: only MText annotation content is created".into(),
-        ));
-    }
-    Ok(())
 }
 
 impl Application {
@@ -245,9 +251,11 @@ impl Application {
                 text: request.text,
                 // `QLEADER`/`LEADER` have no typed option line: the style row is
                 // their only option source, exactly as documented in this module.
+                style_name: None,
                 dogleg_length: None,
                 dogleg_angle: None,
                 attachment: None,
+                text_angle: None,
             },
         };
         self.create_mleader(session, &mleader)

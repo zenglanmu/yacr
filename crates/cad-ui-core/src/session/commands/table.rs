@@ -23,26 +23,31 @@
 //!   the 1-based cell.
 //! * `TABLEDIT UNMERGE <row> <col>` — split the range covering the cell.
 //! * `TABLEDIT FORMAT <row> <col> [ALIGN <TL|TC|TR|ML|MC|MR|BL|BC|BR>]
-//!   [ROTATION <degrees>]` — set the cell's own text alignment and rotation.
-//!   `COLOR`, `FILL` and `LINEWEIGHT` are recognised and **refused by name**
-//!   (`tabledit.format_unsupported`): this build's display has one colour per
-//!   entity and no filled area, so there is no field to store them in.
+//!   [ROTATION <degrees>] [COLOR <aci|BYLAYER>] [FILL <aci|NONE>]
+//!   [LINEWEIGHT <mm|BYLAYER>] [BORDERCOLOR <aci|BYLAYER>]` — set the cell's own
+//!   text alignment, rotation, text colour, background fill and the four border
+//!   edges' colour/lineweight. A **border line type** stays refused by name
+//!   (`tabledit.format_unsupported`): this build's table model has no field for
+//!   it and the DXF writer emits no per-cell border line type.
 //! * `TABLEDIT STYLE <name>` — assign the table's style (the `TABLESTYLE <name>`
 //!   write through the `TABLEDIT` selector).
 //! * `MATCHCELL <src_row> <src_col> <dst_row> <dst_col> [<dst_row> <dst_col> …]`
 //!   — copy the source cell's whole format onto every destination cell.
 //! * `TABLESTYLE` — the read-only report; `TABLESTYLE [<name>] [DESC <text>]
 //!   [MARGIN <h> <v>] [ROW <DATA|TITLE|HEADER>] [HEIGHT <h>] [TEXTSTYLE <name>]
-//!   [ALIGN <code>] [BORDER <TOP|RIGHT|BOTTOM|LEFT|ALL> <ON|OFF|DOUBLE>
-//!   [<spacing>]] [TITLE <ON|OFF>] [HEADER <ON|OFF>]` — the style write. `ROW`
-//!   scopes the **following** row-scoped fields (`HEIGHT`, `TEXTSTYLE`, `ALIGN`,
-//!   `BORDER`) to one row type; without it they reach all three value sets.
+//!   [ALIGN <code>] [COLOR <aci|BYLAYER>] [FILL <aci|NONE>]
+//!   [LINEWEIGHT <mm|BYLAYER>] [BORDERCOLOR <aci|BYLAYER>]
+//!   [BORDER <TOP|RIGHT|BOTTOM|LEFT|ALL> <ON|OFF|DOUBLE> [<spacing>]]
+//!   [TITLE <ON|OFF>] [HEADER <ON|OFF>]` — the style write. `ROW` scopes the
+//!   **following** row-scoped fields (`HEIGHT`, `TEXTSTYLE`, `ALIGN`, `COLOR`,
+//!   `FILL`, `LINEWEIGHT`, `BORDERCOLOR`, `BORDER`) to one row type; without it
+//!   they reach all three value sets.
 //! * `TABLEEXPORT <path.csv>` — one CSV file; the whole remainder is the path
 //!   (see `super::table_export`).
 
 use cad_app::{
-    TableCellAddress, TableCreateCommand, TableEditCommand, TablePayload, TableRowStyleCommand,
-    TableStyleCommand, TableStyleEdge, TableStyleRowScope,
+    TableCellAddress, TableColorValue, TableCreateCommand, TableEditCommand, TableLineweightValue,
+    TablePayload, TableRowStyleCommand, TableStyleCommand, TableStyleEdge, TableStyleRowScope,
 };
 use cad_domain::{Point3, TableCellAlignment, TableRowKind};
 
@@ -191,7 +196,15 @@ pub fn parse_tabledit_option_argument(argument: &str) -> Option<TablePayload> {
     None
 }
 
-/// Parse `FORMAT <row> <col> [ALIGN <code>] [ROTATION <degrees>]`.
+/// Parse `FORMAT <row> <col> [ALIGN <code>] [ROTATION <degrees>]
+/// [COLOR <aci|BYLAYER>] [FILL <aci|NONE>] [LINEWEIGHT <mm|BYLAYER>]
+/// [BORDERCOLOR <aci|BYLAYER>]`.
+///
+/// Every field may appear once, in any order; a repeated field, an unknown word
+/// or a malformed value is `None` (the caller refuses the whole line by name,
+/// never a partially applied write). The rotation is converted to the model's
+/// radians here; an ACI index and a canonical lineweight are validated by the
+/// command, which owns the drawing-independent value sets.
 fn parse_tabledit_format(rest: &str) -> Option<TablePayload> {
     let tokens: Vec<&str> = rest.split_whitespace().collect();
     if tokens.len() < 4 {
@@ -203,6 +216,10 @@ fn parse_tabledit_format(rest: &str) -> Option<TablePayload> {
     };
     let mut alignment = None;
     let mut rotation = None;
+    let mut color = None;
+    let mut fill = None;
+    let mut lineweight = None;
+    let mut border_color = None;
     let mut index = 2;
     while index < tokens.len() {
         let word = tokens[index];
@@ -225,26 +242,92 @@ fn parse_tabledit_format(rest: &str) -> Option<TablePayload> {
             index += 1;
             continue;
         }
+        if word.eq_ignore_ascii_case("COLOR") || word.eq_ignore_ascii_case("COLOUR") {
+            if color.is_some() {
+                return None;
+            }
+            color = Some(parse_cell_color(tokens.get(index)?, "BYLAYER")?);
+            index += 1;
+            continue;
+        }
+        if word.eq_ignore_ascii_case("FILL") {
+            if fill.is_some() {
+                return None;
+            }
+            fill = Some(parse_cell_color(tokens.get(index)?, "NONE")?);
+            index += 1;
+            continue;
+        }
+        if word.eq_ignore_ascii_case("LINEWEIGHT") {
+            if lineweight.is_some() {
+                return None;
+            }
+            let token = tokens.get(index)?;
+            lineweight = Some(if token.eq_ignore_ascii_case("BYLAYER") {
+                TableLineweightValue::ByLayer
+            } else {
+                TableLineweightValue::Millimetres(parse_non_negative_decimal(token)? as f32)
+            });
+            index += 1;
+            continue;
+        }
+        if word.eq_ignore_ascii_case("BORDERCOLOR") || word.eq_ignore_ascii_case("BORDERCOLOUR") {
+            if border_color.is_some() {
+                return None;
+            }
+            border_color = Some(parse_cell_color(tokens.get(index)?, "BYLAYER")?);
+            index += 1;
+            continue;
+        }
         return None;
     }
-    if alignment.is_none() && rotation.is_none() {
+    if alignment.is_none()
+        && rotation.is_none()
+        && color.is_none()
+        && fill.is_none()
+        && lineweight.is_none()
+        && border_color.is_none()
+    {
         return None;
     }
     Some(TablePayload::Format {
         cell,
         alignment,
         rotation,
+        color,
+        fill,
+        lineweight,
+        border_color,
     })
+}
+
+/// One table colour token: an ACI index `1..=255`, or the field's own symbolic
+/// "no colour" word (`BYLAYER` for a text colour, `NONE` for a fill).
+///
+/// `0` and `256` are deliberately **not** accepted: they are the symbolic
+/// `ByBlock`/`ByLayer` DXF values, not palette entries, and a table cell stores
+/// the resolved colour rather than a second symbolic layer.
+fn parse_cell_color(token: &str, symbolic: &str) -> Option<TableColorValue> {
+    if token.eq_ignore_ascii_case(symbolic) {
+        return Some(TableColorValue::None);
+    }
+    let index = parse_positive_integer(token)?;
+    // `u8::try_from` already bounds the index to `1..=255` (the parser rejected
+    // `0`), which is exactly the palette range a cell record can carry.
+    u8::try_from(index).ok().map(TableColorValue::Aci)
 }
 
 /// The named refusal for a `TABLEDIT FORMAT` field this build cannot store.
 ///
-/// The recognised words are the DXF per-cell appearance fields the **model** has
-/// no room for: `COLOR` (content colour, group 64), `FILL` (background colour
-/// 63 + fill flag 283) and `LINEWEIGHT` (border lineweight, groups 275-279).
-/// They are refused with a stable code and the reason, never parsed and dropped.
-/// `None` when the line carries no such field (it is then either a supported
-/// `FORMAT` line or an ordinary malformed one).
+/// The one recognised word is the DXF per-cell **border line type** (the border
+/// record's line-type handle): this build's table model has no field for it and
+/// the DXF writer emits no per-cell border line type for a plain `TABLE`, so a
+/// stored value could neither be drawn nor round-trip. It is refused with a
+/// stable code and the reason, never parsed and dropped.
+///
+/// `COLOR`, `FILL`, `LINEWEIGHT` and `BORDERCOLOR` are **supported** (the cell
+/// appearance channel stores and draws them) and are therefore not refused here.
+/// `None` when the line carries no unsupported field.
 pub fn tabledit_format_refusal(argument: &str) -> Option<String> {
     let text = argument.trim_start();
     let (word, rest) = split_first_token(text)?;
@@ -252,31 +335,22 @@ pub fn tabledit_format_refusal(argument: &str) -> Option<String> {
         return None;
     }
     for token in rest.split_whitespace() {
-        let (field, reason) =
-            if token.eq_ignore_ascii_case("COLOR") || token.eq_ignore_ascii_case("COLOUR") {
-                (
-                    "COLOR",
-                    "a cell's text colour has no field in this build's table model (the display \
-                 carries one colour per entity), so a stored value could never be drawn",
-                )
-            } else if token.eq_ignore_ascii_case("FILL") {
-                (
-                "FILL",
-                "a cell's background fill has no field in this build's table model (the display \
-                 has no filled area), so a stored value could never be drawn",
+        let (field, reason) = if token.eq_ignore_ascii_case("LINETYPE")
+            || token.eq_ignore_ascii_case("BORDERLINETYPE")
+        {
+            (
+                "LINETYPE",
+                "a cell border's line type has no field in this build's table model and the DXF \
+                 writer emits no per-cell border line type for a plain TABLE, so a stored value \
+                 could never be drawn or written back",
             )
-            } else if token.eq_ignore_ascii_case("LINEWEIGHT") {
-                (
-                "LINEWEIGHT",
-                "a cell border's lineweight has no field in this build's table model (the display \
-                 draws every table border with the entity's lineweight)",
-            )
-            } else {
-                continue;
-            };
+        } else {
+            continue;
+        };
         return Some(format!(
             "tabledit.format_unsupported: TABLEDIT FORMAT cannot set {field}: {reason}; use ALIGN \
-             <TL|TC|TR|ML|MC|MR|BL|BC|BR> or ROTATION <degrees> instead; nothing was changed"
+             <TL|TC|TR|ML|MC|MR|BL|BC|BR>, ROTATION <degrees>, COLOR <aci|BYLAYER>, FILL <aci|NONE>, \
+             LINEWEIGHT <mm|BYLAYER> or BORDERCOLOR <aci|BYLAYER> instead; nothing was changed"
         ));
     }
     None
@@ -329,6 +403,9 @@ pub fn parse_matchcell_argument(argument: &str) -> Option<TablePayload> {
 /// * `HEIGHT <h>` — the row's text height;
 /// * `TEXTSTYLE <name>` — the row's text style name;
 /// * `ALIGN <TL|TC|TR|ML|MC|MR|BL|BC|BR>` — the row's cell alignment;
+/// * `COLOR <aci|BYLAYER>` — the row's cell text colour; `FILL <aci|NONE>` — the
+///   row's background fill; `LINEWEIGHT <mm|BYLAYER>` — the four border edges'
+///   lineweight; `BORDERCOLOR <aci|BYLAYER>` — the four border edges' colour;
 /// * `BORDER <TOP|RIGHT|BOTTOM|LEFT|ALL> <ON|OFF|DOUBLE> [<spacing>]` — one edge
 ///   (or all), visible/off or doubled with an optional spacing;
 /// * `TITLE <ON|OFF>`, `HEADER <ON|OFF>` — the row suppression flags.
@@ -408,6 +485,35 @@ pub fn parse_tablestyle_argument(argument: &str) -> Option<TableStyleCommand> {
             current_row_group(&mut command).alignment = Some(alignment);
             continue;
         }
+        if word.eq_ignore_ascii_case("COLOR") || word.eq_ignore_ascii_case("COLOUR") {
+            let choice = parse_cell_color(tokens.get(index)?, "BYLAYER")?;
+            index += 1;
+            current_row_group(&mut command).text_color = Some(choice);
+            continue;
+        }
+        if word.eq_ignore_ascii_case("BORDERCOLOR") || word.eq_ignore_ascii_case("BORDERCOLOUR") {
+            let choice = parse_cell_color(tokens.get(index)?, "BYLAYER")?;
+            index += 1;
+            current_row_group(&mut command).border_color = Some(choice);
+            continue;
+        }
+        if word.eq_ignore_ascii_case("FILL") {
+            let choice = parse_cell_color(tokens.get(index)?, "NONE")?;
+            index += 1;
+            current_row_group(&mut command).fill_color = Some(choice);
+            continue;
+        }
+        if word.eq_ignore_ascii_case("LINEWEIGHT") {
+            let token = tokens.get(index)?;
+            index += 1;
+            let choice = if token.eq_ignore_ascii_case("BYLAYER") {
+                TableLineweightValue::ByLayer
+            } else {
+                TableLineweightValue::Millimetres(parse_non_negative_decimal(token)? as f32)
+            };
+            current_row_group(&mut command).border_lineweight = Some(choice);
+            continue;
+        }
         if word.eq_ignore_ascii_case("BORDER") {
             let edge_word = *tokens.get(index)?;
             index += 1;
@@ -458,13 +564,19 @@ fn current_row_group(command: &mut TableStyleCommand) -> &mut TableRowStyleComma
 
 /// The `TABLESTYLE` field words (so a style name never swallows one).
 fn is_tablestyle_field(token: &str) -> bool {
-    const FIELDS: [&str; 9] = [
+    const FIELDS: [&str; 15] = [
         "DESC",
         "MARGIN",
         "ROW",
         "HEIGHT",
         "TEXTSTYLE",
         "ALIGN",
+        "COLOR",
+        "COLOUR",
+        "FILL",
+        "LINEWEIGHT",
+        "BORDERCOLOR",
+        "BORDERCOLOUR",
         "BORDER",
         "TITLE",
         "HEADER",
@@ -528,8 +640,10 @@ pub fn invalid_tablestyle_argument_reason(text: &str) -> String {
     format!(
         "tablestyle.argument: `{}` is not `TABLESTYLE [<name>] [DESC <text>] [MARGIN <h> <v>] \
          [ROW <DATA|TITLE|HEADER>] [HEIGHT <h>] [TEXTSTYLE <name>] \
-         [ALIGN <TL|TC|TR|ML|MC|MR|BL|BC|BR>] [BORDER <TOP|RIGHT|BOTTOM|LEFT|ALL> \
-         <ON|OFF|DOUBLE> [<spacing>]] [TITLE <ON|OFF>] [HEADER <ON|OFF>]`; nothing was changed",
+         [ALIGN <TL|TC|TR|ML|MC|MR|BL|BC|BR>] [COLOR <aci|BYLAYER>] [FILL <aci|NONE>] \
+         [LINEWEIGHT <mm|BYLAYER>] [BORDERCOLOR <aci|BYLAYER>] [BORDER \
+         <TOP|RIGHT|BOTTOM|LEFT|ALL> <ON|OFF|DOUBLE> [<spacing>]] [TITLE <ON|OFF>] \
+         [HEADER <ON|OFF>]`; nothing was changed",
         text.trim()
     )
 }

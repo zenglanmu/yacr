@@ -105,6 +105,25 @@ impl ProviderRegistry {
             // children take the INSERT's order rather than their own (which is
             // only meaningful inside the block definition) or a synthetic 0.
             let child_draw_order = fragment.draw_order;
+            // A provider may resolve a **primitive's own** colour/lineweight (a
+            // table cell's appearance is the case this build has): it then emits
+            // a concrete value with the matching `*_unresolved` flag clear
+            // instead of the `DEFAULT_*` placeholder. That value wins over the
+            // entity-level `ByLayer`/`ByBlock` provenance resolved above, and an
+            // unresolved (placeholder) one is replaced exactly as before, so
+            // every entity that carries no per-primitive appearance is
+            // unchanged.
+            let (fragment_color, fragment_color_unresolved) = if fragment.color_unresolved {
+                (own_color, color_unresolved)
+            } else {
+                (fragment.color, false)
+            };
+            let (fragment_lineweight, fragment_lineweight_unresolved) =
+                if fragment.lineweight_unresolved {
+                    (own_lineweight, lineweight_unresolved)
+                } else {
+                    (fragment.lineweight, false)
+                };
             match fragment.primitive {
                 DisplayPrimitive::Instance {
                     block,
@@ -219,10 +238,10 @@ impl ProviderRegistry {
                         &fragment.source,
                         &attributes,
                         own_alpha,
-                        own_color,
-                        color_unresolved,
-                        own_lineweight,
-                        lineweight_unresolved,
+                        fragment_color,
+                        fragment_color_unresolved,
+                        fragment_lineweight,
+                        fragment_lineweight_unresolved,
                         &own_linetype,
                         linetype_unresolved,
                         linetype_scale,
@@ -268,10 +287,10 @@ impl ProviderRegistry {
                                 geometry_source: attributes.geometry_source.clone(),
                                 precision: Precision::Analytic,
                                 alpha: own_alpha,
-                                color: own_color,
-                                color_unresolved,
-                                lineweight: own_lineweight,
-                                lineweight_unresolved,
+                                color: fragment_color,
+                                color_unresolved: fragment_color_unresolved,
+                                lineweight: fragment_lineweight,
+                                lineweight_unresolved: fragment_lineweight_unresolved,
                                 linetype: own_linetype.clone(),
                                 linetype_unresolved,
                                 linetype_scale,
@@ -291,10 +310,11 @@ impl ProviderRegistry {
                                                 geometry_source: attributes.geometry_source.clone(),
                                                 precision: Precision::Analytic,
                                                 alpha: own_alpha,
-                                                color: own_color,
-                                                color_unresolved,
-                                                lineweight: own_lineweight,
-                                                lineweight_unresolved,
+                                                color: fragment_color,
+                                                color_unresolved: fragment_color_unresolved,
+                                                lineweight: fragment_lineweight,
+                                                lineweight_unresolved:
+                                                    fragment_lineweight_unresolved,
                                                 linetype: own_linetype.clone(),
                                                 linetype_unresolved,
                                                 linetype_scale,
@@ -316,10 +336,10 @@ impl ProviderRegistry {
                                             geometry_source: attributes.geometry_source.clone(),
                                             precision: Precision::Analytic,
                                             alpha: own_alpha,
-                                            color: own_color,
-                                            color_unresolved,
-                                            lineweight: own_lineweight,
-                                            lineweight_unresolved,
+                                            color: fragment_color,
+                                            color_unresolved: fragment_color_unresolved,
+                                            lineweight: fragment_lineweight,
+                                            lineweight_unresolved: fragment_lineweight_unresolved,
                                             linetype: own_linetype.clone(),
                                             linetype_unresolved,
                                             linetype_scale,
@@ -340,10 +360,10 @@ impl ProviderRegistry {
                             &fragment.source,
                             &attributes,
                             own_alpha,
-                            own_color,
-                            color_unresolved,
-                            own_lineweight,
-                            lineweight_unresolved,
+                            fragment_color,
+                            fragment_color_unresolved,
+                            fragment_lineweight,
+                            fragment_lineweight_unresolved,
                             &own_linetype,
                             linetype_unresolved,
                             linetype_scale,
@@ -396,10 +416,10 @@ impl ProviderRegistry {
                             geometry_source: attributes.geometry_source.clone(),
                             precision: precision_for_source(&attributes.geometry_source),
                             alpha: own_alpha,
-                            color: own_color,
-                            color_unresolved,
-                            lineweight: own_lineweight,
-                            lineweight_unresolved,
+                            color: fragment_color,
+                            color_unresolved: fragment_color_unresolved,
+                            lineweight: fragment_lineweight,
+                            lineweight_unresolved: fragment_lineweight_unresolved,
                             linetype: own_linetype.clone(),
                             linetype_unresolved,
                             linetype_scale,

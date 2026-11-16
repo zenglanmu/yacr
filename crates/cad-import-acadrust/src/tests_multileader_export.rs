@@ -506,7 +506,6 @@ fn the_report_names_the_parsed_groups_the_model_never_reads() {
         "text frame (292)",
         "annotation scale (293)",
         "text direction negative (294)",
-        "text angle type (174)",
         "text align in IPE (178)",
         "extend leader to text (295)",
         "text boundary height (44)",
@@ -518,6 +517,14 @@ fn the_report_names_the_parsed_groups_the_model_never_reads() {
             "missing '{expected}' in {messages:?}"
         );
     }
+    // `174`/`175` (the text angle type) are modelled now, so they must not be
+    // declared unmodelled any more.
+    assert!(
+        !messages
+            .iter()
+            .any(|message| message.contains("text angle type (174)")),
+        "the text angle type is modelled and round-trips: {messages:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------

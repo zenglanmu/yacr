@@ -147,6 +147,8 @@ mod tests {
             merge_width: 1,
             merge_height: 1,
             borders: TableCellBorders::default(),
+            text_color: None,
+            fill_color: None,
         };
         let geometry = TableGeometry::from_import(TableParts {
             frame: TableFrame::default(),

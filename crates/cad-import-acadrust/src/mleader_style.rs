@@ -13,7 +13,7 @@
 //!
 //! Only the [`cad_db::MLeaderStyle`] columns are stored — path type, content
 //! kind, text height, arrowhead size, landing gap, dogleg length, the text-style
-//! name and the left attachment. The remaining source fields (leader
+//! name, the left attachment and the text angle type. The remaining source fields (leader
 //! colour/linetype/lineweight, the arrowhead block handle, block-content
 //! parameters, draw order and the annotative/unknown flags) have **no reader** in
 //! this build: they are not stored rather than given invented homes, and the P7b
@@ -21,7 +21,7 @@
 //! is the named limitation, not a silent loss of a value the model could honour.
 
 use cad_db::MLeaderStyle;
-use cad_domain::{MLeaderPathType, MLeaderStyleId};
+use cad_domain::{MLeaderPathType, MLeaderStyleId, MLeaderTextAngle};
 
 use super::*;
 
@@ -57,6 +57,7 @@ impl ImporterBuilder<'_> {
                     .and_then(|handle| self.text_style_name_for_handle(handle))
                     .unwrap_or_else(|| "Standard".to_string()),
                 left_attachment: style.text_left_attachment as i16,
+                text_angle_type: domain_text_angle(style.text_angle_type as i16),
             })
             .collect();
         for (index, mut style) in styles.into_iter().enumerate() {
@@ -79,4 +80,12 @@ fn domain_path_type(path_type: acadrust::objects::MultiLeaderPathType) -> MLeade
         }
         acadrust::objects::MultiLeaderPathType::Spline => MLeaderPathType::Spline,
     }
+}
+
+/// The domain mirror of the style object's text angle type (`175`).
+///
+/// The cast to `i16` is the group's own code, so an unknown source code reads as
+/// the same default the entity reader and acadrust use.
+pub(crate) fn domain_text_angle(value: i16) -> MLeaderTextAngle {
+    MLeaderTextAngle::from_dxf(value)
 }

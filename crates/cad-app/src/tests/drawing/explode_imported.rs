@@ -88,6 +88,7 @@ fn explode_multileader_with_a_spline_leader_path_keeps_the_spline_verbatim() {
         text_style_name: "Standard".into(),
         text_font: None,
         scale_factor: 1.0,
+        text_angle_type: MLeaderTextAngle::Horizontal,
     };
     let (leader, _) = MultiLeaderGeometry::from_import(MultiLeaderParts {
         style,
@@ -165,6 +166,7 @@ fn explode_multileader_without_content_produces_no_text_entity() {
         text_style_name: "Standard".into(),
         text_font: None,
         scale_factor: 1.0,
+        text_angle_type: MLeaderTextAngle::Horizontal,
     };
     let (leader, _) = MultiLeaderGeometry::from_import(MultiLeaderParts {
         style,
