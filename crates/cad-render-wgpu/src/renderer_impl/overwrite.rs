@@ -250,6 +250,7 @@ impl Renderer {
             .iter()
             .flatten()
             .any(|value| !value.is_finite())
+            || batch.edges.iter().flatten().any(|value| !value.is_finite())
         {
             return Err(BatchOverwriteRefusal::InvalidGeometry);
         }
@@ -271,16 +272,15 @@ impl Renderer {
                     .collect();
                 let normals = pack_positions(&geometry::repaired_normals(batch));
                 let colors = pack_positions(&geometry::repaired_colors(batch));
-                let edges = geometry::mesh_edge_indices(batch);
                 let mut quads = Vec::new();
-                if !edges.is_empty() {
-                    expand_line_quads(&mut quads, batch, Some(&edges));
+                if !batch.edges.is_empty() {
+                    expand_line_quads(&mut quads, batch, true);
                 }
                 (positions, indices, normals, colors, line_quad_bytes(&quads))
             }
             RenderTopology::MeshEdges | RenderTopology::Lines => {
                 let mut quads = Vec::new();
-                expand_line_quads(&mut quads, batch, None);
+                expand_line_quads(&mut quads, batch, false);
                 (
                     Vec::new(),
                     Vec::new(),
@@ -381,7 +381,7 @@ impl Renderer {
             push_line_instances(
                 &mut packed,
                 batch,
-                None,
+                false,
                 stream.origin,
                 first_segment,
                 run.count,

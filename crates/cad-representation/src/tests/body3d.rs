@@ -51,8 +51,8 @@ fn expanded_body(entity: DbEntity) -> DisplayRepresentation {
 fn exact_sheet_body_mesh_keeps_kernel_source_and_body_precision() {
     let display = BodyDisplay {
         mesh: plane_mesh(),
-        // Stored edges are deferred while a display mesh draws (P0.1) but they
-        // must not change the filled draw or its source tag.
+        // One stored 2-point polyline = one independent endpoint pair. It is the
+        // body's wireframe source, so the fragment carries it beside the mesh.
         edges: vec![vec![p(0.0, 0.0), p(1.0, 0.0)]],
         tolerance: Some(0.01),
         precision: Precision::Approximate {
@@ -81,9 +81,199 @@ fn exact_sheet_body_mesh_keeps_kernel_source_and_body_precision() {
     );
     assert_eq!(rep.completeness, Completeness::Complete);
     match &rep.fragments[0].primitive {
-        DisplayPrimitive::Mesh(mesh) => assert_eq!(mesh.triangles.len(), 2),
-        _ => panic!("a body with a display mesh is a filled Mesh primitive"),
+        DisplayPrimitive::MeshWithStoredEdges { mesh, edges } => {
+            assert_eq!(mesh.triangles.len(), 2);
+            assert_eq!(edges.len(), 2, "one stored pair, not per-triangle edges");
+            assert_eq!(edges[0], p(0.0, 0.0));
+            assert_eq!(edges[1], p(1.0, 0.0));
+        }
+        _ => panic!("a body with a display mesh and stored edges carries both"),
     }
+}
+
+#[test]
+fn body_stored_edges_are_flattened_to_independent_pairs() {
+    let display = BodyDisplay {
+        mesh: plane_mesh(),
+        edges: vec![
+            vec![p(0.0, 0.0), p(1.0, 0.0)],
+            vec![p3(0.0, 0.0, 1.0), p3(1.0, 0.0, 1.0), p3(1.0, 1.0, 1.0)],
+        ],
+        tolerance: None,
+        precision: Precision::Analytic,
+        completeness: Completeness::Complete,
+    };
+    let rep = expanded_body(body_entity(
+        94,
+        BodyKind::Sheet,
+        BodyExact::Exact(Box::new(square_brep(false))),
+        display,
+    ));
+    assert_eq!(rep.fragments.len(), 1);
+    match &rep.fragments[0].primitive {
+        DisplayPrimitive::MeshWithStoredEdges { edges, .. } => {
+            // 1 segment + 2 segments = 3 independent pairs = 6 endpoints.
+            assert_eq!(edges.len(), 6);
+            assert_eq!(edges[0], p(0.0, 0.0));
+            assert_eq!(edges[1], p(1.0, 0.0));
+            assert_eq!(edges[2], p3(0.0, 0.0, 1.0));
+            assert_eq!(edges[3], p3(1.0, 0.0, 1.0));
+            assert_eq!(edges[4], p3(1.0, 0.0, 1.0));
+            assert_eq!(edges[5], p3(1.0, 1.0, 1.0));
+        }
+        _ => panic!("stored edges must travel with the mesh"),
+    }
+}
+
+#[test]
+fn body_mesh_without_stored_edges_keeps_the_plain_mesh_primitive() {
+    let display = BodyDisplay {
+        mesh: plane_mesh(),
+        edges: Vec::new(),
+        tolerance: None,
+        precision: Precision::Analytic,
+        completeness: Completeness::Complete,
+    };
+    let rep = expanded_body(body_entity(
+        95,
+        BodyKind::Sheet,
+        BodyExact::Exact(Box::new(square_brep(false))),
+        display,
+    ));
+    assert_eq!(rep.fragments.len(), 1);
+    assert!(
+        matches!(&rep.fragments[0].primitive, DisplayPrimitive::Mesh(_)),
+        "no stored edges keeps the legacy plain Mesh (triangle-derived overlay)"
+    );
+}
+
+#[test]
+fn transforming_a_body_primitive_moves_its_stored_edges() {
+    let primitive = DisplayPrimitive::MeshWithStoredEdges {
+        mesh: std::sync::Arc::new(plane_mesh()),
+        edges: std::sync::Arc::from(vec![p(0.0, 0.0), p(1.0, 0.0)].into_boxed_slice()),
+    };
+    let moved = primitive.transformed(&Transform3::translation(p(10.0, 5.0)));
+    match moved {
+        DisplayPrimitive::MeshWithStoredEdges { mesh, edges } => {
+            assert_eq!(edges[0], p(10.0, 5.0));
+            assert_eq!(edges[1], p(11.0, 5.0));
+            assert_eq!(mesh.vertices[0], p(10.0, 5.0));
+        }
+        _ => panic!("transforming a body primitive keeps the variant"),
+    }
+}
+
+/// Expand a model INSERT of block 1 whose single member is a body carrying
+/// `display`, under the given block clip.
+fn clipped_body_rep(id: u128, clip: BlockClip, display: BodyDisplay) -> DisplayRepresentation {
+    let member = body_entity(
+        id,
+        BodyKind::Sheet,
+        BodyExact::Exact(Box::new(square_brep(false))),
+        display,
+    );
+    let member_id = member.id;
+    let mut b = empty_db();
+    b.insert_block(BlockDefinition {
+        id: BlockId(1),
+        entities: vec![member_id],
+        dynamic_visibility: None,
+    })
+    .unwrap();
+    b.insert_entity(member).unwrap();
+    let mut insert = insert_entity(1, SpaceId::Model, 1, 0.0);
+    insert.geometry = SemanticGeometry::Insert {
+        block: BlockId(1),
+        transform: Transform3::identity(),
+    };
+    b.insert_entity(insert).unwrap();
+    b.set_entity_render_attributes(
+        EntityId(1),
+        EntityRenderAttributes {
+            clip: Some(clip),
+            ..EntityRenderAttributes::default()
+        },
+    )
+    .unwrap();
+    let db = b.finish().unwrap();
+    ProviderRegistry::with_default_provider()
+        .build_expanded(&db, db.entity(EntityId(1)).unwrap(), &context())
+        .unwrap()
+}
+
+fn body_with_edges(edges: Vec<Vec<Point3>>) -> BodyDisplay {
+    BodyDisplay {
+        mesh: plane_mesh(),
+        edges,
+        tolerance: None,
+        precision: Precision::Analytic,
+        completeness: Completeness::Complete,
+    }
+}
+
+#[test]
+fn fully_inside_clipped_body_keeps_its_stored_edges_and_reports_nothing() {
+    // The clip region strictly contains the body's mesh and every stored edge
+    // endpoint, so no cut can change it: the variant (and its stored edges) must
+    // survive with no degradation diagnostic.
+    let rep = clipped_body_rep(
+        97,
+        BlockClip::new(vec![[-1.0, -1.0], [2.0, 2.0]], true, true),
+        body_with_edges(vec![vec![p(0.0, 0.0), p(1.0, 0.0)]]),
+    );
+    assert_eq!(rep.fragments.len(), 1);
+    match &rep.fragments[0].primitive {
+        DisplayPrimitive::MeshWithStoredEdges { edges, .. } => {
+            assert_eq!(edges.len(), 2, "the stored edge pair survives uncut");
+        }
+        _ => panic!("a body wholly inside the clip keeps MeshWithStoredEdges"),
+    }
+    assert!(
+        !rep.diagnostics
+            .iter()
+            .any(|d| d.code == "representation.xclip_body_edges_derived"),
+        "an unchanged body must not report a derived-overlay degradation, got {:?}",
+        rep.diagnostics
+            .iter()
+            .map(|d| d.code.as_str())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn clipped_body_mesh_falls_back_to_triangle_edges_with_a_named_diagnostic() {
+    // A body straddling a clipped block reference: the block clip cuts the mesh
+    // only, so the surviving piece is a plain `Mesh` (triangle-derived overlay)
+    // and one `representation.xclip_body_edges_derived` diagnostic records the
+    // loss.
+    let rep = clipped_body_rep(
+        96,
+        BlockClip::new(vec![[0.0, 0.0], [0.5, 1.0]], true, true),
+        body_with_edges(vec![vec![p(0.0, 0.0), p(1.0, 0.0)]]),
+    );
+    assert!(
+        rep.fragments
+            .iter()
+            .all(|f| matches!(&f.primitive, DisplayPrimitive::Mesh(_))),
+        "a clipped body piece is a plain Mesh"
+    );
+    assert!(
+        !rep.fragments.is_empty(),
+        "the half of the square inside the clip survives"
+    );
+    assert_eq!(
+        rep.diagnostics
+            .iter()
+            .filter(|d| d.code == "representation.xclip_body_edges_derived")
+            .count(),
+        1,
+        "one degradation diagnostic per clipped body, got {:?}",
+        rep.diagnostics
+            .iter()
+            .map(|d| d.code.as_str())
+            .collect::<Vec<_>>()
+    );
 }
 
 #[test]

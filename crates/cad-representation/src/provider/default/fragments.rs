@@ -184,12 +184,12 @@ pub(super) fn push_mesh_fragment(
 /// A body with neither a mesh nor drawable edges is missing geometry with an
 /// explicit diagnostic — never an empty success.
 ///
-/// P0.1: a body's **stored** edge polylines are not uploaded while it has a
-/// display mesh, because carrying them needs a
-/// `DisplayPrimitive::MeshWithStoredEdges` variant (deferred: adding it forces
-/// edits in the import/spatial/measure lanes). Until then the scene draws the
-/// triangle-derived edge overlay of [`DisplayPrimitive::Mesh`] for a body,
-/// exactly as it does for any other mesh; see `cad_scene::cache`.
+/// When the cache has both triangles and stored edges, the fragment is a
+/// [`DisplayPrimitive::MeshWithStoredEdges`]: the stored edge set is the body's
+/// wireframe source, so the scene fills `RenderBatch::edges` from it instead of
+/// re-deriving an overlay from the triangle topology. A cache with no stored
+/// edges keeps the plain [`DisplayPrimitive::Mesh`] (legacy triangle-derived
+/// overlay, and the text-LOD classification is unchanged).
 pub(super) fn body_fragment(
     entity: &DbEntity,
     body: &Body3d,
@@ -221,11 +221,20 @@ pub(super) fn body_fragment(
     // triangles, which would fabricate topology. Only a triangulated cache takes
     // the mesh path; a vertices-only cache falls through to its edges.
     if !body.display.mesh.triangles.is_empty() {
-        representation
-            .fragments
-            .push(fragment(DisplayPrimitive::Mesh(Arc::new(
-                body.display.mesh.clone(),
-            ))));
+        // Flatten the stored edge polylines to independent endpoint pairs. They
+        // travel with the mesh only when at least one segment survives; an empty
+        // edge set keeps today's plain `Mesh`, whose overlay is derived from the
+        // triangles and whose display class stays "not a text glyph".
+        let stored = body_edge_segments(&body.display.edges);
+        let primitive = if stored.is_empty() {
+            DisplayPrimitive::Mesh(Arc::new(body.display.mesh.clone()))
+        } else {
+            DisplayPrimitive::MeshWithStoredEdges {
+                mesh: Arc::new(body.display.mesh.clone()),
+                edges: Arc::from(stored.into_boxed_slice()),
+            }
+        };
+        representation.fragments.push(fragment(primitive));
         representation.completeness = body.display.completeness.clone();
         return;
     }

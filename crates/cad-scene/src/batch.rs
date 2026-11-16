@@ -104,7 +104,14 @@ pub struct RenderBatch {
     /// vertices.
     pub indices: Vec<[u32; 3]>,
     /// Edge positions for the optional wireframe overlay, relative to
-    /// `local_origin`. Empty when no wireframe is requested.
+    /// `local_origin`. Empty when no wireframe is requested. The list is a flat
+    /// set of **independent endpoint pairs** (two consecutive positions = one
+    /// segment, the `LineSegments` pairing rule), not a polyline: the renderer
+    /// draws exactly these positions and never joins adjacent pairs.
+    ///
+    /// For a plain mesh batch the scene derives them from the triangle topology
+    /// (legacy overlay); for a body (`DisplayPrimitive::MeshWithStoredEdges`) it
+    /// copies the body's stored edges instead.
     pub edges: Vec<[f32; 3]>,
     /// Analytic circles/arcs drawn as SDF instances. Non-empty only for
     /// [`RenderTopology::Conics`], whose `vertices` is empty. Each entry is a
@@ -192,10 +199,13 @@ impl RenderBatch {
     /// positions are 12 bytes per vertex; a mesh **always** uploads one normal
     /// per vertex (repaired when the scene's normals are missing or wrong), so
     /// that normal buffer is `vertices.len()` vectors even when
-    /// [`RenderBatch::normals`] is empty; triangle indices are `[u32; 3]`; and
-    /// for an enabled mesh edge overlay the wireframe index buffer is the
-    /// de-duplicated edge list as `u32`. [`SceneBudget::upload_bytes_per_frame`]
-    /// is charged this amount.
+    /// [`RenderBatch::normals`] is empty; and triangle indices are `[u32; 3]`.
+    /// [`SceneBudget::upload_bytes_per_frame`] is charged this amount.
+    ///
+    /// An enabled wireframe overlay charges its **positions** here (12 bytes
+    /// each, already counted in `edges`), not a derived `u32` index buffer: the
+    /// renderer draws the `edges` positions directly (as anti-aliased line quads
+    /// or packed instances).
     pub fn upload_size_bytes(&self) -> usize {
         if self.topology == RenderTopology::Conics {
             // One 72-byte SDF instance per conic (see `ArcInstance` in
@@ -210,11 +220,6 @@ impl RenderBatch {
             self.normals.len() * 12
         };
         let triangle_index_bytes = self.indices.len() * 12;
-        let edge_index_bytes = if self.topology == RenderTopology::Mesh && !self.edges.is_empty() {
-            edge_index_count(&self.indices) * 4
-        } else {
-            0
-        };
         // A mesh always binds a per-vertex colour attribute (white when the
         // batch carries no gradient), so its 12 bytes/vertex are uploaded too.
         let vertex_color_bytes = if self.topology == RenderTopology::Mesh {
@@ -222,7 +227,7 @@ impl RenderBatch {
         } else {
             0
         };
-        positions + normals + edges + triangle_index_bytes + edge_index_bytes + vertex_color_bytes
+        positions + normals + edges + triangle_index_bytes + vertex_color_bytes
     }
 
     /// Vertex-space bytes: positions, normals and edge positions (12 bytes each).
@@ -274,26 +279,7 @@ impl RenderBatch {
     }
 }
 
-/// Number of `u32` indices the wireframe edge buffer will contain for a mesh.
-///
-/// When `RenderBatch::edges` is empty, the optional edge overlay is disabled and
-/// no edge indices are uploaded. Otherwise the renderer builds indices from the
-/// triangle topology; this computes that exact count without allocating.
-pub fn edge_index_count(indices: &[[u32; 3]]) -> usize {
-    let mut pairs: Vec<(u32, u32)> = Vec::new();
-    for tri in indices {
-        for (a, b) in [(tri[0], tri[1]), (tri[1], tri[2]), (tri[2], tri[0])] {
-            if a != b {
-                pairs.push((a.min(b), a.max(b)));
-            }
-        }
-    }
-    pairs.sort_unstable();
-    pairs.dedup();
-    pairs.len() * 2
-}
-
-/// Sanitise a raw alpha value from a display fragment into `[0, 1]`.///
+/// Sanitise a raw alpha value from a display fragment into `[0, 1]`.
 /// Policy (kept in lockstep with `cad-render-wgpu::geometry::clamp_alpha`, which
 /// re-clamps before upload): a non-finite value is treated as **opaque** so an
 /// unreadable opacity never deletes geometry; otherwise the value is clamped to

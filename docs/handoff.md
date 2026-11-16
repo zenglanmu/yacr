@@ -35,9 +35,12 @@
 - **ACIS 导入**：`3DSOLID→Solid`、`REGION`/`SURFACE→Sheet`、`BODY→Unknown`；
   `SolidExchange::Brep` 时保留 `exact`，否则 `Unavailable{reason}` 且 `Solid` 降级；
   `TessellationMesh.edges` 不再丢弃；仅离散体不再报 `Verified/Verified`。
-- **显示**：有三角形 → `Mesh`；仅边线 → `LineSegments`；都没有 → `Missing` +
-  `representation.body_empty`。精度/来源原样透传（`KernelMesh`/`DirectMesh`）。
-  存储边线直送 `RenderBatch.edges` 是 P0.1（当前仍由三角形重推）。
+- **显示**：有显示网格且带存储边线 → `MeshWithStoredEdges`（存储边线直送
+  `RenderBatch.edges`，渲染器按这些位置画线，不再逐三角形重推）；有网格无边线 → `Mesh`；
+  仅边线 → `LineSegments`；都没有 → `Missing` + `representation.body_empty`。精度/来源原样
+  透传（`KernelMesh`/`DirectMesh`）。块/视口裁剪时每个裁剪片段降级为 `Mesh`（三角形重推）
+  并记 `representation.xclip_body_edges_derived`；渲染器改动只有 Linux 单元/契约证据，
+  GPU/像素 **NOT VERIFIED**。
 - **下游**：`cad-spatial` 新增 pick family `body`（子面身份 `body-face-identity-unmodelled`）；
   `cad-measure` 与 `Mesh` 一样不给 snap；`MASSPROP` 显式 `massprop.body_requires_kernel`；
   `select_filter` 用 `type_key` 区分 SOLID/SURFACE/REGION/BODY；body 编辑触发全量表示重建。
@@ -58,6 +61,12 @@
 - **NOT RUN**：`cargo test --workspace --locked -- --test-threads=1` 全量、GPU/像素、真机。
 - **NOT VERIFIED**：真实第三方 ACIS 样本的 B-Rep 保留率；Windows/macOS/Android/Web 运行；
   solidcore 未接线（P1）。
+- **P0.1（2026-11-16）**：存储边线直送 `RenderBatch.edges`，渲染器改为按 `edges` 位置画线
+  （legacy line-quad 与实例流共用同一配对规则，不再逐三角形索引重推）；`RenderBatch::edges`
+  位置不再只是开关。验证仅为 Linux 契约/单元：`cargo test -p cad-representation -p cad-scene`、
+  `cargo test -p cad-render-wgpu --lib`、`cargo test -p cad-cli-tools --lib`、
+  `cargo check -p cad-app --all-targets`、clippy/fmt、`check-file-size.py`、
+  wasm `--lib` check 均绿。**GPU/像素 NOT VERIFIED**（未跑 GPU 用例）。
 
 **wave 8（2026-11-16）**
 

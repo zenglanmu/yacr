@@ -47,7 +47,7 @@ fn converted(batches: &[cad_scene::RenderBatch]) -> Vec<ConvertedLine> {
         .map(|(index, batch)| ConvertedLine {
             batch: index,
             segments: (batch.vertices.len() / 2) as u32,
-            indices: None,
+            edges: false,
         })
         .collect()
 }
@@ -190,7 +190,7 @@ fn push_line_instances_packs_positions_colour_width_and_pick_key() {
     b.lineweight = 0.35;
     let origin = [10.0, 20.0, 30.0];
     let mut out = Vec::new();
-    push_line_instances(&mut out, &b, None, origin, 0, 1, 9);
+    push_line_instances(&mut out, &b, false, origin, 0, 1, 9);
     assert_eq!(out.len(), 1);
     let instance = out[0];
     // (origin-relative) positions
@@ -219,7 +219,7 @@ fn shared_origin_positions_are_exactly_the_batch_vertices() {
     };
     let origin = [b.local_origin.x, b.local_origin.y, b.local_origin.z];
     let mut out = Vec::new();
-    push_line_instances(&mut out, &b, None, origin, 0, 1, 1);
+    push_line_instances(&mut out, &b, false, origin, 0, 1, 1);
     assert_eq!(
         [out[0].p0_width[0], out[0].p0_width[1], out[0].p0_width[2]],
         vertices[0]

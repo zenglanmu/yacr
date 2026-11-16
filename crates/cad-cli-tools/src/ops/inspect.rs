@@ -201,6 +201,16 @@ pub(crate) fn run_build_representation(
                             meshes += 1;
                             vertices += mesh.vertices.len();
                         }
+                        cad_representation::DisplayPrimitive::MeshWithStoredEdges {
+                            mesh,
+                            edges,
+                        } => {
+                            // A body is one mesh primitive; its stored wireframe
+                            // positions are part of the same draw, so they are
+                            // counted too.
+                            meshes += 1;
+                            vertices += mesh.vertices.len() + edges.len();
+                        }
                         cad_representation::DisplayPrimitive::Conic(conic) => {
                             // Chord-expanded downstream today; count its line form.
                             lines += 1;

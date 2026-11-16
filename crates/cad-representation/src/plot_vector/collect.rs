@@ -79,6 +79,23 @@ pub fn build_vector_document(
             DisplayPrimitive::Mesh(mesh) | DisplayPrimitive::MeshWithoutEdgeOverlay(mesh) => {
                 collect_mesh(&mut document, object, mesh, fragment, &vector_page);
             }
+            // A body is drawn as its filled mesh **plus** the stored wireframe,
+            // so the path document carries the same two layers the raster does.
+            // The edge list is a flat set of independent endpoint pairs (the
+            // `LineSegments` pairing rule), never a polyline.
+            DisplayPrimitive::MeshWithStoredEdges { mesh, edges } => {
+                collect_mesh(&mut document, object, mesh, fragment, &vector_page);
+                if edges.len() % 2 != 0 {
+                    document.report(
+                        object,
+                        vector_diagnostic::DEGENERATE_POLYLINE,
+                        "stored body edges require endpoint pairs".into(),
+                    );
+                }
+                for pair in edges.as_chunks::<2>().0 {
+                    collect_lines(&mut document, object, pair, fragment, &vector_page);
+                }
+            }
             DisplayPrimitive::Text { .. } => {
                 document.report(
                     object,

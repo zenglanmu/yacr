@@ -16,8 +16,9 @@ fn mesh_batch_is_indexed_and_carries_normals_and_edges() {
     assert_eq!(batch.normals.len(), 4);
     assert_eq!(batch.indices, vec![[0, 1, 2], [0, 2, 3]]);
     assert_eq!(batch.triangle_count(), 2);
-    // Two triangles => six directed edges => twelve edge vertices.
-    assert_eq!(batch.edges.len(), 12);
+    // Two triangles => six directed edges, de-duplicated to the five unique
+    // undirected segments of a quad (the diagonal is shared) => ten positions.
+    assert_eq!(batch.edges.len(), 10);
 }
 
 #[test]
@@ -72,17 +73,141 @@ fn text_glyph_class_is_an_indexed_mesh_without_edge_overlay() {
 }
 
 #[test]
-fn body_mesh_batch_has_mesh_topology_and_triangle_derived_edges() {
-    // A `Body3d` with a display mesh arrives as `DisplayPrimitive::Mesh`. Its
-    // stored edge polylines are deferred (P0.1), so this triangle-derived
-    // overlay is the only edge source for a body today.
+fn body_mesh_batch_uses_its_stored_edges_not_the_triangle_derived_ones() {
+    // A `Body3d` with a display mesh and stored edges arrives as
+    // `DisplayPrimitive::MeshWithStoredEdges`. Its batch must carry the stored
+    // endpoint pairs, never the twelve triangle-derived positions of the quad.
+    let mesh = quad();
+    let stored = vec![
+        Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        },
+        Point3 {
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
+        },
+    ];
+    let mut representation = mesh_representation(20, mesh.clone());
+    representation.fragments[0].primitive = DisplayPrimitive::MeshWithStoredEdges {
+        mesh: Arc::new(mesh),
+        edges: Arc::from(stored.into_boxed_slice()),
+    };
     let delta = SceneCache::default()
-        .build(&mesh_representation(20, quad()), stamp())
+        .build(&representation, stamp())
         .unwrap();
     let batch = &delta.added[0];
     assert_eq!(batch.topology, RenderTopology::Mesh);
     assert_eq!(batch.indices, vec![[0, 1, 2], [0, 2, 3]]);
-    assert!(!batch.edges.is_empty(), "body mesh carries an edge overlay");
+    assert_eq!(
+        batch.edges,
+        vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+        "one stored segment, relative to the batch origin; not 12 triangle edges"
+    );
+    assert!(!batch.is_text_glyph());
+}
+
+#[test]
+fn body_stored_edges_are_deduplicated_and_degenerate_segments_dropped() {
+    let mesh = quad();
+    let a = Point3 {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+    };
+    let b = Point3 {
+        x: 1.0,
+        y: 0.0,
+        z: 0.0,
+    };
+    let c = Point3 {
+        x: 1.0,
+        y: 1.0,
+        z: 0.0,
+    };
+    let non_finite = Point3 {
+        x: f64::NAN,
+        y: 0.0,
+        z: 0.0,
+    };
+    let stored = vec![
+        a, b, // first occurrence, kept
+        b, a, // same unordered pair in the other direction: dropped
+        c, c, // zero length: dropped
+        non_finite, b, // non-finite endpoint: dropped
+        b, c, // a distinct segment, kept
+    ];
+    let mut representation = mesh_representation(21, mesh.clone());
+    representation.fragments[0].primitive = DisplayPrimitive::MeshWithStoredEdges {
+        mesh: Arc::new(mesh),
+        edges: Arc::from(stored.into_boxed_slice()),
+    };
+    let delta = SceneCache::default()
+        .build(&representation, stamp())
+        .unwrap();
+    let batch = &delta.added[0];
+    assert_eq!(
+        batch.edges,
+        vec![
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [1.0, 1.0, 0.0]
+        ],
+        "first occurrence of each unordered segment, in input order"
+    );
+}
+
+#[test]
+fn body_stored_edges_are_relative_to_the_batch_local_origin() {
+    let mut mesh = quad();
+    // Shift every vertex so the batch origin is the first vertex, not (0,0,0).
+    for vertex in &mut mesh.vertices {
+        vertex.x += 10.0;
+        vertex.y += 20.0;
+        vertex.z += 30.0;
+    }
+    let origin = mesh.vertices[0];
+    let stored = vec![
+        origin,
+        Point3 {
+            x: origin.x + 2.0,
+            y: origin.y,
+            z: origin.z,
+        },
+    ];
+    let mut representation = mesh_representation(22, mesh.clone());
+    representation.fragments[0].primitive = DisplayPrimitive::MeshWithStoredEdges {
+        mesh: Arc::new(mesh),
+        edges: Arc::from(stored.into_boxed_slice()),
+    };
+    let delta = SceneCache::default()
+        .build(&representation, stamp())
+        .unwrap();
+    let batch = &delta.added[0];
+    assert_eq!(batch.local_origin, origin);
+    assert_eq!(batch.edges, vec![[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]]);
+}
+
+#[test]
+fn mesh_with_stored_edges_but_no_usable_segment_keeps_the_triangle_overlay() {
+    // Defensive only: the provider never emits an empty stored-edge list, but if
+    // one reaches the scene the legacy triangle-derived overlay is kept (and the
+    // batch is still not a text glyph).
+    let mesh = quad();
+    let mut representation = mesh_representation(23, mesh.clone());
+    representation.fragments[0].primitive = DisplayPrimitive::MeshWithStoredEdges {
+        mesh: Arc::new(mesh),
+        edges: Arc::from(Vec::<Point3>::new().into_boxed_slice()),
+    };
+    let delta = SceneCache::default()
+        .build(&representation, stamp())
+        .unwrap();
+    let batch = &delta.added[0];
+    assert_eq!(batch.edges.len(), 10);
+    assert!(!batch.is_text_glyph());
 }
 
 #[test]

@@ -215,6 +215,10 @@ impl Renderer {
                     .flatten()
                     .any(|i| *i as usize >= batch.vertices.len())
                 || batch.vertices.iter().flatten().any(|v| !v.is_finite())
+                // The wireframe positions are drawn as they are stored, so a
+                // non-finite edge coordinate is as invalid as a non-finite
+                // vertex (refuse the batch, never upload NaN geometry).
+                || batch.edges.iter().flatten().any(|v| !v.is_finite())
                 // A conic batch carries f64 semantic records, not vertices; guard
                 // its own buffer size and finiteness.
                 || (batch.topology == RenderTopology::Conics
@@ -425,14 +429,18 @@ impl Renderer {
             let instanced = run.is_some();
             let merged = mesh_run.is_some();
             let arc_instanced = arc_run.is_some();
-            // A trailing unpaired vertex of a `Lines`/`MeshEdges` batch is dropped
-            // by every path (a `LineList` cannot pair it). Count it so the drop is
+            // A trailing unpaired position is dropped by every path (a segment
+            // needs two endpoints): a `Lines`/`MeshEdges` vertex, or a mesh
+            // wireframe position in `batch.edges`. Count it so the drop is
             // reported, never silent.
-            if matches!(
-                batch.topology,
-                RenderTopology::Lines | RenderTopology::MeshEdges
-            ) {
-                line_odd_vertex_skips += (batch.vertices.len() % 2) as u64;
+            match batch.topology {
+                RenderTopology::Lines | RenderTopology::MeshEdges => {
+                    line_odd_vertex_skips += (batch.vertices.len() % 2) as u64;
+                }
+                RenderTopology::Mesh => {
+                    line_odd_vertex_skips += (batch.edges.len() % 2) as u64;
+                }
+                RenderTopology::Conics => {}
             }
             // A converted batch owns no per-batch buffers: skip packing its
             // geometry entirely (its bytes live in the shared stream/chunk).
@@ -455,10 +463,13 @@ impl Renderer {
                             // Always bound (white when the batch has no per-vertex
                             // colours), so the mesh pipeline's `@location(2)` is valid.
                             let colors = geometry::repaired_colors(batch);
-                            let edges = geometry::mesh_edge_indices(batch);
+                            // The wireframe overlay draws the batch's `edges`
+                            // positions directly (stored body edges or the
+                            // legacy triangle-derived overlay); no triangle
+                            // index list re-derivation happens here.
                             let mut quads = Vec::new();
-                            if !edges.is_empty() {
-                                expand_line_quads(&mut quads, batch, Some(&edges));
+                            if !batch.edges.is_empty() {
+                                expand_line_quads(&mut quads, batch, true);
                             }
                             (
                                 verts,
@@ -472,7 +483,7 @@ impl Renderer {
                         // legacy position/index buffer is kept.
                         RenderTopology::MeshEdges | RenderTopology::Lines => {
                             let mut quads = Vec::new();
-                            expand_line_quads(&mut quads, batch, None);
+                            expand_line_quads(&mut quads, batch, false);
                             (
                                 Vec::new(),
                                 Vec::new(),

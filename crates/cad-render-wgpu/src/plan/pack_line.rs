@@ -247,10 +247,12 @@ pub(crate) fn push_line_quad(out: &mut Vec<LineQuadVertex>, a: [f32; 3], b: [f32
 
 /// Expand one batch's line geometry into anti-aliased quad vertices.
 ///
-/// With `indices = None` the segments are consecutive pairs of `batch.vertices`
-/// (a `Lines`/`MeshEdges` batch). With `indices = Some(list)` each pair is
-/// `(list[2k], list[2k + 1])` indexed into `batch.vertices` (a mesh edge
-/// overlay); the caller validates the indices are in range.
+/// With `edges = false` the segments are consecutive pairs of `batch.vertices`
+/// (a `Lines`/`MeshEdges` batch). With `edges = true` they are consecutive pairs
+/// of `batch.edges`, the mesh wireframe positions (`RenderBatch::edges` is a flat
+/// list of independent endpoint pairs, either a body's stored edges or the legacy
+/// triangle-derived overlay). The positions are drawn as they are stored; no
+/// triangle index list is consulted.
 ///
 /// The pairing rule is exactly [`push_line_instances`]'s, so the legacy per-batch
 /// path and the instanced path rasterize the same segments (conversion-path
@@ -258,23 +260,11 @@ pub(crate) fn push_line_quad(out: &mut Vec<LineQuadVertex>, a: [f32; 3], b: [f32
 pub(crate) fn expand_line_quads(
     out: &mut Vec<LineQuadVertex>,
     batch: &cad_scene::RenderBatch,
-    indices: Option<&[u32]>,
+    edges: bool,
 ) {
-    match indices {
-        None => {
-            for pair in batch.vertices.as_chunks::<2>().0 {
-                push_line_quad(out, pair[0], pair[1]);
-            }
-        }
-        Some(list) => {
-            for pair in list.as_chunks::<2>().0 {
-                push_line_quad(
-                    out,
-                    batch.vertices[pair[0] as usize],
-                    batch.vertices[pair[1] as usize],
-                );
-            }
-        }
+    let positions: &[[f32; 3]] = if edges { &batch.edges } else { &batch.vertices };
+    for pair in positions.as_chunks::<2>().0 {
+        push_line_quad(out, pair[0], pair[1]);
     }
 }
 
@@ -304,46 +294,41 @@ pub(crate) fn line_batch_is_instanced(batch: &cad_scene::RenderBatch) -> bool {
 /// One batch converted to the instanced line path, plus how its 2-vertex
 /// segments are derived.
 ///
-/// `Lines` batches contribute consecutive pairs of `batch.vertices`; `MeshEdges`
-/// batches and mesh edge overlays contribute explicit index pairs into
-/// `batch.vertices`. Either way the packed instance is a plain 2-vertex segment,
-/// so the coalesced run reproduces the legacy `LineList` draw exactly.
+/// `Lines`/`MeshEdges` batches contribute consecutive pairs of
+/// `batch.vertices`; a mesh wireframe contributes consecutive pairs of
+/// `batch.edges` (stored body edges or the legacy triangle-derived overlay).
+/// Either way the packed instance is a plain 2-vertex segment, so the coalesced
+/// run reproduces the legacy line-quad draw exactly.
 pub(crate) struct ConvertedLine {
     /// Index into the full batch slice.
     pub(crate) batch: usize,
     /// Number of 2-vertex segments this batch contributes.
     pub(crate) segments: u32,
-    /// Explicit index list (exactly `2 * segments` entries) into
-    /// `batch.vertices`; `None` means consecutive pairs of `batch.vertices`.
-    pub(crate) indices: Option<Vec<u32>>,
+    /// `true` when the segment endpoints are consecutive pairs of
+    /// `batch.edges` (a mesh wireframe); `false` for `batch.vertices`
+    /// (`Lines`/`MeshEdges`).
+    pub(crate) edges: bool,
 }
 
-/// The edge-overlay index list of an opaque `Mesh` batch converted to the
-/// instanced line path, or `None` when the batch has no overlay.
+/// The mesh wireframe overlay of an opaque `Mesh` batch converted to the
+/// instanced line path, as a segment count, or `None` when the batch has no
+/// overlay.
 ///
 /// A mergeable opaque `Mesh` batch always instantiates its wireframe overlay when
-/// it carries one: the triangles go to a merged mesh chunk and the overlay to an
-/// instance stream, so no legacy per-batch draw remains for it.
-pub(crate) fn overlay_is_instanced(batch: &cad_scene::RenderBatch) -> Option<Vec<u32>> {
+/// it carries one: the triangles go to a merged mesh chunk and the `edges`
+/// positions to an instance stream, so no legacy per-batch draw remains for it.
+/// The overlay is a flat list of independent endpoint pairs, so its segment count
+/// is `edges.len() / 2` (an odd trailing position is dropped by the same pairing
+/// rule as `Lines`).
+pub(crate) fn overlay_is_instanced(batch: &cad_scene::RenderBatch) -> Option<u32> {
     if batch.topology != RenderTopology::Mesh || batch.edges.is_empty() {
         return None;
     }
     if classify_alpha(batch.alpha) != AlphaClass::Opaque {
         return None;
     }
-    let edges = geometry::mesh_edge_indices(batch);
-    // `sorted_edge_indices` emits whole `(a, b)` pairs by construction, so a
-    // non-empty list is always even. A merged batch owns no per-batch vertex
-    // buffer, so `draw_batch` early-returns for it: a malformed (odd) list could
-    // *not* be routed back to the legacy overlay draw and would be silently
-    // dropped. Assert the invariant rather than drop geometry, and convert only a
-    // non-empty list.
-    debug_assert_eq!(
-        edges.len() % 2,
-        0,
-        "mesh edge index list must be whole (a, b) pairs"
-    );
-    (!edges.is_empty()).then_some(edges)
+    let segments = (batch.edges.len() / 2) as u32;
+    (segments > 0).then_some(segments)
 }
 
 /// Build the instanced-line conversion list for a batch set.
@@ -364,14 +349,14 @@ pub(crate) fn convert_line_batches(
             converted.push(ConvertedLine {
                 batch: index,
                 segments: (batch.vertices.len() / 2) as u32,
-                indices: None,
+                edges: false,
             });
         } else if mesh_merging && mesh_batch_is_mergeable(batch) {
-            if let Some(edges) = overlay_is_instanced(batch) {
+            if let Some(segments) = overlay_is_instanced(batch) {
                 converted.push(ConvertedLine {
                     batch: index,
-                    segments: (edges.len() / 2) as u32,
-                    indices: Some(edges),
+                    segments,
+                    edges: true,
                 });
             }
         }
@@ -435,6 +420,10 @@ pub(crate) fn choose_instance_origin(batches: &[&cad_scene::RenderBatch]) -> [f6
 }
 
 /// World-space AABB of one batch (`local_origin + vertex`), as `(min, max)`.
+///
+/// The wireframe `edges` positions are included too: for a body they are the
+/// stored edge set, which can reach outside the display triangles, and the
+/// instance chunk's AABB drives per-frame culling.
 pub(super) fn batch_world_aabb(batch: &cad_scene::RenderBatch) -> ([f64; 3], [f64; 3]) {
     let o = [
         batch.local_origin.x,
@@ -443,7 +432,7 @@ pub(super) fn batch_world_aabb(batch: &cad_scene::RenderBatch) -> ([f64; 3], [f6
     ];
     let mut min = [f64::INFINITY; 3];
     let mut max = [f64::NEG_INFINITY; 3];
-    for vertex in &batch.vertices {
+    for vertex in batch.vertices.iter().chain(batch.edges.iter()) {
         for axis in 0..3 {
             let world = o[axis] + f64::from(vertex[axis]);
             min[axis] = min[axis].min(world);
@@ -649,7 +638,7 @@ pub(crate) fn build_instance_chunks(
             push_line_instances(
                 &mut instances,
                 &batches[source.batch],
-                source.indices.as_deref(),
+                source.edges,
                 origin,
                 first,
                 count,
@@ -678,10 +667,10 @@ pub(crate) fn build_instance_chunks(
 /// Append one [`LineInstance`] per 2-vertex pair in the segment range
 /// `[first_segment, first_segment + segment_count)` of a batch's line geometry.
 ///
-/// With `indices = None` the pairs are consecutive entries of `batch.vertices`
-/// (a `Lines` batch). With `indices = Some(list)` each pair is
-/// `(list[2k], list[2k + 1])`, indexed into `batch.vertices` (a `MeshEdges` batch
-/// or a mesh edge overlay); the caller validates the indices are in range.
+/// With `edges = false` the pairs are consecutive entries of `batch.vertices`
+/// (a `Lines`/`MeshEdges` batch). With `edges = true` they are consecutive pairs
+/// of `batch.edges`, the mesh wireframe positions (`RenderBatch::edges` is a flat
+/// list of independent endpoint pairs; no triangle index list is consulted).
 ///
 /// A vertex is stored as the batch-local `f32` value when the batch's origin is
 /// the stream `origin` (exact), and otherwise as `world - origin` reduced in
@@ -694,7 +683,7 @@ pub(crate) fn build_instance_chunks(
 pub(crate) fn push_line_instances(
     out: &mut Vec<LineInstance>,
     batch: &cad_scene::RenderBatch,
-    indices: Option<&[u32]>,
+    edges: bool,
     origin: [f64; 3],
     first_segment: u32,
     segment_count: u32,
@@ -738,21 +727,9 @@ pub(crate) fn push_line_instances(
             id_flags: [pick_key, flags],
         });
     };
-    match indices {
-        None => {
-            for pair in batch.vertices[start..end].as_chunks::<2>().0 {
-                push_pair(out, pair[0], pair[1]);
-            }
-        }
-        Some(list) => {
-            for pair in list[start..end].as_chunks::<2>().0 {
-                push_pair(
-                    out,
-                    batch.vertices[pair[0] as usize],
-                    batch.vertices[pair[1] as usize],
-                );
-            }
-        }
+    let positions: &[[f32; 3]] = if edges { &batch.edges } else { &batch.vertices };
+    for pair in positions[start..end].as_chunks::<2>().0 {
+        push_pair(out, pair[0], pair[1]);
     }
 }
 

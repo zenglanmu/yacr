@@ -368,74 +368,55 @@ impl SceneCache {
                     | DisplayPrimitive::MeshWithoutEdgeOverlay(mesh) => {
                         let include_edge_overlay =
                             matches!(&fragment.primitive, DisplayPrimitive::Mesh(_));
-                        let origin = mesh.vertices.first().copied().unwrap_or(Point3 {
-                            x: 0.0,
-                            y: 0.0,
-                            z: 0.0,
-                        });
-                        // De-duplicate the triangle stream: one vertex per mesh
-                        // vertex, indexed by topology, instead of repeating each
-                        // shared corner (audit F14: linear indexing, not ideal).
-                        let verts: Vec<[f32; 3]> = mesh
-                            .vertices
-                            .iter()
-                            .map(|p| {
-                                [
-                                    (p.x - origin.x) as f32,
-                                    (p.y - origin.y) as f32,
-                                    (p.z - origin.z) as f32,
-                                ]
-                            })
-                            .collect();
-                        // Keep only triangles whose indices are in range, and
-                        // carry their normals. A triangle dropped here is a
-                        // malformed topology, reported by the caller.
-                        let mut kept = Vec::with_capacity(mesh.triangles.len());
-                        for tri in &mesh.triangles {
-                            let (a, b, c) = (tri[0] as usize, tri[1] as usize, tri[2] as usize);
-                            if a < verts.len() && b < verts.len() && c < verts.len() {
-                                kept.push(*tri);
-                            }
-                        }
-                        let normals = mesh
-                            .normals
-                            .iter()
-                            .map(|n| [n.x as f32, n.y as f32, n.z as f32])
-                            .collect();
-                        // Per-vertex colours are optional and only meaningful
-                        // when exactly one entry per vertex exists; otherwise
-                        // the batch falls back to its uniform colour.
-                        let colors: Vec<[f32; 3]> = if mesh.colors.len() == mesh.vertices.len() {
-                            mesh.colors
-                                .iter()
-                                .map(|c| sanitize_color([c[0] as f32, c[1] as f32, c[2] as f32]))
-                                .collect()
+                        let MeshStreams {
+                            origin,
+                            verts,
+                            kept,
+                            normals,
+                            colors,
+                        } = mesh_streams(mesh);
+                        // A plain `Mesh` keeps the legacy triangle-derived
+                        // overlay (one segment per unique triangle edge;
+                        // shared edges de-duplicated). `MeshWithoutEdgeOverlay`
+                        // (a text glyph) carries none.
+                        let edge_positions = if include_edge_overlay {
+                            triangle_edge_positions(&kept, &verts)
                         } else {
                             Vec::new()
                         };
-                        // Edge line list built from the kept topology, one
-                        // segment per triangle edge. Duplicated edges are not
-                        // removed yet; that is a documented follow-up (edges are
-                        // only uploaded when a caller asks for the wireframe).
-                        //
-                        // For a `Body3d` this triangle-derived overlay is the
-                        // only edge source today: a body's stored edge
-                        // polylines are not carried by `DisplayPrimitive::Mesh`.
-                        // P0.1 will replace the overlay with those stored edges
-                        // (`MeshWithStoredEdges`); until then the body's
-                        // edge-only display arrives as a separate `LineSegments`
-                        // fragment and is unaffected by this list.
-                        let mut edge_positions = Vec::new();
-                        if include_edge_overlay {
-                            edge_positions.reserve(kept.len() * 6);
-                            for tri in &kept {
-                                for &(i, j) in
-                                    &[(tri[0], tri[1]), (tri[1], tri[2]), (tri[2], tri[0])]
-                                {
-                                    edge_positions.push(verts[i as usize]);
-                                    edge_positions.push(verts[j as usize]);
-                                }
-                            }
+                        (
+                            RenderTopology::Mesh,
+                            verts,
+                            normals,
+                            colors,
+                            kept,
+                            edge_positions,
+                            origin,
+                            false,
+                        )
+                    }
+                    // A body's stored edge set is the wireframe source: the
+                    // overlay positions come from those independent endpoint
+                    // pairs, never from the triangle topology. De-duplication
+                    // and the defensive empty fallback live in
+                    // [`stored_edge_positions`].
+                    DisplayPrimitive::MeshWithStoredEdges { mesh, edges } => {
+                        let MeshStreams {
+                            origin,
+                            verts,
+                            kept,
+                            normals,
+                            colors,
+                        } = mesh_streams(mesh);
+                        let mut edge_positions = stored_edge_positions(edges, origin);
+                        if edge_positions.is_empty() {
+                            // Defensive only: the provider emits this variant
+                            // with at least one stored segment. If a hand-built
+                            // fragment carries none, keep the legacy
+                            // triangle-derived overlay (which also keeps
+                            // `is_text_glyph` false) rather than drawing a
+                            // body with no wireframe.
+                            edge_positions = triangle_edge_positions(&kept, &verts);
                         }
                         (
                             RenderTopology::Mesh,
@@ -582,6 +563,179 @@ impl SceneCache {
     /// and the source representation/domain data lives elsewhere.
     pub fn total_cpu_bytes(&self) -> usize {
         self.used_bytes
+    }
+}
+
+/// The shared GPU streams of a [`RenderTopology::Mesh`] batch.
+struct MeshStreams {
+    /// World-space reference the vertex and edge positions are reduced against.
+    origin: Point3,
+    /// De-duplicated vertex stream (one entry per mesh vertex).
+    verts: Vec<[f32; 3]>,
+    /// The triangle topology whose indices are all in range.
+    kept: Vec<[u32; 3]>,
+    /// Per-vertex normals, carried verbatim.
+    normals: Vec<[f32; 3]>,
+    /// Per-vertex colours, empty unless exactly one entry per vertex exists.
+    colors: Vec<[f32; 3]>,
+}
+
+/// Build a mesh batch's shared streams.
+///
+/// De-duplication means one vertex per mesh vertex, indexed by topology, instead
+/// of repeating each shared corner (audit F14: linear indexing, not ideal). A
+/// triangle with an out-of-range index is dropped; normals are carried verbatim
+/// and per-vertex colours are only meaningful when exactly one entry per vertex
+/// exists.
+fn mesh_streams(mesh: &Mesh) -> MeshStreams {
+    let origin = mesh.vertices.first().copied().unwrap_or(Point3 {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+    });
+    let verts: Vec<[f32; 3]> = mesh
+        .vertices
+        .iter()
+        .map(|p| {
+            [
+                (p.x - origin.x) as f32,
+                (p.y - origin.y) as f32,
+                (p.z - origin.z) as f32,
+            ]
+        })
+        .collect();
+    let mut kept = Vec::with_capacity(mesh.triangles.len());
+    for tri in &mesh.triangles {
+        let (a, b, c) = (tri[0] as usize, tri[1] as usize, tri[2] as usize);
+        if a < verts.len() && b < verts.len() && c < verts.len() {
+            kept.push(*tri);
+        }
+    }
+    let normals = mesh
+        .normals
+        .iter()
+        .map(|n| [n.x as f32, n.y as f32, n.z as f32])
+        .collect();
+    let colors: Vec<[f32; 3]> = if mesh.colors.len() == mesh.vertices.len() {
+        mesh.colors
+            .iter()
+            .map(|c| sanitize_color([c[0] as f32, c[1] as f32, c[2] as f32]))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    MeshStreams {
+        origin,
+        verts,
+        kept,
+        normals,
+        colors,
+    }
+}
+
+/// The legacy triangle-derived edge overlay: one segment per **unique**
+/// triangle edge.
+///
+/// The directed pairs of every kept triangle are de-duplicated through
+/// [`dedup_pairs`] (an unordered endpoint pair is one segment), so the shared
+/// diagonal of two triangles is emitted once — the same five-segment quad
+/// wireframe as before the P0.1 change, with no doubled AA fringe on shared
+/// edges. It is also the defensive fallback for a `MeshWithStoredEdges` that
+/// carries no usable stored segment.
+fn triangle_edge_positions(kept: &[[u32; 3]], verts: &[[f32; 3]]) -> Vec<[f32; 3]> {
+    let mut pairs = Vec::with_capacity(kept.len() * 6);
+    for tri in kept {
+        for &(i, j) in &[(tri[0], tri[1]), (tri[1], tri[2]), (tri[2], tri[0])] {
+            pairs.push(verts[i as usize]);
+            pairs.push(verts[j as usize]);
+        }
+    }
+    dedup_pairs(pairs)
+}
+
+/// Stored body edge positions relative to `origin`, reduced to `f32`, with
+/// duplicate segments removed.
+///
+/// The input is a flat list of independent endpoint pairs (the
+/// [`DisplayPrimitive::MeshWithStoredEdges`] contract). A non-finite endpoint is
+/// dropped, then [`dedup_pairs`] removes a repeated unordered pair (`-0.0`
+/// normalized to `0.0`) while preserving first-occurrence order and dropping
+/// zero-length segments.
+///
+/// Defensive only: `cad-db` validates a body's edge polylines (at least two
+/// points, finite), so a release-path cache cannot contain a bad endpoint. There
+/// is no diagnostics channel in this scene build, so the drop is not reported
+/// here; the provider's `representation.body_empty` is the missing-geometry
+/// signal.
+fn stored_edge_positions(points: &[Point3], origin: Point3) -> Vec<[f32; 3]> {
+    let mut pairs = Vec::with_capacity(points.len());
+    for pair in points.as_chunks::<2>().0 {
+        let (Some(a), Some(b)) = (relative_f32(pair[0], origin), relative_f32(pair[1], origin))
+        else {
+            continue;
+        };
+        pairs.push(a);
+        pairs.push(b);
+    }
+    dedup_pairs(pairs)
+}
+
+/// Drop duplicate and degenerate segments from a flat endpoint-pair list.
+///
+/// A segment is an **unordered** endpoint pair compared bitwise
+/// ([`canonical_segment`]), so the same edge emitted in either direction is one
+/// segment. The first occurrence keeps its order; a zero-length pair is dropped.
+/// Both wireframe sources (stored body edges and the triangle-derived overlay)
+/// go through this one rule.
+fn dedup_pairs(pairs: Vec<[f32; 3]>) -> Vec<[f32; 3]> {
+    let mut seen: std::collections::BTreeSet<[[u32; 3]; 2]> = std::collections::BTreeSet::new();
+    let mut out = Vec::with_capacity(pairs.len());
+    for pair in pairs.as_chunks::<2>().0 {
+        let key = canonical_segment(pair[0], pair[1]);
+        if key[0] == key[1] {
+            // Degenerate: both endpoints are the same reduced position.
+            continue;
+        }
+        if seen.insert(key) {
+            out.push(pair[0]);
+            out.push(pair[1]);
+        }
+    }
+    out
+}
+
+/// One world point reduced against `origin` and narrowed to `f32`, `None` when a
+/// component is not finite.
+fn relative_f32(point: Point3, origin: Point3) -> Option<[f32; 3]> {
+    let values = [
+        (point.x - origin.x) as f32,
+        (point.y - origin.y) as f32,
+        (point.z - origin.z) as f32,
+    ];
+    values
+        .iter()
+        .all(|value| value.is_finite())
+        .then_some(values)
+}
+
+/// A bitwise key for one `f32` position, with `-0.0` folded onto `0.0`.
+fn f32_key(value: f32) -> u32 {
+    if value == 0.0 {
+        0
+    } else {
+        value.to_bits()
+    }
+}
+
+/// The unordered bitwise key of one segment: endpoints are sorted so both
+/// directions produce the same key.
+fn canonical_segment(a: [f32; 3], b: [f32; 3]) -> [[u32; 3]; 2] {
+    let a = a.map(f32_key);
+    let b = b.map(f32_key);
+    if a <= b {
+        [a, b]
+    } else {
+        [b, a]
     }
 }
 

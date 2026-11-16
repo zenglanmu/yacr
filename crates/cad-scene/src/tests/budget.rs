@@ -110,7 +110,9 @@ fn frame_budget_rejects_counter_overflow_without_changing_usage() {
 #[test]
 fn upload_bytes_of_counts_every_uploaded_buffer() {
     // A mesh batch uploads positions, normals, per-vertex colours, `[u32; 3]`
-    // triangle indices and a `u32` edge index per de-duplicated edge.
+    // triangle indices and the wireframe edge **positions** (12 bytes each;
+    // the renderer draws those positions, so no derived `u32` index buffer is
+    // charged).
     let mut cache = SceneCache::default();
     let delta = cache
         .build(&mesh_representation(1, quad()), stamp())
@@ -119,12 +121,10 @@ fn upload_bytes_of_counts_every_uploaded_buffer() {
     // 4 positions + 4 normals = 8 vertex vectors * 12 = 96.
     // 4 per-vertex colours * 12 = 48 (a mesh always binds the colour attribute).
     // 2 triangles * 12 = 24 index bytes.
-    // A quad triangulated as [0,1,2],[0,2,3] has 5 distinct undirected edges
-    // (the diagonal is shared) => 10 `u32` edge indices = 40 bytes.
-    // `edges` (the position list the scene carries) is separate and counted too.
-    assert_eq!(batch.vertex_bytes(), (4 + 4 + 12) * 12);
-    assert_eq!(edge_index_count(&batch.indices), 10);
-    let expected = batch.vertex_bytes() + 4 * 12 + 2 * 12 + 10 * 4;
+    // The triangle-derived overlay de-duplicates shared edges: a quad has 5
+    // unique segments = 10 positions * 12 = 120 bytes.
+    assert_eq!(batch.vertex_bytes(), (4 + 4 + 10) * 12);
+    let expected = batch.vertex_bytes() + 4 * 12 + 2 * 12;
     assert_eq!(batch.upload_size_bytes(), expected);
 }
 

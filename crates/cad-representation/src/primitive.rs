@@ -178,6 +178,23 @@ pub enum DisplayPrimitive {
     /// general "mesh without a wireframe" work: that would silently classify the
     /// geometry as text.
     MeshWithoutEdgeOverlay(Arc<Mesh>),
+    /// A filled triangle mesh plus the **stored** display edges beside it.
+    ///
+    /// Only a `SemanticGeometry::Body3d` emits this: `edges` is the body display
+    /// cache's own boundary/feature edge set, flattened into independent endpoint
+    /// pairs (two consecutive points are one segment, the same pairing rule as
+    /// [`DisplayPrimitive::LineSegments`]). It is **not** a polyline list —
+    /// adjacent pairs are never joined.
+    ///
+    /// These stored edges are the body's wireframe source: the scene fills
+    /// `RenderBatch::edges` from them instead of re-deriving an overlay from the
+    /// triangle topology (internal tessellation diagonals are not real edges),
+    /// and the renderer draws them. Use plain [`DisplayPrimitive::Mesh`] when a
+    /// mesh has no stored edges; that keeps the legacy triangle-derived overlay.
+    MeshWithStoredEdges {
+        mesh: Arc<Mesh>,
+        edges: Arc<[Point3]>,
+    },
     Text {
         text: String,
         origin: Point3,
@@ -273,6 +290,20 @@ impl DisplayPrimitive {
             }
             DisplayPrimitive::MeshWithoutEdgeOverlay(mesh) => {
                 DisplayPrimitive::MeshWithoutEdgeOverlay(Arc::new(transform_mesh(mesh, transform)))
+            }
+            // Both halves are world-space geometry: the mesh is transformed as
+            // usual and every stored edge endpoint moves through the same map.
+            DisplayPrimitive::MeshWithStoredEdges { mesh, edges } => {
+                DisplayPrimitive::MeshWithStoredEdges {
+                    mesh: Arc::new(transform_mesh(mesh, transform)),
+                    edges: Arc::from(
+                        edges
+                            .iter()
+                            .map(|point| transform.apply_point(*point))
+                            .collect::<Vec<Point3>>()
+                            .into_boxed_slice(),
+                    ),
+                }
             }
             DisplayPrimitive::Text {
                 text,

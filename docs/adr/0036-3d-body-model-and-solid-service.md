@@ -1,13 +1,15 @@
 # ADR 0036：3D 实体模型（wireframe / surface / solid）与 solidcore 无状态建模服务
 
-- 状态：**Accepted（2026-11-16）**。实现进度：P0 已落地（P0.1 的"存储边线直送
-  `RenderBatch.edges`"未做）；P1–P3 **NOT IMPLEMENTED**。
+- 状态：**Accepted（2026-11-16）**。实现进度：P0 已落地；P0.1（存储边线直送
+  `RenderBatch.edges`）已完成，仅有 Linux 上的契约/单元证据（尚无 GPU/像素证据）；
+  P1–P3 **NOT IMPLEMENTED**。
   验证边界：本轮只有 Linux 上的契约/单元证据；Windows/macOS/Android/Web 的
   solidcore 运行状态、任何 GPU/像素结论一律 **NOT VERIFIED**。
 - 日期：2026-11-16。
 - 相关：[ADR-0033](0033-multi-format-import.md)（多格式导入；D2/D9 的 BRep 边界）、
   [ADR-0031](0031-acadrust-vendored-patch-policy.md)（依赖补丁策略）、
   `docs/kernel-acis.md`（现有 ACIS 契约）、`docs/compatibility.md`（逐命令能力表）、
+  `docs/3d-solidcore-and-mesh-import.md`（接入收益与 SKP/STL 映射方案）、
   `scripts/check-architecture.py`（分层门禁）、`crates/cad-kernel-adapter`。
 - 影响：`cad-domain`（新增 `BrepData` 与 `Body3d`）、`cad-kernel-adapter`（数据下沉、
   保留评估接缝）、`cad-db`（校验/变换/包围盒）、`cad-representation` / `cad-scene`
@@ -144,9 +146,9 @@ pub struct Body3d { pub kind: BodyKind, pub exact: BodyExact, pub display: BodyD
 
 - **P0（本轮）**：`Body3d` + 中性 B-Rep 下沉 + `cad-db` 校验/变换/包围盒 +
   导入保留 `exact`/`edges` + 表示/场景用显示缓存 + 全量 match 分支显式化。
-  不接 solidcore、不加命令、不加 NURBS。**P0.1**：表示层新增
+  不接 solidcore、不加命令、不加 NURBS。**P0.1（已完成）**：表示层新增
   `MeshWithStoredEdges`，把 `BodyDisplay.edges` 直接送进 `RenderBatch.edges`，替换
-  当前由三角形重推的边线覆盖层。
+  当前由三角形重推的边线覆盖层；渲染器改为按 `edges` 位置画线。
 - **P1**：`cad-kernel-solidcore` + `SolidModeler`；基本体（BOX/CYLINDER/SPHERE/
   CONE/TORUS/WEDGE/PYRAMID）、UNION/SUBTRACT/INTERSECT、`3DSOLID`/`BODY`/`REGION`
   命令注册、体积/质心/惯性、由 `BrepFace.id` 产出 `face_sources`、`VSCURRENT`。

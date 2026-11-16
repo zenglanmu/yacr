@@ -39,6 +39,13 @@ impl FragmentHistogram {
                     self.glyph_meshes += 1;
                     self.glyph_triangles += mesh.triangles.len();
                 }
+                DisplayPrimitive::MeshWithStoredEdges { mesh, .. } => {
+                    // A body's stored-edge mesh is a solid mesh, not a glyph:
+                    // the scene builds it as a `Mesh` batch with an edge
+                    // overlay.
+                    self.meshes += 1;
+                    self.mesh_triangles += mesh.triangles.len();
+                }
                 DisplayPrimitive::Conic(conic) => {
                     // Slice B: an eligible circle/arc is drawn as an SDF conic
                     // batch (tallied in `conic_batches`); an ineligible one
@@ -126,5 +133,72 @@ impl BatchHistogram {
 
     pub(crate) fn total_batches(&self) -> usize {
         self.line_batches + self.mesh_batches + self.glyph_batches + self.mesh_edge_batches
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cad_domain::{
+        Completeness, DocumentId, EntityId, GeometrySource, InstancePath, Mesh, Point3, Precision,
+        SelectionRef,
+    };
+    use cad_representation::{DisplayFragment, DisplayRepresentation};
+
+    #[test]
+    fn a_body_with_stored_edges_tallies_as_a_mesh_not_a_glyph() {
+        let representation = DisplayRepresentation {
+            fragments: vec![DisplayFragment {
+                source: SelectionRef {
+                    document: DocumentId(1),
+                    entity: EntityId(1),
+                    instance: InstancePath::default(),
+                    sub_element: None,
+                },
+                geometry_source: GeometrySource::DirectMesh,
+                precision: Precision::Analytic,
+                alpha: 1.0,
+                color: [1.0; 3],
+                color_unresolved: true,
+                lineweight: 0.0,
+                lineweight_unresolved: true,
+                linetype: cad_db::LinetypePattern::continuous(),
+                linetype_unresolved: true,
+                linetype_scale: 1.0,
+                draw_order: 0,
+                primitive: DisplayPrimitive::MeshWithStoredEdges {
+                    mesh: std::sync::Arc::new(Mesh {
+                        vertices: Vec::new(),
+                        triangles: vec![[0, 1, 2]],
+                        normals: Vec::new(),
+                        face_sources: Vec::new(),
+                        colors: Vec::new(),
+                    }),
+                    edges: std::sync::Arc::from(
+                        vec![
+                            Point3 {
+                                x: 0.0,
+                                y: 0.0,
+                                z: 0.0,
+                            },
+                            Point3 {
+                                x: 1.0,
+                                y: 0.0,
+                                z: 0.0,
+                            },
+                        ]
+                        .into_boxed_slice(),
+                    ),
+                },
+            }],
+            completeness: Completeness::Complete,
+            diagnostics: Vec::new(),
+        };
+        let mut histogram = FragmentHistogram::default();
+        histogram.tally(&representation);
+        assert_eq!(histogram.meshes, 1);
+        assert_eq!(histogram.mesh_triangles, 1);
+        assert_eq!(histogram.glyph_meshes, 0);
+        assert_eq!(histogram.glyph_triangles, 0);
     }
 }

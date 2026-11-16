@@ -88,25 +88,6 @@ fn degenerate_mesh_gets_fallback_normal() {
 }
 
 #[test]
-fn edge_indices_are_sorted_and_deduplicated() {
-    // Two triangles sharing edge (1,2).
-    let edges = sorted_edge_indices(&[[0, 1, 2], [2, 1, 3]]);
-    // Unique edges: (0,1),(1,2),(0,2),(1,3),(2,3) => 10 indices.
-    assert_eq!(edges.len(), 10);
-    assert_eq!(edges, vec![0, 1, 0, 2, 1, 2, 1, 3, 2, 3]);
-    // Deterministic for the same input.
-    assert_eq!(sorted_edge_indices(&[[0, 1, 2], [2, 1, 3]]), edges);
-}
-
-#[test]
-fn mesh_upload_edge_indices_follow_the_optional_overlay_contract() {
-    let mut batch = mesh_batch(false);
-    assert!(mesh_edge_indices(&batch).is_empty());
-    batch.edges = vec![[0.0; 3], [1.0, 0.0, 0.0]];
-    assert_eq!(mesh_edge_indices(&batch), vec![0, 1, 0, 2, 1, 2]);
-}
-
-#[test]
 fn plan_frame_accepts_within_budget() {
     let batches = vec![mesh_batch(false)];
     let budget = FrameBudget {

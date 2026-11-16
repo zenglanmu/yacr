@@ -205,6 +205,11 @@ pub(crate) fn apply_qtext(representation: &mut DisplayRepresentation, object: u1
             DisplayPrimitive::Mesh(mesh) | DisplayPrimitive::MeshWithoutEdgeOverlay(mesh) => {
                 mesh.vertices.clone()
             }
+            DisplayPrimitive::MeshWithStoredEdges { mesh, edges } => {
+                let mut points = mesh.vertices.clone();
+                points.extend_from_slice(edges);
+                points
+            }
             DisplayPrimitive::Text { .. } => {
                 report_extent_unknown(
                     representation,

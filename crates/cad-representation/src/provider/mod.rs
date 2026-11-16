@@ -1,6 +1,7 @@
 //! Representation providers and the provider registry.
 
 mod clip;
+mod clip_emit;
 mod default;
 mod depth;
 mod display_modes;

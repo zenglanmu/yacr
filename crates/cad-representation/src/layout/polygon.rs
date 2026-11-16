@@ -158,6 +158,16 @@ impl PaperClip {
         inside
     }
 
+    /// Whether every point lies inside this clip (boundary inclusive).
+    ///
+    /// Used as the "nothing to cut" fast path for a primitive wholly inside the
+    /// region. Point containment is exact for a rectangle and for a convex
+    /// polygon's hull; a concave clip is still accepted here only when every
+    /// point is inside it (the region test the caller asked for).
+    pub fn holds_all_points<'a>(&self, points: impl IntoIterator<Item = &'a Point3>) -> bool {
+        points.into_iter().all(|p| self.contains([p.x, p.y]))
+    }
+
     /// Whether a whole convex-or-concave subject boundary lies inside the clip.
     ///
     /// True only when every subject vertex is inside **and** no subject edge
@@ -654,6 +664,16 @@ impl WorldRectBoundary {
     /// Whether `point` is inside the region (boundary inclusive).
     pub fn contains(&self, point: [f64; 2]) -> bool {
         self.pieces.iter().any(|piece| piece.contains(point))
+    }
+
+    /// Whether every point lies inside the region (boundary inclusive).
+    ///
+    /// This is the "nothing can be cut" fast path for a primitive wholly inside
+    /// the region: every mesh vertex and stored edge endpoint is tested against
+    /// the union of the region's pieces. Any point outside keeps the exact
+    /// clipper path.
+    pub fn holds_all_points<'a>(&self, points: impl IntoIterator<Item = &'a Point3>) -> bool {
+        points.into_iter().all(|p| self.contains([p.x, p.y]))
     }
 
     /// The exact intersection of two regions, or `None` when they are disjoint.

@@ -168,8 +168,9 @@ face-with-hole 1/8、instance-scaled 3/36；theater-2017 1246 实体/96,333 三�
   反推 B-Rep。
 - **容差是规则**：线性偏差 = 该实体**世界包围盒对角线的 0.1 %（1e-3）**，角度偏差取内核默认 0.35 rad；
   `BodyDisplay.tolerance` 记录实际请求值。`fixtures/acis/cube.sat` 对角线 3.4641016 ⇒ **3.464102e-3**。
-- **边线不再丢弃**：`TessellationMesh.edges` 进入 `BodyDisplay.edges`。P0 的显示仍由三角形重推
-  边线覆盖层；直接把存储边线送进 `RenderBatch.edges` 是 P0.1。
+- **边线不再丢弃**：`TessellationMesh.edges` 进入 `BodyDisplay.edges`。有显示网格时表示层把它作为
+  `DisplayPrimitive::MeshWithStoredEdges` 直送 `RenderBatch.edges`（P0.1 已完成，表示/场景契约与
+  单元证据；渲染器的 GPU/像素结果 **NOT VERIFIED**）。
 - **完整性**：精确 B-Rep + 解析离散 ⇒ `Complete`；曲面/近似离散 ⇒ `Partial` 并带具名近似理由；
   只离散不保留精确几何 ⇒ `Partial`。**只离散的实体不再报 `Verified/Verified`**。
 - **拒绝保持原状**：超出子集、或原始 SAT/SAB 被内核拒绝 ⇒ 仍是 `Opaque` + 内核具名码

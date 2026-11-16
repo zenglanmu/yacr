@@ -293,7 +293,9 @@ fn face_only(
     color: [f32; 3],
 ) -> Option<RenderBatch> {
     match &fragment.primitive {
-        DisplayPrimitive::Mesh(mesh) | DisplayPrimitive::MeshWithoutEdgeOverlay(mesh) => {
+        DisplayPrimitive::Mesh(mesh)
+        | DisplayPrimitive::MeshWithoutEdgeOverlay(mesh)
+        | DisplayPrimitive::MeshWithStoredEdges { mesh, .. } => {
             mesh_batch(reference, mesh, id, draw_order, alpha, color)
         }
         _ => None,

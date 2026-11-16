@@ -35,7 +35,9 @@ use super::expand::report_xclip;
 /// The clip plane normal is the block's `+Z`, so a depth band is a world z range
 /// and the test is the primitive's z extent:
 ///
-/// * **line / line bundle / mesh / mask** — the min/max z of the vertices;
+/// * **line / line bundle / mask** — the min/max z of the vertices;
+/// * **mesh** — the min/max z of the vertices (for a body mesh, its stored edge
+///   endpoints are included too);
 /// * **conic** — `center.z ± (|major.z| + |minor.z|)`, an exact bound: a conic
 ///   whose bound is outside the band cannot have any point in it;
 /// * **image** — the four z values of the unit square's corners under the
@@ -51,6 +53,12 @@ pub(super) fn primitive_depth_span(primitive: &DisplayPrimitive) -> Option<(f64,
         DisplayPrimitive::Mesh(mesh) | DisplayPrimitive::MeshWithoutEdgeOverlay(mesh) => {
             points_depth_span(&mesh.vertices)
         }
+        // The span covers the filled mesh **and** its stored wireframe: a body
+        // whose edge set reaches outside the display triangles is still tested as
+        // one primitive.
+        DisplayPrimitive::MeshWithStoredEdges { mesh, edges } => {
+            mesh_with_edges_depth_span(mesh, edges)
+        }
         DisplayPrimitive::Text { origin, .. } => Some((origin.z, origin.z)),
         DisplayPrimitive::Image { transform, .. } => image_depth_span(transform),
         DisplayPrimitive::Mask { boundary, .. } => points_depth_span(boundary),
@@ -61,14 +69,27 @@ pub(super) fn primitive_depth_span(primitive: &DisplayPrimitive) -> Option<(f64,
 
 /// The z extent of a world-space point list, `None` when empty or non-finite.
 fn points_depth_span(points: &[Point3]) -> Option<(f64, f64)> {
+    points_depth_span_of(std::iter::once(points))
+}
+
+/// The z extent of a mesh's vertices together with its stored edge endpoints.
+fn mesh_with_edges_depth_span(mesh: &Mesh, edges: &[Point3]) -> Option<(f64, f64)> {
+    points_depth_span_of([mesh.vertices.as_slice(), edges].into_iter())
+}
+
+/// The z extent over several world-space point lists, `None` when they are all
+/// empty or any coordinate is non-finite.
+fn points_depth_span_of<'a>(lists: impl Iterator<Item = &'a [Point3]>) -> Option<(f64, f64)> {
     let mut min = f64::INFINITY;
     let mut max = f64::NEG_INFINITY;
-    for point in points {
-        if !point.z.is_finite() {
-            return None;
+    for points in lists {
+        for point in points {
+            if !point.z.is_finite() {
+                return None;
+            }
+            min = min.min(point.z);
+            max = max.max(point.z);
         }
-        min = min.min(point.z);
-        max = max.max(point.z);
     }
     (min <= max).then_some((min, max))
 }
@@ -103,6 +124,7 @@ pub(super) fn primitive_depth_kind(primitive: &DisplayPrimitive) -> &'static str
         DisplayPrimitive::Lines(_) | DisplayPrimitive::LineSegments(_) => "line",
         DisplayPrimitive::Conic(_) => "conic",
         DisplayPrimitive::Mesh(_) | DisplayPrimitive::MeshWithoutEdgeOverlay(_) => "mesh",
+        DisplayPrimitive::MeshWithStoredEdges { .. } => "mesh",
         DisplayPrimitive::Text { .. } => "text",
         DisplayPrimitive::Image { .. } => "image",
         DisplayPrimitive::Mask { .. } => "mask",

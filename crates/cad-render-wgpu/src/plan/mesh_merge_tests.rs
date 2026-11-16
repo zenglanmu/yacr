@@ -292,11 +292,13 @@ fn overlay_is_instanced_only_for_opaque_meshes_with_edges() {
     let mut with_edges = quad([0.0; 3], [1.0; 3], 1);
     assert!(overlay_is_instanced(&with_edges).is_none());
     with_edges.edges = vec![[0.0; 3], [1.0, 0.0, 0.0]];
-    // `mesh_edge_indices` sorts/de-duplicates the triangle edges.
-    assert_eq!(
-        overlay_is_instanced(&with_edges),
-        Some(vec![0, 1, 0, 2, 0, 3, 1, 2, 2, 3])
-    );
+    // `edges` is a flat pair list: one segment, drawn from those positions and
+    // never re-derived from the triangle index list.
+    assert_eq!(overlay_is_instanced(&with_edges), Some(1));
+    // A trailing unpaired position is dropped by the shared pairing rule.
+    let mut odd = with_edges.clone();
+    odd.edges.push([2.0, 0.0, 0.0]);
+    assert_eq!(overlay_is_instanced(&odd), Some(1));
     // Transparent overlays stay legacy.
     let mut transparent = with_edges.clone();
     transparent.alpha = 0.5;
@@ -310,39 +312,64 @@ fn convert_line_batches_instances_overlays_only_when_merging() {
     let batches = vec![mesh];
     // Mesh merging off: nothing converts (the overlay stays a legacy draw).
     assert!(convert_line_batches(&batches, true, false).is_empty());
-    // Mesh merging on: the overlay becomes an index-pair line source.
+    // Mesh merging on: the overlay becomes a position-pair line source.
     let converted = convert_line_batches(&batches, true, true);
     assert_eq!(converted.len(), 1);
     assert_eq!(converted[0].batch, 0);
-    assert_eq!(converted[0].segments, 5);
-    assert_eq!(
-        converted[0].indices.as_deref(),
-        Some(&[0, 1, 0, 2, 0, 3, 1, 2, 2, 3][..])
-    );
+    assert_eq!(converted[0].segments, 1);
+    assert!(converted[0].edges);
 }
 
 #[test]
-fn push_line_instances_expands_index_pairs_from_the_overlay() {
-    // An overlay is an index list over the batch vertices; each consecutive
-    // index pair must expand to one 2-vertex instance.
+fn push_line_instances_expands_positions_from_the_overlay() {
+    // An overlay is a flat endpoint-pair list; each pair must expand to one
+    // 2-vertex instance from the `edges` positions, not from the mesh vertices.
     let mut batch = quad([0.0; 3], [0.25, 0.5, 0.75], 7);
     batch.edges = vec![[0.0; 3], [1.0, 0.0, 0.0]];
-    let indices = overlay_is_instanced(&batch).expect("overlay");
+    let segments = overlay_is_instanced(&batch).expect("overlay");
     let origin = [0.0, 0.0, 0.0];
     let mut out = Vec::new();
-    push_line_instances(&mut out, &batch, Some(&indices), origin, 0, 5, 7);
-    assert_eq!(out.len(), 5);
-    // First edge (0,1): vertices[0] -> vertices[1].
+    push_line_instances(&mut out, &batch, true, origin, 0, segments, 7);
+    assert_eq!(out.len(), 1);
+    // The stored edge (0,0,0) -> (1,0,0), not `vertices[0] -> vertices[1]`.
     assert_eq!(
         [out[0].p0_width[0], out[0].p0_width[1], out[0].p0_width[2]],
-        batch.vertices[0]
+        [0.0, 0.0, 0.0]
     );
     assert_eq!(
         [out[0].p1_pad[0], out[0].p1_pad[1], out[0].p1_pad[2]],
-        batch.vertices[1]
+        [1.0, 0.0, 0.0]
     );
     // Colour comes from the batch (as the legacy line uniform did); the pick
-    // key is new per-instance metadata the legacy draw did not carry.
+    // key is per-instance metadata the legacy draw did not carry.
     assert_eq!(out[0].rgba, [0.25, 0.5, 0.75, 1.0]);
     assert_eq!(out[0].id_flags[0], 7);
+}
+
+#[test]
+fn legacy_line_quads_draw_the_mesh_edge_positions_not_its_triangle_vertices() {
+    // Two stored positions are one segment. The legacy per-batch mesh path must
+    // rasterize exactly that segment, not the quad's triangle corners.
+    let mut batch = quad([0.0; 3], [1.0; 3], 1);
+    batch.edges = vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]];
+    let mut quads = Vec::new();
+    expand_line_quads(&mut quads, &batch, true);
+    // Six quad vertices (two triangles) per segment.
+    assert_eq!(quads.len(), 6);
+    assert_eq!(line_quad_bytes(&quads).len(), 6 * LINE_QUAD_STRIDE as usize);
+    assert!(quads
+        .iter()
+        .all(|quad| quad.p0 == [0.0, 0.0, 0.0] && quad.p1 == [1.0, 0.0, 0.0]));
+
+    // The same call on the vertex stream keeps the `Lines` pairing rule.
+    let mut line = quad([0.0; 3], [1.0; 3], 1);
+    line.topology = RenderTopology::Lines;
+    line.vertices = vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]];
+    line.edges.clear();
+    let mut vertex_quads = Vec::new();
+    expand_line_quads(&mut vertex_quads, &line, false);
+    assert_eq!(vertex_quads.len(), 6);
+    assert!(vertex_quads
+        .iter()
+        .all(|quad| quad.p0 == [0.0, 0.0, 0.0] && quad.p1 == [1.0, 0.0, 0.0]));
 }

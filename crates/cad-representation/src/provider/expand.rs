@@ -1,6 +1,4 @@
-use crate::layout::{
-    clip_conic, clip_mesh, clip_polyline, visible_image, ImageRegion, WorldRectBoundary,
-};
+use crate::layout::{clip_conic, clip_polyline, WorldRectBoundary};
 use crate::*;
 
 use cad_db::LayerScope;
@@ -8,6 +6,7 @@ use cad_db::LayerScope;
 use super::clip::{
     block_clip_boundary, block_clip_depth, rejection_code, rejection_message, ClipDepth,
 };
+use super::clip_emit::emit_clipped;
 use super::default::chord_tessellation_params;
 use super::depth::{
     conic_depth_span, depth_straddle_message, filter_runs_by_depth, primitive_depth_kind,
@@ -450,13 +449,14 @@ impl ProviderRegistry {
                     // arc-length dash subdivision the `Lines` path performs does
                     // not apply. It is drawn solid and reported here instead of
                     // silently dropping the pattern.
-                    if matches!(&primitive, DisplayPrimitive::Mesh(_))
-                        && matches!(
-                            &entity.geometry,
-                            SemanticGeometry::Polyline { width, .. }
-                                if width.is_finite() && *width > 0.0
-                        )
-                        && !own_linetype.is_continuous()
+                    if matches!(
+                        &primitive,
+                        DisplayPrimitive::Mesh(_) | DisplayPrimitive::MeshWithStoredEdges { .. }
+                    ) && matches!(
+                        &entity.geometry,
+                        SemanticGeometry::Polyline { width, .. }
+                            if width.is_finite() && *width > 0.0
+                    ) && !own_linetype.is_continuous()
                     {
                         out.completeness = weaker_completeness(
                             &out.completeness,
@@ -554,172 +554,6 @@ impl ProviderRegistry {
         }
         Ok(())
     }
-}
-
-/// Emit one already-transformed primitive through the block-clip region.
-///
-/// Meshes (including filled meshes and the wide-polyline stroke band), images
-/// and — through their own arms — lines and conics are cut exactly. A region
-/// with several disjoint pieces (a nested intersection) is clipped piece by
-/// piece and each surviving piece is emitted as its own fragment, so the union
-/// of the fragments is exactly `primitive ∩ clip`.
-///
-/// A primitive with no exact clip path is **kept** and reported, never dropped
-/// or silently drawn as clipped; a clipper that refuses makes the whole
-/// primitive stay unclipped (never a partial cut) and report its stable code.
-///
-/// The clip **depth** band is a separate filter applied before this one (see
-/// `primitive_depth_span`): it drops whole primitives outside the band and keeps
-/// a straddling primitive whole, reported by name.
-fn emit_clipped(
-    entity: &DbEntity,
-    primitive: DisplayPrimitive,
-    region: &WorldRectBoundary,
-    emit: &dyn Fn(DisplayPrimitive, &mut DisplayRepresentation),
-    out: &mut DisplayRepresentation,
-) {
-    match primitive {
-        DisplayPrimitive::Mesh(mesh) => match clip_mesh_region(&mesh, region) {
-            Ok(pieces) => {
-                for piece in pieces {
-                    emit(DisplayPrimitive::Mesh(Arc::new(piece)), out);
-                }
-            }
-            Err(_) => {
-                report_xclip(
-                    out,
-                    entity,
-                    "representation.xclip_mesh_unclippable",
-                    "the mesh cannot be clipped exactly (missing index or non-finite vertex), \
-                         so it is kept unclipped",
-                );
-                emit(DisplayPrimitive::Mesh(mesh), out);
-            }
-        },
-        DisplayPrimitive::MeshWithoutEdgeOverlay(mesh) => match clip_mesh_region(&mesh, region) {
-            Ok(pieces) => {
-                for piece in pieces {
-                    emit(
-                        DisplayPrimitive::MeshWithoutEdgeOverlay(Arc::new(piece)),
-                        out,
-                    );
-                }
-            }
-            Err(_) => {
-                report_xclip(
-                    out,
-                    entity,
-                    "representation.xclip_mesh_unclippable",
-                    "the mesh cannot be clipped exactly (missing index or non-finite \
-                         vertex), so it is kept unclipped",
-                );
-                emit(DisplayPrimitive::MeshWithoutEdgeOverlay(mesh), out);
-            }
-        },
-        DisplayPrimitive::Image {
-            resource,
-            transform,
-            clip,
-            adjust,
-        } => {
-            // The shared image path cuts the quad (or the entity's own clip
-            // ring) against each region piece and hands back convex pieces with
-            // interpolated texture coordinates — one fragment each, over the
-            // same resource, so a concave clip is the union of its pieces.
-            let mut whole: Option<Option<Arc<[ImageVertex]>>> = None;
-            let mut pieces: Vec<Vec<ImageVertex>> = Vec::new();
-            let mut refusal = None;
-            for piece in region.pieces() {
-                match visible_image(&transform, clip.as_deref(), piece) {
-                    Ok(ImageRegion::Empty) => {}
-                    Ok(ImageRegion::Whole { entity }) => {
-                        // The whole quad survives this piece. Pieces are
-                        // disjoint, so at most one can hold it; keeping the
-                        // first is the exact answer.
-                        whole.get_or_insert(entity);
-                    }
-                    Ok(ImageRegion::Pieces(parts)) => pieces.extend(parts),
-                    Err(clip_refusal) => {
-                        refusal = Some(clip_refusal);
-                        break;
-                    }
-                }
-            }
-            if let Some(clip_refusal) = refusal {
-                report_xclip(
-                    out,
-                    entity,
-                    "representation.xclip_image_unclippable",
-                    &clip_refusal.message,
-                );
-                emit(
-                    DisplayPrimitive::Image {
-                        resource,
-                        transform,
-                        clip,
-                        adjust,
-                    },
-                    out,
-                );
-            } else if let Some(entity_clip) = whole {
-                emit(
-                    DisplayPrimitive::Image {
-                        resource,
-                        transform,
-                        clip: entity_clip,
-                        adjust,
-                    },
-                    out,
-                );
-            } else {
-                for piece in pieces {
-                    emit(
-                        DisplayPrimitive::Image {
-                            resource: resource.clone(),
-                            transform,
-                            clip: Some(Arc::from(piece.into_boxed_slice())),
-                            adjust,
-                        },
-                        out,
-                    );
-                }
-            }
-        }
-        // Text needs a shaped font outline and a mask is an erase region with
-        // its own fill rule; neither has an exact region cut here.
-        other => {
-            let name = match &other {
-                DisplayPrimitive::Text { .. } => "text",
-                DisplayPrimitive::Mask { .. } => "mask",
-                _ => "primitive",
-            };
-            report_xclip(
-                out,
-                entity,
-                "representation.xclip_primitive_unsupported",
-                &format!(
-                    "{name} geometry has no exact block-clip path, so it is kept and drawn \
-                     unclipped"
-                ),
-            );
-            emit(other, out);
-        }
-    }
-}
-
-/// Clip one mesh against every piece of `region`.
-///
-/// `Ok(pieces)` holds the surviving meshes (empty when the whole mesh is outside,
-/// an exact omission); `Err` is the shared clipper's refusal and means the
-/// caller must keep the source mesh untouched.
-fn clip_mesh_region(mesh: &Mesh, region: &WorldRectBoundary) -> Result<Vec<Mesh>, ClipRefusal> {
-    let mut pieces = Vec::new();
-    for piece in region.pieces() {
-        if let Some(clipped) = clip_mesh(mesh, piece)? {
-            pieces.push(clipped);
-        }
-    }
-    Ok(pieces)
 }
 
 /// Clip one analytic conic against every piece of `region`.

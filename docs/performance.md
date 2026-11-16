@@ -35,8 +35,9 @@
 | `max_triangles_per_frame` | `FrameBudget::charge` | `OverBudget{category:"triangles"}` |
 
 字节数是**精确打包大小**（`RenderBatch::upload_size_bytes`＝位置/法线/边位置
-12 B/顶点 + 三角索引 `[u32;3]` 12 B + 去重后的边索引 `u32` 4 B），不是估算；
-网格法线即使缺失也会在上传时补齐，因此始终计入 `vertices.len()` 条法线。
+12 B/顶点 + 三角索引 `[u32;3]` 12 B），不是估算；线框边位置按 12 B/位置计入，
+反锯齿 line quad 缓冲在上传预算中**单独**计入，不存在 `u32` 边索引缓冲；网格法线
+即使缺失也会在上传时补齐，因此始终计入 `vertices.len()` 条法线。
 
 GPU 侧另有 `Renderer::last_upload_ms()`：最近一次 `upload` 的真实墙钟毫秒，
 `LoadTimings::upload_ms` 的来源。

@@ -209,6 +209,7 @@ fn primitive_kind(primitive: &DisplayPrimitive) -> &'static str {
         DisplayPrimitive::Conic(_) => "Conic",
         DisplayPrimitive::Mesh(_) => "Mesh",
         DisplayPrimitive::MeshWithoutEdgeOverlay(_) => "MeshWithoutEdgeOverlay",
+        DisplayPrimitive::MeshWithStoredEdges { .. } => "MeshWithStoredEdges",
         DisplayPrimitive::Text { .. } => "Text",
         DisplayPrimitive::Image { .. } => "Image",
         DisplayPrimitive::Instance { .. } => "Instance",

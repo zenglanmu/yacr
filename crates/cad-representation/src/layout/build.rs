@@ -86,6 +86,41 @@ fn report_clip_degradation(
     }
 }
 
+/// Record the stored-body-edge clip fallback on the paper build.
+///
+/// The viewport cut can only cut the body's triangles, so a clipped body piece
+/// is drawn as a plain `Mesh` with its triangle-derived overlay. Completeness
+/// weakens and one `representation.xclip_body_edges_derived` diagnostic is
+/// attached per layout build (deduplicated by the same `seen` set the other clip
+/// degradations use), rather than one per piece or per viewport.
+fn report_body_edges_derived(
+    out: &mut DisplayRepresentation,
+    seen: &mut BTreeSet<(String, String)>,
+    layout_id: LayoutId,
+    viewport_index: usize,
+) {
+    let message = "stored body edges cannot be clipped exactly per region piece, so the clipped \
+                   mesh draws its triangle-derived wireframe";
+    out.completeness = weaker(
+        &out.completeness,
+        &Completeness::Partial(vec![message.to_string()]),
+    );
+    let key = (
+        "representation.xclip_body_edges_derived".to_string(),
+        message.to_string(),
+    );
+    if seen.insert(key) {
+        out.diagnostics.push(Diagnostic {
+            object: None,
+            code: "representation.xclip_body_edges_derived".into(),
+            message: format!(
+                "layout {} viewport {viewport_index}: {message}",
+                layout_id.0
+            ),
+        });
+    }
+}
+
 /// Build the display representation for one paper-space layout (spec §3.3, F04).
 ///
 /// This is an **on-demand** entry point: the host calls it when it switches to
@@ -317,6 +352,58 @@ pub fn build_paper_space(
                                     } else {
                                         DisplayPrimitive::MeshWithoutEdgeOverlay(mesh)
                                     },
+                                ));
+                            }
+                        }
+                    }
+                    DisplayPrimitive::MeshWithStoredEdges { mesh, edges } => {
+                        // A body's stored edge set has no exact per-piece
+                        // viewport cut: `clip_mesh` cuts the triangles only.
+                        // A body whose every mesh vertex and stored edge
+                        // endpoint is inside the window cannot be cut, so it
+                        // keeps the variant (and its stored edges) with no
+                        // diagnostic. Otherwise each surviving piece is emitted
+                        // as a plain `Mesh`, whose documented overlay is derived
+                        // from the clipped triangles, and the loss is reported
+                        // once — never stored edges *and* a derived overlay on
+                        // the same piece.
+                        if clip.holds_all_points(mesh.vertices.iter().chain(edges.iter())) {
+                            out.fragments.push(fragment_like(
+                                fragment,
+                                DisplayPrimitive::MeshWithStoredEdges { mesh, edges },
+                            ));
+                            continue;
+                        }
+                        match clip_mesh(&mesh, clip) {
+                            Ok(Some(clipped)) => {
+                                report_body_edges_derived(
+                                    &mut out,
+                                    &mut clip_seen,
+                                    layout_id,
+                                    index,
+                                );
+                                out.fragments.push(fragment_like(
+                                    fragment,
+                                    DisplayPrimitive::Mesh(std::sync::Arc::new(clipped)),
+                                ));
+                            }
+                            // Every triangle lies outside the window: an exact
+                            // omission, not a degradation.
+                            Ok(None) => {}
+                            Err(refusal) => {
+                                // The clipper refused (missing index or
+                                // non-finite vertex): keep the whole original
+                                // primitive, stored edges included.
+                                report_clip_degradation(
+                                    &mut out,
+                                    &mut clip_seen,
+                                    &refusal,
+                                    layout_id,
+                                    index,
+                                );
+                                out.fragments.push(fragment_like(
+                                    fragment,
+                                    DisplayPrimitive::MeshWithStoredEdges { mesh, edges },
                                 ));
                             }
                         }
