@@ -22,6 +22,68 @@
 （Linux 原生 Wayland、Windows、macOS、Android）由 native 会话持有 `cad-db`，`dom-canvas`
 （X11/XWayland、Web）由 wasm 会话持有。细节与逐平台证据边界见 `AGENTS.md` 平台表。
 
+**3D 实体 P1/C1：七种图元命令真实创建（2026-11-17）**
+
+- **注入（trait-only）**：`cad-app::Application` 新增私有
+  `solid_modeler: Option<Arc<dyn cad_kernel_adapter::SolidModeler>>` 与
+  `set_solid_modeler` / `solid_modeler`；`Application::new()` 为 `None`（`cad-app` 不链接内核）。
+  `cad-ui-core::CadSession::set_solid_modeler` 只做转发（会话仅持有 `HostCore`，无 wire/`HostProfile`
+  变更）；
+  `apps/app-linux/src/host/tick/bootstrap.rs` 在会话创建成功后注入
+  `cad_kernel_solidcore::SolidCoreModeler::new()`。**代码事实**：只有 Linux 的 **`native-below`**
+  （原生 Wayland）会话有模型器；Linux `dom-canvas`（X11/XWayland，CAD 会话在 WebView 里是 wasm）、
+  Web、Windows、macOS、Android **都不注入**，七条命令按 `unsupported-runtime: solid-modeler`
+  具名拒绝（不写库/不升修订/不入历史）。这些载体的**运行时**行为 **NOT VERIFIED**（仅编译/契约）。
+  `cad-host` **没有** `cad-kernel-solidcore` 依赖；门禁新增“`cad-*` 共享层不得把它当**运行时**
+  依赖”（开发依赖允许，CLI 集成契约是唯一一个，见其 manifest 注释）。
+- **命令**：新 `crates/cad-app/src/app_drawing/solids.rs`（`create_solid_primitive`）；调度从
+  `app_dispatch.rs` 的 W14 拒绝臂移到独立臂；`app_extended_w14_refusals.rs` 删除七条原因串；
+  `ExtendedCommandId::requires_work_mode()` 对这七条返回 `true`（其余 18 条仍 Viewer-legal）。
+- **显式点契约（无交互提示）**：`BOX` 两点对角落点（dx/dy/dz>0，origin=最小角）；`WEDGE` 三点
+  （底面角点/对角点/高度点；两点须共面，否则 `wedge.base_not_coplanar`；**高面固定在最小 x 一侧**，
+  底点点序不影响结果，和 `polyhedra::wedge_brep` 同一约定）；`PYRAMID` 三点（正方形底面对角点/
+  底面中心正上方顶点；两点须共面，否则 `pyramid.base_not_coplanar`）；`CYLINDER` 三点（圆心/半径点/顶点）；`CONE` 三点（底面半径 + 顶面半径，
+  顶点在圆心正上方即全锥 `radius_top=0`；上下半径相等按名拒绝 `cone.equal_radii`，请用 CYLINDER）；
+  `SPHERE` 两点；`TORUS` 三点（中心/主半径点/次半径点，次<主）。错误载荷是 `InvalidInput`：
+  `<kind>.requires_{two,three}_points`、`<kind>.degenerate_extent`、`<kind>.non_finite_point`、
+  `pyramid.invalid_base`、`pyramid.base_not_coplanar`、`wedge.base_not_coplanar`、`cone.equal_radii`。
+- **提交**：`commit_new_entity_typed(.., "AcDb3dSolid", "create <kind>")`，一条事务/一步撤销；
+  `Body3d{Solid, Exact}` + `BodyDisplay` 由既有 `tessellate_exchange` 生成。**容差是共享的
+  形状相对规则**（`cad_kernel_adapter::shape_relative_tolerance`：1e-3 × 包围盒对角线，钳制，
+  无尺度回退单位对角线；与导入同一份实现）：平面体 `Precision::Analytic` + `Completeness::Complete`，
+  曲面体 `Precision::Approximate` + `Completeness::Partial([共享理由])`
+  （`cad_kernel_adapter::discrete_mesh_reason`，导入的 `acis_approximation_reason` 也用它）。
+  该规则使图元三角形数近似恒定：r=500 球正常建体，r=1e6 球在默认预算内建体或
+  `solid.tessellation_failed: <...budget...>` 快速拒绝（**残余最坏情况**：极小/极大非均匀体
+  仍由 tessellator 既有预算检查兜底，不是廉价预估）。剖分失败 →
+  `solid.tessellation_failed: <首个诊断 或 Unsupported reason 的 code: detail>`；
+  内核 `Unsupported{reason}` → `code: detail`；`Failed{diagnostics}` →
+  `solid.kernel_failed: <诊断 message>`（不再重复诊断自身的 `solid.kernel_failed:` 码）；都**不写库**。
+- **同步豁免（显式）**：图元命令**在命令线程内同步**跑模型器 + 剖分，理由是有界工作
+  （单个图元 + 形状相对剖分）；C2 布尔**不得**沿用该豁免，必须 worker + 可取消探针（ADR-0036 P1/C1）。
+- **ELEV**：`Body3d` 显式 3D 定位，`elevate_new_geometry`/`elevate_new_geometries` 对它直接返回，
+  `ELEV != 0` 不会平移实体（有测试）。
+- **未做**：交互式尺寸提示；布尔 `UNION`/`SUBTRACT`/`INTERSECT`（C2）；`MASSPROP` /
+  `face_sources` / `VSCURRENT`（C3）；P2/P3。**`3DSOLID`/`BODY` 仍是实体类型键**（模型器
+  `Registration::entity_types` 声明），不新增同名命令。
+- **证据（Linux x86-64，本轮实跑，退出码 0）**：`cargo test -p cad-app --locked`（2975 passed）、
+  `cargo test -p cad-cli-tools --test solid_command --locked`（8 passed；真实 solidcore：七种图元
+  逐一建体并断言 Precision/Completeness、BOX+CYLINDER 两次建体与一次 undo、r=500/r=1e6 球、
+  反序 WEDGE 同一 B-rep、ELEV 不平移、`CommandPayload::None` 拒绝）、
+  `cargo test -p cad-import-acadrust`（473 passed，共享容差规则未改变导入路径）、
+  `cargo check -p app-linux --all-targets --locked`、
+  `cargo clippy -p cad-app -p cad-cli-tools -p app-linux --all-targets --locked -- -D warnings`、
+  `python3 scripts/check-i18n.py`、`python3 scripts/check-architecture.py`、
+  `python3 scripts/check-command-docs.py`、`cargo fmt --all -- --check`、
+  `python3 scripts/check-file-size.py`、`cargo check --workspace --lib --target
+  wasm32-unknown-unknown --locked`（`app-web`/`cad-render-wgpu` 有既有 dead_code 警告，非本轮引入）、
+  `python3 scripts/test-ui-migration-guards.py`（含新增的“内核宿主不得是 `cad-*` 运行时依赖”
+  正向/负向契约）。前端仅跑受影响用例：`node --test test/extended-wave14.test.ts`（2 passed）。
+- **NOT RUN**：全 workspace 测试（`cargo test --workspace --locked -- --test-threads=1`）、
+  GPU/像素/性能、非 Linux 载体运行。
+- **NOT VERIFIED**：Linux `dom-canvas`（X11/XWayland）与 Windows/macOS/Android/Web 的模型器注入
+  与运行（当前都不注入，仅编译/契约证据）；真实 GPU 显示。
+
 **3D 实体：solidcore 模型器 P1/B2（2026-11-17）**
 
 - **新 crate `crates/cad-kernel-solidcore`**：唯一允许命名 `solidcore*` 的包；两个依赖

@@ -125,11 +125,19 @@ solidcore 1.0.1 的公开 API 覆盖（详见 ADR-0036 与 docs.rs）：
 
 ### 4.3 P1：接入内核（最小可用建模）
 
-- 状态（2026-11-17）：**B2 已落地，P1 仍只完成一半**。`cad-kernel-solidcore` 存在并实现
-  `SolidModeler`；**平面体**的创建/布尔/质量属性/相似变换可用；曲面 primitives 可创建、可显示、
-  可导出，但其布尔与质量属性**显式拒绝**。命令接线（`3DSOLID`/`REGION`、`MASSPROP`、
-  `face_sources`、`VSCURRENT`）**NOT IMPLEMENTED**。证据只有 Linux 契约/单元（真实内核，
-  无 mock）；其它载体 NOT VERIFIED。详见 ADR-0036 §7。
+- 状态（2026-11-17）：**B2 已落地、C1 已落地（七种图元创建），P1 仍只完成一半到三分之二**。
+  `cad-kernel-solidcore` 存在并实现 `SolidModeler`；**平面体**的创建/布尔/质量属性/相似变换可用；
+  曲面 primitives 可创建、可显示、可导出，但其布尔与质量属性**显式拒绝**。
+  **阶段 C1**：`BOX`/`WEDGE`/`PYRAMID`/`CYLINDER`/`SPHERE`/`CONE`/`TORUS` 七条命令由具名拒绝改为
+  真实创建（显式点 → 模型器 → 一条 `AcDb3dSolid` 实体），模型器由载体注入
+  （`Application::set_solid_modeler`；**只有 Linux `native-below` 注入**，Linux `dom-canvas`
+  （X11/XWayland，CAD 会话在 WebView 里是 wasm）、Web、Windows、macOS、Android 都是 `None`，
+  七条命令报 `unsupported-runtime: solid-modeler`；这些载体的运行时行为 NOT VERIFIED）。
+  显示剖分用与导入共享的**形状相对容差**（1e-3 × 包围盒对角线），平面体 `Complete`、
+  曲面体 `Partial`（“离散网格、缩放不细化”）。图元同步跑在命令线程（**C1 豁免**，工作有界）；
+  C2 布尔必须 worker + 取消探针，不得沿用。
+  **仍 NOT IMPLEMENTED**：交互式尺寸提示、布尔命令（C2）、`MASSPROP`/`face_sources`/`VSCURRENT`（C3）。
+  证据只有 Linux 契约/单元（真实内核，无 mock）；其它载体 NOT VERIFIED。详见 ADR-0036 §7。
 - **拒绝边界（能力是 family 级，不是逐操作数）**：`capabilities().booleans` /
   `mass_properties` 为 true 只表示"这一族有实现"，每次调用仍可能对单个操作数返回
   `Unsupported`，调用方必须处理：
@@ -175,12 +183,20 @@ solidcore 1.0.1 的公开 API 覆盖（详见 ADR-0036 与 docs.rs）：
    Failed { diagnostics } }`：**没有** `aborted` 标志、没有"空成功"；剖分仍由既有
    `BrepTessellator` 在模型器之外完成（模型器不做显示网格）。
    身份是 `cad-db` 的 `EntityId` + `ObjectId.revision`；跨接缝只传 `BrepData` 快照。
-3. **命令接入**（`cad-app`，**NOT IMPLEMENTED**，Phase C）
-   - 补目录里缺失的 `3DSOLID`/`BODY`；把 `BOX/CYLINDER/SPHERE/CONE/TORUS/WEDGE/PYRAMID`
-     从拒绝改成创建；`UNION/SUBTRACT/INTERSECT` 作用于 `Body3d(Solid)`；
-     `REGION` 用 `BodyKind::Sheet`。
-   - 每个命令：输入 → `SolidRequest` → `SolidOutcome` 的 body → 新 `DbEntity` 经
-     `apply_drawing_changes` 落库 → `ChangeMask::GEOMETRY` 触发显示失效。
+3. **命令接入**（`cad-app`，C1 **已实现**；C2/C3 **NOT IMPLEMENTED**）
+   - **C1（本轮）**：`BOX/CYLINDER/SPHERE/CONE/TORUS/WEDGE/PYRAMID` 从拒绝改成创建：
+     `CommandPayload::Points` → `PrimitiveSpec`（显式点契约见
+     `crates/cad-app/src/app_drawing/solids.rs` 模块文档）→ `execute_solid` → 中性 B-Rep →
+     `tessellate_exchange`（显示缓存）→ `commit_new_entity_typed(.., "AcDb3dSolid", ..)`
+     （一条事务/一步撤销）。模型器由载体注入（`Application::set_solid_modeler`），当前只有
+     Linux `native-below` 注入；无模型器载体报 `unsupported-runtime: solid-modeler`。
+     剖分容差是共享的形状相对规则（`cad_kernel_adapter::shape_relative_tolerance`），
+     曲面体的 `BodyDisplay.completeness` 是 `Partial([discrete_mesh_reason])`。
+   - **C2（NOT IMPLEMENTED）**：`UNION/SUBTRACT/INTERSECT` 作用于 `Body3d(Solid)`；
+     替换操作数 + 插入结果要在一条事务/一条 undo 记录里。
+   - **C3（NOT IMPLEMENTED）**：`MASSPROP` 接线、`face_sources`（用 `BrepFace.id`）、`VSCURRENT`。
+   - `3DSOLID`/`BODY` 是**实体类型键**（模型器 `Registration::entity_types` 声明），不是 AutoCAD
+     命令：不新增同名 `CommandId`。
    - 逐命令契约测试 + `compatibility.md` 行；i18n 两个 catalog 同步。
 4. **质量属性**（模型器已实现；命令 **NOT IMPLEMENTED**）：`MASSPROP` 仍未接线，
    对 body 继续显式 `massprop.body_requires_kernel`。模型器返回

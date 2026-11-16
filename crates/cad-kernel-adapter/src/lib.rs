@@ -36,6 +36,7 @@ mod no_kernel;
 mod outcome;
 mod request;
 mod seam;
+mod solid_tolerance;
 
 pub use brep_tessellator::*;
 pub use exchange::*;
@@ -44,6 +45,7 @@ pub use outcome::*;
 pub use request::*;
 pub use seam::*;
 pub use solid::*;
+pub use solid_tolerance::*;
 
 #[cfg(test)]
 mod tests;

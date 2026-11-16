@@ -19,6 +19,7 @@
 //! more arms.
 
 use super::*;
+use cad_kernel_adapter::PrimitiveKind;
 
 impl Application {
     /// Dispatch an [`ExtendedCommandId`], or `None` when the command is not one.
@@ -412,15 +413,33 @@ impl Application {
             | ExtendedCommandId::AlignSpace
             | ExtendedCommandId::VpSync
             | ExtendedCommandId::LayTrans => self.extended_w13_refusals(session, command, ext)?,
+            // Wave 14 / ADR-0036 phase C1: the seven primitive families create
+            // one real exact `Body3d` (one transaction, one undo step) through
+            // the carrier-injected `SolidModeler`; a carrier without one refuses
+            // with `unsupported-runtime: solid-modeler`.
+            ExtendedCommandId::Box => {
+                self.create_solid_primitive(session, command, PrimitiveKind::Box)?
+            }
+            ExtendedCommandId::Cone => {
+                self.create_solid_primitive(session, command, PrimitiveKind::Cone)?
+            }
+            ExtendedCommandId::Cylinder => {
+                self.create_solid_primitive(session, command, PrimitiveKind::Cylinder)?
+            }
+            ExtendedCommandId::Sphere => {
+                self.create_solid_primitive(session, command, PrimitiveKind::Sphere)?
+            }
+            ExtendedCommandId::Torus => {
+                self.create_solid_primitive(session, command, PrimitiveKind::Torus)?
+            }
+            ExtendedCommandId::Wedge => {
+                self.create_solid_primitive(session, command, PrimitiveKind::Wedge)?
+            }
+            ExtendedCommandId::Pyramid => {
+                self.create_solid_primitive(session, command, PrimitiveKind::Pyramid)?
+            }
             // Wave 14: stable named refusals.
-            ExtendedCommandId::Box
-            | ExtendedCommandId::Cone
-            | ExtendedCommandId::Cylinder
-            | ExtendedCommandId::Sphere
-            | ExtendedCommandId::Torus
-            | ExtendedCommandId::Wedge
-            | ExtendedCommandId::Pyramid
-            | ExtendedCommandId::PolySolid
+            ExtendedCommandId::PolySolid
             | ExtendedCommandId::Extrude
             | ExtendedCommandId::Revolve
             | ExtendedCommandId::Sweep

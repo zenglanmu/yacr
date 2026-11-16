@@ -54,6 +54,10 @@
 //! elevation is not applied inside `insert_new_entities` itself: the copy path
 //! reaches it too.
 //!
+//! A `Body3d` is exempt for a different reason: it is an explicitly placed 3D
+//! object (the solid primitive commands take full 3D points), so its own Z is
+//! the author's intent and `ELEV` never translates it.
+//!
 //! # Refusals
 //!
 //! The session setter only stores a finite token (`elev.invalid_value`), and a
@@ -74,6 +78,14 @@ impl Application {
         geometry: SemanticGeometry,
         elevation: f64,
     ) -> CadResult<SemanticGeometry> {
+        // A `Body3d` is an explicitly placed 3D object: its own Z is the
+        // author's intent (the primitive commands take full 3D points), so the
+        // session `ELEV` token — AutoCAD's "current elevation for new objects" —
+        // never translates it. Exempted here, in the one funnel, so no create
+        // path can sneak an offset in.
+        if matches!(&geometry, SemanticGeometry::Body3d(_)) {
+            return Ok(geometry);
+        }
         if elevation == 0.0 {
             return Ok(geometry);
         }

@@ -911,7 +911,8 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'VPSYNC', labelKey: 'draw.kind.vpsync', icon: 'view', group: 'view' },
   { id: 'LAYTRANS', labelKey: 'draw.kind.laytrans', icon: 'layers', group: 'properties' },
 
-  // The 2026-11-09 Wave 14 batch: 3D solids/primitives named refusals.
+  // The 2026-11-09 Wave 14 batch: the seven 3D solid primitives create an exact
+  // body from explicit points (ADR-0036 phase C1); the rest are named refusals.
   { id: 'BOX', labelKey: 'draw.kind.box', icon: 'rectang', group: 'draw' },
   { id: 'CONE', labelKey: 'draw.kind.cone', icon: 'dot', group: 'draw' },
   { id: 'CYLINDER', labelKey: 'draw.kind.cylinder', icon: 'dot', group: 'draw' },

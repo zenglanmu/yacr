@@ -233,6 +233,14 @@ pub(super) fn create_and_bind_session(shared: &Arc<Mutex<Shared>>, cad_mode: boo
             });
             match created {
                 Some(Ok(session)) => {
+                    // ADR-0036 phase C1: this carrier is the **only** one that
+                    // injects a solid modeler (Linux native session). Every other
+                    // carrier passes `None`, so the seven primitive commands
+                    // refuse with `unsupported-runtime: solid-modeler` instead of
+                    // pretending to create a body.
+                    session.set_solid_modeler(Some(std::sync::Arc::new(
+                        cad_kernel_solidcore::SolidCoreModeler::new(),
+                    )));
                     // The Options dialog's GPU budget is a renderer policy: apply
                     // the configured percentage before the first device attach
                     // (the engine re-applies it on every re-attach).

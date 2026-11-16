@@ -16,6 +16,10 @@ description = "UI-framework-independent shared layer: wire protocol, layout, CAD
 # types) are forbidden here and enforced by `scripts/check-architecture.py`.
 [dependencies]
 cad-app.workspace = true
+# The kernel-independent solid modelling seam: the session only *forwards* a
+# carrier-owned `Arc<dyn SolidModeler>` into `cad_app::Application` (ADR-0036
+# phase C1). Trait-only, no kernel, no toolkit/GPU.
+cad-kernel-adapter.workspace = true
 # The authoritative database is a lower, pure-data layer: the session projects
 # its read-only external-reference metadata onto the wire. It adds no toolkit,
 # GPU or platform dependency.

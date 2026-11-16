@@ -4,13 +4,14 @@ use super::*;
 
 /// Completeness reason (a) for a tessellated ACIS entity.
 ///
-/// The tolerance is embedded so the report says **which** discretisation was
-/// used, not merely that one was used.
+/// The exact B-rep is kept, but the **display** is the discrete mesh built at
+/// import time; the tolerance is embedded so the report says **which**
+/// discretisation was used, not merely that one was used. The sentence itself
+/// is shared with command-time body creation
+/// ([`cad_kernel_adapter::discrete_mesh_reason`]) so an imported and a created
+/// solid never explain their display precision differently.
 pub(crate) fn acis_approximation_reason(linear_deflection: f64) -> String {
-    format!(
-        "ACIS solid drawn as a discrete mesh approximation at tolerance \
-         {linear_deflection:.6e}; it does not refine when you zoom"
-    )
+    cad_kernel_adapter::discrete_mesh_reason(linear_deflection)
 }
 
 /// Completeness reason (b) for a tessellated ACIS entity: the source is gone.

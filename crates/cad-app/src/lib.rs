@@ -529,6 +529,14 @@ pub struct Application {
     /// document state and is replaced/cleared with the pass. `None` means the
     /// carrier has no settled vendor pass (or the document was replaced).
     pub vendor_representations: Option<Arc<crate::vendor::VendorRepresentationStore>>,
+    /// The injected solid modeler (ADR-0036 phase C1).
+    ///
+    /// Injected by the **carrier**, never built here: `cad-app` links no
+    /// modelling kernel. `None` means this carrier has none, and every primitive
+    /// command refuses with `unsupported-runtime: solid-modeler` instead of
+    /// fabricating a body. The modeler is stateless (content in, content out), so
+    /// it is shared as `Arc` and holds no document state.
+    solid_modeler: Option<Arc<dyn cad_kernel_adapter::SolidModeler>>,
 }
 
 impl Default for Application {

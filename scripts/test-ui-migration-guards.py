@@ -286,6 +286,27 @@ class ArchitectureGuardContract(unittest.TestCase):
         completed = run_guard(ARCHITECTURE_GUARD, self.root)
         self.assert_rejected(completed)
 
+    def test_kernel_host_is_not_a_runtime_dependency_of_a_shared_layer(self) -> None:
+        # Only a carrier app links the kernel at runtime; a `cad-*` shared layer
+        # that did would fold the pin into a reusable crate.
+        self.append_to(
+            "crates/cad-app",
+            '\n[dependencies]\ncad-kernel-solidcore = { path = "../cad-kernel-solidcore" }\n',
+        )
+        completed = run_guard(ARCHITECTURE_GUARD, self.root)
+        self.assert_rejected(completed)
+        self.assertIn("cad-kernel-solidcore", completed.stderr)
+
+    def test_kernel_host_is_accepted_as_a_dev_dependency(self) -> None:
+        # The CLI integration contract links the real modeler; a dev table is a
+        # test-time consumer, not a runtime one.
+        self.append_to(
+            "crates/cad-app",
+            '\n[dev-dependencies]\ncad-kernel-solidcore = { path = "../cad-kernel-solidcore" }\n',
+        )
+        completed = run_guard(ARCHITECTURE_GUARD, self.root)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
     # ---- `[patch.crates-io]` policy (ADR-0031 / ADR-0035) -----------------
 
     def write_rvt_patch(

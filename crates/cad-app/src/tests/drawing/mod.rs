@@ -381,6 +381,8 @@ mod rectangle;
 mod reports;
 mod scale_text;
 mod selection_reconcile;
+// ADR-0036 phase C1: the seven primitive create commands (fake modeler).
+mod solids;
 mod spline;
 mod stretch;
 mod stretch_curves;

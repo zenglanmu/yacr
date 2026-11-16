@@ -182,8 +182,9 @@ face-with-hole 1/8、instance-scaled 3/36；theater-2017 1246 实体/96,333 三�
 - **仍未做**：NURBS/样条曲面、一般裁剪 B-rep、完整 ACIS 内核；SAT/SAB **源字节仍不保留**
   （只保留 lift 后的中性 B-Rep）。**2026-11-17 更新**：`cad-kernel-solidcore` 模型器（P1/B2）
   已能在 Linux 契约/单元里对**平面体**创建/布尔/算体积·面积·质心·惯性，曲面 body 的布尔与
-  质量属性显式拒绝（`solid.lift_requires_planar`）；但**命令层尚未接线**（Phase C），
-  所以 `BOX`/`UNION` 等命令仍拒绝、`MASSPROP` 对 body 仍显式 `massprop.body_requires_kernel`，
+  质量属性显式拒绝（`solid.lift_requires_planar`）；**命令层只接线了七种图元的创建（阶段 C1）**，
+  所以 `BOX` 等已能建体，但 `UNION`/`SUBTRACT`/`INTERSECT`（C2）仍拒绝、
+  `MASSPROP` 对 body 仍显式 `massprop.body_requires_kernel`（C3），
   圆角/倒角/抽壳仍无实现。模型器的能力是 **family 级**：`booleans`/`mass_properties` 为 true
   不等于每个操作数都能算——曲面 body、开放 sheet、反向面/重复面等结构不一致的操作数逐次返回
   `Unsupported`（`solid.lift_unsupported`）；**空腔（void region）的结果在布尔本身就被拒绝**，
@@ -1482,19 +1483,29 @@ BODY/SURFACE **当前渲染为空**，仅解析为不透明负载，见上文「
 | `VPSYNC` | **部分实现**：具名拒绝（`vpsync.unsupported`）：视口同步未实现（无视口组模型）。 | 不写库/不升修订/不入历史（报告类只读） |
 | `LAYTRANS` | **部分实现**：具名拒绝（`laytrans.unsupported`）：图层转换标准未实现。 | 不写库/不升修订/不入历史（报告类只读） |
 
-### 2026-11-09 Wave 14 扩展命令（3D 实体/布尔/边编辑拒绝）
+### 2026-11-09 / 2026-11-17 Wave 14 扩展命令（3D 实体图元与其余拒绝）
 
-> 3D 低于 2D；以下名字只提供诚实命令路径（具名拒绝），不是可用 3D 功能。
+> **ADR-0036 阶段 C1（2026-11-17）**：`BOX`/`CONE`/`CYLINDER`/`SPHERE`/`TORUS`/`WEDGE`/`PYRAMID`
+> 从具名拒绝晋升为**真实创建命令**：显式点 → `SolidRequest` → 模型器（`SolidModeler`）→
+> 中性 B-Rep → 既有 `BrepTessellator` 显示缓存 → 一条 `AcDb3dSolid` 实体（一条事务/一步撤销）。
+> **仍未实现**：AutoCAD 的交互式尺寸提示、布尔运算（C2）、`MASSPROP`/`face_sources`/`VSCURRENT`（C3）、
+> 圆角/倒角/抽壳与曲面 lift（P2）。**代码事实**：只有 Linux 的 **`native-below`**（原生 Wayland）
+> 会话注入模型器；Linux `dom-canvas`（X11/XWayland，其 CAD 会话在 WebView 里是 wasm）、Web、
+> Windows、macOS、Android **不注入**，七条命令按 `unsupported-runtime: solid-modeler` 具名拒绝。
+> **证据仅 Linux 契约/单元**（真实 solidcore，无 GPU/像素）；非 Linux 载体与 `dom-canvas` 的运行时
+> 行为 **NOT VERIFIED**（仅编译/契约证据），不得写成可用。`3DSOLID`/`BODY` 仍是**实体类型键**，
+> 不是命令。
+> 其余名字依旧只提供诚实命令路径（具名拒绝），不是可用 3D 功能。
 
 | 命令 | 结果 | 明示未实现 / 证据边界 |
 | --- | --- | --- |
-| `BOX` | **部分实现（具名拒绝）**：`box.unsupported: 3D solid primitives are not implemented` | 不写库/不升修订/不入历史 |
-| `CONE` | **部分实现（具名拒绝）**：`cone.unsupported: 3D solid primitives are not implemented` | 不写库/不升修订/不入历史 |
-| `CYLINDER` | **部分实现（具名拒绝）**：`cylinder.unsupported: 3D solid primitives are not implemented` | 不写库/不升修订/不入历史 |
-| `SPHERE` | **部分实现（具名拒绝）**：`sphere.unsupported: 3D solid primitives are not implemented` | 不写库/不升修订/不入历史 |
-| `TORUS` | **部分实现（具名拒绝）**：`torus.unsupported: 3D solid primitives are not implemented` | 不写库/不升修订/不入历史 |
-| `WEDGE` | **部分实现（具名拒绝）**：`wedge.unsupported: 3D solid primitives are not implemented` | 不写库/不升修订/不入历史 |
-| `PYRAMID` | **部分实现（具名拒绝）**：`pyramid.unsupported: 3D solid primitives are not implemented` | 不写库/不升修订/不入历史 |
+| `BOX` | **部分实现**：显式两点（对角落点）创建 `AcDb3dSolid` 实体（`Body3d{Solid,Exact}` + 显示网格/边线）；dx/dy/dz 均须为正，origin 取最小角 | **未实现**：交互式尺寸提示、布尔运算（C2）；错误载荷 `InvalidInput`（`box.requires_*_points`/`box.degenerate_extent`）；无模型器载体 `unsupported-runtime: solid-modeler`；证据仅 Linux 契约（真实 solidcore），GPU/像素 NOT VERIFIED |
+| `CONE` | **部分实现**：显式三点（底面圆心、底面半径点、顶面/顶点）创建 `AcDb3dSolid` 实体（`Body3d{Solid,Exact}` + 显示网格/边线）；顶面点在圆心正上方即全锥（`radius_top = 0`）；上下半径相等是圆柱（`cone.equal_radii`） | **未实现**：交互式尺寸提示、布尔运算（C2）；错误载荷 `InvalidInput`（`cone.requires_*_points`/`cone.degenerate_extent`）；无模型器载体 `unsupported-runtime: solid-modeler`；证据仅 Linux 契约（真实 solidcore），GPU/像素 NOT VERIFIED |
+| `CYLINDER` | **部分实现**：显式三点（底面圆心、半径点、顶点）创建 `AcDb3dSolid` 实体（`Body3d{Solid,Exact}` + 显示网格/边线）；半径取 xy 距离，高取 `t.z - c.z` | **未实现**：交互式尺寸提示、布尔运算（C2）；错误载荷 `InvalidInput`（`cylinder.requires_*_points`/`cylinder.degenerate_extent`）；无模型器载体 `unsupported-runtime: solid-modeler`；证据仅 Linux 契约（真实 solidcore），GPU/像素 NOT VERIFIED |
+| `SPHERE` | **部分实现**：显式两点（球心、半径点）创建 `AcDb3dSolid` 实体（`Body3d{Solid,Exact}` + 显示网格/边线）；半径取三维距离 | **未实现**：交互式尺寸提示、布尔运算（C2）；错误载荷 `InvalidInput`（`sphere.requires_*_points`/`sphere.degenerate_extent`）；无模型器载体 `unsupported-runtime: solid-modeler`；证据仅 Linux 契约（真实 solidcore），GPU/像素 NOT VERIFIED |
+| `TORUS` | **部分实现**：显式三点（中心、主半径点、次半径点）创建 `AcDb3dSolid` 实体（`Body3d{Solid,Exact}` + 显示网格/边线）；次半径须小于主半径 | **未实现**：交互式尺寸提示、布尔运算（C2）；错误载荷 `InvalidInput`（`torus.requires_*_points`/`torus.degenerate_extent`）；无模型器载体 `unsupported-runtime: solid-modeler`；证据仅 Linux 契约（真实 solidcore），GPU/像素 NOT VERIFIED |
+| `WEDGE` | **部分实现**：显式三点（底面角点、底面对角点、高度点）创建 `AcDb3dSolid` 实体（`Body3d{Solid,Exact}` + 显示网格/边线）；高面固定在**最小 x 一侧**（底点点序不影响结果）；底面两点须共面（`wedge.base_not_coplanar`） | **未实现**：交互式尺寸提示、布尔运算（C2）；错误载荷 `InvalidInput`（`wedge.requires_*_points`/`wedge.degenerate_extent`）；无模型器载体 `unsupported-runtime: solid-modeler`；证据仅 Linux 契约（真实 solidcore），GPU/像素 NOT VERIFIED |
+| `PYRAMID` | **部分实现**：显式三点（正方形底面对角点、顶点）创建 `AcDb3dSolid` 实体（`Body3d{Solid,Exact}` + 显示网格/边线）；底面须为正方形且两点共面（`pyramid.base_not_coplanar`），顶点须在底面中心正上方 | **未实现**：交互式尺寸提示、布尔运算（C2）；错误载荷 `InvalidInput`（`pyramid.requires_*_points`/`pyramid.degenerate_extent`）；无模型器载体 `unsupported-runtime: solid-modeler`；证据仅 Linux 契约（真实 solidcore），GPU/像素 NOT VERIFIED |
 | `POLYSOLID` | **部分实现（具名拒绝）**：`polysolid.unsupported: 3D solid primitives are not implemented` | 不写库/不升修订/不入历史 |
 | `EXTRUDE` | **部分实现（具名拒绝）**：`extrude.unsupported: 3D extrusion is not implemented` | 不写库/不升修订/不入历史 |
 | `REVOLVE` | **部分实现（具名拒绝）**：`revolve.unsupported: 3D revolution is not implemented` | 不写库/不升修订/不入历史 |

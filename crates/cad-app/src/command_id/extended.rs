@@ -730,20 +730,21 @@ pub enum ExtendedCommandId {
     /// `LAYTRANS`: layer translation standards are NOT IMPLEMENTED.
     LayTrans,
 
-    // Wave 14: stable named refusals (Viewer-legal).
-    /// `BOX`: 3D solid primitives are not implemented.
+    // Wave 14: the seven primitive families create exact bodies (ADR-0036
+    // phase C1, Work-only); the rest are stable named refusals (Viewer-legal).
+    /// `BOX`: creates one exact `Body3d` from two opposite corners (Work-only).
     Box,
-    /// `CONE`: 3D solid primitives are not implemented.
+    /// `CONE`: creates one exact `Body3d` from base centre, radius and top point.
     Cone,
-    /// `CYLINDER`: 3D solid primitives are not implemented.
+    /// `CYLINDER`: creates one exact `Body3d` from base centre, radius and top.
     Cylinder,
-    /// `SPHERE`: 3D solid primitives are not implemented.
+    /// `SPHERE`: creates one exact `Body3d` from centre and radius point.
     Sphere,
-    /// `TORUS`: 3D solid primitives are not implemented.
+    /// `TORUS`: creates one exact `Body3d` from centre, major and minor point.
     Torus,
-    /// `WEDGE`: 3D solid primitives are not implemented.
+    /// `WEDGE`: creates one exact `Body3d` from two base corners and a height point.
     Wedge,
-    /// `PYRAMID`: 3D solid primitives are not implemented.
+    /// `PYRAMID`: creates one exact square-base `Body3d` from two base corners and an apex.
     Pyramid,
     /// `POLYSOLID`: 3D solid primitives are not implemented.
     PolySolid,

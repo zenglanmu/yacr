@@ -31,5 +31,9 @@ cad-spatial.workspace = true
 cad-diagnostics.workspace = true
 cad-platform.workspace = true
 cad-resources.workspace = true
+# The kernel-independent solid modelling seam (ADR-0036 phase C1): the app
+# depends on the **trait** only, never on a kernel. The carrier injects an
+# `Arc<dyn SolidModeler>`; a carrier without one refuses by name.
+cad-kernel-adapter.workspace = true
 serde_json.workspace = true
 serde.workspace = true

@@ -316,6 +316,26 @@ def check(root: pathlib.Path) -> int:
     for dependency in sorted(forbidden_solidcore_dependencies):
         forbid_dependency("cad-kernel-solidcore", dependency)
 
+    # The kernel **host** crate is a carrier-owned dependency: only a concrete
+    # app host (today `app-linux`) links it at runtime. No `cad-*` shared layer
+    # may, because that would fold the pinned kernel into a reusable layer
+    # instead of a carrier composition (ADR-0036 D1 / P1/C1).
+    #
+    # A **dev-dependency** stays allowed on purpose: `cad-cli-tools`'s
+    # integration contract (`tests/solid_command.rs`) links the real modeler to
+    # prove create/undo/tolerance behaviour, and its manifest carries an explicit
+    # comment. The ban therefore checks the runtime graph only.
+    for name in sorted(packages):
+        if name == "cad-kernel-solidcore" or not name.startswith("cad-"):
+            continue
+        assert "cad-kernel-solidcore" not in runtime_dependencies(
+            packages[name], workspace_dependencies
+        ), (
+            f"{name} must not depend on cad-kernel-solidcore at runtime "
+            "(only a carrier app links the kernel; a dev-dependency for a "
+            "contract test is allowed)"
+        )
+
     # Shared UI layer boundary: the platform-independent UI logic (`cad-ui-core`)
     # sits above the UI-free application/host contracts it consumes — it depends on
     # `cad-host` (the owner-thread session wraps `HostCore`) — and below every

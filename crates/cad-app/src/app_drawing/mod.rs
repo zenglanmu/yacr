@@ -164,6 +164,10 @@ pub mod table_payload;
 // The 2026-11-12 SHAPE family: `SHAPE` glyph creation and the `SHP2BLK`
 // shape→outline-block conversion.
 mod shape;
+// ADR-0036 phase C1: BOX/WEDGE/PYRAMID/CYLINDER/SPHERE/CONE/TORUS create one
+// real exact `Body3d` through the injected `SolidModeler` (no boolean, no
+// mass-properties, no display-style wiring here).
+mod solids;
 // The 2026-11-12 block/copy writes: `MINSERT` (block array) and `ADDSELECTED`.
 mod addselected;
 mod minsert;

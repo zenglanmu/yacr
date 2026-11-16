@@ -732,7 +732,8 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("ALIGNSPACE", CommandId::Extended(ExtendedCommandId::AlignSpace)), ("VPSYNC", CommandId::Extended(ExtendedCommandId::VpSync)),
     ("LAYTRANS", CommandId::Extended(ExtendedCommandId::LayTrans)),
 
-    // Wave 14 (2026-11-09): stable named refusals.
+    // Wave 14 (2026-11-09): the seven primitive families create an exact body
+    // (ADR-0036 phase C1); the rest are stable named refusals.
     ("BOX", CommandId::Extended(ExtendedCommandId::Box)), ("CONE", CommandId::Extended(ExtendedCommandId::Cone)),
     ("CYLINDER", CommandId::Extended(ExtendedCommandId::Cylinder)), ("SPHERE", CommandId::Extended(ExtendedCommandId::Sphere)),
     ("TORUS", CommandId::Extended(ExtendedCommandId::Torus)), ("WEDGE", CommandId::Extended(ExtendedCommandId::Wedge)),

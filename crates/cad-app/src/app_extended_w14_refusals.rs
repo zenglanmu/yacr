@@ -4,6 +4,12 @@
 //! `CadError::Unsupported` carrying a stable reason. Nothing is written, no
 //! revision is bumped and no `cad-history` entry is recorded; all are
 //! Viewer-legal.
+//!
+//! ADR-0036 phase C1 graduated the seven primitive families
+//! (`BOX`/`WEDGE`/`PYRAMID`/`CYLINDER`/`SPHERE`/`CONE`/`TORUS`) out of this
+//! list: they are real body creators now (`app_drawing::solids`) and are
+//! dispatched before this refusal arm, so they no longer appear in `reason`.
+//! Everything else here is still a refusal.
 
 use super::*;
 use crate::app_utility::require_none_payload;
@@ -22,17 +28,6 @@ impl Application {
 
 fn reason(ext: ExtendedCommandId) -> String {
     let text = match ext {
-        ExtendedCommandId::Box => "box.unsupported: 3D solid primitives are not implemented",
-        ExtendedCommandId::Cone => "cone.unsupported: 3D solid primitives are not implemented",
-        ExtendedCommandId::Cylinder => {
-            "cylinder.unsupported: 3D solid primitives are not implemented"
-        }
-        ExtendedCommandId::Sphere => "sphere.unsupported: 3D solid primitives are not implemented",
-        ExtendedCommandId::Torus => "torus.unsupported: 3D solid primitives are not implemented",
-        ExtendedCommandId::Wedge => "wedge.unsupported: 3D solid primitives are not implemented",
-        ExtendedCommandId::Pyramid => {
-            "pyramid.unsupported: 3D solid primitives are not implemented"
-        }
         ExtendedCommandId::PolySolid => {
             "polysolid.unsupported: 3D solid primitives are not implemented"
         }

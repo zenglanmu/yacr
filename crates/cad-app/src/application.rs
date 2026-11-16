@@ -10,7 +10,23 @@ impl Application {
             measurement: MeasurementEngine::default(),
             query: QueryService::new(),
             vendor_representations: None,
+            // No kernel is linked here: a carrier injects its modeler (ADR-0036
+            // phase C1). Without one every primitive command refuses by name.
+            solid_modeler: None,
         }
+    }
+
+    /// Inject (or clear) the solid modeler this application uses.
+    ///
+    /// Carrier-owned composition: `cad-app` never builds a modeler, and the
+    /// seam is trait-only so no kernel type crosses it. The host calls this once
+    /// while wiring its session; `None` restores the honest
+    /// `unsupported-runtime: solid-modeler` answer.
+    pub fn set_solid_modeler(
+        &mut self,
+        modeler: Option<Arc<dyn cad_kernel_adapter::SolidModeler>>,
+    ) {
+        self.solid_modeler = modeler;
     }
 
     /// Execute a command. This is the single entry point shared by UI and CLI.

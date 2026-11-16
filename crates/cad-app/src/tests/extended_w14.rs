@@ -1,40 +1,19 @@
-//! Wave 14 named-refusal contracts.
+//! Wave 14 command contracts.
 //!
-//! Each name is admitted by the vocabulary and refused with
+//! ADR-0036 phase C1 graduated the seven primitive families
+//! (`BOX`/`WEDGE`/`PYRAMID`/`CYLINDER`/`SPHERE`/`CONE`/`TORUS`) from named
+//! refusals to real body creators, so they are no longer in this list: they are
+//! Work-only drawing writes (their create contracts live in
+//! `tests/drawing/solids.rs`) and a carrier without a modeler refuses them with
+//! `unsupported-runtime: solid-modeler`.
+//!
+//! Every **remaining** name is admitted by the vocabulary and refused with
 //! `CadError::Unsupported` carrying a stable reason; nothing is written, no
 //! revision is bumped and no history entry appears. All are Viewer-legal.
 
 use super::*;
 
-const REFUSALS: [(ExtendedCommandId, &str); 25] = [
-    (
-        ExtendedCommandId::Box,
-        "box.unsupported: 3D solid primitives are not implemented",
-    ),
-    (
-        ExtendedCommandId::Cone,
-        "cone.unsupported: 3D solid primitives are not implemented",
-    ),
-    (
-        ExtendedCommandId::Cylinder,
-        "cylinder.unsupported: 3D solid primitives are not implemented",
-    ),
-    (
-        ExtendedCommandId::Sphere,
-        "sphere.unsupported: 3D solid primitives are not implemented",
-    ),
-    (
-        ExtendedCommandId::Torus,
-        "torus.unsupported: 3D solid primitives are not implemented",
-    ),
-    (
-        ExtendedCommandId::Wedge,
-        "wedge.unsupported: 3D solid primitives are not implemented",
-    ),
-    (
-        ExtendedCommandId::Pyramid,
-        "pyramid.unsupported: 3D solid primitives are not implemented",
-    ),
+const REFUSALS: [(ExtendedCommandId, &str); 18] = [
     (
         ExtendedCommandId::PolySolid,
         "polysolid.unsupported: 3D solid primitives are not implemented",
@@ -109,6 +88,17 @@ const REFUSALS: [(ExtendedCommandId, &str); 25] = [
     ),
 ];
 
+/// The seven primitives that became real body creators in phase C1.
+const PRIMITIVES: [ExtendedCommandId; 7] = [
+    ExtendedCommandId::Box,
+    ExtendedCommandId::Wedge,
+    ExtendedCommandId::Pyramid,
+    ExtendedCommandId::Cylinder,
+    ExtendedCommandId::Sphere,
+    ExtendedCommandId::Cone,
+    ExtendedCommandId::Torus,
+];
+
 fn revision(app: &Application) -> Revision {
     app.workspace.documents[&DocumentId(1)].drawing.revision()
 }
@@ -148,5 +138,62 @@ fn every_wave14_refusal_stays_viewer_legal() {
             )
             .expect_err("the feature is still missing");
         assert!(matches!(error, CadError::Unsupported(_)));
+    }
+}
+
+#[test]
+fn the_seven_primitives_are_drawing_writes_not_viewer_refusals() {
+    for ext in PRIMITIVES {
+        assert!(
+            ext.requires_work_mode(),
+            "{ext:?} creates a body, so it is Work-only"
+        );
+    }
+}
+
+#[test]
+fn a_viewer_cannot_create_a_primitive() {
+    for ext in PRIMITIVES {
+        let (mut app, mut session) = application_with_document();
+        session
+            .switch_mode(AppMode::Viewer)
+            .expect("Viewer is legal");
+        let error = app
+            .execute(
+                &mut session,
+                command(CommandId::Extended(ext), CommandPayload::None),
+            )
+            .expect_err("Viewer is read-only");
+        assert_eq!(error, CadError::PermissionDenied, "{ext:?}");
+    }
+}
+
+#[test]
+fn primitives_without_a_modeler_refuse_by_name_and_write_nothing() {
+    let at = |x: f64, y: f64, z: f64| Point3 { x, y, z };
+    for ext in PRIMITIVES {
+        let (mut app, mut session) = application_with_document();
+        let before = revision(&app);
+        // Well-formed payloads, so the refusal under test is the missing modeler
+        // and not an input rule.
+        let payload = if matches!(ext, ExtendedCommandId::Box | ExtendedCommandId::Sphere) {
+            CommandPayload::Points(vec![at(0.0, 0.0, 0.0), at(1.0, 1.0, 1.0)])
+        } else {
+            CommandPayload::Points(vec![
+                at(0.0, 0.0, 0.0),
+                at(2.0, 2.0, 0.0),
+                at(1.0, 1.0, 2.0),
+            ])
+        };
+        let error = app
+            .execute(&mut session, command(CommandId::Extended(ext), payload))
+            .expect_err("no modeler, no body");
+        assert_eq!(
+            error,
+            CadError::Unsupported("unsupported-runtime: solid-modeler".into()),
+            "{ext:?}"
+        );
+        assert_eq!(revision(&app), before, "{ext:?} writes nothing");
+        assert!(!app.can_undo(&DocumentId(1)), "{ext:?} records no undo");
     }
 }

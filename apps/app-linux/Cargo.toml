@@ -39,6 +39,11 @@ cad-platform.workspace = true
 cad-resources.workspace = true
 cad-db.workspace = true
 cad-domain.workspace = true
+# ADR-0036 phase C1: this carrier owns the only composition that injects a
+# solid modeler (`cad-kernel-solidcore`) into `cad_app::Application`. The kernel
+# stays behind the trait seam; no kernel type reaches another shared layer, and
+# this host never names the trait's crate itself.
+cad-kernel-solidcore.workspace = true
 
 # GTK overlay bridge: the probe surface lives on a windowed GtkDrawingArea
 # inside a GtkOverlay, with the React webview reparented as a transparent sibling.

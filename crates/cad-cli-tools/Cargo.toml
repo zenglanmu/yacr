@@ -32,3 +32,10 @@ serde_json.workspace = true
 # The parity harness (`tests/pick_parity.rs`) compares the renderer's id pass
 # against CPU picking; `cad-spatial` is the reference precise-pick stage.
 cad-spatial.workspace = true
+
+# ADR-0036 phase C1 integration contract (`tests/solid_command.rs`): the **real**
+# solidcore modeler, injected exactly as `app-linux` injects it. Dev-only: the
+# CLI library itself links no kernel. The crate is `#![cfg(not(wasm32))]`.
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+cad-kernel-adapter.workspace = true
+cad-kernel-solidcore.workspace = true

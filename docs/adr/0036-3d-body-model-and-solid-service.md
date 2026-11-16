@@ -1,19 +1,31 @@
 # ADR 0036：3D 实体模型（wireframe / surface / solid）与 solidcore 无状态建模服务
 
-- 状态：**Accepted（2026-11-16）**，**P1 部分实现**（2026-11-17，B2 增补）：
+- 状态：**Accepted（2026-11-16）**，**P1 部分实现**（2026-11-17，B2 + C1 增补）：
   - P0 已落地；P0.1（存储边线直送 `RenderBatch.edges`）已完成（Linux 契约/单元证据）；
   - P1/B1：`SolidModeler` 无内核接缝已落地（`cad-kernel-adapter`）；
-  - P1/B2（本轮，见 §7）：`cad-kernel-solidcore` 让**平面体**路径可用——基本体
+  - P1/B2（见 §7）：`cad-kernel-solidcore` 让**平面体**路径可用——基本体
     （BOX/WEDGE/PYRAMID 本仓精确平面 B-rep；CYLINDER/SPHERE/CONE/TORUS 走上游构造器）、
     UNION/SUBTRACT/INTERSECT、体积/面积/质心/惯性、相似变换；
+  - **P1/C1（2026-11-17）**：命令层接线第一阶段——`BOX`/`WEDGE`/`PYRAMID`/`CYLINDER`/`SPHERE`/
+    `CONE`/`TORUS` 由具名拒绝变成**真实创建**：显式点 → `PrimitiveSpec` → 注入的模型器 →
+    中性 B-Rep → 既有 `BrepTessellator` 显示缓存 → 一条 `AcDb3dSolid` 实体（一条事务/一步撤销）。
+    显示剖分用**共享的形状相对容差**（`cad_kernel_adapter::shape_relative_tolerance`，1e-3 ×
+    包围盒对角线，与导入同一条规则）；平面体 `Complete`，曲面体 `Partial` 并给出共享的
+    “离散网格、缩放不细化”理由。模型器由**载体注入**（`Application::set_solid_modeler`）；
+    本切面只有 Linux `native-below` 注入 `SolidCoreModeler`，其它载体/`dom-canvas` 传 `None` 并报
+    `unsupported-runtime: solid-modeler`。
+    **同步豁免（仅 C1）**：图元命令在**命令线程内同步**执行模型器 + 剖分，理由是工作有界
+    （单个图元 + 形状相对剖分，三角形数近似恒定）且取消探针恒为 `false`。**C2 的布尔不得沿用
+    该豁免**：布尔必须放到 worker 线程并接活取消探针，否则一条长操作会阻塞命令线程且无法取消。
   - **曲面 body**（含 cylinder/cone/sphere/torus 面）的布尔与质量属性**显式拒绝**
     （`solid.lift_requires_planar`），曲面 lift 是 P2；
-  - P1/C（`3DSOLID`/`REGION` 创建命令、`MASSPROP` 接线、face_sources、VSCURRENT）、
-    P2、P3 **NOT IMPLEMENTED**。
+  - **仍未实现**：AutoCAD 的交互式尺寸提示；布尔命令 `UNION`/`SUBTRACT`/`INTERSECT`（C2）；
+    `MASSPROP` 接线、`face_sources`、`VSCURRENT`（C3）；P2、P3。`3DSOLID`/`BODY` 是**实体类型键**
+    （模型器在 `Registration::entity_types` 声明），不新增同名命令。
   验证边界：只有 Linux x86-64 上的契约/单元证据——测试进程里跑的是**真实**固定 revision 的
   `solidcore` 内核（无 mock、不引用上游 golden）；Windows/macOS/Android/Web 的 solidcore
-  运行状态、任何 GPU/像素/性能结论一律 **NOT VERIFIED**。
-- 日期：2026-11-16（P1/B2 增补 2026-11-17）。
+  运行状态与模型器注入、任何 GPU/像素/性能结论一律 **NOT VERIFIED**。
+- 日期：2026-11-16（P1/B2 增补 2026-11-17，P1/C1 增补 2026-11-17）。
 - 相关：[ADR-0033](0033-multi-format-import.md)（多格式导入；D2/D9 的 BRep 边界）、
   [ADR-0031](0031-acadrust-vendored-patch-policy.md)（依赖补丁策略）、
   `docs/kernel-acis.md`（现有 ACIS 契约）、`docs/compatibility.md`（逐命令能力表）、

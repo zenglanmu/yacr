@@ -90,6 +90,7 @@ use cad_engine::render::RenderSessionHandle;
 use cad_host::{HostCore, HostOptions, HostPlatform};
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
+use std::sync::Arc;
 // Names referenced only by intra-doc links in this module.
 #[allow(unused_imports)]
 use cad_app::interaction::{InteractionRequest, SelectionMode};
@@ -320,6 +321,21 @@ impl CadSession {
     /// The host-owned render session the GPU lane attaches and draws through.
     pub fn render_session(&self) -> RenderSessionHandle {
         self.core.render.clone()
+    }
+
+    /// Inject (or clear) the carrier's solid modeler (ADR-0036 phase C1).
+    ///
+    /// The carrier owns the composition: `app-linux` passes its
+    /// `SolidCoreModeler`; every other carrier passes `None` (and the seven
+    /// primitive commands then refuse with
+    /// `unsupported-runtime: solid-modeler`). `cad-ui-core` names only the
+    /// trait, never a kernel.
+    pub fn set_solid_modeler(&self, modeler: Option<Arc<dyn cad_kernel_adapter::SolidModeler>>) {
+        self.core
+            .controller
+            .borrow_mut()
+            .application
+            .set_solid_modeler(modeler);
     }
 
     /// Diagnostics from reading the startup config/preference files.

@@ -916,6 +916,16 @@ impl ExtendedCommandId {
                 // forms are the read-only reports (`cad_db::drawing::header_geometry`).
                 | Self::BasePoint
                 | Self::DrawingLimits
+                // ADR-0036 phase C1: the seven primitive families create one
+                // exact `Body3d` row (one transaction / one undo step), so they
+                // are drawing writes and no longer Viewer-legal refusals.
+                | Self::Box
+                | Self::Wedge
+                | Self::Pyramid
+                | Self::Cylinder
+                | Self::Sphere
+                | Self::Cone
+                | Self::Torus
         )
     }
 }

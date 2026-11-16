@@ -72,6 +72,7 @@ cad-dependencies = { path = "crates/cad-dependencies" }
 cad-history = { path = "crates/cad-history" }
 cad-geometry = { path = "crates/cad-geometry" }
 cad-kernel-adapter = { path = "crates/cad-kernel-adapter" }
+cad-kernel-solidcore = { path = "crates/cad-kernel-solidcore" }
 cad-representation = { path = "crates/cad-representation" }
 cad-spatial = { path = "crates/cad-spatial" }
 cad-scene = { path = "crates/cad-scene" }
