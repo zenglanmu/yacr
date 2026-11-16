@@ -9,7 +9,9 @@
 // `HATCHEDIT` option grammar lives in `argument-hatchedit.ts` for the same reason,
 // the `COLOR`/`-COLOR` token grammar in `argument-color-grammar.ts` (one predicate
 // shared by both spellings), and the MULTILEADER/`SSX`/record grammars in
-// `argument-{mleader,selection,record}-grammar.ts`.
+// `argument-{mleader,selection,record}-grammar.ts`. The `LINETYPE`/`MLINE`/
+// `LAYOUT`/`TABLEEXPORT` shapes — plus the quote-aware tokenizer they share with
+// `RENAME` — live in `argument-extras-grammar.ts`.
 import { isHatchEditArgument } from './argument-hatchedit.ts';
 import { isColorArgument } from './argument-color-grammar.ts';
 import {
@@ -23,6 +25,10 @@ import {
 import {
   isMLeaderAlignArgument, isMLeaderEditArgument, isMlEditArgument, isToleranceArgument,
 } from './argument-mleader-grammar.ts';
+import {
+  isLayoutArgument, isLinetypeArgument, isMlineArgument, isTableExportArgument,
+  splitQuotedTokens,
+} from './argument-extras-grammar.ts';
 import { isAddSelectedArgument, isAliasEditArgument, isMvSetupArgument } from './argument-record-grammar.ts';
 import { isSsxArgument } from './argument-selection-grammar.ts';
 
@@ -409,13 +415,14 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
       return parts.length === 5 && parts.every(isSignedDecimal);
     },
   }),
+  /**
+   * `MLINE <spacing> <offset> <x1,y1> <x2,y2> [<x3,y3> …]`: a positive spacing,
+   * a signed offset and two or more baseline vertices (the grammar lives in
+   * `argument-extras-grammar.ts`). The `2..=1024` vertex bound is the command
+   * layer's `mline.point_count` refusal, so it is deliberately not imposed here.
+   */
   MLINE: Object.freeze({
-    parse: (argument: string) => {
-      const parts = tokens(argument);
-      return parts.length === 4 && isPositiveDecimal(parts[0])
-        && isSignedDecimal(parts[1]) && isCoordinatePair(parts[2])
-        && isCoordinatePair(parts[3]);
-    },
+    parse: isMlineArgument,
   }),
   MLSTYLE: Object.freeze({
     parse: (argument: string) => {
@@ -513,33 +520,29 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
     // shape (one word) and lets that refusal speak.
     parse: (argument: string) => tokens(argument).length === 1,
   }),
+  /**
+   * `LINETYPE LIST|SET <name>|DELETE <name>|CREATE <name> <dash>,<gap>,…
+   * [DESCRIPTION <text>]`; `-LINETYPE` is the command-line spelling of the same
+   * grammar (one predicate for both rows, exactly like `-PAGESETUP`). The
+   * `CREATE` tail's `DESCRIPTION` text is content, so admission preserves the
+   * typed case through `CASE_PRESERVING_ARGUMENTS` in `commands.ts`; whether the
+   * name exists, whether the pattern is a valid dash/gap sequence and the table's
+   * limits stay `linetype.*` refusals.
+   */
   LINETYPE: Object.freeze({
-    parse: (argument: string) => {
-      const parts = tokens(argument);
-      const word = (parts[0] ?? '').toUpperCase();
-      if (word === 'LIST') return parts.length === 1;
-      return word === 'SET' && parts.length >= 2;
-    },
+    parse: isLinetypeArgument,
   }),
   '-LINETYPE': Object.freeze({
-    parse: (argument: string) => {
-      const parts = tokens(argument);
-      const word = (parts[0] ?? '').toUpperCase();
-      if (word === 'LIST') return parts.length === 1;
-      return word === 'SET' && parts.length >= 2;
-    },
+    parse: isLinetypeArgument,
   }),
 
+  /**
+   * `LAYOUT LIST|NEW|RENAME|DELETE|SET|COPY <source> <new-name>|TEMPLATE …`.
+   * `TEMPLATE` stays admitted so the host can answer its own
+   * `layout.template_not_implemented` instead of the chrome's generic refusal.
+   */
   LAYOUT: Object.freeze({
-    parse: (argument: string) => {
-      const parts = tokens(argument);
-      const [option, ...rest] = parts;
-      if (option === undefined) return false;
-      const upper = option.toUpperCase();
-      if (upper === 'LIST') return rest.length === 0;
-      if (upper === 'NEW' || upper === 'DELETE' || upper === 'SET') return rest.length > 0;
-      return upper === 'RENAME' && rest.length >= 2;
-    },
+    parse: isLayoutArgument,
   }),
   LAYOUTMERGE: Object.freeze({
     parse: (argument: string) => tokens(argument).length >= 2,
@@ -762,6 +765,18 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
   TABLEDIT: Object.freeze({
     parse: isTableEditArgument,
   }),
+  /**
+   * `TABLEEXPORT <path.csv>`: the destination is typed (AutoCAD opens a dialog;
+   * this build has none) and the host writes the CSV through its file channel,
+   * like `SAVE`/`PLOT`. The whole remainder is the path, so its typed case is
+   * preserved (`CASE_PRESERVING_ARGUMENTS`); the `.csv` requirement, the
+   * one-table selection rule, a runtime with no filesystem and a failed write are
+   * all named host refusals (`tableexport.*`, `unsupported-runtime:
+   * table-export`) that this predicate must not pre-empt.
+   */
+  TABLEEXPORT: Object.freeze({
+    parse: isTableExportArgument,
+  }),
 
   // The 2026-11-15 audit batch: nine selectors whose host parser already took the
   // typed argument while this table had no row (shapes in `argument-*-grammar.ts`;
@@ -968,31 +983,3 @@ function isRenameArgument(argument: string): boolean {
   return tokens[1].length > 0 && tokens[2].length > 0;
 }
 
-/**
- * Split whitespace-separated tokens while keeping double-quoted runs together.
- * Returns `null` for an unbalanced quote. Unquoted empty runs are ignored.
- */
-function splitQuotedTokens(text: string): string[] | null {
-  const tokens: string[] = [];
-  let current = '';
-  let quoted = false;
-  let started = false;
-  for (const ch of text.trim()) {
-    if (ch === '"') {
-      quoted = !quoted;
-      started = true;
-    } else if (/\s/.test(ch) && !quoted) {
-      if (started || current.length > 0) {
-        tokens.push(current);
-        current = '';
-        started = false;
-      }
-    } else {
-      current += ch;
-      started = true;
-    }
-  }
-  if (quoted) return null;
-  if (started || current.length > 0) tokens.push(current);
-  return tokens;
-}

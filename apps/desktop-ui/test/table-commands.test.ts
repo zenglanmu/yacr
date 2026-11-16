@@ -71,14 +71,39 @@ test('the three table rows carry real labels and hints in both catalogs', async 
   }
 });
 
-test('the still-missing table names stay named refusals', async () => {
+test('TABLEEXPORT, TABLESTYLE and MATCHCELL now describe real writes', async () => {
+  const zh = await readCatalog('zh-CN');
   const en = await readCatalog('en');
   for (const key of [
-    'draw.kind.tableexport.hint',
-    'draw.kind.tablestyle.hint',
-    'draw.kind.tinsert.hint',
-    'draw.kind.matchcell.hint',
+    'draw.kind.tableexport',
+    'draw.kind.tablestyle',
+    'draw.kind.matchcell',
   ]) {
+    for (const [locale, catalog] of [['zh-CN', zh], ['en', en]] as const) {
+      const label = catalog[key];
+      const hint = catalog[`${key}.hint`];
+      assert.equal(typeof label, 'string', `${locale} missing ${key}`);
+      assert.equal(typeof hint, 'string', `${locale} missing ${key}.hint`);
+      // These three are implemented: the old "named refusal" copy must not
+      // survive on a row that really writes (TABLESTYLE/MATCHCELL) or exports
+      // through the host file channel (TABLEEXPORT). A hint may still say that
+      // *bad input* is refused by name — that is the honest error copy — so the
+      // contract is "describes the real effect, never claims it is missing".
+      assert.equal(/not implemented/i.test(label), false, `${locale} ${key}: ${label}`);
+      assert.equal(/not implemented/i.test(hint), false, `${locale} ${key}: ${hint}`);
+      assert.equal(/未实现/.test(hint), false, `${locale} ${key}: ${hint}`);
+      assert.match(
+        hint,
+        locale === 'en' ? /writ|export|cop(y|ies)|report/i : /写|导出|复制|报告/,
+        `${locale} ${key}: the hint describes what the command does`,
+      );
+    }
+  }
+});
+
+test('the still-missing table name stays a named refusal', async () => {
+  const en = await readCatalog('en');
+  for (const key of ['draw.kind.tinsert.hint']) {
     assert.equal(typeof en[key], 'string', key);
     assert.equal(/refusal/i.test(en[key]), true, `${key}: ${en[key]}`);
   }

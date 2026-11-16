@@ -29,6 +29,7 @@ import {
 } from './gating.ts';
 import type { CommandStatusView, SelectionRequirement } from './gating.ts';
 import { hatchEditArgumentCarriesPath } from './argument-hatchedit.ts';
+import { linetypeCreateCarriesDescription } from './argument-extras-grammar.ts';
 
 /** A typed command line split into its base name and its argument. */
 export interface SplitCommandText {
@@ -176,11 +177,21 @@ export function splitCommandText(text: unknown): SplitCommandText {
  * * `TOLERANCE <x> <y> <text…>`: the whole tail is the frame text, preserved
  *   verbatim by the host (`parse_tolerance_argument`). The two coordinates are
  *   numbers, so preserving their spelling is a no-op.
+ * * `TABLEEXPORT <path.csv>`: the tail is one opaque host-written path (the host
+ *   resolves the one selected table and writes the CSV). It may contain spaces,
+ *   so the whole remainder is preserved.
+ * * `LINETYPE`/`-LINETYPE CREATE … DESCRIPTION <text>`: only the `CREATE` form
+ *   with a `DESCRIPTION` is a content tail (the description is stored). The
+ *   `SET`/`DELETE` tails are names the host matches, so they keep the shared
+ *   normal form.
  */
 const CASE_PRESERVING_ARGUMENTS: Readonly<Record<string, (argument: string) => boolean>> = Object.freeze({
   IMAGEATTACH: () => true,
   HATCHEDIT: hatchEditArgumentCarriesPath,
   TOLERANCE: () => true,
+  TABLEEXPORT: () => true,
+  LINETYPE: linetypeCreateCarriesDescription,
+  '-LINETYPE': linetypeCreateCarriesDescription,
 });
 
 /**
@@ -561,7 +572,8 @@ export function historyText(history: readonly string[], index: number | null, dr
  * gates, and the returned `command` is the **full normalized line** so the host
  * receives (and validates) the value itself. A case-preserving tail
  * ([`CASE_PRESERVING_ARGUMENTS`]: `IMAGEATTACH <file>`,
- * `HATCHEDIT PATTERNFILE <path>`, `TOLERANCE <x> <y> <text…>`) is the one
+ * `HATCHEDIT PATTERNFILE <path>`, `TOLERANCE <x> <y> <text…>`,
+ * `TABLEEXPORT <path.csv>`, `LINETYPE CREATE … DESCRIPTION <text>`) is the one
  * exception: its selector is upper-cased and the tail keeps the typed spelling,
  * so a mixed-case path or frame text is not silently rewritten. An argument on a
  * selector that takes none, or an argument outside the local syntax predicate,

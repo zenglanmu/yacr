@@ -886,7 +886,10 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   ...EXTENDED_COMMAND_CATALOG,
   ...REFUSAL_COMMAND_CATALOG,
   // The 2026-11-09 Wave 13 batch: page-setup/conversion reports, table/field
-  // surfaces and named refusals. Appended last so no shipped row moves.
+  // surfaces and named refusals. `TABLEEXPORT` is a real read-only export — the
+  // host writes the CSV through its file channel, like `SAVE`/`PLOT` — so the
+  // table rows are not a "no file I/O" group. Appended last so no shipped row
+  // moves.
   { id: 'PAGESETUP', labelKey: 'draw.kind.pagesetup', icon: 'printer', group: 'file' },
   { id: '-PAGESETUP', labelKey: 'draw.kind.dashpagesetup', icon: 'printer', group: 'file' },
   { id: 'PSETUPIN', labelKey: 'draw.kind.psetupin', icon: 'printer', group: 'file' },
