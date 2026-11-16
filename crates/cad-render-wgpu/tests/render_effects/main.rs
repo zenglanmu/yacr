@@ -398,7 +398,17 @@ fn merged_quad(
     draw_order: i64,
 ) -> RenderBatch {
     let edge_positions = if edges {
-        vec![[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]
+        // The quad's de-duplicated triangle-edge wireframe: 0-2, 1-2, 0-1, 0-3,
+        // 2-3 (the `Mesh` overlay contract), as independent endpoint pairs.
+        let v = [
+            [-half, -half, 0.0],
+            [-half, half, 0.0],
+            [half, half, 0.0],
+            [half, -half, 0.0],
+        ];
+        vec![
+            v[0], v[2], v[1], v[2], v[0], v[1], v[0], v[3], v[2], v[3],
+        ]
     } else {
         Vec::new()
     };

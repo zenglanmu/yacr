@@ -116,6 +116,19 @@ fn every_extended_variant_has_one_table_row_and_normalizes() {
                 | ExtendedCommandId::ChSpace
                 | ExtendedCommandId::BasePoint
                 | ExtendedCommandId::DrawingLimits
+                // ADR-0036 C1/C2: the seven 3D primitive creates and the three
+                // solid booleans write entity rows (booleans run as a job but
+                // still mutate the drawing).
+                | ExtendedCommandId::Box
+                | ExtendedCommandId::Cylinder
+                | ExtendedCommandId::Sphere
+                | ExtendedCommandId::Cone
+                | ExtendedCommandId::Torus
+                | ExtendedCommandId::Wedge
+                | ExtendedCommandId::Pyramid
+                | ExtendedCommandId::Union
+                | ExtendedCommandId::Subtract
+                | ExtendedCommandId::Intersect
         );
         assert_eq!(
             variant.requires_work_mode(),
