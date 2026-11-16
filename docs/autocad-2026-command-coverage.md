@@ -997,7 +997,7 @@
 | `RTEXT` | 部分实现 | 具名拒绝（`rtext.unsupported`）：远程文字未实现（无 RTEXT 模型）。 |
 | `RTUCS` | 部分实现 | 具名拒绝（`rtucs.unsupported: no dynamic UCS model`）。 |
 | `RULESURF` | 部分实现 | 具名拒绝（`rulesurf.unsupported: no 3D surface (NURBS) model`）。 |
-| `SAVE` | 部分实现 | 有损 DXF 另存；源为 `.dwg` 时可**实验性导出 DWG**（上游 `acadrust::DwgWriter`，新文件、默认 `<stem>-export.dwg`、绝不覆盖源）；DWG 导出有损/不完整，仅合成 self-roundtrip 证据，vendor/AutoCAD **NOT VERIFIED** |
+| `SAVE` | 部分实现 | 有损 DXF 另存（逐条记录转换/丢弃）；源为 `.dwg` 时可**实验性导出 DWG**（上游 `acadrust::DwgWriter`，新文件、默认 `<stem>-export.dwg`、绝不覆盖源）；**块参照与裁剪已可写出**：导出写 `BLOCK_RECORD`/`BLOCK`/`INSERT`（含嵌套、动态块的活动可见性、非均匀缩放）与 `ACAD_FILTER`/`SPATIAL_FILTER` 裁剪链，`fixtures/dxf/qcad-examples/entities.dxf` 的两个命名块实例与定义经一次保存后保持 | 无法写成单条 `INSERT` 的参照（镜像/倾斜摆放、剪切、零或非有限缩放、非仿射、定义环、嵌套超限、xref、重名）仍展开并逐条声明；inverted 裁剪与裁剪深度面无法写出（格式/模型无对应字段）；DWG 导出仍有损，vendor/AutoCAD **NOT VERIFIED** |
 | `SAVEALL` | 部分实现 | 具名拒绝（`saveall.single_document`）：本构建只有一个文档；请用 SAVE。 |
 | `SAVEAS` | 部分实现 | SAVE 别名：有损 DXF 另存；源为 .dwg 时可实验性导出 DWG（新文件、默认 <stem>-export.dwg、绝不覆盖源；仅合成 self-roundtrip 证据，vendor/AutoCAD NOT VERIFIED） |
 | `SAVEIMG` | 部分实现 | 具名拒绝（`saveimg.unsupported: raster image export is host-owned; this command layer has no file handle (use PLOT PNG)`）。 |
