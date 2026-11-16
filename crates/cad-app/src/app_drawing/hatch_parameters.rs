@@ -20,19 +20,20 @@
 //! / `acadiso.pat` file is parsed by the same `PatternLibrary::parse` and
 //! resolved by name (`PatternLibrary::resolve`).
 //!
-//! **Declared boundary**: this build has no pattern-name or pattern-file tool
-//! parameter — `hatchPattern` is a closed **1-based index** channel over the
-//! implemented library — so a user `.pat` entry cannot yet be *selected* from
-//! the command line. The loader, the parser refusals
-//! (`hatch.pattern_file_*`) and the name resolution
-//! (`hatch.pattern_missing`) are complete and exercised; wiring a name-entry
-//! prompt (or extending the channel) is the remaining step, and until it exists
-//! no user pattern is silently accepted or approximated.
+//! **The name channel**: `hatchPattern` is a closed **1-based index** over the
+//! implemented library, so it cannot carry a name. The command line therefore
+//! has a one-shot pattern-name spelling (`HATCH PATTERN <name>` /
+//! `HATCH PATTERNFILE <path.pat> [<name>]`, dispatches
+//! `CommandPayload::HatchPattern`) that resolves through the very same loader and
+//! the very same by-name rules `HATCHEDIT` uses. The session fill *type* is not
+//! read on that path (the command line decided the pattern), while the scale,
+//! hatch angle, `HPDOUBLE` flag and style stay the session channel.
 
 use super::*;
 
 use super::hatch_stitch::STITCH_TOLERANCE;
 
+use super::hatch_edit_pattern_file::PatternChoice;
 use super::hatch_pattern::{PatternDefinition, PatternLibrary};
 
 use cad_domain::hatch::{GradientDef, GradientKind, GradientStop};
@@ -87,11 +88,11 @@ pub(super) struct HatchParameters {
     /// The **1-based** index into the implemented predefined pattern table
     /// (`hatchPattern`); only read for `HATCH_PATTERN_TYPE_PREDEFINED`.
     pattern_index: f64,
-    spacing: f64,
+    pub(super) spacing: f64,
     /// Degrees on the channel (the AutoCAD prompt unit); the domain stores
     /// radians.
-    angle_degrees: f64,
-    double: bool,
+    pub(super) angle_degrees: f64,
+    pub(super) double: bool,
     pub(super) style: f64,
     /// Gradient kind closed set (`0` linear, `1` spherical); only read for
     /// `HATCH_PATTERN_TYPE_GRADIENT`.
@@ -119,19 +120,39 @@ pub(super) struct HatchParameters {
 /// generic range refusal would hide which pattern set the command actually
 /// implements).
 pub(super) fn hatch_parameters(session: &SessionState) -> CadResult<HatchParameters> {
-    hatch_parameters_for(session, false)
+    hatch_parameters_for(session, FillAxis::Session)
 }
 
 /// Read the parameters for the GRADIENT command: the same channel, with the
 /// gradient fill forced regardless of the session pattern type.
 pub(super) fn gradient_parameters(session: &SessionState) -> CadResult<HatchParameters> {
-    hatch_parameters_for(session, true)
+    hatch_parameters_for(session, FillAxis::Gradient)
 }
 
-fn hatch_parameters_for(
-    session: &SessionState,
-    force_gradient: bool,
-) -> CadResult<HatchParameters> {
+/// Read the parameters for a **typed pattern-name** creation
+/// (`HATCH PATTERN <name>` / `HATCH PATTERNFILE <path> [<name>]`).
+///
+/// The pattern comes from the command line, so the session fill *type*
+/// (`hatchPatternType`) is deliberately not read: a stale solid/gradient selector
+/// can neither refuse nor silently change a named pattern. The pattern fill's own
+/// parameters (scale = `hatchSpacing`, hatch-level angle, `HPDOUBLE`) and the
+/// island style are still the session channel, exactly like the tool path.
+pub(super) fn pattern_parameters(session: &SessionState) -> CadResult<HatchParameters> {
+    hatch_parameters_for(session, FillAxis::Pattern)
+}
+
+/// Which fill the parameters are being read for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FillAxis {
+    /// The tool path: `hatchPatternType` decides the fill.
+    Session,
+    /// GRADIENT: the gradient fill is forced.
+    Gradient,
+    /// A typed pattern name: the command line supplies the pattern.
+    Pattern,
+}
+
+fn hatch_parameters_for(session: &SessionState, axis: FillAxis) -> CadResult<HatchParameters> {
     let validate = |parameter: ToolParameter| -> CadResult<()> {
         parameter
             .validate(session.tool_parameter(parameter))
@@ -142,13 +163,14 @@ fn hatch_parameters_for(
                 other => other,
             })
     };
-    // Always validated: the fill selector itself, the style and the flag.
-    for parameter in [
-        ToolParameter::HatchPatternType,
-        ToolParameter::HatchDouble,
-        ToolParameter::HatchStyle,
-    ] {
+    // Always validated: the style and the flag. The fill selector itself is only
+    // read on the session axis (it *is* the fill there); a forced gradient and a
+    // typed pattern both override it, so a stale value must not refuse them.
+    for parameter in [ToolParameter::HatchDouble, ToolParameter::HatchStyle] {
         validate(parameter)?;
+    }
+    if axis == FillAxis::Session {
+        validate(ToolParameter::HatchPatternType)?;
     }
     let number = |parameter: ToolParameter| {
         session
@@ -157,7 +179,7 @@ fn hatch_parameters_for(
             .unwrap_or(f64::NAN)
     };
     let parameters = HatchParameters {
-        force_gradient,
+        force_gradient: axis == FillAxis::Gradient,
         pattern_type: number(ToolParameter::HatchPatternType),
         pattern_index: number(ToolParameter::HatchPattern),
         spacing: number(ToolParameter::HatchSpacing),
@@ -172,16 +194,17 @@ fn hatch_parameters_for(
         gradient_color_a: number(ToolParameter::HatchGradientColorA),
         gradient_color_b: number(ToolParameter::HatchGradientColorB),
     };
-    let fill_parameters: &[ToolParameter] = if parameters.is_gradient() {
-        &[
-            ToolParameter::HatchGradientKind,
-            ToolParameter::HatchGradientAngle,
-            ToolParameter::HatchGradientColorA,
-            ToolParameter::HatchGradientColorB,
-        ]
-    } else {
-        &[ToolParameter::HatchSpacing, ToolParameter::HatchAngle]
-    };
+    let fill_parameters: &[ToolParameter] =
+        if axis == FillAxis::Gradient || (axis == FillAxis::Session && parameters.is_gradient()) {
+            &[
+                ToolParameter::HatchGradientKind,
+                ToolParameter::HatchGradientAngle,
+                ToolParameter::HatchGradientColorA,
+                ToolParameter::HatchGradientColorB,
+            ]
+        } else {
+            &[ToolParameter::HatchSpacing, ToolParameter::HatchAngle]
+        };
     for parameter in fill_parameters {
         validate(*parameter)?;
     }
@@ -280,8 +303,9 @@ impl HatchParameters {
     }
 
     /// The pattern scale (`HPSCALE`) and angle, validated once for the two
-    /// pattern kinds that use them (user-defined and predefined).
-    fn scale_and_angle(&self) -> CadResult<()> {
+    /// pattern kinds that use them (user-defined and predefined, and a typed
+    /// pattern name).
+    pub(super) fn scale_and_angle(&self) -> CadResult<()> {
         if !self.spacing.is_finite() || self.spacing <= 0.0 {
             return Err(CadError::InvalidInput(format!(
                 "HATCH spacing must be finite and > 0, got {}",
@@ -448,15 +472,53 @@ pub(super) fn hatch_creation_refusal(error: CadError) -> CadError {
     }
 }
 
+/// Re-label a **shared pattern-resolution** refusal for the HATCH command.
+///
+/// `HATCH PATTERN`/`HATCH PATTERNFILE` and `HATCHEDIT` resolve through the same
+/// functions, so the codes they build are written for the edit command
+/// (`hatchedit.unknown_pattern`, `hatchedit.pattern_file_*`). The typed line
+/// belongs to HATCH, so the prefix and the command name are rewritten — the
+/// message keeps the searched sources and the parser's own detail verbatim.
+pub(super) fn hatch_pattern_refusal(error: CadError) -> CadError {
+    let relabel = |message: String| {
+        message
+            .replace("HATCHEDIT", "HATCH")
+            .replace("hatchedit.", "hatch.")
+    };
+    match error {
+        CadError::InvalidInput(message) => CadError::InvalidInput(relabel(message)),
+        CadError::Unsupported(message) => CadError::Unsupported(relabel(message)),
+        other => other,
+    }
+}
+
 /// The explicit summary diagnostic (locale-neutral, like the ARRAY commands).
+///
+/// `typed_pattern` is the command-line selection: `Some(choice)` echoes the
+/// library name and the recorded DXF pattern type instead of naming the session
+/// fill (which did not decide this creation).
 pub(super) fn hatch_diagnostic(
     object: ObjectId,
     loop_count: usize,
     stitched_edges: usize,
     style: HatchStyle,
     parameters: &HatchParameters,
+    typed_pattern: Option<&PatternChoice>,
 ) -> Diagnostic {
-    let fill = if parameters.is_gradient() {
+    let fill = if let Some(choice) = typed_pattern {
+        let source = if choice.pattern_type() == HatchPatternType::Custom {
+            "custom"
+        } else {
+            "predefined"
+        };
+        format!(
+            "{source} pattern {} (scale {}, angle {} deg, double {})",
+            choice.definition().name(),
+            parameters.spacing,
+            parameters.angle_degrees,
+            parameters.double
+        )
+    } else if parameters.is_gradient() {
         // The command already validated the gradient in `fill()`; the name and
         // colours are echoed so the summary says which ramp was written instead
         // of naming a pattern that does not exist.

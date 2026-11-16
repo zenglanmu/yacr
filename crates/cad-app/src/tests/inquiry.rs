@@ -35,7 +35,7 @@ fn entity(
     }
 }
 
-fn line(id: u128, start: Point3, end: Point3) -> DbEntity {
+pub(super) fn line(id: u128, start: Point3, end: Point3) -> DbEntity {
     entity(
         id,
         SemanticGeometry::Line { start, end },
@@ -46,7 +46,9 @@ fn line(id: u128, start: Point3, end: Point3) -> DbEntity {
     )
 }
 
-fn app_from_builder(builder: DrawingDatabaseBuilder) -> (Application, SessionState, DocumentId) {
+pub(super) fn app_from_builder(
+    builder: DrawingDatabaseBuilder,
+) -> (Application, SessionState, DocumentId) {
     let mut app = Application::new();
     let document_id = DocumentId(1);
     let drawing = builder.finish().unwrap();
@@ -68,7 +70,7 @@ fn app_from_builder(builder: DrawingDatabaseBuilder) -> (Application, SessionSta
     (app, session, document_id)
 }
 
-fn command(id: CommandId, payload: CommandPayload) -> Command {
+pub(super) fn command(id: CommandId, payload: CommandPayload) -> Command {
     Command {
         schema_version: 1,
         id,
@@ -78,11 +80,11 @@ fn command(id: CommandId, payload: CommandPayload) -> Command {
     }
 }
 
-fn point(x: f64, y: f64) -> Point3 {
+pub(super) fn point(x: f64, y: f64) -> Point3 {
     Point3 { x, y, z: 0.0 }
 }
 
-fn diagnostic<'a>(outcome: &'a CommandOutcome, code: &str) -> Vec<&'a str> {
+pub(super) fn diagnostic<'a>(outcome: &'a CommandOutcome, code: &str) -> Vec<&'a str> {
     outcome
         .diagnostics
         .iter()
@@ -742,7 +744,7 @@ fn status_is_allowed_in_viewer_mode() {
         .is_ok());
 }
 
-fn fs_fixture() -> (Application, SessionState, DocumentId) {
+pub(super) fn fs_fixture() -> (Application, SessionState, DocumentId) {
     let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
     builder
         .insert_layer(Layer {

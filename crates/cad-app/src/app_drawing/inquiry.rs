@@ -24,17 +24,17 @@
 //!   (`status.limits_base`) and names an absent one instead of defaulting it; it
 //!   does **not** track drawing creation/edit time or memory usage and says so
 //!   with explicit `status.not_tracked` diagnostics;
-//! * `FS` is an Express tool (command-line only, no ribbon button) and implements
-//!   AutoCAD's default `FSMODE=OFF`: it adds only **directly touching** entities
-//!   — a crossing and a tangent contact both count — never a transitive chain.
-//!   Chain mode (`FSMODE=ON`) is **NOT IMPLEMENTED**.
-//!   It enumerates directly addressable model-space entities only — block
-//!   instance members are not expanded, and hidden layers are skipped.
+//! * `FS` is an Express tool (command-line only, no ribbon button). `FSMODE=OFF`
+//!   (AutoCAD's initial value) adds only **directly touching** entities — a
+//!   crossing and a tangent contact both count — never a transitive chain;
+//!   `FSMODE=ON` follows the transitive **tangent** chain and refuses by name what
+//!   it cannot chain (`fs.chain_nontangent`, `fs.chain_ambiguous`,
+//!   `fs.chain_bound`; see [`super::fs_chain`]). It enumerates directly addressable
+//!   model-space entities only — block instance members are not expanded, and
+//!   hidden layers are skipped.
 
-use crate::picking::ref_visibility;
-use crate::selection::model_ref;
 use cad_domain::TolerancePolicy;
-use cad_geometry::{distance, DefaultGeometryEngine, GeometryEngine};
+use cad_geometry::{distance, DefaultGeometryEngine};
 
 use super::*;
 
@@ -580,6 +580,12 @@ impl Application {
     }
 
     /// `FS`: add every visible model-space entity that touches the selected seed.
+    ///
+    /// `FSMODE=OFF` (the default) adds the **direct** contacts only; `FSMODE=ON`
+    /// (`session.drafting_extras`) follows the transitive tangent chain. Both passes
+    /// live in [`super::fs_chain`], which also owns the named refusals. Read-only:
+    /// the pass mutates the session selection and nothing else, so there is no
+    /// transaction, no revision bump and no undo entry.
     pub(crate) fn selection_touching(
         &self,
         session: &mut SessionState,
@@ -611,7 +617,7 @@ impl Application {
                 "fs.seed_not_model_space: the FS seed must be a model-space entity".into(),
             ));
         }
-        if !fs_supported(&seed.geometry) {
+        if !super::fs_chain::fs_supported(&seed.geometry) {
             return Err(CadError::Unsupported(format!(
                 "fs.seed_geometry: FS does not intersect {:?} geometry",
                 std::mem::discriminant(&seed.geometry)
@@ -620,56 +626,44 @@ impl Application {
 
         let engine = DefaultGeometryEngine;
         let policy = TolerancePolicy::default();
-        let seed_endpoints = curve_endpoints(&engine, &seed.geometry, &policy)?;
         let root = drawing.root_layer_scope();
-        let mut touching = Vec::new();
-        for candidate in drawing.model_space() {
-            if candidate.id == seed.id || !fs_supported(&candidate.geometry) {
-                continue;
-            }
-            let reference = model_ref(command.document, candidate.id);
-            if !ref_visibility(
+        let chain_mode = session.drafting_extras.fs_mode();
+        let pass = if chain_mode {
+            super::fs_chain::tangent_chain(
                 &drawing,
-                &session.layer_overrides,
-                &session.hidden_entities,
+                session,
+                command.document,
                 root,
-                &reference,
-            )
-            .unwrap_or(false)
-            {
-                continue;
-            }
-            let mut hit = match engine.intersect_local(&seed.geometry, &candidate.geometry, &policy)
-            {
-                Ok(points) => !points.is_empty(),
-                Err(error) => {
-                    return Err(CadError::Unsupported(format!(
-                        "fs.intersect: entity {} could not be intersected: {error}",
-                        candidate.id.0
-                    )))
-                }
-            };
-            if !hit && !seed_endpoints.is_empty() {
-                let candidate_endpoints = curve_endpoints(&engine, &candidate.geometry, &policy)?;
-                hit = endpoints_touch(&seed_endpoints, &candidate_endpoints, &policy);
-            }
-            if hit {
-                touching.push(reference);
-            }
-        }
+                seed,
+                &engine,
+                &policy,
+            )?
+        } else {
+            super::fs_chain::direct_touching(
+                &drawing,
+                session,
+                command.document,
+                root,
+                seed,
+                &engine,
+                &policy,
+            )?
+        };
 
         let mut added = 0usize;
-        for reference in touching {
+        for reference in pass.refs {
             if session.selection.insert(reference) {
                 added += 1;
             }
         }
         let total = session.selection.len();
+        let mode = if chain_mode { "ON" } else { "OFF" };
         let (code, message) = if added == 0 {
             (
                 "fs.none",
                 format!(
-                    "FS: nothing touches the selected entity {}; the selection is unchanged",
+                    "FS (FSMODE={mode}): nothing touches the selected entity {}; the selection \
+                     is unchanged",
                     seed.id.0
                 ),
             )
@@ -679,63 +673,38 @@ impl Application {
                 format!("FS: added {added} touching object(s) to the selection (total {total})"),
             )
         };
+        let mut diagnostics = vec![Diagnostic {
+            object: None,
+            code: code.into(),
+            message,
+        }];
+        if added > 0 {
+            let detail = if chain_mode {
+                format!(
+                    "FSMODE=ON: tangent-chain pass over {} visible model-space curve(s) including \
+                     the seed, {} tangent contact(s); FS adds to the session selection only",
+                    pass.entities, pass.contacts
+                )
+            } else {
+                format!(
+                    "FSMODE=OFF: direct-contact pass; {} touching object(s) beside the seed ({} \
+                     visible model-space curve(s) including it); no transitive chain — set \
+                     FSMODE=ON for the tangent chain",
+                    pass.contacts, pass.entities
+                )
+            };
+            diagnostics.push(Diagnostic {
+                object: None,
+                code: "fs.mode".into(),
+                message: detail,
+            });
+        }
         Ok(CommandOutcome {
             objects: Vec::new(),
             changes: None,
-            diagnostics: vec![Diagnostic {
-                object: None,
-                code: code.into(),
-                message,
-            }],
+            diagnostics,
             measurement: None,
             point_report: None,
         })
     }
-}
-
-/// The geometry kinds FS intersects. Other kinds (text, hatch, dimensions,
-/// blocks, images, opaque data, meshes, compounds) are not curve-touch candidates
-/// and are skipped, never silently truncated inside a supported kind.
-fn fs_supported(geometry: &SemanticGeometry) -> bool {
-    matches!(
-        geometry,
-        SemanticGeometry::Line { .. }
-            | SemanticGeometry::Circle { .. }
-            | SemanticGeometry::Arc { .. }
-            | SemanticGeometry::Ellipse { .. }
-            | SemanticGeometry::Polyline { .. }
-            | SemanticGeometry::Spline { .. }
-    )
-}
-
-fn curve_endpoints(
-    engine: &DefaultGeometryEngine,
-    geometry: &SemanticGeometry,
-    policy: &TolerancePolicy,
-) -> CadResult<Vec<Point3>> {
-    match geometry {
-        SemanticGeometry::Line { start, end } => Ok(vec![*start, *end]),
-        SemanticGeometry::Arc { .. }
-        | SemanticGeometry::Polyline { .. }
-        | SemanticGeometry::Spline { .. } => {
-            let points = engine.tessellate_curve(geometry, policy)?;
-            let mut endpoints = Vec::new();
-            if let Some(first) = points.first() {
-                endpoints.push(*first);
-            }
-            if let Some(last) = points.last() {
-                if endpoints.first() != Some(last) {
-                    endpoints.push(*last);
-                }
-            }
-            Ok(endpoints)
-        }
-        _ => Ok(Vec::new()),
-    }
-}
-
-fn endpoints_touch(a: &[Point3], b: &[Point3], policy: &TolerancePolicy) -> bool {
-    let tolerance = policy.computation_world.max(1e-9);
-    a.iter()
-        .any(|p| b.iter().any(|q| distance(*p, *q) <= tolerance))
 }

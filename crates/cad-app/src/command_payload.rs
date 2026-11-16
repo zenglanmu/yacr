@@ -511,6 +511,27 @@ pub enum CommandPayload {
     Hatch {
         refs: Vec<SelectionRef>,
     },
+    /// HATCH with an explicit **pattern name selected on the command line**
+    /// (`HATCH PATTERN <name>` / `HATCH PATTERNFILE <path.pat> [<name>]`, and
+    /// the `-HATCH` spelling).
+    ///
+    /// `refs` is the current selection — the same pre-selected boundary the
+    /// [`Self::Hatch`] payload carries. `request` is the `.pat` selection the
+    /// typed line made; the session already read any user file through the host,
+    /// so `request` always carries its text. Everything else still comes from the
+    /// session typed channel: the pattern **scale** (`hatchSpacing`), the
+    /// hatch-level **angle** (`hatchAngle`, degrees) and the `HPDOUBLE` flag
+    /// (`hatchDouble`), plus the island style (`hatchStyle`).
+    ///
+    /// This payload exists because `hatchPattern` is a closed **numeric** index
+    /// set and therefore cannot carry a name; the typed line is the one-shot
+    /// pattern channel. A built-in name records DXF group 76 as `Predefined`
+    /// (`1`) and a definition parsed from the user's file as `Custom` (`2`).
+    /// Full contract: [`crate::command_id::hatch`].
+    HatchPattern {
+        refs: Vec<SelectionRef>,
+        request: crate::command_id::hatch::HatchPatternRequest,
+    },
     /// HATCHPOINT: create a hatch from **one internal point** (project-specific
     /// selector).
     ///
@@ -527,25 +548,9 @@ pub enum CommandPayload {
     HatchPoint {
         seed: Point3,
     },
-    /// BOUNDARY: create one closed polyline per discovered boundary loop from
-    /// **one internal point** (project-specific selector, like HATCHPOINT).
-    ///
-    /// `seed` is the picked internal point (finite; model space only in v1). The
-    /// command discovers the smallest visible closed boundary containing it plus
-    /// every nested closed boundary, and creates one **non-associative** closed
-    /// `AcDbPolyline` per loop on the active layer, in one transaction / one undo
-    /// step. The source boundary entities are retained. The current selection is
-    /// **not** the input.
-    ///
-    /// Source-entity limits are HATCHPOINT's: only whole visible `Circle`, full
-    /// `Ellipse` and closed `Polyline` entities participate; `LINE`/`ARC` edge
-    /// chains, block-instance edges and off-plane geometry are skipped. `-BOUNDARY`
-    /// (boundary set, island detection off, region output, object type) is **NOT
-    /// IMPLEMENTED** and has no payload field. Full contract:
+    /// BOUNDARY from one internal point plus the `-BOUNDARY` options; see
     /// [`crate::command_id::boundary`].
-    BoundaryPoint {
-        seed: Point3,
-    },
+    BoundaryPoint(crate::command_id::boundary::BoundaryInput),
     /// `COPYBASE`: capture the refs into the in-process clipboard together with
     /// the picked base point (a read-only capture: no transaction, no history).
     ///

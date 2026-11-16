@@ -227,6 +227,13 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             "CHAMFER",
             "FILLET",
             "HATCHEDIT",
+            // HATCH / -HATCH typed pattern-name forms (2026-11-16).
+            "HATCH",
+            "-HATCH",
+            // ARRAY / -ARRAY / ARRAYCLASSIC typed RECT/POLAR forms (2026-11-16).
+            "ARRAY",
+            "-ARRAY",
+            "ARRAYCLASSIC",
             "MEASUREGEOM",
             "JUSTIFYTEXT",
             "TSCALE",

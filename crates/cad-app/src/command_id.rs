@@ -9,6 +9,7 @@ pub use mode::AppMode;
 
 pub mod annot_batch;
 pub mod area_object;
+pub mod array;
 pub mod block_define;
 pub mod boundary;
 pub mod break_at_point;
@@ -19,6 +20,7 @@ pub mod dimension_extra;
 pub mod draw2;
 pub mod draw_variants;
 pub mod extras;
+pub mod fs;
 pub mod gradient;
 pub mod grip_stretch;
 pub mod hatch;

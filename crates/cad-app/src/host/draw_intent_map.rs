@@ -643,7 +643,14 @@ impl HostController {
             // conversion are the command layer's, so no selection is sent.
             DrawIntent::Boundary { seed } => (
                 crate::CommandId::Boundary,
-                crate::CommandPayload::BoundaryPoint { seed },
+                crate::CommandPayload::BoundaryPoint(crate::command_id::boundary::BoundaryInput {
+                    seed,
+                    // The interactive capture prompts no `-BOUNDARY` option: the
+                    // documented default (whole drawing, island detection on) is the
+                    // interactive behaviour, exactly like AutoCAD's initial values.
+                    // Options ride the payload for programmatic callers.
+                    options: crate::command_id::boundary::BoundaryOptions::default(),
+                }),
             ),
             // DIVIDE/LENGTHEN: the selection snapshot is the whole input (the
             // default capture is zero-point); the segment count / mode+amount are

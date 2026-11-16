@@ -220,6 +220,7 @@ impl Application {
                 edge_count,
                 style,
                 &parameters,
+                None,
             ));
             outcome.diagnostics.push(Diagnostic {
                 object: Some(object),
@@ -317,7 +318,11 @@ fn selection_ref(document_id: DocumentId, entity: EntityId) -> SelectionRef {
 /// **seed plane** (all candidates are already filtered to the seed's `+Z` plane
 /// and elevation within [`plane_tolerance`]), so entity loops and edge faces share
 /// one frame.
-fn closed_entity_loop(entity: &DbEntity, plane: &HatchPlane, seed: Point3) -> Option<HatchLoop> {
+pub(crate) fn closed_entity_loop(
+    entity: &DbEntity,
+    plane: &HatchPlane,
+    seed: Point3,
+) -> Option<HatchLoop> {
     if !is_closed_candidate_geometry(&entity.geometry) {
         return None;
     }
@@ -453,7 +458,7 @@ fn face_boundary(face: &FaceLoop) -> Option<CandidateBoundary> {
 }
 
 /// Wrap a loop as a candidate, rejecting rings that cannot be boundaries.
-fn boundary_candidate(loop_: HatchLoop, edge_count: usize) -> Option<CandidateBoundary> {
+pub(crate) fn boundary_candidate(loop_: HatchLoop, edge_count: usize) -> Option<CandidateBoundary> {
     let ring = loop_.sampled_ring();
     if ring.len() < 3 {
         return None;

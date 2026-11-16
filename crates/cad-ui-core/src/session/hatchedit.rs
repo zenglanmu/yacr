@@ -134,28 +134,39 @@ fn parse_pattern_name(text: &str) -> Result<HatchEditOption, HatchEditArgumentEr
 /// path separator is a spaced path, refused by name
 /// ([`HatchEditArgumentError::PatternFilePath`]).
 fn parse_pattern_file(text: &str) -> Result<HatchEditOption, HatchEditArgumentError> {
-    let mut parts = text.split_whitespace();
-    let Some(path) = parts.next() else {
-        return Err(HatchEditArgumentError::Malformed);
-    };
-    let name = parts.next();
-    if parts.next().is_some() {
-        return Err(HatchEditArgumentError::Malformed);
-    }
+    let (path, name) = parse_pattern_file_tokens(text).ok_or(HatchEditArgumentError::Malformed)?;
     // A pattern name never contains a path separator, so a second token that does
     // is a **path with spaces**: refuse it by name instead of reading the first
     // word as a path and the rest as a name.
-    if name.is_some_and(|name| name.contains(['/', '\\'])) {
+    if name
+        .as_deref()
+        .is_some_and(|name| name.contains(['/', '\\']))
+    {
         return Err(HatchEditArgumentError::PatternFilePath);
     }
-    let name = name.map(str::to_string);
     Ok(HatchEditOption::PatternFile {
-        path: path.to_string(),
+        path,
         name,
         // Filled by the host read below; a payload that reaches the command
         // without it is refused (`hatchedit.pattern_file_not_read`).
         text: None,
     })
+}
+
+/// Split the `PATTERNFILE` remainder into `(path, name)`.
+///
+/// This is the **one** token rule `HATCHEDIT PATTERNFILE` and `HATCH
+/// PATTERNFILE` share: one path token and at most one name token. `None` means
+/// the line is malformed (no path, or a third token). The spaced-path refusal
+/// stays with each grammar, because it is a message about *that* command line.
+pub(super) fn parse_pattern_file_tokens(text: &str) -> Option<(String, Option<String>)> {
+    let mut parts = text.split_whitespace();
+    let path = parts.next()?;
+    let name = parts.next();
+    if parts.next().is_some() {
+        return None;
+    }
+    Some((path.to_string(), name.map(str::to_string)))
 }
 
 /// The word dispatch of the declared grammar (`PATTERN` is handled before it,
@@ -393,52 +404,59 @@ impl CadSession {
     ///
     /// Viewer is refused **first**, through the same `SessionState::authorize`
     /// gate the command layer uses, so a command that cannot write never performs
-    /// host I/O (and the refusal text cannot drift from the command's).
+    /// host I/O (and the refusal text cannot drift from the command's). `prefix`
+    /// is the refusal-code namespace of the caller (`hatchedit` for `HATCHEDIT`,
+    /// `hatch` for `HATCH`), so each typed line answers with its own stable code.
     fn read_pattern_file(&self, path: &str) -> Result<PatternFileText, String> {
-        if let Err(error) = self
-            .core
-            .controller
-            .borrow()
-            .session
-            .authorize(CommandId::HatchEdit)
-        {
+        self.read_pattern_file_for("hatchedit", CommandId::HatchEdit, path)
+    }
+
+    /// Read a `.pat` path through the host strategy under `prefix`, authorized as
+    /// `command` (so the Viewer refusal names the command that owns the line).
+    pub(super) fn read_pattern_file_for(
+        &self,
+        prefix: &str,
+        command: CommandId,
+        path: &str,
+    ) -> Result<PatternFileText, String> {
+        if let Err(error) = self.core.controller.borrow().session.authorize(command) {
             return Err(cad_error_text(&error));
         }
         let bytes = self
             .core
             .resources
             .read_named_file(Path::new(path))
-            .map_err(|error| pattern_file_read_reason(path, &error))?;
+            .map_err(|error| pattern_file_read_reason(prefix, path, &error))?;
         match std::str::from_utf8(&bytes) {
             // The text is borrowed from `bytes` and copied into the payload: the
             // bytes must live past this call, so the copy is explicit.
             Ok(text) => Ok(PatternFileText::new(text)),
-            Err(_) => Err(pattern_file_encoding_reason(path)),
+            Err(_) => Err(pattern_file_encoding_reason(prefix, path)),
         }
     }
 }
 
 /// The named refusal for a host read that did not deliver the pattern file.
-fn pattern_file_read_reason(path: &str, error: &NamedFileError) -> String {
+fn pattern_file_read_reason(prefix: &str, path: &str, error: &NamedFileError) -> String {
     match error {
         NamedFileError::Unavailable => format!(
-            "hatchedit.pattern_file_unavailable: unsupported-runtime: pattern-file: this host \
+            "{prefix}.pattern_file_unavailable: unsupported-runtime: pattern-file: this host \
              cannot read the user-named file '{path}' ({})",
             error.reason()
         ),
         NamedFileError::Missing(reason) => {
-            format!("hatchedit.pattern_file_missing: {path}: {reason}")
+            format!("{prefix}.pattern_file_missing: {path}: {reason}")
         }
         NamedFileError::Unreadable(reason) => {
-            format!("hatchedit.pattern_file_unreadable: {path}: {reason}")
+            format!("{prefix}.pattern_file_unreadable: {path}: {reason}")
         }
     }
 }
 
 /// The named refusal for a file that is not `.pat` text.
-fn pattern_file_encoding_reason(path: &str) -> String {
+fn pattern_file_encoding_reason(prefix: &str, path: &str) -> String {
     format!(
-        "hatchedit.pattern_file_encoding: {path} is not UTF-8 text; a `.pat` pattern library is \
+        "{prefix}.pattern_file_encoding: {path} is not UTF-8 text; a `.pat` pattern library is \
          text"
     )
 }

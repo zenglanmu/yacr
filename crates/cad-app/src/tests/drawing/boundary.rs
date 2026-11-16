@@ -1,15 +1,20 @@
 //! BOUNDARY (AutoCAD 2026) contract tests.
 //!
-//! Pins the declared internal-point v1: one picked point selects the **smallest
-//! visible closed boundary** containing it plus nested islands, and every loop
-//! becomes one closed, non-associative `AcDbPolyline` on the active layer. Only
-//! whole visible circle/full ellipse/closed polyline entities participate; the
-//! current selection is deliberately not used. On-edge/no-boundary/ambiguous picks
-//! and Viewer mode write nothing.
+//! Pins the declared internal-point v1 plus the two `-BOUNDARY` options: one picked
+//! point selects the **smallest visible closed boundary** containing it plus nested
+//! islands, and every loop becomes one closed, non-associative `AcDbPolyline` on the
+//! active layer. Only whole visible circle/full ellipse/closed polyline entities
+//! participate; the current selection is deliberately not used. `BoundaryOptions`
+//! narrows the search to a named **boundary set** and can switch **island
+//! detection** off (which must be named, never silently dropped). On-edge/
+//! no-boundary/ambiguous picks, invalid boundary sets and Viewer mode write nothing.
 
 use super::*;
 
 use super::hatch::{circle, entity_count, square, undo_depth};
+
+use crate::command_id::boundary::{BoundaryInput, BoundaryOptions};
+use crate::selection::model_ref;
 
 fn boundary_app(entities: Vec<(u128, SemanticGeometry)>) -> (Application, SessionState) {
     let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
@@ -46,12 +51,33 @@ fn run_boundary(
     session: &mut SessionState,
     seed: Point3,
 ) -> CadResult<CommandOutcome> {
+    run_boundary_with(app, session, seed, BoundaryOptions::default())
+}
+
+fn run_boundary_with(
+    app: &mut Application,
+    session: &mut SessionState,
+    seed: Point3,
+    options: BoundaryOptions,
+) -> CadResult<CommandOutcome> {
     execute(
         app,
         session,
         CommandId::Boundary,
-        CommandPayload::BoundaryPoint { seed },
+        CommandPayload::BoundaryPoint(BoundaryInput { seed, options }),
     )
+}
+
+/// The message of the one diagnostic with `code`.
+fn diagnostic_message(outcome: &CommandOutcome, code: &str) -> String {
+    let messages: Vec<&str> = outcome
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == code)
+        .map(|diagnostic| diagnostic.message.as_str())
+        .collect();
+    assert_eq!(messages.len(), 1, "expected one {code} diagnostic");
+    messages[0].to_string()
 }
 
 /// The geometry of one created object id.
@@ -64,10 +90,20 @@ fn created_geometry(app: &Application, id: ObjectId) -> &SemanticGeometry {
 }
 
 fn assert_refused(app: &mut Application, session: &mut SessionState, seed: Point3, needle: &str) {
+    assert_refused_with(app, session, seed, BoundaryOptions::default(), needle)
+}
+
+fn assert_refused_with(
+    app: &mut Application,
+    session: &mut SessionState,
+    seed: Point3,
+    options: BoundaryOptions,
+    needle: &str,
+) {
     let before_revision = revision(app);
     let before_depth = undo_depth(app);
     let before_count = entity_count(app);
-    let error = run_boundary(app, session, seed).expect_err("BOUNDARY must refuse");
+    let error = run_boundary_with(app, session, seed, options).expect_err("BOUNDARY must refuse");
     let text = format!("{error:?}");
     assert!(text.contains(needle), "expected {needle:?} in {text}");
     assert_eq!(revision(app), before_revision, "a refusal must not write");
@@ -252,5 +288,214 @@ fn boundary_tool_captures_one_internal_point() {
         DrawIntent::Boundary {
             seed: p3(1.0, 2.0, 0.0)
         }
+    );
+}
+
+#[test]
+fn island_detection_names_every_separate_loop_it_writes() {
+    // Outer 0..10 with one inner 3..7 and the seed in the annulus.
+    let (mut app, mut session) = boundary_app(vec![
+        (1, square(1, 0.0, 10.0, 0.0).1),
+        (2, square(2, 3.0, 7.0, 0.0).1),
+    ]);
+    let outcome = run_boundary(&mut app, &mut session, p3(1.0, 1.0, 0.0)).unwrap();
+    assert_eq!(outcome.objects.len(), 2, "outer loop plus one island");
+
+    let islands = diagnostic_message(&outcome, "boundary.islands");
+    assert!(islands.contains("1 nested loop(s)"), "{islands}");
+    assert!(
+        islands.contains("no hole list") && islands.contains("diagnostic only"),
+        "the hole representation is named, not implied: {islands}"
+    );
+    let created = diagnostic_message(&outcome, "boundary.created");
+    assert!(created.contains("island detection ON"), "{created}");
+    assert!(
+        created.contains("every visible closed entity"),
+        "the whole drawing is the default boundary set: {created}"
+    );
+    assert_eq!(undo_depth(&app), 1, "one transaction / one undo step");
+
+    // The single undo removes both loops and keeps both sources.
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .unwrap();
+    assert_eq!(entity_count(&app), 2);
+}
+
+#[test]
+fn two_inner_islands_create_three_polylines_in_one_undo_step() {
+    let (mut app, mut session) = boundary_app(vec![
+        (1, square(1, 0.0, 20.0, 0.0).1),
+        (2, square(2, 2.0, 4.0, 0.0).1),
+        (3, square(3, 12.0, 18.0, 0.0).1),
+    ]);
+    let outcome = run_boundary(&mut app, &mut session, p3(1.0, 1.0, 0.0)).unwrap();
+    assert_eq!(
+        outcome.objects.len(),
+        3,
+        "outer loop plus both inner islands"
+    );
+    let islands = diagnostic_message(&outcome, "boundary.islands");
+    assert!(islands.contains("2 nested loop(s)"), "{islands}");
+    assert_eq!(entity_count(&app), 6, "every source is retained");
+    assert_eq!(undo_depth(&app), 1, "one transaction / one undo step");
+
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .unwrap();
+    assert_eq!(entity_count(&app), 3, "one undo removes all three loops");
+}
+
+#[test]
+fn island_detection_off_writes_only_the_outer_loop_and_names_the_skipped_islands() {
+    let (mut app, mut session) = boundary_app(vec![
+        (1, square(1, 0.0, 10.0, 0.0).1),
+        (2, square(2, 3.0, 7.0, 0.0).1),
+    ]);
+    let options = BoundaryOptions {
+        boundary_set: None,
+        island_detection: false,
+    };
+    let outcome = run_boundary_with(&mut app, &mut session, p3(1.0, 1.0, 0.0), options).unwrap();
+    assert_eq!(outcome.objects.len(), 1, "only the outer loop is written");
+    let SemanticGeometry::Polyline { points, .. } = created_geometry(&app, outcome.objects[0])
+    else {
+        panic!("expected a polyline");
+    };
+    assert!(
+        points
+            .iter()
+            .all(|point| point.x <= 10.0 && point.y <= 10.0),
+        "the outer ring is the 0..10 square: {points:?}"
+    );
+    let skipped = diagnostic_message(&outcome, "boundary.island_detection_off");
+    assert!(skipped.contains("1 nested loop(s)"), "{skipped}");
+    assert!(
+        skipped.contains("NOT created") && skipped.contains("no hole is ever implied"),
+        "the omitted island is named, never silently dropped: {skipped}"
+    );
+    assert!(
+        outcome
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.code != "boundary.islands"),
+        "island detection off must not claim islands were written"
+    );
+    let created = diagnostic_message(&outcome, "boundary.created");
+    assert!(created.contains("island detection OFF"), "{created}");
+    assert_eq!(undo_depth(&app), 1);
+}
+
+#[test]
+fn boundary_set_narrows_the_search_and_replaces_the_whole_drawing_default() {
+    // Outer 0..10 (id 1) with an inner 3..7 (id 2); the seed sits in the annulus.
+    let (mut app, mut session) = boundary_app(vec![
+        (1, square(1, 0.0, 10.0, 0.0).1),
+        (2, square(2, 3.0, 7.0, 0.0).1),
+    ]);
+    // The default boundary set is the whole drawing: outer loop + island.
+    let outcome = run_boundary(&mut app, &mut session, p3(1.0, 1.0, 0.0)).unwrap();
+    assert_eq!(outcome.objects.len(), 2);
+
+    // Narrowing the set to the outer entity alone drops the island: the island is
+    // outside the set, not silently ignored geometry inside it.
+    let outer_only = BoundaryOptions {
+        boundary_set: Some(vec![model_ref(DocumentId(1), EntityId(1))]),
+        island_detection: true,
+    };
+    let outcome = run_boundary_with(
+        &mut app,
+        &mut session,
+        p3(1.0, 1.0, 0.0),
+        outer_only.clone(),
+    )
+    .unwrap();
+    assert_eq!(outcome.objects.len(), 1, "the set holds one candidate");
+    let created = diagnostic_message(&outcome, "boundary.created");
+    assert!(created.contains("named 1-entity boundary set"), "{created}");
+
+    // A set that does not contain the seed cannot silently widen: it is the
+    // shared no-boundary refusal.
+    let inner_only = BoundaryOptions {
+        boundary_set: Some(vec![model_ref(DocumentId(1), EntityId(2))]),
+        island_detection: true,
+    };
+    assert_refused_with(
+        &mut app,
+        &mut session,
+        p3(1.0, 1.0, 0.0),
+        inner_only,
+        "boundary.boundary_not_found",
+    );
+}
+
+#[test]
+fn an_invalid_boundary_set_is_a_named_refusal_that_writes_nothing() {
+    let (mut app, mut session) = boundary_app(vec![
+        (1, square(1, 0.0, 10.0, 0.0).1),
+        (
+            2,
+            SemanticGeometry::Line {
+                start: p3(0.0, 0.0, 0.0),
+                end: p3(5.0, 5.0, 0.0),
+            },
+        ),
+    ]);
+    // An empty set is refused, never widened back to the whole drawing.
+    assert_refused_with(
+        &mut app,
+        &mut session,
+        p3(1.0, 1.0, 0.0),
+        BoundaryOptions {
+            boundary_set: Some(Vec::new()),
+            island_detection: true,
+        },
+        "boundary.set_empty",
+    );
+    // An open LINE is not a closed candidate.
+    assert_refused_with(
+        &mut app,
+        &mut session,
+        p3(1.0, 1.0, 0.0),
+        BoundaryOptions {
+            boundary_set: Some(vec![model_ref(DocumentId(1), EntityId(2))]),
+            island_detection: true,
+        },
+        "boundary.set_not_candidate",
+    );
+    // A ref that is not in the drawing is refused by name too.
+    assert_refused_with(
+        &mut app,
+        &mut session,
+        p3(1.0, 1.0, 0.0),
+        BoundaryOptions {
+            boundary_set: Some(vec![model_ref(DocumentId(1), EntityId(99))]),
+            island_detection: true,
+        },
+        "boundary.set_not_candidate",
+    );
+    // A block-instance member / sub-element ref is not directly addressable.
+    assert_refused_with(
+        &mut app,
+        &mut session,
+        p3(1.0, 1.0, 0.0),
+        BoundaryOptions {
+            boundary_set: Some(vec![SelectionRef {
+                document: DocumentId(1),
+                entity: EntityId(1),
+                instance: InstancePath(vec![EntityId(1)]),
+                sub_element: None,
+            }]),
+            island_detection: true,
+        },
+        "boundary.set_not_candidate",
     );
 }

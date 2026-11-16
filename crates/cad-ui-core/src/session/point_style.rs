@@ -91,6 +91,20 @@ impl CadSession {
             // `HATCHEDIT <option>` (2026-11-07): the one selected hatch is the
             // input; the typed option travels in the payload.
             HATCHEDIT_SELECTOR => self.hatchedit_argument(argument, text),
+            // `HATCH PATTERN|PATTERNFILE …` / `-HATCH …`: the selection is the
+            // boundary and the typed pattern name travels in the payload (the
+            // `hatchPattern` channel is a closed numeric index).
+            super::HATCH_SELECTOR | super::DASH_HATCH_SELECTOR => {
+                self.hatch_argument(selector, argument, text)
+            }
+            // `ARRAY RECT|POLAR …` / `-ARRAY …` / `ARRAYCLASSIC …`: the typed
+            // numbers write the session array channel and the ordinary
+            // `ArrayRect`/`ArrayPolar` payload runs the existing planner.
+            super::commands::ARRAY_SELECTOR
+            | super::commands::DASH_ARRAY_SELECTOR
+            | super::commands::ARRAYCLASSIC_SELECTOR => {
+                self.array_argument(selector, argument, text)
+            }
             // `MEASUREGEOM <option>` routes to the existing measurement tools
             // (`DISTANCE`/`ANGLE`/`AREA`/`POLYLINE`) or the report-only `RADIUS`
             // (and the explicit `VOLUME` refusal). It is not a second engine.

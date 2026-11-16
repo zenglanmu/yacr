@@ -15,12 +15,13 @@
 //! `acad.pat`/`acadiso.pat` file goes through the same [`PatternLibrary::parse`]
 //! and [`PatternLibrary::resolve`].
 //!
-//! **Two entrances, one loader**: the HATCH tool parameter `hatchPattern` is a
-//! closed **1-based index** over the implemented (built-in) library, `HATCHEDIT
-//! PATTERN <name>` selects a **built-in** name from it, and `HATCHEDIT
-//! PATTERNFILE <path.pat> [<name>]` applies a user `.pat` entry parsed from text
-//! the **host** read (see [`super::hatch_edit_pattern_file`]). No user pattern is
-//! ever silently accepted, approximated or clamped onto a built-in: an
+//! **One loader, every entrance**: the HATCH tool parameter `hatchPattern` is a
+//! closed **1-based index** over the implemented (built-in) library, `HATCH
+//! PATTERN <name>` / `HATCHEDIT PATTERN <name>` select a built-in name from it, and
+//! `HATCH PATTERNFILE <path.pat> [<name>]` / `HATCHEDIT PATTERNFILE …` apply a user
+//! `.pat` entry parsed from text the **host** read (see
+//! [`super::hatch_edit_pattern_file`] for the shared resolution). No user pattern
+//! is ever silently accepted, approximated or clamped onto a built-in: an
 //! unparsable file, an ambiguous file and a name in neither source are named
 //! refusals.
 //!

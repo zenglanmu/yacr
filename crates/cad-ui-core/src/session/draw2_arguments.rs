@@ -5,20 +5,25 @@
 //! same `HostCore::command` funnel every other typed form uses. An argument
 //! outside a selector's grammar is refused before IPC with a stable reason.
 
-use cad_app::{CommandId, CommandPayload, ExtendedCommandId, TablePayload};
+use cad_app::interaction::InteractionRequest;
+use cad_app::{
+    CommandId, CommandPayload, ExtendedCommandId, TablePayload, ToolParameter, ToolValue,
+};
 
 use super::commands::{
-    invalid_arraypath_argument_reason, invalid_matchcell_argument_reason,
-    invalid_tablestyle_argument_reason, parse_arraypath_argument, parse_clip_argument,
-    parse_donut_argument, parse_draworder_argument, parse_helix_argument,
-    parse_imageadjust_argument, parse_imageattach_argument, parse_imageclip_argument,
-    parse_matchcell_argument, parse_mline_argument, parse_mlstyle_argument, parse_mpedit_argument,
-    parse_solid_argument, parse_table_create_argument, parse_tabledit_argument,
-    parse_tabledit_option_argument, parse_tablestyle_argument, parse_trex_argument,
-    parse_xclip_argument, ARRAYPATH_SELECTOR, CLIP_SELECTOR, DASH_IMAGEADJUST_SELECTOR,
-    DASH_TABLE_SELECTOR, DONUT_SELECTOR, HELIX_SELECTOR, IMAGEATTACH_SELECTOR, IMAGECLIP_SELECTOR,
-    MATCHCELL_SELECTOR, MLINE_SELECTOR, MLSTYLE_SELECTOR, MPEDIT_SELECTOR, SOLID_SELECTOR,
-    TABLEDIT_SELECTOR, TABLESTYLE_SELECTOR, TABLE_SELECTOR, TREX_SELECTOR, XCLIP_SELECTOR,
+    array_argument_refusal, array_payload, invalid_arraypath_argument_reason,
+    invalid_matchcell_argument_reason, invalid_tablestyle_argument_reason, parse_array_argument,
+    parse_arraypath_argument, parse_clip_argument, parse_donut_argument, parse_draworder_argument,
+    parse_helix_argument, parse_imageadjust_argument, parse_imageattach_argument,
+    parse_imageclip_argument, parse_matchcell_argument, parse_mline_argument,
+    parse_mlstyle_argument, parse_mpedit_argument, parse_solid_argument,
+    parse_table_create_argument, parse_tabledit_argument, parse_tabledit_option_argument,
+    parse_tablestyle_argument, parse_trex_argument, parse_xclip_argument, ArrayArgument,
+    ARRAYCLASSIC_SELECTOR, ARRAYPATH_SELECTOR, ARRAY_SELECTOR, CLIP_SELECTOR, DASH_ARRAY_SELECTOR,
+    DASH_IMAGEADJUST_SELECTOR, DASH_TABLE_SELECTOR, DONUT_SELECTOR, HELIX_SELECTOR,
+    IMAGEATTACH_SELECTOR, IMAGECLIP_SELECTOR, MATCHCELL_SELECTOR, MLINE_SELECTOR, MLSTYLE_SELECTOR,
+    MPEDIT_SELECTOR, SOLID_SELECTOR, TABLEDIT_SELECTOR, TABLESTYLE_SELECTOR, TABLE_SELECTOR,
+    TREX_SELECTOR, XCLIP_SELECTOR,
 };
 use super::diagnostics::cad_error_text;
 use super::CadSession;
@@ -30,6 +35,22 @@ pub fn invalid_draw2_argument_reason(selector: &str, text: &str) -> String {
          <argument> (see the command contract); nothing was changed",
         text.trim()
     )
+}
+
+/// The `CommandId` one typed `ARRAY` family line dispatches.
+///
+/// `ARRAY`, `-ARRAY` and `ARRAYCLASSIC` are three spellings of the same router
+/// (`array_router`), so the selector the user typed is the selector that runs and
+/// the payload is the ordinary `ArrayRect`/`ArrayPolar` one.
+fn array_command_id(selector: &str) -> CommandId {
+    if selector == ARRAY_SELECTOR {
+        CommandId::Extended(ExtendedCommandId::Array)
+    } else if selector == DASH_ARRAY_SELECTOR {
+        CommandId::Extended(ExtendedCommandId::DashArray)
+    } else {
+        debug_assert_eq!(selector, ARRAYCLASSIC_SELECTOR);
+        CommandId::Extended(ExtendedCommandId::ArrayClassic)
+    }
 }
 
 /// The stable refusal for an `IMAGEATTACH` / `IMAGECLIP` / `IMAGEADJUST`
@@ -123,6 +144,83 @@ impl CadSession {
             .core
             .command(id, CommandPayload::Draw2(Box::new(payload)))
         {
+            Ok(()) => {
+                *self.error.borrow_mut() = None;
+                Ok(())
+            }
+            Err(error) => {
+                let text = cad_error_text(&error);
+                *self.error.borrow_mut() = Some(text.clone());
+                Err(text)
+            }
+        }
+    }
+
+    /// Apply one typed `ARRAY RECT …` / `ARRAY POLAR …` line (also the `-ARRAY`
+    /// and `ARRAYCLASSIC` spellings, which route to the same planner).
+    ///
+    /// The numbers are the **session tool-parameter channel** the planners already
+    /// read (`arrayRows`/`arrayColumns`/`arrayRowSpacing`/`arrayColumnSpacing` and
+    /// `arrayItems`/`arrayFillAngle`), so this writes that one channel and then
+    /// dispatches the ordinary `ArrayRect`/`ArrayPolar` payload — no second value
+    /// store, and the copies/placement/cap/undo step stay the planner's. Every
+    /// grammar refusal (`array.count`, `array.spacing`, `array.angle`,
+    /// `array.cap`) happens **before** the channel is touched, and a Viewer session
+    /// is refused by the channel's own authorization (nothing dispatched).
+    pub(super) fn array_argument(
+        &self,
+        selector: &'static str,
+        argument: &str,
+        text: &str,
+    ) -> Result<(), String> {
+        let parsed = match parse_array_argument(argument) {
+            Ok(parsed) => parsed,
+            Err(error) => {
+                return self.refuse_argument(array_argument_refusal(selector, error, text))
+            }
+        };
+        let refs = {
+            let controller = self.core.controller.borrow();
+            controller.session.selection.refs().to_vec()
+        };
+        if refs.is_empty() {
+            return self.refuse_argument(format!(
+                "array.selection: {selector} needs at least one selected entity (the source \
+                 object); nothing was written"
+            ));
+        }
+        // One retained channel, one authority: the same values the ARRAYRECT /
+        // ARRAYPOLAR tools and their option palette use.
+        let sets: Vec<InteractionRequest> = match &parsed {
+            ArrayArgument::Rect(rect) => [
+                (ToolParameter::ArrayRows, rect.rows as f64),
+                (ToolParameter::ArrayColumns, rect.columns as f64),
+                (ToolParameter::ArrayRowSpacing, rect.row_spacing),
+                (ToolParameter::ArrayColumnSpacing, rect.column_spacing),
+            ]
+            .into_iter()
+            .map(|(parameter, value)| InteractionRequest::SetToolParameter {
+                parameter,
+                value: ToolValue::Number(value),
+            })
+            .collect(),
+            ArrayArgument::Polar(polar) => [
+                (ToolParameter::ArrayItems, polar.items as f64),
+                (ToolParameter::ArrayFillAngle, polar.fill_angle),
+            ]
+            .into_iter()
+            .map(|(parameter, value)| InteractionRequest::SetToolParameter {
+                parameter,
+                value: ToolValue::Number(value),
+            })
+            .collect(),
+        };
+        // A refused set (Viewer mode, or a value the channel rejects) returns the
+        // real refusal and dispatches no command.
+        self.submit_interactions(sets)?;
+        let payload = array_payload(parsed, refs);
+        self.core.record_command(selector);
+        match self.core.command(array_command_id(selector), payload) {
             Ok(()) => {
                 *self.error.borrow_mut() = None;
                 Ok(())

@@ -45,6 +45,19 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     CHAMFER_SELECTOR,
     FILLET_SELECTOR,
     HATCHEDIT_SELECTOR,
+    // `HATCH` / `-HATCH`'s typed **pattern-name** forms (`PATTERN <name>`,
+    // `PATTERNFILE <path.pat> [<name>]`). The selection stays the boundary; the
+    // name rides `CommandPayload::HatchPattern`, because the `hatchPattern`
+    // channel is a closed 1-based index and cannot carry a name.
+    crate::session::HATCH_SELECTOR,
+    crate::session::DASH_HATCH_SELECTOR,
+    // `ARRAY` / `-ARRAY` / `ARRAYCLASSIC`'s typed `RECT`/`POLAR` forms: the
+    // counts/spacings are the session channel the same planners already read, so
+    // the typed line writes that one channel and dispatches the ordinary
+    // `ArrayRect`/`ArrayPolar` payload.
+    ARRAY_SELECTOR,
+    DASH_ARRAY_SELECTOR,
+    ARRAYCLASSIC_SELECTOR,
     MEASUREGEOM_SELECTOR,
     JUSTIFYTEXT_SELECTOR,
     TSCALE_SELECTOR,

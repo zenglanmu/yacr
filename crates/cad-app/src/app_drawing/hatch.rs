@@ -63,10 +63,20 @@
 //! perpendicular second family; the definition rows come from the library, so
 //! these are **our transcribed values, not vendor-verified**. An index outside
 //! the library is refused **by name** — never clamped onto a neighbouring
-//! pattern. A user `acad.pat`/`acadiso.pat` file is parsed and resolvable by
-//! name, but this build has no pattern-name/file tool parameter (`hatchPattern`
-//! is a closed 1-based index), so a user entry cannot yet be selected from the
-//! command line (declared; nothing is approximated).
+//! pattern.
+//!
+//! Because `hatchPattern` is a closed **numeric** index it cannot carry a name, so
+//! the typed command line has a one-shot **pattern-name** channel:
+//! `HATCH PATTERN <name>` (a built-in library name) and `HATCH PATTERNFILE
+//! <path.pat> [<name>]` (a user file the **host** read), both carried on
+//! [`CommandPayload::HatchPattern`](crate::CommandPayload::HatchPattern) and
+//! resolved with the very same functions `HATCHEDIT` uses. The session fill
+//! **type** is not consulted on that path (the command line named the pattern);
+//! the scale, hatch angle, `HPDOUBLE` flag and style stay the session channel, and
+//! the recorded DXF type follows the source (`1` built-in, `2` user file). A
+//! typed `HATCH SOLID` / `HATCH GRADIENT` is refused by name
+//! (`hatch.fill_not_pattern`) in the session: this form selects patterns, the fill
+//! kind is the channel and a gradient has its own `GRADIENT` command.
 //!
 //! Pattern type code `3` creates a two-colour **gradient** fill from its own
 //! channel (`hatchGradientKind` Linear/Spherical, `hatchGradientAngle` in
@@ -88,10 +98,13 @@
 use super::*;
 
 use super::hatch_boundary::{boundary_loops, boundary_shapes, resolve_plane, stitch_boundary};
+use super::hatch_edit_pattern_file::{resolve_file_pattern, PatternChoice};
+use super::hatch_edit_pattern_name::resolve_builtin_pattern;
 use super::hatch_parameters::{
-    gradient_parameters, hatch_creation_refusal, hatch_diagnostic, hatch_parameters, hatch_style,
-    HatchFillMode,
+    gradient_parameters, hatch_creation_refusal, hatch_diagnostic, hatch_parameters,
+    hatch_pattern_refusal, hatch_style, pattern_parameters, HatchFillMode,
 };
+use crate::command_id::hatch::HatchPatternRequest;
 
 /// Relabel a shared HATCH refusal for the GRADIENT command: the boundary rules
 /// are the same code, so only the command name in the message changes. HATCH
@@ -141,17 +154,45 @@ impl Application {
     ///   gradient ACI index that is non-integral, outside `0..=255` or the ACI
     ///   `0` ByBlock placeholder — and Viewer mode (the command layer's mode
     ///   check).
+    ///
+    /// A [`CommandPayload::HatchPattern`](crate::CommandPayload::HatchPattern)
+    /// payload adds the typed pattern-name refusals, all resolved before the
+    /// document is touched: `hatch.needs_pattern_name`, `hatch.unknown_pattern`
+    /// (naming the searched sources), `hatch.pattern_file_invalid` /
+    /// `hatch.pattern_file_ambiguous` (the `.pat` parser's own codes) and the
+    /// session-side `hatch.pattern_file_*` read refusals.
     pub(crate) fn create_hatch(
         &mut self,
         session: &SessionState,
         command: &Command,
     ) -> CadResult<CommandOutcome> {
-        let CommandPayload::Hatch { refs } = &command.payload else {
-            return Err(CadError::InvalidInput(
-                "Hatch needs a Hatch { refs } payload".into(),
-            ));
-        };
-        self.create_hatch_from_selection(session, command, refs, HatchFillMode::Session)
+        match &command.payload {
+            // The tool/`-HATCH` shape: the fill comes from the session channel.
+            CommandPayload::Hatch { refs } => self.create_hatch_from_selection(
+                session,
+                command,
+                refs,
+                HatchFillMode::Session,
+                None,
+            ),
+            // The typed command line: `PATTERN <name>` / `PATTERNFILE <path>
+            // [<name>]` selects the pattern by name, with the resolution shared
+            // with `HATCHEDIT`. Resolved **before** the document is touched, so
+            // an unknown name / bad file writes nothing and opens no transaction.
+            CommandPayload::HatchPattern { refs, request } => {
+                let choice = resolve_typed_pattern(request)?;
+                self.create_hatch_from_selection(
+                    session,
+                    command,
+                    refs,
+                    HatchFillMode::Session,
+                    Some(choice),
+                )
+            }
+            _ => Err(CadError::InvalidInput(
+                "Hatch needs a Hatch { refs } or HatchPattern { refs, request } payload".into(),
+            )),
+        }
     }
 
     /// GRADIENT: fill the **currently selected** closed boundary entities with the
@@ -190,20 +231,43 @@ impl Application {
                     .into(),
             ));
         }
-        self.create_hatch_from_selection(session, command, refs, HatchFillMode::Gradient)
+        self.create_hatch_from_selection(session, command, refs, HatchFillMode::Gradient, None)
     }
 
-    /// The one boundary-to-hatch path shared by HATCH and GRADIENT.
+    /// The one boundary-to-hatch path shared by HATCH, `HATCH PATTERN[FILE]` and
+    /// GRADIENT.
+    ///
+    /// `mode` picks the fill authority (session channel or forced gradient) and
+    /// `pattern` is the **command-line** pattern selection: `None` keeps the
+    /// session fill channel (the tool path), `Some(choice)` writes the named
+    /// `.pat` definition without consulting the session fill *type*.
     fn create_hatch_from_selection(
         &mut self,
         session: &SessionState,
         command: &Command,
         refs: &[SelectionRef],
         mode: HatchFillMode,
+        pattern: Option<PatternChoice>,
     ) -> CadResult<CommandOutcome> {
         let gradient = mode == HatchFillMode::Gradient;
+        // An empty boundary is refused by name before any parameter or document
+        // work: a payload caller gets the same `hatch.selection` code the typed
+        // line answers with (the `HATCH` spelling; `gradient.selection` for the
+        // GRADIENT command is pre-checked by its own entry point).
+        if refs.is_empty() {
+            return Err(mode.relabel(CadError::InvalidInput(
+                "hatch.selection: HATCH needs at least one selected closed boundary entity; \
+                 nothing was written"
+                    .into(),
+            )));
+        }
         let parameters = if gradient {
             gradient_parameters(session)?
+        } else if pattern.is_some() {
+            // The typed pattern selection needs the pattern scale/angle/double
+            // and the style only: the session fill *type* is not read, so a stale
+            // solid/gradient selector can neither refuse nor change it.
+            pattern_parameters(session)?
         } else {
             hatch_parameters(session)?
         };
@@ -253,7 +317,22 @@ impl Application {
         };
         let loop_count = loops.len();
         let style = hatch_style(parameters.style)?;
-        let (fill, pattern_type) = parameters.fill()?;
+        let (fill, pattern_type) = match &pattern {
+            // The typed pattern name: the library entry supplies the name and the
+            // definition rows, the session channel the scale/angle/double. The
+            // recorded DXF type follows the source (built-in `1`, user file `2`).
+            Some(choice) => {
+                parameters.scale_and_angle()?;
+                let definition = choice.definition();
+                let built = definition.to_hatch_pattern(
+                    parameters.spacing,
+                    parameters.angle_degrees,
+                    parameters.double,
+                );
+                (HatchFill::Pattern(built), choice.pattern_type())
+            }
+            None => parameters.fill()?,
+        };
 
         // The unique creation-path constructor: every boundary defect (A.3) is a
         // whole-command refusal here, before a transaction exists.
@@ -278,8 +357,29 @@ impl Application {
                 stitched_edges,
                 style,
                 &parameters,
+                pattern.as_ref(),
             ));
         }
         Ok(outcome)
+    }
+}
+
+/// Resolve the typed `PATTERN <name>` / `PATTERNFILE <path> [<name>]` selection.
+///
+/// This is the **same** resolution `HATCHEDIT` uses — the built-in library by
+/// name, or the user file first and the built-in table second — so creation and
+/// editing cannot drift into two pattern readers. The refusal codes are
+/// re-labelled from `hatchedit.*` to `hatch.*` (the command that owns the line),
+/// with the message's command name following, so a typed `HATCH` line always
+/// answers with its own stable code and still names the sources it searched.
+fn resolve_typed_pattern(request: &HatchPatternRequest) -> CadResult<PatternChoice> {
+    match request {
+        HatchPatternRequest::Named(name) => resolve_builtin_pattern(name)
+            .map(PatternChoice::Builtin)
+            .map_err(hatch_pattern_refusal),
+        HatchPatternRequest::File { path, name, text } => {
+            resolve_file_pattern(path, name.as_deref(), Some(text.as_str()))
+                .map_err(hatch_pattern_refusal)
+        }
     }
 }

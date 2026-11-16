@@ -53,10 +53,73 @@
 //! (`type_key`/`class_name` = `AcDbHatch`) is inserted through the shared create
 //! funnel in one transaction / one undo step on the active layer.
 //!
+//! ## Typed pattern name (`HATCH PATTERN` / `HATCH PATTERNFILE`)
+//!
+//! The `hatchPattern` channel above is a **closed numeric** set, so it cannot
+//! carry a name. The command line therefore has a second, **one-shot** spelling
+//! that travels on [`crate::CommandPayload::HatchPattern`] instead of the
+//! channel:
+//!
+//! * `HATCH PATTERN <name>` — a **built-in** `.pat` library name (the same table
+//!   `HATCHEDIT PATTERN` resolves);
+//! * `HATCH PATTERNFILE <path.pat> [<name>]` — a **user** pattern file. The host
+//!   read the text (this crate never opens a file), and the resolution is
+//!   exactly `HATCHEDIT PATTERNFILE`'s: the file is searched first, the built-in
+//!   library second, and without a name the file must hold exactly one pattern.
+//!
+//! Creation keeps the rest of the session channel: spacing is the pattern scale
+//! (`HPSCALE`), `hatchAngle` the hatch-level rotation and `hatchDouble` the
+//! perpendicular family, so a built-in name and the same name via the index
+//! produce the same rows. The recorded DXF pattern type follows the source: a
+//! built-in definition is `Predefined` (`76 = 1`), a definition that came from
+//! the user's file is `Custom` (`76 = 2`).
+//!
+//! Named refusals (nothing written, no transaction):
+//! `hatch.needs_pattern_name` (a bare `PATTERN`), `hatch.unknown_pattern`
+//! (naming whether the file and/or the built-in table was searched),
+//! `hatch.pattern_file_invalid` / `hatch.pattern_file_ambiguous` (the parser's
+//! own `.pat` codes), the session-side `hatch.pattern_file_missing` /
+//! `_unreadable` / `_encoding` / `_unavailable` (the host could not deliver the
+//! file) and `hatch.fill_not_pattern` (a typed `HATCH SOLID` / `HATCH GRADIENT`
+//! request: the typed form carries a pattern name only, and a gradient has its
+//! own `GRADIENT` command). `-HATCH` accepts the same two forms.
+//!
 //! ## NOT IMPLEMENTED
 //!
 //! Associativity, boundary-from-an-internal-point (that is
 //! [`crate::CommandId::HatchPoint`]), self-intersecting boundary loops (refused,
-//! never trimmed or repaired), custom (`76=2`) pattern names and `.pat` loading,
-//! a pattern picker dialog, gradient creation, a live preview and a per-span dash
-//! phase reset. Work-only.
+//! never trimmed or repaired), a pattern picker dialog, gradient creation from
+//! `HATCH` (that is [`crate::CommandId::Gradient`]), a live preview and a
+//! per-span dash phase reset. Work-only. Associativity is the one remaining
+//! **model** gap: a hatch stores its derived loops only, with no
+//! boundary-handle/reactor record to rebuild from.
+
+use crate::PatternFileText;
+
+/// The pattern a typed `HATCH PATTERN` / `HATCH PATTERNFILE` line selected.
+///
+/// It is the **creation-time** counterpart of
+/// [`crate::HatchEditOption::Pattern`]/`PatternFile`: the same `.pat` library,
+/// the same by-name resolution and the same source rules, carried on
+/// [`crate::CommandPayload::HatchPattern`] because the closed numeric
+/// `hatchPattern` channel has no room for a name.
+///
+/// The file variant carries the text the **host** read (this crate never touches
+/// the filesystem), so a request that reaches the command always has content: a
+/// read the host could not perform is refused in the session, before any
+/// command is dispatched.
+#[derive(Debug, Clone, PartialEq)]
+pub enum HatchPatternRequest {
+    /// A built-in `.pat` library name (matched ASCII case-insensitively).
+    Named(String),
+    /// A user `.pat` file, searched first; `name` selects one entry and its
+    /// absence requires the file to hold exactly one pattern.
+    File {
+        /// The path as typed (echoed in diagnostics/refusals).
+        path: String,
+        /// The optional entry name inside the file.
+        name: Option<String>,
+        /// The file content the host read.
+        text: PatternFileText,
+    },
+}

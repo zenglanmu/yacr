@@ -227,6 +227,14 @@ pub struct DraftingExtras {
     /// outline-only (`false`). Consumed by the display build
     /// (`render_scene::DisplaySettings::fill`).
     fill: bool,
+    /// `FSMODE`: the `FS` (Express "select touching") chain mode.
+    ///
+    /// `false` is AutoCAD's initial value and the pre-`FSMODE` behaviour: `FS`
+    /// adds only the entities that touch the seed **directly**. `true` chains
+    /// through successive **tangent** contacts (see
+    /// `crates/cad-app/src/app_drawing/fs_chain.rs`). Session state only — no
+    /// database write, revision bump, history entry or persisted preference.
+    fs_mode: bool,
     tframes: bool,
     regenauto: bool,
     isodraft: bool,
@@ -285,6 +293,7 @@ impl Default for DraftingExtras {
         Self {
             qtext: false,
             fill: true,
+            fs_mode: false,
             tframes: false,
             regenauto: false,
             isodraft: false,
@@ -594,6 +603,24 @@ impl DraftingExtras {
     pub fn toggle_ucsicon(&mut self) -> bool {
         self.ucsicon = !self.ucsicon;
         self.ucsicon
+    }
+
+    /// The session `FSMODE` chain mode of `FS` (default OFF).
+    ///
+    /// OFF keeps the single-contact pass; ON chains through successive tangent
+    /// contacts and refuses by name (see `app_drawing::fs_chain`). Session state
+    /// only: no drawing write, revision, history entry or undo step.
+    pub fn fs_mode(&self) -> bool {
+        self.fs_mode
+    }
+
+    /// Store the session `FSMODE` chain mode.
+    ///
+    /// The typed `FSMODE ON|OFF` command line is not wired in this build (the
+    /// argument grammar lives in `cad-ui-core`), so this setter is the single
+    /// storage point an `FSMODE` selector must call; `FS` itself only reads it.
+    pub fn set_fs_mode(&mut self, value: bool) {
+        self.fs_mode = value;
     }
 
     /// The session `LWEIGHT` lineweight-display token (default ON).

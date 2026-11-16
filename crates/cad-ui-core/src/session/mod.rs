@@ -37,6 +37,7 @@ mod dim_arguments;
 mod draw2_arguments;
 pub mod events;
 mod fonts;
+mod hatch_arguments;
 mod hatchedit;
 mod header_arguments;
 mod import_progress;
@@ -171,6 +172,12 @@ pub use self::events::{
     CanvasJson, EventBus, EventSink, StatusFrame, EVENT_RING_CAPACITY,
 };
 pub use self::fonts::{CadFont, CadFonts};
+pub use self::hatch_arguments::{
+    hatch_argument_refusal, hatch_fill_not_pattern_reason, hatch_pattern_file_path_reason,
+    hatch_pattern_payload, hatch_unknown_pattern_reason, invalid_hatch_argument_reason,
+    needs_hatch_pattern_name_reason, parse_hatch_argument, HatchArgumentError,
+    HatchPatternArgument, DASH_HATCH_SELECTOR, HATCH_SELECTOR,
+};
 pub use self::hatchedit::{
     invalid_hatchedit_argument_reason, needs_pattern_name_reason, parse_hatchedit_argument,
     unknown_pattern_reason, HatchEditArgumentError,
