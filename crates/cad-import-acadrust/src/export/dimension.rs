@@ -98,6 +98,23 @@ pub(super) fn emit_dimension(
     // than to a stale table entry.
     doc.dim_styles
         .add_or_replace(dimstyle_entry(style_name, dimension.style(), ctx.database));
+    // DXF has exactly one DIMSTYLE record per name. When the table row has been
+    // edited after this dimension was created (the ADR 0017 non-retroactive
+    // rule), the record above is the entity's baked snapshot and the row's
+    // newer display-driving values cannot also be written; state that instead
+    // of losing it silently. B.2(b) values below do come from the row.
+    let superseded_table_row = ctx
+        .database
+        .dim_style_by_name(style_name)
+        .filter(|row| {
+            !row.resolved(
+                dimension.style().text_style_name.clone(),
+                dimension.style().text_style,
+                dimension.style().text_font.clone(),
+            )
+            .eq(dimension.style())
+        })
+        .map(|row| row.name.trim().to_string());
     let mut style_reason = format!("DIMSTYLE record '{style_name}' written so group 3 resolves");
     if !text_reasons.is_empty() {
         style_reason.push_str(&format!(" ({})", text_reasons.join("; ")));
@@ -206,6 +223,19 @@ pub(super) fn emit_dimension(
     conversion.extend(reasons);
     if let Some(reason) = style_reason {
         conversion.push(reason);
+    }
+    if let Some(table_name) = superseded_table_row {
+        acc.notes.push(super::report::ExportDiagnostic {
+            object,
+            code: "export.dimstyle_table_superseded".into(),
+            message: format!(
+                "dimension style '{table_name}' resolves to values this dimension did not use: \
+                 the DIMSTYLE record written for it is the entity's baked snapshot (style edits \
+                 are not retroactive, ADR 0017), so the row's newer display-driving values are \
+                 not in the file; its snapshot-only variables (DIMJUST/DIMTIH/DIMTOH/DIMATFIT/\
+                 DIMTIX/DIMTOFL/DIMCLR*/DIMDLE/DIMDLI) are still written from the row"
+            ),
+        });
     }
     acc.record(object, "dimension", MappingOutcome::Converted(conversion));
     Ok(())

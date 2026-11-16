@@ -17,9 +17,10 @@
 //! in one revision or a reader could observe a dangling name between the two
 //! halves. The contract, in order:
 //!
-//! 1. **shape**: no duplicate id inside a batch, the key matches the row id, a
-//!    patch has at least one side, and no patch is a no-op (`before == after`
-//!    is refused: a caller that stages nothing must not bump the revision);
+//! 1. **shape**: no duplicate id inside a batch and the key matches the row id;
+//!    a patch that stages the stored row unchanged (`before == after` after the
+//!    stored name trim) is an authoritative **no-op**: it is dropped, so a
+//!    batch of re-spellings returns `before == after` and bumps no revision;
 //! 2. **names**: trimmed, non-empty, free of the AutoCAD-illegal characters
 //!    ([`super::layer_edit::ILLEGAL_LAYER_NAME_CHARS`]) and unique
 //!    case-insensitively inside their own table's **final** name set (a name
@@ -190,7 +191,30 @@ impl DrawingDatabase {
         validate_dim_style_batch(self, changes.dim_styles)?;
         validate_mleader_style_batch(self, changes.mleader_styles)?;
 
-        // Phase 2: upserts first, deletes last, so a row freed by the batch is
+        // Phase 2: a patch that stages the stored row unchanged is an
+        // authoritative no-op — a re-spelling of the same name (`Text`/
+        // ` text `) or a value the row already carries writes nothing and does
+        // not bump the revision. Only real writes remain.
+        let dim_styles = effective_dim_style_changes(self, changes.dim_styles);
+        let styles = effective_style_changes(self, changes.styles);
+        let mleader_styles = effective_mleader_style_changes(self, changes.mleader_styles);
+        if styles.is_empty() && dim_styles.is_empty() && mleader_styles.is_empty() {
+            return Ok(ChangeSet {
+                database: self.id,
+                before,
+                after: before,
+                transaction,
+                reason: reason.to_string(),
+                changes: Vec::new(),
+            });
+        }
+        let changes = StyleTableChanges {
+            styles: &styles,
+            dim_styles: &dim_styles,
+            mleader_styles: &mleader_styles,
+        };
+
+        // Phase 3: upserts first, deletes last, so a row freed by the batch is
         // not observed half-applied.
         for (id, change) in changes.styles {
             if let Some(row) = change {
@@ -352,6 +376,66 @@ impl DrawingDatabase {
         }
         self.next_mleader_style_id = self.next_mleader_style_id.max(id.0.saturating_add(1));
     }
+}
+
+/// Drop the style-table patches that stage the stored row unchanged.
+///
+/// The comparison uses the **stored** normalisation (`id` forced to the patch
+/// key, name trimmed), so re-staging the same row under a different spelling
+/// (`"Standard"` vs `" standard "`) is an authoritative no-op rather than a
+/// revision bump.
+fn effective_style_changes(
+    db: &DrawingDatabase,
+    rows: &[(StyleId, Option<Style>)],
+) -> Vec<(StyleId, Option<Style>)> {
+    rows.iter()
+        .filter(|(id, change)| match change {
+            Some(row) => {
+                let mut staged = row.clone();
+                staged.id = *id;
+                staged.name = staged.name.trim().to_string();
+                db.styles.get(id) != Some(&staged)
+            }
+            None => true,
+        })
+        .cloned()
+        .collect()
+}
+
+fn effective_dim_style_changes(
+    db: &DrawingDatabase,
+    rows: &[(DimStyleId, Option<DimStyle>)],
+) -> Vec<(DimStyleId, Option<DimStyle>)> {
+    rows.iter()
+        .filter(|(id, change)| match change {
+            Some(row) => {
+                let mut staged = row.clone();
+                staged.id = *id;
+                staged.name = staged.name.trim().to_string();
+                db.dim_styles.get(id) != Some(&staged)
+            }
+            None => true,
+        })
+        .cloned()
+        .collect()
+}
+
+fn effective_mleader_style_changes(
+    db: &DrawingDatabase,
+    rows: &[(MLeaderStyleId, Option<MLeaderStyle>)],
+) -> Vec<(MLeaderStyleId, Option<MLeaderStyle>)> {
+    rows.iter()
+        .filter(|(id, change)| match change {
+            Some(row) => {
+                let mut staged = row.clone();
+                staged.id = *id;
+                staged.name = staged.name.trim().to_string();
+                db.mleader_styles.get(id) != Some(&staged)
+            }
+            None => true,
+        })
+        .cloned()
+        .collect()
 }
 
 /// Trim and validate one style-table name.

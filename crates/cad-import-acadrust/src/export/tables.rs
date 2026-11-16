@@ -1,13 +1,28 @@
-//! Layer, text-style and linetype tables for the DXF export.
+//! Layer, text-style, linetype and dimension-style tables for the DXF export.
 //!
-//! Entities reference layers/styles/linetypes by name, so every table entry an
-//! exported entity can name must exist before the entities are added. Missing
-//! text-style names are substituted with `Standard` (with a diagnostic), never
-//! written as a dangling reference.
+//! Entities reference layers/styles/linetypes/dim styles by name, so every table
+//! entry an exported entity can name must exist before the entities are added.
+//! Missing text-style names are substituted with `Standard` (with a diagnostic),
+//! never written as a dangling reference.
+//!
+//! # DIMSTYLE rows: the table pass writes the row, the entity pass the snapshot
+//!
+//! Every stored [`cad_db::DimStyle`] row is written here, so a row created by
+//! `DIMSTYLE NEW` (or edited by `DIMSTYLE MODIFY`) survives SAVE → OPEN even
+//! when no dimension references it yet. A dimension then writes (replaces) the
+//! record for the style **it names** from its own resolved snapshot
+//! ([`super::dimension`]): DXF has exactly one DIMSTYLE record per name, so a
+//! non-retroactive table edit cannot be represented separately from the entity
+//! that still carries the old values. That conflict is reported, never silent.
 
-use acadrust::tables::{Layer as DxfLayer, LineType as DxfLineType, LineTypeElement, TextStyle};
+use acadrust::tables::{
+    DimStyle as DxfDimStyle, Layer as DxfLayer, LineType as DxfLineType, LineTypeElement, TextStyle,
+};
 use acadrust::{CadDocument, Color as DxfColor, LineWeight as DxfLineWeight, Transparency};
-use cad_db::{DrawingDatabase, LayerAttributes, LayerLineWeight, LineType as DbLineType};
+use cad_db::{
+    DimStyle as DbDimStyle, DrawingDatabase, LayerAttributes, LayerLineWeight,
+    LineType as DbLineType,
+};
 use cad_domain::Unit;
 
 use super::report::ExportReport;
@@ -51,6 +66,80 @@ pub(crate) fn write_tables(
     for linetype in database.linetypes() {
         doc.line_types.add_or_replace(linetype_entry(linetype));
     }
+
+    // Dimension styles. Entities are emitted after this pass, and a dimension
+    // replaces its own style's record with the entity's baked snapshot, so an
+    // unreferenced row (a `DIMSTYLE NEW` row, or one whose only dimension was
+    // deleted) is written exactly as stored.
+    for style in database.dim_styles() {
+        let font = database
+            .style_by_name(style.text_style_name.trim())
+            .and_then(|text| text.resource_keys.first().map(String::as_str));
+        let (text_style, reasons) = ensure_text_style(doc, &style.text_style_name, font);
+        for reason in reasons {
+            report.notes.push(super::report::ExportDiagnostic {
+                object: None,
+                code: "export.dimstyle_text_style".into(),
+                message: format!(
+                    "dimension style '{}': {reason}; group 340 names '{text_style}'",
+                    style.name
+                ),
+            });
+        }
+        let mut entry = dimstyle_entry(style);
+        entry.dimtxsty = text_style;
+        doc.dim_styles.add_or_replace(entry);
+    }
+}
+
+/// One DXF DIMSTYLE record from a stored table row, field for field.
+///
+/// `DIMSCALE` is written as the row's own scale and the distance variables
+/// unscaled, so [`cad_db::DimStyle::resolved`] reproduces the row exactly on
+/// re-import (unlike the entity pass, which writes the already-scaled snapshot
+/// with `DIMSCALE = 1`).
+///
+/// Two declared drops: `DIMCONTINUEMODE` is drawing-level and has no acadrust
+/// `DimStyle` field (ADR 0017 B.2(b)), and the acadrust record carries no field
+/// for a true-colour override of `DIMCLRD`/`DIMCLRE`/`DIMCLRT`, so the ACI
+/// values are written and an RGB override cannot round-trip.
+fn dimstyle_entry(style: &DbDimStyle) -> DxfDimStyle {
+    let mut entry = DxfDimStyle::new(style.name.trim());
+    // B.2(a): display-driving values, verbatim.
+    entry.dimscale = style.scale;
+    entry.dimtxt = style.text_height;
+    entry.dimasz = style.arrow_size;
+    entry.dimexo = style.ext_offset;
+    entry.dimexe = style.ext_beyond;
+    entry.dimgap = style.text_gap;
+    entry.dimtad = style.text_vertical;
+    entry.dimtvp = style.text_vertical_position;
+    entry.dimdec = style.decimals;
+    entry.dimzin = style.zero_suppression;
+    entry.dimlfac = style.linear_factor;
+    entry.dimrnd = style.rounding;
+    entry.dimpost = style.postfix.clone();
+    entry.dimcen = style.center_mark;
+    entry.dimtxsty = style.text_style_name.trim().to_string();
+    entry.dimse1 = style.suppress_ext1;
+    entry.dimse2 = style.suppress_ext2;
+    entry.dimsd1 = style.suppress_dim1;
+    entry.dimsd2 = style.suppress_dim2;
+    // B.2(b): snapshot-only values, written for table fidelity.
+    entry.dimlunit = style.linear_unit_format;
+    entry.dimdsep = style.decimal_separator;
+    entry.dimjust = style.text_justification;
+    entry.dimtih = style.text_inside_horizontal;
+    entry.dimtoh = style.text_outside_horizontal;
+    entry.dimatfit = style.text_fit;
+    entry.dimtix = style.text_inside_extensions;
+    entry.dimtofl = style.text_outside_flow_line;
+    entry.dimclrd = style.dim_line_color;
+    entry.dimclre = style.ext_line_color;
+    entry.dimclrt = style.text_color;
+    entry.dimdle = style.dim_line_extension;
+    entry.dimdli = style.dim_line_increment;
+    entry
 }
 
 /// Copy the stored attribute row onto the DXF layer entry.
