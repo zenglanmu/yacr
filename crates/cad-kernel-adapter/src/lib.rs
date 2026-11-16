@@ -14,6 +14,12 @@
 //! request as [`TessellationOutcome::Unsupported`] with a stable diagnostic
 //! code. See `docs/kernel-acis.md` for the integration contract and the
 //! acceptance criteria that must be met before this can be considered done.
+//!
+//! A second, independent seam lives in [`solid`]: [`SolidModeler`] creates and
+//! combines **exact** bodies (primitives, booleans, similarity transforms, mass
+//! properties) and returns neutral [`BrepData`]. Phase B1 (ADR-0036) defines only
+//! that contract; this crate still links no modelling kernel and has no default
+//! modeler.
 
 use cad_domain::*;
 
@@ -21,6 +27,8 @@ pub mod brep;
 pub use brep::{BrepCurve, BrepData, BrepFace, BrepLoop, BrepPlacement, BrepShell, BrepSurface};
 
 pub mod codes;
+
+pub mod solid;
 
 mod brep_tessellator;
 mod exchange;
@@ -35,6 +43,7 @@ pub use no_kernel::*;
 pub use outcome::*;
 pub use request::*;
 pub use seam::*;
+pub use solid::*;
 
 #[cfg(test)]
 mod tests;

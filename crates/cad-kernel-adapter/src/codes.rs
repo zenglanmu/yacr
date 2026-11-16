@@ -29,3 +29,27 @@ pub const KERNEL_OPEN_EDGE: &str = "kernel.open_edge";
 pub const KERNEL_DROPPED_SHELL: &str = "kernel.dropped_shell";
 /// The request was cancelled before a result could be produced.
 pub const KERNEL_CANCELLED: &str = "kernel.cancelled";
+
+// ---------------------------------------------------------------------------
+// Solid modelling seam (`SolidModeler`, ADR-0036 D1/D7).
+//
+// These are the input/capability categories of the modelling seam, separate
+// from the tessellation codes above: a body can be modelled and still fail to
+// tessellate, and vice versa.
+// ---------------------------------------------------------------------------
+
+/// A primitive length/radius was non-finite or not strictly positive.
+pub const SOLID_INVALID_DIMENSION: &str = "solid.invalid_dimension";
+/// A primitive origin/base centre coordinate was not finite.
+pub const SOLID_INVALID_POINT: &str = "solid.invalid_point";
+/// A mass-properties density was non-finite or not strictly positive.
+pub const SOLID_INVALID_DENSITY: &str = "solid.invalid_density";
+/// A transform matrix was non-finite, not affine, or singular.
+pub const SOLID_INVALID_TRANSFORM: &str = "solid.invalid_transform";
+/// A boolean/transform/mass operand carried no B-rep geometry.
+pub const SOLID_EMPTY_OPERAND: &str = "solid.empty_operand";
+/// The modeler was asked for a capability it does not declare.
+pub const SOLID_UNSUPPORTED: &str = "solid.unsupported";
+/// The kernel ran but produced no usable body (for example an empty boolean
+/// result). Never an empty success.
+pub const SOLID_FAILED: &str = "solid.failed";
