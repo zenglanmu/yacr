@@ -22,6 +22,20 @@
 （Linux 原生 Wayland、Windows、macOS、Android）由 native 会话持有 `cad-db`，`dom-canvas`
 （X11/XWayland、Web）由 wasm 会话持有。细节与逐平台证据边界见 `AGENTS.md` 平台表。
 
+**最终验证（2026-11-17，ADR-0036 本轮收口）**
+
+- **全量测试已运行**：`cargo test --workspace --locked -- --test-threads=1` → 通过（exit 0；
+  首两次分别为渲染边线 fixture 与 `cad-ui-core` work-mode 表的测试契约漂移，已修正并复跑通过）。
+- 全量门禁通过：`cargo fmt --all -- --check`、`cargo clippy --workspace --exclude app-android
+  --exclude app-web --all-targets --locked -- -D warnings`、`cargo check --workspace
+  --all-targets --locked`、`cargo check --workspace --lib --target wasm32-unknown-unknown
+  --locked`、`check-architecture.py`、`check-tauri-capabilities.py`、`check-fixture-manifest.py`、
+  `check-file-size.py`、`check-i18n.py`、`check-command-docs.py` + 其自测。
+- **仍未实现（显式）**：P2.1 NURBS 中性模型与曲面 record lift、圆角、solidcore-tess 显示；
+  P2.2 `SURFACE` 家族；P3b SAB/DWG 写出。CHAMFEREDGE 命令未接线。
+- **证据边界**：仅 Linux 契约/单元与自读回环；Windows/macOS/Android/Web、GPU/像素、第三方
+  CAD 读取 SAT/3DSOLID 一律 **NOT VERIFIED**。
+
 **3D 实体 P2.0：平面体单边直线倒角模型器能力（2026-11-17）**
 
 - **范围**：只落**模型器能力**，**不接 CHAMFEREDGE 命令**（该命令仍是有名字的拒绝
