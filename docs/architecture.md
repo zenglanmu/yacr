@@ -248,10 +248,27 @@ traits 是契约草案（0.1），实现前可通过 ADR 修正不足，不代�
   进入 id/pick pass。纯光标移动因此是 0 suffix commit；snap hints 仍是 committed overlay
   （工具态 churn 仍会提交）。
 
+## 关键设计索引（按需点开）
+
+| 主题 | 唯一权威 |
+|---|---|
+| 载体与合成（`native-below` / `dom-canvas`） | ADR 0010、0023、0024、0027；`AGENTS.md` 平台表 |
+| 增量更新与渲染（ChangeSet → 失效 → 显示表示） | `docs/architecture.md`、`docs/core-invariants.md`、ADR 0007、ADR 0012、`docs/render-optimization-backlog.md` |
+| 光标/合成层（transient overlay、base/overlay 分离） | ADR 0028、ADR 0023 |
+| 设备协商与 GPU 预算 | ADR 0013、ADR 0026 |
+| 多格式导入（DWG/DXF/RVT/IFC/STEP/OBJ/STL/PLY/SKP/DGN） | ADR 0033、`docs/compatibility.md`、`docs/dgn.md` |
+| 依赖补丁策略 | ADR 0031 + `docs/acadrust-patches.md`；ADR 0035 + `docs/rvt-patches.md` |
+| 插件（厂商 ABI、拾取/属性、TS API） | ADR 0029、0030、0034、`docs/plugin-api.md` |
+| 命令面与官方清单 | `docs/commands.md`、`docs/autocad-2026-command-coverage.md` |
+| 宿主 I/O 与文件 | `docs/host-files.md`、`docs/react-linux-app.md`、`docs/windows-app.md`、`docs/macos-app.md`、`docs/android-host.md` |
+| 证据边界 | `AGENTS.md` 平台表、`docs/compatibility.md`、`docs/validation*.md` |
+| 逐轮记录（含迁移前 `docs/handoff.md` 的全部条目） | `docs/handoff-archive/2026-10.md`、`docs/handoff-archive/2026-11.md` |
+
 ## 历史（已退役 / 被取代）
 
 - ADR 0002（旧 UI/wgpu 合成）、ADR 0003（浏览器旧 UI/wgpu）描述**旧 UI 基线**；
-  桌面部分被 ADR 0010 取代，Web/Android UI 已退役（见 ADR 0010 与 `docs/handoff.md`）。
+  桌面部分被 ADR 0010 取代，Web/Android UI 已退役（见 ADR 0010 与
+  `docs/handoff-archive/2026-11.md` 的同日期条目）。
 - ADR 0006（React + Tauri 实验）是本次迁移的**前身实验**，其“实验/未删旧代码”描述已过时。
 - `docs/code-structure.md` 中描述旧 UI 渲染桥文件职责的段落属历史；当前宿主结构见本文与
   `docs/react-linux-app.md`。

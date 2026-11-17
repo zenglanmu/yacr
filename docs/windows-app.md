@@ -547,4 +547,5 @@ ADR 原文把“原生表面如何出像素”视为渲染器内部细节，未�
    build-to-build 区分保留）；composition 不可用时必须显式失败
    （`class=surface_composition`），**不得**回退到未证明可达合成输出的 HWND 链。
 5. **不改动 ADR 0023 §5**：平台合成 ADR（RenderTarget/HostTexture token 所有权）仍**显式延期**，
-   在 `docs/handoff.md` 中原样保留；本增补只规定 Windows 的视觉合成形态，**不**解决 token 所有权。
+   在 `docs/handoff-archive/2026-10.md` 的「已定义，但尚需设计审查」条目中原样保留；本增补只规定 Windows
+   的视觉合成形态，**不**解决 token 所有权。

@@ -8,7 +8,7 @@
   React 宿主 UI、**POINT 的渲染表示**（overlay 标记）、以及 `cad-geometry`（SPLINE 插值纯函数）。
   **不**覆盖：弧段 polyline 造形、椭圆弧造形、样条 CV 法/切向/公差选项、`PELLIPSE`、参数持久化、3D/OCS 造形。
 - 相关：`CAD_IMPLEMENTATION_SPEC.md` §3.2（基础图形支持范围，**含能力表要求**）、`docs/interaction.md`、
-  `docs/adr/0008-sdf-conic-rendering.md`、`docs/compatibility.md`、`docs/handoff.md`、
+  `docs/adr/0008-sdf-conic-rendering.md`、`docs/compatibility.md`、`docs/handoff-archive/2026-10.md`、
   `.slim/deepwork/autocad-parity/progress.md`（P3）。
 
 ## 实施状态（追加，不改写决策文本）

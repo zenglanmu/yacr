@@ -16,7 +16,8 @@ with wgpu, measures,
 and has an implementation path for 979 of 981 commands (185 complete, 794 partial); the remaining
 two names (MEASURE, TRACE) are counted as same-name-different-meaning, and unsupported options are
 rejected by name instead of silently succeeding. It is **not yet a production CAD system**;
-per-platform status and evidence boundaries are in `docs/handoff.md` and `docs/compatibility.md`.
+per-platform status and evidence boundaries are in the `AGENTS.md` platform table and
+`docs/compatibility.md`.
 
 **Author / contact:** zenglanmu@126.com · **License:** AGPL-3.0 (`LICENSE`)
 
@@ -353,23 +354,23 @@ the internal docs:
 - macOS: `docs/macos-app.md`
 - Android: `docs/android-host.md`
 - Web: `docs/validation-web.md`
-- Capability matrix: `docs/compatibility.md` · per-round evidence: `docs/handoff.md`
+- Capability matrix: `docs/compatibility.md` · per-round evidence: `docs/handoff-archive/`
 
 Recent work (2026-10-17/18) hardened the renderer and picking path under real use: a scene spatial
 index for CPU picking (ADR 0012, S4; per-chunk R-tree in `cad-spatial`, with a measured trade-off
 documented honestly), frame-pacing / incremental-commit fixes, per-frame CPU plan and encode-skip
 optimizations, GPU frame-time measurement, block-level frustum culling, and device-limit
 negotiation. The current local Flatpak bundle and the auto evidence-collection script
-(`scripts/collect-evidence.sh`) date from the same period. Per-round evidence is in `docs/handoff.md`
-and `docs/validation*.md`.
+(`scripts/collect-evidence.sh`) date from the same period. Per-round evidence is in
+`docs/handoff-archive/` and `docs/validation*.md`.
 
 ### Honest boundaries
 
 - **No validated DWG compatibility, entity, or platform.** `fixtures/manifest` holds synthetic
   fixtures plus one open-source QCAD `flange` sample (`Partial`); build evidence is not compatibility.
-- **Evidence boundaries**: per-round evidence is in `docs/handoff.md`; detailed validation records are
-  in `docs/validation*.md`. Static gates and synthetic tests are not real-GPU, device, golden or
-  performance acceptance.
+- **Evidence boundaries**: see the `AGENTS.md` platform table and `docs/compatibility.md`; detailed
+  validation records are in `docs/validation*.md`. Static gates and synthetic tests are not real-GPU,
+  device, golden or performance acceptance.
 - **Explicitly unsupported / unimplemented** (no success is faked):
   - Vendor opcode records of proxy entities (public cache records only); no cached geometry → no display.
   - External content: PDF/DWF/DGN **underlays inside a DWG**, OLE2 embedded objects,
@@ -390,7 +391,7 @@ and `docs/validation*.md`.
 ## Documentation
 
 **Overview** — requirements: `CAD_IMPLEMENTATION_SPEC.md` (v2.0); round-by-round handoff:
-`docs/handoff.md`; architecture and invariants: `docs/architecture.md`, `docs/core-invariants.md`;
+`docs/handoff-archive/`; architecture and invariants: `docs/architecture.md`, `docs/core-invariants.md`;
 compatibility matrix: `docs/compatibility.md`; validation evidence: `docs/validation.md`,
 `docs/validation-dwg.md`.
 

@@ -23,7 +23,7 @@
 //! **worker** carrier still runs the older viewer session — camera-only navigation
 //! over a released database — and is deliberately untouched by this change; it has
 //! no `invoke`/`probe_input`/`shell_*` surface yet (those refuse explicitly). Moving
-//! it onto the real session is the remaining half of stage ⑧ (`docs/handoff.md`).
+//! it onto the real session is the remaining half of stage ⑧ (`docs/handoff-archive/`).
 //!
 //! ## Measured capability split (2026-10-24)
 //!

@@ -133,5 +133,5 @@ NODE_PATH=<playwright 的 node_modules> \
 - **性能**：未测（启动、布局、帧率、内存均无数据；软件渲染下也不得出性能结论）。
 - **CI**：**未接线**。`scripts/build-web-ui.sh` 与 `scripts/web-ui-smoke.cjs` 是**本地/手工**入口；
   CI 的 `web-smoke` 仍是旧的 `apps/app-web/dist` 载体/状态冒烟（见 `docs/ci.md`）。
-- **原生宿主**：桌面 Tauri 宿主的窄窗口行为不在本轮范围（见 `docs/handoff.md` 的既有条目）。
+- **原生宿主**：桌面 Tauri 宿主的窄窗口行为不在本轮范围（见 `docs/handoff-archive/2026-10.md` 的既有条目）。
 - **Android 真机/真实 GPU**：模拟器证据见 `docs/android-host.md`；模拟器 ≠ 真机。

@@ -7,7 +7,8 @@
 实际运行过的东西，未运行的一律标 NOT RUN。
 
 需求与边界：`docs/adr/0011-native-wayland-subsurface.md`、`docs/react-linux-app.md`、
-`docs/architecture.md`；逐轮交接见 `docs/handoff.md`。本轮**不改**历史 ADR 0006/0010 的初始范围。
+`docs/architecture.md`；逐轮交接见 `docs/handoff-archive/2026-10.md` 的 2026-10-16 条目。本轮**不改**历史
+ADR 0006/0010 的初始范围。
 
 - 证据根目录（本轮）：`/tmp/opencode/yacr-wayland-20261016T065457Z/`
   - `compile/remediation/`（scoped 编译/测试/clippy/wasm/门禁）

@@ -250,7 +250,7 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
   同样隐藏，但**拾取/测量语义不变**（pick 仍用 `all_visible`）。类别由表示层的
   `MeshWithoutEdgeOverlay` 唯一来源派生（`RenderBatch::is_text_glyph`），渲染器只消费
   `GpuBatch.text_glyph` + `ChunkCull.hide_text`。这不是本条“亚像素/矩形退化”的完成；阈值退化、
-  例外集合与像素验收仍未做。见 `docs/handoff.md` 2026-11-07 LOD 条目与
+  例外集合与像素验收仍未做。见 `docs/handoff-archive/2026-11.md` 2026-11-07 LOD 条目与
   `docs/validation-nav-settle-2026-11-07.md`。
 
 ### P3 — 帧缓冲复用 / blit+scissor 局部重绘（bandwidth+fragment 优化，**非** GPU compute）
@@ -402,8 +402,8 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
   **7.7 → 11.3 ms**（seq 746–750）把 EMA 抬到 **13.87/14.67**、`scale` **0.336 → 0.252**（seq 751），
   稳定页最终 `complete=true`；`debug-default-fonts.dwg` 458 帧全 `pacing=active`，**46 ms** 离群把 `scale`
   **1.000 → 0.422**，随后慢升抬到上夹紧 **`budget_scale=4.000` / 32,000,000 verts**（seq 240）。
-  逐条证据、测试矩阵与**未测边界**见 `docs/validation-frame-pacing-2026-10-17.md`、`docs/handoff.md`
-  本轮条目。**未测**：wasm/浏览器真实运行时 disabled 路径、跨页 z-order、视觉/截图判定、GPU 时间、
+  逐条证据、测试矩阵与**未测边界**见 `docs/validation-frame-pacing-2026-10-17.md`、`docs/handoff-archive/2026-10.md`
+  的 2026-10-17 本轮条目。**未测**：wasm/浏览器真实运行时 disabled 路径、跨页 z-order、视觉/截图判定、GPU 时间、
   120 Hz/刷新率自适应。
 - **N1a 后续 — 后缀提交不再重置 pacing 成本模型：已落地（2026-10-17）**。逐条证据见
   `docs/validation-pacing-suffix-commit-2026-10-17.md`（实现 commit `0fb2bc1`）。这是 N1a 的**收敛性**残余项：
@@ -512,9 +512,9 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
     - **边界**：初始 base commit 仍是一次性 **~2.7–3.0 s**（2.699 GB pulled 在 2 GB P620 上 OOM +
       fallback）；这是开图成本，不是每次 settle 的回退。交互帧最大 55 ms。仅单机单适配器、合成 DOM
       拖拽、无 GPU timestamp。文本 glyph 导航 LOD 已落地（2026-11-07，用户签核：移动时隐藏、
-      settle 恢复；见 `docs/handoff.md`）；阈值退化与像素验收仍未做。
+      settle 恢复；见 `docs/handoff-archive/2026-11.md` 的 2026-11-07 条目）；阈值退化与像素验收仍未做。
   - **N1e 后续（2026-11-07）—— pulled 预检用真实常驻判定 + 一次性提示：已落地**。证据见
-    `docs/validation-gpu-memory-2026-10-24.md` §9、`docs/handoff.md` 同日首条。
+    `docs/validation-gpu-memory-2026-10-24.md` §9、`docs/handoff-archive/2026-10.md` 同日首条。
     - **根因**：`pulled_rebuild.rs` 丢弃 `gpu_memory.admit` 的 `Err`，改比 `required ≤ cap`。
       `fixtures/test-tangent-1.dwg`：常驻 1.94 GB + pulled 2.696 GB > cap 3.865 GB，`admit` 拒绝却放行
       → 分配 OOM → fallback（~1.5–2.2 s/次）。
@@ -698,7 +698,7 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
     （`entityCount=44591`、settled 帧 `complete=true`、exit 0、无 panic/`is invalid`）；
     `debug-default-fonts.dwg` 仍 `pulled=active`（`entityCount=10656`）。
   - **未测**：真实驱动/显存 OOM 在本机不可模拟（新设备测试触发的是无效 handle/validation 路径）；
-    其它 GPU/vendor 未验证。逐帧证据见 `docs/handoff.md` 本轮条目，政策见 ADR 0013。
+    其它 GPU/vendor 未验证。逐帧证据见 `docs/handoff-archive/2026-10.md` 的本轮（2026-10-17）条目，政策见 ADR 0013。
 - **诚实边界（必须记录）**：① 上述均为**本机判定**（真实宿主，单适配器）；② 预算是**单缓冲**限制、
   却拿去和**总 payload** 比较 ⇒ **刻意保守**（limits 抬高后仍保留，作为最后一道安全网）；
   ③ limits 协商后 `complex-test.dwg` 的 pulled 已可用，但**任意图纸**是否可用仍取决于单次分配 payload
@@ -853,7 +853,8 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
 
 - **现状/问题（更新于 2026-10-17）**：`OverlayInputs::hovered` / `hidden` 机制与测试就绪。**hover 半已闭环**：
   宿主（`cad-host`）在空闲移动时用与点选相同的拾取路径产生**单个**实体级 ref，喂给 `OverlayInputs.hovered`
-  （该输入在生产会话中由此**非空**；ADR-0012 §10 S2、`docs/input.md` §1.1.2、`docs/handoff.md` 2026-10-17 S2 小节）。
+  （该输入在生产会话中由此**非空**；ADR-0012 §10 S2、`docs/input.md` §1.1.2、
+  `docs/handoff-archive/2026-10.md` 2026-10-17 S2 小节）。
   **`hidden` 半仍未接线**：`cad-host` 仍传空 `SelectionSet`（`crates/cad-host/src/state.rs`），默认空
   （`docs/picking-gpu-id-pass.md` §0、§8；ADR-0007:97-102）。
 - **预期收益**：无直接性能收益；**功能补全**——悬停高亮已在生产会话可用（hover 半）；隐藏实体在生产会话可用（hidden 半，未做）。
@@ -948,7 +949,7 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
 - **需要的决策**：左键“点击 vs 拖拽”阈值已取 4.0 逻辑像素（复用 `DRAG_THRESHOLD_LOGICAL_PX`）；与 pan 手势的
   互斥已定：主键**无拖拽**点击=选择、**有拖拽**=pan（**框选**语义待 S5）。
 - **相关契约/栅栏**：DOM→`SelectAt`→`pick_at_screen` 端到端契约；点选结果携带 `SelectionRef` 的回归测试；
-  `selection` 状态块形状僵化（见 `docs/handoff.md` 2026-10-17 S1 小节）。
+  `selection` 状态块形状僵化（见 `docs/handoff-archive/2026-10.md` 2026-10-17 S1 小节）。
 - **证据（2026-10-17，合成/本地）**：`cargo fmt`/`check`/`clippy`（`cad-ui-core`+`cad-host`）PASS；
   `cargo test -p cad-ui-core` **77 passed / 0 failed**；`cargo test -p cad-host` **92 passed / 0 failed / 1 ignored**
   （预存 `perf_baseline`，需 `YACR_TEST_DWG`）；`app-linux` `cargo check` PASS；`(cd apps/app-linux/ui && npm ci)`
@@ -1064,7 +1065,7 @@ bonus，永远不是架构依赖**；每项此类增强**必须**有 capability 
 - **现状/问题（更新于 2026-10-17；2026-11-06 P5 收敛）**：**拾取半已接线**（见上）。`SceneCache::apply_changes`
   （`cad-scene/src/cache.rs:90`）**只在测试调用**、`CacheKey`（`cad-scene/src/batch.rs:8`）**定义即废弃**；
   **P5 已把两者删除**（另有从未填充的 `SceneDelta::removed_chunks`），生产删除走
-  `cad-app` 的 retire 路径 + 整基重建压缩，见 `docs/handoff.md` 2026-11-06 P5 条目。此项不再排期。
+  `cad-app` 的 retire 路径 + 整基重建压缩，见 `docs/handoff-archive/2026-11.md` 2026-11-06 P5 条目。此项不再排期。
 - **预期收益**：拾取/框选/查询成本与图纸总规模脱钩（**拾取半已实测**，见上；框选/查询仍**预期**）。
 - **前置条件/风险**：按 ADR-0012 §7 落两级结构（顶层网格 + local `rstar` 0.13 不可变快照）——顶层
   网格与超大图元策略**已落地**（拾取半），**每 chunk 的 `rstar` 亦已落地**（调优 `(256,1024)`，粗网格

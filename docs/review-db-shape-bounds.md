@@ -8,4 +8,4 @@
 期望值保留既有 Frobenius 范数的保守膨胀，而非声称获得精确球面边界。
 这里只修复既有保守尺寸估算的重复缩放，不声称 SHX 字形真实轮廓边界或剪切变换已精确验证。
 主控最终 debug 全目标编译、严格 clippy 与 wasm 检查通过；Rust 契约仅编译、未执行，
-Linux 离屏与 release 构建未运行。完整执行与中止记录见 `docs/handoff.md`。
+Linux 离屏与 release 构建未运行。完整执行与中止记录见 `docs/handoff-archive/2026-10.md` 的 2026-10-04 轮次。

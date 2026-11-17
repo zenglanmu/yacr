@@ -12,7 +12,7 @@ yacr 处于活跃开发中，**预览版现在即可下载**：Linux Flatpak、W
 与浏览器版本。它可以打开 DWG/DXF/DGN，可导入网格/STEP/IFC 文件用于显示、可预览 Revit 工程，能用 wgpu
 查看 2D/3D 图纸、做测量，命令清单 981 条中有 979 条有实现路径（185 完整 + 794 部分），其余 2 条
 （MEASURE / TRACE）按同名不同义不计入；未支持的选项按名拒绝，不静默成功。它**还不是生产级 CAD**；
-各平台状态与证据边界见 `docs/handoff.md` 与 `docs/compatibility.md`。
+各平台状态与证据边界见 `AGENTS.md` 平台表与 `docs/compatibility.md`。
 
 **作者 / 联系：** zenglanmu@126.com · **许可证：** AGPL-3.0（`LICENSE`）
 
@@ -299,19 +299,19 @@ GPU 验收。
 - macOS：`docs/macos-app.md`
 - Android：`docs/android-host.md`
 - Web：`docs/validation-web.md`
-- 能力矩阵：`docs/compatibility.md` · 逐轮证据：`docs/handoff.md`
+- 能力矩阵：`docs/compatibility.md` · 逐轮证据：`docs/handoff-archive/`
 
 近期（2026-10-17/18）在真实使用下打磨了渲染与拾取路径：CPU 拾取接入场景空间索引（ADR 0012，S4；
 `cad-spatial` 每 chunk R-tree，实测权衡如实记录）、帧 pacing / 增量提交修复、每帧 CPU plan 与 encode
 跳过的优化、GPU 帧时间测量、块级视锥剔除、设备 limits 协商。当前本地 Flatpak bundle 与自动证据采集
-脚本（`scripts/collect-evidence.sh`）也出自同期。逐轮证据见 `docs/handoff.md` 与 `docs/validation*.md`。
+脚本（`scripts/collect-evidence.sh`）也出自同期。逐轮证据见 `docs/handoff-archive/` 与 `docs/validation*.md`。
 
 ### 诚实边界
 
 - **没有已验收的 DWG 兼容性、实体或平台。** `fixtures/manifest` 含合成夹具与一个开源 QCAD `flange`
   样本（`Partial`）；构建证据不等于兼容性。
-- **验证证据的边界**：逐轮证据见 `docs/handoff.md`，详细验证记录见 `docs/validation*.md`。静态门禁与
-  合成测试不等于真实 GPU、真机、golden 或性能验收。
+- **验证证据的边界**：能力与证据边界见 `AGENTS.md` 平台表与 `docs/compatibility.md`，详细验证记录见
+  `docs/validation*.md`。静态门禁与合成测试不等于真实 GPU、真机、golden 或性能验收。
 - **明确未支持 / 未实现**（不伪造成功）：
   - 代理图元的厂商 opcode 记录（仅公开缓存记录）；无缓存几何不显示。
   - 外部内容：DWG **内部的** PDF/DWF/DGN underlay、OLE2 嵌入对象、CoordinationModel /
@@ -328,7 +328,7 @@ GPU 验收。
 
 ## 文档索引
 
-**总览**——需求权威：`CAD_IMPLEMENTATION_SPEC.md`（v2.0）；逐轮交接：`docs/handoff.md`；架构边界与
+**总览**——需求权威：`CAD_IMPLEMENTATION_SPEC.md`（v2.0）；逐轮交接：`docs/handoff-archive/`；架构边界与
 不变量：`docs/architecture.md`、`docs/core-invariants.md`；兼容性与能力矩阵：`docs/compatibility.md`；
 验证与运行证据：`docs/validation.md`、`docs/validation-dwg.md`。
 

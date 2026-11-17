@@ -119,7 +119,7 @@ python3 scripts/build-landing-changelog.py --check   # 只校验是否已过期�
 - 新增版本时：写 `docs/release-notes/vX.Y.Z.md` → 跑一次生成脚本 → 与版本 bump 一起提交。
   输出不含时间戳，因此 `--check` 在 CI 是确定性的。
 - 版本说明按 `docs/release-notes/TEMPLATE.md` 写：只列用户可见变化，默认 60 行以内（功能密集版本
-  最多约 80 行）；证据边界在文末用一句话指向 `AGENTS.md` / `docs/handoff.md`，不重复整段免责声明。
+  最多约 80 行）；证据边界在文末用一句话指向 `AGENTS.md` / `docs/compatibility.md`，不重复整段免责声明。
 
 ## CI
 
@@ -147,7 +147,7 @@ python3 scripts/build-landing-changelog.py --check   # 只校验是否已过期�
   r2.dev（`R2_PUBLIC_BASE=managed`）。若把 `cdnBase` 设为 `null`，页面回退 GitHub，
   `deploy-landing-pages.sh` 会打印 warning 但允许部署。
 - 上传/部署成功不等于安装包在真机、真实 GPU 上运行通过；Windows/macOS/Android 的运行时证据边界
-  仍以 `AGENTS.md` 平台表与 `docs/handoff.md` 为准。
+  仍以 `AGENTS.md` 平台表与 `docs/compatibility.md` 为准。
 - `yacr.pages.dev` 子域名是全局唯一的；若已被占用，Pages 可能给项目分配带随机后缀的域名，
   或创建直接失败。此时需改 `CF_PAGES_PROJECT`（以及 `site.yml` 里的值）并同步页面的
   canonical/OG URL，不要静默复用别人的项目。
@@ -162,9 +162,9 @@ python3 scripts/build-landing-changelog.py --check   # 只校验是否已过期�
 - 复跑采集：`bash scripts/collect-evidence.sh --backend wayland --dwg
   fixtures/dxf/qcad-flange/flange.dxf --no-build --capture-at 12 --out <dir>`；整屏原始帧在
   `<dir>/wayland/wayland-frame.png`，裁剪框与页面资产一致（1206 × 834 于 1920 × 1080 帧）。
-- 页面上的“725K 图元（复杂测试图纸展开）”来自 `docs/handoff.md` 对 `fixtures/complex-test.dwg`
-  的场景实测（725k 实体 / 145,776 batches）；2026-11-08 在同一宿主复跑读到 `resident_batches`
-  166,686、`verts` 约 120 万。`cad-cli-tools scan` 对该文件读到 44,591 顶层实体 / 1,081 块定义
+- 页面上的“725K 图元（复杂测试图纸展开）”来自 `docs/handoff-archive/2026-11.md` 对 `fixtures/complex-test.dwg`
+  的场景实测（725k 实体 / 145,776 batches）；2026-11-08 在同一宿主复跑读到 `resident_batches` 166,686、
+  `verts` 约 120 万。`cad-cli-tools scan` 对该文件读到 44,591 顶层实体 / 1,081 块定义
   （图元数是展开后的显示量级，不是文件顶层实体数）。性能/帧率仍未验收。
 - 换图时必须保持 `width`/`height` 与真实像素比例，并同步 `scripts/test-landing-site.py` 的
   期望尺寸与路径；`alt` 必须写明这是真实截图。

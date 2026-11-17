@@ -191,8 +191,8 @@ DXF 另存（v1）**不能**写外部参照记录或路径，因此拒绝把 xre
 - `cad-ui-core` / `apps/desktop-ui`：`cad_status.references` 原样投影、References 面板状态/提示/
   拒绝畸形行、`layout` 页签与 `activeSpace` 投影、`SPACE` 参数解析（见 `docs/layouts.md`）。
 
-具体通过数量见 `docs/handoff.md` 的 2026-11-02 条目；数量只说明这些测试当时通过，不改变下面的
-证据边界。
+具体通过数量见 `docs/handoff-archive/2026-11.md` 的 2026-11-02 条目；数量只说明这些测试当时通过，
+不改变下面的证据边界。
 
 **NOT RUN（不得从上述测试推导）：**
 

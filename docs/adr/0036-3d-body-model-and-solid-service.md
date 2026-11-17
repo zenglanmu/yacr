@@ -327,7 +327,7 @@ pub struct Body3d { pub kind: BodyKind, pub exact: BodyExact, pub display: BodyD
 | 内核错误 | `Unsupported`/`Unported` → `Unsupported`；`UnsureRegion` → `Failed(solid.unsure_region)`；`Empty` → `Failed(solid.empty_result)`；`Internal`（会话捕获的内核 panic）→ `Failed(solid.kernel_panic)` 且**不回传 panic 文本**；`Cancelled` → `Err(Cancelled)`。**倒角另有映射**（`error::from_chamfer`）：布尔对应的 `Argument`/`Status`/`NoRoom`/`TooLarge`/`NoEffect` → `Unsupported(solid.chamfer_failed)`（几何上建不出来，不是 `Failed` 的空成功） |
 | 质量属性 | `Body::mass_properties(1e-6)`，报 `MassAccuracy::Requested`（估计，不证明），**不**标 `Analytic` |
 | 取消 | 前/后检查 + 布尔与倒角共用 `ops::watched`（内部是 `solidcore_ops::cancel::{CancelToken, within}`；看门狗线程每 50 ms 轮询接缝回调，即**检测粒度**；调用结束用 `unpark` 立即唤醒，成功路径不额外等 50 ms；`StopGuard` 在 `Drop` 里置位并唤醒，内核调用 panic 也不会把 `thread::scope` 卡在睡着的看门狗上），`Error::Cancelled → CadError::Cancelled`，无 `aborted` 产物 |
-| 证据 | `cargo test -p cad-kernel-solidcore`（真实内核）、`cargo test -p cad-kernel-adapter`、clippy `-D warnings`、wasm `cargo check`、`check-architecture.py`；完整命令与退出码见 `docs/handoff.md` 2026-11-17 条目 |
+| 证据 | `cargo test -p cad-kernel-solidcore`（真实内核）、`cargo test -p cad-kernel-adapter`、clippy `-D warnings`、wasm `cargo check`、`check-architecture.py`；完整命令与退出码见 `docs/handoff-archive/2026-11.md` 的「迁移快照」（2026-11-17） |
 
 **本轮学到并写进代码的事实**（不是上游文档的推断）：
 

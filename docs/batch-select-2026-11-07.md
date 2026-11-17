@@ -3,7 +3,7 @@
 Status: **implemented at contract level**, verified only by the Rust tests listed
 below. No GUI run, no frontend test run, no real-DWG run and no GPU/pixel
 evidence was produced for this batch. This document is the per-command record;
-`docs/compatibility.md`, `docs/handoff.md` and
+`docs/compatibility.md`, `docs/handoff-archive/2026-11.md` and
 `docs/autocad-2026-command-coverage.md` are deliberately not updated by this
 lane.
 

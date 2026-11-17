@@ -214,10 +214,11 @@ chrome/CAD 边界的弹窗（Observer 判读 PASS）；同一探针在 XWayland 
     DOM-canvas 路径，分阶段；**代码未开始**，X11 当前仍拒绝）。本节其余延期条款不变——尤其
     **RenderTarget/HostTexture 平台合成 ADR 仍独立延期，不被 ADR 0024 覆盖**。
 - **平台合成 ADR（RenderTarget/HostTexture token 所有权）——本文显式延期，未覆盖。**
-  `docs/handoff.md` 的“已定义，但尚需设计审查”条目（RenderTarget/HostTexture 目前只是自有数字
-  token；共享 Device/Queue 的拥有者、token 生命周期与安全访问方式须在**平台合成 ADR** 中固定）
+  `docs/handoff-archive/2026-10.md` 的“已定义，但尚需设计审查”条目（RenderTarget/HostTexture 目前只是
+  自有数字 token；共享 Device/Queue 的拥有者、token 生命周期与安全访问方式须在**平台合成 ADR** 中固定）
   属于 **renderer 资源契约**，与本文的“层序/合成方向”正交。本文**不**定义 token 所有权，也**不**
-  凭 token 猜测 GPU 对象；该待办**原样保留**在 handoff，另立 ADR 或并入 renderer 文档。
+  凭 token 猜测 GPU 对象；该待办**原样保留**在 `docs/handoff-archive/2026-10.md` 的同条目，另立 ADR
+  或并入 renderer 文档。
 - 动态 opaque region、性能优化、tiling 分片抽象：未立项（YAGNI；等 spike-1 失败证据再决策）。
 
 ## 6. 对既有 ADR / SPEC 的影响（失效条款清单）

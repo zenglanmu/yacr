@@ -188,4 +188,4 @@ Idle ──1 触点按下──▶ Pending ──移动 ≥ 阈值──▶ Drag
   真实 GPU 或真实 DWG，`SelectionRef` 与 hover 高亮均**未**在真实宿主窗口闭环。可选探针
   `YACR_PROFILE_PICK hover elapsed_ms=… picked=…` 只在 `YACR_PROFILE_PICK=1` 时输出，其**任何数字仅为
   合成/本地**（记录运行用的是 6 实体 demo 文档，无真实 DWG/GPU），**不构成**性能结论。框选（S5）仍未实现。
-  证据与 NOT RUN 边界见 `docs/handoff.md` 的 2026-10-17 S1/S2 小节与 `docs/render-optimization-backlog.md` 的 S1/S2 项。
+  证据与 NOT RUN 边界见 `docs/handoff-archive/2026-10.md` 的 2026-10-17 S1/S2 小节与 `docs/render-optimization-backlog.md` 的 S1/S2 项。

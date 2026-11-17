@@ -202,7 +202,7 @@ exposes **no 3D control**:
 - **GPU execution has been observed** on a real adapter (Quadro P620, Vulkan)
   through the React/Tauri host: the 2D path renders the drawing and the 3D path
   renders a real frame. Pixel-level correctness of the **3D image** is a separate
-  question and is tracked in `docs/handoff.md`; 2D↔3D round-trip and the camera
+  question and is tracked in `docs/handoff-archive/2026-10.md`; 2D↔3D round-trip and the camera
   math are unit-tested (`cargo test -p cad-app`).
 - **Platform placeholders**: `apps/app-web` and `apps/app-android` are explicit
   NOT IMPLEMENTED stubs, so 3D and paper-space runtime reachability there is not

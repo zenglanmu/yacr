@@ -36,7 +36,7 @@
 
 **NOT RUN（子代理）**：未执行编译、测试、检查器或格式化器，未提交或推送。
 主控统一格式化、提交、合并后完成 debug 全目标编译、严格 clippy 与 wasm 检查；
-Rust 合成契约仅编译，未执行。最终快速门禁与中止记录见 `docs/handoff.md`。
+Rust 合成契约仅编译，未执行。最终快速门禁与中止记录见 `docs/handoff-archive/2026-10.md` 的 2026-10-04 轮次。
 这些检查不涉及真实 DWG、GPU、窗口或平台兼容性结论。
 
 不扩展数据库身份映射、ChangeSet 顺序跟踪、缓存 chunk 标识分配或 mesh 拓扑诊断；这些需要独立契约设计。本轮也不改变 `publish` 已有的超预算淘汰行为。缓存不可能预留的错误使用现有 `CadError::InvalidInput`，不引入跨 crate 的新错误变体。

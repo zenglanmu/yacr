@@ -11,8 +11,8 @@
 > 键位仍只有源码/契约证据**，没有真实窗口、真实按键或像素验收。
 
 本文件是本程序（命令行 + 固定键位 + 绘制/编辑工具）的**单一诚实参考**。证据以**源码契约 + 单测**
-为主；历史轮次的离屏/软件 Vulkan（lavapipe）证据**不代表**真实 GPU、真实窗口或真实设备；逐轮证据与
-未完成项见 `docs/handoff.md`。支持的硬件/平台结论见 `docs/compatibility.md`。
+为主；历史轮次的离屏/软件 Vulkan（lavapipe）证据**不代表**真实 GPU、真实窗口或真实设备；逐轮记录见
+`docs/handoff-archive/`；未完成项与支持的硬件/平台结论见 `docs/compatibility.md`。
 
 术语（**2026-10-27 更正**）：**canonical 选择子**是 `crates/cad-ui-core/src/session/commands.rs` 的
 `COMMAND_TABLE`（每个都对应一个 `CommandId`）**加上**交互专用的测量/缩放步进选择子
@@ -498,4 +498,4 @@ ERASE 等的空选择/多选拒绝都是显式反馈。
 - **全部证据为合成/离屏**：不代表真实 GPU、真实窗口、真机或 vendor 兼容。`verify_ui` 的**文档**仍在
   `docs/verify-ui.md`（其顶部已标 **已退役（2026-10-16）**），但它描述的运行器 `scripts/verify-ui.sh`
   **已删除**（仓库里不存在；`scripts/check-linux-app.sh` 同样已退役），因此**没有可运行的 verify-ui
-  脚本**，不得把它当作验证入口。逐轮记录见 `docs/handoff.md`。
+  脚本**，不得把它当作验证入口。逐轮记录见 `docs/handoff-archive/`。

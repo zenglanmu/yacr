@@ -176,4 +176,4 @@ shell-only 报告在有 Tauri 桥时仍回原生宿主。唯一例外是**引导
 `npm test` 包含类型检查、纯函数测试和源码契约断言。`readModule()` 使用精确的
 `src` 相对路径；`readAppSource()` 递归收集源码，`readComponentsSource()` 只收集组件。
 源码契约不是运行时 DOM 挂载测试，也不是像素、真实 GPU 或跨平台验收。
-本次目录整理的实际运行结果见 `docs/handoff.md` 对应条目；历史截图不能代替本轮验证。
+本次目录整理的实际运行结果见 `docs/handoff-archive/` 对应条目；历史截图不能代替本轮验证。

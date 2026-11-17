@@ -352,5 +352,5 @@ parity harness（真实 DWG，**渲染器 id pass** vs **CPU `cad_spatial` 参�
 - **视觉 tint**：`SELECTED_TINT`/`HOVERED_TINT` 仍是机械常量（颜色替换，非混合），最终视觉
   归 UI 切片；与旧 overlay 的视觉**不**保证一致（用户已授权）。
 - **逐帧 id pass**：不做（按需）。
-- `docs/picking-3d.md`、`docs/handoff.md` 的交叉引用与交接条目本轮未更新（P3a-2 作用域限定为
+- `docs/picking-3d.md`、`docs/handoff-archive/2026-10.md` 的交叉引用与交接条目本轮未更新（P3a-2 作用域限定为
   渲染器/scene/app/engine 源码 + 测试 + 本文档 + ADR-0007 deferred 列表）。

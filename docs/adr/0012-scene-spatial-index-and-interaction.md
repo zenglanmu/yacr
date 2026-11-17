@@ -2,11 +2,12 @@
 
 - 状态：**已接受（Accepted，2026-10-17）**，范围**定性**：本 ADR 固化架构、术语与不变量，明确**否决项**
   与**延后项**。**不包含**任何实现完成声明：本 ADR 未运行任何测试；各项实现与证据在各自合入时另记
-  （见 `docs/handoff.md`）。范围**有界**：Linux 宿主（React/Tauri + X11/原生 Wayland）的 2D 正交交互域；
+  （见 `docs/handoff-archive/2026-10.md` 的 2026-10-17 条目）。范围**有界**：Linux 宿主（React/Tauri +
+  X11/原生 Wayland）的 2D 正交交互域；
   3D 透视拾取、跨平台、vendor、精度与性能结论均 **NOT RUN**。
 - 相关：`CAD_IMPLEMENTATION_SPEC.md` §3.3、§4.4、§4.6、§4.7、§4.8、§8.1、§8.2、§8.4、§8.5、§16.1、
   §16.2、§18.2、§18.3；`docs/render-optimization-backlog.md`；`docs/picking-3d.md`；
-  `docs/picking-gpu-id-pass.md`；`docs/architecture.md`；`docs/interaction.md`；`docs/handoff.md`。
+  `docs/picking-gpu-id-pass.md`；`docs/architecture.md`；`docs/interaction.md`；`docs/handoff-archive/2026-10.md`。
 - 前身/依赖：ADR 0007（entity-as-data 渲染器）、ADR 0008（SDF 圆/弧渲染）。ADR 0007 的静态
   `GpuBatch` + `commit_upload` 前缀复用是本 ADR 的硬前提。
 - 裁决关系：本 ADR 取代一份 2026-10-17 提出的外部设计提案（46 节 + 追加修正）。该提案的**三段纪律**

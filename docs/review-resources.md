@@ -28,7 +28,7 @@
 本轮 Linux release lavapipe 离屏 smoke 实际通过：
 `/tmp/opencode/yacr-linux-20261004-011217-419337`；2 帧 CAD，导航改变相机和像素，
 `renderError=null`。输入为**合成图纸**；不是参考图视觉验收、真实 GPU 或桌面窗口验证。
-完整统一门禁结果在 `docs/handoff.md` 按当前代码轮次记录。
+完整统一门禁结果见 `docs/handoff-archive/2026-10.md` 的 2026-10-04 轮次。
 
 ## 范围限制
 

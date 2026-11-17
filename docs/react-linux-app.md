@@ -77,7 +77,7 @@ GDK_BACKEND=x11 DISPLAY=:0 ./target/release/yacr --open /abs/drawing.dwg
 
 参数（透传给宿主）：`--open <path>`、`--fonts-dir <path>`、`--images-dir <path>`、`--probe`，
 外加**裸位置参数**：`yacr <path>` 与 `yacr --open <path>` 等价（flatpak 后由文件管理器
-`Exec=… %F` 调用的前置条件）。**语义（已实现，有真机证据，见 `docs/handoff.md` 2026-10-17 小节）**：
+`Exec=… %F` 调用的前置条件）。**语义（已实现，有真机证据，见 `docs/handoff-archive/2026-10.md` 2026-10-17 小节）**：
 
 - 多个位置参数只打开**第一个**，其余**显式诊断**（多文档打开 NOT IMPLEMENTED，绝不静默丢弃）；
 - 同时给 `--open` 与位置参数时 **`--open` 优先**（与顺序无关），被忽略的位置参数**显式报告**；
@@ -577,7 +577,7 @@ fixture 几何直接透出生产 DOM 视口、无蒙层；About in-DOM 覆盖层
   真机 5K/`scale=2` 复测 **用户报告 PASS（2026-11-12）**，无 agent 抓帧/像素证据。GTK3 只提供
   整数 scale，
   WebKitGTK 2.54 不使用 `wp_fractional_scale_v1`，因此**分数显示缩放本身**仍未验收；本修复处理的是
-  page zoom / text scaling 造成的 dpr 差异。详见 `docs/handoff.md` 2026-11-12。
+  page zoom / text scaling 造成的 dpr 差异。详见 `docs/handoff-archive/2026-11.md` 2026-11-12。
 - **仍未运行 / 未支持**：**DPR>1/分数缩放**（只测 `scale=1`；5K 报告已定位并修代码，但真机复测
   NOT RUN）、GTK **toplevel**
   替换、GPU 设备丢失、vendor 广度、几何/像素精度、性能/60fps、跨平台、打包、vendor/golden。

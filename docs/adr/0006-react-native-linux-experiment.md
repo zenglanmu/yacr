@@ -22,7 +22,7 @@ CAD 能力，失败必须显式状态。
 
 ## 证据（本轮实际执行）
 
-环境（只读诊断，见 `docs/handoff.md` 实验段）：
+环境（只读诊断，见 `docs/handoff-archive/2026-10.md` 的 2026-10-14 实验段）：
 
 - GNOME/mutter Wayland 会话，XWayland `:0` 可连接（`xdpyinfo` 退出码 0，扩展含
   `Present/GLX/DRI3/XWAYLAND`）；NVIDIA Quadro P620 + Intel UHD 双显卡；

@@ -262,5 +262,5 @@ Foundation 前需重新核对条款（本项目“开发中，无可交付产品
 - CI 的 `Get-AuthenticodeSignature = Valid` 依赖 runner 导入证书，不能作为用户机器上的
   信任证据。
 - 密钥生成、备份、轮换与丢失恢复不在本仓库 CI 的证明范围内。
-- `docs/handoff.md` 的旧记录、`docs/evidence/**`、`docs/adr/**` 与历史 release notes 中
+- `docs/handoff-archive/` 的旧记录、`docs/evidence/**`、`docs/adr/**` 与历史 release notes 中
   的 `dev.yacr.app`、SignPath 结论是历史事实，不随本轮切换回写。

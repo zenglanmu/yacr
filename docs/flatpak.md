@@ -193,7 +193,7 @@ bundle 是未签名的，CI summary 会明确写 `UNSIGNED`。
 > 变量影响：报告者 A/B 里 `WEBKIT_DISABLE_DMABUF_RENDERER=1` 与
 > `WEBKIT_DMABUF_RENDERER_FORCE_SHM=1` **仍然崩溃**。修复是让 CAD 子表面物理尺寸向上对齐到
 > 整数 buffer scale 的倍数，并由该值反推逻辑尺寸（render target == 子表面），见
-> `docs/handoff.md` 2026-11-12。
+> `docs/handoff-archive/2026-11.md` 2026-11-12。
 >
 > 下面这条 WebKitGTK 2.54.1（运行时 `libwebkit2gtk-4.1.so.0.24.4`）显式同步缺陷仍然存在
 > （上游 280210 / 324551，2.54.2 已修），但它是**独立的**上游问题；本次真机日志不能证明它，

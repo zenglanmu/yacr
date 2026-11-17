@@ -68,7 +68,7 @@
  *
  * The script starts and stops `scripts/serve-web.py` itself. `playwright` is not
  * a repository dependency: install it outside the repo and point `NODE_PATH` at
- * its `node_modules` (see `docs/ci.md` / the handoff entry this script came from).
+ * its `node_modules` (see `docs/ci.md` / the originating entry in `docs/handoff-archive/`).
  *
  * Requires the bundle to exist already (`bash scripts/build-web-ui.sh`); this
  * script never builds it, and a missing bundle is a loud non-zero exit.

@@ -54,4 +54,4 @@ in both (relative difference 5e-14).
 
 Those numbers are a bounded local experiment. They are **not** a golden
 regression, not a performance measurement, and not product acceptance; see
-`docs/compatibility.md` and `docs/handoff.md` for the current evidence boundary.
+`docs/compatibility.md` and `docs/validation*.md` for the current evidence boundary.

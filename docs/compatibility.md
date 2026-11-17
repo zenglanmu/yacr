@@ -140,7 +140,7 @@ face-with-hole 1/8、instance-scaled 3/36；theater-2017 1246 实体/96,333 三�
 | 显示 LOD 不影响计算 / 代理标记缓存几何 | 实现（SPLINE 解析/采样与显示 LOD 解耦；天正代理标缓存几何） | 见上表 SPLINE 行与「天正/探索者代理」行 |
 | **源单位未知 → 显示「图纸单位」** | **已实现（2026-10-26 补齐）**：测量与点回显的 `unit: null`（宿主对 `Unit::DrawingUnits` 的唯一投影）现在渲染目录键 `units.unknown`（图纸单位 / “Drawing units”），面积按其平方模板得 `图纸单位²`；`angle` 仍只带 `°`（角度自带单位，不是未知源单位）。**区分保留**：字段缺失/非字符串/空串仍**不**加后缀——那是坏行，不是宿主声明「图纸单位」 | `crates/cad-host/src/command_log.rs:183-192`（`DrawingUnits → None`）、`apps/desktop-ui/src/commands/command-log.ts:144-147`（`unitLabel`）、`:154-157`（`areaUnit` 平方同一个标签）、ID 点行同路径；测试 `apps/desktop-ui/test/command-log.test.ts`「an unknown source unit reads as the drawing-units label in the active language」 |
 
-> 该条**已闭环**（2026-10-26）：`units.unknown` 现由命令窗口真实消费；`docs/handoff.md`「接线验收」里
+> 该条**已闭环**（2026-10-26）：`units.unknown` 现由命令窗口真实消费；`docs/handoff-archive/2026-10.md` 的 2026-10-26 条目「接线验收」里
 > 「未知源单位显示图纸单位」一句至此成立。仍未做的是**用户指定单位/校准**（spec 同句后半段）——
 > 那需要新的单位设置面，不在本批范围。
 
@@ -837,7 +837,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
   "UI→宿主→命令→文档"的接线与结果，不构成 OS 级输入集成证据。**桌面端 `TRIM`/`EXTEND` 的取点已接线**（选择目标 + 边界两次实体拾取 → `CONFIRM`），旧文档中的
   `linux.trim`/`linux.extend` 显式 `Unsupported` **已不存在**；但当前唯一在库 DWG 夹具是四条**平行**竖线，
   因此"桌面端真的裁剪出几何改动"与本仓库的 EXTEND 演示**尚未取得真机证据**（命令层与宿主层有确定性测试，
-  见 `docs/handoff.md`）。Windows 宿主 2026-10-23 起已实现（Tier 0 编译 + Wine 拒绝合同，视觉/运行时未验收）；
+  见 `docs/handoff-archive/2026-10.md` 的同日期条目）。Windows 宿主 2026-10-23 起已实现（Tier 0 编译 + Wine 拒绝合同，视觉/运行时未验收）；
   macOS 宿主已实现但仅 CI 编译；Android 自 2026-11-01 起是原生 `native-below` 载体（编译级证据，
   设备运行/Vulkan/像素 **NOT VERIFIED**）；2026-11-02 起 Android 已接 SAF 打开与 DXF 另存（设备/模拟器
   选择器与实际读写 **NOT RUN**）；Web 的 wasm 会话已实现，其 host target 仍是空壳。
@@ -856,7 +856,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
   命令行本就可达。**Ribbon 已接线**（2026-10-21）：`view` 标签的 3D 面板提供 `2D/3D`、`投影`、
   七种标准视图，`环绕` 按设计**可见但禁用**（手势理由）；文案复用既有 `view.*` 键。
   **真机 3D 出图已验证**（Quadro P620 / Vulkan / X11 —— CAD-on-top 时代证据，X11 现被显式拒绝）：ACIS 立方体在斜视下为 **6 顶点凸包、三面、
-  平行棱收敛 31.2%、对角线不等 10.1%**，隐藏边不穿透（`docs/handoff.md` 2026-10-21 条目）。
+  平行棱收敛 31.2%、对角线不等 10.1%**，隐藏边不穿透（`docs/handoff-archive/2026-10.md` 2026-10-21 条目）。
   边界：俯视正交下"有面立方体"与"填色方片"**像素等价**，故 2D 帧不能证明三维性；
   无 golden/跨 GPU/vendor/性能结论。
   **着色约定**：2D 保持**世界 -Z 头灯**（位级不变）；3D 用**相机相对、偏离视轴的固定主光**

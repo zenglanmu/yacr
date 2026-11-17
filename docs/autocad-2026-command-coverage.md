@@ -141,7 +141,7 @@
 - 每条命令：Rust 命令路径 + `COMMAND_TABLE` + dispatch + 能力门 + React 目录/gating/i18n
   + 契约测试；未支持选项一律具名拒绝。
 - 每 wave 独立 worktree/分支，隔离 `CARGO_TARGET_DIR`；合并后由 orchestrator 统一更新本文、
-  `docs/compatibility.md`、`docs/handoff.md`。
+  `docs/compatibility.md`、`docs/handoff-archive/2026-11.md`。
 - 共享单表（`CommandId`、`COMMAND_TABLE`、dispatch、UI catalog、i18n）冲突由 orchestrator
   按显式路径合并；合并后重跑 cad-app/cad-ui-core/前端全量/门禁。
 - 本轮所有结论仅 Linux 本机编译/契约；Windows/macOS/Android/Web 运行时 NOT VERIFIED。

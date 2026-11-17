@@ -3,7 +3,7 @@
 - 状态：**已接受（Accepted，2026-10-16）**——取代 ADR 0006 的“实验”定位，并使 ADR 0002/0003
   中“旧桌面 UI 为桌面合成基线”的部分作废。
 - 相关：`CAD_IMPLEMENTATION_SPEC.md` §21；`docs/architecture.md`；`docs/react-linux-app.md`；
-  `docs/handoff.md`。
+  `docs/handoff-archive/2026-10.md`（2026-10-16 条目）。
 
 ## 背景
 

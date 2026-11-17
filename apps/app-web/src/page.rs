@@ -58,7 +58,7 @@
 //! navigation, and it has **no** `invoke`/`probe_input`/`shell_*` surface (those
 //! refuse with the explicit "no live CAD session" message there). Moving the worker
 //! onto this session is the remaining half of ADR 0024 stage ⑧ and is recorded as
-//! not done in `docs/handoff.md`.
+//! not done in `docs/handoff-archive/`.
 
 use std::cell::RefCell;
 

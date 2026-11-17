@@ -10,7 +10,8 @@
   [ADR-0023](0023-dom-on-top-cross-host-composition.md)（**现行合成权威**；本文修订其 D1 的「单一合成
   方向」表述与 §5 的「X11 web+canvas 显式延后」，**不**改其输入漏斗、弹窗围栏与单 presenter 不变量）。
 - 需求：`CAD_IMPLEMENTATION_SPEC.md` §21（本轮已同步修订，逐条对照见第 6 节）。
-- 前身证据（**本轮实跑探针**，不是历史结果复用；原始记录见第 0 节与 `docs/handoff.md` 顶部条目）：
+- 前身证据（**本轮实跑探针**，不是历史结果复用；原始记录见第 0 节与
+  `docs/handoff-archive/2026-10.md` 的 2026-10-23 条目）：
   WebKitGTK 2.52.6 在 Wayland GNOME 会话内的 X11/XWayland 实例里 **WebGL2 上下文可用**，
   `navigator.gpu === false`，WebKit WebProcess 持有 NVIDIA render node 的 DRM fd。
 - 影响：像素承载机制（新增 `surfaceMode: dom-canvas`）、`cad-db` 权威位置（wasm 侧）、`app-linux`
@@ -192,7 +193,7 @@ UI 不按平台分叉：
 - **import-in-wasm 分期**：阶段 ①–⑦ 全部只覆盖 **synthetic fixture**；DWG 导入/代理/资源解码在 wasm 侧属
   阶段 ⑧，**另立项**。不得把「canvas 能画线」当作「wasm 能打开 DWG」。
 - **ADR 0023 §5 的「平台合成 ADR（RenderTarget/HostTexture token 所有权）」仍独立延期**，**不被本文覆盖**：
-  它是 renderer 资源契约，与像素承载机制正交；`docs/handoff.md` 该条目原样保留。
+  它是 renderer 资源契约，与像素承载机制正交；`docs/handoff-archive/2026-10.md` 该条目原样保留。
 - 不做 X11 下的原生 drop-shadow/装饰窗口优化、不做 Wayland canvas 回退、不做 WebGPU 优先策略
   （`navigator.gpu` 为 false 已是本轮事实；若未来可用，属另行决策）。
 
@@ -222,7 +223,7 @@ UI 不按平台分叉：
 
 | # | 阶段 | 状态 | 判据 / 产出 |
 |---|---|---|---|
-| ① | 文档：本文 + SPEC §21 修订注记 + ADR 0023 增补 + `AGENTS.md` + `docs/handoff.md` | **本轮完成** | 五个 Markdown 文件；**零代码改动** |
+| ① | 文档：本文 + SPEC §21 修订注记 + ADR 0023 增补 + `AGENTS.md` + `docs/handoff-archive/2026-10.md`（2026-10-23 条目） | **本轮完成** | 五个 Markdown 文件；**零代码改动** |
 | ② | wasm renderer canvas 接通（启用 `wgpu/webgl`：`Cargo.toml:68` 加 feature，`cad-render-wgpu` 增 canvas surface 创建，wasm-only） | **未实现** | `ActiveBackend::WebGl2` 不再是死代码；配置/边界契约测试；架构门禁仍过 |
 | ③ | wasm 合成场景 + 相机（synthetic fixture → 场景批次 → pan/zoom，无 import） | **未实现** | 纯 wasm 单测/契约测试；无 GPU 断言只到批次层 |
 | ④ | `app-linux` X11 走 `dom-canvas`（`backend.rs` 一次性决议；WebGL2 不可用 → 标记行 + 码 6） | **未实现** | 拒绝合同测试（标记行 + 码 6）；D2 权威不变量契约测试 |

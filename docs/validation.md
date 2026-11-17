@@ -104,7 +104,7 @@ release 构建、Web/Android 图像加载器接线。
   其中 `cad-import-acadrust` 106 passed，含本轮新增的 5 个 0.6.3 契约测试（LAYOUT group 72/73
   被类型化、STYLE xdata 字体面类型化与 `read_styles` 优先级）。
 - 未执行：GPU/软件 Vulkan 套件、Linux 离屏 App、release 编译、真机/浏览器矩阵；
-  本次不构成渲染或兼容性验收。能力增量与未决项见 `docs/handoff.md`、`docs/compatibility.md`。
+  本次不构成渲染或兼容性验收。能力增量与未决项见 `docs/compatibility.md`。
 
 ## 2026-10-08：资源占用/显卡加速排查证据（本机真实桌面，非无头）
 
@@ -131,7 +131,7 @@ release 构建、Web/Android 图像加载器接线。
 相机变化重绘）、`cad-render-wgpu` `adapter_selection_tests`（6 项：
 auto/high/low 选择与回退）、`cad-cli-tools` `scene_budget_fails_explicitly_instead_of_oom`
 与 `gpu_selection_stable_names...`、`cli_contracts` `--gpu`/`--max-batches` 用法契约、
-`app-linux` options `--gpu` 契约。相关 crate 全量测试通过（见 `docs/handoff.md` 顶部）。
+`app-linux` options `--gpu` 契约。相关 crate 全量测试通过（见 `docs/handoff-archive/2026-10.md` 的同日期条目）。
 
 ## 已执行的测试
 
@@ -159,7 +159,7 @@ pkg-config，本环境无 sudo）；其外壳编译由 Android target 检查覆�
 
 ### 2026-11-17 ADR-0036 C3 契约测试（Linux，契约/单元证据）
 
-> 只记录本轮新增/改动的契约测试名；证据边界与 NOT RUN 项见 `docs/handoff.md` 同日条目。
+> 只记录本轮新增/改动的契约测试名；证据边界与 NOT RUN 项见 `docs/handoff-archive/2026-11.md` 的「迁移快照」。
 > **没有** GPU/像素/性能或非 Linux 载体结论。
 
 - C3a `MASSPROP`（`cad-app/src/tests/drawing/massprop_solid.rs`）：
@@ -524,7 +524,7 @@ Metal GPU 渲染与像素/视觉验收、原生文件对话框、配置目录写
 
 `v0.1` tag 首次触发 `build.yml` 的 `windows-release`/`macos-release` 时失败，经配置 GitHub
 API 鉴权拉取真实日志，定位并修复三个确定性脚本 bug（PE 导入 CRLF、fat `otool` 头、字体目录
-Windows 编码；详见 `docs/handoff.md`「CI 发布 job 首次运行失败与修复」）。修复后把 `v0.1`
+Windows 编码；详见 `docs/handoff-archive/2026-10.md`「CI 发布 job 首次运行失败与修复」）。修复后把 `v0.1`
 强制更新到修复提交并重跑，随后又让 `android-release` 自装工具链并再次验证：
 
 - run `https://github.com/zenglanmu/yacr/actions/runs/37916376185`（sha `2b09fcf`，push tag

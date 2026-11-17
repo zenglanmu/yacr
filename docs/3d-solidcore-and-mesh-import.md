@@ -125,7 +125,7 @@ solidcore 1.0.1 的公开 API 覆盖（详见 ADR-0036 与 docs.rs）：
 | `cad-import-acadrust` | ACIS 发出 `Body3d`，保留 `exact`/`edges`/`tolerance`；导出：P0 只写 `POLYFACE`，**P3a 起**单壳全平面直线体的精确 B-Rep 写回 `3DSOLID`（SAT 文本），其余仍 `POLYFACE` 并记 `acis.*` |
 | `cad-representation`/`cad-scene` | body → `Mesh` / `LineSegments` / `Missing`；精度与来源透传 |
 | `cad-spatial`/`cad-measure`/`cad-app` | 独立 pick family `body`；无 snap；`MASSPROP` 显式拒绝（P0 时；C3a 已改为精确测量，见 §4.3）；`select_filter` 用 `type_key` |
-| 文档 | ADR-0036、`kernel-acis.md`、`compatibility.md`、`dxf-entity-coverage.md`、`handoff.md` |
+| 文档 | ADR-0036、`kernel-acis.md`、`compatibility.md`、`dxf-entity-coverage.md`、`handoff-archive/2026-11.md` |
 
 ### 4.2 P0.1（已完成）
 

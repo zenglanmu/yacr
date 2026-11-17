@@ -1,7 +1,8 @@
 # AGENTS.md
 
 Rust CAD 系统，**开发中，无可交付产品**。需求唯一权威是
-`CAD_IMPLEMENTATION_SPEC.md`（v2.0）；逐轮交接入口 `docs/handoff.md`；桌面 UI 决策见
+`CAD_IMPLEMENTATION_SPEC.md`（v2.0）；逐轮交接记录在 `docs/handoff-archive/`，当前能力与证据边界见
+本文件平台表、`docs/compatibility.md`、`docs/validation*.md`；桌面 UI 决策见
 `docs/adr/0010-react-linux-host.md`，合成方向见 ADR 0023/0024，Android 载体见
 ADR 0027。
 
@@ -16,7 +17,7 @@ ADR 0027。
 >
 > **大量“已通过”只是合成测试或有界环境证据**（模拟器、软件 GPU、无头浏览器），不是产品验收。
 >
-> 这些证据边界**写在仓库内部文档**：`docs/handoff.md`、`docs/compatibility.md`、
+> 这些证据边界**写在仓库内部文档**：`docs/compatibility.md`、
 > `docs/validation*.md` 与下方平台表。不要复制进 UI 文案、`apps/landing/`、`docs/release-notes/`、
 > GitHub Release 或 README 的每个段落；用户可见面只保留必要的状态标签，或一句指向内部文档。
 
@@ -36,7 +37,7 @@ ADR 0027。
 5. 每项改动同步补契约测试与文档。
 6. 证据诚实：未运行就写 NOT RUN；合成测试、模拟器、软件渲染、无头浏览器结论不得推广为真机/
    真实 GPU/vendor/golden/性能结论；历史宿主的证据不得冒充 React 宿主结论。**边界统一写在
-   内部文档**（`docs/handoff.md`/`docs/compatibility.md`/`docs/validation*.md` 与本文件平台表），
+   内部文档**（`docs/compatibility.md`/`docs/validation*.md` 与本文件平台表），
    不复制到 UI 文案、`apps/landing/`、`docs/release-notes/` 或 GitHub Release。
 7. 不覆盖/删除陌生变更（并发实现常见）；先读源码与最新构建证据。
 8. **载体权威不可混淆**：`dom-canvas`（X11/XWayland、Web）只有 wasm 侧 CAD 会话持有 `cad-db`；
@@ -92,7 +93,7 @@ submodule**；克隆后必须 `git submodule update --init --recursive`，否则
 
 **日常只验证自己的改动范围**（改动 crate 的编译、自己的契约测试、自己文件的 fmt/clippy）。
 全量门禁与全量测试只在用户明确要求或发版/发布验收前运行；未运行必须写 **NOT RUN**（写进本轮
-`docs/handoff.md` 或验证记录，不是 UI 或发行说明）。
+`docs/validation*.md` 或本轮验证记录，不是 UI 或发行说明）。
 
 ```bash
 # 单 crate / 单测试（GPU/CLI 用例串行）
@@ -206,7 +207,7 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
 
 ## 平台状态（勿过度承诺）
 
-**平台边界的唯一汇总处是本表与 `docs/handoff.md`；UI、落地页与发行说明只保留状态标签，不复制
+**平台边界的唯一汇总处是本表与 `docs/compatibility.md`；UI、落地页与发行说明只保留状态标签，不复制
 表格里的免责描述。**
 
 | 载体 / 平台 | 实现与证据边界 |
@@ -226,7 +227,7 @@ tag 的 Release）；`web-deploy` 也只在该事件下把 `apps/app-web/dist-ui
 打包或发布成功都不是运行、GPU、像素或真机验收，也不要写“某平台已验收”。
 
 `README.md` 的平台段仍有历史残留（例如 Windows/Web 的旧状态），平台判断以本表、`docs/*-app.md`、
-`docs/handoff.md` 与实际代码为准。
+`docs/compatibility.md` 与实际代码为准。
 
 ## 提交纪律（已发生两次）
 
@@ -241,8 +242,8 @@ tag 的 Release）；`web-deploy` 也只在该事件下把 `apps/app-web/dist-ui
 
 ## 文档索引（按需读）
 
-`docs/architecture.md`（边界/不变量）、`docs/core-invariants.md`、`docs/handoff.md`（逐轮交接，
-最新事实优先；`2026-11-12` 及更早的条目在 `docs/handoff-archive/`，按月份分文件并带条目索引）、
+`docs/architecture.md`（边界/不变量）、`docs/core-invariants.md`、`docs/handoff-archive/`（逐轮交接，
+按月份分文件并带条目索引；新条目追加到当月文件，截至 2026-11-17 的 `docs/handoff.md` 内容已整体迁入）、
 `docs/compatibility.md`（能力表）、`docs/dgn.md`（DGN V7/V8 导入边界）、
 `docs/3d-solidcore-and-mesh-import.md`（solidcore 接入收益、代码改动与 SKP/STL 映射）、
 `docs/testing-dwg.md`、`docs/react-linux-app.md`、

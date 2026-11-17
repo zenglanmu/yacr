@@ -430,7 +430,7 @@ fn cancel_clears_the_started_tool() {
     // sampling leave the tool Idle, so it does not pin the sampling order. The
     // ordering decision itself is pinned by the pure `cancel_target` test in
     // `tests_input.rs`; a discriminating session-level test needs an observable
-    // `dispatch_command` seam and is recorded as a follow-up in `docs/handoff.md`.
+    // `dispatch_command` seam and is recorded as a follow-up in `docs/handoff-archive/`.
     assert!(!session.capturing());
 }
 

@@ -132,6 +132,19 @@ GitHub Actions 的 workflow artifact 需要登录且会过期，**不能**作为
 dispatch 的 publisher 里。publisher 全绿只代表 **artifact 上传成功**，不是签名/运行/GPU/设备/
 视觉验收。
 
+## 发布顺序与已知陷阱（v0.1.12 → v0.1.14 实测）
+
+顺序是 **bump → tag → 出包 → 发布 → 再补 notes + 落地页清单**。`tag` 树**不得**包含
+`docs/release-notes/<version>.md`：
+
+- `test-landing-site.py` 与 `downloads.json`/`changelog.json` 需要**出包之后**的真实 size/sha256，
+  提前把 notes 放进 tag 会让这些检查在构建前就失败。
+- v0.1.13 首轮 tag（`9e00f728`）正是这样失败的；`7600b316` 只把 notes 移出 tag 树后重跑才通过。
+  同一轮 `macos-release` 在排队阶段被取消（`runner_name` 空、`steps: []`、无构建日志），
+  重跑即可，不是代码问题。
+- v0.1.14 沿用该顺序：tag 树与 `main` 源码同源、不含 notes，notes 与落地页清单在出包后单独提交
+  （`a09f8ef3`）。
+
 ## 锁定工具版本
 
 `build.yml` 顶部 `env:` 与 `docs/build.md`、`Cargo.lock` 对齐：
@@ -266,6 +279,11 @@ cargo test -p cad-render-wgpu --test wgsl_validation --locked
 cargo test --workspace --exclude app-android --exclude app-web --exclude cad-render-wgpu --locked
 cargo test -p cad-render-wgpu --locked -- --test-threads=1
 ```
+
+**`rc=101` 先看磁盘**：2026-11-17 的全量 `cargo test --workspace` 前两次退出 101 是
+`No space left on device`（`target/` 涨到 148 G），不是断言失败。处理：删掉可重建的 `target/`，
+再以 `CARGO_INCREMENTAL=0` 与 `CARGO_PROFILE_{TEST,DEV}_DEBUG=0` 从零重建复跑；之后日志里
+`No space left` 计数为 0 才算真跑过。判读失败原因前先确认 log 里没有写盘错误。
 
 浏览器 bundle（与 CI 的 `web-build` 同一条命令；**本地**运行，产物 git 忽略）：
 

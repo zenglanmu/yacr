@@ -2,7 +2,7 @@
 
 Status: **partial, contract-tested**. Rust command layer + session typed-argument
 grammar + frontend catalog/inspection tables are wired. This file is the honest
-boundary record; `docs/compatibility.md`, `docs/handoff.md` and
+boundary record; `docs/compatibility.md`, `docs/handoff-archive/2026-11.md` and
 `docs/autocad-2026-command-coverage.md` were deliberately **not** touched by this
 batch.
 

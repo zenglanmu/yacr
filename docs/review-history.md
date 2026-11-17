@@ -26,7 +26,7 @@
 --locked` 为 **17 passed / 0 failed**。严格 workspace clippy（排除 Android/Web）、
 架构、fixture manifest、workflow 与 i18n 检查已通过。
 
-完整主机测试、Linux release 离屏门禁和 wasm 检查的本轮结果见 `docs/handoff.md`。
+完整主机测试、Linux release 离屏门禁和 wasm 检查的本轮结果见 `docs/handoff-archive/2026-10.md` 的 2026-10-04 轮次。
 合成测试/软件 GPU 证据不能推广为真实图纸视觉正确、真实 GPU 或真机兼容结论。
 
 ## 仍需审查

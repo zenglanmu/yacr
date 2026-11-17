@@ -6,7 +6,7 @@ and pinned by Rust contract tests (`crates/cad-app/src/tests/layer_commands/*`,
 No GUI, GPU, pixel, real-DWG or cross-platform run was performed for this batch.
 
 This file is the per-command boundary record for this round. `docs/compatibility.md`,
-`docs/handoff.md` and `docs/autocad-2026-command-coverage.md` are owned by the
+`docs/handoff-archive/2026-11.md` and `docs/autocad-2026-command-coverage.md` are owned by the
 orchestrator and deliberately not edited here.
 
 ## Canonical paths and official names

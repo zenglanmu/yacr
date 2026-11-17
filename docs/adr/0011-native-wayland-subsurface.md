@@ -5,7 +5,7 @@
   DPR>1/分数缩放、toplevel 替换、设备丢失、vendor/精度/性能仍 **NOT RUN**；**最终 Oracle（W3 attempt3）
   终判 ACCEPT-WITH-LIMITATIONS（无 blocker，有界本地验收：GNOME/Mutter + P620 + `scale=1`；非完整产品）**。
 - 相关：`CAD_IMPLEMENTATION_SPEC.md` §21；`docs/react-linux-app.md`；`docs/architecture.md`；
-  `docs/validation-native-wayland-2026-10-16.md`；`docs/handoff.md`；
+  `docs/validation-native-wayland-2026-10-16.md`；`docs/handoff-archive/2026-10.md`（2026-10-16 条目）；
   `.slim/deepwork/native-wayland/`（含 `design-inputs.md`、`gate-w1.md`、`gate-w2-attempt*.md`、
   `w2a-remediation.md`、`w2b-remediation.md`、`w2-native-probe.md`）。
 - 前身：ADR 0010（React/Tauri 宿主）。ADR 0006/0010 描述的是**当时**的 X11/XWayland

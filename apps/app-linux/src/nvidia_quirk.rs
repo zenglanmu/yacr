@@ -4,7 +4,7 @@
 //! WebKitGTK/NVIDIA defect. It is **not** the cause of the reported 2026-11-12
 //! real-machine startup crash: that run's `wl_display.error` named
 //! `wl_surface` error 2 (`invalid_size`) for an odd 3963x1645 CAD child buffer at
-//! `buffer_scale = 2`, i.e. **yacr's own** surface (see `docs/handoff.md`
+//! `buffer_scale = 2`, i.e. **yacr's own** surface (see `docs/handoff-archive/2026-11.md`
 //! 2026-11-12 and `wayland_aligned_buffer_size`). Both
 //! `WEBKIT_DISABLE_DMABUF_RENDERER=1` and `WEBKIT_DMABUF_RENDERER_FORCE_SHM=1`
 //! left that crash unchanged, as expected — neither touches our surface.

@@ -140,6 +140,6 @@ python3 scripts/check-architecture.py
 
 ## 未触碰
 
-`acadrust` 源码、`Cargo` patch、`docs/compatibility.md`、`docs/handoff.md`、
+`acadrust` 源码、`Cargo` patch、`docs/compatibility.md`、`docs/handoff-archive/2026-11.md`、
 `docs/autocad-2026-command-coverage.md` 均未修改。`docs/shortcuts.md` §2b 因新增三个别名按门禁
 要求同步了别名表与计数。

@@ -17,7 +17,8 @@
 
 ## 1. 问题
 
-2026-11-05 的 base/overlay 两层设计（`docs/handoff.md`）只解决了“移动鼠标不重绘/重新分页底图”：
+2026-11-05 的 base/overlay 两层设计（`docs/handoff-archive/2026-11.md` 同日条目）只解决了“移动鼠标
+不重绘/重新分页底图”：
 base colour/depth 与 overlay colour/depth 分离，overlay 每帧合成。但光标仍属于
 `OverlayInputs.cursor`，因此每次 `pointermove` 都会：
 
@@ -31,7 +32,7 @@ Phase 1 已把“run-free suffix commit”的 GC、pulled 重建、base draw-pla
 suffix commit 的 `commit_us` p50 从 19.95 ms 降到 2.16 ms，`frame_total` p50 从 62.8 ms 降到
 10.5 ms）。但每次移动仍要付一次场景准备 + suffix commit + pick table 增量 + lineweight 扫描，
 并且准备 token 在连续快速移动时会被不断作废（`crates/cad-engine/src/render/mod.rs:415`），
-光标可能停在上一次已发布位置直到手停下来。`docs/handoff.md`（2026-10-25）已把
+光标可能停在上一次已发布位置直到手停下来。`docs/handoff-archive/2026-10.md`（2026-10-25）已把
 “cursor 作为不参与发布令牌的动态 overlay”记为后续 ADR 事项。
 
 问题不是“底图重画”，而是：
