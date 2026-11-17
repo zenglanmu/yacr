@@ -23,13 +23,18 @@ fn dimension_placement_scales_rotates_then_translates() {
 }
 
 #[test]
-fn hatch_sweeps_follow_their_winding() {
+fn hatch_arc_sweeps_follow_their_winding() {
     let tau = std::f64::consts::TAU;
-    let half = std::f64::consts::PI / 2.0;
-    assert!((directed_sweep(half, 0.0, false) + half).abs() < 1e-9);
-    assert!((directed_sweep(0.0, half, true) - half).abs() < 1e-9);
+    let quarter = std::f64::consts::FRAC_PI_2;
+    // The stored sweep is always the positive difference; a clockwise edge is
+    // mirrored by `boundary_arc_parameter`, not by wrapping the angles.
+    assert!((boundary_arc_sweep(0.0, quarter) - quarter).abs() < 1e-9);
+    assert!((boundary_arc_sweep(quarter, 0.0) - 3.0 * quarter).abs() < 1e-9);
     // A full turn is kept, not collapsed to zero.
-    assert!((directed_sweep(0.0, 0.0, true) - tau).abs() < 1e-9);
+    assert!((boundary_arc_sweep(0.0, tau) - tau).abs() < 1e-9);
+    // ... and a clockwise edge starts at the negated stored angle.
+    assert!((boundary_arc_parameter(quarter, quarter, 0.0, false) + quarter).abs() < 1e-9);
+    assert!((boundary_arc_parameter(quarter, quarter, 0.0, true) - quarter).abs() < 1e-9);
 }
 
 fn rect_path(x0: f64, y0: f64, x1: f64, y1: f64) -> BoundaryPath {
@@ -380,11 +385,13 @@ fn user_defined_pattern_without_families_is_synthesized() {
 }
 
 #[test]
-fn pattern_families_rotate_the_offset_with_the_pattern_angle() {
+fn pattern_families_reproduce_the_stored_rows() {
     // Values from the committed `isometric_grid.dxf`: pattern angle 75 degrees,
-    // scale 0.5, a line at 120 degrees with a 1.5875 perpendicular offset. Before
-    // P6a the offset was not rotated, so it stopped being perpendicular to the
-    // final line direction (ADR U-7).
+    // scale 0.5, a line at 120 degrees with a 1.5875 perpendicular offset. The
+    // file's rows are **already evaluated** (angle 120 = 45 + 75, offset scaled
+    // by 0.5), so the composed families must reproduce them exactly — composing
+    // angle/scale a second time was ADR 0018 §B.7's "every hatch at 225° and 8×
+    // spacing" bug.
     let mut hatch = acadrust::entities::Hatch::new();
     hatch.pattern_angle = 75.0f64.to_radians();
     hatch.pattern_scale = 0.5;
@@ -399,7 +406,7 @@ fn pattern_families_rotate_the_offset_with_the_pattern_angle() {
     let pattern = import_pattern(&hatch);
     let families = pattern.families();
     let family = &families[0];
-    let expected_angle = (120.0f64 + 75.0).to_radians();
+    let expected_angle = 120.0f64.to_radians();
     assert!((family.angle - expected_angle).abs() < 1e-12);
     let direction = [family.angle.cos(), family.angle.sin()];
     let perpendicular = family.offset[0] * direction[0] + family.offset[1] * direction[1];
@@ -410,13 +417,9 @@ fn pattern_families_rotate_the_offset_with_the_pattern_angle() {
     );
     let magnitude =
         (family.offset[0] * family.offset[0] + family.offset[1] * family.offset[1]).sqrt();
-    assert!((magnitude - 0.793_75).abs() < 1e-9, "{magnitude}");
-    // The base point is scaled and rotated as well (pattern space -> hatch
-    // space): scale 0.5 then +75 degrees.
-    let base_x = 0.25 * 75.0f64.to_radians().cos();
-    let base_y = 0.25 * 75.0f64.to_radians().sin();
-    assert!((family.base[0] - base_x).abs() < 1e-9, "{:?}", family.base);
-    assert!((family.base[1] - base_y).abs() < 1e-9, "{:?}", family.base);
+    assert!((magnitude - 1.587_5).abs() < 1e-9, "{magnitude}");
+    assert!((family.base[0] - 0.5).abs() < 1e-9, "{:?}", family.base);
+    assert!(family.base[1].abs() < 1e-9, "{:?}", family.base);
 }
 
 #[path = "../../../cad-domain/tests/support/bulge_cases.rs"]

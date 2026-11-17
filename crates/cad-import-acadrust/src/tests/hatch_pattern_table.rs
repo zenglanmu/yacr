@@ -230,15 +230,18 @@ fn file_rows_win_over_the_table_and_are_not_reported() {
         });
     let out = convert(hatch);
 
+    // The file's rows are already evaluated (ADR 0018 §B.7), so the contract is
+    // that the *composed* families reproduce them: the domain's stored rows are
+    // pattern space, while `families()` applies the hatch angle and scale.
     let pattern = imported_pattern(&out.geometry);
     assert_eq!(pattern.lines.len(), 1, "{:?}", pattern.lines);
-    let line = &pattern.lines[0];
-    assert!((line.angle - 0.0).abs() < 1e-12, "{line:?}");
-    assert!((line.base_x - 0.25).abs() < 1e-12, "{line:?}");
-    assert!((line.base_y - 0.0).abs() < 1e-12, "{line:?}");
-    assert!((line.offset_x - 0.0).abs() < 1e-12, "{line:?}");
-    assert!((line.offset_y - 0.5).abs() < 1e-12, "{line:?}");
-    assert_eq!(line.dashes, vec![0.25, -0.125]);
+    let family = &pattern.families()[0];
+    assert!((family.angle - 0.0).abs() < 1e-12, "{family:?}");
+    assert!((family.base[0] - 0.25).abs() < 1e-12, "{family:?}");
+    assert!((family.base[1] - 0.0).abs() < 1e-12, "{family:?}");
+    assert!((family.offset[0] - 0.0).abs() < 1e-12, "{family:?}");
+    assert!((family.offset[1] - 0.5).abs() < 1e-12, "{family:?}");
+    assert_eq!(family.dashes, vec![0.25, -0.125]);
     assert!(
         matches!(out.completeness, Completeness::Complete),
         "{:?}",

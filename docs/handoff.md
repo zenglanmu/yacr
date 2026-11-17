@@ -789,6 +789,45 @@ cad-host 340、`cad-render-wgpu` 全 target（GPU 用例串行 `-- --test-thread
 > 新 → 旧。标题带日期与主题；每条末尾写证据边界（实跑 / NOT RUN / NOT VERIFIED）。
 > 再往前（`2026-11-12` 及更早）的条目见 `docs/handoff-archive/`。
 
+## 2026-11-17 HATCH 渲染调试：顺时针边界弧的补角约定 + 图案行「已求值」+ 文本岛不绘制
+
+触发：用户提供的外部真实 DWG（AC1018 工程地质纵断面，663 个 `HATCH`）+ 参考渲染 PNG（**不在仓库 `fixtures/`**，
+AGENTS.md 的外部大样本规则）。修复前 `cad-cli-tools render` 只剩 5 个巨大彩色圆盘，断面本体约 1 px。
+
+- **缺陷 1（边界弧读法）**：顺时针边界弧（`ccw=0`）的存储角度是**补角**（`360°−θ`），扫角必须取**存储差值**、
+  方向走镜像帧。`directed_sweep` 的整圈补正把一条 0.9°、27 单位弦的平弧读成 359°，单点落到离边界 3 500 单位处，
+  `drawing.bounds()` 被撑到 5528 × 10782（断面本体 1908 × 527），渲染视角随之坍缩。
+  证据：ezdxf #175（"complementary angles"，并明说**无官方文档**）、GDAL `ogrdxf_hatch.cpp`、acadrust
+  `count.rs`/`explode/mod.rs`，以及 acadrust #241 对 **44 个生产 DWG** 的实测（镜像读法 40 个文件 1e-7 接上；
+  字面读法 44 个全错，最大 1.7e6 单位）。见 ADR 0018 §B.7-1 与新增 **U-14**。
+- **缺陷 2（图案行双重变换）**：文件里的图案定义行是**已经求值**的（行角 = 行角+52、基点按 52 旋转并按 41 缩放、
+  dash ×41，同图案 45°/135° 与基点 `(5.656,0)`/`(0,5.656)` 自证），而 `HatchPattern::families()` 又按 ADR A.1
+  应用一次 41/52 ⇒ 间距 8→64、方向 135°→225°，图案几乎不可见。导入改为**反求值**（`unevaluated_pattern_row`），
+  导出改为**求值落盘**（`dxf_pattern`），往返仍逐值复现文件。见 §B.7-2。
+- **缺陷 3（文本岛被画成矩形）**：`92` 位 8/128 是**填充挖洞**，不是作者几何。`display()` 与 `FILL OFF` 的边界半边
+  现在跳过它们；`loops()` 仍保留（奇偶/捕捉/导出不变）。见 §B.7-3。
+- **诚实退化**：边界链交不上时按实测残差（> 路径对角 10%）记 `import.hatch_boundary_gap` 诊断 + 该 HATCH 的
+  `Partial` 理由（含数值），几何**照存储读数保留**——不丢边、不改读、不伪造闭合。
+- **修复后（同机同参数，Vulkan / P620）**：图界 **5528×10782 → 2010×1012**；最大 HATCH 绘制范围 **5 482 → 635 单位**；
+  渲染恢复为三幅断面 + 图例，图案按 8 单位/135° 出现。
+- **测试**：新增 `crates/cad-import-acadrust/src/tests/hatch_boundary_arcs.rs`（5 项：实测平弧接链、镜像恒等、
+  整圈不坍缩、图案行求值往返、不闭合只报告）、`cad-domain` 的
+  `text_island_loops_are_not_drawn_but_still_cut_the_fill`；改写 4 个把"文件行当图案空间行"的旧断言
+  （`pattern_families_reproduce_the_stored_rows`、`file_rows_win_over_the_table_…`、
+  `a_pattern_hatch_writes_…definition_rows`、`a_rotated_pattern_writes_…`）。
+- **已运行**：`cad-import-acadrust` 504、`cad-domain` 162、`cad-representation` 357、`cad-app` 3012、
+  `cad-spatial` 55、`cad-scene` 71、`cad-measure` 59（均 `--lib`，`--locked`）；`cargo fmt --all -- --check`；
+  `clippy -D warnings`（三个改动 crate）；`check-architecture.py` / `check-file-size.py` / `check-i18n.py`；
+  外部文件 `scan`/`render`（真 Vulkan / P620）。
+- **同名风险面已排查（同日追加）**：只有 HATCH 边界边是"绝对角度 + 方向位"；`ARC`/`ELLIPSE` 实体无方向位（恒逆时针，
+  `start > end` 本就该走长弧）、折线 bulge 带符号（`θ = 4·atan(b)`，无绕 0 歧义），均**不**重演本缺陷。
+  三份 bulge 实现（显示 / 域 / 导入）符号与圆心公式已逐项对齐；实测该文件 `ARC` 2 个（r 2.535、1.438 rad）、
+  `ELLIPSE` 0 个、bulge 563 段（最大 |θ| 1.54、无退化）。新增 `tests/arc_sweep.rs`（3 项）钉住"不要推广"。
+  残余：`normalize_sweep(0) = 2π` 会把 `start == end` 的 ARC 画成整圆，AutoCAD 侧行为未验证，保持现状并声明。
+- **NOT RUN**：全量 `cargo test --workspace`、GUI 宿主真机运行、`linux-host-smoke`、任何非 Linux 载体。
+  **NOT VERIFIED**：参考 PNG 与我们的渲染**不是同视口**（参考是裁切视图，本图含下方钻孔柱状文本），故**没有**
+  逐像素/golden 结论；`ratio ≠ 1` 的 DXF↔DWG 角度基差异、LibreDWG/ODA 逐字段对照、AutoCAD 另存 DXF 对照均未做（U-14）。
+
 ## 2026-11-15 晋升计划 P4/P5：`LAYDEL`/`LAYTHW`/`RENAME`/`LAYMRG`/`LAYOUTWIZARD`/`LENGTHEN`/`FILLET`/`CLIP`/`CLIPIT`/`STRETCH`/`JOIN`/`TXT2MTXT`/`HATCHEDIT` 升为完整实现（真机 GUI 证据）
 
 - **范围**：覆盖清单「部分实现 → 完整实现 晋升计划」的 **16 个命令名**晋升为**完整实现**

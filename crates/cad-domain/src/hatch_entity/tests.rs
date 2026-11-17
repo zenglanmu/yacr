@@ -124,6 +124,34 @@ fn pattern_length(hatch: &HatchGeometry) -> f64 {
 // ---------------------------------------------------------------------------
 
 #[test]
+fn text_island_loops_are_not_drawn_but_still_cut_the_fill() {
+    // A hatch whose outer ring carries a text-box hole: the hole is a *fill*
+    // island (DXF group 92 bits 8/128), not boundary geometry the author drew,
+    // so the display must not draw its rectangle (ADR 0018 §B.7). The loop
+    // itself stays: the fill parity and the export both need it.
+    let mut loops = vec![rect(0.0, 0.0, 10.0, 10.0)];
+    let hole = rect(4.0, 4.0, 6.0, 6.0);
+    loops.push(HatchLoop::new(
+        hole.points,
+        Vec::new(),
+        HatchLoopFlags(HatchLoopFlags::TEXTBOX),
+    ));
+    let hatch = build(loops, HatchStyle::Normal, HatchFill::Solid);
+
+    // Two loops, one drawn boundary: only the outer rectangle.
+    assert_eq!(hatch.loops().len(), 2);
+    let boundaries = hatch
+        .display()
+        .iter()
+        .filter(|child| matches!(child, SemanticGeometry::Polyline { .. }))
+        .count();
+    assert_eq!(boundaries, 1, "{:?}", hatch.display());
+    // The hole still punches the fill: 100 - 4 = 96.
+    let area = display_area(&hatch);
+    assert!((area - 96.0).abs() < 1e-6, "{area}");
+}
+
+#[test]
 fn solid_style_areas_on_three_concentric_loops() {
     // Regions: 1 = 64, 2 = 32, 3 = 4.
     let cases = [

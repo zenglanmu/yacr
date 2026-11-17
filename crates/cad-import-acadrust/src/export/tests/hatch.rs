@@ -354,13 +354,42 @@ fn a_pattern_hatch_writes_its_style_type_angle_scale_double_and_definition_rows(
     assert!((number(&record, "41") - 2.5).abs() < 1e-9);
     assert_eq!(integer(&record, "77"), 1, "double");
     assert_eq!(integer(&record, "78"), 1, "one definition row");
-    assert!((number(&record, "53") - 0.25_f64.to_degrees()).abs() < 1e-9);
-    assert!((number(&record, "43") - 0.5).abs() < 1e-12);
-    assert!((number(&record, "44") - 0.25).abs() < 1e-12);
-    assert!((number(&record, "45") - 0.0).abs() < 1e-12);
-    assert!((number(&record, "46") - 1.5).abs() < 1e-12);
+    // Rows are written **evaluated** (ADR 0018 §B.7): the file carries group
+    // 41/52 *and* rows that already include them, so the written row is the
+    // composed one, not the domain's pattern-space row.
+    let expected_angle = 0.25 + angle;
+    assert!((number(&record, "53") - expected_angle.to_degrees()).abs() < 1e-9);
+    let base = [2.5 * 0.5, 2.5 * 0.25];
+    assert!((number(&record, "43") - (angle.cos() * base[0] - angle.sin() * base[1])).abs() < 1e-9);
+    assert!((number(&record, "44") - (angle.sin() * base[0] + angle.cos() * base[1])).abs() < 1e-9);
+    let offset = [0.0, 2.5 * 1.5];
+    assert!(
+        (number(&record, "45") - (angle.cos() * offset[0] - angle.sin() * offset[1])).abs() < 1e-9
+    );
+    assert!(
+        (number(&record, "46") - (angle.sin() * offset[0] + angle.cos() * offset[1])).abs() < 1e-9
+    );
     assert_eq!(integer(&record, "79"), 2, "two dashes");
-    assert_eq!(values(&record, "49"), vec!["0.5", "-0.25"]);
+    assert_eq!(values(&record, "49"), vec!["1.25", "-0.625"]);
+    // The exact contract: what the file says re-composes to the same families.
+    let after = single_hatch(&bytes);
+    let HatchFill::Pattern(after_pattern) = after.fill() else {
+        panic!("expected a pattern fill");
+    };
+    let HatchFill::Pattern(source) = pattern_fill("CUSTOM_RIDGE", angle, 2.5, true) else {
+        unreachable!()
+    };
+    let expected = source.families();
+    let actual = after_pattern.families();
+    assert_eq!(expected.len(), actual.len());
+    for (a, b) in expected.iter().zip(&actual) {
+        assert!((a.angle - b.angle).abs() < 1e-9, "{a:?} vs {b:?}");
+        assert!((a.base[0] - b.base[0]).abs() < 1e-9, "{a:?} vs {b:?}");
+        assert!((a.base[1] - b.base[1]).abs() < 1e-9, "{a:?} vs {b:?}");
+        assert!((a.offset[0] - b.offset[0]).abs() < 1e-9, "{a:?} vs {b:?}");
+        assert!((a.offset[1] - b.offset[1]).abs() < 1e-9, "{a:?} vs {b:?}");
+        assert_eq!(a.dashes.len(), b.dashes.len());
+    }
     // No clipped lines: the only 10/20 pairs are the elevation, the boundary
     // vertices and (zero) seeds.
     assert_eq!(values(&record, "98"), vec!["0"]);
@@ -399,7 +428,7 @@ fn a_rotated_pattern_writes_the_raw_rows_and_the_rotated_hatch_angle() {
     let rotated = hatch
         .transformed(&rotation_z(25.0_f64.to_radians()))
         .expect("an in-plane rotation is a similarity");
-    let (bytes, report) = export_one(SemanticGeometry::Hatch(Box::new(rotated)));
+    let (bytes, report) = export_one(SemanticGeometry::Hatch(Box::new(rotated.clone())));
     let record = hatch_record(&bytes);
 
     // Group 52 carries the rotated hatch-level angle; group 41 is untouched.
@@ -408,13 +437,44 @@ fn a_rotated_pattern_writes_the_raw_rows_and_the_rotated_hatch_angle() {
     // One raw row, not the two families a `double` pattern composes to.
     assert_eq!(integer(&record, "78"), 1, "raw definition rows only");
     assert_eq!(integer(&record, "77"), 1, "the raw double flag");
-    // The row itself is the imported definition, not a rotated/scaled copy.
-    assert!((number(&record, "53") - 0.25_f64.to_degrees()).abs() < 1e-9);
-    assert!((number(&record, "43") - 0.5).abs() < 1e-12);
-    assert!((number(&record, "44") - 0.25).abs() < 1e-12);
-    assert!((number(&record, "45") - 0.0).abs() < 1e-12);
-    assert!((number(&record, "46") - 1.5).abs() < 1e-12);
-    assert_eq!(values(&record, "49"), vec!["0.5", "-0.25"]);
+    // The row carries the rotated, scaled definition (rows are evaluated in the
+    // file, ADR 0018 §B.7) — but still exactly one row, not the two families a
+    // `double` pattern composes to.
+    let composed = (10.0 + 25.0_f64).to_radians();
+    assert!((number(&record, "53") - (0.25 + composed).to_degrees()).abs() < 1e-9);
+    let base = [2.5 * 0.5, 2.5 * 0.25];
+    assert!(
+        (number(&record, "43") - (composed.cos() * base[0] - composed.sin() * base[1])).abs()
+            < 1e-9
+    );
+    assert!(
+        (number(&record, "44") - (composed.sin() * base[0] + composed.cos() * base[1])).abs()
+            < 1e-9
+    );
+    assert!((number(&record, "45") + composed.sin() * 2.5 * 1.5).abs() < 1e-9);
+    assert!((number(&record, "46") - composed.cos() * 2.5 * 1.5).abs() < 1e-9);
+    assert_eq!(values(&record, "49"), vec!["1.25", "-0.625"]);
+    // The rotated hatch's own families come back out of the written record.
+    let after = single_hatch(&bytes);
+    let HatchFill::Pattern(after_pattern) = after.fill() else {
+        panic!("expected a pattern fill");
+    };
+    let HatchFill::Pattern(rotated_pattern) = rotated.fill() else {
+        panic!("expected a pattern fill");
+    };
+    assert_eq!(
+        after_pattern.families().len(),
+        rotated_pattern.families().len()
+    );
+    for (a, b) in rotated_pattern
+        .families()
+        .iter()
+        .zip(&after_pattern.families())
+    {
+        assert!((a.angle - b.angle).abs() < 1e-9, "{a:?} vs {b:?}");
+        assert!((a.base[0] - b.base[0]).abs() < 1e-9, "{a:?} vs {b:?}");
+        assert!((a.offset[1] - b.offset[1]).abs() < 1e-9, "{a:?} vs {b:?}");
+    }
     assert!(report.entries.iter().any(|entry| {
         entry.code == "export.converted.hatch" && entry.message.contains("1 definition row")
     }));

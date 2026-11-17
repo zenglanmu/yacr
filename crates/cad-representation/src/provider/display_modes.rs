@@ -80,15 +80,17 @@ pub fn viewres_segment_ceiling(percent: u32) -> usize {
 
 /// The boundary loops of a hatch as display geometry, in world space.
 ///
-/// Identical to the boundary half of [`HatchGeometry::display`] (every loop,
-/// closed, in plane coordinates mapped through [`cad_domain::HatchPlane`]), so
-/// an outline-only `FILL OFF` draw keeps exactly the vertices — and therefore
-/// the snap points and pick parity — of the filled draw.
+/// Identical to the boundary half of [`HatchGeometry::display`] (every loop that
+/// is not a text-box/text-island fill hole, closed, in plane coordinates mapped
+/// through [`cad_domain::HatchPlane`]), so an outline-only `FILL OFF` draw keeps
+/// exactly the vertices — and therefore the snap points and pick parity — of the
+/// filled draw.
 pub(crate) fn hatch_outline_geometry(hatch: &HatchGeometry) -> Vec<SemanticGeometry> {
     let plane = hatch.plane();
     hatch
         .loops()
         .iter()
+        .filter(|loop_| !loop_.is_text_island())
         .map(|loop_| SemanticGeometry::Polyline {
             points: loop_
                 .points

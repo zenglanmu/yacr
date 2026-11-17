@@ -323,19 +323,38 @@ fn dxf_pattern(
             ),
         }
     };
+    // Pattern rows are written **evaluated**, which is what real files carry:
+    // groups 41/52 are metadata, while each row's angle, base point, offset and
+    // dash lengths already include them (measured, ADR 0018 §B.7). The domain
+    // keeps pattern-space rows; this is the exact inverse of the importer's
+    // `unevaluated_pattern_row`, so a round trip reproduces the stored numbers.
+    let scale = if pattern.scale.is_finite() && pattern.scale.abs() > f64::EPSILON {
+        pattern.scale
+    } else {
+        1.0
+    };
+    let (sin, cos) = pattern.angle.sin_cos();
+    let bake = |x: f64, y: f64| {
+        [
+            cos * scale * x - sin * scale * y,
+            sin * scale * x + cos * scale * y,
+        ]
+    };
     let written = DxfPattern {
         name: pattern.name.clone(),
         description: String::new(),
-        // Definition rows are pattern-space data and round-trip unchanged; the
-        // hatch-level angle/scale are applied by the consumer, not baked here.
         lines: pattern
             .lines
             .iter()
-            .map(|line| DxfPatternLine {
-                angle: line.angle,
-                base_point: Vector2::new(line.base_x + shift[0], line.base_y + shift[1]),
-                offset: Vector2::new(line.offset_x, line.offset_y),
-                dash_lengths: line.dashes.clone(),
+            .map(|line| {
+                let base = bake(line.base_x + shift[0], line.base_y + shift[1]);
+                let offset = bake(line.offset_x, line.offset_y);
+                DxfPatternLine {
+                    angle: line.angle + pattern.angle,
+                    base_point: Vector2::new(base[0], base[1]),
+                    offset: Vector2::new(offset[0], offset[1]),
+                    dash_lengths: line.dashes.iter().map(|d| d * scale).collect(),
+                }
             })
             .collect(),
     };

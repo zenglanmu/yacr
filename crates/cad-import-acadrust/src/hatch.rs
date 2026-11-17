@@ -60,10 +60,15 @@ pub(crate) fn append_boundary_edge(
             push_hatch_point(out, [l.end.x, l.end.y]);
         }
         BoundaryEdge::CircularArc(a) => {
-            let sweep = directed_sweep(a.start_angle, a.end_angle, a.counter_clockwise);
+            let sweep = boundary_arc_sweep(a.start_angle, a.end_angle);
             let n = arc_steps(sweep);
             for i in 0..=n {
-                let t = a.start_angle + sweep * (i as f64) / (n as f64);
+                let t = boundary_arc_parameter(
+                    a.start_angle,
+                    sweep,
+                    i as f64 / n as f64,
+                    a.counter_clockwise,
+                );
                 push_hatch_point(
                     out,
                     [
@@ -84,10 +89,15 @@ pub(crate) fn append_boundary_edge(
                 -u[1] * major_len * a.minor_axis_ratio,
                 u[0] * major_len * a.minor_axis_ratio,
             ];
-            let sweep = directed_sweep(a.start_angle, a.end_angle, a.counter_clockwise);
+            let sweep = boundary_arc_sweep(a.start_angle, a.end_angle);
             let n = arc_steps(sweep);
             for i in 0..=n {
-                let t = a.start_angle + sweep * (i as f64) / (n as f64);
+                let t = boundary_arc_parameter(
+                    a.start_angle,
+                    sweep,
+                    i as f64 / n as f64,
+                    a.counter_clockwise,
+                );
                 let (sin, cos) = t.sin_cos();
                 push_hatch_point(
                     out,
@@ -255,23 +265,141 @@ pub(crate) fn dedup_loop(points: &mut Vec<[f64; 2]>) {
     }
 }
 
-pub(crate) fn directed_sweep(start: f64, end: f64, counter_clockwise: bool) -> f64 {
+pub(crate) fn arc_steps(sweep: f64) -> usize {
+    ((sweep.abs() / 0.05).ceil() as usize).clamp(2, 4096)
+}
+
+/// The positive parameter sweep of a HATCH boundary arc.
+///
+/// A boundary arc's `counter_clockwise` flag is not only a direction: **a
+/// clockwise edge stores its angles mirrored** (the complementary angle,
+/// `360° - θ`), so the edge really runs from `-start` to `-end`. Read as literal
+/// angles, a flat 1° edge sweeps 359° — a 3 500-unit arc out of a 27-unit chord,
+/// which is the "one hatch explodes the drawing bounds" failure this build had.
+///
+/// Evidence (ADR 0018 §B.7, U-14): it is the de-facto convention every
+/// implementation follows. ezdxf mirrors clockwise hatch angles on load
+/// (<https://github.com/mozman/ezdxf/issues/175>, "no official documentation on
+/// this"); GDAL negates them (`ogrdxf_hatch.cpp`); acadrust's own boundary code
+/// does the same (`count.rs`'s `s = -1` axis, `explode/mod.rs`'s
+/// `(-end, -start)`); and acadrust issue #241 measured 44 production DWGs where
+/// the mirrored reading joins the boundary edges to 1e-7 in 40 of them while the
+/// literal reading misses in **all 44**. The Autodesk DXF/DWG references state
+/// only "start angle" / "is counterclockwise" and never spell out the
+/// interaction, so this is a de-facto convention, not a documented one.
+///
+/// The sweep is the **stored difference** (always positive); the direction is
+/// applied by [`boundary_arc_parameter`], not by wrapping the angles.
+pub(crate) fn boundary_arc_sweep(start: f64, end: f64) -> f64 {
     let tau = std::f64::consts::TAU;
-    let mut sweep = end - start;
-    if counter_clockwise {
-        while sweep <= 0.0 {
-            sweep += tau;
-        }
-    } else {
-        while sweep >= 0.0 {
-            sweep -= tau;
-        }
+    let raw = end - start;
+    let mut sweep = raw.rem_euclid(tau);
+    // `start = 0, end = 2π` normalises to zero but means a whole turn. Only a
+    // really identical angle pair is a degenerate zero-length edge.
+    if sweep.abs() <= HATCH_EPS && raw.abs() > HATCH_EPS {
+        sweep = tau;
     }
     sweep
 }
 
-pub(crate) fn arc_steps(sweep: f64) -> usize {
-    ((sweep.abs() / 0.05).ceil() as usize).clamp(2, 4096)
+/// The parameter of one boundary-arc sample, in the frame the edge stores.
+///
+/// A clockwise edge is traversed in the mirrored frame, which is the same point
+/// set as negating an ellipse's minor axis (ADR 0018 §B.7).
+pub(crate) fn boundary_arc_parameter(
+    start: f64,
+    sweep: f64,
+    fraction: f64,
+    counter_clockwise: bool,
+) -> f64 {
+    let stored = start + sweep * fraction;
+    if counter_clockwise {
+        stored
+    } else {
+        -stored
+    }
+}
+
+/// Largest junction gap a boundary path may have, relative to its own extent.
+///
+/// A closed boundary chain joins end to end. Real files round their vertices
+/// (this fixture quantises to 0.1–0.5 units against 5–30-unit features, ~1.5 % of
+/// a path), so a small residual is data, not a misreading. A junction that
+/// misses by a tenth of the path's own diagonal is a broken chain and is
+/// reported; nothing is ever dropped or re-read on the strength of it.
+const MAX_JOIN_GAP_FRACTION: f64 = 0.1;
+
+/// How well one boundary path's edges join, measured after sampling.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) struct BoundaryJoinReport {
+    /// The path has a junction missing by more than
+    /// [`MAX_JOIN_GAP_FRACTION`] of its own diagonal.
+    pub broken: bool,
+    /// Largest junction gap, in plane units.
+    pub max_gap: f64,
+    /// The path's own bounding-box diagonal, in plane units.
+    pub extent: f64,
+}
+
+/// Sample one HATCH boundary path and measure how its edges join.
+///
+/// Every edge goes through [`append_boundary_edge`], so the geometry is exactly
+/// the per-edge sampling; this only records the residuals the chain implies. A
+/// path whose stored parameters are read wrongly (or whose file genuinely does
+/// not close) shows up as a gap comparable to the path itself — reported by the
+/// caller, never silently re-read (ADR 0018 §B.7 / U-14).
+pub(crate) fn sample_boundary_path(
+    edges: &[BoundaryEdge],
+    out: &mut Vec<[f64; 2]>,
+    params: &TessellationParams,
+) -> BoundaryJoinReport {
+    let start_index = out.len();
+    let mut report = BoundaryJoinReport::default();
+    let mut previous: Option<[f64; 2]> = None;
+    let mut edge_points: Vec<[f64; 2]> = Vec::new();
+    for edge in edges {
+        // Sample the edge on its own: the loop dedups a repeated vertex, so the
+        // edge's own first sample (not the first point actually appended) is what
+        // the junction is measured against.
+        edge_points.clear();
+        append_boundary_edge(edge, &mut edge_points, params);
+        let Some((&edge_start, &edge_end)) = edge_points.first().zip(edge_points.last()) else {
+            continue;
+        };
+        if let Some(previous) = previous {
+            report.max_gap = report.max_gap.max(distance(previous, edge_start));
+        }
+        for &point in &edge_points {
+            push_hatch_point(out, point);
+        }
+        previous = Some(edge_end);
+    }
+    report.extent = extent(&out[start_index..]);
+    if let (Some(&first), Some(&last)) = (out.get(start_index), out.last()) {
+        report.max_gap = report.max_gap.max(distance(first, last));
+    }
+    report.broken = report.extent > 0.0 && report.max_gap > report.extent * MAX_JOIN_GAP_FRACTION;
+    report
+}
+
+fn distance(a: [f64; 2], b: [f64; 2]) -> f64 {
+    ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)).sqrt()
+}
+
+/// The bounding-box diagonal of a point set.
+fn extent(points: &[[f64; 2]]) -> f64 {
+    let mut min = [f64::INFINITY; 2];
+    let mut max = [f64::NEG_INFINITY; 2];
+    for p in points {
+        min[0] = min[0].min(p[0]);
+        min[1] = min[1].min(p[1]);
+        max[0] = max[0].max(p[0]);
+        max[1] = max[1].max(p[1]);
+    }
+    if !min[0].is_finite() {
+        return 0.0;
+    }
+    ((max[0] - min[0]).powi(2) + (max[1] - min[1]).powi(2)).sqrt()
 }
 
 // ---------------------------------------------------------------------------
@@ -375,14 +503,7 @@ pub(crate) fn import_pattern(h: &Hatch) -> HatchPattern {
             .pattern
             .lines
             .iter()
-            .map(|line| HatchPatternLine {
-                angle: line.angle,
-                base_x: line.base_point.x,
-                base_y: line.base_point.y,
-                offset_x: line.offset.x,
-                offset_y: line.offset.y,
-                dashes: line.dash_lengths.clone(),
-            })
+            .map(|line| unevaluated_pattern_row(line, h.pattern_angle, h.pattern_scale))
             .collect(),
         PatternRowSource::UserDefinedSynthesis => vec![HatchPatternLine {
             angle: 0.0,
@@ -408,6 +529,50 @@ pub(crate) fn import_pattern(h: &Hatch) -> HatchPattern {
         scale: h.pattern_scale,
         double: h.is_double,
         lines,
+    }
+}
+
+/// Translate one stored pattern row into the domain's **pattern-space** row.
+///
+/// A file's pattern-definition rows are stored **already evaluated**: the hatch
+/// record carries `41` (scale) and `52` (angle) *and* rows whose base points are
+/// rotated by that angle and whose offsets and dash lengths are multiplied by
+/// that scale. Measured on a real AC1018 file (ADR 0018 §B.7): the same
+/// pattern row reads `base = (5.656, 0), angle = 45°` at hatch angle 0 and
+/// `base = (0, 5.656), angle = 135°` at hatch angle 90°, with dash lengths
+/// `1.6 = 0.2 × 8` at scale 8 — the angle is baked into both the row angle and
+/// the base point, and the scale into both the offset and the dashes.
+///
+/// Our domain model stores pattern-space rows and re-applies angle/scale in
+/// [`HatchPattern::families`](cad_domain::HatchPattern::families) (ADR A.1), so
+/// copying the stored rows verbatim applies both **twice**: a measured ZBM22
+/// hatch drew every 64 units at 225° instead of every 8 units at 135°, i.e.
+/// almost no pattern lines at all. This undoes exactly that composition, so
+/// `families()` reproduces the file's rows and export writes them back
+/// unchanged.
+fn unevaluated_pattern_row(
+    line: &acadrust::entities::HatchPatternLine,
+    angle: f64,
+    scale: f64,
+) -> HatchPatternLine {
+    // A zero or non-finite scale cannot be divided out; the rows are then taken
+    // as the pattern-space definition (nothing is fabricated beyond the identity).
+    let scale = if scale.is_finite() && scale.abs() > HATCH_EPS {
+        scale
+    } else {
+        1.0
+    };
+    let (sin, cos) = angle.sin_cos();
+    let unrotate = |x: f64, y: f64| [(cos * x + sin * y) / scale, (-sin * x + cos * y) / scale];
+    let base = unrotate(line.base_point.x, line.base_point.y);
+    let offset = unrotate(line.offset.x, line.offset.y);
+    HatchPatternLine {
+        angle: line.angle - angle,
+        base_x: base[0],
+        base_y: base[1],
+        offset_x: offset[0],
+        offset_y: offset[1],
+        dashes: line.dash_lengths.iter().map(|d| d / scale).collect(),
     }
 }
 
