@@ -68,6 +68,11 @@ apps/app-web/dist-ui/
 fixtures/complex-test.dwg
 fixtures/debug-default-fonts.dwg
 
+# HATCH 渲染调试的本地证据（真实工程 DWG + 参考 PNG）。外部大样本不进仓库，
+# 也不进 `fixtures/manifest`；需要时从原始来源重新取。
+fixtures/test-hatch-render.dwg
+fixtures/test-hatch-render.png
+
 # Confidential Tianzheng (TCH_*) sample drawings. Never commit; tests read an
 # externally supplied path via `YACR_TEST_DWG` (a skip is not evidence).
 fixtures/test-tangent*
