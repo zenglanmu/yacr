@@ -9,7 +9,9 @@
 
 use super::*;
 
-use cad_import_acadrust::export::{export, ExportFormat, ExportLimits, ExportRequest, ExportSpace};
+use cad_import_acadrust::export::{
+    export, AcisVersion, DxfTarget, ExportFormat, ExportLimits, ExportRequest, ExportSpace,
+};
 use cad_import_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
 
 // ---------------------------------------------------------------------------
@@ -386,6 +388,8 @@ fn a_written_dimstyle_row_round_trips_through_save_and_open() {
         document_id: DocumentId(1),
         space: ExportSpace::Model,
         format: ExportFormat::DxfText,
+        acis_version: AcisVersion::default(),
+        dxf_target: DxfTarget::default(),
         limits: ExportLimits::default(),
         units: Some(UnitContext::drawing_units()),
     })

@@ -20,7 +20,9 @@ use super::*;
 
 use cad_domain::hatch::GradientStop;
 use cad_domain::HatchGradient;
-use cad_import_acadrust::export::{export, ExportFormat, ExportLimits, ExportRequest, ExportSpace};
+use cad_import_acadrust::export::{
+    export, AcisVersion, DxfTarget, ExportFormat, ExportLimits, ExportRequest, ExportSpace,
+};
 use cad_import_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
 
 /// A closed axis-aligned rectangle `[x0, x1] x [y0, y1]`, so the ramp covers a
@@ -166,6 +168,8 @@ fn the_degrees_to_radians_conversion_survives_export_and_reimport() {
         document_id: DocumentId(1),
         space: ExportSpace::Model,
         format: ExportFormat::DxfText,
+        acis_version: AcisVersion::default(),
+        dxf_target: DxfTarget::default(),
         limits: ExportLimits::default(),
         units: None,
     })

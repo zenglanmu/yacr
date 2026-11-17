@@ -322,7 +322,7 @@ pub(super) fn tessellated_volume(brep: BrepData) -> f64 {
 }
 
 pub(super) fn round_trip(brep: &BrepData) -> BrepData {
-    let sat = brep_to_sat(brep).expect("the planar fixture is writable");
+    let sat = brep_to_sat(brep, AcisVersion::default()).expect("the planar fixture is writable");
     let text = acadrust::SatWriter::write(&sat);
     let parsed = acadrust::SatDocument::parse(&text).expect("acadrust parses its own SAT text");
     sat_to_brep(&parsed)

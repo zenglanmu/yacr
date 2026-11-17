@@ -255,11 +255,15 @@ impl SolidBooleanManager {
     /// Start a boolean, superseding any running job.
     ///
     /// The caller has already validated the operands and refuses before this
-    /// point; the worker only executes the frozen plan.
+    /// point; the worker only executes the frozen plan. `tessellator` is the
+    /// carrier's display mesher (P2.1c part 1), shipped to the worker with the
+    /// modeler: the result is tessellated there, and a body with a NURBS face must
+    /// not lose its display because it crossed a thread.
     pub(crate) fn start(
         &mut self,
         plan: SolidBooleanPlan,
         modeler: Arc<dyn SolidModeler>,
+        tessellator: Option<Arc<dyn cad_kernel_adapter::SolidTessellator>>,
     ) -> CadResult<TaskStamp> {
         self.cancel_current();
         self.document = plan.document;
@@ -281,7 +285,13 @@ impl SolidBooleanManager {
                         let token = worker_cancel.clone();
                         move || token.is_cancelled()
                     };
-                    let terminal = run_boolean(&plan, modeler.as_ref(), &worker_stamp, &cancelled);
+                    let terminal = run_boolean(
+                        &plan,
+                        modeler.as_ref(),
+                        tessellator.as_deref(),
+                        &worker_stamp,
+                        &cancelled,
+                    );
                     // The receiver may already be gone (superseded + dropped):
                     // the terminal value is then simply lost.
                     let _ = result_tx.send(terminal);
@@ -363,6 +373,7 @@ impl SolidBooleanManager {
 fn run_boolean(
     plan: &SolidBooleanPlan,
     modeler: &dyn SolidModeler,
+    tessellator: Option<&dyn cad_kernel_adapter::SolidTessellator>,
     stamp: &TaskStamp,
     cancelled: &(dyn Fn() -> bool + Sync),
 ) -> Terminal {
@@ -436,7 +447,7 @@ fn run_boolean(
     if cancelled() {
         return Terminal::Failed(CadError::Cancelled);
     }
-    match crate::app_drawing::solids::solid_body(accumulated) {
+    match crate::app_drawing::solids::solid_body(accumulated, tessellator) {
         Ok(body) => Terminal::Body {
             body: Box::new(body),
             diagnostics,

@@ -10,7 +10,9 @@ use super::*;
 use cad_history::History;
 
 use crate::command_payload::{TableCreateCommand, TableEditCommand};
-use cad_import_acadrust::export::{export, ExportFormat, ExportLimits, ExportRequest, ExportSpace};
+use cad_import_acadrust::export::{
+    export, AcisVersion, DxfTarget, ExportFormat, ExportLimits, ExportRequest, ExportSpace,
+};
 use cad_import_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
 
 fn undo_depth(app: &Application) -> usize {
@@ -305,6 +307,8 @@ fn a_created_table_exports_and_reimports_with_the_same_sizes() {
         document_id: DocumentId(1),
         space: ExportSpace::Model,
         format: ExportFormat::DxfText,
+        acis_version: AcisVersion::default(),
+        dxf_target: DxfTarget::default(),
         limits: ExportLimits::default(),
         units: None,
     })

@@ -22,13 +22,18 @@ cad-kernel-adapter.workspace = true
 # 55ae49ef919b606bf77901df626ed9bb543e5212 (ADR-0036 D1, unchanged by this
 # crate).
 #
-# Four upstream crates are named directly (all at the same pin, all inside the
+# Five upstream crates are named directly (all at the same pin, all inside the
 # `solidcore` repository, and `scripts/check-architecture.py` allows exactly this
 # crate to name them):
 #
 # - `solidcore-ops`: the `Body`/`Body::from_record` boundary, the cancellation
 #   hook and the exact-pcurve call (`pcurve::pcurves_within`);
 # - `solidcore-record`: the portable record types;
+# - `solidcore-tess` (P2.1c part 1): the display mesher — `plan` over the record
+#   and `TessPlan::evaluate`, used by `src/tess.rs` to draw a NURBS face through
+#   the `SolidTessellator` seam. `publish = false` upstream, so it only exists at
+#   the pin; it is not a `[patch.crates-io]` entry and no other crate may name
+#   it;
 # - `solidcore`: **only** `eval::form` (`surface`, `curve`, `on_frame`) and the
 #   `eval::{Curve, Frame, Surface}` types those functions take — the exact rational
 #   NURBS form of a cylinder, cone, sphere or torus face and of a circle/arc edge
@@ -47,3 +52,4 @@ solidcore = { git = "https://github.com/tangency-labs/solidcore", rev = "55ae49e
 solidcore-convert = { git = "https://github.com/tangency-labs/solidcore", rev = "55ae49ef919b606bf77901df626ed9bb543e5212" }
 solidcore-ops = { git = "https://github.com/tangency-labs/solidcore", rev = "55ae49ef919b606bf77901df626ed9bb543e5212" }
 solidcore-record = { git = "https://github.com/tangency-labs/solidcore", rev = "55ae49ef919b606bf77901df626ed9bb543e5212" }
+solidcore-tess = { git = "https://github.com/tangency-labs/solidcore", rev = "55ae49ef919b606bf77901df626ed9bb543e5212" }

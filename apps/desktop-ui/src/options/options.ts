@@ -45,6 +45,27 @@ export const SETTINGS_ERROR = Object.freeze({
 export const PLOT_FORMATS: readonly string[] = Object.freeze(['svg', 'pdf']);
 
 /**
+ * The DXF container versions a Save-As may write (`"2010" | "2013" | "2018"`).
+ *
+ * These are the host's `ui.export.dxfVersion` tokens, default first: `2010`
+ * writes inline SAT text, `2013`/`2018` write the SAB blob in `ACDSDATA`. They
+ * are a **save-time** choice — the next DXF save uses the value, the open
+ * drawing is never re-encoded — and the host accepts exactly this list (a
+ * `"2019"` is refused, never folded back onto a default).
+ */
+export const DXF_VERSIONS: readonly string[] = Object.freeze(['2010', '2013', '2018']);
+
+/**
+ * The ACIS payload versions a Save-As may write (`"7.0" | "21.0"`).
+ *
+ * The host's `ui.export.acisVersion` tokens, default first. The version selects
+ * the header version of a 3DSOLID's ACIS payload (`7.0` = header 700, `21.0` =
+ * ASM header 21800), not which solids are exported, and it is applied when the
+ * file is saved. `21.0` needs a DXF of 2013 or later.
+ */
+export const ACIS_VERSIONS: readonly string[] = Object.freeze(['7.0', '21.0']);
+
+/**
  * The graphics backends the user may ask WGPU for (`"auto" | "vulkan" | "dx12"`).
  *
  * The values are the shared wire contract: the host stores the choice under the
@@ -376,6 +397,39 @@ export const OPTIONS_FIELDS: readonly OptionField[] = Object.freeze<OptionField[
     errorCode: SETTINGS_ERROR.invalidPlotFormat,
     labelKey: 'options.field.plotFormat',
     helpKey: 'options.help.plotFormat',
+  },
+  {
+    // The DXF container written by the next Save-As (`ui.export.dxfVersion`).
+    // A **save-time** choice: the host persists it and the exporter reads it when
+    // it builds the file, so changing the row touches neither the open drawing
+    // nor the session. The snapshot field, the write key and the config leaf are
+    // the same camelCase `dxfVersion`; a value outside the list is refused with
+    // the host's generic `settings.invalid_value`, never clamped to `2010`.
+    //
+    // Container before payload: the DXF row precedes the ACIS row, matching how
+    // a saved file nests them (a DXF wraps whatever 3DSOLID payload it holds).
+    id: 'dxfVersion',
+    tab: 'plot',
+    kind: 'select',
+    wire: 'dxfVersion',
+    key: 'dxfVersion',
+    choices: DXF_VERSIONS,
+    labelKey: 'options.setting.dxf_version.label',
+    helpKey: 'options.setting.dxf_version.help',
+  },
+  {
+    // The ACIS payload version written into a saved 3DSOLID
+    // (`ui.export.acisVersion`). Same staging and same save-time semantics as the
+    // DXF row above: it changes only the encoding of the payload the next save
+    // writes, never which solids are exportable and never the open drawing.
+    id: 'acisVersion',
+    tab: 'plot',
+    kind: 'select',
+    wire: 'acisVersion',
+    key: 'acisVersion',
+    choices: ACIS_VERSIONS,
+    labelKey: 'options.setting.acis_version.label',
+    helpKey: 'options.setting.acis_version.help',
   },
   {
     id: 'fontsDir',

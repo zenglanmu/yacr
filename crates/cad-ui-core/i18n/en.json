@@ -656,8 +656,8 @@
   "plot.no_document": "No drawing is open",
   "save.exported": "Saved DXF to {path}",
   "save.exported_partial": "Saved DXF to {path} (partial: {converted} converted, {dropped} dropped)",
-  "save.exported_acis_sat": "Saved DXF to {path} (a 3DSOLID is present, so the whole file is written as AC1024 to keep its ACIS SAT text inline)",
-  "save.exported_acis_sat_partial": "Saved DXF to {path} (partial: {converted} converted, {dropped} dropped; a 3DSOLID is present, so the whole file is written as AC1024 to keep its ACIS SAT text inline)",
+  "save.exported_acis_sat": "Saved DXF to {path} (written as AC1024/R2010, so a 3DSOLID carries inline ACIS SAT text; set DXF version 2013 or 2018 for a binary SAB payload)",
+  "save.exported_acis_sat_partial": "Saved DXF to {path} (partial: {converted} converted, {dropped} dropped; written as AC1024/R2010, so a 3DSOLID carries inline ACIS SAT text)",
   "save.export_failed": "Save failed: {reason}",
   "save.refused_source_path": "Refused: the target is the opened source drawing",
   "save.cancelled": "Save cancelled; nothing was written",
@@ -2935,5 +2935,11 @@
   "solid.boolean_done": "Solid boolean completed and committed on the first operand's layer",
   "solid.boolean_failed": "Solid boolean failed: {error}",
   "solid.boolean_cancelled": "Solid boolean cancelled; the drawing is unchanged",
-  "solid.boolean_stale": "Solid boolean discarded because an operand changed; the drawing is unchanged"
+  "solid.boolean_stale": "Solid boolean discarded because an operand changed; the drawing is unchanged",
+  "options.setting.acis_version.label": "ACIS payload version",
+  "options.setting.acis_version.help": "Version of the solid-modeler payload written into a saved 3DSOLID: 7.0 (SAT/SAB header 700, default) or 21.0 (ASM header 21800). It changes only the payload encoding, never which solids are exported, and 21.0 requires DXF version 2013 or 2018.",
+  "options.setting.dxf_version.label": "DXF version",
+  "options.setting.dxf_version.help": "Container version of a saved DXF: 2010 (default, inline SAT text), 2013 or 2018 (SAB blob in ACDSDATA). A DWG save is always AC1032 (R2018).",
+  "save.exported_acis_sab_dxf": "Saved DXF to {path}; it carries a 3DSOLID whose ACIS payload was rebuilt from the retained exact B-Rep as a binary SAB blob in the DXF ACDSDATA section, and no third-party CAD reader was run to verify it.",
+  "save.exported_acis_sab_dxf_partial": "Saved DXF to {path} (partial: {converted} converted, {dropped} dropped); it carries a 3DSOLID whose ACIS payload was rebuilt from the retained exact B-Rep as a binary SAB blob in the DXF ACDSDATA section, and no third-party CAD reader was run to verify it."
 }

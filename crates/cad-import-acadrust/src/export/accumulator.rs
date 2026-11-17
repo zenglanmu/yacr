@@ -50,10 +50,11 @@ pub(crate) struct ExportAccumulator {
     /// `true` once any `3DSOLID` record was queued — including one emitted as a
     /// block member and then drained into a `BLOCK_RECORD`.
     ///
-    /// The DXF writer serialises a `3DSOLID` payload inline as SAT text only
-    /// before AC1027 (see `export::export`), so the format decision must see a
-    /// solid wherever it was emitted; reading this flag on `entities` alone would
-    /// miss a body written inside a block definition.
+    /// The DXF container decides the `3DSOLID` payload form: inline SAT text
+    /// before AC1027, a SAB/ASM blob in `ACDSDATA` from AC1027 on (see
+    /// `export::export`). The report note must therefore see a solid wherever it
+    /// was emitted; reading this flag on `entities` alone would miss a body
+    /// written inside a block definition.
     pub written_solid3d: bool,
     /// Source objects whose `XCLIP` boundary was already reported. A clipped
     /// reference reaches the entity mapper once per array cell and once per

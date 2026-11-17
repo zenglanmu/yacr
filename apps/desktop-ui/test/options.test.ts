@@ -10,6 +10,8 @@ import { readFile } from 'node:fs/promises';
 import { createTranslator } from '../src/i18n.ts';
 import { POPUP_KINDS, popupView } from '../src/popup/popup.ts';
 import {
+  ACIS_VERSIONS,
+  DXF_VERSIONS,
   LOCALE_CHOICES,
   OPTIONS_FIELDS,
   OPTIONS_KEYS,
@@ -71,6 +73,10 @@ function snapshot(overrides = {}) {
     orbitSensitivityPercent: 100,
     gpuBudgetPercent: 90,
     plotFormat: 'svg',
+    // The two Save-As export versions: the host always reports them (its own
+    // defaults are `2010` and `7.0`).
+    dxfVersion: '2010',
+    acisVersion: '7.0',
     fontsDir: '/usr/share/fonts',
     // The WGPU backend is a shared wire key: snake_case in the snapshot too.
     wgpu_backend: 'auto',
@@ -118,8 +124,17 @@ test('every field sits on a declared tab exactly once and nothing else exists', 
   for (const field of OPTIONS_FIELDS) {
     assert.ok(tabById(field.tab), `${field.id} points at an undeclared tab`);
     assert.equal(fieldById(field.id), field);
-    assert.ok(field.labelKey.startsWith('options.field.'), field.id);
-    assert.ok(field.helpKey.startsWith('options.help.'), field.id);
+    // Two copy families are in use: the dialog's own `options.field.*` /
+    // `options.help.*` rows, and the export-version rows whose copy the host lane
+    // already published under `options.setting.<key>.{label,help}`.
+    assert.ok(
+      field.labelKey.startsWith('options.field.') || field.labelKey.startsWith('options.setting.'),
+      field.id,
+    );
+    assert.ok(
+      field.helpKey.startsWith('options.help.') || field.helpKey.startsWith('options.setting.'),
+      field.id,
+    );
   }
   assert.equal(fieldById('nope'), null);
   assert.deepEqual(fieldsForTab('display').map(field => field.id), [
@@ -130,7 +145,9 @@ test('every field sits on a declared tab exactly once and nothing else exists', 
     'snapEnabled', 'hoverPreview', 'snapSpacing', 'pickboxSize', 'apertureSize', 'leftDragPans',
     'orbitSensitivity',
   ]);
-  assert.deepEqual(fieldsForTab('plot').map(field => field.id), ['plotFormat']);
+  assert.deepEqual(fieldsForTab('plot').map(field => field.id), [
+    'plotFormat', 'dxfVersion', 'acisVersion',
+  ]);
   assert.deepEqual(fieldsForTab('files').map(field => field.id), ['fontsDir']);
   assert.deepEqual(fieldsForTab('user').map(field => field.id), ['language', 'wgpuBackend']);
 });
@@ -154,6 +171,8 @@ test('each control is the editor its backend value really needs', () => {
     orbitSensitivity: 'real',
     gpuBudgetPercent: 'number',
     plotFormat: 'select',
+    dxfVersion: 'select',
+    acisVersion: 'select',
     fontsDir: 'readonly',
     language: 'locale',
     wgpuBackend: 'select',
@@ -175,6 +194,16 @@ test('each control is the editor its backend value really needs', () => {
   // The plot selector offers exactly the two formats the host can produce.
   assert.deepEqual(fieldById('plotFormat').choices, ['svg', 'pdf']);
   assert.deepEqual(PLOT_FORMATS, ['svg', 'pdf']);
+  // The Save-As version selectors offer exactly the host's closed token lists,
+  // default first, and carry the export lane's already published copy.
+  assert.deepEqual(fieldById('dxfVersion').choices, ['2010', '2013', '2018']);
+  assert.deepEqual(DXF_VERSIONS, ['2010', '2013', '2018']);
+  assert.deepEqual(fieldById('acisVersion').choices, ['7.0', '21.0']);
+  assert.deepEqual(ACIS_VERSIONS, ['7.0', '21.0']);
+  // A token outside the list is the host's generic invalid value, not the plot
+  // format refusal.
+  assert.equal(fieldById('dxfVersion').errorCode, undefined);
+  assert.equal(fieldById('acisVersion').errorCode, undefined);
   assert.deepEqual(LOCALE_CHOICES, ['zh-CN', 'en']);
   // The WGPU selector offers exactly the shared enum, with its own copy.
   assert.deepEqual(WGPU_BACKENDS, ['auto', 'vulkan', 'dx12']);
@@ -314,6 +343,20 @@ test('the validation table matches the host ranges and codes', () => {
     ['plotFormat', 'pdf', null],
     ['plotFormat', 'png', SETTINGS_ERROR.invalidPlotFormat],
     ['plotFormat', 'SVG', SETTINGS_ERROR.invalidPlotFormat],
+    // The Save-As version tokens are a closed set: a neighbour version or a
+    // differently spelled token is the generic invalid value, never a silent
+    // fallback to the default.
+    ['dxfVersion', '2010', null],
+    ['dxfVersion', '2013', null],
+    ['dxfVersion', '2018', null],
+    ['dxfVersion', '2007', SETTINGS_ERROR.invalidValue],
+    ['dxfVersion', 'r2018', SETTINGS_ERROR.invalidValue],
+    ['dxfVersion', 2018, SETTINGS_ERROR.invalidValue],
+    ['acisVersion', '7.0', null],
+    ['acisVersion', '21.0', null],
+    ['acisVersion', '2016', SETTINGS_ERROR.invalidValue],
+    ['acisVersion', '7', SETTINGS_ERROR.invalidValue],
+    ['acisVersion', 21, SETTINGS_ERROR.invalidValue],
     ['wgpuBackend', 'auto', null],
     ['wgpuBackend', 'vulkan', null],
     ['wgpuBackend', 'dx12', null],
@@ -365,6 +408,10 @@ test('the draft is seeded from the host snapshot, never from local defaults', ()
   assert.equal(draft.gpuBudgetPercent, '90');
   assert.equal(draft.grid, true);
   assert.equal(draft.plotFormat, 'svg');
+  // The export versions are seeded from the host snapshot, never from the row's
+  // own idea of a default.
+  assert.equal(draft.dxfVersion, '2010');
+  assert.equal(draft.acisVersion, '7.0');
   assert.equal(draft.fontsDir, '/usr/share/fonts');
   assert.equal(draft.language, 'zh-CN');
   assert.equal(draft.wgpuBackend, 'auto');
@@ -378,6 +425,8 @@ test('the draft is seeded from the host snapshot, never from local defaults', ()
   assert.equal(empty.snapSpacing, null);
   assert.equal(empty.grid, null);
   assert.equal(empty.plotFormat, null);
+  assert.equal(empty.dxfVersion, null);
+  assert.equal(empty.acisVersion, null);
   assert.equal(empty.fontsDir, null);
   assert.equal(empty.language, null);
   // A host that does not report the backend shows the row as unreported (and

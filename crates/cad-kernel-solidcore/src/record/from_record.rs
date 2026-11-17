@@ -345,6 +345,14 @@ fn cylinder_loops(
 /// A cone lateral face in its **normalised** form: one or two full circles plus,
 /// for a full cone, the degenerate apex loop the neutral tessellator recognises.
 /// `None` when the face is not that shape (the caller maps its loops literally).
+///
+/// A zero-slope cone never reaches this function: [`surface::to_brep`] maps an
+/// exactly zero half angle to [`cad_domain::BrepSurface::Cylinder`], because that
+/// is what such a record face *is* and a cone label this build cannot write back
+/// would be lost on the next lift (a round fillet is recorded exactly that way).
+/// The slope test below therefore stays as a **defensive** guard for a
+/// `BrepSurface::Cone` that states no slope by other means; it is unreachable
+/// from a record read through [`surface::to_brep`].
 fn cone_loops(
     record: &Record,
     face: &Face,

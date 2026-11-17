@@ -171,12 +171,16 @@ pub(crate) fn tessellate_face(
             linear_deflection,
             angular_deflection,
         ),
-        // A NURBS face is a form the neutral model now carries, but this build has
-        // no mesher for it: `solidcore-tess` (phase P2.1c) is the missing piece.
-        // Reported as an unsupported **surface** so the body marks this face
-        // missing — never a fabricated mesh, never a silent skip.
+        // A NURBS face is a form the neutral model carries, but the **neutral**
+        // tessellator has no mesher for it. This message is accurate: a mesher
+        // exists in this build (`solidcore-tess`, injected by a carrier as a
+        // `SolidTessellator`, ADR-0036 P2.1c part 1); it is simply not supplied to
+        // this call. Reported as an unsupported **surface** so the body marks this
+        // face missing — never a fabricated mesh, never a silent skip.
         BrepSurface::Nurbs { .. } => Err(FaceFailure::UnsupportedSurface(
-            "nurbs-face: no NURBS mesher in this build (solidcore-tess, phase P2.1c)".into(),
+            "nurbs-face: the neutral tessellator has no NURBS mesher; a solidcore-tess \
+             tessellator injected through the seam (P2.1c) draws it"
+                .into(),
         )),
         BrepSurface::Unsupported { type_key } => {
             Err(FaceFailure::UnsupportedSurface(type_key.clone()))
@@ -263,7 +267,7 @@ pub(super) fn sample_loop(
                 }
             }
             BrepCurve::Unsupported { type_key } => {
-                return Err(FaceFailure::UnsupportedCurve(type_key.clone()))
+                return Err(FaceFailure::UnsupportedCurve(type_key.clone()));
             }
         }
     }

@@ -3,8 +3,9 @@
 //!
 //! An exact, single-shell, planar, line-bounded solid is written as a real
 //! `3DSOLID` carrying ACIS built by [`super::acis`] — in **both** formats, with
-//! only the payload encoding differing: the DXF export is pinned to AC1024 and
-//! carries SAT text inline, while the DWG export is AC1032 and carries the same
+//! only the payload encoding differing: a R2010 DXF carries ACIS 7.0 SAT text
+//! inline, a R2013/R2018 DXF carries the chosen ACIS version (7.0 or 21.0/ASM) as
+//! a binary SAB blob in `ACDSDATA`, and a DWG is AC1032 and carries the same
 //! topology as a binary SAB blob in the AcDs (AcDsPrototype_1b) section, which is
 //! what R2013+ stores. Everything else is written as the honest part — the
 //! derived display cache:
@@ -24,15 +25,15 @@
 //! # Document-global consequence of writing a 3DSOLID
 //!
 //! The DXF version is one header value for the whole file, not a per-entity
-//! choice. A `3DSOLID` payload is written inline as ACIS SAT text only before
-//! AC1027, and from AC1027 on the upstream writer would move it into a binary
-//! SAB blob in `ACDSDATA` — which this exporter does not write for DXF. So the
-//! presence of **any** `3DSOLID` (in model space or inside a written block
-//! definition) pins the DXF output to AC1024 and adds
-//! `export.note.acis_sat_text_version`. That is a document-wide constraint on
-//! future entity work: a feature that needs AC1027+ cannot be added without
-//! revisiting the SAT text path. The pin is a DXF rule only — a DWG is written as
-//! AC1032 (so the upstream writer emits the AcDs section) and never inherits it.
+//! choice. A `3DSOLID` payload is written inline as ACIS 7.0 SAT text only in a
+//! pre-AC1027 container; R2013/R2018 carry it as a binary SAB blob in
+//! `ACDSDATA`. So the presence of **any** `3DSOLID` (in model space or inside a
+//! written block definition) pins the DXF output to the requested target and adds
+//! `export.note.acis_sat_text_version` (R2010) or `export.note.acis_sab_dxf`
+//! (R2013/R2018). That is a document-wide constraint on future entity work: a
+//! feature that needs a different container cannot be added without revisiting
+//! this pin. The pin is a DXF rule only — a DWG is written as AC1032 (so the
+//! upstream writer emits the AcDs section) and never inherits it.
 //!
 //! Every outcome is recorded in the [`ExportReport`](super::report::ExportReport),
 //! so the report never claims exact geometry was written when it was not — and
@@ -164,7 +165,7 @@ pub(super) fn emit_body3d(
     };
     let mut refusal: Option<(&'static str, String)> = None;
     if let Some(brep) = exact {
-        match brep_to_sat(brep) {
+        match brep_to_sat(brep, ctx.acis_version) {
             Ok(sat) => return emit_acis_solid3d(doc, entity, body, &sat, ctx, acc),
             Err(error) => refusal = Some((error.code(), error.message())),
         }
@@ -267,24 +268,27 @@ pub(super) fn emit_body3d(
     Ok(())
 }
 
-/// Write the exact planar B-rep as a `3DSOLID`, in the format's own ACIS
+/// Write the exact planar B-rep as a `3DSOLID`, in the combination's own ACIS
 /// encoding.
 ///
-/// * DXF (AC1024): inline SAT text via [`Solid3D::from_sat`].
-/// * DWG (AC1032): the same [`SatDocument`] converted to a binary SAB blob with
-///   [`SabWriter::write`] and attached as `sab_data` (`Solid3D::from_sab`). The
-///   upstream DWG writer puts it into the `AcDsPrototype_1b` section.
+/// * R2010 DXF (AC1024): inline SAT text via [`Solid3D::from_sat`], ACIS 7.0 only
+///   (an ASM 21800 payload is refused before this point).
+/// * R2013/R2018 DXF (AC1027/AC1032) and DWG (AC1032): the same [`SatDocument`]
+///   converted to a binary SAB blob with [`SabWriter::write`] and attached as
+///   `sab_data` (`Solid3D::from_sab`), so the DXF writer queues that blob
+///   verbatim into `ACDSDATA` and the DWG writer puts it into the
+///   `AcDsPrototype_1b` section.
 ///
 /// Why the SAB is built here instead of handing the writer SAT text: the
 /// writer's data-store flag comes from
 /// `AcisData::contributes_sab()` (`acadrust-0.6.8/src/entities/solid3d.rs:398`),
 /// which is `(is_binary && !sab_data.is_empty()) || !sat_data.is_empty()` — so
-/// *both* payload shapes satisfy it. The SAB shape is chosen because its blob is
-/// decided by the bytes we hold: `queue_sab_entry`
-/// (`object_writer/entities.rs:5646-5659`) pushes `sab_for_save()` for binary
-/// data, but for SAT text it calls `SatDocument::parse` a **second** time and, on
-/// error, pushes nothing while `has_ds_data` is already true — which would orphan
-/// the solid in the file. Attaching the SAB removes that silent failure mode.
+/// *both* payload shapes satisfy it. The SAB shape is chosen for the AC1027+
+/// containers because its blob is decided by the bytes we hold: `queue_sab_data`
+/// (`section_writer.rs:12098`) pushes `sab_for_save()` for binary data, but for
+/// SAT text it parses the text a **second** time and pushes nothing on error,
+/// which would orphan the solid in the file. Attaching the SAB removes that
+/// silent failure mode and keeps the chosen payload version byte-exact.
 fn emit_acis_solid3d(
     doc: &mut CadDocument,
     entity: &DbEntity,
@@ -295,25 +299,42 @@ fn emit_acis_solid3d(
 ) -> CadResult<()> {
     let object = Some(entity.object.id);
     let (common, mut reasons) = common_for(doc, entity, ctx);
-    let mut solid = match ctx.format {
-        ExportFormat::DxfText => Solid3D::from_sat(&sat.to_sat_string()),
-        ExportFormat::Dwg => Solid3D::from_sab(SabWriter::write(sat)),
+    let inline_sat = ctx.format == ExportFormat::DxfText && !ctx.dxf_target.stores_sab();
+    let mut solid = if inline_sat {
+        Solid3D::from_sat(&sat.to_sat_string())
+    } else {
+        Solid3D::from_sab(SabWriter::write(sat))
     };
     solid.common = common;
     acc.push(EntityType::Solid3D(solid), ctx)?;
-    reasons.push(match ctx.format {
-        ExportFormat::DxfText => {
-            "exact planar B-rep written as ACIS SAT text in a 3DSOLID (single closed shell, plane \
-             surfaces, straight-line boundary curves)"
-                .to_string()
-        }
-        ExportFormat::Dwg => {
-            "exact planar B-rep written as a 3DSOLID whose ACIS payload is a binary SAB blob in the \
-             DWG AC1032 AcDs (AcDsPrototype_1b) section (single closed shell, plane surfaces, \
-             straight-line boundary curves)"
-                .to_string()
-        }
-    });
+    let payload = if inline_sat {
+        format!(
+            "exact planar B-rep written as ACIS SAT text in a 3DSOLID (SAB/SAT header version {}, \
+             ACIS {}) in the {container} DXF (single closed shell, plane surfaces, straight-line \
+             boundary curves)",
+            ctx.acis_version.number(),
+            ctx.acis_version.label(),
+            container = ctx.dxf_target.dxf_version().as_str(),
+        )
+    } else if ctx.format == ExportFormat::DxfText {
+        format!(
+            "exact planar B-rep written as a 3DSOLID whose ACIS {} payload is a binary SAB blob \
+             (header version {}) in the {container} DXF ACDSDATA section (single closed shell, \
+             plane surfaces, straight-line boundary curves)",
+            ctx.acis_version.label(),
+            ctx.acis_version.number(),
+            container = ctx.dxf_target.dxf_version().as_str(),
+        )
+    } else {
+        format!(
+            "exact planar B-rep written as a 3DSOLID whose ACIS {} payload is a binary SAB blob \
+             (header version {}) in the DWG AC1032 AcDs (AcDsPrototype_1b) section (single closed \
+             shell, plane surfaces, straight-line boundary curves)",
+            ctx.acis_version.label(),
+            ctx.acis_version.number(),
+        )
+    };
+    reasons.push(payload);
     reasons.push(
         "the payload is rebuilt from the retained exact B-Rep, not the original SAT/SAB byte \
          stream: source records, history and ACIS attributes are not retained"

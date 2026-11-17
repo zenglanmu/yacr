@@ -4,7 +4,12 @@
 use super::*;
 
 /// The kernel-facing tessellation seam.
-pub trait SolidTessellator {
+///
+/// `Send + Sync`, exactly like [`cad_kernel_adapter::SolidModeler`]: a carrier
+/// holds one instance as an `Arc` and may hand it to a worker thread (the
+/// background boolean tessellates its result there). Both implementations in this
+/// crate are zero-sized and stateless.
+pub trait SolidTessellator: Send + Sync {
     fn registration(&self) -> Registration;
 
     /// Tessellate a single solid/surface request.

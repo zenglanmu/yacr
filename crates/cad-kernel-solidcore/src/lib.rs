@@ -58,8 +58,12 @@
 //!
 //! Display follows `cad-db`, not this crate: a **trimmed** curved face lifts but
 //! tessellates as a partial body naming that face (the neutral tessellator draws a
-//! cylinder strip only from two full circles), and a NURBS face has no mesher in
-//! this build (`solidcore-tess`, phase P2.1c).
+//! cylinder strip only from two full circles). A **NURBS** face has a mesher in
+//! this build: [`tess::SolidCoreTessellator`] is the `solidcore-tess` display
+//! mesher of the pinned revision, behind the same [`cad_kernel_adapter::SolidTessellator`]
+//! seam the neutral tessellator implements (P2.1c part 1). It is **injected by a
+//! carrier**, exactly like the modeler: a session without it keeps the neutral
+//! path, which still reports a NURBS face as a missing face by name.
 //!
 //! # Family-level capabilities, per-operand refusals
 //!
@@ -148,6 +152,7 @@ mod modeler;
 mod ops;
 pub mod polyhedra;
 mod record;
+pub mod tess;
 
 pub use error::{
     CHAMFER_FAILED, EDGE_NOT_FOUND, EMPTY_RESULT, KERNEL_FAILED, KERNEL_PANIC,
@@ -156,3 +161,4 @@ pub use error::{
 };
 pub use modeler::{SolidCoreModeler, TYPE_KEY, UPSTREAM_REVISION, UPSTREAM_VERSION};
 pub use polyhedra::{box_brep, pyramid_brep, wedge_brep};
+pub use tess::SolidCoreTessellator;

@@ -42,10 +42,13 @@
 //! revision bump, no history entry).
 //!
 //! **Code fact (what is wired today)**: only the Linux `native-below` session
-//! injects `cad_kernel_solidcore::SolidCoreModeler`. Linux `dom-canvas`
+//! injects `cad_kernel_solidcore::SolidCoreModeler` **and**, beside it, the
+//! display mesher `cad_kernel_solidcore::SolidCoreTessellator` (P2.1c part 1).
+//! Linux `dom-canvas`
 //! (X11/XWayland — its CAD session is the wasm one in the WebView), Web
-//! (wasm), Windows, macOS and Android do **not** inject a modeler, so the seven
-//! commands refuse by name there. Whether those carriers can ever host the
+//! (wasm), Windows, macOS and Android do **not** inject either, so the seven
+//! commands refuse by name there and a NURBS face stays a missing face. Whether
+//! those carriers can ever host the
 //! modeler is a separate, unproven question: their runtime injection/behaviour
 //! is **NOT VERIFIED** (only compile/contract evidence exists), never a claim
 //! that the feature works there.
@@ -75,9 +78,8 @@ use super::*;
 use crate::app_utility::require_none_payload;
 use crate::tasks::{SolidBooleanOperand, SolidBooleanPlan};
 use cad_kernel_adapter::{
-    execute_solid, tessellate_exchange, BooleanOp, PrimitiveKind, PrimitiveSpec, SolidExchange,
-    SolidOperation, SolidOutcome, SolidProduct, SolidRequest, TessellationBudget,
-    TessellationOutcome,
+    execute_solid, BooleanOp, PrimitiveKind, PrimitiveSpec, SolidExchange, SolidOperation,
+    SolidOutcome, SolidProduct, SolidRequest, TessellationBudget, TessellationOutcome,
 };
 
 /// The stable refusal a carrier without a modeler reports.
@@ -154,7 +156,7 @@ impl Application {
             }
         };
 
-        let body = solid_body(brep)?;
+        let body = solid_body(brep, self.solid_tessellator.as_deref())?;
         let mut outcome = self.commit_new_entity_typed(
             session,
             command,
@@ -409,7 +411,18 @@ pub(crate) fn describe_operand(entity: &DbEntity) -> String {
 /// missing or empty is refused (`solid.tessellation_failed`) instead of being
 /// committed as a `Solid` with an empty display — `cad-db` would accept that and
 /// the representer would then draw nothing.
-pub(crate) fn solid_body(brep: BrepData) -> CadResult<Body3d> {
+///
+/// `tessellator` is the carrier's injected display mesher (P2.1c part 1), or
+/// `None` for the neutral path. The seam is consulted **only** for a body with a
+/// NURBS face (see `cad_kernel_adapter::tessellate_exchange_with`), so an
+/// analytic-only body's facets are exactly what they were before. Cancellation is
+/// checked by the callers before this bounded display step; the neutral path is
+/// not mid-cancellable, so the seam is handed a `false` probe rather than a token
+/// that could silently stop the fallback.
+pub(crate) fn solid_body(
+    brep: BrepData,
+    tessellator: Option<&dyn cad_kernel_adapter::SolidTessellator>,
+) -> CadResult<Body3d> {
     // The **shared** shape-relative rule (`1e-3 x bbox diagonal`): the same
     // policy the importer uses, so a created body's facet density does not
     // depend on the drawing unit, and a huge primitive asks for a chord budget
@@ -417,10 +430,12 @@ pub(crate) fn solid_body(brep: BrepData) -> CadResult<Body3d> {
     // used to turn a radius-500 sphere into a budget refusal and could make the
     // tessellator materialise a 100M-triangle mesh before it was rejected).
     let (tolerance, _diagonal) = cad_kernel_adapter::shape_relative_tolerance(&brep);
-    let outcome = tessellate_exchange(
+    let outcome = cad_kernel_adapter::tessellate_exchange_with(
         &SolidExchange::Brep(brep.clone()),
         tolerance,
         TessellationBudget::default(),
+        tessellator,
+        &|| false,
     );
     let usable = outcome.is_success() && outcome.mesh().is_some_and(|mesh| !mesh.is_empty());
     if !usable {

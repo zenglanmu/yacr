@@ -21,6 +21,7 @@ use cad_db::{BlockDefinition, DbEntity, DbObject, DrawingDatabase, DrawingDataba
 
 use super::*;
 use crate::export::ExportReport;
+use crate::export::{AcisVersion, DxfTarget};
 
 pub(crate) fn p(x: f64, y: f64, z: f64) -> Point3 {
     Point3 { x, y, z }
@@ -416,6 +417,8 @@ pub(crate) fn export_db(database: &DrawingDatabase) -> (Vec<u8>, ExportReport) {
         document_id: DocumentId(1),
         space: export::ExportSpace::Model,
         format: export::ExportFormat::DxfText,
+        acis_version: AcisVersion::default(),
+        dxf_target: DxfTarget::default(),
         limits: export::ExportLimits::default(),
         units: None,
     })

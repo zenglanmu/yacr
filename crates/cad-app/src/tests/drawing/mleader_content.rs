@@ -10,7 +10,9 @@ use super::*;
 
 use cad_db::{BlockDefinition, MLeaderStyle};
 use cad_domain::{MLeaderContentKind, MLeaderStyleId, MLeaderToleranceContent, Transform3};
-use cad_import_acadrust::export::{export, ExportFormat, ExportLimits, ExportRequest, ExportSpace};
+use cad_import_acadrust::export::{
+    export, AcisVersion, DxfTarget, ExportFormat, ExportLimits, ExportRequest, ExportSpace,
+};
 use cad_import_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
 
 /// The app's one named block (`Door`, id 7) with a single member line, plus
@@ -125,6 +127,8 @@ fn export_bytes(app: &Application) -> Vec<u8> {
         document_id: DocumentId(1),
         space: ExportSpace::Model,
         format: ExportFormat::DxfText,
+        acis_version: AcisVersion::default(),
+        dxf_target: DxfTarget::default(),
         limits: ExportLimits::default(),
         units: None,
     })
@@ -139,6 +143,8 @@ fn round_trip(app: &Application) -> MultiLeaderGeometry {
         document_id: DocumentId(1),
         space: ExportSpace::Model,
         format: ExportFormat::DxfText,
+        acis_version: AcisVersion::default(),
+        dxf_target: DxfTarget::default(),
         limits: ExportLimits::default(),
         units: None,
     })
@@ -236,6 +242,8 @@ fn content_block_round_trips_through_the_one_writer_and_reader() {
         document_id: DocumentId(1),
         space: ExportSpace::Model,
         format: ExportFormat::DxfText,
+        acis_version: AcisVersion::default(),
+        dxf_target: DxfTarget::default(),
         limits: ExportLimits::default(),
         units: None,
     })
@@ -789,6 +797,8 @@ fn a_block_content_that_cannot_be_written_is_flattened_with_the_reason() {
         document_id: DocumentId(1),
         space: ExportSpace::Model,
         format: ExportFormat::DxfText,
+        acis_version: AcisVersion::default(),
+        dxf_target: DxfTarget::default(),
         limits: ExportLimits::default(),
         units: None,
     })

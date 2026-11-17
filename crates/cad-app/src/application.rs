@@ -13,6 +13,9 @@ impl Application {
             // No kernel is linked here: a carrier injects its modeler (ADR-0036
             // phase C1). Without one every primitive command refuses by name.
             solid_modeler: None,
+            // Likewise the display mesher (P2.1c part 1): without it a body keeps
+            // the neutral tessellator and a NURBS face stays a missing face.
+            solid_tessellator: None,
             // Adopted from the first plan's document at `start`.
             solid_booleans: crate::tasks::SolidBooleanManager::new(cad_domain::DocumentId(0)),
         }
@@ -40,7 +43,12 @@ impl Application {
         plan: crate::tasks::SolidBooleanPlan,
         modeler: Arc<dyn cad_kernel_adapter::SolidModeler>,
     ) -> CadResult<()> {
-        self.solid_booleans.start(plan, modeler).map(|_| ())
+        // The display mesher rides along with the modeler: the worker tessellates
+        // its own result, so the injected one (or `None`) must cross with it.
+        let tessellator = self.solid_tessellator.clone();
+        self.solid_booleans
+            .start(plan, modeler, tessellator)
+            .map(|_| ())
     }
 
     /// Whether a background solid boolean is currently running.
@@ -61,6 +69,24 @@ impl Application {
     /// know whether the capability exists.
     pub fn has_solid_modeler(&self) -> bool {
         self.solid_modeler.is_some()
+    }
+
+    /// Inject (or clear) the solid tessellator this application draws bodies with.
+    ///
+    /// Carrier-owned composition, exactly like [`Self::set_solid_modeler`]: the
+    /// seam is trait-only, so no kernel type crosses into `cad-app`. `None` (the
+    /// default) keeps the neutral tessellator: a NURBS face is then reported as a
+    /// missing face by name, never drawn falsely.
+    pub fn set_solid_tessellator(
+        &mut self,
+        tessellator: Option<Arc<dyn cad_kernel_adapter::SolidTessellator>>,
+    ) {
+        self.solid_tessellator = tessellator;
+    }
+
+    /// Whether this carrier injected a display mesher (P2.1c part 1).
+    pub fn has_solid_tessellator(&self) -> bool {
+        self.solid_tessellator.is_some()
     }
 
     /// Take the background boolean's terminal state (never commits).

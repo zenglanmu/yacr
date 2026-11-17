@@ -43,6 +43,7 @@ impl HostController {
             api_prompt_error: None,
             api_prompt_results: Vec::new(),
             tolerance: TolerancePolicy::default(),
+            export_options: ExportOptions::default(),
         };
         controller.new_blank_document()?;
         Ok(controller)

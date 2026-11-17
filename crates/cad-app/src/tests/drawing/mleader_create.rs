@@ -11,7 +11,9 @@ use super::*;
 
 use cad_db::MLeaderStyle;
 use cad_domain::MLeaderStyleId;
-use cad_import_acadrust::export::{export, ExportFormat, ExportLimits, ExportRequest, ExportSpace};
+use cad_import_acadrust::export::{
+    export, AcisVersion, DxfTarget, ExportFormat, ExportLimits, ExportRequest, ExportSpace,
+};
 use cad_import_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
 
 /// A drawing with layer 0, an optional second layer `WALLS` (id 3), the given
@@ -465,6 +467,8 @@ fn create_mleader_honours_a_spline_style_as_the_leader_line_type() {
         document_id: DocumentId(1),
         space: ExportSpace::Model,
         format: ExportFormat::DxfText,
+        acis_version: AcisVersion::default(),
+        dxf_target: DxfTarget::default(),
         limits: ExportLimits::default(),
         units: None,
     })
@@ -759,6 +763,8 @@ fn a_content_less_command_stores_an_empty_text_and_renders_arrow_and_dogleg() {
         document_id: DocumentId(1),
         space: ExportSpace::Model,
         format: ExportFormat::DxfText,
+        acis_version: AcisVersion::default(),
+        dxf_target: DxfTarget::default(),
         limits: ExportLimits::default(),
         units: None,
     })
@@ -852,6 +858,8 @@ fn a_created_multileader_exports_as_a_real_multileader_and_reimports() {
         document_id: DocumentId(1),
         space: ExportSpace::Model,
         format: ExportFormat::DxfText,
+        acis_version: AcisVersion::default(),
+        dxf_target: DxfTarget::default(),
         limits: ExportLimits::default(),
         units: None,
     })

@@ -326,7 +326,8 @@ impl Application {
             }
         };
 
-        let after_body = crate::app_drawing::solids::solid_body(brep)?;
+        let after_body =
+            crate::app_drawing::solids::solid_body(brep, self.solid_tessellator.as_deref())?;
         let document_id = command.document;
         let mut candidate = {
             let document = self

@@ -47,6 +47,16 @@ pub fn tessellate_exchange(
     tolerance: TessellationTolerance,
     budget: TessellationBudget,
 ) -> TessellationOutcome {
+    tessellate_exchange_with(exchange, tolerance, budget, None, &|| false)
+}
+
+/// The neutral evaluation path of [`tessellate_exchange`], unchanged: what the
+/// seam falls back to when it does not delegate.
+pub(crate) fn tessellate_exchange_neutral(
+    exchange: &SolidExchange,
+    tolerance: TessellationTolerance,
+    budget: TessellationBudget,
+) -> TessellationOutcome {
     if let Err(error) = tolerance.validate().and_then(|_| budget.validate()) {
         return BrepTessellator::failed(error.code, error.message);
     }
@@ -71,6 +81,188 @@ pub fn tessellate_exchange(
                 exchange.type_key()
             ),
         ),
+    }
+}
+
+/// Tessellate an exchange payload through an **optional** kernel tessellator,
+/// falling back to the neutral B-rep mesher.
+///
+/// The seam is only consulted for a payload the neutral mesher provably cannot
+/// draw completely: a `SolidExchange::Brep` with **at least one**
+/// [`BrepSurface::Nurbs`] face. Every other body keeps exactly the neutral path
+/// (and its `Analytic` precision), so analytic-only display does not churn when a
+/// carrier injects a mesher.
+///
+/// The request handed to the seam carries a deliberately synthetic identity —
+/// [`GeometryHandle::Resolved`]`(ObjectId(0))` and
+/// `TaskStamp::new(DocumentId(0), 0)`. This entry point is used outside the
+/// database object lifecycle (import-time and command-time callers that have no
+/// object id yet), and the stamp is only the seam's **result tag**: the caller of
+/// this function discards it. Nothing may treat it as an object's identity.
+///
+/// When the seam returns usable facets (`Success` or `Partial`, non-empty) its
+/// outcome is returned. When it cannot produce any (`Unsupported`, `Failed`,
+/// empty, or an `Err`), the neutral path runs and **the seam's refusal stays
+/// visible**: its diagnostics are prepended to the neutral outcome, or its detail
+/// is folded into the neutral `Unsupported` reason. A neutral `Partial` stays
+/// `Partial`.
+pub fn tessellate_exchange_with(
+    exchange: &SolidExchange,
+    tolerance: TessellationTolerance,
+    budget: TessellationBudget,
+    tessellator: Option<&dyn SolidTessellator>,
+    cancelled: &dyn Fn() -> bool,
+) -> TessellationOutcome {
+    let neutral = || tessellate_exchange_neutral(exchange, tolerance, budget);
+    let Some(tessellator) = tessellator else {
+        return neutral();
+    };
+    // Delegation rule (deliberate): only a neutral B-rep that carries a NURBS
+    // face. A body of analytic faces is drawn by the neutral mesher, whose curved
+    // arms are exact enough that a change of mesh would be churn, not an
+    // improvement.
+    let SolidExchange::Brep(brep) = exchange else {
+        return neutral();
+    };
+    if !brep
+        .shells
+        .iter()
+        .flat_map(|shell| &shell.faces)
+        .any(|face| face_is_nurbs(&face.surface))
+    {
+        return neutral();
+    }
+
+    let request = TessellationRequest {
+        geometry: GeometryHandle::Resolved(ObjectId(0)),
+        exchange: exchange.clone(),
+        tolerance,
+        budget,
+        stamp: TaskStamp::new(DocumentId(0), 0),
+    };
+    let refusal = match tessellator.tessellate(&request, cancelled) {
+        Ok(result) => result.outcome,
+        // The seam has no outcome to keep, so its error becomes one. A cancel is
+        // its own code; the neutral path below still runs (it is not
+        // cancellable), so the caller keeps a display and sees the refusal.
+        Err(CadError::Cancelled) => TessellationOutcome::Failed {
+            diagnostics: vec![Diagnostic {
+                code: codes::KERNEL_CANCELLED.to_string(),
+                object: None,
+                message: "the solid tessellator reported the request as cancelled".into(),
+            }],
+        },
+        Err(error) => TessellationOutcome::Failed {
+            diagnostics: vec![Diagnostic {
+                code: codes::SOLID_FAILED.to_string(),
+                object: None,
+                message: error.to_string(),
+            }],
+        },
+    };
+    if refusal.mesh().is_some_and(|mesh| !mesh.is_empty()) {
+        return refusal;
+    }
+    with_refusal(neutral(), &refusal)
+}
+
+/// `BrepSurface::Nurbs` by name, with every other family listed explicitly: a new
+/// variant has to be classified here rather than silently treated as analytic
+/// (and therefore as "do not delegate").
+fn face_is_nurbs(surface: &BrepSurface) -> bool {
+    match surface {
+        BrepSurface::Nurbs { .. } => true,
+        BrepSurface::Plane { .. }
+        | BrepSurface::Sphere { .. }
+        | BrepSurface::Torus { .. }
+        | BrepSurface::Cylinder { .. }
+        | BrepSurface::Cone { .. }
+        | BrepSurface::Unsupported { .. } => false,
+    }
+}
+
+/// The neutral outcome, with the seam's refusal kept visible on it.
+fn with_refusal(
+    neutral: TessellationOutcome,
+    refusal: &TessellationOutcome,
+) -> TessellationOutcome {
+    let mut diagnostics = refusal_diagnostics(refusal);
+    match neutral {
+        TessellationOutcome::Success {
+            geometry,
+            diagnostics: mut neutral_diagnostics,
+        } => {
+            diagnostics.append(&mut neutral_diagnostics);
+            TessellationOutcome::Success {
+                geometry,
+                diagnostics,
+            }
+        }
+        TessellationOutcome::Partial {
+            geometry,
+            degradation,
+            diagnostics: mut neutral_diagnostics,
+        } => {
+            diagnostics.append(&mut neutral_diagnostics);
+            TessellationOutcome::Partial {
+                geometry,
+                degradation,
+                diagnostics,
+            }
+        }
+        TessellationOutcome::Failed {
+            diagnostics: mut neutral_diagnostics,
+        } => {
+            diagnostics.append(&mut neutral_diagnostics);
+            TessellationOutcome::Failed { diagnostics }
+        }
+        // `Unsupported` carries no diagnostics list, so the seam's detail is
+        // folded into its reason instead of dropped.
+        TessellationOutcome::Unsupported { reason } => TessellationOutcome::Unsupported {
+            reason: UnsupportedReason {
+                code: reason.code,
+                exchange: reason.exchange,
+                detail: format!("{}; {}", refusal_detail(refusal), reason.detail),
+            },
+        },
+    }
+}
+
+/// The diagnostics a refused seam outcome stands for.
+fn refusal_diagnostics(refusal: &TessellationOutcome) -> Vec<Diagnostic> {
+    match refusal {
+        TessellationOutcome::Failed { diagnostics } => diagnostics.clone(),
+        TessellationOutcome::Unsupported { reason } => vec![Diagnostic {
+            code: reason.code.clone(),
+            object: None,
+            message: format!(
+                "the solid tessellator cannot evaluate this body: {}",
+                reason.detail
+            ),
+        }],
+        // A non-empty success/partial is returned as it is, so these cannot reach
+        // here; an empty one has nothing to say.
+        TessellationOutcome::Success { .. } | TessellationOutcome::Partial { .. } => Vec::new(),
+    }
+}
+
+/// One line naming what the seam refused, for an `Unsupported` reason's detail.
+fn refusal_detail(refusal: &TessellationOutcome) -> String {
+    match refusal {
+        TessellationOutcome::Unsupported { reason } => {
+            format!("{}: {}", reason.code, reason.detail)
+        }
+        TessellationOutcome::Failed { diagnostics } => {
+            match (diagnostics.first(), diagnostics.len()) {
+                (Some(first), count) => {
+                    format!("{}: {} (+{} more)", first.code, first.message, count - 1)
+                }
+                (None, _) => "the solid tessellator produced no usable facet set".into(),
+            }
+        }
+        TessellationOutcome::Success { .. } | TessellationOutcome::Partial { .. } => {
+            "the solid tessellator produced no usable facet set".into()
+        }
     }
 }
 

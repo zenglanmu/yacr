@@ -113,6 +113,8 @@ fn an_over_limit_dwg_export_is_an_explicit_error_not_a_panic() {
         document_id: DocumentId(1),
         space: ExportSpace::Model,
         format: ExportFormat::Dwg,
+        acis_version: AcisVersion::default(),
+        dxf_target: DxfTarget::R2018,
         limits: ExportLimits {
             max_output_entities: 0,
             max_explode_depth: ExportLimits::default().max_explode_depth,

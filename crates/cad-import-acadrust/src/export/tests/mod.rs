@@ -16,12 +16,13 @@ use cad_db::{
 use cad_domain::*;
 
 use super::report::{ExportCounts, ExportFormat, ExportLimits, ExportReport, ExportSpace};
-use super::{export, ExportRequest};
+use super::{export, AcisVersion, DxfTarget, ExportRequest};
 use crate::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
 
 mod acis;
 mod acis_export;
 mod acis_fixtures;
+mod acis_version_matrix;
 mod body3d;
 mod dimension;
 mod dimension_radial;
@@ -108,6 +109,14 @@ fn export_db_format(db: &DrawingDatabase, format: ExportFormat) -> (Vec<u8>, Exp
         document_id: DocumentId(1),
         space: ExportSpace::Model,
         format,
+        // A DWG's container version is fixed at AC1032 by the upstream writer, so
+        // the request names the DWG's own container; the DXF target only selects
+        // the DXF container (default R2010).
+        acis_version: AcisVersion::default(),
+        dxf_target: match format {
+            ExportFormat::DxfText => DxfTarget::default(),
+            ExportFormat::Dwg => DxfTarget::R2018,
+        },
         limits: ExportLimits::default(),
         units: None,
     })

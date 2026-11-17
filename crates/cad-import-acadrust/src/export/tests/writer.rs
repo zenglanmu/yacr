@@ -641,6 +641,8 @@ fn insert_depth_beyond_the_limit_is_an_explicit_error() {
         document_id: DocumentId(1),
         space: ExportSpace::Model,
         format: ExportFormat::DxfText,
+        acis_version: AcisVersion::default(),
+        dxf_target: DxfTarget::default(),
         limits: ExportLimits {
             max_output_entities: 1_000_000,
             max_explode_depth: 1,
@@ -721,6 +723,8 @@ fn unit_context_maps_to_insunits() {
         document_id: DocumentId(1),
         space: ExportSpace::Model,
         format: ExportFormat::DxfText,
+        acis_version: AcisVersion::default(),
+        dxf_target: DxfTarget::default(),
         limits: ExportLimits::default(),
         units: Some(UnitContext {
             source: Unit::Millimeter,

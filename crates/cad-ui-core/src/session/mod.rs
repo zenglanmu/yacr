@@ -338,6 +338,19 @@ impl CadSession {
             .set_solid_modeler(modeler);
     }
 
+    /// Inject (or clear) the carrier's display mesher (ADR-0036 P2.1c): the same
+    /// carrier-owned, trait-only composition as [`Self::set_solid_modeler`].
+    pub fn set_solid_tessellator(
+        &self,
+        tessellator: Option<Arc<dyn cad_kernel_adapter::SolidTessellator>>,
+    ) {
+        self.core
+            .controller
+            .borrow_mut()
+            .application
+            .set_solid_tessellator(tessellator);
+    }
+
     /// Diagnostics from reading the startup config/preference files.
     pub fn startup_diagnostics(&self) -> Vec<String> {
         self.core.startup_diagnostics()

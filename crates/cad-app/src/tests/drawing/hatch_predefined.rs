@@ -18,7 +18,9 @@ use super::hatch::{
 use super::*;
 
 use cad_domain::hatch::predefined_patterns;
-use cad_import_acadrust::export::{export, ExportFormat, ExportLimits, ExportRequest, ExportSpace};
+use cad_import_acadrust::export::{
+    export, AcisVersion, DxfTarget, ExportFormat, ExportLimits, ExportRequest, ExportSpace,
+};
 use cad_import_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
 
 /// A closed axis-aligned rectangle `[x0, x1] x [y0, y1]` (unlike [`square`] the
@@ -266,6 +268,8 @@ fn a_created_predefined_hatch_round_trips_its_name_rows_and_76_one() {
         document_id: DocumentId(1),
         space: ExportSpace::Model,
         format: ExportFormat::DxfText,
+        acis_version: AcisVersion::default(),
+        dxf_target: DxfTarget::default(),
         limits: ExportLimits::default(),
         units: None,
     })

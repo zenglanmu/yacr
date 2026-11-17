@@ -32,6 +32,7 @@ use super::common::{
 use super::report::{ExportFormat, ExportLimits, MappingOutcome};
 use super::solid_record::{face_class, face_record};
 use super::tables::ensure_text_style;
+use super::{AcisVersion, DxfTarget};
 
 /// Source entity classes whose ACIS payload an *older* import tessellated into a
 /// plain [`SemanticGeometry::Mesh`]. Current imports produce a
@@ -48,12 +49,19 @@ pub(crate) struct EntityContext<'a> {
     /// The format being written.
     ///
     /// Both formats write an exact ACIS `3DSOLID` for the same planar subset;
-    /// the format only picks the payload encoding, because a DWG is AC1032 and
-    /// stores the payload as a binary SAB blob in its AcDs section (R2013+),
-    /// while the DXF export is pinned to AC1024 and carries SAT text inline.
+    /// the format and the container target only pick the payload encoding. A DWG
+    /// is AC1032 and stores the payload as a binary SAB blob in its AcDs section
+    /// (R2013+); a R2010 DXF carries ACIS 7.0 SAT text inline and a R2013/R2018
+    /// DXF carries the chosen ACIS version as a binary SAB blob in `ACDSDATA`.
     /// Any body outside the subset falls back to its POLYFACE display cache in
-    /// **either** format, under the ACIS writer's own named refusal code.
+    /// **every** combination, under the ACIS writer's own named refusal code.
     pub format: ExportFormat,
+    /// The ACIS payload version written into a `3DSOLID` (SAT/SAB header 700 or
+    /// 21800). Never changes which bodies are writable.
+    pub acis_version: AcisVersion,
+    /// The DXF container version. A DWG is always AC1032 (refused otherwise by
+    /// the export matrix), so this only selects the DXF payload form.
+    pub dxf_target: DxfTarget,
 }
 
 /// Type keys whose source entity is an infinite construct line.
@@ -550,8 +558,9 @@ fn emit_leaf(
             emit_polyface_mesh(doc, entity, mesh, base_reasons, ctx, acc)?;
         }
         // A 3D body keeps its exact B-rep in the database. An exact, single-shell,
-        // planar, line-bounded solid is written as a real `3DSOLID` carrying ACIS
-        // SAT text (see `super::acis`); everything else falls back to the derived
+        // planar, line-bounded solid is written as a real `3DSOLID` carrying the
+        // configured ACIS payload (inline SAT text or a SAB/ASM blob, see
+        // `super::acis` and `super::body`); everything else falls back to the derived
         // display cache (a polyface mesh for facets, LINE/POLYLINE3D for
         // edge-only bodies). Never a fabricated payload: any refusal is recorded
         // by name.

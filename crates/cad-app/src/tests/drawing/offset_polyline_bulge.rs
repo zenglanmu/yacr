@@ -27,7 +27,9 @@ use super::offset::app_with_drawing;
 use super::offset_polyline::{created_polyline, polyline_app, undo_depth};
 use super::*;
 use cad_geometry::bulge_arc_geometry;
-use cad_import_acadrust::export::{export, ExportFormat, ExportLimits, ExportRequest, ExportSpace};
+use cad_import_acadrust::export::{
+    export, AcisVersion, DxfTarget, ExportFormat, ExportLimits, ExportRequest, ExportSpace,
+};
 use cad_import_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
 
 /// The `+Z` normal the DXF bulge convention uses for 2D data.
@@ -692,6 +694,8 @@ fn offset_bulged_polyline_result_round_trips_through_the_dxf_export() {
         document_id: DocumentId(1),
         space: ExportSpace::Model,
         format: ExportFormat::DxfText,
+        acis_version: AcisVersion::default(),
+        dxf_target: DxfTarget::default(),
         limits: ExportLimits::default(),
         units: Some(UnitContext::drawing_units()),
     })

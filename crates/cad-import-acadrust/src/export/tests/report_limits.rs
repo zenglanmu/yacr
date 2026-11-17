@@ -174,6 +174,8 @@ fn limits_are_enforced_explicitly() {
         document_id: DocumentId(1),
         space: ExportSpace::Model,
         format: ExportFormat::DxfText,
+        acis_version: AcisVersion::default(),
+        dxf_target: DxfTarget::default(),
         limits: ExportLimits {
             max_output_entities: 1,
             max_explode_depth: 32,

@@ -10,7 +10,9 @@
 use super::*;
 use cad_kernel_adapter::{
     ModelerCapabilities, ModelerPrimitives, PrimitiveKind, PrimitiveSpec, SolidModeler,
-    SolidOperation, SolidOutcome, SolidProduct, SolidRequest, SolidResult, SolidUnsupportedReason,
+    SolidOperation, SolidOutcome, SolidProduct, SolidRequest, SolidResult, SolidTessellator,
+    SolidUnsupportedReason, TessellationMesh, TessellationOutcome, TessellationRequest,
+    TessellationResult,
 };
 use std::sync::{Arc, Mutex};
 
@@ -773,4 +775,116 @@ fn primitives_with_a_non_positive_height_or_radius_are_refused() {
 fn primitive_kind_tags_are_stable() {
     assert_eq!(PrimitiveKind::Box.as_str(), "box");
     assert_eq!(PrimitiveKind::Torus.as_str(), "torus");
+}
+
+// ---- P2.1c part 1: the injected display mesher -----------------------------
+
+/// The unit box whose `+Z` face is a degree-1x1 NURBS plane (weights exactly
+/// `1.0`, its own `(u, v)` box): the smallest body the neutral tessellator cannot
+/// draw and an injected mesher can.
+fn nurbs_top_box() -> BrepData {
+    let mut brep = unit_box();
+    let top = &mut brep.shells[0].faces[1];
+    assert!(matches!(top.surface, BrepSurface::Plane { .. }));
+    top.surface = BrepSurface::Nurbs {
+        u_knots: vec![0.0, 0.0, 1.0, 1.0],
+        v_knots: vec![0.0, 0.0, 1.0, 1.0],
+        points: vec![
+            vec![[0.0, 0.0, 1.0, 1.0], [0.0, 1.0, 1.0, 1.0]],
+            vec![[1.0, 0.0, 1.0, 1.0], [1.0, 1.0, 1.0, 1.0]],
+        ],
+    };
+    top.domain = Some([[0.0, 1.0], [0.0, 1.0]]);
+    brep
+}
+
+/// A one-triangle stub mesher, so "the seam was used" is visible in the body.
+struct StubTessellator;
+
+impl SolidTessellator for StubTessellator {
+    fn registration(&self) -> cad_domain::Registration {
+        cad_domain::Registration {
+            type_key: "test.stub-tessellator".into(),
+            version: 1,
+            priority: 1,
+            entity_types: vec!["3DSOLID".into(), "BODY".into()],
+            capabilities: vec!["nurbs-faces".into()],
+        }
+    }
+
+    fn tessellate(
+        &self,
+        request: &TessellationRequest,
+        _cancelled: &dyn Fn() -> bool,
+    ) -> cad_domain::CadResult<TessellationResult> {
+        Ok(TessellationResult {
+            stamp: request.stamp.clone(),
+            outcome: TessellationOutcome::Success {
+                geometry: TessellationMesh {
+                    mesh: cad_domain::Mesh {
+                        vertices: vec![p(0.0, 0.0, 0.0), p(1.0, 0.0, 0.0), p(0.0, 1.0, 0.0)],
+                        triangles: vec![[0, 1, 2]],
+                        normals: vec![p(0.0, 0.0, 1.0); 3],
+                        face_sources: vec![Some(cad_domain::SubElementId {
+                            source_key: "brep:face:0/1".into(),
+                            topology_revision: Revision(0),
+                        })],
+                        colors: Vec::new(),
+                    },
+                    edges: vec![vec![p(0.0, 0.0, 0.0), p(1.0, 0.0, 0.0)]],
+                    precision: cad_domain::Precision::Approximate {
+                        error_bound: Some(1.0e-2),
+                    },
+                },
+                diagnostics: Vec::new(),
+            },
+        })
+    }
+}
+
+#[test]
+fn solid_body_uses_the_injected_mesher_and_keeps_the_neutral_refusal_without_one() {
+    let brep = nurbs_top_box();
+
+    // Without a mesher the NURBS face stays a missing face: the existing
+    // `solid.tessellation_failed` refusal, not a half-drawn body.
+    let error = crate::app_drawing::solids::solid_body(brep.clone(), None)
+        .expect_err("the neutral tessellator has no NURBS mesher");
+    let CadError::Unsupported(reason) = error else {
+        panic!("a failed tessellation is Unsupported, got {error:?}");
+    };
+    assert!(
+        reason.starts_with("solid.tessellation_failed: kernel.missing_face:"),
+        "{reason}"
+    );
+    assert!(
+        reason.contains("nurbs") && reason.contains("face 1"),
+        "the refusal names the NURBS face: {reason}"
+    );
+
+    // With one, its facets are the committed display — and the exact B-rep is
+    // still the body's authority (display is derived, never the source).
+    let body = crate::app_drawing::solids::solid_body(brep, Some(&StubTessellator))
+        .expect("the injected mesher draws the body");
+    assert_eq!(body.display.mesh.triangles.len(), 1);
+    assert_eq!(body.display.edges.len(), 1);
+    assert!(matches!(
+        body.display.precision,
+        cad_domain::Precision::Approximate { .. }
+    ));
+    assert!(matches!(body.exact, BodyExact::Exact(_)));
+
+    // A body the seam is never consulted for (no NURBS face) still refuses with
+    // the existing code even when a mesher is injected: delegation is per body,
+    // not per carrier.
+    let error =
+        crate::app_drawing::solids::solid_body(unsupported_surface_body(), Some(&StubTessellator))
+            .expect_err("an unsupported surface is still the neutral path's to refuse");
+    let CadError::Unsupported(reason) = error else {
+        panic!("a failed tessellation is Unsupported, got {error:?}");
+    };
+    assert!(
+        reason.starts_with("solid.tessellation_failed: kernel.unsupported_surface:"),
+        "{reason}"
+    );
 }

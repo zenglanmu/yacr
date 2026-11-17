@@ -8,6 +8,7 @@
 //! `LayerAttributes` row at draw time.
 
 use super::*;
+use crate::export::{AcisVersion, DxfTarget};
 
 /// One model-space line at `x` on `layer`, with the given source style.
 fn line_at(
@@ -177,6 +178,8 @@ fn a_symbolic_linetype_carries_the_entity_linetype_scale() {
         document_id: DocumentId(1),
         space: crate::export::ExportSpace::Model,
         format: crate::export::ExportFormat::DxfText,
+        acis_version: AcisVersion::default(),
+        dxf_target: DxfTarget::default(),
         limits: crate::export::ExportLimits::default(),
         units: None,
     })

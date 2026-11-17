@@ -184,7 +184,8 @@ fn a_cylindrical_face_is_refused_by_name() {
         placement: None,
         tolerance: None,
     };
-    let refusal = brep_to_sat(&cylinder).expect_err("a cylinder is not planar");
+    let refusal =
+        brep_to_sat(&cylinder, AcisVersion::default()).expect_err("a cylinder is not planar");
     assert_eq!(refusal, AcisWriteRefusal::CurvedFace { face_id: 7 });
     assert_eq!(refusal.code(), "acis.curved_face_not_written");
     assert!(refusal.message().contains("acis.planar_only"));
@@ -199,7 +200,8 @@ fn a_circle_boundary_curve_is_refused_by_name() {
         u_dir: p(1.0, 0.0, 0.0),
         radius: 0.5,
     };
-    let refusal = brep_to_sat(&brep).expect_err("a circular boundary is not a straight line");
+    let refusal = brep_to_sat(&brep, AcisVersion::default())
+        .expect_err("a circular boundary is not a straight line");
     assert_eq!(refusal, AcisWriteRefusal::NonLineCurve { face_id: 0 });
     assert_eq!(refusal.code(), "acis.non_line_curve_not_written");
     assert!(refusal.message().contains("acis.planar_only"));
@@ -210,7 +212,8 @@ fn a_two_shell_body_is_refused_instead_of_flattened() {
     let mut brep = box_brep(1.0, 1.0, 1.0);
     let mut inner = box_brep(0.5, 0.5, 0.5);
     brep.shells.push(inner.shells.remove(0));
-    let refusal = brep_to_sat(&brep).expect_err("a void needs a second shell");
+    let refusal =
+        brep_to_sat(&brep, AcisVersion::default()).expect_err("a void needs a second shell");
     assert_eq!(refusal, AcisWriteRefusal::MultipleShells { n: 2 });
     assert_eq!(refusal.code(), "acis.multi_shell_not_written");
 }
@@ -218,7 +221,7 @@ fn a_two_shell_body_is_refused_instead_of_flattened() {
 #[test]
 fn an_empty_body_and_a_shelless_body_are_refused() {
     assert_eq!(
-        brep_to_sat(&BrepData::default()).expect_err("no shell"),
+        brep_to_sat(&BrepData::default(), AcisVersion::default()).expect_err("no shell"),
         AcisWriteRefusal::NoShell
     );
     let shelless = BrepData {
@@ -230,7 +233,7 @@ fn an_empty_body_and_a_shelless_body_are_refused() {
         tolerance: None,
     };
     assert_eq!(
-        brep_to_sat(&shelless).expect_err("a shell without faces"),
+        brep_to_sat(&shelless, AcisVersion::default()).expect_err("a shell without faces"),
         AcisWriteRefusal::NoShell
     );
 }
@@ -243,7 +246,8 @@ fn a_sheared_placement_is_refused_instead_of_baked() {
         translation: p(0.0, 0.0, 0.0),
         scale: 1.0,
     });
-    let refusal = brep_to_sat(&brep).expect_err("a shear is not a similarity");
+    let refusal =
+        brep_to_sat(&brep, AcisVersion::default()).expect_err("a shear is not a similarity");
     assert_eq!(refusal, AcisWriteRefusal::Placement);
     assert_eq!(refusal.code(), "acis.placement_not_written");
 }
@@ -277,7 +281,8 @@ fn plane_frames_are_normalised_and_a_skewed_frame_is_refused() {
     if let BrepSurface::Plane { normal, u_dir, .. } = &mut skewed.shells[0].faces[0].surface {
         *u_dir = unit(add(*u_dir, scale(*normal, 0.5)));
     }
-    let refusal = brep_to_sat(&skewed).expect_err("a skewed plane frame is not writable");
+    let refusal = brep_to_sat(&skewed, AcisVersion::default())
+        .expect_err("a skewed plane frame is not writable");
     assert_eq!(refusal.code(), "acis.invalid_topology_not_written");
     assert!(
         refusal.message().contains("perpendicular"),
@@ -294,7 +299,8 @@ fn a_mirrored_placement_is_refused_instead_of_inverting_the_shell() {
         translation: p(5.0, 0.0, 0.0),
         scale: 1.0,
     });
-    let refusal = brep_to_sat(&brep).expect_err("a mirror would invert the shell");
+    let refusal =
+        brep_to_sat(&brep, AcisVersion::default()).expect_err("a mirror would invert the shell");
     assert_eq!(refusal, AcisWriteRefusal::Placement);
     assert_eq!(refusal.code(), "acis.placement_not_written");
     assert!(
@@ -316,7 +322,8 @@ fn a_flipped_face_is_refused_as_inconsistently_oriented() {
             }
         }
     }
-    let refusal = brep_to_sat(&brep).expect_err("a flipped face breaks the shell orientation");
+    let refusal = brep_to_sat(&brep, AcisVersion::default())
+        .expect_err("a flipped face breaks the shell orientation");
     assert_eq!(refusal.code(), "acis.invalid_topology_not_written");
     assert!(
         refusal.message().contains("inverted"),
@@ -330,7 +337,8 @@ fn an_open_shell_with_a_once_used_edge_is_refused_as_non_manifold() {
     // Drop one face: the remaining edges of the hole are used once.
     let mut brep = box_brep(1.0, 1.0, 1.0);
     brep.shells[0].faces.pop();
-    let refusal = brep_to_sat(&brep).expect_err("an open shell is not a closed solid");
+    let refusal = brep_to_sat(&brep, AcisVersion::default())
+        .expect_err("an open shell is not a closed solid");
     assert_eq!(refusal.code(), "acis.invalid_topology_not_written");
 }
 
@@ -409,7 +417,8 @@ fn a_face_with_a_square_hole_round_trips_with_both_loops() {
 fn every_written_loop_and_coedge_ring_closes() {
     use acadrust::entities::acis::{SatCoedge, SatLoop, SatPointer};
 
-    let sat = brep_to_sat(&box_brep(2.0, 3.0, 4.0)).expect("the box is writable");
+    let sat =
+        brep_to_sat(&box_brep(2.0, 3.0, 4.0), AcisVersion::default()).expect("the box is writable");
     let text = acadrust::SatWriter::write(&sat);
     let document = acadrust::SatDocument::parse(&text).expect("the payload parses");
 

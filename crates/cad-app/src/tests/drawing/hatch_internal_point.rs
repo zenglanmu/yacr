@@ -10,7 +10,9 @@
 use super::*;
 
 use super::hatch::{circle, entity_count, filled_area, square, the_hatch, undo_depth};
-use cad_import_acadrust::export::{export, ExportFormat, ExportLimits, ExportRequest, ExportSpace};
+use cad_import_acadrust::export::{
+    export, AcisVersion, DxfTarget, ExportFormat, ExportLimits, ExportRequest, ExportSpace,
+};
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -368,6 +370,8 @@ fn the_hatch_records_the_projected_seed_and_exports_group_98() {
         document_id: DocumentId(1),
         space: ExportSpace::Model,
         format: ExportFormat::DxfText,
+        acis_version: AcisVersion::default(),
+        dxf_target: DxfTarget::default(),
         limits: ExportLimits::default(),
         units: None,
     })

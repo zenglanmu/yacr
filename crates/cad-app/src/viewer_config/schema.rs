@@ -196,10 +196,21 @@ impl PlotExportFormat {
 }
 
 /// Host-owned export defaults (no executable content).
+///
+/// `acisVersion` selects the ACIS payload version a Save-As writes and
+/// `dxfVersion` the DXF container. Both reuse the exporter's own public enums
+/// (and therefore its wire labels), so the persisted token, the settings token
+/// and the written header cannot drift.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct ExportConfig {
     pub plot_format: PlotExportFormat,
+    /// ACIS payload version (`"7.0"` / `"21.0"`), default `"7.0"`.
+    pub acis_version: cad_import_acadrust::export::AcisVersion,
+    /// DXF container version (`"2010"` / `"2013"` / `"2018"`), default
+    /// `"2010"`. A DWG is always AC1032 (R2018); see
+    /// [`cad_import_acadrust::export::DxfTarget`].
+    pub dxf_version: cad_import_acadrust::export::DxfTarget,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]

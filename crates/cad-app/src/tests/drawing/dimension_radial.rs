@@ -26,7 +26,9 @@
 
 use super::*;
 
-use cad_import_acadrust::export::{export, ExportFormat, ExportLimits, ExportRequest, ExportSpace};
+use cad_import_acadrust::export::{
+    export, AcisVersion, DxfTarget, ExportFormat, ExportLimits, ExportRequest, ExportSpace,
+};
 use cad_import_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
 
 const CIRCLE_ID: u128 = 1;
@@ -659,6 +661,8 @@ fn created_radial_dimensions_round_trip_through_the_dxf_export() {
             document_id: DocumentId(1),
             space: ExportSpace::Model,
             format: ExportFormat::DxfText,
+            acis_version: AcisVersion::default(),
+            dxf_target: DxfTarget::default(),
             limits: ExportLimits::default(),
             units: Some(UnitContext::drawing_units()),
         })

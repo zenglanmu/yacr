@@ -42,15 +42,20 @@
 //! **Evidence boundary**: the payload is read back by this crate's own SAT/SAB
 //! reader only. No third-party CAD application was used to verify it.
 //!
-//! The result is a [`SatDocument`]. The DXF export serialises it as SAT text and
-//! carries it inline; the DWG export serialises the *same* document with
-//! `SabWriter` and attaches it as a binary SAB blob. Both encodings come from
-//! this one document, so the reachable subset is identical for the two formats.
+//! The result is a [`SatDocument`] carrying the caller's ACIS version. A R2010
+//! DXF serialises it as ACIS 7.0 SAT text and carries it inline; a R2013/R2018
+//! DXF and a DWG serialise the *same* document with `SabWriter` (SAB, or ASM for
+//! version 21800) and attach it as a binary blob. Every encoding comes from this
+//! one document, so the reachable subset is identical for every combination.
 
 use std::collections::HashMap;
 
-use acadrust::entities::acis::{SatDocument, SatPointer, Sense, Sidedness};
+use acadrust::entities::acis::{
+    SatDocument, SatHeader, SatPointer, SatRecord, SatToken, Sense, Sidedness,
+};
 use cad_domain::{BrepCurve, BrepData, BrepFace, BrepPlacement, BrepSurface, Point3};
+
+use super::AcisVersion;
 
 /// Why a B-rep is not written as ACIS.
 ///
@@ -118,8 +123,16 @@ impl AcisWriteRefusal {
     }
 }
 
-/// Build a SAT document for a single-shell, planar, line-bounded solid.
-pub(super) fn brep_to_sat(brep: &BrepData) -> Result<SatDocument, AcisWriteRefusal> {
+/// Build a SAT/SAB document for a single-shell, planar, line-bounded solid.
+///
+/// `version` selects the payload version only: the topology built below is
+/// identical for ACIS 7.0 (700) and ACIS 21.0 (21800/ASM), because both use
+/// explicit record indices and `@`-counted strings. The subset gate and every
+/// [`AcisWriteRefusal`] are version-independent.
+pub(super) fn brep_to_sat(
+    brep: &BrepData,
+    version: AcisVersion,
+) -> Result<SatDocument, AcisWriteRefusal> {
     let shell = match brep.shells.len() {
         0 => return Err(AcisWriteRefusal::NoShell),
         1 => &brep.shells[0],
@@ -377,7 +390,22 @@ pub(super) fn brep_to_sat(brep: &BrepData) -> Result<SatDocument, AcisWriteRefus
 
     // Record indices are position-indexed: create the records group by group so
     // every forward pointer (coedge → loop, loop → face, face → shell) is known.
-    let mut doc = SatDocument::new_body();
+    //
+    // The document starts from the requested SAT version instead of
+    // `SatDocument::new_body()`'s fixed 7.0 header; the body record layout is the
+    // same one (body at index 0, lump pointing back at it), which is why the
+    // index arithmetic below is unchanged. The ACIS version never changes the
+    // record set, only the header and the SAB/ASM encoding derived from it.
+    let mut doc = SatDocument::with_header(SatHeader::with_version(version.sat_version()));
+    doc.header.num_bodies = 1;
+    let mut body = SatRecord::new(0, "body");
+    body.attribute = SatPointer::NULL;
+    body.tokens.push(SatToken::Pointer(SatPointer::NULL)); // next_body
+    body.tokens.push(SatToken::Pointer(SatPointer::NULL)); // lump
+    body.tokens.push(SatToken::Pointer(SatPointer::NULL)); // wire
+    body.tokens.push(SatToken::Pointer(SatPointer::NULL)); // transform
+    doc.records.push(body);
+    doc.header.num_records = doc.records.len();
     let points_start = doc.records.len() as i32;
     let vertices_start = points_start + welder.points.len() as i32;
     let curves_start = vertices_start + welder.points.len() as i32;

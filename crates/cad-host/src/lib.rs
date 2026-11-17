@@ -66,7 +66,9 @@ pub mod policy;
 mod recent;
 mod save;
 mod settings;
+mod settings_export;
 mod settings_root;
+mod settings_snapshot;
 mod state;
 
 pub use command_log::{

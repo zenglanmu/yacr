@@ -10,7 +10,9 @@ use super::*;
 
 use cad_db::MLeaderStyle;
 use cad_domain::MLeaderStyleId;
-use cad_import_acadrust::export::{export, ExportFormat, ExportLimits, ExportRequest, ExportSpace};
+use cad_import_acadrust::export::{
+    export, AcisVersion, DxfTarget, ExportFormat, ExportLimits, ExportRequest, ExportSpace,
+};
 use cad_import_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
 
 /// A drawing with layer 0, the pinned `Standard` row and the extra style rows.
@@ -106,6 +108,8 @@ fn reimport(app: &Application) -> cad_db::DrawingDatabase {
         document_id: DocumentId(1),
         space: ExportSpace::Model,
         format: ExportFormat::DxfText,
+        acis_version: AcisVersion::default(),
+        dxf_target: DxfTarget::default(),
         limits: ExportLimits::default(),
         units: None,
     })
@@ -130,6 +134,8 @@ fn exported_text(app: &Application) -> String {
         document_id: DocumentId(1),
         space: ExportSpace::Model,
         format: ExportFormat::DxfText,
+        acis_version: AcisVersion::default(),
+        dxf_target: DxfTarget::default(),
         limits: ExportLimits::default(),
         units: None,
     })

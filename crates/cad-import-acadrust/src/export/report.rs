@@ -27,7 +27,8 @@ pub enum ExportSpace {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExportFormat {
     DxfText,
-    /// Binary DWG (AC1032 by default, decided by `CadDocument::version`).
+    /// Binary DWG: always AC1032, decided by the document version the DWG
+    /// writer reads (a request with any other DXF target is refused).
     Dwg,
 }
 

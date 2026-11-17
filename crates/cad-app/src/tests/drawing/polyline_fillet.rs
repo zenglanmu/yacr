@@ -950,6 +950,8 @@ fn a_rounded_polyline_round_trips_through_the_dxf_export() {
         document_id: DocumentId(1),
         space: ExportSpace::Model,
         format: ExportFormat::DxfText,
+        acis_version: cad_import_acadrust::export::AcisVersion::default(),
+        dxf_target: cad_import_acadrust::export::DxfTarget::default(),
         limits: ExportLimits::default(),
         units: Some(UnitContext::drawing_units()),
     })

@@ -11,9 +11,6 @@ use cad_db::{
     transform_geometry, DbEntity, DbObject, DrawingDatabase, DrawingDatabaseBuilder, Layer,
 };
 use cad_domain::*;
-use cad_import_acadrust::export::{
-    export, ExportFormat, ExportLimits, ExportReport, ExportRequest, ExportSpace,
-};
 use cad_import_acadrust::ImportedDrawing;
 use cad_measure::{MeasurementEngine, SnapCandidate, SnapTarget};
 
@@ -28,6 +25,7 @@ mod documents;
 mod draw_create;
 mod draw_intent_map;
 mod draw_pick;
+mod export_options;
 mod open_import;
 mod properties;
 mod render_edit;
@@ -53,6 +51,11 @@ pub use databases::{
     blank_database, demo_database, snap_candidates_near, snap_candidates_near_uncached,
     snap_candidates_near_with_policy,
 };
+/// The Save-As export option types (ACIS payload version, DXF container).
+///
+/// Re-exported so host-side code can name the option types without a direct
+/// `cad-import-acadrust` dependency, exactly like [`XrefOptions`].
+pub use export_options::{AcisVersion, DxfTarget, ExportOptions};
 /// The poll result of the background solid boolean (ADR-0036 phase C2).
 pub use solids::SolidBooleanPoll;
 
@@ -124,6 +127,11 @@ pub struct HostController {
     /// geometry and snapping are unchanged; `APERTURE <n>` overlays only the
     /// object-snap aperture, never the pickbox.
     tolerance: TolerancePolicy,
+    /// The Save-As export options: ACIS payload version and DXF container.
+    ///
+    /// Host-set app option, **not** document state (no `cad-db` write, no
+    /// revision, no history). See [`HostController::set_export_options`].
+    export_options: ExportOptions,
 }
 
 impl HostController {
@@ -166,6 +174,7 @@ impl HostController {
             api_prompt_error: None,
             api_prompt_results: Vec::new(),
             tolerance: TolerancePolicy::default(),
+            export_options: ExportOptions::default(),
         })
     }
 
@@ -287,42 +296,6 @@ impl HostController {
             .documents
             .get(&self.document_id)
             .map(|d| d.drawing.clone())
-    }
-
-    /// Reverse-map the active document to lossy DXF bytes plus the export report.
-    ///
-    /// Host-owned: the platform chooses the path and writes the bytes. This is a
-    /// **Save As** whose report records every conversion/drop; a missing document
-    /// is an explicit `InvalidInput`, never an empty success.
-    pub fn export_dxf(&self) -> CadResult<(Vec<u8>, ExportReport)> {
-        self.export_as(ExportFormat::DxfText)
-    }
-
-    /// Reverse-map the active document to **experimental** binary DWG bytes.
-    ///
-    /// Same document/report as [`Self::export_dxf`], written by upstream
-    /// `acadrust::DwgWriter`: lossy and NOT verified against AutoCAD/vendor.
-    pub fn export_dwg(&self) -> CadResult<(Vec<u8>, ExportReport)> {
-        self.export_as(ExportFormat::Dwg)
-    }
-
-    /// The one request builder shared by both formats, so they cannot drift.
-    fn export_as(&self, format: ExportFormat) -> CadResult<(Vec<u8>, ExportReport)> {
-        let document = self
-            .application
-            .workspace
-            .documents
-            .get(&self.document_id)
-            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
-        let request = ExportRequest {
-            database: document.drawing.as_ref(),
-            document_id: self.document_id,
-            space: ExportSpace::Model,
-            format,
-            limits: ExportLimits::default(),
-            units: Some(document.units.clone()),
-        };
-        export(&request)
     }
 
     /// Publish an imported drawing into the current document slot.
@@ -907,14 +880,14 @@ impl HostController {
             [] => {
                 return Err(CadError::InvalidInput(
                     "textedit.selection_empty: select exactly one TEXT entity to edit".into(),
-                ))
+                ));
             }
             [only] => only.clone(),
             refs => {
                 return Err(CadError::InvalidInput(format!(
                     "textedit.selection_multiple: TEXTEDIT edits one TEXT entity, {} are selected",
                     refs.len()
-                )))
+                )));
             }
         };
         self.execute(Command {

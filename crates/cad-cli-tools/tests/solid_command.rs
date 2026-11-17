@@ -23,7 +23,7 @@ use cad_domain::{
     SemanticGeometry,
 };
 use cad_kernel_adapter::SolidModeler;
-use cad_kernel_solidcore::SolidCoreModeler;
+use cad_kernel_solidcore::{SolidCoreModeler, SolidCoreTessellator};
 
 fn p(x: f64, y: f64, z: f64) -> Point3 {
     Point3 { x, y, z }
@@ -58,6 +58,11 @@ fn modeler_controller() -> HostController {
         HostController::with_blank_document([800.0, 600.0]).expect("blank document");
     let modeler: Arc<dyn SolidModeler> = Arc::new(SolidCoreModeler::new());
     controller.application.set_solid_modeler(Some(modeler));
+    // P2.1c part 1: the display mesher rides on the same carrier composition. A
+    // primitive body has no NURBS face, so this stays inert for these contracts.
+    controller
+        .application
+        .set_solid_tessellator(Some(Arc::new(SolidCoreTessellator::new())));
     controller
 }
 
@@ -681,7 +686,7 @@ fn mesh_volume(mesh: &cad_domain::Mesh) -> f64 {
 #[test]
 fn a_modeler_box_survives_a_dxf_round_trip_as_an_exact_solid3d() {
     use cad_import_acadrust::export::{
-        export, ExportFormat, ExportLimits, ExportRequest, ExportSpace,
+        export, AcisVersion, DxfTarget, ExportFormat, ExportLimits, ExportRequest, ExportSpace,
     };
     use cad_import_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
 
@@ -702,6 +707,8 @@ fn a_modeler_box_survives_a_dxf_round_trip_as_an_exact_solid3d() {
         document_id: document,
         space: ExportSpace::Model,
         format: ExportFormat::DxfText,
+        acis_version: AcisVersion::default(),
+        dxf_target: DxfTarget::default(),
         limits: ExportLimits::default(),
         units: None,
     })

@@ -34,6 +34,11 @@ struct SaveOutcome {
     /// names that payload instead of only saying "experimental DWG", and still
     /// states that no third-party reader verified it.
     acis_sab_dwg: bool,
+    /// The export wrote a `3DSOLID` into a R2013/R2018 DXF whose ACIS payload is
+    /// a binary SAB blob in the `ACDSDATA` section
+    /// (`export.note.acis_sab_dxf`). The status names the payload version and the
+    /// container instead of only saying "Saved DXF".
+    acis_sab_dxf: bool,
 }
 
 /// Why a lossy save could not be performed, for a graded status.
@@ -227,10 +232,13 @@ impl HostCore {
                     }
                     // Clean success only when the export report is Complete; the
                     // UI never re-derives the verdict from the counts. A file that
-                    // carries a `3DSOLID` was written as AC1024 (see
-                    // `ExportReport.notes`), which the status says out loud.
+                    // carries a `3DSOLID` says which container/payload combination
+                    // was written (R2010 inline SAT text, or a R2013/R2018 SAB
+                    // blob in ACDSDATA), which the status states out loud.
                     Ok(outcome) if outcome.completeness == Completeness::Complete => {
-                        let key = if outcome.acis_sat_ac1024 {
+                        let key = if outcome.acis_sab_dxf {
+                            "save.exported_acis_sab_dxf"
+                        } else if outcome.acis_sat_ac1024 {
                             "save.exported_acis_sat"
                         } else {
                             "save.exported"
@@ -238,7 +246,9 @@ impl HostCore {
                         catalog(key, &[("path", &target.display_name)])
                     }
                     Ok(outcome) => {
-                        let key = if outcome.acis_sat_ac1024 {
+                        let key = if outcome.acis_sab_dxf {
+                            "save.exported_acis_sab_dxf_partial"
+                        } else if outcome.acis_sat_ac1024 {
                             "save.exported_acis_sat_partial"
                         } else {
                             "save.exported_partial"
@@ -312,6 +322,12 @@ impl HostCore {
             // must never be written to.
             return Err(SaveFailure::RefusedSourcePath);
         }
+        // Install the configured Save-As options on the controller first: the
+        // ACIS payload version and DXF container are host settings, and the
+        // request builder reads them when it runs. A DWG is always AC1032, so the
+        // controller names the DWG's own container for that format.
+        let options = self.export_options();
+        self.controller.borrow_mut().set_export_options(options);
         let (bytes, report) = if wrote_dwg {
             self.controller.borrow().export_dwg()
         } else {
@@ -334,6 +350,10 @@ impl HostCore {
                 .notes
                 .iter()
                 .any(|note| note.code == "export.note.acis_sab_dwg"),
+            acis_sab_dxf: report
+                .notes
+                .iter()
+                .any(|note| note.code == "export.note.acis_sab_dxf"),
         })
     }
 

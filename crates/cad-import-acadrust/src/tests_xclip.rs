@@ -8,6 +8,7 @@
 //! parse → `BlockClip` path rather than a hand-constructed object graph.
 
 use super::*;
+use crate::export::{AcisVersion, DxfTarget};
 use std::sync::Arc;
 
 fn request(bytes: Vec<u8>) -> ImportRequest {
@@ -422,6 +423,8 @@ fn export_writes_the_clip_chain_so_an_imported_clip_round_trips() {
         document_id: DocumentId(1),
         space: crate::export::ExportSpace::Model,
         format: crate::export::ExportFormat::DxfText,
+        acis_version: AcisVersion::default(),
+        dxf_target: DxfTarget::default(),
         limits: crate::export::ExportLimits::default(),
         units: None,
     })
@@ -468,6 +471,8 @@ fn export_writes_a_switched_off_clip_as_a_disabled_boundary() {
         document_id: DocumentId(1),
         space: crate::export::ExportSpace::Model,
         format: crate::export::ExportFormat::DxfText,
+        acis_version: AcisVersion::default(),
+        dxf_target: DxfTarget::default(),
         limits: crate::export::ExportLimits::default(),
         units: None,
     })

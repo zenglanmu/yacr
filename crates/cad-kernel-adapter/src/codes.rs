@@ -27,6 +27,12 @@ pub const KERNEL_MISSING_FACE: &str = "kernel.missing_face";
 pub const KERNEL_OPEN_EDGE: &str = "kernel.open_edge";
 /// A shell/body was dropped because a face in it could not be tessellated.
 pub const KERNEL_DROPPED_SHELL: &str = "kernel.dropped_shell";
+/// The mesh was produced but does **not** meet the requested fidelity: a face the
+/// mesher could only fill leniently, a face or edge whose refinement stopped at a
+/// bound above the chord tolerance, or an edge that could not be sampled at all.
+/// Never used for a missing entity (that is `kernel.missing_face`); always paired
+/// with a `Partial` outcome.
+pub const KERNEL_TOLERANCE_NOT_MET: &str = "kernel.tolerance_not_met";
 /// The request was cancelled before a result could be produced.
 pub const KERNEL_CANCELLED: &str = "kernel.cancelled";
 

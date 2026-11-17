@@ -29,7 +29,8 @@ pub const THEME_LIGHT_BACKGROUND: &str = "#ffffff";
 
 /// Host policy mirroring the web host: users may persist the two dock panels'
 /// initial-open flags and the Options-dialog settings that have real behavioural
-/// backing (overlay visibility, the plot default, the five persisted interaction
+/// backing (overlay visibility, the plot default, the ACIS payload and DXF
+/// container versions, the five persisted interaction
 /// values — object snap, hover preview, `SNAP` grid snap, `ORTHO` and the
 /// `SNAPUNIT` spacing —, the 2D left-drag input scheme, the 3D orbit
 /// sensitivity, the model/paper backgrounds, the crosshair size and the
@@ -51,6 +52,8 @@ pub const HOST_ALLOWED_PATHS_JSON: &str = r#"{"ui":{"userCustomization":{"allowe
     "view.aperture.sizePixels",
     "view.gpuBudget.percent",
     "ui.export.plotFormat",
+    "ui.export.acisVersion",
+    "ui.export.dxfVersion",
     "interaction.snapEnabled",
     "interaction.hoverPreview",
     "interaction.gridSnapEnabled",

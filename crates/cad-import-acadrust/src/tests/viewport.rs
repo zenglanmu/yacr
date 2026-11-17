@@ -1,6 +1,7 @@
 //! Viewport content transforms and clipping semantics.
 
 use super::*;
+use crate::export::{AcisVersion, DxfTarget};
 
 /// Build a top/plan VIEWPORT entity with the given paper rectangle, scale,
 /// and model view centre.
@@ -674,6 +675,8 @@ fn the_exporter_writes_no_viewport_so_a_polygon_clip_does_not_survive_save_as() 
         document_id: DocumentId(1),
         space: crate::export::ExportSpace::Model,
         format: crate::export::ExportFormat::DxfText,
+        acis_version: AcisVersion::default(),
+        dxf_target: DxfTarget::default(),
         limits: crate::export::ExportLimits::default(),
         units: None,
     })

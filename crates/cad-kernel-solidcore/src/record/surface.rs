@@ -3,7 +3,9 @@
 //! Two families map here:
 //!
 //! - the analytic labels `Plane`, `PlaneThrough`, `Cylinder`, `Cone`, `Sphere`,
-//!   `Torus` become the matching [`cad_domain::BrepSurface`] variant;
+//!   `Torus` become the matching [`cad_domain::BrepSurface`] variant, with one
+//!   reclassification: a **zero-slope cone is a cylinder** (see "A zero-slope
+//!   cone is a cylinder" and the `Cone` arm of [`to_brep`]);
 //! - the **form** surfaces `Spline` and `RationalSpline` become
 //!   [`cad_domain::BrepSurface::Nurbs`] (a `Spline` with every weight `1.0`). The
 //!   net, knots and weights cross the seam bit-for-bit; the degree stays implicit
@@ -18,6 +20,23 @@
 //! `Cylinder`/`Cone`/`Sphere`/`Torus`), and the form is ignored. That keeps curved
 //! primitives analytic downstream (display and export) instead of degrading them
 //! to a spline.
+//!
+//! # A zero-slope cone is a cylinder
+//!
+//! The pinned kernel writes a **round fillet** as `Surface::Cone { half_angle:
+//! 0.0 }` plus a rational NURBS net (measured: `tests/fillet.rs`, one round on a
+//! unit cube's edge). A zero-slope cone *is* a cylinder, and mapping it to
+//! [`cad_domain::BrepSurface::Cone`] would keep a face this build cannot write
+//! back — the record writer needs a slope for a cone label, and the cone's loop
+//! mapping refuses a slope-less lateral face — so the round would be lost on the
+//! next lift. It is therefore mapped to
+//! [`cad_domain::BrepSurface::Cylinder`] with the same fields
+//! (origin, `axis = z`, `ref_dir = x`, radius), which the existing trimmed-side
+//! path already writes, measures and booleans.
+//!
+//! The test is **exactly** `half_angle == 0.0`, on purpose: only a bit-exact zero
+//! slope is reclassified, and any genuinely conical face (however shallow) keeps
+//! its own label and its own slope.
 //!
 //! The face's own `(u, v)` box is not read here: it is [`cad_domain::BrepFace`]
 //! data, carried by the caller.
@@ -119,6 +138,27 @@ pub(crate) fn to_brep(surface: &Surface) -> Result<BrepSurface, LiftRefusal> {
         } => {
             let (origin, x, z) = frame(f)
                 .ok_or_else(|| LiftRefusal::unsupported("a cone record with a degenerate frame"))?;
+            // An exactly zero slope is a cylinder, and one that keeps the cone label
+            // cannot be carried: the record writer needs a slope for a cone label and
+            // the cone's loop mapping refuses a slope-less lateral face, so the face
+            // (and with it a round fillet, which the pinned kernel records exactly
+            // this way) would be lost on the next lift. The radius is guarded like
+            // the cylinder label it becomes; a genuinely conical face keeps its own
+            // label below.
+            if *half_angle == 0.0 {
+                if !radius_at_origin.is_finite() || *radius_at_origin <= 0.0 {
+                    return Err(LiftRefusal::unsupported(format!(
+                        "a zero-slope cone (a cylinder) with radius {radius_at_origin} cannot be \
+                         mapped; the radius must be finite and positive"
+                    )));
+                }
+                return Ok(BrepSurface::Cylinder {
+                    origin,
+                    axis: z,
+                    ref_dir: x,
+                    radius: *radius_at_origin,
+                });
+            }
             if !half_angle.is_finite() || half_angle.abs() >= std::f64::consts::FRAC_PI_2 {
                 return Err(LiftRefusal::unsupported(format!(
                     "a cone record with half angle {half_angle} cannot be mapped"
@@ -257,4 +297,98 @@ pub(crate) fn record_plane(
         u_axis: super::units::record_point(u),
         v_axis: super::units::record_point(v),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::LIFT_UNSUPPORTED;
+
+    /// The frame the pinned kernel writes for a round on a unit cube's edge at
+    /// x = 0, y = 1 (see `tests/fillet.rs`, which measures it).
+    fn round_frame() -> Frame {
+        Frame {
+            origin: [0.1, 0.9, -0.5],
+            x_axis: [0.0, 1.0, 0.0],
+            y_axis: [-1.0, 0.0, 0.0],
+        }
+    }
+
+    /// A round fillet comes back as `Surface::Cone { half_angle: 0.0 }` plus a
+    /// rational net; the label alone must map to the cylinder it describes, or the
+    /// face would be unwritable (the cone writer needs a slope) and the round lost.
+    #[test]
+    fn a_zero_slope_cone_maps_to_the_cylinder_it_is() {
+        let mapped = to_brep(&Surface::Cone {
+            frame: round_frame(),
+            radius_at_origin: 0.1,
+            half_angle: 0.0,
+        })
+        .expect("a zero-slope cone maps");
+        let BrepSurface::Cylinder {
+            origin,
+            axis,
+            ref_dir,
+            radius,
+        } = mapped
+        else {
+            panic!("a zero-slope cone is a cylinder, got {mapped:?}");
+        };
+        assert_eq!(
+            origin,
+            Point3 {
+                x: 0.1,
+                y: 0.9,
+                z: -0.5
+            }
+        );
+        // z = x_axis × y_axis, x the label's x_axis: the label's own frame.
+        assert!((axis.x).abs() < 1e-12 && (axis.y).abs() < 1e-12 && (axis.z - 1.0).abs() < 1e-12);
+        assert!((ref_dir.y - 1.0).abs() < 1e-12 && (ref_dir.x).abs() < 1e-12);
+        assert_eq!(radius, 0.1);
+    }
+
+    /// The reclassification is exact, on purpose: a genuinely conical face keeps
+    /// its label and its slope, however shallow.
+    #[test]
+    fn a_shallow_but_non_zero_cone_keeps_its_cone_label() {
+        for half_angle in [1e-9, 1e-3, 0.5] {
+            let mapped = to_brep(&Surface::Cone {
+                frame: round_frame(),
+                radius_at_origin: 0.1,
+                half_angle,
+            })
+            .expect("a cone maps");
+            let BrepSurface::Cone {
+                sin_half_angle,
+                cos_half_angle,
+                ..
+            } = mapped
+            else {
+                panic!("a cone of half angle {half_angle} must stay a cone, got {mapped:?}");
+            };
+            assert_eq!(sin_half_angle, half_angle.sin());
+            assert_eq!(cos_half_angle, half_angle.cos());
+        }
+    }
+
+    /// The cylinder a zero-slope cone becomes needs a radius the cylinder label can
+    /// carry; a zero or negative one is refused by name, not mapped.
+    #[test]
+    fn a_zero_slope_cone_without_a_positive_radius_is_refused() {
+        for radius in [0.0, -0.1] {
+            let refusal = to_brep(&Surface::Cone {
+                frame: round_frame(),
+                radius_at_origin: radius,
+                half_angle: 0.0,
+            })
+            .expect_err("a non-positive radius is refused");
+            assert_eq!(refusal.code, LIFT_UNSUPPORTED);
+            assert!(
+                refusal.detail.contains("zero-slope cone") && refusal.detail.contains("radius"),
+                "{}",
+                refusal.detail
+            );
+        }
+    }
 }

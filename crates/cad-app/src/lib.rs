@@ -541,6 +541,13 @@ pub struct Application {
     /// fabricating a body. The modeler is stateless (content in, content out), so
     /// it is shared as `Arc` and holds no document state.
     solid_modeler: Option<Arc<dyn cad_kernel_adapter::SolidModeler>>,
+    /// The injected solid tessellator (ADR-0036 P2.1c part 1).
+    ///
+    /// Injected by the **carrier** exactly like the modeler, and `None` is the
+    /// honest default: without it a body keeps the neutral tessellator, which
+    /// draws a NURBS face as a missing face by name instead of a mesh. The seam is
+    /// trait-only, so no kernel type crosses into `cad-app`.
+    solid_tessellator: Option<Arc<dyn cad_kernel_adapter::SolidTessellator>>,
     /// The single current background solid boolean (ADR-0036 phase C2).
     ///
     /// One slot per live controller (`Application` is 1:1 with a

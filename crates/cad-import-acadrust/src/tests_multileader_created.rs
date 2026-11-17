@@ -22,7 +22,9 @@ use acadrust::entities::LeaderContentType;
 use acadrust::objects::ObjectType;
 use acadrust::{DxfReader, EntityType};
 
-use crate::export::{self, ExportFormat, ExportLimits, ExportRequest, ExportSpace};
+use crate::export::{
+    self, AcisVersion, DxfTarget, ExportFormat, ExportLimits, ExportRequest, ExportSpace,
+};
 use crate::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
 use cad_db::{DbEntity, DbObject, DrawingDatabaseBuilder, Layer, MLeaderStyle};
 use cad_domain::MLeaderStyleId;
@@ -93,6 +95,8 @@ fn export_bytes(database: &cad_db::DrawingDatabase) -> Vec<u8> {
         document_id: DocumentId(1),
         space: ExportSpace::Model,
         format: ExportFormat::DxfText,
+        acis_version: AcisVersion::default(),
+        dxf_target: DxfTarget::default(),
         limits: ExportLimits::default(),
         units: None,
     })
