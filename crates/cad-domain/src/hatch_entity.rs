@@ -50,6 +50,8 @@ impl HatchLoopFlags {
     /// A derived boundary (the file did not store its vertices).
     pub const DERIVED: u32 = 4;
     pub const TEXTBOX: u32 = 8;
+    /// A text island: the fill hole a text-shaped island carves out.
+    pub const TEXT_ISLAND: u32 = 128;
 
     /// The raw bits (DXF group 92).
     pub fn bits(self) -> u32 {
@@ -62,10 +64,14 @@ impl HatchLoopFlags {
         self.0 & Self::DERIVED != 0
     }
 
-    /// Whether the loop is a text box. Preserved but **not interpreted**
-    /// (ADR U-5).
+    /// Whether the loop is a text box (DXF group 92 bit 8).
     pub fn textbox(self) -> bool {
         self.0 & Self::TEXTBOX != 0
+    }
+
+    /// Whether the loop is a text island (DXF group 92 bit 128).
+    pub fn text_island(self) -> bool {
+        self.0 & Self::TEXT_ISLAND != 0
     }
 }
 
@@ -135,6 +141,18 @@ impl HatchLoop {
             flags,
             source_edges: None,
         }
+    }
+
+    /// Whether this loop is a **fill island the drawing does not show**.
+    ///
+    /// A text box (`92` bit 8) or a text island (`92` bit 128) is a hole the
+    /// hatch engine carved around text, not boundary geometry the author drew:
+    /// the vendor drawing shows no outline there. Drawing it adds visible
+    /// rectangles inside filled areas, so the *display* skips it while the loop
+    /// itself is kept — the fill parity, the snap vertices and the export all
+    /// still see it (ADR 0018 §B.7).
+    pub fn is_text_island(&self) -> bool {
+        self.flags.textbox() || self.flags.text_island()
     }
 
     /// Sample this loop's bulges into a dense closed 2D ring.
@@ -606,9 +624,14 @@ impl HatchGeometry {
     }
 
     /// Boundary-loop polylines only (the plane is unusable, so no fill).
+    ///
+    /// Text-box / text-island loops are not drawn: they are fill holes, and the
+    /// vendor drawing shows no outline for them (see
+    /// [`HatchLoop::is_text_island`]).
     fn boundary_display(&self) -> Vec<SemanticGeometry> {
         self.loops
             .iter()
+            .filter(|loop_| !loop_.is_text_island())
             .map(|loop_| SemanticGeometry::Polyline {
                 points: loop_
                     .points

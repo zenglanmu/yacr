@@ -447,3 +447,111 @@ pub enum BoundaryEdge {                     // 供导出写解析边（B4）
 - **证据边界**：契约测试（`crates/cad-app/src/tests/drawing/hatch_internal_point.rs`，14 项）与
   `cad-app`/`cad-ui-core` 门禁；**无**真实 DWG、GUI、像素或 vendor 对照。`LINE`/`ARC` 自动发现、非 `+Z` 平面、
   图纸空间与关联性仍 **NOT IMPLEMENTED**。
+
+## 2026-11-17 补注：边界弧绕向与图案行「已求值」（真文件调试，U-14）
+
+**不改写上面的历史决策**；本条记录一次**真实 DWG 渲染调试**定位的两处导入缺陷、证据等级与仍然存在的上限。
+触发文件：外部 AC1018 真图（工程地质纵断面，663 个 HATCH、2596 条边界路径、495 条椭圆弧边），参考图由用户提供
+（AutoCAD 侧导出的 PNG）。**该文件不在仓库 `fixtures/`**（AGENTS.md：外部大样本放仓库外），因此本条的数字是
+外部证据，不是仓库内的 golden。
+
+### 症状
+
+全部模型空间渲染坍缩成 5 个巨大彩色圆盘，纵断面本体只有约 1 px：`scan` 的图界是 **5528 × 10782** 单位，而断面本体
+约 **1908 × 527**。根因有两条，各自独立、各自足够致命。
+
+### B.7-1 顺时针边界弧的角度是**镜像存储**的（U-14）
+
+- **现象**：7 条路径的椭圆弧边半径 600–2750，而相邻边界顶点只相距 5–30 单位（"平弧"）。我们的
+  `directed_sweep` 对 `ccw=false` 且 `end > start` 的角度补整圈，把一条 **0.9°、27 单位弦**的边读成 **359°**；
+  单个采样点落在离边界 3 500 单位处，`drawing.bounds()` 被这条弧撑爆，渲染视角随之坍缩。
+- **真实规则**：边界弧的 `counter_clockwise` 不只是方向——**顺时针边的存储角度是补角**（`360° − θ`），
+  即边实际从 `−start` 走到 `−end`。等价写法是"负号照在椭圆短轴上"（`minor = (maj.y, −maj.x)·ratio`）。
+  因此扫角必须取**存储差值本身**（恒正，整圈只在 `start=0,end=2π` 时保留），方向由参数帧（镜像）表达，
+  不能再对角度做整圈补正。
+- **证据等级**（全部为"实践约定"，非 Autodesk 文档）：
+  - ezdxf #175（<https://github.com/mozman/ezdxf/issues/175>）："DXF stores the clockwise oriented start- and end
+    angles for HATCH arc- and ellipse edges as complementary angles (360 − angle)"，并且明确指出
+    **"There's no official documentation on this"**；
+  - GDAL `ogrdxf_hatch.cpp` 对顺时针边取负角；acadrust 自身 `count.rs`（`s = -1` 轴）与
+    `explode/mod.rs`（`(-end, -start)`）都按镜像读；
+  - acadrust #241 用 **44 个生产 DWG** 实测：镜像读法在 40 个文件里让边界边以 1e-7 接上，字面读法**44 个全部错开**
+    （0.45 至 1.7e6 单位）；
+  - 本文件自证：同一图案在 hatch 角 0° 与 90° 时，存储行角分别是 45° 与 135°、基点从 `(5.656, 0)` 变成
+    `(0, 5.656)`（见 B.7-2），说明写盘侧确实把 52/41 烘进行里，顺时针弧同理。
+- **决定**：在**导入边界**处按上述约定采样（`boundary_arc_sweep` / `boundary_arc_parameter`），不做"猜测式选读"：
+  文档读法永远优先，绝不为了让边界闭合成环而逐边挑角度（那会把一条合法的 >180° 弧掰成补弧）。
+- **仍然诚实报告**：每条路径采样后测量相邻边交点残差与闭合残差；残差超过**该路径自身对角线 10%** 时
+  记 `import.hatch_boundary_gap` 诊断并把实测残差写进该 HATCH 的 `Partial` 理由（`hatch boundary edges do not
+  join …`）。几何**照存储读数保留**，不丢边、不改读、不伪造闭合（ADR B6）。本文件命中该诊断的路径，
+  是文件自身边界不闭合的部分，不是被"修正"的对象。
+- **修复后**（同一台机器、同一 Vulkan P620、`cad-cli-tools render --width 1305 --height 501`）：图界
+  **5528×10782 → 2010×1012**；最大 HATCH 绘制范围 **5 482 → 635 单位**；渲染输出从"5 个圆盘"变为完整的
+  三幅断面 + 图例。
+
+### B.7-2 存储的图案定义行是**已经求值**的（角度 + 比例已烘入）
+
+- **现象**：修完 B.7-1 后断面可见，但图案几乎不可见——每条图案线的间距是 64 单位、方向 225°，而参考图同级地层
+  是 8 单位、135°。原因：`HatchPattern::families()`（ADR A.1：行是**图案空间**，角度/比例在组合时应用）把
+  文件里**已经烘过 52/41 的行**又变换了一次。
+- **自证数据**（同一图案 `ZBM22`，`pattern_scale = 8`）：
+  | hatch 角 | 存储行角 | 存储基点 | 存储偏移 | 存储 dash |
+  |---|---|---|---|---|
+  | 0° | 45° | (0, 0) / (5.656, 0) | (-5.6569, +5.6569) | 1.6 / −1.6 |
+  | 90° | 135° | (0, 0) / (0, 5.656) | (-5.6569, −5.6569) | 1.6 / −1.6 |
+  行角 = 45° + 52；基点 = 图案空间点乘 41 后按 52 旋转；偏移模长 8 = 1 × 41；dash 1.6 = 0.2 × 41。三项同时吻合，
+  说明写盘侧存的是**求值后**的行。
+- **决定**：导入时把文件行**反求值**回图案空间（`unevaluated_pattern_row`：`R(−52)·行/41`、dash ÷ 41、
+  行角 − 52），于是 `families()` 组合出的正是文件里的数字；导出侧对应**求值落盘**（`dxf_pattern` 烘 52/41），
+  所以"导入 → 导出"仍逐值复现文件（`a_pattern_hatch_round_trips…` 与 `…raw_rows…` 契约测试）。
+  比例不可用（0/非有限）时按 1 处理并保持既有"原点不可写"的声明。
+- **声明的副作用**：`HatchPatternLine` 的字段语义（图案空间）不变，但**导入值不再等于文件值**；凡是把
+  `pattern.lines` 当"文件原值"读的代码/测试必须改看 `families()`。本次改了 4 处测试与 1 处导出。
+
+### B.7-3 文本岛边界不再当作可见几何绘制
+
+- 边界路径的 `92` 位 8（TEXTBOX）/128（TEXT_ISLAND）是**填充挖洞**，不是作者画出的边界：参考图在这些位置没有
+  任何矩形，我们此前把每个环都画成闭合折线，于是断层里出现大量小方框。
+- 决定：`display()` 与 `FILL OFF` 的边界half 都跳过文本岛/文本框环；`loops()` 仍保留它们，**填充奇偶、捕捉顶点、
+  导出**都不变（`text_island_loops_are_not_drawn_but_still_cut_the_fill`）。其它环仍全量绘制（ADR A.3 未改）。
+
+### B.7-4 同名风险面排查：`ARC` / `ELLIPSE` / 折线 bulge 不受影响
+
+同一类"绝对角度 + 方向位"的记录只有 **HATCH 边界边**。三处相邻面各有不同的存储约定，**不得**把 B.7-1 的镜像规则
+推广过去（`crates/cad-import-acadrust/src/tests/arc_sweep.rs` 是本条的回归钉子）：
+
+| 载体 | 存储 | 方向如何确定 | 是否会重演本次缺陷 |
+|---|---|---|---|
+| HATCH 边界 `CircularArc`/`EllipticArc` | 绝对角度 + `73` ccw 位 | 顺时针**存补角**（B.7-1） | 会（已修） |
+| `ARC` 实体 | 绝对角度，**无方向位** | 恒为 `start → end` **逆时针**，`normalize_sweep(end − start)` 取 `(0, 2π]` | 不会：没有位可"读反"，`start > end` 本就该走长弧（实测 `1.7 → 1.6` = 354°） |
+| `ELLIPSE` 实体 | 参数 `start/end`，**无方向位** | 同上，恒逆时针（`DXF` 整椭圆即 `0 → 2π`） | 不会 |
+| 折线 / HATCH 边界 `Polyline` 的 bulge | `bulge = tan(θ/4)`，**带符号** | 符号即方向，几何由 `θ = 4·atan(b)` 唯一确定 | 不会：没有"绝对角度绕过 0"的歧义，`θ` 最大只能到接近 ±2π 且由数值本身给出 |
+
+- **三份 bulge 实现已对齐**（`cad-geometry::append_bulge_arc` 显示路径、`cad-domain::hatch_entity::geometry::push_bulge_points`、
+  `cad-import-acadrust::hatch::push_bulge_segment`）：弦长 + bulge ⇒ `r = c/(2·sin(θ/2))`（带符号）、
+  圆心 `mid + left·r·cos(θ/2)`；负 bulge 两者同样落在弦的另一侧。历史上"弧心放在弦顶侧"的镜像缺陷
+  已于 2026-11-01 修复（本文件更早的补注），本轮复核未发现分歧。
+- **实测（同一外部 AC1018 文件）**：`ARC` 实体 **2** 个（半径 2.535、张角 1.438 rad，正常）；`ELLIPSE` 实体 **0** 个；
+  折线 bulge 段 **563** 段，最大 `|θ| = 1.54 rad`、无退化、无近整圈；其中 4 段是"大半径平弧"（r 113–195、弦 30–36、
+  θ 0.19–0.26），因为 bulge 带符号，它们**不存在** B.7-1 的读法歧义。
+- **残余（未查证，未改）**：`normalize_sweep(0) = 2π`，即一条 `start == end` 的 `ARC` 会被画成整圆而不是零长弧。
+  这种记录在 AutoCAD 侧的行为**未验证**，因此保持现状并在此声明，不做猜测性修改。
+
+### U-14（新增未查证项）
+
+**`ratio ≈ 1` 时椭圆短轴手性（等价地：椭圆参数符号）无法从记录本身确定**；顺时针补角约定是**实践约定**，
+不是 Autodesk 文档（DXF/DWG 参考只写 "start angle" / "is counterclockwise"）。本次只在**一个外部 AC1018 文件**
+上验证，且**未**用第二个实现（LibreDWG/ODA）逐字段比对、**未**做 AutoCAD 另存 DXF 的对照。
+`ratio ≠ 1` 时"DXF 50/51 是圆角、DWG 是椭圆参数"这一点同样 **NOT VERIFIED**（本文件全部 `ratio = 1`，无法区分）。
+
+### 证据边界（本轮实际运行 / 未运行）
+
+- **已运行**：`cad-import-acadrust` 501 lib 测试（新增 `tests/hatch_boundary_arcs.rs` 5 项）、
+  `cad-domain` 162、`cad-representation` 357、`cad-app` 3012、`cad-spatial` 55、`cad-scene` 71、
+  `cad-measure` 59；`cargo fmt --all -- --check`、`clippy -D warnings`（三个改动 crate）、
+  `check-architecture.py`、`check-file-size.py`、`check-i18n.py`。
+- **已运行（外部文件，非仓库 golden）**：`cad-cli-tools scan/render` 于
+  `test-hatch-render.dwg`（真 Vulkan / P620），修复前后同参数对比；**视觉判读**由本会话对着用户提供的参考 PNG 完成。
+- **NOT RUN**：全量 `cargo test --workspace`、GUI 宿主（`yacr`）真机运行、`linux-host-smoke`、
+  Windows/macOS/Android/Web 任一载体、像素/性能结论。参考 PNG 与我们的渲染**不是同视口**（参考图是裁切视图，
+  本图含下方钻孔柱状文本），因此**未**做逐像素或 golden 比对。

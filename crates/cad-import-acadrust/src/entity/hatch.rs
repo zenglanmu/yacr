@@ -18,6 +18,7 @@ impl<'a> ImporterBuilder<'a> {
     /// rows, so it gets no provenance claim.
     pub(crate) fn hatch_semantics(&mut self, h: &Hatch) -> (SemanticGeometry, Completeness) {
         let out = Self::hatch_geometry(h);
+        self.report_boundary_gap(&out);
         let (SemanticGeometry::Hatch(hatch), _) = &out else {
             return out;
         };
@@ -45,6 +46,39 @@ impl<'a> ImporterBuilder<'a> {
         out
     }
 
+    /// Record the drawing-level diagnostic for a HATCH boundary chain that does
+    /// not join (ADR 0018 §B.7).
+    ///
+    /// Once per import, like the pattern-table provenance: a drawing whose
+    /// boundary edges miss each other must not look like a file whose boundary
+    /// was read consistently. The measured gap stays in that hatch's `Partial`
+    /// reasons, where `scan` reports it.
+    fn report_boundary_gap(&mut self, out: &(SemanticGeometry, Completeness)) {
+        let Completeness::Partial(reasons) = &out.1 else {
+            return;
+        };
+        if !reasons
+            .iter()
+            .any(|reason| reason.starts_with(ARC_READING_REASON))
+        {
+            return;
+        }
+        if self
+            .reported_reasons
+            .insert(HATCH_BOUNDARY_GAP_CODE.to_string())
+        {
+            self.diagnostics.push(Diagnostic {
+                object: None,
+                code: HATCH_BOUNDARY_GAP_CODE.into(),
+                message: "one or more HATCH boundary chains do not join end to end (a junction \
+                          misses by more than a tenth of the path's own extent); the boundary is \
+                          sampled exactly as its stored edges read and the fill may cover a \
+                          different region than the authoring application's (ADR 0018 §B.7)"
+                    .to_string(),
+            });
+        }
+    }
+
     /// Convert a HATCH into a first-class [`SemanticGeometry::Hatch`].
     ///
     /// The display (boundary polylines plus the style-filtered fill, pattern or
@@ -58,11 +92,15 @@ impl<'a> ImporterBuilder<'a> {
             ..TessellationParams::default()
         };
         let mut loops: Vec<HatchLoop> = Vec::new();
+        let mut join = BoundaryJoinReport::default();
         for path in &h.paths {
             let mut points: Vec<[f64; 2]> = Vec::new();
-            for edge in &path.edges {
-                append_boundary_edge(edge, &mut points, &params);
+            let report = sample_boundary_path(&path.edges, &mut points, &params);
+            if report.broken {
+                join.broken = true;
             }
+            join.max_gap = join.max_gap.max(report.max_gap);
+            join.extent = join.extent.max(report.extent);
             dedup_loop(&mut points);
             if points.len() < 3 {
                 continue;
@@ -125,6 +163,17 @@ impl<'a> ImporterBuilder<'a> {
                 reasons = name_unresolved_pattern(reasons, name);
             }
         }
+        // A boundary chain that does not join end to end (ADR 0018 §B.7): the
+        // stored parameters or the file's own vertices are inconsistent. The
+        // sampled geometry is kept as read and the measured gap is reported, so a
+        // wrong-looking fill is explained instead of silent.
+        if join.broken {
+            reasons.push(format!(
+                "{ARC_READING_REASON}: a boundary junction misses by {:.3} plane units against a \
+                 path extent of {:.3}; the sampled edges are kept as read",
+                join.max_gap, join.extent
+            ));
+        }
         let completeness = if reasons.is_empty() {
             Completeness::Complete
         } else {
@@ -133,6 +182,16 @@ impl<'a> ImporterBuilder<'a> {
         (SemanticGeometry::Hatch(Box::new(geometry)), completeness)
     }
 }
+
+/// Stable diagnostic code: a HATCH boundary chain does not join end to end.
+///
+/// The sampled geometry is kept (ADR B6 — import never rejects a hatch); the
+/// measured gap says the file's boundary parameters or vertices disagree, which
+/// is what makes a fill look wrong without being silently "corrected".
+pub(crate) const HATCH_BOUNDARY_GAP_CODE: &str = "import.hatch_boundary_gap";
+
+/// The per-hatch `Partial` reason for a boundary chain that does not close.
+pub(crate) const ARC_READING_REASON: &str = "hatch boundary edges do not join";
 
 /// Stable diagnostic code: the HATCH pattern rows were taken from the built-in
 /// transcribed predefined table because the file carried none.

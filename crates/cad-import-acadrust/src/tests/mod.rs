@@ -9,12 +9,14 @@ use std::sync::Arc;
 
 mod acis;
 mod acis_arcs;
+mod arc_sweep;
 mod basics;
 mod colour_provenance;
 mod dimension;
 mod dxf;
 mod format_report;
 mod hatch;
+mod hatch_boundary_arcs;
 mod hatch_pattern_table;
 mod insert;
 mod layer_attributes;
