@@ -932,6 +932,9 @@ impl ExtendedCommandId {
                 | Self::Union
                 | Self::Subtract
                 | Self::Intersect
+                // ADR-0036: CHAMFEREDGE rewrites one exact body in place (one
+                // transaction / one undo step), so it is a drawing write too.
+                | Self::ChamferEdge
         )
     }
 }

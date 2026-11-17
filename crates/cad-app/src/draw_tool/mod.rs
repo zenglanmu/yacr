@@ -641,6 +641,13 @@ impl DrawTool {
                 pick_first: a,
                 pick_second: b,
             },
+            // CHAMFEREDGE: the selected body (resolved at pick time) and the
+            // pixel pick's hit point, which the kernel uses as its nearest-edge
+            // seed. The distances are the session typed channel.
+            DrawToolKind::ChamferEdge => DrawIntent::ChamferEdge {
+                body: self.picks[0].clone(),
+                seed: a,
+            },
             // ARRAYRECT: handled by the early return above (zero captured points).
             // The arm is unreachable here but keeps the match exhaustive over kinds.
             DrawToolKind::ArrayRect => DrawIntent::ArrayRect,

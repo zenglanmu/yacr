@@ -29,7 +29,7 @@ use super::body::{emit_body3d, emit_polyface_mesh};
 use super::common::{
     common_for, map_h_align, map_v_align, mtext_attachment, ocs_from_wcs, v3, with_reasons,
 };
-use super::report::{ExportLimits, MappingOutcome};
+use super::report::{ExportFormat, ExportLimits, MappingOutcome};
 use super::solid_record::{face_class, face_record};
 use super::tables::ensure_text_style;
 
@@ -45,12 +45,15 @@ const ACIS_TESSELLATED_TYPE_KEYS: [&str; 4] =
 pub(crate) struct EntityContext<'a> {
     pub database: &'a DrawingDatabase,
     pub limits: ExportLimits,
-    /// Whether the output format can carry an exact ACIS `3DSOLID` payload.
+    /// The format being written.
     ///
-    /// `true` only for [`ExportFormat::DxfText`](super::ExportFormat::DxfText):
-    /// the DWG path keeps the POLYFACE display cache and records
-    /// `acis.dwg_3dsolid_unsupported` per exact body.
-    pub allow_3dsolid: bool,
+    /// Both formats write an exact ACIS `3DSOLID` for the same planar subset;
+    /// the format only picks the payload encoding, because a DWG is AC1032 and
+    /// stores the payload as a binary SAB blob in its AcDs section (R2013+),
+    /// while the DXF export is pinned to AC1024 and carries SAT text inline.
+    /// Any body outside the subset falls back to its POLYFACE display cache in
+    /// **either** format, under the ACIS writer's own named refusal code.
+    pub format: ExportFormat,
 }
 
 /// Type keys whose source entity is an infinite construct line.

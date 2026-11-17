@@ -258,3 +258,19 @@ export const DRAW_MODIFY_ITEMS: readonly RibbonCommandItem[] = Object.freeze([
   MPEDIT_ITEM,
   DRAWORDER_ITEM,
 ]);
+
+/**
+ * The 3D solid edits AutoCAD keeps apart from the 2D Modify panel. This build
+ * has one: CHAMFEREDGE (ADR-0036 P2.0) cuts one edge of the **selected** exact
+ * solid, with one pick supplying the kernel's nearest-edge seed. Small button,
+ * no variant popover (one edge per run, no options sub-prompt), and no
+ * preview/edge highlight — the hint says so. Enablement is the shared admission
+ * plus the one-object selection requirement, so it is not document-scoped.
+ */
+export const SOLID_MODIFY_ITEM: RibbonCommandItem = Object.freeze({
+  id: 'CHAMFEREDGE',
+  labelKey: 'draw.kind.chamferedge',
+  icon: 'chamfer',
+  command: 'CHAMFEREDGE',
+  hintKey: 'draw.kind.chamferedge.hint',
+});

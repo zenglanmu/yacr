@@ -119,7 +119,15 @@ impl HostCore {
         }
         let outcome = match request {
             InteractionRequest::BeginDraw(kind) => {
-                self.controller.borrow_mut().begin_draw_tool(kind)?;
+                // CHAMFEREDGE refuses **at tool start**, before any click: a
+                // carrier without a modeler and a selection that is not exactly
+                // one addressable exact solid are both named here, so no pick is
+                // silently consumed by a capture that can never commit.
+                if kind == cad_app::DrawToolKind::ChamferEdge {
+                    self.begin_chamfer_edge_tool()?;
+                } else {
+                    self.controller.borrow_mut().begin_draw_tool(kind)?;
+                }
                 // A capture owns the pointer: any live box gesture ends with it,
                 // so no frozen band survives and no refused `SelectInBox` is
                 // dispatched on release (ADR 0014 B.6).
@@ -225,23 +233,45 @@ impl HostCore {
                 InteractionOutcome::CursorCleared
             }
             InteractionRequest::CapturePoint(point) => {
-                let point = self.world_point(point)?;
-                // AutoCAD's "click the first vertex to close the ring" rule for a
-                // crossing polygon: the click that lands on the first vertex is the
-                // close, not another vertex. The aperture is the same pick box every
-                // other pick uses, and the ring itself is validated by the capture
-                // (a refused close leaves it open and changes nothing).
-                if self.close_stretch_ring_at(point)? {
-                    // The ring closed on this click: that is capture state (no
-                    // command ran), so only the derived tool state is republished.
-                    self.full_dirty.set(true);
+                // CHAMFEREDGE's one step is a **pixel** pick: the seed is the
+                // hit point the pick funnel resolved, never a work-plane
+                // projection (which would hard-stamp a fabricated `z` in a 3D
+                // view). This branch precedes `world_point` on purpose.
+                if self.controller.borrow().session.draw_kind()
+                    == Some(cad_app::DrawToolKind::ChamferEdge)
+                {
+                    // A second click would run a whole pixel pick and target
+                    // resolve only to be refused by the capture ("that step
+                    // takes no entity pick"). Name the real state instead — the
+                    // exact sentence `DrawTool::push_point_checked` uses for a
+                    // completed fixed-arity pick capture.
+                    if !self.controller.borrow().session.draw_accepts_entity_pick() {
+                        return Err(CadError::InvalidInput(format!(
+                            "draw kind '{}' is ready; press Enter to confirm",
+                            cad_app::DrawToolKind::ChamferEdge.key()
+                        )));
+                    }
+                    self.capture_chamfer_edge_pick(point)?;
                     InteractionOutcome::PointCaptured
                 } else {
-                    let auto_ready = self.controller.borrow_mut().capture_tool_point(point)?;
-                    if auto_ready {
-                        return self.confirm_tool();
+                    let point = self.world_point(point)?;
+                    // AutoCAD's "click the first vertex to close the ring" rule for a
+                    // crossing polygon: the click that lands on the first vertex is the
+                    // close, not another vertex. The aperture is the same pick box every
+                    // other pick uses, and the ring itself is validated by the capture
+                    // (a refused close leaves it open and changes nothing).
+                    if self.close_stretch_ring_at(point)? {
+                        // The ring closed on this click: that is capture state (no
+                        // command ran), so only the derived tool state is republished.
+                        self.full_dirty.set(true);
+                        InteractionOutcome::PointCaptured
+                    } else {
+                        let auto_ready = self.controller.borrow_mut().capture_tool_point(point)?;
+                        if auto_ready {
+                            return self.confirm_tool();
+                        }
+                        InteractionOutcome::PointCaptured
                     }
-                    InteractionOutcome::PointCaptured
                 }
             }
             InteractionRequest::MoveCursor(point) => {
@@ -251,12 +281,24 @@ impl HostCore {
                 // still runs its own resolution and reports its own error.
                 let logical = self.cursor_logical_of(point).ok();
                 if self.capturing() {
-                    // A draw/measurement capture owns the cursor: this is the
-                    // tool preview cursor, unchanged.
-                    let point = self.world_point(point)?;
-                    self.controller.borrow_mut().move_tool_cursor(point)?;
-                    // The capture, not the pointer, decides what is highlighted.
-                    self.clear_hover();
+                    // CHAMFEREDGE's seed is a pixel pick hit point; there is no
+                    // work-plane point to move. This request is demoted to the
+                    // suppressed-hover path (the drawing tool owns the pointer,
+                    // so no pick and no tint run) instead of feeding a fabricated
+                    // `z` into the tool cursor. No highlight exists to promise.
+                    if self.controller.borrow().session.draw_kind()
+                        == Some(cad_app::DrawToolKind::ChamferEdge)
+                    {
+                        scope = DirtyScope::Overlay;
+                        self.resolve_hover(point)?;
+                    } else {
+                        // A draw/measurement capture owns the cursor: this is the
+                        // tool preview cursor, unchanged.
+                        let point = self.world_point(point)?;
+                        self.controller.borrow_mut().move_tool_cursor(point)?;
+                        // The capture, not the pointer, decides what is highlighted.
+                        self.clear_hover();
+                    }
                 } else {
                     // Without a capture the same request is the hover probe
                     // (ADR-0012 §10 S2): it only refreshes the flags overlay.
@@ -670,12 +712,14 @@ impl HostCore {
         }
     }
 
-    /// The source ref under one logical canvas point, through the one pick path.
+    /// The precise hit under one logical canvas point, through the one pick path.
     ///
-    /// Shared by the ordinary click selection and a pending plugin prompt's
-    /// entity/selection reads, so they can never disagree about what is under the
-    /// cursor.
-    fn pick_ref_at(&self, point: [f64; 2]) -> CadResult<Option<cad_domain::SelectionRef>> {
+    /// Shared by the ordinary click selection, a pending plugin prompt's
+    /// entity/selection reads, the hover probe and CHAMFEREDGE's seed — so a
+    /// click, a hover and a chamfer seed can never disagree about what is under
+    /// the cursor or use a second tolerance. The hit carries both the identity
+    /// (`source`) and the model-space point the ray resolved (`point`).
+    fn pick_hit_at(&self, point: [f64; 2]) -> CadResult<Option<cad_app::picking::PickHit>> {
         self.metrics()?;
         let c = self.controller.borrow();
         let viewport = c
@@ -703,7 +747,90 @@ impl HostCore {
             // (ADR-0028 D2); `None` is the exact pre-plugin behaviour.
             c.application.vendor_representations.as_deref(),
         )?;
-        Ok(report.hit.map(|hit| hit.source))
+        Ok(report.hit)
+    }
+
+    /// The source ref under one logical canvas point, through the one pick path.
+    fn pick_ref_at(&self, point: [f64; 2]) -> CadResult<Option<cad_domain::SelectionRef>> {
+        Ok(self.pick_hit_at(point)?.map(|hit| hit.source))
+    }
+
+    /// Start the `CHAMFEREDGE` capture after failing fast on its prerequisites.
+    ///
+    /// The order is the command path's order: **authorize first** (the
+    /// extended command is Work-only, so a Viewer session gets the same
+    /// `PermissionDenied` a typed `CHAMFEREDGE` would), then the carrier
+    /// capability (`unsupported-runtime: solid-modeler`), then the selection
+    /// (the shared [`cad_app::chamfer_edge_target`] `chamferedge.*` codes).
+    ///
+    /// All of it runs before the session arms a capture, so a refused start
+    /// leaves no tool and consumes no click.
+    fn begin_chamfer_edge_tool(&self) -> CadResult<()> {
+        {
+            let c = self.controller.borrow();
+            c.session.authorize(cad_app::CommandId::Extended(
+                cad_app::ExtendedCommandId::ChamferEdge,
+            ))?;
+        }
+        let (has_modeler, document, refs) = {
+            let c = self.controller.borrow();
+            (
+                c.application.has_solid_modeler(),
+                c.document_id,
+                c.session.selection.refs().to_vec(),
+            )
+        };
+        if !has_modeler {
+            return Err(CadError::Unsupported(
+                cad_app::SOLID_MODELER_UNSUPPORTED.into(),
+            ));
+        }
+        {
+            let c = self.controller.borrow();
+            cad_app::chamfer_edge_target(&c.application, document, &refs)?;
+        }
+        self.controller
+            .borrow_mut()
+            .begin_draw_tool(cad_app::DrawToolKind::ChamferEdge)
+    }
+
+    /// Capture `CHAMFEREDGE`'s one step: the pixel pick hit point on the
+    /// selected body.
+    ///
+    /// The click is resolved through [`Self::pick_hit_at`] (the one pick funnel,
+    /// its pickbox aperture and its visibility rules) and the captured point is
+    /// `PickHit.point`, never a work-plane projection. The hit must name the
+    /// **currently selected** body — document, entity and instance path compared,
+    /// sub-element ignored, because a body click legitimately resolves a face —
+    /// and the normalised body ref is stored with the point. A miss or a hit on
+    /// another object is a named refusal that leaves the capture armed.
+    fn capture_chamfer_edge_pick(&self, point: PointInput) -> CadResult<()> {
+        let logical = self.select_logical(point)?;
+        let hit = self.pick_hit_at(logical)?.ok_or_else(|| {
+            CadError::InvalidInput(
+                "chamferedge.pick_missed: no object is under the cursor; pick an edge on the \
+                 selected body"
+                    .into(),
+            )
+        })?;
+        let target = {
+            let c = self.controller.borrow();
+            cad_app::chamfer_edge_target(&c.application, c.document_id, c.session.selection.refs())?
+        };
+        if hit.source.document != target.body.document
+            || hit.source.entity != target.body.entity
+            || hit.source.instance != target.body.instance
+        {
+            return Err(CadError::InvalidInput(format!(
+                "chamferedge.pick_not_selected_body: the pick hit entity {} but the selected body \
+                 is entity {}; select the body you want to chamfer",
+                hit.source.entity.0, target.body.entity.0
+            )));
+        }
+        self.controller
+            .borrow_mut()
+            .session
+            .capture_draw_pick(hit.point, target.body)
     }
 
     /// One `SelectAt`/`CapturePoint` input as logical canvas coordinates.

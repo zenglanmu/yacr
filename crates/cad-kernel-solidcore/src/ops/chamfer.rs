@@ -1,19 +1,21 @@
 //! Chamfer: one edge cut back by a distance along each of its two faces.
 //!
 //! P2.0 is deliberately the smallest honest chamfer: a **straight** section on a
-//! **planar** body, so the product needs no NURBS and re-lifts through the same
-//! `record → BrepData` path a boolean product uses (ADR-0036 P2 plan). The kernel
-//! does the geometry (`solidcore_ops::chamfer_sides_ordered`); this module only
-//! lifts, resolves the caller's point to an edge, drives the call and maps its
-//! refusals.
+//! **straight** edge. The body it cuts may be planar or curved — the lift writes
+//! either — but the selector resolves a **shared** `Line` edge only, so a cylinder
+//! has nothing to pick (its one Line edge is the seam the writer reconstructs, and
+//! the user never named that). The kernel does the geometry
+//! (`solidcore_ops::chamfer_sides_ordered`); this module only lifts, resolves the
+//! caller's point to an edge, drives the call and maps its refusals.
 //!
 //! # Which edge, and why a point
 //!
 //! The seam carries no kernel record ids (they are not part of the neutral
 //! B-rep), so [`SolidEdgeSelector::NearestToPoint`] resolves against the lifted
-//! record instead. Only a `Line` edge is pickable — the planar lift admits
-//! nothing else — and a curve family this module cannot measure exactly is
-//! skipped, never guessed. An edge is accepted only when it lies within
+//! record instead. Only a **shared** `Line` edge is pickable: a curve family this
+//! module cannot measure exactly is skipped, never guessed, and so is a **seam**
+//! (both uses on one face), a surface that exists only in the record and sits
+//! exactly where a user clicks a rim. An edge is accepted only when it lies within
 //! `max(1e-9, 1e-3 · bounding-box diagonal)` of the point: enough to absorb a
 //! pick at a vertex or a snapped point, far too little to silently cut a
 //! different edge. Anything farther is `solid.edge_not_found`. Ties are broken
@@ -31,8 +33,10 @@
 //!
 //! # Refusals
 //!
-//! A curved body never reaches the kernel: the lift refuses it with
-//! [`crate::LIFT_REQUIRES_PLANAR`]. A chamfer the kernel will not build (too
+//! A curved body's face is not a refusal by itself (P2.1b part 2): the lift
+//! writes it, and what stops a rim chamfer is the pick — `solid.edge_not_found`,
+//! because a rim is a curve edge and the reconstructed seam is not selectable. A
+//! chamfer the kernel will not build (too
 //! large, no room, not blendable, no effect) is `Unsupported` with
 //! [`crate::CHAMFER_FAILED`] — this build cannot build the requested chamfer
 //! exactly, and an `Unsupported` outcome can never be mistaken for a body. A
@@ -79,7 +83,8 @@ pub(crate) fn chamfer(
     let tolerance = (SELECT_RELATIVE * bbox_diagonal(&record)).max(SELECT_FLOOR);
     let Some((edge, found)) = nearest_edge(&record, at) else {
         return Ok(not_found(
-            "the lifted body has no straight edge to pick (only Line edges are pickable)",
+            "the lifted body has no pickable straight edge near that point (a seam, which only \
+             closes the record, and a non-Line edge are not pickable)",
         ));
     };
     if !found.is_finite() || found > tolerance {
@@ -158,9 +163,19 @@ fn not_found(detail: impl Into<String>) -> SolidOutcome {
 
 /// The nearest pickable edge and its distance; the lowest record index wins a
 /// tie, so the same body and point always pick the same edge.
+///
+/// A **seam** is not pickable. A cylindrical, conical, spherical or toroidal face
+/// has no seam in the neutral model — it is reconstructed when the face is written
+/// (`record::curved`) — and it sits exactly where a user clicks a rim. Handing it
+/// to the kernel would cut nothing and answer "this edge has no blend (Smooth)",
+/// naming an edge the user never selected. The test is exact: both uses of the
+/// edge are on the **same** face.
 fn nearest_edge(record: &Record, at: Point3) -> Option<(usize, f64)> {
     let mut best: Option<(usize, f64)> = None;
     for (index, edge) in record.edges.iter().enumerate() {
+        if is_seam(edge) {
+            continue;
+        }
         let Some(distance) = edge_distance(edge, at) else {
             continue;
         };
@@ -169,6 +184,15 @@ fn nearest_edge(record: &Record, at: Point3) -> Option<(usize, f64)> {
         }
     }
     best
+}
+
+/// Whether both uses of the edge are on one face: the marker of a reconstructed
+/// seam (a cylinder's generator, a sphere's meridian), not a real shared edge.
+fn is_seam(edge: &Edge) -> bool {
+    match edge.uses.as_slice() {
+        [first, second] => first.face == second.face,
+        _ => false,
+    }
 }
 
 /// Distance from `at` to the edge's curve, when this module can measure it.
@@ -235,5 +259,64 @@ mod tests {
         assert!((point_segment(at(3.0, 0.0, 0.0), start, end) - 1.0).abs() < EPSILON);
         // A degenerate segment is a point.
         assert!((point_segment(at(1.0, 0.0, 0.0), start, start) - 1.0).abs() < EPSILON);
+    }
+
+    /// A seam — both uses on one face — is not pickable, while a real shared edge
+    /// is. The lifted cylinder is the case the selector used to fall into: its only
+    /// `Line` edge is the reconstructed seam, and it sits exactly where a user
+    /// clicks the rim.
+    #[test]
+    fn a_seam_is_skipped_and_a_shared_edge_is_not() {
+        let cylinder = solidcore_ops::make_cylinder([0.0, 0.0, 0.0], 1.0, 2.0).expect("cylinder");
+        let (record, _) = cylinder.to_record().expect("record");
+        let seams: Vec<usize> = record
+            .edges
+            .iter()
+            .enumerate()
+            .filter(|(_, edge)| is_seam(edge))
+            .map(|(index, _)| index)
+            .collect();
+        assert!(
+            !seams.is_empty(),
+            "the cylinder record has a reconstructed seam"
+        );
+        for index in &seams {
+            assert_eq!(
+                record.edges[*index].uses[0].face,
+                record.edges[*index].uses[1].face
+            );
+        }
+        // Nothing at the rim's seam point is pickable any more.
+        let rim = Point3 {
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        assert!(
+            nearest_edge(&record, rim).is_none(),
+            "the seam must not win the pick"
+        );
+
+        // A real edge of a planar body is still pickable, and it is not a seam.
+        let boxed = crate::polyhedra::box_brep(
+            Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            1.0,
+            1.0,
+            1.0,
+        );
+        let record =
+            crate::record::to_record(&boxed, crate::record::DEFAULT_TOLERANCE).expect("box lifts");
+        assert!(record.edges.iter().all(|edge| !is_seam(edge)));
+        let corner = Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.5,
+        };
+        let (_, distance) = nearest_edge(&record, corner).expect("a box edge is pickable");
+        assert!(distance <= 1e-12, "{distance}");
     }
 }

@@ -143,6 +143,7 @@ pub fn prism(sides: usize, height: f64) -> BrepData {
             faces: face_list,
         }],
         placement: None,
+        tolerance: None,
     }
 }
 
@@ -182,5 +183,7 @@ pub fn plane_face(id: u32, cycle: &[Point3]) -> BrepFace {
                 })
                 .collect(),
         }],
+        domain: None,
+        tolerance: None,
     }
 }

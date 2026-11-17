@@ -8,8 +8,12 @@
 //!   numbers are exact), not the kernel's round trip;
 //! - `CYLINDER`, `SPHERE`, `CONE`, `TORUS` are built by the upstream
 //!   constructors and read back through `Body::to_record`, then mapped to
-//!   analytic neutral surfaces. Those bodies display and export exactly; they
-//!   cannot be re-lifted in P1 (see [`crate::LIFT_REQUIRES_PLANAR`]).
+//!   analytic neutral surfaces. Those bodies display and export exactly, and they
+//!   **re-lift** (P2.1b part 2): the writer carries each face's exact NURBS form,
+//!   its `(u, v)` box and exact pcurves back into the kernel, so a boolean, mass
+//!   properties or a chamfer over one is answered. A boundary family this build
+//!   cannot write is still refused ([`crate::LIFT_REQUIRES_PLANAR`]), and a
+//!   trimmed spherical/toroidal face is refused by the reader.
 //!
 //! Input validation happens before this module runs
 //! ([`cad_kernel_adapter::SolidRequest::validate`]); a dimension the kernel

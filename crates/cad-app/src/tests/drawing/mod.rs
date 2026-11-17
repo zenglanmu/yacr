@@ -287,6 +287,8 @@ mod block_undo;
 mod boundary;
 mod break_curve;
 mod chamfer_fillet;
+// ADR-0036 P2.0: the real one-pick `CHAMFEREDGE` command.
+mod chamfer_edge;
 mod circle_options;
 mod clipboard;
 mod construction_line;

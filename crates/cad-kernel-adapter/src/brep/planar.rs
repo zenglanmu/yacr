@@ -4,8 +4,10 @@
 use cad_domain::Point3;
 
 use super::math::{cross, dot, frame_from, length, sub};
-use super::tessellate::{face_normal, sample_loop, FaceFailure, FaceMesh};
-use super::types::BrepFace;
+use super::tessellate::{
+    arc_error_bound, arc_sweep, face_normal, sample_loop, FaceFailure, FaceMesh,
+};
+use super::types::{BrepCurve, BrepFace};
 
 pub(super) fn tessellate_planar(
     face: &BrepFace,
@@ -114,7 +116,46 @@ pub(super) fn tessellate_planar(
         .map(|l| sample_loop(l, linear_deflection, angular_deflection))
         .filter_map(Result::ok)
         .collect();
+    // A planar face is exact only when its boundary is straight. An arc-bounded
+    // face is triangulated from a polyline on the arcs, so it is an approximation
+    // with the arcs' chordal sagitta as its bound — reporting `Analytic` here
+    // would claim a precision the mesh does not have.
+    if let Some(bound) = boundary_error(face, linear_deflection, angular_deflection) {
+        out.curved = true;
+        out.error_bound = Some(bound);
+    }
     Ok(out)
+}
+
+/// The chordal error bound of a planar face's arc boundary, `None` when the
+/// boundary is all lines (or all full circles, which predate this path).
+fn boundary_error(face: &BrepFace, linear_deflection: f64, angular_deflection: f64) -> Option<f64> {
+    let mut bound: Option<f64> = None;
+    for curve in face.loops.iter().flat_map(|loop_| &loop_.edges) {
+        let BrepCurve::Arc {
+            center,
+            normal,
+            u_dir,
+            radius,
+            start,
+            end,
+        } = curve
+        else {
+            continue;
+        };
+        if !radius.is_finite() || *radius <= 0.0 {
+            continue;
+        }
+        let Some((u, v, _)) = frame_from(*normal, *u_dir) else {
+            continue;
+        };
+        let Some(sweep) = arc_sweep(*center, u, v, *start, *end) else {
+            continue;
+        };
+        let error = arc_error_bound(*radius, sweep, linear_deflection, angular_deflection);
+        bound = Some(bound.map_or(error, |current: f64| current.max(error)));
+    }
+    bound
 }
 fn ring_area(p: &[[f64; 2]]) -> f64 {
     let mut acc = 0.0;

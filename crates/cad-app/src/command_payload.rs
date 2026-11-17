@@ -982,16 +982,19 @@ pub enum CommandPayload {
     /// Contract: [`crate::app_refedit`].
     RefSet(RefSetOption),
     /// `SCALELISTEDIT` / `-SCALELISTEDIT ADD|RENAME|DELETE`: one annotation-scale
-    /// table write (Work-only; the bare selector keeps the read-only report).
-    ///
-    /// The payload is the typed line's parsed operation — the grammar lives in
-    /// `cad-ui-core` (`session::scale_arguments`), so a typed command line and a
-    /// direct IPC caller reach the same handler. Contract:
-    /// [`crate::app_extended_scale_list`].
+    /// table write (Work-only; the bare selector keeps the read-only report). The
+    /// payload is the typed line's parsed operation — the grammar lives in
+    /// `cad-ui-core` (`session::scale_arguments`), so a typed line and a direct
+    /// IPC caller reach the same handler. Contract: [`crate::app_extended_scale_list`].
     ScaleList(crate::app_extended_scale_list::ScaleListCommand),
-    /// `REFCLOSE SAVE|DISCARD`: save the working set back into the block
-    /// definition or discard the extracted clones (Work-only). A bare
-    /// `REFCLOSE` is `CommandPayload::None` and refused by name
-    /// (`refclose.needs_option`). Contract: [`crate::app_refedit`].
+    /// `REFCLOSE SAVE|DISCARD`: save the working set back into the block definition
+    /// or discard the extracted clones (Work-only). A bare `REFCLOSE` is
+    /// `CommandPayload::None` and refused by name (`refclose.needs_option`).
+    /// Contract: [`crate::app_refedit`].
     RefClose(RefCloseOption),
+    /// `CHAMFEREDGE`: selected exact body + the pixel pick seed (ADR-0036 P2.0).
+    ChamferSolidEdge {
+        body: SelectionRef,
+        seed: Point3,
+    },
 }

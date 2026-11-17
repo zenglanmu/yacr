@@ -24,11 +24,16 @@ struct SaveOutcome {
     dropped: usize,
     completeness: Completeness,
     wrote_dwg: bool,
-    /// The export wrote a `3DSOLID`, so the whole DXF was written as AC1024 to
-    /// keep the ACIS payload as inline SAT text (`export.note.acis_sat_text_version`).
-    /// The status names that choice instead of leaving it in a report the SAVE
-    /// path never shows.
+    /// The export wrote a `3DSOLID` into a DXF, so the whole file was written as
+    /// AC1024 to keep the ACIS payload as inline SAT text
+    /// (`export.note.acis_sat_text_version`). The status names that choice instead
+    /// of leaving it in a report the SAVE path never shows.
     acis_sat_ac1024: bool,
+    /// The export wrote a `3DSOLID` into a DWG whose ACIS payload is a binary SAB
+    /// blob in the AC1032 AcDs section (`export.note.acis_sab_dwg`). The status
+    /// names that payload instead of only saying "experimental DWG", and still
+    /// states that no third-party reader verified it.
+    acis_sab_dwg: bool,
 }
 
 /// Why a lossy save could not be performed, for a graded status.
@@ -196,16 +201,22 @@ impl HostCore {
                 match self.export_save(&target) {
                     // A DWG write always says it is experimental and that the
                     // source was not modified; a clean/partial distinction only
-                    // changes whether conversions are counted.
+                    // changes whether conversions are counted. A DWG that carries
+                    // an exact `3DSOLID` says so too (`save.exported_acis_sab`),
+                    // because its ACIS payload is a SAB blob in the AcDs section.
                     Ok(outcome) if outcome.wrote_dwg => {
-                        if outcome.completeness == Completeness::Complete {
-                            catalog(
-                                "save.dwg_exported_experimental",
-                                &[("path", &target.display_name)],
-                            )
+                        let clean = outcome.completeness == Completeness::Complete;
+                        let key = match (outcome.acis_sab_dwg, clean) {
+                            (true, true) => "save.exported_acis_sab",
+                            (true, false) => "save.exported_acis_sab_partial",
+                            (false, true) => "save.dwg_exported_experimental",
+                            (false, false) => "save.dwg_exported_partial",
+                        };
+                        if clean {
+                            catalog(key, &[("path", &target.display_name)])
                         } else {
                             catalog(
-                                "save.dwg_exported_partial",
+                                key,
                                 &[
                                     ("path", &target.display_name),
                                     ("converted", &outcome.converted.to_string()),
@@ -319,6 +330,10 @@ impl HostCore {
                 .notes
                 .iter()
                 .any(|note| note.code == "export.note.acis_sat_text_version"),
+            acis_sab_dwg: report
+                .notes
+                .iter()
+                .any(|note| note.code == "export.note.acis_sab_dwg"),
         })
     }
 

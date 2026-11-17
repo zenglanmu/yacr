@@ -30,8 +30,9 @@
 //!
 //! | code | used for | sites |
 //! |---|---|---|
-//! | [`LIFT_REQUIRES_PLANAR`] | **only** a non-`Plane` face or a non-`Line` boundary curve in `BrepData → record` | `to_record.rs` (`record_face_surface`, the loop builder) |
-//! | [`LIFT_UNSUPPORTED`] | every structural `BrepData → record` refusal (more than one shell, empty loop, coincident endpoints, tolerance, record validation, closed-shell/chain/agreement checks) **and** every `record → BrepData` refusal (unsupported surface/curve family, void region, wire/vertex shell, a vertex loop other than a full cone's degenerate apex, trimmed face, torus tube/radii, arc edge) | `to_record.rs`, `from_record.rs` |
+//! | [`LIFT_REQUIRES_PLANAR`] | **only** a boundary curve that is not a `Line`, a full `Circle` or an `Arc`, or an `Unsupported` surface kind, in `BrepData → record` | `arc.rs` (`authored_segment`), `surfaces.rs` (`write`) |
+//! | [`LIFT_UNSUPPORTED`] | every structural `BrepData → record` refusal (more than one shell, empty loop, coincident endpoints, a curved face without its `(u, v)` domain, a degenerate curved frame, tolerance, record validation, closed-shell/chain/agreement checks) **and** every `record → BrepData` refusal (unsupported surface/curve family, void region, wire/vertex shell, a vertex loop other than a full cone's degenerate apex, trimmed face, torus tube/radii, arc edge) | `to_record.rs`, `from_record.rs` |
+//! | [`PCURVE_NOT_EXACT`] | a curved face whose boundary use has no exact pcurve in its surface parameters | `loops.rs` (`surface_loops`) |
 //! | [`PLACEMENT_NOT_SUPPORTED`] | a placement or plane frame that cannot be baked (mirror, non-positive/non-finite scale, singular or sheared matrix, degenerate frame) | `record/mod.rs` (`bake`), `record/surface.rs` (`record_plane`), `to_record.rs` (degenerate frame) |
 //! | [`NONUNIFORM_TRANSFORM`] | a `Transform` request that is not a similarity | `ops/transform.rs` |
 
@@ -39,14 +40,16 @@ use cad_domain::{CadError, CadResult, Diagnostic};
 use cad_kernel_adapter::{codes, SolidOperationFamily, SolidOutcome, SolidUnsupportedReason};
 use solidcore_ops::Error;
 
-/// The body has a **non-planar face** or a **non-`Line` boundary curve**, so it
-/// cannot be lifted from the neutral B-rep into a kernel record.
+/// A boundary curve (or a surface) is a family this build cannot write into a
+/// kernel record — neither a `Line`, a full `Circle` nor a circular `Arc`, or an
+/// `Unsupported` surface kind.
 ///
-/// This code is reserved for exactly those two sites: every boolean or
-/// mass-properties request on a curved body returns it. Everything else that
-/// stops a conversion uses [`LIFT_UNSUPPORTED`] or [`PLACEMENT_NOT_SUPPORTED`],
-/// so a caller can tell "curved lift is P2" apart from "this body is structurally
-/// unusable".
+/// Since P2.1b part 2 a **curved surface** is no longer this code: a labelled
+/// cylinder, cone, sphere or torus is written with its exact NURBS form and its
+/// pcurves, so a boolean or mass-properties request on a curved body is answered.
+/// What remains here is a *curve* family (a spline or ellipse boundary) or an
+/// explicitly unsupported surface. Structural problems use
+/// [`LIFT_UNSUPPORTED`] or [`PLACEMENT_NOT_SUPPORTED`].
 pub const LIFT_REQUIRES_PLANAR: &str = "solid.lift_requires_planar";
 
 /// A conversion refused for a structural reason.
@@ -54,8 +57,10 @@ pub const LIFT_REQUIRES_PLANAR: &str = "solid.lift_requires_planar";
 /// `record → BrepData`: an unsupported surface or curve family, a void region, a
 /// `wire`/`vertex` shell, a vertex loop (except the degenerate apex a full cone
 /// needs), a trimmed face, a torus whose tube starts off its equator or is not a
-/// ring, an arc edge, a face shell with embedded wire edges. `BrepData → record`:
-/// more than one shell, an empty loop, coincident endpoints, a bad tolerance, a
+/// ring, an arc whose endpoints do not lie on its circle or whose interval
+/// disagrees with them, a face shell with embedded wire edges. `BrepData →
+/// record`: more than one shell, an empty loop, coincident endpoints, a bad
+/// tolerance, an arc whose geometry is not a proper sub-span of its circle, a
 /// record that fails validation or its geometry/consistency checks.
 ///
 /// Used by **both** directions: the detail says which, the code says "not a
@@ -64,6 +69,16 @@ pub const LIFT_REQUIRES_PLANAR: &str = "solid.lift_requires_planar";
 /// body can exist whose next lift is refused — mass properties therefore see
 /// `Unsupported` for something a boolean successfully produced.
 pub const LIFT_UNSUPPORTED: &str = "solid.lift_unsupported";
+
+/// A curved face's boundary has no **exact** pcurve in its surface parameters,
+/// so the face cannot be trimmed by the kernel.
+///
+/// `BrepData → record` only: the pcurves of a non-planar face come from
+/// `solidcore_ops::pcurve::pcurves_within`, which has exact closed forms only and
+/// fits nothing. A miss is refused by name here rather than approximated (a fitted
+/// trim would report a wrong area/centroid while the volume still agreed) and it
+/// is never replaced by a plane assumption.
+pub const PCURVE_NOT_EXACT: &str = "solid.pcurve_not_exact";
 
 /// A placement or plane frame cannot be baked (a mirror, a non-positive or
 /// non-finite scale, a singular or sheared matrix, a degenerate frame), so the
@@ -117,7 +132,7 @@ pub(crate) struct LiftRefusal {
 }
 
 impl LiftRefusal {
-    /// The body has a non-planar face or a non-line boundary (the only
+    /// A boundary curve or surface kind this build does not write (the only
     /// [`LIFT_REQUIRES_PLANAR`] sites).
     pub(crate) fn non_planar(detail: impl Into<String>) -> Self {
         LiftRefusal {

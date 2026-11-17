@@ -42,7 +42,6 @@ fn reason(ext: ExtendedCommandId) -> String {
         ExtendedCommandId::PressPull => "presspull.unsupported: no press/pull model",
         ExtendedCommandId::Imprint => "imprint.unsupported: no 3D imprint model",
         ExtendedCommandId::OffsetEdge => "offsetedge.unsupported: no 3D face/edge offset model",
-        ExtendedCommandId::ChamferEdge => "chamferedge.unsupported: no 3D edge chamfer model",
         ExtendedCommandId::FilletEdge => "filletedge.unsupported: no 3D edge fillet model",
         ExtendedCommandId::Edge => "edge.unsupported: no 3D face-edge visibility model",
         ExtendedCommandId::Mirror3D => "mirror3d.unsupported: no 3D mirror-plane model",

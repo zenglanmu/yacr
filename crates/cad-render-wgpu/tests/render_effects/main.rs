@@ -406,9 +406,7 @@ fn merged_quad(
             [half, half, 0.0],
             [half, -half, 0.0],
         ];
-        vec![
-            v[0], v[2], v[1], v[2], v[0], v[1], v[0], v[3], v[2], v[3],
-        ]
+        vec![v[0], v[2], v[1], v[2], v[0], v[1], v[0], v[3], v[2], v[3]]
     } else {
         Vec::new()
     };

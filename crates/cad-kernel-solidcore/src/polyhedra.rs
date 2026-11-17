@@ -91,6 +91,8 @@ fn face(id: u32, cycle: &[Point3]) -> BrepFace {
         },
         reversed: false,
         loops: vec![BrepLoop { edges }],
+        domain: None,
+        tolerance: None,
     }
 }
 
@@ -106,6 +108,7 @@ fn body(cycles: &[&[usize]], corners: &[Point3]) -> BrepData {
     BrepData {
         shells: vec![BrepShell { id: 0, faces }],
         placement: None,
+        tolerance: None,
     }
 }
 

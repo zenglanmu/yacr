@@ -60,7 +60,10 @@ fn required_points_and_selection_are_explicit_per_kind() {
             // terminal typed text. BLOCK captures its one base point; its name is
             // also the terminal typed text.
             | DrawToolKind::InsertBlock
-            | DrawToolKind::BlockDefine => 1,
+            | DrawToolKind::BlockDefine
+            // CHAMFEREDGE captures the one pixel pick hit point (the kernel's
+            // nearest-edge seed).
+            | DrawToolKind::ChamferEdge => 1,
             // WIPEOUT is the open-ended polygon capture: three vertices are the
             // minimum a closed ring needs.
             DrawToolKind::Wipeout => 3,
@@ -118,6 +121,13 @@ fn required_points_and_selection_are_explicit_per_kind() {
     assert_eq!(DrawToolKind::Stretch.arity(), PointArity::Exact(4));
     assert!(!DrawToolKind::Stretch.requires_selection());
     assert!(!DrawToolKind::Stretch.needs_picked_entities());
+    // CHAMFEREDGE: one entity pick, one captured point, and the selection is the
+    // body it cuts.
+    assert_eq!(DrawToolKind::ChamferEdge.arity(), PointArity::Exact(1));
+    assert_eq!(DrawToolKind::ChamferEdge.picked_step_count(), 1);
+    assert!(DrawToolKind::ChamferEdge.requires_selection());
+    assert!(DrawToolKind::ChamferEdge.needs_picked_entities());
+    assert!(!DrawToolKind::ChamferEdge.requires_text());
 }
 
 mod arc;

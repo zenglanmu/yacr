@@ -177,9 +177,12 @@ fn a_cylindrical_face_is_refused_by_name() {
                 },
                 reversed: false,
                 loops: Vec::new(),
+                tolerance: None,
+                domain: None,
             }],
         }],
         placement: None,
+        tolerance: None,
     };
     let refusal = brep_to_sat(&cylinder).expect_err("a cylinder is not planar");
     assert_eq!(refusal, AcisWriteRefusal::CurvedFace { face_id: 7 });
@@ -224,6 +227,7 @@ fn an_empty_body_and_a_shelless_body_are_refused() {
             faces: Vec::new(),
         }],
         placement: None,
+        tolerance: None,
     };
     assert_eq!(
         brep_to_sat(&shelless).expect_err("a shell without faces"),

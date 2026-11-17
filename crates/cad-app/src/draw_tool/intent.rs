@@ -538,6 +538,16 @@ pub enum DrawIntent {
     /// [`super::MAX_TOOL_TEXT_CHARS`] characters) and re-validated by the
     /// command.
     TextEdit { target: SelectionRef, text: String },
+    /// `CHAMFEREDGE`: cut one edge of the selected exact solid body at `seed`.
+    ///
+    /// `body` is the **collapsed** body ref (a face sub-element of the selected
+    /// body resolves to the body; an instance path is already refused by the
+    /// host). `seed` is the pixel pick's hit point — the model-space point the
+    /// kernel resolves its nearest edge from — never a work-plane projection.
+    /// The two set-back distances are the session typed channel
+    /// ([`super::ToolParameter::ChamferDistanceA`] / `B`), read at execute time,
+    /// so the intent carries no distance.
+    ChamferEdge { body: SelectionRef, seed: Point3 },
     /// DIVIDE the one pre-selected curve into equal arc-length parts, placing
     /// POINT marks at the division parameters (2026-11-01).
     ///

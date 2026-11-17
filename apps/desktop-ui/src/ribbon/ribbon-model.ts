@@ -12,7 +12,7 @@
 import { POPUP_KEYS } from '../popup/popup.ts';
 import { OPTIONS_KEYS } from '../options/options.ts';
 import { STANDARD_VIEWS } from '../cad/view3d.ts';
-import { DRAW_MODIFY_ITEMS, HOME_MODIFY_ITEMS } from './ribbon-modify.ts';
+import { DRAW_MODIFY_ITEMS, HOME_MODIFY_ITEMS, SOLID_MODIFY_ITEM } from './ribbon-modify.ts';
 import { LAYER_PANEL_ITEMS } from './layers-panel.ts';
 import { ANNOTATE_TEXT_COMMAND_ITEMS } from './annotate-text-commands.ts';
 import { CIRCLE_ITEM, HATCHEDIT_ITEM, MEASUREGEOM_ITEM, POLYGON_ITEM } from './variants.ts';
@@ -473,7 +473,8 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
       {
         id: 'modify',
         titleKey: 'ribbon.panel.modify',
-        items: HOME_MODIFY_ITEMS,
+        // + the 3D solid edit tail (CHAMFEREDGE, ADR-0036 P2.0).
+        items: [...HOME_MODIFY_ITEMS, SOLID_MODIFY_ITEM],
       },
       {
         id: 'layers',
@@ -624,7 +625,8 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
         id: 'modify',
         titleKey: 'ribbon.panel.modify',
         launcher: true,
-        items: DRAW_MODIFY_ITEMS,
+        // Same 3D solid tail as the Home panel.
+        items: [...DRAW_MODIFY_ITEMS, SOLID_MODIFY_ITEM],
       },
     ],
   },

@@ -55,10 +55,16 @@ pub fn brep_diagonal(brep: &BrepData) -> Option<f64> {
 /// Conservative axis-aligned bounds of a neutral B-rep, in world coordinates.
 ///
 /// Every analytic surface contributes its centre ± its radius on all three
-/// axes (a superset of the true extent), and every loop contributes its line
-/// endpoints. The placement is applied to each sample. This is a *size* estimate
-/// for the tolerance rule, not a display bound, so a conservative over-estimate
-/// is preferable to missing a curved face.
+/// axes (a superset of the true extent), a NURBS face contributes the box of its
+/// dehomogenised control net (the convex hull of a positive-weight rational
+/// surface contains the surface), and every loop contributes its line
+/// endpoints. An arc contributes its **circle's** axis box rather than its
+/// endpoints: the arc's bulge can reach the full radius in any axis direction, so
+/// the circle's box is the safe superset (the endpoint chord would understate it
+/// on a quarter arc and miss the bulge entirely on a near-half one). The
+/// placement is applied to each sample. This is a *size* estimate for the
+/// tolerance rule, not a display bound, so a conservative over-estimate is
+/// preferable to missing a curved face.
 pub fn brep_bounds(brep: &BrepData) -> Option<(Point3, Point3)> {
     let placement = brep.placement.unwrap_or_else(BrepPlacement::identity);
     let mut samples: Vec<Point3> = Vec::new();
@@ -73,6 +79,9 @@ pub fn brep_bounds(brep: &BrepData) -> Option<(Point3, Point3)> {
                             samples.push(*end);
                         }
                         BrepCurve::Circle { center, radius, .. } => {
+                            axis_box(*center, radius.abs(), &mut samples)
+                        }
+                        BrepCurve::Arc { center, radius, .. } => {
                             axis_box(*center, radius.abs(), &mut samples)
                         }
                         BrepCurve::Unsupported { .. } => {}
@@ -125,6 +134,32 @@ fn surface_samples(surface: &BrepSurface, out: &mut Vec<Point3>) {
         } => axis_box(*center, major_radius.abs() + minor_radius.abs(), out),
         BrepSurface::Cylinder { origin, radius, .. } => axis_box(*origin, radius.abs(), out),
         BrepSurface::Cone { origin, radius, .. } => axis_box(*origin, radius.abs(), out),
+        BrepSurface::Nurbs { points, .. } => nurbs_control_box(points, out),
+    }
+}
+
+/// Every dehomogenised control point of a NURBS net — a **superset** box.
+///
+/// With positive weights a rational B-spline surface lies in the convex hull of
+/// its dehomogenised control points, so the axis-aligned box of those points
+/// contains the whole surface: safe for a size estimate (the tolerance rule), and
+/// it may over-estimate — the hull is larger than the patch. That is the same
+/// deliberate trade the analytic arms above make with `axis_box`.
+///
+/// A coefficient whose weight is not a usable positive number cannot be
+/// dehomogenised and is skipped: it is not a point of the surface, and a net whose
+/// points are all unusable contributes nothing (exactly like a degenerate radius).
+fn nurbs_control_box(points: &[Vec<[f64; 4]>], out: &mut Vec<Point3>) {
+    for coefficient in points.iter().flatten() {
+        let w = coefficient[3];
+        if !w.is_finite() || w < 1e-12 {
+            continue;
+        }
+        out.push(Point3 {
+            x: coefficient[0] / w,
+            y: coefficient[1] / w,
+            z: coefficient[2] / w,
+        });
     }
 }
 

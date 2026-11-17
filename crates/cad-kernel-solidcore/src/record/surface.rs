@@ -1,15 +1,26 @@
-//! Upstream surface records → neutral analytic surfaces.
+//! Upstream surface records → neutral surfaces.
 //!
-//! Only the analytic set the neutral model can evaluate is mapped: `Plane`,
-//! `PlaneThrough`, `Cylinder`, `Cone`, `Sphere`, `Torus`. Everything else
-//! (`Spline`, `RationalSpline`, `BallPatch`, `PlacedRevolution`, `Blend`) is a
-//! typed refusal — phase P2 adds a NURBS variant to the neutral model first.
+//! Two families map here:
 //!
-//! A face that carries its `nurbs` form is mapped from its **analytic label**
-//! (the record guarantees the label is proved against the form for
-//! `Cylinder`/`Cone`/`Sphere`/`Torus`). That keeps curved primitives analytic
-//! downstream (display and export) instead of degrading them to a spline this
-//! build cannot evaluate.
+//! - the analytic labels `Plane`, `PlaneThrough`, `Cylinder`, `Cone`, `Sphere`,
+//!   `Torus` become the matching [`cad_domain::BrepSurface`] variant;
+//! - the **form** surfaces `Spline` and `RationalSpline` become
+//!   [`cad_domain::BrepSurface::Nurbs`] (a `Spline` with every weight `1.0`). The
+//!   net, knots and weights cross the seam bit-for-bit; the degree stays implicit
+//!   and is never re-declared here.
+//!
+//! `BallPatch`, `PlacedRevolution` and `Blend` stay typed refusals — each needs a
+//! certification step (a ball patch/blend net against a defining surface) this
+//! build does not do, so they are named, not approximated.
+//!
+//! A face that carries its `nurbs` form on an **analytic label** is mapped from
+//! that label (the record guarantees the label is proved against the form for
+//! `Cylinder`/`Cone`/`Sphere`/`Torus`), and the form is ignored. That keeps curved
+//! primitives analytic downstream (display and export) instead of degrading them
+//! to a spline.
+//!
+//! The face's own `(u, v)` box is not read here: it is [`cad_domain::BrepFace`]
+//! data, carried by the caller.
 
 use cad_domain::{BrepSurface, Point3};
 use solidcore_record::brep::{Frame, Surface};
@@ -159,9 +170,34 @@ pub(crate) fn to_brep(surface: &Surface) -> Result<BrepSurface, LiftRefusal> {
                 u_dir: x,
             })
         }
+        Surface::Spline {
+            u_knots,
+            v_knots,
+            points,
+        } => Ok(BrepSurface::Nurbs {
+            u_knots: u_knots.clone(),
+            v_knots: v_knots.clone(),
+            points: points
+                .iter()
+                .map(|row| {
+                    row.iter()
+                        .map(|p| [p[0], p[1], p[2], 1.0])
+                        .collect::<Vec<[f64; 4]>>()
+                })
+                .collect(),
+        }),
+        Surface::RationalSpline {
+            u_knots,
+            v_knots,
+            homogeneous,
+        } => Ok(BrepSurface::Nurbs {
+            u_knots: u_knots.clone(),
+            v_knots: v_knots.clone(),
+            points: homogeneous.clone(),
+        }),
         _other => Err(LiftRefusal::unsupported(format!(
             "a '{key}' surface is not mapped to the neutral B-rep in P1 \
-             (only plane, cylinder, cone, sphere and torus are)"
+             (plane, cylinder, cone, sphere, torus, spline and rational-spline are)"
         ))),
     }
 }

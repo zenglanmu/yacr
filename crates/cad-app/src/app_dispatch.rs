@@ -448,6 +448,10 @@ impl Application {
             ExtendedCommandId::Intersect => {
                 self.boolean_solids(session, command, BooleanOp::Intersect)?
             }
+            // ADR-0036 P2.0: CHAMFEREDGE cuts one edge of the selected exact
+            // solid in place (one transaction / one undo step). The host builds
+            // the body+seed payload from the one-pick capture.
+            ExtendedCommandId::ChamferEdge => self.chamfer_solid_edge(session, command)?,
             // Wave 14: stable named refusals.
             ExtendedCommandId::PolySolid
             | ExtendedCommandId::Extrude
@@ -459,7 +463,6 @@ impl Application {
             | ExtendedCommandId::PressPull
             | ExtendedCommandId::Imprint
             | ExtendedCommandId::OffsetEdge
-            | ExtendedCommandId::ChamferEdge
             | ExtendedCommandId::FilletEdge
             | ExtendedCommandId::Edge
             | ExtendedCommandId::Mirror3D

@@ -3,9 +3,9 @@
 //! Moved out of `validate.rs` when the source file reached the 1000-line gate.
 
 use crate::validate::{
-    validate_geometry, REASON_BODY_EDGE_POLYLINE, REASON_BODY_SOLID_WITHOUT_EXACT,
-    REASON_BODY_SOLID_WITH_EMPTY_BREP, REASON_BODY_TOLERANCE, REASON_POLYLINE_WIDTH,
-    REASON_TEXT_LINE_SPACING, REASON_TEXT_WIDTH_FACTOR,
+    validate_geometry, REASON_BODY_BREP_TOLERANCE, REASON_BODY_EDGE_POLYLINE,
+    REASON_BODY_SOLID_WITHOUT_EXACT, REASON_BODY_SOLID_WITH_EMPTY_BREP, REASON_BODY_TOLERANCE,
+    REASON_POLYLINE_WIDTH, REASON_TEXT_LINE_SPACING, REASON_TEXT_WIDTH_FACTOR,
 };
 use cad_domain::*;
 
@@ -303,9 +303,12 @@ fn plane_brep() -> BrepData {
                 },
                 reversed: false,
                 loops: vec![square_loop()],
+                tolerance: None,
+                domain: None,
             }],
         }],
         placement: None,
+        tolerance: None,
     }
 }
 
@@ -416,6 +419,44 @@ fn body_display_edges_and_tolerance_are_validated() {
 }
 
 #[test]
+fn body_brep_tolerance_must_be_a_usable_length_when_stated() {
+    let with_body_tolerance = |tolerance: Option<f64>| {
+        let mut brep = plane_brep();
+        brep.tolerance = tolerance;
+        let mut body = sheet_body();
+        body.exact = BodyExact::Exact(Box::new(brep));
+        body_geometry(body)
+    };
+    // `None` is "the source stated none" and is representable; a stated tolerance
+    // must be a positive finite length.
+    assert!(validate_geometry(&with_body_tolerance(None)).is_ok());
+    assert!(validate_geometry(&with_body_tolerance(Some(1e-7))).is_ok());
+    for bad in [Some(0.0), Some(-1e-6), Some(f64::NAN), Some(f64::INFINITY)] {
+        let message = validate_geometry(&with_body_tolerance(bad))
+            .expect_err("the B-rep tolerance must be finite and positive")
+            .to_string();
+        assert!(
+            message.contains(REASON_BODY_BREP_TOLERANCE),
+            "the refusal must name the B-rep tolerance rule: {message}"
+        );
+    }
+
+    // The same rule for a face, which the record cannot even carry today: a
+    // producer that states one must state a usable length.
+    let mut brep = plane_brep();
+    brep.shells[0].faces[0].tolerance = Some(0.0);
+    let mut body = sheet_body();
+    body.exact = BodyExact::Exact(Box::new(brep));
+    let message = validate_geometry(&body_geometry(body))
+        .expect_err("a face tolerance of zero is not a length")
+        .to_string();
+    assert!(
+        message.contains(REASON_BODY_BREP_TOLERANCE),
+        "the refusal must name the B-rep tolerance rule: {message}"
+    );
+}
+
+#[test]
 fn body_bounds_include_edges_when_the_mesh_is_empty() {
     let mut body = sheet_body();
     body.display.mesh = Mesh::default();
@@ -461,6 +502,45 @@ fn body_uniform_scale_transforms_display_and_keeps_exact() {
     // the same world point the edge polyline now ends at.
     let corner = placement.apply(p(10.0, 0.0));
     assert!((corner.x - 20.0).abs() < 1e-9, "{corner:?}");
+}
+
+#[test]
+fn body_brep_tolerance_stays_a_model_length_under_a_similarity() {
+    let mut brep = plane_brep();
+    brep.tolerance = Some(0.5);
+    brep.shells[0].faces[0].tolerance = Some(0.25);
+    let mut body = sheet_body();
+    body.exact = BodyExact::Exact(Box::new(brep));
+    let moved = crate::transform_geometry(&body_geometry(body), &Transform3::scale(2.0))
+        .expect("a uniform scale is representable");
+    let SemanticGeometry::Body3d(moved) = moved else {
+        panic!("expected a body");
+    };
+    let brep = moved.exact_brep().expect("exact B-rep");
+    // A B-rep tolerance is in **model** units, and a transform only composes the
+    // placement: the shell coordinates are untouched, so both tolerances — body
+    // and face — stay exactly as they were. Scaling them here as well would scale
+    // them twice, because baking the composed placement into a record scales the
+    // geometry *and* the tolerances by the placement's factor (pinned by
+    // `cad-kernel-solidcore`'s `baking_a_similarity_scales_body_and_face_tolerances_as_lengths`).
+    assert_eq!(brep.tolerance, Some(0.5));
+    assert_eq!(brep.shells[0].faces[0].tolerance, Some(0.25));
+    assert!(
+        (brep.placement.expect("composed placement").scale - 2.0).abs() < 1e-12,
+        "the scale lives in the placement, not in the tolerance"
+    );
+
+    // `None` (unspecified) stays unspecified — never filled in from the scale.
+    let mut instant = plane_brep();
+    instant.tolerance = None;
+    let mut body = sheet_body();
+    body.exact = BodyExact::Exact(Box::new(instant));
+    let moved = crate::transform_geometry(&body_geometry(body), &Transform3::scale(3.0))
+        .expect("a uniform scale is representable");
+    let SemanticGeometry::Body3d(moved) = moved else {
+        panic!("expected a body");
+    };
+    assert_eq!(moved.exact_brep().expect("exact").tolerance, None);
 }
 
 #[test]

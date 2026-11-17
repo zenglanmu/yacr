@@ -87,7 +87,7 @@ impl DrawToolKind {
     /// Every kind, in the order the UI selector presents them. This is the one
     /// authoritative ordering; the UI shell mirrors it instead of keeping a
     /// second hand-written list that can drift.
-    pub const ALL: [DrawToolKind; 58] = [
+    pub const ALL: [DrawToolKind; 59] = [
         DrawToolKind::Line,
         DrawToolKind::Circle,
         DrawToolKind::Arc,
@@ -187,6 +187,10 @@ impl DrawToolKind {
         // BOUNDARY is appended for the same index-stability reason: it is a real
         // one-internal-point capture started by its command selector.
         DrawToolKind::Boundary,
+        // CHAMFEREDGE is appended for the same index-stability reason: a real
+        // one-pick capture (the pixel pick hit point) over the selected exact
+        // solid, started by its command selector.
+        DrawToolKind::ChamferEdge,
     ];
 
     /// Stable, locale-independent machine key (never translated).
@@ -250,6 +254,7 @@ impl DrawToolKind {
             Self::Wipeout => "wipeout",
             Self::PolygonCircumscribed => "polygoncircumscribed",
             Self::Boundary => "boundary",
+            Self::ChamferEdge => "chamferedge",
         }
     }
 
@@ -315,6 +320,7 @@ impl DrawToolKind {
             "wipeout" => Some(Self::Wipeout),
             "polygoncircumscribed" => Some(Self::PolygonCircumscribed),
             "boundary" => Some(Self::Boundary),
+            "chamferedge" => Some(Self::ChamferEdge),
             _ => None,
         }
     }
@@ -470,6 +476,8 @@ impl DrawToolKind {
             Self::PolygonCircumscribed => "POLYGON CIRCUMSCRIBED",
             // BOUNDARY shares the locale-neutral ASCII fallback rule.
             Self::Boundary => "BOUNDARY",
+            // CHAMFEREDGE shares the locale-neutral ASCII fallback rule.
+            Self::ChamferEdge => "CHAMFEREDGE",
         }
     }
 
@@ -534,6 +542,9 @@ impl DrawToolKind {
             // discovered from.
             | Self::HatchPoint
             | Self::Boundary
+            // CHAMFEREDGE captures the one pixel pick hit point (the kernel's
+            // edge selector seed).
+            | Self::ChamferEdge
             // INSERT captures its one insertion point; the block name is the
             // terminal typed text, not a point. BLOCK captures its one base
             // point; the block name is the terminal typed text.
@@ -643,6 +654,9 @@ impl DrawToolKind {
                 // deliberately do not.
                 | Self::CopyBase
                 | Self::CutBase
+                // CHAMFEREDGE cuts an edge of the **selected** exact solid, so an
+                // empty selection must never be confirmable.
+                | Self::ChamferEdge
         )
     }
 
@@ -677,6 +691,9 @@ impl DrawToolKind {
             Self::Break | Self::BreakAtPoint => 1,
             // TEXTEDIT picks the text entity it will edit as its only step.
             Self::TextEdit => 1,
+            // CHAMFEREDGE picks the solid edge it will cut as its only step (the
+            // pick resolves a seed point, not an edge identity).
+            Self::ChamferEdge => 1,
             // DIMANGULAR's first step is the **mixed** line-pick-or-vertex step
             // ([`Self::has_mixed_first_step`]) and its second is the second line;
             // both count here so a two-line capture has two resolved refs. The

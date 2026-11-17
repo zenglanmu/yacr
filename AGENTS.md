@@ -244,6 +244,7 @@ tag 的 Release）；`web-deploy` 也只在该事件下把 `apps/app-web/dist-ui
 `docs/architecture.md`（边界/不变量）、`docs/core-invariants.md`、`docs/handoff.md`（逐轮交接，
 最新事实优先；`2026-11-12` 及更早的条目在 `docs/handoff-archive/`，按月份分文件并带条目索引）、
 `docs/compatibility.md`（能力表）、`docs/dgn.md`（DGN V7/V8 导入边界）、
+`docs/3d-solidcore-and-mesh-import.md`（solidcore 接入收益、代码改动与 SKP/STL 映射）、
 `docs/testing-dwg.md`、`docs/react-linux-app.md`、
 `docs/android-host.md`、`docs/windows-app.md`、`docs/macos-app.md`、`docs/xref.md`、`docs/ci.md`
 （部分历史条目已过期，以 workflow 与实际代码为准）、`docs/adr/`（0010、0017–0027）。

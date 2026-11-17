@@ -17,7 +17,7 @@
 
 use super::*;
 
-const REFUSALS: [(ExtendedCommandId, &str); 15] = [
+const REFUSALS: [(ExtendedCommandId, &str); 14] = [
     (
         ExtendedCommandId::PolySolid,
         "polysolid.unsupported: 3D solid primitives are not implemented",
@@ -57,10 +57,6 @@ const REFUSALS: [(ExtendedCommandId, &str); 15] = [
     (
         ExtendedCommandId::OffsetEdge,
         "offsetedge.unsupported: no 3D face/edge offset model",
-    ),
-    (
-        ExtendedCommandId::ChamferEdge,
-        "chamferedge.unsupported: no 3D edge chamfer model",
     ),
     (
         ExtendedCommandId::FilletEdge,
@@ -158,6 +154,33 @@ fn the_three_booleans_are_drawing_writes_not_viewer_refusals() {
             "{ext:?} replaces the operands, so it is Work-only"
         );
     }
+}
+
+#[test]
+fn chamfer_edge_is_a_drawing_write_not_a_viewer_refusal() {
+    // ADR-0036 P2.0 graduated CHAMFEREDGE out of the refusal list: it rewrites
+    // the selected body in place, so it is Work-only like the primitives and the
+    // booleans. Without an injected modeler it refuses by name (tested in
+    // `tests::drawing::chamfer_edge`), never as "not implemented".
+    assert!(ExtendedCommandId::ChamferEdge.requires_work_mode());
+}
+
+#[test]
+fn a_viewer_cannot_chamfer_an_edge() {
+    let (mut app, mut session) = application_with_document();
+    session
+        .switch_mode(AppMode::Viewer)
+        .expect("Viewer is legal");
+    let error = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::Extended(ExtendedCommandId::ChamferEdge),
+                CommandPayload::None,
+            ),
+        )
+        .expect_err("Viewer is read-only");
+    assert_eq!(error, CadError::PermissionDenied);
 }
 
 #[test]

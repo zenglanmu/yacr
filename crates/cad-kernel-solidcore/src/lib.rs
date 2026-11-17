@@ -16,7 +16,7 @@
 //! It holds no document state, no body handle and no cache: content in, content
 //! out (ADR-0036 D1, [`cad_kernel_adapter::SolidModeler`]).
 //!
-//! # Scope of this cut (P1, honest)
+//! # Scope of this cut (P1 + P2.1b part 2, honest)
 //!
 //! **Fully supported** (create, edit, mass, display):
 //!
@@ -24,37 +24,50 @@
 //!   ([`polyhedra`]), lifted to a record and validated by the kernel
 //!   (`Body::from_record(.., false)`), so a body handed out is one the kernel
 //!   accepted;
-//! - `UNION`/`SUBTRACT`/`INTERSECT` of bodies whose faces are all planes with
-//!   `Line` boundary curves;
-//! - a straight **chamfer on one edge** of such a planar body (P2.0,
-//!   [`cad_kernel_adapter::SolidOperation::Chamfer`]): the product is still
-//!   all-planar, so it re-lifts; NURBS, fillets, shells and the `SURFACE` family
+//! - `UNION`/`SUBTRACT`/`INTERSECT` of bodies whose faces are planes with `Line`,
+//!   `Circle` or `Arc` boundaries (holes included), and of bodies with a curved
+//!   face;
+//! - a straight **chamfer on one `Line` edge** (P2.0,
+//!   [`cad_kernel_adapter::SolidOperation::Chamfer`]): the product re-lifts, also
+//!   when the body it cuts is curved; a curved *edge* (a cylinder rim) needs the
+//!   curve-edge selector and stays P2.2. Fillets, shells and the `SURFACE` family
 //!   remain unimplemented and are refused, not approximated;
-//! - mass properties of the same planar bodies;
+//! - mass properties of those bodies, including the closed forms of a cylinder,
+//!   sphere, cone and torus;
 //! - similarity transforms of **any** body this module can describe, including
 //!   the curved primitives below: the map is baked into the neutral B-rep
 //!   arithmetically and never re-enters the kernel.
 //!
-//! **Created, displayable and exportable, but not editable in P1**:
-//! `CYLINDER`, `SPHERE`, `CONE` and `TORUS` are built by the upstream
-//! constructors (`solidcore_ops::{make_cylinder, make_sphere, make_cone,
-//! make_torus}`), read back through `Body::to_record` and mapped to analytic
-//! [`cad_domain::BrepSurface`]/[`cad_domain::BrepCurve`] variants.
+//! **Curved bodies lift (P2.1b part 2)**: `CYLINDER`, `SPHERE`, `CONE` and
+//! `TORUS` are built by the upstream constructors
+//! (`solidcore_ops::{make_cylinder, make_sphere, make_cone, make_torus}`), read
+//! back through `Body::to_record`, mapped to analytic
+//! [`cad_domain::BrepSurface`]/[`cad_domain::BrepCurve`] variants — and written
+//! **back** with the exact rational NURBS form `solidcore`'s `eval::form` gives
+//! each analytic label, the form's `(u, v)` box and every use's exact pcurve. So
+//! a boolean, mass-properties or chamfer request over a curved body reaches the
+//! kernel: the closed forms of a cylinder, sphere, cone and torus are measured,
+//! and booleans on them are answered.
 //!
-//! **Refused, never approximated**: any operation that has to *lift* a
-//! `BrepData` back into the kernel — a boolean, mass-properties or chamfer
-//! request — on a body with a non-planar face or a non-`Line` boundary curve.
-//! Those return [`cad_kernel_adapter::SolidOutcome::Unsupported`] with the stable
-//! reason [`LIFT_REQUIRES_PLANAR`]. Lifting curved shells losslessly needs NURBS
-//! surfaces *and* their pcurves in the neutral model, which is phase P2.1.
+//! The one refusal that survives at the lift is a **boundary family** this build
+//! does not write (a spline or ellipse curve, an `Unsupported` surface) —
+//! [`LIFT_REQUIRES_PLANAR`] — plus the structural ones. A curved face with no
+//! stated `(u, v)` domain is [`LIFT_UNSUPPORTED`] by name, and a use whose pcurve
+//! has no exact closed form in its surface parameters is `solid.pcurve_not_exact`:
+//! nothing is fitted and no box is invented.
+//!
+//! Display follows `cad-db`, not this crate: a **trimmed** curved face lifts but
+//! tessellates as a partial body naming that face (the neutral tessellator draws a
+//! cylinder strip only from two full circles), and a NURBS face has no mesher in
+//! this build (`solidcore-tess`, phase P2.1c).
 //!
 //! # Family-level capabilities, per-operand refusals
 //!
 //! [`cad_kernel_adapter::ModelerCapabilities::booleans`], `mass_properties` and
 //! `chamfer` being `true` means "this family is implemented", **not** "every
 //! operand can be evaluated": each execution still re-lifts its operands and may
-//! refuse. The planar lift accepts exactly **one closed, consistently oriented
-//! shell** (`[LIFT_UNSUPPORTED]` otherwise):
+//! refuse. The lift accepts exactly **one closed, consistently oriented shell**
+//! (`[LIFT_UNSUPPORTED]` otherwise):
 //!
 //! - a boolean result with a **void region (a cavity)** is refused **at the
 //!   boolean itself** (the kernel stores a cavity as a void region, which this
@@ -67,7 +80,11 @@
 //!   refused rather than measured: the measured symptoms of letting them through
 //!   were a plausible area of 40 instead of 52 and a volume of 36 instead of 24;
 //! - mass properties additionally require **exactly one closed shell**: a void
-//!   region or a second shell is refused instead of summing two volumes.
+//!   region or a second shell is refused instead of summing two volumes;
+//! - a **curved** operand needs `ModelerCapabilities::nurbs`; the pinned
+//!   modeler declares it, and each execution still writes the exact form — an
+//!   operand it cannot express (no `(u, v)` domain, no exact pcurve) is refused
+//!   by name, never approximated.
 //!
 //! Callers must therefore handle a per-call `Unsupported` from a family the
 //! modeler declares; they must not cache "booleans are supported" as a
@@ -78,6 +95,11 @@
 //! starts off its outer equator, a non-identity placement that cannot be baked,
 //! and a mirroring transform (see [`LIFT_UNSUPPORTED`] and
 //! [`PLACEMENT_NOT_SUPPORTED`]).
+//!
+//! [`cad_kernel_adapter::ModelerCapabilities::nurbs`] is `true` and is
+//! **load-bearing**: a boolean, mass-properties or chamfer operand with a
+//! non-planar face needs it, and a modeler that declares `false` refuses such an
+//! operand with `solid.nurbs_not_supported` before any work.
 //!
 //! # Units
 //!
@@ -129,8 +151,8 @@ mod record;
 
 pub use error::{
     CHAMFER_FAILED, EDGE_NOT_FOUND, EMPTY_RESULT, KERNEL_FAILED, KERNEL_PANIC,
-    LIFT_REQUIRES_PLANAR, LIFT_UNSUPPORTED, NONUNIFORM_TRANSFORM, PLACEMENT_NOT_SUPPORTED,
-    UNSURE_REGION,
+    LIFT_REQUIRES_PLANAR, LIFT_UNSUPPORTED, NONUNIFORM_TRANSFORM, PCURVE_NOT_EXACT,
+    PLACEMENT_NOT_SUPPORTED, UNSURE_REGION,
 };
 pub use modeler::{SolidCoreModeler, TYPE_KEY, UPSTREAM_REVISION, UPSTREAM_VERSION};
 pub use polyhedra::{box_brep, pyramid_brep, wedge_brep};

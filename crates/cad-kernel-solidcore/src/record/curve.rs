@@ -1,10 +1,13 @@
 //! Upstream edge curves → neutral analytic curves.
 //!
-//! `Line`, a **closed** `Circle`, and a `Spline` whose control points all lie on
-//! its chord are mapped. A record edge is unbounded (its bounds are the edge
-//! `interval`), so a circle edge that is not closed — its start and end vertex
-//! differ — is an arc, and the neutral model has no arc variant: it is refused,
-//! never drawn as a full circle.
+//! `Line`, a **closed** `Circle`, a **non-closed** `Circle` (an open circle is an
+//! arc: the record's curves are unbounded, so the edge `interval` is the trim and
+//! its two vertices are the ends), and a `Spline` whose control points all lie on
+//! its chord are mapped. A circle edge whose start and end vertex coincide is the
+//! full circle; when they differ the arc is reconstructed from the circle's frame
+//! and the **authoritative vertices** — but only when both endpoints really lie on
+//! the circle within the edge's tolerance. An open circle whose endpoints do not
+//! lie on it is refused by name, never drawn as the nearest arc.
 //!
 //! The record's `curve` is the analytic *label*; when the edge also carries a
 //! `nurbs` form the form is the geometry and the label a proved name for it, so
@@ -25,7 +28,7 @@ use cad_domain::{BrepCurve, Point3};
 use solidcore_record::brep::{Brep as Record, Curve, Edge};
 
 use super::units::point;
-use super::{add, cross, dot, length, mul, sub};
+use super::{add, cross, dot, is_axis, length, mul, sub};
 use crate::error::LiftRefusal;
 
 /// The record's own name for a curve, used in refusal details.
@@ -99,9 +102,7 @@ pub(crate) fn to_brep(
     }
     if let Some((center, normal, u_dir, radius)) = circle(&edge.curve) {
         if !closed(edge) {
-            return Err(LiftRefusal::unsupported(
-                "a circular arc edge (open circle) is not mapped in P1; only full circles are",
-            ));
+            return arc_from_circle(record, edge, forward, center, normal, u_dir, radius);
         }
         return Ok(BrepCurve::Circle {
             center,
@@ -116,12 +117,94 @@ pub(crate) fn to_brep(
     let key = type_key(&edge.curve);
     Err(LiftRefusal::unsupported(format!(
         "a '{key}' edge curve is not mapped to the neutral B-rep in P1 \
-         (only lines, full circles and exactly straight splines are)"
+         (only lines, circles (full or open) and exactly straight splines are)"
     )))
 }
 
-/// The straight segment a `Spline` edge describes *exactly*, when it does.
+/// The neutral arc an **open** circle edge describes, or a named refusal.
 ///
+/// The circle record is unbounded and the edge's `interval` is its trim; the
+/// edge's **vertices** are authoritative for the ends (a kernel record can be one
+/// ULP off between its curve and its vertex). The result is oriented so the sweep
+/// from `start` to `end` runs counter-clockwise about `normal`:
+///
+/// - a use walking the edge `forward` runs interval min → max, which for a
+///   `Curve::Circle` label is counter-clockwise about the frame's `z = x × y`;
+/// - a use walking it backwards runs `end → start`, which is counter-clockwise
+///   about `-z`, so the endpoints and the normal both flip.
+///
+/// Both endpoints must lie on the circle (radius **and** plane) within the edge's
+/// own tolerance, and the span they describe must be a proper part of one turn.
+/// Otherwise the record is internally inconsistent and is refused — a "nearly
+/// right" arc is not re-projected onto the circle.
+fn arc_from_circle(
+    record: &Record,
+    edge: &Edge,
+    forward: bool,
+    center: Point3,
+    normal: Point3,
+    u_dir: Point3,
+    radius: f64,
+) -> Result<BrepCurve, LiftRefusal> {
+    if !radius.is_finite() || radius <= 0.0 {
+        return Err(LiftRefusal::unsupported(format!(
+            "an arc edge has radius {radius}; the radius must be finite and positive"
+        )));
+    }
+    let Some((start, end)) = endpoints(record, edge, forward) else {
+        return Err(LiftRefusal::unsupported(
+            "an arc edge (an open circle) references a missing vertex",
+        ));
+    };
+    let normal = if forward { normal } else { mul(normal, -1.0) };
+    if !is_axis(normal) || !is_axis(u_dir) {
+        return Err(LiftRefusal::unsupported(
+            "an arc edge has a degenerate circle frame",
+        ));
+    }
+    // The same idiom as a straight spline's ends: the edge's own tolerance with a
+    // tiny relative floor, so a zero tolerance still admits the kernel's rounding.
+    let allowed = edge
+        .tolerance
+        .max(1e-9 * radius.abs())
+        .max(f64::MIN_POSITIVE);
+    let v_dir = cross(normal, u_dir);
+    for p in [start, end] {
+        let offset = sub(p, center);
+        if (length(offset) - radius).abs() > allowed || dot(offset, normal).abs() > allowed {
+            return Err(LiftRefusal::unsupported(format!(
+                "an arc edge (an open circle) has an endpoint that is not on its circle (radius \
+                 or plane off by more than {allowed}); it is not re-projected"
+            )));
+        }
+    }
+    let angle = |p: Point3| {
+        let offset = sub(p, center);
+        dot(offset, v_dir).atan2(dot(offset, u_dir))
+    };
+    let delta = angle(end) - angle(start);
+    let sweep = if delta > 0.0 {
+        delta
+    } else {
+        delta + std::f64::consts::TAU
+    };
+    if !sweep.is_finite() || !(sweep > 1e-9 && sweep < std::f64::consts::TAU - 1e-9) {
+        return Err(LiftRefusal::unsupported(format!(
+            "an arc edge (an open circle) covers {sweep} rad between its vertices; an arc is a \
+             proper part of one turn, so this is refused rather than drawn as a full circle"
+        )));
+    }
+    Ok(BrepCurve::Arc {
+        center,
+        normal,
+        u_dir,
+        radius,
+        start,
+        end,
+    })
+}
+
+/// The straight segment a `Spline` edge describes *exactly*, when it does.///
 /// See the module docs: a Bézier/B-spline whose control polygon lies on its
 /// chord has the chord as its image, so it is a line. The endpoints are taken
 /// from the edge's authoritative **vertices** (kernel records can be one ULP off

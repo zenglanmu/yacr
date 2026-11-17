@@ -15,6 +15,9 @@
 //! * Sphere and torus surfaces with an unbounded (loop-less) face are sampled
 //!   from their natural parameterisation.
 //! * Cylindrical side faces bounded by two full circles are sampled as a strip.
+//! * A **NURBS** face (`BrepSurface::Nurbs`, the neutral model's form surface) has
+//!   no mesher in this build: it is refused as an unsupported face naming
+//!   `solidcore-tess` (phase P2.1c), never approximated.
 //! * Every other supporting surface, every partial/elliptical curve and every
 //!   degenerate loop is reported as an unsupported *face*, never replaced by a
 //!   fabricated mesh.

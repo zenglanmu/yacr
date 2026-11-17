@@ -89,6 +89,8 @@ pub(super) fn planar_face(id: u32, outward: Point3, ring: &[Point3]) -> BrepFace
         },
         reversed: false,
         loops: vec![BrepLoop { edges }],
+        tolerance: None,
+        domain: None,
     }
 }
 
@@ -96,6 +98,7 @@ pub(super) fn single_shell(faces: Vec<BrepFace>) -> BrepData {
     BrepData {
         shells: vec![BrepShell { id: 0, faces }],
         placement: None,
+        tolerance: None,
     }
 }
 

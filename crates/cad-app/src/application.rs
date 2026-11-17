@@ -53,6 +53,16 @@ impl Application {
         self.solid_booleans.is_running()
     }
 
+    /// Whether this carrier injected a solid modeler (ADR-0036 phase C1).
+    ///
+    /// The host uses it to fail a solid tool **at tool start**, before any
+    /// click, instead of letting the user pick an edge on a carrier that can
+    /// never chamfer it. The modeler itself stays private: callers only need to
+    /// know whether the capability exists.
+    pub fn has_solid_modeler(&self) -> bool {
+        self.solid_modeler.is_some()
+    }
+
     /// Take the background boolean's terminal state (never commits).
     pub(crate) fn poll_solid_boolean_take(&mut self) -> crate::tasks::SolidBooleanTake {
         self.solid_booleans.poll()

@@ -9,14 +9,18 @@
 //!
 //! Both directions are lossy and say so:
 //!
-//! - [`to_record`](to_record::to_record) accepts only planar faces with `Line`
-//!   boundaries (one closed, consistently oriented shell), and refuses anything
-//!   else with [`LIFT_REQUIRES_PLANAR`](crate::LIFT_REQUIRES_PLANAR) (the
-//!   geometry is curved) or [`LIFT_UNSUPPORTED`](crate::LIFT_UNSUPPORTED) (the
-//!   body is structurally unusable);
+//! - [`to_record`](to_record::to_record) accepts `Line`, `Arc` and full `Circle`
+//!   boundaries on `Plane` faces, and labelled `Cylinder`/`Cone`/`Sphere`/`Torus`
+//!   or form faces with their exact NURBS form (one closed, consistently oriented
+//!   shell). Anything else is refused with
+//!   [`LIFT_REQUIRES_PLANAR`](crate::LIFT_REQUIRES_PLANAR) (a curve/surface family
+//!   this build does not carry) or [`LIFT_UNSUPPORTED`](crate::LIFT_UNSUPPORTED)
+//!   (the body is structurally unusable);
 //! - [`from_record`](from_record::from_record) maps the analytic surfaces
-//!   `Plane`, `PlaneThrough`, `Cylinder`, `Cone`, `Sphere` and `Torus` and the
-//!   curves `Line` and full `Circle`; anything else is refused with
+//!   `Plane`, `PlaneThrough`, `Cylinder`, `Cone`, `Sphere` and `Torus`, the
+//!   **form** surfaces `Spline`/`RationalSpline` (as
+//!   `BrepSurface::Nurbs`) and the curves `Line`, full `Circle` and open `Circle`
+//!   (an arc); anything else is refused with
 //!   [`LIFT_UNSUPPORTED`](crate::LIFT_UNSUPPORTED) rather than degraded.
 //!
 //! # Asymmetric refusals (read this before relying on a round trip)
@@ -26,17 +30,23 @@
 //!
 //! | record content | `from_record` | `to_record` |
 //! |---|---|---|
-//! | `Face.nurbs` / `Edge.nurbs` (the spline form) | **ignored**: mapped from the analytic label (`Plane`/`Cylinder`/…, `Line`/`Circle`), which the record guarantees that form equals | never written (a planar face/line needs none) |
+//! | `Face.surface` = `Spline` / `RationalSpline` (a **form** surface) | mapped to `BrepSurface::Nurbs`, net/knots/weights verbatim (`Spline` gets weight `1.0`) | written back as the same form label; a boundary with no exact pcurve in its parameters is `solid.pcurve_not_exact` |
+//! | `Face.nurbs` on an **analytic** label | **ignored**: mapped from the label (`Plane`/`Cylinder`/…), which the record guarantees that form equals | **written** for every labelled curved face, from `eval::form::surface` over the box the boundary pins |
+//! | `Face.domain` (the `(u, v)` box) | **carried verbatim** into `BrepFace.domain` (the only source of it) | planes: derived from the boundary. Curved faces: **required** (a face that states none is refused by name), and the written box is the *form's*, derived from the face's own boundary geometry — the producer's numbers are in the producer's parameterisation, which this build does not re-derive. A `Nurbs` face is written with its stated box |
+//! | `Edge.nurbs` (the spline form) | **ignored**: mapped from the curve label (`Line`/`Circle`) | never written (a planar boundary needs none) |
 //! | `Shell::Faces.wires` (wire edges embedded in a face shell) | **refused** (no wire-edge slot in `BrepData`; dropping them would lose geometry) | always empty |
 //! | `Loop::Vertex` | **accepted only as the degenerate apex** of a full cone (the neutral cone face needs that marker); every other vertex loop is refused | never produced |
 //! | `Shell::Wire` / `Shell::Vertex`, void regions | refused | never produced |
 //! | **more than one shell** | **accepted** (a disjoint `UNION` is a legitimate body: two closed shells) | **refused** — the kernel is handed geometry, so it needs exactly one closed shell |
-//! | pcurves | ignored (only the loop geometry is mapped) | written as the exact `(u, v)` line image |
+//! | pcurves | ignored (only the loop geometry is mapped) | planes: the exact `(u, v)` line/arc image; curved faces: the exact closed form the kernel proves, else `solid.pcurve_not_exact` |
 //!
 //! So a body that carries a spline form on an analytic face round-trips as the
-//! analytic surface (same geometry, the form is re-derived by the kernel), while
-//! a body with embedded wire edges does not round-trip at all — it is refused on
-//! the way in.
+//! analytic surface (same geometry, the form is re-derived), while a body with
+//! embedded wire edges does not round-trip at all — it is refused on the way in.
+//! A record whose *label* is the spline reads into `BrepSurface::Nurbs` and is
+//! written back as that form; its boundary is the one thing that can still stop
+//! it, because a form surface's own parameters rarely have a line for a straight
+//! 3D boundary (that is a `solid.pcurve_not_exact`, not a missing writer).
 //!
 //! The multi-shell row is the one callers actually meet: a boolean over disjoint
 //! bodies **succeeds** (the `BrepData` holds both shells), and the refusal arrives
@@ -45,9 +55,13 @@
 //! round: it is refused **at the boolean itself**, because the kernel stores a
 //! cavity as a void region that this direction does not map.
 
+mod arc;
 mod curve;
+mod curved;
 mod from_record;
+mod loops;
 mod surface;
+mod surfaces;
 mod to_record;
 mod units;
 
@@ -64,6 +78,12 @@ use crate::error::LiftRefusal;
 /// The relative tolerance a baked placement must be a similarity within:
 /// columns equal in length to this ratio and perpendicular to this cosine.
 const PLACEMENT_EPSILON: f64 = 1e-9;
+
+/// The smallest weight a NURBS control point may carry — the record's own bound.
+///
+/// Baking a placement divides by the weight, so anything below it (or non-finite)
+/// is refused by name instead of producing a NaN coordinate.
+const NURBS_MIN_WEIGHT: f64 = 1e-12;
 
 /// Add two vectors.
 pub(crate) fn add(a: Point3, b: Point3) -> Point3 {
@@ -140,9 +160,9 @@ pub(crate) fn is_axis(v: Point3) -> bool {
 /// Similarity only: a placement whose scale is non-positive or non-finite, or
 /// whose frame mirrors (determinant < 0), is refused with
 /// [`PLACEMENT_NOT_SUPPORTED`](crate::PLACEMENT_NOT_SUPPORTED) instead of
-/// moving the geometry the wrong way round. Radii are scaled by the uniform
-/// scale; directions are renormalised; a cone's half angle is unchanged by a
-/// similarity.
+/// moving the geometry the wrong way round. Radii **and tolerances** (a length
+/// each) are scaled by the uniform scale; directions are renormalised; a cone's
+/// half angle is unchanged by a similarity.
 pub(crate) fn bake(brep: &BrepData, placement: BrepPlacement) -> Result<BrepData, LiftRefusal> {
     if placement.is_identity() {
         return Ok(brep.clone());
@@ -208,46 +228,58 @@ pub(crate) fn bake(brep: &BrepData, placement: BrepPlacement) -> Result<BrepData
     let point = |p: Point3| placement.apply(p);
     let direction = |d: Point3| placement.apply_direction(d);
 
-    let shells = brep
-        .shells
-        .iter()
-        .map(|shell| BrepShell {
+    let mut shells = Vec::with_capacity(brep.shells.len());
+    for shell in &brep.shells {
+        let mut faces = Vec::with_capacity(shell.faces.len());
+        for face in &shell.faces {
+            faces.push(BrepFace {
+                id: face.id,
+                surface: bake_surface(&face.surface, &point, &direction, scale)?,
+                reversed: face.reversed,
+                loops: face
+                    .loops
+                    .iter()
+                    .map(|loop_| BrepLoop {
+                        edges: loop_
+                            .edges
+                            .iter()
+                            .map(|curve| bake_curve(curve, &point, &direction, scale))
+                            .collect(),
+                    })
+                    .collect(),
+                // A face's `(u, v)` box is a parameter rectangle, not a length:
+                // moving the geometry does not change the parameters.
+                domain: face.domain,
+                // A tolerance is a length, so a similarity scales it by the
+                // one uniform factor. `None` stays unspecified.
+                tolerance: face.tolerance.map(|tolerance| tolerance * scale),
+            });
+        }
+        shells.push(BrepShell {
             id: shell.id,
-            faces: shell
-                .faces
-                .iter()
-                .map(|face| BrepFace {
-                    id: face.id,
-                    surface: bake_surface(&face.surface, &point, &direction, scale),
-                    reversed: face.reversed,
-                    loops: face
-                        .loops
-                        .iter()
-                        .map(|loop_| BrepLoop {
-                            edges: loop_
-                                .edges
-                                .iter()
-                                .map(|curve| bake_curve(curve, &point, &direction, scale))
-                                .collect(),
-                        })
-                        .collect(),
-                })
-                .collect(),
-        })
-        .collect();
+            faces,
+        });
+    }
     Ok(BrepData {
         shells,
         placement: None,
+        tolerance: brep.tolerance.map(|tolerance| tolerance * scale),
     })
 }
 
+/// Bake the placement into one surface.
+///
+/// A similarity maps a NURBS control **point**, so the net is dehomogenised,
+/// moved, and re-homogenised with its weight unchanged (`[x·w, y·w, z·w, w]` is
+/// invariant under `p → a·p + t` up to the same weights). Knots are parameters and
+/// are left exactly as they are.
 fn bake_surface(
     surface: &BrepSurface,
     point: &dyn Fn(Point3) -> Point3,
     direction: &dyn Fn(Point3) -> Point3,
     scale: f64,
-) -> BrepSurface {
-    match surface {
+) -> Result<BrepSurface, LiftRefusal> {
+    Ok(match surface {
         BrepSurface::Plane {
             origin,
             normal,
@@ -307,10 +339,46 @@ fn bake_surface(
             sin_half_angle: *sin_half_angle,
             cos_half_angle: *cos_half_angle,
         },
+        BrepSurface::Nurbs {
+            u_knots,
+            v_knots,
+            points,
+        } => {
+            // Dehomogenise, move, re-homogenise: a similarity acts on the control
+            // point, and the weight is a property of the point, not of its
+            // position in space.
+            let mut baked = Vec::with_capacity(points.len());
+            for (row_index, row) in points.iter().enumerate() {
+                let mut baked_row = Vec::with_capacity(row.len());
+                for (column_index, coefficient) in row.iter().enumerate() {
+                    let w = coefficient[3];
+                    if !w.is_finite() || w < NURBS_MIN_WEIGHT {
+                        return Err(LiftRefusal::unsupported(format!(
+                            "a NURBS control point at ({row_index}, {column_index}) has weight \
+                             {w}; baking a placement needs a finite positive weight (>= \
+                             {NURBS_MIN_WEIGHT}), so the coordinate is refused rather than \
+                             divided by it"
+                        )));
+                    }
+                    let control = point(Point3 {
+                        x: coefficient[0] / w,
+                        y: coefficient[1] / w,
+                        z: coefficient[2] / w,
+                    });
+                    baked_row.push([control.x * w, control.y * w, control.z * w, w]);
+                }
+                baked.push(baked_row);
+            }
+            BrepSurface::Nurbs {
+                u_knots: u_knots.clone(),
+                v_knots: v_knots.clone(),
+                points: baked,
+            }
+        }
         BrepSurface::Unsupported { type_key } => BrepSurface::Unsupported {
             type_key: type_key.clone(),
         },
-    }
+    })
 }
 
 fn bake_curve(
@@ -335,11 +403,37 @@ fn bake_curve(
             u_dir: direction(*u_dir),
             radius: radius * scale,
         },
+        BrepCurve::Arc {
+            center,
+            normal,
+            u_dir,
+            radius,
+            start,
+            end,
+        } => BrepCurve::Arc {
+            center: point(*center),
+            normal: direction(*normal),
+            u_dir: direction(*u_dir),
+            radius: radius * scale,
+            start: point(*start),
+            end: point(*end),
+        },
         BrepCurve::Unsupported { type_key } => BrepCurve::Unsupported {
             type_key: type_key.clone(),
         },
     }
 }
+
+#[cfg(test)]
+// P2.1b part 1: the NURBS form-surface read path, in its own file because the
+// conversion files are close to the 1000-line ceiling.
+mod nurbs_tests;
+
+#[cfg(test)]
+mod curved_tests;
+
+#[cfg(test)]
+mod to_record_tests;
 
 #[cfg(test)]
 mod tests {
@@ -432,6 +526,44 @@ mod tests {
             (min - 6.0).abs() < 1e-12 && (max - 10.0).abs() < 1e-12,
             "{min}..{max}"
         );
+    }
+
+    #[test]
+    fn baking_a_similarity_scales_body_and_face_tolerances_as_lengths() {
+        // Both are model-space lengths: baking a placement into the geometry
+        // scales them exactly like the coordinates it also scales. This is the
+        // **only** place they are scaled — a transform that merely composes a
+        // placement must leave them alone (see `cad-db`'s transform test), or a
+        // round trip would scale them twice.
+        let mut brep = unit_box();
+        brep.tolerance = Some(0.5);
+        for face in &mut brep.shells[0].faces {
+            face.tolerance = Some(0.25);
+        }
+        let baked = bake(
+            &brep,
+            placement([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], 2.0),
+        )
+        .expect("a uniform scale bakes");
+        assert_eq!(baked.tolerance, Some(1.0));
+        for face in &baked.shells[0].faces {
+            assert_eq!(face.tolerance, Some(0.5));
+        }
+        // `None` (unspecified) stays unspecified: baking never fills it in.
+        brep.tolerance = None;
+        for face in &mut brep.shells[0].faces {
+            face.tolerance = None;
+        }
+        let baked = bake(
+            &brep,
+            placement([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], 2.0),
+        )
+        .expect("a uniform scale bakes");
+        assert_eq!(baked.tolerance, None);
+        assert!(baked.shells[0]
+            .faces
+            .iter()
+            .all(|face| face.tolerance.is_none()));
     }
 
     #[test]

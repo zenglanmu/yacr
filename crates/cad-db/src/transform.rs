@@ -509,6 +509,12 @@ fn transform_mesh(mesh: &Mesh, transform: &Transform3) -> Mesh {
 /// `s' = s·σ`, `B' = R·B`, `t' = L·t + u`, i.e. `M' = M·Rᵀ` and the shell data
 /// stays untouched. The caller has already established that the transform is a
 /// similarity.
+///
+/// Tolerances are **model-space** lengths and the model coordinates are not
+/// touched here (only the placement that maps them to world), so they stay put:
+/// scaling them here as well would scale them twice, because baking the composed
+/// placement into a record scales geometry *and* tolerance by `s'`. Only
+/// [`cad_kernel_solidcore`'s `bake`] scales them.
 fn transform_brep(brep: &BrepData, transform: &Transform3) -> BrepData {
     let placement = brep.placement.unwrap_or_else(BrepPlacement::identity);
     BrepData {
@@ -516,6 +522,7 @@ fn transform_brep(brep: &BrepData, transform: &Transform3) -> BrepData {
         // Composition lives in `cad-domain` so the geometry engine and the
         // database path cannot drift.
         placement: Some(placement.composed_with(transform)),
+        tolerance: brep.tolerance,
     }
 }
 

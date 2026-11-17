@@ -86,6 +86,10 @@ impl SolidTessellator for BrepTessellator {
                 "REGION".into(),
                 "SURFACE".into(),
             ],
+            // Deliberately no `nurbs-*` entry: a NURBS face is carried by the
+            // neutral model (P2.1b part 1) but this tessellator has no mesh for
+            // one (`solidcore-tess`, phase P2.1c), so nothing here may claim it.
+            // This list is what is supported, not what may arrive.
             capabilities: vec![
                 "planar-faces".into(),
                 "planar-faces-with-holes".into(),

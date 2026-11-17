@@ -167,7 +167,7 @@ test('JOIN sits at the end of the shipped Modify run and is a router command', a
       ids.slice(joinIndex + 2),
       ['REVERSE', 'PEDIT', 'OOPS', 'OVERKILL', 'BREAKATPOINT', 'HATCHTOBACK', 'TEXTTOFRONT',
         'SSX', 'SELECTCOUNT', 'HIDEOBJECTS', 'ISOLATEOBJECTS', 'UNISOLATEOBJECTS',
-        'TREX', 'EXTRIM', 'MPEDIT', 'DRAWORDER'],
+        'TREX', 'EXTRIM', 'MPEDIT', 'DRAWORDER', 'CHAMFEREDGE'],
       `${tabId}: only the documented 2026-11-07 additions follow SELECTSIMILAR`,
     );
     const join = modify.items[joinIndex];

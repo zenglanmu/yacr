@@ -646,6 +646,35 @@ fn gripstretch_is_admitted_but_its_bare_form_is_refused_without_a_fabricated_dra
 }
 
 #[test]
+fn chamfer_edge_routes_to_its_one_pick_tool_and_the_host_refuses_without_a_modeler() {
+    // ADR-0036 P2.0: CHAMFEREDGE is a real one-pick tool now, routed through
+    // `BeginDraw(ChamferEdge)`. This synthetic session has no solid modeler, so
+    // the host's tool-start gate answers the stable capability refusal **before**
+    // any capture is armed — the proof that the route reached the host instead of
+    // the old named-refusal arm.
+    assert_eq!(
+        normalize_command("CHAMFEREDGE"),
+        Some(CommandId::Extended(ExtendedCommandId::ChamferEdge))
+    );
+    assert!(admissible_names().contains(&"CHAMFEREDGE"));
+    assert!(CommandId::Extended(ExtendedCommandId::ChamferEdge).requires_work_mode());
+
+    let session = session(Rc::new(FakeFiles {
+        events: RefCell::new(Vec::new()),
+    }));
+    let error = session.command("CHAMFEREDGE").unwrap_err();
+    assert!(
+        error.contains("unsupported-runtime: solid-modeler"),
+        "the router started the tool, whose start gate refused by name: {error}"
+    );
+    assert_eq!(
+        session.snapshot(None, None, 0).tool,
+        None,
+        "a refused start arms no capture"
+    );
+}
+
+#[test]
 fn the_layer_table_selectors_and_the_newlayer_synonym_are_admitted() {
     // The three structural layer commands are canonical selectors with a real
     // `CommandId`, and all three are Work-only like every other database write.

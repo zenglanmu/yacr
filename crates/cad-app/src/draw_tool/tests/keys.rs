@@ -22,4 +22,15 @@ fn keys_indices_and_labels_round_trip_and_reject_unknowns() {
         None
     );
     assert_eq!(DrawToolKind::from_label("半径"), None);
+    // The catalogue length is mirrored by the UI selector, so a new kind must be
+    // appended (never inserted) and the count updated deliberately.
+    assert_eq!(DrawToolKind::ALL.len(), 59);
+    assert_eq!(
+        DrawToolKind::from_index(DrawToolKind::ALL.len() as i32 - 1),
+        Some(DrawToolKind::ChamferEdge)
+    );
+    assert_eq!(
+        DrawToolKind::ChamferEdge.index(),
+        DrawToolKind::ALL.len() - 1
+    );
 }

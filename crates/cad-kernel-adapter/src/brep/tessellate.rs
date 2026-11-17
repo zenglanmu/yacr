@@ -171,6 +171,13 @@ pub(crate) fn tessellate_face(
             linear_deflection,
             angular_deflection,
         ),
+        // A NURBS face is a form the neutral model now carries, but this build has
+        // no mesher for it: `solidcore-tess` (phase P2.1c) is the missing piece.
+        // Reported as an unsupported **surface** so the body marks this face
+        // missing — never a fabricated mesh, never a silent skip.
+        BrepSurface::Nurbs { .. } => Err(FaceFailure::UnsupportedSurface(
+            "nurbs-face: no NURBS mesher in this build (solidcore-tess, phase P2.1c)".into(),
+        )),
         BrepSurface::Unsupported { type_key } => {
             Err(FaceFailure::UnsupportedSurface(type_key.clone()))
         }
@@ -222,6 +229,39 @@ pub(super) fn sample_loop(
                     ));
                 }
             }
+            BrepCurve::Arc {
+                center,
+                normal,
+                u_dir,
+                radius,
+                start,
+                end,
+            } => {
+                if !radius.is_finite() || *radius <= 0.0 {
+                    return Err(FaceFailure::Degenerate("arc has no radius".into()));
+                }
+                let Some((u, v, _)) = frame_from(*normal, *u_dir) else {
+                    return Err(FaceFailure::Degenerate("arc frame is degenerate".into()));
+                };
+                let Some(sweep) = arc_sweep(*center, u, v, *start, *end) else {
+                    return Err(FaceFailure::Degenerate(
+                        "arc does not sweep a proper part of one turn about its normal".into(),
+                    ));
+                };
+                let from = dot(sub(*start, *center), v).atan2(dot(sub(*start, *center), u));
+                let n = arc_segments(*radius, sweep, linear_deflection, angular_deflection);
+                // The arc contributes its own start point exactly (loops chain by
+                // the shared point, not by a re-evaluated one) and stops before its
+                // end, which the next curve contributes as its start.
+                pts.push(*start);
+                for i in 1..n {
+                    let t = from + sweep * (i as f64) / (n as f64);
+                    pts.push(add(
+                        *center,
+                        add(mul(u, *radius * t.cos()), mul(v, *radius * t.sin())),
+                    ));
+                }
+            }
             BrepCurve::Unsupported { type_key } => {
                 return Err(FaceFailure::UnsupportedCurve(type_key.clone()))
             }
@@ -229,6 +269,54 @@ pub(super) fn sample_loop(
     }
     dedupe_ring(&mut pts);
     Ok(pts)
+}
+
+/// The counter-clockwise sweep in `(0, 2π)` from `arc`'s `start` to its `end`
+/// about its normal, in the `(u, v)` frame `frame_from` built for that normal.
+///
+/// `start` fixes the parameter's origin (an arc's `u_dir` is the frame's axis,
+/// not the start angle), so both endpoints' angles are read and the sweep is the
+/// positive turn from one to the other.
+///
+/// `None` when the two endpoints describe no proper sub-span (coincident ends, a
+/// full turn, or a non-finite angle) — the caller reports that as degenerate
+/// rather than guessing a direction.
+pub(super) fn arc_sweep(
+    center: Point3,
+    u: Point3,
+    v: Point3,
+    start: Point3,
+    end: Point3,
+) -> Option<f64> {
+    let angle = |p: Point3| {
+        let d = sub(p, center);
+        dot(d, v).atan2(dot(d, u))
+    };
+    let from = angle(start);
+    let to = angle(end);
+    if !from.is_finite() || !to.is_finite() {
+        return None;
+    }
+    let delta = to - from;
+    let sweep = if delta > 0.0 {
+        delta
+    } else {
+        delta + std::f64::consts::TAU
+    };
+    (sweep > 0.0 && sweep < std::f64::consts::TAU).then_some(sweep)
+}
+
+/// The chordal sagitta bound of an arc sampled at `arc_segments` of `sweep`.
+pub(super) fn arc_error_bound(
+    radius: f64,
+    sweep: f64,
+    linear_deflection: f64,
+    angular_deflection: f64,
+) -> f64 {
+    let n = arc_segments(radius, sweep, linear_deflection, angular_deflection).max(3);
+    // Half the angle each chord spans: `sweep / n`, halved. A full turn reduces to
+    // the familiar `r(1 - cos(π/n))`.
+    radius * (1.0 - (0.5 * sweep / n as f64).cos())
 }
 
 /// Drop consecutive (and wrap-around) duplicate points from a ring.

@@ -314,7 +314,10 @@ fn opaque_payload_retains_the_raw_acis_bytes() {
 
 // ---- Import-time tessellation of the four ACIS entity types ----
 
-fn builder<'a>(req: &'a ImportRequest, acad: &'a acadrust::CadDocument) -> ImporterBuilder<'a> {
+pub(super) fn builder<'a>(
+    req: &'a ImportRequest,
+    acad: &'a acadrust::CadDocument,
+) -> ImporterBuilder<'a> {
     ImporterBuilder::new(req, acad, ReadStats::default(), compute_identity(&[]))
 }
 

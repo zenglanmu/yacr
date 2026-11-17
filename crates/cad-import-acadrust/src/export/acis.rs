@@ -1,6 +1,6 @@
-//! Exact ACIS SAT text writer for the planar subset of a neutral B-rep.
+//! Exact ACIS writer for the planar subset of a neutral B-rep.
 //!
-//! This is the **only** place the DXF exporter builds an ACIS payload. It is
+//! This is the **only** place the exporter builds an ACIS document. It is
 //! deliberately narrow and refuses everything it cannot represent exactly:
 //!
 //! * exactly **one** shell of faces (a void would be a second shell);
@@ -39,18 +39,25 @@
 //! wound the wrong way — is refused here instead of being written as an
 //! inside-out shell.
 //!
-//! **Evidence boundary**: the payload is read back by this crate's own SAT
+//! **Evidence boundary**: the payload is read back by this crate's own SAT/SAB
 //! reader only. No third-party CAD application was used to verify it.
+//!
+//! The result is a [`SatDocument`]. The DXF export serialises it as SAT text and
+//! carries it inline; the DWG export serialises the *same* document with
+//! `SabWriter` and attaches it as a binary SAB blob. Both encodings come from
+//! this one document, so the reachable subset is identical for the two formats.
 
 use std::collections::HashMap;
 
 use acadrust::entities::acis::{SatDocument, SatPointer, Sense, Sidedness};
 use cad_domain::{BrepCurve, BrepData, BrepFace, BrepPlacement, BrepSurface, Point3};
 
-/// Why a B-rep is not written as ACIS SAT text.
+/// Why a B-rep is not written as ACIS.
 ///
 /// Each variant maps to one stable [`AcisWriteRefusal::code`], which the export
 /// report records verbatim; the message names the geometry that caused it.
+/// These refusals are format-independent: the same B-rep is refused, with the
+/// same code, in a DXF and in a DWG export.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum AcisWriteRefusal {
     /// A face is supported by something other than a plane.
@@ -86,12 +93,12 @@ impl AcisWriteRefusal {
     pub(super) fn message(&self) -> String {
         match self {
             AcisWriteRefusal::CurvedFace { face_id } => format!(
-                "face {face_id} is not supported by a plane; this writer emits ACIS SAT text for \
+                "face {face_id} is not supported by a plane; this writer emits ACIS for \
                  planar-faced solids only (acis.planar_only)"
             ),
             AcisWriteRefusal::NonLineCurve { face_id } => format!(
                 "face {face_id} has a boundary loop segment that is not a straight line; this \
-                 writer emits ACIS SAT text for line-bounded planar faces only (acis.planar_only)"
+                 writer emits ACIS for line-bounded planar faces only (acis.planar_only)"
             ),
             AcisWriteRefusal::NoShell => {
                 "the body has no shell of faces to write as a solid".to_string()

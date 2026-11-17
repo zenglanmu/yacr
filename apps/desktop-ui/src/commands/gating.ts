@@ -349,7 +349,6 @@ export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze([
   'PRESSPULL',
   'IMPRINT',
   'OFFSETEDGE',
-  'CHAMFEREDGE',
   'FILLETEDGE',
   'EDGE',
   'MIRROR3D',
@@ -766,6 +765,13 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
   UNION: Object.freeze({ count: 2, reasonKey: 'draw.kind.union.hint' }),
   SUBTRACT: Object.freeze({ count: 2, reasonKey: 'draw.kind.subtract.hint' }),
   INTERSECT: Object.freeze({ count: 2, reasonKey: 'draw.kind.intersect.hint' }),
+  // CHAMFEREDGE (ADR-0036 P2.0) cuts one edge of the **one** selected exact
+  // solid body, so a selection is the real minimum. The table states one; the
+  // host refuses an empty/multi-body selection, a non-body, a non-exact body, a
+  // paper-space body and an instance path by name (`chamferedge.*`), and the
+  // sentence is the command's own hint so the disabled row and the refusal word
+  // the rule once.
+  CHAMFEREDGE: Object.freeze({ count: 1, reasonKey: 'draw.kind.chamferedge.hint' }),
   // MEASUREGEOM itself takes no selection up front: its tool options capture
   // their own points and only RADIUS reads the selection, so pre-gating the
   // command would disable the tool entries with an unrelated sentence. The host

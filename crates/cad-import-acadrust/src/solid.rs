@@ -27,6 +27,16 @@ use cad_kernel_adapter::{
 /// Faces are grouped by their owning shell pointer so a shell that produced no
 /// facets can be reported as dropped. Surfaces and curves outside the
 /// documented subset are marked unsupported rather than approximated.
+///
+/// # Tolerances
+///
+/// The SAT **record set** this reader walks (`body`/`lump`/`shell`/`face`/`loop`/
+/// `coedge`/`edge`/`vertex`/`curve`) carries no per-body, per-face, per-edge or
+/// per-vertex geometry tolerance, so every one of them stays `None` —
+/// "unspecified", never a fabricated number. The three numbers in the SAT header
+/// are document-level modeler settings, not this body's tolerance (acadrust's own
+/// writer emits a spatial resolution of `10`, which as a 10 mm intersection
+/// tolerance would loosen every later kernel call), so they are not used either.
 pub fn sat_to_brep(document: &SatDocument) -> BrepData {
     let mut shells: Vec<BrepShell> = Vec::new();
     let mut order: Vec<i32> = Vec::new();
@@ -46,6 +56,9 @@ pub fn sat_to_brep(document: &SatDocument) -> BrepData {
             surface,
             reversed,
             loops,
+            // No per-face tolerance in the SAT record set: unspecified.
+            tolerance: None,
+            domain: None,
         };
         if let Some(pos) = order.iter().position(|&p| p == shell_ptr) {
             shells[pos].faces.push(brep_face);
@@ -82,7 +95,12 @@ pub fn sat_to_brep(document: &SatDocument) -> BrepData {
         None
     };
 
-    BrepData { shells, placement }
+    BrepData {
+        shells,
+        placement,
+        // See the function docs: the record set states no body tolerance.
+        tolerance: None,
+    }
 }
 
 /// Build the kernel-facing exchange for a solid/surface entity.
@@ -297,16 +315,11 @@ fn coedge_curve(document: &SatDocument, coedge: &SatCoedge<'_>) -> BrepCurve {
                     type_key: "ellipse-curve".into(),
                 };
             };
+            // Only a circle is mapped: a non-unit ratio is a genuine ellipse, a
+            // curve this build cannot evaluate.
             if (ellipse.ratio() - 1.0).abs() > 1e-9 {
                 return BrepCurve::Unsupported {
                     type_key: "ellipse-arc".into(),
-                };
-            }
-            // A full circle is an edge whose start and end vertex coincide.
-            let closed = !edge.start_vertex().is_null() && edge.start_vertex() == edge.end_vertex();
-            if !closed {
-                return BrepCurve::Unsupported {
-                    type_key: "partial-circle".into(),
                 };
             }
             let major = tuple(ellipse.major_axis());
@@ -316,16 +329,147 @@ fn coedge_curve(document: &SatDocument, coedge: &SatCoedge<'_>) -> BrepCurve {
                     type_key: "zero-radius-circle".into(),
                 };
             }
-            BrepCurve::Circle {
-                center: tuple(ellipse.center()),
-                normal: tuple(ellipse.normal()),
-                u_dir: normalize(major),
-                radius,
+            let center = tuple(ellipse.center());
+            let normal = tuple(ellipse.normal());
+            let u_dir = normalize(major);
+            // A full circle is an edge whose start and end vertex coincide.
+            let closed = !edge.start_vertex().is_null() && edge.start_vertex() == edge.end_vertex();
+            if closed {
+                return BrepCurve::Circle {
+                    center,
+                    normal,
+                    u_dir,
+                    radius,
+                };
             }
+            arc_curve(&edge, center, normal, u_dir, radius, start, end)
         }
         other => BrepCurve::Unsupported {
             type_key: other.to_string(),
         },
+    }
+}
+
+/// The neutral arc an **open** `ellipse-curve` edge describes, when it is one.
+///
+/// The edge's vertices (already in loop order at the call site) must lie on the
+/// circle — in radius **and** in plane — or the record is not a circular arc and
+/// stays [`BrepCurve::Unsupported`] (`partial-circle`) rather than being
+/// re-projected.
+///
+/// # Orientation
+///
+/// The neutral arc's traversal is counter-clockwise about `normal`, and the two
+/// ways round a chord are different arcs, so the direction is read from the
+/// record rather than guessed:
+///
+/// * ACIS parameterises the ellipse counter-clockwise about its own normal, from
+///   the major axis, and an edge records both ends' parameters
+///   (`start_param`/`end_param`);
+/// * its span is therefore `(end_param - start_param) mod 2π` — a **remainder**,
+///   not `|end - start|`, because ACIS parameters may wrap past a full turn
+///   (`5.5 → 0.5` is `1.28` rad, not `5.0`);
+/// * of the two candidate sweeps from the loop-oriented `start` to its `end`
+///   (about `normal` and about `-normal`), the one whose sweep matches that span
+///   is the arc.
+///
+/// A **half arc** sweeps `π` either way, so the span cannot decide it: there the
+/// ACIS counter-clockwise convention does, which is the `about_normal` branch —
+/// i.e. a 180° arc is taken to run counter-clockwise about the ellipse normal
+/// unless the recorded span says otherwise. An arc whose span matches *neither*
+/// candidate is an inconsistent record and stays unsupported.
+///
+/// # No span
+///
+/// acadrust's v400 up-converter inserts `Float(0.0)` placeholders for edge
+/// parameters, so every **v400** arc arrives with a zero span. It is reported as
+/// `arc-without-span` (not as a mysterious "partial circle"), and v400 SAT arcs
+/// are not importable through this path.
+fn arc_curve(
+    edge: &SatEdge<'_>,
+    center: Point3,
+    normal: Point3,
+    u_dir: Point3,
+    radius: f64,
+    start: Option<Point3>,
+    end: Option<Point3>,
+) -> BrepCurve {
+    let unsupported = || BrepCurve::Unsupported {
+        type_key: "partial-circle".into(),
+    };
+    let (Some(start), Some(end)) = (start, end) else {
+        return unsupported();
+    };
+    let n = normalize(normal);
+    let u = normalize(u_dir);
+    let v = normalize(cross(n, u));
+    if !(is_axis(n) && is_axis(u) && is_axis(v)) || dot(n, u).abs() > 1e-6 {
+        return unsupported();
+    }
+    let allowed = 1e-9 * radius.max(1.0);
+    for p in [start, end] {
+        let d = sub(p, center);
+        if (length(d) - radius).abs() > allowed || dot(d, n).abs() > allowed {
+            return unsupported();
+        }
+    }
+    let angle = |p: Point3| {
+        let d = sub(p, center);
+        dot(d, v).atan2(dot(d, u))
+    };
+    let (from, to) = (angle(start), angle(end));
+    if !from.is_finite() || !to.is_finite() {
+        return unsupported();
+    }
+    let delta = to - from;
+    let about_normal = if delta > 0.0 {
+        delta
+    } else {
+        delta + std::f64::consts::TAU
+    };
+    let about_reversed = std::f64::consts::TAU - about_normal;
+    let delta_param = edge.end_param() - edge.start_param();
+    if !delta_param.is_finite() {
+        return BrepCurve::Unsupported {
+            type_key: "arc-without-span".into(),
+        };
+    }
+    // A remainder, not an absolute difference: ACIS edge parameters may wrap past
+    // a full turn.
+    let span = delta_param.rem_euclid(std::f64::consts::TAU);
+    if span <= 1e-9 {
+        // Zero span: the record states no span at all (every v400 arc, whose edge
+        // parameters the up-converter pads with `0.0`). Named, because calling it
+        // a "partial circle" points at the wrong thing.
+        return BrepCurve::Unsupported {
+            type_key: "arc-without-span".into(),
+        };
+    }
+    let slack = 1e-6 * (1.0 + span);
+    if (about_normal - span).abs() <= slack {
+        BrepCurve::Arc {
+            center,
+            normal: n,
+            u_dir: u,
+            radius,
+            start,
+            end,
+        }
+    } else if (about_reversed - span).abs() <= slack {
+        BrepCurve::Arc {
+            center,
+            normal: Point3 {
+                x: -n.x,
+                y: -n.y,
+                z: -n.z,
+            },
+            u_dir: u,
+            radius,
+            start,
+            end,
+        }
+    } else {
+        unsupported()
     }
 }
 
@@ -347,6 +491,35 @@ fn tuple(value: (f64, f64, f64)) -> Point3 {
         y: value.1,
         z: value.2,
     }
+}
+
+fn sub(a: Point3, b: Point3) -> Point3 {
+    Point3 {
+        x: a.x - b.x,
+        y: a.y - b.y,
+        z: a.z - b.z,
+    }
+}
+
+fn dot(a: Point3, b: Point3) -> f64 {
+    a.x * b.x + a.y * b.y + a.z * b.z
+}
+
+fn cross(a: Point3, b: Point3) -> Point3 {
+    Point3 {
+        x: a.y * b.z - a.z * b.y,
+        y: a.z * b.x - a.x * b.z,
+        z: a.x * b.y - a.y * b.x,
+    }
+}
+
+fn length(a: Point3) -> f64 {
+    dot(a, a).sqrt()
+}
+
+/// Whether a normalised direction is usable as a frame axis.
+fn is_axis(v: Point3) -> bool {
+    length(v) > 0.5
 }
 
 fn normalize(v: Point3) -> Point3 {

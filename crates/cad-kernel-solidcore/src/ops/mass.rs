@@ -1,8 +1,8 @@
 //! Mass properties: volume, boundary area, centroid and the inertia tensor.
 //!
-//! The body is lifted exactly like a boolean operand (so the same planar-only
-//! refusal applies), rebuilt as a kernel body and integrated by
-//! `Body::mass_properties(relative_accuracy)`.
+//! The body is lifted exactly like a boolean operand (so the same boundary-family
+//! refusals apply; a curved face is written with its exact form), rebuilt as a
+//! kernel body and integrated by `Body::mass_properties(relative_accuracy)`.
 //!
 //! **The accuracy is requested, not proved.** The upstream integrator holds its
 //! own error *estimate* under the requested relative accuracy; that is not a

@@ -594,6 +594,7 @@ fn an_empty_exact_brep_refuses_by_name() {
         BodyExact::Exact(Box::new(BrepData {
             shells: Vec::new(),
             placement: None,
+            tolerance: None,
         })),
     )]);
     with_modeler(&mut app, Answer::Mass);

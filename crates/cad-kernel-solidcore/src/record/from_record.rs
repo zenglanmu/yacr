@@ -11,11 +11,30 @@
 //! - a cylindrical/cone lateral face is stored with its seam edges as ordinary
 //!   loop uses, while [`cad_domain::BrepSurface::Cylinder`] is bounded by one
 //!   full circle per loop, so the seam lines are verified (they must lie on the
-//!   surface) and dropped, and the circles become one loop each;
+//!   surface) and dropped, and the circles become one loop each. That shape is
+//!   what the display tessellator draws a strip from, so it is preserved — but a
+//!   **trimmed** side face (bounded by arcs) is not that shape and is mapped
+//!   **literally** instead of refused, which lifts and measures it while leaving
+//!   its display partial;
 //! - a sphere or a torus is stored as one face with seam-only boundary, while
 //!   the neutral model expects a **loop-less** face covering the whole surface,
 //!   so the boundary is verified to be seam-only (a trimmed face is refused, not
 //!   drawn as a full primitive) and dropped.
+//!
+//! A planar face maps literally, one curve per oriented edge; an **open** circle
+//! edge (whose two vertices differ) becomes a [`cad_domain::BrepCurve::Arc`] when
+//! both vertices lie on the circle, oriented so its sweep runs counter-clockwise
+//! about its own normal. The body's tolerance is the record's (`Some` only when
+//! the record states a positive finite one); the record has no per-face
+//! tolerance, so faces stay `None`.
+//!
+//! A **form** surface (the record's `Spline`/`RationalSpline` label) maps to
+//! [`cad_domain::BrepSurface::Nurbs`], copied bit-for-bit, and its loops map
+//! literally like a plane's — but the curves still have to be ones this build
+//! carries, so a spline/ellipse boundary is refused at the **curve**, with the
+//! existing named code, not given a new curve variant. The face's `(u, v)` box
+//! comes from `Face.domain` alone; it is the only source of it, and every mapped
+//! face carries it.
 //!
 //! Everything not mapped is a typed refusal with
 //! [`LIFT_UNSUPPORTED`](crate::LIFT_UNSUPPORTED) — never a guessed surface.
@@ -124,6 +143,18 @@ pub(crate) fn from_record(record: &Record) -> Result<BrepData, LiftRefusal> {
     Ok(BrepData {
         shells,
         placement: None,
+        // The record does state one body tolerance (a length); a zero or
+        // non-finite one is not a stated length, so it stays unspecified rather
+        // than becoming `Some(0.0)`.
+        //
+        // Read `Some(1e-7)` here as "this record's tolerance", not as a number the
+        // *producer* stated: `1e-7` is this crate's own
+        // [`DEFAULT_TOLERANCE`](super::DEFAULT_TOLERANCE), which `lift` uses when
+        // a neutral body states none, so a body that never had a tolerance comes
+        // back with our default. The value is honest (it is the tolerance the
+        // record really carries); its authorship is not.
+        tolerance: Some(record.tolerance)
+            .filter(|tolerance| tolerance.is_finite() && *tolerance > 0.0),
     })
 }
 
@@ -142,13 +173,22 @@ fn face_of(record: &Record, use_: &OrientedFace) -> Result<BrepFace, LiftRefusal
     })?;
     let surface = surface::to_brep(&face.surface)?;
     let loops = match &surface {
-        BrepSurface::Plane { .. } => plane_loops(record, face)?,
+        BrepSurface::Plane { .. } => literal_loops(record, face)?,
+        // A form surface has no parametrisation this build knows, so its loops
+        // are mapped literally: one curve per oriented edge, exactly as a plane's.
+        BrepSurface::Nurbs { .. } => literal_loops(record, face)?,
         BrepSurface::Cylinder {
             origin,
             axis,
             radius,
             ..
-        } => cylinder_loops(record, face, *origin, *axis, *radius)?,
+        } => match cylinder_loops(record, face, *origin, *axis, *radius)? {
+            Some(loops) => loops,
+            // Not the two-full-circle band the display tessellator needs (a
+            // trimmed side face): its loops are real boundary curves, so they map
+            // literally. That face lifts; only its *display* is partial.
+            None => literal_loops(record, face)?,
+        },
         BrepSurface::Cone {
             origin,
             axis,
@@ -156,7 +196,7 @@ fn face_of(record: &Record, use_: &OrientedFace) -> Result<BrepFace, LiftRefusal
             sin_half_angle,
             cos_half_angle,
             ..
-        } => cone_loops(
+        } => match cone_loops(
             record,
             face,
             *origin,
@@ -164,7 +204,10 @@ fn face_of(record: &Record, use_: &OrientedFace) -> Result<BrepFace, LiftRefusal
             *radius,
             *sin_half_angle,
             *cos_half_angle,
-        )?,
+        )? {
+            Some(loops) => loops,
+            None => literal_loops(record, face)?,
+        },
         BrepSurface::Sphere {
             center,
             radius,
@@ -187,20 +230,34 @@ fn face_of(record: &Record, use_: &OrientedFace) -> Result<BrepFace, LiftRefusal
         surface,
         reversed: !use_.forward,
         loops,
+        // The record's `(u, v)` box, verbatim: this is the only source of it, and
+        // the neutral model never reparameterises a face, so there is nothing to
+        // derive it from when a writer later needs it.
+        domain: Some(face.domain),
+        // The pinned record has no per-face tolerance (one per body, edge and
+        // vertex), so a face's value is unspecified rather than copied from the
+        // body's.
+        tolerance: None,
     })
 }
 
-/// A planar face: every loop maps literally, one curve per oriented edge.
-fn plane_loops(record: &Record, face: &Face) -> Result<Vec<BrepLoop>, LiftRefusal> {
+/// A face whose loops map literally: every loop becomes one curve per oriented
+/// edge, in loop order.
+///
+/// Used for a plane (whose `(u, v)` is affine, so the loop *is* its boundary) and
+/// for a form surface (which has no parametrisation this build evaluates, so a
+/// literal loop is all it can carry). A vertex loop is refused: the neutral model
+/// has no point-curve, and only a full cone's degenerate apex is given one.
+fn literal_loops(record: &Record, face: &Face) -> Result<Vec<BrepLoop>, LiftRefusal> {
     let mut loops = Vec::with_capacity(face.loops.len());
     for loop_ in &face.loops {
         let Loop::Edges { edges } = loop_ else {
             return Err(LiftRefusal::unsupported(
-                "a vertex loop on a planar face is not mapped in P1",
+                "a vertex loop on a face with literal loops is not mapped in P1",
             ));
         };
         if edges.is_empty() {
-            return Err(LiftRefusal::unsupported("an empty planar loop"));
+            return Err(LiftRefusal::unsupported("an empty face loop"));
         }
         let mut curves = Vec::with_capacity(edges.len());
         for use_ in edges {
@@ -213,35 +270,37 @@ fn plane_loops(record: &Record, face: &Face) -> Result<Vec<BrepLoop>, LiftRefusa
     }
     if loops.is_empty() {
         return Err(LiftRefusal::unsupported(
-            "a planar face without a boundary loop",
+            "a face without a boundary loop cannot be mapped",
         ));
     }
     Ok(loops)
 }
 
-/// A cylindrical lateral face: two full circles, the seam lines verified on the
-/// surface and dropped.
+/// A cylindrical lateral face in its **normalised** two-full-circle form, or
+/// `None` when it is not that shape.
+///
+/// The display tessellator draws a cylinder strip from exactly two full-circle
+/// loops, so a band is normalised to that here (the seam lines are verified on
+/// the surface and dropped). Anything else — a trimmed side face bounded by arcs
+/// — is not normalised: the caller maps its loops literally, which lifts but
+/// displays as a partial body naming that face.
 fn cylinder_loops(
     record: &Record,
     face: &Face,
     origin: Point3,
     axis: Point3,
     radius: f64,
-) -> Result<Vec<BrepLoop>, LiftRefusal> {
+) -> Result<Option<Vec<BrepLoop>>, LiftRefusal> {
     let uses = EdgeUses::of(record, face)?;
     if uses.vertex_loop {
-        return Err(LiftRefusal::unsupported(
-            "a cylindrical face with a vertex loop is not mapped in P1",
-        ));
+        return Ok(None);
     }
     let mut circles: Vec<BrepCurve> = Vec::new();
     let mut seen = BTreeSet::new();
     for (edge_index, edge, _forward) in &uses.edges {
         if let Some((center, normal, u_dir, circle_radius)) = curve::circle(&edge.curve) {
             if !curve::closed(edge) {
-                return Err(LiftRefusal::unsupported(
-                    "a cylindrical face bounded by a circular arc is not mapped in P1",
-                ));
+                return Ok(None);
             }
             if seen.insert(*edge_index) {
                 circles.push(BrepCurve::Circle {
@@ -271,21 +330,21 @@ fn cylinder_loops(
         }
     }
     if circles.len() != 2 {
-        return Err(LiftRefusal::unsupported(format!(
-            "a cylindrical face is bounded by {} full circle(s); the neutral model needs two",
-            circles.len()
-        )));
+        return Ok(None);
     }
-    Ok(circles
-        .into_iter()
-        .map(|circle| BrepLoop {
-            edges: vec![circle],
-        })
-        .collect())
+    Ok(Some(
+        circles
+            .into_iter()
+            .map(|circle| BrepLoop {
+                edges: vec![circle],
+            })
+            .collect(),
+    ))
 }
 
-/// A cone lateral face: one or two full circles plus, for a full cone, the
-/// degenerate apex loop the neutral tessellator recognises.
+/// A cone lateral face in its **normalised** form: one or two full circles plus,
+/// for a full cone, the degenerate apex loop the neutral tessellator recognises.
+/// `None` when the face is not that shape (the caller maps its loops literally).
 fn cone_loops(
     record: &Record,
     face: &Face,
@@ -294,7 +353,7 @@ fn cone_loops(
     radius: f64,
     sin_half_angle: f64,
     cos_half_angle: f64,
-) -> Result<Vec<BrepLoop>, LiftRefusal> {
+) -> Result<Option<Vec<BrepLoop>>, LiftRefusal> {
     if !cos_half_angle.is_finite() || cos_half_angle.abs() < 1e-9 {
         return Err(LiftRefusal::unsupported(
             "a cone with a zero cosine half angle is a disc, not a lateral face",
@@ -315,9 +374,7 @@ fn cone_loops(
     for (edge_index, edge, _forward) in &uses.edges {
         if let Some((center, normal, u_dir, circle_radius)) = curve::circle(&edge.curve) {
             if !curve::closed(edge) {
-                return Err(LiftRefusal::unsupported(
-                    "a cone face bounded by a circular arc is not mapped in P1",
-                ));
+                return Ok(None);
             }
             let level = dot(sub(center, origin), axis);
             let expected = radius + slope * level;
@@ -352,10 +409,7 @@ fn cone_loops(
         }
     }
     if circles.is_empty() || circles.len() > 2 {
-        return Err(LiftRefusal::unsupported(format!(
-            "a cone face is bounded by {} full circle(s); one or two are mapped",
-            circles.len()
-        )));
+        return Ok(None);
     }
     if circles.len() == 2 && has_apex {
         return Err(LiftRefusal::unsupported(
@@ -376,11 +430,11 @@ fn cone_loops(
     if has_apex {
         loops.push(BrepLoop {
             edges: vec![BrepCurve::Unsupported {
-                type_key: "edge-without-curve".into(),
+                type_key: super::loops::APEX_WITHOUT_CURVE.into(),
             }],
         });
     }
-    Ok(loops)
+    Ok(Some(loops))
 }
 
 /// A spherical face: only a full sphere is mapped, as a loop-less face.
@@ -462,6 +516,92 @@ mod tests {
     use crate::error::LIFT_UNSUPPORTED;
     use crate::polyhedra;
     use crate::record::{to_record, DEFAULT_TOLERANCE};
+
+    /// A disc of zero thickness: two coplanar faces sharing two half-arc edges,
+    /// wound oppositely. See `to_record`'s `flat_disc`: an arc lies in one plane,
+    /// so a *solid* with arc edges always has a curved neighbour (P2.1b).
+    fn disc_brep() -> BrepData {
+        let half = |start: Point3, end: Point3| BrepCurve::Arc {
+            center: Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            normal: Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+            },
+            u_dir: Point3 {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            radius: 1.0,
+            start,
+            end,
+        };
+        let loops = vec![BrepLoop {
+            edges: vec![
+                half(
+                    Point3 {
+                        x: 1.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                    Point3 {
+                        x: -1.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                ),
+                half(
+                    Point3 {
+                        x: -1.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                    Point3 {
+                        x: 1.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                ),
+            ],
+        }];
+        let face = |id: u32, reversed: bool| BrepFace {
+            id,
+            surface: BrepSurface::Plane {
+                origin: Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                normal: Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 1.0,
+                },
+                u_dir: Point3 {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            },
+            reversed,
+            loops: loops.clone(),
+            domain: None,
+            tolerance: None,
+        };
+        BrepData {
+            shells: vec![BrepShell {
+                id: 0,
+                faces: vec![face(0, false), face(1, true)],
+            }],
+            placement: None,
+            tolerance: None,
+        }
+    }
 
     fn unit_box() -> Record {
         to_record(
@@ -677,6 +817,112 @@ mod tests {
         assert!(
             refusal.detail.contains("trimmed spherical"),
             "{}",
+            refusal.detail
+        );
+    }
+
+    #[test]
+    fn an_open_circle_edge_maps_to_a_neutral_arc() {
+        // The disc's closed shell is the only all-planar shell that can hold an
+        // arc edge (an arc lies in one plane, so its two faces are coplanar).
+        let arcs = |brep: &BrepData| -> Vec<BrepCurve> {
+            brep.shells
+                .iter()
+                .flat_map(|shell| &shell.faces)
+                .flat_map(|face| &face.loops)
+                .flat_map(|loop_| &loop_.edges)
+                .cloned()
+                .collect()
+        };
+        let disc = disc_brep();
+        let record = to_record(&disc, DEFAULT_TOLERANCE).expect("flat disc lifts");
+        let back = from_record(&record).expect("open circles read back as arcs");
+        let mapped = arcs(&back);
+        assert_eq!(mapped.len(), 4, "two faces, two arcs each");
+        for curve in &mapped {
+            let BrepCurve::Arc { radius, .. } = curve else {
+                panic!("an open circle must read back as an arc, got {curve:?}");
+            };
+            assert!((radius - 1.0).abs() < 1e-12);
+        }
+        // Every arc is oriented so its own sweep runs counter-clockwise about its
+        // normal, and covers half a turn. (Both faces of a zero-thickness disc
+        // store the same loop direction; `reversed` says which side is material.)
+        for curve in &mapped {
+            let BrepCurve::Arc {
+                center,
+                normal,
+                u_dir,
+                start,
+                end,
+                ..
+            } = curve
+            else {
+                unreachable!("every mapped curve is an arc")
+            };
+            let v_dir = crate::record::cross(*normal, *u_dir);
+            let angle = |p: Point3| {
+                let offset = crate::record::sub(p, *center);
+                (crate::record::dot(offset, v_dir)).atan2(crate::record::dot(offset, *u_dir))
+            };
+            let delta = angle(*end) - angle(*start);
+            let sweep = if delta > 0.0 {
+                delta
+            } else {
+                delta + std::f64::consts::TAU
+            };
+            assert!(
+                (sweep - std::f64::consts::PI).abs() < 1e-9,
+                "a half arc must sweep pi counter-clockwise about its normal, got {sweep}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_arc_vertex_off_its_circle_is_refused_by_name() {
+        let record = to_record(&disc_brep(), DEFAULT_TOLERANCE).expect("flat disc lifts");
+        let mut moved = record.clone();
+        // One ULP is fine; a real displacement is a different curve.
+        moved.vertices[0].point = [1.05, 0.02, 0.0];
+        let refusal = refusal(&moved);
+        assert_eq!(refusal.code, LIFT_UNSUPPORTED);
+        assert!(
+            refusal.detail.contains("arc") && refusal.detail.contains("circle"),
+            "the refusal must name the arc: {}",
+            refusal.detail
+        );
+    }
+
+    /// Inverted from `an_arc_bounded_cylinder_side_face_is_refused_as_p2_1b`:
+    /// what is still refused here is a **corrupt** open circle (an endpoint that
+    /// is not on its circle), not the arc-bounded face itself. A real
+    /// arc-bounded side face lifts and re-reads; see `tests/arcs.rs`.
+    #[test]
+    fn an_open_circle_off_its_circle_is_refused_by_name() {
+        let body = solidcore_ops::make_cylinder([0.0, 0.0, 0.0], 1.0, 2.0).expect("cylinder");
+        let (mut record, _) = body.to_record().expect("cylinder record");
+        // Make one boundary circle open by pointing its second vertex at another.
+        let all_vertices: Vec<u32> = record.edges.iter().flat_map(|edge| edge.vertices).collect();
+        let mut opened = false;
+        for edge in &mut record.edges {
+            if matches!(edge.curve, Curve::Circle { .. }) && edge.vertices[0] == edge.vertices[1] {
+                if let Some(other) = all_vertices
+                    .iter()
+                    .copied()
+                    .find(|vertex| *vertex != edge.vertices[0])
+                {
+                    edge.vertices[1] = other;
+                    opened = true;
+                    break;
+                }
+            }
+        }
+        assert!(opened, "the cylinder record carries a closed circle edge");
+        let refusal = refusal(&record);
+        assert_eq!(refusal.code, LIFT_UNSUPPORTED);
+        assert!(
+            refusal.detail.contains("circle") && refusal.detail.contains("not on its circle"),
+            "the refusal names the gap: {}",
             refusal.detail
         );
     }

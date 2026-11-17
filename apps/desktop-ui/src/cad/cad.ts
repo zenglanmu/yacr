@@ -272,6 +272,10 @@ export const TOOL_STEP_PROMPTS: Readonly<Record<string, readonly string[]>> = Ob
     'tool.prompt.xline.base',
     'tool.prompt.xline.through',
   ],
+  // CHAMFEREDGE (ADR-0036 P2.0) is a **one-pick** capture over the selected exact
+  // solid. The single sentence names the pick and the two distance controls; it
+  // must not promise an edge highlight or a preview (neither exists).
+  'draw.chamferedge': ['tool.prompt.chamferedge.pick_edge'],
   'draw.ray': [
     'tool.prompt.ray.base',
     'tool.prompt.ray.through',
@@ -512,6 +516,10 @@ export const TOOL_READY_PROMPTS: Readonly<Record<string, string>> = Object.freez
   // no ready sentence may claim an unbounded construction line or ray exists.
   'draw.xline': 'tool.prompt.xline.ready',
   'draw.ray': 'tool.prompt.ray.ready',
+  // CHAMFEREDGE is complete once its one pick lands: the shared dimension copy
+  // ("Dimension defined") would be false, so it names the cut that Enter
+  // performs.
+  'draw.chamferedge': 'tool.prompt.chamferedge.ready',
   'draw.dimcenter': 'tool.prompt.dim.center_ready',
   // STRETCH's complement is four picks (rectangle) or a closed window ring plus
   // two displacement picks (polygon/lasso), so once the complement is captured

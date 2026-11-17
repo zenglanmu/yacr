@@ -8,6 +8,7 @@ use super::*;
 use std::sync::Arc;
 
 mod acis;
+mod acis_arcs;
 mod basics;
 mod colour_provenance;
 mod dimension;

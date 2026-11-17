@@ -51,6 +51,11 @@ pub const SOLID_INVALID_TRANSFORM: &str = "solid.invalid_transform";
 pub const SOLID_EMPTY_OPERAND: &str = "solid.empty_operand";
 /// The modeler was asked for a capability it does not declare.
 pub const SOLID_UNSUPPORTED: &str = "solid.unsupported";
+/// The operand carries a curved (non-planar) face and the modeler does not
+/// declare the `nurbs` capability, so its B-rep cannot be lifted back into the
+/// kernel. Distinct from [`SOLID_UNSUPPORTED`] so a caller can tell "this
+/// modeler cannot carry curved geometry" apart from "this family is unknown".
+pub const SOLID_NURBS_NOT_SUPPORTED: &str = "solid.nurbs_not_supported";
 /// The kernel ran but produced no usable body (for example an empty boolean
 /// result). Never an empty success.
 pub const SOLID_FAILED: &str = "solid.failed";

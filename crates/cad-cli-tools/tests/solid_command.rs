@@ -15,7 +15,9 @@
 use std::sync::Arc;
 
 use cad_app::host::{HostController, SolidBooleanPoll};
-use cad_app::{Command, CommandId, CommandPayload, ExtendedCommandId, SelectionSet};
+use cad_app::{
+    Command, CommandId, CommandPayload, ExtendedCommandId, SelectionSet, ToolParameter, ToolValue,
+};
 use cad_domain::{
     Body3d, Completeness, DocumentId, EntityId, InstancePath, Point3, Precision, SelectionRef,
     SemanticGeometry,
@@ -594,11 +596,21 @@ fn massprop_reports_a_real_box_volume_area_and_requested_accuracy() {
     assert_eq!(solid_count(&controller), 1, "a read writes nothing");
 }
 
+/// Inverted from `massprop_refuses_a_real_curved_cylinder_as_not_liftable`: a
+/// curved body now lifts (P2.1b part 2), so `MASSPROP` measures it against the
+/// closed form instead of refusing it.
+///
+/// The `massprop.body_not_liftable` path is still covered — by the crate that can
+/// author a *curved-but-unrepresentable* body (`cad-kernel-solidcore`'s unit
+/// tests: a curved face with no `(u, v)` domain, a boundary with no exact pcurve)
+/// and by `cad-app`'s fake-modeler test. No CLI command can author such a face,
+/// so inventing one here would be a fabricated operand.
 #[test]
-fn massprop_refuses_a_real_curved_cylinder_as_not_liftable() {
+fn massprop_measures_a_real_curved_cylinder_against_its_closed_form() {
+    use std::f64::consts::PI;
     let mut controller = modeler_controller();
     let document = controller.document_id;
-    let viewport = controller.viewport_id;
+    // Radius 2, height 5: V = πr²h = 20π, A = 2πr² + 2πrh = 8π + 20π = 28π.
     run_body(
         &mut controller,
         ExtendedCommandId::Cylinder,
@@ -610,29 +622,35 @@ fn massprop_refuses_a_real_curved_cylinder_as_not_liftable() {
         .drawing
         .revision();
 
-    let error = controller
-        .application
-        .execute(
-            &mut controller.session,
-            command(
-                document,
-                viewport,
-                CommandId::MassProp,
-                CommandPayload::None,
-            ),
-        )
-        .expect_err("P1 cannot lift a curved body");
-    let cad_domain::CadError::Unsupported(text) = error else {
-        panic!("a curved body is an Unsupported refusal, got {error:?}");
-    };
-    assert!(text.starts_with("massprop.body_not_liftable:"), "{text}");
-    assert!(text.contains("solid.lift_requires_planar"), "{text}");
+    let row = massprop_object(&mut controller);
+    assert_eq!(row.object.map(|object| object.0), Some(ids[0].0));
+    let text = row.message;
+    let volume = 20.0 * PI;
+    let area = 28.0 * PI;
+    assert!(
+        text.contains(&format!("volume={volume:.6}")),
+        "volume {volume:.6}: {text}"
+    );
+    assert!(
+        text.contains(&format!("surface_area={area:.6}")),
+        "area {area:.6}: {text}"
+    );
+    // The axis centroid prints with a signed zero, so only the height and the
+    // zero plane are pinned.
+    assert!(
+        text.contains("0.000000, 0.000000, 2.500000)"),
+        "centroid at mid-height: {text}"
+    );
+    assert!(
+        text.contains("estimated at requested relative accuracy 1e-6, not a proved bound"),
+        "{text}"
+    );
     assert_eq!(
         controller.application.workspace.documents[&document]
             .drawing
             .revision(),
         revision,
-        "a refusal writes nothing"
+        "a read writes nothing"
     );
     assert_eq!(solid_count(&controller), 1, "the cylinder stays");
 }
@@ -749,4 +767,227 @@ fn a_modeler_box_survives_a_dxf_round_trip_as_an_exact_solid3d() {
         (volume - 1.0).abs() < 1e-3,
         "a 1×1×1 BOX keeps volume 1 through the round trip, got {volume}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0036 P2.0: CHAMFEREDGE through the **real** solidcore modeler.
+// ---------------------------------------------------------------------------
+
+/// The stored exact B-rep of one `AcDb3dSolid` row.
+fn stored_brep(controller: &HostController, id: EntityId) -> cad_domain::BrepData {
+    let entity = controller.application.workspace.documents[&controller.document_id]
+        .drawing
+        .entity(id)
+        .expect("the body row exists");
+    let SemanticGeometry::Body3d(body) = &entity.geometry else {
+        panic!("entity {} is not a body", id.0);
+    };
+    body.exact_brep().expect("the body is exact").clone()
+}
+
+fn face_count(brep: &cad_domain::BrepData) -> usize {
+    brep.shells.iter().map(|shell| shell.faces.len()).sum()
+}
+
+fn revision_of(controller: &HostController) -> cad_domain::Revision {
+    controller.application.workspace.documents[&controller.document_id]
+        .drawing
+        .revision()
+}
+
+fn set_chamfer_distances(controller: &mut HostController, a: f64, b: f64) {
+    controller
+        .session
+        .set_tool_parameter(ToolParameter::ChamferDistanceA, ToolValue::Number(a))
+        .expect("A is a legal set-back");
+    controller
+        .session
+        .set_tool_parameter(ToolParameter::ChamferDistanceB, ToolValue::Number(b))
+        .expect("B is a legal set-back");
+}
+
+/// Run CHAMFEREDGE with the host-built payload (the real kernel seam; the pick
+/// itself is a `cad-host`/`cad-app` contract, not a CLI one).
+fn chamfer_edge(
+    controller: &mut HostController,
+    body: EntityId,
+    seed: Point3,
+) -> cad_domain::CadResult<cad_app::CommandOutcome> {
+    let document = controller.document_id;
+    let viewport = controller.viewport_id;
+    controller.application.execute(
+        &mut controller.session,
+        command(
+            document,
+            viewport,
+            CommandId::Extended(ExtendedCommandId::ChamferEdge),
+            CommandPayload::ChamferSolidEdge {
+                body: SelectionRef {
+                    document,
+                    entity: body,
+                    instance: InstancePath::default(),
+                    sub_element: None,
+                },
+                seed,
+            },
+        ),
+    )
+}
+
+/// **Evidence boundary**: Linux x86-64 contract only (real `solidcore`, no GPU,
+/// no window, no carrier); it is not visual/pixel/performance evidence.
+#[test]
+fn chamfer_edge_cuts_one_real_box_edge_in_place() {
+    let mut controller = modeler_controller();
+    let document = controller.document_id;
+    run_body(
+        &mut controller,
+        ExtendedCommandId::Box,
+        vec![p(0.0, 0.0, 0.0), p(2.0, 3.0, 4.0)],
+    );
+    let ids = solid_ids(&controller);
+    assert_eq!(ids.len(), 1);
+    let body = ids[0];
+    select_bodies(&mut controller, &ids);
+    set_chamfer_distances(&mut controller, 0.5, 0.5);
+
+    let before_revision = revision_of(&controller);
+    let before_brep = stored_brep(&controller, body);
+    let before_faces = face_count(&before_brep);
+    let before_undo = controller.application.history[&document].undo_depth();
+
+    // The middle of the top-front edge (`y = 0`, `z = 4`).
+    let seed = p(1.0, 0.0, 4.0);
+    let outcome = chamfer_edge(&mut controller, body, seed)
+        .expect("the real kernel chamfers a planar box edge");
+    assert_eq!(outcome.objects, vec![cad_domain::ObjectId(body.0)]);
+    assert_eq!(
+        revision_of(&controller),
+        cad_domain::Revision(before_revision.0 + 1),
+        "exactly one revision bump"
+    );
+    assert_eq!(
+        controller.application.history[&document].undo_depth(),
+        before_undo + 1,
+        "exactly one undo entry"
+    );
+    assert!(
+        outcome
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "chamferedge.applied"),
+        "the success is reported"
+    );
+
+    let after_brep = stored_brep(&controller, body);
+    assert_eq!(
+        face_count(&after_brep),
+        before_faces + 1,
+        "one chamfer face replaces the edge"
+    );
+    assert_ne!(after_brep, before_brep);
+
+    controller
+        .application
+        .execute(
+            &mut controller.session,
+            command(
+                document,
+                controller.viewport_id,
+                CommandId::Undo,
+                CommandPayload::None,
+            ),
+        )
+        .expect("undo");
+    assert_eq!(
+        stored_brep(&controller, body),
+        before_brep,
+        "one undo restores the exact original B-rep"
+    );
+}
+
+/// **Evidence boundary**: as above — real-kernel contract, not visual evidence.
+#[test]
+fn a_real_face_centre_seed_is_solid_edge_not_found_and_writes_nothing() {
+    let mut controller = modeler_controller();
+    run_body(
+        &mut controller,
+        ExtendedCommandId::Box,
+        vec![p(0.0, 0.0, 0.0), p(2.0, 3.0, 4.0)],
+    );
+    let ids = solid_ids(&controller);
+    select_bodies(&mut controller, &ids);
+    set_chamfer_distances(&mut controller, 0.5, 0.5);
+    let before_revision = revision_of(&controller);
+    let before_undo = controller.application.history[&controller.document_id].undo_depth();
+
+    // The centre of the top face: far from every edge.
+    let error = chamfer_edge(&mut controller, ids[0], p(1.0, 1.5, 4.0))
+        .expect_err("no edge is near the face centre");
+    let cad_domain::CadError::Unsupported(text) = error else {
+        panic!("a kernel edge refusal is Unsupported, got {error:?}");
+    };
+    assert!(text.starts_with("solid.edge_not_found:"), "{text}");
+    assert_eq!(
+        revision_of(&controller),
+        before_revision,
+        "a refusal writes nothing"
+    );
+    assert_eq!(
+        controller.application.history[&controller.document_id].undo_depth(),
+        before_undo,
+        "a refusal records no undo"
+    );
+    assert_eq!(solid_count(&controller), 1, "the body is unchanged");
+}
+
+/// Inverted from `a_real_curved_cylinder_chamfer_is_solid_lift_requires_planar`.
+///
+/// A curved body now lifts, so the chamfer reaches the **pick** — and stops there:
+/// the cylinder's only `Line` edge is the seam the writer reconstructs to close the
+/// record, and a seam (both its uses on one face) is not an edge a user can select.
+/// The refusal is therefore `solid.edge_not_found`, naming the seam it will not
+/// hand over, and the body is unchanged. Cutting a cylinder's rim needs a
+/// curve-edge selector, which is P2.2.
+///
+/// **Evidence boundary**: real-kernel contract on Linux x86-64. The refusal is
+/// the modeler's own answer; no GPU/window/carrier is involved.
+#[test]
+fn a_real_curved_cylinder_chamfer_finds_no_pickable_edge() {
+    let mut controller = modeler_controller();
+    run_body(
+        &mut controller,
+        ExtendedCommandId::Cylinder,
+        vec![p(0.0, 0.0, 0.0), p(2.0, 0.0, 0.0), p(0.0, 0.0, 5.0)],
+    );
+    let ids = solid_ids(&controller);
+    select_bodies(&mut controller, &ids);
+    set_chamfer_distances(&mut controller, 0.5, 0.5);
+    let before_revision = revision_of(&controller);
+    let before_undo = controller.application.history[&controller.document_id].undo_depth();
+
+    // A point on the cylinder's top rim: the edge a cylinder actually has.
+    let error = chamfer_edge(&mut controller, ids[0], p(2.0, 0.0, 5.0))
+        .expect_err("a cylinder's rim has no pickable straight edge");
+    let cad_domain::CadError::Unsupported(text) = error else {
+        panic!("a capability refusal is Unsupported, got {error:?}");
+    };
+    assert!(
+        !text.starts_with("solid.lift_requires_planar:"),
+        "a curved operand no longer refuses at the lift: {text}"
+    );
+    assert!(
+        text.starts_with("solid.edge_not_found:"),
+        "the only Line edge is a seam, which is not pickable: {text}"
+    );
+    assert!(
+        text.contains("seam"),
+        "the refusal says the seam is what it skipped: {text}"
+    );
+    assert_eq!(revision_of(&controller), before_revision);
+    assert_eq!(
+        controller.application.history[&controller.document_id].undo_depth(),
+        before_undo
+    );
+    assert_eq!(solid_count(&controller), 1, "the cylinder is unchanged");
 }

@@ -29,7 +29,7 @@ use crate::measure_tool::{MeasurementPreview, MeasurementTool, MeasurementToolKi
 use crate::selection::SelectionSet;
 use crate::tool_state::{DrawCapture, ToolSnapshot, ToolState};
 use crate::view_states::ViewStates;
-use crate::{AppMode, CommandId};
+use crate::{AppMode, CommandId, ExtendedCommandId};
 pub use drafting_extras::{ChamferMethod, DraftingExtras, IsoPlane, WipeoutFrames};
 pub use erase_snapshot::{EraseEntry, EraseSnapshot};
 pub use modify_options::ModifyOptions;
@@ -445,7 +445,9 @@ impl SessionState {
         parameter: ToolParameter,
         value: ToolValue,
     ) -> CadResult<()> {
-        self.authorize(authorizing_command(parameter))?;
+        for command in authorizing_commands(parameter) {
+            self.authorize(*command)?;
+        }
         parameter.validate(value)?;
         self.tool_parameters.set(parameter, value);
         // A parameter that selects the interactive shape (ALIGN pairs, BREAK `F`,
@@ -650,6 +652,7 @@ impl SessionState {
             DrawToolKind::HatchPoint => CommandId::HatchPoint,
             // BOUNDARY: one internal point, shared discovery, new polylines.
             DrawToolKind::Boundary => CommandId::Boundary,
+            DrawToolKind::ChamferEdge => CommandId::Extended(ExtendedCommandId::ChamferEdge),
             DrawToolKind::Text => CommandId::CreateText,
             // INSERT is point-then-name; the reference is created from existing
             // block metadata, never by writing the block table.
@@ -994,4 +997,4 @@ impl SessionState {
 mod inspection;
 mod tool_authorization;
 
-pub(crate) use tool_authorization::authorizing_command;
+pub(crate) use tool_authorization::authorizing_commands;

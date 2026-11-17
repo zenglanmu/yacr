@@ -19,6 +19,16 @@ impl DrawPreview {
     /// The open-ended branch adds **locale-neutral ASCII** text instead of more
     /// hardcoded copy, so this change does not widen that deviation.
     pub fn status_line(&self) -> String {
+        // CHAMFEREDGE (ADR-0036): one pick, no text, and no edge highlight or
+        // preview geometry exists — the copy must not imply either. The seed is
+        // the pixel pick hit point and the body is the current selection.
+        if self.kind == DrawToolKind::ChamferEdge {
+            return if self.picks.is_empty() {
+                "chamferedge: pick an edge on the selected body".to_string()
+            } else {
+                "chamferedge: edge picked, press Enter to chamfer".to_string()
+            };
+        }
         if self.kind.requires_text() {
             // TEXT/TEXTEDIT (ADR 0019 decision A, ADR 0020 amendment A):
             // locale-neutral ASCII only — the catalog (`tool.prompt.text.*`,

@@ -10,8 +10,8 @@
 
 use cad_domain::{CadResult, Registration};
 use cad_kernel_adapter::{
-    codes, ModelerCapabilities, ModelerPrimitives, SolidModeler, SolidOperation, SolidOutcome,
-    SolidRequest, SolidResult, SolidUnsupportedReason,
+    ModelerCapabilities, ModelerPrimitives, SolidModeler, SolidOperation, SolidOutcome,
+    SolidRequest, SolidResult,
 };
 
 use crate::ops;
@@ -45,12 +45,13 @@ impl SolidCoreModeler {
 
 /// The capability declaration of this build.
 ///
-/// `booleans`, `mass_properties` and `chamfer` are `true` for **planar**
-/// operands; a curved operand is still refused at execution time with
-/// [`crate::LIFT_REQUIRES_PLANAR`] (curved lift is P2.1). `chamfer` is the
-/// straight-section, one-edge capability of P2.0 — it does not imply a fillet,
-/// a shell or a NURBS body. `fillet`, `shell` and `nurbs` are `false`: this
-/// build links no such operation, so they must not be claimed.
+/// `booleans`, `mass_properties` and `chamfer` are `true` for bodies whose faces
+/// are planes **and** for bodies with a curved face (P2.1b): a curved shell is
+/// lifted back into the kernel with its exact NURBS form and exact pcurves, so
+/// the same gate serves both. `nurbs: true` is the flag that gate reads (see
+/// [`cad_kernel_adapter::requires_nurbs`]); it does not imply a fillet, a shell
+/// or a NURBS *edit*, which stay out of this build. `fillet` and `shell` remain
+/// `false`.
 fn declared_capabilities() -> ModelerCapabilities {
     ModelerCapabilities {
         primitives: ModelerPrimitives::all(),
@@ -59,7 +60,7 @@ fn declared_capabilities() -> ModelerCapabilities {
         chamfer: true,
         fillet: false,
         shell: false,
-        nurbs: false,
+        nurbs: true,
     }
 }
 
@@ -92,6 +93,11 @@ impl SolidModeler for SolidCoreModeler {
                 "chamfer.sides".into(),
                 "mass_properties".into(),
                 "transform.similarity".into(),
+                // The curved-lift capability the `nurbs` flag stands for: a
+                // non-planar face is written back with its exact form and exact
+                // pcurves. Advertised by name so a host can tell which face
+                // kinds ride on the flag.
+                "nurbs.faces".into(),
                 format!("solidcore.version={UPSTREAM_VERSION}"),
             ],
         }
@@ -136,15 +142,10 @@ impl SolidModeler for SolidCoreModeler {
                 }
             }
         } else {
-            // Unreachable with the declaration above, but the contract says a
-            // capability that is not claimed returns `Unsupported`, never a
-            // silent attempt.
+            // The declaration above refuses a curved operand when `nurbs` is
+            // false, and an unknown family otherwise; the reason says which.
             SolidOutcome::Unsupported {
-                reason: SolidUnsupportedReason {
-                    code: codes::SOLID_UNSUPPORTED,
-                    operation: request.operation.family(),
-                    detail: format!("this build does not claim {}", request.operation.family()),
-                },
+                reason: capabilities.refusal(&request.operation),
             }
         };
 

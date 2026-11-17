@@ -553,9 +553,12 @@ mod body_support_tests {
                     },
                     reversed: false,
                     loops: Vec::new(),
+                    tolerance: None,
+                    domain: None,
                 }],
             }],
             placement: None,
+            tolerance: None,
         }
     }
 

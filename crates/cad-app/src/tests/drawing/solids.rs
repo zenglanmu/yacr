@@ -179,6 +179,8 @@ fn plane_face(id: u32, cycle: &[Point3]) -> BrepFace {
         },
         reversed: false,
         loops: vec![BrepLoop { edges }],
+        tolerance: None,
+        domain: None,
     }
 }
 
@@ -215,6 +217,7 @@ pub(super) fn unit_box() -> BrepData {
     BrepData {
         shells: vec![BrepShell { id: 0, faces }],
         placement: None,
+        tolerance: None,
     }
 }
 
@@ -235,9 +238,12 @@ fn unsupported_surface_body() -> BrepData {
                         end: p(1.0, 0.0, 0.0),
                     }],
                 }],
+                tolerance: None,
+                domain: None,
             }],
         }],
         placement: None,
+        tolerance: None,
     }
 }
 

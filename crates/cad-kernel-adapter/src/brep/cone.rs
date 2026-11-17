@@ -109,6 +109,17 @@ pub(super) fn tessellate_cone(
                 {
                     has_apex = true;
                 }
+                BrepCurve::Arc { .. } => {
+                    // A cone's side face bounded by an arc is a trimmed cone: the
+                    // band's sample rings would have to be matched to the arc's
+                    // own span, which is P2.1b. Named, never rounded up to a full
+                    // circle.
+                    return Err(FaceFailure::UnsupportedSurface(
+                        "cone side face bounded by a circular arc (an open circle): curved side \
+                         faces are P2.1b"
+                            .into(),
+                    ));
+                }
                 BrepCurve::Unsupported { type_key } => {
                     return Err(FaceFailure::UnsupportedCurve(type_key.clone()));
                 }

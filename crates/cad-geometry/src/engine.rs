@@ -429,6 +429,12 @@ impl GeometryEngine for DefaultGeometryEngine {
                                 .unwrap_or_else(BrepPlacement::identity)
                                 .composed_with(t),
                         ),
+                        // A B-rep tolerance is a model-space length and the model
+                        // coordinates are untouched here (only the composed
+                        // placement changes), so it stays put. Baking the
+                        // placement into a record scales geometry and tolerance
+                        // together; scaling it here too would count it twice.
+                        tolerance: brep.tolerance,
                     })),
                     BodyExact::Exact(_) => BodyExact::Unavailable {
                         reason: "body.nonuniform_scale".to_string(),

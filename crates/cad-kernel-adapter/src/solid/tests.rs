@@ -43,6 +43,8 @@ fn square_face(id: u32, normal: [f64; 3], corners: [[f64; 3]; 4]) -> BrepFace {
                 })
                 .collect(),
         }],
+        tolerance: None,
+        domain: None,
     }
 }
 
@@ -113,6 +115,7 @@ fn cube_brep() -> BrepData {
     BrepData {
         shells: vec![BrepShell { id: 0, faces }],
         placement: None,
+        tolerance: None,
     }
 }
 
@@ -503,6 +506,123 @@ fn capability_probe_reports_per_family_flags() {
     assert_eq!(mass_op.family().as_str(), "mass_properties");
 }
 
+/// The `nurbs` flag is **load-bearing**, not documentation: a curved operand is
+/// refused by the capability probe itself when the modeler does not claim it,
+/// with its own stable code, while a planar operand is unaffected.
+#[test]
+fn a_curved_operand_needs_the_nurbs_capability() {
+    let mut curved = cube_brep();
+    curved.shells[0].faces[0].surface = BrepSurface::Cylinder {
+        origin: p(0.0, 0.0, 0.0),
+        axis: p(0.0, 0.0, 1.0),
+        ref_dir: p(1.0, 0.0, 0.0),
+        radius: 1.0,
+    };
+    let planar = cube_brep();
+    let transform = Transform3::identity();
+    let ops = [
+        SolidOperation::MassProperties {
+            brep: &curved,
+            density: 1.0,
+        },
+        SolidOperation::Boolean {
+            op: BooleanOp::Union,
+            left: &planar,
+            right: &curved,
+        },
+        SolidOperation::Chamfer {
+            brep: &curved,
+            selector: SolidEdgeSelector::NearestToPoint(p(0.0, 0.0, 0.0)),
+            distance: 0.1,
+            second: None,
+        },
+    ];
+
+    let mut caps = ModelerCapabilities {
+        primitives: ModelerPrimitives::all(),
+        booleans: true,
+        mass_properties: true,
+        chamfer: true,
+        fillet: false,
+        shell: false,
+        nurbs: false,
+    };
+    for operation in &ops {
+        assert!(requires_nurbs(operation), "the operand is curved");
+        assert!(
+            !caps.supports(operation),
+            "a curved operand needs `nurbs`: {operation:?}"
+        );
+        assert_eq!(
+            caps.refusal(operation).code,
+            codes::SOLID_NURBS_NOT_SUPPORTED
+        );
+    }
+    // A planar operand of the same family is unaffected...
+    for operation in [
+        SolidOperation::MassProperties {
+            brep: &planar,
+            density: 1.0,
+        },
+        SolidOperation::Boolean {
+            op: BooleanOp::Union,
+            left: &planar,
+            right: &planar,
+        },
+    ] {
+        assert!(!requires_nurbs(&operation));
+        assert!(caps.supports(&operation));
+    }
+    // ...and a transform never reads an operand, so it stays the baseline.
+    assert!(caps.supports(&SolidOperation::Transform {
+        brep: &curved,
+        transform: &transform,
+    }));
+    assert!(!requires_nurbs(&SolidOperation::Transform {
+        brep: &curved,
+        transform: &transform,
+    }));
+
+    // Claiming `nurbs` is exactly what switches the gate off.
+    caps.nurbs = true;
+    for operation in &ops {
+        assert!(caps.supports(operation), "{operation:?}");
+    }
+}
+
+/// A modeler with `nurbs: false` answers a curved operand with
+/// `solid.nurbs_not_supported` — never a silent attempt and never the generic
+/// "family unknown" code.
+#[test]
+fn a_modeler_without_nurbs_refuses_a_curved_operand_by_name() {
+    let modeler = ToyModeler::new();
+    let mut curved = cube_brep();
+    curved.shells[0].faces[1].surface = BrepSurface::Sphere {
+        center: p(0.5, 0.5, 0.5),
+        radius: 0.5,
+        u_dir: p(1.0, 0.0, 0.0),
+        pole: p(0.0, 0.0, 1.0),
+    };
+    let req = request(SolidOperation::MassProperties {
+        brep: &curved,
+        density: 1.0,
+    });
+    let result = modeler.execute(&req, &|| false).expect("unsupported is Ok");
+    let SolidOutcome::Unsupported { reason } = &result.outcome else {
+        panic!("expected Unsupported, got {:?}", result.outcome);
+    };
+    assert_eq!(reason.code, codes::SOLID_NURBS_NOT_SUPPORTED);
+    assert_eq!(reason.operation, SolidOperationFamily::MassProperties);
+    assert!(reason.detail.contains("nurbs"), "{reason:?}");
+    assert!(result.outcome.mass().is_none() && result.outcome.body().is_none());
+
+    // The same request on a modeler that claims `nurbs` is not the probe's
+    // business; the family flag and the operand both pass.
+    let claiming = ToyModeler::new().with_nurbs();
+    let result = claiming.execute(&req, &|| false).expect("not an Err");
+    assert!(result.outcome.mass().is_some(), "{:?}", result.outcome);
+}
+
 // ---- Outcome accessors ----
 
 #[test]
@@ -574,6 +694,11 @@ struct ToyModeler {
 }
 
 impl ToyModeler {
+    fn with_nurbs(mut self) -> Self {
+        self.caps.nurbs = true;
+        self
+    }
+
     fn new() -> Self {
         let primitives = ModelerPrimitives {
             box_primitive: true,
@@ -623,11 +748,7 @@ impl SolidModeler for ToyModeler {
 
         let outcome = if !self.caps.supports(&request.operation) {
             SolidOutcome::Unsupported {
-                reason: SolidUnsupportedReason {
-                    code: codes::SOLID_UNSUPPORTED,
-                    operation: request.operation.family(),
-                    detail: "toy modeler does not claim this capability".into(),
-                },
+                reason: self.caps.refusal(&request.operation),
             }
         } else {
             match &request.operation {

@@ -91,7 +91,7 @@ test('both modify panels carry SELECTSIMILAR as one small selection-gated button
       items.slice(items.findIndex(candidate => candidate.id === ID) + 1).map(candidate => candidate.id),
       ['REVERSE', 'PEDIT', 'OOPS', 'OVERKILL', 'BREAKATPOINT', 'HATCHTOBACK', 'TEXTTOFRONT',
         'SSX', 'SELECTCOUNT', 'HIDEOBJECTS', 'ISOLATEOBJECTS', 'UNISOLATEOBJECTS',
-        'TREX', 'EXTRIM', 'MPEDIT', 'DRAWORDER'],
+        'TREX', 'EXTRIM', 'MPEDIT', 'DRAWORDER', 'CHAMFEREDGE'],
       `${tabId}: only the documented additions follow SELECTSIMILAR`,
     );
     assert.equal(item.command, ID, 'the dispatch token is the router name');

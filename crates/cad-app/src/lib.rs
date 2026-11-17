@@ -49,6 +49,8 @@ pub mod viewer_config;
 pub mod zoom_history;
 
 mod app_audit;
+// ADR-0036 P2.0: the real one-pick `CHAMFEREDGE` command.
+mod app_chamfer_edge;
 // The extended-command wrapper: dispatch, session toggles and reports.
 mod app_dispatch;
 mod app_drafting;
@@ -140,6 +142,8 @@ pub use camera::{
 };
 pub mod command_aliases;
 pub mod command_id;
+pub use app_chamfer_edge::{chamfer_edge_target, ChamferEdgeTarget};
+pub use app_drawing::solids::SOLID_MODELER_UNSUPPORTED;
 pub use command_id::{AppMode, CommandId, ExtendedCommandId, RefusalId};
 pub use draw_tool::{
     circle_radius, AlignPairSet, DrawIntent, DrawPreview, DrawTool, DrawToolKind, PointArity,

@@ -775,7 +775,8 @@ pub enum ExtendedCommandId {
     Imprint,
     /// `OFFSETEDGE`: no 3D face/edge offset model.
     OffsetEdge,
-    /// `CHAMFEREDGE`: no 3D edge chamfer model.
+    /// `CHAMFEREDGE`: cuts one edge of the selected exact solid body with the
+    /// P2.0 planar chamfer (Work-only; ADR-0036).
     ChamferEdge,
     /// `FILLETEDGE`: no 3D edge fillet model.
     FilletEdge,

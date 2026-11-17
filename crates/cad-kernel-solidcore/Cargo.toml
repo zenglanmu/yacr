@@ -20,11 +20,30 @@ cad-kernel-adapter.workspace = true
 # Apache-2.0 (upstream LICENSE + NOTICE, SMLib port). Upstream repository
 # <https://github.com/tangency-labs/solidcore>, pinned to revision
 # 55ae49ef919b606bf77901df626ed9bb543e5212 (ADR-0036 D1, unchanged by this
-# crate). Only `solidcore-ops` and `solidcore-record` are named: `solidcore-ops`
-# pulls the kernel (`solidcore`) and the record converter (`solidcore-convert`)
-# transitively, so nothing here depends on a kernel crate directly.
+# crate).
+#
+# Four upstream crates are named directly (all at the same pin, all inside the
+# `solidcore` repository, and `scripts/check-architecture.py` allows exactly this
+# crate to name them):
+#
+# - `solidcore-ops`: the `Body`/`Body::from_record` boundary, the cancellation
+#   hook and the exact-pcurve call (`pcurve::pcurves_within`);
+# - `solidcore-record`: the portable record types;
+# - `solidcore`: **only** `eval::form` (`surface`, `curve`, `on_frame`) and the
+#   `eval::{Curve, Frame, Surface}` types those functions take — the exact rational
+#   NURBS form of a cylinder, cone, sphere or torus face and of a circle/arc edge
+#   over a label's parameter range, plus the relabelling of a circle onto a face's
+#   frame. That module is the one place the analytic label and the form are proved
+#   to be the same geometry; everything else still goes through `solidcore-ops`.
+# - `solidcore-convert`: the record↔kernel surface/curve mapping those `form`
+#   calls need (`surface`, `record_surface`, `record_curve`; `curve` is used to
+#   relabel a circle and to evaluate an edge in the exactness test). It is the
+#   same converter `solidcore-ops` already converts through.
+#
 # `cad-kernel-solidcore` is the only consumer in this workspace
 # (`scripts/check-architecture.py` enforces that); no `[patch.crates-io]` entry.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+solidcore = { git = "https://github.com/tangency-labs/solidcore", rev = "55ae49ef919b606bf77901df626ed9bb543e5212" }
+solidcore-convert = { git = "https://github.com/tangency-labs/solidcore", rev = "55ae49ef919b606bf77901df626ed9bb543e5212" }
 solidcore-ops = { git = "https://github.com/tangency-labs/solidcore", rev = "55ae49ef919b606bf77901df626ed9bb543e5212" }
 solidcore-record = { git = "https://github.com/tangency-labs/solidcore", rev = "55ae49ef919b606bf77901df626ed9bb543e5212" }

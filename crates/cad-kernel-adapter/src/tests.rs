@@ -272,6 +272,8 @@ fn plane_face(id: u32, origin: [f64; 3], normal: [f64; 3], loop_pts: &[[f64; 3]]
         },
         reversed: false,
         loops: vec![line_loop(loop_pts)],
+        tolerance: None,
+        domain: None,
     }
 }
 
@@ -318,6 +320,7 @@ fn cube_brep(size: f64) -> BrepData {
     BrepData {
         shells: vec![BrepShell { id: 0, faces }],
         placement: None,
+        tolerance: None,
     }
 }
 
@@ -448,9 +451,12 @@ fn brep_sphere_is_closed_and_monotone_in_tolerance() {
                     },
                     reversed: false,
                     loops: Vec::new(),
+                    tolerance: None,
+                    domain: None,
                 }],
             }],
             placement: None,
+            tolerance: None,
         };
         let mut req = brep_request(brep);
         req.tolerance.linear_deflection = tolerance;
@@ -497,6 +503,8 @@ fn brep_budget_exceeded_is_reported_not_truncated() {
             },
             reversed: false,
             loops: Vec::new(),
+            tolerance: None,
+            domain: None,
         }],
     });
     let mut req = brep_request(brep);
@@ -534,10 +542,13 @@ fn brep_partial_reports_missing_face_and_open_edge() {
                     },
                     reversed: false,
                     loops: Vec::new(),
+                    tolerance: None,
+                    domain: None,
                 },
             ],
         }],
         placement: None,
+        tolerance: None,
     };
     let req = brep_request(brep);
     let result = BrepTessellator.tessellate(&req, &no_cancel).unwrap();
@@ -573,9 +584,12 @@ fn brep_all_unsupported_is_unsupported_not_empty_success() {
                 },
                 reversed: false,
                 loops: Vec::new(),
+                tolerance: None,
+                domain: None,
             }],
         }],
         placement: None,
+        tolerance: None,
     };
     let req = brep_request(brep);
     let result = BrepTessellator.tessellate(&req, &no_cancel).unwrap();
@@ -695,9 +709,12 @@ fn brep_cylinder_facets_carry_the_face_id() {
                 },
                 reversed: false,
                 loops: vec![ring(0.0), ring(1.0)],
+                tolerance: None,
+                domain: None,
             }],
         }],
         placement: None,
+        tolerance: None,
     };
     let req = brep_request(brep);
     let result = BrepTessellator.tessellate(&req, &no_cancel).unwrap();
@@ -716,4 +733,189 @@ fn brep_cylinder_facets_carry_the_face_id() {
             "Revision(0) is the documented no-entity-revision placeholder"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Arc-bounded planar faces at body level
+// ---------------------------------------------------------------------------
+
+#[test]
+fn an_arc_bounded_cap_tessellates_while_its_curved_neighbour_is_named_missing() {
+    // The top cap of a quarter-disc plate plus the arc-bounded cylindrical side
+    // that the cap's arc forces: the cap is displayable, the trimmed cylinder is
+    // P2.1b, and the outcome must say exactly that (a `Partial` with a named
+    // missing face, never a blank or a fabricated side).
+    let brep = BrepData {
+        shells: vec![BrepShell {
+            id: 0,
+            faces: vec![
+                BrepFace {
+                    id: 0,
+                    surface: BrepSurface::Plane {
+                        origin: pt(0.0, 0.0, 1.0),
+                        normal: pt(0.0, 0.0, 1.0),
+                        u_dir: pt(1.0, 0.0, 0.0),
+                    },
+                    reversed: false,
+                    loops: vec![BrepLoop {
+                        edges: vec![
+                            BrepCurve::Arc {
+                                center: pt(0.0, 0.0, 1.0),
+                                normal: pt(0.0, 0.0, 1.0),
+                                u_dir: pt(1.0, 0.0, 0.0),
+                                radius: 1.0,
+                                start: pt(1.0, 0.0, 1.0),
+                                end: pt(0.0, 1.0, 1.0),
+                            },
+                            BrepCurve::Line {
+                                start: pt(0.0, 1.0, 1.0),
+                                end: pt(0.0, 0.0, 1.0),
+                            },
+                            BrepCurve::Line {
+                                start: pt(0.0, 0.0, 1.0),
+                                end: pt(1.0, 0.0, 1.0),
+                            },
+                        ],
+                    }],
+                    tolerance: None,
+                    domain: None,
+                },
+                BrepFace {
+                    id: 1,
+                    surface: BrepSurface::Cylinder {
+                        origin: pt(0.0, 0.0, 0.0),
+                        axis: pt(0.0, 0.0, 1.0),
+                        ref_dir: pt(1.0, 0.0, 0.0),
+                        radius: 1.0,
+                    },
+                    reversed: false,
+                    loops: vec![
+                        BrepLoop {
+                            edges: vec![BrepCurve::Arc {
+                                center: pt(0.0, 0.0, 0.0),
+                                normal: pt(0.0, 0.0, 1.0),
+                                u_dir: pt(1.0, 0.0, 0.0),
+                                radius: 1.0,
+                                start: pt(1.0, 0.0, 0.0),
+                                end: pt(0.0, 1.0, 0.0),
+                            }],
+                        },
+                        BrepLoop {
+                            edges: vec![BrepCurve::Arc {
+                                center: pt(0.0, 0.0, 1.0),
+                                normal: pt(0.0, 0.0, 1.0),
+                                u_dir: pt(1.0, 0.0, 0.0),
+                                radius: 1.0,
+                                start: pt(1.0, 0.0, 1.0),
+                                end: pt(0.0, 1.0, 1.0),
+                            }],
+                        },
+                    ],
+                    tolerance: None,
+                    domain: None,
+                },
+            ],
+        }],
+        placement: None,
+        tolerance: None,
+    };
+    let tolerance = crate::solid_tolerance::shape_relative_tolerance(&brep).0;
+    let result = crate::brep_tessellator::tessellate_exchange(
+        &SolidExchange::Brep(brep),
+        tolerance,
+        TessellationBudget::default(),
+    );
+    let TessellationOutcome::Partial {
+        geometry,
+        degradation,
+        ..
+    } = result
+    else {
+        panic!("an arc cap plus a trimmed cylinder is Partial, got {result:?}");
+    };
+    assert_eq!(degradation.missing_faces.len(), 1);
+    assert!(
+        degradation.missing_faces[0].reason.contains("circular arc"),
+        "the missing face must name the arc-bounded side: {:?}",
+        degradation.missing_faces[0]
+    );
+    assert_eq!(
+        degradation.missing_faces[0].id, 1,
+        "the cylindrical side is the missing one"
+    );
+    // What *did* tessellate is the arc-bounded cap, and its area is the quarter
+    // disc's closed form within the chord budget of the shape-relative tolerance.
+    let area = crate::brep::mesh_area(&geometry.mesh);
+    let expected = std::f64::consts::FRAC_PI_4;
+    assert!(
+        (area - expected).abs() / expected < 1e-2,
+        "cap area {area} vs {expected}"
+    );
+}
+
+/// A NURBS face is carried by the neutral model but not meshed: the **body**
+/// reports `Partial` with that face missing — never `Success` (a fabricated
+/// mesh) and never `Failed` (the rest of the body is fine).
+#[test]
+fn brep_nurbs_face_is_partial_and_names_solidcore_tess() {
+    let nurbs = BrepFace {
+        id: 5,
+        surface: BrepSurface::Nurbs {
+            u_knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            v_knots: vec![0.0, 0.0, 1.0, 1.0],
+            points: vec![
+                vec![[0.0, 0.0, 0.0, 1.0], [0.0, 1.0, 0.0, 1.0]],
+                vec![[1.0, 0.0, 0.5, 1.0], [1.0, 1.0, 0.5, 1.0]],
+                vec![[2.0, 0.0, 0.0, 1.0], [2.0, 1.0, 0.0, 1.0]],
+            ],
+        },
+        reversed: false,
+        loops: Vec::new(),
+        domain: Some([[0.0, 1.0], [0.0, 1.0]]),
+        tolerance: None,
+    };
+    let brep = BrepData {
+        shells: vec![BrepShell {
+            id: 0,
+            faces: vec![
+                plane_face(
+                    0,
+                    [0.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0],
+                    &[
+                        [0.0, 0.0, 0.0],
+                        [1.0, 0.0, 0.0],
+                        [1.0, 1.0, 0.0],
+                        [0.0, 1.0, 0.0],
+                    ],
+                ),
+                nurbs,
+            ],
+        }],
+        placement: None,
+        tolerance: None,
+    };
+    let req = brep_request(brep);
+    let result = BrepTessellator.tessellate(&req, &no_cancel).unwrap();
+    let TessellationOutcome::Partial {
+        geometry,
+        degradation,
+        diagnostics,
+    } = result.outcome
+    else {
+        panic!("expected Partial, got a different outcome");
+    };
+    assert_eq!(geometry.triangle_count(), 2, "the plane still meshes");
+    assert_eq!(degradation.missing_faces.len(), 1);
+    assert_eq!(degradation.missing_faces[0].id, 5);
+    assert!(
+        degradation.missing_faces[0]
+            .reason
+            .contains("solidcore-tess"),
+        "the missing face names the missing mesher: {}",
+        degradation.missing_faces[0].reason
+    );
+    assert!(diagnostics
+        .iter()
+        .any(|d| d.code == codes::KERNEL_MISSING_FACE));
 }

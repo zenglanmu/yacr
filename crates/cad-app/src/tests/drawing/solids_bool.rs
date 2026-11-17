@@ -175,6 +175,8 @@ fn plane_face(id: u32, cycle: &[Point3]) -> BrepFace {
         },
         reversed: false,
         loops: vec![BrepLoop { edges }],
+        tolerance: None,
+        domain: None,
     }
 }
 
@@ -209,6 +211,7 @@ fn unit_box() -> BrepData {
     BrepData {
         shells: vec![BrepShell { id: 0, faces }],
         placement: None,
+        tolerance: None,
     }
 }
 

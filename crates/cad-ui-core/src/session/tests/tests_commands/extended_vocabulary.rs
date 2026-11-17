@@ -129,6 +129,8 @@ fn every_extended_variant_has_one_table_row_and_normalizes() {
                 | ExtendedCommandId::Union
                 | ExtendedCommandId::Subtract
                 | ExtendedCommandId::Intersect
+                // ADR-0036 P2.0: CHAMFEREDGE rewrites one exact body in place.
+                | ExtendedCommandId::ChamferEdge
         );
         assert_eq!(
             variant.requires_work_mode(),

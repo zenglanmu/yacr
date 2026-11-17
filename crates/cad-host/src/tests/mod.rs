@@ -17,6 +17,7 @@ mod area_object_echo;
 mod box_select;
 mod box_select_edge_cases;
 mod capture_candidate;
+mod chamfer_edge;
 mod compat;
 mod display_modes;
 mod document_lifecycle;

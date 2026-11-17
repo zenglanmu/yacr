@@ -101,6 +101,61 @@ fn saving_a_drawing_with_a_3dsolid_says_the_file_is_written_as_ac1024() {
 }
 
 #[test]
+fn saving_a_drawing_with_a_3dsolid_to_dwg_says_the_payload_is_sab() {
+    // The same exact ACIS fixture, written to a DWG target: the exporter carries
+    // the body as a `3DSOLID` whose payload is a binary SAB blob in the AcDs
+    // section (`export.note.acis_sab_dwg`), and the status names that payload
+    // instead of the plain experimental-DWG line.
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/dxf/synthetic-acis-cube.dxf");
+    let bytes = std::fs::read(&fixture).expect("committed ACIS DXF fixture");
+    let files = Rc::new(RecordingSaveFiles::new());
+    *files.chosen.borrow_mut() = Some(FileTarget::from_path("/tmp/acis-cube-export.dwg"));
+    let core = core_with_caps(files.clone(), capabilities(false));
+    core.controller
+        .borrow_mut()
+        .open_bytes(Arc::from(bytes), "synthetic-acis-cube.dxf")
+        .expect("the ACIS fixture opens");
+    core.request_save().unwrap();
+
+    let written = files.written.borrow();
+    assert_eq!(written.len(), 1, "exactly one file is written");
+    assert_eq!(written[0].0, "/tmp/acis-cube-export.dwg");
+    assert!(
+        written[0].1.starts_with(b"AC10"),
+        "the written file is DWG binary, not DXF text: {:?}",
+        &written[0].1[..written[0].1.len().min(6)]
+    );
+    assert!(
+        !written[0].1.windows(7).any(|window| window == b"3DSOLID"),
+        "a DWG carries the payload as binary SAB, not as a textual 3DSOLID record"
+    );
+    drop(written);
+
+    let status = core.last_status().expect("the save grades a status");
+    let (key, args) = catalog(&status);
+    // The partial variant is the only reachable one: writing an ACIS `3DSOLID`
+    // always records the body as Converted (its display cache is dropped), so the
+    // report can never be Complete and the clean key must not appear.
+    assert_eq!(
+        key, "save.exported_acis_sab_partial",
+        "the status names the DWG ACIS payload instead of the plain experimental line"
+    );
+    assert_ne!(
+        key, "save.exported_acis_sab",
+        "a written ACIS body always makes the export partial, so the clean SAB key is unreachable"
+    );
+    assert_eq!(
+        args.get("path"),
+        Some(&"/tmp/acis-cube-export.dwg".to_string())
+    );
+    assert!(
+        args.contains_key("converted") && args.contains_key("dropped"),
+        "a partial status still carries both counts: {args:?}"
+    );
+}
+
+#[test]
 fn a_synchronous_plot_writes_real_vector_content() {
     // A committed fixture with one paper-space layout, so the vector plot has
     // real stroke geometry. Opening is synchronous on this fake platform.

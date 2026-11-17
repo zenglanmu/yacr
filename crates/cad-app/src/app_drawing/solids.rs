@@ -81,7 +81,7 @@ use cad_kernel_adapter::{
 };
 
 /// The stable refusal a carrier without a modeler reports.
-pub(crate) const SOLID_MODELER_UNSUPPORTED: &str = "unsupported-runtime: solid-modeler";
+pub const SOLID_MODELER_UNSUPPORTED: &str = "unsupported-runtime: solid-modeler";
 
 /// The ACIS class key every created/combined body is stored under.
 pub(crate) const SOLID_TYPE_KEY: &str = "AcDb3dSolid";

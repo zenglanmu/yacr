@@ -1,36 +1,38 @@
-//! The Work-only command each session tool parameter is authorized against.
+//! The Work-only command(s) each session tool parameter is authorized against.
 //!
 //! Split out of `session_state.rs` to keep that module inside the code-size limit;
-//! the single mapping function keeps its original body and is re-exported by the
-//! parent so the parameter channel's authorization is unchanged.
+//! the mapping function keeps its original body (now a slice, so one parameter can
+//! belong to more than one Work-only command) and is re-exported by the parent so
+//! the parameter channel's authorization is unchanged.
 
 use super::*;
 
-/// The Work-only command a [`ToolParameter`] is authorized against.
+/// The Work-only commands a [`ToolParameter`] is authorized against.
 ///
 /// `PolygonSides` keeps its original authorization (`CreatePolygon`) exactly as
-/// before the migration. `FilletRadius` and the two `ChamferDistance`s belong to
-/// the FILLET/CHAMFER edit commands (ADR 0016 decisions B/C); the array
-/// parameters belong to the ARRAYRECT/ARRAYPOLAR edit commands (ADR 0016 decision
-/// D). Each parameter is authorized against its own command, so a Viewer-mode set
-/// is refused exactly like the create commands.
-pub(crate) fn authorizing_command(parameter: ToolParameter) -> CommandId {
+/// before the migration. `FilletRadius` belongs to the FILLET edit command and the
+/// two `ChamferDistance`s belong to **both** corner commands that read them: the
+/// 2D CHAMFER (ADR 0016 decision C) and the 3D `CHAMFEREDGE` (ADR-0036 P2.0). The
+/// array parameters belong to the ARRAYRECT/ARRAYPOLAR edit commands (ADR 0016
+/// decision D). A Viewer-mode set is refused exactly like the create commands.
+pub(crate) fn authorizing_commands(parameter: ToolParameter) -> &'static [CommandId] {
     match parameter {
-        ToolParameter::PolygonSides => CommandId::CreatePolygon,
-        ToolParameter::FilletRadius => CommandId::FilletLines,
-        ToolParameter::ChamferDistanceA | ToolParameter::ChamferDistanceB => {
-            CommandId::ChamferLines
-        }
+        ToolParameter::PolygonSides => &[CommandId::CreatePolygon],
+        ToolParameter::FilletRadius => &[CommandId::FilletLines],
+        ToolParameter::ChamferDistanceA | ToolParameter::ChamferDistanceB => &[
+            CommandId::ChamferLines,
+            CommandId::Extended(crate::ExtendedCommandId::ChamferEdge),
+        ],
         ToolParameter::ArrayRows
         | ToolParameter::ArrayColumns
         | ToolParameter::ArrayRowSpacing
-        | ToolParameter::ArrayColumnSpacing => CommandId::ArrayRectangular,
+        | ToolParameter::ArrayColumnSpacing => &[CommandId::ArrayRectangular],
         ToolParameter::ArrayItems
         | ToolParameter::ArrayFillAngle
-        | ToolParameter::ArrayRotateItems => CommandId::ArrayPolar,
+        | ToolParameter::ArrayRotateItems => &[CommandId::ArrayPolar],
         // ALIGN (P4d): `AlignScale` is authorized against the ALIGN edit command,
         // so a Viewer-mode set is refused exactly like the other edit parameters.
-        ToolParameter::AlignScale => CommandId::AlignEntities,
+        ToolParameter::AlignScale => &[CommandId::AlignEntities],
         // HATCH (P6b): every hatch parameter is authorized against the HATCH
         // create command, so a Viewer-mode set is refused exactly like the create
         // commands. HATCHPOINT (`hatch.internal_point`) reads the **same** channel
@@ -46,48 +48,48 @@ pub(crate) fn authorizing_command(parameter: ToolParameter) -> CommandId {
         | ToolParameter::HatchGradientKind
         | ToolParameter::HatchGradientAngle
         | ToolParameter::HatchGradientColorA
-        | ToolParameter::HatchGradientColorB => CommandId::Hatch,
+        | ToolParameter::HatchGradientColorB => &[CommandId::Hatch],
         // TEXT (P7a): the glyph height is authorized against the TEXT create
         // command, so a Viewer-mode set is refused exactly like the other create
         // parameters. MTEXT captures with the **same** parameter (its only height
         // channel) and `CreateMText` is Work-only too, so this one authorization is
         // exactly the gate MTEXT needs — there is no second height parameter and no
         // per-kind authorization to drift.
-        ToolParameter::TextHeight => CommandId::CreateText,
+        ToolParameter::TextHeight => &[CommandId::CreateText],
         // TEXT creation also owns the rotation: the `Text` payload has no rotation
         // field, so `textRotation` is read straight from this channel by
         // `create_text`. MTEXT consumes the same parameter (it has no rotation
         // parameter of its own), and `CreateMText` is Work-only too, so the one
         // authorization is exactly the gate both create commands need.
-        ToolParameter::TextRotation => CommandId::CreateText,
+        ToolParameter::TextRotation => &[CommandId::CreateText],
         // MTEXT attachment is MTEXT-only, so it is authorized against the MTEXT
         // create command (`CreateMText` is Work-only, like every other parameter
         // command here).
-        ToolParameter::MTextAttachment => CommandId::CreateMText,
+        ToolParameter::MTextAttachment => &[CommandId::CreateMText],
         // The single-curve edit pair (2026-11-01): DIVIDE's segment count is
         // authorized against the DIVIDE command, and LENGTHEN's mode/amount
         // against the LENGTHEN command, so a Viewer-mode set is refused exactly
         // like every other Work-only parameter and there is no second gate.
-        ToolParameter::DivideSegments => CommandId::Divide,
-        ToolParameter::LengthenMode | ToolParameter::LengthenValue => CommandId::Lengthen,
+        ToolParameter::DivideSegments => &[CommandId::Divide],
+        ToolParameter::LengthenMode | ToolParameter::LengthenValue => &[CommandId::Lengthen],
         // SCALETEXT's factor is authorized against the SCALETEXT command, so a
         // Viewer-mode set is refused exactly like every other Work-only parameter.
-        ToolParameter::ScaleTextFactor => CommandId::ScaleText,
+        ToolParameter::ScaleTextFactor => &[CommandId::ScaleText],
         // DIMROTATED's dimension-line angle is authorized against the
         // DIMROTATED create command, so a Viewer-mode set is refused exactly
         // like every other Work-only parameter.
-        ToolParameter::DimRotation => CommandId::DimRotated,
+        ToolParameter::DimRotation => &[CommandId::DimRotated],
         // The interactive-shape selectors belong to their own edit command, so a
         // Viewer-mode set is refused exactly like the parameters above.
-        ToolParameter::AlignPairs => CommandId::AlignEntities,
-        ToolParameter::BreakFirstPoint => CommandId::Break,
-        ToolParameter::DivideUseBlock => CommandId::Divide,
-        ToolParameter::DivideAlignBlock => CommandId::Divide,
+        ToolParameter::AlignPairs => &[CommandId::AlignEntities],
+        ToolParameter::BreakFirstPoint => &[CommandId::Break],
+        ToolParameter::DivideUseBlock => &[CommandId::Divide],
+        ToolParameter::DivideAlignBlock => &[CommandId::Divide],
         // PLINE's uniform width belongs to the polyline create command, so a
         // Viewer-mode set is refused exactly like every other create parameter.
-        ToolParameter::PolylineWidth => CommandId::CreatePolyline,
+        ToolParameter::PolylineWidth => &[CommandId::CreatePolyline],
         // STRETCH's crossing-window mode belongs to the STRETCH edit command, so a
         // Viewer-mode set is refused exactly like every other Work-only parameter.
-        ToolParameter::StretchWindow => CommandId::StretchEntities,
+        ToolParameter::StretchWindow => &[CommandId::StretchEntities],
     }
 }

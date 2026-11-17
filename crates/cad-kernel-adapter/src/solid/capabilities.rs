@@ -61,12 +61,15 @@ impl ModelerPrimitives {
 
 /// The full capability declaration of a modeler.
 ///
-/// `chamfer` is the P2.0 straight-chamfer capability (planar bodies only at
-/// this pin); `fillet`, `shell` and `nurbs` are the rest of phase P2
-/// (ADR-0036 D7). A `false` flag means [`crate::SolidOutcome::Unsupported`]
-/// today, never a degraded approximation. `mass_properties` covers volume,
-/// surface area, centroid and inertia at a **requested** relative accuracy (see
-/// [`crate::MassAccuracy`]): the estimate is not a proved error bound.
+/// `chamfer` is the P2.0 straight-chamfer capability; `nurbs` is P2.1b's curved
+/// B-rep capability: it says the modeler can lift a body with a **non-planar**
+/// face back into its kernel (a labelled cylinder, cone, sphere or torus with
+/// its exact NURBS form and pcurves, or a form surface). `fillet` and `shell`
+/// are the rest of phase P2 (ADR-0036 D7). A `false` flag means
+/// [`crate::SolidOutcome::Unsupported`] today, never a degraded approximation.
+/// `mass_properties` covers volume, surface area, centroid and inertia at a
+/// **requested** relative accuracy (see [`crate::MassAccuracy`]): the estimate is
+/// not a proved error bound.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ModelerCapabilities {
     pub primitives: ModelerPrimitives,
@@ -88,16 +91,90 @@ impl ModelerCapabilities {
     /// [`crate::SolidModeler::execute`] and is reported as
     /// [`crate::SolidOutcome::Unsupported`] with a stable reason code.
     ///
+    /// One operand property **is** part of the probe, because it is a declared
+    /// capability: a boolean, mass-properties or chamfer request whose operand
+    /// B-rep has a non-planar face needs [`Self::nurbs`]. With `nurbs: false` the
+    /// request is refused here, before any work, instead of being attempted and
+    /// failing on the way into the kernel.
+    ///
     /// [`SolidOperation::Transform`] is always `true`: a similarity transform is
     /// arithmetic on the neutral B-rep and part of the seam's baseline, while
     /// refusing a non-similarity is an execution-time decision.
     pub fn supports(&self, operation: &SolidOperation<'_>) -> bool {
+        self.family(operation) && (self.nurbs || !requires_nurbs(operation))
+    }
+
+    /// Whether the **family** flag of `operation` is claimed, ignoring the
+    /// per-operand curved-geometry gate. `supports` and `refusal` both read this
+    /// so the two cannot disagree about which cause is being reported.
+    fn family(&self, operation: &SolidOperation<'_>) -> bool {
         match operation {
             SolidOperation::Primitive { spec } => self.primitives.supports(spec.kind()),
             SolidOperation::Boolean { .. } => self.booleans,
             SolidOperation::Chamfer { .. } => self.chamfer,
             SolidOperation::Transform { .. } => true,
             SolidOperation::MassProperties { .. } => self.mass_properties,
+        }
+    }
+
+    /// The structured `Unsupported` reason for an operation [`Self::supports`]
+    /// refuses.
+    ///
+    /// Two causes, two codes: a curved operand this modeler cannot carry is
+    /// [`codes::SOLID_NURBS_NOT_SUPPORTED`](crate::codes::SOLID_NURBS_NOT_SUPPORTED)
+    /// (the family is implemented; the geometry is beyond this build), anything
+    /// else is [`codes::SOLID_UNSUPPORTED`](crate::codes::SOLID_UNSUPPORTED) (the
+    /// family itself is not claimed).
+    pub fn refusal(&self, operation: &SolidOperation<'_>) -> super::SolidUnsupportedReason {
+        let operation_family = operation.family();
+        if !self.family(operation) {
+            // The family itself is not claimed: say so, whatever the operand is.
+            // Reporting the curved-operand gate here would name a cause that
+            // fixing `nurbs` would not help.
+            return super::SolidUnsupportedReason {
+                code: crate::codes::SOLID_UNSUPPORTED,
+                operation: operation_family,
+                detail: format!("this build does not claim {operation_family}"),
+            };
+        }
+        if requires_nurbs(operation) && !self.nurbs {
+            return super::SolidUnsupportedReason {
+                code: crate::codes::SOLID_NURBS_NOT_SUPPORTED,
+                operation: operation_family,
+                detail: "the operand has a curved (non-planar) face; this modeler does not \
+                         declare the `nurbs` capability, so the B-rep cannot be lifted into its \
+                         kernel"
+                    .into(),
+            };
+        }
+        // `supports` accepted it; a caller asking for a refusal anyway gets the
+        // generic family answer rather than an invented cause.
+        super::SolidUnsupportedReason {
+            code: crate::codes::SOLID_UNSUPPORTED,
+            operation: operation_family,
+            detail: format!("this build does not claim {operation_family}"),
+        }
+    }
+}
+
+/// Whether a B-rep operand of `operation` has a face this seam calls **curved**:
+/// any supporting surface other than a plane.
+///
+/// The check is on the neutral surface kind, not on the loops: a plane bounded by
+/// an arc is still planar, while a cylinder is curved even when its boundary is
+/// two full circles. `Transform` and `Primitive` never read an operand.
+pub fn requires_nurbs(operation: &SolidOperation<'_>) -> bool {
+    fn curved(brep: &cad_domain::BrepData) -> bool {
+        brep.shells
+            .iter()
+            .flat_map(|shell| &shell.faces)
+            .any(|face| !matches!(face.surface, cad_domain::BrepSurface::Plane { .. }))
+    }
+    match operation {
+        SolidOperation::Primitive { .. } | SolidOperation::Transform { .. } => false,
+        SolidOperation::Boolean { left, right, .. } => curved(left) || curved(right),
+        SolidOperation::Chamfer { brep, .. } | SolidOperation::MassProperties { brep, .. } => {
+            curved(brep)
         }
     }
 }

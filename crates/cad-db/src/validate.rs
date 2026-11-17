@@ -98,6 +98,12 @@ pub const REASON_BODY_TOLERANCE: &str = "body.tolerance";
 /// exact geometry, so it draws nothing at all.
 pub const REASON_BODY_WIRE_WITHOUT_GEOMETRY: &str = "body.wire_without_geometry";
 
+/// Stable reason code: an exact B-rep's own modelling tolerance (body or face)
+/// is present but not a usable length. `None` means "the source stated none" and
+/// is legal; `Some(0.0)`, a negative value or a non-finite one is not a length
+/// and would make the kernel's geometry checks meaningless.
+pub const REASON_BODY_BREP_TOLERANCE: &str = "body.brep_tolerance";
+
 /// Validate a [`SemanticGeometry`] before it is written.
 ///
 /// Rejects non-finite coordinates and degenerate/unsupported-for-write cases:
@@ -713,6 +719,9 @@ pub fn validate_geometry(geometry: &SemanticGeometry) -> CadResult<()> {
 ///   ([`REASON_BODY_EDGE_POLYLINE`]);
 /// - a stored `tolerance` is finite and strictly positive
 ///   ([`REASON_BODY_TOLERANCE`]);
+/// - an exact B-rep's own `tolerance` and every face `tolerance`, when stated, is
+///   finite and strictly positive ([`REASON_BODY_BREP_TOLERANCE`]); `None` (the
+///   source stated none) is legal and is never filled in;
 /// - a [`BodyKind::Solid`] requires [`BodyExact::Exact`] and a non-empty B-rep
 ///   ([`REASON_BODY_SOLID_WITHOUT_EXACT`], [`REASON_BODY_SOLID_WITH_EMPTY_BREP`]);
 /// - a [`BodyKind::Wire`] may have an empty mesh, but must still have display
@@ -747,6 +756,37 @@ pub fn validate_body(body: &Body3d) -> CadResult<()> {
                 REASON_BODY_TOLERANCE,
                 &format!("body display tolerance must be positive and finite, got {tolerance}"),
             ));
+        }
+    }
+    if let BodyExact::Exact(brep) = &body.exact {
+        // A B-rep tolerance is a **length** the producer stated, so `None`
+        // (unspecified) is legal and a stated one must be a usable length. This
+        // mirrors the display-tolerance rule above; it never fills `None` in.
+        if let Some(tolerance) = brep.tolerance {
+            if !tolerance.is_finite() || tolerance <= 0.0 {
+                return Err(degenerate_reason(
+                    REASON_BODY_BREP_TOLERANCE,
+                    &format!("exact B-rep tolerance must be positive and finite, got {tolerance}"),
+                ));
+            }
+        }
+        for (index, face) in brep
+            .shells
+            .iter()
+            .flat_map(|shell| &shell.faces)
+            .enumerate()
+        {
+            if let Some(tolerance) = face.tolerance {
+                if !tolerance.is_finite() || tolerance <= 0.0 {
+                    return Err(degenerate_reason(
+                        REASON_BODY_BREP_TOLERANCE,
+                        &format!(
+                            "exact B-rep face tolerance {index} must be positive and finite, got \
+                             {tolerance}"
+                        ),
+                    ));
+                }
+            }
         }
     }
     match body.kind {

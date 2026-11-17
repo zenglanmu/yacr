@@ -657,6 +657,11 @@ export const TOOL_PARAMETERS: ToolParameterMap = Object.freeze({
   },
   'draw.fillet': { command: 'FILLET', keys: ['filletRadius'] },
   'draw.chamfer': { command: 'CHAMFER', keys: ['chamferDistanceA', 'chamferDistanceB'] },
+  // CHAMFEREDGE (ADR-0036 P2.0) reads the **same** two set-back distances the 2D
+  // CHAMFER does, from the one session channel: the host validates them at
+  // execute time, so the strip offers exactly those two rows under this command
+  // and no new control is added.
+  'draw.chamferedge': { command: 'CHAMFEREDGE', keys: ['chamferDistanceA', 'chamferDistanceB'] },
   // ALIGN's pair count selects the capture shape (1/2/3 pairs); the scale flag
   // only applies to the two-pair path, so it follows the count in the strip.
   'draw.align': { command: 'ALIGN', keys: ['alignPairs', 'alignScale'] },

@@ -420,6 +420,14 @@ impl HostController {
                     pick_second,
                 })),
             ),
+            // CHAMFEREDGE: the selected body (resolved at pick time) and the pixel
+            // pick hit point travel on the host-built payload; the kernel resolves
+            // its nearest edge from the seed and the two distances are the session
+            // typed channel, so they never ride the payload.
+            DrawIntent::ChamferEdge { body, seed } => (
+                crate::CommandId::Extended(crate::ExtendedCommandId::ChamferEdge),
+                crate::CommandPayload::ChamferSolidEdge { body, seed },
+            ),
             // ARRAYRECT/ARRAYPOLAR: the selection snapshot travels as the refs;
             // the row/column/item parameters and the fill angle are the session
             // typed channel the command layer reads, so they never ride the

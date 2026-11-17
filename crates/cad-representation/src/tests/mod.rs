@@ -189,6 +189,8 @@ fn square_brep(with_unsupported: bool) -> BrepData {
         },
         reversed: false,
         loops: vec![loop_],
+        tolerance: None,
+        domain: None,
     }];
     if with_unsupported {
         faces.push(BrepFace {
@@ -198,11 +200,14 @@ fn square_brep(with_unsupported: bool) -> BrepData {
             },
             reversed: false,
             loops: Vec::new(),
+            tolerance: None,
+            domain: None,
         });
     }
     BrepData {
         shells: vec![BrepShell { id: 0, faces }],
         placement: None,
+        tolerance: None,
     }
 }
 

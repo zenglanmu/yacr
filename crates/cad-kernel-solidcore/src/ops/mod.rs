@@ -37,8 +37,14 @@ pub(crate) fn body_outcome(brep: BrepData) -> SolidOutcome {
 }
 
 /// Neutral body → kernel record: the single lift gate of this crate.
+///
+/// The record's tolerance is the body's own when the source states one (a length,
+/// `BrepData::tolerance`), else the largest tolerance a face states, else
+/// [`record::DEFAULT_TOLERANCE`] — **our** default, not a number any producer
+/// stated (see `to_record::record_tolerance`). It is never derived from the
+/// geometry.
 pub(crate) fn lift(brep: &BrepData) -> Result<Record, LiftRefusal> {
-    record::to_record(brep, record::DEFAULT_TOLERANCE)
+    record::to_record(brep, brep.tolerance.unwrap_or(record::DEFAULT_TOLERANCE))
 }
 
 /// Kernel record → neutral body.

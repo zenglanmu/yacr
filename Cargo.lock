@@ -817,6 +817,7 @@ dependencies = [
  "cad-diagnostics",
  "cad-domain",
  "cad-engine",
+ "cad-kernel-adapter",
  "cad-platform",
  "cad-representation",
  "cad-resources",
@@ -966,6 +967,8 @@ version = "0.1.14"
 dependencies = [
  "cad-domain",
  "cad-kernel-adapter",
+ "solidcore",
+ "solidcore-convert",
  "solidcore-ops",
  "solidcore-record",
 ]

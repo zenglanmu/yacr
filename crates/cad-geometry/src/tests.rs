@@ -700,3 +700,60 @@ fn text_transform_is_a_similarity_and_refuses_stretch_and_mirror() {
         }
     }
 }
+
+#[test]
+fn body_transform_keeps_the_exact_brep_tolerance_in_model_units() {
+    let mut brep = BrepData {
+        shells: Vec::new(),
+        placement: None,
+        tolerance: Some(0.5),
+    };
+    let body = |brep: BrepData| {
+        SemanticGeometry::Body3d(Box::new(Body3d {
+            kind: BodyKind::Sheet,
+            exact: BodyExact::Exact(Box::new(brep)),
+            display: BodyDisplay {
+                mesh: Mesh::default(),
+                edges: Vec::new(),
+                tolerance: None,
+                precision: Precision::Unknown,
+                completeness: Completeness::Partial(Vec::new()),
+            },
+        }))
+    };
+    let moved = DefaultGeometryEngine
+        .transform(&body(brep.clone()), &Transform3::scale(2.0))
+        .expect("a uniform scale is representable");
+    let SemanticGeometry::Body3d(moved) = moved else {
+        panic!("expected a body");
+    };
+    // The scale goes into the composed placement; the shell coordinates — and
+    // therefore the model-space tolerance — do not change here. Baking the
+    // placement (the record lift) is what scales tolerance and geometry together.
+    assert_eq!(
+        moved.exact_brep().expect("exact").tolerance,
+        Some(0.5),
+        "a model-space length is not scaled by composition"
+    );
+    assert!(
+        (moved
+            .exact_brep()
+            .expect("exact")
+            .placement
+            .expect("composed")
+            .scale
+            - 2.0)
+            .abs()
+            < 1e-12
+    );
+
+    // `None` stays unspecified: neither the transform nor the bake fills it in.
+    brep.tolerance = None;
+    let moved = DefaultGeometryEngine
+        .transform(&body(brep), &Transform3::scale(3.0))
+        .expect("a uniform scale is representable");
+    let SemanticGeometry::Body3d(moved) = moved else {
+        panic!("expected a body");
+    };
+    assert_eq!(moved.exact_brep().expect("exact").tolerance, None);
+}

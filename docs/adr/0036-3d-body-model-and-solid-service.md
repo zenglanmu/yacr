@@ -1,6 +1,8 @@
 # ADR 0036：3D 实体模型（wireframe / surface / solid）与 solidcore 无状态建模服务
 
-- 状态：**Accepted（2026-11-16）**，**P1 已实现到 C3**（2026-11-17，B2 + C1 + C2 + C3a/C3b/C3c 增补）：
+- 状态：**Accepted（2026-11-16）**，**P1 已实现到 C3；P2.0（倒角 + `CHAMFEREDGE`）、P2.1a（圆弧
+  边 + B-Rep 容差）、P2.1b（NURBS 载体 + 曲面 lift）、P3b（DWG SAB）已实现受限子集**（2026-11-17，
+  B2 + C1 + C2 + C3a/C3b/C3c + P2.0/P2.1a/P2.1b/P3a/P3b 增补）：
   - P0 已落地；P0.1（存储边线直送 `RenderBatch.edges`）已完成（Linux 契约/单元证据）；
   - P1/B1：`SolidModeler` 无内核接缝已落地（`cad-kernel-adapter`）；
   - P1/B2（见 §7）：`cad-kernel-solidcore` 让**平面体**路径可用——基本体
@@ -31,8 +33,9 @@
     不泄漏 panic payload）。结果继承**第一个操作数**的显式显示状态（同一事务的
     `update_entity_display_state`，redo 也恢复）；无覆盖则不写。布尔运行期间 C1 的同步图元创建
     按 `solid.boolean_busy: a boolean is running; wait for it to settle before creating another
-    solid` 拒绝（共用内核互斥锁，不能阻塞命令线程），拒绝在模型器调用与事务之前。曲面操作数由
-    模型器给出 `Unsupported`（`solid.lift_requires_planar`），P2 前显式拒绝。
+    solid` 拒绝（共用内核互斥锁，不能阻塞命令线程），拒绝在模型器调用与事务之前。曲面操作数自
+    **P2.1b** 起参与内核布尔（由 `nurbs` 能力位承载）；无 `(u,v)` box / 无精确 pcurve 的曲面面仍是
+    `Unsupported`（`solid.lift_unsupported`）。
   - **P1/C3（2026-11-17，C3a + C3b + C3c）**：
     - **C3a `MASSPROP`**：精确 `Body3d{Solid, Exact}` 经**注入的**模型器**同步**测量
       （`SolidOperation::MassProperties`，density 1.0、请求相对精度 1e-6；报告明写“估计、
@@ -55,39 +58,59 @@
     `along` 面取该边在面下标最小的面上的 use，`second` 缺省与 `distance` 相同（对称 45°）。产物仍然全平面，
     因此可再次 lift；上游把倒角的直线边写成**共线三次 Bézier**，`record → BrepData` 只在
     控制点全部落在弦上（容差内）且弦端点为该边顶点时判为 `Line`（精确，不是 NURBS lift），
-    其它样条仍拒绝。**CHAMFEREDGE 命令未接线**：仍是有名字的拒绝；NURBS/曲面 lift、圆角、
-    SHELL、`SURFACE` 家族仍未实现。证据：Linux 契约/单元（真实内核）。**实测范围**：凸 **90°
+    其它样条仍拒绝。**同轮把 `CHAMFEREDGE` 接成命令**（一次边拾取、种子取 `PickHit.point`，
+    详见下方「P2.0 接缝」）；NURBS 显示、圆角、
+    SHELL、`SURFACE` 家族仍未实现（曲面 lift 由 P2.1b 补齐）。证据：Linux 契约/单元（真实内核）。**实测范围**：凸 **90°
     平面边**（单位 box、wedge 的底/背面交线；含 `distance=0.1` / `second=0.2` 非对称）；
     **凹边与非 90° 二面角未测**，能力声明不覆盖它们。
-  - **曲面 body**（含 cylinder/cone/sphere/torus 面）的布尔、质量属性与倒角**显式拒绝**
-    （`solid.lift_requires_planar`），曲面 lift 是 P2.1；
+  - **P2.1b（2026-11-17，已实现）**：`cad-domain` 增加 `BrepSurface::Nurbs { u_knots, v_knots,
+    points }`（齐次控制网、隐式次数、无周期性标志）与 `BrepFace.domain`；record `Spline`/
+    `RationalSpline` 读成 `Nurbs`（`Spline` ⇒ `w=1`），`BallPatch`/`PlacedRevolution`/`Blend`
+    与样条/椭圆边界曲线仍按名拒绝；写侧把 `Cylinder`/`Cone`/`Sphere`/`Torus` 面带解析 label +
+    `solidcore::eval::form::surface` 的**精确有理 NURBS form** + form 参数 `(u,v)` box + 精确
+    pcurve（`pcurves_within`，未命中或偏网格裁剪 ⇒ `solid.pcurve_not_exact`）回写 record（纬圆先
+    重标到面自己的 frame，再由 `verify_pcurves` 的 6 样本/1e-9 相对比对证明；**完整圆锥**的
+    apex band 也写出）；
+    `ModelerCapabilities::nurbs = true` 且**承载**（曲面操作数缺该位 ⇒ `solid.nurbs_not_supported`）。
+    **显示仍不完整**：NURBS 面没有网格器（`solidcore-tess`，P2.1c），被剪裁侧壁报缺面。详见 §10。
+  - **曲面 body**（含 cylinder/cone/sphere/torus 面）的布尔、质量属性与倒角自 **P2.1b** 起**可参与**
+    （由 `nurbs` 能力位承载）；仍按名拒绝的是无 `(u,v)` box 的曲面面、无精确 pcurve 的边界、
+    多壳/空腔等结构性原因（`solid.lift_unsupported`），以及未声明 `nurbs` 的模型器
+    （`solid.nurbs_not_supported`）；曲面**边**倒角与圆角仍是 P2.1c/P2.2；
   - **P3a（2026-11-17，已实现一个受限子集）**：DXF 导出把**单壳、全平面、直线边界、真相似
     放置**的精确 `Body3d{Solid, Exact}` 写成真 `3DSOLID`，载荷是本仓库用 acadrust SAT 构建器
     生成的 **ACIS SAT 文本**（`crates/cad-import-acadrust/src/export/acis.rs`）。其余 body
     （曲面面、非直线边界、多壳/空腔、剪切/镜像放置、开放/非流形/反转拓扑）**按名拒绝**并退回
     既有 POLYFACE 显示缓存：`acis.curved_face_not_written`、`acis.non_line_curve_not_written`、
     `acis.no_shell_not_written`、`acis.multi_shell_not_written`、`acis.placement_not_written`、
-    `acis.invalid_topology_not_written`。**DWG 不写 `3DSOLID`**（任一体分支都记
-    `acis.dwg_3dsolid_unsupported`），**SAB 不写**。因为 `3DSOLID` 的 ACIS 载荷只在 AC1027
-    之前内联为 SAT 文本，**只要文件含任一 3DSOLID（含块定义内）整个 DXF 按 AC1024 写出**并记
+    `acis.invalid_topology_not_written`（这六个码在 DXF 与 DWG 下相同）。**P3b（同日）**：同一份
+    `SatDocument` 也用 `SabWriter` 写成**二进制 SAB**，DWG 的 `3DSOLID` 把它放进 **AC1032 的
+    AcDs（`AcDsPrototype_1b`）段**，记 `export.note.acis_sab_dwg` / 状态行
+    `save.exported_acis_sab[_partial]`；**没有 SAB 专用拒绝码**（转换不可失败，见「P3b 决策」）。
+    因为 `3DSOLID` 的 ACIS 载荷只在 AC1027 之前内联为 SAT 文本，**只要文件含任一 3DSOLID
+    （含块定义内）整个 DXF 按 AC1024 写出**并记
     `export.note.acis_sat_text_version`（SAVEAS 状态行同义）——这是**文档级**约束，未来任何需要
-    AC1027+ 的实体特性必须重审该路径。证据：本仓库自写→acadrust 解析→自读往返（盒/楔/棱锥/
+    AC1027+ 的实体特性必须重审该路径（**仅 DXF**；DWG 保持 AC1032）。证据：本仓库自写→acadrust
+    解析→自读往返（盒/楔/棱锥/
     带孔面；拓扑计数、面参数精确、几何 ≤1e-9·对角线、`BrepTessellator` 体积 ≤0.1%）+
-    `solid_command` 的真实 solidcore BOX 存盘/再导入（精确体、体积 1±1e-3）；**无第三方 CAD
-    读取器、无 SAB、无 vendor/像素/非 Linux 证据**。
-  - **仍是 P2 及以后**：AutoCAD 的交互式尺寸提示；NURBS/曲面 lift 与曲面布尔（P2.1）、
-    圆角/抽壳（P2.1/P2.2）、`SURFACE` 家族（P2.2）、**P3b（SAB 写出、DWG `3DSOLID`、
-    曲面/NURBS 面与一般裁剪 B-rep 的 SAT 文本）**。P2.0 只落了**平面体上一刀倒角的模型器
-    能力**，CHAMFEREDGE 命令仍是具名拒绝（模型器能力不对用户可达）。
+    `solid_command` 的真实 solidcore BOX 存盘/再导入（精确体、体积 1±1e-3）+ P3b 的
+    DWG 写入→`DwgReader` 读回（AcDs）→`sab_to_brep` 同一精确体；**无第三方 CAD 读取器、无
+    vendor/像素/非 Linux 证据**（SAB 头是 ACIS 7.0（700，非 ASM），vendor 接受性未验证）。
+  - **仍是 P2 及以后**：AutoCAD 的交互式尺寸提示；NURBS 面的**显示**（`solidcore-tess`）与圆角
+    （P2.1c）；`SURFACE` 家族（P2.2）；DXF AC1027+ 的 SAB 输出（本构建**没有版本选择器**，DXF 恒 AC1024）。
+    P2.0 的倒角、P2.1a 的圆弧 lift 与 P2.1b 的曲面 lift 已实现，且倒角已接成 `CHAMFEREDGE` 命令
+    （模型器能力不再是不可达）；证据只有 Linux 契约/单元。
     `UNION`/`SUBTRACT`/`INTERSECT` 已是 C2 后台任务（见下）；
     `3DSOLID`/`BODY` 是**实体类型键**（模型器在 `Registration::entity_types` 声明），不新增同名命令。
-  - **阶段总结**：**P0/P0.1/P1（内核 + C1/C2/C3）已实现**；**P2.0（倒角模型器能力，无命令）已实现**；
-    **P3a（平面子集 SAT 文本）已实现**；**P2 其余（NURBS/曲面 lift、圆角、抽壳、SURFACE 家族）
-    未实现**；**P3b（SAB/DWG/曲面）明确拒绝**。
+  - **阶段总结**：**P0/P0.1/P1（内核 + C1/C2/C3）已实现**；**P2.0（倒角 + `CHAMFEREDGE` 命令）
+    已实现**；**P2.1a（`BrepCurve::Arc` + B-Rep 容差）已实现**；**P2.1b（NURBS 载体 + 曲面 lift）
+    已实现**；**P3a/P3b（平面子集 SAT 文本与 DWG SAB）已实现**；**P2.1c（NURBS 面显示、圆角）与
+    P2.2（`SURFACE` 家族、抽壳、曲面边倒角）未实现**。
   验证边界：只有 Linux x86-64 上的契约/单元证据——测试进程里跑的是**真实**固定 revision 的
   `solidcore` 内核（无 mock、不引用上游 golden）；Windows/macOS/Android/Web 的 solidcore
   运行状态与模型器注入、任何 GPU/像素/性能结论一律 **NOT VERIFIED**。
-- 日期：2026-11-16（P1/B2 2026-11-17，P1/C1 2026-11-17，P1/C2 2026-11-17，P1/C3 2026-11-17）。
+- 日期：2026-11-16（P1/B2 2026-11-17，P1/C1 2026-11-17，P1/C2 2026-11-17，P1/C3 2026-11-17，
+  P2.0/P2.1a/P3a/P3b 2026-11-17）。
 - 相关：[ADR-0033](0033-multi-format-import.md)（多格式导入；D2/D9 的 BRep 边界）、
   [ADR-0031](0031-acadrust-vendored-patch-policy.md)（依赖补丁策略）、
   `docs/kernel-acis.md`（现有 ACIS 契约）、`docs/compatibility.md`（逐命令能力表）、
@@ -243,21 +266,28 @@ pub struct Body3d { pub kind: BodyKind, pub exact: BodyExact, pub display: BodyD
   命令注册、体积/质心/惯性、由 `BrepFace.id` 产出 `face_sources`、`VSCURRENT`。
 - **P2**：圆角/倒角/抽壳；`BrepSurface::Nurbs`（有理 B 样条 + 权重）与 NURBS 显示；
   `SURFACE` 家族（PLANESURF/EXTRUDEDSURF/LOFTEDSURF/REVOLVEDSURF/SWEPTSURF）。
-  **P2.0（已实现，仅模型器能力）**：平面体上的单边直线倒角（`SolidOperation::Chamfer`）；
-  CHAMFEREDGE 命令与其余 P2 内容仍未实现。
+  **P2.0（已实现，含命令接线）**：平面体上的单边直线倒角（`SolidOperation::Chamfer`）与
+  `CHAMFEREDGE` 一次边拾取（种子 `PickHit.point`，原地改写）；其余 P2 内容仍未实现。
+  **P2.1a（已实现）**：`BrepCurve::Arc`（跨度 `(end_param − start_param).rem_euclid(2π)`；
+  跨度 ≤ `1e-9` 是 `arc-without-span`，**v400 SAT 的 Arc 边不可导入**）与
+  `BrepData.tolerance`/`BrepFace.tolerance`（**模型单位长度**、`Option`、`None` 不臆造；
+  只有 `record::bake` 按 placement 缩放一次）；圆弧边界的**平面**面可 lift/离散/回写。
+  **P2.1b（已实现，见 §10）**：NURBS 载体 + 曲面 lift（弧边界曲面侧面随之可 lift，但显示仍缺面）。
   曲线/曲面评估优先走 solidcore 服务，避免在域内再写第二套评估器。
-- **P3**：ACIS 写出。**P3a（已实现）**：平面子集的 SAT 文本（DXF `3DSOLID`），见上方状态块；
-  **P3b（未实现，显式拒绝）**：SAB 二进制（`acis.sab_write_unsupported`）、DWG `3DSOLID`
-  （`acis.dwg_3dsolid_unsupported`）、曲面/NURBS/一般裁剪 B-rep 的 SAT 文本
-  （`acis.curved_face_not_written` / `acis.non_line_curve_not_written`）。
+- **P3**：ACIS 写出。**P3a（已实现）**：平面子集的 SAT 文本（DXF `3DSOLID`）；**P3b（已实现）**：
+  同一子集的 SAB 二进制与 DWG `3DSOLID`（AC1032 AcDs 段），见上方状态块与「P3b 决策」。
+  **仍未实现（显式拒绝，不新增码）**：曲面/NURBS/一般裁剪 B-rep 的写出
+  （`acis.curved_face_not_written` / `acis.non_line_curve_not_written`）、`BODY`/`REGION`/
+  `SURFACE` 写回、ASM（21800）载荷、DXF AC1027+ 的 SAB 输出（无版本选择器）。
 
 ## 4. 后果与风险
 
 1. **match 分支扩散**：新增变体会让约 26 个生产文件、48 个文件（含测试）各加一条
    显式分支。这是本决策的**目的**：编译器强制每个消费者表态，而不是把 body 当三角汤。
    禁止用 `_ => {}` 兜底 `Body3d`。
-2. **导出回归**：DWG 导出今天把离散 ACIS 写 `POLYFACE`。P0 必须保持字节同构，并在
-   报告中明确"精确 B-Rep 未写出"，不得写成 `3DSOLID`。
+2. **导出回归**：DWG 导出把离散 ACIS 写 `POLYFACE`（P0 保持字节同构，报告明确"精确 B-Rep
+   未写出"）。**P3b 起**平面子集改写真 `3DSOLID`（DWG 的 SAB 在 AC1032 AcDs 段），其余体仍
+   退回 `POLYFACE` 并逐个记 `acis.*`——不得把"退回了显示缓存"写成 `3DSOLID`。
 3. **双真相**：靠 `BodyDisplay` 是缓存 + 单行同时替换 + `Solid ⇒ Exact` 不变量约束；
    P2 再引入 `Arc<BrepData>` 共享以控制历史内存。
 4. **wasm**：solidcore 是大型纯 Rust 依赖且无取消钩子；wasm 无线程。P1 起按载体报告
@@ -289,11 +319,11 @@ pub struct Body3d { pub kind: BodyKind, pub exact: BodyExact, pub display: BodyD
 | crate | `crates/cad-kernel-solidcore`（唯一允许命名 `solidcore` 的包，`#![cfg(not(target_arch = "wasm32"))]`） |
 | 依赖 | `solidcore-ops` + `solidcore-record`（`ops` 传递引入内核与 `solidcore-convert`），git revision `55ae49ef919b606bf77901df626ed9bb543e5212`，Apache-2.0，目标表 `cfg(not(wasm32))`；无 `[patch.crates-io]` |
 | 注册 | `type_key = yacr.kernel.solidcore`，`priority = 10`，`entity_types = 3DSOLID/BODY`（**只有**这两类：`REGION`/`SURFACE` 是零厚度 sheet body，本切面既不创建也不接受为操作数，声明它们会过度承诺；P2 的 SURFACE 家族再加）；`Registration::version` 是 `u32`（本适配器契约版本 `1`），上游版本串 `1.0.1+55ae49ef919b` 由 `SolidCoreModeler::UPSTREAM_VERSION` 与 capabilities 声明 |
-| 能力 | primitives 全真（7 族）、booleans 真、mass_properties 真、chamfer 真（P2.0，**平面体**上的单边直线倒角）；fillet/shell/nurbs 假。**booleans / chamfer 是 family 级声明**：单个操作数不可 lift（曲面 body、开放 sheet、多于一个 shell、空腔、结构不一致）时，该次调用返回 `Unsupported` 并带稳定码，调用方**必须**逐次处理，不得把 family 级 `true` 当成「每个操作数都能算」 |
-| 转换 | `BrepData → record`：仅平面面 + `Line` 环、单 shell、可烘焙 placement；`record → BrepData`：Plane/PlaneThrough/Cylinder/Cone/Sphere/Torus + Line/整圆 |
+| 能力 | primitives 全真（7 族）、booleans 真、mass_properties 真、chamfer 真（P2.0，**平面体**上的单边直线倒角）、nurbs 真（P2.1b，登记 `nurbs.faces`，**承载**曲面操作数）；fillet/shell 假。**booleans / chamfer / nurbs 是 family 级声明**：单个操作数不可 lift（开放 sheet、无 `(u,v)` box 或无精确 pcurve 的曲面面、多于一个 shell、空腔、结构不一致）时，该次调用返回 `Unsupported` 并带稳定码，调用方**必须**逐次处理，不得把 family 级 `true` 当成「每个操作数都能算」 |
+| 转换 | `BrepData → record`：平面面 + `Line` 环，**自 P2.1b 起**解析曲面面带解析 label + `eval::form` 精确 NURBS form + `(u,v)` box + 精确 pcurve（`Line`/整圆/圆弧），单 shell、可烘焙 placement；`record → BrepData`：Plane/PlaneThrough/Cylinder/Cone/Sphere/Torus + **`Spline`/`RationalSpline` → `Nurbs`** + `Face.domain` + Line/整圆/圆弧 |
 | 精确性 | 作者化 box/wedge/pyramid 由内核 `Body::from_record(.., false)` 验证后才交出；体积用闭式断言（1.0 / l·w·h、l·w·h/2、s²·h/3） |
 | 结构一致性 | lift 之后除 record 的 `validate` 还做：每条边**恰好两次**使用且两个面在**壳的朝向**下反向遍历（拒绝反向面/重复面/把 sheet 当 solid）、每个环按精确位首尾相接、以及 `solidcore_ops::record_check::agreement` 的几何一致性检查。任一失败 → `Unsupported` + `solid.lift_unsupported`（不是「可算但算错」） |
-| 拒绝码 | `solid.lift_requires_planar` **只**用于两处非平面（非 `Plane` 面 / 非 `Line` 边）；结构/退化/空/容差/记录校验 → `solid.lift_unsupported`；placement 或平面 frame 不可烘焙（镜像、非正/非有限缩放、奇异或含剪切矩阵）→ `solid.placement_not_supported`；非相似变换 → `solid.nonuniform_transform`。倒角：选择点离所有边都远 → `solid.edge_not_found`；内核建不出该倒角 → `solid.chamfer_failed`（两者都是 `Unsupported`） |
+| 拒绝码 | `solid.lift_requires_planar` **只**用于 `BrepData → record` 里非 `Line`/整圆/`Arc` 的边界曲线与 `Unsupported` 曲面种类（P2.1b 起解析曲面面不再走此码）；结构/退化/空/容差/记录校验 → `solid.lift_unsupported`；曲面面缺 `(u,v)` box 或某个 use 无精确 pcurve → `solid.lift_unsupported` / `solid.pcurve_not_exact`；模型器未声明 `nurbs` → `solid.nurbs_not_supported`；placement 或平面 frame 不可烘焙（镜像、非正/非有限缩放、奇异或含剪切矩阵）→ `solid.placement_not_supported`；非相似变换 → `solid.nonuniform_transform`。倒角：选择点离所有边都远 → `solid.edge_not_found`；内核建不出该倒角 → `solid.chamfer_failed`（两者都是 `Unsupported`） |
 | 内核错误 | `Unsupported`/`Unported` → `Unsupported`；`UnsureRegion` → `Failed(solid.unsure_region)`；`Empty` → `Failed(solid.empty_result)`；`Internal`（会话捕获的内核 panic）→ `Failed(solid.kernel_panic)` 且**不回传 panic 文本**；`Cancelled` → `Err(Cancelled)`。**倒角另有映射**（`error::from_chamfer`）：布尔对应的 `Argument`/`Status`/`NoRoom`/`TooLarge`/`NoEffect` → `Unsupported(solid.chamfer_failed)`（几何上建不出来，不是 `Failed` 的空成功） |
 | 质量属性 | `Body::mass_properties(1e-6)`，报 `MassAccuracy::Requested`（估计，不证明），**不**标 `Analytic` |
 | 取消 | 前/后检查 + 布尔与倒角共用 `ops::watched`（内部是 `solidcore_ops::cancel::{CancelToken, within}`；看门狗线程每 50 ms 轮询接缝回调，即**检测粒度**；调用结束用 `unpark` 立即唤醒，成功路径不额外等 50 ms；`StopGuard` 在 `Drop` 里置位并唤醒，内核调用 panic 也不会把 `thread::scope` 卡在睡着的看门狗上），`Error::Cancelled → CadError::Cancelled`，无 `aborted` 产物 |
@@ -324,8 +354,185 @@ pub struct Body3d { pub kind: BodyKind, pub exact: BodyExact, pub display: BodyD
    布尔返回的合法产物，`mass_properties` 在对它 lift 时返回 `Unsupported` + `solid.lift_unsupported`，
    绝不把两块的体积相加当结果。
 
-**仍未做**（P2 其余/P3）：NURBS 曲面/曲线与 pcurve 的中性表达、曲面 body 的布尔/质量属性/
-倒角、圆角、抽壳、`SURFACE` 家族、ACIS SAB 写出、DWG `3DSOLID`、曲面/NURBS 面的 SAT 文本
-（P3a 只覆盖单壳全平面直线体，见上方状态块）。**P2.0 的倒角只是模型器能力**：CHAMFEREDGE
-仍是具名拒绝，用户不可达。
-（命令接线 C1/C2/C3a/C3b/C3c 已落地，见上方状态块与 D6。）
+**仍未做**（P2.1c/P2.2 与 P3 剩余）：NURBS **面的显示**（无网格器，`solidcore-tess`）、圆角、
+抽壳、`SURFACE` 家族、`BODY`/`REGION`/`SURFACE` 写回、曲面/NURBS/一般裁剪 B-rep 的 ACIS 写出、
+ASM（21800）载荷、DXF AC1027+ 的 SAB 输出（本构建**没有版本选择器**）。曲面 body 的布尔/质量属性/
+倒角、NURBS carrier 与 pcurve 已在 P2.1b 落地（见 §10）。（命令接线 C1/C2/C3a/C3b/C3c 与 P2.0 的
+`CHAMFEREDGE` 已落地，见上方状态块与 D6。）
+
+## 8. P2.0 接缝：`CHAMFEREDGE` 用拾取命中点，不用工作平面
+
+`CapturePoint(PointInput::CanvasLocal { logical_position, .. })` 本来就携带逻辑像素，但历史上的
+宿主路径走 `world_point` → `Viewport::screen_to_world`，会把 `z` 硬写成 `work_plane.origin.z`。
+在 3D/透视视图里那是一个**编造的点**。`CHAMFEREDGE` 因此用**既有拾取漏斗**
+（`pick_at_screen_with_visibility_and_vendor`）解析它的唯一一次拾取并取 `PickHit.point`；body 来自
+当前选择（面引用折叠到所属 body，实例/块路径拒绝）。种子以 `SolidEdgeSelector::NearestToPoint`
+传下去，边由**内核自己的容差**选择，`cad-app` **不添加第二套容差**。没有子边身份、没有边高亮、
+没有预览几何、没有圆角、没有链式，也没有新的内核能力。命令原地改写被选中的行（一次 revision、
+一步撤销），内核的具名答复（`solid.lift_requires_planar` / `solid.edge_not_found` /
+`solid.chamfer_failed` / `solid.kernel_failed`）**原样透传，不加前缀**。
+
+可达拒绝码（命令路径）：`unsupported-runtime: solid-modeler`、`chamferedge.selection_required`、
+`chamferedge.selection_multiple`、`chamferedge.not_addressable`、`chamferedge.not_a_solid`、
+`chamferedge.not_exact`、`chamferedge.not_model_space`、`chamferedge.selection_changed`、
+`chamferedge.distance_invalid`、`chamferedge.pick_missed`、`chamferedge.pick_not_selected_body`、
+`chamferedge.kernel_busy`、`chamferedge.unexpected_mass`，以及类型化但无载荷调用的
+`chamferedge.requires_payload`。`chamfer_edge_target` 是宿主工具启动门、点击匹配器与命令**共用**
+的唯一选择/body 解析器；`PickHit` 从 `cad_app::picking` 重导出，宿主不必为同一漏斗再引入
+spatial 依赖。
+
+**操作数约束（评审后补）**：两个退距必须 `> 0`；通道默认 `0/0`（对 2D `CHAMFER` 合法）下第一次
+回车就是具名 `chamferedge.distance_invalid`，**拾取保留**，状态/提示行已写明原因。
+`chamferDistanceA/B` **按设计**与 2D `CHAMFER` 共享：`ChamferMethod`/角度/`trim` 是 2D-only
+概念，CHAMFEREDGE 总是把**两个值都**当 3D 退距消费（2D ANGLE 模式留下的旧 `B` 会成为真实退距）。
+工具启动还把 Work-only 命令的权限门放在模型器/选择门**之前**，所以 Viewer 调用在两条路径上都是
+同一个 `PermissionDenied`（此前会产生两个不同码）。
+
+## 9. P3b 决策：DWG 的 `3DSOLID` 用 `SabWriter` + `Solid3D::from_sab`
+
+**决定**：DWG 的附着路径是显式的 `SabWriter::write(&sat)` → `Solid3D::from_sab(bytes)`（DXF 仍是
+`Solid3D::from_sat(text)`），而不是让上游从 SAT 文本二次解析。
+
+**理由（acadrust 0.6.8 源码实测）**：`write_solid3d` 先算
+`pending_has_ds_data = needs_acds_section() && e.acis_data.contributes_sab()`；`contributes_sab`
+两条路径都满足，但 `queue_sab_entry` 的 **SAT 分支**会再解析文档，**解析失败时静默不 push，而
+`has_ds_data` 已经是 true**——那会留下一个 AcDs 里没有载荷的孤儿 `3DSOLID`。`from_sab` 把
+`is_binary = true`、`version = Version2`、`sat_data` 置空，正是 writer 的 AC1027+ 分支期待的
+形状；载荷由**我们持有的字节**决定，不依赖 writer 内的一次解析。今天 `brep_to_sat` 已先
+`validate()`，所以 SAT 分支的失败态够不到，但它仍是**不用** SAT 文本走 DWG 的原因。AcDs 段由
+`needs_acds_section = version.r2013_plus(document.version)` 触发，而 `document.version` 是
+**AC1032**——这也是 DXF 的 AC1024 钉死规则**不得**作用于 DWG 的原因。测量事实：1×2×3 的盒附着
+5271 字节，读回后的 blob **字节数相同**、解析为 6 面、体积精确 6。
+
+DWG 覆盖**与 DXF 相同的平面子集**；子集外的体在两种格式下都退回显示缓存并记同一组六个
+`acis.*_not_written` 码——拒绝是**体**的属性，不是容器的属性。**没有** SAB 专用拒绝码：
+`SabWriter::write` 返回 `Vec<u8>`（不失败），输入是本仓库已 `validate()` 的同一份 `SatDocument`，
+一个不可达的码不写进文档。
+
+**状态与限制**：SAB 头是 **ACIS 7.0（700，非 ASM）**（构建器是 `SatDocument::new_body()`，与
+DXF 路径同源；`SatVersion::V21_0` 的数字是 2100，ShapeManager 需要
+`from_sat_number(21800)`）；AutoCAD/ODA/任何 vendor 是否接受我们的 700 SAB **未验证、不声明**。
+**第二项未验证的 vendor 风险**：每个 AC1027+ `3DSOLID` 还带一个 `acis_revision` 块，而我们把它
+**置零**写出（`has_guid = false`、全零 GUID）——`Solid3D::from_sab` 设 `AcisRevision::default()`，
+`write_solid3d` 无条件写该块。acadrust 自己的文档要求该块在写出时保留，省略会破坏实体流（文件
+在 ACAD/TrueView/BricsCAD 里打不开）；我们**没有**可保留的源 revision，且**没有测试能抓到**
+（往返只走 acadrust 的宽松读取器）。这是与 ASM 头并列的、**未验证的 vendor 接受性风险**，不声明。
+DWG 往返只经 acadrust **自己的** `DwgReader`（`AcDb:AcDsPrototype_1b` → `SabReader` →
+`sab_to_brep`）。AcDs 记录表读取器需要 ≥2 条记录才用 handle 表，单实体文件按位置附着（已实测
+单盒、单块成员与三个夹具）；多实体只由混合文档（solid + MTEXT）与块用例覆盖，**没有**多实体
+压力夹具。写出 ACIS 总会丢弃显示缓存，报告恒 `Partial`，所以**干净**的
+`save.exported_acis_sab` / `save.exported_acis_sat` 目前不可达（键保留，UI 不声称它们出现）。
+证据只有 Linux 契约/单元 + 本仓库自写/acadrust 自读往返；**没有** GPU、像素、非 Linux 载体或
+第三方 CAD 读取器证据；`cad-cli-tools` **没有**导出 DWG 的路径，所以“真实内核 → DWG”这一用例
+不存在、也没有被伪造（NOT RUN）。
+
+## 10. P2.1b 决策：曲面 lift 写「label + 精确 form + 精确 pcurve」
+
+**背景**：P2.1a 之后（P2.1b 之前），圆弧边界的**曲面侧面**（半圆柱壁、圆角槽侧壁）与所有曲面 body
+的布尔/质量属性仍被 `solid.lift_requires_planar` 拒绝——不是因为我们不认识这些曲面，而是
+`BrepData → record` 只会写平面。而 record 侧其实早就有 `SurfaceKind::BSpline`、`Face.nurbs`、`Face.domain` 与逐 use 的
+pcurve 槽位；缺的是我们这一侧的写方与读方。
+
+**决定**：P2.1b 一次性把这两个方向补齐，且**只用闭式解**：
+
+1. **读侧（载体）**：`BrepSurface::Nurbs { u_knots, v_knots, points }`（齐次控制网 `[x·w,y·w,z·w,w]`、
+   **隐式次数**、**无周期性标志**；权重有限且 `> 0`）与 `BrepFace.domain: Option<[[f64;2];2]>`。
+   record `Spline` → `Nurbs`（`w = 1`）、`RationalSpline` → `Nurbs`（齐次系数），net/knots/weights
+   逐位通过；`Face.domain` 是**生产者自己的** `(u,v)` 矩形，唯一来源，逐字带入。`BallPatch`/
+   `PlacedRevolution`/`Blend` 与样条/椭圆**边界曲线**仍按名拒绝：没有 curve 变体、没有
+   `BrepFace.approximation`，不把“没证明”的东西认证成解析曲面。record 的结构限制
+   （2…4096 控制点/方向、次数 1…16、`knots.len() == count + degree + 1`）不在类型上断言，
+   只在回写中性体时校验（只有它能分辨畸形网与不寻常网）。
+2. **写侧（form）**：`Cylinder`/`Cone`/`Sphere`/`Torus` 面写**解析 label** +
+   `solidcore::eval::form::surface` 给出的**精确有理 NURBS form**。不拟合、不采样：`eval::form`
+   是内核里唯一把 label 与几何证明为同一曲面的地方，所以直接用它。完整圆边界
+   （`BrepCurve::Circle`）也随之写出（`Curve::Circle` + 整圈 form + 一个 seam 顶点）；闭合边
+   没有第二个顶点可读 `forward`，方向由共享该圆的**平面面**解析，两个非平面面共用时按名拒绝。
+   **完整圆锥**（`radius_top = 0`）也能写：读回的退化 apex 环被写成内核 record 自己的 apex band
+   （**一条母线用两次**、apex 作其对端顶点——几何仍是同一母线），因此 `V = πr²h/3`、
+   `A = πr² + πr√(h²+r²)`、形心在 `h/4` 可测；**不是只有截头圆锥**。
+3. **pcurve 只用精确闭式解，且精确性要被证明**：每个 use 的 pcurve 来自
+   `solidcore_ops::pcurve::pcurves_within`——它只接受 kernel 能证明的闭式像，**绝不拟合**；
+   未命中是新的稳定码 **`solid.pcurve_not_exact`**。理由已实测：用占位/拟合 pcurve 时，参数域上
+   的面积积分返回 0（体积仍对，面积错），所以宁可拒绝一个面，也不写一个“能算但算错”的体。
+   证明机制（**不是**“内核的少数样本”）：
+   - 闭式解在内核里说 **label 参数**，record 存的是**面的 form 参数**，两者只在边界落在共享的
+     **四分之一网格**上才逐项一致。写方因此把圆柱/圆锥的**纬圆重标到面自己的 frame**
+     （`curved::align_curved_frames`，只移动参数零点、圆不动）。**不能**改用
+     `solidcore::eval::form::on_frame` 去位移角度区间：整圈 pcurve 会不再覆盖 form 的 knot span，
+     record 以 “pcurve interval differs from its edge's” 拒绝（已实测）。
+   - `verify_pcurves` 对每个 use 在 **6 个样本（4 个内点）** 上比对 `pcurve(t)` 的面点与 `edge(t)`
+     的点，按 `solidcore` 的 **1e-9 相对**（`1e-9·(1+max|坐标|)`）判“精确”；未命中 ⇒
+     `solid.pcurve_not_exact`，诊断点名 **face / loop / use**、gap 与原因。
+   - **偏离网格的裁剪**（旋转过的盒切圆柱等）没有精确闭式 pcurve：拒绝 `solid.pcurve_not_exact`
+     并写明 “an exact closed form exists only where the boundary shares the face's quarter grid”，
+     不把 record 的内部报错（“geometry disagrees with its topology”）漏给用户。**平面**面照旧
+     lift（圆弧退回自己的 knots）。
+4. **能力位承载**：`ModelerCapabilities::nurbs = true`（登记字符串 `nurbs.faces`）。布尔 / 质量
+   属性 / 倒角任一操作数含非平面面时该位**必需**；声明 `false` 的模型器答
+   **`solid.nurbs_not_supported`**（不是静默尝试、也不是泛化的 kernel 错误）。它是 **family 级**
+   的：`true` 只表示这一族可用，单个操作数仍可能因无 box / 无 pcurve / 结构不一致而 `Unsupported`
+   ——这与 `booleans`/`chamfer` 的既有约定一致，命令层必须逐次处理。**族先于几何**：族本身未声明的
+   请求答 **`solid.unsupported`**，即使操作数带曲面也不报 `solid.nurbs_not_supported`（否则会把
+   用户指向一个改能力位也修不好的原因）。
+
+**其余具名拒绝**（全部 `Unsupported`，与上面同一条 record 方向，不属于 ACIS 导出）：
+`solid.pcurve_not_exact` 同时覆盖“闭式解未命中”与“裁剪偏离四分之一网格”；`solid.lift_unsupported`
+也用于 label 不在 `parameter_scale` 覆盖的四种解析族内、曲面 form 无法重标（不是 NURBS）、**圆弧边
+没有有理 NURBS form 可投影进面**、同一整圆与一个**不包含它**的平面面共用（法向不平行，含垂直——
+垂直曾被误读成“反向遍历”）、调用方给的 seam 点不在该圆的参考半径上。
+
+**两处必须照实记录的偏差（都由实测逼出）**：
+
+- **写入的 `(u,v)` box 由面自身边界推出**，不复制 `BrepFace.domain`。生产者 box 在**生产者自己的
+  form 参数**里（球 `[0,1]²`、圆柱弧度），直接交给读 label 参数的 `eval::form` 会把每个球写成小片
+  并拒绝。中性 box 的**存在**仍是生产者“这是被剪裁片”的声明：曲面面未声明 ⇒ `solid.lift_unsupported`
+  （写方不发明参数盒）。修正的是“复制数字 → 得到错误的 form 范围”。
+  `label_box` 是**包围盒**：by construction 比裁剪片宽（u 取整圈、v 取边界范围），**绝不可收紧**。
+  球的 seam 是**零面积 bigon**，唯一的合法性来源就是整圈 u 盒——两极跳变把第二个 use 放在一个
+  **周期**之外；收紧盒子会让两个 use 叠在一处，内核直接拒绝该面。
+- **`eval::form` 的 knots 按每个角度方向 π/2 重标，但这不是“form 参数 = label 角度”**。
+  `eval::form` 的参数 `q + quarter_u(ψ)` 在四分之一圈内**非线性**：重标后参数 `0.25` 对应
+  `0.357 rad`，**不是** `0.393 rad`；任何代码都不得把 form 参数当角度用。重标只买到**单位**：
+  一圈 = `2π`，于是 box 端点、解析曲面的 `Domain::period`（`2π`）与 seam 跳变同单位，落在四分之一
+  线上的边界正好压在 knot 上。不重标时单位对不上（圆柱 seam 落在 `u = 2π` 而端圆在 `u = 4`，
+  球面经线起点偏离边 0.65 mm）。pcurve 的精确性由第 3 条的 `align_curved_frames` + `verify_pcurves`
+  保证，**不是**由这次重标保证。
+
+**torus seam 的顶点算术（M1）**：seam 顶点**只算一次**，同一个点穿进两个 edge use。旧实现把
+`(o + x·R) + x·r`（tube 侧）与 `o + x·(R+r)`（赤道侧）分别求值——record 顶点按**精确位**去重——
+两者只在 frame 对齐时逐位相等（x 对齐帧 0 % 不一致，一般单位帧约 50 % 差一个 rounding step），
+所以只测原点/轴对齐的用例一直是绿的。现在由 `a_torus_on_a_generic_frame_keeps_one_seam_vertex`
+（手写一般单位帧）与 `a_rotated_torus_away_from_the_origin_keeps_one_seam_vertex`（非原点 + 旋转，
+经公共 transform 烘焙）钉住。
+
+**`CHAMFEREDGE` 与曲面体（M3）**：曲面体不再在 lift 处被拒，倒角会走到**选边**。写入方为闭合曲面
+重建的**合成 seam**（一条边的两个 use 同属**一个**面）现在被 `nearest_edge` **跳过**，所以在圆柱
+rim 上点击得到如实的 **`solid.edge_not_found`**（诊断点名被跳过的 seam），**不是**
+`solid.chamfer_failed`，body 不变。两个**不同**面共享的光滑 seam 仍会答 `solid.chamfer_failed`
+（“no blend (Smooth)”），但本构建没有任何可构造的 body 会产生这种边，因此该路径只在**谓词级**
+（`is_seam` 的单元测试）被钉住，没有真实 body 证据。曲面**边**倒角仍是 P2.2。
+
+**显示缺口与 P2.1c**：`BrepSurface::Nurbs` 没有任何网格器。中性离散器对该面按名拒绝，并在原因里
+点名 **`solidcore-tess`**（`nurbs-face: no NURBS mesher in this build (solidcore-tess, phase
+P2.1c)`），该面进 `missing_faces`，body 保持 `Partial`；被**剪裁**的圆柱/圆锥侧壁同样报缺面
+（条带要求两个整圆）。**lift 成功、可布尔、可测量，但不等于显示完整**。`solidcore-tess` 接入是
+P2.1c 的路径；在它落地前不允许用采样网格冒充实体的精确面。
+
+**依赖与门禁**：`eval::form` 收内核的 `eval` 类型，所以本 crate 直接命名了**两个新依赖**——
+`solidcore`（只用 `eval::form::{surface,curve}`）与 `solidcore-convert`（record↔kernel 的
+`surface`/`record_surface`/`curve`/`record_curve`）。两者与既有的 `solidcore-ops`/`solidcore-record`
+同一 pin（`55ae49ef`），同一仓库，**无 `[patch.crates-io]`、无版本变化**；
+`scripts/check-architecture.py` 的允许表已包含这四个名字，且只有 `cad-kernel-solidcore` 可以命名它们。
+
+**证据**（Linux x86-64、真实固定内核；不是 GPU/像素/宿主/其它载体）：圆柱 r=1 h=2 → `V=2π`/`A=6π`；
+球 `4π/3`；圆环 R=2 r=0.5 → `V=π²`/`A=4π²Rr`；截头圆锥 r1=1 r2=0.5 h=2 →
+`πh(r1²+r1r2+r2²)/3`；**完整圆锥** r=1 h=2 → `V=πr²h/3`、`A=πr²+πr√(h²+r²)`、形心 `h/4`；圆柱
+∪/∖/∩ 盒 → `8+π/2`/`π/2`/`3π/2`；被剪裁半圆柱 → `V=π`/`A=3π+4`/形心 y=`4/(3π)`；二次 lift 稳定。
+**断言一律是内核请求的 `1e-6` 相对精度**（个别绝对量用 `1e-6` 绝对），实测误差远小于它、具体数值只
+记在测试注释里，**不钉成界**。测试在 `cad-kernel-solidcore/tests/curved.rs`（含
+`a_full_cone_measures_its_apex_band`、两个 torus seam 用例、
+`a_trimmed_face_cut_off_the_quarter_grid_is_refused_by_name`）与 `tests/arcs.rs`（真实内核），
+NURBS 载体/命名/pcurve 的单元测试在 `record/nurbs_tests.rs`、`record/to_record_tests.rs`
+（`pcurves_are_exact_at_sixteen_interior_samples`）、`brep/tests.rs`、`solid/tests.rs` 与
+`ops/chamfer.rs`（`a_seam_is_skipped_and_a_shared_edge_is_not`）。

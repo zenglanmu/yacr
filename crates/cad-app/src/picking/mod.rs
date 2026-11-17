@@ -27,6 +27,9 @@ use crate::vendor::VendorRepresentationStore;
 use cad_db::{DrawingDatabase, LayerScope, MAX_INSTANCE_DEPTH};
 use cad_domain::*;
 use cad_spatial::{BackFacePolicy, ChunkGridIndex, PickItem, PickOptions, PickReport};
+// The hit type is re-exported so a host can name the one pick funnel's result
+// (position + identity) without a second spatial dependency.
+pub use cad_spatial::PickHit;
 use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::Instant;

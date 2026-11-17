@@ -47,6 +47,16 @@ pub(super) fn tessellate_cylinder(
                     ));
                 }
             }
+            BrepCurve::Arc { .. } => {
+                // An arc-bounded lateral face is a trimmed cylinder (P2.1b). Named
+                // explicitly: the `_` arm below would otherwise read it as "not a
+                // full circle" and hide which gap it is.
+                return Err(FaceFailure::UnsupportedSurface(
+                    "cylinder side face bounded by a circular arc (an open circle): curved side \
+                     faces are P2.1b"
+                        .into(),
+                ));
+            }
             _ => {
                 return Err(FaceFailure::UnsupportedSurface(
                     "cylinder boundary is not a full circle".into(),

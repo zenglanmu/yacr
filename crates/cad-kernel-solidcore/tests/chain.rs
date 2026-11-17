@@ -61,15 +61,21 @@ fn registration_and_capabilities_are_honest() {
     assert!(capabilities.mass_properties);
     // P2.0: exactly the straight chamfer on one edge, nothing else from P2.
     assert!(capabilities.chamfer);
-    assert!(!capabilities.fillet && !capabilities.shell && !capabilities.nurbs);
-    assert!(
-        registration
-            .capabilities
-            .iter()
-            .any(|entry| entry == "chamfer.sides"),
-        "the chamfer capability is advertised: {:?}",
-        registration.capabilities
-    );
+    // P2.1b part 2: a curved (non-planar) face is lifted back into the kernel,
+    // so the curved-operand capability is claimed. A fillet, a shell or a NURBS
+    // *edit* is still absent and stays false.
+    assert!(capabilities.nurbs);
+    assert!(!capabilities.fillet && !capabilities.shell);
+    for entry in ["chamfer.sides", "nurbs.faces"] {
+        assert!(
+            registration
+                .capabilities
+                .iter()
+                .any(|advertised| advertised == entry),
+            "the {entry} capability is advertised: {:?}",
+            registration.capabilities
+        );
+    }
 }
 
 #[test]
@@ -327,103 +333,6 @@ fn empty_intersection_is_failed_never_a_success() {
     };
     assert_eq!(diagnostics.len(), 1);
     assert_eq!(diagnostics[0].code, cad_kernel_solidcore::EMPTY_RESULT);
-}
-
-#[test]
-fn curved_primitives_map_analytic_surfaces_and_refuse_kernel_re_entry() {
-    let modeler = SolidCoreModeler::new();
-    let cases: [(PrimitiveSpec, &str); 4] = [
-        (
-            PrimitiveSpec::Cylinder {
-                origin: p(0.0, 0.0, 0.0),
-                radius: 1.0,
-                height: 2.0,
-            },
-            "cylinder",
-        ),
-        (
-            PrimitiveSpec::Sphere {
-                origin: p(0.0, 0.0, 0.0),
-                radius: 1.0,
-            },
-            "sphere",
-        ),
-        (
-            PrimitiveSpec::Cone {
-                origin: p(0.0, 0.0, 0.0),
-                radius_bottom: 1.0,
-                radius_top: 0.5,
-                height: 2.0,
-            },
-            "cone",
-        ),
-        (
-            PrimitiveSpec::Torus {
-                origin: p(0.0, 0.0, 0.0),
-                major_radius: 2.0,
-                minor_radius: 0.5,
-            },
-            "torus",
-        ),
-    ];
-    for (spec, name) in cases {
-        let brep = body(execute(&modeler, SolidOperation::Primitive { spec }));
-        // The curved face keeps its analytic kind: display and export get an exact
-        // surface, not an unsupported placeholder.
-        let analytic = brep
-            .shells
-            .iter()
-            .flat_map(|shell| &shell.faces)
-            .any(|face| {
-                matches!(
-                    (name, &face.surface),
-                    ("cylinder", BrepSurface::Cylinder { .. })
-                        | ("sphere", BrepSurface::Sphere { .. })
-                        | ("cone", BrepSurface::Cone { .. })
-                        | ("torus", BrepSurface::Torus { .. })
-                )
-            });
-        assert!(analytic, "{name}: no analytic surface in the mapped body");
-
-        // A boolean has to lift the body back into the kernel, which needs the
-        // curved shell's NURBS form and pcurves the neutral model does not carry
-        // yet. Refused with a stable reason, never approximated.
-        let other = body(execute(
-            &modeler,
-            SolidOperation::Primitive {
-                spec: box_spec(p(-2.0, -2.0, -2.0), 1.0, 1.0, 1.0),
-            },
-        ));
-        let outcome = execute(
-            &modeler,
-            SolidOperation::Boolean {
-                op: BooleanOp::Union,
-                left: &brep,
-                right: &other,
-            },
-        );
-        assert_eq!(
-            unsupported_code(&outcome),
-            LIFT_REQUIRES_PLANAR,
-            "{name}: boolean must refuse the curved lift"
-        );
-        assert!(outcome.body().is_none());
-
-        // Mass properties take the same lift gate.
-        let mass = execute(
-            &modeler,
-            SolidOperation::MassProperties {
-                brep: &brep,
-                density: 1.0,
-            },
-        );
-        assert_eq!(
-            unsupported_code(&mass),
-            LIFT_REQUIRES_PLANAR,
-            "{name}: mass must refuse the curved lift"
-        );
-        assert!(mass.mass().is_none());
-    }
 }
 
 #[test]
@@ -884,7 +793,7 @@ fn chamfer_refuses_a_point_far_from_every_edge() {
 }
 
 #[test]
-fn chamfer_refuses_bad_sizes_and_curved_bodies_and_honours_cancellation() {
+fn chamfer_refuses_bad_sizes_and_smooth_edges_and_honours_cancellation() {
     let modeler = SolidCoreModeler::new();
     let unit = body(execute(
         &modeler,
@@ -909,8 +818,12 @@ fn chamfer_refuses_bad_sizes_and_curved_bodies_and_honours_cancellation() {
         }
     }
 
-    // A curved body cannot be lifted in this cut: the same refusal as a boolean,
-    // never an approximated chamfer.
+    // A curved body now *lifts*, so what stops this chamfer is the **pick**: the
+    // cylinder's only `Line` edge is the seam the writer reconstructs to close the
+    // record, and a seam (both uses on one face) is not something a user can
+    // select. Handing it to the kernel used to answer "this edge has no blend
+    // (Smooth)" — naming an edge the caller never picked. Cutting a rim needs a
+    // curve-edge selector (P2.2).
     let cylinder = body(execute(
         &modeler,
         SolidOperation::Primitive {
@@ -930,7 +843,18 @@ fn chamfer_refuses_bad_sizes_and_curved_bodies_and_honours_cancellation() {
             second: None,
         },
     );
-    assert_eq!(unsupported_code(&outcome), LIFT_REQUIRES_PLANAR);
+    assert_ne!(
+        unsupported_code(&outcome),
+        LIFT_REQUIRES_PLANAR,
+        "a curved operand is no longer a curved-lift refusal"
+    );
+    assert_eq!(unsupported_code(&outcome), EDGE_NOT_FOUND);
+    assert!(
+        outcome
+            .unsupported()
+            .is_some_and(|reason| reason.detail.contains("seam")),
+        "the pick names the seam it refuses to hand over: {outcome:?}"
+    );
     assert!(outcome.body().is_none());
 
     // Cancellation wins before any work and leaves no product.

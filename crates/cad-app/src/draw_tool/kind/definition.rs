@@ -702,6 +702,35 @@ pub enum DrawToolKind {
     /// region output, object type) are **NOT IMPLEMENTED**. The created polylines
     /// are non-associative and the source entities are retained. Work-only.
     Boundary,
+    /// `CHAMFEREDGE`: pick **one edge** of the current selection's exact solid
+    /// body and cut it with the P2.0 planar chamfer (ADR-0036).
+    ///
+    /// The capture is exactly one step ([`Self::arity`] is `Exact(1)`) and that
+    /// step is an **entity pick** ([`Self::picked_step_count`] is `1`). The body
+    /// to cut is the **current selection**, so the kind
+    /// [`Self::requires_selection`] and the command layer refuses anything but
+    /// exactly one addressable exact solid. The pick is not an entity identity:
+    /// it is a **seed point** resolved through the ordinary pixel pick funnel
+    /// (`pick_at_screen_with_visibility_and_vendor`, `PickHit.point`), which is
+    /// the only point a 3D/perspective view can supply honestly. The host
+    /// requires the hit to name the selected body (a face sub-element collapses
+    /// to its owning body) and stores the hit point as the captured point; it
+    /// never routes this step through the work-plane mapping, which would
+    /// hard-stamp a fabricated `z`.
+    ///
+    /// The kernel picks the edge: the seed travels as
+    /// `SolidEdgeSelector::NearestToPoint` and the modeler answers
+    /// `solid.edge_not_found` when no edge is near it. There is **no** edge
+    /// sub-element identity, no edge highlight and no preview geometry (this
+    /// build has none), so the tool must not imply either. The two set-back
+    /// distances are the session typed channel
+    /// ([`super::ToolParameter::ChamferDistanceA`] / `B`) read at execute time.
+    ///
+    /// Deliberate subset (NOT IMPLEMENTED): `FILLETEDGE`, a chain of edges,
+    /// per-edge distances, a preview, and every curved/NURBS chamfer (the kernel
+    /// refuses a body whose lift needs non-planar surfaces with
+    /// `solid.lift_requires_planar`). Work-only.
+    ChamferEdge,
     /// BREAK: pick one LINE/ARC/CIRCLE/SPLINE (the first click is also the
     /// **first break point**) and then click the second break point.
     ///

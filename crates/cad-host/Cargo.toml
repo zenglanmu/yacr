@@ -28,3 +28,10 @@ serde_json.workspace = true
 # `std::time::Instant::now()` panics on wasm32-unknown-unknown; `web-time`
 # re-exports std elsewhere (no-op off wasm). See `src/lib.rs`/`src/core.rs`.
 web-time.workspace = true
+
+[dev-dependencies]
+# CHAMFEREDGE's tool-start gate needs an injected `SolidModeler` to prove the
+# Viewer refusal happens *before* the capability/selection checks. The seam trait
+# is all this test target links (the kernel itself stays carrier-owned; see
+# `scripts/check-architecture.py` and ADR-0036).
+cad-kernel-adapter.workspace = true

@@ -137,6 +137,13 @@ pub(crate) fn interaction_request_for(
         // entities are the whole input, so the selector only starts the tool.
         CommandId::ScaleText => Some(InteractionRequest::BeginDraw(DrawToolKind::ScaleText)),
         CommandId::ChamferLines => Some(InteractionRequest::BeginDraw(DrawToolKind::Chamfer)),
+        // CHAMFEREDGE (ADR-0036 P2.0) is a **one-pick** tool over the selected
+        // exact solid: the pick is the pixel hit point the kernel uses as its
+        // nearest-edge seed, and the body comes from the current selection. The
+        // host validates both (modeler + selection) at tool start.
+        CommandId::Extended(cad_app::ExtendedCommandId::ChamferEdge) => {
+            Some(InteractionRequest::BeginDraw(DrawToolKind::ChamferEdge))
+        }
         CommandId::FilletLines => Some(InteractionRequest::BeginDraw(DrawToolKind::Fillet)),
         CommandId::ArrayRectangular => Some(InteractionRequest::BeginDraw(DrawToolKind::ArrayRect)),
         CommandId::ArrayPolar => Some(InteractionRequest::BeginDraw(DrawToolKind::ArrayPolar)),

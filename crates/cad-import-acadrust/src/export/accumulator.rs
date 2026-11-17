@@ -142,7 +142,7 @@ impl ExportAccumulator {
     /// Most conversions use the derived `export.converted.<kind>` spelling. This
     /// entry point exists for outcomes whose code is itself the contract and
     /// names the missing feature (`acis.curved_face_not_written`,
-    /// `acis.dwg_3dsolid_unsupported`, ...) rather than only the entity kind. It
+    /// `acis.multi_shell_not_written`, ...) rather than only the entity kind. It
     /// still counts as one converted geometry, so the report can never stay
     /// `Complete`.
     pub(crate) fn record_converted_code(

@@ -119,11 +119,13 @@ pub fn export(request: &ExportRequest<'_>) -> CadResult<(Vec<u8>, ExportReport)>
     let ctx = EntityContext {
         database: request.database,
         limits: request.limits,
-        // Only the SAT text DXF output can carry a `3DSOLID` payload. DWG keeps
-        // the POLYFACE display cache and records
-        // `acis.dwg_3dsolid_unsupported` per body (the DWG ACIS path is not
-        // written by this slice).
-        allow_3dsolid: request.format == ExportFormat::DxfText,
+        // The format only picks the ACIS payload encoding for an exact body; it
+        // no longer decides *whether* one is written. DXF (AC1024) carries SAT
+        // text inline, DWG (AC1032) carries a binary SAB blob in the AcDs
+        // section. A body outside the planar single-shell subset falls back to
+        // its POLYFACE display cache in either format, under the ACIS writer's
+        // own `acis.*_not_written` code.
+        format: request.format,
     };
     let mut acc = ExportAccumulator::new();
 
@@ -217,10 +219,14 @@ pub fn export(request: &ExportRequest<'_>) -> CadResult<(Vec<u8>, ExportReport)>
 
     // A `3DSOLID` carries its ACIS payload inline as SAT text only before
     // R2013. From AC1027 on the upstream writer would convert the payload to a
-    // binary SAB blob in `ACDSDATA`; this slice writes SAT text, never SAB, so
-    // the file is declared as AC1024 (R2010) whenever a 3DSOLID is present —
-    // in model space or in a written block definition, because the DXF version
-    // is a single document-wide header.
+    // binary SAB blob in `ACDSDATA`; the DXF output of this exporter writes SAT
+    // text, never SAB, so the file is declared as AC1024 (R2010) whenever a
+    // 3DSOLID is present — in model space or in a written block definition,
+    // because the DXF version is a single document-wide header.
+    //
+    // This is a **DXF rule only**. A DWG is written as AC1032 (the document
+    // default) precisely so the upstream writer emits the AcDs section, and its
+    // payload is the binary SAB blob; the pin must never fire for DWG.
     if request.format == ExportFormat::DxfText && has_solid3d {
         doc.version = acadrust::DxfVersion::AC1024;
         report.notes.push(ExportDiagnostic {
@@ -234,14 +240,44 @@ pub fn export(request: &ExportRequest<'_>) -> CadResult<(Vec<u8>, ExportReport)>
         });
     }
 
+    // The DWG counterpart of the note above: the payload is there, it is binary,
+    // and it lives in the AcDs section rather than inline. It states the same two
+    // boundaries the DXF note states about provenance and evidence.
+    //
+    // Derivation, and why it is sound rather than a guess: this is decided from
+    // (format, a `3DSOLID` was queued), not from acadrust's
+    // `needs_acds_section()`, which is `version.r2013_plus(dxf_version)` with
+    // `dxf_version == CadDocument::version` (`object_writer/mod.rs:178,570`).
+    // A DWG is written from the document this function built: `CadDocument::new()`
+    // is AC1032 and the AC1024 pin above is `DxfText`-only, so no path lowers a
+    // DWG's version — AC1032 is `r2013_plus`, hence `needs_acds_section()` is true
+    // whenever this note fires, and the writer's `write_solid3d` then always takes
+    // the `write_acis_empty` + `queue_sab_entry` branch (`entities.rs:5187-5198`).
+    // Deriving from the bytes instead would not be cheaper: the report is built
+    // before the writer runs, and the read-back tests assert the reader's
+    // "AcDs: attached N SAB blob(s)" notification, which fails if this ever drifts.
+    if request.format == ExportFormat::Dwg && has_solid3d {
+        report.notes.push(ExportDiagnostic {
+            object: None,
+            code: "export.note.acis_sab_dwg".into(),
+            message: "a 3DSOLID was written with its ACIS payload as a binary SAB blob in the \
+                      DWG AC1032 AcDs (AcDsPrototype_1b) section, which is where R2013 and later \
+                      store modeler geometry. The payload is rebuilt from the retained exact \
+                      B-Rep, not the original SAT/SAB byte stream (source records, history and \
+                      ACIS attributes are not retained), and no third-party CAD reader was run to \
+                      verify it: only this exporter's own ACIS reader round-trips the file"
+                .into(),
+        });
+    }
+
     let bytes = match request.format {
         ExportFormat::DxfText => acadrust::io::dxf::DxfWriter::new(&doc)
             .write_to_vec()
             .map_err(|error| CadError::InvalidInput(format!("DXF write failed: {error}")))?,
         // Upstream acadrust DWG writer. The same reverse-mapped, already-lossy
         // document is the input, so DWG inherits every recorded conversion/drop.
-        // Version follows `CadDocument::version` (AC1032; the AC1024 choice above
-        // is DXF-only because DWG never carries a 3DSOLID from this exporter).
+        // The version stays the document's own AC1032 (the AC1024 choice above is
+        // DXF-only: a DWG only carries ACIS in the AcDs section from AC1027 on).
         // Experimental: no vendor/AutoCAD verification exists for this output.
         ExportFormat::Dwg => acadrust::DwgWriter::write_to_vec(&doc)
             .map_err(|error| CadError::InvalidInput(format!("DWG write failed: {error}")))?,
