@@ -2,6 +2,49 @@
   "generatedFrom": "docs/release-notes",
   "releases": [
     {
+      "version": "v0.1.15",
+      "title": "yacr v0.1.15",
+      "date": "2026-11-17",
+      "url": "https://github.com/zenglanmu/yacr/releases/tag/v0.1.15",
+      "sections": [
+        {
+          "heading": "3D 实体建模 / 3D solids",
+          "items": [
+            "BOX、WEDGE、PYRAMID、CYLINDER、SPHERE、CONE、TORUS 从具名拒绝变成真实创建：一条事务、一步撤销，生成可显示、可再编辑的 B-Rep 实体。",
+            "UNION、SUBTRACT、INTERSECT 作为可取消的后台任务运行；操作数在期间变化时明确报 Stale 且图纸不变，长操作不再占用命令线程。",
+            "MASSPROP 对精确实体报告体积、面积、质心与惯性矩；曲面体（圆柱/圆锥/球/圆环面）同样可测。",
+            "CHAMFEREDGE 对平面体的直线边做单边倒角（一次拾取，不对称距离可选）。",
+            "VSCURRENT 提供会话级 3D 实体视觉样式；实体面身份进入拾取与高亮。",
+            "曲面实体可参与布尔与质量属性；FILLETEDGE、SURFACE 家族、抽壳、曲面边倒角仍未实现。"
+          ]
+        },
+        {
+          "heading": "保存与导出 / Save and export",
+          "items": [
+            "DXF 导出把单壳、全平面、直线边界的精确实体写成真 3DSOLID（ACIS SAT 文本）；DWG 用二进制 SAB 写进 AC1032 的 AcDs 段。其余实体仍按名退回 POLYFACE，不伪造实体。",
+            "新增 acisVersion（700 / 21800）与 dxfVersion（R2010 / R2013 / R2018）选择器；不合法的组合在写文件前拒绝（21.0 + R2010、DWG + 非 R2018），不会写出半成品。",
+            "行为变化：DXF 的默认容器固定为 AC1024（此前“无实体时 AC1032”）；含 3DSOLID 时与以前相同。"
+          ]
+        },
+        {
+          "heading": "图案填充 / HATCH",
+          "items": [
+            "顺时针边界弧按文件存储的补角读取：一条 0.9° 的短弧不再被当成 359°，图界与渲染视角不再被撑爆。",
+            "文件里的图案行按“已求值”反算回图案空间，图案角度与间距和参考图一致；导入再导出逐值复现。",
+            "TEXTBOX / TEXT_ISLAND 边界只用于填充挖洞，不再画成可见小方框；填充奇偶、捕捉与导出不变。"
+          ]
+        },
+        {
+          "heading": "仍为部分实现 / Still partial",
+          "items": [
+            "3D 实体命令只在 Linux 原生宿主注入建模器；其它载体与 Web/dom-canvas 显式拒绝（unsupported-runtime: solid-modeler）。",
+            "导入的 ACIS spline 曲面仍按名拒绝；ASM 21800 与 AC1027+ 容器只有本仓库自写自读证据，没有第三方 CAD 读取证据。",
+            "命令覆盖计数不变（185 完整 / 794 部分）：本版把已计入「部分实现」的命令变成真实能力，不是新增命令或状态晋升。"
+          ]
+        }
+      ]
+    },
+    {
       "version": "v0.1.14",
       "title": "yacr v0.1.14",
       "date": "2026-11-16",
