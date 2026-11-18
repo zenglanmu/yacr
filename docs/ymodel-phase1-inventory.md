@@ -131,7 +131,22 @@ whole document and is always rewritten. Nine revision-bump sites must fill it, p
 display-state writer and the builder-excluded import path; the ordered list is in
 ADR-0037 D12 and in the write-path recon that produced this document.
 
-## 6. Known follow-ups (deliberately not in Phase 1)
+## 6. Open defect found by the archive acceptance test
+
+**Paper-space and block models collide on their persisted id.** `ModelKey::Paper(LayoutId(n))` and
+`ModelKey::Block(BlockId(n))` both encode as `(Model << 45) | n`, so a drawing that has a paper
+layout and a block with the same numeric id — which is almost every real drawing, since both
+allocators start at 1 — cannot be persisted: `write` fails with a duplicate element entry, or, when
+the block happens to be empty, `read` fails with a duplicate model record.
+
+Cause: model ids were derived from the owning layout/block sequence under a single `IdKind::Model`,
+so the kind carries no family information and the sequence alone cannot disambiguate. Fix: one
+`IdKind` per model family (`ModelSpace`, `PaperModel`, `BlockModel`, `DefinitionModel`), which also
+removes the reserved-`MAX_SEQ` trick for the definition model. Not fixed at the time of writing;
+`crates/cad-store-zip/tests/document_fixed_point.rs` documents the workaround (block ids 2/3) and
+must be simplified to colliding ids once the fix lands.
+
+## 7. Known follow-ups (deliberately not in Phase 1)
 
 1. `next_linetype_id` does not exist yet — Phase 1 must add the field, the mint path, the
    builder seeding, and the migration note.
