@@ -941,6 +941,30 @@ Windows/macOS 的人工验收（本轮 **NOT VERIFIED**，无真机）：在真�
 | **Android** | **原生 `native-below` 宿主**（2026-11-01 起，`apps/app-android`）：Tauri WebView + 共享 React chrome 在上，原生 `CadSession` 持有 `cad-db`，wgpu/Vulkan 呈现到 WebView 之下的 `SurfaceView`；wasm 会话不实例化 | **DOM on top**：`SurfaceView` 在 WebView 之下，WebView 背景清透明 | **编译级 + 开发机契约**：`cargo test -p app-android`（48 passed）、`cargo check --target aarch64-linux-android`、clippy、Kotlin 编译、`javap` 核对 JNI 符号、`test-android-host.py`（SAF/五方法/关联/ProGuard 静态断言）；release APK 已构建并本地签名（R8 `classes.dex` 核对），未安装 | **设备/模拟器运行、Vulkan adapter、像素、旋转/前后台、JNI 运行时链接、SAF 选择器与实际读写、外部「打开方式」全部 NOT VERIFIED**；**打开** = `ACTION_OPEN_DOCUMENT`（`*/*`）→ worker 读 → 共享 `FileEvent::Opened`；**另存** = `ACTION_CREATE_DOCUMENT` 导出 **DXF**；源为 `.dwg` 时导出**实验性 DWG**（上游 `DwgWriter`，默认新文件名 `<stem>-export.dwg`；SAF URI 守卫 + 归一化名回退都拒绝覆盖来源，属导出副本）。**DWG 只有合成 acadrust self-roundtrip 证据，AutoCAD/vendor 兼容性 NOT VERIFIED**；**New/Plot 不支持**；`content://` 无 sidecar xref/栅格；导入同步在 tick（`importWorker=false`，超大 DWG 停顿未测量）；弹窗接缝已接（in-DOM，Options/About/text-edit 可用，源码/契约级）且偏好持久化到应用 `filesDir`（设备落盘 NOT VERIFIED）；FIT 自 2026-11-08 起按**可见 CAD 矩形**取景（`SurfaceMetrics.origin` + `ViewSnapshot.canvas_origin` + `place_canvas_camera2d`），渲染目标仍为整窗；**3D 透视取景**未做离轴投影，属显式 **Partial**；2026-10-28 的 `dom-canvas` 模拟器证据属已退役载体，不得复用 |
 | **Web** | **wasm CAD 会话已复活**（`apps/app-web`）；浏览器 bundle 本地可构建 | **DOM-canvas**：同一 wasm 会话画进 `<canvas>`（无第二份文档） | 本地运行（Chromium + WebKitGTK 2.52.6）：合成 fixture 出图与缩放；真实 DWG（4.2 MB）在 wasm 内导入（1.43 GB 堆 / 11.2 s）；Chromium **Worker 隔离**（`isolation=worker`），WebKitGTK 显式 `main-thread (no WebGL2 in worker)`；共享 chrome 由 `scripts/build-web-ui.sh` 构建。**文件访问（2026-11-01）**：`OPEN` = 浏览器上传（隐藏 `<input type=file>` → bytes → wasm `open_bytes`，页面 transport 抬 `canOpen`，会话本身仍报 `canOpen:false`）；`SAVE` = 浏览器下载 **DXF**（`BrowserFiles` 在 `begin_save` 内合成 `download://<name>`，`DomDownload` 用 `Blob`+`<a download>`）；源为 `.dwg` 时下载**实验性 DWG**（默认新文件名，浏览器无文件身份 ⇒ 用归一化名回退拒绝与源同名；DWG 仅合成 self-roundtrip 证据，AutoCAD/vendor NOT VERIFIED），`PLOT` = **SVG/PDF** 下载（仅契约测试）。本机 Chromium+SwiftShader：smoke 8/8 (216/216)、端到端 `OPEN`→4 实体、`SAVE`→48,206 B DXF (`0 SECTION…EOF`) | CI `web-build`/`web-smoke`(SwiftShader)/`web-deploy` 已按 tag/dispatch 合同运行（v0.1.4 发布成功，线上 `yacr-examples.pages.dev` **是修复前 bundle**，需新 tag 才带上文件保存）；大图预算未达标（峰值由导入阶段决定）、Firefox/Safari/WebKit/移动端矩阵、GPU、像素、性能均 **NOT VERIFIED**；`PLOT` 无浏览器级证据；旧 Web（早期桌面 UI 时代）证据不得复用 |
 
+### ymodel 原生文档格式（2026-11-18，ADR-0037）
+
+`ymodel` 是本仓库的**原生**保存格式：zip 容器 + 分片 JSON + 保留的原始源字节。DWG / DXF /
+STEP / SKP 等一律是连接器格式（打开/另存为边界）。保真等级：**L0** 源字节保留（`revision ==
+manifest.open_revision` 且源字节仍在才同格式直通）、**L1** 已建模语义不动点、**L3** 视觉等同
+（**永不承诺**）。
+
+| 项 | 状态 | 证据 / 边界 |
+|---|---|---|
+| 文档模型与快照 | 已实现 | `cad-db` 323 测试；文档级不动点（`snapshot → hydrate → snapshot` 逐字段相等） |
+| 容器读写 | 已实现 | `cad-store-zip` 53 测试：manifest/哈希/长度/CRC、版本门禁（更高 `read`/`minor` 在解析其它 entry 之前拒绝）、foreign entry 原样保留、两次保存字节相同、超预算 abort |
+| 文件级往返 | 已实现 | `cad-store-zip/tests/document_fixed_point.rs` 7 项（含 layout 与 block 序列相同的碰撞回归）；`apps/app-linux/tests/ymodel_round_trip.rs` 走真实适配器 |
+| 原生打开/保存（Linux） | 已接线 | `cad-host` 8 项：安装文档、缺适配器拒绝、损坏归档不破坏当前文档、保存推进 `saved_revision`、外部修改拒绝、保存目的按源格式选择 |
+| Windows / macOS / Android / Web | **NOT IMPLEMENTED** | 无归档适配器，显式 `unsupported-runtime: ymodel`（禁止静默改导出别的格式） |
+| L0 源字节直通 | **未实现** | `raw/source-*.bin` 尚未写入；需要连接器保留源字节 |
+| L1 不动点（DWG/DXF → ymodel → 原格式） | **未验证** | 需要真实 DWG 语料与连接器往返测试；`$INSUNITS=5` 的 100× 问题已修（见下） |
+| 真实窗口内保存/重开 | **NOT RUN** | 只有库层与 carrier 契约证据；无 agent 侧 GUI 操作 |
+| 性能（打开 / 保存 / 峰值磁盘） | **NOT RUN** | ADR-0037 D17 的门槛数字未测量 |
+
+已知格式限制（记录在 ADR，不是待办猜测）：`manifest.sha256_c`（压缩字节哈希）在 `zip` 9.5.0
+上**无法计算或校验**，因此每个 entry 改验解压后的 `sha256` + `len` + CRC；`tables/*.json` 的
+行表（图层/块/样式/线型/比例/布局/页面设置/xref）是 v1 的**显式存储偏差**，对象模型里它们仍是
+DefinitionElement。
+
 ### 插件管理器载体矩阵（2026-11-05）
 
 插件管理器管理离线厂商解码器（`tch` + 用户安装），**不是**第二份 CAD 文档权威。所有行都是

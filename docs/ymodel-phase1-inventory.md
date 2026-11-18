@@ -64,7 +64,7 @@ Entry keys: `document` = `document.json`; `table:X` = `tables/X.json`;
 Count check: 39 declared `pub(crate)` fields — 29 data fields, 8 allocators, `external_references`
 and `bounds_cache`. Nine counters are needed (§4); the ninth does not exist yet.
 
-## 2. `cad_app::Document` — 5 fields
+## 2. `cad_app::Document` — 6 fields
 
 `crates/cad-app/src/lib.rs:191`. Three move into `cad-domain::ymodel::DocumentHeader`.
 
@@ -75,6 +75,7 @@ and `bounds_cache`. Nine counters are needed (§4); the ninth does not exist yet
 | `identity` | `DocumentIdentity` | `header.identity` — the type already lives in `cad-domain` (`lib.rs:357`); only the codec is new |
 | `units` | `UnitContext` | `header.units` |
 | `resource_keys` | `Vec<String>` | `header.resource_keys` |
+| `persistence` | `PersistenceState` | `manifest.json` (`open_revision`, `saved_revision`, `document_uuid`, foreign entries) + `source_sha256` for the conflict check |
 
 ## 3. `SemanticGeometry` — 20 variants
 
@@ -161,21 +162,34 @@ with block 1, and
 `crates/cad-store-zip/tests/document_fixed_point.rs::paper_and_block_models_with_equal_sequences_do_not_collide`
 pins the regression directly.
 
-## 7. Known follow-ups (deliberately not in Phase 1)
+## 7. Decisions taken during implementation
 
-1. `next_linetype_id` does not exist yet — Phase 1 must add the field, the mint path, the
-   builder seeding, and the migration note.
-2. `Revision` is `u64` while ids are `u128`; the store range-checks both, and `DbObject.revision`
-   is always `Revision(0)` today (it is not the element's persisted revision).
-3. `block_name_order` and the two display side tables are the only fields where "derive it"
-   was rejected in favour of persisting; each carries a comment in the payload codec.
-4. `manifest.sha256_c` cannot be computed or verified with `zip` 9.5.0 (crate-private raw
-   reader), so it is carried through from the previous manifest and marked unverified; every
-   entry is verified on its decompressed `sha256` + `len` + CRC instead. Deciding whether to
-   drop the field (minor bump) or keep it belongs to Phase 2.
-5. `TableKind` has no `ALL` constant, so the store keeps its own `table_entry` mirror; a new row
+1. **Block definition rows are a table** (`tables/blocks.json`), like the other row families — same
+   D7 storage deviation, and it is why `ChangeScope` routes a block-row write to
+   `TableKind::Blocks` while block *members* stay elements of `ModelKey::Block`.
+2. **`block_name_order` is persisted** as a per-row `registration_index`, because
+   last-duplicate-wins name lookup cannot be rebuilt from an id-keyed map.
+3. **Element identity is inside the payload** (`CAD_ELEMENT.id`), so an entry is readable on its
+   own and a bare sequence in the file fails the encoded-row contract test.
+4. **`document_uuid` is minted once at document creation**, never derived: the store's fallback
+   hashes the header, which would make an identity follow its content.
+5. **The native save is a transitional rule**: `.dwg` source → DWG export, `.ymodel` or no source
+   → `.ymodel`, anything else → DXF. A real format chooser is later work.
+
+## 8. Open items
+
+1. `manifest.sha256_c` cannot be computed or verified with `zip` 9.5.0 (crate-private raw reader),
+   so it is carried through from the previous manifest and marked unverified; every entry is
+   verified on its decompressed `sha256` + `len` + CRC instead. Dropping the field needs a minor
+   bump — decide in Phase 2.
+2. `TableKind` has no `ALL` constant, so the store keeps its own mirror of `table_entry`; a new row
    table needs both, and a missed one is refused as `UNSUPPORTED_MINOR` rather than dropped.
-6. Style / layer / linetype / scale / layout **and block definition** rows are stored as
-   `tables/*.json` in v1, not as `DefinitionElement`s (ADR-0037 D7 storage deviation). `ChangeScope::TableKind` is the closed
-   set that has to grow with any new row table; a table missing from it would be silently
-   unsaved. Migrating these rows to elements needs a minor bump and a migration.
+3. `snapshot/tables.rs` is at ~998 lines behind a `#[rustfmt::skip]` module, so `cargo fmt` cannot
+   reach it. It needs a real module split before more rows land there.
+4. `L0` source bytes are not written yet (`raw/source-*.bin`), so the passthrough predicate is
+   correct but unsatisfiable. L1 fixed points and performance numbers are **NOT RUN**.
+5. Only the Linux carrier has an archive adapter; Windows/macOS/Android/Web refuse
+   `.ymodel` by name and need their own `DocumentArchive` implementations (the Web one also needs
+   the chunked sink path, which `write_atomic`'s whole-buffer shape cannot express).
+6. `Revision` is `u64` while ids are `u128`; the store range-checks both, and `DbObject.revision`
+   is always `Revision(0)` today (it is not the element's persisted revision).

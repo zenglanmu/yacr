@@ -174,6 +174,12 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
 - 退出码：`0` 成功、`1` 通用失败、`2` 后端策略错误、`3` postload-pan 驱动失败、`4` **历史** X11
   拒绝（不再产生）、`5` Windows 缺 WebView2、`6` dom-canvas 缺 WebGL2、`7` GPU 预算拒绝。
   分类以稳定标记行为第一依据。
+- **`.ymodel` 是原生保存格式**（zip 容器 + 分片 JSON）：`--open <x.ymodel>` 走
+  `cad_platform::DocumentArchive` 解码，**不经过 importer**；`SAVE` 对无源文档或 `.ymodel`
+  源写 `.ymodel`，`.dwg` 源仍是实验性 DWG 导出，其它源仍是 DXF。归档拒绝用稳定标记
+  `ymodel.*`（`unsupported_version` / `unsupported_minor` / `invalid_document` / `conflict` /
+  `foreign_entries_unreadable`）；**目前没有进程退出码映射**（ADR-0037 D13 的 `8` 只是计划）。
+  L0 源字节直通与 L1 不动点**都还没有证据**。
 
 ## 前端约定（`apps/desktop-ui`）
 
@@ -218,6 +224,10 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
 | Android `app-android` | 真实 Tauri WebView + 原生 `CadSession` + Vulkan `SurfaceView`，`native-below`，wasm 会话**不实例化**。SAF 打开 + DXF 导出保存已接线（DWG 保存显式延后），维护者已侧载 APK 并运行成功（2026-11-08，非 CI 验收）；About/更新页 URL opener（`cad_open_release_page` → `ACTION_VIEW`）已接线，设备运行 NOT VERIFIED；设备/真实 GPU/像素的正式验收仍 **NOT VERIFIED** |
 | Web `app-web` | wasm `CadSession` + DOM canvas（`dom-canvas`）。OPEN 走页面上传，SAVE/PLOT 走浏览器下载（DXF/SVG/PDF；**不回写 DWG**）；CI `web-smoke` 是 SwiftShader 冒烟，非 GPU/像素；native host target 是显式 NOT IMPLEMENTED 空壳 |
 | CLI `cad-cli-tools` | 保留，headless 开图/出图（PNG/SVG/PDF） |
+
+`ymodel` 原生读写的载体状态：**只有 Linux 已接线**（`apps/app-linux/src/ymodel_archive.rs`
+→ `CadSession::set_document_archive`）；Windows/macOS/Android/Web **NOT IMPLEMENTED**，打开/另存
+`.ymodel` 会以 `unsupported-runtime: ymodel` 显式拒绝，不得改成静默导出别的格式。
 
 平台打包脚本与 5 个 release job 自 2026-11-01 起按 React/Tauri 宿主重新启用：仅 `v*` tag / 手工
 `workflow_dispatch` 运行，只上传 workflow artifact，**不签名、不公证、不接触商店凭据**。
