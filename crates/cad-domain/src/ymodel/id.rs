@@ -52,18 +52,23 @@ pub enum IdKind {
     MLeaderStyle = 7,
     Linetype = 8,
     Scale = 9,
-    /// A ymodel Model (model space, paper space, or a block model). Its
-    /// sequence is derived from the owning layout/block, not allocated.
-    Model = 10,
+    /// `cad:ModelSpace`. Its sequence is always 0.
+    ModelSpace = 10,
     /// The one SubCategory mirroring a DWG layer (D7).
     SubCategory = 11,
     Relationship = 12,
     Aspect = 13,
+    /// `cad:PaperSpace`; the sequence is the owning layout id (never 0).
+    PaperModel = 14,
+    /// `cad:BlockModel`; the sequence is the owning block id (never 0).
+    BlockModel = 15,
+    /// The document-level `cad:DefinitionModel`. Its sequence is always 0.
+    DefinitionModel = 16,
 }
 
 impl IdKind {
     /// All kinds, in format order. Used by registry checks and tests.
-    pub const ALL: [IdKind; 13] = [
+    pub const ALL: [IdKind; 16] = [
         IdKind::Entity,
         IdKind::Layer,
         IdKind::Block,
@@ -73,10 +78,13 @@ impl IdKind {
         IdKind::MLeaderStyle,
         IdKind::Linetype,
         IdKind::Scale,
-        IdKind::Model,
+        IdKind::ModelSpace,
         IdKind::SubCategory,
         IdKind::Relationship,
         IdKind::Aspect,
+        IdKind::PaperModel,
+        IdKind::BlockModel,
+        IdKind::DefinitionModel,
     ];
 
     /// Decode a persisted kind byte. `None` means "not this build's format" —
@@ -92,10 +100,13 @@ impl IdKind {
             7 => Some(IdKind::MLeaderStyle),
             8 => Some(IdKind::Linetype),
             9 => Some(IdKind::Scale),
-            10 => Some(IdKind::Model),
+            10 => Some(IdKind::ModelSpace),
             11 => Some(IdKind::SubCategory),
             12 => Some(IdKind::Relationship),
             13 => Some(IdKind::Aspect),
+            14 => Some(IdKind::PaperModel),
+            15 => Some(IdKind::BlockModel),
+            16 => Some(IdKind::DefinitionModel),
             _ => None,
         }
     }
@@ -222,10 +233,13 @@ persistent_ids!(
 
 /// A Model in the ymodel sense, derived from the in-memory space of an element.
 ///
-/// Model identifiers are not allocated: a paper layout's model reuses the
-/// layout's sequence under [`IdKind::Model`], a block's model reuses the
-/// block's, and model space is sequence 0. Deleted layouts/blocks take their
-/// model id with them and it is never handed out again, because the underlying
+/// Model identifiers are not allocated: each kind of model has its own
+/// [`IdKind`], so paper and block models that share a numeric sequence are
+/// still distinct identifiers. A paper layout's model reuses the layout's
+/// sequence under [`IdKind::PaperModel`], a block's model reuses the block's
+/// under [`IdKind::BlockModel`], and model space / the definition model are
+/// sequence 0 under their own kinds. Deleted layouts/blocks take their model id
+/// with them and it is never handed out again, because the underlying
 /// layout/block allocator never rewinds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ModelKey {
@@ -241,13 +255,6 @@ pub enum ModelKey {
     Definitions,
 }
 
-/// Sequence reserved for [`ModelKey::Definitions`].
-///
-/// It is the largest legal sequence, so it cannot collide with an allocated
-/// layout or block id in any realistic document; a document that claims it for
-/// a row is refused on load rather than silently sharing a model.
-pub const DEFINITION_MODEL_SEQ: u128 = MAX_SEQ;
-
 impl ModelKey {
     /// The Model this element space belongs to.
     pub const fn from_space(space: SpaceId) -> ModelKey {
@@ -259,55 +266,53 @@ impl ModelKey {
     }
 
     /// The persisted Model identifier.
+    ///
+    /// # Panics
+    ///
+    /// Paper and block models encode their owner's sequence, and sequence 0 is
+    /// reserved for [`ModelKey::ModelSpace`]. The allocators never issue it, so
+    /// only a malformed row — `Paper(LayoutId(0))` or `Block(BlockId(0))` —
+    /// reaches the panic (a debug assertion when they are compiled out); such a
+    /// row is refused on load by [`ModelKey::from_persistent`], never built from
+    /// a document.
     pub const fn persistent(self) -> PersistentId {
         match self {
-            ModelKey::ModelSpace => PersistentId::expect(IdKind::Model, 0),
-            ModelKey::Paper(layout) => PersistentId::expect(IdKind::Model, layout.0),
-            ModelKey::Block(block) => PersistentId::expect(IdKind::Model, block.0),
-            ModelKey::Definitions => PersistentId::expect(IdKind::Model, DEFINITION_MODEL_SEQ),
+            ModelKey::ModelSpace => PersistentId::expect(IdKind::ModelSpace, 0),
+            ModelKey::Paper(layout) => {
+                debug_assert!(
+                    layout.0 != 0,
+                    "layout sequence 0 is reserved for model space"
+                );
+                PersistentId::expect(IdKind::PaperModel, layout.0)
+            }
+            ModelKey::Block(block) => {
+                debug_assert!(block.0 != 0, "block sequence 0 is reserved for model space");
+                PersistentId::expect(IdKind::BlockModel, block.0)
+            }
+            ModelKey::Definitions => PersistentId::expect(IdKind::DefinitionModel, 0),
         }
     }
 
-    /// Rebuild a key from a persisted Model id plus the family its sequence
-    /// belongs to.
+    /// Rebuild a key from a persisted Model id.
     ///
-    /// Decoding cannot be done from the id alone: paper sequences and block
-    /// sequences are both just the owning layout/block id, so the family has to
-    /// come from `shard_map` and the layout/block tables. Sequence 0 is always
-    /// model space (`LayoutId(0)`/`BlockId(0)` are reserved and never
-    /// allocated); a `Paper`/`Block` claim on sequence 0 is rejected here.
-    pub const fn from_persistent(id: PersistentId, family: ModelFamily) -> Option<ModelKey> {
-        if !matches!(id.kind(), IdKind::Model) {
-            return None;
-        }
-        match (family, id.seq()) {
-            (ModelFamily::ModelSpace, 0) => Some(ModelKey::ModelSpace),
-            (ModelFamily::ModelSpace, _) => None,
-            (ModelFamily::Paper, 0) => None,
-            // `MAX_SEQ` is reserved for the definition model: a layout or block
-            // row claiming it is rejected rather than sharing that model.
-            (ModelFamily::Paper, DEFINITION_MODEL_SEQ) => None,
-            (ModelFamily::Paper, seq) => Some(ModelKey::Paper(LayoutId(seq))),
-            (ModelFamily::Block, 0) => None,
-            (ModelFamily::Block, DEFINITION_MODEL_SEQ) => None,
-            (ModelFamily::Block, seq) => Some(ModelKey::Block(BlockId(seq))),
-            (ModelFamily::Definitions, DEFINITION_MODEL_SEQ) => Some(ModelKey::Definitions),
-            (ModelFamily::Definitions, _) => None,
+    /// The kind carries the family, so no side table is needed: `ModelSpace`
+    /// and `DefinitionModel` are sequence 0, `PaperModel` and `BlockModel` are
+    /// any non-zero sequence. Sequence 0 is reserved because the layout and
+    /// block allocators never issue it, so a `PaperModel`/`BlockModel` id with
+    /// sequence 0 is not a model this format can mean.
+    pub const fn from_persistent(id: PersistentId) -> Option<ModelKey> {
+        match (id.kind(), id.seq()) {
+            (IdKind::ModelSpace, 0) => Some(ModelKey::ModelSpace),
+            (IdKind::ModelSpace, _) => None,
+            (IdKind::PaperModel, 0) => None,
+            (IdKind::PaperModel, seq) => Some(ModelKey::Paper(LayoutId(seq))),
+            (IdKind::BlockModel, 0) => None,
+            (IdKind::BlockModel, seq) => Some(ModelKey::Block(BlockId(seq))),
+            (IdKind::DefinitionModel, 0) => Some(ModelKey::Definitions),
+            (IdKind::DefinitionModel, _) => None,
+            _ => None,
         }
     }
-}
-
-/// The table a Model sequence must be resolved against.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum ModelFamily {
-    /// `cad:ModelSpace` (sequence 0 only).
-    ModelSpace,
-    /// `cad:PaperSpace`, resolved against the layouts table.
-    Paper,
-    /// `cad:BlockModel`, resolved against the blocks table.
-    Block,
-    /// The document-level definition model (reserved sequence only).
-    Definitions,
 }
 
 /// A shard index inside one Model.
@@ -348,17 +353,20 @@ mod tests {
             (IdKind::MLeaderStyle, 7),
             (IdKind::Linetype, 8),
             (IdKind::Scale, 9),
-            (IdKind::Model, 10),
+            (IdKind::ModelSpace, 10),
             (IdKind::SubCategory, 11),
             (IdKind::Relationship, 12),
             (IdKind::Aspect, 13),
+            (IdKind::PaperModel, 14),
+            (IdKind::BlockModel, 15),
+            (IdKind::DefinitionModel, 16),
         ];
         for (kind, byte) in expected {
             assert_eq!(kind as u8, byte, "{kind:?}");
             assert_eq!(IdKind::from_u8(byte), Some(kind));
         }
         assert_eq!(IdKind::from_u8(0), None);
-        assert_eq!(IdKind::from_u8(14), None);
+        assert_eq!(IdKind::from_u8(17), None);
         assert_eq!(IdKind::ALL.len(), expected.len());
     }
 
@@ -396,8 +404,8 @@ mod tests {
     #[test]
     fn from_raw_rejects_negative_and_unknown_kind() {
         assert_eq!(PersistentId::from_raw(-1), None);
-        // Kind 14 shifted into place is not a kind this build knows.
-        let unknown = (14i64) << SEQ_BITS;
+        // Kind 17 shifted into place is not a kind this build knows.
+        let unknown = (17i64) << SEQ_BITS;
         assert_eq!(PersistentId::from_raw(unknown), None);
         // Above 2^53.
         assert_eq!(PersistentId::from_raw(MAX_ID + 1), None);
@@ -437,61 +445,75 @@ mod tests {
         assert_eq!(ModelKey::from_space(SpaceId::Model), ModelKey::ModelSpace);
         assert_ne!(model_space, paper);
         assert_ne!(model_space, block);
+        // A paper layout and a block with the same sequence are different
+        // models: the kind, not the sequence, carries the family.
+        assert_eq!(paper.kind(), IdKind::PaperModel);
+        assert_eq!(block.kind(), IdKind::BlockModel);
+        assert_ne!(
+            ModelKey::Paper(LayoutId(1)).persistent(),
+            ModelKey::Block(BlockId(1)).persistent()
+        );
         assert_eq!(
-            ModelKey::from_persistent(model_space, ModelFamily::ModelSpace),
+            ModelKey::from_persistent(model_space),
             Some(ModelKey::ModelSpace)
         );
-        // Paper and block sequences overlap numerically on purpose: the family
-        // has to come from the tables, never from the id alone.
         assert_eq!(
-            ModelKey::from_persistent(paper, ModelFamily::Paper),
+            ModelKey::from_persistent(paper),
             Some(ModelKey::Paper(LayoutId(1)))
         );
         assert_eq!(
-            ModelKey::from_persistent(paper, ModelFamily::Block),
+            ModelKey::from_persistent(block),
             Some(ModelKey::Block(BlockId(1)))
         );
+        assert_eq!(ModelKey::from_persistent(EntityId(1).persistent()), None);
+    }
+
+    #[test]
+    fn definition_model_uses_sequence_zero_under_its_own_kind() {
+        let definitions = ModelKey::Definitions.persistent();
+        assert_eq!(definitions.kind(), IdKind::DefinitionModel);
+        assert_eq!(definitions.seq(), 0);
         assert_eq!(
-            ModelKey::from_persistent(paper, ModelFamily::ModelSpace),
-            None
+            ModelKey::from_persistent(definitions),
+            Some(ModelKey::Definitions)
+        );
+        assert_ne!(definitions, ModelKey::ModelSpace.persistent());
+        // An ordinary paper sequence cannot claim the definition model, and a
+        // definition-model id with a non-zero sequence is not a model at all.
+        assert_eq!(
+            ModelKey::from_persistent(ModelKey::Paper(LayoutId(1)).persistent()),
+            Some(ModelKey::Paper(LayoutId(1)))
         );
         assert_eq!(
-            ModelKey::from_persistent(model_space, ModelFamily::Paper),
-            None
-        );
-        assert_eq!(
-            ModelKey::from_persistent(EntityId(1).persistent(), ModelFamily::ModelSpace),
+            ModelKey::from_persistent(PersistentId::expect(IdKind::DefinitionModel, 1)),
             None
         );
     }
 
     #[test]
-    fn definition_model_owns_a_reserved_sequence() {
-        let definitions = ModelKey::Definitions.persistent();
-        assert_eq!(definitions.kind(), IdKind::Model);
-        assert_eq!(definitions.seq(), MAX_SEQ);
+    fn from_persistent_rejects_reserved_and_mismatched_sequences() {
+        // Model space and the definition model are sequence 0 only.
         assert_eq!(
-            ModelKey::from_persistent(definitions, ModelFamily::Definitions),
-            Some(ModelKey::Definitions)
+            ModelKey::from_persistent(PersistentId::expect(IdKind::ModelSpace, 1)),
+            None
         );
-        // A layout or block row claiming the reserved sequence is refused
-        // instead of silently sharing the definition model.
+        // Paper and block models never carry sequence 0: it belongs to model
+        // space, and no allocator issues it.
         assert_eq!(
-            ModelKey::from_persistent(definitions, ModelFamily::Paper),
+            ModelKey::from_persistent(PersistentId::expect(IdKind::PaperModel, 0)),
             None
         );
         assert_eq!(
-            ModelKey::from_persistent(definitions, ModelFamily::Block),
+            ModelKey::from_persistent(PersistentId::expect(IdKind::BlockModel, 0)),
             None
         );
-        // And the definition model cannot be claimed by an ordinary sequence.
         assert_eq!(
-            ModelKey::from_persistent(
-                ModelKey::Paper(LayoutId(1)).persistent(),
-                ModelFamily::Definitions
-            ),
-            None
+            ModelKey::from_persistent(PersistentId::expect(IdKind::PaperModel, 1)),
+            Some(ModelKey::Paper(LayoutId(1)))
         );
-        assert_ne!(definitions, ModelKey::ModelSpace.persistent());
+        assert_eq!(
+            ModelKey::from_persistent(PersistentId::expect(IdKind::BlockModel, 1)),
+            Some(ModelKey::Block(BlockId(1)))
+        );
     }
 }

@@ -114,11 +114,13 @@ silently change stored data, and would reject legacy non-finite rows.
 ## 4. Identity
 
 - Kinds (file-format constants, never renumbered): Entity 1, Layer 2, Block 3, Layout 4,
-  Style 5, DimStyle 6, MLeaderStyle 7, Linetype 8, Scale 9, Model 10, SubCategory 11,
-  Relationship 12, Aspect 13.
+  Style 5, DimStyle 6, MLeaderStyle 7, Linetype 8, Scale 9, ModelSpace 10, SubCategory 11,
+  Relationship 12, Aspect 13, PaperModel 14, BlockModel 15, DefinitionModel 16.
 - `(kind << 45) | seq`, `seq < 2^45`, whole value ≤ 2^53 − 1 (exact in `jq`/`JSON.parse`).
-- Model ids are derived, not allocated: model space = 0, paper = layout seq, block = block seq,
-  `cad:DefinitionModel` = reserved `MAX_SEQ`.
+- Model ids are derived, not allocated, and each model family has its own kind: model space =
+  `ModelSpace`/0, paper = `PaperModel`/layout seq, block = `BlockModel`/block seq,
+  `cad:DefinitionModel` = `DefinitionModel`/0. Paper and block sequences may therefore be equal
+  without sharing an id.
 - **Nine** high-water marks. The code today has eight; linetypes have no allocator and recompute
   `max(row id) + 1` on every create (`crates/cad-db/src/drawing/linetype_edit.rs:258-277`), so
   create → delete → create already reuses an id. Phase 1 must add `next_linetype_id`.
@@ -131,20 +133,33 @@ whole document and is always rewritten. Nine revision-bump sites must fill it, p
 display-state writer and the builder-excluded import path; the ordered list is in
 ADR-0037 D12 and in the write-path recon that produced this document.
 
-## 6. Open defect found by the archive acceptance test
+## 6. Defect found by the archive acceptance test (fixed)
 
-**Paper-space and block models collide on their persisted id.** `ModelKey::Paper(LayoutId(n))` and
-`ModelKey::Block(BlockId(n))` both encode as `(Model << 45) | n`, so a drawing that has a paper
+**Paper-space and block models collided on their persisted id.** `ModelKey::Paper(LayoutId(n))` and
+`ModelKey::Block(BlockId(n))` both encoded as `(Model << 45) | n`, so a drawing that has a paper
 layout and a block with the same numeric id — which is almost every real drawing, since both
-allocators start at 1 — cannot be persisted: `write` fails with a duplicate element entry, or, when
-the block happens to be empty, `read` fails with a duplicate model record.
+allocators start at 1 — could not be persisted: `write` failed with a duplicate element entry, or,
+when the block happened to be empty, `read` failed with a duplicate model record.
 
 Cause: model ids were derived from the owning layout/block sequence under a single `IdKind::Model`,
-so the kind carries no family information and the sequence alone cannot disambiguate. Fix: one
-`IdKind` per model family (`ModelSpace`, `PaperModel`, `BlockModel`, `DefinitionModel`), which also
-removes the reserved-`MAX_SEQ` trick for the definition model. Not fixed at the time of writing;
-`crates/cad-store-zip/tests/document_fixed_point.rs` documents the workaround (block ids 2/3) and
-must be simplified to colliding ids once the fix lands.
+so the kind carried no family information and the sequence alone could not disambiguate.
+
+**Fixed by** giving each model family its own kind, so the id decodes without a side table and the
+reserved-`MAX_SEQ` definition-model trick is gone:
+
+| model | kind | value | sequence |
+|---|---|---|---|
+| `cad:ModelSpace` | `ModelSpace` | 10 | 0 |
+| `cad:PaperSpace` | `PaperModel` | 14 | layout id (never 0) |
+| `cad:BlockModel` | `BlockModel` | 15 | block id (never 0) |
+| `cad:DefinitionModel` | `DefinitionModel` | 16 | 0 |
+
+Kind 10 keeps its value (and now means model space only); 14–16 are new. `tables/models.json` still
+records a readable `kind` spelling, but the reader derives the family from the id and refuses a
+record whose two spellings disagree (`INVALID_DOCUMENT`). The acceptance fixture now uses layout 1
+with block 1, and
+`crates/cad-store-zip/tests/document_fixed_point.rs::paper_and_block_models_with_equal_sequences_do_not_collide`
+pins the regression directly.
 
 ## 7. Known follow-ups (deliberately not in Phase 1)
 

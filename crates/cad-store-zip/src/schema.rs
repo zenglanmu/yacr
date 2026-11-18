@@ -139,10 +139,13 @@ fn id_kind_spelling(kind: IdKind) -> &'static str {
         IdKind::MLeaderStyle => "mleader_style",
         IdKind::Linetype => "linetype",
         IdKind::Scale => "scale",
-        IdKind::Model => "model",
+        IdKind::ModelSpace => "model_space",
         IdKind::SubCategory => "sub_category",
         IdKind::Relationship => "relationship",
         IdKind::Aspect => "aspect",
+        IdKind::PaperModel => "paper_model",
+        IdKind::BlockModel => "block_model",
+        IdKind::DefinitionModel => "definition_model",
     }
 }
 

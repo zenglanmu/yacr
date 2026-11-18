@@ -41,8 +41,8 @@ pub use descriptor::{
 };
 pub use header::{DocumentHeader, HeaderError, IdCounters, COUNTER_CEILING};
 pub use id::{
-    shard_of, IdKind, ModelFamily, ModelKey, PersistentId, PersistentIdOf, Shard,
-    DEFINITION_MODEL_SEQ, MAX_ID, MAX_SEQ, SEQ_BITS, SHARD_ELEMENTS,
+    shard_of, IdKind, ModelKey, PersistentId, PersistentIdOf, Shard, MAX_ID, MAX_SEQ, SEQ_BITS,
+    SHARD_ELEMENTS,
 };
 pub use json::{decode_f64, decode_point3, encode_f64, encode_point3, JsonError};
 pub use payload::{decode as decode_payload, encode as encode_payload, PayloadError};

@@ -1,17 +1,20 @@
 //! `tables/models.json`: model metadata (ADR-0037 D7).
 //!
 //! ```text
-//! [{"key": 10, "kind": "model", "name": null, "owner": null},
-//!  {"key": 1099511627775, "kind": "definitions", "name": "Definitions", "owner": null}]
+//! [{"key": 351843720888320, "kind": "model", "name": null, "owner": null},
+//!  {"key": 492581209243649, "kind": "paper", "name": "Sheet",
+//!   "owner": 140737488355329}]
 //! ```
 //!
 //! `key` is the **raw** [`cad_domain::ymodel::PersistentId`] number
-//! (`(kind << 45) | seq`, always ≤ 2^53 so an `f64`-based reader keeps it exact),
-//! not the in-memory `ModelKey`: the two differ for paper layouts and block
-//! models, whose sequences share one numeric space. The family is recovered from
-//! `kind` — `ModelKey::from_persistent` refuses a layout/block record claiming
-//! sequence 0 or the reserved definition-model sequence, so a malformed record is
-//! an invalid archive rather than a silently shared model.
+//! (`(kind << 45) | seq`, always ≤ 2^53 so an `f64`-based reader keeps it
+//! exact). Each model family has its own kind — model space 10, paper 14,
+//! block 15, definitions 16 — so the id alone identifies the model and a paper
+//! layout and a block may carry the same sequence. The record's `kind` is kept
+//! because it makes the file readable, but it must **agree** with the id:
+//! [`ModelKey::from_persistent`] decodes the family from the id and a record
+//! whose two spellings disagree is an invalid archive, never a silently
+//! retyped model.
 //!
 //! Records are written **sorted by model id**: the shard map and the model list
 //! then agree on one order, and two saves of one snapshot stay byte-identical
@@ -20,7 +23,7 @@
 use serde_json::{Map, Value};
 
 use cad_db::{ModelKind, ModelRecord, StoreError};
-use cad_domain::ymodel::{IdKind, ModelFamily, ModelKey, PersistentId};
+use cad_domain::ymodel::{ModelKey, PersistentId};
 
 use crate::json::{malformed, Reader};
 
@@ -98,19 +101,18 @@ fn record_from_value(value: &Value) -> Result<ModelRecord, StoreError> {
         .ok_or_else(|| malformed(CONTEXT, format!("unknown model kind {kind_name:?}")))?;
     let id = PersistentId::from_raw(raw)
         .ok_or_else(|| malformed(CONTEXT, format!("model id {raw} is not storable")))?;
-    if id.kind() != IdKind::Model {
+    let key = ModelKey::from_persistent(id)
+        .ok_or_else(|| malformed(CONTEXT, format!("model id {raw} is not a Model identifier")))?;
+    let derived = model_kind(key);
+    if derived != kind {
         return Err(malformed(
             CONTEXT,
-            format!("model id {raw} is not a Model identifier"),
+            format!(
+                "model id {raw} encodes a {} model but records kind {kind_name:?}",
+                derived.as_str()
+            ),
         ));
     }
-    let family = family_of(kind);
-    let key = ModelKey::from_persistent(id, family).ok_or_else(|| {
-        malformed(
-            CONTEXT,
-            format!("model id {raw} cannot be a {} model", kind.as_str()),
-        )
-    })?;
     Ok(ModelRecord {
         key,
         kind,
@@ -119,13 +121,13 @@ fn record_from_value(value: &Value) -> Result<ModelRecord, StoreError> {
     })
 }
 
-/// The table a model id's sequence must be resolved against.
-const fn family_of(kind: ModelKind) -> ModelFamily {
-    match kind {
-        ModelKind::ModelSpace => ModelFamily::ModelSpace,
-        ModelKind::PaperSpace => ModelFamily::Paper,
-        ModelKind::Block => ModelFamily::Block,
-        ModelKind::Definitions => ModelFamily::Definitions,
+/// The `kind` a decoded model id must be recorded as.
+const fn model_kind(key: ModelKey) -> ModelKind {
+    match key {
+        ModelKey::ModelSpace => ModelKind::ModelSpace,
+        ModelKey::Paper(_) => ModelKind::PaperSpace,
+        ModelKey::Block(_) => ModelKind::Block,
+        ModelKey::Definitions => ModelKind::Definitions,
     }
 }
 
@@ -196,7 +198,8 @@ mod tests {
     }
 
     #[test]
-    fn a_layout_record_cannot_claim_the_definition_model() {
+    fn a_record_kind_must_agree_with_its_model_id() {
+        // A paper record whose id is the definition-model id.
         let value = serde_json::json!([{
             "key": ModelKey::Definitions.persistent().raw(),
             "kind": "paper",
@@ -205,7 +208,7 @@ mod tests {
         }]);
         assert!(models_from_value(&value).is_err());
 
-        // …nor sequence 0, which is reserved for model space.
+        // A block record whose id is the model-space id.
         let value = serde_json::json!([{
             "key": ModelKey::ModelSpace.persistent().raw(),
             "kind": "block",
@@ -213,6 +216,33 @@ mod tests {
             "owner": null
         }]);
         assert!(models_from_value(&value).is_err());
+
+        // A layout record whose id encodes a block model with the same sequence:
+        // the family comes from the id now, and a disagreement is refused.
+        let value = serde_json::json!([{
+            "key": ModelKey::Block(BlockId(1)).persistent().raw(),
+            "kind": "paper",
+            "name": null,
+            "owner": null
+        }]);
+        assert!(models_from_value(&value).is_err());
+
+        // The same sequence under the right kind decodes.
+        let value = serde_json::json!([{
+            "key": ModelKey::Paper(LayoutId(1)).persistent().raw(),
+            "kind": "paper",
+            "name": null,
+            "owner": null
+        }]);
+        assert_eq!(
+            models_from_value(&value).expect("decode"),
+            vec![ModelRecord {
+                key: ModelKey::Paper(LayoutId(1)),
+                kind: ModelKind::PaperSpace,
+                name: None,
+                owner: None,
+            }]
+        );
     }
 
     #[test]

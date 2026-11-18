@@ -131,35 +131,33 @@ fn database() -> DrawingDatabase {
         )
         .expect("layer attributes");
 
-    // Blocks: id 2 owns a member entity and a source handle; both are named out
+    // Blocks: id 1 owns a member entity and a source handle; both are named out
     // of id order, so `block_name_order` is not the id order.
     //
-    // The ids deliberately avoid 1: `ModelKey::Paper(LayoutId(n))` and
-    // `ModelKey::Block(BlockId(n))` persist to the *same* model id
-    // (`(10 << 45) | n`), so a block and a paper layout sharing a sequence cannot
-    // both be stored yet. This fixture uses distinct sequences so the rest of the
-    // document can be exercised; the collision itself is outside its scope.
+    // Block id 1 shares its sequence with the paper layout below (layout id 1):
+    // each model family has its own identifier kind, so the two models must both
+    // round-trip rather than encode to one shard entry.
     builder
         .insert_block(BlockDefinition {
-            id: BlockId(2),
+            id: BlockId(1),
             entities: vec![EntityId(3)],
             dynamic_visibility: None,
         })
         .expect("insert block");
     builder
         .insert_block(BlockDefinition {
-            id: BlockId(3),
+            id: BlockId(2),
             entities: vec![],
             dynamic_visibility: None,
         })
         .expect("insert named block");
     builder
-        .set_block_metadata(BlockId(3), "Window", point(0.0, 0.0, 0.0))
+        .set_block_metadata(BlockId(2), "Window", point(0.0, 0.0, 0.0))
         .expect("block metadata");
     builder
-        .set_block_metadata(BlockId(2), "Door", point(1.5, 2.5, 0.0))
+        .set_block_metadata(BlockId(1), "Door", point(1.5, 2.5, 0.0))
         .expect("block metadata");
-    builder.set_block_source_handle(BlockId(2), 42);
+    builder.set_block_source_handle(BlockId(1), 42);
 
     // Layouts: the synthetic model row plus a paper sheet with two viewports.
     builder
@@ -233,7 +231,7 @@ fn database() -> DrawingDatabase {
             name: "Site".to_string(),
             raw_path: "site.dwg".to_string(),
             resolved_path: Some("site.dwg".to_string()),
-            block: Some(BlockId(3)),
+            block: Some(BlockId(2)),
             overlay: false,
             depth: 0,
             status: ExternalReferenceStatus::Missing,
@@ -249,7 +247,7 @@ fn database() -> DrawingDatabase {
         .insert_entity(line(2, LayerId(0), SpaceId::Paper(LayoutId(1))))
         .expect("paper entity");
     builder
-        .insert_entity(line(3, LayerId(1), SpaceId::Block(BlockId(2))))
+        .insert_entity(line(3, LayerId(1), SpaceId::Block(BlockId(1))))
         .expect("block member");
     builder
         .set_entity_render_attributes(
@@ -526,7 +524,7 @@ fn content_that_a_table_only_check_would_miss_survives() {
     // The block's member list (stored on the block row and in the element shard).
     assert_eq!(
         reopened
-            .block(BlockId(2))
+            .block(BlockId(1))
             .map(|block| block.entities.clone()),
         Some(vec![EntityId(3)])
     );
@@ -601,4 +599,80 @@ fn a_foreign_entry_survives_a_real_save_cycle() {
         .find(|record| record["path"] == FOREIGN_PATH)
         .expect("the carried entry is recorded");
     assert_eq!(record["foreign"], Value::Bool(true));
+}
+
+/// A paper layout and a block with the same sequence are two distinct models.
+///
+/// Both allocators start at 1, so this is the ordinary case, not a contrived
+/// one: a document whose paper space and block both carry sequence 1 must store
+/// one shard per model and read both back.
+#[test]
+fn paper_and_block_models_with_equal_sequences_do_not_collide() {
+    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(11));
+    builder
+        .insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".to_string(),
+            visible: true,
+        })
+        .expect("insert layer");
+    builder
+        .insert_layout(Layout {
+            id: LayoutId(0),
+            name: "Model".to_string(),
+            viewports: vec![],
+        })
+        .expect("model layout");
+    builder
+        .insert_layout(Layout {
+            id: LayoutId(1),
+            name: "Sheet".to_string(),
+            viewports: vec![],
+        })
+        .expect("paper layout");
+    builder
+        .insert_block(BlockDefinition {
+            id: BlockId(1),
+            entities: vec![EntityId(2)],
+            dynamic_visibility: None,
+        })
+        .expect("insert block");
+    // One element per model, so a collision cannot hide behind an empty model.
+    builder
+        .insert_entity(line(1, LayerId(0), SpaceId::Paper(LayoutId(1))))
+        .expect("paper entity");
+    builder
+        .insert_entity(line(2, LayerId(0), SpaceId::Block(BlockId(1))))
+        .expect("block entity");
+    let db = builder.finish().expect("build the colliding database");
+
+    let reopened = round_trip(&db);
+    assert_eq!(
+        reopened
+            .layout_entities(LayoutId(1))
+            .iter()
+            .map(|entity| entity.id)
+            .collect::<Vec<_>>(),
+        vec![EntityId(1)],
+        "the paper model keeps its own element"
+    );
+    assert_eq!(
+        reopened
+            .block(BlockId(1))
+            .map(|block| block.entities.clone()),
+        Some(vec![EntityId(2)]),
+        "the block model keeps its own element"
+    );
+    assert_eq!(
+        reopened
+            .entity(EntityId(1))
+            .map(|entity| entity.space.clone()),
+        Some(SpaceId::Paper(LayoutId(1)))
+    );
+    assert_eq!(
+        reopened
+            .entity(EntityId(2))
+            .map(|entity| entity.space.clone()),
+        Some(SpaceId::Block(BlockId(1)))
+    );
 }

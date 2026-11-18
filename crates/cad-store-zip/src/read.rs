@@ -410,7 +410,7 @@ fn parse_shard_path(path: &str) -> Result<(i64, Shard), StoreError> {
     let shard: u64 = shard.parse().map_err(|_| bad())?;
     let id = PersistentId::from_raw(model)
         .ok_or_else(|| malformed(path, format!("model id {model} is not storable")))?;
-    if id.kind() != IdKind::Model {
+    if ModelKey::from_persistent(id).is_none() {
         return Err(malformed(
             path,
             format!("model id {model} is not a Model identifier"),

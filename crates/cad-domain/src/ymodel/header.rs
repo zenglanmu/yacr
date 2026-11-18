@@ -101,7 +101,13 @@ impl IdCounters {
             IdKind::MLeaderStyle => Some(&mut self.mleader_style),
             IdKind::Linetype => Some(&mut self.linetype),
             IdKind::Scale => Some(&mut self.scale),
-            IdKind::Model | IdKind::SubCategory | IdKind::Relationship | IdKind::Aspect => None,
+            IdKind::ModelSpace
+            | IdKind::PaperModel
+            | IdKind::BlockModel
+            | IdKind::DefinitionModel
+            | IdKind::SubCategory
+            | IdKind::Relationship
+            | IdKind::Aspect => None,
         }
     }
 
@@ -852,10 +858,10 @@ mod tests {
         assert_eq!(header.next.entity, COUNTER_CEILING);
 
         // A derived family has no counter, so it cannot be minted.
-        assert_eq!(header.next_id(IdKind::Model), None);
+        assert_eq!(header.next_id(IdKind::ModelSpace), None);
         assert_eq!(
-            header.mint(IdKind::Model),
-            Err(HeaderError::NotAllocated(IdKind::Model))
+            header.mint(IdKind::ModelSpace),
+            Err(HeaderError::NotAllocated(IdKind::ModelSpace))
         );
     }
 

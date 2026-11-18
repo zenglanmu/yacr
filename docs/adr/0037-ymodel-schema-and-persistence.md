@@ -193,6 +193,14 @@ ymodel 为唯一权威数据源；是 DWG/DXF 的可验证超集；其它格式�
 - 每元素恰属一个 Model；父子同 Model 且无环；图形元素恰属一个 SubCategory。
 - 每文档一个 `cad:LayerCategory`；每个 DWG layer = 一个 SubCategory 元素（1:1）；
   每条 xref 一个带前缀的子 Category。
+- Model id 不另设分配器，由空间派生（`cad_domain::ymodel::ModelKey`），**每个 model 家族一个
+  kind**：`ModelSpace`(10) 序列 0、`PaperModel`(14) 序列 = layout id、`BlockModel`(15) 序列 =
+  block id、`DefinitionModel`(16) 序列 0。layout/block 分配器永不复用，所以派生出的 model id
+  也永不复用。
+  **不能只用一个 `Model` kind**：`Paper(LayoutId(1))` 与 `Block(BlockId(1))` 会编码成同一个
+  `(kind << 45) | 1`，于是同时含 layout 与 block 的图纸写不进去（element entry 重名）或读不
+  回来（model 记录重复）。这是 Phase 1 的端到端归档测试发现的真实缺陷，已由分家族 kind 修复；
+  两个半边的单元测试都不会报，只有真走一遍归档才会暴露。
 - **v1 存储偏差（显式记录，不是静默降级）**：对象模型里样式/图层/线型/比例/布局都是
   DefinitionElement（语义上住 `DefinitionModel`），但 v1 把它们的**行**存进
   `tables/*.json`（含块定义行：`tables/blocks.json`），而不是 `elements/<model>-<shard>.json`。理由：① 改一行只需重写一个小
