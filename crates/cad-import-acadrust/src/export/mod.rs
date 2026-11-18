@@ -484,20 +484,43 @@ pub fn export(request: &ExportRequest<'_>) -> CadResult<(Vec<u8>, ExportReport)>
 
 fn write_units(doc: &mut CadDocument, request: &ExportRequest<'_>, report: &mut ExportReport) {
     let _ = request.space;
-    match request.units.as_ref().map(|u| &u.source) {
-        Some(unit) => match tables::unit_insunits(unit) {
-            Some(code) => doc.header.insertion_units = code,
-            None => report.notes.push(ExportDiagnostic {
-                object: None,
-                code: "export.note.units".into(),
-                message: format!("source unit {unit:?} has no $INSUNITS code; written as Unitless"),
-            }),
-        },
-        None => report.notes.push(ExportDiagnostic {
+    let Some(units) = request.units.as_ref() else {
+        report.notes.push(ExportDiagnostic {
             object: None,
             code: "export.note.units_missing".into(),
             message: "no unit context supplied; $INSUNITS left at Unitless".into(),
+        });
+        return;
+    };
+    match tables::unit_insunits(&units.source) {
+        Some(code) => doc.header.insertion_units = code,
+        None => report.notes.push(ExportDiagnostic {
+            object: None,
+            code: "export.note.units".into(),
+            message: format!(
+                "source unit {:?} has no $INSUNITS code; written as Unitless",
+                units.source
+            ),
         }),
+    }
+    // `$INSUNITS` names the source unit and nothing else: a per-document display
+    // scale (`display_per_source`) is not expressible there, so a scale other
+    // than 1 is stated explicitly instead of being silently dropped. The
+    // coordinates are written unscaled (this exporter never rescales), so the
+    // note tells the reader what the numbers mean.
+    if let Some(factor) = units.display_per_source {
+        if (factor - 1.0).abs() > 1e-12 {
+            report.notes.push(ExportDiagnostic {
+                object: None,
+                code: "export.note.units_scale".into(),
+                message: format!(
+                    "source unit {:?} is read at {factor} display unit(s) per source unit; \
+                     $INSUNITS can only name the source unit, so the display scale is not \
+                     written and coordinates stay in source units",
+                    units.source
+                ),
+            });
+        }
     }
 }
 

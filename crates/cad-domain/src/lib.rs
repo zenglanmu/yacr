@@ -316,6 +316,7 @@ pub struct Registration {
 pub enum Unit {
     DrawingUnits,
     Millimeter,
+    Centimeter,
     Meter,
     Inch,
     Foot,
@@ -536,6 +537,7 @@ impl UnitContext {
         match self.display {
             Unit::DrawingUnits => "drawing units",
             Unit::Millimeter => "mm",
+            Unit::Centimeter => "cm",
             Unit::Meter => "m",
             Unit::Inch => "in",
             Unit::Foot => "ft",

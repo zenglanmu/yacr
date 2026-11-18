@@ -103,6 +103,37 @@ fn export_db(db: &DrawingDatabase) -> (Vec<u8>, ExportReport) {
     export_db_format(db, ExportFormat::DxfText)
 }
 
+/// Import bytes and keep the unit context the importer derived (test-local).
+fn import_drawing_with_units(bytes: &[u8]) -> (DrawingDatabase, UnitContext) {
+    let request = ImportRequest {
+        document: DocumentId(1),
+        database: DatabaseId(1),
+        bytes: Arc::from(bytes.to_vec().into_boxed_slice()),
+        limits: ImportLimits::default(),
+        generation: 0,
+        xref: None,
+    };
+    let imported = AcadrustImporter::new()
+        .import(&request, &|| false)
+        .expect("fixture imports");
+    (imported.database, imported.units)
+}
+
+/// Export a database with an explicit unit context (test-local).
+fn export_with_units(db: &DrawingDatabase, units: UnitContext) -> (Vec<u8>, ExportReport) {
+    export(&ExportRequest {
+        database: db,
+        document_id: DocumentId(1),
+        space: ExportSpace::Model,
+        format: ExportFormat::DxfText,
+        acis_version: AcisVersion::default(),
+        dxf_target: DxfTarget::default(),
+        limits: ExportLimits::default(),
+        units: Some(units),
+    })
+    .unwrap()
+}
+
 fn export_db_format(db: &DrawingDatabase, format: ExportFormat) -> (Vec<u8>, ExportReport) {
     export(&ExportRequest {
         database: db,

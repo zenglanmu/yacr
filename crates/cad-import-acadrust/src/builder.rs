@@ -267,9 +267,9 @@ impl<'a> ImporterBuilder<'a> {
                 decimal_places: 3,
             },
             5 => UnitContext {
-                source: Unit::Meter,
-                display: Unit::Meter,
-                display_per_source: Some(0.01),
+                source: Unit::Centimeter,
+                display: Unit::Centimeter,
+                display_per_source: Some(1.0),
                 decimal_places: 3,
             },
             6 => UnitContext {

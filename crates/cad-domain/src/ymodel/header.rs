@@ -408,6 +408,7 @@ pub fn unit_token(unit: &Unit) -> &'static str {
     match unit {
         Unit::DrawingUnits => "drawing",
         Unit::Millimeter => "mm",
+        Unit::Centimeter => "cm",
         Unit::Meter => "m",
         Unit::Inch => "in",
         Unit::Foot => "ft",
@@ -419,6 +420,7 @@ pub fn unit_from_token(token: &str) -> Result<Unit, HeaderError> {
     match token {
         "drawing" => Ok(Unit::DrawingUnits),
         "mm" => Ok(Unit::Millimeter),
+        "cm" => Ok(Unit::Centimeter),
         "m" => Ok(Unit::Meter),
         "in" => Ok(Unit::Inch),
         "ft" => Ok(Unit::Foot),
@@ -452,7 +454,7 @@ pub enum HeaderError {
     },
     /// The family has no per-document counter (Model, SubCategory, …).
     NotAllocated(IdKind),
-    /// `units.source`/`units.display` is not one of the five tokens.
+    /// `units.source`/`units.display` is not one of the six tokens.
     UnknownUnit(String),
     /// `identity.kind` is not `temporary` or `sha256`.
     UnknownIdentityKind(String),
@@ -739,6 +741,7 @@ mod tests {
         for (unit, token) in [
             (Unit::DrawingUnits, "drawing"),
             (Unit::Millimeter, "mm"),
+            (Unit::Centimeter, "cm"),
             (Unit::Meter, "m"),
             (Unit::Inch, "in"),
             (Unit::Foot, "ft"),

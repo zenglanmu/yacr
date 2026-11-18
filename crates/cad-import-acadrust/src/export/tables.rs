@@ -37,6 +37,7 @@ pub(crate) fn unit_insunits(unit: &Unit) -> Option<i16> {
         Unit::Inch => Some(1),
         Unit::Foot => Some(2),
         Unit::Millimeter => Some(4),
+        Unit::Centimeter => Some(5),
         Unit::Meter => Some(6),
         Unit::DrawingUnits => None,
     }

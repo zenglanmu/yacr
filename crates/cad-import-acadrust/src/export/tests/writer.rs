@@ -718,31 +718,135 @@ fn insert_applies_rotation_and_scale_in_the_right_order() {
 #[test]
 fn unit_context_maps_to_insunits() {
     let db = db_with(vec![SemanticGeometry::Point(p(0.0, 0.0, 0.0))]);
-    let (bytes, report) = export(&ExportRequest {
-        database: &db,
-        document_id: DocumentId(1),
-        space: ExportSpace::Model,
-        format: ExportFormat::DxfText,
-        acis_version: AcisVersion::default(),
-        dxf_target: DxfTarget::default(),
-        limits: ExportLimits::default(),
-        units: Some(UnitContext {
-            source: Unit::Millimeter,
-            display: Unit::Millimeter,
-            display_per_source: Some(1.0),
+    for (unit, code) in [
+        (Unit::Inch, 1),
+        (Unit::Foot, 2),
+        (Unit::Millimeter, 4),
+        (Unit::Centimeter, 5),
+        (Unit::Meter, 6),
+    ] {
+        let (bytes, report) = export_with_units(
+            &db,
+            UnitContext {
+                source: unit.clone(),
+                display: unit.clone(),
+                display_per_source: Some(1.0),
+                decimal_places: 3,
+            },
+        );
+        let doc = DxfReader::from_reader(Cursor::new(bytes))
+            .unwrap()
+            .read()
+            .unwrap();
+        assert_eq!(doc.header.insertion_units, code, "{unit:?}");
+        assert!(
+            !report
+                .notes
+                .iter()
+                .any(|note| note.code.starts_with("export.note.units")),
+            "{unit:?} must not report a unit fallback or scale note"
+        );
+    }
+}
+
+/// Audit B31: a `$INSUNITS = 5` file must come back as `$INSUNITS = 5`.
+///
+/// The former mapping read it as "metres with a 0.01 display scale", so the
+/// exporter wrote `$INSUNITS = 6` (metres) with unchanged coordinates: every
+/// length silently became 100× too long on the next open.
+#[test]
+fn centimetre_import_exports_as_insunits_five() {
+    let mut source = CadDocument::new();
+    source.header.insertion_units = 5;
+    source
+        .add_entity(EntityType::Line(acadrust::entities::Line::from_coords(
+            0.0, 0.0, 0.0, 100.0, 0.0, 0.0,
+        )))
+        .unwrap();
+    let bytes = DxfWriter::new(&source).write_to_vec().unwrap();
+    let (db, units) = import_drawing_with_units(&bytes);
+    assert_eq!(units.source, Unit::Centimeter);
+
+    let (out, report) = export_with_units(&db, units);
+    let reread = DxfReader::from_reader(Cursor::new(out.clone()))
+        .unwrap()
+        .read()
+        .unwrap();
+    assert_eq!(
+        reread.header.insertion_units, 5,
+        "a centimetre drawing must stay centimetres, not become metres"
+    );
+    // No coordinate is rescaled anywhere: the 100-unit line is still 100 units
+    // long. Fixing the declared unit is what makes those numbers centimetres.
+    match &read_entities(&out)[0] {
+        EntityType::Line(line) => {
+            assert!((line.start - Vector3::new(0.0, 0.0, 0.0)).length() < 1e-9);
+            assert!((line.end - Vector3::new(100.0, 0.0, 0.0)).length() < 1e-9);
+        }
+        other => panic!("expected LINE, got {other:?}"),
+    }
+    assert!(
+        !report
+            .notes
+            .iter()
+            .any(|note| note.code.starts_with("export.note.units")),
+        "a representable context reports nothing"
+    );
+}
+
+#[test]
+fn non_unit_display_scale_is_reported_and_the_source_unit_still_written() {
+    let db = db_with(vec![SemanticGeometry::Point(p(0.0, 0.0, 0.0))]);
+    let (bytes, report) = export_with_units(
+        &db,
+        UnitContext {
+            source: Unit::Meter,
+            display: Unit::Centimeter,
+            display_per_source: Some(0.01),
             decimal_places: 3,
-        }),
-    })
-    .unwrap();
+        },
+    );
+    let note = report
+        .notes
+        .iter()
+        .find(|note| note.code == "export.note.units_scale")
+        .expect("a 0.01 display scale cannot be expressed by $INSUNITS");
+    assert!(
+        note.message.contains("0.01"),
+        "the note names the factor: {}",
+        note.message
+    );
     let doc = DxfReader::from_reader(Cursor::new(bytes))
         .unwrap()
         .read()
         .unwrap();
-    assert_eq!(doc.header.insertion_units, 4);
-    assert!(!report
-        .notes
-        .iter()
-        .any(|note| note.code.starts_with("export.note.units")));
+    assert_eq!(
+        doc.header.insertion_units, 6,
+        "$INSUNITS still names the source unit"
+    );
+}
+
+#[test]
+fn unit_display_scale_of_one_or_unknown_does_not_report_a_scale_note() {
+    let db = db_with(vec![SemanticGeometry::Point(p(0.0, 0.0, 0.0))]);
+    for factor in [Some(1.0), None] {
+        let (_bytes, report) = export_with_units(
+            &db,
+            UnitContext {
+                source: Unit::DrawingUnits,
+                display: Unit::DrawingUnits,
+                display_per_source: factor,
+                decimal_places: 3,
+            },
+        );
+        assert!(
+            !report
+                .notes
+                .iter()
+                .any(|note| note.code == "export.note.units_scale"),
+            "factor {factor:?} must not report a scale note"
+        );
+    }
 }
 
 #[test]

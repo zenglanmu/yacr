@@ -57,7 +57,7 @@ impl Mapper<'_> {
                 UNITS_UNSUPPORTED,
                 format!(
                     "the DGN master unit is {meters} m per unit, which the domain's unit set \
-                     (mm/m/in/ft) cannot represent; coordinates stay in the file's own numbers \
+                     (mm/cm/m/in/ft) cannot represent; coordinates stay in the file's own numbers \
                      and are reported as drawing units"
                 ),
                 None,
@@ -67,6 +67,7 @@ impl Mapper<'_> {
         let name = match unit {
             cad_domain::Unit::Meter => "meter",
             cad_domain::Unit::Millimeter => "millimeter",
+            cad_domain::Unit::Centimeter => "centimeter",
             cad_domain::Unit::Inch => "inch",
             cad_domain::Unit::Foot => "foot",
             cad_domain::Unit::DrawingUnits => "drawing_units",

@@ -114,6 +114,7 @@ pub fn unit_symbol(units: &UnitContext) -> Option<&'static str> {
     match units.display {
         Unit::DrawingUnits => None,
         Unit::Millimeter => Some("mm"),
+        Unit::Centimeter => Some("cm"),
         Unit::Meter => Some("m"),
         Unit::Inch => Some("in"),
         Unit::Foot => Some("ft"),
