@@ -20,8 +20,10 @@
 //! serialization format. Field-level rules (the `$f64` escape, canonical key
 //! order) live in `cad_domain::ymodel::json` / `payload` and are shared.
 
+pub(crate) mod build;
 pub(crate) mod elements;
 pub(crate) mod tables;
+pub(crate) mod variables;
 
 use std::collections::BTreeMap;
 use std::fmt;

@@ -37,8 +37,7 @@ use cad_domain::{
 };
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
-// Wired by `snapshot::mod`; until then no non-test target references these.
-#[allow(dead_code)] #[rustfmt::skip]
+#[rustfmt::skip]
 mod codec {
     use super::*;
     /// The decoded tables, mirroring the [`DrawingDatabase`] side tables one for
@@ -994,5 +993,4 @@ mod codec {
     }
 }
 
-#[allow(unused_imports)] // the `snapshot::mod` caller lands separately
-pub(crate) use codec::{decode, encode, DecodedTables};
+pub(crate) use codec::{decode, encode};

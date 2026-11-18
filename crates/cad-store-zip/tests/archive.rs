@@ -38,6 +38,8 @@ fn header(serial: u128) -> DocumentHeader {
         },
         identity: DocumentIdentity::Temporary(serial),
         resource_keys: vec!["arial.ttf".to_string(), "logo.png".to_string()],
+        // Header variables are owned by `cad-db`; the store only carries them.
+        variables: serde_json::json!({}),
         next: IdCounters {
             entity: 41,
             block: 2,

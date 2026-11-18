@@ -484,6 +484,7 @@ mod tests {
             units: UnitContext::drawing_units(),
             identity: DocumentIdentity::Temporary(serial),
             resource_keys: Vec::new(),
+            variables: serde_json::json!({}),
             next: IdCounters::default(),
         }
     }

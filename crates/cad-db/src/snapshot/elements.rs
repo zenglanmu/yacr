@@ -54,7 +54,6 @@ use crate::entity::{
 const CLASS: &str = CAD_ELEMENT.type_key;
 
 /// One decoded element row.
-#[allow(dead_code)] // Consumed by the snapshot hydrate path in `snapshot/mod.rs`.
 #[derive(Debug)]
 pub(crate) struct DecodedElement {
     pub entity: DbEntity,
@@ -67,7 +66,6 @@ pub(crate) struct DecodedElement {
 /// The element's own persistent id is written into the payload: an entry must be
 /// readable on its own (`unzip -p ... | jq`) without decoding a filename. Keys
 /// are sorted by `serde_json`'s `BTreeMap`, so the output is deterministic.
-#[allow(dead_code)] // Consumed by the snapshot build path in `snapshot/mod.rs`.
 pub(crate) fn encode(
     entity: &DbEntity,
     attributes: Option<&EntityRenderAttributes>,
@@ -100,7 +98,6 @@ pub(crate) fn encode(
 /// Strict: an absent required field, an unknown extra field, an unknown `class`
 /// or tag, a wrong JSON type and an id of the wrong family are all errors named
 /// after the field.
-#[allow(dead_code)] // Consumed by the snapshot hydrate path in `snapshot/mod.rs`.
 pub(crate) fn decode(value: &Value) -> Result<DecodedElement, SnapshotError> {
     let mut reader = Reader::new(value, CLASS)?;
     let class = reader.class()?.to_string();
