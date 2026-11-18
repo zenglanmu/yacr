@@ -154,7 +154,11 @@ jobs:
     # checks cannot see it. Software rendering is labelled: this proves
     # presentation/geometry, NOT GPU, pixel, performance or real-device behaviour.
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # A cold run compiles the release host and then the contract-test binaries;
+    # two repeat runs hit the old 45-minute limit mid-compile before they could
+    # seed their own cache. 90 minutes covers the cold path; warm runs stay far
+    # below it.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
         with:
