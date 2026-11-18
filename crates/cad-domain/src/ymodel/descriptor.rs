@@ -235,6 +235,10 @@ pub const CAD_ELEMENT: ClassDescriptor = ClassDescriptor {
     id: ClassId::new(ELEMENT_SCHEMA, 1),
     type_key: "cad:Element",
     fields: &[
+        // The element's own persisted identity. It is inside the payload so an
+        // entry read with `unzip -p ... | jq` names its rows without consulting
+        // the shard filename; `persistent` ids keep it exact in f64 tooling.
+        field("id", FieldKind::IdRef(IdKind::Entity)),
         field("type_key", FieldKind::String),
         field("space", FieldKind::Space),
         field("layer", FieldKind::IdRef(IdKind::Layer)),

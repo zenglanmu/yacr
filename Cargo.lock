@@ -1085,6 +1085,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "cad-store-zip"
+version = "0.1.15"
+dependencies = [
+ "cad-db",
+ "cad-domain",
+ "flate2",
+ "serde_json",
+ "sha2 0.11.1",
+ "zip",
+]
+
+[[package]]
 name = "cad-ui-core"
 version = "0.1.15"
 dependencies = [

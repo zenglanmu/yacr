@@ -153,6 +153,7 @@ pub const fn table_entry(kind: TableKind) -> &'static str {
         TableKind::Scales => "tables/scales.json",
         TableKind::PlotSettings => "tables/plot-settings.json",
         TableKind::ExternalReferences => "tables/xrefs.json",
+        TableKind::Blocks => "tables/blocks.json",
     }
 }
 

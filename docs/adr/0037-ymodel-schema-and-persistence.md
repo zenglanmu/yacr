@@ -195,7 +195,7 @@ ymodel 为唯一权威数据源；是 DWG/DXF 的可验证超集；其它格式�
   每条 xref 一个带前缀的子 Category。
 - **v1 存储偏差（显式记录，不是静默降级）**：对象模型里样式/图层/线型/比例/布局都是
   DefinitionElement（语义上住 `DefinitionModel`），但 v1 把它们的**行**存进
-  `tables/*.json`，而不是 `elements/<model>-<shard>.json`。理由：① 改一行只需重写一个小
+  `tables/*.json`（含块定义行：`tables/blocks.json`），而不是 `elements/<model>-<shard>.json`。理由：① 改一行只需重写一个小
   entry，而放进 `Definitions` 分片会把整片（含全部块定义）一起重写，raw-copy 粒度更差；
   ② 这些行的 payload 编解码是 Phase 2+ 的工作量，先做会把首个可用的保存路径推后。
   `ChangeScope::TableKind` 是这份偏差的显式载体——新增行表必须同时加进该枚举与 store 的
@@ -250,8 +250,8 @@ manifest.json                 -- format{read,write,minor}, generator, document_u
 document.json                 -- DocumentHeader: 单位/身份/resource_keys + identity.next_*（9 个）
 schema/classes.json
 tables/models.json            -- Model 元数据（kind、所属 layout/block、名称）
-tables/layers.json | layouts.json | styles.json | dimstyles.json |
-       mleaderstyles.json | linetypes.json | scales.json |
+tables/layers.json | blocks.json | layouts.json | styles.json |
+       dimstyles.json | mleaderstyles.json | linetypes.json | scales.json |
        plot-settings.json | xrefs.json      -- v1 行表（见 D7 存储偏差）
 tables/sources.json | object-refs.json | compat.json   -- Phase 2+
 tables/relationships.json | aspects.json               -- Phase 3+
@@ -266,8 +266,12 @@ raw/source-<id>.bin           -- 保留的原始源文件，STORED
   raw-copy 只复制 `旧 manifest.shard_map` 中**仍存在**的 entry。被删除的 layout/block/model
   的旧分片不会被复制回来（否则重开时"复活"）。
 - **manifest 自身不在 `entries` 里**（自引用无定义）；它的完整性由 zip CRC 保护。
-- **两个 hash**：`sha256` 是解压后字节（格式契约）；`sha256_c` 是压缩字节
-  （让 raw-copy 校验是 O(compressed)，而不是自证）。
+- **两个 hash**：`sha256` 是解压后字节（格式契约）；`sha256_c` 是压缩字节。
+  **实测约束（rev.8）**：`zip` 9.5.0 不公开压缩字节（`take_raw_reader` 是 crate-private），
+  所以本仓库既算不出也验不了 `sha256_c`。Phase 1 对**每个** entry 校验解压后的 `sha256`
+  + `len` + zip 中央目录 CRC（对内容完整性严格更强，且覆盖 foreign entry）；`sha256_c` 只作为
+  拷贝 entry 的原始记录从旧 manifest 透传，读侧标注"未校验"。Phase 2 要么换 zip API/自写
+  容器，要么按 minor 迁移删掉该字段——**不得**把它写成已验证。
 - **压缩**：JSON entry 用 deflate；`raw/*.bin` STORED。
 - **未知 entry**：`foreign: true`，保存时按压缩字节 raw-copy，永不解析、永不丢弃；
   **全量重写/compaction 也必须复制它们**，不可读则 `ymodel.foreign_entries_unreadable`。
@@ -285,8 +289,8 @@ raw/source-<id>.bin           -- 保留的原始源文件，STORED
   1. 从 `ChangeScope` 取脏分片/脏表/header；计算 live entry 集合（D11）。
   2. 在同目录写**唯一**临时文件 `foo.ymodel.<pid>-<nonce>.tmp`：未修改且仍存在的 entry
      raw-copy（Phase 2 起；Phase 1 全量重写）；脏 entry 重写；`manifest.json` 最后写。
-  3. fsync；重开校验 manifest 与**新写** entry 的 `sha256`，被拷贝 entry 校验 `sha256_c`
-     （O(compressed)，不是"两个 manifest 数字相同"的自证）。
+  3. fsync；重开校验 manifest 与每个 entry 的 `sha256` + `len` + CRC。被拷贝的 foreign entry
+     同样走解压后校验（`sha256_c` 在 `zip` 9.5.0 上不可验，见 D11）。
   4. 原子替换：先 `link(target → target.bak)`（无硬链接则复制），再
      `rename(tmp → target)`；Linux/macOS 加目录 fsync；Windows `ReplaceFileW`。
      **绝不**先 `rename(target → bak)`（会留下"目标不存在"的窗口）。

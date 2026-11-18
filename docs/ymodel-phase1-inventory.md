@@ -26,10 +26,10 @@ Entry keys: `document` = `document.json`; `table:X` = `tables/X.json`;
 | 3 | `construction_nonce` | `u64` | `runtime` | Process-local instance discriminator |
 | 4 | `entities` | `BTreeMap<EntityId, DbEntity>` | `elements` | One element per row; shard = `seq/2048` |
 | 5 | `layers` | `BTreeMap<LayerId, Layer>` | `table:layers` | Merged with field 19 by `id` |
-| 6 | `blocks` | `BTreeMap<BlockId, BlockDefinition>` | `elements` (Definitions) | Block definition is a `cad:BlockDefinitionElement` (D7) |
-| 7 | `block_metadata` | `BTreeMap<BlockId, BlockMetadata>` | `elements` (Definitions) | Merged into the block definition element payload |
-| 8 | `block_name_order` | `Vec<(String, BlockId)>` | `elements` (Definitions) | Persisted as an ordered array on the definition model, **not** derived: last-duplicate-wins lookup is order-dependent |
-| 9 | `block_source_handles` | `BTreeMap<u64, BlockId>` | `elements` (Definitions) | `SourceRef` aspect on the block definition; not recomputable |
+| 6 | `blocks` | `BTreeMap<BlockId, BlockDefinition>` | `table:blocks` | Member ids, dynamic visibility; a table in v1 (D7 storage deviation) |
+| 7 | `block_metadata` | `BTreeMap<BlockId, BlockMetadata>` | `table:blocks` | Merged into the block row (name, base point) |
+| 8 | `block_name_order` | `Vec<(String, BlockId)>` | `table:blocks` | Persisted as an ordered array, **not** derived: last-duplicate-wins lookup is order-dependent |
+| 9 | `block_source_handles` | `BTreeMap<u64, BlockId>` | `table:blocks` | Source DWG handle per block; not recomputable |
 | 10 | `hidden_entities` | `BTreeSet<EntityId>` | `elements` | Folded into the element payload as `invisible` |
 | 11 | `layouts` | `BTreeMap<LayoutId, Layout>` | `table:layouts` | `LayoutId(0)` is synthetic model space, not a row |
 | 12 | `styles` | `BTreeMap<StyleId, Style>` | `table:styles` | |
@@ -139,7 +139,13 @@ ADR-0037 D12 and in the write-path recon that produced this document.
    is always `Revision(0)` today (it is not the element's persisted revision).
 3. `block_name_order` and the two display side tables are the only fields where "derive it"
    was rejected in favour of persisting; each carries a comment in the payload codec.
-4. Style / layer / linetype / scale / layout rows are stored as `tables/*.json` in v1, not as
-   `DefinitionElement`s (ADR-0037 D7 storage deviation). `ChangeScope::TableKind` is the closed
+4. `manifest.sha256_c` cannot be computed or verified with `zip` 9.5.0 (crate-private raw
+   reader), so it is carried through from the previous manifest and marked unverified; every
+   entry is verified on its decompressed `sha256` + `len` + CRC instead. Deciding whether to
+   drop the field (minor bump) or keep it belongs to Phase 2.
+5. `TableKind` has no `ALL` constant, so the store keeps its own `table_entry` mirror; a new row
+   table needs both, and a missed one is refused as `UNSUPPORTED_MINOR` rather than dropped.
+6. Style / layer / linetype / scale / layout **and block definition** rows are stored as
+   `tables/*.json` in v1, not as `DefinitionElement`s (ADR-0037 D7 storage deviation). `ChangeScope::TableKind` is the closed
    set that has to grow with any new row table; a table missing from it would be silently
    unsaved. Migrating these rows to elements needs a minor bump and a migration.

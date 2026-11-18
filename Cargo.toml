@@ -9,6 +9,7 @@ exclude = ["vendor/rvt"]
 members = [
     "crates/cad-domain",
     "crates/cad-db",
+    "crates/cad-store-zip",
     "crates/cad-dependencies",
     "crates/cad-history",
     "crates/cad-geometry",
@@ -68,6 +69,10 @@ repository = "https://example.invalid/yacr"
 [workspace.dependencies]
 cad-domain = { path = "crates/cad-domain" }
 cad-db = { path = "crates/cad-db" }
+# Container only: `.ymodel` bytes ⇄ `DocumentSnapshot`. ADR-0037 D1 forbids every
+# `cad-*` shared layer from depending on it; only the carrier `apps/app-*` link it
+# (`scripts/check-architecture.py` enforces both directions).
+cad-store-zip = { path = "crates/cad-store-zip" }
 cad-dependencies = { path = "crates/cad-dependencies" }
 cad-history = { path = "crates/cad-history" }
 cad-geometry = { path = "crates/cad-geometry" }

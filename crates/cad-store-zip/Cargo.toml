@@ -1,0 +1,31 @@
+[package]
+name = "cad-store-zip"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "ymodel archive store: .ymodel bytes ⇄ cad-db DocumentSnapshot (ADR-0037 D11/D12)."
+
+[dependencies]
+cad-domain.workspace = true
+cad-db.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+
+# The container (ADR-0037 D11) and the reason this crate can link on
+# `wasm32-unknown-unknown`: `zip`'s default features pull `bzip2`, `zstd`,
+# `lzma`/`xz` and `aes`, i.e. C or heavy dependencies the `dom-canvas` web
+# session cannot link. `deflate-flate2` alone, with `flate2`'s default pure-Rust
+# `rust_backend` (miniz_oxide), keeps the whole tree pure Rust.
+zip = { version = "9.5", default-features = false, features = ["deflate-flate2"] }
+
+# Not called directly: this enables `flate2`'s **default backend** for the deflate
+# stream `zip` uses. `zip` declares `flate2` with `default-features = false` and
+# its `deflate-flate2` feature only adds the dependency, so *someone* in the graph
+# has to pick the backend. The workspace's `flate2 = "1"` does it with
+# `rust_backend` (miniz_oxide, pure Rust); without this line the build fails with
+# "No compression backend selected", and picking a C backend instead would break
+# the wasm container.
+flate2.workspace = true

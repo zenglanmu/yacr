@@ -336,6 +336,40 @@ def check(root: pathlib.Path) -> int:
             "contract test is allowed)"
         )
 
+    # ymodel archive store (ADR-0037 D1/D11): `cad-store-zip` is the only
+    # implementation of `cad_db::DocumentStore` — it turns a `DocumentSnapshot`
+    # into `.ymodel` bytes and back. It sits above `cad-db` (the snapshot types
+    # are the whole seam) and below every carrier: only the `apps/app-*` hosts may
+    # link it, because a `cad-*` shared layer that could open a document would
+    # drag the container format into the database/UI layers the ADR keeps
+    # format-free. The ban is the mirror image of the `cad-kernel-solidcore` rule
+    # above: there a carrier-owned dependency must not be named by a shared layer,
+    # here a carrier-owned one must not be *required* by a shared layer.
+    require_dependency("cad-store-zip", "cad-db")
+    forbidden_store_dependencies = {
+        "cad-app",
+        "cad-host",
+        "cad-ui-core",
+        "cad-desktop-shell",
+        "tauri",
+        "web-sys",
+        "jni",
+        "ndk",
+        "android-activity",
+    }
+    for dependency in sorted(forbidden_store_dependencies):
+        forbid_dependency("cad-store-zip", dependency)
+
+    for name in sorted(packages):
+        if name == "cad-store-zip" or not name.startswith("cad-"):
+            continue
+        assert "cad-store-zip" not in runtime_dependencies(
+            packages[name], workspace_dependencies
+        ), (
+            f"{name} must not depend on cad-store-zip at runtime "
+            "(only an apps/app-* carrier opens or saves a .ymodel document)"
+        )
+
     # Shared UI layer boundary: the platform-independent UI logic (`cad-ui-core`)
     # sits above the UI-free application/host contracts it consumes — it depends on
     # `cad-host` (the owner-thread session wraps `HostCore`) — and below every

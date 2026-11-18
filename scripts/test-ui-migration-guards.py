@@ -89,6 +89,10 @@ ARCH_MEMBERS: dict[str, str] = {
         '[dependencies]\ncad-domain = { path = "../cad-domain" }\n'
         'cad-kernel-adapter = { path = "../cad-kernel-adapter" }\n'
     ),
+    "crates/cad-store-zip": (
+        '[package]\nname = "cad-store-zip"\nversion = "0.1.0"\n\n'
+        '[dependencies]\ncad-db = { path = "../cad-db" }\n'
+    ),
     "crates/cad-ui-core": (
         '[package]\nname = "cad-ui-core"\nversion = "0.1.0"\n\n'
         '[dependencies]\ncad-app = { path = "../cad-app" }\n'
@@ -306,6 +310,58 @@ class ArchitectureGuardContract(unittest.TestCase):
         )
         completed = run_guard(ARCHITECTURE_GUARD, self.root)
         self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    # ---- ymodel store ownership (ADR-0037 D1/D11) --------------------------
+
+    def test_store_is_not_a_runtime_dependency_of_a_shared_layer(self) -> None:
+        # Only a carrier (`apps/app-*`) opens or saves a `.ymodel`: a `cad-*`
+        # shared layer that did would drag the container format into the database
+        # and UI layers the ADR keeps format-free.
+        self.append_to(
+            "crates/cad-app",
+            '\n[dependencies]\ncad-store-zip = { path = "../cad-store-zip" }\n',
+        )
+        completed = run_guard(ARCHITECTURE_GUARD, self.root)
+        self.assert_rejected(completed)
+        self.assertIn("cad-store-zip", completed.stderr)
+
+    def test_store_may_not_reach_the_application_or_platform_layers(self) -> None:
+        # The store is bytes ⇄ snapshot: application types, host types, the shared
+        # shell and platform bindings must stay out of it.
+        for dependency, path in (
+            ("cad-app", "../cad-app"),
+            ("cad-host", "../cad-host"),
+            ("cad-ui-core", "../cad-ui-core"),
+            ("cad-desktop-shell", "../cad-desktop-shell"),
+        ):
+            with self.subTest(dependency=dependency):
+                # The fixture's manifest ends inside its `[dependencies]` table.
+                self.append_to(
+                    "crates/cad-store-zip",
+                    f'{dependency} = {{ path = "{path}" }}\n',
+                )
+                completed = run_guard(ARCHITECTURE_GUARD, self.root)
+                self.assert_rejected(completed)
+                manifest = self.root / "crates/cad-store-zip/Cargo.toml"
+                text = manifest.read_text(encoding="utf-8")
+                manifest.write_text(
+                    text.replace(
+                        f'{dependency} = {{ path = "{path}" }}\n', ""
+                    ),
+                    encoding="utf-8",
+                )
+
+    def test_the_store_must_depend_on_the_database(self) -> None:
+        # Without `cad-db` there is no `DocumentSnapshot` to implement the store
+        # contract over, so the edge is required rather than merely allowed.
+        manifest = self.root / "crates/cad-store-zip/Cargo.toml"
+        manifest.write_text(
+            '[package]\nname = "cad-store-zip"\nversion = "0.1.0"\n',
+            encoding="utf-8",
+        )
+        completed = run_guard(ARCHITECTURE_GUARD, self.root)
+        self.assert_rejected(completed)
+        self.assertIn("cad-db", completed.stderr)
 
     # ---- `[patch.crates-io]` policy (ADR-0031 / ADR-0035) -----------------
 
