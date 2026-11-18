@@ -17,10 +17,12 @@ pub mod archive;
 pub use archive::{ArchiveBytes, ArchiveError, ArchiveWrite, DocumentArchive, LoadedArchive};
 
 pub mod files;
+pub mod persistence;
 pub use files::{
     ConfigLoad, ConfigStore, FileEvent, FilePurpose, FileTarget, HostCapabilities,
     NonPersistentConfigStore, PlatformFiles, SavePurpose, SurfaceMetrics, SurfaceSource,
 };
+pub use persistence::{NoRecovery, Persistence, RecoveryKey, RecoveryRecord, RecoverySnapshot};
 
 /// Durable plugin storage (policy, installed bundles, entry reads).
 ///
@@ -86,12 +88,6 @@ pub fn block_on<F: Future>(future: F) -> F::Output {
     }
 }
 
-pub trait Persistence {
-    /// Recovery cache is not a permanent user backup.
-    fn save_recovery(&self, document: DocumentId, bytes: Arc<[u8]>) -> HostFuture<'_, ()>;
-    fn load_recovery(&self, document: DocumentId) -> HostFuture<'_, Option<Arc<[u8]>>>;
-    fn discard_recovery_after_confirmation(&self, document: DocumentId) -> HostFuture<'_, ()>;
-}
 #[derive(Clone, Default)]
 pub struct CancellationToken(Arc<AtomicBool>);
 impl CancellationToken {

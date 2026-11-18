@@ -213,6 +213,209 @@ pub struct ExportConfig {
     pub dxf_version: cad_import_acadrust::export::DxfTarget,
 }
 
+/// One drawing/display unit token (ADR-0037 D9).
+///
+/// The persisted/wire spelling is the stable lowercase token — `drawing`, `mm`,
+/// `cm`, `m`, `in`, `ft` — so `renameAll` is genuinely needed: the Rust variant
+/// names are `Mm`/`Cm`/`In`/`Ft`, and `camelCase` renders them as the
+/// single-word lowercase tokens above (`Drawing` → `drawing`, `M` → `m`).
+/// [`Unit::DrawingUnits`] is the schema's "unknown units: values are drawing
+/// units, never assumed millimetres" (`UnitContext::drawing_units`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum UnitToken {
+    #[default]
+    Drawing,
+    Mm,
+    Cm,
+    M,
+    In,
+    Ft,
+}
+
+impl UnitToken {
+    /// Every token, in the schema's declaration order.
+    pub const ALL: [Self; 6] = [
+        Self::Drawing,
+        Self::Mm,
+        Self::Cm,
+        Self::M,
+        Self::In,
+        Self::Ft,
+    ];
+
+    /// The stable lowercase token (also the `cad_set_setting` value).
+    pub fn as_token(self) -> &'static str {
+        match self {
+            Self::Drawing => "drawing",
+            Self::Mm => "mm",
+            Self::Cm => "cm",
+            Self::M => "m",
+            Self::In => "in",
+            Self::Ft => "ft",
+        }
+    }
+
+    /// Parse an exact token; anything else is `None`, never a default.
+    pub fn parse(token: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|unit| unit.as_token() == token)
+    }
+
+    /// The domain unit this token names.
+    pub fn to_unit(self) -> cad_domain::Unit {
+        match self {
+            Self::Drawing => cad_domain::Unit::DrawingUnits,
+            Self::Mm => cad_domain::Unit::Millimeter,
+            Self::Cm => cad_domain::Unit::Centimeter,
+            Self::M => cad_domain::Unit::Meter,
+            Self::In => cad_domain::Unit::Inch,
+            Self::Ft => cad_domain::Unit::Foot,
+        }
+    }
+
+    /// The domain unit back as a token.
+    pub fn from_unit(unit: &cad_domain::Unit) -> Self {
+        match unit {
+            cad_domain::Unit::DrawingUnits => Self::Drawing,
+            cad_domain::Unit::Millimeter => Self::Mm,
+            cad_domain::Unit::Centimeter => Self::Cm,
+            cad_domain::Unit::Meter => Self::M,
+            cad_domain::Unit::Inch => Self::In,
+            cad_domain::Unit::Foot => Self::Ft,
+        }
+    }
+
+    /// Exact metres per one of this unit.
+    ///
+    /// The factors are exact by construction (`in` is defined as `0.0254 m` and
+    /// `ft` as `12 in`), so a displayed length is a division by an exactly
+    /// representable ratio rather than a fitted approximation.
+    /// [`Self::Drawing`] has no factor: an untyped drawing unit is not a metre
+    /// count.
+    pub fn metres_per_unit(self) -> Option<f64> {
+        match self {
+            Self::Drawing => None,
+            Self::Mm => Some(0.001),
+            Self::Cm => Some(0.01),
+            Self::M => Some(1.0),
+            Self::In => Some(0.0254),
+            Self::Ft => Some(0.3048),
+        }
+    }
+}
+
+/// Drawing-unit and display-unit preference (ADR-0037 D9).
+///
+/// Defaults reproduce [`cad_domain::UnitContext::default`] exactly: both units
+/// are the untyped `drawing` token and the precision is `3`. A typed display
+/// unit over an untyped source is refused by [`ViewerConfig::validate`] (see
+/// [`Self::unit_context`]) because it would claim a scale the coordinates do not
+/// have.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
+pub struct UnitsConfig {
+    pub drawing_unit: UnitToken,
+    pub display_unit: UnitToken,
+    pub decimal_places: u8,
+}
+
+impl Default for UnitsConfig {
+    fn default() -> Self {
+        let context = cad_domain::UnitContext::default();
+        Self {
+            drawing_unit: UnitToken::from_unit(&context.source),
+            display_unit: UnitToken::from_unit(&context.display),
+            decimal_places: context.decimal_places,
+        }
+    }
+}
+
+impl UnitsConfig {
+    /// The largest accepted precision, in decimal places.
+    ///
+    /// Eight is the point where a `mm` length still distinguishes one nanometre
+    /// while staying inside the shortest-round-trip formatting the app uses;
+    /// a larger value is refused by name, never clamped.
+    pub const MAX_DECIMAL_PLACES: u8 = 8;
+
+    /// Build the document's [`cad_domain::UnitContext`] from these tokens.
+    ///
+    /// `display_per_source` is `Some(metres_per_source / metres_per_display)`
+    /// when **both** tokens are typed (so `cm → m` is `0.01`, `in → mm` is
+    /// `25.4`, and `m → m` is exactly `1.0`), and `None` when both are the
+    /// untyped `drawing` token. A typed source shown as the untyped display unit
+    /// keeps the stored numbers (`Some(1.0)`: no unit is claimed for them), while
+    /// a **typed display over an untyped source** is an explicit refusal — it
+    /// would present untyped coordinates as a measured length.
+    pub fn unit_context(&self) -> Result<cad_domain::UnitContext, ConfigError> {
+        let source = self.drawing_unit.metres_per_unit();
+        let display = self.display_unit.metres_per_unit();
+        let display_per_source = match (source, display) {
+            (Some(source), Some(display)) => {
+                let ratio = source / display;
+                if !ratio.is_finite() || ratio <= 0.0 {
+                    return Err(ConfigError::new(
+                        "ui.units.displayUnit",
+                        "the display unit has no finite positive ratio to the drawing unit",
+                    ));
+                }
+                Some(ratio)
+            }
+            (None, None) => None,
+            (None, Some(_)) => {
+                return Err(ConfigError::new(
+                    "ui.units.displayUnit",
+                    "a display unit requires a drawing unit; untyped drawing units cannot be displayed as a named unit",
+                ))
+            }
+            // A typed source displayed as "drawing units" shows the stored
+            // numbers unchanged (no unit is claimed for them), so the ratio is
+            // exactly one rather than an invented conversion.
+            (Some(_), None) => Some(1.0),
+        };
+        Ok(cad_domain::UnitContext {
+            source: self.drawing_unit.to_unit(),
+            display: self.display_unit.to_unit(),
+            display_per_source,
+            decimal_places: self.decimal_places,
+        })
+    }
+}
+
+/// The default recovery interval, in seconds (ADR-0037 D12's "at most once per
+/// minute"). The host's `RECOVERY_INTERVAL` constant is this same value.
+pub const DEFAULT_RECOVERY_INTERVAL_SECONDS: u32 = 60;
+
+/// Recovery-snapshot write interval (ADR-0037 D12).
+///
+/// `intervalSeconds` is how often a dirty document may rewrite its snapshot;
+/// `0` disables the writes entirely. The default `60` is the ADR's "at most once
+/// per minute" and the same value as
+/// [`crate::viewer_config::DEFAULT_RECOVERY_INTERVAL_SECONDS`]. Out-of-range
+/// values are refused by [`ViewerConfig::validate`], never clamped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
+pub struct RecoveryConfig {
+    pub interval_seconds: u32,
+}
+
+impl Default for RecoveryConfig {
+    fn default() -> Self {
+        Self {
+            interval_seconds: DEFAULT_RECOVERY_INTERVAL_SECONDS,
+        }
+    }
+}
+
+impl RecoveryConfig {
+    /// The largest accepted interval: one hour.
+    ///
+    /// Above it the "bounded window" the snapshot exists for (ADR-0037 D12) is
+    /// longer than a normal editing session, so a longer value is refused by
+    /// name rather than silently accepted.
+    pub const MAX_INTERVAL_SECONDS: u32 = 3600;
+}
+
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct UiConfig {
@@ -222,6 +425,8 @@ pub struct UiConfig {
     pub command_overrides: BTreeMap<String, CommandOverride>,
     pub user_customization: UserCustomization,
     pub export: ExportConfig,
+    pub units: UnitsConfig,
+    pub recovery: RecoveryConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

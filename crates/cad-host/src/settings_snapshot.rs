@@ -75,6 +75,17 @@ pub struct HostSettings {
     /// ViewCube visibility in 3D views (root `viewCubeIn3d` leaf, default
     /// `true`).
     pub view_cube_in_3d: bool,
+    /// Drawing unit token (`ui.units.drawingUnit`): `drawing` (default), `mm`,
+    /// `cm`, `m`, `in` or `ft`.
+    pub drawing_unit: String,
+    /// Display unit token (`ui.units.displayUnit`), the same closed set. A typed
+    /// token over the untyped `drawing` source is refused by the schema.
+    pub display_unit: String,
+    /// Decimal places the display uses (`ui.units.decimalPlaces`, `0..=8`).
+    pub unit_precision: u32,
+    /// Recovery-snapshot interval in seconds (`ui.recovery.intervalSeconds`,
+    /// `0..=3600`); `0` disables the writes.
+    pub recovery_interval: u32,
     pub fonts_dir: Option<String>,
 }
 
@@ -127,6 +138,49 @@ impl HostCore {
             )
         };
         let orbit_sensitivity_percent = self.orbit_sensitivity_percent();
+        // The units the **document** really carries are the ones in effect: a
+        // `.ymodel` open installs the header's units, so the config preference is
+        // only the value a write applies (and the fallback when no document is
+        // open). Reporting the preference over a differing header would show a
+        // unit that is not what the coordinates mean.
+        let (drawing_unit, display_unit, unit_precision) = {
+            let controller = self.controller.borrow();
+            let from_document = controller
+                .application
+                .workspace
+                .documents
+                .get(&controller.document_id)
+                .map(|document| &document.units);
+            match from_document {
+                Some(units) => (
+                    cad_app::viewer_config::UnitToken::from_unit(&units.source)
+                        .as_token()
+                        .to_string(),
+                    cad_app::viewer_config::UnitToken::from_unit(&units.display)
+                        .as_token()
+                        .to_string(),
+                    u32::from(units.decimal_places),
+                ),
+                None => {
+                    let store = self.viewer_config.borrow();
+                    let units = store.effective().ui.units;
+                    (
+                        units.drawing_unit.as_token().to_string(),
+                        units.display_unit.as_token().to_string(),
+                        u32::from(units.decimal_places),
+                    )
+                }
+            }
+        };
+        // The recovery interval is not document state: it is exactly the
+        // effective preference the tick reads.
+        let recovery_interval = self
+            .viewer_config
+            .borrow()
+            .effective()
+            .ui
+            .recovery
+            .interval_seconds;
         let (snap_enabled, hover_preview, grid_snap_enabled, ortho_enabled, snap_spacing) = {
             let controller = self.controller.borrow();
             (
@@ -170,6 +224,10 @@ impl HostCore {
             navvcube_display: self.root_preferences.borrow().navvcube_display(),
             view_cube_in_2d: self.root_preferences.borrow().view_cube_in_2d(),
             view_cube_in_3d: self.root_preferences.borrow().view_cube_in_3d(),
+            drawing_unit,
+            display_unit,
+            unit_precision,
+            recovery_interval,
             fonts_dir: self
                 .options
                 .fonts_dir

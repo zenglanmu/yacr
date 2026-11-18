@@ -33,6 +33,8 @@ mod tests;
 mod tests_display;
 #[cfg(test)]
 mod tests_interaction;
+#[cfg(test)]
+mod tests_units;
 
 pub use colour::*;
 pub use commands::*;

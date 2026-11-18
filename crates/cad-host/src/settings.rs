@@ -11,7 +11,9 @@
 //! (`view.gpuBudget.percent`), the five host-owned appearance/navigation leaves
 //! (`theme`, `navbarVisible`, `navvcubeDisplay`, `viewCubeIn2d`,
 //! `viewCubeIn3d`), the 3D orbit sensitivity percentage
-//! (`interaction.orbitSensitivityPercent`) and the read-only `--fonts-dir`
+//! (`interaction.orbitSensitivityPercent`), the drawing/display units and their
+//! precision (`ui.units.*`, applied to the document header), the recovery
+//! interval (`ui.recovery.intervalSeconds`) and the read-only `--fonts-dir`
 //! display value.
 //! Every write goes through the same validated store/persistence path as
 //! [`HostCore::apply_user_preference_json`] — the backend leaf and the five
@@ -108,11 +110,24 @@ pub enum CadSettingKey {
     ViewCubeIn2d,
     /// ViewCube visibility in 3D views (root `viewCubeIn3d` leaf).
     ViewCubeIn3d,
+    /// Drawing unit of the document's coordinates (`ui.units.drawingUnit`):
+    /// the token `drawing` (default), `mm`, `cm`, `m`, `in` or `ft`.
+    DrawingUnit,
+    /// Unit lengths are displayed in (`ui.units.displayUnit`): the same tokens.
+    /// The schema refuses a typed display unit over the untyped `drawing`
+    /// source.
+    DisplayUnit,
+    /// Decimal places the display uses (`ui.units.decimalPlaces`): `0..=8`.
+    UnitPrecision,
+    /// Recovery-snapshot write interval in seconds
+    /// (`ui.recovery.intervalSeconds`): `0` disables the snapshot writes,
+    /// `3600` is the accepted ceiling.
+    RecoveryInterval,
 }
 
 impl CadSettingKey {
     /// Every writable key, in a stable order.
-    pub const ALL: [Self; 26] = [
+    pub const ALL: [Self; 30] = [
         Self::Grid,
         Self::Axes,
         Self::SelectionHighlight,
@@ -139,6 +154,10 @@ impl CadSettingKey {
         Self::NavvcubeDisplay,
         Self::ViewCubeIn2d,
         Self::ViewCubeIn3d,
+        Self::DrawingUnit,
+        Self::DisplayUnit,
+        Self::UnitPrecision,
+        Self::RecoveryInterval,
     ];
 
     /// The stable camelCase wire key (also the `cad_set_setting` key).
@@ -177,6 +196,10 @@ impl CadSettingKey {
             Self::NavvcubeDisplay => "navvcubeDisplay",
             Self::ViewCubeIn2d => "viewCubeIn2d",
             Self::ViewCubeIn3d => "viewCubeIn3d",
+            Self::DrawingUnit => "drawingUnit",
+            Self::DisplayUnit => "displayUnit",
+            Self::UnitPrecision => "unitPrecision",
+            Self::RecoveryInterval => "recoveryInterval",
         }
     }
 
@@ -292,6 +315,37 @@ impl CadSettingKey {
             Self::GpuBudgetPercent => match value {
                 CadSettingValue::Number(percent)
                     if cad_app::viewer_config::ViewGpuBudget::RANGE.contains(percent) =>
+                {
+                    Ok(())
+                }
+                _ => Err(SETTINGS_INVALID_VALUE),
+            },
+            // The drawing/display unit tokens are the schema's stable lowercase
+            // set; an unknown token is refused with the generic invalid value,
+            // never normalized to `drawing`.
+            Self::DrawingUnit | Self::DisplayUnit => match value {
+                CadSettingValue::Text(token)
+                    if cad_app::viewer_config::UnitToken::parse(token).is_some() =>
+                {
+                    Ok(())
+                }
+                _ => Err(SETTINGS_INVALID_VALUE),
+            },
+            // Unit precision: `0..=8` decimal places, the schema's own ceiling.
+            Self::UnitPrecision => match value {
+                CadSettingValue::Number(places)
+                    if *places
+                        <= u32::from(cad_app::viewer_config::UnitsConfig::MAX_DECIMAL_PLACES) =>
+                {
+                    Ok(())
+                }
+                _ => Err(SETTINGS_INVALID_VALUE),
+            },
+            // The recovery interval in seconds: `0` disables the writes, `3600`
+            // is the accepted ceiling. Out of range is refused, never clamped.
+            Self::RecoveryInterval => match value {
+                CadSettingValue::Number(seconds)
+                    if *seconds <= cad_app::viewer_config::RecoveryConfig::MAX_INTERVAL_SECONDS =>
                 {
                     Ok(())
                 }
@@ -428,6 +482,10 @@ impl HostCore {
             CadSettingKey::ViewCubeIn3d => {
                 self.apply_root_flag(&value, |preferences| &mut preferences.view_cube_in_3d)
             }
+            CadSettingKey::DrawingUnit => self.apply_drawing_unit(&value),
+            CadSettingKey::DisplayUnit => self.apply_display_unit(&value),
+            CadSettingKey::UnitPrecision => self.apply_unit_precision(&value),
+            CadSettingKey::RecoveryInterval => self.apply_recovery_interval(&value),
         }
     }
 

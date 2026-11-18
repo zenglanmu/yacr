@@ -179,7 +179,9 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
   源写 `.ymodel`，`.dwg` 源仍是实验性 DWG 导出，其它源仍是 DXF。归档拒绝用稳定标记
   `ymodel.*`（`unsupported_version` / `unsupported_minor` / `invalid_document` / `conflict` /
   `foreign_entries_unreadable`）；**目前没有进程退出码映射**（ADR-0037 D13 的 `8` 只是计划）。
-  L0 源字节直通与 L1 不动点**都还没有证据**。
+  L0 源字节直通与 L1 不动点**都还没有证据**。恢复快照是载体私有的**普通 `.ymodel`**
+  （`<config>/recovery/<key>.ymodel`），恢复 = 用 `OPEN` 打开它；默认每 60 s 写一次（选项里可改，0 = 关闭），保存成功后丢弃，
+  过期快照（`revision <= saved_revision`）直接丢弃而不是提示——**不得**用旧快照回滚文档。
 
 ## 前端约定（`apps/desktop-ui`）
 

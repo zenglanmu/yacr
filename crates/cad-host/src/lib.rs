@@ -53,7 +53,6 @@ use cad_platform::{
     ConfigLoad, ConfigStore, FileTarget, HostCapabilities, PlatformFiles, SavePurpose,
     SurfaceMetrics, SurfaceSource,
 };
-
 mod command_log;
 mod command_log_echo;
 mod core;
@@ -65,11 +64,13 @@ mod orbit_sensitivity;
 mod p4;
 pub mod policy;
 mod recent;
+mod recovery;
 mod save;
 mod settings;
 mod settings_export;
 mod settings_root;
 mod settings_snapshot;
+mod settings_units;
 mod state;
 
 pub use command_log::{
@@ -96,12 +97,13 @@ mod zoom_anchor_tests;
 pub use cad_app::{VendorRecord, VendorSource};
 pub(crate) use core::{
     ActiveGuard, BoxGesture, FileAbort, HoverState, LassoGesture, NavInner, PendingHover,
-    PendingSave,
+    PendingSave, RecoveryState,
 };
 pub use core::{HostCore, HostOptions, HostPlatform, RequestClock};
 #[cfg(not(target_arch = "wasm32"))]
 pub use fonts::DesktopResources;
 pub use fonts::{HostResources, UnsupportedResources};
+pub use recovery::RECOVERY_INTERVAL;
 
 /// A user-facing rendering of a command error.
 ///
@@ -190,6 +192,9 @@ impl HostCore {
             drawing_path: Rc::new(RefCell::new(None)),
             source_target: Rc::new(RefCell::new(None)),
             archive: Rc::new(RefCell::new(None)),
+            persistence: Rc::new(RefCell::new(None)),
+            recovery: Rc::new(RefCell::new(RecoveryState::default())),
+            recovery_now: Rc::new(Instant::now),
             last_status: Rc::new(RefCell::new(None)),
             last_image_report: Rc::new(RefCell::new(None)),
             last_image_keys: Rc::new(RefCell::new(std::collections::BTreeSet::new())),
@@ -305,6 +310,14 @@ impl HostCore {
         self.hover_now = clock;
     }
 
+    /// Test-only: install a deterministic instant source for the recovery
+    /// interval, for the same reason as [`Self::set_hover_clock_for_test`] — the
+    /// interval is a per-tick deadline, so a test must move the clock, not sleep.
+    #[cfg(test)]
+    pub(crate) fn set_recovery_clock_for_test(&mut self, clock: Rc<dyn Fn() -> Instant>) {
+        self.recovery_now = clock;
+    }
+
     /// Discard any in-progress pointer gesture.
     ///
     /// Called when the authoritative document, canvas metrics or config change:
@@ -364,6 +377,11 @@ impl HostCore {
             // (open/new) clears it so no entry from another drawing survives.
             // The sequence counter is kept monotonic across the clear.
             self.command_log.borrow_mut().clear();
+            // Recovery bookkeeping is per document too: the new document has its
+            // own key, its own interval and its own failure latch, and a deadline
+            // carried over from the replaced drawing would let the new one's
+            // first snapshot fire immediately (or never).
+            *self.recovery.borrow_mut() = RecoveryState::default();
             // A replacement rebuilds `SessionState`; re-apply the persisted
             // interaction defaults so an Options choice survives open/new.
             self.seed_session_interaction();
@@ -959,14 +977,19 @@ impl HostCore {
         self.sync_render()
     }
 
-    /// One timer tick: due hover dwell → file events → open/save funnels →
-    /// metrics → render sync.
+    /// One timer tick: due hover dwell → due recovery snapshot → file events →
+    /// open/save funnels → metrics → render sync.
     ///
     /// The due-hover application is the only timing hook for the hover dwell; it
     /// is a no-op when nothing is pending or the deadline has not elapsed, so a
-    /// stable tick schedules no render revision churn.
+    /// stable tick schedules no render revision churn. The recovery writer is the
+    /// same shape: a deadline check, no timer thread, and no effect at all while
+    /// the document is clean or no store is installed.
     pub fn tick(&self) -> CadResult<()> {
         self.apply_due_hover();
+        // Before the fallible chain: a snapshot is due on its own schedule and
+        // must not be skipped because a metrics/surface read failed this tick.
+        self.tick_recovery();
         self.poll_open()
             .and_then(|_| self.poll_solid_boolean())
             .and_then(|_| self.poll_pending_save())

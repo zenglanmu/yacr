@@ -1,6 +1,6 @@
 //! Typed settings wire surface for the Options dialog.
 //!
-//! The session exposes the same closed twenty-four-key surface the host
+//! The session exposes the same closed thirty-key surface the host
 //! persists; it adds no second validation and no raw-JSON entry point. A UI
 //! writes one typed key/value pair, the host validates it against the closed
 //! table, persists the matching preference leaf and applies it to the live
@@ -20,13 +20,15 @@ pub use cad_host::{
 ///
 /// A flat camelCase wire object (like the status/session types). `fontsDir` is
 /// read-only display data sourced from the host's `--fonts-dir`; the other
-/// twenty-three fields correspond one-to-one with [`CadSettingKey`], the two
+/// twenty-nine fields correspond one-to-one with [`CadSettingKey`], the two
 /// backgrounds as canonical `#rrggbb` strings, the crosshair and the GPU memory
 /// budget as integer percentages, the pickbox/aperture as integer pixel counts,
 /// the snap spacing as a real number of drawing units, the orbit sensitivity as
 /// a real percentage of the host's base rate, the graphics backend as
-/// one of `auto`/`vulkan`/`dx12`, the theme as `dark`/`light` and the
-/// navigation/ViewCube switches as their host-owned values.
+/// one of `auto`/`vulkan`/`dx12`, the theme as `dark`/`light`, the
+/// navigation/ViewCube switches as their host-owned values, the drawing/display
+/// units as their schema tokens, and the unit precision / recovery interval as
+/// integers.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CadSettings {
@@ -94,6 +96,17 @@ pub struct CadSettings {
     /// ViewCube visibility in 3D views (root leaf `viewCubeIn3d`, default
     /// `true`).
     pub view_cube_in_3d: bool,
+    /// Drawing unit of the document's coordinates (`ui.units.drawingUnit`):
+    /// `drawing` (default), `mm`, `cm`, `m`, `in` or `ft`.
+    pub drawing_unit: String,
+    /// Unit lengths are displayed in (`ui.units.displayUnit`), the same closed
+    /// token set. A typed token over the `drawing` source is refused.
+    pub display_unit: String,
+    /// Decimal places the display uses (`ui.units.decimalPlaces`, `0..=8`).
+    pub unit_precision: u32,
+    /// Recovery-snapshot interval in seconds (`ui.recovery.intervalSeconds`,
+    /// `0..=3600`); `0` disables the writes.
+    pub recovery_interval: u32,
     /// Read-only: the configured CAD font directory, or `null` when unset.
     pub fonts_dir: Option<String>,
 }
@@ -125,6 +138,10 @@ impl From<HostSettings> for CadSettings {
             navvcube_display: value.navvcube_display,
             view_cube_in_2d: value.view_cube_in_2d,
             view_cube_in_3d: value.view_cube_in_3d,
+            drawing_unit: value.drawing_unit,
+            display_unit: value.display_unit,
+            unit_precision: value.unit_precision,
+            recovery_interval: value.recovery_interval,
             fonts_dir: value.fonts_dir,
         }
     }

@@ -515,7 +515,12 @@ static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 /// still atomic and the user's edit is the thing at risk. It is reported on
 /// stderr instead of being swallowed, because "saved with no backup" and "saved"
 /// are different contracts.
-fn atomic_replace(path: &Path, bytes: &[u8], keep_backup: bool) -> CadResult<()> {
+///
+/// `pub(crate)` so the recovery store ([`crate::recovery_store`]) uses this one
+/// implementation instead of a second, subtly different one: a carrier-private
+/// snapshot needs the same temp → sync → rename sequence as a document save, and
+/// two copies could disagree about durability.
+pub(crate) fn atomic_replace(path: &Path, bytes: &[u8], keep_backup: bool) -> CadResult<()> {
     let parent = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())

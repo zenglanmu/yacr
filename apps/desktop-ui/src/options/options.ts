@@ -19,6 +19,11 @@
 // Nothing here invents a value. A field the host does not report stays `null`
 // (rendered as "not reported"), is never dirty and is never written.
 import type { Translator } from '../i18n.ts';
+import type { OptionField } from './unit-fields.ts';
+import { UNIT_FIELDS, UNIT_TOKENS, unitPairError } from './unit-fields.ts';
+
+export type { OptionField } from './unit-fields.ts';
+export { UNIT_TOKENS, UNIT_FIELDS } from './unit-fields.ts';
 
 /** The IPC that returns the effective settings snapshot. */
 export const SETTINGS_READ_COMMAND = 'cad_settings';
@@ -135,62 +140,6 @@ export const OPTIONS_TABS: readonly OptionTab[] = Object.freeze<OptionTab[]>([
   { id: 'user', labelKey: 'options.tab.user', icon: 'language' },
   { id: 'plugins', labelKey: 'options.tab.plugins', icon: 'settings', selfRendered: true },
 ]);
-
-/**
- * The editor a control offers.
- *
- * `number` is the integer editor (a wire `u32`); `real` is the fractional one
- * (a wire `f64`). They are separate kinds on purpose: reusing `number` for a real
- * would silently refuse a legal `2.5` (see [`parseIntegerText`]).
- */
-export type OptionFieldKind = 'bool' | 'number' | 'real' | 'color' | 'select' | 'readonly' | 'locale';
-
-/** The facts every control carries. */
-interface OptionFieldBase {
-  readonly id: string;
-  readonly tab: string;
-  readonly labelKey: string;
-  readonly helpKey: string;
-}
-
-/**
- * A control whose draft is a `cad_set_setting` write: the `cad_settings` field
- * it is seeded from (`wire`) and the write key `cad_set_setting` expects (`key`).
- */
-interface OptionWritableField extends OptionFieldBase {
-  readonly wire: string;
-  readonly key: string;
-}
-
-/**
- * One control. The `kind` tag decides which editor renders it and which facts
- * are meaningful, so the numeric range only exists on a `number`/`real` field and
- * the delivered options only exist on a `select` field.
- */
-export type OptionField =
-  | (OptionWritableField & { readonly kind: 'bool' | 'color' })
-  | (OptionWritableField & {
-    readonly kind: 'number';
-    readonly min: number;
-    readonly max: number;
-    readonly unitKey: string;
-  })
-  | (OptionWritableField & {
-    // A fractional number (the wire shape is a JSON real, never a truncated
-    // integer). Same facts as `number`; only the parser differs.
-    readonly kind: 'real';
-    readonly min: number;
-    readonly max: number;
-    readonly unitKey: string;
-  })
-  | (OptionWritableField & {
-    readonly kind: 'select';
-    readonly choices: readonly string[];
-    readonly choiceKeyPrefix?: string;
-    readonly errorCode?: string;
-  })
-  | (OptionFieldBase & { readonly kind: 'readonly'; readonly wire: string })
-  | (OptionFieldBase & { readonly kind: 'locale' });
 
 /**
  * The complete control table.
@@ -431,6 +380,7 @@ export const OPTIONS_FIELDS: readonly OptionField[] = Object.freeze<OptionField[
     labelKey: 'options.setting.acis_version.label',
     helpKey: 'options.setting.acis_version.help',
   },
+  ...UNIT_FIELDS,
   {
     id: 'fontsDir',
     tab: 'files',
@@ -652,6 +602,7 @@ export function validateDraft(draft: OptionsDraft | null | undefined): Record<st
     const code = validateField(field.id, value);
     if (code) errors[field.id] = code;
   }
+  if (unitPairError(draft)) errors.displayUnit = SETTINGS_ERROR.invalidValue;
   return errors;
 }
 

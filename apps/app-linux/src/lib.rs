@@ -47,6 +47,8 @@ mod nvidia_quirk;
 #[cfg(target_os = "linux")]
 pub mod platform;
 #[cfg(target_os = "linux")]
+pub mod recovery_store;
+#[cfg(target_os = "linux")]
 pub mod redraw;
 #[cfg(target_os = "linux")]
 mod stacking_regression;

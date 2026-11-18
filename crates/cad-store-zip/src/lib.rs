@@ -47,8 +47,7 @@
 //! # Determinism
 //!
 //! Two writes of the same snapshot produce byte-identical archives: entries are
-//! emitted in sorted path order, object keys serialize in `serde_json`'s
-//! `BTreeMap` (sorted) order, every zip entry gets [`zip::DateTime::default`],
+//! emitted in sorted path order, every zip entry gets [`zip::DateTime::default`],
 //! JSON entries are always `Deflated` and foreign copies are byte-identical.
 //! There is one apparent exception — `saved_at` — and it is handled by not being
 //! a clock: see [`ZipDocumentStore::with_saved_at`].

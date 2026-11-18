@@ -340,6 +340,24 @@ pub(crate) struct HoverState {
 /// Registered queue empty-to-nonempty wake callback.
 pub(crate) type RequestWaker = Rc<dyn Fn()>;
 
+/// Timing and one-report-per-document bookkeeping for the recovery snapshot
+/// (ADR-0037 D12).
+///
+/// Pure host state: the store itself is a carrier capability
+/// ([`HostCore::set_persistence`]) and nothing here is authoritative document
+/// content.
+#[derive(Default)]
+pub(crate) struct RecoveryState {
+    /// The last snapshot attempt (successful or not), for the interval.
+    ///
+    /// `None` while the document is clean: the next edit arms a fresh interval
+    /// instead of inheriting one that expired while there was nothing to save.
+    pub last_attempt: Option<Instant>,
+    /// The key whose snapshot write last failed, so a broken store is reported
+    /// once per document instead of once per interval.
+    pub failed_key: Option<cad_platform::RecoveryKey>,
+}
+
 /// Monotonic millisecond clock source for the pump time budget.
 ///
 /// Public because a host with **no** default clock (wasm32: `std::time::Instant`
@@ -415,6 +433,18 @@ pub struct HostCore {
     /// shared layers may not link `cad-store-zip` (architecture gate), so the
     /// implementation arrives as a trait object.
     pub(crate) archive: Rc<RefCell<Option<Arc<dyn DocumentArchive>>>>,
+    /// The carrier's recovery-snapshot store (ADR-0037 D12).
+    ///
+    /// `None` on a carrier with no durable private directory (browser, Android
+    /// SAF): the host then writes no snapshot at all rather than inventing a
+    /// place for one.
+    pub(crate) persistence: Rc<RefCell<Option<Arc<dyn cad_platform::Persistence>>>>,
+    /// Timing / one-report-per-document state for the recovery writer.
+    pub(crate) recovery: Rc<RefCell<RecoveryState>>,
+    /// The monotonic clock the recovery interval is measured against. Separate
+    /// from [`Self::hover_now`] only so the two timing contracts can be driven
+    /// independently; production installs the same `Instant::now` in both.
+    pub(crate) recovery_now: Rc<dyn Fn() -> Instant>,
     /// Last semantic status update.
     pub(crate) last_status: Rc<RefCell<Option<StatusMessage>>>,
     /// Last raster-image loading outcome, surfaced by the diagnostics drawer.

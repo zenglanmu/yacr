@@ -23,6 +23,7 @@ mod block_edit;
 mod bounds;
 mod edit;
 mod header_geometry;
+mod header_meta;
 mod layer_edit;
 mod layer_inherit;
 mod layer_patch;

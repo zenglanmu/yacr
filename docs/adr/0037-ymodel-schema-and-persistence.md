@@ -281,6 +281,11 @@ raw/source-<id>.bin           -- 保留的原始源文件，STORED
   拷贝 entry 的原始记录从旧 manifest 透传，读侧标注"未校验"。Phase 2 要么换 zip API/自写
   容器，要么按 minor 迁移删掉该字段——**不得**把它写成已验证。
 - **压缩**：JSON entry 用 deflate；`raw/*.bin` STORED。
+- **键序不是格式的一部分**：`serde_json::Map` 的底层类型取决于这次 build 里有没有别的 crate
+  启用 `preserve_order`（本仓库没有，但某个传递依赖有），所以桌面构建按插入序、窄构建按字母序
+  输出。两者是同一个 JSON 对象，读取端一律按名字取值；**同一次构建内**同一个快照两次写仍
+  逐字节相同（插入序固定），但**跨构建**的字节不同，不是兼容性问题。测试不得固定键序——
+  `schema::tests::the_object_is_deterministic` 曾因此只在合并构建时失败。
 - **未知 entry**：`foreign: true`，保存时按压缩字节 raw-copy，永不解析、永不丢弃；
   **全量重写/compaction 也必须复制它们**，不可读则 `ymodel.foreign_entries_unreadable`。
   foreign entry 与保留路径冲突 → 显式失败，不覆盖。
@@ -306,6 +311,20 @@ raw/source-<id>.bin           -- 保留的原始源文件，STORED
   6. 清理孤儿 `.tmp`（打开时扫描本目录）。
 - **恢复快照生命周期**：成功保存后清掉旧快照；启动时只有
   `snapshot.revision > file.saved_revision` 才提示恢复。否则会用旧快照把文件"回滚"。
+- **恢复快照的实现形态（实现期收窄，记录在此）**：
+  - 快照就是一份普通 `.ymodel`，写在载体私有目录（`<config>/recovery/<key>.ymodel` 与同名
+    `.json` 记录），**从不触碰文档自己的文件**。于是"恢复"= 用现有 `OPEN` 打开它——不需要
+    新命令、不需要新对话框。`RECOVER` 保持 AutoCAD 的只读报告语义，不被挪用（本仓库没有
+    host 侧通用 yes/no 提示面，为这一条新增一整套模态是 disproportionate）。
+  - **先写字节、后写记录**：被撕裂的一对绝不会声称比实际字节更新的 revision。
+  - key 由宿主派生：有源文件时 `sha256(源 opaque 句柄)`，否则 `sha256("uuid:" + document_uuid)`；
+    只允许 `[0-9a-f]`，所以 key 不可能逃出恢复目录。
+  - 脏文档最多每 60 s 写一次（在 owner tick 上按 deadline 判断，**没有定时线程**；与 hover
+    dwell 同一先例）。
+  - 成功保存后丢弃；安装文档时 `record.revision <= saved_revision` 视为过期并丢弃，只有严格
+    更新才提示。恢复不可用（载体无归档或无私有目录）时显式说不可用，不假装有快照。
+  - 恢复快照**不计入**保存的峰值磁盘预算（D17 已注明）。v1 只在 native 载体实现；Web/Android
+    的恢复快照仍需各自的 ADR（D16）。
 - **崩溃窗口**：上次保存/恢复快照之后的编辑。
 - **撤销**：会话内；undo/redo 照常提升 revision（回到保存点仍是 dirty，安全方向）。
   **`File > Revert` = 从磁盘重新加载**，不是反向应用撤销栈（后者清不干净 dirty）。

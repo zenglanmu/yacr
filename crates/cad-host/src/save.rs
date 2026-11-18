@@ -291,7 +291,14 @@ impl HostCore {
                 // would tell the user a DXF was written when the file is a
                 // `.ymodel`. The foreign-entry count has no key yet, so it stays
                 // in the document's persistence state rather than being guessed at.
-                Ok(()) => catalog("save.exported_ymodel", &[("path", &target.display_name)]),
+                Ok(None) => catalog("save.exported_ymodel", &[("path", &target.display_name)]),
+                // Saved, but the recovery snapshot could not be removed. The file
+                // is durable, so this is a warning that names both facts instead
+                // of failing a save that succeeded.
+                Ok(Some(reason)) => catalog(
+                    "save.exported_ymodel_stale_recovery",
+                    &[("path", &target.display_name), ("reason", &reason)],
+                ),
                 Err(SaveFailure::RefusedSourcePath) => catalog("save.refused_source_path", &[]),
                 Err(SaveFailure::Reason(reason)) => {
                     catalog("save.export_failed", &[("reason", &reason)])
@@ -398,7 +405,14 @@ impl HostCore {
     /// 4. encode from a **fresh snapshot of the current revision**;
     /// 5. write atomically, and only then advance `saved_revision` and clear the
     ///    source hash to the new bytes. A write failure leaves the state untouched.
-    fn export_ymodel(&self, target: &FileTarget) -> Result<(), SaveFailure> {
+    /// 6. discard the recovery snapshot this document was writing.
+    ///
+    /// Step 6 is the only recovery action a save takes, and it never fails the
+    /// save: the bytes are already durable, and a snapshot that survives can only
+    /// be discarded as stale at the next open (it is never offered above the
+    /// saved revision). Its refusal is returned as a warning for the status line,
+    /// not as an error.
+    fn export_ymodel(&self, target: &FileTarget) -> Result<Option<String>, SaveFailure> {
         let Some(archive) = self.document_archive() else {
             // A carrier with no archive cannot save the native format. Explicit,
             // never a silent DXF/DWG export under a `.ymodel` name.
@@ -409,6 +423,11 @@ impl HostCore {
             .borrow()
             .as_ref()
             .is_some_and(|source| policy::same_normalized_target(source, target));
+        // The key the snapshot was written under, captured **before** the write
+        // moves `source_target` (a first save switches uuid key → path key, and a
+        // Save As switches to a new path): otherwise the discard would look under
+        // the new name and leave the old snapshot behind.
+        let recovery_key = self.recovery_key();
         let persistence = self.controller.borrow().persistence().cloned();
         // An absent target is a first save / Save As (`None`); an existing target
         // we cannot re-read is a real refusal, not "absent", or the save would
@@ -486,7 +505,10 @@ impl HostCore {
         *self.source_target.borrow_mut() = Some(target.clone());
         self.files.set_source(Some(target));
         self.full_dirty.set(true);
-        Ok(())
+        // The document is durable: the snapshot it was protecting is obsolete.
+        // A refusal here is surfaced on the save status by the caller, but it
+        // never turns a written file into a failed save.
+        Ok(self.discard_recovery(recovery_key.as_ref()))
     }
 
     fn report_plot_failed(&self, reason: &str) -> CadResult<()> {

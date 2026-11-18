@@ -205,8 +205,24 @@ mod tests {
         let first = serde_json::to_vec(&classes_value()).expect("encode");
         let second = serde_json::to_vec(&classes_value()).expect("encode");
         assert_eq!(first, second);
-        // Keys are sorted, so `fields` precedes `id` precedes `type_key`.
+        // Key order is NOT asserted: `serde_json::Map` is a `BTreeMap` only when
+        // no crate in the build enables `preserve_order`, which a transitive
+        // dependency does. Both orders are the same JSON object, and nothing in
+        // the format or the reader depends on it.
         let text = String::from_utf8(first).expect("utf8");
-        assert!(text.starts_with(r#"{"classes":[{"fields":["#), "{text}");
+        let value: serde_json::Value = serde_json::from_str(&text).expect("valid JSON");
+        assert_eq!(
+            value.as_object().map(|object| object.len()),
+            Some(1),
+            "the registry object has exactly one top-level key: {text}"
+        );
+        let classes = value["classes"].as_array().expect("an array");
+        assert!(!classes.is_empty());
+        for class in classes {
+            let object = class.as_object().expect("each class is an object");
+            for key in ["id", "type_key", "fields"] {
+                assert!(object.contains_key(key), "class is missing {key}: {text}");
+            }
+        }
     }
 }

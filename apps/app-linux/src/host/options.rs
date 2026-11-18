@@ -29,19 +29,33 @@ pub const ANIMATION_STEP: f32 = 0.01;
 /// `None` when no home is resolvable: the store then refuses persistence
 /// explicitly (the host falls back to in-memory defaults).
 pub(super) fn config_paths() -> (Option<PathBuf>, Option<PathBuf>) {
-    let dir = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")));
-    match dir {
-        Some(dir) => {
-            let app = dir.join("yacr");
-            (
-                Some(app.join("config.json")),
-                Some(app.join("preference.json")),
-            )
-        }
+    match config_dir() {
+        Some(app) => (
+            Some(app.join("config.json")),
+            Some(app.join("preference.json")),
+        ),
         None => (None, None),
     }
+}
+
+/// The carrier-private directory for durable host data (`$XDG_CONFIG_HOME/yacr`).
+///
+/// `None` when no home is resolvable: a caller that needs a durable private
+/// place must then refuse rather than invent one.
+pub(super) fn config_dir() -> Option<PathBuf> {
+    std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
+        .map(|dir| dir.join("yacr"))
+}
+
+/// The recovery-snapshot directory (ADR-0037 D12), beside the config files.
+///
+/// Carrier-private on purpose: it is **not** the document's directory, so a
+/// snapshot can never be mistaken for the document or collide with a Save As.
+/// Created lazily by the store on the first write.
+pub(super) fn recovery_dir() -> Option<PathBuf> {
+    config_dir().map(|dir| dir.join("recovery"))
 }
 
 /// Whether the window starts maximized.

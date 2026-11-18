@@ -95,6 +95,54 @@ impl HostController {
         Ok(())
     }
 
+    /// Replace the document's unit context (ADR-0037 D9).
+    ///
+    /// This is a **document-header** change, not scene geometry: the units live
+    /// on the `Document` slot, so the database learns about it through
+    /// [`cad_db::DrawingDatabase::note_document_header_change`] — one revision
+    /// that dirties only `document.json`, exactly what the next save's header
+    /// write needs. The session generation advances the same way a view/command
+    /// outcome does, so a host republishes its snapshot instead of showing the
+    /// previous units.
+    ///
+    /// Identical units are a **no-op**: no revision, no generation bump, no
+    /// status. A caller that re-applies the configured units (for example after
+    /// an open) must not manufacture an edit.
+    pub fn set_units(&mut self, units: cad_domain::UnitContext) -> CadResult<()> {
+        let changed = {
+            let document = self
+                .application
+                .workspace
+                .documents
+                .get_mut(&self.document_id)
+                .ok_or_else(|| CadError::InvalidInput("no document is open".into()))?;
+            if document.units == units {
+                return Ok(());
+            }
+            document.units = units;
+            let drawing = Arc::make_mut(&mut document.drawing);
+            drawing.note_document_header_change(
+                crate::app_drawing::next_transaction_id(),
+                "units changed",
+            );
+            true
+        };
+        if changed {
+            self.session.generation = self.session.generation.saturating_add(1);
+            // The document slot is the authority; this is the host's own status
+            // line (not a catalog key), like `install_snapshot`'s "opened …".
+            let unit_label = self
+                .application
+                .workspace
+                .documents
+                .get(&self.document_id)
+                .map(|document| document.units.label().to_string())
+                .unwrap_or_else(|| "drawing units".to_string());
+            self.last_status = format!("units changed: display in {unit_label}");
+        }
+        Ok(())
+    }
+
     /// The current document's persistence state, if a document is open.
     pub fn persistence(&self) -> Option<&crate::PersistenceState> {
         self.application

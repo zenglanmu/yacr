@@ -30,6 +30,10 @@ fn cad_settings_wire_shape_is_a_flat_camel_case_object() {
         navvcube_display: 2,
         view_cube_in_2d: false,
         view_cube_in_3d: true,
+        drawing_unit: "mm".to_string(),
+        display_unit: "cm".to_string(),
+        unit_precision: 2,
+        recovery_interval: 30,
         fonts_dir: Some("/tmp/yacr-fonts".to_string()),
     };
     let wire = serde_json::to_value(&settings).expect("settings serialize");
@@ -60,11 +64,15 @@ fn cad_settings_wire_shape_is_a_flat_camel_case_object() {
             "navvcubeDisplay": 2,
             "viewCubeIn2d": false,
             "viewCubeIn3d": true,
+            "drawingUnit": "mm",
+            "displayUnit": "cm",
+            "unitPrecision": 2,
+            "recoveryInterval": 30,
             "fontsDir": "/tmp/yacr-fonts",
         })
     );
-    // Exactly the twenty-five documented fields; no unrelated Options fields.
-    assert_eq!(wire.as_object().expect("object").len(), 25);
+    // Exactly the twenty-nine documented fields; no unrelated Options fields.
+    assert_eq!(wire.as_object().expect("object").len(), 29);
     // The backend choice keeps the shared snake_case key on the snapshot wire
     // (`settings.wgpu_backend` in the UI), never camelCased into `wgpuBackend`.
     assert!(

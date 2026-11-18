@@ -155,7 +155,7 @@ fn the_orbit_sensitivity_key_is_in_the_closed_table() {
     let key = CadSettingKey::OrbitSensitivityPercent;
     assert_eq!(
         CadSettingKey::ALL.len(),
-        26,
+        30,
         "one writable key per contract"
     );
     assert_eq!(

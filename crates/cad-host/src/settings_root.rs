@@ -60,7 +60,11 @@ pub const HOST_ALLOWED_PATHS_JSON: &str = r#"{"ui":{"userCustomization":{"allowe
     "interaction.orthoEnabled",
     "interaction.snapSpacing",
     "interaction.leftDragPans",
-    "interaction.orbitSensitivityPercent"
+    "interaction.orbitSensitivityPercent",
+    "ui.units.drawingUnit",
+    "ui.units.displayUnit",
+    "ui.units.decimalPlaces",
+    "ui.recovery.intervalSeconds"
 ]}}}"#;
 
 /// The five host-owned appearance/navigation preference keys.

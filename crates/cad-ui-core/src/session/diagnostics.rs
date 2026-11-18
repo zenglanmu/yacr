@@ -23,17 +23,35 @@ pub(super) fn camera_status(params: cad_app::Camera2dParams) -> Option<CadCamera
     })
 }
 
-/// A locale-neutral failure string from a host status, or `None` for a normal
-/// status.
+/// Catalog keys that are **not** failures but still have to reach the user.
 ///
-/// Failure catalog keys (`command.failed`, `linux.failed`, `fonts.failed`, …)
-/// and explicit external text are surfaced as technical strings built from the
-/// status data; no localized prose is hardcoded here.
+/// `cad_status.error` is the wire's only free-text channel: the React shell
+/// renders it as a one-shot dismissible banner. A recovery snapshot that is newer
+/// than the saved file is worthless if nobody is told about it, and there is no
+/// second notice channel, so these three keys are surfaced through the same
+/// string. They are deliberately a closed list, not a prefix: an informational
+/// key must be added here on purpose.
+const NOTICE_KEYS: [&str; 3] = [
+    "recovery.available",
+    "recovery.available_no_hint",
+    "recovery.unavailable",
+];
+
+/// A locale-neutral failure or notice string from a host status, or `None` for a
+/// normal status.
+///
+/// Failure catalog keys (`command.failed`, `linux.failed`, `fonts.failed`, …),
+/// the informational [`NOTICE_KEYS`], and explicit external text are surfaced as
+/// technical strings built from the status data; no localized prose is hardcoded
+/// here.
 pub(super) fn status_error(status: &StatusMessage) -> Option<String> {
     match status {
         StatusMessage::ExternalText(text) => Some(text.clone()),
         StatusMessage::Catalog { key, args } => {
-            if !(key == "command.failed" || key.ends_with(".failed")) {
+            if !(key == "command.failed"
+                || key.ends_with(".failed")
+                || NOTICE_KEYS.contains(&key.as_str()))
+            {
                 return None;
             }
             Some(

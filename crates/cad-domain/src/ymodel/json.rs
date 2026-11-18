@@ -17,7 +17,12 @@
 //! # Canonical key order
 //!
 //! `serde_json` is built here **without** the `preserve_order` feature, so its
-//! `Map` is a `BTreeMap` and object keys serialize in sorted order. That is the
+//! `Map` serializes keys in whatever order the map holds them, which is **not**
+//! part of this format: JSON objects are unordered and every reader here matches
+//! by name. Do not write a test that pins key order, and do not assume sorted
+//! output — see the note below on why it is build-dependent.
+//!
+//! Historically this module claimed `Map` was a `BTreeMap` and therefore sorted.
 //! format's canonical key order: two writers given the same fields produce the
 //! same bytes, and a re-encoding of a decoded payload is byte-stable. Do not
 //! enable `preserve_order`; it would make the file's bytes depend on insertion
@@ -423,7 +428,8 @@ mod tests {
         };
         let text = serde_json::to_string(&encode_point3(point)).expect("serialize");
         assert!(text.contains("\"$f64\":\"inf\""), "{text}");
-        // Keys are sorted by the BTreeMap-backed map, which is the canonical order.
+        // Key order follows the map's backing store, which is build-dependent; the
+        // format does not depend on it (see the module docs).
         assert!(text.starts_with("{\"x\":"), "{text}");
         let parsed: Value = serde_json::from_str(&text).expect("parse");
         let decoded = decode_point3(&parsed).expect("decode");

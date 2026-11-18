@@ -21,6 +21,7 @@ import {
   SETTINGS_READ_COMMAND,
   SETTINGS_WAITING,
   SETTINGS_WRITE_COMMAND,
+  UNIT_TOKENS,
   WGPU_BACKENDS,
   applyFailureView,
   applyPayload,
@@ -80,6 +81,11 @@ function snapshot(overrides = {}) {
     fontsDir: '/usr/share/fonts',
     // The WGPU backend is a shared wire key: snake_case in the snapshot too.
     wgpu_backend: 'auto',
+    // The document units and the recovery interval (ADR-0037 D9/D12).
+    drawingUnit: 'drawing',
+    displayUnit: 'drawing',
+    unitPrecision: 3,
+    recoveryInterval: 60,
     ...overrides,
   };
 }
@@ -148,7 +154,9 @@ test('every field sits on a declared tab exactly once and nothing else exists', 
   assert.deepEqual(fieldsForTab('plot').map(field => field.id), [
     'plotFormat', 'dxfVersion', 'acisVersion',
   ]);
-  assert.deepEqual(fieldsForTab('files').map(field => field.id), ['fontsDir']);
+  assert.deepEqual(fieldsForTab('files').map(field => field.id), [
+    'drawingUnit', 'displayUnit', 'unitPrecision', 'recoveryInterval', 'fontsDir',
+  ]);
   assert.deepEqual(fieldsForTab('user').map(field => field.id), ['language', 'wgpuBackend']);
 });
 
@@ -173,6 +181,10 @@ test('each control is the editor its backend value really needs', () => {
     plotFormat: 'select',
     dxfVersion: 'select',
     acisVersion: 'select',
+    drawingUnit: 'select',
+    displayUnit: 'select',
+    unitPrecision: 'number',
+    recoveryInterval: 'number',
     fontsDir: 'readonly',
     language: 'locale',
     wgpuBackend: 'select',
@@ -180,7 +192,10 @@ test('each control is the editor its backend value really needs', () => {
   // Number controls carry the host's own range and a unit suffix, never a clamp.
   assert.deepEqual(
     OPTIONS_FIELDS.filter(field => field.kind === 'number').map(field => [field.id, field.min, field.max]),
-    [['crosshairSize', 1, 100], ['gpuBudgetPercent', 10, 100], ['pickboxSize', 1, 50], ['apertureSize', 1, 50]],
+    [
+      ['crosshairSize', 1, 100], ['gpuBudgetPercent', 10, 100], ['pickboxSize', 1, 50],
+      ['apertureSize', 1, 50], ['unitPrecision', 0, 8], ['recoveryInterval', 0, 3600],
+    ],
   );
   // The orbit sensitivity is the `real` percentage (the host range is f64, not an
   // integer set); it carries the same inclusive bounds as a number row.
@@ -705,6 +720,7 @@ test('every key the dialog asks for exists in both catalogs with real copy', () 
     ...OPTIONS_FIELDS.flatMap(field => [field.labelKey, field.helpKey, field.unitKey].filter(Boolean)),
     ...LOCALE_CHOICES.map(choice => `options.language.${choice}`),
     ...WGPU_BACKENDS.map(choice => `options.wgpuBackend.${choice}`),
+    ...UNIT_TOKENS.map(choice => `options.unitToken.${choice}`),
     'options.error.generic',
     'options.error.load_failed',
     'options.error.not_visible',

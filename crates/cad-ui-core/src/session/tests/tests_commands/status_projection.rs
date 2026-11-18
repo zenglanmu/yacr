@@ -49,6 +49,39 @@ fn status_error_is_locale_neutral() {
 }
 
 #[test]
+fn a_recovery_snapshot_offer_reaches_the_user_but_ordinary_status_does_not() {
+    // The offer is not a failure, but `cad_status.error` is the wire's only
+    // free-text channel and a recovery nobody is told about is worthless.
+    let offer = StatusMessage::Catalog {
+        key: "recovery.available".into(),
+        args: vec![cad_engine::protocol::StatusArgument {
+            key: "path".into(),
+            value: "/home/u/.config/yacr/recovery/ab.ymodel".into(),
+        }],
+    };
+    assert_eq!(
+        status_error(&offer).as_deref(),
+        Some("recovery.available"),
+        "the key is surfaced so the shell can show its banner"
+    );
+    // A failed write still carries its reason, unchanged.
+    let failed = StatusMessage::Catalog {
+        key: "recovery.failed".into(),
+        args: vec![cad_engine::protocol::StatusArgument {
+            key: "error".into(),
+            value: "disk full".into(),
+        }],
+    };
+    assert_eq!(status_error(&failed).as_deref(), Some("disk full"));
+    // An informational key that is NOT on the closed list stays out.
+    let other = StatusMessage::Catalog {
+        key: "linux.opened".into(),
+        args: Vec::new(),
+    };
+    assert_eq!(status_error(&other), None);
+}
+
+#[test]
 fn resource_diagnostics_are_technical_not_ui_text() {
     let diagnostic = RawDiagnostic {
         object: None,

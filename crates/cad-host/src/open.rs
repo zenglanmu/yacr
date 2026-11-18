@@ -274,6 +274,11 @@ impl HostCore {
         if let Some(error) = &resource_error {
             self.set_catalog_status("fonts.failed", &[("error", error)])?;
         }
+        // The new document's own recovery offer. Last, because it is the one
+        // fact that can lose work if it is buried: a snapshot newer than the
+        // file is a data-loss warning, while a font/image failure is already
+        // published in its own report.
+        self.observe_recovery_on_install();
         self.render.sync_drawing(self.controller.borrow().drawing());
         self.full_dirty.set(true);
         Ok(())
@@ -571,6 +576,12 @@ impl HostCore {
         if let Some(error) = &resource_error {
             self.set_catalog_status("fonts.failed", &[("error", error)])?;
         }
+        // A published import is a real document install: offer that document's
+        // recovery snapshot last, after this tick's `linux.opened` and resource
+        // lines, so the data-loss warning cannot be overwritten by them.
+        if opened {
+            self.observe_recovery_on_install();
+        }
         Ok(())
     }
 
@@ -658,6 +669,10 @@ impl HostCore {
         if let Some(error) = &resource_error {
             self.set_catalog_status("fonts.failed", &[("error", error)])?;
         }
+        // Offer (or silently discard) this document's recovery snapshot, exactly
+        // like the connector open path: the file just opened is the baseline the
+        // record's revision is compared against.
+        self.observe_recovery_on_install();
         self.render.sync_drawing(self.controller.borrow().drawing());
         self.full_dirty.set(true);
         Ok(())

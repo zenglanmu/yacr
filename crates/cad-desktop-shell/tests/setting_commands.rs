@@ -44,6 +44,10 @@ fn snapshot_with_snap_spacing(snap_spacing: f64) -> CadSettings {
         navvcube_display: 3,
         view_cube_in_2d: true,
         view_cube_in_3d: true,
+        drawing_unit: "drawing".to_string(),
+        display_unit: "drawing".to_string(),
+        unit_precision: 3,
+        recovery_interval: 60,
         fonts_dir: None,
     }
 }

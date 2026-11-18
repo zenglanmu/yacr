@@ -262,6 +262,18 @@ pub(super) fn create_and_bind_session(shared: &Arc<Mutex<Shared>>, cad_mode: boo
                     // silent DXF export under a `.ymodel` name.
                     session.set_document_archive(Some(crate::ymodel_archive::ZipArchive::new()
                         as std::sync::Arc<dyn cad_platform::DocumentArchive>));
+                    // The recovery snapshot (ADR-0037 D12): the same archive
+                    // encoder, written to a carrier-private directory while the
+                    // document is dirty, so a crash costs at most a minute of
+                    // edits. No resolvable config directory means no durable
+                    // private place, so nothing is installed and the host writes
+                    // no snapshot — it never invents a path.
+                    if let Some(dir) = super::super::options::recovery_dir() {
+                        session.set_persistence(Some(crate::recovery_store::FsRecoveryStore::new(
+                            dir,
+                        )
+                            as std::sync::Arc<dyn cad_platform::Persistence>));
+                    }
                     // The Options dialog's GPU budget is a renderer policy: apply
                     // the configured percentage before the first device attach
                     // (the engine re-applies it on every re-attach).

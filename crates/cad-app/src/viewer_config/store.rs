@@ -76,6 +76,27 @@ impl ViewerConfig {
                 "orbit sensitivity must be a finite percentage from 25 to 200",
             ));
         }
+        // The units preference has one cross-field rule and two bounds; all are
+        // refusals by name, never clamps. `drawing → drawing` is the shipped
+        // default and keeps untyped coordinates untyped; a typed display unit
+        // over an untyped source would present coordinates as a measured length,
+        // so `UnitsConfig::unit_context` names it as a refusal.
+        let units = &self.ui.units;
+        if units.decimal_places > UnitsConfig::MAX_DECIMAL_PLACES {
+            return Err(ConfigError::new(
+                "ui.units.decimalPlaces",
+                "decimal places must be an integer from 0 to 8",
+            ));
+        }
+        units.unit_context()?;
+        // The recovery interval: `0` disables the writes, one hour is the
+        // documented ceiling. Anything above it is refused by name.
+        if self.ui.recovery.interval_seconds > RecoveryConfig::MAX_INTERVAL_SECONDS {
+            return Err(ConfigError::new(
+                "ui.recovery.intervalSeconds",
+                "recovery interval must be an integer number of seconds from 0 to 3600",
+            ));
+        }
         for key in self.ui.command_overrides.keys() {
             if !is_known_command(key) {
                 return Err(ConfigError::new(

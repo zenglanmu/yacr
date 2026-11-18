@@ -39,7 +39,7 @@ fn theme_background(core: &HostCore) -> (String, String) {
 fn the_five_appearance_keys_are_in_the_closed_table() {
     assert_eq!(
         CadSettingKey::ALL.len(),
-        26,
+        30,
         "one writable key per contract"
     );
     for (key, wire) in [
