@@ -677,7 +677,7 @@ ymodel 是唯一原生文档模型与保存格式（`.ymodel` = zip 容器 + 分
 
 #### 16.5.2 身份与溯源
 
-持久 id 是 i64 复合键 `(kind << 45) | seq`：kind 8 位、seq 45 位，整体 ≤ 2^53，保证在 JSON/`jq` 等 f64 环境下精确显示（超出 2^53 的标识性整数必须写成字符串）；seq 永不复用。`FederationGuid` 每文档唯一，另存为保留元素 GUID 并生成新的文档身份。`SourceRef` 多值 aspect 记录源文件、源 handle、类型与校验和；`(source, handle) → element` 映射表是连接器必需输出。8 个 id 高水位计数必须随文档持久化并在加载时原样恢复，禁止用 `max(id)+1` 重建（删除最大 id 后重开会复用 id）；不存 tombstone，删除只让 id 消失，悬空引用是显式 `Unresolved`。
+持久 id 是 i64 复合键 `(kind << 45) | seq`：kind 8 位、seq 45 位，整体 ≤ 2^53，保证在 JSON/`jq` 等 f64 环境下精确显示（超出 2^53 的标识性整数必须写成字符串）；seq 永不复用。`FederationGuid` 每文档唯一，另存为保留元素 GUID 并生成新的文档身份。`SourceRef` 多值 aspect 记录源文件、源 handle、类型与校验和；`(source, handle) → element` 映射表是连接器必需输出。9 个 id 高水位计数（entity/block/layer/layout/style/dim-style/mleader-style/linetype/scale）必须随文档持久化并在加载时原样恢复，禁止用 `max(id)+1` 重建（删除最大 id 后重开会复用 id；线型今天根本没有分配器，靠 `max(行 id)+1` 现算，创建→删除→再创建已会复用）；不存 tombstone，删除只让 id 消失，悬空引用是显式 `Unresolved`。
 
 #### 16.5.3 几何三段
 

@@ -38,7 +38,7 @@ rev.3–rev.5 的关键点：
 - **磁盘格式由 descriptor 决定**：元素 payload 是 descriptor 字段集的 JSON 对象；
   `SemanticGeometry` 只是它的 Rust 视图。
 - **存储句柄不进 `DrawingDatabase`**：它是 `Clone` + `Arc` 快照 + 指针身份模型。
-- **id 是 i64 复合键**（8 位 kind + 45 位 seq，≤2^53），且**高水位计数随文档持久化**。
+- **id 是 i64 复合键**（8 位 kind + 45 位 seq，≤2^53），且**9 个高水位计数随文档持久化**。
 - **无 tombstone**：id 永不复用，悬空引用显式 `Unresolved`。
 - **L0 直通必须有源文件字节**，且"未修改"= `revision == manifest.open_revision`；
   `open_revision` 是导入基线，**永不随保存推进**。
@@ -52,7 +52,7 @@ rev.3–rev.5 的关键点：
 ### 1.1 现状（事实，含锚点）
 
 - **没有持久化**：`cad-db`/`cad-domain` 声明 `serde`/`serde_json` 但零使用；无 schema 版本、
-  无迁移、无 save/load。`DrawingDatabase` 是 41 个 `pub(crate)` 字段的内存结构
+  无迁移、无 save/load。`DrawingDatabase` 是 39 个 `pub(crate)` 字段的内存结构
   （`crates/cad-db/src/drawing/mod.rs:95`），`#[derive(Clone)]`，内含
   `Arc<RwLock<BoundsCache>>` 供场景线程共享同一 `Arc<DrawingDatabase>`（同文件 `:280`），
   编辑走 `Arc::make_mut`（`crates/cad-app/src/app_history.rs:33`）；
@@ -110,7 +110,7 @@ ymodel 为唯一权威数据源；是 DWG/DXF 的可验证超集；其它格式�
 - **存储句柄不进入 `DrawingDatabase`**：句柄属于宿主 `Document`/session。契约测试加
   `fn _assert_send_sync<T: Send + Sync>()`。
 - **`DocumentHeader` 在 `cad-domain`/`cad-db`**：承载 `UnitContext`、`DocumentIdentity`、
-  `resource_keys` 与 8 个 id 高水位计数；`cad_app::Document` 持有它，store 只序列化它。
+  `resource_keys` 与 9 个 id 高水位计数；`cad_app::Document` 持有它，store 只序列化它。
   （`cad-store-zip` 不得依赖 `cad-app`。）
 - 导入仍经 Builder；写入仍走同一验证/变更路径。
 - Tauri command/wire **不破坏**；`api/plugin-api.json` 只许追加字段。
@@ -160,9 +160,13 @@ ymodel 为唯一权威数据源；是 DWG/DXF 的可验证超集；其它格式�
 
 - **持久 id 是 i64 复合键**：`(kind << 45) | seq`。kind 8 位（≤255），seq 45 位，
   整体 ≤ 2^53 —— JSON 与 `jq`（f64 解析）也能精确显示；超出 2^53 的标识性整数写成字符串。
-- **8 个 id 高水位计数随文档持久化**（`document.json` 的 `identity.next_*`），加载时原样恢复，
-  并断言 `> max(现有行 id)`。**禁止**用 `max(id)+1` 重建分配器：删除最大 id 后重开再插入
+- **9 个 id 高水位计数随文档持久化**（`document.json` 的 `identity.next_*`），加载时原样恢复，
+  并断言 `>= 1` 且 `<= 2^45`。**禁止**用 `max(id)+1` 重建分配器：删除最大 id 后重开再插入
   会复用已删除的 id，违反"永不复用"，并让分片规则失效。
+  这 9 个是 entity / block / layer / layout / style / dim-style / mleader-style / linetype /
+  scale。今天的代码只有 8 个分配器：**线型没有分配器**，`linetype_edit.rs:258-277` 每次创建都
+  按 `max(现有行 id)+1` 现算，所以"创建→删除→再创建"今天就会复用 id。实现阶段必须补
+  `next_linetype_id` 字段与迁移，不能把现算逻辑写进保存路径。
 - **不存 tombstone**：删除只让 id 消失；悬空引用在读取时是显式 `Unresolved`。
   （避免 tombstone 表 O(deletes) 增长，也避免每次删除都重写一个 entry。）
 - `FederationGuid`：每文档唯一，导入时分配；另存为保留元素 GUID，生成新的 `document_uuid`。
@@ -189,6 +193,14 @@ ymodel 为唯一权威数据源；是 DWG/DXF 的可验证超集；其它格式�
 - 每元素恰属一个 Model；父子同 Model 且无环；图形元素恰属一个 SubCategory。
 - 每文档一个 `cad:LayerCategory`；每个 DWG layer = 一个 SubCategory 元素（1:1）；
   每条 xref 一个带前缀的子 Category。
+- **v1 存储偏差（显式记录，不是静默降级）**：对象模型里样式/图层/线型/比例/布局都是
+  DefinitionElement（语义上住 `DefinitionModel`），但 v1 把它们的**行**存进
+  `tables/*.json`，而不是 `elements/<model>-<shard>.json`。理由：① 改一行只需重写一个小
+  entry，而放进 `Definitions` 分片会把整片（含全部块定义）一起重写，raw-copy 粒度更差；
+  ② 这些行的 payload 编解码是 Phase 2+ 的工作量，先做会把首个可用的保存路径推后。
+  `ChangeScope::TableKind` 是这份偏差的显式载体——新增行表必须同时加进该枚举与 store 的
+  表分派，否则该表不会被保存。迁移到 DefinitionElement 需要升 minor 并写迁移器；在此之前，
+  SubCategory 归属由元素的 `layer` 字段派生，`LayerCategory` 只作为对象模型概念存在、不落盘。
 
 ### D8 几何三点，以及变更范围
 
@@ -235,10 +247,14 @@ manifest.json                 -- format{read,write,minor}, generator, document_u
                                  open_revision, saved_revision, saved_at,
                                  shard_map: {model_id: [entry...]},
                                  entries[{path, sha256, sha256_c, len, crc, foreign}]
-document.json                 -- DocumentHeader: 单位/身份/resource_keys + identity.next_*
+document.json                 -- DocumentHeader: 单位/身份/resource_keys + identity.next_*（9 个）
 schema/classes.json
-tables/models.json | relationships.json | aspects.json | sources.json |
-       object-refs.json | compat.json
+tables/models.json            -- Model 元数据（kind、所属 layout/block、名称）
+tables/layers.json | layouts.json | styles.json | dimstyles.json |
+       mleaderstyles.json | linetypes.json | scales.json |
+       plot-settings.json | xrefs.json      -- v1 行表（见 D7 存储偏差）
+tables/sources.json | object-refs.json | compat.json   -- Phase 2+
+tables/relationships.json | aspects.json               -- Phase 3+
 elements/<model>-<shard>.json -- 每分片 2048 元素，按 id 排序
 raw/source-<id>.bin           -- 保留的原始源文件，STORED
 ```
@@ -336,9 +352,10 @@ raw/source-<id>.bin           -- 保留的原始源文件，STORED
 ### D17 迁移路线与验收门槛
 
 1. **Phase 0（文档）**：本 ADR + spec §16.5。
-2. **Phase 1**：descriptor + 身份（含 8 个高水位持久化）+ `DocumentHeader` + `ChangeScope` +
+2. **Phase 1**：descriptor + 身份（含 9 个高水位持久化）+ `DocumentHeader` + `ChangeScope` +
    `DocumentStore` + `cad-store-zip`（**全量重写**、manifest 校验、原子替换、`.bak`、
-   revision 种子、恢复快照）。交付物：**"41 + 5 个字段 + 20 个变体 → entry/字段"清单**；
+   revision 种子、恢复快照）。交付物：**"39 + 5 个字段 + 20 个变体 → entry/字段"清单**
+   （`docs/ymodel-phase1-inventory.md`）；
    `Send + Sync` 断言；打开/保存/重开契约测试。
 3. **Phase 2**：DXF 导入；DXF 导出 + L1 不动点；报告落盘；**脏分片 raw-copy +
    `sha256_c` 校验 + live entry 集合**；撤销/恢复快照生命周期；冲突检测。
