@@ -58,6 +58,9 @@ mod format;
 mod grid;
 #[cfg(test)]
 mod grid_tests;
+// The persisted restore constructor (ADR-0037 D8), split out for the code-size
+// gate; a child module can reach the private fields without widening them.
+mod persist;
 mod style;
 
 /// Similarity tolerance for the table transform (the same ratio rule every

@@ -457,6 +457,7 @@ pub fn text_line_spacing_factor_from_dxf(factor: f64) -> Option<f64> {
 
 mod semantic;
 pub use semantic::*;
+pub mod ymodel;
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Mesh {
     pub vertices: Vec<Point3>,

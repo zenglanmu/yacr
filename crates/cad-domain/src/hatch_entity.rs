@@ -27,6 +27,9 @@ use validate::{loop_depths, plane_is_usable, validate_creation};
 
 mod fill;
 mod geometry;
+// The persisted restore constructor (ADR-0037 D8), split out for the code-size
+// gate; a child module can reach the private fields without widening them.
+mod persist;
 mod validate;
 
 pub use fill::{HatchFill, HatchGradient, HatchPattern, HatchPatternLine};

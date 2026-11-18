@@ -69,6 +69,20 @@ pub struct Body3d {
 }
 
 impl Body3d {
+    /// Rebuild a body exactly as it was persisted (ADR-0037 D8).
+    ///
+    /// The display cache is stored verbatim in Phase 1, so the payload reader
+    /// must not re-tessellate: the kernel seam is not part of this crate, and
+    /// rebuilding would replace the stored cache on the first save. This is a
+    /// plain constructor — the fields are already public data.
+    pub(crate) fn from_persisted(kind: BodyKind, exact: BodyExact, display: BodyDisplay) -> Self {
+        Body3d {
+            kind,
+            exact,
+            display,
+        }
+    }
+
     /// The exact B-rep, when this body has one.
     pub fn exact_brep(&self) -> Option<&BrepData> {
         match &self.exact {

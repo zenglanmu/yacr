@@ -22,6 +22,11 @@ use crate::dimension_synthesis::{
 };
 use crate::{CadError, CadResult, Mesh, Point3, SemanticGeometry, StyleId, TextAlignH, Transform3};
 
+// The persisted restore constructor (ADR-0037 D8), split out for the code-size
+// gate; it is a child module, so it can reach the private fields without
+// widening them.
+mod persist;
+
 // ---------------------------------------------------------------------------
 // Subtype and definition points (ADR 0017 A.3).
 // ---------------------------------------------------------------------------
@@ -428,7 +433,7 @@ impl DimensionStyleValues {
 /// The display provenance of a dimension: whether `display` is our synthesis or
 /// an external picture block's expanded members.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DisplaySource {
+pub(crate) enum DisplaySource {
     Synthesized,
     Picture,
 }

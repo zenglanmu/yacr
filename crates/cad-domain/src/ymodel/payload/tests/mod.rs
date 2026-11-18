@@ -1,0 +1,465 @@
+//! Payload round-trip and field-completeness tests (ADR-0037 D8, D10).
+//!
+//! Two contracts are asserted here:
+//!
+//! 1. **The fixed point.** For every one of the 20 semantic geometry variants,
+//!    `encode → JSON text → parse → decode → encode` produces an equal JSON
+//!    value. That is the L1 round-trip at the payload level: a decoded payload
+//!    re-encodes to the same bytes, including the derived display caches Phase 1
+//!    stores verbatim.
+//! 2. **The descriptor is the field set.** The encoded object's keys (minus
+//!    `class`) equal the class's descriptor fields exactly, so a field added to
+//!    the codec without the registry (or the reverse) fails.
+//!
+//! The samples live in [`samples`] (split out for the code-size ceiling); they
+//! are built through the restore constructors wherever the validating
+//! constructors would refuse synthetic data.
+
+mod samples;
+
+use std::collections::BTreeSet;
+
+use serde_json::Value;
+
+use super::{decode, encode, id_ref_value};
+use crate::dimension::DisplaySource;
+use crate::ymodel::descriptor::{by_type_key, ClassDescriptor};
+use crate::{
+    BlockId, Body3d, BodyDisplay, BodyExact, BodyKind, Completeness, DimensionDefinition,
+    DimensionGeometry, DimensionKind, DimensionPoints, HatchFill, HatchGeometry, HatchPattern,
+    HatchPatternLine, HatchPatternType, HatchPlane, HatchStyle, ImageAdjust, MLeaderContent,
+    MLeaderToleranceContent, Mesh, MultiLeaderGeometry, Point3, Precision, SemanticGeometry,
+    TextAlignH, Transform3,
+};
+use samples::*;
+
+fn p(x: f64, y: f64, z: f64) -> Point3 {
+    Point3 { x, y, z }
+}
+
+fn origin() -> Point3 {
+    p(0.0, 0.0, 0.0)
+}
+
+fn z_axis() -> Point3 {
+    p(0.0, 0.0, 1.0)
+}
+
+/// `encode → text → parse → decode → encode` must be a fixed point.
+fn assert_round_trips(geometry: &SemanticGeometry) {
+    let first = encode(geometry);
+    let type_key = first
+        .get("class")
+        .and_then(Value::as_str)
+        .expect("class key")
+        .to_string();
+    assert_keys_match(&type_key, &first);
+    let text = serde_json::to_string(&first).expect("serialize");
+    let parsed: Value = serde_json::from_str(&text).expect("parse");
+    let decoded = decode(&parsed).unwrap_or_else(|error| panic!("{type_key}: {error}"));
+    let second = encode(&decoded);
+    assert_eq!(first, second, "{type_key} is not a payload fixed point");
+    assert_eq!(
+        decoded, *geometry,
+        "{type_key} decoded to a different value"
+    );
+}
+
+/// The encoded keys (minus `class`) are exactly the descriptor's field names.
+fn assert_keys_match(type_key: &str, value: &Value) {
+    let class: &ClassDescriptor =
+        by_type_key(type_key).unwrap_or_else(|| panic!("no descriptor for {type_key}"));
+    let expected: BTreeSet<&str> = class.fields.iter().map(|field| field.name).collect();
+    let object = value.as_object().expect("payload object");
+    let actual: BTreeSet<&str> = object
+        .keys()
+        .map(String::as_str)
+        .filter(|key| *key != "class")
+        .collect();
+    assert_eq!(
+        actual, expected,
+        "{type_key} payload fields disagree with its descriptor"
+    );
+    assert!(object.contains_key("class"), "{type_key} has no class key");
+}
+
+// ---------------------------------------------------------------------------
+// The one-sample-per-variant contract.
+// ---------------------------------------------------------------------------
+
+/// Every `SemanticGeometry` variant, with one representative sample.
+fn samples() -> Vec<SemanticGeometry> {
+    vec![
+        SemanticGeometry::Line {
+            start: origin(),
+            end: p(1.0, 2.0, 3.0),
+        },
+        SemanticGeometry::Polyline {
+            points: vec![origin(), p(1.0, 0.0, 0.0), p(1.0, 1.0, 0.0)],
+            bulges: vec![0.0, 0.5, 0.0],
+            closed: true,
+            width: 0.25,
+        },
+        SemanticGeometry::Circle {
+            center: origin(),
+            normal: z_axis(),
+            radius: 2.0,
+        },
+        SemanticGeometry::Arc {
+            center: origin(),
+            normal: z_axis(),
+            radius: 2.0,
+            start: 0.25,
+            sweep: 1.75,
+        },
+        SemanticGeometry::Ellipse {
+            center: origin(),
+            normal: z_axis(),
+            major_axis: p(3.0, 0.0, 0.0),
+            ratio: 0.5,
+            start: 0.0,
+            sweep: 6.0,
+        },
+        SemanticGeometry::Spline {
+            degree: 3,
+            knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+            control_points: vec![
+                origin(),
+                p(1.0, 1.0, 0.0),
+                p(2.0, 0.0, 0.0),
+                p(3.0, 0.0, 0.0),
+            ],
+            weights: vec![1.0, 2.0, 2.0, 1.0],
+            closed: false,
+        },
+        SemanticGeometry::Point(p(4.0, 5.0, 6.0)),
+        SemanticGeometry::Mesh(mesh_sample()),
+        SemanticGeometry::Body3d(Box::new(body_sample())),
+        SemanticGeometry::Insert {
+            block: BlockId(3),
+            transform: Transform3 {
+                matrix: [
+                    [2.0, 0.0, 0.0, 10.0],
+                    [0.0, 2.0, 0.0, 20.0],
+                    [0.0, 0.0, 2.0, 30.0],
+                    [0.0, 0.0, 0.0, 1.0],
+                ],
+            },
+        },
+        text_sample(),
+        SemanticGeometry::Shape {
+            shape_name: "BOX".to_string(),
+            code: 7,
+            position: p(1.0, 1.0, 0.0),
+            size: 2.5,
+            rotation: 0.5,
+            font: Some("ltypeshp.shx".to_string()),
+        },
+        SemanticGeometry::Opaque {
+            type_key: "AcDbUnknown".to_string(),
+            version: 2,
+            payload: vec![0x00, 0x01, 0x7f, 0x80, 0xff],
+        },
+        SemanticGeometry::Compound(vec![
+            SemanticGeometry::Line {
+                start: origin(),
+                end: p(1.0, 1.0, 1.0),
+            },
+            SemanticGeometry::Mask {
+                boundary: vec![origin(), p(1.0, 0.0, 0.0), p(1.0, 1.0, 0.0)],
+                inverted: true,
+            },
+        ]),
+        SemanticGeometry::Dimension(Box::new(dimension_sample())),
+        SemanticGeometry::Hatch(Box::new(hatch_sample())),
+        SemanticGeometry::MultiLeader(Box::new(mleader_sample())),
+        SemanticGeometry::Table(Box::new(table_sample())),
+        image_sample(),
+        SemanticGeometry::Mask {
+            boundary: vec![
+                origin(),
+                p(2.0, 0.0, 0.0),
+                p(2.0, 2.0, 0.0),
+                p(0.0, 2.0, 0.0),
+            ],
+            inverted: false,
+        },
+    ]
+}
+
+#[test]
+fn all_twenty_variants_are_a_payload_fixed_point() {
+    let samples = samples();
+    assert_eq!(samples.len(), 20, "one sample per SemanticGeometry variant");
+    let mut seen = BTreeSet::new();
+    for geometry in &samples {
+        assert_round_trips(geometry);
+        let type_key = encode(geometry)
+            .get("class")
+            .and_then(Value::as_str)
+            .expect("class")
+            .to_string();
+        assert!(seen.insert(type_key), "duplicate class in the sample list");
+    }
+    assert_eq!(seen.len(), 20);
+    // Every geometry class in the registry is covered.
+    let registered: BTreeSet<&str> = crate::ymodel::descriptor::CLASSES
+        .iter()
+        .filter(|class| class.id.schema() == crate::ymodel::descriptor::GEOMETRY_SCHEMA)
+        .map(|class| class.type_key)
+        .collect();
+    let seen_refs: BTreeSet<&str> = seen.iter().map(String::as_str).collect();
+    assert_eq!(seen_refs, registered);
+}
+
+// ---------------------------------------------------------------------------
+// Nested alternatives the one-per-class samples do not reach.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn nested_alternatives_round_trip() {
+    // A solid-hatch pattern fill with definition rows.
+    let pattern = HatchGeometry::from_persisted(
+        vec![hatch_loop_sample()],
+        HatchPlane::default(),
+        HatchStyle::Normal,
+        HatchFill::Pattern(HatchPattern {
+            name: "ANSI31".to_string(),
+            angle: 0.5,
+            scale: 1.5,
+            double: true,
+            lines: vec![HatchPatternLine {
+                angle: 0.25,
+                base_x: 1.0,
+                base_y: 2.0,
+                offset_x: 3.0,
+                offset_y: 4.0,
+                dashes: vec![1.0, -0.5, 0.25],
+            }],
+        }),
+        Vec::new(),
+        None,
+        HatchPatternType::Predefined,
+        [0.0, 0.0],
+        Vec::new(),
+    );
+    assert_round_trips(&SemanticGeometry::Hatch(Box::new(pattern)));
+
+    // A tolerance-content multileader with the `Text` content kind.
+    let tolerance = mleader_with_content(MLeaderContent::Tolerance(MLeaderToleranceContent {
+        text: "|0.05|A|B".to_string(),
+        height: 2.5,
+    }));
+    assert_round_trips(&SemanticGeometry::MultiLeader(Box::new(tolerance)));
+
+    // Radial dimension points and the synthesized display provenance.
+    let radial = DimensionGeometry::from_persisted(
+        DimensionDefinition {
+            kind: DimensionKind::Radius,
+            points: DimensionPoints::Radial {
+                center: origin(),
+                point_on_arc: p(2.0, 0.0, 0.0),
+                leader_length: 3.0,
+            },
+            text_middle: origin(),
+            text_rotation: 0.0,
+            normal: z_axis(),
+        },
+        "Standard".to_string(),
+        dimension_style_sample(),
+        2.0,
+        None,
+        Vec::new(),
+        TextAlignH::Left,
+        DisplaySource::Synthesized,
+    );
+    assert_round_trips(&SemanticGeometry::Dimension(Box::new(radial)));
+
+    // A body with missing exact geometry keeps its reason.
+    let unavailable = Body3d::from_persisted(
+        BodyKind::Unknown,
+        BodyExact::Unavailable {
+            reason: "unparsed SAT payload".to_string(),
+        },
+        BodyDisplay {
+            mesh: Mesh::default(),
+            edges: Vec::new(),
+            tolerance: None,
+            precision: Precision::Analytic,
+            completeness: Completeness::Missing(vec!["exact geometry".to_string()]),
+        },
+    );
+    assert_round_trips(&SemanticGeometry::Body3d(Box::new(unavailable)));
+
+    // An image with no clip and no file.
+    let bare_image = SemanticGeometry::Image {
+        origin: origin(),
+        u: p(1.0, 0.0, 0.0),
+        v: p(0.0, 1.0, 0.0),
+        pixels: [1.0, 2.0],
+        file: None,
+        clip: None,
+        visible: true,
+        adjust: ImageAdjust::default(),
+    };
+    assert_round_trips(&bare_image);
+}
+
+fn mleader_with_content(content: MLeaderContent) -> MultiLeaderGeometry {
+    let geometry = mleader_sample();
+    // Rebuild with another content by going through the same restore path.
+    MultiLeaderGeometry::from_persisted(
+        geometry.style().clone(),
+        geometry.style_name().to_string(),
+        geometry.override_mask(),
+        content,
+        geometry.text().clone(),
+        geometry.roots().to_vec(),
+        geometry.lines().to_vec(),
+        geometry.reserved().clone(),
+        geometry.plane(),
+        geometry.display().to_vec(),
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Strictness.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn unknown_class_is_refused() {
+    let error = decode(&serde_json::json!({ "class": "cad:Nope" })).expect_err("unknown class");
+    assert!(error.message().contains("cad:Nope"), "{error}");
+}
+
+#[test]
+fn missing_and_extra_fields_are_refused() {
+    let line = encode(&SemanticGeometry::Line {
+        start: origin(),
+        end: p(1.0, 0.0, 0.0),
+    });
+
+    let mut missing = line.as_object().expect("object").clone();
+    missing.remove("end");
+    let error = decode(&Value::Object(missing)).expect_err("missing field");
+    assert!(error.message().contains("end"), "{error}");
+
+    let mut extra = line.as_object().expect("object").clone();
+    extra.insert("future_field".to_string(), Value::Bool(true));
+    let error = decode(&Value::Object(extra)).expect_err("extra field");
+    assert!(error.message().contains("future_field"), "{error}");
+}
+
+#[test]
+fn id_refs_must_belong_to_the_declared_family() {
+    let insert = encode(&SemanticGeometry::Insert {
+        block: BlockId(1),
+        transform: Transform3::identity(),
+    });
+    let mut object = insert.as_object().expect("object").clone();
+    // A Style id where the descriptor declares a Block reference.
+    object.insert(
+        "block".to_string(),
+        id_ref_value(crate::ymodel::IdKind::Style, 1),
+    );
+    let error = decode(&Value::Object(object)).expect_err("wrong family");
+    assert!(error.message().contains("block"), "{error}");
+}
+
+#[test]
+fn byte_payloads_are_lowercase_hex_only() {
+    let opaque = encode(&SemanticGeometry::Opaque {
+        type_key: "AcDbUnknown".to_string(),
+        version: 1,
+        payload: vec![0xab, 0xcd],
+    });
+    assert_eq!(
+        opaque.get("payload").and_then(Value::as_str),
+        Some("abcd"),
+        "bytes are written as lowercase hex"
+    );
+
+    let mut object = opaque.as_object().expect("object").clone();
+    object.insert("payload".to_string(), Value::String("ABCD".to_string()));
+    let error = decode(&Value::Object(object)).expect_err("uppercase hex");
+    assert!(error.message().contains("payload"), "{error}");
+}
+
+#[test]
+fn non_finite_scalars_use_the_escape_inside_a_payload() {
+    let line = encode(&SemanticGeometry::Line {
+        start: Point3 {
+            x: f64::INFINITY,
+            y: f64::NAN,
+            z: -0.0,
+        },
+        end: origin(),
+    });
+    assert_eq!(
+        line["start"]["x"],
+        serde_json::json!({ "$f64": "inf" }),
+        "a non-finite coordinate is escaped, never dropped"
+    );
+    let text = serde_json::to_string(&line).expect("serialize");
+    assert!(text.contains("\"$f64\":\"nan\""), "{text}");
+    let parsed: Value = serde_json::from_str(&text).expect("parse");
+    let decoded = decode(&parsed).expect("decode");
+    let SemanticGeometry::Line { start, .. } = decoded else {
+        panic!("expected a line");
+    };
+    assert!(start.x.is_infinite() && start.y.is_nan());
+    assert_eq!(start.z.to_bits(), (-0.0f64).to_bits());
+}
+
+#[test]
+fn a_non_finite_stored_measurement_is_persisted_verbatim() {
+    // Phase 1 must save a legacy row's `NaN` through the escape rather than
+    // refuse the file or write `0.0` (ADR-0037 D9). A structural equality
+    // assertion cannot express this (`NaN != NaN`), so the contract checked
+    // here is the encoded form and its fixed point.
+    let mut dimension = dimension_sample();
+    dimension = DimensionGeometry::from_persisted(
+        dimension.definition().clone(),
+        dimension.style_name().to_string(),
+        dimension.style().clone(),
+        f64::NAN,
+        dimension.text_override().map(str::to_string),
+        dimension.display().to_vec(),
+        dimension.text_h_align(),
+        dimension.display_source(),
+    );
+    let geometry = SemanticGeometry::Dimension(Box::new(dimension));
+    let encoded = encode(&geometry);
+    assert_eq!(
+        encoded["measurement"],
+        serde_json::json!({ "$f64": "nan" }),
+        "a non-finite measurement round-trips through the escape"
+    );
+    let text = serde_json::to_string(&encoded).expect("serialize");
+    let parsed: Value = serde_json::from_str(&text).expect("parse");
+    let decoded = decode(&parsed).expect("decode");
+    assert_eq!(encode(&decoded), encoded);
+    let SemanticGeometry::Dimension(decoded) = decoded else {
+        panic!("expected a dimension");
+    };
+    assert!(decoded.measurement().is_nan());
+}
+
+#[test]
+fn table_display_appearance_must_match_geometry_len() {
+    let value = encode(&SemanticGeometry::Table(Box::new(table_sample())));
+    let mut object = value.as_object().expect("object").clone();
+    let mut display = object
+        .get("display")
+        .and_then(Value::as_object)
+        .expect("display")
+        .clone();
+    let appearance = display
+        .get_mut("appearance")
+        .and_then(Value::as_array_mut)
+        .expect("appearance");
+    appearance.pop();
+    object.insert("display".to_string(), Value::Object(display));
+    let error = decode(&Value::Object(object)).expect_err("length mismatch");
+    assert!(error.message().contains("lockstep"), "{error}");
+}

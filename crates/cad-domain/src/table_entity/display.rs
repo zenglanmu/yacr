@@ -53,6 +53,26 @@ pub(crate) struct TableDisplay {
 }
 
 impl TableDisplay {
+    /// Rebuild the pair from a persisted payload.
+    ///
+    /// The two lists are stored together and must be the same length, so the
+    /// payload reader passes both; the invariant is checked by the caller (a
+    /// length mismatch is refused there, before anything is built).
+    pub(crate) fn from_parts(
+        geometry: Vec<SemanticGeometry>,
+        appearance: Vec<TableDisplayAppearance>,
+    ) -> Self {
+        TableDisplay {
+            geometry,
+            appearance,
+        }
+    }
+
+    /// The primitives and their appearance, in lockstep, for the payload writer.
+    pub(crate) fn parts(&self) -> (&[SemanticGeometry], &[TableDisplayAppearance]) {
+        (&self.geometry, &self.appearance)
+    }
+
     fn push(&mut self, geometry: SemanticGeometry, appearance: TableDisplayAppearance) {
         self.geometry.push(geometry);
         self.appearance.push(appearance);

@@ -28,6 +28,10 @@ use crate::{
     CadError, CadResult, Point3, SemanticGeometry, StyleId, TextAlignH, TextAlignV, Transform3,
 };
 
+// The persisted restore constructor (ADR-0037 D8), split out for the code-size
+// gate; a child module can reach the private fields without widening them.
+mod persist;
+
 // ---------------------------------------------------------------------------
 // Enums mirrored from DXF (ADR 0019 C).
 // ---------------------------------------------------------------------------
