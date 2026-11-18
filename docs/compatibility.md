@@ -953,7 +953,8 @@ manifest.open_revision` 且源字节仍在才同格式直通）、**L1** 已建�
 | 文档模型与快照 | 已实现 | `cad-db` 323 测试；文档级不动点（`snapshot → hydrate → snapshot` 逐字段相等） |
 | 容器读写 | 已实现 | `cad-store-zip` 53 测试：manifest/哈希/长度/CRC、版本门禁（更高 `read`/`minor` 在解析其它 entry 之前拒绝）、foreign entry 原样保留、两次保存字节相同、超预算 abort |
 | 文件级往返 | 已实现 | `cad-store-zip/tests/document_fixed_point.rs` 7 项（含 layout 与 block 序列相同的碰撞回归）；`apps/app-linux/tests/ymodel_round_trip.rs` 走真实适配器 |
-| 原生打开/保存（Linux） | 已接线 | `cad-host` 8 项：安装文档、缺适配器拒绝、损坏归档不破坏当前文档、保存推进 `saved_revision`、外部修改拒绝、保存目的按源格式选择 |
+| 原生打开/保存（Linux） | 已接线 | `cad-host` 8 项：安装文档、缺适配器拒绝、损坏归档不破坏当前文档、保存推进 `saved_revision`、外部修改拒绝、保存目的按源格式选择。保存前把上一版留在 `<name>.bak`（硬链接，失败回退复制；首存不建；配置写入不建），失败只告警不阻断——重命名本身仍是原子的 |
+| 自动恢复快照 | **未实现** | ADR-0037 D12 的恢复快照与 `File > Revert` 还没接线；崩溃窗口目前是"上次保存之后" |
 | Windows / macOS / Android / Web | **NOT IMPLEMENTED** | 无归档适配器，显式 `unsupported-runtime: ymodel`（禁止静默改导出别的格式） |
 | L0 源字节直通 | **未实现** | `raw/source-*.bin` 尚未写入；需要连接器保留源字节 |
 | L1 不动点（DWG/DXF → ymodel → 原格式） | **未验证** | 需要真实 DWG 语料与连接器往返测试；`$INSUNITS=5` 的 100× 问题已修（见下） |

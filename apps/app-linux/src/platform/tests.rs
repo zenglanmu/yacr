@@ -482,6 +482,42 @@ fn write_atomic_writes_exact_bytes_and_leaves_no_temp_file() {
 }
 
 #[test]
+fn the_previous_file_is_kept_as_a_backup_before_the_replacement() {
+    let dir = temp_path("bak-dir");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let files = files_with(cancelled_open());
+    let target = dir.join("drawing.ymodel");
+    let backup = dir.join("drawing.ymodel.bak");
+
+    // A first save has nothing to back up, so it must not invent one.
+    files
+        .write_atomic(&FileTarget::from_path(&target.to_string_lossy()), b"v1")
+        .unwrap();
+    assert_eq!(std::fs::read(&target).unwrap(), b"v1");
+    assert!(!backup.exists(), "no .bak for a file that did not exist");
+
+    // The second save keeps the previous bytes, byte for byte.
+    files
+        .write_atomic(&FileTarget::from_path(&target.to_string_lossy()), b"v2")
+        .unwrap();
+    assert_eq!(std::fs::read(&target).unwrap(), b"v2");
+    assert_eq!(std::fs::read(&backup).unwrap(), b"v1");
+
+    // A third save rotates the backup; the stale one must not survive.
+    files
+        .write_atomic(&FileTarget::from_path(&target.to_string_lossy()), b"v3")
+        .unwrap();
+    assert_eq!(std::fs::read(&backup).unwrap(), b"v2");
+    assert!(
+        temp_leftovers(&dir).is_empty(),
+        "a save leaves no temp files behind, backup or not"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn write_atomic_into_a_missing_directory_is_an_explicit_error() {
     let dir = temp_path("missing-write-dir");
     let _ = std::fs::remove_dir_all(&dir);

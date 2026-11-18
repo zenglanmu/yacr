@@ -328,7 +328,7 @@ impl PlatformFiles for ReactFiles {
     }
 
     fn write_atomic(&self, target: &FileTarget, bytes: &[u8]) -> CadResult<()> {
-        atomic_replace(Path::new(&target.opaque), bytes)
+        atomic_replace(Path::new(&target.opaque), bytes, true)
     }
 
     fn refuses_source_overwrite(&self, target: &FileTarget) -> bool {
@@ -442,7 +442,7 @@ impl ConfigStore for ReactConfigStore {
                     .map_err(|error| CadError::InvalidInput(error.to_string()))?;
             }
         }
-        atomic_replace(path, text.as_bytes())
+        atomic_replace(path, text.as_bytes(), false)
     }
 }
 
@@ -500,11 +500,22 @@ fn load_file(path: Option<&Path>) -> ConfigLoad {
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// Write `bytes` to `path` atomically: temp file in the target's directory,
-/// `sync_all`, rename over the target, then a best-effort parent-directory fsync.
+/// `sync_all`, a `.bak` of the previous file, rename over the target, then a
+/// best-effort parent-directory fsync.
+///
+/// The backup is taken **before** the rename (`link`, falling back to a copy),
+/// never by renaming the target away: renaming first would leave a window in
+/// which the document does not exist at all. A hard link costs no extra bytes,
+/// so the save peak stays at roughly 2x the file (temp + target) instead of 3x.
 ///
 /// A failure at any step is an explicit [`CadError`] naming the path, and the
 /// temp file is removed; a partial file is never left in the target's place.
-fn atomic_replace(path: &Path, bytes: &[u8]) -> CadResult<()> {
+///
+/// A backup that cannot be created does **not** fail the save: the rename is
+/// still atomic and the user's edit is the thing at risk. It is reported on
+/// stderr instead of being swallowed, because "saved with no backup" and "saved"
+/// are different contracts.
+fn atomic_replace(path: &Path, bytes: &[u8], keep_backup: bool) -> CadResult<()> {
     let parent = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -515,6 +526,18 @@ fn atomic_replace(path: &Path, bytes: &[u8]) -> CadResult<()> {
         .unwrap_or("yacr");
     let sequence = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     let tmp = parent.join(format!(".{stem}.{}.{sequence}.tmp", std::process::id()));
+    // The backup must describe the file we are about to replace, so it is taken
+    // before the rename and skipped for a first save (nothing to back up).
+    // Config/preference writes ask for no backup: no recovery flow consumes one
+    // and it would leave a `.bak` next to the settings file on every change.
+    if keep_backup && path.exists() {
+        if let Err(reason) = backup_previous(path) {
+            eprintln!(
+                "yacr: warning: saved {} without a .bak ({reason})",
+                path.display()
+            );
+        }
+    }
     if let Err(error) = write_then_rename(&tmp, path, bytes) {
         // Never leave a partial temp file behind, whichever step failed.
         let _ = std::fs::remove_file(&tmp);
@@ -526,6 +549,28 @@ fn atomic_replace(path: &Path, bytes: &[u8]) -> CadResult<()> {
         let _ = directory.sync_all();
     }
     Ok(())
+}
+
+/// Refresh `path.bak` from the current `path`.
+///
+/// A hard link is preferred: it is atomic, costs no extra bytes and shares the
+/// inode, so the backup is byte-identical by construction. Filesystems without
+/// hard links (FAT, some FUSE/SMB mounts) fall back to a copy.
+fn backup_previous(path: &Path) -> Result<(), String> {
+    let backup = path.with_extension(match path.extension().and_then(|ext| ext.to_str()) {
+        Some(extension) => format!("{extension}.bak"),
+        None => "bak".to_string(),
+    });
+    // A stale backup must not block a fresh one: `hard_link` refuses an existing
+    // destination, and `copy` would silently keep the older bytes if it did not
+    // truncate.
+    let _ = std::fs::remove_file(&backup);
+    match std::fs::hard_link(path, &backup) {
+        Ok(()) => Ok(()),
+        Err(link_error) => std::fs::copy(path, &backup)
+            .map(|_| ())
+            .map_err(|copy_error| format!("link: {link_error}; copy: {copy_error}")),
+    }
 }
 
 /// The fallible half of [`atomic_replace`]: create, write and sync the temp file,
