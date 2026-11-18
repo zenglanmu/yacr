@@ -171,12 +171,14 @@ flowchart TD
 
 | 数据 | 初期访问规则 | 持久性 |
 |---|---|---|
-| DrawingDatabase | 受控导入完成后只读；2D 绘制/编辑经受控写事务修改（2026-11-16 增补） | 来源 DWG 与必要规范化数据 |
+| DrawingDatabase | 受控导入完成后只读；2D 绘制/编辑经受控写事务修改（2026-11-16 增补） | ymodel 文档（`.ymodel`）；DWG/DXF 等为连接器格式（ADR-0037） |
 | SessionState | 应用层操作，可有导航历史 | 可选恢复，不属于底图修改 |
 | PreviewState | 工具频繁更新，不进文档撤销栈 | 临时，取消即丢弃 |
 | DerivedCaches | 按版本重建 | 可删除，不是权威来源 |
 
 底图编辑必须经同一验证和变更追踪路径，不得暴露 unrestricted mutable access。（2026-11-16：2D 绘制/编辑已按此路径提供写入，见文首范围增补。）导入器通过 Builder 构造数据库，应用通过查询接口只读访问；所有正式写入必须经过同一验证和变更追踪路径。
+
+2026-11-18：文档权威改为 ymodel（`.ymodel` 单文件，ADR-0037）；上述访问与写入规则不变，改变的是 `DrawingDatabase` 的持久化底座。ymodel 的具体契约见 §16.5。
 
 ### 4.4 DB 对象和身份
 
@@ -187,6 +189,8 @@ Rust 中建议采用稳定 ID + 显式数据类型/枚举 + 外部协议提供�
 选择引用至少包含 DocumentId、EntityId、InstancePath 和可选 SubElementId。源 DWG handle 只是来源标识；块定义里的同一实体在不同 INSERT 中必须能区分。GPU 顶点索引、批次位置不能作为持久 ID。
 
 对象删除后旧 ID 不得误指向新对象；可使用带 generation 的句柄或不复用的持久 ID。导入映射必须稳定记录 source handle。三维 face/edge 编号可能在重新离散或拓扑变化后失效，锚点应有稳定来源、坐标回退及 Valid/Stale/Unresolved 状态，不能声称自动解决拓扑命名问题。
+
+ADR-0037 把"稳定记录 source handle"升级为强制契约：本地 id 不复用 + `FederationGuid` + 多值 `SourceRef` aspect，且 `(source, handle) → element` 映射表是连接器的必需输出（兼容性报告、增量重导入、xref 与回源导出都依赖它）。
 
 ### 4.5 模块规划
 
@@ -653,6 +657,8 @@ mlightcad 仅用于 UI 功能和操作流程对照，不再作为绘制迁移主
 
 ~~批注内容存在未保存修改时，文档切换、后端重建和退出要走一致的保存/保留恢复/丢弃策略。只有用户明确选择丢弃，才删除唯一恢复副本。~~（2026-10-05 批注子系统移除，本句作废；通用原则——“未保存修改”的保存/恢复/丢弃策略——仍适用于绘图/测量编辑与宿主恢复流程。）
 
+2026-11-18：本节要求的交换格式、版本化、迁移与"不静默丢弃未知字段"由 ymodel 落地；具体决策见 §16.5 与 ADR-0037。
+
 ### 16.4 可修改性与公共契约
 
 只公开核心稳定契约，禁止对外随意 re-export 第三方实体/内核/UI 类型。大块只读数据通过自有 view/handle 或共享不可变存储访问，不以隔离为由无限复制。
@@ -660,6 +666,38 @@ mlightcad 仅用于 UI 功能和操作流程对照，不再作为绘制迁移主
 模块拆分的验收标准是：升级外部解析器时主要修改导入适配；更换 UI 时核心测试不受影响；增加实体表示时不修改所有 GPU 管线；新增平台时不改几何算法。不得以大量跨 crate 回调和全局 service locator 掩盖循环依赖。
 
 新增模块或重大契约变更写 ADR，包含问题、证据、选项、选择、兼容性与测试。公共格式/接口变更需明确迁移和弃用规则。
+
+### 16.5 ymodel 文档模型与持久化（ADR-0037）
+
+ymodel 是唯一原生文档模型与保存格式（`.ymodel` = zip 容器 + 分片 JSON + 二进制大对象）；其它格式只在"打开/另存为"边界由连接器处理。本节为骨架，完整决策、备选与测试见 ADR-0037。
+
+#### 16.5.1 对象模型
+
+概念骨架取自 BIS：Element / Model / Relationship / Aspect / Code。子类使用 CAD 语义（Line、Polyline、Dimension、Hatch、Insert、TextStyle、BlockDefinition…），不照搬建筑语义类。每个 Element 恰属一个 Model；父子元素同 Model 且无环；图形元素恰属一个 SubCategory。DWG model space 混装 2D/3D，因此 `cad:ModelSpace` 允许混合维度；元素的维度由几何在写入时派生，不落冗余标记——这是对 BIS 不变量的显式放宽，必须在 schema 与校验器中命名，不得默默允许。
+
+#### 16.5.2 身份与溯源
+
+持久 id 是 i64 复合键 `(kind << 45) | seq`：kind 8 位、seq 45 位，整体 ≤ 2^53，保证在 JSON/`jq` 等 f64 环境下精确显示（超出 2^53 的标识性整数必须写成字符串）；seq 永不复用。`FederationGuid` 每文档唯一，另存为保留元素 GUID 并生成新的文档身份。`SourceRef` 多值 aspect 记录源文件、源 handle、类型与校验和；`(source, handle) → element` 映射表是连接器必需输出。8 个 id 高水位计数必须随文档持久化并在加载时原样恢复，禁止用 `max(id)+1` 重建（删除最大 id 后重开会复用 id）；不存 tombstone，删除只让 id 消失，悬空引用是显式 `Unresolved`。
+
+#### 16.5.3 几何三段
+
+Definition（权威参数、样式与属性引用）存在元素 JSON 的 payload 字段；Geometry 由 definition 生成、不落盘；Presentation 概念保留但 v1 不持久化缓存，打开时重建即正确性测试。派生显示数据不得作为权威行内容。现有内嵌 `display` 字段在 Phase 1 保持原样，只有替代缓存能给出逐字节一致的 accessor 输出时才降级。`ChangeScope`（脏分片、脏表、header）是内存对象、不落盘，但必须由每一个写入路径填充——包括发布空 `changes` 的图层/布局/样式/线型/头变量写入；它是判定"哪些 entry 脏"的唯一依据。`ChangeMask` v1 保持 5 bit，仅用于内存通知。
+
+#### 16.5.4 单位、比例与数值
+
+持久化规范单位：毫米（长度）+ 弧度（角度），属性绑定 KindOfQuantity；每个源保留 `UnitProvenance`（源单位、精确换算、可得原始数值）。未声明单位时保持"图纸单位"，不默认毫米。annotation scale 与 plot scale 是一等数据。地理配准/CRS 独立以米存储。payload 是 JSON：f64 用最短往返表示并有逐位往返属性测试；JSON 没有 NaN/Inf，用 `{"$f64":"nan"}`/`"inf"`/`"-inf"` 转义，读取端拒绝未知转义值。新写入拒绝非有限几何与非法数值，但恢复数据库曾持有的旧行（`RestoreStored`）必须按原值转义保存。写入前必须修完 B31（`$INSUNITS` 厘米）。
+
+#### 16.5.5 持久化、版本与迁移
+
+`.ymodel` 是 zip 容器。`manifest.json` 记录 `format{read,write,minor}`、`document_uuid`、`open_revision`（导入基线，永不推进）、`saved_revision`、`shard_map` 与逐 entry 的 `sha256`（解压后）、`sha256_c`（压缩后）、`len`、`crc`、`foreign`。保存是显式动作：按 `ChangeScope` 取脏 entry，**新 entry 集合 = live 分片 ∪ 脏分片 ∪ 表 ∪ foreign**（被删除对象的旧分片不得复制回来），写唯一临时文件 → 脏 entry 重写、未修改且仍存在的 entry 按压缩字节 raw-copy（Phase 2 起）→ manifest 最后写 → fsync → 校验新写 entry 的 `sha256` 与拷贝 entry 的 `sha256_c` → `link` 旧文件为 `.bak` 后 `rename` 替换。崩溃窗口是"上次保存/恢复快照之后"；保存成功后清/替换恢复快照，且只有 `snapshot.revision > saved_revision` 才提示恢复。不引入 lockfile：保存前比对目标 `(sha256, mtime)`，不一致显式拒绝并建议另存为。版本 `Read.Write.Minor`；更高 read 版本 `ymodel.unsupported_version`、更高 minor `ymodel.unsupported_minor`；稳定标记是契约，退出码 8 只是 CLI/native 映射。未知 entry（`foreign`）原样保留，全量重写也必须复制；不可读时 `ymodel.foreign_entries_unreadable`，路径冲突显式失败。一文件一文档；id/GUID 唯一性按文件计。
+
+#### 16.5.6 连接器与保真契约
+
+每个对象有保真等级：L0（源文件字节保留；`revision == manifest.open_revision && source_retained` 时同格式导出 = 原字节；加载时 revision 以 `saved_revision` 为种子、`open_revision` 永不推进，否则编辑保存后重开会让 L0 复活）、L1（语义往返 + 不动点测试）、L3（视觉，永不承诺）；L2 字节级 v1 不承诺。"DWG/DXF 超集"= 存储层超集（L0 兜底）+ 已建模部分 L1 不动点；任意 DWG 对象修改后完美回写不是 v1 目标。"未修改"是机械谓词，改图层名/样式/头变量同样使直通失效。兼容性报告复用 `SupportStatus`/`EntityCapability`/`Completeness` 词汇，按对象、双向（import/export/roundtrip）持久化，并在 UI 以可点击弹窗呈现；新 code 与新属性一律走 i18n 目录与现有 `PropertyRow` 路径。
+
+#### 16.5.7 载体边界
+
+store 是纯 Rust，任何持有 `cad-db` 的载体都能持久化；字节源/汇由平台适配器提供。native：临时文件 + 原子替换（Windows `ReplaceFileW`，Linux/macOS rename + fsync）。Android 的 SAF 是流，而 zip 读需要 Seek：打开时先把字节读入应用私有缓存；保存写临时文档再经 `DocumentsContract` 替换，明确非原子，靠私有 `.bak` 与打开时 hash 校验。X11/XWayland 的 `dom-canvas` 由 Tauri 宿主读写字节，宿主回 ACK（`saved_revision`、目标 hash 与长度）后才清 dirty。Web：文件选择器打开；File System Access 可用时原地写回，`await writer.close()` 后才清 dirty，否则下载副本且 UI 明示"已下载副本"。wasm sink 必须分块可中止，按峰值（累计写入 + 源文件 + 文档内存）超过 256 MB（实测后调整）以 `web.persistence_too_large` 中途 abort；dirty 时 `beforeunload` 拦截；v1 不做浏览器恢复快照。
 
 ## 17. 扩展机制和开源维护
 
