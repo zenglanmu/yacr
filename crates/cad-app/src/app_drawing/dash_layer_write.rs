@@ -40,6 +40,7 @@ use super::layer_record::layer_row;
 use super::{layer_edit, *};
 use crate::command_payload::DashLayerOps;
 use crate::layer_property::LayerPropertyValue;
+use cad_db::ChangeScope;
 
 impl Application {
     /// Apply one typed `-LAYER <option> …` write line.
@@ -71,6 +72,9 @@ impl Application {
         let transaction = next_transaction_id();
         let mut patches: Vec<cad_db::LayerPatch> = Vec::new();
         let mut diagnostics: Vec<Diagnostic> = Vec::new();
+        // Every option is a layer-table write; the published change set spans all
+        // of them, so its dirty scope is the union of each row write's scope.
+        let mut scope = ChangeScope::default();
         // Session effects, applied only after the candidate is published: which
         // layer becomes current, which rows were deleted (their temporary
         // overrides are pruned) and the delete fallback for the active layer.
@@ -90,7 +94,7 @@ impl Application {
             }
             DashLayerOps::New(names) => {
                 for name in names {
-                    let id = create_layer_on(&mut candidate, name, transaction)?;
+                    let id = create_layer_on(&mut candidate, name, transaction, &mut scope)?;
                     let stored = stored_name(&candidate, id, name);
                     patches.push(cad_history::layer_patch(
                         id,
@@ -107,7 +111,7 @@ impl Application {
                 let id = match layer_edit::lookup_layer(drawing.as_ref(), name)? {
                     Some(id) => id,
                     None => {
-                        let id = create_layer_on(&mut candidate, name, transaction)?;
+                        let id = create_layer_on(&mut candidate, name, transaction, &mut scope)?;
                         let stored = stored_name(&candidate, id, name);
                         patches.push(cad_history::layer_patch(
                             id,
@@ -138,8 +142,10 @@ impl Application {
                 let previous = stored_name(drawing.as_ref(), id, old);
                 let before = layer_row(drawing.as_ref(), id);
                 let changeset = candidate.rename_layer(id, new, transaction, "-LAYER rename")?;
+                scope.merge(&changeset.scope);
                 // Renaming to the stored name is an authoritative no-op: the
-                // database did not bump the revision, so no patch is recorded.
+                // database did not bump the revision, so no patch is recorded
+                // (and its empty scope adds nothing).
                 if changeset.before != changeset.after {
                     let stored = stored_name(&candidate, id, new);
                     patches.push(cad_history::layer_patch(
@@ -177,7 +183,8 @@ impl Application {
                 }
                 for (id, name) in &layers {
                     let before = layer_row(drawing.as_ref(), *id);
-                    candidate.delete_layer(*id, transaction, "-LAYER delete")?;
+                    let write = candidate.delete_layer(*id, transaction, "-LAYER delete")?;
+                    scope.merge(&write.scope);
                     patches.push(cad_history::layer_patch(*id, before, None));
                     deleted.push(*id);
                     diagnostics.push(diagnostic(
@@ -196,6 +203,7 @@ impl Application {
                     "off = false".to_string(),
                     "ON",
                     transaction,
+                    &mut scope,
                     &mut patches,
                     &mut diagnostics,
                 )?;
@@ -218,6 +226,7 @@ impl Application {
                     "off = true".to_string(),
                     "OFF",
                     transaction,
+                    &mut scope,
                     &mut patches,
                     &mut diagnostics,
                 )?;
@@ -240,6 +249,7 @@ impl Application {
                     "frozen = true".to_string(),
                     "FREEZE",
                     transaction,
+                    &mut scope,
                     &mut patches,
                     &mut diagnostics,
                 )?;
@@ -254,6 +264,7 @@ impl Application {
                     "frozen = false".to_string(),
                     "THAW",
                     transaction,
+                    &mut scope,
                     &mut patches,
                     &mut diagnostics,
                 )?;
@@ -268,6 +279,7 @@ impl Application {
                     "locked = true".to_string(),
                     "LOCK",
                     transaction,
+                    &mut scope,
                     &mut patches,
                     &mut diagnostics,
                 )?;
@@ -282,6 +294,7 @@ impl Application {
                     "locked = false".to_string(),
                     "UNLOCK",
                     transaction,
+                    &mut scope,
                     &mut patches,
                     &mut diagnostics,
                 )?;
@@ -300,6 +313,7 @@ impl Application {
                     format!("color = '{value}'"),
                     "COLOR",
                     transaction,
+                    &mut scope,
                     &mut patches,
                     &mut diagnostics,
                 )?;
@@ -315,6 +329,7 @@ impl Application {
                     format!("linetype = '{name}'"),
                     "LTYPE",
                     transaction,
+                    &mut scope,
                     &mut patches,
                     &mut diagnostics,
                 )?;
@@ -330,6 +345,7 @@ impl Application {
                     format!("lineweight = '{value}'"),
                     "LWEIGHT",
                     transaction,
+                    &mut scope,
                     &mut patches,
                     &mut diagnostics,
                 )?;
@@ -349,6 +365,7 @@ impl Application {
                     format!("plottable = {plottable}"),
                     "PLOT",
                     transaction,
+                    &mut scope,
                     &mut patches,
                     &mut diagnostics,
                 )?;
@@ -367,6 +384,7 @@ impl Application {
                 transaction,
                 reason: "-LAYER".to_string(),
                 changes: Vec::new(),
+                scope,
             };
             self.publish_layer_record(document_id, candidate, transaction, "-LAYER", patches)?;
             Some(Arc::new(changes))
@@ -453,8 +471,10 @@ fn create_layer_on(
     candidate: &mut DrawingDatabase,
     name: &str,
     transaction: TransactionId,
+    scope: &mut ChangeScope,
 ) -> CadResult<LayerId> {
-    let (id, _changeset) = candidate.create_layer(name, transaction, "-LAYER new")?;
+    let (id, changeset) = candidate.create_layer(name, transaction, "-LAYER new")?;
+    scope.merge(&changeset.scope);
     Ok(id)
 }
 
@@ -474,6 +494,7 @@ fn write_attribute(
     label: String,
     option: &str,
     transaction: TransactionId,
+    scope: &mut ChangeScope,
     patches: &mut Vec<cad_db::LayerPatch>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> CadResult<()> {
@@ -483,6 +504,7 @@ fn write_attribute(
         crate::layer_property::apply(&mut attributes, parsed.clone());
         let changeset =
             candidate.set_layer_attributes(*id, attributes, transaction, "-LAYER write")?;
+        scope.merge(&changeset.scope);
         if changeset.before != changeset.after {
             patches.push(cad_history::layer_patch(
                 *id,

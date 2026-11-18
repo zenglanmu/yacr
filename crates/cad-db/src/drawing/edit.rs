@@ -5,6 +5,7 @@ use cad_domain::*;
 use super::{DrawingDatabase, DrawingTransaction};
 use crate::change::{ChangeMask, ChangeSet, ObjectChange};
 use crate::entity::DbEntity;
+use crate::scope::ChangeScope;
 
 impl DrawingDatabase {
     /// Switch a dynamic block's active visibility state.
@@ -52,6 +53,7 @@ impl DrawingDatabase {
                 transaction,
                 reason: reason.to_string(),
                 changes: Vec::new(),
+                scope: ChangeScope::default(),
             });
         }
 
@@ -94,6 +96,12 @@ impl DrawingDatabase {
             .into_iter()
             .map(|e| ObjectChange::Update(ObjectId(e.0), ChangeMask::GEOMETRY))
             .collect();
+        // Only the block **definition** row changed (its active visibility
+        // state). The per-member entities are published as visible-set updates,
+        // but their own rows did not change, so their shards are deliberately
+        // not marked dirty.
+        let mut scope = ChangeScope::default();
+        scope.definition(block.0);
         Ok(ChangeSet {
             database: self.id,
             before,
@@ -101,6 +109,7 @@ impl DrawingDatabase {
             transaction,
             reason: reason.to_string(),
             changes,
+            scope,
         })
     }
 

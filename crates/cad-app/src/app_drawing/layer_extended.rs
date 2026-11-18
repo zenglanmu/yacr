@@ -38,7 +38,7 @@ mod state;
 
 use std::collections::BTreeSet;
 
-use cad_db::{DbEntity, DEFAULT_LAYER_NAME};
+use cad_db::{ChangeScope, DbEntity, TableKind, DEFAULT_LAYER_NAME};
 use cad_domain::SelectionRef;
 
 use super::layer_commands::{
@@ -325,6 +325,14 @@ impl Application {
         for source in &sources {
             session.layer_overrides.remove(*source);
         }
+        // The published change set spans the entity write, the viewport prune and
+        // the layer deletes; none of those tables is an entity change, so the
+        // dirty scope must be unioned explicitly.
+        let mut scope: ChangeScope = change_set.scope.clone();
+        scope.table(TableKind::Layers);
+        if !layout_patches.is_empty() {
+            scope.table(TableKind::Layouts);
+        }
         let combined = ChangeSet {
             database: candidate.id(),
             before: before_revision,
@@ -332,6 +340,7 @@ impl Application {
             transaction,
             reason: "laymrg".to_string(),
             changes: change_set.changes.clone(),
+            scope,
         };
         self.publish_candidate(
             document_id,
@@ -489,6 +498,13 @@ impl Application {
             session.layer_overrides.remove(*source);
         }
         let after_revision = candidate.revision();
+        // Entity deletes + viewport prune + layer deletes in one revision span:
+        // union every half's dirty scope.
+        let mut scope: ChangeScope = change_set.scope.clone();
+        scope.table(TableKind::Layers);
+        if !layout_patches.is_empty() {
+            scope.table(TableKind::Layouts);
+        }
         let combined = ChangeSet {
             database: candidate.id(),
             before: before_revision,
@@ -496,6 +512,7 @@ impl Application {
             transaction,
             reason: "laydel".to_string(),
             changes: change_set.changes.clone(),
+            scope,
         };
         self.publish_candidate(
             document_id,

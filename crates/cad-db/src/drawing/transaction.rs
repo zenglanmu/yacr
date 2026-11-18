@@ -314,7 +314,9 @@ impl<'a> DrawingTransaction<'a> {
             )?;
         // The apply path sees only before/after, so it cannot know a change was
         // a deliberate move. Add the TRANSFORM bit here for the moved ids; the
-        // geometry/validation/mutation all happened in the shared path.
+        // geometry/validation/mutation all happened in the shared path. The dirty
+        // `scope` the apply path produced is left untouched: a move changes the
+        // same rows with or without the bit, so it cannot erase or add entries.
         if !transformed.is_empty() {
             for change in &mut changeset.changes {
                 if let ObjectChange::Update(object, mask) = change {

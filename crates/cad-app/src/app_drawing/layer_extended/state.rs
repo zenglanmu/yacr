@@ -7,7 +7,7 @@
 
 use std::collections::BTreeMap;
 
-use cad_db::LayerAttributes;
+use cad_db::{ChangeScope, LayerAttributes};
 
 use super::*;
 use crate::command_payload::LayerStateCommand;
@@ -166,15 +166,17 @@ impl Application {
                 let before_revision = drawing.revision();
                 let mut candidate = drawing.as_ref().clone();
                 let mut patches = Vec::new();
+                let mut scope = ChangeScope::default();
                 for (layer, attributes) in &snapshot.attributes {
                     if drawing.layer_attributes(*layer) != *attributes {
                         let before = layer_row(drawing.as_ref(), *layer);
-                        candidate.set_layer_attributes(
+                        let write = candidate.set_layer_attributes(
                             *layer,
                             attributes.clone(),
                             transaction,
                             "restore layer state",
                         )?;
+                        scope.merge(&write.scope);
                         patches.push(cad_history::layer_patch(
                             *layer,
                             before,
@@ -191,6 +193,7 @@ impl Application {
                         transaction,
                         reason: "restore layer state".to_string(),
                         changes: Vec::new(),
+                        scope,
                     })
                 });
                 if changed > 0 {

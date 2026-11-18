@@ -12,7 +12,7 @@
 //! the project's code-size limit.
 
 use super::*;
-use cad_db::LayerAttributes;
+use cad_db::{ChangeScope, LayerAttributes};
 
 /// Read one layer table row (the [`cad_db::Layer`] plus its attributes) as the
 /// before/after unit a [`cad_db::LayerPatch`] carries.
@@ -57,11 +57,16 @@ impl Application {
         let transaction = next_transaction_id();
         let mut changed = 0;
         let mut patches = Vec::new();
+        // Every real `set_layer_attributes` call reports its own dirty scope; the
+        // published change set spans all of those revision bumps, so it has to
+        // union them (a layer row is not an entity, so `changes` stays empty).
+        let mut scope = ChangeScope::default();
         for id in layers {
             let before_row = layer_row(drawing.as_ref(), *id);
             let mut attributes = candidate.layer_attributes(*id);
             if mutate(&mut attributes) {
-                candidate.set_layer_attributes(*id, attributes, transaction, reason)?;
+                let write = candidate.set_layer_attributes(*id, attributes, transaction, reason)?;
+                scope.merge(&write.scope);
                 changed += 1;
                 if let Some(before_row) = before_row {
                     patches.push(cad_history::layer_patch(
@@ -82,6 +87,7 @@ impl Application {
             transaction,
             reason: reason.to_string(),
             changes: Vec::new(),
+            scope,
         };
         self.publish_layer_record(
             document_id,

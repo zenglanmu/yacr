@@ -44,6 +44,7 @@ use cad_domain::*;
 
 use super::DrawingDatabase;
 use crate::change::ChangeSet;
+use crate::scope::ChangeScope;
 
 impl DrawingDatabase {
     /// The stored insertion base point (`$INSBASE`), or `None` when this
@@ -160,6 +161,7 @@ impl DrawingDatabase {
             transaction,
             reason: reason.to_string(),
             changes: Vec::new(),
+            scope: ChangeScope::default(),
         }
     }
 
@@ -174,6 +176,9 @@ impl DrawingDatabase {
         self.invalidate_bounds_cache();
         let after = Revision(before.0 + 1);
         self.revision = after;
+        // A header value lives in `document.json`; no element or table row moved.
+        let mut scope = ChangeScope::default();
+        scope.header();
         ChangeSet {
             database: self.id,
             before,
@@ -181,6 +186,7 @@ impl DrawingDatabase {
             transaction,
             reason: reason.to_string(),
             changes: Vec::new(),
+            scope,
         }
     }
 }

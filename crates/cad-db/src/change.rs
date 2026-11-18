@@ -3,6 +3,7 @@
 use cad_domain::*;
 
 use crate::entity::DbEntity;
+use crate::scope::ChangeScope;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChangeMask(pub u8);
@@ -105,6 +106,22 @@ pub enum ObjectChange {
 /// `changes` preserves staging order and, as [`ObjectChange`] documents, may
 /// contain several entries for one object (an insert plus a display-state
 /// `STYLE` update); match on `(id, kind)`, not on "the" entry for an id.
+///
+/// # `scope` is the persisted-state answer `changes` cannot give
+///
+/// [`ObjectChange`] carries an id and a mask: no table, no Model, no values. The
+/// table/header writers publish an **empty** `changes` list and only raise the
+/// revision, so `revision != saved_revision` alone cannot tell a saver what to
+/// write. [`ChangeScope`] is the explicit dirty set (ADR-0037 D8/D12) and is
+/// filled by every write path. It is in-memory commit metadata, never stored in a
+/// document, and it lives here (not in `DrawingDatabase`) because the database is
+/// `Clone`, `Arc`-shared with the scene thread and edited through
+/// `Arc::make_mut`, which would fork a batch stored inside it.
+///
+/// `is_empty()` intentionally keeps its historical meaning — "no object change
+/// entries" — so a layer edit that publishes no `changes` is still not "empty" in
+/// the sense a consumer of this struct would care about; use
+/// [`ChangeScope::is_empty`] for the stored-state question.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChangeSet {
     pub database: DatabaseId,
@@ -113,6 +130,8 @@ pub struct ChangeSet {
     pub transaction: TransactionId,
     pub reason: String,
     pub changes: Vec<ObjectChange>,
+    /// The persisted rows this commit made stale (never written to a document).
+    pub scope: ChangeScope,
 }
 
 impl ChangeSet {

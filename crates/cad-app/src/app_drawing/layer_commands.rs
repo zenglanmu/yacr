@@ -130,6 +130,7 @@ mod setbylayer;
 use super::*;
 
 use super::layer_record::layer_row;
+use cad_db::ChangeScope;
 
 /// A named, non-capability refusal (`<command>.<code>: <detail>`).
 pub(super) fn invalid(prefix: &str, code: &str, detail: impl std::fmt::Display) -> CadError {
@@ -388,6 +389,9 @@ impl Application {
         let mut candidate = drawing.clone();
         let transaction = next_transaction_id();
         let mut layer_patches = Vec::new();
+        // The published change set spans the layer **and** layout writes; its
+        // dirty scope must union both (neither is an entity change).
+        let mut scope = ChangeScope::default();
         for id in &layers {
             let before_row = layer_row(&drawing, *id);
             let mut attributes = candidate.layer_attributes(*id);
@@ -396,7 +400,8 @@ impl Application {
             }
             attributes.frozen = false;
             // `frozen_in_new_viewport` is not a viewport model; it stays.
-            candidate.set_layer_attributes(*id, attributes, transaction, "laythw")?;
+            let write = candidate.set_layer_attributes(*id, attributes, transaction, "laythw")?;
+            scope.merge(&write.scope);
             if let Some(before_row) = before_row {
                 let after = layer_row(&candidate, *id);
                 layer_patches.push(cad_history::layer_patch(*id, Some(before_row), after));
@@ -405,7 +410,8 @@ impl Application {
         let mut layout_patches = Vec::with_capacity(thawed.len());
         for (layout, viewports) in thawed {
             let before_row = layout_row(&drawing, layout);
-            candidate.set_layout_viewports(layout, viewports, transaction, "laythw")?;
+            let write = candidate.set_layout_viewports(layout, viewports, transaction, "laythw")?;
+            scope.merge(&write.scope);
             let after = layout_row(&candidate, layout);
             layout_patches.push(cad_history::layout_patch(layout, before_row, after));
         }
@@ -430,6 +436,7 @@ impl Application {
             transaction,
             reason: "laythw".to_string(),
             changes: Vec::new(),
+            scope,
         };
         self.publish_candidate(
             document_id,

@@ -23,6 +23,7 @@ mod plot;
 mod point_style;
 mod scale;
 mod scale_edit;
+mod scope;
 mod spline_transform;
 mod spline_validation;
 mod style_tables;

@@ -1,7 +1,7 @@
 //! Unit tests.
 
 use super::*;
-use cad_db::{ChangeSet, ObjectChange};
+use cad_db::{ChangeScope, ChangeSet, ObjectChange};
 
 fn change_set(before: u64, after: u64, changes: Vec<ObjectChange>) -> ChangeSet {
     ChangeSet {
@@ -11,6 +11,8 @@ fn change_set(before: u64, after: u64, changes: Vec<ObjectChange>) -> ChangeSet 
         transaction: TransactionId(1),
         reason: "test".into(),
         changes,
+        // These change sets describe dependency-invalidation input, not a write.
+        scope: ChangeScope::default(),
     }
 }
 

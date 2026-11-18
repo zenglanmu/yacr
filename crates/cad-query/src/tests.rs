@@ -1,7 +1,7 @@
 //! Unit tests.
 
 use super::*;
-use cad_db::{DrawingDatabase, DrawingDatabaseBuilder, Layer};
+use cad_db::{ChangeScope, DrawingDatabase, DrawingDatabaseBuilder, Layer};
 
 fn request(offset: usize, limit: usize) -> QueryRequest {
     QueryRequest {
@@ -159,6 +159,8 @@ fn change(database: DatabaseId, before: u64, after: u64) -> ChangeSet {
         transaction: TransactionId(1),
         reason: "query update regression".into(),
         changes: Vec::new(),
+        // A query update is not a database write: nothing is dirty.
+        scope: ChangeScope::default(),
     }
 }
 

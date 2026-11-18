@@ -39,6 +39,7 @@ use cad_domain::*;
 
 use super::DrawingDatabase;
 use crate::change::ChangeSet;
+use crate::scope::ChangeScope;
 
 impl DrawingDatabase {
     /// Store the drawing-global POINT display style (`$PDMODE` / `$PDSIZE`).
@@ -78,6 +79,7 @@ impl DrawingDatabase {
                 transaction,
                 reason: reason.to_string(),
                 changes: Vec::new(),
+                scope: ChangeScope::default(),
             });
         }
 
@@ -90,6 +92,9 @@ impl DrawingDatabase {
         self.invalidate_bounds_cache();
         let after = Revision(before.0 + 1);
         self.revision = after;
+        // `$PDMODE`/`$PDSIZE` live in `document.json`; nothing else moved.
+        let mut scope = ChangeScope::default();
+        scope.header();
         Ok(ChangeSet {
             database: self.id,
             before,
@@ -97,6 +102,7 @@ impl DrawingDatabase {
             transaction,
             reason: reason.to_string(),
             changes: Vec::new(),
+            scope,
         })
     }
 }

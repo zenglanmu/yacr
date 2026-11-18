@@ -64,6 +64,7 @@ use crate::change::ChangeSet;
 use crate::dim_style::DimStyle;
 use crate::entity::DbEntity;
 use crate::mleader_style::MLeaderStyle;
+use crate::scope::{ChangeScope, TableKind};
 use crate::tables::Style;
 
 /// The canonical name of the DIMSTYLE/MLEADERSTYLE row creation resolves. It is
@@ -213,6 +214,7 @@ impl DrawingDatabase {
                 transaction,
                 reason: reason.to_string(),
                 changes: Vec::new(),
+                scope: ChangeScope::default(),
             });
         }
 
@@ -236,6 +238,7 @@ impl DrawingDatabase {
                 transaction,
                 reason: reason.to_string(),
                 changes: Vec::new(),
+                scope: ChangeScope::default(),
             });
         }
         let changes = StyleTableChanges {
@@ -243,6 +246,10 @@ impl DrawingDatabase {
             dim_styles: &dim_styles,
             mleader_styles: &mleader_styles,
         };
+        // Read before the mutation: the header part is decided afterwards, once
+        // the installs have moved the allocators.
+        let watermarks_before = self.identity_watermarks();
+        let mut scope = self.style_batch_scope(changes);
 
         // Phase 3: upserts first, deletes last, so a row freed by the batch is
         // not observed half-applied.
@@ -277,6 +284,9 @@ impl DrawingDatabase {
             }
         }
 
+        if watermarks_before != self.identity_watermarks() {
+            scope.header();
+        }
         let after = Revision(before.0 + 1);
         self.revision = after;
         // A style edit is not a geometry change, but text dimensions/metrics can
@@ -290,7 +300,50 @@ impl DrawingDatabase {
             transaction,
             reason: reason.to_string(),
             changes: Vec::new(),
+            scope,
         })
+    }
+
+    /// The dirty scope of the three style batches, read before the mutation.
+    ///
+    /// Reused by [`Self::apply_drawing_changes_combined`] so the combined path
+    /// and [`Self::apply_style_table_changes`] cannot disagree about which tables
+    /// a staged row dirties. A batch that is non-empty after the no-op filter
+    /// rewrites rows; a row that does not exist yet also moves the table's id
+    /// high-water mark, which lives in `document.json`.
+    pub(crate) fn style_batch_scope(&self, changes: StyleTableChanges<'_>) -> ChangeScope {
+        let mut scope = ChangeScope::default();
+        if !changes.styles.is_empty() {
+            scope.table(TableKind::Styles);
+            if changes
+                .styles
+                .iter()
+                .any(|(id, change)| change.is_some() && !self.styles.contains_key(id))
+            {
+                scope.header();
+            }
+        }
+        if !changes.dim_styles.is_empty() {
+            scope.table(TableKind::DimStyles);
+            if changes
+                .dim_styles
+                .iter()
+                .any(|(id, change)| change.is_some() && !self.dim_styles.contains_key(id))
+            {
+                scope.header();
+            }
+        }
+        if !changes.mleader_styles.is_empty() {
+            scope.table(TableKind::MLeaderStyles);
+            if changes
+                .mleader_styles
+                .iter()
+                .any(|(id, change)| change.is_some() && !self.mleader_styles.contains_key(id))
+            {
+                scope.header();
+            }
+        }
+        scope
     }
 
     /// Validate the three style batches of a combined write.

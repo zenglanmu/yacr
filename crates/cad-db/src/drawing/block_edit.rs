@@ -85,6 +85,7 @@ use super::style_edit::StyleTableChanges;
 use super::{DrawingDatabase, EntityDisplayState, EntityGeometryCheck};
 use crate::change::{ChangeMask, ChangeSet, ObjectChange};
 use crate::entity::DbEntity;
+use crate::scope::ChangeScope;
 use crate::tables::{BlockDefinition, BlockMetadata, LineType};
 use crate::validate::validate_entity_in;
 
@@ -293,6 +294,7 @@ impl DrawingDatabase {
                 transaction,
                 reason: reason.to_string(),
                 changes: Vec::new(),
+                scope: ChangeScope::default(),
             });
         }
 
@@ -450,6 +452,19 @@ impl DrawingDatabase {
             None
         };
 
+        // Phase 1e: the dirty scope of this batch, read **before** the first
+        // mutation (a moved entity needs its stored shard as well as its new
+        // one). See `scope::DrawingDatabase::combined_change_scope`.
+        let watermarks_before = self.identity_watermarks();
+        let mut scope = self.combined_change_scope(
+            block_changes,
+            &changes,
+            layer_changes,
+            layout_changes,
+            style_changes,
+            linetype_changes,
+        );
+
         // Phase 2: mutate. The batch is known-valid; keep the caller's order.
         let mut ordered = Vec::with_capacity(changes.len());
 
@@ -539,13 +554,17 @@ impl DrawingDatabase {
 
         // 2e-2: the entities the linetype cascade retargeted are style changes
         // too. Their row did not change, so the batch has no `Update` for them
-        // unless one was staged; announce each exactly once.
-        for id in linetype_touched {
+        // unless one was staged; announce each exactly once. Their **element
+        // payload** (the render attributes) did change, so the shard is dirty.
+        for id in &linetype_touched {
             match ordered.iter_mut().find(
                 |change| matches!(change, ObjectChange::Update(object, _) if object.0 == id.0),
             ) {
                 Some(ObjectChange::Update(_, mask)) => *mask = mask.union(ChangeMask::STYLE),
                 _ => ordered.push(ObjectChange::Update(ObjectId(id.0), ChangeMask::STYLE)),
+            }
+            if let Some(entity) = self.entities.get(id) {
+                scope.element(&entity.space, id.0);
             }
         }
 
@@ -604,6 +623,19 @@ impl DrawingDatabase {
         if let Some(bounds) = incremental_bounds {
             self.store_insert_only_bounds(after, bounds);
         }
+        // A display state lives in the element payload, so the row's shard must
+        // be rewritten even when the caller staged no entity row for it.
+        for (id, _) in display {
+            if let Some(entity) = self.entities.get(id) {
+                scope.element(&entity.space, id.0);
+            }
+        }
+        // Safety net for ids supplied explicitly at or above the stored
+        // watermark (a replayed higher id). A new row already set `header`, so
+        // this only catches values the allocators moved without a new row.
+        if watermarks_before != self.identity_watermarks() {
+            scope.header();
+        }
         Ok(ChangeSet {
             database: self.id,
             before,
@@ -611,6 +643,7 @@ impl DrawingDatabase {
             transaction,
             reason: reason.to_string(),
             changes: ordered,
+            scope,
         })
     }
 

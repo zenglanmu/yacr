@@ -55,6 +55,7 @@ use super::layer_patch::LayerRow;
 use super::{BlockRow, DrawingDatabase, EntityDisplayState};
 use crate::change::ChangeSet;
 use crate::entity::DbEntity;
+use crate::scope::{ChangeScope, TableKind};
 use crate::tables::{Layout, PaperViewport, PlotSettingsRecord};
 
 /// Characters AutoCAD forbids in a symbol-table name (layer, layout, style, …).
@@ -136,7 +137,12 @@ impl DrawingDatabase {
                 viewports: Vec::new(),
             },
         );
-        let change_set = self.publish_layout_change(transaction, reason);
+        // A new row plus a moved layout allocator: `document.json` must carry the
+        // advanced high-water mark.
+        let mut scope = ChangeScope::default();
+        scope.table(TableKind::Layouts);
+        scope.header();
+        let change_set = self.publish_layout_change(scope, transaction, reason);
         Ok((id, change_set))
     }
 
@@ -167,7 +173,9 @@ impl DrawingDatabase {
         if let Some(layout) = self.layouts.get_mut(&id) {
             layout.name = name;
         }
-        Ok(self.publish_layout_change(transaction, reason))
+        let mut scope = ChangeScope::default();
+        scope.table(TableKind::Layouts);
+        Ok(self.publish_layout_change(scope, transaction, reason))
     }
 
     /// Delete a layout and its plot settings row atomically.
@@ -198,9 +206,17 @@ impl DrawingDatabase {
 
         // Phase 2: mutate. The plot row is keyed by layout id and must not
         // outlive its layout: both removals happen before the one revision bump.
+        let had_plot = self.plot_settings.contains_key(&id);
         self.layouts.remove(&id);
         self.plot_settings.remove(&id);
-        Ok(self.publish_layout_change(transaction, reason))
+        let mut scope = ChangeScope::default();
+        scope.table(TableKind::Layouts);
+        if had_plot {
+            // The page-setup row is its own persisted row and disappeared with
+            // the layout.
+            scope.table(TableKind::PlotSettings);
+        }
+        Ok(self.publish_layout_change(scope, transaction, reason))
     }
 
     /// Replace a layout's paper viewports.
@@ -243,7 +259,9 @@ impl DrawingDatabase {
         if let Some(layout) = self.layouts.get_mut(&id) {
             layout.viewports = viewports;
         }
-        Ok(self.publish_layout_change(transaction, reason))
+        let mut scope = ChangeScope::default();
+        scope.table(TableKind::Layouts);
+        Ok(self.publish_layout_change(scope, transaction, reason))
     }
 
     /// Store one validated page setup for an existing layout.
@@ -309,7 +327,10 @@ impl DrawingDatabase {
         let mut record = record;
         record.paper_size_name = paper_name;
         self.plot_settings.insert(id, record);
-        Ok(self.publish_layout_change(transaction, reason))
+        // Only the page-setup row changed; the layout row is untouched.
+        let mut scope = ChangeScope::default();
+        scope.table(TableKind::PlotSettings);
+        Ok(self.publish_layout_change(scope, transaction, reason))
     }
 
     /// Apply a layout-only batch as **one** revision and **one** [`ChangeSet`].
@@ -342,6 +363,9 @@ impl DrawingDatabase {
         // **current** entity table is the post-batch view.
         validate_layout_batch(self, changes, |id| paper_entity_count(self, id))?;
 
+        let watermarks_before = self.identity_watermarks();
+        let mut scope = self.layout_batch_scope(changes);
+
         // Phase 2: mutate. Upserts first, deletes last; one revision bump.
         for (id, change) in changes {
             if let Some(row) = change {
@@ -353,7 +377,12 @@ impl DrawingDatabase {
                 self.remove_layout_row(*id);
             }
         }
-        Ok(self.publish_layout_change(transaction, reason))
+        // A replayed row at or above the stored watermark moves the allocator,
+        // which is persisted in `document.json`.
+        if watermarks_before != self.identity_watermarks() {
+            scope.header();
+        }
+        Ok(self.publish_layout_change(scope, transaction, reason))
     }
 
     /// [`Self::apply_drawing_changes_with_blocks_display_and_layers`] plus a
@@ -445,7 +474,12 @@ impl DrawingDatabase {
     /// The only mutation step shared by the layout writes: after this the table
     /// change is authoritative and every revision-bound projection is stale by
     /// construction.
-    fn publish_layout_change(&mut self, transaction: TransactionId, reason: &str) -> ChangeSet {
+    fn publish_layout_change(
+        &mut self,
+        scope: ChangeScope,
+        transaction: TransactionId,
+        reason: &str,
+    ) -> ChangeSet {
         let before = self.revision;
         let after = Revision(before.0 + 1);
         self.revision = after;
@@ -459,9 +493,28 @@ impl DrawingDatabase {
             after,
             transaction,
             reason: reason.to_string(),
-            // No entity changed: see the module docs.
+            // No entity changed: see the module docs. The table row is still
+            // dirty, which is what `scope` records.
             changes: Vec::new(),
+            scope,
         }
+    }
+
+    /// The dirty scope of one validated layout batch, read before the mutation.
+    fn layout_batch_scope(&self, changes: &[(LayoutId, Option<LayoutRow>)]) -> ChangeScope {
+        let mut scope = ChangeScope::default();
+        scope.table(TableKind::Layouts);
+        for (id, change) in changes {
+            let had_plot = self.plot_settings.contains_key(id);
+            let writes_plot = change.as_ref().is_some_and(|row| row.plot.is_some());
+            if had_plot || writes_plot {
+                scope.table(TableKind::PlotSettings);
+            }
+            if change.is_some() && !self.layouts.contains_key(id) {
+                scope.header();
+            }
+        }
+        scope
     }
 
     /// Refuse `name` when another layout already uses it case-insensitively.

@@ -32,6 +32,12 @@
 //! is deliberately **not** done — that would claim geometry/style changed when it
 //! did not.
 //!
+//! What the empty `changes` list cannot say is *which stored row is dirty*; that
+//! is [`ChangeScope`](crate::ChangeScope)'s job. Every write here records
+//! [`TableKind::Layers`](crate::TableKind::Layers), and a create also records the
+//! header because it mints an id (ADR-0037 D12). A save without that entry would
+//! "succeed" while writing nothing.
+//!
 //! # These methods record no undo step themselves
 //!
 //! `cad-history` has a layer patch kind ([`super::LayerPatch`]) and the command
@@ -63,6 +69,7 @@ use cad_domain::*;
 
 use super::DrawingDatabase;
 use crate::change::ChangeSet;
+use crate::scope::{ChangeScope, TableKind};
 use crate::tables::{Layer, LayerAttributes};
 
 /// Characters AutoCAD forbids in a symbol-table name (layer, linetype, style,
@@ -127,7 +134,12 @@ impl DrawingDatabase {
         // opaque), which keeps the `visible == !(off || frozen)` invariant: the
         // row is visible and neither flag is set.
         self.layer_attributes.insert(id, LayerAttributes::default());
-        let change_set = self.publish_layer_change(transaction, reason);
+        // The row is new and the layer allocator moved: `document.json` (which
+        // persists the id high-water marks) must be rewritten with the row.
+        let mut scope = ChangeScope::default();
+        scope.table(TableKind::Layers);
+        scope.header();
+        let change_set = self.publish_layer_change(scope, transaction, reason);
         Ok((id, change_set))
     }
 
@@ -171,6 +183,7 @@ impl DrawingDatabase {
                 transaction,
                 reason: reason.to_string(),
                 changes: Vec::new(),
+                scope: ChangeScope::default(),
             });
         }
 
@@ -178,7 +191,9 @@ impl DrawingDatabase {
         if let Some(layer) = self.layers.get_mut(&id) {
             layer.name = name;
         }
-        Ok(self.publish_layer_change(transaction, reason))
+        let mut scope = ChangeScope::default();
+        scope.table(TableKind::Layers);
+        Ok(self.publish_layer_change(scope, transaction, reason))
     }
 
     /// Delete a layer table entry.
@@ -229,7 +244,9 @@ impl DrawingDatabase {
         // layer: leaving it behind would keep an unreachable entry (and one that
         // a future id-reuse would silently inherit).
         self.layer_attributes.remove(&id);
-        Ok(self.publish_layer_change(transaction, reason))
+        let mut scope = ChangeScope::default();
+        scope.table(TableKind::Layers);
+        Ok(self.publish_layer_change(scope, transaction, reason))
     }
 
     /// Replace a layer's attributes, keeping the visibility invariant.
@@ -283,6 +300,7 @@ impl DrawingDatabase {
                     transaction,
                     reason: reason.to_string(),
                     changes: Vec::new(),
+                    scope: ChangeScope::default(),
                 });
             }
             visible
@@ -295,7 +313,9 @@ impl DrawingDatabase {
         if let Some(layer) = self.layers.get_mut(&id) {
             layer.visible = visible;
         }
-        Ok(self.publish_layer_change(transaction, reason))
+        let mut scope = ChangeScope::default();
+        scope.table(TableKind::Layers);
+        Ok(self.publish_layer_change(scope, transaction, reason))
     }
 
     /// Raise the revision exactly once and build the revision-tagged change set.
@@ -303,7 +323,12 @@ impl DrawingDatabase {
     /// The only mutation step shared by the layer writes: after this the table
     /// change is authoritative and every revision-bound projection (layer rows,
     /// scene identity) is stale by construction.
-    fn publish_layer_change(&mut self, transaction: TransactionId, reason: &str) -> ChangeSet {
+    fn publish_layer_change(
+        &mut self,
+        scope: ChangeScope,
+        transaction: TransactionId,
+        reason: &str,
+    ) -> ChangeSet {
         let before = self.revision;
         let after = Revision(before.0 + 1);
         self.revision = after;
@@ -319,8 +344,9 @@ impl DrawingDatabase {
             transaction,
             reason: reason.to_string(),
             // No entity changed: see the module docs ("Why the change set carries
-            // no object changes").
+            // no object changes"). The table row is still dirty: `scope`.
             changes: Vec::new(),
+            scope,
         }
     }
 

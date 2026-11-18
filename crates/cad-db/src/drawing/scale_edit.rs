@@ -72,6 +72,7 @@ use cad_domain::*;
 
 use super::DrawingDatabase;
 use crate::change::{ChangeMask, ChangeSet, ObjectChange};
+use crate::scope::{ChangeScope, TableKind};
 use crate::tables::Scale;
 
 /// A before/after record of one scale-table row.
@@ -123,7 +124,12 @@ impl DrawingDatabase {
         };
         let before = self.revision;
         self.scales.insert(id, row.clone());
-        let changeset = self.commit_scale_write(before, transaction, reason);
+        // A new row plus a moved scale allocator: `document.json` must carry the
+        // advanced high-water mark.
+        let mut scope = ChangeScope::default();
+        scope.table(TableKind::Scales);
+        scope.header();
+        let changeset = self.commit_scale_write(before, transaction, reason, scope);
         Ok((changeset, row))
     }
 
@@ -162,15 +168,36 @@ impl DrawingDatabase {
                 transaction,
                 reason: reason.to_string(),
                 changes: Vec::new(),
+                scope: ChangeScope::default(),
             });
         }
         ensure_unique_scale_name(self, &new_name, Some(id))?;
         let before = self.revision;
         let mut renamed = stored.clone();
         renamed.name = new_name.clone();
+        // The `CANNOSCALE` header value is one of the two name references the
+        // cascade retargets, so a rename that names it makes `document.json`
+        // stale as well.
+        let active_scale_renamed = self
+            .active_annotation_scale
+            .as_ref()
+            .is_some_and(|active| active.name.eq_ignore_ascii_case(&stored.name));
         self.scales.insert(id, renamed);
         let touched = self.cascade_scale_name(&stored.name, &new_name);
-        let mut changeset = self.commit_scale_write(before, transaction, reason);
+        let mut scope = ChangeScope::default();
+        scope.table(TableKind::Scales);
+        if active_scale_renamed {
+            scope.header();
+        }
+        // The other reference store is the per-entity annotative override list in
+        // the render attributes, i.e. the element payload: those rows are dirty
+        // even though the `DbEntity` row itself is unchanged.
+        for entity in &touched {
+            if let Some(row) = self.entities.get(entity) {
+                scope.element(&row.space, entity.0);
+            }
+        }
+        let mut changeset = self.commit_scale_write(before, transaction, reason, scope);
         changeset.changes = touched
             .into_iter()
             .map(|entity| ObjectChange::Update(ObjectId(entity.0), ChangeMask::STYLE))
@@ -217,7 +244,9 @@ impl DrawingDatabase {
         }
         let before = self.revision;
         self.scales.remove(&id);
-        Ok(self.commit_scale_write(before, transaction, reason))
+        let mut scope = ChangeScope::default();
+        scope.table(TableKind::Scales);
+        Ok(self.commit_scale_write(before, transaction, reason, scope))
     }
 
     /// How many stored name references point at `name`.
@@ -297,6 +326,7 @@ impl DrawingDatabase {
         before: Revision,
         transaction: TransactionId,
         reason: &str,
+        scope: ChangeScope,
     ) -> ChangeSet {
         self.invalidate_bounds_cache();
         let after = Revision(before.0 + 1);
@@ -308,6 +338,7 @@ impl DrawingDatabase {
             transaction,
             reason: reason.to_string(),
             changes: Vec::new(),
+            scope,
         }
     }
 }
