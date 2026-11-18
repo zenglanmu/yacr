@@ -56,6 +56,7 @@ pub mod plugins;
 mod point_style;
 mod profile;
 mod recent;
+mod recovery_list;
 mod reference_status;
 // The typed `REFSET ADD|REMOVE` / `REFCLOSE SAVE|DISCARD` option lines.
 mod refedit_arguments;
@@ -190,6 +191,9 @@ pub use self::profile::{
     wire_status_json, DocumentOwner, HostProfile, HostSurfaceMode, WireStatus,
 };
 pub use self::recent::{CadRecentFiles, OPEN_RECENT_COMMAND, RECENT_FILES_COMMAND};
+pub use self::recovery_list::{
+    CadRecoveryFiles, RecoveryEntry, OPEN_RECOVERY_COMMAND, RECOVERY_FILES_COMMAND,
+};
 pub use self::refedit_arguments::{
     invalid_refclose_option_reason, invalid_refset_option_reason, parse_refclose_option,
     parse_refset_option,
@@ -365,26 +369,6 @@ impl CadSession {
     /// session directly and never need this.
     pub fn owner_mirror(&self) -> (CadSettings, Vec<(String, String)>) {
         (self.settings(), self.runtime_command_aliases())
-    }
-
-    /// The host's real recent-drawings list (newest first, possibly empty).
-    ///
-    /// Pure read of the durable list the host loaded/recorded; it never touches
-    /// the drawing, the revision or the history.
-    pub fn recent_files(&self) -> CadRecentFiles {
-        CadRecentFiles::supported(self.core.recent_entries())
-    }
-
-    /// Reopen one recorded recent drawing by its opaque handle.
-    ///
-    /// The host validates the handle against its own list (an unknown/crafted
-    /// handle is refused, not opened), then starts the ordinary
-    /// `begin_open_target` funnel; a real platform failure (missing file, revoked
-    /// grant) is returned unchanged. The document is not touched here.
-    pub fn open_recent(&self, opaque: &str, display_name: &str) -> Result<(), String> {
-        self.core
-            .open_recent(opaque, display_name)
-            .map_err(|error| cad_error_text(&error))
     }
 
     /// Apply validated canvas-local logical metrics (origin `[0, 0]`).

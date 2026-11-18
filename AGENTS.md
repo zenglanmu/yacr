@@ -164,6 +164,7 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
 - 一键证据：`bash scripts/collect-evidence.sh`（Wayland/X11 用同 UID Mutter ScreenCast 抓合成帧）。
   `--probe` 是假打开，**不得**当作视觉/像素证据；证据运行必须显式前台目标窗口并每轮用新目录。
 - 桌面窗口默认**最大化但保留标题栏**（不是全屏/kiosk）；`YACR_PROBE_NO_MAXIMIZE` 仅用于证据运行。
+- **无 `--open` 启动时不自动建空白图**：所有生产载体以 `StartDocument::Empty` 进入无文档状态，显示欢迎页（`StartPanel`）；`NEW` 才创建空白图，`--open` 直接打开。欢迎页列出最近文件与**恢复快照**（点击只发 key，宿主自己解析路径；UI 不接触文件路径）。
 - Web 本地验收（手工，未接线 CI）：`bash scripts/build-web-ui.sh` →
   `python3 scripts/serve-web.py --directory apps/app-web/dist-ui` →
   `node scripts/web-ui-smoke.cjs --url http://127.0.0.1:8090/ --verbose --evidence <dir>`

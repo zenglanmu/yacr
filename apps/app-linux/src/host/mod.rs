@@ -62,6 +62,7 @@ mod popup;
 mod postload;
 mod presenter;
 mod recent;
+mod recovery_host;
 mod release;
 mod surface;
 mod telemetry;
@@ -401,5 +402,13 @@ pub(crate) fn register_seams(
     cad_desktop_shell::state::configure_recent_host(
         shared,
         recent::AppRecentHost::new(app.clone()),
+    );
+    // Recovery snapshots (ADR-0037 D12): the store and the open funnel live on
+    // the same main-thread session, so the shared commands reach them through a
+    // second seam of exactly that shape. The key is the whole open request; this
+    // side resolves the path.
+    cad_desktop_shell::state::configure_recovery_host(
+        shared,
+        recovery_host::AppRecoveryHost::new(app.clone()),
     );
 }

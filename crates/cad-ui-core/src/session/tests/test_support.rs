@@ -40,7 +40,7 @@ pub(super) use cad_engine::protocol::{
 #[allow(unused_imports)]
 pub(super) use cad_engine::render::RenderSessionHandle;
 #[allow(unused_imports)]
-pub(super) use cad_host::{HostCore, HostOptions, HostPlatform, HostResources};
+pub(super) use cad_host::{HostCore, HostOptions, HostPlatform, HostResources, StartDocument};
 #[allow(unused_imports)]
 pub(super) use cad_platform::{
     ConfigLoad, ConfigStore, FileEvent, FilePurpose, FileTarget, HostCapabilities, PlatformFiles,
@@ -231,7 +231,7 @@ pub(super) fn options() -> HostOptions {
         headless: true,
         drawing: None,
         // tests keep the historical demo document
-        start_blank: false,
+        document_at_start: StartDocument::Demo,
         size: [800.0, 600.0],
     }
 }

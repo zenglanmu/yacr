@@ -954,7 +954,7 @@ manifest.open_revision` 且源字节仍在才同格式直通）、**L1** 已建�
 | 容器读写 | 已实现 | `cad-store-zip` 53 测试：manifest/哈希/长度/CRC、版本门禁（更高 `read`/`minor` 在解析其它 entry 之前拒绝）、foreign entry 原样保留、两次保存字节相同、超预算 abort |
 | 文件级往返 | 已实现 | `cad-store-zip/tests/document_fixed_point.rs` 7 项（含 layout 与 block 序列相同的碰撞回归）；`apps/app-linux/tests/ymodel_round_trip.rs` 走真实适配器 |
 | 原生打开/保存（Linux） | 已接线 | `cad-host` 8 项：安装文档、缺适配器拒绝、损坏归档不破坏当前文档、保存推进 `saved_revision`、外部修改拒绝、保存目的按源格式选择。保存前把上一版留在 `<name>.bak`（硬链接，失败回退复制；首存不建；配置写入不建），失败只告警不阻断——重命名本身仍是原子的 |
-| 自动恢复快照 | 已接线（仅 Linux 载体） | 脏文档**默认每 60 s**（选项里可改，0 = 关闭）把**同一份** `.ymodel` 写到 `<config>/recovery/<key>.ymodel`（+ 同名 `.json` 记录），从不触碰文档本身；成功保存后丢弃；安装文档时 `record.revision <= saved_revision` 判为过期并丢弃；只有严格更新才通过 `cad_status.error` 的一次性横幅告知（`recovery.available`，指向可用 `OPEN` 打开的恢复文件）。8 项 host 契约 + 5 项 Linux 存储测试；单快照上限 512 MiB。**边界**：`File > Revert` 仍未做；Web/Android 无恢复快照；真实崩溃恢复、横幅在真实窗口中的呈现 **NOT RUN** |
+| 自动恢复快照 | 已接线（仅 Linux 载体） | 脏文档**默认每 60 s**（选项里可改，0 = 关闭）把**同一份** `.ymodel` 写到 `<config>/recovery/<key>.ymodel`（+ 同名 `.json` 记录），从不触碰文档本身；成功保存后丢弃；安装文档时 `record.revision <= saved_revision` 判为过期并丢弃；只有严格更新才通过 `cad_status.error` 的一次性横幅告知（`recovery.available`，指向可用 `OPEN` 打开的恢复文件）。13 项 host 契约 + 8 项 Linux 存储 + 2 项 wire + 2 项命令接缝 + 7 项前端测试；单快照上限 512 MiB。**欢迎页**：无 `--open` 启动时进入无文档状态（`StartDocument::Empty`），恢复快照与最近文件一起列在开始页，点击按**key**打开（UI 不接触路径）。**边界**：`File > Revert` 仍未做；Web/Android 无恢复快照；真实崩溃恢复、横幅在真实窗口中的呈现 **NOT RUN** |
 | Windows / macOS / Android / Web | **NOT IMPLEMENTED** | 无归档适配器，显式 `unsupported-runtime: ymodel`（禁止静默改导出别的格式） |
 | L0 源字节直通 | **未实现** | `raw/source-*.bin` 尚未写入；需要连接器保留源字节 |
 | L1 不动点（DWG/DXF → ymodel → 原格式） | **未验证** | 需要真实 DWG 语料与连接器往返测试；`$INSUNITS=5` 的 100× 问题已修（见下） |
@@ -1115,6 +1115,8 @@ AutoCAD 的 0＝关闭拾取框/选择预览未建模，故拒绝 0)
 2026-10-26 补上**，见下方「颜色选择器」条。）
 
 **2026-11-08 补齐**：生产宿主默认启动**空白 `untitled` 图纸**（`HostOptions::start_blank=true`；不再加载 demo 几何），`--open`/位置参数仍优先；`CLOSE` 成为宿主自有命令，关闭当前唯一文档并回到开始页（无未保存提示——项目没有 dirty 模型；多文档/`CLOSEALL` 仍不支持）。开始页与 About 改为跨平台开源 CAD 介绍，取消标签页 `+`（多标签未实现）。
+
+**2026-11-18 更正**：生产载体改为 `HostOptions::document_at_start = StartDocument::Empty`——启动**没有文档**（与 `CLOSE` 后同一状态），用户看到的是开始页；`StartDocument::Blank` 保留「启动即空白 `untitled` 图」语义（需要文档的测试/夹具显式选择），`StartDocument::Demo` 仍是测试与 headless 夹具的合成 demo。配置了 `--open` 时启动打开照常运行。
 
 **2026-10-25 补齐（React 宿主，源码/单测证据；真机像素 NOT RUN）**：`NEW`/`SAVE`/`PLOT` 及其别名
 经宿主能力布尔（`canNew`/`canSave`/`canPlot`）真实准入，Linux 保存目标走 XDG portal `save_file`；

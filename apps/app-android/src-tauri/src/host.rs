@@ -66,7 +66,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::thread::ThreadId;
 use std::time::Instant;
 
-use cad_host::HostOptions;
+use cad_host::{HostOptions, StartDocument};
 use cad_platform::{ConfigStore, PlatformFiles};
 use cad_render_wgpu::{ProbeStageTimings, PulledState};
 use cad_ui_core::protocol::InputKind;
@@ -263,8 +263,9 @@ fn install_cad_env(shared: &Arc<Mutex<Shared>>) {
             images_dir: images_dir.or_else(|| launch.images_dir.clone()),
             headless: false,
             drawing: None,
-            // production starts on a real (empty) document
-            start_blank: true,
+            // production starts with no document: the user sees the start page
+            // until they choose NEW or a file (SAF/VIEW intent)
+            document_at_start: StartDocument::Empty,
             size: launch.size,
         },
     };

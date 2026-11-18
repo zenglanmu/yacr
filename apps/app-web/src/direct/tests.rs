@@ -47,7 +47,7 @@ use std::rc::Rc;
 
 use cad_app::{StandardView, ToolParameter, ToolValue};
 use cad_engine::render::{BackendPreference, RenderSessionHandle};
-use cad_host::{HostOptions, RequestClock};
+use cad_host::{HostOptions, RequestClock, StartDocument};
 use cad_ui_core::session::wire::{self, CadCommandAck};
 use cad_ui_core::session::{
     CadApiOutcome, CadApiSubmission, CadLayerWrite, CadLayers, CadSession, CadSettingKey,
@@ -86,7 +86,7 @@ fn session() -> CadSession {
         headless: false,
         drawing: None,
         // test fixture: the synthetic bytes are opened explicitly afterwards
-        start_blank: false,
+        document_at_start: StartDocument::Demo,
         size: [800.0, 600.0],
     };
     // The carrier's surface must be reported before the session is built: the open

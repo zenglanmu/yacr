@@ -47,7 +47,7 @@ use cad_app::render_scene::{model_scene_merge_stats, SceneAssemblyStats};
 use cad_domain::{Point3, TaskStamp};
 use cad_engine::protocol::{EngineClient, EngineRequest};
 use cad_engine::render::RenderSessionHandle;
-use cad_host::{HostCore, HostOptions, HostPlatform, UnsupportedResources};
+use cad_host::{HostCore, HostOptions, HostPlatform, StartDocument, UnsupportedResources};
 use cad_platform::{
     ConfigLoad, ConfigStore, FileEvent, FileTarget, HostCapabilities, PlatformFiles, SavePurpose,
     SurfaceMetrics, SurfaceSource,
@@ -128,7 +128,7 @@ fn build_core() -> HostCore {
         headless: false,
         drawing: None,
         // fixture: the performance baseline keeps the historical demo document
-        start_blank: false,
+        document_at_start: StartDocument::Demo,
         size: [1280.0, 800.0],
     };
     HostCore::new(options, platform, RenderSessionHandle::default()).expect("host core")

@@ -158,7 +158,7 @@ mod tests {
     use std::rc::Rc;
 
     use cad_engine::render::{BackendPreference, RenderSessionHandle};
-    use cad_host::{HostOptions, RequestClock};
+    use cad_host::{HostOptions, RequestClock, StartDocument};
     use cad_platform::HostCapabilities;
 
     use super::*;
@@ -196,7 +196,7 @@ mod tests {
                 headless: false,
                 drawing: None,
                 // historical demo-document fixture (not a production host)
-                start_blank: false,
+                document_at_start: StartDocument::Demo,
                 size: [800.0, 600.0],
             },
             platform,

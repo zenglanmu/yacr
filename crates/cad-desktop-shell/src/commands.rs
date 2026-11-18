@@ -35,7 +35,8 @@ use std::sync::{Arc, Mutex};
 
 use cad_ui_core::protocol::{InputKind, ProbeInput, ProbeInputAck, ProbeStatus};
 use cad_ui_core::session::{
-    wire, CadFonts, CadLayers, CadRecentFiles, CadSettings, HostProfile, WireStatus,
+    wire, CadFonts, CadLayers, CadRecentFiles, CadRecoveryFiles, CadSettings, HostProfile,
+    WireStatus,
 };
 use cad_ui_core::shell::{modal_gate_open, queue_cad_input, POPUP_MODAL_OPEN};
 
@@ -299,6 +300,68 @@ pub fn cad_open_recent_impl(
     Ok(CadCommandAck::accepted())
 }
 
+/// `cad_recovery_files` command: the recovery snapshots this carrier can open.
+///
+/// A host file capability like the recent list, served by the host's
+/// [`crate::state::ShellRecoveryHost`] seam because the store lives on the
+/// `!Send` owner-thread session. A host without the seam refuses with the stable
+/// marker (`unsupported-runtime: cad_recovery_files`); it never answers an empty
+/// list that would read as "nothing to recover".
+#[tauri::command]
+pub fn cad_recovery_files(
+    shared: tauri::State<'_, ProbeShared>,
+) -> Result<CadRecoveryFiles, String> {
+    cad_recovery_files_impl(&shared.0)
+}
+
+/// Command body of [`cad_recovery_files`], without the Tauri state wrapper.
+pub fn cad_recovery_files_impl(shared: &Arc<Mutex<Shared>>) -> Result<CadRecoveryFiles, String> {
+    // Clone the seam and release the shell lock before the (possibly blocking)
+    // main-thread hop, per the `Shared` lock-order contract.
+    let host = lock(shared).recovery_host.clone();
+    match host {
+        Some(host) => host.list(),
+        None => Err(format!(
+            "unsupported-runtime: {}",
+            cad_ui_core::session::RECOVERY_FILES_COMMAND
+        )),
+    }
+}
+
+/// `cad_open_recovery` command: start opening one listed recovery snapshot.
+///
+/// The argument is exactly `{ key }` — the store's hex key, never a path. The
+/// host validates it and resolves the location from its own store, so a crafted
+/// key is refused rather than opened; a real failure (missing archive) rejects
+/// unchanged. Resolving means the platform open was **started**; the document
+/// outcome still arrives through `cad_status`.
+#[tauri::command]
+pub fn cad_open_recovery(
+    shared: tauri::State<'_, ProbeShared>,
+    key: String,
+) -> Result<CadCommandAck, String> {
+    cad_open_recovery_impl(&shared.0, &key)
+}
+
+/// Command body of [`cad_open_recovery`], without the Tauri state wrapper.
+pub fn cad_open_recovery_impl(
+    shared: &Arc<Mutex<Shared>>,
+    key: &str,
+) -> Result<CadCommandAck, String> {
+    let host = lock(shared).recovery_host.clone();
+    let Some(host) = host else {
+        return Err(format!(
+            "unsupported-runtime: {}",
+            cad_ui_core::session::OPEN_RECOVERY_COMMAND
+        ));
+    };
+    if key.trim().is_empty() {
+        return Err("recovery.invalid_payload: the recovery row has no key to open".to_string());
+    }
+    host.open_recovery(key)?;
+    Ok(CadCommandAck::accepted())
+}
+
 /// Command body of `cad_create_layer`, without the Tauri state wrapper.
 pub fn cad_create_layer_impl(
     shared: &Arc<Mutex<Shared>>,
@@ -524,3 +587,107 @@ pub fn probe_input_impl(shared: &Arc<Mutex<Shared>>, input: ProbeInput) -> Probe
 // The shared wrappers, `COMMAND_NAMES` and `register_commands` are generated
 // from the one registry table. This is the only desktop emitter invocation.
 cad_ui_core::cad_wire_registry!(emit_tauri_wire_registry);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cad_ui_core::session::{CadRecoveryFiles, RecoveryEntry};
+    use std::sync::Mutex;
+
+    fn shared() -> Arc<Mutex<Shared>> {
+        Arc::new(Mutex::new(Shared::new(
+            cad_ui_core::launch::LaunchOptions::default(),
+        )))
+    }
+
+    /// A seam that answers one empty supported list and records the keys it is
+    /// asked to open.
+    #[derive(Default)]
+    struct RecordingRecovery {
+        opened: Mutex<Vec<String>>,
+    }
+
+    impl crate::state::ShellRecoveryHost for RecordingRecovery {
+        fn list(&self) -> Result<CadRecoveryFiles, String> {
+            Ok(CadRecoveryFiles::supported(Vec::new()))
+        }
+
+        fn open_recovery(&self, key: &str) -> Result<(), String> {
+            self.opened.lock().unwrap().push(key.to_string());
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn the_recovery_commands_refuse_by_name_without_a_seam() {
+        // A host with no seam has no recovery capability. Both commands keep the
+        // stable marker instead of an empty list / a silent acceptance.
+        let shared = shared();
+        assert_eq!(
+            cad_recovery_files_impl(&shared).expect_err("no seam must refuse"),
+            "unsupported-runtime: cad_recovery_files"
+        );
+        for key in ["0123456789abcdef", ""] {
+            assert_eq!(
+                cad_open_recovery_impl(&shared, key).expect_err("no seam must refuse"),
+                "unsupported-runtime: cad_open_recovery",
+                "{key:?}"
+            );
+        }
+        // The names come from the shared wire module, so the refusal and the
+        // registered command can never drift apart.
+        assert_eq!(
+            cad_ui_core::session::RECOVERY_FILES_COMMAND,
+            "cad_recovery_files"
+        );
+        assert_eq!(
+            cad_ui_core::session::OPEN_RECOVERY_COMMAND,
+            "cad_open_recovery"
+        );
+    }
+
+    #[test]
+    fn a_configured_recovery_seam_serves_the_list_and_the_key_only() {
+        let shared = shared();
+        let seam = Arc::new(RecordingRecovery::default());
+        crate::state::configure_recovery_host(&shared, seam.clone());
+
+        let answer = cad_recovery_files_impl(&shared).expect("the seam answers");
+        assert_eq!(
+            answer,
+            CadRecoveryFiles::supported(Vec::new()),
+            "empty is the seam's real answer"
+        );
+
+        // An empty key is refused before the seam is called.
+        let error = cad_open_recovery_impl(&shared, "   ").expect_err("empty key");
+        assert!(error.starts_with("recovery.invalid_payload:"), "{error}");
+        assert!(seam.opened.lock().unwrap().is_empty());
+
+        let ack = cad_open_recovery_impl(&shared, "0123456789abcdef").expect("admitted");
+        assert!(ack.accepted, "admission only; the open is in flight");
+        assert_eq!(
+            seam.opened.lock().unwrap().clone(),
+            vec!["0123456789abcdef".to_string()],
+            "the seam receives the key, not a path"
+        );
+
+        // Pin the row shape the seam returns so the UI parser's contract is
+        // explicit here too.
+        let row = RecoveryEntry {
+            key: "0123456789abcdef".to_string(),
+            display_name: None,
+            revision: 3,
+            saved_at_ms: 0,
+        };
+        assert_eq!(
+            serde_json::to_value(&row).expect("json"),
+            serde_json::json!({
+                "key": "0123456789abcdef",
+                "displayName": null,
+                "revision": 3,
+                "savedAtMs": 0,
+            })
+        );
+    }
+}

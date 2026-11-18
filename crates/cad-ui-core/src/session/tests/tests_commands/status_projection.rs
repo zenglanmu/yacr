@@ -194,6 +194,43 @@ fn blank_status_reports_no_document_capabilities() {
 }
 
 #[test]
+fn empty_start_projects_the_start_page() {
+    // `blank_status_reports_no_document_capabilities` proves the pure
+    // assembler's no-document block; this proves a session *built* with
+    // `StartDocument::Empty` really is in that state — no document was ever
+    // published, not one that was closed afterwards.
+    let mut host_platform = platform(Rc::new(FakeFiles {
+        events: RefCell::new(Vec::new()),
+    }));
+    host_platform.capabilities = advertised_capabilities();
+    let mut opts = options();
+    opts.headless = false;
+    opts.document_at_start = StartDocument::Empty;
+    let session = CadSession::new(opts, host_platform, RenderSessionHandle::default())
+        .expect("session builds");
+
+    let status = session.snapshot(None, None, 0);
+    assert_eq!(status.document_label, None, "the user sees the start page");
+    assert_eq!(status.entity_count, None);
+    assert_eq!(status.camera, None, "a document-less start has no camera");
+    assert!(!status.can_fit);
+    assert!(!status.can_save, "saving needs an authoritative document");
+    assert!(!status.can_plot, "plotting needs an authoritative document");
+    assert!(status.can_open, "OPEN is available from the start page");
+    assert!(status.can_new, "NEW needs no source file");
+
+    // NEW is the way off the start page, and it installs the real untitled
+    // document (`StartDocument::Blank` truth) — never a demo drawing.
+    session.command("NEW").expect("NEW is admitted");
+    let after = session.snapshot(None, None, 0);
+    assert!(
+        after.document_label.is_some(),
+        "NEW installs an untitled document"
+    );
+    assert!(after.can_fit && after.can_save && after.can_plot);
+}
+
+#[test]
 fn close_is_admitted_and_projects_the_no_document_block() {
     // Vocabulary: CLOSE is a canonical, advertised selector like OPEN/NEW.
     assert_eq!(normalize_command("CLOSE"), Some(CommandId::CloseDrawing));

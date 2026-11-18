@@ -74,11 +74,11 @@ fn xref_options_for(_target: &FileTarget) -> Option<Arc<XrefOptions>> {
 impl HostCore {
     /// Open the configured `--open` drawing at startup (or fit the demo).
     ///
-    /// With no configured drawing there is nothing to frame: a blank production
-    /// document (`options.start_blank`) is already installed by
-    /// [`HostCore::new`] and has no extent, so no `fit()` is attempted; the
-    /// historical demo path keeps its framing. Uses the already-owned render
-    /// session; no UI bridge is required.
+    /// With no configured drawing there is nothing to open: an empty start
+    /// ([`StartDocument::Empty`]) has no document and a blank production
+    /// document ([`StartDocument::Blank`]) has no extent, so neither attempts a
+    /// `fit()`; only the historical demo path keeps its framing. Uses the
+    /// already-owned render session; no UI bridge is required.
     pub fn open_configured_drawing(&self) -> CadResult<()> {
         self.metrics()?;
         if let Some(path) = &self.options.drawing {
@@ -90,8 +90,9 @@ impl HostCore {
                 return Err(error);
             }
             self.drain_files()?;
-        } else if !self.options.start_blank {
-            // Historical demo framing only: a blank document has no extent.
+        } else if self.options.document_at_start == StartDocument::Demo {
+            // Historical demo framing only: an empty start has no document and a
+            // blank document has no extent.
             self.controller.borrow_mut().fit()?;
         }
         Ok(())

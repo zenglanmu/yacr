@@ -34,8 +34,8 @@ use cad_ui_core::popup::PopupAck;
 use cad_ui_core::protocol::InputKind;
 use cad_ui_core::session::events::EventBus;
 use cad_ui_core::session::{
-    CadFonts, CadLayerWrite, CadLayers, CadRecentFiles, CadSettingKey, CadSettingValue,
-    CadSettings, CadStatus, OrbitDelta, QueueFamily, QueueReads, QueueSink,
+    CadFonts, CadLayerWrite, CadLayers, CadRecentFiles, CadRecoveryFiles, CadSettingKey,
+    CadSettingValue, CadSettings, CadStatus, OrbitDelta, QueueFamily, QueueReads, QueueSink,
 };
 use cad_ui_core::shell::{modal_gate_open, ShellState};
 
@@ -111,6 +111,31 @@ pub trait ShellRecentHost: Send + Sync {
     /// is the caller's row label; the host revalidates the handle against its
     /// own list and uses the stored name.
     fn open_recent(&self, opaque: &str, display_name: &str) -> Result<(), String>;
+}
+
+/// The platform side of the recovery-snapshot commands.
+///
+/// A recovery snapshot is a carrier-private file (ADR-0037 D12), so the same
+/// shape as [`ShellRecentHost`]: the store and the open live on the `!Send`
+/// owner-thread session, and the shared command layer can only reach them through
+/// a seam. The list is a **host file capability**, not document data; a host that
+/// installs no seam refuses both commands by name
+/// (`unsupported-runtime: cad_recovery_files` / `cad_open_recovery`), never with
+/// an empty list that would look like "nothing to recover".
+///
+/// `open_recovery` takes the store's hex **key** only — the seam resolves the
+/// path on the session thread — so no filesystem path ever crosses this boundary
+/// in either direction.
+///
+/// Implementations must not hold their own lock while waiting on the session
+/// thread and must not lock [`Shared`] while holding a lock of their own; the
+/// commands clone the seam out of `Shared` and release the lock before calling.
+pub trait ShellRecoveryHost: Send + Sync {
+    /// Every snapshot the carrier offers, newest first (possibly empty).
+    fn list(&self) -> Result<CadRecoveryFiles, String>;
+
+    /// Start opening the snapshot filed under `key` (hex, validated by the host).
+    fn open_recovery(&self, key: &str) -> Result<(), String>;
 }
 
 /// State shared with the IPC commands: deliberately **GPU-free and
@@ -254,6 +279,12 @@ pub struct Shared {
     /// (`unsupported-runtime: cad_recent_files`) instead of answering an empty
     /// list that would look like "nothing was ever opened".
     pub recent_host: Option<Arc<dyn ShellRecentHost>>,
+    /// The platform recovery-snapshot seam (see [`ShellRecoveryHost`]). `None`
+    /// before the host registers one and permanently on a carrier with no durable
+    /// private directory; the two commands then refuse by name
+    /// (`unsupported-runtime: cad_recovery_files`) instead of an empty list that
+    /// would look like "nothing to recover".
+    pub recovery_host: Option<Arc<dyn ShellRecoveryHost>>,
     /// The WebView vendor-decoding pass (pending → records → apply). Host
     /// transport state, not document state: it carries a token and bounded
     /// diagnostics, never geometry or a second `cad-db`.
@@ -313,6 +344,7 @@ impl Shared {
             popup_host: None,
             release_opener: None,
             recent_host: None,
+            recovery_host: None,
             vendor: crate::vendor::VendorStore::default(),
             vendor_pending_representations: None,
             vendor_representations_clear: false,
@@ -447,6 +479,15 @@ pub fn configure_release_opener(
 /// keeps the named refusal instead of an empty supported list.
 pub fn configure_recent_host(shared: &Arc<Mutex<Shared>>, host: Arc<dyn ShellRecentHost>) {
     lock(shared).recent_host = Some(host);
+}
+
+/// Install the recovery-snapshot platform seam (see [`ShellRecoveryHost`]).
+///
+/// Same shape as [`configure_recent_host`]: a host whose session owns a recovery
+/// store calls this once during startup; every other carrier keeps the named
+/// refusal instead of a supported-but-empty list.
+pub fn configure_recovery_host(shared: &Arc<Mutex<Shared>>, host: Arc<dyn ShellRecoveryHost>) {
+    lock(shared).recovery_host = Some(host);
 }
 
 /// Lock [`Shared`], recovering the guard from a poisoned mutex.

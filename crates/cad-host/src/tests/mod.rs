@@ -202,7 +202,7 @@ fn options() -> HostOptions {
         headless: false,
         drawing: None,
         // tests keep the historical demo document
-        start_blank: false,
+        document_at_start: StartDocument::Demo,
         size: [800.0, 600.0],
     }
 }

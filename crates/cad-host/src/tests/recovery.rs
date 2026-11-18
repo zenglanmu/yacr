@@ -39,6 +39,8 @@ struct FakePersistence {
     saved: Mutex<Vec<SavedSnapshot>>,
     discarded: Mutex<Vec<String>>,
     loaded: Mutex<Option<RecoverySnapshot>>,
+    /// What `list_recovery` answers.
+    listed: Mutex<Vec<RecoveryRecord>>,
     /// The key the last `load_recovery` was asked for.
     loaded_for: Mutex<Option<String>>,
     /// When set, every `save_recovery` refuses with this reason.
@@ -77,6 +79,10 @@ impl Persistence for FakePersistence {
 
     fn recovery_hint(&self, _key: &RecoveryKey) -> Option<String> {
         self.hint.clone()
+    }
+
+    fn list_recovery(&self) -> CadResult<Vec<RecoveryRecord>> {
+        Ok(self.listed.lock().unwrap().clone())
     }
 
     fn discard_recovery(&self, key: &RecoveryKey) -> CadResult<()> {
@@ -144,13 +150,16 @@ struct RecoveryFiles {
     disk: RefCell<BTreeMap<String, Vec<u8>>>,
     written: RefCell<Vec<String>>,
     source: RefCell<Option<FileTarget>>,
+    /// The target the last `begin_open_target` saw.
+    opened: RefCell<Option<FileTarget>>,
 }
 
 impl PlatformFiles for RecoveryFiles {
     fn begin_open(&self) -> CadResult<()> {
         Ok(())
     }
-    fn begin_open_target(&self, _target: &FileTarget) -> CadResult<()> {
+    fn begin_open_target(&self, target: &FileTarget) -> CadResult<()> {
+        *self.opened.borrow_mut() = Some(target.clone());
         Ok(())
     }
     fn begin_save(&self, purpose: SavePurpose, default_name: &str) -> CadResult<()> {
@@ -560,6 +569,91 @@ fn a_refusing_store_is_reported_once_per_document() {
         key, "command.completed",
         "a latched failure does not rewrite the status every interval"
     );
+}
+
+/// A record the fake store lists, with a caller-chosen key/time.
+fn listed_record(key: &RecoveryKey, revision: Revision, saved_at_ms: u64) -> RecoveryRecord {
+    RecoveryRecord {
+        key: key.as_str().to_string(),
+        document_uuid: Some("doc-uuid-1".to_string()),
+        revision,
+        display_name: Some("plan.ymodel".to_string()),
+        saved_at_ms,
+    }
+}
+
+#[test]
+fn the_snapshot_list_is_the_store_list_in_its_own_order() {
+    let files = Rc::new(RecoveryFiles::default());
+    let (core, _now_ms) = recovery_core(files);
+    let older = RecoveryKey::from_hex("aaaa000000000001").expect("hex key");
+    let newer = RecoveryKey::from_hex("bbbb000000000002").expect("hex key");
+    let newest_record = listed_record(&newer, Revision(5), 2_000);
+    let older_record = listed_record(&older, Revision(4), 1_000);
+    let store = FakePersistence::ready(None);
+    *store.listed.lock().unwrap() = vec![newest_record.clone(), older_record.clone()];
+    core.set_persistence(Some(store));
+
+    assert_eq!(
+        core.list_recovery().expect("the store answers"),
+        vec![newest_record, older_record],
+        "the host wraps the store's list; it neither reorders nor invents a row"
+    );
+
+    // A carrier that installed no store has nothing to list — a true empty
+    // answer, not a refusal.
+    core.set_persistence(None);
+    assert_eq!(
+        core.list_recovery().expect("empty is not an error"),
+        Vec::new()
+    );
+}
+
+#[test]
+fn opening_a_recovery_refuses_an_unknown_or_non_hex_key() {
+    let files = Rc::new(RecoveryFiles::default());
+    let (core, _now_ms) = recovery_core(files.clone());
+    let key = RecoveryKey::from_hex("0123456789abcdef").expect("hex key");
+    let store = FakePersistence::ready(None);
+    *store.listed.lock().unwrap() = vec![listed_record(&key, Revision(2), 5)];
+    core.set_persistence(Some(store));
+
+    // A path is never accepted: only a validated hex key can be resolved.
+    let error = core
+        .open_recovery("../escape")
+        .expect_err("a non-hex key is refused before any path is built");
+    assert!(
+        error.to_string().contains("recovery.invalid_key"),
+        "{error}"
+    );
+    let error = core
+        .open_recovery("ffffffffffffffff")
+        .expect_err("a hex key outside the store's list is refused");
+    assert!(error.to_string().contains("recovery.unknown"), "{error}");
+    assert!(
+        files.opened.borrow().is_none(),
+        "neither refusal reached the platform"
+    );
+}
+
+#[test]
+fn opening_a_listed_recovery_starts_the_open_at_the_store_hint() {
+    let files = Rc::new(RecoveryFiles::default());
+    let (core, _now_ms) = recovery_core(files.clone());
+    let key = RecoveryKey::from_hex("0123456789abcdef").expect("hex key");
+    let store = FakePersistence::ready(None);
+    *store.listed.lock().unwrap() = vec![listed_record(&key, Revision(7), 9)];
+    core.set_persistence(Some(store));
+
+    core.open_recovery(key.as_str())
+        .expect("the snapshot opens");
+
+    assert_eq!(
+        files.opened.borrow().as_ref(),
+        Some(&FileTarget::from_path(RECOVERY_HINT)),
+        "the path is the store's hint, never caller input"
+    );
+    assert!(core.open_pending.get(), "the platform read is in flight");
 }
 
 /// `ui.recovery.intervalSeconds = 0` writes nothing even while dirty, and turns

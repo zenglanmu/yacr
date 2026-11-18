@@ -16,7 +16,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use cad_host::HostOptions;
+use cad_host::{HostOptions, StartDocument};
 use cad_platform::ConfigStore;
 use cad_ui_core::i18n::{host_locale_script, host_locale_tag};
 use cad_ui_core::unsupported_status;
@@ -178,8 +178,9 @@ pub fn init(
                         images_dir: launch.images_dir.clone(),
                         headless: false,
                         drawing: launch.drawing.clone(),
-                        // production starts on a real (empty) document
-                        start_blank: true,
+                        // production starts with no document: the user sees the
+                        // start page until they choose NEW or OPEN
+                        document_at_start: StartDocument::Empty,
                         size: launch.size,
                     },
                 };

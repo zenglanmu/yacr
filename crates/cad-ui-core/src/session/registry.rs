@@ -32,7 +32,8 @@
 //!
 //! * **groups** — `shared` (served by both transports) or `tauri_only` (desktop
 //!   only: `cad_status`, `probe_status`, `probe_input`, `cad_recent_files`,
-//!   `cad_open_recent`); `wasm_export` marks a row
+//!   `cad_open_recent`, `cad_recovery_files`, `cad_open_recovery`); `wasm_export`
+//!   marks a row
 //!   that is *also* a direct wasm export (`probe_input`, `cad_status`). The wasm
 //!   export list is informational for the generated name sets; those functions are
 //!   declared next to the wasm binding, because only that crate knows the export
@@ -52,7 +53,7 @@
 //!   exactly like a bare return, and the reject path is unreachable for a row
 //!   whose body cannot fail.
 //! * **body** — the `wire::*` call. This is the only place a shared wire command
-//!   body is written for either transport. The five `tauri_only` rows carry an
+//!   body is written for either transport. The `tauri_only` rows carry an
 //!   empty body: their implementations read host state (`Shared`, the probe
 //!   tracker, the file capability) that this crate deliberately does not name, so
 //!   those wrappers stay in the desktop emitter.
@@ -91,6 +92,12 @@ macro_rules! cad_wire_registry {
             // desktop emitter because they read the host's own file capability.
             @row(tauri_only, host, NoArgs, cad_recent_files, { }, $crate::session::CadRecentFiles, { })
             @row(tauri_only, host, OpenRecentArgs, cad_open_recent, { arg(req, opaque, ::std::string::String) arg(req, display_name, ::std::string::String) }, $crate::session::wire::CadCommandAck, { })
+            // The recovery snapshots on the start page. Same family: a host file
+            // capability, served by the same desktop seam style. The open carries
+            // the store's hex **key** only — never a path — and a carrier with no
+            // durable private directory refuses both by name.
+            @row(tauri_only, host, NoArgs, cad_recovery_files, { }, $crate::session::CadRecoveryFiles, { })
+            @row(tauri_only, host, OpenRecoveryArgs, cad_open_recovery, { arg(req, key, ::std::string::String) }, $crate::session::wire::CadCommandAck, { })
             @row(shared, pure, NoArgs, cad_commands, { }, ::std::vec::Vec<&'static str>, { ::std::result::Result::Ok($crate::session::wire::commands()) })
             @row(shared, pure, NoArgs, cad_app_version, { }, ::std::string::String, { ::std::result::Result::Ok($crate::app_version().to_string()) })
             @row(shared, pure, NoArgs, cad_api_status, { }, $crate::session::CadApiStatus, { $crate::session::wire::api_status() })

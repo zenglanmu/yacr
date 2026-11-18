@@ -186,6 +186,73 @@ impl Persistence for FsRecoveryStore {
         }
         Ok(())
     }
+
+    fn list_recovery(&self) -> CadResult<Vec<RecoveryRecord>> {
+        let entries = match std::fs::read_dir(&self.dir) {
+            Ok(entries) => entries,
+            // Nothing was ever written here: there is nothing to list. (The
+            // directory is created lazily by the first `save_recovery`.)
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            // A directory that exists but cannot be read is an error, never an
+            // empty list: "there may be work that cannot be seen" is a different
+            // fact from "nothing to recover".
+            Err(error) => {
+                return Err(CadError::Unsupported(format!(
+                    "{RECOVERY_STORE_PREFIX}.list_unreadable: {}: {error}",
+                    self.dir.display()
+                )))
+            }
+        };
+        let mut records = Vec::new();
+        for entry in entries {
+            let path = entry
+                .map_err(|error| {
+                    CadError::Unsupported(format!(
+                        "{RECOVERY_STORE_PREFIX}.list_unreadable: {}: {error}",
+                        self.dir.display()
+                    ))
+                })?
+                .path();
+            if path.extension().and_then(std::ffi::OsStr::to_str) != Some("json") {
+                continue;
+            }
+            // One malformed/unreadable record file is skipped, not fatal: a
+            // hostile or torn neighbour must not hide the *other* snapshots. It
+            // is also not listed, because only a record this build can decode
+            // names something openable.
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let Ok(record) = decode_record(&text) else {
+                continue;
+            };
+            // The body must be the key the file is named under (the same rule
+            // `load_recovery` enforces); a mismatched record describes another
+            // document and is not offered.
+            let Some(key) = RecoveryKey::from_hex(&record.key) else {
+                continue;
+            };
+            if path.file_stem().and_then(std::ffi::OsStr::to_str) != Some(key.as_str()) {
+                continue;
+            }
+            // A record without its archive is a click that cannot succeed, so it
+            // is not an entry. (`load_recovery` treats the same pair as an error;
+            // the list simply has nothing to offer.)
+            if !self.bytes_path(&key).is_file() {
+                continue;
+            }
+            records.push(record);
+        }
+        // Newest first, then by key so equal/absent timestamps are stable and the
+        // order does not depend on the directory's iteration order.
+        records.sort_by(|left, right| {
+            right
+                .saved_at_ms
+                .cmp(&left.saved_at_ms)
+                .then_with(|| left.key.cmp(&right.key))
+        });
+        Ok(records)
+    }
 }
 
 /// Serialize a record as a strict JSON object.
@@ -403,6 +470,66 @@ mod tests {
         );
         // Nothing was written outside the directory by any of the above.
         assert!(!temp.0.join("escape.ymodel").exists());
+    }
+
+    #[test]
+    fn snapshots_are_listed_newest_first() {
+        let temp = TempDir::new("list-order");
+        let store = FsRecoveryStore::new(temp.0.join("recovery"));
+        let older = RecoveryKey::from_hex("aaaa000000000001").expect("hex key");
+        let newer = RecoveryKey::from_hex("bbbb000000000002").expect("hex key");
+        let mut older_record = record(&older, 3);
+        older_record.saved_at_ms = 1_000;
+        let mut newer_record = record(&newer, 4);
+        newer_record.saved_at_ms = 2_000;
+
+        store
+            .save_recovery(&older_record, b"older bytes")
+            .expect("written");
+        store
+            .save_recovery(&newer_record, b"newer bytes")
+            .expect("written");
+
+        let listed = store.list_recovery().expect("the directory is readable");
+        assert_eq!(
+            listed,
+            vec![newer_record, older_record],
+            "newest saved_at_ms first"
+        );
+    }
+
+    #[test]
+    fn a_record_without_its_archive_is_not_listed() {
+        let temp = TempDir::new("list-missing-bytes");
+        let store = FsRecoveryStore::new(temp.0.join("recovery"));
+        let key = key();
+        store
+            .save_recovery(&record(&key, 5), b"bytes")
+            .expect("written");
+        std::fs::remove_file(store.directory().join("0123456789abcdef.ymodel"))
+            .expect("remove the bytes, keep the record");
+
+        assert_eq!(
+            store.list_recovery().expect("readable"),
+            Vec::new(),
+            "a snapshot that cannot be opened is not offered as a row"
+        );
+    }
+
+    #[test]
+    fn a_malformed_record_is_skipped_without_failing_the_list() {
+        let temp = TempDir::new("list-malformed");
+        let directory = temp.0.join("recovery");
+        let store = FsRecoveryStore::new(directory.clone());
+        let key = key();
+        store
+            .save_recovery(&record(&key, 6), b"bytes")
+            .expect("written");
+        // A torn/foreign record beside a good one must not hide it.
+        std::fs::write(directory.join("deadbeef.json"), b"{ not json").expect("malformed record");
+
+        let listed = store.list_recovery().expect("one bad record is not fatal");
+        assert_eq!(listed, vec![record(&key, 6)], "only the decodable record");
     }
 
     #[test]

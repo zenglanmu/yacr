@@ -6,6 +6,34 @@ use cad_platform::DocumentArchive;
 use crate::Instant;
 use cad_app::grips::GripId;
 
+/// Which document a host installs when the session is first built.
+///
+/// This only describes the window **before** the first open: a configured
+/// `--open` drawing replaces the selected starting state in
+/// [`HostCore::open_configured_drawing`], whatever the variant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartDocument {
+    /// No document at all — exactly the state `CLOSE` leaves behind.
+    ///
+    /// The user sees the start page (NEW/OPEN), not a CAD drawing: the canvas
+    /// has no document, the status label is `None`, and the render side was
+    /// never given a drawing. Production carriers use this so an unconfigured
+    /// launch cannot present a freshly made empty drawing as if the user had
+    /// asked for it.
+    Empty,
+    /// A real, empty `untitled` drawing (layer `0`, no geometry, default
+    /// plan-view camera).
+    ///
+    /// The user sees an empty editable model space instead of the start page.
+    Blank,
+    /// The synthetic demo drawing (`yacr-demo`) with built-in geometry.
+    ///
+    /// The user sees demo geometry. Tests, perf baselines and headless fixtures
+    /// keep this so their expectations do not move; it is never a production
+    /// default.
+    Demo,
+}
+
 /// Platform-general host options.
 ///
 /// A host-specific options type (for example `LinuxOptions`, which also carries
@@ -21,14 +49,15 @@ pub struct HostOptions {
     pub headless: bool,
     /// A drawing to open at startup (`--open`) or the headless input.
     pub drawing: Option<PathBuf>,
-    /// Start on an empty `untitled` drawing instead of the synthetic demo.
+    /// The document state the session starts in (see [`StartDocument`]).
     ///
-    /// Production hosts set this to `true`: a new session must begin on a real
-    /// (empty) document, not the built-in demo geometry. Omitting/false keeps
-    /// the historical demo-document behaviour used by tests and headless
-    /// fixtures, so their expectations do not move. A configured `drawing`
-    /// replaces the initial document either way.
-    pub start_blank: bool,
+    /// Production carriers use [`StartDocument::Empty`]: opening a session must
+    /// not fabricate a document the user did not ask for, so the start page is
+    /// what they see. [`StartDocument::Blank`] installs a real empty `untitled`
+    /// drawing and [`StartDocument::Demo`] keeps the historical synthetic demo
+    /// used by tests and headless fixtures. A configured `drawing` replaces the
+    /// starting document in every case.
+    pub document_at_start: StartDocument,
     pub size: [f64; 2],
 }
 
@@ -667,14 +696,15 @@ impl HostCore {
     }
 }
 
-/// The initial controller selected by [`HostOptions::start_blank`].
+/// The initial controller selected by [`HostOptions::document_at_start`].
 ///
-/// Production hosts start on a real empty `untitled` drawing; tests and
-/// headless fixtures keep the historical synthetic demo.
+/// Production hosts start with no document at all (the start page); tests and
+/// headless fixtures keep the historical synthetic demo, and `Blank` is the
+/// explicit "real empty untitled drawing" option.
 pub(crate) fn initial_controller(options: &HostOptions) -> CadResult<HostController> {
-    if options.start_blank {
-        HostController::with_blank_document(options.size)
-    } else {
-        HostController::with_demo_document(options.size)
+    match options.document_at_start {
+        StartDocument::Empty => HostController::with_no_document(options.size),
+        StartDocument::Blank => HostController::with_blank_document(options.size),
+        StartDocument::Demo => HostController::with_demo_document(options.size),
     }
 }

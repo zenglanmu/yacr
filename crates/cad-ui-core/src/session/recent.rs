@@ -14,6 +14,8 @@
 
 use cad_host::RecentEntry;
 
+use super::CadSession;
+
 /// The recent-list command name (also the browser adapter's refusal subject).
 pub const RECENT_FILES_COMMAND: &str = "cad_recent_files";
 
@@ -53,5 +55,27 @@ impl CadRecentFiles {
             entries: Vec::new(),
             reason: Some(format!("unsupported-runtime: {command}")),
         }
+    }
+}
+
+impl CadSession {
+    /// The host's real recent-drawings list (newest first, possibly empty).
+    ///
+    /// Pure read of the durable list the host loaded/recorded; it never touches
+    /// the drawing, the revision or the history.
+    pub fn recent_files(&self) -> CadRecentFiles {
+        CadRecentFiles::supported(self.core.recent_entries())
+    }
+
+    /// Reopen one recorded recent drawing by its opaque handle.
+    ///
+    /// The host validates the handle against its own list (an unknown/crafted
+    /// handle is refused, not opened), then starts the ordinary
+    /// `begin_open_target` funnel; a real platform failure (missing file, revoked
+    /// grant) is returned unchanged. The document is not touched here.
+    pub fn open_recent(&self, opaque: &str, display_name: &str) -> Result<(), String> {
+        self.core
+            .open_recent(opaque, display_name)
+            .map_err(|error| super::cad_error_text(&error))
     }
 }

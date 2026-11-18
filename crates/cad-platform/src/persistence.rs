@@ -125,6 +125,22 @@ pub trait Persistence {
     /// Called after a successful save and after an explicit discard, never
     /// speculatively.
     fn discard_recovery(&self, key: &RecoveryKey) -> CadResult<()>;
+
+    /// Every snapshot this carrier can offer, newest first (possibly empty).
+    ///
+    /// The default is `Ok(Vec::new())` rather than a refusal, unlike the other
+    /// methods: the caller is a **list** offered on the start page, and "this
+    /// carrier has no snapshots" is a true answer, not a missing capability. A
+    /// carrier whose store lives somewhere (a filesystem directory) overrides it;
+    /// [`NoRecovery`] therefore needs no implementation.
+    ///
+    /// An entry that cannot be opened must **not** appear here: a row the user
+    /// could click and only then learn it is broken is worse than no row. A store
+    /// that can name the snapshots but not read the whole directory is an error,
+    /// not an empty list (`Ok(empty)` would mean "nothing to recover").
+    fn list_recovery(&self) -> CadResult<Vec<RecoveryRecord>> {
+        Ok(Vec::new())
+    }
 }
 
 /// A [`Persistence`] for a carrier with no durable private directory.
@@ -181,5 +197,19 @@ mod tests {
         assert!(error.to_string().contains("unsupported-runtime: recovery"));
         assert!(store.load_recovery(&key).is_err());
         assert!(store.discard_recovery(&key).is_err());
+    }
+
+    #[test]
+    fn the_default_snapshot_list_is_empty_and_not_an_error() {
+        // A carrier with no durable private directory has nothing to offer. That
+        // is a true answer to a list, so it is `Ok(empty)` rather than the
+        // refusal every other method returns.
+        let store = NoRecovery;
+        assert_eq!(
+            store
+                .list_recovery()
+                .expect("an empty list is not an error"),
+            Vec::new()
+        );
     }
 }

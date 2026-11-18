@@ -183,6 +183,10 @@ Android 的产品路径绑在 **WebView 的 GL 实现**上：
 > `HostCore::request_new` / `HostController::new_blank_document`，只替换当前文档，不需要 SAF/文件系统，
 > 也**不**建立第二份文档权威。初始文档为空白 `untitled`（`HostOptions::start_blank = true`），不是内置
 > demo 图纸。**出图仍 `canPlot = false`**。设备/模拟器运行仍 **NOT VERIFIED**；本条只改契约与静态接线。
+>
+> **2026-11-18 更正**：上述布尔已被 `HostOptions::document_at_start = StartDocument::{Empty,Blank,Demo}`
+> 取代。生产载体（含 Android）现在是 `Empty`：**启动无文档**，用户看到开始页；`NEW` 仍是同一条共享空白
+> `untitled` 漏斗，`Blank` 只在需要「启动即有空白图」的测试/夹具里显式选择。
 
 ## 6. 失效条款清单（逐条对照）
 

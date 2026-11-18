@@ -18,7 +18,7 @@ use cad_domain::{
     StyleId, TextAlignH, TextAlignV,
 };
 use cad_engine::render::{BackendPreference, RenderSessionHandle};
-use cad_host::{HostCore, HostOptions, RequestClock};
+use cad_host::{HostCore, HostOptions, RequestClock, StartDocument};
 use cad_platform::{
     ConfigLoad, ConfigStore, FileEvent, FileTarget, HostCapabilities, PlatformFiles, SavePurpose,
     SurfaceSource,
@@ -53,7 +53,7 @@ fn options() -> HostOptions {
         // The document is the bytes; naming a path here would be a second source.
         drawing: None,
         // test fixture: the synthetic bytes are opened explicitly afterwards
-        start_blank: false,
+        document_at_start: StartDocument::Demo,
         size: [800.0, 600.0],
     }
 }

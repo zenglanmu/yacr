@@ -13,8 +13,10 @@ cad_fonts
 cad_layers
 cad_open_popup
 cad_open_recent
+cad_open_recovery
 cad_orbit
 cad_recent_files
+cad_recovery_files
 cad_rename_layer
 cad_restore_layers
 cad_set_active_layer

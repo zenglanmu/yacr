@@ -11,6 +11,8 @@ import { unavailableReasonKey } from '../commands/commands.ts';
 import { useI18n, useShell } from '../context.ts';
 import { useRecentFiles } from '../files/recent.ts';
 import type { RecentFileEntry } from '../files/recent.ts';
+import { recoveryRowName, useRecoveryFiles } from '../files/recovery.ts';
+import type { RecoveryFileEntry } from '../files/recovery.ts';
 import '../files/recent.css';
 
 export function StartPanel() {
@@ -37,6 +39,13 @@ export function StartPanel() {
   const openRefusal = refusal('OPEN', 'file.open');
   const openRecent = (entry: RecentFileEntry) => {
     if (!recentDisabled) recent.open(entry);
+  };
+  // Recovery snapshots (ADR-0037 D12): the same admission rule as a file open —
+  // a row is a real open, so it is held while a load runs or OPEN is not admitted.
+  const recovery = useRecoveryFiles();
+  const recoveryDisabled = shell.loading || !canOpen;
+  const openRecovery = (entry: RecoveryFileEntry) => {
+    if (!recoveryDisabled) recovery.open(entry);
   };
   return (
     <section className="palette start-panel" aria-label={t('start.title')}>
@@ -76,6 +85,66 @@ export function StartPanel() {
             {t('start.new_drawing')}
           </Button>
         </div>
+        <section className="recent-files" aria-labelledby="start-recovery-heading">
+          <h3 id="start-recovery-heading" className="start-panel__section">{t('start.recovery')}</h3>
+          {recovery.openError ? (
+            <p className="recent-files__error" role="alert">
+              {t('start.recovery_open_failed', { name: recovery.openError.name, reason: recovery.openError.reason })}
+            </p>
+          ) : null}
+          {recovery.state.kind === 'loading' ? (
+            <div className="recent-files__state recent-files__state--loading" role="status" aria-busy="true">
+              <Icon name="spinner" size={16} className="spin" />
+              <span className="sr-only">{t('start.recovery')}</span>
+            </div>
+          ) : recovery.state.kind === 'unsupported' ? (
+            <div className="recent-files__state">
+              <Icon name="info" size={16} />
+              <p>{t('start.recovery_unavailable')}</p>
+            </div>
+          ) : recovery.state.kind === 'failed' ? (
+            <div className="recent-files__state recent-files__state--error" role="alert">
+              <Icon name="alert" size={16} />
+              <p>{t('start.recovery_failed', { reason: recovery.state.reason })}</p>
+            </div>
+          ) : recovery.state.entries.length === 0 ? (
+            <div className="recent-files__state">
+              <Icon name="save" size={20} />
+              <p>{t('start.recovery_empty')}</p>
+            </div>
+          ) : (
+            <ul className="recent-files__list">
+              {recovery.state.entries.map(entry => {
+                const name = recoveryRowName(entry);
+                const openLabel = t('start.recovery_open', { name });
+                const revision = t('start.recovery_revision', { revision: String(entry.revision) });
+                const saved = entry.savedAtMs > 0
+                  ? t('start.recovery_saved', { time: new Date(entry.savedAtMs).toLocaleString() })
+                  : '';
+                return (
+                  <li key={entry.key}>
+                    <button
+                      type="button"
+                      className="recent-files__row"
+                      disabled={recoveryDisabled}
+                      aria-label={openLabel}
+                      title={recoveryDisabled ? openRefusal : openLabel}
+                      onClick={() => openRecovery(entry)}
+                    >
+                      <span className="recent-files__icon" aria-hidden="true">
+                        <Icon name="save" size={16} />
+                      </span>
+                      <span className="recent-files__text">
+                        <span className="recent-files__name">{name}</span>
+                        <span className="recent-files__path">{saved ? `${saved} \u00b7 ${revision}` : revision}</span>
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
         <section className="recent-files" aria-labelledby="start-recent-heading">
           <h3 id="start-recent-heading" className="start-panel__section">{t('start.recent')}</h3>
           {recent.openError ? (

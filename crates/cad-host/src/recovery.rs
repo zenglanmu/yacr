@@ -57,8 +57,87 @@ impl HostCore {
         self.persistence.borrow().clone()
     }
 
-    /// The stable key this document's snapshot is filed under, when there is one.
+    /// Every snapshot the installed store offers, newest first (possibly empty).
     ///
+    /// A carrier that installed no store has nothing to list, so the answer is
+    /// the empty list — the same true answer [`Persistence::list_recovery`]'s
+    /// default gives, and not a refusal: the caller renders a list, and "no
+    /// snapshots here" is one of its states.
+    ///
+    /// A store that cannot read its own directory propagates its error: that is
+    /// "there may be work that cannot be seen", which must never be shown as
+    /// "nothing to recover".
+    pub fn list_recovery(&self) -> CadResult<Vec<RecoveryRecord>> {
+        let Some(store) = self.persistence_store() else {
+            return Ok(Vec::new());
+        };
+        store.list_recovery()
+    }
+
+    /// Start opening the snapshot filed under `key`.
+    ///
+    /// `key` is the **only** input: it is validated as a [`RecoveryKey`] (hex
+    /// only, so it can never name a path) and then looked up in the store's own
+    /// list, so a crafted key cannot make the host open an arbitrary file. The
+    /// path comes from [`Persistence::recovery_hint`] — the store's answer, never
+    /// the caller's — and the open follows the ordinary `begin_open_target`
+    /// funnel with the same admission rules as [`Self::open_recent`].
+    pub fn open_recovery(&self, key: &str) -> CadResult<()> {
+        let key = RecoveryKey::from_hex(key).ok_or_else(|| {
+            CadError::InvalidInput(format!("recovery.invalid_key: {key:?} is not a hex key"))
+        })?;
+        let available = self.list_recovery()?;
+        if !available.iter().any(|record| record.key == key.as_str()) {
+            return Err(CadError::InvalidInput(format!(
+                "recovery.unknown: {} is not an available snapshot",
+                key.as_str()
+            )));
+        }
+        let Some(store) = self.persistence_store() else {
+            // Unreachable while `list_recovery` returned the key from a store, but
+            // keep the explicit refusal instead of unwrapping.
+            return Err(CadError::Unsupported(
+                "recovery.unknown: no recovery store is installed".into(),
+            ));
+        };
+        let Some(path) = store.recovery_hint(&key) else {
+            // No filesystem path (a browser handle, a SAF URI): the host cannot
+            // turn this key into something the open funnel can read, so it says
+            // so rather than inventing a path.
+            return Err(CadError::Unsupported(format!(
+                "recovery.no_hint: {} has no openable location on this carrier",
+                key.as_str()
+            )));
+        };
+        // Same admission rules as the chooser funnel: an open never races a save
+        // and never overlaps another load.
+        if self.save_pending() {
+            return Err(CadError::Unsupported(
+                "file operation already in progress".into(),
+            ));
+        }
+        if !self.options.headless && self.loading() {
+            return Ok(());
+        }
+        let target = FileTarget::from_path(&path);
+        self.begin_open_attempt();
+        self.open_pending.set(true);
+        if let Err(error) = self.files.begin_open_target(&target) {
+            self.open_pending.set(false);
+            return Err(error);
+        }
+        self.drain_files()?;
+        if self.open_pending.get() {
+            if !self.options.headless {
+                self.set_catalog_status("linux.picker_waiting", &[])?;
+            }
+        } else {
+            self.grade_pending_open()?;
+        }
+        Ok(())
+    }
+
+    /// The stable key this document's snapshot is filed under, when there is one.    ///
     /// A hash of the opened target's opaque handle first — that is the file the
     /// user names, and it survives a restart — then a hash of the document uuid
     /// (a never-saved document has no file yet). `None` means nothing stable to

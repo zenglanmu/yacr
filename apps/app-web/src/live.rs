@@ -79,7 +79,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use cad_engine::render::RenderSessionHandle;
-use cad_host::{HostOptions, RequestClock};
+use cad_host::{HostOptions, RequestClock, StartDocument};
 use cad_ui_core::popup::{self as popup_state, PopupAck, PopupGate, PopupOps, TextEditPayload};
 use cad_ui_core::session::wire::PopupTarget;
 use cad_ui_core::session::{BytesDocument, CadPopup, CadSession, CadStatus, CadTool};
@@ -638,10 +638,10 @@ fn options(metrics: Metrics) -> HostOptions {
         images_dir: None,
         headless: false,
         drawing: None,
-        // The browser carrier is a production host: start on the empty
-        // `untitled` drawing. Opening the synthetic fixture afterwards is a
-        // separate, explicit open — not the default document.
-        start_blank: true,
+        // The browser carrier is a production host: start with no document, so
+        // the page shows its start panel. Opening the synthetic fixture
+        // afterwards is a separate, explicit open — not the default document.
+        document_at_start: StartDocument::Empty,
         size: metrics.css,
     }
 }

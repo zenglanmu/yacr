@@ -99,7 +99,7 @@ pub(crate) use core::{
     ActiveGuard, BoxGesture, FileAbort, HoverState, LassoGesture, NavInner, PendingHover,
     PendingSave, RecoveryState,
 };
-pub use core::{HostCore, HostOptions, HostPlatform, RequestClock};
+pub use core::{HostCore, HostOptions, HostPlatform, RequestClock, StartDocument};
 #[cfg(not(target_arch = "wasm32"))]
 pub use fonts::DesktopResources;
 pub use fonts::{HostResources, UnsupportedResources};
@@ -133,10 +133,10 @@ fn select_canvas_metrics(surface: SurfaceMetrics) -> CadResult<CanvasMetrics> {
 impl HostCore {
     /// Build the core over the configured initial document and the platform contracts.
     ///
-    /// `options.start_blank` selects a real empty `untitled` drawing; otherwise
-    /// the historical synthetic demo is installed (tests/headless fixtures). A
-    /// configured `--open` drawing replaces either one in
-    /// [`Self::open_configured_drawing`].
+    /// `options.document_at_start` selects the starting state: no document
+    /// (the start page), a real empty `untitled` drawing, or the historical
+    /// synthetic demo (tests/headless fixtures). A configured `--open` drawing
+    /// replaces it in [`Self::open_configured_drawing`].
     pub fn new(
         options: HostOptions,
         platform: HostPlatform,

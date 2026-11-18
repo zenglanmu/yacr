@@ -49,6 +49,50 @@ impl HostController {
         Ok(controller)
     }
 
+    /// Build a work-mode session with **no** document: exactly what
+    /// [`HostController::close_document`] leaves behind, but at construction.
+    ///
+    /// The single viewport slot is installed (so a later New/Open reuses it with
+    /// the same ids the host caches); nothing else is. There is no document,
+    /// hence no `untitled` drawing, no extent and no published content. The name
+    /// hint is `"untitled"` so the save/plot suggestion has a stem, the vendor
+    /// pass is marked pending so the first tick clears any previous pass, and the
+    /// camera is the viewport's own construction default: no `fit()` is
+    /// fabricated for a drawing that does not exist.
+    pub fn with_no_document(logical_size: [f64; 2]) -> CadResult<Self> {
+        let document_id = DocumentId(1);
+        let viewport_id = ViewportId(1);
+        let mut application = Application::new();
+        application.workspace.viewports.insert(
+            viewport_id,
+            Viewport::new(viewport_id, document_id, logical_size),
+        );
+        Ok(HostController {
+            application,
+            session: SessionState::new(document_id, AppMode::Work),
+            document_id,
+            viewport_id,
+            // No document was published, so no readiness claim is made.
+            last_status: String::new(),
+            document_name_hint: "untitled".to_string(),
+            last_import_report: None,
+            last_vendor_records: Vec::new(),
+            // Same invariant as the post-CLOSE state: `Some([])` on the next tick
+            // clears any previous vendor pass.
+            vendor_records_pending: true,
+            import_manager: crate::tasks::ImportManager::new(document_id),
+            pending_open_label: None,
+            pending_open_guard: None,
+            async_open: None,
+            temporary_identity: 0,
+            api_prompt: None,
+            api_prompt_error: None,
+            api_prompt_results: Vec::new(),
+            tolerance: TolerancePolicy::default(),
+            export_options: ExportOptions::default(),
+        })
+    }
+
     /// Rebuild session/history/query/overrides after the document content changed.
     ///
     /// The document id and viewport id stay stable (hosts cache them), but all
