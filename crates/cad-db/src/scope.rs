@@ -46,9 +46,10 @@
 //!
 //! Shard assignment follows ADR-0037 D11 exactly: `seq / 2048` inside one Model,
 //! the Model derived from the in-memory [`SpaceId`] ([`ModelKey::from_space`]).
-//! Block **definition** rows, styles and categories live in the document-level
-//! [`ModelKey::Definitions`] model at `shard_of(id)`; their members live in
-//! [`ModelKey::Block`].
+//! A block's **members** live in [`ModelKey::Block`]. Block **definition** rows
+//! are a table in v1 ([`TableKind::Blocks`]), per the storage deviation recorded
+//! in ADR-0037 D7: the semantic object model still calls them elements of the
+//! definition model, but their payload codec is not Phase 1 work.
 
 use std::collections::BTreeSet;
 
@@ -80,6 +81,13 @@ pub enum TableKind {
     PlotSettings,
     /// External-reference metadata.
     ExternalReferences,
+    /// Block definition rows (name, member ids, base point, dynamic visibility,
+    /// source handle and registration order).
+    ///
+    /// A table rather than definition-model elements in v1 (ADR-0037 D7 storage
+    /// deviation); a block's member *entities* are still elements of its
+    /// [`crate::ModelKey::Block`] model.
+    Blocks,
 }
 
 /// The set of persisted rows one commit made stale.
@@ -147,17 +155,6 @@ impl ChangeScope {
         self.prev_shards.insert((model, shard_of(seq)));
     }
 
-    /// Record a **block definition** row (it lives in [`ModelKey::Definitions`]).
-    pub fn definition(&mut self, seq: u128) {
-        self.element_in(ModelKey::Definitions, seq);
-    }
-
-    /// Record the [`ModelKey::Definitions`] shard an old block definition row
-    /// occupied.
-    pub fn prev_definition(&mut self, seq: u128) {
-        self.prev_element_in(ModelKey::Definitions, seq);
-    }
-
     /// Record that one table's rows changed.
     pub fn table(&mut self, kind: TableKind) {
         self.tables.insert(kind);
@@ -175,12 +172,7 @@ impl crate::drawing::DrawingDatabase {
     /// A commit that moved one of these has made `document.json` stale even when
     /// it changed no header field: the counters are stored there, and rebuilding
     /// them from `max(id) + 1` on load would hand a deleted id to a new object.
-    ///
-    /// ADR-0037 D5 requires **nine**: `next_linetype_id` does not exist yet, so
-    /// linetype creation still derives `max(row id) + 1` and can reuse a deleted
-    /// id. That field and its mint path are added with the header slice, and this
-    /// array grows with it.
-    pub(crate) fn identity_watermarks(&self) -> [u128; 8] {
+    pub(crate) fn identity_watermarks(&self) -> [u128; 9] {
         [
             self.next_entity_id,
             self.next_block_id,
@@ -189,6 +181,7 @@ impl crate::drawing::DrawingDatabase {
             self.next_style_id,
             self.next_dim_style_id,
             self.next_mleader_style_id,
+            self.next_linetype_id,
             self.next_scale_id,
         ]
     }
@@ -201,8 +194,8 @@ impl crate::drawing::DrawingDatabase {
     ///
     /// * an entity row dirties the shard of its **new** space and the shard of
     ///   the **old** row (a move straddles two, a delete has only the old side);
-    /// * a block **definition** row lives in [`ModelKey::Definitions`] at its own
-    ///   sequence, while its members live in [`ModelKey::Block`];
+    /// * a block **definition** row dirties [`TableKind::Blocks`], while its
+    ///   member entities live in [`ModelKey::Block`];
     /// * a non-empty table batch dirties its [`TableKind`], and a page-setup row
     ///   that appears, changes or disappears dirties [`TableKind::PlotSettings`]
     ///   even when its layout row only moved;
@@ -243,15 +236,14 @@ impl crate::drawing::DrawingDatabase {
                 }
             }
         }
-        for (id, change) in block_changes {
-            let existed = self.blocks.contains_key(id);
-            if change.is_some() {
-                scope.definition(id.0);
-                if !existed {
-                    scope.header();
-                }
-            } else if existed {
-                scope.prev_definition(id.0);
+        if !block_changes.is_empty() {
+            scope.table(TableKind::Blocks);
+            if block_changes
+                .iter()
+                .any(|(id, change)| change.is_some() && !self.blocks.contains_key(id))
+            {
+                // A new block row moves the block high-water mark.
+                scope.header();
             }
         }
         if !layer_changes.is_empty() {
@@ -283,6 +275,13 @@ impl crate::drawing::DrawingDatabase {
         }
         if !linetype_changes.is_empty() {
             scope.table(TableKind::Linetypes);
+            if linetype_changes
+                .iter()
+                .any(|(id, change)| change.is_some() && !self.linetypes.contains_key(id))
+            {
+                // A new linetype row moves the linetype high-water mark.
+                scope.header();
+            }
             let renamed: Vec<&str> = linetype_changes
                 .iter()
                 .filter_map(|(id, change)| {
@@ -332,11 +331,8 @@ mod tests {
         let mut scope = ChangeScope::default();
         scope.element(&SpaceId::Model, 2049);
         scope.prev_element(&SpaceId::Paper(cad_domain::LayoutId(1)), 0);
-        scope.definition(1);
-        let expected = [
-            (ModelKey::ModelSpace, Shard(1)),
-            (ModelKey::Definitions, Shard(0)),
-        ];
+        scope.table(TableKind::Blocks);
+        let expected = [(ModelKey::ModelSpace, Shard(1))];
         assert_eq!(
             scope.shards.iter().copied().collect::<Vec<_>>(),
             expected.to_vec()

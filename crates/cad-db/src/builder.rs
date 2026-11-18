@@ -3,6 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use cad_domain::ymodel::IdCounters;
 use cad_domain::*;
 
 use crate::dim_style::DimStyle;
@@ -33,6 +34,9 @@ fn next_construction_nonce() -> u64 {
 pub struct DrawingDatabaseBuilder {
     database: DrawingDatabase,
     errors: Vec<String>,
+    /// Persisted counters a load path supplied, or `None` on the import path
+    /// (which has no counters yet and rebuilds them from row maxima).
+    seeded_counters: Option<IdCounters>,
 }
 
 impl DrawingDatabaseBuilder {
@@ -75,12 +79,42 @@ impl DrawingDatabaseBuilder {
                 next_style_id: 1,
                 next_dim_style_id: 1,
                 next_mleader_style_id: 1,
+                next_linetype_id: 1,
                 next_scale_id: 1,
                 external_references: BTreeMap::new(),
                 bounds_cache: Default::default(),
             },
             errors: Vec::new(),
+            seeded_counters: None,
         }
+    }
+
+    /// Set the revision the finished database starts at.
+    ///
+    /// The import path leaves it at `Revision(0)` (a fresh document, no saves
+    /// yet). A load path seeds it from `manifest.saved_revision` (ADR-0037 D2):
+    /// `manifest.open_revision` is the import baseline and never advances, so
+    /// without this seed an edited-then-reopened document would still satisfy
+    /// the L0 predicate `revision == open_revision` and could export divergent
+    /// content as "the original bytes".
+    pub fn set_revision(&mut self, revision: Revision) {
+        self.database.revision = revision;
+    }
+
+    /// Adopt the persisted identifier high-water marks instead of rebuilding
+    /// them from `max(row id) + 1`.
+    ///
+    /// A **load** path must call this: the counters are document state (ADR-0037
+    /// D5), and a rebuild would hand a deleted id to the next created object.
+    /// The import path must not call it — an imported drawing has no persisted
+    /// counters, so [`Self::finish`] rebuilds them from row maxima.
+    ///
+    /// [`Self::finish`] validates the seeded counters verbatim: every one must
+    /// be in `1 ..= MAX_SEQ + 1` and at least `max(existing row id) + 1`. A
+    /// counter that would reuse an existing id refuses the build; it is never
+    /// clamped.
+    pub fn seed_identifiers(&mut self, counters: IdCounters) {
+        self.seeded_counters = Some(counters);
     }
 
     pub fn insert_entity(&mut self, entity: DbEntity) -> CadResult<()> {
@@ -643,6 +677,17 @@ impl DrawingDatabaseBuilder {
                 "import validation failed: {joined}"
             )));
         }
+        // Identity counters are document state (ADR-0037 D5), not derived data.
+        //
+        // A load path seeds them from the document it opened; they are adopted
+        // verbatim and only validated, because rebuilding them from row maxima
+        // would hand a deleted id to the next created object. The import path
+        // has no persisted counters yet, so it rebuilds them from the largest
+        // id in the finished database.
+        if let Some(seeded) = self.seeded_counters {
+            self.database.adopt_id_counters(&seeded)?;
+            return Ok(self.database);
+        }
         // Initialise the id allocator from the largest id in the finished
         // database (entities plus block member lists, defensively), so the first
         // `allocate_entity_id` can never collide with an imported entity.
@@ -701,6 +746,18 @@ impl DrawingDatabaseBuilder {
         // `SCALELISTEDIT ADD` can never collide with an imported row.
         let max_scale = self.database.scales.keys().map(|s| s.0).max().unwrap_or(0);
         self.database.next_scale_id = max_scale.saturating_add(1);
+        // Linetypes allocate the same way on the import path. A load never
+        // reaches here: its persisted `next_linetype_id` is adopted above, so a
+        // create → delete → create that was saved and reopened still gets a
+        // fresh id instead of the deleted maximum.
+        let max_linetype = self
+            .database
+            .linetypes
+            .keys()
+            .map(|s| s.0)
+            .max()
+            .unwrap_or(0);
+        self.database.next_linetype_id = max_linetype.saturating_add(1);
         Ok(self.database)
     }
 }

@@ -11,6 +11,7 @@ mod drawing_clip;
 mod drawing_display;
 mod header_geometry;
 mod history_replay;
+mod identity;
 mod layer_attributes;
 mod layer_inherit;
 mod layer_patch;

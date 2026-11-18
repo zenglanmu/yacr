@@ -265,6 +265,13 @@ pub struct DrawingDatabase {
     pub(crate) next_dim_style_id: u128,
     /// Next multileader-style id to hand out (same monotonic rule).
     pub(crate) next_mleader_style_id: u128,
+    /// Next linetype id to hand out. Monotonic like the layer allocator: the
+    /// builder initialises it from `max(stored) + 1` on the import path (which
+    /// has no persisted counters) and from the document's own high-water mark on
+    /// a load, it is bumped by every installed row (including an undo restore),
+    /// and a delete never rewinds it. That is what makes create → delete →
+    /// create hand out a fresh id instead of the deleted one (ADR-0037 D5).
+    pub(crate) next_linetype_id: u128,
     /// Next annotation-scale id to hand out (same monotonic rule: initialised by
     /// the builder from `max(stored) + 1`, bumped by every create, never rewound).
     pub(crate) next_scale_id: u128,

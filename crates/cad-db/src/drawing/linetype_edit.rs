@@ -202,6 +202,19 @@ impl DrawingDatabase {
         )
     }
 
+    /// Allocate the next linetype id.
+    ///
+    /// Monotonic like [`DrawingDatabase::allocate_layer_id`]: initialised by the
+    /// builder from `max(stored id) + 1` on the import path and from the
+    /// persisted `next_linetype_id` counter on a load, bumped by every installed
+    /// row, and never rewound by a delete, so a deleted id is never handed out
+    /// again.
+    pub fn allocate_linetype_id(&mut self) -> LinetypeId {
+        let id = LinetypeId(self.next_linetype_id);
+        self.next_linetype_id = self.next_linetype_id.saturating_add(1);
+        id
+    }
+
     /// Create one linetype table row from a typed name + group-49 pattern.
     ///
     /// The **single** create path (the typed `LINETYPE CREATE` form). Validation
@@ -217,10 +230,12 @@ impl DrawingDatabase {
     ///
     /// # Ids
     ///
-    /// This build has no linetype-id allocator (the importer numbers rows from
-    /// `0`), so a created row takes `max(stored id) + 1`. A create → delete →
-    /// create sequence can therefore reuse an id; the history patches carry the
-    /// **full** before/after row, so undo/redo stays exact either way.
+    /// The id comes from the persisted monotonic allocator
+    /// [`DrawingDatabase::allocate_linetype_id`], exactly like every other table row:
+    /// a create → delete → create sequence never hands the deleted id out again
+    /// (ADR-0037 D5 — `SourceRef` maps and the shard assignment depend on ids
+    /// never being reused). Allocation is not a content write by itself; a
+    /// refusal below leaves the allocator where it was.
     ///
     /// # Pattern grammar
     ///
@@ -257,23 +272,7 @@ impl DrawingDatabase {
                 existing.name, existing.id.0
             )));
         }
-        let next_id = self
-            .linetypes
-            .keys()
-            .map(|row| row.0)
-            .max()
-            .map(|max| {
-                max.checked_add(1).ok_or_else(|| {
-                    CadError::Invariant(
-                        "linetype.id_exhausted: the linetype id space is full, so a create cannot \
-                         allocate a fresh id (an existing row is never overwritten)"
-                            .into(),
-                    )
-                })
-            })
-            .transpose()?
-            .unwrap_or(0);
-        let id = LinetypeId(next_id);
+        let id = self.allocate_linetype_id();
         let row = LineType {
             id,
             name,
@@ -323,6 +322,10 @@ impl DrawingDatabase {
             installed.id = *id;
             installed.name = installed.name.trim().to_string();
             self.linetypes.insert(*id, installed.clone());
+            // A caller-supplied id (an undo reinstall, or a load) must leave the
+            // allocator ahead of it, so a later create cannot collide with a row
+            // that already exists. The persisted high-water mark only grows.
+            self.next_linetype_id = self.next_linetype_id.max(id.0.saturating_add(1));
             if let Some(previous) = previous {
                 if previous != installed.name {
                     self.cascade_linetype_name(&previous, &installed.name, &mut touched);

@@ -208,6 +208,15 @@ pub struct DocumentHeader {
     pub resource_keys: Vec<String>,
     /// The next sequence number of every allocated family.
     pub next: IdCounters,
+    /// Drawing header variables (`$LTSCALE`, `$PDMODE`, `$PDSIZE`, `$INSBASE`,
+    /// `$LIMMIN`/`$LIMMAX`, `$DWGCODEPAGE`, `CANNOSCALE`).
+    ///
+    /// Opaque here on purpose: the values are owned and encoded by `cad-db`
+    /// (one of them is a `cad-db` row type), so this crate only guarantees that
+    /// it is a JSON object and round-trips it. Keeping them in the header rather
+    /// than in a table is what makes `document.json` the single place a reader
+    /// looks for document-level scalars. Empty for a document that has none.
+    pub variables: serde_json::Value,
 }
 
 impl DocumentHeader {
@@ -262,6 +271,7 @@ impl DocumentHeader {
             ),
         );
         map.insert("next".to_string(), self.next.to_json_value());
+        map.insert("variables".to_string(), self.variables.clone());
         Value::Object(map)
     }
 
@@ -274,6 +284,13 @@ impl DocumentHeader {
         let identity = DocumentIdentity::from_json_value(&reader.take("identity")?)?;
         let resource_keys = strings_from_value(&reader.take("resource_keys")?)?;
         let next = IdCounters::from_json_value(&reader.take("next")?)?;
+        let variables = reader.take("variables")?;
+        if !variables.is_object() {
+            return Err(HeaderError::InvalidField {
+                field: "variables",
+                detail: "document header variables must be a JSON object".into(),
+            });
+        }
         reader.finish()?;
         let header = DocumentHeader {
             database,
@@ -281,6 +298,7 @@ impl DocumentHeader {
             identity,
             resource_keys,
             next,
+            variables,
         };
         header.next.validate()?;
         Ok(header)
@@ -447,6 +465,13 @@ pub enum HeaderError {
         /// The offending text.
         text: String,
     },
+    /// A field is present but has the wrong JSON shape.
+    InvalidField {
+        /// Field being decoded.
+        field: &'static str,
+        /// What was expected.
+        detail: String,
+    },
 }
 
 impl fmt::Display for HeaderError {
@@ -483,6 +508,9 @@ impl fmt::Display for HeaderError {
             ),
             HeaderError::BadDecimal { field, text } => {
                 write!(f, "{field}: {text:?} is not a decimal u128")
+            }
+            HeaderError::InvalidField { field, detail } => {
+                write!(f, "{field}: {detail}")
             }
         }
     }
@@ -616,6 +644,7 @@ mod tests {
             identity: DocumentIdentity::Temporary(u128::MAX),
             resource_keys: Vec::new(),
             next: IdCounters::default(),
+            variables: Value::Object(Map::new()),
         }
     }
 
@@ -626,6 +655,36 @@ mod tests {
     }
 
     #[test]
+    fn header_variables_round_trip_verbatim() {
+        // The values are owned by `cad-db`; this crate only guarantees the shape
+        // is an object and that it survives unchanged, nested values included.
+        let mut header = header();
+        header.variables = serde_json::json!({
+            "linetype_scale": 2.5,
+            "point_display_mode": 3,
+            "insertion_base": null,
+            "limits": { "min": [0.0, 0.0], "max": [420.0, 297.0] },
+            "code_page": "ANSI_936"
+        });
+        assert_eq!(round_trip(&header), header);
+
+        // A non-object is refused: a reader must not have to guess the shape.
+        let mut value = header.to_json_value();
+        value["variables"] = serde_json::json!([1, 2, 3]);
+        let error = DocumentHeader::from_json_value(&value).expect_err("array variables");
+        assert!(
+            matches!(
+                error,
+                HeaderError::InvalidField {
+                    field: "variables",
+                    ..
+                }
+            ),
+            "{error:?}"
+        );
+    }
+
+    #[test]
     fn header_round_trips_with_drawing_units_and_no_conversion() {
         let header = DocumentHeader {
             database: DatabaseId(7),
@@ -633,6 +692,7 @@ mod tests {
             identity: DocumentIdentity::Temporary(1),
             resource_keys: Vec::new(),
             next: IdCounters::default(),
+            variables: Value::Object(Map::new()),
         };
         assert_eq!(round_trip(&header), header);
         assert_eq!(header.units.display_per_source, None);
@@ -831,6 +891,7 @@ mod tests {
             "identity": { "kind": "temporary", "value": "1" },
             "resource_keys": [],
             "next": IdCounters::default().to_json_value(),
+            "variables": {},
             "future_field": true
         });
         let error = DocumentHeader::from_json_value(&value).expect_err("unknown field");

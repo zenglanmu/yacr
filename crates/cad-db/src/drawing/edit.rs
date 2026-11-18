@@ -5,7 +5,7 @@ use cad_domain::*;
 use super::{DrawingDatabase, DrawingTransaction};
 use crate::change::{ChangeMask, ChangeSet, ObjectChange};
 use crate::entity::DbEntity;
-use crate::scope::ChangeScope;
+use crate::scope::{ChangeScope, TableKind};
 
 impl DrawingDatabase {
     /// Switch a dynamic block's active visibility state.
@@ -101,7 +101,7 @@ impl DrawingDatabase {
         // but their own rows did not change, so their shards are deliberately
         // not marked dirty.
         let mut scope = ChangeScope::default();
-        scope.definition(block.0);
+        scope.table(TableKind::Blocks);
         Ok(ChangeSet {
             database: self.id,
             before,

@@ -11,6 +11,7 @@ mod change;
 mod dim_style;
 mod drawing;
 mod entity;
+mod identity;
 mod math;
 mod measurement;
 mod mleader_style;

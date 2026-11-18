@@ -182,14 +182,13 @@ fn moving_an_entity_into_a_paper_layout_dirties_both_shards() {
 }
 
 // ---------------------------------------------------------------------------
-// Block definitions live in the definition model, their members in Block(id)
+// Block definition rows are a table; their members are Block(id) elements
 // ---------------------------------------------------------------------------
 
 #[test]
 fn block_definition_rows_and_members_dirty_different_models() {
     let mut db = scope_db();
     let block = db.allocate_block_id();
-    let definitions = cad_domain::ymodel::ModelKey::Definitions;
 
     let created = db
         .apply_drawing_changes_with_blocks(
@@ -213,11 +212,13 @@ fn block_definition_rows_and_members_dirty_different_models() {
         )
         .expect("a clean empty block creates");
     assert!(
-        created
-            .scope
-            .shards
-            .contains(&(definitions, shard_of(block.0))),
-        "the definition row lives in the definition model: {:?}",
+        created.scope.tables.contains(&TableKind::Blocks),
+        "the definition row is a table in v1: {:?}",
+        created.scope
+    );
+    assert!(
+        created.scope.shards.is_empty(),
+        "a definition row is not an element shard: {:?}",
         created.scope
     );
     assert!(
@@ -248,7 +249,14 @@ fn block_definition_rows_and_members_dirty_different_models() {
         "a member is an element of the block model: {:?}",
         added.scope
     );
-    assert!(!added.scope.shards.contains(&(definitions, shard_of(9))));
+    assert!(
+        !added
+            .scope
+            .prev_shards
+            .contains(&(model_key(SpaceId::Block(block)), shard_of(9))),
+        "adding a member must not mark the old side: {:?}",
+        added.scope
+    );
 }
 
 // ---------------------------------------------------------------------------

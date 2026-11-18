@@ -318,7 +318,7 @@ fn creating_a_linetype_stores_the_pattern_and_bumps_once() {
     assert_eq!(row.pattern.elements, vec![2.0, -0.5, 0.5, -0.5]);
     assert_eq!(row.pattern.cycle, 3.5);
     assert!(!row.complex);
-    assert_eq!(id, LinetypeId(2), "max(stored id) + 1");
+    assert_eq!(id, LinetypeId(2), "the import path's max(stored id) + 1");
     assert_eq!(change_set.after, Revision(before.0 + 1));
     assert_eq!(db.revision(), change_set.after);
 }
