@@ -122,6 +122,7 @@ mod app_view_extras;
 mod app_zoom;
 mod layer_history;
 mod layer_states;
+mod persistence;
 mod space;
 pub mod view_states;
 
@@ -165,6 +166,7 @@ pub use layer_history::{LayerOverrideHistory, LAYER_OVERRIDE_HISTORY_CAP};
 pub use layer_states::{LayerStates, NamedLayerState, LAYER_STATE_CAP};
 pub use measure_tool::{MeasurementPreview, MeasurementTool, MeasurementToolKind};
 pub use ortho::{ortho_constrain, ortho_constrain_point};
+pub use persistence::PersistenceState;
 pub use picking::{
     drawing_pick_items, filter_by_index, last_pick_stats, pick_at_screen, pick_ray,
     pick_ray_exhaustive, pick_ray_with_index, pick_tolerance, PickIndex, PickStats,
@@ -194,6 +196,12 @@ pub struct Document {
     pub identity: DocumentIdentity,
     pub units: UnitContext,
     pub resource_keys: Vec<String>,
+    /// Where this document stands relative to its file (ADR-0037 D2/D12).
+    ///
+    /// Not drawing content: the database never sees an archive (D1). It stays on
+    /// the document slot because `saved_revision`/`open_revision` are per-document
+    /// facts, not per-command ones.
+    pub persistence: PersistenceState,
 }
 
 mod session_state;

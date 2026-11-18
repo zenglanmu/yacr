@@ -29,6 +29,7 @@ mod export_options;
 mod open_import;
 mod properties;
 mod render_edit;
+mod snapshot;
 mod solids;
 mod tolerance;
 mod vendor_properties;
@@ -149,6 +150,7 @@ impl HostController {
                 identity: DocumentIdentity::Temporary(0),
                 units: UnitContext::drawing_units(),
                 resource_keys: Vec::new(),
+                persistence: crate::PersistenceState::untitled(),
             },
         );
         application.workspace.viewports.insert(
@@ -326,6 +328,9 @@ impl HostController {
             identity: imported.report.identity.clone(),
             units: imported.units,
             resource_keys: Vec::new(),
+            // An import is an untitled document saved later (D3) with revision 0
+            // as its import baseline (D2).
+            persistence: crate::PersistenceState::imported(),
         };
         self.application
             .workspace
@@ -380,6 +385,7 @@ impl HostController {
             identity: DocumentIdentity::Temporary(self.temporary_identity),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            persistence: crate::PersistenceState::untitled(),
         };
         self.application
             .workspace

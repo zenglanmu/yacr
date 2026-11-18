@@ -86,6 +86,7 @@ fn load() -> Option<(Application, SessionState)> {
             identity: DocumentIdentity::Temporary(1),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            persistence: cad_app::PersistenceState::untitled(),
         },
     );
     let mut viewport = Viewport::new(VIEWPORT, DOC, CANVAS);

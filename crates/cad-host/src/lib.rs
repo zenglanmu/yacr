@@ -57,6 +57,7 @@ use cad_platform::{
 mod command_log;
 mod command_log_echo;
 mod core;
+mod document_archive;
 mod fonts;
 mod input;
 mod open;
@@ -74,6 +75,7 @@ mod state;
 pub use command_log::{
     CommandLogEntry, CommandLogKind, CommandLogMeasurement, CommandLogPoint, COMMAND_LOG_CAPACITY,
 };
+pub(crate) use document_archive::sha256_hex;
 pub use recent::{
     recent_files_from_preference, RecentEntry, RECENT_FILES_CAP, RECENT_FILES_PREFERENCE_KEY,
 };
@@ -187,6 +189,7 @@ impl HostCore {
             pending_save: Rc::new(RefCell::new(None)),
             drawing_path: Rc::new(RefCell::new(None)),
             source_target: Rc::new(RefCell::new(None)),
+            archive: Rc::new(RefCell::new(None)),
             last_status: Rc::new(RefCell::new(None)),
             last_image_report: Rc::new(RefCell::new(None)),
             last_image_keys: Rc::new(RefCell::new(std::collections::BTreeSet::new())),

@@ -1,6 +1,5 @@
 //! `FILLET POLYLINE` / `CHAMFER POLYLINE` contracts: parity, all-junction rewrite,
-//! closed/open-closing polylines, arc removal, too-short skip, trim-off joins,
-//! intersect-only forms and every named refusal.
+//! closed/open polylines, arc removal, too-short skip, joins and named refusals.
 
 use super::*;
 use crate::app_drawing::{
@@ -69,6 +68,7 @@ fn polyline_app(
             identity: DocumentIdentity::Sha256([41u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            persistence: crate::PersistenceState::untitled(),
         },
     );
     app.workspace.viewports.insert(

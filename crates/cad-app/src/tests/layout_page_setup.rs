@@ -77,6 +77,7 @@ fn fixture(layouts: &[(u128, &str)], store_plots: bool) -> (Application, Session
             identity: DocumentIdentity::Sha256([0u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            persistence: crate::PersistenceState::untitled(),
         },
     );
     app.workspace.viewports.insert(

@@ -58,6 +58,7 @@ fn app_with_bounds(mode: AppMode) -> (Application, SessionState) {
             identity: DocumentIdentity::Sha256([61u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            persistence: crate::PersistenceState::untitled(),
         },
     );
     app.workspace.viewports.insert(
@@ -88,6 +89,7 @@ fn empty_app() -> (Application, SessionState) {
             identity: DocumentIdentity::Sha256([62u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            persistence: crate::PersistenceState::untitled(),
         },
     );
     app.workspace.viewports.insert(

@@ -8,6 +8,9 @@ use std::path::Path;
 fn a_synchronous_save_completes_inside_the_gesture() {
     let files = Rc::new(SyncSaveFiles::default());
     let core = core_with_caps(files.clone(), capabilities(false));
+    // A document opened from a `.dxf` keeps the lossy DXF Save As (the native
+    // `.ymodel` save is the default only for a document with no source format).
+    *core.source_target.borrow_mut() = Some(FileTarget::from_path("/tmp/plan.dxf"));
     // Save As DXF: the synchronous platform synthesizes the target in
     // `begin_save`, so the export must run inside the gesture.
     core.request_save().unwrap();

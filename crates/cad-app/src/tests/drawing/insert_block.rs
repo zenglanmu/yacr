@@ -79,6 +79,7 @@ fn insert_app() -> (Application, SessionState) {
             identity: DocumentIdentity::Sha256([11u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            persistence: crate::PersistenceState::untitled(),
         },
     );
     app.workspace.viewports.insert(
@@ -246,6 +247,7 @@ fn insert_refuses_missing_block_metadata_without_inventing_a_base() {
             identity: DocumentIdentity::Sha256([12u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            persistence: crate::PersistenceState::untitled(),
         },
     );
     app.workspace.viewports.insert(
@@ -328,6 +330,7 @@ fn insert_accepts_a_block_whose_definition_contains_a_nested_insert() {
             identity: DocumentIdentity::Sha256([13u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            persistence: crate::PersistenceState::untitled(),
         },
     );
     app.workspace.viewports.insert(

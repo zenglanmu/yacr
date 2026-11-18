@@ -99,6 +99,7 @@ fn select_all_app(
             identity: DocumentIdentity::Sha256([28u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            persistence: crate::PersistenceState::untitled(),
         },
     );
     app.workspace.viewports.insert(

@@ -99,6 +99,9 @@ impl HostCore {
                 SavePurpose::Plot => "plot.picker_waiting",
                 SavePurpose::SaveDxf => "save.picker_waiting",
                 SavePurpose::SaveDwg => "save.picker_waiting_dwg",
+                // No ymodel-specific catalog line exists yet; the shared
+                // "choose where to save" line is the closest existing key.
+                SavePurpose::SaveYmodel => "save.picker_waiting",
             };
             self.set_catalog_status(waiting, &[])?;
             return Ok(());
@@ -132,11 +135,12 @@ impl HostCore {
 
     /// Save the active drawing as a lossy drawing file, host-owned.
     ///
-    /// The source extension selects the default: a `.dwg` source offers an
+    /// The source format selects the default: a `.dwg` source offers an
     /// **experimental DWG export** under a different name (`<stem>-export.dwg`),
-    /// so a SAVE never overwrites the opened drawing; `.dxf` (or no source)
-    /// keeps the lossy DXF Save As. The chosen target's extension is what is
-    /// actually written.
+    /// so a SAVE never overwrites the opened drawing; a `.dxf` source keeps the
+    /// lossy DXF Save As; a `.ymodel` source — or a document with no source
+    /// format at all — is the native archive save. The chosen target's extension
+    /// is what is actually written for DXF/DWG.
     pub(crate) fn request_save(&self) -> CadResult<()> {
         if !self.capabilities.save {
             let reason = self.message("command.unsupported", &[("command", "SAVE")]);
@@ -149,17 +153,29 @@ impl HostCore {
             return Err(CadError::Unsupported(busy));
         }
         let hint = self.controller.borrow().document_name_hint.clone();
+        // Transitional purpose rule (ADR-0037 Phase 1), keyed on the source the
+        // document came from — the opened target's name, or the name hint an
+        // import published — never on a new setting or a dialog:
+        //  * `.dwg` → the experimental DWG export (unchanged; NEW file)
+        //  * `.ymodel`, or **no** extension at all (blank or never-saved
+        //    document, e.g. `untitled`/`yacr-demo`) → the native archive save
+        //  * any other extension (`.dxf`, ...) → the lossy DXF Save As (unchanged)
+        // A real "which format?" choice belongs to the save dialog; until one
+        // exists this rule is the honest projection of what the document is.
         let source_name = self.save_source_name().unwrap_or_else(|| hint.clone());
-        let (purpose, default_name) = if policy::source_is_dwg(&source_name) {
-            (
+        let (purpose, default_name) = match policy::extension_of(&source_name).as_str() {
+            "dwg" => (
                 SavePurpose::SaveDwg,
                 policy::default_dwg_export_name(&source_name),
-            )
-        } else {
-            (
+            ),
+            "ymodel" | "" => (
+                SavePurpose::SaveYmodel,
+                policy::default_save_name(&hint, "ymodel"),
+            ),
+            _ => (
                 SavePurpose::SaveDxf,
                 policy::default_save_name(&hint, "dxf"),
-            )
+            ),
         };
         if let Err(error) = self.files.begin_save(purpose, &default_name) {
             self.set_catalog_status("save.export_failed", &[("reason", &error_text(&error))])?;
@@ -190,15 +206,17 @@ impl HostCore {
                 .collect(),
         };
         let status = match (purpose, result) {
-            // A closed dialog is a cancel, not a failure (both drawing formats).
-            (SavePurpose::SaveDxf | SavePurpose::SaveDwg, Err(FileAbort::Cancelled)) => {
-                catalog("save.cancelled", &[])
-            }
+            // A closed dialog is a cancel, not a failure (all save formats).
+            (
+                SavePurpose::SaveDxf | SavePurpose::SaveDwg | SavePurpose::SaveYmodel,
+                Err(FileAbort::Cancelled),
+            ) => catalog("save.cancelled", &[]),
             (SavePurpose::Plot, Err(FileAbort::Cancelled)) => catalog("plot.cancelled", &[]),
             // The platform's reason is already localized: show it verbatim.
-            (SavePurpose::SaveDxf | SavePurpose::SaveDwg, Err(FileAbort::Failed(reason))) => {
-                catalog("save.export_failed", &[("reason", &reason)])
-            }
+            (
+                SavePurpose::SaveDxf | SavePurpose::SaveDwg | SavePurpose::SaveYmodel,
+                Err(FileAbort::Failed(reason)),
+            ) => catalog("save.export_failed", &[("reason", &reason)]),
             (SavePurpose::Plot, Err(FileAbort::Failed(reason))) => {
                 catalog("plot.export_failed", &[("reason", &reason)])
             }
@@ -268,6 +286,17 @@ impl HostCore {
                     }
                 }
             }
+            (SavePurpose::SaveYmodel, Ok(target)) => match self.export_ymodel(&target) {
+                // The native format has its own wording: reusing `save.exported`
+                // would tell the user a DXF was written when the file is a
+                // `.ymodel`. The foreign-entry count has no key yet, so it stays
+                // in the document's persistence state rather than being guessed at.
+                Ok(()) => catalog("save.exported_ymodel", &[("path", &target.display_name)]),
+                Err(SaveFailure::RefusedSourcePath) => catalog("save.refused_source_path", &[]),
+                Err(SaveFailure::Reason(reason)) => {
+                    catalog("save.export_failed", &[("reason", &reason)])
+                }
+            },
             (SavePurpose::Plot, Ok(target)) => match self.export_plot(&target) {
                 // Clean success only when nothing was dropped; a partial export
                 // is reported as such, never as a clean success.
@@ -355,6 +384,109 @@ impl HostCore {
                 .iter()
                 .any(|note| note.code == "export.note.acis_sab_dxf"),
         })
+    }
+
+    /// Write the native `.ymodel` archive for `target` (ADR-0037 D12 Phase 1).
+    ///
+    /// The order is the contract:
+    /// 1. the carrier archive must exist — otherwise the marker, never a fallback
+    ///    export of another format;
+    /// 2. read the target's current bytes (the previous archive) for foreign-entry
+    ///    copy-through and conflict detection;
+    /// 3. refuse an in-place save whose file changed since it was opened
+    ///    (`ymodel.conflict`) — the no-lock-file rule of D12;
+    /// 4. encode from a **fresh snapshot of the current revision**;
+    /// 5. write atomically, and only then advance `saved_revision` and clear the
+    ///    source hash to the new bytes. A write failure leaves the state untouched.
+    fn export_ymodel(&self, target: &FileTarget) -> Result<(), SaveFailure> {
+        let Some(archive) = self.document_archive() else {
+            // A carrier with no archive cannot save the native format. Explicit,
+            // never a silent DXF/DWG export under a `.ymodel` name.
+            return Err(SaveFailure::Reason(policy::UNSUPPORTED_YMODEL.to_string()));
+        };
+        let in_place = self
+            .source_target
+            .borrow()
+            .as_ref()
+            .is_some_and(|source| policy::same_normalized_target(source, target));
+        let persistence = self.controller.borrow().persistence().cloned();
+        // An absent target is a first save / Save As (`None`); an existing target
+        // we cannot re-read is a real refusal, not "absent", or the save would
+        // overwrite a file whose contents (and foreign entries) it never saw.
+        let previous = match self.files.read_target(target) {
+            Ok(bytes) => Some(bytes),
+            Err(reason) => {
+                if in_place {
+                    return Err(SaveFailure::Reason(reason));
+                }
+                None
+            }
+        };
+        // Conflict detection applies to the file this document was opened from:
+        // a Save As to a different, existing archive must not refuse because its
+        // bytes differ from the source we opened.
+        if in_place {
+            if let (Some(expected), Some(bytes)) = (
+                persistence.as_ref().and_then(|p| p.source_sha256.clone()),
+                previous.as_ref(),
+            ) {
+                if sha256_hex(bytes) != expected {
+                    return Err(SaveFailure::Reason(
+                        cad_domain::ymodel::markers::CONFLICT.to_string(),
+                    ));
+                }
+            }
+        }
+        let snapshot = self
+            .controller
+            .borrow()
+            .snapshot_document()
+            .map_err(|error| SaveFailure::Reason(error_text(&error)))?;
+        // Phase 1 rewrites every entry, so there is no dirty scope to narrow the
+        // write yet (Phase 2 fills this from the commit ChangeScope). An empty
+        // scope is the accurate description of "everything is being re-encoded".
+        let dirty = cad_db::ChangeScope::default();
+        let document_uuid = persistence.as_ref().and_then(|p| p.document_uuid.clone());
+        let open_revision = persistence
+            .as_ref()
+            .and_then(|p| p.open_revision)
+            // No baseline: `u64::MAX` makes the L0 passthrough predicate
+            // unsatisfiable rather than accidentally true (D2).
+            .map_or(u64::MAX, |revision| revision.0);
+        let request = cad_platform::ArchiveWrite {
+            snapshot: &snapshot,
+            dirty: &dirty,
+            previous: previous.as_deref(),
+            document_uuid: document_uuid.as_deref(),
+            open_revision,
+            // No clock in the shared host: the manifest timestamp stays absent.
+            saved_at: None,
+        };
+        let encoded = archive
+            .write(&request)
+            .map_err(|error| SaveFailure::Reason(format!("{}: {}", error.marker, error.detail)))?;
+        self.files
+            .write_atomic(target, &encoded.bytes)
+            .map_err(|error| SaveFailure::Reason(error_text(&error)))?;
+        // Durable: now the document may claim the new saved revision.
+        let source_sha256 = sha256_hex(&encoded.bytes);
+        // The archive does not echo the uuid it may have minted, so this either
+        // keeps the known identity or stays `None` — never a fabricated v4 uuid.
+        let foreign_entries = persistence
+            .as_ref()
+            .map(|state| state.foreign_entries.clone())
+            .unwrap_or_default();
+        {
+            let mut controller = self.controller.borrow_mut();
+            controller.mark_saved(encoded.saved_revision, document_uuid, foreign_entries);
+            controller.set_source_sha256(Some(source_sha256));
+        }
+        // The document now *is* this file: the next save is in place against it
+        // and the source-overwrite guard must name the target we just wrote.
+        *self.source_target.borrow_mut() = Some(target.clone());
+        self.files.set_source(Some(target));
+        self.full_dirty.set(true);
+        Ok(())
     }
 
     fn report_plot_failed(&self, reason: &str) -> CadResult<()> {

@@ -149,6 +149,7 @@ fn match_app_with_source_and_locked(
             identity: DocumentIdentity::Sha256([11u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            persistence: crate::PersistenceState::untitled(),
         },
     );
     app.workspace.viewports.insert(
@@ -876,6 +877,7 @@ fn special_app() -> (Application, SessionState) {
             identity: DocumentIdentity::Sha256([13u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            persistence: crate::PersistenceState::untitled(),
         },
     );
     app.workspace.viewports.insert(

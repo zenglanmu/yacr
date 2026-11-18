@@ -195,6 +195,12 @@ impl HostCore {
             self.full_dirty.set(true);
             return Ok(());
         }
+        // A `.ymodel` target is the native document archive, not a connector
+        // format: it must be decoded by the carrier archive (or refused by name),
+        // never handed to the DWG/DXF importer.
+        if policy::is_ymodel_target(&target) {
+            return self.deliver_ymodel_open(target, bytes);
+        }
         // Import-only external-reference policy for this delivery: a real host
         // path gets the native filesystem carrier rooted at the drawing's own
         // directory; a path-less (browser/external-byte) open gets `None`.
@@ -566,6 +572,107 @@ impl HostCore {
             self.set_catalog_status("fonts.failed", &[("error", error)])?;
         }
         Ok(())
+    }
+
+    /// Install a delivered `.ymodel` archive as the authoritative document.
+    ///
+    /// Synchronous by construction: an archive decode is a zip read, not a
+    /// background parse, so this runs in the delivery gesture on every carrier
+    /// (a worker host simply never starts an import job for it).
+    ///
+    /// Every failure — no carrier archive, a refused/corrupt archive, a snapshot
+    /// that cannot hydrate — is reported through the same
+    /// [`ImportTerminal::Failed`] terminal an import failure uses and leaves the
+    /// previous document exactly as it was: nothing is installed half-way.
+    fn deliver_ymodel_open(&self, target: FileTarget, bytes: Arc<[u8]>) -> CadResult<()> {
+        // No archive means the carrier cannot read the format at all. There is no
+        // connector fallback that could read these bytes, and an import attempt
+        // would report a parse error instead of the real cause.
+        let Some(archive) = self.document_archive() else {
+            return self.fail_ymodel_open(CadError::Unsupported(
+                policy::UNSUPPORTED_YMODEL.to_string(),
+            ));
+        };
+        let loaded = match archive.read(&bytes) {
+            Ok(loaded) => loaded,
+            // The marker, not the prose, is the contract (D13).
+            Err(error) => {
+                return self.fail_ymodel_open(CadError::Unsupported(format!(
+                    "{}: {}",
+                    error.marker, error.detail
+                )))
+            }
+        };
+        // Two revisions, kept apart (D2): `saved_revision` seeds the in-memory
+        // revision (the hydrated database already carries it) and the manifest's
+        // import baseline is carried separately, never advanced by a save.
+        let persistence = cad_app::PersistenceState {
+            saved_revision: loaded.manifest.saved_revision,
+            open_revision: Some(loaded.manifest.open_revision),
+            document_uuid: Some(loaded.manifest.document_uuid.clone()),
+            foreign_entries: loaded.manifest.foreign_entries.clone(),
+            source_sha256: Some(sha256_hex(&bytes)),
+        };
+        let label = target.display_name.clone();
+        if let Err(error) = self.controller.borrow_mut().install_snapshot(
+            &loaded.snapshot,
+            persistence,
+            Some(label),
+        ) {
+            return self.fail_ymodel_open(error);
+        }
+        // The authoritative document was replaced: bump the host document epoch
+        // and record the real opened terminal before any fallible post-step.
+        self.presenting_open.set(false);
+        self.note_document_replaced();
+        let entities = self
+            .controller
+            .borrow()
+            .drawing()
+            .map_or(0, |drawing| drawing.entity_count());
+        *self.sync_terminal.borrow_mut() =
+            Some(ImportProgressSnapshot::terminal(ImportTerminal::Opened {
+                entities,
+            }));
+        // Arm the corruption guard only now that the open succeeded, before
+        // `install_images` reads the directory for sibling raster resources.
+        self.files.set_source(Some(&target));
+        *self.drawing_path.borrow_mut() = Some(PathBuf::from(&target.opaque));
+        *self.source_target.borrow_mut() = Some(target.clone());
+        if let Err(error) = self.record_recent_success(&target) {
+            self.note_post_commit_error(&error);
+        }
+        self.controller.borrow_mut().fit()?;
+        self.controller.borrow_mut().cancel_tool()?;
+        // Resource installation is non-fatal for presentation, exactly like the
+        // connector open path: the document is shown and the failure is a status.
+        let mut resource_error: Option<String> = None;
+        if let Err(error) = self.install_fonts() {
+            resource_error = Some(error_text(&error));
+        }
+        if let Err(error) = self.install_images() {
+            if resource_error.is_none() {
+                resource_error = Some(error_text(&error));
+            }
+        }
+        if let Some(error) = &resource_error {
+            self.set_catalog_status("fonts.failed", &[("error", error)])?;
+        }
+        self.render.sync_drawing(self.controller.borrow().drawing());
+        self.full_dirty.set(true);
+        Ok(())
+    }
+
+    /// Report a `.ymodel` open failure without touching the current document.
+    fn fail_ymodel_open(&self, error: CadError) -> CadResult<()> {
+        self.presenting_open.set(false);
+        *self.open_target.borrow_mut() = None;
+        *self.sync_terminal.borrow_mut() =
+            Some(ImportProgressSnapshot::terminal(ImportTerminal::Failed {
+                error: error.clone(),
+            }));
+        self.full_dirty.set(true);
+        Err(error)
     }
 }
 

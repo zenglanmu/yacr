@@ -253,6 +253,15 @@ pub(super) fn create_and_bind_session(shared: &Arc<Mutex<Shared>>, cad_mode: boo
                     session.set_solid_tessellator(Some(std::sync::Arc::new(
                         cad_kernel_solidcore::SolidCoreTessellator::new(),
                     )));
+                    // The native document format. `cad-store-zip` may only be
+                    // linked by a carrier app (`scripts/check-architecture.py`),
+                    // so the shared layers see it exclusively through
+                    // `cad_platform::DocumentArchive`. Without this line every
+                    // `.ymodel` open/save refuses with
+                    // `unsupported-runtime: ymodel` — the explicit refusal, not a
+                    // silent DXF export under a `.ymodel` name.
+                    session.set_document_archive(Some(crate::ymodel_archive::ZipArchive::new()
+                        as std::sync::Arc<dyn cad_platform::DocumentArchive>));
                     // The Options dialog's GPU budget is a renderer policy: apply
                     // the configured percentage before the first device attach
                     // (the engine re-applies it on every re-attach).

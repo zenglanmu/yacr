@@ -591,8 +591,11 @@ fn read_failure(path: &Path, error: std::io::Error) -> String {
 /// `.skp` is the SketchUp preview lane (triangles only, never a measurement
 /// source; an edge-only model is refused by name, not by the picker).
 const OPEN_EXTENSIONS: &[&str] = &[
-    "dwg", "dxf", "obj", "stl", "ply", "off", "coff", "step", "stp", "ifc", "rvt", "rte", "rfa",
-    "rft", "skp", "dgn",
+    // `ymodel` is the native document: it is routed to the archive decoder
+    // before the importer sees it (`cad-host`), and a build without an archive
+    // adapter refuses it by name instead of trying to import it.
+    "ymodel", "dwg", "dxf", "obj", "stl", "ply", "off", "coff", "step", "stp", "ifc", "rvt", "rte",
+    "rfa", "rft", "skp", "dgn",
 ];
 
 /// `"obj"` → `"*.[oO][bB][jJ]"`.

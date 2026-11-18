@@ -61,6 +61,7 @@ fn addselected_app(geometry: SemanticGeometry, space: SpaceId) -> (Application, 
             identity: DocumentIdentity::Sha256([41u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            persistence: crate::PersistenceState::untitled(),
         },
     );
     app.workspace.viewports.insert(

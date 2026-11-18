@@ -222,6 +222,7 @@ fn offset_circle_grows_outward_and_shrinks_inward() {
                 identity: DocumentIdentity::Sha256([7u8; 32]),
                 units: UnitContext::drawing_units(),
                 resource_keys: Vec::new(),
+                persistence: crate::PersistenceState::untitled(),
             },
         );
         app.workspace.viewports.insert(
@@ -371,6 +372,7 @@ pub(super) fn app_with_drawing(drawing: DrawingDatabase) -> Application {
             identity: DocumentIdentity::Sha256([9u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            persistence: crate::PersistenceState::untitled(),
         },
     );
     app.workspace.viewports.insert(

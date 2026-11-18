@@ -25,6 +25,10 @@ serde.workspace = true
 # `recentFiles` array). No version change: the workspace already pins the same
 # serde_json.
 serde_json.workspace = true
+# Native `.ymodel` save conflict detection: the `sha256` of the bytes a document
+# was opened from (ADR-0037 D12 "no lock file" rule). Hashing only — the archive
+# itself stays carrier-owned.
+sha2.workspace = true
 # `std::time::Instant::now()` panics on wasm32-unknown-unknown; `web-time`
 # re-exports std elsewhere (no-op off wasm). See `src/lib.rs`/`src/core.rs`.
 web-time.workspace = true

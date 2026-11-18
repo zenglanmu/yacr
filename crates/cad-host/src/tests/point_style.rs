@@ -17,6 +17,9 @@ use super::*;
 fn a_pdmode_pdsize_write_survives_a_real_save_and_reopen() {
     let files = Rc::new(SyncSaveFiles::default());
     let core = core_with_caps(files.clone(), capabilities(false));
+    // This contract is about the DXF head-variable round trip, so the document
+    // has a `.dxf` source (a sourceless document now defaults to `.ymodel`).
+    *core.source_target.borrow_mut() = Some(FileTarget::from_path("/tmp/point-style.dxf"));
 
     core.command(
         CommandId::SetPointDisplayMode,

@@ -58,6 +58,7 @@ mod stretch_lasso;
 mod text_tool;
 mod tolerance;
 mod wipeout_frames;
+mod ymodel;
 mod zoom_window;
 
 // --- synthetic platform contracts -------------------------------------------

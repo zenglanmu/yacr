@@ -88,6 +88,7 @@ fn fixture(mode: AppMode) -> (Application, SessionState) {
             identity: DocumentIdentity::Temporary(1),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            persistence: cad_app::PersistenceState::untitled(),
         },
     );
     app.workspace
@@ -402,6 +403,7 @@ fn opaque_geometry_is_refused_by_preflight_without_changing_selection() {
             identity: DocumentIdentity::Temporary(2),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            persistence: cad_app::PersistenceState::untitled(),
         },
     );
     app.workspace
@@ -478,6 +480,7 @@ fn single_geometry_fixture(geometry: SemanticGeometry) -> (Application, SessionS
             identity: DocumentIdentity::Temporary(3),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            persistence: cad_app::PersistenceState::untitled(),
         },
     );
     app.workspace
@@ -632,6 +635,7 @@ fn single_entity_app(geometry: SemanticGeometry) -> (Application, SessionState) 
             identity: DocumentIdentity::Temporary(1),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            persistence: cad_app::PersistenceState::untitled(),
         },
     );
     app.workspace
@@ -722,6 +726,7 @@ fn layer_zero_member_fixture(mode: AppMode) -> (Application, SessionState) {
             identity: DocumentIdentity::Temporary(1),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            persistence: cad_app::PersistenceState::untitled(),
         },
     );
     app.workspace

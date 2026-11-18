@@ -160,6 +160,7 @@ fn annot_app() -> (Application, SessionState) {
             identity: DocumentIdentity::Sha256([9u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            persistence: crate::PersistenceState::untitled(),
         },
     );
     app.workspace.viewports.insert(

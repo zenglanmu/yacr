@@ -23,6 +23,9 @@ use cad_domain::CadResult;
 /// Which export a save dialog was opened for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SavePurpose {
+    /// Native document save (`.ymodel`). The only format that round-trips
+    /// losslessly and the only one that can be re-opened as the same document.
+    SaveYmodel,
     /// Lossy DXF Save As.
     SaveDxf,
     /// Experimental DWG Save As: always a **new** file, never the opened source.
@@ -116,6 +119,17 @@ pub trait PlatformFiles {
     /// [`PlatformFiles::refuses_source_overwrite`] can guard it. The core calls
     /// this only after a **successful** install, never at attempt time.
     fn set_source(&self, target: Option<&FileTarget>);
+
+    /// Read a target's current bytes, for in-place save support (native `.ymodel`).
+    /// The default refuses: a carrier that cannot re-read a target cannot save in
+    /// place. Never fabricate empty bytes.
+    ///
+    /// `Err` means the bytes could not be read (absent **or** unreadable); the
+    /// save funnel only treats an error as "no previous archive" for a target it
+    /// was not opened from, and refuses an in-place save it cannot re-read.
+    fn read_target(&self, _target: &FileTarget) -> Result<Vec<u8>, String> {
+        Err("unsupported-runtime: read_target".to_string())
+    }
 
     /// Remember (`Some`) or clear (`None`) the last reopened/opened target, so
     /// the next open chooser can start in its directory.
@@ -278,5 +292,17 @@ mod tests {
             }),
             None
         );
+    }
+
+    #[test]
+    fn read_target_refuses_explicitly_by_default() {
+        // A carrier that cannot re-read a target must not silently gain in-place
+        // save support: the default answers with a stable marker, never empty
+        // bytes (which a saver would take as "the file is empty").
+        let files = NullFiles;
+        let error = files
+            .read_target(&FileTarget::from_path("/tmp/plan.ymodel"))
+            .expect_err("the default must refuse, not fabricate bytes");
+        assert_eq!(error, "unsupported-runtime: read_target");
     }
 }

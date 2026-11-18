@@ -34,6 +34,7 @@ fn finish(b: DrawingDatabaseBuilder, mode: AppMode) -> (Application, SessionStat
             identity: DocumentIdentity::Sha256([91u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            persistence: crate::PersistenceState::untitled(),
         },
     );
     app.workspace.viewports.insert(

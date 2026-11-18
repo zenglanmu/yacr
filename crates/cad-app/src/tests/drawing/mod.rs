@@ -88,6 +88,7 @@ fn drawing_app() -> (Application, SessionState) {
             identity: DocumentIdentity::Sha256([1u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            persistence: crate::PersistenceState::untitled(),
         },
     );
     app.workspace.viewports.insert(
@@ -150,6 +151,7 @@ fn single_line_app(attributes: Option<cad_db::EntityRenderAttributes>) -> Applic
             identity: DocumentIdentity::Sha256([3u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            persistence: crate::PersistenceState::untitled(),
         },
     );
     app.workspace.viewports.insert(
@@ -219,6 +221,7 @@ fn line_and_boundary_app(
             identity: DocumentIdentity::Sha256([4u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            persistence: crate::PersistenceState::untitled(),
         },
     );
     app.workspace.viewports.insert(
@@ -266,6 +269,7 @@ fn line_and_opaque_app() -> Application {
             identity: DocumentIdentity::Sha256([6u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            persistence: crate::PersistenceState::untitled(),
         },
     );
     app.workspace.viewports.insert(

@@ -36,4 +36,5 @@ cad-resources.workspace = true
 # `Arc<dyn SolidModeler>`; a carrier without one refuses by name.
 cad-kernel-adapter.workspace = true
 serde_json.workspace = true
+uuid.workspace = true
 serde.workspace = true

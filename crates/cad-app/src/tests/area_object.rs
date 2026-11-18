@@ -225,6 +225,7 @@ fn app_with_objects() -> (Application, SessionState) {
             identity: DocumentIdentity::Sha256([11u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            persistence: crate::PersistenceState::untitled(),
         },
     );
     app.workspace.viewports.insert(
@@ -544,6 +545,7 @@ fn an_ellipse_with_a_degenerate_ratio_or_axis_is_refused() {
             identity: DocumentIdentity::Sha256([12u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            persistence: crate::PersistenceState::untitled(),
         },
     );
     app.workspace.viewports.insert(
@@ -603,6 +605,7 @@ fn an_ellipse_ratio_above_one_is_measured_verbatim_and_not_swapped() {
             identity: DocumentIdentity::Sha256([13u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            persistence: crate::PersistenceState::untitled(),
         },
     );
     app.workspace.viewports.insert(

@@ -13,6 +13,9 @@ pub type HostFuture<'a, T> = Pin<Box<dyn Future<Output = CadResult<T>> + 'a>>;
 /// This reshapes the earlier 0-implementation `FileAccess` draft: the host core
 /// is event-based and single-threaded, so the contracts are object-safe, use no
 /// futures and require no `Send`.
+pub mod archive;
+pub use archive::{ArchiveBytes, ArchiveError, ArchiveWrite, DocumentArchive, LoadedArchive};
+
 pub mod files;
 pub use files::{
     ConfigLoad, ConfigStore, FileEvent, FilePurpose, FileTarget, HostCapabilities,

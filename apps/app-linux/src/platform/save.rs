@@ -21,9 +21,11 @@ use cad_ui_core::i18n::MessageSource;
 
 use super::{FileChooserOutcome, KEY_PICKER_EMPTY, KEY_PICKER_FAILED, KEY_PICKER_LOCAL};
 
+const KEY_SAVE_TITLE_YMODEL: &str = "linux.save_title_ymodel";
 const KEY_SAVE_TITLE_DXF: &str = "linux.save_title_dxf";
 const KEY_SAVE_TITLE_DWG: &str = "linux.save_title_dwg";
 const KEY_SAVE_TITLE_PLOT: &str = "linux.save_title_plot";
+const KEY_SAVE_FILTER_YMODEL: &str = "linux.save_filter_ymodel";
 const KEY_SAVE_FILTER_DXF: &str = "linux.save_filter_dxf";
 const KEY_SAVE_FILTER_DWG: &str = "linux.save_filter_dwg";
 const KEY_SAVE_FILTER_PLOT: &str = "linux.save_filter_plot";
@@ -36,9 +38,12 @@ const KEY_SAVE_FILTER_PLOT: &str = "linux.save_filter_plot";
 /// concept), the title and filter are per [`SavePurpose`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UseSaveDialogLabels {
+    /// Native `.ymodel` Save As.
+    pub title_ymodel: String,
     pub title_dxf: String,
     pub title_dwg: String,
     pub title_plot: String,
+    pub filter_ymodel: String,
     pub filter_dxf: String,
     pub filter_dwg: String,
     pub filter_plot: String,
@@ -62,9 +67,11 @@ impl UseSaveDialogLabels {
                 .ok_or_else(|| CadError::InvalidInput(format!("i18n key missing: {key}")))
         };
         Ok(Self {
+            title_ymodel: get(KEY_SAVE_TITLE_YMODEL)?,
             title_dxf: get(KEY_SAVE_TITLE_DXF)?,
             title_dwg: get(KEY_SAVE_TITLE_DWG)?,
             title_plot: get(KEY_SAVE_TITLE_PLOT)?,
+            filter_ymodel: get(KEY_SAVE_FILTER_YMODEL)?,
             filter_dxf: get(KEY_SAVE_FILTER_DXF)?,
             filter_dwg: get(KEY_SAVE_FILTER_DWG)?,
             filter_plot: get(KEY_SAVE_FILTER_PLOT)?,
@@ -82,6 +89,7 @@ impl UseSaveDialogLabels {
     /// Dialog title for a save purpose.
     pub fn title(&self, purpose: SavePurpose) -> &str {
         match purpose {
+            SavePurpose::SaveYmodel => &self.title_ymodel,
             SavePurpose::SaveDxf => &self.title_dxf,
             SavePurpose::SaveDwg => &self.title_dwg,
             SavePurpose::Plot => &self.title_plot,
@@ -91,6 +99,7 @@ impl UseSaveDialogLabels {
     /// The one filter label for a save purpose.
     pub fn filter(&self, purpose: SavePurpose) -> &str {
         match purpose {
+            SavePurpose::SaveYmodel => &self.filter_ymodel,
             SavePurpose::SaveDxf => &self.filter_dxf,
             SavePurpose::SaveDwg => &self.filter_dwg,
             SavePurpose::Plot => &self.filter_plot,
@@ -117,6 +126,9 @@ pub fn portal_save(
     use ashpd::desktop::ResponseError;
 
     let filter = match purpose {
+        SavePurpose::SaveYmodel => {
+            FileFilter::new(labels.filter(purpose)).glob("*.[yY][mM][oO][dD][eE][lL]")
+        }
         SavePurpose::SaveDxf => FileFilter::new(labels.filter(purpose)).glob("*.[dD][xX][fF]"),
         SavePurpose::SaveDwg => FileFilter::new(labels.filter(purpose)).glob("*.[dD][wW][gG]"),
         SavePurpose::Plot => FileFilter::new(labels.filter(purpose))

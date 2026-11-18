@@ -232,6 +232,7 @@ fn space_app(
             identity: DocumentIdentity::Sha256([7u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            persistence: crate::PersistenceState::untitled(),
         },
     );
     app.workspace.viewports.insert(
@@ -482,6 +483,7 @@ fn a_target_already_on_its_row_is_a_noop_with_no_transaction() {
             identity: DocumentIdentity::Sha256([7u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            persistence: crate::PersistenceState::untitled(),
         },
     );
     app.workspace.viewports.insert(
@@ -634,6 +636,7 @@ fn auto_uses_the_style_text_height_not_the_zero_measurement() {
             identity: DocumentIdentity::Sha256([7u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            persistence: crate::PersistenceState::untitled(),
         },
     );
     app.workspace.viewports.insert(
@@ -745,6 +748,7 @@ fn angular_dimensions_are_spaced_concentrically() {
             identity: DocumentIdentity::Sha256([7u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            persistence: crate::PersistenceState::untitled(),
         },
     );
     let mut session = SessionState::new(DocumentId(1), AppMode::Work);

@@ -73,6 +73,7 @@ fn text_app_with(geometry: SemanticGeometry) -> (Application, SessionState) {
             identity: DocumentIdentity::Sha256([9u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            persistence: crate::PersistenceState::untitled(),
         },
     );
     app.workspace.viewports.insert(
@@ -385,6 +386,7 @@ fn mtext_app() -> (Application, SessionState) {
             identity: DocumentIdentity::Sha256([9u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            persistence: crate::PersistenceState::untitled(),
         },
     );
     app.workspace.viewports.insert(
@@ -572,6 +574,7 @@ fn textedit_refuses_a_content_less_multileader_by_name() {
             identity: DocumentIdentity::Sha256([9u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            persistence: crate::PersistenceState::untitled(),
         },
     );
     app.workspace.viewports.insert(

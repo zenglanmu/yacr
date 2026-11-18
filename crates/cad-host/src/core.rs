@@ -1,6 +1,7 @@
 //! Shared host core types: options, platform contracts and the state handles
 //! owned by [`HostCore`].
 use super::*;
+use cad_platform::DocumentArchive;
 // Same monotonic clock alias as the crate root: std off wasm, `web-time` on wasm.
 use crate::Instant;
 use cad_app::grips::GripId;
@@ -405,6 +406,15 @@ pub struct HostCore {
     /// Android has only a SAF URI). Cleared by New; replaced only on a
     /// successful open.
     pub(crate) source_target: Rc<RefCell<Option<FileTarget>>>,
+    /// The carrier's native document archive (ADR-0037 D1/D16).
+    ///
+    /// `None` on a carrier that cannot decode/encode `.ymodel`. The open funnel
+    /// then refuses a `.ymodel` target **by name** (`unsupported-runtime:
+    /// ymodel`) instead of feeding archive bytes to a connector importer, and
+    /// the save funnel refuses the native save the same way. Carrier-owned: the
+    /// shared layers may not link `cad-store-zip` (architecture gate), so the
+    /// implementation arrives as a trait object.
+    pub(crate) archive: Rc<RefCell<Option<Arc<dyn DocumentArchive>>>>,
     /// Last semantic status update.
     pub(crate) last_status: Rc<RefCell<Option<StatusMessage>>>,
     /// Last raster-image loading outcome, surfaced by the diagnostics drawer.

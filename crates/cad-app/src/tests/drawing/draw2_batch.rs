@@ -48,6 +48,7 @@ fn build(entities: Vec<DbEntity>) -> (Application, SessionState) {
             identity: DocumentIdentity::Sha256([0u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            persistence: crate::PersistenceState::untitled(),
         },
     );
     app.workspace.viewports.insert(
@@ -901,6 +902,7 @@ fn draworder_front_moves_block_and_paper_rows_inside_their_own_scope() {
             identity: DocumentIdentity::Sha256([0u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            persistence: crate::PersistenceState::untitled(),
         },
     );
     app.workspace.viewports.insert(
@@ -967,6 +969,7 @@ fn draworder_above_refuses_a_mover_in_another_scope() {
             identity: DocumentIdentity::Sha256([0u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            persistence: crate::PersistenceState::untitled(),
         },
     );
     app.workspace.viewports.insert(

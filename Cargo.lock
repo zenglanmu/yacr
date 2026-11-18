@@ -182,6 +182,7 @@ dependencies = [
  "cad-platform",
  "cad-render-wgpu",
  "cad-resources",
+ "cad-store-zip",
  "cad-ui-core",
  "cc",
  "gdk",
@@ -710,6 +711,7 @@ dependencies = [
  "cad-spatial",
  "serde",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]
@@ -823,6 +825,7 @@ dependencies = [
  "cad-resources",
  "serde",
  "serde_json",
+ "sha2 0.11.1",
  "web-time",
 ]
 

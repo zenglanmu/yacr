@@ -39,6 +39,7 @@ fn fixture(mode: AppMode) -> (Application, SessionState) {
             identity: DocumentIdentity::Temporary(1),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            persistence: cad_app::PersistenceState::untitled(),
         },
     );
     let mut session = SessionState::new(DocumentId(1), mode);

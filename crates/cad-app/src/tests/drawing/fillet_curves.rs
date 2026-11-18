@@ -38,6 +38,7 @@ fn app_from(drawing: cad_db::DrawingDatabase) -> (Application, SessionState) {
             identity: DocumentIdentity::Sha256([7u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            persistence: crate::PersistenceState::untitled(),
         },
     );
     app.workspace.viewports.insert(

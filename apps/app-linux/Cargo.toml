@@ -39,6 +39,10 @@ cad-platform.workspace = true
 cad-resources.workspace = true
 cad-db.workspace = true
 cad-domain.workspace = true
+# The `.ymodel` container: architecture-gated to carrier apps only
+# (`scripts/check-architecture.py`), reached through the
+# `cad_platform::DocumentArchive` seam so no shared layer links it.
+cad-store-zip.workspace = true
 # ADR-0036 phase C1: this carrier owns the only composition that injects a
 # solid modeler (`cad-kernel-solidcore`) into `cad_app::Application`. The kernel
 # stays behind the trait seam; no kernel type reaches another shared layer, and

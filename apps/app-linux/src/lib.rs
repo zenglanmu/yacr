@@ -52,6 +52,8 @@ pub mod redraw;
 mod stacking_regression;
 #[cfg(target_os = "linux")]
 pub mod wayland_surface;
+#[cfg(target_os = "linux")]
+pub mod ymodel_archive;
 
 #[cfg(target_os = "linux")]
 pub use backend::{

@@ -4,6 +4,13 @@
 use cad_app::CommandId;
 use cad_platform::FileTarget;
 
+/// The stable refusal a carrier without a native document archive reports.
+///
+/// Not a localized sentence: the marker is the contract (ADR-0037 D13, the same
+/// string the carrier adapters emit), so an open or a save that cannot run never
+/// silently falls back to a connector format.
+pub const UNSUPPORTED_YMODEL: &str = "unsupported-runtime: ymodel";
+
 /// Plot and Save As own their own success/failure status
 /// (`plot.exported` / `save.exported` / ...); the generic completed/failed text
 /// must not overwrite it.
@@ -47,6 +54,26 @@ pub fn default_dwg_export_name(hint: &str) -> String {
 /// Whether the opened source name denotes a DWG drawing.
 pub fn source_is_dwg(name: &str) -> bool {
     extension_of(name) == "dwg"
+}
+
+/// Whether a target denotes the native `.ymodel` document archive.///
+/// Decided from the user-facing name and the carrier handle, case-insensitively:
+/// the desktop handle is a path, Android's is a SAF `content://` URI and the
+/// browser's is a download label, so the name is the only field all three share.
+/// This decides which *pipeline* runs (archive decode/encode vs. connector
+/// import/export) — never which bytes a file holds.
+pub fn is_ymodel_target(target: &FileTarget) -> bool {
+    is_ymodel_name(&target.display_name) || is_ymodel_name(&target.opaque)
+}
+
+/// Whether a name ends with `.ymodel` (case-insensitive).
+pub fn is_ymodel_name(name: &str) -> bool {
+    const SUFFIX: &[u8] = b".ymodel";
+    let name = name.trim();
+    // Byte comparison, not string slicing: a non-ASCII name must not panic on a
+    // char boundary (it simply is not a `.ymodel`).
+    name.len() >= SUFFIX.len()
+        && name.as_bytes()[name.len() - SUFFIX.len()..].eq_ignore_ascii_case(SUFFIX)
 }
 
 /// A lexical path/handle normalization used for the source-overwrite backstop.
@@ -177,6 +204,29 @@ mod tests {
         assert!(source_is_dwg("/tmp/PLAN.DWG"));
         assert!(!source_is_dwg("plan.dxf"));
         assert!(!source_is_dwg("plan"));
+    }
+
+    #[test]
+    fn ymodel_targets_are_recognized_case_insensitively_from_either_field() {
+        assert!(is_ymodel_name("plan.ymodel"));
+        assert!(is_ymodel_name("/tmp/PLAN.YMODEL"));
+        assert!(
+            is_ymodel_name("plan.ymodel "),
+            "a trailing space is trimmed"
+        );
+        assert!(!is_ymodel_name("plan.ymodel.bak"));
+        assert!(!is_ymodel_name("plan.dwg"));
+        assert!(!is_ymodel_name("plan"));
+        assert!(!is_ymodel_name("ymodel"), "the dot is required");
+        // A non-ASCII name must be a plain `false`, never a slicing panic.
+        assert!(!is_ymodel_name("图纸"));
+        assert!(!is_ymodel_name("图纸文件"));
+        // The carrier handle counts too: a SAF URI whose display name was lost.
+        assert!(is_ymodel_target(&FileTarget {
+            display_name: String::new(),
+            opaque: "content://provider/document/plan.YMODEL".to_string(),
+        }));
+        assert!(!is_ymodel_target(&FileTarget::from_path("/tmp/plan.dxf")));
     }
 
     #[test]
