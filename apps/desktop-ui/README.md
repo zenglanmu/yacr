@@ -24,7 +24,7 @@ npm run dev     # http://127.0.0.1:1420
 | `src/tools/` | 工具参数、开放步骤、文字输入与文字编辑 |
 | `src/commands/` | 命令目录与准入、命令历史（`command-history.ts` 纯规则：命令/拒绝两类条目的有界日志 + `use-command-history.ts` 状态）、命令窗口合流（`command-window.ts`：把宿主 `commandLog` 的输出挂到对应输入行上，弹窗是唯一记录）、消息行文案（`command-message.ts`，行与历史共用同一句）、右键菜单模型、命令行控制器（`command-line-model.ts` 纯规则 + `use-command-line.ts` 状态）、插件提示路由（`plugin-prompt.ts`：`pendingPrompt` 挂起时这一行是答复数据，走 `cad_set_tool_text`，空行 = `CONFIRM`、Esc = `CANCEL`，不经命令准入）、插件消息回声（`plugin-message-echo.ts` 纯模型 + `use-plugin-echo.ts`：读 `src/plugin-api/messages.ts` 的有界缓冲，命令行只显示最新 3 行，不伪造消息） |
 | `src/ribbon/` | 功能区模型与溢出计算 |
-| `src/layout/` | 宽度布局开关（`matchMedia`，断点 1024 CSS px）、移动端抽屉状态与功能区折叠、共享拒绝句（按原因键折叠）、浮动面板几何（`palette-window.ts`，纯函数）、QuickCalc 浮窗几何（`quick-calc-window.ts`，纯函数，视口坐标） |
+| `src/layout/` | 宽度布局开关（`matchMedia`，断点 1024 CSS px）、移动端抽屉状态与功能区折叠、移动端命令栏开关与“必须显示”规则（`mobile-commandbar.ts`）、共享拒绝句（按原因键折叠）、浮动面板几何（`palette-window.ts`，纯函数）、QuickCalc 浮窗几何（`quick-calc-window.ts`，纯函数，视口坐标） |
 | `src/layers/` | 图层投影、属性与标签 |
 | `src/properties/` | 实体属性投影、显示模型与标签 |
 | `src/references/` | 外部引用投影（宿主状态码、稳定原因码）与 `RESOURCES` 本地选择器 |
@@ -36,7 +36,7 @@ npm run dev     # http://127.0.0.1:1420
 | `src/components/` | 区域组件与共享控件（TSX） |
 | `src/stacking-regression/` | 层序回归夹具，不是产品开关 |
 | `src/App.tsx` | 单一 React 树的状态编排与接线，不按本次整理拆分 |
-| `src/main.tsx`、`src/style.css`、`src/mobile.css` | 入口与共享样式 token；`mobile.css` 是移动端增量（全部由 `:root[data-layout="mobile"]` 守卫） |
+| `src/main.tsx`、`src/style.css`、`src/mobile.css`、`src/mobile-commandbar.css` | 入口与共享样式 token；`mobile.css` 是移动端增量（共享面的改动都由 `:root[data-layout="mobile"]` 守卫），命令栏与其向上 sheet 因 1000 行上限拆到 `mobile-commandbar.css`，仍在其后按序加载 |
 | 根目录其他共享模块 | `icons.tsx`、`context.ts`、`catalogs.ts`、`i18n.ts`、`limits.ts`、`defaults.ts`、`focus-release.ts`、`fps.ts` |
 
 新增纯逻辑优先放入对应功能目录；区域 UI 放入 `components/`。只有确实跨功能共享的基础模块
@@ -70,7 +70,8 @@ portal 到 `document.body`，`position: fixed`，标题栏拖动、位置在会�
 `main.shell` 不再携带该属性，所有紧凑样式都用 `:root[data-layout="mobile"]` 守卫。窗口实时改变宽度即切换，
 不重新加载文档，也不重建 `<Workspace />`（它在两种布局里处于同一位置；左侧开始栏与浮动面板层在
 `mobile.css` 里隐藏而非卸载，因此 CAD 会话不会被重挂）。导航列在紧凑布局保留：ViewCube 始终可见，
-图标栏默认收起（本地 chevron 展开），列宽不变，所以展开/收起不会移动 CAD 分区矩形。
+图标栏默认收起（本地 chevron 展开），列宽不变，所以展开/收起不会移动 CAD 分区矩形；主题开关在导航卡的
+**固定头部**（图标栏会滚动，头部不会；桌面用标题行，同一布局只出现一次）。
 
 **为什么是 1024**：布局只按屏幕宽度选（产品决定），而 1024 CSS px 是最后一个“手机/平板”而不是
 “桌面窗口”的宽度——手机竖屏 390、手机横屏（2400×1080 类屏幕约 914）、平板两个方向（≤1024）都拿到
@@ -78,15 +79,17 @@ portal 到 `document.body`，`position: fixed`，标题栏拖动、位置在会�
 
 | 区域 | 桌面 | 紧凑 |
 |---|---|---|
-| 顶部 | 标题/QAT · 功能区 · 图纸标签 | `.mobile-topbar`：菜单按钮（44×44，`aria-expanded`/`aria-controls`）+ 图纸名 + 主题开关（44×44） |
-| 工具 | 92px 功能区 | 抽屉式覆盖层（同一 React 树）：标签 chip 行（横向滚动，固定不滚走）+ 触摸网格（正文滚动，底部渐隐 + 细滚动条）；高度 ≤ `68dvh` 且始终给图纸留下 ≥132px；关闭方式 = 背景点击 / Escape / 执行后 |
-| 中部 | 浮动面板层（默认贴左、可拖动/调宽）+ 导航列 | CAD 分区铺满剩余高度（`100dvh` 里减掉两条 bar）；导航列保留（ViewCube 常驻，图标栏默认收起） |
-| 底部 | 命令行 + 状态栏 | `.mobile-commandbar`：输入、发送、消息（含错误）、向上展开的候选/历史 sheet（≤45dvh） |
+| 顶部 | 标题/QAT · 功能区 · 图纸标签 | `.mobile-topbar`：只有菜单按钮（44×44，`aria-expanded`/`aria-controls`）；图纸名并入抽屉首行（一行省略号 + `title` 全名），主题开关移到导航卡固定头部 |
+| 工具 | 92px 功能区 | 抽屉式覆盖层（同一 React 树）：图纸名首行（一行省略号 + `title` 全名）+ 标签 chip 行（横向滚动，固定不滚走）+ 触摸网格（正文滚动，底部渐隐 + 细滚动条）；高度 ≤ `68dvh` 且始终给图纸留下 ≥96px（浮动按钮 + 一条图纸）；关闭方式 = 背景点击 / Escape / 执行后 |
+| 中部 | 浮动面板层（默认贴左、可拖动/调宽）+ 导航列 | CAD 分区铺满剩余高度（`100dvh` 里减掉顶栏；命令栏展开时再减掉它）；导航列保留（ViewCube 常驻，图标栏默认收起） |
+| 底部 | 命令行 + 状态栏 | 默认隐藏；右下角浮动按钮（44×44）展开 `.mobile-commandbar`：输入、发送、消息（含错误）、向上展开的候选/历史 sheet（≤45dvh）。文字输入步 / 插件提示、宿主故障横幅、已展开的历史 sheet 存在时强制保持展开 |
 
 抽屉与命令栏都不重写规则：抽屉用 `RIBBON_TABS` + `offeredPanels`/`offeredItems` + `runItem`/
 `itemEnabled`/`unavailable`；命令栏用共享控制器 `useCommandLine()` 与 `CommandField`。
-移动端不提供浮动面板开关与“干净屏幕/命令行”折叠开关（没有可折叠的 chrome），
-这是与 `dom-canvas` 载体同一条“不给死按钮”的规则。桌面布局（>1024 px）不变。
+移动端不提供浮动面板开关与“干净屏幕”折叠开关（没有可折叠的 chrome），
+这是与 `dom-canvas` 载体同一条“不给死按钮”的规则。命令栏自己的显隐在右下角浮动按钮上，
+但文字输入步 / 插件提示、宿主故障横幅、已展开的历史 sheet 在场时由纯规则强制展开
+（`layout/mobile-commandbar.ts`）。桌面布局（>1024 px）不变。
 
 抽屉里的拒绝理由是**按原因键**折叠的（`layout/mobile-ribbon.ts` 的 `sharedRefusal` +
 `panelRefusalKey`）：一个面板里所有工具因为同一个原因不可用时只打印一句面板级说明，不再在每个
@@ -94,8 +97,9 @@ portal 到 `document.body`，`position: fixed`，标题栏拖动、位置在会�
 
 ### 宿主要设置的安全区变量
 
-`.mobile-commandbar` 的底部内边距是
-`calc(8px + max(env(safe-area-inset-bottom, 0px), var(--yacr-safe-bottom, 0px)))`。
+`.mobile-commandbar` 的底部内边距（以及浮动触发器的 `bottom`）是
+`calc(8px + max(env(safe-area-inset-bottom, 0px), var(--yacr-safe-bottom, 0px)))`，
+两者都在 `mobile-commandbar.css` 里。
 `--yacr-safe-bottom` 由**宿主**设到 `document.documentElement` 上（默认 `0px`），用于
 Android 强制 edge-to-edge 时系统手势条画在页面上、而 WebView 又报 `env()` 为 0 的情况：
 宿主给出平台真正保留的高度，命令栏据此让开手势条，无需在 CSS 里写死设备数值。
@@ -112,12 +116,12 @@ Android 宿主（`apps/app-android` 的 `MainActivity`）读 `WindowInsets.Type.
 | 工作区 | `Workspace.tsx` |
 | 浮动面板容器 | `PaletteWindow.tsx`（唯一容器：拖动、调宽、层级与几何存储；几何规则在 `src/layout/palette-window.ts`） |
 | 开始页 / 属性 / 图层 / 文件信息 / 诊断（性能）/ 外部引用 / 字体管理器 | `StartPanel.tsx`、`PropertiesDock.tsx`、`LayersPalette.tsx`、`FileInfoPalette.tsx`（静态文件信息）、`DiagnosticsPalette.tsx`（动态性能诊断；两者数据契约见 `docs/file-info-panel.md`）、`ReferencesPanel.tsx`、`FontsPanel.tsx` |
-| 导航列（ViewCube + 图标栏） | `NavigationDock.tsx`（固定宽度右缘列）、`ViewCube.tsx` + `viewcube.css`（六面 + Home；CSS 3D 由宿主相机基算出）、`NavRail.tsx`（可收起；桌面跟宿主 `NAVBAR`，紧凑布局本地展开） |
-| 主题开关 | `ThemeToggle.tsx`（标题/QAT 行与紧凑顶栏共用；写入 `cad_set_setting`，不本地翻转） |
+| 导航列（ViewCube + 图标栏） | `NavigationDock.tsx`（固定宽度右缘列；紧凑布局的头部还挂主题开关）、`ViewCube.tsx` + `viewcube.css`（六面 + Home；CSS 3D 由宿主相机基算出）、`NavRail.tsx`（可收起、只放工具与面板开关；桌面跟宿主 `NAVBAR`，紧凑布局本地展开） |
+| 主题开关 | `ThemeToggle.tsx`（桌面标题/QAT 行；紧凑布局挂在导航卡的固定头部，不随图标栏滚动，同一布局只出现一次；写入 `cad_set_setting`，不本地翻转） |
 | 模型 / 布局标签 | `LayoutTabs.tsx` |
 | 命令行 | `CommandLine.tsx`（桌面停靠区），控制器在 `src/commands/use-command-line.ts`；历史日志见 `src/commands/command-history.ts`；插件提示（原句 + 关键词 + 无效输入）与 `writeMessage` 回声在行上方的有界回声条内，不改变命令行高度 |
 | 状态栏 | `StatusBar.tsx` |
-| 紧凑布局 | `MobileTopBar.tsx`、`MobileRibbonDrawer.tsx`、`MobileCommandBar.tsx`；共享输入框 `CommandField.tsx` |
+| 紧凑布局 | `MobileTopBar.tsx`、`MobileRibbonDrawer.tsx`、`MobileCommandBar.tsx`、`MobileCommandBarToggle.tsx`（浮动触发器）；开关规则在 `src/layout/mobile-commandbar.ts`；共享输入框 `CommandField.tsx` |
 | 共享控件 | `primitives.tsx`，图标在 `src/icons.tsx` |
 
 ## 合成与输入约束

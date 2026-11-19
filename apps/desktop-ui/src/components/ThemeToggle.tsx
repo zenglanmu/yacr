@@ -1,5 +1,7 @@
-// The theme toggle: one icon button, shared by the desktop title row and the
-// compact top bar so both layouts offer the same switch.
+// The theme toggle: one icon button. The desktop title row mounts it, and the
+// compact layout mounts it in the navigation dock's fixed head (the top bar is a
+// single menu button, and the rail below the head scrolls) — the same switch in
+// both layouts, never two per layout.
 //
 // The button never flips a local theme. It writes the opposite of the **host's**
 // value through `cad_set_setting`; the icon changes only when the next
@@ -16,7 +18,7 @@ import { reportedSurfaceMode } from '../cad/surface.ts';
 import type { Theme } from '../theme/theme.ts';
 
 export interface ThemeToggleProps {
-  /** Button size; the compact top bar overrides it to a 44px touch target in CSS. */
+  /** Button size; the compact dock head grows it to a 44px touch target in CSS. */
   readonly size?: ButtonSize;
 }
 

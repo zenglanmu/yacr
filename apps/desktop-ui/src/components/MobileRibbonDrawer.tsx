@@ -9,6 +9,11 @@
 //
 // Shape, and why it differs from the band:
 //
+//   * **The drawing's name heads the panel.** The compact top bar keeps one
+//     control, so the open document's label (the same string the bar used) is the
+//     drawer's first row: one ellipsized line with the full name in `title`, next
+//     to the close button. It is a 44px row, so it costs the chips nothing on a
+//     short landscape viewport.
 //   * **Tab chips, not a tab strip.** The seven tabs cannot share 390px, so the
 //     chip row scrolls horizontally and every chip is a 44px target.
 //   * **A two-or-more column touch grid, not a 92px band.** Each cell is an icon,
@@ -179,6 +184,12 @@ export function MobileRibbonDrawer({ open, onClose }: MobileRibbonDrawerProps) {
   const drawerRef = useRef<HTMLDivElement | null>(null);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const tab = ribbonTab(shell.ribbonTab);
+  // The top bar keeps one control (the menu button), so the open drawing's name
+  // lives here: the same label the bar used, one ellipsized line, with the full
+  // name in `title` for a truncated one. On the start state it is the same
+  // "Get started" the start panel and the desktop doc tab already use, so it never
+  // reads as an invented file name.
+  const documentLabel = shell.documentLabel ?? t('start.title');
   // The compact layout's stand-in for the desktop model/layout strip. It reads
   // the very same projection (`layoutTabsView`) from the same `cad_status`, so
   // the drawer can never show a different space or a different reason.
@@ -229,7 +240,7 @@ export function MobileRibbonDrawer({ open, onClose }: MobileRibbonDrawerProps) {
         tabIndex={-1}
       >
         <div className="mobile-drawer__head">
-          <span className="mobile-drawer__title">{t('mobile.drawer')}</span>
+          <span className="mobile-drawer__title" title={documentLabel}>{documentLabel}</span>
           <IconButton icon="close" label={t('mobile.close')} onClick={onClose} />
         </div>
         {/* The drawing-space strip: the same `layoutTabsView` rows the desktop

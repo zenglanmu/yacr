@@ -13,6 +13,13 @@
 // references toggles stand or fall together, so no button here can toggle a panel
 // that is never rendered. Command ids and gates are unchanged from the rail this
 // replaces; only the chevron moved out.
+//
+// The rail is a scroller, and it is the dock's `tool bar|导航` landmark — so it
+// holds its tools and palette toggles only. Chrome appearance (the compact theme
+// switch) lives in the dock's fixed head instead (`NavigationDock.tsx`): a switch
+// that must be reachable without scrolling cannot be an item in a column that caps
+// and scrolls, and a theme toggle is not a navigation tool. Nothing in this file
+// owns or mounts that switch.
 import React from 'react';
 import { Icon } from '../icons.tsx';
 import type { IconName } from '../icons.tsx';

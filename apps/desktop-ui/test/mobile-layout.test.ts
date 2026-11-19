@@ -1,6 +1,6 @@
 // Contract tests for the width-based layout switch and the compact chrome.
 //
-// Four contracts are locked here, none of them a screenshot:
+// Five contracts are locked here, none of them a screenshot:
 //
 //   * the breakpoint is one constant and the resolver agrees with it (`1024` is
 //     mobile — phone portrait, phone landscape and every tablet — and `1025` is
@@ -9,6 +9,11 @@
 //   * the drawer's ribbon grouping is the real model minus exactly the items a
 //     phone cannot offer (no docked palettes, no chrome-collapse switches), and
 //     its refusals collapse **by reason key**, not by rendered sentence;
+//   * the compact chrome is minimal: the top bar keeps one control (the menu
+//     button), the drawing's name and the theme switch live in the drawer and the
+//     navigation rail, and the command bar is hidden by default behind a floating
+//     trigger while still auto-revealing for a prompt, a text step, a host failure
+//     or the history sheet;
 //   * the app renders the compact regions on mobile only, keeps the desktop
 //     regions gated on it, and hides — rather than unmounts — the docked chrome
 //     inside `<Workspace />`, so a live breakpoint crossing never remounts the
@@ -16,11 +21,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { readCatalog, readModule } from './helpers.ts';
+import { readCatalog, readMobileCss, readModule } from './helpers.ts';
 import {
   LAYOUT_ATTRIBUTE, MOBILE_MAX_WIDTH, MOBILE_MEDIA_QUERY, layoutForWidth, layoutFromMatches,
 } from '../src/layout/layout-mode.ts';
 import { MOBILE_DRAWER_CLOSED, mobileDrawerNext } from '../src/layout/mobile-drawer.ts';
+import {
+  MOBILE_COMMAND_BAR_CLOSED, commandBarMustShow, mobileCommandBarNext, mobileCommandBarVisible,
+} from '../src/layout/mobile-commandbar.ts';
 import {
   MOBILE_HIDDEN_ACTIONS, mobileRibbonDomId, mobileRibbonSections, mobileRibbonTabs, panelRefusalKey, sharedRefusal,
 } from '../src/layout/mobile-ribbon.ts';
@@ -78,6 +86,90 @@ test('the drawer transition is pure and returns the same state when nothing chan
   // not re-render the tree.
   assert.equal(mobileDrawerNext(closed, 'close'), closed);
   assert.equal(mobileDrawerNext(opened, 'open'), opened);
+});
+
+test('the command bar starts hidden, toggles purely, and reveals for must-see facts', () => {
+  // Default closed: the drawing gets the row below the top bar.
+  assert.equal(MOBILE_COMMAND_BAR_CLOSED.open, false);
+  const opened = mobileCommandBarNext(MOBILE_COMMAND_BAR_CLOSED, 'toggle');
+  assert.equal(opened.open, true);
+  assert.notEqual(opened, MOBILE_COMMAND_BAR_CLOSED, 'a real change is a new object');
+  assert.equal(mobileCommandBarNext(opened, 'toggle').open, false);
+  assert.equal(mobileCommandBarNext(opened, 'close').open, false);
+  assert.equal(mobileCommandBarNext(MOBILE_COMMAND_BAR_CLOSED, 'open').open, true);
+  // No-ops keep identity, so a redundant close does not re-render the tree.
+  assert.equal(mobileCommandBarNext(MOBILE_COMMAND_BAR_CLOSED, 'close'), MOBILE_COMMAND_BAR_CLOSED);
+  assert.equal(mobileCommandBarNext(opened, 'open'), opened);
+
+  const quiet = { promptMode: false, textMode: false, notice: false, sheet: false };
+  assert.equal(commandBarMustShow(quiet), false);
+  assert.equal(mobileCommandBarVisible(MOBILE_COMMAND_BAR_CLOSED, quiet), false, 'hidden with nothing to say');
+  assert.equal(mobileCommandBarVisible(opened, quiet), true, 'the user\'s own open wins');
+  // Every must-see fact reveals the bar on its own, without the user asking, and
+  // none of them can be closed away while it holds.
+  for (const condition of ['promptMode', 'textMode', 'notice', 'sheet']) {
+    const reveal = { ...quiet, [condition]: true };
+    assert.equal(commandBarMustShow(reveal), true, `${condition} must show the bar`);
+    assert.equal(mobileCommandBarVisible(MOBILE_COMMAND_BAR_CLOSED, reveal), true, `${condition} reveals it while closed`);
+    assert.equal(
+      mobileCommandBarVisible(mobileCommandBarNext(opened, 'close'), reveal),
+      true,
+      `${condition} keeps it revealed after a close`,
+    );
+  }
+});
+
+test('the compact surface owns the bar state and wires the trigger to the bar it controls', async () => {
+  const app = await readModule('App.tsx');
+  // One region renders both halves; nothing else reads the flag.
+  assert.ok(app.includes('{mobile ? <MobileCommandSurface /> : commandLineOpen ? <CommandLine /> : null}'));
+  const surface = await readModule('components/MobileCommandSurface.tsx');
+  assert.ok(surface.includes('{bar.open ? <MobileCommandBar /> : null}'), 'the bar is mounted only while revealed');
+  assert.ok(surface.includes('barId={MOBILE_COMMAND_BAR_ID}'), 'one bar id, shared by element and trigger');
+  assert.ok(surface.includes('MOBILE_COMMAND_BAR_ID') && surface.includes("from './MobileCommandBar.tsx'"), 'the id is the bar\'s export');
+
+  const hook = await readModule('layout/use-mobile-commandbar.ts');
+  assert.ok(hook.includes('useState<MobileCommandBarState>(MOBILE_COMMAND_BAR_CLOSED)'), 'hidden by default');
+  assert.ok(
+    hook.includes("mobileCommandBarNext(value, mobileCommandBarVisible(value, reveal) ? 'close' : 'open')"),
+    'the trigger acts on what is on screen, not on the stale flag',
+  );
+  // The reveal facts are the bar's own: the same text-step/prompt readers, the
+  // host banner and the history sheet this bar owns.
+  assert.ok(hook.includes('shell.pluginPrompt !== null'));
+  assert.ok(hook.includes('awaitingToolText(shell.status)'));
+  assert.ok(hook.includes("notice: shell.displayedError !== ''"));
+  assert.ok(hook.includes('sheet: shell.historyOpen'));
+  assert.ok(hook.includes('mobileCommandBarVisible(state, reveal)'));
+  // Closing the bar dismisses the sheet it owns (the sheet is shell state).
+  assert.ok(hook.includes('setHistoryOpen(false);'));
+  // No reset effect: the region itself unmounts on a breakpoint crossing.
+  assert.equal(hook.includes('useEffect'), false, 'the state resets by unmounting');
+
+  const bar = await readModule('components/MobileCommandBar.tsx');
+  assert.ok(bar.includes("export const MOBILE_COMMAND_BAR_ID = 'cad-mobile-commandbar';"));
+  // Mounted means open, so the class is constant and the reserved column engages;
+  // without it the fixed trigger would sit on top of Send.
+  assert.ok(bar.includes('className="mobile-commandbar is-open app-region"'));
+
+  const toggle = await readModule('components/MobileCommandBarToggle.tsx');
+  assert.ok(toggle.includes('aria-expanded={expanded}'), 'the trigger reports what is on screen');
+  assert.ok(toggle.includes('aria-controls={barId}'), 'and names the bar it reveals');
+  assert.ok(toggle.includes("t(expanded ? 'mobile.commandbar.hide' : 'mobile.commandbar.show')"), 'catalog copy');
+  assert.ok(toggle.includes("expanded ? 'chevronDown' : 'terminal'"), 'down when open, a terminal when hidden');
+  assert.ok(toggle.includes("t('mobile.commandbar.pinned')"), 'a forced reveal says why it stays');
+  assert.ok(toggle.includes('className={[\'mobile-commandbar-toggle\''), 'one class family');
+  // A chrome overlay: the button is the only painted node (no wrapper, no
+  // full-size layer that would swallow the drawing's presses around it).
+  assert.equal((toggle.match(/className=/g) ?? []).length, 1, 'exactly one painted node');
+  assert.ok(toggle.includes('<button'), 'the trigger is a real button');
+  const css = await readMobileCss();
+  const trigger = css.slice(css.indexOf('.mobile-commandbar-toggle {'), css.indexOf('.mobile-commandbar-toggle:hover'));
+  assert.ok(trigger.includes('position: fixed'), 'it takes no flex space from the drawing');
+  assert.ok(trigger.includes('width: 44px') && trigger.includes('height: 44px'), 'a 44px touch target');
+  assert.ok(trigger.includes('--yacr-safe-bottom'), 'it clears the host gesture bar like the bar');
+  assert.ok(css.includes('.mobile-commandbar-toggle.is-pinned'), 'a forced reveal has its own state');
+  assert.ok(css.includes('.mobile-commandbar.is-open'), 'the open bar reserves the trigger\'s column');
 });
 
 test('the drawer offers the real ribbon model minus the two chrome-collapse switches', () => {
@@ -185,7 +277,7 @@ test('App renders the compact regions on mobile only and keeps the desktop regio
   // Compact regions.
   assert.ok(app.includes('<MobileTopBar menuOpen={mobileDrawer.open}'));
   assert.ok(app.includes('<MobileRibbonDrawer open={mobileDrawer.open}'));
-  assert.ok(app.includes('{mobile ? <MobileCommandBar /> : commandLineOpen ? <CommandLine /> : null}'));
+  assert.ok(app.includes('{mobile ? <MobileCommandSurface /> : commandLineOpen ? <CommandLine /> : null}'));
   // Desktop regions are gated on the compact layout, not rendered alongside it.
   // The ribbon and the drawing tabs carry the finer-grained chrome visibility on
   // top of the layout/clean-screen gates; LayoutTabs and the status bar keep the
@@ -203,10 +295,19 @@ test('App renders the compact regions on mobile only and keeps the desktop regio
 
 test('the compact regions exist and the top bar is the only control that takes width', async () => {
   const topbar = await readModule('components/MobileTopBar.tsx');
-  assert.ok(topbar.includes("shell.documentLabel ?? t('start.title')"), 'the drawing label, or the start title');
+  // One control: the menu button. The drawing's name moved into the drawer, and
+  // the theme switch moved into the navigation rail, so neither competes with the
+  // drawing for the bar's width.
+  assert.equal((topbar.match(/<button\b/g) ?? []).length, 1, 'exactly one button in the top bar');
+  assert.equal(topbar.includes('mobile-topbar__title'), false, 'no document label in the bar');
+  assert.equal(topbar.includes('documentLabel'), false, 'the bar does not read the document label');
+  assert.equal(topbar.includes('ThemeToggle'), false, 'no theme switch in the bar');
   assert.ok(topbar.includes('aria-expanded={menuOpen}'));
   assert.ok(topbar.includes('aria-controls={drawerId}'));
   assert.ok(topbar.includes('aria-label={t(\'mobile.menu\')}'));
+  assert.ok(topbar.includes('importProgressView(shell.importProgress'), 'the host import strip stays');
+  // The bar still drags the window.
+  assert.ok(topbar.includes('className="mobile-topbar app-region"'));
 
   const drawer = await readModule('components/MobileRibbonDrawer.tsx');
   assert.ok(drawer.includes('role="dialog"'));
@@ -214,6 +315,10 @@ test('the compact regions exist and the top bar is the only control that takes w
   assert.ok(drawer.includes('mobileRibbonSections('), 'the real model, reduced for touch');
   assert.ok(drawer.includes('mobileRibbonTabs()'), 'the real tab list');
   assert.ok(drawer.includes('MOBILE_DRAWER_ID'));
+  // The drawer's header carries the label the top bar used to show, one line,
+  // with the full name in `title`.
+  assert.ok(drawer.includes("const documentLabel = shell.documentLabel ?? t('start.title');"), 'the label lives here now');
+  assert.ok(drawer.includes('className="mobile-drawer__title" title={documentLabel}'), 'one ellipsized line with the full name');
   // Same gating and same dispatch as the band: imported, never re-spelled.
   assert.ok(drawer.includes("import { itemEnabled, runItem, unavailable } from './Ribbon.tsx';"));
   assert.ok(drawer.includes('runItem(shell, item)'));
@@ -237,6 +342,7 @@ test('the compact regions exist and the top bar is the only control that takes w
   assert.ok(bar.includes('role="alert"'), 'refusals stay visible without a status bar');
   assert.ok(bar.includes('shell.displayedError'), 'the status bar\'s error slot moved here');
   assert.ok(bar.includes("releaseFocusOnOutsidePress("), 'the same focus hand-off as the docked field');
+  assert.ok(bar.includes('id={MOBILE_COMMAND_BAR_ID}'), 'the trigger\'s aria-controls names this element');
 });
 
 test('no compact component binds the CAD surface or mounts a second session', async () => {
@@ -256,11 +362,13 @@ test('no compact component binds the CAD surface or mounts a second session', as
   }
 });
 
-test('the mobile stylesheet is guarded by the one layout attribute and fits a phone', async () => {
-  const css = await readModule('mobile.css');
+test('the mobile stylesheets are guarded by the one layout attribute and fit a phone', async () => {
+  // Both halves of the compact bundle: the command bar moved to its own file at
+  // the code-file ceiling, so a rule that lives there must stay covered too.
+  const css = await readMobileCss();
   // One guard, no second media query: the breakpoint exists in `layout-mode.ts`
-  // only, so the stylesheet cannot drift from the hook.
-  assert.equal(css.includes('@media'), false, 'mobile.css must not add a second breakpoint');
+  // only, so the stylesheets cannot drift from the hook.
+  assert.equal(css.includes('@media'), false, 'the compact bundle must not add a second breakpoint');
   assert.ok(css.includes(':root[data-layout="mobile"] .shell'));
   assert.ok(css.includes('height: 100dvh'), 'the drawing follows the visual viewport');
   // Safe areas on both bars: the top bar pads the cutout, and the command bar
@@ -280,6 +388,9 @@ test('the mobile stylesheet is guarded by the one layout attribute and fits a ph
   // 44px touch targets on the menu button and the command bar controls.
   const menu = css.slice(css.indexOf('.mobile-topbar__menu {'), css.indexOf('.mobile-topbar__menu {') + 400);
   assert.ok(menu.includes('width: 44px') && menu.includes('height: 44px'));
+  // The top bar keeps no styling for the removed label or theme switch.
+  assert.equal(css.includes('.mobile-topbar__title'), false, 'no title rule survives');
+  assert.equal(css.includes('.mobile-topbar .ui-icon-button'), false, 'no theme-switch rule survives in the bar');
   // The sheet is capped near half the drawing and opens upward from the bar.
   assert.ok(css.includes('--mobile-sheet-h: 45dvh'));
   assert.ok(css.includes('bottom: calc(100% + 6px)'));
@@ -304,7 +415,7 @@ test('the drawer caps its height, scrolls its body and never clips a row silentl
   const cap = css.slice(capStart, css.indexOf(';', capStart));
   assert.ok(cap.includes('68dvh'), 'the panel is capped at 68dvh');
   assert.ok(cap.includes('min('), 'the cap is the smaller of the design cap and the viewport limit');
-  assert.ok(cap.includes('- 132px'), 'a strip of drawing and the command bar always stay visible');
+  assert.ok(cap.includes('- 96px'), 'the floating trigger plus a strip of drawing always stay visible');
   const panel = css.slice(css.indexOf('.mobile-drawer {'), css.indexOf('.mobile-drawer__backdrop {'));
   assert.ok(panel.includes('max-height: var(--mobile-drawer-h)'), 'the panel uses the cap');
   // The body is the scroller: momentum scrolling, contained overscroll, a visible
@@ -319,14 +430,17 @@ test('the drawer caps its height, scrolls its body and never clips a row silentl
   assert.ok(body.includes('padding: 2px 10px calc(var(--mobile-drawer-fade) + 10px)'), 'a reachable last row');
   // The visible affordance at the bottom edge, and the pinned head/chips.
   assert.ok(css.includes('.mobile-drawer::after'), 'a bottom fade says "there is more below"');
-  assert.ok(css.includes('- 132px'));
-  const head = css.slice(css.indexOf('.mobile-drawer__head {'), css.indexOf('.mobile-drawer__head {') + 200);
+  assert.ok(css.includes('- 96px'), 'the floor no longer reserves a hidden command bar');
+  const head = css.slice(css.indexOf('.mobile-drawer__head {'), css.indexOf('.mobile-drawer__head {') + 260);
   assert.ok(head.includes('flex: 0 0 auto'), 'the head stays pinned above the scroller');
+  // The document label's row is exactly the close button's 44px: no vertical
+  // padding, so it costs a short landscape viewport nothing extra.
+  assert.ok(head.includes('padding: 0 4px 0 14px'), 'the label row adds no vertical padding');
   assert.ok(css.includes('--mobile-drawer-fade: 24px'), 'the fade is one variable');
 });
 
 test('every compact control keeps a >= 44px touch target', async () => {
-  const css = await readModule('mobile.css');
+  const css = await readMobileCss();
   const block = (selector) => {
     const start = css.indexOf(`${selector} {`);
     assert.ok(start > 0, `${selector} must exist`);
@@ -401,7 +515,7 @@ test('the status-bar chip cannot wrap, overlap a neighbour or overflow its own b
 });
 
 test('the sheet is the only command-line surface on a phone, and it never reserves a gap', async () => {
-  const css = await readModule('mobile.css');
+  const css = await readMobileCss();
   const block = (selector) => {
     const start = css.indexOf(`${selector} {`);
     assert.ok(start > 0, `${selector} must exist`);
@@ -443,6 +557,9 @@ test('the compact copy is catalog copy in both languages', async () => {
     'mobile.menu', 'mobile.drawer', 'mobile.close', 'mobile.send',
     // The panel-level wording for a reason every tool in a panel shares.
     'mobile.refusal.unsupported',
+    // The floating trigger's two actions and the reason a must-see condition
+    // keeps the bar revealed.
+    'mobile.commandbar.show', 'mobile.commandbar.hide', 'mobile.commandbar.pinned',
   ];
   for (const key of keys) {
     assert.equal(typeof en[key], 'string', `en missing ${key}`);
@@ -459,6 +576,7 @@ test('the compact copy is catalog copy in both languages', async () => {
     'components/MobileTopBar.tsx',
     'components/MobileRibbonDrawer.tsx',
     'components/MobileCommandBar.tsx',
+    'components/MobileCommandBarToggle.tsx',
     'components/CommandField.tsx',
   ]) {
     const source = await readModule(name);
@@ -475,6 +593,6 @@ test('the host bottom inset and the breakpoint are documented for the other lane
   assert.ok(readme.includes('≤1024'), 'README names the current breakpoint');
   assert.equal(readme.includes('768px'), false, 'no README breakpoint sentence still names 768px');
   assert.equal(readme.includes('≤768'), false, 'no README breakpoint sentence still names ≤768');
-  const css = await readModule('mobile.css');
+  const css = await readMobileCss();
   assert.ok(css.includes('<= 1024 CSS px'), 'the stylesheet header names the current breakpoint');
 });

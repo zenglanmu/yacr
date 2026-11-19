@@ -23,16 +23,22 @@ function ruleFor(css, selector) {
 
 const zOf = rule => Number(/z-index:\s*(\d+)/.exec(rule)[1]);
 
-test('the dock head is the cube plus its toggle, and the rail comes after it', async () => {
+test('the dock head is the cube, the compact theme switch and its toggle, then the rail', async () => {
   const dock = await readModule('components/NavigationDock.tsx');
-  // DOM order inside the dock: head (cube, toggle) then the rail. The toggle is
-  // *not* in the rail: it must exist in both rail states and on both layouts.
+  // DOM order inside the dock: head (cube, theme, toggle) then the rail. The
+  // toggle and the theme switch are *not* in the rail: they must exist in both
+  // rail states and on both layouts (the theme one on compact only).
   const head = dock.indexOf('className="navdock__head"');
   const cube = dock.indexOf('<ViewCube />');
+  const theme = dock.indexOf('className="navdock__theme"');
   const toggle = dock.indexOf('className="navdock__toggle"');
   const rail = dock.indexOf('<NavRail open={open} />');
   assert.ok(head > 0 && cube > head, 'the cube is the head\'s first child');
-  assert.ok(toggle > cube, 'the collapse control sits directly under the cube');
+  // The order is deliberate: the chevron acts on the rail, so it stays the last
+  // control directly above it; the theme switch is chrome appearance and sits
+  // before it, never as the rail's first tool.
+  assert.ok(theme > cube, 'the theme switch is under the cube');
+  assert.ok(toggle > theme, 'the collapse control stays the last head control');
   assert.ok(rail > toggle, 'the rail is rendered after the head');
   assert.ok(dock.includes('className="navdock app-region"'), 'one layout region, tagged for metrics');
   // The rail receives the state; it does not own it.
@@ -74,6 +80,11 @@ test('the rail is presentational: it takes `open` and owns no state or copy', as
   for (const action of ['shell.toggleLayers()', 'shell.setFileInfoOpen(', 'shell.setDiagnosticsOpen(', 'shell.setReferencesOpen(']) {
     assert.ok(rail.includes(action), `${action} survives`);
   }
+  // The rail is the dock's `tool bar|导航` landmark and its scroller, so it holds
+  // tools only: no theme switch, no theme state.
+  assert.equal(rail.includes('ThemeToggle'), false, 'the theme switch is not a rail item');
+  assert.equal(rail.includes('navrail__theme'), false, 'no theme group in the column');
+  assert.equal(rail.includes('applyTheme('), false, 'no second theme owner');
   // The chevron moved out of the rail: no toggle, no host command, no own state.
   assert.equal(rail.includes('navrail__toggle'), false, 'the rail renders no collapse control');
   assert.equal(rail.includes("shell.runCommand('NAVBAR')"), false, 'the rail never toggles the host setting itself');
@@ -84,6 +95,36 @@ test('the rail is presentational: it takes `open` and owns no state or copy', as
   // to the head and the desktop column shows the dock's own fill.
   assert.ok(rail.includes('export function NavRail({ open }: NavRailProps)'));
   assert.ok(rail.includes('if (!open) return null;'), 'a closed rail renders nothing at all');
+});
+
+test('the compact theme switch lives in the dock head, outside the scrolling rail landmark', async () => {
+  const dock = await readModule('components/NavigationDock.tsx');
+  // Compact only: the desktop title row owns its one switch, so the desktop column
+  // never grows a second one. `ThemeToggle` still owns every write.
+  assert.ok(dock.includes("import { ThemeToggle } from './ThemeToggle.tsx';"));
+  assert.ok(dock.includes('{shell.mobile ? ('), 'the mount point is the layout, not a prop');
+  assert.ok(dock.includes('className="navdock__theme"'));
+  assert.equal(dock.includes('applyTheme('), false, 'no second theme owner');
+  // Inside the head, ahead of the rail: the rail is the scroller and the
+  // `tool bar|导航` landmark, so a switch there would scroll out of reach.
+  const headAt = dock.indexOf('<div className="navdock__head">');
+  const themeAt = dock.indexOf('className="navdock__theme"');
+  const toggleAt = dock.indexOf('className="navdock__toggle"');
+  const railAt = dock.indexOf('<NavRail open={open} />');
+  assert.ok(themeAt > headAt && themeAt < toggleAt, 'the switch is a head row, before the chevron');
+  assert.ok(themeAt < railAt, 'and never inside the rail');
+  const rail = await readModule('components/NavRail.tsx');
+  assert.equal(rail.includes('ThemeToggle'), false, 'the rail landmark holds no theme switch');
+  // The head is the fixed part: sized by its content and never a scroller, while
+  // the rail (which caps and scrolls inside the card) is the only overflow area.
+  const desktop = await readModule('style.css');
+  const headRule = ruleFor(desktop, '.navdock__head');
+  assert.ok(headRule.includes('flex: 0 0 auto'), 'the head never shrinks into the scroller');
+  assert.equal(headRule.includes('overflow'), false, 'the head is not a scroller');
+  assert.ok(ruleFor(desktop, '.navrail').includes('overflow-y: auto'), 'the rail is the scroller');
+  const mobile = await readModule('mobile.css');
+  const mobileHead = ruleFor(mobile, ':root[data-layout="mobile"] .navdock__head');
+  assert.equal(mobileHead.includes('overflow'), false, 'the compact head does not scroll or clip either');
 });
 
 test('the collapse state is host truth on desktop and local on mobile', async () => {
@@ -188,6 +229,8 @@ test('the compact dock is a content-sized card, never a full-height strip', asyn
   assert.ok(toggle.includes('width: 44px') && toggle.includes('height: 44px'), 'a finger-sized toggle');
   assert.ok(ruleFor(mobile, ':root[data-layout="mobile"] .navrail__button').includes('width: 44px'), '44px rail buttons');
   assert.ok(mobile.includes(':root[data-layout="mobile"] .viewcube__home'), 'Home is finger-sized on mobile too');
+  const theme = ruleFor(mobile, ':root[data-layout="mobile"] .navdock__theme .ui-icon-button');
+  assert.ok(theme.includes('width: 44px') && theme.includes('height: 44px'), 'the theme switch is a 44px target in the card head');
   // The rail paints nothing of its own inside the card, so a *collapsed* card (and
   // an open card's column) never shows a full-height rail background. The desktop
   // fill still lives in `style.css`, which is what `metrics.test.ts` pins.

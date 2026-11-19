@@ -1,20 +1,26 @@
-// The mobile top bar: one menu button and the drawing's name.
+// The mobile top bar: one button, and nothing else.
 //
-// It replaces the title/QAT row, the ribbon tab strip and the drawing-tab strip
-// on the compact layout. Deliberately almost empty: the CAD drawing is the thing
-// that must get the width, so nothing here competes with it. The menu button is
-// the one control (44x44 CSS px, the smallest comfortable touch target, and the
-// only way into the ribbon), and the label is one ellipsized line.
+// It replaces the title/QAT row, the ribbon tab strip and the drawing-tab strip on
+// the compact layout. The CAD drawing is the thing that must get the space, so the
+// bar keeps exactly one control: the 44x44 menu button that opens the ribbon
+// drawer (`aria-expanded`/`aria-controls`, the smallest comfortable touch target,
+// and the only way into the tools).
 //
-// The import strip is the one addition, and it is 2px tall: the desktop puts
-// open progress in the drawing-tab strip, which does not exist here, so a long
-// DWG import would otherwise be invisible (a blank drawing area with no hint
-// that something is running). It reports the host's own progress figure and
-// never invents one; a determinate import fills the bar, an indeterminate one
-// slides.
+// The open drawing's name is **not** here. A filename is not a control, and on a
+// 390px phone a title line either truncates a name the user cannot read or pushes
+// the one button aside; it now lives in the drawer's own header, where a tap on the
+// menu button shows the full name and the tools at the same time. The theme switch
+// moved to the navigation dock's fixed head (mobile only) for the same reason: one
+// row, one control, and it stays reachable without scrolling. Nothing else competes
+// with the drawing.
+//
+// The import strip is the one addition, and it is 2px tall: the desktop puts open
+// progress in the drawing-tab strip, which does not exist here, so a long DWG
+// import would otherwise be invisible (a blank drawing area with no hint that
+// something is running). It reports the host's own progress figure and never
+// invents one; a determinate import fills the bar, an indeterminate one slides.
 import React from 'react';
 import { Icon } from '../icons.tsx';
-import { ThemeToggle } from './ThemeToggle.tsx';
 import { useI18n, useShell } from '../context.ts';
 import { importProgressView } from '../cad/cad-status.ts';
 import type { CadImportProgress } from '../cad/cad-status.ts';
@@ -31,10 +37,6 @@ export interface MobileTopBarProps {
 export function MobileTopBar({ menuOpen, onMenu, drawerId }: MobileTopBarProps) {
   const { t } = useI18n();
   const shell = useShell();
-  // The drawing's own label while one is open; on the start state the title is
-  // the same "Get started" the desktop start panel and doc tab already use, so
-  // the bar never shows an empty slot or an invented file name.
-  const label = shell.documentLabel ?? t('start.title');
   const progress = importProgressView(shell.importProgress as CadImportProgress | null, t);
   const percent = progress && progress.determinate ? Math.round((progress.ratio ?? 1) * 100) : null;
   const running = progress !== null || shell.loading;
@@ -50,10 +52,6 @@ export function MobileTopBar({ menuOpen, onMenu, drawerId }: MobileTopBarProps) 
       >
         <Icon name="menu" size={22} />
       </button>
-      <span className="mobile-topbar__title" title={label}>{label}</span>
-      {/* The compact title row replaces the desktop title bar, so it carries the
-          same theme switch (44px via `mobile.css`). */}
-      <ThemeToggle />
       {running ? (
         <span
           className={['mobile-topbar__progress', progress && progress.determinate ? '' : 'is-indeterminate'].filter(Boolean).join(' ')}

@@ -17,7 +17,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DOCKED_PANEL_REFUSAL_KEY, dockedPaletteOpenable, shortcutAction } from '../src/layout/layout-surfaces.ts';
-import { readCatalog, readModule } from './helpers.ts';
+import { readCatalog, readMobileCss, readModule } from './helpers.ts';
 
 test('the desktop layout keeps all four chrome shortcuts', () => {
   assert.equal(shortcutAction('desktop', 'cleanScreen'), 'toggle-clean-screen');
@@ -31,9 +31,11 @@ test('the desktop layout keeps all four chrome shortcuts', () => {
 test('the compact layout never claims a shortcut whose surface it does not render', () => {
   // The palette layer is hidden, so the properties key is refused in words, not ignored.
   assert.equal(shortcutAction('mobile', 'properties'), 'refuse-docked-panel');
-  // The two bars are unconditional: there is no clean screen to toggle and no
-  // docked command line to hide. The shell claims neither chord (Ctrl+0's WebKit
-  // zoom reset is separately suppressed in every layout).
+  // There is no clean screen to toggle and no docked command line to hide: the
+  // mobile bar's reveal belongs to its floating trigger and the must-see rule
+  // (`layout/mobile-commandbar.ts`), not to a chrome chord. The shell claims
+  // neither chord (Ctrl+0's WebKit zoom reset is separately suppressed in every
+  // layout).
   assert.equal(shortcutAction('mobile', 'cleanScreen'), 'none');
   assert.equal(shortcutAction('mobile', 'commandLine'), 'none');
   // F2 opens the command bar's history sheet...
@@ -102,8 +104,10 @@ test('data-layout has one writer, on the document element', async () => {
   const app = await readModule('App.tsx');
   assert.equal(app.includes('data-layout'), false, 'the shell renders no second copy');
 
-  // Every compact rule keys on the node that actually carries the attribute.
-  const css = (await readModule('mobile.css')).replace(/\/\*[\s\S]*?\*\//g, '');
+  // Every compact rule keys on the node that actually carries the attribute. Both
+  // halves of the bundle are counted: the command bar split out of `mobile.css`
+  // into `mobile-commandbar.css`, and a guard there is still a guard.
+  const css = (await readMobileCss()).replace(/\/\*[\s\S]*?\*\//g, '');
   const guards = css.match(/data-layout="mobile"/g) ?? [];
   assert.ok(guards.length > 10, 'the compact rules are still guarded');
   const roots = css.match(/:root\[data-layout="mobile"\]/g) ?? [];

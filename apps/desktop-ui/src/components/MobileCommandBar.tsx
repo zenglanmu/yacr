@@ -1,4 +1,4 @@
-// The mobile command bar: the single bottom component.
+// The mobile command bar: the bottom component, hidden until it is asked for.
 //
 // It replaces the desktop command line **and** the status bar. The bar holds the
 // same field (through the shared controller and `CommandField`), a send button
@@ -6,13 +6,21 @@
 // lists — which open upward as one bounded sheet so the drawing above stays
 // visible.
 //
+// It is **not mounted by default** (`layout/mobile-commandbar.ts`): the compact
+// layout renders it only while the floating trigger asked for it, or while a
+// must-see condition holds (a text step, a plugin prompt, a host failure, the open
+// history sheet). Unmounting rather than hiding is deliberate — a closed bar takes
+// no height from the drawing, and its absolute sheet/echo cannot leak — and the
+// field is a fresh mount for every reveal, so the text step's "focus the field"
+// effect runs at the moment it is finally on screen.
+//
 // Why a sheet and not the desktop's inline lists: the bar is the last thing on
 // the screen, so an inline list would have nowhere to go but over the drawing,
-// and the drawing is the point. The sheet is capped at 45dvh (`mobile.css`) and
-// the history is capped at `MOBILE_HISTORY_ROWS` entries, so it can never grow
-// into a second screen; it scrolls inside itself. The desktop panel opens upward
-// for the same reason, which is why both presentations pop over the drawing and
-// neither reflows the shell.
+// and the drawing is the point. The sheet is capped at 45dvh
+// (`mobile-commandbar.css`) and the history is capped at `MOBILE_HISTORY_ROWS`
+// entries, so it can never grow into a second screen; it scrolls inside itself.
+// The desktop panel opens upward for the same reason, which is why both
+// presentations pop over the drawing and neither reflows the shell.
 //
 // **No refusal line under the field.** A refused command is reported once, in the
 // history (the red row of the same sheet, above this bar). One surface, one
@@ -48,6 +56,13 @@ interface HistoryMenuState {
   readonly index: number | null;
 }
 
+/**
+ * The bar's DOM id: the floating trigger's `aria-controls` names it. The bar is
+ * mounted only while it is revealed, so the id exists exactly when the trigger
+ * reports `aria-expanded="true"`.
+ */
+export const MOBILE_COMMAND_BAR_ID = 'cad-mobile-commandbar';
+
 export function MobileCommandBar() {
   const { t } = useI18n();
   const shell = useShell();
@@ -63,7 +78,7 @@ export function MobileCommandBar() {
   // over a pending prompt: the sheet would offer commands into an answer line.
   const showHistory = shell.historyOpen && !line.textMode && !line.promptMode;
   // The plugin echo: the same bounded strip the docked region shows, in the one
-  // overlay this bar opens upward (see `mobile.css`).
+  // overlay this bar opens upward (see `mobile-commandbar.css`).
   const echo = usePluginEcho();
   // The pending plugin prompt's own sentence, in full, in the overlay: a phone
   // row cannot hold a question without squeezing the field, and a bounded panel
@@ -169,7 +184,10 @@ export function MobileCommandBar() {
   const bannerText = shell.displayedError ? statusBannerText(shell.displayedError, t) : '';
 
   return (
-    <div ref={rootRef} className="mobile-commandbar app-region">
+    // `is-open` is a statement of fact, not a toggle: this component is mounted
+    // only while the reveal rule has it on screen, and the class is what makes the
+    // bar reserve the floating trigger's column (`mobile-commandbar.css`).
+    <div ref={rootRef} id={MOBILE_COMMAND_BAR_ID} className="mobile-commandbar is-open app-region">
       {line.listOpen || showHistory ? (
         <div
           className="mobile-sheet"
@@ -229,7 +247,7 @@ export function MobileCommandBar() {
             ) : (
               // The same log the docked panel renders, newest first and capped: a
               // command row recalls into the field, a refusal row is red text and
-              // not a control (`.is-error`, styled in `mobile.css`).
+              // not a control (`.is-error`, styled in `mobile-commandbar.css`).
               <ol className="mobile-sheet__rows mobile-sheet__list" aria-label={t('command.history')}>
                 {historyRows.map((entry, index) => (
                   <li key={`${entry.kind}-${index}`} data-history-index={index}>

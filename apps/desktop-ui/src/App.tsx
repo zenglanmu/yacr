@@ -46,7 +46,7 @@ import { CommandLine } from './components/CommandLine.tsx';
 import { StatusBar } from './components/StatusBar.tsx';
 import { PopupOverlay } from './components/PopupOverlay.tsx';
 import { ContextMenu } from './components/ContextMenu.tsx';
-import { MobileCommandBar } from './components/MobileCommandBar.tsx';
+import { MobileCommandSurface } from './components/MobileCommandSurface.tsx';
 import { MOBILE_DRAWER_ID, MobileRibbonDrawer } from './components/MobileRibbonDrawer.tsx';
 import { MobileTopBar } from './components/MobileTopBar.tsx';
 import { MOBILE_DRAWER_CLOSED, mobileDrawerNext } from './layout/mobile-drawer.ts';
@@ -202,7 +202,8 @@ function Shell() {
   const toggleMobileDrawer = useCallback(() => setMobileDrawer(state => mobileDrawerNext(state, 'toggle')), []);
   const closeMobileDrawer = useCallback(() => setMobileDrawer(state => mobileDrawerNext(state, 'close')), []);
   // Leaving the compact layout closes the drawer: there is no drawer on the
-  // desktop band, and a resize back to mobile must not resurrect it open.
+  // desktop band, and a resize back to mobile must not resurrect it open. (The
+  // command bar needs no reset here: its region owns the flag and unmounts.)
   useEffect(() => {
     if (mobile) return;
     setMobileDrawer(state => mobileDrawerNext(state, 'close'));
@@ -926,26 +927,24 @@ function Shell() {
     <I18nContext.Provider value={i18n}>
       <ShellContext.Provider value={shell}>
         <main className={['shell', cleanScreen ? 'is-clean' : ''].filter(Boolean).join(' ')}>
-          {/* Compact layout: the top bar (menu + drawing name) and the drawer it
+          {/* Compact layout: the top bar (one menu button) and the drawer it
               opens. The drawer is a fixed overlay, so it costs the drawing no
-              height. The start column and the palette layer are desktop chrome:
-              they stay mounted and are hidden by CSS on mobile, so a breakpoint
-              crossing never remounts the CAD session. The navigation dock stays
-              on both layouts (the cube is the compact 3D cue). */}
-          {mobile ? (
-            <>
-              <MobileTopBar menuOpen={mobileDrawer.open} onMenu={toggleMobileDrawer} drawerId={MOBILE_DRAWER_ID} />
-              <MobileRibbonDrawer open={mobileDrawer.open} onClose={closeMobileDrawer} />
-            </>
-          ) : cleanScreen ? null : <TitleBar />}
+              height; it is also where the drawing's name and the tools live. The
+              start column and the palette layer are desktop chrome: they stay
+              mounted and are hidden by CSS on mobile, so a breakpoint crossing
+              never remounts the CAD session. The navigation dock stays on both
+              layouts (the cube is the compact 3D cue). */}
+          {mobile ? <MobileTopBar menuOpen={mobileDrawer.open} onMenu={toggleMobileDrawer} drawerId={MOBILE_DRAWER_ID} /> : null}
+          {mobile ? <MobileRibbonDrawer open={mobileDrawer.open} onClose={closeMobileDrawer} /> : null}
+          {mobile || cleanScreen ? null : <TitleBar />}
           {mobile || cleanScreen || !chromeVisibility.ribbon ? null : <Ribbon />}
           {mobile || cleanScreen || !chromeVisibility.fileTabs ? null : <DocTabs />}
           <Workspace />
           {mobile || cleanScreen ? null : <LayoutTabs />}
           {/* One bottom component per layout: the docked command line below the
-              status bar on desktop, the command bar (which also carries errors
-              and history) on mobile. */}
-          {mobile ? <MobileCommandBar /> : commandLineOpen ? <CommandLine /> : null}
+              status bar on desktop, the compact command surface (the bar and its
+              floating trigger, which own the hidden-by-default rule) on mobile. */}
+          {mobile ? <MobileCommandSurface /> : commandLineOpen ? <CommandLine /> : null}
           {mobile ? null : <StatusBar />}
         </main>
         {/* The chrome-local surfaces: Quick View panels, QuickCalc, the workspace

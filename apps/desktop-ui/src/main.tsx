@@ -6,8 +6,11 @@ import { App } from './App.tsx';
 import './style.css';
 // Compact-layout additions. Loaded after `style.css` so its guarded overrides win
 // on equal specificity; every shared-surface rule is scoped to
-// `:root[data-layout="mobile"]`, so the desktop chrome is untouched.
+// `:root[data-layout="mobile"]`, so the desktop chrome is untouched. The command
+// bar and its upward sheet live in the second file, split out at the code-file
+// ceiling; it loads *after* `mobile.css`, so override order is unchanged.
 import './mobile.css';
+import './mobile-commandbar.css';
 import { StackingRegression } from './stacking-regression/Probe.tsx';
 import { isStackingRegression } from './stacking-regression/state.ts';
 import { installGlobalErrorCapture } from './errors/install-global-capture.ts';

@@ -7,8 +7,12 @@
  * the breakpoint lives in one place (`layout-mode.ts`), so the stylesheet and the
  * hook cannot drift apart.
  *
- * Composition: one top bar (menu + drawing name + theme), the CAD partition and
- * the right-edge navigation dock between the bars, and one bottom command bar.
+ * Composition: one top bar holding a single control (the menu button), the CAD
+ * partition and the right-edge navigation dock filling the space below it, and —
+ * hidden by default behind a floating bottom-right trigger — the command bar (see
+ * `mobile-commandbar.css`). The open drawing's name and the tools live in the
+ * drawer the menu button opens; the theme switch lives in the navigation dock's
+ * fixed head (the only part of that card that never scrolls).
  * The desktop palette layer, the ribbon band, the drawing/layout tab strips and
  * the status bar are not rendered on mobile; the chrome inside `<Workspace />`
  * (the start column and the palette layer) stays *mounted* and is hidden below,
@@ -18,8 +22,9 @@
  * it folds the icon rail out of that card (it starts collapsed). It is never a
  * full-height strip here — a phone cannot spare 56px of drawing width.
  *
- * Safe areas: the two bars pad themselves with `env(safe-area-inset-*)`, so a
- * notched phone does not put a control under the cutout or the gesture bar.
+ * Safe areas: the top bar pads the cutout, and the command bar and its trigger pad
+ * the gesture bar with `env(safe-area-inset-*)`, so a notched phone does not put a
+ * control under the cutout or the gesture bar.
  *
  * The command bar also honours the host variable `--yacr-safe-bottom` (default
  * `0px`, set on `:root` by a host before the document loads). It exists for the
@@ -42,12 +47,14 @@
      drawing, which is the thing the user came for. The second limit keeps a
      *usable* strip on a short viewport (a phone in landscape is ~412px tall,
      where 68dvh alone would bury the drawing entirely): the drawer never grows
-     past "viewport minus top bar minus 132px", and the 132px floor covers the
-     command bar plus a strip of drawing above it. `env()` is subtracted because
-     the layer's own padding adds the top inset. */
+     past "viewport minus top bar minus 96px", which is the floating command-line
+     trigger (44px) plus its 8px inset plus a 44px strip of drawing beside it. The
+     command bar itself is hidden by default now, so the floor no longer reserves
+     a docked bar's height. `env()` is subtracted because the layer's own padding
+     adds the top inset. */
   --mobile-drawer-h: min(
     68dvh,
-    calc(100dvh - var(--mobile-topbar-h) - env(safe-area-inset-top) - 132px)
+    calc(100dvh - var(--mobile-topbar-h) - env(safe-area-inset-top) - 96px)
   );
   /* How far the panel's bottom fade reaches into the drawer body. The body pads
      itself by the fade plus a gap, so the last row is fully readable above it. */
@@ -77,9 +84,12 @@
    handful of icons, so the compact layout turns the **same** element into a
    small floating card pinned to the drawing's top-right corner:
  *
- *   * closed, the card is exactly its head — the ViewCube plus the one expand
- *     control under it, nothing else. There is no full-height background and no
- *     left border strip, because nothing is painted that the card does not use;
+ *   * closed, the card is exactly its head — the ViewCube, the compact theme
+ *     switch, and the one expand control under it, nothing else. There is no
+ *     full-height background and no left border strip, because nothing is painted
+ *     that the card does not use. The theme switch is here rather than in the rail
+ *     because the head never scrolls: it must stay reachable at 960x600 and on a
+ *     phone, where the rail's visible part is already full;
  *   * open, it is the same head with the icon rail below it, capped and
  *     scrollable, so it never buries the drawing.
  *
@@ -99,7 +109,8 @@
  *
  * `overflow: hidden` keeps the rail's scrollbar and a pressed button's hover fill
  * inside the 8px radius; the border is a full 1px frame rather than the desktop
- * `border-left` edge. */
+ * `border-left` edge. The head itself is `flex: 0 0 auto` with no overflow rule
+ * (`style.css`), so it neither scrolls nor clips its switch. */
 :root[data-layout="mobile"] .navdock {
   top: 8px;
   right: 8px;
@@ -145,17 +156,26 @@
   height: 44px;
 }
 :root[data-layout="mobile"] .navrail__rule { width: 24px; margin: 3px 0; }
+/* The compact theme switch is a **head** row, not a rail item: the head is the
+   dock's fixed part (the rail below it caps and scrolls with no scrollbar), so the
+   switch stays reachable without scrolling. 44px, like every compact control; the
+   wrapper is one such row so the head does not grow by more than the switch. */
+:root[data-layout="mobile"] .navdock__theme .ui-icon-button {
+  width: 44px;
+  height: 44px;
+}
 :root[data-layout="mobile"] .viewcube { padding: 4px 0; }
 :root[data-layout="mobile"] .viewcube__home { width: 44px; height: 44px; }
 
 /* Top bar ---------------------------------------------------------------- */
+/* One control, one row. The bar exists for the menu button (and the 2px import
+   strip), so everything else here is padding and the safe area. */
 .mobile-topbar {
   position: relative;
   z-index: 30;
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 10px;
   min-height: var(--mobile-topbar-h);
   padding-top: env(safe-area-inset-top);
   padding-left: max(8px, env(safe-area-inset-left));
@@ -164,7 +184,7 @@
   border-bottom: 1px solid var(--line);
 }
 /* The one control in the bar. 44px square is the minimum comfortable touch
-   target; it never shrinks, so the label gives up the width instead. */
+   target; there is nothing beside it to shrink, so it keeps its size. */
 .mobile-topbar__menu {
   display: grid;
   place-items: center;
@@ -184,23 +204,6 @@
 .mobile-topbar__menu[aria-expanded="true"] {
   background: var(--pressed);
   border-color: var(--line-soft);
-}
-.mobile-topbar__title {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: .2px;
-}
-/* The theme switch is the second control in the bar; 44px so it is a comfortable
-   touch target and never squeezes the title row below the minimum. */
-.mobile-topbar .ui-icon-button {
-  flex: none;
-  width: 44px;
-  height: 44px;
 }
 /* Import progress: 2px, pinned to the bar's lower edge, so it costs no width and
    no height. Determinate fills to the host's own ratio; indeterminate slides. */
@@ -275,13 +278,16 @@
   animation: fade var(--t-med) both;
 }
 /* The head and the chip row are `flex: 0 0 auto` siblings of the scroller, so
-   they stay pinned while the body scrolls underneath them. */
+   they stay pinned while the body scrolls underneath them. The head is one 44px
+   row: the open drawing's name (the label the top bar used to carry) and the close
+   control. No vertical padding, so the row is exactly the close button's 44px and
+   a short landscape viewport loses nothing to it. */
 .mobile-drawer__head {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 2px 4px 2px 14px;
+  padding: 0 4px 0 14px;
   border-bottom: 1px solid var(--line);
 }
 .mobile-drawer__head .ui-icon-button {
@@ -295,10 +301,10 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--text-muted);
-  font-size: 10.5px;
-  letter-spacing: .5px;
-  text-transform: uppercase;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: .2px;
 }
 /* Drawing space ---------------------------------------------------------- */
 /* The desktop model/layout strip (`LayoutTabs`) is not rendered on the compact
@@ -559,221 +565,6 @@
   color: var(--text-muted);
   font-size: 10px;
   font-style: normal;
-}
-
-/* Command bar ------------------------------------------------------------ */
-/* The bottom inset is the larger of the platform's `env()` safe area and the
-   host variable `--yacr-safe-bottom` (see the file header). Android enforces
-   edge-to-edge and draws its gesture pill over the page, and the height it
-   reserves is a host fact rather than a CSS constant, so the host sets the
-   variable and the bar clears the pill; a host that sets neither keeps the plain
-   8px. The bar is `flex: 0 0 auto` in `.shell`, so a taller bar simply takes its
-   height from the CAD partition above it — the partition still fills everything
-   that is left. */
-.mobile-commandbar {
-  position: relative;
-  flex: 0 0 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding-top: 6px;
-  padding-left: max(8px, env(safe-area-inset-left));
-  padding-right: max(8px, env(safe-area-inset-right));
-  padding-bottom: calc(8px + max(env(safe-area-inset-bottom, 0px), var(--yacr-safe-bottom, 0px)));
-  background: var(--chrome-2);
-  border-top: 1px solid var(--line);
-}
-.mobile-commandbar__row {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-.mobile-commandbar__prompt { flex: none; color: var(--accent-text); }
-/* The mobile echo: the prompt's own sentence (in full), its keyword chips, its
-   invalid-input sentence and the plugin's messages, as one overlay above the bar.
-   Absolutely positioned for the same reason the sheet is: a prompt must never
-   reflow the drawing, and it yields that space to the sheet. */
-.mobile-echo {
-  position: absolute;
-  left: max(8px, env(safe-area-inset-left));
-  right: max(8px, env(safe-area-inset-right));
-  bottom: calc(100% + 6px);
-  z-index: 20;
-  display: flex; flex-direction: column; gap: 6px;
-  max-height: 40dvh; overflow-y: auto; overscroll-behavior: contain;
-  padding: 8px;
-  background: var(--chrome); border: 1px solid var(--line-soft); border-radius: var(--radius);
-  box-shadow: 0 12px 28px rgba(var(--shadow-rgb), .45);
-  font-family: var(--font-mono); font-size: 11.5px; line-height: 1.35;
-  animation: rise var(--t-fast) both;
-}
-/* The question itself: the command line's accent tone, wrapped rather than
-   clipped — on a phone this is the only place the whole sentence fits. */
-.mobile-echo__prompt { margin: 0; color: var(--accent-text); overflow-wrap: anywhere; }
-.mobile-echo__line {
-  margin: 0;
-  color: var(--text-dim);
-  overflow-wrap: anywhere;
-}
-.mobile-echo__keywords { display: flex; flex-wrap: wrap; gap: 6px; }
-.mobile-echo__keyword {
-  min-height: 32px; padding: 0 12px;
-  border: 1px solid var(--line-soft); border-radius: 999px;
-  background: transparent; color: var(--accent-text);
-  font: inherit; font-size: 12px;
-  cursor: pointer;
-}
-.mobile-echo__keyword:active { background: var(--hover); color: var(--text); }
-.mobile-echo__error { margin: 0; color: var(--danger); font-family: inherit; overflow-wrap: anywhere; }
-/* 16px, not the docked 12px: a smaller field makes iOS Safari zoom the whole
-   page on focus, which would break the partition rect the host composites at. */
-.mobile-commandbar__input {
-  flex: 1 1 auto;
-  min-width: 0;
-  height: 44px;
-  padding: 0 10px;
-  background: var(--field);
-  color: var(--text);
-  border: 1px solid var(--line-soft);
-  border-radius: var(--radius);
-  font-family: var(--font-mono);
-  font-size: 16px;
-}
-.mobile-commandbar__input::placeholder { color: var(--text-muted); opacity: 1; }
-.mobile-commandbar__input:disabled { color: var(--text-disabled); }
-.mobile-commandbar__input:focus-visible {
-  outline: none;
-  border-color: var(--focus);
-  box-shadow: 0 0 0 1px var(--focus);
-}
-.mobile-commandbar .ui-icon-button {
-  flex: none;
-  width: 44px;
-  height: 44px;
-}
-.mobile-commandbar__message {
-  display: block;
-  width: 100%;
-  min-height: 44px;
-  margin: 0 2px;
-  padding: 8px 2px;
-  border: 0;
-  background: transparent;
-  text-align: left;
-  font: inherit;
-  color: var(--danger);
-  font-size: 12px;
-  line-height: 1.35;
-  overflow-wrap: anywhere;
-  cursor: pointer;
-}
-.mobile-commandbar__message.error { color: var(--danger); }
-.mobile-commandbar__message:hover { text-decoration: underline; }
-.mobile-commandbar__hint {
-  margin: 0 2px;
-  color: var(--text-muted);
-  font-size: 11.5px;
-  line-height: 1.35;
-}
-
-/* The upward sheet: absolutely positioned above the bar, so it is an overlay and
-   never reflows the drawing. Capped by `--mobile-sheet-h` and scrollable. */
-.mobile-sheet {
-  position: absolute;
-  left: max(8px, env(safe-area-inset-left));
-  right: max(8px, env(safe-area-inset-right));
-  bottom: calc(100% + 6px);
-  z-index: 20;
-  display: flex;
-  flex-direction: column;
-  max-height: var(--mobile-sheet-h);
-  background: var(--chrome);
-  border: 1px solid var(--line-soft);
-  border-radius: var(--radius);
-  box-shadow: 0 12px 28px rgba(var(--shadow-rgb), .45);
-  overflow: hidden;
-  animation: rise var(--t-fast) both;
-}
-.mobile-sheet__head {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 2px 4px 2px 12px;
-  border-bottom: 1px solid var(--line);
-  color: var(--text-muted);
-  font-size: 10.5px;
-  letter-spacing: .5px;
-  text-transform: uppercase;
-}
-.mobile-sheet__head > span { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mobile-sheet__actions { display: flex; align-items: center; gap: 2px; flex: none; }
-/* The transient copy outcome, the same live region the docked panel carries. It
-   sits inside the actions so the title's ellipsis rule never treats it as a second
-   title. */
-.mobile-sheet__status {
-  flex: none; max-width: 96px;
-  color: var(--text-muted); font-size: 10.5px; letter-spacing: 0; text-transform: none; white-space: nowrap;
-  overflow: hidden; text-overflow: ellipsis;
-}
-.mobile-sheet__status.is-copied { color: var(--ok); }
-.mobile-sheet__status.is-failed { color: var(--danger); }
-/* 44px, not the 36px the head used to give them: these are the sheet's only touch
-   controls (copy history, clear history, close) and a finger does not aim at 36px. */
-.mobile-sheet__actions .ui-icon-button { width: 44px; height: 44px; }
-.mobile-sheet__rows {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding: 4px;
-}
-.mobile-sheet__list { margin: 0; list-style: none; user-select: text; -webkit-user-select: text; }
-.mobile-sheet__row {
-  display: flex;
-  align-items: center;
-  width: 100%;
-  min-height: 44px;
-  padding: 0 10px;
-  border: 0;
-  border-radius: var(--radius);
-  background: transparent;
-  color: var(--text-dim);
-  font-family: var(--font-mono);
-  font-size: 13px;
-  text-align: left;
-  overflow-wrap: anywhere;
-  cursor: pointer;
-  user-select: text;
-  -webkit-user-select: text;
-}
-.mobile-sheet__row:hover { background: var(--hover); color: var(--text); }
-/* A refusal row of the same list: red, wrapping, and not tappable (no hover, no
-   44px hit area — nothing happens when it is pressed). It keeps the sheet's
-   sub-label size (12px on `--chrome` is 4.9:1) so a full sentence stays readable
-   on a phone instead of shrinking into the mono command face. */
-.mobile-sheet__row.is-error {
-  display: block;
-  min-height: 0;
-  padding: 9px 10px;
-  color: var(--danger);
-  font-family: var(--font-ui);
-  font-size: 12px;
-  line-height: 1.4;
-  overflow-wrap: anywhere;
-  cursor: default;
-}
-.mobile-sheet__empty {
-  padding: 12px;
-  color: var(--text-muted);
-  font-size: 12px;
-}
-/* The completion rows are the docked region's own `.completion` markup; only the
-   row height grows, so the two lists cannot describe a suggestion differently. */
-.mobile-sheet .completion {
-  min-height: 44px;
-  padding: 0 10px;
-  font-size: 12.5px;
 }
 
 /* References sheet ------------------------------------------------------- */

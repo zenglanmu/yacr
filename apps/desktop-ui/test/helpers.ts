@@ -59,6 +59,23 @@ export function readCss() {
   return readFile(new URL('style.css', SRC), 'utf8');
 }
 
+/**
+ * Every compact-layout stylesheet, concatenated in load order (`main.tsx` order):
+ * `mobile.css`, then `mobile-commandbar.css`.
+ *
+ * The compact bundle became two files when `mobile.css` reached the 1000-line
+ * code-file ceiling (the command bar and its upward sheet moved out). A test that
+ * asserts on "the compact stylesheet" must read this, not one half: a rule that
+ * moved to the second file would otherwise stop being covered without any failure.
+ */
+export async function readMobileCss() {
+  const files = await Promise.all([
+    readModule('mobile.css'),
+    readModule('mobile-commandbar.css'),
+  ]);
+  return files.join('\n');
+}
+
 export function catalogPath(locale) {
   return new URL(`../../../crates/cad-ui-core/i18n/${locale}.json`, import.meta.url);
 }

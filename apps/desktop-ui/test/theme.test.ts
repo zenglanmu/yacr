@@ -7,7 +7,7 @@
 // and the light token block the stylesheet keys on.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readModule } from './helpers.ts';
+import { readMobileCss, readModule } from './helpers.ts';
 import {
   DEFAULT_THEME,
   THEME_ATTRIBUTE,
@@ -71,7 +71,7 @@ test('main applies the cached theme before React mounts', async () => {
   assert.ok(mount > apply, 'before the first render');
 });
 
-test('the toggle never applies a theme locally, and both title rows carry it', async () => {
+test('the toggle never applies a theme locally, and each layout mounts it exactly once', async () => {
   const toggle = await readModule('components/ThemeToggle.tsx');
   assert.equal(toggle.includes('applyTheme('), false, 'the component does not write the attribute');
   assert.equal(toggle.includes('storeTheme('), false, 'the component does not write the cache');
@@ -83,9 +83,22 @@ test('the toggle never applies a theme locally, and both title rows carry it', a
   const title = await readModule('components/TitleBar.tsx');
   assert.ok(title.includes("import { ThemeToggle } from './ThemeToggle.tsx';"));
   assert.ok(title.includes('<ThemeToggle />'));
-  const mobile = await readModule('components/MobileTopBar.tsx');
-  assert.ok(mobile.includes("import { ThemeToggle } from './ThemeToggle.tsx';"));
-  assert.ok(mobile.includes('<ThemeToggle />'));
+  // The compact layout mounts the same switch in the navigation dock's fixed head,
+  // behind the layout gate: the desktop title row already carries one, so an
+  // unconditional copy would be a second switch for one setting. The rail is the
+  // dock's scroller and `tool bar|导航` landmark, so it holds no switch at all.
+  const dock = await readModule('components/NavigationDock.tsx');
+  assert.ok(dock.includes("import { ThemeToggle } from './ThemeToggle.tsx';"));
+  assert.ok(dock.includes('{shell.mobile ? ('), 'the dock head mounts it on the compact layout only');
+  assert.ok(dock.includes('<ThemeToggle />'));
+  assert.equal(dock.includes('applyTheme('), false, 'the dock owns no theme state');
+  assert.equal(dock.includes('setTheme('), false, 'the dock head writes no setting');
+  const rail = await readModule('components/NavRail.tsx');
+  assert.equal(rail.includes('ThemeToggle'), false, 'the scrolling rail mounts no switch');
+  // The compact top bar is one menu button: no theme switch (and no second copy
+  // of the state) rides there.
+  const mobileTopBar = await readModule('components/MobileTopBar.tsx');
+  assert.equal(mobileTopBar.includes('ThemeToggle'), false, 'the top bar carries no theme switch');
 });
 
 test('the light theme overrides the whole token set and the hardcoded colours are tokenised', async () => {
@@ -113,10 +126,11 @@ test('the light theme overrides the whole token set and the hardcoded colours ar
   assert.equal(/#fff\b/.test(rules), false, 'white-on-accent is --on-text');
   assert.equal(/rgba\(0, 0, 0,/.test(rules), false, 'shadows use --shadow-rgb');
   assert.equal(/rgba\(59, 68, 83, 0\)/.test(rules), false, 'the chrome fade is --chrome-0');
-  // Compact chrome follows the same tokens, and the nav rail is no longer hidden.
-  const mobile = await readModule('mobile.css');
+  // Compact chrome follows the same tokens (both halves of the bundle), and the
+  // theme switch is a 44px target in the mobile dock head.
+  const mobile = await readMobileCss();
   assert.equal(/#fff\b/.test(mobile), false);
   assert.equal(/rgba\(0, 0, 0,/.test(mobile), false);
   assert.ok(mobile.includes('var(--scrim-drawer)'));
-  assert.ok(mobile.includes('.mobile-topbar .ui-icon-button'));
+  assert.ok(mobile.includes(':root[data-layout="mobile"] .navdock__theme .ui-icon-button'));
 });
