@@ -24,14 +24,17 @@ BUILD_CHANGELOG = ROOT / "scripts" / "build-landing-changelog.py"
 CHANGELOG = LANDING / "changelog.json"
 HEADERS = LANDING / "_headers"
 
-RELEASE = "v0.1.15"
-GITHUB_BASE = "https://github.com/zenglanmu/yacr/releases/download/v0.1.15/"
-CDN_BASE = "https://dl-yacr.snakeheartgo.top/releases/v0.1.15"
+RELEASE = "v0.1.16"
+GITHUB_BASE = "https://github.com/zenglanmu/yacr/releases/download/v0.1.16/"
+# `None` is a deliberate value, not a placeholder: v0.1.16 was published without
+# an R2 mirror, so the committed manifest falls back to the GitHub Release URLs.
+# After `upload-r2-downloads.sh` runs, set this to the CDN base it wrote.
+CDN_BASE = None
 KNOWN_ASSETS = {
-    "linux": ("yacr-0.1.15-linux-x86_64.flatpak", 124768448),
-    "windows": ("yacr-0.1.15-windows-x86_64.zip", 111762345),
-    "macos": ("yacr-0.1.15-macos-universal.tar.gz", 160085308),
-    "android": ("app-universal-release.apk", 118912860),
+    "linux": ("yacr-0.1.16-linux-x86_64.flatpak", 124498384),
+    "windows": ("yacr-0.1.16-windows-x86_64.zip", 112159277),
+    "macos": ("yacr-0.1.16-macos-universal.tar.gz", 160844815),
+    "android": ("app-universal-release.apk", 119703388),
 }
 
 # The page shows one genuine product screenshot; the asset must exist, be a PNG
@@ -92,8 +95,8 @@ def check_manifest(text: str, errors: list[str]) -> None:
         fail(f"downloads.json githubBase must be {GITHUB_BASE!r}", errors)
     if data.get("cdnBase") != CDN_BASE:
         fail(
-            f"downloads.json cdnBase must be {CDN_BASE!r} (the cached custom "
-            "download domain)",
+            f"downloads.json cdnBase must be {CDN_BASE!r} (null = GitHub Release "
+            "fallback, otherwise the CDN base the R2 mirror wrote)",
             errors,
         )
 

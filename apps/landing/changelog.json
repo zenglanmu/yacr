@@ -2,6 +2,52 @@
   "generatedFrom": "docs/release-notes",
   "releases": [
     {
+      "version": "v0.1.16",
+      "title": "yacr v0.1.16",
+      "date": "2026-11-19",
+      "url": "https://github.com/zenglanmu/yacr/releases/tag/v0.1.16",
+      "sections": [
+        {
+          "heading": "原生文档 / Native .ymodel documents",
+          "items": [
+            "新增 .ymodel 原生格式（zip 容器 + 分片 JSON）：--open 打开，SAVE 写回；另存为沿用源文档的归档，不会把目标路径上已有文件的内容当成自己的。",
+            "保存是显式且原子的：先写临时文件再替换，上一版留在同目录的 .bak；第一次保存不造备份。",
+            "增量保存：只重写改动过的分片，未改动的分片按上次归档的压缩字节复制；本程序不认识的条目（他方写入的扩展数据）保存时原样保留，重开时按哈希与 CRC 复核。",
+            "修正同一图纸里布局与块编号相同时保存/重开失败的问题。",
+            "文件关联：.ymodel 进入打开对话框与 Linux/Flatpak、macOS、Windows、Android 的文件关联（MIME application/x-yacr-ymodel）。",
+            "边界：只有 Linux 载体接线；其它载体打开/另存 .ymodel 显式拒绝（unsupported-runtime: ymodel），不会静默改存成别的格式。"
+          ]
+        },
+        {
+          "heading": "自动恢复快照 / Recovery snapshots (Linux)",
+          "items": [
+            "有未保存修改时默认每 60 秒写一份恢复快照（设置里可改，0 = 关闭）；成功保存后丢弃；比已保存版本旧的快照直接丢弃，不用它覆盖当前文件。",
+            "恢复就是 OPEN 那份快照，它列在欢迎页的恢复项里。"
+          ]
+        },
+        {
+          "heading": "开始页 / Start page",
+          "items": [
+            "不带 --open 启动不再自动创建空白图：显示欢迎页，列出最近文件与恢复快照；NEW 才建新图。"
+          ]
+        },
+        {
+          "heading": "单位 / Units",
+          "items": [
+            "图纸单位、显示单位、小数位与恢复间隔进入设置（Units & Files 页）；改变单位会把文档标脏。",
+            "$INSUNITS=5（厘米）的图不再在导出时被当成米；显示比例不是 1 时导出会给出明确提示，而不是静默改写长度。"
+          ]
+        },
+        {
+          "heading": "紧凑布局 / Compact layout (≤ 1024 px)",
+          "items": [
+            "顶栏只留菜单按钮，图纸名移到抽屉首行；主题开关移入导航卡片栏头并保持常驻。",
+            "命令栏默认隐藏，由绘图区右下角的浮动按钮展开；文字输入步、插件提示、宿主故障句或历史面板在场时强制保持展开，错误不会被藏起来。"
+          ]
+        }
+      ]
+    },
+    {
       "version": "v0.1.15",
       "title": "yacr v0.1.15",
       "date": "2026-11-17",
