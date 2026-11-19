@@ -51,8 +51,8 @@ const KEY_PICKER_FAILED: &str = "windows.picker_failed";
 /// `.skp` is the SketchUp preview lane (triangles only, never a measurement
 /// source; an edge-only model is refused by name, not by the picker).
 const OPEN_EXTENSIONS: &[&str] = &[
-    "dwg", "dxf", "obj", "stl", "ply", "off", "coff", "step", "stp", "ifc", "rvt", "rte", "rfa",
-    "rft", "skp", "dgn",
+    "ymodel", "dwg", "dxf", "obj", "stl", "ply", "off", "coff", "step", "stp", "ifc", "rvt", "rte",
+    "rfa", "rft", "skp", "dgn",
 ];
 
 /// The COM `COMDLG_FILTERSPEC` pattern (`"*.dwg;*.dxf;…"`).
@@ -964,8 +964,8 @@ mod tests {
         let spec = open_filter_spec();
         let patterns: Vec<&str> = spec.split(';').collect();
         for extension in [
-            "dwg", "dxf", "obj", "stl", "ply", "off", "coff", "step", "stp", "ifc", "rvt", "rte",
-            "rfa", "rft", "skp",
+            "ymodel", "dwg", "dxf", "obj", "stl", "ply", "off", "coff", "step", "stp", "ifc",
+            "rvt", "rte", "rfa", "rft", "skp",
         ] {
             let pattern = format!("*.{extension}");
             assert!(
@@ -973,7 +973,7 @@ mod tests {
                 "{pattern} missing from {spec}"
             );
         }
-        assert!(spec.starts_with("*.dwg;*.dxf;"), "{spec}");
+        assert!(spec.starts_with("*.ymodel;*.dwg;*.dxf;"), "{spec}");
         assert!(!spec.contains(" "), "{spec}");
     }
 }

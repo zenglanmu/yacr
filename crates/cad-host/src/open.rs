@@ -624,6 +624,11 @@ impl HostCore {
             document_uuid: Some(loaded.manifest.document_uuid.clone()),
             foreign_entries: loaded.manifest.foreign_entries.clone(),
             source_sha256: Some(sha256_hex(&bytes)),
+            // The document's own bytes are the base later saves encode from: a
+            // narrowed write keeps their entries, and a Save As carries them
+            // forward instead of adopting the destination file's contents
+            // (ADR-0037 D8/D11/D12 Phase 2).
+            archive_bytes: Some(bytes.clone()),
         };
         let label = target.display_name.clone();
         if let Err(error) = self.controller.borrow_mut().install_snapshot(

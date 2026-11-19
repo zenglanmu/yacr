@@ -1,8 +1,12 @@
 # ADR 0037：ymodel — 唯一原生文档模型与持久化格式
 
-- 状态：**Proposed（2026-11-18，rev.5：持久化章节二次评审后）**。本 ADR 只固定决策、边界与
-  验收标准；**尚未实现**，文中不出现"已实现/已验证"结论。
-- 日期：2026-11-18。
+- 状态：**Proposed（2026-11-18，rev.5：持久化章节二次评审后）；2026-11-19 实现进度更新**。
+  Phase 1（容器/身份/`DocumentHeader`/`ChangeScope`/`DocumentStore`/全量保存/原子替换/`.bak`/
+  revision 种子/恢复快照）与 Phase 2 的**脏分片 raw-copy、宿主 `ChangeScope` 累积、文档自身归档
+  字节保留、冲突检测、恢复快照生命周期**已实现；Phase 2 余项（DXF 导入/导出 L1 不动点、报告落盘）
+  与 Phase 3/4 **未实现**。证据边界见 §5 与
+  `docs/validation-ymodel-phase2-2026-11-19.md`；未运行项在文中逐条标注，不做产品验收结论。
+- 日期：2026-11-18（rev.5）；2026-11-19 增补实现状态。
 - 相关：`CAD_IMPLEMENTATION_SPEC.md` §4.3、§4.4、§4.6、§16.3 与新增 §16.5；
   [ADR-0033](0033-multi-format-import.md)、[ADR-0036](0036-3d-body-model-and-solid-service.md)、
   [ADR-0024](0024-dom-canvas-wasm-cad-path.md)、[ADR-0010](0010-react-linux-host.md)；

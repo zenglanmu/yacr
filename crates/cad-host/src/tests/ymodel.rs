@@ -8,7 +8,9 @@
 
 use super::*;
 
-use cad_db::{DocumentSnapshot, FormatVersion, ManifestSummary};
+use cad_app::{Command, CommandId, CommandPayload};
+use cad_db::{ChangeScope, DocumentSnapshot, FormatVersion, ManifestSummary};
+use cad_domain::ymodel::{ModelKey, Shard};
 use cad_domain::Revision;
 use cad_platform::{ArchiveBytes, ArchiveError, ArchiveWrite, DocumentArchive, LoadedArchive};
 use std::cell::RefCell;
@@ -22,13 +24,20 @@ struct RecordedWrite {
     snapshot_revision: Revision,
     document_uuid: Option<String>,
     open_revision: u64,
+    /// The base archive the write was told to encode from (`previous`).
     previous: Option<Vec<u8>>,
-    dirty_is_empty: bool,
+    /// The accumulated dirty scope the host handed to the write.
+    dirty: ChangeScope,
 }
 
 /// A fake carrier archive: one canned decode result, one canned encode answer.
+///
+/// A successful `write` also retains its snapshot so a later `read` serves it
+/// back: that is what makes a save → reopen round trip a real one here (a real
+/// store would encode and decode the same content).
 struct FakeArchive {
     read: Result<LoadedArchive, ArchiveError>,
+    saved: Mutex<Option<DocumentSnapshot>>,
     writes: Mutex<Vec<RecordedWrite>>,
 }
 
@@ -36,6 +45,7 @@ impl FakeArchive {
     fn new(loaded: LoadedArchive) -> Self {
         Self {
             read: Ok(loaded),
+            saved: Mutex::new(None),
             writes: Mutex::new(Vec::new()),
         }
     }
@@ -46,6 +56,7 @@ impl FakeArchive {
                 marker,
                 "entry tables/layers.json is truncated",
             )),
+            saved: Mutex::new(None),
             writes: Mutex::new(Vec::new()),
         }
     }
@@ -53,6 +64,13 @@ impl FakeArchive {
 
 impl DocumentArchive for FakeArchive {
     fn read(&self, _bytes: &[u8]) -> Result<LoadedArchive, ArchiveError> {
+        // Reopening a file this fake wrote returns what was written.
+        if let Some(snapshot) = self.saved.lock().unwrap().clone() {
+            return Ok(LoadedArchive {
+                manifest: manifest(snapshot.revision),
+                snapshot,
+            });
+        }
         self.read.clone()
     }
 
@@ -62,8 +80,9 @@ impl DocumentArchive for FakeArchive {
             document_uuid: request.document_uuid.map(str::to_string),
             open_revision: request.open_revision,
             previous: request.previous.map(<[u8]>::to_vec),
-            dirty_is_empty: request.dirty.is_empty(),
+            dirty: request.dirty.clone(),
         });
+        *self.saved.lock().unwrap() = Some(request.snapshot.clone());
         Ok(ArchiveBytes {
             bytes: b"FAKE-YMODEL-BYTE-STREAM".to_vec(),
             // A real store echoes the revision it just encoded.
@@ -81,6 +100,9 @@ struct YmodelFiles {
     written: RefCell<Vec<(String, Vec<u8>)>>,
     source: RefCell<Option<FileTarget>>,
     saves: RefCell<Vec<(SavePurpose, String)>>,
+    /// A target the next `begin_save` must return instead of the source, so a
+    /// Save As to a **different** file can be exercised.
+    save_as: RefCell<Option<FileTarget>>,
 }
 
 impl PlatformFiles for YmodelFiles {
@@ -95,13 +117,16 @@ impl PlatformFiles for YmodelFiles {
             .borrow_mut()
             .push((purpose, default_name.to_string()));
         // A synchronous picker (the shape the browser/headless carriers use):
-        // the target is the opened source when there is one, else the suggested
-        // name in a synthetic directory.
-        let target = match self.source.borrow().as_ref() {
-            Some(source) => source.clone(),
-            None => FileTarget {
-                display_name: default_name.to_string(),
-                opaque: format!("/tmp/{default_name}"),
+        // the target is an explicit Save As when one was queued, else the opened
+        // source, else the suggested name in a synthetic directory.
+        let target = match self.save_as.borrow_mut().take() {
+            Some(target) => target,
+            None => match self.source.borrow().as_ref() {
+                Some(source) => source.clone(),
+                None => FileTarget {
+                    display_name: default_name.to_string(),
+                    opaque: format!("/tmp/{default_name}"),
+                },
             },
         };
         self.events
@@ -320,10 +345,12 @@ fn a_native_save_writes_the_archive_and_advances_the_saved_revision() {
     open_ymodel(&core, archive.clone(), &bytes).expect("open");
 
     // One real edit: the document is now dirty.
-    core.controller
+    let created = core
+        .controller
         .borrow_mut()
         .create_line(p(0.0, 5.0), p(5.0, 5.0))
         .expect("edit");
+    let new_entity = created.objects.first().expect("the new entity id").0;
     let edited_revision = {
         let controller = core.controller.borrow();
         let revision = controller.drawing().expect("drawing").revision();
@@ -339,11 +366,21 @@ fn a_native_save_writes_the_archive_and_advances_the_saved_revision() {
         writes[0].snapshot_revision, edited_revision,
         "the snapshot is the current revision"
     );
-    assert!(writes[0].dirty_is_empty, "Phase 1 rewrites every entry");
+    assert!(
+        writes[0]
+            .dirty
+            .touches_shard(ModelKey::ModelSpace, Shard::of(new_entity)),
+        "the accumulated scope names the new entity's shard, got {:?}",
+        writes[0].dirty
+    );
+    assert!(
+        writes[0].dirty.header,
+        "a new row moves the id high-water mark, so document.json is dirty"
+    );
     assert_eq!(
         writes[0].previous.as_deref(),
         Some(bytes.as_slice()),
-        "the target's previous bytes are handed to the archive"
+        "the document's own opened bytes are the base of the write"
     );
     assert_eq!(writes[0].document_uuid.as_deref(), Some("doc-uuid-1"));
     assert_eq!(
@@ -364,8 +401,275 @@ fn a_native_save_writes_the_archive_and_advances_the_saved_revision() {
         "the archive's echoed revision is applied only after the write"
     );
     assert!(!controller.is_dirty(), "a durable save clears dirty");
+    assert!(
+        controller.dirty_scope().is_empty(),
+        "a durable save clears the accumulated scope"
+    );
+    assert_eq!(
+        persistence.archive_bytes.as_deref(),
+        Some(b"FAKE-YMODEL-BYTE-STREAM".as_slice()),
+        "the committed bytes become the next save's base"
+    );
     assert_eq!(persistence.document_uuid.as_deref(), Some("doc-uuid-1"));
     assert!(persistence.source_sha256.is_some());
+}
+
+#[test]
+fn a_second_save_carries_only_the_edits_since_the_first_one() {
+    let files = Rc::new(YmodelFiles::default());
+    let core = core_with(files.clone());
+    let (snapshot, bytes) = archived_document();
+    let opened_revision = snapshot.revision;
+    files
+        .disk
+        .borrow_mut()
+        .insert(YMODEL_PATH.to_string(), bytes.clone());
+    let archive = Arc::new(FakeArchive::new(LoadedArchive {
+        snapshot,
+        manifest: manifest(opened_revision),
+    }));
+    open_ymodel(&core, archive.clone(), &bytes).expect("open");
+    assert!(
+        core.controller.borrow().dirty_scope().is_empty(),
+        "a freshly opened document has nothing outstanding"
+    );
+
+    // First edit, then save.
+    core.controller
+        .borrow_mut()
+        .create_line(p(0.0, 5.0), p(5.0, 5.0))
+        .expect("first edit");
+    core.request_save().expect("first save");
+    assert!(
+        core.controller.borrow().dirty_scope().is_empty(),
+        "the scope is empty right after a durable save"
+    );
+
+    // Second edit: the accumulated set must be exactly this commit's scope, not
+    // a union with the first (already saved) edit.
+    let second = core
+        .controller
+        .borrow_mut()
+        .create_line(p(0.0, 7.0), p(7.0, 7.0))
+        .expect("second edit");
+    let second_scope = second
+        .changes
+        .as_ref()
+        .expect("a committed edit publishes its change set")
+        .scope
+        .clone();
+    assert!(!second_scope.is_empty(), "the second edit is real");
+    {
+        let controller = core.controller.borrow();
+        assert_eq!(
+            controller.dirty_scope(),
+            &second_scope,
+            "only the second edit's scope is accumulated"
+        );
+    }
+    core.request_save().expect("second save");
+    assert!(
+        core.controller.borrow().dirty_scope().is_empty(),
+        "the second save clears it again"
+    );
+
+    let writes = archive.writes.lock().unwrap();
+    assert_eq!(writes.len(), 2);
+    assert_eq!(
+        writes[1].dirty, second_scope,
+        "the second write is narrowed by the second edit's scope only"
+    );
+}
+
+#[test]
+fn a_layer_rename_marks_the_layers_table_and_survives_a_save_and_reopen() {
+    let files = Rc::new(YmodelFiles::default());
+    let core = core_with(files.clone());
+    let (snapshot, bytes) = archived_document();
+    let opened_revision = snapshot.revision;
+    files
+        .disk
+        .borrow_mut()
+        .insert(YMODEL_PATH.to_string(), bytes.clone());
+    let archive = Arc::new(FakeArchive::new(LoadedArchive {
+        snapshot,
+        manifest: manifest(opened_revision),
+    }));
+    open_ymodel(&core, archive.clone(), &bytes).expect("open");
+
+    // A layer write path publishes an **empty** change list (no entity rows) and
+    // only its scope says which table went stale.
+    let (document_id, viewport_id) = {
+        let controller = core.controller.borrow();
+        (controller.document_id, controller.viewport_id)
+    };
+    core.controller
+        .borrow_mut()
+        .execute(Command {
+            schema_version: 1,
+            id: CommandId::RenameLayer,
+            document: document_id,
+            viewport: viewport_id,
+            payload: CommandPayload::RenameLayer {
+                layer: "0".into(),
+                name: "WALLS".into(),
+            },
+        })
+        .expect("the rename applies");
+    assert!(
+        core.controller
+            .borrow()
+            .dirty_scope()
+            .tables
+            .contains(&cad_db::TableKind::Layers),
+        "a layer rename must dirty the layer table even with no entity changes"
+    );
+
+    let renamed_revision = {
+        let controller = core.controller.borrow();
+        let revision = controller.drawing().expect("drawing").revision();
+        assert!(revision.0 > opened_revision.0, "the rename is a revision");
+        revision
+    };
+    core.request_save().expect("save");
+    {
+        let writes = archive.writes.lock().unwrap();
+        assert_eq!(writes.len(), 1);
+        assert_eq!(writes[0].snapshot_revision, renamed_revision);
+        assert!(
+            writes[0].dirty.tables.contains(&cad_db::TableKind::Layers),
+            "the layer table is named in the encoded dirty set"
+        );
+    }
+
+    // Reopen the file the save just wrote: the renamed table row is there.
+    let reopened = b"FAKE-YMODEL-BYTE-STREAM".to_vec();
+    open_ymodel(&core, archive.clone(), &reopened).expect("reopen");
+    let controller = core.controller.borrow();
+    let drawing = controller.drawing().expect("reopened drawing");
+    assert!(
+        drawing.layers().any(|layer| layer.name == "WALLS"),
+        "the renamed layer survived the save/reopen round trip"
+    );
+    assert!(
+        !drawing.layers().any(|layer| layer.name == "0"),
+        "the old name is gone from the reopened document"
+    );
+    assert!(
+        controller.dirty_scope().is_empty(),
+        "reopening starts with no accumulated scope"
+    );
+}
+
+#[test]
+fn opening_a_document_clears_the_accumulated_scope() {
+    let files = Rc::new(YmodelFiles::default());
+    let core = core_with(files.clone());
+    let (snapshot, bytes) = archived_document();
+    let opened_revision = snapshot.revision;
+    files
+        .disk
+        .borrow_mut()
+        .insert(YMODEL_PATH.to_string(), bytes.clone());
+    let archive = Arc::new(FakeArchive::new(LoadedArchive {
+        snapshot,
+        manifest: manifest(opened_revision),
+    }));
+    open_ymodel(&core, archive, &bytes).expect("open");
+    core.controller
+        .borrow_mut()
+        .create_line(p(0.0, 2.0), p(2.0, 2.0))
+        .expect("edit");
+    assert!(
+        !core.controller.borrow().dirty_scope().is_empty(),
+        "the edit accumulated a scope"
+    );
+
+    // The scope described the replaced content; a New must not carry it over.
+    core.controller
+        .borrow_mut()
+        .new_blank_document()
+        .expect("a blank document replaces the edited one");
+    assert!(
+        core.controller.borrow().dirty_scope().is_empty(),
+        "New starts with no accumulated scope"
+    );
+}
+
+#[test]
+fn a_save_as_keeps_the_source_archive_and_the_accumulated_scope() {
+    let files = Rc::new(YmodelFiles::default());
+    let core = core_with(files.clone());
+    let (snapshot, bytes) = archived_document();
+    let opened_revision = snapshot.revision;
+    files
+        .disk
+        .borrow_mut()
+        .insert(YMODEL_PATH.to_string(), bytes.clone());
+    let archive = Arc::new(FakeArchive::new(LoadedArchive {
+        snapshot,
+        manifest: manifest(opened_revision),
+    }));
+    open_ymodel(&core, archive.clone(), &bytes).expect("open");
+    let created = core
+        .controller
+        .borrow_mut()
+        .create_line(p(0.0, 3.0), p(3.0, 3.0))
+        .expect("edit");
+    let new_entity = created.objects.first().expect("the new entity id").0;
+
+    // Save As: a different, not-yet-existing target. The platform would hand this
+    // back from the picker; the fake returns it instead of the source.
+    let copy = FileTarget {
+        display_name: "copy.ymodel".to_string(),
+        opaque: "/tmp/copy.ymodel".to_string(),
+    };
+    *files.save_as.borrow_mut() = Some(copy.clone());
+    core.request_save()
+        .expect("the Save As runs inside the gesture");
+
+    let writes = archive.writes.lock().unwrap();
+    assert_eq!(writes.len(), 1);
+    assert_eq!(
+        writes[0].previous.as_deref(),
+        Some(bytes.as_slice()),
+        "a Save As carries the document's own archive, never the destination's"
+    );
+    assert!(
+        !writes[0].dirty.is_empty(),
+        "the accumulated scope travels with the Save As"
+    );
+    assert!(
+        writes[0]
+            .dirty
+            .touches_shard(ModelKey::ModelSpace, Shard::of(new_entity)),
+        "the edit's shard is in the dirty set, got {:?}",
+        writes[0].dirty
+    );
+    drop(writes);
+
+    let written = files.written.borrow();
+    assert_eq!(written.len(), 1, "one file written");
+    assert_eq!(
+        written[0].0, "copy.ymodel",
+        "the Save As target was written"
+    );
+    drop(written);
+
+    let controller = core.controller.borrow();
+    assert!(
+        controller.dirty_scope().is_empty(),
+        "the Save As is durable, so the scope is cleared"
+    );
+    assert_eq!(
+        controller
+            .persistence()
+            .expect("persistence")
+            .archive_bytes
+            .as_deref(),
+        Some(b"FAKE-YMODEL-BYTE-STREAM".as_slice()),
+        "the saved bytes become the next base"
+    );
 }
 
 #[test]

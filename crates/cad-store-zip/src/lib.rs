@@ -16,7 +16,7 @@
 //! tables/models.json            -- Vec<ModelRecord>
 //! tables/<table>.json           -- one per present TableKind (cad_db::table_entry)
 //! elements/<model>-<shard>.json -- elements of one shard, sorted by id
-//! raw/<anything>                -- foreign/preserved entries (only in Phase 1)
+//! raw/<anything>                -- foreign/preserved entries (never parsed)
 //! ```
 //!
 //! `manifest.json` is deliberately **not** listed in its own `entries`: a
@@ -33,16 +33,19 @@
 //!   central directory on read);
 //! * `sha256_c` — lowercase hex of the **compressed** bytes, or `null`.
 //!
-//! `sha256_c` is `Option` on purpose. Phase 1 is a full rewrite and streams each
-//! entry through the zip writer, so the compressed bytes of an entry it *encodes*
-//! never exist as a buffer the store could hash: computing `sha256_c` would mean
-//! buffering the whole archive first, which the chunked-sink rule (ADR-0037 D16,
-//! the web memory budget) forbids. Freshly encoded entries therefore write
-//! `"sha256_c": null` and are verified on read by decompressing and checking
-//! `sha256`/`len`. Copied (foreign) entries are the exception: their compressed
-//! bytes are carried over unchanged, so their `sha256_c` is copied from the
-//! source archive's manifest and the reader verifies that instead — O(compressed)
-//! instead of O(uncompressed), which is the point of keeping the field at all.
+//! `sha256_c` is `Option` on purpose. Encoding streams each entry through the zip
+//! writer, so the compressed bytes of an entry it *encodes* never exist as a
+//! buffer the store could hash: computing `sha256_c` would mean buffering the whole
+//! archive first, which the chunked-sink rule (ADR-0037 D16, the web memory
+//! budget) forbids. Freshly encoded entries therefore write `"sha256_c": null`.
+//! Raw-copied entries (a foreign blob, or an untouched shard in Phase 2) carry
+//! their compressed bytes over unchanged, but this build still cannot hash those
+//! bytes — `zip` keeps its raw reader crate-private — so a copied shard records
+//! `null` rather than claim a value it did not compute. (A foreign entry whose
+//! source manifest already recorded `sha256_c` keeps that value: it describes the
+//! very bytes being copied.) Every entry is verified on read by decompressing and
+//! checking `sha256`/`len`/CRC; a copy whose source record was corrupt therefore
+//! fails the open instead of being trusted.
 //!
 //! # Determinism
 //!
@@ -138,13 +141,19 @@ impl ZipDocumentStore {
         self
     }
 
-    /// The bytes of the archive this write must carry foreign entries over from.
+    /// The bytes of the archive this write copies unchanged entries from.
+    ///
+    /// Foreign entries **must** be carried over from it, and element shards the
+    /// commit did not touch (`dirty`) are copied from it too rather than being
+    /// re-encoded. Without previous bytes every entry is encoded, which is the
+    /// first-save case.
     ///
     /// [`DocumentStore::read`] sets this automatically when the opened archive
     /// held entries this build does not model, so the usual carrier never calls
     /// it. It exists for the case where the previous archive was read by another
-    /// store instance in the same session. Passing bytes that do not parse as a
-    /// `.ymodel` archive makes `write` fail with
+    /// store instance in the same session, and for a carrier that keeps the
+    /// archive to make later saves incremental. Passing bytes that do not parse as
+    /// a `.ymodel` archive makes `write` fail with
     /// [`cad_domain::ymodel::markers::FOREIGN_ENTRIES_UNREADABLE`]: dropping the
     /// unknown entries silently would be worse than refusing the save.
     pub fn with_previous(mut self, previous: Option<Vec<u8>>) -> ZipDocumentStore {
@@ -231,15 +240,15 @@ impl DocumentStore for ZipDocumentStore {
         dirty: &ChangeScope,
         sink: &mut dyn ByteSink,
     ) -> Result<SaveReport, StoreError> {
-        // Phase 1 is a full rewrite: the live entry set is
-        // `shards ∪ tables_present ∪ models ∪ header ∪ classes ∪ foreign`, so
-        // `dirty` would only choose between "re-encode" and "raw-copy", and
-        // raw-copy lands in Phase 2 (ADR-0037 D17). The parameter stays on the
-        // trait so the call site does not change then.
-        let _ = dirty;
+        // The live entry set is
+        // `shards ∪ tables_present ∪ models ∪ header ∪ classes ∪ foreign`.
+        // `dirty` decides which shards may be raw-copied from `self.previous`
+        // instead of re-encoded (ADR-0037 D11 Phase 2); everything else is
+        // rewritten, so an entry that is no longer live cannot survive.
         write::encode(
             self.max_bytes,
             self.previous.as_deref(),
+            dirty,
             self.open_revision,
             self.document_uuid.as_deref(),
             self.saved_at.as_deref(),

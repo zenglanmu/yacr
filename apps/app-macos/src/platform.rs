@@ -59,8 +59,8 @@ const KEY_PICKER_FAILED: &str = "macos.picker_failed";
 /// `.skp` is the SketchUp preview lane (triangles only, never a measurement
 /// source; an edge-only model is refused by name, not by the picker).
 const OPEN_EXTENSIONS: &[&str] = &[
-    "dwg", "dxf", "obj", "stl", "ply", "off", "coff", "step", "stp", "ifc", "rvt", "rte", "rfa",
-    "rft", "skp", "dgn",
+    "ymodel", "dwg", "dxf", "obj", "stl", "ply", "off", "coff", "step", "stp", "ifc", "rvt", "rte",
+    "rfa", "rft", "skp", "dgn",
 ];
 
 /// The localized labels the native open dialog and open funnel use.
@@ -943,14 +943,14 @@ mod tests {
     #[test]
     fn allowed_file_types_cover_the_importer_set() {
         for extension in [
-            "dwg", "dxf", "obj", "stl", "ply", "off", "coff", "step", "stp", "ifc", "rvt", "rte",
-            "rfa", "rft", "skp", "dgn",
+            "ymodel", "dwg", "dxf", "obj", "stl", "ply", "off", "coff", "step", "stp", "ifc",
+            "rvt", "rte", "rfa", "rft", "skp", "dgn",
         ] {
             assert!(
                 OPEN_EXTENSIONS.contains(&extension),
                 "{extension} must be selectable"
             );
         }
-        assert_eq!(&OPEN_EXTENSIONS[..2], &["dwg", "dxf"]);
+        assert_eq!(&OPEN_EXTENSIONS[..2], &["ymodel", "dwg"]);
     }
 }

@@ -16,6 +16,7 @@
 //! and export divergent content as the original bytes.
 
 use cad_domain::Revision;
+use std::sync::Arc;
 
 /// The persistence state of one document slot.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,6 +44,21 @@ pub struct PersistenceState {
     /// from a file (blank/imported-from-memory), so a save cannot claim to know
     /// what the file looked like.
     pub source_sha256: Option<String>,
+    /// The document's **own** native archive bytes, as last opened or saved
+    /// (ADR-0037 D8/D11/D12).
+    ///
+    /// This is the base a save encodes **from**: its live entries are the ones a
+    /// narrowed write keeps, its unknown entries are copied through
+    /// (`foreign_entries` names them, but the bytes carry the payloads), and its
+    /// header/manifest supplies identity and baseline. It is therefore **never**
+    /// the save target: a Save As must carry the *source* archive forward rather
+    /// than adopt the destination file's contents, and an in-place save must not
+    /// need a re-read to preserve what was already there.
+    ///
+    /// `None` for a document with no native archive — a blank or
+    /// connector-imported drawing — which is also the honest statement that
+    /// "there is nothing to copy through or passthrough".
+    pub archive_bytes: Option<Arc<[u8]>>,
 }
 
 /// A fresh document identity.
@@ -65,6 +81,7 @@ impl PersistenceState {
             document_uuid: Some(new_document_uuid()),
             foreign_entries: Vec::new(),
             source_sha256: None,
+            archive_bytes: None,
         }
     }
 
@@ -81,6 +98,7 @@ impl PersistenceState {
             document_uuid: Some(new_document_uuid()),
             foreign_entries: Vec::new(),
             source_sha256: None,
+            archive_bytes: None,
         }
     }
 
@@ -106,6 +124,10 @@ mod tests {
         );
         assert!(state.foreign_entries.is_empty());
         assert_eq!(state.source_sha256, None);
+        assert_eq!(
+            state.archive_bytes, None,
+            "a blank document has no archive to copy through"
+        );
         assert!(!state.is_dirty(Revision(0)));
         assert!(state.is_dirty(Revision(1)));
     }
@@ -121,6 +143,10 @@ mod tests {
         );
         assert!(!state.is_dirty(Revision(0)));
         assert!(state.is_dirty(Revision(3)));
+        assert_eq!(
+            state.archive_bytes, None,
+            "connector bytes are not the document's own archive"
+        );
     }
 
     #[test]
@@ -147,6 +173,7 @@ mod tests {
             document_uuid: Some("doc".into()),
             foreign_entries: Vec::new(),
             source_sha256: None,
+            archive_bytes: None,
         };
         assert!(!state.is_dirty(Revision(2)));
         assert!(state.is_dirty(Revision(3)));

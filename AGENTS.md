@@ -180,7 +180,11 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
   源写 `.ymodel`，`.dwg` 源仍是实验性 DWG 导出，其它源仍是 DXF。归档拒绝用稳定标记
   `ymodel.*`（`unsupported_version` / `unsupported_minor` / `invalid_document` / `conflict` /
   `foreign_entries_unreadable`）；**目前没有进程退出码映射**（ADR-0037 D13 的 `8` 只是计划）。
-  L0 源字节直通与 L1 不动点**都还没有证据**。恢复快照是载体私有的**普通 `.ymodel`**
+  L0 源字节直通与 L1 不动点**都还没有证据**。保存是**显式保存 + 原子替换**；Phase 2 起
+  保存以文档**自身**的上一个归档为 base，未触及分片按压缩字节 raw-copy、脏分片重编码，
+  `ChangeScope` 由宿主累积（命令 / interaction / plugin commit / engine funnel），打开/New/Close
+  与成功保存后清空。**新增写入路径必须填 `ChangeScope`**，否则保存会复制旧分片（库层测试不会
+  发现这类漏写，只有覆盖该路径的宿主契约才会）。恢复快照是载体私有的**普通 `.ymodel`**
   （`<config>/recovery/<key>.ymodel`），恢复 = 用 `OPEN` 打开它；默认每 60 s 写一次（选项里可改，0 = 关闭），保存成功后丢弃，
   过期快照（`revision <= saved_revision`）直接丢弃而不是提示——**不得**用旧快照回滚文档。
 

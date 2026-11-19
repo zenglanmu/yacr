@@ -1,11 +1,18 @@
 //! Encoding a [`cad_db::DocumentSnapshot`] into `.ymodel` bytes (ADR-0037 D11).
 //!
-//! Phase 1 is a **full rewrite**: every entry the document holds is re-encoded, so
-//! an entry that is no longer live simply is not written and cannot reappear on
-//! the next open. The only entries carried over are the **foreign** ones, and
-//! they are carried over at the compressed-byte level with
-//! [`zip::ZipWriter::raw_copy_file`] — never parsed, never re-compressed, never
-//! dropped.
+//! The save is **incremental at the entry level**: an element shard the commit did
+//! not touch (`dirty.shards ∪ dirty.prev_shards`, Phase 2) is copied from the
+//! previous archive at the compressed-byte level with
+//! [`zip::ZipWriter::raw_copy_file`], while a shard the commit touched is
+//! re-encoded from the snapshot. An entry that is no longer live simply is not
+//! written and cannot reappear on the next open. The other entries carried over
+//! are the **foreign** ones, also raw-copied — never parsed, never re-compressed,
+//! never dropped.
+//!
+//! Everything else is small and always re-encoded: `document.json`,
+//! `schema/classes.json`, `tables/models.json` and every `tables/*.json` row set.
+//! Raw-copying a modelled entry needs the previous archive's manifest to describe
+//! it; a first save has no previous archive, so every entry is encoded then.
 //!
 //! The write order is the format's: every entry in sorted path order, then
 //! `manifest.json` **last** (its entry table can only be built once every other
@@ -30,10 +37,10 @@ use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, DateTime, ZipArchive, ZipWriter};
 
 use cad_db::{
-    table_entry, ByteSink, DocumentSnapshot, ModelRecord, SaveReport, ShardSnapshot, StoreError,
-    CLASSES_ENTRY, DOCUMENT_ENTRY, MODELS_ENTRY,
+    table_entry, ByteSink, ChangeScope, DocumentSnapshot, ModelRecord, SaveReport, ShardSnapshot,
+    StoreError, CLASSES_ENTRY, DOCUMENT_ENTRY, MODELS_ENTRY,
 };
-use cad_domain::ymodel::{markers, DocumentHeader};
+use cad_domain::ymodel::{markers, DocumentHeader, ModelKey, Shard};
 use cad_domain::DocumentIdentity;
 
 use crate::crc32::crc32;
@@ -99,6 +106,11 @@ fn encode_error(error: serde_json::Error) -> StoreError {
 struct Planned<'a> {
     path: String,
     body: Option<Body<'a>>,
+    /// The shard this entry holds, when it is a `Body::Shard`.
+    ///
+    /// Only shard entries are eligible for the raw copy: the rest are small and
+    /// are always re-encoded, so `None` here also means "never copy this".
+    shard: Option<(ModelKey, Shard)>,
 }
 
 /// Everything that must survive the borrow of the sink.
@@ -165,9 +177,11 @@ impl Write for SinkWriter<'_> {
 type ZipSink<'a> = ZipWriter<zip::write::StreamWriter<SinkWriter<'a>>>;
 
 /// Encode `snapshot` and hand the bytes to `sink`.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn encode(
     max_bytes: Option<u64>,
     previous_bytes: Option<&[u8]>,
+    dirty: &ChangeScope,
     open_revision: Option<u64>,
     document_uuid: Option<&str>,
     saved_at: Option<&str>,
@@ -181,9 +195,47 @@ pub(crate) fn encode(
         None => None,
     };
 
+    // One map for every raw copy, whether it is a shard this commit did not touch
+    // or a foreign entry. A copied entry's `body` is `None`; the record is what the
+    // next manifest lists.
+    let mut copy_records = BTreeMap::new();
+
+    // Shards the commit did not touch keep their compressed bytes. The source
+    // manifest must describe the entry as modelled (`!foreign`) and list it in
+    // `shard_map`; otherwise it is re-encoded rather than trusted.
+    if let Some(previous) = previous.as_ref() {
+        for entry in &mut planned {
+            let Some((model, shard)) = entry.shard else {
+                continue;
+            };
+            if !copyable_shard(previous, dirty, &entry.path, model, shard) {
+                continue;
+            }
+            let source = previous
+                .record(&entry.path)
+                .expect("copyable_shard requires a source record");
+            copy_records.insert(
+                entry.path.clone(),
+                EntryRecord {
+                    path: entry.path.clone(),
+                    // The compressed bytes are copied unchanged, so the source's
+                    // uncompressed hashes still describe them.
+                    sha256: source.sha256.clone(),
+                    // This build never holds the compressed bytes as a buffer
+                    // (`zip`'s raw reader is crate-private), so it cannot claim a
+                    // value for them.
+                    sha256_c: None,
+                    len: source.len,
+                    crc: source.crc,
+                    foreign: false,
+                },
+            );
+            entry.body = None;
+        }
+    }
+
     // Foreign entries join the plan at the compressed-byte level. A collision with
     // a live entry is an explicit failure, never an overwrite (D11).
-    let mut foreign_records = BTreeMap::new();
     let mut foreign_paths = Vec::new();
     if let (Some(previous), Some(bytes)) = (previous.as_ref(), previous_bytes) {
         let live: BTreeSet<&str> = planned.iter().map(|entry| entry.path.as_str()).collect();
@@ -203,12 +255,16 @@ pub(crate) fn encode(
                 // Not described by the source manifest: hash it from the bytes.
                 None => previous::measure(bytes, path)?,
             };
-            foreign_records.insert(path.clone(), record);
+            copy_records.insert(path.clone(), record);
             foreign_paths.push(path.clone());
         }
     }
     for path in foreign_paths {
-        planned.push(Planned { path, body: None });
+        planned.push(Planned {
+            path,
+            body: None,
+            shard: None,
+        });
     }
     planned.sort_by(|left, right| left.path.cmp(&right.path));
 
@@ -222,7 +278,7 @@ pub(crate) fn encode(
         &metrics,
         max_bytes,
         &planned,
-        &foreign_records,
+        &copy_records,
         previous_bytes,
         snapshot,
         open_revision,
@@ -259,19 +315,23 @@ fn plan_entries(snapshot: &DocumentSnapshot) -> Result<(Vec<Planned<'_>>, ShardM
     planned.push(Planned {
         path: DOCUMENT_ENTRY.to_string(),
         body: Some(Body::Header(&snapshot.header)),
+        shard: None,
     });
     planned.push(Planned {
         path: CLASSES_ENTRY.to_string(),
         body: Some(Body::Classes),
+        shard: None,
     });
     planned.push(Planned {
         path: MODELS_ENTRY.to_string(),
         body: Some(Body::Models(&snapshot.models)),
+        shard: None,
     });
     for (kind, rows) in &snapshot.tables.rows {
         planned.push(Planned {
             path: table_entry(*kind).to_string(),
             body: Some(Body::Table(rows)),
+            shard: None,
         });
     }
 
@@ -292,12 +352,32 @@ fn plan_entries(snapshot: &DocumentSnapshot) -> Result<(Vec<Planned<'_>>, ShardM
         planned.push(Planned {
             path,
             body: Some(Body::Shard(shard)),
+            shard: Some((shard.model, shard.shard)),
         });
     }
     for paths in shard_map.values_mut() {
         paths.sort();
     }
     Ok((planned, shard_map))
+}
+
+/// Whether a shard entry may be copied from the previous archive instead of
+/// re-encoded.
+///
+/// Every condition is required: the source manifest must list the path as a shard,
+/// describe it as a modelled entry, and the commit must not have touched either
+/// side of the row (a move dirties the old shard through `prev_shards`).
+fn copyable_shard(
+    previous: &PreviousArchive,
+    dirty: &ChangeScope,
+    path: &str,
+    model: ModelKey,
+    shard: Shard,
+) -> bool {
+    previous.lists_shard(path)
+        && previous.record(path).is_some_and(|record| !record.foreign)
+        && !dirty.shards.contains(&(model, shard))
+        && !dirty.prev_shards.contains(&(model, shard))
 }
 
 /// `elements/<model raw>-<shard>.json`.
@@ -311,7 +391,7 @@ fn write_entries(
     metrics: &RefCell<WriteMetrics>,
     max_bytes: Option<u64>,
     planned: &[Planned<'_>],
-    foreign_records: &BTreeMap<String, EntryRecord>,
+    copy_records: &BTreeMap<String, EntryRecord>,
     previous_bytes: Option<&[u8]>,
     snapshot: &DocumentSnapshot,
     open_revision: Option<u64>,
@@ -353,10 +433,13 @@ fn write_entries(
                 entries_written += 1;
             }
             None => {
-                let record = foreign_records.get(&entry.path).ok_or_else(|| {
+                let record = copy_records.get(&entry.path).ok_or_else(|| {
                     malformed(
-                        "foreign entry",
-                        format!("{:?} was planned without a record", entry.path),
+                        "copied entry",
+                        format!(
+                            "{:?} was planned as a copied entry without a record",
+                            entry.path
+                        ),
                     )
                 })?;
                 let bytes = previous_bytes.ok_or_else(|| {
@@ -552,6 +635,17 @@ mod tests {
                     format!("elements/{key}-1.json"),
                 ][..]
             )
+        );
+        // Only the shard entries are marked copyable; the header, registry, models
+        // and tables are always re-encoded.
+        let marked: BTreeSet<(ModelKey, Shard)> =
+            planned.iter().filter_map(|entry| entry.shard).collect();
+        assert_eq!(
+            marked,
+            BTreeSet::from([
+                (ModelKey::ModelSpace, Shard(0)),
+                (ModelKey::ModelSpace, Shard(1))
+            ])
         );
     }
 

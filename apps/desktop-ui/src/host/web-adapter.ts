@@ -238,6 +238,12 @@ export const WEB_HOST_COMMANDS: readonly string[] = [WEB_OPEN_COMMAND];
  * (`cad-import-core::detect`), and all importers are wasm-clean; so this list is
  * the importer's set, not a narrower browser subset.
  *
+ * `.ymodel` is the exception: it is Yacr's native zip+JSON document, not an
+ * importer format, and the wasm session has no archive adapter. It is listed so
+ * the accept set stays identical to `packaging/mime/formats.json`; the session
+ * refuses it by name (`unsupported-runtime: ymodel`), never by a silent fallback
+ * into a connector import.
+ *
  * `.rfa`/`.rft` are included deliberately: a Revit family has no geometry and the
  * RVT adapter refuses it with a precise `import.rvt.family_no_geometry`
  * diagnostic, which beats an unexplained "not a drawing" from this gate. They are
@@ -254,6 +260,7 @@ export const WEB_HOST_COMMANDS: readonly string[] = [WEB_OPEN_COMMAND];
  * [`pickDrawingFile`]).
  */
 export const WEB_OPEN_EXTENSIONS: readonly string[] = Object.freeze([
+  '.ymodel',
   '.dwg', '.dxf', '.dgn', '.obj', '.stl', '.ply', '.off', '.coff',
   '.step', '.stp', '.ifc', '.rvt', '.rte', '.rfa', '.rft', '.skp',
 ]);

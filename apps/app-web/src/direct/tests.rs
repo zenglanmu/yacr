@@ -516,11 +516,12 @@ fn the_wire_command_set_is_the_registrys_shared_set() {
             "{name} is not in the full registry"
         );
     }
-    // The five desktop-only rows are the difference between the two sets; none of
+    // The seven desktop-only rows are the difference between the two sets; none of
     // them is a dom-canvas command (see the `cad_status` test below). The two
-    // recent-drawing rows are host file capabilities: a browser carrier answers
-    // `cad_recent_files` with `supported: false` and refuses `cad_open_recent` by
-    // name, so neither may reach this transport.
+    // recent-drawing rows and the two recovery-snapshot rows are host file
+    // capabilities: a browser carrier answers `cad_recent_files` /
+    // `cad_recovery_files` with `supported: false` and refuses `cad_open_recent` /
+    // `cad_open_recovery` by name, so none of them may reach this transport.
     assert_eq!(
         cad_ui_core::session::TAURI_ONLY_WIRE_COMMAND_NAMES,
         &[
@@ -529,6 +530,8 @@ fn the_wire_command_set_is_the_registrys_shared_set() {
             "cad_status",
             "cad_recent_files",
             "cad_open_recent",
+            "cad_recovery_files",
+            "cad_open_recovery",
         ]
     );
 }

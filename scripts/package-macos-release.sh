@@ -250,6 +250,7 @@ cat > "${STAGE}/Yacr.app/Contents/Info.plist" <<EOF
       <key>LSHandlerRank</key><string>Alternate</string>
       <key>CFBundleTypeExtensions</key>
       <array>
+        <string>ymodel</string>
         <string>dwg</string>
         <string>dxf</string>
         <string>dgn</string>

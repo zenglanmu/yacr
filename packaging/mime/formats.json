@@ -10,6 +10,12 @@
     "also admit .rfa/.rft so the RVT adapter can refuse family files by name); this",
     "file must list the same extension set, and the gate compares them.",
     "",
+    ".ymodel is Yacr's own native document: a zip container with sharded JSON, so it",
+    "is NOT a connector format and has no importer. Hosts that can decode the archive",
+    "advertise it; every other carrier must refuse it by the stable marker",
+    "`unsupported-runtime: ymodel` (the shared host already does) instead of falling",
+    "back to a connector import. Its MIME type is private: application/x-yacr-ymodel.",
+    "",
     "MIME choices (2026-11-13):",
     "  * dwg/dxf/obj/stl are standard in shared-mime-info; do not redefine them.",
     "  * model/step only exists in shared-mime-info >= 2.5, so it is shipped here too.",
@@ -36,6 +42,7 @@
     "docs/windows-app.md."
   ],
   "extensions": [
+    "ymodel",
     "dwg",
     "dxf",
     "obj",
@@ -54,6 +61,7 @@
     "dgn"
   ],
   "mimeTypes": [
+    { "type": "application/x-yacr-ymodel", "extensions": ["ymodel"] },
     { "type": "image/vnd.dwg", "extensions": ["dwg"] },
     { "type": "application/acad", "extensions": ["dwg"] },
     { "type": "application/dwg", "extensions": ["dwg"] },
@@ -81,6 +89,11 @@
   ],
   "androidExtraMimeTypes": ["application/octet-stream"],
   "sharedMimeInfo": [
+    {
+      "type": "application/x-yacr-ymodel",
+      "comment": "Yacr native CAD document",
+      "globs": ["*.ymodel", "*.YMODEL"]
+    },
     {
       "type": "model/step",
       "comment": "STEP CAD model (ISO 10303-21)",

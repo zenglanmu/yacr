@@ -23,6 +23,11 @@
   Geomview coloured OFF variant .coff uses application/x-geomview-coff instead.
 -->
 <mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-yacr-ymodel">
+    <comment>Yacr native CAD document</comment>
+    <glob pattern="*.ymodel"/>
+    <glob pattern="*.YMODEL"/>
+  </mime-type>
   <mime-type type="model/step">
     <comment>STEP CAD model (ISO 10303-21)</comment>
     <glob pattern="*.step"/>

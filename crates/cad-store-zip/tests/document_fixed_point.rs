@@ -564,7 +564,8 @@ fn a_foreign_entry_survives_a_real_save_cycle() {
     // First save: the store is handed the archive that holds the unknown entry.
     let mut store = ZipDocumentStore::new().with_previous(Some(previous));
     let (bytes, report) = write_archive(&mut store, &snapshot);
-    assert_eq!(report.entries_copied, 1);
+    // The foreign entry is one of the raw copies; untouched shards are the others.
+    assert!(report.entries_copied >= 1, "{report:?}");
 
     // Second save: a fresh store reads the archive (keeping it for preservation)
     // and writes it again.
@@ -577,7 +578,7 @@ fn a_foreign_entry_survives_a_real_save_cycle() {
     );
     assert_eq!(loaded.snapshot, snapshot, "the document still round-trips");
     let (bytes, report) = write_archive(&mut store, &loaded.snapshot);
-    assert_eq!(report.entries_copied, 1);
+    assert!(report.entries_copied >= 1, "{report:?}");
 
     // Reopen the final archive: the entry is still there, byte-identical, and
     // recorded as foreign rather than modelled.

@@ -28,6 +28,11 @@
     },
     "fileAssociations": [
       {
+        "ext": ["ymodel"],
+        "mimeType": "application/x-yacr-ymodel",
+        "androidIntentActionFilters": ["view"]
+      },
+      {
         "ext": ["dwg"],
         "mimeType": "image/vnd.dwg",
         "androidIntentActionFilters": ["view"]
@@ -149,6 +154,7 @@
       },
       {
         "ext": [
+          "ymodel",
           "dwg",
           "dxf",
           "obj",

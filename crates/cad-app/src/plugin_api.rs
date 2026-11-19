@@ -85,14 +85,21 @@ impl HostController {
             database: drawing.id(),
             viewport: self.viewport_id,
         };
-        self.application.execute_api(
+        let outcome = self.application.execute_api(
             &mut self.session,
             target,
             ApiRequest::Commit {
                 expected_revision,
                 edits,
             },
-        )
+        )?;
+        // A plugin commit is a real document write, so its scope joins the same
+        // accumulated dirty set the command path feeds (ADR-0037 D8/D12 Phase 2).
+        // `execute_api` is the one commit path; nothing is written when it fails.
+        if let Some(changes) = &outcome.changes {
+            self.note_change_scope(&changes.scope);
+        }
+        Ok(outcome)
     }
 }
 

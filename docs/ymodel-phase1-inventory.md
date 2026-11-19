@@ -7,9 +7,15 @@ mapping. It exists so a future field addition cannot quietly fall outside the fo
 Evidence status: the tables below were produced by reading the code at `4faef9ef`
 (`crates/cad-db/src/drawing/mod.rs`, `crates/cad-domain/src/semantic.rs`,
 `crates/cad-app/src/lib.rs`). Counts marked here were verified by counting the declarations in
-source (`grep -c '^\s*pub(crate) '`), not by running a test. **No `.ymodel` archive has been
-written or read yet** — the store is not implemented. Anything below is a design contract, not
-a verified behaviour.
+source (`grep -c '^\s*pub(crate) '`), not by running a test.
+
+**2026-11-19 update:** the store and carrier wiring now exist (Phase 1 + Phase 2 dirty-shard
+raw-copy). This file remains the field-mapping contract — every field still maps to the entry
+listed here — but the earlier "no archive has been written or read yet" caveat is obsolete.
+Evidence for the mapping is the `cad-store-zip` fixed-point/raw-copy tests and the `cad-host`
+`ymodel` contract tests; see `docs/validation-ymodel-phase2-2026-11-19.md`. Real DWG/DXF L1
+round-trip and L0 source passthrough remain unverified (they are Phase 2/3 items, not covered by
+this inventory).
 
 ## 1. `DrawingDatabase` — 39 `pub(crate)` fields
 

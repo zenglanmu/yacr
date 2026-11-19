@@ -14,11 +14,17 @@
 //! with `raw_copy_file` (compressed bytes carried over, so a foreign blob cannot
 //! be re-compressed into a slightly different archive).
 //!
+//! The same scan also answers the raw-copy question for **modelled** entries: a
+//! shard the commit did not touch can be carried over at the compressed-byte
+//! level too (ADR-0037 D11 Phase 2), using the source manifest's `shard_map` and
+//! entry record. Only entries the source manifest describes as non-foreign are
+//! eligible; everything else in the archive remains foreign data.
+//!
 //! Failure to read the previous archive is
 //! [`cad_domain::ymodel::markers::FOREIGN_ENTRIES_UNREADABLE`], never a save that
 //! quietly drops what it could not understand.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Cursor, Read};
 
 use zip::ZipArchive;
@@ -37,6 +43,8 @@ pub(crate) struct PreviousArchive {
     foreign: Vec<String>,
     /// The source manifest's records, for the paths it described.
     records: BTreeMap<String, EntryRecord>,
+    /// Every entry path the source manifest lists in `shard_map`.
+    shards: BTreeSet<String>,
 }
 
 impl PreviousArchive {
@@ -70,12 +78,38 @@ impl PreviousArchive {
             .iter()
             .map(|record| (record.path.clone(), record.clone()))
             .collect();
-        Ok(PreviousArchive { foreign, records })
+        let shards = manifest.shard_map.values().flatten().cloned().collect();
+        Ok(PreviousArchive {
+            foreign,
+            records,
+            shards,
+        })
     }
 
     /// The paths to copy, sorted.
     pub(crate) fn foreign(&self) -> &[String] {
         &self.foreign
+    }
+
+    /// Whether the source manifest lists `path` as one of its element shards.
+    ///
+    /// `shard_map` is the authority for what an archive holds, but it is not the
+    /// authority for what this build can copy: [`Self::record`] must also describe
+    /// the entry, and a path listed only in `shard_map` without a record is left
+    /// to be re-encoded.
+    pub(crate) fn lists_shard(&self, path: &str) -> bool {
+        self.shards.contains(path)
+    }
+
+    /// The source manifest's record for a modelled (non-foreign) entry.
+    ///
+    /// Unlike [`Self::reusable`], this does not require `sha256_c`: a shard copied
+    /// from the source archive carries its compressed bytes over unchanged, so the
+    /// uncompressed `sha256`/`len`/`crc` it records is still true. The next reader
+    /// verifies those by decompressing (`crate::read`), which is why a corrupt
+    /// source record surfaces as a load failure instead of being trusted.
+    pub(crate) fn record(&self, path: &str) -> Option<&EntryRecord> {
+        self.records.get(path).filter(|record| !record.foreign)
     }
 
     /// A source record that can be reused verbatim.

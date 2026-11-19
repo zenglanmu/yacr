@@ -152,12 +152,36 @@ impl HostController {
             .map(|document| &document.persistence)
     }
 
+    /// Accumulate one commit's [`cad_db::ChangeScope`] into this document's
+    /// unsaved dirty set (ADR-0037 D8/D12 Phase 2).
+    ///
+    /// Merge is a union, so a commit reachable through both the outer outcome and
+    /// a traced command may be noted twice without changing the answer. Hosts
+    /// call this for publishes that bypass the wrappers below (the engine request
+    /// funnel), so there is one accumulated set rather than per-path copies.
+    pub fn note_change_scope(&mut self, scope: &cad_db::ChangeScope) {
+        self.dirty_scope.merge(scope);
+    }
+
+    /// The dirty set accumulated since the last save/open/close.
+    ///
+    /// Read-only: the saver clones this as the `dirty` half of the archive write.
+    /// It is empty right after a durable save, an open, a New or a Close.
+    pub fn dirty_scope(&self) -> &cad_db::ChangeScope {
+        &self.dirty_scope
+    }
+
     /// Record that the document's file now holds `saved` (D12 step 5).
     ///
     /// Called only after the bytes are durably on disk. The import baseline
     /// (`open_revision`) is deliberately untouched: it never advances across
     /// saves, or the L0 passthrough predicate would become satisfiable again
     /// (D2).
+    ///
+    /// Clearing the accumulated dirty scope here — together with
+    /// [`HostController::record_saved_archive`]'s retained bytes — is what makes
+    /// "the file holds this and there is nothing outstanding" one atomic fact;
+    /// a write failure must never reach this method (ADR-0037 D8/D12 Phase 2).
     pub fn mark_saved(
         &mut self,
         saved: Revision,
@@ -173,6 +197,26 @@ impl HostController {
             document.persistence.saved_revision = saved;
             document.persistence.document_uuid = document_uuid;
             document.persistence.foreign_entries = foreign_entries;
+        }
+        self.dirty_scope = cad_db::ChangeScope::default();
+    }
+
+    /// Retain the bytes just committed to the document's own file.
+    ///
+    /// They become the base of the next save: its live entries are the ones a
+    /// narrowed write keeps and its unknown entries are copied through. Never
+    /// the save target — a Save As carries these bytes forward instead of
+    /// adopting the destination file's contents (ADR-0037 D8/D11/D12 Phase 2).
+    ///
+    /// Called only after the same durable write as [`HostController::mark_saved`].
+    pub fn record_saved_archive(&mut self, bytes: Arc<[u8]>) {
+        if let Some(document) = self
+            .application
+            .workspace
+            .documents
+            .get_mut(&self.document_id)
+        {
+            document.persistence.archive_bytes = Some(bytes);
         }
     }
 

@@ -312,9 +312,11 @@ fn a_snapshot_survives_a_full_round_trip_with_a_foreign_entry() {
     let (bytes, report) = write_snapshot(&mut store, &snapshot);
 
     // The save encoded the document entries and copied the foreign one through.
+    // Untouched shards are raw-copied too now (Phase 2), so the count is an
+    // aggregate; the structural checks below prove which entry was preserved.
     assert_eq!(report.saved_revision, Revision(12));
     assert!(report.entries_written >= 6, "{report:?}");
-    assert_eq!(report.entries_copied, 1);
+    assert!(report.entries_copied >= 1, "{report:?}");
     assert_eq!(
         report.sha256, None,
         "the sink cannot report the archive hash"
@@ -354,7 +356,8 @@ fn an_unlisted_foreign_entry_is_preserved_too() {
 
     let mut store = ZipDocumentStore::new().with_previous(Some(previous));
     let (bytes, report) = write_snapshot(&mut store, &snapshot);
-    assert_eq!(report.entries_copied, 1);
+    // The foreign entry plus the shards this scope leaves untouched.
+    assert!(report.entries_copied >= 1, "{report:?}");
 
     let (entries, manifest) = explode(&bytes);
     assert_eq!(
@@ -385,7 +388,7 @@ fn an_unlisted_foreign_entry_is_preserved_too() {
         vec![FOREIGN_PATH.to_string()]
     );
     let (bytes, report) = write_snapshot(&mut store, &loaded.snapshot);
-    assert_eq!(report.entries_copied, 1);
+    assert!(report.entries_copied >= 1, "{report:?}");
     let (entries, _) = explode(&bytes);
     assert!(entries.iter().any(|(name, _)| name == FOREIGN_PATH));
 }

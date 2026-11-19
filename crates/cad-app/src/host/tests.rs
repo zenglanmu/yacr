@@ -13,6 +13,7 @@ mod chamfer_fillet;
 mod clipboard;
 mod curve_edits;
 mod dimension;
+mod dirty_scope;
 mod document;
 mod draw_pick;
 mod explode;

@@ -133,6 +133,14 @@ pub struct HostController {
     /// Host-set app option, **not** document state (no `cad-db` write, no
     /// revision, no history). See [`HostController::set_export_options`].
     export_options: ExportOptions,
+    /// Every commit's [`cad_db::ChangeScope`] accumulated since the last
+    /// save/open/close (ADR-0037 D8/D12 Phase 2).
+    ///
+    /// Plain in-memory host state, never persisted: a save hands this to the
+    /// archive writer as the dirty half of D11's entry set, then clears it only
+    /// after the bytes are durable ([`HostController::mark_saved`]). A blank or
+    /// freshly opened document starts empty, so the first save narrows nothing.
+    dirty_scope: cad_db::ChangeScope,
 }
 
 impl HostController {
@@ -177,6 +185,7 @@ impl HostController {
             api_prompt_results: Vec::new(),
             tolerance: TolerancePolicy::default(),
             export_options: ExportOptions::default(),
+            dirty_scope: cad_db::ChangeScope::default(),
         })
     }
 
@@ -450,6 +459,11 @@ impl HostController {
             return Ok(CommandOutcome::none());
         }
         let outcome = self.application.execute(&mut self.session, command)?;
+        if let Some(changes) = &outcome.changes {
+            // One command, one revision span: the scope travels with the
+            // published `ChangeSet` (ADR-0037 D8/D12 Phase 2).
+            self.dirty_scope.merge(&changes.scope);
+        }
         if let Some(diagnostic) = outcome.diagnostics.first() {
             self.last_status = diagnostic.message.clone();
         }
@@ -470,7 +484,20 @@ impl HostController {
         let traced = self
             .application
             .execute_traced(&mut self.session, command)?;
+        // Every successful trace (an `Interaction` may enter several commands)
+        // and the outer result contribute; merge is a union, so a command that
+        // appears in both is counted once.
+        for trace in &traced.commands {
+            if let Ok(outcome) = &trace.result {
+                if let Some(changes) = &outcome.changes {
+                    self.dirty_scope.merge(&changes.scope);
+                }
+            }
+        }
         if let Ok(outcome) = &traced.result {
+            if let Some(changes) = &outcome.changes {
+                self.dirty_scope.merge(&changes.scope);
+            }
             if let Some(diagnostic) = outcome.diagnostics.first() {
                 self.last_status = diagnostic.message.clone();
             }

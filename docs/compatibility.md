@@ -951,9 +951,10 @@ manifest.open_revision` 且源字节仍在才同格式直通）、**L1** 已建�
 | 项 | 状态 | 证据 / 边界 |
 |---|---|---|
 | 文档模型与快照 | 已实现 | `cad-db` 323 测试；文档级不动点（`snapshot → hydrate → snapshot` 逐字段相等） |
-| 容器读写 | 已实现 | `cad-store-zip` 53 测试：manifest/哈希/长度/CRC、版本门禁（更高 `read`/`minor` 在解析其它 entry 之前拒绝）、foreign entry 原样保留、两次保存字节相同、超预算 abort |
+| 容器读写 | 已实现 | `cad-store-zip` 59 测试（29 unit + 17 archive + 7 fixed-point + 6 raw-copy）：manifest/哈希/长度/CRC、版本门禁（更高 `read`/`minor` 在解析其它 entry 之前拒绝）、foreign entry 原样保留、未变分片按压缩字节 raw-copy、两次保存字节相同、超预算 abort |
+| 增量保存（Phase 2 dirty-shard raw-copy） | 已实现（库层 + 宿主接线） | 宿主累积每个 commit 的 `ChangeScope`（命令、interaction、plugin commit、engine funnel）；保存以文档**自身**的上一个归档为 base：未触及分片 raw-copy、脏分片重编码、删除分片不复活、header/classes/models/tables 始终重写；打开/New/Close 与成功保存后清空累积范围。`cad-store-zip/tests/raw_copy.rs` 6 项 + `cad-app` dirty-scope 契约 4 项 + `cad-host/tests/ymodel.rs` 的保存范围断言。**边界**：`sha256_c` 仍不可计算/校验（`zip` 9.5.0），复制条目读侧按解压后 `sha256` + `len` + CRC 复核；**host FakeArchive → 真实 store 的端到端 narrowed-save 与真实大文件性能 NOT RUN**；X11 dom-canvas / Web / Android / Windows / macOS 的归档保存仍 `unsupported-runtime: ymodel` |
 | 文件级往返 | 已实现 | `cad-store-zip/tests/document_fixed_point.rs` 7 项（含 layout 与 block 序列相同的碰撞回归）；`apps/app-linux/tests/ymodel_round_trip.rs` 走真实适配器 |
-| 原生打开/保存（Linux） | 已接线 | `cad-host` 8 项：安装文档、缺适配器拒绝、损坏归档不破坏当前文档、保存推进 `saved_revision`、外部修改拒绝、保存目的按源格式选择。保存前把上一版留在 `<name>.bak`（硬链接，失败回退复制；首存不建；配置写入不建），失败只告警不阻断——重命名本身仍是原子的 |
+| 原生打开/保存（Linux） | 已接线 | `cad-host` 的 `ymodel` 契约 11 项（全 crate 398 测试内）：安装文档、缺适配器拒绝、损坏归档不破坏当前文档、保存推进 `saved_revision`、外部修改拒绝、保存目的按源格式选择、第二次保存只携带增量范围、Save As 保留源归档与范围。保存前把上一版留在 `<name>.bak`（硬链接，失败回退复制；首存不建；配置写入不建），失败只告警不阻断——重命名本身仍是原子的 |
 | 自动恢复快照 | 已接线（仅 Linux 载体） | 脏文档**默认每 60 s**（选项里可改，0 = 关闭）把**同一份** `.ymodel` 写到 `<config>/recovery/<key>.ymodel`（+ 同名 `.json` 记录），从不触碰文档本身；成功保存后丢弃；安装文档时 `record.revision <= saved_revision` 判为过期并丢弃；只有严格更新才通过 `cad_status.error` 的一次性横幅告知（`recovery.available`，指向可用 `OPEN` 打开的恢复文件）。13 项 host 契约 + 8 项 Linux 存储 + 2 项 wire + 2 项命令接缝 + 7 项前端测试；单快照上限 512 MiB。**欢迎页**：无 `--open` 启动时进入无文档状态（`StartDocument::Empty`），恢复快照与最近文件一起列在开始页，点击按**key**打开（UI 不接触路径）。**边界**：`File > Revert` 仍未做；Web/Android 无恢复快照；真实崩溃恢复、横幅在真实窗口中的呈现 **NOT RUN** |
 | Windows / macOS / Android / Web | **NOT IMPLEMENTED** | 无归档适配器，显式 `unsupported-runtime: ymodel`（禁止静默改导出别的格式） |
 | L0 源字节直通 | **未实现** | `raw/source-*.bin` 尚未写入；需要连接器保留源字节 |

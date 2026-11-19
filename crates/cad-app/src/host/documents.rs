@@ -44,6 +44,7 @@ impl HostController {
             api_prompt_results: Vec::new(),
             tolerance: TolerancePolicy::default(),
             export_options: ExportOptions::default(),
+            dirty_scope: cad_db::ChangeScope::default(),
         };
         controller.new_blank_document()?;
         Ok(controller)
@@ -90,6 +91,7 @@ impl HostController {
             api_prompt_results: Vec::new(),
             tolerance: TolerancePolicy::default(),
             export_options: ExportOptions::default(),
+            dirty_scope: cad_db::ChangeScope::default(),
         })
     }
 
@@ -106,6 +108,10 @@ impl HostController {
         let tool_generation = self.session.tool_generation.saturating_add(1);
         self.application.history.remove(&self.document_id);
         self.application.query = cad_query::QueryService::new();
+        // The accumulated dirty set described edits to the **replaced** content;
+        // it must never narrow the next save of a different document (Open/New/
+        // Close all funnel through here, ADR-0037 D8/D12 Phase 2).
+        self.dirty_scope = cad_db::ChangeScope::default();
         self.session = SessionState::new(self.document_id, self.session.mode());
         self.session.generation = self.session.generation.saturating_add(1);
         self.session.tool_generation = tool_generation;

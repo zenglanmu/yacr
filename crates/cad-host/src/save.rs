@@ -393,21 +393,29 @@ impl HostCore {
         })
     }
 
-    /// Write the native `.ymodel` archive for `target` (ADR-0037 D12 Phase 1).
+    /// Write the native `.ymodel` archive for `target` (ADR-0037 D8/D11/D12).
     ///
     /// The order is the contract:
     /// 1. the carrier archive must exist — otherwise the marker, never a fallback
     ///    export of another format;
-    /// 2. read the target's current bytes (the previous archive) for foreign-entry
-    ///    copy-through and conflict detection;
-    /// 3. refuse an in-place save whose file changed since it was opened
-    ///    (`ymodel.conflict`) — the no-lock-file rule of D12;
-    /// 4. encode from a **fresh snapshot of the current revision**;
-    /// 5. write atomically, and only then advance `saved_revision` and clear the
-    ///    source hash to the new bytes. A write failure leaves the state untouched.
-    /// 6. discard the recovery snapshot this document was writing.
+    /// 2. `previous` is the document's **own** archive bytes
+    ///    ([`crate::PersistenceState::archive_bytes`]), not the target's:
+    ///    a narrowed write keeps that base's entries and a Save As must not adopt
+    ///    a different file's contents;
+    /// 3. for an **in-place** save only, re-read the target and refuse when its
+    ///    bytes differ from what was opened/saved (`ymodel.conflict`) — the
+    ///    no-lock-file rule of D12. An unreadable in-place target is a refusal
+    ///    too, because the write would replace bytes it never verified. A Save As
+    ///    to a different/new target reads nothing;
+    /// 4. `dirty` is the scope accumulated by every commit since the last
+    ///    save/open (empty for a first save, which conservatively rewrites);
+    /// 5. encode from a **fresh snapshot of the current revision**;
+    /// 6. write atomically, and only then advance `saved_revision`, retain the
+    ///    committed bytes as the next base and clear the dirty scope. A write
+    ///    failure leaves the state untouched.
+    /// 7. discard the recovery snapshot this document was writing.
     ///
-    /// Step 6 is the only recovery action a save takes, and it never fails the
+    /// Step 7 is the only recovery action a save takes, and it never fails the
     /// save: the bytes are already durable, and a snapshot that survives can only
     /// be discarded as stale at the next open (it is never offered above the
     /// saved revision). Its refusal is returned as a warning for the status line,
@@ -429,42 +437,43 @@ impl HostCore {
         // the new name and leave the old snapshot behind.
         let recovery_key = self.recovery_key();
         let persistence = self.controller.borrow().persistence().cloned();
-        // An absent target is a first save / Save As (`None`); an existing target
-        // we cannot re-read is a real refusal, not "absent", or the save would
-        // overwrite a file whose contents (and foreign entries) it never saw.
-        let previous = match self.files.read_target(target) {
-            Ok(bytes) => Some(bytes),
-            Err(reason) => {
-                if in_place {
-                    return Err(SaveFailure::Reason(reason));
-                }
-                None
-            }
-        };
-        // Conflict detection applies to the file this document was opened from:
-        // a Save As to a different, existing archive must not refuse because its
-        // bytes differ from the source we opened.
+        // Conflict detection applies only to the file this document was opened
+        // from: a Save As to a different, existing archive must not refuse because
+        // its bytes differ from the source we opened, and must not need to read it
+        // at all.
         if in_place {
-            if let (Some(expected), Some(bytes)) = (
-                persistence.as_ref().and_then(|p| p.source_sha256.clone()),
-                previous.as_ref(),
-            ) {
-                if sha256_hex(bytes) != expected {
+            let target_bytes = self
+                .files
+                .read_target(target)
+                // An existing in-place target we cannot re-read is a real
+                // refusal, not "absent": the save would overwrite a file whose
+                // contents it never verified.
+                .map_err(SaveFailure::Reason)?;
+            if let Some(expected) = persistence
+                .as_ref()
+                .and_then(|state| state.source_sha256.clone())
+            {
+                if sha256_hex(&target_bytes) != expected {
                     return Err(SaveFailure::Reason(
                         cad_domain::ymodel::markers::CONFLICT.to_string(),
                     ));
                 }
             }
         }
+        // The base of the write: the document's own archive, never the target's
+        // bytes. `None` (blank/imported) means there is nothing to copy through.
+        let previous = persistence
+            .as_ref()
+            .and_then(|state| state.archive_bytes.clone());
         let snapshot = self
             .controller
             .borrow()
             .snapshot_document()
             .map_err(|error| SaveFailure::Reason(error_text(&error)))?;
-        // Phase 1 rewrites every entry, so there is no dirty scope to narrow the
-        // write yet (Phase 2 fills this from the commit ChangeScope). An empty
-        // scope is the accurate description of "everything is being re-encoded".
-        let dirty = cad_db::ChangeScope::default();
+        // Every commit since the last save/open, accumulated by the controller
+        // (command path, plugin commits and the engine request funnel). Empty for
+        // a first save, where rewriting every entry is the conservative answer.
+        let dirty = self.controller.borrow().dirty_scope().clone();
         let document_uuid = persistence.as_ref().and_then(|p| p.document_uuid.clone());
         let open_revision = persistence
             .as_ref()
@@ -487,8 +496,11 @@ impl HostCore {
         self.files
             .write_atomic(target, &encoded.bytes)
             .map_err(|error| SaveFailure::Reason(error_text(&error)))?;
-        // Durable: now the document may claim the new saved revision.
-        let source_sha256 = sha256_hex(&encoded.bytes);
+        // Durable: now the document may claim the new saved revision, retain the
+        // bytes just written and clear the scope that produced them — one fact,
+        // committed only after the write.
+        let committed: Arc<[u8]> = Arc::from(encoded.bytes);
+        let source_sha256 = sha256_hex(&committed);
         // The archive does not echo the uuid it may have minted, so this either
         // keeps the known identity or stays `None` — never a fabricated v4 uuid.
         let foreign_entries = persistence
@@ -499,6 +511,7 @@ impl HostCore {
             let mut controller = self.controller.borrow_mut();
             controller.mark_saved(encoded.saved_revision, document_uuid, foreign_entries);
             controller.set_source_sha256(Some(source_sha256));
+            controller.record_saved_archive(committed);
         }
         // The document now *is* this file: the next save is in place against it
         // and the source-overwrite guard must name the target we just wrote.

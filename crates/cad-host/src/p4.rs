@@ -214,6 +214,14 @@ impl HostCore {
         for change_set in changes {
             if !seen.contains(&change_set.transaction) {
                 seen.push(change_set.transaction);
+                // The host's accumulated dirty scope must cover every commit
+                // that reaches the document, including the API path (`run_api`
+                // bypasses the controller wrappers) and `Interaction` traces
+                // (ADR-0037 D8/D12 Phase 2). Merge is a union, so a commit the
+                // wrappers already noted is counted once.
+                self.controller
+                    .borrow_mut()
+                    .note_change_scope(&change_set.scope);
                 events.push(EngineEvent::EntitiesChanged {
                     changes: change_set,
                 });

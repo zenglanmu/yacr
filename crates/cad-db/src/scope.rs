@@ -132,6 +132,17 @@ impl ChangeScope {
         self.header |= other.header;
     }
 
+    /// Whether this scope reaches `(model, shard)` on either side of a move.
+    ///
+    /// A saver asks this to decide whether a live shard must be re-encoded: both
+    /// the **new** row ([`Self::shards`]) and the **old** row
+    /// ([`Self::prev_shards`]) belong to the dirty half of D11's entry set, so a
+    /// pure delete (prev side only) and a pure insert (new side only) both answer
+    /// `true`.
+    pub fn touches_shard(&self, model: ModelKey, shard: Shard) -> bool {
+        self.shards.contains(&(model, shard)) || self.prev_shards.contains(&(model, shard))
+    }
+
     /// Record the new row of an element in `space`.
     pub fn element(&mut self, space: &SpaceId, seq: u128) {
         self.element_in(ModelKey::from_space(space.clone()), seq);
@@ -357,5 +368,43 @@ mod tests {
         // Merging is idempotent.
         left.merge(&right);
         assert_eq!(left.shards.len(), 1);
+    }
+
+    #[test]
+    fn merge_is_idempotent_for_every_part() {
+        // The host accumulates a scope from several publish paths (the outer
+        // outcome and every traced command), so the same commit may be merged
+        // twice; a second merge must not grow or change anything.
+        let mut commit = ChangeScope::default();
+        commit.element(&SpaceId::Model, 0);
+        commit.prev_element(&SpaceId::Paper(LayoutId(2)), 2048);
+        commit.table(TableKind::Layers);
+        commit.header();
+
+        let mut accumulated = ChangeScope::default();
+        accumulated.merge(&commit);
+        let once = accumulated.clone();
+        accumulated.merge(&commit);
+        assert_eq!(accumulated, once);
+        assert!(accumulated.header);
+        assert_eq!(accumulated.shards.len(), 1);
+        assert_eq!(accumulated.prev_shards.len(), 1);
+        assert_eq!(accumulated.tables.len(), 1);
+    }
+
+    #[test]
+    fn touches_shard_covers_both_sides_of_a_move() {
+        let mut scope = ChangeScope::default();
+        // A delete-only commit records the old side.
+        scope.prev_element(&SpaceId::Model, 0);
+        assert!(scope.touches_shard(ModelKey::ModelSpace, Shard(0)));
+        // A shard the commit never mentioned is not touched.
+        assert!(!scope.touches_shard(ModelKey::ModelSpace, Shard(1)));
+        assert!(!scope.touches_shard(ModelKey::Paper(LayoutId(1)), Shard(0)));
+
+        // A move into another shard dirties both sides.
+        scope.element(&SpaceId::Model, 2048);
+        assert!(scope.touches_shard(ModelKey::ModelSpace, Shard(1)));
+        assert!(scope.touches_shard(ModelKey::ModelSpace, Shard(0)));
     }
 }
