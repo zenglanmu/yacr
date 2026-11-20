@@ -145,12 +145,12 @@ export const OPTIONS_TABS: readonly OptionTab[] = Object.freeze<OptionTab[]>([
  * The complete control table.
  *
  * `wire` is the `cad_settings` field, `key` is the `cad_set_setting` key (absent
- * for the two non-settings controls: the read-only fonts directory and the UI
- * language). `kind` selects the editor: `bool`, `number`, `real`, `color`,
- * `select`, `readonly`, `locale`. Number fields carry the host's own range and
- * the unit suffix key; a value outside it is refused, never clamped. A `select`
- * field whose options have their own copy carries `choiceKeyPrefix`, and its
- * refusal code can be overridden with `errorCode` when the host reports a more
+ * for the two non-settings controls: the read-only effective fonts directory and
+ * the UI language). `kind` selects the editor: `bool`, `number`, `real`, `color`,
+ * `select`, `path`, `readonly`, `locale`. Number fields carry the host's own range
+ * and the unit suffix key; a value outside it is refused, never clamped. A
+ * `select` field whose options have their own copy carries `choiceKeyPrefix`, and
+ * its refusal code can be overridden with `errorCode` when the host reports a more
  * specific one.
  */
 export const OPTIONS_FIELDS: readonly OptionField[] = Object.freeze<OptionField[]>([
@@ -382,12 +382,38 @@ export const OPTIONS_FIELDS: readonly OptionField[] = Object.freeze<OptionField[
   },
   ...UNIT_FIELDS,
   {
+    // The persisted **choice** for the drawing's font directory
+    // (`ui.paths.fontsDir`). `wire` is the host's own `fontsDirOverride` field
+    // while the **write** key is `fontsDir`, the name `cad_set_setting` accepts:
+    // the two spellings are the host's and never folded together here. An empty
+    // row is the documented "nothing saved" value, so clearing writes `""`
+    // rather than inventing a path. The host re-validates every write; this row
+    // accepts any single-line text because only the host can say what its
+    // filesystem holds.
+    //
+    // The editable row exists only on a carrier that can read local directories
+    // (the reported `native-below`); `OptionsDialog` hides it on `dom-canvas` and
+    // on an unrecognised mode, where the picker would be a dead button. The
+    // effective row below always renders, so the user still sees the directory
+    // actually in use.
     id: 'fontsDir',
+    tab: 'files',
+    kind: 'path',
+    wire: 'fontsDirOverride',
+    key: 'fontsDir',
+    labelKey: 'options.field.fontsDir',
+    helpKey: 'options.help.fontsDir',
+  },
+  {
+    // The directory the host is **actually** reading (`fontsDir`), which is not
+    // the choice when it is unset or when the saved one is gone. Pure display
+    // data: it carries no write key, and the dialog never derives it.
+    id: 'fontsDirEffective',
     tab: 'files',
     kind: 'readonly',
     wire: 'fontsDir',
-    labelKey: 'options.field.fontsDir',
-    helpKey: 'options.help.fontsDir',
+    labelKey: 'options.field.fontsDirEffective',
+    helpKey: 'options.help.fontsDirEffective',
   },
   {
     id: 'language',
@@ -486,6 +512,12 @@ export function draftFromSettings(
         : null;
     } else if (field.kind === 'select') {
       draft[field.id] = typeof value === 'string' && field.choices.includes(value) ? value : null;
+    } else if (field.kind === 'path') {
+      // `""` **is** the host's "no override" value, so a host that reports no
+      // choice seeds the same editable empty row instead of the "not reported"
+      // state: nothing is invented, the empty string is the documented unset
+      // state and it is never written unless the draft actually changes.
+      draft[field.id] = typeof value === 'string' ? value : '';
     } else {
       // `readonly` / `locale`: verbatim display data, `null` when absent.
       draft[field.id] = typeof value === 'string' ? value : null;
@@ -574,6 +606,11 @@ export function validateField(id: string, value: unknown): string | null {
       // The host's own code for this control (the plot format has a dedicated
       // one); a plain enum mismatch is the generic invalid value.
       return field.errorCode ?? SETTINGS_ERROR.invalidValue;
+    case 'path':
+      // Any string is a legal path here, the empty one included (it clears the
+      // override). Whether the directory exists is the host's answer, reported
+      // as a warning on the row, never as a client-side refusal.
+      return typeof value === 'string' ? null : SETTINGS_ERROR.invalidValue;
     case 'locale':
       return typeof value === 'string' && LOCALE_CHOICES.includes(value)
         ? null
@@ -629,6 +666,12 @@ export function normalizeValue(id: string, value: unknown): string | boolean | n
         : null;
     case 'select':
       return typeof value === 'string' && field.choices.includes(value) ? value : null;
+    case 'path':
+      // Surrounding whitespace is never part of a path, and the empty answer is
+      // the canonical "no override" — including for a host that reports `null`.
+      // Returning `''` (not `null`) is what lets the diff see "cleared" as a
+      // value while an untouched empty row stays equal to its baseline.
+      return typeof value === 'string' ? value.trim() : '';
     case 'locale':
       return typeof value === 'string' && LOCALE_CHOICES.includes(value) ? value : null;
     default:
@@ -670,7 +713,7 @@ export function dirtyFields(
  * Order is the table order (stable across sessions). Each entry carries the
  * **write** key (`crosshairSize`, not the wire field `crosshairPercent`) and a
  * typed value: boolean, integer, real or string. The language control and the
- * read-only fonts directory are never part of this payload.
+ * read-only effective fonts directory are never part of this payload.
  */
 export function applyPayload(
   draft: OptionsDraft | null | undefined,

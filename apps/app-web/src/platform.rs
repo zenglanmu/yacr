@@ -89,6 +89,14 @@ pub const UNSUPPORTED_IMAGES: &str = "unsupported-runtime: images";
 pub const IMAGE_COMMAND_UNSUPPORTED: &str =
     "imageattach.unsupported: this carrier has no image decoder";
 
+/// Stable refusal of every `fontsDir` settings write on the browser carrier.
+///
+/// The Web session has no local filesystem: a font package arrives as bytes from
+/// the page's same-origin `fonts/`. Accepting the write would persist a path this
+/// carrier can never read, so it is refused by name. The same prefix shape as
+/// [`UNSUPPORTED_IMAGES`] keeps one marker vocabulary across the carrier.
+pub const UNSUPPORTED_FONTS_DIR: &str = "unsupported-runtime: fontsDir";
+
 /// Refuse an `IMAGEATTACH` / `IMAGECLIP` command line on this carrier.
 ///
 /// Both the bare selectors and their typed `SELECTOR <argument>` forms are

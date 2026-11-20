@@ -226,6 +226,58 @@ impl DrawingDatabase {
         self.textures.get(key)
     }
 
+    /// Every bundled external resource, in `(kind, key)` order (ADR-0040 D5).
+    ///
+    /// The bytes belong to the document: a font, an `IMAGE` raster or an xref
+    /// source resolves from here first (ADR-0040 D9), never from a host path.
+    pub fn resources(&self) -> impl Iterator<Item = (BundledKind, &str, &Arc<[u8]>)> {
+        self.resources
+            .iter()
+            .map(|((kind, key), bytes)| (*kind, key.as_str(), bytes))
+    }
+
+    /// The bytes of one bundled resource, or `None` when this document does not
+    /// carry it.
+    pub fn resource(&self, kind: BundledKind, key: &str) -> Option<&Arc<[u8]>> {
+        self.resources.get(&(kind, key.to_string()))
+    }
+
+    /// The logical name a bundled resource is referenced by (ADR-0040 D4).
+    pub fn resource_name(&self, kind: BundledKind, key: &str) -> Option<&str> {
+        self.resource_names
+            .get(&(kind, key.to_string()))
+            .map(String::as_str)
+    }
+
+    /// The `(kind, key)` a logical resource name resolves to (ADR-0040 D9).
+    ///
+    /// A linear scan over the document's resources: the table is small (tens of
+    /// entries), and keeping a reverse index in sync with two maps that can be
+    /// dropped independently would be the more expensive choice. `None` means
+    /// "this document does not embed that name", which a resolver must report
+    /// (`resource.unavailable`) rather than guess a path from.
+    pub fn resource_key_for_name(&self, kind: BundledKind, name: &str) -> Option<&str> {
+        self.resource_names
+            .iter()
+            .find(|((existing_kind, _), existing_name)| {
+                *existing_kind == kind && existing_name.as_str() == name
+            })
+            .map(|((_, key), _)| key.as_str())
+    }
+
+    /// The collection-time source path of a bundled resource, when one was
+    /// recorded (ADR-0040 D4: diagnostics only).
+    pub fn resource_source(&self, kind: BundledKind, key: &str) -> Option<&str> {
+        self.resource_sources
+            .get(&(kind, key.to_string()))
+            .and_then(|source| source.as_deref())
+    }
+
+    /// Whether this document embeds external resources (ADR-0040 D3).
+    pub fn embed_resources(&self) -> bool {
+        self.embed_resources
+    }
+
     pub fn layer(&self, id: LayerId) -> Option<&Layer> {
         self.layers.get(&id)
     }

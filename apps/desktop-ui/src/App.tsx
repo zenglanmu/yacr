@@ -535,10 +535,11 @@ function Shell() {
       if (vocabularyRef.current) {
         try { await vocabularyRef.current; } catch { /* reported by the loader */ }
       }
-      // A `.dwg` source must confirm before the picker; the hook only asks on an
-      // admitted line, and `dwgSaveConfirmed` is the proceed path's one bypass.
-      if (!dwgSaveConfirmed
-        && await confirmDwgSave(text, status, documentLabel, vocabularyRef, () => { void submitCommand(text, options, true); })) return;
+      // The pre-save gates: the `.dwg` caution, then the optional embed question.
+      // `dwgSaveConfirmed` tells the hook the first gate was answered; the hook
+      // re-enters this funnel when the user answers, so nothing is sent before.
+      if (await confirmDwgSave(text, status, documentLabel, vocabularyRef, dwgSaveConfirmed,
+        () => { void submitCommand(text, options, true); })) return;
       const result = await queueCadCommand(invoke, text, status, false,
         command => pluginCommand(command, status?.selection ?? null),
       );

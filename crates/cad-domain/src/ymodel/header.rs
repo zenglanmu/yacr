@@ -212,6 +212,16 @@ pub struct DocumentHeader {
     /// The logical resource keys this document references (fonts, images),
     /// sorted or not — the header preserves the caller's order verbatim.
     pub resource_keys: Vec<String>,
+    /// Whether this document embeds external resources (fonts, xref sources and
+    /// `IMAGE` rasters) in its own archive (ADR-0040 D3, simplified to one
+    /// toggle).
+    ///
+    /// `false` is the default and is **not written at all**, so a document that
+    /// packs nothing stays byte-compatible with a minor ≤ 4 archive; absent
+    /// decodes to `false`. One boolean is enough because the collector decides
+    /// *what* to pack (and reports what it skipped) — the document only records
+    /// whether it is meant to be self-contained.
+    pub embed_resources: bool,
     /// The next sequence number of every allocated family.
     pub next: IdCounters,
     /// Drawing header variables (`$LTSCALE`, `$PDMODE`, `$PDSIZE`, `$INSBASE`,
@@ -276,6 +286,12 @@ impl DocumentHeader {
                     .collect(),
             ),
         );
+        // ADR-0040 D3: only `true` is written. `false` is the default for every
+        // document this format has produced, so a pack-nothing document stays
+        // byte-compatible with a minor ≤ 4 archive.
+        if self.embed_resources {
+            map.insert("embed_resources".to_string(), Value::Bool(true));
+        }
         map.insert("next".to_string(), self.next.to_json_value());
         map.insert("variables".to_string(), self.variables.clone());
         Value::Object(map)
@@ -289,6 +305,19 @@ impl DocumentHeader {
         let units = UnitContext::from_json_value(&reader.take("units")?)?;
         let identity = DocumentIdentity::from_json_value(&reader.take("identity")?)?;
         let resource_keys = strings_from_value(&reader.take("resource_keys")?)?;
+        // ADR-0040 D3: a minor ≤ 4 header has no `embed_resources` key, and the
+        // only accepted default is `false` (self containment is opt-in). A
+        // present non-boolean is refused instead of defaulting.
+        let embed_resources = match reader.raw_if_present("embed_resources") {
+            None => false,
+            Some(Value::Bool(value)) => value,
+            Some(_) => {
+                return Err(HeaderError::InvalidField {
+                    field: "embed_resources",
+                    detail: "expected a boolean".into(),
+                });
+            }
+        };
         let next = IdCounters::from_json_value(&reader.take("next")?)?;
         let variables = reader.take("variables")?;
         if !variables.is_object() {
@@ -303,6 +332,7 @@ impl DocumentHeader {
             units,
             identity,
             resource_keys,
+            embed_resources,
             next,
             variables,
         };
@@ -651,6 +681,7 @@ mod tests {
             },
             identity: DocumentIdentity::Temporary(u128::MAX),
             resource_keys: Vec::new(),
+            embed_resources: false,
             next: IdCounters::default(),
             variables: Value::Object(Map::new()),
         }
@@ -699,6 +730,7 @@ mod tests {
             units: drawing_units(),
             identity: DocumentIdentity::Temporary(1),
             resource_keys: Vec::new(),
+            embed_resources: false,
             next: IdCounters::default(),
             variables: Value::Object(Map::new()),
         };
@@ -740,6 +772,53 @@ mod tests {
             encoded.get("value").and_then(Value::as_str),
             Some("340282366920938463463374607431768211455")
         );
+    }
+
+    #[test]
+    fn embed_resources_round_trips_and_defaults_to_false_when_absent() {
+        let mut embedded = header();
+        embedded.embed_resources = true;
+        assert_eq!(round_trip(&embedded), embedded);
+        assert_eq!(
+            embedded.to_json_value()["embed_resources"],
+            Value::Bool(true)
+        );
+        // `false` is not written at all: a minor ≤ 4 document and a
+        // pack-nothing document must have the same bytes (D3).
+        let plain = header();
+        assert!(!plain.embed_resources);
+        let value = plain.to_json_value();
+        assert!(
+            value.get("embed_resources").is_none(),
+            "the default must not be written: {value}"
+        );
+        assert_eq!(round_trip(&plain), plain);
+
+        // A minor ≤ 4 header has no key at all: that decodes to `false`.
+        let mut value = embedded.to_json_value();
+        value
+            .as_object_mut()
+            .expect("object")
+            .remove("embed_resources");
+        let decoded = DocumentHeader::from_json_value(&value).expect("minor-4 header");
+        assert!(!decoded.embed_resources);
+
+        // A present non-boolean is refused, never coerced.
+        for bad in [Value::String("true".into()), Value::from(1)] {
+            let mut value = embedded.to_json_value();
+            value["embed_resources"] = bad;
+            let error = DocumentHeader::from_json_value(&value).expect_err("wrong type");
+            assert!(
+                matches!(
+                    error,
+                    HeaderError::InvalidField {
+                        field: "embed_resources",
+                        ..
+                    }
+                ),
+                "{error:?}"
+            );
+        }
     }
 
     #[test]

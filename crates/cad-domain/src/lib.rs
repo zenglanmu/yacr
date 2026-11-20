@@ -18,6 +18,7 @@ mod multileader_create;
 // tolerance), split out for the code-size gate; `multileader` re-exports them.
 mod multileader_content;
 mod pbr;
+pub mod resource;
 pub mod table_entity;
 mod texture;
 pub use block_clip::{validate_clip_depth, BlockClip, ClipDepthError};
@@ -27,6 +28,10 @@ pub use hatch_entity::*;
 pub use multileader::*;
 pub use multileader_angle::*;
 pub use pbr::MeshPbr;
+pub use resource::{
+    bundled_kind_of_extension, is_valid_bundled_key, BundledKind, UnknownBundledKind,
+    RESOURCE_KEY_HEX_LEN, RESOURCE_KEY_MAX_LEN,
+};
 pub use table_entity::*;
 pub use texture::{is_valid_texture_key, TEXTURE_KEY_HEX_LEN, TEXTURE_KEY_MAX_LEN};
 

@@ -55,15 +55,23 @@ use cad_domain::ymodel::{
     markers, DocumentHeader, IdKind, ModelKey, PersistentId, PersistentIdOf, Shard, FORMAT_MINOR,
     FORMAT_READ,
 };
-use cad_domain::{EntityId, Revision};
+use cad_domain::{BundledKind, EntityId, Revision};
 
 use crate::json::{malformed, sha256_hex, Reader};
 use crate::manifest::{EntryRecord, Manifest};
 use crate::models::models_from_value;
+use crate::resources::{self, resource_entry};
 use crate::MANIFEST_ENTRY;
 
 /// The element shards plus the raw-model → paths map they imply.
 type ShardEntries = (Vec<ShardSnapshot>, BTreeMap<i64, Vec<String>>);
+
+/// The three resource views one decode fills, kept together so they cannot drift.
+type ResourceEntries = (
+    BTreeMap<(BundledKind, String), Arc<[u8]>>,
+    BTreeMap<(BundledKind, String), String>,
+    BTreeMap<(BundledKind, String), Option<String>>,
+);
 
 /// One successfully parsed archive.
 pub(crate) struct Parsed {
@@ -99,6 +107,8 @@ pub(crate) fn parse(bytes: &[u8]) -> Result<Parsed, StoreError> {
     parse_classes(&mut archive, &manifest)?;
     let models = parse_models(&mut archive, &manifest)?;
     let tables = parse_tables(&mut archive, &manifest)?;
+    let (resources, resource_names, resource_sources) =
+        parse_resources(&mut archive, &manifest, &tables)?;
     let textures = parse_textures(&mut archive, &manifest)?;
     let (shards, shard_paths) = parse_shards(&mut archive, &manifest, &models)?;
     check_shard_map(&manifest, &shard_paths)?;
@@ -113,6 +123,9 @@ pub(crate) fn parse(bytes: &[u8]) -> Result<Parsed, StoreError> {
         shards,
         tables,
         textures,
+        resources,
+        resource_names,
+        resource_sources,
     };
     Ok(Parsed {
         // The two texture views are filled from one decode, so they cannot drift.
@@ -313,7 +326,7 @@ fn parse_tables(
 /// `cad-db`, and `check-architecture.py` forbids this crate from editing it), so
 /// the reverse map is written out and a table missing from it is refused by
 /// [`unknown_live_entry`] rather than silently dropped.
-const TABLE_ENTRIES: [(TableKind, &str); 12] = [
+const TABLE_ENTRIES: [(TableKind, &str); 13] = [
     (TableKind::Layers, "tables/layers.json"),
     (TableKind::Layouts, "tables/layouts.json"),
     (TableKind::Styles, "tables/styles.json"),
@@ -324,6 +337,9 @@ const TABLE_ENTRIES: [(TableKind, &str); 12] = [
     (TableKind::PlotSettings, "tables/plot-settings.json"),
     (TableKind::ExternalReferences, "tables/xrefs.json"),
     (TableKind::Blocks, "tables/blocks.json"),
+    // The resource name ⇄ key mapping (ADR-0040 D4). A row array like every
+    // other table; the payloads are the `resources/<kind>/<key>` entries.
+    (TableKind::Resources, "tables/resources.json"),
     // Host-owned document metadata (ADR-0037 D11). Decoded as opaque rows: the
     // store never interprets a report, it only carries it across a save.
     (TableKind::Sources, "tables/sources.json"),
@@ -438,6 +454,41 @@ fn parse_textures(
         textures.insert(key.to_string(), Arc::from(bytes));
     }
     Ok(textures)
+}
+
+/// Every listed `resources/<kind>/<key>` entry, decoded into the snapshot
+/// (ADR-0040 D1/D4/D5/D6).
+///
+/// The key is content-addressed, so the manifest's `sha256` — already verified
+/// against the payload by [`read_entry`] — must start with the key's hex prefix.
+/// Without that check an archive whose key disagrees with its bytes would be
+/// re-saved under the wrong name and then raw-copied forever (D1).
+///
+/// The mapping comes from `tables/resources.json`, which is a plain row array
+/// (D4): its rows name the payloads, and the two sets must be equal. An entry
+/// whose name is not in the canonical `resources/<kind>/<32 hex>.<ext>` form never
+/// reaches here — [`is_modelled`] refuses it as [`markers::UNSUPPORTED_MINOR`].
+fn parse_resources(
+    archive: &mut ZipArchive<Cursor<&[u8]>>,
+    manifest: &Manifest,
+    tables: &TableSnapshot,
+) -> Result<ResourceEntries, StoreError> {
+    let mapping = resources::decode_rows(tables.get(TableKind::Resources).unwrap_or(&[]))?;
+    let mut payloads: BTreeMap<(BundledKind, String), Arc<[u8]>> = BTreeMap::new();
+    for record in listed_live(manifest) {
+        let Some((kind, key)) = resource_entry(&record.path) else {
+            continue;
+        };
+        // D10: the archive is untrusted input, so the declared length is capped
+        // before the entry is decompressed, not after it is in memory.
+        resources::check_budget(&record.path, record.len)?;
+        resources::check_read_key_matches_digest(kind, key, &record.sha256, &record.path)?;
+        let bytes = read_entry(archive, record)?;
+        payloads.insert((kind, key.to_string()), Arc::from(bytes));
+    }
+    resources::check_mapping(&payloads, &mapping)?;
+    let (names, sources) = mapping;
+    Ok((payloads, names, sources))
 }
 
 /// Every element row: the payload plus the identity the payload carries.
@@ -589,6 +640,7 @@ fn is_modelled(path: &str) -> bool {
         || path == MODELS_ENTRY
         || table_kind_for_entry(path).is_some()
         || texture_key(path).is_some()
+        || resource_entry(path).is_some()
         || parse_shard_path(path).is_ok()
 }
 
@@ -638,6 +690,7 @@ mod tests {
             TableKind::PlotSettings,
             TableKind::ExternalReferences,
             TableKind::Blocks,
+            TableKind::Resources,
             TableKind::Sources,
             TableKind::Compat,
         ];
@@ -657,6 +710,7 @@ mod tests {
                 TableKind::PlotSettings => "PlotSettings",
                 TableKind::ExternalReferences => "ExternalReferences",
                 TableKind::Blocks => "Blocks",
+                TableKind::Resources => "Resources",
                 TableKind::Sources => "Sources",
                 TableKind::Compat => "Compat",
             };

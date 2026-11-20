@@ -98,6 +98,19 @@ macro_rules! cad_wire_registry {
             // durable private directory refuses both by name.
             @row(tauri_only, host, NoArgs, cad_recovery_files, { }, $crate::session::CadRecoveryFiles, { })
             @row(tauri_only, host, OpenRecoveryArgs, cad_open_recovery, { arg(req, key, ::std::string::String) }, $crate::session::wire::CadCommandAck, { })
+            // The save dialog's self-containment question (ADR-0040 D3/D17). Both
+            // are about a `.ymodel` archive, so only the carrier that installs one
+            // serves them; every other host refuses by name
+            // (`unsupported-runtime: ymodel` / `unsupported-runtime: embed_resources`)
+            // through the same host seam family as the recovery rows.
+            @row(tauri_only, host, NoArgs, cad_ymodel_resource_preview, { }, $crate::session::CadYmodelResources, { })
+            @row(tauri_only, host, EmbedResourcesArgs, cad_set_embed_resources, { arg(req, embed, bool) }, $crate::session::wire::CadCommandAck, { })
+            // The Options > Files folder chooser: a host file capability, not a
+            // CAD wire command. A carrier with no local folder picker (`dom-canvas`,
+            // and every native carrier that has not wired one) refuses with
+            // `unsupported-runtime: pick_directory`; the reply is the chosen
+            // absolute path or `null` for a cancelled dialog.
+            @row(tauri_only, host, NoArgs, cad_pick_directory, { }, ::std::option::Option<::std::string::String>, { })
             @row(shared, pure, NoArgs, cad_commands, { }, ::std::vec::Vec<&'static str>, { ::std::result::Result::Ok($crate::session::wire::commands()) })
             @row(shared, pure, NoArgs, cad_app_version, { }, ::std::string::String, { ::std::result::Result::Ok($crate::app_version().to_string()) })
             @row(shared, pure, NoArgs, cad_api_status, { }, $crate::session::CadApiStatus, { $crate::session::wire::api_status() })

@@ -377,6 +377,7 @@ fn compare(case: &str, name: &str, args: &str, gates: (bool, bool)) -> (Run, Run
 
 /// The per-command matrix lives in its own module so this file stays readable.
 mod matrix;
+mod settings_fonts;
 
 // ---------------------------------------------------------------------------
 // The `invoke` envelope and the name set
@@ -516,12 +517,15 @@ fn the_wire_command_set_is_the_registrys_shared_set() {
             "{name} is not in the full registry"
         );
     }
-    // The seven desktop-only rows are the difference between the two sets; none of
-    // them is a dom-canvas command (see the `cad_status` test below). The two
+    // The desktop-only rows are the difference between the two sets; none of them
+    // is a dom-canvas command (see the `cad_status` test below). The two
     // recent-drawing rows and the two recovery-snapshot rows are host file
     // capabilities: a browser carrier answers `cad_recent_files` /
     // `cad_recovery_files` with `supported: false` and refuses `cad_open_recent` /
-    // `cad_open_recovery` by name, so none of them may reach this transport.
+    // `cad_open_recovery` by name, so none of them may reach this transport. The
+    // ymodel pair is the same story for the `.ymodel` archive (ADR-0040): a page
+    // document is not an archive, so both are refused by marker. The folder picker
+    // is refused for the same reason (a page has no local directory).
     assert_eq!(
         cad_ui_core::session::TAURI_ONLY_WIRE_COMMAND_NAMES,
         &[
@@ -532,7 +536,92 @@ fn the_wire_command_set_is_the_registrys_shared_set() {
             "cad_open_recent",
             "cad_recovery_files",
             "cad_open_recovery",
+            "cad_ymodel_resource_preview",
+            "cad_set_embed_resources",
+            "cad_pick_directory",
         ]
+    );
+}
+
+/// The host-seam commands refuse with **their own** markers, with and without a
+/// live session.
+///
+/// A browser document is not a `.ymodel` archive: there is no file to make
+/// self-contained, so the preview would describe resources no file could carry and
+/// the flag could never be written. A page also has no local directory to pick for
+/// the fonts row. The marker (not the generic "no such wire command") is what the
+/// chrome keys on, and what an operator reads in the log. In particular the picker
+/// must never answer `null`: that would read as "the user cancelled".
+#[test]
+fn the_host_seam_commands_refuse_with_their_own_markers() {
+    for (name, marker) in [
+        (
+            cad_ui_core::session::YMODEL_PREVIEW_COMMAND,
+            cad_ui_core::session::UNSUPPORTED_YMODEL,
+        ),
+        (
+            cad_ui_core::session::EMBED_RESOURCES_COMMAND,
+            cad_ui_core::session::UNSUPPORTED_EMBED_RESOURCES,
+        ),
+        (
+            cad_ui_core::session::PICK_DIRECTORY_COMMAND,
+            cad_ui_core::session::UNSUPPORTED_PICK_DIRECTORY,
+        ),
+    ] {
+        assert!(!is_wire_command(name), "{name} is desktop-only");
+
+        let without = without_session(name).expect_err("refused without a session");
+        assert_eq!(without, marker, "{name}");
+
+        let session = session();
+        let mut sink = DirectSink::new(&session);
+        let reads = DirectReads::new(&session);
+        let mut popups = NoPopups;
+        let refused = dispatch(name, "{}", &mut sink, &reads, &mut popups)
+            .expect_err("the host-seam command is refused");
+        assert_eq!(refused, marker, "{name} on a live session");
+
+        // The whole `invoke` envelope. The picker's success value would be a path
+        // or `null`; a refusal must be an `ok:false` error instead.
+        let invoked: Value = serde_json::from_str(&invoke(name, "{}")).expect("valid JSON");
+        assert_eq!(invoked["ok"], Value::Bool(false), "{name}");
+        assert_eq!(
+            invoked["error"],
+            Value::String(marker.to_string()),
+            "{name}"
+        );
+    }
+}
+
+/// The Web carrier refuses the folder picker by name (the row is disabled in the
+/// chrome; this is the backstop).
+#[test]
+fn the_web_carrier_refuses_the_directory_picker_by_name() {
+    let marker = cad_ui_core::session::UNSUPPORTED_PICK_DIRECTORY;
+    assert_eq!(marker, "unsupported-runtime: pick_directory");
+    assert_eq!(
+        refuse_host_seam_command(cad_ui_core::session::PICK_DIRECTORY_COMMAND),
+        Some(marker.to_string())
+    );
+    // The no-session path and the live-session path agree, and neither is `null`.
+    assert_eq!(
+        without_session(cad_ui_core::session::PICK_DIRECTORY_COMMAND).expect_err("refused"),
+        marker
+    );
+    let session = session();
+    let mut sink = DirectSink::new(&session);
+    let reads = DirectReads::new(&session);
+    let mut popups = NoPopups;
+    assert_eq!(
+        dispatch(
+            cad_ui_core::session::PICK_DIRECTORY_COMMAND,
+            "{}",
+            &mut sink,
+            &reads,
+            &mut popups,
+        )
+        .expect_err("refused"),
+        marker
     );
 }
 

@@ -32,8 +32,8 @@ function snapshot(overrides: Record<string, unknown> = {}): Record<string, unkno
 }
 
 test('the files tab holds one units block and the recovery interval', () => {
-  // Declaration order is the rendering order: the four rows read as one block
-  // under the tab heading, with the read-only fonts folder last.
+  // Declaration order is the rendering order: the four unit rows read as one
+  // block under the tab heading, then the fonts override and its effective value.
   assert.deepEqual(
     fieldsForTab('files').map(field => [field.id, field.kind, field.wire, field.key]),
     [
@@ -41,7 +41,11 @@ test('the files tab holds one units block and the recovery interval', () => {
       ['displayUnit', 'select', 'displayUnit', 'displayUnit'],
       ['unitPrecision', 'number', 'unitPrecision', 'unitPrecision'],
       ['recoveryInterval', 'number', 'recoveryInterval', 'recoveryInterval'],
-      ['fontsDir', 'readonly', 'fontsDir', undefined],
+      // The fonts rows read the host's two keys: the saved choice is edited (and
+      // written as `fontsDir`), the directory in use stays report-only
+      // (`options-fonts-dir.test.ts`).
+      ['fontsDir', 'path', 'fontsDirOverride', 'fontsDir'],
+      ['fontsDirEffective', 'readonly', 'fontsDir', undefined],
     ],
   );
   // Both unit selects carry the schema's closed lowercase token set, default

@@ -34,7 +34,8 @@ pub const THEME_LIGHT_BACKGROUND: &str = "#ffffff";
 /// values — object snap, hover preview, `SNAP` grid snap, `ORTHO` and the
 /// `SNAPUNIT` spacing —, the 2D left-drag input scheme, the 3D orbit
 /// sensitivity, the model/paper backgrounds, the crosshair size and the
-/// pickbox/aperture sizes). A host `config.json` replaces this policy wholesale.
+/// pickbox/aperture sizes, and the CAD font directory). A host `config.json`
+/// replaces this policy wholesale.
 ///
 /// The settings leaves are listed individually (never a `view.overlays` prefix)
 /// so no other configuration field becomes user-writable by inheritance.
@@ -64,7 +65,8 @@ pub const HOST_ALLOWED_PATHS_JSON: &str = r#"{"ui":{"userCustomization":{"allowe
     "ui.units.drawingUnit",
     "ui.units.displayUnit",
     "ui.units.decimalPlaces",
-    "ui.recovery.intervalSeconds"
+    "ui.recovery.intervalSeconds",
+    "ui.paths.fontsDir"
 ]}}}"#;
 
 /// The five host-owned appearance/navigation preference keys.

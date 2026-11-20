@@ -445,8 +445,15 @@ impl HostCore {
             }
         }
         let exe = std::env::current_exe().unwrap_or_default();
-        let font_dir =
-            cad_platform::fonts::local::resolve_font_dir(self.options.fonts_dir.as_deref(), &exe)?;
+        // `--fonts-dir` keeps its hard-error semantics (a missing directory
+        // refuses the load). A persisted `ui.paths.fontsDir` is only handed over
+        // while it still names a directory: a stale one falls through to
+        // discovery here instead of failing every open (the preference itself is
+        // kept and diagnosed at startup — see `settings::paths`).
+        let font_dir = cad_platform::fonts::local::resolve_font_dir(
+            self.explicit_font_dir().as_deref(),
+            &exe,
+        )?;
         let system_default = cad_platform::fonts::local::cached_system_default_candidates();
         let loaded = cad_platform::fonts::local::load_engine_report(
             font_dir.as_deref(),

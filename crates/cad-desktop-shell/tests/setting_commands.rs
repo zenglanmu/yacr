@@ -49,7 +49,63 @@ fn snapshot_with_snap_spacing(snap_spacing: f64) -> CadSettings {
         unit_precision: 3,
         recovery_interval: 60,
         fonts_dir: None,
+        // The desktop carrier has nothing saved here in this fixture, so both
+        // path fields stay **absent** on the wire (never `null`), matching the
+        // contract the React lane reads for "not configured".
+        fonts_dir_override: None,
+        // The row-state flag is always a boolean, never omitted.
+        fonts_dir_missing: false,
     }
+}
+
+/// The font-directory wire contract the Options row depends on.
+///
+/// `fontsDir`/`fontsDirOverride` are **omitted** when there is no value (the row
+/// reads an absent key as "not configured"), never serialized as `null`;
+/// `fontsDirMissing` is always a boolean. A stale saved choice keeps its own
+/// value while `fontsDir` reports the directory actually in use.
+#[test]
+fn the_font_directory_wire_fields_omit_paths_but_always_publish_the_row_state() {
+    let wire = serde_json::to_value(snapshot_with_snap_spacing(10.0)).expect("serializes");
+    assert!(
+        wire.get("fontsDir").is_none(),
+        "an unset directory is omitted, not null: {wire}"
+    );
+    assert!(
+        wire.get("fontsDirOverride").is_none(),
+        "an unset override is omitted, not null: {wire}"
+    );
+    assert_eq!(
+        wire.get("fontsDirMissing"),
+        Some(&json!(false)),
+        "the row state is always present: {wire}"
+    );
+
+    // A saved, usable directory is published on both path fields.
+    let mut saved = snapshot_with_snap_spacing(10.0);
+    saved.fonts_dir = Some("/opt/yacr/fonts".to_string());
+    saved.fonts_dir_override = Some("/opt/yacr/fonts".to_string());
+    let wire = serde_json::to_value(&saved).expect("serializes");
+    assert_eq!(wire.get("fontsDir"), Some(&json!("/opt/yacr/fonts")));
+    assert_eq!(
+        wire.get("fontsDirOverride"),
+        Some(&json!("/opt/yacr/fonts"))
+    );
+    assert_eq!(wire.get("fontsDirMissing"), Some(&json!(false)));
+
+    // A stale saved choice: the override keeps what the user picked, `fontsDir`
+    // is the fallback actually in use, and the row state is true.
+    let mut stale = snapshot_with_snap_spacing(10.0);
+    stale.fonts_dir = Some("/opt/yacr/fonts".to_string());
+    stale.fonts_dir_override = Some("/mnt/removed/fonts".to_string());
+    stale.fonts_dir_missing = true;
+    let wire = serde_json::to_value(&stale).expect("serializes");
+    assert_eq!(wire.get("fontsDir"), Some(&json!("/opt/yacr/fonts")));
+    assert_eq!(
+        wire.get("fontsDirOverride"),
+        Some(&json!("/mnt/removed/fonts"))
+    );
+    assert_eq!(wire.get("fontsDirMissing"), Some(&json!(true)));
 }
 
 fn queued_settings(

@@ -454,7 +454,13 @@ fn every_wire_command_answers_identically_on_both_paths() {
 #[test]
 fn the_control_reads_answer_the_same_object_on_both_paths() {
     let session = session();
-    let settings = session.settings();
+    // The browser carrier's read seam omits the local font-directory fields
+    // (`DirectReads::settings`); mirror that here so the comparison is the same
+    // carrier answer on both paths instead of depending on the host's `fonts/`
+    // discovery for the test executable.
+    let mut settings = session.settings();
+    settings.fonts_dir = None;
+    settings.fonts_dir_override = None;
     let layers = session.layers();
     let fonts = session.fonts();
     let api_snapshot = session.api_snapshot();

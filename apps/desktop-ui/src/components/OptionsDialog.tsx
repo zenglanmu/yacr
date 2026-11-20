@@ -35,6 +35,8 @@ import type { Locale, Translator } from '../i18n.ts';
 import type { CSSProperties } from 'react';
 import { storeLocale } from '../i18n.ts';
 import { POPUP_BLANK } from '../popup/popup.ts';
+import { surfaceModeFromShell } from '../cad/surface.ts';
+import { fontsDirKnown, fontsDirMissing, pickDirectory, pickerAvailable } from '../options/fonts-dir.ts';
 import {
   LOCALE_CHOICES,
   OPTIONS_FIELDS,
@@ -50,6 +52,7 @@ import {
   optionsTabs,
   readSettings,
   settleSettings,
+  settingErrorCode,
   takeOptionsTab,
   validateDraft,
   validateField,
@@ -238,10 +241,16 @@ interface OptionsRowProps {
   readonly error: FieldError | null;
   readonly first: boolean;
   readonly t: Translator;
+  /**
+   * Copy override for the help line. The effective fonts directory uses it on a
+   * carrier that cannot read local directories, where the stored help sentence
+   * ("pick a directory…") would describe an affordance this carrier hides.
+   */
+  readonly helpKey?: string;
   readonly children: React.ReactNode;
 }
 
-function OptionsRow({ field, error, first, t, children }: OptionsRowProps) {
+function OptionsRow({ field, error, first, t, helpKey, children }: OptionsRowProps) {
   const ids = fieldIds(field);
   const labelStyle = error ? { ...OPTIONS_LABEL, ...OPTIONS_LABEL_INVALID } : OPTIONS_LABEL;
   return (
@@ -261,7 +270,7 @@ function OptionsRow({ field, error, first, t, children }: OptionsRowProps) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
         {children}
         <p id={ids.help} style={error ? { ...OPTIONS_HELP, ...OPTIONS_HELP_INVALID } : OPTIONS_HELP}>
-          {t(field.helpKey)}
+          {t(helpKey ?? field.helpKey)}
         </p>
         {error ? (
           <p
@@ -284,6 +293,30 @@ function MissingBadge({ t }: { readonly t: Translator }) {
   return <span style={OPTIONS_BADGE}>{t(OPTIONS_KEYS.missing)}</span>;
 }
 
+/**
+ * The inline "the configured directory is missing" caution.
+ *
+ * A degraded path, not a failure: the host already fell back to its default, so
+ * the line uses the accent caution (the same rule the GPU-fallback notice
+ * follows) and never the danger red. It is a row line with `role="status"`,
+ * never a modal, and it keeps the code out of the visible sentence.
+ */
+function FontsDirWarning({ t }: { readonly t: Translator }) {
+  return (
+    <p
+      role="status"
+      className="options-warning"
+      style={{
+        display: 'flex', alignItems: 'flex-start', gap: 5, margin: 0,
+        fontSize: 11, lineHeight: 1.45, color: 'var(--accent-text)',
+      }}
+    >
+      <Icon name="alert" size={12} style={{ flex: '0 0 auto', marginTop: 1 }} />
+      <span>{t('options.status.fontsDirMissing')}</span>
+    </p>
+  );
+}
+
 /** What `PopupOverlay` hands the Options body. */
 interface OptionsDialogProps {
   readonly onClose: () => void;
@@ -294,6 +327,12 @@ interface OptionsDialogProps {
 export function OptionsDialog({ onClose, closeFailure }: OptionsDialogProps) {
   const { t, locale, setLocale } = useI18n();
   const { status } = useShell();
+  // Which carrier the host reported — never the build target. A directory picker
+  // is a native-shell capability, so the editable fonts row exists only on
+  // `native-below`; on `dom-canvas` (Web, X11/XWayland) and on a mode the chrome
+  // does not recognise, it is hidden and only the effective value is shown.
+  const surfaceMode = surfaceModeFromShell({ status });
+  const canPick = pickerAvailable(surfaceMode);
   const tabs = useMemo(() => optionsTabs(), []);
   const [phase, setPhase] = useState<Phase>({ kind: 'loading' });
   const [settings, setSettings] = useState<SettingsSnapshot | null>(null);
@@ -373,6 +412,26 @@ export function OptionsDialog({ onClose, closeFailure }: OptionsDialogProps) {
       return next;
     });
   }, []);
+
+  /**
+   * Ask the host for a directory and stage it as the row's value.
+   *
+   * A cancelled picker (`null`) stages **nothing** — the previous value stays
+   * exactly as it was. A refusal is the host's sentence, reported in the footer
+   * through the same `options.error.<code>` lookup a refused write uses; it is
+   * never folded into "cancelled".
+   */
+  const browse = useCallback(async (id: string) => {
+    if (!canPick) return;
+    try {
+      const picked = await pickDirectory(invoke);
+      if (!alive.current || picked === null) return;
+      update(id, picked);
+    } catch (error) {
+      if (!alive.current) return;
+      setNotice(optionsErrorView(settingErrorCode(error), t));
+    }
+  }, [alive, canPick, t, update]);
 
   const dirty = useMemo(
     () => (draft && phase.kind === 'ready' ? dirtyFields(draft, settings, baselineLocale) : []),
@@ -475,7 +534,17 @@ export function OptionsDialog({ onClose, closeFailure }: OptionsDialogProps) {
   }, [activeTab, moveTab, tabs]);
 
   const tab = tabs.some(entry => entry.id === activeTab) ? activeTab : tabs[0]?.id ?? null;
+  // The editable fonts row always renders, but only as an *editor* where a
+  // directory picker can open and the host names a directory; elsewhere it keeps
+  // the disabled/missing shape, so a carrier that would refuse the write never
+  // shows an empty editable field. The effective row below it always renders, so
+  // the user still sees the directory in use (or that there is none).
   const fields = tab ? fieldsForTab(tab) : [];
+  // The host's own verdict on the saved choice, and whether it can name any
+  // directory at all. Both come from the snapshot: the warning is never derived
+  // from comparing the two paths (a `--fonts-dir` value legitimately wins).
+  const missingDir = fontsDirMissing(settings);
+  const fontsAvailable = fontsDirKnown(settings);
   const ready = phase.kind === 'ready' && draft !== null;
   const dirtyCount = dirty.length;
   const hasLocalErrors = Object.keys(fieldErrors).length > 0;
@@ -575,6 +644,60 @@ export function OptionsDialog({ onClose, closeFailure }: OptionsDialogProps) {
           </span>
         );
       }
+      case 'path': {
+        // The saved choice, edited as plain text with two actions: the host's
+        // directory picker, and "clear" (the documented empty value that puts the
+        // default directory back in charge). The placeholder is the directory the
+        // host is really reading, so an empty row still says what will be used.
+        //
+        // The row is an *editor* only where a directory picker can open. A carrier
+        // that cannot read a local directory (Web, `dom-canvas`, an unrecognised
+        // mode) refuses both the pick and the write, and reports no `fontsDir`, so
+        // the row keeps the **disabled/missing** shape — a disabled field with the
+        // "not reported" badge and no dead picker — instead of an empty editable
+        // box that would write a path the carrier refuses. A stale saved choice is
+        // still editable where the picker exists: picking is the fix.
+        const current = typeof value === 'string' ? value : '';
+        const editable = canPick;
+        // The seeded effective row is the host's own answer for what is read now.
+        const seeded = draft?.fontsDirEffective;
+        const effective = typeof seeded === 'string' && seeded.trim().length > 0 ? seeded : null;
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
+            <span style={OPTIONS_CONTROL}>
+              <DraftInput
+                id={ids.input}
+                value={missing ? '' : current}
+                invalid={Boolean(error)}
+                disabled={!editable}
+                placeholder={effective ?? undefined}
+                describedBy={description}
+                onChange={next => update(field.id, next)}
+              />
+              {editable ? (
+                <>
+                  <Button icon="open" iconSize={13} onClick={() => { void browse(field.id); }}>
+                    {t('options.action.browse')}
+                  </Button>
+                  <Button
+                    icon="close"
+                    iconSize={13}
+                    disabled={current.length === 0}
+                    onClick={() => update(field.id, '')}
+                  >
+                    {t('options.action.clear')}
+                  </Button>
+                </>
+              ) : fontsAvailable ? (
+                <span style={OPTIONS_BADGE}>{t(OPTIONS_KEYS.readOnly)}</span>
+              ) : (
+                <MissingBadge t={t} />
+              )}
+            </span>
+            {missingDir ? <FontsDirWarning t={t} /> : null}
+          </div>
+        );
+      }
       case 'locale':
         return (
           <span style={OPTIONS_CONTROL}>
@@ -591,8 +714,11 @@ export function OptionsDialog({ onClose, closeFailure }: OptionsDialogProps) {
           </span>
         );
       case 'readonly':
-      default:
-        return (
+      default: {
+        // An absent answer keeps the "not reported" pattern (blank well plus the
+        // missing badge) instead of an empty value that could be read as a real
+        // one; a reported value keeps the "read only" badge.
+        const well = (
           <span style={OPTIONS_CONTROL}>
             <span
               style={{ ...OPTIONS_WELL, flex: '1 1 auto', minWidth: 0 }}
@@ -600,9 +726,24 @@ export function OptionsDialog({ onClose, closeFailure }: OptionsDialogProps) {
             >
               {missing ? POPUP_BLANK : value}
             </span>
-            <span style={OPTIONS_BADGE}>{t(OPTIONS_KEYS.readOnly)}</span>
+            {missing
+              ? <MissingBadge t={t} />
+              : <span style={OPTIONS_BADGE}>{t(OPTIONS_KEYS.readOnly)}</span>}
           </span>
         );
+        // The effective row is the only place the missing-directory warning can
+        // appear when the editable row is unavailable, so it speaks for the same
+        // host fact here.
+        if (field.id === 'fontsDirEffective' && missingDir) {
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
+              {well}
+              <FontsDirWarning t={t} />
+            </div>
+          );
+        }
+        return well;
+      }
     }
   };
 
@@ -689,8 +830,25 @@ export function OptionsDialog({ onClose, closeFailure }: OptionsDialogProps) {
               {heading}
               {fields.map((field, index) => {
                 const error = fieldErrors[field.id] ? optionsErrorView(fieldErrors[field.id], t) : null;
+                // On a carrier without local directories the effective row says
+                // so: the stored help sentence describes a picker that is not
+                // rendered on this carrier.
+                // Both fonts rows describe a directory this carrier cannot offer
+                // (no picker, or the host names none), so neither keeps the
+                // "pick a directory" sentence that would describe a dead action.
+                const fontsRow = field.id === 'fontsDir' || field.id === 'fontsDirEffective';
+                const helpKey = fontsRow && (!canPick || !fontsAvailable)
+                  ? 'options.help.fontsDirUnavailable'
+                  : undefined;
                 return (
-                  <OptionsRow key={field.id} field={field} error={error} first={index === 0} t={t}>
+                  <OptionsRow
+                    key={field.id}
+                    field={field}
+                    error={error}
+                    first={index === 0}
+                    t={t}
+                    helpKey={helpKey}
+                  >
                     {control(field)}
                   </OptionsRow>
                 );

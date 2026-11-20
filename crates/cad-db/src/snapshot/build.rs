@@ -36,21 +36,24 @@ use cad_domain::ymodel::{shard_of, DocumentHeader, ModelKey, PersistentIdOf, Sha
 use cad_domain::{CadResult, DocumentIdentity, Revision, SpaceId, UnitContext};
 
 use super::elements;
+use super::resources;
 use super::tables;
 use super::variables;
 use super::{
-    DocumentSnapshot, ElementSnapshot, ModelKind, ModelRecord, ShardSnapshot, SnapshotError,
+    table_entry, DocumentSnapshot, ElementSnapshot, ModelKind, ModelRecord, ShardSnapshot,
+    SnapshotError,
 };
 use crate::drawing::DrawingDatabase;
+use crate::scope::TableKind;
 use crate::DrawingDatabaseBuilder;
 
 impl DrawingDatabase {
     /// Encode this database as a [`DocumentSnapshot`].
     ///
     /// `units`, `identity`, `resource_keys` and `revision` are host/session state
-    /// the database does not hold; the database id and the identifier counters are
-    /// **not** parameters, because they must describe the rows (see the module
-    /// docs).
+    /// the database does not hold; the database id, the identifier counters and
+    /// the resource policy are **not** parameters, because they must describe the
+    /// document (the policy is document state, ADR-0040 D3).
     pub fn snapshot(
         &self,
         units: UnitContext,
@@ -63,18 +66,37 @@ impl DrawingDatabase {
             units,
             identity,
             resource_keys,
+            embed_resources: self.embed_resources,
             next: self.id_counters(),
             variables: variables::encode(self)?,
         };
+        // `tables::encode` writes the row tables; the resource mapping lives in
+        // its own codec (`snapshot/resources.rs`) for the file-size gate and is
+        // still one `tables/resources.json` row array here.
+        //
+        // ADR-0040 D12: that table exists **only** when the document really
+        // carries resource bytes. A document that packs nothing writes no table
+        // at all, so a pre-0040 reader sees the minor-4 archive it expects
+        // instead of refusing a table it cannot model (an empty table is still a
+        // `tables/resources.json` entry). `embed_resources` alone is a
+        // `document.json` scalar and does not earn a table: the flag is written
+        // there, so the archive is minor 5 without a mapping nothing maps.
+        let mut tables = tables::encode(self)?;
+        if !self.resources.is_empty() {
+            tables.set(TableKind::Resources, resources::encode(self)?);
+        }
         Ok(DocumentSnapshot {
             header,
             revision,
             models: self.model_records(),
             shards: self.shard_snapshots()?,
-            tables: tables::encode(self)?,
+            tables,
             // Cloned `Arc`s, not copied bytes: one save shares the document's
             // texture buffers with the snapshot it hands to the store.
             textures: self.textures.clone(),
+            resources: self.resources.clone(),
+            resource_names: self.resource_names.clone(),
+            resource_sources: self.resource_sources.clone(),
         })
     }
 
@@ -87,8 +109,10 @@ impl DrawingDatabase {
         let mut builder = DrawingDatabaseBuilder::new(snapshot.header.database);
         builder.set_revision(snapshot.revision);
         builder.seed_identifiers(snapshot.header.next);
+        builder.set_embed_resources(snapshot.header.embed_resources);
 
         let tables = tables::decode(&snapshot.tables)?;
+        let resource_tables = resources::decode(&snapshot.tables)?;
 
         for layer in tables.layers.values() {
             checked(
@@ -197,6 +221,41 @@ impl DrawingDatabase {
                 builder.insert_texture(key.clone(), std::sync::Arc::clone(bytes)),
                 format!("textures/{key}"),
             )?;
+        }
+        // Bundled external resources (ADR-0040 D5). On load the **table** is the
+        // mapping authority and the snapshot's byte map is the payload authority,
+        // so the two refusals below are the whole integrity rule: a listed name
+        // with no bytes is a dangling reference, and bytes with no listed name
+        // would be an asset nothing can reach (and would be dropped by the next
+        // save). Neither is repaired by guessing.
+        for ((kind, key), name) in &resource_tables.0 {
+            let Some(bytes) = snapshot.resources.get(&(*kind, key.clone())) else {
+                return Err(SnapshotError::invalid(format!(
+                    "{}: {kind}/{key} has no resources/{kind}/{key} payload entry",
+                    table_entry(TableKind::Resources)
+                )));
+            };
+            checked(
+                builder.insert_resource(*kind, key, name, std::sync::Arc::clone(bytes)),
+                format!("resources/{kind}/{key}"),
+            )?;
+            let source = resource_tables
+                .1
+                .get(&(*kind, key.clone()))
+                .cloned()
+                .flatten();
+            checked(
+                builder.set_resource_source(*kind, key, source.as_deref()),
+                format!("resources/{kind}/{key}"),
+            )?;
+        }
+        for (kind, key) in snapshot.resources.keys() {
+            if !resource_tables.0.contains_key(&(*kind, key.clone())) {
+                return Err(SnapshotError::invalid(format!(
+                    "resources/{kind}/{key} is not listed in {}",
+                    table_entry(TableKind::Resources)
+                )));
+            }
         }
 
         let mut hidden = BTreeSet::new();
@@ -575,6 +634,10 @@ mod tests {
         assert_eq!(loaded.revision(), Revision(7));
         let b = snapshot_of(&loaded, Revision(7));
         assert_eq!(a, b, "snapshot -> database -> snapshot is a fixed point");
+        assert!(
+            a.bytes_equal(&b),
+            "the fixed point holds for the payload bytes too, not just their lengths"
+        );
 
         // Spot-check the values a lenient codec could have flattened.
         assert!(loaded.point_display_size.is_nan());

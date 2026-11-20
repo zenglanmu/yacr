@@ -57,15 +57,12 @@ impl DocumentArchive for ZipArchive {
         // `commit` is what makes the bytes observable; a sink that never
         // committed means the write did not complete, which must not be reported
         // as a saved document.
-        let bytes = sink
-            .committed_bytes()
-            .ok_or_else(|| {
-                ArchiveError::new(
-                    cad_domain::ymodel::markers::INVALID_DOCUMENT,
-                    "the archive sink did not commit",
-                )
-            })?
-            .to_vec();
+        let bytes = sink.into_committed_bytes().ok_or_else(|| {
+            ArchiveError::new(
+                cad_domain::ymodel::markers::INVALID_DOCUMENT,
+                "the archive sink did not commit",
+            )
+        })?;
         Ok(ArchiveBytes {
             bytes,
             saved_revision: report.saved_revision,

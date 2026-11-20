@@ -2246,6 +2246,111 @@ button, input, select { font: inherit; color: inherit; }
 }
 .dwg-save-confirm__footer { flex-wrap: wrap; }
 
+/* Pre-save embed dialog ---------------------------------------------------- */
+/* The optional "pack the external files in" question, asked between an admitted
+   SAVE and the host's save picker. Same dialog family values as the card above
+   (surface, line, radius, elevation, motion) and the same stacking slot, so the
+   two pre-save questions can never be mistaken for a host notice. The two lists
+   are the content, so the body gives them a scrolling region and keeps the
+   toggle, the total and the footer still. A found row carries the accent edge and
+   the bytes it adds; a missing row is dashed and muted with no size cell, so it
+   can never read as embedded. */
+.popup-overlay.save-embed-overlay { z-index: 61; }
+.save-embed {
+  width: min(528px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  display: flex;
+  flex-direction: column;
+  background: var(--chrome-2);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: 0 18px 48px rgba(var(--shadow-rgb), .45);
+  animation: fade var(--t-med) both;
+}
+.save-embed__head { border-bottom: 1px solid var(--line); }
+.save-embed__title { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
+.save-embed__title .icon { color: var(--accent-text); }
+.save-embed__body { gap: 12px; }
+/* The benefit is the reason to say yes: one accent-edged block, never a banner. */
+.save-embed__benefit {
+  margin: 0;
+  padding: 9px 11px;
+  background: var(--field);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 12px; line-height: 1.55;
+}
+.save-embed__cost { margin: 0; color: var(--text-muted); font-size: 11.5px; line-height: 1.5; }
+.save-embed__toggle {
+  display: flex; align-items: center; gap: 9px;
+  padding: 8px 11px;
+  background: var(--well);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  color: var(--text); font-size: 12px;
+  cursor: pointer;
+}
+.save-embed__toggle:hover { background: var(--well-hi); }
+.save-embed__switch { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); }
+.save-embed__switch:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.save-embed__switch:disabled { cursor: default; }
+.save-embed__groups {
+  display: flex; flex-direction: column; gap: 10px;
+  flex: 1 1 auto; min-height: 0; overflow: auto;
+  padding-right: 2px;
+}
+.save-embed__group { display: flex; flex-direction: column; gap: 4px; }
+.save-embed__group-head {
+  display: flex; align-items: baseline; gap: 8px;
+  font-size: 10.5px; letter-spacing: .4px; text-transform: uppercase;
+  color: var(--text-muted);
+}
+.save-embed__count { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.save-embed__list { list-style: none; margin: 0; padding: 0; }
+.save-embed__row {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-left: 2px solid transparent;
+  font-size: 11.5px;
+}
+.save-embed__row + .save-embed__row { border-top: 1px solid var(--line); }
+.save-embed__row.is-found { border-left-color: var(--accent); background: var(--field); }
+.save-embed__row.is-missing { border-left: 2px dashed var(--line-soft); }
+.save-embed__kind {
+  display: inline-flex; align-items: center; gap: 5px;
+  min-width: 0; overflow: hidden; white-space: nowrap;
+  color: var(--text-muted); font-size: 10.5px;
+}
+.save-embed__row.is-found .save-embed__kind { color: var(--text-dim); }
+.save-embed__name {
+  min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--font-mono); font-size: 11.5px; color: var(--text);
+}
+.save-embed__row.is-missing .save-embed__name { color: var(--text-muted); }
+.save-embed__size {
+  white-space: nowrap; font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);
+}
+.save-embed__meta {
+  display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between;
+  gap: 4px 12px;
+}
+.save-embed__total {
+  margin: 0; font-size: 11.5px; color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.save-embed__note { margin: 0; font-size: 11px; color: var(--text-muted); }
+.save-embed__empty { margin: 0; font-size: 12px; color: var(--text-dim); }
+.save-embed__error { margin: 0; font-size: 11px; }
+.save-embed__footer { flex-wrap: wrap; }
+
 /* In-app update banner ---------------------------------------------------- */
 /* A new release is news, not a blocker. Unlike the notices above this is not a
    dialog: no backdrop, no focus trap, no global key handler. It is a card in a

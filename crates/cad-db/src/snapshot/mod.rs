@@ -23,6 +23,7 @@
 
 pub(crate) mod build;
 pub(crate) mod elements;
+pub(crate) mod resources;
 pub(crate) mod tables;
 pub(crate) mod variables;
 
@@ -31,7 +32,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use cad_domain::ymodel::{DocumentHeader, ModelKey, PersistentId, Shard};
-use cad_domain::{EntityId, Revision};
+use cad_domain::{BundledKind, EntityId, Revision};
 
 use crate::scope::TableKind;
 
@@ -158,6 +159,10 @@ pub const fn table_entry(kind: TableKind) -> &'static str {
         TableKind::PlotSettings => "tables/plot-settings.json",
         TableKind::ExternalReferences => "tables/xrefs.json",
         TableKind::Blocks => "tables/blocks.json",
+        // The logical name ⇄ archive-key mapping (ADR-0040 D4). A plain row
+        // array like every other table; the bytes are separate
+        // `resources/<kind>/<key>` entries.
+        TableKind::Resources => "tables/resources.json",
         // Host-owned document metadata (ADR-0037 D11): written from the
         // `Document` slot, never encoded from the database itself.
         TableKind::Sources => "tables/sources.json",
@@ -179,7 +184,7 @@ pub const CLASSES_ENTRY: &str = "schema/classes.json";
 /// One snapshot is one save: it is built from a `&DrawingDatabase` (plus the
 /// dirty scope, which decides what may be copied rather than rewritten) and it is
 /// consumed to hydrate a new database on open.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct DocumentSnapshot {
     pub header: DocumentHeader,
     /// The revision this snapshot represents. On save this is
@@ -199,6 +204,87 @@ pub struct DocumentSnapshot {
     /// every document without textures, which is every document this build wrote
     /// before minor 3.
     pub textures: BTreeMap<String, Arc<[u8]>>,
+    /// Document-bundled external resource bytes (fonts, xref sources and
+    /// `IMAGE` rasters), keyed by `(kind, key)` (ADR-0040 D5).
+    ///
+    /// The store writes one `resources/<kind>/<key>` binary entry per item and
+    /// reads them back here; `tables/resources.json` carries the logical names
+    /// that point at these keys. Empty for every document that packs nothing,
+    /// which is every document written before minor 5.
+    pub resources: BTreeMap<(BundledKind, String), Arc<[u8]>>,
+    /// The logical name each bundled resource is referenced by (ADR-0040 D4).
+    ///
+    /// Keyed like [`Self::resources`] so the mapping and the payloads cannot be
+    /// reordered independently; the name is what the entity/style/xref row
+    /// actually spells.
+    pub resource_names: BTreeMap<(BundledKind, String), String>,
+    /// The collection-time source path of each bundled resource, when one was
+    /// recorded (ADR-0040 D4: written as `source`, diagnostics only).
+    ///
+    /// Preserved rather than dropped so a save-after-open does not silently
+    /// rewrite a file with the provenance removed. `None` is "the writer knew no
+    /// path", which the table codec writes as `source: null`.
+    pub resource_sources: BTreeMap<(BundledKind, String), Option<String>>,
+}
+
+impl PartialEq for DocumentSnapshot {
+    /// Equality that does **not** compare the binary payloads byte for byte.
+    ///
+    /// `textures` and `resources` carry up to tens of MiB each, and the fixed
+    /// point test (`snapshot → database → snapshot`) compares whole snapshots:
+    /// a full memcmp there answers a question nobody asked. The key set plus each
+    /// payload's length are compared instead, so an added, dropped or resized
+    /// asset still makes two snapshots unequal. A caller that really means
+    /// "identical bytes" calls [`DocumentSnapshot::bytes_equal`].
+    fn eq(&self, other: &Self) -> bool {
+        self.header == other.header
+            && self.revision == other.revision
+            && self.models == other.models
+            && self.shards == other.shards
+            && self.tables == other.tables
+            && binary_keys_and_lengths_match(&self.textures, &other.textures)
+            && binary_keys_and_lengths_match(&self.resources, &other.resources)
+            && self.resource_names == other.resource_names
+            && self.resource_sources == other.resource_sources
+    }
+}
+
+/// Same keys, same payload **lengths**; contents are not compared (see
+/// [`DocumentSnapshot`]'s `PartialEq`).
+fn binary_keys_and_lengths_match<K: Ord>(
+    left: &BTreeMap<K, Arc<[u8]>>,
+    right: &BTreeMap<K, Arc<[u8]>>,
+) -> bool {
+    left.len() == right.len()
+        && left.iter().all(|(key, bytes)| {
+            right
+                .get(key)
+                .is_some_and(|other| other.len() == bytes.len())
+        })
+}
+
+/// Same keys and identical payload bytes.
+fn binary_contents_match<K: Ord>(
+    left: &BTreeMap<K, Arc<[u8]>>,
+    right: &BTreeMap<K, Arc<[u8]>>,
+) -> bool {
+    left.len() == right.len()
+        && left.iter().all(|(key, bytes)| {
+            right
+                .get(key)
+                .is_some_and(|other| other.as_ref() == bytes.as_ref())
+        })
+}
+
+impl DocumentSnapshot {
+    /// Whether both snapshots carry byte-identical textures and resources.
+    ///
+    /// `PartialEq` deliberately compares only keys and lengths (see above); a
+    /// round-trip test that wants to prove the bytes survived calls this.
+    pub fn bytes_equal(&self, other: &DocumentSnapshot) -> bool {
+        binary_contents_match(&self.textures, &other.textures)
+            && binary_contents_match(&self.resources, &other.resources)
+    }
 }
 
 /// Why a snapshot could not be built or hydrated.

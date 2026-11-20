@@ -14,6 +14,9 @@
 //!   parent-directory fsync, so a partial file is never left in place.
 //! * [`ReactSurface`] — [`SurfaceSource`]: the CAD content rectangle and scale
 //!   reported by the frontend DOM, shared through an `Rc<Cell<..>>`.
+//! * [`directory`] — the Options > Files folder chooser: a blocking XDG-portal
+//!   single-directory pick that `cad-desktop-shell::directory::DirectoryPicker`
+//!   runs on its worker thread (no frame-loop blocking).
 //! * [`ReactConfigStore`] — [`ConfigStore`]: std-fs config/preference loading
 //!   (`Absent` vs `Unreadable` distinguished) and atomic preference persistence,
 //!   or an explicit `Unsupported` when no durable path is configured.
@@ -39,9 +42,13 @@ use cad_platform::{
 };
 use cad_ui_core::i18n::MessageSource;
 
+#[path = "platform/directory.rs"]
+pub mod directory;
+
 #[path = "platform/save.rs"]
 mod save;
 
+pub use directory::portal_pick_directory;
 pub use save::{SaveChooser, UseSaveDialogLabels};
 
 const KEY_PICKER_TITLE: &str = "linux.picker_title";

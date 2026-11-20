@@ -10,6 +10,13 @@ use crate::policy::{self, PlotFormat, SaveFormat};
 use cad_domain::Completeness;
 use cad_platform::SavePurpose;
 
+pub mod resources;
+
+pub use resources::{
+    ResourceCandidate, ResourcePreview, ResourceReport, ResourceSkip, RESOURCE_BUDGET_ENTRY_BYTES,
+    RESOURCE_BUDGET_TOTAL_BYTES,
+};
+
 /// Outcome of a vector export: how many items the vector document could not
 /// represent (unshaped text, unsupported images, ...). A non-zero count means
 /// the export is partial and must not be reported as a clean success.
@@ -51,6 +58,16 @@ enum SaveFailure {
     RefusedSourcePath,
     /// Any other explicit failure, already localized.
     Reason(String),
+}
+
+/// What one native `.ymodel` save did, for the status line.
+struct YmodelSaveOutcome {
+    /// The recovery snapshot this document had could not be discarded. The file is
+    /// durable, so this is a warning, not a failure.
+    stale_recovery: Option<String>,
+    /// The external resources this save embedded (ADR-0040 D13). Empty when the
+    /// document does not embed resources or there was nothing to report.
+    resources: ResourceReport,
 }
 
 impl HostCore {
@@ -319,11 +336,30 @@ impl HostCore {
                 // would tell the user a DXF was written when the file is a
                 // `.ymodel`. The foreign-entry count has no key yet, so it stays
                 // in the document's persistence state rather than being guessed at.
-                Ok(None) => catalog("save.exported_ymodel", &[("path", &target.display_name)]),
+                //
+                // A save that packed external resources reports them on this same
+                // line (ADR-0040 D13): the catalog's two sentences
+                // (`save.embed.report` / `save.embed.report_skipped`) followed by
+                // the machine detail when anything was skipped or failed. It is
+                // deliberately *not* written into `tables/compat.json` — that table
+                // describes the content and is capped at 32 rows, so an over-budget
+                // resource would be lost.
+                Ok(outcome) if !outcome.resources.is_empty() => StatusMessage::ExternalText(
+                    outcome
+                        .resources
+                        .status_text(&target.display_name, outcome.stale_recovery.as_deref()),
+                ),
+                Ok(YmodelSaveOutcome {
+                    resources: _,
+                    stale_recovery: None,
+                }) => catalog("save.exported_ymodel", &[("path", &target.display_name)]),
                 // Saved, but the recovery snapshot could not be removed. The file
                 // is durable, so this is a warning that names both facts instead
                 // of failing a save that succeeded.
-                Ok(Some(reason)) => catalog(
+                Ok(YmodelSaveOutcome {
+                    resources: _,
+                    stale_recovery: Some(reason),
+                }) => catalog(
                     "save.exported_ymodel_stale_recovery",
                     &[("path", &target.display_name), ("reason", &reason)],
                 ),
@@ -479,7 +515,13 @@ impl HostCore {
     /// be discarded as stale at the next open (it is never offered above the
     /// saved revision). Its refusal is returned as a warning for the status line,
     /// not as an error.
-    fn export_ymodel(&self, target: &FileTarget) -> Result<Option<String>, SaveFailure> {
+    ///
+    /// Between steps 4 and 5 the external resources are collected when the
+    /// document opted into self-containment (ADR-0040 D13): the collection writes
+    /// the decided bytes into `cad-db` (so the snapshot below is the authority),
+    /// and **never fails the save** — a missing or over-budget resource is a
+    /// report, not an error.
+    fn export_ymodel(&self, target: &FileTarget) -> Result<YmodelSaveOutcome, SaveFailure> {
         let Some(archive) = self.document_archive() else {
             // A carrier with no archive cannot save the native format. Explicit,
             // never a silent DXF/DWG export under a `.ymodel` name.
@@ -524,6 +566,11 @@ impl HostCore {
         let previous = persistence
             .as_ref()
             .and_then(|state| state.archive_bytes.clone());
+        // ADR-0040 D13: collect the document's external resources **before** the
+        // snapshot, so the bytes the write encodes are already `cad-db` state and
+        // the scope it computes names `tables/resources.json`. A no-op for every
+        // document that never opted in (the flag is a document property, D3).
+        let resources = self.collect_ymodel_resources();
         let snapshot = self
             .controller
             .borrow()
@@ -580,7 +627,10 @@ impl HostCore {
         // The document is durable: the snapshot it was protecting is obsolete.
         // A refusal here is surfaced on the save status by the caller, but it
         // never turns a written file into a failed save.
-        Ok(self.discard_recovery(recovery_key.as_ref()))
+        Ok(YmodelSaveOutcome {
+            stale_recovery: self.discard_recovery(recovery_key.as_ref()),
+            resources,
+        })
     }
 
     fn report_plot_failed(&self, reason: &str) -> CadResult<()> {

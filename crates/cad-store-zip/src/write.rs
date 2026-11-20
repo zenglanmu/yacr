@@ -41,13 +41,14 @@ use cad_db::{
     StoreError, CLASSES_ENTRY, DOCUMENT_ENTRY, MODELS_ENTRY,
 };
 use cad_domain::ymodel::{markers, DocumentHeader, ModelKey, Shard};
-use cad_domain::DocumentIdentity;
+use cad_domain::{BundledKind, DocumentIdentity};
 
 use crate::crc32::crc32;
 use crate::json::{hex_lower, malformed, sha256_hex, Sha256Sum};
 use crate::manifest::{EntryRecord, Manifest};
 use crate::models::models_value;
 use crate::previous::{self, PreviousArchive};
+use crate::resources::{self, check_write_key_matches_digest};
 use crate::schema::classes_value;
 use crate::MANIFEST_ENTRY;
 
@@ -69,16 +70,32 @@ enum Body<'a> {
     Models(&'a [ModelRecord]),
     Table(&'a [Value]),
     Shard(&'a ShardSnapshot),
-    /// A document resource's raw bytes (a base-colour texture, ADR-0038 D4).
+    /// A document texture's raw bytes (ADR-0038 D4).
     ///
     /// Written verbatim: PNG/JPEG are already compressed, so a second deflate pass
     /// only costs CPU and blocks, and the format's `len`/`sha256` describe exactly
-    /// the image the importer registered.
+    /// the image the importer registered. Streamed, never buffered, and never
+    /// raw-copied (ADR-0040 D14).
     Binary(&'a [u8]),
+    /// A bundled external resource's raw bytes (`resources/<kind>/<key>`,
+    /// ADR-0040 D1).
+    ///
+    /// The key travels with the bytes because the write path asserts that the key
+    /// names this payload (`sha256(bytes)[..32]`). Streamed like a texture, but
+    /// eligible for the raw copy when the previous archive holds it unchanged.
+    Resource {
+        kind: BundledKind,
+        key: &'a str,
+        bytes: &'a [u8],
+    },
 }
 
 impl Body<'_> {
-    /// The entry's uncompressed bytes.
+    /// The entry's uncompressed JSON bytes.
+    ///
+    /// Binary bodies are *streamed* by the writer (ADR-0040 D15), so they have no
+    /// buffer to return; reaching here with one is an internal invariant failure,
+    /// not a document error.
     fn encode(&self) -> Result<Vec<u8>, StoreError> {
         // `serde_json::to_vec` per arm rather than a generic helper: the crate has
         // no direct `serde` dependency (the workspace's `serde_json` is enough),
@@ -99,13 +116,16 @@ impl Body<'_> {
                 let payloads: Vec<&Value> = rows.iter().map(|element| &element.payload).collect();
                 serde_json::to_vec(&payloads).map_err(encode_error)
             }
-            Body::Binary(bytes) => Ok(bytes.to_vec()),
+            Body::Binary(_) | Body::Resource { .. } => Err(malformed(
+                "entry",
+                "a binary entry is streamed to the zip, not buffered",
+            )),
         }
     }
 
     /// Whether this entry holds JSON (deflated) or opaque bytes (stored).
     fn is_json(&self) -> bool {
-        !matches!(self, Body::Binary(_))
+        !matches!(self, Body::Binary(_) | Body::Resource { .. })
     }
 }
 
@@ -113,16 +133,27 @@ fn encode_error(error: serde_json::Error) -> StoreError {
     malformed("entry", error)
 }
 
+/// Where a planned entry's bytes come from when the previous archive holds them.
+///
+/// A `Shard` is copyable only when the commit left it untouched (`dirty`); a
+/// `Resource` is content-addressed, so "the key did not change" already means "the
+/// bytes did not change" and no dirty scope is needed (ADR-0040 D7/D8).
+pub(crate) enum CopySource {
+    Shard(ModelKey, Shard),
+    Resource(BundledKind, String),
+}
+
 /// One entry the save will write: re-encoded, or copied from the previous
 /// archive.
 struct Planned<'a> {
     path: String,
     body: Option<Body<'a>>,
-    /// The shard this entry holds, when it is a `Body::Shard`.
+    /// The previous-archive entry a raw copy may take from, when one is eligible.
     ///
-    /// Only shard entries are eligible for the raw copy: the rest are small and
-    /// are always re-encoded, so `None` here also means "never copy this".
-    shard: Option<(ModelKey, Shard)>,
+    /// `None` means "always re-encoded". A texture is deliberately `None`: its
+    /// bytes are already in memory and ADR-0040 D14 keeps `textures/<key>` out of
+    /// the raw copy.
+    copy: Option<CopySource>,
 }
 
 /// Everything that must survive the borrow of the sink.
@@ -212,20 +243,41 @@ pub(crate) fn encode(
     // next manifest lists.
     let mut copy_records = BTreeMap::new();
 
-    // Shards the commit did not touch keep their compressed bytes. The source
-    // manifest must describe the entry as modelled (`!foreign`) and list it in
-    // `shard_map`; otherwise it is re-encoded rather than trusted.
+    // Shards the commit did not touch, and resources the previous archive already
+    // holds, keep their compressed bytes. The source manifest must describe the
+    // entry as modelled (`!foreign`); otherwise it is re-encoded rather than
+    // trusted.
     if let Some(previous) = previous.as_ref() {
         for entry in &mut planned {
-            let Some((model, shard)) = entry.shard else {
+            let Some(source) = entry.copy.as_ref() else {
                 continue;
             };
-            if !copyable_shard(previous, dirty, &entry.path, model, shard) {
-                continue;
+            match source {
+                CopySource::Shard(model, shard) => {
+                    if !copyable_shard(previous, dirty, &entry.path, *model, *shard) {
+                        continue;
+                    }
+                }
+                // D8: a resource is copyable exactly when the previous manifest
+                // recorded this path as a modelled entry. The planned path, the
+                // copy source and the body must all name the same `(kind, key)`;
+                // a planner that split them would copy a blob under a name that
+                // does not describe it.
+                CopySource::Resource(kind, key) => {
+                    let same_resource = previous.record(&entry.path).is_some()
+                        && matches!(
+                            &entry.body,
+                            Some(Body::Resource { kind: body_kind, key: body_key, .. })
+                                if body_kind == kind && *body_key == key.as_str()
+                        );
+                    if !same_resource {
+                        continue;
+                    }
+                }
             }
             let source = previous
                 .record(&entry.path)
-                .expect("copyable_shard requires a source record");
+                .expect("a copyable entry has a source record");
             copy_records.insert(
                 entry.path.clone(),
                 EntryRecord {
@@ -247,7 +299,9 @@ pub(crate) fn encode(
     }
 
     // Foreign entries join the plan at the compressed-byte level. A collision with
-    // a live entry is an explicit failure, never an overwrite (D11).
+    // a live entry is an explicit failure, never an overwrite (D11). The one
+    // exception is a content-addressed resource path: identical bytes are the same
+    // asset, so the modelled entry takes over (ADR-0040 D8).
     let mut foreign_paths = Vec::new();
     if let (Some(previous), Some(bytes)) = (previous.as_ref(), previous_bytes) {
         let live: BTreeSet<&str> = planned.iter().map(|entry| entry.path.as_str()).collect();
@@ -256,6 +310,26 @@ pub(crate) fn encode(
                 continue;
             }
             if live.contains(path.as_str()) {
+                // A content-addressed resource path can legitimately reappear
+                // (ADR-0040 D8): identical bytes are the same asset, so the
+                // modelled entry takes over; different bytes are a real conflict,
+                // never an overwrite. Everything else is a plain collision.
+                let new_bytes = planned
+                    .iter()
+                    .find(|entry| entry.path == path.as_str())
+                    .and_then(|entry| match entry.body {
+                        Some(Body::Resource {
+                            bytes: planned_bytes,
+                            ..
+                        }) => Some(planned_bytes),
+                        _ => None,
+                    });
+                if let Some(new_bytes) = new_bytes {
+                    if resources::foreign_has_same_content(bytes, path, new_bytes)? {
+                        continue;
+                    }
+                    return Err(resources::conflict(path));
+                }
                 return Err(previous::conflict(path));
             }
             let record = match previous.reusable(path) {
@@ -275,7 +349,7 @@ pub(crate) fn encode(
         planned.push(Planned {
             path,
             body: None,
-            shard: None,
+            copy: None,
         });
     }
     planned.sort_by(|left, right| left.path.cmp(&right.path));
@@ -327,34 +401,51 @@ fn plan_entries(snapshot: &DocumentSnapshot) -> Result<(Vec<Planned<'_>>, ShardM
     planned.push(Planned {
         path: DOCUMENT_ENTRY.to_string(),
         body: Some(Body::Header(&snapshot.header)),
-        shard: None,
+        copy: None,
     });
     planned.push(Planned {
         path: CLASSES_ENTRY.to_string(),
         body: Some(Body::Classes),
-        shard: None,
+        copy: None,
     });
     planned.push(Planned {
         path: MODELS_ENTRY.to_string(),
         body: Some(Body::Models(&snapshot.models)),
-        shard: None,
+        copy: None,
     });
     for (kind, rows) in &snapshot.tables.rows {
         planned.push(Planned {
             path: table_entry(*kind).to_string(),
             body: Some(Body::Table(rows)),
-            shard: None,
+            copy: None,
         });
     }
-    // Document resources (ADR-0038 D4/D5). The snapshot is the authority: exactly
+    // Document textures (ADR-0038 D4/D5). The snapshot is the authority: exactly
     // one entry per texture it holds, and never one it does not — an orphan image
     // must not appear in the archive. Texture entries are never raw-copied (their
-    // bytes are already in memory), so `shard: None` also means "always re-encoded".
+    // bytes are already in memory), so `copy: None` also means "always re-encoded".
     for (key, bytes) in &snapshot.textures {
         planned.push(Planned {
             path: texture_entry(key)?,
             body: Some(Body::Binary(&bytes[..])),
-            shard: None,
+            copy: None,
+        });
+    }
+    // Bundled resources (ADR-0040 D1/D4/D5). Content-addressed, one entry per
+    // snapshot resource, and again the snapshot is the authority: a key it does
+    // not hold is never written, so a dropped resource leaves no orphan entry.
+    for resource in resources::plan(snapshot)? {
+        planned.push(Planned {
+            path: resource.path,
+            body: Some(Body::Resource {
+                kind: resource.kind,
+                key: resource.key,
+                bytes: resource.bytes,
+            }),
+            copy: Some(CopySource::Resource(
+                resource.kind,
+                resource.key.to_string(),
+            )),
         });
     }
 
@@ -375,7 +466,7 @@ fn plan_entries(snapshot: &DocumentSnapshot) -> Result<(Vec<Planned<'_>>, ShardM
         planned.push(Planned {
             path,
             body: Some(Body::Shard(shard)),
-            shard: Some((shard.model, shard.shard)),
+            copy: Some(CopySource::Shard(shard.model, shard.shard)),
         });
     }
     for paths in shard_map.values_mut() {
@@ -453,6 +544,21 @@ fn write_entries(
 
     for entry in planned {
         match &entry.body {
+            // Binary payloads are measured and streamed, never buffered
+            // (ADR-0040 D15). A resource key is asserted against the measured
+            // digest before the entry is started, so a wrong key cannot leave a
+            // partial entry behind.
+            Some(Body::Binary(bytes)) => {
+                let record = write_binary(&mut zip, metrics, &entry.path, bytes, None)?;
+                records.push(record);
+                entries_written += 1;
+            }
+            Some(Body::Resource { kind, key, bytes }) => {
+                let record =
+                    write_binary(&mut zip, metrics, &entry.path, bytes, Some((*kind, key)))?;
+                records.push(record);
+                entries_written += 1;
+            }
             Some(body) => {
                 let bytes = body.encode()?;
                 let record = EntryRecord {
@@ -503,7 +609,7 @@ fn write_entries(
         format: cad_db::FormatVersion {
             read: cad_domain::ymodel::FORMAT_READ,
             write: cad_domain::ymodel::FORMAT_WRITE,
-            minor: cad_domain::ymodel::FORMAT_MINOR,
+            minor: resources::document_minor(snapshot),
         },
         generator: crate::GENERATOR.to_string(),
         document_uuid: document_uuid
@@ -524,6 +630,39 @@ fn write_entries(
 
     let written = metrics.borrow().written;
     Ok((written, entries_written, entries_copied))
+}
+
+/// Stream one opaque entry straight into the zip, measuring it on the way.
+///
+/// No buffer is built: a 64 MiB resource is hashed, CRC'd and written in the
+/// chunk sequence it already lives in (ADR-0040 D15). `expected_key` is the
+/// resource key the entry must name; it is checked **before** the entry is
+/// started so a mismatched key cannot leave a partial entry in the archive.
+fn write_binary(
+    zip: &mut ZipSink<'_>,
+    metrics: &RefCell<WriteMetrics>,
+    path: &str,
+    bytes: &[u8],
+    expected_key: Option<(BundledKind, &str)>,
+) -> Result<EntryRecord, StoreError> {
+    let (sha256, len, crc) = resources::measure(bytes);
+    if let Some((kind, key)) = expected_key {
+        check_write_key_matches_digest(kind, key, &sha256, path)?;
+    }
+    start_entry(zip, metrics, path, false)?;
+    for chunk in bytes.chunks(resources::BINARY_CHUNK) {
+        zip.write_all(chunk)
+            .map_err(|error| io_error(metrics, error, path))?;
+    }
+    Ok(EntryRecord {
+        path: path.to_string(),
+        sha256,
+        // See the crate docs: the compressed bytes never exist as a buffer.
+        sha256_c: None,
+        len,
+        crc,
+        foreign: false,
+    })
 }
 
 /// The options every JSON entry is written with: one compression method, one
@@ -634,6 +773,7 @@ mod tests {
             units: UnitContext::drawing_units(),
             identity: DocumentIdentity::Temporary(serial),
             resource_keys: Vec::new(),
+            embed_resources: false,
             variables: serde_json::json!({}),
             next: IdCounters::default(),
         }
@@ -677,6 +817,9 @@ mod tests {
                 key.to_string(),
                 Arc::from(vec![0x89u8, b'P', b'N', b'G']),
             )]),
+            resources: Default::default(),
+            resource_names: Default::default(),
+            resource_sources: Default::default(),
         };
         let (planned, _) = plan_entries(&snapshot).expect("plan");
         let entry = planned
@@ -687,7 +830,7 @@ mod tests {
             matches!(entry.body, Some(Body::Binary(_))),
             "a texture is a binary body"
         );
-        assert!(entry.shard.is_none(), "a texture is never raw-copied");
+        assert!(entry.copy.is_none(), "a texture is never raw-copied");
 
         // The snapshot is the authority: dropping the texture drops the entry.
         snapshot.textures.clear();
@@ -753,6 +896,9 @@ mod tests {
             ],
             tables: Default::default(),
             textures: Default::default(),
+            resources: Default::default(),
+            resource_names: Default::default(),
+            resource_sources: Default::default(),
         };
         snapshot.tables.set(cad_db::TableKind::Layers, Vec::new());
         let (planned, shard_map) = plan_entries(&snapshot).expect("plan");
@@ -771,10 +917,15 @@ mod tests {
                 ][..]
             )
         );
-        // Only the shard entries are marked copyable; the header, registry, models
-        // and tables are always re-encoded.
-        let marked: BTreeSet<(ModelKey, Shard)> =
-            planned.iter().filter_map(|entry| entry.shard).collect();
+        // Only shard entries are marked copyable; the header, registry, models and
+        // tables are always re-encoded.
+        let marked: BTreeSet<(ModelKey, Shard)> = planned
+            .iter()
+            .filter_map(|entry| match entry.copy {
+                Some(CopySource::Shard(model, shard)) => Some((model, shard)),
+                _ => None,
+            })
+            .collect();
         assert_eq!(
             marked,
             BTreeSet::from([
@@ -804,6 +955,9 @@ mod tests {
             ],
             tables: Default::default(),
             textures: Default::default(),
+            resources: Default::default(),
+            resource_names: Default::default(),
+            resource_sources: Default::default(),
         };
         assert!(plan_entries(&snapshot).is_err());
     }

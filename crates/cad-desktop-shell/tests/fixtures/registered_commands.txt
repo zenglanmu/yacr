@@ -15,11 +15,13 @@ cad_open_popup
 cad_open_recent
 cad_open_recovery
 cad_orbit
+cad_pick_directory
 cad_recent_files
 cad_recovery_files
 cad_rename_layer
 cad_restore_layers
 cad_set_active_layer
+cad_set_embed_resources
 cad_set_layer_property
 cad_set_layer_visible
 cad_set_selected_property
@@ -30,5 +32,6 @@ cad_set_tool_text
 cad_settings
 cad_standard_view
 cad_status
+cad_ymodel_resource_preview
 probe_input
 probe_status

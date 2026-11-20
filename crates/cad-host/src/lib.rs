@@ -65,7 +65,7 @@ mod p4;
 pub mod policy;
 mod recent;
 mod recovery;
-mod save;
+pub mod save;
 mod settings;
 mod settings_export;
 mod settings_root;
@@ -442,16 +442,13 @@ impl HostCore {
         self.set_status_message(StatusMessage::ExternalText(text.into()))
     }
 
-    /// Locale-neutral diagnostic text for errors that are returned to a caller.
+    /// Locale-neutral text for a catalog key plus its arguments.
+    ///
+    /// The rendering lives in [`crate::save::resources::catalog_message`] so the
+    /// save status and every caller of this helper cannot format a key
+    /// differently. The prose is the catalog's; this only carries `key arg=value`.
     pub(crate) fn message(&self, key: &str, values: &[(&str, &str)]) -> String {
-        let mut text = key.to_string();
-        for (name, value) in values {
-            text.push(' ');
-            text.push_str(name);
-            text.push('=');
-            text.push_str(value);
-        }
-        text
+        crate::save::resources::catalog_message(key, values)
     }
 
     pub fn last_status(&self) -> Option<StatusMessage> {
@@ -871,8 +868,7 @@ impl HostCore {
                 // The five appearance/navigation leaves are root preferences
                 // outside the `ViewerConfig` schema for the same reason: capture
                 // them here (absent/malformed -> documented default) so the
-                // settings snapshot reports them and every later write keeps
-                // them, then strip them before the store's allowed-path check.
+                // settings snapshot reports them and every later write keeps them.
                 *self.root_preferences.borrow_mut() =
                     settings_root::root_preferences_from_preference(&text);
                 // Recent drawings are user data in the same document: the array
@@ -901,7 +897,8 @@ impl HostCore {
                 diagnostics.push(format!("preferences {path} unreadable: {reason}"));
             }
         }
-
+        // A persisted font directory that disappeared is diagnosed, not fatal.
+        self.diagnose_fonts_dir(&mut diagnostics);
         // The loaded preference must actually seed the live session, not just
         // sit in the config store: `CadStatus.snap_enabled`/`hover_preview` read
         // `SessionState`, whose constructor defaults both switches on.

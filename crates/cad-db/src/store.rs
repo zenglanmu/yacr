@@ -223,6 +223,17 @@ impl MemorySink {
         self.committed.then_some(self.bytes.as_slice())
     }
 
+    /// The committed bytes, moved out of the sink.
+    ///
+    /// [`Self::committed_bytes`] borrows, so a caller that needs an owned
+    /// `Vec<u8>` (the archive seam hands `ArchiveBytes { bytes: Vec<u8> }` to the
+    /// carrier) would copy the whole archive. With resources embedded that copy
+    /// is an extra tens of MiB per save for no reason, so the sink exposes the
+    /// move instead. `None` until `commit` succeeds, exactly like the borrow.
+    pub fn into_committed_bytes(self) -> Option<Vec<u8>> {
+        self.committed.then_some(self.bytes)
+    }
+
     /// Bytes written so far, committed or not — for asserting abort behaviour.
     pub fn buffered(&self) -> &[u8] {
         &self.bytes

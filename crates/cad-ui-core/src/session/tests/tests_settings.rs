@@ -401,6 +401,33 @@ fn session_orbit_sensitivity_round_trips_and_reads_the_startup_preference() {
     assert_eq!(seeded.settings().orbit_sensitivity_percent, 50.0);
 }
 
+/// The font-directory **path** fields are omitted, not `null`, when the carrier
+/// has no local directory: the Options dialog reads an absent key as a disabled
+/// row instead of "an empty path was chosen". The `fontsDirMissing` flag stays a
+/// boolean (nothing saved is nothing missing).
+#[test]
+fn session_settings_omit_the_font_directory_fields_when_unknown() {
+    let session = plain_session();
+    let wire = serde_json::to_value(session.settings()).expect("settings serialize");
+    assert!(
+        wire.get("fontsDir").is_none(),
+        "an unknown directory is omitted: {wire}"
+    );
+    assert!(
+        wire.get("fontsDirOverride").is_none(),
+        "a cleared choice is omitted: {wire}"
+    );
+    assert_eq!(
+        wire["fontsDirMissing"],
+        serde_json::json!(false),
+        "nothing saved is nothing missing, and the flag is always a boolean"
+    );
+    assert_eq!(
+        serde_json::to_value(session.settings()).expect("settings serialize")["wgpu_backend"],
+        serde_json::json!("auto")
+    );
+}
+
 #[test]
 fn session_unknown_keys_are_outside_the_closed_table() {
     assert_eq!(CadSettingKey::parse("bogus"), None);

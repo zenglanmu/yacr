@@ -17,8 +17,8 @@ use cad_domain::Revision;
 fn the_units_and_recovery_keys_are_in_the_closed_table() {
     assert_eq!(
         CadSettingKey::ALL.len(),
-        30,
-        "four new writable keys on the closed table"
+        31,
+        "the closed table grew with the persisted font directory"
     );
     for key in [
         CadSettingKey::DrawingUnit,

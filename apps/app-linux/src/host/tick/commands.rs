@@ -73,6 +73,15 @@ pub(super) fn apply_batch(
                 .find(|(seq, _)| *seq == sequence)
                 .map(|(_, received)| received.elapsed().as_micros())
         });
+        // The save dialog's self-containment choice (ADR-0040 D3) is applied
+        // **before** this batch's commands: the dialog applies the choice and then
+        // dispatches SAVE, and both can land in one tick. Draining it after the
+        // commands would save with the previous policy and silently ignore the
+        // user's answer. Last wins (the field is one scalar), so a double toggle
+        // ends at the newest value.
+        CAD.with(|cell| {
+            cad_desktop_shell::state::drain_embed_resources(shared, cell.borrow().as_ref());
+        });
         let inputs_started = Instant::now();
         if queued > 0 {
             CAD.with(|cell| {
@@ -162,6 +171,11 @@ pub(super) fn apply_batch(
         CAD.with(|cell| {
             cad_desktop_shell::state::drain_api_calls(shared, cell.borrow().as_ref());
         });
+        // The Options > Files folder chooser publishes one terminal from its
+        // worker thread; the tick hands it to the waiting `cad_pick_directory`
+        // call. It needs no session (a pick can happen with no document open), so
+        // it runs outside the `CAD.with` block.
+        cad_desktop_shell::state::drain_directory_pick(shared);
 
         let inputs_us = inputs_started.elapsed().as_micros();
         // One owner-thread tick (host file/open/save/metrics/preparation + pump).

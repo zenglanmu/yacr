@@ -13,8 +13,9 @@
 //! `viewCubeIn3d`), the 3D orbit sensitivity percentage
 //! (`interaction.orbitSensitivityPercent`), the drawing/display units and their
 //! precision (`ui.units.*`, applied to the document header), the recovery
-//! interval (`ui.recovery.intervalSeconds`) and the read-only `--fonts-dir`
-//! display value.
+//! interval (`ui.recovery.intervalSeconds`) and the persisted CAD font directory
+//! (`ui.paths.fontsDir`, which selects the directory the next font load reads;
+//! `--fonts-dir` still wins over it).
 //! Every write goes through the same validated store/persistence path as
 //! [`HostCore::apply_user_preference_json`] — the backend leaf and the five
 //! appearance/navigation leaves are merged into the same durable preference
@@ -26,6 +27,10 @@ use super::*;
 pub use crate::settings_snapshot::HostSettings;
 
 use cad_app::viewer_config::HexColor;
+
+// The persisted font-directory preference: a child module so both files stay
+// inside the file-size gate.
+pub(crate) mod paths;
 
 use crate::settings_root::RootPreferences;
 pub(crate) use crate::settings_root::{
@@ -123,11 +128,16 @@ pub enum CadSettingKey {
     /// (`ui.recovery.intervalSeconds`): `0` disables the snapshot writes,
     /// `3600` is the accepted ceiling.
     RecoveryInterval,
+    /// CAD font directory (`ui.paths.fontsDir`): an **absolute** path to an
+    /// existing directory, or `""` to clear the override and fall back to the
+    /// host's discovery order. A relative or missing directory is refused with
+    /// [`SETTINGS_INVALID_VALUE`]; nothing is normalized.
+    FontsDir,
 }
 
 impl CadSettingKey {
     /// Every writable key, in a stable order.
-    pub const ALL: [Self; 30] = [
+    pub const ALL: [Self; 31] = [
         Self::Grid,
         Self::Axes,
         Self::SelectionHighlight,
@@ -158,6 +168,7 @@ impl CadSettingKey {
         Self::DisplayUnit,
         Self::UnitPrecision,
         Self::RecoveryInterval,
+        Self::FontsDir,
     ];
 
     /// The stable camelCase wire key (also the `cad_set_setting` key).
@@ -200,6 +211,7 @@ impl CadSettingKey {
             Self::DisplayUnit => "displayUnit",
             Self::UnitPrecision => "unitPrecision",
             Self::RecoveryInterval => "recoveryInterval",
+            Self::FontsDir => "fontsDir",
         }
     }
 
@@ -351,6 +363,16 @@ impl CadSettingKey {
                 }
                 _ => Err(SETTINGS_INVALID_VALUE),
             },
+            // The persisted font directory: `""` clears the override, otherwise
+            // the path must be absolute **and** an existing directory. A
+            // relative path, a file, a missing directory and any non-string are
+            // refused with the generic code — never trimmed, canonicalized or
+            // silently replaced with the default.
+            Self::FontsDir => match value {
+                CadSettingValue::Text(path) if path.is_empty() => Ok(()),
+                CadSettingValue::Text(path) if paths::fonts_dir_is_usable(path) => Ok(()),
+                _ => Err(SETTINGS_INVALID_VALUE),
+            },
             Self::Grid
             | Self::Axes
             | Self::SelectionHighlight
@@ -486,6 +508,7 @@ impl HostCore {
             CadSettingKey::DisplayUnit => self.apply_display_unit(&value),
             CadSettingKey::UnitPrecision => self.apply_unit_precision(&value),
             CadSettingKey::RecoveryInterval => self.apply_recovery_interval(&value),
+            CadSettingKey::FontsDir => self.apply_fonts_dir(&value),
         }
     }
 

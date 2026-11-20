@@ -49,6 +49,9 @@ mod admission;
 // process-exit trigger in `crate::entry` can forget it.
 pub(crate) mod canvas_session;
 mod dispatch;
+// The Options > Files folder chooser seam (portal on a worker thread; the owner
+// tick drains the pending slot).
+mod directory_host;
 mod dom;
 mod fonts;
 mod init;
@@ -69,6 +72,7 @@ mod telemetry;
 mod tick;
 mod tick_evidence;
 mod vendor;
+mod ymodel_host;
 
 #[cfg(test)]
 mod tests;
@@ -411,4 +415,16 @@ pub(crate) fn register_seams(
         shared,
         recovery_host::AppRecoveryHost::new(app.clone()),
     );
+    // The save dialog's self-containment preview (ADR-0040 D17): a read of the
+    // open document plus its resource files, so it marshals onto the same
+    // main-thread session. Only a carrier that installs a `.ymodel` archive has
+    // this seam, and only `native-below` has that session.
+    cad_desktop_shell::state::configure_ymodel_host(
+        shared,
+        ymodel_host::AppYmodelHost::new(app.clone()),
+    );
+    // The Options > Files folder chooser: `native-below` only, because the
+    // `dom-canvas` carrier has no local directory (the wasm session owns the
+    // document there and its adapter refuses by name).
+    directory_host::register(shared);
 }

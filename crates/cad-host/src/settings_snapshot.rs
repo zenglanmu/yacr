@@ -8,7 +8,8 @@ use super::*;
 ///
 /// Derived from the effective config (defaults, then `config.json`, then the
 /// host-allowed `preference.json`) plus the live session state. `fonts_dir` is
-/// read-only display data from [`HostOptions`].
+/// the directory actually used for font loading; `fonts_dir_override` is the
+/// persisted choice behind it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct HostSettings {
     pub grid: bool,
@@ -86,7 +87,19 @@ pub struct HostSettings {
     /// Recovery-snapshot interval in seconds (`ui.recovery.intervalSeconds`,
     /// `0..=3600`); `0` disables the writes.
     pub recovery_interval: u32,
+    /// The CAD font directory actually used for font loading: `--fonts-dir`
+    /// when given, else a usable persisted `ui.paths.fontsDir`, else the first
+    /// discovered candidate. `None` when nothing resolves and no explicit path
+    /// was configured.
     pub fonts_dir: Option<String>,
+    /// The persisted font-directory choice (`ui.paths.fontsDir`), `None` when
+    /// the user never chose one or cleared it. This is the **editable** value.
+    pub fonts_dir_override: Option<String>,
+    /// Whether [`Self::fonts_dir_override`] no longer names a usable directory,
+    /// so the Options row can show `options.status.fontsDirMissing` for the saved
+    /// value. The directory in use is still [`Self::fonts_dir`] (the CLI value or
+    /// the discovered default). `false` when nothing was ever chosen.
+    pub fonts_dir_missing: bool,
 }
 
 impl HostCore {
@@ -228,11 +241,14 @@ impl HostCore {
             display_unit,
             unit_precision,
             recovery_interval,
+            // `--fonts-dir` > usable persisted `ui.paths.fontsDir` > discovery.
+            // The persisted choice is reported separately so the Options row can
+            // show what the user picked even when it is stale.
             fonts_dir: self
-                .options
-                .fonts_dir
-                .as_ref()
+                .effective_fonts_dir()
                 .map(|path| path.display().to_string()),
+            fonts_dir_override: self.fonts_dir_override(),
+            fonts_dir_missing: self.fonts_dir_is_missing(),
         }
     }
 }

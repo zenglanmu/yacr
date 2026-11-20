@@ -30,6 +30,7 @@ mod open_import;
 mod properties;
 mod render_edit;
 mod report_json;
+pub mod resources;
 mod snapshot;
 mod solids;
 mod tolerance;

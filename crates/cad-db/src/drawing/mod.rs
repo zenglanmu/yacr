@@ -297,6 +297,36 @@ pub struct DrawingDatabase {
     /// Populated by the builder only (import and document load); there is no
     /// post-import mutation path.
     pub(crate) textures: BTreeMap<String, Arc<[u8]>>,
+    /// Document-bundled external resource bytes (fonts, xref sources and
+    /// `IMAGE` rasters), keyed by `(kind, key)` (ADR-0040 D1/D5).
+    ///
+    /// Same contract as [`Self::textures`], one level up: the bytes are document
+    /// state, written into the `.ymodel` as `resources/<kind>/<key>` entries, and
+    /// the key form is [`cad_domain::is_valid_bundled_key`]'s, enforced by
+    /// [`crate::DrawingDatabaseBuilder::insert_resource`]. The value type is
+    /// `Arc<[u8]>` so one save shares buffers instead of copying megabytes.
+    pub(crate) resources: BTreeMap<(BundledKind, String), Arc<[u8]>>,
+    /// The logical name each bundled resource is referenced by (ADR-0040 D4):
+    /// the spelling that appears in `Style.resource_keys`/`Text.font`, in
+    /// `cad:Image.file`, or as an `ExternalReference.name`.
+    ///
+    /// Kept beside [`Self::resources`] rather than in the key so a rename of the
+    /// logical reference cannot silently re-point the bytes: `(kind, name)` is
+    /// unique, and the name is what `tables/resources.json` maps back to a key.
+    pub(crate) resource_names: BTreeMap<(BundledKind, String), String>,
+    /// The collection-time source path of each bundled resource, for diagnostics
+    /// only (ADR-0040 D4: never used for runtime resolution).
+    ///
+    /// `Some(path)` records where the bytes came from, `None` means the writer
+    /// knew no path. Absent keys are equivalent to `None`.
+    pub(crate) resource_sources: BTreeMap<(BundledKind, String), Option<String>>,
+    /// Whether this document embeds external resources in its own archive
+    /// (ADR-0040 D3, one toggle).
+    ///
+    /// Document state, not a carrier preference: it is written into
+    /// `document.json` and seeded back on load, so a re-save keeps the user's
+    /// choice. Defaults to `false` (opt-in) and is not written while `false`.
+    pub(crate) embed_resources: bool,
     /// Cache of [`Self::bounds`] tagged with the [`Revision`] it was computed
     /// at. Interior mutability is required because `bounds` takes `&self` (the
     /// scene-preparation worker shares one `Arc<DrawingDatabase>` across

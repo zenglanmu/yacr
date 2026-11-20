@@ -35,8 +35,8 @@ use std::sync::{Arc, Mutex};
 
 use cad_ui_core::protocol::{InputKind, ProbeInput, ProbeInputAck, ProbeStatus};
 use cad_ui_core::session::{
-    wire, CadFonts, CadLayers, CadRecentFiles, CadRecoveryFiles, CadSettings, HostProfile,
-    WireStatus,
+    wire, CadFonts, CadLayers, CadRecentFiles, CadRecoveryFiles, CadSettings, CadYmodelResources,
+    HostProfile, WireStatus,
 };
 use cad_ui_core::shell::{modal_gate_open, queue_cad_input, POPUP_MODAL_OPEN};
 
@@ -360,6 +360,117 @@ pub fn cad_open_recovery_impl(
     }
     host.open_recovery(key)?;
     Ok(CadCommandAck::accepted())
+}
+
+/// `cad_ymodel_resource_preview` command: what a `.ymodel` save would embed.
+///
+/// Read-only (ADR-0040 D17): it lists the resources the open document references
+/// with their size and whether the host can read them, plus the document's
+/// current self-containment flag. Nothing is written, so a cancelled save dialog
+/// leaves no trace. The session is `!Send` and owned by the owner thread, so the
+/// read is marshalled through the host's [`crate::state::ShellYmodelHost`] seam.
+///
+/// A carrier that installs no `.ymodel` archive has no seam: the answer is the
+/// stable `unsupported-runtime: ymodel`, never an empty preview that would read as
+/// "nothing to embed".
+#[tauri::command]
+pub fn cad_ymodel_resource_preview(
+    shared: tauri::State<'_, ProbeShared>,
+) -> Result<CadYmodelResources, String> {
+    cad_ymodel_resource_preview_impl(&shared.0)
+}
+
+/// Command body of [`cad_ymodel_resource_preview`], without the Tauri wrapper.
+pub fn cad_ymodel_resource_preview_impl(
+    shared: &Arc<Mutex<Shared>>,
+) -> Result<CadYmodelResources, String> {
+    // Clone the seam and release the shell lock before the (possibly blocking)
+    // main-thread hop, per the `Shared` lock-order contract.
+    let host = lock(shared).ymodel_host.clone();
+    match host {
+        Some(host) => host.preview(),
+        None => Err(cad_ui_core::session::UNSUPPORTED_YMODEL.to_string()),
+    }
+}
+
+/// `cad_set_embed_resources` command: store the save dialog's choice on the
+/// document (ADR-0040 D3).
+///
+/// Admission only: `{accepted:true}` means **queued**, exactly like every other
+/// typed write on this transport. The owner tick drains it into
+/// `CadSession::set_embed_resources`, so a refusal (a document write that cannot
+/// land) surfaces through `cad_status.error` rather than a fabricated success.
+///
+/// A carrier with no `.ymodel` archive has no seam and refuses here, before the
+/// queue: accepting the choice would store a flag no file on that carrier can
+/// carry.
+#[tauri::command]
+pub fn cad_set_embed_resources(
+    shared: tauri::State<'_, ProbeShared>,
+    embed: bool,
+) -> Result<CadCommandAck, String> {
+    cad_set_embed_resources_impl(&shared.0, embed)
+}
+
+/// Command body of [`cad_set_embed_resources`], without the Tauri wrapper.
+pub fn cad_set_embed_resources_impl(
+    shared: &Arc<Mutex<Shared>>,
+    embed: bool,
+) -> Result<CadCommandAck, String> {
+    let mut state = lock(shared);
+    if state.ymodel_host.is_none() {
+        return Err(cad_ui_core::session::UNSUPPORTED_EMBED_RESOURCES.to_string());
+    }
+    if !state.shell.cad_mode {
+        return Err("CAD is disabled in probe mode".to_string());
+    }
+    // Last wins: the tick applies the newest choice once (`Option`, not a queue).
+    state.cad_embed_resources = Some(embed);
+    Ok(CadCommandAck::accepted())
+}
+
+/// `cad_pick_directory` command: open the carrier's folder chooser.
+///
+/// The Options > Files page asks for one local absolute directory. The reply is
+/// the chosen path, or `null` when the user closed the dialog without choosing.
+///
+/// The command does **not** run the chooser on the calling thread: Tauri commands
+/// run on the GTK main thread here, and an open portal dialog would freeze the
+/// frame loop. [`DirectoryPicker::begin`](crate::directory::DirectoryPicker::begin)
+/// admits one pick and starts its worker; the owner tick drains the pending slot
+/// (`state::drain_directory_pick`), and this async body waits for that answer on a
+/// blocking-pool thread. A chooser failure is the explicit
+/// `pick_directory.failed: …` error, never a `null` that reads as a cancellation.
+///
+/// A carrier that installs no picker (`dom-canvas`, and the native carriers that
+/// have not wired one yet) refuses with `unsupported-runtime: pick_directory`.
+#[tauri::command]
+pub async fn cad_pick_directory(
+    shared: tauri::State<'_, ProbeShared>,
+) -> Result<Option<String>, String> {
+    let pending = cad_pick_directory_impl(&shared.0)?;
+    tauri::async_runtime::spawn_blocking(move || match pending.recv() {
+        Ok(answer) => answer,
+        Err(_) => Err(cad_ui_core::session::PICK_DIRECTORY_LOST.to_string()),
+    })
+    .await
+    .map_err(|error| cad_ui_core::session::pick_directory_failed(&error.to_string()))?
+}
+
+/// Command body of [`cad_pick_directory`], without the Tauri wrapper or the await.
+///
+/// Split out so a test can assert the admission and the no-picker refusal without
+/// running an async runtime.
+pub fn cad_pick_directory_impl(
+    shared: &Arc<Mutex<Shared>>,
+) -> Result<crate::directory::DirectoryPickReceiver, String> {
+    // Clone the seam and release the shell lock before starting the worker, per
+    // the `Shared` lock-order contract.
+    let picker = lock(shared).directory_picker.clone();
+    match picker {
+        Some(picker) => picker.begin(),
+        None => Err(cad_ui_core::session::UNSUPPORTED_PICK_DIRECTORY.to_string()),
+    }
 }
 
 /// Command body of `cad_create_layer`, without the Tauri state wrapper.
@@ -689,5 +800,134 @@ mod tests {
                 "savedAtMs": 0,
             })
         );
+    }
+
+    /// A seam that answers one fixed preview and counts the reads.
+    #[derive(Default)]
+    struct RecordingYmodel {
+        previews: Mutex<usize>,
+    }
+
+    impl crate::state::ShellYmodelHost for RecordingYmodel {
+        fn preview(&self) -> Result<CadYmodelResources, String> {
+            *self.previews.lock().unwrap() += 1;
+            Ok(CadYmodelResources {
+                policy: true,
+                entries: vec![cad_ui_core::session::CadYmodelResource {
+                    kind: "font".to_string(),
+                    name: "arial.ttf".to_string(),
+                    source: Some("/fonts/arial.ttf".to_string()),
+                    bytes: 12,
+                    found: true,
+                }],
+            })
+        }
+    }
+
+    #[test]
+    fn the_ymodel_commands_refuse_by_marker_without_a_seam() {
+        // A carrier with no `.ymodel` archive installs no seam: neither command
+        // may pretend a preview exists or queue a choice no file can carry.
+        let shared = shared();
+        assert_eq!(
+            cad_ymodel_resource_preview_impl(&shared).expect_err("no seam must refuse"),
+            cad_ui_core::session::UNSUPPORTED_YMODEL
+        );
+        assert_eq!(
+            cad_set_embed_resources_impl(&shared, true).expect_err("no seam must refuse"),
+            cad_ui_core::session::UNSUPPORTED_EMBED_RESOURCES
+        );
+        assert!(
+            lock(&shared).cad_embed_resources.is_none(),
+            "a refused choice is never queued"
+        );
+        assert_eq!(
+            cad_ui_core::session::YMODEL_PREVIEW_COMMAND,
+            "cad_ymodel_resource_preview"
+        );
+        assert_eq!(
+            cad_ui_core::session::EMBED_RESOURCES_COMMAND,
+            "cad_set_embed_resources"
+        );
+    }
+
+    #[test]
+    fn a_configured_ymodel_seam_serves_the_preview_and_queues_the_choice() {
+        let shared = shared();
+        let seam = Arc::new(RecordingYmodel::default());
+        crate::state::configure_ymodel_host(&shared, seam.clone());
+
+        let preview = cad_ymodel_resource_preview_impl(&shared).expect("the seam answers");
+        assert!(preview.policy);
+        assert_eq!(preview.entries.len(), 1);
+        assert_eq!(preview.entries[0].kind, "font");
+        assert_eq!(preview.entries[0].bytes, 12);
+        assert!(preview.entries[0].found);
+        assert_eq!(*seam.previews.lock().unwrap(), 1);
+
+        // The setter is admission only: the choice is queued for the owner tick,
+        // and the newest choice wins (a scalar, not a queue).
+        let ack = cad_set_embed_resources_impl(&shared, true).expect("admitted");
+        assert!(ack.accepted);
+        assert_eq!(lock(&shared).cad_embed_resources, Some(true));
+        cad_set_embed_resources_impl(&shared, false).expect("admitted");
+        assert_eq!(lock(&shared).cad_embed_resources, Some(false));
+    }
+
+    #[test]
+    fn the_embed_choice_is_never_queued_in_probe_mode() {
+        let mut state = Shared::new(cad_ui_core::launch::LaunchOptions {
+            probe_only: true,
+            ..cad_ui_core::launch::LaunchOptions::default()
+        });
+        state.ymodel_host = Some(Arc::new(RecordingYmodel::default()));
+        assert!(!state.shell.cad_mode);
+        let shared = Arc::new(Mutex::new(state));
+        assert_eq!(
+            cad_set_embed_resources_impl(&shared, true).expect_err("probe mode refuses"),
+            "CAD is disabled in probe mode"
+        );
+        assert!(lock(&shared).cad_embed_resources.is_none());
+    }
+
+    #[test]
+    fn the_directory_picker_refuses_by_marker_without_a_picker() {
+        // Windows/macOS/Android install no picker in this pass, and `dom-canvas`
+        // never registers one: the command must say so by name, never answer
+        // `null` (which the Options footer would read as "the user cancelled").
+        let shared = shared();
+        assert_eq!(
+            cad_pick_directory_impl(&shared).expect_err("no picker must refuse"),
+            "unsupported-runtime: pick_directory"
+        );
+        assert_eq!(
+            cad_ui_core::session::PICK_DIRECTORY_COMMAND,
+            "cad_pick_directory"
+        );
+    }
+
+    #[test]
+    fn a_configured_picker_admits_one_pick_and_the_tick_delivers_it() {
+        let shared = shared();
+        let picker = crate::directory::DirectoryPicker::new(Arc::new(|| {
+            crate::directory::DirectoryOutcome::Cancelled
+        }));
+        crate::state::configure_directory_picker(&shared, picker);
+
+        let answer = cad_pick_directory_impl(&shared).expect("admitted");
+        // The pending slot is drained by the owner tick's helper, exactly like the
+        // app-linux tick calls it; only then does the waiting call resolve.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut delivered = false;
+        while std::time::Instant::now() < deadline {
+            crate::state::drain_directory_pick(&shared);
+            if let Ok(value) = answer.try_recv() {
+                assert_eq!(value, Ok(None), "a cancelled dialog is a real null");
+                delivered = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert!(delivered, "the tick must deliver the terminal");
     }
 }

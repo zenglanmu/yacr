@@ -84,6 +84,10 @@ impl DrawingDatabaseBuilder {
                 next_scale_id: 1,
                 external_references: BTreeMap::new(),
                 textures: BTreeMap::new(),
+                resources: BTreeMap::new(),
+                resource_names: BTreeMap::new(),
+                resource_sources: BTreeMap::new(),
+                embed_resources: false,
                 bounds_cache: Default::default(),
             },
             errors: Vec::new(),
@@ -252,6 +256,153 @@ impl DrawingDatabaseBuilder {
         }
         self.database.textures.insert(key, bytes);
         Ok(())
+    }
+
+    /// Record one bundled external resource's bytes and its logical name
+    /// (ADR-0040 D1/D4/D5).
+    ///
+    /// `key` must be the canonical form [`cad_domain::is_valid_bundled_key`]
+    /// accepts for `kind`: it becomes the `resources/<kind>/<key>` archive entry
+    /// name, so a path, a `..`, an uppercase extension or an extension outside
+    /// the kind's allowlist is refused here, with the stable
+    /// `resource.unsupported_kind` marker, rather than at save time.
+    ///
+    /// `name` is the **logical reference** the document uses (the spelling in
+    /// `Style.resource_keys`/`Text.font`, `cad:Image.file`, or
+    /// `ExternalReference.name`); it must be non-empty and is stored verbatim.
+    /// `(kind, name)` is unique (ADR-0040 D4): a second distinct key claiming an
+    /// already-used name is refused with `resource.name_conflict`, because the
+    /// name would then resolve to two different payloads.
+    ///
+    /// Re-inserting the **same** key with the same bytes and the same name is
+    /// idempotent (the key is content-addressed); different bytes under one key
+    /// are a caller bug and are refused instead of silently replacing the asset
+    /// — exactly [`Self::insert_texture`]'s rule. An empty payload is refused
+    /// too: a zero-byte font or image can never resolve, so storing it would turn
+    /// "the resource is missing" into a decode failure with no origin.
+    ///
+    /// There is **no budget policy in the database**: the collector owns
+    /// `resource.budget.*` (ADR-0040 D10) before it calls this.
+    pub fn insert_resource(
+        &mut self,
+        kind: BundledKind,
+        key: &str,
+        name: &str,
+        bytes: Arc<[u8]>,
+    ) -> CadResult<()> {
+        if !cad_domain::is_valid_bundled_key(kind, key) {
+            return Err(CadError::InvalidInput(format!(
+                "{}: {kind} {key:?} is not a valid bundled-resource key (expected \
+                 <32 lowercase hex>.<ext> with an extension this kind allows)",
+                cad_domain::ymodel::markers::RESOURCE_UNSUPPORTED_KIND
+            )));
+        }
+        if bytes.is_empty() {
+            return Err(CadError::InvalidInput(format!(
+                "{}: {kind} {key:?} has no bytes",
+                cad_domain::ymodel::markers::RESOURCE_UNAVAILABLE
+            )));
+        }
+        if name.trim().is_empty() {
+            return Err(CadError::InvalidInput(format!(
+                "resource.name: {kind} {key:?} has an empty logical name"
+            )));
+        }
+        let id = (kind, key.to_string());
+        if let Some(existing) = self.database.resources.get(&id) {
+            if existing.as_ref() != bytes.as_ref() {
+                return Err(CadError::Invariant(format!(
+                    "resource.key: different bytes were inserted under the \
+                     content-addressed key {kind}/{key:?}"
+                )));
+            }
+            // Same bytes: only the name may still disagree, which would make one
+            // payload reachable under a different logical reference.
+            if self.database.resource_names.get(&id).map(String::as_str) != Some(name) {
+                return Err(CadError::InvalidInput(format!(
+                    "{}: {kind} {key:?} is already bound to a different logical name",
+                    cad_domain::ymodel::markers::RESOURCE_NAME_CONFLICT
+                )));
+            }
+            return Ok(());
+        }
+        if let Some(other_key) = self
+            .database
+            .resource_names
+            .iter()
+            .find(|((existing_kind, _), existing_name)| {
+                *existing_kind == kind && existing_name.as_str() == name
+            })
+            .map(|(id, _)| id.1.as_str())
+        {
+            return Err(CadError::InvalidInput(format!(
+                "{}: {kind} {name:?} is already bound to key {other_key:?}; rename one of them",
+                cad_domain::ymodel::markers::RESOURCE_NAME_CONFLICT,
+            )));
+        }
+        self.database.resources.insert(id.clone(), bytes);
+        self.database.resource_names.insert(id, name.to_string());
+        Ok(())
+    }
+
+    /// Record where a bundled resource was collected from (ADR-0040 D4/D13).
+    ///
+    /// The path is **diagnostic only** — it is written to
+    /// `tables/resources.json` as `source` and never used for runtime
+    /// resolution. `None`, or an empty/whitespace-only path, records **no**
+    /// path and removes any previous entry, so "absent" and "no path" are one
+    /// state (matching [`Self::set_code_page`]'s rule and keeping a
+    /// snapshot → load → snapshot round trip a fixed point). The key must
+    /// already be inserted: provenance for an absent resource would be
+    /// unreachable, so that is a caller bug.
+    pub fn set_resource_source(
+        &mut self,
+        kind: BundledKind,
+        key: &str,
+        source: Option<&str>,
+    ) -> CadResult<()> {
+        let id = (kind, key.to_string());
+        if !self.database.resources.contains_key(&id) {
+            return Err(CadError::Invariant(format!(
+                "resource source for unknown bundled resource {kind}/{key:?}"
+            )));
+        }
+        match source.map(str::trim).filter(|value| !value.is_empty()) {
+            Some(path) => {
+                self.database
+                    .resource_sources
+                    .insert(id, Some(path.to_string()));
+            }
+            None => {
+                self.database.resource_sources.remove(&id);
+            }
+        }
+        Ok(())
+    }
+
+    /// Drop one bundled resource and its name/source mapping.
+    ///
+    /// Returns `true` when the document held it. A save that saw this call must
+    /// rewrite `tables/resources.json` and must not copy the byte entry through
+    /// (ADR-0040 D7/D8), which is why the host records
+    /// [`TableKind::Resources`](crate::TableKind::Resources) when it drops one.
+    /// Dropping an absent key is a no-op, not an error: a collector re-running
+    /// over a changed policy must not fail on the second pass.
+    pub fn drop_resource(&mut self, kind: BundledKind, key: &str) -> bool {
+        let id = (kind, key.to_string());
+        self.database.resource_sources.remove(&id);
+        self.database.resource_names.remove(&id);
+        self.database.resources.remove(&id).is_some()
+    }
+
+    /// Set whether this document embeds external resources (ADR-0040 D3).
+    ///
+    /// Document state, not a carrier preference: it is written into
+    /// `document.json` and seeded back on load. `false` (the default) is not
+    /// written at all, so a document that packs nothing keeps the bytes of a
+    /// minor ≤ 4 archive.
+    pub fn set_embed_resources(&mut self, embed: bool) {
+        self.database.embed_resources = embed;
     }
 
     /// Record a block's table name and insertion base point.
@@ -715,6 +866,22 @@ impl DrawingDatabaseBuilder {
                         reference.name
                     ));
                 }
+            }
+        }
+        // Bundled resources are two maps that must describe the same set: a
+        // payload without a logical name could never be referenced, and the two
+        // writers (`insert_resource`/`drop_resource`) are the only ones allowed
+        // to touch either, so a mismatch here is a caller bug.
+        for id in self.database.resources.keys() {
+            if !self.database.resource_names.contains_key(id) {
+                self.errors
+                    .push(format!("bundled resource {id:?} has no logical name"));
+            }
+        }
+        for id in self.database.resource_names.keys() {
+            if !self.database.resources.contains_key(id) {
+                self.errors
+                    .push(format!("bundled resource name for {id:?} has no payload"));
             }
         }
         if !self.errors.is_empty() {

@@ -41,6 +41,7 @@ fn header() -> DocumentHeader {
         units: UnitContext::drawing_units(),
         identity: DocumentIdentity::Temporary(5),
         resource_keys: Vec::new(),
+        embed_resources: false,
         variables: serde_json::json!({}),
         next: IdCounters::default(),
     }
@@ -58,6 +59,9 @@ fn snapshot_with(textures: &[(&str, &[u8])]) -> DocumentSnapshot {
         shards: Vec::new(),
         tables: Default::default(),
         textures: map,
+        resources: Default::default(),
+        resource_names: Default::default(),
+        resource_sources: Default::default(),
     }
 }
 

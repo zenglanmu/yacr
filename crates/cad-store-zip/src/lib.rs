@@ -17,8 +17,14 @@
 //! tables/<table>.json           -- one per present TableKind (cad_db::table_entry)
 //! elements/<model>-<shard>.json -- elements of one shard, sorted by id
 //! textures/<key>                -- document base-colour textures (ADR-0038 D4)
+//! resources/<kind>/<key>        -- bundled font/xref/image payloads (ADR-0040 D1)
 //! raw/<anything>                -- foreign/preserved entries (never parsed)
 //! ```
+//!
+//! `tables/resources.json` is a plain row array mapping a logical name to one of
+//! those `resources/<kind>/<key>` entries (ADR-0040 D4). A resource key is the
+//! payload's SHA-256 prefix, so the entry name **is** the integrity claim; this
+//! store asserts it on both sides ([`crate::resources`]).
 //!
 //! `manifest.json` is deliberately **not** listed in its own `entries`: a
 //! self-referential hash has no fixed point. Its integrity is the zip CRC.
@@ -89,6 +95,7 @@ mod manifest;
 mod models;
 mod previous;
 mod read;
+mod resources;
 mod schema;
 mod write;
 
@@ -220,13 +227,13 @@ impl DocumentStore for ZipDocumentStore {
     fn read(&mut self, source: &mut dyn ByteSource) -> Result<LoadedDocument, StoreError> {
         let bytes = source.read_all()?;
         let parsed = read::parse(&bytes)?;
-        // Keep the archive only when it is needed: a document with no foreign
-        // entries must not pay for a second copy of its own bytes.
-        self.previous = if parsed.loaded.manifest.foreign_entries.is_empty() {
-            None
-        } else {
-            Some(bytes)
-        };
+        // Keep the archive only when the next save needs it: foreign entries have
+        // to be carried over, and modelled resource entries are the raw-copy base
+        // for the next save (ADR-0040 D18). Any other document must not pay for a
+        // second copy of its own bytes.
+        let keep_previous = !parsed.loaded.manifest.foreign_entries.is_empty()
+            || !parsed.loaded.snapshot.resources.is_empty();
+        self.previous = if keep_previous { Some(bytes) } else { None };
         // Preserve the manifest fields the store cannot derive, so a load → save
         // round trip does not re-mint them.
         self.open_revision = Some(parsed.loaded.manifest.open_revision.0);

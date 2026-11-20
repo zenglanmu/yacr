@@ -80,7 +80,15 @@ pub const FORMAT_WRITE: u32 = 1;
 /// four PBR texture keys, as `null` or one nested object. It joins the same
 /// absent-means-`None` exception, so a minor-3 archive still opens; the four
 /// texture slots reuse the existing `textures/<key>` entries.
-pub const FORMAT_MINOR: u32 = 4;
+///
+/// `5` adds bundled external resources (ADR-0040): `resources/<kind>/<key>`
+/// binary entries, the `tables/resources.json` name ⇄ key mapping and the
+/// `embed_resources` header flag. A writer stamps `5` **per document** — only
+/// when it packs a resource or sets that flag — so an ordinary document stays a
+/// minor-4 archive that an older build can still open (D12). A reader that only
+/// knows `4` must refuse a `5` archive rather than drop the entries it cannot
+/// model.
+pub const FORMAT_MINOR: u32 = 5;
 
 /// Stable failure markers.
 ///
@@ -100,6 +108,25 @@ pub mod markers {
     pub const CONFLICT: &str = "ymodel.conflict";
     /// Writing would exceed the carrier's serialization budget.
     pub const PERSISTENCE_TOO_LARGE: &str = "web.persistence_too_large";
+    /// A resource key names a kind/extension this build cannot model
+    /// (ADR-0040 D1/D12).
+    pub const RESOURCE_UNSUPPORTED_KIND: &str = "resource.unsupported_kind";
+    /// A caller computed a resource key that does not name the bytes it hands in
+    /// (ADR-0040 D1/D12): a collector bug, not a malformed document.
+    pub const RESOURCE_INVALID_KEY: &str = "resource.invalid_key";
+    /// Two distinct keys claim one logical resource name (ADR-0040 D4/D12).
+    pub const RESOURCE_NAME_CONFLICT: &str = "resource.name_conflict";
+    /// A resource could not be collected or read (ADR-0040 D9/D12).
+    pub const RESOURCE_UNAVAILABLE: &str = "resource.unavailable";
+    /// One collected resource exceeds the per-entry budget (ADR-0040 D10).
+    pub const RESOURCE_BUDGET_ENTRY: &str = "resource.budget.entry";
+    /// The collected resources exceed the total budget (ADR-0040 D10).
+    pub const RESOURCE_BUDGET_TOTAL: &str = "resource.budget.total";
+    /// A previous archive holds different bytes at a modelled resource path
+    /// (ADR-0040 D8): the collision is refused instead of silently overwritten.
+    pub const RESOURCE_CONFLICT: &str = "resource.conflict";
+    /// A recovery archive dropped embedded resources (ADR-0040 D11).
+    pub const RECOVERY_RESOURCES_OMITTED: &str = "recovery.resources_omitted";
 }
 
 /// Exit code the CLI and `native-below` hosts map [`markers`] onto.

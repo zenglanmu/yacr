@@ -99,20 +99,32 @@ pub enum TableKind {
     /// Host-owned document metadata like [`TableKind::Sources`]: the report
     /// describes how the content was imported, not the content itself.
     Compat,
+    /// The logical resource mapping (`tables/resources.json`, ADR-0040 D4):
+    /// which `(kind, key)` archive entry is referenced by which logical name.
+    ///
+    /// Informational only: `cad-store-zip` does **not** read
+    /// [`ChangeScope::tables`] — it rewrites `tables/resources.json` from
+    /// `DocumentSnapshot::tables` on every save, because the table is small and
+    /// the snapshot is the authority. Marking it dirty is bookkeeping for callers
+    /// that need to know a mapping changed, not a raw-copy switch. The bytes
+    /// themselves are `resources/<kind>/<key>` entries driven by the document's
+    /// own resource table, not by this scope.
+    Resources,
 }
 
 /// The set of persisted rows one commit made stale.
 ///
 /// This is commit metadata only — it is never written into a document (see the
-/// module docs). All fields are public because the store reads them directly;
-/// the builder-style methods are the write paths' idiomatic way to fill them.
+/// module docs). Fields are public because callers fill them and the store reads
+/// the ones it acts on (`shards`/`prev_shards`); `tables` is informational, since
+/// the store re-encodes every table present in the snapshot on every save.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ChangeScope {
     /// Element shards whose **new** content must be written.
     pub shards: BTreeSet<(ModelKey, Shard)>,
     /// Element shards the **old** row occupied (moves and deletes).
     pub prev_shards: BTreeSet<(ModelKey, Shard)>,
-    /// Tables whose rows changed.
+    /// Tables whose rows changed. Informational: not consumed by `cad-store-zip`.
     pub tables: BTreeSet<TableKind>,
     /// `document.json` must be rewritten.
     pub header: bool,

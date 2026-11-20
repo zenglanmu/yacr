@@ -23,6 +23,7 @@ mod named_delete;
 mod pbr;
 mod plot;
 mod point_style;
+mod resources;
 mod scale;
 mod scale_edit;
 mod scope;

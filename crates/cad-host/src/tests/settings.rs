@@ -409,10 +409,15 @@ fn settings_report_the_configured_fonts_dir_read_only() {
         capabilities: capabilities(false),
     };
     let core = HostCore::new(options, platform, RenderSessionHandle::default()).unwrap();
+    // `--fonts-dir` is reported verbatim (a missing directory stays a hard load
+    // error, so the snapshot must not pretend another directory is configured).
     assert_eq!(
         core.settings().fonts_dir.as_deref(),
         Some("/tmp/yacr-fonts")
     );
+    // Nothing was persisted, so there is no editable override.
+    assert_eq!(core.settings().fonts_dir_override, None);
+    assert!(!core.settings().fonts_dir_missing);
 }
 
 // --- display options: backgrounds + crosshair --------------------------------

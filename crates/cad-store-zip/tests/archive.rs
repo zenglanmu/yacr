@@ -38,6 +38,7 @@ fn header(serial: u128) -> DocumentHeader {
         },
         identity: DocumentIdentity::Temporary(serial),
         resource_keys: vec!["arial.ttf".to_string(), "logo.png".to_string()],
+        embed_resources: false,
         // Header variables are owned by `cad-db`; the store only carries them.
         variables: serde_json::json!({}),
         next: IdCounters {
@@ -113,6 +114,9 @@ fn snapshot() -> DocumentSnapshot {
         shards,
         tables: Default::default(),
         textures: Default::default(),
+        resources: Default::default(),
+        resource_names: Default::default(),
+        resource_sources: Default::default(),
     };
     document.tables.set(
         TableKind::Layers,
@@ -326,6 +330,12 @@ fn a_snapshot_survives_a_full_round_trip_with_a_foreign_entry() {
 
     let loaded = read_archive(&bytes).expect("read back");
     assert_eq!(loaded.snapshot, snapshot, "the document is a fixed point");
+    // `PartialEq` compares only keys and lengths for binary payloads (ADR-0040
+    // D16), so the shaping assertion above cannot catch corrupted bytes.
+    assert!(
+        loaded.snapshot.bytes_equal(&snapshot),
+        "textures/resources must survive byte for byte"
+    );
     assert_eq!(loaded.snapshot.revision, loaded.manifest.saved_revision);
     assert_eq!(
         loaded.manifest.foreign_entries,
@@ -568,9 +578,10 @@ fn the_manifest_pins_the_document_and_the_import_baseline() {
     assert_eq!(manifest["format"]["write"], Value::from(1));
     assert_eq!(
         manifest["format"]["minor"],
-        Value::from(cad_domain::ymodel::FORMAT_MINOR)
+        Value::from(4),
+        "a document that packs nothing stays a minor-4 archive (ADR-0040 D12)"
     );
-    assert_eq!(cad_domain::ymodel::FORMAT_MINOR, 4, "ADR-0039 D2");
+    assert_eq!(cad_domain::ymodel::FORMAT_MINOR, 5, "ADR-0040 D12");
 
     let loaded = read_archive(&bytes).expect("read");
     assert_eq!(loaded.manifest.open_revision, Revision(4));

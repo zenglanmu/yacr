@@ -81,6 +81,36 @@ pub fn unsupported_runtime(name: &str) -> String {
     format!("{UNSUPPORTED_RUNTIME}: {name}: no such wire command on this carrier")
 }
 
+/// The host-seam commands this carrier refuses **by marker**.
+///
+/// A browser document is not a `.ymodel` archive: there is no file to make
+/// self-contained, so the preview would list resources no file could carry and the
+/// policy flag could never be written. Both archive names are refused with their
+/// stable markers (`unsupported-runtime: ymodel` / `unsupported-runtime:
+/// embed_resources`) rather than the generic "no such wire command": the save
+/// chrome keys on the marker to skip the embed question entirely, and a generic
+/// miss would look like a transport bug to whoever reads the log.
+///
+/// `cad_pick_directory` is the same story for the Options > Files row: a page has
+/// no local filesystem, so a directory it cannot read is refused as
+/// `unsupported-runtime: pick_directory`. The UI already renders the row disabled;
+/// this is the backstop, and it must not answer `null` (which would read as "the
+/// user cancelled").
+pub fn refuse_host_seam_command(name: &str) -> Option<String> {
+    match name {
+        cad_ui_core::session::YMODEL_PREVIEW_COMMAND => {
+            Some(cad_ui_core::session::UNSUPPORTED_YMODEL.to_string())
+        }
+        cad_ui_core::session::EMBED_RESOURCES_COMMAND => {
+            Some(cad_ui_core::session::UNSUPPORTED_EMBED_RESOURCES.to_string())
+        }
+        cad_ui_core::session::PICK_DIRECTORY_COMMAND => {
+            Some(cad_ui_core::session::UNSUPPORTED_PICK_DIRECTORY.to_string())
+        }
+        _ => None,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // The sink
 // ---------------------------------------------------------------------------
@@ -197,6 +227,13 @@ impl AdmissionTarget for DirectSink<'_> {
     }
 
     fn setting(&mut self, key: CadSettingKey, value: CadSettingValue) -> Result<(), String> {
+        // The font directory is a local filesystem location, and this carrier has
+        // none: a persisted path would be a value the page can never read (and a
+        // silent success would hide that). Refused by name, like the image
+        // commands.
+        if key == CadSettingKey::FontsDir {
+            return Err(crate::platform::UNSUPPORTED_FONTS_DIR.to_string());
+        }
         let outcome = self.session.apply_setting(key, value).map(|_settings| ());
         self.applied(outcome)
     }
@@ -256,7 +293,14 @@ impl<'a> DirectReads<'a> {
 
 impl ControlReads for DirectReads<'_> {
     fn settings(&self) -> Option<CadSettings> {
-        Some(self.session.settings())
+        let mut settings = self.session.settings();
+        // This carrier has no local font directory: the field is **omitted**, not
+        // reported as an empty path or a fabricated one, so the Options dialog
+        // shows a disabled row (the carrier-omits-it pattern) instead of implying
+        // the page uses a directory it cannot read.
+        settings.fonts_dir = None;
+        settings.fonts_dir_override = None;
+        Some(settings)
     }
 
     fn layers(&self) -> Option<Result<CadLayers, String>> {
@@ -359,6 +403,9 @@ macro_rules! wasm_wire_dispatch {
             $reads: &dyn ControlReads,
             $popups: &mut dyn PopupTarget,
         ) -> Result<Value, String> {
+            if let Some(refusal) = refuse_host_seam_command($name) {
+                return Err(refusal);
+            }
             match $name {
                 $($arms)*
                 other => Err(unsupported_runtime(other)),
@@ -467,6 +514,9 @@ pub fn is_wire_command(name: &str) -> bool {
 /// [`unsupported_runtime`]. Nothing is answered as a success that this carrier
 /// cannot perform.
 pub(crate) fn without_session(name: &str) -> Result<Value, String> {
+    if let Some(refusal) = refuse_host_seam_command(name) {
+        return Err(refusal);
+    }
     match name {
         "cad_commands" => Ok(serde_json::json!(wire::commands())),
         "cad_command_aliases" => Ok(serde_json::json!(wire::aliases())),

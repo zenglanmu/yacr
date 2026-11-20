@@ -32,7 +32,9 @@ mod command_log;
 mod command_overrides;
 mod commands;
 mod diagnostics;
+// The Options > Files directory-picker vocabulary (name + carrier refusals).
 mod dim_arguments;
+mod directory_pick;
 mod document_archive;
 mod draw2_arguments;
 pub mod events;
@@ -80,6 +82,7 @@ mod util_arguments;
 pub mod vendor;
 mod view_arguments;
 pub mod wire;
+mod ymodel_resources;
 mod zoom;
 use crate::protocol::ProbeInput;
 use cad_app::{
@@ -168,6 +171,10 @@ pub use self::commands::{
     UNDEFINE_SELECTOR, VIEWGO_SELECTOR, VIEW_SELECTOR, VPOINT_SELECTOR, ZOOM_IN_FACTOR,
     ZOOM_OUT_FACTOR, ZOOM_STEP_SELECTORS,
 };
+pub use self::directory_pick::{
+    pick_directory_failed, PICK_DIRECTORY_BUSY, PICK_DIRECTORY_COMMAND, PICK_DIRECTORY_LOST,
+    UNSUPPORTED_PICK_DIRECTORY,
+};
 pub use self::draw2_arguments::invalid_draw2_argument_reason;
 pub use self::events::{
     cursor_changed, derive_batch, same_status_ignoring_volatile, CadEvent, CadEventKind,
@@ -222,6 +229,10 @@ pub use self::wire::{
     AdmissionTarget, CadCommandAck, CadCommandAlias, Channel, ControlReads, NoPopups, OrbitDelta,
     PopupTarget, QueueFamily, QueueReads, QueueSink, CAD_WAITING, ORBIT_ANGLES_NOT_FINITE,
     POPUP_HOST_UNAVAILABLE,
+};
+pub use self::ymodel_resources::{
+    CadYmodelResource, CadYmodelResources, EMBED_RESOURCES_COMMAND, UNSUPPORTED_EMBED_RESOURCES,
+    UNSUPPORTED_YMODEL, YMODEL_PREVIEW_COMMAND,
 };
 
 /// Completions drained per poll. The queue's absolute capacity is 256, so this

@@ -390,11 +390,19 @@ fn a_document_is_a_fixed_point_through_the_archive() {
         second, first,
         "database -> archive -> database -> snapshot must not lose a field"
     );
+    // The snapshot equality above is shape-only for binary payloads (ADR-0040
+    // D16); the bytes need their own assertion.
+    assert!(
+        second.bytes_equal(&first),
+        "database -> archive -> database must not corrupt textures/resources"
+    );
     assert_eq!(second.revision, Revision(7));
     assert_eq!(
         second.tables.rows.len(),
         10,
-        "the fixture must cover every table, or the fixed point is trivially true"
+        "the fixture must cover every table it writes, or the fixed point is \
+         trivially true; `tables/resources.json` is written only when the \
+         document carries resources (ADR-0040 D12) and this fixture packs none"
     );
 }
 

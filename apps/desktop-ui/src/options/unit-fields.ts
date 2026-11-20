@@ -28,6 +28,10 @@ export type OptionField =
     readonly choiceKeyPrefix?: string;
     readonly errorCode?: string;
   })
+  // A free-form filesystem path whose **empty** value is the documented "no
+  // override" state (the fonts directory row). It is writable, so it carries the
+  // write key; the host re-validates it like any other setting.
+  | (OptionWritableField & { readonly kind: 'path' })
   | (OptionFieldBase & { readonly kind: 'readonly'; readonly wire: string })
   | (OptionFieldBase & { readonly kind: 'locale' });
 

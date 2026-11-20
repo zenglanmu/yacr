@@ -37,11 +37,31 @@ static TABLE: [u32; 256] = table();
 
 /// CRC-32 of `bytes`.
 pub(crate) fn crc32(bytes: &[u8]) -> u32 {
-    let mut crc = 0xFFFF_FFFFu32;
-    for byte in bytes {
-        crc = TABLE[((crc ^ u32::from(*byte)) & 0xff) as usize] ^ (crc >> 8);
+    let mut crc = Crc32::new();
+    crc.update(bytes);
+    crc.finish()
+}
+
+/// A streaming CRC-32, for entry bodies that are measured while they are
+/// written rather than collected first (ADR-0040 D15).
+pub(crate) struct Crc32(u32);
+
+impl Crc32 {
+    pub(crate) fn new() -> Crc32 {
+        Crc32(0xFFFF_FFFF)
     }
-    !crc
+
+    pub(crate) fn update(&mut self, bytes: &[u8]) {
+        let mut crc = self.0;
+        for byte in bytes {
+            crc = TABLE[((crc ^ u32::from(*byte)) & 0xff) as usize] ^ (crc >> 8);
+        }
+        self.0 = crc;
+    }
+
+    pub(crate) fn finish(self) -> u32 {
+        !self.0
+    }
 }
 
 #[cfg(test)]

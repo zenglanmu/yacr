@@ -34,8 +34,9 @@ use cad_ui_core::popup::PopupAck;
 use cad_ui_core::protocol::InputKind;
 use cad_ui_core::session::events::EventBus;
 use cad_ui_core::session::{
-    CadFonts, CadLayerWrite, CadLayers, CadRecentFiles, CadRecoveryFiles, CadSettingKey,
-    CadSettingValue, CadSettings, CadStatus, OrbitDelta, QueueFamily, QueueReads, QueueSink,
+    CadFonts, CadLayerWrite, CadLayers, CadRecentFiles, CadRecoveryFiles, CadSession,
+    CadSettingKey, CadSettingValue, CadSettings, CadStatus, CadYmodelResources, OrbitDelta,
+    QueueFamily, QueueReads, QueueSink,
 };
 use cad_ui_core::shell::{modal_gate_open, ShellState};
 
@@ -138,6 +139,24 @@ pub trait ShellRecoveryHost: Send + Sync {
     fn open_recovery(&self, key: &str) -> Result<(), String>;
 }
 
+/// The platform side of the `cad_ymodel_resource_preview` command (ADR-0040 D17).
+///
+/// The preview is a read of the **open document** plus a filesystem probe of the
+/// resources it references, so it needs the `!Send` owner-thread session. Same
+/// shape as [`ShellRecoveryHost`]: a carrier that installs a `.ymodel` archive
+/// installs one seam that marshals the read onto its session thread; every other
+/// carrier installs none and both ymodel commands refuse by name
+/// (`unsupported-runtime: ymodel` / `unsupported-runtime: embed_resources`)
+/// instead of an empty preview that would read as "nothing to embed".
+///
+/// Implementations must not hold their own lock while waiting on the session
+/// thread and must not lock [`Shared`] while holding a lock of their own; the
+/// command clones the seam out of `Shared` and releases the lock before calling.
+pub trait ShellYmodelHost: Send + Sync {
+    /// What a save of the open document would embed right now.
+    fn preview(&self) -> Result<CadYmodelResources, String>;
+}
+
 /// State shared with the IPC commands: deliberately **GPU-free and
 /// renderer-free**.
 ///
@@ -215,6 +234,15 @@ pub struct Shared {
     /// Bounded main-thread queue of typed settings writes: admitted by
     /// `cad_set_setting` and drained into `CadSession::apply_setting`.
     pub cad_setting_writes: VecDeque<(CadSettingKey, CadSettingValue)>,
+    /// The pending self-containment choice for the open document (ADR-0040 D3).
+    ///
+    /// `None` is "nothing queued". A toggle is a scalar, so the queue is
+    /// last-wins: two writes in one tick must end at the second value, never
+    /// replay an intermediate state nobody sees. The owner tick drains it into
+    /// `CadSession::set_embed_resources` (the session is `!Send`, so the IPC
+    /// thread never applies it) and the real refusal surfaces through
+    /// `cad_status.error`.
+    pub cad_embed_resources: Option<bool>,
     /// Latest effective settings snapshot mirrored from the owner-thread session,
     /// so the worker-thread `cad_settings` IPC read never touches the `!Send`
     /// session.
@@ -285,6 +313,21 @@ pub struct Shared {
     /// (`unsupported-runtime: cad_recovery_files`) instead of an empty list that
     /// would look like "nothing to recover".
     pub recovery_host: Option<Arc<dyn ShellRecoveryHost>>,
+    /// The platform ymodel-resource seam (see [`ShellYmodelHost`]). `None` before
+    /// the host registers one and permanently on a carrier with no `.ymodel`
+    /// archive; `cad_ymodel_resource_preview` / `cad_set_embed_resources` then
+    /// refuse by name instead of inventing a preview for a file that cannot carry
+    /// resources.
+    pub ymodel_host: Option<Arc<dyn ShellYmodelHost>>,
+    /// The native folder picker (see [`crate::directory::DirectoryPicker`]).
+    ///
+    /// A carrier with a local folder chooser installs one during startup; the
+    /// `cad_pick_directory` command then starts a worker and the owner tick
+    /// drains the pending slot. Every other carrier (`dom-canvas`, and the native
+    /// carriers that have not wired one yet) keeps `None` and refuses with the
+    /// stable `unsupported-runtime: pick_directory` marker instead of a `null`
+    /// that would read as "the user cancelled".
+    pub directory_picker: Option<Arc<crate::directory::DirectoryPicker>>,
     /// The WebView vendor-decoding pass (pending → records → apply). Host
     /// transport state, not document state: it carries a token and bounded
     /// diagnostics, never geometry or a second `cad-db`.
@@ -333,6 +376,7 @@ impl Shared {
             cad_orbits: VecDeque::new(),
             cad_pinches: VecDeque::new(),
             cad_setting_writes: VecDeque::new(),
+            cad_embed_resources: None,
             cad_settings: None,
             cad_layer_writes: VecDeque::new(),
             cad_layers: None,
@@ -345,6 +389,8 @@ impl Shared {
             release_opener: None,
             recent_host: None,
             recovery_host: None,
+            ymodel_host: None,
+            directory_picker: None,
             vendor: crate::vendor::VendorStore::default(),
             vendor_pending_representations: None,
             vendor_representations_clear: false,
@@ -488,6 +534,62 @@ pub fn configure_recent_host(shared: &Arc<Mutex<Shared>>, host: Arc<dyn ShellRec
 /// refusal instead of a supported-but-empty list.
 pub fn configure_recovery_host(shared: &Arc<Mutex<Shared>>, host: Arc<dyn ShellRecoveryHost>) {
     lock(shared).recovery_host = Some(host);
+}
+
+/// Install the ymodel-resource platform seam (see [`ShellYmodelHost`]).
+///
+/// Same shape as [`configure_recovery_host`]: only a carrier that installs a
+/// `.ymodel` archive calls this. Every other carrier keeps the named refusals
+/// (`unsupported-runtime: ymodel` / `unsupported-runtime: embed_resources`)
+/// instead of a preview of resources no file on that carrier can carry.
+pub fn configure_ymodel_host(shared: &Arc<Mutex<Shared>>, host: Arc<dyn ShellYmodelHost>) {
+    lock(shared).ymodel_host = Some(host);
+}
+
+/// Install the native folder picker (see [`crate::directory::DirectoryPicker`]).
+///
+/// Same shape as [`configure_ymodel_host`]: a carrier whose surface mode can read
+/// a local directory calls this once during startup. Every other carrier never
+/// does, so `cad_pick_directory` keeps its named `unsupported-runtime:
+/// pick_directory` refusal instead of starting a chooser it cannot show.
+pub fn configure_directory_picker(
+    shared: &Arc<Mutex<Shared>>,
+    picker: Arc<crate::directory::DirectoryPicker>,
+) {
+    lock(shared).directory_picker = Some(picker);
+}
+
+/// The owner tick's folder-pick drain (see [`crate::directory::DirectoryPicker`]).
+///
+/// Takes the finished terminal out of the pending slot and hands it to the
+/// waiting `cad_pick_directory` call. A carrier with no picker is a no-op.
+pub fn drain_directory_pick(shared: &Arc<Mutex<Shared>>) {
+    // Clone the seam out and release the shell lock before touching it, per the
+    // `Shared` lock-order contract.
+    let picker = lock(shared).directory_picker.clone();
+    if let Some(picker) = picker {
+        picker.drain();
+    }
+}
+
+/// The owner tick's self-containment drain (ADR-0040 D3).
+///
+/// Takes the last-wins choice out of [`Shared`] under the lock and applies it on
+/// the owner-thread session, exactly like [`drain_api_calls`]. A host with no
+/// session leaves the choice queued for the next tick rather than applying it
+/// against nothing; a session refusal is printed as its own technical reason and
+/// also lands in `cad_status.error` (the session records it).
+pub fn drain_embed_resources(shared: &Arc<Mutex<Shared>>, session: Option<&CadSession>) {
+    let embed = {
+        let mut state = lock(shared);
+        state.cad_embed_resources.take()
+    };
+    let (Some(embed), Some(session)) = (embed, session) else {
+        return;
+    };
+    if let Err(error) = session.set_embed_resources(embed) {
+        eprintln!("[probe] cad embed resources rejected: {error}");
+    }
 }
 
 /// Lock [`Shared`], recovering the guard from a poisoned mutex.

@@ -1,6 +1,6 @@
 //! Typed settings wire surface for the Options dialog.
 //!
-//! The session exposes the same closed thirty-key surface the host
+//! The session exposes the same closed thirty-one-key surface the host
 //! persists; it adds no second validation and no raw-JSON entry point. A UI
 //! writes one typed key/value pair, the host validates it against the closed
 //! table, persists the matching preference leaf and applies it to the live
@@ -19,8 +19,11 @@ pub use cad_host::{
 /// The effective settings an Options dialog reads and writes.
 ///
 /// A flat camelCase wire object (like the status/session types). `fontsDir` is
-/// read-only display data sourced from the host's `--fonts-dir`; the other
-/// twenty-nine fields correspond one-to-one with [`CadSettingKey`], the two
+/// the font directory actually used and `fontsDirOverride` the persisted choice
+/// behind it; both are omitted when the carrier cannot answer them (the Web
+/// `dom-canvas` host has no local font directory), which renders the row
+/// disabled rather than inventing a path. The other thirty fields correspond
+/// one-to-one with [`CadSettingKey`] (`fontsDir` included), the two
 /// backgrounds as canonical `#rrggbb` strings, the crosshair and the GPU memory
 /// budget as integer percentages, the pickbox/aperture as integer pixel counts,
 /// the snap spacing as a real number of drawing units, the orbit sensitivity as
@@ -107,8 +110,32 @@ pub struct CadSettings {
     /// Recovery-snapshot interval in seconds (`ui.recovery.intervalSeconds`,
     /// `0..=3600`); `0` disables the writes.
     pub recovery_interval: u32,
-    /// Read-only: the configured CAD font directory, or `null` when unset.
+    /// The font directory actually used for font loading (`--fonts-dir` > a
+    /// usable persisted `ui.paths.fontsDir` > discovery), or absent when the
+    /// carrier has no local directory (Web) or nothing resolves.
+    ///
+    /// Omitted rather than `null` when `None`: a carrier that cannot answer the
+    /// question must not be read as "answered with an empty value". The Options
+    /// dialog renders an omitted key as a disabled row with the missing badge.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub fonts_dir: Option<String>,
+    /// The persisted font-directory choice (`ui.paths.fontsDir`), absent when the
+    /// user never chose one, cleared it, or the carrier has no local
+    /// filesystem (Web). This is the **editable** value: it is what the row
+    /// shows and what `cad_set_setting` writes with the key `fontsDir`.
+    ///
+    /// A choice that no longer exists is still reported here, while
+    /// [`Self::fonts_dir`] carries the directory in use (the CLI value or the
+    /// discovered default); [`Self::fonts_dir_missing`] is the row state the
+    /// dialog turns into `options.status.fontsDirMissing`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fonts_dir_override: Option<String>,
+    /// Whether [`Self::fonts_dir_override`] no longer names a usable directory.
+    ///
+    /// `false` when the user never chose one (and on the Web carrier, which has
+    /// no saved local directory at all); the font-directory row there is disabled
+    /// by the omitted [`Self::fonts_dir`], not by this flag.
+    pub fonts_dir_missing: bool,
 }
 
 impl From<HostSettings> for CadSettings {
@@ -143,6 +170,8 @@ impl From<HostSettings> for CadSettings {
             unit_precision: value.unit_precision,
             recovery_interval: value.recovery_interval,
             fonts_dir: value.fonts_dir,
+            fonts_dir_override: value.fonts_dir_override,
+            fonts_dir_missing: value.fonts_dir_missing,
         }
     }
 }

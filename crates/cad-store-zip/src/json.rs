@@ -62,6 +62,21 @@ impl Reader {
         }
     }
 
+    /// Take a string that may be `null` **or absent**; both mean "no value".
+    ///
+    /// Only a format field explicitly documented as optional may use this: the
+    /// reader otherwise refuses a missing field, because the writer emits every
+    /// field it models.
+    pub(crate) fn string_if_present(
+        &mut self,
+        field: &'static str,
+    ) -> Result<Option<String>, StoreError> {
+        if !self.map.contains_key(field) {
+            return Ok(None);
+        }
+        self.opt_string(field)
+    }
+
     /// Take a required non-negative integer.
     pub(crate) fn u64(&mut self, field: &'static str) -> Result<u64, StoreError> {
         match self.take(field)? {

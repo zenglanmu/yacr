@@ -9,6 +9,9 @@
 //!   and the frozen lock-order invariant (`Shared` before render telemetry).
 //! - [`commands`]: every `#[tauri::command]` IPC function plus the single
 //!   `generate_handler!` registration (`commands::register_commands`).
+//! - [`directory`]: the Options > Files folder picker (single-flight admission,
+//!   the pending slot the owner tick drains, and the cancel-vs-failure answer
+//!   mapping; the blocking chooser is injected by each host).
 //! - [`plugins`]: the five native plugin-manager commands, the durable store
 //!   seam and the startup gate (persist now, apply next launch).
 //! - [`popup`]: the shared modal-popup lifecycle (gate mapping and the
@@ -42,6 +45,13 @@
     target_os = "android"
 ))]
 pub mod commands;
+#[cfg(any(
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "android"
+))]
+pub mod directory;
 #[cfg(any(
     target_os = "linux",
     target_os = "windows",

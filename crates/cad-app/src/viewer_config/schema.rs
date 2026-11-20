@@ -416,6 +416,20 @@ impl RecoveryConfig {
     pub const MAX_INTERVAL_SECONDS: u32 = 3600;
 }
 
+/// Filesystem locations a user preference may choose (`ui.paths.*`).
+///
+/// `fontsDir` is an **absolute** directory path, or absent/`null` (and `""` for a
+/// cleared preference) when the active directory comes from discovery instead.
+/// Existence is deliberately not a schema rule: a persisted directory can be
+/// removed between runs, and that must not fail the whole configuration load —
+/// the host diagnoses it and falls back to its own discovery order instead.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
+pub struct UiPaths {
+    /// CAD font directory override, or `None`/`""` when the user cleared it.
+    pub fonts_dir: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct UiConfig {
@@ -427,6 +441,7 @@ pub struct UiConfig {
     pub export: ExportConfig,
     pub units: UnitsConfig,
     pub recovery: RecoveryConfig,
+    pub paths: UiPaths,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

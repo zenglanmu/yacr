@@ -247,6 +247,12 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
 → `CadSession::set_document_archive`）；Windows/macOS/Android/Web **NOT IMPLEMENTED**，打开/另存
 `.ymodel` 会以 `unsupported-runtime: ymodel` 显式拒绝，不得改成静默导出别的格式。
 
+外部资源打包（ADR-0040，`document.json.embed_resources` → `resources/{font,xref,image}/<key>`）
+同样**只在 Linux 生效**，`FORMAT_MINOR` 上限升到 **5**（写入按文档取 4 或 5）。字体目录设置与
+目录选择器只在 `native-below` 可用：`dom-canvas`（Web **与 X11/XWayland**）读不到本地目录，
+行渲染为不可用、写设置按 `unsupported-runtime: fontsDir` 拒绝——**不得**按 `--fonts-dir` 静默生效。
+真实跨机自包含、字体度量一致性、portal 目录选择器交互均 **NOT VERIFIED**。
+
 平台打包脚本与 5 个 release job 自 2026-11-01 起按 React/Tauri 宿主重新启用：仅 `v*` tag / 手工
 `workflow_dispatch` 运行，只上传 workflow artifact，**不签名、不公证、不接触商店凭据**。
 `publish-release.yml` 是 GitHub Release 的唯一发布入口（手工把指定 run 的 5 个 artifact 附到

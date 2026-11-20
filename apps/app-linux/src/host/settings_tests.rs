@@ -35,6 +35,8 @@ fn cad_settings_wire_shape_is_a_flat_camel_case_object() {
         unit_precision: 2,
         recovery_interval: 30,
         fonts_dir: Some("/tmp/yacr-fonts".to_string()),
+        fonts_dir_override: Some("/tmp/yacr-user-fonts".to_string()),
+        fonts_dir_missing: true,
     };
     let wire = serde_json::to_value(&settings).expect("settings serialize");
     assert_eq!(
@@ -69,10 +71,12 @@ fn cad_settings_wire_shape_is_a_flat_camel_case_object() {
             "unitPrecision": 2,
             "recoveryInterval": 30,
             "fontsDir": "/tmp/yacr-fonts",
+            "fontsDirOverride": "/tmp/yacr-user-fonts",
+            "fontsDirMissing": true,
         })
     );
-    // Exactly the twenty-nine documented fields; no unrelated Options fields.
-    assert_eq!(wire.as_object().expect("object").len(), 29);
+    // Exactly the thirty-one documented fields; no unrelated Options fields.
+    assert_eq!(wire.as_object().expect("object").len(), 31);
     // The backend choice keeps the shared snake_case key on the snapshot wire
     // (`settings.wgpu_backend` in the UI), never camelCased into `wgpuBackend`.
     assert!(

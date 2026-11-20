@@ -57,9 +57,13 @@
 
 ### Linux / Windows / macOS 桌面与 CLI（`native-below` 与 CLI）
 
-- 共用 `cad-platform::fonts::local`。`resolve_font_dir` 先看显式 `--fonts-dir`（目录不存在是
-  错误，不静默回退），否则按顺序找：可执行文件同级 `fonts/`、其父级 `fonts/`、macOS
-  `.app` 的 `Contents/Resources/fonts`、当前工作目录 `fonts/`。
+- 共用 `cad-platform::fonts::local`。字体目录的优先级是 **`--fonts-dir` > 持久化偏好
+  `ui.paths.fontsDir` > 发现顺序**；发现顺序为：可执行文件同级 `fonts/`、其父级 `fonts/`、macOS
+  `.app` 的 `Contents/Resources/fonts`、当前工作目录 `fonts/`。`--fonts-dir` 指向不存在的目录仍是
+  **硬错误**，不静默回退；持久化偏好可在 Options 里编辑（必须是绝对路径且目录存在，清空即回到发现
+  顺序），下次启动时若该目录已不存在则**不**让启动失败：记录一条诊断、回退到发现顺序，Options 行
+  显示 `options.status.fontsDirMissing`。`cad_settings` 的 `fontsDir` 是**实际使用**的目录，
+  `fontsDirOverride` 是持久化选择（清空或 Web 载体时字段省略）。
 - `DirFontLoader` 从该目录读 `fonts.json` 与面字节；`load_engine_report` 再注册 `--font
   NAME=PATH` 显式字体，最后把系统默认字体（`fc-match` / `%WINDIR%\Fonts` /
   `/System/Library/Fonts` 等候选）作为首回退。`.ttc` 等无法解析的候选被跳过，不伪造。

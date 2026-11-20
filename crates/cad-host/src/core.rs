@@ -385,6 +385,11 @@ pub(crate) struct RecoveryState {
     /// The key whose snapshot write last failed, so a broken store is reported
     /// once per document instead of once per interval.
     pub failed_key: Option<cad_platform::RecoveryKey>,
+    /// Whether `recovery.resources_omitted` was already published for this
+    /// document (ADR-0040 D11). The recovery write repeats every interval; the
+    /// fact that the snapshot does not pack resources is one fact per document,
+    /// so it is reported once instead of on every snapshot.
+    pub resources_omitted_reported: bool,
 }
 
 /// Monotonic millisecond clock source for the pump time budget.

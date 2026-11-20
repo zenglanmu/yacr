@@ -166,9 +166,11 @@ face-with-hole 1/8、instance-scaled 3/36；theater-2017 1246 实体/96,333 三�
   completeness/capabilities/entries`；`tables/sources.json` 记录导入来源。导入记录在导入时写入，
   导出记录在 Save As 成功后写入（最多保留 32 条导出记录，导入记录不淘汰）。报告**弹窗 UI 未实现**。
 - **格式版本**：两张报告表把 `FORMAT_MINOR` 提到 **2**；网格基色纹理的 `textures/<key>` 条目与
-  `cad:Mesh` 的 `uvs`/`texture` 再提到 **3**；网格 PBR 的 `cad:Mesh.pbr` 再提到 **4**。
-  minor ≤ 3 的归档仍可打开（缺 `pbr` → `None`；缺 UV/纹理按空/无解码）；minor > 4 的归档按
-  `ymodel.unsupported_minor` 拒绝打开（不静默丢字段）。
+  `cad:Mesh` 的 `uvs`/`texture` 再提到 **3**；网格 PBR 的 `cad:Mesh.pbr` 再提到 **4**；
+  外部资源打包的 `resources/{font,xref,image}/<key>` 条目与 `document.json.embed_resources`
+  把**可读上限**提到 **5**，写入时按文档取 **4 或 5**（无资源且未开开关 → 4，老构建仍可打开）。
+  minor ≤ 4 的归档仍可打开（缺 `pbr` → `None`；缺 UV/纹理按空/无解码；缺 `embed_resources` → `false`）；
+  minor > 5 的归档按 `ymodel.unsupported_minor` 拒绝打开（不静默丢字段）。
 - **载体**：Linux 的 Save As 选择器提供交换格式扩展名；Windows/macOS/Android/Web 的选择器本轮
   未扩展（只能由宿主/测试按显式路径触发，Web 下载流程为 **NOT IMPLEMENTED**），运行证据
   **NOT VERIFIED**。
@@ -231,6 +233,30 @@ wasm 纹理路径、像素与性能结论一律 **NOT RUN / NOT VERIFIED**。软
 `pbr-channels.glb` 的端到端渲染记录 **待补**；three.js/Blender/glTF-Validator 等厂商验收、
 Windows/macOS/Android/Web 运行、像素/golden/性能结论一律 **NOT RUN / NOT VERIFIED**。
 软件渲染不得用作像素或性能证据。
+
+### 外部资源打包（自包含 `.ymodel`，2026-11-20，ADR-0040）
+
+`.ymodel` 可选把**字体、外部参照源文件、栅格 `IMAGE` 字节**打进同一个归档，使单文件可换机打开。
+开关是**文档属性** `document.json.embed_resources`（布尔，仅 `true` 时写；缺省 `false`），
+保存对话框在保存前询问并列出探测到的资源与合计大小。网格贴图（`textures/<key>`）本来就自包含。
+
+| 层 | 实现 | 边界 |
+|---|---|---|
+| 归档布局 | `resources/{font,xref,image}/<32 lowercase hex>.<ext>`，内容寻址，与 `textures/<key>` 同构；`manifest` 记 `len`/`sha256`/zip CRC，逐条校验 | 键必须等于 `sha256(bytes)` 前 32 hex，写入与读取两侧都断言；`ext` 白名单外拒绝（`resource.unsupported_kind`）；listed 但不合法的条目按 `ymodel.unsupported_minor` 拒绝，不当外来字节静默保留 |
+| 逻辑映射 | `tables/resources.json` = 纯 JSON **数组** `[{key,kind,name,source}]`；`name` 与被引用处逐字一致，`source` 仅供诊断 | 表存在 ⟺ 确有资源字节（空表不写）；表与快照映射不一致时**拒绝保存**，不做"表赢"；同名不同字节 `resource.name_conflict` |
+| 版本 | `FORMAT_MINOR` 上限 **5**，写入按文档取 **4 或 5**（无资源且未开开关 → 4） | minor ≤ 4 归档正常打开（无该字段 → `false`）；带资源的 5 被旧构建按 `ymodel.unsupported_minor` 拒绝——这是设计意图 |
+| 增量 | 未改动的资源条目按上版归档 raw-copy（字节不改写）；与未列出的同路径外来条目碰撞时按**实际字节摘要**比对，相同则接管、不同则 `resource.conflict` | 首次流写 → raw-copy 会重写 zip local header，所以字节不变性只从第二次保存起成立（既有行为，测试按实测断言） |
+| 预算 | 单条 32 MiB、单次保存合计 64 MiB；超限/读不到**跳过该条并报告**，不让保存失败；读取侧同样有单条上限 | 标记 `resource.budget.entry` / `budget.total` / `unavailable`；采集结果是本轮保存状态，**不写** `tables/compat.json`（该表只留最多 32 条既往导出记录） |
+| 解析优先级 | 内嵌 > 宿主（字体目录/图纸目录/`images/`）> 显式缺失 | 内嵌必须优先；宿主文件更新时不"取较新者"。内嵌按**逻辑键**命中（`IMAGE` 用 `image_resource_key(name)`，绕过绝对路径拒绝），归档键只是存储 |
+| 恢复快照 | 恢复归档**强制**不打包资源（`recovery.resources_omitted` 显式记录） | 恢复文件每 60 s 写一次；恢复路径的 `previous` 是 `None`，沿用文档策略会周期性全量重写 |
+| 载体 | **只有 Linux** 已接线（`.ymodel` 本就仅 Linux）；字体目录设置与目录选择器只在 `native-below` 可用 | Windows/macOS/Android/Web 打开/保存 `.ymodel` 仍 `unsupported-runtime: ymodel`；`dom-canvas`（Web 与 X11）不能读本地目录，字体目录行渲染为不可用，写设置按 `unsupported-runtime: fontsDir` 拒绝 |
+
+**明确不做**：解压到磁盘（字节只在内存流转）、把外部参照变成活链接（内嵌源只保证重新导入/导出
+保真，`XREF RELOAD` 未实现）、字体子集化与授权校验、加密/签名/口令、`raw/source-*.bin` 的 L0 直通。
+
+**证据边界**：库层与宿主契约测试见 `docs/validation-resources-2026-11-20.md`；真实 DWG 跨机自包含、
+字体度量一致性、外部参照重新导入保真 **未运行**；目录选择器的真实 portal 交互 **NOT VERIFIED**；
+Windows/macOS/Android 仅编译。
 
 ### 测量命令与 §3.3 的逐条对应（2026-10-26 对账补齐）
 

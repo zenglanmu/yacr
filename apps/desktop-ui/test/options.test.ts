@@ -79,6 +79,7 @@ function snapshot(overrides = {}) {
     dxfVersion: '2010',
     acisVersion: '7.0',
     fontsDir: '/usr/share/fonts',
+    fontsDirOverride: '/usr/share/fonts',
     // The WGPU backend is a shared wire key: snake_case in the snapshot too.
     wgpu_backend: 'auto',
     // The document units and the recovery interval (ADR-0037 D9/D12).
@@ -155,7 +156,7 @@ test('every field sits on a declared tab exactly once and nothing else exists', 
     'plotFormat', 'dxfVersion', 'acisVersion',
   ]);
   assert.deepEqual(fieldsForTab('files').map(field => field.id), [
-    'drawingUnit', 'displayUnit', 'unitPrecision', 'recoveryInterval', 'fontsDir',
+    'drawingUnit', 'displayUnit', 'unitPrecision', 'recoveryInterval', 'fontsDir', 'fontsDirEffective',
   ]);
   assert.deepEqual(fieldsForTab('user').map(field => field.id), ['language', 'wgpuBackend']);
 });
@@ -185,7 +186,7 @@ test('each control is the editor its backend value really needs', () => {
     displayUnit: 'select',
     unitPrecision: 'number',
     recoveryInterval: 'number',
-    fontsDir: 'readonly',
+    fontsDir: 'path', fontsDirEffective: 'readonly',
     language: 'locale',
     wgpuBackend: 'select',
   });
@@ -244,12 +245,12 @@ test('the wire field and the write key differ only where the host says so', () =
   // Read from `cad_settings`, written through `cad_set_setting`.
   const differing = OPTIONS_FIELDS.filter(field => field.wire && field.key && field.wire !== field.key);
   assert.deepEqual(differing.map(field => [field.id, field.wire, field.key]), [
-    ['crosshairSize', 'crosshairPercent', 'crosshairSize'],
+    ['crosshairSize', 'crosshairPercent', 'crosshairSize'], ['fontsDir', 'fontsDirOverride', 'fontsDir'],
   ]);
-  // The two non-settings controls carry no write key at all.
+  // Only the effective directory row and the UI language carry no write key.
   assert.deepEqual(
     OPTIONS_FIELDS.filter(field => !field.key).map(field => field.id),
-    ['fontsDir', 'language'],
+    ['fontsDirEffective', 'language'],
   );
 });
 
@@ -442,7 +443,7 @@ test('the draft is seeded from the host snapshot, never from local defaults', ()
   assert.equal(empty.plotFormat, null);
   assert.equal(empty.dxfVersion, null);
   assert.equal(empty.acisVersion, null);
-  assert.equal(empty.fontsDir, null);
+  assert.equal(empty.fontsDir, '');
   assert.equal(empty.language, null);
   // A host that does not report the backend shows the row as unreported (and
   // unwritable) rather than seeding the `auto` default on its behalf.
@@ -466,7 +467,7 @@ test('the draft is seeded from the host snapshot, never from local defaults', ()
   assert.equal(validateField('crosshairSize', malformed.crosshairSize), SETTINGS_ERROR.invalidValue);
   assert.equal(malformed.backgroundModel, null);
   assert.equal(malformed.plotFormat, null);
-  assert.equal(malformed.fontsDir, null);
+  assert.equal(malformed.fontsDir, '');
 });
 
 test('an unedited draft is clean in both value shapes the wire can use', () => {
@@ -517,9 +518,9 @@ test('the apply payload carries write keys, typed values and nothing else', () =
     // The backend keeps the shared snake_case key in both directions.
     { field: 'wgpuBackend', key: 'wgpu_backend', value: 'vulkan' },
   ]);
-  // The read-only fonts folder and the UI language are never written.
+  // The UI language is never written; the fonts override is a real write now.
   const onlyLocal = { ...draftFromSettings(wire, 'en'), fontsDir: '/tmp/fonts', language: 'zh-CN' };
-  assert.deepEqual(applyPayload(onlyLocal, wire), []);
+  assert.deepEqual(applyPayload(onlyLocal, wire), [{ field: 'fontsDir', key: 'fontsDir', value: '/tmp/fonts' }]);
 });
 
 test('normalizeValue is the single canonical form used by diff and settle', () => {

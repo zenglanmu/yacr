@@ -238,6 +238,28 @@ impl HostCore {
             };
             (snapshot, persistence, controller.document_name_hint.clone())
         };
+        // ADR-0040 D11: a recovery snapshot never packs the document's external
+        // resources. It is written on a timer from the same snapshot the save path
+        // uses, and inheriting the document's policy would re-encode up to 64 MiB
+        // every interval — with no limit the native carriers enforce. The omission
+        // is published (once per document) instead of being silent.
+        let (snapshot, resources_omitted) = recovery_snapshot(snapshot);
+        let report_omitted =
+            resources_omitted && !self.recovery.borrow().resources_omitted_reported;
+        if report_omitted {
+            self.recovery.borrow_mut().resources_omitted_reported = true;
+            // A technical status, not a catalog key: this lane does not own the
+            // i18n catalog, and the stable marker is what a diagnostic keys on.
+            // The line says what was left out and what still keeps the bytes.
+            let text = format!(
+                "{}: recovery snapshots never pack external resources; \
+                 the document's own .ymodel keeps them",
+                cad_domain::ymodel::markers::RECOVERY_RESOURCES_OMITTED
+            );
+            if let Err(error) = self.set_external_status(text) {
+                self.note_post_commit_error(&error);
+            }
+        }
         // A recovery file is standalone: `previous: None`, because the
         // document's own archive is not this file's previous version and an
         // in-place foreign-entry copy must never read the user's file.
@@ -389,4 +411,26 @@ impl HostCore {
         }
         self.record_status("recovery.failed", &[("error", &error_text(error))]);
     }
+}
+
+/// The snapshot a recovery write stores: the document **without** its bundled
+/// external resources (ADR-0040 D11).
+///
+/// Returns the snapshot plus whether anything was dropped, so the caller can
+/// publish `recovery.resources_omitted` rather than dropping it silently. The
+/// self-containment flag is cleared too: the snapshot packs nothing, and a
+/// `true` there would claim otherwise (and would force a minor-5 archive for a
+/// file with no resources, D12).
+///
+/// The mapping table is removed with the payloads: leaving its rows behind would
+/// name `resources/<kind>/<key>` entries the archive no longer carries, which the
+/// reader refuses as `ymodel.invalid_document`.
+fn recovery_snapshot(mut snapshot: cad_db::DocumentSnapshot) -> (cad_db::DocumentSnapshot, bool) {
+    let omitted = snapshot.header.embed_resources || !snapshot.resources.is_empty();
+    snapshot.header.embed_resources = false;
+    snapshot.resources.clear();
+    snapshot.resource_names.clear();
+    snapshot.resource_sources.clear();
+    snapshot.tables.rows.remove(&cad_db::TableKind::Resources);
+    (snapshot, omitted)
 }
