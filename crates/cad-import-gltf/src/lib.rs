@@ -1,0 +1,332 @@
+//! glTF 2.0 (`.gltf`) and binary glTF (`.glb`) import adapter.
+//!
+//! glTF is a scene format: a JSON document plus one or more binary buffers,
+//! optionally packed into a single GLB container. This adapter reads it
+//! **bytes-only** (no file source, no HTTP): a `buffer.uri` is either a
+//! `data:` base64 payload or a named refusal, never a silently empty buffer.
+//!
+//! Every triangle primitive becomes one mesh entity on layer `0` in model
+//! space. The source frame is glTF's **metres, +Y up**; stored coordinates are
+//! the CAD frame (**metres, +Z up**) via `(x, y, z) -> (x, -z, y)`, and node
+//! world transforms are applied first (column-major composition).
+//!
+//! Losses are never silent:
+//! * strip/fan primitives are skipped with [`DIAG_PRIMITIVE_MODE_UNSUPPORTED`]
+//!   (points/lines with [`DIAG_PRIMITIVE_MODE_IGNORED`]), both `Partial`;
+//! * a primitive without `POSITION` is [`DIAG_MESH_WITHOUT_POSITIONS`]; a file
+//!   with no triangle at all is a named refusal, not an empty success;
+//! * normals are dropped as a whole set when any transformed value is
+//!   non-finite or zero ([`DIAG_NORMALS_DROPPED`]);
+//! * glTF vertex colours are linear; per glTF 2.0 `COLOR_0` multiplies the
+//!   material's linear `baseColorFactor` (that factor is applied before the
+//!   linear-to-sRGB encode, and is `[1, 1, 1]` when no material is named), and
+//!   RGB becomes sRGB bytes while a translucent vertex alpha cannot be stored by
+//!   the neutral mesh, so it is dropped and reported
+//!   ([`DIAG_VERTEX_ALPHA_DROPPED`]);
+//! * a base-colour texture is not sampled: the factor is used and the loss is
+//!   reported ([`DIAG_TEXTURE_NOT_IMPORTED`]);
+//! * skins, animations, cameras and meshes outside the imported scene are
+//!   reported, never silently ignored.
+//!
+//! Materials are colours only. A primitive that names **no** material keeps the
+//! layer colour ([`EntityColor::ByLayer`](cad_db::EntityColor::ByLayer)): the
+//! glTF default material's white factor is a format default, not an authored
+//! colour, so it is not baked in. A named material's linear `baseColorFactor`
+//! becomes an explicit sRGB entity colour — or, when the primitive also carries
+//! `COLOR_0`, is multiplied into those vertex colours instead, so the authored
+//! composition is stored once and the entity keeps `ByLayer` colour — and its
+//! alpha is honoured through `alphaMode`: `OPAQUE` is imported opaque, `BLEND`
+//! keeps an alpha below `1.0`, and `MASK` cutouts are imported opaque with
+//! [`DIAG_ALPHA_MASK_NOT_IMPORTED`] because the neutral mesh cannot represent
+//! them. Metallic/roughness, normal maps and every texture channel are not
+//! represented in `cad-db`.
+//!
+//! A document whose `asset.version` is not `2.x` is refused by name
+//! ([`DIAG_UNSUPPORTED_VERSION`]); it is never read as if it were glTF 2.0.
+
+mod buffers;
+mod scene;
+
+#[cfg(test)]
+mod tests;
+
+use cad_domain::{CadError, CadResult, Diagnostic, UnitContext};
+use cad_import_core::{
+    compute_identity, ConnectorDescriptor, ExportCapability, FidelityLevel, ImportCapability,
+    ImportPhase, ImportProgress, ImportProgressSink, ImportReport, ImportRequest, ImportedDrawing,
+    Importer, MeshImport, NoopProgress,
+};
+
+use buffers::resolve_buffers;
+use scene::SceneWalker;
+
+/// The glTF entity `type_key` reported in capabilities and stored rows.
+pub const GLTF_MESH_TYPE_KEY: &str = "GltfMesh";
+
+/// Stable diagnostic code: a `data:` buffer payload is not valid base64.
+pub const DIAG_BUFFER_BASE64: &str = "import.gltf.buffer_base64";
+/// Stable diagnostic code: a decoded buffer is shorter than its `byteLength`.
+pub const DIAG_BUFFER_LENGTH: &str = "import.gltf.buffer_length";
+/// Stable diagnostic code: a GLB has no BIN chunk for its `Source::Bin` buffer.
+pub const DIAG_MISSING_BIN: &str = "import.gltf.missing_bin";
+/// Stable diagnostic code: a buffer names an external URI (bytes-only import).
+pub const DIAG_EXTERNAL_BUFFER: &str = "import.gltf.external_buffer_unavailable";
+/// Stable diagnostic code: the JSON/GLB container could not be parsed.
+pub const DIAG_PARSE: &str = "import.gltf.parse";
+/// Stable diagnostic code: the document declares no scene.
+pub const DIAG_NO_SCENE: &str = "import.gltf.no_scene";
+/// Stable diagnostic code: a node hierarchy closes a cycle.
+pub const DIAG_NODE_CYCLE: &str = "import.gltf.node_cycle";
+/// Stable diagnostic code: the hierarchy is deeper than the recursion guard.
+pub const DIAG_NODE_DEPTH: &str = "import.gltf.node_depth";
+/// Stable diagnostic code: a node transform is non-finite.
+pub const DIAG_INVALID_TRANSFORM: &str = "import.gltf.invalid_transform";
+/// Stable diagnostic code: strip/fan primitives are not triangulated.
+pub const DIAG_PRIMITIVE_MODE_UNSUPPORTED: &str = "import.gltf.primitive_mode_unsupported";
+/// Stable diagnostic code: point/line primitives carry no CAD geometry here.
+pub const DIAG_PRIMITIVE_MODE_IGNORED: &str = "import.gltf.primitive_mode_ignored";
+/// Stable diagnostic code: a triangle primitive has no `POSITION` attribute.
+pub const DIAG_MESH_WITHOUT_POSITIONS: &str = "import.gltf.mesh_without_positions";
+/// Stable diagnostic code: no triangle could be built from the document.
+pub const DIAG_NO_GEOMETRY: &str = "import.gltf.no_geometry";
+/// Stable diagnostic code: an index references a vertex outside its primitive.
+pub const DIAG_INDEX_OUT_OF_RANGE: &str = "import.gltf.index_out_of_range";
+/// Stable diagnostic code: a triangle index list is not a multiple of three.
+pub const DIAG_TRIANGLE_INDEX_COUNT: &str = "import.gltf.triangle_index_count";
+/// Stable diagnostic code: a transformed vertex is non-finite.
+pub const DIAG_NON_FINITE_VERTEX: &str = "import.gltf.non_finite_vertex";
+/// Stable diagnostic code: a sparse accessor cannot be expanded here.
+pub const DIAG_SPARSE_ACCESSOR: &str = "import.gltf.sparse_accessor";
+/// Stable diagnostic code: a normal set was unusable and dropped as a whole.
+pub const DIAG_NORMALS_DROPPED: &str = "import.gltf.normals_dropped";
+/// Stable diagnostic code: a vertex-colour set was unusable and dropped.
+pub const DIAG_COLORS_DROPPED: &str = "import.gltf.colors_dropped";
+/// Stable diagnostic code: translucent vertex alpha has no neutral-mesh channel.
+pub const DIAG_VERTEX_ALPHA_DROPPED: &str = "import.gltf.vertex_alpha_dropped";
+/// Stable diagnostic code: a base-colour texture is not sampled.
+pub const DIAG_TEXTURE_NOT_IMPORTED: &str = "import.gltf.texture_not_imported";
+/// Stable diagnostic code: an unusable `baseColorFactor` was not applied.
+pub const DIAG_MATERIAL_IGNORED: &str = "import.gltf.material_ignored";
+/// Stable diagnostic code: an `alphaMode` of `MASK` (cutout) is imported opaque.
+pub const DIAG_ALPHA_MASK_NOT_IMPORTED: &str = "import.gltf.alpha_mask_not_imported";
+/// Stable refusal code: the document's `asset.version` is not glTF 2.x.
+pub const DIAG_UNSUPPORTED_VERSION: &str = "import.gltf.unsupported_version";
+/// Stable diagnostic code: a degenerate triangle was dropped.
+pub const DIAG_DEGENERATE_TRIANGLE: &str = "import.gltf.degenerate_triangle";
+/// Stable diagnostic code (note): glTF coordinates are metres.
+pub const DIAG_UNITS_METRES: &str = "import.gltf.units_metres";
+/// Stable diagnostic code (note): the glTF +Y-up frame was converted to +Z up.
+pub const DIAG_FRAME_CONVERTED: &str = "import.gltf.frame_converted";
+/// Stable diagnostic code: skins are not imported.
+pub const DIAG_SKIN_IGNORED: &str = "import.gltf.skin_ignored";
+/// Stable diagnostic code: animations are not imported.
+pub const DIAG_ANIMATION_IGNORED: &str = "import.gltf.animation_ignored";
+/// Stable diagnostic code: cameras are not imported.
+pub const DIAG_CAMERA_IGNORED: &str = "import.gltf.camera_ignored";
+/// Stable diagnostic code: a mesh is referenced by no node in the scene.
+pub const DIAG_UNREFERENCED_MESH: &str = "import.gltf.unreferenced_mesh";
+
+/// The glTF connector descriptor.
+///
+/// Owned by this crate. The writer half (`cad-export-gltf`) emits glTF 2.0 at
+/// L1; the format cannot carry `cad-db`'s analytic curves, layers or units, so
+/// the export direction is lossy and every conversion is reported.
+pub const DESCRIPTOR_GLTF: ConnectorDescriptor = ConnectorDescriptor {
+    id: "gltf",
+    name_key: "connector.gltf.name",
+    extensions: &["gltf", "glb"],
+    import: Some(ImportCapability {
+        versions: "glTF 2.0 (.gltf JSON, .glb binary)",
+        container: "gltf",
+    }),
+    export: Some(ExportCapability {
+        versions: "glTF 2.0 (GLB + JSON .gltf)",
+        level: FidelityLevel::L1,
+        lossy: true,
+    }),
+    declared_classes: &[],
+};
+
+/// Conservatively identify glTF bytes.
+///
+/// This delegates to the shared detector so the connector's answer can never
+/// drift from the dispatcher's: a GLB needs the `glTF` magic plus a version-2
+/// header, and a JSON `.gltf` must be a JSON object carrying the `asset` and
+/// `version` keys. Anything else is `false`, never a guess.
+pub fn sniff(bytes: &[u8]) -> bool {
+    matches!(
+        cad_import_core::detect_format(bytes),
+        cad_import_core::DrawingFormat::Gltf
+    )
+}
+
+/// Refuse a document whose `asset.version` is not glTF 2.x before any parse.
+///
+/// For a GLB the JSON chunk is extracted from the container; for a JSON
+/// `.gltf` the input bytes are the document. A missing or non-string
+/// `asset.version` is the same named refusal as a `1.x` one.
+fn check_asset_version(bytes: &[u8]) -> CadResult<()> {
+    if bytes.starts_with(b"glTF") {
+        let glb = gltf::binary::Glb::from_slice(bytes)
+            .map_err(|error| CadError::CorruptData(format!("{DIAG_PARSE}: {error}")))?;
+        check_json_asset_version(&glb.json)
+    } else {
+        check_json_asset_version(bytes)
+    }
+}
+
+fn check_json_asset_version(json: &[u8]) -> CadResult<()> {
+    let document: serde_json::Value = serde_json::from_slice(json)
+        .map_err(|error| CadError::CorruptData(format!("{DIAG_PARSE}: {error}")))?;
+    let version = document
+        .get("asset")
+        .and_then(|asset| asset.get("version"))
+        .and_then(serde_json::Value::as_str);
+    match version {
+        Some(version) if version.starts_with("2.") => Ok(()),
+        Some(version) => Err(CadError::Unsupported(format!(
+            "{DIAG_UNSUPPORTED_VERSION}: asset.version is {version:?}; only glTF 2.x documents \
+             are imported"
+        ))),
+        None => Err(CadError::Unsupported(format!(
+            "{DIAG_UNSUPPORTED_VERSION}: the document declares no string asset.version; only \
+             glTF 2.x documents are imported"
+        ))),
+    }
+}
+
+/// The glTF importer.
+#[derive(Default)]
+pub struct GltfImporter;
+
+impl GltfImporter {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Importer for GltfImporter {
+    fn import(
+        &self,
+        request: &ImportRequest,
+        cancelled: &dyn Fn() -> bool,
+    ) -> CadResult<ImportedDrawing> {
+        self.import_with_progress(request, cancelled, &NoopProgress)
+    }
+
+    fn import_with_progress(
+        &self,
+        request: &ImportRequest,
+        cancelled: &dyn Fn() -> bool,
+        progress: &dyn ImportProgressSink,
+    ) -> CadResult<ImportedDrawing> {
+        if cancelled() {
+            return Err(CadError::Cancelled);
+        }
+        if request.bytes.len() > request.limits.max_file_bytes {
+            return Err(CadError::InvalidInput(format!(
+                "file is {} bytes, over the {} byte import limit",
+                request.bytes.len(),
+                request.limits.max_file_bytes
+            )));
+        }
+
+        let started = web_time::Instant::now();
+        let identity = compute_identity(&request.bytes);
+        progress.report(ImportProgress {
+            phase: ImportPhase::Reading,
+            entities_done: 0,
+            entities_total: None,
+            bytes: Some(request.bytes.len() as u64),
+            message: None,
+        });
+        check_asset_version(&request.bytes)?;
+
+        let gltf = gltf::Gltf::from_slice(&request.bytes)
+            .map_err(|error| CadError::CorruptData(format!("{DIAG_PARSE}: {error}")))?;
+        if cancelled() {
+            return Err(CadError::Cancelled);
+        }
+        let buffers = resolve_buffers(&gltf)?;
+        let Some(scene) = gltf
+            .document
+            .default_scene()
+            .or_else(|| gltf.document.scenes().next())
+        else {
+            return Err(CadError::Unsupported(format!(
+                "{DIAG_NO_SCENE}: the document declares no scene"
+            )));
+        };
+
+        progress.report(ImportProgress::at(ImportPhase::Parsing, 0, None));
+
+        let mut import = MeshImport::new(request, GLTF_MESH_TYPE_KEY)?;
+        let mut walker = SceneWalker::new(&gltf.document, &buffers, &request.limits, cancelled);
+        let mut stack = Vec::new();
+        for node in scene.nodes() {
+            walker.walk(&node, &scene::IDENTITY, &mut stack, &mut import)?;
+        }
+        walker.record_ignored(&mut import);
+
+        if import.entity_count() == 0 {
+            if walker.saw_mesh_without_positions {
+                return Err(CadError::CorruptData(format!(
+                    "{DIAG_MESH_WITHOUT_POSITIONS}: no triangle primitive carries a POSITION \
+                     attribute"
+                )));
+            }
+            return Err(CadError::Unsupported(format!(
+                "{DIAG_NO_GEOMETRY}: the document produced no triangle geometry"
+            )));
+        }
+
+        import.record(
+            Diagnostic {
+                object: None,
+                code: DIAG_UNITS_METRES.into(),
+                message: "glTF coordinates are metres; stored values keep the metre unit".into(),
+            },
+            None,
+        );
+        import.record(
+            Diagnostic {
+                object: None,
+                code: DIAG_FRAME_CONVERTED.into(),
+                message: "glTF +Y up was converted to the CAD +Z up frame as (x, y, z) -> \
+                          (x, -z, y)"
+                    .into(),
+            },
+            None,
+        );
+
+        let entity_total = import.entity_count();
+        progress.report(ImportProgress::at(
+            ImportPhase::Entities,
+            entity_total,
+            Some(entity_total),
+        ));
+        progress.report(ImportProgress::at(
+            ImportPhase::Finishing,
+            entity_total,
+            Some(entity_total),
+        ));
+
+        let outcome = import.finish()?;
+        let report = ImportReport {
+            identity,
+            capabilities: outcome.capabilities,
+            completeness: outcome.completeness,
+            diagnostics: outcome.diagnostics,
+            connector: None,
+            parse_ms: Some(started.elapsed().as_secs_f64() * 1000.0),
+            object_xdata: Vec::new(),
+        };
+
+        Ok(ImportedDrawing {
+            database: outcome.database,
+            units: UnitContext::from_meter(),
+            report,
+            vendor_records: Vec::new(),
+        })
+    }
+}

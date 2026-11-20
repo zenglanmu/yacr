@@ -46,6 +46,8 @@
     <mediatype>application/x-ply</mediatype>
     <mediatype>model/off</mediatype>
     <mediatype>application/x-geomview-coff</mediatype>
+    <mediatype>model/gltf+json</mediatype>
+    <mediatype>model/gltf-binary</mediatype>
     <mediatype>model/step</mediatype>
     <mediatype>application/step</mediatype>
     <mediatype>application/x-ifc</mediatype>

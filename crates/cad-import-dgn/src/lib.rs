@@ -36,8 +36,9 @@ mod transform;
 
 use cad_domain::{CadError, CadResult, UnitContext};
 use cad_import_core::{
-    compute_identity, ImportLimits, ImportPhase, ImportProgress, ImportProgressSink, ImportReport,
-    ImportRequest, ImportedDrawing, Importer, NoopProgress,
+    compute_identity, ConnectorDescriptor, ImportCapability, ImportLimits, ImportPhase,
+    ImportProgress, ImportProgressSink, ImportReport, ImportRequest, ImportedDrawing, Importer,
+    NoopProgress,
 };
 
 /// Stable refusal code: the DGN reader produced no drawable entity.
@@ -223,3 +224,20 @@ fn read_error(error: cadkit_core::Error) -> CadError {
         )),
     }
 }
+
+/// The Bentley DGN connector descriptor (V7 ISFF and V8 OLE-CFB).
+///
+/// Owned by this crate: read-only in this build, so `export` is `None` and an
+/// export attempt is the registry's named `export.dgn.not_implemented`
+/// refusal.
+pub const DESCRIPTOR_DGN: ConnectorDescriptor = ConnectorDescriptor {
+    id: "dgn",
+    name_key: "connector.dgn.name",
+    extensions: &["dgn"],
+    import: Some(ImportCapability {
+        versions: "V7 (ISFF) / V8 (OLE-CFB)",
+        container: "dgn",
+    }),
+    export: None,
+    declared_classes: &[],
+};

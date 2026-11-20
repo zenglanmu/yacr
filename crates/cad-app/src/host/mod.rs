@@ -29,6 +29,7 @@ mod export_options;
 mod open_import;
 mod properties;
 mod render_edit;
+mod report_json;
 mod snapshot;
 mod solids;
 mod tolerance;
@@ -48,6 +49,8 @@ pub use cad_import_acadrust::ImportReport;
 /// [`HostController::begin_async_open_with_xref`] take it: host-side code should
 /// not need a direct `cad-import-acadrust` dependency to pass the policy.
 pub use cad_import_acadrust::XrefOptions;
+/// A connector's compatibility report and export result (bytes + report).
+pub use cad_import_core::{CompatReport, ExportOutput};
 pub use databases::{
     blank_database, demo_database, snap_candidates_near, snap_candidates_near_uncached,
     snap_candidates_near_with_policy,
@@ -158,6 +161,8 @@ impl HostController {
                 identity: DocumentIdentity::Temporary(0),
                 units: UnitContext::drawing_units(),
                 resource_keys: Vec::new(),
+                compat: Vec::new(),
+                sources: Vec::new(),
                 persistence: crate::PersistenceState::untitled(),
             },
         );
@@ -331,12 +336,16 @@ impl HostController {
             .pending_open_label
             .take()
             .unwrap_or_else(|| self.document_name_hint.clone());
+        // Persisted report/provenance rows (ADR-0037 D11/D14).
+        let (compat, sources) = report_json::import_rows(&imported.report, &label);
         let document = Document {
             id: self.document_id,
             drawing: Arc::new(imported.database),
             identity: imported.report.identity.clone(),
             units: imported.units,
             resource_keys: Vec::new(),
+            compat,
+            sources,
             // An import is an untitled document saved later (D3) with revision 0
             // as its import baseline (D2).
             persistence: crate::PersistenceState::imported(),
@@ -348,11 +357,13 @@ impl HostController {
 
         // Rebuild everything bound to the previous content identity.
         self.reset_for_new_content();
+        // After `reset_for_new_content`, which clears the replaced content's scope.
+        self.mark_import_metadata_dirty();
         self.document_name_hint = label.clone();
         self.last_import_report = Some(imported.report.clone());
         self.last_vendor_records = vendor_records;
         self.vendor_records_pending = true;
-        self.last_status = format!("已打开 {label}: {}", opened.completeness_label);
+        self.last_status = format!("opened {label}: {}", opened.completeness_label);
         Ok(opened)
     }
 
@@ -394,6 +405,8 @@ impl HostController {
             identity: DocumentIdentity::Temporary(self.temporary_identity),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            compat: Vec::new(),
+            sources: Vec::new(),
             persistence: crate::PersistenceState::untitled(),
         };
         self.application

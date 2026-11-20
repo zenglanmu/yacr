@@ -36,6 +36,8 @@ fn application_with_document() -> (Application, SessionState) {
             identity: DocumentIdentity::Sha256([0u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            compat: Vec::new(),
+            sources: Vec::new(),
             persistence: crate::PersistenceState::untitled(),
         },
     );
@@ -45,6 +47,23 @@ fn application_with_document() -> (Application, SessionState) {
     );
     let session = SessionState::new(document_id, AppMode::Work);
     (app, session)
+}
+
+/// A document over `drawing` with `identity` and no host metadata rows.
+///
+/// Keeps the many test fixtures from repeating the `Document` field list: the
+/// two report tables are always empty unless a test fills them.
+fn document_with(drawing: cad_db::DrawingDatabase, identity: DocumentIdentity) -> Document {
+    Document {
+        id: DocumentId(1),
+        drawing: Arc::new(drawing),
+        identity,
+        units: UnitContext::drawing_units(),
+        resource_keys: Vec::new(),
+        compat: Vec::new(),
+        sources: Vec::new(),
+        persistence: crate::PersistenceState::untitled(),
+    }
 }
 
 fn command(id: CommandId, payload: CommandPayload) -> Command {

@@ -689,11 +689,16 @@ dependencies = [
  "cad-dependencies",
  "cad-diagnostics",
  "cad-domain",
+ "cad-export-gltf",
+ "cad-export-ifc",
+ "cad-export-mesh",
+ "cad-export-skp",
  "cad-geometry",
  "cad-history",
  "cad-import-acadrust",
  "cad-import-core",
  "cad-import-dgn",
+ "cad-import-gltf",
  "cad-import-ifc",
  "cad-import-mesh",
  "cad-import-obj",
@@ -795,6 +800,54 @@ dependencies = [
 ]
 
 [[package]]
+name = "cad-export-gltf"
+version = "0.1.16"
+dependencies = [
+ "base64 0.22.1",
+ "cad-db",
+ "cad-domain",
+ "cad-import-core",
+ "cad-import-gltf",
+ "gltf",
+ "serde_json",
+]
+
+[[package]]
+name = "cad-export-ifc"
+version = "0.1.16"
+dependencies = [
+ "cad-db",
+ "cad-domain",
+ "cad-import-core",
+ "cad-import-ifc",
+ "ifc-lite-export",
+ "ifc-lite-processing",
+]
+
+[[package]]
+name = "cad-export-mesh"
+version = "0.1.16"
+dependencies = [
+ "cad-db",
+ "cad-domain",
+ "cad-import-core",
+ "cad-import-mesh",
+ "cad-import-obj",
+ "cad-import-stl",
+]
+
+[[package]]
+name = "cad-export-skp"
+version = "0.1.16"
+dependencies = [
+ "cad-db",
+ "cad-domain",
+ "cad-import-core",
+ "cad-import-skp",
+ "skpwright",
+]
+
+[[package]]
 name = "cad-geometry"
 version = "0.1.16"
 dependencies = [
@@ -870,6 +923,19 @@ dependencies = [
  "cad-import-core",
  "cadkit-core",
  "cadkit-dgn",
+ "web-time",
+]
+
+[[package]]
+name = "cad-import-gltf"
+version = "0.1.16"
+dependencies = [
+ "base64 0.22.1",
+ "cad-db",
+ "cad-domain",
+ "cad-import-core",
+ "gltf",
+ "serde_json",
  "web-time",
 ]
 
@@ -1786,7 +1852,7 @@ version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab8ecd87370524b461f8557c119c405552c396ed91fc0a8eec68679eab26f94a"
 dependencies = [
- "libloading 0.7.4",
+ "libloading 0.8.9",
 ]
 
 [[package]]
@@ -2987,6 +3053,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "ifc-lite-export"
+version = "28.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c04a06595049736f2804bdf3f063c55844800c719edbb79235ef17bbd0603b69"
+dependencies = [
+ "bytemuck",
+ "geometry-predicates",
+ "ifc-lite-core",
+ "ifc-lite-geometry",
+ "ifc-lite-processing",
+ "nalgebra",
+ "png",
+ "rustc-hash 2.1.3",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "ifc-lite-geometry"
 version = "28.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3007,6 +3091,24 @@ dependencies = [
  "serde",
  "smallvec",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "ifc-lite-processing"
+version = "28.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a787fea27c0335cb4e016aeb318cc65a0465e0044aff15ab239388433ae7bf5"
+dependencies = [
+ "ifc-lite-core",
+ "ifc-lite-geometry",
+ "nalgebra",
+ "png",
+ "rayon",
+ "rustc-hash 2.1.3",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tracing",
 ]
 
 [[package]]

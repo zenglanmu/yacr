@@ -153,6 +153,9 @@ impl PlatformFiles for AndroidFiles {
     }
 
     fn begin_save(&self, purpose: SavePurpose, default_name: &str) -> CadResult<()> {
+        // SAF has no per-format save filter: the connector Save As extensions
+        // (.stl/.obj/.ply/.off/.ifc/.skp) are reachable only by typing the file
+        // name, and those paths are NOT VERIFIED on Android this round.
         #[cfg(target_os = "android")]
         {
             self.arm(FilePurpose::Save(purpose))?;

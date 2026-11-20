@@ -57,14 +57,16 @@
 //! * `vendor_records` is empty and `ImportRequest::xref` is ignored: IFC has
 //!   neither Tianzheng records nor CAD external references.
 //!
-//! There is **no IFC export** and no glTF exposure in this crate.
+//! There is **no glTF exposure in this crate**. The IFC4 writer is a separate
+//! crate (`cad-export-ifc`), declared as an L1 lossy export on
+//! [`DESCRIPTOR_IFC`].
 
 use cad_db::EntityColor;
 use cad_domain::{CadError, CadResult, Diagnostic, Mesh, Point3, Unit, UnitContext};
 use cad_import_core::{
-    compute_identity, ifc_schema as ifc_file_schema, ImportLimits, ImportPhase, ImportProgress,
-    ImportProgressSink, ImportReport, ImportRequest, ImportedDrawing, Importer, MeshImport,
-    NoopProgress,
+    compute_identity, ifc_schema as ifc_file_schema, ConnectorDescriptor, ExportCapability,
+    FidelityLevel, ImportCapability, ImportLimits, ImportPhase, ImportProgress, ImportProgressSink,
+    ImportReport, ImportRequest, ImportedDrawing, Importer, MeshImport, NoopProgress,
 };
 use ifc_lite_core::{
     build_entity_index, is_geometry_job, resolve_length_unit, EntityDecoder, EntityScanner, IfcType,
@@ -419,6 +421,7 @@ impl Importer for IfcImporter {
             capabilities: outcome.capabilities,
             completeness: outcome.completeness,
             diagnostics: outcome.diagnostics,
+            connector: None,
             parse_ms: Some(started.elapsed().as_secs_f64() * 1000.0),
             object_xdata: Vec::new(),
         };
@@ -803,3 +806,25 @@ fn index_to_u32(base: usize, index: u32, label: &str) -> CadResult<u32> {
 
 #[cfg(test)]
 mod tests;
+
+/// The IFC connector descriptor (IFC2X3 / IFC4 / IFC4X3).
+///
+/// Import is owned by this crate. Export is the separate `cad-export-ifc`
+/// writer: it projects model-space meshes into a fresh IFC4 file, so it is L1
+/// and lossy (analytic geometry, layers, blocks and paper space are not
+/// represented; every drop is reported).
+pub const DESCRIPTOR_IFC: ConnectorDescriptor = ConnectorDescriptor {
+    id: "ifc",
+    name_key: "connector.ifc.name",
+    extensions: &["ifc"],
+    import: Some(ImportCapability {
+        versions: "IFC2X3 / IFC4 / IFC4X3",
+        container: "step",
+    }),
+    export: Some(ExportCapability {
+        versions: "IFC4",
+        level: FidelityLevel::L1,
+        lossy: true,
+    }),
+    declared_classes: &[],
+};

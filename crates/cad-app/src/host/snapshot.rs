@@ -16,6 +16,12 @@
 
 use super::*;
 
+/// The number of export reports [`HostController::record_export_report`] keeps.
+///
+/// Repeated Save As calls must not grow the document without bound; the table is
+/// a bounded recent history, so the oldest rows are dropped first.
+pub const MAX_EXPORT_RECORDS: usize = 32;
+
 impl HostController {
     /// Encode the current document as a [`DocumentSnapshot`].
     ///
@@ -33,7 +39,7 @@ impl HostController {
             .documents
             .get(&self.document_id)
             .ok_or_else(|| CadError::InvalidInput("no document is open".into()))?;
-        document
+        let mut snapshot = document
             .drawing
             .snapshot(
                 document.units.clone(),
@@ -42,7 +48,20 @@ impl HostController {
                 document.drawing.revision(),
             )
             // A marker, not prose: callers match on `ymodel.*` (D13).
-            .map_err(|error| CadError::Unsupported(format!("{}: {}", error.marker, error.detail)))
+            .map_err(|error| {
+                CadError::Unsupported(format!("{}: {}", error.marker, error.detail))
+            })?;
+        // Host-owned metadata (ADR-0037 D11/D14): the database snapshot never
+        // produces these rows, so the document slot supplies them here. An empty
+        // vector is an empty table, not an absent one: the document really has
+        // no report/source rows.
+        snapshot
+            .tables
+            .set(cad_db::TableKind::Compat, document.compat.clone());
+        snapshot
+            .tables
+            .set(cad_db::TableKind::Sources, document.sources.clone());
+        Ok(snapshot)
     }
 
     /// Install a decoded archive as the authoritative document.
@@ -74,6 +93,18 @@ impl HostController {
             identity: snapshot.header.identity.clone(),
             units: snapshot.header.units.clone(),
             resource_keys: snapshot.header.resource_keys.clone(),
+            // Host-owned metadata travels with the archive (ADR-0037 D11/D14).
+            // The database hydration above ignores these rows by construction.
+            compat: snapshot
+                .tables
+                .get(cad_db::TableKind::Compat)
+                .map(<[serde_json::Value]>::to_vec)
+                .unwrap_or_default(),
+            sources: snapshot
+                .tables
+                .get(cad_db::TableKind::Sources)
+                .map(<[serde_json::Value]>::to_vec)
+                .unwrap_or_default(),
             persistence,
         };
         self.application
@@ -169,6 +200,64 @@ impl HostController {
     /// It is empty right after a durable save, an open, a New or a Close.
     pub fn dirty_scope(&self) -> &cad_db::ChangeScope {
         &self.dirty_scope
+    }
+
+    /// Mark the two host-owned report tables dirty after an import publish.
+    ///
+    /// `tables/compat.json` and `tables/sources.json` are written from the
+    /// `Document` slot, not from `cad-db`, so no database commit would otherwise
+    /// name them. Called **after** [`HostController::reset_for_new_content`],
+    /// which clears the accumulated scope because it described the replaced
+    /// document.
+    pub(super) fn mark_import_metadata_dirty(&mut self) {
+        self.dirty_scope.table(cad_db::TableKind::Compat);
+        self.dirty_scope.table(cad_db::TableKind::Sources);
+    }
+
+    /// Append one export report to the document's persisted compatibility table.
+    ///
+    /// Called by the Save As funnel **after** the exported file is durable
+    /// (`crates/cad-host/src/save.rs`), so the report of the file just written
+    /// travels with the document the next time its `.ymodel` archive is saved.
+    /// It is metadata about a projection, not document content: a failure to
+    /// record must never fail the save that already wrote its bytes.
+    ///
+    /// Only the newest [`MAX_EXPORT_RECORDS`] rows are retained: repeated exports
+    /// would otherwise grow the document (and its archive) without bound. The
+    /// oldest rows are dropped first, so the table stays a bounded recent history
+    /// rather than an ever-growing log.
+    ///
+    /// Returns an explicit error when no document is open: silently dropping the
+    /// record would claim the report was persisted.
+    pub fn record_export_report(&mut self, report: &CompatReport) -> CadResult<()> {
+        let record = report_json::compat_report_to_json(report);
+        let document = self
+            .application
+            .workspace
+            .documents
+            .get_mut(&self.document_id)
+            .ok_or_else(|| CadError::InvalidInput("no document is open".into()))?;
+        document.compat.push(record);
+        // Bounded **export** history: keep every import record (the document's
+        // provenance) and only the newest `MAX_EXPORT_RECORDS` export rows.
+        // `retain` walks front to back, so the oldest export rows go first.
+        let is_export = |row: &serde_json::Value| {
+            row.get("direction").and_then(serde_json::Value::as_str) == Some("export")
+        };
+        let export_rows = document.compat.iter().filter(|row| is_export(row)).count();
+        let mut excess = export_rows.saturating_sub(MAX_EXPORT_RECORDS);
+        if excess > 0 {
+            document.compat.retain(|row| {
+                if excess > 0 && is_export(row) {
+                    excess -= 1;
+                    false
+                } else {
+                    true
+                }
+            });
+        }
+        self.dirty_scope.table(cad_db::TableKind::Compat);
+        Ok(())
     }
 
     /// Record that the document's file now holds `saved` (D12 step 5).

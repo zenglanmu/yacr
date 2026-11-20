@@ -43,6 +43,14 @@
   文件级 copyleft：披露义务针对被修改的源文件，本仓库不作任何修改，仅以编译产物形式链接；
   其源码可从上游与 crates.io 取得。该 crate 内含若干传递依赖（如 `i_overlay`、
   `geometry-predicates`、`nalgebra`）；实际版本与许可证见 Cargo.lock，分发前需做完整依赖审计。
+- ifc-lite-export / ifc-lite-processing 28.2.0：同一上游的 IFC4 导出计划执行器（skeleton、
+  `Disposition::Add`、`IfcTriangulatedFaceSet` 写出）与几何处理管线，**MPL-2.0**，上游
+  <https://github.com/LTplus-AG/ifc-lite>。`ifc-lite-export` 仅由 `cad-export-ifc` 的 IFC4
+  writer 依赖；`ifc-lite-processing` 在同一 workspace 中一并固定，使 `ifc-lite-export` 的 caret
+  依赖不能把 28.2.0 家族漂移到读取器 `=28.2.0` 之外。两者版本在 workspace 中**精确固定**
+  （`=28.2.0`），未启用额外 feature；**上游文件均未修改**（未打补丁、未复制其源码）。MPL-2.0
+  是文件级 copyleft：本仓库不作任何修改，仅以编译产物形式链接；其源码可从上游与 crates.io
+  取得。其传递依赖的实际版本与许可证见 Cargo.lock，分发前需做完整依赖审计。
 - rvt 0.24.0：Autodesk Revit（`.rvt`/`.rte`/`.rfa`/`.rft`）的 clean-room 读取器与
   IFC4/glTF/plan-SVG 导出器，**Apache-2.0**，上游 <https://github.com/DrunkOnJava/rvt-rs>。
   仅由 `cad-import-rvt` 依赖；版本在 workspace 中**精确固定**（`=0.24.0`），未启用额外
@@ -54,12 +62,18 @@
   2026/2027 为 `experimental`，家族文件没有几何；本仓库不把其输出用于测量。
   其传递依赖（`cfb`、`earcut`、`quick-xml`、`md-5`、`sha2` 等）的实际版本与许可证见
   Cargo.lock，分发前需做完整依赖审计。
-- gltf 1.4.1（含 `gltf-json` 1.4.1、`gltf-derive` 1.4.1）：glTF 2.0 / GLB 读取器，
-  **MIT OR Apache-2.0**，上游 <https://github.com/gltf-rs/gltf>。仅由 `cad-import-rvt`
-  依赖，用于读取 `rvt` 生成的**内部**单缓冲 GLB（不是用户可见格式）；`default-features =
-  false` 并只启用 `utils`/`names`/`extras`（`extras` 只读 `rvt` 材质的
-  `colourSource`/`alphaSource` 来源字段），因此不引入 `image` 及其编解码依赖；未修改上游
-  源码。
+- gltf 1.4.1（含 `gltf-json` 1.4.1、`gltf-derive` 1.4.1）：glTF 2.0 / GLB 读取器与
+  文档校验器，**MIT OR Apache-2.0**，上游 <https://github.com/gltf-rs/gltf>。由
+  `cad-import-gltf`（用户可见的 `.gltf`/`.glb` 导入 lane）与 `cad-import-rvt`（读取 `rvt`
+  生成的**内部**单缓冲 GLB）依赖；`default-features = false` 并只启用
+  `utils`/`names`/`extras`（`extras` 只读 `rvt` 材质的 `colourSource`/`alphaSource`
+  来源字段），因此不引入 `image` 及其编解码依赖；版本在 workspace 中**精确固定**（`=1.4.1`），
+  **未修改上游源码**（未打补丁、未复制其源码）。
+- base64 0.22.1：Base64 编解码，**MIT OR Apache-2.0**，上游
+  <https://github.com/marshallpierce/rust-base64>。由 `cad-import-gltf`
+  （`.gltf` 的 `data:` buffer 解码）与 `cad-export-gltf`（JSON `.gltf` 的 buffer 内嵌为 base64
+  data URI）依赖；该版本已在 `Cargo.lock` 中（既有传递依赖），workspace 以 `base64 = "0.22"`
+  声明，**未修改上游源码**。
 - skpwright 0.6.0：SketchUp（`.skp`）的 clean-room 读取器，**GPL-3.0-only**，上游
   <https://github.com/hew3d/skpwright>。仅由 `cad-import-skp` 依赖；版本在 workspace 中
   **精确固定**（`=0.6.0`），未启用额外 feature，上游源码**未修改**（未打补丁、未复制其源码）；

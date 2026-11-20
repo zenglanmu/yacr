@@ -127,6 +127,15 @@ pub enum SaveFormat {
     Dxf,
     /// Experimental binary DWG (upstream acadrust `DwgWriter`), always a new file.
     Dwg,
+    /// A registry export key (`.stl`/`.obj`/`.ply`/`.off`/`.coff`/`.ifc`/`.skp`/
+    /// `.glb`/`.gltf`).
+    ///
+    /// `.stl` is the **binary** STL container; the ASCII variant (`stl-ascii`)
+    /// has no extension of its own and is reachable only through the registry
+    /// API, never by typing a file name. `.coff` is the same ASCII OFF writer as
+    /// `.off` (the COFF header variant), and `.glb`/`.gltf` are the two
+    /// registry keys of the one `gltf` connector (binary and JSON containers).
+    Connector(&'static str),
     NoExtension,
     Unknown(String),
 }
@@ -136,6 +145,19 @@ pub fn save_format(extension: &str) -> SaveFormat {
     match extension {
         "dxf" => SaveFormat::Dxf,
         "dwg" => SaveFormat::Dwg,
+        "stl" => SaveFormat::Connector("stl"),
+        "obj" => SaveFormat::Connector("obj"),
+        "ply" => SaveFormat::Connector("ply"),
+        "off" => SaveFormat::Connector("off"),
+        // `.coff` is the colour-capable OFF spelling; the registry key is the
+        // same ASCII OFF/COFF writer (`off`), not a second descriptor.
+        "coff" => SaveFormat::Connector("off"),
+        "ifc" => SaveFormat::Connector("ifc"),
+        "skp" => SaveFormat::Connector("skp"),
+        // glTF: `.glb` is the binary container key and `.gltf` the JSON one; both
+        // belong to the one `gltf` descriptor.
+        "glb" => SaveFormat::Connector("glb"),
+        "gltf" => SaveFormat::Connector("gltf"),
         "" => SaveFormat::NoExtension,
         other => SaveFormat::Unknown(other.to_string()),
     }
@@ -266,6 +288,19 @@ mod tests {
     fn save_and_plot_formats_grade_every_branch() {
         assert_eq!(save_format("dxf"), SaveFormat::Dxf);
         assert_eq!(save_format("dwg"), SaveFormat::Dwg);
+        // Every connector writer key is reachable by its extension; `.stl` is
+        // the binary container (ASCII has no extension of its own).
+        assert_eq!(save_format("stl"), SaveFormat::Connector("stl"));
+        assert_eq!(save_format("obj"), SaveFormat::Connector("obj"));
+        assert_eq!(save_format("ply"), SaveFormat::Connector("ply"));
+        assert_eq!(save_format("off"), SaveFormat::Connector("off"));
+        // `.coff` is an extension of the same ASCII writer, not a new key.
+        assert_eq!(save_format("coff"), SaveFormat::Connector("off"));
+        assert_eq!(save_format("ifc"), SaveFormat::Connector("ifc"));
+        assert_eq!(save_format("skp"), SaveFormat::Connector("skp"));
+        // Both glTF containers are registry keys of the one `gltf` descriptor.
+        assert_eq!(save_format("glb"), SaveFormat::Connector("glb"));
+        assert_eq!(save_format("gltf"), SaveFormat::Connector("gltf"));
         assert_eq!(save_format(""), SaveFormat::NoExtension);
         assert_eq!(save_format("txt"), SaveFormat::Unknown("txt".into()));
 

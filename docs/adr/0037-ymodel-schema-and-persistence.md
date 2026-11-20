@@ -1,11 +1,16 @@
 # ADR 0037：ymodel — 唯一原生文档模型与持久化格式
 
-- 状态：**Proposed（2026-11-18，rev.5：持久化章节二次评审后）；2026-11-19 实现进度更新**。
+- 状态：**Proposed（2026-11-18，rev.5）；2026-11-20 实现进度更新**。
   Phase 1（容器/身份/`DocumentHeader`/`ChangeScope`/`DocumentStore`/全量保存/原子替换/`.bak`/
   revision 种子/恢复快照）与 Phase 2 的**脏分片 raw-copy、宿主 `ChangeScope` 累积、文档自身归档
-  字节保留、冲突检测、恢复快照生命周期**已实现；Phase 2 余项（DXF 导入/导出 L1 不动点、报告落盘）
-  与 Phase 3/4 **未实现**。证据边界见 §5 与
-  `docs/validation-ymodel-phase2-2026-11-19.md`；未运行项在文中逐条标注，不做产品验收结论。
+  字节保留、冲突检测、恢复快照生命周期**已实现。**2026-11-20 新增**：注册表式 `Connector` 契约、
+  统一 `Exporter`/`CompatReport`、STL/OBJ/PLY/OFF/IFC4/SKP/glTF 写出（glTF = GLB + JSON `.gltf`）、
+  对象级报告落盘
+  （`tables/compat.json`/`tables/sources.json`，格式 minor **2**）。仍未实现：DXF 导入/导出
+  **L1 不动点**、**L0** 源字节直通、报告弹窗 UI，以及 STEP/DGN/RVT 写出（后三者按名拒绝
+  `export.<id>.not_implemented`）。证据边界见 §5、
+  `docs/validation-ymodel-phase2-2026-11-19.md` 与
+  `docs/validation-ymodel-connectors-2026-11-20.md`；未运行项逐条标注，不做产品验收结论。
 - 日期：2026-11-18（rev.5）；2026-11-19 增补实现状态。
 - 相关：`CAD_IMPLEMENTATION_SPEC.md` §4.3、§4.4、§4.6、§16.3 与新增 §16.5；
   [ADR-0033](0033-multi-format-import.md)、[ADR-0036](0036-3d-body-model-and-solid-service.md)、
@@ -82,7 +87,7 @@ rev.3–rev.5 的关键点：
   `cad_app::Document`（`crates/cad-app/src/lib.rs:191-197`）。
   已知缺陷：`$INSUNITS=5`（厘米）映射为"米 + 0.01"（open B31）。
 - **xref 只有元数据**；`ImportRequest::xref` 是 DWG-only。
-- 已有 `cad-import-core` 与 11 个格式 crate，但派发是硬编码 `match`。
+- 已有 `cad-import-core` 与 12 个格式 crate，但派发是硬编码 `match`。
 - 已有兼容性词汇可复用：`SupportStatus`/`EntityCapability`/`Completeness`、
   `ImportReport`、`ExportReport`；**判定不落盘**。
 - `cad_platform::Persistence` 已声明（recovery 语义，含 `discard_recovery_after_confirmation`）

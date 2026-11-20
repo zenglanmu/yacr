@@ -209,6 +209,7 @@ impl<'a> ImporterBuilder<'a> {
                 capabilities,
                 completeness,
                 diagnostics,
+                connector: None,
                 parse_ms: None,
                 object_xdata,
             },

@@ -1,0 +1,21 @@
+[package]
+name = "cad-export-ifc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "IFC4 writer: neutral cad-db meshes to IfcTriangulatedFaceSet."
+
+[dependencies]
+cad-domain.workspace = true
+cad-db.workspace = true
+cad-import-core.workspace = true
+ifc-lite-export.workspace = true
+# Pinned so `ifc-lite-export`'s caret dependency cannot float this member of
+# the 28.2.0 family past the reader's `=28.2.0` pins.
+ifc-lite-processing.workspace = true
+
+[dev-dependencies]
+cad-import-ifc.workspace = true

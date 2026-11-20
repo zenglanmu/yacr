@@ -644,8 +644,8 @@ const OPEN_EXTENSIONS: &[&str] = &[
     // `ymodel` is the native document: it is routed to the archive decoder
     // before the importer sees it (`cad-host`), and a build without an archive
     // adapter refuses it by name instead of trying to import it.
-    "ymodel", "dwg", "dxf", "obj", "stl", "ply", "off", "coff", "step", "stp", "ifc", "rvt", "rte",
-    "rfa", "rft", "skp", "dgn",
+    "ymodel", "dwg", "dxf", "obj", "stl", "ply", "off", "coff", "gltf", "glb", "step", "stp", "ifc",
+    "rvt", "rte", "rfa", "rft", "skp", "dgn",
 ];
 
 /// `"obj"` → `"*.[oO][bB][jJ]"`.

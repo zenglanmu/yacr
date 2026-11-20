@@ -1,0 +1,19 @@
+[package]
+name = "cad-export-mesh"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Neutral-mesh writers (STL/OBJ/PLY/OFF) from the cad-db display model."
+
+[dependencies]
+cad-domain.workspace = true
+cad-db.workspace = true
+cad-import-core.workspace = true
+
+[dev-dependencies]
+cad-import-obj.workspace = true
+cad-import-stl.workspace = true
+cad-import-mesh.workspace = true

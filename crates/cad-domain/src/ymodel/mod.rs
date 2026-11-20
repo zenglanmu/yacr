@@ -64,7 +64,12 @@ pub const FORMAT_WRITE: u32 = 1;
 /// is refused ([`markers::UNSUPPORTED_MINOR`]) instead of being opened and
 /// re-saved with unknown fields dropped: the writer re-serializes whole
 /// shards, so it cannot preserve fields it does not model.
-pub const FORMAT_MINOR: u32 = 1;
+///
+/// `2` adds the host-owned metadata tables `tables/sources.json` and
+/// `tables/compat.json` (ADR-0037 D11/D14). A build that only knows `1` must
+/// not open such a file: saving it back would drop the import provenance and
+/// the object-level report.
+pub const FORMAT_MINOR: u32 = 2;
 
 /// Stable failure markers.
 ///

@@ -38,6 +38,8 @@ pub(super) fn hatch_app(entities: Vec<(u128, SemanticGeometry)>) -> (Application
             identity: DocumentIdentity::Sha256([4u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            compat: Vec::new(),
+            sources: Vec::new(),
             persistence: crate::PersistenceState::untitled(),
         },
     );

@@ -27,8 +27,9 @@ use std::io::Cursor;
 use cad_db::EntityColor;
 use cad_domain::{CadError, CadResult, Diagnostic, Mesh, Point3, UnitContext};
 use cad_import_core::{
-    compute_identity, ImportLimits, ImportPhase, ImportProgress, ImportProgressSink, ImportReport,
-    ImportRequest, ImportedDrawing, Importer, MeshImport, NoopProgress,
+    compute_identity, ConnectorDescriptor, ExportCapability, FidelityLevel, ImportCapability,
+    ImportLimits, ImportPhase, ImportProgress, ImportProgressSink, ImportReport, ImportRequest,
+    ImportedDrawing, Importer, MeshImport, NoopProgress,
 };
 use tobj::{LoadOptions, Material, Model};
 
@@ -240,6 +241,7 @@ impl Importer for ObjImporter {
             capabilities: outcome.capabilities,
             completeness: outcome.completeness,
             diagnostics: outcome.diagnostics,
+            connector: None,
             parse_ms: Some(started.elapsed().as_secs_f64() * 1000.0),
             object_xdata: Vec::new(),
         };
@@ -536,3 +538,24 @@ fn merge_mesh(target: &mut Mesh, source: Mesh) {
 
 #[cfg(test)]
 mod tests;
+
+/// The Wavefront OBJ connector descriptor.
+///
+/// Owned by this crate. `cad-export-mesh` writes the geometry (`v`/`vn`/`f`,
+/// one `o` per source entity); the writer is lossy because OBJ stores no
+/// per-vertex colours here (no `mtllib` is emitted) and no units.
+pub const DESCRIPTOR_OBJ: ConnectorDescriptor = ConnectorDescriptor {
+    id: "obj",
+    name_key: "connector.obj.name",
+    extensions: &["obj"],
+    import: Some(ImportCapability {
+        versions: "Wavefront OBJ (triangulated, no mtllib)",
+        container: "obj",
+    }),
+    export: Some(ExportCapability {
+        versions: "Wavefront OBJ",
+        level: FidelityLevel::L1,
+        lossy: true,
+    }),
+    declared_classes: &[],
+};

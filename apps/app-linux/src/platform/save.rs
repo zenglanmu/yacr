@@ -114,9 +114,11 @@ pub type SaveChooser =
 
 /// The real native save chooser (XDG desktop portal via `ashpd` `save_file`).
 ///
-/// DXF is the lossy drawing Save As, DWG is the **experimental** binary export
-/// (always a new file), and plot is SVG/PDF. Each purpose has its own localized
-/// title/filter and its own extension filter.
+/// The drawing Save As is lossy: DXF plus the connector exchange formats
+/// (binary STL, OBJ, PLY, OFF, IFC, SKP) share one filter because the target
+/// extension decides what the shared host writes. DWG is the **experimental**
+/// binary export (always a new file), and plot is SVG/PDF. Each purpose has its
+/// own localized title/filter and its own extension filter.
 pub fn portal_save(
     purpose: SavePurpose,
     labels: &UseSaveDialogLabels,
@@ -129,7 +131,20 @@ pub fn portal_save(
         SavePurpose::SaveYmodel => {
             FileFilter::new(labels.filter(purpose)).glob("*.[yY][mM][oO][dD][eE][lL]")
         }
-        SavePurpose::SaveDxf => FileFilter::new(labels.filter(purpose)).glob("*.[dD][xX][fF]"),
+        // The drawing Save As covers the connector writers too: `.stl` (binary),
+        // `.obj`, `.ply`, `.off`/`.coff`, `.ifc`, `.skp`, `.glb`/`.gltf`, plus
+        // DXF. ASCII STL (`stl-ascii`) has no extension of its own.
+        SavePurpose::SaveDxf => FileFilter::new(labels.filter(purpose))
+            .glob("*.[dD][xX][fF]")
+            .glob("*.[sS][tT][lL]")
+            .glob("*.[oO][bB][jJ]")
+            .glob("*.[pP][lL][yY]")
+            .glob("*.[oO][fF][fF]")
+            .glob("*.[cC][oO][fF][fF]")
+            .glob("*.[iI][fF][cC]")
+            .glob("*.[sS][kK][pP]")
+            .glob("*.[gG][lL][bB]")
+            .glob("*.[gG][lL][tT][fF]"),
         SavePurpose::SaveDwg => FileFilter::new(labels.filter(purpose)).glob("*.[dD][wW][gG]"),
         SavePurpose::Plot => FileFilter::new(labels.filter(purpose))
             .glob("*.[sS][vV][gG]")

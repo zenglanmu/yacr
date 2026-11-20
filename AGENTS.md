@@ -188,6 +188,14 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
   （`<config>/recovery/<key>.ymodel`），恢复 = 用 `OPEN` 打开它；默认每 60 s 写一次（选项里可改，0 = 关闭），保存成功后丢弃，
   过期快照（`revision <= saved_revision`）直接丢弃而不是提示——**不得**用旧快照回滚文档。
 
+  连接器与导出（2026-11-20）：`cad-app::ConnectorRegistry` 是唯一派发表（导入有序 probe、导出按
+  `format_id`）；`ConnectorDescriptor` 由实现 crate 声明，`cad-app` 只接线。写出一律读 `cad-db` 并
+  返回 `CompatReport`：DXF/DWG/STL/OBJ/PLY/OFF/IFC4/SKP/glTF（GLB + JSON `.gltf`）已接线；
+  STEP/DGN/RVT 为稳定拒绝
+  `export.<id>.not_implemented`。对象级报告随 `.ymodel` 落 `tables/compat.json`（导出记录最多 32 条，
+  导入记录不淘汰）与 `tables/sources.json`；新增两张表使 `FORMAT_MINOR = 2`。**报告弹窗 UI、L0 源字节
+  直通、DXF L1 不动点仍未实现**，不得写成已完成。
+
 ## 前端约定（`apps/desktop-ui`）
 
 - TypeScript/TSX，**只用可剥离语法**（禁 `enum`/`namespace`/参数属性），类型导入用 `import type`；

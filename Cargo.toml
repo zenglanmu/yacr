@@ -31,6 +31,11 @@ members = [
     "crates/cad-import-dgn",
     "crates/cad-import-rvt",
     "crates/cad-import-skp",
+    "crates/cad-import-gltf",
+    "crates/cad-export-mesh",
+    "crates/cad-export-ifc",
+    "crates/cad-export-skp",
+    "crates/cad-export-gltf",
     "crates/cad-resources",
     "crates/cad-query",
     "crates/cad-app",
@@ -94,6 +99,14 @@ cad-import-ifc = { path = "crates/cad-import-ifc" }
 cad-import-dgn = { path = "crates/cad-import-dgn" }
 cad-import-rvt = { path = "crates/cad-import-rvt" }
 cad-import-skp = { path = "crates/cad-import-skp" }
+cad-import-gltf = { path = "crates/cad-import-gltf" }
+# Writers above the neutral import/export contract. They read `cad-db` and
+# produce bytes plus a `CompatReport`; none of them is linked by a carrier
+# directly — `cad-app`/`cad-host` wire them.
+cad-export-mesh = { path = "crates/cad-export-mesh" }
+cad-export-ifc = { path = "crates/cad-export-ifc" }
+cad-export-skp = { path = "crates/cad-export-skp" }
+cad-export-gltf = { path = "crates/cad-export-gltf" }
 cad-resources = { path = "crates/cad-resources" }
 cad-query = { path = "crates/cad-query" }
 cad-app = { path = "crates/cad-app" }
@@ -161,6 +174,12 @@ cadmpeg-tessellate = "0.6.12"
 # findings recorded in `crates/cad-import-ifc/src/lib.rs`.
 ifc-lite-core = "=28.2.0"
 ifc-lite-geometry = "=28.2.0"
+# IFC4 writer (`cad-export-ifc`): IFC4 `IfcTriangulatedFaceSet` / `IfcFacetedBrep`
+# emission from a neutral mesh, MPL-2.0, same release train as the pinned reader.
+# `ifc-lite-processing` is pinned too because `ifc-lite-export` declares caret
+# deps on the 28.2.0 family and this workspace must not float one of them.
+ifc-lite-export = "=28.2.0"
+ifc-lite-processing = "=28.2.0"
 
 # MicroStation DGN V7 (ISFF) and V8 (OLE compound file) reader
 # (`cad-import-dgn`). MIT OR Apache-2.0, pure Rust, `unsafe_code = "forbid"`,
@@ -208,6 +227,10 @@ gltf = { version = "=1.4.1", default-features = false, features = ["utils", "nam
 # It is a **preview** reader: triangles only (no edge geometry), no UV/texture
 # sampling, no measurement semantics.
 skpwright = "=0.6.0"
+
+# Base64 for glTF data URIs (`.gltf` embedded buffers) and GLB decoding.
+# Already in the lock as a transitive dependency; MIT/Apache-2.0.
+base64 = "0.22"
 
 # Portable wall clock. `std::time::Instant::now()` panics on
 # wasm32-unknown-unknown ("time not implemented"); `web-time` re-exports std on

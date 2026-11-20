@@ -56,6 +56,8 @@ fn build(entities: Vec<DbEntity>) -> (Application, SessionState) {
             identity: DocumentIdentity::Sha256([9u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            compat: Vec::new(),
+            sources: Vec::new(),
             persistence: crate::PersistenceState::untitled(),
         },
     );
@@ -271,6 +273,8 @@ fn overkill_ignore_layer_and_ignore_color_are_honoured() {
                 identity: DocumentIdentity::Sha256([9u8; 32]),
                 units: UnitContext::drawing_units(),
                 resource_keys: Vec::new(),
+                compat: Vec::new(),
+                sources: Vec::new(),
                 persistence: crate::PersistenceState::untitled(),
             },
         );

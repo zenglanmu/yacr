@@ -234,6 +234,7 @@ pub(super) fn emit_dimension(
         acc.notes.push(super::report::ExportDiagnostic {
             object,
             code: "export.dimstyle_table_superseded".into(),
+            outcome: super::report::ExportOutcome::Note,
             message: format!(
                 "dimension style '{table_name}' resolves to values this dimension did not use: \
                  the DIMSTYLE record written for it is the entity's baked snapshot (style edits \

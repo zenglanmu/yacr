@@ -9,8 +9,20 @@
 //! `cad-db` stays the sole authority: [`ImportedDrawing::database`] is the built
 //! database, and every other field is derived metadata about that build.
 
+mod connector;
+pub use connector::{
+    Connector, ConnectorDescriptor, ExportCapability, FidelityLevel, ImportCapability,
+    ReportDirection,
+};
+
 mod detect;
 pub use detect::{detect_format, ifc_schema, step_file_schema, DrawingFormat, OFF_FAMILY_PREFIXES};
+
+pub mod export;
+pub use export::{
+    CompatCounts, CompatEntry, CompatReport, ExportJob, ExportLimits, ExportOutput, ExportSpace,
+    Exporter,
+};
 
 /// Stable refusal code for ISO 10303-21 input whose `FILE_SCHEMA` is IFC when
 /// it is handed to the **STEP** adapter.
@@ -196,6 +208,14 @@ pub struct ImportReport {
     pub capabilities: Vec<EntityCapability>,
     pub completeness: Completeness,
     pub diagnostics: Vec<Diagnostic>,
+    /// The registry connector that produced this report.
+    ///
+    /// `None` when an importer was called directly (unit tests, CLI probes): the
+    /// adapter itself does not know the registry key it was dispatched under. The
+    /// registry-backed [`crate::Importer`] wrapper stamps it after a successful
+    /// import, so a persisted report always names its connector without any
+    /// adapter hard-coding a second identity.
+    pub connector: Option<&'static str>,
     /// Wall-clock parse/normalise time in milliseconds, when measured.
     pub parse_ms: Option<f64>,
     /// Decoded object-level EED (XDATA) applications, sorted by name.
@@ -206,13 +226,30 @@ pub struct ImportReport {
 }
 
 impl ImportReport {
-    /// Short human-facing completeness label for the UI status line.
+    /// Short human-facing completeness label for a status line.
+    ///
+    /// Neutral English, not localized prose: the UI maps
+    /// [`Self::completeness_key`] through its i18n catalogue and uses this only
+    /// where a plain-text label is needed (logs, CLI).
     pub fn completeness_label(&self) -> String {
         match &self.completeness {
-            Completeness::Complete => "完整".to_string(),
-            Completeness::Partial(items) => format!("部分（{} 项）", items.len()),
-            Completeness::Missing(items) => format!("缺失（{} 项）", items.len()),
-            Completeness::Unverified => "未验证".to_string(),
+            Completeness::Complete => "complete".to_string(),
+            Completeness::Partial(items) => format!("partial ({} items)", items.len()),
+            Completeness::Missing(items) => format!("missing ({} items)", items.len()),
+            Completeness::Unverified => "unverified".to_string(),
+        }
+    }
+
+    /// Stable i18n key for the completeness verdict.
+    ///
+    /// These are the shared `resources.completeness.*` catalogue keys (they carry
+    /// a `{count}` placeholder that the UI fills from the verdict).
+    pub fn completeness_key(&self) -> &'static str {
+        match &self.completeness {
+            Completeness::Complete => "resources.completeness.complete",
+            Completeness::Partial(_) => "resources.completeness.partial",
+            Completeness::Missing(_) => "resources.completeness.missing",
+            Completeness::Unverified => "resources.completeness.unverified",
         }
     }
 }

@@ -346,6 +346,7 @@ fn empty_import_report() -> cad_app::host::ImportReport {
         completeness: cad_domain::Completeness::Complete,
         diagnostics: Vec::new(),
         object_xdata: Vec::new(),
+        connector: None,
         parse_ms: None,
     }
 }

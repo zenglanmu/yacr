@@ -52,6 +52,7 @@ impl Mapper<'_> {
             capabilities,
             completeness,
             diagnostics: self.diagnostics,
+            connector: None,
             parse_ms: Some(parse_ms),
             object_xdata: Vec::new(),
         };

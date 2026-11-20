@@ -103,14 +103,7 @@ fn app_with(entities: Vec<DbEntity>) -> (Application, SessionState) {
     let mut app = Application::new();
     app.workspace.documents.insert(
         DocumentId(1),
-        Document {
-            id: DocumentId(1),
-            drawing: Arc::new(drawing),
-            identity: DocumentIdentity::Sha256([93u8; 32]),
-            units: UnitContext::drawing_units(),
-            resource_keys: Vec::new(),
-            persistence: crate::PersistenceState::untitled(),
-        },
+        document_with(drawing, DocumentIdentity::Sha256([93u8; 32])),
     );
     app.workspace.viewports.insert(
         ViewportId(1),

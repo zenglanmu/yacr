@@ -65,6 +65,8 @@ fn block_app_with(base: Point3, standard: Option<MLeaderStyle>) -> (Application,
             identity: DocumentIdentity::Sha256([7u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            compat: Vec::new(),
+            sources: Vec::new(),
             persistence: crate::PersistenceState::untitled(),
         },
     );
@@ -425,6 +427,8 @@ fn a_block_definition_without_metadata_is_refused_by_name() {
             identity: DocumentIdentity::Sha256([9u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            compat: Vec::new(),
+            sources: Vec::new(),
             persistence: crate::PersistenceState::untitled(),
         },
     );
@@ -779,6 +783,8 @@ fn a_block_content_that_cannot_be_written_is_flattened_with_the_reason() {
             identity: DocumentIdentity::Sha256([8u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            compat: Vec::new(),
+            sources: Vec::new(),
             persistence: crate::PersistenceState::untitled(),
         },
     );

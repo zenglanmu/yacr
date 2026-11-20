@@ -98,6 +98,16 @@
         "androidIntentActionFilters": ["view"]
       },
       {
+        "ext": ["gltf"],
+        "mimeType": "model/gltf+json",
+        "androidIntentActionFilters": ["view"]
+      },
+      {
+        "ext": ["glb"],
+        "mimeType": "model/gltf-binary",
+        "androidIntentActionFilters": ["view"]
+      },
+      {
         "ext": ["step", "stp"],
         "mimeType": "model/step",
         "androidIntentActionFilters": ["view"]
@@ -162,6 +172,8 @@
           "ply",
           "off",
           "coff",
+          "gltf",
+          "glb",
           "step",
           "stp",
           "ifc",

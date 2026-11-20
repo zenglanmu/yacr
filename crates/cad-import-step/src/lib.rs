@@ -65,9 +65,9 @@ use std::io::Cursor;
 use cad_db::EntityColor;
 use cad_domain::{CadError, CadResult, Diagnostic, Mesh, Point3, Unit, UnitContext};
 use cad_import_core::{
-    compute_identity, ifc_schema, ImportLimits, ImportPhase, ImportProgress, ImportProgressSink,
-    ImportReport, ImportRequest, ImportedDrawing, Importer, MeshImport, NoopProgress,
-    IFC_SCHEMA_REFUSED,
+    compute_identity, ifc_schema, ConnectorDescriptor, ImportCapability, ImportLimits, ImportPhase,
+    ImportProgress, ImportProgressSink, ImportReport, ImportRequest, ImportedDrawing, Importer,
+    MeshImport, NoopProgress, IFC_SCHEMA_REFUSED,
 };
 use cadmpeg_codec_step::StepCodec;
 use cadmpeg_ir::document::CadIr;
@@ -460,6 +460,7 @@ impl Importer for StepImporter {
             capabilities: outcome.capabilities,
             completeness: outcome.completeness,
             diagnostics: outcome.diagnostics,
+            connector: None,
             parse_ms: Some(parse_ms),
             object_xdata: Vec::new(),
         };
@@ -873,3 +874,23 @@ fn place_mesh(mesh: &Mesh, matrix: &Affine, label: &str) -> CadResult<PlacedMesh
 
 #[cfg(test)]
 mod tests;
+
+/// The STEP connector descriptor (ISO 10303-21 AP203/AP214/AP242).
+///
+/// Owned by this crate: the reader implements the format, so the descriptor
+/// lives next to it and `cad-app` only wires it into the registry.
+///
+/// There is **no** writer, so `export` is `None`; an export attempt is the
+/// registry's named `export.step.not_implemented` refusal, never an empty
+/// success.
+pub const DESCRIPTOR_STEP: ConnectorDescriptor = ConnectorDescriptor {
+    id: "step",
+    name_key: "connector.step.name",
+    extensions: &["step", "stp"],
+    import: Some(ImportCapability {
+        versions: "AP203/AP214/AP242",
+        container: "step",
+    }),
+    export: None,
+    declared_classes: &[],
+};

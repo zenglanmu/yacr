@@ -46,8 +46,9 @@ pub use convert::{
 use cad_db::{EntityColor, EntityRenderAttributes, EntityTransparency};
 use cad_domain::{CadError, CadResult, Diagnostic, EntityCapability, SupportStatus, UnitContext};
 use cad_import_core::{
-    compute_identity, ImportPhase, ImportProgress, ImportProgressSink, ImportReport, ImportRequest,
-    ImportedDrawing, Importer, MeshImport, NoopProgress,
+    compute_identity, ConnectorDescriptor, ImportCapability, ImportPhase, ImportProgress,
+    ImportProgressSink, ImportReport, ImportRequest, ImportedDrawing, Importer, MeshImport,
+    NoopProgress,
 };
 
 /// Stable refusal code: the fixed header is missing or truncated, so the file
@@ -281,6 +282,7 @@ impl Importer for SkpImporter {
             capabilities,
             completeness: outcome.completeness,
             diagnostics: outcome.diagnostics,
+            connector: None,
             parse_ms: Some(started.elapsed().as_secs_f64() * 1000.0),
             object_xdata: Vec::new(),
         };
@@ -452,3 +454,24 @@ fn record_losses(import: &mut MeshImport, stats: &SkpStats) {
         );
     }
 }
+
+/// The SketchUp connector descriptor.
+///
+/// Owned by this crate (one declaration per format): the reader is this preview
+/// importer and the writer is `cad-export-skp`, which authors the 2026/2027
+/// container at L1 (lossy: triangles, tags/materials flattened).
+pub const DESCRIPTOR_SKP: ConnectorDescriptor = ConnectorDescriptor {
+    id: "skp",
+    name_key: "connector.skp.name",
+    extensions: &["skp"],
+    import: Some(ImportCapability {
+        versions: "3-8, 2013-2020, 2026, 2027 (2021-2025 read as container-equivalent, unverified)",
+        container: "skp",
+    }),
+    export: Some(cad_import_core::ExportCapability {
+        versions: "SketchUp 2026/2027 (written container)",
+        level: cad_import_core::FidelityLevel::L1,
+        lossy: true,
+    }),
+    declared_classes: &[],
+};

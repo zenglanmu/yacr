@@ -24,6 +24,10 @@ pub enum DrawingFormat {
     Stl,
     Ply,
     Off,
+    /// glTF 2.0: either the binary `.glb` container (fixed `glTF` + version-2
+    /// header) or a JSON `.gltf` document that carries the required `asset`
+    /// object with a `version`. Both spellings are one connector.
+    Gltf,
     /// Bentley DGN V7 (ISFF), identified by its fixed design-file header.
     /// V8 is an OLE compound file and shares [`DrawingFormat::Ole`]; the DGN
     /// adapter's `sniff` recognizes its `Dgn~H` stream.
@@ -54,6 +58,7 @@ impl DrawingFormat {
             DrawingFormat::Stl => "STL",
             DrawingFormat::Ply => "PLY (Polygon File Format)",
             DrawingFormat::Off => "OFF (Object File Format)",
+            DrawingFormat::Gltf => "glTF 2.0 (.gltf/.glb)",
             DrawingFormat::Dgn => "Bentley DGN V7 (MicroStation)",
             DrawingFormat::Ole => "OLE compound file (Revit or DGN V8)",
             DrawingFormat::Skp => "SketchUp (.skp)",
@@ -69,7 +74,9 @@ impl DrawingFormat {
 ///
 /// The SKP probe runs first because it is a fixed 32-byte signature — cheaper
 /// than the OLE/CFB and `AC10xx` sniffs — and no other format starts with
-/// `FF FE FF`, so putting it first cannot shadow an arm.
+/// `FF FE FF`, so putting it first cannot shadow an arm. The glTF arm runs
+/// before the magic-less mesh formats: a GLB has its own header and a JSON
+/// `.gltf` starts with `{`, which no later arm claims.
 pub fn detect_format(bytes: &[u8]) -> DrawingFormat {
     if looks_like_skp(bytes) {
         DrawingFormat::Skp
@@ -87,6 +94,8 @@ pub fn detect_format(bytes: &[u8]) -> DrawingFormat {
         } else {
             DrawingFormat::Step
         }
+    } else if looks_like_gltf(bytes) {
+        DrawingFormat::Gltf
     } else if looks_like_stl(bytes) {
         DrawingFormat::Stl
     } else if looks_like_ply(bytes) {
@@ -213,6 +222,35 @@ fn looks_like_dxf(bytes: &[u8]) -> bool {
 /// rest are the object/geometry/group/material declarations OBJ producers emit
 /// before geometry.
 const OBJ_OPENING_DIRECTIVES: &[&str] = &["v", "vt", "vn", "o", "g", "s", "usemtl", "mtllib", "f"];
+
+/// glTF 2.0 in either container the adapter reads: binary `.glb` or JSON
+/// `.gltf`.
+///
+/// A GLB is a 12-byte header (`glTF` magic, little-endian version, total length),
+/// so the version must be exactly `2`; version 1 is a different format. A JSON
+/// `.gltf` must be a JSON **object** whose first 8 KiB carries both `"asset"` and
+/// `"version"` — the required top-level block — and anything that is not JSON is
+/// never matched. This is a bounded header read, not a parse.
+fn looks_like_gltf(bytes: &[u8]) -> bool {
+    if bytes.starts_with(b"glTF") {
+        return bytes.len() >= 12
+            && u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]) == 2;
+    }
+    const SNIFF_BYTES: usize = 8 * 1024;
+    let bytes = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes);
+    let start = bytes
+        .iter()
+        .position(|byte| !byte.is_ascii_whitespace())
+        .unwrap_or(bytes.len());
+    let window = &bytes[start..bytes.len().min(start + SNIFF_BYTES)];
+    window.starts_with(b"{") && contains(window, b"\"asset\"") && contains(window, b"\"version\"")
+}
+
+fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle)
+}
 
 /// STL has no magic. A binary file is recognised by its standard layout (80-byte
 /// header + little-endian facet count whose `84 + 50*count` length matches);
@@ -345,6 +383,61 @@ mod tests {
         assert_eq!(detect_format(&bytes), DrawingFormat::Stl);
     }
 
+    /// A minimal binary glTF container: magic, version, total length.
+    fn glb_header(version: u32) -> Vec<u8> {
+        let mut bytes = b"glTF".to_vec();
+        bytes.extend_from_slice(&version.to_le_bytes());
+        bytes.extend_from_slice(&20u32.to_le_bytes());
+        bytes.extend_from_slice(&[0u8; 8]);
+        bytes
+    }
+
+    #[test]
+    fn a_version_2_glb_header_is_gltf() {
+        assert_eq!(detect_format(&glb_header(2)), DrawingFormat::Gltf);
+    }
+
+    #[test]
+    fn a_version_1_glb_header_is_not_gltf() {
+        // glTF 1.0 is a different format: the version is part of the signature.
+        assert_eq!(detect_format(&glb_header(1)), DrawingFormat::Unknown);
+        // A truncated header (fewer than the 12 fixed bytes) is not a container.
+        assert_eq!(
+            detect_format(b"glTF\x02\x00\x00\x00"),
+            DrawingFormat::Unknown
+        );
+    }
+
+    #[test]
+    fn a_json_gltf_document_is_gltf() {
+        assert_eq!(
+            detect_format(br#"{"asset":{"version":"2.0"}}"#),
+            DrawingFormat::Gltf
+        );
+        assert_eq!(
+            DrawingFormat::Gltf.label(),
+            "glTF 2.0 (.gltf/.glb)",
+            "both container spellings are one label"
+        );
+        // A BOM and leading whitespace are tolerated, as the reader tolerates
+        // them.
+        assert_eq!(
+            detect_format(b"\xEF\xBB\xBF\n  {\"asset\": {\"version\": \"2.0\"}}"),
+            DrawingFormat::Gltf
+        );
+    }
+
+    #[test]
+    fn a_json_object_without_the_asset_block_is_not_gltf() {
+        // JSON, but not glTF: the required `asset`/`version` block is missing.
+        assert_eq!(detect_format(br#"{"foo":1}"#), DrawingFormat::Unknown);
+        // Non-JSON never reaches the JSON arm even when it carries the words.
+        assert_eq!(
+            detect_format(b"asset version {\"asset\":{\"version\":\"2.0\"}}"),
+            DrawingFormat::Unknown
+        );
+    }
+
     /// The fixed `.skp` header: the document type record, a version record and
     /// the 16-byte model GUID (the signature is only the first record).
     fn skp_header(document_type: &str) -> Vec<u8> {
@@ -456,7 +549,9 @@ mod tests {
             detect_format(b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE2"),
             DrawingFormat::Unknown
         );
-        // glTF is an internal intermediate, never a user-visible format.
+        // glTF is a user-visible connector; the 8-byte truncated header is
+        // still `Unknown` because the GLB probe requires the 12-byte header and
+        // version 2.
         assert_eq!(
             detect_format(b"glTF\x02\x00\x00\x00"),
             DrawingFormat::Unknown

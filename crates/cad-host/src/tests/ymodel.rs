@@ -778,3 +778,91 @@ fn a_ymodel_save_without_an_archive_refuses_by_name() {
         Some("unsupported-runtime: ymodel")
     );
 }
+
+#[test]
+fn import_report_and_source_rows_survive_a_save_and_reopen() {
+    // ADR-0037 D11/D14: `tables/compat.json` and `tables/sources.json` are
+    // host-owned document metadata. They must travel with the archive and come
+    // back on the installed document, exactly like the database tables do.
+    let files = Rc::new(YmodelFiles::default());
+    let core = core_with(files.clone());
+    let (snapshot, bytes) = archived_document();
+    let opened_revision = snapshot.revision;
+    files
+        .disk
+        .borrow_mut()
+        .insert(YMODEL_PATH.to_string(), bytes.clone());
+    let archive = Arc::new(FakeArchive::new(LoadedArchive {
+        snapshot,
+        manifest: manifest(opened_revision),
+    }));
+    open_ymodel(&core, archive.clone(), &bytes).expect("open");
+
+    let compat = serde_json::json!({
+        "connector": "dxf",
+        "direction": "import",
+        "level": "L1",
+        "counts": null,
+        "completeness": {"kind": "partial", "reasons": ["spline flags dropped"]},
+        "capabilities": [],
+        "entries": [],
+    });
+    let source = serde_json::json!({
+        "source_id": "uuid:0",
+        "identifier": "plan.dxf",
+        "kind": "drawing",
+        "checksum": null,
+        "retained": false,
+        "connector": "dxf",
+        "open_revision": null,
+    });
+    {
+        let mut controller = core.controller.borrow_mut();
+        let document_id = controller.document_id;
+        let document = controller
+            .application
+            .workspace
+            .documents
+            .get_mut(&document_id)
+            .expect("the opened document");
+        document.compat = vec![compat.clone()];
+        document.sources = vec![source.clone()];
+    }
+
+    core.request_save().expect("save");
+
+    // The snapshot the archive was asked to encode carries both rows.
+    let saved = archive
+        .saved
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("the write captured a snapshot");
+    assert_eq!(
+        saved.tables.get(cad_db::TableKind::Compat),
+        Some(&[compat.clone()][..])
+    );
+    assert_eq!(
+        saved.tables.get(cad_db::TableKind::Sources),
+        Some(&[source.clone()][..])
+    );
+
+    // Reopen the bytes the save just wrote: the rows are installed on the new
+    // document (they never enter `cad-db`).
+    let reopened = b"FAKE-YMODEL-BYTE-STREAM".to_vec();
+    open_ymodel(&core, archive, &reopened).expect("reopen");
+    let controller = core.controller.borrow();
+    let document = controller
+        .application
+        .workspace
+        .documents
+        .get(&controller.document_id)
+        .expect("the reopened document");
+    assert_eq!(document.compat, vec![compat]);
+    assert_eq!(document.sources, vec![source]);
+    assert_eq!(
+        document.drawing.entity_count(),
+        1,
+        "the database content is unaffected by the metadata tables"
+    );
+}

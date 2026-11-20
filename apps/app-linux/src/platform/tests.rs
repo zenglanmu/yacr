@@ -127,7 +127,7 @@ fn save_labels_come_from_the_i18n_catalogue() {
         );
     }
     assert_ne!(zh.title_dxf, en.title_dxf);
-    assert_eq!(en.title_dxf, "Save as DXF");
+    assert_eq!(en.title_dxf, "Export drawing");
     assert_eq!(en.title_dwg, "Save as DWG (experimental)");
     assert!(zh.picker_failed("boom").contains("boom"));
 }

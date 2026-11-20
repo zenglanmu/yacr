@@ -59,8 +59,8 @@ const KEY_PICKER_FAILED: &str = "macos.picker_failed";
 /// `.skp` is the SketchUp preview lane (triangles only, never a measurement
 /// source; an edge-only model is refused by name, not by the picker).
 const OPEN_EXTENSIONS: &[&str] = &[
-    "ymodel", "dwg", "dxf", "obj", "stl", "ply", "off", "coff", "step", "stp", "ifc", "rvt", "rte",
-    "rfa", "rft", "skp", "dgn",
+    "ymodel", "dwg", "dxf", "obj", "stl", "ply", "off", "coff", "gltf", "glb", "step", "stp",
+    "ifc", "rvt", "rte", "rfa", "rft", "skp", "dgn",
 ];
 
 /// The localized labels the native open dialog and open funnel use.
@@ -288,6 +288,10 @@ impl PlatformFiles for ReactFiles {
     }
 
     fn begin_save(&self, _purpose: SavePurpose, _default_name: &str) -> CadResult<()> {
+        // No save picker is wired on this carrier, so the connector Save As
+        // extensions (.stl/.obj/.ply/.off/.ifc/.skp) cannot be selected here.
+        // The shared host dispatches them only by typed extension, and those
+        // paths are NOT VERIFIED on macOS.
         Err(CadError::Unsupported(
             "save is not supported by the macOS host".into(),
         ))

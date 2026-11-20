@@ -42,6 +42,8 @@ pub(super) fn image_app(mode: AppMode) -> (Application, SessionState) {
             identity: DocumentIdentity::Sha256([77u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            compat: Vec::new(),
+            sources: Vec::new(),
             persistence: crate::PersistenceState::untitled(),
         },
     );
@@ -556,6 +558,8 @@ fn image_report_lists_model_and_paper_images_and_writes_nothing() {
             identity: DocumentIdentity::Sha256([78u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            compat: Vec::new(),
+            sources: Vec::new(),
             persistence: crate::PersistenceState::untitled(),
         },
     );
@@ -725,6 +729,8 @@ fn image_report_counts_images_inside_block_definitions() {
             identity: DocumentIdentity::Sha256([79u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            compat: Vec::new(),
+            sources: Vec::new(),
             persistence: crate::PersistenceState::untitled(),
         },
     );

@@ -15,6 +15,7 @@ use cad_domain::{CadError, CadResult};
 use cad_import_acadrust::export::{
     export, ExportFormat, ExportLimits, ExportReport, ExportRequest, ExportSpace,
 };
+use cad_import_core::ExportOutput;
 
 use super::HostController;
 
@@ -49,6 +50,38 @@ impl HostController {
     /// `acadrust::DwgWriter`: lossy and NOT verified against AutoCAD/vendor.
     pub fn export_dwg(&self) -> CadResult<(Vec<u8>, ExportReport)> {
         self.export_as(ExportFormat::Dwg)
+    }
+
+    /// Export the active document through the connector registry.
+    ///
+    /// This is the Save-As lane for every format the registry writes beyond
+    /// DXF/DWG (neutral mesh, IFC4, SketchUp). The job carries the document's
+    /// real [`cad_domain::UnitContext`] because the IFC and SKP writers refuse to
+    /// guess a source length unit; a missing document is an explicit
+    /// `InvalidInput`, never an empty success.
+    ///
+    /// The ACIS/DXF settings are handed over unchanged: the mesh/IFC/SKP writers
+    /// ignore them, and a future shared writer must decide for itself rather than
+    /// read a second copy of the host options.
+    pub fn export_connector(&self, format_id: &str) -> CadResult<ExportOutput> {
+        let document = self
+            .application
+            .workspace
+            .documents
+            .get(&self.document_id)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+        let job = cad_import_core::ExportJob {
+            database: document.drawing.as_ref(),
+            document_id: self.document_id,
+            units: Some(&document.units),
+            space: cad_import_core::ExportSpace::Model,
+            limits: cad_import_core::ExportLimits::default(),
+        };
+        let settings = crate::ExportSettings {
+            acis_version: self.export_options.acis_version,
+            dxf_target: self.export_options.dxf_target,
+        };
+        crate::ConnectorRegistry::builtin().export(format_id, &job, &settings)
     }
 
     /// The one request builder shared by both formats, so they cannot drift.

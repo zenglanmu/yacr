@@ -274,6 +274,8 @@ fn table_with_explicit_cell_app() -> (Application, SessionState) {
             identity: DocumentIdentity::Sha256([11u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            compat: Vec::new(),
+            sources: Vec::new(),
             persistence: crate::PersistenceState::untitled(),
         },
     );

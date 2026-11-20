@@ -109,15 +109,35 @@ impl MappingOutcome {
     }
 }
 
+/// What one report entry did.
+///
+/// Recorded where the decision is made, because the `code` string cannot carry
+/// it: the ACIS payload writer's own codes (`acis.*`) name both a conversion
+/// (a body meshed under that refusal) and a drop (a body with no display
+/// geometry at all), and `export.xclip_*` codes are drops while
+/// `export.converted.*` codes are conversions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExportOutcome {
+    /// Written with an explicit, reported approximation.
+    Converted,
+    /// Omitted with an explicit, reported reason.
+    Dropped,
+    /// A provenance fact or an evidence boundary, not a per-geometry verdict.
+    Note,
+}
+
 /// One explicit conversion/drop record, or a global note.
 ///
 /// `code` is stable and machine-checkable (for example `export.dropped.shape`);
 /// `message` is the human detail. `object` names the source object when known.
+/// `outcome` is the record's own verdict and is the only source of a per-entry
+/// status downstream — never the code's namespace.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExportDiagnostic {
     pub object: Option<ObjectId>,
     pub code: String,
     pub message: String,
+    pub outcome: ExportOutcome,
 }
 
 /// The lossy-export report.

@@ -88,6 +88,17 @@ pub enum TableKind {
     /// deviation); a block's member *entities* are still elements of its
     /// [`crate::ModelKey::Block`] model.
     Blocks,
+    /// Import provenance rows (`tables/sources.json`, ADR-0037 D11).
+    ///
+    /// Host-owned document metadata, not database rows: the host writes one row
+    /// per import and `DrawingDatabase::from_snapshot` ignores the table. It is
+    /// listed here so a save can mark it dirty instead of rewriting it silently.
+    Sources,
+    /// Object-level compatibility report records (`tables/compat.json`, D11).
+    ///
+    /// Host-owned document metadata like [`TableKind::Sources`]: the report
+    /// describes how the content was imported, not the content itself.
+    Compat,
 }
 
 /// The set of persisted rows one commit made stale.

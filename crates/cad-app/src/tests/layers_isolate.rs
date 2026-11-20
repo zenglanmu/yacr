@@ -66,6 +66,8 @@ fn app_three_layers() -> (Application, SessionState) {
             identity: DocumentIdentity::Sha256([41u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            compat: Vec::new(),
+            sources: Vec::new(),
             persistence: crate::PersistenceState::untitled(),
         },
     );
@@ -203,6 +205,8 @@ fn every_layer_already_kept_is_a_noop_that_writes_no_override() {
             identity: DocumentIdentity::Sha256([42u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            compat: Vec::new(),
+            sources: Vec::new(),
             persistence: crate::PersistenceState::untitled(),
         },
     );
@@ -329,6 +333,8 @@ fn app_with_a_layer_zero_block_member() -> (Application, SessionState) {
             identity: DocumentIdentity::Sha256([43u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            compat: Vec::new(),
+            sources: Vec::new(),
             persistence: crate::PersistenceState::untitled(),
         },
     );

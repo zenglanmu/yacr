@@ -2,6 +2,22 @@ use super::*;
 
 use std::path::Path;
 
+/// The document's in-memory compatibility table (`Document.compat`).
+///
+/// Save As appends the export report after a durable write; the next `.ymodel`
+/// save persists these rows. Read through the same public fields the ymodel
+/// tests use.
+fn document_compat(core: &HostCore) -> Vec<serde_json::Value> {
+    let controller = core.controller.borrow();
+    controller
+        .application
+        .workspace
+        .documents
+        .get(&controller.document_id)
+        .map(|document| document.compat.clone())
+        .unwrap_or_default()
+}
+
 // --- file contracts: open/save/plot -----------------------------------------
 
 #[test]
@@ -100,6 +116,19 @@ fn saving_a_drawing_with_a_3dsolid_says_the_file_is_written_as_ac1024() {
     assert!(
         args.get("path").is_some_and(|path| path.ends_with(".dxf")),
         "the status still names the written path: {args:?}"
+    );
+
+    // The DXF export went through the registry but the ACIS note still drives
+    // the status, and the report itself is now recorded on the document.
+    let compat = document_compat(&core);
+    let record = compat.last().expect("the export report is recorded");
+    assert_eq!(record["connector"], "dxf");
+    assert_eq!(record["direction"], "export");
+    assert!(
+        record["entries"].as_array().is_some_and(|entries| entries
+            .iter()
+            .any(|entry| entry["code"] == "export.note.acis_sat_text_version")),
+        "the recorded report keeps the ACIS note code: {record}"
     );
 }
 
@@ -699,6 +728,233 @@ fn the_normalized_backstop_also_refuses_a_dot_path_spelling_of_the_source() {
 
     core.request_save().unwrap();
     assert!(files.written.borrow().is_empty());
+    let status = core.last_status().unwrap();
+    let (key, _) = catalog(&status);
+    assert_eq!(key, "save.refused_source_path");
+}
+
+#[test]
+fn a_connector_save_as_writes_registry_bytes_and_grades_its_own_status() {
+    // A mesh document (the committed STL fixture imports as one model-space
+    // mesh) is written through the registry for both a neutral-mesh key and
+    // IFC. The status must name the connector format instead of the DXF wording.
+    for (extension, magic) in [("stl", None), ("ifc", Some(&b"ISO-10303-21;"[..]))] {
+        let files = Rc::new(RecordingSaveFiles::new());
+        let target = format!("/tmp/mesh-export.{extension}");
+        *files.chosen.borrow_mut() = Some(FileTarget::from_path(&target));
+        let core = core_with_caps(files.clone(), capabilities(false));
+        let fixture =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/stl/synthetic-quad.stl");
+        let bytes = std::fs::read(&fixture).expect("committed STL fixture");
+        core.deliver_external_open(FileTarget::from_path("/tmp/source.stl"), Arc::from(bytes))
+            .expect("the STL fixture imports as a mesh document");
+        // IFC (and SKP) refuse to guess a source length unit; STL carries none.
+        core.controller
+            .borrow_mut()
+            .set_units(cad_domain::UnitContext::from_meter())
+            .unwrap();
+
+        core.request_save().unwrap();
+        assert!(
+            !core.save_pending.get(),
+            "{extension}: the target is drained"
+        );
+        let written = files.written.borrow();
+        assert_eq!(written.len(), 1, "{extension}: exactly one file is written");
+        assert_eq!(written[0].0, target);
+        assert!(
+            !written[0].1.is_empty(),
+            "{extension}: a connector export wrote no bytes"
+        );
+        if let Some(magic) = magic {
+            assert!(
+                written[0].1.starts_with(magic),
+                "{extension}: bytes must start with {magic:?}"
+            );
+        }
+        drop(written);
+
+        let status = core.last_status().expect("the export grades a status");
+        let (key, args) = catalog(&status);
+        assert!(
+            key == "save.exported_connector" || key == "save.exported_connector_partial",
+            "{extension}: the status must name the connector export, got {key}"
+        );
+        assert_eq!(args.get("path"), Some(&target));
+        assert_eq!(
+            args.get("format"),
+            Some(&extension.to_string()),
+            "{extension}: the status names the connector key"
+        );
+        if key == "save.exported_connector_partial" {
+            assert!(args.contains_key("converted") && args.contains_key("dropped"));
+        }
+    }
+}
+
+#[test]
+fn a_connector_save_records_its_export_report_on_the_document() {
+    let files = Rc::new(RecordingSaveFiles::new());
+    *files.chosen.borrow_mut() = Some(FileTarget::from_path("/tmp/mesh-export.stl"));
+    let core = core_with_caps(files.clone(), capabilities(false));
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/stl/synthetic-quad.stl");
+    let bytes = std::fs::read(&fixture).expect("committed STL fixture");
+    core.deliver_external_open(FileTarget::from_path("/tmp/source.stl"), Arc::from(bytes))
+        .expect("the STL fixture imports as a mesh document");
+    let before = document_compat(&core).len();
+
+    core.request_save().unwrap();
+    assert_eq!(files.written.borrow().len(), 1);
+
+    let compat = document_compat(&core);
+    assert_eq!(
+        compat.len(),
+        before + 1,
+        "a successful export appends exactly one compat record"
+    );
+    let record = compat.last().expect("the export record");
+    assert_eq!(record["connector"], "stl");
+    assert_eq!(record["direction"], "export");
+}
+
+/// A `.glb` Save As writes the **binary** glTF container of the one `gltf`
+/// connector: the status names the registry key the user typed (`glb`), while the
+/// recorded report names the descriptor (`gltf`) — the report id is not the key.
+#[test]
+fn a_glb_save_as_writes_the_gltf_connector_and_records_its_report() {
+    let files = Rc::new(RecordingSaveFiles::new());
+    *files.chosen.borrow_mut() = Some(FileTarget::from_path("/tmp/mesh-export.glb"));
+    let core = core_with_caps(files.clone(), capabilities(false));
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/stl/synthetic-quad.stl");
+    let bytes = std::fs::read(&fixture).expect("committed STL fixture");
+    core.deliver_external_open(FileTarget::from_path("/tmp/source.stl"), Arc::from(bytes))
+        .expect("the STL fixture imports as a mesh document");
+    // glTF positions are metres, so the writer refuses an unknown unit.
+    core.controller
+        .borrow_mut()
+        .set_units(cad_domain::UnitContext::from_meter())
+        .unwrap();
+    let before = document_compat(&core).len();
+
+    core.request_save().unwrap();
+
+    let written = files.written.borrow();
+    assert_eq!(written.len(), 1, "exactly one file is written");
+    assert_eq!(written[0].0, "/tmp/mesh-export.glb");
+    assert!(
+        written[0].1.starts_with(b"glTF"),
+        "a `.glb` target must write the binary glTF container"
+    );
+    drop(written);
+
+    let status = core.last_status().expect("the export grades a status");
+    let (key, args) = catalog(&status);
+    assert!(
+        key == "save.exported_connector" || key == "save.exported_connector_partial",
+        "the status must name the connector export, got {key}"
+    );
+    assert_eq!(args.get("format"), Some(&"glb".to_string()));
+
+    let compat = document_compat(&core);
+    assert_eq!(
+        compat.len(),
+        before + 1,
+        "a successful export appends exactly one compat record"
+    );
+    let record = compat.last().expect("the export record");
+    assert_eq!(
+        record["connector"], "gltf",
+        "the report id is the descriptor id, not the registry key"
+    );
+    assert_eq!(record["direction"], "export");
+}
+
+/// The compat table is a bounded recent history: repeated exports must not grow
+/// the document (and its next `.ymodel`) without bound.
+#[test]
+fn export_records_are_capped_to_the_newest_32() {
+    let files = Rc::new(RecordingSaveFiles::new());
+    *files.chosen.borrow_mut() = Some(FileTarget::from_path("/tmp/mesh-export.stl"));
+    let core = core_with_caps(files.clone(), capabilities(false));
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/stl/synthetic-quad.stl");
+    let bytes = std::fs::read(&fixture).expect("committed STL fixture");
+    core.deliver_external_open(FileTarget::from_path("/tmp/source.stl"), Arc::from(bytes))
+        .expect("the STL fixture imports as a mesh document");
+
+    for _ in 0..40 {
+        core.request_save().unwrap();
+    }
+    let compat = document_compat(&core);
+    let is_export = |row: &serde_json::Value| row["direction"].as_str() == Some("export");
+    let export_rows = compat.iter().filter(|row| is_export(row)).count();
+    assert_eq!(export_rows, 32, "the table keeps the newest 32 export rows");
+    // The import provenance record is not part of the export history and is
+    // never evicted by later exports.
+    assert_eq!(compat.iter().filter(|row| !is_export(row)).count(), 1);
+    assert_eq!(compat.last().expect("a record")["connector"], "stl");
+}
+
+/// A document whose units are unresolved drawing units refuses IFC and SKP by
+/// name: neither writer may assume a length, and nothing is written.
+#[test]
+fn drawing_units_refuse_ifc_and_skp_by_name_without_writing() {
+    for (extension, code) in [
+        ("ifc", "export.ifc.units_unknown"),
+        ("skp", "export.skp.units_unknown"),
+    ] {
+        let files = Rc::new(RecordingSaveFiles::new());
+        let target = format!("/tmp/units-export.{extension}");
+        *files.chosen.borrow_mut() = Some(FileTarget::from_path(&target));
+        let core = core_with_caps(files.clone(), capabilities(false));
+        let fixture =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/stl/synthetic-quad.stl");
+        let bytes = std::fs::read(&fixture).expect("committed STL fixture");
+        core.deliver_external_open(FileTarget::from_path("/tmp/source.stl"), Arc::from(bytes))
+            .expect("the STL fixture imports as a mesh document");
+        core.controller
+            .borrow_mut()
+            .set_units(cad_domain::UnitContext::drawing_units())
+            .unwrap();
+
+        core.request_save().unwrap();
+
+        assert!(
+            files.written.borrow().is_empty(),
+            "{extension}: a refused unit must write nothing"
+        );
+        let status = core.last_status().expect("the refusal is graded");
+        let (key, args) = catalog(&status);
+        assert_eq!(key, "save.export_failed", "{extension}");
+        let reason = args.get("reason").expect("the failure names its reason");
+        assert!(
+            reason.contains(code),
+            "{extension}: expected {code}, got {reason}"
+        );
+    }
+}
+
+#[test]
+fn choosing_the_opened_source_as_a_connector_target_is_refused() {
+    // The platform cannot detect inode identity on every carrier, so the
+    // normalized-name backstop must also protect a connector Save As.
+    let files = Rc::new(RecordingSaveFiles::new());
+    files.detect_identity.set(false);
+    *files.chosen.borrow_mut() = Some(FileTarget::from_path("/tmp/source.stl"));
+    let core = core_with_caps(files.clone(), capabilities(false));
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/stl/synthetic-quad.stl");
+    let bytes = std::fs::read(&fixture).expect("committed STL fixture");
+    core.deliver_external_open(FileTarget::from_path("/tmp/source.stl"), Arc::from(bytes))
+        .expect("the STL fixture imports");
+
+    core.request_save().unwrap();
+    assert!(
+        files.written.borrow().is_empty(),
+        "a connector Save As never overwrites the opened source"
+    );
     let status = core.last_status().unwrap();
     let (key, _) = catalog(&status);
     assert_eq!(key, "save.refused_source_path");

@@ -1,9 +1,10 @@
 //! Plot (SVG/PDF) and lossy Save As: the host-owned export funnel.
 //!
-//! Save As writes DXF, or — when the opened source is a `.dwg` (or the user
-//! chooses a `.dwg` target) — an **experimental** DWG export through upstream
-//! acadrust. A DWG save always writes a **new** file; the opened source is never
-//! overwritten.
+//! Save As dispatches **every** lossy format through the connector registry:
+//! DXF, an **experimental** DWG through upstream acadrust, and the neutral-mesh /
+//! IFC / SketchUp lanes (`.stl`, `.obj`, `.ply`, `.off`, `.coff`, `.ifc`, `.skp`).
+//! A DWG or connector save always writes a **new** file; the opened source is
+//! never overwritten.
 use super::*;
 use crate::policy::{self, PlotFormat, SaveFormat};
 use cad_domain::Completeness;
@@ -24,6 +25,9 @@ struct SaveOutcome {
     dropped: usize,
     completeness: Completeness,
     wrote_dwg: bool,
+    /// The registry key that wrote this file when a connector export (STL,
+    /// OBJ, PLY, OFF, IFC, SKP) produced it; `None` for the DXF/DWG path.
+    connector: Option<&'static str>,
     /// The export wrote a `3DSOLID` into a DXF, so the whole file was written as
     /// AC1024 to keep the ACIS payload as inline SAT text
     /// (`export.note.acis_sat_text_version`). The status names that choice instead
@@ -140,7 +144,8 @@ impl HostCore {
     /// so a SAVE never overwrites the opened drawing; a `.dxf` source keeps the
     /// lossy DXF Save As; a `.ymodel` source — or a document with no source
     /// format at all — is the native archive save. The chosen target's extension
-    /// is what is actually written for DXF/DWG.
+    /// is what is actually written: DXF, DWG (experimental) or a connector
+    /// format (`stl`/`obj`/`ply`/`off`/`ifc`/`skp`).
     pub(crate) fn request_save(&self) -> CadResult<()> {
         if !self.capabilities.save {
             let reason = self.message("command.unsupported", &[("command", "SAVE")]);
@@ -222,6 +227,29 @@ impl HostCore {
             }
             (SavePurpose::SaveDxf | SavePurpose::SaveDwg, Ok(target)) => {
                 match self.export_save(&target) {
+                    // A connector export (mesh/IFC/SKP) has its own wording: the
+                    // file is not a DXF, and the format key is what the user
+                    // chose. Complete vs. partial still comes from the report's
+                    // single completeness authority.
+                    Ok(outcome) if outcome.connector.is_some() => {
+                        let format = outcome.connector.unwrap_or_default();
+                        if outcome.completeness == Completeness::Complete {
+                            catalog(
+                                "save.exported_connector",
+                                &[("path", &target.display_name), ("format", format)],
+                            )
+                        } else {
+                            catalog(
+                                "save.exported_connector_partial",
+                                &[
+                                    ("path", &target.display_name),
+                                    ("format", format),
+                                    ("converted", &outcome.converted.to_string()),
+                                    ("dropped", &outcome.dropped.to_string()),
+                                ],
+                            )
+                        }
+                    }
                     // A DWG write always says it is experimental and that the
                     // source was not modified; a clean/partial distinction only
                     // changes whether conversions are counted. A DWG that carries
@@ -326,28 +354,39 @@ impl HostCore {
 
     /// Write the lossy drawing export for `target`'s extension.
     ///
-    /// `.dxf` → the DXF writer; `.dwg` → the experimental upstream DWG writer;
-    /// any other extension fails. The opened source file is never overwritten:
-    /// the platform guard (device+inode / SAF URI) runs for **both** formats,
-    /// plus a normalized path/name backstop for carriers without filesystem
-    /// identity (web label handles, Android SAF URIs).
+    /// Every extension — `.dxf`, `.dwg` and the connector keys
+    /// `.stl`/`.obj`/`.ply`/`.off`/`.coff`/`.ifc`/`.skp` — is dispatched through
+    /// the connector registry ([`HostController::export_connector`]), so the
+    /// writer's own [`cad_import_core::CompatReport`] is the single source of the
+    /// counts, the verdict and the note codes. Any other extension fails. The
+    /// opened source file is never overwritten: the platform guard (device+inode
+    /// / SAF URI) runs for **all** formats, plus a normalized path/name backstop
+    /// for every non-DXF export (web label handles, Android SAF URIs).
+    ///
+    /// After the bytes are durable, the report is recorded in the in-memory
+    /// `Document.compat` table (the next `.ymodel` save persists it). A recording
+    /// failure never fails the save: the file is already written.
     fn export_save(&self, target: &FileTarget) -> Result<SaveOutcome, SaveFailure> {
-        let wrote_dwg = match policy::save_format(&policy::extension_of(&target.display_name)) {
-            SaveFormat::Dwg => true,
-            SaveFormat::NoExtension => {
-                return Err(SaveFailure::Reason(self.message("save.no_extension", &[])))
-            }
-            SaveFormat::Unknown(ext) => {
-                return Err(SaveFailure::Reason(
-                    self.message("save.unknown_format", &[("ext", &ext)]),
-                ))
-            }
-            SaveFormat::Dxf => false,
-        };
+        let (wrote_dwg, format_id): (bool, &'static str) =
+            match policy::save_format(&policy::extension_of(&target.display_name)) {
+                SaveFormat::Dwg => (true, "dwg"),
+                SaveFormat::Dxf => (false, "dxf"),
+                // Every other supported extension is a connector export key
+                // (`stl`, `obj`, `ply`, `off`, `coff`, `ifc`, `skp`).
+                SaveFormat::Connector(id) => (false, id),
+                SaveFormat::NoExtension => {
+                    return Err(SaveFailure::Reason(self.message("save.no_extension", &[])))
+                }
+                SaveFormat::Unknown(ext) => {
+                    return Err(SaveFailure::Reason(
+                        self.message("save.unknown_format", &[("ext", &ext)]),
+                    ))
+                }
+            };
         if self.files.refuses_source_overwrite(target) {
             return Err(SaveFailure::RefusedSourcePath);
         }
-        if wrote_dwg
+        if (wrote_dwg || format_id != "dxf")
             && self
                 .source_target
                 .borrow()
@@ -355,41 +394,61 @@ impl HostCore {
                 .is_some_and(|source| policy::same_normalized_target(source, target))
         {
             // Even without inode identity, reusing the opened source's path/name
-            // must never be written to.
+            // must never be written to. Every non-DXF lossy export (DWG and every
+            // connector format) is a Save As to a NEW file: silently overwriting
+            // the opened drawing would corrupt the only input.
             return Err(SaveFailure::RefusedSourcePath);
         }
         // Install the configured Save-As options on the controller first: the
-        // ACIS payload version and DXF container are host settings, and the
-        // request builder reads them when it runs. A DWG is always AC1032, so the
-        // controller names the DWG's own container for that format.
+        // ACIS payload version and DXF container are host settings, and the DXF
+        // and DWG lanes read them when they build their request. The mesh/IFC/SKP
+        // writers ignore them. A DWG is always AC1032, so the registry names the
+        // DWG's own container for that format.
         let options = self.export_options();
         self.controller.borrow_mut().set_export_options(options);
-        let (bytes, report) = if wrote_dwg {
-            self.controller.borrow().export_dwg()
-        } else {
-            self.controller.borrow().export_dxf()
-        }
-        .map_err(|error| SaveFailure::Reason(error_text(&error)))?;
-        self.files
-            .write_atomic(target, &bytes)
+        // The connector lane: the registry is the dispatch authority (DXF/DWG
+        // included) and the writer's own report supplies both the counts and the
+        // verdict.
+        let output = self
+            .controller
+            .borrow()
+            .export_connector(format_id)
             .map_err(|error| SaveFailure::Reason(error_text(&error)))?;
+        self.files
+            .write_atomic(target, &output.bytes)
+            .map_err(|error| SaveFailure::Reason(error_text(&error)))?;
+        // The file is durable; recording the report is metadata. A failure here
+        // (no document open, a poisoned slot) must not turn a written file into a
+        // failed save, so it is deliberately ignored. The next `.ymodel` save
+        // persists whatever was recorded.
+        let _ = self
+            .controller
+            .borrow_mut()
+            .record_export_report(&output.report);
+        let dxf_or_dwg = format_id == "dxf" || format_id == "dwg";
         Ok(SaveOutcome {
-            converted: report.counts.converted,
-            dropped: report.counts.dropped,
-            completeness: report.completeness,
+            converted: output.report.counts.converted,
+            dropped: output.report.counts.dropped,
+            completeness: output.report.completeness,
             wrote_dwg,
-            acis_sat_ac1024: report
-                .notes
+            connector: if dxf_or_dwg { None } else { Some(format_id) },
+            // The ACIS notes are produced by the acadrust DXF/DWG adapter and
+            // copied verbatim into the shared report; no other lane writes them.
+            acis_sat_ac1024: output
+                .report
+                .entries
                 .iter()
-                .any(|note| note.code == "export.note.acis_sat_text_version"),
-            acis_sab_dwg: report
-                .notes
+                .any(|entry| entry.code == "export.note.acis_sat_text_version"),
+            acis_sab_dwg: output
+                .report
+                .entries
                 .iter()
-                .any(|note| note.code == "export.note.acis_sab_dwg"),
-            acis_sab_dxf: report
-                .notes
+                .any(|entry| entry.code == "export.note.acis_sab_dwg"),
+            acis_sab_dxf: output
+                .report
+                .entries
                 .iter()
-                .any(|note| note.code == "export.note.acis_sab_dxf"),
+                .any(|entry| entry.code == "export.note.acis_sab_dxf"),
         })
     }
 

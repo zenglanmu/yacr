@@ -125,6 +125,20 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
+                <data android:mimeType="model/gltf+json" />
+                <data android:pathPattern=".*\\.gltf" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:mimeType="model/gltf-binary" />
+                <data android:pathPattern=".*\\.glb" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
                 <data android:mimeType="model/step" />
                 <data android:pathPattern=".*\\.step" />
                 <data android:pathPattern=".*\\.stp" />
@@ -213,6 +227,8 @@
                 <data android:pathPattern=".*\\.ply" />
                 <data android:pathPattern=".*\\.off" />
                 <data android:pathPattern=".*\\.coff" />
+                <data android:pathPattern=".*\\.gltf" />
+                <data android:pathPattern=".*\\.glb" />
                 <data android:pathPattern=".*\\.step" />
                 <data android:pathPattern=".*\\.stp" />
                 <data android:pathPattern=".*\\.ifc" />

@@ -411,7 +411,7 @@ fn a_newer_minor_is_refused_before_anything_else_is_parsed() {
     let base = archive_bytes(&snapshot());
     let broken = tamper(&base, DOCUMENT_ENTRY, b"not json at all");
     let archive = patch_manifest(&broken, |manifest| {
-        manifest["format"]["minor"] = Value::from(2);
+        manifest["format"]["minor"] = Value::from(3);
     });
     let error = read_archive(&archive).expect_err("refused");
     assert_eq!(error.marker, markers::UNSUPPORTED_MINOR, "{error}");
@@ -565,7 +565,7 @@ fn the_manifest_pins_the_document_and_the_import_baseline() {
     assert_eq!(manifest["saved_at"], "2026-11-18T00:00:00Z");
     assert_eq!(manifest["format"]["read"], Value::from(1));
     assert_eq!(manifest["format"]["write"], Value::from(1));
-    assert_eq!(manifest["format"]["minor"], Value::from(1));
+    assert_eq!(manifest["format"]["minor"], Value::from(2));
 
     let loaded = read_archive(&bytes).expect("read");
     assert_eq!(loaded.manifest.open_revision, Revision(4));
@@ -789,4 +789,74 @@ fn deleting_a_table_or_shard_from_the_snapshot_drops_its_entry() {
     // No stale shard_map row survives the deletion either.
     assert_eq!(manifest["shard_map"].as_object().expect("map").len(), 1);
     assert!(read_archive(&bytes).is_ok());
+}
+
+#[test]
+fn host_metadata_tables_round_trip_as_opaque_rows() {
+    // ADR-0037 D11/D14: import provenance and compatibility reports live in
+    // `tables/sources.json` / `tables/compat.json`. The store never interprets
+    // them, so a decoded `Value` is the contract (the bytes may be re-encoded).
+    let mut full = snapshot();
+    let compat = serde_json::json!({
+        "connector": "dxf",
+        "direction": "import",
+        "level": "L1",
+        "counts": null,
+        "completeness": {"kind": "partial", "reasons": ["spline flags dropped"]},
+        "capabilities": [{
+            "type_key": "AcDbSpline",
+            "read": "verified",
+            "semantic": "partial",
+            "render": "verified",
+            "pick": "verified",
+            "measure": "unsupported",
+        }],
+        "entries": [{
+            "object": 7,
+            "type_key": null,
+            "status": "unverified",
+            "code": "import.spline.flags_dropped",
+            "message": "flags dropped",
+        }],
+    });
+    let source = serde_json::json!({
+        "source_id": "0123456789abcdef",
+        "identifier": "plan.dxf",
+        "kind": "drawing",
+        "checksum": "0123456789abcdef",
+        "retained": false,
+        "connector": "dxf",
+        "open_revision": null,
+    });
+    full.tables.set(TableKind::Compat, vec![compat.clone()]);
+    full.tables.set(TableKind::Sources, vec![source.clone()]);
+
+    let bytes = archive_bytes(&full);
+    let (entries, _) = explode(&bytes);
+    for path in ["tables/compat.json", "tables/sources.json"] {
+        assert!(
+            entries.iter().any(|(name, _)| name == path),
+            "{path} must be a live entry"
+        );
+    }
+
+    let loaded = read_archive(&bytes).expect("read");
+    assert_eq!(
+        loaded.snapshot.tables.get(TableKind::Compat),
+        Some(&[compat][..])
+    );
+    assert_eq!(
+        loaded.snapshot.tables.get(TableKind::Sources),
+        Some(&[source][..])
+    );
+    // A second write of the decoded snapshot produces the same table rows.
+    let again = read_archive(&archive_bytes(&loaded.snapshot)).expect("re-read");
+    assert_eq!(
+        again.snapshot.tables.get(TableKind::Compat),
+        loaded.snapshot.tables.get(TableKind::Compat)
+    );
+    assert_eq!(
+        again.snapshot.tables.get(TableKind::Sources),
+        loaded.snapshot.tables.get(TableKind::Sources)
+    );
 }

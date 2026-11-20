@@ -141,6 +141,11 @@ impl<S: DownloadSink> PlatformFiles for BrowserFiles<S> {
     }
 
     fn begin_save(&self, purpose: SavePurpose, default_name: &str) -> CadResult<()> {
+        // The browser has no save picker and no format filter: the target is
+        // synthesized from the suggested name, which defaults to `.dxf`. There is
+        // no way to choose another extension in the web flow, so the connector
+        // Save As formats (.stl/.obj/.ply/.off/.ifc/.skp) are NOT IMPLEMENTED on
+        // web this round: they are not merely unverified.
         if default_name.trim().is_empty() {
             return Err(CadError::InvalidInput(
                 "begin_save: default_name is empty; a browser download needs a real file name"

@@ -298,7 +298,7 @@ fn parse_tables(
 /// `cad-db`, and `check-architecture.py` forbids this crate from editing it), so
 /// the reverse map is written out and a table missing from it is refused by
 /// [`unknown_live_entry`] rather than silently dropped.
-const TABLE_ENTRIES: [(TableKind, &str); 10] = [
+const TABLE_ENTRIES: [(TableKind, &str); 12] = [
     (TableKind::Layers, "tables/layers.json"),
     (TableKind::Layouts, "tables/layouts.json"),
     (TableKind::Styles, "tables/styles.json"),
@@ -309,6 +309,10 @@ const TABLE_ENTRIES: [(TableKind, &str); 10] = [
     (TableKind::PlotSettings, "tables/plot-settings.json"),
     (TableKind::ExternalReferences, "tables/xrefs.json"),
     (TableKind::Blocks, "tables/blocks.json"),
+    // Host-owned document metadata (ADR-0037 D11). Decoded as opaque rows: the
+    // store never interprets a report, it only carries it across a save.
+    (TableKind::Sources, "tables/sources.json"),
+    (TableKind::Compat, "tables/compat.json"),
 ];
 
 /// The table kind one entry path holds, if this build models it.
@@ -553,6 +557,65 @@ mod tests {
             assert_eq!(table_kind_for_entry(path), Some(kind));
         }
         assert_eq!(table_kind_for_entry("tables/unknown.json"), None);
+    }
+
+    /// The mirror is checked against an **explicit** list of every `TableKind`.
+    ///
+    /// `the_table_reverse_map_covers_every_kind_it_names` derives its cases from
+    /// `TABLE_ENTRIES` itself, so a new `TableKind` with no mirror row would be
+    /// invisible to it. This test names the closed set by hand: adding a variant
+    /// without a `TABLE_ENTRIES` row (and therefore without a reader entry) fails
+    /// here instead of being silently refused at load time.
+    #[test]
+    fn every_table_kind_variant_has_a_reader_mirror_entry() {
+        let kinds = [
+            TableKind::Layers,
+            TableKind::Layouts,
+            TableKind::Styles,
+            TableKind::DimStyles,
+            TableKind::MLeaderStyles,
+            TableKind::Linetypes,
+            TableKind::Scales,
+            TableKind::PlotSettings,
+            TableKind::ExternalReferences,
+            TableKind::Blocks,
+            TableKind::Sources,
+            TableKind::Compat,
+        ];
+        let mut paths = std::collections::BTreeSet::new();
+        for kind in kinds {
+            // Exhaustive match: a new `TableKind` variant is a *compile* error
+            // here, so the author must add it to this list (and then the length
+            // assertion below demands the matching `TABLE_ENTRIES` row).
+            let name = match kind {
+                TableKind::Layers => "Layers",
+                TableKind::Layouts => "Layouts",
+                TableKind::Styles => "Styles",
+                TableKind::DimStyles => "DimStyles",
+                TableKind::MLeaderStyles => "MLeaderStyles",
+                TableKind::Linetypes => "Linetypes",
+                TableKind::Scales => "Scales",
+                TableKind::PlotSettings => "PlotSettings",
+                TableKind::ExternalReferences => "ExternalReferences",
+                TableKind::Blocks => "Blocks",
+                TableKind::Sources => "Sources",
+                TableKind::Compat => "Compat",
+            };
+            assert_eq!(name, format!("{kind:?}"));
+            let path = table_entry(kind);
+            assert_eq!(
+                table_kind_for_entry(path),
+                Some(kind),
+                "{kind:?} has no reader mirror entry for {path}"
+            );
+            assert!(paths.insert(path), "duplicate mirror path {path}");
+        }
+        assert_eq!(
+            kinds.len(),
+            TABLE_ENTRIES.len(),
+            "every TableKind variant must have exactly one TABLE_ENTRIES row"
+        );
+        assert_eq!(paths.len(), kinds.len());
     }
 
     #[test]

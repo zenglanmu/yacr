@@ -14,6 +14,8 @@ use std::{collections::BTreeMap, sync::Arc};
 
 pub mod api;
 pub mod camera;
+// The ordered import/export connector table (Phase 1: contract + registry only).
+mod connector;
 pub mod draw_tool;
 pub mod grips;
 pub mod groups;
@@ -146,6 +148,12 @@ pub mod command_id;
 pub use app_chamfer_edge::{chamfer_edge_target, ChamferEdgeTarget};
 pub use app_drawing::solids::SOLID_MODELER_UNSUPPORTED;
 pub use command_id::{AppMode, CommandId, ExtendedCommandId, RefusalId};
+pub use connector::{
+    ConnectorRegistry, ExportConnector, ExportSettings, ImportConnector, DESCRIPTOR_DGN,
+    DESCRIPTOR_DWG, DESCRIPTOR_DXF, DESCRIPTOR_GLTF, DESCRIPTOR_IFC, DESCRIPTOR_OBJ,
+    DESCRIPTOR_OFF, DESCRIPTOR_PLY, DESCRIPTOR_RVT, DESCRIPTOR_SKP, DESCRIPTOR_STEP,
+    DESCRIPTOR_STL,
+};
 pub use draw_tool::{
     circle_radius, AlignPairSet, DrawIntent, DrawPreview, DrawTool, DrawToolKind, PointArity,
     StretchWindowMode, StretchWindowStep, ToolParameter, ToolParameterStore, ToolValue,
@@ -196,6 +204,21 @@ pub struct Document {
     pub identity: DocumentIdentity,
     pub units: UnitContext,
     pub resource_keys: Vec<String>,
+    /// Object-level compatibility report records for this document
+    /// (ADR-0037 D11/D14).
+    ///
+    /// Persisted host metadata, not database content: `DrawingDatabase` never
+    /// reads it. One record per import, plus one per successful Save As export
+    /// (`record_export_report`, bounded to the newest `host::MAX_EXPORT_RECORDS`
+    /// rows) so the file just written carries its own report into the next
+    /// `.ymodel` save.
+    pub compat: Vec<serde_json::Value>,
+    /// Import provenance rows (`tables/sources.json`, ADR-0037 D11).
+    ///
+    /// Persisted host metadata: one row per import naming the source identity,
+    /// the connector and the source checksum. It **never** stores raw source
+    /// bytes — those stay a separate, explicit `raw/source-*.bin` decision.
+    pub sources: Vec<serde_json::Value>,
     /// Where this document stands relative to its file (ADR-0037 D2/D12).
     ///
     /// Not drawing content: the database never sees an archive (D1). It stays on

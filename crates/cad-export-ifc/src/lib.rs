@@ -1,0 +1,563 @@
+//! IFC4 export writer: neutral `cad-db` meshes to `IfcTriangulatedFaceSet`.
+//!
+//! The writer is a thin adapter from the shared [`cad_import_core::Exporter`]
+//! contract onto `ifc-lite-export`'s export-plan executor:
+//!
+//! 1. every model-space mesh entity is collected (a [`cad_domain::Mesh`] body,
+//!    or a [`cad_db::DbEntity`]'s 3D body display cache);
+//! 2. one empty IFC4 file is built with [`ifc_lite_export::plan::skeleton`]
+//!    (project / site / building, SI metres);
+//! 3. each mesh is added as an `IfcBuildingElementProxy` contained in the
+//!    building, with its triangles as an `IfcTriangulatedFaceSet`;
+//! 4. the executor's output is returned with a [`cad_import_core::CompatReport`]
+//!    that names every written mesh and every drop.
+//!
+//! # Units
+//!
+//! The skeleton is SI metres, so `cad-db` coordinates are converted **once**,
+//! at this boundary, by the job's `UnitContext::source` factor
+//! (`mm` 0.001 … `ft` 0.3048). A missing context, or `Unit::DrawingUnits`, is a
+//! named refusal ([`UNITS_UNKNOWN`]): the writer never assumes millimetres.
+//!
+//! # Determinism and evidence
+//!
+//! No clock, no RNG: the skeleton's GlobalIds and every added object's GlobalId
+//! come from fixed role tags and the `cad-db` `ObjectId`, and the plan header
+//! carries no timestamp. The same database always produces byte-identical
+//! output, which the crate's tests pin.
+//!
+//! The only validation of the produced bytes is a **self-consistency**
+//! roundtrip through `cad-import-ifc` (the pinned reader reads back the same
+//! triangle count). That is not vendor acceptance, not a golden file and not a
+//! certification: no external IFC checker or vendor application was run.
+//!
+//! What the writer does not represent: per-vertex colours, normals, materials,
+//! property sets, layers, blocks, paper space and analytic (non-mesh) geometry.
+//! Every source entity it cannot write is reported, never silently skipped; an
+//! attribute that cannot ride along with a written mesh is reported once by kind
+//! (`export.ifc.colors_dropped`, `export.ifc.normals_dropped`,
+//! `export.ifc.layers_dropped`) and moves the verdict to `Partial`.
+//!
+//! An empty database is not an error: the writer still emits the valid IFC4
+//! skeleton and reports `Complete`, because there was no geometry to lose.
+//!
+//! `WriteReport::findings` from the executor are provenance notes (the skeleton
+//! writes no `IfcApplication`, so added objects name a deterministic synthesized
+//! owner history). They are not geometry losses and are not copied into the
+//! compatibility report; refusals are.
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use cad_domain::{
+    CadError, CadResult, Completeness, ObjectId, SemanticGeometry, SpaceId, SupportStatus, Unit,
+    UnitContext,
+};
+use cad_import_core::{
+    CompatCounts, CompatEntry, CompatReport, Connector, ConnectorDescriptor, ExportJob,
+    ExportOutput, Exporter, FidelityLevel, ReportDirection,
+};
+use ifc_lite_export::plan::{
+    execute, skeleton, Disposition, ExportPlan, GlobalId, IfcClass, NewObject, NewPlacement,
+    ObjectRef, PlanContext, Representation, Skeleton, SkeletonRoot, TriangleMesh, IDENTITY,
+};
+
+/// The writer's one registry key (the descriptor's extension spelling).
+pub const FORMAT_ID: &str = "ifc";
+
+/// Stable refusal code: the job carries no known source length unit.
+pub const UNITS_UNKNOWN: &str = "export.ifc.units_unknown";
+/// Stable drop code: the entity's geometry is not a mesh.
+pub const UNSUPPORTED_GEOMETRY: &str = "export.ifc.unsupported_geometry";
+/// Stable drop code: the entity's mesh has no triangle.
+pub const EMPTY_MESH: &str = "export.ifc.empty_mesh";
+/// Stable drop code: the entity is outside model space (paper layout or block
+/// definition), which this writer does not project.
+pub const SPACE_NOT_EXPORTED: &str = "export.ifc.space_not_exported";
+/// Stable conversion code: the source mesh carries per-vertex colours, which an
+/// `IfcTriangulatedFaceSet` cannot represent.
+pub const COLORS_DROPPED: &str = "export.ifc.colors_dropped";
+/// Stable conversion code: the source mesh carries per-vertex normals, which the
+/// written face set does not carry.
+pub const NORMALS_DROPPED: &str = "export.ifc.normals_dropped";
+/// Stable conversion code: the entity carries a layer (or display attribute),
+/// which the IFC skeleton does not model.
+pub const LAYERS_DROPPED: &str = "export.ifc.layers_dropped";
+/// Stable drop code: the plan executor refused the object's `Add`.
+pub const ADD_REFUSED: &str = "export.ifc.add_refused";
+/// Stable refusal code: the source has more meshes than the job's entity bound.
+pub const ENTITY_LIMIT: &str = "export.ifc.entity_limit";
+/// Stable refusal code: the source has more triangles than the job's bound.
+pub const TRIANGLE_LIMIT: &str = "export.ifc.triangle_limit";
+/// Stable refusal code: the executor could not write the file at all.
+pub const EXECUTE_FAILED: &str = "export.ifc.execute_failed";
+/// Stable refusal code: the IFC4 skeleton could not be built.
+pub const SKELETON_FAILED: &str = "export.ifc.skeleton_failed";
+
+/// The IFC4 writer behind the shared [`Exporter`] contract.
+///
+/// It holds only the caller's descriptor: the writer keeps no document state,
+/// and every export reads the `cad-db` database it is handed.
+pub struct IfcExporter {
+    descriptor: &'static ConnectorDescriptor,
+}
+
+impl IfcExporter {
+    /// A writer that reports `descriptor` as its connector.
+    pub fn new(descriptor: &'static ConnectorDescriptor) -> Self {
+        Self { descriptor }
+    }
+}
+
+impl Connector for IfcExporter {
+    fn descriptor(&self) -> &'static ConnectorDescriptor {
+        self.descriptor
+    }
+}
+
+impl Exporter for IfcExporter {
+    fn descriptor(&self) -> &'static ConnectorDescriptor {
+        self.descriptor
+    }
+
+    fn format_id(&self) -> &'static str {
+        FORMAT_ID
+    }
+
+    fn export(&self, format_id: &'static str, job: &ExportJob<'_>) -> CadResult<ExportOutput> {
+        // The registry key must name what this writer actually writes: another
+        // key would stamp a descriptor into the report that does not describe
+        // the bytes, so the mismatch is refused by name.
+        if format_id != FORMAT_ID {
+            return Err(CadError::Unsupported(format!(
+                "export.{format_id}.mismatched_descriptor: exporter writes {FORMAT_ID}"
+            )));
+        }
+        let units = job.units.ok_or_else(|| {
+            CadError::Unsupported(format!(
+                "{UNITS_UNKNOWN}: the export job carries no unit context, and the IFC4 skeleton is \
+                 SI metres; the source length unit must be known rather than assumed"
+            ))
+        })?;
+        let factor = metre_factor(units)?;
+
+        let mut drops = Vec::<DropRecord>::new();
+        let mut attributes = AttributeLoss::default();
+        let meshes = collect_meshes(job, factor, &mut drops, &mut attributes)?;
+        // Zero meshes is a valid outcome: the skeleton below is a complete IFC4
+        // project on its own, so an empty database writes a skeleton-only file
+        // and reports `Complete` (there is no geometry to lose). That is
+        // deliberately different from the SKP writer, which refuses an empty
+        // model because a `.skp` with no geometry says nothing.
+        let (skeleton_bytes, plan) = build_plan(&meshes)?;
+
+        let mut bytes = Vec::new();
+        let written = execute(&skeleton_bytes, &plan, &mut bytes)
+            .map_err(|error| CadError::Unsupported(format!("{EXECUTE_FAILED}: {error}")))?;
+
+        // One refusal is one mesh the executor did not write. It is recorded by
+        // name, never dropped silently.
+        let mut gid_index = BTreeMap::new();
+        for (index, mesh) in meshes.iter().enumerate() {
+            gid_index.insert(mesh_global_id(mesh.object).encode(), index);
+        }
+        for refusal in &written.refusals {
+            let object = match &refusal.object {
+                ObjectRef::Guid(guid) => gid_index.get(guid).map(|&index| &meshes[index]),
+                // `ObjectRef` is `#[non_exhaustive]`; the keys this writer
+                // passes are always GlobalIds, and an id-keyed refusal is not
+                // tied to a source entity here.
+                _ => None,
+            };
+            drops.push(DropRecord {
+                object: object.map(|mesh| mesh.object),
+                type_key: object.map(|mesh| mesh.type_key.clone()),
+                code: ADD_REFUSED,
+                message: format!(
+                    "IFC plan executor refused {}: {}",
+                    object.map_or("an added object", |mesh| mesh.type_key.as_str()),
+                    refusal.reason
+                ),
+            });
+        }
+
+        let exact = written.added;
+        let report = compat_report(exact, &drops, &attributes, bytes.len());
+        Ok(ExportOutput { bytes, report })
+    }
+}
+
+/// One source entity the writer projects as an IFC mesh.
+struct CollectedMesh {
+    object: ObjectId,
+    /// The `cad-db` type key, written as the object's `Name` when non-empty.
+    type_key: String,
+    /// Positions in metres, already converted at this boundary.
+    positions: Vec<[f64; 3]>,
+    triangles: Vec<[u32; 3]>,
+}
+
+/// One entity that is not in the output, and why.
+struct DropRecord {
+    /// The source object, when the drop is tied to one.
+    object: Option<ObjectId>,
+    type_key: Option<String>,
+    code: &'static str,
+    message: String,
+}
+
+/// Source attributes the IFC skeleton cannot carry.
+///
+/// Unlike a [`DropRecord`], the geometry itself **is** written: only the
+/// attribute is lost, so each non-zero count becomes one `Partial` conversion
+/// entry and moves the report to `Completeness::Partial` (never `Missing`).
+#[derive(Default)]
+struct AttributeLoss {
+    /// Meshes whose `Mesh::colors` is non-empty.
+    colours: usize,
+    /// Meshes whose `Mesh::normals` is non-empty.
+    normals: usize,
+    /// Entities on a non-zero layer or carrying a display attribute.
+    layers: usize,
+}
+
+impl AttributeLoss {
+    /// One conversion entry per kind that actually occurred: an absent attribute
+    /// never invents an entry.
+    fn entries(&self) -> Vec<CompatEntry> {
+        let mut entries = Vec::new();
+        if self.colours > 0 {
+            entries.push(CompatEntry {
+                connector: "ifc",
+                direction: ReportDirection::Export,
+                level: FidelityLevel::L1,
+                object: None,
+                type_key: None,
+                status: SupportStatus::Partial,
+                code: COLORS_DROPPED.to_string(),
+                message: format!(
+                    "per-vertex colours on {} mesh(es) are not written: an \
+                     IfcTriangulatedFaceSet carries positions and triangles only",
+                    self.colours
+                ),
+            });
+        }
+        if self.normals > 0 {
+            entries.push(CompatEntry {
+                connector: "ifc",
+                direction: ReportDirection::Export,
+                level: FidelityLevel::L1,
+                object: None,
+                type_key: None,
+                status: SupportStatus::Partial,
+                code: NORMALS_DROPPED.to_string(),
+                message: format!(
+                    "per-vertex normals on {} mesh(es) are not written: the face set's \
+                     normals are derived by the reader",
+                    self.normals
+                ),
+            });
+        }
+        if self.layers > 0 {
+            entries.push(CompatEntry {
+                connector: "ifc",
+                direction: ReportDirection::Export,
+                level: FidelityLevel::L1,
+                object: None,
+                type_key: None,
+                status: SupportStatus::Partial,
+                code: LAYERS_DROPPED.to_string(),
+                message: format!(
+                    "layers or display attributes on {} entity(ies) are not written: the \
+                     IFC skeleton has no layer or style projection",
+                    self.layers
+                ),
+            });
+        }
+        entries
+    }
+
+    fn messages(&self) -> Vec<String> {
+        self.entries()
+            .into_iter()
+            .map(|entry| entry.message)
+            .collect()
+    }
+}
+
+/// Whether an entity carries layer/display information the IFC skeleton drops.
+///
+/// The comparison is on the display attributes themselves, not the whole record:
+/// `geometry_source`/`linetype_scale` are storage provenance, not a layer
+/// attribute a user chose.
+fn carries_layer_attributes(entity: &cad_db::DbEntity, database: &cad_db::DrawingDatabase) -> bool {
+    if entity.layer.0 != 0 {
+        return true;
+    }
+    let attributes = database.entity_render_attributes(entity.id);
+    let defaults = cad_db::EntityRenderAttributes::default();
+    attributes.color != defaults.color
+        || attributes.transparency != defaults.transparency
+        || attributes.lineweight != defaults.lineweight
+        || attributes.linetype != defaults.linetype
+}
+
+/// The metre factor of the job's source unit, or a named refusal.
+///
+/// `Unit::DrawingUnits` is not a length unit: nothing states how large one unit
+/// is, so it is refused rather than guessed.
+fn metre_factor(units: &UnitContext) -> CadResult<f64> {
+    match &units.source {
+        Unit::Millimeter => Ok(0.001),
+        Unit::Centimeter => Ok(0.01),
+        Unit::Meter => Ok(1.0),
+        Unit::Inch => Ok(0.0254),
+        Unit::Foot => Ok(0.3048),
+        Unit::DrawingUnits => Err(CadError::Unsupported(format!(
+            "{UNITS_UNKNOWN}: the source unit is drawing units, which state no length; the IFC4 \
+             skeleton is SI metres, so the source unit must be known rather than assumed"
+        ))),
+    }
+}
+
+/// Every model-space mesh the writer projects, with everything else reported.
+fn collect_meshes(
+    job: &ExportJob<'_>,
+    factor: f64,
+    drops: &mut Vec<DropRecord>,
+    attributes: &mut AttributeLoss,
+) -> CadResult<Vec<CollectedMesh>> {
+    let mut meshes = Vec::new();
+    let mut triangles = 0usize;
+    for entity in job.database.entities() {
+        let object = entity.object.id;
+        let type_key = entity.object.type_key.clone();
+        if entity.space != SpaceId::Model {
+            let message = format!(
+                "entity #{} is outside model space ({:?}); the IFC writer projects model \
+                 space only",
+                object.0, entity.space
+            );
+            drops.push(DropRecord {
+                object: Some(object),
+                type_key: Some(type_key),
+                code: SPACE_NOT_EXPORTED,
+                message,
+            });
+            continue;
+        }
+        let mesh = match &entity.geometry {
+            SemanticGeometry::Mesh(mesh) => mesh,
+            // A 3D body's derived display mesh is the drawable geometry; the
+            // exact B-rep is not written (and the report says so when the cache
+            // is empty).
+            SemanticGeometry::Body3d(body) => &body.display.mesh,
+            _ => {
+                let message = format!(
+                    "entity #{} ({}) is not mesh geometry; the IFC writer writes meshes as \
+                     IfcTriangulatedFaceSet only",
+                    object.0, type_key
+                );
+                drops.push(DropRecord {
+                    object: Some(object),
+                    type_key: Some(type_key),
+                    code: UNSUPPORTED_GEOMETRY,
+                    message,
+                });
+                continue;
+            }
+        };
+        if mesh.triangles.is_empty() {
+            let message = format!(
+                "entity #{} ({}) has no triangle; an empty mesh has no IfcTriangulatedFaceSet \
+                 to write",
+                object.0, type_key
+            );
+            drops.push(DropRecord {
+                object: Some(object),
+                type_key: Some(type_key),
+                code: EMPTY_MESH,
+                message,
+            });
+            continue;
+        }
+        // The geometry is written; these attributes are not. Each is reported
+        // once by kind, and only when a source entity actually carries it.
+        if !mesh.colors.is_empty() {
+            attributes.colours += 1;
+        }
+        if !mesh.normals.is_empty() {
+            attributes.normals += 1;
+        }
+        if carries_layer_attributes(entity, job.database) {
+            attributes.layers += 1;
+        }
+        meshes.push(CollectedMesh {
+            object,
+            type_key,
+            positions: mesh
+                .vertices
+                .iter()
+                .map(|point| [point.x * factor, point.y * factor, point.z * factor])
+                .collect(),
+            triangles: mesh.triangles.clone(),
+        });
+        triangles = triangles.saturating_add(mesh.triangles.len());
+        if meshes.len() > job.limits.max_output_entities {
+            return Err(CadError::Unsupported(format!(
+                "{ENTITY_LIMIT}: the source has more than {} mesh entities, over the export \
+                 limit",
+                job.limits.max_output_entities
+            )));
+        }
+        if triangles > job.limits.max_output_triangles {
+            return Err(CadError::Unsupported(format!(
+                "{TRIANGLE_LIMIT}: the source has more than {} triangles, over the export limit",
+                job.limits.max_output_triangles
+            )));
+        }
+    }
+    Ok(meshes)
+}
+
+/// The IFC4 skeleton bytes and the plan that adds `meshes` to it.
+fn build_plan(meshes: &[CollectedMesh]) -> CadResult<(Vec<u8>, ExportPlan)> {
+    let project = stable_global_id("yacr/project", 0);
+    let site = stable_global_id("yacr/site", 0);
+    let building = stable_global_id("yacr/building", 0);
+    let mut ids = BTreeSet::new();
+    for id in [project, site, building] {
+        if !ids.insert(id.0) {
+            return Err(CadError::Invariant(
+                "IFC skeleton GlobalIds collided".into(),
+            ));
+        }
+    }
+
+    let source = Skeleton::new(
+        SkeletonRoot::new(project).with_name("yacr project"),
+        SkeletonRoot::new(site).with_name("yacr site"),
+        SkeletonRoot::new(building).with_name("yacr building"),
+    )
+    .with_file_name("export.ifc");
+    let skeleton_bytes = skeleton(&source)
+        .map_err(|reason| CadError::Unsupported(format!("{SKELETON_FAILED}: {reason}")))?;
+
+    let container = ObjectRef::Guid(building.encode());
+    let mut dispositions = Vec::with_capacity(meshes.len());
+    for mesh in meshes {
+        let global_id = mesh_global_id(mesh.object);
+        if !ids.insert(global_id.0) {
+            return Err(CadError::Invariant(format!(
+                "IFC export GlobalId collision for object #{}",
+                mesh.object.0
+            )));
+        }
+        let mut object = NewObject::new(
+            global_id,
+            IfcClass::BuildingElementProxy,
+            NewPlacement::new(IDENTITY),
+        )
+        .with_container(container.clone())
+        .with_representation(Representation::Mesh(TriangleMesh::new(
+            mesh.positions.clone(),
+            mesh.triangles.clone(),
+        )));
+        if !mesh.type_key.trim().is_empty() {
+            object = object.with_name(mesh.type_key.clone());
+        } else {
+            object = object.with_tag(format!("object:{}", mesh.object.0));
+        }
+        dispositions.push((
+            ObjectRef::Guid(global_id.encode()),
+            Disposition::Add(Box::new(object)),
+        ));
+    }
+
+    let plan =
+        ExportPlan::new(dispositions).with_context(PlanContext::new().with_file_name("export.ifc"));
+    Ok((skeleton_bytes, plan))
+}
+
+/// The compatibility report for one export.
+fn compat_report(
+    exact: usize,
+    drops: &[DropRecord],
+    attributes: &AttributeLoss,
+    bytes: usize,
+) -> CompatReport {
+    let mut entries = Vec::with_capacity(drops.len() + 3);
+    let mut reasons: Vec<String> = Vec::new();
+    for drop in drops {
+        entries.push(CompatEntry {
+            connector: "ifc",
+            direction: ReportDirection::Export,
+            level: FidelityLevel::L1,
+            object: drop.object,
+            type_key: drop.type_key.clone(),
+            // Every drop is a named loss: the entity is not in the output.
+            status: SupportStatus::Unsupported,
+            code: drop.code.to_string(),
+            message: drop.message.clone(),
+        });
+        if !reasons.contains(&drop.message) {
+            reasons.push(drop.message.clone());
+        }
+    }
+    entries.extend(attributes.entries());
+    reasons.extend(attributes.messages());
+    CompatReport {
+        connector: "ifc",
+        direction: ReportDirection::Export,
+        level: FidelityLevel::L1,
+        counts: CompatCounts {
+            exact,
+            // Attribute losses are conversions, not drops: one per attribute
+            // kind that actually occurred, matching the `Partial` entries above.
+            converted: usize::from(attributes.colours > 0)
+                + usize::from(attributes.normals > 0)
+                + usize::from(attributes.layers > 0),
+            dropped: drops.len(),
+            bytes,
+        },
+        entries,
+        capabilities: Vec::new(),
+        completeness: if !drops.is_empty() {
+            Completeness::Missing(reasons)
+        } else if !reasons.is_empty() {
+            // Some geometry was written but an attribute on it was not: the
+            // report is partial, never a clean `Complete`.
+            Completeness::Partial(reasons)
+        } else {
+            Completeness::Complete
+        },
+    }
+}
+
+/// A deterministic `GlobalId` for one role and index: no clock, no RNG.
+///
+/// FNV-1a over the role tag and the 128-bit index. The same database therefore
+/// always produces the same GlobalIds and byte-identical output.
+fn stable_global_id(role: &str, index: u128) -> GlobalId {
+    const OFFSET: u128 = 0x6c62_272e_07bb_0142_62b8_2175_6295_c58d;
+    const PRIME: u128 = 0x0000_0000_0100_0000_0000_0000_0000_013b;
+    let mut hash = OFFSET;
+    for byte in role.as_bytes().iter().chain(&[0xff]) {
+        hash ^= u128::from(*byte);
+        hash = hash.wrapping_mul(PRIME);
+    }
+    let mut remaining = index;
+    for _ in 0..16 {
+        hash ^= remaining & 0xff;
+        hash = hash.wrapping_mul(PRIME);
+        remaining >>= 8;
+    }
+    GlobalId(hash)
+}
+
+/// The GlobalId of one exported mesh entity.
+fn mesh_global_id(object: ObjectId) -> GlobalId {
+    stable_global_id("yacr/mesh", object.0)
+}
+
+#[cfg(test)]
+mod tests;

@@ -18,8 +18,9 @@ use std::io::Cursor;
 use cad_db::EntityColor;
 use cad_domain::{CadError, CadResult, Diagnostic, Mesh, Point3, UnitContext};
 use cad_import_core::{
-    compute_identity, ImportLimits, ImportPhase, ImportProgress, ImportProgressSink, ImportReport,
-    ImportRequest, ImportedDrawing, Importer, MeshImport, NoopProgress,
+    compute_identity, ConnectorDescriptor, ExportCapability, FidelityLevel, ImportCapability,
+    ImportLimits, ImportPhase, ImportProgress, ImportProgressSink, ImportReport, ImportRequest,
+    ImportedDrawing, Importer, MeshImport, NoopProgress,
 };
 
 /// Stable diagnostic code: a degenerate facet was dropped.
@@ -253,6 +254,7 @@ impl Importer for StlImporter {
             capabilities: outcome.capabilities,
             completeness: outcome.completeness,
             diagnostics: outcome.diagnostics,
+            connector: None,
             parse_ms: Some(started.elapsed().as_secs_f64() * 1000.0),
             object_xdata: Vec::new(),
         };
@@ -333,3 +335,24 @@ fn triangle_normal(points: [Point3; 3]) -> Option<Point3> {
 
 #[cfg(test)]
 mod tests;
+
+/// The STL connector descriptor.
+///
+/// Owned by this crate. `cad-export-mesh` writes both containers (`stl` =
+/// binary, `stl-ascii` = ASCII); the writer is lossy because STL has no colours,
+/// layers or units and per-face normals replace the neutral per-vertex normals.
+pub const DESCRIPTOR_STL: ConnectorDescriptor = ConnectorDescriptor {
+    id: "stl",
+    name_key: "connector.stl.name",
+    extensions: &["stl"],
+    import: Some(ImportCapability {
+        versions: "ASCII / binary STL",
+        container: "stl",
+    }),
+    export: Some(ExportCapability {
+        versions: "binary / ASCII STL",
+        level: FidelityLevel::L1,
+        lossy: true,
+    }),
+    declared_classes: &[],
+};

@@ -12,7 +12,7 @@ use cad_db::DbEntity;
 use cad_domain::*;
 
 use super::entity::EntityContext;
-use super::report::{ExportCounts, ExportDiagnostic, MappingOutcome};
+use super::report::{ExportCounts, ExportDiagnostic, ExportOutcome, MappingOutcome};
 
 /// A block definition written into the output, as one `BLOCK_RECORD`.
 #[derive(Debug, Clone)]
@@ -95,6 +95,7 @@ impl ExportAccumulator {
                         object,
                         code: format!("export.converted.{kind}"),
                         message: reason,
+                        outcome: ExportOutcome::Converted,
                     });
                 }
             }
@@ -105,6 +106,7 @@ impl ExportAccumulator {
                         object,
                         code: format!("export.dropped.{kind}"),
                         message: reason,
+                        outcome: ExportOutcome::Dropped,
                     });
                 }
             }
@@ -134,6 +136,7 @@ impl ExportAccumulator {
                 object,
                 code: code.to_string(),
                 message: reason,
+                outcome: ExportOutcome::Dropped,
             });
         }
     }
@@ -161,6 +164,7 @@ impl ExportAccumulator {
                 object,
                 code: code.to_string(),
                 message: reason,
+                outcome: ExportOutcome::Converted,
             });
         }
     }

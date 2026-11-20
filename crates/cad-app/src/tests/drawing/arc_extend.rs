@@ -451,6 +451,8 @@ fn extend_chooses_the_nearest_of_several_crossings() {
             identity: DocumentIdentity::Sha256([5u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            compat: Vec::new(),
+            sources: Vec::new(),
             persistence: crate::PersistenceState::untitled(),
         },
     );

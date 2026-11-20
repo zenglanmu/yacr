@@ -59,6 +59,8 @@ fn app_with(entities: Vec<cad_db::DbEntity>) -> (Application, SessionState) {
             identity: DocumentIdentity::Sha256([7u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            compat: Vec::new(),
+            sources: Vec::new(),
             persistence: crate::PersistenceState::untitled(),
         },
     );

@@ -41,8 +41,9 @@ pub use glb::{read_glb, GlbScene, MaterialLosses, PlacedMesh};
 use cad_db::{EntityColor, EntityRenderAttributes, EntityTransparency};
 use cad_domain::{CadError, CadResult, Diagnostic, EntityCapability, SupportStatus, UnitContext};
 use cad_import_core::{
-    compute_identity, ImportPhase, ImportProgress, ImportProgressSink, ImportReport, ImportRequest,
-    ImportedDrawing, Importer, MeshImport, NoopProgress,
+    compute_identity, ConnectorDescriptor, ImportCapability, ImportPhase, ImportProgress,
+    ImportProgressSink, ImportReport, ImportRequest, ImportedDrawing, Importer, MeshImport,
+    NoopProgress,
 };
 
 /// Stable refusal code: the file is a Revit family/family template, which has
@@ -305,6 +306,7 @@ impl Importer for RvtImporter {
             capabilities,
             completeness: outcome.completeness,
             diagnostics: outcome.diagnostics,
+            connector: None,
             parse_ms: Some(started.elapsed().as_secs_f64() * 1000.0),
             object_xdata: Vec::new(),
         };
@@ -622,3 +624,20 @@ fn summarize(items: &[String]) -> String {
         items.len() - LIMIT
     )
 }
+
+/// The Autodesk Revit connector descriptor (preview geometry).
+///
+/// Owned by this crate: read-only in this build, so `export` is `None` and an
+/// export attempt is the registry's named `export.rvt.not_implemented`
+/// refusal.
+pub const DESCRIPTOR_RVT: ConnectorDescriptor = ConnectorDescriptor {
+    id: "rvt",
+    name_key: "connector.rvt.name",
+    extensions: &["rvt", "rte"],
+    import: Some(ImportCapability {
+        versions: "Revit 2008-2027 (preview meshes; per-release status ceiling)",
+        container: "ole",
+    }),
+    export: None,
+    declared_classes: &[],
+};

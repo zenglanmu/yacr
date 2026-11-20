@@ -54,8 +54,9 @@ mod tests;
 use cad_db::EntityColor;
 use cad_domain::{CadError, CadResult, Diagnostic, DocumentIdentity, Mesh, Point3, UnitContext};
 use cad_import_core::{
-    ImportLimits, ImportPhase, ImportProgress, ImportProgressSink, ImportReport, ImportRequest,
-    ImportedDrawing, MeshImport,
+    ConnectorDescriptor, ExportCapability, FidelityLevel, ImportCapability, ImportLimits,
+    ImportPhase, ImportProgress, ImportProgressSink, ImportReport, ImportRequest, ImportedDrawing,
+    MeshImport,
 };
 
 /// One non-fatal fact the parser found. `partial` marks lost/inexact geometry;
@@ -156,6 +157,7 @@ pub(crate) fn publish(
         capabilities: outcome.capabilities,
         completeness: outcome.completeness,
         diagnostics: outcome.diagnostics,
+        connector: None,
         parse_ms: Some(started.elapsed().as_secs_f64() * 1000.0),
         object_xdata: Vec::new(),
     };
@@ -167,3 +169,45 @@ pub(crate) fn publish(
         vendor_records: Vec::new(),
     })
 }
+
+/// The PLY connector descriptor.
+///
+/// Owned by this crate. `cad-export-mesh` writes binary little-endian PLY 1.0;
+/// the writer is lossy because PLY stores no layers/units and an incomplete
+/// normal or colour set is dropped rather than invented.
+pub const DESCRIPTOR_PLY: ConnectorDescriptor = ConnectorDescriptor {
+    id: "ply",
+    name_key: "connector.ply.name",
+    extensions: &["ply"],
+    import: Some(ImportCapability {
+        versions: "PLY 1.0 (ascii / binary little- and big-endian)",
+        container: "ply",
+    }),
+    export: Some(ExportCapability {
+        versions: "PLY 1.0 (binary little-endian)",
+        level: FidelityLevel::L1,
+        lossy: true,
+    }),
+    declared_classes: &[],
+};
+
+/// The OFF/COFF connector descriptor.
+///
+/// Owned by this crate. `cad-export-mesh` writes ASCII `OFF`, or `COFF` when
+/// every vertex has a colour; the writer is lossy because OFF stores no
+/// layers/units and merges every source mesh into one table.
+pub const DESCRIPTOR_OFF: ConnectorDescriptor = ConnectorDescriptor {
+    id: "off",
+    name_key: "connector.off.name",
+    extensions: &["off", "coff"],
+    import: Some(ImportCapability {
+        versions: "OFF / COFF (ASCII)",
+        container: "off",
+    }),
+    export: Some(ExportCapability {
+        versions: "OFF / COFF (ASCII)",
+        level: FidelityLevel::L1,
+        lossy: true,
+    }),
+    declared_classes: &[],
+};

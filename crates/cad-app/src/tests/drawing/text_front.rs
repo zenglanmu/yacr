@@ -31,6 +31,8 @@ fn text_app(entities: Vec<(u128, SemanticGeometry, i64)>) -> (Application, Sessi
             identity: DocumentIdentity::Sha256([8u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            compat: Vec::new(),
+            sources: Vec::new(),
             persistence: crate::PersistenceState::untitled(),
         },
     );
@@ -310,6 +312,8 @@ fn text_in_a_block_definition_moves_within_its_own_scope_only() {
             identity: DocumentIdentity::Sha256([8u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            compat: Vec::new(),
+            sources: Vec::new(),
             persistence: crate::PersistenceState::untitled(),
         },
     );

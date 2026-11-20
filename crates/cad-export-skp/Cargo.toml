@@ -1,0 +1,18 @@
+[package]
+name = "cad-export-skp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "SketchUp (.skp) writer: neutral cad-db meshes via skpwright."
+
+[dependencies]
+cad-domain.workspace = true
+cad-db.workspace = true
+cad-import-core.workspace = true
+skpwright.workspace = true
+
+[dev-dependencies]
+cad-import-skp.workspace = true

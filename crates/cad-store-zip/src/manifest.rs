@@ -5,7 +5,7 @@
 //! {"document_uuid": "…", "entries": [{"crc": 1, "foreign": false, "len": 2,
 //!                                     "path": "document.json",
 //!                                     "sha256": "…", "sha256_c": null}, …],
-//!  "format": {"minor": 1, "read": 1, "write": 1}, "generator": "yacr/0.1.15",
+//!  "format": {"minor": 2, "read": 1, "write": 1}, "generator": "yacr/0.1.15",
 //!  "open_revision": 0, "saved_at": null, "saved_revision": 7,
 //!  "shard_map": {"10": ["elements/10-0.json"]}}
 //! ```

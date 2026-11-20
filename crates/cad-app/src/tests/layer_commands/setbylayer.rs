@@ -262,6 +262,8 @@ fn app_with_insert(member_layer: LayerId, locked: Option<LayerId>) -> (Applicati
             identity: DocumentIdentity::Sha256([13u8; 32]),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            compat: Vec::new(),
+            sources: Vec::new(),
             persistence: crate::PersistenceState::untitled(),
         },
     );

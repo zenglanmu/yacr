@@ -267,6 +267,8 @@ cat > "${STAGE}/Yacr.app/Contents/Info.plist" <<EOF
         <string>ply</string>
         <string>off</string>
         <string>coff</string>
+        <string>gltf</string>
+        <string>glb</string>
         <string>step</string>
         <string>stp</string>
         <string>ifc</string>

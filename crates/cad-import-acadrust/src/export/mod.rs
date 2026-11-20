@@ -36,6 +36,7 @@
 
 mod accumulator;
 mod acis;
+mod adapter;
 mod body;
 mod common;
 mod dimension;
@@ -52,9 +53,10 @@ mod solid_record;
 mod table;
 mod tables;
 
+pub use adapter::{AcadrustExporter, DESCRIPTOR_DWG, DESCRIPTOR_DXF};
 pub use report::{
-    ExportCounts, ExportDiagnostic, ExportFormat, ExportLimits, ExportReport, ExportSpace,
-    MappingOutcome,
+    ExportCounts, ExportDiagnostic, ExportFormat, ExportLimits, ExportOutcome, ExportReport,
+    ExportSpace, MappingOutcome,
 };
 
 use acadrust::entities::acis::SatVersion;
@@ -237,6 +239,7 @@ pub fn export(request: &ExportRequest<'_>) -> CadResult<(Vec<u8>, ExportReport)>
         report.notes.push(ExportDiagnostic {
             object: None,
             code: "export.note.dwg_experimental".into(),
+            outcome: report::ExportOutcome::Note,
             message: "DWG output is produced by the upstream acadrust DwgWriter from the same \
                       lossy reverse-mapped document as the DXF export; the conversion is \
                       experimental and lossy, and it is NOT verified against AutoCAD or any \
@@ -266,6 +269,7 @@ pub fn export(request: &ExportRequest<'_>) -> CadResult<(Vec<u8>, ExportReport)>
     report.notes.push(ExportDiagnostic {
         object: None,
         code: "export.note.style_resolved".into(),
+        outcome: report::ExportOutcome::Note,
         message: "ByLayer colour, linetype, lineweight and transparency are written symbolically \
                   (no group 62 = DXF colour 256, group 6 = BYLAYER, group 370 omitted = -1, group 440 \
                   omitted = transparency ByLayer), so a layer colour, linetype, lineweight or \
@@ -399,6 +403,7 @@ pub fn export(request: &ExportRequest<'_>) -> CadResult<(Vec<u8>, ExportReport)>
             report.notes.push(ExportDiagnostic {
                 object: None,
                 code: "export.note.acis_sab_dxf".into(),
+                outcome: report::ExportOutcome::Note,
                 message: format!(
                     "a 3DSOLID was written with its ACIS {acis} payload as a binary SAB blob \
                      (SAB header version {number}) in the DXF {container} ACDSDATA section, which \
@@ -416,6 +421,7 @@ pub fn export(request: &ExportRequest<'_>) -> CadResult<(Vec<u8>, ExportReport)>
             report.notes.push(ExportDiagnostic {
                 object: None,
                 code: "export.note.acis_sat_text_version".into(),
+                outcome: report::ExportOutcome::Note,
                 message: format!(
                     "a 3DSOLID was written with an inline ACIS {acis} SAT text payload (SAT header \
                      version {number}), so the whole file is written as {container} (R2010): from \
@@ -451,6 +457,7 @@ pub fn export(request: &ExportRequest<'_>) -> CadResult<(Vec<u8>, ExportReport)>
         report.notes.push(ExportDiagnostic {
             object: None,
             code: "export.note.acis_sab_dwg".into(),
+            outcome: report::ExportOutcome::Note,
             message: format!(
                 "a 3DSOLID was written with its ACIS {acis} payload as a binary SAB blob (SAB \
                  header version {number}) in the DWG AC1032 AcDs (AcDsPrototype_1b) section, which \
@@ -488,6 +495,7 @@ fn write_units(doc: &mut CadDocument, request: &ExportRequest<'_>, report: &mut 
         report.notes.push(ExportDiagnostic {
             object: None,
             code: "export.note.units_missing".into(),
+            outcome: report::ExportOutcome::Note,
             message: "no unit context supplied; $INSUNITS left at Unitless".into(),
         });
         return;
@@ -497,6 +505,7 @@ fn write_units(doc: &mut CadDocument, request: &ExportRequest<'_>, report: &mut 
         None => report.notes.push(ExportDiagnostic {
             object: None,
             code: "export.note.units".into(),
+            outcome: report::ExportOutcome::Note,
             message: format!(
                 "source unit {:?} has no $INSUNITS code; written as Unitless",
                 units.source
@@ -513,6 +522,7 @@ fn write_units(doc: &mut CadDocument, request: &ExportRequest<'_>, report: &mut 
             report.notes.push(ExportDiagnostic {
                 object: None,
                 code: "export.note.units_scale".into(),
+                outcome: report::ExportOutcome::Note,
                 message: format!(
                     "source unit {:?} is read at {factor} display unit(s) per source unit; \
                      $INSUNITS can only name the source unit, so the display scale is not \
@@ -571,6 +581,7 @@ fn write_linetype_scale(
         report.notes.push(ExportDiagnostic {
             object: None,
             code: "export.note.linetype_scale".into(),
+            outcome: report::ExportOutcome::Note,
             message: format!(
                 "stored linetype scale {scale} is not a positive finite number, so $LTSCALE is \
                  left at the DXF default 1.0"
@@ -622,6 +633,7 @@ fn write_header_points(
         report.notes.push(ExportDiagnostic {
             object: None,
             code: "export.note.limits_half_stored".into(),
+            outcome: report::ExportOutcome::Note,
             message: format!(
                 "the drawing stores only one limits corner (model limits {}); $LIMMIN and $LIMMAX                  are both written, so the missing corner is the DXF default rather than a value                  this database held",
                 database
@@ -683,6 +695,7 @@ fn write_scale_list(doc: &mut CadDocument, database: &DrawingDatabase, report: &
             report.notes.push(ExportDiagnostic {
                 object: None,
                 code: "export.note.scale_unwritable".into(),
+                outcome: report::ExportOutcome::Note,
                 message: format!(
                     "annotation scale '{}' has a non-finite ratio ({}/{}), so it is not written to                      ACAD_SCALELIST; the other rows are",
                     row.name, row.paper_units, row.drawing_units

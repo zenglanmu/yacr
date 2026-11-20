@@ -81,6 +81,7 @@ pub(crate) fn write_tables(
             report.notes.push(super::report::ExportDiagnostic {
                 object: None,
                 code: "export.dimstyle_text_style".into(),
+                outcome: super::report::ExportOutcome::Note,
                 message: format!(
                     "dimension style '{}': {reason}; group 340 names '{text_style}'",
                     style.name
@@ -204,6 +205,7 @@ fn write_layer_attributes(
         report.notes.push(super::report::ExportDiagnostic {
             object: None,
             code: "export.layer_plot_style_dropped".into(),
+            outcome: super::report::ExportOutcome::Note,
             message: format!(
                 "layer '{layer_name}' plot style '{name}' cannot be written (the DXF writer \
                  emits a plot-style handle, not a name); the default plot style is used"
@@ -238,6 +240,7 @@ fn exportable_linetype(
     report.notes.push(super::report::ExportDiagnostic {
         object: None,
         code: "export.layer_linetype_substituted".into(),
+        outcome: super::report::ExportOutcome::Note,
         message: format!(
             "layer '{layer_name}' names linetype '{name}', which this drawing's linetype table \
              does not define; written as 'Continuous'"

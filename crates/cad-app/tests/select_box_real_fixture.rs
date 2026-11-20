@@ -86,6 +86,8 @@ fn load() -> Option<(Application, SessionState)> {
             identity: DocumentIdentity::Temporary(1),
             units: UnitContext::drawing_units(),
             resource_keys: Vec::new(),
+            compat: Vec::new(),
+            sources: Vec::new(),
             persistence: cad_app::PersistenceState::untitled(),
         },
     );

@@ -156,6 +156,10 @@ pub const fn table_entry(kind: TableKind) -> &'static str {
         TableKind::PlotSettings => "tables/plot-settings.json",
         TableKind::ExternalReferences => "tables/xrefs.json",
         TableKind::Blocks => "tables/blocks.json",
+        // Host-owned document metadata (ADR-0037 D11): written from the
+        // `Document` slot, never encoded from the database itself.
+        TableKind::Sources => "tables/sources.json",
+        TableKind::Compat => "tables/compat.json",
     }
 }
 

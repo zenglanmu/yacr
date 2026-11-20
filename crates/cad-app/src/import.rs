@@ -1,28 +1,20 @@
 //! Format dispatcher for the shared import contract.
 //!
 //! `cad-app` and every carrier open bytes through one [`Importer`]. This module
-//! sniffs the format once ([`cad_import_core::detect_format`]) and delegates to
-//! the adapter that owns it. It is intentionally a plain dispatcher: no limits,
-//! progress, report or cancellation policy is duplicated here, so the adapters
-//! remain the single place each format's behaviour is defined.
+//! is a thin wrapper over [`crate::ConnectorRegistry::builtin`], which owns
+//! the ordered probe table (SKP, DGN V7/V8, OLE/RVT, DWG, DXF, IFC, STEP, STL,
+//! PLY, OFF, OBJ) and the per-format descriptors. No limits, progress,
+//! report or cancellation policy is duplicated here, so the adapters remain the
+//! single place each format's behaviour is defined.
 //!
 //! `ImportRequest::xref` is DWG-only. OBJ, STL, PLY, OFF, STEP, IFC, RVT and
 //! SKP imports ignore it; those formats have no CAD external references, and
 //! reporting otherwise would invent a resolution that never happened.
 
-use cad_domain::{CadError, CadResult};
-use cad_import_acadrust::AcadrustImporter;
-use cad_import_core::{
-    detect_format, DrawingFormat, ImportProgressSink, ImportedDrawing, NoopProgress,
-};
-use cad_import_dgn::DgnImporter;
-use cad_import_ifc::IfcImporter;
-use cad_import_mesh::{OffImporter, PlyImporter};
-use cad_import_obj::ObjImporter;
-use cad_import_rvt::RvtImporter;
-use cad_import_skp::SkpImporter;
-use cad_import_step::StepImporter;
-use cad_import_stl::StlImporter;
+use cad_domain::CadResult;
+use cad_import_core::{ImportProgressSink, ImportedDrawing, NoopProgress};
+
+use crate::connector::ConnectorRegistry;
 
 // Re-exported so call sites name one module (`cad_app::import`) instead of
 // mixing the neutral contract crate with the dispatcher.
@@ -36,23 +28,34 @@ pub const UNSUPPORTED_INPUT: &str = "input is not a supported drawing: expected 
      file, an STL file, a PLY file, or an OFF/COFF file";
 
 /// Sniff-and-delegate importer used by every carrier.
-#[derive(Default)]
+///
+/// Kept as the public entry point (and [`Importer`] implementation) so every
+/// call site keeps working; the dispatch itself is
+/// [`crate::ConnectorRegistry::builtin`], which owns the ordered probe table and the
+/// per-format descriptors. This type adds no second dispatch path.
 pub struct FormatImporter {
-    acadrust: AcadrustImporter,
-    step: StepImporter,
-    ifc: IfcImporter,
-    dgn: DgnImporter,
-    obj: ObjImporter,
-    stl: StlImporter,
-    ply: PlyImporter,
-    off: OffImporter,
-    rvt: RvtImporter,
-    skp: SkpImporter,
+    registry: ConnectorRegistry,
 }
 
 impl FormatImporter {
     pub fn new() -> Self {
-        Self::default()
+        FormatImporter {
+            registry: ConnectorRegistry::builtin(),
+        }
+    }
+
+    /// The registry this dispatcher delegates to.
+    ///
+    /// Exposed so a host can list descriptors (`descriptors()`) or drive an
+    /// export through the same table it imports with.
+    pub fn registry(&self) -> &ConnectorRegistry {
+        &self.registry
+    }
+}
+
+impl Default for FormatImporter {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -71,54 +74,24 @@ impl Importer for FormatImporter {
         cancelled: &dyn Fn() -> bool,
         progress: &dyn ImportProgressSink,
     ) -> CadResult<ImportedDrawing> {
-        match detect_format(&request.bytes) {
-            DrawingFormat::Dwg | DrawingFormat::Dxf => self
-                .acadrust
-                .import_with_progress(request, cancelled, progress),
-            DrawingFormat::Step => self.step.import_with_progress(request, cancelled, progress),
-            // IFC shares the Part 21 container with STEP but has its own schema
-            // and importer. Detection separates it by FILE_SCHEMA, so the STEP
-            // adapter (and cadmpeg) never sees these bytes.
-            DrawingFormat::Ifc => self.ifc.import_with_progress(request, cancelled, progress),
-            // DGN V7 has a fixed header and its own lane.
-            DrawingFormat::Dgn => self.dgn.import_with_progress(request, cancelled, progress),
-            DrawingFormat::Obj => self.obj.import_with_progress(request, cancelled, progress),
-            DrawingFormat::Stl => self.stl.import_with_progress(request, cancelled, progress),
-            DrawingFormat::Ply => self.ply.import_with_progress(request, cancelled, progress),
-            DrawingFormat::Off => self.off.import_with_progress(request, cancelled, progress),
-            // The OLE signature covers both Revit and DGN V8. `sniff` reads the
-            // compound-file directory for `Dgn~H`; it must run only after the
-            // file-size limit, because it parses that directory. Everything else
-            // goes to the RVT adapter, which refuses families by name.
-            // glTF is never a user-visible format and is never detected here.
-            DrawingFormat::Ole => {
-                if request.bytes.len() > request.limits.max_file_bytes {
-                    return Err(CadError::InvalidInput(format!(
-                        "file is {} bytes, over the {} byte import limit",
-                        request.bytes.len(),
-                        request.limits.max_file_bytes
-                    )));
-                }
-                if DgnImporter::sniff(&request.bytes) {
-                    self.dgn.import_with_progress(request, cancelled, progress)
-                } else {
-                    self.rvt.import_with_progress(request, cancelled, progress)
-                }
-            }
-            // The `.skp` header tells the containers apart but not the release;
-            // the SKP adapter maps the release to a status ceiling, refuses
-            // edge-only files by name, and is always `Partial`/`Unsupported` for
-            // measurement.
-            DrawingFormat::Skp => self.skp.import_with_progress(request, cancelled, progress),
-            DrawingFormat::Unknown => Err(CadError::CorruptData(UNSUPPORTED_INPUT.into())),
+        let mut imported = self.registry.import(request, cancelled, progress)?;
+        // Attribution for the persisted report/provenance rows (ADR-0037 D11):
+        // an adapter cannot know its registry key, so the dispatcher stamps it.
+        // `route` is a pure sniff with no import limit; the bytes already passed
+        // `import`, so re-sniffing is safe and cannot change the decision. A
+        // direct adapter call (tests, CLI probes) keeps `None`.
+        if imported.report.connector.is_none() {
+            imported.report.connector = self.registry.route(&request.bytes).map(|d| d.id);
         }
+        Ok(imported)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cad_domain::{DatabaseId, DocumentId};
+    use cad_domain::{CadError, DatabaseId, DocumentId};
+    use cad_import_core::{detect_format, DrawingFormat};
     use std::sync::Arc;
 
     fn request(bytes: Vec<u8>) -> ImportRequest {
@@ -273,6 +246,7 @@ mod tests {
                     && !message.contains("import.obj.")
                     && !message.contains("import.stl.")
                     && !message.contains("import.ply.")
+                    && !message.contains("import.gltf.")
                     && !message.contains("import.off."),
                 "version {version} leaked to a neighbouring lane: {message}"
             );
@@ -280,14 +254,14 @@ mod tests {
     }
 
     #[test]
-    fn the_gltf_intermediate_is_not_a_user_format() {
-        // `rvt` -> GLB is an implementation detail. GLB bytes fall through to
-        // Unknown and the single unsupported-input message; there is no glTF
-        // capability row, no detector arm and no picker entry.
+    fn a_truncated_glb_header_is_not_a_drawing() {
+        // glTF is a user format (the registry owns both lanes), but the GLB
+        // magic alone is not a container: a header shorter than the 12 fixed
+        // bytes is `Unknown` and gets the single unsupported-input message.
         let error = match FormatImporter::new()
             .import(&request(b"glTF\x02\x00\x00\x00".to_vec()), &|| false)
         {
-            Ok(_) => panic!("glTF is not a supported drawing"),
+            Ok(_) => panic!("a truncated header is not an importable drawing"),
             Err(error) => error,
         };
         match error {

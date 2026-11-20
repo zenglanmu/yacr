@@ -263,6 +263,7 @@ export const WEB_OPEN_EXTENSIONS: readonly string[] = Object.freeze([
   '.ymodel',
   '.dwg', '.dxf', '.dgn', '.obj', '.stl', '.ply', '.off', '.coff',
   '.step', '.stp', '.ifc', '.rvt', '.rte', '.rfa', '.rft', '.skp',
+  '.gltf', '.glb',
 ]);
 
 /** The stable prefix of every module-unavailable failure. */
