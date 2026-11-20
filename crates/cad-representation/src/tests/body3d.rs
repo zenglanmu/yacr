@@ -13,6 +13,7 @@ fn plane_mesh() -> Mesh {
     Mesh {
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
         vertices: vec![
             p3(0.0, 0.0, 0.0),
             p3(1.0, 0.0, 0.0),

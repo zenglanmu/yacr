@@ -331,6 +331,7 @@ fn place_run(
             colors: Vec::new(),
             uvs: out.uvs,
             texture: None,
+            pbr: None,
         };
         if uv_ok && mesh.uvs.len() == mesh.vertices.len() {
             mesh.texture = plan.key;

@@ -418,4 +418,211 @@ impl Renderer {
             .flat_map(|batch| batch.arc_runs.iter().map(|run| run.stream))
             .collect()
     }
+
+    /// Create the accelerated tier's pipelines, layouts and per-frame camera
+    /// uniform. Returns `false` (and leaves the pulled resources cleared) unless
+    /// the tier is [`RenderTier::Accelerated`] and the shared flags layout is
+    /// present; the caller downgrades the tier on `false` rather than leaving it
+    /// labelled `Accelerated` with a missing pulled path.
+    ///
+    /// The pulled pipelines have **no vertex buffers**: every input is pulled
+    /// from group 2's read-only storage buffers, so they are not WebGL2-safe and
+    /// exist only on the accelerated tier.
+    pub(super) fn create_pulled_resources(&mut self, device: &wgpu::Device) -> bool {
+        // Drop any previous device generation's pulled resources first, so a
+        // downgrade cannot leave stale handles from the old device.
+        self.pulled_camera_bind_group = None;
+        self.pulled_camera_layout = None;
+        self.pulled_camera_buffer = None;
+        self.pulled_line_storage_layout = None;
+        self.pulled_mesh_storage_layout = None;
+        self.line_pulled_pipeline = None;
+        self.mesh_pulled_pipeline = None;
+        self.mesh_pulled_mirrored_pipeline = None;
+        if self.render_tier != RenderTier::Accelerated {
+            return false;
+        }
+        let Some(flags_layout) = self.flags_layout.clone() else {
+            return false;
+        };
+        let pulled_camera_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("cad-pulled-camera-layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    // The pulled line fragment stage reads `c3.x` (the AA line SDF
+                    // ramp width), so the camera uniform must be visible to both
+                    // stages; the mesh fragment stage ignores it.
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(u64::from(PULLED_CAMERA_BYTES)),
+                    },
+                    count: None,
+                }],
+            });
+        let camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("cad-pulled-camera"),
+            size: u64::from(PULLED_CAMERA_BYTES),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("cad-pulled-camera-bind"),
+            layout: &pulled_camera_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &camera_buffer,
+                    offset: 0,
+                    size: wgpu::BufferSize::new(u64::from(PULLED_CAMERA_BYTES)),
+                }),
+            }],
+        });
+        let storage_entry = |binding: u32| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::VERTEX,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        };
+        let line_storage_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("cad-pulled-line-storage-layout"),
+                entries: &[storage_entry(0), storage_entry(1)],
+            });
+        let mesh_storage_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("cad-pulled-mesh-storage-layout"),
+                entries: &[storage_entry(0), storage_entry(1), storage_entry(2)],
+            });
+        let line_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("cad-pulled-line-pipeline-layout"),
+            bind_group_layouts: &[
+                Some(&pulled_camera_layout),
+                Some(&flags_layout),
+                Some(&line_storage_layout),
+            ],
+            immediate_size: 0,
+        });
+        let mesh_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("cad-pulled-mesh-pipeline-layout"),
+            bind_group_layouts: &[
+                Some(&pulled_camera_layout),
+                Some(&flags_layout),
+                Some(&mesh_storage_layout),
+            ],
+            immediate_size: 0,
+        });
+        let line_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("cad-pulled-lines"),
+            source: wgpu::ShaderSource::Wgsl(LINE_PULLED_SHADER.into()),
+        });
+        let mesh_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("cad-pulled-mesh"),
+            source: wgpu::ShaderSource::Wgsl(MESH_PULLED_SHADER.into()),
+        });
+        self.line_pulled_pipeline = Some(device.create_render_pipeline(
+            &wgpu::RenderPipelineDescriptor {
+                label: Some("cad-pulled-lines-pipeline"),
+                layout: Some(&line_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &line_shader,
+                    entry_point: Some("vs_main"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    unclipped_depth: false,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    conservative: false,
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: DEPTH_FORMAT,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &line_shader,
+                    entry_point: Some("fs_main"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: self.target_format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            },
+        ));
+        let mesh_pipeline = |front_face: wgpu::FrontFace, label: &str| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(&mesh_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &mesh_shader,
+                    entry_point: Some("vs_main"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face,
+                    cull_mode: Some(wgpu::Face::Back),
+                    unclipped_depth: false,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    conservative: false,
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: DEPTH_FORMAT,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::Less),
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &mesh_shader,
+                    entry_point: Some("fs_main"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: self.target_format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        self.mesh_pulled_pipeline = Some(mesh_pipeline(
+            wgpu::FrontFace::Ccw,
+            "cad-pulled-mesh-pipeline",
+        ));
+        self.mesh_pulled_mirrored_pipeline = Some(mesh_pipeline(
+            wgpu::FrontFace::Cw,
+            "cad-pulled-mesh-pipeline-mirrored",
+        ));
+        self.pulled_camera_layout = Some(pulled_camera_layout);
+        self.pulled_camera_charge =
+            Some(self.gpu_charge(GpuMemoryCategory::Uniform, camera_buffer.size()));
+        self.pulled_camera_buffer = Some(camera_buffer);
+        self.pulled_camera_bind_group = Some(camera_bind_group);
+        self.pulled_line_storage_layout = Some(line_storage_layout);
+        self.pulled_mesh_storage_layout = Some(mesh_storage_layout);
+        true
+    }
 }

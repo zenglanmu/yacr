@@ -91,6 +91,7 @@ fn lines_batch(entity: u128, vertices: Vec<[f32; 3]>) -> RenderBatch {
     RenderBatch {
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
         conics: Vec::new(),
         local_origin: Point3 {
             x: 0.0,
@@ -121,6 +122,7 @@ fn quad_mesh(entity: u128, half: f32, x: f64, y: f64) -> RenderBatch {
     RenderBatch {
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
         conics: Vec::new(),
         local_origin: Point3 { x, y, z: 0.0 },
         topology: RenderTopology::Mesh,

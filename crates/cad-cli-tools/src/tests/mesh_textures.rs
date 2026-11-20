@@ -80,6 +80,7 @@ fn triangle(texture: Option<&str>) -> Mesh {
         // surface property (ADR-0038 D1), and only the texture key is dropped.
         uvs: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
         texture: texture.map(str::to_owned),
+        pbr: None,
     }
 }
 

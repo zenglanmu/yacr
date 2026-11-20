@@ -164,6 +164,7 @@ pub(crate) fn element_mesh(
         // here is already final, so a caller-side UV set stays 1:1 with it.
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
     }))
 }
 

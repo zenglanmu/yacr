@@ -487,24 +487,31 @@ fn uniform_scale(transform: &Transform3) -> f64 {
 /// Shared by the standalone `Mesh` arm and a body's display cache so the two
 /// cannot drift.
 ///
-/// The clone is deliberate for the fields this function does not touch: `uvs` and
-/// `texture` belong to the surface, not to the placement (ADR-0038 D1/D9), so a
-/// move/rotate/mirror carries them unchanged — a mirror does **not** flip U, which
-/// is the documented convention. Forgetting this would make a textured mesh lose
-/// its texture after any edit.
+/// Every other field is spelled out deliberately: `uvs`, `texture` and `pbr`
+/// belong to the surface/material, not to the placement (ADR-0038 D1/D9,
+/// ADR-0039 D1), so a move/rotate/mirror carries them unchanged — a mirror does
+/// **not** flip U, which is the documented convention. Forgetting one would make a
+/// textured/PBR mesh lose its material after any edit, so a new `Mesh` field must
+/// be added here explicitly rather than inherited from a clone.
 fn transform_mesh(mesh: &Mesh, transform: &Transform3) -> Mesh {
-    let mut out = mesh.clone();
-    out.vertices = mesh
-        .vertices
-        .iter()
-        .map(|p| transform.apply_point(*p))
-        .collect();
-    out.normals = mesh
-        .normals
-        .iter()
-        .map(|n| normalize(apply_vector(transform, *n)))
-        .collect();
-    out
+    Mesh {
+        vertices: mesh
+            .vertices
+            .iter()
+            .map(|p| transform.apply_point(*p))
+            .collect(),
+        normals: mesh
+            .normals
+            .iter()
+            .map(|n| normalize(apply_vector(transform, *n)))
+            .collect(),
+        triangles: mesh.triangles.clone(),
+        face_sources: mesh.face_sources.clone(),
+        colors: mesh.colors.clone(),
+        uvs: mesh.uvs.clone(),
+        texture: mesh.texture.clone(),
+        pbr: mesh.pbr.clone(),
+    }
 }
 
 /// Compose a similarity transform onto a body's placement.

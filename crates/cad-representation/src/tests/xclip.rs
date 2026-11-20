@@ -119,6 +119,7 @@ fn triangle_mesh() -> Mesh {
     Mesh {
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
         vertices: vec![p(-2.0, -2.0), p(2.0, -2.0), p(0.0, 2.0)],
         triangles: vec![[0, 1, 2]],
         normals: Vec::new(),
@@ -132,6 +133,7 @@ fn square_mesh() -> Mesh {
     Mesh {
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
         vertices: vec![p(0.0, 0.0), p(10.0, 0.0), p(10.0, 10.0), p(0.0, 10.0)],
         triangles: vec![[0, 1, 2], [0, 2, 3]],
         normals: Vec::new(),

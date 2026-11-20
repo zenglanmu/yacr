@@ -69,6 +69,7 @@ fn base_band() -> RenderBatch {
     RenderBatch {
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
         conics: Vec::new(),
         local_origin: p(0.0, 0.0),
         topology: RenderTopology::Lines,

@@ -40,6 +40,7 @@ fn conic_batch(conics: Vec<RenderConic>, entity: u128) -> RenderBatch {
     RenderBatch {
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
         local_origin: origin,
         topology: RenderTopology::Conics,
         vertices: Vec::new(),
@@ -249,6 +250,7 @@ fn straight_lines(origin: Point3, segments: Vec<[f64; 3]>, entity: u128) -> Rend
     RenderBatch {
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
         local_origin: origin,
         topology: RenderTopology::Lines,
         vertices,
@@ -376,6 +378,7 @@ fn chord_lines_batch(conics: &[RenderConic], entity: u128) -> RenderBatch {
     RenderBatch {
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
         local_origin: origin,
         topology: RenderTopology::Lines,
         vertices,

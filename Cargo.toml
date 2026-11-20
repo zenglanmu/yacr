@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-# `vendor/rvt` is a path-patched copy of the pinned `rvt` 0.24.0 (ADR-0035,
+# `vendor/rvt` is a path-patched copy of the pinned `rvt` 0.25.0 (ADR-0035,
 # `docs/rvt-patches.md`). Cargo makes a path dependency inside the workspace
 # directory a member unless it is excluded; keeping it out of the workspace
 # keeps the upstream crate's own tests, formatting and 1000-line rule out of
@@ -197,14 +197,18 @@ cadkit-core = { version = "=0.5.2" }
 
 # Autodesk Revit reader (`cad-import-rvt`). Apache-2.0, pure Rust, pinned
 # exactly: pre-1.0, and the crate publishes faster than any range can track
-# (0.22.0 on 2026-11-13, 0.23.0 and 0.24.0 on 2026-11-14). It is a **preview**
+# (0.22.0 on 2026-11-13, 0.23.0/0.24.0 on 2026-11-14, 0.25.0 on 2026-11-15). It is a **preview**
 # reader: element bodies are bounding boxes on Revit 2008-2023, 2024/2025 are
 # `partial`, 2026/2027 `experimental`, and family files carry no geometry.
 # 0.22.0 → 0.24.0 changed no glTF structure (the pinned GLB shape this crate
 # reads is unchanged); it selects invalid material indices away instead of
 # writing them, and its element-body recovery moved on (wall tops, redirected
 # roofs, multistorey stairs, embed hosts) — so the preview *geometry* differs,
-# the hand-off *format* does not. Upstream's support matrix also lowered two
+# the hand-off *format* does not. 0.24.0 → 0.25.0 extracts the name-based
+# metallic/roughness mapping into `src/ifc/pbr.rs` and revises element-body
+# placement/extrusion math; the material-selection chain (the one our patch
+# touches) and the GLB shape are unchanged, and 0.25.0 still writes **no**
+# textures (no `images`/`textures`/`TEXCOORD_0`). Upstream's support matrix also lowered two
 # capability ceilings (`cfb-container-open`,
 # `record-elevation-storey-bind`: `verified` → `partial`); this crate's own
 # ceiling follows the per-release status instead, which did not change.
@@ -214,7 +218,7 @@ cadkit-core = { version = "=0.5.2" }
 # glTF is only its internal hand-off format (the crate has no gltf dependency);
 # `gltf` reads that single-buffer GLB. `default-features = false` drops the
 # `image` importer, which this lane never needs, and keeps `utils`/`names`.
-rvt = "=0.24.0"
+rvt = "=0.25.0"
 gltf = { version = "=1.4.1", default-features = false, features = ["utils", "names", "extras"] }
 
 # SketchUp `.skp` reader (`cad-import-skp`). **GPL-3.0-only**, pure Rust with a
@@ -312,7 +316,7 @@ debug = 1
 # Only these two dependencies may be path-patched, each with a tracked ledger
 # row (ADR-0031 for `acadrust`, ADR-0035 for `rvt`); `scripts/check-architecture.py`
 # fails closed on any other key. `vendor/rvt` is a fixed copy of the pinned
-# 0.24.0 source with `src/ifc/gltf.rs` patched (see `docs/rvt-patches.md`);
-# the workspace dependency above still pins `=0.24.0`.
+# 0.25.0 source with `src/ifc/gltf.rs` patched (see `docs/rvt-patches.md`);
+# the workspace dependency above still pins `=0.25.0`.
 [patch.crates-io]
 rvt = { path = "vendor/rvt" }

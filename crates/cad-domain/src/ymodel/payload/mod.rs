@@ -29,6 +29,7 @@
 //! * [`basic`] — the analytic primitives, text/shape/insert, opaque, compound,
 //!   image and mask.
 //! * [`mesh`] — meshes, sub-element sources and the whole 3D body / B-rep tree.
+//! * [`mesh_pbr`] — the nested `cad:Mesh.pbr` material object (ADR-0039).
 //! * [`dimension`], [`hatch`], [`multileader`], [`table`] — the four families
 //!   with their nested definition types.
 //!
@@ -46,6 +47,7 @@ mod basic;
 mod dimension;
 mod hatch;
 mod mesh;
+mod mesh_pbr;
 mod multileader;
 mod table;
 #[cfg(test)]

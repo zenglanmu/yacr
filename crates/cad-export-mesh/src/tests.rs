@@ -64,6 +64,7 @@ fn quad(colors: Option<[[u8; 3]; 4]>) -> Mesh {
         colors: colors.map(|colors| colors.to_vec()).unwrap_or_default(),
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
     }
 }
 
@@ -732,6 +733,7 @@ fn stl_exact_count_excludes_meshes_with_dropped_facets() {
         colors: Vec::new(),
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
     };
     let database = mesh_database(mesh);
     let output = export_output(MeshFormat::StlBinary, &database);

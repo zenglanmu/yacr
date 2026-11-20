@@ -46,6 +46,10 @@ pub mod codes {
     pub const RENDER_DEVICE_LOST: &str = "render.device_lost";
     /// A submitted batch carries a lineweight the renderer does not draw.
     pub const RENDER_LINEWEIGHT_NOT_DRAWN: &str = "render.lineweight_not_drawn";
+    /// A PBR batch's normal-map channel was disabled because no tangent frame
+    /// could be generated from its UVs (degenerate parameterisation). The batch
+    /// still draws its scalar factors; no tangent is invented (ADR-0039 D6).
+    pub const RENDER_PBR_TANGENT_UNAVAILABLE: &str = "render.pbr.tangent_unavailable";
     /// An in-place resident-batch overwrite was refused; the caller must fall
     /// back to a full base re-stage. The specific fit-gate reason is carried by
     /// [`BatchOverwriteRefusal::reason`](crate::BatchOverwriteRefusal::reason).

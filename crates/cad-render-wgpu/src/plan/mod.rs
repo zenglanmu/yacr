@@ -36,6 +36,8 @@ mod mesh_overlay_tests;
 #[cfg(test)]
 mod page_plan_tests;
 #[cfg(test)]
+mod pbr_tangent_tests;
+#[cfg(test)]
 mod pick_table_tests;
 
 pub(crate) use frame_plan::*;

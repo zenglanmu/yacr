@@ -83,6 +83,7 @@ fn field_kind_spelling(kind: FieldKind) -> String {
         FieldKind::VecU32x3 => "vec_u32x3",
         FieldKind::U8x3List => "u8x3_list",
         FieldKind::VecOptSubElement => "vec_opt_sub_element",
+        FieldKind::MeshPbr => "mesh_pbr",
         FieldKind::Geometry => "geometry",
         FieldKind::VecGeometry => "vec_geometry",
         FieldKind::Bytes => "bytes",
@@ -198,6 +199,20 @@ mod tests {
         );
         // A non-identifier kind never borrows the family syntax.
         assert!(!field_kind_spelling(FieldKind::Point3).contains(':'));
+    }
+
+    #[test]
+    fn the_mesh_pbr_field_kind_is_published() {
+        // ADR-0039 D2: every `FieldKind` variant must be spellable here, and the
+        // registry must actually use this one on `cad:Mesh`.
+        assert_eq!(field_kind_spelling(FieldKind::MeshPbr), "mesh_pbr");
+        let mesh = cad_domain::ymodel::by_type_key("cad:Mesh").expect("cad:Mesh is registered");
+        assert!(
+            mesh.fields
+                .iter()
+                .any(|field| field.name == "pbr" && field.kind == FieldKind::MeshPbr),
+            "cad:Mesh must declare the pbr field"
+        );
     }
 
     #[test]

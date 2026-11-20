@@ -21,6 +21,17 @@
 //! as `export.gltf.texture_not_written` and is not counted as written exactly;
 //! nothing is ever sampled from an invented or placeholder image.
 //!
+//! A mesh that declares PBR channels (`Mesh::pbr`, ADR-0039 D5) writes the
+//! metallic-roughness factors, the four texture maps (`metallicRoughnessTexture`,
+//! `normalTexture`, `occlusionTexture`, `emissiveTexture`) and the linear
+//! `emissiveFactor` on its material, with one `images[]`/`textures[]` pair per
+//! distinct document texture key. The material dedup key includes the whole PBR
+//! tuple, so two meshes never share a material unless every channel matches. A
+//! mesh with `pbr: None` writes **no** PBR key, which keeps its output
+//! byte-identical to the pre-ADR-0039 writer; a PBR slot whose bytes the document
+//! lacks is the same `texture_not_written` conversion as a lost base-colour
+//! texture, and the remaining channels are still written.
+//!
 //! glTF is **metres, +Y up**; `cad-db` coordinates are +Z up in the document's
 //! own source unit. The scale and the frame rotation are applied exactly once,
 //! in [`write`], and both are reported as provenance notes. Unknown units are
@@ -36,7 +47,9 @@
 //! passes it in.
 
 mod collect;
+mod pbr;
 mod report;
+mod texture;
 mod write;
 
 use cad_domain::{CadError, CadResult};

@@ -244,6 +244,7 @@ impl Importer for StlImporter {
                 colors: Vec::new(),
                 uvs: Vec::new(),
                 texture: None,
+                pbr: None,
             },
             EntityColor::ByLayer,
         )?;

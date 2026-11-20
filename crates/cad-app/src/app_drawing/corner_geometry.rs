@@ -69,7 +69,7 @@ pub(super) enum GeometryUpdate {
     /// (knot insertion + truncation in `cad_geometry::sub_curve`; same degree,
     /// same weights, tangent point as an exact endpoint).
     Spline {
-        geometry: SemanticGeometry,
+        geometry: Box<SemanticGeometry>,
     },
     /// Re-cut a CIRCLE into the ARC between its two crossings (the `R = 0`
     /// CIRCLE↔CIRCLE sharp corner). `center`/`normal`/`radius` are the entity's own

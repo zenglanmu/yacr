@@ -113,6 +113,9 @@ pub(crate) fn wide_polyline_mesh(
         // positions). The stroke therefore always draws with the batch colour.
         uvs: Vec::new(),
         texture: None,
+        // Synthesised geometry declares no material channels either: a stroke
+        // has no source PBR material (ADR-0039).
+        pbr: None,
     };
     for (point, offset) in centerline.iter().zip(offsets.iter()) {
         mesh.vertices.push(add(*point, *offset));

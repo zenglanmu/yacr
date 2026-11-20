@@ -229,6 +229,7 @@ fn quad_entity(id: u128, cx: f64, cy: f64, half: f64) -> DbEntity {
             colors: Vec::new(),
             uvs: Vec::new(),
             texture: None,
+            pbr: None,
         }),
         draw_order: id as i64,
     }

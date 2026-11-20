@@ -298,6 +298,7 @@ fn mesh_per_vertex_colors_interpolate_at_clip_vertices() {
     let mesh = Mesh {
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
         vertices: vec![p(-2.0, 0.0), p(0.0, 0.0), p(0.0, 2.0)],
         triangles: vec![[0, 1, 2]],
         normals: Vec::new(),
@@ -329,6 +330,7 @@ fn mesh_with_a_missing_index_is_refused_not_dropped() {
     let mesh = Mesh {
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
         vertices: vec![p(0.0, 0.0)],
         triangles: vec![[0, 1, 2]],
         normals: Vec::new(),

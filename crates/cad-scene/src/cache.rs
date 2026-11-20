@@ -66,8 +66,9 @@ impl SceneCache {
         &self.masks
     }
 
-    /// Every distinct mesh base-colour texture key held by this cache,
-    /// deduplicated and sorted (see [`mesh_texture_keys`]).
+    /// Every distinct mesh texture key held by this cache — base-colour keys and
+    /// the four PBR channel slots — deduplicated and sorted (see
+    /// [`mesh_texture_keys`]).
     ///
     /// The host calls this on a base change to resolve exactly the textures the
     /// resident batches reference; the renderer prunes any key outside the set it
@@ -289,9 +290,11 @@ impl SceneCache {
                         vertices: Vec::new(),
                         normals: Vec::new(),
                         colors: Vec::new(),
-                        // A conic batch has no surface, hence no UV0 or texture.
+                        // A conic batch has no surface, hence no UV0, texture or
+                        // PBR channel set.
                         uvs: Vec::new(),
                         texture: None,
+                        pbr: None,
                         indices: Vec::new(),
                         edges: Vec::new(),
                         conics: vec![record],
@@ -320,6 +323,7 @@ impl SceneCache {
                 colors,
                 uvs,
                 texture,
+                pbr,
                 indices,
                 edges,
                 origin,
@@ -349,6 +353,8 @@ impl SceneCache {
                         Vec::new(),
                         Vec::new(),
                         Vec::new(),
+                        None,
+                        // A polyline has no surface material, hence no PBR set.
                         None,
                         Vec::new(),
                         Vec::new(),
@@ -385,6 +391,8 @@ impl SceneCache {
                         Vec::new(),
                         Vec::new(),
                         None,
+                        // A polyline has no surface material, hence no PBR set.
+                        None,
                         Vec::new(),
                         Vec::new(),
                         origin,
@@ -402,6 +410,7 @@ impl SceneCache {
                         colors,
                         uvs,
                         texture,
+                        pbr,
                     } = mesh_streams(mesh);
                     // A plain `Mesh` keeps the legacy triangle-derived
                     // overlay (one segment per unique triangle edge;
@@ -419,6 +428,7 @@ impl SceneCache {
                         colors,
                         uvs,
                         texture,
+                        pbr,
                         kept,
                         edge_positions,
                         origin,
@@ -439,6 +449,7 @@ impl SceneCache {
                         colors,
                         uvs,
                         texture,
+                        pbr,
                     } = mesh_streams(mesh);
                     let mut edge_positions = stored_edge_positions(edges, origin);
                     if edge_positions.is_empty() {
@@ -457,6 +468,7 @@ impl SceneCache {
                         colors,
                         uvs,
                         texture,
+                        pbr,
                         kept,
                         edge_positions,
                         origin,
@@ -488,6 +500,9 @@ impl SceneCache {
                 // unless the mesh carried a valid key and one UV per vertex.
                 uvs,
                 texture,
+                // PBR channels, sanitised by `mesh_streams`: `None` unless the
+                // source declared a material with finite in-range factors.
+                pbr,
                 indices,
                 edges,
                 conics: Vec::new(),
@@ -620,6 +635,8 @@ struct MeshStreams {
     uvs: Vec<[f32; 2]>,
     /// The document-owned texture key (already converted to a [`ResourceKey`]).
     texture: Option<ResourceKey>,
+    /// The sanitised PBR channel set, or `None` when the source declared none.
+    pbr: Option<RenderPbr>,
 }
 
 /// Build a mesh batch's shared streams.
@@ -685,15 +702,63 @@ fn mesh_streams(mesh: &Mesh) -> MeshStreams {
                 .flatten()
                 .all(|component| component.is_finite())
         });
-    let (uvs, texture) = match textured {
-        Some(key) => (
-            mesh.uvs
-                .iter()
-                .map(|uv| [uv[0] as f32, uv[1] as f32])
-                .collect(),
-            Some(ResourceKey(key.to_owned())),
-        ),
-        None => (Vec::new(), None),
+    let texture = textured.map(|key| Some(ResourceKey(key.to_owned())));
+    // PBR channels (ADR-0039 D6), sanitised rather than trusted:
+    //
+    // * every scalar must be finite and inside `[0, 1]` — a violating value drops
+    //   the whole `pbr` (there is no honest partial material), matching the
+    //   `cad-db` rule that refuses such a mesh at import;
+    // * a texture slot needs a valid document key **and** a non-empty, finite,
+    //   vertex-aligned UV0 stream, because every PBR map samples UV0. A slot
+    //   without a parameterisation is dropped (channel disabled) and the scalar
+    //   factors are kept — sampling it would need invented UVs.
+    let uvs_usable = !mesh.uvs.is_empty()
+        && mesh.uvs.len() == mesh.vertices.len()
+        && mesh
+            .uvs
+            .iter()
+            .flatten()
+            .all(|component| component.is_finite());
+    let pbr = mesh.pbr.as_ref().and_then(|pbr| {
+        let unit = |value: f64| value.is_finite() && (0.0..=1.0).contains(&value);
+        if !unit(pbr.metallic)
+            || !unit(pbr.roughness)
+            || !unit(pbr.occlusion_strength)
+            || !pbr.emissive.iter().copied().all(unit)
+        {
+            return None;
+        }
+        let slot = |key: &Option<String>| {
+            key.as_deref()
+                .filter(|key| is_valid_texture_key(key))
+                .filter(|_| uvs_usable)
+                .map(|key| ResourceKey(key.to_owned()))
+        };
+        Some(RenderPbr {
+            metallic: pbr.metallic as f32,
+            roughness: pbr.roughness as f32,
+            emissive: [
+                pbr.emissive[0] as f32,
+                pbr.emissive[1] as f32,
+                pbr.emissive[2] as f32,
+            ],
+            occlusion_strength: pbr.occlusion_strength as f32,
+            metallic_roughness: slot(&pbr.metallic_roughness_texture),
+            normal: slot(&pbr.normal_texture),
+            emissive_texture: slot(&pbr.emissive_texture),
+            occlusion: slot(&pbr.occlusion_texture),
+        })
+    });
+    // UV0 is uploaded when any channel that samples it is active: the base colour
+    // texture or any surviving PBR map.
+    let needs_uvs = texture.is_some() || pbr.as_ref().is_some_and(RenderPbr::has_textures);
+    let uvs = if needs_uvs {
+        mesh.uvs
+            .iter()
+            .map(|uv| [uv[0] as f32, uv[1] as f32])
+            .collect()
+    } else {
+        Vec::new()
     };
     MeshStreams {
         origin,
@@ -702,7 +767,8 @@ fn mesh_streams(mesh: &Mesh) -> MeshStreams {
         normals,
         colors,
         uvs,
-        texture,
+        texture: texture.flatten(),
+        pbr,
     }
 }
 

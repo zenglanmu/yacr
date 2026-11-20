@@ -30,10 +30,10 @@
 //! ```
 // Tracker: VW1-04, VW1-06.
 
+use super::{IfcModel, MaterialInfo};
 use super::body_geometry::{self, Body, Placement, body_mesh, element_body};
 use super::entities::IfcEntity;
 use super::pbr::PbrMaterial;
-use super::{IfcModel, MaterialInfo};
 use serde::{Deserialize, Serialize};
 
 /// Top-level glTF 2.0 JSON document.
@@ -729,7 +729,7 @@ pub fn build_gltf(model: &IfcModel) -> (GltfDocument, Vec<u8>) {
                     None => {
                         let alpha = element_alpha.get(&entity_index).copied();
                         let key = (ifc_type.clone(), alpha.map_or(u32::MAX, f32::to_bits));
-                        let index = *category_alpha_materials.entry(key).or_insert_with(|| {
+                        Some(*category_alpha_materials.entry(key).or_insert_with(|| {
                             let mut material = category_material(ifc_type);
                             if let Some(alpha) = alpha {
                                 material.pbr_metallic_roughness.base_color_factor[3] = alpha;
@@ -738,8 +738,7 @@ pub fn build_gltf(model: &IfcModel) -> (GltfDocument, Vec<u8>) {
                             }
                             doc.materials.push(material);
                             doc.materials.len() - 1
-                        });
-                        Some(index)
+                        }))
                     }
                 };
                 let mut attributes = std::collections::BTreeMap::new();

@@ -714,5 +714,5 @@ pub(super) fn plan_mixed_weld(sources: &[DbEntity], close: bool) -> CadResult<Jo
     }
     let degree = chain.iter().map(Span::degree).max().unwrap_or(1).max(1);
     let elevated: Vec<Span> = chain.iter().map(|span| span.elevated(degree)).collect();
-    Ok(Joined::Raw(assemble(&elevated, degree, close)))
+    Ok(Joined::Raw(Box::new(assemble(&elevated, degree, close))))
 }

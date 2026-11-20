@@ -382,6 +382,7 @@ fn build_mesh(
         // be sampled. The loss is reported per document instead.
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
     }))
 }
 

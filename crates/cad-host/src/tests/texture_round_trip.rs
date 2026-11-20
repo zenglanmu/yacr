@@ -192,6 +192,7 @@ fn textured_mesh() -> Mesh {
         colors: Vec::new(),
         uvs: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
         texture: Some(TEXTURE_KEY.to_string()),
+        pbr: None,
     }
 }
 

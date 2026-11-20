@@ -151,6 +151,7 @@ pub(crate) fn publish(
             // `s`/`t` reports the loss instead of keeping UVs nothing can sample.
             uvs: Vec::new(),
             texture: None,
+            pbr: None,
         },
         // Per-vertex colours, when present, are carried by the mesh; the entity
         // colour stays ByLayer so an absent colour never wins over them.

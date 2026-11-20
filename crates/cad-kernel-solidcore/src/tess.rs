@@ -262,6 +262,7 @@ impl SolidCoreTessellator {
                 colors: Vec::new(),
                 uvs: Vec::new(),
                 texture: None,
+                pbr: None,
             },
             edges,
             precision: Precision::Approximate {

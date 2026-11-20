@@ -19,6 +19,16 @@
 //! the entity also has an explicit colour). A mesh without a texture writes
 //! exactly the bytes it wrote before this capability existed.
 //!
+//! PBR channels (ADR-0039 D5) follow the same shape: `metallicFactor`,
+//! `roughnessFactor` and `metallicRoughnessTexture` join `pbrMetallicRoughness`,
+//! `normalTexture` (with the authored `scale: 1.0` — the domain stores no separate
+//! scale), `occlusionTexture` (with `strength`), `emissiveTexture` and
+//! `emissiveFactor` join the material, and every distinct texture key becomes one
+//! `images[]`/`textures[]` pair. A mesh with `pbr: None` writes **no** PBR key at
+//! all, so an untextured, un-PBR export is byte-identical to the pre-ADR-0039
+//! output; a PBR slot whose bytes the document lacks is one
+//! `texture_not_written` conversion, and the rest of the material is written.
+//!
 //! Frame: `cad-db` is +Z up in source units; glTF is **metres, +Y up**. The
 //! conversion `(x, y, z) -> (x * s, z * s, -y * s)` is applied once here, at the
 //! boundary. Normals get the same rotation without the scale; UVs are a surface
@@ -32,8 +42,10 @@ use serde_json::{json, Value};
 
 use std::collections::BTreeMap;
 
-use crate::collect::{Collected, SourceMesh};
+use crate::collect::{Collected, SourceMesh, SourcePbr};
+use crate::pbr::{self, PbrKey, PbrTextures};
 use crate::report::ReportBuilder;
+use crate::texture::{base_colour_texture, Textures, Uv0};
 use crate::GltfContainer;
 
 /// The exporter was handed a registry key it does not write.
@@ -83,10 +95,6 @@ const TRIANGLES: u32 = 4;
 const LINEAR: u32 = 9729;
 /// `REPEAT` sampler wrapping mode.
 const REPEAT: u32 = 10497;
-/// The 8-byte PNG signature (ISO/IEC 15948 §5.2).
-const PNG_MAGIC: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
-/// The 3-byte JPEG SOI + first marker prefix.
-const JPEG_MAGIC: [u8; 3] = [0xFF, 0xD8, 0xFF];
 /// GLB JSON chunk type (`JSON` as little-endian ASCII).
 const CHUNK_JSON: u32 = 0x4E4F_534A;
 /// GLB BIN chunk type (`BIN\0`).
@@ -216,21 +224,45 @@ pub(crate) fn write(
             attributes.push(("NORMAL".to_string(), builder.push_normals(&normals)));
         }
 
-        // UV0 and the base-colour texture: `TEXCOORD_0` is only written for a
-        // mesh that also has usable texture bytes, so a written primitive never
-        // claims a parameterisation the file cannot sample. Anything dropped
-        // here is one reported conversion (`texture_not_written`).
-        let textured = texture_attributes(mesh, &mut builder, &mut textures, report);
-        let texture_index = textured.map(|(texture, uv_accessor)| {
-            attributes.push(("TEXCOORD_0".to_string(), uv_accessor));
-            texture
+        // UV0 and the textures: `TEXCOORD_0` is only written for a mesh that
+        // also has a writable image to sample it, so a written primitive never
+        // claims a parameterisation the file cannot use. Anything dropped here
+        // is one reported conversion (`texture_not_written`).
+        let uv0 = Uv0::of(mesh);
+        let texture_index = base_colour_texture(mesh, &uv0, &mut textures, &mut builder, report);
+        let (pbr_textures, pbr_lost) = mesh.pbr.as_ref().map_or((None, false), |pbr| {
+            let (indices, lost) =
+                pbr::pbr_textures(mesh.object, pbr, &uv0, &mut textures, &mut builder, report);
+            (Some(indices), lost)
         });
-        // A mesh that declared UVs or a texture but lost them is not written
-        // exactly, even when every triangle survived.
-        let texture_expected = !mesh.uvs.is_empty()
-            || mesh.texture.is_some()
-            || mesh.missing_texture.is_some()
-            || mesh.uvs_dropped;
+        let pbr_material = mesh.pbr.as_ref().zip(pbr_textures.as_ref());
+        let any_pbr_texture = pbr_textures.as_ref().is_some_and(pbr::PbrTextures::any);
+        if let Some(pairs) = uv0.pairs() {
+            if texture_index.is_some() || any_pbr_texture {
+                attributes.push(("TEXCOORD_0".to_string(), builder.push_uvs(pairs)));
+            }
+        }
+        // A mesh that declared a texture but lost it is not written exactly,
+        // even when every triangle survived.
+        let texture_lost = texture_index.is_none()
+            && (mesh.texture.is_some() || mesh.missing_texture.is_some() || mesh.uvs_dropped);
+        // UV0 with nothing to sample it is not written either (`TEXCOORD_0` only
+        // exists for an image); a mesh that declared PBR channels already has
+        // those losses reported instead.
+        let uv_unsampled = !mesh.uvs.is_empty()
+            && texture_index.is_none()
+            && mesh.texture.is_none()
+            && mesh.missing_texture.is_none()
+            && mesh.pbr.is_none();
+        if uv_unsampled {
+            report.converted(
+                TEXTURE_NOT_WRITTEN,
+                format!(
+                    "entity #{} has UV0 but no writable texture; TEXCOORD_0 was not written",
+                    mesh.object.0
+                ),
+            );
+        }
 
         let mut material_index = None;
         if include_colors {
@@ -250,14 +282,15 @@ pub(crate) fn write(
                     ),
                 );
             }
-            if texture_index.is_some() {
-                // The material exists for the texture. `COLOR_0` stays the
-                // authoritative tint, so no `baseColorFactor` is written, and
-                // the entity opacity rides on the material alpha that `COLOR_0`
-                // (always opaque) cannot carry.
+            if texture_index.is_some() || pbr_material.is_some() {
+                // The material exists for the texture/PBR channels. `COLOR_0`
+                // stays the authoritative tint, so no `baseColorFactor` is
+                // written, and the entity opacity rides on the material alpha that
+                // `COLOR_0` (always opaque) cannot carry.
                 let (alpha, from_layer) = opacity(mesh.transparency);
                 layer_appearance |= from_layer;
-                material_index = Some(materials.index_for(None, alpha, texture_index));
+                material_index =
+                    Some(materials.index_for(None, alpha, texture_index, pbr_material));
             } else {
                 // `COLOR_0` alpha is written opaque, so an explicit opacity below
                 // `1.0` cannot be carried by the vertex attribute and is reported
@@ -287,15 +320,17 @@ pub(crate) fn write(
             match mesh.color {
                 EntityColor::Explicit(rgb) => {
                     layer_appearance |= from_layer;
-                    material_index = Some(materials.index_for(Some(rgb), alpha, texture_index));
+                    material_index =
+                        Some(materials.index_for(Some(rgb), alpha, texture_index, pbr_material));
                 }
                 EntityColor::ByLayer | EntityColor::ByBlock => {
                     layer_appearance = true;
-                    if texture_index.is_some() {
-                        // A texture needs a material even without an explicit
-                        // entity colour: the base-colour factor stays the glTF
-                        // default `[1, 1, 1, 1]`.
-                        material_index = Some(materials.index_for(None, alpha, texture_index));
+                    if texture_index.is_some() || pbr_material.is_some() {
+                        // A texture or a PBR channel needs a material even without
+                        // an explicit entity colour: the base-colour factor stays
+                        // the glTF default `[1, 1, 1, 1]`.
+                        material_index =
+                            Some(materials.index_for(None, alpha, texture_index, pbr_material));
                     }
                 }
             }
@@ -321,7 +356,7 @@ pub(crate) fn write(
             "name": mesh.name,
             "mesh": mesh_index,
         }));
-        if degenerate == 0 && !(texture_expected && texture_index.is_none()) {
+        if degenerate == 0 && !texture_lost && !uv_unsampled && !pbr_lost {
             exact_meshes += 1;
         }
     }
@@ -381,167 +416,6 @@ fn normals(mesh: &SourceMesh) -> Vec<[f32; 3]> {
     mesh.normals.iter().map(frame_normal).collect()
 }
 
-/// UV0 narrowed to `f32` (ADR-0038 D1).
-///
-/// The frame rotation is deliberately **not** applied: `(u, v)` is a surface
-/// parameterisation, so rotating or mirroring a position must not re-map the
-/// image. Narrowing at this boundary is the only precision step.
-fn uvs(mesh: &SourceMesh) -> Vec<[f32; 2]> {
-    mesh.uvs
-        .iter()
-        .map(|[u, v]| [*u as f32, *v as f32])
-        .collect()
-}
-
-/// The glTF `images[].mimeType` a texture key promises.
-///
-/// The key is the only place the format is declared, so the stored bytes are
-/// checked against it: writing a PNG under `image/jpeg` would make the file
-/// undecodable while still looking complete. A mismatch is `None` and the
-/// writer reports the texture instead of writing it.
-fn texture_mime(key: &str, bytes: &[u8]) -> Option<&'static str> {
-    if key.ends_with(".png") {
-        bytes.starts_with(&PNG_MAGIC).then_some("image/png")
-    } else if key.ends_with(".jpg") {
-        bytes.starts_with(&JPEG_MAGIC).then_some("image/jpeg")
-    } else {
-        None
-    }
-}
-
-/// Write the UV0 accessor and register the mesh's texture, in that order.
-///
-/// Returns `(textures[] index, TEXCOORD_0 accessor)` when the primitive is
-/// textured, or `None` after reporting one `texture_not_written` conversion when
-/// the source carried UVs or named a texture that cannot be written. The caller
-/// adds the attribute, because the accessor belongs in the primitive's
-/// `attributes` map beside `POSITION`.
-fn texture_attributes(
-    mesh: &SourceMesh,
-    builder: &mut Builder,
-    textures: &mut Textures,
-    report: &mut ReportBuilder,
-) -> Option<(usize, usize)> {
-    let lost = |report: &mut ReportBuilder, reason: String| {
-        report.converted(
-            TEXTURE_NOT_WRITTEN,
-            format!("entity #{} {reason}", mesh.object.0),
-        );
-    };
-    if mesh.uvs_dropped {
-        lost(
-            report,
-            "declares UV0 that does not pair with its vertex list; TEXCOORD_0 was not written"
-                .to_string(),
-        );
-        return None;
-    }
-    let Some(texture) = &mesh.texture else {
-        if let Some(key) = &mesh.missing_texture {
-            lost(
-                report,
-                format!(
-                    "names texture {key:?} but the document does not carry its bytes; TEXCOORD_0 \
-                     and the image were not written"
-                ),
-            );
-        } else if !mesh.uvs.is_empty() {
-            lost(
-                report,
-                "has UV0 but no base-colour texture; TEXCOORD_0 was not written".to_string(),
-            );
-        }
-        return None;
-    };
-    if mesh.uvs.is_empty() {
-        lost(
-            report,
-            format!(
-                "names texture {:?} but has no UV0; the image and TEXCOORD_0 were not written",
-                texture.key
-            ),
-        );
-        return None;
-    }
-    let Some(mime) = texture_mime(&texture.key, &texture.bytes) else {
-        lost(
-            report,
-            format!(
-                "texture {:?} does not carry bytes matching its extension; TEXCOORD_0 and the \
-                 image were not written",
-                texture.key
-            ),
-        );
-        return None;
-    };
-    let uvs = uvs(mesh);
-    if uvs
-        .iter()
-        .any(|uv| uv.iter().any(|value| !value.is_finite()))
-    {
-        lost(
-            report,
-            format!(
-                "texture {:?} has UV0 outside the f32 range; TEXCOORD_0 and the image were not \
-                 written",
-                texture.key
-            ),
-        );
-        return None;
-    }
-    let index = textures.index_for(builder, &texture.key, &texture.bytes, mime);
-    let accessor = builder.push_uvs(&uvs);
-    Some((index, accessor))
-}
-
-/// `images[]` / `textures[]` for the distinct texture keys, in first-use order.
-///
-/// The traversal is the entity-ascending collect order, so the emitted order is
-/// stated rather than incidental; the key index is a map lookup, never a pointer
-/// or hash of one. Image and texture indices are 1:1 because a distinct key
-/// produces exactly one image and one texture.
-#[derive(Default)]
-struct Textures {
-    images: Vec<Value>,
-    textures: Vec<Value>,
-    indices: BTreeMap<String, usize>,
-}
-
-impl Textures {
-    /// The `textures[]` index for `key`, adding its image once.
-    fn index_for(
-        &mut self,
-        builder: &mut Builder,
-        key: &str,
-        bytes: &[u8],
-        mime: &'static str,
-    ) -> usize {
-        if let Some(index) = self.indices.get(key) {
-            return *index;
-        }
-        // Image bufferViews carry no `target`: the glTF schema reserves `target`
-        // for accessor data, and an image view with one is invalid.
-        let view = builder.push_view(bytes, None);
-        let image = self.images.len();
-        self.images.push(json!({
-            "bufferView": view,
-            "mimeType": mime,
-        }));
-        let texture = self.textures.len();
-        self.textures.push(json!({
-            "sampler": 0,
-            "source": image,
-        }));
-        self.indices.insert(key.to_string(), texture);
-        texture
-    }
-
-    /// Whether any texture was written (so the sampler/texture arrays exist).
-    fn is_empty(&self) -> bool {
-        self.textures.is_empty()
-    }
-}
-
 /// sRGB byte -> linear glTF component (the IEC 61966-2-1 decode).
 ///
 /// Exact inverse of `cad_import_gltf::scene`'s `linear_to_srgb_byte`, so an
@@ -568,13 +442,16 @@ fn opacity(transparency: EntityTransparency) -> (f32, bool) {
     }
 }
 
-/// Deduplicated `materials[]` entries for explicit entity colours and textures.
+/// Deduplicated `materials[]` entries for explicit entity colours, textures and
+/// declared PBR channels.
 ///
-/// Two primitives that resolve to the same sRGB byte triple, opacity and texture
-/// share one material, so a drawing that colours thousands of entities from a
-/// handful of colours and one image produces a handful of materials. A primitive
-/// with only a texture (no explicit entity colour) gets a material whose base
-/// colour factor stays the glTF default `[1, 1, 1, 1]`.
+/// Two primitives that resolve to the same sRGB byte triple, opacity, texture and
+/// PBR tuple share one material, so a drawing that colours thousands of entities
+/// from a handful of colours and one image produces a handful of materials. A
+/// primitive with only a texture or only PBR channels (no explicit entity colour)
+/// gets a material whose base-colour factor stays the glTF default
+/// `[1, 1, 1, 1]`. A mesh with `pbr: None` writes no PBR key at all, so its
+/// material is byte-identical to the pre-ADR-0039 output.
 #[derive(Default)]
 struct Materials {
     json: Vec<Value>,
@@ -582,27 +459,36 @@ struct Materials {
 }
 
 /// What makes two primitives share a material: the explicit colour (if any),
-/// the stored opacity and the texture it samples.
+/// the stored opacity, the base-colour texture it samples and its PBR tuple.
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 struct MaterialKey {
     rgb: Option<[u8; 3]>,
     alpha_bits: u32,
     texture: Option<usize>,
+    pbr: Option<PbrKey>,
 }
 
 impl Materials {
     /// The index of the material for `rgb` (sRGB bytes, `None` for no factor),
-    /// `alpha` and the `textures[]` index, adding it if needed.
-    fn index_for(&mut self, rgb: Option<[u8; 3]>, alpha: f32, texture: Option<usize>) -> usize {
+    /// `alpha`, the base-colour `textures[]` index and the PBR channels, adding
+    /// it if needed.
+    fn index_for(
+        &mut self,
+        rgb: Option<[u8; 3]>,
+        alpha: f32,
+        texture: Option<usize>,
+        pbr: Option<(&SourcePbr, &PbrTextures)>,
+    ) -> usize {
         let key = MaterialKey {
             rgb,
             alpha_bits: alpha.to_bits(),
             texture,
+            pbr: pbr.map(|(pbr, textures)| PbrKey::new(pbr, textures)),
         };
         if let Some(index) = self.indices.get(&key) {
             return *index;
         }
-        let mut pbr = serde_json::Map::new();
+        let mut metallic_roughness = serde_json::Map::new();
         if let Some(rgb) = rgb {
             let factor = [
                 srgb_byte_to_linear(rgb[0]),
@@ -614,34 +500,49 @@ impl Materials {
                 .into_iter()
                 .map(|value| Value::from(f64::from(value)))
                 .collect();
-            pbr.insert("baseColorFactor".to_string(), Value::Array(factor));
+            metallic_roughness.insert("baseColorFactor".to_string(), Value::Array(factor));
         }
         if let Some(texture) = texture {
-            pbr.insert(
+            metallic_roughness.insert(
                 "baseColorTexture".to_string(),
                 json!({ "index": texture, "texCoord": 0 }),
             );
         }
-        // Deterministic name: the colour bytes and the texture index, never a
-        // clock or a counter that depends on hash order.
-        let name = match (rgb, texture) {
-            (Some(rgb), texture) => {
-                let base = format!("entity_color_{}_{}_{}", rgb[0], rgb[1], rgb[2]);
-                match texture {
-                    Some(texture) => format!("{base}_texture_{texture}"),
-                    None => base,
-                }
+        if let Some((pbr, textures)) = pbr {
+            for (name, value) in pbr::metallic_roughness_fields(pbr, textures) {
+                metallic_roughness.insert(name.to_string(), value);
             }
-            // Only a texture: the base-colour factor stays the glTF default
-            // `[1, 1, 1, 1]`, so the material carries the image alone.
-            (None, Some(texture)) => format!("texture_{texture}"),
-            // Unreachable: a material is only requested for a colour or a texture.
-            (None, None) => "material".to_string(),
+        }
+        // Deterministic name: the colour bytes, the texture index and the PBR
+        // marker, never a clock or a counter that depends on hash order.
+        let mut parts = Vec::new();
+        if let Some(rgb) = rgb {
+            parts.push(format!("entity_color_{}_{}_{}", rgb[0], rgb[1], rgb[2]));
+        }
+        // Only a texture: the base-colour factor stays the glTF default
+        // `[1, 1, 1, 1]`, so the material carries the image alone.
+        if let Some(texture) = texture {
+            parts.push(format!("texture_{texture}"));
+        }
+        if pbr.is_some() {
+            parts.push("pbr".to_string());
+        }
+        // Unreachable with an empty list: a material is only requested for a
+        // colour, a texture or a PBR channel.
+        let name = if parts.is_empty() {
+            "material".to_string()
+        } else {
+            parts.join("_")
         };
         let mut material = json!({
             "name": name,
-            "pbrMetallicRoughness": Value::Object(pbr),
+            "pbrMetallicRoughness": Value::Object(metallic_roughness),
         });
+        if let Some((pbr, textures)) = pbr {
+            for (field, value) in pbr::material_fields(pbr, textures) {
+                material[field] = value;
+            }
+        }
         if alpha < 1.0 {
             // The glTF default is OPAQUE; BLEND is only needed when the stored
             // opacity actually lets background through.
@@ -694,7 +595,7 @@ fn writable_triangles(mesh: &SourceMesh) -> (Vec<[u32; 3]>, usize) {
 
 /// One tightly packed buffer, its bufferViews and its accessors.
 #[derive(Default)]
-struct Builder {
+pub(crate) struct Builder {
     bin: Vec<u8>,
     views: Vec<Value>,
     accessors: Vec<Value>,
@@ -705,7 +606,7 @@ impl Builder {
     ///
     /// `target` is `None` for image data: the glTF schema only allows `target`
     /// on accessor buffer views, so an image view must omit it.
-    fn push_view(&mut self, bytes: &[u8], target: Option<u32>) -> usize {
+    pub(crate) fn push_view(&mut self, bytes: &[u8], target: Option<u32>) -> usize {
         while !self.bin.len().is_multiple_of(4) {
             self.bin.push(0);
         }

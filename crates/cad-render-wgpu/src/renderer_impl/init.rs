@@ -42,6 +42,24 @@ impl Renderer {
             mesh_pipeline_textured_transparent: None,
             mesh_pipeline_textured_mirrored_transparent: None,
             image_pipeline: None,
+            mesh_pipeline_pbr: None,
+            mesh_pipeline_pbr_mirrored: None,
+            mesh_pipeline_pbr_transparent: None,
+            mesh_pipeline_pbr_mirrored_transparent: None,
+            mesh_pipeline_pbr_uv: None,
+            mesh_pipeline_pbr_uv_mirrored: None,
+            mesh_pipeline_pbr_uv_transparent: None,
+            mesh_pipeline_pbr_uv_mirrored_transparent: None,
+            mesh_pipeline_pbr_flat: None,
+            mesh_pipeline_pbr_flat_mirrored: None,
+            mesh_pipeline_pbr_flat_transparent: None,
+            mesh_pipeline_pbr_flat_mirrored_transparent: None,
+            pbr_texture_layout: None,
+            pbr_identities: None,
+            pbr_identity_bind_group: None,
+            pbr_data_textures: HashMap::new(),
+            pbr_bind_groups: std::collections::BTreeMap::new(),
+            pbr_tangent_unavailable: std::sync::atomic::AtomicU64::new(0),
             mask_pipeline: None,
             mask_frame_pipeline: None,
             image_texture_layout: None,
@@ -532,6 +550,20 @@ impl Renderer {
             &image_texture_layout,
             self.target_format,
         );
+        // PBR channel (ADR-0039 D6): another separate family, so the untextured and
+        // textured pipelines keep their exact layout/state. Group 2 is the PBR
+        // channel layout (five textures + sampler); the identity textures are
+        // created once here so an absent channel always has its neutral sample.
+        let pbr_texture_layout = Self::create_pbr_texture_layout(&device);
+        let pbr_identities = Self::create_pbr_identities(&device, &queue);
+        let (mesh_pbr_pipelines, mesh_pbr_uv_pipelines, mesh_pbr_flat_pipelines) =
+            Self::create_mesh_pbr_pipelines(
+                &device,
+                &layout,
+                &flags_layout,
+                &pbr_texture_layout,
+                self.target_format,
+            );
         let image_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("cad-image-pipeline"),
             layout: Some(&image_pipeline_layout),
@@ -585,6 +617,15 @@ impl Renderer {
             mipmap_filter: wgpu::MipmapFilterMode::Nearest,
             ..Default::default()
         });
+        // All-identity PBR bind group: the fallback for a batch whose channel set
+        // has not been resolved (or is entirely absent), so a PBR batch always has
+        // a legal group 2 and a disabled channel is a neutral multiply.
+        let pbr_identity_bind_group = Self::create_pbr_identity_bind_group(
+            &device,
+            &pbr_texture_layout,
+            &pbr_identities,
+            &image_sampler,
+        );
         let (mask_pipeline, mask_frame_pipeline) = Self::create_mask_pipelines(
             &device,
             &pipeline_layout,
@@ -604,6 +645,11 @@ impl Renderer {
         // re-uploads them on its next base change like every other GPU resource.
         self.mesh_textures.clear();
         self.mesh_texture_fallbacks.clear();
+        // PBR residency is derived from the dropped batches too: keep the identity
+        // textures (device-agnostic content) but retire the per-set bind groups and
+        // the linear data textures, which belong to the old generation.
+        self.pbr_data_textures.clear();
+        self.pbr_bind_groups.clear();
         self.instance_streams.clear();
         self.arc_streams.clear();
         self.mesh_chunks.clear();
@@ -664,6 +710,14 @@ impl Renderer {
         self.mesh_pipeline_textured_transparent = Some(mesh_pipeline_textured_transparent);
         self.mesh_pipeline_textured_mirrored_transparent =
             Some(mesh_pipeline_textured_mirrored_transparent);
+        self.install_pbr_resources(
+            mesh_pbr_pipelines,
+            mesh_pbr_uv_pipelines,
+            mesh_pbr_flat_pipelines,
+            pbr_texture_layout,
+            pbr_identities,
+            pbr_identity_bind_group,
+        );
         self.image_pipeline = Some(image_pipeline);
         self.mask_pipeline = Some(mask_pipeline);
         self.mask_frame_pipeline = Some(mask_frame_pipeline);
@@ -692,245 +746,6 @@ impl Renderer {
             self.create_pick_pipelines(&device_ref);
         }
         Ok(caps)
-    }
-
-    /// Group-1 layout of the selection-flags table: an integer lookup texture
-    /// (`texture_2d<u32>`, addressed with `textureLoad`) plus a 16-byte control
-    /// uniform. Deliberately a texture, not a vertex-stage storage buffer, so the
-    /// layout stays WebGL2-safe.
-    pub(super) fn create_flags_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("cad-flags-layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Uint,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: wgpu::BufferSize::new(u64::from(FLAGS_CTL_BYTES)),
-                    },
-                    count: None,
-                },
-            ],
-        })
-    }
-
-    /// Create the accelerated tier's pipelines, layouts and per-frame camera
-    /// uniform. Returns `false` (and leaves the pulled resources cleared) unless
-    /// the tier is [`RenderTier::Accelerated`] and the shared flags layout is
-    /// present; the caller downgrades the tier on `false` rather than leaving it
-    /// labelled `Accelerated` with a missing pulled path.
-    ///
-    /// The pulled pipelines have **no vertex buffers**: every input is pulled
-    /// from group 2's read-only storage buffers, so they are not WebGL2-safe and
-    /// exist only on the accelerated tier.
-    pub(super) fn create_pulled_resources(&mut self, device: &wgpu::Device) -> bool {
-        // Drop any previous device generation's pulled resources first, so a
-        // downgrade cannot leave stale handles from the old device.
-        self.pulled_camera_bind_group = None;
-        self.pulled_camera_layout = None;
-        self.pulled_camera_buffer = None;
-        self.pulled_line_storage_layout = None;
-        self.pulled_mesh_storage_layout = None;
-        self.line_pulled_pipeline = None;
-        self.mesh_pulled_pipeline = None;
-        self.mesh_pulled_mirrored_pipeline = None;
-        if self.render_tier != RenderTier::Accelerated {
-            return false;
-        }
-        let Some(flags_layout) = self.flags_layout.clone() else {
-            return false;
-        };
-        let pulled_camera_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("cad-pulled-camera-layout"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    // The pulled line fragment stage reads `c3.x` (the AA line SDF
-                    // ramp width), so the camera uniform must be visible to both
-                    // stages; the mesh fragment stage ignores it.
-                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: wgpu::BufferSize::new(u64::from(PULLED_CAMERA_BYTES)),
-                    },
-                    count: None,
-                }],
-            });
-        let camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("cad-pulled-camera"),
-            size: u64::from(PULLED_CAMERA_BYTES),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("cad-pulled-camera-bind"),
-            layout: &pulled_camera_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &camera_buffer,
-                    offset: 0,
-                    size: wgpu::BufferSize::new(u64::from(PULLED_CAMERA_BYTES)),
-                }),
-            }],
-        });
-        let storage_entry = |binding: u32| wgpu::BindGroupLayoutEntry {
-            binding,
-            visibility: wgpu::ShaderStages::VERTEX,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            },
-            count: None,
-        };
-        let line_storage_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("cad-pulled-line-storage-layout"),
-                entries: &[storage_entry(0), storage_entry(1)],
-            });
-        let mesh_storage_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("cad-pulled-mesh-storage-layout"),
-                entries: &[storage_entry(0), storage_entry(1), storage_entry(2)],
-            });
-        let line_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("cad-pulled-line-pipeline-layout"),
-            bind_group_layouts: &[
-                Some(&pulled_camera_layout),
-                Some(&flags_layout),
-                Some(&line_storage_layout),
-            ],
-            immediate_size: 0,
-        });
-        let mesh_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("cad-pulled-mesh-pipeline-layout"),
-            bind_group_layouts: &[
-                Some(&pulled_camera_layout),
-                Some(&flags_layout),
-                Some(&mesh_storage_layout),
-            ],
-            immediate_size: 0,
-        });
-        let line_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("cad-pulled-lines"),
-            source: wgpu::ShaderSource::Wgsl(LINE_PULLED_SHADER.into()),
-        });
-        let mesh_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("cad-pulled-mesh"),
-            source: wgpu::ShaderSource::Wgsl(MESH_PULLED_SHADER.into()),
-        });
-        self.line_pulled_pipeline = Some(device.create_render_pipeline(
-            &wgpu::RenderPipelineDescriptor {
-                label: Some("cad-pulled-lines-pipeline"),
-                layout: Some(&line_pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &line_shader,
-                    entry_point: Some("vs_main"),
-                    compilation_options: Default::default(),
-                    buffers: &[],
-                },
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    strip_index_format: None,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: None,
-                    unclipped_depth: false,
-                    polygon_mode: wgpu::PolygonMode::Fill,
-                    conservative: false,
-                },
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: DEPTH_FORMAT,
-                    depth_write_enabled: Some(true),
-                    depth_compare: Some(wgpu::CompareFunction::LessEqual),
-                    stencil: wgpu::StencilState::default(),
-                    bias: wgpu::DepthBiasState::default(),
-                }),
-                multisample: wgpu::MultisampleState::default(),
-                fragment: Some(wgpu::FragmentState {
-                    module: &line_shader,
-                    entry_point: Some("fs_main"),
-                    compilation_options: Default::default(),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: self.target_format,
-                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                }),
-                multiview_mask: None,
-                cache: None,
-            },
-        ));
-        let mesh_pipeline = |front_face: wgpu::FrontFace, label: &str| {
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some(label),
-                layout: Some(&mesh_pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &mesh_shader,
-                    entry_point: Some("vs_main"),
-                    compilation_options: Default::default(),
-                    buffers: &[],
-                },
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    strip_index_format: None,
-                    front_face,
-                    cull_mode: Some(wgpu::Face::Back),
-                    unclipped_depth: false,
-                    polygon_mode: wgpu::PolygonMode::Fill,
-                    conservative: false,
-                },
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: DEPTH_FORMAT,
-                    depth_write_enabled: Some(true),
-                    depth_compare: Some(wgpu::CompareFunction::Less),
-                    stencil: wgpu::StencilState::default(),
-                    bias: wgpu::DepthBiasState::default(),
-                }),
-                multisample: wgpu::MultisampleState::default(),
-                fragment: Some(wgpu::FragmentState {
-                    module: &mesh_shader,
-                    entry_point: Some("fs_main"),
-                    compilation_options: Default::default(),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: self.target_format,
-                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                }),
-                multiview_mask: None,
-                cache: None,
-            })
-        };
-        self.mesh_pulled_pipeline = Some(mesh_pipeline(
-            wgpu::FrontFace::Ccw,
-            "cad-pulled-mesh-pipeline",
-        ));
-        self.mesh_pulled_mirrored_pipeline = Some(mesh_pipeline(
-            wgpu::FrontFace::Cw,
-            "cad-pulled-mesh-pipeline-mirrored",
-        ));
-        self.pulled_camera_layout = Some(pulled_camera_layout);
-        self.pulled_camera_charge =
-            Some(self.gpu_charge(GpuMemoryCategory::Uniform, camera_buffer.size()));
-        self.pulled_camera_buffer = Some(camera_buffer);
-        self.pulled_camera_bind_group = Some(camera_bind_group);
-        self.pulled_line_storage_layout = Some(line_storage_layout);
-        self.pulled_mesh_storage_layout = Some(mesh_storage_layout);
-        true
     }
 
     /// Decide the id-target format from the device's own format features.

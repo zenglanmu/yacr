@@ -730,6 +730,7 @@ fn drawing_validate_geometry_covers_supported_kinds() {
             colors: Vec::new(),
             uvs: Vec::new(),
             texture: None,
+            pbr: None,
         }),
         SemanticGeometry::Image {
             origin: point(0.0, 0.0),
@@ -760,6 +761,7 @@ fn drawing_validate_geometry_covers_supported_kinds() {
         colors: Vec::new(),
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
     }))
     .is_err());
     assert!(crate::validate_geometry(&SemanticGeometry::Spline {

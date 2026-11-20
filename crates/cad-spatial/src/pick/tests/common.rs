@@ -58,6 +58,7 @@ pub(super) fn two_face_mesh() -> Mesh {
         colors: Vec::new(),
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
     }
 }
 

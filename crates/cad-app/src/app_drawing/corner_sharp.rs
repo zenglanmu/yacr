@@ -485,13 +485,15 @@ fn cut_circle(
     let resolution = plan_trim(&curve, pick, &boundaries, &policy, cut_tolerance())
         .map_err(|reason| format!("FILLET.circle_arc_conversion: {}", reason.into_cad_error()))?;
     match resolution.plan {
-        TrimPlan::Replace(SemanticGeometry::Arc { start, sweep, .. }) => {
-            Ok(GeometryUpdate::CircleToArc { start, sweep })
-        }
-        TrimPlan::Replace(other) => Err(format!(
-            "FILLET.circle_arc_conversion: the two-cut CIRCLE target came back as {}",
-            class_name(&other)
-        )),
+        TrimPlan::Replace(geometry) => match *geometry {
+            SemanticGeometry::Arc { start, sweep, .. } => {
+                Ok(GeometryUpdate::CircleToArc { start, sweep })
+            }
+            other => Err(format!(
+                "FILLET.circle_arc_conversion: the two-cut CIRCLE target came back as {}",
+                class_name(&other)
+            )),
+        },
         TrimPlan::Delete => Err(
             "FILLET.no_corner_intersection: the R=0 corner needs two crossings, and this picked \
              CIRCLE would be reduced to nothing"

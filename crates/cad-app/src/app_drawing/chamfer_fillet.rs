@@ -461,7 +461,7 @@ fn apply_update(
             start,
             sweep,
         },
-        (GeometryUpdate::Spline { geometry }, SemanticGeometry::Spline { .. }) => geometry,
+        (GeometryUpdate::Spline { geometry }, SemanticGeometry::Spline { .. }) => *geometry,
         // The `R = 0` CIRCLE↔CIRCLE cut: the circle becomes the arc between its two
         // crossings, in place (the same conversion TRIM makes for a closed target).
         (

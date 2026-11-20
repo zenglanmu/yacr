@@ -330,6 +330,7 @@ fn sdf_arc_draw_order_ties() {
         let mut line = RenderBatch {
             uvs: Vec::new(),
             texture: None,
+            pbr: None,
             local_origin: Point3 {
                 x: 0.0,
                 y: 0.0,
@@ -418,6 +419,7 @@ fn sdf_arc_draw_order_ties() {
         let mesh = RenderBatch {
             uvs: Vec::new(),
             texture: None,
+            pbr: None,
             local_origin: Point3 {
                 x: 0.0,
                 y: 0.0,

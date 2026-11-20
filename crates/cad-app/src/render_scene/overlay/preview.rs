@@ -959,6 +959,7 @@ fn line_preview_batch(
     RenderBatch {
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
         conics: Vec::new(),
         local_origin: origin,
         topology: RenderTopology::Lines,
@@ -984,7 +985,6 @@ fn line_preview_batch(
         draw_order,
     }
 }
-
 /// A stable synthetic source id for a preview batch.
 ///
 /// Previews are not database objects, so the id is a fixed namespace derived

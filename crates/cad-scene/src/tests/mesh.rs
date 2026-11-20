@@ -488,3 +488,190 @@ fn mesh_texture_keys_are_deduplicated_and_sorted() {
     cache.publish(delta, &stamp()).unwrap();
     assert_eq!(cache.mesh_texture_keys(), keys);
 }
+
+// ---- PBR channels (ADR-0039 D6) -----------------------------------------
+
+const MR_KEY: &str = "11111111111111111111111111111111.png";
+const NORMAL_KEY: &str = "22222222222222222222222222222222.jpg";
+const EMISSIVE_KEY: &str = "33333333333333333333333333333333.png";
+const OCCLUSION_KEY: &str = "44444444444444444444444444444444.png";
+
+fn pbr_material() -> cad_domain::MeshPbr {
+    cad_domain::MeshPbr {
+        metallic: 0.25,
+        roughness: 0.5,
+        emissive: [0.5, 0.25, 0.0],
+        occlusion_strength: 0.75,
+        metallic_roughness_texture: Some(MR_KEY.to_owned()),
+        normal_texture: Some(NORMAL_KEY.to_owned()),
+        emissive_texture: Some(EMISSIVE_KEY.to_owned()),
+        occlusion_texture: Some(OCCLUSION_KEY.to_owned()),
+    }
+}
+
+fn pbr_quad() -> Mesh {
+    let mut mesh = textured_quad();
+    mesh.pbr = Some(pbr_material());
+    mesh
+}
+
+#[test]
+fn mesh_batch_carries_the_converted_pbr_material() {
+    let delta = SceneCache::default()
+        .build(&mesh_representation(1, pbr_quad()), stamp())
+        .unwrap();
+    let batch = &delta.added[0];
+    let pbr = batch
+        .pbr
+        .as_ref()
+        .expect("the material survives conversion");
+    assert_eq!(pbr.metallic, 0.25);
+    assert_eq!(pbr.roughness, 0.5);
+    assert_eq!(pbr.emissive, [0.5, 0.25, 0.0]);
+    assert_eq!(pbr.occlusion_strength, 0.75);
+    assert_eq!(
+        pbr.metallic_roughness.as_ref().map(|k| k.as_str()),
+        Some(MR_KEY)
+    );
+    assert_eq!(pbr.normal.as_ref().map(|k| k.as_str()), Some(NORMAL_KEY));
+    assert_eq!(
+        pbr.emissive_texture.as_ref().map(|k| k.as_str()),
+        Some(EMISSIVE_KEY)
+    );
+    assert_eq!(
+        pbr.occlusion.as_ref().map(|k| k.as_str()),
+        Some(OCCLUSION_KEY)
+    );
+    assert_eq!(
+        batch.texture.as_ref().map(|k| k.as_str()),
+        Some(TEXTURE_KEY)
+    );
+    assert_eq!(batch.uvs.len(), batch.vertices.len());
+}
+
+#[test]
+fn a_pbr_material_with_bad_or_out_of_range_factors_is_dropped_whole() {
+    for break_it in [
+        |pbr: &mut cad_domain::MeshPbr| pbr.metallic = 1.5,
+        |pbr: &mut cad_domain::MeshPbr| pbr.roughness = f64::NAN,
+        |pbr: &mut cad_domain::MeshPbr| pbr.occlusion_strength = -0.1,
+        |pbr: &mut cad_domain::MeshPbr| pbr.emissive = [0.0, f64::INFINITY, 0.0],
+    ] {
+        let mut mesh = pbr_quad();
+        let mut pbr = pbr_material();
+        break_it(&mut pbr);
+        mesh.pbr = Some(pbr);
+        let delta = SceneCache::default()
+            .build(&mesh_representation(1, mesh), stamp())
+            .unwrap();
+        assert!(
+            delta.added[0].pbr.is_none(),
+            "an unrepresentable factor drops the whole material, never a clamped guess"
+        );
+        // The base-colour texture channel is independent and still drawable.
+        assert!(delta.added[0].texture.is_some());
+    }
+}
+
+#[test]
+fn a_pbr_texture_without_uvs_is_dropped_but_the_scalar_factors_survive() {
+    let mut mesh = quad();
+    // No UV stream at all: no PBR map can be sampled from UV0.
+    mesh.pbr = Some(pbr_material());
+    let delta = SceneCache::default()
+        .build(&mesh_representation(1, mesh), stamp())
+        .unwrap();
+    let batch = &delta.added[0];
+    let pbr = batch
+        .pbr
+        .as_ref()
+        .expect("the scalar factors are UV-independent and survive");
+    assert_eq!(pbr.metallic, 0.25);
+    assert!(
+        !pbr.has_textures(),
+        "every PBR texture slot needs a UV stream; all four are dropped"
+    );
+    assert!(batch.uvs.is_empty());
+
+    // A misaligned UV stream drops the maps the same way.
+    let mut misaligned = pbr_quad();
+    misaligned.uvs = vec![[0.0, 0.0], [1.0, 0.0]];
+    let delta = SceneCache::default()
+        .build(&mesh_representation(2, misaligned), stamp())
+        .unwrap();
+    let pbr = delta.added[0].pbr.as_ref().expect("scalars survive");
+    assert!(!pbr.has_textures());
+    assert!(delta.added[0].uvs.is_empty());
+
+    // An unsafe PBR key is refused by the same defensive filter.
+    let mut bad_key = pbr_quad();
+    bad_key.pbr.as_mut().unwrap().normal_texture = Some("../escape.png".to_owned());
+    let delta = SceneCache::default()
+        .build(&mesh_representation(3, bad_key), stamp())
+        .unwrap();
+    let pbr = delta.added[0].pbr.as_ref().expect("scalars survive");
+    assert!(pbr.normal.is_none(), "an unsafe key never reaches the GPU");
+    assert!(pbr.metallic_roughness.is_some());
+}
+
+#[test]
+fn pbr_material_bytes_charge_the_keys_and_the_tangent_stream() {
+    let delta = SceneCache::default()
+        .build(&mesh_representation(1, pbr_quad()), stamp())
+        .unwrap();
+    let batch = &delta.added[0];
+    let pbr = batch.pbr.as_ref().expect("material");
+    let key_bytes = [MR_KEY, NORMAL_KEY, EMISSIVE_KEY, OCCLUSION_KEY]
+        .iter()
+        .map(|key| key.len())
+        .sum::<usize>();
+    // The normal map needs a `Float32x4` tangent per vertex.
+    let tangent_bytes = batch.vertices.len() * 16;
+    assert_eq!(pbr.key_bytes(), key_bytes);
+    let geometry = 4 * 12 * 3 + 2 * 12 + 10 * 12 + 4 * 8;
+    assert_eq!(
+        batch.upload_size_bytes(),
+        geometry + key_bytes + tangent_bytes,
+        "a PBR batch uploads its tangent stream and charges its key strings"
+    );
+    assert_eq!(
+        batch.vertex_bytes(),
+        4 * 12 * 2 + 10 * 12 + 4 * 8 + key_bytes + tangent_bytes
+    );
+    assert_eq!(
+        batch.approx_bytes(),
+        (4 + 4 + 10) * 12 + 2 * 12 + 4 * 8 + key_bytes + tangent_bytes
+    );
+
+    // A material without a normal map needs no tangent frame.
+    let mut scalar_only = quad();
+    scalar_only.pbr = Some(cad_domain::MeshPbr {
+        metallic: 1.0,
+        roughness: 0.2,
+        ..cad_domain::MeshPbr::default()
+    });
+    let delta = SceneCache::default()
+        .build(&mesh_representation(2, scalar_only), stamp())
+        .unwrap();
+    let batch = &delta.added[0];
+    assert!(
+        !batch.pbr.as_ref().expect("material").needs_tangents(),
+        "no normal map, no tangent frame"
+    );
+    // With no texture channel active, nothing samples UV0, so the batch keeps
+    // the untextured form and uploads no UV stream either.
+    assert!(batch.uvs.is_empty());
+    assert_eq!(batch.upload_size_bytes(), 4 * 12 * 3 + 2 * 12 + 10 * 12);
+}
+
+#[test]
+fn mesh_texture_keys_collect_the_base_colour_and_all_four_pbr_keys() {
+    let delta = SceneCache::default()
+        .build(&mesh_representation(1, pbr_quad()), stamp())
+        .unwrap();
+    let keys = mesh_texture_keys(delta.added.iter());
+    let names = keys.iter().map(|key| key.as_str()).collect::<Vec<_>>();
+    let mut expected = vec![TEXTURE_KEY, MR_KEY, NORMAL_KEY, EMISSIVE_KEY, OCCLUSION_KEY];
+    expected.sort_unstable();
+    assert_eq!(names, expected, "all five keys, deduped and sorted");
+}

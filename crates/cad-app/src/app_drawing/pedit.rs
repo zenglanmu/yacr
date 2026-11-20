@@ -204,7 +204,7 @@ enum Plan {
         message: String,
     },
     Write {
-        geometry: SemanticGeometry,
+        geometry: Box<SemanticGeometry>,
         label: String,
         deleted: Vec<DbEntity>,
     },
@@ -486,7 +486,7 @@ impl Application {
 
         let entity_id = entity.id;
         let mut after = entity.clone();
-        after.geometry = new_geometry;
+        after.geometry = *new_geometry;
         after.object.type_key = class_name(&after.geometry).to_string();
         let display_states: Vec<_> = deleted
             .iter()
@@ -599,12 +599,12 @@ fn plan_close_open(geometry: SemanticGeometry, close: bool, id: EntityId) -> Cad
             ));
         }
         Ok(Plan::Write {
-            geometry: SemanticGeometry::Polyline {
+            geometry: Box::new(SemanticGeometry::Polyline {
                 points,
                 bulges,
                 closed: true,
                 width,
-            },
+            }),
             label: "CLOSE (closed = true)".into(),
             deleted: Vec::new(),
         })
@@ -619,12 +619,12 @@ fn plan_close_open(geometry: SemanticGeometry, close: bool, id: EntityId) -> Cad
             });
         }
         Ok(Plan::Write {
-            geometry: SemanticGeometry::Polyline {
+            geometry: Box::new(SemanticGeometry::Polyline {
                 points,
                 bulges,
                 closed: false,
                 width,
-            },
+            }),
             label: "OPEN (closed = false)".into(),
             deleted: Vec::new(),
         })
@@ -641,7 +641,13 @@ fn plan_reverse(geometry: SemanticGeometry, _id: EntityId) -> CadResult<Plan> {
     } = &geometry
     {
         return Ok(Plan::Write {
-            geometry: reverse_spline(*degree, knots, control_points, weights, *closed),
+            geometry: Box::new(reverse_spline(
+                *degree,
+                knots,
+                control_points,
+                weights,
+                *closed,
+            )),
             label: "REVERSE (SPLINE control frame)".into(),
             deleted: Vec::new(),
         });
@@ -652,7 +658,7 @@ fn plan_reverse(geometry: SemanticGeometry, _id: EntityId) -> CadResult<Plan> {
             other => other,
         })?;
     Ok(Plan::Write {
-        geometry: reversed,
+        geometry: Box::new(reversed),
         label: "REVERSE (vertex order and bulges reversed)".into(),
         deleted: Vec::new(),
     })
@@ -684,12 +690,12 @@ fn plan_join(
         ));
     }
     Ok(Plan::Write {
-        geometry: SemanticGeometry::Polyline {
+        geometry: Box::new(SemanticGeometry::Polyline {
             points: chain.points,
             bulges: chain.bulges,
             closed: false,
             width: *width,
-        },
+        }),
         label,
         deleted,
     })
@@ -721,12 +727,12 @@ fn plan_fit(geometry: SemanticGeometry) -> CadResult<Plan> {
         });
     }
     Ok(Plan::Write {
-        geometry: SemanticGeometry::Polyline {
+        geometry: Box::new(SemanticGeometry::Polyline {
             points,
             bulges: fitted,
             closed,
             width,
-        },
+        }),
         label: if closed {
             "FIT (closed tangent-continuous arc ring)".into()
         } else {
@@ -767,7 +773,7 @@ fn plan_spline(geometry: SemanticGeometry, precision: u8) -> CadResult<Plan> {
     }
     let n = control_points.len();
     Ok(Plan::Write {
-        geometry: SemanticGeometry::Spline {
+        geometry: Box::new(SemanticGeometry::Spline {
             degree,
             knots: clamped_uniform_knots(n, degree as usize),
             control_points,
@@ -775,7 +781,7 @@ fn plan_spline(geometry: SemanticGeometry, precision: u8) -> CadResult<Plan> {
             // A closed POLYLINE becomes a closed SPLINE: the frame already
             // repeats the first vertex, and the flag states the same fact.
             closed,
-        },
+        }),
         label: if closed {
             format!("SPLINE (closed control frame, precision {precision})")
         } else {
@@ -803,12 +809,12 @@ fn plan_decurve(geometry: SemanticGeometry) -> CadResult<Plan> {
             }
             bulges.fill(0.0);
             Ok(Plan::Write {
-                geometry: SemanticGeometry::Polyline {
+                geometry: Box::new(SemanticGeometry::Polyline {
                     points,
                     bulges,
                     closed,
                     width: 0.0,
-                },
+                }),
                 label: "DECURVE (bulges cleared, frame restored)".into(),
                 deleted: Vec::new(),
             })
@@ -831,12 +837,12 @@ fn plan_decurve(geometry: SemanticGeometry) -> CadResult<Plan> {
                 ));
             };
             Ok(Plan::Write {
-                geometry: SemanticGeometry::Polyline {
+                geometry: Box::new(SemanticGeometry::Polyline {
                     points,
                     bulges,
                     closed,
                     width: 0.0,
-                },
+                }),
                 label: "DECURVE (SPLINE control frame restored)".into(),
                 deleted: Vec::new(),
             })

@@ -17,11 +17,11 @@ use crate::{
     HatchStyle, ImageAdjust, ImageClip, MLeaderBackground, MLeaderBlockContent, MLeaderBreak,
     MLeaderColor, MLeaderColumns, MLeaderContent, MLeaderLine, MLeaderLineBreak, MLeaderLineExtras,
     MLeaderPathType, MLeaderReserved, MLeaderRoot, MLeaderRootExtras, MLeaderStyleValues,
-    MLeaderText, MLeaderTextAngle, Mesh, MultiLeaderGeometry, PlaneFrame, Precision, Revision,
-    SemanticGeometry, StyleId, SubElementId, TableBorder, TableCellAlignH, TableCellAlignV,
-    TableCellAlignment, TableCellBorders, TableCellGeometry, TableCellMargins, TableColumnGeometry,
-    TableDisplayAppearance, TableFrame, TableGeometry, TableRowGeometry, TableRowStyle,
-    TableStyleValues, TextAlignH, TextAlignV, TextLineSpacing, TextLineSpacingStyle,
+    MLeaderText, MLeaderTextAngle, Mesh, MeshPbr, MultiLeaderGeometry, PlaneFrame, Precision,
+    Revision, SemanticGeometry, StyleId, SubElementId, TableBorder, TableCellAlignH,
+    TableCellAlignV, TableCellAlignment, TableCellBorders, TableCellGeometry, TableCellMargins,
+    TableColumnGeometry, TableDisplayAppearance, TableFrame, TableGeometry, TableRowGeometry,
+    TableRowStyle, TableStyleValues, TextAlignH, TextAlignV, TextLineSpacing, TextLineSpacingStyle,
 };
 
 // ---------------------------------------------------------------------------
@@ -48,8 +48,26 @@ pub(super) fn mesh_sample() -> Mesh {
         // One UV per vertex plus a canonical texture key (ADR-0038 sample).
         uvs: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
         texture: Some(super::TEXTURE_KEY.to_string()),
+        // A full PBR material (ADR-0039 sample): every scalar and every texture
+        // slot is non-default so the codec is exercised field by field.
+        pbr: Some(MeshPbr {
+            metallic: 0.75,
+            roughness: 0.25,
+            emissive: [0.0, 0.125, 0.5],
+            occlusion_strength: 0.5,
+            metallic_roughness_texture: Some(PBR_TEXTURE_KEY.to_string()),
+            normal_texture: Some(PBR_NORMAL_KEY.to_string()),
+            emissive_texture: Some(PBR_EMISSIVE_KEY.to_string()),
+            occlusion_texture: Some(PBR_OCCLUSION_KEY.to_string()),
+        }),
     }
 }
+
+/// Additional canonical texture keys the PBR sample references (ADR-0039 D1).
+const PBR_TEXTURE_KEY: &str = "0f1e2d3c4b5a69788796a5b4c3d2e1f0.png";
+const PBR_NORMAL_KEY: &str = "1f2e3d4c5b6a79880917263544352617.png";
+const PBR_EMISSIVE_KEY: &str = "2f3e4d5c6b7a89890716253443526170.jpg";
+const PBR_OCCLUSION_KEY: &str = "3f4e5d6c7b8a9999081726354453627f.png";
 
 pub(super) fn brep_sample() -> BrepData {
     let loop_ = BrepLoop {

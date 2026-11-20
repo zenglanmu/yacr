@@ -572,8 +572,8 @@ fn the_id_target_probe_prefers_r32uint_when_the_spec_guarantees_it_renderable() 
 #[test]
 fn the_uniform_struct_carries_the_light_without_moving_the_slot_stride() {
     // `mat4x4` (64) + tint `vec4<f32>` (16) + key_flags `vec4<u32>` (16) +
-    // light `vec4<f32>` (16) = 112.
-    assert_eq!(UNIFORM_STRUCT_BYTES, 112);
+    // light `vec4<f32>` (16) + the ADR-0039 PBR words (3 × 16) = 160.
+    assert_eq!(UNIFORM_STRUCT_BYTES, 160);
     // The dynamic-offset slot stride stays at the 256-byte alignment, so the
     // per-page slot count is unchanged by the extra field.
     let (slot_size, slots) = uniform_layout_params(&wgpu::Limits::default());
@@ -613,6 +613,49 @@ fn the_uniform_struct_carries_the_light_without_moving_the_slot_stride() {
         f32::from_le_bytes(uniform[108..112].try_into().unwrap()),
         0.0
     );
+    // The non-PBR path writes the default PBR payload: zero factors, no channel
+    // enabled, no emissive and no eye (ADR-0039 D6).
+    let pbr_default = uniform_bytes_pbr(
+        &[1.0; 16],
+        [0.25, 0.5, 0.75, 1.0],
+        [7, INSTANCE_FLAG_OPAQUE, 0, 0],
+        [0.0, 0.0, 1.0, 0.0],
+        PbrUniforms::default(),
+        [0.0; 3],
+    );
+    assert_eq!(
+        &pbr_default[..112],
+        &uniform[..112],
+        "the prefix is unchanged"
+    );
+    let pbr = uniform_bytes_pbr(
+        &[1.0; 16],
+        [1.0; 4],
+        [7, 0, 0, 0],
+        [0.0, 0.0, 1.0, 0.0],
+        PbrUniforms {
+            metallic: 0.25,
+            roughness: 0.5,
+            occlusion_strength: 0.75,
+            channels: PBR_CHANNEL_BASE_COLOUR | PBR_CHANNEL_NORMAL,
+            emissive: [0.125, 0.25, 0.5],
+        },
+        [10.0, 20.0, 30.0],
+    );
+    // Word 28..32 = factors + channel bits, 32..36 = emissive, 36..40 = eye.
+    assert_eq!(f32::from_le_bytes(pbr[112..116].try_into().unwrap()), 0.25);
+    assert_eq!(f32::from_le_bytes(pbr[116..120].try_into().unwrap()), 0.5);
+    assert_eq!(f32::from_le_bytes(pbr[120..124].try_into().unwrap()), 0.75);
+    assert_eq!(
+        f32::from_le_bytes(pbr[124..128].try_into().unwrap()) as u32,
+        PBR_CHANNEL_BASE_COLOUR | PBR_CHANNEL_NORMAL,
+        "channel bits ride an exactly-representable float word"
+    );
+    assert_eq!(f32::from_le_bytes(pbr[128..132].try_into().unwrap()), 0.125);
+    assert_eq!(f32::from_le_bytes(pbr[132..136].try_into().unwrap()), 0.25);
+    assert_eq!(f32::from_le_bytes(pbr[136..140].try_into().unwrap()), 0.5);
+    assert_eq!(f32::from_le_bytes(pbr[144..148].try_into().unwrap()), 10.0);
+    assert_eq!(f32::from_le_bytes(pbr[152..156].try_into().unwrap()), 30.0);
 }
 
 /// Numeric proof of the SDF conic **ramp-width** semantics — the root cause of
@@ -665,6 +708,7 @@ fn sdf_conic_field_is_unit_gradient_and_triangle_ink_is_one_pixel() {
     let batch = cad_scene::RenderBatch {
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
         local_origin: center,
         topology: cad_scene::RenderTopology::Conics,
         vertices: Vec::new(),

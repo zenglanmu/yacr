@@ -475,6 +475,38 @@ impl Renderer {
         )
     }
 
+    /// Group-1 layout of the selection-flags table: an integer lookup texture
+    /// (`texture_2d<u32>`, addressed with `textureLoad`) plus a 16-byte control
+    /// uniform. Deliberately a texture, not a vertex-stage storage buffer, so the
+    /// layout stays WebGL2-safe.
+    pub(super) fn create_flags_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("cad-flags-layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Uint,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(u64::from(FLAGS_CTL_BYTES)),
+                    },
+                    count: None,
+                },
+            ],
+        })
+    }
+
     /// Capability snapshot derived from the actual shared device, not the request.
     pub(super) fn caps_for(device: &wgpu::Device) -> BackendCapabilities {
         plan::caps_from(

@@ -140,6 +140,7 @@ fn triangle_mesh(corners: [Point3; 3]) -> Mesh {
     Mesh {
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
         vertices: corners.to_vec(),
         triangles: vec![[0, 1, 2]],
         normals: Vec::new(),

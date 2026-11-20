@@ -22,6 +22,7 @@ fn quad(origin: [f64; 3], color: [f32; 3], entity: u128) -> cad_scene::RenderBat
     cad_scene::RenderBatch {
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
         conics: Vec::new(),
         local_origin: cad_domain::Point3 {
             x: origin[0],
@@ -421,4 +422,38 @@ fn a_textured_mesh_is_never_flat_merged() {
     let (chunks, runs) = build_mesh_chunks(&batches, &converted, &keys(&batches), 1 << 16, 1e9);
     assert_eq!(chunks.len(), 1);
     assert!(runs[1].is_none(), "the textured batch owns no merged run");
+}
+
+/// A PBR batch is never flat-merged (nor pulled), for the same reason as a
+/// textured one: the merged/pulled paths bind one uniform for a whole draw and
+/// carry no per-batch five-texture bind group or material factors (ADR-0039 D6).
+#[test]
+fn a_pbr_mesh_is_never_flat_merged() {
+    let plain = quad([0.0, 0.0, 0.0], [1.0, 1.0, 1.0], 1);
+    assert!(mesh_batch_is_mergeable(&plain));
+
+    let mut pbr = quad([0.0, 0.0, 0.0], [1.0, 1.0, 1.0], 2);
+    // Even a scalar-only material (no texture, no UVs) is excluded.
+    pbr.pbr = Some(cad_scene::RenderPbr {
+        metallic: 1.0,
+        roughness: 0.25,
+        emissive: [0.0; 3],
+        occlusion_strength: 0.0,
+        metallic_roughness: None,
+        normal: None,
+        emissive_texture: None,
+        occlusion: None,
+    });
+    assert!(
+        !mesh_batch_is_mergeable(&pbr),
+        "a PBR batch must keep its own draw so it can bind its own channel set"
+    );
+    let batches = [plain, pbr];
+    let converted: Vec<usize> = batches
+        .iter()
+        .enumerate()
+        .filter(|(_, batch)| mesh_batch_is_mergeable(batch))
+        .map(|(index, _)| index)
+        .collect();
+    assert_eq!(converted, vec![0], "the PBR batch converts to nothing");
 }

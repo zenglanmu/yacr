@@ -125,7 +125,7 @@ pub(crate) fn plan_trim_hatch(
         points: window,
         bulges,
         ..
-    } = geometry
+    } = *geometry
     else {
         return Err(PlanRefusal::Unsupported(
             "trim.hatch_unrepresentable: the shared polyline planner did not return a polyline \
@@ -199,7 +199,7 @@ pub(crate) fn plan_trim_hatch(
         first.x, first.y, first.z, last.x, last.y, last.z
     ));
     Ok(TrimResolution {
-        plan: TrimPlan::Replace(SemanticGeometry::Hatch(Box::new(rebuilt))),
+        plan: TrimPlan::Replace(Box::new(SemanticGeometry::Hatch(Box::new(rebuilt)))),
         notes,
     })
 }

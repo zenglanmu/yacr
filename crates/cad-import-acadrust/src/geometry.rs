@@ -414,6 +414,7 @@ pub(crate) fn quad_mesh(corners: [Point3; 4]) -> Mesh {
         colors: Vec::new(),
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
     });
     Mesh {
         vertices: std::mem::take(&mut vertices),
@@ -423,6 +424,7 @@ pub(crate) fn quad_mesh(corners: [Point3; 4]) -> Mesh {
         colors: Vec::new(),
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
     }
 }
 

@@ -63,6 +63,161 @@ pub(crate) fn pack_uvs(uvs: &[[f32; 2]]) -> Vec<u8> {
     bytes
 }
 
+/// Per-vertex tangent frame travels in its own vertex buffer (slot 4), and
+/// **only** for a PBR batch that needs one: the `mesh_pbr` pipeline's full
+/// variant (ADR-0039 D6).
+///
+/// `Float32x4`: `xyz` is the unit tangent, `w` the bitangent handedness
+/// (`+1`/`-1`) so the shader can rebuild `B = cross(N, T) * w` without a second
+/// attribute.
+pub(crate) fn mesh_tangent_layout() -> wgpu::VertexBufferLayout<'static> {
+    wgpu::VertexBufferLayout {
+        array_stride: u64::from(cad_scene::TANGENT_STRIDE),
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &wgpu::vertex_attr_array![4 => Float32x4],
+    }
+}
+
+/// The packed bytes of a batch's tangent stream (`Float32x4` per vertex).
+pub(crate) fn pack_tangents(tangents: &[[f32; 4]]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(tangents.len() * 16);
+    for tangent in tangents {
+        for component in tangent {
+            bytes.extend_from_slice(&component.to_le_bytes());
+        }
+    }
+    bytes
+}
+
+/// Generate one tangent frame per vertex from positions + UV0 + triangles.
+///
+/// The domain stores **no** tangents (glTF's `TANGENT` accessor is not imported),
+/// so they are derived here at pack time with a MikkTSpace-style simplification:
+///
+/// 1. per triangle, solve the UV gradient for a tangent and bitangent and
+///    accumulate both on each of its three vertices;
+/// 2. per vertex, orthonormalise the accumulated tangent against the (repaired)
+///    normal and normalise it;
+/// 3. `w` is the handedness `sign(dot(cross(N, T), B_accumulated))`, `+1` when the
+///    frame degenerates to zero.
+///
+/// `None` means the batch has **no usable tangent frame**: UV0 is absent or
+/// misaligned, a triangle has a degenerate UV triangle (zero area in UV space),
+/// or a vertex's accumulated tangent vanishes against its normal. The caller
+/// must then treat the normal-map channel as absent and record
+/// `render.pbr.tangent_unavailable` — a tangent is **never** invented (ADR-0039
+/// D6).
+pub(crate) fn generate_tangents(
+    vertices: &[[f32; 3]],
+    normals: &[[f32; 3]],
+    uvs: &[[f32; 2]],
+    indices: &[[u32; 3]],
+) -> Option<Vec<[f32; 4]>> {
+    if vertices.is_empty()
+        || uvs.len() != vertices.len()
+        || normals.len() != vertices.len()
+        || indices.is_empty()
+    {
+        return None;
+    }
+    // UV areas below this are degenerate: the gradient solve would divide by a
+    // vanishing determinant and invent a direction.
+    const UV_EPSILON: f32 = 1e-12;
+    const LENGTH_EPSILON: f32 = 1e-8;
+    let mut tangent_accum = vec![[0.0f32; 3]; vertices.len()];
+    let mut bitangent_accum = vec![[0.0f32; 3]; vertices.len()];
+    for triangle in indices {
+        let [i0, i1, i2] = triangle.map(|index| index as usize);
+        if i0 >= vertices.len() || i1 >= vertices.len() || i2 >= vertices.len() {
+            return None;
+        }
+        let p0 = vertices[i0];
+        let p1 = vertices[i1];
+        let p2 = vertices[i2];
+        let uv0 = uvs[i0];
+        let uv1 = uvs[i1];
+        let uv2 = uvs[i2];
+        let edge1 = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];
+        let edge2 = [p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]];
+        let duv1 = [uv1[0] - uv0[0], uv1[1] - uv0[1]];
+        let duv2 = [uv2[0] - uv0[0], uv2[1] - uv0[1]];
+        let determinant = duv1[0] * duv2[1] - duv2[0] * duv1[1];
+        if !determinant.is_finite() || determinant.abs() <= UV_EPSILON {
+            return None;
+        }
+        let reciprocal = 1.0 / determinant;
+        let tangent = [
+            (edge1[0] * duv2[1] - edge2[0] * duv1[1]) * reciprocal,
+            (edge1[1] * duv2[1] - edge2[1] * duv1[1]) * reciprocal,
+            (edge1[2] * duv2[1] - edge2[2] * duv1[1]) * reciprocal,
+        ];
+        let bitangent = [
+            (edge2[0] * duv1[0] - edge1[0] * duv2[0]) * reciprocal,
+            (edge2[1] * duv1[0] - edge1[1] * duv2[0]) * reciprocal,
+            (edge2[2] * duv1[0] - edge1[2] * duv2[0]) * reciprocal,
+        ];
+        if !tangent.iter().all(|value| value.is_finite())
+            || !bitangent.iter().all(|value| value.is_finite())
+        {
+            return None;
+        }
+        for index in [i0, i1, i2] {
+            for axis in 0..3 {
+                tangent_accum[index][axis] += tangent[axis];
+                bitangent_accum[index][axis] += bitangent[axis];
+            }
+        }
+    }
+    let mut tangents = Vec::with_capacity(vertices.len());
+    for (index, accumulated) in tangent_accum.iter().enumerate() {
+        let normal = normals[index];
+        let normal_length =
+            (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
+        if !normal_length.is_finite() || normal_length <= LENGTH_EPSILON {
+            return None;
+        }
+        let normal = [
+            normal[0] / normal_length,
+            normal[1] / normal_length,
+            normal[2] / normal_length,
+        ];
+        // Gram-Schmidt: remove the normal component, then normalise.
+        let projection =
+            accumulated[0] * normal[0] + accumulated[1] * normal[1] + accumulated[2] * normal[2];
+        let orthogonal = [
+            accumulated[0] - normal[0] * projection,
+            accumulated[1] - normal[1] * projection,
+            accumulated[2] - normal[2] * projection,
+        ];
+        let length = (orthogonal[0] * orthogonal[0]
+            + orthogonal[1] * orthogonal[1]
+            + orthogonal[2] * orthogonal[2])
+            .sqrt();
+        if !length.is_finite() || length <= LENGTH_EPSILON {
+            return None;
+        }
+        let tangent = [
+            orthogonal[0] / length,
+            orthogonal[1] / length,
+            orthogonal[2] / length,
+        ];
+        // Handedness from the accumulated bitangent: `cross(N, T)` points along
+        // +B when w = +1. A zero bitangent (no information) keeps +1.
+        let cross = [
+            normal[1] * tangent[2] - normal[2] * tangent[1],
+            normal[2] * tangent[0] - normal[0] * tangent[2],
+            normal[0] * tangent[1] - normal[1] * tangent[0],
+        ];
+        let accumulated_bitangent = bitangent_accum[index];
+        let handedness = cross[0] * accumulated_bitangent[0]
+            + cross[1] * accumulated_bitangent[1]
+            + cross[2] * accumulated_bitangent[2];
+        let w = if handedness < 0.0 { -1.0 } else { 1.0 };
+        tangents.push([tangent[0], tangent[1], tangent[2], w]);
+    }
+    Some(tangents)
+}
+
 // ---------------------------------------------------------------------------
 // Flat-merged mesh runs ("entity = data", second slice)
 // ---------------------------------------------------------------------------
@@ -153,11 +308,17 @@ pub(crate) fn mesh_merged_layout() -> wgpu::VertexBufferLayout<'static> {
 /// documented batching regression — it costs one draw per textured mesh — not a
 /// silent behaviour change. The pulled mesh class applies the same predicate, so
 /// textured batches stay on the per-batch `mesh_textured` path on every tier.
+///
+/// A **PBR** batch is never mergeable either (ADR-0039 D6): it draws through the
+/// separate `mesh_pbr` channel with its own five texture bindings and per-batch
+/// factors, none of which the merged vertex stream can carry. The same predicate
+/// keeps it out of the pulled class on every tier.
 pub(crate) fn mesh_batch_is_mergeable(batch: &cad_scene::RenderBatch) -> bool {
     batch.topology == RenderTopology::Mesh
         && !batch.indices.is_empty()
         && classify_alpha(batch.alpha) == AlphaClass::Opaque
         && batch.texture.is_none()
+        && batch.pbr.is_none()
 }
 
 /// One member batch's triangle range inside a merged mesh chunk.

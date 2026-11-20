@@ -81,12 +81,12 @@ pub(super) fn plan_vertex(
             }
             let (inserted_points, inserted_bulges) = curve.insert_vertex_at(after, local)?;
             Ok(Plan::Write {
-                geometry: SemanticGeometry::Polyline {
+                geometry: Box::new(SemanticGeometry::Polyline {
                     points: inserted_points,
                     bulges: inserted_bulges,
                     closed,
                     width,
-                },
+                }),
                 label: format!(
                     "Edit vertex INSERT (one vertex on segment {after}, shape preserved)"
                 ),
@@ -150,12 +150,12 @@ pub(super) fn plan_vertex(
                 ));
             }
             Ok(Plan::Write {
-                geometry: SemanticGeometry::Polyline {
+                geometry: Box::new(SemanticGeometry::Polyline {
                     points,
                     bulges,
                     closed,
                     width,
-                },
+                }),
                 label: format!("Edit vertex MOVE (vertex {vertex})"),
                 deleted: Vec::new(),
             })
@@ -190,12 +190,12 @@ pub(super) fn plan_vertex(
                 kept_bulges.extend_from_slice(tail);
             }
             Ok(Plan::Write {
-                geometry: SemanticGeometry::Polyline {
+                geometry: Box::new(SemanticGeometry::Polyline {
                     points: kept_points,
                     bulges: kept_bulges,
                     closed,
                     width,
-                },
+                }),
                 label: format!(
                     "Edit vertex STRAIGHTEN ({first} → {last}: {} interior vertex/vertices \
                      removed)",

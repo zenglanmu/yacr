@@ -82,6 +82,27 @@ impl Renderer {
         fallbacks: &mut Vec<ResourceKey>,
     ) {
         let batch = &self.batches[index];
+        // A PBR batch takes the dedicated `mesh_pbr` channel on every tier: it is
+        // never merged or pulled, so this is the only draw path it can reach.
+        if batch.pbr.is_some() {
+            if let Some((pipeline, pbr_bind_group, layout)) =
+                self.pbr_draw_state(batch, transparent, fallbacks)
+            {
+                draw_batch_pbr(
+                    pass,
+                    state,
+                    batch,
+                    bind_group,
+                    uniform_offset,
+                    pbr_bind_group,
+                    line_pipeline,
+                    pipeline,
+                    layout != PbrVertexLayout::Flat,
+                    layout == PbrVertexLayout::Full,
+                );
+                return;
+            }
+        }
         let textured = batch.texture.as_ref().and_then(|key| {
             let texture = self.mesh_textures.get(key)?;
             let pipeline = self.textured_mesh_pipeline(batch.mirrored, transparent)?;

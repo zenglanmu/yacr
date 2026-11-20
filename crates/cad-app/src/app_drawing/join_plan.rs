@@ -57,7 +57,7 @@ pub(super) enum Joined {
     },
     Spline(SplineCurve),
     /// A geometry a planner already assembled (the mixed NURBS weld).
-    Raw(SemanticGeometry),
+    Raw(Box<SemanticGeometry>),
 }
 
 impl Joined {
@@ -112,7 +112,7 @@ impl Joined {
                 width: 0.0,
             },
             Joined::Spline(curve) => curve.geometry(),
-            Joined::Raw(geometry) => geometry,
+            Joined::Raw(geometry) => *geometry,
         }
     }
 }

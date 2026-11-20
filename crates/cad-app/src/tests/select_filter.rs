@@ -865,6 +865,7 @@ fn body_type_names_come_from_the_stored_source_class() {
                     colors: Vec::new(),
                     uvs: Vec::new(),
                     texture: None,
+                    pbr: None,
                 },
                 edges: Vec::new(),
                 tolerance: None,

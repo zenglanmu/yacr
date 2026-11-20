@@ -211,6 +211,7 @@ fn degenerate_triangle_is_dropped_and_not_counted_exact() {
         colors: Vec::new(),
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
     };
     let database = mesh_database(mesh);
     let output = export(GltfContainer::Glb, &database);

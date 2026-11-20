@@ -194,8 +194,9 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
   STEP/DGN/RVT 为稳定拒绝
   `export.<id>.not_implemented`。对象级报告随 `.ymodel` 落 `tables/compat.json`（导出记录最多 32 条，
   导入记录不淘汰）与 `tables/sources.json`；新增两张表使 `FORMAT_MINOR` 升到 **2**，
-  网格基色纹理（`textures/<key>` 二进制条目 + `cad:Mesh` 的 `uvs`/`texture`）再升到 **3**
-  （minor ≤ 2 仍可打开）。**报告弹窗 UI、
+  网格基色纹理（`textures/<key>` 二进制条目 + `cad:Mesh` 的 `uvs`/`texture`）再升到 **3**，
+  网格 PBR 通道（`cad:Mesh.pbr`：metallic/roughness/emissive/occlusion 标量 + 4 张 UV0 贴图）
+  再升到 **4**（minor ≤ 3 仍可打开）。**报告弹窗 UI、
   L0 源字节直通、DXF L1 不动点仍未实现**，不得写成已完成。
 
 ## 前端约定（`apps/desktop-ui`）

@@ -82,5 +82,9 @@ pub(crate) fn transform_mesh(mesh: &Mesh, t: &Transform3) -> Mesh {
         // The texture reference is a document key, so a transform never invents,
         // drops or rewrites it.
         texture: mesh.texture.clone(),
+        // The PBR channel set (scalar factors + four document texture keys) is a
+        // material property: a rigid/affine transform never rewrites, drops or
+        // invents it (ADR-0039 D6, mirroring the ADR-0038 D7 rule for `texture`).
+        pbr: mesh.pbr.clone(),
     }
 }

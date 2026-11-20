@@ -31,6 +31,7 @@ fn grid_batch(first: usize, count: usize, draw_order: i64) -> RenderBatch {
     RenderBatch {
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
         conics: Vec::new(),
         local_origin: Point3 {
             x: 0.0,

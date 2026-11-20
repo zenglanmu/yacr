@@ -570,7 +570,7 @@ fn the_manifest_pins_the_document_and_the_import_baseline() {
         manifest["format"]["minor"],
         Value::from(cad_domain::ymodel::FORMAT_MINOR)
     );
-    assert_eq!(cad_domain::ymodel::FORMAT_MINOR, 3, "ADR-0038 D4");
+    assert_eq!(cad_domain::ymodel::FORMAT_MINOR, 4, "ADR-0039 D2");
 
     let loaded = read_archive(&bytes).expect("read");
     assert_eq!(loaded.manifest.open_revision, Revision(4));

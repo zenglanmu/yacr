@@ -426,6 +426,7 @@ pub(super) fn solid_body(exact: BrepData) -> SemanticGeometry {
             colors: Vec::new(),
             uvs: Vec::new(),
             texture: None,
+            pbr: None,
         },
         vec![vec![p(0.0, 0.0, 0.0), p(1.0, 0.0, 0.0)]],
     )

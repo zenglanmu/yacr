@@ -55,6 +55,7 @@ fn empty_batch_centroid_falls_back_to_local_origin() {
         colors: Vec::new(),
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
         indices: Vec::new(),
         edges: Vec::new(),
         mirrored: false,

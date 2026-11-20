@@ -116,6 +116,7 @@ fn triangle_mesh() -> Mesh {
         colors: Vec::new(),
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
     }
 }
 
@@ -273,4 +274,5 @@ fn read_scalar_u32(gltf: &gltf::Gltf, buffers: &[Vec<u8>], index: usize) -> Vec<
 mod attributes;
 mod geometry;
 mod materials;
+mod pbr;
 mod textures;

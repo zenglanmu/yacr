@@ -175,6 +175,7 @@ mod tests {
                         colors: Vec::new(),
                         uvs: Vec::new(),
                         texture: None,
+                        pbr: None,
                     }),
                     edges: std::sync::Arc::from(
                         vec![

@@ -209,7 +209,9 @@ impl Application {
                     }
                     TrexMode::Extend => {
                         match plan_extend(&curve, curve.point_at(1.0), &boundaries, &policy, tol) {
-                            Ok(resolution) => Some(TrimPlan::Replace(resolution.geometry)),
+                            Ok(resolution) => {
+                                Some(TrimPlan::Replace(Box::new(resolution.geometry)))
+                            }
                             Err(reason) => {
                                 diagnostics.push(skipped("trex.skipped", target.id, &reason));
                                 None
@@ -220,7 +222,7 @@ impl Application {
                 if let Some(plan) = plan {
                     match plan {
                         TrimPlan::Replace(geometry) => {
-                            changes.push(CurveChange::Replace(target.clone(), geometry))
+                            changes.push(CurveChange::Replace(target.clone(), *geometry))
                         }
                         TrimPlan::Delete => changes.push(CurveChange::Delete(
                             target.clone(),
@@ -393,7 +395,7 @@ impl Application {
                         }
                         match resolution.plan {
                             TrimPlan::Replace(geometry) => {
-                                changes.push(CurveChange::Replace(target.clone(), geometry))
+                                changes.push(CurveChange::Replace(target.clone(), *geometry))
                             }
                             TrimPlan::Delete => changes.push(CurveChange::Delete(
                                 target.clone(),

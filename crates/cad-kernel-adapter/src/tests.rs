@@ -142,6 +142,7 @@ fn budget_exceeded_is_reported_with_stable_code() {
             colors: Vec::new(),
             uvs: Vec::new(),
             texture: None,
+            pbr: None,
         },
         edges: vec![vec![
             Point3 {

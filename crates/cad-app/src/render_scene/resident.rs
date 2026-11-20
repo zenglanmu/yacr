@@ -436,6 +436,7 @@ mod tests {
         RenderBatch {
             uvs: Vec::new(),
             texture: None,
+            pbr: None,
             conics: Vec::new(),
             local_origin: Point3 {
                 x: 0.0,

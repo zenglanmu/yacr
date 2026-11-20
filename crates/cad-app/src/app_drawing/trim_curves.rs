@@ -89,7 +89,7 @@ pub(crate) enum TrimPlan {
     Delete,
     /// Replace the target's geometry with this value. The entity keeps its id,
     /// layer, space and display state.
-    Replace(SemanticGeometry),
+    Replace(Box<SemanticGeometry>),
 }
 
 /// A resolved TRIM plus the honesty notes the command turns into diagnostics.
@@ -180,7 +180,7 @@ pub(crate) enum TargetCurve {
     /// its own continuation rule (`super::extend_spline`) and never plans one
     /// through [`plan_extend`], because "extend" is a tangent ray rather than a
     /// window of this parameterisation.
-    Spline(SplineTarget),
+    Spline(Box<SplineTarget>),
 }
 
 impl TargetCurve {
@@ -297,13 +297,13 @@ impl TargetCurve {
                 control_points,
                 weights,
                 closed,
-            } => Ok(Self::Spline(SplineTarget::new(
+            } => Ok(Self::Spline(Box::new(SplineTarget::new(
                 *degree,
                 knots,
                 control_points,
                 weights,
                 *closed,
-            )?)),
+            )?))),
             other => Err(CadError::Unsupported(format!(
                 "{command} target must be {supported}; {} is not supported",
                 geometry_kind(other)
@@ -778,7 +778,7 @@ pub(crate) fn plan_trim(
         spline.note_exact_sub_curve_on_sampled_cuts(&mut notes);
     }
     Ok(TrimResolution {
-        plan: TrimPlan::Replace(geometry),
+        plan: TrimPlan::Replace(Box::new(geometry)),
         notes,
     })
 }

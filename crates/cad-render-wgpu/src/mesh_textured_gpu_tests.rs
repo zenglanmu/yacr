@@ -86,6 +86,7 @@ fn textured_quad(color: [f32; 3], texture: &str) -> RenderBatch {
     RenderBatch {
         uvs: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
         texture: Some(ResourceKey(texture.to_owned())),
+        pbr: None,
         conics: Vec::new(),
         local_origin: Point3 {
             x: 0.0,

@@ -2,8 +2,7 @@ use super::upload::batch_world_z_range;
 use super::*;
 
 impl Renderer {
-    /// Build resources without changing the active scene. Synchronous input and
-    /// device-limit validation precedes allocation; async driver failures remain
+    /// Build resources without changing the active scene. Synchronous input and    /// device-limit validation precedes allocation; async driver failures remain
     /// covered by the render error scope/device lifecycle, not this return value.
     pub fn prepare_upload(&self, delta: &SceneDelta) -> CadResult<PreparedUpload> {
         self.prepare_upload_batches(&delta.added)
@@ -228,6 +227,15 @@ impl Renderer {
                 || (!batch.uvs.is_empty() && batch.uvs.len() != batch.vertices.len())
                 || (batch.texture.is_some() && batch.uvs.len() != batch.vertices.len())
                 || batch.uvs.iter().flatten().any(|component| !component.is_finite())
+                // A PBR channel set must be finite and in range, and a PBR texture
+                // samples UV0, so it requires one finite pair per vertex
+                // (ADR-0039 D6). The scene sanitiser normally guarantees this; a
+                // hand-built batch that violates it is refused, never bound as a
+                // wrong-layout buffer.
+                || batch.pbr.as_ref().is_some_and(|pbr| {
+                    !pbr_is_uploadable(pbr)
+                        || (pbr.has_textures() && batch.uvs.len() != batch.vertices.len())
+                })
                 // A conic batch carries f64 semantic records, not vertices; guard
                 // its own buffer size and finiteness.
                 || (batch.topology == RenderTopology::Conics
@@ -456,7 +464,7 @@ impl Renderer {
             // `line_quads` holds the pre-expanded anti-aliased line quads for a
             // legacy `Lines`/`MeshEdges` batch or a non-merged mesh's wireframe
             // overlay (empty for a converted batch).
-            let (vertices, indices, normals, colors, uvs, line_quads) =
+            let (vertices, indices, normals, colors, uvs, tangents, line_quads) =
                 if instanced || merged || arc_instanced {
                     Default::default()
                 } else {
@@ -472,14 +480,45 @@ impl Renderer {
                             // Always bound (white when the batch has no per-vertex
                             // colours), so the mesh pipeline's `@location(2)` is valid.
                             let colors = geometry::repaired_colors(batch);
-                            // UV0 is uploaded **only** for a textured batch: an
-                            // untextured batch keeps the three-buffer layout of the
-                            // existing mesh pipelines (ADR-0038 D9).
-                            let uvs = if batch.texture.is_some() {
+                            // UV0 is uploaded when a channel actually samples it: the
+                            // base-colour texture (ADR-0038 D9) or any surviving PBR
+                            // map (ADR-0039 D6). An untextured, non-PBR batch keeps
+                            // the three-buffer layout of the existing mesh pipelines.
+                            let samples_uv = batch.texture.is_some()
+                                || batch.pbr.as_ref().is_some_and(|pbr| pbr.has_textures());
+                            let uvs = if samples_uv {
                                 pack_uvs(&batch.uvs)
                             } else {
                                 Vec::new()
                             };
+                            // Tangents are **generated** at pack time, only for a PBR
+                            // material whose normal map needs a frame. Degenerate UVs
+                            // yield no frame: the channel is disabled and the event is
+                            // counted (never a fabricated tangent).
+                            let tangent_frame = batch.pbr.as_ref().and_then(|pbr| {
+                                if !pbr.needs_tangents()
+                                    || batch.uvs.is_empty()
+                                    || batch.uvs.len() != batch.vertices.len()
+                                {
+                                    return None;
+                                }
+                                match generate_tangents(
+                                    &batch.vertices,
+                                    &normals,
+                                    &batch.uvs,
+                                    &batch.indices,
+                                ) {
+                                    Some(tangents) => Some(tangents),
+                                    None => {
+                                        self.pbr_tangent_unavailable
+                                            .fetch_add(1, Ordering::Relaxed);
+                                        None
+                                    }
+                                }
+                            });
+                            let tangents = tangent_frame
+                                .as_deref()
+                                .map_or_else(Vec::new, pack_tangents);
                             // The wireframe overlay draws the batch's `edges`
                             // positions directly (stored body edges or the
                             // legacy triangle-derived overlay); no triangle
@@ -494,6 +533,7 @@ impl Renderer {
                                 pack_positions(&normals),
                                 pack_positions(&colors),
                                 uvs,
+                                tangents,
                                 line_quad_bytes(&quads),
                             )
                         }
@@ -503,6 +543,7 @@ impl Renderer {
                             let mut quads = Vec::new();
                             expand_line_quads(&mut quads, batch, false);
                             (
+                                Vec::new(),
                                 Vec::new(),
                                 Vec::new(),
                                 Vec::new(),
@@ -524,8 +565,12 @@ impl Renderer {
             self.admit_gpu_memory(&[
                 (
                     GpuMemoryCategory::Vertex,
-                    (vertices.len() + normals.len() + colors.len() + uvs.len() + line_quads.len())
-                        as u64,
+                    (vertices.len()
+                        + normals.len()
+                        + colors.len()
+                        + uvs.len()
+                        + tangents.len()
+                        + line_quads.len()) as u64,
                 ),
                 (GpuMemoryCategory::Index, (indices.len() * 4) as u64),
             ])?;
@@ -580,6 +625,14 @@ impl Renderer {
             } else {
                 None
             };
+            // Tangent (slot 4) exists only for a PBR material whose normal map
+            // needed a frame; a batch without one binds no slot 4 (the `flat`
+            // pipeline declares none), so no tangent is ever fabricated.
+            let tangent_buffer = if is_mesh && !merged && !tangents.is_empty() {
+                Some(Self::vertex_buffer(device, self.queue.as_ref(), &tangents))
+            } else {
+                None
+            };
             // Charge exactly what the created handles hold (never the packed CPU
             // bytes: a buffer is rounded up by the backend, and the handle is the
             // only truth). `None` when the batch owns no buffer of that kind.
@@ -588,6 +641,7 @@ impl Renderer {
                 &normal_buffer,
                 &color_buffer,
                 &uv_buffer,
+                &tangent_buffer,
                 &line_quad_buffer,
             ]
             .into_iter()
@@ -654,6 +708,7 @@ impl Renderer {
                     + vertices.len()
                     + colors.len()
                     + uvs.len()
+                    + tangents.len()
                     + indices.len() * 4
                     + line_quads.len()
             };
@@ -665,6 +720,12 @@ impl Renderer {
                 colors: color_buffer,
                 uvs: uv_buffer,
                 texture: batch.texture.clone(),
+                // A PBR batch owns a per-batch draw on every tier (never merged or
+                // pulled); a scalar-only material without tangents draws through the
+                // `flat` pipeline (no UV/tangent buffers bound).
+                pbr: batch.pbr.clone(),
+                tangents: tangent_buffer,
+                has_tangents: is_mesh && !merged && !tangents.is_empty(),
                 topology: batch.topology,
                 text_glyph: batch.is_text_glyph(),
                 indices: index_buffer,
@@ -706,4 +767,18 @@ impl Renderer {
             elapsed_ms: started.elapsed().as_secs_f64() * 1000.0,
         })
     }
+}
+
+/// Whether a scene PBR record is safe to upload (ADR-0039 D6).
+///
+/// Every scalar must be finite and inside `[0, 1]`; the scene sanitiser normally
+/// guarantees it (`cad-db` is the authority), and this is the last-line defensive
+/// gate for a hand-built batch. A violation refuses the batch rather than clamping
+/// or uploading a NaN into the shader.
+fn pbr_is_uploadable(pbr: &cad_scene::RenderPbr) -> bool {
+    let unit = |value: f32| value.is_finite() && (0.0..=1.0).contains(&value);
+    unit(pbr.metallic)
+        && unit(pbr.roughness)
+        && unit(pbr.occlusion_strength)
+        && pbr.emissive.iter().copied().all(unit)
 }

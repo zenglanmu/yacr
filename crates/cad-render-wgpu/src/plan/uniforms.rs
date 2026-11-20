@@ -1,15 +1,24 @@
 use super::*;
 
 /// Bytes of the per-batch uniform struct: `mat4x4<f32>` (64) + `vec4<f32>` tint
-/// (16) + `vec4<u32> key_flags` (16) + `vec4<f32>` light (16) in
-/// `shaders/{line,mesh,image,line_instanced,mesh_merged}.wgsl`. `key_flags.x` is
+/// (16) + `vec4<u32>` key_flags (16) + `vec4<f32>` light (16) + the three PBR
+/// words below (48) in
+/// `shaders/{line,mesh,image,line_instanced,mesh_merged,mesh_pbr}.wgsl`.
+/// `key_flags.x` is
 /// the batch's renderer pick key and `.y` its [`INSTANCE_FLAG_*`] bitfield;
 /// `light.rgb` is the frame's unit vector *toward* the light in world space and
 /// `light.a` is the frame's **light-background** flag (`1` when the clear colour
 /// is light, see [`background_is_light`]; `0` otherwise — the ink-flip flag the
-/// colour shaders read). The uniform is 16-byte aligned, so the struct is 112
+/// colour shaders read). The uniform is 16-byte aligned, so the struct is 160
 /// bytes.
-pub(crate) const UNIFORM_STRUCT_BYTES: u32 = 112;
+///
+/// The three trailing words are the ADR-0039 PBR channel payload (factors,
+/// linear emissive, and the frame's camera position for the view vector). They
+/// are part of the **shared** layout — like `light`, which only a subset of
+/// shaders reads — so a per-batch uniform stays one slot on one page and needs no
+/// second arena. Every other shader declares the shorter prefix, which is valid
+/// for a uniform binding at least as large as the declared struct.
+pub(crate) const UNIFORM_STRUCT_BYTES: u32 = 160;
 
 /// Bytes of the selection-flags control uniform (`enabled` + row width + two
 /// reserved words, 16-byte aligned for the uniform layout).
@@ -89,10 +98,10 @@ pub(crate) struct EncodeState {
     last_bind_group0: Option<wgpu::BindGroup>,
     last_bind_offset0: u32,
     last_bind_group2: Option<wgpu::BindGroup>,
-    /// Last bound buffer per vertex slot. Four slots cover every pipeline in
+    /// Last bound buffer per vertex slot. Five slots cover every pipeline in
     /// this crate: 0 position (or the shared unit quad), 1 normal / instance
-    /// stream, 2 colour, 3 UV0 (textured mesh only).
-    last_vertex: [Option<wgpu::Buffer>; 4],
+    /// stream, 2 colour, 3 UV0 (textured/PBR mesh), 4 tangent (PBR mesh).
+    last_vertex: [Option<wgpu::Buffer>; 5],
     last_index: Option<wgpu::Buffer>,
 }
 
@@ -104,7 +113,7 @@ impl EncodeState {
             last_bind_group0: None,
             last_bind_offset0: u32::MAX,
             last_bind_group2: None,
-            last_vertex: [None, None, None, None],
+            last_vertex: [None, None, None, None, None],
             last_index: None,
         }
     }
@@ -333,6 +342,76 @@ pub(crate) fn draw_batch_textured(
     }
 }
 
+/// Submit one PBR mesh batch (`mesh_pbr`, ADR-0039 D6).
+///
+/// Mirrors [`draw_batch_textured`] for the triangle draw, but binds the PBR
+/// channel bind group at group 2 and whichever vertex buffers the pipeline's
+/// layout declares: `bind_uv` for the UV0 slot (slot 3) and `bind_tangent` for the
+/// CPU-generated tangent slot (slot 4). The `flat` layout declares neither, for a
+/// scalar-only PBR material with no UV stream.
+///
+/// The optional anti-aliased wireframe overlay is drawn exactly like the other
+/// mesh paths (the line pipeline, after the triangles), so a PBR body keeps its
+/// edge display.
+///
+/// The caller guarantees the batch has a resident (or all-identity) PBR bind
+/// group; an unresolved channel is never drawn with a placeholder texture.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn draw_batch_pbr(
+    pass: &mut wgpu::RenderPass<'_>,
+    state: &mut EncodeState,
+    batch: &GpuBatch,
+    bind_group: &wgpu::BindGroup,
+    uniform_offset: u32,
+    pbr_bind_group: &wgpu::BindGroup,
+    line_pipeline: &wgpu::RenderPipeline,
+    mesh_pipeline: &wgpu::RenderPipeline,
+    bind_uv: bool,
+    bind_tangent: bool,
+) {
+    let Some(vertices) = batch.vertices.as_ref() else {
+        return;
+    };
+    let draw_plan = mesh_draw_plan(batch.indices.is_some(), batch.line_quads.is_some());
+    if draw_plan.triangles {
+        state.set_pipeline(pass, mesh_pipeline);
+        state.set_bind_group0(pass, bind_group, uniform_offset);
+        state.set_bind_group2(pass, pbr_bind_group);
+        state.set_vertex_buffer(pass, 0, vertices);
+        if let Some(normals) = &batch.normals {
+            state.set_vertex_buffer(pass, 1, normals);
+        }
+        if let Some(colors) = &batch.colors {
+            state.set_vertex_buffer(pass, 2, colors);
+        }
+        if bind_uv {
+            if let Some(uvs) = &batch.uvs {
+                state.set_vertex_buffer(pass, 3, uvs);
+            }
+        }
+        if bind_tangent {
+            if let Some(tangents) = &batch.tangents {
+                state.set_vertex_buffer(pass, 4, tangents);
+            }
+        }
+        let indices = batch
+            .indices
+            .as_ref()
+            .expect("mesh draw plan requires triangle indices");
+        state.set_index_buffer(pass, indices);
+        pass.draw_indexed(0..batch.index_count, 0, 0..1);
+    }
+    if draw_plan.edge_overlay {
+        let quads = batch
+            .line_quads
+            .as_ref()
+            .expect("draw plan requires overlay quads");
+        state.set_pipeline(pass, line_pipeline);
+        state.set_vertex_buffer(pass, 0, quads);
+        pass.draw(0..batch.line_quad_count, 0..1);
+    }
+}
+
 /// Submit one coalesced instanced line run: `6` unit-quad vertices expanded once
 /// per instance in `start..start + count` of `stream`.
 ///
@@ -511,13 +590,54 @@ pub(crate) fn pack_positions(vectors: &[[f32; 3]]) -> Vec<u8> {
     bytes
 }
 
+/// PBR channel bits carried in `Camera.pbr_factors.w` (bitcast to `u32` by the
+/// shader) for the `mesh_pbr` channel (ADR-0039 D6).
+///
+/// A clear bit means "this channel is disabled": the renderer binds the exact
+/// multiplicative identity for its texture slot, so the sample is neutral. The
+/// normal bit additionally requires a generated tangent frame — without one the
+/// normal map is disabled and the tangent is never invented.
+pub(crate) const PBR_CHANNEL_BASE_COLOUR: u32 = 1 << 0;
+pub(crate) const PBR_CHANNEL_METALLIC_ROUGHNESS: u32 = 1 << 1;
+pub(crate) const PBR_CHANNEL_NORMAL: u32 = 1 << 2;
+pub(crate) const PBR_CHANNEL_EMISSIVE: u32 = 1 << 3;
+pub(crate) const PBR_CHANNEL_OCCLUSION: u32 = 1 << 4;
+
+/// The per-batch PBR payload of the shared uniform (ADR-0039 D6).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct PbrUniforms {
+    /// Metallic factor in `[0, 1]`.
+    pub(crate) metallic: f32,
+    /// Roughness factor in `[0, 1]`.
+    pub(crate) roughness: f32,
+    /// Ambient-occlusion strength in `[0, 1]`.
+    pub(crate) occlusion_strength: f32,
+    /// [`PBR_CHANNEL_*`] bits of the channels the bind group actually supplies.
+    pub(crate) channels: u32,
+    /// **Linear** emissive RGB in `[0, 1]`.
+    pub(crate) emissive: [f32; 3],
+}
+
+impl Default for PbrUniforms {
+    fn default() -> Self {
+        PbrUniforms {
+            metallic: 0.0,
+            roughness: 1.0,
+            occlusion_strength: 0.0,
+            channels: 0,
+            emissive: [0.0, 0.0, 0.0],
+        }
+    }
+}
+
 /// Pack one per-batch uniform: `mat4x4<f32>` transform, `vec4<f32>` tint,
 /// `vec4<u32> key_flags` (x = renderer pick key, y = [`INSTANCE_FLAG_*`] bits)
 /// and `vec4<f32>` light (`rgb` = unit vector toward the light in world space,
 /// `a` = the frame's light-background ink flag, see [`background_is_light`]).
 ///
 /// `light` is a per-frame constant, but it travels in every slot because all
-/// shaders share one uniform layout (see [`UNIFORM_STRUCT_BYTES`]).
+/// shaders share one uniform layout (see [`UNIFORM_STRUCT_BYTES`]). The PBR words
+/// default to "no channel enabled" for every non-PBR slot.
 ///
 /// Word-oriented so the byte layout is exactly what the shaders declare and does
 /// not depend on the host's float representation or `bytemuck` alignment rules.
@@ -527,7 +647,28 @@ pub(crate) fn uniform_bytes(
     key_flags: [u32; 4],
     light: [f32; 4],
 ) -> [u8; UNIFORM_STRUCT_BYTES as usize] {
-    let mut words = [0u32; 28];
+    uniform_bytes_pbr(
+        matrix,
+        tint,
+        key_flags,
+        light,
+        PbrUniforms::default(),
+        [0.0; 3],
+    )
+}
+
+/// [`uniform_bytes`] plus the PBR payload: the material factors, the linear
+/// emissive term and the frame's camera position (the `mesh_pbr` view vector).
+/// Every other shader reads only the leading 112 bytes.
+pub(crate) fn uniform_bytes_pbr(
+    matrix: &[f32; 16],
+    tint: [f32; 4],
+    key_flags: [u32; 4],
+    light: [f32; 4],
+    pbr: PbrUniforms,
+    camera_position: [f32; 3],
+) -> [u8; UNIFORM_STRUCT_BYTES as usize] {
+    let mut words = [0u32; UNIFORM_STRUCT_BYTES as usize / 4];
     for (slot, value) in matrix.iter().enumerate() {
         words[slot] = value.to_bits();
     }
@@ -538,6 +679,20 @@ pub(crate) fn uniform_bytes(
     for (slot, value) in light.iter().enumerate() {
         words[24 + slot] = value.to_bits();
     }
+    words[28] = pbr.metallic.to_bits();
+    words[29] = pbr.roughness.to_bits();
+    words[30] = pbr.occlusion_strength.to_bits();
+    // Channel bits travel as an exactly-representable small `f32` so the whole
+    // struct stays float-worded; the shader rounds back to `u32`.
+    words[31] = (pbr.channels as f32).to_bits();
+    words[32] = pbr.emissive[0].to_bits();
+    words[33] = pbr.emissive[1].to_bits();
+    words[34] = pbr.emissive[2].to_bits();
+    words[35] = 0;
+    words[36] = camera_position[0].to_bits();
+    words[37] = camera_position[1].to_bits();
+    words[38] = camera_position[2].to_bits();
+    words[39] = 0;
     let mut bytes = [0u8; UNIFORM_STRUCT_BYTES as usize];
     for (slot, word) in words.iter().enumerate() {
         bytes[slot * 4..slot * 4 + 4].copy_from_slice(&word.to_le_bytes());
@@ -548,6 +703,65 @@ pub(crate) fn uniform_bytes(
 /// Sanitise a batch colour for the uniform: finite `[0, 1]` channels.///
 /// Mirrors `cad_scene::sanitize_color` so a value that bypassed the scene cache
 /// still cannot put a NaN into the shader.
+/// The per-batch uniform for `batch`.
+///
+/// A non-PBR batch is exactly [`uniform_bytes`] (the PBR words stay at their
+/// neutral defaults). A PBR batch adds its material (ADR-0039 D6): the scalar
+/// factors, the [`PBR_CHANNEL_*`] bits of the channels its bind group supplies,
+/// the linear emissive term, and the camera position expressed in the batch's own
+/// vertex space (`batch.origin` is already folded into `matrix`, so
+/// `eye - position` is the view vector in that space).
+///
+/// The normal-map bit additionally requires a generated tangent frame
+/// ([`GpuBatch::has_tangents`]); without one the channel is disabled rather than
+/// evaluated against an invented tangent.
+pub(crate) fn batch_uniform(
+    batch: &GpuBatch,
+    matrix: &[f32; 16],
+    tint: [f32; 4],
+    key_flags: [u32; 4],
+    light: [f32; 4],
+    camera_position: [f32; 3],
+) -> [u8; UNIFORM_STRUCT_BYTES as usize] {
+    let Some(pbr) = &batch.pbr else {
+        return uniform_bytes(matrix, tint, key_flags, light);
+    };
+    let mut channels = 0;
+    if batch.texture.is_some() {
+        channels |= PBR_CHANNEL_BASE_COLOUR;
+    }
+    if pbr.metallic_roughness.is_some() {
+        channels |= PBR_CHANNEL_METALLIC_ROUGHNESS;
+    }
+    if pbr.normal.is_some() && batch.has_tangents {
+        channels |= PBR_CHANNEL_NORMAL;
+    }
+    if pbr.emissive_texture.is_some() {
+        channels |= PBR_CHANNEL_EMISSIVE;
+    }
+    if pbr.occlusion.is_some() {
+        channels |= PBR_CHANNEL_OCCLUSION;
+    }
+    uniform_bytes_pbr(
+        matrix,
+        tint,
+        key_flags,
+        light,
+        PbrUniforms {
+            metallic: pbr.metallic,
+            roughness: pbr.roughness,
+            occlusion_strength: pbr.occlusion_strength,
+            channels,
+            emissive: pbr.emissive,
+        },
+        [
+            camera_position[0] - batch.origin[0],
+            camera_position[1] - batch.origin[1],
+            camera_position[2] - batch.origin[2],
+        ],
+    )
+}
+
 pub(crate) fn renderer_color(color: [f32; 3]) -> [f32; 3] {
     let channel = |c: f32| {
         if c.is_finite() {

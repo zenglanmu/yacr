@@ -250,29 +250,37 @@ impl Renderer {
         Ok(report)
     }
 
-    /// Resolve and upload the mesh base-colour textures of a scene (ADR-0038
-    /// D9/D10).
+    /// Resolve and upload the mesh material textures of a scene (ADR-0038
+    /// D9/D10, ADR-0039 D6).
     ///
     /// `keys` is the deduplicated texture-key set the resident batches reference
-    /// (`cad_scene::mesh_texture_keys` / `SceneCache::mesh_texture_keys`). Each key
-    /// is resolved through the **same** decoded-image cache the raster images use
-    /// and uploaded with the image pipeline's texture layout
+    /// (`cad_scene::mesh_texture_keys` / `SceneCache::mesh_texture_keys`), which
+    /// includes the base-colour key **and** the four PBR slots. Each key is
+    /// resolved through the **same** decoded-image cache the raster images use and
+    /// uploaded with the image pipeline's texture layout
     /// ([`Self::image_texture_layout`]) and shared filtering sampler, so mesh
     /// textures and image quads share one allocation/decode path.
     ///
+    /// Texel format follows the key's **role**, read from the resident batches:
+    ///
+    /// * base colour and emissive are colour → `Rgba8UnormSrgb` (linear on sample);
+    /// * metallic-roughness, normal and occlusion are data → `Rgba8Unorm`. Decoding
+    ///   a normal map through sRGB would break the tangent-space normal.
+    ///
+    /// A key used in both roles is uploaded once per role (two textures); that is
+    /// rare and keeps each sample correct rather than picking one convention.
+    ///
+    /// After the residency update, one bind group is created per distinct
+    /// five-slot channel set referenced by a resident PBR batch
+    /// ([`Self::pbr_bind_groups`]). A slot whose key is unresolved binds its
+    /// **identity** texture (channel disabled) and is named in
+    /// [`ImageUploadReport::unresolved`]; it is reported again at draw time through
+    /// [`Renderer::mesh_texture_fallbacks`]. A batch whose channel set has not been
+    /// resolved yet draws with the all-identity bind group.
+    ///
     /// This is a texture-residency call only: it creates no draw item and no pick
     /// key (a mesh texture is never pickable on its own — picking resolves the
-    /// batch), so it does not touch the pick table, the draw plan or pacing. A key
-    /// that is absent from the cache (a failed decode, an unsupported container)
-    /// or whose decoded buffer is malformed is **skipped**, never replaced by a
-    /// placeholder, and returned in [`ImageUploadReport::unresolved`]; a batch that
-    /// references such a key is drawn untextured and the key is surfaced again at
-    /// draw time via [`Renderer::mesh_texture_fallbacks`].
-    ///
-    /// The resident set is replaced, not appended: a texture whose key is no
-    /// longer referenced is pruned. Reuse is identity-aware exactly like
-    /// `upload_images` (`Arc::ptr_eq` on the decoded image), because a
-    /// `ResourceKey` can outlive the bytes it names across document opens.
+    /// batch), so it does not touch the pick table, the draw plan or pacing.
     pub fn upload_mesh_textures(
         &mut self,
         keys: &[ResourceKey],
@@ -301,47 +309,221 @@ impl Renderer {
 
         self.clear_gpu_memory_refusal();
         let mut report = ImageUploadReport::default();
-        let mut live: std::collections::HashSet<ResourceKey> = std::collections::HashSet::new();
-        for key in keys {
-            if live.contains(key) {
-                // The caller normally deduplicates; a repeat costs nothing.
-                continue;
+        // Which role each key plays, derived from the resident batches (the scene
+        // already sanitised the keys, so a key is only here if a batch declares it).
+        let mut colour_role: std::collections::HashSet<ResourceKey> =
+            std::collections::HashSet::new();
+        let mut data_role: std::collections::HashSet<ResourceKey> =
+            std::collections::HashSet::new();
+        for batch in &self.batches {
+            if let Some(key) = &batch.texture {
+                colour_role.insert(key.clone());
             }
+            if let Some(pbr) = &batch.pbr {
+                if let Some(key) = &pbr.emissive_texture {
+                    colour_role.insert(key.clone());
+                }
+                for key in [&pbr.metallic_roughness, &pbr.normal, &pbr.occlusion]
+                    .into_iter()
+                    .flatten()
+                {
+                    data_role.insert(key.clone());
+                }
+            }
+        }
+        let mut live_colour: std::collections::HashSet<ResourceKey> =
+            std::collections::HashSet::new();
+        let mut live_data: std::collections::HashSet<ResourceKey> =
+            std::collections::HashSet::new();
+        // A key with no batch role can only come from the caller's list; treat it
+        // as a base-colour key (the pre-ADR-0039 contract).
+        let mut unresolved: std::collections::BTreeSet<ResourceKey> =
+            std::collections::BTreeSet::new();
+        let mut uploaded_any = 0usize;
+        for key in keys {
+            let wants_colour = colour_role.contains(key) || !data_role.contains(key);
+            let wants_data = data_role.contains(key);
             let Some(decoded) = cache.get(key) else {
-                report.unresolved.push(key.clone());
+                unresolved.insert(key.clone());
                 continue;
             };
             let expected = decoded.width as usize * decoded.height as usize * 4;
             if decoded.width == 0 || decoded.height == 0 || decoded.rgba.len() != expected {
-                report.unresolved.push(key.clone());
+                unresolved.insert(key.clone());
                 continue;
             }
-            let reusable = self
-                .mesh_textures
-                .get(key)
-                .is_some_and(|existing| Arc::ptr_eq(&existing.decoded, &decoded));
-            if !reusable {
-                let requested = u64::from(decoded.width) * u64::from(decoded.height) * 4;
-                self.admit_gpu_memory(&[(GpuMemoryCategory::ImageTexture, requested)])?;
-                let created = Self::build_texture(
-                    &device,
-                    &queue,
-                    &texture_layout,
-                    &sampler,
-                    &decoded,
-                    &self.gpu_memory,
-                )
-                .map_err(|error| self.image_allocation_error(key, error))?;
-                report.bytes += created.upload_bytes as u64;
-                self.mesh_textures.insert(key.clone(), created);
+            if wants_colour {
+                let reusable = self
+                    .mesh_textures
+                    .get(key)
+                    .is_some_and(|existing| Arc::ptr_eq(&existing.decoded, &decoded));
+                if !reusable {
+                    let requested = u64::from(decoded.width) * u64::from(decoded.height) * 4;
+                    self.admit_gpu_memory(&[(GpuMemoryCategory::ImageTexture, requested)])?;
+                    let created = Self::build_texture(
+                        &device,
+                        &queue,
+                        &texture_layout,
+                        &sampler,
+                        &decoded,
+                        &self.gpu_memory,
+                    )
+                    .map_err(|error| self.image_allocation_error(key, error))?;
+                    report.bytes += created.upload_bytes as u64;
+                    self.mesh_textures.insert(key.clone(), created);
+                }
+                live_colour.insert(key.clone());
+                uploaded_any += 1;
             }
-            report.uploaded += 1;
-            live.insert(key.clone());
+            if wants_data {
+                let reusable = self
+                    .pbr_data_textures
+                    .get(key)
+                    .is_some_and(|existing| Arc::ptr_eq(&existing.decoded, &decoded));
+                if !reusable {
+                    let requested = u64::from(decoded.width) * u64::from(decoded.height) * 4;
+                    self.admit_gpu_memory(&[(GpuMemoryCategory::ImageTexture, requested)])?;
+                    let created = Self::build_texture_with_format(
+                        &device,
+                        &queue,
+                        &texture_layout,
+                        &sampler,
+                        &decoded,
+                        &self.gpu_memory,
+                        wgpu::TextureFormat::Rgba8Unorm,
+                    )
+                    .map_err(|error| self.image_allocation_error(key, error))?;
+                    report.bytes += created.upload_bytes as u64;
+                    self.pbr_data_textures.insert(key.clone(), created);
+                }
+                live_data.insert(key.clone());
+                uploaded_any += 1;
+            }
         }
-        // Prune textures no batch references any more: the map tracks the resident
+        report.unresolved = unresolved.into_iter().collect();
+        report.uploaded = uploaded_any;
+        // Prune textures no batch references any more: the maps track the resident
         // set, not history.
-        self.mesh_textures.retain(|key, _| live.contains(key));
+        self.mesh_textures
+            .retain(|key, _| live_colour.contains(key));
+        self.pbr_data_textures
+            .retain(|key, _| live_data.contains(key));
+
+        // Rebuild one group-2 bind group per distinct PBR channel set. A missing
+        // slot binds its identity texture (channel disabled), never a placeholder.
+        self.pbr_bind_groups.clear();
+        if let (Some(layout), Some(identities), Some(_)) = (
+            self.pbr_texture_layout.as_ref(),
+            self.pbr_identities.as_ref(),
+            self.pbr_identity_bind_group.as_ref(),
+        ) {
+            for batch in &self.batches {
+                if batch.pbr.is_none() {
+                    continue;
+                }
+                let set = PbrTextureSet::of(batch);
+                if self.pbr_bind_groups.contains_key(&set) {
+                    continue;
+                }
+                let bind_group = Self::build_pbr_bind_group(
+                    &device,
+                    layout,
+                    &sampler,
+                    &set,
+                    identities,
+                    &self.mesh_textures,
+                    &self.pbr_data_textures,
+                );
+                self.pbr_bind_groups.insert(set, bind_group);
+            }
+        }
         Ok(report)
+    }
+
+    /// One group-2 bind group for a PBR channel set.
+    ///
+    /// Colour slots (`base`, `emissive`) resolve through the sRGB mesh textures,
+    /// data slots (`metallic_roughness`, `normal`, `occlusion`) through the linear
+    /// PBR data textures. A missing key falls back to the stored identity view for
+    /// that slot, so the channel contributes exactly 1 (or "no perturbation").
+    #[allow(clippy::too_many_arguments)]
+    fn build_pbr_bind_group(
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+        sampler: &wgpu::Sampler,
+        set: &PbrTextureSet,
+        identities: &PbrIdentities,
+        colour: &HashMap<ResourceKey, GpuTexture>,
+        data: &HashMap<ResourceKey, GpuTexture>,
+    ) -> wgpu::BindGroup {
+        // A fresh view per bound texture: `GpuTexture` keeps its single-texture
+        // bind group, not a view, and composing one view per slot on a base change
+        // is cheaper than threading a second handle through the upload struct.
+        let view_of = |texture: &GpuTexture| {
+            texture
+                .texture
+                .create_view(&wgpu::TextureViewDescriptor::default())
+        };
+        let colour_view = |key: &Option<ResourceKey>, identity: &wgpu::TextureView| {
+            key.as_ref()
+                .and_then(|key| colour.get(key))
+                .map_or_else(|| identity.clone(), view_of)
+        };
+        let data_view = |key: &Option<ResourceKey>, identity: &wgpu::TextureView| {
+            key.as_ref()
+                .and_then(|key| data.get(key))
+                .map_or_else(|| identity.clone(), view_of)
+        };
+        let views = [
+            colour_view(&set.base, &identities.white),
+            data_view(&set.metallic_roughness, &identities.white),
+            data_view(&set.normal, &identities.flat_normal),
+            colour_view(&set.emissive, &identities.black),
+            data_view(&set.occlusion, &identities.white),
+        ];
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("cad-pbr-texture-bind"),
+            layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&views[0]),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&views[1]),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&views[2]),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&views[3]),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(&views[4]),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::Sampler(sampler),
+                },
+            ],
+        })
+    }
+
+    /// Monotonic count of PBR batches whose tangent frame could not be generated
+    /// from degenerate UVs (ADR-0039 D6).
+    ///
+    /// Such a batch still draws (scalar factors are valid), but its normal-map
+    /// channel is **disabled** rather than evaluated against an invented tangent.
+    /// A non-zero value is the [`codes::RENDER_PBR_TANGENT_UNAVAILABLE`]
+    /// (`render.pbr.tangent_unavailable`) evidence; the counter only ever
+    /// increases and is never reset by a camera or scene change.
+    pub fn pbr_tangent_unavailable(&self) -> u64 {
+        self.pbr_tangent_unavailable
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Texture keys a drawn batch wanted but could not sample in the last frame.
@@ -398,6 +580,32 @@ impl Renderer {
         decoded: &Arc<DecodedImage>,
         ledger: &Arc<GpuMemoryLedger>,
     ) -> Result<GpuTexture, PulledAllocationError> {
+        Self::build_texture_with_format(
+            device,
+            queue,
+            texture_layout,
+            sampler,
+            decoded,
+            ledger,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+        )
+    }
+
+    /// [`Self::build_texture`] with an explicit texel format.
+    ///
+    /// Base-colour and emissive maps are colour and use `Rgba8UnormSrgb`; the
+    /// metallic-roughness, normal and occlusion maps are linear data and use
+    /// `Rgba8Unorm` (ADR-0039 D6) — sRGB-decoding a normal map would corrupt it.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn build_texture_with_format(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        texture_layout: &wgpu::BindGroupLayout,
+        sampler: &wgpu::Sampler,
+        decoded: &Arc<DecodedImage>,
+        ledger: &Arc<GpuMemoryLedger>,
+        format: wgpu::TextureFormat,
+    ) -> Result<GpuTexture, PulledAllocationError> {
         let texture = allocation_guard(device, || {
             device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("cad-image-texture"),
@@ -409,7 +617,7 @@ impl Renderer {
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                format,
                 usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
                 view_formats: &[],
             })

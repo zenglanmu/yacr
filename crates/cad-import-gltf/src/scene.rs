@@ -5,7 +5,7 @@
 //! transformed in the glTF frame first (metres, +Y up) and then mapped to the
 //! CAD frame (metres, +Z up) as `(x, y, z) -> (x, -z, y)`.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use cad_db::{EntityColor, EntityRenderAttributes, EntityTransparency};
 use cad_domain::{CadError, CadResult, Diagnostic, Mesh, ObjectId, Point3};
@@ -15,7 +15,11 @@ use gltf::{
 };
 
 use crate::buffers::ResolvedBuffer;
-use crate::texture::{refusal_marker, resolve_base_colour_texture, BaseColourTexture};
+use crate::geometry::{
+    apply, is_zero_area, local_matrix, multiply, normal_matrix, to_cad_frame, transform_normals,
+};
+use crate::pbr::{PbrChannels, PbrLosses};
+use crate::texture::{refusal_marker, resolve_texture_info, PbrDecl, TextureImage};
 use crate::{
     DIAG_ALPHA_MASK_NOT_IMPORTED, DIAG_ANIMATION_IGNORED, DIAG_CAMERA_IGNORED, DIAG_COLORS_DROPPED,
     DIAG_DEGENERATE_TRIANGLE, DIAG_EXTERNAL_IMAGE, DIAG_INDEX_OUT_OF_RANGE, DIAG_INVALID_TRANSFORM,
@@ -46,6 +50,9 @@ pub(crate) struct SceneWalker<'a> {
     /// Material indices whose base-colour texture info carries
     /// `KHR_texture_transform` (the transform is not applied).
     transformed_materials: &'a BTreeSet<usize>,
+    /// Every material's authored PBR declaration, read from the document JSON
+    /// (ADR-0039 D4). A missing entry means "no authored PBR" → `pbr: None`.
+    pbr_declarations: &'a BTreeMap<usize, PbrDecl>,
     referenced_meshes: BTreeSet<usize>,
     /// `TEXCOORD_n` sets that were present but not the imported set.
     ignored_uv_sets: BTreeSet<u32>,
@@ -60,6 +67,7 @@ impl<'a> SceneWalker<'a> {
         limits: &'a ImportLimits,
         cancelled: &'a dyn Fn() -> bool,
         transformed_materials: &'a BTreeSet<usize>,
+        pbr_declarations: &'a BTreeMap<usize, PbrDecl>,
     ) -> Self {
         SceneWalker {
             document,
@@ -67,6 +75,7 @@ impl<'a> SceneWalker<'a> {
             limits,
             cancelled,
             transformed_materials,
+            pbr_declarations,
             referenced_meshes: BTreeSet::new(),
             ignored_uv_sets: BTreeSet::new(),
             saw_mesh_without_positions: false,
@@ -167,6 +176,7 @@ impl<'a> SceneWalker<'a> {
             self.buffers,
             self.limits,
             self.transformed_materials,
+            self.pbr_declarations,
             import,
         )?;
         for set in &build.ignored_uv_sets {
@@ -269,9 +279,6 @@ impl<'a> SceneWalker<'a> {
                 Some("at least one mesh is referenced by no node in the scene".into()),
             );
         }
-        if let Some(note) = crate::texture::channel_note(self.document) {
-            import.record(note, None);
-        }
         if !self.ignored_uv_sets.is_empty() {
             let sets: Vec<u32> = self.ignored_uv_sets.iter().copied().collect();
             import.record(
@@ -279,7 +286,7 @@ impl<'a> SceneWalker<'a> {
                     object: None,
                     code: DIAG_UV_SET_IGNORED.into(),
                     message: format!(
-                        "only the UV set a material's base-color texture names is imported; \
+                        "only one UV set per primitive is imported (the set its textures sample); \
                          TEXCOORD set(s) {sets:?} were not read"
                     ),
                 },
@@ -317,6 +324,8 @@ struct PrimitiveBuild {
     texture_not_imported: bool,
     material_invalid: bool,
     alpha_mask_not_imported: bool,
+    /// Every PBR loss this primitive incurred (ADR-0039 D4).
+    pbr: PbrLosses,
 }
 
 fn record_losses(
@@ -481,6 +490,7 @@ fn record_losses(
             )),
         );
     }
+    build.pbr.record(import, object, label);
 }
 
 fn build_primitive(
@@ -489,6 +499,7 @@ fn build_primitive(
     buffers: &[ResolvedBuffer<'_>],
     limits: &ImportLimits,
     transformed_materials: &BTreeSet<usize>,
+    pbr_declarations: &BTreeMap<usize, PbrDecl>,
     import: &mut MeshImport,
 ) -> CadResult<PrimitiveBuild> {
     let style = material_style(primitive);
@@ -504,19 +515,54 @@ fn build_primitive(
         ..Default::default()
     };
 
+    // PBR channels (ADR-0039 D4). Only a material whose JSON declares a PBR
+    // channel becomes a `MeshPbr`: the crate's getters would otherwise answer
+    // with glTF's spec defaults (`metallicFactor = 1`), which would draw an
+    // unlit `baseColorFactor`-only asset as black metal. The scalars are
+    // validated before any texture byte is registered, so an unusable factor
+    // leaves no orphan image in the document.
+    let declaration = style
+        .material_index
+        .and_then(|index| pbr_declarations.get(&index));
+    let pbr_channels = declaration
+        .filter(|decl| decl.declared)
+        .map(|_| PbrChannels::read(primitive));
+    if let Some(decl) = declaration {
+        build.pbr = PbrLosses::declared(decl);
+    }
+    if let Some(channels) = &pbr_channels {
+        if let Some(invalid) = channels.invalid_scalars() {
+            build.pbr.ignore(invalid);
+        }
+        build
+            .pbr
+            .set_normal_scale(channels.unauthored_normal_scale());
+    }
+
+    // The one UV set this primitive reads. The base-colour slot keeps owning it
+    // when it names one (ADR-0038 D6); otherwise a PBR texture slot that samples
+    // set 0 makes set 0 the imported set, because every PBR channel is stored
+    // against UV0.
+    let uv_set = style
+        .base_color_texture
+        .as_ref()
+        .map(TextureInfo::tex_coord)
+        .or_else(|| pbr_channels.as_ref().and_then(PbrChannels::uv_set));
+
     // `accessor::Iter` returns `None` for sparse accessors (they have no buffer
     // view), which would make positions "absent" and indices look like triangle
-    // soup. Refuse by name instead of misreading them. The base-colour UV set is
-    // part of the list for the same reason: a sparse `TEXCOORD_n` would otherwise
-    // read as "no UV set" and be indistinguishable from an absent one.
+    // soup. Refuse by name instead of misreading them. The UV set this primitive
+    // samples is part of the list for the same reason: a sparse `TEXCOORD_n`
+    // would otherwise read as "no UV set" and be indistinguishable from an
+    // absent one.
     let mut accessors = vec![
         primitive.get(&Semantic::Positions),
         primitive.get(&Semantic::Normals),
         primitive.get(&Semantic::Colors(0)),
         primitive.indices(),
     ];
-    if let Some(info) = &style.base_color_texture {
-        accessors.push(primitive.get(&Semantic::TexCoords(info.tex_coord())));
+    if let Some(set) = uv_set {
+        accessors.push(primitive.get(&Semantic::TexCoords(set)));
     }
     for accessor in accessors.into_iter().flatten() {
         if accessor.sparse().is_some() {
@@ -674,15 +720,14 @@ fn build_primitive(
         return Ok(build);
     }
 
-    // Base-colour texture (ADR-0038 D6). Only the UV set the material's
-    // `baseColorTexture` names is read, and only the encoded bytes the document
-    // itself carries can become a document-owned texture. UVs and the texture key
-    // are stored together or not at all: a texture with no UV could never be
-    // sampled, so `cad-db` refuses that combination and this reader never builds it.
+    // Textures (ADR-0038 D6, ADR-0039 D4). Only the one UV set this primitive
+    // reads is stored, and only the encoded bytes the document itself carries can
+    // become a document-owned texture. UVs and a texture key are stored together
+    // or not at all: a texture with no UV could never be sampled, so `cad-db`
+    // refuses that combination and this reader never builds it.
     let mut uvs = Vec::new();
     let mut texture = None;
-    if let Some(info) = &style.base_color_texture {
-        let set = info.tex_coord();
+    if let Some(set) = uv_set {
         for (semantic, _) in primitive.attributes() {
             if let Semantic::TexCoords(other) = semantic {
                 if other != set {
@@ -706,9 +751,11 @@ fn build_primitive(
             }
             _ => build.uvs_dropped += 1,
         }
-        if !uvs.is_empty() {
-            match resolve_base_colour_texture(info, buffers)? {
-                BaseColourTexture::Embedded(bytes) => match import.register_texture(&bytes) {
+    }
+    if !uvs.is_empty() {
+        if let Some(info) = &style.base_color_texture {
+            match resolve_texture_info(info, buffers)? {
+                TextureImage::Embedded(bytes) => match import.register_texture(&bytes) {
                     Ok(key) => {
                         texture = Some(key);
                         build.texture_transform_not_imported = style
@@ -724,12 +771,24 @@ fn build_primitive(
                             Some((refusal_marker(&message).to_string(), message));
                     }
                 },
-                BaseColourTexture::Unavailable { uri } => {
+                TextureImage::Unavailable { uri } => {
                     build.texture_unavailable = Some(uri);
                     build.texture_not_imported = true;
                 }
             }
         }
+    }
+
+    // PBR channels (ADR-0039 D3/D4). Only a material with usable scalars gets a
+    // `MeshPbr`; each texture slot then either imports its bytes or is reported.
+    // The channels share UV0, so a slot on any other `TEXCOORD` set cannot be
+    // sampled and is left unset (`uv_set_ignored`), and every slot stays unset
+    // when the UV set was unusable (`uvs_dropped`) — the scalars still apply.
+    let mut pbr = None;
+    if let Some(channels) = pbr_channels.as_ref().filter(|_| !build.pbr.is_ignored()) {
+        pbr = channels.import(uv_set, !uvs.is_empty(), buffers, import, &mut build.pbr)?;
+        let ignored = std::mem::take(&mut build.pbr.ignored_uv_sets);
+        build.ignored_uv_sets.extend(ignored);
     }
 
     build.mesh = Some(Mesh {
@@ -740,6 +799,7 @@ fn build_primitive(
         colors,
         uvs,
         texture,
+        pbr,
     });
     Ok(build)
 }
@@ -851,129 +911,4 @@ fn check_mesh_limits(limits: &ImportLimits, triangles: usize) -> CadResult<()> {
         }
     }
     Ok(())
-}
-
-fn is_zero_area(triangle: [u32; 3], vertices: &[Point3]) -> bool {
-    let p0 = vertices[triangle[0] as usize];
-    let p1 = vertices[triangle[1] as usize];
-    let p2 = vertices[triangle[2] as usize];
-    let ux = p1.x - p0.x;
-    let uy = p1.y - p0.y;
-    let uz = p1.z - p0.z;
-    let vx = p2.x - p0.x;
-    let vy = p2.y - p0.y;
-    let vz = p2.z - p0.z;
-    let cx = uy * vz - uz * vy;
-    let cy = uz * vx - ux * vz;
-    let cz = ux * vy - uy * vx;
-    cx == 0.0 && cy == 0.0 && cz == 0.0
-}
-
-/// `glTF [col][row]` -> row-major affine, in f64.
-fn local_matrix(node: &Node<'_>) -> CadResult<[[f64; 4]; 4]> {
-    let matrix = node.transform().matrix();
-    let mut out = [[0.0f64; 4]; 4];
-    for (row, output) in out.iter_mut().enumerate() {
-        for (column, value) in output.iter_mut().enumerate() {
-            *value = matrix[column][row] as f64;
-        }
-    }
-    if !out.iter().flatten().all(|value| value.is_finite()) {
-        return Err(CadError::CorruptData(format!(
-            "{DIAG_INVALID_TRANSFORM}: glTF node {} has a non-finite transform",
-            node.index()
-        )));
-    }
-    Ok(out)
-}
-
-fn multiply(left: &[[f64; 4]; 4], right: &[[f64; 4]; 4]) -> [[f64; 4]; 4] {
-    let mut out = [[0.0f64; 4]; 4];
-    for (row, output) in out.iter_mut().enumerate() {
-        for (column, value) in output.iter_mut().enumerate() {
-            *value = (0..4).map(|k| left[row][k] * right[k][column]).sum();
-        }
-    }
-    out
-}
-
-fn apply(matrix: &[[f64; 4]; 4], point: Point3) -> Point3 {
-    Point3 {
-        x: matrix[0][0] * point.x + matrix[0][1] * point.y + matrix[0][2] * point.z + matrix[0][3],
-        y: matrix[1][0] * point.x + matrix[1][1] * point.y + matrix[1][2] * point.z + matrix[1][3],
-        z: matrix[2][0] * point.x + matrix[2][1] * point.y + matrix[2][2] * point.z + matrix[2][3],
-    }
-}
-
-/// glTF (+Y up) -> CAD (+Z up).
-fn to_cad_frame(point: Point3) -> Point3 {
-    Point3 {
-        x: point.x,
-        y: -point.z,
-        z: point.y,
-    }
-}
-
-/// The inverse-transpose of the affine's linear part, or `None` when singular.
-fn normal_matrix(matrix: &[[f64; 4]; 4]) -> Option<[[f64; 3]; 3]> {
-    let a = [
-        [matrix[0][0], matrix[0][1], matrix[0][2]],
-        [matrix[1][0], matrix[1][1], matrix[1][2]],
-        [matrix[2][0], matrix[2][1], matrix[2][2]],
-    ];
-    let det = a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1])
-        - a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0])
-        + a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0]);
-    if !det.is_finite() || det.abs() <= f64::EPSILON {
-        return None;
-    }
-    let inverse = 1.0 / det;
-    let cofactor = [
-        [
-            (a[1][1] * a[2][2] - a[1][2] * a[2][1]) * inverse,
-            (a[1][2] * a[2][0] - a[1][0] * a[2][2]) * inverse,
-            (a[1][0] * a[2][1] - a[1][1] * a[2][0]) * inverse,
-        ],
-        [
-            (a[0][2] * a[2][1] - a[0][1] * a[2][2]) * inverse,
-            (a[0][0] * a[2][2] - a[0][2] * a[2][0]) * inverse,
-            (a[0][1] * a[2][0] - a[0][0] * a[2][1]) * inverse,
-        ],
-        [
-            (a[0][1] * a[1][2] - a[0][2] * a[1][1]) * inverse,
-            (a[0][2] * a[1][0] - a[0][0] * a[1][2]) * inverse,
-            (a[0][0] * a[1][1] - a[0][1] * a[1][0]) * inverse,
-        ],
-    ];
-    cofactor
-        .iter()
-        .flatten()
-        .all(|value| value.is_finite())
-        .then_some(cofactor)
-}
-
-/// Transform every normal by `matrix`, then into the CAD frame and normalize.
-///
-/// `None` when any result is zero-length or non-finite: the caller drops the
-/// whole set rather than storing a partial or zeroed list.
-fn transform_normals(normals: &[Point3], matrix: &[[f64; 3]; 3]) -> Option<Vec<Point3>> {
-    let mut out = Vec::with_capacity(normals.len());
-    for normal in normals {
-        let transformed = Point3 {
-            x: matrix[0][0] * normal.x + matrix[0][1] * normal.y + matrix[0][2] * normal.z,
-            y: matrix[1][0] * normal.x + matrix[1][1] * normal.y + matrix[1][2] * normal.z,
-            z: matrix[2][0] * normal.x + matrix[2][1] * normal.y + matrix[2][2] * normal.z,
-        };
-        let cad = to_cad_frame(transformed);
-        let length = (cad.x * cad.x + cad.y * cad.y + cad.z * cad.z).sqrt();
-        if !length.is_finite() || length <= 0.0 {
-            return None;
-        }
-        out.push(Point3 {
-            x: cad.x / length,
-            y: cad.y / length,
-            z: cad.z / length,
-        });
-    }
-    Some(out)
 }

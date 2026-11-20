@@ -35,6 +35,8 @@ fn triangle(uvs: Vec<[f64; 2]>, texture: Option<&str>) -> Mesh {
         colors: Vec::new(),
         uvs,
         texture: texture.map(str::to_string),
+        // These ADR-0038 contracts are about the base-colour texture only.
+        pbr: None,
     }
 }
 

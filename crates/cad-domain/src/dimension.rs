@@ -809,6 +809,8 @@ fn transform_child(
                 // fields are carried unchanged.
                 uvs: mesh.uvs.clone(),
                 texture: mesh.texture.clone(),
+                // PBR is material data, not placement (ADR-0039 D1).
+                pbr: mesh.pbr.clone(),
             })
         }
         SemanticGeometry::Text {

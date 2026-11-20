@@ -53,6 +53,7 @@ fn lines_batch(vertices: Vec<[f32; 3]>) -> RenderBatch {
     RenderBatch {
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
         conics: Vec::new(),
         local_origin: Point3 {
             x: 0.0,
@@ -98,6 +99,7 @@ fn triangle_mesh() -> RenderBatch {
     RenderBatch {
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
         conics: Vec::new(),
         local_origin: Point3 {
             x: 0.0,
@@ -168,6 +170,7 @@ fn quad_mesh() -> RenderBatch {
     RenderBatch {
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
         conics: Vec::new(),
         local_origin: Point3 {
             x: 0.0,
@@ -216,6 +219,7 @@ fn gradient_quad(left: [f32; 3], right: [f32; 3]) -> RenderBatch {
     RenderBatch {
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
         conics: Vec::new(),
         local_origin: Point3 {
             x: 0.0,

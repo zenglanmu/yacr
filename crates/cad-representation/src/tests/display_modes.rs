@@ -165,6 +165,7 @@ fn fill_off_draws_a_2d_solid_as_its_boundary_edges() {
         SemanticGeometry::Mesh(Mesh {
             uvs: Vec::new(),
             texture: None,
+            pbr: None,
             vertices: vec![p(0.0, 0.0), p(4.0, 0.0), p(4.0, 4.0), p(0.0, 4.0)],
             triangles: vec![[0, 1, 2], [0, 2, 3]],
             normals: Vec::new(),
@@ -211,6 +212,7 @@ fn fill_off_keeps_a_non_solid_mesh_filled() {
     let geometry = SemanticGeometry::Mesh(Mesh {
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
         vertices: vec![p(0.0, 0.0), p(1.0, 0.0), p(0.0, 1.0)],
         triangles: vec![[0, 1, 2]],
         normals: Vec::new(),

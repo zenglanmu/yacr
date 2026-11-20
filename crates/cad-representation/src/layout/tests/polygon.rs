@@ -130,6 +130,7 @@ fn concave_clip_limits_a_mesh_to_the_polygon_area() {
     let mesh = Mesh {
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
         vertices: vec![p(-2.0, -2.0), p(12.0, -2.0), p(12.0, 12.0), p(-2.0, 12.0)],
         triangles: vec![[0, 1, 2], [0, 2, 3]],
         normals: Vec::new(),
@@ -497,6 +498,7 @@ fn a_polygon_viewport_builds_a_mesh_only_inside_the_polygon() {
         geometry: SemanticGeometry::Mesh(Mesh {
             uvs: Vec::new(),
             texture: None,
+            pbr: None,
             vertices: vec![p(-2.0, -2.0), p(12.0, -2.0), p(12.0, 12.0), p(-2.0, 12.0)],
             triangles: vec![[0, 1, 2], [0, 2, 3]],
             normals: Vec::new(),

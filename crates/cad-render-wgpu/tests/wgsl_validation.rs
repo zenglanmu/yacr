@@ -79,6 +79,27 @@ fn mesh_textured_shader_is_valid_wgsl() {
     .expect("textured mesh shader must validate");
 }
 
+/// The PBR channel (ADR-0039 D6) must validate with `Capabilities::empty()`: it
+/// uses only five `texture_2d<f32>` + one sampler, an integer flags texture and
+/// plain vertex attributes, so it is WebGL2-safe (`vs_main`/`vs_flat` share one
+/// `fs_main`).
+#[test]
+fn mesh_pbr_shader_is_valid_wgsl() {
+    validate_wgsl("mesh_pbr.wgsl", include_str!("../shaders/mesh_pbr.wgsl"))
+        .expect("PBR mesh shader must validate");
+    let source = include_str!("../shaders/mesh_pbr.wgsl");
+    for entry in ["fn vs_main", "fn vs_uv", "fn vs_flat", "fn fs_main"] {
+        assert!(
+            source.contains(entry),
+            "mesh_pbr.wgsl: missing {entry} (every vertex layout shares fs_main)"
+        );
+    }
+    assert!(
+        !source.contains("var<storage"),
+        "mesh_pbr.wgsl must stay WebGL2-safe: no storage buffers"
+    );
+}
+
 /// The two accelerated-tier shaders use vertex-stage storage buffers, so they
 /// are **not** WebGL2-safe and are deliberately excluded from the GLSL ES 300
 /// back-translation test below. They must still parse and validate as WGSL.
@@ -108,7 +129,7 @@ fn image_shader_is_valid_wgsl() {
         .expect("image shader must validate");
 }
 
-/// The light-background ink flip is a **display-time** transform: the seven
+/// The light-background ink flip is a **display-time** transform: the eight
 /// colour shaders must apply it and the image / textured-mesh / id-pass / mask
 /// shaders must not. Pinned by source contract because the rule is deliberately
 /// textual and the uniform word it keys off (`light.a`) travels through every
@@ -116,9 +137,13 @@ fn image_shader_is_valid_wgsl() {
 ///
 /// A textured mesh is excluded on purpose: a base-colour map is authored art, not
 /// near-white ink, so flipping it on a light background would recolour the
-/// texture (ADR-0038 D9).
+/// texture (ADR-0038 D9). The PBR channel **does** apply it, following
+/// `mesh.wgsl`'s display convention (ADR-0039 D6): it is a lit surface channel
+/// whose untextured output is the same kind of near-white ink. That means a PBR
+/// surface with a near-white *scalar* albedo flips on a light background too — an
+/// explicit display convention, not a material change.
 #[test]
-fn only_the_seven_colour_shaders_carry_the_light_background_ink_flip() {
+fn only_the_eight_colour_shaders_carry_the_light_background_ink_flip() {
     let with_flip = [
         ("line.wgsl", include_str!("../shaders/line.wgsl")),
         (
@@ -139,6 +164,7 @@ fn only_the_seven_colour_shaders_carry_the_light_background_ink_flip() {
             "mesh_pulled.wgsl",
             include_str!("../shaders/mesh_pulled.wgsl"),
         ),
+        ("mesh_pbr.wgsl", include_str!("../shaders/mesh_pbr.wgsl")),
     ];
     for (name, source) in with_flip {
         assert!(
@@ -240,6 +266,7 @@ fn color_shaders_back_translate_to_glsl_es_300() {
             "mesh_textured.wgsl",
             include_str!("../shaders/mesh_textured.wgsl"),
         ),
+        ("mesh_pbr.wgsl", include_str!("../shaders/mesh_pbr.wgsl")),
         ("mask.wgsl", include_str!("../shaders/mask.wgsl")),
     ];
     for (name, source) in shaders {
@@ -251,10 +278,19 @@ fn color_shaders_back_translate_to_glsl_es_300() {
         )
         .validate(&module)
         .unwrap_or_else(|e| panic!("{name}: WGSL validation error: {e:?}"));
-        for (entry, stage) in [
-            ("vs_main", naga::ShaderStage::Vertex),
-            ("fs_main", naga::ShaderStage::Fragment),
-        ] {
+        // A pipeline declares one vertex entry point; each of `mesh_pbr.wgsl`'s
+        // two layouts must independently back-translate.
+        let entries: &[&str] = if name == "mesh_pbr.wgsl" {
+            &["vs_main", "vs_uv", "vs_flat", "fs_main"]
+        } else {
+            &["vs_main", "fs_main"]
+        };
+        for entry in entries {
+            let stage = if *entry == "fs_main" {
+                naga::ShaderStage::Fragment
+            } else {
+                naga::ShaderStage::Vertex
+            };
             let options = naga::back::glsl::Options {
                 version: naga::back::glsl::Version::new_gles(300),
                 ..Default::default()

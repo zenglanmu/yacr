@@ -847,27 +847,5 @@ fn a_textured_primitive_with_vertex_colours_keeps_both() {
     assert_eq!(drawing.report.completeness, Completeness::Complete);
 }
 
-#[test]
-fn a_non_base_colour_texture_channel_is_noted_once() {
-    let png = png();
-    let (json, bin) = textured_triangle(None, TextureImage::Bin(&png));
-    // Add a normal map beside the base-colour texture (texture 1).
-    let json = json.replace(
-        r#""textures":[{"source":0}],"#,
-        r#""textures":[{"source":0},{"source":0}],"#,
-    );
-    let json = json.replace(
-        r#""materials":[{"pbrMetallicRoughness":{"baseColorTexture":{"index":0}}}],"#,
-        r#""materials":[{"pbrMetallicRoughness":{"baseColorTexture":{"index":0}},
-          "normalTexture":{"index":1}}],"#,
-    );
-    let drawing = import(glb(&json, &bin)).expect("the GLB imports");
-
-    let notes: Vec<&str> = codes(&drawing)
-        .into_iter()
-        .filter(|code| *code == DIAG_TEXTURE_CHANNEL_NOT_IMPORTED)
-        .collect();
-    assert_eq!(notes.len(), 1, "one note per document, not per primitive");
-    assert!(meshes(&drawing)[0].texture.is_some());
-    assert_eq!(drawing.report.completeness, Completeness::Complete);
-}
+// PBR channel cases (ADR-0039 D4), one per authored channel family.
+mod pbr;

@@ -354,16 +354,20 @@ fn missing_and_extra_fields_are_refused() {
 }
 
 #[test]
-fn a_mesh_without_uvs_or_texture_decodes_to_the_no_texture_state() {
+fn a_mesh_without_uvs_texture_or_pbr_decodes_to_the_bare_state() {
     // A minor-2 archive (ADR-0038 D4): the two fields this build added in minor 3
-    // are simply absent. That is the format's ONLY defaulting exception, so the
-    // next test also proves it does not extend to a required field.
+    // are simply absent; a minor-3 archive additionally has no `pbr` (ADR-0039
+    // D2). That is the format's ONLY defaulting exception, so the next test also
+    // proves it does not extend to a required field.
     let mut mesh = encode(&SemanticGeometry::Mesh(mesh_sample()));
     let object = mesh.as_object_mut().expect("mesh payload object");
     object.remove("uvs");
     object.remove("texture");
+    object.remove("pbr");
     assert!(
-        !object.contains_key("uvs") && !object.contains_key("texture"),
+        !object.contains_key("uvs")
+            && !object.contains_key("texture")
+            && !object.contains_key("pbr"),
         "{object:?}"
     );
 
@@ -373,13 +377,53 @@ fn a_mesh_without_uvs_or_texture_decodes_to_the_no_texture_state() {
     };
     assert!(decoded.uvs.is_empty(), "absent uvs means no UV");
     assert_eq!(decoded.texture, None, "absent texture means none");
+    assert_eq!(
+        decoded.pbr, None,
+        "absent pbr means the source declared none"
+    );
     assert_eq!(decoded.vertices.len(), 3);
 }
 
 #[test]
-fn only_the_two_texture_fields_may_be_absent() {
-    // The negative half of ADR-0038 D4: every other `cad:Mesh` field is still
-    // required, so the exception cannot spread by accident.
+fn a_hand_written_minor_three_mesh_payload_decodes_with_no_pbr() {
+    // ADR-0039 D2 backward compatibility, spelled out instead of derived from
+    // `encode`: this is the exact shape a minor-3 writer emits for a textured
+    // mesh — every ordinal field plus `uvs`/`texture`, and no `pbr` key at all.
+    let minor_three = serde_json::json!({
+        "class": "cad:Mesh",
+        "vertices": [
+            {"x": 0.0, "y": 0.0, "z": 0.0},
+            {"x": 1.0, "y": 0.0, "z": 0.0},
+            {"x": 0.0, "y": 1.0, "z": 0.0}
+        ],
+        "triangles": [[0, 1, 2]],
+        "normals": [
+            {"x": 0.0, "y": 0.0, "z": 1.0},
+            {"x": 0.0, "y": 0.0, "z": 1.0},
+            {"x": 0.0, "y": 0.0, "z": 1.0}
+        ],
+        "face_sources": [null, null, null],
+        "colors": [],
+        "uvs": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+        "texture": TEXTURE_KEY,
+    });
+    let decoded = decode(&minor_three).expect("a minor-3 mesh decodes");
+    let SemanticGeometry::Mesh(decoded) = decoded else {
+        panic!("expected a mesh");
+    };
+    assert_eq!(decoded.pbr, None, "minor 3 never wrote pbr");
+    assert_eq!(decoded.texture.as_deref(), Some(TEXTURE_KEY));
+    assert_eq!(decoded.uvs.len(), 3);
+
+    // Re-saving writes the new key explicitly, so the upgrade is visible.
+    let re_encoded = encode(&SemanticGeometry::Mesh(decoded));
+    assert_eq!(re_encoded["pbr"], Value::Null);
+}
+
+#[test]
+fn only_the_three_texture_fields_may_be_absent() {
+    // The negative half of ADR-0038 D4 / ADR-0039 D2: every other `cad:Mesh`
+    // field is still required, so the exception cannot spread by accident.
     for required in ["vertices", "triangles", "normals", "face_sources", "colors"] {
         let mut mesh = encode(&SemanticGeometry::Mesh(mesh_sample()));
         let object = mesh.as_object_mut().expect("mesh payload object");
@@ -393,16 +437,53 @@ fn only_the_two_texture_fields_may_be_absent() {
 }
 
 #[test]
-fn uv_and_texture_round_trip_through_the_payload() {
+fn uv_texture_and_pbr_round_trip_through_the_payload() {
     let mesh = mesh_sample();
     assert_eq!(mesh.uvs.len(), mesh.vertices.len());
+    let pbr = mesh.pbr.clone().expect("the sample declares PBR");
     let encoded = encode(&SemanticGeometry::Mesh(mesh.clone()));
     assert_eq!(encoded["texture"], Value::String(TEXTURE_KEY.to_string()));
     assert!(encoded["uvs"].is_array());
+    let object = encoded["pbr"].as_object().expect("the pbr object");
+    assert_eq!(object.len(), 8, "every PBR field is written: {object:?}");
+    assert_eq!(object["metallic"], Value::from(0.75));
+    assert_eq!(object["roughness"], Value::from(0.25));
+    assert_eq!(object["emissive"], serde_json::json!([0.0, 0.125, 0.5]));
+    assert_eq!(
+        object["normal_texture"],
+        Value::String(pbr.normal_texture.clone().expect("normal map"))
+    );
     let text = serde_json::to_string(&encoded).expect("serialize");
     let parsed: Value = serde_json::from_str(&text).expect("parse");
     let decoded = decode(&parsed).expect("decode");
     assert_eq!(decoded, SemanticGeometry::Mesh(mesh));
+    let SemanticGeometry::Mesh(decoded) = decoded else {
+        panic!("expected a mesh");
+    };
+    assert_eq!(decoded.pbr, Some(pbr));
+}
+
+#[test]
+fn a_pbr_object_with_an_unknown_field_is_refused() {
+    // The absent-key exception applies to `pbr` itself, never to the fields of
+    // the nested object: a future minor that added a channel must be refused
+    // rather than silently dropped on the next save.
+    let mut mesh = encode(&SemanticGeometry::Mesh(mesh_sample()));
+    let object = mesh.as_object_mut().expect("mesh payload object");
+    let mut pbr = object["pbr"].as_object().expect("pbr object").clone();
+    pbr.insert("clearcoat".to_string(), Value::from(1.0));
+    object.insert("pbr".to_string(), Value::Object(pbr));
+    let error = decode(&Value::Object(object.clone())).expect_err("unknown pbr field");
+    assert!(error.message().contains("clearcoat"), "{error}");
+
+    // A present object missing a required field is refused too (the exception is
+    // about the *key* `pbr`, not about its contents).
+    let object = mesh.as_object_mut().expect("mesh payload object");
+    let mut pbr = object["pbr"].as_object().expect("pbr object").clone();
+    pbr.remove("roughness").expect("the field exists");
+    object.insert("pbr".to_string(), Value::Object(pbr));
+    let error = decode(&Value::Object(object.clone())).expect_err("missing pbr field");
+    assert!(error.message().contains("roughness"), "{error}");
 }
 
 #[test]

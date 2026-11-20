@@ -7,7 +7,10 @@
 //!
 //! UV0 and the base-colour texture key travel with the mesh; the texture bytes
 //! are resolved from the document here because `cad-db` is the only owner of
-//! them and the writer never reaches back into it.
+//! them and the writer never reaches back into it. The four PBR texture slots
+//! (ADR-0039 D5) resolve the same way, so a key the document does not carry is
+//! recorded as [`PbrChannel::Missing`] and reported by the writer instead of
+//! aborting the whole export.
 //!
 //! `cad-db` stores entities in a `BTreeMap<EntityId, _>`, but the collection is
 //! sorted by `EntityId` anyway so the output byte order is a stated guarantee
@@ -28,6 +31,70 @@ use cad_import_core::ExportJob;
 pub(crate) struct SourceTexture {
     pub key: String,
     pub bytes: Arc<[u8]>,
+}
+
+/// One declared PBR texture channel: its resolved bytes, or the key whose bytes
+/// the document does not carry.
+///
+/// A missing key is not an error here because the writer resolves the loss: it
+/// omits that channel and reports `export.gltf.texture_not_written`, leaving the
+/// rest of the material intact.
+pub(crate) enum PbrChannel {
+    /// The source declared no texture on this slot.
+    None,
+    /// The document carries these bytes under this key.
+    Bytes(SourceTexture),
+    /// The mesh names this key but `cad-db` has no bytes for it.
+    Missing(String),
+}
+
+impl PbrChannel {
+    fn resolve(key: Option<&str>, database: &cad_db::DrawingDatabase) -> Self {
+        let Some(key) = key else {
+            return PbrChannel::None;
+        };
+        match database.texture(key) {
+            Some(bytes) => PbrChannel::Bytes(SourceTexture {
+                key: key.to_string(),
+                bytes: Arc::clone(bytes),
+            }),
+            None => PbrChannel::Missing(key.to_string()),
+        }
+    }
+}
+
+/// One mesh's declared PBR channels, with every texture resolved (ADR-0039 D5).
+///
+/// The scalars stay in the source `f64`; the writer narrows nothing, because
+/// glTF stores them as JSON numbers and the round trip must return the imported
+/// value.
+pub(crate) struct SourcePbr {
+    pub metallic: f64,
+    pub roughness: f64,
+    pub emissive: [f64; 3],
+    pub occlusion_strength: f64,
+    pub metallic_roughness: PbrChannel,
+    pub normal: PbrChannel,
+    pub emissive_texture: PbrChannel,
+    pub occlusion: PbrChannel,
+}
+
+impl SourcePbr {
+    fn resolve(pbr: &cad_domain::MeshPbr, database: &cad_db::DrawingDatabase) -> Self {
+        SourcePbr {
+            metallic: pbr.metallic,
+            roughness: pbr.roughness,
+            emissive: pbr.emissive,
+            occlusion_strength: pbr.occlusion_strength,
+            metallic_roughness: PbrChannel::resolve(
+                pbr.metallic_roughness_texture.as_deref(),
+                database,
+            ),
+            normal: PbrChannel::resolve(pbr.normal_texture.as_deref(), database),
+            emissive_texture: PbrChannel::resolve(pbr.emissive_texture.as_deref(), database),
+            occlusion: PbrChannel::resolve(pbr.occlusion_texture.as_deref(), database),
+        }
+    }
 }
 
 /// One writable source entity, copied out of the read-only database.
@@ -60,6 +127,11 @@ pub(crate) struct SourceMesh {
     /// The source declared UVs that do not pair with its vertex list, so none
     /// were copied (defensive; `cad-db` validation refuses this shape too).
     pub uvs_dropped: bool,
+    /// The declared PBR channels with their textures resolved (ADR-0039 D5).
+    ///
+    /// `None` is "the source declared no PBR" and must stay byte-identical to a
+    /// pre-ADR-0039 export: no PBR key is written at all.
+    pub pbr: Option<SourcePbr>,
     /// The entity's display colour as the importer resolved it.
     ///
     /// Only `Explicit` becomes a glTF material, and only for a mesh that writes
@@ -237,6 +309,10 @@ pub(crate) fn collect(job: &ExportJob<'_>, connector: &str) -> CadResult<Collect
             texture,
             missing_texture,
             uvs_dropped,
+            pbr: mesh
+                .pbr
+                .as_ref()
+                .map(|pbr| SourcePbr::resolve(pbr, job.database)),
             color: render.color,
             transparency: render.transparency,
         });

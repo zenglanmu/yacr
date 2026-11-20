@@ -206,6 +206,9 @@ fn fill_sfnt_glyph(
         // texture is attached (ADR-0038: never fabricate a UV from positions).
         uvs: Vec::new(),
         texture: None,
+        // Text fill is synthesised from glyph outlines; it carries no source
+        // material channels (ADR-0039).
+        pbr: None,
     });
 }
 

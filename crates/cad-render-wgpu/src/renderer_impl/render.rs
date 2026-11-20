@@ -569,12 +569,8 @@ impl Renderer {
                 renderer_color(batch.color),
                 clamp_alpha(batch.alpha),
             );
-            let uniform = uniform_bytes(
-                &m,
-                [r, g, b, alpha],
-                [batch.pick_key, batch.instance_flags(), line_wpp_bits, 0],
-                light,
-            );
+            let key_flags = [batch.pick_key, batch.instance_flags(), line_wpp_bits, 0];
+            let uniform = self.batch_uniform(batch, &m, [r, g, b, alpha], key_flags);
             self.uniforms.write_slot(legacy_slots, &uniform);
             self.frame_slots[index] = legacy_slots as u32;
             legacy_slots += 1;

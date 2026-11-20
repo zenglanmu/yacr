@@ -128,100 +128,6 @@ enum ScopeOutcome {
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
-struct GpuBatch {
-    /// Per-batch position vertex buffer (`None` when the batch was converted to
-    /// an instanced line stream, which owns the geometry instead).
-    vertices: Option<wgpu::Buffer>,
-    vertex_count: u32,
-    /// Per-vertex normals (mesh topology only); kept alive for binding.
-    normals: Option<wgpu::Buffer>,
-    /// Per-vertex colours (mesh topology only); kept alive for binding. Always
-    /// bound for a mesh (white when the batch has no gradient), so the shader's
-    /// `@location(2)` attribute is always provided.
-    colors: Option<wgpu::Buffer>,
-    /// Per-vertex UV0 (`@location(3)`) for a **textured** mesh batch; `None` for
-    /// every untextured batch (only `mesh_textured` binds slot 3).
-    uvs: Option<wgpu::Buffer>,
-    /// The base-colour texture key; `Some` routes the draw through
-    /// `mesh_textured`. A non-resident key falls back to the untextured pipeline
-    /// and is surfaced, never bound to a placeholder texture.
-    texture: Option<ResourceKey>,
-    topology: RenderTopology,
-    /// `true` for the text-glyph display class (indexed mesh, no edge overlay).
-    text_glyph: bool,
-    /// Triangle index buffer (mesh topology only).
-    indices: Option<wgpu::Buffer>,
-    index_count: u32,
-    /// Pre-expanded anti-aliased line quads for this batch's line geometry: the
-    /// `Lines`/`MeshEdges` line list, or a non-merged mesh's wireframe overlay.
-    /// `None` when the batch owns no per-batch line geometry (a converted
-    /// instance stream, or a mesh with no overlay).
-    line_quads: Option<wgpu::Buffer>,
-    /// Vertex count of [`GpuBatch::line_quads`] (six per segment).
-    line_quad_count: u32,
-    /// `true` when the batch's transform mirrors winding.
-    mirrored: bool,
-    /// Constant per-object alpha.
-    alpha: f32,
-    /// Constant per-object colour (normalized sRGB), sanitized at upload.
-    color: [f32; 3],
-    /// Requested lineweight in millimetres; carried but not drawn.
-    lineweight: f32,
-    /// Paint order relative to sibling batches (larger is later/on top). The
-    /// frame's draw plan performs a stable sort on this key.
-    draw_order: i64,
-    /// World-space centroid, the transparent pass's back-to-front sort key.
-    centroid: [f32; 3],
-    origin: [f32; 3],
-    /// Empty unless this batch's segments live in instanced line streams. The
-    /// frame path draws each `[offset, offset + count)` instance slice in order
-    /// (coalescing against adjacent slices in the same stream) instead of a
-    /// per-batch draw. Usually one run; a batch larger than a stream's instance
-    /// cap contributes one run per chunk it was split across.
-    instanced: Vec<InstanceRun>,
-    /// Empty unless this batch's triangles live in merged mesh chunks (see
-    /// [`MeshChunkData`]). The frame path draws each `[index_offset,
-    /// index_offset + index_count)` triangle range in order (coalescing against
-    /// adjacent ranges in the same chunk) instead of a per-batch draw. Usually
-    /// one run; a batch larger than the vertex cap contributes one run per piece.
-    mesh_runs: Vec<MeshRun>,
-    /// Empty unless this batch's conics live in SDF instance streams (see
-    /// [`ArcChunk`]). The frame path draws each `[offset, offset + count)`
-    /// instance slice in order (coalescing against adjacent slices in the same
-    /// stream). Usually one run; a batch larger than the instance cap contributes
-    /// one run per chunk.
-    arc_runs: Vec<ArcRun>,
-    /// Exact bytes this batch uploads, cached at upload time so the per-frame
-    /// byte budget does not recompute the edge index list every frame.
-    upload_bytes: usize,
-    /// This batch's renderer pick key (see [`PickTable`]): `1 + <ordinal>`, never
-    /// `0`. Packed into every instance/merged vertex the batch contributes and
-    /// into `Camera::key_flags.x` of its per-batch uniform, so the id pass and
-    /// the selection-flags table can resolve any fragment of it.
-    pick_key: u32,
-    /// World-space z range `[min, max]` of this batch's geometry, captured at
-    /// upload. The orthographic frame derives its depth band from the union over
-    /// resident batches (see [`plan::OrthoDepth`]), so a solid's world-z extent
-    /// maps into the depth range instead of being clipped by it.
-    z_range: [f32; 2],
-    /// The full `SelectionRef` list this batch's fragments can belong to,
-    /// preserved so the CPU-side pick table can return the whole `u128` identity
-    /// (the scene builder may concatenate several entities into one batch).
-    sources: Vec<SelectionRef>,
-    /// GPU memory charge of this batch's per-vertex buffers (positions, normals,
-    /// colours, anti-aliased line quads). `None` for a batch whose geometry lives
-    /// in a shared instance stream / merged chunk / conic stream, which owns the
-    /// charge instead. Released when the batch is dropped (see
-    /// [`gpu_memory::GpuMemoryLedger`]).
-    // Held only for its `Drop` impl, which releases the ledger charge.
-    #[allow(dead_code)]
-    vertex_charge: Option<GpuCharge>,
-    /// GPU memory charge of this batch's triangle index buffer.
-    // Held only for its `Drop` impl, which releases the ledger charge.
-    #[allow(dead_code)]
-    index_charge: Option<GpuCharge>,
-}
-
 /// One device-resident merged mesh chunk: an interleaved vertex buffer, a
 /// triangle index buffer rebased onto it, and the `f64` reference origin its
 /// stored positions are measured from.
@@ -436,38 +342,6 @@ pub(crate) struct PulledMesh {
     table_charge: GpuCharge,
 }
 
-impl GpuBatch {
-    /// Exact bytes this batch uploads to the device.
-    ///
-    /// Positions/normals are 12 bytes per vertex, edge indices and the triangle
-    /// index buffer are `u32` (4 bytes) each. This matches the byte count
-    /// [`Renderer::upload`] accumulates, so the frame byte budget and the
-    /// reported `FrameStats::uploaded_bytes` cannot disagree.
-    fn upload_size_bytes(&self) -> usize {
-        self.upload_bytes
-    }
-
-    /// The [`INSTANCE_FLAG_*`] bitfield of this resident batch, for
-    /// `Camera::key_flags.y` of its per-batch uniform. Mirrors
-    /// [`batch_instance_flags`] on the packed form (converted batches are always
-    /// opaque, a legacy batch keeps its own alpha class).
-    fn instance_flags(&self) -> u32 {
-        (if classify_alpha(self.alpha) == AlphaClass::Opaque {
-            INSTANCE_FLAG_OPAQUE
-        } else {
-            0
-        }) | if self.sources.is_empty() {
-            0
-        } else {
-            INSTANCE_FLAG_HAS_SOURCE
-        } | if self.lineweight > 0.0 {
-            INSTANCE_FLAG_LINEWEIGHT
-        } else {
-            0
-        }
-    }
-}
-
 /// The CAD renderer. Owns only derived GPU resources.
 pub struct Renderer {
     pub preference: BackendPreference,
@@ -545,6 +419,44 @@ pub struct Renderer {
     mesh_pipeline_textured_mirrored_transparent: Option<wgpu::RenderPipeline>,
     /// Textured-quad pipeline for raster images (group 2 = texture + sampler).
     image_pipeline: Option<wgpu::RenderPipeline>,
+    /// PBR mesh pipelines (ADR-0039 D6): the mesh state plus UV0 + tangent slots
+    /// and group 2 = five channel textures + sampler. Three vertex layouts
+    /// (`vs_main` UV0+tangent, `vs_uv` UV0 only, `vs_flat` position/normal/colour),
+    /// four mirror/depth variants each, mirroring the untextured set.
+    mesh_pipeline_pbr: Option<wgpu::RenderPipeline>,
+    mesh_pipeline_pbr_mirrored: Option<wgpu::RenderPipeline>,
+    mesh_pipeline_pbr_transparent: Option<wgpu::RenderPipeline>,
+    mesh_pipeline_pbr_mirrored_transparent: Option<wgpu::RenderPipeline>,
+    mesh_pipeline_pbr_uv: Option<wgpu::RenderPipeline>,
+    mesh_pipeline_pbr_uv_mirrored: Option<wgpu::RenderPipeline>,
+    mesh_pipeline_pbr_uv_transparent: Option<wgpu::RenderPipeline>,
+    mesh_pipeline_pbr_uv_mirrored_transparent: Option<wgpu::RenderPipeline>,
+    mesh_pipeline_pbr_flat: Option<wgpu::RenderPipeline>,
+    mesh_pipeline_pbr_flat_mirrored: Option<wgpu::RenderPipeline>,
+    mesh_pipeline_pbr_flat_transparent: Option<wgpu::RenderPipeline>,
+    mesh_pipeline_pbr_flat_mirrored_transparent: Option<wgpu::RenderPipeline>,
+    /// Bind-group layout of the PBR channel set: five `texture_2d<f32>` views and
+    /// one filtering sampler (group 2 of `mesh_pbr`).
+    pbr_texture_layout: Option<wgpu::BindGroupLayout>,
+    /// The exact multiplicative-identity 1x1 textures bound for an absent PBR
+    /// channel (white base/metallic-roughness/occlusion, black emissive, flat
+    /// normal). Created once; documented as "channel disabled", not data.
+    pbr_identities: Option<PbrIdentities>,
+    /// All-identity bind group: what a PBR batch draws with before (or instead of)
+    /// a resolvable channel set. Every channel is then disabled, never fake.
+    pbr_identity_bind_group: Option<wgpu::BindGroup>,
+    /// Linear (non-sRGB) GPU textures for the metallic-roughness / normal /
+    /// occlusion maps. Separate from [`Self::mesh_textures`] because those maps
+    /// are data, not colour: sRGB-decoding them would corrupt a normal map.
+    pbr_data_textures: HashMap<ResourceKey, GpuTexture>,
+    /// One bind group per distinct five-key channel set referenced by a resident
+    /// PBR batch, rebuilt by [`Renderer::upload_mesh_textures`]. A missing key is
+    /// substituted with its identity texture (channel disabled) and reported.
+    pbr_bind_groups: std::collections::BTreeMap<PbrTextureSet, wgpu::BindGroup>,
+    /// Monotonic count of PBR batches whose tangent frame could not be generated
+    /// (degenerate UVs): the normal-map channel was disabled rather than inventing
+    /// a tangent. Exposed as `render.pbr.tangent_unavailable` evidence.
+    pbr_tangent_unavailable: std::sync::atomic::AtomicU64,
     /// Wipeout mask pipeline: triangle list, `depth_compare = Always`, no depth
     /// write, fragment output = the clear colour (ADR 0022 C1). Drawn in the
     /// frame's final pass.
@@ -950,6 +862,8 @@ impl Default for Renderer {
 /// per-chunk world AABBs. Kept separate from the planners so it is unit-testable
 /// without a GPU.
 mod cull;
+mod gpu_batch;
+mod pbr_texture;
 /// Native id-pass + readback (`Renderer::pick_at`). The browser tiers keep CPU
 /// picking (`cad_spatial`); a blocking GPU→CPU readback is not available there.
 #[cfg(not(target_arch = "wasm32"))]
@@ -959,7 +873,9 @@ mod renderer_impl;
 
 pub(crate) use cull::{ChunkCull, WorldAabb};
 mod mask_coverage;
+pub(crate) use gpu_batch::GpuBatch;
 pub(crate) use mask_coverage::MaskCoverage;
+pub(crate) use pbr_texture::{PbrIdentities, PbrTextureSet};
 pub(crate) use plan::*;
 
 // Private accelerated-tier GPU contracts for the pulled-prefix fast path. Test
@@ -971,6 +887,10 @@ pub(crate) use plan::*;
 mod conic_overwrite_gpu_tests;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod cursor_transient_gpu_tests;
+/// Native GPU contracts for the PBR channel (ADR-0039 D6): normal map, metallic,
+/// emissive and occlusion each provably change the presented pixels.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod mesh_pbr_gpu_tests;
 /// Native GPU contracts for the textured-mesh channel (ADR-0038 D9): a real
 /// texture is sampled, and an unresolved key draws untextured + is reported.
 #[cfg(all(test, not(target_arch = "wasm32")))]

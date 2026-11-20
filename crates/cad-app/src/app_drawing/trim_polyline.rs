@@ -127,7 +127,7 @@ pub(crate) fn plan_trim_polyline(
         )
     })?;
     Ok(TrimResolution {
-        plan: TrimPlan::Replace(geometry),
+        plan: TrimPlan::Replace(Box::new(geometry)),
         notes,
     })
 }

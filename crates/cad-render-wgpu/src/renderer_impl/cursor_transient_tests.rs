@@ -15,6 +15,9 @@ fn overlay_batch(draw_order: i64) -> GpuBatch {
     GpuBatch {
         uvs: None,
         texture: None,
+        pbr: None,
+        tangents: None,
+        has_tangents: false,
         vertices: None,
         vertex_count: 0,
         normals: None,

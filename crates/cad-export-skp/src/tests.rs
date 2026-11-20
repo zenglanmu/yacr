@@ -46,6 +46,7 @@ fn triangle() -> Mesh {
         colors: Vec::new(),
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
     }
 }
 

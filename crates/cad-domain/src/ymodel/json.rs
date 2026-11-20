@@ -343,9 +343,10 @@ impl ObjectReader {
     /// This is not a general relaxation: the format writes every descriptor
     /// field, so an absent key normally means the entry was not produced by this
     /// writer. ADR-0038 D4 makes exactly two `cad:Mesh` fields (`uvs`,
-    /// `texture`) optional so a minor-2 archive stays readable, and those two
-    /// takes are their only callers. Keep it that way — the payload tests pin a
-    /// missing `vertices` as an error to stop the exception spreading.
+    /// `texture`) optional so a minor-2 archive stays readable, and ADR-0039 D2
+    /// adds the third (`pbr`, absent → `None`); those takes are their only
+    /// callers. Keep it that way — the payload tests pin a missing `vertices` as
+    /// an error to stop the exception spreading.
     pub(crate) fn vec_f64x2_if_present(
         &mut self,
         field: &'static str,
@@ -359,7 +360,7 @@ impl ObjectReader {
 
     /// A `string-or-null` field whose **key may also be absent** (absent → `None`).
     ///
-    /// The second and only other use of the ADR-0038 D4 exception; see
+    /// The second use of the ADR-0038 D4 exception; see
     /// [`Self::vec_f64x2_if_present`]. A present key still goes through the
     /// strict [`Self::opt_string`] type check.
     pub(crate) fn string_if_present(
@@ -371,6 +372,16 @@ impl ObjectReader {
         } else {
             Ok(None)
         }
+    }
+
+    /// A raw nested value whose **key may be absent** (`None` only when absent).
+    ///
+    /// The third use of the ADR-0038 D4 exception, extended by ADR-0039 D2 for
+    /// `cad:Mesh.pbr`: a minor-3 archive has no `pbr` key at all. The caller
+    /// still distinguishes a present `null` from a present object and applies its
+    /// own strict shape check, so this take only decides "was the key written?".
+    pub(crate) fn raw_if_present(&mut self, field: &'static str) -> Option<Value> {
+        self.map.remove(field)
     }
 }
 

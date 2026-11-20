@@ -226,8 +226,11 @@ impl SplineCurve {
         } else {
             (tangent_parameter, t_max)
         };
-        self.sub_curve(kept_start, kept_end)
-            .map(|geometry| Some(GeometryUpdate::Spline { geometry }))
+        self.sub_curve(kept_start, kept_end).map(|geometry| {
+            Some(GeometryUpdate::Spline {
+                geometry: Box::new(geometry),
+            })
+        })
     }
 
     /// The exact `[t0, t1]` B-spline sub-curve in the stored representation.

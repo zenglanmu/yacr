@@ -65,6 +65,9 @@ fn gpu_batch(
     GpuBatch {
         uvs: None,
         texture: None,
+        pbr: None,
+        tangents: None,
+        has_tangents: false,
         vertices: None,
         vertex_count,
         normals: None,

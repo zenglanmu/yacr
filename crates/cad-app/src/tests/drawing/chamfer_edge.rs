@@ -76,6 +76,7 @@ fn display_mesh() -> Mesh {
         colors: Vec::new(),
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
     }
 }
 

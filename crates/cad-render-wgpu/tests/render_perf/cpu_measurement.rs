@@ -6,6 +6,7 @@ fn line_batch(index: usize, transparent: bool) -> RenderBatch {
     RenderBatch {
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
         conics: Vec::new(),
         local_origin: Point3 {
             x: 0.0,

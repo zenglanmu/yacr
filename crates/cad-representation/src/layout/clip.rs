@@ -709,6 +709,11 @@ pub fn clip_mesh_to_rect(
         // Clipping removes triangles, never the material: the texture key is
         // carried whenever its UVs were (a texture without UVs cannot be sampled).
         texture: if has_uvs { mesh.texture.clone() } else { None },
+        // The PBR channel set is carried verbatim. The scalar factors are
+        // UV-independent, so they always survive; a PBR texture key whose UV
+        // stream did not survive is dropped downstream by the scene sanitiser
+        // (ADR-0039 D6), never silently sampled with fabricated UVs.
+        pbr: mesh.pbr.clone(),
     }))
 }
 
@@ -815,6 +820,10 @@ pub fn clip_mesh_to_polygon(mesh: &Mesh, clip: &PaperClip) -> Result<Option<Mesh
         colors: if has_colors { out.colors } else { Vec::new() },
         uvs: if has_uvs { out.uvs } else { Vec::new() },
         texture: if has_uvs { mesh.texture.clone() } else { None },
+        // Same rule as the rectangle clip: the PBR material travels with the
+        // surviving triangles; a texture key without a surviving UV stream is
+        // dropped by the scene sanitiser, not sampled with invented UVs.
+        pbr: mesh.pbr.clone(),
     }))
 }
 

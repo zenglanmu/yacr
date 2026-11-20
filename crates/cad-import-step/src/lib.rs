@@ -792,6 +792,7 @@ fn tessellate_body(
         colors: Vec::new(),
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
     }))
 }
 
@@ -874,6 +875,7 @@ fn place_mesh(mesh: &Mesh, matrix: &Affine, label: &str) -> CadResult<PlacedMesh
             // today, so this stays empty in practice.
             uvs: mesh.uvs.clone(),
             texture: mesh.texture.clone(),
+            pbr: mesh.pbr.clone(),
         },
         normals_dropped,
     })

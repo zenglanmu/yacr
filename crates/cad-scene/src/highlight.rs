@@ -407,6 +407,9 @@ fn mesh_batch(
         // documented untextured batch form, so the batch invariant holds.
         uvs: Vec::new(),
         texture: None,
+        // A solid tint overlay is never a PBR draw either (ADR-0039, mirroring
+        // the ADR-0038 D8 rule for textures).
+        pbr: None,
         indices,
         edges: Vec::new(),
         mirrored: false,
@@ -565,6 +568,7 @@ mod tests {
         Mesh {
             uvs: Vec::new(),
             texture: None,
+            pbr: None,
             vertices: vec![
                 p(-2.0, -1.0, 2.0),
                 p(-1.0, 1.0, 2.0),
@@ -881,13 +885,20 @@ mod tests {
         assert_eq!(scene.batches[0].alpha, 1.0);
     }
 
-    /// A highlight is a solid tint overlay: it never samples a texture, even when
-    /// the surface it marks is textured (ADR-0038 D8).
+    /// A highlight is a solid tint overlay: it never samples a texture or a PBR
+    /// channel, even when the surface it marks declares them (ADR-0038 D8,
+    /// ADR-0039 D6).
     #[test]
     fn highlight_batches_never_carry_uvs_or_a_texture() {
         let mut mesh = two_face_mesh();
         mesh.uvs = vec![[0.0, 0.0]; mesh.vertices.len()];
         mesh.texture = Some("4c2f2e0a5f3d9b7c1e8a6d4b2c0f9e71.png".to_owned());
+        mesh.pbr = Some(cad_domain::MeshPbr {
+            metallic: 1.0,
+            roughness: 0.25,
+            normal_texture: Some("22222222222222222222222222222222.jpg".to_owned()),
+            ..cad_domain::MeshPbr::default()
+        });
         let reps = vec![mesh_rep(50, Vec::new(), mesh)];
         let selection = [reference(50, Vec::new(), Some(face("face-a")))];
         let scene = highlight(&selection, &reps);
@@ -898,5 +909,9 @@ mod tests {
             "the overlay is a solid tint, not the textured surface"
         );
         assert!(batch.texture.is_none());
+        assert!(
+            batch.pbr.is_none(),
+            "a highlight overlay is never a PBR draw"
+        );
     }
 }

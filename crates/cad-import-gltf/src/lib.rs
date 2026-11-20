@@ -31,9 +31,25 @@
 //!   its UVs, no texture is referenced and the loss is reported
 //!   ([`DIAG_EXTERNAL_IMAGE`], [`DIAG_TEXTURE_NOT_IMPORTED`]); an unusable UV set
 //!   is dropped as a whole ([`DIAG_UVS_DROPPED`]) rather than guessed at. Other
-//!   `TEXCOORD_n` sets ([`DIAG_UV_SET_IGNORED`]), `KHR_texture_transform`
-//!   ([`DIAG_TEXTURE_TRANSFORM_NOT_IMPORTED`]) and the non-base-colour channels
-//!   ([`DIAG_TEXTURE_CHANNEL_NOT_IMPORTED`]) are reported, never silent;
+//!   `TEXCOORD_n` sets ([`DIAG_UV_SET_IGNORED`]) and `KHR_texture_transform`
+//!   ([`DIAG_TEXTURE_TRANSFORM_NOT_IMPORTED`]) are reported, never silent;
+//! * the metallic-roughness material channels **are** imported (ADR-0039 D4):
+//!   `metallicFactor`/`roughnessFactor`, `emissiveFactor` (linear RGB),
+//!   `occlusionTexture.strength` and the four PBR texture slots
+//!   (`metallicRoughnessTexture`, `normalTexture`, `emissiveTexture`,
+//!   `occlusionTexture`) become `Mesh::pbr`. `pbr` is `Some` **only** when the
+//!   document's JSON declares at least one of those channels — glTF's default
+//!   `metallicFactor = 1` is a format default, and applying it to a
+//!   `baseColorFactor`-only asset would draw unlit CAD as black metal, so such a
+//!   material stays `pbr: None`. A non-finite or out-of-range factor drops the
+//!   whole channel ([`DIAG_PBR_IGNORED`]), never clamps it. Every PBR texture
+//!   samples UV0: a slot on another `TEXCOORD` set is not imported
+//!   ([`DIAG_UV_SET_IGNORED`]), a slot whose UV set was unusable stays unset
+//!   ([`DIAG_UVS_DROPPED`]), and an external image is named
+//!   ([`DIAG_EXTERNAL_IMAGE`]). A `normalTexture.scale` other than `1.0`
+//!   ([`DIAG_NORMAL_SCALE_NOT_IMPORTED`]) and any
+//!   `KHR_materials_emissive_strength` ([`DIAG_EMISSIVE_STRENGTH_NOT_IMPORTED`])
+//!   are reported rather than guessed at;
 //! * skins, animations, cameras and meshes outside the imported scene are
 //!   reported, never silently ignored.
 //!
@@ -50,14 +66,17 @@
 //! them. The linear RGB `baseColorFactor` is *not* baked into a textured
 //! primitive's geometry when that primitive has no `COLOR_0`: it stays the
 //! explicit entity colour, which the renderer multiplies with the sampled
-//! texture (`texture × vertex colour × entity colour`) exactly once. Metallic/
-//! roughness, normal maps and every non-base-colour texture channel are not
-//! represented in `cad-db`.
+//! texture (`texture × vertex colour × entity colour`) exactly once. The
+//! metallic-roughness channels a material declares are carried beside the
+//! geometry in `Mesh::pbr` (ADR-0039 D1); a material that declares none keeps
+//! `pbr: None` instead of receiving glTF's spec defaults.
 //!
 //! A document whose `asset.version` is not `2.x` is refused by name
 //! ([`DIAG_UNSUPPORTED_VERSION`]); it is never read as if it were glTF 2.0.
 
 mod buffers;
+mod geometry;
+mod pbr;
 mod scene;
 mod texture;
 
@@ -121,13 +140,17 @@ pub const DIAG_VERTEX_ALPHA_DROPPED: &str = "import.gltf.vertex_alpha_dropped";
 pub const DIAG_TEXTURE_NOT_IMPORTED: &str = "import.gltf.texture_not_imported";
 /// Stable diagnostic code: a base-colour image names an external file.
 pub const DIAG_EXTERNAL_IMAGE: &str = "import.gltf.external_image_unavailable";
-/// Stable diagnostic code (note): non-base-colour texture channels exist.
-pub const DIAG_TEXTURE_CHANNEL_NOT_IMPORTED: &str = "import.gltf.texture_channel_not_imported";
+/// Stable diagnostic code: a declared PBR factor is non-finite or out of `[0, 1]`.
+pub const DIAG_PBR_IGNORED: &str = "import.gltf.pbr_ignored";
+/// Stable diagnostic code: `normalTexture.scale` is not `1.0`.
+pub const DIAG_NORMAL_SCALE_NOT_IMPORTED: &str = "import.gltf.normal_scale_not_imported";
+/// Stable diagnostic code: `KHR_materials_emissive_strength` is not applied.
+pub const DIAG_EMISSIVE_STRENGTH_NOT_IMPORTED: &str = "import.gltf.emissive_strength_not_imported";
 /// Stable diagnostic code: a base-colour `KHR_texture_transform` was ignored.
 pub const DIAG_TEXTURE_TRANSFORM_NOT_IMPORTED: &str = "import.gltf.texture_transform_not_imported";
 /// Stable diagnostic code: a UV set was unusable and dropped as a whole.
 pub const DIAG_UVS_DROPPED: &str = "import.gltf.uvs_dropped";
-/// Stable diagnostic code (note): only the base-colour texture's UV set is read.
+/// Stable diagnostic code (note): only one UV set is read per primitive.
 pub const DIAG_UV_SET_IGNORED: &str = "import.gltf.uv_set_ignored";
 /// Stable diagnostic code: an image's `data:` payload is not valid base64.
 pub const DIAG_IMAGE_BASE64: &str = "import.gltf.image_base64";
@@ -269,13 +292,17 @@ impl Importer for GltfImporter {
             bytes: Some(request.bytes.len() as u64),
             message: None,
         });
-        // One JSON parse serves both the version gate and the extension scan; the
-        // `gltf` crate is built without the typed `KHR_texture_transform` accessors.
+        // One JSON parse serves the version gate, the extension scan and the
+        // authored-PBR scan; the `gltf` crate is built without the typed
+        // `KHR_texture_transform`/`KHR_materials_emissive_strength` accessors and
+        // its getters answer with spec defaults, so the authored keys are read
+        // from this value.
         let json = document_json(&request.bytes)?;
         let json: serde_json::Value = serde_json::from_slice(&json)
             .map_err(|error| CadError::CorruptData(format!("{DIAG_PARSE}: {error}")))?;
         check_asset_version(&json)?;
         let transformed_materials = texture::transform_materials(&json);
+        let pbr_declarations = texture::pbr_declarations(&json);
 
         let gltf = gltf::Gltf::from_slice(&request.bytes)
             .map_err(|error| CadError::CorruptData(format!("{DIAG_PARSE}: {error}")))?;
@@ -302,6 +329,7 @@ impl Importer for GltfImporter {
             &request.limits,
             cancelled,
             &transformed_materials,
+            &pbr_declarations,
         );
         let mut stack = Vec::new();
         for node in scene.nodes() {

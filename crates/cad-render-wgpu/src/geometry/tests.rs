@@ -10,6 +10,7 @@ fn mesh_batch(mirrored: bool) -> RenderBatch {
     RenderBatch {
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
         conics: Vec::new(),
         local_origin: point(0.0, 0.0, 0.0),
         topology: RenderTopology::Mesh,

@@ -198,10 +198,10 @@ impl Application {
                 // TRIM keeps the clicked piece of the same entity, so it keeps
                 // the polyline's uniform width (the shared curve model emits a
                 // centreline-only geometry).
-                if let TrimPlan::Replace(SemanticGeometry::Polyline { width: kept, .. }) =
-                    &mut resolution.plan
-                {
-                    *kept = *width;
+                if let TrimPlan::Replace(geometry) = &mut resolution.plan {
+                    if let SemanticGeometry::Polyline { width: kept, .. } = &mut **geometry {
+                        *kept = *width;
+                    }
                 }
                 (
                     resolution.plan,
@@ -247,7 +247,7 @@ impl Application {
                 TrimPlan::Delete => staged.delete_entity(target_entity.id)?,
                 TrimPlan::Replace(geometry) => {
                     let mut after = target_entity.clone();
-                    after.geometry = geometry.clone();
+                    after.geometry = (**geometry).clone();
                     staged.update_entity(after)?;
                 }
             }

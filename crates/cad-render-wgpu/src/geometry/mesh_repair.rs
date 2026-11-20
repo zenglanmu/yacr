@@ -67,6 +67,7 @@ pub fn repaired_normals(batch: &RenderBatch) -> Vec<[f32; 3]> {
         // (ADR-0038 D1: never fabricate a UV).
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
     };
     let computed = cad_geometry::compute_vertex_normals(&mesh);
     computed

@@ -320,6 +320,8 @@ fn push_fill(
             // A synthesized display primitive has no texture parameterisation.
             uvs: Vec::new(),
             texture: None,
+            // …and declares no PBR material (ADR-0039 D1).
+            pbr: None,
         }),
         TableDisplayAppearance::colored(fill),
     );

@@ -385,6 +385,7 @@ fn body_yields_no_snap_candidates() {
                 colors: Vec::new(),
                 uvs: Vec::new(),
                 texture: None,
+                pbr: None,
             },
             edges: vec![vec![flat(0.0, 0.0), flat(10.0, 0.0)]],
             tolerance: Some(0.01),

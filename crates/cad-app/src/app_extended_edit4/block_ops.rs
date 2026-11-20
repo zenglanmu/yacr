@@ -240,12 +240,12 @@ impl Application {
                     .map_err(|reason| invalid(prefix, "no_cut", plan_reason(reason)))?
             } else {
                 plan_extend(&curve, curve.point_at(1.0), &boundaries, &policy, tol)
-                    .map(|resolution| TrimPlan::Replace(resolution.geometry))
+                    .map(|resolution| TrimPlan::Replace(Box::new(resolution.geometry)))
                     .map_err(|reason| invalid(prefix, "no_boundary", reason))?
             };
             match resolution {
                 TrimPlan::Replace(geometry) => {
-                    changes.push(CurveChange::Replace(target.clone(), geometry))
+                    changes.push(CurveChange::Replace(target.clone(), *geometry))
                 }
                 TrimPlan::Delete => changes.push(CurveChange::Delete(
                     target.clone(),

@@ -85,6 +85,12 @@ pub enum BatchOverwriteRefusal {
     /// silently drop the batch's pixels; the staging path rejects such a batch,
     /// so the overwrite refuses it too instead of publishing garbage.
     InvalidGeometry,
+    /// The batch has a PBR material channel set (ADR-0039 D6). Its tangent frame
+    /// is generated from positions + UV0 at pack time, so an in-place geometry
+    /// rewrite (which never regenerates tangents) would leave a stale frame under
+    /// a rotating transform. Refuse by name and let the caller re-stage, which is
+    /// always correct; the cheaper path is simply not implemented.
+    PbrNotUpdatable,
     /// The instanced line path: the rebuilt batch does not produce exactly the
     /// resident run list. A run is `(stream, offset, count)`; a different count,
     /// a different split or a different stream would move other batches'
@@ -161,6 +167,7 @@ impl BatchOverwriteRefusal {
             Self::LineQuadCountChanged { .. } => "line_quad_count_changed",
             Self::AttributeShapeChanged { .. } => "attribute_shape_changed",
             Self::InvalidGeometry => "invalid_geometry",
+            Self::PbrNotUpdatable => "pbr_not_updatable",
             Self::RunListChanged => "run_list_changed",
             Self::StreamOriginChanged => "stream_origin_changed",
             Self::MeshNotSupported => "mesh_not_supported",
@@ -220,6 +227,11 @@ impl fmt::Display for BatchOverwriteRefusal {
             Self::InvalidGeometry => write!(
                 f,
                 "batch overwrite refused: the rebuilt geometry carries a non-finite coordinate"
+            ),
+            Self::PbrNotUpdatable => write!(
+                f,
+                "batch overwrite refused: a PBR batch carries a generated tangent frame \
+                 that an in-place overwrite does not regenerate"
             ),
             Self::RunListChanged => write!(
                 f,

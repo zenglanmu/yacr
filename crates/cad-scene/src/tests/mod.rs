@@ -75,6 +75,7 @@ fn quad() -> Mesh {
     Mesh {
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
         vertices: vec![
             Point3 {
                 x: 0.0,

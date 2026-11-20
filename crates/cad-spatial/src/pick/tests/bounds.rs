@@ -131,6 +131,7 @@ fn allocation_free_pick_bounds_match_the_vec_reference() {
             colors: vec![],
             uvs: Vec::new(),
             texture: None,
+            pbr: None,
         }),
         SemanticGeometry::Opaque {
             type_key: "x".into(),
@@ -197,6 +198,7 @@ fn bounded_and_unculled_pick_reports_are_identical() {
                 colors: vec![],
                 uvs: Vec::new(),
                 texture: None,
+                pbr: None,
             }),
         ),
     ];
@@ -451,6 +453,7 @@ fn conservative_bounds_account_for_transforms_and_mesh_vertices() {
         colors: Vec::new(),
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
     });
     assert_eq!(
         hit_geometry(&ray, &mesh, &Transform3::identity(), &options).unwrap(),
@@ -471,6 +474,7 @@ fn huge_mesh_preserves_barycentric_slack_outside_tolerance_bounds() {
         colors: Vec::new(),
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
     });
     assert!(local_pick_bounds(&mesh).is_none());
     let ray = ray(p(-5e-7, 1.0, 0.0), p(0.0, 0.0, 1.0));
@@ -566,6 +570,7 @@ fn body_bounds_union_the_mesh_and_its_edges() {
             colors: Vec::new(),
             uvs: Vec::new(),
             texture: None,
+            pbr: None,
         },
         vec![vec![p(-1.0, -3.0, 0.0), p(4.0, 2.0, 5.0)]],
     );
@@ -590,6 +595,7 @@ fn body_bounds_union_the_mesh_and_its_edges() {
             colors: Vec::new(),
             uvs: Vec::new(),
             texture: None,
+            pbr: None,
         },
         vec![vec![p(-2.0, 0.0, 0.0), p(0.0, 3.0, 0.0)]],
     );
@@ -613,6 +619,7 @@ fn body_bounds_union_the_mesh_and_its_edges() {
             colors: Vec::new(),
             uvs: Vec::new(),
             texture: None,
+            pbr: None,
         },
         Vec::new(),
     );

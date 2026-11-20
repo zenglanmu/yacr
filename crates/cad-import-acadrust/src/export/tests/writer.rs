@@ -53,6 +53,7 @@ fn oversized_polyface_mesh_is_dropped_not_corrupted() {
         colors: Vec::new(),
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
     };
     let (bytes, report) = export_one(SemanticGeometry::Mesh(bad_index));
     assert!(read_entities(&bytes).is_empty());
@@ -70,6 +71,7 @@ fn oversized_polyface_mesh_is_dropped_not_corrupted() {
         colors: Vec::new(),
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
     };
     let (bytes, report) = export_one(SemanticGeometry::Mesh(too_many));
     assert!(read_entities(&bytes).is_empty());

@@ -19,7 +19,7 @@
 
 use serde_json::{Map, Value};
 
-use super::{fields, object, PayloadError};
+use super::{fields, mesh_pbr, object, PayloadError};
 use crate::brep::{BrepCurve, BrepData, BrepFace, BrepLoop, BrepPlacement, BrepShell, BrepSurface};
 use crate::ymodel::json::{self, ObjectReader};
 use crate::{
@@ -82,6 +82,13 @@ pub(super) fn encode_mesh(mesh: &Mesh) -> Value {
                     .as_ref()
                     .map_or(Value::Null, |key| Value::String(key.clone())),
             ),
+            // ADR-0039 D2: `null` for "the source declared no PBR". Always
+            // written, so only a minor-3 archive reaches the reader's
+            // absent-key default.
+            (
+                "pbr",
+                mesh.pbr.as_ref().map_or(Value::Null, mesh_pbr::encode),
+            ),
         ],
     )
 }
@@ -107,12 +114,17 @@ pub(super) fn decode_mesh(value: &Value) -> Result<Mesh, PayloadError> {
         }
     };
     let colors = reader.u8x3_list("colors")?;
-    // The format's only defaulting exception (ADR-0038 D4): a minor-2 archive
-    // has neither key, so `uvs` reads as "no UV" and `texture` as "none". Every
-    // other field above stays required, which is what
+    // The format's defaulting exception (ADR-0038 D4, extended by ADR-0039 D2):
+    // a minor-2 archive has neither `uvs`/`texture`, and a minor-3 archive has no
+    // `pbr`, so the three read as "no UV" / "none" / "no PBR". Every other field
+    // above stays required, which is what
     // `a_missing_required_mesh_field_is_still_refused` pins.
     let uvs = reader.vec_f64x2_if_present("uvs")?;
     let texture = reader.string_if_present("texture")?;
+    let pbr = match reader.raw_if_present("pbr") {
+        None | Some(Value::Null) => None,
+        Some(value) => Some(mesh_pbr::decode(&value)?),
+    };
     reader.finish()?;
     Ok(Mesh {
         vertices,
@@ -122,6 +134,7 @@ pub(super) fn decode_mesh(value: &Value) -> Result<Mesh, PayloadError> {
         colors,
         uvs,
         texture,
+        pbr,
     })
 }
 

@@ -107,6 +107,10 @@ pub enum FieldKind {
     VecOptSubElement,
     /// A composite identifier of the named family (`PersistentId` number).
     IdRef(IdKind),
+    /// `Option<MeshPbr>` (`null`, absent, or the PBR channel object; ADR-0039
+    /// D1/D2). The object's shape is owned by [`super::payload`], like the other
+    /// nested kinds.
+    MeshPbr,
     /// One nested semantic geometry object (recursive).
     Geometry,
     /// An array of nested semantic geometry objects (recursive).
@@ -334,6 +338,10 @@ pub const CLASSES: &[ClassDescriptor] = &[
             // minus these two keys, and the reader may treat them as absent.
             field("uvs", FieldKind::VecF64x2),
             field("texture", FieldKind::OptString),
+            // ADR-0039 D2: `null` or the PBR channel object. A minor-3 payload
+            // is the same object minus this key, so the reader treats it as
+            // absent (`pbr: None`).
+            field("pbr", FieldKind::MeshPbr),
         ],
     },
     ClassDescriptor {
@@ -753,6 +761,7 @@ mod tests {
                 | FieldKind::U8x3List
                 | FieldKind::VecOptSubElement
                 | FieldKind::IdRef(_)
+                | FieldKind::MeshPbr
                 | FieldKind::Geometry
                 | FieldKind::VecGeometry
                 | FieldKind::Bytes
@@ -806,6 +815,7 @@ mod tests {
             FieldKind::U8x3List,
             FieldKind::VecOptSubElement,
             FieldKind::IdRef(IdKind::Block),
+            FieldKind::MeshPbr,
             FieldKind::Geometry,
             FieldKind::VecGeometry,
             FieldKind::Bytes,

@@ -119,6 +119,7 @@ fn triangle_db() -> cad_db::DrawingDatabase {
                 colors: Vec::new(),
                 uvs: Vec::new(),
                 texture: None,
+                pbr: None,
             }),
             draw_order: 0,
         })

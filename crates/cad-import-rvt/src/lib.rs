@@ -29,6 +29,7 @@
 
 mod decode;
 mod glb;
+mod pbr;
 
 #[cfg(test)]
 mod tests;
@@ -102,6 +103,17 @@ pub const DIAG_ALPHA_CHOSEN: &str = "import.rvt.alpha_chosen";
 /// the vendored writer changed; decoding images is out of phase-A scope and
 /// `vendor/rvt` gains no texture patch (ADR-0035).
 pub const DIAG_TEXTURE_NOT_IMPORTED: &str = "import.rvt.texture_not_imported";
+/// Note: the imported metallic/roughness values are `rvt`'s **name-based
+/// heuristics** (`rvt` `src/ifc/pbr.rs`), not Revit-authored material data
+/// (ADR-0039 D4).
+///
+/// A provenance note, not a loss: the values are imported and stored as-is, so
+/// this does not change completeness.
+pub const DIAG_PBR_HEURISTIC: &str = "import.rvt.pbr_heuristic";
+/// Partial reason: a material's `metallicFactor`/`roughnessFactor` was
+/// non-finite or outside glTF's `[0, 1]` range, so no `MeshPbr` was stored for
+/// it (ADR-0039 D4: never clamped).
+pub const DIAG_PBR_IGNORED: &str = "import.rvt.pbr_ignored";
 
 /// Stable error code: the intermediate GLB is missing the `glTF` magic.
 pub const EMPTY_GLB: &str = "import.rvt.invalid_glb";
@@ -598,6 +610,44 @@ fn record_scene(import: &mut MeshImport, scene: &GlbScene) {
             None,
         );
     }
+    if scene.pbr_meshes > 0 {
+        // ADR-0039 D4: read, but named as what it is. `rvt` 0.24.0 derives both
+        // values from the material name alone; its `extras` mark only colour and
+        // alpha provenance, so nothing here is Revit-authored PBR.
+        import.record(
+            Diagnostic {
+                object: None,
+                code: DIAG_PBR_HEURISTIC.into(),
+                message: format!(
+                    "{} imported mesh(es) carry a metallic/roughness factor from the intermediate \
+                     glTF; rvt 0.24.0 derives both heuristically from the material name \
+                     (`src/ifc/pbr.rs`), not from Revit-authored material data, so they approximate \
+                     a plausible surface rather than the file's own PBR values (only colour and \
+                     alpha provenance are marked in the material extras)",
+                    scene.pbr_meshes
+                ),
+            },
+            None,
+        );
+    }
+    if scene.pbr_ignored > 0 {
+        import.record(
+            Diagnostic {
+                object: None,
+                code: DIAG_PBR_IGNORED.into(),
+                message: format!(
+                    "{} glTF primitive(s) named a metallicFactor/roughnessFactor that is \
+                     non-finite or outside glTF's [0, 1] range; no PBR channel was stored for \
+                     them; the factors were dropped rather than clamped into a plausible surface",
+                    scene.pbr_ignored
+                ),
+            },
+            Some(format!(
+                "{} metallic/roughness factor(s) in the rvt glTF were unusable and not imported",
+                scene.pbr_ignored
+            )),
+        );
+    }
 }
 
 /// One diagnostic per material-loss reason; all of them leave faces `ByLayer`.
@@ -609,11 +659,14 @@ fn record_material_losses(import: &mut MeshImport, losses: &MaterialLosses) {
         ),
         (
             losses.non_finite,
-            "carry a non-finite linear baseColorFactor",
+            "carry a non-finite linear baseColorFactor (a usable metallic/roughness pair on the \
+             same material is dropped with it, since the material as a whole is unusable)",
         ),
         (
             losses.out_of_range,
-            "carry a baseColorFactor component outside glTF's [0, 1] range",
+            "carry a baseColorFactor component outside glTF's [0, 1] range (a usable \
+             metallic/roughness pair on the same material is dropped with it, since the material \
+             as a whole is unusable)",
         ),
         (
             losses.conflicting,

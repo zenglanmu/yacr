@@ -43,8 +43,26 @@
 //! (out-of-range index, non-finite or out-of-range factor, or conflicting
 //! materials inside one merged node) also keeps `ByLayer` and is counted, never
 //! guessed.
+//!
+//! **PBR scalars (ADR-0039 D4).** `rvt` 0.24.0 also writes
+//! `pbrMetallicRoughness.metallicFactor`/`roughnessFactor` for every material,
+//! but its own `src/ifc/pbr.rs` derives them **heuristically from the material
+//! name** — they are not Revit-authored values (`src/ifc/gltf.rs` says so
+//! itself: "Metallic and roughness are always rvt-rs's"). This reader imports
+//! them as [`MeshPbr`] with only those two scalars filled in (no emissive, no
+//! textures: `rvt` 0.24.0 emits none) and reports one document-level
+//! `import.rvt.pbr_heuristic` note so neither the import nor the renderer
+//! presents them as the file's own material data. A factor that is non-finite
+//! or outside glTF's `[0, 1]` range is **not** clamped: the primitive stores no
+//! `MeshPbr` and the loss is counted for `import.rvt.pbr_ignored` (Partial).
+//!
+//! Whether a material *declares* either scalar is decided from the raw JSON
+//! chunk, not the typed view: `gltf` 1.4.1 fills in the spec default (`1.0`)
+//! for an absent key, and ADR-0039 D1 requires a material that declares no PBR
+//! scalar to stay `Mesh.pbr = None` rather than acquire glTF's default (which
+//! would draw an unlit CAD body as black metal).
 
-use cad_domain::{CadError, CadResult, Mesh, Point3};
+use cad_domain::{CadError, CadResult, Mesh, MeshPbr, Point3};
 use cad_import_core::ImportLimits;
 use gltf::accessor::{Accessor, DataType, Dimensions};
 use gltf::buffer::Source;
@@ -52,6 +70,7 @@ use gltf::material::AlphaMode;
 use gltf::mesh::Mode;
 use gltf::{Document, Gltf, Node, Primitive, Semantic};
 
+use crate::pbr::{declares_pbr_factor, json_chunk, validate_pbr_factors};
 use crate::{
     EMPTY_GLB, EXTERNAL_BUFFER, GLB_INVALID, INDEX_OUT_OF_RANGE, INVALID_TRANSFORM,
     MESH_WITHOUT_POSITIONS, NODE_CYCLE, NON_FINITE_VERTEX, NO_SCENE, SPARSE_ACCESSOR,
@@ -126,6 +145,11 @@ struct MaterialStyle {
     /// single material: a category default, or a body drawn whole taking its
     /// most transparent constituent material's opacity.
     alpha_chosen: bool,
+    /// The material's `metallicFactor`/`roughnessFactor`, when it declared at
+    /// least one and both survived validation. `None` means the material
+    /// declares no PBR scalar: the mesh then keeps `Mesh.pbr = None` and no
+    /// spec default is filled in.
+    pbr: Option<(f32, f32)>,
 }
 
 /// What one primitive's `material` reference resolved to.
@@ -165,6 +189,19 @@ pub struct GlbScene {
     /// that took its most transparent constituent material's opacity. Reported
     /// so neither is mistaken for the file's own transparency of that body.
     pub alpha_chosen: usize,
+    /// Meshes that stored a `MeshPbr` from the intermediate glTF.
+    ///
+    /// Reported once as `import.rvt.pbr_heuristic` (ADR-0039 D4): `rvt` 0.24.0
+    /// derives `metallicFactor`/`roughnessFactor` heuristically from the
+    /// material **name** (`rvt` `src/ifc/pbr.rs`), not from Revit-authored
+    /// material data. That is a note about provenance, not a loss, so it does
+    /// not change completeness.
+    pub pbr_meshes: usize,
+    /// Primitives whose material declared a `metallicFactor`/`roughnessFactor`
+    /// that is non-finite or outside glTF's `[0, 1]` range. No `MeshPbr` was
+    /// stored for them (never clamped, ADR-0039 D4) and the loss is reported as
+    /// `import.rvt.pbr_ignored`, which marks the import `Partial`.
+    pub pbr_ignored: usize,
 }
 
 /// Read a GLB and return every drawable node/mesh instance in world space.
@@ -212,6 +249,9 @@ pub fn read_glb(
     // the vendored writer changed. Count them once per document and report the
     // loss instead of ignoring the entries.
     scene_out.texture_references += document.images().len() + document.textures().len();
+    // Presence of `metallicFactor`/`roughnessFactor` is invisible in the typed
+    // document (see `json_chunk`), so the raw chunk is kept for it.
+    let raw = json_chunk(bytes);
     let mut stack = Vec::new();
     for node in scene.nodes() {
         if cancelled() {
@@ -219,6 +259,7 @@ pub fn read_glb(
         }
         visit_node(
             document,
+            raw.as_ref(),
             blob,
             &node,
             IDENTITY,
@@ -234,6 +275,7 @@ pub fn read_glb(
 #[allow(clippy::too_many_arguments)]
 fn visit_node(
     document: &Document,
+    raw: Option<&serde_json::Value>,
     blob: Option<&[u8]>,
     node: &Node<'_>,
     parent_world: [[f64; 4]; 4],
@@ -291,8 +333,14 @@ fn visit_node(
             }
             if primitive.mode() == Mode::Triangles {
                 build_primitive(blob, &primitive, &world, &mut built)?;
-                let style =
-                    resolve_material(document, mesh.index(), &primitive, &mut out.material_losses);
+                let style = resolve_material(
+                    document,
+                    raw,
+                    mesh.index(),
+                    &primitive,
+                    &mut out.material_losses,
+                    &mut out.pbr_ignored,
+                );
                 match agreed {
                     None => agreed = Some(style),
                     Some(previous) if previous != style => conflict = true,
@@ -312,6 +360,18 @@ fn visit_node(
         };
         if style.is_some_and(|style| style.alpha_chosen) {
             out.alpha_chosen += 1;
+        }
+        // ADR-0039 D4: only the two scalars are filled in; `rvt` 0.24.0 emits no
+        // emissive/occlusion data and no textures, so those stay at their
+        // "source declared nothing" defaults. The provenance of the two values
+        // (name-based heuristics inside `rvt`) is reported once per document by
+        // `import.rvt.pbr_heuristic`, not stored per mesh.
+        if let Some((metallic, roughness)) = style.and_then(|style| style.pbr) {
+            built.mesh.pbr = Some(MeshPbr {
+                metallic: f64::from(metallic),
+                roughness: f64::from(roughness),
+                ..MeshPbr::default()
+            });
         }
         out.degenerate_triangles += built.degenerate;
         out.normals_dropped += built.normals_dropped;
@@ -337,6 +397,9 @@ fn visit_node(
                 built.mesh.triangles.len(),
                 limits,
             )?;
+            if built.mesh.pbr.is_some() {
+                out.pbr_meshes += 1;
+            }
             out.meshes.push(PlacedMesh {
                 name: node.name().map(str::to_string),
                 mesh: built.mesh,
@@ -347,7 +410,9 @@ fn visit_node(
     }
 
     for child in node.children() {
-        visit_node(document, blob, &child, world, stack, limits, cancelled, out)?;
+        visit_node(
+            document, raw, blob, &child, world, stack, limits, cancelled, out,
+        )?;
     }
     stack.pop();
     Ok(())
@@ -470,9 +535,11 @@ fn build_primitive(
 /// ever moves or a caller loads without it.
 fn resolve_material(
     document: &Document,
+    raw: Option<&serde_json::Value>,
     mesh_index: usize,
     primitive: &Primitive<'_>,
     losses: &mut MaterialLosses,
+    pbr_ignored: &mut usize,
 ) -> PrimitiveMaterial {
     let json = document.as_json();
     let Some(index) = json
@@ -492,9 +559,28 @@ fn resolve_material(
         .materials()
         .nth(index)
         .expect("index is bounds-checked against document.materials above");
-    let factor = material.pbr_metallic_roughness().base_color_factor();
+    let metallic_roughness = material.pbr_metallic_roughness();
+    let factor = metallic_roughness.base_color_factor();
     let Some((color, alpha)) = validate_factor(factor, losses) else {
         return PrimitiveMaterial::Unusable;
+    };
+    // ADR-0039 D4: `rvt` 0.24.0 writes `metallicFactor`/`roughnessFactor` for
+    // every material, derived heuristically from the material **name** (its
+    // `src/ifc/pbr.rs`), so they are read as PBR scalars and reported as a
+    // heuristic. A material that declares neither keeps `pbr: None` — no glTF
+    // spec default is substituted. An unusable pair drops the whole PBR
+    // channel and is counted; it is never clamped into a plausible value.
+    let pbr = if declares_pbr_factor(raw, index) {
+        let factors = validate_pbr_factors(
+            metallic_roughness.metallic_factor(),
+            metallic_roughness.roughness_factor(),
+        );
+        if factors.is_none() {
+            *pbr_ignored += 1;
+        }
+        factors
+    } else {
+        None
     };
     // glTF's default `alphaMode` is OPAQUE, where the alpha value is ignored;
     // MASK is a cutout, not a translucency, and has no `Mesh` equivalent, so it
@@ -507,6 +593,7 @@ fn resolve_material(
         color,
         opacity,
         alpha_chosen: opacity.is_some() && alpha_is_chosen(&material),
+        pbr,
     })
 }
 

@@ -9,7 +9,7 @@ use std::io::{Cursor, Write};
 use std::path::Path;
 use std::sync::Arc;
 
-use cad_domain::{CadError, DatabaseId, DocumentId, SupportStatus};
+use cad_domain::{CadError, DatabaseId, DocumentId, MeshPbr, SupportStatus};
 use cad_import_core::{detect_format, DrawingFormat, ImportLimits, ImportRequest};
 use serde_json::{json, Value};
 
@@ -687,8 +687,12 @@ fn a_glb_without_materials_keeps_every_entity_bylayer() {
     for placed in &scene.meshes {
         assert_eq!(placed.color, None);
         assert_eq!(placed.opacity, None);
+        // No material means no declared PBR either: never a spec default.
+        assert_eq!(placed.mesh.pbr, None);
     }
     assert!(scene.material_losses.is_empty());
+    assert_eq!(scene.pbr_meshes, 0);
+    assert_eq!(scene.pbr_ignored, 0);
 }
 
 // ---- Unit 1: rvt -> GLB --------------------------------------------------
@@ -977,3 +981,5 @@ fn cfb_with(streams: &[(&str, &[u8])]) -> Vec<u8> {
     }
     cursor.into_inner()
 }
+
+mod pbr;

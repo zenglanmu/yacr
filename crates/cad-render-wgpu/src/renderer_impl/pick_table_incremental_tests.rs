@@ -19,6 +19,9 @@ fn gpu_batch(pick_key: u32, sources: Vec<SelectionRef>) -> GpuBatch {
     GpuBatch {
         uvs: None,
         texture: None,
+        pbr: None,
+        tangents: None,
+        has_tangents: false,
         vertices: None,
         vertex_count: 0,
         normals: None,

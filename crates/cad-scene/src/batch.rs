@@ -84,6 +84,92 @@ impl RenderConic {
     }
 }
 
+/// The PBR channels a mesh batch draws with (ADR-0039 D6).
+///
+/// This is the GPU-facing form of [`cad_domain::MeshPbr`]: the `f64` domain
+/// values are narrowed to `f32` and the four document texture keys become
+/// [`ResourceKey`]s (exactly like [`RenderBatch::texture`]). It exists **only**
+/// when the domain mesh declared PBR — `None` means "the source declared no
+/// PBR", never "the default material" (a glTF material with only a base colour
+/// stays on the unlit `mesh_textured` path).
+///
+/// Absent texture slots are **channel-disabled**: the renderer binds the exact
+/// multiplicative identity for that slot (white for base colour / occlusion,
+/// black for emissive, flat `(0.5, 0.5, 1)` for the normal map), so a missing
+/// channel is a mathematically neutral sample, not fabricated data.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RenderPbr {
+    /// Metallic factor in `[0, 1]`.
+    pub metallic: f32,
+    /// Roughness factor in `[0, 1]`.
+    pub roughness: f32,
+    /// **Linear** RGB emissive factor, each component in `[0, 1]`.
+    pub emissive: [f32; 3],
+    /// Ambient-occlusion strength in `[0, 1]`.
+    pub occlusion_strength: f32,
+    /// Metallic-roughness map key (`g` = roughness, `b` = metallic), or `None`.
+    pub metallic_roughness: Option<ResourceKey>,
+    /// Tangent-space normal map key (UV0), or `None`.
+    pub normal: Option<ResourceKey>,
+    /// Emissive map key (sRGB), or `None`.
+    pub emissive_texture: Option<ResourceKey>,
+    /// Ambient-occlusion map key (`r`), or `None`.
+    pub occlusion: Option<ResourceKey>,
+}
+
+impl RenderPbr {
+    /// Every distinct texture key this material references (four slots, so at
+    /// most four entries; slot order, not sorted).
+    pub fn texture_keys(&self) -> impl Iterator<Item = &ResourceKey> {
+        [
+            &self.metallic_roughness,
+            &self.normal,
+            &self.emissive_texture,
+            &self.occlusion,
+        ]
+        .into_iter()
+        .flatten()
+    }
+
+    /// `true` when no texture slot is set (scalar factors only).
+    pub fn has_textures(&self) -> bool {
+        self.texture_keys().next().is_some()
+    }
+
+    /// `true` when the shader needs a per-vertex tangent frame: only the normal
+    /// map perturbs a normal, so only it requires tangents (ADR-0039 D6). The
+    /// renderer generates them at pack time; a batch without them draws with the
+    /// normal-map channel disabled.
+    pub fn needs_tangents(&self) -> bool {
+        self.normal.is_some()
+    }
+
+    /// Bytes of the four texture keys' UTF-8 strings (safe relative names, so
+    /// bounded and exact).
+    pub fn key_bytes(&self) -> usize {
+        self.texture_keys().map(|key| key.as_str().len()).sum()
+    }
+
+    /// Tangent-stream bytes for a batch of `vertex_count` vertices: one
+    /// `Float32x4` per vertex, and only when the material needs tangents.
+    pub fn tangent_bytes(&self, vertex_count: usize) -> usize {
+        if self.needs_tangents() {
+            vertex_count * TANGENT_STRIDE as usize
+        } else {
+            0
+        }
+    }
+
+    /// CPU/upload bytes this material adds beyond the mesh geometry: the four
+    /// key strings plus the tangent stream when the normal map needs one.
+    pub fn approx_bytes(&self, vertex_count: usize) -> usize {
+        self.key_bytes() + self.tangent_bytes(vertex_count)
+    }
+}
+
+/// Bytes of one packed tangent: `Float32x4` (`xyz` = tangent, `w` = handedness).
+pub const TANGENT_STRIDE: u32 = 16;
+
 /// A GPU-ready batch. `vertices` are relative to `local_origin`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RenderBatch {
@@ -101,12 +187,13 @@ pub struct RenderBatch {
     pub colors: Vec<[f32; 3]>,
     /// Per-vertex UV0 in texture space, one entry per `vertices` entry.
     ///
-    /// Only a batch with a [`Self::texture`] carries UVs: an untextured batch
-    /// keeps this empty (its UVs, if a source had any, would be unreadable by the
-    /// GPU anyway). The invariant is therefore
-    /// `texture.is_some() ⇒ uvs.len() == vertices.len()`, and otherwise both are
-    /// empty; [`SceneCache::build`] sanitises a violating mesh into the untextured
-    /// form instead of panicking (ADR-0038 D8).
+    /// Only a batch with a sampler carries UVs — the base-colour texture
+    /// ([`Self::texture`], ADR-0038 D8) or any surviving PBR map (ADR-0039 D6).
+    /// An untextured, non-PBR batch keeps this empty (its UVs, if a source had
+    /// any, would be unreadable by the GPU anyway). The invariant is
+    /// `(texture.is_some() || pbr has a texture) ⇒ uvs.len() == vertices.len()`,
+    /// and otherwise both are empty; [`SceneCache::build`] sanitises a violating
+    /// mesh into the untextured form instead of panicking.
     pub uvs: Vec<[f32; 2]>,
     /// The document-owned base-colour texture key, or `None` for an untextured
     /// batch.
@@ -118,6 +205,20 @@ pub struct RenderBatch {
     /// bind one uniform for the whole draw and cannot express a per-batch texture
     /// (ADR-0038 D8 — a documented batching regression, not a silent one).
     pub texture: Option<ResourceKey>,
+    /// The declared PBR channel set, or `None` when the source declared no PBR
+    /// material (ADR-0039 D6).
+    ///
+    /// A batch with `pbr.is_some()` is drawn through the separate `mesh_pbr`
+    /// channel: it is never flat-merged into a shared vertex stream and never
+    /// enters the pulled mesh class (both bake one uniform per draw and cannot
+    /// express a per-batch PBR material). That is a documented batching
+    /// regression, exactly like the ADR-0038 D8 texture rule.
+    ///
+    /// Sanitised by [`SceneCache::build`]: a non-finite or out-of-range scalar
+    /// drops the whole `pbr` (there is no honest partial value); a PBR texture
+    /// slot without a non-empty UV0 stream drops just that key and keeps the
+    /// scalar factors.
+    pub pbr: Option<RenderPbr>,
     /// Triangle topology indices (`[i0, i1, i2]` into `vertices`). Empty for
     /// line topologies; for meshes it lets the renderer index rather than repeat
     /// vertices.
@@ -211,6 +312,12 @@ impl RenderBatch {
             + self.uvs.len() * 8
             + self.indices.len() * 12
             + self.conics.len() * std::mem::size_of::<RenderConic>()
+            // PBR: the four texture-key strings plus the generated tangent stream
+            // (16 B per vertex when the normal map needs a tangent frame).
+            + self
+                .pbr
+                .as_ref()
+                .map_or(0, |pbr| pbr.approx_bytes(self.vertices.len()))
     }
 
     /// The exact packed GPU upload size of this batch, in bytes.
@@ -255,13 +362,33 @@ impl RenderBatch {
         // Textured meshes upload one `Float32x2` per vertex; untextured batches
         // upload no UV buffer at all (this is exactly 0 for them).
         let uv_bytes = self.uvs.len() * 8;
-        positions + normals + edges + triangle_index_bytes + vertex_color_bytes + uv_bytes
+        // A PBR batch additionally uploads a `Float32x4` tangent stream (16 B per
+        // vertex) when its normal map needs a tangent frame; the four texture-key
+        // strings are charged too, so the residency accounting covers the whole
+        // material record (ADR-0039 D6).
+        let pbr_bytes = self
+            .pbr
+            .as_ref()
+            .map_or(0, |pbr| pbr.approx_bytes(self.vertices.len()));
+        positions
+            + normals
+            + edges
+            + triangle_index_bytes
+            + vertex_color_bytes
+            + uv_bytes
+            + pbr_bytes
     }
 
     /// Vertex-space bytes: positions, normals and edge positions (12 bytes each),
-    /// plus UV0 (8 bytes) for a textured batch.
+    /// plus UV0 (8 bytes) for a textured batch, plus the PBR material record
+    /// (four key strings and the 16-byte tangent stream when one is generated).
     pub fn vertex_bytes(&self) -> usize {
-        (self.vertices.len() + self.normals.len() + self.edges.len()) * 12 + self.uvs.len() * 8
+        (self.vertices.len() + self.normals.len() + self.edges.len()) * 12
+            + self.uvs.len() * 8
+            + self
+                .pbr
+                .as_ref()
+                .map_or(0, |pbr| pbr.approx_bytes(self.vertices.len()))
     }
 
     /// World-space centroid used as the transparent-pass depth-sort key.
@@ -313,10 +440,12 @@ impl RenderBatch {
 ///
 /// This is the single source of truth the host uses before
 /// `Renderer::upload_mesh_textures`: it walks the batches it already holds
-/// instead of keeping a second texture table that could drift. The result is
+/// instead of keeping a second texture table that could drift. A batch
+/// contributes its base-colour key plus the four PBR slots it declared
+/// (metallic-roughness, normal, emissive, occlusion — ADR-0039 D7). The result is
 /// sorted (a [`BTreeSet`] first) so an upload report, a diagnostic listing and a
-/// test assertion are all deterministic; an untextured scene yields an empty
-/// vector.
+/// test assertion are all deterministic; an untextured, non-PBR scene yields an
+/// empty vector.
 pub fn mesh_texture_keys<'a>(
     batches: impl IntoIterator<Item = &'a RenderBatch>,
 ) -> Vec<ResourceKey> {
@@ -324,6 +453,11 @@ pub fn mesh_texture_keys<'a>(
     for batch in batches {
         if let Some(texture) = &batch.texture {
             keys.insert(texture.clone());
+        }
+        if let Some(pbr) = &batch.pbr {
+            for key in pbr.texture_keys() {
+                keys.insert(key.clone());
+            }
         }
     }
     keys.into_iter().collect()

@@ -51,12 +51,12 @@
   （`=28.2.0`），未启用额外 feature；**上游文件均未修改**（未打补丁、未复制其源码）。MPL-2.0
   是文件级 copyleft：本仓库不作任何修改，仅以编译产物形式链接；其源码可从上游与 crates.io
   取得。其传递依赖的实际版本与许可证见 Cargo.lock，分发前需做完整依赖审计。
-- rvt 0.24.0：Autodesk Revit（`.rvt`/`.rte`/`.rfa`/`.rft`）的 clean-room 读取器与
+- rvt 0.25.0：Autodesk Revit（`.rvt`/`.rte`/`.rfa`/`.rft`）的 clean-room 读取器与
   IFC4/glTF/plan-SVG 导出器，**Apache-2.0**，上游 <https://github.com/DrunkOnJava/rvt-rs>。
-  仅由 `cad-import-rvt` 依赖；版本在 workspace 中**精确固定**（`=0.24.0`），未启用额外
-  feature。**源码有本地补丁**：上游 0.24.0 的一份完整副本以固定路径 `vendor/rvt` 引入
+  仅由 `cad-import-rvt` 依赖；版本在 workspace 中**精确固定**（`=0.25.0`），未启用额外
+  feature。**源码有本地补丁**：上游 0.25.0 的一份完整副本以固定路径 `vendor/rvt` 引入
   （Apache-2.0 允许修改与再分发），只改 `src/ifc/gltf.rs` 的透明度选择（材质来源标记 `extras`
-  与 material 索引越界过滤都已包含在上游 0.24.0）；改动、
+  自上游 0.20.0、material 索引越界过滤自 0.24.0 起已包含在上游 0.25.0）；改动、
   理由、测试与移除条件见 `docs/rvt-patches.md` 与 ADR-0035，补丁文件本身随仓库分发。
   它是 **preview** 读取器：2008–2023 的构件体是包围盒，2024/2025 为 `partial`，
   2026/2027 为 `experimental`，家族文件没有几何；本仓库不把其输出用于测量。

@@ -14,6 +14,7 @@ fn batch(topology: RenderTopology, vertices: Vec<[f32; 3]>, alpha: f32) -> cad_s
     cad_scene::RenderBatch {
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
         conics: Vec::new(),
         local_origin: cad_domain::Point3 {
             x: 0.0,

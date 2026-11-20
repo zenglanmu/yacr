@@ -214,6 +214,11 @@ impl Renderer {
         if existing.draw_order != batch.draw_order {
             return Err(BatchOverwriteRefusal::DrawOrderChanged);
         }
+        // A PBR batch's tangent frame was generated from its positions + UV0 at
+        // pack time; an in-place rewrite cannot regenerate it (ADR-0039 D6).
+        if existing.pbr.is_some() || batch.pbr.is_some() {
+            return Err(BatchOverwriteRefusal::PbrNotUpdatable);
+        }
         // A merged mesh chunk's member vertex offset is not recorded on its run,
         // so no exact in-place rewrite is provable. Refuse by name.
         if !existing.mesh_runs.is_empty() {

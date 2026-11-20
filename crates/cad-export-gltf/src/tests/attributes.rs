@@ -248,6 +248,7 @@ fn partially_present_normals_and_colors_are_dropped_and_reported() {
         colors: vec![[1, 2, 3]],
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
     };
     let database = mesh_database(mesh);
     let output = export(GltfContainer::Glb, &database);

@@ -797,6 +797,8 @@ impl HatchGeometry {
             // texture parameterisation.
             uvs: Vec::new(),
             texture: None,
+            // A hatch fill declares no PBR material (ADR-0039 D1).
+            pbr: None,
         })
     }
 }

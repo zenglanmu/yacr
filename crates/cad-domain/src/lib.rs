@@ -17,6 +17,7 @@ mod multileader_create;
 // The MULTILEADER annotation content kinds and their payloads (block / MText /
 // tolerance), split out for the code-size gate; `multileader` re-exports them.
 mod multileader_content;
+mod pbr;
 pub mod table_entity;
 mod texture;
 pub use block_clip::{validate_clip_depth, BlockClip, ClipDepthError};
@@ -25,6 +26,7 @@ pub use brep::{BrepCurve, BrepData, BrepFace, BrepLoop, BrepPlacement, BrepShell
 pub use hatch_entity::*;
 pub use multileader::*;
 pub use multileader_angle::*;
+pub use pbr::MeshPbr;
 pub use table_entity::*;
 pub use texture::{is_valid_texture_key, TEXTURE_KEY_HEX_LEN, TEXTURE_KEY_MAX_LEN};
 
@@ -495,6 +497,15 @@ pub struct Mesh {
     /// `texture.is_some()` requires a non-empty [`Self::uvs`]; validation refuses
     /// the combination instead of ignoring the texture.
     pub texture: Option<String>,
+    /// The PBR channels the source declared, or `None` for "the source declared
+    /// no PBR" (ADR-0039 D1).
+    ///
+    /// `None` is **not** "the default material": a glTF material that only has a
+    /// base colour stays `None` and keeps the existing shading path, because
+    /// applying glTF's spec defaults would fabricate a look the source never
+    /// asked for. All PBR texture slots are document texture keys sampled through
+    /// UV0, so `pbr` with any texture requires a non-empty [`Self::uvs`].
+    pub pbr: Option<MeshPbr>,
 }
 
 // ---------------------------------------------------------------------------

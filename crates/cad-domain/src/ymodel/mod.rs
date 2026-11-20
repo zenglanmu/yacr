@@ -72,10 +72,15 @@ pub const FORMAT_WRITE: u32 = 1;
 ///
 /// `3` adds mesh UV0 + base-colour textures (ADR-0038 D4): `cad:Mesh` gains
 /// `uvs`/`texture`, and the `textures/<key>` binary entries carry the image
-/// bytes. Those two payload fields are the format's single documented
-/// "absent means empty/None" exception, scoped to `decode_mesh` only, so a
+/// bytes. Those two payload fields are the format's documented
+/// "absent means empty/None" exceptions, scoped to `decode_mesh` only, so a
 /// minor-2 archive still opens; every other missing field remains an error.
-pub const FORMAT_MINOR: u32 = 3;
+///
+/// `4` adds `cad:Mesh.pbr` (ADR-0039 D2): the metallic-roughness scalars and the
+/// four PBR texture keys, as `null` or one nested object. It joins the same
+/// absent-means-`None` exception, so a minor-3 archive still opens; the four
+/// texture slots reuse the existing `textures/<key>` entries.
+pub const FORMAT_MINOR: u32 = 4;
 
 /// Stable failure markers.
 ///

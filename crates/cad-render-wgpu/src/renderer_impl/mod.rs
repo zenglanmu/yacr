@@ -24,6 +24,8 @@ mod masks;
 mod memory;
 mod overlay;
 mod overwrite;
+pub(crate) mod pbr;
+pub(crate) use pbr::PbrVertexLayout;
 mod pipelines;
 mod progressive;
 mod pulled_plan;

@@ -96,6 +96,11 @@ impl Renderer {
         // frame's fallback report: both are derived from the batches just dropped.
         self.mesh_textures.clear();
         self.mesh_texture_fallbacks.clear();
+        // PBR residency follows the batches: the per-set bind groups and the linear
+        // data textures are derived from them. The identity textures stay (they are
+        // constant content).
+        self.pbr_bind_groups.clear();
+        self.pbr_data_textures.clear();
         self.rebuild_lineweight_cache();
         // An explicit full teardown is a document switch/close, not a transient
         // empty resident set: the retained entity-flag request belongs to the

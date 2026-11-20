@@ -30,6 +30,7 @@ fn textured_triangle(corners: [Point3; 3], uvs: [[f64; 2]; 3]) -> Mesh {
         colors: Vec::new(),
         uvs: uvs.to_vec(),
         texture: Some(TEXTURE_KEY.to_owned()),
+        pbr: None,
     }
 }
 
@@ -121,6 +122,7 @@ fn clipped_textured_mesh_keeps_uvs_aligned_when_triangles_are_dropped() {
             [9.25, 9.5],
         ],
         texture: Some(TEXTURE_KEY.to_owned()),
+        pbr: None,
     };
     let clipped = clip_mesh_to_rect(&mesh, [0.0, 0.0], [1.0, 1.0])
         .unwrap()
@@ -161,4 +163,58 @@ fn untextured_mesh_clip_carries_no_uvs_or_texture() {
         .expect("inside");
     assert!(clipped.uvs.is_empty());
     assert!(clipped.texture.is_none());
+}
+
+// ---- PBR channel set through the rebuild paths (ADR-0039 D6) -------------
+
+fn pbr_material() -> cad_domain::MeshPbr {
+    cad_domain::MeshPbr {
+        metallic: 0.25,
+        roughness: 0.6,
+        emissive: [0.1, 0.05, 0.0],
+        occlusion_strength: 0.75,
+        metallic_roughness_texture: Some(TEXTURE_KEY.to_owned()),
+        normal_texture: Some("0123456789abcdef0123456789abcdef.jpg".to_owned()),
+        emissive_texture: None,
+        occlusion_texture: Some("fedcba9876543210fedcba9876543210.png".to_owned()),
+    }
+}
+
+#[test]
+fn transformed_mesh_keeps_its_pbr_channel_set() {
+    let mut mesh = textured_triangle(
+        [p(0.0, 0.0), p(2.0, 0.0), p(0.0, 2.0)],
+        [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+    );
+    mesh.pbr = Some(pbr_material());
+    let transformed = crate::transform_mesh(&mesh, &Transform3::translation(p(-7.0, 3.0)));
+    assert_eq!(
+        transformed.pbr, mesh.pbr,
+        "a transform carries the PBR material verbatim (ADR-0039 D6)"
+    );
+}
+
+#[test]
+fn clipped_mesh_keeps_its_pbr_channel_set() {
+    let mut mesh = textured_triangle(
+        [p(-0.5, -0.5), p(0.5, -0.5), p(0.0, 0.5)],
+        [[0.25, 0.25], [0.75, 0.25], [0.5, 0.75]],
+    );
+    mesh.pbr = Some(pbr_material());
+    let clipped = clip_mesh_to_rect(&mesh, [0.0, 0.0], [1.0, 1.0])
+        .unwrap()
+        .expect("the triangle is inside the window");
+    assert_eq!(
+        clipped.pbr, mesh.pbr,
+        "clipping removes triangles, never the PBR material"
+    );
+
+    let clip = PaperClip::rect([-1.0, -1.0], [1.0, 1.0]);
+    let polygon_clipped = clip_mesh_to_polygon(&mesh, &clip)
+        .unwrap()
+        .expect("the triangle overlaps the polygon");
+    assert_eq!(
+        polygon_clipped.pbr, mesh.pbr,
+        "the polygon clip carries the PBR material too"
+    );
 }

@@ -142,6 +142,7 @@ fn mesh_maps_to_a_polyface_mesh_and_reports_the_drop() {
         colors: vec![[255, 0, 0]; 3],
         uvs: Vec::new(),
         texture: None,
+        pbr: None,
     };
     let (bytes, report) = export_one(SemanticGeometry::Mesh(mesh));
     match &read_entities(&bytes)[0] {
