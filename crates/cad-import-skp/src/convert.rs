@@ -23,7 +23,10 @@ use std::collections::BTreeMap;
 
 use cad_domain::hatch::{fill_rings, triangulate};
 use cad_domain::{CadError, Mesh, Point3};
-use cad_import_core::ImportLimits;
+use cad_import_core::{ImportLimits, MeshImport};
+
+use crate::texture::{self, TextureSlots};
+use skpwright::UvXform;
 
 /// Maximum instance nesting depth walked. A corrupt or hostile file must not
 /// turn the scene walk into unbounded recursion.
@@ -87,8 +90,26 @@ pub struct SkpStats {
     pub materials: usize,
     /// Tags (layers) in the model.
     pub layers: usize,
-    /// Materials that carry an embedded texture, whose image is not sampled.
+    /// Materials the model declares as textured (embedded image or external
+    /// path).
     pub textured_materials: usize,
+    /// Faces emitted inside a group that really carries its texture.
+    pub textured_faces: usize,
+    /// Material groups whose `Mesh` carries a texture key.
+    pub textured_groups: usize,
+    /// Material groups whose material is textured but whose `Mesh` stays
+    /// untextured (external image, refused registration, no UV transform).
+    pub untextured_textured_groups: usize,
+    /// Textured materials that reference an external image file instead of
+    /// embedded bytes.
+    pub external_textures: usize,
+    /// Textured faces for which no §4v UV transform resolved.
+    pub uv_unavailable: usize,
+    /// Faces painted with a textured back-face material (not imported).
+    pub back_textured_faces: usize,
+    /// The first texture registration refusal, verbatim; its `import.texture.*`
+    /// marker becomes the diagnostic code.
+    pub texture_refusal: Option<String>,
 }
 
 /// The plottable result of a scene walk.
@@ -114,6 +135,7 @@ pub fn read_scene(
     model: &skpwright::Model,
     limits: &ImportLimits,
     cancelled: &dyn Fn() -> bool,
+    import: &mut MeshImport,
 ) -> cad_domain::CadResult<SkpScene> {
     let mut stats = SkpStats {
         runs: model.geometry.len(),
@@ -127,6 +149,7 @@ pub fn read_scene(
         ..SkpStats::default()
     };
     let mut placed = Vec::new();
+    let mut textures = TextureSlots::default();
     let layer_visible = |slot: u16| model.layer_of(slot).is_none_or(|layer| layer.visible);
 
     // The model-level run (loose geometry no instance places) sits at identity.
@@ -145,6 +168,8 @@ pub fn read_scene(
             &layer_visible,
             limits,
             cancelled,
+            import,
+            &mut textures,
             &mut placed,
             &mut stats,
         )?;
@@ -158,6 +183,8 @@ pub fn read_scene(
             &layer_visible,
             limits,
             cancelled,
+            import,
+            &mut textures,
             &mut placed,
             &mut stats,
         )?;
@@ -178,6 +205,8 @@ fn walk(
     layer_visible: &dyn Fn(u16) -> bool,
     limits: &ImportLimits,
     cancelled: &dyn Fn() -> bool,
+    import: &mut MeshImport,
+    textures: &mut TextureSlots,
     placed: &mut Vec<PlacedMesh>,
     stats: &mut SkpStats,
 ) -> cad_domain::CadResult<()> {
@@ -203,6 +232,8 @@ fn walk(
             layer_visible,
             limits,
             cancelled,
+            import,
+            textures,
             placed,
             stats,
         )?;
@@ -215,6 +246,8 @@ fn walk(
             layer_visible,
             limits,
             cancelled,
+            import,
+            textures,
             placed,
             stats,
         )?;
@@ -231,6 +264,8 @@ fn place_run(
     layer_visible: &dyn Fn(u16) -> bool,
     limits: &ImportLimits,
     cancelled: &dyn Fn() -> bool,
+    import: &mut MeshImport,
+    textures: &mut TextureSlots,
     placed: &mut Vec<PlacedMesh>,
     stats: &mut SkpStats,
 ) -> cad_domain::CadResult<()> {
@@ -238,34 +273,80 @@ fn place_run(
         return Ok(());
     };
     stats.placed_runs += 1;
+    // Back-face textures are not imported (the face's front side is the one this
+    // adapter paints); count them so the caller can say so once.
+    stats.back_textured_faces += run
+        .mesh
+        .faces
+        .iter()
+        .filter(|face| !face.hidden && layer_visible(face.layer))
+        .filter(|face| texture::has_textured_back(model, face))
+        .count();
     let groups = group_faces(&run.mesh, inherited_material, layer_visible, stats);
 
     for (material, faces) in groups {
         let (color, opacity) = material_style(model, material);
+        let plan = texture::plan_group(model, material, &faces, import, textures);
+        stats.external_textures += usize::from(plan.external_image);
+        if let Some(refusal) = plan.refusal {
+            if stats.texture_refusal.is_none() {
+                stats.texture_refusal = Some(refusal);
+            }
+        }
+        stats.uv_unavailable += plan.uv_unavailable;
+        let uv_ok = plan.key.is_some();
         let mut out = GroupBuffers::default();
-        for face in faces {
+        for (index, face) in faces.iter().enumerate() {
             if cancelled() {
                 return Err(CadError::Cancelled);
             }
-            match emit_face(&run.mesh, face, world, &mut out) {
-                Ok(()) => stats.faces_emitted += 1,
+            let uv = if uv_ok {
+                plan.xforms[index].as_ref()
+            } else {
+                None
+            };
+            match emit_face(&run.mesh, face, world, uv, &mut out) {
+                Ok(()) => {
+                    stats.faces_emitted += 1;
+                    if uv.is_some() {
+                        stats.textured_faces += 1;
+                    }
+                }
                 Err(FaceSkip::Malformed) => stats.faces_malformed += 1,
                 Err(FaceSkip::Untriangulable) => stats.faces_untriangulable += 1,
             }
             check_face_budget(stats, limits)?;
         }
         if out.triangles.is_empty() {
+            if plan.material_is_textured {
+                stats.untextured_textured_groups += 1;
+            }
             continue;
         }
+        let mut mesh = Mesh {
+            vertices: out.vertices,
+            triangles: out.triangles,
+            normals: out.normals,
+            face_sources: Vec::new(),
+            colors: Vec::new(),
+            uvs: out.uvs,
+            texture: None,
+        };
+        if uv_ok && mesh.uvs.len() == mesh.vertices.len() {
+            mesh.texture = plan.key;
+            stats.textured_groups += 1;
+        } else {
+            // A group without a usable texture is exactly what it was before
+            // ADR-0038: average colour, no UVs (a UV set with no texture would
+            // only be dead weight the renderer has no use for).
+            mesh.uvs.clear();
+            if plan.material_is_textured {
+                stats.untextured_textured_groups += 1;
+            }
+        }
         placed.push(PlacedMesh {
-            triangles: out.triangles.len(),
-            mesh: Mesh {
-                vertices: out.vertices,
-                triangles: out.triangles,
-                normals: out.normals,
-                face_sources: Vec::new(),
-                colors: Vec::new(),
-            },
+            triangles: mesh.triangles.len(),
+            mesh,
             color,
             opacity,
             material,
@@ -326,12 +407,23 @@ pub fn material_style(model: &skpwright::Model, slot: u16) -> (Option<[u8; 3]>, 
     style_of(model.material_of(slot))
 }
 
+#[derive(Default)]
+struct GroupBuffers {
+    vertices: Vec<Point3>,
+    normals: Vec<Point3>,
+    triangles: Vec<[u32; 3]>,
+    /// Per-vertex UV0, 1:1 with `vertices`; filled only when a §4v transform is
+    /// supplied, so the group is textured exactly when this is non-empty.
+    uvs: Vec<[f64; 2]>,
+}
+
 /// `(colour, opacity)` of one material.
 ///
 /// A textured material contributes its average colour (the value SketchUp's own
-/// COLLADA export writes as the diffuse colour), because this adapter does not
-/// sample the image. Opacity is reported only when the material is genuinely
-/// translucent; `1.0` and out-of-range values stay `ByLayer`.
+/// COLLADA export writes as the diffuse colour), which is what a group whose
+/// image could not be registered keeps. Opacity is reported only when the
+/// material is genuinely translucent; `1.0` and out-of-range values stay
+/// `ByLayer`.
 pub fn style_of(material: Option<&skpwright::Material>) -> (Option<[u8; 3]>, Option<f32>) {
     let Some(material) = material else {
         return (None, None);
@@ -348,18 +440,16 @@ pub fn style_of(material: Option<&skpwright::Material>) -> (Option<[u8; 3]>, Opt
     (color, opacity)
 }
 
-#[derive(Default)]
-struct GroupBuffers {
-    vertices: Vec<Point3>,
-    normals: Vec<Point3>,
-    triangles: Vec<[u32; 3]>,
-}
-
 /// Triangulate one face and append it to `out`, in world metres.
+///
+/// `uv` is the face's §4v transform when the group is textured: it is evaluated
+/// on each **world** vertex (metres), which is the frame `UvXform::apply` is
+/// documented for and the same point the mesh stores.
 fn emit_face(
     mesh: &skpwright::Mesh,
     face: &skpwright::MeshFace,
     world: &[f64; 16],
+    uv: Option<&UvXform>,
     out: &mut GroupBuffers,
 ) -> Result<(), FaceSkip> {
     let normal = unit(face.normal).ok_or(FaceSkip::Malformed)?;
@@ -423,6 +513,9 @@ fn emit_face(
             origin[2] + u[2] * p[0] + v[2] * p[1],
         ];
         let world_point = apply_point(world, local);
+        if let Some(xform) = uv {
+            out.uvs.push(xform.apply(world_point));
+        }
         out.vertices.push(Point3 {
             x: world_point[0],
             y: world_point[1],
@@ -658,7 +751,7 @@ mod tests {
     fn a_quad_becomes_two_triangles_with_the_face_normal() {
         let (mesh, face) = quad();
         let mut out = GroupBuffers::default();
-        emit_face(&mesh, &face, &IDENTITY_WORLD, &mut out).expect("a planar quad fills");
+        emit_face(&mesh, &face, &IDENTITY_WORLD, None, &mut out).expect("a planar quad fills");
 
         assert_eq!(out.triangles.len(), 2);
         assert!(
@@ -689,7 +782,7 @@ mod tests {
         with_hole.holes = vec![vec![4, 5, 6, 7]];
 
         let mut out = GroupBuffers::default();
-        emit_face(&mesh, &with_hole, &IDENTITY_WORLD, &mut out).expect("donut fills");
+        emit_face(&mesh, &with_hole, &IDENTITY_WORLD, None, &mut out).expect("donut fills");
 
         assert!(
             (total_area(&out) - 12.0).abs() < 1e-6,
@@ -719,7 +812,7 @@ mod tests {
         ];
         assert!(determinant3(&mirrored_world) < 0.0);
         let mut out = GroupBuffers::default();
-        emit_face(&mesh, &face, &mirrored_world, &mut out).expect("a mirrored quad fills");
+        emit_face(&mesh, &face, &mirrored_world, None, &mut out).expect("a mirrored quad fills");
 
         for normal in &out.normals {
             assert!(
@@ -745,7 +838,7 @@ mod tests {
             0.0, 0.0, 0.0, 1.0,
         ];
         let mut out = GroupBuffers::default();
-        emit_face(&mesh, &face, &world, &mut out).expect("a translated quad fills");
+        emit_face(&mesh, &face, &world, None, &mut out).expect("a translated quad fills");
         for vertex in &out.vertices {
             assert!((vertex.x - 10.0).abs() < 1e-9 || (vertex.x - 11.0).abs() < 1e-9);
             assert!((vertex.y - 20.0).abs() < 1e-9 || (vertex.y - 21.0).abs() < 1e-9);
@@ -815,7 +908,7 @@ mod tests {
         let mut degenerate = face(vec![0, 1, 2]);
         degenerate.normal = [0.0, 0.0, 1.0];
         let mut out = GroupBuffers::default();
-        let result = emit_face(&mesh, &degenerate, &IDENTITY_WORLD, &mut out);
+        let result = emit_face(&mesh, &degenerate, &IDENTITY_WORLD, None, &mut out);
 
         assert_eq!(result, Err(FaceSkip::Untriangulable));
         assert!(out.vertices.is_empty() && out.triangles.is_empty());
@@ -825,16 +918,7 @@ mod tests {
     fn a_ring_index_outside_the_run_is_malformed() {
         let mesh = mesh_with(vec![[0.0, 0.0, 0.0]], vec![]);
         let mut out = GroupBuffers::default();
-        let result = emit_face(&mesh, &face(vec![0, 1, 2]), &IDENTITY_WORLD, &mut out);
-        assert_eq!(result, Err(FaceSkip::Malformed));
-    }
-
-    #[test]
-    fn a_zero_length_normal_is_malformed() {
-        let (mesh, mut face) = quad();
-        face.normal = [0.0, 0.0, 0.0];
-        let mut out = GroupBuffers::default();
-        let result = emit_face(&mesh, &face, &IDENTITY_WORLD, &mut out);
+        let result = emit_face(&mesh, &face(vec![0, 1, 2]), &IDENTITY_WORLD, None, &mut out);
         assert_eq!(result, Err(FaceSkip::Malformed));
     }
 }

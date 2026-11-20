@@ -8,6 +8,8 @@ fn point(x: f64, y: f64, z: f64) -> Point3 {
 
 fn mesh_batch(mirrored: bool) -> RenderBatch {
     RenderBatch {
+        uvs: Vec::new(),
+        texture: None,
         conics: Vec::new(),
         local_origin: point(0.0, 0.0, 0.0),
         topology: RenderTopology::Mesh,

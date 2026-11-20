@@ -46,6 +46,9 @@ pub(super) struct OverlayOutcome {
     /// Renderer-owned transient cursor draws (0 or 1); folded into `draw_calls`
     /// only, never into the committed batch counters.
     pub(super) transient_draws: u64,
+    /// Texture keys a textured overlay batch could not resolve; that batch was
+    /// drawn untextured (never with a placeholder texture).
+    pub(super) mesh_texture_fallbacks: Vec<ResourceKey>,
     pub(super) encode_ms: f64,
     pub(super) set_pipeline_calls: u64,
     pub(super) set_bind_group_calls: u64,
@@ -365,6 +368,7 @@ impl Renderer {
             transparent_batches: plan.transparent.len(),
             invisible_batches: plan.invisible,
             transient_draws: outcome.transient_draws,
+            mesh_texture_fallbacks: outcome.mesh_texture_fallbacks,
             encode_ms: outcome.encode_ms,
             set_pipeline_calls: outcome.encode_state.tally.set_pipeline_calls,
             set_bind_group_calls: outcome.encode_state.tally.set_bind_group_calls,

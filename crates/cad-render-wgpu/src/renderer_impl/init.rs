@@ -37,6 +37,10 @@ impl Renderer {
             mesh_pipeline_mirrored_transparent: None,
             mesh_pipeline_merged: None,
             mesh_pipeline_merged_mirrored: None,
+            mesh_pipeline_textured: None,
+            mesh_pipeline_textured_mirrored: None,
+            mesh_pipeline_textured_transparent: None,
+            mesh_pipeline_textured_mirrored_transparent: None,
             image_pipeline: None,
             mask_pipeline: None,
             mask_frame_pipeline: None,
@@ -92,6 +96,8 @@ impl Renderer {
             masks: Vec::new(),
             mask_skips: Vec::new(),
             image_textures: HashMap::new(),
+            mesh_textures: HashMap::new(),
+            mesh_texture_fallbacks: Vec::new(),
             cursor_transient: None,
             cursor_transient_buffer: None,
             cursor_transient_dirty: false,
@@ -509,6 +515,23 @@ impl Renderer {
                 ],
                 immediate_size: 0,
             });
+        // Textured mesh (ADR-0038 D9): a **separate** pipeline family, so the
+        // untextured `mesh` pipelines keep exactly their previous vertex layouts,
+        // bind groups and draw state. Group 2 is the image pipeline's texture
+        // layout, and the primitive/depth state matches the mesh pair it shadows
+        // (see `create_mesh_textured_pipelines`).
+        let (
+            mesh_pipeline_textured,
+            mesh_pipeline_textured_mirrored,
+            mesh_pipeline_textured_transparent,
+            mesh_pipeline_textured_mirrored_transparent,
+        ) = Self::create_mesh_textured_pipelines(
+            &device,
+            &layout,
+            &flags_layout,
+            &image_texture_layout,
+            self.target_format,
+        );
         let image_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("cad-image-pipeline"),
             layout: Some(&image_pipeline_layout),
@@ -577,6 +600,10 @@ impl Renderer {
         self.masks.clear();
         self.mask_skips.clear();
         self.image_textures.clear();
+        // Mesh textures belong to the dropped device generation too; the host
+        // re-uploads them on its next base change like every other GPU resource.
+        self.mesh_textures.clear();
+        self.mesh_texture_fallbacks.clear();
         self.instance_streams.clear();
         self.arc_streams.clear();
         self.mesh_chunks.clear();
@@ -632,6 +659,11 @@ impl Renderer {
         self.mesh_pipeline_mirrored_transparent = Some(mesh_pipeline_mirrored_transparent);
         self.mesh_pipeline_merged = Some(mesh_pipeline_merged);
         self.mesh_pipeline_merged_mirrored = Some(mesh_pipeline_merged_mirrored);
+        self.mesh_pipeline_textured = Some(mesh_pipeline_textured);
+        self.mesh_pipeline_textured_mirrored = Some(mesh_pipeline_textured_mirrored);
+        self.mesh_pipeline_textured_transparent = Some(mesh_pipeline_textured_transparent);
+        self.mesh_pipeline_textured_mirrored_transparent =
+            Some(mesh_pipeline_textured_mirrored_transparent);
         self.image_pipeline = Some(image_pipeline);
         self.mask_pipeline = Some(mask_pipeline);
         self.mask_frame_pipeline = Some(mask_frame_pipeline);

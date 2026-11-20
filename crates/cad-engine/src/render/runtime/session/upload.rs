@@ -377,9 +377,21 @@ impl CadRenderRuntime {
             let empty = super::super::controller::DecodedImageCache::new();
             let cache = ready.images.as_deref().unwrap_or(&empty);
             let report = renderer.upload_images(ready.base.images(), cache)?;
-            if let Some(reason) = report.diagnostic() {
-                let keys = report
-                    .unresolved
+            // Mesh base-colour textures (ADR-0038 D10) are a separate residency
+            // set resolved from the **same** decoded-image cache: the scene reports
+            // the keys its batches reference, and the renderer uploads exactly
+            // those. A failure here must be as observable as a failed image, so
+            // both reports fold into the one `image_diagnostic` channel. The code
+            // is the shared `image.unresolved` marker; the keys themselves
+            // (`<hex>.png|.jpg`) identify the mesh textures, and a textured batch
+            // whose key failed is additionally drawn untextured (never with a
+            // placeholder) and surfaced by `Renderer::mesh_texture_fallbacks`.
+            let mesh_report = renderer
+                .upload_mesh_textures(&cad_scene::mesh_texture_keys(ready.base.batches()), cache)?;
+            let mut unresolved = report.unresolved.clone();
+            unresolved.extend(mesh_report.unresolved.iter().cloned());
+            if let Some(reason) = report.diagnostic().or_else(|| mesh_report.diagnostic()) {
+                let keys = unresolved
                     .iter()
                     .map(|key| key.as_str())
                     .collect::<Vec<_>>()

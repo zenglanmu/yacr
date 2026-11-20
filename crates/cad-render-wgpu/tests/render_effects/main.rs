@@ -114,6 +114,8 @@ fn camera_3d() -> Camera3d {
 
 fn lines_batch(vertices: Vec<[f32; 3]>) -> RenderBatch {
     RenderBatch {
+        uvs: Vec::new(),
+        texture: None,
         conics: Vec::new(),
         local_origin: Point3 {
             x: 0.0,
@@ -171,6 +173,8 @@ fn quad_mesh(
         [half, -half, 0.0],
     ];
     RenderBatch {
+        uvs: Vec::new(),
+        texture: None,
         conics: Vec::new(),
         local_origin: origin,
         topology: RenderTopology::Mesh,
@@ -411,6 +415,8 @@ fn merged_quad(
         Vec::new()
     };
     RenderBatch {
+        uvs: Vec::new(),
+        texture: None,
         conics: Vec::new(),
         local_origin: Point3 {
             x: origin[0],

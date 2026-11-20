@@ -435,6 +435,8 @@ fn two_face_mesh() -> Mesh {
         normals: Vec::new(),
         face_sources: vec![Some(face("face-a")), Some(face("face-b"))],
         colors: Vec::new(),
+        uvs: Vec::new(),
+        texture: None,
     }
 }
 
@@ -700,6 +702,8 @@ fn wire_body_with_only_edges_is_pickable() {
                     normals: Vec::new(),
                     face_sources: Vec::new(),
                     colors: Vec::new(),
+                    uvs: Vec::new(),
+                    texture: None,
                 },
                 edges: vec![vec![p(-1.0, 0.0, 2.0), p(1.0, 0.0, 2.0)]],
                 tolerance: Some(0.01),

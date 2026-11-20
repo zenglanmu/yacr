@@ -39,6 +39,30 @@ pub(crate) fn mesh_color_layout() -> wgpu::VertexBufferLayout<'static> {
     }
 }
 
+/// Per-vertex UV0 travels in its own vertex buffer (slot 3), and **only** for a
+/// batch that carries a base-colour texture (ADR-0038 D9).
+///
+/// The untextured `mesh` pipelines deliberately keep their three-buffer layout:
+/// a batch without a texture uploads no UV buffer and is drawn through exactly
+/// the same pipeline state as before this feature existed.
+pub(crate) fn mesh_uv_layout() -> wgpu::VertexBufferLayout<'static> {
+    wgpu::VertexBufferLayout {
+        array_stride: 8,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &wgpu::vertex_attr_array![3 => Float32x2],
+    }
+}
+
+/// The packed bytes of a batch's UV0 stream (`Float32x2` per vertex; 8 bytes).
+pub(crate) fn pack_uvs(uvs: &[[f32; 2]]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(uvs.len() * 8);
+    for uv in uvs {
+        bytes.extend_from_slice(&uv[0].to_le_bytes());
+        bytes.extend_from_slice(&uv[1].to_le_bytes());
+    }
+    bytes
+}
+
 // ---------------------------------------------------------------------------
 // Flat-merged mesh runs ("entity = data", second slice)
 // ---------------------------------------------------------------------------
@@ -122,10 +146,18 @@ pub(crate) fn mesh_merged_layout() -> wgpu::VertexBufferLayout<'static> {
 /// transparent mesh keeps its camera-dependent back-to-front order, and a mesh
 /// with no triangles has nothing to draw. `mirrored` is a merge boundary (a
 /// different pipeline), enforced in [`build_mesh_chunks`], not here.
+///
+/// A **textured** batch is never mergeable: the merged path bakes the per-batch
+/// tint into one vertex stream and binds a single uniform for the whole chunk,
+/// which cannot express a per-batch texture (ADR-0038 D8). That exclusion is a
+/// documented batching regression — it costs one draw per textured mesh — not a
+/// silent behaviour change. The pulled mesh class applies the same predicate, so
+/// textured batches stay on the per-batch `mesh_textured` path on every tier.
 pub(crate) fn mesh_batch_is_mergeable(batch: &cad_scene::RenderBatch) -> bool {
     batch.topology == RenderTopology::Mesh
         && !batch.indices.is_empty()
         && classify_alpha(batch.alpha) == AlphaClass::Opaque
+        && batch.texture.is_none()
 }
 
 /// One member batch's triangle range inside a merged mesh chunk.

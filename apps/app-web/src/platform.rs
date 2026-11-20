@@ -272,15 +272,32 @@ impl BrowserResources {
     }
 
     /// The raster-image decision, pure: `Ok` only when the drawing has none.
-    pub fn images_decision(requested: &[String]) -> CadResult<()> {
-        if requested.is_empty() {
-            return Ok(());
+    ///
+    /// `document_textures` is the count of mesh base-colour textures the document
+    /// owns (`cad_db::DrawingDatabase::textures`, ADR-0038 D3). They are decoded
+    /// from database bytes, not files, but this carrier has no image decoder at
+    /// all, so a texture-only drawing must be refused exactly like a file-image
+    /// one instead of drawing untextured silently. With no document textures the
+    /// file-based message is unchanged.
+    pub fn images_decision(requested: &[String], document_textures: usize) -> CadResult<()> {
+        match (requested.is_empty(), document_textures) {
+            (true, 0) => Ok(()),
+            (false, 0) => Err(CadError::Unsupported(format!(
+                "{UNSUPPORTED_RESOURCES}: images: {} referenced image(s); \
+                 no image decoder is wired for this carrier",
+                requested.len()
+            ))),
+            (true, textures) => Err(CadError::Unsupported(format!(
+                "{UNSUPPORTED_RESOURCES}: images: {textures} document texture(s); \
+                 no image decoder is wired for this carrier"
+            ))),
+            (false, textures) => Err(CadError::Unsupported(format!(
+                "{UNSUPPORTED_RESOURCES}: images: {} referenced image(s) and \
+                 {textures} document texture(s); \
+                 no image decoder is wired for this carrier",
+                requested.len()
+            ))),
         }
-        Err(CadError::Unsupported(format!(
-            "{UNSUPPORTED_RESOURCES}: images: {} referenced image(s); \
-             no image decoder is wired for this carrier",
-            requested.len()
-        )))
     }
 }
 
@@ -326,13 +343,18 @@ impl HostResources for BrowserResources {
     }
 
     fn install_images(&self, core: &HostCore, render: &RenderSessionHandle) -> CadResult<()> {
-        let requested = core
+        let (requested, document_textures) = core
             .controller
             .borrow()
             .drawing()
-            .map(|drawing| cad_platform::images::requested_images(drawing.as_ref()))
+            .map(|drawing| {
+                (
+                    cad_platform::images::requested_images(drawing.as_ref()),
+                    drawing.textures().count(),
+                )
+            })
             .unwrap_or_default();
-        Self::images_decision(&requested)?;
+        Self::images_decision(&requested, document_textures)?;
         render.set_images(None);
         Ok(())
     }

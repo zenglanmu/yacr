@@ -17,6 +17,10 @@ impl Renderer {
         self.mesh_pipeline_mirrored_transparent = None;
         self.mesh_pipeline_merged = None;
         self.mesh_pipeline_merged_mirrored = None;
+        self.mesh_pipeline_textured = None;
+        self.mesh_pipeline_textured_mirrored = None;
+        self.mesh_pipeline_textured_transparent = None;
+        self.mesh_pipeline_textured_mirrored_transparent = None;
         self.image_pipeline = None;
         self.image_texture_layout = None;
         self.image_sampler = None;
@@ -32,6 +36,8 @@ impl Renderer {
         self.batches.clear();
         self.images.clear();
         self.image_textures.clear();
+        self.mesh_textures.clear();
+        self.mesh_texture_fallbacks.clear();
         // Drop only the transient cursor's device buffer; the CPU cursor/packed
         // bytes survive and are re-uploaded after the host re-initializes.
         self.cursor_transient_buffer = None;
@@ -121,6 +127,10 @@ impl Renderer {
         self.mesh_pipeline_mirrored_transparent = None;
         self.mesh_pipeline_merged = None;
         self.mesh_pipeline_merged_mirrored = None;
+        self.mesh_pipeline_textured = None;
+        self.mesh_pipeline_textured_mirrored = None;
+        self.mesh_pipeline_textured_transparent = None;
+        self.mesh_pipeline_textured_mirrored_transparent = None;
         self.image_pipeline = None;
         self.image_texture_layout = None;
         self.image_sampler = None;
@@ -136,6 +146,8 @@ impl Renderer {
         self.batches.clear();
         self.images.clear();
         self.image_textures.clear();
+        self.mesh_textures.clear();
+        self.mesh_texture_fallbacks.clear();
         // The transient cursor survives a device loss as CPU input; only its
         // buffer belonged to the lost device.
         self.cursor_transient_buffer = None;

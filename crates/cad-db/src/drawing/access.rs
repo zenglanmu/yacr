@@ -1,5 +1,7 @@
 //! Read-only queries over [`DrawingDatabase`] and the display-state snapshots.
 
+use std::sync::Arc;
+
 use cad_domain::*;
 
 use super::DrawingDatabase;
@@ -202,6 +204,26 @@ impl DrawingDatabase {
 
     pub fn entity_count(&self) -> usize {
         self.entities.len()
+    }
+
+    /// Every document-owned base-colour texture, in key order (ADR-0038 D3).
+    ///
+    /// The bytes belong to the document, not to a file reference: a mesh's
+    /// `texture` names one of these keys and nothing outside the database is
+    /// consulted to resolve it.
+    pub fn textures(&self) -> impl Iterator<Item = (&str, &Arc<[u8]>)> {
+        self.textures
+            .iter()
+            .map(|(key, bytes)| (key.as_str(), bytes))
+    }
+
+    /// The bytes of one texture, or `None` when this document does not carry it.
+    ///
+    /// `None` is the honest "not in this document" answer — never an empty or
+    /// placeholder image — so a renderer can report the missing asset instead of
+    /// sampling something invented.
+    pub fn texture(&self, key: &str) -> Option<&Arc<[u8]>> {
+        self.textures.get(key)
     }
 
     pub fn layer(&self, id: LayerId) -> Option<&Layer> {

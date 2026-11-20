@@ -12,6 +12,8 @@ use crate::report::ReportBuilder;
 
 /// Stable marker: source colours could not be kept for every vertex.
 const COLORS_DROPPED: &str = "export.off.colors_dropped";
+/// Stable marker: a written mesh's base-colour texture has no OFF channel here.
+const TEXTURE_NOT_WRITTEN: &str = "export.off.texture_not_written";
 
 pub(crate) fn write(collected: &Collected, report: &mut ReportBuilder) -> Vec<u8> {
     let write_colors = collected.colors_complete();
@@ -34,6 +36,7 @@ pub(crate) fn write(collected: &Collected, report: &mut ReportBuilder) -> Vec<u8
     out.push_str(if write_colors { "COFF\n" } else { "OFF\n" });
     writeln!(out, "{vertices} {triangles} 0").expect("writing to a String cannot fail");
     for mesh in &collected.meshes {
+        report.texture_not_written(TEXTURE_NOT_WRITTEN, "OFF", mesh);
         for (index, vertex) in mesh.vertices.iter().enumerate() {
             if write_colors {
                 let [red, green, blue] = mesh.colors[index];

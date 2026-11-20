@@ -30,10 +30,14 @@
 //! converted back to the sRGB bytes `cad_db::EntityColor::Explicit` stores
 //! (the exact inverse of `rvt`'s own `colour_material` linearisation, `rvt`
 //! `src/ifc/gltf.rs:828`), and its alpha becomes
-//! `cad_db::EntityTransparency::Explicit` (opacity: `1.0` opaque). `rvt` emits
-//! **no textures at all** — no `images`/`textures`/`samplers`, no `TEXCOORD_0`
-//! — and `cad_domain::Mesh` has no UV channel, so texture loss is a property of
-//! the source and the domain, not a defect of this reader.
+//! `cad_db::EntityTransparency::Explicit` (opacity: `1.0` opaque). `rvt` 0.24.0
+//! emits **no textures at all** — no `images`/`textures`/`samplers`, no
+//! `TEXCOORD_*` — and this reader imports none (ADR-0038 D6 keeps RVT textures
+//! out of phase A because the patch ledger must not grow). A `TEXCOORD_*`
+//! attribute or an `images`/`textures` entry is therefore counted in
+//! [`GlbScene::texture_references`] and reported as
+//! `import.rvt.texture_not_imported`: the only honest reading is that the
+//! vendored writer changed, so the loss is named rather than silently dropped.
 //!
 //! A primitive without a material keeps `ByLayer`, and every unusable material
 //! (out-of-range index, non-finite or out-of-range factor, or conflicting
@@ -145,6 +149,16 @@ pub struct GlbScene {
     pub degenerate_triangles: usize,
     pub normals_dropped: usize,
     pub material_losses: MaterialLosses,
+    /// Texture references the intermediate GLB carries: one per primitive with a
+    /// `TEXCOORD_*` attribute, plus one per document-level `images`/`textures`
+    /// entry.
+    ///
+    /// `rvt` 0.24.0 emits none of these (ADR-0038 D6), so a non-zero count means
+    /// the vendored writer changed. The importer reports it as
+    /// `import.rvt.texture_not_imported` and imports no UVs/texture: decoding the
+    /// images is out of phase-A scope and `vendor/rvt` must not gain a texture
+    /// patch (ADR-0035).
+    pub texture_references: usize,
     /// Meshes whose stored opacity the exporter **chose** (`extras.alphaSource =
     /// "rvt-rs"`, ADR-0035) rather than read for the body's own single material:
     /// a category's default alpha (e.g. `IFCSPACE` 0.12), or a body drawn whole
@@ -194,6 +208,10 @@ pub fn read_glb(
     };
 
     let mut scene_out = GlbScene::default();
+    // ADR-0038 D6: `rvt` 0.24.0 writes no `images`/`textures`; seeing them means
+    // the vendored writer changed. Count them once per document and report the
+    // loss instead of ignoring the entries.
+    scene_out.texture_references += document.images().len() + document.textures().len();
     let mut stack = Vec::new();
     for node in scene.nodes() {
         if cancelled() {
@@ -261,6 +279,15 @@ fn visit_node(
         for primitive in mesh.primitives() {
             if cancelled() {
                 return Err(CadError::Cancelled);
+            }
+            // ADR-0038 D6: no `TEXCOORD_*` is emitted by `rvt` 0.24.0 and none
+            // is imported here, so a present attribute is counted (once per
+            // visited primitive instance) rather than silently ignored.
+            if primitive
+                .attributes()
+                .any(|(semantic, _)| matches!(semantic, Semantic::TexCoords(_)))
+            {
+                out.texture_references += 1;
             }
             if primitive.mode() == Mode::Triangles {
                 build_primitive(blob, &primitive, &world, &mut built)?;

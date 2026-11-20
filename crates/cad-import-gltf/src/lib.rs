@@ -23,8 +23,17 @@
 //!   RGB becomes sRGB bytes while a translucent vertex alpha cannot be stored by
 //!   the neutral mesh, so it is dropped and reported
 //!   ([`DIAG_VERTEX_ALPHA_DROPPED`]);
-//! * a base-colour texture is not sampled: the factor is used and the loss is
-//!   reported ([`DIAG_TEXTURE_NOT_IMPORTED`]);
+//! * the base-colour texture **is** imported when the document carries its bytes
+//!   (a GLB buffer view or a base64 `data:` URI): the UV set its `texCoord` names
+//!   becomes UV0 and the encoded PNG/JPEG becomes a document-owned texture
+//!   (`cad_db::DrawingDatabase::textures`). A texture whose bytes live in an
+//!   external file cannot be read by a bytes-only import, so the geometry keeps
+//!   its UVs, no texture is referenced and the loss is reported
+//!   ([`DIAG_EXTERNAL_IMAGE`], [`DIAG_TEXTURE_NOT_IMPORTED`]); an unusable UV set
+//!   is dropped as a whole ([`DIAG_UVS_DROPPED`]) rather than guessed at. Other
+//!   `TEXCOORD_n` sets ([`DIAG_UV_SET_IGNORED`]), `KHR_texture_transform`
+//!   ([`DIAG_TEXTURE_TRANSFORM_NOT_IMPORTED`]) and the non-base-colour channels
+//!   ([`DIAG_TEXTURE_CHANNEL_NOT_IMPORTED`]) are reported, never silent;
 //! * skins, animations, cameras and meshes outside the imported scene are
 //!   reported, never silently ignored.
 //!
@@ -38,7 +47,11 @@
 //! alpha is honoured through `alphaMode`: `OPAQUE` is imported opaque, `BLEND`
 //! keeps an alpha below `1.0`, and `MASK` cutouts are imported opaque with
 //! [`DIAG_ALPHA_MASK_NOT_IMPORTED`] because the neutral mesh cannot represent
-//! them. Metallic/roughness, normal maps and every texture channel are not
+//! them. The linear RGB `baseColorFactor` is *not* baked into a textured
+//! primitive's geometry when that primitive has no `COLOR_0`: it stays the
+//! explicit entity colour, which the renderer multiplies with the sampled
+//! texture (`texture × vertex colour × entity colour`) exactly once. Metallic/
+//! roughness, normal maps and every non-base-colour texture channel are not
 //! represented in `cad-db`.
 //!
 //! A document whose `asset.version` is not `2.x` is refused by name
@@ -46,6 +59,7 @@
 
 mod buffers;
 mod scene;
+mod texture;
 
 #[cfg(test)]
 mod tests;
@@ -103,8 +117,22 @@ pub const DIAG_NORMALS_DROPPED: &str = "import.gltf.normals_dropped";
 pub const DIAG_COLORS_DROPPED: &str = "import.gltf.colors_dropped";
 /// Stable diagnostic code: translucent vertex alpha has no neutral-mesh channel.
 pub const DIAG_VERTEX_ALPHA_DROPPED: &str = "import.gltf.vertex_alpha_dropped";
-/// Stable diagnostic code: a base-colour texture is not sampled.
+/// Stable diagnostic code: a base-colour texture's bytes are not in the document.
 pub const DIAG_TEXTURE_NOT_IMPORTED: &str = "import.gltf.texture_not_imported";
+/// Stable diagnostic code: a base-colour image names an external file.
+pub const DIAG_EXTERNAL_IMAGE: &str = "import.gltf.external_image_unavailable";
+/// Stable diagnostic code (note): non-base-colour texture channels exist.
+pub const DIAG_TEXTURE_CHANNEL_NOT_IMPORTED: &str = "import.gltf.texture_channel_not_imported";
+/// Stable diagnostic code: a base-colour `KHR_texture_transform` was ignored.
+pub const DIAG_TEXTURE_TRANSFORM_NOT_IMPORTED: &str = "import.gltf.texture_transform_not_imported";
+/// Stable diagnostic code: a UV set was unusable and dropped as a whole.
+pub const DIAG_UVS_DROPPED: &str = "import.gltf.uvs_dropped";
+/// Stable diagnostic code (note): only the base-colour texture's UV set is read.
+pub const DIAG_UV_SET_IGNORED: &str = "import.gltf.uv_set_ignored";
+/// Stable diagnostic code: an image's `data:` payload is not valid base64.
+pub const DIAG_IMAGE_BASE64: &str = "import.gltf.image_base64";
+/// Stable diagnostic code: an image's buffer view lies outside its buffer.
+pub const DIAG_IMAGE_OUT_OF_RANGE: &str = "import.gltf.image_out_of_range";
 /// Stable diagnostic code: an unusable `baseColorFactor` was not applied.
 pub const DIAG_MATERIAL_IGNORED: &str = "import.gltf.material_ignored";
 /// Stable diagnostic code: an `alphaMode` of `MASK` (cutout) is imported opaque.
@@ -160,24 +188,25 @@ pub fn sniff(bytes: &[u8]) -> bool {
     )
 }
 
-/// Refuse a document whose `asset.version` is not glTF 2.x before any parse.
+/// The document JSON of a `.gltf`, or the JSON chunk of a GLB.
 ///
-/// For a GLB the JSON chunk is extracted from the container; for a JSON
-/// `.gltf` the input bytes are the document. A missing or non-string
-/// `asset.version` is the same named refusal as a `1.x` one.
-fn check_asset_version(bytes: &[u8]) -> CadResult<()> {
+/// A GLB wraps the document in a chunked container, so the JSON is extracted from
+/// it; for a JSON `.gltf` the input bytes are the document.
+fn document_json(bytes: &[u8]) -> CadResult<std::borrow::Cow<'_, [u8]>> {
     if bytes.starts_with(b"glTF") {
         let glb = gltf::binary::Glb::from_slice(bytes)
             .map_err(|error| CadError::CorruptData(format!("{DIAG_PARSE}: {error}")))?;
-        check_json_asset_version(&glb.json)
+        Ok(glb.json)
     } else {
-        check_json_asset_version(bytes)
+        Ok(std::borrow::Cow::Borrowed(bytes))
     }
 }
 
-fn check_json_asset_version(json: &[u8]) -> CadResult<()> {
-    let document: serde_json::Value = serde_json::from_slice(json)
-        .map_err(|error| CadError::CorruptData(format!("{DIAG_PARSE}: {error}")))?;
+/// Refuse a document whose `asset.version` is not glTF 2.x before any parse.
+///
+/// A missing or non-string `asset.version` is the same named refusal as a `1.x`
+/// one.
+fn check_asset_version(document: &serde_json::Value) -> CadResult<()> {
     let version = document
         .get("asset")
         .and_then(|asset| asset.get("version"))
@@ -240,7 +269,13 @@ impl Importer for GltfImporter {
             bytes: Some(request.bytes.len() as u64),
             message: None,
         });
-        check_asset_version(&request.bytes)?;
+        // One JSON parse serves both the version gate and the extension scan; the
+        // `gltf` crate is built without the typed `KHR_texture_transform` accessors.
+        let json = document_json(&request.bytes)?;
+        let json: serde_json::Value = serde_json::from_slice(&json)
+            .map_err(|error| CadError::CorruptData(format!("{DIAG_PARSE}: {error}")))?;
+        check_asset_version(&json)?;
+        let transformed_materials = texture::transform_materials(&json);
 
         let gltf = gltf::Gltf::from_slice(&request.bytes)
             .map_err(|error| CadError::CorruptData(format!("{DIAG_PARSE}: {error}")))?;
@@ -261,7 +296,13 @@ impl Importer for GltfImporter {
         progress.report(ImportProgress::at(ImportPhase::Parsing, 0, None));
 
         let mut import = MeshImport::new(request, GLTF_MESH_TYPE_KEY)?;
-        let mut walker = SceneWalker::new(&gltf.document, &buffers, &request.limits, cancelled);
+        let mut walker = SceneWalker::new(
+            &gltf.document,
+            &buffers,
+            &request.limits,
+            cancelled,
+            &transformed_materials,
+        );
         let mut stack = Vec::new();
         for node in scene.nodes() {
             walker.walk(&node, &scene::IDENTITY, &mut stack, &mut import)?;

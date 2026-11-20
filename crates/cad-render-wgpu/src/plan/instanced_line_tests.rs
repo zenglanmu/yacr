@@ -12,6 +12,8 @@ fn source() -> SelectionRef {
 
 fn batch(topology: RenderTopology, vertices: Vec<[f32; 3]>, alpha: f32) -> cad_scene::RenderBatch {
     cad_scene::RenderBatch {
+        uvs: Vec::new(),
+        texture: None,
         conics: Vec::new(),
         local_origin: cad_domain::Point3 {
             x: 0.0,

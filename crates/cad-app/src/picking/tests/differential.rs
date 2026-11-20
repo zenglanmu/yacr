@@ -62,6 +62,8 @@ fn rand_mesh(rng: &mut XorShift, span: f64) -> Mesh {
         normals: Vec::new(),
         face_sources,
         colors: Vec::new(),
+        uvs: Vec::new(),
+        texture: None,
     }
 }
 

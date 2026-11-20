@@ -337,6 +337,41 @@ impl ObjectReader {
     pub(crate) fn f64x2(&mut self, field: &'static str) -> Result<[f64; 2], JsonError> {
         decode_f64x2(&self.take(field)?)
     }
+
+    /// A two-number-array list whose **key may be absent** (absent → empty).
+    ///
+    /// This is not a general relaxation: the format writes every descriptor
+    /// field, so an absent key normally means the entry was not produced by this
+    /// writer. ADR-0038 D4 makes exactly two `cad:Mesh` fields (`uvs`,
+    /// `texture`) optional so a minor-2 archive stays readable, and those two
+    /// takes are their only callers. Keep it that way — the payload tests pin a
+    /// missing `vertices` as an error to stop the exception spreading.
+    pub(crate) fn vec_f64x2_if_present(
+        &mut self,
+        field: &'static str,
+    ) -> Result<Vec<[f64; 2]>, JsonError> {
+        if self.map.contains_key(field) {
+            self.vec_f64x2(field)
+        } else {
+            Ok(Vec::new())
+        }
+    }
+
+    /// A `string-or-null` field whose **key may also be absent** (absent → `None`).
+    ///
+    /// The second and only other use of the ADR-0038 D4 exception; see
+    /// [`Self::vec_f64x2_if_present`]. A present key still goes through the
+    /// strict [`Self::opt_string`] type check.
+    pub(crate) fn string_if_present(
+        &mut self,
+        field: &'static str,
+    ) -> Result<Option<String>, JsonError> {
+        if self.map.contains_key(field) {
+            self.opt_string(field)
+        } else {
+            Ok(None)
+        }
+    }
 }
 
 #[cfg(test)]

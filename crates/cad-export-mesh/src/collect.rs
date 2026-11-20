@@ -23,6 +23,10 @@ pub(crate) struct SourceMesh {
     pub normals: Vec<Point3>,
     /// Empty or one sRGB colour per vertex (the `cad-db` invariant).
     pub colors: Vec<[u8; 3]>,
+    /// The document texture key, when the source mesh references a base-colour
+    /// texture. The neutral-mesh formats have no texture channel, so a writer
+    /// that writes the geometry still reports the texture as a conversion.
+    pub texture: Option<String>,
 }
 
 /// One source entity that cannot be written, with its stable marker.
@@ -175,6 +179,7 @@ pub(crate) fn collect(job: &ExportJob<'_>, format_id: &str) -> CadResult<Collect
             triangles: mesh.triangles.clone(),
             normals: mesh.normals.clone(),
             colors: mesh.colors.clone(),
+            texture: mesh.texture.clone(),
         });
     }
 

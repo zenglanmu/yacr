@@ -115,6 +115,9 @@ pub fn arrowhead(tip: Point3, outward: Point3, size: f64) -> SemanticGeometry {
         normals: Vec::new(),
         face_sources: Vec::new(),
         colors: Vec::new(),
+        // A synthesized arrowhead is an untextured display primitive.
+        uvs: Vec::new(),
+        texture: None,
     })
 }
 

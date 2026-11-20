@@ -17,6 +17,15 @@
 //!    opened. They are reported as `foreign_entries` and preserved by the next
 //!    save.
 //!
+//! # Document textures
+//!
+//! A listed `textures/<key>` entry is a modelled binary resource (ADR-0038 D4): the
+//! key must be the canonical `<32 lowercase hex>.png|.jpg` form, and the bytes go
+//! through the same `len`/SHA-256/CRC verification as every other entry before
+//! they enter [`cad_db::DocumentSnapshot::textures`]. An **unlisted** `textures/...`
+//! entry is not special-cased: it is a foreign entry and is preserved verbatim, so
+//! a document written by another tool keeps its blobs.
+//!
 //! # `sha256_c` and what this build actually verifies
 //!
 //! The format records both hashes so a raw-copy can be checked at O(compressed)
@@ -33,6 +42,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Cursor, Read};
+use std::sync::Arc;
 
 use serde_json::Value;
 use zip::ZipArchive;
@@ -89,21 +99,26 @@ pub(crate) fn parse(bytes: &[u8]) -> Result<Parsed, StoreError> {
     parse_classes(&mut archive, &manifest)?;
     let models = parse_models(&mut archive, &manifest)?;
     let tables = parse_tables(&mut archive, &manifest)?;
+    let textures = parse_textures(&mut archive, &manifest)?;
     let (shards, shard_paths) = parse_shards(&mut archive, &manifest, &models)?;
     check_shard_map(&manifest, &shard_paths)?;
 
     let manifest_summary = manifest.summary(foreign_entries);
+    let snapshot = DocumentSnapshot {
+        header,
+        // D2: the archive's saved revision seeds the in-memory revision, so
+        // an edited-then-reopened document does not satisfy the L0 predicate.
+        revision: Revision(manifest.saved_revision),
+        models,
+        shards,
+        tables,
+        textures,
+    };
     Ok(Parsed {
+        // The two texture views are filled from one decode, so they cannot drift.
         loaded: LoadedDocument {
-            snapshot: DocumentSnapshot {
-                header,
-                // D2: the archive's saved revision seeds the in-memory revision, so
-                // an edited-then-reopened document does not satisfy the L0 predicate.
-                revision: Revision(manifest.saved_revision),
-                models,
-                shards,
-                tables,
-            },
+            textures: snapshot.textures.clone(),
+            snapshot,
             manifest: manifest_summary,
         },
         saved_at: manifest.saved_at.clone(),
@@ -382,7 +397,50 @@ fn parse_shards(
     Ok((shards, shard_paths))
 }
 
-/// One element row: the payload plus the identity the payload carries.
+/// The prefix every document texture entry carries (ADR-0038 D4).
+const TEXTURES_PREFIX: &str = "textures/";
+
+/// The document texture key one entry path names, when the path really is a
+/// `textures/<valid key>` entry.
+///
+/// One helper for both the "do we model this entry?" check and the decode, so the
+/// two can never disagree about what a texture entry is.
+fn texture_key(path: &str) -> Option<&str> {
+    path.strip_prefix(TEXTURES_PREFIX)
+        .filter(|key| cad_domain::is_valid_texture_key(key))
+}
+
+/// Every listed `textures/<key>` entry, verified and decoded into the snapshot's
+/// texture table (ADR-0038 D3/D4).
+///
+/// Verification is the existing entry path — [`check_listed_entries`] already
+/// compared the zip CRC and `len`, and [`read_entry`] decompresses and checks the
+/// SHA-256 and length — so a corrupted or truncated image refuses the open instead
+/// of entering the document. An **unlisted** `textures/...` entry never reaches
+/// here: [`foreign_entries`] keeps it as a preserved foreign entry, exactly like
+/// any other unmodelled blob.
+fn parse_textures(
+    archive: &mut ZipArchive<Cursor<&[u8]>>,
+    manifest: &Manifest,
+) -> Result<BTreeMap<String, Arc<[u8]>>, StoreError> {
+    let mut textures = BTreeMap::new();
+    for record in listed_live(manifest) {
+        let Some(key) = texture_key(&record.path) else {
+            continue;
+        };
+        let bytes = read_entry(archive, record)?;
+        if bytes.is_empty() {
+            return Err(malformed(
+                &record.path,
+                "a texture entry must not be empty (an empty image cannot decode)",
+            ));
+        }
+        textures.insert(key.to_string(), Arc::from(bytes));
+    }
+    Ok(textures)
+}
+
+/// Every element row: the payload plus the identity the payload carries.
 fn element_snapshot(path: &str, value: Value) -> Result<ElementSnapshot, StoreError> {
     let Some(raw) = value.get("id").and_then(Value::as_i64) else {
         return Err(malformed(
@@ -530,6 +588,7 @@ fn is_modelled(path: &str) -> bool {
         || path == CLASSES_ENTRY
         || path == MODELS_ENTRY
         || table_kind_for_entry(path).is_some()
+        || texture_key(path).is_some()
         || parse_shard_path(path).is_ok()
 }
 

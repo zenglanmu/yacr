@@ -107,6 +107,12 @@ pub(crate) fn wide_polyline_mesh(
         normals: Vec::with_capacity(count * 2),
         face_sources: Vec::new(),
         colors: Vec::new(),
+        // A widened polyline is geometry this provider **synthesises** from a
+        // centreline: it has no source surface, so it invents neither a UV0
+        // parameterisation nor a texture (ADR-0038: no UV is fabricated from
+        // positions). The stroke therefore always draws with the batch colour.
+        uvs: Vec::new(),
+        texture: None,
     };
     for (point, offset) in centerline.iter().zip(offsets.iter()) {
         mesh.vertices.push(add(*point, *offset));

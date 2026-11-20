@@ -62,7 +62,16 @@ fn quad(colors: Option<[[u8; 3]; 4]>) -> Mesh {
         normals: vec![normal; 4],
         face_sources: Vec::new(),
         colors: colors.map(|colors| colors.to_vec()).unwrap_or_default(),
+        uvs: Vec::new(),
+        texture: None,
     }
+}
+
+/// The same quad with a UV0 set and a document texture key.
+fn textured(mut mesh: Mesh, key: &str) -> Mesh {
+    mesh.uvs = vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+    mesh.texture = Some(key.to_string());
+    mesh
 }
 
 fn entity(object: u128, type_key: &str, geometry: SemanticGeometry) -> DbEntity {
@@ -324,6 +333,104 @@ fn stl_and_obj_report_dropped_colours() {
         ));
         assert_eq!(output.report.counts.converted, 1);
     }
+}
+
+#[test]
+fn a_textured_mesh_reports_the_texture_not_written_and_writes_the_same_bytes() {
+    for format in [
+        MeshFormat::StlBinary,
+        MeshFormat::StlAscii,
+        MeshFormat::Obj,
+        MeshFormat::Ply,
+        MeshFormat::Off,
+    ] {
+        let code = match format {
+            // The two STL containers share one report prefix on purpose.
+            MeshFormat::StlBinary | MeshFormat::StlAscii => "export.stl.texture_not_written",
+            MeshFormat::Obj => "export.obj.texture_not_written",
+            MeshFormat::Ply => "export.ply.texture_not_written",
+            MeshFormat::Off => "export.off.texture_not_written",
+        };
+        let with = export_output(format, &mesh_database(textured(quad(None), "abc.png")));
+        let without = export_output(format, &mesh_database(quad(None)));
+        assert_eq!(
+            with.bytes,
+            without.bytes,
+            "{} must write the same bytes for a textured and an untextured mesh",
+            format.format_id()
+        );
+        assert_eq!(
+            with.report.counts.exact,
+            without.report.counts.exact,
+            "{}: the mesh geometry is still exact",
+            format.format_id()
+        );
+
+        let entries: Vec<_> = with
+            .report
+            .entries
+            .iter()
+            .filter(|entry| entry.code == code)
+            .collect();
+        assert_eq!(
+            entries.len(),
+            1,
+            "{} must report {code}",
+            format.format_id()
+        );
+        assert_eq!(entries[0].status, SupportStatus::Partial);
+        assert!(
+            entries[0].message.contains("#1") && entries[0].message.contains("abc.png"),
+            "the message must name the entity and the texture key: {}",
+            entries[0].message
+        );
+        assert!(matches!(with.report.completeness, Completeness::Partial(_)));
+
+        assert!(
+            !without
+                .report
+                .entries
+                .iter()
+                .any(|entry| entry.code == code),
+            "{}: an untextured mesh must not report a texture loss",
+            format.format_id()
+        );
+        assert_eq!(
+            without.report.completeness,
+            Completeness::Complete,
+            "{}: an untextured mesh keeps the previous verdict",
+            format.format_id()
+        );
+    }
+}
+
+#[test]
+fn each_textured_mesh_entity_gets_its_own_texture_entry() {
+    let database = database(vec![
+        entity(
+            1,
+            "First",
+            SemanticGeometry::Mesh(textured(quad(None), "abc.png")),
+        ),
+        entity(
+            2,
+            "Second",
+            SemanticGeometry::Mesh(textured(quad(None), "def.png")),
+        ),
+    ]);
+    let output = export_output(MeshFormat::Obj, &database);
+    let messages: Vec<&str> = output
+        .report
+        .entries
+        .iter()
+        .filter(|entry| entry.code == "export.obj.texture_not_written")
+        .map(|entry| entry.message.as_str())
+        .collect();
+    assert_eq!(messages.len(), 2, "{messages:?}");
+    assert!(messages[0].contains("#1") && messages[0].contains("abc.png"));
+    assert!(messages[1].contains("#2") && messages[1].contains("def.png"));
+    assert_eq!(output.report.counts.exact, 2);
+    assert_eq!(output.report.counts.converted, 2);
 }
 
 #[test]
@@ -623,6 +730,8 @@ fn stl_exact_count_excludes_meshes_with_dropped_facets() {
         normals: Vec::new(),
         face_sources: Vec::new(),
         colors: Vec::new(),
+        uvs: Vec::new(),
+        texture: None,
     };
     let database = mesh_database(mesh);
     let output = export_output(MeshFormat::StlBinary, &database);

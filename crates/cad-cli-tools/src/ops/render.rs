@@ -45,17 +45,19 @@ pub(crate) fn run_render(invocation: &CliInvocation) -> Result<serde_json::Value
         drawing_needs_text(&controller),
         drawing_locale(&controller),
     )?;
-    let requested_images = images_requested(&controller);
-    let (image_cache, image_report) = load_images(invocation, &requested_images)?;
+    let (image_cache, image_report) = load_images(invocation, &controller)?;
     let mut context = representation_context(&controller, fonts.as_ref());
     // The render feeds the GPU directly: packed dash output + compact line
     // batches, identical to the desktop scene path. `build-representation`
     // intentionally keeps the unpacked form so its primitive counts describe
     // fragments, not render batches.
     context = context.with_packed_line_segments();
-    // A drawing with no raster images keeps the previous context exactly (no
-    // texture path); a decoded cache lets an `Image` become a texture.
-    if !requested_images.is_empty() {
+    // A drawing with no raster images at all keeps the previous context exactly
+    // (no texture path); a decoded cache lets an `Image` become a texture and a
+    // textured mesh sample its document-owned base colour. `requested` names both
+    // sources (file keys and document textures), so a texture-only drawing still
+    // attaches the cache (ADR-0038 D10).
+    if !image_report.requested.is_empty() {
         context = context.with_images(image_cache.clone());
     }
 
@@ -393,10 +395,11 @@ pub(crate) fn run_plot_png(invocation: &CliInvocation) -> Result<serde_json::Val
         drawing_needs_text(&controller),
         drawing_locale(&controller),
     )?;
-    let requested_images = images_requested(&controller);
-    let (image_cache, image_report) = load_images(invocation, &requested_images)?;
+    let (image_cache, image_report) = load_images(invocation, &controller)?;
     let mut context = representation_context(&controller, fonts.as_ref());
-    if !requested_images.is_empty() {
+    // File images and document-owned mesh textures both attach the cache: a plot
+    // that carries only textured meshes must still decode them (ADR-0038 D10).
+    if !image_report.requested.is_empty() {
         context = context.with_images(image_cache.clone());
     }
     let registry = cad_representation::ProviderRegistry::with_default_provider();

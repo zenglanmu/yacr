@@ -236,6 +236,53 @@ element face 1\nproperty list uchar int vertex_indices\nend_header\n\
 }
 
 #[test]
+fn declared_texture_coordinates_are_reported_not_silently_consumed() {
+    // PLY 1.0 lets a vertex element declare `s`/`t`; this reader consumes them
+    // as unknown properties. ADR-0038 D6 requires the loss to be named: no
+    // texture image bytes exist, so the coordinates are not imported and the
+    // import is `Partial` rather than silently dropping a channel.
+    let bytes = "ply\nformat ascii 1.0\nelement vertex 3\n\
+property float x\nproperty float y\nproperty float z\n\
+property float s\nproperty float t\n\
+element face 1\nproperty list uchar int vertex_indices\nend_header\n\
+0 0 0 0.0 0.0\n\
+1 0 0 1.0 0.0\n\
+0 1 0 0.0 1.0\n\
+3 0 1 2\n";
+    let drawing = PlyImporter::new()
+        .import(&request(bytes.as_bytes()), &|| false)
+        .expect("geometry imports without the texture");
+    let mesh = one_mesh(&drawing);
+    assert_eq!(mesh.triangles.len(), 1);
+    assert!(mesh.uvs.is_empty(), "texture coordinates are not stored");
+    assert!(mesh.texture.is_none());
+    assert_eq!(
+        codes(&drawing)
+            .iter()
+            .filter(|code| **code == ply::DIAG_TEXTURE_COORDS_NOT_IMPORTED)
+            .count(),
+        1,
+        "one document-level texture loss"
+    );
+    assert!(matches!(
+        drawing.report.completeness,
+        Completeness::Partial(_)
+    ));
+}
+
+#[test]
+fn a_ply_without_texture_coordinates_stays_complete() {
+    let drawing = PlyImporter::new()
+        .import(&request(TRI_PLY.as_bytes()), &|| false)
+        .expect("triangle PLY imports");
+    assert!(!codes(&drawing).contains(&ply::DIAG_TEXTURE_COORDS_NOT_IMPORTED));
+    assert!(matches!(
+        drawing.report.completeness,
+        Completeness::Complete
+    ));
+}
+
+#[test]
 fn truncated_ascii_payload_is_corrupt_naming_the_shortfall() {
     let bytes = "ply\nformat ascii 1.0\nelement vertex 3\n\
 property float x\nproperty float y\nproperty float z\n\

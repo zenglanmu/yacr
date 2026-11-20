@@ -81,6 +81,34 @@ fn color_layout(element: &HeaderElement) -> Result<Option<ColorLayout>, String> 
     Ok(None)
 }
 
+/// Vertex property spellings that declare texture coordinates.
+///
+/// PLY 1.0's canonical pair is `s`/`t`; exporters also write `texture_u`/
+/// `texture_v` and, rarely, plain `u`/`v`. The neutral mesh has no texture bytes
+/// to sample with them, so they are reported ([`DIAG_TEXTURE_COORDS_NOT_IMPORTED`])
+/// instead of being consumed silently as unknown properties.
+const TEXTURE_COORD_PAIRS: [(&str, &str); 3] = [("s", "t"), ("texture_u", "texture_v"), ("u", "v")];
+
+/// The first declared texture-coordinate spelling on the vertex element.
+///
+/// `u`/`v` are generic names, so that pair must be complete; `s`/`t` and the
+/// `texture_*` names are unambiguous on their own.
+fn declared_texture_coords(element: &HeaderElement) -> Option<(&'static str, &'static str)> {
+    let has = |name: &str| {
+        element
+            .properties
+            .iter()
+            .any(|property| property.name == name)
+    };
+    TEXTURE_COORD_PAIRS.into_iter().find(|(first, second)| {
+        if *first == "u" {
+            has(first) && has(second)
+        } else {
+            has(first) || has(second)
+        }
+    })
+}
+
 fn type_label(ty: ScalarType) -> &'static str {
     match ty {
         ScalarType::I8 => "char/int8",
@@ -108,6 +136,7 @@ pub(crate) fn parse(bytes: &[u8], cancelled: &dyn Fn() -> bool) -> CadResult<Par
     let mut repeated_index_triangles = 0usize;
     let mut normals_note: Option<String> = None;
     let mut colors_note: Option<String> = None;
+    let mut texture_coords_note: Option<String> = None;
     let mut saw_vertex = false;
 
     for element in &header.elements {
@@ -163,6 +192,15 @@ pub(crate) fn parse(bytes: &[u8], cancelled: &dyn Fn() -> bool) -> CadResult<Par
                     None
                 }
             };
+            if let Some((first, second)) = declared_texture_coords(element) {
+                // ADR-0038 D6: PLY has no texture image channel, so the
+                // coordinates cannot be sampled even if they were kept. Name the
+                // loss once instead of silently consuming the properties.
+                texture_coords_note = Some(format!(
+                    "the vertex element declares texture coordinate properties '{first}'/'{second}'; \
+                     PLY carries no texture image bytes, so they were not imported"
+                ));
+            }
 
             ensure_element_fits(header.encoding, element, payload_bytes.len())?;
             let mut vertex_values = Vec::with_capacity(element.count);
@@ -358,6 +396,13 @@ pub(crate) fn parse(bytes: &[u8], cancelled: &dyn Fn() -> bool) -> CadResult<Par
             code: DIAG_COLORS_DROPPED,
             message,
             partial: false,
+        });
+    }
+    if let Some(message) = texture_coords_note {
+        notes.push(Note {
+            code: DIAG_TEXTURE_COORDS_NOT_IMPORTED,
+            message,
+            partial: true,
         });
     }
     Ok(ParsedMesh {

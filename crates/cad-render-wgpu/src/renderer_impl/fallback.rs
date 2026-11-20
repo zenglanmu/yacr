@@ -92,6 +92,10 @@ impl Renderer {
         self.images.clear();
         self.masks.clear();
         self.mask_skips.clear();
+        // A cleared scene also retires the mesh-texture residency set and last
+        // frame's fallback report: both are derived from the batches just dropped.
+        self.mesh_textures.clear();
+        self.mesh_texture_fallbacks.clear();
         self.rebuild_lineweight_cache();
         // An explicit full teardown is a document switch/close, not a transient
         // empty resident set: the retained entity-flag request belongs to the

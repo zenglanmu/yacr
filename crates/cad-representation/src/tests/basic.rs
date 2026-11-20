@@ -305,6 +305,8 @@ fn multi_ring_hatch_fill_flows_through_the_mesh_path() {
         });
     }
     children.push(SemanticGeometry::Mesh(Mesh {
+        uvs: Vec::new(),
+        texture: None,
         vertices,
         triangles: fill.triangles,
         normals,

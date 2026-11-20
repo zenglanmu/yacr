@@ -74,5 +74,13 @@ pub(crate) fn transform_mesh(mesh: &Mesh, t: &Transform3) -> Mesh {
         // Colour is a vertex attribute, not a direction; it passes through a
         // rigid/affine transform unchanged (no colour management here).
         colors: mesh.colors.clone(),
+        // UV0 is a surface parameterisation, not a direction and not a position:
+        // it belongs to the *surface*, so a transform (including a mirror)
+        // carries it through verbatim (ADR-0038 D7 / invariant 9: a mirror does
+        // not flip U). Only the positions change.
+        uvs: mesh.uvs.clone(),
+        // The texture reference is a document key, so a transform never invents,
+        // drops or rewrites it.
+        texture: mesh.texture.clone(),
     }
 }

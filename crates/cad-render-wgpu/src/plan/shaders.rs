@@ -24,6 +24,12 @@ pub(crate) const MESH_SHADER: &str = include_str!("../../shaders/mesh.wgsl");
 // per-batch tint is folded in at upload, see `push_mesh_vertices`).
 pub(crate) const MESH_MERGED_SHADER: &str = include_str!("../../shaders/mesh_merged.wgsl");
 
+// Textured-mesh shader (ADR-0038 D9): the separate per-batch channel for a mesh
+// with a base-colour texture. Adds a UV0 vertex attribute and group 2 = sampled
+// texture + filtering sampler; deliberately unlit (the texel is authored albedo).
+// Not implemented here: `alphaMode = MASK` cutout, UV1+, per-corner UVs.
+pub(crate) const MESH_TEXTURED_SHADER: &str = include_str!("../../shaders/mesh_textured.wgsl");
+
 // Accelerated (vertex-pulling) merged-mesh shader: one indexed draw covers
 // every flat-merged mesh chunk by pulling vertices and triangle indices from
 // read-only vertex-stage storage buffers. Capability-gated; not WebGL2-safe.

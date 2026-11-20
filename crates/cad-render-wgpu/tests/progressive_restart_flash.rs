@@ -75,6 +75,8 @@ fn gpu() -> Option<HeadlessGpu> {
 /// One horizontal line batch (`y` fixed, `x` from -0.8 to 0.8) from `entity`.
 fn line_batch(entity: u128, y: f32) -> RenderBatch {
     RenderBatch {
+        uvs: Vec::new(),
+        texture: None,
         conics: Vec::new(),
         local_origin: Point3 {
             x: 0.0,

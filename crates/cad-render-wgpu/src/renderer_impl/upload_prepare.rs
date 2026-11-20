@@ -190,7 +190,9 @@ impl Renderer {
                     as u64;
                 instance_bytes + line_bytes
             } else {
+                // A texture batch also uploads its UV0 stream (8 B per vertex).
                 (batch.vertices.len() as u64).saturating_mul(12)
+                    + (batch.uvs.len() as u64).saturating_mul(8)
             };
             if batch.topology == RenderTopology::Conics
                 && classify_alpha(batch.alpha) == AlphaClass::Transparent
@@ -219,6 +221,13 @@ impl Renderer {
                 // non-finite edge coordinate is as invalid as a non-finite
                 // vertex (refuse the batch, never upload NaN geometry).
                 || batch.edges.iter().flatten().any(|v| !v.is_finite())
+                // UV0 is either absent or exactly one finite pair per vertex, and
+                // a batch that references a texture must carry it (ADR-0038 D8);
+                // a violation is refused here rather than bound as a wrong-layout
+                // buffer.
+                || (!batch.uvs.is_empty() && batch.uvs.len() != batch.vertices.len())
+                || (batch.texture.is_some() && batch.uvs.len() != batch.vertices.len())
+                || batch.uvs.iter().flatten().any(|component| !component.is_finite())
                 // A conic batch carries f64 semantic records, not vertices; guard
                 // its own buffer size and finiteness.
                 || (batch.topology == RenderTopology::Conics
@@ -447,7 +456,7 @@ impl Renderer {
             // `line_quads` holds the pre-expanded anti-aliased line quads for a
             // legacy `Lines`/`MeshEdges` batch or a non-merged mesh's wireframe
             // overlay (empty for a converted batch).
-            let (vertices, indices, normals, colors, line_quads) =
+            let (vertices, indices, normals, colors, uvs, line_quads) =
                 if instanced || merged || arc_instanced {
                     Default::default()
                 } else {
@@ -463,6 +472,14 @@ impl Renderer {
                             // Always bound (white when the batch has no per-vertex
                             // colours), so the mesh pipeline's `@location(2)` is valid.
                             let colors = geometry::repaired_colors(batch);
+                            // UV0 is uploaded **only** for a textured batch: an
+                            // untextured batch keeps the three-buffer layout of the
+                            // existing mesh pipelines (ADR-0038 D9).
+                            let uvs = if batch.texture.is_some() {
+                                pack_uvs(&batch.uvs)
+                            } else {
+                                Vec::new()
+                            };
                             // The wireframe overlay draws the batch's `edges`
                             // positions directly (stored body edges or the
                             // legacy triangle-derived overlay); no triangle
@@ -476,6 +493,7 @@ impl Renderer {
                                 idx,
                                 pack_positions(&normals),
                                 pack_positions(&colors),
+                                uvs,
                                 line_quad_bytes(&quads),
                             )
                         }
@@ -485,6 +503,7 @@ impl Renderer {
                             let mut quads = Vec::new();
                             expand_line_quads(&mut quads, batch, false);
                             (
+                                Vec::new(),
                                 Vec::new(),
                                 Vec::new(),
                                 Vec::new(),
@@ -505,7 +524,8 @@ impl Renderer {
             self.admit_gpu_memory(&[
                 (
                     GpuMemoryCategory::Vertex,
-                    (vertices.len() + normals.len() + colors.len() + line_quads.len()) as u64,
+                    (vertices.len() + normals.len() + colors.len() + uvs.len() + line_quads.len())
+                        as u64,
                 ),
                 (GpuMemoryCategory::Index, (indices.len() * 4) as u64),
             ])?;
@@ -553,6 +573,13 @@ impl Renderer {
             } else {
                 None
             };
+            // UV0 (slot 3) exists only for a textured mesh batch; an untextured
+            // batch creates no buffer, so its upload and draw state are unchanged.
+            let uv_buffer = if is_mesh && !merged && !uvs.is_empty() {
+                Some(Self::vertex_buffer(device, self.queue.as_ref(), &uvs))
+            } else {
+                None
+            };
             // Charge exactly what the created handles hold (never the packed CPU
             // bytes: a buffer is rounded up by the backend, and the handle is the
             // only truth). `None` when the batch owns no buffer of that kind.
@@ -560,6 +587,7 @@ impl Renderer {
                 &vertex_buffer,
                 &normal_buffer,
                 &color_buffer,
+                &uv_buffer,
                 &line_quad_buffer,
             ]
             .into_iter()
@@ -622,7 +650,12 @@ impl Renderer {
             let bytes = if instanced || merged || arc_instanced {
                 line_bytes + mesh_bytes + pulled_bytes + arc_bytes
             } else {
-                normals.len() + vertices.len() + colors.len() + indices.len() * 4 + line_quads.len()
+                normals.len()
+                    + vertices.len()
+                    + colors.len()
+                    + uvs.len()
+                    + indices.len() * 4
+                    + line_quads.len()
             };
             uploaded_bytes += bytes as u64;
             staged.push(GpuBatch {
@@ -630,6 +663,8 @@ impl Renderer {
                 vertex_count: batch.vertices.len() as u32,
                 normals: normal_buffer,
                 colors: color_buffer,
+                uvs: uv_buffer,
+                texture: batch.texture.clone(),
                 topology: batch.topology,
                 text_glyph: batch.is_text_glyph(),
                 indices: index_buffer,

@@ -69,6 +69,12 @@ enum Body<'a> {
     Models(&'a [ModelRecord]),
     Table(&'a [Value]),
     Shard(&'a ShardSnapshot),
+    /// A document resource's raw bytes (a base-colour texture, ADR-0038 D4).
+    ///
+    /// Written verbatim: PNG/JPEG are already compressed, so a second deflate pass
+    /// only costs CPU and blocks, and the format's `len`/`sha256` describe exactly
+    /// the image the importer registered.
+    Binary(&'a [u8]),
 }
 
 impl Body<'_> {
@@ -93,7 +99,13 @@ impl Body<'_> {
                 let payloads: Vec<&Value> = rows.iter().map(|element| &element.payload).collect();
                 serde_json::to_vec(&payloads).map_err(encode_error)
             }
+            Body::Binary(bytes) => Ok(bytes.to_vec()),
         }
+    }
+
+    /// Whether this entry holds JSON (deflated) or opaque bytes (stored).
+    fn is_json(&self) -> bool {
+        !matches!(self, Body::Binary(_))
     }
 }
 
@@ -334,6 +346,17 @@ fn plan_entries(snapshot: &DocumentSnapshot) -> Result<(Vec<Planned<'_>>, ShardM
             shard: None,
         });
     }
+    // Document resources (ADR-0038 D4/D5). The snapshot is the authority: exactly
+    // one entry per texture it holds, and never one it does not — an orphan image
+    // must not appear in the archive. Texture entries are never raw-copied (their
+    // bytes are already in memory), so `shard: None` also means "always re-encoded".
+    for (key, bytes) in &snapshot.textures {
+        planned.push(Planned {
+            path: texture_entry(key)?,
+            body: Some(Body::Binary(&bytes[..])),
+            shard: None,
+        });
+    }
 
     let mut shard_map = ShardMap::new();
     let mut seen = BTreeSet::new();
@@ -385,6 +408,22 @@ fn shard_entry(model_raw: i64, shard: cad_domain::ymodel::Shard) -> String {
     format!("elements/{model_raw}-{}.json", shard.0)
 }
 
+/// The archive path of one document texture: `textures/<key>` (ADR-0038 D4).
+///
+/// The key is re-validated here rather than trusted: it becomes a path inside an
+/// untrusted container, so a `/`, a `..` or an uppercase spelling would either
+/// escape `textures/` or name an entry no reader could resolve. Refusing it at
+/// write time means no archive this build produces can carry such a name.
+fn texture_entry(key: &str) -> Result<String, StoreError> {
+    if !cad_domain::is_valid_texture_key(key) {
+        return Err(malformed(
+            "textures",
+            format!("{key:?} is not a valid texture key (expected <32 lowercase hex>.png|.jpg)"),
+        ));
+    }
+    Ok(format!("textures/{key}"))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn write_entries(
     sink: &mut dyn ByteSink,
@@ -426,7 +465,7 @@ fn write_entries(
                     crc: crc32(&bytes),
                     foreign: false,
                 };
-                start_json(&mut zip, metrics, &entry.path)?;
+                start_entry(&mut zip, metrics, &entry.path, body.is_json())?;
                 zip.write_all(&bytes)
                     .map_err(|error| io_error(metrics, error, &entry.path))?;
                 records.push(record);
@@ -495,6 +534,32 @@ pub(crate) fn json_options() -> SimpleFileOptions {
         .last_modified_time(DateTime::default())
 }
 
+/// The options a binary resource entry is written with.
+///
+/// `Stored`, not `Deflated`: PNG/JPEG are already compressed, so deflating them
+/// again spends CPU to produce slightly larger bytes. The timestamp is the same
+/// fixed value as every other entry, so a save stays byte-deterministic.
+pub(crate) fn binary_options() -> SimpleFileOptions {
+    SimpleFileOptions::default()
+        .compression_method(CompressionMethod::Stored)
+        .last_modified_time(DateTime::default())
+}
+
+fn start_entry(
+    zip: &mut ZipSink<'_>,
+    metrics: &RefCell<WriteMetrics>,
+    path: &str,
+    is_json: bool,
+) -> Result<(), StoreError> {
+    let options = if is_json {
+        json_options()
+    } else {
+        binary_options()
+    };
+    zip.start_file(path, options)
+        .map_err(|error| zip_error(metrics, error, path))
+}
+
 fn start_json(
     zip: &mut ZipSink<'_>,
     metrics: &RefCell<WriteMetrics>,
@@ -556,6 +621,8 @@ fn derive_document_uuid(header: &DocumentHeader) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+
     use cad_db::ModelKind;
     use cad_domain::ymodel::ModelKey;
     use cad_domain::ymodel::{IdCounters, Shard};
@@ -570,6 +637,73 @@ mod tests {
             variables: serde_json::json!({}),
             next: IdCounters::default(),
         }
+    }
+
+    #[test]
+    fn texture_entry_accepts_only_the_canonical_key_form() {
+        let key = "4c2f2e0a5f3d9b7c1e8a6d4b2c0f9e71.png";
+        assert_eq!(
+            texture_entry(key).expect("a canonical png key"),
+            format!("textures/{key}")
+        );
+        assert_eq!(
+            texture_entry("0f1e2d3c4b5a69788796a5b4c3d2e1f0.jpg").expect("a canonical jpg key"),
+            "textures/0f1e2d3c4b5a69788796a5b4c3d2e1f0.jpg"
+        );
+        for bad in [
+            "",
+            "/tmp/tex.png",
+            "../tex.png",
+            "textures/4c2f2e0a5f3d9b7c1e8a6d4b2c0f9e71.png",
+            "4C2F2E0A5F3D9B7C1E8A6D4B2C0F9E71.png",
+            "4c2f2e0a5f3d9b7c1e8a6d4b2c0f9e71.jpeg",
+            "tex.png",
+        ] {
+            let error = texture_entry(bad).expect_err(bad);
+            assert_eq!(error.marker, markers::INVALID_DOCUMENT, "{bad}: {error}");
+        }
+    }
+
+    #[test]
+    fn the_plan_emits_one_binary_entry_per_snapshot_texture() {
+        let key = "4c2f2e0a5f3d9b7c1e8a6d4b2c0f9e71.png";
+        let mut snapshot = DocumentSnapshot {
+            header: header(1),
+            revision: Revision(1),
+            models: Vec::new(),
+            shards: Vec::new(),
+            tables: Default::default(),
+            textures: BTreeMap::from([(
+                key.to_string(),
+                Arc::from(vec![0x89u8, b'P', b'N', b'G']),
+            )]),
+        };
+        let (planned, _) = plan_entries(&snapshot).expect("plan");
+        let entry = planned
+            .iter()
+            .find(|entry| entry.path == format!("textures/{key}"))
+            .expect("the texture entry is planned");
+        assert!(
+            matches!(entry.body, Some(Body::Binary(_))),
+            "a texture is a binary body"
+        );
+        assert!(entry.shard.is_none(), "a texture is never raw-copied");
+
+        // The snapshot is the authority: dropping the texture drops the entry.
+        snapshot.textures.clear();
+        let (planned, _) = plan_entries(&snapshot).expect("plan");
+        assert!(
+            planned
+                .iter()
+                .all(|entry| !entry.path.starts_with("textures/")),
+            "no orphan texture entry may be written"
+        );
+
+        // An invalid key is refused before any byte is written.
+        snapshot
+            .textures
+            .insert("../escape.png".to_string(), Arc::from(vec![1u8]));
+        assert!(plan_entries(&snapshot).is_err());
     }
 
     #[test]
@@ -618,6 +752,7 @@ mod tests {
                 },
             ],
             tables: Default::default(),
+            textures: Default::default(),
         };
         snapshot.tables.set(cad_db::TableKind::Layers, Vec::new());
         let (planned, shard_map) = plan_entries(&snapshot).expect("plan");
@@ -668,6 +803,7 @@ mod tests {
                 },
             ],
             tables: Default::default(),
+            textures: Default::default(),
         };
         assert!(plan_entries(&snapshot).is_err());
     }

@@ -21,6 +21,12 @@
 //!   has no file source. `tobj` returns the geometry with the material `Result`
 //!   in error; that loss is reported as [`DIAG_MTL_NOT_LOADED`] and the entity
 //!   colour falls back to `ByLayer`.
+//! * Texture coordinates (`vt`) and texture materials are **not** imported
+//!   (ADR-0038 D6): the MTL/image bytes never reach this importer, so there is
+//!   nothing to sample. The file is scanned for `vt`/`mtllib` records and one
+//!   document-level [`DIAG_TEXTURE_NOT_IMPORTED`] keeps that loss explicit; the
+//!   mesh's `uvs`/`texture` stay empty rather than carrying coordinates no
+//!   texture can use.
 
 use std::io::Cursor;
 
@@ -39,6 +45,9 @@ pub const DIAG_NGON_FAN: &str = "import.obj.ngon_fan_triangulated";
 pub const DIAG_DEGENERATE_TRIANGLE: &str = "import.obj.degenerate_triangle";
 /// Stable diagnostic code: a referenced material library could not be loaded.
 pub const DIAG_MTL_NOT_LOADED: &str = "import.obj.mtl_not_loaded";
+/// Stable diagnostic code: the file declares texture coordinates and/or a
+/// material library, but no texture is imported (the MTL bytes are unavailable).
+pub const DIAG_TEXTURE_NOT_IMPORTED: &str = "import.obj.texture_not_imported";
 /// Stable diagnostic code: an object produced no usable triangles.
 pub const DIAG_EMPTY_OBJECT: &str = "import.obj.empty_object";
 
@@ -150,6 +159,30 @@ impl Importer for ObjImporter {
                 Vec::new()
             }
         };
+
+        // ADR-0038 D6: OBJ texture coordinates and their material library are not
+        // imported — the MTL (and therefore the image) bytes are not part of the
+        // import bytes. Name that loss once for the whole document instead of
+        // dropping `tobj`'s `texcoords` silently; the mesh keeps no UVs because
+        // there is no texture to sample.
+        if declares_texture_data(&request.bytes) {
+            import.record(
+                Diagnostic {
+                    object: None,
+                    code: DIAG_TEXTURE_NOT_IMPORTED.into(),
+                    message: "the OBJ declares texture coordinates and/or a material library, but \
+                              texture coordinates and materials are not imported because the MTL \
+                              is not available as bytes; no base-colour texture or UVs were \
+                              stored"
+                        .into(),
+                },
+                Some(
+                    "OBJ texture coordinates/materials were not imported; the MTL bytes are \
+                     unavailable to a bytes-only import"
+                        .to_string(),
+                ),
+            );
+        }
 
         let ngons = count_ngon_faces(&request.bytes);
         if ngons > 0 {
@@ -344,6 +377,11 @@ fn build_mesh(
         normals: map_normals(raw, vertex_count),
         face_sources: Vec::new(),
         colors: map_colors(raw, vertex_count),
+        // ADR-0038 D6: `tobj`'s `texcoords` are deliberately not mapped — the
+        // image bytes live in an MTL this importer cannot read, so UVs could not
+        // be sampled. The loss is reported per document instead.
+        uvs: Vec::new(),
+        texture: None,
     }))
 }
 
@@ -501,6 +539,23 @@ fn count_ngon_faces(bytes: &[u8]) -> usize {
         }
     }
     count
+}
+
+/// Whether the file declares any texture material at all: an `mtllib` (the MTL
+/// holds the image paths) or per-vertex texture coordinates (`vt`).
+///
+/// This is a conservative line scan, like [`count_ngon_faces`]: `tobj` parses
+/// both but the bytes-only import cannot resolve the MTL, so the honest report
+/// is one document-level loss. Blank lines and `#` comments are ignored.
+fn declares_texture_data(bytes: &[u8]) -> bool {
+    let text = String::from_utf8_lossy(bytes);
+    text.lines().any(|line| {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            return false;
+        }
+        matches!(line.split_whitespace().next(), Some("mtllib" | "vt"))
+    })
 }
 
 /// Merge a split model back into its object/material group.

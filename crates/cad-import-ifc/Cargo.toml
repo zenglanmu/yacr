@@ -9,6 +9,8 @@ repository.workspace = true
 description = "IFC (IFC2X3/IFC4/IFC4X3) adapter: parse and mesh into the neutral mesh contract."
 
 [dependencies]
+# RGBA8 IFC textures are encoded to PNG before they enter the document store.
+png.workspace = true
 cad-domain.workspace = true
 cad-db.workspace = true
 cad-import-core.workspace = true

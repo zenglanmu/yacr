@@ -33,6 +33,9 @@ use crate::{
 };
 use samples::*;
 
+/// The canonical texture key the mesh sample references (ADR-0038 D4).
+pub(super) const TEXTURE_KEY: &str = "4c2f2e0a5f3d9b7c1e8a6d4b2c0f9e71.png";
+
 fn p(x: f64, y: f64, z: f64) -> Point3 {
     Point3 { x, y, z }
 }
@@ -348,6 +351,58 @@ fn missing_and_extra_fields_are_refused() {
     extra.insert("future_field".to_string(), Value::Bool(true));
     let error = decode(&Value::Object(extra)).expect_err("extra field");
     assert!(error.message().contains("future_field"), "{error}");
+}
+
+#[test]
+fn a_mesh_without_uvs_or_texture_decodes_to_the_no_texture_state() {
+    // A minor-2 archive (ADR-0038 D4): the two fields this build added in minor 3
+    // are simply absent. That is the format's ONLY defaulting exception, so the
+    // next test also proves it does not extend to a required field.
+    let mut mesh = encode(&SemanticGeometry::Mesh(mesh_sample()));
+    let object = mesh.as_object_mut().expect("mesh payload object");
+    object.remove("uvs");
+    object.remove("texture");
+    assert!(
+        !object.contains_key("uvs") && !object.contains_key("texture"),
+        "{object:?}"
+    );
+
+    let decoded = decode(&Value::Object(object.clone())).expect("a minor-2 mesh decodes");
+    let SemanticGeometry::Mesh(decoded) = decoded else {
+        panic!("expected a mesh");
+    };
+    assert!(decoded.uvs.is_empty(), "absent uvs means no UV");
+    assert_eq!(decoded.texture, None, "absent texture means none");
+    assert_eq!(decoded.vertices.len(), 3);
+}
+
+#[test]
+fn only_the_two_texture_fields_may_be_absent() {
+    // The negative half of ADR-0038 D4: every other `cad:Mesh` field is still
+    // required, so the exception cannot spread by accident.
+    for required in ["vertices", "triangles", "normals", "face_sources", "colors"] {
+        let mut mesh = encode(&SemanticGeometry::Mesh(mesh_sample()));
+        let object = mesh.as_object_mut().expect("mesh payload object");
+        object.remove(required).expect("the field exists");
+        let error = decode(&Value::Object(object.clone())).expect_err(required);
+        assert!(
+            error.message().contains(required),
+            "{required}: {error} (the refusal must name the field)"
+        );
+    }
+}
+
+#[test]
+fn uv_and_texture_round_trip_through_the_payload() {
+    let mesh = mesh_sample();
+    assert_eq!(mesh.uvs.len(), mesh.vertices.len());
+    let encoded = encode(&SemanticGeometry::Mesh(mesh.clone()));
+    assert_eq!(encoded["texture"], Value::String(TEXTURE_KEY.to_string()));
+    assert!(encoded["uvs"].is_array());
+    let text = serde_json::to_string(&encoded).expect("serialize");
+    let parsed: Value = serde_json::from_str(&text).expect("parse");
+    let decoded = decode(&parsed).expect("decode");
+    assert_eq!(decoded, SemanticGeometry::Mesh(mesh));
 }
 
 #[test]

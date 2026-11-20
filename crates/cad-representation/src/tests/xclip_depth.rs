@@ -42,6 +42,8 @@ fn circle_entity(id: u128, space: SpaceId, center: Point3, radius: f64) -> DbEnt
 /// A plan triangle mesh in the block plane z = 0.
 fn triangle_mesh() -> Mesh {
     Mesh {
+        uvs: Vec::new(),
+        texture: None,
         vertices: vec![p(-2.0, -2.0), p(2.0, -2.0), p(0.0, 2.0)],
         triangles: vec![[0, 1, 2]],
         normals: Vec::new(),

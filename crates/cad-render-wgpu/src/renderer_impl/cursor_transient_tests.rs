@@ -13,6 +13,8 @@ fn p(x: f64, y: f64) -> cad_domain::Point3 {
 /// ordering fields, so `None` buffers are enough.
 fn overlay_batch(draw_order: i64) -> GpuBatch {
     GpuBatch {
+        uvs: None,
+        texture: None,
         vertices: None,
         vertex_count: 0,
         normals: None,

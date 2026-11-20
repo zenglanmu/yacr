@@ -74,12 +74,23 @@
   （`.gltf` 的 `data:` buffer 解码）与 `cad-export-gltf`（JSON `.gltf` 的 buffer 内嵌为 base64
   data URI）依赖；该版本已在 `Cargo.lock` 中（既有传递依赖），workspace 以 `base64 = "0.22"`
   声明，**未修改上游源码**。
+- png 0.18.1：PNG 编解码，**MIT OR Apache-2.0**，上游 <https://github.com/image-rs/png>。
+  由 `cad-import-ifc`（IFC 纹理 RGBA8 → 确定性 PNG，ADR-0038）与既有图像解码路径
+  （`cad-resources`/`cad-platform`/`cad-render-wgpu`）依赖；workspace 以
+  `png = "0.18"` 声明，`Cargo.lock` 解析为 0.18.1，**未修改上游源码、未打补丁、未做 vendoring**。
+- sha2 0.11.1：SHA-256 摘要，**MIT OR Apache-2.0**，上游
+  <https://github.com/RustCrypto/hashes>。由 `cad-import-core`（文档纹理的内容寻址键）、
+  `cad-store-zip`（`.ymodel` entry 的 `sha256` 校验）与 `cad-host`（保存冲突检测）直接依赖
+  （`cad-import-acadrust` 既有依赖沿用）；workspace 以 `sha2 = "0.11"` 声明，`Cargo.lock`
+  解析为 0.11.1，**未修改上游源码、未打补丁、未做 vendoring**。（`Cargo.lock` 中的
+  `sha2 0.10.9` 来自 `rvt` 等传递依赖，不是本仓库的直接依赖。）
 - skpwright 0.6.0：SketchUp（`.skp`）的 clean-room 读取器，**GPL-3.0-only**，上游
   <https://github.com/hew3d/skpwright>。仅由 `cad-import-skp` 依赖；版本在 workspace 中
   **精确固定**（`=0.6.0`），未启用额外 feature，上游源码**未修改**（未打补丁、未复制其源码）；
   它只有**一个**依赖 `miniz_oxide`（纯 Rust），本仓库的导入 lane 也是纯 Rust、无平台依赖。
-  它是 **preview** 读取器：只输出三角形、实例变换、tag 与材质颜色/不透明度；不导入边/曲线、
-  纹理图像与 UV、场景、剖切面、标注，本仓库不把其输出用于测量。主仓许可是 **AGPL-3.0**，
+  它是 **preview** 读取器：输出三角形、实例变换、tag、材质颜色/不透明度与**正面**基色纹理
+  字节（ADR-0038 起由本仓库导入为文档纹理 + UV0）；本仓库不导入边/曲线、场景、剖切面、标注，
+  背面纹理与外部图像引用按名报告，不把其输出用于测量。主仓许可是 **AGPL-3.0**，
   可与 GPL-3.0 代码组合（AGPLv3 §13）；**skpwright 部分对下游仍按 GPLv3 分发**，不因组合而
   改许可。其唯一传递依赖的实际版本见 Cargo.lock，分发前需做完整依赖审计。
 - MiniCAD：轻量开源 2D/3D CAD，仅作为功能与实现参考；未复制其源码，也不是构建或运行时依赖。

@@ -338,6 +338,143 @@ impl Renderer {
         })
     }
 
+    /// Create one textured-mesh pipeline (`mesh_textured`, ADR-0038 D9).
+    ///
+    /// It is the mesh pipeline's state plus a UV0 vertex buffer:
+    ///
+    /// * vertex slots 0/1/2 = position/normal/colour, exactly as the untextured
+    ///   mesh pipeline; slot 3 = `Float32x2` UV0 (stride 8), bound only for a
+    ///   batch that carries a texture;
+    /// * group 2 = the image pipeline's `texture_2d<f32>` + filtering sampler
+    ///   layout, so a mesh texture and a raster image share one texture layout;
+    /// * `depth_compare: Less` with `depth_write` matching the variant (true for
+    ///   opaque, false for the transparent pair), back-face culling with the same
+    ///   `front_face` rule as the corresponding mesh pipeline.
+    ///
+    /// Nothing here is shared with the untextured pipelines, so their behaviour is
+    /// untouched by this feature.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn create_mesh_textured_pipeline(
+        device: &wgpu::Device,
+        pipeline_layout: &wgpu::PipelineLayout,
+        shader: &wgpu::ShaderModule,
+        format: wgpu::TextureFormat,
+        front_face: wgpu::FrontFace,
+        depth_write: bool,
+        label: &str,
+    ) -> wgpu::RenderPipeline {
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some(label),
+            layout: Some(pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[
+                    Some(mesh_vertex_layout()),
+                    Some(mesh_normal_layout()),
+                    Some(mesh_color_layout()),
+                    Some(mesh_uv_layout()),
+                ],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face,
+                cull_mode: Some(wgpu::Face::Back),
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(depth_write),
+                depth_compare: Some(wgpu::CompareFunction::Less),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: shader,
+                entry_point: Some("fs_main"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        })
+    }
+
+    /// Create the textured-mesh pipeline family (ADR-0038 D9).
+    ///
+    /// Four pipelines shadow the untextured mesh set — opaque/transparent ×
+    /// normal/mirrored — so a textured batch keeps exactly the depth and winding
+    /// behaviour it would have had without a texture. They are a separate family
+    /// because they add a UV0 vertex buffer (slot 3) and group 2 (sampled texture
+    /// and filtering sampler, the image pipeline's layout); nothing about the
+    /// existing mesh pipelines changes.
+    pub(super) fn create_mesh_textured_pipelines(
+        device: &wgpu::Device,
+        camera_layout: &wgpu::BindGroupLayout,
+        flags_layout: &wgpu::BindGroupLayout,
+        texture_layout: &wgpu::BindGroupLayout,
+        format: wgpu::TextureFormat,
+    ) -> (
+        wgpu::RenderPipeline,
+        wgpu::RenderPipeline,
+        wgpu::RenderPipeline,
+        wgpu::RenderPipeline,
+    ) {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("cad-mesh-textured"),
+            source: wgpu::ShaderSource::Wgsl(MESH_TEXTURED_SHADER.into()),
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("cad-mesh-textured-pipeline-layout"),
+            // Flags stay at group 1 so every colour pipeline in this crate agrees
+            // on the selection table's index; the texture is group 2.
+            bind_group_layouts: &[
+                Some(camera_layout),
+                Some(flags_layout),
+                Some(texture_layout),
+            ],
+            immediate_size: 0,
+        });
+        let make = |front_face: wgpu::FrontFace, depth_write: bool, label: &str| {
+            Self::create_mesh_textured_pipeline(
+                device,
+                &pipeline_layout,
+                &shader,
+                format,
+                front_face,
+                depth_write,
+                label,
+            )
+        };
+        (
+            make(wgpu::FrontFace::Ccw, true, "cad-mesh-textured-pipeline"),
+            make(
+                wgpu::FrontFace::Cw,
+                true,
+                "cad-mesh-textured-pipeline-mirrored",
+            ),
+            make(
+                wgpu::FrontFace::Ccw,
+                false,
+                "cad-mesh-textured-pipeline-transparent",
+            ),
+            make(
+                wgpu::FrontFace::Cw,
+                false,
+                "cad-mesh-textured-pipeline-mirrored-transparent",
+            ),
+        )
+    }
+
     /// Capability snapshot derived from the actual shared device, not the request.
     pub(super) fn caps_for(device: &wgpu::Device) -> BackendCapabilities {
         plan::caps_from(

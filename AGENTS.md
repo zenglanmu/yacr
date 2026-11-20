@@ -193,8 +193,10 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
   返回 `CompatReport`：DXF/DWG/STL/OBJ/PLY/OFF/IFC4/SKP/glTF（GLB + JSON `.gltf`）已接线；
   STEP/DGN/RVT 为稳定拒绝
   `export.<id>.not_implemented`。对象级报告随 `.ymodel` 落 `tables/compat.json`（导出记录最多 32 条，
-  导入记录不淘汰）与 `tables/sources.json`；新增两张表使 `FORMAT_MINOR = 2`。**报告弹窗 UI、L0 源字节
-  直通、DXF L1 不动点仍未实现**，不得写成已完成。
+  导入记录不淘汰）与 `tables/sources.json`；新增两张表使 `FORMAT_MINOR` 升到 **2**，
+  网格基色纹理（`textures/<key>` 二进制条目 + `cad:Mesh` 的 `uvs`/`texture`）再升到 **3**
+  （minor ≤ 2 仍可打开）。**报告弹窗 UI、
+  L0 源字节直通、DXF L1 不动点仍未实现**，不得写成已完成。
 
 ## 前端约定（`apps/desktop-ui`）
 

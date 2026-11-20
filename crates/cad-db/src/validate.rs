@@ -23,6 +23,7 @@ use cad_domain::*;
 use crate::drawing::EntityGeometryCheck;
 use crate::entity::DbEntity;
 use crate::math::{cross, length, transform_is_finite};
+use crate::mesh_validation::{validate_mesh, validate_texture_references};
 
 /// Smallest length/radius a stored curve may have. Chosen well above f64 noise
 /// and below any real drawing unit, so legitimate tiny geometry survives while a
@@ -826,40 +827,6 @@ pub fn validate_body(body: &Body3d) -> CadResult<()> {
     Ok(())
 }
 
-fn validate_mesh(mesh: &Mesh) -> CadResult<()> {
-    let finite = |p: &Point3| p.x.is_finite() && p.y.is_finite() && p.z.is_finite();
-    if !mesh.vertices.iter().all(finite) {
-        return Err(degenerate("mesh has a non-finite vertex"));
-    }
-    if !mesh.normals.iter().all(finite) {
-        return Err(degenerate("mesh has a non-finite normal"));
-    }
-    if !mesh.colors.is_empty() && mesh.colors.len() != mesh.vertices.len() {
-        return Err(degenerate(
-            "mesh per-vertex colours do not match the vertex count",
-        ));
-    }
-    let count = mesh.vertices.len() as u32;
-    for tri in &mesh.triangles {
-        if tri.iter().any(|i| *i >= count) {
-            return Err(degenerate("mesh triangle references an unknown vertex"));
-        }
-        if tri[0] == tri[1] || tri[1] == tri[2] || tri[0] == tri[2] {
-            return Err(degenerate("mesh triangle is degenerate"));
-        }
-    }
-    // A face-source list is either absent (not face-addressable) or parallel to
-    // the triangle list, one entry per triangle. The ids themselves stay opaque
-    // to the database: a source key is a producer-owned stable string (for a
-    // B-rep body, the face id the tessellator stamped), not database data.
-    if !mesh.face_sources.is_empty() && mesh.face_sources.len() != mesh.triangles.len() {
-        return Err(degenerate(
-            "mesh face sources do not match the triangle count",
-        ));
-    }
-    Ok(())
-}
-
 /// Validate a whole entity before it is written.
 ///
 /// Beyond [`validate_geometry`] this enforces the database invariants:
@@ -935,6 +902,9 @@ pub(crate) fn validate_entity_in(
     // this validator's approval.
     if geometry_check == EntityGeometryCheck::NewWrite {
         validate_geometry(&entity.geometry)?;
+        // Referential half of the mesh texture rule (ADR-0038 D3): the image a
+        // mesh names must be part of this document.
+        validate_texture_references(db, &entity.geometry)?;
     }
     if !db.layers.contains_key(&entity.layer) && !staged_layers.contains(&entity.layer) {
         return Err(CadError::Invariant(format!(
@@ -969,7 +939,7 @@ pub(crate) fn validate_entity_in(
     Ok(())
 }
 
-fn degenerate(message: &str) -> CadError {
+pub(crate) fn degenerate(message: &str) -> CadError {
     CadError::Invariant(format!("invalid entity geometry: {message}"))
 }
 

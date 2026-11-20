@@ -9,7 +9,7 @@
 use cad_domain::{Completeness, ObjectId, SupportStatus, UnitContext};
 use cad_import_core::{CompatCounts, CompatEntry, CompatReport, FidelityLevel, ReportDirection};
 
-use crate::collect::DropEntry;
+use crate::collect::{DropEntry, SourceMesh};
 
 pub(crate) struct ReportBuilder {
     connector: &'static str,
@@ -105,6 +105,32 @@ impl ReportBuilder {
             code,
             message,
         });
+    }
+
+    /// Record that one written source mesh's base-colour texture has no channel
+    /// in this format.
+    ///
+    /// The mesh geometry **is** written; only the texture is not, so this is one
+    /// conversion per affected source entity (never a drop, never `Missing`).
+    /// Neutral-mesh formats carry no texture reference at all and the bytes are
+    /// identical to the same mesh exported untextured.
+    pub(crate) fn texture_not_written(
+        &mut self,
+        code: &str,
+        format_label: &str,
+        mesh: &SourceMesh,
+    ) {
+        let Some(key) = mesh.texture.as_deref() else {
+            return;
+        };
+        self.converted(
+            code.to_string(),
+            format!(
+                "entity #{} ({}) references base-colour texture \"{key}\", which {format_label} \
+                 cannot store; the mesh geometry was written without it",
+                mesh.object.0, mesh.type_key
+            ),
+        );
     }
 
     /// Record one provenance/evidence note. Notes never change completeness.

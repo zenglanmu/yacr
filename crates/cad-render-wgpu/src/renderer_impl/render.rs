@@ -827,6 +827,11 @@ impl Renderer {
             unit_quad_buffer,
         );
         let submission = overlay.submission;
+        // Draw-time texture failures (both passes) must stay observable.
+        self.mesh_texture_fallbacks = merged_texture_fallbacks(
+            &base_outcome.mesh_texture_fallbacks,
+            &overlay.mesh_texture_fallbacks,
+        );
         let submit_ms = submit_started.elapsed().as_secs_f64() * 1000.0;
         // Overlay batches are staged legacy, so each is exactly one per-batch
         // draw (its class is 0). The renderer-owned transient cursor adds one

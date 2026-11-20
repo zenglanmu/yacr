@@ -14,6 +14,8 @@ use crate::report::ReportBuilder;
 const COLORS_DROPPED: &str = "export.obj.colors_dropped";
 /// Stable marker: declared normals could not be kept for every vertex.
 const NORMALS_DROPPED: &str = "export.obj.normals_dropped";
+/// Stable marker: a written mesh's base-colour texture has no OBJ channel here.
+const TEXTURE_NOT_WRITTEN: &str = "export.obj.texture_not_written";
 
 pub(crate) fn write(collected: &Collected, report: &mut ReportBuilder) -> Vec<u8> {
     if collected.has_any_colors() {
@@ -35,6 +37,7 @@ pub(crate) fn write(collected: &Collected, report: &mut ReportBuilder) -> Vec<u8
     // OBJ indices are 1-based and global across the file.
     let mut base = 1u32;
     for mesh in &collected.meshes {
+        report.texture_not_written(TEXTURE_NOT_WRITTEN, "OBJ", mesh);
         let name = if mesh.type_key.is_empty() {
             "mesh"
         } else {

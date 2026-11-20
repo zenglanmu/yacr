@@ -830,6 +830,8 @@ impl SolidTessellator for StubTessellator {
                             topology_revision: Revision(0),
                         })],
                         colors: Vec::new(),
+                        uvs: Vec::new(),
+                        texture: None,
                     },
                     edges: vec![vec![p(0.0, 0.0, 0.0), p(1.0, 0.0, 0.0)]],
                     precision: cad_domain::Precision::Approximate {

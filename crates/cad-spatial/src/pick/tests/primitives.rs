@@ -65,6 +65,8 @@ fn mesh_pick_returns_the_closest_triangle() {
         normals: Vec::new(),
         face_sources: Vec::new(),
         colors: Vec::new(),
+        uvs: Vec::new(),
+        texture: None,
     };
     let r = ray(p(0.0, 0.0, 0.0), p(0.0, 0.0, 1.0));
     let options = PickOptions::new(1e-6).unwrap();
@@ -92,6 +94,8 @@ fn body_triangle_mesh() -> Mesh {
         normals: Vec::new(),
         face_sources: Vec::new(),
         colors: Vec::new(),
+        uvs: Vec::new(),
+        texture: None,
     }
 }
 
@@ -138,6 +142,8 @@ fn wire_body_with_only_edges_is_hit_testable() {
             normals: Vec::new(),
             face_sources: Vec::new(),
             colors: Vec::new(),
+            uvs: Vec::new(),
+            texture: None,
         },
         vec![edge],
     );
@@ -171,6 +177,8 @@ fn body_with_an_empty_display_honestly_misses() {
             normals: Vec::new(),
             face_sources: Vec::new(),
             colors: Vec::new(),
+            uvs: Vec::new(),
+            texture: None,
         },
         Vec::new(),
     );

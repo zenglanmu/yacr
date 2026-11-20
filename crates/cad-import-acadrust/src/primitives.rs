@@ -40,6 +40,8 @@ pub(crate) fn triangle_mesh(vertices: Vec<Point3>, faces: &[Vec<usize>]) -> Sema
         normals: Vec::new(),
         face_sources: Vec::new(),
         colors: Vec::new(),
+        uvs: Vec::new(),
+        texture: None,
     })
 }
 

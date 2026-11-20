@@ -30,7 +30,9 @@
 //! itself must guarantee — hashes, ordering, the manifest-last rule — is the
 //! store's job.
 
+use std::collections::BTreeMap;
 use std::fmt;
+use std::sync::Arc;
 
 use cad_domain::Revision;
 
@@ -69,6 +71,14 @@ pub struct ManifestSummary {
 pub struct LoadedDocument {
     pub snapshot: DocumentSnapshot,
     pub manifest: ManifestSummary,
+    /// The document's base-colour textures, mirrored from
+    /// [`DocumentSnapshot::textures`] (ADR-0038 D3).
+    ///
+    /// A carrier that forwards only the parsed document (or destructures the
+    /// loaded value) can reach the bytes without threading the snapshot through;
+    /// the store fills both from one decode, so the two always agree. The snapshot
+    /// stays the authority for what a save writes.
+    pub textures: BTreeMap<String, Arc<[u8]>>,
 }
 
 /// What one save actually did.

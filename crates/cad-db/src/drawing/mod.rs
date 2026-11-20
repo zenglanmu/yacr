@@ -283,6 +283,20 @@ pub struct DrawingDatabase {
     /// mutated by a transaction after [`crate::DrawingDatabaseBuilder::finish`].
     /// Empty for hand-built databases and drawings without xrefs.
     pub(crate) external_references: BTreeMap<String, ExternalReference>,
+    /// Document-owned base-colour texture bytes, keyed by the logical key a
+    /// [`cad_domain::Mesh::texture`] names (ADR-0038 D2/D3).
+    ///
+    /// The bytes are **document state**, not a file reference: they are written
+    /// into the `.ymodel` as `textures/<key>` entries, so saving, reopening or
+    /// switching carriers never depends on a source image still existing. The key
+    /// is a plain `String` because `cad-db` must not depend on `cad-resources`
+    /// (the layering forbids that edge); its form is
+    /// [`cad_domain::is_valid_texture_key`]'s contract, enforced by
+    /// [`crate::DrawingDatabaseBuilder::insert_texture`].
+    ///
+    /// Populated by the builder only (import and document load); there is no
+    /// post-import mutation path.
+    pub(crate) textures: BTreeMap<String, Arc<[u8]>>,
     /// Cache of [`Self::bounds`] tagged with the [`Revision`] it was computed
     /// at. Interior mutability is required because `bounds` takes `&self` (the
     /// scene-preparation worker shares one `Arc<DrawingDatabase>` across

@@ -10,17 +10,20 @@ use std::collections::BTreeSet;
 use cad_db::{EntityColor, EntityRenderAttributes, EntityTransparency};
 use cad_domain::{CadError, CadResult, Diagnostic, Mesh, ObjectId, Point3};
 use cad_import_core::{ImportLimits, MeshImport};
-use gltf::{material::AlphaMode, mesh::Mode, Node, Primitive, Semantic};
+use gltf::{
+    material::AlphaMode, mesh::Mode, texture::Info as TextureInfo, Node, Primitive, Semantic,
+};
 
 use crate::buffers::ResolvedBuffer;
+use crate::texture::{refusal_marker, resolve_base_colour_texture, BaseColourTexture};
 use crate::{
     DIAG_ALPHA_MASK_NOT_IMPORTED, DIAG_ANIMATION_IGNORED, DIAG_CAMERA_IGNORED, DIAG_COLORS_DROPPED,
-    DIAG_DEGENERATE_TRIANGLE, DIAG_INDEX_OUT_OF_RANGE, DIAG_INVALID_TRANSFORM,
+    DIAG_DEGENERATE_TRIANGLE, DIAG_EXTERNAL_IMAGE, DIAG_INDEX_OUT_OF_RANGE, DIAG_INVALID_TRANSFORM,
     DIAG_MATERIAL_IGNORED, DIAG_MESH_WITHOUT_POSITIONS, DIAG_NODE_CYCLE, DIAG_NODE_DEPTH,
     DIAG_NON_FINITE_VERTEX, DIAG_NORMALS_DROPPED, DIAG_PRIMITIVE_MODE_IGNORED,
     DIAG_PRIMITIVE_MODE_UNSUPPORTED, DIAG_SKIN_IGNORED, DIAG_SPARSE_ACCESSOR,
-    DIAG_TEXTURE_NOT_IMPORTED, DIAG_TRIANGLE_INDEX_COUNT, DIAG_UNREFERENCED_MESH,
-    DIAG_VERTEX_ALPHA_DROPPED,
+    DIAG_TEXTURE_NOT_IMPORTED, DIAG_TEXTURE_TRANSFORM_NOT_IMPORTED, DIAG_TRIANGLE_INDEX_COUNT,
+    DIAG_UNREFERENCED_MESH, DIAG_UVS_DROPPED, DIAG_UV_SET_IGNORED, DIAG_VERTEX_ALPHA_DROPPED,
 };
 
 /// The maximum node-hierarchy depth accepted before the recursion guard trips.
@@ -40,7 +43,12 @@ pub(crate) struct SceneWalker<'a> {
     buffers: &'a [ResolvedBuffer<'a>],
     limits: &'a ImportLimits,
     cancelled: &'a dyn Fn() -> bool,
+    /// Material indices whose base-colour texture info carries
+    /// `KHR_texture_transform` (the transform is not applied).
+    transformed_materials: &'a BTreeSet<usize>,
     referenced_meshes: BTreeSet<usize>,
+    /// `TEXCOORD_n` sets that were present but not the imported set.
+    ignored_uv_sets: BTreeSet<u32>,
     /// `true` when at least one triangle primitive had no usable positions.
     pub(crate) saw_mesh_without_positions: bool,
 }
@@ -51,13 +59,16 @@ impl<'a> SceneWalker<'a> {
         buffers: &'a [ResolvedBuffer<'a>],
         limits: &'a ImportLimits,
         cancelled: &'a dyn Fn() -> bool,
+        transformed_materials: &'a BTreeSet<usize>,
     ) -> Self {
         SceneWalker {
             document,
             buffers,
             limits,
             cancelled,
+            transformed_materials,
             referenced_meshes: BTreeSet::new(),
+            ignored_uv_sets: BTreeSet::new(),
             saw_mesh_without_positions: false,
         }
     }
@@ -150,7 +161,17 @@ impl<'a> SceneWalker<'a> {
             }
         }
 
-        let mut build = build_primitive(primitive, world, self.buffers, self.limits)?;
+        let mut build = build_primitive(
+            primitive,
+            world,
+            self.buffers,
+            self.limits,
+            self.transformed_materials,
+            import,
+        )?;
+        for set in &build.ignored_uv_sets {
+            self.ignored_uv_sets.insert(*set);
+        }
         if build.missing_positions {
             self.saw_mesh_without_positions = true;
             import.record(
@@ -248,6 +269,25 @@ impl<'a> SceneWalker<'a> {
                 Some("at least one mesh is referenced by no node in the scene".into()),
             );
         }
+        if let Some(note) = crate::texture::channel_note(self.document) {
+            import.record(note, None);
+        }
+        if !self.ignored_uv_sets.is_empty() {
+            let sets: Vec<u32> = self.ignored_uv_sets.iter().copied().collect();
+            import.record(
+                Diagnostic {
+                    object: None,
+                    code: DIAG_UV_SET_IGNORED.into(),
+                    message: format!(
+                        "only the UV set a material's base-color texture names is imported; \
+                         TEXCOORD set(s) {sets:?} were not read"
+                    ),
+                },
+                // A note, not a loss: UV1+ has no representation in the domain and
+                // nothing in the document asked for it to be drawn (ADR-0038 D1).
+                None,
+            );
+        }
     }
 }
 
@@ -263,6 +303,17 @@ struct PrimitiveBuild {
     colors_dropped: usize,
     /// Vertices whose stored alpha was below `1.0` (the mesh has RGB only).
     alpha_dropped: usize,
+    /// UV sets the primitive carried but that were not the imported set.
+    ignored_uv_sets: Vec<u32>,
+    /// The base-colour UV set was unusable and dropped as a whole.
+    uvs_dropped: usize,
+    /// The base-colour image names bytes this bytes-only import cannot read.
+    texture_unavailable: Option<String>,
+    /// `register_texture` refused the bytes: the stable marker and its message.
+    texture_refused: Option<(String, String)>,
+    /// The imported texture's info carried `KHR_texture_transform`.
+    texture_transform_not_imported: bool,
+    /// The material's base-colour texture bytes are outside the document.
     texture_not_imported: bool,
     material_invalid: bool,
     alpha_mask_not_imported: bool,
@@ -334,17 +385,72 @@ fn record_losses(
             )),
         );
     }
+    if build.uvs_dropped > 0 {
+        import.record(
+            Diagnostic {
+                object,
+                code: DIAG_UVS_DROPPED.into(),
+                message: format!(
+                    "{label}: the UV set the material's base-color texture names did not have \
+                     one finite pair per vertex and was dropped as a whole; the primitive keeps \
+                     its geometry and no texture is referenced"
+                ),
+            },
+            Some(format!("{label}: the base-colour UV set was dropped")),
+        );
+    }
     if build.texture_not_imported {
         import.record(
             Diagnostic {
                 object,
                 code: DIAG_TEXTURE_NOT_IMPORTED.into(),
                 message: format!(
-                    "{label}: the material has a base-colour texture; textures are not sampled, \
-                     the base-color factor is used instead"
+                    "{label}: the material has a base-color texture whose bytes are not inside \
+                     the document; the primitive keeps its UVs, the base-color factor is used \
+                     instead"
                 ),
             },
-            Some(format!("{label}: a base-colour texture was not imported")),
+            Some(format!(
+                "{label}: a base-colour texture's bytes were unavailable"
+            )),
+        );
+    }
+    if let Some(uri) = &build.texture_unavailable {
+        import.record(
+            Diagnostic {
+                object,
+                code: DIAG_EXTERNAL_IMAGE.into(),
+                message: format!(
+                    "{label}: the base-color image is `{uri}`, which this bytes-only import \
+                     cannot read; the UVs are kept and no texture is referenced"
+                ),
+            },
+            Some(format!("{label}: a base-colour image is an external file")),
+        );
+    }
+    if let Some((code, message)) = &build.texture_refused {
+        import.record(
+            Diagnostic {
+                object,
+                code: code.clone(),
+                message: format!("{label}: {message}"),
+            },
+            Some(format!("{label}: a base-colour texture was refused")),
+        );
+    }
+    if build.texture_transform_not_imported {
+        import.record(
+            Diagnostic {
+                object,
+                code: DIAG_TEXTURE_TRANSFORM_NOT_IMPORTED.into(),
+                message: format!(
+                    "{label}: the base-color texture info carries KHR_texture_transform; the \
+                     transform is not applied and the UVs are stored as authored"
+                ),
+            },
+            Some(format!(
+                "{label}: a base-colour KHR_texture_transform was not applied"
+            )),
         );
     }
     if build.material_invalid {
@@ -382,6 +488,8 @@ fn build_primitive(
     world: &[[f64; 4]; 4],
     buffers: &[ResolvedBuffer<'_>],
     limits: &ImportLimits,
+    transformed_materials: &BTreeSet<usize>,
+    import: &mut MeshImport,
 ) -> CadResult<PrimitiveBuild> {
     let style = material_style(primitive);
     // glTF 2.0: `COLOR_0` multiplies the material's linear `baseColorFactor`.
@@ -391,7 +499,6 @@ fn build_primitive(
     let mut build = PrimitiveBuild {
         color: style.color,
         transparency: style.transparency,
-        texture_not_imported: style.texture_not_imported,
         material_invalid: style.material_invalid,
         alpha_mask_not_imported: style.alpha_mask_not_imported,
         ..Default::default()
@@ -399,13 +506,18 @@ fn build_primitive(
 
     // `accessor::Iter` returns `None` for sparse accessors (they have no buffer
     // view), which would make positions "absent" and indices look like triangle
-    // soup. Refuse by name instead of misreading them.
-    let accessors = [
+    // soup. Refuse by name instead of misreading them. The base-colour UV set is
+    // part of the list for the same reason: a sparse `TEXCOORD_n` would otherwise
+    // read as "no UV set" and be indistinguishable from an absent one.
+    let mut accessors = vec![
         primitive.get(&Semantic::Positions),
         primitive.get(&Semantic::Normals),
         primitive.get(&Semantic::Colors(0)),
         primitive.indices(),
     ];
+    if let Some(info) = &style.base_color_texture {
+        accessors.push(primitive.get(&Semantic::TexCoords(info.tex_coord())));
+    }
     for accessor in accessors.into_iter().flatten() {
         if accessor.sparse().is_some() {
             return Err(CadError::Unsupported(format!(
@@ -562,25 +674,88 @@ fn build_primitive(
         return Ok(build);
     }
 
+    // Base-colour texture (ADR-0038 D6). Only the UV set the material's
+    // `baseColorTexture` names is read, and only the encoded bytes the document
+    // itself carries can become a document-owned texture. UVs and the texture key
+    // are stored together or not at all: a texture with no UV could never be
+    // sampled, so `cad-db` refuses that combination and this reader never builds it.
+    let mut uvs = Vec::new();
+    let mut texture = None;
+    if let Some(info) = &style.base_color_texture {
+        let set = info.tex_coord();
+        for (semantic, _) in primitive.attributes() {
+            if let Semantic::TexCoords(other) = semantic {
+                if other != set {
+                    build.ignored_uv_sets.push(other);
+                }
+            }
+        }
+        let values: Option<Vec<[f64; 2]>> = reader.read_tex_coords(set).map(|read| {
+            read.into_f32()
+                .map(|uv| [f64::from(uv[0]), f64::from(uv[1])])
+                .collect()
+        });
+        // The whole set is kept or dropped: a partial list or a `NaN` component
+        // would put the texture somewhere the document never authored it.
+        match values {
+            Some(values)
+                if values.len() == vertices.len()
+                    && values.iter().flatten().all(|value| value.is_finite()) =>
+            {
+                uvs = values;
+            }
+            _ => build.uvs_dropped += 1,
+        }
+        if !uvs.is_empty() {
+            match resolve_base_colour_texture(info, buffers)? {
+                BaseColourTexture::Embedded(bytes) => match import.register_texture(&bytes) {
+                    Ok(key) => {
+                        texture = Some(key);
+                        build.texture_transform_not_imported = style
+                            .material_index
+                            .is_some_and(|index| transformed_materials.contains(&index));
+                    }
+                    Err(error) => {
+                        // A budget/format refusal loses the texture only: the
+                        // geometry and its UVs stay, reported by the refusal's own
+                        // stable marker.
+                        let message = error.to_string();
+                        build.texture_refused =
+                            Some((refusal_marker(&message).to_string(), message));
+                    }
+                },
+                BaseColourTexture::Unavailable { uri } => {
+                    build.texture_unavailable = Some(uri);
+                    build.texture_not_imported = true;
+                }
+            }
+        }
+    }
+
     build.mesh = Some(Mesh {
         vertices,
         triangles,
         normals,
         face_sources: Vec::new(),
         colors,
+        uvs,
+        texture,
     });
     Ok(build)
 }
 
 /// What the primitive's material contributes, plus every loss it incurs.
 #[derive(Default)]
-struct MaterialStyle {
+struct MaterialStyle<'a> {
     color: EntityColor,
     transparency: EntityTransparency,
     /// The named material's linear RGB factor, when it is usable; multiplied
     /// into any `COLOR_0` vertex colours. `None` means `[1, 1, 1]`.
     factor: Option<[f32; 3]>,
-    texture_not_imported: bool,
+    /// The material's base-colour texture reference, when it names one.
+    base_color_texture: Option<TextureInfo<'a>>,
+    /// The named material's JSON index (the default material has none).
+    material_index: Option<usize>,
     material_invalid: bool,
     alpha_mask_not_imported: bool,
 }
@@ -603,19 +778,23 @@ struct MaterialStyle {
 ///
 /// The linear RGB factor is also kept in [`MaterialStyle::factor`] so a
 /// primitive with `COLOR_0` multiplies it into its vertex colours exactly once
-/// (the glTF 2.0 rule) instead of discarding it.
+/// (the glTF 2.0 rule) instead of discarding it. It is equally not baked into a
+/// **textured** primitive with no `COLOR_0`: the renderer composes
+/// `texture x vertex colour x entity colour`, so the factor stays the entity
+/// colour there and is applied exactly once.
 ///
 /// A factor outside the spec range is not clamped into a plausible colour: the
 /// entity keeps `ByLayer` and the loss is reported.
-fn material_style(primitive: &Primitive<'_>) -> MaterialStyle {
+fn material_style<'a>(primitive: &Primitive<'a>) -> MaterialStyle<'a> {
     let material = primitive.material();
-    if material.index().is_none() {
+    let Some(index) = material.index() else {
         return MaterialStyle::default();
-    }
+    };
     let pbr = material.pbr_metallic_roughness();
     let factor = pbr.base_color_factor();
     let mut style = MaterialStyle {
-        texture_not_imported: pbr.base_color_texture().is_some(),
+        base_color_texture: pbr.base_color_texture(),
+        material_index: Some(index),
         ..Default::default()
     };
     let valid = factor

@@ -13,6 +13,14 @@
 //! is reported as a conversion rather than silently flattened, and its
 //! layer-driven opacity joins the same layer note.
 //!
+//! A mesh that carries UV0 **and** a document-owned base-colour texture writes
+//! `TEXCOORD_0`, one `images[]` entry (a bufferView into the same single buffer,
+//! so `.gltf` stays one data-URI buffer and GLB stays one BIN chunk), one
+//! `textures[]`/`samplers[]` pair and a material with `baseColorTexture`
+//! (ADR-0038 D11). A mesh whose UVs or texture could not be written is reported
+//! as `export.gltf.texture_not_written` and is not counted as written exactly;
+//! nothing is ever sampled from an invented or placeholder image.
+//!
 //! glTF is **metres, +Y up**; `cad-db` coordinates are +Z up in the document's
 //! own source unit. The scale and the frame rotation are applied exactly once,
 //! in [`write`], and both are reported as provenance notes. Unknown units are

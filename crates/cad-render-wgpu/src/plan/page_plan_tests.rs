@@ -63,6 +63,8 @@ fn gpu_batch(
     upload_bytes: usize,
 ) -> GpuBatch {
     GpuBatch {
+        uvs: None,
+        texture: None,
         vertices: None,
         vertex_count,
         normals: None,

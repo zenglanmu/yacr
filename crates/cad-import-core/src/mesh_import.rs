@@ -10,6 +10,9 @@
 //! This helper intentionally knows nothing about a file format. It never
 //! invents units, colours or completeness: the caller supplies every value.
 
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
 use cad_db::{
     validate_geometry, DbEntity, DbObject, DrawingDatabaseBuilder, EntityColor,
     EntityRenderAttributes, Layer, LayerAttributes,
@@ -19,7 +22,47 @@ use cad_domain::{
     ObjectId, Revision, SemanticGeometry, SpaceId, SupportStatus,
 };
 
-use crate::ImportRequest;
+use crate::{ImportLimits, ImportRequest};
+
+/// The PNG container signature (the first eight bytes of every PNG).
+const PNG_MAGIC: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+
+/// Enough of the JPEG SOI + first marker to identify the container.
+const JPEG_MAGIC: [u8; 3] = [0xff, 0xd8, 0xff];
+
+/// The extension a texture key uses for these bytes, or `None` when the bytes are
+/// neither PNG nor JPEG.
+///
+/// This is a **sniff**, not a full decode: the importer only needs to know which
+/// archive extension to name, and refusing an unknown container by name is exactly
+/// the `import.texture.unsupported_format` contract. A file with a `.png` name and
+/// other bytes is refused, because the key must reproduce the bytes' real form.
+fn texture_extension(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(&PNG_MAGIC) {
+        Some("png")
+    } else if bytes.starts_with(&JPEG_MAGIC) {
+        Some("jpg")
+    } else {
+        None
+    }
+}
+
+/// `<sha256 first 32 hex>.<ext>` — the document-owned key for these bytes.
+///
+/// Content addressing is the whole dedupe mechanism: one image referenced by many
+/// faces (or imported twice from the same file) has exactly one key, so the
+/// document stores and saves exactly one copy.
+fn texture_key(bytes: &[u8], extension: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    let digest = hasher.finalize();
+    let mut hex = String::with_capacity(32);
+    for byte in digest.iter().take(16) {
+        hex.push_str(&format!("{byte:02x}"));
+    }
+    format!("{hex}.{extension}")
+}
 
 /// Builds a database out of neutral meshes.
 pub struct MeshImport {
@@ -30,6 +73,15 @@ pub struct MeshImport {
     inserted: usize,
     next_id: u128,
     partial: bool,
+    /// Registered textures, keyed by their content-addressed key (ADR-0038 D5).
+    ///
+    /// Held until [`MeshImport::finish`] flushes them into the builder, so a mesh
+    /// may be pushed before or after the image it references and a refused import
+    /// never leaves a texture behind in a database.
+    textures: BTreeMap<String, Arc<[u8]>>,
+    /// Sum of `textures`' payload sizes, for the total-bytes budget.
+    texture_bytes: usize,
+    limits: ImportLimits,
 }
 
 /// The report-side result of a finished mesh import.
@@ -59,7 +111,81 @@ impl MeshImport {
             inserted: 0,
             next_id: 1,
             partial: false,
+            textures: BTreeMap::new(),
+            texture_bytes: 0,
+            limits: request.limits,
         })
+    }
+
+    /// Register one base-colour texture and return the key a mesh may carry
+    /// (ADR-0038 D5).
+    ///
+    /// The key is content-addressed — `<sha256(bytes) first 32 hex>.<png|jpg>` —
+    /// so registering the same bytes twice returns the same key and stores one
+    /// copy. The container is **sniffed**, not trusted from a filename: anything
+    /// that is not PNG or JPEG is `import.texture.unsupported_format` (a `.png`
+    /// name over other bytes is still refused, because the key must reproduce the
+    /// bytes' real form).
+    ///
+    /// Budgets come from [`ImportLimits`] and are refusals by name, never
+    /// truncation: `import.texture.too_large` (one image),
+    /// `import.texture.budget_exceeded` (the document total) and
+    /// `import.texture.too_many` (the count). A refused registration changes no
+    /// state, so an importer can decide to drop the texture, report it, and keep
+    /// the UVs (the ADR's `Partial` behaviour).
+    pub fn register_texture(&mut self, bytes: &[u8]) -> CadResult<String> {
+        let extension = texture_extension(bytes).ok_or_else(|| {
+            CadError::Unsupported(format!(
+                "import.texture.unsupported_format: {} bytes are neither PNG nor JPEG",
+                bytes.len()
+            ))
+        })?;
+        let key = texture_key(bytes, extension);
+        // Dedupe before any budget check: the image is already stored, so a second
+        // registration adds nothing and must not consume budget twice.
+        if self.textures.contains_key(&key) {
+            return Ok(key);
+        }
+        if bytes.len() > self.limits.max_texture_bytes {
+            return Err(CadError::InvalidInput(format!(
+                "import.texture.too_large: {key} is {} bytes, over the {}-byte \
+                 per-texture budget",
+                bytes.len(),
+                self.limits.max_texture_bytes
+            )));
+        }
+        if self.textures.len() >= self.limits.max_textures {
+            return Err(CadError::InvalidInput(format!(
+                "import.texture.too_many: this import already holds {} textures, at \
+                 its {}-texture budget",
+                self.textures.len(),
+                self.limits.max_textures
+            )));
+        }
+        let total = self.texture_bytes.saturating_add(bytes.len());
+        if total > self.limits.max_total_texture_bytes {
+            return Err(CadError::InvalidInput(format!(
+                "import.texture.budget_exceeded: this import would hold {total} texture \
+                 bytes, over the {}-byte total budget",
+                self.limits.max_total_texture_bytes
+            )));
+        }
+        // Only now does any state change: a refusal above leaves the import exactly
+        // as it was.
+        self.texture_bytes = total;
+        self.textures.insert(key.clone(), Arc::from(bytes));
+        Ok(key)
+    }
+
+    /// The textures registered so far, in key order.
+    ///
+    /// Exposed for the importer's own report (an unreferenced texture is still
+    /// carried into the document) and for tests; the bytes themselves are flushed
+    /// into the built database at [`Self::finish`].
+    pub fn textures(&self) -> impl Iterator<Item = (&str, &Arc<[u8]>)> {
+        self.textures
+            .iter()
+            .map(|(key, bytes)| (key.as_str(), bytes))
     }
 
     /// Reserve the identity a mesh entity (or an explicit empty-object report)
@@ -167,9 +293,23 @@ impl MeshImport {
 
     /// Publish the database and the derived report fields.
     ///
+    /// Registered textures are flushed into the database here (ADR-0038 D5) —
+    /// including ones no mesh references. That is deliberate: the importer decided
+    /// those bytes belong to the document (a material library, a face set that was
+    /// dropped as `Partial`), and dropping an asset the source shipped would lose
+    /// data the format could have preserved. The document stays the authority for
+    /// what a save writes; a key nothing references simply is not reachable from
+    /// geometry.
+    ///
     /// A mesh is drawable and pickable but is not a MEASURE target; the
     /// capability rows say exactly that, matching the DWG/DXF mesh mapping.
-    pub fn finish(self) -> CadResult<MeshImportOutcome> {
+    pub fn finish(mut self) -> CadResult<MeshImportOutcome> {
+        // Borrow the two fields separately: iterating the texture map while the
+        // builder is mutated is fine because they are disjoint.
+        for (key, bytes) in &self.textures {
+            self.builder
+                .insert_texture(key.clone(), Arc::clone(bytes))?;
+        }
         let database = self.builder.finish()?;
         let completeness = if self.partial {
             Completeness::Partial(self.reasons)
@@ -274,5 +414,196 @@ mod tests {
         assert_eq!(attributes.transparency, EntityTransparency::Explicit(0.5));
         // Nothing else is invented: the layer keeps its opaque, ACI 7 defaults.
         assert_eq!(outcome.database.entity_count(), 1);
+    }
+
+    // ------------------------------------------------------------ textures ---
+
+    fn png(tail: u8) -> Vec<u8> {
+        let mut bytes = PNG_MAGIC.to_vec();
+        bytes.extend_from_slice(&[tail, 0x1a, 0x2b, 0x3c]);
+        bytes
+    }
+
+    fn jpeg() -> Vec<u8> {
+        let mut bytes = JPEG_MAGIC.to_vec();
+        bytes.extend_from_slice(&[0xe0, 0x00, 0x10, 0x4a]);
+        bytes
+    }
+
+    fn request_with(limits: ImportLimits) -> ImportRequest {
+        ImportRequest {
+            limits,
+            ..request()
+        }
+    }
+
+    fn is_texture_key(key: &str, extension: &str) -> bool {
+        let Some(stem) = key.strip_suffix(extension) else {
+            return false;
+        };
+        stem.len() == 32
+            && stem
+                .chars()
+                .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
+    }
+
+    #[test]
+    fn a_png_and_a_jpeg_get_deterministic_content_addressed_keys() {
+        let mut import = MeshImport::new(&request(), "TestMesh").unwrap();
+        let png_key = import.register_texture(&png(0x01)).expect("png");
+        let jpeg_key = import.register_texture(&jpeg()).expect("jpeg");
+        assert!(is_texture_key(&png_key, ".png"), "{png_key}");
+        assert!(is_texture_key(&jpeg_key, ".jpg"), "{jpeg_key}");
+        assert_ne!(png_key, jpeg_key, "different bytes, different keys");
+
+        // Same bytes, fresh import: the key is a function of the bytes alone, so a
+        // saved document stays addressable across sessions.
+        let mut second = MeshImport::new(&request(), "TestMesh").unwrap();
+        assert_eq!(second.register_texture(&png(0x01)).expect("png"), png_key);
+        assert_ne!(
+            second.register_texture(&png(0x02)).expect("other png"),
+            png_key
+        );
+    }
+
+    #[test]
+    fn a_non_image_is_refused_by_name() {
+        let mut import = MeshImport::new(&request(), "TestMesh").unwrap();
+        for bytes in [
+            Vec::new(),
+            b"not an image".to_vec(),
+            // A truncated PNG signature must not pass the sniff.
+            PNG_MAGIC[..7].to_vec(),
+            // A two-byte JPEG prefix is not a JPEG either.
+            JPEG_MAGIC[..2].to_vec(),
+        ] {
+            let error = import.register_texture(&bytes).expect_err("not a PNG/JPEG");
+            assert!(
+                error
+                    .to_string()
+                    .contains("import.texture.unsupported_format"),
+                "{error}"
+            );
+        }
+        assert_eq!(import.textures().count(), 0, "a refusal changes no state");
+    }
+
+    #[test]
+    fn identical_bytes_are_stored_once() {
+        let mut import = MeshImport::new(&request(), "TestMesh").unwrap();
+        let first = import.register_texture(&png(0x07)).expect("first");
+        let second = import.register_texture(&png(0x07)).expect("second");
+        assert_eq!(first, second);
+        assert_eq!(import.textures().count(), 1, "one copy, one key");
+        // The second registration must not consume budget a second time: the whole
+        // document budget is already spent by the one copy.
+        let mut tight = MeshImport::new(
+            &request_with(ImportLimits {
+                max_texture_bytes: png(0x07).len(),
+                max_total_texture_bytes: png(0x07).len(),
+                max_textures: 1,
+                ..ImportLimits::default()
+            }),
+            "TestMesh",
+        )
+        .unwrap();
+        assert!(tight.register_texture(&png(0x07)).is_ok());
+        assert!(
+            tight.register_texture(&png(0x07)).is_ok(),
+            "a duplicate is not charged twice"
+        );
+    }
+
+    #[test]
+    fn each_texture_budget_is_a_named_refusal_that_keeps_state() {
+        // Per-image budget.
+        let mut import = MeshImport::new(
+            &request_with(ImportLimits {
+                max_texture_bytes: 4,
+                ..ImportLimits::default()
+            }),
+            "TestMesh",
+        )
+        .unwrap();
+        let error = import.register_texture(&png(0x01)).expect_err("too large");
+        assert!(
+            error.to_string().contains("import.texture.too_large"),
+            "{error}"
+        );
+        assert_eq!(import.textures().count(), 0);
+
+        // Per-document total budget: each image fits, the sum does not.
+        let one = png(0x01).len();
+        let mut import = MeshImport::new(
+            &request_with(ImportLimits {
+                max_total_texture_bytes: one + 1,
+                ..ImportLimits::default()
+            }),
+            "TestMesh",
+        )
+        .unwrap();
+        import.register_texture(&png(0x01)).expect("first fits");
+        let error = import.register_texture(&png(0x02)).expect_err("budget");
+        assert!(
+            error.to_string().contains("import.texture.budget_exceeded"),
+            "{error}"
+        );
+        assert_eq!(import.textures().count(), 1, "the first texture stays");
+
+        // Texture count budget.
+        let mut import = MeshImport::new(
+            &request_with(ImportLimits {
+                max_textures: 1,
+                ..ImportLimits::default()
+            }),
+            "TestMesh",
+        )
+        .unwrap();
+        import.register_texture(&png(0x01)).expect("first");
+        let error = import.register_texture(&png(0x02)).expect_err("too many");
+        assert!(
+            error.to_string().contains("import.texture.too_many"),
+            "{error}"
+        );
+        assert_eq!(import.textures().count(), 1);
+    }
+
+    #[test]
+    fn finish_carries_the_bytes_into_the_database() {
+        let mut import = MeshImport::new(&request(), "TestMesh").unwrap();
+        let key = import.register_texture(&png(0x01)).expect("png");
+        // Registered but referenced by no mesh: the importer decided the asset
+        // belongs to the document, so it is still carried.
+        let outcome = import.finish().expect("finish");
+        assert_eq!(
+            outcome.database.texture(&key).map(|bytes| &bytes[..]),
+            Some(&png(0x01)[..])
+        );
+        assert_eq!(outcome.database.textures().count(), 1);
+    }
+
+    #[test]
+    fn a_textured_mesh_reaches_the_finished_database() {
+        let mut import = MeshImport::new(&request(), "TestMesh").unwrap();
+        let key = import.register_texture(&png(0x01)).expect("png");
+        let object = import.reserve_object().unwrap();
+        let mut mesh = triangle();
+        mesh.uvs = vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]];
+        mesh.texture = Some(key.clone());
+        import
+            .push_mesh(object, mesh, EntityColor::Explicit([1, 2, 3]))
+            .expect("a textured mesh validates");
+        let outcome = import.finish().expect("finish");
+        let entity = outcome
+            .database
+            .entities()
+            .find(|entity| entity.id == EntityId(1))
+            .expect("the mesh row");
+        let SemanticGeometry::Mesh(mesh) = &entity.geometry else {
+            panic!("expected a mesh");
+        };
+        assert_eq!(mesh.texture.as_deref(), Some(key.as_str()));
+        assert_eq!(mesh.uvs.len(), 3);
+        assert!(outcome.database.texture(&key).is_some());
     }
 }

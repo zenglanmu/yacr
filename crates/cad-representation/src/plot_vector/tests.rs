@@ -569,6 +569,8 @@ fn mesh_without_triangles_is_reported() {
 #[test]
 fn mesh_triangles_become_filled_polygons() {
     let mesh = Mesh {
+        uvs: Vec::new(),
+        texture: None,
         vertices: vec![paper(0.0, 0.0), paper(10.0, 0.0), paper(0.0, 10.0)],
         triangles: vec![[0, 1, 2]],
         ..Mesh::default()

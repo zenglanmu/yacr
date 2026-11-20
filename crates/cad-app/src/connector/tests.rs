@@ -117,6 +117,8 @@ fn triangle_db() -> cad_db::DrawingDatabase {
                 normals: vec![normal; 3],
                 face_sources: Vec::new(),
                 colors: Vec::new(),
+                uvs: Vec::new(),
+                texture: None,
             }),
             draw_order: 0,
         })

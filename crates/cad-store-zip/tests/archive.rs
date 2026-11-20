@@ -112,6 +112,7 @@ fn snapshot() -> DocumentSnapshot {
         models,
         shards,
         tables: Default::default(),
+        textures: Default::default(),
     };
     document.tables.set(
         TableKind::Layers,
@@ -411,12 +412,12 @@ fn a_newer_minor_is_refused_before_anything_else_is_parsed() {
     let base = archive_bytes(&snapshot());
     let broken = tamper(&base, DOCUMENT_ENTRY, b"not json at all");
     let archive = patch_manifest(&broken, |manifest| {
-        manifest["format"]["minor"] = Value::from(3);
+        manifest["format"]["minor"] = Value::from(cad_domain::ymodel::FORMAT_MINOR + 1);
     });
     let error = read_archive(&archive).expect_err("refused");
     assert_eq!(error.marker, markers::UNSUPPORTED_MINOR, "{error}");
 
-    // One below the ceiling is still opened.
+    // At the ceiling the archive is still opened.
     let same_minor = tamper(&base, DOCUMENT_ENTRY, b"not json at all");
     let error = read_archive(&same_minor).expect_err("refused");
     assert_eq!(error.marker, markers::INVALID_DOCUMENT, "{error}");
@@ -565,7 +566,11 @@ fn the_manifest_pins_the_document_and_the_import_baseline() {
     assert_eq!(manifest["saved_at"], "2026-11-18T00:00:00Z");
     assert_eq!(manifest["format"]["read"], Value::from(1));
     assert_eq!(manifest["format"]["write"], Value::from(1));
-    assert_eq!(manifest["format"]["minor"], Value::from(2));
+    assert_eq!(
+        manifest["format"]["minor"],
+        Value::from(cad_domain::ymodel::FORMAT_MINOR)
+    );
+    assert_eq!(cad_domain::ymodel::FORMAT_MINOR, 3, "ADR-0038 D4");
 
     let loaded = read_archive(&bytes).expect("read");
     assert_eq!(loaded.manifest.open_revision, Revision(4));

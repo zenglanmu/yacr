@@ -95,6 +95,13 @@ pub const DIAG_MATERIAL_IGNORED: &str = "import.rvt.material_ignored";
 /// (`extras.alphaSource = "rvt-rs"`, ADR-0035) — a category default, or the most
 /// transparent constituent of a body drawn whole — not read for one material.
 pub const DIAG_ALPHA_CHOSEN: &str = "import.rvt.alpha_chosen";
+/// Partial reason: the intermediate GLB carries texture references
+/// (`TEXCOORD_*`, `images` or `textures`) that this importer does not import.
+///
+/// `rvt` 0.24.0 emits no textures at all (ADR-0038 D6), so this code firing means
+/// the vendored writer changed; decoding images is out of phase-A scope and
+/// `vendor/rvt` gains no texture patch (ADR-0035).
+pub const DIAG_TEXTURE_NOT_IMPORTED: &str = "import.rvt.texture_not_imported";
 
 /// Stable error code: the intermediate GLB is missing the `glTF` magic.
 pub const EMPTY_GLB: &str = "import.rvt.invalid_glb";
@@ -555,6 +562,26 @@ fn record_scene(import: &mut MeshImport, scene: &GlbScene) {
         );
     }
     record_material_losses(import, &scene.material_losses);
+    if scene.texture_references > 0 {
+        import.record(
+            Diagnostic {
+                object: None,
+                code: DIAG_TEXTURE_NOT_IMPORTED.into(),
+                message: format!(
+                    "the intermediate GLB declares {} texture reference(s) (a `TEXCOORD_*` \
+                     attribute, an `images` entry or a `textures` entry); rvt 0.24.0 emits no \
+                     textures, so this means the vendored glTF writer changed — no UVs or texture \
+                     were imported",
+                    scene.texture_references
+                ),
+            },
+            Some(format!(
+                "{} texture reference(s) in the rvt glTF were not imported; rvt 0.24.0 does not \
+                 emit textures, so this is unexpected input",
+                scene.texture_references
+            )),
+        );
+    }
     if scene.alpha_chosen > 0 {
         import.record(
             Diagnostic {

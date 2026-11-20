@@ -61,6 +61,12 @@ pub fn repaired_normals(batch: &RenderBatch) -> Vec<[f32; 3]> {
         normals: Vec::new(),
         face_sources: Vec::new(),
         colors: Vec::new(),
+        // Normal repair only needs positions and triangles. UV0 and the texture
+        // key are not reconstructed here: a mesh rebuilt for a geometry helper is
+        // never drawn, so inventing a parameterisation would be fake data
+        // (ADR-0038 D1: never fabricate a UV).
+        uvs: Vec::new(),
+        texture: None,
     };
     let computed = cad_geometry::compute_vertex_normals(&mesh);
     computed

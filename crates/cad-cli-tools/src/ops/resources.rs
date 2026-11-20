@@ -87,6 +87,12 @@ pub(crate) fn load_fonts(
 }
 
 /// The raster-image keys the open drawing references, for the image loader.
+///
+/// File-based `Image` keys only: a mesh's base-colour texture is document state
+/// (`cad-db`), decoded by
+/// [`cad_platform::images::local::load_image_cache_for_document`] (ADR-0038 D10).
+/// [`cad_platform::images::has_document_textures`] is the companion check for
+/// "does this drawing have any image at all?".
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn images_requested(controller: &HostController) -> Vec<String> {
     controller
@@ -95,28 +101,43 @@ pub(crate) fn images_requested(controller: &HostController) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Resolve and decode the drawing's raster images for `render`/`plot`.
+/// Resolve and decode every image the open drawing owns, for `render`/`plot`.
 ///
-/// Native only. Roots are the drawing's own directory first, then an explicit
-/// `--images-dir`; a missing, unsafe or undecodable key is reported, never
-/// substituted. When the drawing references no images this is an empty cache
-/// and an empty report (a no-op).
+/// Native only. The drawing's **document textures** are decoded first straight
+/// from `cad-db` (no filesystem access, ADR-0038 D10); the file-based roots are
+/// then the drawing's own directory followed by an explicit `--images-dir`. A
+/// missing, unsafe, undecodable or over-budget key is reported, never
+/// substituted. When the drawing references neither a file image nor a document
+/// texture this is an empty cache and an empty report (a no-op).
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn load_images(
     invocation: &CliInvocation,
-    requested: &[String],
+    controller: &HostController,
 ) -> CadResult<(
     Arc<cad_resources::DecodedImageCache>,
     cad_platform::images::ImageLoadReport,
 )> {
+    let requested = images_requested(controller);
     let drawing_dir = invocation
         .input
         .parent()
         .filter(|dir| !dir.as_os_str().is_empty());
-    cad_platform::images::local::load_image_cache(
-        requested,
-        drawing_dir,
-        invocation.images_dir.as_deref(),
-        &cad_resources::ResourceLimits::default(),
-    )
+    let limits = cad_resources::ResourceLimits::default();
+    match controller.drawing() {
+        Some(drawing) => cad_platform::images::local::load_image_cache_for_document(
+            drawing.as_ref(),
+            &requested,
+            drawing_dir,
+            invocation.images_dir.as_deref(),
+            &limits,
+        ),
+        // No open document: there is nothing a texture could belong to, so the
+        // file-only pass is the same (empty-request) no-op.
+        None => cad_platform::images::local::load_image_cache(
+            &requested,
+            drawing_dir,
+            invocation.images_dir.as_deref(),
+            &limits,
+        ),
+    }
 }

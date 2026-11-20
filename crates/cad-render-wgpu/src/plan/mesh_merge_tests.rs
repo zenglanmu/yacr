@@ -20,6 +20,8 @@ fn keys(batches: &[cad_scene::RenderBatch]) -> Vec<u32> {
 fn quad(origin: [f64; 3], color: [f32; 3], entity: u128) -> cad_scene::RenderBatch {
     let half = 1.0f32;
     cad_scene::RenderBatch {
+        uvs: Vec::new(),
+        texture: None,
         conics: Vec::new(),
         local_origin: cad_domain::Point3 {
             x: origin[0],
@@ -372,4 +374,51 @@ fn legacy_line_quads_draw_the_mesh_edge_positions_not_its_triangle_vertices() {
     assert!(vertex_quads
         .iter()
         .all(|quad| quad.p0 == [0.0, 0.0, 0.0] && quad.p1 == [1.0, 0.0, 0.0]));
+}
+
+/// The UV0 stream is `@location(3)` `Float32x2`, 8 bytes per vertex, and only a
+/// textured batch ever uploads it (ADR-0038 D9).
+#[test]
+fn mesh_uv_stream_is_a_two_float_attribute_at_location_three() {
+    let packed = pack_uvs(&[[0.25, 0.5], [1.0, 0.0], [0.0, 1.0]]);
+    assert_eq!(packed.len(), 3 * 8);
+    let layout = mesh_uv_layout();
+    assert_eq!(layout.array_stride, 8);
+    assert_eq!(layout.attributes.len(), 1);
+    assert_eq!(layout.attributes[0].shader_location, 3);
+    assert_eq!(layout.attributes[0].format, wgpu::VertexFormat::Float32x2);
+    assert_eq!(layout.attributes[0].offset, 0);
+}
+
+/// A textured batch is never flat-merged (nor pulled): both paths bind one
+/// uniform for a whole draw and cannot express a per-batch texture. This is the
+/// documented batching regression of ADR-0038 D8, asserted rather than assumed.
+#[test]
+fn a_textured_mesh_is_never_flat_merged() {
+    let plain = quad([0.0, 0.0, 0.0], [1.0, 1.0, 1.0], 1);
+    assert!(mesh_batch_is_mergeable(&plain));
+
+    let mut textured = quad([0.0, 0.0, 0.0], [1.0, 1.0, 1.0], 2);
+    textured.uvs = vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+    textured.texture = Some(cad_resources::ResourceKey(
+        "4c2f2e0a5f3d9b7c1e8a6d4b2c0f9e71.png".into(),
+    ));
+    assert!(
+        !mesh_batch_is_mergeable(&textured),
+        "a textured batch must keep its own draw so it can bind its own texture"
+    );
+
+    // The planner only merges what the predicate admits, so the textured batch
+    // contributes no chunk at all.
+    let batches = [plain, textured];
+    let converted: Vec<usize> = batches
+        .iter()
+        .enumerate()
+        .filter(|(_, batch)| mesh_batch_is_mergeable(batch))
+        .map(|(index, _)| index)
+        .collect();
+    assert_eq!(converted, vec![0]);
+    let (chunks, runs) = build_mesh_chunks(&batches, &converted, &keys(&batches), 1 << 16, 1e9);
+    assert_eq!(chunks.len(), 1);
+    assert!(runs[1].is_none(), "the textured batch owns no merged run");
 }

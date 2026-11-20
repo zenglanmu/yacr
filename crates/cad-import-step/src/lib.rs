@@ -790,6 +790,8 @@ fn tessellate_body(
         normals,
         face_sources: Vec::new(),
         colors: Vec::new(),
+        uvs: Vec::new(),
+        texture: None,
     }))
 }
 
@@ -867,6 +869,11 @@ fn place_mesh(mesh: &Mesh, matrix: &Affine, label: &str) -> CadResult<PlacedMesh
             normals,
             face_sources: Vec::new(),
             colors: Vec::new(),
+            // Placement moves the geometry, not the surface parameterisation:
+            // the source mesh's UV0 and texture carry over. STEP has neither
+            // today, so this stays empty in practice.
+            uvs: mesh.uvs.clone(),
+            texture: mesh.texture.clone(),
         },
         normals_dropped,
     })

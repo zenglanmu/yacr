@@ -128,6 +128,8 @@ fn line_span_rows(
         vertices.push([x1, offset, 0.0]);
     }
     RenderBatch {
+        uvs: Vec::new(),
+        texture: None,
         conics: Vec::new(),
         local_origin: Point3 {
             x: 0.0,

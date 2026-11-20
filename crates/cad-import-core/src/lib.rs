@@ -70,6 +70,17 @@ pub struct ImportLimits {
     /// `None` means the reader's own behaviour (per-section allocation, no
     /// shared budget), so the default does not silently change what is accepted.
     pub max_decompressed_bytes: Option<usize>,
+    /// Largest single document texture an importer may register (ADR-0038 D5).
+    ///
+    /// Refused by name (`import.texture.too_large`), never truncated: a
+    /// half-written image decodes to garbage, which is worse than a reported loss.
+    pub max_texture_bytes: usize,
+    /// Total bytes all textures of one import may register
+    /// (`import.texture.budget_exceeded`).
+    pub max_total_texture_bytes: usize,
+    /// Largest number of distinct textures one import may register
+    /// (`import.texture.too_many`).
+    pub max_textures: usize,
 }
 
 impl Default for ImportLimits {
@@ -81,6 +92,12 @@ impl Default for ImportLimits {
             max_mesh_faces: None,
             max_mesh_face_indices: None,
             max_decompressed_bytes: None,
+            // ADR-0038 D5: 16 MiB per image, 64 MiB per document, 256 images.
+            // Real base-colour maps are far below every one of them; the budgets
+            // exist so a hostile file cannot turn a texture into an OOM.
+            max_texture_bytes: 16 * 1024 * 1024,
+            max_total_texture_bytes: 64 * 1024 * 1024,
+            max_textures: 256,
         }
     }
 }

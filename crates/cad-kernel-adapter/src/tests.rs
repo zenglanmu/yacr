@@ -140,6 +140,8 @@ fn budget_exceeded_is_reported_with_stable_code() {
             normals: vec![],
             face_sources: vec![None],
             colors: Vec::new(),
+            uvs: Vec::new(),
+            texture: None,
         },
         edges: vec![vec![
             Point3 {

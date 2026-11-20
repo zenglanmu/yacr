@@ -29,6 +29,8 @@ fn grid_batch(first: usize, count: usize, draw_order: i64) -> RenderBatch {
         vertices.push([x0 + 2.0, y0 + 1.5, 0.0]);
     }
     RenderBatch {
+        uvs: Vec::new(),
+        texture: None,
         conics: Vec::new(),
         local_origin: Point3 {
             x: 0.0,

@@ -8,10 +8,17 @@
 //! the two cannot drift apart:
 //!
 //! 1. [`requested_images`] reads, read-only, the image keys a drawing
-//!    references.
+//!    references. It is deliberately **file-based only**: a mesh's base-colour
+//!    texture is document state (`cad_db::DrawingDatabase::textures`), not a
+//!    file reference (ADR-0038 D2/D3). [`has_document_textures`] is the cheap
+//!    "any images at all?" companion for that second source.
 //! 2. [`local::load_image_cache`] resolves each key under a drawing directory
 //!    and an optional explicit images directory, reads the bytes, decodes them
 //!    with `cad-resources` and inserts them into a [`DecodedImageCache`].
+//! 3. [`local::load_image_cache_for_document`] is the same pass plus the
+//!    document's own textures, decoded first from the database bytes with the
+//!    same [`cad_resources::ResourceLimits`] and **no filesystem access**
+//!    (ADR-0038 D10).
 //!
 //! Resolution is deliberately defensive: an absolute path, a `..` escape, a
 //! URL or an empty key is rejected before any read (`is_safe_reference`), and a
@@ -82,6 +89,20 @@ pub fn requested_images(database: &DrawingDatabase) -> Vec<String> {
     out
 }
 
+/// Whether the document owns any mesh base-colour texture bytes (ADR-0038 D3).
+///
+/// [`requested_images`] only reports file-based `Image` keys, so a drawing whose
+/// only raster assets are mesh textures would otherwise look image-free and skip
+/// the decode pass entirely. Callers that branch on "does this drawing reference
+/// any image?" must OR this in: `requested_images(db).is_empty() &&
+/// !has_document_textures(db)` is the real "no images at all" test.
+///
+/// Cheap (one map probe) and free of filesystem access: the bytes live in
+/// `cad-db`.
+pub fn has_document_textures(database: &DrawingDatabase) -> bool {
+    database.textures().next().is_some()
+}
+
 fn collect_images(geometry: &SemanticGeometry, out: &mut Vec<String>) {
     match geometry {
         SemanticGeometry::Image {
@@ -132,229 +153,7 @@ fn collect_images(geometry: &SemanticGeometry, out: &mut Vec<String>) {
 /// Kept out of wasm builds, which have no filesystem and resolve resources
 /// through the browser network stack instead.
 #[cfg(not(target_arch = "wasm32"))]
-pub mod local {
-    use std::path::{Path, PathBuf};
-    use std::sync::Arc;
-
-    use cad_domain::{CadError, CadResult};
-    use cad_resources::{
-        decode_image, image_resource_key, is_safe_reference, DecodedImageCache, ResourceLimits,
-    };
-
-    use super::*;
-
-    /// Candidate `images/` directories for an executable path, most specific
-    /// first: next to the binary, next to its `bin/` parent, under a macOS
-    /// `.app` bundle's `Contents/Resources/`, then the working directory.
-    ///
-    /// Mirrors [`super::super::fonts::local::font_dir_candidates`] so a packaged
-    /// client finds a sibling image pack the same way it finds its fonts.
-    pub fn image_dir_candidates(exe: &Path) -> Vec<PathBuf> {
-        let mut out = Vec::new();
-        if let Some(dir) = exe.parent() {
-            out.push(dir.join("images"));
-            if let Some(parent) = dir.parent() {
-                out.push(parent.join("images"));
-                // macOS `.app` layout: `Contents/MacOS/<exe>` with the image
-                // package at `Contents/Resources/images`. Harmless on other
-                // platforms (the path simply does not exist).
-                out.push(parent.join("Resources").join("images"));
-            }
-        }
-        if let Ok(cwd) = std::env::current_dir() {
-            out.push(cwd.join("images"));
-        }
-        out
-    }
-
-    /// Resolve the image directory to use.
-    ///
-    /// An explicit path must exist (a typo is an error, not a silent fallback);
-    /// otherwise the first existing candidate for `exe` is used, or `None`.
-    pub fn resolve_image_dir(explicit: Option<&Path>, exe: &Path) -> CadResult<Option<PathBuf>> {
-        match explicit {
-            Some(dir) => {
-                if dir.is_dir() {
-                    Ok(Some(dir.to_path_buf()))
-                } else {
-                    Err(CadError::InvalidInput(format!(
-                        "image directory does not exist: {}",
-                        dir.display()
-                    )))
-                }
-            }
-            None => Ok(image_dir_candidates(exe)
-                .into_iter()
-                .find(|dir| dir.is_dir())),
-        }
-    }
-
-    /// Resolve one logical image key to an existing file under `roots`.
-    ///
-    /// The reference is validated with `cad-resources`' [`is_safe_reference`]
-    /// (absolute paths, Windows drive letters, URL schemes and `..` escapes are
-    /// rejected) before any filesystem access; the joined candidate must also
-    /// stay under its root as defence in depth. Returns `Ok(None)` when the key
-    /// is safe but no root holds the file, so the caller reports it unresolved.
-    ///
-    /// The stored key is lowercased ([`image_resource_key`]) but the filesystem
-    /// may be case-sensitive, so after an exact miss each root is retried with a
-    /// **bounded, component-by-component case-insensitive scan**. The scan never
-    /// follows a symlink, never accepts `..`/empty path segments and only returns
-    /// a regular file, so it cannot escape the root.
-    pub fn resolve_image_file(roots: &[PathBuf], key: &str) -> CadResult<Option<PathBuf>> {
-        if key.chars().any(char::is_control) || !is_safe_reference(key) {
-            return Err(CadError::InvalidInput(format!(
-                "image reference is not a safe relative key: {key}"
-            )));
-        }
-        // Canonical relative components (empty and `.` dropped), matching the
-        // normalisation `image_resource_key` applies to the cached key.
-        let folded = key.replace('\\', "/");
-        let components: Vec<&str> = folded
-            .split('/')
-            .filter(|segment| !segment.is_empty() && *segment != ".")
-            .collect();
-        if components.is_empty() {
-            return Err(CadError::InvalidInput(format!(
-                "image reference is not a safe relative key: {key}"
-            )));
-        }
-        for root in roots {
-            let candidate = root.join(key);
-            if !candidate.starts_with(root) {
-                continue;
-            }
-            if candidate.is_file() {
-                return Ok(Some(candidate));
-            }
-            if let Some(found) = case_insensitive_candidate(root, &components) {
-                return Ok(Some(found));
-            }
-        }
-        Ok(None)
-    }
-
-    /// Resolve `components` under `root` by matching each path component
-    /// case-insensitively.
-    ///
-    /// Only directory entries are considered (never a constructed path), a
-    /// symlink entry is skipped, and the final entry must be a regular file.
-    /// This keeps a hostile stored key from traversing `..`, a symlink or an
-    /// absolute path out of the allowed root.
-    fn case_insensitive_candidate(root: &Path, components: &[&str]) -> Option<PathBuf> {
-        let mut current = root.to_path_buf();
-        for (index, component) in components.iter().enumerate() {
-            let last = index + 1 == components.len();
-            let mut matched = None;
-            for entry in std::fs::read_dir(&current).ok()?.flatten() {
-                let file_type = entry.file_type().ok()?;
-                if file_type.is_symlink() {
-                    continue;
-                }
-                let name = entry.file_name();
-                let Some(name) = name.to_str() else {
-                    continue;
-                };
-                if !name.eq_ignore_ascii_case(component) {
-                    continue;
-                }
-                if last && !file_type.is_file() {
-                    continue;
-                }
-                if !last && !file_type.is_dir() {
-                    continue;
-                }
-                matched = Some(entry.path());
-                break;
-            }
-            current = matched?;
-        }
-        if current.starts_with(root) && current.is_file() {
-            Some(current)
-        } else {
-            None
-        }
-    }
-
-    /// Resolve, decode and cache the requested images.
-    ///
-    /// `drawing_dir` is searched first (a drawing's own folder wins over an
-    /// explicit pack), then `images_dir`. Each key is reduced to the same
-    /// path-preserving [`image_resource_key`] the representation provider looks
-    /// up, so a decoded image actually becomes a texture primitive rather than an
-    /// outline-only frame and two files with the same base name stay distinct.
-    /// A missing/undecodable/over-budget key is recorded in the report and never
-    /// inserted as a placeholder.
-    pub fn load_image_cache(
-        requested: &[String],
-        drawing_dir: Option<&Path>,
-        images_dir: Option<&Path>,
-        limits: &ResourceLimits,
-    ) -> CadResult<(Arc<DecodedImageCache>, ImageLoadReport)> {
-        let mut roots: Vec<PathBuf> = Vec::new();
-        if let Some(dir) = drawing_dir {
-            roots.push(dir.to_path_buf());
-        }
-        if let Some(dir) = images_dir {
-            roots.push(dir.to_path_buf());
-        }
-
-        let requested = dedup(requested);
-        let mut cache = DecodedImageCache::new();
-        let mut report = ImageLoadReport {
-            requested: requested.clone(),
-            ..ImageLoadReport::default()
-        };
-        for key in &requested {
-            match resolve_image_file(&roots, key) {
-                Ok(Some(path)) => {
-                    let bytes = match std::fs::read(&path) {
-                        Ok(bytes) => bytes,
-                        Err(error) => {
-                            report.failed.push(format!("{key}: read failed: {error}"));
-                            continue;
-                        }
-                    };
-                    match decode_image(&bytes, limits) {
-                        Ok(image) => {
-                            // Key by the path-preserving image key so two files
-                            // with the same base name stay distinct. The reference
-                            // already passed `is_safe_reference` in
-                            // `resolve_image_file`; a `None` here is defensive.
-                            let Some(resource) = image_resource_key(key) else {
-                                report.unresolved.push(key.clone());
-                                continue;
-                            };
-                            match cache.insert(resource, image, limits) {
-                                Ok(()) => report.loaded.push(key.clone()),
-                                Err(issue) => {
-                                    report.failed.push(format!("{key}: {}", issue.code));
-                                }
-                            }
-                        }
-                        Err(issue) => report.failed.push(format!("{key}: {}", issue.code)),
-                    }
-                }
-                // Unsafe references are not attempts at all; both they and a
-                // clean miss stay explicit unresolved keys.
-                Ok(None) | Err(_) => report.unresolved.push(key.clone()),
-            }
-        }
-        report.bytes = cache.used_bytes();
-        Ok((Arc::new(cache), report))
-    }
-
-    fn dedup(keys: &[String]) -> Vec<String> {
-        let mut out = Vec::new();
-        for key in keys {
-            if !out.iter().any(|existing| existing == key) {
-                out.push(key.clone());
-            }
-        }
-        out
-    }
-}
+pub mod local;
 
 #[cfg(test)]
 mod tests {
@@ -716,5 +515,195 @@ mod tests {
         let result =
             local::resolve_image_dir(Some(missing), std::path::Path::new("/opt/yacr/bin/yacr"));
         assert!(matches!(result, Err(cad_domain::CadError::InvalidInput(_))));
+    }
+
+    // --- document-owned mesh textures (ADR-0038 D3/D10) ---------------------
+
+    /// A canonical content-addressed key: 32 lowercase hex + `.png`.
+    const TEXTURE_KEY: &str = "4c2f2e0a5f3d9b7c1e8a6d4b2c0f9e71.png";
+
+    fn database_with_texture(key: &str, bytes: Vec<u8>) -> DrawingDatabase {
+        let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
+        builder
+            .insert_layer(Layer {
+                id: LayerId(0),
+                name: "0".into(),
+                visible: true,
+            })
+            .unwrap();
+        builder
+            .insert_texture(key, std::sync::Arc::from(bytes))
+            .expect("a canonical key with non-empty bytes");
+        builder.finish().unwrap()
+    }
+
+    fn two_by_two_png() -> Vec<u8> {
+        encode_png(
+            2,
+            2,
+            &[
+                255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 10, 20, 30, 255,
+            ],
+        )
+    }
+
+    #[test]
+    fn has_document_textures_is_the_companion_to_requested_images() {
+        let mut builder = DrawingDatabaseBuilder::new(DatabaseId(7));
+        builder
+            .insert_layer(Layer {
+                id: LayerId(0),
+                name: "0".into(),
+                visible: true,
+            })
+            .unwrap();
+        let empty = builder.finish().unwrap();
+        assert!(requested_images(&empty).is_empty());
+        assert!(!has_document_textures(&empty));
+
+        let with_texture = database_with_texture(TEXTURE_KEY, two_by_two_png());
+        assert!(
+            requested_images(&with_texture).is_empty(),
+            "a mesh texture is not a file reference"
+        );
+        assert!(
+            has_document_textures(&with_texture),
+            "the 'any images?' branch must fire for a texture-only document"
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn document_textures_decode_into_the_cache_without_a_file() {
+        use cad_resources::ResourceLimits;
+        let db = database_with_texture(TEXTURE_KEY, two_by_two_png());
+        // A drawing directory that does not exist proves nothing was read from
+        // disk: the bytes are database state.
+        let missing = std::path::Path::new("/definitely/not/a/drawing/dir");
+        let (cache, report) = local::load_image_cache_for_document(
+            &db,
+            &[],
+            Some(missing),
+            None,
+            &ResourceLimits::default(),
+        )
+        .unwrap();
+
+        assert_eq!(report.requested, vec![TEXTURE_KEY.to_string()]);
+        assert_eq!(report.loaded, vec![TEXTURE_KEY.to_string()]);
+        assert!(report.unresolved.is_empty());
+        assert!(report.failed.is_empty());
+        assert_eq!(report.bytes, 16, "2x2 RGBA");
+        let decoded = cache
+            .get(&cad_resources::ResourceKey(TEXTURE_KEY.to_string()))
+            .expect("the mesh decode key is the batch's ResourceKey");
+        assert_eq!((decoded.width, decoded.height), (2, 2));
+        assert_eq!(&decoded.rgba[0..4], &[255, 0, 0, 255]);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn an_undecodable_document_texture_is_reported_by_key_and_left_out() {
+        use cad_resources::ResourceLimits;
+        let db = database_with_texture(TEXTURE_KEY, b"not really a png".to_vec());
+        let (cache, report) =
+            local::load_image_cache_for_document(&db, &[], None, None, &ResourceLimits::default())
+                .expect("one bad texture must not fail the whole load");
+
+        assert_eq!(report.requested, vec![TEXTURE_KEY.to_string()]);
+        assert!(report.loaded.is_empty());
+        assert!(report.unresolved.is_empty());
+        assert_eq!(report.failed.len(), 1);
+        assert!(
+            report.failed[0].starts_with(&format!("{TEXTURE_KEY}: ")),
+            "the failure names the key, got {:?}",
+            report.failed
+        );
+        assert!(
+            cache.is_empty(),
+            "no placeholder may stand in for an undecodable texture"
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn an_over_budget_document_texture_is_reported_and_not_cached() {
+        use cad_resources::ResourceLimits;
+        let db = database_with_texture(TEXTURE_KEY, two_by_two_png());
+        let limits = ResourceLimits {
+            // A 2x2 RGBA payload is 16 bytes; one byte of budget refuses it.
+            total_bytes: 1,
+            ..ResourceLimits::default()
+        };
+        let (cache, report) =
+            local::load_image_cache_for_document(&db, &[], None, None, &limits).unwrap();
+        assert!(report.loaded.is_empty());
+        assert_eq!(report.failed.len(), 1);
+        assert!(report.failed[0].starts_with(&format!("{TEXTURE_KEY}: ")));
+        assert!(cache.is_empty());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_document_texture_wins_over_a_same_named_file_reference() {
+        use cad_resources::{ResourceKey, ResourceLimits};
+        let dir = scratch("doc-texture-wins");
+        // A file under the exact same logical key, with different pixels.
+        std::fs::write(dir.join(TEXTURE_KEY), encode_png(1, 1, &[9, 9, 9, 255])).unwrap();
+        let db = database_with_texture(TEXTURE_KEY, two_by_two_png());
+
+        let (cache, report) = local::load_image_cache_for_document(
+            &db,
+            &[TEXTURE_KEY.to_string()],
+            Some(&dir),
+            None,
+            &ResourceLimits::default(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            report.requested,
+            vec![TEXTURE_KEY.to_string()],
+            "the key is requested once, as a document texture"
+        );
+        assert_eq!(report.loaded, vec![TEXTURE_KEY.to_string()]);
+        let decoded = cache.get(&ResourceKey(TEXTURE_KEY.to_string())).unwrap();
+        assert_eq!(
+            (decoded.width, decoded.height),
+            (2, 2),
+            "the document bytes win over the same-named file"
+        );
+        assert_eq!(&decoded.rgba[0..4], &[255, 0, 0, 255]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn without_document_textures_the_report_is_identical_to_the_file_only_pass() {
+        use cad_resources::ResourceLimits;
+        let dir = scratch("doc-texture-parity");
+        std::fs::write(dir.join("logo.png"), encode_png(1, 1, &[1, 2, 3, 255])).unwrap();
+        let requested = vec!["logo.png".to_string(), "../escape.png".to_string()];
+        let db = database_with_images(); // no textures
+
+        let (file_cache, file_report) =
+            local::load_image_cache(&requested, Some(&dir), None, &ResourceLimits::default())
+                .unwrap();
+        let (doc_cache, doc_report) = local::load_image_cache_for_document(
+            &db,
+            &requested,
+            Some(&dir),
+            None,
+            &ResourceLimits::default(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            doc_report, file_report,
+            "the document-aware pass must not change the file-based report"
+        );
+        assert_eq!(doc_cache.len(), file_cache.len());
+        assert!(!has_document_textures(&db));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

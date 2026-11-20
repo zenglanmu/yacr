@@ -449,6 +449,8 @@ fn tessellate_brep(
             normals,
             face_sources,
             colors: Vec::new(),
+            uvs: Vec::new(),
+            texture: None,
         },
         edges,
         precision,

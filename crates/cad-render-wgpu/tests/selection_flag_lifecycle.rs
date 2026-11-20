@@ -35,6 +35,8 @@ fn source(entity: u128) -> SelectionRef {
 /// the target centre under any 2D camera.
 fn quad(entity: u128) -> RenderBatch {
     RenderBatch {
+        uvs: Vec::new(),
+        texture: None,
         conics: Vec::new(),
         local_origin: Point3 {
             x: 0.0,

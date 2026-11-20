@@ -18,6 +18,7 @@ mod multileader_create;
 // tolerance), split out for the code-size gate; `multileader` re-exports them.
 mod multileader_content;
 pub mod table_entity;
+mod texture;
 pub use block_clip::{validate_clip_depth, BlockClip, ClipDepthError};
 pub use body::{Body3d, BodyDisplay, BodyExact, BodyKind};
 pub use brep::{BrepCurve, BrepData, BrepFace, BrepLoop, BrepPlacement, BrepShell, BrepSurface};
@@ -25,6 +26,7 @@ pub use hatch_entity::*;
 pub use multileader::*;
 pub use multileader_angle::*;
 pub use table_entity::*;
+pub use texture::{is_valid_texture_key, TEXTURE_KEY_HEX_LEN, TEXTURE_KEY_MAX_LEN};
 
 #[cfg(test)]
 mod dimension_tests;
@@ -474,6 +476,25 @@ pub struct Mesh {
     /// are used rather than floats so the domain stays independent of the
     /// renderer's colour conventions.
     pub colors: Vec<[u8; 3]>,
+    /// Per-vertex UV0, one pair per entry of [`Self::vertices`]; empty = no UV.
+    ///
+    /// The uniform invariant is `uvs.is_empty() || uvs.len() == vertices.len()`
+    /// (enforced by `cad-db`'s geometry validation). `f64` only to match
+    /// [`Point3`] and the ymodel `VecF64x2` field kind; the GPU side converts to
+    /// `f32`. Only UV0 exists: no per-corner UV, no second set, no UV transform
+    /// (ADR-0038 D1).
+    pub uvs: Vec<[f64; 2]>,
+    /// The document-owned base-colour texture key, or `None` for an untextured
+    /// mesh (ADR-0038 D2).
+    ///
+    /// The string is a **logical key**, never a platform path: the bytes live in
+    /// `cad-db` and in a `.ymodel` `textures/<key>` entry, so saving/reopening
+    /// or switching carriers does not depend on the source file still existing.
+    /// The only accepted form is `<32 lowercase hex>.png|.jpg`, see
+    /// [`is_valid_texture_key`]. A texture is meaningless without UVs, so
+    /// `texture.is_some()` requires a non-empty [`Self::uvs`]; validation refuses
+    /// the combination instead of ignoring the texture.
+    pub texture: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

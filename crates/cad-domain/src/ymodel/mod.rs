@@ -69,7 +69,13 @@ pub const FORMAT_WRITE: u32 = 1;
 /// `tables/compat.json` (ADR-0037 D11/D14). A build that only knows `1` must
 /// not open such a file: saving it back would drop the import provenance and
 /// the object-level report.
-pub const FORMAT_MINOR: u32 = 2;
+///
+/// `3` adds mesh UV0 + base-colour textures (ADR-0038 D4): `cad:Mesh` gains
+/// `uvs`/`texture`, and the `textures/<key>` binary entries carry the image
+/// bytes. Those two payload fields are the format's single documented
+/// "absent means empty/None" exception, scoped to `decode_mesh` only, so a
+/// minor-2 archive still opens; every other missing field remains an error.
+pub const FORMAT_MINOR: u32 = 3;
 
 /// Stable failure markers.
 ///

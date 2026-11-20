@@ -2,6 +2,8 @@
 
 use super::*;
 
+mod texture_images;
+
 /// Most CLI operation functions return `Result<_, CliError>`, so the error
 /// variant must stay below clippy's 128-byte `result_large_err` ceiling.
 ///
@@ -259,16 +261,20 @@ fn render_of_missing_input_fails_before_any_gpu_work() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_drawing_without_images_loads_an_empty_image_cache() {
-    // The demo document references no rasters: resolution must be a no-op, not
-    // an empty-but-present texture set.
+    // The demo document references no rasters and owns no mesh textures:
+    // resolution must be a no-op, not an empty-but-present texture set.
     let controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
     let requested = images_requested(&controller);
     assert!(
         requested.is_empty(),
         "demo document must not request images: {requested:?}"
     );
+    assert!(
+        !cad_platform::images::has_document_textures(controller.drawing().unwrap().as_ref()),
+        "demo document must not own mesh textures"
+    );
     let invocation = CliInvocation::new(CliOperation::FixedViewportRender, "demo.dwg");
-    let (cache, report) = load_images(&invocation, &requested).unwrap();
+    let (cache, report) = load_images(&invocation, &controller).unwrap();
     assert!(cache.is_empty());
     assert!(report.is_empty());
     assert!(report.unresolved.is_empty());

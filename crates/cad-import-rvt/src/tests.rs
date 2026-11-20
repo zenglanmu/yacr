@@ -395,6 +395,88 @@ fn a_glb_without_a_scene_is_refused() {
     }
 }
 
+// ---- Unit 2: glTF texture references (must never appear from rvt) --------
+
+#[test]
+fn glb_texture_references_are_counted_not_ignored() {
+    // `rvt` 0.24.0 writes no `TEXCOORD_*`, `images` or `textures` (ADR-0038 D6).
+    // Injecting them proves the reader notices: the shared mesh is visited by two
+    // nodes, plus one image and one texture.
+    let (mut json, bin) = glb_parts(&glb_fixture());
+    json["meshes"][0]["primitives"][0]["attributes"]["TEXCOORD_0"] = json!(1);
+    json["images"] = json!([{ "bufferView": 0, "mimeType": "image/png" }]);
+    json["textures"] = json!([{ "source": 0 }]);
+    let scene = read_glb(&rebuild_glb(&json, &bin), &ImportLimits::default(), &|| {
+        false
+    })
+    .expect("a GLB with texture references still reads");
+    assert_eq!(
+        scene.texture_references, 4,
+        "2 node instances with TEXCOORD_0 + 1 image + 1 texture"
+    );
+    for placed in &scene.meshes {
+        assert!(placed.mesh.uvs.is_empty(), "no UVs are imported");
+        assert!(placed.mesh.texture.is_none(), "no texture is imported");
+    }
+}
+
+#[test]
+fn a_texture_reference_marks_the_import_partial_with_its_own_code() {
+    let req = request(fixture("upstream-metadata-scaffold-2024-no-geometry.rvt"));
+    let mut import =
+        cad_import_core::MeshImport::new(&req, RVT_MESH_TYPE_KEY).expect("scaffold import");
+    let object = import.reserve_object().expect("reserve an object");
+    import
+        .push_mesh(
+            object,
+            cad_domain::Mesh {
+                vertices: vec![
+                    cad_domain::Point3 {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                    cad_domain::Point3 {
+                        x: 1.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                    cad_domain::Point3 {
+                        x: 0.0,
+                        y: 1.0,
+                        z: 0.0,
+                    },
+                ],
+                triangles: vec![[0, 1, 2]],
+                ..cad_domain::Mesh::default()
+            },
+            cad_db::EntityColor::ByLayer,
+        )
+        .expect("push a triangle");
+    let scene = GlbScene {
+        texture_references: 2,
+        ..GlbScene::default()
+    };
+    record_scene(&mut import, &scene);
+    let outcome = import.finish().expect("finish the import");
+    assert!(
+        matches!(outcome.completeness, cad_domain::Completeness::Partial(_)),
+        "an unimported texture must not claim Complete"
+    );
+    assert!(
+        outcome
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == DIAG_TEXTURE_NOT_IMPORTED),
+        "the texture loss is named: {:?}",
+        outcome
+            .diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.code.as_str())
+            .collect::<Vec<_>>()
+    );
+}
+
 // ---- Unit 2: glTF material colours ---------------------------------------
 
 #[test]

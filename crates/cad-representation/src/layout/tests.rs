@@ -138,6 +138,8 @@ fn context() -> RepresentationContext {
 
 fn triangle_mesh(corners: [Point3; 3]) -> Mesh {
     Mesh {
+        uvs: Vec::new(),
+        texture: None,
         vertices: corners.to_vec(),
         triangles: vec![[0, 1, 2]],
         normals: Vec::new(),
@@ -161,4 +163,5 @@ fn mesh_area(mesh: &Mesh) -> f64 {
 mod build;
 mod image;
 mod polygon;
+mod texture;
 mod viewport;

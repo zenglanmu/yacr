@@ -949,6 +949,7 @@ dependencies = [
  "cad-import-step",
  "ifc-lite-core",
  "ifc-lite-geometry",
+ "png",
  "web-time",
 ]
 

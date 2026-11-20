@@ -20,6 +20,8 @@ pub const LAYER_MATERIAL_FLATTENED: &str = "export.skp.layer_material_flattened"
 pub const COLORS_DROPPED: &str = "export.skp.colors_dropped";
 /// Per-vertex source normals were dropped; every face gets its own Newell normal.
 pub const NORMALS_DROPPED: &str = "export.skp.normals_dropped";
+/// A written mesh references a base-colour texture; the writer carries no texture.
+pub const TEXTURE_NOT_WRITTEN: &str = "export.skp.texture_not_written";
 /// A non-model-space entity was left out (the writer has no paper space).
 pub const PAPER_SPACE_DROPPED: &str = "export.skp.paper_space_dropped";
 /// A caller budget (`ExportLimits`) was exceeded; nothing was written.

@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use cad_domain::ymodel::IdCounters;
 use cad_domain::*;
@@ -82,6 +83,7 @@ impl DrawingDatabaseBuilder {
                 next_linetype_id: 1,
                 next_scale_id: 1,
                 external_references: BTreeMap::new(),
+                textures: BTreeMap::new(),
                 bounds_cache: Default::default(),
             },
             errors: Vec::new(),
@@ -205,6 +207,50 @@ impl DrawingDatabaseBuilder {
         self.database
             .external_references
             .insert(reference.name.clone(), reference);
+        Ok(())
+    }
+
+    /// Record one texture's bytes under its document-owned key (ADR-0038 D2/D3).
+    ///
+    /// The key must be the canonical form [`cad_domain::is_valid_texture_key`]
+    /// accepts (`<32 lowercase hex>.png|.jpg`): it is the `.ymodel` entry name and
+    /// the value a mesh's `texture` field carries, so a path, a `..` or an
+    /// uppercase spelling would make the document unrepresentable on disk and is
+    /// refused here rather than at save time. An empty payload is refused too — a
+    /// zero-byte image can never decode, so storing it would turn "the texture is
+    /// missing" into a decode failure with no origin.
+    ///
+    /// There is **no budget policy in the database**: the importer owns the
+    /// `import.texture.*` limits before it calls this. Re-inserting the same key is
+    /// idempotent (the key is content-addressed); different bytes under one key are
+    /// a caller bug and are refused instead of silently replacing the asset.
+    ///
+    /// Textures are document state: [`crate::DrawingDatabase::snapshot`] carries
+    /// them and the loader re-inserts them. This method is the only writer, so
+    /// there is no post-import mutation path.
+    pub fn insert_texture(&mut self, key: impl Into<String>, bytes: Arc<[u8]>) -> CadResult<()> {
+        let key = key.into();
+        if !cad_domain::is_valid_texture_key(&key) {
+            return Err(CadError::InvalidInput(format!(
+                "cad:texture.key: {key:?} is not a valid texture key (expected \
+                 <32 lowercase hex>.png|.jpg)"
+            )));
+        }
+        if bytes.is_empty() {
+            return Err(CadError::InvalidInput(format!(
+                "cad:texture.empty: texture {key:?} has no bytes"
+            )));
+        }
+        if let Some(existing) = self.database.textures.get(&key) {
+            if existing.as_ref() != bytes.as_ref() {
+                return Err(CadError::Invariant(format!(
+                    "cad:texture.conflict: different bytes were inserted under the \
+                     content-addressed key {key:?}"
+                )));
+            }
+            return Ok(());
+        }
+        self.database.textures.insert(key, bytes);
         Ok(())
     }
 

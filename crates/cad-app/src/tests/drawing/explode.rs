@@ -252,6 +252,8 @@ fn explode_compound_keeps_every_child_including_hatch_fill() {
         normals: vec![p3(0.0, 0.0, 1.0); 3],
         face_sources: Vec::new(),
         colors: Vec::new(),
+        uvs: Vec::new(),
+        texture: None,
     });
     let pattern = polyline(vec![point(0.0, 1.0), point(4.0, 1.0)], vec![0.0; 2], false);
     let compound = SemanticGeometry::Compound(vec![boundary, fill, pattern]);

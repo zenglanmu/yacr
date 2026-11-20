@@ -51,4 +51,5 @@ pub(crate) use alloc::{
     PulledAllocationError, PulledAllocationVerdict,
 };
 pub(crate) use background_ink::light_with_background_flag;
+pub(crate) use encode::merged_texture_fallbacks;
 pub(crate) use types::{prefix_outcome, CheckpointFacts, IncomingResources, PrefixOutcome};

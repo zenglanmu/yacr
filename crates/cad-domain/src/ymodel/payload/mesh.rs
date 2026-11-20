@@ -68,6 +68,20 @@ pub(super) fn encode_mesh(mesh: &Mesh) -> Value {
                         .collect(),
                 ),
             ),
+            // ADR-0038 D4: the two texture fields are written last. A writer of
+            // this build always emits both (`[]` / `null` for "none"), so the
+            // reader's absent-field default only ever applies to a minor-2
+            // archive.
+            (
+                "uvs",
+                Value::Array(mesh.uvs.iter().map(|uv| json::encode_f64x2(*uv)).collect()),
+            ),
+            (
+                "texture",
+                mesh.texture
+                    .as_ref()
+                    .map_or(Value::Null, |key| Value::String(key.clone())),
+            ),
         ],
     )
 }
@@ -93,6 +107,12 @@ pub(super) fn decode_mesh(value: &Value) -> Result<Mesh, PayloadError> {
         }
     };
     let colors = reader.u8x3_list("colors")?;
+    // The format's only defaulting exception (ADR-0038 D4): a minor-2 archive
+    // has neither key, so `uvs` reads as "no UV" and `texture` as "none". Every
+    // other field above stays required, which is what
+    // `a_missing_required_mesh_field_is_still_refused` pins.
+    let uvs = reader.vec_f64x2_if_present("uvs")?;
+    let texture = reader.string_if_present("texture")?;
     reader.finish()?;
     Ok(Mesh {
         vertices,
@@ -100,6 +120,8 @@ pub(super) fn decode_mesh(value: &Value) -> Result<Mesh, PayloadError> {
         normals,
         face_sources,
         colors,
+        uvs,
+        texture,
     })
 }
 

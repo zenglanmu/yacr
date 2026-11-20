@@ -11,6 +11,8 @@ fn triangle_mesh() -> Mesh {
         normals: vec![p(0.0, 0.0, 1.0); 3],
         face_sources: Vec::new(),
         colors: Vec::new(),
+        uvs: Vec::new(),
+        texture: None,
     }
 }
 

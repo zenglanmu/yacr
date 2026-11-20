@@ -139,6 +139,13 @@ struct GpuBatch {
     /// bound for a mesh (white when the batch has no gradient), so the shader's
     /// `@location(2)` attribute is always provided.
     colors: Option<wgpu::Buffer>,
+    /// Per-vertex UV0 (`@location(3)`) for a **textured** mesh batch; `None` for
+    /// every untextured batch (only `mesh_textured` binds slot 3).
+    uvs: Option<wgpu::Buffer>,
+    /// The base-colour texture key; `Some` routes the draw through
+    /// `mesh_textured`. A non-resident key falls back to the untextured pipeline
+    /// and is surfaced, never bound to a placeholder texture.
+    texture: Option<ResourceKey>,
     topology: RenderTopology,
     /// `true` for the text-glyph display class (indexed mesh, no edge overlay).
     text_glyph: bool,
@@ -530,6 +537,12 @@ pub struct Renderer {
     /// mesh pipelines. `_mirrored` uses `front_face = Cw`, like the legacy pair.
     mesh_pipeline_merged: Option<wgpu::RenderPipeline>,
     mesh_pipeline_merged_mirrored: Option<wgpu::RenderPipeline>,
+    /// Textured-mesh pipelines (ADR-0038 D9): the mesh state plus a UV0 slot and
+    /// group 2 = texture + sampler; four variants mirror the untextured set.
+    mesh_pipeline_textured: Option<wgpu::RenderPipeline>,
+    mesh_pipeline_textured_mirrored: Option<wgpu::RenderPipeline>,
+    mesh_pipeline_textured_transparent: Option<wgpu::RenderPipeline>,
+    mesh_pipeline_textured_mirrored_transparent: Option<wgpu::RenderPipeline>,
     /// Textured-quad pipeline for raster images (group 2 = texture + sampler).
     image_pipeline: Option<wgpu::RenderPipeline>,
     /// Wipeout mask pipeline: triangle list, `depth_compare = Always`, no depth
@@ -679,6 +692,15 @@ pub struct Renderer {
     /// image quad that references it. Bounded to the keys of the current image
     /// set (unreferenced entries are pruned on upload).
     image_textures: HashMap<ResourceKey, GpuTexture>,
+    /// One GPU texture per resolved mesh base-colour key, filled by
+    /// [`Renderer::upload_mesh_textures`]. Separate from `image_textures`: the set
+    /// follows geometry batches, and these textures own no pick key. Pruned to the
+    /// last upload's keys, so an unreferenced texture is released.
+    mesh_textures: HashMap<ResourceKey, GpuTexture>,
+    /// Texture keys a textured batch wanted at draw time but could not resolve
+    /// (decode/upload failure, or no upload yet); those batches drew untextured.
+    /// Rebuilt every frame, sorted and deduplicated, so the drop is observable.
+    mesh_texture_fallbacks: Vec<ResourceKey>,
     /// Renderer-owned transient cursor (ADR 0028): a per-frame crosshair/pickbox
     /// that is **not** scene content. Never in `batches`/`draw_plan`/`BatchFacts`,
     /// never pick-keyed, never drawn by the id/pick pass. Kept across device loss
@@ -949,6 +971,10 @@ pub(crate) use plan::*;
 mod conic_overwrite_gpu_tests;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod cursor_transient_gpu_tests;
+/// Native GPU contracts for the textured-mesh channel (ADR-0038 D9): a real
+/// texture is sampled, and an unresolved key draws untextured + is reported.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod mesh_textured_gpu_tests;
 /// Native GPU contracts for the in-place resident-batch overwrite (P4). Test
 /// only: it reads private renderer state and needs a real device.
 #[cfg(all(test, not(target_arch = "wasm32")))]

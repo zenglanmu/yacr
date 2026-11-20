@@ -260,6 +260,8 @@ impl SolidCoreTessellator {
                 face_sources,
                 // The neutral assembly carries no vertex colours either.
                 colors: Vec::new(),
+                uvs: Vec::new(),
+                texture: None,
             },
             edges,
             precision: Precision::Approximate {

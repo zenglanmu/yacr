@@ -1,14 +1,14 @@
 //! Assembly of the shared [`CompatReport`] for a glTF export.
 //!
 //! One written source mesh is one `exact` count. An attribute the file cannot
-//! carry (a partially present normal/colour set, or an explicit entity colour
-//! masked by per-vertex colours) is one `converted` entry; a dropped degenerate
-//! triangle is counted per triangle; a source entity that could not be written
-//! is one `dropped` entry. Notes (the unit/frame statement, the absent layer
-//! appearance) never change the verdict.
+//! carry (a partially present normal/colour set, an explicit entity colour
+//! masked by per-vertex colours, UV0 or a texture that could not be written) is
+//! one `converted` entry; a dropped degenerate triangle is counted per triangle;
+//! a source entity that could not be written is one `dropped` entry. Notes (the
+//! unit/frame statement, the absent layer appearance) never change the verdict.
 //!
-//! `exact` is set from the writer's own count of meshes that lost no triangle;
-//! a drop entry never subtracts from it.
+//! `exact` is set from the writer's own count of meshes that lost no triangle
+//! and no UV/texture; a drop entry never subtracts from it.
 
 use cad_domain::{Completeness, ObjectId, SupportStatus};
 use cad_import_core::{CompatCounts, CompatEntry, CompatReport, FidelityLevel, ReportDirection};

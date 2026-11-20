@@ -355,3 +355,136 @@ fn line_topologies_do_not_consume_the_triangle_budget() {
     batch.topology = RenderTopology::Mesh;
     assert_eq!(batch.triangle_count(), 2);
 }
+
+// ---- UV0 / base-colour texture (ADR-0038 D8) ----------------------------
+
+/// A canonical document texture key (`<32 lowercase hex>.png`).
+const TEXTURE_KEY: &str = "4c2f2e0a5f3d9b7c1e8a6d4b2c0f9e71.png";
+
+fn textured_quad() -> Mesh {
+    let mut mesh = quad();
+    mesh.uvs = vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+    mesh.texture = Some(TEXTURE_KEY.to_owned());
+    mesh
+}
+
+#[test]
+fn mesh_batch_carries_uvs_and_a_resource_key_for_a_textured_mesh() {
+    let delta = SceneCache::default()
+        .build(&mesh_representation(1, textured_quad()), stamp())
+        .unwrap();
+    let batch = &delta.added[0];
+    assert_eq!(
+        batch.uvs,
+        vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]
+    );
+    assert_eq!(batch.uvs.len(), batch.vertices.len());
+    assert_eq!(
+        batch.texture.as_ref().map(|key| key.as_str()),
+        Some(TEXTURE_KEY),
+        "the domain String key is converted to a ResourceKey at the scene boundary"
+    );
+}
+
+#[test]
+fn untextured_mesh_uploads_no_uv_stream_even_when_it_carries_uvs() {
+    // UVs without a texture cannot be sampled by any pipeline, so the batch
+    // keeps the untextured form: both fields empty. This is a documented
+    // sanitisation, not a silent loss of a drawable attribute.
+    let mut mesh = quad();
+    mesh.uvs = vec![[0.0, 0.0]; 4];
+    let delta = SceneCache::default()
+        .build(&mesh_representation(1, mesh), stamp())
+        .unwrap();
+    let batch = &delta.added[0];
+    assert!(batch.uvs.is_empty());
+    assert!(batch.texture.is_none());
+    assert_eq!(
+        batch.upload_size_bytes(),
+        4 * 12 * 3 + 2 * 12 + 10 * 12,
+        "no UV bytes are charged for an untextured batch"
+    );
+}
+
+#[test]
+fn a_texture_with_misaligned_or_invalid_uvs_is_sanitised_not_panicked() {
+    // Wrong count: the domain requires one UV per vertex.
+    let mut wrong_count = quad();
+    wrong_count.uvs = vec![[0.0, 0.0], [1.0, 0.0]];
+    wrong_count.texture = Some(TEXTURE_KEY.to_owned());
+    let delta = SceneCache::default()
+        .build(&mesh_representation(1, wrong_count), stamp())
+        .unwrap();
+    assert!(delta.added[0].uvs.is_empty());
+    assert!(delta.added[0].texture.is_none());
+
+    // A non-finite UV can never reach the GPU as NaN.
+    let mut nan_uv = quad();
+    nan_uv.uvs = vec![[f64::NAN, 0.0]; 4];
+    nan_uv.texture = Some(TEXTURE_KEY.to_owned());
+    let delta = SceneCache::default()
+        .build(&mesh_representation(2, nan_uv), stamp())
+        .unwrap();
+    assert!(delta.added[0].uvs.is_empty());
+    assert!(delta.added[0].texture.is_none());
+
+    // An unsafe key is refused by the same defensive filter (cad-db validation
+    // is the authority; the scene is the last line).
+    let mut bad_key = quad();
+    bad_key.uvs = vec![[0.0, 0.0]; 4];
+    bad_key.texture = Some("../escape.png".to_owned());
+    let delta = SceneCache::default()
+        .build(&mesh_representation(3, bad_key), stamp())
+        .unwrap();
+    assert!(delta.added[0].uvs.is_empty());
+    assert!(delta.added[0].texture.is_none());
+}
+
+#[test]
+fn textured_mesh_upload_bytes_and_cpu_bytes_charge_the_uv_stream() {
+    let delta = SceneCache::default()
+        .build(&mesh_representation(1, textured_quad()), stamp())
+        .unwrap();
+    let batch = &delta.added[0];
+    // positions + normals + colours (4 × 12 each) + indices (2 × 12) + edges
+    // (10 × 12) + UVs (4 × 8).
+    assert_eq!(
+        batch.upload_size_bytes(),
+        4 * 12 * 3 + 2 * 12 + 10 * 12 + 4 * 8
+    );
+    assert_eq!(batch.vertex_bytes(), 4 * 12 * 2 + 10 * 12 + 4 * 8);
+    // `approx_bytes` counts the streams the cache actually holds (the batch has
+    // no per-vertex colour stream) plus the UV0 stream.
+    assert_eq!(batch.approx_bytes(), (4 + 4 + 10) * 12 + 2 * 12 + 4 * 8);
+}
+
+#[test]
+fn mesh_texture_keys_are_deduplicated_and_sorted() {
+    let other_key = "0f1e2d3c4b5a69788796a5b4c3d2e1f0.jpg";
+    let mut second = quad();
+    second.uvs = vec![[0.0, 0.0]; 4];
+    second.texture = Some(other_key.to_owned());
+    let representation = DisplayRepresentation {
+        fragments: [
+            mesh_representation(1, textured_quad()),
+            mesh_representation(2, textured_quad()),
+            mesh_representation(3, second),
+            mesh_representation(4, quad()),
+        ]
+        .into_iter()
+        .flat_map(|rep| rep.fragments)
+        .collect(),
+        completeness: Completeness::Complete,
+        diagnostics: Vec::new(),
+    };
+    let mut cache = SceneCache::default();
+    let delta = cache.build(&representation, stamp()).unwrap();
+    let keys = mesh_texture_keys(delta.added.iter());
+    assert_eq!(
+        keys.iter().map(|key| key.as_str()).collect::<Vec<_>>(),
+        vec![other_key, TEXTURE_KEY],
+        "untextured batches contribute nothing; keys are deduped and sorted"
+    );
+    cache.publish(delta, &stamp()).unwrap();
+    assert_eq!(cache.mesh_texture_keys(), keys);
+}

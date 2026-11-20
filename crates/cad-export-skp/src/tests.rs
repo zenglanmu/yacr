@@ -22,7 +22,8 @@ use cad_import_core::{
 
 use crate::{
     metres_per_source_unit, COLORS_DROPPED, DEGENERATE_TRIANGLE, LAYER_MATERIAL_FLATTENED,
-    LIMITS_EXCEEDED, MISMATCHED_DESCRIPTOR, NORMALS_DROPPED, UNITS_UNKNOWN, UNSUPPORTED_GEOMETRY,
+    LIMITS_EXCEEDED, MISMATCHED_DESCRIPTOR, NORMALS_DROPPED, TEXTURE_NOT_WRITTEN, UNITS_UNKNOWN,
+    UNSUPPORTED_GEOMETRY,
 };
 
 const SKP_MAGIC: [u8; 3] = [0xFF, 0xFE, 0xFF];
@@ -43,6 +44,8 @@ fn triangle() -> Mesh {
         normals: Vec::new(),
         face_sources: Vec::new(),
         colors: Vec::new(),
+        uvs: Vec::new(),
+        texture: None,
     }
 }
 
@@ -322,6 +325,50 @@ fn per_vertex_colours_and_normals_are_reported_dropped() {
         output.report.completeness,
         Completeness::Partial(_)
     ));
+}
+
+/// A written mesh that references a base-colour texture keeps its faces in the
+/// file, and the texture loss is one `Partial` conversion naming the entity and
+/// the key. The bytes are identical to the untextured mesh.
+#[test]
+fn a_textured_mesh_reports_the_texture_not_written() {
+    let mut textured = triangle();
+    textured.uvs = vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]];
+    textured.texture = Some("abc.png".into());
+    let with = export(
+        &database(vec![(SemanticGeometry::Mesh(textured), LayerId(0))]),
+        Some(&meter()),
+    )
+    .unwrap();
+    let without = export(
+        &database(vec![(SemanticGeometry::Mesh(triangle()), LayerId(0))]),
+        Some(&meter()),
+    )
+    .unwrap();
+    assert_eq!(
+        with.bytes, without.bytes,
+        "the SketchUp writer must write the same bytes for a textured and an untextured mesh"
+    );
+    assert_eq!(
+        with.report.counts.exact, without.report.counts.exact,
+        "the faces are still exact"
+    );
+    assert_eq!(codes(&with), [TEXTURE_NOT_WRITTEN]);
+    let entry = &with.report.entries[0];
+    assert_eq!(entry.status, cad_domain::SupportStatus::Partial);
+    assert_eq!(entry.object, Some(ObjectId(1)));
+    assert!(
+        entry.message.contains("#1") && entry.message.contains("abc.png"),
+        "the message must name the entity and the texture key: {}",
+        entry.message
+    );
+    assert_eq!(with.report.counts.converted, 1);
+    assert!(matches!(with.report.completeness, Completeness::Partial(_)));
+    assert!(
+        !codes(&without).contains(&TEXTURE_NOT_WRITTEN),
+        "an untextured mesh must not report a texture loss"
+    );
+    assert_eq!(without.report.completeness, Completeness::Complete);
 }
 
 #[test]

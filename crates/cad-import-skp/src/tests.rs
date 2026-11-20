@@ -16,8 +16,9 @@
 //! ```
 
 use cad_domain::{Completeness, DatabaseId, DocumentId, SemanticGeometry, SupportStatus, Unit};
-use cad_import_core::ImportLimits;
+use cad_import_core::{ImportLimits, MeshImport};
 
+use crate::convert::read_scene;
 use crate::{
     ceiling_for, major_release, style_of, Importer, SkpImporter, DIAG_DOCUMENT, DIAG_UNITS_METRES,
 };
@@ -346,4 +347,177 @@ fn a_file_that_is_not_a_sketchup_model_is_refused_by_name() {
         }
         other => panic!("expected CorruptData, got {other:?}"),
     }
+}
+
+// ---- Textured materials (ADR-0038 A3b) ----------------------------------
+
+/// A run mesh over `faces`; the run's edges/curves are irrelevant here.
+fn mesh_with(vertices: Vec<[f64; 3]>, faces: Vec<skpwright::MeshFace>) -> skpwright::Mesh {
+    skpwright::Mesh {
+        vertices,
+        faces,
+        ..Default::default()
+    }
+}
+
+fn face(outer: Vec<u32>) -> skpwright::MeshFace {
+    skpwright::MeshFace {
+        outer,
+        ..Default::default()
+    }
+}
+
+/// Registration only sniffs the container, so a signature is what this
+/// crate's tests need; nothing here decodes the image.
+fn png_bytes() -> Vec<u8> {
+    let mut bytes = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+    bytes.extend_from_slice(&[0x00, 0x11, 0x22, 0x33]);
+    bytes
+}
+
+/// A 2 m × 2 m painted quad whose material 5 is textured by `image`.
+fn textured_model(image: Option<Vec<u8>>, applied: Option<(f64, f64)>) -> skpwright::Model {
+    let mut painted = face(vec![0, 1, 2, 3]);
+    painted.front_material = Some(5);
+    skpwright::Model {
+        materials: vec![skpwright::Material::Textured {
+            name: "Pavers".into(),
+            texture: Some("pavers.jpg".into()),
+            applied_size_in: applied,
+            jpeg_quality: None,
+            image_bytes: image,
+            avg_rgba: Some([180, 150, 120, 255]),
+            colorized: false,
+            texture_avg_rgba: None,
+            colorize_type: 0,
+            opacity: 1.0,
+        }],
+        material_links: vec![(5, 0)],
+        geometry: vec![skpwright::GeometryRun {
+            mesh: mesh_with(
+                vec![
+                    [0.0, 0.0, 0.0],
+                    [2.0, 0.0, 0.0],
+                    [2.0, 2.0, 0.0],
+                    [0.0, 2.0, 0.0],
+                ],
+                vec![painted],
+            ),
+            ..Default::default()
+        }],
+        ..Default::default()
+    }
+}
+
+#[test]
+fn a_textured_front_face_carries_uvs_and_its_embedded_image() {
+    let image = png_bytes();
+    let model = textured_model(Some(image.clone()), Some((12.0, 12.0)));
+    let mut import = MeshImport::new(&request(Vec::new()), "SkpPreviewMesh").expect("import");
+    let scene = read_scene(&model, &ImportLimits::default(), &|| false, &mut import)
+        .expect("the textured model walks");
+
+    assert_eq!(scene.placed.len(), 1);
+    let mesh = &scene.placed[0].mesh;
+    assert_eq!(
+        mesh.uvs.len(),
+        mesh.vertices.len(),
+        "one UV pair per emitted vertex"
+    );
+    // The contract is exactly `uv_xform(Front, applied_size).apply(world_m)`:
+    // recompute it from `skpwright`'s own API for the same vertices.
+    let face = &model.geometry[0].mesh.faces[0];
+    let xform = face
+        .uv_xform(skpwright::Side::Front, (12.0, 12.0))
+        .expect("the §4v map is invertible");
+    for (vertex, uv) in mesh.vertices.iter().zip(&mesh.uvs) {
+        let want = xform.apply([vertex.x, vertex.y, vertex.z]);
+        assert!(
+            (uv[0] - want[0]).abs() < 1e-12 && (uv[1] - want[1]).abs() < 1e-12,
+            "UV {uv:?} does not match uv_xform.apply({:?}) = {want:?}",
+            [vertex.x, vertex.y, vertex.z]
+        );
+    }
+    assert_eq!(scene.stats.textured_groups, 1);
+    assert_eq!(scene.stats.untextured_textured_groups, 0);
+    assert_eq!(scene.stats.textured_faces, 1);
+
+    let key = mesh
+        .texture
+        .as_deref()
+        .expect("the texture key is attached");
+    let bytes = import
+        .textures()
+        .find(|(candidate, _)| *candidate == key)
+        .map(|(_, bytes)| bytes)
+        .expect("the key is registered with the import");
+    assert_eq!(
+        &bytes[..],
+        &image[..],
+        "the key addresses the material's own image bytes"
+    );
+}
+
+#[test]
+fn an_external_texture_stays_untextured_and_is_counted() {
+    // `image_bytes: None` means the material names a file outside the model.
+    let model = textured_model(None, Some((12.0, 12.0)));
+    let mut import = MeshImport::new(&request(Vec::new()), "SkpPreviewMesh").expect("import");
+    let scene = read_scene(&model, &ImportLimits::default(), &|| false, &mut import)
+        .expect("the model walks");
+
+    let mesh = &scene.placed[0].mesh;
+    assert!(mesh.uvs.is_empty(), "no texture, no UV set");
+    assert!(mesh.texture.is_none());
+    assert_eq!(scene.stats.external_textures, 1);
+    assert_eq!(scene.stats.untextured_textured_groups, 1);
+    assert_eq!(scene.stats.textured_groups, 0);
+    assert_eq!(
+        import.textures().count(),
+        0,
+        "nothing enters the document's texture table"
+    );
+    // The group keeps the material's average colour, as before ADR-0038.
+    assert_eq!(scene.placed[0].color, Some([180, 150, 120]));
+}
+
+#[test]
+fn a_textured_back_material_is_counted_not_imported() {
+    let mut model = textured_model(Some(png_bytes()), Some((12.0, 12.0)));
+    let mut backs = face(vec![0, 1, 2, 3]);
+    backs.back_material = Some(5);
+    backs.normal = [0.0, 0.0, -1.0];
+    model.geometry[0].mesh.faces.push(backs);
+
+    let mut import = MeshImport::new(&request(Vec::new()), "SkpPreviewMesh").expect("import");
+    let scene = read_scene(&model, &ImportLimits::default(), &|| false, &mut import)
+        .expect("the model walks");
+
+    assert_eq!(
+        scene.stats.back_textured_faces, 1,
+        "the back-painted face is reported, not imported"
+    );
+    // The front-painted face still carries its texture.
+    assert_eq!(scene.stats.textured_groups, 1);
+}
+
+#[test]
+fn a_textured_material_without_an_applied_size_keeps_no_uvs() {
+    // No applied size anywhere: the §4v denominator is unknown, so the group
+    // must not guess a tiling.
+    let model = textured_model(Some(png_bytes()), None);
+    let mut import = MeshImport::new(&request(Vec::new()), "SkpPreviewMesh").expect("import");
+    let scene = read_scene(&model, &ImportLimits::default(), &|| false, &mut import)
+        .expect("the model walks");
+
+    let mesh = &scene.placed[0].mesh;
+    assert!(mesh.uvs.is_empty());
+    assert!(mesh.texture.is_none());
+    assert_eq!(scene.stats.uv_unavailable, 1);
+    assert_eq!(scene.stats.untextured_textured_groups, 1);
+    assert_eq!(
+        import.textures().count(),
+        0,
+        "an image no mesh could sample is not registered"
+    );
 }

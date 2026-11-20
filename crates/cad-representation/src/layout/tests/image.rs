@@ -79,6 +79,8 @@ fn paper_build_keeps_an_unclippable_mesh_partial_and_reported() {
     .unwrap();
     // A triangle that references a missing vertex cannot be clipped exactly.
     let broken = Mesh {
+        uvs: Vec::new(),
+        texture: None,
         vertices: vec![p(0.0, 0.0), p(1.0, 0.0)],
         triangles: vec![[0, 1, 2]],
         normals: Vec::new(),

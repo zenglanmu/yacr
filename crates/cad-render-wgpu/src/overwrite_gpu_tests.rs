@@ -64,6 +64,8 @@ fn camera() -> Camera2d {
 /// An opaque 2-vertex `Lines` batch at `y`, spanning `x` in `[-0.9, 0.9]`.
 fn line_batch(entity: u128, y: f32) -> RenderBatch {
     RenderBatch {
+        uvs: Vec::new(),
+        texture: None,
         conics: Vec::new(),
         local_origin: Point3 {
             x: 0.0,
@@ -92,6 +94,8 @@ fn line_batch(entity: u128, y: f32) -> RenderBatch {
 /// An opaque mergeable triangle quad.
 fn quad_mesh(entity: u128, half: f32) -> RenderBatch {
     RenderBatch {
+        uvs: Vec::new(),
+        texture: None,
         conics: Vec::new(),
         local_origin: Point3 {
             x: 0.0,

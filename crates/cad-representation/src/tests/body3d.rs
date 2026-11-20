@@ -11,6 +11,8 @@ use super::*;
 /// A planar square cache: four vertices, two triangles, unit normals.
 fn plane_mesh() -> Mesh {
     Mesh {
+        uvs: Vec::new(),
+        texture: None,
         vertices: vec![
             p3(0.0, 0.0, 0.0),
             p3(1.0, 0.0, 0.0),

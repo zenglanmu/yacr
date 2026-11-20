@@ -431,7 +431,7 @@ fn resources_refuse_only_when_the_drawing_asks_for_something() {
     // The synthetic fixture's case: no faces, no shaping, no images — a real
     // no-op, not a fabricated install.
     BrowserResources::fonts_decision(&[], false).expect("nothing requested is a no-op");
-    BrowserResources::images_decision(&[]).expect("no images is a no-op");
+    BrowserResources::images_decision(&[], 0).expect("no images is a no-op");
 
     let font_error = BrowserResources::fonts_decision(&["simplex".into()], false).unwrap_err();
     let CadError::Unsupported(reason) = font_error else {
@@ -446,12 +446,26 @@ fn resources_refuse_only_when_the_drawing_asks_for_something() {
     let shaping_error = BrowserResources::fonts_decision(&[], true).unwrap_err();
     assert!(shaping_error.to_string().contains("text_shaping=true"));
 
-    let image_error = BrowserResources::images_decision(&["logo.png".into()]).unwrap_err();
+    let image_error = BrowserResources::images_decision(&["logo.png".into()], 0).unwrap_err();
     let CadError::Unsupported(reason) = image_error else {
         panic!("an unwired image decoder must refuse explicitly");
     };
     assert!(reason.starts_with(UNSUPPORTED_RESOURCES), "{reason}");
     assert!(reason.contains("logo") || reason.contains('1'), "{reason}");
+
+    // A mesh texture is document state, not a file, but this carrier has no
+    // decoder for either: a texture-only drawing must be refused by name rather
+    // than drawn untextured behind the user's back (ADR-0038 D10).
+    let texture_error = BrowserResources::images_decision(&[], 2).unwrap_err();
+    let CadError::Unsupported(reason) = texture_error else {
+        panic!("an unwired image decoder must refuse a document texture too");
+    };
+    assert!(reason.starts_with(UNSUPPORTED_RESOURCES), "{reason}");
+    assert!(reason.contains("2 document texture(s)"), "{reason}");
+    assert!(
+        !reason.contains("referenced image(s)"),
+        "a texture-only drawing has no file references: {reason}"
+    );
 }
 
 #[test]

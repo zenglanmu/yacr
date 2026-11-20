@@ -6,12 +6,14 @@
   字节保留、冲突检测、恢复快照生命周期**已实现。**2026-11-20 新增**：注册表式 `Connector` 契约、
   统一 `Exporter`/`CompatReport`、STL/OBJ/PLY/OFF/IFC4/SKP/glTF 写出（glTF = GLB + JSON `.gltf`）、
   对象级报告落盘
-  （`tables/compat.json`/`tables/sources.json`，格式 minor **2**）。仍未实现：DXF 导入/导出
+  （`tables/compat.json`/`tables/sources.json`，格式 minor **2**；网格基色纹理见 ADR-0038，
+  再升到 minor **3**）。仍未实现：DXF 导入/导出
   **L1 不动点**、**L0** 源字节直通、报告弹窗 UI，以及 STEP/DGN/RVT 写出（后三者按名拒绝
   `export.<id>.not_implemented`）。证据边界见 §5、
-  `docs/validation-ymodel-phase2-2026-11-19.md` 与
-  `docs/validation-ymodel-connectors-2026-11-20.md`；未运行项逐条标注，不做产品验收结论。
-- 日期：2026-11-18（rev.5）；2026-11-19 增补实现状态。
+  `docs/validation-ymodel-phase2-2026-11-19.md`、
+  `docs/validation-ymodel-connectors-2026-11-20.md` 与
+  `docs/validation-textures-2026-11-20.md`；未运行项逐条标注，不做产品验收结论。
+- 日期：2026-11-18（rev.5）；2026-11-19、2026-11-20 增补实现状态。
 - 相关：`CAD_IMPLEMENTATION_SPEC.md` §4.3、§4.4、§4.6、§16.3 与新增 §16.5；
   [ADR-0033](0033-multi-format-import.md)、[ADR-0036](0036-3d-body-model-and-solid-service.md)、
   [ADR-0024](0024-dom-canvas-wasm-cad-path.md)、[ADR-0010](0010-react-linux-host.md)；
@@ -274,6 +276,7 @@ tables/sources.json | object-refs.json | compat.json   -- Phase 2+
 tables/relationships.json | aspects.json               -- Phase 3+
 elements/<model>-<shard>.json -- 每分片 2048 元素，按 id 排序
 raw/source-<id>.bin           -- 保留的原始源文件，STORED
+textures/<key>                -- 文档自有基色纹理，STORED（minor 3，ADR-0038 D4）
 ```
 
 - **分片规则是格式契约**：`shard = seq / 2048`（同一 Model 内），元素按 id 排序写入。
@@ -289,7 +292,13 @@ raw/source-<id>.bin           -- 保留的原始源文件，STORED
   + `len` + zip 中央目录 CRC（对内容完整性严格更强，且覆盖 foreign entry）；`sha256_c` 只作为
   拷贝 entry 的原始记录从旧 manifest 透传，读侧标注"未校验"。Phase 2 要么换 zip API/自写
   容器，要么按 minor 迁移删掉该字段——**不得**把它写成已验证。
-- **压缩**：JSON entry 用 deflate；`raw/*.bin` STORED。
+- **压缩**：JSON entry 用 deflate；`raw/*.bin` STORED；`textures/<key>` 也是 STORED（PNG/JPEG 已压缩）。
+- **minor 3（2026-11-20，ADR-0038 D4）**：新增 `textures/<key>` 受管二进制条目（键为
+  `<sha256 前 32 hex>.png|.jpg`，manifest 记 `len`/`sha256` + zip CRC，读取逐条校验，
+  `foreign: false`），并在 `cad:Mesh` 上新增 `uvs` 与 `texture` 两个字段。**minor ≤ 2 的归档
+  仍可打开**：没有 `textures/` 条目，`cad:Mesh` 缺这两个字段时解码为空 UV/无纹理——这是格式里
+  唯一的"缺省"例外，只在 `decode_mesh` 内对这两个字段生效，由契约测试钉住。**旧构建读 minor 3**
+  仍按 `ymodel.unsupported_minor` 拒绝（不静默丢字段）。
 - **键序不是格式的一部分**：`serde_json::Map` 的底层类型取决于这次 build 里有没有别的 crate
   启用 `preserve_order`（本仓库没有，但某个传递依赖有），所以桌面构建按插入序、窄构建按字母序
   输出。两者是同一个 JSON 对象，读取端一律按名字取值；**同一次构建内**同一个快照两次写仍

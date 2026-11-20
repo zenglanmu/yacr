@@ -103,6 +103,8 @@ pub(super) fn acis_cube(with_edge_overlay: bool) -> RenderBatch {
         }
     }
     RenderBatch {
+        uvs: Vec::new(),
+        texture: None,
         conics: Vec::new(),
         local_origin: Point3 {
             x: 0.0,

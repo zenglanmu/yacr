@@ -408,6 +408,9 @@ fn solid_mesh(points: &[Point3]) -> CadResult<Mesh> {
         normals: Vec::new(),
         face_sources: Vec::new(),
         colors: Vec::new(),
+        // A SOLID/TRACE face has no surface parameterisation: no UV0, no texture.
+        uvs: Vec::new(),
+        texture: None,
     };
     let normals = cad_geometry::compute_vertex_normals(&mesh);
     Ok(Mesh { normals, ..mesh })

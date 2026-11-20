@@ -16,6 +16,7 @@
 //! tables/models.json            -- Vec<ModelRecord>
 //! tables/<table>.json           -- one per present TableKind (cad_db::table_entry)
 //! elements/<model>-<shard>.json -- elements of one shard, sorted by id
+//! textures/<key>                -- document base-colour textures (ADR-0038 D4)
 //! raw/<anything>                -- foreign/preserved entries (never parsed)
 //! ```
 //!

@@ -58,6 +58,7 @@ mod snap_marker;
 mod solid_boolean;
 mod stretch_lasso;
 mod text_tool;
+mod texture_round_trip;
 mod tolerance;
 mod wipeout_frames;
 mod ymodel;

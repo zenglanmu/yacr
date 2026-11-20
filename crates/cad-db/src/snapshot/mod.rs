@@ -2,8 +2,9 @@
 //! (ADR-0037 D1/D11).
 //!
 //! A [`DocumentSnapshot`] is the only thing `cad-store-zip` ever sees: a header,
-//! a revision, a list of element shards and a set of table rows. The store turns
-//! it into archive bytes and back; it never touches [`DrawingDatabase`].
+//! a revision, a list of element shards, a set of table rows and the document's
+//! base-colour texture bytes (ADR-0038 D3). The store turns it into archive bytes
+//! and back; it never touches [`DrawingDatabase`].
 //!
 //! The direction of the dependency matters:
 //!
@@ -27,6 +28,7 @@ pub(crate) mod variables;
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::sync::Arc;
 
 use cad_domain::ymodel::{DocumentHeader, ModelKey, PersistentId, Shard};
 use cad_domain::{EntityId, Revision};
@@ -188,6 +190,15 @@ pub struct DocumentSnapshot {
     pub models: Vec<ModelRecord>,
     pub shards: Vec<ShardSnapshot>,
     pub tables: TableSnapshot,
+    /// Document-owned base-colour texture bytes, keyed by
+    /// [`cad_domain::is_valid_texture_key`]'s canonical form (ADR-0038 D3/D4).
+    ///
+    /// The store writes one `textures/<key>` binary entry per item and reads them
+    /// back here; the snapshot is the authority for what exists, so a key this map
+    /// does not hold is never written (no orphan assets in the archive). Empty for
+    /// every document without textures, which is every document this build wrote
+    /// before minor 3.
+    pub textures: BTreeMap<String, Arc<[u8]>>,
 }
 
 /// Why a snapshot could not be built or hydrated.

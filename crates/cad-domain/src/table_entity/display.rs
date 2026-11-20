@@ -317,6 +317,9 @@ fn push_fill(
             // pipeline multiplies the batch tint (the appearance colour) into
             // white vertices, exactly like a single-colour solid HATCH.
             colors: Vec::new(),
+            // A synthesized display primitive has no texture parameterisation.
+            uvs: Vec::new(),
+            texture: None,
         }),
         TableDisplayAppearance::colored(fill),
     );

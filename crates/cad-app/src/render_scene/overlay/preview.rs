@@ -875,31 +875,9 @@ pub(super) fn line_batch(
             ]
         })
         .collect();
-    Some(RenderBatch {
-        conics: Vec::new(),
-        local_origin: origin,
-        topology: RenderTopology::Lines,
-        vertices,
-        normals: Vec::new(),
-        colors: Vec::new(),
-        indices: Vec::new(),
-        edges: Vec::new(),
-        mirrored: false,
-        alpha: 1.0,
-        color: cad_scene::sanitize_color(color),
-        color_unresolved: false,
-        lineweight: 0.0,
-        lineweight_unresolved: false,
-        linetype: cad_db::LinetypePattern::continuous(),
-        linetype_unresolved: false,
-        sources: vec![SelectionRef {
-            document,
-            entity: cad_domain::EntityId(preview_source_id(code)),
-            instance: cad_domain::InstancePath::default(),
-            sub_element: None,
-        }],
-        draw_order,
-    })
+    Some(line_preview_batch(
+        origin, vertices, color, document, draw_order, code,
+    ))
 }
 
 /// Build one `Lines` batch of axis-aligned crosses (two segments per point).
@@ -958,7 +936,29 @@ fn marker_batch(
             },
         );
     }
-    Some(RenderBatch {
+    Some(line_preview_batch(
+        origin, vertices, color, document, draw_order, code,
+    ))
+}
+
+/// The one `Lines` batch shape every preview overlay shares.
+///
+/// Previews are not database objects: the batch is a constant-colour,
+/// continuous, solid line list whose source is the synthetic
+/// [`preview_source_id`] identity. It is never textured and carries no UVs
+/// (ADR-0038 D8), and it has no wireframe overlay because it *is* the line
+/// geometry.
+fn line_preview_batch(
+    origin: Point3,
+    vertices: Vec<[f32; 3]>,
+    color: [f32; 3],
+    document: DocumentId,
+    draw_order: i64,
+    code: &str,
+) -> RenderBatch {
+    RenderBatch {
+        uvs: Vec::new(),
+        texture: None,
         conics: Vec::new(),
         local_origin: origin,
         topology: RenderTopology::Lines,
@@ -982,7 +982,7 @@ fn marker_batch(
             sub_element: None,
         }],
         draw_order,
-    })
+    }
 }
 
 /// A stable synthetic source id for a preview batch.

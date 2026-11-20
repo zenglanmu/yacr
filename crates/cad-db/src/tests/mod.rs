@@ -30,6 +30,7 @@ mod spline_validation;
 mod style_tables;
 mod table_validation;
 mod text_transform;
+mod textures;
 mod validate_geometry;
 mod visibility;
 mod xref;

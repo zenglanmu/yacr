@@ -8,10 +8,10 @@
 
 use std::sync::Arc;
 
-use cad_db::{DbEntity, DbObject, DrawingDatabase, DrawingDatabaseBuilder, Layer};
+use cad_db::{DbEntity, DbObject, DrawingDatabase, DrawingDatabaseBuilder, Layer, Layout};
 use cad_domain::{
-    CadError, Completeness, DatabaseId, DocumentId, EntityId, LayerId, Mesh, ObjectId, Point3,
-    Revision, SemanticGeometry, SpaceId, SupportStatus, Unit, UnitContext,
+    CadError, Completeness, DatabaseId, DocumentId, EntityId, LayerId, LayoutId, Mesh, ObjectId,
+    Point3, Revision, SemanticGeometry, SpaceId, SupportStatus, Unit, UnitContext,
 };
 use cad_import_core::{
     ExportJob, ExportLimits, ExportSpace, Exporter, ImportLimits, ImportRequest, Importer,
@@ -77,6 +77,13 @@ fn database(entities: Vec<DbEntity>) -> DrawingDatabase {
     for row in entities {
         builder.insert_entity(row).unwrap();
     }
+    builder
+        .insert_layout(Layout {
+            id: LayoutId(1),
+            name: "Layout1".into(),
+            viewports: Vec::new(),
+        })
+        .unwrap();
     builder.finish().unwrap()
 }
 
@@ -339,6 +346,87 @@ fn a_mesh_with_colours_and_normals_writes_but_reports_both_losses() {
     ));
     let text = std::str::from_utf8(&output.bytes).expect("IFC is ASCII");
     assert!(text.contains("IFCTRIANGULATEDFACESET"));
+}
+
+/// A written mesh that references a base-colour texture keeps its geometry in
+/// the file, and the texture loss is one `Partial` conversion naming the entity
+/// and the key. The bytes are identical to the untextured mesh.
+#[test]
+fn a_textured_mesh_reports_the_texture_not_written_and_writes_the_same_bytes() {
+    let units = UnitContext::from_meter();
+    let mut textured = triangle_mesh();
+    textured.uvs = vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]];
+    textured.texture = Some("abc.png".into());
+    let with = export(
+        &database(vec![entity(
+            1,
+            "TestMesh",
+            SemanticGeometry::Mesh(textured),
+        )]),
+        &units,
+    );
+    let without = export(&triangle_database(), &units);
+    assert_eq!(
+        with.bytes, without.bytes,
+        "the IFC writer must write the same bytes for a textured and an untextured mesh"
+    );
+    assert_eq!(
+        with.report.counts.exact, without.report.counts.exact,
+        "the mesh geometry is still exact"
+    );
+
+    let entries: Vec<&CompatEntry> = with
+        .report
+        .entries
+        .iter()
+        .filter(|entry| entry.code == TEXTURE_NOT_WRITTEN)
+        .collect();
+    assert_eq!(entries.len(), 1, "{:?}", with.report.entries);
+    assert_eq!(entries[0].status, SupportStatus::Partial);
+    assert_eq!(entries[0].object, Some(ObjectId(1)));
+    assert!(
+        entries[0].message.contains("#1") && entries[0].message.contains("abc.png"),
+        "the message must name the entity and the texture key: {}",
+        entries[0].message
+    );
+    assert_eq!(with.report.counts.converted, 1);
+    assert!(matches!(with.report.completeness, Completeness::Partial(_)));
+    assert!(
+        !without
+            .report
+            .entries
+            .iter()
+            .any(|entry| entry.code == TEXTURE_NOT_WRITTEN),
+        "an untextured mesh must not report a texture loss"
+    );
+    assert_eq!(without.report.completeness, Completeness::Complete);
+}
+
+/// An entity that is not in the file at all is reported once: the texture on it
+/// is part of that drop, never a second entry.
+#[test]
+fn a_dropped_entity_reports_its_texture_loss_only_once() {
+    let units = UnitContext::from_meter();
+    let mut textured = triangle_mesh();
+    textured.uvs = vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]];
+    textured.texture = Some("abc.png".into());
+    let mut row = entity(1, "PaperMesh", SemanticGeometry::Mesh(textured));
+    row.space = SpaceId::Paper(LayoutId(1));
+    let database = database(vec![row]);
+    let output = export(&database, &units);
+    assert_eq!(output.report.counts.dropped, 1);
+    assert_eq!(output.report.counts.converted, 0);
+    assert_eq!(output.report.entries.len(), 1);
+    assert_eq!(output.report.entries[0].code, SPACE_NOT_EXPORTED);
+    assert!(!output
+        .report
+        .entries
+        .iter()
+        .any(|entry| entry.code == TEXTURE_NOT_WRITTEN));
+    assert!(matches!(
+        output.report.completeness,
+        Completeness::Missing(_)
+    ));
 }
 
 /// An entity on a named layer (or carrying a display attribute) is written, but

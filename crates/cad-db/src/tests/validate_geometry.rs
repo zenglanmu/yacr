@@ -319,6 +319,8 @@ fn triangle_mesh() -> Mesh {
         normals: Vec::new(),
         face_sources: Vec::new(),
         colors: Vec::new(),
+        uvs: Vec::new(),
+        texture: None,
     }
 }
 

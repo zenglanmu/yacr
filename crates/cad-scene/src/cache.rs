@@ -66,6 +66,16 @@ impl SceneCache {
         &self.masks
     }
 
+    /// Every distinct mesh base-colour texture key held by this cache,
+    /// deduplicated and sorted (see [`mesh_texture_keys`]).
+    ///
+    /// The host calls this on a base change to resolve exactly the textures the
+    /// resident batches reference; the renderer prunes any key outside the set it
+    /// is given, so this is also the "live set" contract.
+    pub fn mesh_texture_keys(&self) -> Vec<ResourceKey> {
+        mesh_texture_keys(self.chunks())
+    }
+
     /// Number of cached mask draw items.
     pub fn mask_count(&self) -> usize {
         self.masks.len()
@@ -279,6 +289,9 @@ impl SceneCache {
                         vertices: Vec::new(),
                         normals: Vec::new(),
                         colors: Vec::new(),
+                        // A conic batch has no surface, hence no UV0 or texture.
+                        uvs: Vec::new(),
+                        texture: None,
                         indices: Vec::new(),
                         edges: Vec::new(),
                         conics: vec![record],
@@ -300,146 +313,167 @@ impl SceneCache {
             }
             previous_was_lines = line_points.is_some();
             previous_was_conic = false;
-            let (topology, vertices, normals, colors, indices, edges, origin, mirrored) =
-                match &fragment.primitive {
-                    DisplayPrimitive::Lines(points) | DisplayPrimitive::LineSegments(points) => {
-                        let origin = points.first().copied().unwrap_or(Point3 {
-                            x: 0.0,
-                            y: 0.0,
-                            z: 0.0,
-                        });
-                        let relative = |p: &Point3| {
-                            [
-                                (p.x - origin.x) as f32,
-                                (p.y - origin.y) as f32,
-                                (p.z - origin.z) as f32,
-                            ]
-                        };
-                        let verts: Vec<[f32; 3]> = if compact && !paired {
-                            points.windows(2).flatten().map(relative).collect()
-                        } else {
-                            points.iter().map(relative).collect()
-                        };
-                        (
-                            RenderTopology::Lines,
-                            verts,
-                            Vec::new(),
-                            Vec::new(),
-                            Vec::new(),
-                            Vec::new(),
-                            origin,
-                            false,
-                        )
+            let (
+                topology,
+                vertices,
+                normals,
+                colors,
+                uvs,
+                texture,
+                indices,
+                edges,
+                origin,
+                mirrored,
+            ) = match &fragment.primitive {
+                DisplayPrimitive::Lines(points) | DisplayPrimitive::LineSegments(points) => {
+                    let origin = points.first().copied().unwrap_or(Point3 {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                    });
+                    let relative = |p: &Point3| {
+                        [
+                            (p.x - origin.x) as f32,
+                            (p.y - origin.y) as f32,
+                            (p.z - origin.z) as f32,
+                        ]
+                    };
+                    let verts: Vec<[f32; 3]> = if compact && !paired {
+                        points.windows(2).flatten().map(relative).collect()
+                    } else {
+                        points.iter().map(relative).collect()
+                    };
+                    (
+                        RenderTopology::Lines,
+                        verts,
+                        Vec::new(),
+                        Vec::new(),
+                        Vec::new(),
+                        None,
+                        Vec::new(),
+                        Vec::new(),
+                        origin,
+                        false,
+                    )
+                }
+                // An ineligible conic (ellipse, dashed or degenerate) is
+                // chord-expanded exactly like a continuous `Lines` polyline.
+                DisplayPrimitive::Conic(conic) => {
+                    let points = conic.chord_points();
+                    let points: &[Point3] = &points;
+                    let origin = points.first().copied().unwrap_or(Point3 {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                    });
+                    let relative = |p: &Point3| {
+                        [
+                            (p.x - origin.x) as f32,
+                            (p.y - origin.y) as f32,
+                            (p.z - origin.z) as f32,
+                        ]
+                    };
+                    let verts: Vec<[f32; 3]> = if compact {
+                        points.windows(2).flatten().map(relative).collect()
+                    } else {
+                        points.iter().map(relative).collect()
+                    };
+                    (
+                        RenderTopology::Lines,
+                        verts,
+                        Vec::new(),
+                        Vec::new(),
+                        Vec::new(),
+                        None,
+                        Vec::new(),
+                        Vec::new(),
+                        origin,
+                        false,
+                    )
+                }
+                DisplayPrimitive::Mesh(mesh) | DisplayPrimitive::MeshWithoutEdgeOverlay(mesh) => {
+                    let include_edge_overlay =
+                        matches!(&fragment.primitive, DisplayPrimitive::Mesh(_));
+                    let MeshStreams {
+                        origin,
+                        verts,
+                        kept,
+                        normals,
+                        colors,
+                        uvs,
+                        texture,
+                    } = mesh_streams(mesh);
+                    // A plain `Mesh` keeps the legacy triangle-derived
+                    // overlay (one segment per unique triangle edge;
+                    // shared edges de-duplicated). `MeshWithoutEdgeOverlay`
+                    // (a text glyph) carries none.
+                    let edge_positions = if include_edge_overlay {
+                        triangle_edge_positions(&kept, &verts)
+                    } else {
+                        Vec::new()
+                    };
+                    (
+                        RenderTopology::Mesh,
+                        verts,
+                        normals,
+                        colors,
+                        uvs,
+                        texture,
+                        kept,
+                        edge_positions,
+                        origin,
+                        false,
+                    )
+                }
+                // A body's stored edge set is the wireframe source: the
+                // overlay positions come from those independent endpoint
+                // pairs, never from the triangle topology. De-duplication
+                // and the defensive empty fallback live in
+                // [`stored_edge_positions`].
+                DisplayPrimitive::MeshWithStoredEdges { mesh, edges } => {
+                    let MeshStreams {
+                        origin,
+                        verts,
+                        kept,
+                        normals,
+                        colors,
+                        uvs,
+                        texture,
+                    } = mesh_streams(mesh);
+                    let mut edge_positions = stored_edge_positions(edges, origin);
+                    if edge_positions.is_empty() {
+                        // Defensive only: the provider emits this variant
+                        // with at least one stored segment. If a hand-built
+                        // fragment carries none, keep the legacy
+                        // triangle-derived overlay (which also keeps
+                        // `is_text_glyph` false) rather than drawing a
+                        // body with no wireframe.
+                        edge_positions = triangle_edge_positions(&kept, &verts);
                     }
-                    // An ineligible conic (ellipse, dashed or degenerate) is
-                    // chord-expanded exactly like a continuous `Lines` polyline.
-                    DisplayPrimitive::Conic(conic) => {
-                        let points = conic.chord_points();
-                        let points: &[Point3] = &points;
-                        let origin = points.first().copied().unwrap_or(Point3 {
-                            x: 0.0,
-                            y: 0.0,
-                            z: 0.0,
-                        });
-                        let relative = |p: &Point3| {
-                            [
-                                (p.x - origin.x) as f32,
-                                (p.y - origin.y) as f32,
-                                (p.z - origin.z) as f32,
-                            ]
-                        };
-                        let verts: Vec<[f32; 3]> = if compact {
-                            points.windows(2).flatten().map(relative).collect()
-                        } else {
-                            points.iter().map(relative).collect()
-                        };
-                        (
-                            RenderTopology::Lines,
-                            verts,
-                            Vec::new(),
-                            Vec::new(),
-                            Vec::new(),
-                            Vec::new(),
-                            origin,
-                            false,
-                        )
-                    }
-                    DisplayPrimitive::Mesh(mesh)
-                    | DisplayPrimitive::MeshWithoutEdgeOverlay(mesh) => {
-                        let include_edge_overlay =
-                            matches!(&fragment.primitive, DisplayPrimitive::Mesh(_));
-                        let MeshStreams {
-                            origin,
-                            verts,
-                            kept,
-                            normals,
-                            colors,
-                        } = mesh_streams(mesh);
-                        // A plain `Mesh` keeps the legacy triangle-derived
-                        // overlay (one segment per unique triangle edge;
-                        // shared edges de-duplicated). `MeshWithoutEdgeOverlay`
-                        // (a text glyph) carries none.
-                        let edge_positions = if include_edge_overlay {
-                            triangle_edge_positions(&kept, &verts)
-                        } else {
-                            Vec::new()
-                        };
-                        (
-                            RenderTopology::Mesh,
-                            verts,
-                            normals,
-                            colors,
-                            kept,
-                            edge_positions,
-                            origin,
-                            false,
-                        )
-                    }
-                    // A body's stored edge set is the wireframe source: the
-                    // overlay positions come from those independent endpoint
-                    // pairs, never from the triangle topology. De-duplication
-                    // and the defensive empty fallback live in
-                    // [`stored_edge_positions`].
-                    DisplayPrimitive::MeshWithStoredEdges { mesh, edges } => {
-                        let MeshStreams {
-                            origin,
-                            verts,
-                            kept,
-                            normals,
-                            colors,
-                        } = mesh_streams(mesh);
-                        let mut edge_positions = stored_edge_positions(edges, origin);
-                        if edge_positions.is_empty() {
-                            // Defensive only: the provider emits this variant
-                            // with at least one stored segment. If a hand-built
-                            // fragment carries none, keep the legacy
-                            // triangle-derived overlay (which also keeps
-                            // `is_text_glyph` false) rather than drawing a
-                            // body with no wireframe.
-                            edge_positions = triangle_edge_positions(&kept, &verts);
-                        }
-                        (
-                            RenderTopology::Mesh,
-                            verts,
-                            normals,
-                            colors,
-                            kept,
-                            edge_positions,
-                            origin,
-                            false,
-                        )
-                    }
-                    // Text/instance batching is handled by their own subsystems;
-                    // a scene batch that pretends to draw them would be a fake
-                    // success. Images are carried as `ImageBatch` above, so this
-                    // arm is unreachable for them but keeps the match exhaustive.
-                    DisplayPrimitive::Text { .. }
-                    | DisplayPrimitive::Instance { .. }
-                    | DisplayPrimitive::Image { .. }
-                    | DisplayPrimitive::Mask { .. } => {
-                        continue;
-                    }
-                };
+                    (
+                        RenderTopology::Mesh,
+                        verts,
+                        normals,
+                        colors,
+                        uvs,
+                        texture,
+                        kept,
+                        edge_positions,
+                        origin,
+                        false,
+                    )
+                }
+                // Text/instance batching is handled by their own subsystems;
+                // a scene batch that pretends to draw them would be a fake
+                // success. Images are carried as `ImageBatch` above, so this
+                // arm is unreachable for them but keeps the match exhaustive.
+                DisplayPrimitive::Text { .. }
+                | DisplayPrimitive::Instance { .. }
+                | DisplayPrimitive::Image { .. }
+                | DisplayPrimitive::Mask { .. } => {
+                    continue;
+                }
+            };
             if vertices.is_empty() {
                 continue;
             }
@@ -450,6 +484,10 @@ impl SceneCache {
                 vertices,
                 normals,
                 colors,
+                // Texture state, sanitised by `mesh_streams`: both are empty/None
+                // unless the mesh carried a valid key and one UV per vertex.
+                uvs,
+                texture,
                 indices,
                 edges,
                 conics: Vec::new(),
@@ -578,6 +616,10 @@ struct MeshStreams {
     normals: Vec<[f32; 3]>,
     /// Per-vertex colours, empty unless exactly one entry per vertex exists.
     colors: Vec<[f32; 3]>,
+    /// Per-vertex UV0 in texture space, empty unless the mesh is textured.
+    uvs: Vec<[f32; 2]>,
+    /// The document-owned texture key (already converted to a [`ResourceKey`]).
+    texture: Option<ResourceKey>,
 }
 
 /// Build a mesh batch's shared streams.
@@ -587,6 +629,14 @@ struct MeshStreams {
 /// triangle with an out-of-range index is dropped; normals are carried verbatim
 /// and per-vertex colours are only meaningful when exactly one entry per vertex
 /// exists.
+///
+/// Texture state is carried under the ADR-0038 D8 invariant, sanitised rather
+/// than trusted: a mesh only becomes a textured batch when it has a **valid**
+/// texture key and exactly one finite UV per vertex. Anything else is sanitised
+/// into the untextured form (both fields empty/`None`) instead of panicking — a
+/// half-declared texture can never reach the GPU as a fabricated sampling state.
+/// `cad-db` validation is the authority that refuses such a mesh at import; this
+/// is the last-line defensive filter for a hand-built scene.
 fn mesh_streams(mesh: &Mesh) -> MeshStreams {
     let origin = mesh.vertices.first().copied().unwrap_or(Point3 {
         x: 0.0,
@@ -624,12 +674,35 @@ fn mesh_streams(mesh: &Mesh) -> MeshStreams {
     } else {
         Vec::new()
     };
+    let textured = mesh
+        .texture
+        .as_deref()
+        .filter(|key| is_valid_texture_key(key))
+        .filter(|_| mesh.uvs.len() == mesh.vertices.len() && !mesh.uvs.is_empty())
+        .filter(|_| {
+            mesh.uvs
+                .iter()
+                .flatten()
+                .all(|component| component.is_finite())
+        });
+    let (uvs, texture) = match textured {
+        Some(key) => (
+            mesh.uvs
+                .iter()
+                .map(|uv| [uv[0] as f32, uv[1] as f32])
+                .collect(),
+            Some(ResourceKey(key.to_owned())),
+        ),
+        None => (Vec::new(), None),
+    };
     MeshStreams {
         origin,
         verts,
         kept,
         normals,
         colors,
+        uvs,
+        texture,
     }
 }
 

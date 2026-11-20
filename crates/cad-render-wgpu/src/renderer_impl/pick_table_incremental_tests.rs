@@ -17,6 +17,8 @@ fn source(entity: u128) -> SelectionRef {
 /// buffers are `None` (the table is pure CPU data).
 fn gpu_batch(pick_key: u32, sources: Vec<SelectionRef>) -> GpuBatch {
     GpuBatch {
+        uvs: None,
+        texture: None,
         vertices: None,
         vertex_count: 0,
         normals: None,

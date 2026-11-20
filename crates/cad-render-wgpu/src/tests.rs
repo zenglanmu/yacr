@@ -663,6 +663,8 @@ fn sdf_conic_field_is_unit_gradient_and_triangle_ink_is_one_pixel() {
         full: true,
     };
     let batch = cad_scene::RenderBatch {
+        uvs: Vec::new(),
+        texture: None,
         local_origin: center,
         topology: cad_scene::RenderTopology::Conics,
         vertices: Vec::new(),

@@ -15,6 +15,8 @@ use crate::report::ReportBuilder;
 const NORMALS_DROPPED: &str = "export.ply.normals_dropped";
 /// Stable marker: source colours could not be kept for every vertex.
 const COLORS_DROPPED: &str = "export.ply.colors_dropped";
+/// Stable marker: a written mesh's base-colour texture has no PLY channel here.
+const TEXTURE_NOT_WRITTEN: &str = "export.ply.texture_not_written";
 
 pub(crate) fn write(collected: &Collected, report: &mut ReportBuilder) -> Vec<u8> {
     let write_colors = collected.colors_complete();
@@ -55,6 +57,7 @@ pub(crate) fn write(collected: &Collected, report: &mut ReportBuilder) -> Vec<u8
 
     let mut out = header.into_bytes();
     for mesh in &collected.meshes {
+        report.texture_not_written(TEXTURE_NOT_WRITTEN, "PLY", mesh);
         for (index, vertex) in mesh.vertices.iter().enumerate() {
             push_f32(&mut out, vertex.x);
             push_f32(&mut out, vertex.y);

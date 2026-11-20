@@ -70,6 +70,15 @@ fn mesh_merged_shader_is_valid_wgsl() {
     .expect("merged mesh shader must validate");
 }
 
+#[test]
+fn mesh_textured_shader_is_valid_wgsl() {
+    validate_wgsl(
+        "mesh_textured.wgsl",
+        include_str!("../shaders/mesh_textured.wgsl"),
+    )
+    .expect("textured mesh shader must validate");
+}
+
 /// The two accelerated-tier shaders use vertex-stage storage buffers, so they
 /// are **not** WebGL2-safe and are deliberately excluded from the GLSL ES 300
 /// back-translation test below. They must still parse and validate as WGSL.
@@ -100,9 +109,14 @@ fn image_shader_is_valid_wgsl() {
 }
 
 /// The light-background ink flip is a **display-time** transform: the seven
-/// colour shaders must apply it and the image / id-pass / mask shaders must not.
-/// Pinned by source contract because the rule is deliberately textual and the
-/// uniform word it keys off (`light.a`) travels through every pipeline.
+/// colour shaders must apply it and the image / textured-mesh / id-pass / mask
+/// shaders must not. Pinned by source contract because the rule is deliberately
+/// textual and the uniform word it keys off (`light.a`) travels through every
+/// pipeline.
+///
+/// A textured mesh is excluded on purpose: a base-colour map is authored art, not
+/// near-white ink, so flipping it on a light background would recolour the
+/// texture (ADR-0038 D9).
 #[test]
 fn only_the_seven_colour_shaders_carry_the_light_background_ink_flip() {
     let with_flip = [
@@ -147,6 +161,10 @@ fn only_the_seven_colour_shaders_carry_the_light_background_ink_flip() {
     }
     let without_flip = [
         ("image.wgsl", include_str!("../shaders/image.wgsl")),
+        (
+            "mesh_textured.wgsl",
+            include_str!("../shaders/mesh_textured.wgsl"),
+        ),
         ("mask.wgsl", include_str!("../shaders/mask.wgsl")),
         ("pick_arc.wgsl", include_str!("../shaders/pick_arc.wgsl")),
         (
@@ -177,6 +195,10 @@ fn only_the_seven_colour_shaders_carry_the_light_background_ink_flip() {
 /// the entry point for the active id-target format. Validating the file alone
 /// would therefore only prove the body parses; this validates the exact module
 /// text the pipelines compile, for both id-target formats.
+///
+/// The list length is a **contract**: a textured mesh is picked through the same
+/// `pick_mesh` id shader as an untextured one (the id pass ignores UV0/texture),
+/// so adding a set of have-texture draw items must not add an id-pass class.
 #[test]
 fn id_pass_shaders_validate_for_both_target_formats() {
     for format in [IdTargetFormat::R32Uint, IdTargetFormat::PackedRgba8] {
@@ -214,6 +236,10 @@ fn color_shaders_back_translate_to_glsl_es_300() {
             include_str!("../shaders/mesh_merged.wgsl"),
         ),
         ("image.wgsl", include_str!("../shaders/image.wgsl")),
+        (
+            "mesh_textured.wgsl",
+            include_str!("../shaders/mesh_textured.wgsl"),
+        ),
         ("mask.wgsl", include_str!("../shaders/mask.wgsl")),
     ];
     for (name, source) in shaders {

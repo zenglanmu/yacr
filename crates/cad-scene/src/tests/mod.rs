@@ -73,6 +73,8 @@ fn mesh_representation(entity: u128, mesh: Mesh) -> DisplayRepresentation {
 
 fn quad() -> Mesh {
     Mesh {
+        uvs: Vec::new(),
+        texture: None,
         vertices: vec![
             Point3 {
                 x: 0.0,

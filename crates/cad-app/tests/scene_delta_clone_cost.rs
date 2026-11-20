@@ -26,6 +26,8 @@ use cad_scene::{LinetypePattern, RenderBatch, RenderTopology, SceneDelta, DEFAUL
 fn batch(index: usize) -> RenderBatch {
     let x = index as f32 * 0.25;
     RenderBatch {
+        uvs: Vec::new(),
+        texture: None,
         conics: Vec::new(),
         local_origin: Point3 {
             x: 0.0,

@@ -328,6 +328,8 @@ fn sdf_arc_draw_order_ties() {
         let mut conic = conic_batch(vec![circle(base, 40.0)], 1);
         conic.color = red;
         let mut line = RenderBatch {
+            uvs: Vec::new(),
+            texture: None,
             local_origin: Point3 {
                 x: 0.0,
                 y: 0.0,
@@ -414,6 +416,8 @@ fn sdf_arc_draw_order_ties() {
         conic.color = red;
         // A quad covering the whole view, same z, drawn first.
         let mesh = RenderBatch {
+            uvs: Vec::new(),
+            texture: None,
             local_origin: Point3 {
                 x: 0.0,
                 y: 0.0,

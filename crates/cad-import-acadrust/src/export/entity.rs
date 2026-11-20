@@ -25,7 +25,7 @@ use cad_db::{DbEntity, DrawingDatabase};
 use cad_domain::*;
 
 pub(crate) use super::accumulator::ExportAccumulator;
-use super::body::{emit_body3d, emit_polyface_mesh};
+use super::body::{emit_body3d, emit_polyface_mesh, record_texture_not_written};
 use super::common::{
     common_for, map_h_align, map_v_align, mtext_attachment, ocs_from_wcs, v3, with_reasons,
 };
@@ -531,6 +531,9 @@ fn emit_leaf(
                         solid.is_trace = record.class.is_trace();
                         solid.common = common;
                         acc.push(EntityType::Solid(solid), ctx)?;
+                        // The filled face is written; a base-colour texture on
+                        // the source mesh has no DXF record here.
+                        record_texture_not_written(acc, entity, mesh, ctx);
                         acc.record(
                             object,
                             "filled_face",

@@ -422,6 +422,9 @@ struct ClipVertex {
     z: f64,
     normal: Option<Point3>,
     color: Option<[u8; 3]>,
+    /// UV0 of this vertex, when the source mesh carries a texture parameterisation
+    /// (ADR-0038). `None` for an untextured mesh, so nothing is invented.
+    uv: Option<[f64; 2]>,
 }
 
 impl ClipVertex {
@@ -432,6 +435,7 @@ impl ClipVertex {
             && self.z == other.z
             && self.normal == other.normal
             && self.color == other.color
+            && self.uv == other.uv
     }
 
     fn lerp(&self, other: &ClipVertex, t: f64) -> ClipVertex {
@@ -455,6 +459,13 @@ impl ClipVertex {
                     lerp_channel(a[1], b[1], t),
                     lerp_channel(a[2], b[2], t),
                 ]),
+                _ => None,
+            },
+            // UV0 is a surface parameter: interpolate it linearly along the cut
+            // edge (no wrapping, no re-normalisation) so a clipped triangle keeps
+            // the exact texture mapping of the source surface.
+            uv: match (self.uv, other.uv) {
+                (Some(a), Some(b)) => Some([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]),
                 _ => None,
             },
         }
@@ -514,42 +525,70 @@ fn intersect_clip_vertices(a: ClipVertex, b: ClipVertex, axis: usize, bound: f64
     out
 }
 
-fn push_clip_vertices(
-    vertices: &mut Vec<Point3>,
-    normals: &mut Vec<Point3>,
-    colors: &mut Vec<[u8; 3]>,
-    source: &[ClipVertex],
-    has_normals: bool,
-    has_colors: bool,
-) -> Result<u32, ClipRefusal> {
-    let base = u32::try_from(vertices.len()).map_err(|_| {
-        ClipRefusal::new(
-            clip_reason::MESH_UNCLIPPABLE,
-            "clipped mesh exceeds 32-bit vertex addressing",
-        )
-    })?;
-    if vertices.len().saturating_add(source.len()) > u32::MAX as usize {
-        return Err(ClipRefusal::new(
-            clip_reason::MESH_UNCLIPPABLE,
-            "clipped mesh exceeds 32-bit vertex addressing",
-        ));
+/// The output streams of one clipped mesh, accumulated across triangles.
+///
+/// A struct rather than four `&mut Vec` parameters: the push helper already took
+/// six arguments, and the UV0 stream makes it seven (over the readable limit).
+struct ClippedMesh {
+    vertices: Vec<Point3>,
+    normals: Vec<Point3>,
+    colors: Vec<[u8; 3]>,
+    uvs: Vec<[f64; 2]>,
+}
+
+impl ClippedMesh {
+    fn new() -> Self {
+        Self {
+            vertices: Vec::new(),
+            normals: Vec::new(),
+            colors: Vec::new(),
+            uvs: Vec::new(),
+        }
     }
-    for vertex in source {
-        vertices.push(Point3 {
-            x: vertex.pos[0],
-            y: vertex.pos[1],
-            z: vertex.z,
-        });
-        if has_normals {
-            normals.push(crate::transform::normalize(
-                vertex.normal.unwrap_or_default(),
+
+    /// Append `source`, interpolating whichever optional attributes the source
+    /// mesh carries. Returns the base index of the appended block.
+    fn push(
+        &mut self,
+        source: &[ClipVertex],
+        has_normals: bool,
+        has_colors: bool,
+        has_uvs: bool,
+    ) -> Result<u32, ClipRefusal> {
+        let base = u32::try_from(self.vertices.len()).map_err(|_| {
+            ClipRefusal::new(
+                clip_reason::MESH_UNCLIPPABLE,
+                "clipped mesh exceeds 32-bit vertex addressing",
+            )
+        })?;
+        if self.vertices.len().saturating_add(source.len()) > u32::MAX as usize {
+            return Err(ClipRefusal::new(
+                clip_reason::MESH_UNCLIPPABLE,
+                "clipped mesh exceeds 32-bit vertex addressing",
             ));
         }
-        if has_colors {
-            colors.push(vertex.color.unwrap_or([0, 0, 0]));
+        for vertex in source {
+            self.vertices.push(Point3 {
+                x: vertex.pos[0],
+                y: vertex.pos[1],
+                z: vertex.z,
+            });
+            if has_normals {
+                self.normals.push(crate::transform::normalize(
+                    vertex.normal.unwrap_or_default(),
+                ));
+            }
+            if has_colors {
+                self.colors.push(vertex.color.unwrap_or([0, 0, 0]));
+            }
+            if has_uvs {
+                // A surviving vertex always carries the UV of its source edge, so
+                // the stream stays aligned with `vertices` one-to-one.
+                self.uvs.push(vertex.uv.unwrap_or([0.0, 0.0]));
+            }
         }
+        Ok(base)
     }
-    Ok(base)
 }
 
 /// Clip every triangle of `mesh` against the paper rectangle `[center ± half]`.
@@ -573,6 +612,12 @@ pub fn clip_mesh_to_rect(
     let max = [center[0] + half[0], center[1] + half[1]];
     let has_normals = mesh.normals.len() == mesh.vertices.len();
     let has_colors = mesh.colors.len() == mesh.vertices.len();
+    // UV0 survives clipping whenever it is aligned with the vertices. A mesh may
+    // carry UVs without a texture (the mapping is still a true surface property),
+    // so the predicate is the domain invariant, not `texture.is_some()`. A
+    // texture *without* UVs cannot be sampled: the domain forbids it, and the
+    // rebuild below drops that invalid combination instead of faking UVs.
+    let has_uvs = !mesh.uvs.is_empty() && mesh.uvs.len() == mesh.vertices.len();
     let has_sources = mesh.face_sources.len() == mesh.triangles.len();
 
     for vertex in &mesh.vertices {
@@ -584,9 +629,7 @@ pub fn clip_mesh_to_rect(
         }
     }
 
-    let mut vertices: Vec<Point3> = Vec::new();
-    let mut normals: Vec<Point3> = Vec::new();
-    let mut colors: Vec<[u8; 3]> = Vec::new();
+    let mut out = ClippedMesh::new();
     let mut triangles: Vec<[u32; 3]> = Vec::new();
     let mut face_sources: Vec<Option<SubElementId>> = Vec::new();
 
@@ -614,6 +657,7 @@ pub fn clip_mesh_to_rect(
                 z: mesh.vertices[vi].z,
                 normal: has_normals.then(|| mesh.normals[vi]),
                 color: has_colors.then(|| mesh.colors[vi]),
+                uv: has_uvs.then(|| mesh.uvs[vi]),
             }
         });
 
@@ -621,14 +665,7 @@ pub fn clip_mesh_to_rect(
         if originals.iter().all(|v| {
             v.pos[0] >= min[0] && v.pos[0] <= max[0] && v.pos[1] >= min[1] && v.pos[1] <= max[1]
         }) {
-            let base = push_clip_vertices(
-                &mut vertices,
-                &mut normals,
-                &mut colors,
-                &originals,
-                has_normals,
-                has_colors,
-            )?;
+            let base = out.push(&originals, has_normals, has_colors, has_uvs)?;
             triangles.push([base, base + 1, base + 2]);
             face_sources.push(source.clone());
             continue;
@@ -650,14 +687,7 @@ pub fn clip_mesh_to_rect(
             // A fully clipped (or degenerate) triangle contributes no area.
             continue;
         }
-        let base = push_clip_vertices(
-            &mut vertices,
-            &mut normals,
-            &mut colors,
-            &polygon,
-            has_normals,
-            has_colors,
-        )?;
+        let base = out.push(&polygon, has_normals, has_colors, has_uvs)?;
         for k in 1..polygon.len() - 1 {
             triangles.push([base, base + k as u32, base + k as u32 + 1]);
             face_sources.push(source.clone());
@@ -668,11 +698,17 @@ pub fn clip_mesh_to_rect(
         return Ok(None);
     }
     Ok(Some(Mesh {
-        vertices,
+        vertices: out.vertices,
         triangles,
-        normals: if has_normals { normals } else { Vec::new() },
+        normals: if has_normals { out.normals } else { Vec::new() },
         face_sources,
-        colors: if has_colors { colors } else { Vec::new() },
+        colors: if has_colors { out.colors } else { Vec::new() },
+        // The UV stream survives with exactly one entry per surviving vertex, so
+        // the clipped mesh keeps the source surface parameterisation.
+        uvs: if has_uvs { out.uvs } else { Vec::new() },
+        // Clipping removes triangles, never the material: the texture key is
+        // carried whenever its UVs were (a texture without UVs cannot be sampled).
+        texture: if has_uvs { mesh.texture.clone() } else { None },
     }))
 }
 
@@ -692,6 +728,7 @@ pub fn clip_mesh_to_rect(
 pub fn clip_mesh_to_polygon(mesh: &Mesh, clip: &PaperClip) -> Result<Option<Mesh>, ClipRefusal> {
     let has_normals = mesh.normals.len() == mesh.vertices.len();
     let has_colors = mesh.colors.len() == mesh.vertices.len();
+    let has_uvs = !mesh.uvs.is_empty() && mesh.uvs.len() == mesh.vertices.len();
     let has_sources = mesh.face_sources.len() == mesh.triangles.len();
 
     for vertex in &mesh.vertices {
@@ -704,9 +741,7 @@ pub fn clip_mesh_to_polygon(mesh: &Mesh, clip: &PaperClip) -> Result<Option<Mesh
     }
 
     let windows = clip.triangles();
-    let mut vertices: Vec<Point3> = Vec::new();
-    let mut normals: Vec<Point3> = Vec::new();
-    let mut colors: Vec<[u8; 3]> = Vec::new();
+    let mut out = ClippedMesh::new();
     let mut triangles: Vec<[u32; 3]> = Vec::new();
     let mut face_sources: Vec<Option<SubElementId>> = Vec::new();
 
@@ -734,6 +769,7 @@ pub fn clip_mesh_to_polygon(mesh: &Mesh, clip: &PaperClip) -> Result<Option<Mesh
                 z: mesh.vertices[vi].z,
                 normal: has_normals.then(|| mesh.normals[vi]),
                 color: has_colors.then(|| mesh.colors[vi]),
+                uv: has_uvs.then(|| mesh.uvs[vi]),
             }
         });
 
@@ -741,14 +777,7 @@ pub fn clip_mesh_to_polygon(mesh: &Mesh, clip: &PaperClip) -> Result<Option<Mesh
         // and with no edge leaving through a concave notch) is reused verbatim.
         let corners = originals.map(|vertex| vertex.pos);
         if clip.holds(&corners) {
-            let base = push_clip_vertices(
-                &mut vertices,
-                &mut normals,
-                &mut colors,
-                &originals,
-                has_normals,
-                has_colors,
-            )?;
+            let base = out.push(&originals, has_normals, has_colors, has_uvs)?;
             triangles.push([base, base + 1, base + 2]);
             face_sources.push(source.clone());
             continue;
@@ -767,14 +796,7 @@ pub fn clip_mesh_to_polygon(mesh: &Mesh, clip: &PaperClip) -> Result<Option<Mesh
                 // A fully clipped (or degenerate) piece contributes no area.
                 continue;
             }
-            let base = push_clip_vertices(
-                &mut vertices,
-                &mut normals,
-                &mut colors,
-                &polygon,
-                has_normals,
-                has_colors,
-            )?;
+            let base = out.push(&polygon, has_normals, has_colors, has_uvs)?;
             for k in 1..polygon.len() - 1 {
                 triangles.push([base, base + k as u32, base + k as u32 + 1]);
                 face_sources.push(source.clone());
@@ -786,11 +808,13 @@ pub fn clip_mesh_to_polygon(mesh: &Mesh, clip: &PaperClip) -> Result<Option<Mesh
         return Ok(None);
     }
     Ok(Some(Mesh {
-        vertices,
+        vertices: out.vertices,
         triangles,
-        normals: if has_normals { normals } else { Vec::new() },
+        normals: if has_normals { out.normals } else { Vec::new() },
         face_sources,
-        colors: if has_colors { colors } else { Vec::new() },
+        colors: if has_colors { out.colors } else { Vec::new() },
+        uvs: if has_uvs { out.uvs } else { Vec::new() },
+        texture: if has_uvs { mesh.texture.clone() } else { None },
     }))
 }
 

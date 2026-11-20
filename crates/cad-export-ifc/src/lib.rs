@@ -82,6 +82,9 @@ pub const NORMALS_DROPPED: &str = "export.ifc.normals_dropped";
 /// Stable conversion code: the entity carries a layer (or display attribute),
 /// which the IFC skeleton does not model.
 pub const LAYERS_DROPPED: &str = "export.ifc.layers_dropped";
+/// Stable conversion code: a written mesh references a base-colour texture, which
+/// the IFC skeleton does not project.
+pub const TEXTURE_NOT_WRITTEN: &str = "export.ifc.texture_not_written";
 /// Stable drop code: the plan executor refused the object's `Add`.
 pub const ADD_REFUSED: &str = "export.ifc.add_refused";
 /// Stable refusal code: the source has more meshes than the job's entity bound.
@@ -218,12 +221,27 @@ struct AttributeLoss {
     normals: usize,
     /// Entities on a non-zero layer or carrying a display attribute.
     layers: usize,
+    /// Written meshes that reference a document base-colour texture.
+    ///
+    /// Kept per entity because the message names both the source entity and the
+    /// texture key; the loss itself is one conversion per affected mesh.
+    textures: Vec<TextureLoss>,
+}
+
+/// One written mesh whose base-colour texture is not in the IFC file.
+struct TextureLoss {
+    object: ObjectId,
+    type_key: String,
+    key: String,
 }
 
 impl AttributeLoss {
     /// One conversion entry per kind that actually occurred: an absent attribute
     /// never invents an entry.
-    fn entries(&self) -> Vec<CompatEntry> {
+    ///
+    /// `dropped` holds the entities the file does not contain at all: a texture
+    /// on one of them is part of that drop and is never reported twice.
+    fn entries(&self, dropped: &BTreeSet<ObjectId>) -> Vec<CompatEntry> {
         let mut entries = Vec::new();
         if self.colours > 0 {
             entries.push(CompatEntry {
@@ -273,14 +291,30 @@ impl AttributeLoss {
                 ),
             });
         }
+        // One entry per written mesh that references a texture: the face set is
+        // written, the texture is not. An entity the file does not contain at all
+        // was already reported as a drop, so its texture is not reported again.
+        for loss in &self.textures {
+            if dropped.contains(&loss.object) {
+                continue;
+            }
+            entries.push(CompatEntry {
+                connector: "ifc",
+                direction: ReportDirection::Export,
+                level: FidelityLevel::L1,
+                object: Some(loss.object),
+                type_key: Some(loss.type_key.clone()),
+                status: SupportStatus::Partial,
+                code: TEXTURE_NOT_WRITTEN.to_string(),
+                message: format!(
+                    "entity #{} ({}) references base-colour texture \"{}\", which the IFC \
+                     skeleton has no texture projection for; the mesh geometry was written \
+                     without it",
+                    loss.object.0, loss.type_key, loss.key
+                ),
+            });
+        }
         entries
-    }
-
-    fn messages(&self) -> Vec<String> {
-        self.entries()
-            .into_iter()
-            .map(|entry| entry.message)
-            .collect()
     }
 }
 
@@ -390,6 +424,13 @@ fn collect_meshes(
         }
         if carries_layer_attributes(entity, job.database) {
             attributes.layers += 1;
+        }
+        if let Some(key) = mesh.texture.as_deref() {
+            attributes.textures.push(TextureLoss {
+                object,
+                type_key: type_key.clone(),
+                key: key.to_string(),
+            });
         }
         meshes.push(CollectedMesh {
             object,
@@ -503,19 +544,22 @@ fn compat_report(
             reasons.push(drop.message.clone());
         }
     }
-    entries.extend(attributes.entries());
-    reasons.extend(attributes.messages());
+    // An entity the file does not contain at all is already reported as a drop,
+    // so a texture on it must not be reported a second time.
+    let dropped_objects: BTreeSet<ObjectId> = drops.iter().filter_map(|drop| drop.object).collect();
+    let attribute_entries = attributes.entries(&dropped_objects);
+    reasons.extend(attribute_entries.iter().map(|entry| entry.message.clone()));
+    // Each attribute entry is one conversion (one per attribute kind actually
+    // lost, or one per textured mesh), matching the `Partial` entries above.
+    let converted = attribute_entries.len();
+    entries.extend(attribute_entries);
     CompatReport {
         connector: "ifc",
         direction: ReportDirection::Export,
         level: FidelityLevel::L1,
         counts: CompatCounts {
             exact,
-            // Attribute losses are conversions, not drops: one per attribute
-            // kind that actually occurred, matching the `Partial` entries above.
-            converted: usize::from(attributes.colours > 0)
-                + usize::from(attributes.normals > 0)
-                + usize::from(attributes.layers > 0),
+            converted,
             dropped: drops.len(),
             bytes,
         },

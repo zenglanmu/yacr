@@ -46,8 +46,8 @@ use cad_import_core::{
 pub use write::{
     export_env, metres_per_source_unit, COLORS_DROPPED, DEGENERATE_TRIANGLE,
     LAYER_MATERIAL_FLATTENED, LIMITS_EXCEEDED, MISMATCHED_DESCRIPTOR, MODEL_REJECTED,
-    NORMALS_DROPPED, NO_GEOMETRY, PAPER_SPACE_DROPPED, UNITS_UNKNOWN, UNSUPPORTED_GEOMETRY,
-    WRITE_FAILED, WRITE_SEED, WRITE_UNIX_TIME,
+    NORMALS_DROPPED, NO_GEOMETRY, PAPER_SPACE_DROPPED, TEXTURE_NOT_WRITTEN, UNITS_UNKNOWN,
+    UNSUPPORTED_GEOMETRY, WRITE_FAILED, WRITE_SEED, WRITE_UNIX_TIME,
 };
 
 /// SketchUp `.skp` writer for the connector whose descriptor it was built with.
@@ -143,6 +143,11 @@ struct Report {
     /// A source mesh carried per-vertex normals; faces get their own Newell
     /// normal instead.
     normals_dropped: bool,
+    /// Written meshes that reference a document base-colour texture, one entry
+    /// per source entity (the message names the entity and the texture key).
+    texture_losses: Vec<(cad_domain::ObjectId, String)>,
+    /// How many of those texture entries were recorded by the last model build.
+    texture_count: usize,
 }
 
 impl Report {
@@ -157,6 +162,8 @@ impl Report {
             flattened: false,
             colours_dropped: false,
             normals_dropped: false,
+            texture_losses: Vec::new(),
+            texture_count: 0,
         }
     }
 
@@ -338,6 +345,17 @@ impl Report {
             if degenerate == 0 {
                 self.exact += 1;
             }
+            // The faces are written; a base-colour texture has no carrier here.
+            if let Some(key) = source.mesh.texture.as_deref() {
+                self.texture_losses.push((
+                    source.object,
+                    format!(
+                        "entity #{} ({}) references base-colour texture \"{key}\", which the \
+                         SketchUp writer does not carry; the faces were written without it",
+                        source.object.0, source.type_key
+                    ),
+                ));
+            }
             model.geometry.push(skpwright::GeometryRun {
                 def_index: None,
                 mesh: skpwright::Mesh {
@@ -400,6 +418,23 @@ impl Report {
                 message,
             });
         }
+        // The geometry is written; only the base-colour texture is not. One
+        // entry per affected source entity, naming the entity and the key.
+        let losses = std::mem::take(&mut self.texture_losses);
+        for (object, message) in &losses {
+            self.reasons.push(message.clone());
+            self.entries.push(CompatEntry {
+                connector: self.connector,
+                direction: ReportDirection::Export,
+                level: FidelityLevel::L1,
+                object: Some(*object),
+                type_key: None,
+                status: SupportStatus::Partial,
+                code: TEXTURE_NOT_WRITTEN.to_string(),
+                message: message.clone(),
+            });
+        }
+        self.texture_count = losses.len();
         Ok(model)
     }
 
@@ -433,7 +468,9 @@ impl Report {
             exact: self.exact,
             // One conversion per attribute kind actually lost, matching the
             // `Partial` entries appended in `model_and_report`.
-            converted: usize::from(self.colours_dropped) + usize::from(self.normals_dropped),
+            converted: usize::from(self.colours_dropped)
+                + usize::from(self.normals_dropped)
+                + self.texture_count,
             dropped: self.dropped,
             bytes,
         }

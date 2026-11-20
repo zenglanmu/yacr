@@ -25,6 +25,8 @@ fn created_solid_mesh() -> Mesh {
         normals: Vec::new(),
         face_sources: Vec::new(),
         colors: Vec::new(),
+        uvs: Vec::new(),
+        texture: None,
     };
     mesh.normals = cad_geometry::compute_vertex_normals(&mesh);
     mesh

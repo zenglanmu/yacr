@@ -20,6 +20,10 @@
 //! * A truncated payload (fewer element/vertex/face instances than declared) is
 //!   [`CadError::CorruptData`] naming the shortfall. It is never a partial
 //!   success that silently drops trailing data.
+//! * PLY vertex texture coordinates (`s`/`t`) are not imported: a PLY carries
+//!   no texture image bytes, so they could not be sampled. They are reported
+//!   ([`ply::DIAG_TEXTURE_COORDS_NOT_IMPORTED`] + `Partial`) instead of
+//!   vanishing as unknown properties (ADR-0038 D6).
 //!
 //! Deliberate boundaries:
 //! * PLY is one mesh per file, so one `DbEntity`; OFF likewise.
@@ -41,7 +45,7 @@ pub use ply::{
     PlyImporter, DIAG_COLORS_DROPPED as PLY_DIAG_COLORS_DROPPED,
     DIAG_DEGENERATE_TRIANGLE as PLY_DIAG_DEGENERATE_TRIANGLE,
     DIAG_FACE_TOO_FEW_VERTICES as PLY_DIAG_FACE_TOO_FEW_VERTICES,
-    DIAG_NGON_FAN as PLY_DIAG_NGON_FAN, DIAG_NORMALS_DROPPED,
+    DIAG_NGON_FAN as PLY_DIAG_NGON_FAN, DIAG_NORMALS_DROPPED, DIAG_TEXTURE_COORDS_NOT_IMPORTED,
     ERR_INDEX_RANGE as PLY_ERR_INDEX_RANGE, ERR_MALFORMED_HEADER as PLY_ERR_MALFORMED_HEADER,
     ERR_MISSING_END_HEADER, ERR_NON_FINITE as PLY_ERR_NON_FINITE, ERR_TRAILING_BYTES,
     ERR_TRUNCATED as PLY_ERR_TRUNCATED, ERR_UNSUPPORTED_FORMAT, ERR_UNSUPPORTED_PROPERTY_TYPE,
@@ -142,6 +146,11 @@ pub(crate) fn publish(
             normals: parsed.normals,
             face_sources: Vec::new(),
             colors: parsed.colors,
+            // ADR-0038 D6: PLY carries no texture image bytes, so neither parser
+            // in this crate produces UVs or a texture key. A file that declares
+            // `s`/`t` reports the loss instead of keeping UVs nothing can sample.
+            uvs: Vec::new(),
+            texture: None,
         },
         // Per-vertex colours, when present, are carried by the mesh; the entity
         // colour stays ByLayer so an absent colour never wins over them.

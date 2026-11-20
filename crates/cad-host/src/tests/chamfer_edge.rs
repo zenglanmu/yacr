@@ -83,6 +83,8 @@ fn box_body(id: u128, x0: f64) -> DbEntity {
                     normals: Vec::new(),
                     face_sources,
                     colors: Vec::new(),
+                    uvs: Vec::new(),
+                    texture: None,
                 },
                 edges: Vec::new(),
                 tolerance: Some(0.01),

@@ -51,6 +51,8 @@ fn gpu() -> Option<HeadlessGpu> {
 
 fn lines_batch(vertices: Vec<[f32; 3]>) -> RenderBatch {
     RenderBatch {
+        uvs: Vec::new(),
+        texture: None,
         conics: Vec::new(),
         local_origin: Point3 {
             x: 0.0,
@@ -94,6 +96,8 @@ fn rectangle_lines() -> Vec<[f32; 3]> {
 /// A triangle wound counter-clockwise in world/clip space, facing +Z.
 fn triangle_mesh() -> RenderBatch {
     RenderBatch {
+        uvs: Vec::new(),
+        texture: None,
         conics: Vec::new(),
         local_origin: Point3 {
             x: 0.0,
@@ -162,6 +166,8 @@ fn camera_2d() -> Camera2d {
 /// a minimum triangle, so a tiny paced budget can be shown to reject it.
 fn quad_mesh() -> RenderBatch {
     RenderBatch {
+        uvs: Vec::new(),
+        texture: None,
         conics: Vec::new(),
         local_origin: Point3 {
             x: 0.0,
@@ -208,6 +214,8 @@ fn line_batches(n: usize) -> Vec<RenderBatch> {
 /// `right` at the two x = +0.8 vertices.
 fn gradient_quad(left: [f32; 3], right: [f32; 3]) -> RenderBatch {
     RenderBatch {
+        uvs: Vec::new(),
+        texture: None,
         conics: Vec::new(),
         local_origin: Point3 {
             x: 0.0,

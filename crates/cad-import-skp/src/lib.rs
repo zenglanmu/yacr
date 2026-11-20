@@ -12,11 +12,13 @@
 //!
 //! * **Read** is real: model geometry runs, instances/components and groups,
 //!   per-instance transforms, tags (layers), hidden flags, materials with
-//!   colour and opacity.
-//! * **Not imported:** edges (SketchUp's line/curve geometry), texture image
-//!   sampling, UV placement, scenes/pages, section planes, annotations,
-//!   dynamic-component attributes, and any CAD semantics. A file whose only
-//!   geometry is edges is an **explicit refusal**
+//!   colour, opacity, and front-face base-colour textures (ADR-0038): an
+//!   embedded image is registered as a document asset and the face group carries
+//!   §4v UV0.
+//! * **Not imported:** edges (SketchUp's line/curve geometry), back-face
+//!   textures, images that only exist as external paths, scenes/pages, section
+//!   planes, annotations, dynamic-component attributes, and any CAD semantics. A
+//!   file whose only geometry is edges is an **explicit refusal**
 //!   ([`EDGE_ONLY_GEOMETRY`]), never an empty success.
 //! * Tags are flattened onto layer `0` (the shared mesh-import contract inserts
 //!   a single layer) but **visibility is honoured**: hidden instances, hidden
@@ -34,6 +36,9 @@
 //! node translations to metres. See [`DIAG_UNITS_METRES`].
 
 mod convert;
+// The textured-material bridge (asset registration + §4v UV planning), split
+// out for the code-size gate.
+mod texture;
 
 #[cfg(test)]
 mod tests;
@@ -78,8 +83,17 @@ pub const DIAG_DOCUMENT: &str = "import.skp.document";
 pub const DIAG_LAYERS_FLATTENED: &str = "import.skp.layers_flattened";
 /// Informational code: what WYSIWYG pruning removed.
 pub const DIAG_HIDDEN_PRUNED: &str = "import.skp.hidden_pruned";
-/// Partial code: material textures are not sampled.
+/// Partial code: a textured material group still falls back to its average colour
+/// (no usable image, so no texture could be attached).
 pub const DIAG_TEXTURES_NOT_SAMPLED: &str = "import.skp.textures_not_sampled";
+/// Partial code: a textured material references an image file outside the model,
+/// whose bytes are not in the `.skp`.
+pub const DIAG_TEXTURE_UNAVAILABLE: &str = "import.skp.texture_unavailable";
+/// Partial code: a textured face has no §4v UV transform (or no applied size), so
+/// its group stays untextured.
+pub const DIAG_UV_UNAVAILABLE: &str = "import.skp.uv_unavailable";
+/// Informational code: back-face textures are not imported (the front side is).
+pub const DIAG_BACK_TEXTURE_NOT_IMPORTED: &str = "import.skp.back_texture_not_imported";
 /// Partial code: faces whose rings could not be triangulated were dropped.
 pub const DIAG_FACES_DROPPED: &str = "import.skp.faces_dropped";
 /// Partial code: the release is read by container equivalence only.
@@ -158,7 +172,8 @@ impl Importer for SkpImporter {
             )));
         }
 
-        let scene = read_scene(&model, &request.limits, cancelled)?;
+        let mut import = MeshImport::new(request, SKP_MESH_TYPE_KEY)?;
+        let scene = read_scene(&model, &request.limits, cancelled, &mut import)?;
         let stats = &scene.stats;
         if scene.placed.is_empty() {
             let code = if stats.edges_not_imported > 0 {
@@ -190,7 +205,6 @@ impl Importer for SkpImporter {
             0,
             Some(entity_total),
         ));
-        let mut import = MeshImport::new(request, SKP_MESH_TYPE_KEY)?;
         record_version(&mut import, &model);
         record_document(&mut import, stats);
         record_losses(&mut import, stats);
@@ -227,14 +241,14 @@ impl Importer for SkpImporter {
             Diagnostic {
                 object: None,
                 code: DIAG_PREVIEW_GEOMETRY.into(),
-                message: "SketchUp preview: triangles, instance transforms, tags and materials \
-                          are read; edges, textures, scenes, sections and annotations are not. \
-                          Not a measurement source."
+                message: "SketchUp preview: triangles, instance transforms, tags, materials and \
+                          front-face base-colour textures are read; edges, back-face textures, \
+                          scenes, sections and annotations are not. Not a measurement source."
                     .into(),
             },
             Some(
-                "SketchUp preview geometry: triangle meshes only, no edges, textures, scenes or \
-                 measurement semantics"
+                "SketchUp preview geometry: triangle meshes only, no edges, scenes or measurement \
+                 semantics"
                     .into(),
             ),
         );
@@ -388,16 +402,19 @@ fn record_document(import: &mut MeshImport, stats: &SkpStats) {
             object: None,
             code: DIAG_DOCUMENT.into(),
             message: format!(
-                "{} run(s), {} placed, {} scene node(s), {} face(s) emitted, {} edge(s) not \
-                 importable, {} material(s), {} tag(s) ({} textured)",
+                "{} run(s), {} placed, {} scene node(s), {} face(s) emitted ({} textured), {} \
+                 edge(s) not importable, {} material(s), {} tag(s) ({} textured), {} textured \
+                 group(s)",
                 stats.runs,
                 stats.placed_runs,
                 stats.nodes,
                 stats.faces_emitted,
+                stats.textured_faces,
                 stats.edges_not_imported,
                 stats.materials,
                 stats.layers,
-                stats.textured_materials
+                stats.textured_materials,
+                stats.textured_groups
             ),
         },
         None,
@@ -439,18 +456,86 @@ fn record_document(import: &mut MeshImport, stats: &SkpStats) {
 }
 
 fn record_losses(import: &mut MeshImport, stats: &SkpStats) {
-    if stats.textured_materials > 0 {
+    if stats.external_textures > 0 {
+        import.record(
+            Diagnostic {
+                object: None,
+                code: DIAG_TEXTURE_UNAVAILABLE.into(),
+                message: format!(
+                    "{} textured material(s) reference an image file outside the model; those \
+                     images are not in the .skp, so the affected faces keep the material's \
+                     average colour.",
+                    stats.external_textures
+                ),
+            },
+            Some("a SketchUp texture references an external image file".into()),
+        );
+    }
+    if let Some(refusal) = &stats.texture_refusal {
+        // The marker is the code: `import.texture.too_large`,
+        // `import.texture.budget_exceeded`, `import.texture.too_many` or
+        // `import.texture.unsupported_format`.
+        let code = refusal
+            .split(':')
+            .next()
+            .map(str::trim)
+            .filter(|marker| marker.starts_with("import."))
+            .unwrap_or("import.texture.refused")
+            .to_string();
+        import.record(
+            Diagnostic {
+                object: None,
+                code,
+                message: format!(
+                    "a SketchUp texture could not be stored as a document asset ({refusal}); the \
+                     affected faces keep the material's average colour."
+                ),
+            },
+            Some("a SketchUp texture was refused and its faces keep the average colour".into()),
+        );
+    }
+    if stats.uv_unavailable > 0 {
+        import.record(
+            Diagnostic {
+                object: None,
+                code: DIAG_UV_UNAVAILABLE.into(),
+                message: format!(
+                    "{} face(s) paint a textured material but have no §4v texture placement (or \
+                     their material declares no applied size), so their group stays untextured \
+                     instead of guessing a mapping.",
+                    stats.uv_unavailable
+                ),
+            },
+            Some("some textured SketchUp faces have no texture placement".into()),
+        );
+    }
+    if stats.back_textured_faces > 0 {
+        // A note, not a loss of the front-side texture that was imported.
+        import.record(
+            Diagnostic {
+                object: None,
+                code: DIAG_BACK_TEXTURE_NOT_IMPORTED.into(),
+                message: format!(
+                    "{} face(s) carry a textured back-face material; back faces are not \
+                     imported, only the front side is.",
+                    stats.back_textured_faces
+                ),
+            },
+            None,
+        );
+    }
+    if stats.untextured_textured_groups > 0 {
         import.record(
             Diagnostic {
                 object: None,
                 code: DIAG_TEXTURES_NOT_SAMPLED.into(),
                 message: format!(
-                    "{} textured material(s): the average colour is used as the face colour; \
-                     texture images and UV placement are not imported.",
-                    stats.textured_materials
+                    "{} textured material group(s) could not be given their image, so they keep \
+                     the material's average colour as the face colour.",
+                    stats.untextured_textured_groups
                 ),
             },
-            Some("SketchUp textures are reduced to their average colour".into()),
+            Some("some SketchUp textured material groups fall back to their average colour".into()),
         );
     }
 }

@@ -17,6 +17,8 @@ use crate::report::ReportBuilder;
 const DEGENERATE_TRIANGLE: &str = "export.stl.degenerate_triangle";
 /// Stable marker: source vertex colours have no STL channel.
 const COLORS_DROPPED: &str = "export.stl.colors_dropped";
+/// Stable marker: a written mesh's base-colour texture has no STL channel.
+const TEXTURE_NOT_WRITTEN: &str = "export.stl.texture_not_written";
 
 struct Facet {
     normal: Point3,
@@ -101,6 +103,11 @@ fn collect_facets(collected: &Collected, report: &mut ReportBuilder) -> Vec<Face
                     "{degenerate} zero-area STL facet(s) were dropped; the stored triangle is degenerate"
                 ),
             );
+        }
+        // Only a mesh with at least one written facet has geometry in the file;
+        // an all-degenerate mesh wrote nothing and is already reported by name.
+        if degenerate < mesh.triangles.len() {
+            report.texture_not_written(TEXTURE_NOT_WRITTEN, "STL", mesh);
         }
     }
     facets

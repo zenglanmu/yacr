@@ -196,23 +196,39 @@ impl HostCore {
     }
 }
 
-/// The normalised logical image-key set the current drawing references.
+/// The normalised image-key set the current drawing references.
 ///
-/// Keys go through [`cad_resources::image_resource_key`] (the identity the
-/// decoded cache stores); an unsafe key that yields no normalised form is kept
-/// verbatim so a change from one unsafe reference to another is still noticed.
+/// Two sources, both normalised to the identity the decoded cache stores with
+/// [`cad_resources::ResourceKey`]:
+///
+/// * file-based `Image` keys go through [`cad_resources::image_resource_key`]
+///   (an unsafe key that yields no normalised form is kept verbatim so a change
+///   from one unsafe reference to another is still noticed);
+/// * the document's own mesh textures (ADR-0038 D3) are already canonical
+///   content keys, so they enter as `ResourceKey(key)`.
+///
+/// A document with only mesh textures must still produce a non-empty set: it is
+/// the set that decides whether the cache is (re)installed after a committed
+/// edit.
 fn requested_image_keys(core: &HostCore) -> std::collections::BTreeSet<cad_resources::ResourceKey> {
     core.controller
         .borrow()
         .drawing()
         .map(|drawing| {
-            cad_platform::images::requested_images(drawing.as_ref())
-                .into_iter()
-                .map(|key| {
-                    cad_resources::image_resource_key(&key)
-                        .unwrap_or(cad_resources::ResourceKey(key))
-                })
-                .collect()
+            let mut keys: std::collections::BTreeSet<cad_resources::ResourceKey> =
+                cad_platform::images::requested_images(drawing.as_ref())
+                    .into_iter()
+                    .map(|key| {
+                        cad_resources::image_resource_key(&key)
+                            .unwrap_or(cad_resources::ResourceKey(key))
+                    })
+                    .collect();
+            keys.extend(
+                drawing
+                    .textures()
+                    .map(|(key, _)| cad_resources::ResourceKey(key.to_string())),
+            );
+            keys
         })
         .unwrap_or_default()
 }
@@ -279,19 +295,25 @@ impl HostResources for DesktopResources {
 
     /// (Re)load the drawing's raster images for the current document.
     ///
-    /// Resolves each logical key under the drawing's own directory (then an
-    /// explicit `--images-dir`), decodes it through the shared platform loader
-    /// and installs the cache on the view. An empty request clears the cache.
-    /// Unresolved/undecodable keys are retained in `last_image_report` and
-    /// surfaced by the diagnostics drawer, never silently dropped.
+    /// Document-owned mesh textures are decoded first straight from `cad-db`
+    /// (ADR-0038 D10: no filesystem access, same `ResourceLimits`); the file
+    /// references are then resolved under the drawing's own directory (then an
+    /// explicit `--images-dir`) and decoded through the shared platform loader.
+    /// The cache is installed on the view. A texture-only drawing still installs
+    /// one — the "no images at all" early return requires **both** sources to be
+    /// empty. Unresolved/undecodable keys (either source) are retained in
+    /// `last_image_report` and surfaced by the diagnostics drawer, never silently
+    /// dropped and never replaced by a placeholder.
     fn install_images(&self, core: &HostCore, render: &RenderSessionHandle) -> CadResult<()> {
-        let requested = core
-            .controller
-            .borrow()
-            .drawing()
-            .map(|drawing| cad_platform::images::requested_images(drawing.as_ref()))
-            .unwrap_or_default();
-        if requested.is_empty() {
+        let drawing = core.controller.borrow().drawing();
+        let Some(drawing) = drawing else {
+            render.set_images(None);
+            *core.last_image_report.borrow_mut() = None;
+            return Ok(());
+        };
+        let requested = cad_platform::images::requested_images(drawing.as_ref());
+        let owns_textures = cad_platform::images::has_document_textures(drawing.as_ref());
+        if requested.is_empty() && !owns_textures {
             render.set_images(None);
             *core.last_image_report.borrow_mut() = None;
             return Ok(());
@@ -303,7 +325,8 @@ impl HostResources for DesktopResources {
             .and_then(|path| path.parent())
             .filter(|dir| !dir.as_os_str().is_empty())
             .map(std::path::Path::to_path_buf);
-        let (cache, report) = cad_platform::images::local::load_image_cache(
+        let (cache, report) = cad_platform::images::local::load_image_cache_for_document(
+            drawing.as_ref(),
             &requested,
             drawing_dir.as_deref(),
             core.options.images_dir.as_deref(),

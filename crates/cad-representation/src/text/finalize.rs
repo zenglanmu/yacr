@@ -201,6 +201,11 @@ fn fill_sfnt_glyph(
         triangles: fill.triangles,
         face_sources: Vec::new(),
         colors: Vec::new(),
+        // Text fill geometry is synthesised from shaped glyph outlines: there is
+        // no source surface parameterisation, so no UV0 is invented and no
+        // texture is attached (ADR-0038: never fabricate a UV from positions).
+        uvs: Vec::new(),
+        texture: None,
     });
 }
 

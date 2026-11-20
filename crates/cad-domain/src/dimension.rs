@@ -804,6 +804,11 @@ fn transform_child(
                 normals,
                 face_sources: mesh.face_sources.clone(),
                 colors: mesh.colors.clone(),
+                // A similarity moves the surface but not its parameterisation
+                // (ADR-0038 D1: UV belongs to the surface), so both texture
+                // fields are carried unchanged.
+                uvs: mesh.uvs.clone(),
+                texture: mesh.texture.clone(),
             })
         }
         SemanticGeometry::Text {

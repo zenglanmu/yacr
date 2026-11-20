@@ -401,6 +401,12 @@ fn mesh_batch(
         // A highlight recolours the whole overlay uniformly, so any per-vertex
         // gradient colour is intentionally dropped here.
         colors: Vec::new(),
+        // A highlight is a **solid tint overlay**, never a textured draw: it must
+        // stay visible over the surface it marks, so it carries no UV0 and no
+        // texture key (ADR-0038 D8). Empty `uvs` with `texture: None` is the
+        // documented untextured batch form, so the batch invariant holds.
+        uvs: Vec::new(),
+        texture: None,
         indices,
         edges: Vec::new(),
         mirrored: false,
@@ -557,6 +563,8 @@ mod tests {
     /// Two coplanar triangles at z = 2 (centres x = -1 and x = 1).
     fn two_face_mesh() -> Mesh {
         Mesh {
+            uvs: Vec::new(),
+            texture: None,
             vertices: vec![
                 p(-2.0, -1.0, 2.0),
                 p(-1.0, 1.0, 2.0),
@@ -871,5 +879,24 @@ mod tests {
             &options,
         );
         assert_eq!(scene.batches[0].alpha, 1.0);
+    }
+
+    /// A highlight is a solid tint overlay: it never samples a texture, even when
+    /// the surface it marks is textured (ADR-0038 D8).
+    #[test]
+    fn highlight_batches_never_carry_uvs_or_a_texture() {
+        let mut mesh = two_face_mesh();
+        mesh.uvs = vec![[0.0, 0.0]; mesh.vertices.len()];
+        mesh.texture = Some("4c2f2e0a5f3d9b7c1e8a6d4b2c0f9e71.png".to_owned());
+        let reps = vec![mesh_rep(50, Vec::new(), mesh)];
+        let selection = [reference(50, Vec::new(), Some(face("face-a")))];
+        let scene = highlight(&selection, &reps);
+        assert_eq!(scene.drawn(), 1);
+        let batch = &scene.batches[0];
+        assert!(
+            batch.uvs.is_empty(),
+            "the overlay is a solid tint, not the textured surface"
+        );
+        assert!(batch.texture.is_none());
     }
 }

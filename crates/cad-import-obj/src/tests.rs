@@ -305,6 +305,52 @@ fn a_referenced_mtl_is_reported_not_silently_dropped() {
 }
 
 #[test]
+fn texture_coordinates_are_reported_not_silently_dropped() {
+    // `tobj` parses `vt`, but the image bytes live in an MTL this bytes-only
+    // import cannot read. ADR-0038 D6 keeps that loss explicit: one document
+    // diagnostic, `Partial`, and no UVs that no texture could sample.
+    let bytes = "o tri\n\
+                 v 0 0 0\n\
+                 v 1 0 0\n\
+                 v 0 1 0\n\
+                 vt 0 0\n\
+                 vt 1 0\n\
+                 vt 0 1\n\
+                 f 1/1 2/2 3/3\n";
+    let drawing = ObjImporter::new()
+        .import(&request(bytes), &|| false)
+        .expect("geometry still imports without its texture");
+    let mesh = meshes(&drawing)[0];
+    assert!(mesh.uvs.is_empty(), "no texture means no UVs are stored");
+    assert!(mesh.texture.is_none());
+    let codes = diag_codes(&drawing);
+    assert_eq!(
+        codes
+            .iter()
+            .filter(|code| **code == DIAG_TEXTURE_NOT_IMPORTED)
+            .count(),
+        1,
+        "exactly one document-level texture loss: {codes:?}"
+    );
+    assert!(matches!(
+        drawing.report.completeness,
+        Completeness::Partial(_)
+    ));
+}
+
+#[test]
+fn an_obj_without_texture_records_has_no_texture_diagnostic() {
+    let drawing = ObjImporter::new()
+        .import(&request(triangle()), &|| false)
+        .expect("triangle imports");
+    assert!(!diag_codes(&drawing).contains(&DIAG_TEXTURE_NOT_IMPORTED));
+    assert!(matches!(
+        drawing.report.completeness,
+        Completeness::Complete
+    ));
+}
+
+#[test]
 fn progress_reports_reading_parsing_entities_finishing() {
     let ticks = Mutex::new(Vec::new());
     ObjImporter::new()

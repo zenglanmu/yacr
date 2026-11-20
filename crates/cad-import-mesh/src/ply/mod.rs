@@ -21,6 +21,10 @@
 //! * Faces with `n > 3` are fan-triangulated and reported ([`DIAG_NGON_FAN`] +
 //!   `Partial`); `n < 3` is reported and skipped; degenerate triangles are
 //!   dropped and reported.
+//! * Declared vertex texture coordinates (`s`/`t`, `texture_u`/`texture_v`,
+//!   `u`/`v`) are **not** imported — PLY carries no texture image bytes — and
+//!   are reported ([`DIAG_TEXTURE_COORDS_NOT_IMPORTED`] + `Partial`) instead of
+//!   disappearing as unknown properties (ADR-0038 D6).
 
 use cad_domain::{CadError, CadResult};
 use cad_import_core::{
@@ -40,6 +44,9 @@ pub const DIAG_DEGENERATE_TRIANGLE: &str = "import.ply.degenerate_triangle";
 pub const DIAG_NORMALS_DROPPED: &str = "import.ply.normals_dropped";
 /// Stable diagnostic code: declared colours were unusable and dropped.
 pub const DIAG_COLORS_DROPPED: &str = "import.ply.colors_dropped";
+/// Stable diagnostic code: the vertex element declares texture coordinates, but
+/// PLY carries no texture image bytes, so they are not imported (ADR-0038 D6).
+pub const DIAG_TEXTURE_COORDS_NOT_IMPORTED: &str = "import.ply.texture_coords_not_imported";
 
 /// Stable refusal code: the `format` line is not a known PLY 1.0 encoding.
 pub const ERR_UNSUPPORTED_FORMAT: &str = "import.ply.unsupported_format";

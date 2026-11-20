@@ -793,6 +793,10 @@ impl HatchGeometry {
             normals,
             face_sources: Vec::new(),
             colors,
+            // The gradient is baked into per-vertex colours; a hatch fill has no
+            // texture parameterisation.
+            uvs: Vec::new(),
+            texture: None,
         })
     }
 }

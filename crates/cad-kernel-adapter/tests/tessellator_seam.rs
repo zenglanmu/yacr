@@ -138,6 +138,8 @@ fn stub_mesh() -> TessellationMesh {
                 topology_revision: Revision(0),
             })],
             colors: Vec::new(),
+            uvs: Vec::new(),
+            texture: None,
         },
         edges: vec![vec![p(0.0, 0.0, 0.0), p(1.0, 0.0, 0.0)]],
         precision: Precision::Approximate {
@@ -385,6 +387,8 @@ fn an_empty_seam_partial_falls_back_to_the_neutral_path() {
                 normals: Vec::new(),
                 face_sources: Vec::new(),
                 colors: Vec::new(),
+                uvs: Vec::new(),
+                texture: None,
             },
             edges: Vec::new(),
             precision: Precision::Unknown,

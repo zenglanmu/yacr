@@ -486,6 +486,12 @@ fn uniform_scale(transform: &Transform3) -> f64 {
 ///
 /// Shared by the standalone `Mesh` arm and a body's display cache so the two
 /// cannot drift.
+///
+/// The clone is deliberate for the fields this function does not touch: `uvs` and
+/// `texture` belong to the surface, not to the placement (ADR-0038 D1/D9), so a
+/// move/rotate/mirror carries them unchanged — a mirror does **not** flip U, which
+/// is the documented convention. Forgetting this would make a textured mesh lose
+/// its texture after any edit.
 fn transform_mesh(mesh: &Mesh, transform: &Transform3) -> Mesh {
     let mut out = mesh.clone();
     out.vertices = mesh

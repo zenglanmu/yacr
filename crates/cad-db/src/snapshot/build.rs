@@ -72,6 +72,9 @@ impl DrawingDatabase {
             models: self.model_records(),
             shards: self.shard_snapshots()?,
             tables: tables::encode(self)?,
+            // Cloned `Arc`s, not copied bytes: one save shares the document's
+            // texture buffers with the snapshot it hands to the store.
+            textures: self.textures.clone(),
         })
     }
 
@@ -183,6 +186,16 @@ impl DrawingDatabase {
             checked(
                 builder.insert_external_reference(reference.clone()),
                 format!("tables/xrefs.json reference {:?}", reference.name),
+            )?;
+        }
+        // Document-owned textures (ADR-0038 D3): the snapshot is the authority, so
+        // every entry here is restored verbatim. `insert_texture` re-checks the key
+        // form and the non-empty payload, which makes a corrupt archive entry an
+        // `invalid_document` refusal rather than an unusable asset in memory.
+        for (key, bytes) in &snapshot.textures {
+            checked(
+                builder.insert_texture(key.clone(), std::sync::Arc::clone(bytes)),
+                format!("textures/{key}"),
             )?;
         }
 

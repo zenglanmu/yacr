@@ -5,14 +5,30 @@
 //! [`SemanticGeometry::Body3d`] — and every other entity (or an entity outside
 //! model space) produces one explicit drop entry instead of being skipped.
 //!
+//! UV0 and the base-colour texture key travel with the mesh; the texture bytes
+//! are resolved from the document here because `cad-db` is the only owner of
+//! them and the writer never reaches back into it.
+//!
 //! `cad-db` stores entities in a `BTreeMap<EntityId, _>`, but the collection is
 //! sorted by `EntityId` anyway so the output byte order is a stated guarantee
 //! rather than a container detail. The entity and triangle budgets are enforced
 //! **before** any mesh is copied out of the database.
 
+use std::sync::Arc;
+
 use cad_db::{DbEntity, EntityColor, EntityRenderAttributes, EntityTransparency};
 use cad_domain::{CadError, CadResult, ObjectId, Point3, SemanticGeometry, SpaceId};
 use cad_import_core::ExportJob;
+
+/// One document-owned base-colour texture resolved from `cad-db`.
+///
+/// The key is the logical name stored on the mesh (`<32 hex>.png|.jpg`), the
+/// bytes are the same `Arc` the database holds, so a texture shared by many
+/// meshes is copied into the output buffer once per distinct key.
+pub(crate) struct SourceTexture {
+    pub key: String,
+    pub bytes: Arc<[u8]>,
+}
 
 /// One writable source entity, copied out of the read-only database.
 pub(crate) struct SourceMesh {
@@ -27,6 +43,23 @@ pub(crate) struct SourceMesh {
     pub normals: Vec<Point3>,
     /// Empty or one sRGB colour per vertex (the `cad-db` invariant).
     pub colors: Vec<[u8; 3]>,
+    /// Per-vertex UV0, empty or one pair per vertex (ADR-0038 D1).
+    ///
+    /// Kept in the source `f64` precision; the writer narrows to `f32` once, at
+    /// the glTF boundary. The frame rotation deliberately does **not** apply:
+    /// UVs are a surface parameterisation, not a position.
+    pub uvs: Vec<[f64; 2]>,
+    /// The resolved base-colour texture, `None` when this mesh carries none.
+    pub texture: Option<SourceTexture>,
+    /// A texture key the mesh names but the database does not carry.
+    ///
+    /// `cad-db` validation refuses that shape, so this is only reachable for a
+    /// hand-built database; it is tracked so the writer reports the loss rather
+    /// than emitting UVs that point at no image.
+    pub missing_texture: Option<String>,
+    /// The source declared UVs that do not pair with its vertex list, so none
+    /// were copied (defensive; `cad-db` validation refuses this shape too).
+    pub uvs_dropped: bool,
     /// The entity's display colour as the importer resolved it.
     ///
     /// Only `Explicit` becomes a glTF material, and only for a mesh that writes
@@ -169,6 +202,29 @@ pub(crate) fn collect(job: &ExportJob<'_>, connector: &str) -> CadResult<Collect
         // is what keeps a glTF -> glTF Save As from reporting `Complete` while
         // dropping the material the importer stored.
         let render: EntityRenderAttributes = job.database.entity_render_attributes(entity.id);
+        // UV0 is either one pair per vertex or absent; anything else cannot be
+        // written and is reported by the writer instead of being truncated.
+        let uvs_dropped = !mesh.uvs.is_empty() && mesh.uvs.len() != mesh.vertices.len();
+        let uvs = if uvs_dropped {
+            Vec::new()
+        } else {
+            mesh.uvs.clone()
+        };
+        // The bytes are document-owned, so they are resolved here, while the
+        // read-only database is still borrowed; the writer never touches it.
+        let (texture, missing_texture) = match &mesh.texture {
+            Some(key) => match job.database.texture(key) {
+                Some(bytes) => (
+                    Some(SourceTexture {
+                        key: key.clone(),
+                        bytes: Arc::clone(bytes),
+                    }),
+                    None,
+                ),
+                None => (None, Some(key.clone())),
+            },
+            None => (None, None),
+        };
         meshes.push(SourceMesh {
             object,
             name: format!("{type_key}_{}", object.0),
@@ -177,6 +233,10 @@ pub(crate) fn collect(job: &ExportJob<'_>, connector: &str) -> CadResult<Collect
             triangles: mesh.triangles.clone(),
             normals: mesh.normals.clone(),
             colors: mesh.colors.clone(),
+            uvs,
+            texture,
+            missing_texture,
+            uvs_dropped,
             color: render.color,
             transparency: render.transparency,
         });

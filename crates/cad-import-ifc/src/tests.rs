@@ -6,10 +6,12 @@ use std::sync::Arc;
 
 use super::*;
 use cad_domain::{
-    CadError, Completeness, DatabaseId, DocumentId, EntityCapability, SemanticGeometry,
+    CadError, Completeness, DatabaseId, DocumentId, EntityCapability, Mesh, SemanticGeometry,
     SupportStatus,
 };
-use cad_import_core::{detect_format, DrawingFormat, ImportPhase, IFC_SCHEMA_REFUSED};
+use cad_import_core::{
+    detect_format, DrawingFormat, ImportLimits, ImportPhase, IFC_SCHEMA_REFUSED,
+};
 use cad_import_step::StepImporter;
 
 fn request_bytes(bytes: Vec<u8>) -> ImportRequest {
@@ -58,6 +60,13 @@ fn assert_mesh_invariants(mesh: &Mesh) {
         mesh.colors.is_empty() || mesh.colors.len() == mesh.vertices.len(),
         "mesh colours must be empty or one per vertex"
     );
+    assert!(
+        mesh.uvs.is_empty() || mesh.uvs.len() == mesh.vertices.len(),
+        "mesh UVs must be empty or one pair per vertex"
+    );
+    if mesh.texture.is_some() {
+        assert!(!mesh.uvs.is_empty(), "a textured mesh must carry UVs");
+    }
     assert!(!mesh.vertices.is_empty(), "a stored mesh has vertices");
     assert!(!mesh.triangles.is_empty(), "a stored mesh has triangles");
     for vertex in &mesh.vertices {
@@ -432,4 +441,251 @@ fn progress_reaches_every_phase_with_real_counts() {
     ] {
         assert!(phases.contains(&expected), "missing phase {expected:?}");
     }
+}
+
+// ---------------------------------------------------------------- textures ---
+
+/// A one-quad `IfcTriangulatedFaceSet` (metres, 1 m used band) with a single
+/// `IfcIndexedTriangleTextureMap` over it.
+///
+/// `texture` is the `#20` record, so the same document can carry an embedded
+/// `IfcPixelTexture` or an `IfcImageTexture` pointing outside the model.
+fn textured_tessellation(texture: &str) -> Vec<u8> {
+    textured_tessellation_with(texture, "")
+}
+
+/// [`textured_tessellation`] plus extra DATA records (`extra` is spliced in
+/// before `ENDSEC`), used to give the panel an opening.
+fn textured_tessellation_with(texture: &str, extra: &str) -> Vec<u8> {
+    format!(
+        "ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('ViewDefinition [CoordinationView]'),'2;1');
+FILE_NAME('synthetic-textured-tessellation.ifc','2026-11-20T00:00:00',('yacr'),('yacr'),\
+ 'yacr synthetic fixture','yacr','');
+FILE_SCHEMA(('IFC4'));
+ENDSEC;
+DATA;
+#1=IFCPROJECT('2O2Fr$t4X7Zf8NOew3FL00',$,'Textured project',$,$,$,$,(#2),#9);
+#2=IFCGEOMETRICREPRESENTATIONCONTEXT($,'Model',3,1.E-05,#3,$);
+#3=IFCAXIS2PLACEMENT3D(#4,#5,#6);
+#4=IFCCARTESIANPOINT((0.,0.,0.));
+#5=IFCDIRECTION((0.,0.,1.));
+#6=IFCDIRECTION((1.,0.,0.));
+#7=IFCSIUNIT(*,.LENGTHUNIT.,$,.METRE.);
+#8=IFCSIUNIT(*,.PLANEANGLEUNIT.,$,.RADIAN.);
+#9=IFCUNITASSIGNMENT((#7,#8));
+#10=IFCCARTESIANPOINTLIST3D(((0.,0.,0.),(1.,0.,0.),(1.,1.,0.),(0.,1.,0.)),$);
+#11=IFCTRIANGULATEDFACESET(#10,$,.T.,((1,2,3),(1,3,4)),$);
+#12=IFCSHAPEREPRESENTATION(#2,'Body','Tessellation',(#11));
+#13=IFCPRODUCTDEFINITIONSHAPE($,$,(#12));
+#14=IFCLOCALPLACEMENT($,#15);
+#15=IFCAXIS2PLACEMENT3D(#16,$,$);
+#16=IFCCARTESIANPOINT((0.,0.,0.));
+#17=IFCBUILDINGELEMENTPROXY('2O2Fr$t4X7Zf8NOew3FL01',$,'Panel',$,$,#14,#13,$,$);
+#20={texture};
+#21=IFCTEXTUREVERTEXLIST(((0.,0.),(1.,0.),(1.,1.),(0.,1.)));
+#22=IFCINDEXEDTRIANGLETEXTUREMAP((#20),#11,#21,((1,2,3),(1,3,4)));
+{extra}ENDSEC;
+END-ISO-10303-21;
+"
+    )
+    .into_bytes()
+}
+
+/// Two RGB pixels: red then green.
+const PIXEL_TEXTURE_2X1: &str =
+    "IFCPIXELTEXTURE(.T.,.T.,'MODULATE',$,$,2,1,3,(\"0FF0000\",\"000FF00\"))";
+
+/// `IfcImageTexture` names a sibling file; its bytes are not in the model.
+const EXTERNAL_IMAGE_TEXTURE: &str = "IFCIMAGETEXTURE(.T.,.T.,$,$,$,'panel.png')";
+
+fn import_textured(texture: &str) -> cad_import_core::ImportedDrawing {
+    IfcImporter::new()
+        .import(&request_bytes(textured_tessellation(texture)), &|| false)
+        .unwrap_or_else(|error| panic!("the textured fixture must import: {error:?}"))
+}
+
+/// `(width, height, pixels)` of a PNG, decoded with the same crate the adapter
+/// encodes with, so the test proves the container really holds the image.
+fn decode_png(bytes: &[u8]) -> (u32, u32, Vec<u8>) {
+    let cursor = std::io::Cursor::new(bytes);
+    let mut reader = png::Decoder::new(cursor).read_info().expect("PNG header");
+    let size = reader.output_buffer_size().expect("bounded PNG");
+    let mut pixels = vec![0u8; size];
+    let info = reader.next_frame(&mut pixels).expect("PNG pixels");
+    pixels.truncate(info.line_size * info.height as usize);
+    (info.width, info.height, pixels)
+}
+
+#[test]
+fn a_textured_tessellation_imports_uvs_and_an_embedded_png() {
+    let drawing = import_textured(PIXEL_TEXTURE_2X1);
+    let meshes = meshes(&drawing);
+    assert_eq!(meshes.len(), 1, "one textured face set is one entity");
+    let mesh = meshes[0];
+    // ifc-lite flat-shades a triangulated face set and then welds the positions
+    // back together (indices only), so the four authored points stay four
+    // vertices and the UVs stay aligned with them.
+    assert_eq!(mesh.vertices.len(), 4);
+    assert_eq!(mesh.triangles.len(), 2);
+    assert_eq!(
+        mesh.uvs.len(),
+        mesh.vertices.len(),
+        "one UV pair per vertex"
+    );
+    // The fixture authors the UVs as (0,0) (1,0) (1,1) (0,1) for the points
+    // (0,0) (1,0) (1,1) (0,1), and ifc-lite flips V to a top-left origin, so
+    // every verified vertex must read `[x, 1 - y]`.
+    for (vertex, uv) in mesh.vertices.iter().zip(&mesh.uvs) {
+        assert_eq!(
+            *uv,
+            [vertex.x, 1.0 - vertex.y],
+            "UV does not match the authored texture vertex for {vertex:?}"
+        );
+    }
+
+    let key = mesh
+        .texture
+        .as_deref()
+        .expect("the pixel texture is registered");
+    assert!(
+        key.strip_suffix(".png")
+            .is_some_and(|stem| stem.len() == 32),
+        "the key is content-addressed: {key}"
+    );
+    let bytes = drawing
+        .database
+        .texture(key)
+        .expect("the document holds the image bytes");
+    assert_eq!(&bytes[..8], b"\x89PNG\r\n\x1a\n", "the asset is a real PNG");
+    let (width, height, pixels) = decode_png(bytes);
+    assert_eq!((width, height), (2, 1));
+    assert_eq!(
+        pixels,
+        vec![255, 0, 0, 255, 0, 255, 0, 255],
+        "the two authored RGB pixels, expanded to RGBA8"
+    );
+    assert_eq!(
+        drawing.report.completeness,
+        Completeness::Complete,
+        "diagnostics: {:?}",
+        drawing.report.diagnostics
+    );
+}
+
+#[test]
+fn an_external_image_texture_is_reported_and_never_read() {
+    let drawing = import_textured(EXTERNAL_IMAGE_TEXTURE);
+    let meshes = meshes(&drawing);
+    assert_eq!(meshes.len(), 1, "the geometry is kept");
+    let mesh = meshes[0];
+    assert_eq!(
+        mesh.uvs.len(),
+        mesh.vertices.len(),
+        "the parameterisation is independent of the image"
+    );
+    assert!(
+        mesh.texture.is_none(),
+        "an external file is never read into the document"
+    );
+    assert_eq!(
+        drawing.database.textures().count(),
+        0,
+        "no image bytes enter the document"
+    );
+    assert!(
+        diagnostic_codes(&drawing).contains(&DIAG_EXTERNAL_TEXTURE_UNAVAILABLE),
+        "diagnostics: {:?}",
+        drawing.report.diagnostics
+    );
+    assert!(matches!(
+        drawing.report.completeness,
+        Completeness::Partial(_)
+    ));
+}
+
+#[test]
+fn the_ifc_png_encoder_round_trips_into_register_texture() {
+    // The encoder is the adapter's own bridge from IFC's decoded RGBA8 to a
+    // document asset; this pins the exact byte plumbing `register_texture`
+    // needs (PNG signature + decodable pixels) without a document fixture.
+    let rgba = vec![10u8, 20, 30, 255, 40, 50, 60, 255];
+    let png = texture::encode_rgba_png(&rgba, 2, 1).expect("2x1 RGBA encodes");
+    let (width, height, pixels) = decode_png(&png);
+    assert_eq!((width, height), (2, 1));
+    assert_eq!(pixels, rgba);
+
+    // Deterministic: the key is the hash of these bytes, so the same pixels must
+    // produce the same PNG on every call.
+    assert_eq!(
+        png,
+        texture::encode_rgba_png(&rgba, 2, 1).expect("encodes again")
+    );
+
+    // A short/long buffer is refused instead of being padded or truncated.
+    for (bytes, width, height) in [
+        (rgba.as_slice(), 3u32, 1u32),
+        (rgba.as_slice(), 2, 2),
+        (rgba.as_slice(), 0, 1),
+    ] {
+        assert!(
+            texture::encode_rgba_png(bytes, width, height).is_err(),
+            "{width}x{height} with {} bytes must be refused",
+            bytes.len()
+        );
+    }
+}
+
+/// A 1 m opening (a tessellated box) voiding the panel through
+/// `IfcRelVoidsElement`.
+const OPENING_RECORDS: &str = "#30=IFCCARTESIANPOINTLIST3D(((0.4,0.4,-1.),(0.6,0.4,-1.),\
+(0.6,0.6,-1.),(0.4,0.6,-1.),(0.4,0.4,1.),(0.6,0.4,1.),(0.6,0.6,1.),(0.4,0.6,1.)),$);
+#31=IFCTRIANGULATEDFACESET(#30,$,.T.,((1,2,3),(1,3,4),(5,6,7),(5,7,8),(1,2,6),(1,6,5),(2,3,7),\
+(2,7,6),(3,4,8),(3,8,7),(4,1,5),(4,5,8)),$);
+#32=IFCSHAPEREPRESENTATION(#2,'Body','Tessellation',(#31));
+#33=IFCPRODUCTDEFINITIONSHAPE($,$,(#32));
+#34=IFCLOCALPLACEMENT($,#15);
+#35=IFCOPENINGELEMENT('2O2Fr$t4X7Zf8NOew3FL02',$,'Opening',$,$,#34,#33,$);
+#36=IFCRELVOIDSELEMENT('2O2Fr$t4X7Zf8NOew3FL03',$,$,$,#17,#35);
+";
+
+#[test]
+fn a_textured_product_cut_by_an_opening_reports_the_void_fallback() {
+    let drawing = IfcImporter::new()
+        .import(
+            &request_bytes(textured_tessellation_with(
+                PIXEL_TEXTURE_2X1,
+                OPENING_RECORDS,
+            )),
+            &|| false,
+        )
+        .unwrap_or_else(|error| panic!("the voided textured fixture must import: {error:?}"));
+    let meshes = meshes(&drawing);
+    assert_eq!(meshes.len(), 1, "the opening is a cutter, not a product");
+    let mesh = meshes[0];
+    assert!(
+        mesh.texture.is_none(),
+        "a CSG cut rebuilds vertices, so the texture cannot be attached"
+    );
+    assert!(
+        mesh.uvs.is_empty(),
+        "no texture means no UV set is stored for the cut mesh"
+    );
+    // The product is still meshed on that path (what the cut itself produced is
+    // a CSG question this test does not pin: ifc-lite may leave a tessellated
+    // host uncut where it cuts a solid).
+    assert!(
+        !mesh.triangles.is_empty(),
+        "the cut product must still import"
+    );
+    assert!(
+        diagnostic_codes(&drawing).contains(&DIAG_TEXTURED_VOID_FALLBACK),
+        "diagnostics: {:?}",
+        drawing.report.diagnostics
+    );
+    assert!(matches!(
+        drawing.report.completeness,
+        Completeness::Partial(_)
+    ));
 }

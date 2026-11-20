@@ -34,6 +34,9 @@ pub(crate) use render::{
 };
 pub(crate) use resources::load_fonts;
 #[cfg(not(target_arch = "wasm32"))]
+// `images_requested` is used by the contract tests only (the render/plot paths
+// now load through `load_images`, which reads it internally).
+#[allow(unused_imports)]
 pub(crate) use resources::{
     drawing_locale, drawing_needs_text, fonts_requested, images_requested, load_images,
 };

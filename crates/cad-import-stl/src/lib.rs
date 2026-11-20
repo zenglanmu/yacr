@@ -242,6 +242,8 @@ impl Importer for StlImporter {
                 normals,
                 face_sources: Vec::new(),
                 colors: Vec::new(),
+                uvs: Vec::new(),
+                texture: None,
             },
             EntityColor::ByLayer,
         )?;

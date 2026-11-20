@@ -99,6 +99,25 @@ pub struct RenderBatch {
     /// the shader modulates the batch colour by this value, and the scene
     /// sanitises each channel with [`sanitize_color`].
     pub colors: Vec<[f32; 3]>,
+    /// Per-vertex UV0 in texture space, one entry per `vertices` entry.
+    ///
+    /// Only a batch with a [`Self::texture`] carries UVs: an untextured batch
+    /// keeps this empty (its UVs, if a source had any, would be unreadable by the
+    /// GPU anyway). The invariant is therefore
+    /// `texture.is_some() ⇒ uvs.len() == vertices.len()`, and otherwise both are
+    /// empty; [`SceneCache::build`] sanitises a violating mesh into the untextured
+    /// form instead of panicking (ADR-0038 D8).
+    pub uvs: Vec<[f32; 2]>,
+    /// The document-owned base-colour texture key, or `None` for an untextured
+    /// batch.
+    ///
+    /// The domain `Mesh` carries the key as a `String`; this boundary converts it
+    /// to a [`ResourceKey`] (the type the renderer's decoded-image cache is keyed
+    /// by). A textured batch is a per-batch draw: it is never flat-merged into a
+    /// shared vertex stream and never enters the pulled mesh class, because both
+    /// bind one uniform for the whole draw and cannot express a per-batch texture
+    /// (ADR-0038 D8 — a documented batching regression, not a silent one).
+    pub texture: Option<ResourceKey>,
     /// Triangle topology indices (`[i0, i1, i2]` into `vertices`). Empty for
     /// line topologies; for meshes it lets the renderer index rather than repeat
     /// vertices.
@@ -189,6 +208,7 @@ impl RenderBatch {
 
     pub fn approx_bytes(&self) -> usize {
         (self.vertices.len() + self.normals.len() + self.edges.len() + self.colors.len()) * 12
+            + self.uvs.len() * 8
             + self.indices.len() * 12
             + self.conics.len() * std::mem::size_of::<RenderConic>()
     }
@@ -206,6 +226,11 @@ impl RenderBatch {
     /// each, already counted in `edges`), not a derived `u32` index buffer: the
     /// renderer draws the `edges` positions directly (as anti-aliased line quads
     /// or packed instances).
+    ///
+    /// A textured batch additionally uploads its UV0 stream (`@location(3)`,
+    /// `Float32x2`, 8 bytes per vertex); it is counted only when the batch
+    /// actually carries a texture, mirroring the exact upload in
+    /// `Renderer::prepare_upload_batches`.
     pub fn upload_size_bytes(&self) -> usize {
         if self.topology == RenderTopology::Conics {
             // One 72-byte SDF instance per conic (see `ArcInstance` in
@@ -227,12 +252,16 @@ impl RenderBatch {
         } else {
             0
         };
-        positions + normals + edges + triangle_index_bytes + vertex_color_bytes
+        // Textured meshes upload one `Float32x2` per vertex; untextured batches
+        // upload no UV buffer at all (this is exactly 0 for them).
+        let uv_bytes = self.uvs.len() * 8;
+        positions + normals + edges + triangle_index_bytes + vertex_color_bytes + uv_bytes
     }
 
-    /// Vertex-space bytes: positions, normals and edge positions (12 bytes each).
+    /// Vertex-space bytes: positions, normals and edge positions (12 bytes each),
+    /// plus UV0 (8 bytes) for a textured batch.
     pub fn vertex_bytes(&self) -> usize {
-        (self.vertices.len() + self.normals.len() + self.edges.len()) * 12
+        (self.vertices.len() + self.normals.len() + self.edges.len()) * 12 + self.uvs.len() * 8
     }
 
     /// World-space centroid used as the transparent-pass depth-sort key.
@@ -277,6 +306,27 @@ impl RenderBatch {
             (self.local_origin.z + sz * inv) as f32,
         ]
     }
+}
+
+/// Every distinct texture key the given batches reference, deduplicated and
+/// sorted, so an uploader can resolve exactly the resident set.
+///
+/// This is the single source of truth the host uses before
+/// `Renderer::upload_mesh_textures`: it walks the batches it already holds
+/// instead of keeping a second texture table that could drift. The result is
+/// sorted (a [`BTreeSet`] first) so an upload report, a diagnostic listing and a
+/// test assertion are all deterministic; an untextured scene yields an empty
+/// vector.
+pub fn mesh_texture_keys<'a>(
+    batches: impl IntoIterator<Item = &'a RenderBatch>,
+) -> Vec<ResourceKey> {
+    let mut keys = std::collections::BTreeSet::new();
+    for batch in batches {
+        if let Some(texture) = &batch.texture {
+            keys.insert(texture.clone());
+        }
+    }
+    keys.into_iter().collect()
 }
 
 /// Sanitise a raw alpha value from a display fragment into `[0, 1]`.

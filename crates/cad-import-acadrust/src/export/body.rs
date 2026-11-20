@@ -90,10 +90,49 @@ pub(super) fn emit_polyface_mesh(
     let Some(mut reasons) = push_polyface_mesh(doc, entity, mesh, ctx, acc)? else {
         return Ok(());
     };
+    // The facets are written (only an out-of-range mesh writes nothing, and that
+    // path already returned above), so a base-colour texture is its own loss.
+    record_texture_not_written(acc, entity, mesh, ctx);
     reasons.extend(base_reasons);
     reasons.push(POLYFACE_DISPLAY_REASON.into());
     acc.record(object, "mesh", MappingOutcome::Converted(reasons));
     Ok(())
+}
+
+/// The stable `export.<id>.texture_not_written` code of one container.
+///
+/// The DXF and DWG writers share this module but not the registry key, so the
+/// code names the container the bytes actually are.
+pub(super) fn texture_not_written_code(format: ExportFormat) -> String {
+    format!("export.{}.texture_not_written", format.extension())
+}
+
+/// Record that a written mesh's base-colour texture is not in the file.
+///
+/// The geometry **is** written (polyface facets or a filled-face record); only
+/// the texture is not, so this is one conversion naming the source entity and
+/// the document texture key — never a drop. A mesh that writes no record at all
+/// returns before this is called, so the texture is never reported twice.
+pub(super) fn record_texture_not_written(
+    acc: &mut ExportAccumulator,
+    entity: &DbEntity,
+    mesh: &Mesh,
+    ctx: &EntityContext,
+) {
+    let Some(key) = mesh.texture.as_deref() else {
+        return;
+    };
+    acc.record_converted_code(
+        Some(entity.object.id),
+        &texture_not_written_code(ctx.format),
+        vec![format!(
+            "object #{} ({}) references base-colour texture \"{key}\", which the {} writer cannot \
+             store; the mesh geometry was written without it",
+            entity.object.id.0,
+            entity.object.type_key,
+            ctx.format.extension()
+        )],
+    );
 }
 
 /// Build and queue the polyface record for `mesh`.
@@ -190,6 +229,8 @@ pub(super) fn emit_body3d(
                 else {
                     return Ok(());
                 };
+                // The display facets are written; its base-colour texture is not.
+                record_texture_not_written(acc, entity, &body.display.mesh, ctx);
                 recorded.extend(reasons);
                 recorded.push(POLYFACE_DISPLAY_REASON.into());
                 acc.record_converted_code(object, code, recorded);

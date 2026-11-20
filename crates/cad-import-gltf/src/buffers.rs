@@ -73,7 +73,7 @@ pub(crate) fn resolve_buffers(gltf: &gltf::Gltf) -> CadResult<Vec<ResolvedBuffer
 ///
 /// A non-base64 data URI (percent-encoded) is not decoded either: it is treated
 /// like any other unreadable URI so the caller refuses it by name.
-fn data_uri_payload(uri: &str) -> Option<&str> {
+pub(crate) fn data_uri_payload(uri: &str) -> Option<&str> {
     let rest = uri.strip_prefix("data:")?;
     let (metadata, payload) = rest.split_once(',')?;
     let is_base64 = metadata

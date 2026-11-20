@@ -250,6 +250,111 @@ impl Renderer {
         Ok(report)
     }
 
+    /// Resolve and upload the mesh base-colour textures of a scene (ADR-0038
+    /// D9/D10).
+    ///
+    /// `keys` is the deduplicated texture-key set the resident batches reference
+    /// (`cad_scene::mesh_texture_keys` / `SceneCache::mesh_texture_keys`). Each key
+    /// is resolved through the **same** decoded-image cache the raster images use
+    /// and uploaded with the image pipeline's texture layout
+    /// ([`Self::image_texture_layout`]) and shared filtering sampler, so mesh
+    /// textures and image quads share one allocation/decode path.
+    ///
+    /// This is a texture-residency call only: it creates no draw item and no pick
+    /// key (a mesh texture is never pickable on its own — picking resolves the
+    /// batch), so it does not touch the pick table, the draw plan or pacing. A key
+    /// that is absent from the cache (a failed decode, an unsupported container)
+    /// or whose decoded buffer is malformed is **skipped**, never replaced by a
+    /// placeholder, and returned in [`ImageUploadReport::unresolved`]; a batch that
+    /// references such a key is drawn untextured and the key is surfaced again at
+    /// draw time via [`Renderer::mesh_texture_fallbacks`].
+    ///
+    /// The resident set is replaced, not appended: a texture whose key is no
+    /// longer referenced is pruned. Reuse is identity-aware exactly like
+    /// `upload_images` (`Arc::ptr_eq` on the decoded image), because a
+    /// `ResourceKey` can outlive the bytes it names across document opens.
+    pub fn upload_mesh_textures(
+        &mut self,
+        keys: &[ResourceKey],
+        cache: &DecodedImageCache,
+    ) -> CadResult<ImageUploadReport> {
+        let device = self
+            .device
+            .as_ref()
+            .ok_or_else(|| CadError::GpuFailure("renderer not initialized".into()))?
+            .clone();
+        let queue = self
+            .queue
+            .as_ref()
+            .ok_or_else(|| CadError::GpuFailure("renderer not initialized".into()))?
+            .clone();
+        let texture_layout = self
+            .image_texture_layout
+            .as_ref()
+            .ok_or_else(|| CadError::GpuFailure("renderer not initialized".into()))?
+            .clone();
+        let sampler = self
+            .image_sampler
+            .as_ref()
+            .ok_or_else(|| CadError::GpuFailure("renderer not initialized".into()))?
+            .clone();
+
+        self.clear_gpu_memory_refusal();
+        let mut report = ImageUploadReport::default();
+        let mut live: std::collections::HashSet<ResourceKey> = std::collections::HashSet::new();
+        for key in keys {
+            if live.contains(key) {
+                // The caller normally deduplicates; a repeat costs nothing.
+                continue;
+            }
+            let Some(decoded) = cache.get(key) else {
+                report.unresolved.push(key.clone());
+                continue;
+            };
+            let expected = decoded.width as usize * decoded.height as usize * 4;
+            if decoded.width == 0 || decoded.height == 0 || decoded.rgba.len() != expected {
+                report.unresolved.push(key.clone());
+                continue;
+            }
+            let reusable = self
+                .mesh_textures
+                .get(key)
+                .is_some_and(|existing| Arc::ptr_eq(&existing.decoded, &decoded));
+            if !reusable {
+                let requested = u64::from(decoded.width) * u64::from(decoded.height) * 4;
+                self.admit_gpu_memory(&[(GpuMemoryCategory::ImageTexture, requested)])?;
+                let created = Self::build_texture(
+                    &device,
+                    &queue,
+                    &texture_layout,
+                    &sampler,
+                    &decoded,
+                    &self.gpu_memory,
+                )
+                .map_err(|error| self.image_allocation_error(key, error))?;
+                report.bytes += created.upload_bytes as u64;
+                self.mesh_textures.insert(key.clone(), created);
+            }
+            report.uploaded += 1;
+            live.insert(key.clone());
+        }
+        // Prune textures no batch references any more: the map tracks the resident
+        // set, not history.
+        self.mesh_textures.retain(|key, _| live.contains(key));
+        Ok(report)
+    }
+
+    /// Texture keys a drawn batch wanted but could not sample in the last frame.
+    ///
+    /// Empty in the normal case. A non-empty list means those batches were drawn
+    /// with the untextured pipeline (batch/vertex colour) because the key was not
+    /// resident — a decode failure, a refused upload, or an upload that has not
+    /// run yet. The renderer never binds a placeholder texture, so this is the
+    /// only way that degradation is observable.
+    pub fn mesh_texture_fallbacks(&self) -> &[ResourceKey] {
+        &self.mesh_texture_fallbacks
+    }
+
     /// Turn one failed image allocation into the crate's `CadError` **and** the
     /// recorded explicit refusal.
     ///

@@ -1,5 +1,22 @@
 use super::*;
 
+/// The union of the draw-time texture fallbacks of two encoded passes, sorted
+/// and deduplicated so a diagnostic listing is deterministic.
+///
+/// A key appears here when a textured batch referenced it but the resident
+/// `mesh_textures` set had no entry (decode/upload failure, or no upload yet):
+/// that batch was drawn through the untextured pipeline, never with a
+/// placeholder texture.
+pub(crate) fn merged_texture_fallbacks(
+    first: &[ResourceKey],
+    second: &[ResourceKey],
+) -> Vec<ResourceKey> {
+    let mut keys: Vec<ResourceKey> = first.iter().chain(second.iter()).cloned().collect();
+    keys.sort();
+    keys.dedup();
+    keys
+}
+
 /// The encoder plus every counter the encode pass accumulated. Returned to
 /// [`Renderer::render_with_projection`] so the submit/classification tail can
 /// finish the frame.
@@ -15,10 +32,90 @@ pub(crate) struct EncodeOutcome {
     pub(crate) converted_batches: usize,
     /// Renderer-owned transient cursor draws issued by this encode (0 or 1).
     pub(crate) transient_draws: u64,
+    /// Texture keys a **textured batch** referenced but the resident texture set
+    /// could not resolve; those batches were drawn untextured (never with a
+    /// placeholder texture). Deduplicated and sorted.
+    pub(crate) mesh_texture_fallbacks: Vec<ResourceKey>,
     pub(crate) encode_ms: f64,
 }
 
 impl Renderer {
+    /// The `mesh_textured` pipeline for a batch's mirror/alpha class.
+    ///
+    /// `None` only before device initialisation (or after a device loss), where
+    /// no batch can be drawn anyway; a `None` at a draw site is treated like an
+    /// unresolved texture: the batch falls back to the untextured pipeline and the
+    /// key is surfaced, never drawn with a wrong pipeline.
+    fn textured_mesh_pipeline(
+        &self,
+        mirrored: bool,
+        transparent: bool,
+    ) -> Option<&wgpu::RenderPipeline> {
+        match (mirrored, transparent) {
+            (false, false) => self.mesh_pipeline_textured.as_ref(),
+            (true, false) => self.mesh_pipeline_textured_mirrored.as_ref(),
+            (false, true) => self.mesh_pipeline_textured_transparent.as_ref(),
+            (true, true) => self.mesh_pipeline_textured_mirrored_transparent.as_ref(),
+        }
+    }
+
+    /// Draw one per-batch (non-converted) resident batch.
+    ///
+    /// Untextured batches take exactly the legacy [`draw_batch`] path — same
+    /// pipelines, same vertex buffers, same draw call. A batch with a texture key
+    /// goes through [`draw_batch_textured`] with its resident texture bound at
+    /// group 2; when that key is not resident (a failed decode/upload, or an
+    /// upload that has not run yet) the batch is drawn through the untextured
+    /// pipeline and the key is recorded in `fallbacks`, so the degradation is
+    /// observable rather than a silent change of appearance.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_resident_batch(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        state: &mut EncodeState,
+        index: usize,
+        bind_group: &wgpu::BindGroup,
+        uniform_offset: u32,
+        line_pipeline: &wgpu::RenderPipeline,
+        mesh_pipeline: &wgpu::RenderPipeline,
+        transparent: bool,
+        fallbacks: &mut Vec<ResourceKey>,
+    ) {
+        let batch = &self.batches[index];
+        let textured = batch.texture.as_ref().and_then(|key| {
+            let texture = self.mesh_textures.get(key)?;
+            let pipeline = self.textured_mesh_pipeline(batch.mirrored, transparent)?;
+            Some((pipeline, &texture.bind_group))
+        });
+        if let Some((pipeline, texture_bind_group)) = textured {
+            draw_batch_textured(
+                pass,
+                state,
+                batch,
+                bind_group,
+                uniform_offset,
+                texture_bind_group,
+                line_pipeline,
+                pipeline,
+            );
+            return;
+        }
+        if let Some(key) = &batch.texture {
+            if !fallbacks.contains(key) {
+                fallbacks.push(key.clone());
+            }
+        }
+        draw_batch(
+            pass,
+            state,
+            batch,
+            bind_group,
+            uniform_offset,
+            line_pipeline,
+            mesh_pipeline,
+        );
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn encode_frame(
         &self,
@@ -74,6 +171,8 @@ impl Renderer {
         let mut converted_batches = 0usize;
         // Renderer-owned transient cursor draws (0 or 1; overlay pass only).
         let mut transient_draws = 0u64;
+        // Texture keys a textured batch wanted but could not resolve this frame.
+        let mut mesh_texture_fallbacks: Vec<ResourceKey> = Vec::new();
         let encode_started = Instant::now();
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("cad-encoder"),
@@ -308,10 +407,10 @@ impl Renderer {
                         arc_draws += 1;
                     }
                     let (bind_group, offset) = self.uniforms.binding(self.frame_slots[i] as usize);
-                    draw_batch(
+                    self.draw_resident_batch(
                         &mut pass,
                         &mut encode_state,
-                        &self.batches[i],
+                        i,
                         bind_group,
                         offset,
                         line_pipeline,
@@ -320,6 +419,8 @@ impl Renderer {
                         } else {
                             mesh_pipeline
                         },
+                        false,
+                        &mut mesh_texture_fallbacks,
                     );
                 }
                 if flush_pending_arc(
@@ -472,10 +573,10 @@ impl Renderer {
                         }
                         let (bind_group, offset) =
                             self.uniforms.binding(self.frame_slots[i] as usize);
-                        draw_batch(
+                        self.draw_resident_batch(
                             &mut pass,
                             &mut encode_state,
-                            &self.batches[i],
+                            i,
                             bind_group,
                             offset,
                             line_pipeline,
@@ -484,6 +585,8 @@ impl Renderer {
                             } else {
                                 mesh_pipeline
                             },
+                            false,
+                            &mut mesh_texture_fallbacks,
                         );
                         continue;
                     }
@@ -734,10 +837,10 @@ impl Renderer {
             // blended layer composites over the already-resolved opaque pass.
             for &i in transparent {
                 let (bind_group, offset) = self.uniforms.binding(self.frame_slots[i] as usize);
-                draw_batch(
+                self.draw_resident_batch(
                     &mut pass,
                     &mut encode_state,
-                    &self.batches[i],
+                    i,
                     bind_group,
                     offset,
                     line_pipeline,
@@ -746,6 +849,8 @@ impl Renderer {
                     } else {
                         mesh_pipeline_transparent
                     },
+                    true,
+                    &mut mesh_texture_fallbacks,
                 );
             }
             // Pass 3 — raster images, after opaque/transparent geometry. Full
@@ -811,6 +916,10 @@ impl Renderer {
         }
         let encode_ms = encode_started.elapsed().as_secs_f64() * 1000.0;
 
+        // Deterministic order for the surfaced fallback list.
+        mesh_texture_fallbacks.sort();
+        mesh_texture_fallbacks.dedup();
+
         EncodeOutcome {
             encoder,
             encode_state,
@@ -822,6 +931,7 @@ impl Renderer {
             arc_batches,
             converted_batches,
             transient_draws,
+            mesh_texture_fallbacks,
             encode_ms,
         }
     }

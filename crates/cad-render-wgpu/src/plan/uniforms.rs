@@ -89,7 +89,10 @@ pub(crate) struct EncodeState {
     last_bind_group0: Option<wgpu::BindGroup>,
     last_bind_offset0: u32,
     last_bind_group2: Option<wgpu::BindGroup>,
-    last_vertex: [Option<wgpu::Buffer>; 3],
+    /// Last bound buffer per vertex slot. Four slots cover every pipeline in
+    /// this crate: 0 position (or the shared unit quad), 1 normal / instance
+    /// stream, 2 colour, 3 UV0 (textured mesh only).
+    last_vertex: [Option<wgpu::Buffer>; 4],
     last_index: Option<wgpu::Buffer>,
 }
 
@@ -101,7 +104,7 @@ impl EncodeState {
             last_bind_group0: None,
             last_bind_offset0: u32::MAX,
             last_bind_group2: None,
-            last_vertex: [None, None, None],
+            last_vertex: [None, None, None, None],
             last_index: None,
         }
     }
@@ -268,6 +271,65 @@ pub(crate) fn draw_batch(
         // A conic batch owns no per-batch buffers; it is drawn through the SDF
         // instance-run path, never `draw_batch`.
         RenderTopology::Conics => {}
+    }
+}
+
+/// Submit one textured mesh batch (`mesh_textured`, ADR-0038 D9).
+///
+/// Mirrors [`draw_batch`]'s mesh arm, but binds the batch's UV0 buffer at slot 3
+/// and its texture bind group at group 2, and draws through the textured
+/// pipeline. The optional anti-aliased wireframe overlay is drawn exactly like
+/// the untextured path (the line pipeline, after the triangles), so a textured
+/// body keeps its edge display.
+///
+/// The caller guarantees this batch has a `texture` and a resident texture bind
+/// group: a batch whose texture could not be resolved is routed through
+/// [`draw_batch`] instead, never drawn with a placeholder texture.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn draw_batch_textured(
+    pass: &mut wgpu::RenderPass<'_>,
+    state: &mut EncodeState,
+    batch: &GpuBatch,
+    bind_group: &wgpu::BindGroup,
+    uniform_offset: u32,
+    texture_bind_group: &wgpu::BindGroup,
+    line_pipeline: &wgpu::RenderPipeline,
+    mesh_pipeline: &wgpu::RenderPipeline,
+) {
+    let Some(vertices) = batch.vertices.as_ref() else {
+        return;
+    };
+    let Some(uvs) = batch.uvs.as_ref() else {
+        return;
+    };
+    let draw_plan = mesh_draw_plan(batch.indices.is_some(), batch.line_quads.is_some());
+    if draw_plan.triangles {
+        state.set_pipeline(pass, mesh_pipeline);
+        state.set_bind_group0(pass, bind_group, uniform_offset);
+        state.set_bind_group2(pass, texture_bind_group);
+        state.set_vertex_buffer(pass, 0, vertices);
+        if let Some(normals) = &batch.normals {
+            state.set_vertex_buffer(pass, 1, normals);
+        }
+        if let Some(colors) = &batch.colors {
+            state.set_vertex_buffer(pass, 2, colors);
+        }
+        state.set_vertex_buffer(pass, 3, uvs);
+        let indices = batch
+            .indices
+            .as_ref()
+            .expect("mesh draw plan requires triangle indices");
+        state.set_index_buffer(pass, indices);
+        pass.draw_indexed(0..batch.index_count, 0, 0..1);
+    }
+    if draw_plan.edge_overlay {
+        let quads = batch
+            .line_quads
+            .as_ref()
+            .expect("draw plan requires overlay quads");
+        state.set_pipeline(pass, line_pipeline);
+        state.set_vertex_buffer(pass, 0, quads);
+        pass.draw(0..batch.line_quad_count, 0..1);
     }
 }
 

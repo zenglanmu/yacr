@@ -56,6 +56,8 @@ pub(super) fn two_face_mesh() -> Mesh {
         normals: Vec::new(),
         face_sources: vec![Some(face("face-a")), Some(face("face-b"))],
         colors: Vec::new(),
+        uvs: Vec::new(),
+        texture: None,
     }
 }
 

@@ -45,6 +45,9 @@ pub(super) fn mesh_sample() -> Mesh {
             }),
         ],
         colors: vec![[1, 2, 3], [4, 5, 6], [7, 8, 9]],
+        // One UV per vertex plus a canonical texture key (ADR-0038 sample).
+        uvs: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+        texture: Some(super::TEXTURE_KEY.to_string()),
     }
 }
 

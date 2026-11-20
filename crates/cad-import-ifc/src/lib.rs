@@ -54,6 +54,13 @@
 //! * Style/material colour (`IfcStyledItem`) is not imported: entity colour
 //!   falls back to `ByLayer`, reported by [`DIAG_STYLE_NOT_IMPORTED`] and
 //!   `Partial`.
+//! * Base-colour textures **are** imported (ADR-0038): an embedded
+//!   `IfcBlobTexture`/`IfcPixelTexture` becomes a document-owned PNG and the
+//!   mesh carries its UV0. An `IfcImageTexture` names an external file and is
+//!   reported by [`DIAG_EXTERNAL_TEXTURE_UNAVAILABLE`], never read; a textured
+//!   product that is cut by an opening keeps the void path and reports
+//!   [`DIAG_TEXTURED_VOID_FALLBACK`] (upstream's CSG cut cannot carry UVs).
+//!   Untextured products keep the colour path unchanged.
 //! * `vendor_records` is empty and `ImportRequest::xref` is ignored: IFC has
 //!   neither Tianzheng records nor CAD external references.
 //!
@@ -62,17 +69,26 @@
 //! [`DESCRIPTOR_IFC`].
 
 use cad_db::EntityColor;
-use cad_domain::{CadError, CadResult, Diagnostic, Mesh, Point3, Unit, UnitContext};
+use cad_domain::{CadError, CadResult, Diagnostic, Unit, UnitContext};
 use cad_import_core::{
     compute_identity, ifc_schema as ifc_file_schema, ConnectorDescriptor, ExportCapability,
-    FidelityLevel, ImportCapability, ImportLimits, ImportPhase, ImportProgress, ImportProgressSink,
-    ImportReport, ImportRequest, ImportedDrawing, Importer, MeshImport, NoopProgress,
+    FidelityLevel, ImportCapability, ImportPhase, ImportProgress, ImportProgressSink, ImportReport,
+    ImportRequest, ImportedDrawing, Importer, MeshImport, NoopProgress,
 };
 use ifc_lite_core::{
     build_entity_index, is_geometry_job, resolve_length_unit, EntityDecoder, EntityScanner, IfcType,
 };
 use ifc_lite_geometry::{
-    propagate_voids_to_parts, void_index_from_content, GeometryRouter, Mesh as IfcMesh,
+    build_texture_index, propagate_voids_to_parts, void_index_from_content, GeometryRouter,
+    Mesh as IfcMesh, TextureAttachment,
+};
+
+mod mesh;
+mod texture;
+use mesh::element_mesh;
+pub use texture::{
+    DIAG_EXTERNAL_TEXTURE_UNAVAILABLE, DIAG_TEXTURED_VOID_FALLBACK, DIAG_TEXTURE_ENCODE_FAILED,
+    DIAG_UVS_DROPPED,
 };
 
 /// Stable diagnostic code: the declared length unit was canonicalised to metres.
@@ -211,6 +227,12 @@ impl Importer for IfcImporter {
         let units = resolve_units(&mut decoder);
         let mut void_index = void_index_from_content(content, &mut decoder);
         let _ = propagate_voids_to_parts(&mut void_index, content, &mut decoder);
+        // One texture index per document. `build_texture_index` bails out on its
+        // own keyword scan when the file holds no `IFCINDEXEDTRIANGLETEXTUREMAP`,
+        // so a plain IFC pays only that scan and no texture work happens below.
+        let texture_index = build_texture_index(content, &mut decoder);
+        let mut textures = texture::TextureCache::default();
+        let mut void_texture_fallbacks = 0usize;
 
         let mut jobs = Vec::<Job>::new();
         let mut styled_items = 0usize;
@@ -339,30 +361,154 @@ impl Importer for IfcImporter {
                 return Err(CadError::Cancelled);
             }
             let label = job.label();
-            let parts = match router.process_element_with_voids_parts(
-                &job.entity,
-                &mut decoder,
-                &void_index,
-            ) {
-                Ok(parts) => parts,
-                Err(error) => {
-                    let reason = error.to_string();
-                    stats.note_failure(&label, reason.clone());
+            // The texture index is keyed by face set, so an element only knows it
+            // is textured after walking its representation items. Only a
+            // non-void host may take the textured router: upstream's void path
+            // never passes a texture index because a CSG cut rebuilds vertices
+            // and would orphan the UVs.
+            let textured = !texture_index.is_empty()
+                && texture::element_has_textured_face_set(&job.entity, &mut decoder, &|id| {
+                    texture_index.contains_key(&id)
+                });
+            let has_openings = void_index.contains_key(&job.entity.id);
+            // One (part, texture, uvs) tuple per part: a textured product keeps
+            // its sub-meshes apart (each carries its own image), an untextured
+            // one merges into a single entity exactly as before.
+            let parts: Vec<(IfcMesh, Option<TextureAttachment>, Option<Vec<f32>>)> =
+                if textured && !has_openings {
+                    match router.process_element_with_submeshes_textured(
+                        &job.entity,
+                        &mut decoder,
+                        &texture_index,
+                    ) {
+                        Ok(collection) => collection
+                            .sub_meshes
+                            .into_iter()
+                            .map(|sub| (sub.mesh, sub.texture, sub.uvs))
+                            .collect(),
+                        Err(error) => {
+                            let reason = error.to_string();
+                            stats.note_failure(&label, reason.clone());
+                            import.record(
+                                Diagnostic {
+                                    object: None,
+                                    code: DIAG_ELEMENT_FAILED.into(),
+                                    message: format!(
+                                        "IFC product {label} could not be meshed and was not \
+                                         imported: {reason}"
+                                    ),
+                                },
+                                None,
+                            );
+                            continue;
+                        }
+                    }
+                } else {
+                    if textured {
+                        // The element really carries a texture map but an opening
+                        // cuts it, so it takes the void path and stays untextured.
+                        void_texture_fallbacks += 1;
+                    }
+                    match router.process_element_with_voids_parts(
+                        &job.entity,
+                        &mut decoder,
+                        &void_index,
+                    ) {
+                        Ok(parts) => parts.into_iter().map(|mesh| (mesh, None, None)).collect(),
+                        Err(error) => {
+                            let reason = error.to_string();
+                            stats.note_failure(&label, reason.clone());
+                            import.record(
+                                Diagnostic {
+                                    object: None,
+                                    code: DIAG_ELEMENT_FAILED.into(),
+                                    message: format!(
+                                        "IFC product {label} could not be meshed and was not \
+                                         imported: {reason}"
+                                    ),
+                                },
+                                None,
+                            );
+                            continue;
+                        }
+                    }
+                };
+
+            if parts.iter().any(|(_, attachment, _)| attachment.is_some()) {
+                // One entity per textured sub-mesh, so each mesh samples exactly
+                // one image; a sub-mesh with no triangles contributes nothing.
+                let mut emitted = 0usize;
+                for (part, attachment, uvs) in parts {
+                    let Some(mut mesh) = element_mesh(
+                        std::slice::from_ref(&part),
+                        &label,
+                        &request.limits,
+                        &mut import,
+                    )?
+                    else {
+                        continue;
+                    };
+                    if let Some(attachment) = attachment {
+                        let key = textures.key_for(&attachment, &label, &mut import);
+                        // The parameterisation is independent of the image: it is
+                        // kept whenever it pairs with the vertices, so a missing
+                        // image loses the texture, not the UVs.
+                        match uvs
+                            .as_deref()
+                            .and_then(|uvs| texture::uvs_from_f32(uvs, mesh.vertices.len()))
+                        {
+                            Some(converted) => {
+                                mesh.uvs = converted;
+                                mesh.texture = key;
+                            }
+                            None => import.record(
+                                Diagnostic {
+                                    object: None,
+                                    code: DIAG_UVS_DROPPED.into(),
+                                    message: format!(
+                                        "IFC product {label}: the texture coordinates did not pair \
+                                         one-to-one with its {} vertex/vertices, so the UV set and \
+                                         the texture reference were dropped; the mesh is stored \
+                                         untextured",
+                                        mesh.vertices.len()
+                                    ),
+                                },
+                                Some(
+                                    "an IFC product's texture coordinates did not match its vertex \
+                                     count"
+                                        .to_string(),
+                                ),
+                            ),
+                        }
+                    }
+                    let object = import.reserve_object()?;
+                    import.push_mesh(object, mesh, EntityColor::ByLayer)?;
+                    emitted += 1;
+                    progress.report(ImportProgress::at(
+                        ImportPhase::Entities,
+                        import.entity_count(),
+                        Some(entity_total),
+                    ));
+                }
+                if emitted == 0 {
+                    stats.empty += 1;
                     import.record(
                         Diagnostic {
                             object: None,
-                            code: DIAG_ELEMENT_FAILED.into(),
+                            code: DIAG_ELEMENT_EMPTY.into(),
                             message: format!(
-                                "IFC product {label} could not be meshed and was not imported: \
-                                 {reason}"
+                                "IFC product {label} produced no triangle; a curve/axis-only \
+                                 representation is not drawable mesh geometry"
                             ),
                         },
                         None,
                     );
-                    continue;
                 }
-            };
-            let Some(mesh) = element_mesh(&parts, &label, &request.limits, &mut import)? else {
+                continue;
+            }
+
+            let merged: Vec<IfcMesh> = parts.into_iter().map(|(mesh, _, _)| mesh).collect();
+            let Some(mesh) = element_mesh(&merged, &label, &request.limits, &mut import)? else {
                 stats.empty += 1;
                 import.record(
                     Diagnostic {
@@ -387,6 +533,25 @@ impl Importer for IfcImporter {
         }
 
         drain_router_diagnostics(&router, &mut import);
+
+        if void_texture_fallbacks > 0 {
+            import.record(
+                Diagnostic {
+                    object: None,
+                    code: DIAG_TEXTURED_VOID_FALLBACK.into(),
+                    message: format!(
+                        "{void_texture_fallbacks} textured IFC product(s) are hosts of an \
+                         IfcRelVoidsElement opening. ifc-lite subtracts the opening by rebuilding \
+                         vertices, which would orphan the texture coordinates, so those products \
+                         are cut on the void path and stored without a texture"
+                    ),
+                },
+                Some(format!(
+                    "{void_texture_fallbacks} textured IFC product(s) are cut by an opening and \
+                     could not keep their texture"
+                )),
+            );
+        }
 
         if import.entity_count() == 0 {
             let first = stats
@@ -641,167 +806,6 @@ fn drain_router_diagnostics(router: &GeometryRouter, import: &mut MeshImport) {
             )),
         );
     }
-}
-
-/// Convert one product's `ifc-lite` f32 parts into one validated domain mesh.
-///
-/// `parts` are already world-placed by the router; `Mesh::origin` (set when the
-/// router relativised coordinates for f32 precision) is folded back in f64 so
-/// the database never holds origin-relative coordinates.
-fn element_mesh(
-    parts: &[IfcMesh],
-    label: &str,
-    limits: &ImportLimits,
-    import: &mut MeshImport,
-) -> CadResult<Option<Mesh>> {
-    let mut vertices = Vec::<Point3>::new();
-    let mut normals = Vec::<Point3>::new();
-    let mut normals_usable = true;
-    let mut triangles = Vec::<[u32; 3]>::new();
-    let mut degenerate = 0usize;
-
-    for part in parts {
-        if part.positions.len() % 3 != 0 {
-            return Err(CadError::CorruptData(format!(
-                "IFC product {label}: the geometry router returned {} position component(s), \
-                 not a multiple of 3",
-                part.positions.len()
-            )));
-        }
-        if part.indices.len() % 3 != 0 {
-            return Err(CadError::CorruptData(format!(
-                "IFC product {label}: the geometry router returned {} triangle indices, not a \
-                 multiple of 3",
-                part.indices.len()
-            )));
-        }
-        let part_vertices = part.positions.len() / 3;
-        let base = vertices.len();
-        if base + part_vertices > u32::MAX as usize {
-            return Err(CadError::InvalidInput(format!(
-                "IFC product {label} needs more than {} vertices, over the u32 mesh index range",
-                u32::MAX
-            )));
-        }
-
-        let origin = part.origin;
-        for chunk in part.positions.as_chunks::<3>().0 {
-            let point = Point3 {
-                x: origin[0] + chunk[0] as f64,
-                y: origin[1] + chunk[1] as f64,
-                z: origin[2] + chunk[2] as f64,
-            };
-            if !point.x.is_finite() || !point.y.is_finite() || !point.z.is_finite() {
-                return Err(CadError::CorruptData(format!(
-                    "IFC product {label}: the geometry router produced a non-finite vertex"
-                )));
-            }
-            vertices.push(point);
-        }
-
-        if normals_usable {
-            if part.normals.len() == part.positions.len() {
-                for chunk in part.normals.as_chunks::<3>().0 {
-                    let normal = Point3 {
-                        x: chunk[0] as f64,
-                        y: chunk[1] as f64,
-                        z: chunk[2] as f64,
-                    };
-                    if !normal.x.is_finite() || !normal.y.is_finite() || !normal.z.is_finite() {
-                        normals_usable = false;
-                        break;
-                    }
-                    normals.push(normal);
-                }
-            } else {
-                normals_usable = false;
-            }
-            if !normals_usable {
-                normals.clear();
-            }
-        }
-
-        for corner in part.indices.as_chunks::<3>().0 {
-            if corner.iter().any(|index| *index as usize >= part_vertices) {
-                return Err(CadError::CorruptData(format!(
-                    "IFC product {label}: a triangle references a vertex outside its {part_vertices}-vertex mesh"
-                )));
-            }
-            let placed = [
-                index_to_u32(base, corner[0], label)?,
-                index_to_u32(base, corner[1], label)?,
-                index_to_u32(base, corner[2], label)?,
-            ];
-            if placed[0] == placed[1] || placed[1] == placed[2] || placed[0] == placed[2] {
-                degenerate += 1;
-                continue;
-            }
-            triangles.push(placed);
-            if let Some(max) = limits.max_mesh_faces {
-                if triangles.len() > max {
-                    return Err(CadError::InvalidInput(format!(
-                        "IFC product {label} has more than {max} triangle(s), over the face \
-                         import limit"
-                    )));
-                }
-            }
-        }
-    }
-
-    if degenerate > 0 {
-        let reason = format!(
-            "IFC product {label}: {degenerate} triangle(s) with repeated vertex indices were \
-             dropped"
-        );
-        import.record(
-            Diagnostic {
-                object: None,
-                code: DIAG_DEGENERATE_TRIANGLE.into(),
-                message: reason.clone(),
-            },
-            Some(reason),
-        );
-    }
-    if !normals_usable && !vertices.is_empty() {
-        import.record(
-            Diagnostic {
-                object: None,
-                code: DIAG_NORMALS_DROPPED.into(),
-                message: format!(
-                    "IFC product {label}: the router returned a missing, short or non-finite \
-                     normal list; the mesh was stored without normals"
-                ),
-            },
-            None,
-        );
-    }
-    if triangles.is_empty() {
-        return Ok(None);
-    }
-    if let Some(max) = limits.max_mesh_face_indices {
-        let indices = triangles.len().saturating_mul(3);
-        if indices > max {
-            return Err(CadError::InvalidInput(format!(
-                "IFC product {label} has {indices} face corner indices, over the {max} \
-                 face-index import limit"
-            )));
-        }
-    }
-    Ok(Some(Mesh {
-        vertices,
-        triangles,
-        normals: if normals_usable { normals } else { Vec::new() },
-        face_sources: Vec::new(),
-        colors: Vec::new(),
-    }))
-}
-
-fn index_to_u32(base: usize, index: u32, label: &str) -> CadResult<u32> {
-    u32::try_from(base + index as usize).map_err(|_| {
-        CadError::InvalidInput(format!(
-            "IFC product {label} exceeds the u32 mesh index range"
-        ))
-    })
 }
 
 #[cfg(test)]

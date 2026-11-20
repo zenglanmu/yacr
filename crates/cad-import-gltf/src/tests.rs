@@ -147,6 +147,153 @@ fn glb(json: &str, bin: &[u8]) -> Vec<u8> {
     out
 }
 
+/// The three canonical positions and their 0,1,2 index list.
+fn position_bytes() -> Vec<u8> {
+    let mut bytes = Vec::new();
+    for position in [[0.0f32, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]] {
+        for component in position {
+            bytes.extend_from_slice(&component.to_le_bytes());
+        }
+    }
+    bytes
+}
+
+fn index_bytes() -> Vec<u8> {
+    let mut bytes = Vec::new();
+    for index in [0u16, 1, 2] {
+        bytes.extend_from_slice(&index.to_le_bytes());
+    }
+    bytes
+}
+
+/// `[u, v]` pairs as little-endian `f32` bytes (one `VEC2` accessor's payload).
+fn uv_bytes(pairs: &[[f32; 2]]) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    for pair in pairs {
+        for component in pair {
+            bytes.extend_from_slice(&component.to_le_bytes());
+        }
+    }
+    bytes
+}
+
+fn color_bytes(colors: [[f32; 4]; 3]) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    for color in colors {
+        for component in color {
+            bytes.extend_from_slice(&component.to_le_bytes());
+        }
+    }
+    bytes
+}
+
+/// Hand-built PNG bytes: the real container signature plus a payload.
+///
+/// `register_texture` sniffs the container and content-addresses the bytes, so the
+/// payload only has to be recognisable and distinct — this is not a decodable
+/// image, and nothing in the import path decodes it.
+fn png() -> Vec<u8> {
+    let mut bytes = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+    bytes.extend_from_slice(b"hand-built base-colour texture");
+    bytes
+}
+
+/// Accumulates a BIN chunk and the matching `bufferViews` entries, so an offset
+/// is computed once by the fixture instead of by hand in every test.
+#[derive(Default)]
+struct Bin {
+    bytes: Vec<u8>,
+    views: Vec<String>,
+}
+
+impl Bin {
+    /// Append `bytes` as the next buffer view and return its index.
+    fn view(&mut self, bytes: &[u8]) -> usize {
+        let offset = self.bytes.len();
+        self.bytes.extend_from_slice(bytes);
+        self.views.push(format!(
+            r#"{{"buffer":0,"byteOffset":{offset},"byteLength":{}}}"#,
+            bytes.len()
+        ));
+        self.views.len() - 1
+    }
+
+    fn views_json(&self) -> String {
+        self.views.join(",")
+    }
+}
+
+/// Which image a fixture's `images[0]` describes.
+enum TextureImage<'a> {
+    /// These PNG bytes are appended to the BIN chunk and referenced by a view.
+    Bin(&'a [u8]),
+    /// The `images` entry to emit verbatim (a `data:` URI or an external path).
+    Entry(String),
+}
+
+/// A one-primitive document whose material carries a base-colour texture.
+///
+/// The accessor order is fixed: `0` positions, `1` `TEXCOORD_0`, `2` indices and
+/// — when `colors` is set — `3` `COLOR_0`. The buffer is declared without a URI;
+/// a caller that wants a `.gltf` replaces it with an embedded one.
+fn textured_triangle(colors: Option<[[f32; 4]; 3]>, image: TextureImage<'_>) -> (String, Vec<u8>) {
+    let mut bin = Bin::default();
+    let positions = bin.view(&position_bytes());
+    let uvs = bin.view(&uv_bytes(&[[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]));
+    let indices = bin.view(&index_bytes());
+    let mut attributes = format!(r#""POSITION":{positions},"TEXCOORD_0":{uvs}"#);
+    let mut accessors = format!(
+        r#"{{"bufferView":{positions},"componentType":5126,"count":3,"type":"VEC3",
+            "min":[0.0,0.0,0.0],"max":[1.0,1.0,0.0]}},
+           {{"bufferView":{uvs},"componentType":5126,"count":3,"type":"VEC2"}},
+           {{"bufferView":{indices},"componentType":5123,"count":3,"type":"SCALAR"}}"#
+    );
+    if let Some(colors) = colors {
+        let view = bin.view(&color_bytes(colors));
+        attributes.push_str(&format!(r#","COLOR_0":{view}"#));
+        accessors.push_str(&format!(
+            r#",{{"bufferView":{view},"componentType":5126,"count":3,"type":"VEC4"}}"#
+        ));
+    }
+    let image = match image {
+        TextureImage::Bin(bytes) => {
+            let view = bin.view(bytes);
+            format!(r#"{{"bufferView":{view},"mimeType":"image/png"}}"#)
+        }
+        TextureImage::Entry(entry) => entry,
+    };
+    let bytes = bin.bytes.len();
+    let views = bin.views_json();
+    let json = format!(
+        r#"{{"asset":{{"version":"2.0"}},"scene":0,"scenes":[{{"nodes":[0]}}],
+        "nodes":[{{"mesh":0}}],
+        "meshes":[{{"primitives":[{{"attributes":{{{attributes}}},"indices":{indices},
+          "material":0}}]}}],
+        "materials":[{{"pbrMetallicRoughness":{{"baseColorTexture":{{"index":0}}}}}}],
+        "textures":[{{"source":0}}],
+        "images":[{image}],
+        "accessors":[{accessors}],
+        "bufferViews":[{views}],
+        "buffers":[{{"byteLength":{bytes}}}]}}"#
+    );
+    (json, bin.bytes)
+}
+
+/// Replace the fixture's `buffer` entry with an embedded base64 `data:` URI.
+fn with_data_uri_buffer(json: &str, bin: &[u8]) -> String {
+    let payload = base64::engine::general_purpose::STANDARD.encode(bin);
+    let declared = format!(r#"{{"byteLength":{}}}"#, bin.len());
+    let embedded = format!(
+        r#"{{"byteLength":{},"uri":"data:application/octet-stream;base64,{payload}"}}"#,
+        bin.len()
+    );
+    assert!(
+        json.contains(&declared),
+        "the fixture must declare its buffer without a URI"
+    );
+    json.replace(&declared, &embedded)
+}
+
 fn meshes(drawing: &ImportedDrawing) -> Vec<&cad_domain::Mesh> {
     drawing
         .database
@@ -508,4 +655,219 @@ fn a_glb_with_a_non_2x_json_version_is_refused() {
         Err(other) => panic!("expected a version refusal, got {other:?}"),
         Ok(_) => panic!("expected a version refusal, got a successful import"),
     }
+}
+
+#[test]
+fn a_glb_base_colour_texture_is_imported_with_its_uvs() {
+    let png = png();
+    let (json, bin) = textured_triangle(None, TextureImage::Bin(&png));
+    let drawing = import(glb(&json, &bin)).expect("the textured GLB imports");
+
+    assert_eq!(drawing.database.entity_count(), 1);
+    let meshes = meshes(&drawing);
+    assert_eq!(meshes.len(), 1);
+    let mesh = meshes[0];
+    // Authored values, in the authored order: UVs are surface parameters, so the
+    // CAD frame conversion never touches them.
+    assert_eq!(mesh.uvs, vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]);
+    let key = mesh
+        .texture
+        .clone()
+        .expect("the base-colour texture is referenced");
+    let bytes = drawing
+        .database
+        .texture(&key)
+        .expect("the texture bytes belong to the document");
+    assert_eq!(bytes.as_ref(), png.as_slice());
+
+    // A texture that really was imported is not a loss in any form.
+    let codes = codes(&drawing);
+    assert!(!codes.contains(&DIAG_TEXTURE_NOT_IMPORTED));
+    assert!(!codes.contains(&DIAG_UVS_DROPPED));
+    assert_eq!(drawing.report.completeness, Completeness::Complete);
+}
+
+#[test]
+fn a_data_uri_image_imports_the_same_texture() {
+    let png = png();
+    let payload = base64::engine::general_purpose::STANDARD.encode(&png);
+    let entry = format!(r#"{{"uri":"data:image/png;base64,{payload}"}}"#);
+    let (json, bin) = textured_triangle(None, TextureImage::Entry(entry));
+    let json = with_data_uri_buffer(&json, &bin);
+    let drawing = import(json.into_bytes()).expect("the textured .gltf imports");
+
+    let meshes = meshes(&drawing);
+    assert_eq!(meshes.len(), 1);
+    assert_eq!(meshes[0].uvs, vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]);
+    let key = meshes[0]
+        .texture
+        .clone()
+        .expect("the base-colour texture is referenced");
+    let bytes = drawing
+        .database
+        .texture(&key)
+        .expect("the texture bytes belong to the document");
+    assert_eq!(bytes.as_ref(), png.as_slice());
+    assert_eq!(drawing.report.completeness, Completeness::Complete);
+}
+
+#[test]
+fn an_external_image_keeps_uvs_and_reports_the_missing_bytes() {
+    let entry = r#"{"uri":"tex.png"}"#.to_string();
+    let (json, bin) = textured_triangle(None, TextureImage::Entry(entry));
+    let drawing = import(glb(&json, &bin)).expect("the geometry still imports");
+
+    let meshes = meshes(&drawing);
+    assert_eq!(meshes.len(), 1);
+    let mesh = meshes[0];
+    assert_eq!(mesh.vertices.len(), 3, "geometry is kept");
+    assert_eq!(
+        mesh.uvs,
+        vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+        "UVs are kept even though the bytes are unavailable"
+    );
+    assert_eq!(mesh.texture, None);
+    assert!(drawing.database.textures().next().is_none());
+
+    let codes = codes(&drawing);
+    assert!(codes.contains(&DIAG_EXTERNAL_IMAGE));
+    assert!(codes.contains(&DIAG_TEXTURE_NOT_IMPORTED));
+    assert!(matches!(
+        drawing.report.completeness,
+        Completeness::Partial(_)
+    ));
+}
+
+#[test]
+fn a_uv_count_mismatch_drops_the_uv_set_and_the_texture() {
+    let png = png();
+    let mut bin = Bin::default();
+    let positions = bin.view(&position_bytes());
+    // Four pairs for three vertices: the set cannot describe the geometry.
+    let uvs = bin.view(&uv_bytes(&[[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]));
+    let indices = bin.view(&index_bytes());
+    let image = bin.view(&png);
+    let views = bin.views_json();
+    let bytes = bin.bytes.len();
+    let json = format!(
+        r#"{{"asset":{{"version":"2.0"}},"scene":0,"scenes":[{{"nodes":[0]}}],
+        "nodes":[{{"mesh":0}}],
+        "meshes":[{{"primitives":[{{"attributes":{{"POSITION":{positions},"TEXCOORD_0":{uvs}}},
+          "indices":{indices},"material":0}}]}}],
+        "materials":[{{"pbrMetallicRoughness":{{"baseColorTexture":{{"index":0}}}}}}],
+        "textures":[{{"source":0}}],
+        "images":[{{"bufferView":{image},"mimeType":"image/png"}}],
+        "accessors":[
+          {{"bufferView":{positions},"componentType":5126,"count":3,"type":"VEC3",
+            "min":[0.0,0.0,0.0],"max":[1.0,1.0,0.0]}},
+          {{"bufferView":{uvs},"componentType":5126,"count":4,"type":"VEC2"}},
+          {{"bufferView":{indices},"componentType":5123,"count":3,"type":"SCALAR"}}
+        ],
+        "bufferViews":[{views}],
+        "buffers":[{{"byteLength":{bytes}}}]}}"#
+    );
+    let drawing = import(glb(&json, &bin.bytes)).expect("the geometry still imports");
+
+    let meshes = meshes(&drawing);
+    assert_eq!(meshes.len(), 1);
+    let mesh = meshes[0];
+    assert_eq!(mesh.vertices.len(), 3, "the geometry is kept");
+    assert!(mesh.uvs.is_empty(), "the UV set is dropped as a whole");
+    assert_eq!(mesh.texture, None);
+    // No orphan image: the texture was never registered.
+    assert!(drawing.database.textures().next().is_none());
+
+    assert!(codes(&drawing).contains(&DIAG_UVS_DROPPED));
+    assert!(!codes(&drawing).contains(&DIAG_TEXTURE_NOT_IMPORTED));
+    assert!(matches!(
+        drawing.report.completeness,
+        Completeness::Partial(_)
+    ));
+}
+
+#[test]
+fn a_second_uv_set_is_noted_as_ignored() {
+    let png = png();
+    let mut bin = Bin::default();
+    let positions = bin.view(&position_bytes());
+    let uvs0 = bin.view(&uv_bytes(&[[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]));
+    // The material names set 0; this set is simply not the one it samples.
+    let uvs1 = bin.view(&uv_bytes(&[[0.5, 0.5], [0.5, 0.5], [0.5, 0.5]]));
+    let indices = bin.view(&index_bytes());
+    let image = bin.view(&png);
+    let views = bin.views_json();
+    let bytes = bin.bytes.len();
+    let json = format!(
+        r#"{{"asset":{{"version":"2.0"}},"scene":0,"scenes":[{{"nodes":[0]}}],
+        "nodes":[{{"mesh":0}}],
+        "meshes":[{{"primitives":[{{"attributes":{{"POSITION":{positions},
+          "TEXCOORD_0":{uvs0},"TEXCOORD_1":{uvs1}}},"indices":{indices},"material":0}}]}}],
+        "materials":[{{"pbrMetallicRoughness":{{"baseColorTexture":{{"index":0}}}}}}],
+        "textures":[{{"source":0}}],
+        "images":[{{"bufferView":{image},"mimeType":"image/png"}}],
+        "accessors":[
+          {{"bufferView":{positions},"componentType":5126,"count":3,"type":"VEC3",
+            "min":[0.0,0.0,0.0],"max":[1.0,1.0,0.0]}},
+          {{"bufferView":{uvs0},"componentType":5126,"count":3,"type":"VEC2"}},
+          {{"bufferView":{uvs1},"componentType":5126,"count":3,"type":"VEC2"}},
+          {{"bufferView":{indices},"componentType":5123,"count":3,"type":"SCALAR"}}
+        ],
+        "bufferViews":[{views}],
+        "buffers":[{{"byteLength":{bytes}}}]}}"#
+    );
+    let drawing = import(glb(&json, &bin.bytes)).expect("the document imports");
+
+    let meshes = meshes(&drawing);
+    assert_eq!(
+        meshes[0].uvs,
+        vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+        "the set the material names is the one that is read"
+    );
+    assert!(meshes[0].texture.is_some());
+    assert!(codes(&drawing).contains(&DIAG_UV_SET_IGNORED));
+    // An ignored second set is a note, not a loss of this import.
+    assert_eq!(drawing.report.completeness, Completeness::Complete);
+}
+
+#[test]
+fn a_textured_primitive_with_vertex_colours_keeps_both() {
+    let png = png();
+    let (json, bin) = textured_triangle(Some([[0.5, 0.25, 0.0, 1.0]; 3]), TextureImage::Bin(&png));
+    let drawing = import(glb(&json, &bin)).expect("the GLB imports");
+
+    let meshes = meshes(&drawing);
+    assert_eq!(meshes.len(), 1);
+    let mesh = meshes[0];
+    assert_eq!(mesh.uvs, vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]);
+    assert!(mesh.texture.is_some());
+    assert_eq!(mesh.colors.len(), 3, "COLOR_0 is kept beside the texture");
+    // `COLOR_0` still carries the composed colour; the texture multiplies into it
+    // in the renderer, so it is not folded into the entity colour as well.
+    assert_eq!(only_style(&drawing).color, cad_db::EntityColor::ByLayer);
+    assert_eq!(drawing.report.completeness, Completeness::Complete);
+}
+
+#[test]
+fn a_non_base_colour_texture_channel_is_noted_once() {
+    let png = png();
+    let (json, bin) = textured_triangle(None, TextureImage::Bin(&png));
+    // Add a normal map beside the base-colour texture (texture 1).
+    let json = json.replace(
+        r#""textures":[{"source":0}],"#,
+        r#""textures":[{"source":0},{"source":0}],"#,
+    );
+    let json = json.replace(
+        r#""materials":[{"pbrMetallicRoughness":{"baseColorTexture":{"index":0}}}],"#,
+        r#""materials":[{"pbrMetallicRoughness":{"baseColorTexture":{"index":0}},
+          "normalTexture":{"index":1}}],"#,
+    );
+    let drawing = import(glb(&json, &bin)).expect("the GLB imports");
+
+    let notes: Vec<&str> = codes(&drawing)
+        .into_iter()
+        .filter(|code| *code == DIAG_TEXTURE_CHANNEL_NOT_IMPORTED)
+        .collect();
+    assert_eq!(notes.len(), 1, "one note per document, not per primitive");
+    assert!(meshes(&drawing)[0].texture.is_some());
+    assert_eq!(drawing.report.completeness, Completeness::Complete);
 }

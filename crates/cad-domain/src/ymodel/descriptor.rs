@@ -330,6 +330,10 @@ pub const CLASSES: &[ClassDescriptor] = &[
             field("normals", FieldKind::VecPoint3),
             field("face_sources", FieldKind::VecOptSubElement),
             field("colors", FieldKind::U8x3List),
+            // ADR-0038 D4: appended last so a minor-2 payload is the same object
+            // minus these two keys, and the reader may treat them as absent.
+            field("uvs", FieldKind::VecF64x2),
+            field("texture", FieldKind::OptString),
         ],
     },
     ClassDescriptor {
