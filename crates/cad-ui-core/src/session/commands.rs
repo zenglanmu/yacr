@@ -33,6 +33,10 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("CLOSE", CommandId::CloseDrawing),
     ("PLOT", CommandId::PlotDrawing),
     ("SAVE", CommandId::SaveDrawingAs),
+    // EXPORT is the explicit "write another format" command (ADR-0041 D2): the
+    // chosen target's extension decides the writer. It is NOT a PLOT alias — the
+    // vector plot stays PLOT/PRINT.
+    ("EXPORT", CommandId::Export),
     ("CANCEL", CommandId::CancelLoading),
     ("PAN", CommandId::Pan),
     ("ZOOM", CommandId::Zoom),

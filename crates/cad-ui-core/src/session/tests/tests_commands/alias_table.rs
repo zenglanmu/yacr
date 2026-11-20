@@ -143,9 +143,10 @@ fn the_shipped_table_covers_the_implemented_autocad_abbreviations() {
     assert_eq!(alias_target("MA"), Some("MATCHPROP"));
     assert_eq!(canonical_command_name("MA"), Some("MATCHPROP"));
     assert_eq!(normalize_command("MA"), Some(CommandId::MatchProp));
-    // The pre-existing word synonyms stay in the same table.
+    // The pre-existing word synonyms stay in the same table. `EXPORT` is **not**
+    // one of them any more: it is a canonical command of its own (ADR-0041 D2),
+    // and the vector plot keeps `PLOT`/`PRINT`.
     for (alias, target) in [
-        ("EXPORT", "PLOT"),
         ("PRINT", "PLOT"),
         ("SAVEAS", "SAVE"),
         ("QSAVE", "SAVE"),
@@ -168,6 +169,9 @@ fn the_shipped_table_covers_the_implemented_autocad_abbreviations() {
     // table, and must not point at the clear-all restore.
     assert_eq!(alias_target("LAYERP"), None);
     assert_eq!(normalize_command("LAYERP"), Some(CommandId::LayerPrevious));
+    // `EXPORT` left the alias table too and is now its own canonical selector.
+    assert_eq!(alias_target("EXPORT"), None);
+    assert_eq!(normalize_command("EXPORT"), Some(CommandId::Export));
 }
 
 #[test]

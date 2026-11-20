@@ -673,7 +673,8 @@ def check_document_picker_wiring() -> list[str]:
 
     The native host drives Kotlin through instance JNI on `MainActivity`:
     `documentLaunchOpen(initialUri)`, `documentLaunchSave(defaultName)`,
-    `documentReadUri(uri)`, `documentWriteUri(uri, bytes)` and
+    `documentReadUri(uri)`, `documentWriteUri(uri, bytes)`,
+    `documentReadUriSync(uri)`, `documentWriteSiblingBackup(uri, bytes)` and
     `documentSnapshot()`. `DocumentPicker.kt` must own the picker/read plumbing so
     the Activity keeps holding no document state (iron rule 8), and the picker must
     be registered through `registerForActivityResult` — never `onActivityResult`.
@@ -705,6 +706,9 @@ def check_document_picker_wiring() -> list[str]:
         "contentResolver.openInputStream(",
         "contentResolver.openOutputStream(",
         '"wt"',
+        "File.createTempFile(",
+        "output.fd.sync()",
+        "DocumentsContract.createDocument(",
         "takePersistableUriPermission(",
         "FLAG_GRANT_READ_URI_PERMISSION",
         "FLAG_GRANT_WRITE_URI_PERMISSION",
@@ -752,6 +756,8 @@ def check_document_picker_wiring() -> list[str]:
         "fun documentLaunchSave(defaultName: String)",
         "fun documentReadUri(uri: String)",
         "fun documentWriteUri(uri: String, bytes: ByteArray)",
+        "fun documentReadUriSync(uri: String): ByteArray?",
+        "fun documentWriteSiblingBackup(uri: String, bytes: ByteArray): Boolean",
         "fun documentSnapshot(): Array<Any?>",
     ):
         if signature not in activity:
@@ -761,6 +767,8 @@ def check_document_picker_wiring() -> list[str]:
         "documentPicker.documentLaunchSave(defaultName)",
         "documentPicker.documentReadUri(uri)",
         "documentPicker.documentWriteUri(uri, bytes)",
+        "documentPicker.documentReadUriSync(uri)",
+        "documentPicker.documentWriteSiblingBackup(uri, bytes)",
         "documentPicker.documentSnapshot()",
     ):
         if delegation not in activity:
@@ -802,6 +810,8 @@ def check_document_picker_wiring() -> list[str]:
         "void documentLaunchSave(java.lang.String);",
         "void documentReadUri(java.lang.String);",
         "void documentWriteUri(java.lang.String, byte[]);",
+        "byte[] documentReadUriSync(java.lang.String);",
+        "boolean documentWriteSiblingBackup(java.lang.String, byte[]);",
         "java.lang.Object[] documentSnapshot();",
     ):
         if descriptor not in proguard:

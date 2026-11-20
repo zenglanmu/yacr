@@ -22,7 +22,16 @@
 //     caller must **not** save, so a choice is never silently ignored. Cancel
 //     sends nothing at all.
 import type { Invoke } from '../host/invoke.ts';
-import { DWG_SAVE_COMMANDS } from './save-confirm.ts';
+
+/**
+ * The router names whose real host path is the SAVE funnel.
+ *
+ * They are the only lines that write the document itself (always `.ymodel`,
+ * ADR-0041), so they are the only ones this question applies to. `EXPORT` is
+ * deliberately absent: it opens the host's export picker and writes a copy in
+ * the chosen extension, embedding nothing.
+ */
+export const SAVE_FAMILY_COMMANDS: readonly string[] = Object.freeze(['SAVE', 'SAVEAS', 'QSAVE']);
 
 /** The IPC that reports what would be embedded (and whether the host asks). */
 export const EMBED_PREVIEW_COMMAND = 'cad_ymodel_resource_preview';
@@ -85,7 +94,7 @@ function recordOf(value: unknown): Record<string, unknown> | null {
 
 /** Whether `text` is one of the router names the host saves through. */
 export function isSaveFamilyCommand(text: unknown): boolean {
-  return DWG_SAVE_COMMANDS.includes(String(text ?? '').trim().toUpperCase());
+  return SAVE_FAMILY_COMMANDS.includes(String(text ?? '').trim().toUpperCase());
 }
 
 /** The catalog key of one kind's label (`save.embed.kind.<kind>`). */

@@ -210,7 +210,7 @@ fn the_save_path_writes_the_configured_dxf_container_and_payload() {
         CadSettingValue::Text("21.0".to_string()),
     )
     .unwrap();
-    core.request_save().unwrap();
+    core.request_export().unwrap();
     {
         let written = files.written.borrow();
         assert_eq!(written.len(), 1, "exactly one file is written");
@@ -247,7 +247,7 @@ fn the_save_path_writes_the_configured_dxf_container_and_payload() {
         CadSettingValue::Text("7.0".to_string()),
     )
     .unwrap();
-    core.request_save().unwrap();
+    core.request_export().unwrap();
     {
         let written = files.written.borrow();
         assert_eq!(written.len(), 2, "a second save writes a second file");
@@ -262,7 +262,7 @@ fn the_save_path_writes_the_configured_dxf_container_and_payload() {
         CadSettingValue::Text("2010".to_string()),
     )
     .unwrap();
-    core.request_save().unwrap();
+    core.request_export().unwrap();
     {
         let written = files.written.borrow();
         assert_eq!(written.len(), 3, "a third save writes a third file");
@@ -289,7 +289,7 @@ fn a_save_with_an_unrepresentable_combination_fails_and_writes_nothing() {
         CadSettingValue::Text("21.0".to_string()),
     )
     .unwrap();
-    core.request_save().unwrap();
+    core.request_export().unwrap();
 
     assert!(
         files.written.borrow().is_empty(),

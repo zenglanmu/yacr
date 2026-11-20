@@ -12,8 +12,12 @@ pub enum CommandId {
     CloseDrawing,
     /// Host-owned (no file chooser): a platform host exports SVG/PDF.
     PlotDrawing,
-    /// Host-owned (no file chooser): a platform host saves the lossy DXF.
+    /// Host-owned (no file chooser): a platform host saves the native `.ymodel`
+    /// archive (ADR-0041 D1). Never a lossy export.
     SaveDrawingAs,
+    /// Host-owned (no file chooser): a platform host exports to another format;
+    /// the chosen target's extension decides the writer (ADR-0041 D2).
+    Export,
     CancelLoading,
     Pan,
     /// Change the viewpoint without moving the model; the payload selects the form. View-only, so Viewer mode allows it. Full contract:

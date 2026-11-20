@@ -417,13 +417,15 @@ fn session_status_projects_the_real_save_pending_state_onto_can_save() {
     assert!(idle.document_label.is_some(), "the demo document is open");
     assert!(idle.can_new && idle.can_save && idle.can_plot);
 
-    // SAVE opens the picker and holds the pending slot.
-    session.command("SAVE").expect("SAVE opens the picker");
+    // EXPORT opens the picker and holds the pending slot. (SAVE cannot reach the
+    // picker here: this platform has no `.ymodel` archive and refuses before it,
+    // ADR-0041 D1. SAVE and EXPORT share the one single-flight slot.)
+    session.command("EXPORT").expect("EXPORT opens the picker");
     let pending = session.snapshot(None, None, 0);
     assert!(pending.can_new, "an open picker does not block NEW");
     assert!(
         !pending.can_save && !pending.can_plot,
-        "a pending save target blocks SAVE and PLOT"
+        "a pending export target blocks SAVE and PLOT"
     );
 }
 

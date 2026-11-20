@@ -48,6 +48,11 @@ export type { ArgumentSpec } from './argument-commands.ts';
  * maps each name onto the field that gates it; a name absent here has no
  * capability gate. `canNew` is about creating a blank drawing (no document
  * needed); `canSave`/`canPlot` additionally require an open document.
+ *
+ * `EXPORT` carries `canSave`, not `canPlot`: since ADR-0041 it is its own
+ * router selector (an export picker whose extension decides the writer) and the
+ * host checks the **save** capability before it opens that picker. `PRINT` stays
+ * a PLOT alias and keeps `canPlot`.
  */
 export const CAPABILITY_GATES: Readonly<Record<string, CapabilityGate>> = Object.freeze({
   NEW: 'canNew',
@@ -55,7 +60,7 @@ export const CAPABILITY_GATES: Readonly<Record<string, CapabilityGate>> = Object
   SAVEAS: 'canSave',
   QSAVE: 'canSave',
   PLOT: 'canPlot',
-  EXPORT: 'canPlot',
+  EXPORT: 'canSave',
   PRINT: 'canPlot',
 });
 

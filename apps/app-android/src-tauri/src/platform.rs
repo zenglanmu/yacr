@@ -51,7 +51,16 @@ use crate::policy;
 mod saf_state;
 
 #[cfg(any(target_os = "android", test))]
+mod saf_write;
+
+#[cfg(any(target_os = "android", test))]
 pub(crate) use saf_state::{cold_event, saf_event, SafState};
+
+#[cfg(any(target_os = "android", test))]
+pub use saf_write::{
+    clear_save_without_backup_notice, overwrite_safety, save_without_backup_notice,
+    OverwriteSafety, SAVE_NO_BACKUP_STATUS,
+};
 
 /// File selection/read/write over the Android Storage Access Framework.
 ///
@@ -66,8 +75,6 @@ pub(crate) use saf_state::{cold_event, saf_event, SafState};
 pub struct AndroidFiles {
     /// Events queued by this platform (never fabricated; `poll` only drains this).
     events: RefCell<Vec<FileEvent>>,
-    /// The successfully-opened source target, armed by the core only on success.
-    source: RefCell<Option<FileTarget>>,
     /// The last successfully opened/reopened target, used only as the SAF open
     /// picker's `EXTRA_INITIAL_URI` hint (never as document state).
     recent: RefCell<Option<FileTarget>>,
@@ -87,7 +94,6 @@ impl AndroidFiles {
     pub fn new() -> Self {
         Self {
             events: RefCell::new(Vec::new()),
-            source: RefCell::new(None),
             recent: RefCell::new(None),
             armed: Cell::new(None),
         }
@@ -177,7 +183,11 @@ impl PlatformFiles for AndroidFiles {
     fn write_atomic(&self, target: &FileTarget, bytes: &[u8]) -> CadResult<()> {
         #[cfg(target_os = "android")]
         {
-            crate::saf::write_uri(&target.opaque, bytes).map_err(|error| {
+            // SAF has no atomic replace (see `crate::platform::saf_write`): the
+            // Kotlin lane stages the bytes in a cache file, then streams them into
+            // the provider. A provider that refuses the sibling `.bak` document
+            // is the common case and latches `save.no_backup` for the host status.
+            saf_write::write_via_saf(&saf_write::JniSaf, &target.opaque, bytes).map_err(|error| {
                 CadError::InvalidInput(format!("writing {} failed: {error}", target.display_name))
             })
         }
@@ -188,17 +198,25 @@ impl PlatformFiles for AndroidFiles {
         }
     }
 
-    fn refuses_source_overwrite(&self, target: &FileTarget) -> bool {
-        // SAF URI identity: Android offers no device/inode pair, so the opaque
-        // URI is the only honest source identity.
-        self.source
-            .borrow()
-            .as_ref()
-            .is_some_and(|source| source.opaque == target.opaque)
+    fn read_target(&self, target: &FileTarget) -> Result<Vec<u8>, String> {
+        #[cfg(target_os = "android")]
+        {
+            // Synchronous because the shared save funnel's conflict check is
+            // synchronous: the Kotlin lane reads the document on the caller's
+            // (tick) thread. An absent/unreadable target is an error, never empty
+            // bytes, so an in-place save it cannot verify refuses.
+            saf_write::read_via_saf(&saf_write::JniSaf, &target.opaque)
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = target;
+            Err("unsupported-runtime: read_target".to_string())
+        }
     }
 
-    fn set_source(&self, target: Option<&FileTarget>) {
-        *self.source.borrow_mut() = target.cloned();
+    fn set_source(&self, _target: Option<&FileTarget>) {
+        // Bookkeeping only: overwriting the opened document is an explicit user
+        // choice (ADR-0041 D4); this carrier keeps no identity to refuse.
     }
 
     fn set_recent_target(&self, target: Option<&FileTarget>) {
@@ -216,12 +234,20 @@ impl PlatformFiles for AndroidFiles {
                     // Pending keeps the purpose armed; a terminal clears it.
                     if let Some(event) = saf_event(purpose, result) {
                         self.armed.set(None);
+                        // A delivered document supersedes any previous save
+                        // notice: it describes a document that is no longer open.
+                        if matches!(event, FileEvent::Opened { .. }) {
+                            clear_save_without_backup_notice();
+                        }
                         self.events.borrow_mut().push(event);
                     }
                 }
                 None => {
                     // Nothing armed: only an external/cold-start open is accepted.
                     if let Some(event) = cold_event(result) {
+                        if matches!(event, FileEvent::Opened { .. }) {
+                            clear_save_without_backup_notice();
+                        }
                         self.events.borrow_mut().push(event);
                     }
                 }
@@ -478,7 +504,12 @@ static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 /// Same shape as the desktop store: a failure at any step is an explicit
 /// [`CadError`] naming the path, the temp file is removed, and a partial file is
 /// never left in the target's place.
-fn atomic_replace(path: &Path, bytes: &[u8]) -> CadResult<()> {
+///
+/// Unlike the desktop stores this has **no `.bak`**: the file it is used for is
+/// the app-private config/preference file and the recovery snapshot pair, never a
+/// user document. A user document is written through SAF ([`AndroidFiles`]), which
+/// has no atomic replace at all (see [`saf_write`]).
+pub(crate) fn atomic_replace(path: &Path, bytes: &[u8]) -> CadResult<()> {
     let parent = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -537,6 +568,17 @@ pub fn option_dirs() -> (Option<PathBuf>, Option<PathBuf>) {
         Some(dirs) => (Some(dirs.fonts), Some(dirs.images)),
         None => (None, None),
     }
+}
+
+/// The recovery-snapshot directory (`filesDir/recovery`), if it is known.
+///
+/// Derived from the same `nativeAssetsReady` announcement as the config store
+/// (`filesDir` is the parent of the announced `fontsDir`) and **never guessed**.
+/// `None` before that handshake means no durable private place, so no snapshot is
+/// installed: the host then reports recovery as unavailable instead of inventing
+/// a path (`ADR-0037` D12).
+pub fn recovery_dir() -> Option<PathBuf> {
+    handshake_files_dir().map(|dir| dir.join("recovery"))
 }
 
 /// Android-only: the Kotlin asset handshake (`nativeAssetsReady`).
@@ -602,7 +644,7 @@ mod tests {
         let refusals = [
             files.begin_open(),
             files.begin_open_target(&target()),
-            files.begin_save(SavePurpose::SaveDxf, "plan.dxf"),
+            files.begin_save(SavePurpose::SaveExport, "plan.dxf"),
             files.write_atomic(&target(), b"bytes"),
         ];
         for refusal in refusals {
@@ -616,11 +658,13 @@ mod tests {
     }
 
     #[test]
-    fn nothing_is_fabricated_polled_or_guarded() {
+    fn nothing_is_fabricated_or_polled() {
         let files = AndroidFiles::new();
         assert!(files.poll().is_empty(), "no file event may be invented");
-        // No open can install a source, so no target is ever "the opened source".
-        assert!(!files.refuses_source_overwrite(&target()));
+        // Recording a source is bookkeeping only (ADR-0041 D4): no write is
+        // refused because it names the opened file.
+        files.set_source(Some(&target()));
+        files.set_source(None);
         assert!(files.poll().is_empty());
     }
 
@@ -817,25 +861,25 @@ mod tests {
     #[test]
     fn an_armed_save_only_accepts_a_save_target() {
         match saf_event(
-            FilePurpose::Save(SavePurpose::SaveDxf),
+            FilePurpose::Save(SavePurpose::SaveExport),
             save_target("content://d/3", "plan.dxf"),
         )
         .expect("a completed save chooser must produce an event")
         {
             FileEvent::SaveTarget { purpose, target } => {
-                assert_eq!(purpose, SavePurpose::SaveDxf);
+                assert_eq!(purpose, SavePurpose::SaveExport);
                 assert_eq!(target.opaque, "content://d/3");
             }
             other => panic!("expected SaveTarget, got {other:?}"),
         }
         match saf_event(
-            FilePurpose::Save(SavePurpose::SaveDxf),
+            FilePurpose::Save(SavePurpose::SaveExport),
             opened("content://d/4", "plan.dwg", b"bytes"),
         )
         .expect("a kind mismatch must be an explicit failure")
         {
             FileEvent::Failed { purpose, reason } => {
-                assert_eq!(purpose, FilePurpose::Save(SavePurpose::SaveDxf));
+                assert_eq!(purpose, FilePurpose::Save(SavePurpose::SaveExport));
                 assert!(reason.contains("open target"), "{reason}");
             }
             other => panic!("expected an explicit Failed, got {other:?}"),
@@ -844,7 +888,10 @@ mod tests {
 
     #[test]
     fn pending_queues_nothing_and_cancelled_stays_distinct() {
-        for purpose in [FilePurpose::Open, FilePurpose::Save(SavePurpose::SaveDxf)] {
+        for purpose in [
+            FilePurpose::Open,
+            FilePurpose::Save(SavePurpose::SaveExport),
+        ] {
             assert!(
                 saf_event(purpose, SafState::Pending).is_none(),
                 "a pending picker must not queue an event"
@@ -913,20 +960,21 @@ mod tests {
     }
 
     #[test]
-    fn the_source_guard_compares_saf_uri_identity() {
+    fn set_source_records_a_saf_uri_without_gating_a_write() {
+        // ADR-0041 D4: overwriting the opened document is an explicit user
+        // choice; the carrier keeps the handle for bookkeeping only. The test
+        // platform has no SAF writer, so the write itself stays an explicit
+        // refusal (device runs are NOT VERIFIED).
         let files = AndroidFiles::new();
         let source = FileTarget {
             display_name: "plan.dwg".to_string(),
             opaque: "content://com.android/document/1".to_string(),
         };
         files.set_source(Some(&source));
-        assert!(files.refuses_source_overwrite(&source));
-        // Same display name, different document: not the opened source.
-        assert!(!files.refuses_source_overwrite(&FileTarget {
-            display_name: "plan.dwg".to_string(),
-            opaque: "content://com.android/document/2".to_string(),
-        }));
+        assert!(matches!(
+            files.write_atomic(&source, b"bytes"),
+            Err(CadError::Unsupported(_))
+        ));
         files.set_source(None);
-        assert!(!files.refuses_source_overwrite(&source));
     }
 }

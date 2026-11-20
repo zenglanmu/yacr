@@ -87,7 +87,7 @@ use cad_domain::{CadError, CadResult, Diagnostic, UnitContext};
 use cad_import_core::{
     compute_identity, ConnectorDescriptor, ExportCapability, FidelityLevel, ImportCapability,
     ImportPhase, ImportProgress, ImportProgressSink, ImportReport, ImportRequest, ImportedDrawing,
-    Importer, MeshImport, NoopProgress,
+    Importer, MeshImport, NoopProgress, SpecVisibility,
 };
 
 use buffers::resolve_buffers;
@@ -182,10 +182,14 @@ pub const DIAG_UNREFERENCED_MESH: &str = "import.gltf.unreferenced_mesh";
 /// Owned by this crate. The writer half (`cad-export-gltf`) emits glTF 2.0 at
 /// L1; the format cannot carry `cad-db`'s analytic curves, layers or units, so
 /// the export direction is lossy and every conversion is reported.
+///
+/// `spec` is [`SpecVisibility::Public`]: glTF 2.0 is the published Khronos
+/// specification (`THIRD_PARTY_NOTICES.md`:65-66).
 pub const DESCRIPTOR_GLTF: ConnectorDescriptor = ConnectorDescriptor {
     id: "gltf",
     name_key: "connector.gltf.name",
     extensions: &["gltf", "glb"],
+    spec: SpecVisibility::Public,
     import: Some(ImportCapability {
         versions: "glTF 2.0 (.gltf JSON, .glb binary)",
         container: "gltf",
@@ -194,6 +198,7 @@ pub const DESCRIPTOR_GLTF: ConnectorDescriptor = ConnectorDescriptor {
         versions: "glTF 2.0 (GLB + JSON .gltf)",
         level: FidelityLevel::L1,
         lossy: true,
+        experimental: false,
     }),
     declared_classes: &[],
 };

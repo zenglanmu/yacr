@@ -237,18 +237,22 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
 | 载体 / 平台 | 实现与证据边界 |
 |---|---|
 | Linux `app-linux`（`yacr`） | **主开发目标 / 运行证据最完整**。原生 Wayland = `native-below` 生产路径；X11/XWayland = `dom-canvas`。只有 GNOME/Mutter + P620 + `scale=1` 的有界运行证据 |
-| Windows `app-windows`（`yacr-windows`） | 真实 Tauri/WebView2 + Win32 child HWND，`native-below`；真实宿主已实现，预期可运行；**当前证据**为编译门禁 + Wine 拒绝合同（缺 WebView2 → 退出码 5）；视觉/运行时/真 Windows **NOT VERIFIED**（PENDING user real-Windows spike） |
-| macOS `app-macos`（`yacr-macos`） | 真实 Tauri/WKWebView + CAD 子 `NSView`（Metal），`native-below`；真实宿主已实现，预期可运行；**当前证据**仅 CI 编译；窗口/Metal/层序/DPI/对话框/像素一律 **NOT VERIFIED** |
-| Android `app-android` | 真实 Tauri WebView + 原生 `CadSession` + Vulkan `SurfaceView`，`native-below`，wasm 会话**不实例化**。SAF 打开 + DXF 导出保存已接线（DWG 保存显式延后），维护者已侧载 APK 并运行成功（2026-11-08，非 CI 验收）；About/更新页 URL opener（`cad_open_release_page` → `ACTION_VIEW`）已接线，设备运行 NOT VERIFIED；设备/真实 GPU/像素的正式验收仍 **NOT VERIFIED** |
-| Web `app-web` | wasm `CadSession` + DOM canvas（`dom-canvas`）。OPEN 走页面上传，SAVE/PLOT 走浏览器下载（DXF/SVG/PDF；**不回写 DWG**）；CI `web-smoke` 是 SwiftShader 冒烟，非 GPU/像素；native host target 是显式 NOT IMPLEMENTED 空壳 |
+| Windows `app-windows`（`yacr-windows`） | 真实 Tauri/WebView2 + Win32 child HWND，`native-below`；`.ymodel` 保存/打开已接线（COM `IFileSaveDialog` + 临时文件→`ReplaceFileW` 原子替换 + `.bak` + `%APPDATA%\yacr\recovery` 恢复快照）；**当前证据**为编译门禁（含 `--target x86_64-pc-windows-msvc` 类型检查）+ Wine 拒绝合同（缺 WebView2 → 退出码 5）；真实 Windows 运行/对话框/NTFS `.bak` **NOT VERIFIED**（PENDING user real-Windows spike） |
+| macOS `app-macos`（`yacr-macos`） | 真实 Tauri/WKWebView + CAD 子 `NSView`（Metal），`native-below`；`.ymodel` 保存/打开已接线（`NSSavePanel` + 临时文件→`rename` 原子替换 + `.bak` + `~/Library/Application Support/yacr/recovery`）；**当前证据**为编译/类型检查（mac target，AppKit 调用经桩编译器校验）；真实 macOS 运行/面板点击/APFS `.bak`/层序/DPI/像素一律 **NOT VERIFIED** |
+| Android `app-android` | 真实 Tauri WebView + 原生 `CadSession` + Vulkan `SurfaceView`，`native-below`，wasm 会话**不实例化**。SAF 打开 + **`.ymodel` 保存/打开已接线**（SAF 写非原子；`.bak` 仅在 provider 支持时创建，否则 `save.no_backup`），其它格式走 `EXPORT`；恢复快照装在 `filesDir/recovery`。维护者已侧载 APK 并运行成功（2026-11-08，非 CI 验收）；上述新链路只有编译/契约证据，设备运行 NOT VERIFIED；设备/真实 GPU/像素的正式验收仍 **NOT VERIFIED** |
+| Web `app-web` | wasm `CadSession` + DOM canvas（`dom-canvas`）。OPEN 走页面上传；**`SAVE` 无归档适配器，按 `unsupported-runtime: ymodel` 拒绝**，写文件走 `EXPORT`/`PLOT` 的浏览器下载（SVG/PDF 及按扩展名的交换格式；**不回写 DWG**）；CI `web-smoke` 是 SwiftShader 冒烟，非 GPU/像素；native host target 是显式 NOT IMPLEMENTED 空壳 |
 | CLI `cad-cli-tools` | 保留，headless 开图/出图（PNG/SVG/PDF） |
 
-`ymodel` 原生读写的载体状态：**只有 Linux 已接线**（`apps/app-linux/src/ymodel_archive.rs`
-→ `CadSession::set_document_archive`）；Windows/macOS/Android/Web **NOT IMPLEMENTED**，打开/另存
-`.ymodel` 会以 `unsupported-runtime: ymodel` 显式拒绝，不得改成静默导出别的格式。
+`ymodel` 原生读写的载体状态：**Linux、Android、Windows、macOS 已接线**（Linux：`apps/app-linux/src/ymodel_archive.rs`
+→ `CadSession::set_document_archive`；Android：`apps/app-android/src-tauri/src/ymodel_archive.rs` + SAF 写入 +
+`filesDir/recovery` 恢复快照）；Windows：`apps/app-windows/src/ymodel_archive.rs` + COM 保存对话框 + `%APPDATA%` 恢复；macOS：
+`apps/app-macos/src/ymodel_archive.rs` + `NSSavePanel` + Application Support 恢复；**Web 仍 NOT IMPLEMENTED**，
+打开/另存 `.ymodel` 以 `unsupported-runtime: ymodel` 显式拒绝，不得改成静默导出别的格式。Android 的 SAF 写入**不是原子替换**：
+上一版副本只在 provider 支持创建同名 `.bak` 文档时才有，否则成功覆盖后以 `save.no_backup` 明示。
 
 外部资源打包（ADR-0040，`document.json.embed_resources` → `resources/{font,xref,image}/<key>`）
-同样**只在 Linux 生效**，`FORMAT_MINOR` 上限升到 **5**（写入按文档取 4 或 5）。字体目录设置与
+随 `.ymodel` 保存生效（Linux 完整；Android 的采集受限于文件系统解析——SAF 来源的图片/参照按"未找到"
+记录，不假装已打包），`FORMAT_MINOR` 上限升到 **5**（写入按文档取 4 或 5）。字体目录设置与
 目录选择器只在 `native-below` 可用：`dom-canvas`（Web **与 X11/XWayland**）读不到本地目录，
 行渲染为不可用、写设置按 `unsupported-runtime: fontsDir` 拒绝——**不得**按 `--fonts-dir` 静默生效。
 真实跨机自包含、字体度量一致性、portal 目录选择器交互均 **NOT VERIFIED**。

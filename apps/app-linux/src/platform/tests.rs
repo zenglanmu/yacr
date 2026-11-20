@@ -95,12 +95,12 @@ fn save_labels_come_from_the_i18n_catalogue() {
     let zh = UseSaveDialogLabels::from_locale("zh-CN").unwrap();
     let en = UseSaveDialogLabels::from_locale("en").unwrap();
     assert_eq!(UseSaveDialogLabels::from_locale("fr").unwrap(), en);
-    // Both purposes have their own localized title and filter, and no key fell
-    // back to an empty string.
+    // Every purpose has its own localized title and filter, and no key fell back
+    // to an empty string.
     for labels in [&zh, &en] {
         for purpose in [
-            SavePurpose::SaveDxf,
-            SavePurpose::SaveDwg,
+            SavePurpose::SaveYmodel,
+            SavePurpose::SaveExport,
             SavePurpose::Plot,
         ] {
             assert!(!labels.title(purpose).is_empty());
@@ -109,26 +109,26 @@ fn save_labels_come_from_the_i18n_catalogue() {
             assert!(!labels.picker_local.is_empty());
         }
         assert_ne!(
-            labels.title(SavePurpose::SaveDxf),
+            labels.title(SavePurpose::SaveExport),
             labels.title(SavePurpose::Plot)
         );
         assert_ne!(
-            labels.filter(SavePurpose::SaveDxf),
+            labels.filter(SavePurpose::SaveExport),
             labels.filter(SavePurpose::Plot)
         );
-        // DWG is its own (experimental) dialog: never the DXF title/filter.
+        // The native archive is its own dialog: never the export title/filter.
         assert_ne!(
-            labels.title(SavePurpose::SaveDwg),
-            labels.title(SavePurpose::SaveDxf)
+            labels.title(SavePurpose::SaveYmodel),
+            labels.title(SavePurpose::SaveExport)
         );
         assert_ne!(
-            labels.filter(SavePurpose::SaveDwg),
-            labels.filter(SavePurpose::SaveDxf)
+            labels.filter(SavePurpose::SaveYmodel),
+            labels.filter(SavePurpose::SaveExport)
         );
     }
-    assert_ne!(zh.title_dxf, en.title_dxf);
-    assert_eq!(en.title_dxf, "Export drawing");
-    assert_eq!(en.title_dwg, "Save as DWG (experimental)");
+    assert_ne!(zh.title_export, en.title_export);
+    assert_eq!(en.title_export, "Export to another format");
+    assert_eq!(en.title_ymodel, "Save as ymodel");
     assert!(zh.picker_failed("boom").contains("boom"));
 }
 
@@ -285,34 +285,19 @@ fn terminal_slot_capacity_is_bounded_to_one() {
 }
 
 #[test]
-fn source_guard_uses_filesystem_identity() {
-    let source = temp_path("source.dwg");
-    let other = temp_path("other.dwg");
-    std::fs::write(&source, b"a").unwrap();
-    std::fs::write(&other, b"b").unwrap();
-    let files = files_with(cancelled_open());
-    assert!(!files.refuses_source_overwrite(&FileTarget::from_path(&source.to_string_lossy())));
-    files.set_source(Some(&FileTarget::from_path(&source.to_string_lossy())));
-    assert!(files.refuses_source_overwrite(&FileTarget::from_path(&source.to_string_lossy())));
-    assert!(!files.refuses_source_overwrite(&FileTarget::from_path(&other.to_string_lossy())));
-    files.set_source(None);
-    assert!(!files.refuses_source_overwrite(&FileTarget::from_path(&source.to_string_lossy())));
-    let _ = std::fs::remove_file(&source);
-    let _ = std::fs::remove_file(&other);
-}
-
-#[test]
 fn dxf_save_chooser_returns_the_chosen_target() {
     let path = temp_path("chosen.dxf");
     let _ = std::fs::remove_file(&path);
     let (chooser, seen) = recording_save_path(path.clone());
     let files = files_with_save(cancelled_open(), chooser);
 
-    files.begin_save(SavePurpose::SaveDxf, "draft.dxf").unwrap();
+    files
+        .begin_save(SavePurpose::SaveExport, "draft.dxf")
+        .unwrap();
     let events = wait_event(&files);
     match events.as_slice() {
         [FileEvent::SaveTarget { purpose, target }] => {
-            assert_eq!(*purpose, SavePurpose::SaveDxf);
+            assert_eq!(*purpose, SavePurpose::SaveExport);
             assert_eq!(target.opaque, path.to_string_lossy().into_owned());
             assert_eq!(target.display_name, path.to_string_lossy().into_owned());
         }
@@ -321,7 +306,7 @@ fn dxf_save_chooser_returns_the_chosen_target() {
     // The suggested name reached the dialog and the worker thread got its name.
     assert_eq!(
         *seen.lock().unwrap(),
-        Some((SavePurpose::SaveDxf, "draft.dxf".to_string()))
+        Some((SavePurpose::SaveExport, "draft.dxf".to_string()))
     );
 }
 
@@ -367,10 +352,12 @@ fn failed_save_reports_the_chooser_reason() {
         cancelled_open(),
         Arc::new(|_, _, _| FileChooserOutcome::Failed("portal down".into())),
     );
-    files.begin_save(SavePurpose::SaveDxf, "draft.dxf").unwrap();
+    files
+        .begin_save(SavePurpose::SaveExport, "draft.dxf")
+        .unwrap();
     match wait_event(&files).as_slice() {
         [FileEvent::Failed { purpose, reason }] => {
-            assert_eq!(*purpose, FilePurpose::Save(SavePurpose::SaveDxf));
+            assert_eq!(*purpose, FilePurpose::Save(SavePurpose::SaveExport));
             assert!(reason.contains("portal down"), "reason: {reason}");
         }
         other => panic!("expected Failed, got {other:?}"),
@@ -401,7 +388,9 @@ fn second_save_is_rejected_while_one_is_in_flight() {
     let (save_chooser, release) = blocking_save_chooser();
     let files = files_with_save(cancelled_open(), save_chooser);
 
-    files.begin_save(SavePurpose::SaveDxf, "draft.dxf").unwrap();
+    files
+        .begin_save(SavePurpose::SaveExport, "draft.dxf")
+        .unwrap();
     match files.begin_save(SavePurpose::Plot, "out.svg") {
         Err(CadError::InvalidInput(_)) => {}
         other => panic!("expected InvalidInput, got {other:?}"),
@@ -410,7 +399,7 @@ fn second_save_is_rejected_while_one_is_in_flight() {
     release.send(()).unwrap();
     match wait_event(&files).as_slice() {
         [FileEvent::Cancelled { purpose }] => {
-            assert_eq!(*purpose, FilePurpose::Save(SavePurpose::SaveDxf));
+            assert_eq!(*purpose, FilePurpose::Save(SavePurpose::SaveExport));
         }
         other => panic!("expected the pending save's Cancelled, got {other:?}"),
     }
@@ -536,29 +525,39 @@ fn write_atomic_into_a_missing_directory_is_an_explicit_error() {
     assert!(!path.exists(), "a failed write must not create the target");
 }
 
-/// The source-overwrite guard is a separate query the host enforces before the
-/// write; [`PlatformFiles::write_atomic`] itself never refuses a target.
+/// ADR-0041 D4: an **export** over an existing file is allowed and the previous
+/// bytes are kept in `<name>.<ext>.bak`.
+///
+/// This is a platform-level contract: `cad_host`'s synthetic save platforms
+/// record `write_atomic` calls in memory and cannot model the on-disk backup, so
+/// the smallest harness that can express it is the real Linux `atomic_replace`
+/// behind [`PlatformFiles::write_atomic`]. The extension is `.dxf` (an export
+/// target, not `.ymodel`) to pin that the guarantee covers every write — the
+/// opened source may be the file the user overwrites.
 #[test]
-fn write_atomic_does_not_enforce_the_source_guard_itself() {
-    let dir = temp_path("source-guard-write-dir");
+fn export_over_an_existing_file_keeps_the_previous_bytes_in_a_bak() {
+    let dir = temp_path("export-bak-dir");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    let source = dir.join("source.dwg");
-    std::fs::write(&source, b"original").unwrap();
+    let source = dir.join("plan.dxf");
+    let backup = dir.join("plan.dxf.bak");
+    std::fs::write(&source, b"previous-dxf-bytes").unwrap();
     let files = files_with(cancelled_open());
     files.set_source(Some(&FileTarget::from_path(&source.to_string_lossy())));
 
-    assert!(files.refuses_source_overwrite(&FileTarget::from_path(&source.to_string_lossy())));
     files
         .write_atomic(
             &FileTarget::from_path(&source.to_string_lossy()),
-            b"replaced",
+            b"exported-dxf-bytes",
         )
-        .unwrap();
-    assert_eq!(std::fs::read(&source).unwrap(), b"replaced");
+        .expect("overwriting the opened source is an explicit, allowed export");
 
-    // The guard itself is unchanged by the write.
-    assert!(files.refuses_source_overwrite(&FileTarget::from_path(&source.to_string_lossy())));
+    assert_eq!(std::fs::read(&source).unwrap(), b"exported-dxf-bytes");
+    assert_eq!(
+        std::fs::read(&backup).unwrap(),
+        b"previous-dxf-bytes",
+        "the previous bytes survive in <name>.<ext>.bak"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

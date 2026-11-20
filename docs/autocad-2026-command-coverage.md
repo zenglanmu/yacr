@@ -640,7 +640,7 @@
 | `EXOFFSET` | 完整实现 | `OFFSET` 独立思考拼写，同一规划器：`LINE`/`CIRCLE`/`ARC`/`LWPOLYLINE`（含弧段）/`ELLIPSE`→样条/`SPLINE`→样条，`Through`/`Distance`/`Multiple`/`Erase`/`Layer`/`OFFSETGAPTYPE` 全部继承，一条事务/一步撤销（逐类 + `Multiple` + 拒绝均有契约） |
 | `EXPLAN` | 部分实现 | 具名拒绝（`explan.unsupported: this build has no UCS model; the world +Z plan path is PLAN`）。 |
 | `EXPLODE` | 部分实现 | 一层分解；标注→线/弧/箭头/文字、多重引线→引线/样条/箭头/MTEXT、非均匀块可表示子集；`EXPMODE` 无会话通道 |
-| `EXPORT` | 部分实现 | PLOT 别名：仅矢量 SVG/PDF |
+| `EXPORT` | 部分实现 | 导出为其它格式，目标扩展名决定写出器（dxf/dwg/stl/obj/ply/off/coff/ifc/skp/glb/gltf）；DWG/SKP 写出为实验性，vendor **NOT VERIFIED** |
 | `EXPORTDWF` | 部分实现 | 具名拒绝（`exportdwf.unsupported: this build has no DWF/DWFx exporter`）。 |
 | `EXPORTDWFX` | 部分实现 | 具名拒绝（`exportdwfx.unsupported: this build has no DWF/DWFx exporter`）。 |
 | `EXPORTLAYOUT` | 部分实现 | 具名拒绝（`exportlayout.unsupported`）：请用 PLOT（单一布局，SVG/PDF）。 |
@@ -949,7 +949,7 @@
 | `QLEADER` | 部分实现 | 与 LEADER/MLEADER 共享引线选项计划：直线/样条引线、注释类型 text、箭头开；箭头关/最大点数按名拒绝；无设置对话框/块/公差注释 |
 | `QNEW` | 部分实现 | 具名拒绝（`qnew.single_document`）：本构建只有一个文档；请用 NEW。 |
 | `QQUIT` | 部分实现 | 具名拒绝（`qquit.unsupported`）：应用退出由宿主负责。 |
-| `QSAVE` | 部分实现 | SAVE 别名：有损 DXF 另存；源为 .dwg 时可实验性导出 DWG（新文件、默认 <stem>-export.dwg、绝不覆盖源；仅合成 self-roundtrip 证据，vendor/AutoCAD NOT VERIFIED） |
+| `QSAVE` | 部分实现 | SAVE 别名：保存为原生 `.ymodel`（无损、可再次打开）；导出其它格式用 `EXPORT` |
 | `QSELECT` | 部分实现 | `Equals`/`Not Equal`/`>`/`<`/`>=`/`<=`/通配符/`Select All`；整图（当前空间）或当前选择；`Include`/`Exclude`/`Append`；嵌套块不参与；只读；**分类/自定义对象特性未建模**，属性集为基础子集 |
 | `QTEXT` | 完整实现 | 会话令牌 `qtext` 真正到达派生批次：开启时每个文字图元替换为按其本应绘制几何 bbox 得到的闭合 `Lines` 矩形；无法推导范围的文字保留原绘制并报 `qtext.extent_unknown`（不编造宽度）；不写库/不入历史 |
 | `QUICKCUI` | 部分实现 | 具名拒绝（`quickcui.unsupported: no CUI (menu-customization) model`）。 |
@@ -1006,9 +1006,9 @@
 | `RTEXT` | 部分实现 | 具名拒绝（`rtext.unsupported`）：远程文字未实现（无 RTEXT 模型）。 |
 | `RTUCS` | 部分实现 | 具名拒绝（`rtucs.unsupported: no dynamic UCS model`）。 |
 | `RULESURF` | 部分实现 | 具名拒绝（`rulesurf.unsupported: no 3D surface (NURBS) model`）。 |
-| `SAVE` | 部分实现 | 有损 DXF 另存（逐条记录转换/丢弃）；源为 `.dwg` 时可**实验性导出 DWG**（上游 `acadrust::DwgWriter`，新文件、默认 `<stem>-export.dwg`、绝不覆盖源）；**块参照与裁剪已可写出**：导出写 `BLOCK_RECORD`/`BLOCK`/`INSERT`（含嵌套、动态块的活动可见性、非均匀缩放）与 `ACAD_FILTER`/`SPATIAL_FILTER` 裁剪链，`fixtures/dxf/qcad-examples/entities.dxf` 的两个命名块实例与定义经一次保存后保持 | 无法写成单条 `INSERT` 的参照（镜像/倾斜摆放、剪切、零或非有限缩放、非仿射、定义环、嵌套超限、xref、重名）仍展开并逐条声明；inverted 裁剪与裁剪深度面无法写出（格式/模型无对应字段）；DWG 导出仍有损，vendor/AutoCAD **NOT VERIFIED** |
+| `SAVE` | 部分实现 | **保存为原生 `.ymodel`**（无损、可再次打开，保留分片与导出报告）；导出其它格式用 `EXPORT`。DXF 导出（`EXPORT` 选 `.dxf`）仍逐条记录转换/丢弃，且**块参照与裁剪已可写出**：写 `BLOCK_RECORD`/`BLOCK`/`INSERT`（含嵌套、动态块的活动可见性、非均匀缩放）与 `ACAD_FILTER`/`SPATIAL_FILTER` 裁剪链 | 无法写成单条 `INSERT` 的参照（镜像/倾斜摆放、剪切、零或非有限缩放、非仿射、定义环、嵌套超限、xref、重名）在 DXF 导出中仍展开并逐条声明；inverted 裁剪与裁剪深度面无法写出；DWG 导出仍有损，vendor/AutoCAD **NOT VERIFIED** |
 | `SAVEALL` | 部分实现 | 具名拒绝（`saveall.single_document`）：本构建只有一个文档；请用 SAVE。 |
-| `SAVEAS` | 部分实现 | SAVE 别名：有损 DXF 另存；源为 .dwg 时可实验性导出 DWG（新文件、默认 <stem>-export.dwg、绝不覆盖源；仅合成 self-roundtrip 证据，vendor/AutoCAD NOT VERIFIED） |
+| `SAVEAS` | 部分实现 | SAVE 别名：保存为原生 `.ymodel`（无损、可再次打开）；导出其它格式用 `EXPORT` |
 | `SAVEIMG` | 部分实现 | 具名拒绝（`saveimg.unsupported: raster image export is host-owned; this command layer has no file handle (use PLOT PNG)`）。 |
 | `SAVETOWEBMOBILE` | 部分实现 | 具名拒绝（`savetowebmobile.unsupported: no Autodesk Account (web/mobile) file-exchange model`）。 |
 | `SCALE` | 已实现 | — |
@@ -1570,7 +1570,7 @@
 | 344 | `EXPLAN` | 部分实现 | Displays an orthographic view of the XY plane of a specified UCS without changing the view magnification. | 具名拒绝（`explan.unsupported: this build has no UCS model; the world +Z plan path is PLAN`）。 |
 | 345 | `EXPLODE` | 部分实现 | Breaks a compound object into its component objects. | 一层分解；标注→线/弧/箭头/文字、多重引线→引线/样条/箭头/MTEXT、非均匀块可表示子集；`EXPMODE` 无会话通道 |
 | 346 | `-EXPORT` | 部分实现 | Creates a DWF, DWFx, or PDF file from the command line. | 具名拒绝（`-export.unsupported`）：请用 PLOT/EXPORT；本构建只有一条矢量导出路径；命令行拼写。 |
-| 347 | `EXPORT` | 部分实现 | Saves the objects in a drawing to a different file format. | PLOT 别名：仅矢量 SVG/PDF |
+| 347 | `EXPORT` | 部分实现 | Saves the objects in a drawing to a different file format. | 导出为其它格式，目标扩展名决定写出器；DWG/SKP 写出为实验性，vendor **NOT VERIFIED** |
 | 348 | `EXPORTDWF` | 部分实现 | Creates a DWF file and allows you to set individual page setup overrides on a sheet-by-sheet basis. | 具名拒绝（`exportdwf.unsupported: this build has no DWF/DWFx exporter`）。 |
 | 349 | `EXPORTDWFX` | 部分实现 | Creates a DWFx file where you can set individual page setup overrides on a sheet-by-sheet basis. | 具名拒绝（`exportdwfx.unsupported: this build has no DWF/DWFx exporter`）。 |
 | 350 | `EXPORTLAYOUT` | 部分实现 | Creates a visual representation of the current layout in the model space of a new drawing. | 具名拒绝（`exportlayout.unsupported`）：请用 PLOT（单一布局，SVG/PDF）。 |
@@ -1920,7 +1920,7 @@
 | 694 | `QLEADER` | 部分实现 | Creates a leader and leader annotation. | 与 LEADER/MLEADER 共享引线选项计划：直线/样条引线、注释类型 text、箭头开；箭头关/最大点数按名拒绝；无设置对话框/块/公差注释 |
 | 695 | `QNEW` | 部分实现 | Starts a new drawing from a specified drawing template file. | 具名拒绝（`qnew.single_document`）：本构建只有一个文档；请用 NEW。 |
 | 696 | `QQUIT` | 部分实现 | Closes all open drawings and exit. | 具名拒绝（`qquit.unsupported`）：应用退出由宿主负责。 |
-| 697 | `QSAVE` | 部分实现 | Saves the current drawing using the specified default file format. | SAVE 别名：有损 DXF 另存；源为 .dwg 时可实验性导出 DWG（新文件、默认 <stem>-export.dwg、绝不覆盖源；仅合成 self-roundtrip 证据，vendor/AutoCAD NOT VERIFIED） |
+| 697 | `QSAVE` | 部分实现 | Saves the current drawing using the specified default file format. | SAVE 别名：保存为原生 `.ymodel`（无损、可再次打开）；导出其它格式用 `EXPORT` |
 | 698 | `QSELECT` | 部分实现 | Creates a selection set based on filtering criteria. | `Equals`/`Not Equal`/`>`/`<`/`>=`/`<=`/通配符/`Select All`；整图（当前空间）或当前选择；`Include`/`Exclude`/`Append`；嵌套块不参与；只读；**分类/自定义对象特性未建模**，属性集为基础子集 |
 | 699 | `QTEXT` | 完整实现 | Controls the display and plotting of text and attribute objects. | `QTEXT ON` 把字形片段替换为 bbox 闭合矩形（`apply_qtext`）；无 extent 时报 `qtext.extent_unknown` 并保留原绘制；显示与出图同一上下文 |
 | 700 | `QUICKCALC` | 已实现 | Opens the QuickCalc calculator. | chrome 非模态可拖动浮窗计算器：四则 + 括号/小数/正负号/清除/退格/M+/MR/MC/复制/键盘输入/Esc；科学模式含三角/反三角/对数/开方/幂/平方/倒数/π/e 与 DEG/RAD；无伪工程键，域错误不编造数值 |
@@ -1986,9 +1986,9 @@
 | 760 | `RTEXT` | 部分实现 | Creates remote text (rtext) objects. | 具名拒绝（`rtext.unsupported`）：远程文字未实现（无 RTEXT 模型）。 |
 | 761 | `RTUCS` | 部分实现 | Rotates the UCS dynamically with your pointing device. | 具名拒绝（`rtucs.unsupported: no dynamic UCS model`）。 |
 | 762 | `RULESURF` | 部分实现 | Creates a mesh that represents the surface between two lines or curves. | 具名拒绝（`rulesurf.unsupported: no 3D surface (NURBS) model`）。 |
-| 763 | `SAVE` | 部分实现 | Saves the current drawing under a different file name or location without changing which drawing file is the current one. | 有损 DXF 另存；无 DWG 回写 |
+| 763 | `SAVE` | 部分实现 | Saves the current drawing under a different file name or location without changing which drawing file is the current one. | 保存为原生 `.ymodel`；不回写源格式 |
 | 764 | `SAVEALL` | 部分实现 | Save all open drawings. | 具名拒绝（`saveall.single_document`）：本构建只有一个文档；请用 SAVE。 |
-| 765 | `SAVEAS` | 部分实现 | Saves a copy of the current drawing under a new file name or location. | SAVE 别名：有损 DXF 另存；源为 .dwg 时可实验性导出 DWG（新文件、默认 <stem>-export.dwg、绝不覆盖源；仅合成 self-roundtrip 证据，vendor/AutoCAD NOT VERIFIED） |
+| 765 | `SAVEAS` | 部分实现 | Saves a copy of the current drawing under a new file name or location. | SAVE 别名：保存为原生 `.ymodel`（无损、可再次打开）；导出其它格式用 `EXPORT` |
 | 766 | `SAVEIMG` | 部分实现 | Saves a rendered image to a file. | 具名拒绝（`saveimg.unsupported: raster image export is host-owned; this command layer has no file handle (use PLOT PNG)`）。 |
 | 767 | `SAVETOWEBMOBILE` | 部分实现 | Saves a copy of the current drawing to your Autodesk Account. | 具名拒绝（`savetowebmobile.unsupported: no Autodesk Account (web/mobile) file-exchange model`）。 |
 | 768 | `SCALE` | 已实现 | Enlarges or reduces selected objects, keeping the proportions of the object the same after scaling. | — |
@@ -2379,7 +2379,7 @@
 | `PROJECTION` | 实现 | 透视/正交切换 |
 | `OPEN` | 实现 | 打开 DWG/DXF（宿主提供能力时） |
 | `NEW` | 实现 | 新建空图纸；宿主缺能力时显式 `command.unsupported` |
-| `SAVE` | 部分 | **有损 DXF 另存**（逐条记录转换/丢弃）；源为 `.dwg` 时可**实验性导出 DWG**（上游 `acadrust::DwgWriter`，新文件、默认 `<stem>-export.dwg`、绝不覆盖源）；DWG 导出有损/不完整，仅合成 self-roundtrip 证据，vendor/AutoCAD **NOT VERIFIED** |
+| `SAVE` | 部分 | **保存为原生 `.ymodel`**（无损、可再次打开）；导出其它格式用 `EXPORT`（扩展名决定写出器，DWG/SKP 为实验性，vendor **NOT VERIFIED**） |
 | `PLOT` | 部分 | `PLOT` 是**矢量 SVG/PDF 导出**；无 CTB/STB 打印样式、无批量、无多布局发布；实体能力表里另记的「光栅 PNG（host readback）」是**既有出图通道**，不在本命令的默认路径里 |
 
 | `AUDIT` | 部分 | **只检测（2026-11-07）**：逐实体调用 `cad_db::validate_entity`，输出 `audit.clean` 或 `audit.summary` + 每个 `audit.invalid_entity`；只读，无事务/历史/revision。**未实现**：AutoCAD 的「corrects some errors」修复半部；不修复、不删除、不改写任何实体 |
@@ -2426,7 +2426,7 @@
 | DWG group 对象持久化 | **M** | `GROUP` 系列是会话内组表，不写 DWG group、不过撤销栈、不跨文档保留 |
 | 命名视图持久化 | **M** | `VIEW` 会话内上限 32，不持久化 DWG |
 | 系统剪贴板 | **L** | 现为应用内剪贴板；不跨应用、替换文档即清空 |
-| DWG 精确往返 | **L** | `SAVE` 的实验性 DWG 导出有损/不完整（上游 `DwgWriter`），仅合成 self-roundtrip 证据 |
+| DWG 精确往返 | **L** | `EXPORT` 选 `.dwg` 的实验性导出有损/不完整（上游 `DwgWriter`），仅合成 self-roundtrip 证据 |
 | `VIEWRES`/`VSCURRENT` 渲染器接线 | **S** | 目前只写会话 token；tessellation/visual-style 效果 NOT IMPLEMENTED / NOT pixel-verified |
 | `SKETCH` 定时采样、`MSTRETCH` 多边形窗口、`MOCORO` 交互 gizmo | **S** | 当前只有 payload/窗口并集/单次变换路径 |
 

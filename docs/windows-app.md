@@ -41,7 +41,9 @@ Wine 只承担 smoke/诊断级；**任何 Wine 像素/截图结论必须写
 | `src/host/init.rs` | 透明顶层窗口 + 子 WebView2 + CAD child HWND + renderer crash hook |
 | `src/win32_surface.rs` | 手写 Win32 child 窗口（`YACR_CAD_CHILD`）、z-order、几何、生命周期；`WS_DISABLED` 纯显示 |
 | `src/host/tick.rs` | 每 tick 布局/出帧/`ensure_order()` 幂等重排 |
-| `src/platform.rs` | 平台 I/O 缝：`ReactFiles`/`ReactSurface`/`ReactConfigStore`、`rfd` 文件选择器、known-folders |
+| `src/platform.rs` | 平台 I/O 缝：`ReactFiles`/`ReactSurface`/`ReactConfigStore`、COM `IFileOpenDialog`/`IFileSaveDialog` 选择器（`platform/native.rs`）、原子保存写入（temp → `sync_all` → `.bak` → replace）|
+| `src/ymodel_archive.rs` | `.ymodel` 容器适配器（`cad_platform::DocumentArchive` over `ZipDocumentStore`），原生会话注入 |
+| `src/recovery_store.rs` | 恢复快照（`%APPDATA%\yacr\recovery`，普通 `.ymodel` + `.json` 记录）|
 | `src/host/popup.rs` | 渲染进程失败（`ProcessFailed`）→ 复位 modal gate + `HostErrorKind::Renderer` 诊断 |
 | `src/redraw.rs` | Win32 `InvalidateRect` redraw pump（与 GTK `queue_draw` 对应） |
 
@@ -67,6 +69,36 @@ Windows 宿主始终是 `native-below`，因此按契约提供插件管理器（
 `NEW` 走共享 `HostCore::request_new` → `HostController::new_blank_document` 安装空白
 `untitled` 文档；不需要 picker/文件系统，**没有新增平台 I/O**（不涉及 `src/platform.rs`）。
 文档加载中发起 `NEW` 仍被显式拒绝（不自造空成功）。**真实 Windows 运行/视觉仍 NOT VERIFIED**。
+
+### 文件打开 / 保存 / 恢复（2026-11-21，ADR-0041 对齐 Linux）
+
+打开与保存都走 **同一 COM 单飞通道**（`ReactFiles`，容量 1 的终态槽；同一时刻只允许一个文件
+交互）：取消是 `Cancelled`，失败是带本地化原因的 `Failed`，**不存在**伪造路径或空成功。
+
+- **OPEN**：`IFileOpenDialog`，过滤器列出 importer 可读的全部扩展名（含 `.ymodel`）。`.ymodel`
+  由 `cad-host` 在 connector probe **之前**按目标名识别，交给本载体的
+  `src/ymodel_archive.rs` 解码；不会把归档字节喂给 DWG/DXF importer，也不会静默拒绝
+  （未装 archive 时才是显式 `unsupported-runtime: ymodel`）。
+- **SAVE**（`HostCapabilities::save = true`）：`IFileSaveDialog`，`*.ymodel` 单过滤器，
+  `SetFileName` 预填当前文档名。`EXPORT` 同一对话框提供 DXF/DWG/STL/OBJ/PLY/OFF/COFF/IFC/SKP/
+  GLB/GLTF 单过滤器（**目标扩展名决定 writer**，未默认扩展名）；`PLOT` 为 `*.svg;*.pdf`。
+  覆盖已存在文件是允许的（记得 `FOS_OVERWRITEPROMPT`）；SAVE 不再强制改名，也不把结果改写成
+  别的格式。
+- **原子写入**（`PlatformFiles::write_atomic`）：目标目录建临时文件 → 写入 → `sync_all` →
+  旧文件 `.bak`（`std::fs::hard_link`，FAT/exFAT/SMB 等无硬链接时退化为 copy）→
+  **`ReplaceFileW`**，失败再退 **`MoveFileExW(MOVEFILE_REPLACE_EXISTING)`** → 目录 fsync 尽力而为。
+  任一步失败都删除临时文件并报错，**旧目标字节保持原样**；`.bak` 创建失败只告警，不让保存失败。
+  `read_target` 用同一路径重读，支持原地 SAVE 的冲突检查。
+- **恢复快照**（ADR-0037 D12）：`%APPDATA%\yacr\recovery\<key>.ymodel` + `<key>.json`，
+  与配置同目录；`APPDATA` 不可解析时不安装 `Persistence`、**不发明路径**。快照是普通 `.ymodel`，
+  恢复就是普通 OPEN（`recovery_hint` 返回绝对路径，不是 `file://` URI）。
+
+**证据边界**：本轮只在 Linux 开发主机跑通 `cargo test -p app-windows`（注入 chooser 的 (a)–(e)
+契约、适配器 (f) 往返、`.ymodel` 打开路由 (g)、`.bak`/失败写入在真实临时目录上的行为）；
+Win32 分支（`ReplaceFileW`/`MoveFileExW`/`IFileSaveDialog`）本机**未做 Windows 目标类型检查**
+（开发主机未安装 `x86_64-pc-windows-msvc` std，`cargo xwin` 因此无法编译该 target）；真 Windows
+运行、真实保存对话框、NTFS 上的 `.bak`/`ReplaceFileW` 行为、ACL/流保留一律
+**NOT VERIFIED (PENDING user real-Windows spike)**。macOS/Android/Web 不在本条。
 
 ## 2. 合成契约（DOM on top）
 

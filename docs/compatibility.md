@@ -147,7 +147,7 @@ face-with-hole 1/8、instance-scaled 3/36；theater-2017 1246 实体/96,333 三�
 | STEP | 实现（AP203/214/242） | **拒绝** `export.step.not_implemented` | — | descriptor `export: None` | cadmpeg 有写出器（AP242），本轮未接线 |
 | DGN | V7/V8 | **拒绝** `export.dgn.not_implemented` | — | 同上 | 上游只有 seed-based V8 写出器 |
 | RVT | 预览实现 | **拒绝** `export.rvt.not_implemented` | — | 同上 | 只有预览读入 |
-| `.ymodel` | Linux | Linux | archive | 原生 | 其它载体 `unsupported-runtime: ymodel` |
+| `.ymodel` | Linux、Android、Windows、macOS | Linux、Android、Windows、macOS | archive | 原生 | Linux/macOS/Windows 临时文件→原子替换 + `.bak`；Android SAF 写**非原子**、`.bak` 仅在 provider 支持时创建（否则 `save.no_backup`）；**Web** `unsupported-runtime: ymodel` |
 
 共同边界：
 - **模型空间**：写出只覆盖 `SpaceId::Model`；块定义成员/图纸空间实体逐条记
@@ -257,6 +257,26 @@ Windows/macOS/Android/Web 运行、像素/golden/性能结论一律 **NOT RUN / 
 **证据边界**：库层与宿主契约测试见 `docs/validation-resources-2026-11-20.md`；真实 DWG 跨机自包含、
 字体度量一致性、外部参照重新导入保真 **未运行**；目录选择器的真实 portal 交互 **NOT VERIFIED**；
 Windows/macOS/Android 仅编译。
+
+### 保存与导出分离、非公开格式来源提示（2026-11-20，ADR-0041）
+
+`SAVE` 与"导出其它格式"不再混为一个动作：
+
+| 层 | 实现 | 边界 |
+|---|---|---|
+| `SAVE` / `SAVEAS` / `QSAVE` | **只写原生 `.ymodel`**，默认名 `<stem>.ymodel`，选择器只给 `*.ymodel` | 无归档适配器的载体在**打开选择器之前**就以 `unsupported-runtime: ymodel` 失败（不弹框、不写盘、不静默退回 DXF） |
+| `EXPORT` | 真命令（不再是 `PLOT` 别名）；选择器含 dxf/dwg/stl/obj/ply/off/coff/ifc/skp/glb/gltf，**目标扩展名决定写出器** | `PLOT`/`PRINT` 仍是矢量 SVG/PDF，行为不变；`export.step|dgn|rvt.not_implemented` 仍按名拒绝 |
+| 覆盖源文件 | **允许**（不再预填 `<stem>-export.dwg`、不再弹 DWG 确认框、不再有 `save.refused_source_path` 拦截） | 安全性由原子写的 `.bak` 兜底（Linux `atomic_replace` 对所有 `write_atomic` 写出生效，已有契约测试断言旧字节在 `.bak` 里）；没有原子替换能力的载体必须显式说"没有备份"，不得假装有 |
+| 打开提示 | `cad_status.openedSource`（仅 `spec = reverse_engineered` 时出现），非模态可关闭横幅 | 四个逆向连接器：DWG、DGN、SKP、RVT（`SpecVisibility` + `ExportCapability.experimental` 为唯一来源）；DXF/STEP/IFC/glTF/网格格式为公开规范，不提示；`.ymodel` 与 New/Close 清除该字段 |
+
+横幅文案按格式分开（`open.notice.detail.{dwg,dgn,skp,rvt}`），并如实说明回存能力：DWG/SKP 写出为实验性，
+DGN/RVT 无写出器。**不阻止打开**，也不在保存时重复弹窗。
+
+**证据边界**：命令/状态/横幅均为代码路径 + 契约测试；"导出可能无法被原软件打开、会丢信息" 是依据本仓库
+既有 vendor `NOT VERIFIED` 结论的保守表述，**不是**逐格式的实测兼容性结论。真实 AutoCAD / MicroStation /
+SketchUp / Revit 打开我们导出的文件一律 **NOT RUN**。
+
+**明确不做**：导出预设、批量导出、`EXPORTOFFICE`、真 `WBLOCK`、L0 源字节直通、导出后保持源文件其余部分不变。
 
 ### 测量命令与 §3.3 的逐条对应（2026-10-26 对账补齐）
 
@@ -559,8 +579,9 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 > 「不实现 DWG 回写、原始实体移动/删除/修改」，完整编辑亦被排除在初期之外。因此 MOVE/COPY/ERASE/
 > TRIM/EXTEND/ROTATE/SCALE/MIRROR/OFFSET/CLIPBOARD/MATCHPROP、各类创建命令、夹点拖拽
 > **全部是项目自选范围**：行为选择标为**我们的选择**，不得表述为「符合规范」。与 DIMENSION 创建行
-> （「创建无 spec 授权」）同一口径。这些命令**只改内存文档**：`SAVE` 是有损 DXF 另存（**块定义与 `INSERT` 以及 XCLIP 的 `ACAD_FILTER`/`SPATIAL_FILTER` 链现已写出**；无法表达为单条 INSERT 的摆放仍展开并逐条声明），源为
-> `.dwg` 时写**实验性新 DWG 文件**（默认 `<stem>-export.dwg`）；**没有任何 DWG 原地回写**。
+> （「创建无 spec 授权」）同一口径。这些命令**只改内存文档**：`SAVE` 写原生 `.ymodel`；
+> 导出 DXF 走 `EXPORT`（**块定义与 `INSERT` 以及 XCLIP 的 `ACAD_FILTER`/`SPATIAL_FILTER` 链现已写出**；
+> 无法表达为单条 INSERT 的摆放仍展开并逐条声明），导出 DWG 是实验性的显式动作（ADR-0041）。
 
 | 命令 | 能力 | 诚实边界 |
 |---|---|---|
@@ -674,12 +695,14 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
   AutoCAD 的**交互式**流程（先选源、再逐个选目标并显示“特性刷”光标）**未实现**——它需要新的
   draw-tool 类型与绘制光标，本项只实现选择式变体。命令无 payload（`CommandPayload::None`），
   选择在应用时从会话读取。
-- **导出**：`SAVE` 默认是**有损 DXF 另存**（`Partial`，逐条记录转换/丢弃，**非** DWG 往返保存）；**块定义 + `INSERT`（含嵌套、动态块活动可见性、非均匀缩放）与 XCLIP 裁剪链已可写出**，损失面收窄为「无法表达为单条 INSERT 的摆放（镜像/倾斜/剪切/零或非有限缩放/非仿射/定义环/嵌套超限/xref/重名）」与「inverted 裁剪、裁剪深度面」；
-  若打开源是 `.dwg`（或用户选择 `.dwg` 目标），则写入**实验性 DWG 导出**（上游
-  `acadrust::DwgWriter`）：有损、不完整、**不是**原地回写，默认建议新文件名 `<stem>-export.dwg`，
-  且**绝不覆盖被打开的源文件**（平台 device+inode/SAF URI 守卫 + 宿主归一化路径/名回退守卫）；
-  **写入前的选择器提示**（`save.picker_waiting_dwg`，2026-11-11）就说明“实验性、写新文件、不覆盖源图纸”，
-  不把这条边界留到写完之后才说；成功状态再次明确标注 experimental 与“源图纸未修改”。**证据只有合成的 acadrust self-roundtrip
+- **保存与导出分离（ADR-0041）**：`SAVE` 只写原生 `.ymodel`（无损、可再次打开）；导出其它格式是显式
+  `EXPORT`，目标扩展名决定写出器。`EXPORT` 选 `.dxf` 时是**有损 DXF 导出**（`Partial`，逐条记录转换/丢弃，
+  **非** DWG 往返保存）；**块定义 + `INSERT`（含嵌套、动态块活动可见性、非均匀缩放）与 XCLIP 裁剪链已可写出**，
+  损失面收窄为「无法表达为单条 INSERT 的摆放（镜像/倾斜/剪切/零或非有限缩放/非仿射/定义环/嵌套超限/xref/重名）」
+  与「inverted 裁剪、裁剪深度面」。`EXPORT` 选 `.dwg` 时写入**实验性 DWG 导出**（上游 `acadrust::DwgWriter`）：
+  有损、不完整；与旧设计不同，**覆盖目标（包括被打开的源文件）是允许的**，安全性由原子写的 `.bak` 兜底
+  （旧行为的 `<stem>-export.dwg` 预填名、`save.dwg_confirm` 确认框与 `refused_source_path` 拦截已删除）。
+  成功状态仍标注 experimental 与 `Partial`。**证据只有合成的 acadrust self-roundtrip
   （writer→reader），AutoCAD/vendor 兼容性 NOT VERIFIED**。`PLOT` 为矢量 SVG/PDF。真实图纸上的
   导出兼容性**未验证**。逐类：LWPOLYLINE（平面的）/ELLIPSE/POINT 为精确映射；**SPLINE 记为
   `Converted`**（`DxfSpline`，几何保留，**closed/periodic 标志不携带**）；Shape/Image/Mask/Opaque
@@ -1087,7 +1110,9 @@ manifest.open_revision` 且源字节仍在才同格式直通）、**L1** 已建�
 | 文件级往返 | 已实现 | `cad-store-zip/tests/document_fixed_point.rs` 7 项（含 layout 与 block 序列相同的碰撞回归）；`apps/app-linux/tests/ymodel_round_trip.rs` 走真实适配器 |
 | 原生打开/保存（Linux） | 已接线 | `cad-host` 的 `ymodel` 契约 11 项（全 crate 398 测试内）：安装文档、缺适配器拒绝、损坏归档不破坏当前文档、保存推进 `saved_revision`、外部修改拒绝、保存目的按源格式选择、第二次保存只携带增量范围、Save As 保留源归档与范围。保存前把上一版留在 `<name>.bak`（硬链接，失败回退复制；首存不建；配置写入不建），失败只告警不阻断——重命名本身仍是原子的 |
 | 自动恢复快照 | 已接线（仅 Linux 载体） | 脏文档**默认每 60 s**（选项里可改，0 = 关闭）把**同一份** `.ymodel` 写到 `<config>/recovery/<key>.ymodel`（+ 同名 `.json` 记录），从不触碰文档本身；成功保存后丢弃；安装文档时 `record.revision <= saved_revision` 判为过期并丢弃；只有严格更新才通过 `cad_status.error` 的一次性横幅告知（`recovery.available`，指向可用 `OPEN` 打开的恢复文件）。13 项 host 契约 + 8 项 Linux 存储 + 2 项 wire + 2 项命令接缝 + 7 项前端测试；单快照上限 512 MiB。**欢迎页**：无 `--open` 启动时进入无文档状态（`StartDocument::Empty`），恢复快照与最近文件一起列在开始页，点击按**key**打开（UI 不接触路径）。**边界**：`File > Revert` 仍未做；Web/Android 无恢复快照；真实崩溃恢复、横幅在真实窗口中的呈现 **NOT RUN** |
-| Windows / macOS / Android / Web | **NOT IMPLEMENTED** | 无归档适配器，显式 `unsupported-runtime: ymodel`（禁止静默改导出别的格式） |
+| Windows / macOS | **已接线（运行时 NOT VERIFIED）** | `apps/app-{windows,macos}/src/ymodel_archive.rs` + 原生保存对话框（COM `IFileSaveDialog` / `NSSavePanel`）+ 临时文件→原子替换 + `.bak` + 载体恢复目录；Win32/AppKit 分支只做过类型检查（`x86_64-pc-windows-msvc` / `aarch64-apple-darwin`） |
+| Web | **NOT IMPLEMENTED** | 无归档适配器，显式 `unsupported-runtime: ymodel`（禁止静默改导出别的格式）；写文件走 `EXPORT` 的浏览器下载 |
+| Android | **已接线（设备 NOT VERIFIED）** | `apps/app-android/src-tauri/src/ymodel_archive.rs` + SAF 读/写 + `filesDir/recovery`；写入先落缓存再灌入 URI（**非原子**），`.bak` 尽力而为，缺失时 `save.no_backup`；恢复回读走 `file://` + `ContentResolver`，设备路径未跑 |
 | L0 源字节直通 | **未实现** | `raw/source-*.bin` 尚未写入；需要连接器保留源字节 |
 | L1 不动点（DWG/DXF → ymodel → 原格式） | **未验证** | 需要真实 DWG 语料与连接器往返测试；`$INSUNITS=5` 的 100× 问题已修（见下） |
 | 真实窗口内保存/重开 | **NOT RUN** | 只有库层与 carrier 契约证据；无 agent 侧 GUI 操作 |

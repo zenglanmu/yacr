@@ -1,7 +1,10 @@
 //! The frozen frontend `cad_status` snapshot and its honest projections.
 //!
 //! Every key is always present, an unknown value is `null`, and a count is
-//! never fabricated. This module carries no host state: it only projects
+//! never fabricated. The one deliberate exception is [`CadStatus::opened_source`]
+//! (ADR-0041 D5): it is an **additive** key that is omitted entirely for any
+//! document without a reverse-engineered source, so every other document's wire
+//! stays byte-identical. This module carries no host state: it only projects
 //! already-derived values.
 
 use serde::Serialize;
@@ -286,18 +289,76 @@ pub struct CadPopup {
     pub modal: bool,
 }
 
+/// Which specification a connector's format was implemented from (ADR-0041
+/// D5), as the wire names it.
+///
+/// Mirrors `cad_import_core::SpecVisibility` (which deliberately carries no
+/// serde) so the `openedSource.spec` value is `"public"` /
+/// `"reverse_engineered"` and nothing else.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CadSpecVisibility {
+    /// Published, freely implementable specification.
+    Public,
+    /// Not published; the reader is an independent reconstruction.
+    ReverseEngineered,
+}
+
+/// Provenance of the connector that opened the current document (ADR-0041 D5).
+///
+/// Wire shape: `{ connector, spec, canWrite, experimental }`. It exists **only**
+/// when the opened document's source connector has a
+/// [`CadSpecVisibility::ReverseEngineered`] spec: a public-spec format produces
+/// no object at all, so the key is absent (see
+/// [`CadStatus::opened_source`]) and nothing about a DXF/STEP/IFC/glTF/mesh
+/// document changes on the wire. Every value is the registry descriptor's own —
+/// never an extension sniff or a UI guess.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenedSource {
+    /// Stable registry connector id (`"dwg"`, `"dgn"`, `"skp"`, `"rvt"`).
+    pub connector: String,
+    /// The format's spec visibility; always
+    /// [`CadSpecVisibility::ReverseEngineered`] on the wire today.
+    pub spec: CadSpecVisibility,
+    /// Whether the connector declares an export direction
+    /// (`descriptor.export.is_some()`).
+    pub can_write: bool,
+    /// Whether that writer is unverified/experimental; `false` without a writer.
+    pub experimental: bool,
+}
+
+impl OpenedSource {
+    /// Project the application's connector provenance onto the wire shape.
+    pub(super) fn from_app(source: cad_app::OpenedSource) -> Self {
+        Self {
+            connector: source.connector.to_string(),
+            spec: if source.spec_is_public() {
+                CadSpecVisibility::Public
+            } else {
+                CadSpecVisibility::ReverseEngineered
+            },
+            can_write: source.can_write,
+            experimental: source.experimental,
+        }
+    }
+}
+
 pub use super::status_view::{CadNavigation, CadViewOrientation};
 
 /// The `cad_status` snapshot consumed by the frontend.
 ///
 /// The field set is the frozen frontend contract: every key is always present,
-/// an unknown value is `null`, and a count is never fabricated. `error` is a
-/// technical, locale-neutral string from the real host state (a command/
-/// completion failure, a resource diagnostic or a render diagnostic); it is
-/// never a localized UI label. `import_progress` carries the real, live open
-/// progress while one is running (see [`CadImportProgress`]), `selection`
-/// the real current selection (see [`CadSelection`]) and `popup` the host's open
-/// modal popup (see [`CadPopup`]).
+/// an unknown value is `null`, and a count is never fabricated. The **one**
+/// exception is the additive [`Self::opened_source`] key (ADR-0041 D5), which is
+/// serialized only for a reverse-engineered source so every other document's
+/// wire is unchanged. `error` is a technical, locale-neutral string from the
+/// real host state (a command/completion failure, a resource diagnostic or a
+/// render diagnostic); it is never a localized UI label. `import_progress`
+/// carries the real, live open progress while one is running (see
+/// [`CadImportProgress`]), `selection` the real current selection (see
+/// [`CadSelection`]) and `popup` the host's open modal popup (see
+/// [`CadPopup`]).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CadStatus {
@@ -306,6 +367,18 @@ pub struct CadStatus {
     pub loading: bool,
     /// Live import progress, or `null` when no import is running.
     pub import_progress: Option<CadImportProgress>,
+    /// Provenance of the connector that opened the current document (ADR-0041
+    /// D5), or **absent**.
+    ///
+    /// Present only when the document's source connector has a
+    /// reverse-engineered spec (`dwg`, `dgn`, `skp`, `rvt`); `canWrite` reports
+    /// whether it also declares an export direction (see [`OpenedSource`]).
+    /// Absent for every other document: no document, a native `.ymodel`, a
+    /// public-spec connector (DXF/STEP/IFC/glTF/STL/OBJ/PLY/OFF), and after
+    /// New/Close. The `skip_serializing_if` keeps the wire byte-identical for
+    /// those documents, so this is a purely additive key.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub opened_source: Option<OpenedSource>,
     pub error: Option<String>,
     /// Whether the host can start a **blank** document right now: the host
     /// advertises the NEW capability and no open/import is in flight
@@ -512,6 +585,8 @@ pub fn unsupported_status(error: Option<String>) -> CadStatus {
         entity_count: None,
         loading: false,
         import_progress: None,
+        // No session means no opened connector: absent, never a fabricated object.
+        opened_source: None,
         error,
         // No session means no document/command capability at all.
         can_new: false,
@@ -663,6 +738,9 @@ pub(super) fn assemble_status(
         entity_count,
         loading,
         import_progress: None,
+        // The session owns the document: `CadSession::snapshot` projects the
+        // opened source's provenance onto this field (never inferred here).
+        opened_source: None,
         error,
         can_new: capabilities.can_new,
         can_open,

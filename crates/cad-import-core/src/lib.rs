@@ -12,7 +12,7 @@
 mod connector;
 pub use connector::{
     Connector, ConnectorDescriptor, ExportCapability, FidelityLevel, ImportCapability,
-    ReportDirection,
+    ReportDirection, SpecVisibility,
 };
 
 mod detect;

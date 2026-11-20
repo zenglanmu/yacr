@@ -38,7 +38,7 @@ use cad_domain::{CadError, CadResult, UnitContext};
 use cad_import_core::{
     compute_identity, ConnectorDescriptor, ImportCapability, ImportLimits, ImportPhase,
     ImportProgress, ImportProgressSink, ImportReport, ImportRequest, ImportedDrawing, Importer,
-    NoopProgress,
+    NoopProgress, SpecVisibility,
 };
 
 /// Stable refusal code: the DGN reader produced no drawable entity.
@@ -230,10 +230,14 @@ fn read_error(error: cadkit_core::Error) -> CadError {
 /// Owned by this crate: read-only in this build, so `export` is `None` and an
 /// export attempt is the registry's named `export.dgn.not_implemented`
 /// refusal.
+///
+/// `spec` is [`SpecVisibility::ReverseEngineered`]: `cadkit-dgn` is a clean-room
+/// reader with no Bentley document behind it (`THIRD_PARTY_NOTICES.md`:11-12).
 pub const DESCRIPTOR_DGN: ConnectorDescriptor = ConnectorDescriptor {
     id: "dgn",
     name_key: "connector.dgn.name",
     extensions: &["dgn"],
+    spec: SpecVisibility::ReverseEngineered,
     import: Some(ImportCapability {
         versions: "V7 (ISFF) / V8 (OLE-CFB)",
         container: "dgn",

@@ -415,6 +415,7 @@ impl Application {
             | CommandId::NewDrawing
             | CommandId::CloseDrawing
             | CommandId::PlotDrawing
+            | CommandId::Export
             | CommandId::CancelLoading => Err(CadError::Unsupported(
                 "file open, new drawing, close drawing, plot export, save-as and cancel are \
                  performed by the platform host, not the application"

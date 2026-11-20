@@ -79,6 +79,15 @@ cad-platform.workspace = true
 # targets are covered by this same `not(wasm32)` table.
 cad-ui-core.workspace = true
 log.workspace = true
+# The native document format (ADR-0037/ADR-0041). `cad-store-zip` may only be
+# linked by an `apps/app-*` carrier (`scripts/check-architecture.py`), so this
+# carrier links it here and hands the shared layers only the
+# `cad_platform::DocumentArchive` / `Persistence` traits. Both are in the
+# target-independent table so the adapter and the recovery store are exercised by
+# `cargo test -p app-android` on the development host (no device needed).
+cad-db.workspace = true
+cad-store-zip.workspace = true
+serde_json.workspace = true
 
 # `tauri-build` generates the Tauri context (and the `TAURI_ANDROID_PACKAGE_NAME_*`
 # env vars `#[tauri::mobile_entry_point]` expands with) for an Android target. It

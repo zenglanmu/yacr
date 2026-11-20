@@ -646,10 +646,21 @@ class MainActivity : TauriActivity() {
   /**
    * Synchronous truncating write of `bytes` to `uri`. Throws `IOException` on any
    * failure (the JNI caller reports it); it never reports an empty success.
+   * The bytes are staged in an app-cache file first (see [DocumentPicker]).
    */
   fun documentWriteUri(uri: String, bytes: ByteArray) {
     documentPicker.documentWriteUri(uri, bytes)
   }
+
+  /** Synchronous read of `uri`; `null` means the document does not exist. */
+  fun documentReadUriSync(uri: String): ByteArray? = documentPicker.documentReadUriSync(uri)
+
+  /**
+   * Best-effort sibling `<name>.bak` document holding `bytes`; `false` when the
+   * provider cannot create one. Never an atomic replace (SAF has none).
+   */
+  fun documentWriteSiblingBackup(uri: String, bytes: ByteArray): Boolean =
+    documentPicker.documentWriteSiblingBackup(uri, bytes)
 
   /**
    * `[Int state, String? uri, String? name, String? error, ByteArray? bytes]`.

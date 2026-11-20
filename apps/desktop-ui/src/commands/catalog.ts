@@ -13,6 +13,7 @@ export interface CommandCatalogEntry {
 }
 
 import { EXTENDED_COMMAND_CATALOG } from './catalog-extended.ts';
+import { FILE_COMMAND_CATALOG } from './catalog-file.ts';
 import { INTERFACE_COMMAND_CATALOG } from './catalog-interface.ts';
 import { REFUSAL_COMMAND_CATALOG } from './catalog-refusals.ts';
 import { TABLE_COMMAND_CATALOG } from './catalog-tables.ts';
@@ -27,21 +28,10 @@ import { TABLE_COMMAND_CATALOG } from './catalog-tables.ts';
  * still be typed and admitted when the router knows it.
  */
 export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
-  { id: 'OPEN', labelKey: 'file.open', icon: 'open', group: 'file' },
+  // The file group lives in `catalog-file.ts` (size gate): OPEN, NEW, SAVE,
+  // EXPORT, PLOT, CLOSE in listing order.
+  ...FILE_COMMAND_CATALOG,
   { id: 'FIT', labelKey: 'toolbar.fit', icon: 'fit', group: 'view' },
-  { id: 'NEW', labelKey: 'qat.new', icon: 'new', group: 'file' },
-  { id: 'SAVE', labelKey: 'qat.save', icon: 'save', group: 'file' },
-  // PLOT is the same router selector as the `EXPORT`/`PRINT` aliases (the host
-  // writes SVG/PDF through the platform save picker and refuses `.png` for the
-  // GUI). It sits after SAVE because it is a file-level output action, and it is
-  // gated by `canPlot` like the aliases, not by anything local.
-  { id: 'PLOT', labelKey: 'file.plot', icon: 'save', group: 'file' },
-  // CLOSE ends the open drawing and returns the chrome to the start page. It is
-  // listed directly after the other file-level actions because it is one, and it
-  // is document-scoped (`gating.ts`): with no drawing open there is nothing to
-  // close, so the start page disables it with the catalog's own "no drawing is
-  // open" sentence.
-  { id: 'CLOSE', labelKey: 'doctabs.close', icon: 'close', group: 'file' },
   { id: 'UNDO', labelKey: 'toolbar.undo', icon: 'undo', group: 'modify' },
   { id: 'REDO', labelKey: 'toolbar.redo', icon: 'redo', group: 'modify' },
   { id: 'LINE', labelKey: 'draw.kind.line', icon: 'line', group: 'draw' },

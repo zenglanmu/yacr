@@ -19,7 +19,7 @@
 //!
 //! | contract | browser behaviour |
 //! |---|---|
-//! | [`PlatformFiles`] | **save/plot are real downloads** ([`crate::download`]): `begin_save` synthesizes a `download://<name>` target, `write_atomic` publishes the finished bytes through the carrier's [`DownloadSink`](crate::download::DownloadSink) — a DOM download on wasm32, a recording sink on the host target; **open** still refuses with [`UNSUPPORTED_FILESYSTEM`] because the page's file picker owns selection and the bytes arrive through the session's `open_bytes` entry; `refuses_source_overwrite` is `false` (no inode identity) |
+//! | [`PlatformFiles`] | **save/plot are real downloads** ([`crate::download`]): `begin_save` synthesizes a `download://<name>` target, `write_atomic` publishes the finished bytes through the carrier's [`DownloadSink`](crate::download::DownloadSink) — a DOM download on wasm32, a recording sink on the host target; **open** still refuses with [`UNSUPPORTED_FILESYSTEM`] because the page's file picker owns selection and the bytes arrive through the session's `open_bytes` entry; `set_source` is bookkeeping only and never gates a write |
 //! | [`ConfigStore`] | in-memory only: readable for the rest of this session, **never** durable — a reload starts from `Absent` ([`MemoryConfigStore::PERSISTENT`] is `false`) |
 //! | [`SurfaceSource`] | the metrics the host feeds it (CSS logical size + scale), `None` before the first report |
 //! | [`HostResources`] | the committed font package is installed from memory when the page staged it ([`crate::fonts`]); a drawing that requests nothing is a real no-op success, a drawing that requests faces before any package was staged is refused with [`UNSUPPORTED_RESOURCES`] (never a silent empty success) |

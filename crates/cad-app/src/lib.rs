@@ -149,10 +149,10 @@ pub use app_chamfer_edge::{chamfer_edge_target, ChamferEdgeTarget};
 pub use app_drawing::solids::SOLID_MODELER_UNSUPPORTED;
 pub use command_id::{AppMode, CommandId, ExtendedCommandId, RefusalId};
 pub use connector::{
-    ConnectorRegistry, ExportConnector, ExportSettings, ImportConnector, DESCRIPTOR_DGN,
-    DESCRIPTOR_DWG, DESCRIPTOR_DXF, DESCRIPTOR_GLTF, DESCRIPTOR_IFC, DESCRIPTOR_OBJ,
-    DESCRIPTOR_OFF, DESCRIPTOR_PLY, DESCRIPTOR_RVT, DESCRIPTOR_SKP, DESCRIPTOR_STEP,
-    DESCRIPTOR_STL,
+    ConnectorRegistry, ExportConnector, ExportSettings, ImportConnector, OpenedSource,
+    DESCRIPTOR_DGN, DESCRIPTOR_DWG, DESCRIPTOR_DXF, DESCRIPTOR_GLTF, DESCRIPTOR_IFC,
+    DESCRIPTOR_OBJ, DESCRIPTOR_OFF, DESCRIPTOR_PLY, DESCRIPTOR_RVT, DESCRIPTOR_SKP,
+    DESCRIPTOR_STEP, DESCRIPTOR_STL,
 };
 pub use draw_tool::{
     circle_radius, AlignPairSet, DrawIntent, DrawPreview, DrawTool, DrawToolKind, PointArity,

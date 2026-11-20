@@ -94,7 +94,7 @@ fn download_target(name: &str) -> FileTarget {
 fn begin_save_synthesizes_a_download_target_for_the_purpose() {
     let files = browser_files();
     files
-        .begin_save(SavePurpose::SaveDxf, "drawing.dxf")
+        .begin_save(SavePurpose::SaveExport, "drawing.dxf")
         .expect("the browser synthesizes the save target");
     files
         .begin_save(SavePurpose::Plot, "drawing.svg")
@@ -104,7 +104,7 @@ fn begin_save_synthesizes_a_download_target_for_the_purpose() {
     assert_eq!(events.len(), 2, "exactly one event per begin_save");
     match &events[0] {
         FileEvent::SaveTarget { purpose, target } => {
-            assert_eq!(*purpose, SavePurpose::SaveDxf);
+            assert_eq!(*purpose, SavePurpose::SaveExport);
             assert_eq!(target.display_name, "drawing.dxf");
             assert_eq!(target.opaque, "download://drawing.dxf");
         }
@@ -124,7 +124,7 @@ fn begin_save_synthesizes_a_download_target_for_the_purpose() {
 fn begin_save_refuses_a_blank_name_instead_of_inventing_one() {
     let files = browser_files();
     let error = files
-        .begin_save(SavePurpose::SaveDxf, "   ")
+        .begin_save(SavePurpose::SaveExport, "   ")
         .expect_err("a blank download name is refused");
     assert!(
         matches!(error, CadError::InvalidInput(ref reason) if reason.contains("default_name")),
@@ -161,7 +161,7 @@ fn write_atomic_publishes_the_exact_bytes_and_records_the_download() {
 #[test]
 fn poll_drains_each_event_exactly_once() {
     let files = browser_files();
-    files.begin_save(SavePurpose::SaveDxf, "a.dxf").unwrap();
+    files.begin_save(SavePurpose::SaveExport, "a.dxf").unwrap();
     files.begin_save(SavePurpose::Plot, "b.svg").unwrap();
     assert_eq!(files.poll().len(), 2);
     assert!(
@@ -202,15 +202,16 @@ fn open_operations_still_refuse_with_the_filesystem_prefix() {
 }
 
 #[test]
-fn the_source_overwrite_guard_answers_false_and_still_remembers_the_source() {
-    // There is no device+inode identity in a browser, so the guard cannot be
-    // armed; answering `true` would refuse every save instead.
+fn set_source_round_trips_but_never_gates_a_write() {
+    // ADR-0041 D4: overwriting is allowed on every carrier, so the browser keeps
+    // the opened label for diagnostics only and refuses nothing on its account.
     let files = browser_files();
     let target = download_target("drawing.dwg");
-    assert!(!files.refuses_source_overwrite(&target));
     files.set_source(Some(&target));
     assert_eq!(files.source(), Some(target.clone()));
-    assert!(!files.refuses_source_overwrite(&target));
+    files
+        .write_atomic(&target, b"replaced")
+        .expect("a write over the opened name is allowed");
     files.set_source(None);
     assert_eq!(files.source(), None);
 }
@@ -300,11 +301,11 @@ fn a_real_new_command_installs_a_blank_untitled_document() {
 }
 
 #[test]
-fn a_real_save_command_publishes_one_experimental_dwg_download() {
-    // The whole browser save path, end to end on the host: SAVE on a `.dwg`
-    // source is admitted by the real session, the export funnel runs inside the
-    // command (the synchronous-target rule), and the finished experimental DWG
-    // copy reaches the download sink under a NEW name (never the source name).
+fn a_real_export_command_publishes_one_dxf_download() {
+    // The browser has no `.ymodel` archive, so SAVE refuses (ADR-0041 D1); the
+    // whole browser write path is EXPORT, end to end on the host: the export
+    // funnel runs inside the command (the synchronous-target rule) and the
+    // finished DXF reaches the download sink.
     let platform = BrowserPlatform::new();
     platform.surface().report([800.0, 600.0], 1.0);
     let session = CadSession::from_bytes(
@@ -321,22 +322,22 @@ fn a_real_save_command_publishes_one_experimental_dwg_download() {
     session
         .set_canvas_metrics([800.0, 600.0], 1.0)
         .expect("the reported surface accepts the canvas metrics");
-    session.command("SAVE").expect("SAVE is admitted");
+    session.command("EXPORT").expect("EXPORT is admitted");
     let downloads = platform.downloads();
     assert_eq!(
         downloads.len(),
         1,
-        "exactly one save publishes one download"
+        "exactly one export publishes one download"
     );
     assert_eq!(
-        downloads[0].name, "synthetic-four-lines-export.dwg",
-        "a DWG source is saved as a new experimental DWG file, not the source"
+        downloads[0].name, "synthetic-four-lines.dxf",
+        "the export target is the document stem with the DXF extension"
     );
     let published = platform.files().sink().published();
     assert_eq!(published.len(), 1);
     assert!(
-        published[0].1.starts_with(b"AC10"),
-        "the download is DWG binary (experimental upstream writer), not DXF text"
+        published[0].1.windows(7).any(|window| window == b"SECTION"),
+        "the download is an ASCII DXF document"
     );
 }
 
@@ -835,5 +836,39 @@ fn an_unparseable_document_fails_the_bytes_entry_explicitly() {
     assert!(
         refused.is_err(),
         "an unparseable file must not report success"
+    );
+}
+
+#[test]
+fn save_refuses_without_a_ymodel_archive_and_export_is_the_write_path() {
+    // ADR-0041 D1/D2 + the carrier rule: the browser has no `.ymodel` archive, so
+    // SAVE must refuse with the stable marker (never a silent DXF fallback), and
+    // the explicit EXPORT command is the only write path left.
+    let (platform, session) = open(BROWSER_CAPABILITIES);
+    platform.surface().report([800.0, 600.0], 1.0);
+    session
+        .set_canvas_metrics([800.0, 600.0], 1.0)
+        .expect("the reported surface accepts the canvas metrics");
+
+    let error = session
+        .command("SAVE")
+        .expect_err("SAVE is the native archive save; the browser has none");
+    assert!(
+        error.contains(cad_ui_core::session::UNSUPPORTED_YMODEL),
+        "the refusal carries the stable marker: {error}"
+    );
+    assert!(
+        platform.downloads().is_empty(),
+        "a refused SAVE must publish no download"
+    );
+
+    session
+        .command("EXPORT")
+        .expect("EXPORT is the browser's explicit write path");
+    let downloads = platform.downloads();
+    assert_eq!(downloads.len(), 1, "EXPORT publishes the download");
+    assert_eq!(
+        downloads[0].name, "synthetic-four-lines.dxf",
+        "the default export target is a DXF name"
     );
 }

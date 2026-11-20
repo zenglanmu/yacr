@@ -281,6 +281,19 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
         });
     }
 
+    // ---- recovery store: install as soon as `filesDir` is announced ----
+    //
+    // `nativeAssetsReady` is posted from the Android UI thread and may land after
+    // this session was built. Its `HostOptions` are fixed once built, but the
+    // persistence slot is a carrier-owned setter, so a late announcement still
+    // installs the store exactly once. No announcement = no durable private
+    // location: nothing is installed and the host writes no snapshot.
+    CAD.with(|cell| {
+        if let Some(session) = cell.borrow().as_ref() {
+            install_recovery_store(session);
+        }
+    });
+
     // ---- refresh the announced assets while no session exists yet ----
     //
     // `nativeAssetsReady` is posted from the Android UI thread and may land after
@@ -333,6 +346,21 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
         });
         match created {
             Some(Ok(session)) => {
+                // The native document format (ADR-0037/ADR-0041). `cad-store-zip`
+                // may only be linked by a carrier app
+                // (`scripts/check-architecture.py`), so the shared layers see it
+                // exclusively through `cad_platform::DocumentArchive`. Without this
+                // line every `.ymodel` open/save refuses with
+                // `unsupported-runtime: ymodel`, and since `SAVE` writes only
+                // `.ymodel` the carrier could not save anything at all.
+                session.set_document_archive(Some(crate::ymodel_archive::ZipArchive::new()
+                    as std::sync::Arc<dyn cad_platform::DocumentArchive>));
+                // The recovery snapshot (ADR-0037 D12): the same archive encoder,
+                // written to `filesDir/recovery` while the document is dirty. The
+                // directory is derived from the `nativeAssetsReady` handshake, which
+                // may land after this first tick; `install_recovery_store` below
+                // installs it as soon as the announcement is known.
+                install_recovery_store(&session);
                 // The Options dialog's GPU budget is a renderer policy: install
                 // the configured percentage before the first device attach (the
                 // engine re-applies it on every re-attach).
@@ -430,6 +458,13 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
             + selected_texts.len()
             + selected_properties.len()
             + inputs.len();
+        // A new admitted command is a new user action: the previous save's
+        // "no previous copy" notice (if any) is superseded. A SAVE in this same
+        // batch clears it here and re-latches it in `session.tick` below, so the
+        // notice always describes the newest completed save.
+        if !commands.is_empty() {
+            crate::platform::clear_save_without_backup_notice();
+        }
         // The `.native-input` partition origin (CSS px) of the accepted layout rect.
         // Positions from the chrome are relative to that rect while the canvas is
         // the whole window, so the drain below moves them by this origin. No rect
@@ -437,9 +472,10 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
         // origin is then the honest identity.
         let partition_origin = dom_rect.map(|rect| (rect.x, rect.y)).unwrap_or((0.0, 0.0));
         // The save dialog's self-containment choice (ADR-0040 D3), before this
-        // batch's commands so a SAVE admitted in the same tick sees it. This
-        // carrier has no `.ymodel` archive, so its command refuses before
-        // queueing; the drain keeps a future carrier honest too.
+        // batch's commands so a SAVE admitted in the same tick sees it. The choice
+        // is only admitted when the `.ymodel` seam is installed (`ymodel_host`,
+        // registered in `crate::host_files`), so it can never store a flag this
+        // carrier cannot persist.
         CAD.with(|cell| {
             cad_desktop_shell::state::drain_embed_resources(shared, cell.borrow().as_ref());
         });
@@ -625,11 +661,23 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
     let (backend, adapter) = crate::surface::adapter_info()
         .map(|(backend, adapter)| (Some(backend), Some(adapter)))
         .unwrap_or((None, None));
-    let snapshot = CAD.with(|cell| {
+    let mut snapshot = CAD.with(|cell| {
         cell.borrow()
             .as_ref()
             .map(|session| session.snapshot(backend, adapter, 0))
     });
+    // The one free-text notice channel the chrome renders: `cad_status.error`
+    // (the same channel `cad_ui_core::session::diagnostics` uses for
+    // `recovery.available`). A completed overwrite on SAF could not keep a
+    // previous copy (no atomic replace, and the provider refused the sibling
+    // `.bak`), so the carrier publishes the `save.no_backup` key it was told to
+    // publish. It never replaces a real session error, and the latch is retired by
+    // the next admitted command / delivered document.
+    if let Some(snapshot) = snapshot.as_mut() {
+        if snapshot.error.is_none() && crate::platform::save_without_backup_notice() {
+            snapshot.error = Some(crate::platform::SAVE_NO_BACKUP_STATUS.to_string());
+        }
+    }
     // Owner-thread mirrors for the IPC reads: settings + runtime aliases.
     let settings = CAD.with(|c| c.borrow().as_ref().map(|session| session.owner_mirror()));
     let layers = CAD.with(|cell| cell.borrow().as_ref().map(|session| session.layers()));
@@ -677,6 +725,27 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
         &HostProfile::native_below(),
         None::<String>,
     );
+}
+
+/// Install the recovery-snapshot store once `filesDir` is known.
+///
+/// The `nativeAssetsReady` handshake may land after the session's first tick, so
+/// this is called on every pass until it succeeds once. A refusal is impossible
+/// here: the store only records a future directory, and the first snapshot creates
+/// it. No announcement means no durable private location, so nothing is installed
+/// and the host writes no snapshot (it never invents a path, ADR-0037 D12).
+fn install_recovery_store(session: &CadSession) {
+    static INSTALLED: AtomicBool = AtomicBool::new(false);
+    if INSTALLED.load(Ordering::SeqCst) {
+        return;
+    }
+    let Some(dir) = crate::platform::recovery_dir() else {
+        return;
+    };
+    session.set_persistence(Some(crate::recovery_store::FsRecoveryStore::new(dir)
+        as std::sync::Arc<dyn cad_platform::Persistence>));
+    INSTALLED.store(true, Ordering::SeqCst);
+    log::info!("[probe] recovery snapshots: filesDir/recovery installed");
 }
 
 /// Push one status batch with this carrier's profile (no canvas descriptor).

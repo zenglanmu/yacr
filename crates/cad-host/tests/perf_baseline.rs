@@ -71,9 +71,6 @@ impl PlatformFiles for NoFiles {
     fn write_atomic(&self, _target: &FileTarget, _bytes: &[u8]) -> cad_domain::CadResult<()> {
         Ok(())
     }
-    fn refuses_source_overwrite(&self, _target: &FileTarget) -> bool {
-        false
-    }
     fn set_source(&self, _target: Option<&FileTarget>) {}
     fn poll(&self) -> Vec<FileEvent> {
         Vec::new()

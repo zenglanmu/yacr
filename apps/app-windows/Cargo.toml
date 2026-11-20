@@ -34,14 +34,7 @@ raw-window-handle.workspace = true
 cad-desktop-shell.workspace = true
 cad-app.workspace = true
 cad-engine.workspace = true
-cad-host.workspace = true
-cad-platform.workspace = true
 cad-resources.workspace = true
-cad-db.workspace = true
-cad-domain.workspace = true
-# Durable preference read (`wgpu_backend`) through the same JSON store the
-# shared UI writes; no new dependency version (workspace pin).
-serde_json.workspace = true
 
 # Hand-rolled Win32 child window (class, z-order, sizing) + WebView2 runtime
 # detection (registry queries). Version-matched to the `windows`/`webview2-com`
@@ -70,11 +63,27 @@ windows = { version = "0.62", features = [
 ] }
 webview2-com = "0.39"
 
-# `support` (the WebView2 "missing runtime" contract and the transparent-background
-# constants) is target-independent, so its i18n lookup and unit tests run on every
-# host. It only pulls the UI-framework-free `cad-ui-core`.
+# Target-independent carrier contracts. `support` (the WebView2 "missing
+# runtime" contract and the transparent-background constants), the file/platform
+# seam in `platform.rs` (`ReactFiles`/`ReactSurface`/`ReactConfigStore`, including
+# the atomic save write), the `.ymodel` archive adapter and the recovery store
+# are plain std-fs/trait code, so their contract tests run on any host. Only the
+# native COM choosers are Windows-gated (`platform/native.rs`).
+#
+# `cad-store-zip` is the carrier-owned container: `scripts/check-architecture.py`
+# forbids it in every shared `cad-*` layer, so it may only be linked here, through
+# `cad_platform::DocumentArchive`.
 [dependencies]
 cad-ui-core.workspace = true
+cad-platform.workspace = true
+cad-domain.workspace = true
+cad-db.workspace = true
+cad-host.workspace = true
+cad-store-zip.workspace = true
+# Durable preference read (`wgpu_backend`) through the same JSON store the
+# shared UI writes, and the recovery record's strict lexical layer; no new
+# dependency version (workspace pin).
+serde_json.workspace = true
 
 # `tauri-build` generates the Tauri context and embeds the Windows icon/version
 # resource for a Windows target. It is an ordinary build-dependency (compiled for

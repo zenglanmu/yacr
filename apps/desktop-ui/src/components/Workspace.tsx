@@ -27,6 +27,7 @@ import { PropertiesDock } from './PropertiesDock.tsx';
 import { PluginNoticeHost } from './PluginNoticeHost.tsx';
 import { HostNoticeHost } from './HostNoticeHost.tsx';
 import { UpdateNoticeHost } from './UpdateNoticeHost.tsx';
+import { FormatProvenanceNoticeHost } from './FormatProvenanceNoticeHost.tsx';
 import { FileInfoPalette } from './FileInfoPalette.tsx';
 import { DiagnosticsPalette } from './DiagnosticsPalette.tsx';
 import { ReferencesPanel } from './ReferencesPanel.tsx';
@@ -148,6 +149,7 @@ export function Workspace() {
       <PluginNoticeHost />
       <HostNoticeHost />
       <UpdateNoticeHost />
+      <FormatProvenanceNoticeHost />
     </div>
   );
 }

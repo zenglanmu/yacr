@@ -60,7 +60,7 @@ test('admission is the loaded host catalog: empty before load, capability gates 
   for (const name of Object.keys(CAPABILITY_GATES)) assert.equal(isSupportedCommand(name), true, name);
   assert.deepEqual(
     { ...CAPABILITY_GATES },
-    { NEW: 'canNew', SAVE: 'canSave', SAVEAS: 'canSave', QSAVE: 'canSave', PLOT: 'canPlot', EXPORT: 'canPlot', PRINT: 'canPlot' },
+    { NEW: 'canNew', SAVE: 'canSave', SAVEAS: 'canSave', QSAVE: 'canSave', PLOT: 'canPlot', EXPORT: 'canSave', PRINT: 'canPlot' },
   );
   // Unknown names are never admitted.
   assert.equal(isSupportedCommand('NOT_A_COMMAND'), false);

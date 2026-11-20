@@ -246,6 +246,7 @@ pub(crate) fn admissible_for_submit(request: &EngineRequest) -> bool {
             CommandId::OpenDrawing
                 | CommandId::PlotDrawing
                 | CommandId::SaveDrawingAs
+                | CommandId::Export
                 | CommandId::SwitchBackend
         ),
         EngineRequest::Interaction(_) => true,

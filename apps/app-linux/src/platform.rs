@@ -155,7 +155,6 @@ pub struct ReactFiles {
     /// publishes an explicit [`FileEvent::Failed`], never a fabricated target.
     save_chooser: Option<SaveChooser>,
     state: Arc<Mutex<FileState>>,
-    source: Arc<Mutex<Option<PathBuf>>>,
     /// The directory the next open chooser starts in, derived from the last
     /// successfully opened/reopened target (and the newest durable recent entry
     /// at startup). `None` means no hint.
@@ -201,7 +200,6 @@ impl ReactFiles {
             chooser,
             save_chooser,
             state: Arc::new(Mutex::new(FileState::new())),
-            source: Arc::new(Mutex::new(None)),
             recent_dir: Arc::new(Mutex::new(None)),
         })
     }
@@ -338,15 +336,10 @@ impl PlatformFiles for ReactFiles {
         atomic_replace(Path::new(&target.opaque), bytes, true)
     }
 
-    fn refuses_source_overwrite(&self, target: &FileTarget) -> bool {
-        match self.source.lock().unwrap().as_ref() {
-            Some(source) => same_file(source, Path::new(&target.opaque)),
-            None => false,
-        }
-    }
-
-    fn set_source(&self, target: Option<&FileTarget>) {
-        *self.source.lock().unwrap() = target.map(|target| PathBuf::from(&target.opaque));
+    fn set_source(&self, _target: Option<&FileTarget>) {
+        // The source identity is bookkeeping only: overwriting the opened source
+        // is a legal, explicit choice (ADR-0041 D4) and the previous bytes are
+        // protected by `atomic_replace`'s `.bak`.
     }
 
     fn set_recent_target(&self, target: Option<&FileTarget>) {
@@ -608,25 +601,6 @@ fn write_then_rename(tmp: &Path, path: &Path, bytes: &[u8]) -> CadResult<()> {
             path.display()
         ))
     })
-}
-
-/// Whether `target` is the opened source file (device + inode, else canonical path).
-fn same_file(source: &Path, target: &Path) -> bool {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        if let (Ok(source_meta), Ok(target_meta)) =
-            (std::fs::metadata(source), std::fs::metadata(target))
-        {
-            return source_meta.dev() == target_meta.dev()
-                && source_meta.ino() == target_meta.ino();
-        }
-    }
-    let canonical = |candidate: &Path| std::fs::canonicalize(candidate).ok();
-    match (canonical(source), canonical(target)) {
-        (Some(source), Some(target)) => source == target,
-        _ => source == target,
-    }
 }
 
 /// A localized reason for a failed drawing read.

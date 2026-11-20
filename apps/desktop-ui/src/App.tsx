@@ -13,7 +13,7 @@ import type { FrameLoop } from './cad/frame-loop.ts';
 import { canvasSessionFromShell, palettesOffered, SURFACE_MODE_DOM_CANVAS, surfaceModeFromShell } from './cad/surface.ts';
 import { useCanvasTransport } from './cad/use-canvas-transport.ts';
 import { queueCadCommand, type CadCommandResult } from './cad/cad-command.ts';
-import { useDwgSaveConfirm } from './components/use-dwg-save-confirm.tsx';
+import { useSaveGate } from './components/use-save-gate.tsx';
 import { useCadEvents } from './cad/use-cad-events.ts';
 import { pluginCommand, requestProperties, showPluginNotice } from './plugins/host.ts';
 import { pluginCommandFor, runPluginCommand } from './plugin-api/commands.ts';
@@ -505,8 +505,8 @@ function Shell() {
     reportError: setError,
   });
 
-  const { beforeDispatch: confirmDwgSave, dialog: dwgSaveDialog, isPending: dwgSavePending } = useDwgSaveConfirm();
-  const submitCommand = useCallback(async (text: string, options: SubmitOptions = {}, dwgSaveConfirmed = false) => {
+  const { beforeDispatch: beforeSave, dialog: saveGateDialog, isPending: saveGatePending } = useSaveGate();
+  const submitCommand = useCallback(async (text: string, options: SubmitOptions = {}) => {
     // Chrome-local selectors are answered before the in-flight guard; a router
     // line falls through unchanged (`commands/local-selectors.ts`).
     if (runLocalSelector(text, options.fromInput === true)) return;
@@ -535,11 +535,10 @@ function Shell() {
       if (vocabularyRef.current) {
         try { await vocabularyRef.current; } catch { /* reported by the loader */ }
       }
-      // The pre-save gates: the `.dwg` caution, then the optional embed question.
-      // `dwgSaveConfirmed` tells the hook the first gate was answered; the hook
-      // re-enters this funnel when the user answers, so nothing is sent before.
-      if (await confirmDwgSave(text, status, documentLabel, vocabularyRef, dwgSaveConfirmed,
-        () => { void submitCommand(text, options, true); })) return;
+      // The one pre-save gate: the optional embed question. SAVE itself always
+      // writes the native archive, and the hook re-enters this funnel when the
+      // user answers, so nothing is sent before that.
+      if (await beforeSave(text, status, () => { void submitCommand(text, options); })) return;
       const result = await queueCadCommand(invoke, text, status, false,
         command => pluginCommand(command, status?.selection ?? null),
       );
@@ -561,7 +560,7 @@ function Shell() {
       submitting.current = false;
       setPending(false);
     }
-  }, [runLocalSelector, status, commandHistory.appendCommand, documentLabel]);
+  }, [runLocalSelector, status, commandHistory.appendCommand, beforeSave]);
 
   // The terminal text step (ADR 0019 A.1): one `cad_set_tool_text`, never a
   // `cad_command`. The result is returned to the command line so the draft can
@@ -633,7 +632,7 @@ function Shell() {
       if (event.key === 'Escape'
         && (chromeSurfaces.quickView !== null || chromeSurfaces.workspaceSelector
           || chromeSurfaces.toolPalettes || chromeSurfaces.performanceAnalyzer)) return;
-      if (dwgSavePending()) return; // the DWG save confirmation owns Escape
+      if (saveGatePending()) return; // the embed question owns Escape while it is open
       // Ctrl+0 is both the app's clean-screen toggle and WebKit's zoom reset.
       // Handle it before the `defaultPrevented` check: the webview-default guard
       // also prevents the browser action, and listener order must not decide
@@ -992,7 +991,7 @@ function Shell() {
           />
         ) : null}
         {popupOpen ? <PopupOverlay popup={status?.popup} payload={popupPayload} /> : null}
-        {dwgSaveDialog}
+        {saveGateDialog}
       </ShellContext.Provider>
     </I18nContext.Provider>
   );

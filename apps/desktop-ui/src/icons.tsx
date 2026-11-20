@@ -26,6 +26,9 @@ const P = {
   new: <><path d="M6 3h7l5 5v13H6z" /><path d="M13 3v5h5M12 12v6M9 15h6" /></>,
   open: <><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M3 11h18" /></>,
   save: <><path d="M5 3h11l3 3v15H5z" /><path d="M8 3v6h7V3" /><path d="M8 21v-7h8v7" /></>,
+  // Export writes a copy in another format, so it is a tray with the drawing
+  // leaving it — deliberately not a second `save` glyph beside SAVE.
+  export: <><path d="M4 14v4.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V14" /><path d="M12 14V3.5" /><path d="M7.5 8 12 3.5 16.5 8" /></>,
   undo: <><path d="M4 12h11a5 5 0 0 1 0 10h-4" /><path d="M9 7l-5 5 5 5" /></>,
   redo: <><path d="M20 12H9a5 5 0 0 0 0 10h4" /><path d="M15 7l5 5-5 5" /></>,
   fit: <><path d="M4 9V5h4M20 9V5h-4M4 15v4h4M20 15v4h-4" /><rect x="8.5" y="8.5" width="7" height="7" /></>,

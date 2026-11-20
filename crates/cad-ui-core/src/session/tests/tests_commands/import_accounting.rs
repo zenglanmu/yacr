@@ -12,6 +12,20 @@ fn import_synthetic(files: &Rc<FakeFiles>, name: &str) {
     });
 }
 
+/// Queue one committed public-spec DXF `Opened` event.
+fn import_public_dxf(files: &Rc<FakeFiles>, name: &str) {
+    files.events.borrow_mut().push(FileEvent::Opened {
+        target: FileTarget::from_path(name),
+        bytes: Arc::from(SYNTHETIC_DXF.to_vec().into_boxed_slice()),
+    });
+}
+
+/// Open whatever event is queued and settle the host's owner tick.
+fn open_queued(session: &CadSession) {
+    session.command("OPEN").expect("OPEN is admitted");
+    session.tick().expect("tick");
+}
+
 /// The render session's observed incoming database pointer: the discriminator
 /// component that changed on **every** authoritative publish (an edit commit
 /// swaps the drawing `Arc` and the host re-syncs it each tick). Used by tests to
@@ -279,5 +293,110 @@ fn a_changed_render_incoming_alone_does_not_recount() {
         session.snapshot(None, None, 0).import_count,
         1,
         "a changed render incoming alone must not move the import count"
+    );
+}
+
+#[test]
+fn a_reverse_engineered_open_reports_the_connector_provenance() {
+    // ADR-0041 D5: the React layer learns the opened format's provenance from
+    // `cad_status.openedSource`, mapped from the registry descriptor — never
+    // from the file extension.
+    let files = Rc::new(FakeFiles {
+        events: RefCell::new(Vec::new()),
+    });
+    let session = session(files.clone());
+    import_synthetic(&files, "synthetic-four-lines.dwg");
+    open_queued(&session);
+
+    let status = session.snapshot(None, None, 0);
+    let source = status
+        .opened_source
+        .as_ref()
+        .expect("a DWG document carries its source provenance");
+    assert_eq!(source.connector, "dwg");
+    assert_eq!(source.spec, CadSpecVisibility::ReverseEngineered);
+    assert!(source.can_write, "DWG declares a writer in this build");
+    assert!(source.experimental, "that writer is not vendor-verified");
+
+    // The exact wire object the React layer reads.
+    let value = serde_json::to_value(&status).expect("the status serializes");
+    assert_eq!(
+        value["openedSource"],
+        serde_json::json!({
+            "connector": "dwg",
+            "spec": "reverse_engineered",
+            "canWrite": true,
+            "experimental": true,
+        })
+    );
+}
+
+#[test]
+fn a_public_spec_open_omits_the_opened_source_key() {
+    // A published-spec format has nothing to warn about: the object must be
+    // absent, not a `spec: "public"` row.
+    let files = Rc::new(FakeFiles {
+        events: RefCell::new(Vec::new()),
+    });
+    let session = session(files.clone());
+    import_public_dxf(&files, "synthetic-acis-cube.dxf");
+    open_queued(&session);
+
+    let status = session.snapshot(None, None, 0);
+    assert_eq!(status.import_count, 1, "the DXF really opened");
+    assert!(
+        status.opened_source.is_none(),
+        "a DXF (public spec) reports no provenance"
+    );
+    let value = serde_json::to_value(&status).expect("the status serializes");
+    assert!(
+        value.get("openedSource").is_none(),
+        "the key is omitted entirely, so the wire stays identical: {value}"
+    );
+}
+
+#[test]
+fn the_opened_source_is_per_document_and_cleared_by_new_and_close() {
+    let files = Rc::new(FakeFiles {
+        events: RefCell::new(Vec::new()),
+    });
+    let session = session(files.clone());
+
+    import_synthetic(&files, "synthetic-four-lines.dwg");
+    open_queued(&session);
+    assert!(
+        session.snapshot(None, None, 0).opened_source.is_some(),
+        "the DWG document has a reverse-engineered source"
+    );
+
+    // A later public-spec open replaces the document, so the DWG provenance
+    // must not stick to the DXF drawing.
+    import_public_dxf(&files, "synthetic-acis-cube.dxf");
+    open_queued(&session);
+    assert!(
+        session.snapshot(None, None, 0).opened_source.is_none(),
+        "a DXF open clears the previous DWG provenance"
+    );
+
+    // NEW installs a blank document: no source file, no provenance.
+    import_synthetic(&files, "synthetic-four-lines.dwg");
+    open_queued(&session);
+    assert!(session.snapshot(None, None, 0).opened_source.is_some());
+    session.command("NEW").expect("NEW is admitted");
+    session.tick().expect("tick");
+    assert!(
+        session.snapshot(None, None, 0).opened_source.is_none(),
+        "NEW clears the opened source"
+    );
+
+    // CLOSE drops the document entirely.
+    import_synthetic(&files, "synthetic-four-lines.dwg");
+    open_queued(&session);
+    assert!(session.snapshot(None, None, 0).opened_source.is_some());
+    session.command("CLOSE").expect("CLOSE is admitted");
+    session.tick().expect("tick");
+    assert!(
+        session.snapshot(None, None, 0).opened_source.is_none(),
+        "CLOSE clears the opened source"
     );
 }

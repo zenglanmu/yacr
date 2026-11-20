@@ -143,9 +143,6 @@ impl PlatformFiles for YmodelFiles {
             .insert(target.opaque.clone(), bytes.to_vec());
         Ok(())
     }
-    fn refuses_source_overwrite(&self, _target: &FileTarget) -> bool {
-        false
-    }
     fn set_source(&self, target: Option<&FileTarget>) {
         *self.source.borrow_mut() = target.cloned();
     }
@@ -216,9 +213,32 @@ fn opening_a_ymodel_target_installs_the_archived_document() {
     let manifest_uuid = "doc-uuid-1".to_string();
     let generation = core.controller.borrow().session.generation;
 
+    // A connector document first, so the archive open has a provenance to clear.
+    let dwg = std::fs::read(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/dwg/synthetic-four-lines.dwg"),
+    )
+    .expect("the committed synthetic DWG fixture");
+    core.controller
+        .borrow_mut()
+        .open_bytes(Arc::from(dwg), "synthetic-four-lines.dwg")
+        .expect("the synthetic DWG opens");
+    assert_eq!(
+        core.controller
+            .borrow()
+            .opened_source()
+            .map(|source| source.connector),
+        Some("dwg"),
+        "the connector document carries a reverse-engineered source"
+    );
+
     open_ymodel(&core, archive, &bytes).expect("the archive installs");
 
     let controller = core.controller.borrow();
+    assert!(
+        controller.opened_source().is_none(),
+        "a native `.ymodel` is not a connector format: no openedSource object"
+    );
     assert!(
         controller.session.generation > generation,
         "a content replacement rebuilds the session (no stale selection/undo)"
@@ -731,44 +751,67 @@ fn a_native_save_refuses_an_externally_modified_target() {
 }
 
 #[test]
-fn the_save_purpose_follows_the_source_format() {
-    // `.dwg` source → the experimental DWG export (unchanged).
-    let files = Rc::new(YmodelFiles::default());
-    let core = core_with(files.clone());
-    *core.source_target.borrow_mut() = Some(FileTarget::from_path("/tmp/plan.dwg"));
-    core.request_save().expect("DWG save");
-    assert_eq!(files.saves.borrow()[0].0, SavePurpose::SaveDwg);
+fn save_is_always_the_native_archive_whatever_the_source_was() {
+    // ADR-0041 D1: SAVE no longer switches purpose on the source extension. Every
+    // document saves to `SaveYmodel` as `<stem>.ymodel`; the lossy formats moved
+    // to EXPORT. Each case carries an archive, because without one SAVE refuses
+    // before opening a picker (see the next test).
+    let with_archive = |files: Rc<YmodelFiles>| {
+        let core = core_with(files);
+        let (snapshot, _) = archived_document();
+        let revision = snapshot.revision;
+        core.set_document_archive(Some(Arc::new(FakeArchive::new(LoadedArchive {
+            snapshot,
+            manifest: manifest(revision),
+        }))));
+        core
+    };
 
-    // `.ymodel` source → the native save.
-    let files = Rc::new(YmodelFiles::default());
-    let core = core_with(files.clone());
-    *core.source_target.borrow_mut() = Some(target());
-    core.request_save().expect("native save");
-    assert_eq!(files.saves.borrow()[0].0, SavePurpose::SaveYmodel);
-
-    // No source at all (blank/imported document) → the native save.
-    let files = Rc::new(YmodelFiles::default());
-    let core = core_with(files.clone());
-    core.request_save().expect("native save");
-    assert_eq!(files.saves.borrow()[0].0, SavePurpose::SaveYmodel);
-    assert_eq!(files.saves.borrow()[0].1, "yacr-demo.ymodel");
-
-    // `.dxf` source → the lossy DXF Save As (unchanged).
-    let files = Rc::new(YmodelFiles::default());
-    let core = core_with(files.clone());
-    *core.source_target.borrow_mut() = Some(FileTarget::from_path("/tmp/plan.dxf"));
-    core.request_save().expect("DXF save");
-    assert_eq!(files.saves.borrow()[0].0, SavePurpose::SaveDxf);
+    for (source, expected_name) in [
+        (Some("/tmp/plan.dwg"), "plan.ymodel"),
+        (Some("/tmp/plan.dxf"), "plan.ymodel"),
+        (Some(YMODEL_PATH), "plan.ymodel"),
+        (None, "yacr-demo.ymodel"),
+    ] {
+        let files = Rc::new(YmodelFiles::default());
+        let core = with_archive(files.clone());
+        if let Some(source) = source {
+            *core.source_target.borrow_mut() = Some(FileTarget::from_path(source));
+        }
+        core.request_save()
+            .expect("the native save opens its picker");
+        let saves = files.saves.borrow();
+        assert_eq!(saves.len(), 1, "{source:?}: exactly one picker call");
+        assert_eq!(saves[0].0, SavePurpose::SaveYmodel, "{source:?}: purpose");
+        assert_eq!(saves[0].1, expected_name, "{source:?}: suggested name");
+    }
 }
 
 #[test]
 fn a_ymodel_save_without_an_archive_refuses_by_name() {
+    // ADR-0041 D1 + the carrier rule: with SAVE bound to the native archive, a
+    // carrier that has none (Web, Android, Windows, macOS) must refuse with the
+    // stable marker **before** opening a picker — never silently export another
+    // format. This is the shared contract those carriers inherit.
     let files = Rc::new(YmodelFiles::default());
     let core = core_with(files.clone());
     *core.source_target.borrow_mut() = Some(target());
 
-    core.request_save().expect("the funnel grades a status");
-
+    let error = core
+        .request_save()
+        .expect_err("no archive means SAVE refuses, not a fallback export");
+    assert_eq!(
+        crate::policy::UNSUPPORTED_YMODEL,
+        "unsupported-runtime: ymodel"
+    );
+    assert!(
+        matches!(&error, CadError::Unsupported(reason) if reason.as_str() == "unsupported-runtime: ymodel"),
+        "the refusal is the stable marker: {error:?}"
+    );
+    assert!(
+        files.saves.borrow().is_empty(),
+        "no picker is opened for a save that cannot be written"
+    );
     assert!(files.written.borrow().is_empty(), "nothing is written");
     let status = core.last_status().expect("status");
     let (key, args) = catalog(&status);

@@ -20,7 +20,7 @@ use cad_domain::{CadError, CadResult, Diagnostic, Mesh, Point3, UnitContext};
 use cad_import_core::{
     compute_identity, ConnectorDescriptor, ExportCapability, FidelityLevel, ImportCapability,
     ImportLimits, ImportPhase, ImportProgress, ImportProgressSink, ImportReport, ImportRequest,
-    ImportedDrawing, Importer, MeshImport, NoopProgress,
+    ImportedDrawing, Importer, MeshImport, NoopProgress, SpecVisibility,
 };
 
 /// Stable diagnostic code: a degenerate facet was dropped.
@@ -344,10 +344,14 @@ mod tests;
 /// Owned by this crate. `cad-export-mesh` writes both containers (`stl` =
 /// binary, `stl-ascii` = ASCII); the writer is lossy because STL has no colours,
 /// layers or units and per-face normals replace the neutral per-vertex normals.
+///
+/// `spec` is [`SpecVisibility::Public`]: ASCII and binary STL are plain,
+/// published layouts, implemented by `stl_io`/the hand-written reader.
 pub const DESCRIPTOR_STL: ConnectorDescriptor = ConnectorDescriptor {
     id: "stl",
     name_key: "connector.stl.name",
     extensions: &["stl"],
+    spec: SpecVisibility::Public,
     import: Some(ImportCapability {
         versions: "ASCII / binary STL",
         container: "stl",
@@ -356,6 +360,7 @@ pub const DESCRIPTOR_STL: ConnectorDescriptor = ConnectorDescriptor {
         versions: "binary / ASCII STL",
         level: FidelityLevel::L1,
         lossy: true,
+        experimental: false,
     }),
     declared_classes: &[],
 };

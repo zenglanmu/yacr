@@ -32,7 +32,7 @@ use cad_import_acadrust::export::{AcadrustExporter, AcisVersion, DxfTarget, Expo
 use cad_import_acadrust::AcadrustImporter;
 use cad_import_core::{
     detect_format, ConnectorDescriptor, DrawingFormat, ExportJob, ExportOutput, Exporter,
-    ImportProgressSink, ImportRequest, ImportedDrawing, Importer,
+    ImportProgressSink, ImportRequest, ImportedDrawing, Importer, SpecVisibility,
 };
 use cad_import_dgn::DgnImporter;
 use cad_import_gltf::GltfImporter;
@@ -117,6 +117,37 @@ static REFUSALS: &[(&str, &ConnectorDescriptor)] = &[
 pub struct ExportSettings {
     pub acis_version: AcisVersion,
     pub dxf_target: DxfTarget,
+}
+
+/// The provenance of the connector that opened the current document (ADR-0041
+/// D5), for the `cad_status.openedSource` notice.
+///
+/// Only a [`SpecVisibility::ReverseEngineered`] connector produces one: a
+/// published-spec format has nothing to warn about, so the mapping in
+/// [`ConnectorRegistry::opened_source`] returns `None` for it and the wire key
+/// is omitted. `can_write`/`experimental` are the descriptor's own export
+/// capability — never inferred from the file extension.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OpenedSource {
+    /// The stable registry connector id (`"dwg"`, `"dgn"`, `"skp"`, `"rvt"`).
+    pub connector: &'static str,
+    /// The format's spec visibility (always ReverseEngineered for a `Some`).
+    pub spec: SpecVisibility,
+    /// Whether the connector declares an export direction (ADR-0041 D1).
+    pub can_write: bool,
+    /// Whether that writer is unverified/experimental (ADR-0041 D1).
+    pub experimental: bool,
+}
+
+impl OpenedSource {
+    /// Whether the format's specification is published (never `true` for a
+    /// value this host produces: a public source yields no `openedSource`).
+    ///
+    /// Exposes the classification to the wire layer without making it depend on
+    /// `cad-import-core` just to name the enum.
+    pub fn spec_is_public(&self) -> bool {
+        matches!(self.spec, SpecVisibility::Public)
+    }
 }
 
 /// The ordered connector table used by every carrier.
@@ -401,6 +432,40 @@ impl ConnectorRegistry {
             .map(|connector| connector.descriptor)
             .find(|descriptor| descriptor.id == id)
     }
+
+    /// Project one import report's connector id onto the `openedSource` block
+    /// (ADR-0041 D5).
+    ///
+    /// `None` for **no** connector (blank/New, a native `.ymodel` open, an
+    /// importer called directly) and for every [`SpecVisibility::Public`]
+    /// format: the wire object exists only for a reverse-engineered source, so
+    /// a public connector must never produce it. An unknown id is likewise
+    /// `None` — this maps only what the registry actually declares, never a
+    /// guess from the file name.
+    pub fn opened_source(&self, connector: Option<&str>) -> Option<OpenedSource> {
+        let descriptor = self.descriptor(connector?)?;
+        if descriptor.spec != SpecVisibility::ReverseEngineered {
+            return None;
+        }
+        Some(OpenedSource {
+            connector: descriptor.id,
+            spec: descriptor.spec,
+            can_write: descriptor.export.is_some(),
+            experimental: descriptor
+                .export
+                .map(|export| export.experimental)
+                .unwrap_or(false),
+        })
+    }
+}
+
+/// The `openedSource` projection for a document's import report.
+///
+/// Resolves against the one production registry, so a host never builds a
+/// second table just to describe its source. Building the registry is cheap
+/// (small vectors of `&'static` entries), and this runs once per publish/read.
+pub fn opened_source(connector: Option<&str>) -> Option<OpenedSource> {
+    ConnectorRegistry::builtin().opened_source(connector)
 }
 
 impl Default for ConnectorRegistry {

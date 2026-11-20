@@ -51,9 +51,10 @@
 
 | 能力 | 状态 | 实际表现 |
 |---|---|---|
-| 打开 | **支持（SAF，设备 NOT RUN）** | `OPEN` → Kotlin `ACTION_OPEN_DOCUMENT`（`CATEGORY_OPENABLE`、`*/*`、读 + persistable 授权）；worker 线程读完整字节，经 `documentSnapshot` 以 `FileEvent::Opened` 交给共享 `PlatformFiles` 漏斗。`canOpen = true`。宽 MIME 是刻意的：`.dwg` 供应方常报 `application/octet-stream`，窄过滤器会把要打开的文件变灰 |
+| 打开 | **支持（SAF + `.ymodel`，设备 NOT RUN）** | `OPEN` → Kotlin `ACTION_OPEN_DOCUMENT`（`CATEGORY_OPENABLE`、`*/*`、读 + persistable 授权）；worker 线程读完整字节，经 `documentSnapshot` 以 `FileEvent::Opened` 交给共享 `PlatformFiles` 漏斗。`canOpen = true`。宽 MIME 是刻意的：`.dwg` 供应方常报 `application/octet-stream`，窄过滤器会把要打开的文件变灰。**`.ymodel` 源由载体档案（`ZipArchive` over `cad-store-zip`）解码，绝不进入 importer/connector 探测**：共享 `deliver_open` 先按 `is_ymodel_target` 分流（`crates/cad-host/src/open.rs`，开发机契约测试已固定顺序）；本载体只投递字节，自己不调用任何 importer。没有档案时是显式 `unsupported-runtime: ymodel`，不是解析错误 |
 | 新建 | **支持（设备 NOT RUN）** | `canNew = true`；`NEW` 经共享 `HostCore::request_new` 安装空白 `untitled` 文档（替换当前文档；不走 SAF/文件系统，也不建第二份文档权威）。设备运行 **NOT RUN** |
-| 保存 | **支持（DXF 导出，设备 NOT RUN）** | `SAVE` → Kotlin `ACTION_CREATE_DOCUMENT`（`application/octet-stream`、`EXTRA_TITLE`）；共享保存路径把 **DXF** 字节经 `write_atomic` → `ContentResolver.openOutputStream(uri, "wt")` 写入（SAF 实现是截断写，没有临时文件 + rename）。`canSave = true`。这是**导出一份副本**，不是原地覆盖：打开来源的同一 URI 被 `refuses_source_overwrite` 拒绝。源为 `.dwg` 时经同一共享路径写**实验性 DWG 导出**（上游 `acadrust::DwgWriter`；默认新文件 `<stem>-export.dwg`，SAF URI 守卫拒绝覆盖来源；DWG 仅有合成 self-roundtrip 证据，设备/AutoCAD **NOT VERIFIED**） |
+| 保存 | **支持（`SAVE` = `.ymodel`，`EXPORT` = 按扩展名；设备 NOT RUN）** | ADR-0041 D1：`SAVE` 只写原生 `.ymodel`，经载体 `crate::ymodel_archive::ZipArchive` 编码，再由 `write_atomic` → Kotlin `documentWriteUri` 写入。`EXPORT` 仍按目标扩展名走共享 connector（DXF、实验性 DWG、mesh/IFC/SKP/glTF）。`canSave = true`。**写入策略（不声称原子替换）**：先同步读目标现有字节（`documentReadUriSync`，不存在 = 首次保存）→ 尝试经 `DocumentsContract.createDocument` 建同级 `<name>.bak` 并写入旧字节（尽力而为，多数 provider 拒绝）→ 字节先落到 app-cache 临时文件并 `fd.sync()`，再流进 `ContentResolver.openOutputStream(uri, "wt")`。SAF **没有** rename/原子替换，流中断仍可能截断目标；`save.no_backup` 在**没有**建成 `.bak` 的成功覆盖后发布（键已在两份 i18n 目录）。原地覆盖是允许的显式选择（ADR-0041 D4），旧的来源覆盖守卫已移除 |
+| 恢复快照 | **已接（`filesDir/recovery`，设备 NOT RUN）** | `FsRecoveryStore`：每个文档一对 `<key>.ymodel`（普通归档）+ `<key>.json`（`RecoveryRecord`），写入顺序=先字节后记录，二者都走临时文件 + `sync_all` + rename（应用私有目录，不是 SAF）。tick 在 `nativeAssetsReady` 公告 `filesDir` 后安装 `Persistence`（未公告则不安装、不写快照，绝不发明路径）；脏文档每 60 s 一次、成功保存后丢弃、`revision <= saved` 的快照按过期丢弃。开始页 `cad_recovery_files` / `cad_open_recovery` 由 `AndroidRecoveryHost` 服务（`open_recovery` 走 session 自己的 store，**不**经过 SAF 选择器，因为它无法浏览 `filesDir`）。设备侧落盘/恢复 **NOT VERIFIED** |
 | 出图 | **不支持** | `canPlot = false`；没有 SVG/PDF 导出 |
 | 文件身份 | **SAF URI，不伪造** | 身份 = `content://` opaque 句柄 + `OpenableColumns.DISPLAY_NAME`（缺列时回退 URI 末段）；没有 `--open` 启动参数。`content://` 目标**没有**文件系统目录，sidecar xref/栅格不可用：`xref_options_for` 对含 `://` 的句柄返回 `None`，引用按不可用报告，不派生假根目录 |
 | 外部「打开方式」 | **已接（设备 NOT RUN）** | `bundle.fileAssociations` 由单一权威 `packaging/mime/formats.json` 派生：全部 16 个导入扩展名、24 个 mime 类型，**再加**一条 `application/octet-stream` 通配（共 25 条），每条带 `androidIntentActionFilters: ["view"]`；tauri-build 在构建期注入 manifest 的 VIEW intent-filter（每关联一条 filter、每扩展名一条 `pathPattern`）。`MainActivity` 冷启动（`onCreate`）与热启动（`onNewIntent` + `setIntent`，`singleTask`）都投递到同一个读槽。**关联接线只是编译/manifest 证据，系统是否匹配 NOT VERIFIED** |
@@ -67,7 +68,7 @@
 | FIT / 视口 | **按可见 CAD 矩形取景（2D）** | 渲染目标仍是整窗 `SurfaceView`（Vulkan swapchain 必须等于窗口），但 `SurfaceMetrics { origin, logical }` 来自已接受的 `.native-input` 矩形：fit/zoom 用可见矩形，`place_canvas_camera2d` 把正交相机中心移到矩形中心。修复了“打开图纸文字比 Linux 大约 1.5×”的整窗取景缺陷。3D 透视相机未做离轴投影，属显式 **Partial**（见 `docs/compatibility.md`） |
 | 指针 | **分区原点平移** | tick 内把 DOM 分区局部坐标按 origin 换算成 presented-canvas 坐标；不是第二条输入通道。鼠标/触摸/笔按每事件 `device` 在共享 `cad-host` 仲裁（touch：单指平移、tap 选择、双指 pinch 缩放；mouse/pen：中键平移、2D 主键框选、滚轮缩放） |
 
-UI 侧对能力布尔为 `false` 的项（Plot，以及共享路径判定为延后的 DWG 保存）必须**显式禁用/拒绝**
+UI 侧对能力布尔为 `false` 的项（Plot）必须**显式禁用/拒绝**
 （带原因），不得空成功、不得伪造文件选择结果或路径。`canOpen`/`canNew`/`canSave` 由本载体的 tick 按
 `policy.rs` 的常量上报，不在 React 侧按平台猜测。
 
@@ -93,7 +94,7 @@ React chrome），`setZOrderMediaOverlay(false)` 一并固定。
 
 - `Long` 只是不透明原生 handle；Kotlin **不**持有 CAD 状态、不做坐标/命令逻辑。
 
-**反向（Rust → Kotlin）的 6 个实例方法**：`src/saf.rs`（`document*`）与 `src/release.rs`
+**反向（Rust → Kotlin）的 8 个实例方法**：`src/saf.rs`（`document*`）与 `src/release.rs`
 （`openExternalUrl`）按精确名字/描述符调用
 `io.github.zenglanmu.yacr.MainActivity` 上的实例方法（`Java_io_github_zenglanmu_yacr_MainActivity_document*` /
 `..._openExternalUrl`），这也是 `proguard-rules.pro` 必须固定它们的原因。这些方法**不**增加
@@ -104,7 +105,9 @@ Kotlin→Rust 符号：冻结的 `native*` 仍为上面四个。
 | `documentLaunchOpen()` | 启动 `ACTION_OPEN_DOCUMENT`，清空并武装唯一交互槽 |
 | `documentLaunchSave(String)` | 启动 `ACTION_CREATE_DOCUMENT`，`defaultName` 作为建议标题 |
 | `documentReadUri(String)` | 启动 Kotlin worker 读；槽立即进入 `LOADING` |
-| `documentWriteUri(String, byte[])` | 同步截断写入；失败抛 `IOException`，调用方报真实错误 |
+| `documentWriteUri(String, byte[])` | 同步写入；先把字节落到 app-cache 临时文件并 `fd.sync()`，再流进 `openOutputStream(uri, "wt")`；失败抛 `IOException`，调用方报真实错误 |
+| `documentReadUriSync(String) -> ByteArray?` | tick 线程同步读；`null` = 文档不存在；其它失败抛异常（绝不返回空数组） |
+| `documentWriteSiblingBackup(String, byte[]) -> Boolean` | 尽力建同级 `<name>.bak` 文档并写入旧字节；provider 不支持时返回 `false`（不是原子替换） |
 | `documentSnapshot()` | 返回 `[Int state, String? uri, String? name, String? error, ByteArray? bytes]` |
 | `openExternalUrl(String) -> Boolean` | `Intent.ACTION_VIEW` 打开固定下载页；投到 UI 线程并有界等待 2 s；拒绝（无浏览器 / finishing / 异常 / 超时）返回 `false`，Rust 报 `update.open_url_failed` |
 
@@ -187,9 +190,13 @@ apps/app-android/
     src/host/pump.rs           RedrawPump（只唤醒 loop，不做渲染工作）
     src/popup.rs               弹窗接缝：PopupOps payload + AndroidPopupHost 主线程跳转
     src/surface.rs             JNI 表面回调 + SurfaceProbePresenter（Vulkan only）
-    src/saf.rs                 Android-only SAF JNI 桥：5 个 document* 实例方法；非 Android 目标不编译
+    src/saf.rs                 Android-only SAF JNI 桥：7 个 document* 实例方法；非 Android 目标不编译
     src/policy.rs              纯策略：标记行、能力布尔（open/new/save=true，plot=false）、JNI 符号名（可在开发机测试）
     src/platform.rs            SAF 文件契约（AndroidFiles）、DOM surface、filesDir 持久 config store
+    src/platform/saf_write.rs  SAF 写入顺序 + 旧字节读取 + `.bak` 决策 + `save.no_backup` 闩锁（开发机可测）
+    src/ymodel_archive.rs      载体 DocumentArchive（cad-store-zip）——SAVE/OPEN 的 .ymodel 实现
+    src/recovery_store.rs      filesDir/recovery 的 FsRecoveryStore（Persistence）
+    src/host_files.rs          恢复列表/打开与 ymodel 资源预览两个 host 接缝（loop 线程有界跳转）
     src/plugin_store.rs        插件管理器持久化：惰性解析 filesDir 的 AndroidPluginStore（委托 FsPluginStore）
     src/input.rs               分区局部 → canvas 坐标（纯函数，开发机单测）
     src/refusal.rs             稳定标记行 / step / 历史 exit 6 词汇
@@ -370,5 +377,5 @@ bash scripts/build-android.sh --debug   --target x86_64      # 模拟器（debug
 
 **不得复用**：那些像素/命令/选择器结论属于**已退役载体**，不能证明 native `SurfaceView`、Vulkan
 adapter、JNI 链接、旋转/生命周期或 native 命令语义。当前 Android 的最高诚实表述是
-**「native `native-below` 载体已实现并接线，文件打开/DXF 另存与外部「打开方式」已接，编译级契约通过；
+**「native `native-below` 载体已实现并接线，文件打开（含 `.ymodel`）、`SAVE`=`.ymodel`/`EXPORT`、恢复快照与外部「打开方式」已接，编译级契约通过；
 设备运行、SAF 实际读写、外部 intent 投递与视觉证据均为 NOT RUN」**。

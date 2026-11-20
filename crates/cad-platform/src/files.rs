@@ -20,16 +20,20 @@ use std::sync::Arc;
 
 use cad_domain::CadResult;
 
-/// Which export a save dialog was opened for.
+/// Which file interaction a save dialog was opened for.
+///
+/// `SAVE` is always [`SavePurpose::SaveYmodel`] (the native archive, the only
+/// lossless, re-openable format); every other writing format is reached through
+/// `EXPORT` ([`SavePurpose::SaveExport`], target extension decides the writer,
+/// ADR-0041). There is no per-source-format purpose any more.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SavePurpose {
     /// Native document save (`.ymodel`). The only format that round-trips
     /// losslessly and the only one that can be re-opened as the same document.
     SaveYmodel,
-    /// Lossy DXF Save As.
-    SaveDxf,
-    /// Experimental DWG Save As: always a **new** file, never the opened source.
-    SaveDwg,
+    /// Explicit export to another format: the chosen target's extension decides
+    /// the writer (DXF, experimental DWG, mesh/IFC/SKP/glTF, ...).
+    SaveExport,
     /// Vector plot/export (SVG/PDF).
     Plot,
 }
@@ -72,10 +76,10 @@ impl FileTarget {
 pub enum FileEvent {
     /// A drawing was opened and fully read.
     ///
-    /// `target` carries the platform's own handle (`opaque`) so the core can arm
-    /// the source-overwrite guard against the exact file it opened (a SAF URI /
-    /// download handle on non-desktop platforms), not a path re-derived from the
-    /// display name. `bytes` are the raw drawing bytes.
+    /// `target` carries the platform's own handle (`opaque`) so the core can
+    /// remember the exact file it opened (a SAF URI / download handle on
+    /// non-desktop platforms), not a path re-derived from the display name.
+    /// `bytes` are the raw drawing bytes.
     Opened {
         target: FileTarget,
         bytes: Arc<[u8]>,
@@ -110,14 +114,12 @@ pub trait PlatformFiles {
     /// desktop; a single platform write elsewhere).
     fn write_atomic(&self, target: &FileTarget, bytes: &[u8]) -> CadResult<()>;
 
-    /// Whether `target` is the successfully-opened source file, so a save must
-    /// refuse to overwrite it (data-corruption guard). Desktop compares device +
-    /// inode; the web has no filesystem identity and returns `false`.
-    fn refuses_source_overwrite(&self, target: &FileTarget) -> bool;
-
-    /// Remember (`Some`) or clear (`None`) the successfully-opened source, so
-    /// [`PlatformFiles::refuses_source_overwrite`] can guard it. The core calls
-    /// this only after a **successful** install, never at attempt time.
+    /// Remember (`Some`) or clear (`None`) the successfully-opened source.
+    ///
+    /// The core calls this only after a **successful** install, never at attempt
+    /// time. It is diagnostic state (recent/source bookkeeping); a save may
+    /// overwrite the source, and the atomic write's `.bak` is what protects the
+    /// previous bytes (ADR-0041 D4).
     fn set_source(&self, target: Option<&FileTarget>);
 
     /// Read a target's current bytes, for in-place save support (native `.ymodel`).
@@ -266,9 +268,6 @@ mod tests {
         }
         fn write_atomic(&self, _target: &FileTarget, _bytes: &[u8]) -> CadResult<()> {
             Ok(())
-        }
-        fn refuses_source_overwrite(&self, _target: &FileTarget) -> bool {
-            false
         }
         fn set_source(&self, _target: Option<&FileTarget>) {}
         fn poll(&self) -> Vec<FileEvent> {

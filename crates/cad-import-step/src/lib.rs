@@ -67,7 +67,7 @@ use cad_domain::{CadError, CadResult, Diagnostic, Mesh, Point3, Unit, UnitContex
 use cad_import_core::{
     compute_identity, ifc_schema, ConnectorDescriptor, ImportCapability, ImportLimits, ImportPhase,
     ImportProgress, ImportProgressSink, ImportReport, ImportRequest, ImportedDrawing, Importer,
-    MeshImport, NoopProgress, IFC_SCHEMA_REFUSED,
+    MeshImport, NoopProgress, SpecVisibility, IFC_SCHEMA_REFUSED,
 };
 use cadmpeg_codec_step::StepCodec;
 use cadmpeg_ir::document::CadIr;
@@ -891,11 +891,13 @@ mod tests;
 ///
 /// There is **no** writer, so `export` is `None`; an export attempt is the
 /// registry's named `export.step.not_implemented` refusal, never an empty
-/// success.
+/// success. `spec` is [`SpecVisibility::Public`]: ISO 10303-21 is a published
+/// standard (this module's header and `THIRD_PARTY_NOTICES.md`:32-33).
 pub const DESCRIPTOR_STEP: ConnectorDescriptor = ConnectorDescriptor {
     id: "step",
     name_key: "connector.step.name",
     extensions: &["step", "stp"],
+    spec: SpecVisibility::Public,
     import: Some(ImportCapability {
         versions: "AP203/AP214/AP242",
         container: "step",

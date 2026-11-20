@@ -425,8 +425,8 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
                     capabilities: HostCapabilities {
                         open: true,
                         new: true,
-                        save: false,
-                        plot: false,
+                        save: true,
+                        plot: true,
                         import_worker: true,
                     },
                 };
@@ -438,6 +438,26 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
             });
             match created {
                 Some(Ok(session)) => {
+                    // The native document format (ADR-0037/ADR-0041).
+                    // `cad-store-zip` may only be linked by a carrier app
+                    // (`scripts/check-architecture.py`), so the shared layers see
+                    // it exclusively through `cad_platform::DocumentArchive`.
+                    // Without this line `.ymodel` open/save refuses with
+                    // `unsupported-runtime: ymodel` — the explicit refusal, not a
+                    // silent DXF export under a `.ymodel` name.
+                    session.set_document_archive(Some(crate::ymodel_archive::ZipArchive::new()
+                        as std::sync::Arc<dyn cad_platform::DocumentArchive>));
+                    // The recovery snapshot (ADR-0037 D12): the same archive
+                    // encoder, written to a carrier-private directory while the
+                    // document is dirty. No resolvable config directory means no
+                    // durable private place, so nothing is installed and the host
+                    // writes no snapshot — it never invents a path.
+                    if let Some(dir) = crate::platform::recovery_dir() {
+                        session.set_persistence(Some(crate::recovery_store::FsRecoveryStore::new(
+                            dir,
+                        )
+                            as std::sync::Arc<dyn cad_platform::Persistence>));
+                    }
                     CAD.with(|cell| *cell.borrow_mut() = Some(session));
                     eprintln!("[probe] cad session created");
                 }

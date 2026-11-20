@@ -127,6 +127,15 @@ test('the banner shows the short translated label only for the known token', () 
   assert.equal(statusBannerText(REPORT, tMissing), REPORT);
 });
 
+test('a carrier that publishes the bare no-backup key still reads as a sentence', () => {
+  // Android's SAF write path has no catalog, so it publishes `save.no_backup`
+  // as a token. The chrome is the only layer that can turn it into copy.
+  assert.equal(statusBannerText('save.no_backup', tEn), en['save.no_backup']);
+  assert.equal(statusBannerText('save.no_backup', tZh), zh['save.no_backup']);
+  const tMissing = createTranslator({}, 'en');
+  assert.equal(statusBannerText('save.no_backup', tMissing), 'save.no_backup');
+});
+
 test('both catalogs define the notice with a distinct title and all four keys', () => {
   const keys = [
     'gpu.pulled.insufficient_vram.title',

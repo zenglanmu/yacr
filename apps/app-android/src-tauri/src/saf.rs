@@ -2,13 +2,17 @@
 //!
 //! The Kotlin lane (`io.github.zenglanmu.yacr.MainActivity`) owns the `ACTION_OPEN_DOCUMENT`
 //! / `ACTION_CREATE_DOCUMENT` pickers and the `ContentResolver` transfer, and
-//! exposes the interaction through five **instance** methods:
+//! exposes the interaction through these **instance** methods (the picker/read
+//! slot is the first five; the synchronous read and the sibling `.bak` create are
+//! the two Rust-initiated helpers the save path needs):
 //!
 //! ```text
 //! documentLaunchOpen(String?): void
 //! documentLaunchSave(String): void
 //! documentReadUri(String): void   // starts a worker read; poll the snapshot
 //! documentWriteUri(String, byte[]): void
+//! documentReadUriSync(String): byte[]?   // null = the document does not exist
+//! documentWriteSiblingBackup(String, byte[]): boolean
 //! documentSnapshot(): Object[]
 //! ```
 //!
@@ -169,6 +173,11 @@ pub(crate) fn read_uri_async(uri: &str) -> Result<(), String> {
 }
 
 /// Write `bytes` to a document URI (truncating any existing content).
+///
+/// The Kotlin lane stages the bytes in an app-cache file, `sync`s it, and only
+/// then streams that file into the provider. SAF has no atomic replace: this is
+/// not a rename, and a provider failure mid-stream can still truncate the
+/// target. The previous-copy decision lives in [`crate::platform::saf_write`].
 pub(crate) fn write_uri(uri: &str, bytes: &[u8]) -> Result<(), String> {
     let outcome = with_env(|env, activity| {
         let uri_obj = env.new_string(uri)?;
@@ -188,6 +197,75 @@ pub(crate) fn write_uri(uri: &str, bytes: &[u8]) -> Result<(), String> {
         log_failure("documentWriteUri", error);
     }
     outcome
+}
+
+/// Read a document URI **synchronously** on the caller's thread.
+///
+/// `Ok(None)` means the document does not exist (the provider answered
+/// `FileNotFoundException`), which is the ordinary first-save case; every other
+/// failure is an explicit `Err`, never empty bytes. Used by the in-place save
+/// conflict check (`PlatformFiles::read_target`) and by the previous-bytes read
+/// before an overwrite, both of which the shared host drives synchronously.
+pub(crate) fn read_uri_sync(uri: &str) -> Result<Option<Vec<u8>>, String> {
+    let outcome = with_env(|env, activity| {
+        let uri_obj = env.new_string(uri)?;
+        let answer = env
+            .call_method(
+                activity,
+                "documentReadUriSync",
+                "(Ljava/lang/String;)[B",
+                &[JValue::Object(uri_obj.as_ref())],
+            )?
+            .l()?;
+        if answer.is_null() {
+            return Ok(None);
+        }
+        Ok(Some(env.convert_byte_array(JByteArray::from(answer))?))
+    });
+    if let Err(error) = &outcome {
+        log_failure("documentReadUriSync", error);
+    }
+    outcome
+}
+
+/// Create a sibling `<display name>.bak` document holding `bytes`.
+///
+/// Best-effort by design: SAF has no guaranteed sibling create, and most
+/// providers refuse one. `Err` is therefore the common answer and is never
+/// retried or turned into a failed save; [`crate::platform::saf_write`] latches
+/// `save.no_backup` instead so the user is told no copy was kept.
+pub(crate) fn write_sibling_backup(uri: &str, bytes: &[u8]) -> Result<(), String> {
+    let outcome = with_env(|env, activity| {
+        let uri_obj = env.new_string(uri)?;
+        let array = env.byte_array_from_slice(bytes)?;
+        env.call_method(
+            activity,
+            "documentWriteSiblingBackup",
+            "(Ljava/lang/String;[B)Z",
+            &[
+                JValue::Object(uri_obj.as_ref()),
+                JValue::Object(array.as_ref()),
+            ],
+        )?
+        .z()
+    });
+    match outcome {
+        Ok(true) => Ok(()),
+        // The provider has no sibling create (the common case): not an error to
+        // report, only a warning, so a normal overwrite does not look like a crash
+        // in logcat.
+        Ok(false) => {
+            log::warn!(
+                "{LOG_PREFIX}: documentWriteSiblingBackup unavailable for {uri}; \
+                 the overwrite cannot keep a previous copy"
+            );
+            Err("the provider cannot create a sibling backup document".to_string())
+        }
+        Err(error) => {
+            log_failure("documentWriteSiblingBackup", &error);
+            Err(error)
+        }
+    }
 }
 
 /// Read the Kotlin snapshot and decode it into one [`SafState`].

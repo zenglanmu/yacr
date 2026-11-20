@@ -22,12 +22,12 @@ use cad_ui_core::i18n::MessageSource;
 use super::{FileChooserOutcome, KEY_PICKER_EMPTY, KEY_PICKER_FAILED, KEY_PICKER_LOCAL};
 
 const KEY_SAVE_TITLE_YMODEL: &str = "linux.save_title_ymodel";
-const KEY_SAVE_TITLE_DXF: &str = "linux.save_title_dxf";
-const KEY_SAVE_TITLE_DWG: &str = "linux.save_title_dwg";
+const KEY_SAVE_TITLE_EXPORT: &str = "linux.save_title_export";
 const KEY_SAVE_TITLE_PLOT: &str = "linux.save_title_plot";
 const KEY_SAVE_FILTER_YMODEL: &str = "linux.save_filter_ymodel";
-const KEY_SAVE_FILTER_DXF: &str = "linux.save_filter_dxf";
-const KEY_SAVE_FILTER_DWG: &str = "linux.save_filter_dwg";
+// The export filter's label is the existing "CAD exchange formats" string: it
+// names exactly the one filter EXPORT shows, so no second key is introduced.
+const KEY_SAVE_FILTER_EXPORT: &str = "linux.save_filter_dxf";
 const KEY_SAVE_FILTER_PLOT: &str = "linux.save_filter_plot";
 
 /// The localized labels the native save dialog uses.
@@ -38,14 +38,12 @@ const KEY_SAVE_FILTER_PLOT: &str = "linux.save_filter_plot";
 /// concept), the title and filter are per [`SavePurpose`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UseSaveDialogLabels {
-    /// Native `.ymodel` Save As.
+    /// Native `.ymodel` save.
     pub title_ymodel: String,
-    pub title_dxf: String,
-    pub title_dwg: String,
+    pub title_export: String,
     pub title_plot: String,
     pub filter_ymodel: String,
-    pub filter_dxf: String,
-    pub filter_dwg: String,
+    pub filter_export: String,
     pub filter_plot: String,
     pub picker_empty: String,
     pub picker_local: String,
@@ -68,12 +66,10 @@ impl UseSaveDialogLabels {
         };
         Ok(Self {
             title_ymodel: get(KEY_SAVE_TITLE_YMODEL)?,
-            title_dxf: get(KEY_SAVE_TITLE_DXF)?,
-            title_dwg: get(KEY_SAVE_TITLE_DWG)?,
+            title_export: get(KEY_SAVE_TITLE_EXPORT)?,
             title_plot: get(KEY_SAVE_TITLE_PLOT)?,
             filter_ymodel: get(KEY_SAVE_FILTER_YMODEL)?,
-            filter_dxf: get(KEY_SAVE_FILTER_DXF)?,
-            filter_dwg: get(KEY_SAVE_FILTER_DWG)?,
+            filter_export: get(KEY_SAVE_FILTER_EXPORT)?,
             filter_plot: get(KEY_SAVE_FILTER_PLOT)?,
             picker_empty: get(KEY_PICKER_EMPTY)?,
             picker_local: get(KEY_PICKER_LOCAL)?,
@@ -90,8 +86,7 @@ impl UseSaveDialogLabels {
     pub fn title(&self, purpose: SavePurpose) -> &str {
         match purpose {
             SavePurpose::SaveYmodel => &self.title_ymodel,
-            SavePurpose::SaveDxf => &self.title_dxf,
-            SavePurpose::SaveDwg => &self.title_dwg,
+            SavePurpose::SaveExport => &self.title_export,
             SavePurpose::Plot => &self.title_plot,
         }
     }
@@ -100,8 +95,7 @@ impl UseSaveDialogLabels {
     pub fn filter(&self, purpose: SavePurpose) -> &str {
         match purpose {
             SavePurpose::SaveYmodel => &self.filter_ymodel,
-            SavePurpose::SaveDxf => &self.filter_dxf,
-            SavePurpose::SaveDwg => &self.filter_dwg,
+            SavePurpose::SaveExport => &self.filter_export,
             SavePurpose::Plot => &self.filter_plot,
         }
     }
@@ -114,11 +108,11 @@ pub type SaveChooser =
 
 /// The real native save chooser (XDG desktop portal via `ashpd` `save_file`).
 ///
-/// The drawing Save As is lossy: DXF plus the connector exchange formats
-/// (binary STL, OBJ, PLY, OFF, IFC, SKP) share one filter because the target
-/// extension decides what the shared host writes. DWG is the **experimental**
-/// binary export (always a new file), and plot is SVG/PDF. Each purpose has its
-/// own localized title/filter and its own extension filter.
+/// `SAVE` offers `*.ymodel` only (ADR-0041 D1). `EXPORT` is the explicit
+/// "another format" chooser: DXF plus the connector exchange formats (binary
+/// STL, OBJ, PLY, OFF/COFF, IFC, SKP, glTF) and the experimental DWG share one
+/// filter because the target extension decides what the shared host writes.
+/// Plot is SVG/PDF. Each purpose has its own localized title/filter.
 pub fn portal_save(
     purpose: SavePurpose,
     labels: &UseSaveDialogLabels,
@@ -131,11 +125,13 @@ pub fn portal_save(
         SavePurpose::SaveYmodel => {
             FileFilter::new(labels.filter(purpose)).glob("*.[yY][mM][oO][dD][eE][lL]")
         }
-        // The drawing Save As covers the connector writers too: `.stl` (binary),
-        // `.obj`, `.ply`, `.off`/`.coff`, `.ifc`, `.skp`, `.glb`/`.gltf`, plus
-        // DXF. ASCII STL (`stl-ascii`) has no extension of its own.
-        SavePurpose::SaveDxf => FileFilter::new(labels.filter(purpose))
+        // The export filter covers every writer the registry has: `.dxf`, the
+        // experimental `.dwg`, `.stl` (binary), `.obj`, `.ply`, `.off`/`.coff`,
+        // `.ifc`, `.skp`, `.glb`/`.gltf`. ASCII STL (`stl-ascii`) has no
+        // extension of its own.
+        SavePurpose::SaveExport => FileFilter::new(labels.filter(purpose))
             .glob("*.[dD][xX][fF]")
+            .glob("*.[dD][wW][gG]")
             .glob("*.[sS][tT][lL]")
             .glob("*.[oO][bB][jJ]")
             .glob("*.[pP][lL][yY]")
@@ -145,7 +141,6 @@ pub fn portal_save(
             .glob("*.[sS][kK][pP]")
             .glob("*.[gG][lL][bB]")
             .glob("*.[gG][lL][tT][fF]"),
-        SavePurpose::SaveDwg => FileFilter::new(labels.filter(purpose)).glob("*.[dD][wW][gG]"),
         SavePurpose::Plot => FileFilter::new(labels.filter(purpose))
             .glob("*.[sS][vV][gG]")
             .glob("*.[pP][dD][fF]"),

@@ -1,10 +1,13 @@
-//! Plot (SVG/PDF) and lossy Save As: the host-owned export funnel.
+//! Native save, lossy export and plot: the host-owned writing funnels.
 //!
-//! Save As dispatches **every** lossy format through the connector registry:
-//! DXF, an **experimental** DWG through upstream acadrust, and the neutral-mesh /
-//! IFC / SketchUp lanes (`.stl`, `.obj`, `.ply`, `.off`, `.coff`, `.ifc`, `.skp`).
-//! A DWG or connector save always writes a **new** file; the opened source is
-//! never overwritten.
+//! `SAVE` writes **only** the native `.ymodel` archive (ADR-0041 D1): it is the
+//! one lossless, re-openable format, so the opened source's extension never
+//! selects a different purpose. `EXPORT` is the explicit "write another format"
+//! command: every lossy format goes through the connector registry — DXF, an
+//! **experimental** DWG through upstream acadrust, and the neutral-mesh / IFC /
+//! SketchUp / glTF lanes — with the **chosen target's extension** deciding the
+//! writer. An export may overwrite the opened source (a deliberate user choice);
+//! the atomic write's `.bak` is the protection (ADR-0041 D4).
 use super::*;
 use crate::policy::{self, PlotFormat, SaveFormat};
 use cad_domain::Completeness;
@@ -54,9 +57,7 @@ struct SaveOutcome {
 
 /// Why a lossy save could not be performed, for a graded status.
 enum SaveFailure {
-    /// The chosen target is the opened source file (data-corruption guard).
-    RefusedSourcePath,
-    /// Any other explicit failure, already localized.
+    /// The explicit failure, already localized.
     Reason(String),
 }
 
@@ -112,14 +113,12 @@ impl HostCore {
     /// whole download in the same gesture as the click.
     fn finish_or_wait_save(&self, purpose: SavePurpose) -> CadResult<()> {
         if self.save_pending.get() {
-            // The picker-waiting line is the pre-write warning the user sees
-            // while choosing a target. A DWG save gets its own wording because
-            // it is an experimental export that must go to a NEW file; reusing
-            // the DXF line would hide both facts until after the write.
+            // The picker-waiting line is the pre-write status the user sees while
+            // choosing a target. SAVE and EXPORT are different intents, so each
+            // names its own line rather than reusing the vector plot's.
             let waiting = match purpose {
                 SavePurpose::Plot => "plot.picker_waiting",
-                SavePurpose::SaveDxf => "save.picker_waiting",
-                SavePurpose::SaveDwg => "save.picker_waiting_dwg",
+                SavePurpose::SaveExport => "export.picker_waiting",
                 // No ymodel-specific catalog line exists yet; the shared
                 // "choose where to save" line is the closest existing key.
                 SavePurpose::SaveYmodel => "save.picker_waiting",
@@ -154,15 +153,25 @@ impl HostCore {
             .map(|target| target.display_name.clone())
     }
 
-    /// Save the active drawing as a lossy drawing file, host-owned.
+    /// The suggested `.ymodel` name for a document: the opened source's stem when
+    /// there is one, else the document label hint.
     ///
-    /// The source format selects the default: a `.dwg` source offers an
-    /// **experimental DWG export** under a different name (`<stem>-export.dwg`),
-    /// so a SAVE never overwrites the opened drawing; a `.dxf` source keeps the
-    /// lossy DXF Save As; a `.ymodel` source — or a document with no source
-    /// format at all — is the native archive save. The chosen target's extension
-    /// is what is actually written: DXF, DWG (experimental) or a connector
-    /// format (`stl`/`obj`/`ply`/`off`/`ifc`/`skp`).
+    /// `SAVE` no longer derives its purpose or default name from the source
+    /// extension (ADR-0041 D1): every document saves to the native archive, so the
+    /// only thing the source contributes is its stem.
+    fn default_ymodel_name(&self, hint: &str) -> String {
+        let stem_source = self.save_source_name().unwrap_or_else(|| hint.to_string());
+        policy::default_save_name(&stem_source, "ymodel")
+    }
+
+    /// Save the active drawing as the native `.ymodel` archive, host-owned.
+    ///
+    /// `SAVE` is **always** [`SavePurpose::SaveYmodel`] (ADR-0041 D1), whatever
+    /// the document was opened from: `.ymodel` is the only lossless, re-openable
+    /// format. A carrier without a document archive refuses here with the stable
+    /// `unsupported-runtime: ymodel` marker **before** opening a picker — never a
+    /// silent export to another format. Every other writing format is reached
+    /// through [`Self::request_export`].
     pub(crate) fn request_save(&self) -> CadResult<()> {
         if !self.capabilities.save {
             let reason = self.message("command.unsupported", &[("command", "SAVE")]);
@@ -174,38 +183,59 @@ impl HostCore {
             self.set_catalog_status("save.export_failed", &[("reason", &busy)])?;
             return Err(CadError::Unsupported(busy));
         }
+        // A carrier with no archive cannot write the native format. Refusing
+        // before the picker is the honest answer; opening a chooser that can only
+        // fail would look like a save that ran.
+        if self.document_archive().is_none() {
+            let reason = policy::UNSUPPORTED_YMODEL.to_string();
+            self.set_catalog_status("save.export_failed", &[("reason", &reason)])?;
+            return Err(CadError::Unsupported(reason));
+        }
         let hint = self.controller.borrow().document_name_hint.clone();
-        // Transitional purpose rule (ADR-0037 Phase 1), keyed on the source the
-        // document came from — the opened target's name, or the name hint an
-        // import published — never on a new setting or a dialog:
-        //  * `.dwg` → the experimental DWG export (unchanged; NEW file)
-        //  * `.ymodel`, or **no** extension at all (blank or never-saved
-        //    document, e.g. `untitled`/`yacr-demo`) → the native archive save
-        //  * any other extension (`.dxf`, ...) → the lossy DXF Save As (unchanged)
-        // A real "which format?" choice belongs to the save dialog; until one
-        // exists this rule is the honest projection of what the document is.
-        let source_name = self.save_source_name().unwrap_or_else(|| hint.clone());
-        let (purpose, default_name) = match policy::extension_of(&source_name).as_str() {
-            "dwg" => (
-                SavePurpose::SaveDwg,
-                policy::default_dwg_export_name(&source_name),
-            ),
-            "ymodel" | "" => (
-                SavePurpose::SaveYmodel,
-                policy::default_save_name(&hint, "ymodel"),
-            ),
-            _ => (
-                SavePurpose::SaveDxf,
-                policy::default_save_name(&hint, "dxf"),
-            ),
-        };
-        if let Err(error) = self.files.begin_save(purpose, &default_name) {
+        let default_name = self.default_ymodel_name(&hint);
+        if let Err(error) = self
+            .files
+            .begin_save(SavePurpose::SaveYmodel, &default_name)
+        {
             self.set_catalog_status("save.export_failed", &[("reason", &error_text(&error))])?;
             return Err(error);
         }
         self.save_pending.set(true);
         self.drain_files()?;
-        self.finish_or_wait_save(purpose)
+        self.finish_or_wait_save(SavePurpose::SaveYmodel)
+    }
+
+    /// Export the active drawing to another format, host-owned (ADR-0041 D2).
+    ///
+    /// The chooser offers every writable extension and the **chosen target's
+    /// extension** decides the writer (the same dispatch `poll_pending_save`
+    /// uses for SAVE before this ADR); an unsupported extension keeps its stable
+    /// `save.unknown_format` / `<id>.not_implemented` marker. The default name is
+    /// the document's stem with the DXF extension, exactly what the picker used
+    /// to suggest for a drawing Save As.
+    pub(crate) fn request_export(&self) -> CadResult<()> {
+        if !self.capabilities.save {
+            let reason = self.message("command.unsupported", &[("command", "EXPORT")]);
+            self.set_catalog_status("save.export_failed", &[("reason", &reason)])?;
+            return Err(CadError::Unsupported(reason));
+        }
+        if self.loading() || self.save_pending.get() || self.pending_save.borrow().is_some() {
+            let busy = self.message("linux.busy", &[]);
+            self.set_catalog_status("save.export_failed", &[("reason", &busy)])?;
+            return Err(CadError::Unsupported(busy));
+        }
+        let hint = self.controller.borrow().document_name_hint.clone();
+        let default_name = policy::default_save_name(&hint, "dxf");
+        if let Err(error) = self
+            .files
+            .begin_save(SavePurpose::SaveExport, &default_name)
+        {
+            self.set_catalog_status("save.export_failed", &[("reason", &error_text(&error))])?;
+            return Err(error);
+        }
+        self.save_pending.set(true);
+        self.drain_files()?;
+        self.finish_or_wait_save(SavePurpose::SaveExport)
     }
 
     /// Drain a finished save interaction and perform the requested export.
@@ -229,20 +259,18 @@ impl HostCore {
         };
         let status = match (purpose, result) {
             // A closed dialog is a cancel, not a failure (all save formats).
-            (
-                SavePurpose::SaveDxf | SavePurpose::SaveDwg | SavePurpose::SaveYmodel,
-                Err(FileAbort::Cancelled),
-            ) => catalog("save.cancelled", &[]),
+            (SavePurpose::SaveExport | SavePurpose::SaveYmodel, Err(FileAbort::Cancelled)) => {
+                catalog("save.cancelled", &[])
+            }
             (SavePurpose::Plot, Err(FileAbort::Cancelled)) => catalog("plot.cancelled", &[]),
             // The platform's reason is already localized: show it verbatim.
-            (
-                SavePurpose::SaveDxf | SavePurpose::SaveDwg | SavePurpose::SaveYmodel,
-                Err(FileAbort::Failed(reason)),
-            ) => catalog("save.export_failed", &[("reason", &reason)]),
+            (SavePurpose::SaveExport | SavePurpose::SaveYmodel, Err(FileAbort::Failed(reason))) => {
+                catalog("save.export_failed", &[("reason", &reason)])
+            }
             (SavePurpose::Plot, Err(FileAbort::Failed(reason))) => {
                 catalog("plot.export_failed", &[("reason", &reason)])
             }
-            (SavePurpose::SaveDxf | SavePurpose::SaveDwg, Ok(target)) => {
+            (SavePurpose::SaveExport, Ok(target)) => {
                 match self.export_save(&target) {
                     // A connector export (mesh/IFC/SKP) has its own wording: the
                     // file is not a DXF, and the format key is what the user
@@ -267,11 +295,12 @@ impl HostCore {
                             )
                         }
                     }
-                    // A DWG write always says it is experimental and that the
-                    // source was not modified; a clean/partial distinction only
-                    // changes whether conversions are counted. A DWG that carries
-                    // an exact `3DSOLID` says so too (`save.exported_acis_sab`),
-                    // because its ACIS payload is a SAB blob in the AcDs section.
+                    // A DWG write always states it is experimental (the target
+                    // extension, not the opened source, decided this lane); a
+                    // clean/partial distinction only changes whether conversions
+                    // are counted. A DWG that carries an exact `3DSOLID` says so
+                    // too (`save.exported_acis_sab`), because its ACIS payload is a
+                    // SAB blob in the AcDs section.
                     Ok(outcome) if outcome.wrote_dwg => {
                         let clean = outcome.completeness == Completeness::Complete;
                         let key = match (outcome.acis_sab_dwg, clean) {
@@ -325,7 +354,6 @@ impl HostCore {
                             ],
                         )
                     }
-                    Err(SaveFailure::RefusedSourcePath) => catalog("save.refused_source_path", &[]),
                     Err(SaveFailure::Reason(reason)) => {
                         catalog("save.export_failed", &[("reason", &reason)])
                     }
@@ -363,7 +391,6 @@ impl HostCore {
                     "save.exported_ymodel_stale_recovery",
                     &[("path", &target.display_name), ("reason", &reason)],
                 ),
-                Err(SaveFailure::RefusedSourcePath) => catalog("save.refused_source_path", &[]),
                 Err(SaveFailure::Reason(reason)) => {
                     catalog("save.export_failed", &[("reason", &reason)])
                 }
@@ -388,16 +415,19 @@ impl HostCore {
         Ok(())
     }
 
-    /// Write the lossy drawing export for `target`'s extension.
+    /// Write the lossy drawing export for `target`'s extension (the `EXPORT`
+    /// command, ADR-0041 D2/D4).
     ///
     /// Every extension — `.dxf`, `.dwg` and the connector keys
     /// `.stl`/`.obj`/`.ply`/`.off`/`.coff`/`.ifc`/`.skp` — is dispatched through
     /// the connector registry ([`HostController::export_connector`]), so the
     /// writer's own [`cad_import_core::CompatReport`] is the single source of the
-    /// counts, the verdict and the note codes. Any other extension fails. The
-    /// opened source file is never overwritten: the platform guard (device+inode
-    /// / SAF URI) runs for **all** formats, plus a normalized path/name backstop
-    /// for every non-DXF export (web label handles, Android SAF URIs).
+    /// counts, the verdict and the note codes. Any other extension fails.
+    ///
+    /// **Overwriting is allowed** (ADR-0041 D4): a target that names the opened
+    /// source is a deliberate user choice, not a refusal. The previous bytes are
+    /// protected by the platform's atomic write (the Linux carrier keeps a
+    /// `<name>.<ext>.bak`); the host adds no identity guard of its own.
     ///
     /// After the bytes are durable, the report is recorded in the in-memory
     /// `Document.compat` table (the next `.ymodel` save persists it). A recording
@@ -419,22 +449,6 @@ impl HostCore {
                     ))
                 }
             };
-        if self.files.refuses_source_overwrite(target) {
-            return Err(SaveFailure::RefusedSourcePath);
-        }
-        if (wrote_dwg || format_id != "dxf")
-            && self
-                .source_target
-                .borrow()
-                .as_ref()
-                .is_some_and(|source| policy::same_normalized_target(source, target))
-        {
-            // Even without inode identity, reusing the opened source's path/name
-            // must never be written to. Every non-DXF lossy export (DWG and every
-            // connector format) is a Save As to a NEW file: silently overwriting
-            // the opened drawing would corrupt the only input.
-            return Err(SaveFailure::RefusedSourcePath);
-        }
         // Install the configured Save-As options on the controller first: the
         // ACIS payload version and DXF container are host settings, and the DXF
         // and DWG lanes read them when they build their request. The mesh/IFC/SKP
@@ -527,11 +541,14 @@ impl HostCore {
             // never a silent DXF/DWG export under a `.ymodel` name.
             return Err(SaveFailure::Reason(policy::UNSUPPORTED_YMODEL.to_string()));
         };
+        // In-place means the target is the exact handle the host recorded for the
+        // opened/last-saved file (`source_target` is always set from a real
+        // `FileTarget`, never re-derived), so the opaque handle is the identity.
         let in_place = self
             .source_target
             .borrow()
             .as_ref()
-            .is_some_and(|source| policy::same_normalized_target(source, target));
+            .is_some_and(|source| source.opaque == target.opaque);
         // The key the snapshot was written under, captured **before** the write
         // moves `source_target` (a first save switches uuid key → path key, and a
         // Save As switches to a new path): otherwise the discard would look under

@@ -605,3 +605,140 @@ fn a_connector_descriptor_is_available_through_the_trait() {
     );
     assert_eq!(descriptor.name_key, "connector.dxf.name");
 }
+
+/// Every registered descriptor must declare one of the two spec visibilities.
+///
+/// `cad-import-core` owns the vocabulary but cannot depend on the format crates,
+/// so the registry (this crate) is the only place the whole descriptor set can
+/// be enumerated. The match is exhaustive on purpose: a third
+/// [`cad_import_core::SpecVisibility`] variant fails to compile here instead of
+/// silently defaulting to "public".
+#[test]
+fn every_registry_descriptor_declares_a_spec_visibility() {
+    let registry = ConnectorRegistry::builtin();
+    let mut seen = 0;
+    for descriptor in registry.descriptors() {
+        match descriptor.spec {
+            cad_import_core::SpecVisibility::Public => {}
+            cad_import_core::SpecVisibility::ReverseEngineered => {}
+        }
+        seen += 1;
+    }
+    assert_eq!(seen, 12, "every registered format is covered exactly once");
+}
+
+/// Pin the classification so a future edit cannot silently flip a format.
+///
+/// Reverse-engineered evidence (all in-repo):
+/// * DWG — independent `acadrust` reader (`THIRD_PARTY_NOTICES.md`:3-5); writer
+///   `docs/compatibility.md`:138 vendor/AutoCAD NOT VERIFIED;
+/// * DGN — `cadkit-dgn` clean-room reader (`THIRD_PARTY_NOTICES.md`:11-12);
+/// * SKP — `skpwright` clean-room reader (`cad-import-skp/src/lib.rs`:3-6,
+///   `THIRD_PARTY_NOTICES.md`:87);
+/// * RVT — `rvt` clean-room reader (`THIRD_PARTY_NOTICES.md`:54-55,
+///   `vendor/rvt/README.md`:116).
+///
+/// DXF stays public because the repository settles its ambiguities against
+/// Autodesk's published DXF reference (`docs/adr/0017-dimension-family.md`:349,
+/// `docs/hatch-gradient.md`:46).
+#[test]
+fn spec_visibility_is_pinned_per_format() {
+    use cad_import_core::SpecVisibility;
+    let registry = ConnectorRegistry::builtin();
+    let expected = [
+        ("dwg", SpecVisibility::ReverseEngineered),
+        ("dgn", SpecVisibility::ReverseEngineered),
+        ("skp", SpecVisibility::ReverseEngineered),
+        ("rvt", SpecVisibility::ReverseEngineered),
+        ("dxf", SpecVisibility::Public),
+        ("step", SpecVisibility::Public),
+        ("ifc", SpecVisibility::Public),
+        ("gltf", SpecVisibility::Public),
+        ("stl", SpecVisibility::Public),
+        ("ply", SpecVisibility::Public),
+        ("off", SpecVisibility::Public),
+        ("obj", SpecVisibility::Public),
+    ];
+    for (id, spec) in expected {
+        let descriptor = registry
+            .descriptor(id)
+            .unwrap_or_else(|| panic!("{id} is registered"));
+        assert_eq!(descriptor.spec, spec, "{id} spec visibility");
+    }
+
+    let mut reverse: Vec<&str> = registry
+        .descriptors()
+        .filter(|descriptor| descriptor.spec == SpecVisibility::ReverseEngineered)
+        .map(|descriptor| descriptor.id)
+        .collect();
+    reverse.sort_unstable();
+    assert_eq!(reverse, ["dgn", "dwg", "rvt", "skp"]);
+}
+
+/// Only writers whose output no vendor producer has accepted are experimental.
+#[test]
+fn only_the_unverified_writers_are_experimental() {
+    let registry = ConnectorRegistry::builtin();
+    for descriptor in registry.descriptors() {
+        let experimental = descriptor
+            .export
+            .map(|export| export.experimental)
+            .unwrap_or(false);
+        assert_eq!(
+            experimental,
+            matches!(descriptor.id, "dwg" | "skp"),
+            "{} experimental export",
+            descriptor.id
+        );
+    }
+}
+
+/// The `openedSource` projection (ADR-0041 D5): only a reverse-engineered
+/// source produces an object, with the descriptor's own export capability.
+#[test]
+fn the_opened_source_projection_names_the_connector_and_its_writer() {
+    let registry = ConnectorRegistry::builtin();
+
+    // A public-spec format never produces the wire object.
+    for public in ["dxf", "step", "ifc", "gltf", "stl", "ply", "off", "obj"] {
+        assert_eq!(
+            registry.opened_source(Some(public)),
+            None,
+            "{public} is a published spec: no openedSource object"
+        );
+    }
+
+    // Reverse-engineered readers without a writer.
+    for read_only in ["dgn", "rvt"] {
+        let source = registry
+            .opened_source(Some(read_only))
+            .unwrap_or_else(|| panic!("{read_only} is reverse engineered"));
+        assert_eq!(source.connector, read_only);
+        assert!(!source.can_write, "{read_only} has no writer in this build");
+        assert!(
+            !source.experimental,
+            "{read_only} has no writer to be experimental"
+        );
+    }
+
+    // DWG and SKP write, and both writers are unverified (experimental).
+    for experimental in ["dwg", "skp"] {
+        let source = registry
+            .opened_source(Some(experimental))
+            .unwrap_or_else(|| panic!("{experimental} is reverse engineered"));
+        assert!(
+            source.can_write,
+            "{experimental} declares an export direction"
+        );
+        assert!(
+            source.experimental,
+            "{experimental}'s writer is not vendor-verified"
+        );
+        assert!(!source.spec_is_public());
+    }
+
+    // No connector (blank/New, `.ymodel`, direct adapter call) is absent.
+    assert_eq!(registry.opened_source(None), None);
+    // An id the registry does not know is never guessed into a provenance.
+    assert_eq!(registry.opened_source(Some("unknown-format")), None);
+}

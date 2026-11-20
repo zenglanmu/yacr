@@ -156,3 +156,22 @@ impl HostController {
         Ok(())
     }
 }
+
+impl HostController {
+    /// The provenance of the connector that opened the current document
+    /// (ADR-0041 D5), or `None`.
+    ///
+    /// Derived from the document's own **import report** — the host record the
+    /// successful publish wrote and New/Close/`install_snapshot` clear — so the
+    /// answer is per-document by construction. It is never inferred from
+    /// [`Self::document_name_hint`] (extension sniffing is what this replaces):
+    /// a blank drawing, a native `.ymodel` install and a public-spec connector
+    /// all report `None` here.
+    pub fn opened_source(&self) -> Option<crate::OpenedSource> {
+        crate::connector::opened_source(
+            self.last_import_report
+                .as_ref()
+                .and_then(|report| report.connector),
+        )
+    }
+}

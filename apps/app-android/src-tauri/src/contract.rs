@@ -117,6 +117,114 @@ fn the_render_target_stays_the_full_surface() {
 }
 
 #[test]
+fn the_native_session_installs_the_ymodel_archive_and_recovery_store() {
+    // SAVE writes only `.ymodel` (ADR-0041 D1), so a carrier without this adapter
+    // cannot save anything at all. The archive is the carrier's composition:
+    // `cad-store-zip` may only be linked here, and the tick must install it on the
+    // one native session. `set_persistence` is the recovery snapshot store, which
+    // must be installed exactly once the `nativeAssetsReady` handshake names
+    // `filesDir` (never invented).
+    assert!(
+        TICK.contains("session.set_document_archive(Some(crate::ymodel_archive::ZipArchive::new()"),
+        "the tick must install the carrier's .ymodel archive"
+    );
+    assert!(
+        TICK.contains("install_recovery_store(&session);"),
+        "the session must be given the recovery store at creation"
+    );
+    assert!(
+        TICK.contains("install_recovery_store(session);"),
+        "a late nativeAssetsReady handshake must still install the recovery store"
+    );
+    assert!(
+        TICK.contains(
+            "session.set_persistence(Some(crate::recovery_store::FsRecoveryStore::new(dir)"
+        ),
+        "the recovery store must be the filesDir/recovery FsRecoveryStore"
+    );
+    assert!(
+        !TICK.contains("NoRecovery"),
+        "the host must not install the explicit 'no recovery' stub"
+    );
+}
+
+#[test]
+fn the_saf_save_path_never_claims_an_atomic_replace_or_a_backup_it_did_not_keep() {
+    // SAF has no atomic replace: a write truncates, and the sibling `.bak` create
+    // is best effort. The carrier therefore keeps the previous-bytes read, the
+    // staged write and the `save.no_backup` notice in one module, and the tick
+    // publishes that key only through the real status snapshot.
+    const SAF_WRITE: &str = include_str!("platform/saf_write.rs");
+    assert!(
+        SAF_WRITE.contains("pub const SAVE_NO_BACKUP_STATUS: &str = \"save.no_backup\";"),
+        "the notice key must be the catalog's own save.no_backup"
+    );
+    assert!(
+        SAF_WRITE.contains("fn overwrite_safety(backup_written: bool) -> OverwriteSafety"),
+        "the capability decision must live in one function with its doc comment"
+    );
+    assert!(
+        SAF_WRITE.contains("let previous = io.read(uri)?;"),
+        "an overwrite must read the current bytes first"
+    );
+    // The Kotlin lane stages the bytes in a cache file before opening the output.
+    const PICKER: &str =
+        include_str!("../gen/android/app/src/main/java/io/github/zenglanmu/yacr/DocumentPicker.kt");
+    assert!(
+        PICKER.contains("File.createTempFile(\"yacr-save-\", \".tmp\", activity.cacheDir)"),
+        "the write must be staged in an app-cache file"
+    );
+    assert!(
+        PICKER.contains("output.fd.sync()"),
+        "the staged file must be synced before the provider is touched"
+    );
+    assert!(
+        PICKER.contains("fun documentWriteSiblingBackup("),
+        "the sibling .bak create must exist on the Kotlin lane"
+    );
+    // And the notice reaches the chrome: the tick folds it into the mirrored
+    // status when the session itself has no error.
+    assert!(
+        TICK.contains("snapshot.error = Some(crate::platform::SAVE_NO_BACKUP_STATUS.to_string());"),
+        "the tick must publish the latched notice in the status snapshot"
+    );
+}
+
+#[test]
+fn an_opened_ymodel_is_decoded_by_the_archive_and_never_offered_to_a_connector() {
+    // (b) The SAF delivery is only `FileEvent::Opened`; the format decision is the
+    // shared host's, and it must route `.ymodel` to the carrier archive **before**
+    // any importer. The Android platform layer therefore names no importer at all:
+    // there is no second open funnel here that could hand these bytes to a
+    // connector probe.
+    assert!(
+        !PLATFORM.contains("cad_import"),
+        "the Android file contracts must not call an importer"
+    );
+    assert!(
+        !PLATFORM.contains("open_bytes"),
+        "the Android file contracts must not open bytes; the shared host owns that"
+    );
+    const SHARED_OPEN: &str = include_str!("../../../../crates/cad-host/src/open.rs");
+    let ymodel_route = SHARED_OPEN
+        .find("if policy::is_ymodel_target(&target) {")
+        .expect("the shared open funnel must recognize a .ymodel target");
+    let importer_probe = SHARED_OPEN
+        .find("open_bytes_with_xref(")
+        .expect("the shared open funnel must reach the importer for other formats");
+    assert!(
+        ymodel_route < importer_probe,
+        "a .ymodel must be decoded by the archive before any importer probe"
+    );
+    // The archive open is the same call the Linux carrier uses
+    // (`archive.read`), not an importer: `deliver_ymodel_open` must be present.
+    assert!(
+        SHARED_OPEN.contains("fn deliver_ymodel_open(&self, target: FileTarget, bytes: Arc<[u8]>)"),
+        "the shared funnel must keep the archive open path"
+    );
+}
+
+#[test]
 fn the_carrier_never_fabricates_a_document_or_an_open_funnel() {
     // Built at run time so this file's own assertion text cannot satisfy the check.
     let from_bytes = concat!("from", "_bytes");

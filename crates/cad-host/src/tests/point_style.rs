@@ -36,7 +36,8 @@ fn a_pdmode_pdsize_write_survives_a_real_save_and_reopen() {
     assert_eq!(saved.point_display_size(), -20.0);
 
     // The real save gesture: the platform writes the exported DXF bytes.
-    core.request_save().expect("the synchronous save completes");
+    core.request_export()
+        .expect("the synchronous save completes");
     let written = files.written.borrow();
     assert_eq!(written.len(), 1, "exactly one file is written");
     let bytes = written[0].1.clone();

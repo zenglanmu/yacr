@@ -26,6 +26,7 @@ command_selector_contract! {
     CloseDrawing => "CLOSE",
     PlotDrawing => "PLOT",
     SaveDrawingAs => "SAVE",
+    Export => "EXPORT",
     CancelLoading => "CANCEL",
     Pan => "PAN",
     Zoom => "ZOOM",
@@ -256,12 +257,16 @@ fn command_normalization_covers_every_variant() {
     assert_eq!(normalize_command("FIT"), Some(CommandId::FitDrawing));
     assert_eq!(normalize_command("fit\n"), Some(CommandId::FitDrawing));
     assert_eq!(normalize_command("line"), Some(CommandId::CreateLine));
-    assert_eq!(normalize_command("export"), Some(CommandId::PlotDrawing));
+    // EXPORT is a canonical command of its own since ADR-0041 D2 (it used to be
+    // a PLOT alias); PLOT/PRINT keep the vector plot.
+    assert_eq!(normalize_command("export"), Some(CommandId::Export));
+    assert_eq!(normalize_command("PLOT"), Some(CommandId::PlotDrawing));
+    assert_eq!(normalize_command("PRINT"), Some(CommandId::PlotDrawing));
     // Contract: `canonical_selector` is an exhaustive `match` over `CommandId` with no wildcard arm, so a new variant cannot be added
     // without a selector here. Each variant must then appear in
     // `COMMAND_TABLE` exactly once (no missing row, no duplicate mapping).
     assert_eq!(
-        EXPECTED_COMMAND_COUNT, 242,
+        EXPECTED_COMMAND_COUNT, 243,
         "the cad_app CommandId set changed; update COMMAND_TABLE and this contract"
     );
     assert_eq!(ALL_COMMAND_IDS.len(), EXPECTED_COMMAND_COUNT);

@@ -63,9 +63,6 @@ impl PlatformFiles for FakeFiles {
     fn write_atomic(&self, _target: &FileTarget, _bytes: &[u8]) -> CadResult<()> {
         Err(CadError::Unsupported("write unsupported".into()))
     }
-    fn refuses_source_overwrite(&self, _target: &FileTarget) -> bool {
-        false
-    }
     fn set_source(&self, _target: Option<&FileTarget>) {}
     fn poll(&self) -> Vec<FileEvent> {
         std::mem::take(&mut self.events.borrow_mut())
@@ -213,9 +210,6 @@ impl PlatformFiles for PendingSaveFiles {
     }
     fn write_atomic(&self, _target: &FileTarget, _bytes: &[u8]) -> CadResult<()> {
         Err(CadError::Unsupported("write unsupported".into()))
-    }
-    fn refuses_source_overwrite(&self, _target: &FileTarget) -> bool {
-        false
     }
     fn set_source(&self, _target: Option<&FileTarget>) {}
     fn poll(&self) -> Vec<FileEvent> {

@@ -26,6 +26,19 @@ export const GPU_FALLBACK_TOKEN = 'gpu.pulled.insufficient-vram';
 /** The catalog key of the short banner label for a known token. */
 const GPU_FALLBACK_SHORT_KEY = 'gpu.pulled.insufficient_vram.short';
 
+/**
+ * Stable host tokens the banner can translate instead of showing verbatim.
+ *
+ * A carrier publishes these as bare catalog keys when it has no catalog of its
+ * own (Android's SAF write path does), so the chrome is the only place that can
+ * turn them into a sentence. Tokens without an entry are shown as sent.
+ */
+const BANNER_TOKEN_KEYS: ReadonlyArray<readonly [string, string]> = [
+  [GPU_FALLBACK_TOKEN, GPU_FALLBACK_SHORT_KEY],
+  // Android cannot keep a previous copy when it overwrites a SAF document.
+  ['save.no_backup', 'save.no_backup'],
+];
+
 /** Whether `error` is the renderer's pulled-copy fallback report. */
 export function isGpuFallbackError(error: string | null | undefined): boolean {
   return typeof error === 'string' && error.startsWith(GPU_FALLBACK_TOKEN);
@@ -37,11 +50,14 @@ export function isGpuFallbackError(error: string | null | undefined): boolean {
  * available as the banner's `title`; only the visible line is translated.
  */
 export function statusBannerText(error: string, t: Translator): string {
-  if (!isGpuFallbackError(error)) return error;
-  const label = t(GPU_FALLBACK_SHORT_KEY);
-  // A missing catalog entry resolves to the key itself; the raw host sentence is
-  // more honest than showing an identifier in the banner.
-  return label === GPU_FALLBACK_SHORT_KEY ? error : label;
+  for (const [token, key] of BANNER_TOKEN_KEYS) {
+    if (!error.startsWith(token)) continue;
+    const label = t(key);
+    // A missing catalog entry resolves to the key itself; the raw host sentence
+    // is more honest than showing an identifier in the banner.
+    if (label !== key) return label;
+  }
+  return error;
 }
 
 let tokenPresent = false;

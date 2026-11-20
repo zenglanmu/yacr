@@ -9,6 +9,9 @@ import android.util.Log
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileNotFoundException
+import java.io.FileOutputStream
 import java.io.IOException
 
 /**
@@ -211,15 +214,30 @@ class DocumentPicker(private val activity: MainActivity) {
    * Truncating write of `bytes` to `uri`, synchronously (the caller's thread).
    * Throws [IOException] on failure so the native side reports a real error instead
    * of an empty success. No catch here is silent: every failure is logged first.
+   *
+   * The bytes are first written to an app-cache temp file and `sync`ed, then that
+   * file is streamed into the provider. The target is therefore only opened after
+   * the whole payload is known to be writable locally, so an encode/short-write
+   * failure the platform detects before this point never touches the document.
+   * This is **not** an atomic replace: SAF has no rename, and a provider failure
+   * mid-stream can still truncate the target (see `documentWriteSiblingBackup`).
    */
   fun documentWriteUri(uriString: String, bytes: ByteArray) {
     val target = Uri.parse(uriString)
     Log.i(TAG, "document write: start uri=$uriString bytes=${bytes.size}")
+    val staging = File.createTempFile("yacr-save-", ".tmp", activity.cacheDir)
     try {
-      val output = activity.contentResolver.openOutputStream(target, "wt")
+      FileOutputStream(staging).use { output ->
+        output.write(bytes)
+        output.flush()
+        // The staged file exists before the provider is touched; a failure here
+        // (out of space) leaves the target untouched.
+        output.fd.sync()
+      }
+      val outputStream = activity.contentResolver.openOutputStream(target, "wt")
         ?: throw IOException("openOutputStream(..., \"wt\") returned null for $target")
-      output.use { stream ->
-        stream.write(bytes)
+      outputStream.use { stream ->
+        staging.inputStream().use { staged -> staged.copyTo(stream) }
         stream.flush()
       }
       Log.i(TAG, "document write: done uri=$uriString bytes=${bytes.size}")
@@ -229,6 +247,87 @@ class DocumentPicker(private val activity: MainActivity) {
     } catch (error: Exception) {
       Log.e(TAG, "document write: failed uri=$uriString: ${error.message}")
       throw IOException("write failed for $uriString: ${error.message}", error)
+    } finally {
+      if (!staging.delete()) Log.w(TAG, "document write: could not delete ${staging.absolutePath}")
+    }
+  }
+
+  /**
+   * One synchronous read of `uri` on the caller's thread (the native tick).
+   *
+   * @return the document bytes, or `null` when the document does not exist. Every
+   *   other failure throws (JNI reports it); this never answers with an empty
+   *   array that would read as "the document is empty".
+   */
+  fun documentReadUriSync(uriString: String): ByteArray? {
+    val target = Uri.parse(uriString)
+    return try {
+      val input = activity.contentResolver.openInputStream(target) ?: return null
+      input.use { stream -> stream.readBytes() }
+    } catch (missing: FileNotFoundException) {
+      Log.i(TAG, "document read (sync): absent uri=$uriString")
+      null
+    } catch (error: Exception) {
+      Log.e(TAG, "document read (sync): failed uri=$uriString: ${error.message}")
+      throw IOException("sync read failed for $uriString: ${error.message}", error)
+    }
+  }
+
+  /**
+   * Create a sibling `<display name>.bak` document holding `bytes`.
+   *
+   * Best effort: SAF does not guarantee a sibling create, and many providers
+   * refuse it. Returns `false` (never throws) when the provider cannot do it, so
+   * the native save path can say out loud that no previous copy was kept. This is
+   * **not** an atomic replace; it is the only "keep the old bytes" mechanism SAF
+   * offers.
+   */
+  fun documentWriteSiblingBackup(uriString: String, bytes: ByteArray): Boolean {
+    val target = Uri.parse(uriString)
+    return try {
+      val parent = parentDocumentUri(target)
+      if (parent == null) {
+        Log.w(TAG, "document backup: no sibling location for $uriString")
+        return false
+      }
+      val displayName = queryDisplayName(target)
+      val created = DocumentsContract.createDocument(
+        activity.contentResolver,
+        parent,
+        "application/octet-stream",
+        "$displayName.bak",
+      )
+      if (created == null) {
+        Log.w(TAG, "document backup: provider returned no document for $displayName.bak")
+        return false
+      }
+      val output = activity.contentResolver.openOutputStream(created, "wt")
+        ?: throw IOException("openOutputStream returned null for the backup document")
+      output.use { stream ->
+        stream.write(bytes)
+        stream.flush()
+      }
+      Log.i(TAG, "document backup: wrote ${created} (${bytes.size} bytes)")
+      true
+    } catch (error: Exception) {
+      Log.w(TAG, "document backup: unavailable for $uriString: ${error.message}")
+      false
+    }
+  }
+
+  /**
+   * The parent directory document URI of `target`, when its document id is a path
+   * (`dir/name`) — the same derivation the open picker's initial-URI hint uses.
+   * Providers with opaque ids have no derivable sibling location, so `null`.
+   */
+  private fun parentDocumentUri(target: Uri): Uri? {
+    val authority = target.authority ?: return null
+    return try {
+      val documentId = DocumentsContract.getDocumentId(target)
+      val parentId = documentId.substringBeforeLast('/', missingDelimiterValue = "")
+      if (parentId.isEmpty()) null else DocumentsContract.buildDocumentUri(authority, parentId)
+    } catch (_: Exception) {
+      null
     }
   }
 

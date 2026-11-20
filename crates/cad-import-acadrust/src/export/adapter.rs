@@ -35,7 +35,7 @@ use cad_domain::{CadError, CadResult, SupportStatus};
 use cad_import_core::{
     CompatCounts, CompatEntry, CompatReport, Connector, ConnectorDescriptor, ExportCapability,
     ExportJob, ExportOutput, ExportSpace as CoreExportSpace, Exporter, FidelityLevel,
-    ImportCapability, ReportDirection,
+    ImportCapability, ReportDirection, SpecVisibility,
 };
 
 use super::{
@@ -50,10 +50,15 @@ use super::{
 /// strings and are never parsed. `lossy` is `true` because this is a **Save As**
 /// of the resolved display model: colour/linetype/lineweight provenance is
 /// preserved symbolically, but every other conversion and drop is reported.
+///
+/// `spec` is [`SpecVisibility::Public`]: the reader/writer follow Autodesk's
+/// published DXF reference (see `docs/adr/0017-dimension-family.md`:349 and
+/// `docs/hatch-gradient.md`:46, which settle ambiguities against it).
 pub const DESCRIPTOR_DXF: ConnectorDescriptor = ConnectorDescriptor {
     id: "dxf",
     name_key: "connector.dxf.name",
     extensions: &["dxf"],
+    spec: SpecVisibility::Public,
     import: Some(ImportCapability {
         versions: "AC1009..AC1032 (R12-R2018)",
         container: "dxf",
@@ -62,6 +67,7 @@ pub const DESCRIPTOR_DXF: ConnectorDescriptor = ConnectorDescriptor {
         versions: "AC1024/AC1027/AC1032 (R2010/R2013/R2018)",
         level: FidelityLevel::L1,
         lossy: true,
+        experimental: false,
     }),
     declared_classes: &[
         "AcDbLine",
@@ -85,10 +91,17 @@ pub const DESCRIPTOR_DXF: ConnectorDescriptor = ConnectorDescriptor {
 /// evidence for. The writer is the upstream `acadrust::DwgWriter`, always
 /// AC1032, and is **experimental**: the only evidence is a synthetic acadrust
 /// self-roundtrip, never a vendor opening the file.
+///
+/// `spec` is [`SpecVisibility::ReverseEngineered`]: the DWG container is read by
+/// the independent `acadrust` implementation
+/// (`THIRD_PARTY_NOTICES.md`:3-5) — no published DWG specification is used
+/// anywhere in this repository — and `docs/compatibility.md`:138 records the
+/// writer as experimental with vendor/AutoCAD NOT VERIFIED.
 pub const DESCRIPTOR_DWG: ConnectorDescriptor = ConnectorDescriptor {
     id: "dwg",
     name_key: "connector.dwg.name",
     extensions: &["dwg"],
+    spec: SpecVisibility::ReverseEngineered,
     import: Some(ImportCapability {
         versions: "AC1014..AC1032",
         container: "dwg",
@@ -97,6 +110,7 @@ pub const DESCRIPTOR_DWG: ConnectorDescriptor = ConnectorDescriptor {
         versions: "AC1032 (R2018), experimental",
         level: FidelityLevel::L1,
         lossy: true,
+        experimental: true,
     }),
     declared_classes: DESCRIPTOR_DXF.declared_classes,
 };

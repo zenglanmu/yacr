@@ -32,7 +32,10 @@ fn cad_command_aliases_reports_the_autocad_abbreviations_and_canonical_targets()
     assert_eq!(by_alias("EX"), Some("EXTEND"));
     // The word synonyms that predate the abbreviation block are published too:
     // the answer is the whole `COMMAND_ALIASES` table, not just the new rows.
-    assert_eq!(by_alias("EXPORT"), Some("PLOT"));
+    // `EXPORT` is a canonical command since ADR-0041, so it must no longer appear
+    // as a `PLOT` alias; `PRINT` is the remaining plot synonym.
+    assert_eq!(by_alias("EXPORT"), None);
+    assert_eq!(by_alias("PRINT"), Some("PLOT"));
     // `MA` is AutoCAD's MATCHPROP abbreviation, published only because MATCHPROP
     // itself is now an admitted command: the alias table never invents a target.
     assert_eq!(by_alias("MA"), Some("MATCHPROP"));

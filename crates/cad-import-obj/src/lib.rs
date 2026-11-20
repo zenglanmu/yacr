@@ -35,7 +35,7 @@ use cad_domain::{CadError, CadResult, Diagnostic, Mesh, Point3, UnitContext};
 use cad_import_core::{
     compute_identity, ConnectorDescriptor, ExportCapability, FidelityLevel, ImportCapability,
     ImportLimits, ImportPhase, ImportProgress, ImportProgressSink, ImportReport, ImportRequest,
-    ImportedDrawing, Importer, MeshImport, NoopProgress,
+    ImportedDrawing, Importer, MeshImport, NoopProgress, SpecVisibility,
 };
 use tobj::{LoadOptions, Material, Model};
 
@@ -600,10 +600,14 @@ mod tests;
 /// Owned by this crate. `cad-export-mesh` writes the geometry (`v`/`vn`/`f`,
 /// one `o` per source entity); the writer is lossy because OBJ stores no
 /// per-vertex colours here (no `mtllib` is emitted) and no units.
+///
+/// `spec` is [`SpecVisibility::Public`]: Wavefront OBJ is a plain-text format
+/// with a published description, implemented through `tobj`.
 pub const DESCRIPTOR_OBJ: ConnectorDescriptor = ConnectorDescriptor {
     id: "obj",
     name_key: "connector.obj.name",
     extensions: &["obj"],
+    spec: SpecVisibility::Public,
     import: Some(ImportCapability {
         versions: "Wavefront OBJ (triangulated, no mtllib)",
         container: "obj",
@@ -612,6 +616,7 @@ pub const DESCRIPTOR_OBJ: ConnectorDescriptor = ConnectorDescriptor {
         versions: "Wavefront OBJ",
         level: FidelityLevel::L1,
         lossy: true,
+        experimental: false,
     }),
     declared_classes: &[],
 };

@@ -257,9 +257,17 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           { id: 'OPEN', labelKey: 'file.open', icon: 'open', command: 'OPEN', large: true },
           { id: 'NEW', labelKey: 'qat.new', icon: 'new', command: 'NEW', large: true },
           { id: 'SAVE', labelKey: 'qat.save', icon: 'save', command: 'SAVE', large: true },
-          // Plot is a file-level output action like Save: it is the same router
-          // selector as the `EXPORT`/`PRINT` aliases, gated by `canPlot`. The
-          // entry reuses the `save` glyph (there is no dedicated plot icon).
+          // EXPORT writes a copy in the format the host's picker chooses
+          // (ADR-0041). It is not a PLOT alias any more: its own router selector
+          // opens an export picker whose extension decides the writer, and the
+          // chrome offers no format submenu. It carries SAVE's gate
+          // (`canSave`): the host advertises it through the save capability, and
+          // an export needs the same open, idle document.
+          { id: 'EXPORT', labelKey: 'file.export', icon: 'export', command: 'EXPORT', large: true },
+          // Plot renders the drawing to SVG/PDF through the host's own picker,
+          // gated by `canPlot`. `PRINT` remains its alias; `EXPORT` no longer
+          // is. The entry reuses the `save` glyph (there is no dedicated plot
+          // icon).
           { id: 'PLOT', labelKey: 'file.plot', icon: 'save', command: 'PLOT', large: true },
           // CLOSE ends the open drawing and returns to the start page. It is a
           // real payload-free router command, disabled by admission with the

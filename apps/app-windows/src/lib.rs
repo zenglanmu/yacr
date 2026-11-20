@@ -20,26 +20,37 @@
 //! command/state layer lives in `cad-desktop-shell`. Both are imported directly,
 //! with no compatibility shim.
 //!
-//! **Windows only**: `tauri`/`wry`/`tao`, WebView2 and the Win32 APIs are
-//! Windows-target dependencies, so this crate is an empty shell on every other
-//! target and a workspace wasm (or other-target) `--lib` check validates
-//! isolation rather than pretending the host can run there. The binary returns an
-//! explicit NOT IMPLEMENTED error elsewhere ([`entry::run`]).
+//! **Windows only for the host**: `tauri`/`wry`/`tao`, WebView2 and the Win32
+//! host/windowing APIs are Windows-target dependencies, so [`host`],
+//! [`redraw`] and [`win32_surface`] do not compile elsewhere and a workspace
+//! wasm (or other-target) `--lib` check validates that isolation rather than
+//! pretending the host can run there. The binary returns an explicit NOT
+//! IMPLEMENTED error elsewhere ([`entry::run`]).
 //!
 //! [`support`] is deliberately target-independent: it holds the WebView2
 //! missing-runtime refusal contract (marker, exit code, localized copy) and the
-//! pinned transparent-background alpha, so its unit tests run on any host.
+//! pinned transparent-background alpha, so its unit tests run on any host. The
+//! same holds for the carrier file contracts ([`platform`] minus its COM
+//! choosers, [`ymodel_archive`], [`recovery_store`]), which are plain std-fs and
+//! trait code.
 
 pub mod composition_geometry;
 pub mod entry;
 pub mod support;
 
+// Carrier file contracts that are plain std-fs/trait code: the platform seam
+// (`ReactFiles`/`ReactSurface`/`ReactConfigStore`, including the atomic save
+// write), the `.ymodel` archive adapter and the recovery store. They compile on
+// every target so their contract tests run on the development host; only the COM
+// choosers inside `platform` are Windows-gated (`platform/native.rs`).
+pub mod platform;
+pub mod recovery_store;
+pub mod ymodel_archive;
+
 #[cfg(target_os = "windows")]
 pub mod host;
 #[cfg(target_os = "windows")]
 mod main_thread;
-#[cfg(target_os = "windows")]
-pub mod platform;
 #[cfg(target_os = "windows")]
 pub mod redraw;
 #[cfg(target_os = "windows")]

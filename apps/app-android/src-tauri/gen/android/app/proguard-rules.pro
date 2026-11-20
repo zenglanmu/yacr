@@ -28,5 +28,7 @@
     public void documentLaunchSave(java.lang.String);
     public void documentReadUri(java.lang.String);
     public void documentWriteUri(java.lang.String, byte[]);
+    public byte[] documentReadUriSync(java.lang.String);
+    public boolean documentWriteSiblingBackup(java.lang.String, byte[]);
     public java.lang.Object[] documentSnapshot();
 }

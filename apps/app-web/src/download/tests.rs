@@ -21,7 +21,7 @@ fn target(name: &str) -> FileTarget {
 fn begin_save_synthesizes_one_download_target_per_call() {
     let files = files();
     files
-        .begin_save(SavePurpose::SaveDxf, "drawing.dxf")
+        .begin_save(SavePurpose::SaveExport, "drawing.dxf")
         .expect("the browser synthesizes the save target");
     files
         .begin_save(SavePurpose::Plot, "drawing.svg")
@@ -31,7 +31,7 @@ fn begin_save_synthesizes_one_download_target_per_call() {
     assert_eq!(events.len(), 2, "exactly one event per begin_save");
     match &events[0] {
         FileEvent::SaveTarget { purpose, target } => {
-            assert_eq!(*purpose, SavePurpose::SaveDxf);
+            assert_eq!(*purpose, SavePurpose::SaveExport);
             assert_eq!(target.display_name, "drawing.dxf");
             assert_eq!(target.opaque, "download://drawing.dxf");
         }
@@ -54,7 +54,7 @@ fn begin_save_refuses_a_blank_name_instead_of_inventing_one() {
     for blank in ["", "   ", "\t\n"] {
         let files = files();
         let error = files
-            .begin_save(SavePurpose::SaveDxf, blank)
+            .begin_save(SavePurpose::SaveExport, blank)
             .expect_err("a blank download name is refused");
         match error {
             CadError::InvalidInput(reason) => {
@@ -140,13 +140,14 @@ fn open_still_refuses_with_the_stable_filesystem_prefix() {
 }
 
 #[test]
-fn the_source_overwrite_guard_answers_false_and_still_remembers_the_source() {
+fn set_source_round_trips_but_never_gates_a_write() {
     let files = files();
     let source = target("drawing.dwg");
-    assert!(!files.refuses_source_overwrite(&source));
     files.set_source(Some(&source));
     assert_eq!(files.source(), Some(source.clone()));
-    assert!(!files.refuses_source_overwrite(&source));
+    files
+        .write_atomic(&source, b"replaced")
+        .expect("a download reusing the opened name is allowed");
     files.set_source(None);
     assert_eq!(files.source(), None);
 }

@@ -315,6 +315,17 @@ impl CadSession {
             .import_snapshot()
             .as_ref()
             .and_then(CadImportProgress::from_snapshot);
+        // The opened source's connector provenance (ADR-0041 D5), read from the
+        // document's own import report — the record a successful publish wrote
+        // and New/Close/`install_snapshot` clear. Never derived from `label`
+        // (extension sniffing is what this replaces): a public-spec connector,
+        // a blank document and a native `.ymodel` all stay absent.
+        status.opened_source = self
+            .core
+            .controller
+            .borrow()
+            .opened_source()
+            .map(OpenedSource::from_app);
         // The authoritative xref rows projected above: always carried, never
         // omitted, and empty for a document that declares none.
         status.references = references;

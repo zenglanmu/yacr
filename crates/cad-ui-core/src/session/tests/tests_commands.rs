@@ -63,3 +63,7 @@ mod zoom_window_previous;
 /// A committed synthetic, writer-produced AC1032 DWG with four LINE
 /// entities (`fixtures/manifest`). It is not a vendor sample.
 const SYNTHETIC_DWG: &[u8] = include_bytes!("../../../../../fixtures/dwg/synthetic-four-lines.dwg");
+
+/// A committed synthetic DXF (a **public-spec** format): the "no
+/// `openedSource`" half of the provenance projection.
+const SYNTHETIC_DXF: &[u8] = include_bytes!("../../../../../fixtures/dxf/synthetic-acis-cube.dxf");

@@ -3,12 +3,15 @@
 //! Concrete `cad-platform` implementations for the Windows desktop host,
 //! decoupled from the Tauri/WebView2 wiring:
 //!
-//! * [`ReactFiles`] — [`PlatformFiles`]: a native open via the COM
-//!   `IFileOpenDialog` on a worker thread, plus the `--open`/fixture target read.
-//!   It never fabricates a success: a cancelled chooser is a
-//!   [`FileEvent::Cancelled`], a missing/unreadable file is an explicit
-//!   [`FileEvent::Failed`], and a second open is refused while one is pending
-//!   (bounded, single-flight). Save/plot are explicitly `Unsupported`.
+//! * [`ReactFiles`] — [`PlatformFiles`]: native open **and** save-target choosers
+//!   via COM `IFileOpenDialog`/`IFileSaveDialog` on a worker thread
+//!   (`platform/native.rs`), the `--open`/fixture target read, and the real
+//!   atomic save write. It never fabricates a success: a cancelled chooser is a
+//!   [`FileEvent::Cancelled`], a missing/unreadable file or a failed dialog is an
+//!   explicit [`FileEvent::Failed`], and open/save share one single-flight
+//!   admission (bounded, capacity-1 terminal). The save write is temp file →
+//!   `sync_all` → `.bak` of the previous file → replace → best-effort
+//!   directory fsync, so a partial file is never left in the target's place.
 //! * [`ReactSurface`] — [`SurfaceSource`]: the CAD content rectangle and scale
 //!   reported by the frontend DOM, shared through an `Rc<Cell<..>>`.
 //! * [`ReactConfigStore`] — [`ConfigStore`]: std-fs config/preference loading
@@ -19,14 +22,23 @@
 //! User-visible dialog strings come from the single UI i18n catalogue
 //! (`crates/cad-ui-core/i18n/*.json`), selected by locale through
 //! `cad_ui_core::i18n` — no host-side hardcoded UI text. Windows owns its own
-//! `windows.*` keys so a future platform label change cannot leak across hosts.
+//! `windows.picker_*` keys so a future platform label change cannot leak across
+//! hosts; the save titles/filters reuse the shipped shared wording until
+//! `windows.save_*` entries exist (see `platform/save.rs`).
+//!
+//! The module is target-independent: everything except the COM choosers is
+//! plain std-fs/trait code, so the save/backup/config contracts are unit-tested
+//! on any host. Only `platform/native.rs` needs the real Windows target to
+//! type-check.
 //!
 //! Resource resolution (`cad_host::DesktopResources`) and the `HostPlatform`
 //! composition are built by the caller; this module only supplies the contracts.
 
 use std::cell::Cell;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use cad_domain::{CadError, CadResult};
@@ -35,6 +47,22 @@ use cad_platform::{
     SurfaceMetrics, SurfaceSource,
 };
 use cad_ui_core::i18n::MessageSource;
+
+#[cfg(target_os = "windows")]
+#[path = "platform/native.rs"]
+pub mod native;
+
+#[path = "platform/save.rs"]
+mod save;
+
+pub use save::{
+    save_default_extension, save_filter_spec, SaveChooser, WindowsSaveDialogLabels,
+    EXPORT_FILTER_SPEC, PLOT_FILTER_SPEC, YMODEL_FILTER_SPEC,
+};
+
+#[cfg(test)]
+#[path = "platform/tests.rs"]
+mod tests;
 
 const KEY_PICKER_TITLE: &str = "windows.picker_title";
 const KEY_PICKER_FILTER: &str = "windows.picker_filter";
@@ -50,6 +78,7 @@ const KEY_PICKER_FAILED: &str = "windows.picker_failed";
 /// "supported formats" copy (see `README.md` / the i18n filter labels).
 /// `.skp` is the SketchUp preview lane (triangles only, never a measurement
 /// source; an edge-only model is refused by name, not by the picker).
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 const OPEN_EXTENSIONS: &[&str] = &[
     "ymodel", "dwg", "dxf", "obj", "stl", "ply", "off", "coff", "gltf", "glb", "step", "stp",
     "ifc", "rvt", "rte", "rfa", "rft", "skp", "dgn",
@@ -59,6 +88,7 @@ const OPEN_EXTENSIONS: &[&str] = &[
 ///
 /// The shell matches this case-insensitively, so no per-character bracketing is
 /// needed (unlike the XDG portal glob in the Linux host).
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 fn open_filter_spec() -> String {
     OPEN_EXTENSIONS
         .iter()
@@ -156,9 +186,12 @@ impl OpenState {
 /// itself carries no `Send` requirement.
 pub struct ReactFiles {
     labels: Arc<WindowsOpenDialogLabels>,
+    save_labels: Arc<WindowsSaveDialogLabels>,
     chooser: FileChooser,
+    /// `None` means "no save chooser is configured": an admitted save still
+    /// publishes an explicit [`FileEvent::Failed`], never a fabricated target.
+    save_chooser: Option<SaveChooser>,
     state: Arc<Mutex<OpenState>>,
-    source: Arc<Mutex<Option<PathBuf>>>,
     /// The directory the next open chooser starts in, derived from the last
     /// successfully opened/reopened target (and the newest durable recent entry
     /// at startup). `None` means no hint.
@@ -166,19 +199,45 @@ pub struct ReactFiles {
 }
 
 impl ReactFiles {
-    /// Files with the real COM `IFileOpenDialog` open chooser.
+    /// Files with the real COM `IFileOpenDialog`/`IFileSaveDialog` choosers.
+    #[cfg(target_os = "windows")]
     pub fn new(locale: &str) -> CadResult<Self> {
-        Self::with_chooser(locale, Arc::new(native_choose))
+        Self::with_parts(
+            locale,
+            Arc::new(native::native_choose),
+            Some(Arc::new(native::native_save)),
+        )
     }
 
-    /// Files with a dependency-injected chooser (unit tests, no GUI).
+    /// Files with a dependency-injected open chooser and no save chooser
+    /// (unit tests, no GUI); a save admitted here fails explicitly.
     pub fn with_chooser(locale: &str, chooser: FileChooser) -> CadResult<Self> {
+        Self::with_parts(locale, chooser, None)
+    }
+
+    /// Files with dependency-injected open **and** save choosers (unit tests,
+    /// no GUI).
+    pub fn with_choosers(
+        locale: &str,
+        chooser: FileChooser,
+        save_chooser: SaveChooser,
+    ) -> CadResult<Self> {
+        Self::with_parts(locale, chooser, Some(save_chooser))
+    }
+
+    fn with_parts(
+        locale: &str,
+        chooser: FileChooser,
+        save_chooser: Option<SaveChooser>,
+    ) -> CadResult<Self> {
         let labels = Arc::new(WindowsOpenDialogLabels::from_locale(locale)?);
+        let save_labels = Arc::new(WindowsSaveDialogLabels::from_locale(locale)?);
         Ok(Self {
             labels,
+            save_labels,
             chooser,
+            save_chooser,
             state: Arc::new(Mutex::new(OpenState::new())),
-            source: Arc::new(Mutex::new(None)),
             recent_dir: Arc::new(Mutex::new(None)),
         })
     }
@@ -278,31 +337,56 @@ impl PlatformFiles for ReactFiles {
         })
     }
 
-    fn begin_save(&self, _purpose: SavePurpose, _default_name: &str) -> CadResult<()> {
-        // No save picker is wired on this carrier, so the connector Save As
-        // extensions (.stl/.obj/.ply/.off/.ifc/.skp) cannot be selected here.
-        // The shared host dispatches them only by typed extension, and those
-        // paths are NOT VERIFIED on Windows.
-        Err(CadError::Unsupported(
-            "save is not supported by the Windows host".into(),
-        ))
+    fn begin_save(&self, purpose: SavePurpose, default_name: &str) -> CadResult<()> {
+        // Same admission as open: one file interaction at a time, never a queue.
+        self.admit()?;
+        let chooser = self.save_chooser.clone();
+        let labels = self.save_labels.clone();
+        let state = self.state.clone();
+        let default_name = default_name.to_string();
+        self.spawn("react-save-chooser", move || {
+            let event = match chooser {
+                Some(chooser) => match chooser(purpose, &labels, &default_name) {
+                    FileChooserOutcome::Path(path) => FileEvent::SaveTarget {
+                        purpose,
+                        target: FileTarget::from_path(&path.to_string_lossy()),
+                    },
+                    FileChooserOutcome::Cancelled => FileEvent::Cancelled {
+                        purpose: FilePurpose::Save(purpose),
+                    },
+                    FileChooserOutcome::Failed(reason) => FileEvent::Failed {
+                        purpose: FilePurpose::Save(purpose),
+                        reason,
+                    },
+                },
+                // No chooser wired: an explicit failure, never a fabricated path.
+                None => FileEvent::Failed {
+                    purpose: FilePurpose::Save(purpose),
+                    reason: labels.picker_failed("no save chooser is configured"),
+                },
+            };
+            // Publish only; `busy` stays set until `poll` takes this terminal.
+            state.lock().unwrap().terminal = Some(event);
+        })
     }
 
-    fn write_atomic(&self, _target: &FileTarget, _bytes: &[u8]) -> CadResult<()> {
-        Err(CadError::Unsupported(
-            "atomic write is not supported by the Windows host".into(),
-        ))
+    fn write_atomic(&self, target: &FileTarget, bytes: &[u8]) -> CadResult<()> {
+        // The save write always keeps a `.bak` of the bytes it replaces
+        // (ADR-0041 D4): overwriting the opened source is an explicit, allowed
+        // save, and the backup is what protects the previous document.
+        atomic_replace(Path::new(&target.opaque), bytes, true)
     }
 
-    fn refuses_source_overwrite(&self, target: &FileTarget) -> bool {
-        match self.source.lock().unwrap().as_ref() {
-            Some(source) => same_file(source, Path::new(&target.opaque)),
-            None => false,
-        }
+    fn read_target(&self, target: &FileTarget) -> Result<Vec<u8>, String> {
+        // Used only for the in-place `.ymodel` conflict check: the host compares
+        // these bytes with the archive it opened. Never fabricate empty bytes.
+        std::fs::read(&target.opaque)
+            .map_err(|error| format!("read {} failed: {error}", target.opaque))
     }
 
-    fn set_source(&self, target: Option<&FileTarget>) {
-        *self.source.lock().unwrap() = target.map(|target| PathBuf::from(&target.opaque));
+    fn set_source(&self, _target: Option<&FileTarget>) {
+        // Bookkeeping only: overwriting the opened source is a legal, explicit
+        // export (ADR-0041 D4), so this carrier keeps no identity to refuse.
     }
 
     fn set_recent_target(&self, target: Option<&FileTarget>) {
@@ -405,7 +489,7 @@ impl ConfigStore for ReactConfigStore {
                     .map_err(|error| CadError::InvalidInput(error.to_string()))?;
             }
         }
-        atomic_write(path, text.as_bytes())
+        atomic_replace(path, text.as_bytes(), false)
     }
 }
 
@@ -424,6 +508,20 @@ pub fn config_paths() -> (Option<PathBuf>, Option<PathBuf>) {
         }
         None => (None, None),
     }
+}
+
+/// The recovery-snapshot directory (ADR-0037 D12), beside the config files:
+/// `%APPDATA%\yacr\recovery`.
+///
+/// Carrier-private on purpose: it is **not** the document's directory, so a
+/// snapshot can never be mistaken for the document or collide with a Save As.
+/// `None` when `APPDATA` is not resolvable — the session then installs no
+/// persistence and writes no snapshot, rather than inventing a path. Created
+/// lazily by the store on the first write.
+pub fn recovery_dir() -> Option<PathBuf> {
+    config_paths()
+        .0
+        .and_then(|config| config.parent().map(|dir| dir.join("recovery")))
 }
 
 /// Durable wire key of the renderer backend preference (`auto`/`vulkan`/`dx12`).
@@ -476,8 +574,40 @@ fn load_file(path: Option<&Path>) -> ConfigLoad {
     }
 }
 
-/// Write `bytes` to `path` atomically (temp file in the same directory + rename).
-fn atomic_write(path: &Path, bytes: &[u8]) -> CadResult<()> {
+/// Monotonic suffix so two concurrent writes never share a temp path.
+static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+/// Write `bytes` to `path` atomically: temp file in the target's directory,
+/// `sync_all`, an optional `.bak` of the previous file, replace the target, then
+/// a best-effort parent-directory fsync.
+///
+/// The backup is taken **before** the replace (hard link, falling back to a
+/// copy), never by moving the target away: a move would leave a window in which
+/// the document does not exist at all. A hard link costs no extra bytes, so the
+/// save peak stays at roughly 2x the file (temp + target) instead of 3x.
+///
+/// On Windows the replace is `ReplaceFileW` (it keeps the target's identity and
+/// attributes) with `MoveFileExW(MOVEFILE_REPLACE_EXISTING)` as the fallback for
+/// filesystems/directories where `ReplaceFileW` refuses; on other targets it is
+/// `std::fs::rename` (which itself maps to `MoveFileExW` on Windows). This is
+/// the only target-specific step: the temp/sync/backup/fsync sequence and its
+/// failure contract are identical everywhere, which is what the contract tests
+/// exercise on the development host.
+///
+/// A failure at any step is an explicit [`CadError`] naming the path, and the
+/// temp file is removed; a half-written file is never left in the target's
+/// place, so the previous bytes survive a failed save untouched.
+///
+/// A backup that cannot be created does **not** fail the save: the replace is
+/// still atomic and the user's edit is the thing at risk. It is reported on
+/// stderr instead of being swallowed, because "saved with no backup" and "saved"
+/// are different contracts.
+///
+/// `pub(crate)` so the recovery store ([`crate::recovery_store`]) uses this one
+/// implementation instead of a second, subtly different one (without a backup:
+/// no recovery flow consumes one and it would leave a `.bak` beside every
+/// snapshot).
+pub(crate) fn atomic_replace(path: &Path, bytes: &[u8], keep_backup: bool) -> CadResult<()> {
     let parent = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -486,23 +616,130 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> CadResult<()> {
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("yacr");
-    let tmp = parent.join(format!(".{stem}.tmp"));
-    std::fs::write(&tmp, bytes).map_err(|error| {
+    let sequence = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let tmp = parent.join(format!(".{stem}.{}.{sequence}.tmp", std::process::id()));
+    // The backup must describe the file we are about to replace, so it is taken
+    // before the replace and skipped for a first save (nothing to back up).
+    if keep_backup && path.exists() {
+        if let Err(reason) = backup_previous(path) {
+            eprintln!(
+                "yacr: warning: saved {} without a .bak ({reason})",
+                path.display()
+            );
+        }
+    }
+    if let Err(error) = write_then_replace(&tmp, path, bytes) {
+        // Never leave a partial temp file behind, whichever step failed.
+        let _ = std::fs::remove_file(&tmp);
+        return Err(error);
+    }
+    // Best effort: the replace already published the bytes, so a directory fsync
+    // failure is not a write failure (it only weakens crash durability). Windows
+    // cannot open a directory as a file; that failure is ignored on purpose.
+    if let Ok(directory) = std::fs::File::open(parent) {
+        let _ = directory.sync_all();
+    }
+    Ok(())
+}
+
+/// Refresh `path.bak` from the current `path`.
+///
+/// A hard link is preferred: it is atomic, costs no extra bytes and shares the
+/// inode, so the backup is byte-identical by construction. Filesystems without
+/// hard links (FAT/exFAT, some SMB mounts) fall back to a copy.
+fn backup_previous(path: &Path) -> Result<(), String> {
+    let backup = path.with_extension(match path.extension().and_then(|ext| ext.to_str()) {
+        Some(extension) => format!("{extension}.bak"),
+        None => "bak".to_string(),
+    });
+    // A stale backup must not block a fresh one: `hard_link` refuses an existing
+    // destination, and `copy` would silently keep the older bytes if it did not
+    // truncate.
+    let _ = std::fs::remove_file(&backup);
+    match std::fs::hard_link(path, &backup) {
+        Ok(()) => Ok(()),
+        Err(link_error) => std::fs::copy(path, &backup)
+            .map(|_| ())
+            .map_err(|copy_error| format!("link: {link_error}; copy: {copy_error}")),
+    }
+}
+
+/// The fallible half of [`atomic_replace`]: create, write and sync the temp file,
+/// then replace the target with it. Every error names the path it failed on.
+fn write_then_replace(tmp: &Path, path: &Path, bytes: &[u8]) -> CadResult<()> {
+    let mut file = std::fs::File::create(tmp).map_err(|error| {
+        CadError::InvalidInput(format!(
+            "create temp file {} failed: {error}",
+            tmp.display()
+        ))
+    })?;
+    file.write_all(bytes).map_err(|error| {
         CadError::InvalidInput(format!("write {} failed: {error}", tmp.display()))
     })?;
-    std::fs::rename(&tmp, path).map_err(|error| {
-        let _ = std::fs::remove_file(&tmp);
-        CadError::InvalidInput(format!("rename to {} failed: {error}", path.display()))
+    file.sync_all().map_err(|error| {
+        CadError::InvalidInput(format!("sync {} failed: {error}", tmp.display()))
+    })?;
+    drop(file);
+    replace_file(tmp, path)
+}
+
+/// Publish `tmp` at `path`, replacing whatever was there.
+#[cfg(target_os = "windows")]
+fn replace_file(tmp: &Path, path: &Path) -> CadResult<()> {
+    use windows::core::PCWSTR;
+    use windows::Win32::Storage::FileSystem::{
+        MoveFileExW, ReplaceFileW, MOVEFILE_REPLACE_EXISTING, REPLACEFILE_IGNORE_MERGE_ERRORS,
+    };
+
+    let tmp_wide = wide(&tmp.to_string_lossy());
+    let path_wide = wide(&path.to_string_lossy());
+    let tmp_pcwstr = PCWSTR::from_raw(tmp_wide.as_ptr());
+    let path_pcwstr = PCWSTR::from_raw(path_wide.as_ptr());
+    // `ReplaceFileW` keeps the target's ACLs/streams and is the documented
+    // atomic replace; `None` for the backup name because `atomic_replace` already
+    // took the `.bak` itself (a second backup argument would rotate it twice).
+    let replaced = unsafe {
+        ReplaceFileW(
+            path_pcwstr,
+            tmp_pcwstr,
+            PCWSTR::null(),
+            REPLACEFILE_IGNORE_MERGE_ERRORS,
+            None,
+            None,
+        )
+    };
+    if replaced.is_ok() {
+        return Ok(());
+    }
+    // A target that does not exist yet (a first save) is refused by
+    // `ReplaceFileW`; so are some non-NTFS destinations. `MoveFileExW` with
+    // `MOVEFILE_REPLACE_EXISTING` covers both and is still a single atomic
+    // directory-entry swap for an existing target.
+    match unsafe { MoveFileExW(tmp_pcwstr, path_pcwstr, MOVEFILE_REPLACE_EXISTING) } {
+        Ok(()) => Ok(()),
+        Err(error) => Err(CadError::InvalidInput(format!(
+            "replace {} failed: ReplaceFileW: {replaced:?}; MoveFileExW: {error}",
+            path.display()
+        ))),
+    }
+}
+
+/// Publish `tmp` at `path`, replacing whatever was there.
+#[cfg(not(target_os = "windows"))]
+fn replace_file(tmp: &Path, path: &Path) -> CadResult<()> {
+    std::fs::rename(tmp, path).map_err(|error| {
+        CadError::InvalidInput(format!(
+            "rename {} to {} failed: {error}",
+            tmp.display(),
+            path.display()
+        ))
     })
 }
 
-/// Whether `target` is the opened source file (canonical identity).
-fn same_file(source: &Path, target: &Path) -> bool {
-    let canonical = |candidate: &Path| std::fs::canonicalize(candidate).ok();
-    match (canonical(source), canonical(target)) {
-        (Some(source), Some(target)) => source == target,
-        _ => source == target,
-    }
+/// A NUL-terminated UTF-16 copy of `value` (kept alive across the Win32 call).
+#[cfg(target_os = "windows")]
+fn wide(value: &str) -> Vec<u16> {
+    value.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
 /// A localized reason for a failed drawing read.
@@ -511,38 +748,6 @@ fn read_failure(path: &Path, error: std::io::Error) -> String {
         format!("drawing path does not exist: {}", path.display())
     } else {
         error.to_string()
-    }
-}
-
-/// A COM apartment for the worker thread that shows the native chooser.
-///
-/// `IFileOpenDialog` is an STA object; the worker owns the apartment for its
-/// whole lifetime. `CoUninitialize` is called only when initialization
-/// succeeded (including `S_FALSE`, "already initialized on this thread").
-struct Apartment {
-    initialized: bool,
-}
-
-impl Apartment {
-    fn new() -> Result<Self, String> {
-        let result = unsafe {
-            windows::Win32::System::Com::CoInitializeEx(
-                None,
-                windows::Win32::System::Com::COINIT_APARTMENTTHREADED,
-            )
-        };
-        if result.is_err() {
-            return Err(format!("CoInitializeEx failed: {result:?}"));
-        }
-        Ok(Self { initialized: true })
-    }
-}
-
-impl Drop for Apartment {
-    fn drop(&mut self) {
-        if self.initialized {
-            unsafe { windows::Win32::System::Com::CoUninitialize() };
-        }
     }
 }
 
@@ -561,423 +766,4 @@ fn recent_directory(target: &FileTarget) -> Option<PathBuf> {
         return None;
     }
     Some(parent.to_path_buf())
-}
-
-/// The real native open chooser (COM `IFileOpenDialog`).
-///
-/// Runs on a worker thread with its own STA. The dialog has no owner HWND: the
-/// host never passes a window handle across threads, so the dialog is not
-/// modal to the Tauri window (it still appears in the foreground because the
-/// calling process owns it). Failures are explicit and localized; a user
-/// cancellation is [`FileChooserOutcome::Cancelled`], never a failure.
-fn native_choose(labels: &WindowsOpenDialogLabels, initial: Option<&Path>) -> FileChooserOutcome {
-    use windows::core::{HRESULT, PCWSTR};
-    use windows::Win32::Foundation::ERROR_CANCELLED;
-    use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
-    use windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC;
-    use windows::Win32::UI::Shell::{
-        FileOpenDialog, IFileOpenDialog, IShellItem, SHCreateItemFromParsingName,
-        FOS_FILEMUSTEXIST, FOS_FORCEFILESYSTEM, SIGDN_FILESYSPATH,
-    };
-
-    let _apartment = match Apartment::new() {
-        Ok(apartment) => apartment,
-        Err(reason) => return FileChooserOutcome::Failed(labels.picker_failed(&reason)),
-    };
-
-    let dialog: IFileOpenDialog = match unsafe {
-        CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)
-    } {
-        Ok(dialog) => dialog,
-        Err(error) => return FileChooserOutcome::Failed(labels.picker_failed(&error.to_string())),
-    };
-
-    let title = wide(&labels.picker_title);
-    let filter_name = wide(&labels.picker_filter);
-    let filter_spec = wide(&open_filter_spec());
-    let filters = [COMDLG_FILTERSPEC {
-        pszName: PCWSTR::from_raw(filter_name.as_ptr()),
-        pszSpec: PCWSTR::from_raw(filter_spec.as_ptr()),
-    }];
-
-    let configure = unsafe {
-        dialog
-            .SetTitle(PCWSTR::from_raw(title.as_ptr()))
-            .and_then(|()| dialog.SetFileTypes(&filters))
-            .and_then(|()| dialog.SetOptions(FOS_FILEMUSTEXIST | FOS_FORCEFILESYSTEM))
-    };
-    if let Err(error) = configure {
-        return FileChooserOutcome::Failed(labels.picker_failed(&error.to_string()));
-    }
-
-    // Start in the remembered directory when it still exists. `SetFolder`
-    // navigates the dialog there; `SetDefaultFolder` is honoured by some shell
-    // versions. A hint that cannot be resolved is a convenience loss, never a
-    // reason to fail the open.
-    if let Some(directory) = initial {
-        if directory.is_dir() {
-            let path = wide(&directory.to_string_lossy());
-            let bind: Option<&windows::Win32::System::Com::IBindCtx> = None;
-            if let Ok(folder) = unsafe {
-                SHCreateItemFromParsingName::<_, _, IShellItem>(
-                    PCWSTR::from_raw(path.as_ptr()),
-                    bind,
-                )
-            } {
-                let _ = unsafe { dialog.SetFolder(&folder) };
-                let _ = unsafe { dialog.SetDefaultFolder(&folder) };
-            }
-        }
-    }
-
-    match unsafe { dialog.Show(None) } {
-        Ok(()) => {}
-        Err(error) if error.code() == HRESULT::from_win32(ERROR_CANCELLED.0) => {
-            return FileChooserOutcome::Cancelled;
-        }
-        Err(error) => return FileChooserOutcome::Failed(labels.picker_failed(&error.to_string())),
-    }
-
-    let item: IShellItem = match unsafe { dialog.GetResult() } {
-        Ok(item) => item,
-        Err(error) => return FileChooserOutcome::Failed(labels.picker_failed(&error.to_string())),
-    };
-    match unsafe { item.GetDisplayName(SIGDN_FILESYSPATH) } {
-        Ok(raw) => match crate::support::take_pwstr(raw) {
-            Some(path) => FileChooserOutcome::Path(PathBuf::from(path)),
-            None => FileChooserOutcome::Failed(labels.picker_local.clone()),
-        },
-        Err(error) => FileChooserOutcome::Failed(labels.picker_failed(&error.to_string())),
-    }
-}
-
-/// A NUL-terminated UTF-16 copy of `value` (kept alive across the COM call).
-fn wide(value: &str) -> Vec<u16> {
-    value.encode_utf16().chain(std::iter::once(0)).collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::time::Duration;
-
-    fn temp_path(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!(
-            "yacr-win-platform-test-{}-{name}",
-            std::process::id()
-        ))
-    }
-
-    /// Poll until at least one event arrives (bounded), never unbounded.
-    fn wait_event(files: &ReactFiles) -> Vec<FileEvent> {
-        for _ in 0..300 {
-            let events = files.poll();
-            if !events.is_empty() {
-                return events;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        panic!("no file event within the bounded wait");
-    }
-
-    fn files_with(chooser: FileChooser) -> ReactFiles {
-        ReactFiles::with_chooser("zh-CN", chooser).expect("labels load")
-    }
-
-    /// A chooser that blocks until the test releases it, so a pending open can be
-    /// observed deterministically. Admission happens synchronously in
-    /// `begin_open`, so the request is already busy before the worker runs.
-    fn blocking_chooser() -> (FileChooser, std::sync::mpsc::Sender<()>) {
-        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
-        let release_rx = Mutex::new(release_rx);
-        let chooser: FileChooser = Arc::new(move |_, _| {
-            // A released or dropped sender both unblock; tests send exactly once.
-            let _ = release_rx.lock().unwrap().recv();
-            FileChooserOutcome::Cancelled
-        });
-        (chooser, release_tx)
-    }
-
-    #[test]
-    fn labels_come_from_the_i18n_catalogue() {
-        let zh = WindowsOpenDialogLabels::from_locale("zh-CN").unwrap();
-        let en = WindowsOpenDialogLabels::from_locale("en").unwrap();
-        let other = WindowsOpenDialogLabels::from_locale("fr").unwrap();
-        assert_ne!(zh.picker_title, en.picker_title);
-        assert_eq!(other, en, "unknown locale defaults to English");
-        assert!(zh.picker_title.contains('打') || zh.picker_title.contains('开'));
-        assert!(en.picker_title.contains("Open"));
-        assert!(zh.picker_failed("boom").contains("boom"));
-    }
-
-    #[test]
-    fn opened_target_reads_real_bytes() {
-        let path = temp_path("opened.dwg");
-        let payload = b"not-a-real-dwg-but-real-bytes";
-        std::fs::write(&path, payload).unwrap();
-        let files = files_with(Arc::new(|_, _| FileChooserOutcome::Cancelled));
-        files
-            .begin_open_target(&FileTarget::from_path(&path.to_string_lossy()))
-            .unwrap();
-        let events = wait_event(&files);
-        let _ = std::fs::remove_file(&path);
-        match events.as_slice() {
-            [FileEvent::Opened { target, bytes }] => {
-                assert_eq!(&bytes[..], payload);
-                assert_eq!(target.opaque, path.to_string_lossy().into_owned());
-            }
-            other => panic!("expected Opened, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn missing_target_reports_an_error_event() {
-        let path = temp_path("missing.dwg");
-        let _ = std::fs::remove_file(&path);
-        let files = files_with(Arc::new(|_, _| FileChooserOutcome::Cancelled));
-        files
-            .begin_open_target(&FileTarget::from_path(&path.to_string_lossy()))
-            .unwrap();
-        match files.poll().as_slice() {
-            [FileEvent::Failed { purpose, reason }] => {
-                assert_eq!(*purpose, FilePurpose::Open);
-                assert!(reason.contains("does not exist"), "reason: {reason}");
-            }
-            other => panic!("expected Failed, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn cancelled_chooser_is_a_cancel_not_a_success() {
-        let files = files_with(Arc::new(|_, _| FileChooserOutcome::Cancelled));
-        files.begin_open().unwrap();
-        match wait_event(&files).as_slice() {
-            [FileEvent::Cancelled { purpose }] => assert_eq!(*purpose, FilePurpose::Open),
-            other => panic!("expected Cancelled, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn failed_chooser_reports_its_localized_reason() {
-        let files = files_with(Arc::new(|labels, _| {
-            FileChooserOutcome::Failed(labels.picker_failed("dialog down"))
-        }));
-        files.begin_open().unwrap();
-        match wait_event(&files).as_slice() {
-            [FileEvent::Failed { reason, .. }] => assert!(reason.contains("dialog down")),
-            other => panic!("expected Failed, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn second_open_is_rejected_until_the_queued_result_is_polled() {
-        // A missing target is an accepted request whose terminal event is queued
-        // synchronously, so "busy but result queued" is observable without a race.
-        let missing = temp_path("queued-missing.dwg");
-        let _ = std::fs::remove_file(&missing);
-        let target = FileTarget::from_path(&missing.to_string_lossy());
-        let files = files_with(Arc::new(|_, _| FileChooserOutcome::Cancelled));
-
-        files.begin_open_target(&target).unwrap();
-        assert!(
-            files.begin_open().is_err(),
-            "a queued, unpolled result must still be single-flight"
-        );
-
-        // Draining the accepted terminal releases the single flight.
-        match files.poll().as_slice() {
-            [FileEvent::Failed { purpose, .. }] => assert_eq!(*purpose, FilePurpose::Open),
-            other => panic!("expected Failed, got {other:?}"),
-        }
-        files.begin_open_target(&target).unwrap();
-        let _ = files.poll();
-    }
-
-    #[test]
-    fn consumed_terminal_does_not_unlock_a_new_pending_open() {
-        let missing = temp_path("old-terminal.dwg");
-        let _ = std::fs::remove_file(&missing);
-        let target = FileTarget::from_path(&missing.to_string_lossy());
-        let (chooser, release) = blocking_chooser();
-        let files = files_with(chooser);
-        files.begin_open_target(&target).unwrap();
-        let _ = files.poll();
-
-        files.begin_open().unwrap();
-        assert!(files.poll().is_empty());
-        assert!(
-            files.begin_open().is_err(),
-            "an empty poll must not unlock the new pending open"
-        );
-
-        release.send(()).unwrap();
-        match wait_event(&files).as_slice() {
-            [FileEvent::Cancelled { .. }] => {}
-            other => panic!("expected Cancelled, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn terminal_slot_capacity_is_bounded_to_one() {
-        let missing = temp_path("bounded.dwg");
-        let _ = std::fs::remove_file(&missing);
-        let target = FileTarget::from_path(&missing.to_string_lossy());
-        let files = files_with(Arc::new(|_, _| FileChooserOutcome::Cancelled));
-
-        files.begin_open_target(&target).unwrap();
-        for _ in 0..16 {
-            assert!(
-                files.begin_open_target(&target).is_err(),
-                "extra requests must be rejected, never queued"
-            );
-        }
-        assert_eq!(files.poll().len(), 1, "capacity 1: no unbounded queue");
-        assert!(files.poll().is_empty(), "the slot is drained exactly once");
-    }
-
-    #[test]
-    fn source_guard_uses_canonical_identity() {
-        let source = temp_path("source.dwg");
-        let other = temp_path("other.dwg");
-        std::fs::write(&source, b"a").unwrap();
-        std::fs::write(&other, b"b").unwrap();
-        let files = files_with(Arc::new(|_, _| FileChooserOutcome::Cancelled));
-        assert!(!files.refuses_source_overwrite(&FileTarget::from_path(&source.to_string_lossy())));
-        files.set_source(Some(&FileTarget::from_path(&source.to_string_lossy())));
-        assert!(files.refuses_source_overwrite(&FileTarget::from_path(&source.to_string_lossy())));
-        assert!(!files.refuses_source_overwrite(&FileTarget::from_path(&other.to_string_lossy())));
-        files.set_source(None);
-        assert!(!files.refuses_source_overwrite(&FileTarget::from_path(&source.to_string_lossy())));
-        let _ = std::fs::remove_file(&source);
-        let _ = std::fs::remove_file(&other);
-    }
-
-    #[test]
-    fn save_and_write_are_explicitly_unsupported() {
-        let files = files_with(Arc::new(|_, _| FileChooserOutcome::Cancelled));
-        assert!(matches!(
-            files.begin_save(SavePurpose::Plot, "out.svg"),
-            Err(CadError::Unsupported(_))
-        ));
-        assert!(matches!(
-            files.write_atomic(&FileTarget::from_path("C:\\x"), b"x"),
-            Err(CadError::Unsupported(_))
-        ));
-    }
-
-    #[test]
-    fn surface_metrics_set_and_clear() {
-        let surface = ReactSurface::new();
-        assert_eq!(surface.surface(), None);
-        let metrics = SurfaceMetrics {
-            logical: [960.0, 439.0],
-            origin: [0.0, 0.0],
-            scale: 1.0,
-            safe_insets: [0.0; 4],
-        };
-        surface.set_metrics(metrics);
-        assert_eq!(surface.surface(), Some(metrics));
-        surface.clear();
-        assert_eq!(surface.surface(), None);
-    }
-
-    #[test]
-    fn config_absent_unreadable_and_persist_roundtrip() {
-        let absent = temp_path("absent-config.json");
-        let _ = std::fs::remove_file(&absent);
-        let store = ReactConfigStore::new(absent.clone(), temp_path("absent-pref.json"));
-        assert_eq!(store.load_config(), ConfigLoad::Absent);
-
-        // A directory is unreadable, reported as a diagnostic.
-        let dir = temp_path("a-directory");
-        std::fs::create_dir_all(&dir).unwrap();
-        let store = ReactConfigStore::new(dir.clone(), dir.clone());
-        assert!(matches!(store.load_config(), ConfigLoad::Unreadable { .. }));
-
-        // A real path persists atomically and reads back.
-        let pref = temp_path("pref.json");
-        let store = ReactConfigStore::new(absent, pref.clone());
-        store.persist_preference("{\"k\":1}").unwrap();
-        match store.load_preference() {
-            ConfigLoad::Text { text, .. } => assert_eq!(text, "{\"k\":1}"),
-            other => panic!("expected Text, got {other:?}"),
-        }
-        let _ = std::fs::remove_file(&pref);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn non_persistent_store_refuses_persistence_explicitly() {
-        let store = ReactConfigStore::non_persistent();
-        assert_eq!(store.load_config(), ConfigLoad::Absent);
-        assert!(matches!(
-            store.persist_preference("{}"),
-            Err(CadError::Unsupported(_))
-        ));
-    }
-
-    /// The renderer backend preference is read through the same store every
-    /// other user preference uses, and every failure mode is a silent `None`
-    /// (the presenter then uses `auto`) rather than an invented value.
-    #[test]
-    fn wgpu_backend_preference_reads_the_durable_store() {
-        let absent = temp_path("absent-wgpu-pref.json");
-        let _ = std::fs::remove_file(&absent);
-        let store = ReactConfigStore::new(temp_path("unused-config.json"), absent);
-        assert_eq!(wgpu_backend_preference(&store), None);
-
-        let preferences = [
-            (r#"{"wgpu_backend":"dx12"}"#, Some("dx12")),
-            (r#"{"wgpu_backend":"vulkan"}"#, Some("vulkan")),
-            (r#"{"wgpu_backend":"auto"}"#, Some("auto")),
-            // A nested projection is tolerated, the root key is canonical.
-            (r#"{"ui":{"wgpu_backend":"dx12"}}"#, Some("dx12")),
-            // Unknown tokens are returned verbatim; the renderer resolves them
-            // to `auto` (one parser owns the wire contract).
-            (r#"{"wgpu_backend":"gl"}"#, Some("gl")),
-            // Absent key, non-string value and malformed JSON are all `None`.
-            (r#"{"interaction":{"snapEnabled":true}}"#, None),
-            (r#"{"wgpu_backend":1}"#, None),
-            (r#"not json"#, None),
-        ];
-        for (text, expected) in preferences {
-            assert_eq!(
-                backend_preference_from_json(text),
-                expected.map(str::to_string),
-                "{text} must extract {expected:?}"
-            );
-        }
-
-        // End-to-end through the durable store (the path the host reads).
-        let path = temp_path("wgpu-pref.json");
-        let store = ReactConfigStore::new(temp_path("unused-config.json"), path.clone());
-        store
-            .persist_preference(r#"{"wgpu_backend":"dx12"}"#)
-            .unwrap();
-        assert_eq!(wgpu_backend_preference(&store), Some("dx12".to_string()));
-        let _ = std::fs::remove_file(&path);
-    }
-
-    /// The COM filter must offer every extension the dispatcher can read.
-    ///
-    /// `.rfa`/`.rft` are listed on purpose (the importer refuses families by
-    /// name), and `.skp` is the SketchUp preview lane; this test asserts presence
-    /// only, never "supported".
-    #[test]
-    fn open_filter_spec_lists_the_importer_set() {
-        let spec = open_filter_spec();
-        let patterns: Vec<&str> = spec.split(';').collect();
-        for extension in [
-            "ymodel", "dwg", "dxf", "obj", "stl", "ply", "off", "coff", "step", "stp", "ifc",
-            "rvt", "rte", "rfa", "rft", "skp",
-        ] {
-            let pattern = format!("*.{extension}");
-            assert!(
-                patterns.contains(&pattern.as_str()),
-                "{pattern} missing from {spec}"
-            );
-        }
-        assert!(spec.starts_with("*.ymodel;*.dwg;*.dxf;"), "{spec}");
-        assert!(!spec.contains(" "), "{spec}");
-    }
 }

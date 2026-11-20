@@ -56,6 +56,7 @@ use cad_platform::{
 mod command_log;
 mod command_log_echo;
 mod core;
+mod dispatch;
 mod document_archive;
 mod fonts;
 mod input;
@@ -620,70 +621,19 @@ impl HostCore {
                 self.record_raw_trace(command_id, Ok(none));
                 Ok(None)
             }
-            // Host-owned funnels record their real host outcome (no App command
-            // executed). An async Open success means the delivery STARTED, not
-            // that the import finished.
-            CommandId::OpenDrawing => match self.request_open() {
-                Ok(()) => {
-                    self.record_raw_trace(command_id, Ok(none));
-                    Ok(None)
-                }
-                Err(error) => {
-                    self.record_raw_trace(command_id, Err(error.clone()));
-                    Err(error)
-                }
-            },
-            CommandId::NewDrawing => match self.request_new() {
-                Ok(()) => {
-                    self.record_raw_trace(command_id, Ok(none));
-                    Ok(None)
-                }
-                Err(error) => {
-                    self.record_raw_trace(command_id, Err(error.clone()));
-                    Err(error)
+            // Host-owned file funnels (OPEN/NEW/CLOSE/PLOT/SAVE/EXPORT and the
+            // backend refusal) live in `crate::dispatch`; each records its real
+            // host outcome and executes no App command.
+            other => match self.dispatch_host_owned(other, &none) {
+                Some(result) => result,
+                None => {
+                    // Every other command runs through the traced app entry so its
+                    // single actual command trace is captured (shared `Arc` outcome).
+                    let traced = self.controller.borrow_mut().execute_traced(command)?;
+                    self.pending_trace.borrow_mut().extend(traced.commands);
+                    traced.result.map(Some)
                 }
             },
-            CommandId::CloseDrawing => match self.request_close() {
-                Ok(()) => {
-                    self.record_raw_trace(command_id, Ok(none));
-                    Ok(None)
-                }
-                Err(error) => {
-                    self.record_raw_trace(command_id, Err(error.clone()));
-                    Err(error)
-                }
-            },
-            CommandId::PlotDrawing => match self.request_plot() {
-                Ok(()) => {
-                    self.record_raw_trace(command_id, Ok(none));
-                    Ok(None)
-                }
-                Err(error) => {
-                    self.record_raw_trace(command_id, Err(error.clone()));
-                    Err(error)
-                }
-            },
-            CommandId::SaveDrawingAs => match self.request_save() {
-                Ok(()) => {
-                    self.record_raw_trace(command_id, Ok(none));
-                    Ok(None)
-                }
-                Err(error) => {
-                    self.record_raw_trace(command_id, Err(error.clone()));
-                    Err(error)
-                }
-            },
-            // A refusal that never executed records no command trace.
-            CommandId::SwitchBackend => Err(CadError::Unsupported(
-                "backend switching is not available through this host".into(),
-            )),
-            _ => {
-                // Every other command runs through the traced app entry so its
-                // single actual command trace is captured (shared `Arc` outcome).
-                let traced = self.controller.borrow_mut().execute_traced(command)?;
-                self.pending_trace.borrow_mut().extend(traced.commands);
-                traced.result.map(Some)
-            }
         };
         // Typed command echo (observational only): a real measurement or `ID`
         // point report is echoed as a `Result` entry; a refusal as an `Error`

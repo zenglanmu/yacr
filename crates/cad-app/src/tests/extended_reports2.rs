@@ -214,7 +214,7 @@ fn aliasedit_lists_every_canonical_alias_row_without_editing() {
         .diagnostics
         .iter()
         .any(|diagnostic| diagnostic.code == "aliasedit.alias"
-            && diagnostic.message.contains("EXPORT -> PLOT")));
+            && diagnostic.message.contains("PRINT -> PLOT")));
     let summary = diagnostic(&outcome, "aliasedit.summary");
     assert!(
         summary.message.contains("NOT IMPLEMENTED"),

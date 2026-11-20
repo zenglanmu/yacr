@@ -70,6 +70,9 @@ MACOS_DEPENDENCIES = frozenset(
         "cad-platform",
         "cad-resources",
         "cad-db",
+        # The carrier's `.ymodel` container linkage (ADR-0037 D1/D11): linked
+        # only by an `apps/app-*` carrier, never by a shared `cad-*` layer.
+        "cad-store-zip",
         "cad-domain",
         "serde_json",
         "objc2",

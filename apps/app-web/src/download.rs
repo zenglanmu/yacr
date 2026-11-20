@@ -15,7 +15,7 @@
 //! | `begin_save` | **Ok**: one [`FileEvent::SaveTarget`] with `display_name = default_name` and `opaque = download://<default_name>`; a blank name is refused |
 //! | `write_atomic` | `sink.publish(display_name, bytes)` — a real download on wasm, an in-memory record on the host target |
 //! | `begin_open` / `begin_open_target` | [`crate::platform::UNSUPPORTED_FILESYSTEM`]: the page's file picker owns selection and the bytes arrive through the session's `open_bytes` entry |
-//! | `refuses_source_overwrite` | `false` (a browser has no device+inode identity), `set_source` still round-trips |
+//! | `set_source` | bookkeeping only: a browser download may reuse the opened name, since there is no writable source file to protect |
 //! | `poll` | drains every queued event exactly once |
 //!
 //! Nothing here fabricates a save the sink did not perform: a sink failure is
@@ -171,13 +171,6 @@ impl<S: DownloadSink> PlatformFiles for BrowserFiles<S> {
             len: bytes.len(),
         });
         Ok(())
-    }
-
-    fn refuses_source_overwrite(&self, _target: &FileTarget) -> bool {
-        // No device+inode identity exists in a browser, so the guard cannot be
-        // armed. Answering `true` would refuse every save; `false` is the
-        // documented web answer (see `cad_platform::PlatformFiles`).
-        false
     }
 
     fn set_source(&self, target: Option<&FileTarget>) {

@@ -73,7 +73,7 @@ use cad_domain::{CadError, CadResult, Diagnostic, Unit, UnitContext};
 use cad_import_core::{
     compute_identity, ifc_schema as ifc_file_schema, ConnectorDescriptor, ExportCapability,
     FidelityLevel, ImportCapability, ImportPhase, ImportProgress, ImportProgressSink, ImportReport,
-    ImportRequest, ImportedDrawing, Importer, MeshImport, NoopProgress,
+    ImportRequest, ImportedDrawing, Importer, MeshImport, NoopProgress, SpecVisibility,
 };
 use ifc_lite_core::{
     build_entity_index, is_geometry_job, resolve_length_unit, EntityDecoder, EntityScanner, IfcType,
@@ -817,10 +817,14 @@ mod tests;
 /// writer: it projects model-space meshes into a fresh IFC4 file, so it is L1
 /// and lossy (analytic geometry, layers, blocks and paper space are not
 /// represented; every drop is reported).
+///
+/// `spec` is [`SpecVisibility::Public`]: IFC2X3/IFC4/IFC4X3 are published
+/// buildingSMART schemas (`THIRD_PARTY_NOTICES.md`:39-40).
 pub const DESCRIPTOR_IFC: ConnectorDescriptor = ConnectorDescriptor {
     id: "ifc",
     name_key: "connector.ifc.name",
     extensions: &["ifc"],
+    spec: SpecVisibility::Public,
     import: Some(ImportCapability {
         versions: "IFC2X3 / IFC4 / IFC4X3",
         container: "step",
@@ -829,6 +833,7 @@ pub const DESCRIPTOR_IFC: ConnectorDescriptor = ConnectorDescriptor {
         versions: "IFC4",
         level: FidelityLevel::L1,
         lossy: true,
+        experimental: false,
     }),
     declared_classes: &[],
 };

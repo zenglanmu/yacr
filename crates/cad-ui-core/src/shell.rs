@@ -498,6 +498,7 @@ mod tests {
             entity_count: Some(1),
             loading: false,
             import_progress: None,
+            opened_source: None,
             error: error.map(str::to_string),
             can_new: true,
             can_open: true,

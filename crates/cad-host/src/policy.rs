@@ -11,11 +11,14 @@ use cad_platform::FileTarget;
 /// silently falls back to a connector format.
 pub const UNSUPPORTED_YMODEL: &str = "unsupported-runtime: ymodel";
 
-/// Plot and Save As own their own success/failure status
-/// (`plot.exported` / `save.exported` / ...); the generic completed/failed text
-/// must not overwrite it.
+/// Plot, Save As and Export own their own success/failure status
+/// (`plot.exported` / `save.exported` / ... / `export.picker_waiting`); the
+/// generic completed/failed text must not overwrite it.
 pub fn owns_status(id: CommandId) -> bool {
-    matches!(id, CommandId::PlotDrawing | CommandId::SaveDrawingAs)
+    matches!(
+        id,
+        CommandId::PlotDrawing | CommandId::SaveDrawingAs | CommandId::Export
+    )
 }
 
 /// The lowercased extension of a target name, or `""` when there is none.
@@ -42,21 +45,7 @@ pub fn default_save_name(hint: &str, extension: &str) -> String {
     format!("{}.{}", default_stem(hint), extension)
 }
 
-/// The suggested name for a DWG **export**.
-///
-/// Deliberately different from the source name: a save from a `.dwg` document
-/// writes a new file (`<stem>-export.dwg`) and never silently replaces the
-/// opened drawing (DWG output is experimental and lossy).
-pub fn default_dwg_export_name(hint: &str) -> String {
-    format!("{}-export.dwg", default_stem(hint))
-}
-
-/// Whether the opened source name denotes a DWG drawing.
-pub fn source_is_dwg(name: &str) -> bool {
-    extension_of(name) == "dwg"
-}
-
-/// Whether a target denotes the native `.ymodel` document archive.///
+/// Whether a target denotes the native `.ymodel` document archive.
 /// Decided from the user-facing name and the carrier handle, case-insensitively:
 /// the desktop handle is a path, Android's is a SAF `content://` URI and the
 /// browser's is a download label, so the name is the only field all three share.
@@ -74,51 +63,6 @@ pub fn is_ymodel_name(name: &str) -> bool {
     // char boundary (it simply is not a `.ymodel`).
     name.len() >= SUFFIX.len()
         && name.as_bytes()[name.len() - SUFFIX.len()..].eq_ignore_ascii_case(SUFFIX)
-}
-
-/// A lexical path/handle normalization used for the source-overwrite backstop.
-///
-/// Collapses `.` components and resolves `..` lexically (no filesystem access),
-/// so `/tmp/./a.dwg` and `/tmp/a.dwg` compare equal. Case is preserved: on the
-/// carriers where this backstop matters the filesystem is case-sensitive, and a
-/// false refusal is safer than a false write (the platform's own
-/// [`cad_platform::PlatformFiles::refuses_source_overwrite`] remains the
-/// device+inode / URI identity guard).
-fn normalized(name: &str) -> String {
-    use std::path::{Component, Path};
-    let mut out = std::path::PathBuf::new();
-    for component in Path::new(name).components() {
-        match component {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                out.pop();
-            }
-            other => out.push(other.as_os_str()),
-        }
-    }
-    out.to_string_lossy().into_owned()
-}
-
-/// A non-empty handle that is a filesystem path (not a `scheme://` carrier URI).
-fn is_path_handle(handle: &str) -> bool {
-    !handle.is_empty() && !handle.contains("://")
-}
-
-/// Whether two save targets name the **same opened source** after normalization.
-///
-/// The host-side backstop for carriers where the platform cannot detect inode
-/// identity (the web has neither path nor inode; Android has only a SAF URI):
-/// two filesystem handles compare by normalized path, and any carrier handle
-/// (a `download://` name, a `content://` URI, a label-only web open) compares by
-/// normalized display name. It is intentionally conservative — refusing a
-/// same-named target is safe; overwriting the source is not.
-pub fn same_normalized_target(source: &FileTarget, target: &FileTarget) -> bool {
-    if is_path_handle(&source.opaque) && is_path_handle(&target.opaque) {
-        return normalized(&source.opaque) == normalized(&target.opaque);
-    }
-    let source_name = normalized(&source.display_name);
-    let target_name = normalized(&target.display_name);
-    !source_name.is_empty() && source_name == target_name
 }
 
 /// Classification of a lossy-save target by extension.
@@ -190,9 +134,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_plot_and_save_own_their_status() {
+    fn only_plot_save_and_export_own_their_status() {
         assert!(owns_status(CommandId::PlotDrawing));
         assert!(owns_status(CommandId::SaveDrawingAs));
+        assert!(owns_status(CommandId::Export));
         assert!(!owns_status(CommandId::OpenDrawing));
         assert!(!owns_status(CommandId::NewDrawing));
         assert!(!owns_status(CommandId::FitDrawing));
@@ -214,18 +159,9 @@ mod tests {
         assert_eq!(default_stem("yacr-demo"), "yacr-demo");
         assert_eq!(default_save_name("flange.dxf", "svg"), "flange.svg");
         assert_eq!(default_save_name("", "dxf"), "drawing.dxf");
-        // A DWG save is always a NEW file with a distinct name.
-        assert_eq!(default_dwg_export_name("/tmp/plan.dwg"), "plan-export.dwg");
-        assert_eq!(default_dwg_export_name(""), "drawing-export.dwg");
-        assert_ne!(default_dwg_export_name("plan.dwg"), "plan.dwg");
-    }
-
-    #[test]
-    fn the_source_extension_selects_a_dwg_save() {
-        assert!(source_is_dwg("plan.dwg"));
-        assert!(source_is_dwg("/tmp/PLAN.DWG"));
-        assert!(!source_is_dwg("plan.dxf"));
-        assert!(!source_is_dwg("plan"));
+        // SAVE always targets the native archive, whatever the source was.
+        assert_eq!(default_save_name("/tmp/plan.dwg", "ymodel"), "plan.ymodel");
+        assert_eq!(default_save_name("", "ymodel"), "drawing.ymodel");
     }
 
     #[test]
@@ -249,39 +185,6 @@ mod tests {
             opaque: "content://provider/document/plan.YMODEL".to_string(),
         }));
         assert!(!is_ymodel_target(&FileTarget::from_path("/tmp/plan.dxf")));
-    }
-
-    #[test]
-    fn normalized_source_identity_catches_path_and_name_variants() {
-        let source = FileTarget::from_path("/tmp/./plan.dwg");
-        assert!(same_normalized_target(
-            &source,
-            &FileTarget::from_path("/tmp/plan.dwg")
-        ));
-        assert!(!same_normalized_target(
-            &source,
-            &FileTarget::from_path("/tmp/other/plan.dwg")
-        ));
-        // A carrier handle (web download / Android SAF URI) compares names: the
-        // platform cannot supply device+inode identity there.
-        let web_source = FileTarget {
-            display_name: "plan.dwg".into(),
-            opaque: "plan.dwg".into(),
-        };
-        let web_target = FileTarget {
-            display_name: "plan.dwg".into(),
-            opaque: "download://plan.dwg".into(),
-        };
-        assert!(same_normalized_target(&web_source, &web_target));
-        let android_source = FileTarget {
-            display_name: "plan.dwg".into(),
-            opaque: "content://tree/1".into(),
-        };
-        let android_target = FileTarget {
-            display_name: "plan.dwg".into(),
-            opaque: "content://tree/2".into(),
-        };
-        assert!(same_normalized_target(&android_source, &android_target));
     }
 
     #[test]

@@ -21,8 +21,8 @@ import {
   parseEmbedPreview,
   readEmbedPreview,
   resolveSaveEmbed,
+  SAVE_FAMILY_COMMANDS,
 } from '../src/commands/save-embed.ts';
-import { DWG_SAVE_COMMANDS } from '../src/commands/save-confirm.ts';
 import { readAppSource, readCatalog, readModule } from './helpers.ts';
 
 const zh = await readCatalog('zh-CN');
@@ -201,7 +201,7 @@ test('cancel sends nothing, and a failed apply never falls through to a save', a
 // --- the wiring ------------------------------------------------------------
 
 test('the embedded model is asked once, before the save funnel, for SAVE lines only', async () => {
-  assert.deepEqual([...DWG_SAVE_COMMANDS], ['SAVE', 'SAVEAS', 'QSAVE']);
+  assert.deepEqual([...SAVE_FAMILY_COMMANDS], ['SAVE', 'SAVEAS', 'QSAVE']);
   for (const text of ['SAVE', ' save ', 'SaveAs', 'QSAVE']) {
     assert.equal(isSaveFamilyCommand(text), true, text);
   }
@@ -209,12 +209,12 @@ test('the embedded model is asked once, before the save funnel, for SAVE lines o
     assert.equal(isSaveFamilyCommand(text), false, String(text));
   }
 
-  const hook = await readModule('components/use-dwg-save-confirm.tsx');
+  const hook = await readModule('components/use-save-gate.tsx');
   // Only SAVE-family lines reach the preview, and the question is asked before
   // anything is dispatched.
   assert.ok(hook.includes('if (!isSaveFamilyCommand(text)) return false;'));
   const previewAt = hook.indexOf('await readEmbedPreview(invoke)');
-  const openAt = hook.indexOf("setActive({ kind: 'embed', preview })");
+  const openAt = hook.indexOf('setActive(preview)');
   const dispatchAt = hook.indexOf('queued.redispatch()');
   assert.ok(previewAt > 0 && openAt > previewAt, 'the dialog opens only from a preview');
   assert.ok(dispatchAt > openAt, 'dispatch happens after the answer, never before');
@@ -228,11 +228,11 @@ test('the embedded model is asked once, before the save funnel, for SAVE lines o
 
   // One SAVE funnel in the shell: the gate sits before `queueCadCommand`.
   const app = await readModule('App.tsx');
-  const gateAt = app.indexOf('confirmDwgSave(text, status, documentLabel, vocabularyRef');
+  const askAt = app.indexOf('await beforeSave(text, status,');
   const queueAt = app.indexOf('await queueCadCommand(invoke, text, status, false');
-  assert.ok(gateAt > 0 && queueAt > gateAt, 'the question is asked before cad_command is sent');
-  assert.ok(app.includes('{dwgSaveDialog}'), 'the hook owns the only pre-save dialog slot');
-  assert.ok(app.includes("if (dwgSavePending()) return;"), 'the dialog owns Escape while it is open');
+  assert.ok(askAt > 0 && queueAt > askAt, 'the question is asked before cad_command is sent');
+  assert.ok(app.includes('{saveGateDialog}'), 'the hook owns the only pre-save dialog slot');
+  assert.ok(app.includes('if (saveGatePending()) return;'), 'the dialog owns Escape while it is open');
   // Both command names are declared exactly once, in the model.
   const source = await readAppSource();
   assert.equal(source.split(`'${EMBED_PREVIEW_COMMAND}'`).length - 1, 1);
@@ -270,10 +270,10 @@ test('the dialog is one accessible card with the published copy', async () => {
   // Its own confirm label (`save.embed.confirm`) and the funnel's cancel.
   assert.equal(en['save.embed.confirm'], 'Save and embed');
   assert.equal(zh['save.embed.confirm'], '保存并嵌入');
-  for (const key of [...keys, 'save.embed.confirm', 'save.dwg_confirm.cancel']) {
+  for (const key of [...keys, 'save.embed.confirm', 'tool.cancel']) {
     assert.ok(dialog.includes(`t('${key}'`), key);
   }
-  assert.ok(!dialog.includes("t('save.dwg_confirm.proceed'"), 'the DWG wording is not reused');
+  assert.ok(!dialog.includes("save.dwg_confirm"), 'no deleted DWG copy is reused');
   assert.ok(dialog.includes('embedKindKey(entry.kind)'), 'kind labels come from the catalog');
   // One accessible modal from the shared dialog family, focus on the safe answer.
   assert.ok(dialog.includes('role="dialog"'));

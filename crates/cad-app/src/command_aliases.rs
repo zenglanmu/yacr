@@ -34,7 +34,6 @@
 //! `ToggleGrid` would silently turn it into a display toggle — neither is grid
 //! snap, so no alias exists and the canonical name is the only spelling.
 pub const COMMAND_ALIASES: &[(&str, &str)] = &[
-    ("EXPORT", "PLOT"),
     ("PRINT", "PLOT"),
     ("SAVEAS", "SAVE"),
     ("QSAVE", "SAVE"),

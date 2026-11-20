@@ -17,6 +17,10 @@
 //! * [`platform`] — the SAF-backed file contracts (open + DXF-export save;
 //!   Plot still refuses by capability), the DOM surface source, the durable
 //!   `filesDir` config/preference store and the `nativeAssetsReady` handshake;
+//! * [`ymodel_archive`] — the carrier's `DocumentArchive` over `cad-store-zip`
+//!   (`SAVE` writes only `.ymodel`, ADR-0041) and [`recovery_store`], its
+//!   `filesDir/recovery` snapshot store (ADR-0037 D12); both are installed by the
+//!   `native-below` tick, never by a shared layer;
 //! * [`popup`] — the in-DOM popup seam (`PopupOps` payload + the `ShellPopupHost`
 //!   that marshals the shared lifecycle onto the loop thread);
 //! * [`surface`] — the frozen JNI surface callbacks and the
@@ -46,6 +50,8 @@ pub mod report;
 #[cfg(target_os = "android")]
 pub mod host;
 #[cfg(target_os = "android")]
+pub mod host_files;
+#[cfg(target_os = "android")]
 pub mod recent;
 #[cfg(target_os = "android")]
 pub mod release;
@@ -60,6 +66,23 @@ pub mod surface;
 /// host (no device/emulator involved); it has no `tauri`/GPU dependency.
 #[cfg(not(target_arch = "wasm32"))]
 pub mod platform;
+
+/// The carrier's `.ymodel` archive adapter (`cad_platform::DocumentArchive` over
+/// `cad-store-zip`) — the seam `CadSession::set_document_archive` takes.
+///
+/// Installed by the `native-below` tick only. Without it every `.ymodel` open and
+/// every `SAVE` refuses with `unsupported-runtime: ymodel` (ADR-0041 D1: `SAVE`
+/// writes only `.ymodel`, so the carrier could not save anything at all).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod ymodel_archive;
+
+/// The carrier's recovery-snapshot store (`filesDir/recovery`, ADR-0037 D12).
+///
+/// One ordinary `.ymodel` plus one `RecoveryRecord` JSON per document, written
+/// while the document is dirty; restore goes through the session's own
+/// `open_recovery`, never the SAF picker (which cannot browse `filesDir`).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod recovery_store;
 
 /// Durable plugin storage that resolves `filesDir` after the asset handshake.
 #[cfg(not(target_arch = "wasm32"))]

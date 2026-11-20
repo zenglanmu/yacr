@@ -19,7 +19,14 @@
     每 tick 的 CAD 命令/输入/布局/出帧、in-DOM 弹窗生命周期、图层面板投影。
   - `src/macos_surface.rs`：CAD 子 `NSView` + wgpu/Metal presenter 的生命周期与几何权威
     （见下）。
-  - `src/platform.rs`：`cad-platform` 的 macOS 实现（文件打开、配置/偏好、DOM surface 度量）。
+  - `src/platform.rs`：`cad-platform` 的 macOS 实现（文件打开 + 保存选择器、原子写、配置/偏好、
+    DOM surface 度量）；`src/platform/save.rs` 是 `NSSavePanel` 保存选择器，`src/platform/fs.rs`
+    是唯一的原子替换/`.bak` 实现。
+  - `src/ymodel_archive.rs`：`.ymodel` 容器适配器（`cad_platform::DocumentArchive` 在
+    `ZipDocumentStore` 上的实现，与 Linux 逐行同义；两个 carrier 是独立二进制 crate，
+    `cad-store-zip` 只能由 `apps/app-*` 链接，因此重写而不是共享）。
+  - `src/recovery_store.rs`：恢复快照存储（`<config>/recovery/<key>.ymodel` + `.json`），
+    由 tick 在建立会话时装到 `native` 会话上。
   - `src/main_thread.rs` / `src/redraw.rs`：共享 `cad-desktop-shell` 主线程调度 seam 的 Tauri
     适配器，以及让单事件循环保持唤醒的 redraw pump（与 Linux/Windows 同一协议）。
 - 共享层：`cad-ui-core`（协议/布局/CAD 会话/i18n）、`cad-desktop-shell`（`#[tauri::command]`
@@ -63,10 +70,24 @@ NSWindow (Tauri, transparent)
 
 ## 文件、配置与弹窗
 
-- **打开**：`NSOpenPanel`（AppKit）只允许本地 `.dwg`/`.dxf`；取消是 `FileEvent::Cancelled`，
-  读取失败是显式 `Failed`，从不伪造成功。AppKit 要求主线程，因此 `begin_open` 的 worker
-  用 `AppHandle::run_on_main_thread` 把面板送到宿主主线程并等待结果（单飞：一次只允许一个
-  打开请求，终态事件容量 1）。
+- **打开**：`NSOpenPanel`（AppKit）列出与导入器一致的扩展名（`ymodel`、`dwg`/`dxf`/`dgn`、
+  `obj`/`stl`/`ply`/`off`/`coff`、`gltf`/`glb`、`step`/`stp`、`ifc`、`rvt`/`rte`/`rfa`/`rft`、
+  `skp`）；取消是 `FileEvent::Cancelled`，读取失败是显式 `Failed`，从不伪造成功。`.ymodel`
+  由 `DocumentArchive` 解码（见下），**不**经过导入器 probe。AppKit 要求主线程，因此
+  `begin_open` 的 worker 用 `AppHandle::run_on_main_thread` 把面板送到宿主主线程并等待结果
+  （单飞：一次只允许一个交互，终态事件容量 1）。
+- **保存**（ADR-0041）：`SAVE` 写 `.ymodel`（`NSSavePanel`，只允许 `*.ymodel`，预填宿主给出的
+  `<stem>.ymodel`）；`EXPORT` 同一面板按目标扩展名分派（`dxf`/`dwg`/`stl`/`obj`/`ply`/`off`/
+  `coff`/`ifc`/`skp`/`glb`/`gltf`），`PLOT` 为 `svg`/`pdf`。选择器与打开共用同一单飞准入。
+  覆盖已打开/已有文件是**允许**的显式保存，不做强制改名；上一版字节保留为 `<name>.bak`。
+  写路径为：目标目录内临时文件 → `write` → `sync_all` → 硬链接（失败回退复制）生成 `.bak`
+  → `rename` 覆盖目标（POSIX 原子）→ 尽力 `fsync` 父目录；rename 之前失败时旧文件保持原样。
+- **`.ymodel` 归档**：tick 在 `CadSession::new` 后 `set_document_archive(ZipArchive)`；未安装时
+  打开/保存 `.ymodel` 以 `unsupported-runtime: ymodel` 显式拒绝，**不会**回退成把 DXF 写成
+  `.ymodel`。
+- **恢复快照**（ADR-0037 D12）：`~/Library/Application Support/yacr/recovery`（`config_dir()` 派生，
+  与 `config_paths()` 同一 helper）；每对 `<key>.ymodel` + `<key>.json` 走同一个原子替换。
+  `HOME` 不可解析时不装 store、不写快照（不臆造路径）。恢复 = 用 `OPEN` 打开该快照。
 - **配置/偏好**：`$HOME/Library/Application Support/yacr/{config.json,preference.json}`；
   `HOME` 不可解析时 store 明确拒绝持久化（回退内存默认），不静默写别处。
   `wgpu_backend` 仍从同一 `preference.json` 读取（`auto`/`vulkan`/`dx12`/`metal`）。
@@ -81,7 +102,6 @@ NSWindow (Tauri, transparent)
 - **新建**（`NEW`，`canNew = true`）：已接线，使用共享 `HostCore::request_new` →
   `HostController::new_blank_document` 安装空白 `untitled` 文档；不需要 picker/文件系统，
   **无新增平台 I/O**。真实 macOS 运行/视觉仍 **NOT VERIFIED**。
-- **保存/导出**：`begin_save` / `write_atomic` 显式 `Unsupported`（与 Windows 宿主同一边界）。
 - **弹窗**：仍是同一 React 树的 in-DOM 覆盖层；共享 `cad-desktop-shell::popup` 的模态围栏与
   `close`/`reload`/`exit` 触发保留。**renderer crash 触发 ④ 未实现**：tauri 2.12.3 / wry 0.57
   没有暴露 WKWebView 内容进程终止事件，宿主只打印一条诚实缺口日志，不伪造崩溃通知。
@@ -115,6 +135,20 @@ NSWindow (Tauri, transparent)
 
 **已执行（本轮）**
 
+- **2026-11-21（保存语义，ADR-0041）**：`cargo check -p app-macos --all-targets --locked`、
+  `cargo test -p app-macos --locked`（34 passed，含保存选择器注入 seam、原子写/`.bak`、
+  `.ymodel` 往返、`.ymodel` 不经过 connector 的契约）、
+  `cargo clippy -p app-macos --all-targets --locked -- -D warnings`、
+  `cargo fmt -p app-macos -- --check`、`check-file-size.py`、`check-architecture.py`、
+  `test-macos-host.py` 在 Linux 主机通过。
+- **macOS 目标类型检查（有界，2026-11-21）**：按下方假 `cc` 方法运行
+  `cargo check -p app-macos --target aarch64-apple-darwin --all-targets --locked` 与
+  `cargo clippy -p app-macos --no-deps --target aarch64-apple-darwin --all-targets --locked
+  -- -D warnings` **均通过**，因此 `NSSavePanel`/`NSOpenPanel` 的 AppKit 调用（`savePanel`、
+  `setNameFieldStringValue`、`setAllowedFileTypes`、`setAllowsOtherFileTypes`、
+  `setCanCreateDirectories`、`setExtensionHidden`、`runModal`、`URL`）与 `objc2` 签名被**类型
+  检查**过。**不是** Apple SDK 构建、不是链接、不是运行；workspace 级 macOS `-D warnings` 仍会
+  被 `cad-desktop-shell` 的一个既有 `dead_code` 警告挡住（与本轮无关，未修改）。
 - `cargo check -p app-macos --all-targets --locked`（Linux 主机，非 macOS 分支）通过。
 - **macOS 目标的完整类型检查（有界）**：用仅替换 ObjC helper C 步骤的假 `cc`
   （`cargo check` 不链接）运行
@@ -142,7 +176,12 @@ NSWindow (Tauri, transparent)
 
 - 真实 Mac 上的窗口创建、透明合成（WKWebView `drawsBackground=NO` + 窗口非不透明）、
   CAD 子视图层序（是否始终在 WKWebView 之下）、Retina/DPI、Metal adapter 选择、present、
-  像素/视觉、OCR/截图、输入事件、`NSOpenPanel`、配置写入。
+  像素/视觉、OCR/截图、输入事件、`NSOpenPanel`、`NSSavePanel`、配置写入。
+- **保存链路（2026-11-21，全部 NOT VERIFIED）**：真实 `NSSavePanel` 的预填名/扩展名过滤/
+  Cancel/Save 响应；`.ymodel` 经 `DocumentArchive` 的真实打开与保存；`.bak` 在 APFS 上的
+  硬链接语义（含稀疏/克隆文件行为）；`rename` 覆盖已存在目标在真实卷上的原子性；
+  恢复快照在 `~/Library/Application Support` 的写入/列出/恢复；沙箱/权限（TCC、只读卷）下的
+  失败表现。AppKit 面板只有**类型检查**证据，**没有**运行、点击或截图证据。
 - 高 DPI 下 `physical_content_size` 与层 bounds/contentsScale 的像素一致性；窗口 resize 时
   `Outdated`/reconfigure 的时延。
 - 渲染器 crash 触发 ④（显式未实现）；原生菜单/快捷键、辅助功能、App Store 私有 API

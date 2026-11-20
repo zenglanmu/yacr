@@ -44,7 +44,7 @@ use cad_domain::{CadError, CadResult, Diagnostic, EntityCapability, SupportStatu
 use cad_import_core::{
     compute_identity, ConnectorDescriptor, ImportCapability, ImportPhase, ImportProgress,
     ImportProgressSink, ImportReport, ImportRequest, ImportedDrawing, Importer, MeshImport,
-    NoopProgress,
+    NoopProgress, SpecVisibility,
 };
 
 /// Stable refusal code: the file is a Revit family/family template, which has
@@ -710,10 +710,16 @@ fn summarize(items: &[String]) -> String {
 /// Owned by this crate: read-only in this build, so `export` is `None` and an
 /// export attempt is the registry's named `export.rvt.not_implemented`
 /// refusal.
+///
+/// `spec` is [`SpecVisibility::ReverseEngineered`]: `rvt` is a clean-room reader
+/// recovering element records (`THIRD_PARTY_NOTICES.md`:54-55;
+/// `vendor/rvt/README.md`:116 and :159 name the published reverse-engineering
+/// work it rests on).
 pub const DESCRIPTOR_RVT: ConnectorDescriptor = ConnectorDescriptor {
     id: "rvt",
     name_key: "connector.rvt.name",
     extensions: &["rvt", "rte"],
+    spec: SpecVisibility::ReverseEngineered,
     import: Some(ImportCapability {
         versions: "Revit 2008-2027 (preview meshes; per-release status ceiling)",
         container: "ole",

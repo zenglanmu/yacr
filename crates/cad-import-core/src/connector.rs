@@ -31,6 +31,23 @@ pub enum ReportDirection {
     Export,
 }
 
+/// Whether the format's specification is published, i.e. whether this crate
+/// reads it from a public document or reconstructs it by reverse engineering.
+///
+/// This is metadata for the host, not a capability gate: a
+/// [`SpecVisibility::ReverseEngineered`] format is still imported/exported
+/// exactly as its descriptor says. A host may use it to warn the user that the
+/// result rests on an independent reconstruction rather than a published
+/// document, so it must be classified from this repository's own evidence and
+/// never guessed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpecVisibility {
+    /// Published, freely implementable specification (ISO, Khronos, plain text).
+    Public,
+    /// Not published; the reader is an independent reconstruction.
+    ReverseEngineered,
+}
+
 /// What one connector can read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ImportCapability {
@@ -51,6 +68,13 @@ pub struct ExportCapability {
     /// `true` when the writer cannot represent every document faithfully, so a
     /// caller must read the per-object report instead of assuming a round trip.
     pub lossy: bool,
+    /// `true` when the written output is not verified against the format's own
+    /// producer and is known to be incomplete (DWG, SKP today).
+    ///
+    /// Unlike [`Self::lossy`] this is not about the projection: it says the
+    /// writer itself is unproven, so a host must present it as experimental
+    /// rather than as a format the vendor can open.
+    pub experimental: bool,
 }
 
 /// One drawing format as a connector: identity, extensions and both directions.
@@ -66,6 +90,9 @@ pub struct ConnectorDescriptor {
     pub name_key: &'static str,
     /// Lower-case file extensions without the dot, as the picker shows them.
     pub extensions: &'static [&'static str],
+    /// Whether the format's specification is published or reconstructed by
+    /// reverse engineering (see [`SpecVisibility`]).
+    pub spec: SpecVisibility,
     /// `None` when the format has no reader.
     pub import: Option<ImportCapability>,
     /// `None` when the format has no writer (an export attempt is then a named
@@ -82,4 +109,55 @@ pub struct ConnectorDescriptor {
 pub trait Connector {
     /// The descriptor this object implements.
     fn descriptor(&self) -> &'static ConnectorDescriptor;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Exhaustive match: a new [`SpecVisibility`] variant must be classified
+    /// here (and by the host that renders the warning) instead of silently
+    /// falling into "public".
+    fn spec_label(spec: SpecVisibility) -> &'static str {
+        match spec {
+            SpecVisibility::Public => "public",
+            SpecVisibility::ReverseEngineered => "reverse-engineered",
+        }
+    }
+
+    #[test]
+    fn spec_visibility_variants_are_exhaustively_named() {
+        assert_eq!(spec_label(SpecVisibility::Public), "public");
+        assert_eq!(
+            spec_label(SpecVisibility::ReverseEngineered),
+            "reverse-engineered"
+        );
+    }
+
+    #[test]
+    fn a_descriptor_carries_the_spec_visibility_of_its_own_field() {
+        // Shape test only: the per-format classification lives with each
+        // descriptor and is pinned by the registry test in `cad-app`
+        // (`cad-import-core` cannot depend on the format crates).
+        const PUBLIC: ExportCapability = ExportCapability {
+            versions: "synthetic",
+            level: FidelityLevel::L1,
+            lossy: false,
+            experimental: false,
+        };
+        const DESCRIPTOR: ConnectorDescriptor = ConnectorDescriptor {
+            id: "synthetic",
+            name_key: "connector.synthetic.name",
+            extensions: &["synthetic"],
+            spec: SpecVisibility::Public,
+            import: None,
+            export: Some(PUBLIC),
+            declared_classes: &[],
+        };
+        assert_eq!(DESCRIPTOR.spec, SpecVisibility::Public);
+        assert_eq!(
+            DESCRIPTOR.export.map(|export| export.experimental),
+            Some(false)
+        );
+    }
 }

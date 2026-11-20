@@ -39,6 +39,9 @@ cad-host.workspace = true
 cad-platform.workspace = true
 cad-resources.workspace = true
 cad-db.workspace = true
+# The macOS carrier's `.ymodel` container linkage (ADR-0037 D1/D11): a
+# carrier-only crate, never a shared `cad-*` layer.
+cad-store-zip.workspace = true
 cad-domain.workspace = true
 # Durable preference read (`wgpu_backend`) through the same JSON store the
 # shared UI writes; no new dependency version (workspace pin).
@@ -53,11 +56,26 @@ objc2 = { version = "=0.6.5" }
 objc2-foundation = { version = "=0.3.2" }
 objc2-app-kit = { version = "=0.3.2" }
 
-# `platform` (the `cad-platform` file/config/surface contracts) is independent
-# of the macOS windowing layer, so its i18n lookup and unit tests also run on a
-# non-macOS host. It only pulls the UI-framework-free `cad-ui-core`.
+# The one target-independent production dependency: launch options, wire protocol
+# and i18n lookup must be testable on every host.
 [dependencies]
 cad-ui-core.workspace = true
+
+# Test-only, non-macOS: `platform`, `ymodel_archive` and `recovery_store` are
+# plain std-fs/trait code, so their contracts are unit-tested on Linux too (the
+# macOS target gets the same crates from the table above). Dev-dependencies keep
+# the shipped non-macOS (host/wasm) builds free of the CAD/carrier crates: on a
+# macOS target these modules are part of the product, not of a test build.
+#
+# `cad-store-zip` may only be linked by an `apps/app-*` carrier
+# (`scripts/check-architecture.py`); here it is linked by the macOS carrier.
+[target.'cfg(not(target_os = "macos"))'.dev-dependencies]
+cad-platform.workspace = true
+cad-db.workspace = true
+cad-store-zip.workspace = true
+cad-domain.workspace = true
+cad-host.workspace = true
+serde_json.workspace = true
 
 # `tauri-build` generates the Tauri context and embeds the shared React bundle
 # for a macOS target. It is an ordinary build-dependency (compiled for the host)

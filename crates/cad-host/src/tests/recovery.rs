@@ -182,9 +182,6 @@ impl PlatformFiles for RecoveryFiles {
             .insert(target.opaque.clone(), bytes.to_vec());
         Ok(())
     }
-    fn refuses_source_overwrite(&self, _target: &FileTarget) -> bool {
-        false
-    }
     fn set_source(&self, target: Option<&FileTarget>) {
         *self.source.borrow_mut() = target.cloned();
     }

@@ -50,7 +50,9 @@ pub const CAN_OPEN: bool = true;
 /// replaces the current document in the single native session. It needs no
 /// picker or filesystem access and still creates no second document authority.
 pub const CAN_NEW: bool = true;
-/// DXF Save As through `documentLaunchSave` + `documentWriteUri` (lossy export).
+/// `SAVE` through `documentLaunchSave` + `documentWriteUri`: the native `.ymodel`
+/// archive (ADR-0041 D1 — `SAVE` writes only this format), with `EXPORT` reaching
+/// the other writers by target extension.
 pub const CAN_SAVE: bool = true;
 /// No plot/vector export (SVG/PDF) on this carrier yet.
 pub const CAN_PLOT: bool = false;
@@ -179,7 +181,7 @@ mod tests {
     }
 
     #[test]
-    fn open_new_and_dxf_save_are_advertised_plot_is_not() {
+    fn open_new_and_native_save_are_advertised_plot_is_not() {
         // The mirror of the `HostCapabilities` the tick passes to `CadSession::new`:
         // a fabricated capability would make the chrome offer a dead action, and a
         // missing one would hide a real SAF path. Values are read through a binding

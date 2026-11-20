@@ -15,9 +15,9 @@
 // focus (the safe answer), Escape cancels, and Tab cannot leave the card; the
 // trap itself lives in `confirm-focus.ts`.
 //
-// Every sentence comes from the shared catalogs. The two footer actions are the
-// save funnel's own labels: `save.embed.confirm` for the packing save and
-// `save.dwg_confirm.cancel` for "stop, save nothing".
+// Every sentence comes from the shared catalogs. The confirm action is the save
+// funnel's own label (`save.embed.confirm`); cancel is the shared `tool.cancel`
+// ("stop, save nothing").
 import React, { useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Icon } from '../icons.tsx';
@@ -167,7 +167,7 @@ export function SaveEmbedDialog({ preview, busy, error, onConfirm, onCancel }: S
         </div>
         <footer className="save-embed__footer" style={DIALOG_FOOT}>
           <Button ref={cancelRef} variant="ghost" disabled={busy} onClick={onCancel}>
-            {t('save.dwg_confirm.cancel')}
+            {t('tool.cancel')}
           </Button>
           <Button
             variant="solid"

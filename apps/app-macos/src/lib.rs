@@ -42,9 +42,16 @@ pub mod host;
 pub mod macos_surface;
 #[cfg(target_os = "macos")]
 pub mod main_thread;
-#[cfg(target_os = "macos")]
+// The file/config/surface contracts, the `.ymodel` archive adapter and the
+// recovery store are plain std-fs/trait code: they compile for the macOS host and
+// also for unit tests on any host, so their contracts stay verifiable on Linux.
+#[cfg(any(test, target_os = "macos"))]
 pub mod platform;
+#[cfg(any(test, target_os = "macos"))]
+pub mod recovery_store;
 #[cfg(target_os = "macos")]
 pub mod redraw;
+#[cfg(any(test, target_os = "macos"))]
+pub mod ymodel_archive;
 
 pub use entry::run;

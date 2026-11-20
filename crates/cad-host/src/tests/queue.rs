@@ -82,6 +82,7 @@ fn submit_rejects_gesture_commands_without_allocating() {
         CommandId::OpenDrawing,
         CommandId::PlotDrawing,
         CommandId::SaveDrawingAs,
+        CommandId::Export,
         CommandId::SwitchBackend,
     ] {
         let request = EngineRequest::Command(command(&core, id, CommandPayload::None));

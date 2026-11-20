@@ -133,8 +133,9 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 | `OPEN` | 宿主 | 否 | — |
 | `NEW` | 宿主 | 否 | — |
 | `CLOSE` | 宿主（关闭当前图纸并回到开始页；无未保存提示/多文档） | 否 | — |
-| `SAVE` | 宿主（有损 DXF 另存） | 否 | `QSAVE`、`SAVEAS` |
-| `PLOT` | 宿主（矢量导出 SVG/PDF） | 否 | `EXPORT`、`PRINT` |
+| `SAVE` | 宿主（保存为原生 `.ymodel`） | 否 | `QSAVE`、`SAVEAS` |
+| `EXPORT` | 宿主（导出为其它格式；目标扩展名决定写出器） | 否 | — |
+| `PLOT` | 宿主（矢量导出 SVG/PDF） | 否 | `PRINT` |
 | `SWITCH2D3D` | 观察（2D 俯视 ↔ 3D 透视切换；切回 2D 恢复保存的相机） | 否 | — |
 | `PROJECTION` | 观察（透视/正交切换） | 否 | — |
 | `MODEL` | 空间（payload-free 切到模型空间；复用 `SPACE MODEL` 的校验 + 自动取景，Model 标签页走同一命令） | 否 | — |
@@ -276,7 +277,7 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 | `DCE` | `DIMCENTER` | `MA` | `MATCHPROP` |
 | `BR` | `BREAK` | `DIV` | `DIVIDE` |
 
-全词同义词（同样在 `COMMAND_ALIASES` 内）：`EXPORT`/`PRINT`→`PLOT`、`SAVEAS`/`QSAVE`→`SAVE`、
+全词同义词（同样在 `COMMAND_ALIASES` 内）：`PRINT`→`PLOT`、`SAVEAS`/`QSAVE`→`SAVE`、
 `ZOOM EXTENTS`→`FIT`、`ENTER`→`CONFIRM`、`DBA`→`DIMBASELINE`、`DCO`→`DIMCONTINUE`、
 `LAYUNISO`/`LAYON`→`RESTORELAYERS`、`NEWLAYER`→`CREATELAYER`、`LEN`→`LENGTHEN`、`I`→`INSERT`、`B`→`BLOCK`、
 `XL`→`XLINE`（项目同义词，非 `acad.pgp`）、`TJUST`→`JUSTIFYTEXT`、`MTEDIT`→`TEXTEDIT`、
@@ -321,7 +322,7 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 | `Ctrl+Home` | `FIT`（缩放到范围） | 加速器表 |
 | `Ctrl+O` | `OPEN`（需 `canOpen`） | 加速器表 |
 | `Ctrl+N` | `NEW`（需 `canNew`，否则不派发） | 加速器表 |
-| `Ctrl+S` / `Ctrl+Shift+S` | `SAVE`（有损 DXF 另存；需 `canSave`） | 加速器表 |
+| `Ctrl+S` / `Ctrl+Shift+S` | `SAVE`（保存为 `.ymodel`；需 `canSave`） | 加速器表 |
 | `Ctrl+P` | `PLOT`（矢量 SVG/PDF；需 `canPlot`） | 加速器表 |
 | `Ctrl+0` | 切换 clean screen（隐藏 chrome） | `App.tsx` 直接分支 |
 | `Ctrl+1` | 切换属性面板 | `App.tsx` 直接分支 |

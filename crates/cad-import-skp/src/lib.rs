@@ -545,10 +545,17 @@ fn record_losses(import: &mut MeshImport, stats: &SkpStats) {
 /// Owned by this crate (one declaration per format): the reader is this preview
 /// importer and the writer is `cad-export-skp`, which authors the 2026/2027
 /// container at L1 (lossy: triangles, tags/materials flattened).
+///
+/// `spec` is [`cad_import_core::SpecVisibility::ReverseEngineered`]:
+/// `skpwright` is a clean-room reader with no Trimble SDK or SDK-derived
+/// knowledge (this module's header, lines 3-6, and
+/// `THIRD_PARTY_NOTICES.md`:87), and the 2026/2027 writer is NOT VERIFIED
+/// against SketchUp itself, so its export is `experimental`.
 pub const DESCRIPTOR_SKP: ConnectorDescriptor = ConnectorDescriptor {
     id: "skp",
     name_key: "connector.skp.name",
     extensions: &["skp"],
+    spec: cad_import_core::SpecVisibility::ReverseEngineered,
     import: Some(ImportCapability {
         versions: "3-8, 2013-2020, 2026, 2027 (2021-2025 read as container-equivalent, unverified)",
         container: "skp",
@@ -557,6 +564,7 @@ pub const DESCRIPTOR_SKP: ConnectorDescriptor = ConnectorDescriptor {
         versions: "SketchUp 2026/2027 (written container)",
         level: cad_import_core::FidelityLevel::L1,
         lossy: true,
+        experimental: true,
     }),
     declared_classes: &[],
 };

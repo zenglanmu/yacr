@@ -21,15 +21,15 @@ fn document_compat(core: &HostCore) -> Vec<serde_json::Value> {
 // --- file contracts: open/save/plot -----------------------------------------
 
 #[test]
-fn a_synchronous_save_completes_inside_the_gesture() {
+fn a_synchronous_export_completes_inside_the_gesture() {
     let files = Rc::new(SyncSaveFiles::default());
     let core = core_with_caps(files.clone(), capabilities(false));
-    // A document opened from a `.dxf` keeps the lossy DXF Save As (the native
-    // `.ymodel` save is the default only for a document with no source format).
+    // A document opened from a `.dxf`: SAVE would be the native archive, so the
+    // lossy DXF write is the explicit EXPORT command now (ADR-0041 D1/D2).
     *core.source_target.borrow_mut() = Some(FileTarget::from_path("/tmp/plan.dxf"));
-    // Save As DXF: the synchronous platform synthesizes the target in
-    // `begin_save`, so the export must run inside the gesture.
-    core.request_save().unwrap();
+    // EXPORT: the synchronous platform synthesizes the target in `begin_save`, so
+    // the export must run inside the gesture.
+    core.request_export().unwrap();
     assert!(
         !core.save_pending.get(),
         "the synchronous target is drained"
@@ -42,14 +42,14 @@ fn a_synchronous_save_completes_inside_the_gesture() {
     assert_eq!(written.len(), 1, "exactly one file is written");
     assert!(
         written[0].0.ends_with(".dxf"),
-        "save names a .dxf target: {}",
+        "the export names a .dxf target: {}",
         written[0].0
     );
     assert!(
         written[0].1.windows(7).any(|window| window == b"SECTION"),
         "the written save is an ASCII DXF document"
     );
-    let status = core.last_status().expect("the save grades a status");
+    let status = core.last_status().expect("the export grades a status");
     let (key, args) = catalog(&status);
     assert_eq!(key, "save.exported");
     assert_eq!(args.get("path"), Some(&written[0].0));
@@ -70,12 +70,12 @@ fn a_synchronous_save_completes_inside_the_gesture() {
     );
 }
 
-/// SAVEAS of a drawing that carries a `3DSOLID` states that the file is written as
+/// EXPORT of a drawing that carries a `3DSOLID` states that the file is written as
 /// AC1024, because the ACIS payload is inline SAT text. The choice is made in the
-/// exporter (`export.note.acis_sat_text_version`) and surfaces on the save status
+/// exporter (`export.note.acis_sat_text_version`) and surfaces on the export status
 /// instead of staying buried in the report.
 #[test]
-fn saving_a_drawing_with_a_3dsolid_says_the_file_is_written_as_ac1024() {
+fn exporting_a_drawing_with_a_3dsolid_says_the_file_is_written_as_ac1024() {
     let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../fixtures/dxf/synthetic-acis-cube.dxf");
     let bytes = std::fs::read(&fixture).expect("committed ACIS DXF fixture");
@@ -85,7 +85,7 @@ fn saving_a_drawing_with_a_3dsolid_says_the_file_is_written_as_ac1024() {
         .borrow_mut()
         .open_bytes(Arc::from(bytes), "synthetic-acis-cube.dxf")
         .expect("the ACIS fixture opens");
-    core.request_save().unwrap();
+    core.request_export().unwrap();
 
     let written = files.written.borrow();
     assert_eq!(written.len(), 1, "exactly one file is written");
@@ -133,7 +133,7 @@ fn saving_a_drawing_with_a_3dsolid_says_the_file_is_written_as_ac1024() {
 }
 
 #[test]
-fn saving_a_drawing_with_a_3dsolid_to_dwg_says_the_payload_is_sab() {
+fn exporting_a_drawing_with_a_3dsolid_to_dwg_says_the_payload_is_sab() {
     // The same exact ACIS fixture, written to a DWG target: the exporter carries
     // the body as a `3DSOLID` whose payload is a binary SAB blob in the AcDs
     // section (`export.note.acis_sab_dwg`), and the status names that payload
@@ -148,7 +148,7 @@ fn saving_a_drawing_with_a_3dsolid_to_dwg_says_the_payload_is_sab() {
         .borrow_mut()
         .open_bytes(Arc::from(bytes), "synthetic-acis-cube.dxf")
         .expect("the ACIS fixture opens");
-    core.request_save().unwrap();
+    core.request_export().unwrap();
 
     let written = files.written.borrow();
     assert_eq!(written.len(), 1, "exactly one file is written");
@@ -225,20 +225,20 @@ fn a_synchronous_plot_writes_real_vector_content() {
 }
 
 #[test]
-fn an_async_save_waits_for_the_picker_then_exports_on_the_tick() {
+fn an_async_export_waits_for_the_picker_then_exports_on_the_tick() {
     // `FakeFiles::begin_save` is a no-op (a desktop dialog is asynchronous): the
     // core leaves the interaction pending and exports only once the platform
     // delivers the chosen target on a later drain.
     let files = Rc::new(FakeFiles::default());
     let core = core_with(files.clone(), false);
-    core.request_save().unwrap();
+    core.request_export().unwrap();
     assert!(
         core.save_pending.get(),
         "an async picker leaves the interaction pending"
     );
     assert!(core.pending_save.borrow().is_none());
     files.events.borrow_mut().push(FileEvent::SaveTarget {
-        purpose: SavePurpose::SaveDxf,
+        purpose: SavePurpose::SaveExport,
         target: FileTarget::from_path("/tmp/chosen.dxf"),
     });
     core.drain_files().unwrap();
@@ -558,20 +558,16 @@ fn an_open_without_a_real_path_keeps_references_unavailable() {
     );
 }
 
-// --- DWG Save As: experimental export, new file, never the source -----------
+// --- EXPORT: target extension selects the writer, overwriting is allowed -----
 
 /// A save platform whose chosen target (when set) is synthesized synchronously,
-/// recording the suggested name/purpose and every write. `detect_identity`
-/// models the platform's own device+inode / SAF-URI guard: the browser has no
-/// such identity, so its save funnel must rely on the host's normalized backstop.
+/// recording the suggested name/purpose and every write.
 #[derive(Default)]
 struct RecordingSaveFiles {
     calls: RefCell<Vec<(SavePurpose, String)>>,
     events: RefCell<Vec<FileEvent>>,
     written: RefCell<Vec<(String, Vec<u8>)>>,
-    source: RefCell<Option<FileTarget>>,
     chosen: RefCell<Option<FileTarget>>,
-    detect_identity: Cell<bool>,
 }
 
 impl RecordingSaveFiles {
@@ -580,9 +576,7 @@ impl RecordingSaveFiles {
             calls: RefCell::new(Vec::new()),
             events: RefCell::new(Vec::new()),
             written: RefCell::new(Vec::new()),
-            source: RefCell::new(None),
             chosen: RefCell::new(None),
-            detect_identity: Cell::new(true),
         }
     }
 }
@@ -611,17 +605,7 @@ impl PlatformFiles for RecordingSaveFiles {
             .push((target.display_name.clone(), bytes.to_vec()));
         Ok(())
     }
-    fn refuses_source_overwrite(&self, target: &FileTarget) -> bool {
-        self.detect_identity.get()
-            && self
-                .source
-                .borrow()
-                .as_ref()
-                .is_some_and(|source| source.opaque == target.opaque)
-    }
-    fn set_source(&self, target: Option<&FileTarget>) {
-        *self.source.borrow_mut() = target.cloned();
-    }
+    fn set_source(&self, _target: Option<&FileTarget>) {}
     fn poll(&self) -> Vec<FileEvent> {
         std::mem::take(&mut *self.events.borrow_mut())
     }
@@ -643,40 +627,16 @@ fn open_dwg_source(core: &HostCore, path: &str) {
 }
 
 #[test]
-fn save_on_a_dwg_source_suggests_a_new_export_name() {
-    let files = Rc::new(RecordingSaveFiles::new());
-    let core = core_with_caps(files.clone(), capabilities(false));
-    open_dwg_source(&core, "/tmp/plan.dwg");
-
-    core.request_save().unwrap();
-    assert!(
-        core.save_pending.get(),
-        "a desktop picker leaves the save pending"
-    );
-    let calls = files.calls.borrow();
-    assert_eq!(calls.len(), 1);
-    assert_eq!(calls[0].0, SavePurpose::SaveDwg);
-    assert_eq!(calls[0].1, "plan-export.dwg");
-    assert_ne!(calls[0].1, "plan.dwg", "the source name is never suggested");
-    let status = core.last_status().unwrap();
-    let (key, _) = catalog(&status);
-    assert_eq!(
-        key, "save.picker_waiting_dwg",
-        "the DWG picker must warn before the write that the copy is experimental and the source is kept"
-    );
-}
-
-#[test]
 fn a_dwg_target_writes_experimental_dwg_bytes_and_warns() {
     let files = Rc::new(RecordingSaveFiles::new());
     *files.chosen.borrow_mut() = Some(FileTarget::from_path("/tmp/plan-export.dwg"));
     let core = core_with_caps(files.clone(), capabilities(false));
     open_dwg_source(&core, "/tmp/plan.dwg");
 
-    core.request_save().unwrap();
+    core.request_export().unwrap();
     assert!(!core.save_pending.get());
     let written = files.written.borrow();
-    assert_eq!(written.len(), 1, "exactly one new file is written");
+    assert_eq!(written.len(), 1, "exactly one file is written");
     assert_eq!(written[0].0, "/tmp/plan-export.dwg");
     assert!(
         written[0].1.starts_with(b"AC10"),
@@ -696,41 +656,48 @@ fn a_dwg_target_writes_experimental_dwg_bytes_and_warns() {
 }
 
 #[test]
-fn choosing_the_opened_dwg_source_is_refused_and_writes_nothing() {
-    for detect_identity in [true, false] {
-        let files = Rc::new(RecordingSaveFiles::new());
-        files.detect_identity.set(detect_identity);
-        *files.chosen.borrow_mut() = Some(FileTarget::from_path("/tmp/plan.dwg"));
-        let core = core_with_caps(files.clone(), capabilities(false));
-        open_dwg_source(&core, "/tmp/plan.dwg");
+fn exporting_over_the_opened_dwg_source_is_allowed() {
+    // ADR-0041 D4: choosing the opened source as the export target is a
+    // deliberate user action, not a refusal. The host writes it (the platform's
+    // atomic write keeps the previous bytes in `<name>.<ext>.bak`; that half is
+    // pinned by the Linux platform test) and grades the experimental DWG status.
+    let files = Rc::new(RecordingSaveFiles::new());
+    *files.chosen.borrow_mut() = Some(FileTarget::from_path("/tmp/plan.dwg"));
+    let core = core_with_caps(files.clone(), capabilities(false));
+    open_dwg_source(&core, "/tmp/plan.dwg");
 
-        core.request_save().unwrap();
-        assert!(
-            files.written.borrow().is_empty(),
-            "the opened source is never written (detect_identity={detect_identity})"
-        );
-        let status = core.last_status().unwrap();
-        let (key, _) = catalog(&status);
-        assert_eq!(
-            key, "save.refused_source_path",
-            "the refusal is named (detect_identity={detect_identity})"
-        );
-    }
+    core.request_export().unwrap();
+    let written = files.written.borrow();
+    assert_eq!(written.len(), 1, "the source target is written");
+    assert_eq!(written[0].0, "/tmp/plan.dwg");
+    assert!(
+        written[0].1.starts_with(b"AC10"),
+        "the overwritten target holds DWG bytes"
+    );
+    drop(written);
+    let status = core.last_status().unwrap();
+    let (key, _) = catalog(&status);
+    assert!(
+        key == "save.dwg_exported_experimental" || key == "save.dwg_exported_partial",
+        "the DWG status still names the experimental boundary: {key}"
+    );
 }
 
 #[test]
-fn the_normalized_backstop_also_refuses_a_dot_path_spelling_of_the_source() {
+fn exporting_to_a_dot_path_spelling_of_the_source_is_allowed() {
+    // The normalized-path backstop is gone with the refusal: a different lexical
+    // spelling of the same file is an ordinary target now.
     let files = Rc::new(RecordingSaveFiles::new());
-    files.detect_identity.set(false);
     *files.chosen.borrow_mut() = Some(FileTarget::from_path("/tmp/./plan.dwg"));
     let core = core_with_caps(files.clone(), capabilities(false));
     open_dwg_source(&core, "/tmp/plan.dwg");
 
-    core.request_save().unwrap();
-    assert!(files.written.borrow().is_empty());
-    let status = core.last_status().unwrap();
-    let (key, _) = catalog(&status);
-    assert_eq!(key, "save.refused_source_path");
+    core.request_export().unwrap();
+    assert_eq!(
+        files.written.borrow().len(),
+        1,
+        "the target is written, not refused"
+    );
 }
 
 #[test]
@@ -754,7 +721,7 @@ fn a_connector_save_as_writes_registry_bytes_and_grades_its_own_status() {
             .set_units(cad_domain::UnitContext::from_meter())
             .unwrap();
 
-        core.request_save().unwrap();
+        core.request_export().unwrap();
         assert!(
             !core.save_pending.get(),
             "{extension}: the target is drained"
@@ -804,7 +771,7 @@ fn a_connector_save_records_its_export_report_on_the_document() {
         .expect("the STL fixture imports as a mesh document");
     let before = document_compat(&core).len();
 
-    core.request_save().unwrap();
+    core.request_export().unwrap();
     assert_eq!(files.written.borrow().len(), 1);
 
     let compat = document_compat(&core);
@@ -838,7 +805,7 @@ fn a_glb_save_as_writes_the_gltf_connector_and_records_its_report() {
         .unwrap();
     let before = document_compat(&core).len();
 
-    core.request_save().unwrap();
+    core.request_export().unwrap();
 
     let written = files.written.borrow();
     assert_eq!(written.len(), 1, "exactly one file is written");
@@ -885,7 +852,7 @@ fn export_records_are_capped_to_the_newest_32() {
         .expect("the STL fixture imports as a mesh document");
 
     for _ in 0..40 {
-        core.request_save().unwrap();
+        core.request_export().unwrap();
     }
     let compat = document_compat(&core);
     let is_export = |row: &serde_json::Value| row["direction"].as_str() == Some("export");
@@ -919,7 +886,7 @@ fn drawing_units_refuse_ifc_and_skp_by_name_without_writing() {
             .set_units(cad_domain::UnitContext::drawing_units())
             .unwrap();
 
-        core.request_save().unwrap();
+        core.request_export().unwrap();
 
         assert!(
             files.written.borrow().is_empty(),
@@ -937,11 +904,10 @@ fn drawing_units_refuse_ifc_and_skp_by_name_without_writing() {
 }
 
 #[test]
-fn choosing_the_opened_source_as_a_connector_target_is_refused() {
-    // The platform cannot detect inode identity on every carrier, so the
-    // normalized-name backstop must also protect a connector Save As.
+fn exporting_over_the_opened_source_as_a_connector_target_is_allowed() {
+    // ADR-0041 D4: no carrier-specific identity guard refuses this any more. The
+    // previous bytes are the platform atomic write's job, not the host's.
     let files = Rc::new(RecordingSaveFiles::new());
-    files.detect_identity.set(false);
     *files.chosen.borrow_mut() = Some(FileTarget::from_path("/tmp/source.stl"));
     let core = core_with_caps(files.clone(), capabilities(false));
     let fixture =
@@ -950,27 +916,31 @@ fn choosing_the_opened_source_as_a_connector_target_is_refused() {
     core.deliver_external_open(FileTarget::from_path("/tmp/source.stl"), Arc::from(bytes))
         .expect("the STL fixture imports");
 
-    core.request_save().unwrap();
-    assert!(
-        files.written.borrow().is_empty(),
-        "a connector Save As never overwrites the opened source"
+    core.request_export().unwrap();
+    assert_eq!(
+        files.written.borrow().len(),
+        1,
+        "the connector writer runs against the chosen target"
     );
     let status = core.last_status().unwrap();
     let (key, _) = catalog(&status);
-    assert_eq!(key, "save.refused_source_path");
+    assert!(
+        key == "save.exported_connector" || key == "save.exported_connector_partial",
+        "a connector export keeps its own status: {key}"
+    );
 }
 
 #[test]
-fn save_on_a_dxf_source_keeps_the_dxf_purpose_and_name() {
+fn export_on_a_dxf_source_suggests_the_dxf_name() {
     let files = Rc::new(RecordingSaveFiles::new());
     let core = core_with_caps(files.clone(), capabilities(false));
     let (bytes, _report) = core.controller.borrow().export_dxf().unwrap();
     core.deliver_external_open(FileTarget::from_path("/tmp/plan.dxf"), Arc::from(bytes))
         .expect("the synthetic DXF source opens");
 
-    core.request_save().unwrap();
+    core.request_export().unwrap();
     let calls = files.calls.borrow();
     assert_eq!(calls.len(), 1);
-    assert_eq!(calls[0].0, SavePurpose::SaveDxf);
+    assert_eq!(calls[0].0, SavePurpose::SaveExport);
     assert_eq!(calls[0].1, "plan.dxf");
 }

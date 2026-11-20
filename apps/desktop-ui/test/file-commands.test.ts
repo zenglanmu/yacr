@@ -45,8 +45,9 @@ test('file-level commands are gated by the host capability booleans, never by a 
   // An in-flight command is the same temporary state for every name.
   assert.equal(admitCommandText('SAVE', { status: loaded, pending: true }).reasonKey, BUSY_KEY);
 
-  // SAVE/SAVEAS/QSAVE share `canSave`.
-  const saveFamily = ['SAVE', 'SAVEAS', 'QSAVE'];
+  // SAVE/SAVEAS/QSAVE share `canSave`, and since ADR-0041 `EXPORT` does too:
+  // the host checks its save capability before it opens the export picker.
+  const saveFamily = ['SAVE', 'SAVEAS', 'QSAVE', 'EXPORT'];
   for (const typed of saveFamily) {
     assert.equal(CAPABILITY_GATES[typed], 'canSave', typed);
     // Document open + capability true: admitted.
@@ -68,8 +69,8 @@ test('file-level commands are gated by the host capability booleans, never by a 
       typed,
     );
   }
-  // PLOT/EXPORT/PRINT share `canPlot`, with the same three outcomes.
-  for (const typed of ['PLOT', 'EXPORT', 'PRINT']) {
+  // PLOT/PRINT share `canPlot`, with the same three outcomes.
+  for (const typed of ['PLOT', 'PRINT']) {
     assert.equal(CAPABILITY_GATES[typed], 'canPlot', typed);
     assert.deepEqual(admitCommandText(typed, { status: loaded }), { kind: 'admitted', command: typed, reasonKey: null }, typed);
     assert.deepEqual(
@@ -92,7 +93,8 @@ test('file-level commands are gated by the host capability booleans, never by a 
     ['SAVEAS', empty, 'plot.no_document'],
     ['QSAVE', { ...loaded, canSave: false }, 'command.unsupported'],
     ['PLOT', empty, 'plot.no_document'],
-    ['EXPORT', { ...loaded, canPlot: false }, 'command.unsupported'],
+    ['EXPORT', { ...loaded, canSave: false }, 'command.unsupported'],
+    ['EXPORT', empty, 'plot.no_document'],
     ['PRINT', empty, 'plot.no_document'],
     ['LINE', loaded, 'command.unsupported'],
   ];
@@ -145,12 +147,12 @@ test('the start panel offers New through the same admission, not a permanent dis
   assert.ok(source.includes("t('start.new_drawing')"));
 });
 
-test('the File tab keeps NEW/SAVE/PLOT as command tokens enabled by admission', async () => {
+test('the File tab keeps NEW/SAVE/EXPORT/PLOT as command tokens enabled by admission', async () => {
   const { RIBBON_TABS, ribbonCommandIds } = await import('../src/ribbon/ribbon-model.ts');
   const { readModule } = await import('./helpers.ts');
   const file = RIBBON_TABS.find(tab => tab.id === 'file').panels.find(panel => panel.id === 'file');
   const byId = Object.fromEntries(file.items.map(item => [item.id, item]));
-  for (const id of ['NEW', 'SAVE', 'PLOT']) {
+  for (const id of ['NEW', 'SAVE', 'EXPORT', 'PLOT']) {
     assert.equal(byId[id].command, id, `${id} must stay a router command token`);
     // No local `disabled`/`enabled` override: the renderer's `canCommand` gate is
     // the only switch.
@@ -158,9 +160,9 @@ test('the File tab keeps NEW/SAVE/PLOT as command tokens enabled by admission', 
     assert.equal('action' in byId[id], false, id);
     assert.equal(admitCommandText(id, { status: loaded }).kind, 'admitted', id);
   }
-  // PLOT is the host's SVG/PDF output selector — the very command the `EXPORT`
-  // and `PRINT` aliases normalise onto — so it carries the neighbours' label
-  // style and the shared `canPlot` gate, and the ribbon must offer it.
+  // PLOT is the host's SVG/PDF output selector — `PRINT` still normalises onto
+  // it — so it carries the neighbours' label style and the shared `canPlot`
+  // gate, and the ribbon must offer it.
   assert.equal(byId.PLOT.labelKey, 'file.plot');
   assert.equal(byId.PLOT.large, true, 'PLOT is a primary file action like SAVE');
   assert.equal(CAPABILITY_GATES.PLOT, 'canPlot');
@@ -169,7 +171,19 @@ test('the File tab keeps NEW/SAVE/PLOT as command tokens enabled by admission', 
     command: 'PLOT',
     reasonKey: 'plot.no_document',
   });
+  // EXPORT is its own selector now (ADR-0041) and writes a copy in the format
+  // the host's export picker chooses; it carries SAVE's gate, not PLOT's.
+  assert.equal(byId.EXPORT.labelKey, 'file.export');
+  assert.equal(byId.EXPORT.icon, 'export');
+  assert.equal(byId.EXPORT.large, true, 'EXPORT is a primary file action like SAVE');
+  assert.equal(CAPABILITY_GATES.EXPORT, 'canSave');
+  assert.deepEqual(admitCommandText('EXPORT', { status: empty }), {
+    kind: 'unavailable',
+    command: 'EXPORT',
+    reasonKey: 'plot.no_document',
+  });
   assert.equal(ribbonCommandIds().includes('PLOT'), true, 'the File tab offers PLOT');
+  assert.equal(ribbonCommandIds().includes('EXPORT'), true, 'the File tab offers EXPORT');
   // The ribbon renders a refused command through the shared reason key + state.
   const ribbon = await readModule('components/Ribbon.tsx');
   assert.ok(ribbon.includes(': item.command ? shell.canCommand(item.command)'));

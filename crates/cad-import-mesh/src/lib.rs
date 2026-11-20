@@ -60,7 +60,7 @@ use cad_domain::{CadError, CadResult, Diagnostic, DocumentIdentity, Mesh, Point3
 use cad_import_core::{
     ConnectorDescriptor, ExportCapability, FidelityLevel, ImportCapability, ImportLimits,
     ImportPhase, ImportProgress, ImportProgressSink, ImportReport, ImportRequest, ImportedDrawing,
-    MeshImport,
+    MeshImport, SpecVisibility,
 };
 
 /// One non-fatal fact the parser found. `partial` marks lost/inexact geometry;
@@ -185,10 +185,14 @@ pub(crate) fn publish(
 /// Owned by this crate. `cad-export-mesh` writes binary little-endian PLY 1.0;
 /// the writer is lossy because PLY stores no layers/units and an incomplete
 /// normal or colour set is dropped rather than invented.
+///
+/// `spec` is [`SpecVisibility::Public`]: PLY 1.0 is a plain-text header format
+/// with a published description, implemented by the hand-written parser here.
 pub const DESCRIPTOR_PLY: ConnectorDescriptor = ConnectorDescriptor {
     id: "ply",
     name_key: "connector.ply.name",
     extensions: &["ply"],
+    spec: SpecVisibility::Public,
     import: Some(ImportCapability {
         versions: "PLY 1.0 (ascii / binary little- and big-endian)",
         container: "ply",
@@ -197,6 +201,7 @@ pub const DESCRIPTOR_PLY: ConnectorDescriptor = ConnectorDescriptor {
         versions: "PLY 1.0 (binary little-endian)",
         level: FidelityLevel::L1,
         lossy: true,
+        experimental: false,
     }),
     declared_classes: &[],
 };
@@ -206,10 +211,14 @@ pub const DESCRIPTOR_PLY: ConnectorDescriptor = ConnectorDescriptor {
 /// Owned by this crate. `cad-export-mesh` writes ASCII `OFF`, or `COFF` when
 /// every vertex has a colour; the writer is lossy because OFF stores no
 /// layers/units and merges every source mesh into one table.
+///
+/// `spec` is [`SpecVisibility::Public`]: OFF/COFF is a plain-text format with a
+/// published description, implemented by the hand-written parser here.
 pub const DESCRIPTOR_OFF: ConnectorDescriptor = ConnectorDescriptor {
     id: "off",
     name_key: "connector.off.name",
     extensions: &["off", "coff"],
+    spec: SpecVisibility::Public,
     import: Some(ImportCapability {
         versions: "OFF / COFF (ASCII)",
         container: "off",
@@ -218,6 +227,7 @@ pub const DESCRIPTOR_OFF: ConnectorDescriptor = ConnectorDescriptor {
         versions: "OFF / COFF (ASCII)",
         level: FidelityLevel::L1,
         lossy: true,
+        experimental: false,
     }),
     declared_classes: &[],
 };
