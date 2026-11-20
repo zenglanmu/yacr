@@ -91,18 +91,41 @@ mipmap（未实现）、跨 GPU 驱动或其它平台。
 `.ymodel` 仍**只在 Linux** 接线（`apps/app-linux/src/ymodel_archive.rs`）；其它载体打开/另存
 `.ymodel` 按 `unsupported-runtime: ymodel` 拒绝。
 
-## 5. NOT RUN / 未实现（不得据此宣称完成）
+## 5. 端到端运行、NOT RUN / 未实现（不得据此宣称完成）
 
-以下逐条为 **NOT RUN**（或未实现），不得由 §2–§4 的契约测试推广：
+下面是 2026-11-20 实际执行的端到端样本运行，以及仍未执行/未实现的项；后者不得由 §2–§4 的
+契约测试或本文的端到端结果推广：
 
-- **端到端样本运行（待补）**：glTF / IFC / SKP 的纹理导入→渲染与 `.ymodel` **文件级**保存→重开
-  尚未执行，由本文档 lane 之后另一 lane 补跑后更新本文件；在此之前不得写"通过"。
-  - glTF 纹理样本 → 渲染 → `.ymodel` 文件往返：**待补**
-  - IFC 纹理样本 → 渲染 → `.ymodel` 文件往返：**待补**
-  - SKP 纹理样本 → 渲染 → `.ymodel` 文件往返：**待补**
+- **端到端样本运行（2026-11-20 已执行）**：网络不可达（`curl`/`fetch` 均 `ECONNRESET`），
+  因此样本全部为**合成文件**或本机上游夹具；渲染走 `cad-cli-tools render` 的真实 Vulkan
+  适配器（NVIDIA Quadro P620），不是软件渲染：
+
+  | 样本 | 结果 |
+  |---|---|
+  | `checker-textured.glb`（合成：2×2 四色贴图 + UV0） | `mesh_textures.uploaded=1`、`unresolved`/`fallbacks` 空、`distinct_colors=95`、`complete`；帧内可见四色棋盘与三角剖分边 |
+  | `checker-textured.gltf`（同几何，buffer 为 data URI） | 与 GLB 相同（`distinct_colors=95`）、`complete` |
+  | `checker-plain.glb`（无纹理对照） | `mesh_textures.requested=[]`、`distinct_colors=8`（纯色填充） |
+  | `checker-embedded-texture.ifc`（`IfcPixelTexture` 2×1 红/绿） | 纹理 `830b1eea….png` 导入、`uploaded=1`、`distinct_colors=426`、`complete`；帧内为红→绿双线性渐变 |
+  | `issue_1781_image_textures.ifc` / `section_textured.ifc`（上游真实夹具，`IfcImageTexture` 外链） | `import.ifc.external_texture_unavailable` + `partial`，不读外部文件 |
+
+  合成样本由 `scripts/e2e-textures/make_textured_gltf.py`（GLB + JSON `.gltf`）与
+  `scripts/e2e-textures/make_textured_ifc.py`（`IfcPixelTexture`）生成，均为确定性字节；
+  上游 IFC 夹具取自 `ifc-lite-processing` / `ifc-lite-export` 的 `tests/fixtures`。
+
+  - `.ymodel` **文件级**：`apps/app-linux/src/tests/ymodel_texture.rs` 写真实 zip，断言
+    `textures/<key>` 条目存在、字节/UV/键往返一致、二次保存（`with_previous`）不丢失、
+    缺字节按键名拒绝（`cad:Mesh.texture:`）。
+  - SKP **文件级**：`crates/cad-import-skp/src/tests.rs` 用 `skpwright` 2026 写出器生成真实
+    `.skp`（纹理材质 + `0x2710` 面纹理块 + 内嵌 PNG），读回后 UV 与 `uv_xform` 逐点一致、
+    纹理字节相同；无纹理对照不产生任何纹理诊断。
+  - **端到端发现并修复的缺陷**：首轮 glTF 渲染是纯白——CLI 的无头 `render`/光栅 `plot` 只上传
+    图像四边形纹理，从未调用 `upload_mesh_textures`（应用侧的服务引擎路径已接线）。修复后
+    CLI 上报 `mesh_textures{requested,uploaded,unresolved,fallbacks,bytes}`，未解析/回退键可见；
+    矢量 `plot`（SVG/PDF）无纹理通道，记 `vector.mesh_texture_unsupported`。
 - **厂商接受性**：three.js / Blender / glTF-Validator 未打开本仓库写出的带纹理 glTF；
   IfcOpenShell / buildingSMART 未验证 IFC；SketchUp / Trimble 未验证 SKP。**全部 NOT RUN**。
-- **真实 `.skp` 带纹理样本**：离线无样本，SKP 纹理只有合成夹具契约；**NOT RUN**。
+- **真实世界 `.skp` 带纹理样本**：离线无公开样本；只有 `skpwright` 2026 写出器生成的
+  合成 `.skp` 文件往返（§5），真实 SketchUp 文件的纹理保真度 **NOT RUN**。
 - **Windows / macOS / Android / Web 运行**：一律 **NOT VERIFIED**；wasm 纹理路径只到
   `cargo check`（Web 载体对文档纹理是**按名拒绝**，不是解码后渲染）。
 - **像素/视觉验收与性能**：无 golden、无像素对比、无 draw-call/帧率测量；软件渲染未用于任何
@@ -111,9 +134,10 @@ mipmap（未实现）、跨 GPU 驱动或其它平台。
   `import.rvt.texture_not_imported` 契约。
 - **PBR 其余通道、UV1+、per-corner UV、`KHR_texture_transform`、MASK 镂空、mipmap/sampler
   选项、SKP/IFC 纹理导出、OBJ/MTL 字节**：未实现（ADR-0038 §7）。
-- **非 glTF 写出的纹理损失报告**：STL/OBJ/PLY/OFF/IFC4/SKP/DXF/DWG 写出器不写纹理，也**没有**
-  `export.<id>.texture_not_written` 码（源码中只有 `export.gltf.texture_not_written`）；
-  当前是静默丢失，属待补报告缺口，**不得**写成已无损。
+- **非 glTF 写出的纹理损失报告（已补）**：STL/OBJ/PLY/OFF/IFC4/SKP/DXF/DWG 写出器仍**不写**
+  纹理，但对每个写出了几何的带纹理网格各记一条 `export.<id>.texture_not_written`
+  （`Partial`，消息含实体 id 与纹理键），字节与无纹理导出一致；已被丢弃的实体不重复记。
+  这些格式依然**没有**纹理导出。
 
 ## 6. 依赖与许可
 
@@ -126,9 +150,9 @@ mipmap（未实现）、跨 GPU 驱动或其它平台。
 
 ## 7. 跟进项
 
-1. 用真实 glTF/IFC/SKP 样本做端到端渲染与 `.ymodel` 文件往返（§5 "待补"）。
-2. 为 STL/OBJ/PLY/OFF/IFC4/SKP/DXF/DWG 写出器补纹理损失报告（或明确"该格式不支持纹理"的
-   稳定码）。
-3. 厂商查看器接受性（three.js/Blender/glTF-Validator/IfcOpenShell/SketchUp）。
-4. wasm 载体的纹理解码策略（当前按名拒绝）与跨载体运行证据。
+1. 下载真实第三方样本（Khronos glTF-Sample-Assets、带纹理的 IFC/SKP）复跑 §5；本轮网络不可达，
+   只有合成文件与本机上游夹具。
+2. 厂商查看器接受性（three.js/Blender/glTF-Validator/IfcOpenShell/SketchUp）。
+3. wasm 载体的纹理解码策略（当前按名拒绝）与跨载体运行证据。
+4. 桌面宿主（GTK/Tauri）的纹理路径运行证据：本轮只到 CLI 无头渲染 + 契约测试。
 5. ADR-0038 §7 的后续项（PBR 通道、UV1+、MASK、SKP/IFC 纹理导出、RVT 纹理）。

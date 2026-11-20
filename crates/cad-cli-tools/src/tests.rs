@@ -2,7 +2,23 @@
 
 use super::*;
 
+mod mesh_textures;
 mod texture_images;
+
+/// Serialise headless-device creation inside this test binary.
+///
+/// Creating two headless wgpu devices on two threads at once is not safe on
+/// every adapter (a software Vulkan ICD segfaults intermittently here), and the
+/// documented gate invocation runs GPU cases with `--test-threads=1`. A plain
+/// `cargo test -p cad-cli-tools` is parallel, so every device-owning test takes
+/// this lock rather than depending on how the harness was invoked.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn gpu_test_guard() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    // A panicking test poisons the lock; the next test still needs the device,
+    // and the panic itself already failed the run.
+    LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 /// Most CLI operation functions return `Result<_, CliError>`, so the error
 /// variant must stay below clippy's 128-byte `result_large_err` ceiling.
@@ -133,6 +149,8 @@ fn png_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
 fn plot_renders_a_layout_to_a_non_empty_png() {
     use cad_render_wgpu::headless::enumerate_adapters;
     use cad_render_wgpu::BackendPreference;
+    // This test owns a device: see `gpu_test_guard`.
+    let _gpu = gpu_test_guard();
     // No adapter: the operation would report `gpu_failure`, which is the honest
     // answer but not what this test asserts. Skip instead of failing CI.
     if enumerate_adapters(BackendPreference::Auto).is_empty() {

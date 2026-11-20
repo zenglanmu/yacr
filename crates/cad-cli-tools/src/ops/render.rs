@@ -27,10 +27,24 @@ fn render_gpu(invocation: &CliInvocation) -> cad_render_wgpu::GpuSelection {
 /// `CadError::InvalidInput`, and the PNG is written only after a frame exists.
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn run_render(invocation: &CliInvocation) -> Result<serde_json::Value, CliError> {
+    let controller = load_document(invocation)?;
+    render_document(invocation, &controller)
+}
+
+/// The GPU half of [`run_render`] on an already-open document.
+///
+/// Split out (the caller imports; this renders) so a contract test can drive a
+/// document it installed itself: the textured-mesh regression needs a drawing
+/// whose texture bytes live in the database, and writing a carrier-owned
+/// `.ymodel` from this crate would test the archive instead of the renderer.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn render_document(
+    invocation: &CliInvocation,
+    controller: &HostController,
+) -> Result<serde_json::Value, CliError> {
     use cad_render_wgpu::headless::{create_headless_gpu_with, HeadlessGpu};
     use cad_render_wgpu::{BackendPreference, Camera2d, RenderTarget, Renderer};
 
-    let controller = load_document(invocation)?;
     let document = controller
         .application
         .workspace
@@ -41,12 +55,12 @@ pub(crate) fn run_render(invocation: &CliInvocation) -> Result<serde_json::Value
     let registry = cad_representation::ProviderRegistry::with_default_provider();
     let fonts = load_fonts(
         &invocation.fonts,
-        &fonts_requested(&controller),
-        drawing_needs_text(&controller),
-        drawing_locale(&controller),
+        &fonts_requested(controller),
+        drawing_needs_text(controller),
+        drawing_locale(controller),
     )?;
-    let (image_cache, image_report) = load_images(invocation, &controller)?;
-    let mut context = representation_context(&controller, fonts.as_ref());
+    let (image_cache, image_report) = load_images(invocation, controller)?;
+    let mut context = representation_context(controller, fonts.as_ref());
     // The render feeds the GPU directly: packed dash output + compact line
     // batches, identical to the desktop scene path. `build-representation`
     // intentionally keeps the unpacked form so its primitive counts describe
@@ -166,8 +180,22 @@ pub(crate) fn run_render(invocation: &CliInvocation) -> Result<serde_json::Value
         Ok(report) => report,
         Err(error) => return Err(staging_error(&renderer, error)),
     };
+    // Mesh base-colour textures are a second residency set resolved from the
+    // **same** decoded cache (ADR-0038 D10). Without this call a textured mesh
+    // silently draws with its batch colour — the app path already uploaded them
+    // (`cad-engine` session upload); the headless path must do the same or its
+    // frame is not the document's frame. The keys come from the batches
+    // themselves, so a scene with no textured batch is a no-op.
+    let mesh_keys = cad_scene::mesh_texture_keys(&delta.added);
+    let mesh_upload = match renderer.upload_mesh_textures(&mesh_keys, &image_cache) {
+        Ok(report) => report,
+        Err(error) => return Err(staging_error(&renderer, error)),
+    };
     let target = RenderTarget::new(width, height);
     let frame = renderer.render(camera, &target).map_err(render_error)?;
+    // Fallbacks are recorded **at draw time** (a batch whose key was not
+    // resident), so they can only be read after the frame was encoded.
+    let mesh_fallbacks = renderer.mesh_texture_fallbacks().to_vec();
     let readback = renderer.read_target_rgba().map_err(render_error);
     // The only PNG writer: it refuses to write anything unless a frame was
     // actually read back, so a refused render cannot leave an empty image.
@@ -224,6 +252,7 @@ pub(crate) fn run_render(invocation: &CliInvocation) -> Result<serde_json::Value
             "vertices": scene_vertices,
         },
         "images": images_json(&image_report, &image_upload),
+        "mesh_textures": mesh_textures_json(&mesh_keys, &mesh_upload, &mesh_fallbacks),
         "completeness": completeness,
         "note": "software/headless frame; not a compatibility or performance claim",
     }))
@@ -306,6 +335,35 @@ fn run_plot_vector(invocation: &CliInvocation) -> CadResult<serde_json::Value> {
     })?;
     let total_ms = started.elapsed().as_secs_f64() * 1000.0;
 
+    // A base-colour texture cannot reach SVG/PDF (this path has no GPU device and
+    // no image cache; the vector writers carry paths, not texels). Name the loss
+    // rather than emit a document that looks like an untextured drawing.
+    let mesh_texture_keys = representation_texture_keys(&representation);
+    let mut diagnostics: Vec<serde_json::Value> = document
+        .diagnostics
+        .iter()
+        .map(|d| {
+            serde_json::json!({
+                "code": d.code,
+                "message": cad_diagnostics::redact_text(&d.message),
+            })
+        })
+        .collect();
+    if !mesh_texture_keys.is_empty() {
+        diagnostics.push(serde_json::json!({
+            // Same stable `vector.*` family as `cad-representation`'s own plot
+            // diagnostics; this entry is the CLI-side one for a loss that is
+            // known before the writers run.
+            "code": "vector.mesh_texture_unsupported",
+            "message": cad_diagnostics::redact_text(&format!(
+                "mesh base-colour texture(s) {} are not written to {}: the vector plot \
+                 carries geometry only; use --plot-format png for a textured sheet",
+                mesh_texture_keys.join(","),
+                invocation.plot_format.as_str().to_ascii_uppercase(),
+            )),
+        }));
+    }
+
     Ok(serde_json::json!({
         "schema_version": CLI_SCHEMA_VERSION,
         "operation": CliOperation::Plot.as_str(),
@@ -322,10 +380,7 @@ fn run_plot_vector(invocation: &CliInvocation) -> CadResult<serde_json::Value> {
         "output": output.display().to_string(),
         "bytes": bytes.len(),
         "completeness": completeness_json(&document.completeness),
-        "diagnostics": document.diagnostics.iter().map(|d| serde_json::json!({
-            "code": d.code,
-            "message": cad_diagnostics::redact_text(&d.message),
-        })).collect::<Vec<_>>(),
+        "diagnostics": diagnostics,
         "timings": { "plan_ms": plan_ms, "total_ms": total_ms },
         "status": "ok",
         "note": "CPU-only vector plot: path-level geometry, no font embedding and no plot styles (see docs/plot.md)",
@@ -503,10 +558,20 @@ pub(crate) fn run_plot_png(invocation: &CliInvocation) -> Result<serde_json::Val
         Ok(report) => report,
         Err(error) => return Err(staging_error(&renderer, error)),
     };
+    // Same textured-mesh residency as `render`: a paper-space viewport can show a
+    // textured mesh, and the plot frame must sample it instead of the batch
+    // colour. Empty for an untextured sheet, so nothing extra is uploaded.
+    let mesh_keys = cad_scene::mesh_texture_keys(&delta.added);
+    let mesh_upload = match renderer.upload_mesh_textures(&mesh_keys, &image_cache) {
+        Ok(report) => report,
+        Err(error) => return Err(staging_error(&renderer, error)),
+    };
     let render_target = RenderTarget::new(width, height);
     let frame = renderer
         .render(camera, &render_target)
         .map_err(render_error)?;
+    // Fallbacks are recorded at draw time, so they are read after the frame.
+    let mesh_fallbacks = renderer.mesh_texture_fallbacks().to_vec();
     let readback = renderer.read_target_rgba().map_err(render_error);
     // The plot always names an output file (defaulting from the input), so the
     // frame-gated writer is given `Some`; a refused frame still writes nothing.
@@ -561,6 +626,7 @@ pub(crate) fn run_plot_png(invocation: &CliInvocation) -> Result<serde_json::Val
             "invisible_batches": frame.invisible_batches,
         },
         "images": images_json(&image_report, &image_upload),
+        "mesh_textures": mesh_textures_json(&mesh_keys, &mesh_upload, &mesh_fallbacks),
         "timings": { "plan_ms": plan_ms, "gpu_ms": gpu_ms, "total_ms": total_ms },
         "adapter": {
             "backend": adapter.backend,
@@ -793,4 +859,62 @@ fn images_json(
         "uploaded": upload.uploaded,
         "bytes": report.bytes,
     })
+}
+
+/// The stable `mesh_textures` object of the `render`/raster-`plot` result JSON.
+///
+/// A mesh base-colour texture is a fact about the **frame**, not an internal
+/// detail: `requested` names every key the resident batches reference,
+/// `uploaded` counts the ones that became device textures, and
+/// `unresolved`/`fallbacks` name every key that did not (an unresolved key is
+/// missing from the cache; a fallback key was wanted by a drawn batch but was
+/// not resident, so that batch was drawn with its batch colour). The renderer
+/// never binds a placeholder, so this object is the only place that degradation
+/// is visible. `requested: []` is therefore the one shape that means "this
+/// drawing has no mesh textures", and it costs no GPU work.
+#[cfg(not(target_arch = "wasm32"))]
+fn mesh_textures_json(
+    requested: &[cad_resources::ResourceKey],
+    upload: &cad_render_wgpu::ImageUploadReport,
+    fallbacks: &[cad_resources::ResourceKey],
+) -> serde_json::Value {
+    let keys = |items: &[cad_resources::ResourceKey]| {
+        items
+            .iter()
+            .map(|key| key.as_str().to_string())
+            .collect::<Vec<_>>()
+    };
+    serde_json::json!({
+        "requested": keys(requested),
+        "uploaded": upload.uploaded,
+        "unresolved": keys(&upload.unresolved),
+        "fallbacks": keys(fallbacks),
+        "bytes": upload.bytes,
+    })
+}
+
+/// Every base-colour texture key a paper-space representation names.
+///
+/// The CPU vector plot has no decoded-image cache and no GPU texture path, so a
+/// textured mesh plot as paths: this is how the vector path notices the loss
+/// instead of writing a document that is silently untextured.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn representation_texture_keys(
+    representation: &cad_representation::DisplayRepresentation,
+) -> Vec<String> {
+    use cad_representation::DisplayPrimitive;
+
+    let mut keys = std::collections::BTreeSet::new();
+    for fragment in &representation.fragments {
+        let mesh = match &fragment.primitive {
+            DisplayPrimitive::Mesh(mesh)
+            | DisplayPrimitive::MeshWithoutEdgeOverlay(mesh)
+            | DisplayPrimitive::MeshWithStoredEdges { mesh, .. } => Some(mesh),
+            _ => None,
+        };
+        if let Some(texture) = mesh.and_then(|mesh| mesh.texture.as_deref()) {
+            keys.insert(texture.to_owned());
+        }
+    }
+    keys.into_iter().collect()
 }

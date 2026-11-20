@@ -57,6 +57,11 @@ pub mod wayland_surface;
 #[cfg(target_os = "linux")]
 pub mod ymodel_archive;
 
+/// Carrier-level tests that need the container crate (a real `.ymodel` file on
+/// disk); shared `cad-*` layers cannot link it.
+#[cfg(all(test, target_os = "linux"))]
+mod tests;
+
 #[cfg(target_os = "linux")]
 pub use backend::{
     install_surface_mode, parse_backend_policy, prepare_backend, surface_mode, BackendPlan,

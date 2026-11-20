@@ -196,6 +196,7 @@ dependencies = [
  "serde_json",
  "tauri",
  "tauri-build",
+ "zip",
 ]
 
 [[package]]
@@ -995,6 +996,7 @@ dependencies = [
  "cad-db",
  "cad-domain",
  "cad-import-core",
+ "png",
  "skpwright",
  "web-time",
 ]

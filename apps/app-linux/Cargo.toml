@@ -64,6 +64,13 @@ gdkwayland-sys.workspace = true
 ashpd = { version = "0.12.3", default-features = false, features = ["async-std"] }
 pollster = "1.0"
 
+# Test-only: `src/tests/ymodel_texture.rs` writes a real `.ymodel` file and reads
+# it back **as a zip** to assert the `textures/<key>` entry name — an
+# archive-level fact the parsed snapshot cannot prove. `zip` is already pinned in
+# `Cargo.lock` through `cad-store-zip`, so this adds no resolved version.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+zip = { version = "9.5", default-features = false, features = ["deflate-flate2"] }
+
 # `tauri-build` is a build-dependency (compiled for the host). It is gated to the
 # Linux target so non-Linux targets do not pull it; `build.rs` additionally checks
 # the *target* os at runtime before calling `tauri_build::build()`.

@@ -1,9 +1,15 @@
 //! Contract tests for the SketchUp preview adapter.
 //!
-//! Two layers:
+//! Three layers:
 //!
 //! * unit tests for the release ceiling, version parsing and material mapping —
 //!   they need no file at all;
+//! * a **written-container round trip**: a textured model is serialized with the
+//!   pinned 2026 writer to a real `.skp` under the system temp dir (deleted
+//!   afterwards), then imported by [`SkpImporter`], so the §4v placement and the
+//!   image entry are proved through the container rather than in memory. That is
+//!   self-consistency (`skpwright` writing and reading its own output), not
+//!   vendor acceptance;
 //! * **env-gated** real-model tests. `skpwright`'s own evidence corpus is not
 //!   redistributable here (its embedded textures are third-party content), so
 //!   the samples stay outside the repository exactly like `YACR_TEST_DWG`: an
@@ -20,7 +26,9 @@ use cad_import_core::{ImportLimits, MeshImport};
 
 use crate::convert::read_scene;
 use crate::{
-    ceiling_for, major_release, style_of, Importer, SkpImporter, DIAG_DOCUMENT, DIAG_UNITS_METRES,
+    ceiling_for, major_release, style_of, Importer, SkpImporter, DIAG_BACK_TEXTURE_NOT_IMPORTED,
+    DIAG_DOCUMENT, DIAG_TEXTURES_NOT_SAMPLED, DIAG_TEXTURE_UNAVAILABLE, DIAG_UNITS_METRES,
+    DIAG_UV_UNAVAILABLE,
 };
 use std::sync::Arc;
 
@@ -520,4 +528,349 @@ fn a_textured_material_without_an_applied_size_keeps_no_uvs() {
         0,
         "an image no mesh could sample is not registered"
     );
+}
+
+// ---- Written-container round trip (2026 writer -> this importer) ----------
+//
+// The evidence above builds a `skpwright::Model` in memory, so it cannot catch
+// a container-level gap: the writer dropping the §4v block or the image entry
+// would still pass. These tests author a model, serialize it with the pinned
+// 2026 writer, write those bytes to a real file, read them back and import
+// them, so the assertion is about a `.skp` on disk, not a struct.
+//
+// Self-consistency only: `skpwright` writes and reads the container. No
+// SketchUp/Trimble product was involved, which is not vendor acceptance.
+
+/// A `(10, 10)` inch applied size is the §4v denominator, so a 10-inch square
+/// puts the corners exactly on the 0..1 UV range.
+const QUAD_SIDE_M: f64 = 0.254;
+
+fn encode_png() -> Vec<u8> {
+    // 2×2 RGBA with four distinct texels: a real PNG the sniffer accepts, and
+    // one whose bytes cannot collide with any other fixture here.
+    let pixels: [u8; 16] = [
+        255, 0, 0, 255, // red
+        0, 255, 0, 255, // green
+        0, 0, 255, 255, // blue
+        255, 255, 0, 255, // yellow
+    ];
+    let mut out = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut out, 2, 2);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().expect("png header");
+        writer.write_image_data(&pixels).expect("png pixels");
+        writer.finish().expect("png trailer");
+    }
+    out
+}
+
+/// The §4v front placement for a `+Z` face: the identity map, so texture inches
+/// equal face-local inches (u = +X, v = +Y for a horizontal face).
+fn identity_face_texture() -> Box<skpwright::FaceTexture> {
+    Box::new(skpwright::FaceTexture {
+        front: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+        back: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+        front_extra: [0.0; 3],
+        back_extra: [0.0; 3],
+        front_pins: Vec::new(),
+        back_pins: Vec::new(),
+        flags: [1, 0],
+    })
+}
+
+/// One 10-inch square in the XY plane, painted with `slot`, plus the four
+/// boundary edges `skpwright` requires a face ring to have.
+fn written_quad(
+    slot: Option<u16>,
+    texture: Option<Box<skpwright::FaceTexture>>,
+) -> skpwright::GeometryRun {
+    let vertices = vec![
+        [0.0, 0.0, 0.0],
+        [QUAD_SIDE_M, 0.0, 0.0],
+        [QUAD_SIDE_M, QUAD_SIDE_M, 0.0],
+        [0.0, QUAD_SIDE_M, 0.0],
+    ];
+    let edges = [(0u32, 1u32), (1, 2), (2, 3), (3, 0)]
+        .into_iter()
+        .map(|(v0, v1)| skpwright::MeshEdge {
+            v0,
+            v1,
+            ..Default::default()
+        })
+        .collect();
+    skpwright::GeometryRun {
+        def_index: None,
+        mesh: skpwright::Mesh {
+            vertex_pids: vec![0; vertices.len()],
+            vertices,
+            faces: vec![skpwright::MeshFace {
+                outer: vec![0, 1, 2, 3],
+                normal: [0.0, 0.0, 1.0],
+                front_material: slot,
+                texture,
+                ..Default::default()
+            }],
+            edges,
+            vertices_in: Vec::new(),
+        },
+        ..Default::default()
+    }
+}
+
+/// The model the writer is handed: material slot `5` links to material `0`.
+fn written_model(
+    material: skpwright::Material,
+    texture: Option<Box<skpwright::FaceTexture>>,
+) -> skpwright::Model {
+    skpwright::Model {
+        materials: vec![material],
+        material_links: vec![(5, 0)],
+        geometry: vec![written_quad(Some(5), texture)],
+        ..Default::default()
+    }
+}
+
+fn textured_written_model(image: Vec<u8>) -> skpwright::Model {
+    written_model(
+        skpwright::Material::Textured {
+            name: "RoundTripTexture".into(),
+            texture: Some("round-trip.png".into()),
+            applied_size_in: Some((10.0, 10.0)),
+            jpeg_quality: None,
+            image_bytes: Some(image),
+            avg_rgba: Some([200, 40, 40, 255]),
+            colorized: false,
+            texture_avg_rgba: Some([200, 40, 40, 255]),
+            colorize_type: 0,
+            opacity: 1.0,
+        },
+        Some(identity_face_texture()),
+    )
+}
+
+/// Serialize `model` with the pinned 2026 writer exactly as the exporter does
+/// (`Document::from_model_with` with a fixed save time and seed, then `write`),
+/// and prove the bytes are a real file by writing and re-reading them.
+fn write_and_reread(model: &skpwright::Model) -> Vec<u8> {
+    let document = skpwright::Document::from_model_with(
+        model,
+        skpwright::WriteEnv {
+            // Same convention as `cad-export-skp::export_env`: a fixed save
+            // time, so the written bytes are reproducible.
+            unix_time: 1_700_000_000,
+            seed: 0x5941_4352_534b_5000,
+        },
+    )
+    .expect("the writer accepts a textured model");
+    let written = document.write().expect("the 2026 container serializes");
+    assert!(!written.is_empty(), "the writer produced a non-empty file");
+
+    // A unique real file under the system temp dir, removed on drop.
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_nanos());
+    let path = std::env::temp_dir().join(format!(
+        "yacr-skp-texture-{}-{unique}.skp",
+        std::process::id()
+    ));
+    struct TempFile(std::path::PathBuf);
+    impl Drop for TempFile {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+    let file = TempFile(path);
+    std::fs::write(&file.0, &written).expect("the written container reaches disk");
+    let reread = std::fs::read(&file.0).expect("the written container reads back");
+    assert_eq!(reread, written, "the file on disk is the writer's bytes");
+    drop(file);
+    reread
+}
+
+fn codes_of(drawing: &cad_import_core::ImportedDrawing) -> Vec<&str> {
+    drawing
+        .report
+        .diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.code.as_str())
+        .collect()
+}
+
+#[test]
+fn a_written_textured_model_imports_with_uvs_and_its_image() {
+    let image = encode_png();
+    let model = textured_written_model(image.clone());
+
+    // 1. The writer produced a 2026-container file the pinned reader parses back.
+    let bytes = write_and_reread(&model);
+    let (version, guid) = skpwright::header_info(&bytes).expect("a fixed header");
+    assert_eq!(
+        major_release(&version),
+        Some(26),
+        "the writer authors the 2026 container, got {version}"
+    );
+    assert!(guid.is_none(), "the ZIP container carries no model GUID");
+    assert_eq!(
+        skpwright::detect_container(&bytes),
+        skpwright::Container::Zip,
+        "the written file is the ZIP/tagged-record container"
+    );
+    let parsed = skpwright::Model::parse(&bytes).expect("the pinned reader parses its own output");
+    assert_eq!(parsed.geometry.len(), 1);
+    let face = &parsed.geometry[0].mesh.faces[0];
+    assert!(
+        face.texture.is_some(),
+        "the §4v placement survives the written container"
+    );
+    // The reader's slot table is 1-based, so material slot 5 is read back as 1.
+    assert_eq!(face.front_material, Some(1));
+    let applied = parsed
+        .applied_size_of(1)
+        .expect("the applied size survives the written container");
+    assert_eq!(applied, (10.0, 10.0));
+    match parsed.material_of(1) {
+        Some(skpwright::Material::Textured {
+            image_bytes: Some(stored),
+            ..
+        }) => assert_eq!(
+            stored, &image,
+            "the material's image entry is written byte for byte"
+        ),
+        other => panic!("expected a textured material with its image, got {other:?}"),
+    }
+
+    // 2. The importer reads those bytes (no host file access beyond this test's
+    //    own temp file, which is already gone) and applies the §4v map itself.
+    let drawing = SkpImporter::new()
+        .import(&request(bytes), &|| false)
+        .expect("the written file imports");
+    assert_eq!(
+        drawing.database.entities().count(),
+        1,
+        "one material group over one painted run is one preview entity"
+    );
+    let entity = drawing.database.entities().next().expect("the entity");
+    let SemanticGeometry::Mesh(mesh) = &entity.geometry else {
+        panic!("a preview import yields a mesh");
+    };
+    assert_eq!(
+        mesh.uvs.len(),
+        mesh.vertices.len(),
+        "one UV pair per vertex"
+    );
+
+    // The contract is exactly `uv_xform(Front, applied).apply(world_m)`, taken
+    // from the model read back out of the file rather than the one authored.
+    let xform = face
+        .uv_xform(skpwright::Side::Front, applied)
+        .expect("the §4v map is invertible");
+    for (vertex, uv) in mesh.vertices.iter().zip(&mesh.uvs) {
+        let want = xform.apply([vertex.x, vertex.y, vertex.z]);
+        assert!(
+            (uv[0] - want[0]).abs() < 1e-9 && (uv[1] - want[1]).abs() < 1e-9,
+            "UV {uv:?} does not match uv_xform.apply({:?}) = {want:?}",
+            [vertex.x, vertex.y, vertex.z]
+        );
+    }
+    // ... and, independent of `skpwright`, a 10-inch square with a (10, 10)
+    // applied size maps its corners onto the unit square.
+    for corner in [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]] {
+        assert!(
+            mesh.uvs
+                .iter()
+                .any(|uv| (uv[0] - corner[0]).abs() < 1e-9 && (uv[1] - corner[1]).abs() < 1e-9),
+            "corner {corner:?} missing from {:?}",
+            mesh.uvs
+        );
+    }
+
+    // 3. The PNG reached the document's texture table, addressed by the mesh.
+    let stored: Vec<(&str, &Arc<[u8]>)> = drawing.database.textures().collect();
+    assert_eq!(stored.len(), 1, "exactly one document asset");
+    let (key, stored_bytes) = stored[0];
+    assert_eq!(
+        &stored_bytes[..],
+        &image[..],
+        "the asset is the material's own PNG"
+    );
+    assert_eq!(
+        mesh.texture.as_deref(),
+        Some(key),
+        "the mesh names the asset it was given"
+    );
+
+    // 4. Nothing texture-related was lost, and the ceiling is the preview one.
+    let codes = codes_of(&drawing);
+    assert!(
+        !codes.contains(&DIAG_TEXTURES_NOT_SAMPLED),
+        "the texture was sampled; got {codes:?}"
+    );
+    assert!(
+        !codes.contains(&DIAG_UV_UNAVAILABLE),
+        "the face carried its §4v placement; got {codes:?}"
+    );
+    assert!(
+        !codes.contains(&DIAG_TEXTURE_UNAVAILABLE),
+        "the image is embedded, not external; got {codes:?}"
+    );
+    assert!(
+        !codes.contains(&DIAG_BACK_TEXTURE_NOT_IMPORTED),
+        "no face carried a back texture; got {codes:?}"
+    );
+    assert!(
+        matches!(drawing.report.completeness, Completeness::Partial(_)),
+        "preview geometry is always Partial, never Complete"
+    );
+}
+
+#[test]
+fn the_same_written_model_without_a_texture_reports_nothing_texture_related() {
+    // Negative control: the same quad with a plain solid material and no §4v
+    // placement is a solid-coloured preview mesh, and no texture diagnostic
+    // may appear.
+    let model = written_model(
+        skpwright::Material::Solid {
+            name: "Plain".into(),
+            rgba: [30, 60, 90, 255],
+            opacity: 1.0,
+            colorize_type: 0,
+        },
+        None,
+    );
+    let bytes = write_and_reread(&model);
+    let drawing = SkpImporter::new()
+        .import(&request(bytes), &|| false)
+        .expect("the written solid imports");
+
+    assert_eq!(drawing.database.entities().count(), 1);
+    let entity = drawing.database.entities().next().expect("the entity");
+    let SemanticGeometry::Mesh(mesh) = &entity.geometry else {
+        panic!("a preview import yields a mesh");
+    };
+    assert!(mesh.uvs.is_empty(), "a solid has no UV set");
+    assert!(mesh.texture.is_none(), "a solid names no texture");
+    assert_eq!(
+        drawing.database.textures().count(),
+        0,
+        "an untextured model registers no document asset"
+    );
+
+    let codes = codes_of(&drawing);
+    for code in [
+        DIAG_TEXTURES_NOT_SAMPLED,
+        DIAG_UV_UNAVAILABLE,
+        DIAG_TEXTURE_UNAVAILABLE,
+        DIAG_BACK_TEXTURE_NOT_IMPORTED,
+    ] {
+        assert!(
+            !codes.contains(&code),
+            "{code} does not belong to an untextured model; got {codes:?}"
+        );
+    }
+    assert!(matches!(
+        drawing.report.completeness,
+        Completeness::Partial(_)
+    ));
 }

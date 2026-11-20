@@ -29,8 +29,8 @@ pub(crate) use inspect::representation_context;
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 pub(crate) use render::{
-    run_plot, run_plot_png, run_render, synthetic_plot_database, write_png_for_frame,
-    write_required_png, WrittenPng,
+    render_document, representation_texture_keys, run_plot, run_plot_png, run_render,
+    synthetic_plot_database, write_png_for_frame, write_required_png, WrittenPng,
 };
 pub(crate) use resources::load_fonts;
 #[cfg(not(target_arch = "wasm32"))]

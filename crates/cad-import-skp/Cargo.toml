@@ -19,3 +19,9 @@ skpwright.workspace = true
 # `std::time::Instant::now()` panics on wasm32-unknown-unknown; `web_time` uses
 # `Performance.now()` there and re-exports std elsewhere.
 web-time.workspace = true
+
+[dev-dependencies]
+# The written-container round trip (tests) authors a real PNG texture; the
+# importer sniffs the container, so the test needs a genuine encoder, not a
+# signature-only stub.
+png.workspace = true

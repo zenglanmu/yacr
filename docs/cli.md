@@ -215,6 +215,13 @@ cad-cli-tools <operation> <input.dwg> [options]
     "opaque_batches": 11855, "transparent_batches": 0, "invisible_batches": 0
   },
   "scene": { "batches": 11855, "vertices": 26032 },
+  "images": {
+    "requested": [], "loaded": [], "unresolved": [], "failed": [],
+    "uploaded": 0, "bytes": 0
+  },
+  "mesh_textures": {
+    "requested": [], "uploaded": 0, "unresolved": [], "fallbacks": [], "bytes": 0
+  },
   "completeness": { "status": "complete" },
   "note": "software/headless frame; not a compatibility or performance claim"
 }
@@ -222,6 +229,12 @@ cad-cli-tools <operation> <input.dwg> [options]
 
 - `png` 仅在传入 `--png <file>` 时非 `null`；PNG 只在渲染成功后**原子**写入
   （临时文件 + rename），渲染失败绝不留下半截图片。
+- `mesh_textures` 是网格基色纹理（`cad:Mesh.texture`，ADR-0038 D9/D10）的
+  **成帧事实**：`requested` 是驻留批次引用的去重键，`uploaded` 是成为设备纹理的
+  数量，`unresolved`/`fallbacks` 是没上传成功的键（`unresolved` = 解码缓存里没有；
+  `fallbacks` = 该批次绘制时纹理不驻留，已按批次颜色不带纹理绘制）。渲染器从不绑定
+  占位纹理，所以这里为空是"确实采样到了纹理"，非空是"这一帧丢失了纹理"。
+  `requested: []` 表示图纸没有带纹理的网格，此时不做任何额外 GPU 上传。
 - `pixels.non_background` 统计与左上角背景色差异超过容差 8 的像素数；
   `coverage = non_background / (width*height)`。纯背景帧是真实结果，不伪造像素。
 - `completeness` 与 `scan` 一致，来自本次导入报告；没有导入报告时为
@@ -266,7 +279,8 @@ wasm 下 `plot`（含矢量）仍为 `unsupported`：该 CLI 宿主没有自己�
 结果文档含 `format` 字段；矢量路径给出 `width_mm/height_mm/paths/diagnostics`，输出文件
 由 `--png` 指定，缺省在输入名后追加所选格式扩展名（`.plot.svg` / `.plot.pdf`），不会把
 矢量写进 `.png` 名字。无法表达为路径的图元逐项 `vector.*` 诊断，不静默丢图。详见
-`docs/plot.md` §9。
+`docs/plot.md` §9。光栅路径（`--plot-format png`）与 `render` 一样带 `images` 与
+`mesh_textures` 对象：纸空间视口里的带纹理网格同样会采到基色纹理。
 
 ## 4. `--out` 与原子性
 

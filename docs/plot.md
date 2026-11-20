@@ -245,7 +245,10 @@ provenance 标记。
   生成一个 ExtGState `/ca`/`CA`，经页面 `/Resources /ExtGState` 引用并以 `gs` 选择，
   写入后恢复不透明；全不透明文档不产生透明度对象。
 - 完整性：无法表达为路径的图元（未整形文字、图像、未展开实例、空网格、退化/非有限
-  折线）逐项产生稳定诊断码（`vector.*`）并降级 `completeness`，绝不静默丢图。
+  折线）逐项产生稳定诊断码（`vector.*`）并降级 `completeness`，绝不静默丢图。网格基色
+  纹理同理：SVG/PDF 只有路径、没有图像通道，因此带纹理的网格按其几何写出并附一条
+  `vector.mesh_texture_unsupported` 诊断（键名逐个列出），而不是让成品看起来像未贴图的
+  图纸；需要纹理时用 `--plot-format png`。
 - 报告 JSON 增加 `format`，矢量路径给 `width_mm/height_mm/paths`，输出文件由 `--png`
   指定，缺省追加所选格式扩展名（不会把矢量写进 `.png` 名字）。
 
