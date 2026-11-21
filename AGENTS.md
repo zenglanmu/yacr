@@ -205,7 +205,10 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
   BIM 查询 wire 只有一个 `cad_bim_query`（分页行 + facet `summary` 一次返回，`summary.total == total`），
   不再有 `cad_bim_summary`；Linux/Windows/macOS/Android 均已装查询 seam（Linux 有运行证据，Windows
   仅交叉编译，macOS/Android 仅编译/契约，**运行时 NOT VERIFIED**），Web 走 wasm 会话直读；没有查询
-  通道的载体仍按 `unsupported-runtime: bimQuery` 显式拒绝。
+  通道的载体仍按 `unsupported-runtime: bimQuery` 显式拒绝。该 seam 是**通用请求携带型读取**
+  （`cad_ui_core::host_read`：`HostReadRequest{kind:"bimQuery"}` → `HostReadAnswer`，
+  `cad-desktop-shell` 只提供 `HostReadFn` 闭包适配），**新增 kind 不得再新增每载体文件**；未知 kind
+  按 `unsupported-runtime: hostRead.kind` 拒绝。
   **报告弹窗 UI、
   L0 源字节直通、DXF L1 不动点仍未实现**，不得写成已完成。
 

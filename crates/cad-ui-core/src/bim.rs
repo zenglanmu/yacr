@@ -9,11 +9,12 @@
 //!
 //! # Named for what it is
 //!
-//! The seam here only **queries** (a filtered, paged read plus its facet
-//! summary); it is not a general "BIM host" that owns editing, saving or
-//! selection. The names carry that: [`BimQueryHost`], [`BimQueryReads`],
-//! [`BimQuerySeam`]. `cad_select_entities` is a separate command and does not
-//! travel through this seam.
+//! The command only **queries** (a filtered, paged read plus its facet summary);
+//! it is not a general "BIM host" that owns editing, saving or selection.
+//! `cad_select_entities` is a separate command and does not travel through this
+//! request. The transport that carries the request is the generic host-read
+//! seam ([`crate::host_read::HostReadHost`]): a BIM query is one
+//! [`crate::host_read::HostReadRequest`] kind, not a seam of its own.
 //!
 //! # Why the mapping is explicit
 //!
@@ -70,78 +71,7 @@ use cad_app::cad_query::QueryPage;
 use cad_db::{BimEvidence, BimKey, BimSource};
 use cad_domain::DatabaseId;
 
-// ---------------------------------------------------------------------- seam ---
-
-/// The platform side of the one `cad_bim_query` command.
-///
-/// A BIM query reads the **open document**, which on the desktop carriers lives
-/// in the `!Send` owner-thread session (GTK thread-local on Linux). The shared
-/// command layer therefore reaches it through this seam exactly like the
-/// desktop shell's ymodel seam does for the save preview: the host marshals the
-/// call onto its session thread and returns the wire answer.
-///
-/// # Why this trait lives in `cad-ui-core` (not `cad-desktop-shell`)
-///
-/// The other seams (`ShellPopupHost`, `ShellRecentHost`, `ShellRecoveryHost`,
-/// `ShellYmodelHost`) sit in `cad-desktop-shell` because only the desktop host
-/// serves their commands. This one cannot: the registry row for `cad_bim_query`
-/// is a **shared** row, and the registry — the table that names the seam — lives
-/// in `cad-ui-core` so both transports (`tauri` and wasm) expand the same table.
-/// The trait is therefore visible to the wire layer here, and
-/// `cad-desktop-shell` adds nothing of its own for it. That is a layering
-/// constraint, not a preference: moving it down would leave the wasm transport
-/// unable to name the seam its registry row uses.
-///
-/// A carrier that installs no seam has no BIM query lane and answers
-/// [`BIM_UNSUPPORTED`] by name. That is a different fact from "this document has
-/// no BIM data" (an empty page), and the two must never be conflated.
-///
-/// Implementations must not lock their host's shell state while waiting on the
-/// session thread; the command clones the seam out of `Shared` and releases the
-/// shell lock first (the established seam contract).
-pub trait BimQueryHost: Send + Sync {
-    /// Run one filtered, paged query; the answer carries the page and the summary.
-    fn bim_query(&self, request: &BimQueryRequest) -> Result<BimQueryResponse, String>;
-}
-
-/// The read seam the one `cad_bim_query` wire command goes through on **both**
-/// transports.
-///
-/// It is deliberately separate from the session's `ControlReads`: those are
-/// owner-tick projections (no arguments, mirrored ahead of time), while this is a
-/// **request-carrying** read. A wasm carrier implements it over the session it
-/// already holds; a desktop carrier implements it over [`BimQuerySeam`] (the
-/// host's [`BimQueryHost`]). The default is the honest refusal, so a target with
-/// no lane needs no impl.
-pub trait BimQueryReads {
-    /// One filtered, paged query; the answer carries the page and the summary.
-    fn bim_query(&self, _request: &BimQueryRequest) -> Result<BimQueryResponse, String> {
-        Err(BIM_UNSUPPORTED.to_string())
-    }
-}
-
-/// The optional [`BimQueryHost`] handle a desktop `QueueReads` carries.
-///
-/// A newtype with its own `Debug` (the trait object has none) so the reads struct
-/// keeps its `Debug`/`Clone`/`Copy`/`Default` derives without listing the seam.
-#[derive(Clone, Copy, Default)]
-pub struct BimQuerySeam<'a>(pub Option<&'a std::sync::Arc<dyn BimQueryHost>>);
-
-impl std::fmt::Debug for BimQuerySeam<'_> {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_tuple("BimQuerySeam")
-            .field(&self.0.is_some())
-            .finish()
-    }
-}
-
-impl<'a> BimQuerySeam<'a> {
-    /// The installed host, when the carrier installed one.
-    pub fn host(self) -> Option<&'a std::sync::Arc<dyn BimQueryHost>> {
-        self.0
-    }
-}
+// -------------------------------------------------------------------- markers ---
 
 /// Stable refusal of a carrier that has no BIM query lane at all.
 ///

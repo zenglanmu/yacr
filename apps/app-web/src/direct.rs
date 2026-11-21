@@ -274,16 +274,16 @@ impl AdmissionTarget for DirectSink<'_> {
 }
 
 /// The read seam this dispatcher needs: the argument-less control projections
-/// ([`ControlReads`]) **plus** the request-carrying BIM reads
-/// ([`cad_ui_core::bim::BimQueryReads`]).
+/// ([`ControlReads`]) **plus** the request-carrying reads
+/// ([`cad_ui_core::host_read::HostReads`]).
 ///
 /// The shared registry has rows for both families, so the one dispatcher
 /// parameter must satisfy both. The blanket impl makes every reads struct that
-/// implements the two traits qualify; the generated BIM arm upcasts the object
-/// to `&dyn BimQueryReads`.
-pub trait WireReads: ControlReads + cad_ui_core::bim::BimQueryReads {}
+/// implements the two traits qualify (the desktop mirror `QueueReads` forwards to
+/// its host seam, [`DirectReads`] reads the live session).
+pub trait WireReads: ControlReads + cad_ui_core::host_read::HostReads {}
 
-impl<T: ControlReads + cad_ui_core::bim::BimQueryReads + ?Sized> WireReads for T {}
+impl<T: ControlReads + cad_ui_core::host_read::HostReads + ?Sized> WireReads for T {}
 
 /// The [`ControlReads`] of a host that owns its session on this thread.
 ///
@@ -338,16 +338,16 @@ impl ControlReads for DirectReads<'_> {
     }
 }
 
-/// BIM is a **request-carrying** read, so it has its own seam (`BimQueryReads`)
+/// Request-carrying reads have their own seam ([`cad_ui_core::host_read::HostReads`])
 /// instead of the argument-less [`ControlReads`]: the live session is on this
-/// thread, so the answer is the session's own — no mirror, no seam hop, and one
+/// thread, so the answer is the session's own — no mirror, no thread hop, and one
 /// call for the page plus its facet summary.
-impl cad_ui_core::bim::BimQueryReads for DirectReads<'_> {
-    fn bim_query(
+impl cad_ui_core::host_read::HostReads for DirectReads<'_> {
+    fn host_read(
         &self,
-        request: &cad_ui_core::bim::BimQueryRequest,
-    ) -> Result<cad_ui_core::bim::BimQueryResponse, String> {
-        self.session.bim_query(request)
+        request: &cad_ui_core::host_read::HostReadRequest,
+    ) -> Result<cad_ui_core::host_read::HostReadAnswer, String> {
+        self.session.host_read(request)
     }
 }
 

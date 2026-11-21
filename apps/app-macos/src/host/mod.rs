@@ -38,8 +38,8 @@ use cad_ui_core::popup::PopupAck;
 use cad_ui_core::protocol::InputKind;
 use cad_ui_core::session::CadSession;
 
-mod bim_host;
 mod fonts;
+mod host_read;
 mod init;
 mod layers;
 mod popup;
@@ -263,13 +263,12 @@ fn register_seams(
         shared,
         recent::AppRecentHost::new(app.clone()),
     );
-    // BIM query (ADR-0042 D11): a caller-supplied filter over the open document,
-    // answered with the page and its facet summary in one round trip, so the
-    // answer cannot be mirrored ahead of time; the seam marshals it onto the same
-    // main-thread session.
-    cad_desktop_shell::state::configure_bim_query_host(
+    // Request-carrying reads (ADR-0042 D11): the caller supplies the request (a
+    // BIM filter today), so the answer cannot be mirrored; one generic seam
+    // marshals every kind onto the same main-thread session.
+    cad_desktop_shell::state::configure_host_read_host(
         shared,
-        bim_host::AppBimQueryHost::new(app.clone()),
+        host_read::host_read_host(app.clone()),
     );
 }
 

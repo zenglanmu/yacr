@@ -21,6 +21,7 @@ use crate::bim::{
     BimEvidenceWire, BimFilterWire, BimOpWire, BimPropertyFilterWire, BimQueryRequest,
     BimValueWire, BIM_UNSUPPORTED_VALUE,
 };
+use crate::host_read::{HostReadAnswer, HostReadRequest, BIM_QUERY_KIND};
 
 const LEVEL: &str = "level:ifc:doc:L1";
 
@@ -395,4 +396,51 @@ fn the_evidence_filter_is_carried() {
         .expect("the session answers");
     assert_eq!(declared.total, 2);
     assert_eq!(declared.summary.total, 2);
+}
+
+#[test]
+fn the_generic_host_read_answers_the_same_page_as_the_session_entry() {
+    // The wire row now goes through `HostReadRequest`/`HostReadAnswer`; the
+    // session's direct entry must still be the same answer, character for
+    // character, or the refactor changed behaviour.
+    let session = bim_session();
+    let direct = session
+        .bim_query(&request(walls(), 0, 10))
+        .expect("the session answers");
+    let answer = session
+        .host_read(&HostReadRequest::BimQuery {
+            filter: walls(),
+            offset: 0,
+            limit: 10,
+        })
+        .expect("the generic entry answers");
+    assert_eq!(answer, HostReadAnswer::BimQuery(direct.clone()));
+    // The envelope's tag is the documented kind and the inner value is the
+    // unchanged response (the wire row unwraps it).
+    let value = serde_json::to_value(&answer).expect("serialize");
+    assert_eq!(value["kind"], BIM_QUERY_KIND);
+    let inner = serde_json::to_value(&direct).expect("serialize");
+    for key in [
+        "databaseId",
+        "revision",
+        "total",
+        "offset",
+        "limit",
+        "rows",
+        "stale",
+        "summary",
+    ] {
+        assert_eq!(value[key], inner[key], "field {key}");
+    }
+}
+
+#[test]
+fn the_query_row_refuses_by_name_without_a_host_read_seam() {
+    // The desktop transport has no session on the IPC thread: without an
+    // installed seam the shared layer answers by marker, never an empty page.
+    let reads = crate::session::wire::QueueReads::default();
+    let error = crate::session::host_read::bim_query(&reads, BimFilterWire::default(), 0, 10)
+        .expect_err("no host-read seam on this host");
+    assert_eq!(error, crate::bim::BIM_UNSUPPORTED);
+    assert_eq!(error, "unsupported-runtime: bimQuery");
 }

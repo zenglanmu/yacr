@@ -238,18 +238,19 @@ pub fn cad_fonts_impl(shared: &Arc<Mutex<Shared>>) -> Result<CadFonts, String> {
 /// Command body of `cad_bim_query`, without the Tauri state wrapper.
 ///
 /// A **request-carrying** read (ADR-0042 D11): the filter and page window come
-/// from the caller, so the answer is served by the host's
-/// [`cad_ui_core::bim::BimQueryHost`] seam (the session is `!Send` and owned by
-/// the owner thread). One call answers the page **and** the facet summary. A host
-/// that installs no seam keeps the shared `unsupported-runtime: bimQuery`
-/// refusal — never an empty page.
+/// from the caller, so the answer is served by the host's generic
+/// [`cad_ui_core::host_read::HostReadHost`] seam (the session is `!Send` and
+/// owned by the owner thread) through
+/// [`cad_ui_core::session::host_read::bim_query`]. One call answers the page
+/// **and** the facet summary. A host that installs no seam keeps the shared
+/// `unsupported-runtime: bimQuery` refusal — never an empty page.
 pub fn cad_bim_query_impl(
     shared: &Arc<Mutex<Shared>>,
     filter: cad_ui_core::bim::BimFilterWire,
     offset: usize,
     limit: usize,
 ) -> Result<cad_ui_core::bim::BimQueryResponse, String> {
-    cad_ui_core::session::bim_reads::bim_query(&lock(shared).queue_reads(), filter, offset, limit)
+    cad_ui_core::session::host_read::bim_query(&lock(shared).queue_reads(), filter, offset, limit)
 }
 
 /// `cad_recent_files` command: the host's real recent-drawings list.
@@ -946,5 +947,52 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
         assert!(delivered, "the tick must deliver the terminal");
+    }
+
+    /// The generic seam: one closure injected per carrier, one forwarding call
+    /// per request, and the same `cad_bim_query` reply the row always answered.
+    #[test]
+    fn a_host_read_fn_forwards_one_call_and_the_query_row_keeps_its_shape() {
+        use cad_ui_core::host_read::{HostReadAnswer, HostReadRequest, BIM_QUERY_KIND};
+
+        // No seam: the row keeps the shared marker, never an empty page.
+        let shared = shared();
+        assert_eq!(
+            cad_bim_query_impl(&shared, cad_ui_core::bim::BimFilterWire::default(), 0, 10)
+                .expect_err("no host-read seam"),
+            "unsupported-runtime: bimQuery"
+        );
+
+        let calls = Arc::new(Mutex::new(0usize));
+        let seen = calls.clone();
+        let host = crate::state::HostReadFn::new(move |request: &HostReadRequest| {
+            *seen.lock().unwrap() += 1;
+            assert_eq!(request.kind(), BIM_QUERY_KIND);
+            // The frozen `cad_bim_query` reply, unchanged by the envelope.
+            let response = serde_json::from_value(serde_json::json!({
+                "databaseId": 0,
+                "revision": 0,
+                "total": 7,
+                "offset": 0,
+                "limit": 10,
+                "rows": [],
+                "stale": false,
+                "summary": {
+                    "total": 7,
+                    "byCategory": [],
+                    "byLevel": [],
+                    "byType": [],
+                    "byMaterial": []
+                }
+            }))
+            .expect("the frozen response shape");
+            Ok(HostReadAnswer::BimQuery(response))
+        });
+        crate::state::configure_host_read_host(&shared, host);
+
+        let answer = cad_bim_query_impl(&shared, cad_ui_core::bim::BimFilterWire::default(), 0, 10)
+            .expect("the installed seam answers");
+        assert_eq!(answer.total, 7, "the inner response is unwrapped verbatim");
+        assert_eq!(*calls.lock().unwrap(), 1, "one request, one seam call");
     }
 }

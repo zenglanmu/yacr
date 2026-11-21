@@ -304,14 +304,14 @@ fn register_seams(
             app.clone(),
         )));
     }
-    // BIM query (ADR-0042 D11): a caller-supplied filter over the open document,
-    // answered with the page and its facet summary in one round trip, so the
-    // answer cannot be mirrored ahead of time; the seam marshals it onto the loop
-    // thread where the `!Send` session lives. Installed after the shell lock is
-    // released, like every other configure helper.
-    cad_desktop_shell::state::configure_bim_query_host(
+    // Request-carrying reads (ADR-0042 D11): the caller supplies the request (a
+    // BIM filter today), so the answer cannot be mirrored; one generic seam
+    // marshals every kind onto the loop thread where the `!Send` session lives.
+    // Installed after the shell lock is released, like every other configure
+    // helper.
+    cad_desktop_shell::state::configure_host_read_host(
         shared,
-        crate::bim_host::AndroidBimQueryHost::new(app.clone()),
+        crate::host_read::host_read_host(app.clone()),
     );
 }
 

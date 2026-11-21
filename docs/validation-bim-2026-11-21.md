@@ -548,3 +548,96 @@ python3 scripts/check-i18n.py && python3 scripts/check-file-size.py && python3 s
 
 **NOT RUN**：真实 Linux/Windows/macOS/Android 运行、macOS 编译、GPU/像素/性能验收、真实 BIM 样本
 上的面板交互。本节的结论全部是编译/契约与合成夹具证据。
+
+## 17. 方案 B：请求携带型读取收成通用 host-read seam（2026-11-21）
+
+**范围**：纯传输层重构——把「带参数的活读」从 BIM 专属 seam 提升为通用契约，四个载体的
+seam 文件收成同一份结构。**不改**命令名、请求/应答 JSON 形状、拒绝标记、后端语义，也不改
+`cad-app`/`cad-db`/`cad-history`/`cad-query`/导入导出 crate/`apps/desktop-ui`。
+
+**新契约**（`crates/cad-ui-core/src/host_read.rs`）：
+
+```rust
+pub const BIM_QUERY_KIND: &str = "bimQuery";                 // kind 拼写唯一定义处
+pub const HOST_READ_UNKNOWN_KIND: &str = "unsupported-runtime: hostRead.kind";
+
+#[serde(tag 由 BIM_QUERY_KIND 写入)]
+pub enum HostReadRequest { BimQuery { filter: BimFilterWire, offset: usize, limit: usize } }
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum HostReadAnswer { BimQuery(BimQueryResponse) }        // 内部字段形状不变
+
+pub trait HostReadHost: Send + Sync { fn read(&self, r: &HostReadRequest) -> Result<HostReadAnswer, String>; }
+pub struct HostReadSeam<'a>(pub Option<&'a Arc<dyn HostReadHost>>);  // 无 seam → no_seam_refusal(kind)
+pub trait HostReads { fn host_read(&self, r: &HostReadRequest) -> Result<HostReadAnswer, String>; }
+```
+
+- 请求用**手写** `Serialize`/`Deserialize`：tag 来自 `BIM_QUERY_KIND`（单一拼写），未知 kind 由
+  `HOST_READ_UNKNOWN_KIND` 具名拒绝，绝不静默套用 `bimQuery`；`offset`/`limit` 缺省仍为
+  `0`/`BIM_DEFAULT_LIMIT`（`usize`，与既有 `BimQueryRequest` 一致，未窄化成 `u32`）。
+- `HostReadAnswer` 的 tag 由 derive 生成，`the_answer_round_trips_with_its_kind` 断言它等于
+  `BIM_QUERY_KIND` 且内部 `databaseId/revision/offset/limit/rows/summary` 与
+  `BimQueryResponse` 逐字段一致。
+- `cad_bim_query` 行名、参数、应答类型不变；行体改为构造 `HostReadRequest::BimQuery` 并调
+  `session::host_read::bim_query(reads, …)`，`HostReadAnswer::BimQuery` 解出后返回。
+- 删除：`BimQueryHost` / `BimQueryReads` / `BimQuerySeam` / `with_bim_query_host` /
+  `configure_bim_query_host` / `Shared::cad_bim_query_host` / 各载体 `AppBimQueryHost`、
+  `AndroidBimQueryHost`、`*::bim_host` 文件。`QueueReads.host_read: HostReadSeam<'a>`。
+- 装配：`configure_host_read_host(shared, HostReadFn::new(closure))`；
+  `cad_desktop_shell::state::HostReadFn` 是唯一 trait 实现，载体只注入投递差异。
+
+**载体最终行数对比**（物理行 / 不含测试的非文档代码行；旧值取 `git show HEAD:<文件>`）：
+
+| 载体 | 旧 `bim_host.rs` | 新 `host_read.rs` | 代码行（旧→新） |
+|---|---|---|---|
+| Linux `apps/app-linux` | 63 | 65 | 31 → 24 |
+| Windows `apps/app-windows` | 80 | 60 | 28 → 21 |
+| macOS `apps/app-macos` | 81 | 61 | 28 → 21 |
+| Android `apps/app-android` | 133 | 91 | 56 → 40 |
+
+四份结构一致：`host_read_host(app) -> Arc<HostReadFn>`（闭包内 clone app+request →
+`on_main_thread` / 有界 `run_on_main_thread_timeout`）+ `with_session`（~10 行；仅 Linux 有
+`dom-canvas` 分支）。Android 的 40 行含其 `MainThread` 适配器（有界 hop 是本载体差异本身）。新增
+kind 不需要动这四份文件。
+
+**grep 证据**（`git grep` 等价，排除 `target/`；0 命中）：
+
+```bash
+grep -rn "BimQueryHost\|BimQueryReads\|BimQuerySeam\|configure_bim_query_host\|AppBimQueryHost\|AndroidBimQueryHost\|with_bim_query_host\|bim_host\|bim_reads" \
+  --include=*.rs --include=*.ts --include=*.tsx --include=*.py --include=*.json --include=*.toml --include=*.txt . | grep -v '^./target/'
+# → 无输出
+```
+
+**冻结形状**：`crates/cad-ui-core/src/bim/tests.rs::a_query_response_carries_the_frozen_shape`
+期望**未改**，本轮通过；`bim/tests.rs` 其余用例同样未改。app-web 保留
+`one_query_answer_carries_the_page_and_its_summary` 与 `the_summary_command_no_longer_exists`。
+
+**本轮实际运行（逐条看退出码，全部 EXIT 0）**：
+
+```bash
+cargo test -p cad-ui-core --locked                                     # 838 passed
+cargo test -p cad-host --locked bim_query                              # 11 passed
+cargo test -p cad-desktop-shell --locked                               # 含新 HostReadFn 转发用例
+cargo test -p app-web --locked                                         # 147 passed（含 host_read 与 cad_bim_query 同一 JSON）
+cargo test -p app-android bim --locked                                 # 2 passed（拒绝标记 + contract 源码契约）
+cargo check -p app-web --target wasm32-unknown-unknown --locked
+cargo check -p app-linux --all-targets --locked
+cargo check -p app-windows --all-targets --locked
+cargo check -p app-windows --target x86_64-pc-windows-msvc --locked    # 真正编译 Windows host 模块
+cargo check -p app-macos --all-targets --locked                        # 本机只编译 stub（host 模块 cfg 掉）
+cargo check -p app-android --locked
+cargo check -p app-android --target aarch64-linux-android --locked      # 补做：编译 Android-only 模块
+cargo clippy -p cad-ui-core -p cad-host -p cad-desktop-shell -p app-web --all-targets --locked -- -D warnings
+cargo fmt --all -- --check
+python3 scripts/check-file-size.py && python3 scripts/check-architecture.py && python3 scripts/check-tauri-capabilities.py && python3 scripts/check-i18n.py
+(cd apps/desktop-ui && npm test)
+```
+
+`check-file-size.py` 用 `git ls-files` 发现文件，因此**未暂存的删除**仍会被它看到（报「cannot be
+read」）。本轮用一个临时 `GIT_INDEX_FILE` 副本应用同一组新增/删除后复跑：`file-size OK: 2565 code
+file(s)`；真实 Git index 未被改动（无 `git add`/提交）。
+
+**NOT RUN / 证据边界**：真实 Windows/macOS/Android 运行、macOS 编译
+（`--target aarch64-apple-darwin` 因本机无 SDK，`cc-rs` 拒绝 `-arch`，环境缺失而非代码结论）、
+真机/真实 GPU/像素/性能验收、真实 BIM 样本的面板交互。Windows 的结论仅交叉编译
+（`x86_64-pc-windows-msvc`），macOS 仅 `--all-targets`（host 模块未编译，文件仅经 rustfmt 解析并以
+Windows 同构文件复核），Android 仅交叉编译 + 契约。行为等价证据是契约测试，不是产品验收。

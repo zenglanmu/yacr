@@ -13,6 +13,7 @@
 //! `android-activity`, `jni`, `ndk`). The whole crate is UI-framework-free.
 
 pub mod bim;
+pub mod host_read;
 pub mod i18n;
 pub mod launch;
 pub mod layout;
@@ -23,9 +24,13 @@ pub mod shell;
 
 pub use bim::{
     query_response, BimEvidenceWire, BimFacetCountWire, BimFilterWire, BimObjectWire, BimOpWire,
-    BimPropertyCountWire, BimPropertyFilterWire, BimQueryHost, BimQueryReads, BimQueryRequest,
-    BimQueryResponse, BimQuerySeam, BimRowWire, BimSourceWire, BimSummaryWire, BimValueWire,
-    BIM_DEFAULT_LIMIT, BIM_REAL_NOT_FINITE, BIM_STALE, BIM_UNSUPPORTED, BIM_UNSUPPORTED_VALUE,
+    BimPropertyCountWire, BimPropertyFilterWire, BimQueryRequest, BimQueryResponse, BimRowWire,
+    BimSourceWire, BimSummaryWire, BimValueWire, BIM_DEFAULT_LIMIT, BIM_REAL_NOT_FINITE, BIM_STALE,
+    BIM_UNSUPPORTED, BIM_UNSUPPORTED_VALUE,
+};
+pub use host_read::{
+    HostReadAnswer, HostReadHost, HostReadRequest, HostReadSeam, HostReads, BIM_QUERY_KIND,
+    HOST_READ_UNKNOWN_KIND,
 };
 
 pub use i18n::{

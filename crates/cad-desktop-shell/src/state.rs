@@ -28,6 +28,7 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use cad_app::{StandardView, ToolParameter, ToolValue};
+use cad_ui_core::host_read::{HostReadAnswer, HostReadHost, HostReadRequest};
 use cad_ui_core::launch::LaunchOptions;
 use cad_ui_core::layout::LayoutTracker;
 use cad_ui_core::popup::PopupAck;
@@ -327,20 +328,20 @@ pub struct Shared {
     /// refuse by name instead of inventing a preview for a file that cannot carry
     /// resources.
     pub ymodel_host: Option<Arc<dyn ShellYmodelHost>>,
-    /// The platform BIM query seam (see [`cad_ui_core::bim::BimQueryHost`]).
+    /// The platform seam for **request-carrying reads** (see
+    /// [`HostReadHost`]).
     ///
-    /// A BIM query takes a caller-supplied filter, so unlike the element
-    /// projections it cannot be mirrored ahead of time: the host marshals the
-    /// request onto the `!Send` session thread through this seam. One call answers
-    /// the page and the facet summary. `None` keeps `cad_bim_query` on the shared
-    /// `unsupported-runtime: bimQuery` refusal — an honest "this carrier has no
-    /// BIM query lane", never an empty page that would read as "this document has
-    /// no BIM data".
+    /// A request-carrying read takes a caller-supplied request (a BIM filter and
+    /// page window today), so unlike the element projections it cannot be mirrored
+    /// ahead of time: the host marshals it onto the `!Send` session thread through
+    /// this seam. `None` keeps every such command on its kind's named refusal
+    /// (`unsupported-runtime: bimQuery` for a BIM query) — an honest "this carrier
+    /// has no lane", never an empty answer that would read as "this document has
+    /// no data".
     ///
-    /// The trait lives in `cad-ui-core` (not here) because the registry row that
-    /// names it is shared by both transports; that is a layering constraint, see
-    /// the trait's own doc.
-    pub cad_bim_query_host: Option<Arc<dyn cad_ui_core::bim::BimQueryHost>>,
+    /// One seam serves every kind: a new request kind must not add a field or a
+    /// per-carrier file (see [`cad_ui_core::host_read`]).
+    pub host_read_host: Option<Arc<dyn HostReadHost>>,
     /// The native folder picker (see [`crate::directory::DirectoryPicker`]).
     ///
     /// A carrier with a local folder chooser installs one during startup; the
@@ -413,7 +414,7 @@ impl Shared {
             recent_host: None,
             recovery_host: None,
             ymodel_host: None,
-            cad_bim_query_host: None,
+            host_read_host: None,
             directory_picker: None,
             vendor: crate::vendor::VendorStore::default(),
             vendor_pending_representations: None,
@@ -482,8 +483,8 @@ impl Shared {
             self.cad_fonts.as_ref(),
             self.cad_api_snapshot.as_ref(),
         )
-        // The one request-carrying read: served by the session seam, not a mirror.
-        .with_bim_query_host(self.cad_bim_query_host.as_ref())
+        // Request-carrying reads: served by the session seam, not a mirror.
+        .with_host_read_host(self.host_read_host.as_ref())
     }
 }
 
@@ -573,16 +574,41 @@ pub fn configure_ymodel_host(shared: &Arc<Mutex<Shared>>, host: Arc<dyn ShellYmo
     lock(shared).ymodel_host = Some(host);
 }
 
-/// Install the BIM query seam (see [`cad_ui_core::bim::BimQueryHost`]).
+/// Install the request-carrying read seam (see [`HostReadHost`]).
 ///
 /// A carrier whose native session owns the document calls this once during
-/// startup; a carrier that never does keeps the named
-/// `unsupported-runtime: bimQuery` refusal instead of an empty BIM table.
-pub fn configure_bim_query_host(
-    shared: &Arc<Mutex<Shared>>,
-    host: Arc<dyn cad_ui_core::bim::BimQueryHost>,
-) {
-    lock(shared).cad_bim_query_host = Some(host);
+/// startup, with a [`HostReadFn`] that injects its marshalling; a carrier that
+/// never does keeps each kind's named refusal instead of an empty answer.
+/// Adding a request kind does **not** add a configure function or a carrier file.
+pub fn configure_host_read_host(shared: &Arc<Mutex<Shared>>, host: Arc<dyn HostReadHost>) {
+    lock(shared).host_read_host = Some(host);
+}
+
+/// The one closure shape a carrier injects into [`HostReadFn`].
+pub type HostReadFnBody = dyn Fn(&HostReadRequest) -> Result<HostReadAnswer, String> + Send + Sync;
+
+/// The closure adapter behind [`HostReadHost`] (see [`cad_ui_core::host_read`]).
+///
+/// The carriers differ only in **how** the request reaches the `!Send` session
+/// thread — `on_main_thread` on Linux/Windows/macOS, the bounded
+/// `run_on_main_thread_timeout` on Android. Injecting that difference as a
+/// closure keeps one implementation of the trait for every carrier, so a new
+/// request kind never needs a per-carrier struct and method pair.
+pub struct HostReadFn(pub Arc<HostReadFnBody>);
+
+impl HostReadFn {
+    /// Bind one carrier's marshalling closure.
+    pub fn new(
+        read: impl Fn(&HostReadRequest) -> Result<HostReadAnswer, String> + Send + Sync + 'static,
+    ) -> Arc<Self> {
+        Arc::new(Self(Arc::new(read)))
+    }
+}
+
+impl HostReadHost for HostReadFn {
+    fn read(&self, request: &HostReadRequest) -> Result<HostReadAnswer, String> {
+        (self.0)(request)
+    }
 }
 
 /// Install the native folder picker (see [`crate::directory::DirectoryPicker`]).

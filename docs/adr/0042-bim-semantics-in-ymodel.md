@@ -254,6 +254,22 @@ Bentley iModel/BIS 提供了成熟的参照：内部 Id 与 FederationGuid 分�
 而不是 `cad-desktop-shell`，因为 registry 的共享行必须让 wasm 与 native 两个传输都看到它——分层约束，
 不是遗漏。
 
+**2026-11-21 追加（方案 B：通用 host-read seam）**：上面那组私有命名**已被通用契约吸收**。
+请求携带型读取现在只有一份 seam：
+
+- `cad_ui_core::host_read::HostReadRequest`（`#[serde(tag = "kind")]`，当前唯一 kind 为
+  `bimQuery`，拼写只在 `BIM_QUERY_KIND` 定义并被单测钉住）与 `HostReadAnswer`（同 kind 标签）；
+- `HostReadHost`（载体的平台侧）与 `HostReads`（wire 侧，`dom-canvas` 直读 session、
+  desktop 经 `HostReadSeam` 转发）；
+- 无 seam 的默认拒绝仍按 kind 取自 `no_seam_refusal`（BIM = `unsupported-runtime: bimQuery`）；
+  未知 kind 是新的稳定标记 `unsupported-runtime: hostRead.kind`，**不得**被当作 BIM 静默处理。
+
+`cad_bim_query` 的命令名、参数与 JSON 形状逐字节不变（冻结形状测试未改期望）；四个载体只剩一个
+约 10–25 行的闭包注入（Linux/Windows/macOS 用 `on_main_thread`，Android 用有界
+`run_on_main_thread_timeout`），装配点改为 `configure_host_read_host(HostReadFn::new(..))`。
+**约束（新增 kind 时）**：只允许在 `host_read.rs` 加变体/拒绝词、在 `session::host_read` 加路由、
+在 registry 加/改 wire 行；**不得**再新增每载体 seam 文件、struct 或 configure 函数。
+
 ### D12 — `IdKind` 预留位（11/12/13）Phase 1 不启用
 
 - 不用 `SubCategory(11)` 表示 BIM 类别——它已是 DWG layer 的镜像（ADR-0037 D7），叠加会破坏不变量。

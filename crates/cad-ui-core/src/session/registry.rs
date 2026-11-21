@@ -145,10 +145,11 @@ macro_rules! cad_wire_registry {
             // The BIM query (ADR-0042 D11): one **request-carrying** read that
             // answers the page and the facet summary in one round trip. The filter
             // and the page window come from the caller, so the desktop serves it
-            // through its session seam (`cad_bim_query_host`) instead of the
-            // owner-tick mirror. Not a drawing command: absent from
+            // through the generic host-read seam (`Shared::host_read_host`)
+            // instead of the owner-tick mirror; the row name, arguments and reply
+            // shape are unchanged. Not a drawing command: absent from
             // `cad_commands`, so `check-command-docs.py` owes it nothing.
-            @row(shared, reads, BimQueryArgs, cad_bim_query, { arg(req, filter, $crate::bim::BimFilterWire) arg(req, offset, usize) arg(req, limit, usize) }, $crate::bim::BimQueryResponse, { $crate::session::bim_reads::bim_query(reads, filter, offset, limit) })
+            @row(shared, reads, BimQueryArgs, cad_bim_query, { arg(req, filter, $crate::bim::BimFilterWire) arg(req, offset, usize) arg(req, limit, usize) }, $crate::bim::BimQueryResponse, { $crate::session::host_read::bim_query(reads, filter, offset, limit) })
             @row(shared, sink, LayerVisibleArgs, cad_set_layer_visible, { arg(req, name, String) arg(req, visible, bool) }, $crate::session::wire::CadCommandAck, { $crate::session::wire::set_layer_visible(sink, &name, visible) })
             @row(shared, sink, NoArgs, cad_restore_layers, { }, $crate::session::wire::CadCommandAck, { $crate::session::wire::restore_layers(sink) })
             @row(shared, sink, ActiveLayerArgs, cad_set_active_layer, { arg(req, name, String) }, $crate::session::wire::CadCommandAck, { $crate::session::wire::set_active_layer(sink, &name) })

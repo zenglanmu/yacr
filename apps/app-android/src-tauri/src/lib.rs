@@ -47,14 +47,15 @@ pub mod policy;
 pub mod refusal;
 pub mod report;
 
-/// The BIM query seam (`cad_bim_query`, ADR-0042 D11).
+/// The request-carrying read seam (`cad_bim_query`, ADR-0042 D11).
 ///
 /// The refusal half is target-independent, so a query made before the native
 /// session exists answers the shared `unsupported-runtime: bimQuery` marker and
 /// that contract runs on the development host. The Tauri marshalling half is
-/// Android-only, like [`host`].
+/// Android-only, like [`host`]. One generic seam serves every request kind
+/// (see `cad_ui_core::host_read`).
 #[cfg(not(target_arch = "wasm32"))]
-pub mod bim_host;
+pub mod host_read;
 
 #[cfg(target_os = "android")]
 pub mod host;

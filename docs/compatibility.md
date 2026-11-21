@@ -291,9 +291,13 @@ SketchUp / Revit 打开我们导出的文件一律 **NOT RUN**。
 并能按语义回写 IFC**。它不改变"`cad-db` 是唯一权威"，也不引入 EC Schema/ECSQL 或跨文件联邦。
 天花板：**IFC 导入/导出 `Partial`**（契约证据 + 自洽往返，无 vendor checker）；**RVT/DGN 语义
 `Unverified`**。**IFC 关系只导出 `contains`/`nests`**（`aggregates`/`group`/`connects`/
-`other:*` 因 plan API 不可表达而不导出并按 kind 报告）；BIM 查询在 `cad-host`（native）与 Web（wasm `DirectReads`）
-已有 seam/接线（运行时 **NOT VERIFIED**），Windows/macOS/Android 无查询 seam、按
-`unsupported-runtime: bimQuery` 显式拒绝。
+`other:*` 因 plan API 不可表达而不导出并按 kind 报告）；BIM 查询经**通用 host-read seam**
+（`cad_ui_core::host_read`：`HostReadRequest{kind:"bimQuery"}` → `HostReadAnswer`；请求携带型读取
+共用一条 seam，新增 kind 不再新增每载体文件）在 `cad-host`（native）与 Web（wasm `DirectReads`）
+已有接线（运行时 **NOT VERIFIED**）；四个 native 载体都装同一条 seam（Linux 有运行证据，
+Windows/macOS/Android 只有编译/契约证据，见 `docs/validation-bim-2026-11-21.md` §17），没有 seam 的
+宿主/kind 按 `unsupported-runtime: bimQuery`（未知 kind 为 `unsupported-runtime: hostRead.kind`）
+显式拒绝。
 
 | 层 | 实现 | 边界 |
 |---|---|---|

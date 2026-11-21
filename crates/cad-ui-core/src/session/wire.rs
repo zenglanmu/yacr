@@ -528,9 +528,9 @@ pub struct QueueReads<'a> {
     pub fonts: Option<&'a Result<CadFonts, String>>,
     /// `Shared::cad_api_snapshot`.
     pub api_snapshot: Option<&'a CadApiSnapshot>,
-    /// `Shared::cad_bim_query_host`: the caller-supplied BIM query lane
-    /// (`crate::session::bim_reads`; absent = the named `bimQuery` refusal).
-    pub bim: crate::bim::BimQuerySeam<'a>,
+    /// `Shared::host_read_host`: the request-carrying read lane (absent = the
+    /// kind's named refusal; `unsupported-runtime: bimQuery` for a BIM query).
+    pub host_read: crate::host_read::HostReadSeam<'a>,
 }
 
 impl<'a> QueueReads<'a> {
@@ -546,7 +546,7 @@ impl<'a> QueueReads<'a> {
             layers,
             fonts,
             api_snapshot,
-            bim: crate::bim::BimQuerySeam::default(),
+            host_read: crate::host_read::HostReadSeam::default(),
         }
     }
 }

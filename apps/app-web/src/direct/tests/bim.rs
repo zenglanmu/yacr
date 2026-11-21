@@ -16,7 +16,7 @@
 //! answer, so there is no second dispatch arm to test.
 
 use cad_ui_core::bim::{BimFilterWire, BIM_UNSUPPORTED, BIM_UNSUPPORTED_VALUE};
-use cad_ui_core::session::{bim_reads, QueueReads};
+use cad_ui_core::session::{host_read, QueueReads};
 
 use super::*;
 
@@ -174,11 +174,43 @@ fn an_unknown_value_kind_is_refused_by_marker() {
 #[test]
 fn a_desktop_mirror_without_the_seam_refuses_by_name() {
     // The desktop transport has no session on the IPC thread: without the host's
-    // `BimQueryHost` seam the shared layer must answer by marker, never an empty
-    // page.
+    // generic host-read seam the shared layer must answer by marker, never an
+    // empty page.
     let reads = QueueReads::new(None, None, None, None);
-    let error = bim_reads::bim_query(&reads, BimFilterWire::default(), 0, 10)
-        .expect_err("no BIM query lane on this host");
+    let error = host_read::bim_query(&reads, BimFilterWire::default(), 0, 10)
+        .expect_err("no host-read lane on this host");
     assert_eq!(error, BIM_UNSUPPORTED);
     assert_eq!(error, "unsupported-runtime: bimQuery");
+}
+
+#[test]
+fn the_generic_host_read_answers_what_the_query_command_answers() {
+    use cad_ui_core::host_read::{HostReadAnswer, HostReadRequest, HostReads};
+
+    // The dispatcher's `cad_bim_query` arm now builds the generic request; the
+    // direct session read must answer the identical JSON, or the refactor changed
+    // behaviour.
+    let session = session();
+    let direct = DirectReads::new(&session);
+    let mut sink = DirectSink::new(&session);
+    let mut popups = cad_ui_core::session::NoPopups;
+
+    let wire = dispatch("cad_bim_query", args(), &mut sink, &direct, &mut popups)
+        .expect("the live session answers");
+    let answer = direct
+        .host_read(&HostReadRequest::BimQuery {
+            filter: BimFilterWire {
+                categories: vec!["IfcWall".to_string()],
+                ..BimFilterWire::default()
+            },
+            offset: 0,
+            limit: 100,
+        })
+        .expect("the direct read answers");
+    let HostReadAnswer::BimQuery(response) = answer;
+    assert_eq!(
+        wire,
+        serde_json::to_value(&response).expect("serialize"),
+        "the generic entry must not reshape the command's answer"
+    );
 }
