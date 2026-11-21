@@ -161,6 +161,100 @@ fn render_zero_width_is_a_usage_error() {
     clean(&dir);
 }
 
+/// The `--view`/`--azimuth`/`--elevation`/`--fov`/`--legacy-shading` parser
+/// wiring, end to end through the real binary.
+///
+/// A consistent 3D flag set is *accepted* (the empty fixture then fails as
+/// `invalid_input` before any GPU work, not `usage`), and every inconsistent
+/// combination exits `2` with a `usage` code before the drawing is even opened.
+#[test]
+fn render_view_flags_parse_and_inconsistent_combinations_are_usage_errors() {
+    let dir = scratch("render-view-flags");
+    let dwg = write_minimal_dwg(&dir);
+
+    // Accepted: a preset, explicit angles with an FOV, and the shading flag.
+    for args in [
+        vec![s("--view"), s("isometric")],
+        vec![s("--view"), s("ISOMETRIC")],
+        vec![s("--azimuth"), s("0"), s("--elevation"), s("20")],
+        vec![
+            s("--azimuth"),
+            s("-360"),
+            s("--elevation"),
+            s("90"),
+            s("--fov"),
+            s("60"),
+        ],
+        vec![s("--view"), s("front"), s("--fov"), s("1")],
+        vec![s("--legacy-shading"), s("--view"), s("top")],
+    ] {
+        let mut command = vec![s("render"), dwg.as_os_str()];
+        command.extend(args.iter().copied());
+        let output = run(&command);
+        assert_eq!(
+            output.status.code(),
+            Some(1),
+            "a consistent flag set must parse; stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let value = stderr_json(&output);
+        assert_eq!(
+            value["error"]["code"], "invalid_input",
+            "the empty fixture must fail on geometry, not usage"
+        );
+    }
+
+    // Refused: every inconsistent or out-of-range combination is a usage error
+    // with exit code 2.
+    let cases: Vec<(Vec<&std::ffi::OsStr>, &str)> = vec![
+        (vec![s("--view"), s("bogus")], "bogus"),
+        (vec![s("--azimuth"), s("0")], "together"),
+        (vec![s("--elevation"), s("20")], "together"),
+        (
+            vec![
+                s("--view"),
+                s("top"),
+                s("--azimuth"),
+                s("0"),
+                s("--elevation"),
+                s("20"),
+            ],
+            "mutually exclusive",
+        ),
+        (vec![s("--fov"), s("45")], "--fov"),
+        (vec![s("--view"), s("top"), s("--fov"), s("0")], "--fov"),
+        (vec![s("--view"), s("top"), s("--fov"), s("200")], "--fov"),
+        (
+            vec![s("--azimuth"), s("400"), s("--elevation"), s("0")],
+            "--azimuth",
+        ),
+        (
+            vec![s("--azimuth"), s("0"), s("--elevation"), s("91")],
+            "--elevation",
+        ),
+    ];
+    for (args, needle) in cases {
+        let mut command = vec![s("render"), dwg.as_os_str()];
+        command.extend(args.iter().copied());
+        let output = run(&command);
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "{args:?} must be a usage error; stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(output.stdout.is_empty(), "{args:?} must not print a result");
+        let value = stderr_json(&output);
+        assert_eq!(value["error"]["code"], "usage", "{args:?}");
+        let message = value["error"]["message"].as_str().unwrap_or_default();
+        assert!(
+            message.contains(needle),
+            "{args:?}: message {message:?} should name {needle:?}"
+        );
+    }
+    clean(&dir);
+}
+
 /// Real-frame contract, gated on an authorized sample checked by the operator.
 ///
 /// Set `YACR_TEST_DWG` to a real DWG to exercise the full headless GPU path.

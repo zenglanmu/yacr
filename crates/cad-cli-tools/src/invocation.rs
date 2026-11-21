@@ -1,6 +1,7 @@
 //! invocation module.
 
 use super::*;
+use cad_app::StandardView;
 
 /// Machine schema version for CLI result and error documents.
 ///
@@ -265,6 +266,195 @@ pub const MIN_GPU_BUDGET_PERCENT: u8 = 10;
 pub const MAX_GPU_BUDGET_PERCENT: u8 = 100;
 
 // ---------------------------------------------------------------------------
+// 3D camera/view for `render`
+// ---------------------------------------------------------------------------
+
+/// Default vertical field of view for a 3D `render` view, in degrees (`--fov`).
+///
+/// Matches the app camera's own 3D entry default (`π/4` radians = 45°), so the
+/// CLI frames a solid the same way the interactive host does.
+pub const DEFAULT_RENDER_FOV_DEGREES: f64 = 45.0;
+
+/// Accepted `--fov` range, inclusive, in degrees.
+pub const MIN_RENDER_FOV_DEGREES: f64 = 1.0;
+/// Accepted `--fov` range, inclusive, in degrees.
+pub const MAX_RENDER_FOV_DEGREES: f64 = 179.0;
+/// Accepted `--azimuth` range, inclusive, in degrees.
+pub const MIN_RENDER_AZIMUTH_DEGREES: f64 = -360.0;
+/// Accepted `--azimuth` range, inclusive, in degrees.
+pub const MAX_RENDER_AZIMUTH_DEGREES: f64 = 360.0;
+/// Accepted `--elevation` range, inclusive, in degrees.
+pub const MIN_RENDER_ELEVATION_DEGREES: f64 = -90.0;
+/// Accepted `--elevation` range, inclusive, in degrees.
+pub const MAX_RENDER_ELEVATION_DEGREES: f64 = 90.0;
+
+/// A requested 3D view for `render`: a named preset or explicit orbit angles.
+///
+/// `render` without one of these keeps the unchanged 2D plan path; this type is
+/// only produced by [`CliInvocation::requested_view`], which also refuses the
+/// inconsistent flag combinations.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum RequestedView {
+    /// One of [`StandardView::ALL`] (`--view <preset>`).
+    Preset(StandardView),
+    /// `--azimuth <deg>` plus `--elevation <deg>` in the CAD `+Z`-up frame.
+    Angles {
+        azimuth_degrees: f64,
+        elevation_degrees: f64,
+    },
+}
+
+impl RequestedView {
+    /// Unit vector from the target toward the eye in the CAD `+Z`-up world frame.
+    ///
+    /// A preset uses [`StandardView::eye_offset`]; angles use
+    /// `(cos(el)·cos(az), cos(el)·sin(az), sin(el))`.
+    pub fn direction(self) -> Point3 {
+        match self {
+            RequestedView::Preset(view) => view.eye_offset(),
+            RequestedView::Angles {
+                azimuth_degrees,
+                elevation_degrees,
+            } => {
+                let azimuth = azimuth_degrees.to_radians();
+                let elevation = elevation_degrees.to_radians();
+                let cos_elevation = elevation.cos();
+                Point3 {
+                    x: cos_elevation * azimuth.cos(),
+                    y: cos_elevation * azimuth.sin(),
+                    z: elevation.sin(),
+                }
+            }
+        }
+    }
+
+    /// The up hint for this view.
+    ///
+    /// Presets use [`StandardView::up_hint`]. Angles use world `+Z`, except when
+    /// the direction is near-vertical (`|dir.z| > 0.999`), where a `+Z` hint
+    /// would be parallel to the line of sight and the camera basis degenerate;
+    /// world `+Y` is used there instead (the documented top-down convention).
+    pub fn up_hint(self) -> Point3 {
+        match self {
+            RequestedView::Preset(view) => view.up_hint(),
+            RequestedView::Angles { .. } => {
+                let z = Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 1.0,
+                };
+                let y = Point3 {
+                    x: 0.0,
+                    y: 1.0,
+                    z: 0.0,
+                };
+                if self.direction().z.abs() > 0.999 {
+                    y
+                } else {
+                    z
+                }
+            }
+        }
+    }
+
+    /// The `StandardView::key` this view names, or `None` for explicit angles.
+    ///
+    /// This is the `camera.view` value of the `render` result JSON: an unnamed
+    /// angle pair reports `null` rather than inventing a preset name.
+    pub fn preset_key(self) -> Option<&'static str> {
+        match self {
+            RequestedView::Preset(view) => Some(view.key()),
+            RequestedView::Angles { .. } => None,
+        }
+    }
+}
+
+/// Parse a `--view` preset case-insensitively against [`StandardView::ALL`].
+///
+/// `None` means "not a known preset"; the caller reports the valid names so a
+/// typo can never be silently ignored.
+pub fn parse_view_preset(value: &str) -> Option<StandardView> {
+    let wanted = value.trim().to_ascii_lowercase();
+    StandardView::ALL
+        .iter()
+        .copied()
+        .find(|view| view.key() == wanted)
+}
+
+/// Validate an azimuth value in degrees, refusing rather than clamping.
+pub fn validate_azimuth_degrees(value: f64) -> Result<f64, String> {
+    if !value.is_finite()
+        || !(MIN_RENDER_AZIMUTH_DEGREES..=MAX_RENDER_AZIMUTH_DEGREES).contains(&value)
+    {
+        return Err(format!(
+            "--azimuth must be a finite number in \
+             {MIN_RENDER_AZIMUTH_DEGREES}..={MAX_RENDER_AZIMUTH_DEGREES} degrees (got '{value}')"
+        ));
+    }
+    Ok(value)
+}
+
+/// Validate an elevation value in degrees, refusing rather than clamping.
+pub fn validate_elevation_degrees(value: f64) -> Result<f64, String> {
+    if !value.is_finite()
+        || !(MIN_RENDER_ELEVATION_DEGREES..=MAX_RENDER_ELEVATION_DEGREES).contains(&value)
+    {
+        return Err(format!(
+            "--elevation must be a finite number in \
+             {MIN_RENDER_ELEVATION_DEGREES}..={MAX_RENDER_ELEVATION_DEGREES} degrees (got '{value}')"
+        ));
+    }
+    Ok(value)
+}
+
+/// Parse a `--fov` value in degrees.
+///
+/// `1..=179` inclusive; non-finite and out-of-range values are usage errors, not
+/// a clamp, so a bad field of view can never silently frame a different picture.
+pub fn parse_fov_degrees(value: &str) -> Result<f64, String> {
+    match value.trim().parse::<f64>() {
+        Ok(fov) => validate_fov_degrees(fov),
+        Err(_) => Err(format!(
+            "--fov must be a finite number in \
+             {MIN_RENDER_FOV_DEGREES}..={MAX_RENDER_FOV_DEGREES} degrees (got '{value}')"
+        )),
+    }
+}
+
+/// Validate a field of view in degrees, refusing rather than clamping.
+pub fn validate_fov_degrees(value: f64) -> Result<f64, String> {
+    if !value.is_finite() || !(MIN_RENDER_FOV_DEGREES..=MAX_RENDER_FOV_DEGREES).contains(&value) {
+        return Err(format!(
+            "--fov must be a finite number in \
+             {MIN_RENDER_FOV_DEGREES}..={MAX_RENDER_FOV_DEGREES} degrees (got '{value}')"
+        ));
+    }
+    Ok(value)
+}
+
+/// Parse a `--azimuth` value in degrees (see [`validate_azimuth_degrees`]).
+pub fn parse_azimuth_degrees(value: &str) -> Result<f64, String> {
+    match value.trim().parse::<f64>() {
+        Ok(azimuth) => validate_azimuth_degrees(azimuth),
+        Err(_) => Err(format!(
+            "--azimuth must be a finite number in \
+             {MIN_RENDER_AZIMUTH_DEGREES}..={MAX_RENDER_AZIMUTH_DEGREES} degrees (got '{value}')"
+        )),
+    }
+}
+
+/// Parse an `--elevation` value in degrees (see [`validate_elevation_degrees`]).
+pub fn parse_elevation_degrees(value: &str) -> Result<f64, String> {
+    match value.trim().parse::<f64>() {
+        Ok(elevation) => validate_elevation_degrees(elevation),
+        Err(_) => Err(format!(
+            "--elevation must be a finite number in \
+             {MIN_RENDER_ELEVATION_DEGREES}..={MAX_RENDER_ELEVATION_DEGREES} degrees (got '{value}')"
+        )),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Invocation
 // ---------------------------------------------------------------------------
 
@@ -290,6 +480,23 @@ pub struct CliInvocation {
     pub render_width: u32,
     /// Offscreen frame height in pixels for `render`/`plot`.
     pub render_height: u32,
+    /// `--view <preset>` for `render`: a named 3D standard view
+    /// ([`StandardView::ALL`]). `None` keeps the 2D plan path unless
+    /// `--azimuth`/`--elevation` are also given.
+    pub view_preset: Option<StandardView>,
+    /// `--azimuth <deg>` for `render`: 3D orbit azimuth in the CAD `+Z`-up frame.
+    /// Must be supplied together with [`Self::view_elevation_degrees`] and is
+    /// mutually exclusive with [`Self::view_preset`].
+    pub view_azimuth_degrees: Option<f64>,
+    /// `--elevation <deg>` for `render`: 3D orbit elevation. Must be supplied
+    /// together with [`Self::view_azimuth_degrees`].
+    pub view_elevation_degrees: Option<f64>,
+    /// `--fov <deg>` for `render`: vertical field of view of a 3D view. Only
+    /// valid when a 3D view was requested (a lone `--fov` is a usage error).
+    pub view_fov_degrees: Option<f64>,
+    /// `--legacy-shading`: draw this frame with the legacy single-light PBR path
+    /// (`Renderer::set_ibl_enabled(false)`) instead of the session's IBL default.
+    pub legacy_shading: bool,
     /// Layout to plot by name (`plot`). `None` selects the first layout.
     pub layout: Option<String>,
     /// Plot resolution in dots per inch (`plot`). When set, the canvas is sized
@@ -354,6 +561,11 @@ impl CliInvocation {
             png: None,
             render_width: DEFAULT_RENDER_WIDTH,
             render_height: DEFAULT_RENDER_HEIGHT,
+            view_preset: None,
+            view_azimuth_degrees: None,
+            view_elevation_degrees: None,
+            view_fov_degrees: None,
+            legacy_shading: false,
             layout: None,
             plot_dpi: None,
             plot_format: PlotFormat::default(),
@@ -365,6 +577,58 @@ impl CliInvocation {
             gpu_budget_percent_flag: GpuBudgetPercentFlag::Absent,
             gpu_memory_detail: false,
             locale: Locale::default(),
+        }
+    }
+
+    /// Resolve the requested `render` 3D view.
+    ///
+    /// `Ok(None)` is the unchanged 2D plan path. Every inconsistent combination
+    /// is a `usage` error (exit code 2) instead of a silent ignore:
+    ///
+    /// * `--view` together with `--azimuth`/`--elevation`;
+    /// * `--azimuth` without `--elevation` (or vice versa);
+    /// * `--fov` without any 3D view;
+    /// * an out-of-range angle or field of view (also refused when the value was
+    ///   set programmatically, not only through the argument parser).
+    pub fn requested_view(&self) -> Result<Option<RequestedView>, CliError> {
+        let has_angles =
+            self.view_azimuth_degrees.is_some() || self.view_elevation_degrees.is_some();
+        if self.view_preset.is_some() && has_angles {
+            return Err(CliError::usage(
+                "--view and --azimuth/--elevation are mutually exclusive; use one way to \
+                 choose the 3D view",
+            ));
+        }
+        if has_angles
+            && (self.view_azimuth_degrees.is_none() || self.view_elevation_degrees.is_none())
+        {
+            return Err(CliError::usage(
+                "--azimuth and --elevation must be supplied together",
+            ));
+        }
+        if self.view_fov_degrees.is_some() && self.view_preset.is_none() && !has_angles {
+            return Err(CliError::usage(
+                "--fov only applies to a 3D view; pass --view, or --azimuth with --elevation",
+            ));
+        }
+        if let Some(fov) = self.view_fov_degrees {
+            validate_fov_degrees(fov).map_err(CliError::usage)?;
+        }
+        match (
+            self.view_preset,
+            self.view_azimuth_degrees,
+            self.view_elevation_degrees,
+        ) {
+            (Some(preset), None, None) => Ok(Some(RequestedView::Preset(preset))),
+            (None, Some(azimuth), Some(elevation)) => {
+                let azimuth = validate_azimuth_degrees(azimuth).map_err(CliError::usage)?;
+                let elevation = validate_elevation_degrees(elevation).map_err(CliError::usage)?;
+                Ok(Some(RequestedView::Angles {
+                    azimuth_degrees: azimuth,
+                    elevation_degrees: elevation,
+                }))
+            }
+            _ => Ok(None),
         }
     }
 }

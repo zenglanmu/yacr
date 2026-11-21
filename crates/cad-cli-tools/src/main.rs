@@ -9,7 +9,8 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use cad_cli_tools::{
-    parse_gpu_budget_flag, parse_gpu_budget_percent_flag, CliError, CliInvocation, CliOperation,
+    parse_azimuth_degrees, parse_elevation_degrees, parse_fov_degrees, parse_gpu_budget_flag,
+    parse_gpu_budget_percent_flag, parse_view_preset, CliError, CliInvocation, CliOperation,
     GpuPreference, Locale, PlotFormat,
 };
 use cad_domain::Point3;
@@ -36,6 +37,17 @@ Options:
   --png <file>            render/plot: write the raster as a PNG (atomic)
   --width <u32>           render/plot: frame width in pixels (default 1280)
   --height <u32>          render/plot: frame height in pixels (default 720)
+  --view <preset>         render: 3D standard view: top|bottom|front|back|left|
+                          right|isometric (case-insensitive). Omit for the 2D
+                          plan view
+  --azimuth <degrees>     render: 3D orbit azimuth in -360..=360 (CAD +Z-up);
+                          requires --elevation and excludes --view
+  --elevation <degrees>   render: 3D orbit elevation in -90..=90; requires
+                          --azimuth
+  --fov <degrees>         render: vertical field of view for a 3D view, 1..=179
+                          (default 45); a lone --fov is a usage error
+  --legacy-shading        render: disable IBL for this frame (legacy single-light
+                          PBR); without it the session default (IBL on) is used
   --layout <name>         plot: layout to plot (default: the first layout)
   --dpi <f64>             plot: raster resolution; sizes the canvas from the
                           sheet instead of --width/--height
@@ -174,6 +186,74 @@ fn main() -> ExitCode {
                     Err(message) => return fail(CliError::usage(message), operation, locale),
                 }
             }
+            "--view" => {
+                index += 1;
+                let Some(value) = arguments.get(index) else {
+                    return fail(
+                        CliError::usage(
+                            "--view needs a preset (top|bottom|front|back|left|right|isometric)",
+                        ),
+                        operation,
+                        locale,
+                    );
+                };
+                match parse_view_preset(value) {
+                    Some(preset) => invocation.view_preset = Some(preset),
+                    None => {
+                        return fail(
+                            CliError::usage(format!(
+                                "--view must be one of top, bottom, front, back, left, right, \
+                                 isometric (got '{value}')"
+                            )),
+                            operation,
+                            locale,
+                        );
+                    }
+                }
+            }
+            "--azimuth" => {
+                index += 1;
+                let Some(value) = arguments.get(index) else {
+                    return fail(
+                        CliError::usage("--azimuth needs a value in -360..=360 degrees"),
+                        operation,
+                        locale,
+                    );
+                };
+                match parse_azimuth_degrees(value) {
+                    Ok(azimuth) => invocation.view_azimuth_degrees = Some(azimuth),
+                    Err(message) => return fail(CliError::usage(message), operation, locale),
+                }
+            }
+            "--elevation" => {
+                index += 1;
+                let Some(value) = arguments.get(index) else {
+                    return fail(
+                        CliError::usage("--elevation needs a value in -90..=90 degrees"),
+                        operation,
+                        locale,
+                    );
+                };
+                match parse_elevation_degrees(value) {
+                    Ok(elevation) => invocation.view_elevation_degrees = Some(elevation),
+                    Err(message) => return fail(CliError::usage(message), operation, locale),
+                }
+            }
+            "--fov" => {
+                index += 1;
+                let Some(value) = arguments.get(index) else {
+                    return fail(
+                        CliError::usage("--fov needs a value in 1..=179 degrees"),
+                        operation,
+                        locale,
+                    );
+                };
+                match parse_fov_degrees(value) {
+                    Ok(fov) => invocation.view_fov_degrees = Some(fov),
+                    Err(message) => return fail(CliError::usage(message), operation, locale),
+                }
+            }
+            "--legacy-shading" => invocation.legacy_shading = true,
             "--layout" => {
                 index += 1;
                 let Some(value) = arguments.get(index) else {
@@ -380,6 +460,15 @@ fn main() -> ExitCode {
         );
     };
     invocation.input = input.into();
+
+    // A bad `--view`/`--azimuth`/`--elevation`/`--fov` combination is a usage
+    // error before any import or GPU work. The 3D view flags apply to `render`
+    // only; other operations ignore them exactly like `--width`/`--height`.
+    if operation == CliOperation::FixedViewportRender {
+        if let Err(error) = invocation.requested_view() {
+            return fail(error, operation, locale);
+        }
+    }
 
     match cad_cli_tools::run_to_output(&invocation, out.as_deref()) {
         Ok(json) => {

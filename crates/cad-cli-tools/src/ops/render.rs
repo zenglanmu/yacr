@@ -2,6 +2,8 @@
 
 use super::*;
 
+mod camera;
+
 /// Map the CLI-local [`GpuPreference`] onto the renderer's `GpuSelection`.
 ///
 /// Native only: `cad-cli-tools` depends on `cad-render-wgpu` solely on this
@@ -27,6 +29,9 @@ fn render_gpu(invocation: &CliInvocation) -> cad_render_wgpu::GpuSelection {
 /// `CadError::InvalidInput`, and the PNG is written only after a frame exists.
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn run_render(invocation: &CliInvocation) -> Result<serde_json::Value, CliError> {
+    // Refuse a bad `--view`/`--azimuth`/`--elevation`/`--fov` combination before
+    // the import: an option combination is a usage error, not a render failure.
+    invocation.requested_view()?;
     let controller = load_document(invocation)?;
     render_document(invocation, &controller)
 }
@@ -43,7 +48,12 @@ pub(crate) fn render_document(
     controller: &HostController,
 ) -> Result<serde_json::Value, CliError> {
     use cad_render_wgpu::headless::{create_headless_gpu_with, HeadlessGpu};
-    use cad_render_wgpu::{BackendPreference, Camera2d, RenderTarget, Renderer};
+    use cad_render_wgpu::{BackendPreference, RenderTarget, Renderer};
+
+    // A 3D view is only well defined for a consistent flag set; the same check
+    // `run_render` makes up front, repeated for callers that hand a controller in
+    // directly (the contract tests).
+    let requested_view = invocation.requested_view()?;
 
     let document = controller
         .application
@@ -115,45 +125,19 @@ pub(crate) fn render_document(
     // Fit to what is actually drawn, not `drawing.bounds()`: the database
     // bounds include material the renderer does not draw (text, unplaced or
     // block-definition geometry), which leaves the framed image off-centre and
-    // small. The scene batches already carry world-space points
-    // (`local_origin + vertex`), so derive the fit from those.
-    let mut fit: Option<(f64, f64, f64, f64)> = None; // min_x, min_y, max_x, max_y
-    for batch in &delta.added {
-        let ox = batch.local_origin.x;
-        let oy = batch.local_origin.y;
-        for vertex in &batch.vertices {
-            let x = ox + vertex[0] as f64;
-            let y = oy + vertex[1] as f64;
-            if !x.is_finite() || !y.is_finite() {
-                continue;
-            }
-            fit = Some(match fit {
-                None => (x, y, x, y),
-                Some((min_x, min_y, max_x, max_y)) => {
-                    (min_x.min(x), min_y.min(y), max_x.max(x), max_y.max(y))
-                }
-            });
-        }
+    // small. `camera::fit_cameras` derives the unchanged 2D plan fit from the
+    // scene batches' world-space points (`local_origin + vertex`) and, in the
+    // same walk, the 3D extent a `--view`/`--azimuth` frame needs.
+    let fitted = camera::fit_cameras(&delta, invocation.render_width, invocation.render_height);
+    // Nothing drawable at all is still an explicit refusal before any GPU work,
+    // on both camera paths. A scene with no finite vertex z (but drawable XY)
+    // keeps a fitted 2D camera and falls back to `enter_3d(None)` in 3D; a
+    // conic-only scene has 3D bounds but no 2D vertex fit.
+    if fitted.plan.is_none() && fitted.bounds3.is_none() {
+        return Err(CadError::InvalidInput("no drawable geometry to render".into()).into());
     }
-    let (min_x, min_y, max_x, max_y) =
-        fit.ok_or_else(|| CadError::InvalidInput("no drawable geometry to render".into()))?;
-
     let width = invocation.render_width;
     let height = invocation.render_height;
-    let span_x = (max_x - min_x).abs();
-    let span_y = (max_y - min_y).abs();
-    let world_per_px = (span_x / (width as f64 * 0.9))
-        .max(span_y / (height as f64 * 0.9))
-        .max(1e-9);
-    let camera = Camera2d {
-        center: Point3 {
-            x: (min_x + max_x) / 2.0,
-            y: (min_y + max_y) / 2.0,
-            z: 0.0,
-        },
-        world_per_px,
-        z_plane: 0.0,
-    };
 
     let HeadlessGpu {
         device,
@@ -169,6 +153,11 @@ pub(crate) fn render_document(
     // Headless evidence waits longer instead of misreporting a device loss.
     renderer.set_poll_timeout(std::time::Duration::from_secs(600));
     renderer.initialize_with_device(device, queue)?;
+    // PBR environment lighting for this frame: the session's own switch (IBL by
+    // default) unless `--legacy-shading` asks for the pre-IBL single-light path.
+    // This is what makes a metallic asset readable at all in a headless frame.
+    let ibl_enabled = !invocation.legacy_shading && controller.ibl_enabled();
+    renderer.set_ibl_enabled(ibl_enabled);
     // A budget or device-OOM refusal is reported with its own machine code and
     // exit 7 — never flattened into a generic GPU failure, never a blank PNG.
     if let Err(error) = renderer.upload(&delta) {
@@ -192,7 +181,17 @@ pub(crate) fn render_document(
         Err(error) => return Err(staging_error(&renderer, error)),
     };
     let target = RenderTarget::new(width, height);
-    let frame = renderer.render(camera, &target).map_err(render_error)?;
+    // The camera choice and the frame itself live in `camera::render_frame`:
+    // the default is the unchanged 2D plan frame, while a requested view builds
+    // the app's 3D camera state and renders the perspective frame.
+    let (frame, camera_json) = camera::render_frame(
+        &mut renderer,
+        &target,
+        requested_view,
+        fitted.plan,
+        fitted.bounds3,
+        invocation.view_fov_degrees,
+    )?;
     // Fallbacks are recorded **at draw time** (a batch whose key was not
     // resident), so they can only be read after the frame was encoded.
     let mesh_fallbacks = renderer.mesh_texture_fallbacks().to_vec();
@@ -234,6 +233,7 @@ pub(crate) fn render_document(
         "width": width,
         "height": height,
         "png": png_json,
+        "camera": camera_json,
         "pixels": {
             "non_background": non_background,
             "coverage": coverage,

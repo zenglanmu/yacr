@@ -3,6 +3,7 @@
 use super::*;
 
 mod mesh_textures;
+mod render_camera;
 mod texture_images;
 
 /// Serialise headless-device creation inside this test binary.

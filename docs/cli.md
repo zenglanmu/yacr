@@ -29,6 +29,11 @@ cad-cli-tools <operation> <input.dwg> [options]
 | `--plot-format <fmt>` | `plot`：输出格式 `png`（默认，无头 GPU 光栅）\| `svg` \| `pdf`；`svg`/`pdf` 为纯 CPU 矢量路径，不需要 GPU 适配器 |
 | `--width <u32>` | `render`：帧宽（像素，默认 `1280`）；非数字或 `0` 为用法错误 |
 | `--height <u32>` | `render`：帧高（像素，默认 `720`）；非数字或 `0` 为用法错误 |
+| `--view <preset>` | `render`：3D 标准视图 `top\|bottom\|front\|back\|left\|right\|isometric`（大小写不敏感）；省略时保持 2D 平面视图 |
+| `--azimuth <deg>` | `render`：3D 环绕方位角，`-360..=360`（CAD `+Z` 朝上坐标系）；必须与 `--elevation` 同时给出，且与 `--view` 互斥；越界/非有限为用法错误（不钳制） |
+| `--elevation <deg>` | `render`：3D 环绕仰角，`-90..=90`；必须与 `--azimuth` 同时给出 |
+| `--fov <deg>` | `render`：3D 视图的垂直视场角，`1..=179`（默认 `45`）；没有 `--view` 或 `--azimuth`/`--elevation` 时给出为用法错误（不静默忽略） |
+| `--legacy-shading` | `render`：本帧关闭 IBL（`renderer.set_ibl_enabled(false)`），走旧版单光源 PBR；不给出时使用会话默认（IBL 开启） |
 | `--locale <tag>` | **仅**人类 stderr 文字的语言，`zh-CN`（默认）或 `en`；机器输出不变 |
 | `--allow-fingerprint-mismatch` | 图纸指纹不匹配时仍导入批注 |
 | `--gpu <auto\|high\|low>` | `render`/`plot` 适配器偏好：`auto`/`high`（默认）优先独显（discrete），`low` 优先核显（integrated）；没有所偏好类型时回退到所选后端的首个适配器；也可用 `WGPU_ADAPTER_NAME`/`WGPU_POWER_PREF` |
@@ -209,6 +214,13 @@ cad-cli-tools <operation> <input.dwg> [options]
   "width": 800,
   "height": 600,
   "png": { "path": "/tmp/frame.png", "bytes": 8903 },
+  "camera": {
+    "mode": "2d",
+    "view": null,
+    "eye": [x, y, z],
+    "target": [x, y, z],
+    "fov_deg": null
+  },
   "pixels": { "non_background": 22381, "coverage": 0.0466, "distinct_colors": 2 },
   "frame": {
     "draw_calls": 11855, "vertices": 26032, "triangles": 0,
@@ -229,6 +241,28 @@ cad-cli-tools <operation> <input.dwg> [options]
 
 - `png` 仅在传入 `--png <file>` 时非 `null`；PNG 只在渲染成功后**原子**写入
   （临时文件 + rename），渲染失败绝不留下半截图片。
+- `camera` 描述本帧实际使用的相机（`schema_version` 仍为 `1`，均为**新增**键）：
+  `mode` 为 `"2d"`（默认平面视图）或 `"3d"`；`view` 是 `--view` 的预设键
+  （`top`…`isometric`），角度模式或 2D 时为 `null`；`eye`/`target` 是相机点，
+  `fov_deg` 是 3D 垂直视场角（度），2D 时为 `null`。2D 相机没有 look-at 眼点，
+  因此 2D 的 `eye` 与 `target` 都报告同一个正交中心点（不是虚构的视点高度）。
+- **3D 视图**：`--view <preset>` 或 `--azimuth`+`--elevation` 选择 3D 方向
+  （预设用 `StandardView::eye_offset()`；角度用
+  `(cos(el)cos(az), cos(el)sin(az), sin(el))`，CAD `+Z` 朝上）。相机按**实际绘制
+  批次**的完整 3D 包围盒（`local_origin + vertex` 的 x/y/z，以及解析圆弧的
+  `world_aabb`）取中心与距离，`camera3d_params()` 推导 near/far 后走
+  `Renderer::render_3d`。仰角接近垂直（`|dir.z| > 0.999`）时 up hint 用 `+Y`，
+  否则为 `+Z`；预设沿用 `StandardView::up_hint()`。3D 包围盒缺失（没有有限 z 的
+  几何）时用 `Camera::enter_3d(None, fov)` 的空模型回退，绝不产生 NaN 相机；完全没有
+  可绘制几何仍是 `invalid_input`（不是空成功）。
+- **PBR 环境光（IBL）**：`render` 默认按会话默认启用 IBL（`controller.ibl_enabled()`，
+  默认为开），这也是金属材质在无头帧里可见的前提；`--legacy-shading` 对本帧调用
+  `Renderer::set_ibl_enabled(false)`，回到旧版单光源路径。该开关只影响亮度通道，
+  不改变相机/几何/像素统计契约；`plot` 路径不受影响。
+- `--view`/`--azimuth`/`--elevation`/`--fov` 的组合错误是**用法错误**（退出 `2`，
+  code `usage`），在执行导入或任何 GPU 工作之前拒绝：`--view` 与角度互斥、
+  `--azimuth`/`--elevation` 必须成对、裸 `--fov` 不接受、数值越界不钳制。
+  没有这些开关时 2D 平面路径与既有像素输出保持不变（除 IBL 按会话默认为开）。
 - `mesh_textures` 是网格基色纹理（`cad:Mesh.texture`，ADR-0038 D9/D10）的
   **成帧事实**：`requested` 是驻留批次引用的去重键，`uploaded` 是成为设备纹理的
   数量，`unresolved`/`fallbacks` 是没上传成功的键（`unresolved` = 解码缓存里没有；
@@ -331,6 +365,16 @@ wasm 下 `plot`（含矢量）仍为 `unsupported`：该 CLI 宿主没有自己�
 - `render_on_empty_drawing_is_an_input_error_not_empty_success`：无可绘制边界时
   退出 `1`、code `invalid_input`，不是空成功。
 - `render_zero_width_is_a_usage_error`：`--width 0` 退出 `2`、code `usage`。
+- `render_view_flags_parse_and_inconsistent_combinations_are_usage_errors`：
+  `--view`/`--azimuth`/`--elevation`/`--fov`/`--legacy-shading` 的一致组合可解析；
+  未知预设、单侧角度、`--view` 与角度并用、裸 `--fov`、越界 `--fov`/角度均退出 `2`、
+  code `usage`；全部在打开图纸之前拒绝。
+- `crates/cad-cli-tools/src/tests/render_camera.rs`（crate 内单元/契约）：
+  每个 `--view` 预设的大小写解析、角度方向/up hint 的 CAD `+Z` 约定、
+  `requested_view` 的拒绝矩阵；`oblique_views_render_a_real_angle_dependent_3d_projection`
+  用一个有真实 z 延伸的楔形网格，证明 `--azimuth 0/90 + --elevation 20` 与
+  `--view isometric` 的三维帧彼此不同、且都不同于 2D 平面帧，`camera.mode = "3d"`。
+  该用例需要真实适配器，无适配器时打印 `SKIP ... NOT a pass`（不是通过）。
 - `render_without_png_still_returns_structured_json`（需 `YACR_TEST_DWG` 指向真实
   DWG，否则打印跳过并返回）：退出 `0`、stdout 纯 JSON、`adapter.backend` 非空、
   `pixels.non_background > 0`；传 `--png <tmp>` 时 PNG 以 `\x89PNG\r\n\x1a\n`
