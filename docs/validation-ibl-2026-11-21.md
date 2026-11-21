@@ -107,3 +107,30 @@ ordered.len()`）时下一帧被规划成**零批次**，屏幕上保留旧像�
 3. 逐载体登记：Windows/macOS/Android/Web 的 IBL 结论一律先写"仅编译 / 仅契约 /
    NOT VERIFIED"，直到有对应载体运行证据。
 4. 评估把会话令牌聚成 `SessionToggles`（ADR-0044 §5 的重构项），避免 `assemble_status` 参数继续膨胀。
+
+## 6. HDR 环境与色调映射（同日追加，ADR-0044 §6）
+
+程序化天空改为 HDR 波段 + 太阳盘/光晕，IBL 分支输出加 ACES 拟合曲线与具名曝光
+（`IBL_EXPOSURE = 2.2`）；**IBL 关闭路径逐字不变**（`tonemapping_is_ibl_only` 契约锁定）。
+
+`cad-cli-tools render DamagedHelmet.gltf --width 1600 --height 1200 --view isometric`，
+真实 GPU（Quadro P620 / Vulkan `580.178.04`），模型区域（非背景 265 477 px）：
+
+| 指标 | 改前（LDR） | 改后（HDR + ACES） |
+|---|---|---|
+| mean | 0.167 | **0.366** |
+| median | 0.140 | 0.323 |
+| p95 | 0.388 | **0.869** |
+| p99 | 0.667 | 0.972 |
+| > 0.6 | 3.40 % | 11.69 % |
+| > 0.9 | 0.00 % | **4.33 %** |
+| > 0.99 | 0.00 % | 0.01 % |
+
+未达成的子项（诚实记录）：最亮的"纯白漆"40 px 窗口 `p95−mean` 只有 **0.010**（目标 ≥0.20）。
+原因是该资产白漆在曝光前已在 ACES 肩部（≈0.9 scene-linear），大面均匀天空无法同时满足
+"模型均值 ≥0.33" 与"白漆留在中间调"。要真正达到参考图的观感需要**小立体角的 HDR 影棚环境/
+面积光**（ADR-0044 D1/§2 已否决的资产式路线），不是继续调常数。
+
+运行的检查：`cargo test -p cad-render-wgpu --lib`（361 passed，GPU 用例实跑）、
+`--test wgsl_validation`（14 passed）、clippy `-D warnings`、fmt、file-size 均通过。
+其它平台与多适配器仍为 **NOT VERIFIED**。

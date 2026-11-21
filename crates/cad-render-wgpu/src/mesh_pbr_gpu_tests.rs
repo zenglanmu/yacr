@@ -16,6 +16,17 @@
 //! 5. Degenerate UVs disable the normal-map channel instead of inventing a
 //!    tangent, and the event is counted.
 //!
+//! ADR-0044 adds the procedural IBL contracts: an unlit metal is not black, the
+//! roughness selects the environment lobe, occlusion scales the indirect term,
+//! the IBL-off path is the legacy lighting byte for byte, the per-frame switch
+//! reshades the next frame, and (ADR-0044 §6) the HDR environment's **filmic
+//! curve runs on the IBL path only**.
+//!
+//! These bind a real device. The environment is now HDR (~2.2× the legacy sky
+//! energy) and the IBL path applies `tonemap_aces(rgb * IBL_EXPOSURE)`, so an
+//! expectation stated in the readback's units has to go through the same curve:
+//! `srgb_byte(aces(linear * IBL_EXPOSURE))`.
+//!
 //! Run serially (these bind a real device):
 //!
 //! ```text
@@ -36,6 +47,9 @@ const MR_KEY: &str = "11111111111111111111111111111111.png";
 const NORMAL_KEY: &str = "22222222222222222222222222222222.png";
 const EMISSIVE_KEY: &str = "33333333333333333333333333333333.png";
 const OCCLUSION_KEY: &str = "44444444444444444444444444444444.png";
+/// A dark base colour, so a metal's `f0` stays on the rising part of the IBL
+/// display curve instead of its shoulder (see `ibl_roughness_selects_...`).
+const DARK_BASE_KEY: &str = "55555555555555555555555555555555.png";
 
 pub(crate) fn gpu_or_skip(what: &str) -> Option<HeadlessGpu> {
     match create_headless_gpu(BackendPreference::Auto) {
@@ -437,6 +451,24 @@ pub(crate) fn srgb_byte(linear: f32) -> f32 {
     (encoded * 255.0).round()
 }
 
+/// The IBL display transform, mirrored from `mesh_pbr.wgsl`
+/// (`IBL_EXPOSURE` + `tonemap_aces`). Duplicated deliberately: these are the
+/// numbers ADR-0044 §6 fixes, and a test that re-derived them from the shader
+/// could not notice the shader changing them.
+const IBL_EXPOSURE: f32 = 2.2;
+
+/// `tonemap_aces(x)` from `mesh_pbr.wgsl`: the ACES fit, clamped to `[0, 1]`.
+fn aces(x: f32) -> f32 {
+    let v = x * (2.51 * x + 0.03) / (x * (2.43 * x + 0.59) + 0.14);
+    v.clamp(0.0, 1.0)
+}
+
+/// The readback byte a **scene-linear** IBL value must produce after the sRGB
+/// encode: `rgb = tonemap_aces(scene * IBL_EXPOSURE)` runs before the write.
+fn ibl_byte(scene_linear: f32) -> f32 {
+    srgb_byte(aces(scene_linear * IBL_EXPOSURE))
+}
+
 #[test]
 fn metal_is_not_black_with_ibl_on() {
     let Some(gpu) = gpu_or_skip("IBL metal") else {
@@ -477,23 +509,37 @@ fn ibl_roughness_selects_the_specular_lobe() {
     let mut renderer = init(&gpu);
     renderer.set_ibl_enabled(true);
 
-    let sharp = draw(
-        &mut renderer,
-        &pbr_quad([0.0, 0.0, -1.0], unit_uvs(), scalar(1.0, 0.05, [0.0; 3])),
-        &DecodedImageCache::new(),
-    );
-    let diffuse_like = draw(
-        &mut renderer,
-        &pbr_quad([0.0, 0.0, -1.0], unit_uvs(), scalar(1.0, 0.9, [0.0; 3])),
-        &DecodedImageCache::new(),
-    );
+    // A **dark** metal (`f0 = base ≈ 0.15` linear) rather than a white one: the
+    // HDR environment's energy pushes a white `f0` past the top of the display
+    // curve, where ACES flattens both lobes into the same byte (~252 vs ~246) and
+    // the contract could not see the difference. A dark `f0` sits on the rising
+    // part of the curve, so the two lobes stay separable.
+    let cache = texture_cache(&[(DARK_BASE_KEY, [110, 110, 110, 255])]);
+    let rough_metal = |roughness: f32| {
+        let mut batch = pbr_quad(
+            [0.0, 0.0, -1.0],
+            unit_uvs(),
+            scalar(1.0, roughness, [0.0; 3]),
+        );
+        batch.texture = Some(ResourceKey(DARK_BASE_KEY.to_owned()));
+        batch
+    };
+    // A `-Z` normal mirrors `+Z` into the **horizon** band (plus the sun glow),
+    // while its cosine irradiance is the darker horizon/ground mix. A mirror lobe
+    // keeps the bright horizon line, a rough lobe is pulled `r²` toward that
+    // irradiance.
+    let sharp = draw(&mut renderer, &rough_metal(0.05), &cache);
+    let diffuse_like = draw(&mut renderer, &rough_metal(0.9), &cache);
 
-    // A mirror lobe samples the horizon band; a rough lobe is pulled `r²` toward
-    // the cosine-weighted irradiance, which is the (much darker) ground mix for a
-    // `-Z` normal. The two must not collapse to the same reflect.
     assert!(
         (luma(sharp) - luma(diffuse_like)).abs() > 20.0,
-        "roughness must select the environment lobe: sharp={sharp:?} \
+        "roughness must select the environment lobe (the two must not collapse \
+         to the same reflect): sharp={sharp:?} rough={diffuse_like:?}"
+    );
+    assert!(
+        luma(sharp) > luma(diffuse_like),
+        "the mirror lobe keeps a reflected horizon line, the rough lobe converges \
+         on the cosine-weighted irradiance: sharp={sharp:?} \
          rough={diffuse_like:?}"
     );
 }
@@ -574,6 +620,131 @@ fn ibl_off_matches_the_legacy_lighting() {
     assert!(
         (luma(ibl) - luma(first)).abs() > 5.0,
         "enabling IBL must change the shaded result: legacy={first:?} ibl={ibl:?}"
+    );
+}
+
+// --- IBL-only display transform (ADR-0044 §6) -------------------------------
+
+/// An **emissive-only** surface: a `-Z` vertex normal makes `n_dot_l = 0`, so
+/// both direct lobes vanish, and `ao = 0` (`strength = 1` plus a black occlusion
+/// texel) removes every indirect term. `lit` is then exactly the emissive level,
+/// which turns "did the display curve run?" into a closed-form byte comparison
+/// instead of a picture judgement.
+///
+/// The emissive texture is bound but contributes the identity (white), so
+/// `emissive = camera.pbr_emissive = level` in scene-linear units.
+fn emissive_only(level: f32) -> RenderBatch {
+    let mut material = scalar(0.0, 0.5, [level; 3]);
+    material.emissive_texture = Some(ResourceKey(EMISSIVE_KEY.to_owned()));
+    material.occlusion_strength = 1.0;
+    material.occlusion = Some(ResourceKey(OCCLUSION_KEY.to_owned()));
+    pbr_quad([0.0, 0.0, -1.0], unit_uvs(), material)
+}
+
+fn emissive_cache() -> DecodedImageCache {
+    texture_cache(&[
+        // White emission: the identity on the emissive factor.
+        (EMISSIVE_KEY, [255, 255, 255, 255]),
+        // `ao = 1 + 1 * (0 - 1) = 0`: the environment contributes nothing.
+        (OCCLUSION_KEY, [0, 0, 0, 255]),
+    ])
+}
+
+/// ADR-0044 §6: the filmic curve belongs to the **IBL path only**.
+///
+/// The environment is HDR, so the IBL branch applies
+/// `tonemap_aces(rgb * IBL_EXPOSURE)` before the sRGB write. The legacy (IBL off)
+/// branch must stay byte-identical to ADR-0039 D6 (raw linear → sRGB), and the
+/// curve must be monotonic and bounded on the IBL side. The fixture is
+/// emissive-only, so the input is exact.
+#[test]
+fn tonemapping_is_ibl_only() {
+    let Some(gpu) = gpu_or_skip("IBL-only tonemapping") else {
+        return;
+    };
+    let mut renderer = init(&gpu);
+    let cache = emissive_cache();
+
+    // --- IBL off: the legacy convention, byte for byte (and no curve).
+    renderer.set_ibl_enabled(false);
+    let legacy_mid = draw(&mut renderer, &emissive_only(0.25), &cache);
+    let legacy_expected = srgb_byte(0.25);
+    for (channel, value) in ["r", "g", "b"].iter().zip(&legacy_mid[..3]) {
+        assert!(
+            (f32::from(*value) - legacy_expected).abs() <= 1.0,
+            "IBL off must keep the raw linear→sRGB convention (ADR-0039 D6): \
+             channel {channel} = {value}, expected {legacy_expected:.1} for a \
+             0.25 scene-linear emissive, frame {legacy_mid:?}"
+        );
+    }
+    // The same scene-linear value *through* the curve is a different byte (~214):
+    // if the curve leaked into the legacy branch, this is where it would show.
+    let curved = ibl_byte(0.25);
+    assert!(
+        (f32::from(legacy_mid[1]) - curved).abs() > 20.0,
+        "the IBL display curve must not run with IBL off: got {legacy_mid:?}, \
+         the tone-mapped value would be {curved:.1}"
+    );
+
+    // --- IBL on: the curve runs, stays monotonic, and saturates at 1.0.
+    //
+    // The upload gate refuses an emissive factor outside `[0, 1]` (defensive
+    // last line, `pbr_is_uploadable`), so "above 1" scene-linear has to come from
+    // the curve's own domain: a 1.0 input is exactly where the raw convention
+    // clips and the filmic curve must not.
+    renderer.set_ibl_enabled(true);
+    let mid_low = draw(&mut renderer, &emissive_only(0.10), &cache);
+    let mid_high = draw(&mut renderer, &emissive_only(0.25), &cache);
+    let bright = draw(&mut renderer, &emissive_only(1.0), &cache);
+
+    // Monotonic: `x1 < x2 ⇒ out(x1) <= out(x2)`.
+    assert!(
+        luma(mid_low) <= luma(mid_high),
+        "a brighter scene-linear input must never come out darker: \
+         x=0.10 {mid_low:?} vs x=0.25 {mid_high:?}"
+    );
+    assert!(
+        luma(mid_low) < luma(mid_high),
+        "the curve must be strictly increasing where it is not clamped: \
+         x=0.10 {mid_low:?} vs x=0.25 {mid_high:?} (mid-tones collapsed)"
+    );
+    assert!(
+        luma(mid_high) <= luma(bright),
+        "the shoulder must not invert: x=0.25 {mid_high:?} vs x=1.0 {bright:?}"
+    );
+    // The readback is 8-bit, so the *encoded* bound is structural; the bound that
+    // matters is the curve's. A scene-linear 1.0 goes through the shoulder (≈0.93)
+    // instead of clipping onto the ceiling: that is what the raw convention would
+    // do, and it is how this contract tells "curve" from "no curve" near the top.
+    assert!(
+        luma(bright) < 255.0 && luma(bright) > luma(mid_high) + 10.0,
+        "a 1.0 scene-linear input must ride the shoulder below the ceiling: \
+         {bright:?} (mid {mid_high:?})"
+    );
+    // The bound itself is the curve's clamp, stated analytically on the same
+    // formula the shader runs: no input can leave `[0, 1]`.
+    assert_eq!(aces(1.0e9), 1.0, "the ACES fit must clamp at 1.0");
+    assert_eq!(ibl_byte(1.0e9), 255.0);
+    assert!(ibl_byte(1.0) < 255.0, "1.0 must not clip onto the ceiling");
+    // A mid input must stay off the ceiling: the curve is not a step.
+    assert!(
+        luma(mid_high) < 250.0,
+        "a mid scene-linear input must stay below the ceiling: {mid_high:?}"
+    );
+    // And the curve is actually applied to the IBL path: the mid input is lifted
+    // onto the filmic shoulder rather than passed through linearly.
+    assert!(
+        luma(mid_high) > luma(legacy_mid) + 20.0,
+        "the IBL path must tone-map a mid input (legacy {legacy_mid:?} vs IBL \
+         {mid_high:?})"
+    );
+    assert_eq!(
+        mid_high[3], 255,
+        "the display curve must leave alpha untouched, got {mid_high:?}"
+    );
+    eprintln!(
+        "[mesh-pbr-gpu] tonemap: legacy 0.25 -> {legacy_mid:?}; IBL 0.10 / 0.25 / \
+         1.0 -> {mid_low:?} / {mid_high:?} / {bright:?}"
     );
 }
 

@@ -30,12 +30,15 @@ pub(crate) const MESH_MERGED_SHADER: &str = include_str!("../../shaders/mesh_mer
 // Not implemented here: `alphaMode = MASK` cutout, UV1+, per-corner UVs.
 pub(crate) const MESH_TEXTURED_SHADER: &str = include_str!("../../shaders/mesh_textured.wgsl");
 
-// PBR mesh shader (ADR-0039 D6): the separate per-batch channel for a mesh whose
-// `RenderBatch::pbr` declares a metallic-roughness material. Adds UV0 + tangent
-// vertex attributes, group 2 = five channel textures + one sampler, and a
-// Cook-Torrance GGX body against the same single directional light. The untextured
-// and textured channels are untouched. Not implemented: IBL, shadows, tonemap,
-// `KHR_materials_*`, MASK cutout, UV1+.
+// PBR mesh shader (ADR-0039 D6, ADR-0044): the separate per-batch channel for a
+// mesh whose `RenderBatch::pbr` declares a metallic-roughness material. Adds UV0 +
+// tangent vertex attributes, group 2 = five channel textures + one sampler, and a
+// Cook-Torrance GGX body against the same single directional light. With the
+// `IBL` switch on (ADR-0044) it also evaluates a procedural HDR environment
+// (sun disc + glow + split-sum) and tone-maps its own output; with it off the
+// shading is the original ADR-0039 D6 expression, byte for byte. The untextured
+// and textured channels are untouched. Not implemented: shadows, multiple
+// lights, `KHR_materials_*`, MASK cutout, UV1+.
 pub(crate) const MESH_PBR_SHADER: &str = include_str!("../../shaders/mesh_pbr.wgsl");
 
 // Accelerated (vertex-pulling) merged-mesh shader: one indexed draw covers

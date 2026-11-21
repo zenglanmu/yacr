@@ -226,3 +226,78 @@ PBR 网格会被导航 LOD 误当成文字隐藏。
   混在同一个可回退单元里。
 - **证据状态**：所有验证**待补**（`docs/validation-ibl-2026-11-21.md` 全部 NOT RUN）。
   真实 GPU、Metal、DX12、Android/Vulkan、浏览器 GPU 一律 **NOT VERIFIED**。
+
+---
+
+## 6. 修订（2026-11-21，HDR 环境与色调映射）
+
+本条修订 §1 D2 的两处措辞，其余决策（D1、D3–D6、§2、§3）**不变**：环境仍是 WGSL 内联的解析
+函数，仍无资产、无 cubemap、无预滤波 pass、无新 binding、无 uniform 布局变化。
+
+### 6.1 环境改为 HDR（含太阳盘与辉光）
+
+`mesh_pbr.wgsl` 的解析天空从 LDR 改为 **HDR**，仍是纯 ALU 的确定性函数（无纹理、无循环）：
+
+| 常量 | 值（线性 RGB） | 亮度 |
+|---|---|---|
+| `SKY_ZENITH` | `(1.35, 1.70, 2.20)` | ≈1.66（偏冷） |
+| `SKY_HORIZON` | `(1.45, 1.32, 1.18)` | ≈1.34（偏暖） |
+| `SKY_GROUND` | `(0.33, 0.30, 0.26)` | ≈0.30 |
+| `SUN_DISC_POWER` / `SUN_DISC_INTENSITY` | `900` / `60` | 窄太阳盘，暖白 `(1.00, 0.94, 0.85)` |
+| `SUN_GLOW_POWER` / `SUN_GLOW_INTENSITY` | `24` / `2.4` | 宽辉光，同一暖白 |
+
+- **原因（可测量的缺陷，不是观感偏好）**：LDR 天空（亮度约 0.6–0.7）没有任何方向能接近显示上限，
+  所以低粗糙度金属**没有真正的镜面峰**，反射里的地平线读不出来，白色漆面也永远不出现高光。
+  实测 `DamagedHelmet` 等距视图：模型均值亮度 0.167、p95 0.388、>0.9 的像素仅 0.005%，白漆窗口
+  `p95 − mean` 只有 0.04–0.07（参考实现同一视图约 0.428）。
+- `sky_irradiance` 同步升到同一能量级：仍是余弦瓣的解析拟合（半球坡，形状不变），但不再停在 LDR
+  数值。**太阳盘与辉光不计入漫反射辐照度**——它们的能量已经是直接光 `camera.light`，
+  折进间接漫反射就是重复计能。
+- 环境仍**相机相对**（D6）：太阳沿 `camera.light`，随视角移动。
+
+### 6.2 色调映射只作用于 IBL 分支
+
+IBL 分支在**光照求和之后、写入 sRGB 目标之前**（并在选择/悬停 tint **之前**——那是 UI 颜色，
+不是场景辐亮度）应用 ACES 拟合曲线：
+
+```
+rgb   = lit * vertex_colour * batch_tint
+rgb   = tonemap_aces(rgb * IBL_EXPOSURE)          // IBL_EXPOSURE = 2.2
+tonemap_aces(x) = clamp(x*(2.51x+0.03) / (x*(2.43x+0.59)+0.14), 0, 1)
+```
+
+- `IBL_EXPOSURE` 是**命名常量**，也是唯一旋钮。它不是相机 f-stop：PBR 路径的漫反射沿用
+  ADR-0039 的 `albedo * n_dot_l`（没有 1/π）显示约定，因此需要这个场景线性补偿量。
+- **alpha 不变**；曲线写在 sRGB 目标之前，`Rgba8UnormSrgb` 的编码仍是最后一次写入变换。
+- **IBL 开启时跳过 ink-flip 的规则不变**（D2 的例外）；legacy 分支的 ink-flip 逐字保留。
+
+### 6.3 收窄 D2/D6 声明的「不做 tonemap」
+
+D2 原文「**不做 tonemap / exposure**」收窄为：**legacy（IBL OFF）路径与所有非 PBR 通道**
+（`mesh`/`mesh_textured`/`mesh_merged`/`mesh_pulled`、线、文字、图像、掩膜）仍**不做**
+tonemap/exposure，输出与 ADR-0039 D6 逐字节一致；**只有 IBL 路径**做 6.2 的曲线。D6 表格里
+「tonemap / exposure」一行按同一收窄理解（不再是一刀切）。
+
+### 6.4 契约测试的变化
+
+| 用例 | 断言 |
+|---|---|
+| `tonemapping_is_ibl_only`（**新增**） | 自发光夹具（`-Z` 法线 + `ao = 0` ⇒ `lit == emissive` 精确）：IBL OFF 时逐字节等于线性→sRGB 闭式值，且**不等于**曲线值（曲线不得泄漏）；IBL ON 时 x1<x2 ⇒ out(x1)≤out(x2)，1.0 的输入落在肩部（<255，而非直接削平），曲线 clamp 保证任何输入都在 `[0,1]`，alpha 不变 |
+| `ibl_roughness_selects_the_specular_lobe`（重推） | 改用**暗 `f0`** 的金属夹具：白 `f0` 在 HDR 下被推到曲线肩部后，两个瓣会落进同一字节（≈252 vs ≈246），契约看不出差异；暗 `f0` 让镜面瓣（反射地平线）与粗糙瓣（余弦辐照度）仍可区分 |
+| `metal_is_not_black_with_ibl_on` / `ibl_occlusion_scales_the_indirect_term` / `ibl_toggle_reshades_*` | 意图不变，阈值按 HDR + 曲线重推（`ibl_luma > 0.05` 等仍然成立） |
+| `ibl_off_matches_the_legacy_lighting` | 闭式期望 `srgb_byte(AMBIENT)` 不变：曲线不得泄漏到 legacy |
+
+### 6.5 已知残余（本修订不做）
+
+- **均匀亮天空 ≠ 真实 studio HDR**：本环境是**大面积均匀**亮天空，漫反射辐照度高，因此
+  **全亮**的白漆会停在曲线肩部（显示值 ~0.97），只有漆面的明暗过渡区才读得到镜面/环境高光。
+  真实 studio HDR 的亮源立体角小，漫反射辐照度低，白漆会留在中灰而高光更锐利。要消除这一差异
+  需要资产式 HDR 或分区光源，属于 D1/§2 明确否决的路线。
+- 仍是**单方向光 + 解析环境**：没有阴影、没有 SSAO、没有多次弹射，粗糙表面的预滤波是解析近似
+  而非真实 mip 链。
+- 曲线是显示变换，不是相机的物理曝光/白平衡模型；不写文档、不进 `.ymodel`、不参与导出。
+
+**证据**：`cargo test -p cad-render-wgpu --lib`（真实 GPU 用例）与
+`cargo test -p cad-render-wgpu --test wgsl_validation`（离线 WGSL 解析）的逐条结果、以及
+HDR/色调映射前后的实测亮度表，记在 `docs/validation-ibl-2026-11-21.md`。这些仍是**数值/公式**
+证据，不是像素、golden、性能或产品验收；Metal/DX12/Android/浏览器 GPU 一律 **NOT VERIFIED**。

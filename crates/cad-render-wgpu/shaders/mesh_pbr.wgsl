@@ -40,9 +40,14 @@
 // `Rgba8UnormSrgb` (the base-colour convention of ADR-0038), so sampling returns
 // linear values. The metallic-roughness, normal and occlusion maps are uploaded
 // as `Rgba8Unorm` — they are linear data, and sRGB-decoding them would corrupt
-// the normal map. The output follows `mesh.wgsl`'s display convention: linear
-// RGB written to an sRGB target, **no tonemap**, and the same near-white
-// light-background ink flip.
+// the normal map.
+//
+// Display transform (ADR-0044 §6): the **legacy** (IBL off) branch keeps
+// `mesh.wgsl`'s convention exactly — linear RGB written to an sRGB target with
+// **no tonemap** and the same near-white light-background ink flip. The **IBL**
+// branch adds an HDR environment (~2–3× the energy of the legacy LDR sky) plus a
+// sun disc, so it applies an ACES-style filmic curve with a named exposure before
+// the sRGB target; see `IBL_EXPOSURE` / `tonemap_aces`.
 //
 // Shading (Cook-Torrance GGX, one directional light — `camera.light.rgb`, the
 // same unit vector toward the light every mesh shader uses):
@@ -57,10 +62,10 @@
 //
 // Indirect lighting (ADR-0044): the `ambient = diffuse * AMBIENT` floor below is
 // the **legacy** ceiling only. When `camera.pbr_eye.w > 0.5` the ambient floor is
-// replaced by a *procedural analytic* environment (a sky gradient plus one sun
-// lobe — no cubemap, no prefiltered mip chain): the mirror direction is shaded by
-// `sky_radiance` (prefiltered toward `sky_irradiance` by `roughness²`) and
-// modulated by a split-sum BRDF approximation, while the diffuse lobe uses the
+// replaced by a *procedural analytic* environment (an HDR sky gradient plus a sun
+// disc and glow — no cubemap, no prefiltered mip chain): the mirror direction is
+// shaded by `sky_radiance` (prefiltered toward `sky_irradiance` by `roughness²`)
+// and modulated by a split-sum BRDF approximation, while the diffuse lobe uses the
 // cosine-weighted `sky_irradiance`. Both indirect terms are scaled by occlusion.
 // That is what stops `metallic = 1` from being black: a metal reflects the
 // environment instead of receiving an albedo-scaled ambient term it never had
@@ -68,16 +73,25 @@
 // light-background ink flip (a bright env reflection on a light background must
 // not be inverted to black); the legacy branch keeps it exactly.
 //
+// The environment is **HDR** (radiance well above 1). `SUN_DISC_*` puts a real
+// specular peak on a smooth metal and a readable reflected horizon; the IBL
+// branch's `tonemap_aces` maps that back into the sRGB target. Without a sun disc
+// an LDR sky makes every reflection look flat: nothing is bright enough to reach
+// the top of the display range, so a white painted surface never shows a
+// highlight.
+//
 // The view vector is the eye position of the frame expressed in the batch's own
 // vertex space (`camera.pbr_eye`), i.e. camera world position minus the batch
 // local origin, so `eye - position` is exact for a perspective 3D camera. When
 // the eye coincides with the surface (the orthographic 2D camera plane) it falls
 // back to the `+Z` axis, which is the axis `camera.light` uses in 2D.
 //
-// Deliberately NOT implemented (ADR-0039 §3): shadows, tonemapping, multiple
-// lights, `KHR_materials_*` extensions, `alphaMode = MASK` cutout, UV1+ and
+// Deliberately NOT implemented (ADR-0039 §3): shadows, multiple lights,
+// `KHR_materials_*` extensions, `alphaMode = MASK` cutout, UV1+ and
 // `KHR_texture_transform`. Image-based lighting **is** implemented (ADR-0044) as
-// the procedural analytic environment above, not as a sampled cubemap.
+// the procedural analytic HDR environment above, not as a sampled cubemap;
+// tonemapping exists **only** on that IBL path (ADR-0044 §6) — the legacy path
+// and every non-PBR channel keep the raw linear→sRGB display convention.
 //
 // WebGL2-safe: five `texture_2d<f32>` + one filtering sampler, an integer
 // `texture_2d<u32>` for the flags table and plain vertex attributes — no storage
@@ -165,14 +179,23 @@ const AMBIENT: f32 = 0.25;
 const MIN_ROUGHNESS: f32 = 0.04;
 
 // --- procedural analytic environment (ADR-0044) -----------------------------
-// Linear RGB, no tonemap: the same display convention as the direct light. The
-// environment is a piecewise sky gradient (zenith / horizon / ground) plus one
-// sun lobe at the frame's key-light direction, so it stays a closed-form
-// function of the direction — no cubemap, no prefiltered mips, no extra binding.
-const SKY_ZENITH:  vec3<f32> = vec3<f32>(0.32, 0.42, 0.62);
-const SKY_HORIZON: vec3<f32> = vec3<f32>(0.60, 0.66, 0.72);
-const SKY_GROUND:  vec3<f32> = vec3<f32>(0.10, 0.10, 0.09);
-const SUN_COLOUR:  vec3<f32> = vec3<f32>(1.00, 0.96, 0.90);
+// Linear RGB **HDR**: radiance deliberately above 1 so an IBL-lit surface can
+// reach the top of the display range (ADR-0044 §6). Luminance of the three bands
+// is ~0.30 (ground) / ~1.34 (horizon) / ~1.66 (zenith); the horizon is warm and
+// the zenith cool. Still a closed-form function of the direction — no cubemap, no
+// prefiltered mips, no extra binding, no loop.
+const SKY_ZENITH:  vec3<f32> = vec3<f32>(1.35, 1.70, 2.20);
+const SKY_HORIZON: vec3<f32> = vec3<f32>(1.45, 1.32, 1.18);
+const SKY_GROUND:  vec3<f32> = vec3<f32>(0.33, 0.30, 0.26);
+// The sun is the frame's key light (`camera.light`, a camera-following headlight),
+// so the analytic sky puts its disc where the direct lobe already points. Two
+// terms: a narrow disc (the specular peak a smooth metal needs) and a wide warm
+// glow (the bounce a rough surface reads as a gradient).
+const SUN_COLOUR:  vec3<f32> = vec3<f32>(1.00, 0.94, 0.85);
+const SUN_DISC_POWER: f32 = 900.0;
+const SUN_DISC_INTENSITY: f32 = 60.0;
+const SUN_GLOW_POWER: f32 = 24.0;
+const SUN_GLOW_INTENSITY: f32 = 2.4;
 
 /// Radiance arriving from `dir` (the mirror direction for a specular lobe).
 fn sky_radiance(dir: vec3<f32>, sun: vec3<f32>) -> vec3<f32> {
@@ -180,16 +203,23 @@ fn sky_radiance(dir: vec3<f32>, sun: vec3<f32>) -> vec3<f32> {
     let above = mix(SKY_HORIZON, SKY_ZENITH, pow(clamp(y, 0.0, 1.0), 0.55));
     var c = select(SKY_GROUND, above, y >= 0.0);
     let s = max(dot(dir, sun), 0.0);
-    c += SUN_COLOUR * (pow(s, 64.0) * 0.60 + pow(s, 8.0) * 0.10);
+    c += SUN_COLOUR * (pow(s, SUN_DISC_POWER) * SUN_DISC_INTENSITY
+        + pow(s, SUN_GLOW_POWER) * SUN_GLOW_INTENSITY);
     return c;
 }
 
-/// Cosine-weighted irradiance for a surface whose normal is `n`: the same sky
+/// Cosine-weighted irradiance for a surface whose normal is `n`: the same HDR sky
 /// gradient, integrated analytically into a smooth hemisphere ramp (the diffuse
-/// lobe's environment term).
+/// lobe's environment term). The sun disc is **not** added here — its energy is
+/// already the direct light `camera.light`, so folding it into the indirect
+/// diffuse term would count it twice.
 fn sky_irradiance(n: vec3<f32>) -> vec3<f32> {
     let t = smoothstep(0.0, 1.0, clamp(n.y * 0.5 + 0.5, 0.0, 1.0));
-    return mix(SKY_GROUND, mix(SKY_HORIZON, SKY_ZENITH, 0.5), t);
+    // The cosine lobe of a horizontal normal sees half sky and half ground, so
+    // even `t = 0.5` keeps a large ground share; only an up-facing normal gets
+    // the full zenith mix.
+    let sky = mix(SKY_HORIZON, SKY_ZENITH, 0.5 + 0.15 * clamp(n.y, 0.0, 1.0));
+    return mix(SKY_GROUND, sky, t);
 }
 
 /// Split-sum DFG approximation (Karis, cheap analytic fit): `x` scales the
@@ -201,6 +231,28 @@ fn env_brdf_approx(roughness: f32, n_dot_v: f32) -> vec2<f32> {
     let r = roughness * c0 + c1;
     let a004 = min(r.x * r.x, exp2(-9.28 * n_dot_v)) * r.x + r.y;
     return vec2<f32>(-1.04, 1.04) * a004 + r.zw;
+}
+
+// --- IBL display transform (ADR-0044 §6) ------------------------------------
+// The HDR environment needs a filmic curve: without one every value above 1
+// clips flat at the sRGB target and a white painted surface shows no highlight.
+// **IBL only** — the legacy branch keeps the raw linear→sRGB convention byte for
+// byte (ADR-0039/ADR-0044 invariant), and non-PBR channels are untouched.
+//
+// Named exposure: a scene-linear multiplier applied before the curve. It is not a
+// camera f-stop — the PBR path's diffuse convention is the legacy one (`albedo *
+// n_dot_l`, no 1/π), so the scene-linear scale needs this compensation before the
+// display-referred curve. Tuning it moves the whole model up or down the curve's
+// shoulder; the shared `IBL_EXPOSURE` is the single place to change.
+const IBL_EXPOSURE: f32 = 2.2;
+
+/// The ACES fitted curve (Narkowicz / Hill fit), clamped to `[0, 1]`:
+/// `x*(2.51x+0.03) / (x*(2.43x+0.59)+0.14)`. Pure ALU, deterministic on every
+/// backend; the clamp also states "display-referred" at the boundary.
+fn tonemap_aces(x: vec3<f32>) -> vec3<f32> {
+    let numerator = x * (2.51 * x + 0.03);
+    let denominator = x * (2.43 * x + 0.59) + 0.14;
+    return clamp(numerator / denominator, vec3<f32>(0.0), vec3<f32>(1.0));
 }
 
 struct VsOut {
@@ -402,8 +454,16 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         lit += base_colour * (1.0 - metallic) * AMBIENT * occlusion;
     }
 
-    let rgb = lit * in.color * camera.tint.rgb;
+    var rgb = lit * in.color * camera.tint.rgb;
     let alpha = base_sample.a * camera.tint.a;
+    // Display transform: the IBL branch is HDR and gets the filmic curve here, on
+    // the lighting result, **before** the selection/hover tint (those are UI
+    // colours, not scene radiance, so they must not be bent by the curve). The
+    // legacy branch is untouched: no exposure, no curve, same expression as
+    // ADR-0039 D6.
+    if (ibl_on) {
+        rgb = tonemap_aces(rgb * IBL_EXPOSURE);
+    }
     let shaded = flag_tint(vec4<f32>(rgb, alpha), key);
     // The IBL branch is a lit environment reflection, not near-white ink: a light
     // background must not invert it to black. The legacy branch keeps the
