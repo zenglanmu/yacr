@@ -24,6 +24,7 @@ import { StartPanel } from './StartPanel.tsx';
 import { PaletteWindow } from './PaletteWindow.tsx';
 import { LayersPalette } from './LayersPalette.tsx';
 import { PropertiesDock } from './PropertiesDock.tsx';
+import { BimPanel } from './BimPanel.tsx';
 import { PluginNoticeHost } from './PluginNoticeHost.tsx';
 import { HostNoticeHost } from './HostNoticeHost.tsx';
 import { UpdateNoticeHost } from './UpdateNoticeHost.tsx';
@@ -34,11 +35,16 @@ import { ReferencesPanel } from './ReferencesPanel.tsx';
 import { FontsPanel } from './FontsPanel.tsx';
 import { useI18n, useShell } from '../context.ts';
 import { palettesOffered, SURFACE_MODE_DOM_CANVAS, surfaceModeFromShell } from '../cad/surface.ts';
+import { closeBimPanel } from '../bim/panel.ts';
+import { useBimPanelOpen } from '../bim/use-bim-panel.ts';
 
 export function Workspace() {
   const { t } = useI18n();
   const shell = useShell();
   const showStart = !shell.documentVisible;
+  // The BIM browse panel is a module-store flag (`bim/panel.ts`) so the ribbon
+  // action, the palette window and the compact sheet all read one owner.
+  const bimOpen = useBimPanelOpen();
   // Whether the desktop palettes exist on the reported carrier. A `dom-canvas`
   // host holds no host-side document state, so it has none of the projections they
   // read: they are not rendered at all rather than as empty panels. The carrier
@@ -49,7 +55,8 @@ export function Workspace() {
   // `HIDEPALETTES` hides the layer, but an explicitly opened palette is a request
   // to see it: a window flag that is set is never allowed to paint nothing.
   const palettesRequested = Boolean(shell.propertiesOpen || shell.layersOpen
-    || shell.fileInfoOpen || shell.diagnosticsOpen || shell.referencesOpen || shell.fontsOpen);
+    || shell.fileInfoOpen || shell.diagnosticsOpen || shell.referencesOpen || shell.fontsOpen
+    || bimOpen);
   const palettesAvailable = palettesOffered(shell)
     && (shell.chromeVisibility.palettes || palettesRequested);
   // The inspector is only meaningful with a drawing open; on the start screen the
@@ -71,6 +78,12 @@ export function Workspace() {
   // list and the panel says "no layers" rather than disappearing after `LAYER`.
   // Closed by default, so the startup partition geometry is unchanged.
   const showLayers = palettesAvailable && Boolean(shell.layersOpen);
+  // The BIM browse panel reads the document (not a selection), so it is offered
+  // on the start page too: with no session the query refuses `cad_waiting` or
+  // `unsupported-runtime: bimQuery` and the panel says so instead of vanishing.
+  // It renders on exactly one band at a time: the desktop palette window, or the
+  // compact bottom sheet below (never both, so one panel store is not duplicated).
+  const showBim = palettesAvailable && bimOpen;
   // The left column is now the start screen's alone. Palettes live in the
   // floating layer below, so no palette flag may widen the partition.
   const leftOpen = showStart;
@@ -143,8 +156,22 @@ export function Workspace() {
               <FontsPanel />
             </PaletteWindow>
           ) : null}
+          {showBim && !shell.mobile ? (
+            <PaletteWindow windowKey="bim" initialIndex={6}>
+              <BimPanel />
+            </PaletteWindow>
+          ) : null}
         </div>
       </div>
+      {/* The compact BIM sheet: the same panel as a bottom sheet, because the
+          compact layout hides `.palette-layer`. Its backdrop is a real button
+          (a press closes the sheet) and the panel owns Escape while focused. */}
+      {showBim && shell.mobile ? (
+        <div className="bim-layer">
+          <button type="button" className="bim-layer__backdrop" aria-label={t('bim.close')} onClick={closeBimPanel} />
+          <BimPanel variant="floating" />
+        </div>
+      ) : null}
       <NavigationDock />
       <PluginNoticeHost />
       <HostNoticeHost />

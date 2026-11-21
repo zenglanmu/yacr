@@ -34,6 +34,7 @@ struct Queues {
     layer_writes: std::collections::VecDeque<CadLayerWrite>,
     api_calls: std::collections::VecDeque<crate::session::CadApiSubmission>,
     api_results: Vec<crate::session::CadApiOutcome>,
+    selection_requests: std::collections::VecDeque<Vec<super::super::EntityId>>,
     commands: Vec<String>,
     cad_mode: bool,
     modal_open: bool,
@@ -52,6 +53,7 @@ impl Queues {
             layer_writes: std::collections::VecDeque::new(),
             api_calls: std::collections::VecDeque::new(),
             api_results: Vec::new(),
+            selection_requests: std::collections::VecDeque::new(),
             commands: Vec::new(),
             cad_mode,
             modal_open,
@@ -74,6 +76,7 @@ impl Queues {
                 layer_writes: &mut self.layer_writes,
                 api_calls: &mut self.api_calls,
                 api_results: &mut self.api_results,
+                selection_requests: &mut self.selection_requests,
             },
         )
     }
@@ -466,4 +469,143 @@ fn the_orbit_channel_is_gated_bounded_and_carries_the_delta_verbatim() {
         "CAD is disabled in probe mode"
     );
     assert!(probe.orbits.is_empty(), "a gated refusal queues nothing");
+}
+
+// --- cad_select_entities (the BIM panel's selection replacement) ------------
+
+/// The replace-selection channel: the ack is the frozen `{accepted:true}` and the
+/// ids travel verbatim onto the desktop queue (no clamp, no rewrite).
+#[test]
+fn select_entities_queues_the_ids_and_answers_the_frozen_ack() {
+    let mut queues = Queues::new(true, false);
+    {
+        let mut sink = queues.sink();
+        let ack = wire::select_entities(&mut sink, vec![7, 9]).expect("two real ids");
+        assert!(ack.accepted);
+        assert_eq!(
+            serde_json::to_value(ack).expect("serializes"),
+            serde_json::json!({"accepted": true}),
+            "the wire answer is `{{accepted:true}}`, not a count"
+        );
+        assert_eq!(sink.pending(Channel::Selection), 1);
+    }
+    assert_eq!(
+        queues.selection_requests.front(),
+        Some(&vec![super::super::EntityId(7), super::super::EntityId(9)]),
+        "the ids are carried verbatim, in the caller's order"
+    );
+}
+
+/// An **empty** request is refused by name and queues nothing: it is a malformed
+/// request, never "clear the selection".
+#[test]
+fn an_empty_selection_request_is_refused_and_queues_nothing() {
+    let mut queues = Queues::new(true, false);
+    {
+        let mut sink = queues.sink();
+        assert_eq!(
+            wire::select_entities(&mut sink, Vec::new()).unwrap_err(),
+            super::super::SELECTION_EMPTY
+        );
+        assert_eq!(super::super::SELECTION_EMPTY, "selection.empty");
+        assert_eq!(
+            sink.pending(Channel::Selection),
+            0,
+            "a refused request never reaches the queue"
+        );
+    }
+    assert!(queues.selection_requests.is_empty());
+}
+
+/// The shared gates apply in the same order as every other CAD mutation, and the
+/// selection channel has no content-dependent escape.
+#[test]
+fn select_entities_is_gated_by_the_modal_popup_then_probe_mode() {
+    let mut modal = Queues::new(true, true);
+    let mut sink = modal.sink();
+    assert_eq!(
+        wire::select_entities(&mut sink, vec![1]).unwrap_err(),
+        "popup.modal_open"
+    );
+
+    let mut probe = Queues::new(false, false);
+    let mut sink = probe.sink();
+    assert_eq!(
+        wire::select_entities(&mut sink, vec![1]).unwrap_err(),
+        "CAD is disabled in probe mode"
+    );
+    assert!(probe.selection_requests.is_empty());
+}
+
+/// A sink with **no** selection lane refuses with the stable marker; the wire
+/// never turns that into an acknowledgement.
+#[test]
+fn a_sink_without_a_selection_lane_refuses_with_the_stable_marker() {
+    let mut sink = NoSelectionSink;
+    assert_eq!(
+        wire::select_entities(&mut sink, vec![1]).unwrap_err(),
+        wire::SELECT_UNAVAILABLE
+    );
+    assert_eq!(
+        wire::SELECT_UNAVAILABLE,
+        "unsupported-runtime: cad_select_entities"
+    );
+}
+
+/// The minimal [`AdmissionTarget`] of a host that serves no typed CAD mutation:
+/// only the required methods exist, so `select_entities` is the trait default.
+struct NoSelectionSink;
+
+impl AdmissionTarget for NoSelectionSink {
+    fn cad_mode(&self) -> bool {
+        true
+    }
+
+    fn modal_open(&self) -> bool {
+        false
+    }
+
+    fn pending(&self, _channel: Channel) -> usize {
+        0
+    }
+
+    fn command(&mut self, _normalized: String) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn tool_parameter(
+        &mut self,
+        _parameter: cad_app::ToolParameter,
+        _value: ToolValue,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn tool_text(&mut self, _text: String) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn selected_text(&mut self, _text: String) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn selected_property(&mut self, _key: String, _value: String) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn standard_view(&mut self, _view: StandardView) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn orbit(&mut self, _delta: OrbitDelta) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn setting(&mut self, _key: CadSettingKey, _value: CadSettingValue) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn layer_write(&mut self, _write: CadLayerWrite) -> Result<(), String> {
+        Ok(())
+    }
 }

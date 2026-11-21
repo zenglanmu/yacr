@@ -37,6 +37,7 @@ use cad_domain::{CadResult, DocumentIdentity, Revision, SpaceId, UnitContext};
 
 use super::bim;
 use super::elements;
+use super::relations;
 use super::resources;
 use super::tables;
 use super::variables;
@@ -93,6 +94,12 @@ impl DrawingDatabase {
         if !self.bim_definitions.is_empty() {
             tables.set(TableKind::BimDefinitions, bim::encode_definitions(self)?);
         }
+        // ADR-0042 D3 tail/D12: the relation table exists **only** when it holds
+        // rows. Same rule as the definition table: no data, no table, no minor
+        // bump. When it is written the document is minor 7 (`has_bim`).
+        if !self.bim_relations.is_empty() {
+            tables.set(TableKind::BimRelations, relations::encode_relations(self)?);
+        }
         Ok(DocumentSnapshot {
             header,
             revision,
@@ -129,6 +136,16 @@ impl DrawingDatabase {
             checked(
                 builder.set_bim_definitions(bim_definitions),
                 "tables/bim-definitions.json",
+            )?;
+        }
+        // Relation rows have no dangling-reference rule (an endpoint may name a
+        // product with no geometry row), so they are decoded and installed
+        // before the element loop as well; the codec owns shape and budget.
+        let bim_relations = relations::decode_relations(&snapshot.tables)?;
+        if !bim_relations.is_empty() {
+            checked(
+                builder.set_bim_relations(bim_relations),
+                table_entry(TableKind::BimRelations),
             )?;
         }
 

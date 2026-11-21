@@ -93,6 +93,7 @@ impl DrawingDatabaseBuilder {
                 embed_resources: false,
                 bim_elements: BTreeMap::new(),
                 bim_definitions: crate::bim::BimDefinitions::new(),
+                bim_relations: crate::bim::BimRelations::new(),
                 bounds_cache: Default::default(),
             },
             errors: Vec::new(),
@@ -894,9 +895,7 @@ impl DrawingDatabaseBuilder {
         // wrong-kind reference or an over-budget table would make the stored
         // document lie. The check itself lives in `bim.rs` (new code, new
         // module); this line is the only wiring here.
-        if let Err(error) =
-            crate::bim::validate(&self.database.bim_definitions, &self.database.bim_elements)
-        {
+        if let Err(error) = crate::bim::validate_all(&self.database) {
             self.errors.push(error.to_string());
         }
         if !self.errors.is_empty() {

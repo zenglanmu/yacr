@@ -49,8 +49,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use cad_domain::{
-    CadError, CadResult, Completeness, ObjectId, SemanticGeometry, SpaceId, SupportStatus, Unit,
-    UnitContext,
+    CadError, CadResult, Completeness, EntityId, ObjectId, SemanticGeometry, SpaceId,
+    SupportStatus, Unit, UnitContext,
 };
 use cad_import_core::{
     CompatCounts, CompatEntry, CompatReport, Connector, ConnectorDescriptor, ExportJob,
@@ -60,6 +60,11 @@ use ifc_lite_export::plan::{
     execute, skeleton, Disposition, ExportPlan, GlobalId, IfcClass, NewObject, NewPlacement,
     ObjectRef, PlanContext, Representation, Skeleton, SkeletonRoot, TriangleMesh, IDENTITY,
 };
+
+mod bim;
+mod bim_value;
+
+pub use bim::BimExportPolicy;
 
 /// The writer's one registry key (the descriptor's extension spelling).
 pub const FORMAT_ID: &str = "ifc";
@@ -102,12 +107,29 @@ pub const SKELETON_FAILED: &str = "export.ifc.skeleton_failed";
 /// and every export reads the `cad-db` database it is handed.
 pub struct IfcExporter {
     descriptor: &'static ConnectorDescriptor,
+    /// How BIM-side property sets are written (ADR-0042 D10). Defaults to
+    /// excluding `heuristic` evidence; the only place the caller can opt in is
+    /// [`IfcExporter::with_bim_policy`], never a global constant.
+    bim_policy: BimExportPolicy,
 }
 
 impl IfcExporter {
     /// A writer that reports `descriptor` as its connector.
     pub fn new(descriptor: &'static ConnectorDescriptor) -> Self {
-        Self { descriptor }
+        Self {
+            descriptor,
+            bim_policy: BimExportPolicy::default(),
+        }
+    }
+
+    /// Write BIM property sets the document only marked `heuristic`.
+    ///
+    /// The default (`false`) keeps unverified values out of the file and
+    /// reports them (`export.ifc.bim.unverified_skipped`): a guessed value in
+    /// an IFC file would be read as if the author had declared it.
+    pub fn with_bim_policy(mut self, policy: BimExportPolicy) -> Self {
+        self.bim_policy = policy;
+        self
     }
 }
 
@@ -151,18 +173,28 @@ impl Exporter for IfcExporter {
         // and reports `Complete` (there is no geometry to lose). That is
         // deliberately different from the SKP writer, which refuses an empty
         // model because a `.skp` with no geometry says nothing.
-        let (skeleton_bytes, plan) = build_plan(&meshes)?;
+        //
+        // A database with no BIM data takes the original path below: same plan,
+        // same bytes, same report. Only a database that actually carries BIM
+        // data goes through `bim`, so existing output is untouched (ADR-0042
+        // D10).
+        let planned = if job.database.bim_elements().is_empty() {
+            plain_plan(&meshes)?
+        } else {
+            bim::plan(job.database, &meshes, self.bim_policy)?
+        };
 
         let mut bytes = Vec::new();
-        let written = execute(&skeleton_bytes, &plan, &mut bytes)
+        let written = execute(&planned.skeleton_bytes, &planned.plan, &mut bytes)
             .map_err(|error| CadError::Unsupported(format!("{EXECUTE_FAILED}: {error}")))?;
 
         // One refusal is one mesh the executor did not write. It is recorded by
         // name, never dropped silently.
         let mut gid_index = BTreeMap::new();
-        for (index, mesh) in meshes.iter().enumerate() {
-            gid_index.insert(mesh_global_id(mesh.object).encode(), index);
+        for (index, global_id) in planned.element_ids.iter().enumerate() {
+            gid_index.insert(global_id.encode(), index);
         }
+        let mut refused_meshes = 0usize;
         for refusal in &written.refusals {
             let object = match &refusal.object {
                 ObjectRef::Guid(guid) => gid_index.get(guid).map(|&index| &meshes[index]),
@@ -171,6 +203,9 @@ impl Exporter for IfcExporter {
                 // tied to a source entity here.
                 _ => None,
             };
+            if object.is_some() {
+                refused_meshes += 1;
+            }
             drops.push(DropRecord {
                 object: object.map(|mesh| mesh.object),
                 type_key: object.map(|mesh| mesh.type_key.clone()),
@@ -183,20 +218,35 @@ impl Exporter for IfcExporter {
             });
         }
 
-        let exact = written.added;
-        let report = compat_report(exact, &drops, &attributes, bytes.len());
+        // A BIM plan also adds storeys, which are not source meshes: counting
+        // `written.added` would report them as exact geometry. `exact` is
+        // therefore the number of meshes the executor wrote.
+        let exact = if planned.bim {
+            meshes.len().saturating_sub(refused_meshes)
+        } else {
+            written.added
+        };
+        let report = compat_report(
+            exact,
+            &drops,
+            &attributes,
+            &planned.bim_entries,
+            bytes.len(),
+        );
         Ok(ExportOutput { bytes, report })
     }
 }
 
 /// One source entity the writer projects as an IFC mesh.
-struct CollectedMesh {
-    object: ObjectId,
+pub(crate) struct CollectedMesh {
+    pub(crate) object: ObjectId,
+    /// The element row's id: where its BIM side data is looked up.
+    pub(crate) entity: EntityId,
     /// The `cad-db` type key, written as the object's `Name` when non-empty.
-    type_key: String,
+    pub(crate) type_key: String,
     /// Positions in metres, already converted at this boundary.
-    positions: Vec<[f64; 3]>,
-    triangles: Vec<[u32; 3]>,
+    pub(crate) positions: Vec<[f64; 3]>,
+    pub(crate) triangles: Vec<[u32; 3]>,
 }
 
 /// One entity that is not in the output, and why.
@@ -434,6 +484,7 @@ fn collect_meshes(
         }
         meshes.push(CollectedMesh {
             object,
+            entity: entity.id,
             type_key,
             positions: mesh
                 .vertices
@@ -460,13 +511,31 @@ fn collect_meshes(
     Ok(meshes)
 }
 
-/// The IFC4 skeleton bytes and the plan that adds `meshes` to it.
-fn build_plan(meshes: &[CollectedMesh]) -> CadResult<(Vec<u8>, ExportPlan)> {
-    let project = stable_global_id("yacr/project", 0);
-    let site = stable_global_id("yacr/site", 0);
-    let building = stable_global_id("yacr/building", 0);
+/// One export plan plus what the compatibility report needs about it.
+pub(crate) struct PlannedExport {
+    /// The skeleton the plan is executed against.
+    pub(crate) skeleton_bytes: Vec<u8>,
+    pub(crate) plan: ExportPlan,
+    /// The GlobalId of each collected mesh, in mesh order.
+    pub(crate) element_ids: Vec<GlobalId>,
+    /// BIM-side conversion entries (`export.ifc.bim.*`); empty without BIM.
+    pub(crate) bim_entries: Vec<CompatEntry>,
+    /// Whether this plan wrote BIM semantics (storeys and friends).
+    pub(crate) bim: bool,
+}
+
+/// The project / site / building GlobalIds and the skeleton bytes.
+///
+/// Shared by the plain and the BIM plan so both write the same spatial root
+/// (the BIM path only adds storeys and semantics under it).
+pub(crate) fn skeleton_roots() -> CadResult<([GlobalId; 3], Vec<u8>)> {
+    let gids = [
+        stable_global_id("yacr/project", 0),
+        stable_global_id("yacr/site", 0),
+        stable_global_id("yacr/building", 0),
+    ];
     let mut ids = BTreeSet::new();
-    for id in [project, site, building] {
+    for id in gids {
         if !ids.insert(id.0) {
             return Err(CadError::Invariant(
                 "IFC skeleton GlobalIds collided".into(),
@@ -475,16 +544,30 @@ fn build_plan(meshes: &[CollectedMesh]) -> CadResult<(Vec<u8>, ExportPlan)> {
     }
 
     let source = Skeleton::new(
-        SkeletonRoot::new(project).with_name("yacr project"),
-        SkeletonRoot::new(site).with_name("yacr site"),
-        SkeletonRoot::new(building).with_name("yacr building"),
+        SkeletonRoot::new(gids[0]).with_name("yacr project"),
+        SkeletonRoot::new(gids[1]).with_name("yacr site"),
+        SkeletonRoot::new(gids[2]).with_name("yacr building"),
     )
     .with_file_name("export.ifc");
     let skeleton_bytes = skeleton(&source)
         .map_err(|reason| CadError::Unsupported(format!("{SKELETON_FAILED}: {reason}")))?;
+    Ok((gids, skeleton_bytes))
+}
+
+/// The original plan: every mesh as an `IfcBuildingElementProxy` in the
+/// building, with no BIM semantics (byte-for-byte what this writer always
+/// produced, ADR-0042 D10).
+pub(crate) fn plain_plan(meshes: &[CollectedMesh]) -> CadResult<PlannedExport> {
+    let (gids, skeleton_bytes) = skeleton_roots()?;
+    let building = gids[2];
+    let mut ids = BTreeSet::new();
+    for id in gids {
+        ids.insert(id.0);
+    }
 
     let container = ObjectRef::Guid(building.encode());
     let mut dispositions = Vec::with_capacity(meshes.len());
+    let mut element_ids = Vec::with_capacity(meshes.len());
     for mesh in meshes {
         let global_id = mesh_global_id(mesh.object);
         if !ids.insert(global_id.0) {
@@ -512,11 +595,18 @@ fn build_plan(meshes: &[CollectedMesh]) -> CadResult<(Vec<u8>, ExportPlan)> {
             ObjectRef::Guid(global_id.encode()),
             Disposition::Add(Box::new(object)),
         ));
+        element_ids.push(global_id);
     }
 
     let plan =
         ExportPlan::new(dispositions).with_context(PlanContext::new().with_file_name("export.ifc"));
-    Ok((skeleton_bytes, plan))
+    Ok(PlannedExport {
+        skeleton_bytes,
+        plan,
+        element_ids,
+        bim_entries: Vec::new(),
+        bim: false,
+    })
 }
 
 /// The compatibility report for one export.
@@ -524,9 +614,10 @@ fn compat_report(
     exact: usize,
     drops: &[DropRecord],
     attributes: &AttributeLoss,
+    bim_entries: &[CompatEntry],
     bytes: usize,
 ) -> CompatReport {
-    let mut entries = Vec::with_capacity(drops.len() + 3);
+    let mut entries = Vec::with_capacity(drops.len() + 3 + bim_entries.len());
     let mut reasons: Vec<String> = Vec::new();
     for drop in drops {
         entries.push(CompatEntry {
@@ -551,8 +642,13 @@ fn compat_report(
     reasons.extend(attribute_entries.iter().map(|entry| entry.message.clone()));
     // Each attribute entry is one conversion (one per attribute kind actually
     // lost, or one per textured mesh), matching the `Partial` entries above.
-    let converted = attribute_entries.len();
+    let mut converted = attribute_entries.len();
     entries.extend(attribute_entries);
+    // BIM-side losses are conversions too: the geometry is written, a storey,
+    // type, property set or GlobalId could not be. Empty without BIM.
+    converted += bim_entries.len();
+    reasons.extend(bim_entries.iter().map(|entry| entry.message.clone()));
+    entries.extend_from_slice(bim_entries);
     CompatReport {
         connector: "ifc",
         direction: ReportDirection::Export,
@@ -581,7 +677,7 @@ fn compat_report(
 ///
 /// FNV-1a over the role tag and the 128-bit index. The same database therefore
 /// always produces the same GlobalIds and byte-identical output.
-fn stable_global_id(role: &str, index: u128) -> GlobalId {
+pub(crate) fn stable_global_id(role: &str, index: u128) -> GlobalId {
     const OFFSET: u128 = 0x6c62_272e_07bb_0142_62b8_2175_6295_c58d;
     const PRIME: u128 = 0x0000_0000_0100_0000_0000_0000_0000_013b;
     let mut hash = OFFSET;
@@ -599,7 +695,7 @@ fn stable_global_id(role: &str, index: u128) -> GlobalId {
 }
 
 /// The GlobalId of one exported mesh entity.
-fn mesh_global_id(object: ObjectId) -> GlobalId {
+pub(crate) fn mesh_global_id(object: ObjectId) -> GlobalId {
     stable_global_id("yacr/mesh", object.0)
 }
 

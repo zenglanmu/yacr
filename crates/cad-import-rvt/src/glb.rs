@@ -94,6 +94,11 @@ const IDENTITY: [[f64; 4]; 4] = [
 pub struct PlacedMesh {
     /// The glTF node name, when the file carries one.
     pub name: Option<String>,
+    /// Index into the intermediate model's `entities`, from the node's
+    /// `extras.entityIndex` (`rvt`'s viewer identity). One source element split
+    /// into several nodes carries the same index on each; `None` when the node
+    /// declares no extras (a synthetic fixture, or a non-element node).
+    pub entity_index: Option<usize>,
     pub mesh: Mesh,
     /// sRGB colour from the primitive's `baseColorFactor`, or `None` when the
     /// node's triangles carry no usable material (the caller then stores
@@ -402,6 +407,7 @@ fn visit_node(
             }
             out.meshes.push(PlacedMesh {
                 name: node.name().map(str::to_string),
+                entity_index: node_entity_index(node),
                 mesh: built.mesh,
                 color: style.map(|style| style.color),
                 opacity: style.and_then(|style| style.opacity),
@@ -613,6 +619,15 @@ fn alpha_is_chosen(material: &gltf::Material<'_>) -> bool {
         return false;
     };
     extras.get("alphaSource").and_then(|value| value.as_str()) == Some("rvt-rs")
+}
+
+/// The model-entity index a node's `extras.entityIndex` names, when it carries
+/// one (`rvt` writes it on every drawable element node).
+fn node_entity_index(node: &Node<'_>) -> Option<usize> {
+    let raw = node.extras().as_ref()?;
+    let extras = serde_json::from_str::<serde_json::Value>(raw.get()).ok()?;
+    let index = extras.get("entityIndex")?.as_u64()?;
+    usize::try_from(index).ok()
 }
 
 /// Validate a glTF `baseColorFactor` and convert its RGB to stored sRGB.

@@ -14,6 +14,7 @@ use std::collections::BTreeMap;
 
 mod api_prompt;
 mod area_object_echo;
+mod bim_query;
 mod box_select;
 mod box_select_edge_cases;
 mod capture_candidate;
@@ -46,6 +47,7 @@ mod recovery;
 mod render_batch;
 mod save_resources;
 mod select;
+mod select_entities;
 mod settings;
 mod settings_appearance;
 mod settings_backend;

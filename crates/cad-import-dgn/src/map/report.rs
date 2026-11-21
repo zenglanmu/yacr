@@ -1,10 +1,12 @@
 //! Diagnostics aggregation, capability rows and the finished report.
 
+use cad_db::{BIM_MAX_PROPERTIES_PER_SET, BIM_MAX_PSETS_PER_ELEMENT, BIM_MAX_STRING_BYTES};
 use cad_domain::{CadError, CadResult, Completeness, EntityCapability, SupportStatus, UnitContext};
 use cad_import_core::ImportReport;
 
 use super::{no_geometry_message, unknown_only_message, Mapper};
 use crate::{
+    BIM_BUDGET_EXCEEDED, BIM_CATEGORY_FROM_TAG, BIM_NO_CATEGORY, BIM_TAGS_STORED, BIM_UNVERIFIED,
     BLOCK_MISSING, CELL_MIRRORED_Z, DEPTH_LIMIT, ELEMENT_NOT_MODELLED, GEOMETRY_REJECTED,
     GROUP_FLATTENED, LAYER_UNKNOWN, LINETYPE_PATTERN_UNSCALED, LINETYPE_UNKNOWN, MODEL_SKIPPED,
     RASTER_NOT_LOADED, TAGS_NOT_STORED, TEXT_ALIGN_UNSUPPORTED, TEXT_PLANE_NOT_SUPPORTED,
@@ -77,13 +79,83 @@ impl Mapper<'_> {
                 None,
             );
         }
-        if self.tags > 0 {
+        if self.tags > 0 || self.bim_undecodable_tags > 0 {
             self.note(
                 TAGS_NOT_STORED,
                 format!(
-                    "{} DGN tag/attribute value(s) are present; cad-db has no tag storage and \
-                     the import stores no fabricated attribute values",
-                    self.tags
+                    "{} DGN tag/attribute value(s) were not stored: {} belong to an element with no \
+                     database row (skipped type, unknown element or a flattened group owner) and {} \
+                     have no decoded tag name (the reader's `tag_<n>` fallback for a missing tag-set \
+                     definition) or a value with no BIM form (binary, list or non-finite real); no \
+                     name or value was fabricated",
+                    self.tags + self.bim_undecodable_tags,
+                    self.tags,
+                    self.bim_undecodable_tags
+                ),
+                None,
+            );
+        }
+        if self.bim_stored_tags > 0 {
+            self.note(
+                BIM_TAGS_STORED,
+                format!(
+                    "{} DGN tag/Item Type value(s) were stored as {} BIM property set(s) on {} \
+                     element(s); each set is named after its tag set (or '{}' when the file named \
+                     none) and every value keeps its decoded type",
+                    self.bim_stored_tags,
+                    self.bim_psets,
+                    self.bim_elements,
+                    crate::bim::DGN_TAGS_SET
+                ),
+                None,
+            );
+        }
+        if self.bim_categories > 0 {
+            self.note(
+                BIM_CATEGORY_FROM_TAG,
+                format!(
+                    "{} element(s) took bim.category from an explicit Category/IfcType/IFCEntity \
+                     tag (name compared case-insensitively, value must be a single token); no level \
+                     name, cell name or geometric heuristic was used",
+                    self.bim_categories
+                ),
+                None,
+            );
+        }
+        if self.bim_no_category > 0 {
+            self.note(
+                BIM_NO_CATEGORY,
+                format!(
+                    "{} element(s) with stored BIM properties carry no category: the file declared \
+                     no Category/IfcType/IFCEntity token for them, and a level name or shared-cell \
+                     name is never read as one",
+                    self.bim_no_category
+                ),
+                None,
+            );
+        }
+        if self.bim_budget_dropped > 0 {
+            self.note(
+                BIM_BUDGET_EXCEEDED,
+                format!(
+                    "{} BIM part(s) exceeded a cad-db budget and were dropped whole, not truncated: \
+                     at most {BIM_MAX_PSETS_PER_ELEMENT} property sets per element, \
+                     {BIM_MAX_PROPERTIES_PER_SET} properties per set and {BIM_MAX_STRING_BYTES} bytes \
+                     per string",
+                    self.bim_budget_dropped
+                ),
+                None,
+            );
+        }
+        if self.bim_elements > 0 {
+            self.note(
+                BIM_UNVERIFIED,
+                format!(
+                    "the DGN tags of {} element(s) were interpreted as BIM property sets with \
+                     evidence 'declared' (the file's author wrote the values), but the BIM \
+                     interpretation itself is unverified: this adapter has no real V8i/CONNECT sample \
+                     with Item Types behind it",
+                    self.bim_elements
                 ),
                 None,
             );
@@ -294,10 +366,10 @@ impl Mapper<'_> {
              and visibility only ({} level(s))",
             self.doc.layers.len()
         )];
-        if self.tags > 0 {
+        if self.tags > 0 || self.bim_undecodable_tags > 0 {
             reasons.push(format!(
                 "{} DGN tag/attribute value(s) are not stored",
-                self.tags
+                self.tags + self.bim_undecodable_tags
             ));
         }
         let unsupported: usize = self.unknown_types.values().sum::<usize>()
@@ -381,6 +453,19 @@ impl Mapper<'_> {
         }
         if self.units_partial {
             other.push("the master unit is outside the domain's unit set".to_string());
+        }
+        if self.bim_elements > 0 {
+            other.push(format!(
+                "BIM semantics read from DGN tags are Declared but Unverified ({} element(s), {} \
+                 property set(s)); no real V8i/CONNECT sample backs them",
+                self.bim_elements, self.bim_psets
+            ));
+        }
+        if self.bim_budget_dropped > 0 {
+            other.push(format!(
+                "{} BIM part(s) were dropped by a cad-db budget",
+                self.bim_budget_dropped
+            ));
         }
         if !other.is_empty() {
             reasons.push(other.join("; "));

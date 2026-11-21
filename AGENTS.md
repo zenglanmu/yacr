@@ -196,8 +196,10 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
   导入记录不淘汰）与 `tables/sources.json`；新增两张表使 `FORMAT_MINOR` 升到 **2**，
   网格基色纹理（`textures/<key>` 二进制条目 + `cad:Mesh` 的 `uvs`/`texture`）再升到 **3**，
   网格 PBR 通道（`cad:Mesh.pbr`：metallic/roughness/emissive/occlusion 标量 + 4 张 UV0 贴图）
-  再升到 **4**（minor ≤ 3 仍可打开）。RVT/IFC 的 BIM 语义只有 **IFC 导入已接线**（`Partial`，
-  ADR-0042 Phase 1）；**IFC 导出回写与 RVT/DGN 的 BIM 语义未接线**（Phase 2/3）。
+  再升到 **4**（minor ≤ 3 仍可打开）。IFC 导入/导出、RVT/DGN 语义、BIM 查询/面板均已接线（IFC
+  `Partial`；RVT/DGN `Unverified`），`FORMAT_MINOR` 升到 **7**（BIM 元素 6、关系 7，写入按文档取
+  **4/5/7**，minor 6 为只读档）。**IFC 关系不导出**（仍不写 `IfcRelAggregates`/`IfcRelNests`）；
+  **Windows/macOS/Android 无 BIM 查询 seam**（显式拒绝 `unsupported-runtime: bimQuery`）。
   **报告弹窗 UI、
   L0 源字节直通、DXF L1 不动点仍未实现**，不得写成已完成。
 
@@ -255,8 +257,8 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
 外部资源打包（ADR-0040，`document.json.embed_resources` → `resources/{font,xref,image}/<key>`）
 随 `.ymodel` 保存生效（Linux 完整；Android 的采集受限于文件系统解析——SAF 来源的图片/参照按"未找到"
 记录，不假装已打包），资源使 `FORMAT_MINOR` 升到 **5**；BIM 语义（元素行可选 `bim` 块 +
-`tables/bim-definitions.json`，ADR-0042 Phase 1）再升到 **6**，写入按文档取 **4/5/6**
-（有 BIM → 6；只有资源 → 5；否则 → 4）。字体目录设置与
+`tables/bim-definitions.json`，ADR-0042）再升到 **6**，多对多关系的 `tables/bim-relations.json`
+再升到 **7**，写入按文档取 **7/5/4**（有 BIM → 7；只有资源 → 5；否则 → 4；**minor 6 只读**）。字体目录设置与
 目录选择器只在 `native-below` 可用：`dom-canvas`（Web **与 X11/XWayland**）读不到本地目录，
 行渲染为不可用、写设置按 `unsupported-runtime: fontsDir` 拒绝——**不得**按 `--fonts-dir` 静默生效。
 真实跨机自包含、字体度量一致性、portal 目录选择器交互均 **NOT VERIFIED**。

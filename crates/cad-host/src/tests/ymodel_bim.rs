@@ -383,7 +383,7 @@ fn ifc_bim_survives_a_ymodel_save_and_reopen() {
 }
 
 #[test]
-fn a_bim_document_is_written_at_minor_six() {
+fn a_bim_document_is_written_at_minor_seven() {
     let (core, archive, files) = bim_core();
     open_bim_fixture(&core);
 
@@ -396,7 +396,10 @@ fn a_bim_document_is_written_at_minor_six() {
         vec![FORMAT_MINOR, FORMAT_MINOR],
         "a BIM-bearing document is stamped minor {FORMAT_MINOR} on every save"
     );
-    assert_eq!(FORMAT_MINOR, 6, "ADR-0042 D6 raised the ceiling to 6");
+    assert_eq!(
+        FORMAT_MINOR, 7,
+        "ADR-0042 raised the ceiling to 6 for BIM elements and to 7 for relations"
+    );
     for (index, snapshot) in archive.writes().iter().enumerate() {
         assert!(
             snapshot.has_bim(),

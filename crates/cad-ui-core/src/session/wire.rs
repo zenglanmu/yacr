@@ -49,6 +49,7 @@
 use std::collections::VecDeque;
 
 use cad_app::{StandardView, ToolParameter, ToolValue};
+use cad_domain::EntityId;
 
 use crate::popup::PopupAck;
 use crate::shell::check_command_with_aliases;
@@ -89,6 +90,11 @@ pub const API_SUBMIT_UNAVAILABLE: &str = "unsupported-runtime: cad_api: no submi
 /// native host that they do not have. One string, one meaning.
 pub const POPUP_HOST_UNAVAILABLE: &str =
     "popup.host_unavailable: no desktop popup host is registered";
+
+/// The stable refusal of a sink with no selection-replacement lane.
+/// The default [`AdmissionTarget::select_entities`] answers this, so a carrier
+/// without the command refuses by name, never with an acknowledgement.
+pub const SELECT_UNAVAILABLE: &str = "unsupported-runtime: cad_select_entities";
 
 /// Admission result of a queued/applied command: **accepted**, not completed.
 ///
@@ -167,6 +173,8 @@ pub enum Channel {
     Setting,
     /// Typed layer writes (visibility, restore, active and the table writes).
     LayerWrite,
+    /// Selection replacements (`cad_select_entities`).
+    Selection,
 }
 
 /// The **sink seam**: how one host stores or applies an already-admitted request.
@@ -235,6 +243,16 @@ pub trait AdmissionTarget {
 
     /// Store or apply one typed layer write.
     fn layer_write(&mut self, write: CadLayerWrite) -> Result<(), String>;
+
+    /// Replace the current selection with these entity ids.
+    ///
+    /// The ids are the wire's `u64` spelling of `cad_domain::EntityId`. The host
+    /// resolves them against the **open document** and replaces the selection
+    /// atomically; an unknown id refuses the whole request. The default refuses
+    /// with [`SELECT_UNAVAILABLE`], the honest answer for a sink with no lane.
+    fn select_entities(&mut self, _ids: Vec<EntityId>) -> Result<(), String> {
+        Err(SELECT_UNAVAILABLE.to_string())
+    }
 
     /// Queue (desktop) or apply (`dom-canvas`) one plugin-API mutation.
     ///
@@ -357,6 +375,8 @@ pub struct QueueFamily<'a> {
     pub api_calls: &'a mut VecDeque<CadApiSubmission>,
     /// `cad_api_poll` — completed plugin-API outcomes, oldest first (bounded).
     pub api_results: &'a mut Vec<CadApiOutcome>,
+    /// `cad_select_entities` — queued selection replacements (bounded).
+    pub selection_requests: &'a mut VecDeque<Vec<EntityId>>,
 }
 
 /// The **queue sink**: stores into a desktop host's bounded queue family.
@@ -413,6 +433,7 @@ impl AdmissionTarget for QueueSink<'_> {
             Channel::Orbit => self.queues.orbits.len(),
             Channel::Setting => self.queues.setting_writes.len(),
             Channel::LayerWrite => self.queues.layer_writes.len(),
+            Channel::Selection => self.queues.selection_requests.len(),
         }
     }
 
@@ -465,6 +486,11 @@ impl AdmissionTarget for QueueSink<'_> {
         Ok(())
     }
 
+    fn select_entities(&mut self, ids: Vec<EntityId>) -> Result<(), String> {
+        self.queues.selection_requests.push_back(ids);
+        Ok(())
+    }
+
     fn api_submit(&mut self, submission: CadApiSubmission) -> Result<(), String> {
         // The grammar is the shared rule (`dom-canvas` refuses it too), so a bad
         // id never enters the owner-tick queue.
@@ -502,6 +528,9 @@ pub struct QueueReads<'a> {
     pub fonts: Option<&'a Result<CadFonts, String>>,
     /// `Shared::cad_api_snapshot`.
     pub api_snapshot: Option<&'a CadApiSnapshot>,
+    /// `Shared::cad_bim_host`: the caller-supplied BIM query lane
+    /// (`crate::session::bim_reads`; absent = the named `bimQuery` refusal).
+    pub bim: crate::bim::BimSeam<'a>,
 }
 
 impl<'a> QueueReads<'a> {
@@ -517,6 +546,7 @@ impl<'a> QueueReads<'a> {
             layers,
             fonts,
             api_snapshot,
+            bim: crate::bim::BimSeam::default(),
         }
     }
 }
@@ -698,6 +728,29 @@ pub fn set_selected_property(
         target.pending(Channel::SelectedProperty),
     )?;
     target.selected_property(key, value)?;
+    Ok(CadCommandAck::accepted())
+}
+
+/// `cad_select_entities`: replace the current selection with these entities.
+///
+/// The only content rule here is non-emptiness (`selection.empty`); whether every
+/// id exists in the open document is the host session's authority on apply. An
+/// unknown id refuses the **whole** request and leaves the previous selection
+/// untouched — never a silent partial selection.
+pub fn select_entities(
+    target: &mut dyn AdmissionTarget,
+    ids: Vec<u64>,
+) -> Result<CadCommandAck, String> {
+    let ids: Vec<EntityId> = super::admission::parse_selection_request(&ids)?
+        .into_iter()
+        .map(|id| EntityId(u128::from(id)))
+        .collect();
+    super::admission::check_select_entities(
+        target.cad_mode(),
+        target.modal_open(),
+        target.pending(Channel::Selection),
+    )?;
+    target.select_entities(ids)?;
     Ok(CadCommandAck::accepted())
 }
 

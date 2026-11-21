@@ -132,7 +132,25 @@ pub(crate) struct Mapper<'a> {
     pub(super) unmodelled_types: BTreeMap<String, usize>,
     pub(super) unknown_linetypes: BTreeSet<String>,
     pub(super) unknown_layers: usize,
+    /// Tags whose element produced no database row (skipped/unknown element, or
+    /// a flattened group owner). ADR-0042 D9 keeps
+    /// `import.dgn.tags_not_stored` for these and for undecodable tags.
     pub(super) tags: usize,
+    /// Tags dropped inside a stored element: no decoded tag name, or a value
+    /// with no `cad_db::BimValue` form.
+    pub(super) bim_undecodable_tags: usize,
+    /// Tags that did become BIM properties.
+    pub(super) bim_stored_tags: usize,
+    /// Property sets stored across all elements.
+    pub(super) bim_psets: usize,
+    /// Elements with a stored BIM block.
+    pub(super) bim_elements: usize,
+    /// BIM blocks that took `category` from an explicit category tag.
+    pub(super) bim_categories: usize,
+    /// BIM blocks stored without a category token.
+    pub(super) bim_no_category: usize,
+    /// Parts dropped by a `cad_db::BIM_*` budget.
+    pub(super) bim_budget_dropped: usize,
     pub(super) rasters: usize,
     pub(super) groups_flattened: usize,
     pub(super) rejected: usize,
@@ -189,6 +207,13 @@ impl<'a> Mapper<'a> {
             unknown_linetypes: BTreeSet::new(),
             unknown_layers: 0,
             tags: 0,
+            bim_undecodable_tags: 0,
+            bim_stored_tags: 0,
+            bim_psets: 0,
+            bim_elements: 0,
+            bim_categories: 0,
+            bim_no_category: 0,
+            bim_budget_dropped: 0,
             rasters: 0,
             groups_flattened: 0,
             rejected: 0,

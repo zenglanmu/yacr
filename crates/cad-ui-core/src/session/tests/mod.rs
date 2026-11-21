@@ -14,6 +14,7 @@ mod tests_api_submit;
 mod tests_array;
 mod tests_array_arguments;
 mod tests_batch;
+mod tests_bim;
 mod tests_command_log;
 mod tests_commands;
 mod tests_explode;

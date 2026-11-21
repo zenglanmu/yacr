@@ -3,6 +3,8 @@ cad_api_poll
 cad_api_status
 cad_api_submit
 cad_app_version
+cad_bim_query
+cad_bim_summary
 cad_close_popup
 cad_command
 cad_command_aliases
@@ -20,6 +22,7 @@ cad_recent_files
 cad_recovery_files
 cad_rename_layer
 cad_restore_layers
+cad_select_entities
 cad_set_active_layer
 cad_set_embed_resources
 cad_set_layer_property

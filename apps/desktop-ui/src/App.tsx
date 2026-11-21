@@ -1,8 +1,6 @@
-// App: region composition plus the shell state that every region reads.
-//
-// This component owns the behaviour contracts: the ordered input lane, CAD
-// status polling, the command funnel (`cad_command`) and the keyboard shortcuts.
-// Visual work lives in the region components.
+// App: region composition plus the shell state every region reads. It owns the
+// behaviour contracts (the input lane, CAD status polling, the `cad_command`
+// funnel and the keyboard shortcuts); visual work lives in the region components.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from './host/invoke.ts';
 import { CATALOGS } from './catalogs.ts';
@@ -54,6 +52,7 @@ import { useLayoutMode } from './layout/use-layout-mode.ts';
 import { createShortcutRunner } from './layout/shell-shortcuts.ts';
 import { openOptionsDialog } from './options/open-options.ts';
 import { useLocalSelectors } from './commands/local-selectors.ts';
+import { openBimPanel } from './bim/panel.ts';
 import { setSelectedProperty } from './properties/properties.ts';
 import { textEditOpenError } from './popup/popup-textedit.ts';
 import { useWorkspaceSnapshot, useChromeSurfaceState } from './chrome/use-chrome-store.ts';
@@ -907,6 +906,7 @@ function Shell() {
       else if (action === 'cleanScreen') setCleanScreen(value => !value);
       else if (action === 'commandLine') setCommandLineOpen(value => !value);
       else if (action === 'properties') openProperties();
+      else if (action === 'bim') openBimPanel();
       else if (action === 'language') setLocale(value => (value === 'zh-CN' ? 'en' : 'zh-CN'));
       // Dialogs are in-DOM overlays (ADR 0021 D1/D2). The host still owns the
       // modal gate and admission; `existing: true` means the same dialog is

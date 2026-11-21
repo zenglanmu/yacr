@@ -80,10 +80,13 @@ impl Mapper<'_> {
         self.next_object += 1;
         let resolved = self.resolve_style(entity, inherit)?;
         let Some(mapped) = self.geometry(entity, &resolved, object)? else {
+            // No row exists, so the element's tags have nowhere to live.
+            self.tags += entity.attributes.len();
             return Ok(None);
         };
         if let Err(error) = validate_geometry(&mapped.geometry) {
             self.rejected += 1;
+            self.tags += entity.attributes.len();
             self.note(
                 GEOMETRY_REJECTED,
                 format!(
@@ -121,6 +124,9 @@ impl Mapper<'_> {
             draw_order: self.draw_order,
         })?;
         self.builder.set_entity_render_attributes(id, attributes)?;
+        // Tags only exist as BIM property sets in `cad-db` (ADR-0042 D9); the
+        // row is inserted first because `set_entity_bim` requires it.
+        self.attach_bim(entity, id)?;
         self.draw_order += 1;
         self.inserted += 1;
         if !resolved.visible {

@@ -15,13 +15,17 @@
 //! | `IfcBuildingStorey` + `IfcRelAggregates` / `IfcRelContainedInSpatialStructure` | `level` definition + `bim.level` |
 //! | `IfcTypeObject` family + `IfcRelDefinesByType` | `type` definition + `bim.element_type` |
 //! | `IfcPropertySet` + `IfcRelDefinesByProperties` + `IfcPropertySingleValue` | `bim.psets` / type `psets` |
+//! | `IfcElementQuantity` + `IfcRelDefinesByProperties` | `bim.psets` under the source's own `Qto_*` name |
 //! | `IfcMaterial` + `IfcRelAssociatesMaterial` | `material` definition + `bim.material` |
+//! | `IfcRelAggregates` / `IfcRelNests` / `IfcRelContainedInSpatialStructure` / `IfcRelAssignsToGroup` / `IfcRelConnectsElements` | `tables/bim-relations.json` via [`cad_db::BimRelations`] |
 //!
 //! # What is deliberately **not** read
 //!
-//! Complex, enumerated, bounded and quantity values have no [`cad_db::BimValue`]
-//! form (ADR-0042 D2). They are counted under stable diagnostics and left out;
-//! nothing is flattened into a string that looks like the source's value.
+//! Complex, enumerated, bounded and table property values have no
+//! [`cad_db::BimValue`] form (ADR-0042 D2). They are counted under stable
+//! diagnostics and left out; nothing is flattened into a string that looks like
+//! the source's value. The same holds for an aggregate
+//! `IfcPhysicalComplexQuantity`: it is reported, not flattened into a number.
 //! `evidence` is always [`cad_db::BimEvidence::Declared`]: every stored field is
 //! spelled in the file. There is no heuristic path here.
 //!
@@ -36,8 +40,8 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use cad_db::{
-    BimDefinition, BimDefinitions, BimElement, BimEvidence, BimSource, BIM_MAX_DEFINITIONS,
-    BIM_MAX_STRING_BYTES,
+    BimDefinition, BimDefinitions, BimElement, BimEvidence, BimRelations, BimSource,
+    BIM_MAX_DEFINITIONS, BIM_MAX_STRING_BYTES,
 };
 use cad_domain::Diagnostic;
 use cad_import_core::MeshImport;
@@ -46,11 +50,14 @@ use ifc_lite_core::{slot, DecodedEntity, EntityDecoder, EntityScanner, IfcType, 
 use crate::{
     DIAG_BIM_BUDGET_EXCEEDED, DIAG_BIM_ELEVATION_UNRESOLVED, DIAG_BIM_MATERIAL_UNRESOLVED,
     DIAG_BIM_PROPERTY_SET_UNSUPPORTED, DIAG_BIM_PROPERTY_VALUE_UNSUPPORTED,
-    DIAG_BIM_QUANTITY_SET_NOT_STORED, DIAG_BIM_SOURCE_ID_MISSING, DIAG_BIM_STOREY_UNRESOLVED,
-    DIAG_BIM_TYPE_UNRESOLVED,
+    DIAG_BIM_QUANTITY_SET_NOT_STORED, DIAG_BIM_QUANTITY_SET_STORED,
+    DIAG_BIM_RELATION_BUDGET_EXCEEDED, DIAG_BIM_RELATION_ENDPOINT_MISSING,
+    DIAG_BIM_SOURCE_ID_MISSING, DIAG_BIM_STOREY_UNRESOLVED, DIAG_BIM_TYPE_UNRESOLVED,
 };
 
 mod property;
+mod quantity;
+mod relations;
 use property::{collect_element_psets, collect_psets};
 
 /// The connector id every IFC BIM source row carries.
@@ -72,7 +79,14 @@ struct Stats {
     material_unresolved: usize,
     property_set_unsupported: usize,
     property_value_unsupported: usize,
-    quantity_set_not_stored: usize,
+    /// `IfcElementQuantity` sets stored as property sets (lossless count).
+    quantity_sets_stored: usize,
+    /// Quantity sets/entries that could not be read and were left out.
+    quantity_not_stored: usize,
+    /// Structural edges skipped because an endpoint had no readable GlobalId.
+    relation_endpoint_missing: usize,
+    /// The structural relation table was refused at `BIM_MAX_RELATIONS`.
+    relation_budget_exceeded: bool,
     budget_exceeded: usize,
 }
 
@@ -99,6 +113,9 @@ struct Relations {
 /// The BIM result of one IFC import.
 pub(crate) struct IfcSemantics {
     definitions: BimDefinitions,
+    /// Structural edges (`tables/bim-relations.json`), empty when the file
+    /// declares none or the table was refused at its row budget.
+    relations: BimRelations,
     /// One logical BIM block per geometry-bearing IFC product, keyed by step id.
     elements: BTreeMap<u32, BimElement>,
     stats: Stats,
@@ -130,6 +147,7 @@ impl IfcSemantics {
 
         let mut semantics = IfcSemantics {
             definitions: BimDefinitions::new(),
+            relations: BimRelations::new(),
             elements: BTreeMap::new(),
             stats: Stats::default(),
             relations_stored: false,
@@ -144,6 +162,13 @@ impl IfcSemantics {
             }
             None => None,
         };
+        // The structural edges are a separate bounded table; they reuse the
+        // project GlobalId as the endpoint document id. A refused table stores
+        // nothing and reports its own loss rather than truncating.
+        let relation_scan = relations::collect(content, decoder, document_id.as_deref());
+        semantics.relations = relation_scan.relations;
+        semantics.stats.relation_endpoint_missing = relation_scan.endpoint_missing;
+        semantics.stats.relation_budget_exceeded = relation_scan.budget_exceeded;
         for &product_id in products {
             let Ok(product) = decoder.decode_by_id(product_id) else {
                 continue;
@@ -167,6 +192,12 @@ impl IfcSemantics {
     /// Take the definition table for the builder (which owns it at `finish`).
     pub(crate) fn take_definitions(&mut self) -> BimDefinitions {
         std::mem::take(&mut self.definitions)
+    }
+
+    /// Take the structural relation table for the builder (which owns it at
+    /// `finish`, where the encoded-size ceiling is enforced).
+    pub(crate) fn take_relations(&mut self) -> BimRelations {
+        std::mem::take(&mut self.relations)
     }
 
     /// The BIM block for one geometry-bearing product, when it has one.
@@ -303,20 +334,73 @@ impl IfcSemantics {
                 )),
             );
         }
-        if stats.quantity_set_not_stored > 0 {
+        if stats.quantity_sets_stored > 0 {
+            // Lossless: the quantities are in the document. This says what was
+            // read (so a consumer knows `Qto_*` rows came from the file), and
+            // deliberately does not mark the import `Partial` on its own.
+            import.record(
+                Diagnostic {
+                    object: None,
+                    code: DIAG_BIM_QUANTITY_SET_STORED.into(),
+                    message: format!(
+                        "{} IfcElementQuantity set(s) were stored as property sets under their \
+                         own source name, one property per quantity",
+                        stats.quantity_sets_stored
+                    ),
+                },
+                None,
+            );
+        }
+        if stats.quantity_not_stored > 0 {
             import.record(
                 Diagnostic {
                     object: None,
                     code: DIAG_BIM_QUANTITY_SET_NOT_STORED.into(),
                     message: format!(
-                        "{} IfcElementQuantity set(s) are declared; quantities are Phase 3 \
-                         (ADR-0042) and were not stored",
-                        stats.quantity_set_not_stored
+                        "{} IFC quantity set(s)/quantit(ies) could not be read (unknown physical \
+                         quantity entity, missing name, or an invalid/non-finite value) and were \
+                         left out; nothing was invented in their place",
+                        stats.quantity_not_stored
                     ),
                 },
                 Some(format!(
-                    "{} IFC quantity set(s) were not stored",
-                    stats.quantity_set_not_stored
+                    "{} IFC quantity set(s)/quantit(ies) could not be read",
+                    stats.quantity_not_stored
+                )),
+            );
+        }
+        if stats.relation_endpoint_missing > 0 {
+            import.record(
+                Diagnostic {
+                    object: None,
+                    code: DIAG_BIM_RELATION_ENDPOINT_MISSING.into(),
+                    message: format!(
+                        "{} structural relation edge(s) name a parent or child without a \
+                         readable IfcRoot.GlobalId; the edge was not stored rather than keyed \
+                         by a file-local step id",
+                        stats.relation_endpoint_missing
+                    ),
+                },
+                Some(format!(
+                    "{} IFC structural relation edge(s) had no GlobalId endpoint",
+                    stats.relation_endpoint_missing
+                )),
+            );
+        }
+        if stats.relation_budget_exceeded {
+            import.record(
+                Diagnostic {
+                    object: None,
+                    code: DIAG_BIM_RELATION_BUDGET_EXCEEDED.into(),
+                    message: format!(
+                        "the file declares more than {} structural relations; the relation table \
+                         was refused rather than truncated, so no partial edge set is stored",
+                        cad_db::BIM_MAX_RELATIONS
+                    ),
+                },
+                Some(format!(
+                    "IFC structural relations exceeded the {} row budget and were not stored",
+                    cad_db::BIM_MAX_RELATIONS
                 )),
             );
         }
@@ -838,3 +922,7 @@ fn bounded_string(value: &str, stats: &mut Stats) -> Option<String> {
 #[cfg(test)]
 #[path = "tests_semantics.rs"]
 mod tests_semantics;
+
+#[cfg(test)]
+#[path = "tests_semantics_quantity.rs"]
+mod tests_semantics_quantity;

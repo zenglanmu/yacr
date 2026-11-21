@@ -16,8 +16,14 @@
 //!   linetype as raw indices, so layer rows carry name + visibility only and
 //!   **no** `LayerAttributes` row is written ([`LEVEL_SYMBOLOGY_UNDECODED`],
 //!   always `Partial`); no freeze/lock bit is decoded either.
-//! * DGN tags/attributes, rasters, unknown element types and every `EntityKind`
-//!   without a vector mapping are reported and skipped, never fabricated;
+//! * DGN tags / Item Types are decoded by `cadkit-dgn` into
+//!   `cadkit_core::Entity::attributes`; `bim` turns them into `cad-db` BIM
+//!   property sets and an explicit `Category`/`IfcType`/`IFCEntity` tag into
+//!   `bim.category` (ADR-0042 D9). Only a tag the reader could not name, a value
+//!   with no `BimValue` form or an over-budget part is reported as
+//!   [`TAGS_NOT_STORED`]; the BIM interpretation itself is [`BIM_UNVERIFIED`].
+//! * rasters, unknown element types and every `EntityKind` without a vector
+//!   mapping are reported and skipped, never fabricated;
 //! * a shared-cell instance whose block has no definition is skipped
 //!   ([`BLOCK_MISSING`]); no empty block is invented;
 //! * a file whose every element is unsupported is
@@ -29,8 +35,11 @@
 //!
 //! Tested only against the two committed GDAL fixtures (`fixtures/dgn/`); real
 //! V8i/Connect models, device rendering, pixels and performance are NOT
-//! verified by these contract tests.
+//! verified by these contract tests. The BIM mapping (ADR-0042 D9) is covered by
+//! synthetic `cadkit_core::Document`s only: **real DGN Item Type/tag semantics
+//! are NOT VERIFIED**.
 
+mod bim;
 mod map;
 #[cfg(test)]
 mod tests;
@@ -49,7 +58,12 @@ pub const NO_GEOMETRY: &str = "import.dgn.no_geometry";
 pub const NOT_A_DGN_FILE: &str = "import.dgn.not_a_dgn_file";
 /// Stable diagnostic code: an element type this build does not model.
 pub const UNKNOWN_ELEMENT: &str = "import.dgn.unknown_element";
-/// Stable diagnostic code: DGN tag/attribute values have no storage target.
+/// Stable diagnostic code: a DGN tag/attribute value was not stored.
+///
+/// Since ADR-0042 D9 this means **only** tags the reader could not name
+/// (`tag_<n>` fallback), values with no `cad_db::BimValue` form (binary/list,
+/// non-finite real), or tags on an element that produced no database row. An
+/// over-budget tag is [`BIM_BUDGET_EXCEEDED`] instead.
 pub const TAGS_NOT_STORED: &str = "import.dgn.tags_not_stored";
 /// Stable diagnostic code: DGN groups were flattened into their members.
 pub const GROUP_FLATTENED: &str = "import.dgn.group_flattened";
@@ -93,6 +107,16 @@ pub const UNKNOWN_ELEMENTS_ONLY: &str = "import.dgn.unknown_elements_only";
 pub const TEXT_ENCODING: &str = "import.dgn.text_encoding";
 /// Stable diagnostic code: a linetype's paper pattern has no drawing-unit scale.
 pub const LINETYPE_PATTERN_UNSCALED: &str = "import.dgn.linetype_pattern_unscaled";
+/// Stable diagnostic code: decoded DGN tags became BIM property sets.
+pub const BIM_TAGS_STORED: &str = "import.dgn.bim.tags_stored_as_properties";
+/// Stable diagnostic code: `bim.category` came from an explicit category tag.
+pub const BIM_CATEGORY_FROM_TAG: &str = "import.dgn.bim.category_from_tag";
+/// Stable diagnostic code: a BIM element carries no category token.
+pub const BIM_NO_CATEGORY: &str = "import.dgn.bim.no_category";
+/// Stable diagnostic code: the whole BIM interpretation is unverified.
+pub const BIM_UNVERIFIED: &str = "import.dgn.bim.unverified";
+/// Stable diagnostic code: a tag part exceeded a `cad_db::BIM_*` budget.
+pub const BIM_BUDGET_EXCEEDED: &str = "import.dgn.bim.budget_exceeded";
 
 /// The DGN import adapter.
 #[derive(Default)]

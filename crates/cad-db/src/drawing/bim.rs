@@ -9,7 +9,7 @@
 use cad_domain::EntityId;
 
 use super::DrawingDatabase;
-use crate::bim::{BimDefinition, BimDefinitions, BimElement, BimKey};
+use crate::bim::{BimDefinition, BimDefinitions, BimElement, BimKey, BimRelations};
 
 impl DrawingDatabase {
     /// The BIM data of one element, if it carries any.
@@ -25,6 +25,12 @@ impl DrawingDatabase {
     /// The shared definition table. Empty when the document has no BIM data.
     pub fn bim_definitions(&self) -> &BimDefinitions {
         &self.bim_definitions
+    }
+
+    /// The BIM relation table (ADR-0042 D3 tail/D12). Empty when the document
+    /// has no relation edges.
+    pub fn bim_relations(&self) -> &BimRelations {
+        &self.bim_relations
     }
 
     /// One shared definition row by composite id.

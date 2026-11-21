@@ -787,15 +787,15 @@ fn bim_database() -> DrawingDatabase {
 }
 
 #[test]
-fn bim_data_is_a_fixed_point_through_a_minor_six_archive() {
+fn bim_data_is_a_fixed_point_through_a_minor_seven_archive() {
     let db = bim_database();
     let first = snapshot_of(&db, Revision(3));
     let (bytes, _) = write_archive(&mut ZipDocumentStore::new(), &first);
     let (_, manifest) = explode(&bytes);
     assert_eq!(
         manifest["format"]["minor"],
-        Value::from(6),
-        "BIM data earns minor 6 (ADR-0042 D6)"
+        Value::from(7),
+        "BIM data earns minor 7 (ADR-0042 D3 tail/D6)"
     );
 
     let loaded = read_archive(&mut ZipDocumentStore::new(), &bytes);

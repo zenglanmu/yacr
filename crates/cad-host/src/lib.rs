@@ -53,6 +53,7 @@ use cad_platform::{
     ConfigLoad, ConfigStore, FileTarget, HostCapabilities, PlatformFiles, SavePurpose,
     SurfaceMetrics, SurfaceSource,
 };
+mod bim;
 mod command_log;
 mod command_log_echo;
 mod core;
@@ -67,6 +68,7 @@ pub mod policy;
 mod recent;
 mod recovery;
 pub mod save;
+mod selection;
 mod settings;
 mod settings_export;
 mod settings_root;
@@ -74,6 +76,7 @@ mod settings_snapshot;
 mod settings_units;
 mod state;
 
+pub use bim::BimPage;
 pub use command_log::{
     CommandLogEntry, CommandLogKind, CommandLogMeasurement, CommandLogPoint, COMMAND_LOG_CAPACITY,
 };
@@ -105,6 +108,7 @@ pub use core::{HostCore, HostOptions, HostPlatform, RequestClock, StartDocument}
 pub use fonts::DesktopResources;
 pub use fonts::{HostResources, UnsupportedResources};
 pub use recovery::RECOVERY_INTERVAL;
+pub use selection::{SELECTION_NO_DOCUMENT, SELECTION_UNKNOWN_ENTITY};
 
 /// A user-facing rendering of a command error.
 ///

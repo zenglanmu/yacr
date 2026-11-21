@@ -95,7 +95,16 @@ pub const FORMAT_WRITE: u32 = 1;
 /// entirely, never `"bim": null`, because a minor-5 reader is strict about
 /// unknown element fields — and the table only when it holds rows, so an
 /// ordinary document keeps the minor its resources (or its absence) imply.
-pub const FORMAT_MINOR: u32 = 6;
+///
+/// `7` adds `tables/bim-relations.json` (ADR-0042 D3 tail/D12): the bounded
+/// many-to-many `aggregates`/`nests`/`contains`/`group`/`connects`/other edges
+/// between BIM components. The table is written only when it holds rows, but
+/// the **tier** is shared with the minor-6 features: a document with BIM
+/// definitions/element blocks but no relation table is also written at `7`
+/// (both landed in one release, and a minor-6 reader refuses the element block
+/// anyway, so splitting them would not let an older build open anything more).
+/// No `IdKind` 12/13 and no header counter backs these rows.
+pub const FORMAT_MINOR: u32 = 7;
 
 /// Stable failure markers.
 ///

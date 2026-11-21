@@ -206,7 +206,7 @@ test('the drawer offers the real ribbon model minus the two chrome-collapse swit
   }
 
   // The Home tab keeps its tool panels and drops the two palette-only ones.
-  assert.deepEqual(mobileRibbonSections('home').map(section => section.id), ['clipboard', 'draw', 'modify', 'properties', 'navigate']);
+  assert.deepEqual(mobileRibbonSections('home').map(section => section.id), ['clipboard', 'draw', 'modify', 'properties', 'bim', 'navigate']);
   // The File tab keeps both panels: the utilities cluster still offers Audit,
   // the recovery report, About, Options and the direct Plugins page after its
   // palette and chrome switches are gone. Plugins is a dialog entry, so the
@@ -230,7 +230,7 @@ test('the drawer offers the real ribbon model minus the two chrome-collapse swit
     ['QVLAYOUT', 'QUICKCALC'],
   );
   // An unknown tab id resolves like `ribbonTab` (Home), never to an empty drawer.
-  assert.deepEqual(mobileRibbonSections('nope').map(section => section.id), ['clipboard', 'draw', 'modify', 'properties', 'navigate']);
+  assert.deepEqual(mobileRibbonSections('nope').map(section => section.id), ['clipboard', 'draw', 'modify', 'properties', 'bim', 'navigate']);
 });
 
 test('drawer DOM ids survive multi-word ribbon ids', () => {

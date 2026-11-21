@@ -422,7 +422,7 @@ pub(crate) fn take_opt_text(
     }
 }
 
-fn check_text(
+pub(crate) fn check_text(
     reader: &Reader,
     field: &str,
     value: &str,
@@ -455,7 +455,7 @@ pub(crate) fn take_text(
 /// A budget refusal: `ymodel.invalid_document` whose detail carries the stable
 /// `ymodel.bim.budget_exceeded` prefix (ADR-0042 D7: a read-side over-budget
 /// archive is an invalid document, not a different failure class).
-fn budget(detail: impl std::fmt::Display) -> SnapshotError {
+pub(crate) fn budget(detail: impl std::fmt::Display) -> SnapshotError {
     SnapshotError::invalid(format!("{BIM_BUDGET_EXCEEDED}: {detail}"))
 }
 
@@ -465,7 +465,7 @@ fn budget(detail: impl std::fmt::Display) -> SnapshotError {
 /// this codec is willing to decode **before** it allocates the decoded rows. It
 /// is smaller than the exact encoded length (no punctuation/keys), so the exact
 /// check still runs on the way out.
-fn text_bytes(value: &Value) -> usize {
+pub(crate) fn text_bytes(value: &Value) -> usize {
     match value {
         Value::String(text) => text.len(),
         Value::Array(items) => items.iter().map(text_bytes).sum(),
@@ -487,7 +487,7 @@ pub(crate) fn prefixed(error: SnapshotError) -> SnapshotError {
 }
 
 /// A plain JSON object with exactly the given fields.
-fn object(entries: Vec<(&str, Value)>) -> Value {
+pub(crate) fn object(entries: Vec<(&str, Value)>) -> Value {
     let mut map = Map::new();
     for (name, value) in entries {
         let previous = map.insert(name.to_string(), value);

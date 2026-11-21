@@ -130,6 +130,9 @@ struct Queues {
     api_calls: VecDeque<CadApiSubmission>,
     /// `cad_api_poll` — completed outcomes (`Shared::cad_api_results`).
     api_results: Vec<CadApiOutcome>,
+    /// `cad_select_entities` — queued selection replacements
+    /// (`Shared::cad_selection_requests`).
+    selection_requests: VecDeque<Vec<cad_ui_core::session::EntityId>>,
     cad_mode: bool,
     modal_open: bool,
 }
@@ -148,6 +151,7 @@ impl Queues {
             layer_writes: VecDeque::new(),
             api_calls: VecDeque::new(),
             api_results: Vec::new(),
+            selection_requests: VecDeque::new(),
             cad_mode,
             modal_open,
         }
@@ -170,6 +174,7 @@ impl Queues {
                 layer_writes: &mut self.layer_writes,
                 api_calls: &mut self.api_calls,
                 api_results: &mut self.api_results,
+                selection_requests: &mut self.selection_requests,
             },
         )
     }
@@ -185,6 +190,7 @@ impl Queues {
             && self.orbits.is_empty()
             && self.setting_writes.is_empty()
             && self.layer_writes.is_empty()
+            && self.selection_requests.is_empty()
             && self.api_calls.is_empty()
     }
 
@@ -207,6 +213,9 @@ impl Queues {
         }
         for (key, value) in &self.selected_properties {
             session.set_selected_property(key, value)?;
+        }
+        for ids in &self.selection_requests {
+            session.select_entities(ids)?;
         }
         for view in &self.standard_views {
             session.standard_view(*view)?;
@@ -376,7 +385,9 @@ fn compare(case: &str, name: &str, args: &str, gates: (bool, bool)) -> (Run, Run
 }
 
 /// The per-command matrix lives in its own module so this file stays readable.
+mod bim;
 mod matrix;
+mod selection;
 mod settings_fonts;
 
 // ---------------------------------------------------------------------------

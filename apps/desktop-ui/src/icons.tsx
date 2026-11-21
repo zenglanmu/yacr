@@ -206,6 +206,12 @@ const P = {
   angle: <><path d="M4 19h16M4 19 16 5" /><path d="M12 19a8 8 0 0 0-2-5.3" /></>,
   area: <><path d="M5 6h14l-2 12H7z" strokeDasharray="3 2" /></>,
   layers: <><path d="M12 4 3 9l9 5 9-5z" /><path d="M4 13.5 12 18l8-4.5" /></>,
+  // BIM components: a storeyed building outline with a door, not a stack of
+  // sheets (that is `layers`) and not a parameter list (that is `properties`).
+  // It marks the browse panel in the ribbon and the palette header.
+  bim: <><path d="M5 20V6l7-3 7 3v14" /><path d="M5 10h14M5 15h14" /><path d="M10 20v-5h4v5" /></>,
+  // A funnel: the property-filter disclosure. Three tapering rules, no fill.
+  filter: <><path d="M4 6h16M7 12h10M10 18h4" /></>,
   properties: <><path d="M4 7h8M4 12h13M4 17h6" /><circle cx="17" cy="7" r="1.9" /><circle cx="15" cy="17" r="1.9" /></>,
   selectAll: <><path d="M4 4h6M14 4h6M4 20h6M14 20h6M4 4v6M4 14v6M20 4v6M20 14v6" /><path d="M9 12.5l2.4 2.4L16 10" /></>,
   clearSelection: <><circle cx="12" cy="12" r="8" strokeDasharray="3 2" /><path d="M9 9l6 6M15 9l-6 6" /></>,

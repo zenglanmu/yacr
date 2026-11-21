@@ -88,9 +88,11 @@ impl Mapper<'_> {
                 self.depth_limited += 1;
                 continue;
             }
-            self.tags += entity.attributes.len();
             match &entity.kind {
                 EntityKind::Group { children, .. } => {
+                    // A flattened group owns no row, so tags on the group itself
+                    // have no storage target; members carry their own.
+                    self.tags += entity.attributes.len();
                     self.groups_flattened += 1;
                     let style = self.resolve_style(entity, inherit)?;
                     let mut child_ids =

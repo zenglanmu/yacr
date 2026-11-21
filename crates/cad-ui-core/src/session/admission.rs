@@ -279,6 +279,52 @@ pub fn admit_selected_property(
     Ok(())
 }
 
+/// Bounded capacity of the dedicated selection-replacement queue.
+///
+/// It reuses the CAD command queue's capacity so every admission shares one bound.
+pub const CAD_SELECTION_CAP: usize = CAD_COMMAND_CAP;
+
+/// Stable refusal of an empty `cad_select_entities` request.
+///
+/// An empty id list is a malformed request, **not** "clear the selection": the
+/// chrome owns clearing (an empty-space click / `Esc`), and silently turning an
+/// empty request into a real selection change would hide a caller bug. The
+/// refusal is checked before the gates, like every other content rule.
+pub const SELECTION_EMPTY: &str = "selection.empty";
+
+/// Parse the wire form of a `cad_select_entities` request.
+///
+/// The list must be non-empty ([`SELECTION_EMPTY`]); duplicates and order are the
+/// caller's promise (the BIM panel already dedupes and keeps row order), and the
+/// selection set itself dedupes by identity on apply. Whether every id exists in
+/// the open document is **not** checked here: that needs the authoritative
+/// `cad-db` and is the host session's authority on the owner thread.
+pub fn parse_selection_request(ids: &[u64]) -> Result<Vec<u64>, String> {
+    if ids.is_empty() {
+        return Err(SELECTION_EMPTY.to_string());
+    }
+    Ok(ids.to_vec())
+}
+
+/// The gate of the selection-replacement channel: the modal popup gate, CAD
+/// mode, then the bound (the order the other CAD mutations use).
+pub(super) fn check_select_entities(
+    cad_mode: bool,
+    modal_open: bool,
+    pending: usize,
+) -> Result<(), String> {
+    if modal_open {
+        return Err(POPUP_MODAL_OPEN.into());
+    }
+    if !cad_mode {
+        return Err("CAD is disabled in probe mode".into());
+    }
+    if pending >= CAD_SELECTION_CAP {
+        return Err("CAD selection queue is full".into());
+    }
+    Ok(())
+}
+
 /// Bounded capacity of the dedicated standard-view queue.
 ///
 /// It reuses the CAD command queue's capacity so every admission shares one

@@ -59,7 +59,7 @@ use cad_app::{StandardView, ToolParameter, ToolValue};
 use cad_ui_core::session::wire::{self, AdmissionTarget, ControlReads, PopupTarget};
 use cad_ui_core::session::{
     CadApiResults, CadApiSnapshot, CadApiSubmission, CadFonts, CadLayerWrite, CadLayers,
-    CadSession, CadSettingKey, CadSettingValue, CadSettings,
+    CadSession, CadSettingKey, CadSettingValue, CadSettings, EntityId,
 };
 use serde_json::Value;
 
@@ -216,6 +216,16 @@ impl AdmissionTarget for DirectSink<'_> {
         self.applied(outcome)
     }
 
+    fn select_entities(&mut self, ids: Vec<EntityId>) -> Result<(), String> {
+        // The session is on this thread, so the replacement applies inline through
+        // the same `CadSession::select_entities` the desktop owner tick calls: the
+        // ids are resolved against the open document and an unknown id refuses the
+        // whole request (`selection.unknown_entity: <id>`), leaving the previous
+        // selection untouched. Never an acknowledgement of a selection nobody made.
+        let outcome = self.session.select_entities(&ids);
+        self.applied(outcome)
+    }
+
     fn standard_view(&mut self, view: StandardView) -> Result<(), String> {
         let outcome = self.session.standard_view(view);
         self.applied(outcome)
@@ -262,6 +272,18 @@ impl AdmissionTarget for DirectSink<'_> {
         Ok(CadApiResults { results })
     }
 }
+
+/// The read seam this dispatcher needs: the argument-less control projections
+/// ([`ControlReads`]) **plus** the request-carrying BIM reads
+/// ([`cad_ui_core::bim::BimReads`]).
+///
+/// The shared registry has rows for both families, so the one dispatcher
+/// parameter must satisfy both. The blanket impl makes every reads struct that
+/// implements the two traits qualify; the generated BIM arm upcasts the object
+/// to `&dyn BimReads`.
+pub trait WireReads: ControlReads + cad_ui_core::bim::BimReads {}
+
+impl<T: ControlReads + cad_ui_core::bim::BimReads + ?Sized> WireReads for T {}
 
 /// The [`ControlReads`] of a host that owns its session on this thread.
 ///
@@ -313,6 +335,25 @@ impl ControlReads for DirectReads<'_> {
 
     fn api_snapshot(&self) -> Option<&CadApiSnapshot> {
         Some(&self.snapshot)
+    }
+}
+
+/// BIM is a **request-carrying** read, so it has its own seam (`BimReads`)
+/// instead of the argument-less [`ControlReads`]: the live session is on this
+/// thread, so the answer is the session's own — no mirror, no seam hop.
+impl cad_ui_core::bim::BimReads for DirectReads<'_> {
+    fn bim_query(
+        &self,
+        request: &cad_ui_core::bim::BimQueryRequest,
+    ) -> Result<cad_ui_core::bim::BimQueryResponse, String> {
+        self.session.bim_query(request)
+    }
+
+    fn bim_summary(
+        &self,
+        request: &cad_ui_core::bim::BimQueryRequest,
+    ) -> Result<cad_ui_core::bim::BimSummaryResponse, String> {
+        self.session.bim_summary(request)
     }
 }
 
@@ -400,7 +441,7 @@ macro_rules! wasm_wire_dispatch {
             $name: &str,
             $args_json: &str,
             $sink: &mut dyn AdmissionTarget,
-            $reads: &dyn ControlReads,
+            $reads: &dyn WireReads,
             $popups: &mut dyn PopupTarget,
         ) -> Result<Value, String> {
             if let Some(refusal) = refuse_host_seam_command($name) {

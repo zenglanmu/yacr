@@ -16,14 +16,14 @@ use serde_json::{json, Value};
 use super::*;
 use crate::glb::{linear_to_srgb_byte, validate_factor};
 
-fn fixture(name: &str) -> Vec<u8> {
+pub(crate) fn fixture(name: &str) -> Vec<u8> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../fixtures/rvt")
         .join(name);
     std::fs::read(path).expect("RVT fixture is committed")
 }
 
-fn request(bytes: Vec<u8>) -> ImportRequest {
+pub(crate) fn request(bytes: Vec<u8>) -> ImportRequest {
     ImportRequest {
         document: DocumentId(1),
         database: DatabaseId(1),
@@ -901,7 +901,7 @@ fn a_verified_ceiling_still_never_claims_measurability() {
 // ---- Helpers -------------------------------------------------------------
 
 /// Split a GLB into its JSON document and BIN chunk.
-fn glb_parts(bytes: &[u8]) -> (Value, Vec<u8>) {
+pub(crate) fn glb_parts(bytes: &[u8]) -> (Value, Vec<u8>) {
     assert!(bytes.starts_with(b"glTF"));
     let json_len = u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize;
     let json_end = 20 + json_len;
@@ -911,7 +911,7 @@ fn glb_parts(bytes: &[u8]) -> (Value, Vec<u8>) {
     (json, bytes[bin_start..bin_start + bin_len].to_vec())
 }
 
-fn rebuild_glb(json: &Value, bin: &[u8]) -> Vec<u8> {
+pub(crate) fn rebuild_glb(json: &Value, bin: &[u8]) -> Vec<u8> {
     let mut json_bytes = serde_json::to_vec(json).unwrap();
     while !json_bytes.len().is_multiple_of(4) {
         json_bytes.push(b' ');

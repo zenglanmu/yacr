@@ -12,11 +12,11 @@ use super::*;
 // ---------------------------------------------------------------------------
 
 /// The CAD-enabled, no-modal-popup gate inputs of a live host.
-const LIVE: (bool, bool) = (true, false);
+pub(super) const LIVE: (bool, bool) = (true, false);
 /// Probe mode (`--probe`): the CAD path is disabled.
-const PROBE: (bool, bool) = (false, false);
+pub(super) const PROBE: (bool, bool) = (false, false);
 /// A modal popup owns input.
-const MODAL: (bool, bool) = (true, true);
+pub(super) const MODAL: (bool, bool) = (true, true);
 
 #[test]
 fn every_wire_command_answers_identically_on_both_paths() {
@@ -428,7 +428,11 @@ fn every_wire_command_answers_identically_on_both_paths() {
     let (mut gate_refused, mut applied_ok, mut session_refused) = (0, 0, 0);
     // The object-read cases live in the mutating lane's module so this file stays
     // under the physical-line gate; they are driven through the same harness.
-    for (case, name, args, gates) in cases.iter().chain(api::OBJECT_READ_CASES.iter()) {
+    for (case, name, args, gates) in cases
+        .iter()
+        .chain(super::selection::SELECTION_CASES.iter())
+        .chain(api::OBJECT_READ_CASES.iter())
+    {
         let (desktop, _canvas) = compare(case, name, args, *gates);
         match desktop.admission {
             Admission::Refused(_) => gate_refused += 1,

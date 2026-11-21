@@ -44,6 +44,7 @@ use cad_ui_core::protocol::InputKind;
 use cad_ui_core::session::CadSession;
 
 mod admission;
+mod bim_host;
 // The `dom-canvas` session descriptor relay (iron rule 8: the wasm session's own
 // status, stored verbatim and relayed through `cad_status`). `pub(crate)` so the
 // process-exit trigger in `crate::entry` can forget it.
@@ -423,6 +424,10 @@ pub(crate) fn register_seams(
         shared,
         ymodel_host::AppYmodelHost::new(app.clone()),
     );
+    // BIM query/summary (ADR-0042 D11): a caller-supplied filter over the open
+    // document, so the answer cannot be mirrored; the seam marshals it onto the
+    // same main-thread session.
+    cad_desktop_shell::state::configure_bim_host(shared, bim_host::AppBimHost::new(app.clone()));
     // The Options > Files folder chooser: `native-below` only, because the
     // `dom-canvas` carrier has no local directory (the wasm session owns the
     // document there and its adapter refuses by name).

@@ -1,8 +1,12 @@
-//! IFC property sets and property values (ADR-0042 D2/D7).
+//! IFC property sets, quantity sets and property values (ADR-0042 D2/D7,
+//! Phase 3).
 //!
-//! Only `IfcPropertySet` + `IfcPropertySingleValue` have a [`cad_db::BimValue`]
-//! form. Complex, enumerated, bounded, table and quantity shapes are counted
-//! under stable diagnostics and left out — never flattened into a string.
+//! `IfcPropertySet` + `IfcPropertySingleValue` map onto [`cad_db::BimValue`]
+//! rows, and an `IfcElementQuantity` is stored as one [`cad_db::BimPropertySet`]
+//! under its own source name (`Qto_WallBaseQuantities`), one row per quantity —
+//! see [`super::quantity`]. Complex, enumerated, bounded and table property
+//! shapes are counted under stable diagnostics and left out — never flattened
+//! into a string.
 
 use std::collections::BTreeSet;
 
@@ -53,7 +57,15 @@ pub(super) fn collect_psets(
             continue;
         };
         if definition.ifc_type == IfcType::IfcElementQuantity {
-            stats.quantity_set_not_stored += 1;
+            // A quantity set is a BimPropertySet under its own source name; it
+            // shares the per-element PSet budget checked above.
+            match super::quantity::collect_quantity_set(&definition, decoder, units, stats) {
+                Some(set) => {
+                    stats.quantity_sets_stored += 1;
+                    sets.push(set);
+                }
+                None => stats.quantity_not_stored += 1,
+            }
             continue;
         }
         if definition.ifc_type != IfcType::IfcPropertySet {

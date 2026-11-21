@@ -147,8 +147,24 @@ pub const DIAG_BIM_MATERIAL_UNRESOLVED: &str = "import.ifc.bim.material_unresolv
 pub const DIAG_BIM_PROPERTY_SET_UNSUPPORTED: &str = "import.ifc.bim.property_set_unsupported";
 /// Stable diagnostic code: a property/value shape has no `BimValue` form.
 pub const DIAG_BIM_PROPERTY_VALUE_UNSUPPORTED: &str = "import.ifc.bim.property_value_unsupported";
-/// Stable diagnostic code: an `IfcElementQuantity` is not stored (Phase 3).
+/// Stable diagnostic code: an `IfcElementQuantity` (or one of its entries) could
+/// not be read and was left out.
+///
+/// Phase 3 stored quantities as property sets, so this code no longer means
+/// "quantities are unsupported": it fires only on a real parse failure (an
+/// unknown physical-quantity entity such as `IfcPhysicalComplexQuantity`, a
+/// missing name, or an invalid/non-finite value). A set that *was* stored is
+/// reported by [`DIAG_BIM_QUANTITY_SET_STORED`].
 pub const DIAG_BIM_QUANTITY_SET_NOT_STORED: &str = "import.ifc.bim.quantity_set_not_stored";
+/// Stable diagnostic code (lossless): `IfcElementQuantity` sets were stored as
+/// property sets under their own source name (`Qto_*`).
+pub const DIAG_BIM_QUANTITY_SET_STORED: &str = "import.ifc.bim.quantity_set_stored";
+/// Stable diagnostic code: a structural relation edge has an endpoint with no
+/// readable `IfcRoot.GlobalId` and was not stored.
+pub const DIAG_BIM_RELATION_ENDPOINT_MISSING: &str = "import.ifc.bim.relation_endpoint_missing";
+/// Stable diagnostic code: the structural relation table exceeded
+/// [`cad_db::BIM_MAX_RELATIONS`] and was refused, not truncated.
+pub const DIAG_BIM_RELATION_BUDGET_EXCEEDED: &str = "import.ifc.bim.relation_budget_exceeded";
 /// Stable diagnostic code: a BIM row was dropped at a `cad_db::BIM_*` budget.
 pub const DIAG_BIM_BUDGET_EXCEEDED: &str = "import.ifc.bim.budget_exceeded";
 
@@ -339,6 +355,7 @@ impl Importer for IfcImporter {
         };
         let mut semantics = IfcSemantics::scan(content, &mut decoder, &product_ids, length_scale);
         import.set_bim_definitions(semantics.take_definitions())?;
+        import.set_bim_relations(semantics.take_relations())?;
         semantics.record(&mut import);
         if styled_items > 0 {
             import.record(

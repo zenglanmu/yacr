@@ -1,6 +1,6 @@
 //! Unit 1: Revit bytes -> the GLB `rvt` emits, plus its honest coverage facts.
 //!
-//! Every API used here was read from the `rvt` **0.24.0** sources, not guessed:
+//! Every API used here was read from the `rvt` **0.25.0** sources, not guessed:
 //!
 //! * `RevitFile::open_bytes_with_limits` (`src/reader.rs:529`) consumes a
 //!   `Vec<u8>` and rejects anything that is not an OLE/CFB container whose
@@ -32,6 +32,7 @@ use rvt::reader::OpenLimits;
 use rvt::streams::{PART_ATOM, PROJECT_INFORMATION};
 use rvt::RevitFile;
 
+use crate::semantics::{map_model, RvtSemantics};
 use crate::{
     DECODE_FAILED, FAMILY_NO_GEOMETRY, NOT_A_REVIT_FILE, RELEASE_UNSUPPORTED, RVT_OPEN_LIMITS,
 };
@@ -88,6 +89,10 @@ pub struct RvtDecode {
     /// Single-file GLB. Empty geometry is still a valid, parseable GLB (one
     /// root node, no meshes); the caller decides whether that is a refusal.
     pub glb: Vec<u8>,
+    /// BIM semantics read from the same `IfcModel` the GLB was made from
+    /// (ADR-0042 D8). [`RvtSemantics::is_empty`] is true when the export
+    /// carried no building element.
+    pub semantics: RvtSemantics,
     pub revit_version: Option<u32>,
     /// `rvt`'s release status: `verified`, `partial`, `experimental`,
     /// `unsupported` or `unknown`, from its built-in support matrix.
@@ -121,7 +126,7 @@ pub struct RvtDecode {
 ///
 /// A family (`DocumentKind::Family`) and an unsupported release are refusals,
 /// not empty successes. `cancelled` is checked before and after the expensive
-/// `rvt` run; it cannot interrupt inside `run_export` (0.24.0 exposes
+/// `rvt` run; it cannot interrupt inside `run_export` (0.25.0 exposes
 /// cancellation only through its own `WalkerControl`, which has no adapter for
 /// an external `Fn` here).
 /// Streams whose absence is fatal, given what the container turned out to be.
@@ -197,7 +202,7 @@ pub fn decode_to_glb(
             "{RVT_OPEN_LIMITS}: rvt reading {what} needs {size} bytes, over the {limit} byte limit"
         )),
         other => CadError::CorruptData(format!(
-            "{DECODE_FAILED}: rvt 0.24.0 could not export this file: {other}"
+            "{DECODE_FAILED}: rvt 0.25.0 could not export this file: {other}"
         )),
     })?;
     if cancelled() {
@@ -212,7 +217,7 @@ pub fn decode_to_glb(
     let release_capability = release.and_then(|support| support.capability);
     if release_status == "unsupported" {
         return Err(CadError::Unsupported(format!(
-            "{RELEASE_UNSUPPORTED}: rvt 0.24.0 has no element-record reader for Revit release {} \
+            "{RELEASE_UNSUPPORTED}: rvt 0.25.0 has no element-record reader for Revit release {} \
              (supported range 2008..=2027); the file is refused rather than shown as an empty model",
             run.diagnostics
                 .input
@@ -222,10 +227,11 @@ pub fn decode_to_glb(
         )));
     }
 
+    let semantics = map_model(&run.model);
     let glb = model_to_glb(&run.model);
     if !glb.starts_with(b"glTF") {
         return Err(CadError::Invariant(
-            "rvt 0.24.0's model_to_glb returned bytes without the glTF magic".into(),
+            "rvt 0.25.0's model_to_glb returned bytes without the glTF magic".into(),
         ));
     }
 
@@ -247,6 +253,7 @@ pub fn decode_to_glb(
         .collect();
     Ok(RvtDecode {
         glb,
+        semantics,
         revit_version: run.diagnostics.input.revit_version,
         release_status,
         release_capability,
@@ -300,7 +307,7 @@ fn map_open_error(error: rvt::Error) -> CadError {
              D0 CF 11 E0 A1 B1 1A E1"
         )),
         other => CadError::CorruptData(format!(
-            "{DECODE_FAILED}: rvt 0.24.0 could not open the container: {other}"
+            "{DECODE_FAILED}: rvt 0.25.0 could not open the container: {other}"
         )),
     }
 }

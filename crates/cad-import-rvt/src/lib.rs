@@ -1,6 +1,6 @@
 //! Autodesk Revit (`.rvt` / `.rte`) **preview** import adapter.
 //!
-//! This is a preview path, not a measurement path. [`rvt`] 0.24.0 recovers
+//! This is a preview path, not a measurement path. [`rvt`] 0.25.0 recovers
 //! Revit element records and exports them as glTF; on Revit **2008–2023** an
 //! element's body is its **bounding box** (cut at readable joins), 2024/2025
 //! are `partial`, 2026/2027 are `experimental`, and `.rfa`/`.rft` family files
@@ -30,6 +30,7 @@
 mod decode;
 mod glb;
 mod pbr;
+mod semantics;
 
 #[cfg(test)]
 mod tests;
@@ -38,6 +39,7 @@ pub use decode::{
     classify_document, decode_to_glb, part_atom_declares_family_table, DocumentKind, RvtDecode,
 };
 pub use glb::{read_glb, GlbScene, MaterialLosses, PlacedMesh};
+pub use semantics::{map_model, normalize_ifc_category, RvtSemantics, SemanticsCounts};
 
 use cad_db::{EntityColor, EntityRenderAttributes, EntityTransparency};
 use cad_domain::{CadError, CadResult, Diagnostic, EntityCapability, SupportStatus, UnitContext};
@@ -52,7 +54,7 @@ use cad_import_core::{
 pub const FAMILY_NO_GEOMETRY: &str = "import.rvt.family_no_geometry";
 /// Stable refusal code: a compound file without the invariant Revit streams.
 pub const NOT_A_REVIT_FILE: &str = "import.rvt.not_a_revit_file";
-/// Stable refusal code: `rvt` 0.24.0 could not open or export the file.
+/// Stable refusal code: `rvt` 0.25.0 could not open or export the file.
 pub const DECODE_FAILED: &str = "import.rvt.decode_failed";
 /// Stable refusal code: a decodable project produced no drawable geometry.
 pub const NO_GEOMETRY: &str = "import.rvt.no_geometry";
@@ -99,7 +101,7 @@ pub const DIAG_ALPHA_CHOSEN: &str = "import.rvt.alpha_chosen";
 /// Partial reason: the intermediate GLB carries texture references
 /// (`TEXCOORD_*`, `images` or `textures`) that this importer does not import.
 ///
-/// `rvt` 0.24.0 emits no textures at all (ADR-0038 D6), so this code firing means
+/// `rvt` 0.25.0 emits no textures at all (ADR-0038 D6), so this code firing means
 /// the vendored writer changed; decoding images is out of phase-A scope and
 /// `vendor/rvt` gains no texture patch (ADR-0035).
 pub const DIAG_TEXTURE_NOT_IMPORTED: &str = "import.rvt.texture_not_imported";
@@ -114,6 +116,34 @@ pub const DIAG_PBR_HEURISTIC: &str = "import.rvt.pbr_heuristic";
 /// non-finite or outside glTF's `[0, 1]` range, so no `MeshPbr` was stored for
 /// it (ADR-0039 D4: never clamped).
 pub const DIAG_PBR_IGNORED: &str = "import.rvt.pbr_ignored";
+
+// ---- BIM semantics (ADR-0042 D8) ------------------------------------------
+
+/// Note: the RVT BIM mapping is a code contract over `rvt`'s `IfcModel`; no
+/// real Revit project has been verified and `rvt` must not be used for
+/// measurement or coordination. Provenance, not a loss.
+pub const DIAG_BIM_UNVERIFIED: &str = "import.rvt.bim.unverified";
+/// Partial reason: an element has no IFC GlobalId, so its BIM source id is
+/// empty (the Revit ElementId is kept as `native_id`).
+pub const DIAG_BIM_SOURCE_ID_MISSING: &str = "import.rvt.bim.source_id_missing";
+/// Partial reason: an element's `storey_index` names no exported storey, so its
+/// level is left empty.
+pub const DIAG_BIM_STOREY_UNRESOLVED: &str = "import.rvt.bim.storey_unresolved";
+/// Partial reason: an element has a Revit type but its name is not
+/// `Family:Type`, so no type name can be read and no type row is created.
+pub const DIAG_BIM_TYPE_NAME_MISSING: &str = "import.rvt.bim.type_name_missing";
+/// Partial reason: an element's `material_index` names no material (or one
+/// with no name).
+pub const DIAG_BIM_MATERIAL_UNRESOLVED: &str = "import.rvt.bim.material_unresolved";
+/// Partial reason: a property value (enumerated, list, unknown logical,
+/// non-finite real) has no BIM value form and was left out, not flattened.
+pub const DIAG_BIM_PROPERTY_VALUE_UNSUPPORTED: &str = "import.rvt.bim.property_value_unsupported";
+/// Partial reason: `IfcEntity::Aggregate` records were not grouped into their
+/// whole (Phase 3, ADR-0042 D8); the parts stay as their own elements.
+pub const DIAG_BIM_AGGREGATE_PARTS_NOT_GROUPED: &str = "import.rvt.bim.aggregate_parts_not_grouped";
+/// Partial reason: a BIM row/property/string exceeded a `cad_db::BIM_*` budget
+/// and was dropped; every element reference to a dropped definition is empty.
+pub const DIAG_BIM_BUDGET_EXCEEDED: &str = "import.rvt.bim.budget_exceeded";
 
 /// Stable error code: the intermediate GLB is missing the `glTF` magic.
 pub const EMPTY_GLB: &str = "import.rvt.invalid_glb";
@@ -189,13 +219,13 @@ impl Importer for RvtImporter {
         // `rvt::RevitFile::open_bytes` consumes an owned buffer; the import
         // contract hands out an `Arc<[u8]>`, so this is the one deliberate
         // copy. The file-size limit above bounds it.
-        let decoded = decode_to_glb(request.bytes.to_vec(), &request.limits, cancelled)?;
+        let mut decoded = decode_to_glb(request.bytes.to_vec(), &request.limits, cancelled)?;
         if cancelled() {
             return Err(CadError::Cancelled);
         }
         if !decoded.has_geometry {
             return Err(CadError::Unsupported(format!(
-                "{NO_GEOMETRY}: rvt 0.24.0 decoded Revit {} with confidence level {:?} \
+                "{NO_GEOMETRY}: rvt 0.25.0 decoded Revit {} with confidence level {:?} \
                  ({} building element(s), {} with geometry) but produced no drawable body; \
                  this is a metadata/scaffold result, not an empty success",
                 decoded
@@ -235,9 +265,9 @@ impl Importer for RvtImporter {
         let ceiling = ceiling_for(&decoded.release_status);
         if ceiling == SupportStatus::Unsupported {
             // `decode_to_glb` refuses the known `unsupported` value; this also
-            // covers a status word 0.24.0 did not document.
+            // covers a status word 0.25.0 did not document.
             return Err(CadError::Unsupported(format!(
-                "{RELEASE_UNSUPPORTED}: rvt 0.24.0 reports release status {:?}, which this \
+                "{RELEASE_UNSUPPORTED}: rvt 0.25.0 reports release status {:?}, which this \
                  adapter cannot rate above Unsupported",
                 decoded.release_status
             )));
@@ -245,11 +275,16 @@ impl Importer for RvtImporter {
         let mut import = MeshImport::new(request, RVT_MESH_TYPE_KEY)?;
         record_decode(&mut import, &decoded);
         record_scene(&mut import, &scene);
+        // ADR-0042 D8: the BIM side tables come from the same `IfcModel` the GLB
+        // was made from. Definitions are independent of the geometry rows, so
+        // the whole table can be installed before they are inserted.
+        let mut semantics = std::mem::take(&mut decoded.semantics);
+        import.set_bim_definitions(semantics.take_definitions())?;
         import.record(
             Diagnostic {
                 object: None,
                 code: DIAG_UNITS_METRES.into(),
-                message: "rvt 0.24.0 writes glTF with one root matrix of 0.3048 that scales its \
+                message: "rvt 0.25.0 writes glTF with one root matrix of 0.3048 that scales its \
                           feet-based body coordinates to metres and swaps to +Y up; this adapter \
                           applies every node's world transform and maps the glTF +Y-up frame to \
                           CAD +Z up, so stored coordinates are metres"
@@ -273,7 +308,7 @@ impl Importer for RvtImporter {
             // material support existed. `ByLayer` opacity resolves to opaque
             // because this import writes no layer attribute row (see
             // `MeshImport::new`), so an opaque material stores no explicit 1.0.
-            import.push_mesh_with_attributes(
+            let entity = import.push_mesh_with_attributes(
                 object,
                 placed.mesh,
                 EntityRenderAttributes {
@@ -287,6 +322,12 @@ impl Importer for RvtImporter {
                     ..Default::default()
                 },
             )?;
+            // One source element split into several nodes keeps its own
+            // `EntityId` per row but stores the same BIM block on each
+            // (ADR-0042 D2/D5); the block's `bim.source` is the grouping key.
+            if let Some(bim) = semantics.element_for_index(placed.entity_index) {
+                import.set_entity_bim(entity, bim.clone())?;
+            }
             progress.report(ImportProgress::at(
                 ImportPhase::Entities,
                 import.entity_count(),
@@ -299,7 +340,7 @@ impl Importer for RvtImporter {
         // always Partial for the reason below.
         let preview_reason = format!(
             "Revit bodies are preview geometry (bounding boxes on Revit 2008-2023, partial on \
-             2024/2025, experimental on 2026/2027); rvt 0.24.0's release status is {:?} and its \
+             2024/2025, experimental on 2026/2027); rvt 0.25.0's release status is {:?} and its \
              documentation says not to rely on the output for measurement or coordination",
             decoded.release_status
         );
@@ -311,6 +352,11 @@ impl Importer for RvtImporter {
             },
             Some(preview_reason),
         );
+
+        // BIM reading losses and the Unverified provenance note; this adds no
+        // partial reason of its own beyond the losses it reports (an RVT import
+        // is already Partial for preview geometry).
+        semantics.record(&mut import);
 
         progress.report(ImportProgress::at(
             ImportPhase::Finishing,
@@ -389,7 +435,7 @@ fn record_decode(import: &mut MeshImport, decoded: &RvtDecode) {
             object: None,
             code: DIAG_RELEASE_STATUS.into(),
             message: format!(
-                "Revit release {:?} has rvt 0.24.0 status {:?} (capability {:?}); read, render \
+                "Revit release {:?} has rvt 0.25.0 status {:?} (capability {:?}); read, render \
                  and pick are capped at that status, and measure stays Unsupported",
                 decoded.revit_version, decoded.release_status, decoded.release_capability
             ),
@@ -549,7 +595,7 @@ fn record_scene(import: &mut MeshImport, scene: &GlbScene) {
                 object: None,
                 code: DIAG_PRIMITIVE_MODE_SKIPPED.into(),
                 message: format!(
-                    "{} glTF primitive(s) were not TRIANGLES and were skipped; rvt 0.24.0 only \
+                    "{} glTF primitive(s) were not TRIANGLES and were skipped; rvt 0.25.0 only \
                      emits triangle lists, so this is unexpected input",
                     scene.primitives_skipped
                 ),
@@ -581,14 +627,14 @@ fn record_scene(import: &mut MeshImport, scene: &GlbScene) {
                 code: DIAG_TEXTURE_NOT_IMPORTED.into(),
                 message: format!(
                     "the intermediate GLB declares {} texture reference(s) (a `TEXCOORD_*` \
-                     attribute, an `images` entry or a `textures` entry); rvt 0.24.0 emits no \
+                     attribute, an `images` entry or a `textures` entry); rvt 0.25.0 emits no \
                      textures, so this means the vendored glTF writer changed — no UVs or texture \
                      were imported",
                     scene.texture_references
                 ),
             },
             Some(format!(
-                "{} texture reference(s) in the rvt glTF were not imported; rvt 0.24.0 does not \
+                "{} texture reference(s) in the rvt glTF were not imported; rvt 0.25.0 does not \
                  emit textures, so this is unexpected input",
                 scene.texture_references
             )),
@@ -611,7 +657,7 @@ fn record_scene(import: &mut MeshImport, scene: &GlbScene) {
         );
     }
     if scene.pbr_meshes > 0 {
-        // ADR-0039 D4: read, but named as what it is. `rvt` 0.24.0 derives both
+        // ADR-0039 D4: read, but named as what it is. `rvt` 0.25.0 derives both
         // values from the material name alone; its `extras` mark only colour and
         // alpha provenance, so nothing here is Revit-authored PBR.
         import.record(
@@ -620,7 +666,7 @@ fn record_scene(import: &mut MeshImport, scene: &GlbScene) {
                 code: DIAG_PBR_HEURISTIC.into(),
                 message: format!(
                     "{} imported mesh(es) carry a metallic/roughness factor from the intermediate \
-                     glTF; rvt 0.24.0 derives both heuristically from the material name \
+                     glTF; rvt 0.25.0 derives both heuristically from the material name \
                      (`src/ifc/pbr.rs`), not from Revit-authored material data, so they approximate \
                      a plausible surface rather than the file's own PBR values (only colour and \
                      alpha provenance are marked in the material extras)",

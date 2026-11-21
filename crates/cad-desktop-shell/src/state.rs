@@ -35,8 +35,8 @@ use cad_ui_core::protocol::InputKind;
 use cad_ui_core::session::events::EventBus;
 use cad_ui_core::session::{
     CadFonts, CadLayerWrite, CadLayers, CadRecentFiles, CadRecoveryFiles, CadSession,
-    CadSettingKey, CadSettingValue, CadSettings, CadStatus, CadYmodelResources, OrbitDelta,
-    QueueFamily, QueueReads, QueueSink,
+    CadSettingKey, CadSettingValue, CadSettings, CadStatus, CadYmodelResources, EntityId,
+    OrbitDelta, QueueFamily, QueueReads, QueueSink,
 };
 use cad_ui_core::shell::{modal_gate_open, ShellState};
 
@@ -214,6 +214,14 @@ pub struct Shared {
     /// `cad_set_selected_property` and drained into
     /// `CadSession::set_selected_property`.
     pub cad_selected_properties: Vec<(String, String)>,
+    /// Bounded main-thread queue of selection replacements (`cad_select_entities`,
+    /// the BIM panel's click action): admitted by that command and drained into
+    /// `CadSession::select_entities`, which validates every id against the open
+    /// document and replaces the selection atomically.
+    ///
+    /// The request carries ids only: the entity list is derived state, so the
+    /// document binding is resolved on the owner thread at apply time.
+    pub cad_selection_requests: VecDeque<Vec<EntityId>>,
     /// Bounded main-thread queue of typed standard-view requests: admitted by
     /// `cad_standard_view` and drained into `CadSession::standard_view`.
     pub cad_standard_views: VecDeque<StandardView>,
@@ -319,6 +327,15 @@ pub struct Shared {
     /// refuse by name instead of inventing a preview for a file that cannot carry
     /// resources.
     pub ymodel_host: Option<Arc<dyn ShellYmodelHost>>,
+    /// The platform BIM query seam (see [`cad_ui_core::bim::BimHost`]).
+    ///
+    /// A BIM query takes a caller-supplied filter, so unlike the element
+    /// projections it cannot be mirrored ahead of time: the host marshals the
+    /// request onto the `!Send` session thread through this seam. `None` keeps
+    /// both `cad_bim_*` commands on the shared `unsupported-runtime: bimQuery`
+    /// refusal — an honest "this carrier has no BIM query lane", never an empty
+    /// page that would read as "this document has no BIM data".
+    pub cad_bim_host: Option<Arc<dyn cad_ui_core::bim::BimHost>>,
     /// The native folder picker (see [`crate::directory::DirectoryPicker`]).
     ///
     /// A carrier with a local folder chooser installs one during startup; the
@@ -372,6 +389,7 @@ impl Shared {
             cad_tool_texts: Vec::new(),
             cad_selected_texts: Vec::new(),
             cad_selected_properties: Vec::new(),
+            cad_selection_requests: VecDeque::new(),
             cad_standard_views: VecDeque::new(),
             cad_orbits: VecDeque::new(),
             cad_pinches: VecDeque::new(),
@@ -390,6 +408,7 @@ impl Shared {
             recent_host: None,
             recovery_host: None,
             ymodel_host: None,
+            cad_bim_host: None,
             directory_picker: None,
             vendor: crate::vendor::VendorStore::default(),
             vendor_pending_representations: None,
@@ -434,6 +453,7 @@ impl Shared {
                 tool_texts: &mut self.cad_tool_texts,
                 selected_texts: &mut self.cad_selected_texts,
                 selected_properties: &mut self.cad_selected_properties,
+                selection_requests: &mut self.cad_selection_requests,
                 standard_views: &mut self.cad_standard_views,
                 orbits: &mut self.cad_orbits,
                 setting_writes: &mut self.cad_setting_writes,
@@ -457,6 +477,8 @@ impl Shared {
             self.cad_fonts.as_ref(),
             self.cad_api_snapshot.as_ref(),
         )
+        // The one request-carrying read: served by the session seam, not a mirror.
+        .with_bim_host(self.cad_bim_host.as_ref())
     }
 }
 
@@ -544,6 +566,15 @@ pub fn configure_recovery_host(shared: &Arc<Mutex<Shared>>, host: Arc<dyn ShellR
 /// instead of a preview of resources no file on that carrier can carry.
 pub fn configure_ymodel_host(shared: &Arc<Mutex<Shared>>, host: Arc<dyn ShellYmodelHost>) {
     lock(shared).ymodel_host = Some(host);
+}
+
+/// Install the BIM query seam (see [`cad_ui_core::bim::BimHost`]).
+///
+/// A carrier whose native session owns the document calls this once during
+/// startup; a carrier that never does keeps the named
+/// `unsupported-runtime: bimQuery` refusal instead of an empty BIM table.
+pub fn configure_bim_host(shared: &Arc<Mutex<Shared>>, host: Arc<dyn cad_ui_core::bim::BimHost>) {
+    lock(shared).cad_bim_host = Some(host);
 }
 
 /// Install the native folder picker (see [`crate::directory::DirectoryPicker`]).

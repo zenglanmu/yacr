@@ -1,9 +1,10 @@
-//! `manifest.format.minor` per document (ADR-0040 D12, ADR-0042 D6).
+//! `manifest.format.minor` per document (ADR-0040 D12, ADR-0042 D6/D3-tail).
 //!
 //! The version gate runs before anything is decoded, so a document stamped with
 //! a higher minor than it needs is refused by older builds for no reason. These
-//! tests pin the three tiers — `4` plain, `5` resources only, `6` BIM — through
-//! real archives, and prove a minor-5 archive without BIM still opens.
+//! tests pin the tiers — `4` plain, `5` resources only, `7` BIM (with or without
+//! relations) — through real archives, prove a minor-5 archive without BIM still
+//! opens, and prove a minor-6 (relations-free) archive still opens.
 //!
 //! Kept in its own file because `tests/archive.rs` is at the 1000-line gate; it
 //! needs only the public store/db API plus `zip` to read the manifest.
@@ -149,8 +150,27 @@ fn bim_definition() -> Value {
     })
 }
 
+fn relation_row() -> Value {
+    serde_json::json!({
+        "kind": "contains",
+        "parent": {"kind": "source", "connector": "ifc", "document_id": "doc-1", "id": "P"},
+        "child": {"kind": "source", "connector": "ifc", "document_id": "doc-1", "id": "C"},
+        "source": null,
+        "label": null,
+    })
+}
+
 #[test]
 fn a_bim_free_document_stays_minor_four() {
+    let bytes = write_bytes(&snapshot());
+    assert_eq!(minor_of(&bytes), 4);
+    assert!(!read_bytes(&bytes).snapshot.has_bim());
+}
+
+/// The Phase 3 tier table pins the plain case explicitly under this name (the
+/// fixture is shared with [`a_bim_free_document_stays_minor_four`]).
+#[test]
+fn a_plain_document_stays_minor_four() {
     let bytes = write_bytes(&snapshot());
     assert_eq!(minor_of(&bytes), 4);
     assert!(!read_bytes(&bytes).snapshot.has_bim());
@@ -180,7 +200,10 @@ fn a_resources_only_document_stays_minor_five() {
 }
 
 #[test]
-fn a_bim_document_writes_minor_six_and_reopens() {
+fn a_bim_document_without_relations_still_writes_seven() {
+    // Relations and the element/definition blocks are one release (ADR-0042 D3
+    // tail): a minor-6 reader refuses the `bim` block anyway, so there is no
+    // lower tier to gain by writing 6 here.
     let mut document = snapshot();
     document
         .tables
@@ -188,7 +211,7 @@ fn a_bim_document_writes_minor_six_and_reopens() {
     document.shards[0].elements[0].payload["bim"] = bim_block();
 
     let bytes = write_bytes(&document);
-    assert_eq!(minor_of(&bytes), 6);
+    assert_eq!(minor_of(&bytes), 7);
 
     let loaded = read_bytes(&bytes);
     assert!(loaded.snapshot.has_bim());
@@ -200,8 +223,35 @@ fn a_bim_document_writes_minor_six_and_reopens() {
         loaded.snapshot.tables.get(TableKind::BimDefinitions),
         Some(&[bim_definition()][..])
     );
+    assert!(
+        loaded
+            .snapshot
+            .tables
+            .get(TableKind::BimRelations)
+            .is_none(),
+        "no relation rows were given, so no relation table is written"
+    );
     // A second save keeps the tier (the table and the block are still there).
-    assert_eq!(minor_of(&write_bytes(&loaded.snapshot)), 6);
+    assert_eq!(minor_of(&write_bytes(&loaded.snapshot)), 7);
+}
+
+#[test]
+fn a_document_with_relations_writes_minor_seven() {
+    let mut document = snapshot();
+    document
+        .tables
+        .set(TableKind::BimRelations, vec![relation_row()]);
+
+    let bytes = write_bytes(&document);
+    assert_eq!(minor_of(&bytes), 7, "relations alone earn the BIM tier");
+
+    let loaded = read_bytes(&bytes);
+    assert!(loaded.snapshot.has_bim());
+    assert_eq!(
+        loaded.snapshot.tables.get(TableKind::BimRelations),
+        Some(&[relation_row()][..])
+    );
+    assert_eq!(minor_of(&write_bytes(&loaded.snapshot)), 7);
 }
 
 /// Rewrite `manifest.format.minor`, leaving every other entry untouched.
@@ -250,10 +300,10 @@ fn a_minor_five_archive_without_bim_opens() {
     assert!(!loaded.snapshot.has_bim());
 
     // The ceiling still applies: one above this build's minor is refused.
-    let mut source = MemorySource::new(with_minor(&bytes, 7));
+    let mut source = MemorySource::new(with_minor(&bytes, 8));
     let error = ZipDocumentStore::new()
         .read(&mut source)
-        .expect_err("minor 7 is newer than this build");
+        .expect_err("minor 8 is newer than this build");
     assert_eq!(
         error.marker,
         cad_domain::ymodel::markers::UNSUPPORTED_MINOR,
@@ -262,17 +312,46 @@ fn a_minor_five_archive_without_bim_opens() {
 }
 
 #[test]
-fn a_minor_five_archive_that_holds_bim_is_accepted_and_resaved_at_six() {
+fn a_minor_six_archive_without_relations_opens() {
+    // Minor 6 is the legacy BIM tier (elements/definitions, no relation table).
+    // A build that now writes 7 must still read what it wrote before.
+    let mut document = snapshot();
+    document
+        .tables
+        .set(TableKind::BimDefinitions, vec![bim_definition()]);
+    document.shards[0].elements[0].payload["bim"] = bim_block();
+    let seven = write_bytes(&document);
+    assert_eq!(minor_of(&seven), 7);
+
+    let loaded = read_bytes(&with_minor(&seven, 6));
+    assert!(
+        loaded.snapshot.has_bim(),
+        "the definition table and block survive"
+    );
+    assert!(
+        loaded
+            .snapshot
+            .tables
+            .get(TableKind::BimRelations)
+            .is_none(),
+        "a minor-6 archive carries no relation table"
+    );
+    // A resave moves it to the release this build writes.
+    assert_eq!(minor_of(&write_bytes(&loaded.snapshot)), 7);
+}
+
+#[test]
+fn a_minor_five_archive_that_holds_bim_is_accepted_and_resaved_at_seven() {
     // The ADR-0042 compatibility matrix: a non-conforming minor-5 archive with a
-    // `bim` block is accepted and preserved, and the next save stamps minor 6
-    // instead of dropping the data.
+    // `bim` block is accepted and preserved, and the next save stamps the
+    // current tier instead of dropping the data.
     let mut document = snapshot();
     document.shards[0].elements[0].payload["bim"] = bim_block();
-    let six = write_bytes(&document);
-    assert_eq!(minor_of(&six), 6);
+    let seven = write_bytes(&document);
+    assert_eq!(minor_of(&seven), 7);
 
-    let relabelled = with_minor(&six, 5);
+    let relabelled = with_minor(&seven, 5);
     let loaded = read_bytes(&relabelled);
     assert!(loaded.snapshot.has_bim(), "the block is preserved");
-    assert_eq!(minor_of(&write_bytes(&loaded.snapshot)), 6);
+    assert_eq!(minor_of(&write_bytes(&loaded.snapshot)), 7);
 }

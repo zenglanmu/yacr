@@ -128,6 +128,12 @@ macro_rules! cad_wire_registry {
             @row(shared, sink, ToolTextArgs, cad_set_tool_text, { arg(req, text, String) }, $crate::session::wire::CadCommandAck, { $crate::session::wire::set_tool_text(sink, &text) })
             @row(shared, sink, SelectedTextArgs, cad_set_selected_text, { arg(req, text, String) }, $crate::session::wire::CadCommandAck, { $crate::session::wire::set_selected_text(sink, &text) })
             @row(shared, sink, PropertyArgs, cad_set_selected_property, { arg(req, key, String) arg(req, value, String) }, $crate::session::wire::CadCommandAck, { $crate::session::wire::set_selected_property(sink, &key, &value) })
+            // The BIM panel's click action (ADR-0042): the component's geometry
+            // rows replace the current selection. `entity_ids` travels as the
+            // camelCase `entityIds` on the wire (both transports decode camelCase;
+            // Tauri's command arguments and the wasm struct agree). Not a drawing
+            // command: absent from `cad_commands`.
+            @row(shared, sink, SelectionArgs, cad_select_entities, { arg(req, entity_ids, ::std::vec::Vec<u64>) }, $crate::session::wire::CadCommandAck, { $crate::session::wire::select_entities(sink, entity_ids) })
             @row(shared, sink, StandardViewArgs, cad_standard_view, { arg(req, view, String) }, $crate::session::wire::CadCommandAck, { $crate::session::wire::standard_view(sink, &view) })
             @row(shared, sink, OrbitArgs, cad_orbit, { arg(req, yaw, f64) arg(req, pitch, f64) }, $crate::session::wire::CadCommandAck, { $crate::session::wire::orbit(sink, yaw, pitch) })
             @row(shared, popups, PopupArgs, cad_open_popup, { arg(req, kind, String) }, $crate::popup::PopupAck, { $crate::session::wire::open_popup(popups, &kind) })
@@ -136,6 +142,13 @@ macro_rules! cad_wire_registry {
             @row(shared, sink, SettingArgs, cad_set_setting, { arg(req, key, String) arg(req, value, $crate::session::registry::RegistryJsonValue) }, $crate::session::wire::CadCommandAck, { $crate::session::wire::set_setting(sink, &key, &value) })
             @row(shared, reads, NoArgs, cad_layers, { }, $crate::session::CadLayers, { $crate::session::wire::layers(reads) })
             @row(shared, reads, NoArgs, cad_fonts, { }, $crate::session::CadFonts, { $crate::session::wire::fonts(reads) })
+            // The BIM query/summary pair (ADR-0042 D11). A **request-carrying**
+            // read: the filter and the page window come from the caller, so the
+            // desktop serves it through its session seam (`BimHost`) instead of
+            // the owner-tick mirror. Not drawing commands: absent from
+            // `cad_commands`, so `check-command-docs.py` owes them nothing.
+            @row(shared, reads, BimQueryArgs, cad_bim_query, { arg(req, filter, $crate::bim::BimFilterWire) arg(req, offset, usize) arg(req, limit, usize) }, $crate::bim::BimQueryResponse, { $crate::session::bim_reads::bim_query(reads, filter, offset, limit) })
+            @row(shared, reads, BimSummaryArgs, cad_bim_summary, { arg(req, filter, $crate::bim::BimFilterWire) arg(req, offset, usize) arg(req, limit, usize) }, $crate::bim::BimSummaryResponse, { $crate::session::bim_reads::bim_summary(reads, filter, offset, limit) })
             @row(shared, sink, LayerVisibleArgs, cad_set_layer_visible, { arg(req, name, String) arg(req, visible, bool) }, $crate::session::wire::CadCommandAck, { $crate::session::wire::set_layer_visible(sink, &name, visible) })
             @row(shared, sink, NoArgs, cad_restore_layers, { }, $crate::session::wire::CadCommandAck, { $crate::session::wire::restore_layers(sink) })
             @row(shared, sink, ActiveLayerArgs, cad_set_active_layer, { arg(req, name, String) }, $crate::session::wire::CadCommandAck, { $crate::session::wire::set_active_layer(sink, &name) })

@@ -32,6 +32,13 @@ use std::fmt;
 
 use cad_domain::EntityId;
 
+pub(crate) mod relations;
+
+pub use relations::{
+    validate_relation, validate_relations, BimRelation, BimRelationKind, BimRelations,
+    BIM_MAX_RELATIONS, BIM_MAX_RELATION_BYTES,
+};
+
 /// Most rows `tables/bim-definitions.json` may hold (ADR-0042 D3).
 pub const BIM_MAX_DEFINITIONS: usize = 100_000;
 
@@ -403,7 +410,7 @@ impl fmt::Display for BimError {
 impl std::error::Error for BimError {}
 
 /// Check one string against the per-string budget and the non-empty rule.
-fn check_text(what: &str, value: &str, allow_empty: bool) -> Result<(), BimError> {
+pub(crate) fn check_text(what: &str, value: &str, allow_empty: bool) -> Result<(), BimError> {
     if !allow_empty && value.trim().is_empty() {
         return Err(BimError::invalid(format!("{what}: empty")));
     }
@@ -663,7 +670,16 @@ impl crate::DrawingDatabaseBuilder {
     }
 }
 
-fn to_cad_error(error: BimError) -> cad_domain::CadError {
+/// Check a whole document's BIM state, including the relation table.
+///
+/// The builder's `finish()` gate calls this. It is a thin composition so the
+/// call site in `builder.rs` (a file at the 1000-line gate) stays one line.
+pub fn validate_all(database: &crate::DrawingDatabase) -> Result<(), BimError> {
+    validate(&database.bim_definitions, &database.bim_elements)?;
+    relations::validate_relations(&database.bim_relations)
+}
+
+pub(crate) fn to_cad_error(error: BimError) -> cad_domain::CadError {
     cad_domain::CadError::InvalidInput(error.to_string())
 }
 

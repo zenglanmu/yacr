@@ -9,7 +9,7 @@ use std::sync::{Arc, RwLock};
 
 use cad_domain::*;
 
-use crate::bim::{BimDefinitions, BimElement};
+use crate::bim::{BimDefinitions, BimElement, BimRelations};
 use crate::dim_style::DimStyle;
 use crate::entity::{DbEntity, EntityRenderAttributes};
 use crate::mleader_style::MLeaderStyle;
@@ -342,6 +342,13 @@ pub struct DrawingDatabase {
     /// Empty for every document without BIM data; the writer then emits no
     /// table at all, which keeps such a document at its resources-derived minor.
     pub(crate) bim_definitions: BimDefinitions,
+    /// BIM relation edges (`tables/bim-relations.json`, ADR-0042 D3 tail/D12).
+    ///
+    /// Empty for every document without edges; the writer then emits no table,
+    /// so a BIM document without relations stays on the same minor tier as one
+    /// with them only because `has_bim` already names that release (minor 7),
+    /// not because this table is written unconditionally.
+    pub(crate) bim_relations: BimRelations,
     /// Cache of [`Self::bounds`] tagged with the [`Revision`] it was computed
     /// at. Interior mutability is required because `bounds` takes `&self` (the
     /// scene-preparation worker shares one `Arc<DrawingDatabase>` across

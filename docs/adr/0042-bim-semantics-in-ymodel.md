@@ -1,8 +1,12 @@
 # ADR 0042：`.ymodel` 的 BIM 语义层（参照 iModel/BIS 的取舍）
 
-- 状态：**Accepted（2026-11-21）**；**Phase 1 已实现**（格式与存储、IFC 语义导入、属性面板、
-  端到端契约），Phase 2（IFC 导出回写、RVT/DGN 语义）与 Phase 3（查询/过滤/明细表、
-  关系与 Aspect 落盘）**未开始**，见 §4。
+- 状态：**Accepted（2026-11-21）**；**Phase 1 已实现**（格式与存储、IFC 语义导入、属性面板、端到端
+  契约），**Phase 2 与 Phase 3 已实现（2026-11-21）**——IFC 导出回写、RVT/DGN 语义、DGN 标签 PSet、
+  IFC 数量集与关系落盘、`cad-query` BIM 索引 + `cad_bim_query`/`cad_bim_summary` wire、React BIM
+  面板与 `cad_select_entities`。**三项明确边界**：① **IFC 关系不导出**（只做落盘与导入；导出仍不写
+  `IfcRelAggregates`/`IfcRelNests`）；② **Windows/macOS/Android 无 BIM 查询 seam**，按
+  `unsupported-runtime: bimQuery` 显式拒绝（不是空页）；③ `cad_db::BimValue::Text` 无 `ifc_type`，
+  导出恒写 `Label`。RVT/DGN 语义仍 `Unverified`；Aspect 落盘与属性编辑仍未开始，见 §4。
 - 日期：2026-11-21。
 - 相关：[ADR-0037](0037-ymodel-schema-and-persistence.md)（`.ymodel` 是唯一原生格式、BIS 骨架）、
   [ADR-0033](0033-multi-format-import.md)（连接器、各格式定位）、
@@ -102,8 +106,29 @@ Bentley iModel/BIS 提供了成熟的参照：内部 Id 与 FederationGuid 分�
 - 定义表只在非空时写（照 `resources` 的 `build.rs` 条件写法），否则所有文档都会升 minor。
 - 预算：`BIM_MAX_DEFINITIONS = 100_000`、编码体积 32 MiB；超预算丢弃超出部分、把相关元素引用置
   `None` 并报 `*.bim.budget_exceeded` + `Partial`，**不写悬空引用**。
-- 多对多关系（group/system/connects）Phase 1 不落盘；Phase 3 以关系元素进分片或单表（上限
-  100k 行 / 32 MiB，超出显式拒绝）。
+- **Phase 3 已落地（有界单表，2026-11-21）**：多对多关系落 `tables/bim-relations.json`，**不启用**
+  `IdKind` 12/13、不占高水位、不碰 `header.rs`。行形状（`document_id` 与元素 `bim.source` 同一拼写）：
+
+  ```json
+  {"kind": "aggregates",
+   "parent": {"kind": "source", "connector": "ifc", "document_id": "…", "id": "…"},
+   "child":  {"kind": "entity", "entityId": 7},
+   "source": {"kind": "source", "connector": "ifc", "document_id": "…", "id": "…"},
+   "label": null}
+  ```
+
+  - `kind` ∈ `aggregates | nests | contains | group | connects | other:<token>`；未知 token 是坏文档，
+    不是"新类型静默接受"。
+  - `parent`/`child`/`source` 复用元素 `bim.source` 的 `BimKey` 语义：`{"kind":"source",connector,
+    document_id,id}` 或 `{"kind":"entity",entityId}`（持久化 id，必须属于 entity 家族）。
+  - `source`/`label` **恒写键**，无值即 `null`；省略键、额外键、错误类型都按坏文档拒绝。
+  - 只在非空时写；预算 **100 000 行 / 32 MiB 编码体积**，超限 `ymodel.bim.budget_exceeded`
+    **显式拒绝**，不静默截断。
+  - 行键 `(kind, parent, child)`：重复行在写入（`BimRelations::insert`）与读取（表解码）两侧都
+    **拒绝**，不静默合并（同端点不同 label 也算重复）。
+  - 关系端点**不要求**解析到现存元素（IFC 的一个 product 可能没有几何行）；但形状与预算在读侧
+    同样严格，防止恶意归档撑大边集。
+  - 关系与元素/定义同属 **minor 7**；有 BIM 定义但无关系的文档也写 7（同一发布周期，不拆档）。
 
 ### D4 — 属性集内联；属性面板用固定静态键 + 摘要值
 
@@ -114,7 +139,8 @@ Bentley iModel/BIS 提供了成熟的参照：内部 Id 与 FederationGuid 分�
 `bim_properties`（单行摘要，例如 `Pset_WallCommon (3), Pset_Revit_Type (5)`）、`bim_evidence`。
 
 逐属性行、动态属性名、属性编辑一律 Phase 3，且必须先改 wire 契约（`PropertyRow` 增加
-`label`，`key` 变 `Cow<'static, str>`）——不在本轮偷偷改。
+`label`，`key` 变 `Cow<'static, str>`）——不在本轮偷偷改。（Phase 3 已落地其余部分，但这一项
+**仍未做**：`PropertyRow.key` 仍是 `&'static str`，面板 `editable` 恒 `false`。）
 
 ### D5 — 标识：内部 `EntityId` 稳定 + 源标识并存
 
@@ -125,17 +151,21 @@ Bentley iModel/BIS 提供了成熟的参照：内部 Id 与 FederationGuid 分�
   GlobalId 只在文档内唯一：**不承诺跨文件/改后重导入自动合并**；同一批次内按 `bim.source` 归组，
   重复的 `(document_id, id)` 保留两行并报 `import.bim.duplicate_source_id`（`Partial`）。
 
-### D6 — `FORMAT_MINOR` 升到 6，写入按文档取 4/5/6
+### D6 — `FORMAT_MINOR` 升到 7（6 保留为只读档），写入按文档取 4/5/7
 
-- `cad-domain/src/ymodel/mod.rs:91` 改为 6，注释追加"6 = BIM 元素块 + `tables/bim-definitions.json`"。
-- `document_minor()` 必须显式三档（现 `resources.rs:285-306` 直接返回 `FORMAT_MINOR`，不改会让
-  "只有资源"的文档被写成 6，老构建无谓拒绝）：
+- Phase 1 曾把 `cad-domain/src/ymodel/mod.rs` 的 `FORMAT_MINOR` 从 5 升到 6；Phase 3 再升到 **7**
+  （关系表）。注释写明：6 = 元素 `bim` 块 + `tables/bim-definitions.json`，7 = `tables/bim-relations.json`。
+- `document_minor()` 必须显式分档（现 `crates/cad-store-zip/src/minor.rs`），不能直接返回
+  `FORMAT_MINOR`，否则"只有资源"的文档会被写成 7，老构建无谓拒绝：
 
-  `has_bim` → 6；`embed_resources`/有资源条目 → 5；否则 → 4。
+  `has_bim`（元素块 / 定义表 / 关系表任一存在）→ 7；`embed_resources`/有资源条目 → 5；否则 → 4。
 
-  `has_bim` 落在 `cad-db`（`DocumentSnapshot` 方法，store 不认识 `"bim"` 字面量）。
-- 兼容：旧读新 → `ymodel.unsupported_minor`（`crates/cad-store-zip/src/read.rs:146-166`），不静默丢
-  `bim`；新读旧 → 元素无 `bim` = `None`、无定义表 = 空定义，正常打开。
+  **6 是只读旧档**：本构建能打开 minor-6 归档，但再保存一律写 7；"有 BIM 定义但无关系"也写 7，
+  因为元素 `bim` 块本来就会让 minor ≤ 6 的构建拒绝，拆档没有收益。
+
+  `has_bim` 落在 `cad-db`（`DocumentSnapshot` 方法，store 不认识 `"bim"` 字面量或关系表路径）。
+- 兼容：旧读新 → `ymodel.unsupported_minor`（`crates/cad-store-zip/src/read.rs`），不静默丢
+  `bim`/关系；新读旧 → 元素无 `bim` = `None`、无定义表 = 空定义、无关系表 = 空关系，正常打开。
 - `schema/classes.json` 多一个字段不影响旧读（读侧只做形状检查）。
 
 ### D7 — IFC 导入：第二遍语义扫描，天花板 `Partial`
@@ -207,7 +237,9 @@ Bentley iModel/BIS 提供了成熟的参照：内部 Id 与 FederationGuid 分�
 
 - 不用 `SubCategory(11)` 表示 BIM 类别——它已是 DWG layer 的镜像（ADR-0037 D7），叠加会破坏不变量。
 - 启用 `Relationship(12)`/`Aspect(13)` 需要：`IdCounters` 加字段、`from_json_value` 接受新文档缺省、
-  `document_minor` 升 7、只用 `header.mint()`（禁 `max(id)+1`）。Phase 3 再做。
+  `document_minor` 升档、只用 `header.mint()`（禁 `max(id)+1`）。**Phase 3 已落地但未启用它们**：
+  多对多关系改走有界单表 `tables/bim-relations.json`（D3/D6）；12/13 仍留作将来把关系升级为关系元素，
+  Aspect 落盘启动时再评估。
 
 ### D13 — 非目标（不照搬 BIS）
 
@@ -217,12 +249,14 @@ DefinitionElement 迁移提前（样式/图层/线型/块定义仍在 `tables/*`
 
 ## 2. 兼容矩阵
 
-| 文档 | 写入 minor | 旧构建（≤5） | 新构建 |
+| 文档 | 写入 minor | 旧构建（≤6） | 新构建 |
 |---|---|---|---|
 | 无 BIM、无资源 | 4 | 打开 | 打开，`bim=None` |
 | 有资源、无 BIM | 5 | 拒绝（`unsupported_minor`，本就如此） | 打开 |
-| 有 BIM | 6 | 拒绝 `ymodel.unsupported_minor` | 打开 |
-| minor 5 但被塞了 `bim`（非合规） | 保存时变 6 | — | 接受并保留，不丢数据 |
+| 有 BIM 元素/定义、无关系 | 7 | 拒绝 `ymodel.unsupported_minor` | 打开，关系表为空 |
+| 有关系（可带元素/定义） | 7 | 拒绝 `ymodel.unsupported_minor` | 打开 |
+| 旧构建写的 minor 6（元素/定义，无关系） | 再保存变 7 | — | 接受并保留 |
+| minor 5 但被塞了 `bim`（非合规） | 保存时变 7 | — | 接受并保留，不丢数据 |
 
 ## 3. 各载体状态天花板
 
@@ -230,9 +264,9 @@ DefinitionElement 迁移提前（样式/图层/线型/块定义仍在 `tables/*`
 
 | 来源 | 实现 | 目标 BIM 语义状态 | 说明 |
 |---|---|---|---|
-| IFC（`cad-import-ifc`） | **已实现（Phase 1）** | `Partial` | 关系/类型/PSet 读取为合成契约证据；Complex/枚举/数量/样式不支持 |
-| RVT（`cad-import-rvt`） | **未实现（Phase 2）** | `Unverified` | 今天的 `cad-import-rvt` 仍丢弃 `IfcModel`、不用 GLB extras，元素没有 `bim` 块；目标源是 `rvt` 的 `IfcModel`，真实 RVT 文件未验证，预览几何不变 |
-| DGN（`cad-import-dgn`） | **未实现（Phase 3）** | `Unverified` | 今天的 tags/Item Types 仍无落库目标（`import.dgn.tags_not_stored`）；目标只认文件自带 Item Type/tag，level/cell/几何不推断 |
+| IFC（`cad-import-ifc` / `cad-export-ifc`） | **已实现（Phase 1 + 3 导入，Phase 2 导出）** | `Partial` | 关系/类型/PSet 读取为合成契约证据；数量集已存为 PSet、五类 `IfcRel*` 已落 `tables/bim-relations.json`；Complex/枚举/样式不支持；导出仅自洽往返，**关系不导出** |
+| RVT（`cad-import-rvt`） | **已实现（Phase 2）** | `Unverified` | `semantics.rs` 在 `model_to_glb` 前映射 `IfcModel`、用 GLB `entityIndex` 对齐几何；`type.class` 为 `None`（`IfcModel` 不暴露类型 class，派生就是猜）；`Aggregate` 不归组；真实 RVT 文件 **NOT VERIFIED**（单个样本计数只是契约观察），预览几何不变 |
+| DGN（`cad-import-dgn`） | **已实现（Phase 3）** | `Unverified` | tags/Item Types 已落为 PSet（`evidence=Declared`）；只认文件自带的 `Category`/`IfcType`/`IFCEntity` 标签，level/cell/几何不推断；上游 tag 解码未在真实 V8i/CONNECT 文件验证 |
 
 ## 4. 分期与验收
 
@@ -284,13 +318,64 @@ cargo check -p cad-db --target wasm32-unknown-unknown --locked
 cargo clippy -p cad-db -p cad-store-zip -p cad-import-core -p cad-import-ifc -p cad-app --all-targets --locked -- -D warnings
 ```
 
-**Phase 2** — IFC 导出回写（storey/type/pset/material/GlobalId 往返）；RVT 语义（`IfcModel` +
-GLB `entityIndex`）；来源对账 helper。证据上限：IFC 只做自洽往返，无 vendor checker；RVT 真实文件
-**NOT VERIFIED**。
+**Phase 2（已落地，2026-11-21）** — IFC 导出回写 + RVT 语义（证据与命令见
+`docs/validation-bim-2026-11-21.md` §12–§13）：
 
-**Phase 3** — DGN tags/Item Types → PSet + 显式 Category 标签；`cad-query` BIM 索引/过滤/统计 +
-`cad_bim_query` wire + React 过滤/明细表；关系/Aspect 落盘（`IdKind` 12/13 + 高水位 + minor 7）；
-数量/`IfcElementQuantity`。证据上限：DGN BIM 解释 `Unverified`；UI 数据来自合成/契约样本。
+- **IFC 导出**：`cad-export-ifc` 新增 `src/bim.rs`（765 行）、`src/bim_value.rs`（286 行）、
+  `src/tests_bim.rs`（763 行，**14 条**测试）；入口
+  `IfcExporter::with_bim_policy(BimExportPolicy{include_unverified:false})`。只在
+  `database.bim_elements()` 非空时启用，否则走旧路径且**逐字节不变**（钉住：非空 2196 字节 /
+  FNV `ec72ad…`，空 1374 / `c56f8c…`，只出现 `IFCBUILDINGELEMENTPROXY`）。写出 `IfcBuildingStorey`
+  （按 `(elevation,name,id)` 排序、米）、`IfcClass::Named(category)`（显式白名单，逐项对照内置 IFC4
+  registry，未知回退 Proxy）、`<Category>Type`（白名单；`TypeLink` 首现创建、后续引用；与源 class
+  不一致则跳过不替换）、`IfcMaterial`（按名去重）、PSet、源 `GlobalId` 复用（自带 22 字符 IFC
+  base64 → `u128` 解码，向量含 `u128::MAX` 与夹具 `2O2Fr$t4X7Zf8NOew3FLSJ` 自往返；非法/重复回退
+  `stable_global_id` 并报告）。**已知限制**：`BimValue::Text` 无 `ifc_type` → 恒写 `Label`；未知单位
+  不写出并计数；`Null` 跳过；**关系不导出**。证据只有自洽往返（导出 → `cad-import-ifc` 读回
+  GlobalId 一致），**无 vendor checker**。
+- **RVT**：`cad-import-rvt` 新增 `src/semantics.rs`（820 行）+ `src/tests_semantics.rs`（407 行，
+  **7 条**）；`RvtDecode` 增 `semantics`，在 `model_to_glb` 前 `map_model(&run.model)`；`glb.rs` 增
+  `PlacedMesh.entity_index`（读 `node.extras().entityIndex`）；8 个 `import.rvt.bim.*` 诊断。映射见
+  D8；`type.class = None`（`IfcModel` 不暴露类型 class，派生就是猜）；文档级 `global_ids.document`
+  不用。**单个真实样本**（`~/下载/rmeadvancedsampleproject.rvt`）读到 `elements=6783, levels=4,
+  types=90, materials=0, element_psets=44928, with_category=6783, with_level=6702, with_type=6650,
+  with_material=0`（该样本材料表为空，材料路径只有手工 `IfcModel` 单测证据）——**代码契约观察，真实
+  RVT BIM 语义仍 NOT VERIFIED**（`rvt` 自述输出不得用于测量/协调）。
+
+**Phase 3（已落地，2026-11-21）** — DGN 标签、IFC 数量集与关系、查询/wire/UI/选择：
+
+- **DGN**：`crates/cad-import-dgn/src/bim.rs`（339 行）+ `bim/tests.rs`（425 行，**8 条**），按 D9；
+  tags/Item Types 按 `set` 合成 PSet（无 set → `DGN_TAGS`）；浮点保持 `f64`；仅 `Category`/`IfcType`/
+  `IFCEntity` 的单个 token 写 `bim.category`；`import.dgn.bim.{category_from_tag,no_category,
+  unverified,budget_exceeded}`，`import.dgn.tags_not_stored` 收窄为「确实无法解码/无行」。端到端走
+  合成的 `cadkit_core::Document`，**上游 tag 解码本身未在真实 V8i/CONNECT 文件验证**。
+- **数量**：`crates/cad-import-ifc/src/semantics/quantity.rs`（194 行）+
+  `tests_semantics_quantity.rs`（282 行，**6 条**）；`IfcElementQuantity` 作为 PSet 存进 `bim.psets`
+  并保留源名（`Qto_*`）；Length/Area/Volume/Weight/Time → `Real{value, ifc_type: 源实体名, unit}`，
+  Count → `Integer`；**不换算**；单位解析不到 `unit: None`；`import.ifc.bim.quantity_set_stored`
+  信息性、不降级，`quantity_set_not_stored` 收窄为「确实读不出」。
+- **关系**：`tables/bim-relations.json`（仅非空时写；`kind ∈ aggregates|nests|contains|group|
+  connects|other:<token>`；行 `{kind,parent,child,source,label}`；端点复用元素 `bim.source` 键）。
+  `cad-import-ifc` 导入五类 `IfcRel*`（端点 = 项目 GlobalId + 对象 GlobalId；关系 GlobalId/Name →
+  `source`/`label`）；端点缺 GlobalId 跳过 + `import.ifc.bim.relation_endpoint_missing`；行超预算
+  **整表拒绝** `relation_budget_exceeded`；**仅存在关系不降级**；`cad-import-core::MeshImport` 增
+  17 行 `set_bim_relations` 转发。**采用有界单表（`FORMAT_MINOR` 7），未启用 `IdKind` 12/13**——
+  仍留作将来把关系升级为关系元素；不占高水位、不碰 `header.rs`。
+- **查询**：`crates/cad-query/src/bim.rs`（865 行）+ `bim/tests.rs`（776 行，**10 条**）；按
+  `(DatabaseId, Revision)` 懒建 category/level/type/material/property 索引，成员 `BimKey`，统计按
+  `BimKey` 去重；facet 间 AND、facet 内 OR；属性算子 `Eq/Ne/Contains`（Real/Integer 互比）；term
+  上限 64（`bim.filter.too_many_terms`）；行排序确定。
+- **wire/UI/选择**：`crates/cad-ui-core/src/bim.rs`（709 行，冻结 camelCase 契约）+ **18 条**测试
+  （含「不得出现 snake_case 键」递归断言、`object.kind` 二态、`value.kind` 四态）；`session/bim.rs`、
+  `session/bim_reads.rs`；registry 行 `cad_bim_query`/`cad_bim_summary`；`cad-host/src/bim.rs` +
+  `tests/bim_query.rs`（**9 条**）；`cad-desktop-shell` 命令 + 注册表 fixture；`apps/app-web` 已接线
+  （`DirectReads`，**4 条**）；`apps/desktop-ui/src/bim/`（`bim-query.ts`/`bim-view.ts`/`bim-store.ts`/
+  `selection.ts`/`panel.ts`/`use-bim-panel.ts`）+ `components/BimPanel.tsx` + ribbon 入口（两语言各
+  +61 键）；`cad_select_entities`（payload `{entityIds:number[]}`）。**Windows/macOS/Android 无 BIM
+  查询 seam → `unsupported-runtime: bimQuery` 显式拒绝**；`cad_select_entities` 各载体 tick 已接线
+  （Windows/macOS/Android 仅源码一致性，**NOT VERIFIED**）。
+- 证据上限：DGN BIM 解释 `Unverified`；UI 数据来自合成/契约样本；各载体运行时 **NOT VERIFIED**。
+- **仍未开始**：Aspect 落盘、属性编辑与逐属性行（`PropertyRow.key` 仍是 `&'static str`）。
 
 ## 5. 风险与规避
 
@@ -309,10 +394,15 @@ GLB `entityIndex`）；来源对账 helper。证据上限：IFC 只做自洽往�
 
 本 ADR 的所有映射结论都是**代码契约**，不是真实模型验收：
 
-- IFC 语义导入只有合成 fixture 证据，**无 vendor 工具交叉验证**；
+- IFC 语义导入/数量集/关系只有合成 fixture 与自洽往返证据，**无 vendor 工具交叉验证**；
 - RVT 的 BIM 语义建立在 `rvt` 0.25.0 的 `IfcModel` 上，其上游自身声明输出不得用于测量/协调；
-  真实 RVT 文件 **NOT VERIFIED**；
-- DGN 的 Item Type/tag 语义无真实 V8i/Connect 样本，**NOT VERIFIED**；
-- IFC 导出回写只承诺自洽往返，**不承诺**被 Revit/Bentley/IfcOpenShell 接受；
+  单个真实样本（`rmeadvancedsampleproject.rvt`）的元素/楼层/类型/PSet 计数是**代码契约观察**，
+  真实 RVT BIM 语义仍 **NOT VERIFIED**；
+- DGN 的 Item Type/tag 语义只有合成 `cadkit_core::Document` 证据，无真实 V8i/Connect 样本的 tag
+  解码验证，**NOT VERIFIED**；
+- IFC 导出回写只承诺自洽往返，**不承诺**被 Revit/Bentley/IfcOpenShell 接受；**IFC 关系不导出**
+  （仍不写 `IfcRelAggregates`/`IfcRelNests`）；`BimValue::Text` 导出恒 `Label`；
+- BIM 查询/面板在 Windows/macOS/Android 无 seam（`unsupported-runtime: bimQuery`），
+  `cad_select_entities` 在这些载体只有源码一致性，**运行时 NOT VERIFIED**；
 - 所有平台结论仍按 `docs/compatibility.md` 与 AGENTS.md 平台表：只在 Linux 做运行/契约验证，
   Windows/macOS/Android/Web 只能写"仅编译 / 仅契约 / NOT VERIFIED"。

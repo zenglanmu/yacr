@@ -12,6 +12,7 @@
 //! `wgpu`, no `tauri`/`gtk`/`gdk`/`ashpd`, no platform bindings (`web-sys`,
 //! `android-activity`, `jni`, `ndk`). The whole crate is UI-framework-free.
 
+pub mod bim;
 pub mod i18n;
 pub mod launch;
 pub mod layout;
@@ -19,6 +20,13 @@ pub mod popup;
 pub mod protocol;
 pub mod session;
 pub mod shell;
+
+pub use bim::{
+    query_response, summary_response, BimEvidenceWire, BimFacetCountWire, BimFilterWire, BimHost,
+    BimObjectWire, BimOpWire, BimPropertyCountWire, BimPropertyFilterWire, BimQueryRequest,
+    BimQueryResponse, BimRowWire, BimSourceWire, BimSummaryResponse, BimSummaryWire, BimValueWire,
+    BIM_DEFAULT_LIMIT, BIM_REAL_NOT_FINITE, BIM_STALE, BIM_UNSUPPORTED, BIM_UNSUPPORTED_VALUE,
+};
 
 pub use i18n::{
     format_message, locale_from_env, placeholders, resolve_locale, supported_locale_for,

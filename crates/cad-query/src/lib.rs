@@ -7,6 +7,8 @@
 use cad_db::{ChangeSet, DrawingDatabase};
 use cad_domain::*;
 
+pub mod bim;
+
 #[derive(Debug)]
 pub enum PropertyValue<T> {
     Value(T),
@@ -54,6 +56,9 @@ pub struct ToolStateModel {
 #[derive(Default)]
 pub struct QueryService {
     last: std::cell::RefCell<Option<(DocumentId, Revision, Option<DatabaseId>)>>,
+    /// Lazily built BIM index, keyed by `(DatabaseId, Revision)`; a different
+    /// revision rebuilds it (`crate::bim`).
+    bim_index: std::cell::RefCell<Option<(DatabaseId, Revision, bim::BimIndex)>>,
 }
 
 impl QueryService {

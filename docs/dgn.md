@@ -72,8 +72,24 @@
   display/freeze/lock 标志（V7/V8）上游尚未解码，因此所有 level 都按可见导入，并记
   `import.dgn.level_symbology_undecoded` + **每个成功导入都是 Partial**（与 RVT/SKP 的 preview
   诚实通道同型）。
-- **标签/Item Types/XAttributes**：`cad-db` 没有通用属性表；标签存在时记
-  `import.dgn.tags_not_stored` + Partial，**不**塞进几何或伪造属性行。
+- **标签/Item Types/XAttributes（ADR-0042 D9，2026-11-21）**：`cadkit` 已把 DGN tag / Item Type
+  解码进 `Entity.attributes`（每项有 `tag`、已解码类型的 `value`、所属 `set`）。适配器把它们写成该
+  元素的 BIM 块（`cad_db::BimElement`，随元素分片保存）：
+  - 同一 `set` 合成一个 `BimPropertySet`，`set` 缺失时用固定名 `DGN_TAGS`；属性名是 tag 名，
+    值按解码类型映射 `BimValue::{Text,Integer,Real,Bool,Null}`（浮点保留数值，**不**格式化成字符串）。
+  - **只有** tag 名（ASCII 大小写不敏感）是 `Category`/`IfcType`/`IFCEntity`、且值是单个 token
+    （非空、无空白、≤128 字节）时才写 `bim.category`；否则 `category=None` +
+    `import.dgn.bim.no_category`。**level 名不是楼层、cell 名不是类别、几何形状不推断类别**，
+    没有启发式路径（`evidence` 恒为 `declared`）。
+  - `bim.source` 的 `id`/`native_id` 复用实体行既有的 `source_handle` 大写十六进制拼写；
+    `document_id` 为 `None`（DGN 无文档 GUID，checksum 在 `tables/sources.json`）。
+  - 预算用 `cad_db::BIM_*`：单元素 ≤64 PSet、每 PSet ≤256 属性、单串 ≤4 KiB。超限**丢弃该部分**
+    并记 `import.dgn.bim.budget_exceeded`，不写不完整块。
+  - `import.dgn.tags_not_stored` **保留**，但只用于：读者无法命名的 tag（缺 tag-set 定义时的
+    `tag_<n>` 回退）、无 `BimValue` 形态的值（binary/list、非有限浮点），以及没有数据库行的元素
+    （跳过类型、未知元素、被扁平化的 group 自身）。
+  - 整体 BIM 解释恒记一条 `import.dgn.bim.unverified`：值来自文件作者，但**没有真实 V8i/CONNECT
+    样本**，语义仍 **NOT VERIFIED**。XAttributes 仍不建模。
 - **颜色**：DGN palette 已由 cadkit 解析成 sRGB；>255 的扩展色上游仍回退 `ByLayer`（0.5.4
   起在 `Document::warnings` 里按文档聚合 `dgn.color_extended_unresolved`），本适配器无法区分、
   也不转发该上游 warning，按文档边界声明，不声称 true color 完整。
@@ -110,6 +126,10 @@
 `import.dgn.units_unsupported`、`import.dgn.units_unitless`、`import.dgn.units_<name>`、
 `import.dgn.limits_exceeded`。
 
+BIM 语义（ADR-0042 D9）：`import.dgn.bim.tags_stored_as_properties`、
+`import.dgn.bim.category_from_tag`、`import.dgn.bim.no_category`、
+`import.dgn.bim.unverified`、`import.dgn.bim.budget_exceeded`。
+
 诊断消息是英文内部文本；用户可见的状态/标签仍走 i18n 目录。**每个成功导入恒为 `Partial`**
 （level 显示标志未解码是结构性损失），reason 聚合到 ≤5 条稳定原因；**没有几何或只有未知元素时
 是 `Unsupported`，不是空成功**。上游 `cadkit` 0.5.4 的 `Document::warnings`（如
@@ -129,15 +149,20 @@
 - 提交的夹具只有 GDAL 的 `smalltest.dgn`（V7，4 个图形）与 `test_dgnv8.dgn`（V8，27 KB，
   **ODA Teigha 4.02 写出，不是 MicroStation**）；来源、SHA-256 与许可见
   `fixtures/dgn/SOURCE.md` 与 `fixtures/manifest`。
-- 23 条 crate 契约测试（`cargo test -p cad-import-dgn`）覆盖：V7 的 text/circle/polyline/line
+- 31 条 crate 契约测试（`cargo test -p cad-import-dgn`）覆盖：V7 的 text/circle/polyline/line
   与单位；V8 的 metres、3 个 level、shared cell 定义/Insert 位置与 10000 缩放、group 扁平化、
   2 个 Unknown 类型、tags、恒 Partial；纸面线型换算为 0.0045 m（0.5.2 时代夹具值 0.00045 m
   是把纸面毫米当 UOR 再除 UOR 因子的错误结果），无 master-unit 尺寸的纸面线型退 continuous
   并记 `import.dgn.linetype_pattern_unscaled`；layer 不写伪造属性；
   **每个导入实体经 `apply_drawing_changes` 写回成功**；非 DGN/超文件/超实体/取消拒绝；
   未知-only、无几何、fit-point spline、缺块 Insert、循环/超深 shared cell 引用（不发出递归
-  `Insert`）、栅格 per-pixel u/v 与未知像素尺寸、ratio=0 椭圆、zero-sweep 弧、完整椭圆。**不证明** V8i/CONNECT/ORD、真实 MicroStation 文件、
-  level 显示标志、references、Item Types、尺寸/多线/网格/实体、栅格像素或字体度量。
+  `Insert`）、栅格 per-pixel u/v 与未知像素尺寸、ratio=0 椭圆、zero-sweep 弧、完整椭圆；
+  **BIM（ADR-0042 D9，合成 `cadkit_core::Document`）**：tag→PSet 分组与类型映射（浮点不被字符串化）、
+  显式 `Category`/`IfcType`/`IFCEntity`（大小写混写）设类别、无类别 tag 报 `no_category`、
+  level/cell 名与散文值永不成为类别、预算超限整块丢弃并报 `budget_exceeded`（不写不完整块）、
+  无 tag 元素没有 `bim` 块、读者 `tag_<n>` 回退名不成为属性名、以及夹具里唯一的 tag 仍只报
+  `tags_not_stored`。**不证明** V8i/CONNECT/ORD、真实 MicroStation 文件、
+  level 显示标志、references、真实 Item Types、尺寸/多线/网格/实体、栅格像素或字体度量。
 - **2026-11-21 依赖升级**（`cadkit` 0.5.2 → 0.5.4）：只重跑了上述 crate 契约测试（23 passed）、
   `cargo check -p cad-import-dgn --all-targets --locked`、该 crate 的
   `clippy --all-targets -- -D warnings` 与 `cargo fmt --all -- --check`；没有用真实 DGN 样本

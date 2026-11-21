@@ -24,6 +24,7 @@
 pub(crate) mod bim;
 pub(crate) mod build;
 pub(crate) mod elements;
+pub(crate) mod relations;
 pub(crate) mod resources;
 pub(crate) mod tables;
 pub(crate) mod variables;
@@ -171,6 +172,10 @@ pub const fn table_entry(kind: TableKind) -> &'static str {
         // Shared BIM definitions (ADR-0042 D3). Written only when the table
         // holds rows, so a document without BIM data stays at minor 4/5.
         TableKind::BimDefinitions => "tables/bim-definitions.json",
+        // BIM relation edges (ADR-0042 D3 tail / D12). Written only when the
+        // table holds rows; it contributes the minor-7 tier, not a new identity
+        // kind (no `IdKind` 12/13, no header counters).
+        TableKind::BimRelations => "tables/bim-relations.json",
     }
 }
 
@@ -293,18 +298,20 @@ impl DocumentSnapshot {
     /// Whether this document carries BIM data (ADR-0042 D6).
     ///
     /// The store needs this to pick `manifest.format.minor` but must not know
-    /// the `bim` element field or the definition table by name (D6: `has_bim`
-    /// lives here, not in `cad-store-zip`). It is true when the definition table
-    /// is present **or** any element payload carries a `bim` block — an element
-    /// can hold source/category/psets without referencing a definition, and
-    /// writing that document at minor 5 would let an older build refuse it for
-    /// a reason that no longer describes its content.
+    /// the `bim` element field or the definition/relation tables by name (D6:
+    /// `has_bim` lives here, not in `cad-store-zip`). It is true when either BIM
+    /// table is present **or** any element payload carries a `bim` block — an
+    /// element can hold source/category/psets without referencing a definition,
+    /// and writing that document at minor 5 would let an older build refuse it
+    /// for a reason that no longer describes its content.
     ///
     /// The element scan reads the payload key the element codec writes; it is
     /// the one place outside the codec that names it, and it is still inside
-    /// `cad-db` where the shape is defined.
+    /// `cad-db` where the shape is defined. The relation table (ADR-0042 D3
+    /// tail) counts as BIM data too: it only exists when edges were stored.
     pub fn has_bim(&self) -> bool {
         self.tables.get(TableKind::BimDefinitions).is_some()
+            || self.tables.get(TableKind::BimRelations).is_some()
             || self
                 .shards
                 .iter()

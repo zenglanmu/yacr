@@ -14,8 +14,8 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use cad_db::{
-    validate_geometry, BimDefinitions, BimElement, DbEntity, DbObject, DrawingDatabaseBuilder,
-    EntityColor, EntityRenderAttributes, Layer, LayerAttributes,
+    validate_geometry, BimDefinitions, BimElement, BimRelations, DbEntity, DbObject,
+    DrawingDatabaseBuilder, EntityColor, EntityRenderAttributes, Layer, LayerAttributes,
 };
 use cad_domain::{
     CadError, CadResult, Completeness, Diagnostic, EntityCapability, EntityId, LayerId, Mesh,
@@ -93,6 +93,8 @@ pub struct MeshImport {
     bim_elements: usize,
     /// Rows in the shared BIM definition table, for the importer's reporting.
     bim_definitions: usize,
+    /// Rows in the BIM relation table, for the importer's reporting.
+    bim_relations: usize,
     limits: ImportLimits,
 }
 
@@ -127,6 +129,7 @@ impl MeshImport {
             texture_bytes: 0,
             bim_elements: 0,
             bim_definitions: 0,
+            bim_relations: 0,
             limits: request.limits,
         })
     }
@@ -329,6 +332,25 @@ impl MeshImport {
     /// Rows in the shared BIM definition table so far.
     pub fn bim_definition_count(&self) -> usize {
         self.bim_definitions
+    }
+
+    /// Replace the BIM relation table (ADR-0042 D3 tail).
+    ///
+    /// Forwards to [`DrawingDatabaseBuilder::set_bim_relations`], which
+    /// shape-checks every row here and leaves the row-count and encoded-size
+    /// budgets to [`Self::finish`] (both are refusals, never truncation). It may
+    /// be called before or after the element/definition setters: relation
+    /// endpoints do not have to resolve to stored elements.
+    pub fn set_bim_relations(&mut self, relations: BimRelations) -> CadResult<()> {
+        let count = relations.len();
+        self.builder.set_bim_relations(relations)?;
+        self.bim_relations = count;
+        Ok(())
+    }
+
+    /// Rows in the BIM relation table so far.
+    pub fn bim_relation_count(&self) -> usize {
+        self.bim_relations
     }
 
     /// Number of entities inserted so far.

@@ -119,6 +119,15 @@ pub enum TableKind {
     /// — it is the optional `bim` block of the element shard row, which keeps
     /// its raw-copy incrementality (ADR-0042 D2).
     BimDefinitions,
+    /// BIM relation edges (`tables/bim-relations.json`, ADR-0042 D3 tail/D12):
+    /// the many-to-many `aggregates`/`nests`/`contains`/`group`/`connects`/other
+    /// edges, keyed by their own `(kind, parent, child)` triple.
+    ///
+    /// Informational like the definition table: the snapshot is the authority
+    /// and the store re-encodes every present table. No `IdKind`, no header
+    /// counter and no high-water mark backs these rows, so this variant never
+    /// makes `document.json` stale.
+    BimRelations,
 }
 
 /// The set of persisted rows one commit made stale.

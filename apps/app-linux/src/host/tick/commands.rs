@@ -35,6 +35,7 @@ pub(super) fn apply_batch(
             tool_texts,
             selected_texts,
             selected_properties,
+            selection_requests,
             inputs,
         ) = {
             let mut state = lock(shared);
@@ -49,6 +50,7 @@ pub(super) fn apply_batch(
                 std::mem::take(&mut state.cad_tool_texts),
                 std::mem::take(&mut state.cad_selected_texts),
                 std::mem::take(&mut state.cad_selected_properties),
+                std::mem::take(&mut state.cad_selection_requests),
                 std::mem::take(&mut state.shell.cad_inputs),
             )
         };
@@ -61,6 +63,7 @@ pub(super) fn apply_batch(
             + tool_texts.len()
             + selected_texts.len()
             + selected_properties.len()
+            + selection_requests.len()
             + inputs.len();
         last_input_seq = inputs.last().map(|input| input.sequence);
         input_age_us = last_input_seq.and_then(|sequence| {
@@ -161,6 +164,16 @@ pub(super) fn apply_batch(
                     for (key, value) in &selected_properties {
                         if let Err(error) = session.set_selected_property(key, value) {
                             eprintln!("[probe] cad selected property rejected: {error}");
+                        }
+                    }
+                    // BIM-panel selection requests (`cad_select_entities`): every
+                    // id is validated against the open document and the whole
+                    // request is refused on an unknown id, so a stale row can never
+                    // half-select. A refusal is named and surfaces through
+                    // `cad_status.error`.
+                    for ids in &selection_requests {
+                        if let Err(error) = session.select_entities(ids) {
+                            eprintln!("[probe] cad selection rejected: {error}");
                         }
                     }
                 }

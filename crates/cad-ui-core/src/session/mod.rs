@@ -27,6 +27,8 @@ mod api_commit;
 mod api_object;
 mod api_prompt;
 mod api_submit;
+mod bim;
+pub mod bim_reads;
 mod bytes;
 mod command_log;
 mod command_overrides;
@@ -64,6 +66,7 @@ mod reference_status;
 mod refedit_arguments;
 pub mod registry;
 mod scale_arguments;
+mod select_entities;
 mod select_filter;
 mod settings;
 // The 2026-11-12 SHAPE/MINSERT/ADDSELECTED typed dispatch (sibling of
@@ -88,6 +91,7 @@ use crate::protocol::ProbeInput;
 use cad_app::{
     input::CanvasMetrics, CommandPayload, StandardView, ToolParameter, ToolSnapshot, ToolValue,
 };
+pub use cad_domain::EntityId;
 use cad_domain::{CadResult, DocumentIdentity};
 use cad_engine::protocol::{EngineClient, EngineRequest, RequestError, RequestId, StatusMessage};
 use cad_engine::render::RenderSessionHandle;
@@ -113,9 +117,10 @@ pub use self::admission::{
     admit_layer_write, admit_orbit, admit_selected_property, admit_selected_text, admit_setting,
     admit_standard_view, admit_tool_parameter, admit_tool_text, drain_layer_writes, drain_orbits,
     drain_standard_views, parse_layer_property_write, parse_orbit, parse_property_write,
-    parse_standard_view, parse_tool_parameter, CAD_LAYER_WRITE_CAP, CAD_ORBIT_CAP,
-    CAD_SELECTED_PROPERTY_CAP, CAD_SELECTED_TEXT_CAP, CAD_SETTING_CAP, CAD_STANDARD_VIEW_CAP,
-    CAD_TOOL_PARAMETER_CAP, CAD_TOOL_TEXT_CAP,
+    parse_selection_request, parse_standard_view, parse_tool_parameter, CAD_LAYER_WRITE_CAP,
+    CAD_ORBIT_CAP, CAD_SELECTED_PROPERTY_CAP, CAD_SELECTED_TEXT_CAP, CAD_SELECTION_CAP,
+    CAD_SETTING_CAP, CAD_STANDARD_VIEW_CAP, CAD_TOOL_PARAMETER_CAP, CAD_TOOL_TEXT_CAP,
+    SELECTION_EMPTY,
 };
 pub use self::annot_arguments::*;
 pub use self::api::{
@@ -224,11 +229,11 @@ pub use self::text_commands::*;
 pub use self::wire::{
     aliases, api_call, api_status, close_popup, command, commands, create_layer, delete_layer,
     fonts, layers, open_popup, orbit, parse_setting_request, rename_layer, restore_layers,
-    set_active_layer, set_layer_property, set_layer_visible, set_selected_property,
-    set_selected_text, set_setting, set_tool_parameter, set_tool_text, settings, standard_view,
-    AdmissionTarget, CadCommandAck, CadCommandAlias, Channel, ControlReads, NoPopups, OrbitDelta,
-    PopupTarget, QueueFamily, QueueReads, QueueSink, CAD_WAITING, ORBIT_ANGLES_NOT_FINITE,
-    POPUP_HOST_UNAVAILABLE,
+    select_entities, set_active_layer, set_layer_property, set_layer_visible,
+    set_selected_property, set_selected_text, set_setting, set_tool_parameter, set_tool_text,
+    settings, standard_view, AdmissionTarget, CadCommandAck, CadCommandAlias, Channel,
+    ControlReads, NoPopups, OrbitDelta, PopupTarget, QueueFamily, QueueReads, QueueSink,
+    CAD_WAITING, ORBIT_ANGLES_NOT_FINITE, POPUP_HOST_UNAVAILABLE, SELECT_UNAVAILABLE,
 };
 pub use self::ymodel_resources::{
     CadYmodelResource, CadYmodelResources, EMBED_RESOURCES_COMMAND, UNSUPPORTED_EMBED_RESOURCES,

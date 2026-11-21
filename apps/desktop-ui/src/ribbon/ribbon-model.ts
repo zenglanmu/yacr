@@ -14,6 +14,7 @@ import { OPTIONS_KEYS } from '../options/options.ts';
 import { STANDARD_VIEWS } from '../cad/view3d.ts';
 import { DRAW_MODIFY_ITEMS, HOME_MODIFY_ITEMS, SOLID_MODIFY_ITEM } from './ribbon-modify.ts';
 import { LAYER_PANEL_ITEMS } from './layers-panel.ts';
+import { BIM_PANEL } from './bim-panel.ts';
 import { ANNOTATE_TEXT_COMMAND_ITEMS } from './annotate-text-commands.ts';
 import { CIRCLE_ITEM, HATCHEDIT_ITEM, MEASUREGEOM_ITEM, POLYGON_ITEM } from './variants.ts';
 import { INTERFACE_PANEL } from './ribbon-interface.ts';
@@ -512,6 +513,7 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           { id: 'MASSPROP', labelKey: 'draw.kind.massprop', icon: 'properties', command: 'MASSPROP', hintKey: 'draw.kind.massprop.hint' },
         ],
       },
+      BIM_PANEL,
       {
         id: 'navigate',
         titleKey: 'ribbon.panel.navigate',

@@ -8,6 +8,12 @@ use cad_db::{ChangeSet, DrawingDatabase, MeasurementAlgorithm, MeasurementRecord
 use cad_domain::*;
 use cad_history::History;
 use cad_measure::{MeasurementEngine, MeasurementRequest, MeasurementSpace};
+/// Re-exported so the host read (`cad-host`) and the UI wire layer
+/// (`cad-ui-core`) can name the query service's public types (`QueryService`,
+/// `bim::BimFilter`, …) without a new manifest edge: both already depend on this
+/// crate, and a dependency on a workspace member would otherwise be a
+/// `Cargo.toml`/`Cargo.lock` change for a read-only projection.
+pub use cad_query;
 use cad_query::QueryService;
 use cad_representation::{enumerate_layouts, viewport_transform, SpaceSelection, ViewportState};
 use std::{collections::BTreeMap, sync::Arc};
