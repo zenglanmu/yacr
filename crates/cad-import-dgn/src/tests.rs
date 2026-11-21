@@ -23,8 +23,8 @@ use cadkit_core::{
 use crate::map::Mapper;
 use crate::{
     DgnImporter, BLOCK_MISSING, DEPTH_LIMIT, ENTITY_LIMIT, GEOMETRY_REJECTED,
-    LEVEL_SYMBOLOGY_UNDECODED, NOT_A_DGN_FILE, NO_GEOMETRY, RASTER_NOT_LOADED, SPLINE_FIT_POINTS,
-    TAGS_NOT_STORED, UNKNOWN_ELEMENT, UNKNOWN_ELEMENTS_ONLY,
+    LEVEL_SYMBOLOGY_UNDECODED, LINETYPE_PATTERN_UNSCALED, NOT_A_DGN_FILE, NO_GEOMETRY,
+    RASTER_NOT_LOADED, SPLINE_FIT_POINTS, TAGS_NOT_STORED, UNKNOWN_ELEMENT, UNKNOWN_ELEMENTS_ONLY,
 };
 
 fn request(bytes: Vec<u8>) -> ImportRequest {
@@ -251,16 +251,17 @@ fn v8_imports_metres_block_insert_and_flattens_groups() {
 }
 
 #[test]
-fn v8_linetype_pattern_is_scaled_from_uor_to_metres() {
-    // `test_dgnv8` stores DGN_DOT_DASH as [4.5, -1.5, 0, -1.5] UOR with
-    // 10_000 UOR per metre, so the stored pattern is 0.00045 m, etc.
+fn v8_linetype_pattern_is_converted_from_paper_millimetres() {
+    // The fixture references style 4 (DGN_DOT_DASH), a built-in MicroStation
+    // style defined on paper as 4.5/1.5/0/1.5 mm. `test_dgnv8` is a metre file,
+    // so the reader converts those paper sizes into drawing units (metres).
     let drawing = import_fixture("test_dgnv8.dgn");
     let linetype = drawing
         .database
         .linetypes()
         .find(|linetype| linetype.name == "DGN_DOT_DASH")
         .expect("the dashed linetype is stored");
-    let expected = [0.000_45, -0.000_15, 0.0, -0.000_15];
+    let expected = [0.004_5, -0.001_5, 0.0, -0.001_5];
     assert_eq!(linetype.pattern.elements.len(), expected.len());
     for (stored, expected) in linetype.pattern.elements.iter().zip(expected) {
         assert!(
@@ -268,6 +269,37 @@ fn v8_linetype_pattern_is_scaled_from_uor_to_metres() {
             "dash length {stored} != {expected} m"
         );
     }
+}
+
+#[test]
+fn a_paper_linetype_without_a_master_unit_is_reported_not_guessed() {
+    // A unitless file cannot turn the reader's built-in paper pattern into
+    // drawing units (`cadkit` then hands back an empty pattern); the linetype
+    // must stay continuous and say why instead of inventing a scale.
+    let mut document = synthetic(vec![line(KitPoint3::ZERO, kit_point(1.0, 0.0, 0.0))]);
+    document.units = Units::default();
+    let mut linetype = cadkit_core::Linetype::default();
+    linetype.name = "DGN_DOT_DASH".into();
+    linetype
+        .props
+        .insert("dgn.style".into(), cadkit_core::Value::Int(4));
+    document.linetypes.push(linetype);
+    let (database, _, report) =
+        map_document(&document, &ImportLimits::default()).expect("the document maps");
+    let stored = database
+        .linetypes()
+        .find(|linetype| linetype.name == "DGN_DOT_DASH")
+        .expect("the linetype row is stored");
+    assert!(
+        stored.pattern.is_continuous(),
+        "a paper pattern with no drawing-unit scale stays continuous: {:?}",
+        stored.pattern
+    );
+    assert!(
+        codes(&report).contains(&LINETYPE_PATTERN_UNSCALED),
+        "the missing scale is reported: {:?}",
+        codes(&report)
+    );
 }
 
 #[test]

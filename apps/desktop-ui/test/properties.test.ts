@@ -33,7 +33,9 @@ test('property groups have catalog labels and unknown groups stay raw', () => {
   assert.equal(propertyGroupLabel(t, 'geometry'), zh['properties.group.geometry']);
   assert.equal(propertyGroupLabel(t, 'text'), zh['properties.group.text']);
   assert.equal(propertyGroupLabel(t, 'display'), zh['properties.group.display']);
+  assert.equal(propertyGroupLabel(t, 'bim'), zh['properties.group.bim']);
   assert.equal(propertyGroupLabel(tEn, 'display'), en['properties.group.display']);
+  assert.equal(propertyGroupLabel(tEn, 'bim'), en['properties.group.bim']);
   assert.equal(propertyGroupLabel(t, 'future_group'), 'future_group');
 });
 
@@ -95,10 +97,20 @@ test('parseSelection rejects genuinely malformed selection payloads', () => {
 });
 
 test('every machine key emitted by cad-app::selection has a label in both catalogs', async () => {
-  // Read the Rust source of truth so a new row key cannot silently ship unlabeled.
-  const source = await readFile(new URL('../../../crates/cad-app/src/selection.rs', import.meta.url), 'utf8');
-  const keys = new Set([...source.matchAll(/PropertyRow::new\(\s*"([a-z0-9_]+)"/g)].map(match => match[1]));
-  assert.ok(keys.size > 30, `expected the selection module to emit many row keys, saw ${keys.size}`);
+  // Read the Rust sources of truth so a new row key cannot silently ship
+  // unlabeled. `selection.rs` keeps the identity/geometry/display rows; the
+  // fixed BIM rows live in `selection_bim.rs`, so both files are scanned — the
+  // split must not let a `bim_*` key escape this guard.
+  const sources = await Promise.all([
+    readFile(new URL('../../../crates/cad-app/src/selection.rs', import.meta.url), 'utf8'),
+    readFile(new URL('../../../crates/cad-app/src/selection_bim.rs', import.meta.url), 'utf8'),
+  ]);
+  const keys = new Set(sources.flatMap(source => [...source.matchAll(/PropertyRow::new\(\s*"([a-z0-9_]+)"/g)].map(match => match[1])));
+  assert.ok(keys.size > 30, `expected the selection modules to emit many row keys, saw ${keys.size}`);
+  // The BIM keys are the reason the scan covers two files: assert they are here.
+  for (const key of ['bim_category', 'bim_name', 'bim_level', 'bim_type', 'bim_material', 'bim_source', 'bim_properties', 'bim_evidence']) {
+    assert.ok(keys.has(key), `the scan must cover ${key} (selection_bim.rs)`);
+  }
   for (const key of keys) {
     assert.equal(typeof zh[`properties.row.${key}`], 'string', `zh-CN missing properties.row.${key}`);
     assert.equal(typeof en[`properties.row.${key}`], 'string', `en missing properties.row.${key}`);

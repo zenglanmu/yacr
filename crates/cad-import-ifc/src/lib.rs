@@ -9,26 +9,26 @@
 //! (a mesh is not a MEASURE target, and the exact B-rep is discarded).
 //!
 //! The four facts below were read from the verified `ifc-lite-core` /
-//! `ifc-lite-geometry` **28.2.0** source, not assumed:
+//! `ifc-lite-geometry` **28.3.0** source, not assumed:
 //!
 //! * **API sequence.** `build_entity_index` → `EntityDecoder::with_index` →
 //!   `EntityScanner::next_entity` (`src/parser/scanner.rs:116`) filtered by
 //!   `is_geometry_job` → `GeometryRouter::with_units` →
-//!   `process_element_with_voids_parts` (`src/router/voids/mod.rs:130`).
+//!   `process_element_with_voids_parts` (`src/router/voids/mod.rs:131`).
 //!   A returned `Mesh` is `positions: Vec<f32>`, `normals: Vec<f32>` (parallel
 //!   to positions, i.e. one normal per vertex), `indices: Vec<u32>`.
 //! * **Units.** The router's `unit_scale` is applied by `scale_positions`
 //!   (`src/router/processing.rs:55`: "Scale mesh positions from file units to
 //!   meters"), and placements are scaled by the same factor
-//!   (`src/router/transforms/mod.rs:113`). `with_units`
-//!   (`src/router/mod.rs:280`) resolves the project's declared length unit to a
+//!   (`src/router/transforms/mod.rs:108`). `with_units`
+//!   (`src/router/mod.rs:283`) resolves the project's declared length unit to a
 //!   metre scale via `project_unit_scale` (`src/router/unit_admission.rs:75`). Returned positions are therefore **metres**, not
 //!   the file's declared unit. An unresolved unit chain leaves the scale at
 //!   `1.0`, so the coordinates are raw file units and are reported as
 //!   [`UnitContext::drawing_units`] — never silently as millimetres.
 //! * **Placement.** `process_element*` walks the element's
 //!   `IfcLocalPlacement` chain (`resolve_object_placement`,
-//!   `src/router/transforms/mod.rs:105`) and bakes it into the vertices
+//!   `src/router/transforms/mod.rs:108`) and bakes it into the vertices
 //!   (`place_mesh` / `place_sub_meshes`, same file). The returned mesh is in
 //!   **world** metres; the test `two_walls_keep_distinct_placed_bounds` pins
 //!   that two placed walls do not stack at the origin. A mesh may still carry a
@@ -84,8 +84,10 @@ use ifc_lite_geometry::{
 };
 
 mod mesh;
+mod semantics;
 mod texture;
 use mesh::element_mesh;
+use semantics::IfcSemantics;
 pub use texture::{
     DIAG_EXTERNAL_TEXTURE_UNAVAILABLE, DIAG_TEXTURED_VOID_FALLBACK, DIAG_TEXTURE_ENCODE_FAILED,
     DIAG_UVS_DROPPED,
@@ -122,6 +124,33 @@ pub const DIAG_ITEM_UNSUPPORTED: &str = "import.ifc.item_unsupported";
 pub const NO_GEOMETRY_PRODUCTS: &str = "import.ifc.no_geometry_products";
 /// Stable refusal code: every geometry-bearing product failed to mesh.
 pub const ALL_ELEMENTS_FAILED: &str = "import.ifc.all_elements_failed";
+
+// ---------------------------------------------------------------------------
+// BIM semantics (ADR-0042 D7).
+//
+// The second pass reads the file's own relations, types and property sets. It
+// never invents a value: an unsupported shape is counted under a stable code and
+// left out, and the import stays `Partial`.
+// ---------------------------------------------------------------------------
+
+/// Stable diagnostic code: a product has no `IfcRoot.GlobalId`.
+pub const DIAG_BIM_SOURCE_ID_MISSING: &str = "import.ifc.bim.source_id_missing";
+/// Stable diagnostic code: an element's spatial/aggregate chain has no storey.
+pub const DIAG_BIM_STOREY_UNRESOLVED: &str = "import.ifc.bim.storey_unresolved";
+/// Stable diagnostic code: a storey elevation cannot be converted to metres.
+pub const DIAG_BIM_ELEVATION_UNRESOLVED: &str = "import.ifc.bim.elevation_unresolved";
+/// Stable diagnostic code: an `IfcRelDefinesByType` target is not usable.
+pub const DIAG_BIM_TYPE_UNRESOLVED: &str = "import.ifc.bim.type_unresolved";
+/// Stable diagnostic code: an `IfcRelAssociatesMaterial` target is not usable.
+pub const DIAG_BIM_MATERIAL_UNRESOLVED: &str = "import.ifc.bim.material_unresolved";
+/// Stable diagnostic code: a property definition is not an `IfcPropertySet`.
+pub const DIAG_BIM_PROPERTY_SET_UNSUPPORTED: &str = "import.ifc.bim.property_set_unsupported";
+/// Stable diagnostic code: a property/value shape has no `BimValue` form.
+pub const DIAG_BIM_PROPERTY_VALUE_UNSUPPORTED: &str = "import.ifc.bim.property_value_unsupported";
+/// Stable diagnostic code: an `IfcElementQuantity` is not stored (Phase 3).
+pub const DIAG_BIM_QUANTITY_SET_NOT_STORED: &str = "import.ifc.bim.quantity_set_not_stored";
+/// Stable diagnostic code: a BIM row was dropped at a `cad_db::BIM_*` budget.
+pub const DIAG_BIM_BUDGET_EXCEEDED: &str = "import.ifc.bim.budget_exceeded";
 
 /// The IFC entity `type_key` reported in capabilities and stored rows.
 pub const IFC_MESH_TYPE_KEY: &str = "IfcTessellatedMesh";
@@ -300,6 +329,17 @@ impl Importer for IfcImporter {
 
         let mut import = MeshImport::new(request, IFC_MESH_TYPE_KEY)?;
         record_units(&mut import, units);
+        // ADR-0042 D7: a second pass reads identity/relations/property sets for
+        // the products the geometry lane scheduled. The geometry path below is
+        // unchanged; this pass only produces the BIM side tables.
+        let product_ids: Vec<u32> = jobs.iter().map(|job| job.entity.id).collect();
+        let length_scale = match units {
+            Units::Canonical(scale) => Some(scale),
+            Units::Refused | Units::Unknown => None,
+        };
+        let mut semantics = IfcSemantics::scan(content, &mut decoder, &product_ids, length_scale);
+        import.set_bim_definitions(semantics.take_definitions())?;
+        semantics.record(&mut import);
         if styled_items > 0 {
             import.record(
                 Diagnostic {
@@ -438,6 +478,7 @@ impl Importer for IfcImporter {
                 // One entity per textured sub-mesh, so each mesh samples exactly
                 // one image; a sub-mesh with no triangles contributes nothing.
                 let mut emitted = 0usize;
+                let mut entities = Vec::<cad_domain::EntityId>::new();
                 for (part, attachment, uvs) in parts {
                     let Some(mut mesh) = element_mesh(
                         std::slice::from_ref(&part),
@@ -482,7 +523,8 @@ impl Importer for IfcImporter {
                         }
                     }
                     let object = import.reserve_object()?;
-                    import.push_mesh(object, mesh, EntityColor::ByLayer)?;
+                    let entity = import.push_mesh(object, mesh, EntityColor::ByLayer)?;
+                    entities.push(entity);
                     emitted += 1;
                     progress.report(ImportProgress::at(
                         ImportPhase::Entities,
@@ -503,6 +545,13 @@ impl Importer for IfcImporter {
                         },
                         None,
                     );
+                } else if let Some(bim) = semantics.element(job.entity.id) {
+                    // Every geometry row of one IFC product shares the same BIM
+                    // block: the logical component is `bim.source`, and a split
+                    // into several sub-meshes never creates a second component.
+                    for entity in entities {
+                        import.set_entity_bim(entity, bim.clone())?;
+                    }
                 }
                 continue;
             }
@@ -524,7 +573,10 @@ impl Importer for IfcImporter {
                 continue;
             };
             let object = import.reserve_object()?;
-            import.push_mesh(object, mesh, EntityColor::ByLayer)?;
+            let entity = import.push_mesh(object, mesh, EntityColor::ByLayer)?;
+            if let Some(bim) = semantics.element(job.entity.id) {
+                import.set_entity_bim(entity, bim.clone())?;
+            }
             progress.report(ImportProgress::at(
                 ImportPhase::Entities,
                 import.entity_count(),

@@ -44,6 +44,7 @@ use cad_domain::{
 use serde_json::{Map, Number, Value};
 
 use super::SnapshotError;
+use crate::bim::BimElement;
 use crate::entity::{
     AnnotativeAttributes, AnnotativePlacement, AnnotativeScaleOverride, DbEntity, DbObject,
     EntityColor, EntityLineType, EntityLineWeight, EntityRenderAttributes, EntityTransparency,
@@ -53,12 +54,17 @@ use crate::entity::{
 /// The class key of this row. Part of the format.
 const CLASS: &str = CAD_ELEMENT.type_key;
 
+/// The optional per-element BIM block (ADR-0042 D2).
+pub(crate) mod bim;
+
 /// One decoded element row.
 #[derive(Debug)]
 pub(crate) struct DecodedElement {
     pub entity: DbEntity,
     pub attributes: Option<EntityRenderAttributes>,
     pub invisible: bool,
+    /// `None` for a minor ≤ 5 row and for an element without BIM data.
+    pub bim: Option<BimElement>,
 }
 
 /// Encode one element row.
@@ -66,10 +72,15 @@ pub(crate) struct DecodedElement {
 /// The element's own persistent id is written into the payload: an entry must be
 /// readable on its own (`unzip -p ... | jq`) without decoding a filename. Keys
 /// are sorted by `serde_json`'s `BTreeMap`, so the output is deterministic.
+///
+/// `bim` is written **only** when the element has BIM data (ADR-0042 D2): an
+/// absent block leaves the key out entirely, so the row keeps the shape a
+/// minor-5 reader accepts.
 pub(crate) fn encode(
     entity: &DbEntity,
     attributes: Option<&EntityRenderAttributes>,
     invisible: bool,
+    bim: Option<&BimElement>,
 ) -> Result<Value, SnapshotError> {
     let type_key = Value::String(entity.object.type_key.clone());
     let space = encode_space(&entity.space);
@@ -80,7 +91,7 @@ pub(crate) fn encode(
         .as_deref()
         .map_or(Value::Null, |handle| Value::String(handle.to_string()));
     let render_attributes = attributes.map_or(Value::Null, encode_render_attributes);
-    Ok(fields(vec![
+    let mut row = fields(vec![
         ("class", Value::String(CLASS.to_string())),
         ("id", encode_id(entity.id.persistent())),
         ("type_key", type_key),
@@ -90,7 +101,16 @@ pub(crate) fn encode(
         ("invisible", Value::Bool(invisible)),
         ("render_attributes", render_attributes),
         ("geometry", payload::encode(&entity.geometry)),
-    ]))
+    ]);
+    if let Some(bim) = bim {
+        match &mut row {
+            Value::Object(map) => {
+                map.insert("bim".to_string(), bim::encode(bim)?);
+            }
+            _ => unreachable!("`fields` builds an object"),
+        }
+    }
+    Ok(row)
 }
 
 /// Decode one element row.
@@ -120,6 +140,15 @@ pub(crate) fn decode(value: &Value) -> Result<DecodedElement, SnapshotError> {
     let geometry = payload::decode(&geometry_value)
         .map_err(|error| SnapshotError::invalid(format!("{CLASS}.geometry: {error}")))?;
 
+    // ADR-0042 D2/D6: the block is optional. An absent key is `None` (a minor
+    // ≤ 5 row); a present key must be a complete `bim` object — `"bim": null` is
+    // refused rather than treated as "no data", so this writer never produces a
+    // shape the reader would have to guess about.
+    let bim = match reader.opt_take("bim") {
+        None => None,
+        Some(value) => Some(bim::decode(&value).map_err(super::bim::prefixed)?),
+    };
+
     reader.finish()?;
 
     Ok(DecodedElement {
@@ -142,6 +171,7 @@ pub(crate) fn decode(value: &Value) -> Result<DecodedElement, SnapshotError> {
         },
         attributes,
         invisible,
+        bim,
     })
 }
 
@@ -311,13 +341,18 @@ fn variant(kind: &str, entries: Vec<(&str, Value)>) -> Value {
 
 /// A strict reader for one JSON object: fields are taken by name and
 /// [`Reader::finish`] refuses anything left over.
-struct Reader {
+///
+/// `pub(crate)` because the two BIM codecs (`snapshot/bim.rs` and
+/// `snapshot/elements/bim.rs`) reuse it: one strict-reader implementation, so
+/// the element block and the definition rows cannot disagree about what "extra
+/// field" or "wrong type" means.
+pub(crate) struct Reader {
     map: Map<String, Value>,
     context: String,
 }
 
 impl Reader {
-    fn new(value: &Value, context: impl Into<String>) -> Result<Reader, SnapshotError> {
+    pub(crate) fn new(value: &Value, context: impl Into<String>) -> Result<Reader, SnapshotError> {
         let context = context.into();
         match value {
             Value::Object(map) => Ok(Reader {
@@ -330,7 +365,12 @@ impl Reader {
         }
     }
 
-    fn error(&self, detail: impl std::fmt::Display) -> SnapshotError {
+    /// The path this reader names its refusals after.
+    pub(crate) fn context(&self) -> &str {
+        &self.context
+    }
+
+    pub(crate) fn error(&self, detail: impl std::fmt::Display) -> SnapshotError {
         SnapshotError::invalid(format!("{}: {detail}", self.context))
     }
 
@@ -347,12 +387,23 @@ impl Reader {
         }
     }
 
-    fn take(&mut self, field: &'static str) -> Result<Value, SnapshotError> {
+    /// Take a field that must be present.
+    pub(crate) fn take(&mut self, field: &'static str) -> Result<Value, SnapshotError> {
         let value = self.map.remove(field);
         value.ok_or_else(|| self.error(format!("missing required field {field:?}")))
     }
 
-    fn finish(self) -> Result<(), SnapshotError> {
+    /// Take a field that may be absent: `None` means the key was not there.
+    ///
+    /// This is the only optional read in an element payload (ADR-0042 D2's
+    /// `bim` block). It does **not** treat `null` as absent — a caller that
+    /// accepts null checks the value itself — so an existing key is always
+    /// returned and the caller decides whether its shape is acceptable.
+    pub(crate) fn opt_take(&mut self, field: &'static str) -> Option<Value> {
+        self.map.remove(field)
+    }
+
+    pub(crate) fn finish(self) -> Result<(), SnapshotError> {
         // `Map` is a `BTreeMap`, so this is the first key in sorted order.
         match self.map.keys().next() {
             Some(key) => Err(SnapshotError::invalid(format!(
@@ -363,7 +414,7 @@ impl Reader {
         }
     }
 
-    fn string(&mut self, field: &'static str) -> Result<String, SnapshotError> {
+    pub(crate) fn string(&mut self, field: &'static str) -> Result<String, SnapshotError> {
         match self.take(field)? {
             Value::String(text) => Ok(text),
             _ => Err(self.error(format!("{field}: expected a string"))),
@@ -378,19 +429,29 @@ impl Reader {
         }
     }
 
-    fn bool(&mut self, field: &'static str) -> Result<bool, SnapshotError> {
+    pub(crate) fn bool(&mut self, field: &'static str) -> Result<bool, SnapshotError> {
         match self.take(field)? {
             Value::Bool(value) => Ok(value),
             _ => Err(self.error(format!("{field}: expected a boolean"))),
         }
     }
 
-    fn f64(&mut self, field: &'static str) -> Result<f64, SnapshotError> {
+    /// A JSON integer (`i64`, the range the format's property values use).
+    pub(crate) fn integer(&mut self, field: &'static str) -> Result<i64, SnapshotError> {
+        match self.take(field)? {
+            Value::Number(value) => value
+                .as_i64()
+                .ok_or_else(|| self.error(format!("{field}: expected a JSON integer"))),
+            _ => Err(self.error(format!("{field}: expected a JSON integer"))),
+        }
+    }
+
+    pub(crate) fn f64(&mut self, field: &'static str) -> Result<f64, SnapshotError> {
         let value = self.take(field)?;
         json::decode_f64(&value).map_err(|error| self.error(format!("{field}: {error}")))
     }
 
-    fn opt_f64(&mut self, field: &'static str) -> Result<Option<f64>, SnapshotError> {
+    pub(crate) fn opt_f64(&mut self, field: &'static str) -> Result<Option<f64>, SnapshotError> {
         let value = self.take(field)?;
         json::decode_opt_f64(&value).map_err(|error| self.error(format!("{field}: {error}")))
     }
@@ -414,7 +475,7 @@ impl Reader {
         json::decode_point3(&value).map_err(|error| self.error(format!("{field}: {error}")))
     }
 
-    fn array(&mut self, field: &'static str) -> Result<Vec<Value>, SnapshotError> {
+    pub(crate) fn array(&mut self, field: &'static str) -> Result<Vec<Value>, SnapshotError> {
         match self.take(field)? {
             Value::Array(items) => Ok(items),
             _ => Err(self.error(format!("{field}: expected an array"))),
@@ -650,7 +711,11 @@ impl Reader {
     }
 
     /// A nested object, with its path joined onto this reader's context.
-    fn child(&self, value: &Value, field: &'static str) -> Result<Reader, SnapshotError> {
+    pub(crate) fn child(
+        &self,
+        value: &Value,
+        field: &'static str,
+    ) -> Result<Reader, SnapshotError> {
         Reader::new(value, format!("{}.{field}", self.context))
     }
 }

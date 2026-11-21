@@ -609,7 +609,7 @@ fn write_entries(
         format: cad_db::FormatVersion {
             read: cad_domain::ymodel::FORMAT_READ,
             write: cad_domain::ymodel::FORMAT_WRITE,
-            minor: resources::document_minor(snapshot),
+            minor: crate::minor::document_minor(snapshot),
         },
         generator: crate::GENERATOR.to_string(),
         document_uuid: document_uuid

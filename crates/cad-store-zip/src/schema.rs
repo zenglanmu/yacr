@@ -119,6 +119,8 @@ fn field_kind_spelling(kind: FieldKind) -> String {
         FieldKind::ImageAdjust => "image_adjust",
         FieldKind::Space => "space",
         FieldKind::RenderAttributes => "render_attributes",
+        // ADR-0042 D2: `cad-db` owns the nested shape; this file only names it.
+        FieldKind::Bim => "bim",
         FieldKind::IdRef(kind) => return format!("id:{}", id_kind_spelling(kind)),
     };
     fixed.to_string()

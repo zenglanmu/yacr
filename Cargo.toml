@@ -172,14 +172,14 @@ cadmpeg-tessellate = "0.6.12"
 # float across breaking API churn. The geometry crate also carries the placement
 # chain, units-to-metres scaling and void subtraction; see the crate source
 # findings recorded in `crates/cad-import-ifc/src/lib.rs`.
-ifc-lite-core = "=28.2.0"
-ifc-lite-geometry = "=28.2.0"
+ifc-lite-core = "=28.3.0"
+ifc-lite-geometry = "=28.3.0"
 # IFC4 writer (`cad-export-ifc`): IFC4 `IfcTriangulatedFaceSet` / `IfcFacetedBrep`
 # emission from a neutral mesh, MPL-2.0, same release train as the pinned reader.
 # `ifc-lite-processing` is pinned too because `ifc-lite-export` declares caret
-# deps on the 28.2.0 family and this workspace must not float one of them.
-ifc-lite-export = "=28.2.0"
-ifc-lite-processing = "=28.2.0"
+# deps on the 28.3.0 family and this workspace must not float one of them.
+ifc-lite-export = "=28.3.0"
+ifc-lite-processing = "=28.3.0"
 
 # MicroStation DGN V7 (ISFF) and V8 (OLE compound file) reader
 # (`cad-import-dgn`). MIT OR Apache-2.0, pure Rust, `unsafe_code = "forbid"`,
@@ -187,13 +187,16 @@ ifc-lite-processing = "=28.2.0"
 # exactly: pre-1.0, one maintainer, 15 releases in 31 days, and each release has
 # changed the decoded format surface (level tables, raster placement, tag
 # attachment), so a caret range would float across a format-claim change.
+# 0.5.4 reports `Linetype::pattern` in drawing units (the built-in cosmetic
+# styles converted from their paper millimetres), so the adapter stores it
+# as-is; 0.5.2 returned the nominal values and the adapter rescaled them.
 # `default-features = false` disables the seed-based V8 writer, which is the
 # only consumer of the optional `cfb` dependency.
-cadkit-dgn = { version = "=0.5.2", default-features = false }
+cadkit-dgn = { version = "=0.5.4", default-features = false }
 # Format-neutral document model the DGN reader produces. Kept as a direct
 # dependency because the adapter maps `Document`/`EntityKind`/`Units` and must
 # not rely on a re-export from the reader crate.
-cadkit-core = { version = "=0.5.2" }
+cadkit-core = { version = "=0.5.4" }
 
 # Autodesk Revit reader (`cad-import-rvt`). Apache-2.0, pure Rust, pinned
 # exactly: pre-1.0, and the crate publishes faster than any range can track

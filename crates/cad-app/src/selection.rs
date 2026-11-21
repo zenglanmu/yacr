@@ -42,6 +42,8 @@ pub enum PropertyGroup {
     Text,
     /// Display attributes and appearance flags.
     Display,
+    /// BIM semantics attached to the element (ADR-0042 D4).
+    Bim,
 }
 
 impl PropertyGroup {
@@ -52,6 +54,7 @@ impl PropertyGroup {
             PropertyGroup::Geometry => "geometry",
             PropertyGroup::Text => "text",
             PropertyGroup::Display => "display",
+            PropertyGroup::Bim => "bim",
         }
     }
 
@@ -61,7 +64,8 @@ impl PropertyGroup {
     /// text by default (MULTILEADER style names) and is overridden to
     /// [`PropertyGroup::Display`] for the hatch style row. `color`, `linetype`,
     /// `lineweight` and `transparency` are the display-attribute rows emitted by
-    /// [`display_property_rows`].
+    /// [`display_property_rows`]. The `bim_*` keys are the fixed BIM rows of
+    /// [`crate::selection_bim`] (ADR-0042 D4).
     pub fn for_key(key: &str) -> Self {
         match key {
             "id" | "handle" | "type" | "layer" | "space" | "draw_order" | "instance"
@@ -70,6 +74,8 @@ impl PropertyGroup {
             "fill" | "visible" | "color" | "linetype" | "lineweight" | "transparency" => {
                 PropertyGroup::Display
             }
+            "bim_category" | "bim_name" | "bim_level" | "bim_type" | "bim_material"
+            | "bim_source" | "bim_properties" | "bim_evidence" => PropertyGroup::Bim,
             _ => PropertyGroup::Geometry,
         }
     }
@@ -510,6 +516,9 @@ pub fn entity_property_rows(
     }
     rows.extend(geometry_property_rows(&entity.geometry));
     rows.extend(display_property_rows(database, reference, entity));
+    // BIM semantics (ADR-0042 D4) come last: an element without a `bim` block
+    // adds nothing, so the existing row set is unchanged for every other entity.
+    rows.extend(crate::selection_bim::bim_property_rows(database, entity.id));
     rows
 }
 

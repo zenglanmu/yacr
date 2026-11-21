@@ -42,6 +42,9 @@ mod select_similar;
 mod session_multiple;
 // SSX: the Express-Tool selection-filter builder (criteria + apply).
 pub mod selection;
+// The fixed BIM property rows (ADR-0042 D4); wired from `selection` only, so no
+// new public surface and no bucket export.
+mod selection_bim;
 pub mod snap;
 mod ssx;
 pub mod tasks;

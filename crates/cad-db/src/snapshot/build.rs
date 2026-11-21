@@ -35,6 +35,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use cad_domain::ymodel::{shard_of, DocumentHeader, ModelKey, PersistentIdOf, Shard};
 use cad_domain::{CadResult, DocumentIdentity, Revision, SpaceId, UnitContext};
 
+use super::bim;
 use super::elements;
 use super::resources;
 use super::tables;
@@ -85,6 +86,13 @@ impl DrawingDatabase {
         if !self.resources.is_empty() {
             tables.set(TableKind::Resources, resources::encode(self)?);
         }
+        // ADR-0042 D3: the definition table exists **only** when it holds rows.
+        // An unconditional table would make every document a minor-6 archive
+        // that an older build refuses, for no data. Per-element BIM blocks are
+        // written by the element codec, in the shard rows themselves (D2).
+        if !self.bim_definitions.is_empty() {
+            tables.set(TableKind::BimDefinitions, bim::encode_definitions(self)?);
+        }
         Ok(DocumentSnapshot {
             header,
             revision,
@@ -113,6 +121,16 @@ impl DrawingDatabase {
 
         let tables = tables::decode(&snapshot.tables)?;
         let resource_tables = resources::decode(&snapshot.tables)?;
+        // The definition table is decoded and installed before the element loop,
+        // so `set_entity_bim` never has to defer a reference. Its own strictness
+        // (duplicate ids, budgets, kind prefixes) belongs to the codec.
+        let bim_definitions = bim::decode_definitions(&snapshot.tables)?;
+        if !bim_definitions.is_empty() {
+            checked(
+                builder.set_bim_definitions(bim_definitions),
+                "tables/bim-definitions.json",
+            )?;
+        }
 
         for layer in tables.layers.values() {
             checked(
@@ -265,6 +283,7 @@ impl DrawingDatabase {
                     entity,
                     attributes,
                     invisible,
+                    bim,
                 } = elements::decode(&element.payload)?;
                 // The row id is the shard key; `decode` reads the copy inside the
                 // payload. They must agree or one of the two writers is lying.
@@ -297,6 +316,12 @@ impl DrawingDatabase {
                 }
                 if invisible {
                     hidden.insert(id);
+                }
+                if let Some(bim) = bim {
+                    checked(
+                        builder.set_entity_bim(id, bim),
+                        format!("elements: entity {}", id.0),
+                    )?;
                 }
             }
         }
@@ -353,6 +378,7 @@ impl DrawingDatabase {
                 entity,
                 self.render_attributes.get(&entity.id),
                 self.hidden_entities.contains(&entity.id),
+                self.bim_elements.get(&entity.id),
             )?;
             grouped
                 .entry((model, shard_of(entity.id.0)))

@@ -27,9 +27,9 @@ ADR 0027。
    版本/revision 或仓库内固定路径，并分别在 `docs/acadrust-patches.md`（ADR-0031）/
    `docs/rvt-patches.md`（ADR-0035）登记；`check-architecture.py` 强制这两份台账。其它任何
    patch 表/键仍拒绝。当前状态：上游 `acadrust` 0.6.8 **未修改**（实验性 DWG 导出用上游
-   `DwgWriter`）；`rvt` 0.24.0 以固定路径 `vendor/rvt` 引入，**只改**
+   `DwgWriter`）；`rvt` 0.25.0 以固定路径 `vendor/rvt` 引入，**只改**
    `src/ifc/gltf.rs` 的透明度选择（多材质预览体取最透明构件 alpha；`extras` 来源标记与
-   material 索引越界过滤都由上游 0.24.0 提供）——台账外不得再改。
+   material 索引越界过滤已包含在上游 0.25.0）——台账外不得再改。
 2. 未支持/未验证能力必须显式建模（`Unsupported`/`Partial`/诊断/`pending(...)`）；占位与假数据
    不计完成，**禁止**把失败改成空成功。
 3. 业务层只操作数据库/命令/事务；GPU 提交封装在渲染器内。`cad-db` 是唯一权威，UI 与渲染均为派生。
@@ -57,7 +57,7 @@ ADR 0027。
 
 唯一依赖：`cad-render-wgpu` → wgpu；`cad-import-acadrust` → acadrust（0.6.8，当前未修改；如需补丁
 只允许 acadrust 且必须在 `docs/acadrust-patches.md` 登记，见 ADR-0031）；
-`cad-import-rvt` → rvt（0.24.0，`vendor/rvt` 固定路径补丁：只改 `src/ifc/gltf.rs` 的透明度
+`cad-import-rvt` → rvt（0.25.0，`vendor/rvt` 固定路径补丁：只改 `src/ifc/gltf.rs` 的透明度
 选择，见 ADR-0035 与 `docs/rvt-patches.md`）。
 架构规则：`cad-desktop-shell` 是唯一允许依赖 `tauri` 的共享层（脚本强制的是 iced 全局禁用
 与逐 crate 的 ban 列表，不正向断言 tauri 唯一性——不要因此绕过该规则）。平台类型
@@ -196,7 +196,9 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
   导入记录不淘汰）与 `tables/sources.json`；新增两张表使 `FORMAT_MINOR` 升到 **2**，
   网格基色纹理（`textures/<key>` 二进制条目 + `cad:Mesh` 的 `uvs`/`texture`）再升到 **3**，
   网格 PBR 通道（`cad:Mesh.pbr`：metallic/roughness/emissive/occlusion 标量 + 4 张 UV0 贴图）
-  再升到 **4**（minor ≤ 3 仍可打开）。**报告弹窗 UI、
+  再升到 **4**（minor ≤ 3 仍可打开）。RVT/IFC 的 BIM 语义只有 **IFC 导入已接线**（`Partial`，
+  ADR-0042 Phase 1）；**IFC 导出回写与 RVT/DGN 的 BIM 语义未接线**（Phase 2/3）。
+  **报告弹窗 UI、
   L0 源字节直通、DXF L1 不动点仍未实现**，不得写成已完成。
 
 ## 前端约定（`apps/desktop-ui`）
@@ -252,7 +254,9 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
 
 外部资源打包（ADR-0040，`document.json.embed_resources` → `resources/{font,xref,image}/<key>`）
 随 `.ymodel` 保存生效（Linux 完整；Android 的采集受限于文件系统解析——SAF 来源的图片/参照按"未找到"
-记录，不假装已打包），`FORMAT_MINOR` 上限升到 **5**（写入按文档取 4 或 5）。字体目录设置与
+记录，不假装已打包），资源使 `FORMAT_MINOR` 升到 **5**；BIM 语义（元素行可选 `bim` 块 +
+`tables/bim-definitions.json`，ADR-0042 Phase 1）再升到 **6**，写入按文档取 **4/5/6**
+（有 BIM → 6；只有资源 → 5；否则 → 4）。字体目录设置与
 目录选择器只在 `native-below` 可用：`dom-canvas`（Web **与 X11/XWayland**）读不到本地目录，
 行渲染为不可用、写设置按 `unsupported-runtime: fontsDir` 拒绝——**不得**按 `--fonts-dir` 静默生效。
 真实跨机自包含、字体度量一致性、portal 目录选择器交互均 **NOT VERIFIED**。

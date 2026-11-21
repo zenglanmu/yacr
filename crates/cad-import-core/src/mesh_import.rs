@@ -14,8 +14,8 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use cad_db::{
-    validate_geometry, DbEntity, DbObject, DrawingDatabaseBuilder, EntityColor,
-    EntityRenderAttributes, Layer, LayerAttributes,
+    validate_geometry, BimDefinitions, BimElement, DbEntity, DbObject, DrawingDatabaseBuilder,
+    EntityColor, EntityRenderAttributes, Layer, LayerAttributes,
 };
 use cad_domain::{
     CadError, CadResult, Completeness, Diagnostic, EntityCapability, EntityId, LayerId, Mesh,
@@ -23,6 +23,14 @@ use cad_domain::{
 };
 
 use crate::{ImportLimits, ImportRequest};
+
+/// Stable diagnostic code: one per-element BIM block was refused and not stored.
+///
+/// A shape/budget refusal from [`cad_db::DrawingDatabaseBuilder::set_entity_bim`]
+/// is never silent: the forwarding [`MeshImport::set_entity_bim`] records it on
+/// the import's own report channel (and marks the import `Partial`) before
+/// returning the error to its caller.
+pub const DIAG_BIM_ENTITY_REFUSED: &str = "import.bim.entity_refused";
 
 /// The PNG container signature (the first eight bytes of every PNG).
 const PNG_MAGIC: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
@@ -81,6 +89,10 @@ pub struct MeshImport {
     textures: BTreeMap<String, Arc<[u8]>>,
     /// Sum of `textures`' payload sizes, for the total-bytes budget.
     texture_bytes: usize,
+    /// Element rows that carry a BIM block, for the importer's own reporting.
+    bim_elements: usize,
+    /// Rows in the shared BIM definition table, for the importer's reporting.
+    bim_definitions: usize,
     limits: ImportLimits,
 }
 
@@ -113,6 +125,8 @@ impl MeshImport {
             partial: false,
             textures: BTreeMap::new(),
             texture_bytes: 0,
+            bim_elements: 0,
+            bim_definitions: 0,
             limits: request.limits,
         })
     }
@@ -265,6 +279,58 @@ impl MeshImport {
         Ok(entity_id)
     }
 
+    /// Record one element's BIM block (ADR-0042 D2/D7).
+    ///
+    /// Forwards to [`DrawingDatabaseBuilder::set_entity_bim`] and keeps this
+    /// import's own accounting: a stored block bumps [`Self::bim_element_count`];
+    /// a refusal is written to the import's diagnostic channel **and** marks the
+    /// import `Partial` before the error is returned, so a caller that chooses to
+    /// continue still leaves an honest report behind. The entity must already be
+    /// inserted (`push_mesh*` / a future non-mesh insert), exactly as the builder
+    /// requires.
+    pub fn set_entity_bim(&mut self, id: EntityId, bim: BimElement) -> CadResult<()> {
+        match self.builder.set_entity_bim(id, bim) {
+            Ok(()) => {
+                self.bim_elements += 1;
+                Ok(())
+            }
+            Err(error) => {
+                let reason = "an element's BIM block was refused and was not stored".to_string();
+                self.record(
+                    Diagnostic {
+                        object: Some(ObjectId(id.0)),
+                        code: DIAG_BIM_ENTITY_REFUSED.into(),
+                        message: error.to_string(),
+                    },
+                    Some(reason),
+                );
+                Err(error)
+            }
+        }
+    }
+
+    /// Replace the shared BIM definition table (ADR-0042 D3).
+    ///
+    /// Forwards to [`DrawingDatabaseBuilder::set_bim_definitions`]. It may be
+    /// called before or after [`Self::set_entity_bim`]: cross-references are
+    /// checked once, at [`Self::finish`], when the whole document exists.
+    pub fn set_bim_definitions(&mut self, definitions: BimDefinitions) -> CadResult<()> {
+        let count = definitions.len();
+        self.builder.set_bim_definitions(definitions)?;
+        self.bim_definitions = count;
+        Ok(())
+    }
+
+    /// Element rows that carry a BIM block so far.
+    pub fn bim_element_count(&self) -> usize {
+        self.bim_elements
+    }
+
+    /// Rows in the shared BIM definition table so far.
+    pub fn bim_definition_count(&self) -> usize {
+        self.bim_definitions
+    }
+
     /// Number of entities inserted so far.
     pub fn entity_count(&self) -> usize {
         self.inserted
@@ -414,6 +480,61 @@ mod tests {
         assert_eq!(attributes.transparency, EntityTransparency::Explicit(0.5));
         // Nothing else is invented: the layer keeps its opaque, ACI 7 defaults.
         assert_eq!(outcome.database.entity_count(), 1);
+    }
+
+    // ------------------------------------------------------------ BIM ---
+
+    fn bim(connector: &str, id: &str) -> cad_db::BimElement {
+        cad_db::BimElement {
+            category: Some("IfcWall".into()),
+            name: None,
+            source: cad_db::BimSource {
+                connector: connector.into(),
+                document_id: Some("doc".into()),
+                id: Some(id.into()),
+                native_id: None,
+            },
+            level: None,
+            element_type: None,
+            material: None,
+            psets: Vec::new(),
+            evidence: cad_db::BimEvidence::Declared,
+        }
+    }
+
+    #[test]
+    fn set_entity_bim_reaches_the_finished_database() {
+        let mut import = MeshImport::new(&request(), "TestMesh").unwrap();
+        let object = import.reserve_object().unwrap();
+        let id = import
+            .push_mesh(object, triangle(), EntityColor::ByLayer)
+            .unwrap();
+        import.set_entity_bim(id, bim("ifc", "guid")).unwrap();
+        assert_eq!(import.bim_element_count(), 1);
+        let outcome = import.finish().unwrap();
+        let stored = outcome.database.bim_element(id).expect("BIM block stored");
+        assert_eq!(stored.source.id.as_deref(), Some("guid"));
+    }
+
+    #[test]
+    fn set_entity_bim_for_an_unknown_entity_reports_and_fails() {
+        let mut import = MeshImport::new(&request(), "TestMesh").unwrap();
+        let error = import
+            .set_entity_bim(EntityId(99), bim("ifc", "guid"))
+            .expect_err("no entity row owns id 99");
+        assert!(error.to_string().contains("ymodel.bim.invalid"), "{error}");
+        assert_eq!(import.bim_element_count(), 0, "nothing was stored");
+        let outcome = import.finish().unwrap();
+        assert!(outcome.database.bim_element(EntityId(99)).is_none());
+        assert!(matches!(
+            outcome.completeness,
+            Completeness::Partial(ref reasons)
+                if reasons.iter().any(|reason| reason.contains("BIM block was refused"))
+        ));
+        assert!(outcome
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == DIAG_BIM_ENTITY_REFUSED));
     }
 
     // ------------------------------------------------------------ textures ---

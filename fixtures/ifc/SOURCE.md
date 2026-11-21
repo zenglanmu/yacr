@@ -1,6 +1,6 @@
 # IFC fixtures
 
-All six files are **hand-authored in this repository** (`synthetic: true`,
+All seven files are **hand-authored in this repository** (`synthetic: true`,
 `authorized: true`) and are ISO 10303-21 Part 21 text with an IFC `FILE_SCHEMA`.
 They are contract fixtures for the import lane, not compatibility or
 product-acceptance evidence, and they are not produced by any IFC authoring
@@ -20,6 +20,7 @@ evidence.
 | `synthetic-wall-no-units.ifc` | IFC4 | The wall with no `IfcUnitAssignment`; pins the honest unknown-unit path | `Partial`, `import.ifc.units_unknown`, drawing units, raw file numbers |
 | `synthetic-orphan-opening.ifc` | IFC4 | The wall plus an `IfcOpeningElement` that no `IfcRelVoidsElement` references; pins the orphan-cutter channel | one wall entity, `Partial`, `import.ifc.opening_without_host` |
 | `synthetic-axis-only.ifc` | IFC4 | A wall whose only representation is an `Axis` `Curve2D`; pins the every-element-failed refusal | `Unsupported` (`import.ifc.all_elements_failed`) |
+| `synthetic-wall-semantics.ifc` | IFC4 | Two walls with `IfcSite`/`IfcBuilding`/two `IfcBuildingStorey` aggregates, `IfcWallType` + `IfcRelDefinesByType`, `IfcMaterial` + `IfcRelAssociatesMaterial`, and a `Pset_WallCommon` with a bool, an identifier and an `IfcComplexProperty`; pins the ADR-0042 D7 BIM mapping | two entities, 24 triangles, `Partial`, `import.ifc.bim.property_value_unsupported`; `Level 1` elevation stored as 3 m |
 
 Every expected triangle count above is asserted by
 `crates/cad-import-ifc/src/tests.rs`. A hand-written file that no longer parses

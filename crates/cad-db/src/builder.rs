@@ -33,8 +33,11 @@ fn next_construction_nonce() -> u64 {
 /// Validation is deferred to [`Self::finish`], which rejects dangling layer,
 /// block and layout references so a partially-built database never escapes.
 pub struct DrawingDatabaseBuilder {
-    database: DrawingDatabase,
-    errors: Vec<String>,
+    /// Crate-visible so the BIM builder methods live in `crate::bim` (ADR-0042
+    /// new code stays in a new module; `builder.rs` only wires the field and the
+    /// `finish()` gate).
+    pub(crate) database: DrawingDatabase,
+    pub(crate) errors: Vec<String>,
     /// Persisted counters a load path supplied, or `None` on the import path
     /// (which has no counters yet and rebuilds them from row maxima).
     seeded_counters: Option<IdCounters>,
@@ -88,6 +91,8 @@ impl DrawingDatabaseBuilder {
                 resource_names: BTreeMap::new(),
                 resource_sources: BTreeMap::new(),
                 embed_resources: false,
+                bim_elements: BTreeMap::new(),
+                bim_definitions: crate::bim::BimDefinitions::new(),
                 bounds_cache: Default::default(),
             },
             errors: Vec::new(),
@@ -883,6 +888,16 @@ impl DrawingDatabaseBuilder {
                 self.errors
                     .push(format!("bundled resource name for {id:?} has no payload"));
             }
+        }
+        // BIM data is optional, but whatever an element references must exist
+        // and every budget must hold (ADR-0042 D3/D5): a dangling level, a
+        // wrong-kind reference or an over-budget table would make the stored
+        // document lie. The check itself lives in `bim.rs` (new code, new
+        // module); this line is the only wiring here.
+        if let Err(error) =
+            crate::bim::validate(&self.database.bim_definitions, &self.database.bim_elements)
+        {
+            self.errors.push(error.to_string());
         }
         if !self.errors.is_empty() {
             let joined = self.errors.join("; ");

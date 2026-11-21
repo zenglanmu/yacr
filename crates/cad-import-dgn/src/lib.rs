@@ -1,6 +1,6 @@
 //! MicroStation DGN (V7 ISFF and V8 OLE compound file) **vector** import.
 //!
-//! [`cadkit_dgn`] 0.5.2 decodes both containers into a format-neutral
+//! [`cadkit_dgn`] 0.5.4 decodes both containers into a format-neutral
 //! `cadkit_core::Document`. This adapter maps that document into the `cad-db`
 //! vector model: levels become layers, linetypes/styles/shared-cell definitions
 //! become their tables, and every supported entity becomes a neutral
@@ -11,9 +11,11 @@
 //!
 //! * only the **primary design model** is imported; every other model is a
 //!   [`MODEL_SKIPPED`] diagnostic and a `Partial` reason;
-//! * `cadkit-dgn` decodes **no** level colour/weight/linetype/freeze/lock bit,
-//!   so layer rows carry name + visibility only and **no** `LayerAttributes` row
-//!   is written ([`LEVEL_SYMBOLOGY_UNDECODED`], always `Partial`);
+//! * `cadkit-dgn` resolves a level colour only from the 240-byte level-entry
+//!   layout (none of the committed fixtures use it) and keeps lineweight and
+//!   linetype as raw indices, so layer rows carry name + visibility only and
+//!   **no** `LayerAttributes` row is written ([`LEVEL_SYMBOLOGY_UNDECODED`],
+//!   always `Partial`); no freeze/lock bit is decoded either.
 //! * DGN tags/attributes, rasters, unknown element types and every `EntityKind`
 //!   without a vector mapping are reported and skipped, never fabricated;
 //! * a shared-cell instance whose block has no definition is skipped
@@ -89,7 +91,7 @@ pub const DEPTH_LIMIT: &str = "import.dgn.depth_limit";
 pub const UNKNOWN_ELEMENTS_ONLY: &str = "import.dgn.unknown_elements_only";
 /// Informational code: the reader's 8-bit text decoding choice.
 pub const TEXT_ENCODING: &str = "import.dgn.text_encoding";
-/// Stable diagnostic code: a linetype pattern could not be scaled from UOR.
+/// Stable diagnostic code: a linetype's paper pattern has no drawing-unit scale.
 pub const LINETYPE_PATTERN_UNSCALED: &str = "import.dgn.linetype_pattern_unscaled";
 
 /// The DGN import adapter.

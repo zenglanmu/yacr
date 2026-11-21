@@ -183,7 +183,8 @@ impl Mapper<'_> {
             self.note(
                 LINETYPE_PATTERN_UNSCALED,
                 format!(
-                    "{} linetype pattern(s) could not be converted from UOR to document units",
+                    "{} linetype pattern(s) are defined on paper but the file declares no \
+                     master-unit size, so they could not be expressed in drawing units",
                     self.unscaled_linetypes
                 ),
                 None,
@@ -374,7 +375,7 @@ impl Mapper<'_> {
         }
         if self.unscaled_linetypes > 0 {
             other.push(format!(
-                "{} linetype pattern(s) could not be scaled",
+                "{} linetype pattern(s) could not be expressed in drawing units",
                 self.unscaled_linetypes
             ));
         }

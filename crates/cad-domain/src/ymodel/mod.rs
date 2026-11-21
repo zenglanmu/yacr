@@ -88,7 +88,14 @@ pub const FORMAT_WRITE: u32 = 1;
 /// minor-4 archive that an older build can still open (D12). A reader that only
 /// knows `4` must refuse a `5` archive rather than drop the entries it cannot
 /// model.
-pub const FORMAT_MINOR: u32 = 5;
+///
+/// `6` adds the optional `bim` block on an element row and the
+/// `tables/bim-definitions.json` table (ADR-0042 D2/D3/D6). The block is
+/// written only when an element carries BIM data — `None` omits the key
+/// entirely, never `"bim": null`, because a minor-5 reader is strict about
+/// unknown element fields — and the table only when it holds rows, so an
+/// ordinary document keeps the minor its resources (or its absence) imply.
+pub const FORMAT_MINOR: u32 = 6;
 
 /// Stable failure markers.
 ///

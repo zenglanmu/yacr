@@ -23,12 +23,13 @@ use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, DateTime, ZipArchive, ZipWriter};
 
 use cad_db::{
-    BlockDefinition, ChangeScope, DbEntity, DbObject, DimStyle, DocumentSnapshot, DocumentStore,
-    DrawingDatabase, DrawingDatabaseBuilder, EntityColor, EntityLineWeight, EntityRenderAttributes,
-    ExternalReference, ExternalReferenceStatus, Layer, LayerAttributes, LayerColor,
-    LayerLineWeight, Layout, LineType, LinetypePattern, MLeaderStyle, MemorySink, MemorySource,
-    PaperViewport, PlotMargins, PlotPaperUnits, PlotProvenance, PlotRotation, PlotSettingsRecord,
-    PlotType, SaveReport, Scale, Style,
+    BimDefinition, BimDefinitions, BimElement, BimEvidence, BimProperty, BimPropertySet, BimSource,
+    BimValue, BlockDefinition, ChangeScope, DbEntity, DbObject, DimStyle, DocumentSnapshot,
+    DocumentStore, DrawingDatabase, DrawingDatabaseBuilder, EntityColor, EntityLineWeight,
+    EntityRenderAttributes, ExternalReference, ExternalReferenceStatus, Layer, LayerAttributes,
+    LayerColor, LayerLineWeight, Layout, LineType, LinetypePattern, MLeaderStyle, MemorySink,
+    MemorySource, PaperViewport, PlotMargins, PlotPaperUnits, PlotProvenance, PlotRotation,
+    PlotSettingsRecord, PlotType, SaveReport, Scale, Style,
 };
 use cad_domain::{
     BlockId, Completeness, DatabaseId, DimStyleId, DocumentIdentity, EntityId, LayerId, LayoutId,
@@ -683,5 +684,140 @@ fn paper_and_block_models_with_equal_sequences_do_not_collide() {
             .entity(EntityId(2))
             .map(|entity| entity.space.clone()),
         Some(SpaceId::Block(BlockId(1)))
+    );
+}
+
+// ------------------------------------------------------- BIM (ADR-0042 D6) ---
+
+fn bim_source() -> BimSource {
+    BimSource {
+        connector: "ifc".to_string(),
+        document_id: Some("doc-1".to_string()),
+        id: Some("2O2Fr$t4X7Zf8Q".to_string()),
+        native_id: Some("22".to_string()),
+    }
+}
+
+/// A database carrying one BIM element and the three definition rows it
+/// references. Deliberately separate from [`database()`]: the shared fixture must
+/// stay a minor-4 archive so its "every table" count and byte assertions keep
+/// meaning what they say.
+fn bim_database() -> DrawingDatabase {
+    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(9));
+    builder
+        .insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".to_string(),
+            visible: true,
+        })
+        .expect("layer");
+    builder
+        .insert_entity(line(1, LayerId(0), SpaceId::Model))
+        .expect("entity");
+
+    let mut definitions = BimDefinitions::new();
+    definitions
+        .insert(BimDefinition::Level {
+            id: "level:ifc:doc-1:L1".to_string(),
+            name: "Level 1".to_string(),
+            elevation: Some(0.0),
+            source: bim_source(),
+            evidence: BimEvidence::Declared,
+        })
+        .expect("level");
+    definitions
+        .insert(BimDefinition::Type {
+            id: "type:ifc:doc-1:T1".to_string(),
+            name: "Basic Wall:Generic 200mm".to_string(),
+            class: Some("IfcWallType".to_string()),
+            category: Some("IfcWall".to_string()),
+            psets: Vec::new(),
+            source: bim_source(),
+            evidence: BimEvidence::Declared,
+        })
+        .expect("type");
+    definitions
+        .insert(BimDefinition::Material {
+            id: "material:ifc:doc-1:M1".to_string(),
+            name: "Concrete".to_string(),
+            source: bim_source(),
+            evidence: BimEvidence::Declared,
+        })
+        .expect("material");
+    builder
+        .set_bim_definitions(definitions)
+        .expect("definitions");
+
+    builder
+        .set_entity_bim(
+            EntityId(1),
+            BimElement {
+                category: Some("IfcWall".to_string()),
+                name: Some("Basic Wall:Generic 200mm".to_string()),
+                source: bim_source(),
+                level: Some("level:ifc:doc-1:L1".to_string()),
+                element_type: Some("type:ifc:doc-1:T1".to_string()),
+                material: Some("material:ifc:doc-1:M1".to_string()),
+                psets: vec![BimPropertySet {
+                    name: "Pset_WallCommon".to_string(),
+                    properties: vec![
+                        BimProperty {
+                            name: "IsExternal".to_string(),
+                            value: BimValue::Bool(true),
+                        },
+                        BimProperty {
+                            name: "Reference".to_string(),
+                            value: BimValue::Real {
+                                value: 0.2,
+                                ifc_type: Some("IfcPositiveLengthMeasure".to_string()),
+                                unit: Some("m".to_string()),
+                            },
+                        },
+                        BimProperty {
+                            name: "Comment".to_string(),
+                            value: BimValue::Null,
+                        },
+                    ],
+                }],
+                evidence: BimEvidence::Declared,
+            },
+        )
+        .expect("bim");
+    builder.finish().expect("database")
+}
+
+#[test]
+fn bim_data_is_a_fixed_point_through_a_minor_six_archive() {
+    let db = bim_database();
+    let first = snapshot_of(&db, Revision(3));
+    let (bytes, _) = write_archive(&mut ZipDocumentStore::new(), &first);
+    let (_, manifest) = explode(&bytes);
+    assert_eq!(
+        manifest["format"]["minor"],
+        Value::from(6),
+        "BIM data earns minor 6 (ADR-0042 D6)"
+    );
+
+    let loaded = read_archive(&mut ZipDocumentStore::new(), &bytes);
+    let reopened = DrawingDatabase::from_snapshot(&loaded.snapshot).expect("hydrate");
+    assert_eq!(
+        reopened.bim_element(EntityId(1)),
+        db.bim_element(EntityId(1)),
+        "the element's BIM block survives the archive"
+    );
+    assert_eq!(
+        reopened.bim_definitions(),
+        db.bim_definitions(),
+        "the shared definition table survives the archive"
+    );
+    assert_eq!(
+        reopened.bim_key(EntityId(1)),
+        db.bim_key(EntityId(1)),
+        "the logical-component key is derived from the persisted source"
+    );
+    assert_eq!(
+        snapshot_of(&reopened, Revision(3)),
+        first,
+        "database -> archive -> database -> snapshot must lose no BIM field"
     );
 }

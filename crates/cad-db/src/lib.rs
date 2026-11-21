@@ -5,6 +5,7 @@
 //! and every commit raises the database revision and publishes an ordered
 //! [`ChangeSet`].
 
+mod bim;
 mod bounds;
 mod builder;
 mod change;
@@ -24,6 +25,7 @@ mod transform;
 mod validate;
 mod xref;
 
+pub use bim::*;
 pub use bounds::*;
 pub use builder::*;
 pub use change::*;

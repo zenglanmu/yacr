@@ -282,29 +282,6 @@ pub(crate) fn plan(snapshot: &DocumentSnapshot) -> Result<Vec<PlannedResource<'_
     Ok(planned)
 }
 
-/// The minor a document that packs nothing is written at (ADR-0040 D12).
-pub(crate) const FORMAT_MINOR_PLAIN: u32 = 4;
-
-/// The `manifest.format.minor` this document needs (ADR-0040 D12).
-///
-/// `5` whenever the archive carries something a minor-4 reader cannot model: a
-/// resource payload, the `tables/resources.json` table (**even an empty one**), or
-/// the self-containment flag. Everything else stays `4`, because the version gate
-/// fires before any entry is decoded and an unconditional `5` would make a
-/// resource-free document unopenable by an older build.
-///
-/// The table, not the payload count, is what decides: the writer emits
-/// `tables/resources.json` whenever the snapshot holds the table, and a minor-4
-/// reader refuses a table path it does not model.
-pub(crate) fn document_minor(snapshot: &DocumentSnapshot) -> u32 {
-    let has_table = snapshot.tables.get(TableKind::Resources).is_some();
-    if snapshot.header.embed_resources || !snapshot.resources.is_empty() || has_table {
-        cad_domain::ymodel::FORMAT_MINOR
-    } else {
-        FORMAT_MINOR_PLAIN
-    }
-}
-
 /// Whether the previous archive's foreign bytes at `path` are `new_bytes`.
 ///
 /// Only meaningful for a content-addressed `resources/<kind>/<key>` path (D8): the

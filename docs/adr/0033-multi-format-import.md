@@ -121,6 +121,18 @@ ASCII 与二进制同一路径；缺失/零/非有限法向由三角形几何重
 - CSG/布尔保真度、NURBS/`IfcAdvancedBrep` 未在真实样本上验证；按 best-effort 处理，
   拒绝必须显式。能力表不得宣称与 IfcOpenShell 等价。
 
+> 2026-11-21：`ifc-lite-core`/`ifc-lite-geometry` 由 28.2.0 升到 **28.3.0**
+> （`ifc-lite-export`/`ifc-lite-processing` 同步），决策本身不变。使用到的 API
+> （`build_entity_index`、`EntityDecoder`、`EntityScanner::next_entity`、
+> `GeometryRouter::with_units`、`process_element_with_voids_parts`、
+> `process_element_with_submeshes_textured`、`mesh::{Mesh,SubMesh}`、
+> `ifc_lite_export::plan::skeleton`）签名不变。行为变化（源码检视，非运行证据）：void 宿主
+> 改为在元素 root frame 内切割后再应用 RTC；CSG consolidate / CDT incircle / mesh orient /
+> weld 修正；新增 `output_policy`。同一模型的三角化输出**可能**变化，契约测试通过**不是**
+> 几何 golden 验收。默认 feature 现在会编入 CityJSON 写出器（新传递依赖 `i_overlay`）与
+> native result cache（`ifc-lite-processing` 的 build.rs 在 unix 编 `libc`，运行时默认不启用）。
+> 验证记录见 `docs/validation-deps-2026-11-21.md`。
+
 ### D7 RVT/RFA：`rvt` 0.17.0，经内部 glTF 落地，定位为 **preview**
 
 **已实现**（2026-11-10）为 `crates/cad-import-rvt`。本节记录的是代码的真实 API、单位结论与
@@ -315,6 +327,23 @@ level/文字/精确曲线与测量语义，等于把“能看”冒充成“能�
   level 名编码、嵌套复合元素、type-11 曲线切线）。本仓库不能打补丁（AGENTS.md 铁律 1）；
   遇到这些输入只能保留上游 warning / 显式诊断，不得把错误几何说成正确。
 
+> 2026-11-21：`cadkit-dgn`/`cadkit-core` 由 0.5.2 升到 **0.5.4**，`default-features = false`
+> 与“不修改上游”不变，决策本身不变。唯一真实破坏点是 `Linetype::pattern` 的单位：0.5.4 起
+> 是 **drawing units**（内置装饰线型 1..=7 由纸面 mm 经 master unit 换算），适配器
+> `crates/cad-import-dgn/src/map/tables.rs` 原样写入、**不再二次除 UOR**；有 master-unit
+> 尺寸的文件得到真实纸面长度（契约夹具 `DGN_DOT_DASH` 0.00045 m → 0.0045 m）。
+> `import.dgn.linetype_pattern_unscaled` 触发条件收窄为“内置纸面线型 + 文件无 master-unit
+> 尺寸”，code 稳定、仍显式建模。解码增强：V8 level 可从 240 字节 level-entry 解析颜色索引
+> （写 `Layer.color`）与 raw weight/style index，但**仍不解码 freeze/lock**，适配器**仍不写**
+> `LayerAttributes`、`import.dgn.level_symbology_undecoded` 仍恒发且仍 `Partial`；V8 property
+> bit `0x0080` 现使图元 `visible=false`（进 hidden 集，不删除）；可解码 `ff fe` + UTF-16LE 的
+> linkage 名称（level/model/cell/tag set/单位 label），V8 无 stored-length 文本由 range 推导，
+> 2D tag 旋转按 angle 读（兼容旧 quaternion）；复合链/形 header 提前关闭超声明计数的父链
+> （上游 issue #27），新增上游 warning `dgn.complex_count`；扩展色 >255 仍回退 `ByLayer`，
+> 新增上游聚合 warning `dgn.color_extended_unresolved`。两个上游 warning 位于
+> `Document::warnings`，当前适配器不转发、也不新增 `import.dgn.*` 稳定码。验证记录见
+> `docs/validation-deps-2026-11-21.md`。
+
 ## 3. 兼容性与许可证
 
 - `tobj`（MIT）、`stl_io`（MIT）、`cadmpeg-*`（Apache-2.0）、`rvt`（Apache-2.0）与
@@ -328,6 +357,12 @@ level/文字/精确曲线与测量语义，等于把“能看”冒充成“能�
   `unsafe`；只由 `cad-import-dgn` 依赖，精确固定版本，未修改上游。
 - 新增依赖必须记入 `THIRD_PARTY_NOTICES.md`。`[patch.crates-io]` 仍只允许 `acadrust`
   （ADR-0031），本 ADR 不引入任何 patch。
+
+> 2026-11-21：版本事实更新为 `ifc-lite-*` **28.3.0**、`cadkit-dgn`/`cadkit-core` **0.5.4**、
+> `rvt` **0.25.0**（`vendor/rvt` 补丁仍只改 `src/ifc/gltf.rs`）；许可结论不变，也没有新增
+> `[patch.crates-io]` 键。`ifc-lite-export` 的默认 feature 现在会编入 CityJSON 写出器
+> （传递依赖 `i_overlay`，MIT OR Apache-2.0）与 native result cache（unix 编 `libc`），
+> 仍与 AGPL-3.0 主仓兼容。
 
 ## 4. 测试与证据
 

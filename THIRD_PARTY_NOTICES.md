@@ -8,10 +8,10 @@
   `wasm32-unknown-unknown` 可编译。
 - stl_io 0.11.0：ASCII/二进制 STL 读取器，MIT，上游 <https://github.com/hmeyer/stl_io>。
   仅由 `cad-import-stl` 依赖；纯 Rust、无传递依赖。
-- cadkit-dgn / cadkit-core 0.5.2：Bentley DGN V7（ISFF）/ V8（OLE-CFB）的 clean-room
+- cadkit-dgn / cadkit-core 0.5.4：Bentley DGN V7（ISFF）/ V8（OLE-CFB）的 clean-room
   读取器与中性 `Document` 模型，**MIT OR Apache-2.0**，上游
   <https://github.com/TNYCL/cadkit>。仅由 `cad-import-dgn` 依赖；版本在 workspace 中
-  **精确固定**（`=0.5.2`），`cadkit-dgn` 关闭默认 `write` feature（不引入 V8 writer 与可选
+  **精确固定**（`=0.5.4`），`cadkit-dgn` 关闭默认 `write` feature（不引入 V8 writer 与可选
   `cfb`）。读取路径是纯 Rust、无 C 依赖、上游 `unsafe_code = forbid`；**未修改上游源码、
   无 Cargo patch、无 vendoring**。它是 2026-10 才出现的 0.x crate（单一维护者），因此只按
   `docs/dgn.md` 声明的边界提供**矢量文档导入**，不宣称 V8i/CONNECT/ORD 或真实 MicroStation
@@ -36,19 +36,21 @@
   `DecodeOptions` 定义在此 crate，不在 codec crate）；未修改。
 - cadmpeg-tessellate 0.6.12：cadmpeg 的 B-rep 逐面三角化器，Apache-2.0，同一上游。
   仅由 `cad-import-step` 依赖；未修改。三个 cadmpeg crate 都未启用额外 feature。
-- ifc-lite-core / ifc-lite-geometry 28.2.0：IFC（IFC2X3/IFC4/IFC4X3）Part 21 读取器与
+- ifc-lite-core / ifc-lite-geometry 28.3.0：IFC（IFC2X3/IFC4/IFC4X3）Part 21 读取器与
   建筑几何网格化器，**MPL-2.0**，上游 <https://github.com/LTplus-AG/ifc-lite>。仅由
-  `cad-import-ifc` 依赖；版本在 workspace 中**精确固定**（`=28.2.0`），未启用额外 feature；
+  `cad-import-ifc` 依赖；版本在 workspace 中**精确固定**（`=28.3.0`），未启用额外 feature；
   **两个 crate 的文件均未修改**（未打补丁、未复制其源码，也不修改其源文件）。MPL-2.0 是
   文件级 copyleft：披露义务针对被修改的源文件，本仓库不作任何修改，仅以编译产物形式链接；
   其源码可从上游与 crates.io 取得。该 crate 内含若干传递依赖（如 `i_overlay`、
   `geometry-predicates`、`nalgebra`）；实际版本与许可证见 Cargo.lock，分发前需做完整依赖审计。
-- ifc-lite-export / ifc-lite-processing 28.2.0：同一上游的 IFC4 导出计划执行器（skeleton、
+- ifc-lite-export / ifc-lite-processing 28.3.0：同一上游的 IFC4 导出计划执行器（skeleton、
   `Disposition::Add`、`IfcTriangulatedFaceSet` 写出）与几何处理管线，**MPL-2.0**，上游
   <https://github.com/LTplus-AG/ifc-lite>。`ifc-lite-export` 仅由 `cad-export-ifc` 的 IFC4
   writer 依赖；`ifc-lite-processing` 在同一 workspace 中一并固定，使 `ifc-lite-export` 的 caret
-  依赖不能把 28.2.0 家族漂移到读取器 `=28.2.0` 之外。两者版本在 workspace 中**精确固定**
-  （`=28.2.0`），未启用额外 feature；**上游文件均未修改**（未打补丁、未复制其源码）。MPL-2.0
+  依赖不能把 28.3.0 家族漂移到读取器 `=28.3.0` 之外。两者版本在 workspace 中**精确固定**
+  （`=28.3.0`），未启用额外 feature（28.3.0 的默认 feature 会编入 CityJSON 写出器与其传递
+  依赖 `i_overlay`，以及 `ifc-lite-processing` 的 native result cache；运行时默认不启用缓存）；
+  **上游文件均未修改**（未打补丁、未复制其源码）。MPL-2.0
   是文件级 copyleft：本仓库不作任何修改，仅以编译产物形式链接；其源码可从上游与 crates.io
   取得。其传递依赖的实际版本与许可证见 Cargo.lock，分发前需做完整依赖审计。
 - rvt 0.25.0：Autodesk Revit（`.rvt`/`.rte`/`.rfa`/`.rft`）的 clean-room 读取器与

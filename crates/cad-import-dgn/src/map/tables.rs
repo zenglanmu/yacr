@@ -3,7 +3,7 @@
 use cad_db::{BlockDefinition, Layer, LineType, LinetypePattern, Style};
 use cad_domain::{BlockId, LayerId, LinetypeId, Point3, StyleId, UnitContext};
 
-use super::{document_units_per_uor, domain_point, finite_point, Mapper};
+use super::{domain_point, finite_point, Mapper};
 use crate::{
     GEOMETRY_REJECTED, LEVEL_SYMBOLOGY_UNDECODED, LINETYPE_PATTERN_UNSCALED, UNITS_UNSUPPORTED,
 };
@@ -21,8 +21,6 @@ impl Mapper<'_> {
                 None,
             );
         }
-        let model = self.primary_model();
-        self.uor_per_document_unit = model.and_then(document_units_per_uor);
         self.units = self.unit_context();
         self.read_layers()?;
         self.read_linetypes()?;
@@ -107,15 +105,18 @@ impl Mapper<'_> {
             self.layer_names.insert(id, layer.name.clone());
             self.next_layer = self.next_layer.max(index as u128 + 1);
         }
-        // cadkit decodes no level colour, weight, linetype or freeze/lock bit;
-        // the raw flags stay in the document's props, never in a fabricated
-        // LayerAttributes row. Display state is therefore always partial.
+        // cadkit 0.5.4 resolves a level's palette colour only from the 240-byte
+        // level-entry layout, and keeps weight/style as raw indices; no
+        // freeze/lock flag is decoded. The raw values stay in the document's
+        // props, never in a fabricated LayerAttributes row, so display state is
+        // always partial.
         self.note(
             LEVEL_SYMBOLOGY_UNDECODED,
             format!(
                 "{} DGN level row(s) were imported by name and visibility only; cadkit-dgn \
-                 decodes no level colour, lineweight, linetype or freeze/lock flag, so no layer \
-                 attribute row is written",
+                 resolves a level colour only from the 240-byte level-entry layout (raw \
+                 weight/style indices stay in dgn.level_weight_raw/dgn.level_style_raw) and \
+                 decodes no freeze/lock flag, so no layer attribute row is written",
                 doc.layers.len()
             ),
             None,
@@ -125,30 +126,33 @@ impl Mapper<'_> {
 
     fn read_linetypes(&mut self) -> cad_domain::CadResult<()> {
         let doc = self.doc;
+        // `cadkit-dgn` 0.5.4 reports `Linetype::pattern` in **drawing units** — the
+        // same unit as the geometry — and converts the built-in cosmetic styles
+        // (`1..=7`) from their nominal paper millimetres through the document's
+        // master unit. Nothing is left to rescale here: dividing by the
+        // UOR-per-master factor again (the 0.5.2 interpretation) would shrink
+        // every pattern by that factor. When the file declares no master-unit
+        // size the reader cannot express a paper pattern and hands back an
+        // empty one; that loss is reported instead of guessing a scale.
+        let units_known = doc.units.meters_per_unit().is_some();
         for (index, linetype) in doc.linetypes.iter().enumerate() {
             let id = LinetypeId(index as u128);
             let key = linetype.name.to_ascii_lowercase();
-            let pattern = match self.uor_per_document_unit {
-                Some(uor) if uor.is_finite() && uor > 0.0 => LinetypePattern::from_elements(
-                    linetype.pattern.iter().map(|element| element / uor),
-                ),
-                _ => {
-                    if linetype.pattern.iter().any(|element| *element != 0.0) {
-                        self.unscaled_linetypes += 1;
-                        self.note(
-                            LINETYPE_PATTERN_UNSCALED,
-                            format!(
-                                "linetype '{}' stores its dash pattern in UOR, but the file gives \
-                                 no usable UOR-to-document-unit factor; the linetype was stored \
-                                 continuous rather than at a guessed scale",
-                                linetype.name
-                            ),
-                            None,
-                        );
-                    }
-                    LinetypePattern::continuous()
-                }
-            };
+            if !units_known && linetype.pattern.is_empty() && is_builtin_cosmetic_style(linetype) {
+                self.unscaled_linetypes += 1;
+                self.note(
+                    LINETYPE_PATTERN_UNSCALED,
+                    format!(
+                        "linetype '{}' is a built-in MicroStation style whose dash pattern is \
+                         defined on paper; the reader expresses it in drawing units, but the \
+                         file declares no master-unit size, so the linetype was stored \
+                         continuous rather than at a guessed scale",
+                        linetype.name
+                    ),
+                    None,
+                );
+            }
+            let pattern = LinetypePattern::from_elements(linetype.pattern.iter().copied());
             self.builder.insert_linetype(LineType {
                 id,
                 name: linetype.name.clone(),
@@ -282,4 +286,15 @@ impl Mapper<'_> {
             );
         }
     }
+}
+
+/// `cadkit-dgn`'s built-in MicroStation line styles (`1..=7`): their pattern is a
+/// fixed paper size, resolved through the drawing unit. Any other style index,
+/// and `0` (continuous), carries no pattern in the reader's neutral model.
+fn is_builtin_cosmetic_style(linetype: &cadkit_core::Linetype) -> bool {
+    linetype
+        .props
+        .get("dgn.style")
+        .and_then(cadkit_core::Value::as_i64)
+        .is_some_and(|style| (1..=7).contains(&style))
 }

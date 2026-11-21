@@ -326,7 +326,7 @@ fn parse_tables(
 /// `cad-db`, and `check-architecture.py` forbids this crate from editing it), so
 /// the reverse map is written out and a table missing from it is refused by
 /// [`unknown_live_entry`] rather than silently dropped.
-const TABLE_ENTRIES: [(TableKind, &str); 13] = [
+const TABLE_ENTRIES: [(TableKind, &str); 14] = [
     (TableKind::Layers, "tables/layers.json"),
     (TableKind::Layouts, "tables/layouts.json"),
     (TableKind::Styles, "tables/styles.json"),
@@ -344,6 +344,9 @@ const TABLE_ENTRIES: [(TableKind, &str); 13] = [
     // store never interprets a report, it only carries it across a save.
     (TableKind::Sources, "tables/sources.json"),
     (TableKind::Compat, "tables/compat.json"),
+    // Shared BIM definitions (ADR-0042 D3). Opaque rows here too: `cad-db`'s
+    // snapshot codec owns their shape and their budget.
+    (TableKind::BimDefinitions, "tables/bim-definitions.json"),
 ];
 
 /// The table kind one entry path holds, if this build models it.
@@ -693,6 +696,7 @@ mod tests {
             TableKind::Resources,
             TableKind::Sources,
             TableKind::Compat,
+            TableKind::BimDefinitions,
         ];
         let mut paths = std::collections::BTreeSet::new();
         for kind in kinds {
@@ -713,6 +717,7 @@ mod tests {
                 TableKind::Resources => "Resources",
                 TableKind::Sources => "Sources",
                 TableKind::Compat => "Compat",
+                TableKind::BimDefinitions => "BimDefinitions",
             };
             assert_eq!(name, format!("{kind:?}"));
             let path = table_entry(kind);

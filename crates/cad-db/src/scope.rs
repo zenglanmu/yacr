@@ -110,6 +110,15 @@ pub enum TableKind {
     /// themselves are `resources/<kind>/<key>` entries driven by the document's
     /// own resource table, not by this scope.
     Resources,
+    /// Shared BIM definition rows (`tables/bim-definitions.json`, ADR-0042 D3):
+    /// the `level`/`type`/`material` rows elements reference by composite id.
+    ///
+    /// Informational in the same sense as [`TableKind::Resources`]: the store
+    /// re-encodes every table the snapshot holds, so marking this dirty is
+    /// bookkeeping, not a raw-copy switch. Per-element BIM data is **not** here
+    /// — it is the optional `bim` block of the element shard row, which keeps
+    /// its raw-copy incrementality (ADR-0042 D2).
+    BimDefinitions,
 }
 
 /// The set of persisted rows one commit made stale.

@@ -9,6 +9,7 @@ use std::sync::{Arc, RwLock};
 
 use cad_domain::*;
 
+use crate::bim::{BimDefinitions, BimElement};
 use crate::dim_style::DimStyle;
 use crate::entity::{DbEntity, EntityRenderAttributes};
 use crate::mleader_style::MLeaderStyle;
@@ -19,6 +20,7 @@ use crate::tables::{
 use crate::xref::ExternalReference;
 
 mod access;
+mod bim;
 mod block_edit;
 mod bounds;
 mod edit;
@@ -327,6 +329,19 @@ pub struct DrawingDatabase {
     /// `document.json` and seeded back on load, so a re-save keeps the user's
     /// choice. Defaults to `false` (opt-in) and is not written while `false`.
     pub(crate) embed_resources: bool,
+    /// Per-element BIM data (ADR-0042 D2), kept **beside** [`Self::entities`]
+    /// exactly like [`Self::render_attributes`], so [`crate::DbEntity`] keeps
+    /// its six fields and a non-BIM document pays nothing.
+    ///
+    /// An absent entry means "this element carries no BIM data", which is what
+    /// the stored row says (the `bim` key is omitted). Written as the optional
+    /// `bim` block of the element's shard row.
+    pub(crate) bim_elements: BTreeMap<EntityId, BimElement>,
+    /// Shared BIM definition rows (`tables/bim-definitions.json`, ADR-0042 D3).
+    ///
+    /// Empty for every document without BIM data; the writer then emits no
+    /// table at all, which keeps such a document at its resources-derived minor.
+    pub(crate) bim_definitions: BimDefinitions,
     /// Cache of [`Self::bounds`] tagged with the [`Revision`] it was computed
     /// at. Interior mutability is required because `bounds` takes `&self` (the
     /// scene-preparation worker shares one `Arc<DrawingDatabase>` across

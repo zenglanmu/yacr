@@ -34,7 +34,7 @@ pub use export::{
 pub const IFC_SCHEMA_REFUSED: &str = "import.step.ifc_schema_refused";
 
 mod mesh_import;
-pub use mesh_import::{MeshImport, MeshImportOutcome};
+pub use mesh_import::{MeshImport, MeshImportOutcome, DIAG_BIM_ENTITY_REFUSED};
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

@@ -64,6 +64,7 @@ mod texture_round_trip;
 mod tolerance;
 mod wipeout_frames;
 mod ymodel;
+mod ymodel_bim;
 mod zoom_window;
 
 // --- synthetic platform contracts -------------------------------------------

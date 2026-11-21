@@ -92,6 +92,7 @@
 mod crc32;
 mod json;
 mod manifest;
+mod minor;
 mod models;
 mod previous;
 mod read;

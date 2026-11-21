@@ -190,6 +190,16 @@ pub enum FieldKind {
     /// The element's render attributes (colour/lineweight/linetype/opacity,
     /// annotative state, clip). Encoded by `cad-db`, not by this crate.
     RenderAttributes,
+    /// The element's optional BIM block (ADR-0042 D2), or **absent** when the
+    /// element carries none. Encoded by `cad-db` (`bim.rs`), not by this crate:
+    /// the nested shape (source, level/type/material keys, psets, evidence) is
+    /// that module's contract, like [`Self::RenderAttributes`].
+    ///
+    /// This is the second documented absent-means-`None` exception in an
+    /// element payload (after the mesh `uvs`/`texture`/`pbr` fields): a
+    /// minor-5 row is the same object minus this key. It is never written as
+    /// `null`, because a strict minor-5 reader would refuse the extra key.
+    Bim,
 }
 
 /// One field of a class payload.
@@ -250,6 +260,10 @@ pub const CAD_ELEMENT: ClassDescriptor = ClassDescriptor {
         field("invisible", FieldKind::Bool),
         field("render_attributes", FieldKind::RenderAttributes),
         field("geometry", FieldKind::Geometry),
+        // ADR-0042 D2: appended last and **omitted** when the element has no
+        // BIM data, so a minor-5 row is the same object minus this key. The
+        // writer never emits `"bim": null`.
+        field("bim", FieldKind::Bim),
     ],
 };
 
@@ -796,7 +810,8 @@ mod tests {
                 | FieldKind::OptImageClip
                 | FieldKind::ImageAdjust
                 | FieldKind::Space
-                | FieldKind::RenderAttributes => kind,
+                | FieldKind::RenderAttributes
+                | FieldKind::Bim => kind,
             }
         };
         let probes: Vec<FieldKind> = vec![
@@ -851,6 +866,7 @@ mod tests {
             FieldKind::ImageAdjust,
             FieldKind::Space,
             FieldKind::RenderAttributes,
+            FieldKind::Bim,
         ];
         for kind in probes {
             let kind = all_kinds(kind);

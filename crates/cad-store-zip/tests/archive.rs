@@ -581,7 +581,7 @@ fn the_manifest_pins_the_document_and_the_import_baseline() {
         Value::from(4),
         "a document that packs nothing stays a minor-4 archive (ADR-0040 D12)"
     );
-    assert_eq!(cad_domain::ymodel::FORMAT_MINOR, 5, "ADR-0040 D12");
+    assert_eq!(cad_domain::ymodel::FORMAT_MINOR, 6, "ADR-0042 D6");
 
     let loaded = read_archive(&bytes).expect("read");
     assert_eq!(loaded.manifest.open_revision, Revision(4));

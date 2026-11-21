@@ -5,12 +5,13 @@
 //! written as first-class database rows. Only the primary design model is
 //! imported; every other model is reported, never guessed into model space.
 //!
-//! Nothing here invents state. `cadkit-dgn` decodes no level colour, weight,
-//! freeze or lock bit, so layer rows carry only their name and visibility and
-//! **no** `LayerAttributes` row is written (writing defaults would look like
-//! real data). The same rule applies to tags, rasters, unknown elements and
-//! unsupported `EntityKind`s: each is a stable diagnostic plus `Partial`, never
-//! a silently dropped or fabricated value.
+//! Nothing here invents state. `cadkit-dgn` resolves a level colour only from
+//! the 240-byte level-entry layout, keeps lineweight/linetype as raw indices and
+//! decodes no freeze or lock bit, so layer rows carry only their name and
+//! visibility and **no** `LayerAttributes` row is written (writing defaults
+//! would look like real data). The same rule applies to tags, rasters, unknown
+//! elements and unsupported `EntityKind`s: each is a stable diagnostic plus
+//! `Partial`, never a silently dropped or fabricated value.
 
 mod blocks;
 mod entities;
@@ -24,7 +25,7 @@ use cad_domain::{
     CadError, CadResult, Diagnostic, EntityId, LayerId, ObjectId, Point3, SemanticGeometry,
     StyleId, UnitContext,
 };
-use cadkit_core::{Document, Model, ModelKind, Value};
+use cadkit_core::{Document, Model, ModelKind};
 
 use crate::{NO_GEOMETRY, UNKNOWN_ELEMENTS_ONLY};
 
@@ -124,7 +125,6 @@ pub(crate) struct Mapper<'a> {
     pub(super) max_depth: usize,
 
     pub(super) units: UnitContext,
-    pub(super) uor_per_document_unit: Option<f64>,
 
     pub(super) diagnostics: Vec<Diagnostic>,
     pub(super) kinds: BTreeMap<&'static str, bool>,
@@ -182,7 +182,6 @@ impl<'a> Mapper<'a> {
             max_entities: limits.max_entities,
             max_depth: limits.max_block_depth,
             units: UnitContext::drawing_units(),
-            uor_per_document_unit: None,
             diagnostics: Vec::new(),
             kinds: BTreeMap::new(),
             unknown_types: BTreeMap::new(),
@@ -324,20 +323,6 @@ impl<'a> Mapper<'a> {
 
 pub(super) fn finite_point(point: Point3) -> Option<Point3> {
     (point.x.is_finite() && point.y.is_finite() && point.z.is_finite()).then_some(point)
-}
-
-/// Document units per UOR for a model.
-///
-/// `dgn.rescaled_to_document_units` is the effective factor after the reader
-/// scaled another model into the document's units; `dgn.uor_per_master` is the
-/// model's own UOR count.
-pub(super) fn document_units_per_uor(model: &Model) -> Option<f64> {
-    let value = model
-        .props
-        .get("dgn.rescaled_to_document_units")
-        .or_else(|| model.props.get("dgn.uor_per_master"))
-        .and_then(Value::as_f64)?;
-    (value.is_finite() && value > 0.0).then_some(value)
 }
 
 /// `cadkit` and `cad-domain` have separate `Point3`/`Vec3` types; convert

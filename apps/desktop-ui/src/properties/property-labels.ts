@@ -66,6 +66,14 @@ export function propertyRowLabel(t: CatalogTranslate, key: string): string {
     case 'columns': return t('properties.row.columns');
     case 'cells': return t('properties.row.cells');
     case 'fill': return t('properties.row.fill');
+    case 'bim_category': return t('properties.row.bim_category');
+    case 'bim_name': return t('properties.row.bim_name');
+    case 'bim_level': return t('properties.row.bim_level');
+    case 'bim_type': return t('properties.row.bim_type');
+    case 'bim_material': return t('properties.row.bim_material');
+    case 'bim_source': return t('properties.row.bim_source');
+    case 'bim_properties': return t('properties.row.bim_properties');
+    case 'bim_evidence': return t('properties.row.bim_evidence');
     case 'roots': return t('properties.row.roots');
     case 'lines': return t('properties.row.lines');
     case 'color': return t('properties.row.color');
@@ -89,6 +97,7 @@ export function propertyGroupLabel(t: CatalogTranslate, group: string): string {
     case 'geometry': return t('properties.group.geometry');
     case 'text': return t('properties.group.text');
     case 'display': return t('properties.group.display');
+    case 'bim': return t('properties.group.bim');
     default: return group;
   }
 }

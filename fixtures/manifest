@@ -755,6 +755,29 @@
       ]
     },
     {
+      "id": "synthetic-ifc4-wall-semantics",
+      "path": "fixtures/ifc/synthetic-wall-semantics.ifc",
+      "sha256": "9f3c557c48f071782c3b17ecc3ad82d242ccc41fd162ae2a8067d97108ed47ba",
+      "dwg_version": "n/a (ISO 10303-21 IFC4)",
+      "source": "synthetic, authored in this repository",
+      "provenance": {
+        "origin": "yacr repository",
+        "authorization": "synthetic; authored for this repository, no vendor data",
+        "licence": "same as the repository"
+      },
+      "authorized": true,
+      "synthetic": true,
+      "entity_types": [
+        "MESH"
+      ],
+      "expected": "partial",
+      "known_limits": [
+        "Two IFC4 walls (one contained in IfcBuildingStorey 'Level 0' at 0 mm, one aggregated into 'Level 1' at 3000 mm), an IfcWallType with a type PSet, an IfcPropertySet with two single values plus one IfcComplexProperty, and an IfcMaterial.",
+        "Pins the ADR-0042 D7 semantics mapping only: GlobalId/Tag/Name, storey elevation converted to metres, type class/category, type and occurrence PSets, material, and Partial. The IfcComplexProperty is reported as import.ifc.bim.property_value_unsupported, never flattened into a string.",
+        "Contract fixture; no vendor IFC tool has cross-validated these semantics, and it is not compatibility or acceptance evidence."
+      ]
+    },
+    {
       "id": "synthetic-ifc4-wall-opening",
       "path": "fixtures/ifc/synthetic-wall-opening.ifc",
       "sha256": "4fd1081633ece51e0c416af4328bb724dd7d88c23fed260370d20f89862033cd",
