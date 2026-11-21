@@ -77,6 +77,14 @@ impl Application {
 
         // Resolve the value once, against the drawing's own tables. Unsupported
         // keys (`text` included) are refused here.
+        //
+        // A dynamic BIM PSet slot is dispatched **before** the display-property
+        // grammar: the key names a stored value inside the element's `bim` block,
+        // not an entity/display field, and `property_value` must not learn it.
+        // The key grammar and the row are owned by `crate::selection_bim`.
+        if let Some(slot) = crate::selection_bim::BimPropertyKey::parse(key) {
+            return self.set_bim_property(session, command, slot, value);
+        }
         let target = property_value::parse(&drawing, key, value)?;
 
         let references = session.selection.refs();

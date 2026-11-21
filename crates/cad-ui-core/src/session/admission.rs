@@ -218,15 +218,27 @@ pub const CAD_SELECTED_PROPERTY_CAP: usize = CAD_COMMAND_CAP;
 /// Parse the wire form of a `cad_set_selected_property` request.
 ///
 /// Both fields are strings: `key` is a stable machine key and `value` is that
-/// key's documented grammar (see [`cad_app::property_value`]). Only the **key**
-/// is checked here, because it is database-independent
+/// key's documented grammar. Two key families are admitted:
+///
+/// * the five fixed properties of [`cad_app::property_value`]
+///   (`layer`, `color`, `linetype`, `lineweight`, `transparency`);
+/// * a canonical dynamic BIM property key, `bim.pset.{set}.{property}`
+///   ([`cad_app::selection_bim::is_bim_property_key`]), which `cad-app` dispatches
+///   to the BIM write path. It is deliberately **not** added to
+///   `property_value::SUPPORTED_KEYS`: that module must never see a key that
+///   addresses stored PSet data rather than a display attribute.
+///
+/// Only the **key** is checked here, because it is database-independent
 /// (`property.unsupported_key`, the same stable code the host write path uses
-/// for `text` and for any other unknown key). The value's grammar depends on the
-/// drawing's own tables (a layer/linetype name), so it is the host session's
-/// authority on the owner thread — never guessed or clamped here. No
-/// human-readable text is produced for a refused request: only stable codes.
+/// for `text` and for any other unknown or non-canonical key). The value's
+/// grammar depends on the drawing's own tables (a layer/linetype name) or on the
+/// stored property's type, so it is the host session's authority on the owner
+/// thread — never guessed or clamped here. No human-readable text is produced for
+/// a refused request: only stable codes.
 pub fn parse_property_write(key: &str, value: &str) -> Result<(String, String), String> {
-    if !cad_app::property_value::is_supported_key(key) {
+    if !cad_app::property_value::is_supported_key(key)
+        && !cad_app::selection_bim::is_bim_property_key(key)
+    {
         return Err("property.unsupported_key".to_string());
     }
     Ok((key.to_string(), value.to_string()))

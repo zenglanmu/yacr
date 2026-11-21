@@ -21,6 +21,7 @@ use cad_domain::{
     EntityId, HatchFill, InstancePath, MLeaderContentKind, Point3, SelectionRef, SemanticGeometry,
     SpaceId,
 };
+use std::borrow::Cow;
 use std::collections::BTreeSet;
 
 /// Maximum number of `enum` options emitted for one property row.
@@ -65,7 +66,10 @@ impl PropertyGroup {
     /// [`PropertyGroup::Display`] for the hatch style row. `color`, `linetype`,
     /// `lineweight` and `transparency` are the display-attribute rows emitted by
     /// [`display_property_rows`]. The `bim_*` keys are the fixed BIM rows of
-    /// [`crate::selection_bim`] (ADR-0042 D4).
+    /// [`crate::selection_bim`] (ADR-0042 D4); `bim_properties` is the retired
+    /// one-line PSet summary key, kept mapped so an older wire sample still
+    /// groups the same way. A dynamic PSet row is placed in
+    /// [`PropertyGroup::Bim`] explicitly by [`crate::selection_bim`].
     pub fn for_key(key: &str) -> Self {
         match key {
             "id" | "handle" | "type" | "layer" | "space" | "draw_order" | "instance"
@@ -128,7 +132,21 @@ impl PropertyKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PropertyRow {
     /// Stable machine key (never translated): `id`, `handle`, `type`, …
-    pub key: &'static str,
+    ///
+    /// A static key borrows its literal at zero cost; a source-derived row (a
+    /// PSet property, for example) owns a stable generated key instead. Keys are
+    /// unique inside one selection: the multi-selection intersection looks a row
+    /// up by key, so a duplicate would silently drop a row.
+    pub key: Cow<'static, str>,
+    /// The source's own name for a **dynamic** row (`IsExternal`,
+    /// `Pset_WallCommon.IsExternal`), or `None` for a static machine key.
+    ///
+    /// This is source data, not catalog copy: it is never translated and never
+    /// enters the i18n catalog. A consumer shows it verbatim when present and
+    /// falls back to the machine key's catalog label otherwise. `None` **iff**
+    /// the row is static, or the label differs across a multi-selection (the row
+    /// is mixed and its source names no longer describe one property).
+    pub label: Option<String>,
     /// Human-facing value; numbers are formatted by the caller's unit policy
     /// only where the value is a length, otherwise raw drawing units.
     ///
@@ -150,33 +168,41 @@ pub struct PropertyRow {
 }
 
 impl PropertyRow {
-    pub fn new(key: &'static str, value: impl Into<String>) -> Self {
+    pub fn new(key: impl Into<Cow<'static, str>>, value: impl Into<String>) -> Self {
+        let key = key.into();
         PropertyRow {
+            group: PropertyGroup::for_key(&key),
+            kind: PropertyKind::for_key(&key),
             key,
+            label: None,
             value: Some(value.into()),
-            group: PropertyGroup::for_key(key),
             mixed: false,
             editable: false,
-            kind: PropertyKind::for_key(key),
             options: Vec::new(),
         }
     }
 
     /// A row whose value differs across the selection: no value, explicit marker.
-    pub fn mixed(key: &'static str) -> Self {
+    pub fn mixed(key: impl Into<Cow<'static, str>>) -> Self {
+        let key = key.into();
         PropertyRow {
+            group: PropertyGroup::for_key(&key),
+            kind: PropertyKind::for_key(&key),
             key,
+            label: None,
             value: None,
-            group: PropertyGroup::for_key(key),
             mixed: true,
             editable: false,
-            kind: PropertyKind::for_key(key),
             options: Vec::new(),
         }
     }
 
     /// A row in an explicit group rather than the key's default group.
-    pub fn in_group(key: &'static str, value: impl Into<String>, group: PropertyGroup) -> Self {
+    pub fn in_group(
+        key: impl Into<Cow<'static, str>>,
+        value: impl Into<String>,
+        group: PropertyGroup,
+    ) -> Self {
         PropertyRow {
             group,
             ..PropertyRow::new(key, value)
@@ -310,8 +336,9 @@ pub struct SelectionProperties {
     /// value or an explicit mixed marker. Empty only when nothing is selected.
     pub rows: Vec<PropertyRow>,
     /// Keys whose values differ across the selection (multi-select); exactly
-    /// the keys of rows with [`PropertyRow::mixed`] set, in row order.
-    pub mixed_keys: Vec<&'static str>,
+    /// the keys of rows with [`PropertyRow::mixed`] set, in row order. Owned
+    /// strings so a dynamic row key (a PSet property) can be carried too.
+    pub mixed_keys: Vec<String>,
     /// The **round-trippable** current string of a single selected, directly
     /// addressable text entity (ADR 0020 amendment B; ADR-0021 D4 extends it to
     /// TEXT, MTEXT and MULTILEADER text), or `None` for every other selection.
@@ -406,7 +433,7 @@ impl SelectionProperties {
             .collect();
         let mut rows: Vec<PropertyRow> = Vec::new();
         for first_row in &per_ref[0] {
-            let key = first_row.key;
+            let key = first_row.key.clone();
             let Some(members) = per_ref
                 .iter()
                 .map(|rows| rows.iter().find(|row| row.key == key))
@@ -415,25 +442,38 @@ impl SelectionProperties {
                 // Not on every selected object: the intersection excludes it.
                 continue;
             };
+            // A dynamic row's label is source data: two objects at the same
+            // position but with a different source name are not the same
+            // property any more, so the row is mixed and carries no label.
+            let label_differs = members.iter().any(|row| row.label != members[0].label);
             let first_value = members[0].value.clone();
-            let mixed = first_value.is_none() || members.iter().any(|row| row.value != first_value);
+            let mixed = label_differs
+                || first_value.is_none()
+                || members.iter().any(|row| row.value != first_value);
             let mut row = match first_value {
-                Some(value) if !mixed => PropertyRow::new(key, value),
-                _ => PropertyRow::mixed(key),
+                Some(value) if !mixed => PropertyRow::new(key.clone(), value),
+                _ => PropertyRow::mixed(key.clone()),
             };
             // Group and kind follow the key's stable mapping (the first ref's
             // row is authoritative for the per-geometry overrides, e.g. `style`).
             row.group = first_row.group;
             row.kind = first_row.kind;
-            row.options = enum_options(database, key);
-            // Editable only when **every** selected ref supports the write path.
-            row.editable = members.iter().all(|row| row.editable);
+            row.label = if label_differs {
+                None
+            } else {
+                members[0].label.clone()
+            };
+            row.options = enum_options(database, &key);
+            // Editable only when **every** selected ref supports the write path
+            // **and** the row still names one property: two objects whose source
+            // labels differ are a mixed slot, so no single write can address it.
+            row.editable = !label_differs && members.iter().all(|row| row.editable);
             rows.push(row);
         }
-        let mixed_keys: Vec<&'static str> = rows
+        let mixed_keys: Vec<String> = rows
             .iter()
             .filter(|row| row.mixed)
-            .map(|row| row.key)
+            .map(|row| row.key.to_string())
             .collect();
         SelectionProperties {
             count: selection.len(),
@@ -455,10 +495,22 @@ impl SelectionProperties {
 /// a sub-element is not editable here (ADR 0020 amendment B). The value is the
 /// stored string verbatim, never a formatted display row.
 fn editable_text(reference: &SelectionRef, entity: &DbEntity) -> Option<(String, bool)> {
-    if !reference.instance.0.is_empty() || reference.sub_element.is_some() {
+    if !is_addressable(reference) {
         return None;
     }
     editable_text_source(entity).map(|(text, multiline)| (text.to_string(), multiline))
+}
+
+/// Whether the write paths can address this selected object **directly**.
+///
+/// A top-level entity is addressable by its own identity; a block-instance member
+/// (a non-empty instance path) and a sub-element are reached through an
+/// indirection that no write path accepts (ADR 0020 amendment B), so they are
+/// read-only whatever their value. This is the one addressability rule shared by
+/// [`property_row_editable`], [`editable_text`] and the dynamic BIM rows of
+/// [`crate::selection_bim`] — a capability of the target, not a display property.
+pub(crate) fn is_addressable(reference: &SelectionRef) -> bool {
+    reference.instance.0.is_empty() && reference.sub_element.is_none()
 }
 
 /// The raw, writable string of one directly addressable text-bearing entity and
@@ -518,7 +570,9 @@ pub fn entity_property_rows(
     rows.extend(display_property_rows(database, reference, entity));
     // BIM semantics (ADR-0042 D4) come last: an element without a `bim` block
     // adds nothing, so the existing row set is unchanged for every other entity.
-    rows.extend(crate::selection_bim::bim_property_rows(database, entity.id));
+    rows.extend(crate::selection_bim::bim_property_rows(
+        database, reference, entity.id,
+    ));
     rows
 }
 
@@ -608,8 +662,8 @@ pub fn enum_options(database: &DrawingDatabase, key: &str) -> Vec<String> {
 /// Whether the write path can change `key` for this selected object.
 ///
 /// A row is editable when the write target is a directly addressable top-level
-/// entity (the same rule [`editable_text`] uses: no instance path, no
-/// sub-element) **and** the key is one of the five properties
+/// entity (the shared [`is_addressable`] rule: no instance path, no sub-element)
+/// **and** the key is one of the five properties
 /// [`crate::property_value::SUPPORTED_KEYS`] accepts: `layer`, `color`,
 /// `linetype`, `lineweight`, `transparency`.
 ///
@@ -617,14 +671,15 @@ pub fn enum_options(database: &DrawingDatabase, key: &str) -> Vec<String> {
 /// symbolic value (`ByLayer`/`ByBlock`) as well as a concrete one, so a row
 /// whose stored value is symbolic is still writable (and a concrete value can be
 /// switched back to symbolic). Every other key is `false`: text content has its
-/// own edit path (ADR 0020 amendment B) and no other property is writable.
+/// own edit path (ADR 0020 amendment B), a dynamic BIM property key is dispatched
+/// by [`crate::selection_bim`], and no other property is writable.
 pub fn property_row_editable(
     _database: &DrawingDatabase,
     reference: &SelectionRef,
     _entity: &DbEntity,
     key: &str,
 ) -> bool {
-    if !reference.instance.0.is_empty() || reference.sub_element.is_some() {
+    if !is_addressable(reference) {
         return false;
     }
     crate::property_value::is_supported_key(key)

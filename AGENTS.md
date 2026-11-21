@@ -198,8 +198,14 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
   网格 PBR 通道（`cad:Mesh.pbr`：metallic/roughness/emissive/occlusion 标量 + 4 张 UV0 贴图）
   再升到 **4**（minor ≤ 3 仍可打开）。IFC 导入/导出、RVT/DGN 语义、BIM 查询/面板均已接线（IFC
   `Partial`；RVT/DGN `Unverified`），`FORMAT_MINOR` 升到 **7**（BIM 元素 6、关系 7，写入按文档取
-  **4/5/7**，minor 6 为只读档）。**IFC 关系不导出**（仍不写 `IfcRelAggregates`/`IfcRelNests`）；
-  **Windows/macOS/Android 无 BIM 查询 seam**（显式拒绝 `unsupported-runtime: bimQuery`）。
+  **4/5/7**，minor 6 为只读档）。**IFC 关系只导出 `contains`/`nests`**（
+  `IfcRelContainedInSpatialStructure`/`IfcRelNests`）；`aggregates`/`group`/`connects`/`other:*`
+  因上游 plan API 无法表达任意产品间关系而**不导出并按 kind 报告**（`export.ifc.bim.relation_not_written`，
+  端点未导出计 `relation_endpoint_missing`），不得写成容器/嵌套冒充；
+  BIM 查询 wire 只有一个 `cad_bim_query`（分页行 + facet `summary` 一次返回，`summary.total == total`），
+  不再有 `cad_bim_summary`；Linux/Windows/macOS/Android 均已装查询 seam（Linux 有运行证据，Windows
+  仅交叉编译，macOS/Android 仅编译/契约，**运行时 NOT VERIFIED**），Web 走 wasm 会话直读；没有查询
+  通道的载体仍按 `unsupported-runtime: bimQuery` 显式拒绝。
   **报告弹窗 UI、
   L0 源字节直通、DXF L1 不动点仍未实现**，不得写成已完成。
 

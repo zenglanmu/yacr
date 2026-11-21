@@ -239,9 +239,10 @@ pub fn cad_fonts_impl(shared: &Arc<Mutex<Shared>>) -> Result<CadFonts, String> {
 ///
 /// A **request-carrying** read (ADR-0042 D11): the filter and page window come
 /// from the caller, so the answer is served by the host's
-/// [`cad_ui_core::bim::BimHost`] seam (the session is `!Send` and owned by the
-/// owner thread). A host that installs no seam keeps the shared
-/// `unsupported-runtime: bimQuery` refusal — never an empty page.
+/// [`cad_ui_core::bim::BimQueryHost`] seam (the session is `!Send` and owned by
+/// the owner thread). One call answers the page **and** the facet summary. A host
+/// that installs no seam keeps the shared `unsupported-runtime: bimQuery`
+/// refusal — never an empty page.
 pub fn cad_bim_query_impl(
     shared: &Arc<Mutex<Shared>>,
     filter: cad_ui_core::bim::BimFilterWire,
@@ -249,19 +250,6 @@ pub fn cad_bim_query_impl(
     limit: usize,
 ) -> Result<cad_ui_core::bim::BimQueryResponse, String> {
     cad_ui_core::session::bim_reads::bim_query(&lock(shared).queue_reads(), filter, offset, limit)
-}
-
-/// Command body of `cad_bim_summary`, without the Tauri state wrapper.
-///
-/// Same seam and same refusal as [`cad_bim_query_impl`]; a summary is one
-/// logical row, so the host answers the whole count.
-pub fn cad_bim_summary_impl(
-    shared: &Arc<Mutex<Shared>>,
-    filter: cad_ui_core::bim::BimFilterWire,
-    offset: usize,
-    limit: usize,
-) -> Result<cad_ui_core::bim::BimSummaryResponse, String> {
-    cad_ui_core::session::bim_reads::bim_summary(&lock(shared).queue_reads(), filter, offset, limit)
 }
 
 /// `cad_recent_files` command: the host's real recent-drawings list.

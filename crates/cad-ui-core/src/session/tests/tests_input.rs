@@ -927,7 +927,7 @@ fn multi_selection_wire_rows_carry_group_kind_editable_and_options() {
     let properties = cad_app::SelectionProperties {
         count: 2,
         rows: vec![cad_app::PropertyRow::mixed("id"), layer],
-        mixed_keys: vec!["id"],
+        mixed_keys: vec!["id".to_string()],
         text: None,
         text_multiline: false,
         empty: false,

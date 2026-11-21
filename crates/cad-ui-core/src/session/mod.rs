@@ -633,14 +633,14 @@ impl CadSession {
     /// [`cad_app::property_value::SUPPORTED_KEYS`] (`layer`, `color`,
     /// `linetype`, `lineweight`, `transparency`) and `value` must match that
     /// key's documented grammar; both are validated by the host write path, and a
-    /// refusal is returned here as the real error text with its stable code
-    /// (`property.unsupported_key`, `property.invalid_value`,
-    /// `property.unknown_layer`, `property.unknown_linetype`,
-    /// `property.ambiguous_name`, `property.not_addressable`,
-    /// `property.selection_empty`, `property.target_missing`). A successful edit
-    /// is one transaction / one undo step, and the next `cad_status` carries the
-    /// new `selection.rows` (the display-attribute rows round-trip, so the value
-    /// written is the value read back).
+    /// refusal is returned here as the real error text with its stable code.
+    /// A successful edit is one transaction / one undo step, and the next
+    /// `cad_status` carries the new `selection.rows`.
+    ///
+    /// A dynamic BIM PSet row key (`bim.pset.{set}.{property}`) is the same call
+    /// and command: `cad-app` dispatches it to the stored BIM value instead of
+    /// [`cad_app::property_value`], so it is **not** in `SUPPORTED_KEYS`; its own
+    /// refusals are `property.bim_conflict` / `property.bim_too_long`.
     pub fn set_selected_property(&self, key: &str, value: &str) -> Result<(), String> {
         self.submit_interactions(vec![InteractionRequest::SetSelectedProperty {
             key: key.to_string(),

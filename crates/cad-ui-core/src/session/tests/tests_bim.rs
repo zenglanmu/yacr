@@ -1,9 +1,10 @@
-//! The BIM query/summary session bridge (ADR-0042 D11).
+//! The BIM query session bridge (ADR-0042 D11).
 //!
 //! What must hold: the wire filter reaches the backend unchanged, the answer is
-//! the camelCase page bound to the database revision, paging is the `QueryPage`
-//! contract (`limit = 0` = total only), a summary counts components and facets,
-//! and a refusal (unknown filter value kind) is named instead of an empty page.
+//! the camelCase page bound to the database revision, the summary of the same
+//! filtered set rides that one answer (`summary.total == total`), paging is the
+//! `QueryPage` contract (`limit = 0` = total only), and a refusal (unknown filter
+//! value kind) is named instead of an empty page.
 
 use cad_app::{CommandId, CommandPayload};
 use cad_db::{
@@ -187,7 +188,7 @@ fn an_unknown_category_selects_nothing_without_an_error() {
 fn a_level_filter_resolves_the_display_name() {
     let session = bim_session();
     let by_name = session
-        .bim_summary(&request(
+        .bim_query(&request(
             BimFilterWire {
                 levels: vec!["Level 1".to_string()],
                 ..BimFilterWire::default()
@@ -197,8 +198,9 @@ fn a_level_filter_resolves_the_display_name() {
         ))
         .expect("the session answers");
     assert_eq!(by_name.total, 2);
+    assert_eq!(by_name.summary.total, 2);
     let by_id = session
-        .bim_summary(&request(
+        .bim_query(&request(
             BimFilterWire {
                 levels: vec![LEVEL.to_string()],
                 ..BimFilterWire::default()
@@ -268,21 +270,51 @@ fn paging_is_the_query_page_contract() {
         total_only.rows.is_empty(),
         "limit=0 requests only the total"
     );
+    assert_eq!(
+        total_only.summary.total, 2,
+        "the summary is one aggregate: limit=0 still answers the counts"
+    );
+    assert_eq!(total_only.summary.by_category[0].count, 2);
 }
 
 #[test]
-fn the_summary_counts_components_and_facets() {
+fn the_summary_rides_the_query_and_counts_components_and_facets() {
     let session = bim_session();
     let response = session
-        .bim_summary(&request(BimFilterWire::default(), 0, 100))
+        .bim_query(&request(BimFilterWire::default(), 0, 100))
         .expect("the session answers");
     assert_eq!(response.total, 2);
-    assert_eq!(response.summary.total, 2);
+    assert_eq!(
+        response.summary.total, response.total,
+        "one answer, one filtered set"
+    );
     assert_eq!(response.summary.by_category[0].name, "IfcWall");
     assert_eq!(response.summary.by_category[0].count, 2);
     assert_eq!(response.summary.by_level[0].name, "Level 1");
     assert_eq!(response.database_id, 5);
     assert_eq!(response.revision, 9);
+
+    // The facet counts follow the filter: a filtered answer's facets are the
+    // matched set's own, and its summary total is the matched total.
+    let walls = session
+        .bim_query(&request(walls(), 0, 100))
+        .expect("the session answers");
+    assert_eq!(walls.summary.total, walls.total);
+    assert_eq!(walls.summary.by_category.len(), 1);
+    assert_eq!(walls.summary.by_category[0].count, 2);
+    let doors = session
+        .bim_query(&request(
+            BimFilterWire {
+                categories: vec!["IfcDoor".to_string()],
+                ..BimFilterWire::default()
+            },
+            0,
+            100,
+        ))
+        .expect("an unmatched category is an empty page, not an error");
+    assert_eq!(doors.total, 0);
+    assert_eq!(doors.summary.total, 0);
+    assert!(doors.summary.by_category.is_empty());
 }
 
 #[test]
@@ -329,19 +361,15 @@ fn no_document_is_an_empty_success() {
     assert!(response.rows.is_empty());
     assert_eq!(response.database_id, 0);
     assert_eq!(response.revision, 0);
-
-    let summary = session
-        .bim_summary(&request(BimFilterWire::default(), 0, 10))
-        .expect("no document is not an error");
-    assert_eq!(summary.total, 0);
-    assert_eq!(summary.summary.total, 0);
+    assert_eq!(response.summary.total, 0, "no document answers no counts");
+    assert!(response.summary.by_category.is_empty());
 }
 
 #[test]
 fn the_evidence_filter_is_carried() {
     let session = bim_session();
     let heuristic = session
-        .bim_summary(&request(
+        .bim_query(&request(
             BimFilterWire {
                 evidence: Some(BimEvidenceWire::Heuristic),
                 ..BimFilterWire::default()
@@ -354,8 +382,9 @@ fn the_evidence_filter_is_carried() {
         heuristic.total, 0,
         "the fixture's rows are declared, not heuristic"
     );
+    assert_eq!(heuristic.summary.total, 0);
     let declared = session
-        .bim_summary(&request(
+        .bim_query(&request(
             BimFilterWire {
                 evidence: Some(BimEvidenceWire::Declared),
                 ..BimFilterWire::default()
@@ -365,4 +394,5 @@ fn the_evidence_filter_is_carried() {
         ))
         .expect("the session answers");
     assert_eq!(declared.total, 2);
+    assert_eq!(declared.summary.total, 2);
 }

@@ -48,9 +48,11 @@ mod select_similar;
 mod session_multiple;
 // SSX: the Express-Tool selection-filter builder (criteria + apply).
 pub mod selection;
-// The fixed BIM property rows (ADR-0042 D4); wired from `selection` only, so no
-// new public surface and no bucket export.
-mod selection_bim;
+// The BIM property rows (ADR-0042 D4) plus the dynamic PSet key grammar the wire
+// admission checks. Public because `cad-ui-core`'s property-write admission asks
+// `is_bim_property_key` before queueing; the rows themselves are wired from
+// `selection` only.
+pub mod selection_bim;
 pub mod snap;
 mod ssx;
 pub mod tasks;

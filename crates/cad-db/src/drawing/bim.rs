@@ -5,11 +5,30 @@
 //! entity row keeps its six fields and a document without BIM data stores
 //! nothing here. These accessors are the whole read surface commit B (the
 //! property panel) and the exporters need; nothing here mutates.
+//!
+//! The one write **record** type lives here too ([`BimPatch`]): `cad-history`
+//! carries the exact before/after shape instead of inventing a second one, the
+//! same reason [`super::LinetypePatch`] lives beside the linetype write path.
 
 use cad_domain::EntityId;
 
 use super::DrawingDatabase;
 use crate::bim::{BimDefinition, BimDefinitions, BimElement, BimKey, BimRelations};
+
+/// A before/after record of one element's BIM data.
+///
+/// Both sides are always present: the BIM side table is **replace-only** (an
+/// element either has a `bim` block or it does not), so an undo restores
+/// `before` by writing it back over `after`, and a redo writes `after`. There is
+/// deliberately no `Option` here — this patch can never create or delete an
+/// element's BIM data, only overwrite an existing block (use the importer
+/// builder to attach one in the first place).
+#[derive(Debug, Clone, PartialEq)]
+pub struct BimPatch {
+    pub id: EntityId,
+    pub before: BimElement,
+    pub after: BimElement,
+}
 
 impl DrawingDatabase {
     /// The BIM data of one element, if it carries any.

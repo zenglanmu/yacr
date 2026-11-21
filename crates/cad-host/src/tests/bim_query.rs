@@ -1,4 +1,4 @@
-//! BIM query/summary host reads (ADR-0042 D11).
+//! BIM query host reads (ADR-0042 D11).
 //!
 //! The host entry binds the backend index to the open document; these contracts
 //! prove the binding and the pass-through, not the backend's filter algebra
@@ -7,9 +7,11 @@
 //! 1. a category/level filter and a property predicate reach the backend and
 //!    select the expected components;
 //! 2. paging is the `QueryPage` contract, `limit = 0` included;
-//! 3. the summary counts components and facets;
+//! 3. the one read answers the page **and** the summary of the same filtered set
+//!    (`summary.total == total`), with the filter's own facet counts;
 //! 4. one source element split into several geometry rows is **one** component;
-//! 5. no document is an empty success with no database identity, never a panic.
+//! 5. no document is an empty success with no database identity and an empty
+//!    summary, never a panic.
 
 use super::*;
 
@@ -428,43 +430,97 @@ fn paging_is_the_query_page_contract() {
     assert!(past_the_end.page.rows.is_empty());
 }
 
+/// One facet's count by display name.
+fn facet(counts: &[cad_app::cad_query::bim::BimFacetCount], name: &str) -> Option<usize> {
+    counts
+        .iter()
+        .find(|count| count.name == name)
+        .map(|count| count.count)
+}
+
 #[test]
-fn the_summary_counts_components_and_facets() {
+fn the_one_read_answers_the_page_and_the_summary_of_the_same_set() {
     let core = bim_core();
-    let summary = core
-        .bim_summary(&BimFilter::new(), 0, 1)
+    let answer = core
+        .bim_query(&BimFilter::new(), 0, 2)
         .expect("the host answers");
-    assert_eq!(summary.database, Some(DatabaseId(7)));
-    assert_eq!(summary.page.total, 1, "the summary is one logical row");
+    assert_eq!(answer.database, Some(DatabaseId(7)));
+    // The page is still a page…
+    assert_eq!(answer.page.total, 4, "four components in the fixture");
+    assert_eq!(answer.page.rows.len(), 2);
+    // …and the same answer carries the whole filtered set's counts.
     let BimSummary {
         total,
         by_category,
         by_level,
         by_type,
         by_material,
-    } = summary.page.rows.first().expect("one summary row").clone();
-    assert_eq!(total, 4);
-    let facade = |counts: &[cad_app::cad_query::bim::BimFacetCount], name: &str| {
-        counts
-            .iter()
-            .find(|count| count.name == name)
-            .map(|count| count.count)
-    };
-    assert_eq!(facade(&by_category, "IfcWall"), Some(3));
-    assert_eq!(facade(&by_category, "IfcSlab"), Some(1));
-    assert_eq!(facade(&by_level, "Level 1"), Some(2));
-    assert_eq!(facade(&by_level, "Level 2"), Some(1));
-    assert_eq!(facade(&by_type, "Basic Wall:Generic 200mm"), Some(3));
-    assert_eq!(facade(&by_material, "Concrete"), Some(3));
+    } = answer.summary;
+    assert_eq!(total, answer.page.total, "summary.total == total");
+    assert_eq!(facet(&by_category, "IfcWall"), Some(3));
+    assert_eq!(facet(&by_category, "IfcSlab"), Some(1));
+    assert_eq!(facet(&by_level, "Level 1"), Some(2));
+    assert_eq!(facet(&by_level, "Level 2"), Some(1));
+    assert_eq!(facet(&by_type, "Basic Wall:Generic 200mm"), Some(3));
+    assert_eq!(facet(&by_material, "Concrete"), Some(3));
+}
 
-    let summary = core
-        .bim_summary(&BimFilter::new(), 0, 0)
+#[test]
+fn a_zero_window_still_answers_the_counts() {
+    let core = bim_core();
+    let answer = core
+        .bim_query(&BimFilter::new(), 0, 0)
         .expect("the host answers");
     assert!(
-        summary.page.rows.is_empty(),
-        "limit = 0 answers the total only, summary included"
+        answer.page.rows.is_empty(),
+        "limit = 0 answers the total only"
     );
-    assert_eq!(summary.page.total, 1);
+    assert_eq!(answer.page.total, 4);
+    assert_eq!(
+        answer.summary.total, 4,
+        "the summary is one aggregate, so limit = 0 still counts"
+    );
+    assert_eq!(facet(&answer.summary.by_category, "IfcWall"), Some(3));
+}
+
+#[test]
+fn the_summary_counts_the_filtered_set() {
+    let core = bim_core();
+    let walls = core
+        .bim_query(&categories(&["IfcWall"]), 0, 100)
+        .expect("the host answers");
+    assert_eq!(walls.page.total, 3);
+    assert_eq!(walls.summary.total, 3);
+    assert_eq!(
+        walls.summary.by_category.len(),
+        1,
+        "the filtered set declares one category"
+    );
+    assert_eq!(facet(&walls.summary.by_category, "IfcWall"), Some(3));
+    assert_eq!(
+        facet(&walls.summary.by_level, "Level 1"),
+        Some(1),
+        "wall-1 is one component on Level 1; the entity-keyed wall declares none"
+    );
+
+    let slabs = core
+        .bim_query(&categories(&["IfcSlab"]), 0, 100)
+        .expect("the host answers");
+    assert_eq!(slabs.page.total, 1);
+    assert_eq!(slabs.summary.total, 1);
+    assert_eq!(facet(&slabs.summary.by_category, "IfcSlab"), Some(1));
+    assert_eq!(
+        facet(&slabs.summary.by_level, "Level 1"),
+        Some(1),
+        "the filtered summary is the slab's own facet, not the document's"
+    );
+
+    let none = core
+        .bim_query(&categories(&["IfcDoor"]), 0, 100)
+        .expect("an unmatched category is an empty page, not an error");
+    assert_eq!(none.page.total, 0);
+    assert_eq!(none.summary.total, 0);
+    assert!(none.summary.by_category.is_empty());
 }
 
 #[test]
@@ -508,20 +564,13 @@ fn no_document_answers_an_empty_page() {
         core.controller.borrow().drawing().is_none(),
         "the fixture really starts with no document"
     );
-    let page = core
+    let answer = core
         .bim_query(&BimFilter::new(), 0, 10)
         .expect("no document is not an error");
-    assert_eq!(page.database, None);
-    assert_eq!(page.page.total, 0);
-    assert!(page.page.rows.is_empty());
-
-    let summary = core
-        .bim_summary(&BimFilter::new(), 0, 10)
-        .expect("no document is not an error");
-    assert_eq!(summary.database, None);
-    assert_eq!(
-        summary.page.total, 0,
-        "no document answers no summary row at all"
-    );
-    assert!(summary.page.rows.is_empty());
+    assert_eq!(answer.database, None);
+    assert_eq!(answer.page.total, 0);
+    assert!(answer.page.rows.is_empty());
+    assert_eq!(answer.summary.total, 0, "no document answers no counts");
+    assert!(answer.summary.by_category.is_empty());
+    assert!(answer.summary.by_level.is_empty());
 }

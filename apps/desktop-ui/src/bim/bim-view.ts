@@ -1,5 +1,5 @@
-// The BIM panel's view model: one `cad_bim_query` row / `cad_bim_summary`
-// answer projected into exactly what the panel renders.
+// The BIM panel's view model: one `cad_bim_query` answer (its rows and its
+// `summary` block) projected into exactly what the panel renders.
 //
 // Pure (no React, no DOM), so the "unset" rules, the evidence labels and the
 // empty-vs-no-match distinction are unit-tested instead of being asserted on a
@@ -165,10 +165,10 @@ export interface BimEmptyCopy {
  * The sentence pair for an empty result — the one place the panel distinguishes
  * "this drawing has no BIM data" from "your filter matched nothing".
  *
- * `summaryTotal` is the **unfiltered** total (the summary command is always
- * asked without the panel's filter). `0` there means the document itself has no
- * BIM components, which is not the same fact as a filter that excluded all of
- * them. Anything else is only empty because of the filter when the filter is
+ * `summaryTotal` is the **unfiltered** total (the store adopts the `summary`
+ * block of an answer asked without the panel's filter). `0` there means the
+ * document itself has no BIM components, which is not the same fact as a filter
+ * that excluded all of them. Anything else is only empty because of the filter when the filter is
  * active; a host that answered `total: 0` with no filter is still "no data".
  */
 export function bimEmptyCopy(
@@ -189,7 +189,7 @@ export function bimEmptyCopy(
 
 /** The total line: the document's BIM count, plus the filtered count when one is applied. */
 export interface BimTotalsView {
-  /** The unfiltered component total (`cad_bim_summary`'s `total`). */
+  /** The unfiltered component total (`cad_bim_query`'s `summary.total`). */
   readonly total: number;
   /** The filtered total, or `null` when no filter is applied. */
   readonly matched: number | null;

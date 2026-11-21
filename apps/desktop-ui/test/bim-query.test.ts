@@ -1,9 +1,10 @@
-// BIM browse panel: the `cad_bim_query` / `cad_bim_summary` wire model.
+// BIM browse panel: the one `cad_bim_query` wire model.
 //
 // Pure contract tests: the payload mapping (including the value-kind inference),
 // the response normalisation (null fields stay null; they are not turned into
-// empty strings), the page arithmetic edges, and the two stable refusals the
-// panel must not confuse with an empty result.
+// empty strings), the nested `summary` block (one round trip), the page
+// arithmetic edges, and the two stable refusals the panel must not confuse with
+// an empty result.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -26,7 +27,7 @@ import {
   isBimStaleRefusal,
   nextPageOffset,
   parseBimQueryAnswer,
-  parseBimSummaryAnswer,
+  parseBimSummary,
   previousPageOffset,
   sameBimFilter,
   toggleBimFacet,
@@ -49,7 +50,19 @@ function wireRow(overrides = {}) {
   };
 }
 
-/** One wire page. */
+/** One wire summary block (the nested part of a query answer). */
+function wireSummaryBlock(overrides = {}) {
+  return {
+    total: 12,
+    byCategory: [{ key: 'ifcwall', name: 'IfcWall', count: 12 }],
+    byLevel: [{ key: 'level:ifc:doc:1', name: 'Level 1', count: 12 }],
+    byType: [],
+    byMaterial: [],
+    ...overrides,
+  };
+}
+
+/** One wire page: one round trip carries the rows and the summary block. */
 function wirePage(overrides = {}) {
   return {
     databaseId: 1,
@@ -59,23 +72,7 @@ function wirePage(overrides = {}) {
     limit: 100,
     stale: false,
     rows: [wireRow()],
-    ...overrides,
-  };
-}
-
-/** One wire summary. */
-function wireSummary(overrides = {}) {
-  return {
-    databaseId: 1,
-    revision: 42,
-    total: 12,
-    summary: {
-      total: 12,
-      byCategory: [{ key: 'ifcwall', name: 'IfcWall', count: 12 }],
-      byLevel: [{ key: 'level:ifc:doc:1', name: 'Level 1', count: 12 }],
-      byType: [],
-      byMaterial: [],
-    },
+    summary: wireSummaryBlock({ total: 1, byCategory: [], byLevel: [] }),
     ...overrides,
   };
 }
@@ -272,6 +269,10 @@ test('an unreadable query payload is null, never an empty page', () => {
   assert.equal(parseBimQueryAnswer({ total: 0 }), null); // no rows array
   assert.equal(parseBimQueryAnswer({ rows: [] }), null); // no total
   assert.equal(parseBimQueryAnswer({ total: -1, rows: [] }), null);
+  // The summary block is part of the frozen one-command shape: an answer without
+  // it is a contract failure, not a document with no BIM data.
+  assert.equal(parseBimQueryAnswer({ total: 3, rows: [] }), null);
+  assert.equal(parseBimQueryAnswer({ total: 3, rows: [], summary: {} }), null);
   assert.equal(BIM_PAYLOAD_INVALID, 'bim.invalid_payload');
   // A real empty answer is a page with 0 rows, not a null payload.
   const empty = parseBimQueryAnswer(wirePage({ total: 0, rows: [] }));
@@ -295,23 +296,22 @@ test('a limit-0 answer keeps the host window and its empty rows', () => {
   assert.equal(bimPageInfo(answer.total, answer.offset, answer.limit).pages, 1);
 });
 
-test('a summary answer keeps the host facet lists and their null names', () => {
-  const answer = parseBimSummaryAnswer(wireSummary({
-    summary: {
-      total: 12,
+test('the nested summary keeps the host facet lists and their null names', () => {
+  const answer = parseBimQueryAnswer(wirePage({
+    total: 12,
+    summary: wireSummaryBlock({
       byCategory: [
         { key: 'ifcwall', name: 'IfcWall', count: 12 },
         { key: 'ifcwall', name: 'IfcWall again', count: 99 }, // duplicate key: first wins
         { key: 'ifcslab', name: null, count: 0 },
       ],
       byLevel: [],
-      byType: [],
       byMaterial: [{ key: 'material:concrete', name: 'Concrete', count: 4 }],
-    },
+    }),
   }));
   assert.ok(answer);
   assert.equal(answer.total, 12);
-  assert.equal(answer.summary.total, 12);
+  assert.equal(answer.summary.total, 12, 'summary.total is the same filtered total');
   assert.deepEqual(answer.summary.byCategory, [
     { key: 'ifcwall', name: 'IfcWall', count: 12 },
     { key: 'ifcslab', name: null, count: 0 },
@@ -320,17 +320,15 @@ test('a summary answer keeps the host facet lists and their null names', () => {
   assert.deepEqual(answer.summary.byMaterial, [{ key: 'material:concrete', name: 'Concrete', count: 4 }]);
 });
 
-test('the summary falls back to its inner total, and refuses an unreadable shape', () => {
-  const inner = parseBimSummaryAnswer({
-    databaseId: 1,
-    revision: 2,
-    summary: { total: 3, byCategory: [], byLevel: [], byType: [], byMaterial: [] },
+test('the summary block needs its own total, and a missing list is an honest empty group', () => {
+  // A block without its documented total is not the frozen shape: the answer is
+  // refused rather than read as a zero-component document.
+  assert.equal(parseBimSummary(null), null);
+  assert.equal(parseBimSummary({}), null);
+  assert.equal(parseBimSummary({ total: -1 }), null);
+  assert.deepEqual(parseBimSummary({ total: 3 }), {
+    total: 3, byCategory: [], byLevel: [], byType: [], byMaterial: [],
   });
-  assert.ok(inner);
-  assert.equal(inner.total, 3);
-  assert.equal(parseBimSummaryAnswer(null), null);
-  assert.equal(parseBimSummaryAnswer({ total: 3 }), null);
-  assert.equal(parseBimSummaryAnswer({ total: 3, summary: {} }), null);
 });
 
 test('selection ids are the row entity ids, de-duplicated and safe', () => {

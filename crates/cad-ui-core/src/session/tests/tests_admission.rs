@@ -346,6 +346,54 @@ fn the_property_wire_parses_the_five_supported_keys_and_refuses_everything_else(
 }
 
 #[test]
+fn parse_property_write_admits_a_bim_pset_key() {
+    // A canonical dynamic BIM key is admitted by its shape and carried verbatim:
+    // `cad-app` dispatches it to the BIM write path, so the fixed
+    // `property_value` table must stay untouched.
+    for key in ["bim.pset.0.0", "bim.pset.1.4", "bim.pset.12.63"] {
+        assert_eq!(
+            parse_property_write(key, "3.5 m").expect("a canonical BIM key"),
+            (key.to_string(), "3.5 m".to_string())
+        );
+    }
+    // The fixed table is unchanged: a BIM key is still not one of its keys.
+    assert!(!cad_app::property_value::is_supported_key("bim.pset.0.0"));
+}
+
+#[test]
+fn parse_property_write_refuses_a_malformed_bim_key() {
+    // Every non-canonical shape is the same stable refusal as any other unknown
+    // key: only the panel's own written form is addressable.
+    for key in [
+        "bim.pset.x",
+        "bim.pset.0",
+        "bim.pset.00.0",
+        "bim.pset.0.0.1",
+        "bim.pset.",
+        "bim.pset.0.",
+        "BIM.pset.0.0",
+        " bim.pset.0.0",
+    ] {
+        assert_eq!(
+            parse_property_write(key, "1").unwrap_err(),
+            "property.unsupported_key",
+            "'{key}'"
+        );
+    }
+}
+
+#[test]
+fn a_plain_unsupported_key_is_still_refused() {
+    for key in ["text", "id", "status", "bim_category", ""] {
+        assert_eq!(
+            parse_property_write(key, "1").unwrap_err(),
+            "property.unsupported_key",
+            "'{key}'"
+        );
+    }
+}
+
+#[test]
 fn property_admission_is_gated_bounded_and_carries_the_pair_verbatim() {
     let mut queue: Vec<(String, String)> = Vec::new();
 

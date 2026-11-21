@@ -14,6 +14,7 @@ use std::collections::BTreeMap;
 
 mod api_prompt;
 mod area_object_echo;
+mod bim_edit;
 mod bim_query;
 mod box_select;
 mod box_select_edge_cases;

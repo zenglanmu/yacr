@@ -424,10 +424,14 @@ pub(crate) fn register_seams(
         shared,
         ymodel_host::AppYmodelHost::new(app.clone()),
     );
-    // BIM query/summary (ADR-0042 D11): a caller-supplied filter over the open
-    // document, so the answer cannot be mirrored; the seam marshals it onto the
-    // same main-thread session.
-    cad_desktop_shell::state::configure_bim_host(shared, bim_host::AppBimHost::new(app.clone()));
+    // BIM query (ADR-0042 D11): a caller-supplied filter over the open document,
+    // answered with the page and its facet summary in one round trip, so the
+    // answer cannot be mirrored; the seam marshals it onto the same main-thread
+    // session.
+    cad_desktop_shell::state::configure_bim_query_host(
+        shared,
+        bim_host::AppBimQueryHost::new(app.clone()),
+    );
     // The Options > Files folder chooser: `native-below` only, because the
     // `dom-canvas` carrier has no local directory (the wasm session owns the
     // document there and its adapter refuses by name).

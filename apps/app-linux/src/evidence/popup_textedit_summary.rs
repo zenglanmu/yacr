@@ -561,6 +561,7 @@ mod tests {
             .push(cad_ui_core::session::CadSelectionRow {
                 key: "id".into(),
                 value: Some("1".into()),
+                label: None,
                 group: "entity".into(),
                 mixed: false,
                 editable: false,

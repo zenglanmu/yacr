@@ -734,20 +734,20 @@ pub enum CommandPayload {
     /// selected entity (the properties panel's typed edit surface).
     ///
     /// `key` is one of [`crate::property_value::SUPPORTED_KEYS`] (`layer`,
-    /// `color`, `linetype`, `lineweight`, `transparency`); `value` follows that
-    /// key's documented grammar ([`crate::property_value`]). `text` is
-    /// deliberately **not** accepted here — it has its own `TEXTEDIT` path with
-    /// its own newline policy.
+    /// `color`, `linetype`, `lineweight`, `transparency`) or a canonical dynamic
+    /// BIM slot (`bim.pset.{set}.{property}`, dispatched by `cad-app` to the
+    /// stored PSet value and deliberately **not** in `SUPPORTED_KEYS`); `value`
+    /// follows that key's grammar. `text` is deliberately **not** accepted here —
+    /// it has its own `TEXTEDIT` path with its own newline policy.
     ///
     /// The selection itself travels in neither payload field: the command reads
     /// the session's current selection at apply time, so a stale UI cannot
     /// retarget another object. Every selected ref must be directly addressable
     /// (no instance path, no sub-element); one that is not refuses the whole
-    /// command with `property.not_addressable`, and a bad value refuses before
-    /// anything is staged. The whole selection is written in **one transaction
-    /// / one undo step**; entities that already hold the value are not staged,
-    /// and if no entity changes the command records no undo entry at all
-    /// (`property.unchanged`).
+    /// command with `property.not_addressable`. The whole selection is written in
+    /// **one transaction / one undo step**; an entity that already holds the value
+    /// is not staged, and if nothing changes the command records no undo entry
+    /// (`property.unchanged`) and a bad value refuses before anything is staged.
     EntityProperty {
         key: String,
         value: String,

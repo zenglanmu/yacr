@@ -38,6 +38,15 @@ pub struct CadCamera {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CadSelectionRow {
     pub key: String,
+    /// The source's own name for a dynamic row (`Pset_WallCommon.IsExternal`),
+    /// or `null` for a static machine key.
+    ///
+    /// Source data, never catalog copy: the UI shows it verbatim when present and
+    /// falls back to the key's catalog label otherwise. It is **omitted** for a
+    /// static key (like `openedSource`), so a selection without a dynamic row
+    /// keeps its previous wire shape byte for byte.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
     /// Shared value, or `null` when the values differ across the selection.
     pub value: Option<String>,
     /// Stable panel group machine key (`entity`, `geometry`, `text`, `display`).
@@ -151,6 +160,7 @@ impl CadSelection {
             .iter()
             .map(|row| CadSelectionRow {
                 key: row.key.to_string(),
+                label: row.label.clone(),
                 value: row.value.clone(),
                 group: row.group.key().to_string(),
                 mixed: row.mixed,
@@ -790,5 +800,40 @@ pub(super) fn assemble_status(
         view,
         navigation,
         pending_prompt,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn single(rows: Vec<cad_app::PropertyRow>) -> cad_app::SelectionProperties {
+        cad_app::SelectionProperties {
+            count: 1,
+            rows,
+            mixed_keys: Vec::new(),
+            text: None,
+            text_multiline: false,
+            empty: false,
+        }
+    }
+
+    #[test]
+    fn a_dynamic_row_carries_its_source_label_and_a_static_row_omits_the_key() {
+        let mut dynamic = cad_app::PropertyRow::new("bim.pset.0.0", "3.5 m");
+        dynamic.label = Some("Pset_WallCommon.Width".to_string());
+        let selection = CadSelection::from_properties(&single(vec![
+            cad_app::PropertyRow::new("id", "1"),
+            dynamic,
+        ]));
+
+        let value = serde_json::to_value(&selection).expect("the selection serializes");
+        let rows = value["rows"].as_array().expect("rows are an array");
+        assert!(
+            rows[0].get("label").is_none(),
+            "a static key omits `label`, keeping the previous wire shape"
+        );
+        assert_eq!(rows[1]["label"], "Pset_WallCommon.Width");
+        assert_eq!(rows[1]["key"], "bim.pset.0.0");
     }
 }

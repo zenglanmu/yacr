@@ -648,6 +648,13 @@ pub(super) fn offset_arc(
 ///
 /// The whole step is one argument (not one slice per kind) so a caller cannot
 /// forget the linetype rows the step carries.
+///
+/// A step carrying BIM element rows takes the **other** branch: those rows are
+/// replace-only `bim` blocks applied by
+/// [`DrawingDatabase::apply_bim_updates`], the same one-revision path the edit
+/// itself used. [`cad_history::DrawingHistoryStep`] refuses a step that mixes
+/// them with the record's batches or a linetype row, so the two branches are
+/// mutually exclusive and one undo can never span two revisions.
 pub(crate) fn apply_drawing_patches(
     drawing: &mut DrawingDatabase,
     reason: &str,
@@ -655,6 +662,23 @@ pub(crate) fn apply_drawing_patches(
     step: &cad_history::DrawingHistoryStep,
     forward: bool,
 ) -> CadResult<ChangeSet> {
+    if !step.bim_patches.is_empty() {
+        let updates: Vec<(EntityId, cad_db::BimElement)> = step
+            .bim_patches
+            .iter()
+            .map(|patch| {
+                (
+                    patch.id,
+                    if forward {
+                        patch.after.clone()
+                    } else {
+                        patch.before.clone()
+                    },
+                )
+            })
+            .collect();
+        return drawing.apply_bim_updates(reason, transaction, &updates);
+    }
     let patches = &step.record.patches;
     let block_patches = &step.record.block_patches;
     let layer_patches = &step.record.layer_patches;

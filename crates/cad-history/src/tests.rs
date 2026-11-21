@@ -795,3 +795,182 @@ fn malformed_linetype_steps_are_refused() {
     ));
     assert!(!history.can_undo());
 }
+
+// ------------------------------------------------------------------- BIM ---
+
+/// One element with a couple of psets; the strings are what the budget must see.
+fn bim_element(name: &str) -> cad_db::BimElement {
+    cad_db::BimElement {
+        category: Some("IfcWall".into()),
+        name: Some(name.into()),
+        source: cad_db::BimSource {
+            connector: "ifc".into(),
+            document_id: Some("doc-1".into()),
+            id: Some("2O2Fr$t4X7Zf8Q".into()),
+            native_id: Some("22".into()),
+        },
+        level: Some("level:ifc:doc-1:L1".into()),
+        element_type: None,
+        material: None,
+        psets: vec![cad_db::BimPropertySet {
+            name: "Pset_WallCommon".into(),
+            properties: vec![cad_db::BimProperty {
+                name: "IsExternal".into(),
+                value: cad_db::BimValue::Bool(true),
+            }],
+        }],
+        evidence: cad_db::BimEvidence::Declared,
+    }
+}
+
+fn bim_patch(id: u128, before: &str, after: &str) -> cad_db::BimPatch {
+    cad_db::BimPatch {
+        id: EntityId(id),
+        before: bim_element(before),
+        after: bim_element(after),
+    }
+}
+
+fn bim_only_record(transaction: u128, label: &str) -> DrawingUndoRecord {
+    DrawingUndoRecord::entity_only(TransactionId(transaction), label, Vec::new())
+}
+
+/// The patch rides beside the record exactly like the linetype row: a BIM-only
+/// edit is one real undo step, and the exact before/after survive undo and redo.
+#[test]
+fn recorded_bim_patch_round_trips_through_the_history_step() {
+    let mut history = History::default();
+    let patch = bim_patch(3, "Wall A", "Wall A (edited)");
+
+    history
+        .record_drawing_with_bim(
+            bim_only_record(11, "edit bim property"),
+            vec![patch.clone()],
+        )
+        .unwrap();
+    assert_eq!(history.undo_depth(), 1);
+    assert!(
+        history.used_bytes() > 0,
+        "the element rows are accounted for"
+    );
+
+    let back = history.begin_drawing_undo().unwrap();
+    assert_eq!(back.bim_patches, vec![patch.clone()]);
+    assert_eq!(back.bim_patches[0].id, EntityId(3));
+    assert_eq!(back.bim_patches[0].before.name.as_deref(), Some("Wall A"));
+    assert_eq!(
+        back.bim_patches[0].after.name.as_deref(),
+        Some("Wall A (edited)")
+    );
+    assert!(back.record.is_empty());
+    assert!(back.linetype_patches.is_empty());
+    assert_eq!(back.record.label, "edit bim property");
+    history.finish_drawing().unwrap();
+    assert!(history.can_redo());
+
+    let forward = history.begin_drawing_redo().unwrap();
+    assert_eq!(forward.bim_patches, vec![patch]);
+    history.finish_drawing().unwrap();
+    assert_eq!(history.undo_depth(), 1);
+}
+
+/// A BIM batch is applied by its own database path, so it cannot share a step
+/// with the record's batches or a linetype row (one undo would span two
+/// revisions). An empty step is still refused, and malformed steps leave the
+/// retained history untouched.
+#[test]
+fn a_step_with_bim_patches_and_other_batches_is_refused() {
+    let mut history = History::default();
+    let patch = bim_patch(3, "Wall A", "Wall A (edited)");
+
+    assert!(matches!(
+        history.record_drawing_with_bim(bim_only_record(20, "noop"), Vec::new()),
+        Err(CadError::InvalidInput(_))
+    ));
+
+    assert!(matches!(
+        history.record_drawing_with_bim(drawing_record(21), vec![patch.clone()]),
+        Err(CadError::InvalidInput(_))
+    ));
+
+    // The same rule covers a linetype row: the public recorders cannot stage
+    // both batches, so pin the step contract directly.
+    let mixed = DrawingHistoryStep {
+        record: bim_only_record(22, "mixed"),
+        linetype_patches: vec![cad_db::LinetypePatch {
+            id: LinetypeId(1),
+            before: Some(linetype_row(1, "A")),
+            after: Some(linetype_row(1, "B")),
+        }],
+        bim_patches: vec![patch.clone()],
+    };
+    assert!(matches!(mixed.validate(), Err(CadError::InvalidInput(_))));
+
+    assert!(!history.can_undo());
+
+    // A duplicate element id is refused too.
+    assert!(matches!(
+        history.record_drawing_with_bim(
+            bim_only_record(23, "duplicate"),
+            vec![patch.clone(), patch.clone()],
+        ),
+        Err(CadError::InvalidInput(_))
+    ));
+
+    // A merge key cannot coalesce a BIM patch.
+    let mut merged = bim_only_record(24, "merge");
+    merged.merge_key = Some("drag".into());
+    assert!(matches!(
+        history.record_drawing_with_bim(merged, vec![patch]),
+        Err(CadError::InvalidInput(_))
+    ));
+    assert!(!history.can_undo());
+}
+
+/// The strings of a `bim` block dominate its size; a large pset must count
+/// toward the history budget instead of reporting a few hundred fixed bytes.
+#[test]
+fn a_large_bim_patch_counts_towards_the_history_budget() {
+    let text = "x".repeat(4096);
+    let mut element = bim_element("Wall");
+    element.psets = (0..4)
+        .map(|set| cad_db::BimPropertySet {
+            name: format!("Pset_{set}"),
+            properties: (0..8)
+                .map(|property| cad_db::BimProperty {
+                    name: format!("P{property}"),
+                    value: cad_db::BimValue::Text(text.clone()),
+                })
+                .collect(),
+        })
+        .collect();
+    let payload = 4 * 8 * 4096;
+    let patch = cad_db::BimPatch {
+        id: EntityId(4),
+        before: element.clone(),
+        after: element,
+    };
+
+    let step = DrawingHistoryStep {
+        record: bim_only_record(30, "large pset"),
+        linetype_patches: Vec::new(),
+        bim_patches: vec![patch.clone()],
+    };
+    // Both sides are retained, so both are counted.
+    assert!(
+        step.approx_bytes() >= 2 * payload,
+        "before and after must both be budgeted: {} < {}",
+        step.approx_bytes(),
+        2 * payload
+    );
+
+    // And that estimate really drives eviction: a small budget cannot keep the
+    // older step beside the large one.
+    let mut history = History::new(16 * 1024);
+    history.record_drawing(drawing_record(1)).unwrap();
+    history
+        .record_drawing_with_bim(bim_only_record(31, "large pset"), vec![patch])
+        .unwrap();
+    assert!(history.used_bytes() > 16 * 1024);
+    assert_eq!(history.undo_depth(), 1, "the older step was evicted");
+}

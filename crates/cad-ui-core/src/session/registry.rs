@@ -142,13 +142,13 @@ macro_rules! cad_wire_registry {
             @row(shared, sink, SettingArgs, cad_set_setting, { arg(req, key, String) arg(req, value, $crate::session::registry::RegistryJsonValue) }, $crate::session::wire::CadCommandAck, { $crate::session::wire::set_setting(sink, &key, &value) })
             @row(shared, reads, NoArgs, cad_layers, { }, $crate::session::CadLayers, { $crate::session::wire::layers(reads) })
             @row(shared, reads, NoArgs, cad_fonts, { }, $crate::session::CadFonts, { $crate::session::wire::fonts(reads) })
-            // The BIM query/summary pair (ADR-0042 D11). A **request-carrying**
-            // read: the filter and the page window come from the caller, so the
-            // desktop serves it through its session seam (`BimHost`) instead of
-            // the owner-tick mirror. Not drawing commands: absent from
-            // `cad_commands`, so `check-command-docs.py` owes them nothing.
+            // The BIM query (ADR-0042 D11): one **request-carrying** read that
+            // answers the page and the facet summary in one round trip. The filter
+            // and the page window come from the caller, so the desktop serves it
+            // through its session seam (`cad_bim_query_host`) instead of the
+            // owner-tick mirror. Not a drawing command: absent from
+            // `cad_commands`, so `check-command-docs.py` owes it nothing.
             @row(shared, reads, BimQueryArgs, cad_bim_query, { arg(req, filter, $crate::bim::BimFilterWire) arg(req, offset, usize) arg(req, limit, usize) }, $crate::bim::BimQueryResponse, { $crate::session::bim_reads::bim_query(reads, filter, offset, limit) })
-            @row(shared, reads, BimSummaryArgs, cad_bim_summary, { arg(req, filter, $crate::bim::BimFilterWire) arg(req, offset, usize) arg(req, limit, usize) }, $crate::bim::BimSummaryResponse, { $crate::session::bim_reads::bim_summary(reads, filter, offset, limit) })
             @row(shared, sink, LayerVisibleArgs, cad_set_layer_visible, { arg(req, name, String) arg(req, visible, bool) }, $crate::session::wire::CadCommandAck, { $crate::session::wire::set_layer_visible(sink, &name, visible) })
             @row(shared, sink, NoArgs, cad_restore_layers, { }, $crate::session::wire::CadCommandAck, { $crate::session::wire::restore_layers(sink) })
             @row(shared, sink, ActiveLayerArgs, cad_set_active_layer, { arg(req, name, String) }, $crate::session::wire::CadCommandAck, { $crate::session::wire::set_active_layer(sink, &name) })

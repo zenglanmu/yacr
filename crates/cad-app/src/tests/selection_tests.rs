@@ -219,7 +219,7 @@ fn multi_select_lists_common_keys_with_mixed_markers() {
     assert_eq!(props.count, 2);
 
     // Only the keys common to both entities are listed (the intersection).
-    let keys: Vec<&str> = props.rows.iter().map(|row| row.key).collect();
+    let keys: Vec<&str> = props.rows.iter().map(|row| row.key.as_ref()).collect();
     assert_eq!(
         keys,
         vec![
@@ -242,20 +242,20 @@ fn multi_select_lists_common_keys_with_mixed_markers() {
     let id = props.rows.iter().find(|row| row.key == "id").unwrap();
     assert!(id.mixed);
     assert_eq!(id.value, None);
-    assert!(props.mixed_keys.contains(&"id"));
+    assert!(props.mixed_keys.iter().any(|key| key == "id"));
 
     // The shared layer agrees → one real value, not mixed.
     let layer = props.rows.iter().find(|row| row.key == "layer").unwrap();
     assert!(!layer.mixed);
     assert_eq!(layer.value.as_deref(), Some("0 (0)"));
-    assert!(!props.mixed_keys.contains(&"layer"));
+    assert!(!props.mixed_keys.iter().any(|key| key == "layer"));
 
     // `mixed_keys` is exactly the keys of the mixed rows, in row order.
-    let mixed: Vec<&str> = props
+    let mixed: Vec<String> = props
         .rows
         .iter()
         .filter(|row| row.mixed)
-        .map(|row| row.key)
+        .map(|row| row.key.to_string())
         .collect();
     assert_eq!(props.mixed_keys, mixed);
 }
@@ -268,7 +268,7 @@ fn single_selection_rows_order_and_values_are_pinned() {
     let rows: Vec<(&str, Option<&str>)> = props
         .rows
         .iter()
-        .map(|row| (row.key, row.value.as_deref()))
+        .map(|row| (row.key.as_ref(), row.value.as_deref()))
         .collect();
     assert_eq!(
         rows,
@@ -340,7 +340,7 @@ fn multi_selection_with_the_same_layer_keeps_one_shared_value() {
     let layer = row("layer");
     assert_eq!(layer.value.as_deref(), Some("0 (0)"));
     assert!(!layer.mixed);
-    assert!(!props.mixed_keys.contains(&"layer"));
+    assert!(!props.mixed_keys.iter().any(|key| key == "layer"));
 
     // Start points agree; end and length differ.
     assert_eq!(
@@ -350,8 +350,8 @@ fn multi_selection_with_the_same_layer_keeps_one_shared_value() {
     assert!(!row("start").mixed);
     assert!(row("end").mixed && row("end").value.is_none());
     assert!(row("length").mixed);
-    assert!(props.mixed_keys.contains(&"end"));
-    assert!(props.mixed_keys.contains(&"length"));
+    assert!(props.mixed_keys.iter().any(|key| key == "end"));
+    assert!(props.mixed_keys.iter().any(|key| key == "length"));
 }
 
 #[test]
@@ -395,7 +395,7 @@ fn multi_selection_with_different_layers_reports_a_mixed_layer() {
     let layer = props.rows.iter().find(|row| row.key == "layer").unwrap();
     assert!(layer.mixed);
     assert_eq!(layer.value, None);
-    assert!(props.mixed_keys.contains(&"layer"));
+    assert!(props.mixed_keys.iter().any(|key| key == "layer"));
     // The option list is still the drawing's real layer table.
     assert_eq!(layer.options, vec!["0".to_string(), "WALLS".to_string()]);
 }

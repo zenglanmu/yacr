@@ -286,22 +286,33 @@ fn register_seams(
     shared: &Arc<Mutex<Shared>>,
     telemetry: &Arc<Mutex<RenderTelemetry>>,
 ) {
-    let mut state = lock(shared);
-    state.telemetry = Some(Arc::new(AppTelemetry(telemetry.clone())));
-    state.popup_host = Some(Arc::new(crate::popup::AndroidPopupHost::new(app.clone())));
-    // Recent drawings are host file data on the same owner-thread session.
-    state.recent_host = Some(crate::recent::AndroidRecentHost::new(app.clone()));
-    // The `.ymodel` archive (installed by the tick) makes the two document-format
-    // seams real: the start panel's recovery list/restore and the save dialog's
-    // resource preview. Without these the shared commands would keep refusing
-    // with `unsupported-runtime: cad_recovery_files` / `unsupported-runtime: ymodel`
-    // even though SAVE/OPEN now work.
-    state.recovery_host = Some(Arc::new(crate::host_files::AndroidRecoveryHost::new(
-        app.clone(),
-    )));
-    state.ymodel_host = Some(Arc::new(crate::host_files::AndroidYmodelHost::new(
-        app.clone(),
-    )));
+    {
+        let mut state = lock(shared);
+        state.telemetry = Some(Arc::new(AppTelemetry(telemetry.clone())));
+        state.popup_host = Some(Arc::new(crate::popup::AndroidPopupHost::new(app.clone())));
+        // Recent drawings are host file data on the same owner-thread session.
+        state.recent_host = Some(crate::recent::AndroidRecentHost::new(app.clone()));
+        // The `.ymodel` archive (installed by the tick) makes the two document-format
+        // seams real: the start panel's recovery list/restore and the save dialog's
+        // resource preview. Without these the shared commands would keep refusing
+        // with `unsupported-runtime: cad_recovery_files` / `unsupported-runtime: ymodel`
+        // even though SAVE/OPEN now work.
+        state.recovery_host = Some(Arc::new(crate::host_files::AndroidRecoveryHost::new(
+            app.clone(),
+        )));
+        state.ymodel_host = Some(Arc::new(crate::host_files::AndroidYmodelHost::new(
+            app.clone(),
+        )));
+    }
+    // BIM query (ADR-0042 D11): a caller-supplied filter over the open document,
+    // answered with the page and its facet summary in one round trip, so the
+    // answer cannot be mirrored ahead of time; the seam marshals it onto the loop
+    // thread where the `!Send` session lives. Installed after the shell lock is
+    // released, like every other configure helper.
+    cad_desktop_shell::state::configure_bim_query_host(
+        shared,
+        crate::bim_host::AndroidBimQueryHost::new(app.clone()),
+    );
 }
 
 /// Ask the tick to stop and release the presenter (idempotent).

@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { parseSelection } from '../src/cad/selection-wire.ts';
 import { propertyGroupLabel, propertyRowLabel } from '../src/properties/property-labels.ts';
+import { propertyRowView } from '../src/properties/properties-view.ts';
 import { queueCadCommand } from '../src/cad/cad-command.ts';
 import { admitCommandText, isSupportedCommand } from '../src/commands/commands.ts';
 import { createTranslator } from '../src/i18n.ts';
@@ -37,6 +38,50 @@ test('property groups have catalog labels and unknown groups stay raw', () => {
   assert.equal(propertyGroupLabel(tEn, 'display'), en['properties.group.display']);
   assert.equal(propertyGroupLabel(tEn, 'bim'), en['properties.group.bim']);
   assert.equal(propertyGroupLabel(t, 'future_group'), 'future_group');
+});
+
+test('a dynamic row shows its source label verbatim instead of the machine key', () => {
+  const view = propertyRowView({
+    key: 'bim.pset.0.0',
+    label: 'Pset_WallCommon.IsExternal',
+    value: 'true',
+    group: 'bim',
+    mixed: false,
+    editable: false,
+    kind: 'bool',
+    options: [],
+  }, t);
+  // Source data is never translated: the label is what the import declared.
+  assert.equal(view.label, 'Pset_WallCommon.IsExternal');
+  assert.notEqual(view.label, propertyRowLabel(t, 'bim.pset.0.0'));
+});
+
+test('a row without a label falls back to its catalog label', () => {
+  const view = propertyRowView({
+    key: 'layer',
+    value: '0 (0)',
+    group: 'entity',
+    mixed: false,
+    editable: true,
+    kind: 'enum',
+    options: ['0'],
+  }, t);
+  assert.equal(view.label, zh['properties.row.layer']);
+});
+
+test('a dynamic source label carries no CJK copy', () => {
+  const cjk = /[\u3400-\u4dbf\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]/;
+  const view = propertyRowView({
+    key: 'bim.pset.0.0',
+    label: 'Pset_WallCommon.IsExternal',
+    value: 'true',
+    group: 'bim',
+    mixed: false,
+    editable: false,
+    kind: 'bool',
+    options: [],
+  }, t);
+  assert.ok(!cjk.test(view.label), 'the label is source data, not localized copy');
 });
 
 // --- wire --------------------------------------------------------------
@@ -74,6 +119,39 @@ test('parseSelection accepts a single-selection row set only with the full metad
   assert.equal(parseSelection(single), single);
 });
 
+test('parseSelection carries an optional source label for dynamic rows', () => {
+  const dynamic = {
+    count: 1,
+    empty: false,
+    rows: [
+      {
+        key: 'bim.pset.0.0',
+        label: 'Pset_WallCommon.IsExternal',
+        value: 'true',
+        group: 'bim',
+        mixed: false,
+        editable: false,
+        kind: 'bool',
+        options: [],
+      },
+    ],
+    mixedKeys: [],
+    text: null,
+    text_multiline: false,
+  };
+  assert.equal(parseSelection(dynamic), dynamic);
+  // A static row omits the key entirely; that is valid, not a missing field.
+  assert.equal(parseSelection(twoEntityWire), twoEntityWire);
+  // A blank label is a contract violation: it names nothing.
+  assert.throws(
+    () => parseSelection({
+      ...dynamic,
+      rows: [{ ...dynamic.rows[0], label: '' }],
+    }),
+    /CAD_STATUS_INVALID/,
+  );
+});
+
 test('parseSelection rejects genuinely malformed selection payloads', () => {
   const clone = value => JSON.parse(JSON.stringify(value));
   const broken = [
@@ -108,9 +186,13 @@ test('every machine key emitted by cad-app::selection has a label in both catalo
   const keys = new Set(sources.flatMap(source => [...source.matchAll(/PropertyRow::new\(\s*"([a-z0-9_]+)"/g)].map(match => match[1])));
   assert.ok(keys.size > 30, `expected the selection modules to emit many row keys, saw ${keys.size}`);
   // The BIM keys are the reason the scan covers two files: assert they are here.
-  for (const key of ['bim_category', 'bim_name', 'bim_level', 'bim_type', 'bim_material', 'bim_source', 'bim_properties', 'bim_evidence']) {
+  for (const key of ['bim_category', 'bim_name', 'bim_level', 'bim_type', 'bim_material', 'bim_source', 'bim_evidence']) {
     assert.ok(keys.has(key), `the scan must cover ${key} (selection_bim.rs)`);
   }
+  // Dynamic PSet rows build their key from a format string, not a literal, so
+  // they are source data rather than a catalog key and never appear here.
+  assert.ok(keys.has('bim_evidence'), 'static BIM rows are still scanned');
+  assert.ok(!keys.has('bim_properties'), 'the PSet summary row is gone');
   for (const key of keys) {
     assert.equal(typeof zh[`properties.row.${key}`], 'string', `zh-CN missing properties.row.${key}`);
     assert.equal(typeof en[`properties.row.${key}`], 'string', `en missing properties.row.${key}`);

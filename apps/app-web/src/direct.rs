@@ -275,15 +275,15 @@ impl AdmissionTarget for DirectSink<'_> {
 
 /// The read seam this dispatcher needs: the argument-less control projections
 /// ([`ControlReads`]) **plus** the request-carrying BIM reads
-/// ([`cad_ui_core::bim::BimReads`]).
+/// ([`cad_ui_core::bim::BimQueryReads`]).
 ///
 /// The shared registry has rows for both families, so the one dispatcher
 /// parameter must satisfy both. The blanket impl makes every reads struct that
 /// implements the two traits qualify; the generated BIM arm upcasts the object
-/// to `&dyn BimReads`.
-pub trait WireReads: ControlReads + cad_ui_core::bim::BimReads {}
+/// to `&dyn BimQueryReads`.
+pub trait WireReads: ControlReads + cad_ui_core::bim::BimQueryReads {}
 
-impl<T: ControlReads + cad_ui_core::bim::BimReads + ?Sized> WireReads for T {}
+impl<T: ControlReads + cad_ui_core::bim::BimQueryReads + ?Sized> WireReads for T {}
 
 /// The [`ControlReads`] of a host that owns its session on this thread.
 ///
@@ -338,22 +338,16 @@ impl ControlReads for DirectReads<'_> {
     }
 }
 
-/// BIM is a **request-carrying** read, so it has its own seam (`BimReads`)
+/// BIM is a **request-carrying** read, so it has its own seam (`BimQueryReads`)
 /// instead of the argument-less [`ControlReads`]: the live session is on this
-/// thread, so the answer is the session's own — no mirror, no seam hop.
-impl cad_ui_core::bim::BimReads for DirectReads<'_> {
+/// thread, so the answer is the session's own — no mirror, no seam hop, and one
+/// call for the page plus its facet summary.
+impl cad_ui_core::bim::BimQueryReads for DirectReads<'_> {
     fn bim_query(
         &self,
         request: &cad_ui_core::bim::BimQueryRequest,
     ) -> Result<cad_ui_core::bim::BimQueryResponse, String> {
         self.session.bim_query(request)
-    }
-
-    fn bim_summary(
-        &self,
-        request: &cad_ui_core::bim::BimQueryRequest,
-    ) -> Result<cad_ui_core::bim::BimSummaryResponse, String> {
-        self.session.bim_summary(request)
     }
 }
 

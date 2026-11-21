@@ -1238,6 +1238,8 @@
   "properties.edit.unknown_linetype": "没有该名称的线型。",
   "properties.edit.ambiguous_name": "有多个对象使用该名称。",
   "properties.edit.not_addressable": "选中的部分对象无法修改。",
+  "properties.edit.bim_conflict": "选中对象的该属性值不一致。",
+  "properties.edit.bim_too_long": "文本超出该属性允许的长度。",
   "properties.edit.selection_empty": "未选择对象。",
   "properties.edit.unchanged": "该值已经是当前值。",
   "properties.edit.target_missing": "修改的目标已不存在。",

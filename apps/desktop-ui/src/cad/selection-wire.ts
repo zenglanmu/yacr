@@ -13,6 +13,12 @@ export type PropertyRowKind = 'text' | 'number' | 'enum' | 'bool';
 /** One validated property row of the selection block. */
 export interface SelectionPropertyRow {
   readonly key: string;
+  /**
+   * The source's own name for a dynamic row (`Pset_WallCommon.IsExternal`), or
+   * `undefined`/`null` for a static machine key (the label then comes from the
+   * catalog). Source data, never translated. Omitted for a static key.
+   */
+  readonly label?: string | null;
   readonly value: string | null;
   readonly group: string;
   readonly mixed: boolean;
@@ -76,12 +82,15 @@ export function parseSelection(selection: unknown): CadSelection {
   if (rowList.length > 0 && count < 1) throw Error('CAD_STATUS_INVALID');
   // Row keys/groups are machine keys the catalog may not know; that is
   // tolerated (the UI shows the raw key). Missing or mistyped metadata is not.
+  // `label` is the one optional source-data field: absent for a static key,
+  // else the source's own non-blank name, which the UI shows verbatim.
   // `mixed` and `value` are one fact in two fields: a mixed row has no value,
   // and an unmixed row must have one (never a fabricated empty string).
   const validRow = (row: unknown): boolean => {
     if (!row || typeof row !== 'object' || Array.isArray(row)) return false;
     const candidate = row as {
       key?: unknown;
+      label?: unknown;
       value?: unknown;
       group?: unknown;
       mixed?: unknown;
@@ -90,6 +99,11 @@ export function parseSelection(selection: unknown): CadSelection {
       options?: unknown;
     };
     return typeof candidate.key === 'string' && candidate.key.length > 0
+      // `label` is optional (omitted for a static key): absent, `null`, or a
+      // non-empty source name is valid. A blank or non-string label is not.
+      && (candidate.label === undefined
+        || candidate.label === null
+        || (typeof candidate.label === 'string' && candidate.label.length > 0))
       && (candidate.value === null || typeof candidate.value === 'string')
       && typeof candidate.group === 'string' && candidate.group.length > 0
       && typeof candidate.mixed === 'boolean'

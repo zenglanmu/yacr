@@ -1,5 +1,4 @@
-//! The Linux host's BIM query seam (`cad_bim_query`/`cad_bim_summary`, ADR-0042
-//! D11).
+//! The Linux host's BIM query seam (`cad_bim_query`, ADR-0042 D11).
 //!
 //! A BIM query reads the **open document**: the filter, the paging and the
 //! counters all come from the `!Send` [`CadSession`] the GTK main thread owns, and
@@ -8,10 +7,10 @@
 //! reaches it through this seam, exactly like the recent/recovery/ymodel seams:
 //! IPC thread → [`crate::main_thread`] → session.
 //!
-//! Nothing here decides what a query means: the session's own `bim_query`/
-//! `bim_summary` calls the backend (`cad_query::bim`), and a refusal (an unknown
-//! filter value kind, an over-budget filter, a stale document) travels back
-//! unchanged. The `dom-canvas` carrier has no native session by design and
+//! Nothing here decides what a query means: the session's own `bim_query` calls
+//! the backend (`cad_query::bim`), and a refusal (an unknown filter value kind,
+//! an over-budget filter, a stale document) travels back unchanged. One call
+//! answers the page **and** the facet summary of the same filtered set. The `dom-canvas` carrier has no native session by design and
 //! refuses with the stable `unsupported-runtime: bimQuery` marker instead of an
 //! empty table that would read as "this document has no BIM data".
 //!
@@ -19,37 +18,27 @@
 
 use std::sync::Arc;
 
-use cad_ui_core::bim::{
-    BimHost, BimQueryRequest, BimQueryResponse, BimSummaryResponse, BIM_UNSUPPORTED,
-};
+use cad_ui_core::bim::{BimQueryHost, BimQueryRequest, BimQueryResponse, BIM_UNSUPPORTED};
 
 use super::CAD;
 
-/// The Linux implementation of [`BimHost`].
-pub(super) struct AppBimHost {
+/// The Linux implementation of [`BimQueryHost`].
+pub(super) struct AppBimQueryHost {
     app: tauri::AppHandle,
 }
 
-impl AppBimHost {
+impl AppBimQueryHost {
     pub(super) fn new(app: tauri::AppHandle) -> Arc<Self> {
         Arc::new(Self { app })
     }
 }
 
-impl BimHost for AppBimHost {
+impl BimQueryHost for AppBimQueryHost {
     fn bim_query(&self, request: &BimQueryRequest) -> Result<BimQueryResponse, String> {
         let app = self.app.clone();
         let request = request.clone();
         crate::main_thread::on_main_thread(&app, move || {
             with_session(|session| session.bim_query(&request))
-        })
-    }
-
-    fn bim_summary(&self, request: &BimQueryRequest) -> Result<BimSummaryResponse, String> {
-        let app = self.app.clone();
-        let request = request.clone();
-        crate::main_thread::on_main_thread(&app, move || {
-            with_session(|session| session.bim_summary(&request))
         })
     }
 }

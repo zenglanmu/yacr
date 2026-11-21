@@ -327,15 +327,20 @@ pub struct Shared {
     /// refuse by name instead of inventing a preview for a file that cannot carry
     /// resources.
     pub ymodel_host: Option<Arc<dyn ShellYmodelHost>>,
-    /// The platform BIM query seam (see [`cad_ui_core::bim::BimHost`]).
+    /// The platform BIM query seam (see [`cad_ui_core::bim::BimQueryHost`]).
     ///
     /// A BIM query takes a caller-supplied filter, so unlike the element
     /// projections it cannot be mirrored ahead of time: the host marshals the
-    /// request onto the `!Send` session thread through this seam. `None` keeps
-    /// both `cad_bim_*` commands on the shared `unsupported-runtime: bimQuery`
-    /// refusal — an honest "this carrier has no BIM query lane", never an empty
-    /// page that would read as "this document has no BIM data".
-    pub cad_bim_host: Option<Arc<dyn cad_ui_core::bim::BimHost>>,
+    /// request onto the `!Send` session thread through this seam. One call answers
+    /// the page and the facet summary. `None` keeps `cad_bim_query` on the shared
+    /// `unsupported-runtime: bimQuery` refusal — an honest "this carrier has no
+    /// BIM query lane", never an empty page that would read as "this document has
+    /// no BIM data".
+    ///
+    /// The trait lives in `cad-ui-core` (not here) because the registry row that
+    /// names it is shared by both transports; that is a layering constraint, see
+    /// the trait's own doc.
+    pub cad_bim_query_host: Option<Arc<dyn cad_ui_core::bim::BimQueryHost>>,
     /// The native folder picker (see [`crate::directory::DirectoryPicker`]).
     ///
     /// A carrier with a local folder chooser installs one during startup; the
@@ -408,7 +413,7 @@ impl Shared {
             recent_host: None,
             recovery_host: None,
             ymodel_host: None,
-            cad_bim_host: None,
+            cad_bim_query_host: None,
             directory_picker: None,
             vendor: crate::vendor::VendorStore::default(),
             vendor_pending_representations: None,
@@ -478,7 +483,7 @@ impl Shared {
             self.cad_api_snapshot.as_ref(),
         )
         // The one request-carrying read: served by the session seam, not a mirror.
-        .with_bim_host(self.cad_bim_host.as_ref())
+        .with_bim_query_host(self.cad_bim_query_host.as_ref())
     }
 }
 
@@ -568,13 +573,16 @@ pub fn configure_ymodel_host(shared: &Arc<Mutex<Shared>>, host: Arc<dyn ShellYmo
     lock(shared).ymodel_host = Some(host);
 }
 
-/// Install the BIM query seam (see [`cad_ui_core::bim::BimHost`]).
+/// Install the BIM query seam (see [`cad_ui_core::bim::BimQueryHost`]).
 ///
 /// A carrier whose native session owns the document calls this once during
 /// startup; a carrier that never does keeps the named
 /// `unsupported-runtime: bimQuery` refusal instead of an empty BIM table.
-pub fn configure_bim_host(shared: &Arc<Mutex<Shared>>, host: Arc<dyn cad_ui_core::bim::BimHost>) {
-    lock(shared).cad_bim_host = Some(host);
+pub fn configure_bim_query_host(
+    shared: &Arc<Mutex<Shared>>,
+    host: Arc<dyn cad_ui_core::bim::BimQueryHost>,
+) {
+    lock(shared).cad_bim_query_host = Some(host);
 }
 
 /// Install the native folder picker (see [`crate::directory::DirectoryPicker`]).

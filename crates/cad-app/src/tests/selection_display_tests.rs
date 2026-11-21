@@ -111,8 +111,8 @@ fn display_rows_carry_the_write_grammar_and_round_trip_through_it() {
     let emitted: Vec<&str> = props
         .rows
         .iter()
-        .filter(|row| DISPLAY_KEYS.contains(&row.key))
-        .map(|row| row.key)
+        .filter(|row| DISPLAY_KEYS.contains(&row.key.as_ref()))
+        .map(|row| row.key.as_ref())
         .collect();
     assert_eq!(emitted, DISPLAY_KEYS);
 

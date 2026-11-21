@@ -22,9 +22,9 @@ pub mod session;
 pub mod shell;
 
 pub use bim::{
-    query_response, summary_response, BimEvidenceWire, BimFacetCountWire, BimFilterWire, BimHost,
-    BimObjectWire, BimOpWire, BimPropertyCountWire, BimPropertyFilterWire, BimQueryRequest,
-    BimQueryResponse, BimRowWire, BimSourceWire, BimSummaryResponse, BimSummaryWire, BimValueWire,
+    query_response, BimEvidenceWire, BimFacetCountWire, BimFilterWire, BimObjectWire, BimOpWire,
+    BimPropertyCountWire, BimPropertyFilterWire, BimQueryHost, BimQueryReads, BimQueryRequest,
+    BimQueryResponse, BimQuerySeam, BimRowWire, BimSourceWire, BimSummaryWire, BimValueWire,
     BIM_DEFAULT_LIMIT, BIM_REAL_NOT_FINITE, BIM_STALE, BIM_UNSUPPORTED, BIM_UNSUPPORTED_VALUE,
 };
 

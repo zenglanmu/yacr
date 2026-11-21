@@ -476,6 +476,12 @@ pub enum CommandId {
     /// or a transparency percentage `0..=90`). The selection is read from the session at apply time; a ref with an instance path or sub-element is
     /// refused (`property.not_addressable`) instead of being reached into, and a value that is not in the grammar is refused, never clamped.
     ///
+    /// The one other accepted key shape is a **dynamic BIM PSet slot**, `bim.pset.{set}.{property}` (the row key emitted by
+    /// [`crate::selection_bim`]). Those keys are dispatched by `cad-app` to the BIM write path and are deliberately **not** in
+    /// [`crate::property_value::SUPPORTED_KEYS`]; the command, payload, transaction and undo granularity are the same. The value is resolved
+    /// against each element's own stored variant and the multi-selection refuses a slot whose `(pset, property)` names differ
+    /// (`property.bim_conflict`).
+    ///
     /// Entities that already hold the value are not staged; if nothing changes overall the command creates **no** undo entry (`property.unchanged`).
     /// `text` is not a writable property here (it has its own `TEXTEDIT` path). Work-only.
     SetEntityProperty,

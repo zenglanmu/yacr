@@ -1,10 +1,13 @@
-//! Wire contract for the BIM query/summary commands (ADR-0042 D11).
+//! Wire contract for the one BIM query command (ADR-0042 D11).
 //!
 //! These pin the **transport**, not the backend: the field names the frontend
 //! parses (`camelCase`), the two `object` states, the four `value.kind` states,
 //! the evidence and op spellings, and the explicit refusals for anything this
 //! layer cannot express. A backend field rename breaks the compiler here; a wire
 //! key rename breaks these assertions.
+//!
+//! Since the summary rides the query answer, the frozen shape includes the
+//! `summary` block (`summary.total == total`); there is no second command.
 
 use super::*;
 
@@ -323,6 +326,29 @@ fn the_object_kind_has_exactly_two_states() {
     );
 }
 
+/// The summary block of the `counted` matched components.
+fn component_summary(counted: usize) -> BimSummary {
+    BimSummary {
+        total: counted,
+        by_category: vec![BimFacetCount {
+            key: "ifcwall".into(),
+            name: "IfcWall".into(),
+            count: counted,
+        }],
+        by_level: vec![BimFacetCount {
+            key: "level:ifc:doc:L1".into(),
+            name: "Level 1".into(),
+            count: counted,
+        }],
+        by_type: Vec::new(),
+        by_material: vec![BimFacetCount {
+            key: "material:ifc:doc:M1".into(),
+            name: "Concrete".into(),
+            count: 7,
+        }],
+    }
+}
+
 #[test]
 fn a_query_response_carries_the_frozen_shape() {
     let page = QueryPage {
@@ -330,7 +356,7 @@ fn a_query_response_carries_the_frozen_shape() {
         rows: vec![wall_row()],
         total: 12,
     };
-    let response = query_response(page, Some(DatabaseId(1)));
+    let response = query_response(page, &component_summary(12), Some(DatabaseId(1)));
     let value = serde_json::to_value(&response).expect("serialize");
     assert_eq!(
         value,
@@ -363,8 +389,20 @@ fn a_query_response_carries_the_frozen_shape() {
                 "evidence": "declared",
                 "propertySummary": [{ "name": "Pset_WallCommon", "count": 3 }],
             }],
+            "summary": {
+                "total": 12,
+                "byCategory": [{ "key": "ifcwall", "name": "IfcWall", "count": 12 }],
+                "byLevel": [{ "key": "level:ifc:doc:L1", "name": "Level 1", "count": 12 }],
+                "byType": [],
+                "byMaterial": [{ "key": "material:ifc:doc:M1", "name": "Concrete", "count": 7 }],
+            },
         })
     );
+    // Every key is camelCase and the summary rides the same answer: the one
+    // command a frontend calls.
+    let text = value.to_string();
+    assert!(!text.contains("database_id"), "camelCase only: {text}");
+    assert!(!text.contains("by_category"), "camelCase only: {text}");
     // The response decodes back into the same value: the frontend's round trip.
     let decoded: BimQueryResponse = serde_json::from_value(value).expect("decode");
     assert_eq!(decoded, response);
@@ -381,12 +419,18 @@ fn an_entity_keyed_row_uses_the_entity_object() {
         rows: vec![row],
         total: 1,
     };
-    let value = serde_json::to_value(query_response(page, Some(DatabaseId(3)))).expect("json");
+    let value = serde_json::to_value(query_response(
+        page,
+        &component_summary(1),
+        Some(DatabaseId(3)),
+    ))
+    .expect("json");
     assert_eq!(value["rows"][0]["object"]["kind"], "entity");
     assert_eq!(value["rows"][0]["object"]["entityId"], 7);
     assert_eq!(value["total"], 1);
     assert_eq!(value["limit"], 0, "limit=0 is the caller's window");
     assert_eq!(value["stale"], false);
+    assert_eq!(value["summary"]["total"], 1);
 }
 
 #[test]
@@ -396,69 +440,55 @@ fn no_document_answers_zero_identity_and_no_rows() {
         rows: Vec::new(),
         total: 0,
     };
-    let value = serde_json::to_value(query_response(page, None)).expect("json");
+    let value =
+        serde_json::to_value(query_response(page, &BimSummary::default(), None)).expect("json");
     assert_eq!(value["databaseId"], 0);
     assert_eq!(value["total"], 0);
     assert_eq!(value["rows"], serde_json::json!([]));
+    assert_eq!(value["summary"]["total"], 0);
+    assert_eq!(value["summary"]["byCategory"], serde_json::json!([]));
 }
 
 #[test]
-fn a_summary_response_carries_the_counters() {
-    let summary = BimSummary {
-        total: 12,
-        by_category: vec![BimFacetCount {
-            key: "ifcwall".into(),
-            name: "IfcWall".into(),
-            count: 12,
-        }],
-        by_level: vec![BimFacetCount {
-            key: "level:ifc:doc:L1".into(),
-            name: "Level 1".into(),
-            count: 12,
-        }],
-        by_type: Vec::new(),
-        by_material: vec![BimFacetCount {
-            key: "material:ifc:doc:M1".into(),
-            name: "Concrete".into(),
-            count: 7,
-        }],
-    };
+fn the_summary_block_rides_the_query_response() {
     let page = QueryPage {
         request: page_request(0, 1),
-        rows: vec![summary],
-        total: 1,
+        rows: vec![wall_row()],
+        total: 12,
     };
-    let response = summary_response(page, Some(DatabaseId(1)));
+    let response = query_response(page, &component_summary(12), Some(DatabaseId(1)));
     assert_eq!(response.total, 12, "the outer total counts components");
+    assert_eq!(
+        response.summary.total, response.total,
+        "the summary counts the same filtered set"
+    );
     let value = serde_json::to_value(&response).expect("json");
     assert_eq!(
-        value,
+        value["summary"],
         serde_json::json!({
-            "databaseId": 1,
-            "revision": 42,
             "total": 12,
-            "summary": {
-                "total": 12,
-                "byCategory": [{ "key": "ifcwall", "name": "IfcWall", "count": 12 }],
-                "byLevel": [{ "key": "level:ifc:doc:L1", "name": "Level 1", "count": 12 }],
-                "byType": [],
-                "byMaterial": [{ "key": "material:ifc:doc:M1", "name": "Concrete", "count": 7 }],
-            },
+            "byCategory": [{ "key": "ifcwall", "name": "IfcWall", "count": 12 }],
+            "byLevel": [{ "key": "level:ifc:doc:L1", "name": "Level 1", "count": 12 }],
+            "byType": [],
+            "byMaterial": [{ "key": "material:ifc:doc:M1", "name": "Concrete", "count": 7 }],
         })
     );
 }
 
 #[test]
-fn a_summary_page_without_its_row_is_an_honest_empty_summary() {
+fn a_zero_window_still_answers_the_matched_total_and_its_summary() {
     let page = QueryPage {
         request: page_request(0, 0),
         rows: Vec::new(),
-        total: 1,
+        total: 12,
     };
-    let value = serde_json::to_value(summary_response(page, None)).expect("json");
-    assert_eq!(value["total"], 0);
-    assert_eq!(value["summary"]["total"], 0);
-    assert_eq!(value["summary"]["byCategory"], serde_json::json!([]));
+    let value =
+        serde_json::to_value(query_response(page, &component_summary(12), None)).expect("json");
+    assert_eq!(value["limit"], 0);
+    assert_eq!(value["rows"], serde_json::json!([]));
+    assert_eq!(value["total"], 12, "limit=0 requests only the total");
+    assert_eq!(value["summary"]["total"], 12);
+    assert_eq!(value["summary"]["byCategory"][0]["count"], 12);
 }
 
 #[test]

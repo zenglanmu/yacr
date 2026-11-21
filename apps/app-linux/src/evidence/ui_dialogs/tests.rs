@@ -229,6 +229,7 @@ fn row(key: &str, value: Option<&str>, group: &str) -> CadSelectionRow {
     CadSelectionRow {
         key: key.to_string(),
         value: value.map(str::to_string),
+        label: None,
         group: group.to_string(),
         mixed: value.is_none(),
         editable: false,

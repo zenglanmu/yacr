@@ -134,7 +134,12 @@ export function propertyRowView(
   t: Translator,
   mixedHelp: string | null = null,
 ): PropertyRowView {
-  const label = propertyRowLabel(t, row.key);
+  // A dynamic row carries the source's own name (a PSet property, …): it is
+  // data, not catalog copy, so it is shown verbatim. Everything else falls back
+  // to the key's catalog label, exactly like before.
+  const label = typeof row.label === 'string' && row.label.length > 0
+    ? row.label
+    : propertyRowLabel(t, row.key);
   const mixed = row.mixed === true;
   // The placeholder carries the row's own label so a mixed row reads as
   // "Multiple values: Layer" instead of an unexplained dash.

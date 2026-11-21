@@ -1,14 +1,16 @@
 // BIM browse panel: the store's state machine.
 //
 // The fake clock and fake `invoke` keep these tests free of wall time and IPC:
-// they pin the exact payloads the two commands receive, the 150 ms debounce, the
-// generation-based supersession, and the states the panel must not confuse
-// (unsupported / waiting / empty / filtered-empty / stale).
+// they pin the exact payload the one `cad_bim_query` command receives, the
+// 150 ms debounce, the generation-based supersession, and the states the panel
+// must not confuse (unsupported / waiting / empty / filtered-empty / stale).
+//
+// Since the summary rides the query answer, every user action is **one** request:
+// the call counts below are the contract for that.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   BIM_QUERY_COMMAND,
-  BIM_SUMMARY_COMMAND,
   BIM_PAYLOAD_INVALID,
   emptyBimFilter,
 } from '../src/bim/bim-query.ts';
@@ -41,7 +43,19 @@ function wireRow(overrides = {}) {
   };
 }
 
-/** One query page. */
+/** The document-wide facet block a first (unfiltered) answer carries. */
+function wireSummary(overrides = {}) {
+  return {
+    total: 12,
+    byCategory: [{ key: 'ifcwall', name: 'IfcWall', count: 12 }],
+    byLevel: [],
+    byType: [],
+    byMaterial: [],
+    ...overrides,
+  };
+}
+
+/** One query answer: the page and its nested summary block. */
 function page(overrides = {}) {
   return {
     databaseId: 1,
@@ -51,23 +65,7 @@ function page(overrides = {}) {
     limit: 100,
     stale: false,
     rows: [wireRow()],
-    ...overrides,
-  };
-}
-
-/** One summary answer. */
-function summary(overrides = {}) {
-  return {
-    databaseId: 1,
-    revision: 1,
-    total: 12,
-    summary: {
-      total: 12,
-      byCategory: [{ key: 'ifcwall', name: 'IfcWall', count: 12 }],
-      byLevel: [],
-      byType: [],
-      byMaterial: [],
-    },
+    summary: wireSummary(),
     ...overrides,
   };
 }
@@ -128,32 +126,43 @@ function lastCall(calls, command) {
   return [...calls].reverse().find(call => call.command === command) ?? null;
 }
 
-test('the first load asks the summary without the filter and the page with it', async () => {
+test('the first load sends one request and takes rows and summary from it', async () => {
   const clock = fakeClock();
-  const { calls, invoke } = fakeInvoke(command => (command === BIM_SUMMARY_COMMAND ? summary() : page()));
+  const { calls, invoke } = fakeInvoke(() => page());
   const store = createBimStore(invoke, { schedule: clock.schedule, cancel: clock.cancel });
   await store.load();
 
-  assert.equal(calls[0].command, BIM_SUMMARY_COMMAND);
+  // One round trip: the page and the facet summary come from the same answer.
+  assert.equal(calls.length, 1, 'the load must not send a second summary request');
+  assert.equal(calls[0].command, BIM_QUERY_COMMAND);
   assert.deepEqual(calls[0].args.filter, EMPTY_WIRE_FILTER);
-  // A summary is one logical row on the host; it ignores these, but sending the
-  // documented pair keeps the request textual and honest.
-  assert.deepEqual([calls[0].args.offset, calls[0].args.limit], [0, 1]);
-  assert.equal(calls[1].command, BIM_QUERY_COMMAND);
-  assert.deepEqual(calls[1].args.filter, EMPTY_WIRE_FILTER);
-  assert.deepEqual([calls[1].args.offset, calls[1].args.limit], [0, 100]);
+  assert.deepEqual([calls[0].args.offset, calls[0].args.limit], [0, 100]);
 
   const state = store.getState();
   assert.equal(state.phase, 'ready');
   assert.equal(state.busy, false);
-  assert.equal(state.summary?.total, 12);
+  assert.equal(state.summary?.total, 12, "the answer's summary fills the facets");
+  assert.deepEqual(state.summary?.byCategory, [{ key: 'ifcwall', name: 'IfcWall', count: 12 }]);
   assert.equal(state.rows.length, 1);
   assert.deepEqual(state.page, { total: 1, offset: 0, limit: 100, stale: false });
 });
 
 test('a filter press updates the chips immediately and sends one debounced query', async () => {
   const clock = fakeClock();
-  const { calls, invoke } = fakeInvoke(command => (command === BIM_SUMMARY_COMMAND ? summary() : page({ total: 12 })));
+  const DOCUMENT_FACETS = [
+    { key: 'ifcwall', name: 'IfcWall', count: 12 },
+    { key: 'ifcslab', name: 'IfcSlab', count: 4 },
+  ];
+  // The answer mirrors its request's filter, like the host: an unfiltered answer
+  // carries every facet value, a filtered one only the matched set's.
+  const { calls, invoke } = fakeInvoke((command, args) => page({
+    total: 12,
+    summary: wireSummary({
+      byCategory: (args.filter.categories?.length ?? 0) > 0
+        ? [{ key: 'ifcwall', name: 'IfcWall', count: 12 }]
+        : DOCUMENT_FACETS,
+    }),
+  }));
   const store = createBimStore(invoke, { schedule: clock.schedule, cancel: clock.cancel });
   await store.load();
 
@@ -162,20 +171,24 @@ test('a filter press updates the chips immediately and sends one debounced query
   assert.deepEqual(store.getState().filter.categories, ['ifcwall']);
   // The page still belongs to the empty filter, so its count is not relabelled.
   assert.deepEqual(store.getState().queriedFilter, EMPTY_WIRE_FILTER);
-  assert.equal(calls.filter(call => call.command === BIM_QUERY_COMMAND).length, 1);
+  assert.equal(calls.length, 1, 'a pending debounce sends nothing yet');
   assert.equal(clock.pending().length, 1);
 
   await clock.flush();
   const query = lastCall(calls, BIM_QUERY_COMMAND);
   assert.deepEqual(query.args.filter.categories, ['ifcwall']);
   assert.equal(query.args.offset, 0);
+  assert.equal(calls.length, 2, 'one request per filter change');
   assert.deepEqual(store.getState().queriedFilter?.categories, ['ifcwall']);
   assert.equal(store.getState().busy, false);
+  // The facet list stays the document's value list: the filtered answer's
+  // summary counts only the matched set and must not collapse the chips.
+  assert.deepEqual(store.getState().summary?.byCategory, DOCUMENT_FACETS);
 });
 
 test('a second filter within the debounce window replaces the first request', async () => {
   const clock = fakeClock();
-  const { calls, invoke } = fakeInvoke(command => (command === BIM_SUMMARY_COMMAND ? summary() : page({ total: 12 })));
+  const { calls, invoke } = fakeInvoke(() => page({ total: 12 }));
   const store = createBimStore(invoke, { schedule: clock.schedule, cancel: clock.cancel });
   await store.load();
 
@@ -187,15 +200,14 @@ test('a second filter within the debounce window replaces the first request', as
 
   await clock.flush();
   const queries = calls.filter(call => call.command === BIM_QUERY_COMMAND);
-  assert.equal(queries.length, 2);
+  assert.equal(queries.length, 2, 'the load plus the newest filter change');
   assert.deepEqual(queries[1].args.filter.categories, ['ifcslab']);
 });
 
 test('an older in-flight answer never overwrites a newer filter', async () => {
   const clock = fakeClock();
   const pending = [];
-  const invoke = command => {
-    if (command === BIM_SUMMARY_COMMAND) return Promise.resolve(summary());
+  const invoke = () => {
     const reply = deferred();
     pending.push(reply);
     return reply.promise;
@@ -214,7 +226,7 @@ test('an older in-flight answer never overwrites a newer filter', async () => {
   const newRun = clock.flush(); // request B
   await Promise.resolve();
 
-  assert.equal(pending.length, 3);
+  assert.equal(pending.length, 3, 'one request per action');
   pending[2].resolve(page({ total: 5, rows: [wireRow({ name: 'newest' })] }));
   await newRun;
   assert.equal(store.getState().rows[0].name, 'newest');
@@ -252,27 +264,47 @@ test('cad_waiting is a loading state, not an empty drawing', async () => {
 
 test('a real empty answer is "no BIM data"; a filtered page of zero is "no match"', async () => {
   const clock = fakeClock();
-  let summaryTotal = 0;
-  const { invoke } = fakeInvoke(command => (command === BIM_SUMMARY_COMMAND
-    ? summary({ total: summaryTotal, summary: { ...summary().summary, total: summaryTotal, byCategory: [] } })
-    : page({ total: 0, rows: [] })));
+  // The fake answers like the host: an unfiltered request counts the document,
+  // a filtered one only its matches.
+  let document = { total: 0, rows: [], categories: [] };
+  const { invoke } = fakeInvoke((command, args) => {
+    const filtered = (args.filter.categories?.length ?? 0) > 0;
+    if (filtered) {
+      return page({ total: 0, rows: [], summary: wireSummary({ total: 0, byCategory: [] }) });
+    }
+    return page({
+      total: document.total,
+      rows: document.rows,
+      summary: wireSummary({ total: document.total, byCategory: document.categories }),
+    });
+  });
   const store = createBimStore(invoke, { schedule: clock.schedule, cancel: clock.cancel });
+
   await store.load();
   assert.equal(store.getState().phase, 'empty');
 
-  summaryTotal = 12;
+  // The document gets a wall (an import, a reload): the one request answers the
+  // page and the document facets together.
+  document = {
+    total: 1,
+    rows: [wireRow()],
+    categories: [{ key: 'ifcwall', name: 'IfcWall', count: 1 }],
+  };
   await store.refresh();
-  assert.equal(store.getState().phase, 'empty');
-  store.setFilter({ ...emptyBimFilter(), categories: ['ifcwall'] });
+  assert.equal(store.getState().phase, 'ready');
+  assert.equal(store.getState().summary?.total, 1);
+
+  // A filter that matches nothing is "no match", not "no data": the document
+  // summary already on screen still proves the drawing has BIM components.
+  store.setFilter({ ...emptyBimFilter(), categories: ['ifcdoor'] });
   await clock.flush();
   assert.equal(store.getState().phase, 'filtered-empty');
+  assert.equal(store.getState().summary?.total, 1);
 });
 
 test('the host stale flag is kept on the page', async () => {
   const clock = fakeClock();
-  const { invoke } = fakeInvoke(command => (command === BIM_SUMMARY_COMMAND
-    ? summary()
-    : page({ total: 12, stale: true })));
+  const { invoke } = fakeInvoke(() => page({ total: 12, stale: true }));
   const store = createBimStore(invoke, { schedule: clock.schedule, cancel: clock.cancel });
   await store.load();
   assert.equal(store.getState().page?.stale, true);
@@ -281,8 +313,7 @@ test('the host stale flag is kept on the page', async () => {
 test('a bim.stale refusal keeps the last page and turns on the stale banner', async () => {
   const clock = fakeClock();
   let stale = false;
-  const { invoke } = fakeInvoke(command => {
-    if (command === BIM_SUMMARY_COMMAND) return summary();
+  const { invoke } = fakeInvoke(() => {
     if (stale) throw new Error('bim.stale: the query document is not the open document');
     return page({ total: 250 });
   });
@@ -302,9 +333,7 @@ test('a bim.stale refusal keeps the last page and turns on the stale banner', as
 
 test('paging sends the next offset immediately and keeps the filter', async () => {
   const clock = fakeClock();
-  const { calls, invoke } = fakeInvoke((command, args) => (command === BIM_SUMMARY_COMMAND
-    ? summary()
-    : page({ total: 250, offset: args.offset })));
+  const { calls, invoke } = fakeInvoke((command, args) => page({ total: 250, offset: args.offset }));
   const store = createBimStore(invoke, { schedule: clock.schedule, cancel: clock.cancel });
   await store.load();
 
@@ -313,33 +342,44 @@ test('paging sends the next offset immediately and keeps the filter', async () =
   const query = lastCall(calls, BIM_QUERY_COMMAND);
   assert.equal(query.args.offset, 100);
   assert.equal(query.args.limit, 100);
+  assert.equal(calls.length, 2, 'one request per page change');
   assert.equal(store.getState().page?.offset, 100);
   assert.equal(clock.pending().length, 0);
 });
 
-test('a refresh re-reads the summary without the filter and the page with it', async () => {
+test('a refresh sends one request for the current filter and keeps the document facets', async () => {
   const clock = fakeClock();
-  const { calls, invoke } = fakeInvoke(command => (command === BIM_SUMMARY_COMMAND
-    ? summary()
-    : page({ total: 12 })));
+  const DOCUMENT_FACETS = [
+    { key: 'ifcwall', name: 'IfcWall', count: 12 },
+    { key: 'ifcslab', name: 'IfcSlab', count: 4 },
+  ];
+  const { calls, invoke } = fakeInvoke((command, args) => page({
+    total: 12,
+    summary: wireSummary({
+      byCategory: (args.filter.categories?.length ?? 0) > 0
+        ? [{ key: 'ifcwall', name: 'IfcWall', count: 12 }]
+        : DOCUMENT_FACETS,
+    }),
+  }));
   const store = createBimStore(invoke, { schedule: clock.schedule, cancel: clock.cancel });
   await store.load();
 
   store.setFilter({ ...emptyBimFilter(), categories: ['ifcwall'] });
   await clock.flush();
+  const before = calls.length;
   await store.refresh();
 
-  const summaryCalls = calls.filter(call => call.command === BIM_SUMMARY_COMMAND);
-  assert.deepEqual(summaryCalls[1].args.filter, EMPTY_WIRE_FILTER);
+  assert.equal(calls.length, before + 1, 'a refresh is one request');
   const query = lastCall(calls, BIM_QUERY_COMMAND);
   assert.deepEqual(query.args.filter.categories, ['ifcwall']);
+  // The filtered answer's summary is bound to the filter; the panel keeps the
+  // document-wide facet list it already had.
+  assert.deepEqual(store.getState().summary?.byCategory, DOCUMENT_FACETS);
 });
 
 test('a refresh during a pending filter change starts at page 1, not the old offset', async () => {
   const clock = fakeClock();
-  const { calls, invoke } = fakeInvoke((command, args) => (command === BIM_SUMMARY_COMMAND
-    ? summary()
-    : page({ total: 250, offset: args.offset })));
+  const { calls, invoke } = fakeInvoke((command, args) => page({ total: 250, offset: args.offset }));
   const store = createBimStore(invoke, { schedule: clock.schedule, cancel: clock.cancel });
   await store.load();
   store.setPage(100);
@@ -356,9 +396,7 @@ test('a refresh during a pending filter change starts at page 1, not the old off
 
 test('a refresh keeps the page when the filter has not changed', async () => {
   const clock = fakeClock();
-  const { calls, invoke } = fakeInvoke((command, args) => (command === BIM_SUMMARY_COMMAND
-    ? summary()
-    : page({ total: 250, offset: args.offset })));
+  const { calls, invoke } = fakeInvoke((command, args) => page({ total: 250, offset: args.offset }));
   const store = createBimStore(invoke, { schedule: clock.schedule, cancel: clock.cancel });
   await store.load();
   store.setPage(200);
@@ -369,7 +407,7 @@ test('a refresh keeps the page when the filter has not changed', async () => {
 
 test('a different document resets the panel instead of reusing the old rows', async () => {
   const clock = fakeClock();
-  const { invoke } = fakeInvoke(command => (command === BIM_SUMMARY_COMMAND ? summary() : page({ total: 12 })));
+  const { invoke } = fakeInvoke(() => page({ total: 12 }));
   const store = createBimStore(invoke, { schedule: clock.schedule, cancel: clock.cancel });
   await store.load();
   store.setFilter({ ...emptyBimFilter(), categories: ['ifcwall'] });
@@ -392,9 +430,7 @@ test('a different document resets the panel instead of reusing the old rows', as
 
 test('clear-filter drops every group and queries at once', async () => {
   const clock = fakeClock();
-  const { calls, invoke } = fakeInvoke(command => (command === BIM_SUMMARY_COMMAND
-    ? summary()
-    : page({ total: 12 })));
+  const { calls, invoke } = fakeInvoke(() => page({ total: 12 }));
   const store = createBimStore(invoke, { schedule: clock.schedule, cancel: clock.cancel });
   await store.load();
   store.setFilter({
@@ -413,7 +449,7 @@ test('clear-filter drops every group and queries at once', async () => {
 
 test('an unreadable page is an error with the stable payload marker', async () => {
   const clock = fakeClock();
-  const { invoke } = fakeInvoke(command => (command === BIM_SUMMARY_COMMAND ? summary() : {}));
+  const { invoke } = fakeInvoke(() => ({}));
   const store = createBimStore(invoke, { schedule: clock.schedule, cancel: clock.cancel });
   await store.load();
   assert.equal(store.getState().phase, 'error');
@@ -423,7 +459,6 @@ test('an unreadable page is an error with the stable payload marker', async () =
 test('selection sends every geometry id and never claims a local selection', async () => {
   const clock = fakeClock();
   const { calls, invoke } = fakeInvoke(command => {
-    if (command === BIM_SUMMARY_COMMAND) return summary();
     if (command === BIM_QUERY_COMMAND) return page();
     return { accepted: true };
   });
@@ -440,7 +475,6 @@ test('selection sends every geometry id and never claims a local selection', asy
 test('a refused selection is reported in the host words and can be dismissed', async () => {
   const clock = fakeClock();
   const { invoke } = fakeInvoke(command => {
-    if (command === BIM_SUMMARY_COMMAND) return summary();
     if (command === BIM_QUERY_COMMAND) return page();
     return { accepted: false, error: 'selection.no_document' };
   });
@@ -456,7 +490,7 @@ test('a refused selection is reported in the host words and can be dismissed', a
 
 test('a selection request with no ids sends nothing', async () => {
   const clock = fakeClock();
-  const { calls, invoke } = fakeInvoke(command => (command === BIM_SUMMARY_COMMAND ? summary() : page()));
+  const { calls, invoke } = fakeInvoke(() => page());
   const store = createBimStore(invoke, { schedule: clock.schedule, cancel: clock.cancel });
   await store.load();
   const before = calls.length;

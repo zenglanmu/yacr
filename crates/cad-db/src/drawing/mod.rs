@@ -42,6 +42,7 @@ mod transaction;
 #[cfg(test)]
 mod test_support;
 
+pub use self::bim::BimPatch;
 pub use access::{EntityDisplayState, VisibilityMembership, VisibilityStateMembership};
 pub use block_edit::{BlockPatch, BlockRow};
 pub use layer_edit::{DEFAULT_LAYER_NAME, ILLEGAL_LAYER_NAME_CHARS};

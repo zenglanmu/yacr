@@ -33,6 +33,9 @@ mod align;
 pub(crate) mod annot_batch;
 mod arc_length;
 mod array;
+// The dynamic PSet property write path (`bim.pset.{set}.{prop}`): the property
+// command dispatches these keys here, never to the display-property grammar.
+mod bim_properties;
 mod block_define;
 mod boundary;
 mod break_curve;

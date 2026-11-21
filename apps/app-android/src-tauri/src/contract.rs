@@ -38,6 +38,8 @@ const PLATFORM: &str = include_str!("platform.rs");
 const SAF: &str = include_str!("saf.rs");
 /// The Tauri entry point and the seams it registers (Android only).
 const HOST: &str = include_str!("host.rs");
+/// The BIM query seam (refusal half host-compiled, marshalling half Android only).
+const BIM_HOST: &str = include_str!("bim_host.rs");
 /// The popup seam (toolkit-neutral `PopupOps` + the Android marshalling half).
 const POPUP: &str = include_str!("popup.rs");
 /// The Android release-page opener (Android only).
@@ -516,5 +518,74 @@ fn the_release_page_opener_is_wired_through_the_activity_without_a_new_native_sy
     assert_eq!(
         frozen_native, 4,
         "the frozen Kotlin->Rust contract must stay exactly four native symbols"
+    );
+}
+
+#[test]
+fn the_bim_seam_is_registered_and_reads_the_open_document() {
+    // Registration (ADR-0042 D11): the shared `cad_bim_query` command reaches the
+    // host only through this seam; a carrier that never installs it keeps refusing
+    // with `unsupported-runtime: bimQuery` even though the native session owns the
+    // document. Installed once during `setup`, with the app handle, after the shell
+    // lock is released (the configure helper takes the lock itself).
+    assert!(
+        HOST.contains("cad_desktop_shell::state::configure_bim_query_host("),
+        "the Android host must install the shared BIM query seam"
+    );
+    assert!(
+        HOST.contains("crate::bim_host::AndroidBimQueryHost::new(app.clone())"),
+        "the installed seam must be crate::bim_host::AndroidBimQueryHost"
+    );
+    assert!(
+        HOST.contains("register_seams(app.handle(), &setup_shared, &setup_telemetry);"),
+        "the seam must be registered during setup with a real app handle"
+    );
+
+    // Routing: the command is the **live session's** own read (the backend owns
+    // the filter semantics, ordering, paging and counters) — never a locally built
+    // answer, and never a second summary call.
+    assert!(
+        BIM_HOST.contains("impl BimQueryHost for AndroidBimQueryHost"),
+        "the seam must implement the shared trait"
+    );
+    assert!(
+        BIM_HOST.contains("Some(session) => session.bim_query(&request),"),
+        "a query must be answered by the session's own bim_query"
+    );
+    assert!(
+        !BIM_HOST.contains("bim_summary"),
+        "the summary must ride the one query answer, not a second command"
+    );
+
+    // Threading: the hop is bounded (the loop also renders) and probes the recorded
+    // loop thread; the `Shared` guard never crosses it.
+    assert!(
+        BIM_HOST.contains("run_on_main_thread_timeout("),
+        "the marshalling must use the bounded shared protocol"
+    );
+    assert!(
+        BIM_HOST.contains("crate::host::on_loop_thread()"),
+        "the probe must ask the host which thread owns the session"
+    );
+    assert!(
+        !BIM_HOST.contains(".lock("),
+        "the seam must not take the shell mutex (no guard crosses the hop)"
+    );
+
+    // No session (before the first tick, or after a failed creation) is the named
+    // refusal — never an empty page that would read as "no BIM data".
+    assert!(
+        BIM_HOST.contains("None => Err(super::no_document_refusal()),"),
+        "a missing session must answer the named refusal"
+    );
+    let refusal_fn = slice_between(BIM_HOST, "pub fn no_document_refusal() -> String {", "\n}");
+    assert!(
+        refusal_fn.contains("BIM_UNSUPPORTED.to_string()"),
+        "the refusal must be the shared constant"
+    );
+    let respelled = concat!("unsupported-runtime: ", "bimQuery");
+    assert!(
+        !refusal_fn.contains(respelled),
+        "the marker must come from the shared constant, not a re-spelled literal"
     );
 }

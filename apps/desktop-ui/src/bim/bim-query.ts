@@ -1,6 +1,5 @@
-// The BIM browse panel's wire model: the `cad_bim_query` / `cad_bim_summary`
-// contract (ADR-0042 Phase 3), its normalisation and the pure filter → request
-// mapping.
+// The BIM browse panel's wire model: the one `cad_bim_query` contract
+// (ADR-0042 Phase 3), its normalisation and the pure filter → request mapping.
 //
 // Pure data + functions only (no React, no JSX, no DOM), the same shape
 // `layers/layers.ts` and `fonts/fonts.ts` use: the panel's behaviour is unit
@@ -8,7 +7,7 @@
 //
 // # Wire shape (frozen by the host lane)
 //
-//   cad_bim_query / cad_bim_summary  { filter, offset, limit }
+//   cad_bim_query  { filter, offset, limit }
 //     filter: {
 //       categories: [string], levels: [string], types: [string], materials: [string],
 //       property: null | { pset, property, op: "eq" | "ne" | "contains",
@@ -19,10 +18,10 @@
 //   cad_bim_query -> { databaseId, revision, total, offset, limit, stale,
 //                      rows: [{ object, entityIds, category, name, levelName,
 //                               typeName, materialName, source, evidence,
-//                               propertySummary: [{ name, count }] }] }
-//   cad_bim_summary -> { databaseId, revision, total,
-//                        summary: { total, byCategory, byLevel, byType, byMaterial } }
+//                               propertySummary: [{ name, count }] }],
+//                      summary: { total, byCategory, byLevel, byType, byMaterial } }
 //                      // each facet: { key, name, count }
+//                      // one round trip answers both; summary.total === total
 //
 // # Three rules this module is built around
 //
@@ -47,9 +46,6 @@ export type Invoke = (command: string, args?: InvokeArgs) => Promise<unknown>;
 
 /** The query command: one filtered, paged page of logical BIM components. */
 export const BIM_QUERY_COMMAND = 'cad_bim_query';
-
-/** The summary command: total plus the four facet lists (unfiltered by the panel). */
-export const BIM_SUMMARY_COMMAND = 'cad_bim_summary';
 
 /**
  * The fixed page size. The panel has one size, so "next page" is always one
@@ -120,7 +116,7 @@ export interface BimPropertyFilter {
 export type BimEvidence = 'declared' | 'heuristic';
 
 /**
- * The filter both commands share.
+ * The filter the query carries.
  *
  * The arrays are **ANDed** by the host (one term each) and the panel sends the
  * host's own facet keys. `evidence` is modelled because the wire has it, but the
@@ -136,7 +132,7 @@ export interface BimFilter {
   readonly evidence: BimEvidence | null;
 }
 
-/** The request body both commands take. */
+/** The request body the query command takes. */
 export interface BimQueryPayload {
   readonly filter: BimFilter;
   readonly offset: number;
@@ -191,7 +187,7 @@ export interface BimRow {
   readonly propertySummary: readonly BimPropertySummaryEntry[];
 }
 
-/** One parsed `cad_bim_query` answer. */
+/** One parsed `cad_bim_query` answer: the page and the facet summary together. */
 export interface BimQueryAnswer {
   readonly databaseId: number | null;
   readonly revision: number | null;
@@ -201,6 +197,8 @@ export interface BimQueryAnswer {
   /** The host says the document changed after this answer was built. */
   readonly stale: boolean;
   readonly rows: readonly BimRow[];
+  /** Counts over the same filtered set (`summary.total === total`). */
+  readonly summary: BimSummary;
 }
 
 /** One facet entry: the host's key, its display name (or `null`) and its count. */
@@ -217,14 +215,6 @@ export interface BimSummary {
   readonly byLevel: readonly BimFacet[];
   readonly byType: readonly BimFacet[];
   readonly byMaterial: readonly BimFacet[];
-}
-
-/** One parsed `cad_bim_summary` answer. */
-export interface BimSummaryAnswer {
-  readonly databaseId: number | null;
-  readonly revision: number | null;
-  readonly total: number;
-  readonly summary: BimSummary;
 }
 
 /** The evidence label keys the catalog ships, or `null` for an unknown token. */
@@ -748,10 +738,12 @@ function parseRow(value: unknown): BimRow | null {
  *
  * `null` is a **contract failure** the store reports (`bim.read_failed`), never
  * an empty page: an answer with no `rows` array cannot be read as "no rows",
- * because that would turn a broken reply into a successful empty filter.
- * Individual malformed rows are skipped (a row with no addressable object is
- * not rendered), which is the same choice the layers palette makes for a row
- * with no name.
+ * because that would turn a broken reply into a successful empty filter. The
+ * same holds for the nested `summary` block: an answer without it is not the
+ * frozen one-command shape (and an empty summary would wrongly read as "this
+ * document has no BIM data"). Individual malformed rows are skipped (a row with
+ * no addressable object is not rendered), which is the same choice the layers
+ * palette makes for a row with no name.
  */
 export function parseBimQueryAnswer(value: unknown): BimQueryAnswer | null {
   const fields = recordOf(value);
@@ -759,6 +751,8 @@ export function parseBimQueryAnswer(value: unknown): BimQueryAnswer | null {
   if (!Array.isArray(fields.rows)) return null;
   const total = safeNumber(fields.total);
   if (total === null || total < 0) return null;
+  const summary = parseBimSummary(fields.summary);
+  if (!summary) return null;
   const rows: BimRow[] = [];
   for (const raw of fields.rows) {
     const row = parseRow(raw);
@@ -772,6 +766,7 @@ export function parseBimQueryAnswer(value: unknown): BimQueryAnswer | null {
     limit: countOf(fields.limit, BIM_PAGE_SIZE),
     stale: fields.stale === true,
     rows,
+    summary,
   };
 }
 
@@ -791,36 +786,23 @@ function parseFacets(value: unknown): BimFacet[] {
 }
 
 /**
- * Parse one `cad_bim_summary` answer, or `null` when it is unusable.
+ * Parse the `summary` block of one query answer, or `null` when it is unusable.
  *
  * The four facet lists are the host's own lists; a missing list is an empty
- * group, not a fabricated one. The total is the outer `total` when it is a
- * usable number, otherwise the summary's own total (the two are the same fact;
- * the outer field is the command's documented answer).
+ * group, not a fabricated one. The block's own `total` is documented (it equals
+ * the answer's `total`), so a block without it is not the frozen shape.
  */
-export function parseBimSummaryAnswer(value: unknown): BimSummaryAnswer | null {
+export function parseBimSummary(value: unknown): BimSummary | null {
   const fields = recordOf(value);
   if (!fields) return null;
-  const summary = recordOf(fields.summary);
-  if (!summary) return null;
-  // The inner total is the summary's own documented field; a block without it is
-  // not the frozen shape (an empty facet list is a real answer, a missing total
-  // is not).
-  const inner = safeNumber(summary.total);
-  if (inner === null || inner < 0) return null;
-  const total = safeNumber(fields.total) ?? inner;
-  if (total < 0) return null;
+  const total = safeNumber(fields.total);
+  if (total === null || total < 0) return null;
   return {
-    databaseId: safeNumber(fields.databaseId),
-    revision: safeNumber(fields.revision),
     total,
-    summary: {
-      total: inner,
-      byCategory: parseFacets(summary.byCategory),
-      byLevel: parseFacets(summary.byLevel),
-      byType: parseFacets(summary.byType),
-      byMaterial: parseFacets(summary.byMaterial),
-    },
+    byCategory: parseFacets(fields.byCategory),
+    byLevel: parseFacets(fields.byLevel),
+    byType: parseFacets(fields.byType),
+    byMaterial: parseFacets(fields.byMaterial),
   };
 }
 

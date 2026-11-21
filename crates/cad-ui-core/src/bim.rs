@@ -1,11 +1,19 @@
-//! The BIM query/summary **wire** (ADR-0042 D11): request parsing and the
-//! camelCase answer the two `cad_bim_*` commands return.
+//! The BIM query **wire** (ADR-0042 D11): request parsing and the camelCase
+//! answer the one `cad_bim_query` command returns.
 //!
 //! The backend (`cad_query::bim`) owns every rule — the index, the filter
 //! semantics, the ordering, the paging and the counters. This module owns only
 //! the transport shape: it turns the wire filter into a [`BimFilter`], maps the
 //! backend rows into JSON, and refuses what it cannot express instead of
 //! guessing.
+//!
+//! # Named for what it is
+//!
+//! The seam here only **queries** (a filtered, paged read plus its facet
+//! summary); it is not a general "BIM host" that owns editing, saving or
+//! selection. The names carry that: [`BimQueryHost`], [`BimQueryReads`],
+//! [`BimQuerySeam`]. `cad_select_entities` is a separate command and does not
+//! travel through this seam.
 //!
 //! # Why the mapping is explicit
 //!
@@ -27,7 +35,7 @@
 //! # Wire shape (frozen)
 //!
 //! ```jsonc
-//! // args of both commands
+//! // args of cad_bim_query
 //! { "filter": { "categories": [], "levels": [], "types": [], "materials": [],
 //!               "property": { "pset": "Pset_WallCommon", "property": "IsExternal",
 //!                             "op": "eq",
@@ -35,15 +43,21 @@
 //!               "evidence": "declared" },
 //!   "offset": 0, "limit": 100 }
 //!
-//! // cad_bim_query
+//! // cad_bim_query — one round trip answers the page and the facet summary of
+//! // the same filtered set (`summary.total == total`)
 //! { "databaseId": 1, "revision": 42, "total": 12, "offset": 0, "limit": 100,
-//!   "rows": [], "stale": false }
-//!
-//! // cad_bim_summary
-//! { "databaseId": 1, "revision": 42, "total": 12,
+//!   "rows": [], "stale": false,
 //!   "summary": { "total": 12, "byCategory": [], "byLevel": [], "byType": [],
 //!                "byMaterial": [] } }
 //! ```
+//!
+//! The summary block is the former `cad_bim_summary` answer, unchanged in shape;
+//! it now rides the single query command instead of a second round trip. Every
+//! facet bucket is `{ key, name, count }`.
+//!
+//! Both answers used to be separate commands (`cad_bim_query` and
+//! `cad_bim_summary`); the summary command is gone. Callers that only want counts
+//! send the same request with `limit: 0` and read `summary`.
 
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
@@ -58,13 +72,25 @@ use cad_domain::DatabaseId;
 
 // ---------------------------------------------------------------------- seam ---
 
-/// The platform side of the two `cad_bim_*` commands.
+/// The platform side of the one `cad_bim_query` command.
 ///
 /// A BIM query reads the **open document**, which on the desktop carriers lives
 /// in the `!Send` owner-thread session (GTK thread-local on Linux). The shared
-/// command layer therefore reaches it through this seam exactly like
-/// [`ShellYmodelHost`] does for the save preview: the host marshals the call onto
-/// its session thread and returns the wire answer.
+/// command layer therefore reaches it through this seam exactly like the
+/// desktop shell's ymodel seam does for the save preview: the host marshals the
+/// call onto its session thread and returns the wire answer.
+///
+/// # Why this trait lives in `cad-ui-core` (not `cad-desktop-shell`)
+///
+/// The other seams (`ShellPopupHost`, `ShellRecentHost`, `ShellRecoveryHost`,
+/// `ShellYmodelHost`) sit in `cad-desktop-shell` because only the desktop host
+/// serves their commands. This one cannot: the registry row for `cad_bim_query`
+/// is a **shared** row, and the registry — the table that names the seam — lives
+/// in `cad-ui-core` so both transports (`tauri` and wasm) expand the same table.
+/// The trait is therefore visible to the wire layer here, and
+/// `cad-desktop-shell` adds nothing of its own for it. That is a layering
+/// constraint, not a preference: moving it down would leave the wasm transport
+/// unable to name the seam its registry row uses.
 ///
 /// A carrier that installs no seam has no BIM query lane and answers
 /// [`BIM_UNSUPPORTED`] by name. That is a different fact from "this document has
@@ -73,57 +99,46 @@ use cad_domain::DatabaseId;
 /// Implementations must not lock their host's shell state while waiting on the
 /// session thread; the command clones the seam out of `Shared` and releases the
 /// shell lock first (the established seam contract).
-///
-/// The desktop shell's ymodel seam has the same shape
-/// (`cad_desktop_shell::state::ShellYmodelHost`).
-pub trait BimHost: Send + Sync {
-    /// Run one filtered, paged query.
+pub trait BimQueryHost: Send + Sync {
+    /// Run one filtered, paged query; the answer carries the page and the summary.
     fn bim_query(&self, request: &BimQueryRequest) -> Result<BimQueryResponse, String>;
-
-    /// Run one filtered summary.
-    fn bim_summary(&self, request: &BimQueryRequest) -> Result<BimSummaryResponse, String>;
 }
 
-/// The read seam the two `cad_bim_*` wire commands go through on **both**
+/// The read seam the one `cad_bim_query` wire command goes through on **both**
 /// transports.
 ///
 /// It is deliberately separate from the session's `ControlReads`: those are
-/// owner-tick projections (no arguments, mirrored ahead of time), while these are
-/// **request-carrying** reads. A wasm carrier implements it over the session it
-/// already holds; a desktop carrier implements it over [`BimSeam`] (the host's
-/// [`BimHost`]). The default is the honest refusal, so a target with no lane
-/// needs no impl.
-pub trait BimReads {
-    /// One filtered, paged query.
+/// owner-tick projections (no arguments, mirrored ahead of time), while this is a
+/// **request-carrying** read. A wasm carrier implements it over the session it
+/// already holds; a desktop carrier implements it over [`BimQuerySeam`] (the
+/// host's [`BimQueryHost`]). The default is the honest refusal, so a target with
+/// no lane needs no impl.
+pub trait BimQueryReads {
+    /// One filtered, paged query; the answer carries the page and the summary.
     fn bim_query(&self, _request: &BimQueryRequest) -> Result<BimQueryResponse, String> {
-        Err(BIM_UNSUPPORTED.to_string())
-    }
-
-    /// Counts over one filtered set.
-    fn bim_summary(&self, _request: &BimQueryRequest) -> Result<BimSummaryResponse, String> {
         Err(BIM_UNSUPPORTED.to_string())
     }
 }
 
-/// The optional [`BimHost`] handle a desktop `QueueReads` carries.
+/// The optional [`BimQueryHost`] handle a desktop `QueueReads` carries.
 ///
 /// A newtype with its own `Debug` (the trait object has none) so the reads struct
 /// keeps its `Debug`/`Clone`/`Copy`/`Default` derives without listing the seam.
 #[derive(Clone, Copy, Default)]
-pub struct BimSeam<'a>(pub Option<&'a std::sync::Arc<dyn BimHost>>);
+pub struct BimQuerySeam<'a>(pub Option<&'a std::sync::Arc<dyn BimQueryHost>>);
 
-impl std::fmt::Debug for BimSeam<'_> {
+impl std::fmt::Debug for BimQuerySeam<'_> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
-            .debug_tuple("BimSeam")
+            .debug_tuple("BimQuerySeam")
             .field(&self.0.is_some())
             .finish()
     }
 }
 
-impl<'a> BimSeam<'a> {
+impl<'a> BimQuerySeam<'a> {
     /// The installed host, when the carrier installed one.
-    pub fn host(self) -> Option<&'a std::sync::Arc<dyn BimHost>> {
+    pub fn host(self) -> Option<&'a std::sync::Arc<dyn BimQueryHost>> {
         self.0
     }
 }
@@ -366,11 +381,11 @@ impl BimFilterWire {
     }
 }
 
-/// One BIM request: the filter plus the page window.
+/// The one `cad_bim_query` request: the filter plus the page window.
 ///
-/// Both commands take this same object. `offset`/`limit` page the **rows** of
-/// `cad_bim_query`; a summary is one logical row, so its command always asks for
-/// exactly that row (see [`crate::session::CadSession::bim_summary`]).
+/// `offset`/`limit` page the **rows**; the summary block is one logical aggregate
+/// over every matched component, never paged (so `limit: 0` still answers the
+/// facet counts).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BimQueryRequest {
@@ -545,7 +560,7 @@ impl BimRowWire {
     }
 }
 
-/// The `cad_bim_query` answer.
+/// The `cad_bim_query` answer: the page **and** the same filter's summary.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BimQueryResponse {
@@ -564,6 +579,13 @@ pub struct BimQueryResponse {
     /// Always `false` on a successful answer: a query bound to another document
     /// is [`BIM_STALE`], an error, never a successful page flagged stale.
     pub stale: bool,
+    /// Counts over the same filtered components as `total`, in one round trip.
+    ///
+    /// The block is the former summary command's answer, unchanged in shape. Its
+    /// own `total` is the same fact as this response's `total`
+    /// (`summary.total == total`): both count the **whole** filtered set, not the
+    /// current page.
+    pub summary: BimSummaryWire,
 }
 
 /// One bucket of a summary.
@@ -639,20 +661,6 @@ impl BimSummaryWire {
     }
 }
 
-/// The `cad_bim_summary` answer.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BimSummaryResponse {
-    /// The database the summary was answered from; `0` when no document is open.
-    pub database_id: u64,
-    /// The database revision the summary is bound to; `0` with no document.
-    pub revision: u64,
-    /// Matched components (the same number as `summary.total`).
-    pub total: usize,
-    /// The counts.
-    pub summary: BimSummaryWire,
-}
-
 // ----------------------------------------------------------------- conversion ---
 
 /// A database id on the wire.
@@ -668,8 +676,17 @@ fn wire_database(database: Option<DatabaseId>) -> u64 {
     database.map(|id| wire_id(id.0)).unwrap_or(0)
 }
 
-/// Build the `cad_bim_query` answer from one backend page.
-pub fn query_response(page: QueryPage<BimRow>, database: Option<DatabaseId>) -> BimQueryResponse {
+/// Build the `cad_bim_query` answer from one backend page and its summary.
+///
+/// The summary block is the same filtered set's counts. A no-document host answers
+/// the default (empty) summary alongside the empty page: nothing was counted
+/// because nothing is open, which is the `QueryPage` contract rather than a
+/// fabricated zero-component document.
+pub fn query_response(
+    page: QueryPage<BimRow>,
+    summary: &BimSummary,
+    database: Option<DatabaseId>,
+) -> BimQueryResponse {
     BimQueryResponse {
         database_id: wire_database(database),
         revision: page.request.revision.0,
@@ -679,29 +696,7 @@ pub fn query_response(page: QueryPage<BimRow>, database: Option<DatabaseId>) -> 
         rows: page.rows.iter().map(BimRowWire::from_row).collect(),
         // A stale document is the backend's `StaleResult` error, not a page.
         stale: false,
-    }
-}
-
-/// Build the `cad_bim_summary` answer from the backend's single summary row.
-///
-/// A page with no row (only possible when the caller asked for `limit = 0`)
-/// answers an empty summary and a `total` of `0`: nothing was counted because
-/// nothing was returned, which is the `QueryPage` contract rather than a
-/// fabricated zero-component document.
-pub fn summary_response(
-    page: QueryPage<BimSummary>,
-    database: Option<DatabaseId>,
-) -> BimSummaryResponse {
-    let summary = page
-        .rows
-        .first()
-        .map(BimSummaryWire::from_summary)
-        .unwrap_or_default();
-    BimSummaryResponse {
-        database_id: wire_database(database),
-        revision: page.request.revision.0,
-        total: summary.total,
-        summary,
+        summary: BimSummaryWire::from_summary(summary),
     }
 }
 

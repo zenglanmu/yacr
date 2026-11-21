@@ -8,9 +8,9 @@
 //
 // # Reading the panel top to bottom
 //
-//  1. **Totals** — the document's BIM component count (`cad_bim_summary`, always
-//     asked **unfiltered**) and, when a filter is on, the filtered count from the
-//     page.
+//  1. **Totals** — the document's BIM component count (`cad_bim_query`'s
+//     `summary`, taken from an **unfiltered** answer) and, when a filter is on,
+//     the filtered count from the same answer's `total`.
 //  2. **Facets** — category / level / type / material chips, each carrying its
 //     count. A press filters by that value; a second press removes it. The
 //     values are the host's own facet list, never a hard-coded IFC category

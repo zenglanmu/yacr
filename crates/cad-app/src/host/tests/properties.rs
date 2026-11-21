@@ -263,7 +263,12 @@ fn selection_properties_of_a_vendor_entity_and_a_line_are_the_shared_intersectio
     }
     assert_eq!(
         properties.mixed_keys,
-        vec!["id", "handle", "type", "draw_order"],
+        vec![
+            "id".to_string(),
+            "handle".to_string(),
+            "type".to_string(),
+            "draw_order".to_string()
+        ],
         "mixed keys are exactly the mixed rows, in row order"
     );
 

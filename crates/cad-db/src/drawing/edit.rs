@@ -1,8 +1,11 @@
 //! The sanctioned controlled write paths for the drawing database.
 
+use std::collections::BTreeSet;
+
 use cad_domain::*;
 
 use super::{DrawingDatabase, DrawingTransaction};
+use crate::bim::{validate_element, BimElement};
 use crate::change::{ChangeMask, ChangeSet, ObjectChange};
 use crate::entity::DbEntity;
 use crate::scope::{ChangeScope, TableKind};
@@ -102,6 +105,119 @@ impl DrawingDatabase {
         // not marked dirty.
         let mut scope = ChangeScope::default();
         scope.table(TableKind::Blocks);
+        Ok(ChangeSet {
+            database: self.id,
+            before,
+            after,
+            transaction,
+            reason: reason.to_string(),
+            changes,
+            scope,
+        })
+    }
+
+    /// Replace the BIM data of a set of existing elements (ADR-0042 D2).
+    ///
+    /// This is the controlled write path for the BIM property panel: it
+    /// overwrites the `bim` block of elements that **already** carry BIM data.
+    /// It is replace-only — it refuses to attach a block to a non-BIM entity
+    /// (`property.unsupported_key`), because inventing BIM identity from a
+    /// property edit would claim provenance the source never declared; that is
+    /// the importer builder's job. It likewise refuses an unknown entity
+    /// (`property.target_missing`) and any element whose new shape exceeds a
+    /// per-element budget or is malformed (`property.bim_too_long`), all in
+    /// phase 1, so on any error the database, the side table and the revision
+    /// are unchanged.
+    ///
+    /// A non-empty, fully valid batch raises the revision by one and returns a
+    /// [`ChangeSet`] with one `METADATA` update per id in the caller's order. An
+    /// empty batch is a no-op: same revision, no changes, an empty scope.
+    ///
+    /// # Why the scope must be filled here
+    ///
+    /// The `bim` block is part of the element shard row, so each addressed id
+    /// dirties **its own** `elements/<model>-<shard>.json` entry and nothing
+    /// else: no table changes, no header change, no old shard (an update never
+    /// moves the row). This must be right, not merely plausible:
+    ///
+    /// * `cad-store-zip`'s `copyable_shard` decides raw-copy purely from
+    ///   `scope.shards ∪ scope.prev_shards`. An unmarked shard is copied
+    ///   verbatim, so a missing `element()` would make the **first** save look
+    ///   correct (the writer rewrote the whole file for an unrelated reason)
+    ///   and the **second** save silently re-emit the old `bim` bytes while
+    ///   reporting success. Undo/redo is not immune either: it replays through
+    ///   this method and inherits the same hole.
+    /// * Marking a table (`BimDefinitions`) or the header here would be wrong in
+    ///   the other direction: this path never touches
+    ///   `bim_definitions`/`bim_relations`/`has_bim`, so those rows are not
+    ///   stale. Because the edit is replace-only, `has_bim()` cannot flip: an
+    ///   element that had a `bim` block still has one.
+    pub fn apply_bim_updates(
+        &mut self,
+        reason: &str,
+        transaction: TransactionId,
+        updates: &[(EntityId, BimElement)],
+    ) -> CadResult<ChangeSet> {
+        let before = self.revision;
+        if updates.is_empty() {
+            // Nothing staged is nothing to save: no bump, no fabricated
+            // changes, no dirty shard.
+            return Ok(ChangeSet {
+                database: self.id,
+                before,
+                after: before,
+                transaction,
+                reason: reason.to_string(),
+                changes: Vec::new(),
+                scope: ChangeScope::default(),
+            });
+        }
+
+        // Phase 1: validate everything before mutating anything.
+        let mut seen: BTreeSet<EntityId> = BTreeSet::new();
+        for (id, element) in updates {
+            if !seen.insert(*id) {
+                return Err(CadError::Invariant(format!(
+                    "a bim batch names entity {id:?} more than once"
+                )));
+            }
+            if !self.entities.contains_key(id) {
+                return Err(CadError::InvalidInput(format!(
+                    "property.target_missing: entity {} does not exist in this drawing",
+                    id.0
+                )));
+            }
+            // Replace-only: the side table entry must already exist. This single
+            // check refuses both a non-BIM element and a fabricated `bim` block.
+            if !self.bim_elements.contains_key(id) {
+                return Err(CadError::InvalidInput(format!(
+                    "property.unsupported_key: entity {} has no BIM data to edit; \
+                     BIM data is attached by an importer, not by a property edit",
+                    id.0
+                )));
+            }
+            if let Err(error) = validate_element(element) {
+                // Shape and per-element budget refusals share the marker: the
+                // panel reports "this value cannot be stored", and the detail
+                // carries the budget/marker that failed.
+                return Err(CadError::InvalidInput(format!(
+                    "property.bim_too_long: {error}"
+                )));
+            }
+        }
+
+        // Phase 2: mutate, then publish. Each id dirties only the shard its own
+        // row lives in (see the failure mode in the doc comment above).
+        let mut scope = ChangeScope::default();
+        let mut changes = Vec::with_capacity(updates.len());
+        for (id, element) in updates {
+            let space = self.entities[id].space.clone();
+            self.bim_elements.insert(*id, element.clone());
+            changes.push(ObjectChange::Update(ObjectId(id.0), ChangeMask::METADATA));
+            scope.element(&space, id.0);
+        }
+        let after = Revision(before.0 + 1);
+        self.revision = after;
         Ok(ChangeSet {
             database: self.id,
             before,

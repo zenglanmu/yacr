@@ -14,6 +14,20 @@
 //! | `BimElement.material` | `MaterialLink::New` (one `IfcMaterial` per distinct name) |
 //! | `BimElement.psets` | `IfcPropertySet` + `IfcRelDefinesByProperties` |
 //! | `BimElement.source.id` | the element's `GlobalId` when it is a valid IFC id |
+//! | `BimRelationKind::Contains` | the element's `IfcRelContainedInSpatialStructure` container (overrides its level) |
+//! | `BimRelationKind::Nests` | `NewObject::with_nest_in` (`IfcRelNests`) |
+//!
+//! # Relations
+//!
+//! `tables/bim-relations.json` is read in `(kind, parent, child)` order and only
+//! two families are writable with the pinned plan API
+//! (`ifc-lite-export` 28.3.0): one spatial container and one nesting host per
+//! written object. `aggregates`, `group`, `connects` and every `other:<token>`
+//! edge have no plan-level expression (there is no way to relate two products),
+//! so they are **reported per kind** (`export.ifc.bim.relation_not_written`) and
+//! never faked into a container or a nest. An endpoint this export did not
+//! write is reported (`export.ifc.bim.relation_endpoint_missing`), and the
+//! relation is skipped — no panic, no invented object.
 //!
 //! # No guessing
 //!
@@ -51,7 +65,7 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
-use cad_db::{BimDefinition, BimEvidence, BimPropertySet, DrawingDatabase};
+use cad_db::{BimDefinition, BimEvidence, BimKey, BimPropertySet, BimSource, DrawingDatabase};
 use cad_domain::{CadError, CadResult, ObjectId, SupportStatus};
 use cad_import_core::{CompatEntry, FidelityLevel, ReportDirection};
 use ifc_lite_export::plan::{
@@ -61,6 +75,7 @@ use ifc_lite_export::plan::{
 };
 
 use super::{mesh_global_id, skeleton_roots, stable_global_id, CollectedMesh, PlannedExport};
+use crate::bim_relations::{plan_relations, RelationInputs};
 use crate::bim_value::{convert_psets, decode_global_id, hash_text};
 
 /// Stable conversion code: an element names a storey the writer could not
@@ -87,6 +102,13 @@ pub const GLOBAL_ID_INVALID: &str = "export.ifc.bim.global_id_invalid";
 /// Stable conversion code: a source `GlobalId` is already used by another
 /// written record; a derived id was written instead.
 pub const GLOBAL_ID_COLLISION: &str = "export.ifc.bim.global_id_collision";
+/// Stable conversion code: relation edges of one kind are not written (the plan
+/// API has no expression for them, or an extra edge conflicts with the one
+/// already chosen). One entry per kind, with the count.
+pub const RELATION_NOT_WRITTEN: &str = "export.ifc.bim.relation_not_written";
+/// Stable conversion code: relation edges name an endpoint this export did not
+/// write; those edges are skipped. One entry per kind, with the count.
+pub const RELATION_ENDPOINT_MISSING: &str = "export.ifc.bim.relation_endpoint_missing";
 
 /// Whether property sets the document marks as heuristic are written.
 ///
@@ -253,6 +275,10 @@ pub(crate) struct Counts {
     pub(crate) unverified: usize,
     pub(crate) global_id_invalid: usize,
     pub(crate) global_id_collisions: usize,
+    /// Relation edges not written, by kind token (ADR-0042 D10).
+    pub(crate) relation_not_written: BTreeMap<String, usize>,
+    /// Relation edges skipped for a missing endpoint, by kind token.
+    pub(crate) relation_endpoint_missing: BTreeMap<String, usize>,
 }
 
 impl Counts {
@@ -348,6 +374,41 @@ impl Counts {
                 count = self.global_id_collisions
             ),
         );
+        // One entry per relation kind: the count plus the kind's own token. A
+        // kind that was fully written never invents an entry.
+        for (kind, count) in &self.relation_not_written {
+            entries.push(CompatEntry {
+                connector: "ifc",
+                direction: ReportDirection::Export,
+                level: FidelityLevel::L1,
+                object: None,
+                type_key: None,
+                status: SupportStatus::Partial,
+                code: RELATION_NOT_WRITTEN.to_string(),
+                message: format!(
+                    "{count} relation edge(s) of kind `{kind}` are not written: the export \
+                     plan can express one spatial container and one nesting host per object \
+                     (IfcRelContainedInSpatialStructure / IfcRelNests) and nothing else, so \
+                     the edge is reported rather than faked into either",
+                ),
+            });
+        }
+        for (kind, count) in &self.relation_endpoint_missing {
+            entries.push(CompatEntry {
+                connector: "ifc",
+                direction: ReportDirection::Export,
+                level: FidelityLevel::L1,
+                object: None,
+                type_key: None,
+                status: SupportStatus::Partial,
+                code: RELATION_ENDPOINT_MISSING.to_string(),
+                message: format!(
+                    "{count} relation edge(s) of kind `{kind}` are skipped: an endpoint is \
+                     not an object this export writes (it has no geometry row, or it was \
+                     not written); no endpoint is invented",
+                ),
+            });
+        }
         entries
     }
 }
@@ -359,6 +420,9 @@ struct LevelRow {
     name: String,
     elevation: Option<f64>,
     source_id: Option<String>,
+    /// The `(connector, document_id, id)` key a relation endpoint uses, when
+    /// the source declared both halves.
+    key: Option<BimKey>,
 }
 
 /// One type row (same reason).
@@ -371,13 +435,16 @@ struct TypeRow {
     source_id: Option<String>,
 }
 
-/// A type that will be created by its first occurrence.
+/// A type that will be created by the first user written in the disposition
+/// order.
 struct TypePlan {
     global_id: GlobalId,
     class: IfcClass,
     name: String,
     psets: Vec<NewPropertySet>,
-    first: usize,
+    /// The meshes that name this type, in mesh order. The one written first in
+    /// the disposition order creates it (see `type_creators`).
+    users: Vec<usize>,
 }
 
 /// A storey's GlobalId, keyed by definition id.
@@ -411,12 +478,15 @@ pub(crate) fn plan(
                 name: name.clone(),
                 elevation: *elevation,
                 source_id: source.id.clone(),
+                key: source_key(source),
             }),
             _ => None,
         })
         .collect();
     levels.sort_by(level_order);
     let mut storeys: Storeys = BTreeMap::new();
+    // The same storeys keyed the way a relation endpoint names them.
+    let mut storey_keys: BTreeMap<BimKey, GlobalId> = BTreeMap::new();
     for level in &levels {
         let global_id = definition_id(
             "yacr/bim/storey",
@@ -440,6 +510,9 @@ pub(crate) fn plan(
             Disposition::Add(Box::new(object)),
         ));
         storeys.insert(level.id.clone(), global_id);
+        if let Some(key) = level.key.clone() {
+            storey_keys.entry(key).or_insert(global_id);
+        }
     }
 
     // ---- types -------------------------------------------------------------
@@ -514,13 +587,21 @@ pub(crate) fn plan(
                 class: IfcClass::Named(class.to_string()),
                 name: row.name.clone(),
                 psets,
-                first: users[0],
+                users,
             },
         );
     }
 
-    // ---- elements ----------------------------------------------------------
+    // ---- element identities and relation endpoints -------------------------
+    //
+    // Ids are allocated in mesh order before any object is built: the relation
+    // pass below may name a host owned by a later mesh. The allocation sequence
+    // (storeys, types, meshes) is the one this writer always used, so a
+    // document with no relations keeps its exact bytes.
     let mut element_ids = Vec::with_capacity(meshes.len());
+    let mut categories = Vec::with_capacity(meshes.len());
+    let mut element_by_key: BTreeMap<BimKey, usize> = BTreeMap::new();
+    let mut spatial: BTreeSet<usize> = BTreeSet::new();
     for (index, mesh) in meshes.iter().enumerate() {
         let element = database.bim_element(mesh.entity);
         let global_id = element_id(
@@ -529,7 +610,6 @@ pub(crate) fn plan(
             &mut used,
             &mut counts,
         )?;
-
         let category = element
             .and_then(|bim| bim.category.as_deref())
             .and_then(|raw| match category_token(raw) {
@@ -539,6 +619,65 @@ pub(crate) fn plan(
                     None
                 }
             });
+        if category == Some("IfcSpace") {
+            spatial.insert(index);
+        }
+        // A relation endpoint names a component by source key (`BimKey::Source`)
+        // or by the row itself (`BimKey::Entity`); both spellings resolve, and
+        // the first mesh in source order wins a duplicated source key.
+        element_by_key
+            .entry(BimKey::Entity(mesh.entity))
+            .or_insert(index);
+        if let Some(element) = element {
+            element_by_key
+                .entry(element.key(mesh.entity))
+                .or_insert(index);
+        }
+        element_ids.push(global_id);
+        categories.push(category);
+    }
+
+    let relations = plan_relations(
+        database,
+        &RelationInputs {
+            elements: &element_by_key,
+            element_ids: &element_ids,
+            storeys: &storey_keys,
+            building,
+            spatial: &spatial,
+            mesh_count: meshes.len(),
+        },
+        &mut counts,
+    );
+
+    // The disposition slot of each mesh, and the first mesh each type is
+    // written by. A nesting order may differ from mesh order, so the type is
+    // created by whichever user is written first; an `Existing` reference to a
+    // type that is not written yet would be refused. Without reordering these
+    // are the mesh-order values the writer always used.
+    let mut position = vec![0usize; meshes.len()];
+    for (slot, index) in relations.order.iter().enumerate() {
+        position[*index] = slot;
+    }
+    let type_creators: BTreeMap<&str, usize> = type_plans
+        .iter()
+        .map(|(id, plan)| {
+            let first = plan
+                .users
+                .iter()
+                .copied()
+                .min_by_key(|index| position[*index])
+                .expect("a type plan has at least one user");
+            (id.as_str(), first)
+        })
+        .collect();
+
+    // ---- elements ----------------------------------------------------------
+    let mut objects: Vec<Option<NewObject>> = Vec::with_capacity(meshes.len());
+    for (index, mesh) in meshes.iter().enumerate() {
+        let element = database.bim_element(mesh.entity);
+        let global_id = element_ids[index];
+        let category = categories[index];
         let class = category.map_or(IfcClass::BuildingElementProxy, |category| {
             IfcClass::Named(category.to_string())
         });
@@ -547,8 +686,16 @@ pub(crate) fn plan(
         // building: it is never silently dropped and never placed in a storey
         // that was not written. (A validated database cannot hold a dangling
         // reference; the branch is defensive and unit-tested directly.)
+        //
+        // A `contains` relation the document declares overrides that default:
+        // the source's own spatial containment is the authority, and the plan
+        // API takes exactly one container per object.
         let level = element.and_then(|bim| bim.level.as_deref());
-        let container = storey_container(level, &storeys, &building, &mut counts);
+        let container = relations
+            .contains
+            .get(&index)
+            .cloned()
+            .unwrap_or_else(|| storey_container(level, &storeys, &building, &mut counts));
 
         let mut object = NewObject::new(global_id, class, NewPlacement::new(IDENTITY))
             .with_container(container)
@@ -557,21 +704,26 @@ pub(crate) fn plan(
                 mesh.triangles.clone(),
             )));
 
-        if let Some(type_plan) = element
-            .and_then(|bim| bim.element_type.as_deref())
-            .and_then(|type_id| type_plans.get(type_id))
-        {
-            let link = if type_plan.first == index {
-                TypeLink::New(
-                    NewType::new(type_plan.class.clone())
-                        .with_global_id(type_plan.global_id)
-                        .with_name(type_plan.name.clone())
-                        .with_psets(type_plan.psets.clone()),
-                )
-            } else {
-                TypeLink::Existing(ObjectRef::Guid(type_plan.global_id.encode()))
-            };
-            object = object.with_type(link);
+        // A `nests` relation is the object's one nesting host; `order` was
+        // arranged so the host is added before its children.
+        if let Some(&host) = relations.nests.get(&index) {
+            object = object.with_nest_in(ObjectRef::Guid(element_ids[host].encode()));
+        }
+
+        if let Some(type_id) = element.and_then(|bim| bim.element_type.as_deref()) {
+            if let Some(type_plan) = type_plans.get(type_id) {
+                let link = if type_creators.get(type_id) == Some(&index) {
+                    TypeLink::New(
+                        NewType::new(type_plan.class.clone())
+                            .with_global_id(type_plan.global_id)
+                            .with_name(type_plan.name.clone())
+                            .with_psets(type_plan.psets.clone()),
+                    )
+                } else {
+                    TypeLink::Existing(ObjectRef::Guid(type_plan.global_id.encode()))
+                };
+                object = object.with_type(link);
+            }
         }
 
         if let Some(element) = element {
@@ -616,11 +768,22 @@ pub(crate) fn plan(
             object = object.with_tag(format!("object:{}", mesh.object.0));
         }
 
+        objects.push(Some(object));
+    }
+
+    // Adds are validated in this order: a `nests` child must follow its host,
+    // and `order` is the source order unless a nesting edge forces another
+    // (deterministic in both cases). Ids stay in mesh order above.
+    for index in relations.order.iter().copied() {
+        let object = objects[index].take().ok_or_else(|| {
+            CadError::Invariant(format!(
+                "IFC export relation order visits mesh #{index} more than once"
+            ))
+        })?;
         dispositions.push((
-            ObjectRef::Guid(global_id.encode()),
+            ObjectRef::Guid(element_ids[index].encode()),
             Disposition::Add(Box::new(object)),
         ));
-        element_ids.push(global_id);
     }
 
     let plan =
@@ -654,6 +817,23 @@ fn storey_container(
             }
             ObjectRef::Guid(building.encode())
         }
+    }
+}
+
+/// The source `(connector, document_id, id)` key of a definition, when the
+/// source declared both halves (the shape a relation endpoint uses).
+fn source_key(source: &BimSource) -> Option<BimKey> {
+    match (&source.document_id, &source.id) {
+        (Some(document_id), Some(id))
+            if !document_id.trim().is_empty() && !id.trim().is_empty() =>
+        {
+            Some(BimKey::Source {
+                connector: source.connector.clone(),
+                document_id: document_id.clone(),
+                id: id.clone(),
+            })
+        }
+        _ => None,
     }
 }
 
@@ -763,3 +943,7 @@ fn element_id(
 #[cfg(test)]
 #[path = "tests_bim.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests_relations.rs"]
+mod relation_tests;

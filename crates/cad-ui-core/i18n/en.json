@@ -1238,6 +1238,8 @@
   "properties.edit.unknown_linetype": "No linetype has that name.",
   "properties.edit.ambiguous_name": "More than one object matches that name.",
   "properties.edit.not_addressable": "Part of the selection cannot be changed.",
+  "properties.edit.bim_conflict": "The selected objects do not have the same value for this property.",
+  "properties.edit.bim_too_long": "The text is too long for this property.",
   "properties.edit.selection_empty": "No objects are selected.",
   "properties.edit.unchanged": "The value is already set.",
   "properties.edit.target_missing": "The target no longer exists.",

@@ -62,6 +62,7 @@ use ifc_lite_export::plan::{
 };
 
 mod bim;
+mod bim_relations;
 mod bim_value;
 
 pub use bim::BimExportPolicy;
@@ -174,15 +175,18 @@ impl Exporter for IfcExporter {
         // deliberately different from the SKP writer, which refuses an empty
         // model because a `.skp` with no geometry says nothing.
         //
-        // A database with no BIM data takes the original path below: same plan,
-        // same bytes, same report. Only a database that actually carries BIM
-        // data goes through `bim`, so existing output is untouched (ADR-0042
-        // D10).
-        let planned = if job.database.bim_elements().is_empty() {
-            plain_plan(&meshes)?
-        } else {
-            bim::plan(job.database, &meshes, self.bim_policy)?
-        };
+        // A database with neither BIM data nor relation edges takes the
+        // original path below: same plan, same bytes, same report. Only a
+        // database that actually carries BIM semantics goes through `bim`, so
+        // existing output is untouched (ADR-0042 D10). A relation table alone
+        // is BIM semantics too (its endpoints may be entity-keyed), and the BIM
+        // plan writes the identical bytes for a document without BIM elements.
+        let planned =
+            if job.database.bim_elements().is_empty() && job.database.bim_relations().is_empty() {
+                plain_plan(&meshes)?
+            } else {
+                bim::plan(job.database, &meshes, self.bim_policy)?
+            };
 
         let mut bytes = Vec::new();
         let written = execute(&planned.skeleton_bytes, &planned.plan, &mut bytes)

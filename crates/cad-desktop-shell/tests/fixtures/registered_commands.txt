@@ -4,7 +4,6 @@ cad_api_status
 cad_api_submit
 cad_app_version
 cad_bim_query
-cad_bim_summary
 cad_close_popup
 cad_command
 cad_command_aliases

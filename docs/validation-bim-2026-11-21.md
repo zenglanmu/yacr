@@ -206,6 +206,9 @@ minor-5 带 BIM 被接受并在保存时升 6）。
 
 ## 8. 仍不存在的（Phase 2/3）
 
+> 本节是当时（Phase 1 收尾）的缺口清单，落地情况见 §12；查询命令后来合并为单一
+> `cad_bim_query`（页 + `summary` 一次返回），见 §16。
+
 - **IFC4 导出回写**：`cad-export-ifc` 仍只写 `IfcBuildingElementProxy`，**不写** storey/type/pset/
   material，GlobalId 也不从 `bim.source` 复用。Phase 2。
 - **RVT 的 BIM 语义**：`rvt` 的 `IfcModel` 仍被 `decode_to_glb` 丢弃，GLB extras 的
@@ -451,7 +454,97 @@ minor-5 带 BIM 被接受并在保存时升 6）。
   （`DirectReads`）已接线，Windows/macOS/Android **无 seam → `unsupported-runtime: bimQuery`**
   （显式拒绝，不是空页）；`cad_select_entities` 各载体 tick 已接线，但 Windows/macOS/Android 只有
   源码一致性。**全部载体运行时 NOT VERIFIED**。
+  （以上是**收口前**的状态；命令合并为单一 `cad_bim_query` 与四载体 seam 的现状见 §16。）
 - **`app-macos` 编译**：`cc-rs` 编 `objc2-exception-helper` 需要 macOS SDK，本机不可用 → **NOT RUN**
   （环境缺失，不是代码失败）；**Android 编译 NOT RUN**。
 - **运行时/真机/GPU/像素/性能**：Web 运行时、Windows/macOS/Android 点击、真机、GPU、像素、性能、
   跨机自包含一律 **NOT RUN / NOT VERIFIED**。合成夹具与单文件观察不得推广为验收。
+
+## 15. IFC 关系导出（2026-11-21 同轮补齐；§13/§14 的"关系不导出"边界由此收窄）
+
+§12–§14 记录的是 Phase 2 当轮结论（导出不写关系）。本轮在 `crates/cad-export-ifc/` 内把
+`tables/bim-relations.json` 接进导出计划，**只写固定版本 plan API 能表达的两类**，其余显式报告：
+
+| `kind` | 处理 | 证据 |
+|---|---|---|
+| `contains` | `IfcRelContainedInSpatialStructure`，覆盖元素由 `bim.level` 推出的默认容器；一个元素多条 contain 时按 `(kind,parent,child)` 顺序取第一条可解析，其余计 `relation_not_written` | 合成夹具：元素 level 0 + contains → level 1，断言 IFC 容器指向 level 1 |
+| `nests` | `NewObject::with_nest_in` → `IfcRelNests`；disposition 顺序保证宿主先写（源顺序相反时也重排），环上丢一条边并计数 | 合成夹具：宿主在源顺序靠后仍先写出，`IFCRELNESTS` 的 relating = 宿主 |
+| `aggregates` / `group` / `connects` / `other:<token>` | **不写出**（plan API 没有"两个产品之间的关系"，不写成容器/嵌套冒充），按 kind 汇总 `export.ifc.bim.relation_not_written` | 同输入带/不带该边**逐字节相同**，文件里没有该 kind 的产品级记录 |
+| 任一端点不在本次导出 | 跳过该边 + 按 kind 计 `export.ifc.bim.relation_endpoint_missing`，不 panic、不造对象 | 合成夹具：指向不存在的楼层，元素仍按默认容器写出 |
+
+实现：`src/bim_relations.rs`（277 行，端点解析/优先级/嵌套排序）+ `src/bim.rs` 的容器覆盖接线；
+测试 `src/tests_relations.rs`（660 行，**8 条**）。入口条件从"`bim_elements()` 非空"扩为
+"`bim_elements()` 或 `bim_relations()` 非空"；关系表为空时仍走同一 disposition 顺序
+（`0..n`），**2196 / 1374 字节钉住与 FNV `ec72ad…` / `c56f8c…` 继续通过**。
+
+本轮实际运行的命令（逐条看退出码，均 0）：
+
+```bash
+cargo test -p cad-export-ifc --locked                 # 35 passed（27 旧 + 8 新）
+cargo test -p cad-import-ifc --locked                 # 41 passed
+cargo clippy -p cad-export-ifc --all-targets --locked -- -D warnings
+cargo fmt -p cad-export-ifc -- --check
+cargo check -p cad-export-ifc --target wasm32-unknown-unknown --locked
+python3 scripts/check-file-size.py
+python3 scripts/check-architecture.py
+```
+
+**证据边界（同 §14，未放宽）**：`contains`/`nests` 的往返仍只是**自洽往返**（导出 → 固定版本
+`cad-import-ifc` 读回 `bim_relations()` 含 nest/contain 边）；Revit/Bentley/IfcOpenShell 交叉验证、
+真实 IFC 文件、vendor 接受度一律 **NOT RUN**。`aggregates`/`group`/`connects` 的"不可表达"结论来自
+`ifc-lite-export` 28.3.0 计划 API 的源码检视（一个 `NewObject` 只有一个 container 和一个 nest，
+没有产品间关系 API），不是运行观测。
+
+## 16. BIM 查询层去特化收口：一个命令、一次往返（2026-11-21）
+
+只改名字与往返次数，**不改**过滤器/facet 语义、分页、`limit=0`、无文档空页、`bim.stale`、
+`unsupported-runtime: bimQuery` 与 `bim.filter.*` 拒绝：
+
+- **命名**：`BimHost` → `BimQueryHost`，`BimReads` → `BimQueryReads`，`BimSeam` → `BimQuerySeam`，
+  `configure_bim_host` → `configure_bim_query_host`，`Shared::cad_bim_host` →
+  `Shared::cad_bim_query_host`，载体 seam 类型 `AppBimHost`/`AndroidBimHost` →
+  `AppBimQueryHost`/`AndroidBimQueryHost`。trait 仍在 `cad-ui-core`：registry 的 `cad_bim_query`
+  是共享行，两个传输（tauri / wasm）都要看到它；`Shell…Host` 家族留在 `cad-desktop-shell` 只因为
+  它们服务 desktop-only 命令——这是分层约束，不是遗漏。
+- **命令合并**：`cad_bim_summary` 删除，wire 只留 `cad_bim_query`（参数仍为 `filter`/`offset`/`limit`）。
+  应答在原字段之外新增 `summary`（形状与旧汇总应答一致；`summary.total` 为过滤后总数，等于
+  `total`）。`HostCore::bim_query` 一次绑定 document/revision 同时算 page 与 summary，
+  `HostCore::bim_summary` 删除。`limit: 0` 仍只回总数，但 `summary` 照常计数（汇总是单个聚合行）。
+- **前端**：`bim-store` 每次动作只发一个 `invoke`（用一个调用计数断言钉住）；响应里的 `summary`
+  填充 facet 与文档总数。面板的 facet 列表按设计仍是**文档口径**：只有空 filter 的应答
+  （打开/清空筛选/无筛选刷新）会替换 facet 列表；带筛选的应答 `summary` 绑在该筛选上
+  （`summary.total === total`），采用它会把 chip 塌缩成当前选择，因此 rows/page 更新而 facet 列表
+  保持——这是既有语义，不是本轮新行为。
+- **测试**：wire 冻结 JSON 含 `summary` 且无 snake_case；host 断言 `summary.total == total`、
+  过滤后 facet 计数、无文档空页 + 空 summary；app-web 一条「单次调用同时拿 rows 与 summary」+ 一条
+  「`cad_bim_summary` 不存在」；前端 store 的调用计数与 facet 保持。
+- **载体**：四个载体只改名/改装配函数名，行为不变。Linux 有运行路径但**未在本轮重跑真实 GPU 证据**；
+  Windows 仅交叉编译（`x86_64-pc-windows-msvc`）；macOS 仅编译/契约，运行时 **NOT VERIFIED**；
+  Android 仅编译/契约，设备运行 **NOT VERIFIED**。
+
+本轮实际运行（逐条看退出码；未运行的写 NOT RUN 见下）：
+
+```bash
+cargo test -p cad-ui-core --locked
+cargo test -p cad-host --locked bim_query
+cargo test -p cad-desktop-shell --locked
+cargo test -p app-web --locked
+cargo check -p app-web --target wasm32-unknown-unknown --locked
+cargo check -p app-linux --all-targets --locked
+cargo check -p app-windows --target x86_64-pc-windows-msvc --locked
+cargo check -p app-android --locked
+cargo test -p app-android bim --locked
+cargo clippy -p cad-ui-core -p cad-host -p cad-desktop-shell -p app-web --all-targets --locked -- -D warnings
+cargo fmt --all -- --check
+(cd apps/desktop-ui && npm test)
+python3 scripts/check-i18n.py && python3 scripts/check-file-size.py && python3 scripts/check-architecture.py && python3 scripts/check-tauri-capabilities.py
+```
+
+结果：除 `cargo fmt --all -- --check` 外均 EXIT 0。fmt 的唯一 diff 在
+`crates/cad-host/src/tests/ymodel_bim.rs`（另一条 lane 正在改、本 lane 未触碰的文件）；本 lane 改动的
+每个文件都已单独 `rustfmt` 且 `cargo fmt --all -- --check` 只报那一处。macOS 的
+`cargo check -p app-macos --target aarch64-apple-darwin` 因本机无 macOS SDK 由 `cc-rs` 失败
+（环境缺失，**NOT RUN**，不是代码结论）。
+
+**NOT RUN**：真实 Linux/Windows/macOS/Android 运行、macOS 编译、GPU/像素/性能验收、真实 BIM 样本
+上的面板交互。本节的结论全部是编译/契约与合成夹具证据。

@@ -3,7 +3,7 @@
 // panel is, so the tab tree stays under the 1000-line code ceiling.
 //
 // The action token lives beside its panel because it is chrome-local: the panel
-// is a React surface over `cad_bim_query`/`cad_bim_summary`, so nothing here is a
+// is a React surface over `cad_bim_query`, so nothing here is a
 // `cad_command`. It is deliberately **not** in `PALETTE_ACTIONS`: on a carrier
 // with no BIM query lane the entry must stay reachable so the panel can show the
 // host's `unsupported-runtime: bimQuery` refusal instead of the button vanishing.

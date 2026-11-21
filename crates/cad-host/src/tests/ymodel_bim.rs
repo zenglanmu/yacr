@@ -467,7 +467,6 @@ fn reopening_a_bim_document_exposes_bim_property_rows() {
         "bim_type",
         "bim_material",
         "bim_source",
-        "bim_properties",
     ] {
         let row = properties.rows.iter().find(|row| row.key == key);
         let row = row.unwrap_or_else(|| {
@@ -476,7 +475,7 @@ fn reopening_a_bim_document_exposes_bim_property_rows() {
                 properties
                     .rows
                     .iter()
-                    .map(|row| row.key)
+                    .map(|row| row.key.to_string())
                     .collect::<Vec<_>>()
             )
         });
@@ -504,11 +503,32 @@ fn reopening_a_bim_document_exposes_bim_property_rows() {
     assert_eq!(value_of("bim_level"), "Level 0");
     assert_eq!(value_of("bim_type"), "Basic Wall 200mm");
     assert_eq!(value_of("bim_material"), "Concrete");
+
+    // The PSet is per-property rows now: the two single-value properties are
+    // emitted, the unsupported complex value is not (it was never stored).
+    let dynamic: Vec<_> = properties
+        .rows
+        .iter()
+        .filter(|row| row.key.starts_with("bim.pset."))
+        .collect();
     assert_eq!(
-        value_of("bim_properties"),
-        "Pset_WallCommon (2)",
-        "the two single-value properties are summarized; the complex value is not flattened"
+        dynamic.len(),
+        2,
+        "Pset_WallCommon declares two single values"
     );
+    for row in dynamic {
+        assert!(
+            row.value.as_deref().is_some_and(|value| !value.is_empty()),
+            "{} must carry its declared value",
+            row.key
+        );
+        let label = row.label.as_deref().expect("a dynamic row has a label");
+        assert!(!has_cjk(label), "the label is source data: {label:?}");
+        assert!(
+            row.editable,
+            "a directly addressed scalar property is editable (ADR-0042)"
+        );
+    }
 }
 
 #[test]
@@ -545,7 +565,7 @@ fn a_plain_mesh_element_has_no_bim_rows() {
         .rows
         .iter()
         .filter(|row| row.key.starts_with("bim_"))
-        .map(|row| row.key)
+        .map(|row| row.key.as_ref())
         .collect();
     assert!(
         bim_keys.is_empty(),
@@ -582,7 +602,7 @@ fn a_plain_mesh_element_has_no_bim_rows() {
         .rows
         .iter()
         .filter(|row| row.key.starts_with("bim_"))
-        .map(|row| row.key)
+        .map(|row| row.key.as_ref())
         .collect();
     assert!(
         bim_keys.is_empty(),

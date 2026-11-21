@@ -1,18 +1,30 @@
-// The BIM browse panel's state machine: one summary read, one paged query, the
-// debounced filter, response-race supersession and the selection request.
+// The BIM browse panel's state machine: one request per action (the answer
+// carries the page and the facet summary), the debounced filter, response-race
+// supersession and the selection request.
 //
 // A plain object, not a hook, so its behaviour is testable with a fake `invoke`
 // and a fake clock — the same shape `layers/layers.ts` uses. The component
 // subscribes through `useSyncExternalStore`.
 //
-// # The summary is always unfiltered
+// # One round trip
 //
-// `cad_bim_query` and `cad_bim_summary` take the same filter, but the panel
-// asks the summary with an **empty** filter on purpose: its facet lists are the
-// filter's own value list. A filtered summary would collapse to the current
-// selection ("pick a category and every other category becomes 0"), making the
-// core interaction — press another facet — impossible. The filtered count is
-// the query's `total`, shown beside the document total.
+// `cad_bim_query` answers the page **and** the `summary` block of the same
+// filtered set, so a load, a refresh or a filter change is exactly one `invoke`.
+// The former two-call load (`cad_bim_summary` + `cad_bim_query`) is gone, and
+// with it every chance of mixing two revisions.
+//
+// # The facet list is the document's value list
+//
+// The response's summary is bound to the request's filter (`summary.total` is
+// the matched total), while the panel's facet chips must stay the **document's**
+// value list: adopting a filtered summary would collapse the chips to the
+// current selection ("pick a category and every other category disappears"),
+// making the core interaction — press another facet — impossible. The store
+// therefore adopts the answer's summary only when the answer was asked with an
+// **empty** filter (the first load, a clear-filter press, a refresh with no
+// filter); a filtered answer updates the rows and the page and keeps the
+// document summary already on screen. The filtered count is the answer's
+// `total`, shown beside the document total.
 //
 // # Races are discarded, not serialised
 //
@@ -31,7 +43,6 @@ import {
   BIM_PAGE_SIZE,
   BIM_PAYLOAD_INVALID,
   BIM_QUERY_COMMAND,
-  BIM_SUMMARY_COMMAND,
   buildBimQuery,
   bimFilterActive,
   bimPageInfo,
@@ -39,7 +50,6 @@ import {
   emptyBimFilter,
   isBimStaleRefusal,
   parseBimQueryAnswer,
-  parseBimSummaryAnswer,
   reasonText,
   sameBimFilter,
   toggleBimFacet,
@@ -51,7 +61,6 @@ import type {
   BimQueryAnswer,
   BimRow,
   BimSummary,
-  BimSummaryAnswer,
   Invoke,
 } from './bim-query.ts';
 import { selectBimEntities } from './selection.ts';
@@ -60,7 +69,13 @@ import type { BimSelectResult } from './selection.ts';
 /** The filter debounce: one request per pause, not one per keystroke. */
 export const BIM_DEBOUNCE_MS = 150;
 
-/** Why a read failed. `summary` and `read` get their own catalog sentences. */
+/**
+ * Why a read failed.
+ *
+ * Since the page and the summary ride one answer, every failure the store
+ * publishes is a `read`. The `summary` member is kept because the panel still
+ * renders that catalog sentence for it; no store path produces it today.
+ */
 export interface BimPanelError {
   readonly kind: 'read' | 'summary';
   /** The host's raw reason (or `bim.invalid_payload`), never empty. */
@@ -97,11 +112,11 @@ export interface BimState {
 export interface BimStore {
   getState(): BimState;
   subscribe(listener: () => void): () => void;
-  /** First read (page 1) of summary + query. */
+  /** First read (page 1): rows and summary in one request. */
   load(): Promise<void>;
   /** Drop every document fact (a different drawing opened); a pending read is superseded. */
   reset(): void;
-  /** Re-read both at the current page (the stale banner's refresh). */
+  /** Re-read the current page (the stale banner's refresh), rows and summary in one request. */
   refresh(): Promise<void>;
   /** Replace the filter; the query is debounced and resets to page 1. */
   setFilter(filter: BimFilter): void;
@@ -159,31 +174,11 @@ function phaseFor(
   return 'ready';
 }
 
-/** The refusal kind shared by a batch: unsupported beats waiting beats error. */
-function batchRefusal(results: readonly Read<unknown>[]): 'unsupported' | 'waiting' | null {
-  let waiting = false;
-  for (const result of results) {
-    if (result.kind !== 'error') continue;
-    const kind = bimRefusal(result.reason);
-    if (kind === 'unsupported') return 'unsupported';
-    if (kind === 'waiting') waiting = true;
-  }
-  return waiting ? 'waiting' : null;
-}
-
-/** The first error reason of a batch, in the order given. */
-function firstReason(results: readonly Read<unknown>[]): string {
-  for (const result of results) {
-    if (result.kind === 'error') return result.reason;
-  }
-  return reasonText(null);
-}
-
 /**
  * Build the panel's store over one `invoke`.
  *
  * All the rules live here so the component is layout plus local form state:
- * generation-based supersession, the debounce, the unfiltered summary, the
+ * generation-based supersession, the debounce, the document-wide facet list, the
  * empty/no-match distinction and a selection request that never claims a
  * selection on its own. `dispose()` clears the pending timer; every later
  * answer is dropped (`disposed`), so an unmounted panel cannot publish.
@@ -231,90 +226,7 @@ export function createBimStore(invoke: Invoke, options: BimStoreOptions = {}): B
     }
   }
 
-  async function readSummary(): Promise<Read<BimSummaryAnswer>> {
-    try {
-      const answer = await invoke(BIM_SUMMARY_COMMAND, { ...buildBimQuery(emptyBimFilter(), 0, 1) });
-      const parsed = parseBimSummaryAnswer(answer);
-      return parsed ? { kind: 'ok', value: parsed } : { kind: 'error', reason: BIM_PAYLOAD_INVALID };
-    } catch (error) {
-      return { kind: 'error', reason: reasonText(error) };
-    }
-  }
-
-  /** Apply the summary result plus one page, or the refusal the batch carries. */
-  function applyBatch(
-    summaryRead: Read<BimSummaryAnswer>,
-    queryRead: Read<BimQueryAnswer>,
-    filter: BimFilter,
-  ): void {
-    const refusal = batchRefusal([summaryRead, queryRead]);
-    if (refusal === 'unsupported') {
-      queriedFilter = null;
-      publish({
-        ...state,
-        phase: 'unsupported',
-        rows: [],
-        page: null,
-        summary: null,
-        queriedFilter: null,
-        busy: false,
-        error: { kind: 'read', reason: firstReason([summaryRead, queryRead]) },
-      });
-      return;
-    }
-    if (refusal === 'waiting') {
-      queriedFilter = null;
-      publish({
-        ...state,
-        phase: 'waiting',
-        rows: [],
-        page: null,
-        summary: null,
-        queriedFilter: null,
-        busy: false,
-        error: null,
-      });
-      return;
-    }
-    const summary = summaryRead.kind === 'ok' ? summaryRead.value.summary : state.summary;
-    const rows = queryRead.kind === 'ok' ? queryRead.value.rows : state.rows;
-    const queryStale = queryRead.kind === 'error' && isBimStaleRefusal(queryRead.reason);
-    const page = queryRead.kind === 'ok'
-      ? {
-        total: queryRead.value.total,
-        offset: queryRead.value.offset,
-        limit: queryRead.value.limit,
-        stale: queryRead.value.stale,
-      }
-      : queryStale && state.page !== null
-        ? { ...state.page, stale: true }
-        : state.page;
-    const error = queryRead.kind === 'error'
-      ? queryStale && state.page !== null ? null : { kind: 'read' as const, reason: queryRead.reason }
-      : summaryRead.kind === 'error'
-        ? { kind: 'summary' as const, reason: summaryRead.reason }
-        : null;
-    const phase = queryRead.kind === 'ok'
-      ? phaseFor(summary?.total ?? null, queryRead.value.total, bimFilterActive(filter))
-      : queryStale && state.page !== null
-        ? state.phase
-        : rows.length > 0 ? state.phase : 'error';
-    if (queryRead.kind === 'ok') queriedFilter = filter;
-    publish({
-      ...state,
-      phase,
-      filter,
-      rows,
-      page,
-      summary,
-      queriedFilter,
-      busy: false,
-      error,
-      selectionError: null,
-    });
-  }
-
-  /** Apply one query-only answer, keeping the summary and the previous rows on failure. */
+  /** Apply one answer: the page always, the summary when it is the document's. */
   function applyQuery(read: Read<BimQueryAnswer>, filter: BimFilter): void {
     if (read.kind === 'error') {
       const refusal = bimRefusal(read.reason);
@@ -367,12 +279,19 @@ export function createBimStore(invoke: Invoke, options: BimStoreOptions = {}): B
     }
     const answer = read.value;
     queriedFilter = filter;
+    // The facet list is the document's value list, so it is adopted from an
+    // **unfiltered** answer only. A filtered answer's summary is bound to that
+    // filter (`summary.total === total`); adopting it would collapse the chips
+    // to the current selection and hide every other value. The filtered count is
+    // the page's `total`, beside the document total.
+    const summary = bimFilterActive(filter) ? state.summary : answer.summary;
     publish({
       ...state,
-      phase: phaseFor(state.summary?.total ?? null, answer.total, bimFilterActive(filter)),
+      phase: phaseFor(summary?.total ?? null, answer.total, bimFilterActive(filter)),
       filter,
       rows: answer.rows,
       page: { total: answer.total, offset: answer.offset, limit: answer.limit, stale: answer.stale },
+      summary,
       queriedFilter,
       busy: false,
       error: null,
@@ -390,12 +309,12 @@ export function createBimStore(invoke: Invoke, options: BimStoreOptions = {}): B
       busy: true,
       error: null,
     });
-    const [summaryRead, queryRead] = await Promise.all([
-      readSummary(),
-      readQuery(filter, offset, limitOf(state.page)),
-    ]);
+    // One request: the answer carries the rows and the summary of the same
+    // filtered set, so the page and the counters can never come from two
+    // revisions.
+    const read = await readQuery(filter, offset, limitOf(state.page));
     if (disposed || current !== generation) return;
-    applyBatch(summaryRead, queryRead, filter);
+    applyQuery(read, filter);
   }
 
   function limitOf(page: BimPage | null): number {

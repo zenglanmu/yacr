@@ -57,7 +57,7 @@ ChangeSet → 查询/历史/依赖失效 → Representation → SceneDelta → R
 | 工作能力 | cad-measure：MeasurementEngine/SnapCandidate |
 | 应用 | cad-app：Document/SessionState/Viewport/Workspace、CommandHandler/Tool |
 | 查询 | cad-query：分页查询/Mixed/Unset；BIM 索引按 `(DatabaseId, Revision)` 懒建（category/level/type/material/property，成员 `BimKey`，facet 间 AND / 内 OR、`Eq/Ne/Contains`、term 上限 64） |
-| 共享 UI 层 | **cad-ui-core：平台无关的 wire protocol、逻辑布局（layout）、CAD 会话（session，`CadSession`/`CadStatus`/44-command 表）、宿主 admission/error 状态（shell，`ShellState`）、**弹窗纯状态机（popup，`PopupKind`/`PopupAck`/`CadPopup`/allowlist/四触发）**、launch options、i18n 目录、BIM wire（冻结 camelCase 的 `cad_bim_query`/`cad_bim_summary` 与 `cad_select_entities`）；UI 框架与 GPU 无关 |
+| 共享 UI 层 | **cad-ui-core：平台无关的 wire protocol、逻辑布局（layout）、CAD 会话（session，`CadSession`/`CadStatus`/44-command 表）、宿主 admission/error 状态（shell，`ShellState`）、**弹窗纯状态机（popup，`PopupKind`/`PopupAck`/`CadPopup`/allowlist/四触发）**、launch options、i18n 目录、BIM wire（冻结 camelCase 的单一 `cad_bim_query`——页与 facet `summary` 一次返回——与 `cad_select_entities`）；UI 框架与 GPU 无关 |
 | 桌面壳共享层 | **cad-desktop-shell：唯一允许依赖 `tauri` 的共享层**——`#[tauri::command]` 薄壳与注册、主窗口/子 webview 构建（init scripts、`start_maximized`）、popup 命令到 `cad-ui-core::popup` 的接线、工具包无关 `threading`、通用证据驱动骨架、参数化平台实现（`ReactFiles`/`ReactSurface`/`ReactConfigStore`）；**禁止** gtk/gdk/gdkx11/ashpd/wgpu/cad-render-wgpu/cad-engine/iced/acadrust |
 | 宿主编排 | cad-host：HostCore（命令路由、打开/保存/出图管线、状态推送、导航/绘制 sink）；**不依赖任何 UI 工具包，也不依赖 wgpu/web-sys/Android 类型** |
 | 宿主平台契约 | cad-platform：PlatformFiles/ConfigStore/SurfaceSource/FontLoader/Persistence/TaskExecutor/Clipboard/HostLifecycle/RenderHost/**PluginStore** |
