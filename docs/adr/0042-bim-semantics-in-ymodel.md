@@ -6,9 +6,11 @@
   一次返回）、React BIM 面板与 `cad_select_entities`。**三项明确边界**：① **IFC 关系只导出 `contains`/`nests`**（
   `IfcRelContainedInSpatialStructure`/`IfcRelNests`；`aggregates`/`group`/`connects`/`other:*` 因上游
   plan API 无法表达任意产品间关系而**不导出并逐类报告**，不写成容器/嵌套冒充）；②
-  **Windows/macOS/Android 无 BIM 查询 seam**，按
-  `unsupported-runtime: bimQuery` 显式拒绝（不是空页）；③ `cad_db::BimValue::Text` 无 `ifc_type`，
-  导出恒写 `Label`。RVT/DGN 语义仍 `Unverified`；Aspect 落盘与属性编辑仍未开始，见 §4。
+  **Windows/macOS/Android 已装 BIM 查询 seam**（Windows 仅交叉编译，macOS/Android 仅编译/契约，
+  **运行时 NOT VERIFIED**）；没有查询通道的载体仍按 `unsupported-runtime: bimQuery` 显式拒绝
+  （不是空页）；③ `cad_db::BimValue::Text` 无 `ifc_type`，
+  导出恒写 `Label`。RVT/DGN 语义仍 `Unverified`；**BIM 属性编辑已落地**（`c87e4046`：逐属性动态行 +
+  `apply_bim_updates` + `BimPatch`，见 D4）；Aspect 落盘仍未开始，见 §4。
 - 日期：2026-11-21。
 - 相关：[ADR-0037](0037-ymodel-schema-and-persistence.md)（`.ymodel` 是唯一原生格式、BIS 骨架）、
   [ADR-0033](0033-multi-format-import.md)（连接器、各格式定位）、
@@ -132,17 +134,24 @@ Bentley iModel/BIS 提供了成熟的参照：内部 Id 与 FederationGuid 分�
     同样严格，防止恶意归档撑大边集。
   - 关系与元素/定义同属 **minor 7**；有 BIM 定义但无关系的文档也写 7（同一发布周期，不拆档）。
 
-### D4 — 属性集内联；属性面板用固定静态键 + 摘要值
+### D4 — 属性集内联；属性面板用动态逐属性行，可写
 
-`PropertyRow.key` 是 `&'static str`（`crates/cad-app/src/selection.rs:123-125`），多选交集用
-`rows.iter().find(|row| row.key == key)`（`:406`），重复/动态 key 会静默丢行。因此 Phase 1 只发：
+`PropertyRow` 已按 Phase 1 的预告升级（`c87e4046`）：
+`key: Cow<'static, str>`、`label: Option<String>`（源自己的名字，永不进 i18n catalogue）、
+`editable`/`kind`/`options`（读侧元数据，只声明「写路径可改」）。多选交集仍按 key 查找，所以契约是：
+**key 在一次选择内唯一**；动态 key 一律带前缀（`bim.pset.{set}.{prop}`）；同一 `(set, prop)` 在不同
+元素上名字不一致时整行标 `mixed`、`value=None`、不可编辑——不会静默丢行。
 
-`bim_category`、`bim_name`、`bim_level`、`bim_type`、`bim_material`、`bim_source`、
-`bim_properties`（单行摘要，例如 `Pset_WallCommon (3), Pset_Revit_Type (5)`）、`bim_evidence`。
+面板行 = 静态摘要行（`bim_category`/`bim_name`/`bim_level`/`bim_type`/`bim_material`/`bim_source`/
+`bim_evidence`）+ 每个已存非空 PSet 属性一行。**写**不经新命令：`SETENTITYPROPERTY` 在显示属性语法
+之前认领 `bim.pset.*`，按元素自身存储的变体解析草稿（`Real` 保留 `ifc_type` 与单位 token），
+全有或全无，一条事务/一个 revision/一条 undo；无变化时 `property.unchanged` 且不记历史。
 
-逐属性行、动态属性名、属性编辑一律 Phase 3，且必须先改 wire 契约（`PropertyRow` 增加
-`label`，`key` 变 `Cow<'static, str>`）——不在本轮偷偷改。（Phase 3 已落地其余部分，但这一项
-**仍未做**：`PropertyRow.key` 仍是 `&'static str`，面板 `editable` 恒 `false`。）
+落库是 `DrawingDatabase::apply_bim_updates`：先全量校验再改、replace-only（拒绝凭空造 `bim` 块）、
+空批不 bump、自己构建 `ChangeScope.shards`，发布 `METADATA` changes。撤销走
+`DrawingHistoryStep.bim_patches`（`BimPatch{id, before, after}`），`DrawingUndoRecord` 保持不变；
+带 BIM patch 的 step **必须独占一步**（与实体 patch 走不同 db 路径，混用会跨两个 revision）。
+Heuristic 元素可编辑：改的是文档已存的值，`evidence` 原样保留。契约测试见 §4。
 
 ### D5 — 标识：内部 `EntityId` 稳定 + 源标识并存
 
@@ -407,19 +416,35 @@ cargo clippy -p cad-db -p cad-store-zip -p cad-import-core -p cad-import-ifc -p 
   上限 64（`bim.filter.too_many_terms`）；行排序确定。
 - **wire/UI/选择**：`crates/cad-ui-core/src/bim.rs`（冻结 camelCase 契约，`summary` 块随查询应答）
   + **18 条**测试（含「不得出现 snake_case 键」递归断言、`object.kind` 二态、`value.kind` 四态）；
-  `session/bim.rs`、`session/bim_reads.rs`；registry **只有** `cad_bim_query` 一行（`cad_bim_summary`
+  `session/bim.rs` + `session/host_read.rs`（原 `session/bim_reads.rs` 已删除）；registry **只有**
+  `cad_bim_query` 一行（`cad_bim_summary`
   已删除，fixture 同步）；`cad-host/src/bim.rs` + `tests/bim_query.rs`（**11 条**，含
   `summary.total == total` 与过滤后 facet 计数）；`cad-desktop-shell` 命令 + 注册表 fixture；
   `apps/app-web` 已接线（`DirectReads`，**5 条**，含「一次调用同时拿 rows 与 summary」）；
   `apps/desktop-ui/src/bim/`（`bim-query.ts`/`bim-view.ts`/`bim-store.ts`/`selection.ts`/
   `panel.ts`/`use-bim-panel.ts`）+ `components/BimPanel.tsx` + ribbon 入口（两语言各 +61 键）；
   `bim-store` 每次动作（打开/刷新/筛选/翻页）只发一个 `invoke`；`cad_select_entities`
-  （payload `{entityIds:number[]}`）。四个载体都有 `bim_host.rs` seam：Linux 有运行证据，Windows
-  仅交叉编译，macOS/Android 仅编译/契约（运行时 **NOT VERIFIED**）；未装 seam 的载体仍按
-  `unsupported-runtime: bimQuery` 显式拒绝；`cad_select_entities` 各载体 tick 已接线
-  （Windows/macOS/Android 仅源码一致性，**NOT VERIFIED**）。
+  （payload `{entityIds:number[]}`）。
+- **读取 seam（`676b9d4f` 收口）**：请求携带型读取只剩 `cad_ui_core::host_read`
+  （`HostReadRequest{kind:"bimQuery"}` → `HostReadAnswer`）。四个载体各只有一个 `host_read.rs`
+  闭包（原 `bim_host.rs` 已删除）；无 seam 的载体按 `unsupported-runtime: bimQuery` 显式拒绝，
+  未知 kind 按 `unsupported-runtime: hostRead.kind` 拒绝；**新增 kind 不得再新增每载体文件**。
+  Linux 有运行证据，Windows 仅交叉编译，macOS/Android 仅编译/契约（运行时 **NOT VERIFIED**）；
+  `cad_select_entities` 各载体 tick 已接线（Windows/macOS/Android 仅源码一致性，**NOT VERIFIED**）。
+- **属性编辑（`c87e4046`）**：`crates/cad-app/src/app_drawing/bim_properties.rs`
+  （`SETENTITYPROPERTY` 前置拦截 + 逐元素变体解析 + 全有或全无），代表测试
+  `set_bim_key_writes_the_stored_variant_and_advances_the_revision`、
+  `set_bim_key_refuses_a_conflicting_multi_selection`、
+  `set_bim_key_reports_unchanged_without_an_undo_entry`、`undo_and_redo_restore_the_bim_value`、
+  `set_bim_key_on_a_heuristic_element_is_allowed_and_keeps_the_evidence`；
+  `crates/cad-db/src/tests/bim_edit.rs`（`apply_bim_updates_bumps_revision_and_dirties_the_element_shard`、
+  `apply_bim_updates_is_all_or_nothing`、`apply_bim_updates_with_an_empty_batch_is_a_no_op` 等）；
+  `cad-history` 的 `BimPatch` 往返。
+- **IFC 关系导出（`c87e4046`）**：`crates/cad-export-ifc/src/bim_relations.rs` + `tests_relations.rs`：
+  只写 `contains`/`nests`，其余 kind 计 `relation_not_written`，端点缺失计
+  `relation_endpoint_missing`；无关系导出保持逐字节一致（2196/1374 基线）。
 - 证据上限：DGN BIM 解释 `Unverified`；UI 数据来自合成/契约样本；各载体运行时 **NOT VERIFIED**。
-- **仍未开始**：Aspect 落盘、属性编辑与逐属性行（`PropertyRow.key` 仍是 `&'static str`）。
+- **仍未开始**：Aspect 落盘；`IdKind` 12/13 的启用（D12）。
 
 ## 5. 风险与规避
 
@@ -427,12 +452,16 @@ cargo clippy -p cad-db -p cad-store-zip -p cad-import-core -p cad-import-ifc -p 
    耗时；超标则 Phase 3 迁到 DefinitionModel 分片元素（minor 7）。
 2. **`document_minor` 复用 `FORMAT_MINOR`**：会把 resources-only 文档写成 6。规避：显式三档 +
    单测；定义表只在非空时写。
-3. **`PropertyRow.key` 静态契约**：动态键会在多选 `find` 里静默丢行。规避：Phase 1 固定键 + 摘要。
+3. **`PropertyRow` 动态键**：多选交集仍按 key `find`，重复键会静默丢行。规避：key 在一次选择内唯一、
+   动态键带 `bim.pset.*` 前缀、名字不一致时整行 `mixed` 且不可编辑（`c87e4046` 已落地并有测试）。
 4. **`bim: null` 破坏旧读**：规避：None 省略键，并有 minor-4/5 字节兼容测试。
 5. **把源标识当身份**：RVT 文档 GUID 每次保存都变。规避：`document_id+id` 优先、checksum 只作
    provenance、跨保存不自动合并。
 6. **文件规模与并发**：`cad-db/src/snapshot/tables.rs`、`ymodel/header.rs`、`cad-store-zip/src/write.rs`、
    `cad-import-rvt/src/glb.rs` 都接近 1000 行上限。规避：新代码全部放新模块，既有文件只做小接线。
+7. **第二次保存才暴露的脏分片**：`apply_bim_updates` 自建 `ChangeScope.shards`，漏标一个元素分片时
+   第一次保存看起来正常（走 live 分片），第二次保存会把旧字节 raw-copy 回去。规避：写路径必须同时
+   标记元素分片，并保留「保存两次字节稳定」的测试。
 
 ## 6. 证据边界
 
@@ -447,7 +476,8 @@ cargo clippy -p cad-db -p cad-store-zip -p cad-import-core -p cad-import-ifc -p 
 - IFC 导出回写只承诺自洽往返，**不承诺**被 Revit/Bentley/IfcOpenShell 接受；**IFC 关系只导出
   `contains`/`nests`**（`IfcRelContainedInSpatialStructure`/`IfcRelNests`），`aggregates`/`group`/
   `connects`/`other:*` 不导出并逐 kind 报告；`BimValue::Text` 导出恒 `Label`；
-- BIM 查询/面板在 Windows/macOS/Android 无 seam（`unsupported-runtime: bimQuery`），
-  `cad_select_entities` 在这些载体只有源码一致性，**运行时 NOT VERIFIED**；
+- BIM 查询/面板与属性编辑：Linux 有运行证据；Windows 仅交叉编译，macOS/Android 仅编译/契约，
+  `cad_select_entities` 在这些载体只有源码一致性，**运行时 NOT VERIFIED**；没有查询通道的载体仍按
+  `unsupported-runtime: bimQuery` 显式拒绝；
 - 所有平台结论仍按 `docs/compatibility.md` 与 AGENTS.md 平台表：只在 Linux 做运行/契约验证，
   Windows/macOS/Android/Web 只能写"仅编译 / 仅契约 / NOT VERIFIED"。
