@@ -234,6 +234,7 @@ cad-cli-tools <operation> <input.dwg> [options]
   "mesh_textures": {
     "requested": [], "uploaded": 0, "unresolved": [], "fallbacks": [], "bytes": 0
   },
+  "pbr_tangent_unavailable": 0,
   "completeness": { "status": "complete" },
   "note": "software/headless frame; not a compatibility or performance claim"
 }
@@ -268,7 +269,11 @@ cad-cli-tools <operation> <input.dwg> [options]
   数量，`unresolved`/`fallbacks` 是没上传成功的键（`unresolved` = 解码缓存里没有；
   `fallbacks` = 该批次绘制时纹理不驻留，已按批次颜色不带纹理绘制）。渲染器从不绑定
   占位纹理，所以这里为空是"确实采样到了纹理"，非空是"这一帧丢失了纹理"。
+  `bytes` 计入整条 CPU 生成的 mip 链（约为 level 0 的 4/3 加上低位行的 256 字节对齐填充）。
   `requested: []` 表示图纸没有带纹理的网格，此时不做任何额外 GPU 上传。
+- `pbr_tangent_unavailable` 是**法线贴图通道被关闭**的批次数（ADR-0039 D6：
+  没有可用切线帧就不猜）。`0` 表示本帧的法线贴图确实参与了着色；非零表示该批次只剩
+  直接光照与底色，不得据画面推断"法线贴图有效"。
 - `pixels.non_background` 统计与左上角背景色差异超过容差 8 的像素数；
   `coverage = non_background / (width*height)`。纯背景帧是真实结果，不伪造像素。
 - `completeness` 与 `scan` 一致，来自本次导入报告；没有导入报告时为

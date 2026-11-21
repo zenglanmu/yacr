@@ -89,24 +89,74 @@ pub(crate) fn pack_tangents(tangents: &[[f32; 4]]) -> Vec<u8> {
     bytes
 }
 
+/// A normal shorter than this is degenerate; stored normals are expected to be
+/// ~unit length, so this is an absolute floor, not a scale-relative one.
+const NORMAL_LENGTH_EPSILON: f32 = 1e-8;
+
+/// Absolute UV-area floor, relative to the mesh's **squared UV extent**.
+///
+/// `f32` UVs quantise at ~1e-7 of their own magnitude, so a UV triangle area
+/// below `1e-12 · extent²` is subtraction noise from the determinant, not a
+/// parameterisation. Making it relative keeps the test honest for a mesh whose
+/// UVs are in millimetres and for one in the unit square.
+const UV_AREA_RELATIVE_EPSILON: f32 = 1e-12;
+
+/// Largest `|det(duv1, duv2)| / (|duv1| · |duv2|)` — the sine of the angle
+/// between the two UV edges — a triangle may have and still be usable.
+///
+/// Below it the two UV edges are numerically collinear: the gradient solve would
+/// divide by rounding noise and produce a huge, meaningless direction.
+const UV_SLIVER_SINE: f32 = 1e-6;
+
+/// A vertex's accumulated tangent counts as **cancelled out** when the part
+/// orthogonal to its normal is below this fraction of the strongest
+/// single-triangle tangent the vertex received. Relative, so it tracks mesh
+/// scale; far above the `f32` accumulation noise (~n · 6e-8 of the summands) and
+/// far below any real area-weighted average.
+const TANGENT_CANCEL_RATIO: f32 = 1e-5;
+
+/// A raw tangent whose orthogonal component is below this fraction of its own
+/// length is (numerically) parallel to the normal and carries no direction.
+const TANGENT_PARALLEL_RATIO: f32 = 1e-6;
+
 /// Generate one tangent frame per vertex from positions + UV0 + triangles.
 ///
 /// The domain stores **no** tangents (glTF's `TANGENT` accessor is not imported),
 /// so they are derived here at pack time with a MikkTSpace-style simplification:
 ///
 /// 1. per triangle, solve the UV gradient for a tangent and bitangent and
-///    accumulate both on each of its three vertices;
-/// 2. per vertex, orthonormalise the accumulated tangent against the (repaired)
-///    normal and normalise it;
-/// 3. `w` is the handedness `sign(dot(cross(N, T), B_accumulated))`, `+1` when the
-///    frame degenerates to zero.
+///    accumulate both on each of its three vertices. A **UV-degenerate**
+///    triangle — zero UV area at `f32` precision ([`UV_AREA_RELATIVE_EPSILON`])
+///    or two numerically collinear UV edges ([`UV_SLIVER_SINE`]) — is **skipped**
+///    and contributes nothing. Skipping is not inventing: that triangle holds no
+///    UV gradient to read, so the frame is built only from the triangles that do
+///    have one. A sliver triangle is extremely common in game assets, and
+///    refusing the whole batch for it used to cost the asset its whole normal
+///    map;
+/// 2. per vertex, remove the normal component of the accumulated tangent and
+///    normalise it. When the accumulation **cancels** (see
+///    [`TANGENT_CANCEL_RATIO`]), the frame falls back to the **largest-magnitude
+///    single-triangle tangent that vertex actually received** — still a real
+///    triangle's tangent, with that triangle's bitangent deciding `w`; never a
+///    fabricated direction;
+/// 3. a vertex whose triangles were *all* UV-degenerate received no UV gradient
+///    at all. Its frame is inherited from a vertex at the **identical** stored
+///    position (exact `f32` bit pattern: a UV-seam duplicate, i.e. the same
+///    surface point on another chart) that did resolve, re-orthonormalised
+///    against this vertex's normal and keeping the donor chart's handedness.
+///    That is again a real measured tangent at the same point, not an invented
+///    one;
+/// 4. `w` is the handedness `sign(dot(cross(N, T), B))`, `+1` when the frame
+///    degenerates to zero.
 ///
-/// `None` means the batch has **no usable tangent frame**: UV0 is absent or
-/// misaligned, a triangle has a degenerate UV triangle (zero area in UV space),
-/// or a vertex's accumulated tangent vanishes against its normal. The caller
-/// must then treat the normal-map channel as absent and record
-/// `render.pbr.tangent_unavailable` — a tangent is **never** invented (ADR-0039
-/// D6).
+/// `None` means the batch has **no usable tangent frame**: a structural mismatch
+/// (UV0/normal stream not exactly one entry per vertex, no triangles, an
+/// out-of-range index, a zero-length normal), or **any** vertex still without a
+/// resolved frame — it has no non-degenerate triangle and no coincident vertex
+/// to inherit from. A per-vertex attribute cannot be partial, so one undetermined
+/// vertex refuses the batch. The caller must then treat the normal-map channel as
+/// absent and record `render.pbr.tangent_unavailable` — a tangent is **never**
+/// invented (ADR-0039 D6).
 pub(crate) fn generate_tangents(
     vertices: &[[f32; 3]],
     normals: &[[f32; 3]],
@@ -120,12 +170,18 @@ pub(crate) fn generate_tangents(
     {
         return None;
     }
-    // UV areas below this are degenerate: the gradient solve would divide by a
-    // vanishing determinant and invent a direction.
-    const UV_EPSILON: f32 = 1e-12;
-    const LENGTH_EPSILON: f32 = 1e-8;
+    let mut unit_normals = Vec::with_capacity(normals.len());
+    for normal in normals {
+        unit_normals.push(tangent_unit(*normal)?);
+    }
+    let area_floor = uv_area_floor(uvs);
     let mut tangent_accum = vec![[0.0f32; 3]; vertices.len()];
     let mut bitangent_accum = vec![[0.0f32; 3]; vertices.len()];
+    // Per vertex: the strongest single-triangle tangent it actually received
+    // (largest raw magnitude) with that triangle's bitangent, plus that
+    // magnitude as the scale reference for the cancellation test.
+    let mut strongest: Vec<Option<([f32; 3], [f32; 3])>> = vec![None; vertices.len()];
+    let mut strongest_length = vec![0.0f32; vertices.len()];
     for triangle in indices {
         let [i0, i1, i2] = triangle.map(|index| index as usize);
         if i0 >= vertices.len() || i1 >= vertices.len() || i2 >= vertices.len() {
@@ -142,8 +198,16 @@ pub(crate) fn generate_tangents(
         let duv1 = [uv1[0] - uv0[0], uv1[1] - uv0[1]];
         let duv2 = [uv2[0] - uv0[0], uv2[1] - uv0[1]];
         let determinant = duv1[0] * duv2[1] - duv2[0] * duv1[1];
-        if !determinant.is_finite() || determinant.abs() <= UV_EPSILON {
-            return None;
+        // `|det| / (|duv1|·|duv2|)` is `sin` of the angle between the UV edges,
+        // so the sliver test is scale-free; the area floor covers the case where
+        // both edges are short enough that their determinant is pure noise.
+        let edge_product = (duv1[0] * duv1[0] + duv1[1] * duv1[1]).sqrt()
+            * (duv2[0] * duv2[0] + duv2[1] * duv2[1]).sqrt();
+        if !determinant.is_finite()
+            || !edge_product.is_finite()
+            || determinant.abs() <= area_floor.max(UV_SLIVER_SINE * edge_product)
+        {
+            continue;
         }
         let reciprocal = 1.0 / determinant;
         let tangent = [
@@ -159,63 +223,189 @@ pub(crate) fn generate_tangents(
         if !tangent.iter().all(|value| value.is_finite())
             || !bitangent.iter().all(|value| value.is_finite())
         {
-            return None;
+            // A non-finite vertex/UV stream is refused by the upload gate before
+            // this point; a triangle that still lands here contributes nothing
+            // instead of poisoning every vertex it touches.
+            continue;
         }
+        let magnitude = tangent_length(tangent);
         for index in [i0, i1, i2] {
             for axis in 0..3 {
                 tangent_accum[index][axis] += tangent[axis];
                 bitangent_accum[index][axis] += bitangent[axis];
             }
+            if magnitude > strongest_length[index] {
+                strongest_length[index] = magnitude;
+                strongest[index] = Some((tangent, bitangent));
+            }
         }
+    }
+    let mut frames: Vec<Option<[f32; 4]>> = Vec::with_capacity(vertices.len());
+    for index in 0..vertices.len() {
+        let normal = unit_normals[index];
+        let accumulated = tangent_accum[index];
+        // Only average when the average still carries a direction: compare the
+        // part of the sum that remains orthogonal to the normal (a sum that is
+        // mostly along the normal has no tangent direction) against the strongest
+        // real contribution, so the ratio tracks mesh scale. Below it the sum is
+        // cancellation noise and the strongest real triangle tangent is the
+        // honest answer.
+        let mut frame = None;
+        if orthogonal_length(normal, accumulated) > TANGENT_CANCEL_RATIO * strongest_length[index] {
+            frame = tangent_frame(normal, accumulated, bitangent_accum[index]);
+        }
+        if frame.is_none() {
+            if let Some((tangent, bitangent)) = strongest[index] {
+                frame = tangent_frame(normal, tangent, bitangent);
+            }
+        }
+        frames.push(frame);
+    }
+    // Vertices whose triangles were all skipped: inherit the frame of a vertex
+    // at the *identical* stored position (a UV-seam duplicate of the same
+    // surface point). Exact bit equality only — no tolerance is guessed.
+    let mut by_position: std::collections::HashMap<[u32; 3], usize> =
+        std::collections::HashMap::new();
+    for (index, frame) in frames.iter().enumerate() {
+        if frame.is_some() {
+            by_position
+                .entry(position_bits(vertices[index]))
+                .or_insert(index);
+        }
+    }
+    for index in 0..frames.len() {
+        if frames[index].is_some() {
+            continue;
+        }
+        let Some(&donor) = by_position.get(&position_bits(vertices[index])) else {
+            continue;
+        };
+        let Some(donor_frame) = frames[donor] else {
+            continue;
+        };
+        let donor_normal = unit_normals[donor];
+        let donor_tangent = [donor_frame[0], donor_frame[1], donor_frame[2]];
+        // Rebuild the donor's bitangent from its stored handedness so the
+        // inherited frame keeps that chart's orientation.
+        let donor_bitangent = tangent_cross(donor_normal, donor_tangent);
+        let donor_bitangent = [
+            donor_bitangent[0] * donor_frame[3],
+            donor_bitangent[1] * donor_frame[3],
+            donor_bitangent[2] * donor_frame[3],
+        ];
+        frames[index] = tangent_frame(unit_normals[index], donor_tangent, donor_bitangent);
     }
     let mut tangents = Vec::with_capacity(vertices.len());
-    for (index, accumulated) in tangent_accum.iter().enumerate() {
-        let normal = normals[index];
-        let normal_length =
-            (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
-        if !normal_length.is_finite() || normal_length <= LENGTH_EPSILON {
-            return None;
-        }
-        let normal = [
-            normal[0] / normal_length,
-            normal[1] / normal_length,
-            normal[2] / normal_length,
-        ];
-        // Gram-Schmidt: remove the normal component, then normalise.
-        let projection =
-            accumulated[0] * normal[0] + accumulated[1] * normal[1] + accumulated[2] * normal[2];
-        let orthogonal = [
-            accumulated[0] - normal[0] * projection,
-            accumulated[1] - normal[1] * projection,
-            accumulated[2] - normal[2] * projection,
-        ];
-        let length = (orthogonal[0] * orthogonal[0]
-            + orthogonal[1] * orthogonal[1]
-            + orthogonal[2] * orthogonal[2])
-            .sqrt();
-        if !length.is_finite() || length <= LENGTH_EPSILON {
-            return None;
-        }
-        let tangent = [
-            orthogonal[0] / length,
-            orthogonal[1] / length,
-            orthogonal[2] / length,
-        ];
-        // Handedness from the accumulated bitangent: `cross(N, T)` points along
-        // +B when w = +1. A zero bitangent (no information) keeps +1.
-        let cross = [
-            normal[1] * tangent[2] - normal[2] * tangent[1],
-            normal[2] * tangent[0] - normal[0] * tangent[2],
-            normal[0] * tangent[1] - normal[1] * tangent[0],
-        ];
-        let accumulated_bitangent = bitangent_accum[index];
-        let handedness = cross[0] * accumulated_bitangent[0]
-            + cross[1] * accumulated_bitangent[1]
-            + cross[2] * accumulated_bitangent[2];
-        let w = if handedness < 0.0 { -1.0 } else { 1.0 };
-        tangents.push([tangent[0], tangent[1], tangent[2], w]);
+    for frame in frames {
+        tangents.push(frame?);
     }
     Some(tangents)
+}
+
+/// Absolute UV-area floor for one mesh's parameterisation: [`UV_AREA_RELATIVE_EPSILON`]
+/// times the squared UV extent (the larger side of the UV bounding box).
+fn uv_area_floor(uvs: &[[f32; 2]]) -> f32 {
+    let mut min = [f32::INFINITY; 2];
+    let mut max = [f32::NEG_INFINITY; 2];
+    for uv in uvs {
+        for axis in 0..2 {
+            min[axis] = min[axis].min(uv[axis]);
+            max[axis] = max[axis].max(uv[axis]);
+        }
+    }
+    let extent = (max[0] - min[0]).max(max[1] - min[1]);
+    if !extent.is_finite() || extent <= 0.0 {
+        return 0.0;
+    }
+    UV_AREA_RELATIVE_EPSILON * extent * extent
+}
+
+/// Orthonormalise `raw_tangent` against the unit `normal` and derive the
+/// handedness from `raw_bitangent`.
+///
+/// `None` when the raw tangent is zero, non-finite, or (numerically) parallel to
+/// the normal: it then carries no usable direction in the tangent plane.
+fn tangent_frame(
+    normal: [f32; 3],
+    raw_tangent: [f32; 3],
+    raw_bitangent: [f32; 3],
+) -> Option<[f32; 4]> {
+    let raw_length = tangent_length(raw_tangent);
+    if !raw_length.is_finite() || raw_length <= 0.0 {
+        return None;
+    }
+    // Gram-Schmidt: remove the normal component, then normalise.
+    let projection = tangent_dot(raw_tangent, normal);
+    let orthogonal = [
+        raw_tangent[0] - normal[0] * projection,
+        raw_tangent[1] - normal[1] * projection,
+        raw_tangent[2] - normal[2] * projection,
+    ];
+    let length = tangent_length(orthogonal);
+    if !length.is_finite() || length <= TANGENT_PARALLEL_RATIO * raw_length {
+        return None;
+    }
+    let tangent = [
+        orthogonal[0] / length,
+        orthogonal[1] / length,
+        orthogonal[2] / length,
+    ];
+    // `cross(N, T)` points along +B when w = +1. A zero bitangent (no
+    // information) keeps +1.
+    let cross = tangent_cross(normal, tangent);
+    let w = if tangent_dot(cross, raw_bitangent) < 0.0 {
+        -1.0
+    } else {
+        1.0
+    };
+    Some([tangent[0], tangent[1], tangent[2], w])
+}
+
+/// `value` scaled to unit length, or `None` when it is degenerate.
+fn tangent_unit(value: [f32; 3]) -> Option<[f32; 3]> {
+    let length = tangent_length(value);
+    if !length.is_finite() || length <= NORMAL_LENGTH_EPSILON {
+        return None;
+    }
+    Some([value[0] / length, value[1] / length, value[2] / length])
+}
+
+/// Length of the part of `raw` orthogonal to the unit `normal`.
+fn orthogonal_length(normal: [f32; 3], raw: [f32; 3]) -> f32 {
+    let projection = tangent_dot(raw, normal);
+    tangent_length([
+        raw[0] - normal[0] * projection,
+        raw[1] - normal[1] * projection,
+        raw[2] - normal[2] * projection,
+    ])
+}
+
+fn tangent_length(value: [f32; 3]) -> f32 {
+    (value[0] * value[0] + value[1] * value[1] + value[2] * value[2]).sqrt()
+}
+
+fn tangent_dot(a: [f32; 3], b: [f32; 3]) -> f32 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+fn tangent_cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+/// Exact bit pattern of a stored position: the key for "the same surface point"
+/// (`+0.0` and `-0.0` are folded together so a seam duplicate is still found).
+fn position_bits(position: [f32; 3]) -> [u32; 3] {
+    position.map(|value| {
+        if value == 0.0 {
+            0.0f32.to_bits()
+        } else {
+            value.to_bits()
+        }
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -666,5 +856,114 @@ pub(crate) fn push_mesh_vertices(
             ],
             entity_flags: [pick_key, flags],
         });
+    }
+}
+
+#[cfg(test)]
+mod tangent_frame_tests {
+    //! Contracts for the *robustness* rules of [`generate_tangents`]: a
+    //! UV-degenerate triangle is skipped instead of costing the batch its frame,
+    //! a cancelled accumulation falls back to a real triangle tangent, and a
+    //! frame with no usable gradient at all is still refused (never invented).
+
+    use super::*;
+
+    type Streams = (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<[f32; 2]>, Vec<[u32; 3]>);
+
+    /// Unit quad in the XY plane, `+Z` normals, full `[0,1]²` UV square.
+    fn quad() -> Streams {
+        (
+            vec![
+                [-1.0, -1.0, 0.0],
+                [1.0, -1.0, 0.0],
+                [1.0, 1.0, 0.0],
+                [-1.0, 1.0, 0.0],
+            ],
+            vec![[0.0, 0.0, 1.0]; 4],
+            vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+            vec![[0, 1, 2], [0, 2, 3]],
+        )
+    }
+
+    fn close(a: f32, b: f32) -> bool {
+        (a - b).abs() < 1e-5
+    }
+
+    fn assert_frames_are_orthonormal(tangents: &[[f32; 4]], normals: &[[f32; 3]]) {
+        for (tangent, normal) in tangents.iter().zip(normals) {
+            let length = tangent_length([tangent[0], tangent[1], tangent[2]]);
+            assert!(close(length, 1.0), "tangent must be unit: {tangent:?}");
+            let dot = tangent_dot([tangent[0], tangent[1], tangent[2]], *normal);
+            assert!(dot.abs() < 1e-4, "tangent must be ⟂ normal: {tangent:?}");
+            assert!(tangent[3] == 1.0 || tangent[3] == -1.0);
+        }
+    }
+
+    #[test]
+    fn a_degenerate_uv_triangle_is_skipped_and_its_vertex_inherits_the_coincident_frame() {
+        let (vertices, normals, uvs, indices) = quad();
+        let control = generate_tangents(&vertices, &normals, &uvs, &indices)
+            .expect("the control quad has a frame");
+
+        // Append one vertex at the *same* position as vertex 0 with vertex 0's
+        // UV, so triangle `[4, 0, 1]` has two identical UVs: zero UV area, no
+        // gradient. It must not cost the batch its frame.
+        let mut vertices = vertices;
+        let mut normals = normals;
+        let mut uvs = uvs;
+        let mut indices = indices;
+        vertices.push(vertices[0]);
+        normals.push(normals[0]);
+        uvs.push(uvs[0]);
+        indices.push([4, 0, 1]);
+        let tangents = generate_tangents(&vertices, &normals, &uvs, &indices)
+            .expect("one UV-degenerate triangle must not disable the whole frame");
+        assert_eq!(tangents.len(), vertices.len());
+        // The valid triangles' frames are bit-for-bit the control's.
+        for (index, (with, without)) in tangents.iter().zip(&control).enumerate().take(4) {
+            assert_eq!(with, without, "vertex {index} must be unaffected");
+        }
+        // The duplicate vertex inherits the coincident vertex's real tangent.
+        assert!(close(tangents[4][0], 1.0), "{:?}", tangents[4]);
+        assert_eq!(tangents[4][3], 1.0);
+        assert_frames_are_orthonormal(&tangents, &normals);
+    }
+
+    #[test]
+    fn a_cancelled_accumulation_falls_back_to_a_real_triangle_tangent() {
+        // Vertex 0 belongs to two triangles whose UV gradients point at +X and
+        // -X with equal magnitude, so the area-weighted sum cancels exactly.
+        let vertices = vec![
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [-1.0, 0.0, 0.0],
+            [0.0, -1.0, 0.0],
+        ];
+        let normals = vec![[0.0, 0.0, 1.0]; 5];
+        let uvs = vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 0.0], [0.0, 1.0]];
+        let indices = vec![[0, 1, 2], [0, 3, 4]];
+        let tangents = generate_tangents(&vertices, &normals, &uvs, &indices)
+            .expect("a cancellation must fall back, not disable the frame");
+        // The fallback is the strongest *real* triangle tangent (+X), not an
+        // arbitrary direction in the tangent plane.
+        assert!(close(tangents[0][0].abs(), 1.0), "{:?}", tangents[0]);
+        assert!(close(tangents[0][1], 0.0), "{:?}", tangents[0]);
+        assert_frames_are_orthonormal(&tangents, &normals);
+    }
+
+    #[test]
+    fn a_frame_with_no_usable_gradient_is_still_refused() {
+        let (vertices, normals, uvs, indices) = quad();
+        // Every triangle UV-degenerate and every position distinct: nothing to
+        // derive and nobody to inherit from.
+        assert!(generate_tangents(&vertices, &normals, &[[0.5, 0.5]; 4], &indices).is_none());
+        // Structural mismatches are refused, never repaired.
+        assert!(generate_tangents(&vertices, &normals, &uvs, &[]).is_none());
+        assert!(generate_tangents(&vertices, &normals, &uvs[..3], &indices).is_none());
+        assert!(generate_tangents(&vertices, &normals, &uvs, &[[0, 1, 9]]).is_none());
+        let mut zero_normals = normals.clone();
+        zero_normals[0] = [0.0, 0.0, 0.0];
+        assert!(generate_tangents(&vertices, &zero_normals, &uvs, &indices).is_none());
     }
 }

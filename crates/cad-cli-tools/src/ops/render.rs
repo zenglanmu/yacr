@@ -253,6 +253,11 @@ pub(crate) fn render_document(
         },
         "images": images_json(&image_report, &image_upload),
         "mesh_textures": mesh_textures_json(&mesh_keys, &mesh_upload, &mesh_fallbacks),
+        // ADR-0039 D6 / ADR-0044 evidence: a PBR batch whose normal map could
+        // not get a tangent frame is drawn without it (`mesh_pbr` disables the
+        // channel). Reported even when zero, so "the normal map reads" is never
+        // inferred from a picture alone.
+        "pbr_tangent_unavailable": renderer.pbr_tangent_unavailable(),
         "completeness": completeness,
         "note": "software/headless frame; not a compatibility or performance claim",
     }))
