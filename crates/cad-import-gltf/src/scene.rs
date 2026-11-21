@@ -19,7 +19,9 @@ use crate::geometry::{
     apply, is_zero_area, local_matrix, multiply, normal_matrix, to_cad_frame, transform_normals,
 };
 use crate::pbr::{PbrChannels, PbrLosses};
-use crate::texture::{refusal_marker, resolve_texture_info, PbrDecl, TextureImage};
+use crate::texture::{
+    refusal_marker, resolve_texture_info, PbrDecl, TextureImage, WrapDeclaration, WrapLosses,
+};
 use crate::{
     DIAG_ALPHA_MASK_NOT_IMPORTED, DIAG_ANIMATION_IGNORED, DIAG_CAMERA_IGNORED, DIAG_COLORS_DROPPED,
     DIAG_DEGENERATE_TRIANGLE, DIAG_EXTERNAL_IMAGE, DIAG_INDEX_OUT_OF_RANGE, DIAG_INVALID_TRANSFORM,
@@ -53,6 +55,9 @@ pub(crate) struct SceneWalker<'a> {
     /// Every material's authored PBR declaration, read from the document JSON
     /// (ADR-0039 D4). A missing entry means "no authored PBR" → `pbr: None`.
     pbr_declarations: &'a BTreeMap<usize, PbrDecl>,
+    /// The non-REPEAT sampler wrap each texture declares, by texture index.
+    /// The renderer samples REPEAT, so any entry here is a named loss.
+    wrap_declarations: &'a BTreeMap<usize, WrapDeclaration>,
     referenced_meshes: BTreeSet<usize>,
     /// `TEXCOORD_n` sets that were present but not the imported set.
     ignored_uv_sets: BTreeSet<u32>,
@@ -68,6 +73,7 @@ impl<'a> SceneWalker<'a> {
         cancelled: &'a dyn Fn() -> bool,
         transformed_materials: &'a BTreeSet<usize>,
         pbr_declarations: &'a BTreeMap<usize, PbrDecl>,
+        wrap_declarations: &'a BTreeMap<usize, WrapDeclaration>,
     ) -> Self {
         SceneWalker {
             document,
@@ -76,6 +82,7 @@ impl<'a> SceneWalker<'a> {
             cancelled,
             transformed_materials,
             pbr_declarations,
+            wrap_declarations,
             referenced_meshes: BTreeSet::new(),
             ignored_uv_sets: BTreeSet::new(),
             saw_mesh_without_positions: false,
@@ -177,6 +184,7 @@ impl<'a> SceneWalker<'a> {
             self.limits,
             self.transformed_materials,
             self.pbr_declarations,
+            self.wrap_declarations,
             import,
         )?;
         for set in &build.ignored_uv_sets {
@@ -326,6 +334,9 @@ struct PrimitiveBuild {
     alpha_mask_not_imported: bool,
     /// Every PBR loss this primitive incurred (ADR-0039 D4).
     pbr: PbrLosses,
+    /// Non-REPEAT sampler wraps the imported texture slots declare (the
+    /// renderer samples REPEAT; base colour and PBR slots share this set).
+    sampler_wraps: WrapLosses,
 }
 
 fn record_losses(
@@ -491,8 +502,12 @@ fn record_losses(
         );
     }
     build.pbr.record(import, object, label);
+    build
+        .sampler_wraps
+        .record_diagnostics(import, object, label);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_primitive(
     primitive: &Primitive<'_>,
     world: &[[f64; 4]; 4],
@@ -500,6 +515,7 @@ fn build_primitive(
     limits: &ImportLimits,
     transformed_materials: &BTreeSet<usize>,
     pbr_declarations: &BTreeMap<usize, PbrDecl>,
+    wrap_declarations: &BTreeMap<usize, WrapDeclaration>,
     import: &mut MeshImport,
 ) -> CadResult<PrimitiveBuild> {
     let style = material_style(primitive);
@@ -761,6 +777,13 @@ fn build_primitive(
                         build.texture_transform_not_imported = style
                             .material_index
                             .is_some_and(|index| transformed_materials.contains(&index));
+                        // The bytes are resident, so the renderer will sample the
+                        // texture with its REPEAT sampler; name any other wrap.
+                        build.sampler_wraps.record(
+                            "baseColorTexture",
+                            &info.texture(),
+                            wrap_declarations,
+                        );
                     }
                     Err(error) => {
                         // A budget/format refusal loses the texture only: the
@@ -786,7 +809,15 @@ fn build_primitive(
     // when the UV set was unusable (`uvs_dropped`) — the scalars still apply.
     let mut pbr = None;
     if let Some(channels) = pbr_channels.as_ref().filter(|_| !build.pbr.is_ignored()) {
-        pbr = channels.import(uv_set, !uvs.is_empty(), buffers, import, &mut build.pbr)?;
+        pbr = channels.import(
+            uv_set,
+            !uvs.is_empty(),
+            buffers,
+            import,
+            &mut build.pbr,
+            wrap_declarations,
+            &mut build.sampler_wraps,
+        )?;
         let ignored = std::mem::take(&mut build.pbr.ignored_uv_sets);
         build.ignored_uv_sets.extend(ignored);
     }

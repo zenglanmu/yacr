@@ -24,14 +24,15 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
 use base64::Engine as _;
-use cad_domain::{CadError, CadResult};
+use cad_domain::{CadError, CadResult, Diagnostic, ObjectId};
+use cad_import_core::MeshImport;
 use gltf::{
     image::Source as ImageSource,
     texture::{Info as TextureInfo, Texture},
 };
 
 use crate::buffers::{data_uri_payload, ResolvedBuffer};
-use crate::{DIAG_IMAGE_BASE64, DIAG_IMAGE_OUT_OF_RANGE};
+use crate::{DIAG_IMAGE_BASE64, DIAG_IMAGE_OUT_OF_RANGE, DIAG_SAMPLER_WRAP_NOT_IMPORTED};
 
 /// The bytes of one texture image, or why they are not part of the import.
 pub(crate) enum TextureImage<'a> {
@@ -141,6 +142,143 @@ fn abbreviated_uri(uri: &str) -> String {
         end -= 1;
     }
     format!("{}...", &uri[..end])
+}
+
+/// glTF 2.0's default `wrapS`/`wrapT`: `REPEAT` (`10497`).
+const GLTF_REPEAT: u64 = 10497;
+
+/// A sampler wrap a texture declares that is not glTF's `REPEAT` default.
+///
+/// The raw numeric values are kept so the diagnostic can state exactly what the
+/// document authored instead of mapping an unknown value onto a spec enum.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct WrapDeclaration {
+    pub(crate) wrap_s: u64,
+    pub(crate) wrap_t: u64,
+}
+
+/// The non-`REPEAT` sampler wrap each texture declares, keyed by texture index.
+///
+/// A texture with no `sampler`, a sampler of `{}`, or explicit `10497` is glTF's
+/// REPEAT default and is **absent** from the map: the renderer samples REPEAT, so
+/// those declarations are already honoured. Any other value is exactly what this
+/// import cannot carry (`Mesh`/`MeshPbr` have no wrap field and `.ymodel` is not
+/// extended), so the caller names it rather than reinterpreting it.
+pub(crate) fn wrap_declarations(document: &serde_json::Value) -> BTreeMap<usize, WrapDeclaration> {
+    let mut declarations = BTreeMap::new();
+    let Some(textures) = document
+        .get("textures")
+        .and_then(serde_json::Value::as_array)
+    else {
+        return declarations;
+    };
+    let samplers = document
+        .get("samplers")
+        .and_then(serde_json::Value::as_array);
+    for (index, texture) in textures.iter().enumerate() {
+        // `Gltf::from_slice` validates the document before this runs, so a named
+        // sampler index is inside `samplers` and a wrap value is an integer.
+        let Some(sampler_index) = texture
+            .get("sampler")
+            .and_then(serde_json::Value::as_u64)
+            .map(|value| value as usize)
+        else {
+            continue;
+        };
+        let Some(sampler) = samplers.and_then(|samplers| samplers.get(sampler_index)) else {
+            continue;
+        };
+        let wrap_s = sampler
+            .get("wrapS")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(GLTF_REPEAT);
+        let wrap_t = sampler
+            .get("wrapT")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(GLTF_REPEAT);
+        if wrap_s != GLTF_REPEAT || wrap_t != GLTF_REPEAT {
+            declarations.insert(index, WrapDeclaration { wrap_s, wrap_t });
+        }
+    }
+    declarations
+}
+
+/// One distinct non-REPEAT wrap declaration and the slots that named it.
+struct WrapLoss {
+    declaration: WrapDeclaration,
+    slots: Vec<&'static str>,
+}
+
+/// Every non-REPEAT sampler wrap a primitive's imported textures declare.
+///
+/// Reported once per **distinct** `(wrapS, wrapT)` pair, not once per slot: an
+/// asset that puts one sampler on all five material slots produces one
+/// diagnostic naming all of them. The renderer samples REPEAT, so any other
+/// declaration is a named loss, never a silent reinterpretation.
+#[derive(Default)]
+pub(crate) struct WrapLosses {
+    losses: Vec<WrapLoss>,
+}
+
+impl WrapLosses {
+    /// Record the wrap `texture` declares, if it is not REPEAT.
+    ///
+    /// Called only when the slot is actually imported (its bytes were read and
+    /// registered): a slot whose image is external or refused carries no
+    /// sampler the renderer could honour anyway.
+    pub(crate) fn record(
+        &mut self,
+        slot: &'static str,
+        texture: &Texture<'_>,
+        declarations: &BTreeMap<usize, WrapDeclaration>,
+    ) {
+        let Some(declaration) = declarations.get(&texture.index()) else {
+            return;
+        };
+        match self
+            .losses
+            .iter_mut()
+            .find(|loss| loss.declaration == *declaration)
+        {
+            Some(loss) => {
+                if !loss.slots.contains(&slot) {
+                    loss.slots.push(slot);
+                }
+            }
+            None => self.losses.push(WrapLoss {
+                declaration: *declaration,
+                slots: vec![slot],
+            }),
+        }
+    }
+
+    /// Report every distinct declaration against `object`.
+    pub(crate) fn record_diagnostics(
+        &self,
+        import: &mut MeshImport,
+        object: Option<ObjectId>,
+        label: &str,
+    ) {
+        for loss in &self.losses {
+            let slots = loss.slots.join(", ");
+            import.record(
+                Diagnostic {
+                    object,
+                    code: DIAG_SAMPLER_WRAP_NOT_IMPORTED.into(),
+                    message: format!(
+                        "{label}: the {slots} texture declares sampler wrap (wrapS {}, wrapT \
+                         {}); this import does not carry sampler wrap and the renderer samples \
+                         mesh textures with REPEAT",
+                        loss.declaration.wrap_s, loss.declaration.wrap_t
+                    ),
+                },
+                Some(format!(
+                    "{label}: a texture sampler wrap other than REPEAT was not applied (mesh \
+                     textures are sampled with REPEAT)"
+                )),
+            );
+        }
+    }
 }
 
 /// The materials whose **base-colour** texture info carries

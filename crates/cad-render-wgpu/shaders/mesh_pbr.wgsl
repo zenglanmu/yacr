@@ -243,8 +243,10 @@ fn env_brdf_approx(roughness: f32, n_dot_v: f32) -> vec2<f32> {
 // camera f-stop — the PBR path's diffuse convention is the legacy one (`albedo *
 // n_dot_l`, no 1/π), so the scene-linear scale needs this compensation before the
 // display-referred curve. Tuning it moves the whole model up or down the curve's
-// shoulder; the shared `IBL_EXPOSURE` is the single place to change.
-const IBL_EXPOSURE: f32 = 2.2;
+// shoulder; the shared `IBL_EXPOSURE` is the single place to change. Calibrated
+// against the corrected textured DamagedHelmet frame (ADR-0044 §7): the REPEAT
+// sampler fix made the asset's real albedo visible, and 2.2 then overexposed it.
+const IBL_EXPOSURE: f32 = 0.72;
 
 /// The ACES fitted curve (Narkowicz / Hill fit), clamped to `[0, 1]`:
 /// `x*(2.51x+0.03) / (x*(2.43x+0.59)+0.14)`. Pure ALU, deterministic on every

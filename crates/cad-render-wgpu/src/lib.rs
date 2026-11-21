@@ -911,6 +911,11 @@ mod mesh_pbr_gpu_tests;
 /// texture is sampled, and an unresolved key draws untextured + is reported.
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod mesh_textured_gpu_tests;
+/// Native GPU contracts for the mesh material sampler wrap: glTF's default is
+/// REPEAT, so a V ∈ [1, 2] quad must reach the texture instead of clamping to
+/// its last row (ADR-0044 §7).
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod mesh_wrap_gpu_tests;
 /// Native GPU contracts for the in-place resident-batch overwrite (P4). Test
 /// only: it reads private renderer state and needs a real device.
 #[cfg(all(test, not(target_arch = "wasm32")))]

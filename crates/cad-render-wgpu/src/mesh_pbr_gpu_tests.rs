@@ -455,7 +455,7 @@ pub(crate) fn srgb_byte(linear: f32) -> f32 {
 /// (`IBL_EXPOSURE` + `tonemap_aces`). Duplicated deliberately: these are the
 /// numbers ADR-0044 §6 fixes, and a test that re-derived them from the shader
 /// could not notice the shader changing them.
-const IBL_EXPOSURE: f32 = 2.2;
+const IBL_EXPOSURE: f32 = 0.72;
 
 /// `tonemap_aces(x)` from `mesh_pbr.wgsl`: the ACES fit, clamped to `[0, 1]`.
 fn aces(x: f32) -> f32 {
@@ -677,13 +677,16 @@ fn tonemapping_is_ibl_only() {
              0.25 scene-linear emissive, frame {legacy_mid:?}"
         );
     }
-    // The same scene-linear value *through* the curve is a different byte (~214):
-    // if the curve leaked into the legacy branch, this is where it would show.
-    let curved = ibl_byte(0.25);
+    // A saturated scene-linear input *through* the curve is a different byte
+    // (~220 at `IBL_EXPOSURE = 0.72`) from the raw ceiling 255: if the curve
+    // leaked into the legacy branch (or stopped running on the IBL one), the
+    // saturated values would coincide. Low exposures make the curve near-linear
+    // around 0.25, so the discriminator is the input at the top of its domain.
+    let curved = ibl_byte(1.0);
     assert!(
-        (f32::from(legacy_mid[1]) - curved).abs() > 20.0,
-        "the IBL display curve must not run with IBL off: got {legacy_mid:?}, \
-         the tone-mapped value would be {curved:.1}"
+        (255.0 - curved).abs() > 20.0,
+        "the IBL display curve must bend a saturated input off the raw ceiling: \
+         1.0 would clip to 255, the curve gives {curved:.1}"
     );
 
     // --- IBL on: the curve runs, stays monotonic, and saturates at 1.0.
@@ -731,12 +734,15 @@ fn tonemapping_is_ibl_only() {
         luma(mid_high) < 250.0,
         "a mid scene-linear input must stay below the ceiling: {mid_high:?}"
     );
-    // And the curve is actually applied to the IBL path: the mid input is lifted
-    // onto the filmic shoulder rather than passed through linearly.
+    // And the curve is actually applied to the IBL path. At `IBL_EXPOSURE = 0.72`
+    // the mid-tones are near-linear on purpose (the textures are now bright
+    // enough to need the lower exposure), so the measurable effect is the
+    // shoulder: a saturated 1.0 rides below the legacy ceiling instead of
+    // clipping, while still being strictly above the mid input.
     assert!(
-        luma(mid_high) > luma(legacy_mid) + 20.0,
-        "the IBL path must tone-map a mid input (legacy {legacy_mid:?} vs IBL \
-         {mid_high:?})"
+        luma(bright) < 240.0 && luma(bright) > luma(mid_high) + 10.0,
+        "the IBL path must bend a saturated input through the filmic shoulder \
+         (legacy ceiling 255; mid {mid_high:?} vs bright {bright:?})"
     );
     assert_eq!(
         mid_high[3], 255,

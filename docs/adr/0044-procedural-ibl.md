@@ -301,3 +301,28 @@ tonemap/exposure，输出与 ADR-0039 D6 逐字节一致；**只有 IBL 路径**
 `cargo test -p cad-render-wgpu --test wgsl_validation`（离线 WGSL 解析）的逐条结果、以及
 HDR/色调映射前后的实测亮度表，记在 `docs/validation-ibl-2026-11-21.md`。这些仍是**数值/公式**
 证据，不是像素、golden、性能或产品验收；Metal/DX12/Android/浏览器 GPU 一律 **NOT VERIFIED**。
+
+## 7. 采样 wrap 缺陷（2026-11-21，补充记录）
+
+**根因**：`mesh_sampler` 的 U/V 是 `ClampToEdge`。glTF 2.0 的 sampler 默认 wrap 是
+**REPEAT**（10497），Khronos `DamagedHelmet` 的 `samplers: [{}]` 正是规范默认，且其
+`TEXCOORD_0` 的 V ∈ **[1.0006, 1.9987]**。Clamp 把每个纹素采样都钉在 V = 1.0，于是整个表面
+只显示纹理的**最后一行**沿 U 拉伸：一维条带，`metal ≈ 0.007`（看起来“零金属”）、emissive
+全黑（HUD/贴花不发光）、AO ≈ 211（近乎平坦）。这就是用户报告的“纹理很怪”，也解释了此前
+观察到的所有材质症状。
+
+**为什么曾被误判**：同一轮里确实存在 mip 链缺失（大 albedo 缩小后走样），所以该缺陷被归因于
+“没有 mip / 各向异性不足”。但条带与“零金属”是**坐标被 clamp** 的几何结果，不是滤波质量；
+mip/IBL 工作没有、也不可能修复它。mip 链与 16× 各向异性仍是真实的质量修复，保留。
+
+**修复**：`mesh_sampler` 的 U/V 改为 `Repeat`（W 保持 `ClampToEdge`，二维采样不使用）。
+CAD 栅格图像四边形使用独立的 `image_sampler`，**保持 `ClampToEdge`**，不受影响。导入端不把
+`wrapS`/`wrapT` 存进域模型（也不升 `FORMAT_MINOR`）：声明非 REPEAT wrap 的纹理槽按
+`import.gltf.sampler_wrap_not_imported` 报告，消息明确写出渲染器按 REPEAT 采样；缺省
+sampler / `{}` / 显式 `10497` 不产生诊断。回归契约见 `mesh_wrap_gpu_tests`
+（同一 4×4 纹理、V ∈ [1,2]：生产 sampler 显示绿色行，`ClampToEdge` 把红色最后一行铺满全帧）。
+
+**连带重标定**：wrap 修好后纹理的真实反照率第一次可见，`IBL_EXPOSURE` 由 §6.2 的 **2.2**
+下调为 **0.72**（唯一旋钮，环境未改），使等距视图重新落回 §6 的目标区间
+（均值 0.33–0.48 / p95 0.80–0.97 / >0.9 占 0.5–8 %）。实测表与前后对照见
+`docs/validation-ibl-2026-11-21.md`（本轮不改该文件）。

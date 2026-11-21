@@ -12,6 +12,8 @@
 //! Every refusal is kept in [`PbrLosses`] until the caller knows the entity id;
 //! nothing is dropped silently and no channel is guessed at.
 
+use std::collections::BTreeMap;
+
 use cad_domain::{CadResult, Diagnostic, MeshPbr, ObjectId};
 use cad_import_core::MeshImport;
 use gltf::{
@@ -21,7 +23,9 @@ use gltf::{
 };
 
 use crate::buffers::ResolvedBuffer;
-use crate::texture::{refusal_marker, resolve_texture_image, PbrDecl, TextureImage};
+use crate::texture::{
+    refusal_marker, resolve_texture_image, PbrDecl, TextureImage, WrapDeclaration, WrapLosses,
+};
 use crate::{
     DIAG_EMISSIVE_STRENGTH_NOT_IMPORTED, DIAG_EXTERNAL_IMAGE, DIAG_NORMAL_SCALE_NOT_IMPORTED,
     DIAG_PBR_IGNORED, DIAG_TEXTURE_TRANSFORM_NOT_IMPORTED,
@@ -111,6 +115,7 @@ impl<'a> PbrChannels<'a> {
     /// document note can report them. The channels share UV0, so a slot on any
     /// other set is not imported; a slot whose UV set was unusable stays unset
     /// while the scalar factors still apply.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn import(
         &self,
         uv_set: Option<u32>,
@@ -118,6 +123,8 @@ impl<'a> PbrChannels<'a> {
         buffers: &[ResolvedBuffer<'_>],
         import: &mut MeshImport,
         losses: &mut PbrLosses,
+        wrap_declarations: &BTreeMap<usize, WrapDeclaration>,
+        wraps: &mut WrapLosses,
     ) -> CadResult<Option<MeshPbr>> {
         let mut declared = MeshPbr {
             metallic: f64::from(self.metallic),
@@ -162,6 +169,8 @@ impl<'a> PbrChannels<'a> {
                 buffers,
                 import,
                 losses,
+                wrap_declarations,
+                wraps,
                 &mut ignored_uv_sets,
             )?;
             match slot {
@@ -205,6 +214,8 @@ fn import_slot(
     buffers: &[ResolvedBuffer<'_>],
     import: &mut MeshImport,
     losses: &mut PbrLosses,
+    wrap_declarations: &BTreeMap<usize, WrapDeclaration>,
+    wraps: &mut WrapLosses,
     ignored_uv_sets: &mut Vec<u32>,
 ) -> CadResult<Option<String>> {
     let Some((tex_coord, texture)) = reference else {
@@ -221,7 +232,12 @@ fn import_slot(
     }
     match resolve_texture_image(&texture, buffers)? {
         TextureImage::Embedded(bytes) => match import.register_texture(&bytes) {
-            Ok(key) => Ok(Some(key)),
+            Ok(key) => {
+                // The bytes are resident, so this slot's sampler wrap is what the
+                // renderer would sample it with; name any non-REPEAT declaration.
+                wraps.record(slot, &texture, wrap_declarations);
+                Ok(Some(key))
+            }
             Err(error) => {
                 // The refusal's own stable marker (`import.texture.too_large` and
                 // friends) is kept, and only this slot is lost.

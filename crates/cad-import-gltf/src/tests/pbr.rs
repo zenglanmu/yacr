@@ -185,6 +185,46 @@ fn a_metallic_roughness_texture_is_imported_with_its_uvs() {
 }
 
 #[test]
+fn a_non_repeat_sampler_wrap_on_a_pbr_slot_is_named() {
+    // The renderer samples REPEAT, so a mirrored/clamped PBR sampler cannot be
+    // honoured; the slot still imports its bytes and the wrap is reported.
+    let bytes = png();
+    let material = r#"{"pbrMetallicRoughness":{"roughnessFactor":0.5,"metallicRoughnessTexture":{"index":0}}}"#;
+    let (json, bin) = pbr_document(material, 1, &[TextureImage::Bin(&bytes)]);
+    let json = json.replace(
+        r#""textures":[{"source":0}]"#,
+        r#""textures":[{"sampler":0,"source":0}],"samplers":[{"wrapS":33648,"wrapT":33648}]"#,
+    );
+    assert!(
+        json.contains(r#""samplers":[{"wrapS":33648"#),
+        "the fixture must declare the sampler wrap"
+    );
+    let drawing = import(glb(&json, &bin)).expect("the PBR document imports");
+
+    assert!(
+        only_pbr(&drawing).metallic_roughness_texture.is_some(),
+        "the slot's bytes still import"
+    );
+    let diagnostic = drawing
+        .report
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == DIAG_SAMPLER_WRAP_NOT_IMPORTED)
+        .expect("the wrap diagnostic is present");
+    assert!(
+        diagnostic.message.contains("metallicRoughness")
+            && diagnostic.message.contains("33648")
+            && diagnostic.message.contains("REPEAT"),
+        "the diagnostic must name the PBR slot and the wrap: {}",
+        diagnostic.message
+    );
+    assert!(matches!(
+        drawing.report.completeness,
+        Completeness::Partial(_)
+    ));
+}
+
+#[test]
 fn a_normal_map_is_imported() {
     // `scale` keeps its spec default `1.0`: nothing to report.
     let bytes = png();

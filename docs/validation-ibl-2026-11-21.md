@@ -134,3 +134,34 @@ ordered.len()`）时下一帧被规划成**零批次**，屏幕上保留旧像�
 运行的检查：`cargo test -p cad-render-wgpu --lib`（361 passed，GPU 用例实跑）、
 `--test wgsl_validation`（14 passed）、clippy `-D warnings`、fmt、file-size 均通过。
 其它平台与多适配器仍为 **NOT VERIFIED**。
+
+## 7. 采样器 wrap 缺陷（同日追加，ADR-0044 §7）
+
+根因：mesh 材质的采样器 U/V 写死 `ClampToEdge`，而 glTF 2.0 的默认 wrap 是 **REPEAT**，该资产
+`TEXCOORD_0` 的 **V ∈ [1.0006, 1.9987]**（全部越界，采样点被夹到 V=1.0），于是每张贴图只剩**最后
+一行纹素**被采样：表面变成沿 U 拉直的一维色带，MR 最后一行 metal≈0.007（零金属）、emissive 全黑
+（无 HUD/贴花自发光）、AO≈211（几乎无遮挡）。此前把条纹归因于"缺 mipmap"是误诊；mip/各向异性是
+独立的真实质量改进。
+
+修复：`mesh_sampler` U/V 改 `Repeat`（W 不用，保持 clamp；CAD 光栅图 `image_sampler` 不动）；
+导入侧对声明了非 REPEAT 的 sampler 报 `import.gltf.sampler_wrap_not_imported`（不新增
+`Mesh`/`MeshPbr` 字段，`FORMAT_MINOR` 不变）。
+
+回归围栏（真实 GPU，Vulkan P620）：4×4 贴图最后一行红、其余绿，V∈[1,2] 的 quad ——
+生产采样器 green-dominant 192 / red 64（共 256 px），同用例内 `ClampToEdge` 采样器
+green-dominant 0 / red 256，缺陷被逐像素钉死。
+
+DamagedHelmet isometric 1600×1200，模型区域（非背景），Rec.709+sRGB：
+
+| 帧 | mean | median | p95 | >0.9 | cyan px | orange px | distinct colours |
+|---|---|---|---|---|---|---|---|
+| 修复前（ClampToEdge，曝光 2.2） | 0.366 | 0.323 | 0.869 | 4.33 % | 2 | 1866 | 45 161 |
+| 只修 wrap（REPEAT，仍 2.2） | 0.663 | 0.700 | 0.976 | 21.01 % | 5 276 | 4 945 | 66 251 |
+| 最终（REPEAT，曝光 **0.72**） | **0.442** | 0.395 | **0.897** | **4.33 %** | **8 002** | **3 919** | **66 347** |
+
+纹理恢复后亮度整体上移，`IBL_EXPOSURE` 由 2.2 重标定为 **0.72**（只改这一个常数，环境不动）；
+中间值 1.2 → 0.544/0.944/13.0 %、0.8 → 0.463/0.909/6.69 % 用于夹逼，最终落在 ADR-0044 §6 区间内。
+
+运行的检查：`cargo test -p cad-render-wgpu --lib`（362 passed，GPU 用例实跑）、
+`--test wgsl_validation`（14 passed）、`cargo test -p cad-import-gltf`（38 passed）、
+clippy `-D warnings`、fmt、file-size 均通过。应用内端到端观感仍为 **NOT VERIFIED**。

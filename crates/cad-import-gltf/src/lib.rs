@@ -148,6 +148,9 @@ pub const DIAG_NORMAL_SCALE_NOT_IMPORTED: &str = "import.gltf.normal_scale_not_i
 pub const DIAG_EMISSIVE_STRENGTH_NOT_IMPORTED: &str = "import.gltf.emissive_strength_not_imported";
 /// Stable diagnostic code: a base-colour `KHR_texture_transform` was ignored.
 pub const DIAG_TEXTURE_TRANSFORM_NOT_IMPORTED: &str = "import.gltf.texture_transform_not_imported";
+/// Stable diagnostic code: a texture declares a sampler wrap other than REPEAT,
+/// which this import does not carry and the renderer will not honour.
+pub const DIAG_SAMPLER_WRAP_NOT_IMPORTED: &str = "import.gltf.sampler_wrap_not_imported";
 /// Stable diagnostic code: a UV set was unusable and dropped as a whole.
 pub const DIAG_UVS_DROPPED: &str = "import.gltf.uvs_dropped";
 /// Stable diagnostic code (note): only one UV set is read per primitive.
@@ -308,6 +311,11 @@ impl Importer for GltfImporter {
         check_asset_version(&json)?;
         let transformed_materials = texture::transform_materials(&json);
         let pbr_declarations = texture::pbr_declarations(&json);
+        // The renderer samples mesh material textures with REPEAT (glTF's
+        // default). A document that declares another wrap cannot be stored in
+        // `Mesh`/`MeshPbr` or `.ymodel`, so it is named per imported slot rather
+        // than silently reinterpreted.
+        let wrap_declarations = texture::wrap_declarations(&json);
 
         let gltf = gltf::Gltf::from_slice(&request.bytes)
             .map_err(|error| CadError::CorruptData(format!("{DIAG_PARSE}: {error}")))?;
@@ -335,6 +343,7 @@ impl Importer for GltfImporter {
             cancelled,
             &transformed_materials,
             &pbr_declarations,
+            &wrap_declarations,
         );
         let mut stack = Vec::new();
         for node in scene.nodes() {

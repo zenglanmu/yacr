@@ -624,12 +624,26 @@ impl Renderer {
             ..Default::default()
         });
         // Mesh material sampler (ADR-0039 D6 + the CPU mip chain): trilinear
-        // filtering between the uploaded levels plus 16× anisotropy, so a
-        // 2048² albedo on a ~750 px mesh is filtered instead of point-sampled
-        // from level 0 (the striation/smear defect).
+        // filtering between the uploaded levels plus 16× anisotropy, so a large
+        // albedo on a small screen footprint is filtered rather than
+        // point-sampled from level 0. Mips are a genuine quality fix; they were
+        // **not** the cause of the striation/smear defect — that was the
+        // `ClampToEdge` wrap below, which forced every out-of-range `V` to the
+        // texture's last row (see ADR-0044 §7).
+        //
+        // Wrap is `Repeat` for U and V: glTF 2.0's default sampler wrap is
+        // REPEAT (10497), and the importer does not carry `wrapS`/`wrapT`
+        // through, so REPEAT is the only honest mode for mesh material
+        // textures. A document that declares a different wrap is named by the
+        // importer (`import.gltf.sampler_wrap_not_imported`) rather than
+        // silently reinterpreted. W stays `ClampToEdge`: a 2-D material texture
+        // never samples it. (Khronos `DamagedHelmet` has V ∈ [1, 2] with a
+        // default `{}` sampler; clamping there showed one stretched row as
+        // 1-D bands, zero-metal and black emissive.)
         //
         // A separate sampler, not a change to `image_sampler`: the latter is
-        // shared with CAD raster image quads, whose rendering must not change.
+        // shared with CAD raster image quads, whose `ClampToEdge` rendering must
+        // not change.
         //
         // Backend limit: wgpu clamps `anisotropy_clamp` to `min(16)` on a device
         // that reports `DownlevelFlags::ANISOTROPIC_FILTERING` (16 is the
@@ -639,8 +653,8 @@ impl Renderer {
         // documented backend limit, not a silent fallback in this code.
         let mesh_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("cad-mesh-sampler"),
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,

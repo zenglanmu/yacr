@@ -847,5 +847,77 @@ fn a_textured_primitive_with_vertex_colours_keeps_both() {
     assert_eq!(drawing.report.completeness, Completeness::Complete);
 }
 
+// Sampler wrap: the renderer samples REPEAT, so any other declaration is named.
+#[test]
+fn a_non_repeat_sampler_wrap_is_named_not_reinterpreted() {
+    let png = png();
+    let (json, bin) = textured_triangle(None, TextureImage::Bin(&png));
+    let json = with_sampler(&json, r#"{"wrapS":33071,"wrapT":33071}"#);
+    let drawing = import(glb(&json, &bin)).expect("the textured primitive still imports");
+
+    assert!(meshes(&drawing)[0].texture.is_some(), "the texture imports");
+    assert!(
+        codes(&drawing).contains(&DIAG_SAMPLER_WRAP_NOT_IMPORTED),
+        "a declared ClampToEdge wrap must be reported, not silently treated as REPEAT"
+    );
+    let diagnostic = drawing
+        .report
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == DIAG_SAMPLER_WRAP_NOT_IMPORTED)
+        .expect("the wrap diagnostic is present");
+    assert!(
+        diagnostic.message.contains("baseColorTexture")
+            && diagnostic.message.contains("33071")
+            && diagnostic.message.contains("REPEAT"),
+        "the diagnostic must name the slot, the declared wrap and the REPEAT the \
+         renderer actually samples: {}",
+        diagnostic.message
+    );
+    assert!(matches!(
+        drawing.report.completeness,
+        Completeness::Partial(_)
+    ));
+}
+
+#[test]
+fn a_repeat_or_absent_sampler_wrap_is_not_reported() {
+    // glTF 2.0's default is REPEAT; a `{}` sampler and a document with no
+    // `samplers` array both mean exactly what the renderer already does.
+    let png = png();
+    let (json, bin) = textured_triangle(None, TextureImage::Bin(&png));
+
+    let empty_sampler = with_sampler(&json, "{}");
+    let drawing = import(glb(&empty_sampler, &bin)).expect("an empty sampler imports");
+    assert!(
+        !codes(&drawing).contains(&DIAG_SAMPLER_WRAP_NOT_IMPORTED),
+        "an empty sampler is glTF's REPEAT default and must not be reported"
+    );
+    assert_eq!(drawing.report.completeness, Completeness::Complete);
+
+    // An explicit `10497` is the same declaration spelled out.
+    let explicit_repeat = with_sampler(&json, r#"{"wrapS":10497,"wrapT":10497}"#);
+    let drawing = import(glb(&explicit_repeat, &bin)).expect("an explicit REPEAT imports");
+    assert!(!codes(&drawing).contains(&DIAG_SAMPLER_WRAP_NOT_IMPORTED));
+
+    // No sampler at all: the default REPEAT, nothing to report.
+    let drawing = import(glb(&json, &bin)).expect("a sampler-free document imports");
+    assert!(!codes(&drawing).contains(&DIAG_SAMPLER_WRAP_NOT_IMPORTED));
+    assert_eq!(drawing.report.completeness, Completeness::Complete);
+}
+
+/// Point `textures[0]` at sampler 0 and add the given `samplers` array.
+fn with_sampler(json: &str, samplers: &str) -> String {
+    let textures = r#""textures":[{"source":0}]"#;
+    assert!(
+        json.contains(textures),
+        "the fixture must carry exactly one sampler-free texture"
+    );
+    json.replace(
+        textures,
+        &format!(r#""textures":[{{"sampler":0,"source":0}}],"samplers":[{samplers}]"#),
+    )
+}
+
 // PBR channel cases (ADR-0039 D4), one per authored channel family.
 mod pbr;
