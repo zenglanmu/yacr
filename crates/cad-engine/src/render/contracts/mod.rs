@@ -367,6 +367,7 @@ mod draw_preview;
 mod gpu_base;
 mod gpu_flags;
 mod gpu_selection;
+mod ibl_toggle;
 mod navigation;
 mod scene_preparation;
 mod settle;

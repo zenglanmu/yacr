@@ -488,7 +488,26 @@ impl Renderer {
     /// (`Camera.pbr_eye.w`), so the next frame picks it up without a pipeline
     /// rebuild, a plan invalidation or a re-upload. `false` restores the legacy
     /// `AMBIENT` floor exactly.
+    ///
+    /// Storing the flag is not enough on its own: once a progressive walk has
+    /// completed it keeps `cursor == ordered.len()`, and the frame key
+    /// (`frame_key`) deliberately excludes the IBL flag (it is not a
+    /// camera/attachment change). The next render with an unchanged key would
+    /// then accept no page, draw nothing into the retained colour target and
+    /// present the **pre-toggle** shading — the toggle was invisible after the
+    /// first settled frame. The geometry and camera are unchanged, so this
+    /// restarts the walk at cursor 0 over the loaded colour (clear depth only),
+    /// exactly like a selection-flag toggle (`set_selection_flags_enabled`),
+    /// instead of dropping the plan (which would clear the background) or doing a
+    /// full scene rebuild.
     pub fn set_ibl_enabled(&mut self, enabled: bool) {
+        if self.ibl_enabled == enabled {
+            return;
+        }
         self.ibl_enabled = enabled;
+        if let Some(frame) = self.progressive_frame.as_mut() {
+            frame.cursor = 0;
+            self.preserve_color_on_restart = true;
+        }
     }
 }

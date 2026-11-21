@@ -41,8 +41,9 @@
 | 命令 / 检查项 | 结果 | 看到的 |
 |---|---|---|
 | `cargo test -p cad-render-wgpu --test wgsl_validation --locked` | **PASS** `14 passed; 0 failed` | `mesh_pbr` 离线 WGSL 校验通过（含解析天空函数）；`Camera` 布局断言 160 B、成员偏移 `0/64/80/96/112/128/144` |
-| `cargo test -p cad-render-wgpu --lib --locked -- --test-threads=1` | **PASS** `346 passed; 0 failed; 4 ignored`（GPU 用例**已运行**，非跳过） | word 39 = 0/1 与 word 35 = 0；`metal_is_not_black_with_ibl_on`（metallic=1、无贴图、IBL 开 > 0.05 luma，关 < 0.01）；roughness 选瓣；AO 作用于间接项；`Legacy` 项与闭式解 `base*(1-metallic)*AMBIENT*occlusion = 0.25` 一致 |
+| `cargo test -p cad-render-wgpu --lib --locked -- --test-threads=1` | **PASS** `348 passed; 0 failed; 4 ignored`（GPU 用例**已运行**，非跳过） | word 39 = 0/1 与 word 35 = 0；`metal_is_not_black_with_ibl_on`（metallic=1、无贴图、IBL 开 > 0.05 luma，关 < 0.01）；roughness 选瓣；AO 作用于间接项；`Legacy` 项与闭式解 `base*(1-metallic)*AMBIENT*occlusion = 0.25` 一致；**同一渲染器两帧之间切换 IBL 必须重新着色**（渐进遍历完成后与 retained 页两种情形，修复前两者均 FAILED） |
 | `cargo test -p cad-scene --locked` | **PASS** `84 passed; 0 failed` | `pbr_mesh_emits_no_edge_overlay`（PBR 批 `edges` 为空且 `is_text_glyph()==false`，其余流一致）；`pbr: None` 仍带叠加；`Body3d` 存储边不变 |
+| `cargo test -p cad-engine --lib --locked -- --test-threads=1` | **PASS** `130 passed; 0 failed; 16 ignored` | 开关是 live frame 输入：失效帧、`view_revision` +1、**不**置 `navigation_pause_pending`（`pause_after_page == false`）、不推进 `input_revision`、不重建场景；`#[ignore]` 的硬件用例 `ibl_toggle_reshades_the_next_presented_frame_without_a_scene_rebuild` 在真实 GPU 上单独跑过（`1 passed`） |
 | `cargo test -p cad-app --locked -- --test-threads=1` | **PASS** lib `3119 passed; 0 failed; 3 ignored` + 6 个集成目标全绿 | 裸 `IBL` 翻转、`IBL ON/OFF/1/0` 显式设置、非法值 `ibl.invalid_value`、不产生事务/撤销/修订 |
 | `cargo test -p cad-ui-core --locked -- --test-threads=1` | **PASS** lib `848 passed; 0 failed; 1 ignored` | wire 解析与 `iblEnabled` 投影；命令表 245 条 |
 | `cargo test -p cad-host --locked` | **PASS** `451 passed; 0 failed` | 新增 `the_published_view_snapshot_carries_the_session_ibl_switch`：`ViewSnapshot.ibl_enabled` 默认 true → `IBL OFF` false → 裸 `IBL` true，文档修订不变且不可撤销 |
@@ -60,6 +61,13 @@
 **emissive 的边界（实测）**：该资产的 emissive 贴图只有约 0.95% 的纹素亮于 lum 20，渲染后只在少数
 角度出现稀疏原值像素（如 `(255,255,199)`、`(90,255,67)`），**没有**参考图那种 HUD 光晕——那需要
 bloom/tonemap，本 ADR 明确不做。不得把"HUD 观感"当成已实现。
+
+**同一会话里切换开关的缺陷（已修）**：首版 `Renderer::set_ibl_enabled` 只存 bool，没有重置
+渐进遍历的 `progressive_frame.cursor`；`frame_key` 又不含该标志，所以遍历已完成（`cursor ==
+ordered.len()`）时下一帧被规划成**零批次**，屏幕上保留旧像素——CLI（每次新进程、新遍历）看不出来，
+只有长驻宿主会中招。修复为"标志真正变化时把 cursor 归零并保留颜色重绘"，并补了两条真实 GPU 回归
+用例（遍历完成后 / 复用 retained 页）与一条 engine 契约用例；`progressive_restart_flash` 4 项仍过，
+平移的渐进优化未动。**应用内端到端呈现仍为 NOT VERIFIED**（需要人工点击确认）。
 
 ## 3. 真实 GPU / 跨后端
 

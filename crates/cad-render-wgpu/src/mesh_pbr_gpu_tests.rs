@@ -576,3 +576,95 @@ fn ibl_off_matches_the_legacy_lighting() {
         "enabling IBL must change the shaded result: legacy={first:?} ibl={ibl:?}"
     );
 }
+
+/// Commit `batch` **once** so the following renders exercise the retained
+/// progressive plan. [`draw`] re-commits per call, which drops that plan (a base
+/// change clears `progressive_frame`), so it can never prove a live toggle.
+fn upload_only(renderer: &mut Renderer, batch: &RenderBatch) {
+    renderer
+        .prepare_upload_batches(std::slice::from_ref(batch))
+        .and_then(|staged| renderer.commit_upload(staged, 0))
+        .expect("commit the PBR scene");
+}
+
+fn render_frame(renderer: &mut Renderer) -> [u8; 4] {
+    renderer
+        .render_3d(camera(), &RenderTarget::new(SIZE, SIZE))
+        .expect("render");
+    centre_pixel(renderer)
+}
+
+/// ADR-0044: the IBL switch is per-frame uniform data, so toggling it must
+/// re-shade the **next** presented frame on one renderer with one resident scene.
+///
+/// The production session enables progressive rendering, and a completed page
+/// walk keeps `progressive_frame` at `cursor == ordered.len()`. A frame key that
+/// ignores the IBL flag would therefore accept no page and keep the previous
+/// shading: the toggle would be invisible. This is the regression fence (the
+/// fixture is an unlit metal, black under the legacy lighting).
+#[test]
+fn ibl_toggle_reshades_the_next_frame_after_the_progressive_walk_completed() {
+    let Some(gpu) = gpu_or_skip("IBL live toggle") else {
+        return;
+    };
+    let mut renderer = init(&gpu);
+    // The production configuration (`cad-engine`'s `attach_with_gpu_time`).
+    renderer.set_progressive_rendering(true);
+    upload_only(&mut renderer, &unlit_metal());
+
+    renderer.set_ibl_enabled(false);
+    let legacy = render_frame(&mut renderer);
+    // An idle frame must not change the presented pixels (the walk has no page
+    // left to draw), so this is the settled legacy image the toggle must replace.
+    let idle = render_frame(&mut renderer);
+    assert_eq!(
+        legacy, idle,
+        "an idle frame with no new view input keeps the presented pixels"
+    );
+    assert!(
+        !renderer.frame_pending(),
+        "the single-page walk must be complete before the toggle"
+    );
+
+    renderer.set_ibl_enabled(true);
+    let ibl = render_frame(&mut renderer);
+    assert!(
+        luma(ibl) > luma(legacy) + 5.0,
+        "toggling IBL on must re-shade the next frame (legacy={legacy:?} \
+         ibl={ibl:?}); an unchanged frame means the walk was never restarted"
+    );
+    assert!(
+        ibl[3] > 0,
+        "the toggled frame must still show the drawn surface, got {ibl:?}"
+    );
+}
+
+/// ADR-0044 + ADR-0028: the engine passes `pause_after_page = true` for a frame
+/// that lands during a camera gesture, which reuses the retained base page. A
+/// toggle that arrives while such a pause is armed must still be visible: the
+/// retained page holds the **old** shading, so the walk has to redraw page 1
+/// with the new uniform (geometry and camera are unchanged, so the colour target
+/// is still valid).
+#[test]
+fn ibl_toggle_reshades_a_frame_that_reuses_the_retained_page() {
+    let Some(gpu) = gpu_or_skip("IBL retained-page toggle") else {
+        return;
+    };
+    let mut renderer = init(&gpu);
+    renderer.set_progressive_rendering(true);
+    upload_only(&mut renderer, &unlit_metal());
+
+    renderer.set_ibl_enabled(false);
+    let legacy = render_frame(&mut renderer);
+
+    renderer.set_ibl_enabled(true);
+    renderer
+        .render_3d_navigation(camera(), &RenderTarget::new(SIZE, SIZE), true)
+        .expect("paused frame");
+    let ibl = centre_pixel(&renderer);
+    assert!(
+        luma(ibl) > luma(legacy) + 5.0,
+        "a paused frame must not keep the pre-toggle retained page \
+         (legacy={legacy:?} ibl={ibl:?})"
+    );
+}
