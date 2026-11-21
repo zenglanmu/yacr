@@ -64,6 +64,7 @@ impl Renderer {
             mask_frame_pipeline: None,
             image_texture_layout: None,
             image_sampler: None,
+            mesh_sampler: None,
             target: None,
             target_view: None,
             depth_view: None,
@@ -615,7 +616,36 @@ impl Renderer {
             address_mode_w: wgpu::AddressMode::ClampToEdge,
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
+            // Image quads upload `mip_level_count: 1`, so the mip filter can
+            // never select anything but level 0: CAD raster images keep exactly
+            // the sampling they had. (Mesh material channels use
+            // `mesh_sampler` below, which does filter mips.)
             mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            ..Default::default()
+        });
+        // Mesh material sampler (ADR-0039 D6 + the CPU mip chain): trilinear
+        // filtering between the uploaded levels plus 16× anisotropy, so a
+        // 2048² albedo on a ~750 px mesh is filtered instead of point-sampled
+        // from level 0 (the striation/smear defect).
+        //
+        // A separate sampler, not a change to `image_sampler`: the latter is
+        // shared with CAD raster image quads, whose rendering must not change.
+        //
+        // Backend limit: wgpu clamps `anisotropy_clamp` to `min(16)` on a device
+        // that reports `DownlevelFlags::ANISOTROPIC_FILTERING` (16 is the
+        // interface ceiling, so 16 is never reduced there) and substitutes 1 on
+        // one that does not (for example WebGL2). The renderer holds a `Device`,
+        // not an `Adapter`, so that substitution cannot be observed here; it is a
+        // documented backend limit, not a silent fallback in this code.
+        let mesh_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("cad-mesh-sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            anisotropy_clamp: 16,
             ..Default::default()
         });
         // All-identity PBR bind group: the fallback for a batch whose channel set
@@ -625,7 +655,7 @@ impl Renderer {
             &device,
             &pbr_texture_layout,
             &pbr_identities,
-            &image_sampler,
+            &mesh_sampler,
         );
         let (mask_pipeline, mask_frame_pipeline) = Self::create_mask_pipelines(
             &device,
@@ -724,6 +754,7 @@ impl Renderer {
         self.mask_frame_pipeline = Some(mask_frame_pipeline);
         self.image_texture_layout = Some(image_texture_layout);
         self.image_sampler = Some(image_sampler);
+        self.mesh_sampler = Some(mesh_sampler);
         self.active_backend = Some(caps.actual);
         self.device_generation += 1;
         // A new device generation invalidates any page-cost knowledge.

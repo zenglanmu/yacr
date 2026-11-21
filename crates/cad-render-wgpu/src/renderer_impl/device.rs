@@ -24,6 +24,7 @@ impl Renderer {
         self.image_pipeline = None;
         self.image_texture_layout = None;
         self.image_sampler = None;
+        self.mesh_sampler = None;
         self.layout = None;
         self.target = None;
         self.target_view = None;
@@ -134,6 +135,7 @@ impl Renderer {
         self.image_pipeline = None;
         self.image_texture_layout = None;
         self.image_sampler = None;
+        self.mesh_sampler = None;
         self.layout = None;
         self.target = None;
         self.target_view = None;

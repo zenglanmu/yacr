@@ -33,6 +33,7 @@ mod pulled_rebuild;
 mod render;
 mod render_camera;
 mod state;
+mod texture_mip;
 mod types;
 mod upload;
 mod upload_prepare;
@@ -54,4 +55,10 @@ pub(crate) use alloc::{
 };
 pub(crate) use background_ink::light_with_background_flag;
 pub(crate) use encode::merged_texture_fallbacks;
+// The CPU mip-chain builder (`texture_mip`) is shared with the GPU contract in
+// `mesh_mip_gpu_tests`, so the test generates its levels with exactly the code
+// the upload path runs.
+pub(crate) use texture_mip::{
+    generate_mip_levels, mip_level_count, mipped_rgba8_bytes, write_texture_level, MipRole,
+};
 pub(crate) use types::{prefix_outcome, CheckpointFacts, IncomingResources, PrefixOutcome};

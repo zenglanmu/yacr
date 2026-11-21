@@ -13,9 +13,10 @@ pub(crate) struct GpuTexture {
     /// Group 2 bind group (texture view + shared sampler), shared by every quad
     /// that samples this key.
     pub(crate) bind_group: wgpu::BindGroup,
-    /// Padded RGBA bytes actually uploaded: `height` rows of `width * 4` bytes
-    /// each rounded up to wgpu's 256-byte copy alignment. Charged once per key
-    /// against the frame byte budget.
+    /// Padded RGBA bytes actually uploaded: for level 0, `height` rows of
+    /// `width * 4` bytes each rounded up to wgpu's 256-byte copy alignment; a
+    /// mesh material texture adds one such figure per generated mip level.
+    /// Charged once per key against the frame byte budget.
     pub(crate) upload_bytes: usize,
     /// The decoded image this texture was uploaded from, held by identity so the
     /// cache can tell whether a reused [`ResourceKey`] still refers to the same

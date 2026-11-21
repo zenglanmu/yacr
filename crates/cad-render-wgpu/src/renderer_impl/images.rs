@@ -258,17 +258,33 @@ impl Renderer {
     /// includes the base-colour key **and** the four PBR slots. Each key is
     /// resolved through the **same** decoded-image cache the raster images use and
     /// uploaded with the image pipeline's texture layout
-    /// ([`Self::image_texture_layout`]) and shared filtering sampler, so mesh
-    /// textures and image quads share one allocation/decode path.
+    /// ([`Self::image_texture_layout`]), so mesh textures and image quads share one
+    /// allocation/decode path.
+    ///
+    /// Unlike a raster image quad, every mesh texture is uploaded with a
+    /// **CPU-generated mip chain** (`texture_mip::generate_mip_levels`, one
+    /// `write_texture` per level) and is sampled by the dedicated
+    /// `mesh_sampler` (trilinear mip filtering, 16× anisotropy). Without it
+    /// a 2048² albedo minified onto a few hundred pixels sampled level 0 alone and
+    /// aliased into striations.
     ///
     /// Texel format follows the key's **role**, read from the resident batches:
     ///
-    /// * base colour and emissive are colour → `Rgba8UnormSrgb` (linear on sample);
+    /// * base colour and emissive are colour → `Rgba8UnormSrgb` (linear on sample),
+    ///   mips averaged in **linear light** and re-encoded;
     /// * metallic-roughness, normal and occlusion are data → `Rgba8Unorm`. Decoding
-    ///   a normal map through sRGB would break the tangent-space normal.
+    ///   a normal map through sRGB would break the tangent-space normal. Its mips
+    ///   are averaged and then **renormalised**; the two scalar maps get a plain
+    ///   box average.
     ///
     /// A key used in both roles is uploaded once per role (two textures); that is
-    /// rare and keeps each sample correct rather than picking one convention.
+    /// rare and keeps each sample correct rather than picking one convention. A
+    /// key used as both a normal map and a scalar map gets the `Linear` mip rule
+    /// (renormalising a scalar map would corrupt it).
+    ///
+    /// The budget request and [`ImageUploadReport::bytes`] both count the **whole**
+    /// chain, so a mip-chained upload is ~1/3 larger than level 0 and a budget
+    /// refusal cannot be dodged by ignoring the extra levels.
     ///
     /// After the residency update, one bind group is created per distinct
     /// five-slot channel set referenced by a resident PBR batch
@@ -301,8 +317,12 @@ impl Renderer {
             .as_ref()
             .ok_or_else(|| CadError::GpuFailure("renderer not initialized".into()))?
             .clone();
+        // The **mesh** sampler, not the raster-image one: mesh material channels
+        // are uploaded with a CPU-generated mip chain, so they need trilinear mip
+        // filtering (and anisotropy). `image_sampler` keeps its one-level,
+        // `Nearest`-mip behaviour so CAD raster image quads are unchanged.
         let sampler = self
-            .image_sampler
+            .mesh_sampler
             .as_ref()
             .ok_or_else(|| CadError::GpuFailure("renderer not initialized".into()))?
             .clone();
@@ -315,6 +335,12 @@ impl Renderer {
             std::collections::HashSet::new();
         let mut data_role: std::collections::HashSet<ResourceKey> =
             std::collections::HashSet::new();
+        // The mip filtering rule of each **data** key. A normal map needs
+        // renormalisation; metallic-roughness and occlusion are plain linear
+        // averages. A key used in both roles gets `Linear`: renormalising a
+        // scalar map would corrupt it, and the shared-key case is already
+        // ambiguous data rather than a supported configuration.
+        let mut data_mip_role: HashMap<ResourceKey, MipRole> = HashMap::new();
         for batch in &self.batches {
             if let Some(key) = &batch.texture {
                 colour_role.insert(key.clone());
@@ -322,6 +348,15 @@ impl Renderer {
             if let Some(pbr) = &batch.pbr {
                 if let Some(key) = &pbr.emissive_texture {
                     colour_role.insert(key.clone());
+                }
+                if let Some(key) = &pbr.normal {
+                    data_mip_role.entry(key.clone()).or_insert(MipRole::Normal);
+                }
+                for key in [&pbr.metallic_roughness, &pbr.occlusion]
+                    .into_iter()
+                    .flatten()
+                {
+                    data_mip_role.insert(key.clone(), MipRole::Linear);
                 }
                 for key in [&pbr.metallic_roughness, &pbr.normal, &pbr.occlusion]
                     .into_iter()
@@ -358,15 +393,21 @@ impl Renderer {
                     .get(key)
                     .is_some_and(|existing| Arc::ptr_eq(&existing.decoded, &decoded));
                 if !reusable {
-                    let requested = u64::from(decoded.width) * u64::from(decoded.height) * 4;
+                    // The request is the **whole** chain (level 0 plus every
+                    // generated level), not just level 0: a budget refusal that
+                    // ignored the mips would admit a texture the ledger then
+                    // charges more for.
+                    let requested = mipped_rgba8_bytes(decoded.width, decoded.height);
                     self.admit_gpu_memory(&[(GpuMemoryCategory::ImageTexture, requested)])?;
-                    let created = Self::build_texture(
+                    let created = Self::build_texture_with_format(
                         &device,
                         &queue,
                         &texture_layout,
                         &sampler,
                         &decoded,
                         &self.gpu_memory,
+                        wgpu::TextureFormat::Rgba8UnormSrgb,
+                        Some(MipRole::SrgbColour),
                     )
                     .map_err(|error| self.image_allocation_error(key, error))?;
                     report.bytes += created.upload_bytes as u64;
@@ -381,7 +422,8 @@ impl Renderer {
                     .get(key)
                     .is_some_and(|existing| Arc::ptr_eq(&existing.decoded, &decoded));
                 if !reusable {
-                    let requested = u64::from(decoded.width) * u64::from(decoded.height) * 4;
+                    let role = data_mip_role.get(key).copied().unwrap_or(MipRole::Linear);
+                    let requested = mipped_rgba8_bytes(decoded.width, decoded.height);
                     self.admit_gpu_memory(&[(GpuMemoryCategory::ImageTexture, requested)])?;
                     let created = Self::build_texture_with_format(
                         &device,
@@ -391,6 +433,7 @@ impl Renderer {
                         &decoded,
                         &self.gpu_memory,
                         wgpu::TextureFormat::Rgba8Unorm,
+                        Some(role),
                     )
                     .map_err(|error| self.image_allocation_error(key, error))?;
                     report.bytes += created.upload_bytes as u64;
@@ -537,6 +580,17 @@ impl Renderer {
         &self.mesh_texture_fallbacks
     }
 
+    /// The sampler bound at group 2 of the PBR and textured-mesh pipelines:
+    /// trilinear mip filtering with 16× anisotropy.
+    ///
+    /// Crate-visible so the GPU contract in `mesh_pbr_gpu_tests` can sample a
+    /// minified texture with the **same** sampler the production bind groups use
+    /// (a test-local sampler would not prove anything about the product path).
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(crate) fn mesh_sampler(&self) -> Option<&wgpu::Sampler> {
+        self.mesh_sampler.as_ref()
+    }
+
     /// Turn one failed image allocation into the crate's `CadError` **and** the
     /// recorded explicit refusal.
     ///
@@ -569,6 +623,11 @@ impl Renderer {
     /// shared sampler. The returned texture is cached per resource key and
     /// shared by every quad that references it.
     ///
+    /// This is the **raster image quad** path: an `Rgba8UnormSrgb` texture with
+    /// no mip chain (`mip_level_count: 1`), sampled by the renderer's
+    /// `image_sampler`. Mesh material channels take
+    /// [`Self::build_texture_with_format`] with a [`MipRole`].
+    ///
     /// Fallible: the texture (and its bind group) are created inside the crate's
     /// allocation guard, so a driver refusal is classified instead of reaching
     /// wgpu's default handler, which aborts the process on an invalid handle.
@@ -588,14 +647,20 @@ impl Renderer {
             decoded,
             ledger,
             wgpu::TextureFormat::Rgba8UnormSrgb,
+            None,
         )
     }
 
-    /// [`Self::build_texture`] with an explicit texel format.
+    /// [`Self::build_texture`] with an explicit texel format and mip role.
     ///
     /// Base-colour and emissive maps are colour and use `Rgba8UnormSrgb`; the
     /// metallic-roughness, normal and occlusion maps are linear data and use
     /// `Rgba8Unorm` (ADR-0039 D6) — sRGB-decoding a normal map would corrupt it.
+    ///
+    /// `mip_role` decides the CPU mip filtering rule ([`MipRole`]); `None`
+    /// creates a one-level texture. When it is `Some`, the texture is created
+    /// with the full chain and **every** level is written, so the sampler can
+    /// select any of them.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn build_texture_with_format(
         device: &wgpu::Device,
@@ -605,7 +670,20 @@ impl Renderer {
         decoded: &Arc<DecodedImage>,
         ledger: &Arc<GpuMemoryLedger>,
         format: wgpu::TextureFormat,
+        mip_role: Option<MipRole>,
     ) -> Result<GpuTexture, PulledAllocationError> {
+        // Levels 1..end, generated here on the CPU: the bytes are already
+        // decoded, the result is deterministic and no backend-specific render
+        // pass (or per-backend variance) is involved.
+        let levels = mip_role.map_or_else(Vec::new, |role| {
+            generate_mip_levels(decoded.rgba.as_ref(), decoded.width, decoded.height, role)
+        });
+        // Level 0 plus every generated level; an empty `levels` is exactly one
+        // level, so both paths share the same arithmetic.
+        let mip_levels = 1 + levels.len() as u32;
+        if mip_role.is_some() {
+            debug_assert_eq!(mip_levels, mip_level_count(decoded.width, decoded.height));
+        }
         let texture = allocation_guard(device, || {
             device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("cad-image-texture"),
@@ -614,7 +692,7 @@ impl Renderer {
                     height: decoded.height,
                     depth_or_array_layers: 1,
                 },
-                mip_level_count: 1,
+                mip_level_count: mip_levels,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
                 format,
@@ -622,43 +700,29 @@ impl Renderer {
                 view_formats: &[],
             })
         })?;
-        // `write_texture` needs the row stride padded to the 256-byte copy
-        // alignment; the source rows are tightly packed, so copy through a
-        // padded scratch buffer only when the stride is not already aligned.
-        let row_bytes = decoded.width as usize * 4;
-        let aligned = row_bytes.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize)
-            * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize;
-        let padded;
-        let data: &[u8] = if aligned == row_bytes {
-            decoded.rgba.as_ref()
-        } else {
-            let mut buffer = vec![0u8; aligned * decoded.height as usize];
-            for row in 0..decoded.height as usize {
-                buffer[row * aligned..row * aligned + row_bytes]
-                    .copy_from_slice(&decoded.rgba[row * row_bytes..(row + 1) * row_bytes]);
-            }
-            padded = buffer;
-            &padded
-        };
-        queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            data,
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(aligned as u32),
-                rows_per_image: Some(decoded.height),
-            },
-            wgpu::Extent3d {
-                width: decoded.width,
-                height: decoded.height,
-                depth_or_array_layers: 1,
-            },
+        // One `write_texture` per level, each with that level's own size and
+        // 256-byte-padded row stride (level 0 included).
+        let mut upload_bytes = write_texture_level(
+            queue,
+            &texture,
+            0,
+            decoded.width,
+            decoded.height,
+            decoded.rgba.as_ref(),
         );
+        for (index, level) in levels.iter().enumerate() {
+            upload_bytes += write_texture_level(
+                queue,
+                &texture,
+                index as u32 + 1,
+                level.width,
+                level.height,
+                &level.rgba,
+            );
+        }
+        // `TextureViewDescriptor::default()` spans **every** mip level
+        // (`base_mip_level: 0`, `mip_level_count: None`), so each bind group below
+        // exposes the whole chain to the sampler.
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let bind_group = allocation_guard(device, || {
             device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -683,7 +747,9 @@ impl Renderer {
         Ok(GpuTexture {
             texture,
             bind_group,
-            upload_bytes: aligned * decoded.height as usize,
+            // Every level's padded bytes: a mip-chained texture reports (and is
+            // charged) more than level 0 alone.
+            upload_bytes,
             decoded: Arc::clone(decoded),
             texture_charge,
         })

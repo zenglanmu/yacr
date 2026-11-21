@@ -469,6 +469,12 @@ pub struct Renderer {
     image_texture_layout: Option<wgpu::BindGroupLayout>,
     /// Shared linear, clamp-to-edge sampler for every uploaded image.
     image_sampler: Option<wgpu::Sampler>,
+    /// Dedicated sampler for **mesh material** channels (textured and PBR
+    /// meshes): trilinear mip filtering plus 16× anisotropy, which the
+    /// CPU-generated mip chain needs. Deliberately separate from
+    /// `image_sampler`, whose `Nearest` mip filter and single-level
+    /// textures keep CAD raster image quads rendering exactly as before.
+    mesh_sampler: Option<wgpu::Sampler>,
     target: Option<wgpu::Texture>,
     target_view: Option<wgpu::TextureView>,
     depth_view: Option<wgpu::TextureView>,
@@ -893,6 +899,10 @@ pub(crate) use plan::*;
 mod conic_overwrite_gpu_tests;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod cursor_transient_gpu_tests;
+/// Native GPU contracts for mesh-texture mip filtering: a minified checkerboard
+/// must sample its footprint average with the uploaded chain, not alias.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod mesh_mip_gpu_tests;
 /// Native GPU contracts for the PBR channel (ADR-0039 D6): normal map, metallic,
 /// emissive and occlusion each provably change the presented pixels.
 #[cfg(all(test, not(target_arch = "wasm32")))]

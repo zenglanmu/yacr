@@ -31,13 +31,13 @@ use std::time::Duration;
 
 const SIZE: u32 = 64;
 /// A canonical document texture key (`<32 lowercase hex>.png`).
-const BASE_KEY: &str = "4c2f2e0a5f3d9b7c1e8a6d4b2c0f9e71.png";
+pub(crate) const BASE_KEY: &str = "4c2f2e0a5f3d9b7c1e8a6d4b2c0f9e71.png";
 const MR_KEY: &str = "11111111111111111111111111111111.png";
 const NORMAL_KEY: &str = "22222222222222222222222222222222.png";
 const EMISSIVE_KEY: &str = "33333333333333333333333333333333.png";
 const OCCLUSION_KEY: &str = "44444444444444444444444444444444.png";
 
-fn gpu_or_skip(what: &str) -> Option<HeadlessGpu> {
+pub(crate) fn gpu_or_skip(what: &str) -> Option<HeadlessGpu> {
     match create_headless_gpu(BackendPreference::Auto) {
         Ok(gpu) => {
             eprintln!(
@@ -53,7 +53,7 @@ fn gpu_or_skip(what: &str) -> Option<HeadlessGpu> {
     }
 }
 
-fn init(gpu: &HeadlessGpu) -> Renderer {
+pub(crate) fn init(gpu: &HeadlessGpu) -> Renderer {
     let mut renderer = Renderer::new(BackendPreference::Auto);
     renderer.set_poll_timeout(Duration::from_secs(30));
     renderer
@@ -92,7 +92,7 @@ fn source(entity: u128) -> SelectionRef {
 ///
 /// `normal` is a vertex attribute, not a geometric fact: a `-Z` normal is a
 /// surface the light cannot reach while its winding stays visible.
-fn pbr_quad(normal: [f32; 3], uvs: Vec<[f32; 2]>, pbr: RenderPbr) -> RenderBatch {
+pub(crate) fn pbr_quad(normal: [f32; 3], uvs: Vec<[f32; 2]>, pbr: RenderPbr) -> RenderBatch {
     RenderBatch {
         uvs,
         texture: None,
@@ -127,12 +127,12 @@ fn pbr_quad(normal: [f32; 3], uvs: Vec<[f32; 2]>, pbr: RenderPbr) -> RenderBatch
     }
 }
 
-fn unit_uvs() -> Vec<[f32; 2]> {
+pub(crate) fn unit_uvs() -> Vec<[f32; 2]> {
     vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]
 }
 
 /// A scalar-only material: no texture channel is active.
-fn scalar(metallic: f32, roughness: f32, emissive: [f32; 3]) -> RenderPbr {
+pub(crate) fn scalar(metallic: f32, roughness: f32, emissive: [f32; 3]) -> RenderPbr {
     RenderPbr {
         metallic,
         roughness,
@@ -428,7 +428,7 @@ fn unlit_metal() -> RenderBatch {
 
 /// sRGB-encode one linear channel the way the `Rgba8UnormSrgb` target does, so a
 /// legacy expectation is stated in the readback's own units.
-fn srgb_byte(linear: f32) -> f32 {
+pub(crate) fn srgb_byte(linear: f32) -> f32 {
     let encoded = if linear <= 0.003_130_8 {
         linear * 12.92
     } else {
