@@ -293,6 +293,9 @@ impl CadSession {
             self.core.controller.borrow().snap_grid_enabled(),
             self.core.controller.borrow().snap_spacing(),
             self.core.controller.borrow().ortho_enabled(),
+            // The controller's real PBR switch: `IBL` image-based lighting is
+            // the default, and an `IBL OFF` session projects `false`.
+            self.core.controller.borrow().ibl_enabled(),
             snap_kind,
             crosshair,
             cursor_world,

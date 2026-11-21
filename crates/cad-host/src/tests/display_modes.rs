@@ -136,3 +136,51 @@ fn viewres_token_reaches_the_render_session() {
         "an unchanged VIEWRES must not churn the base"
     );
 }
+
+/// `IBL` maps to the engine `ViewSnapshot.ibl_enabled` the host publishes.
+///
+/// The narrowest observable seam is the render session's own published snapshot
+/// (`HostCore::render.view_snapshot()`); the session token has no
+/// display-settings or scene-base consumer, so it is not visible through
+/// [`display_settings`]. Image-based lighting is the session default,
+/// `IBL OFF` clears it, and the bare `IBL` selector toggles it back. The switch
+/// is session-only: it produces no ChangeSet and records no undo entry, so the
+/// document revision must not move.
+#[test]
+fn the_published_view_snapshot_carries_the_session_ibl_switch() {
+    let core = core();
+    let document = core.controller.borrow().document_id;
+    let revision_before = core.controller.borrow().drawing().unwrap().revision();
+
+    core.sync_render().expect("the baseline sync publishes");
+    assert!(
+        core.render.view_snapshot().ibl_enabled,
+        "IBL defaults to ImageBased, so the published view enables image-based lighting"
+    );
+
+    core.command(CommandId::Ibl, CommandPayload::Ibl(false))
+        .expect("IBL OFF is a session-only switch");
+    core.sync_render().expect("the IBL OFF sync publishes");
+    assert!(
+        !core.render.view_snapshot().ibl_enabled,
+        "IBL OFF must reach the engine snapshot as the legacy lighting path"
+    );
+
+    core.command(CommandId::Ibl, CommandPayload::None)
+        .expect("bare IBL toggles");
+    core.sync_render().expect("the bare-IBL sync publishes");
+    assert!(
+        core.render.view_snapshot().ibl_enabled,
+        "the bare IBL toggle returns to image-based lighting"
+    );
+
+    let revision_after = core.controller.borrow().drawing().unwrap().revision();
+    assert_eq!(
+        revision_after, revision_before,
+        "IBL is session state: no ChangeSet is produced, so the drawing revision stays put"
+    );
+    assert!(
+        !core.controller.borrow().application.can_undo(&document),
+        "IBL records no undo entry"
+    );
+}

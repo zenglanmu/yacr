@@ -1,7 +1,7 @@
 //! The 2026-11-07 extras batch view-only commands: `VIEWRES`, `VSCURRENT`,
-//! `WIPEOUTFRAME` and `CVPORT`.
+//! `IBL`, `WIPEOUTFRAME` and `CVPORT`.
 //!
-//! All four mutate [`SessionState`] only: no database write, revision bump,
+//! All of them mutate [`SessionState`] only: no database write, revision bump,
 //! `cad-history` entry, `ChangeSet` or `ZOOM PREVIOUS` snapshot. `-PAN` is
 //! not implemented here: it rides the existing `CommandId::Pan` camera path with
 //! a `Points` delta, so it has no second camera authority.
@@ -128,6 +128,52 @@ impl Application {
                     VisualStyleToken::Shaded =>
                         "3D bodies draw their filled mesh plus stored-edge overlay; other geometry \
                          keeps its display",
+                }
+            ),
+        ))
+    }
+
+    /// `IBL [ON|OFF]`: toggle or store the session PBR image-based-lighting
+    /// switch.
+    ///
+    /// A **bare** `IBL` toggles the current value; `IBL ON`/`IBL OFF` (and the
+    /// typed `1`/`0` spellings, parsed by the command line) set it explicitly.
+    /// The stored token is [`PbrEnvironment`], the value the procedural
+    /// image-based-lighting lane reads at render time.
+    ///
+    /// Session-only and display-only: no database write, revision bump,
+    /// `cad-history` entry, `ChangeSet` or persisted preference. A payload that
+    /// is not this command's own is refused rather than treated as a toggle.
+    pub(crate) fn ibl(
+        &mut self,
+        session: &mut SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        let enabled = match &command.payload {
+            // The bare selector: flip the live value.
+            CommandPayload::None => !session.view_extras.pbr_environment.is_image_based(),
+            CommandPayload::Ibl(enabled) => *enabled,
+            _ => {
+                return Err(CadError::InvalidInput(
+                    "ibl.invalid_payload: IBL takes ON or OFF (or no payload to toggle)".into(),
+                ))
+            }
+        };
+        session
+            .view_extras
+            .set_pbr_environment(if enabled { "IBL" } else { "LEGACY" })?;
+        let active = session.view_extras.pbr_environment;
+        Ok(view_outcome(
+            "ibl.value",
+            format!(
+                "IBL: image-based lighting is {} ({}) — {} (session state only; the drawing was \
+                 not written and no revision or history entry was recorded)",
+                if active.is_image_based() { "ON" } else { "OFF" },
+                active.name(),
+                if active.is_image_based() {
+                    "PBR metal/roughness surfaces are lit by the procedural environment"
+                } else {
+                    "the shader falls back to the single dominant light"
                 }
             ),
         ))

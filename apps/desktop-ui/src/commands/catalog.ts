@@ -985,6 +985,11 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'DGNCLIP', labelKey: 'draw.kind.dgnclip', icon: 'trim', group: 'modify' },
   { id: 'DGNLAYERS', labelKey: 'draw.kind.dgnlayers', icon: 'layers', group: 'properties' },
   { id: 'DGNADJUST', labelKey: 'draw.kind.dgnadjust', icon: 'settings', group: 'properties' },
-  // The 2026-11-12 interface wave (chrome-owned UI selectors), appended last so no row moves.
+  // The 2026-11-12 interface wave (chrome-owned UI selectors).
   ...INTERFACE_COMMAND_CATALOG,
+  // IBL (image-based lighting) is the renderer's PBR lighting toggle for meshes:
+  // a bare name toggles and `IBL ON|OFF|1|0` sets it. The View tab's display
+  // panel carries the ribbon entry; this row is the command-line affordance.
+  // Appended last so no shipped row moves.
+  { id: 'IBL', labelKey: 'ribbon.command.ibl', icon: 'sun', group: 'view' },
 ]);

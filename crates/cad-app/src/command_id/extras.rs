@@ -54,6 +54,14 @@
 //! [`cad_representation::RepresentationContext::body_wireframe`], changes no
 //! other geometry and writes no database row, revision or history entry.
 //!
+//! `IBL [ON|OFF]` toggles (bare) or sets the session PBR environment-lighting
+//! switch. `IBL`/`ON`/`1`/`IMAGEBASED` store `PbrEnvironment::ImageBased` (the
+//! default); `LEGACY`/`OFF`/`0` store `PbrEnvironment::Legacy`. Any other typed
+//! argument is refused by name at the command-line layer (`ibl.invalid_value`)
+//! instead of being treated as a toggle. It is session-only: no database write,
+//! revision bump, history entry, `ChangeSet` or persisted preference. The status
+//! wire projects it as `iblEnabled`.
+//!
 //! `WIPEOUTFRAME [0|1|2]` is the **system-variable spelling** of the
 //! `WIPEOUT Frames` option: `0` hides every frame (the mask still masks), `1`
 //! displays and plots them, `2` displays without plotting. It writes the same

@@ -83,7 +83,7 @@ export const STANDARD_VIEW_KEYS: readonly StandardViewName[] = Object.freeze(
  *
  * This is data (not a comment) because the ribbon's layout contract is built on
  * it: the seven buttons must place each pair in two cells that share an edge
- * (see `pairsShareEdge` in `ribbon-model.mjs`), and the test walks this list
+ * (see `pairsShareEdge` in `ribbon-layout.ts`), and the test walks this list
  * instead of restating the intent.
  */
 export const STANDARD_VIEW_PAIRS: readonly (readonly [StandardViewName, StandardViewName])[] = Object.freeze([

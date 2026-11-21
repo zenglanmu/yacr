@@ -408,3 +408,171 @@ fn degenerate_uvs_disable_the_normal_map_instead_of_inventing_a_tangent() {
         "the missing tangent frame is counted as `render.pbr.tangent_unavailable`"
     );
 }
+
+// --- procedural IBL (ADR-0044) ---------------------------------------------
+
+/// The legacy `AMBIENT` floor, mirroring `mesh_pbr.wgsl`'s constant. Duplicated
+/// deliberately: this is the ADR-0039 value the IBL-off branch must preserve.
+const AMBIENT: f32 = 0.25;
+
+/// The surface response with no incoming direct light and no environment.
+///
+/// A `-Z` vertex normal (the same fixture the emissive test uses) makes
+/// `n_dot_l = 0`, so the diffuse and GGX lobes vanish; with `metallic = 1` the
+/// legacy ambient term vanishes too (it is albedo-scaled). That isolates "what
+/// does the environment contribute" from the direct-light maths — the reported
+/// defect is exactly that an unlit metal is black without one.
+fn unlit_metal() -> RenderBatch {
+    pbr_quad([0.0, 0.0, -1.0], unit_uvs(), scalar(1.0, 0.35, [0.0; 3]))
+}
+
+/// sRGB-encode one linear channel the way the `Rgba8UnormSrgb` target does, so a
+/// legacy expectation is stated in the readback's own units.
+fn srgb_byte(linear: f32) -> f32 {
+    let encoded = if linear <= 0.003_130_8 {
+        linear * 12.92
+    } else {
+        1.055 * linear.powf(1.0 / 2.4) - 0.055
+    };
+    (encoded * 255.0).round()
+}
+
+#[test]
+fn metal_is_not_black_with_ibl_on() {
+    let Some(gpu) = gpu_or_skip("IBL metal") else {
+        return;
+    };
+    let mut renderer = init(&gpu);
+
+    renderer.set_ibl_enabled(false);
+    let legacy = draw(&mut renderer, &unlit_metal(), &DecodedImageCache::new());
+
+    renderer.set_ibl_enabled(true);
+    let ibl = draw(&mut renderer, &unlit_metal(), &DecodedImageCache::new());
+
+    // `luma` is 0..=255; the bar is a normalised luminance.
+    let legacy_luma = luma(legacy) / 255.0;
+    let ibl_luma = luma(ibl) / 255.0;
+    assert!(
+        legacy_luma < 0.01,
+        "the current defect: an unlit metal has no environment to reflect, so \
+         the legacy lighting is black, got {legacy:?}"
+    );
+    assert!(
+        ibl_luma > 0.05,
+        "procedural IBL must give the metal an environment reflection, \
+         got {ibl:?} (normalised luma {ibl_luma:.3})"
+    );
+    assert!(
+        ibl[3] > 0,
+        "the IBL frame must still be the drawn surface, got {ibl:?}"
+    );
+}
+
+#[test]
+fn ibl_roughness_selects_the_specular_lobe() {
+    let Some(gpu) = gpu_or_skip("IBL roughness") else {
+        return;
+    };
+    let mut renderer = init(&gpu);
+    renderer.set_ibl_enabled(true);
+
+    let sharp = draw(
+        &mut renderer,
+        &pbr_quad([0.0, 0.0, -1.0], unit_uvs(), scalar(1.0, 0.05, [0.0; 3])),
+        &DecodedImageCache::new(),
+    );
+    let diffuse_like = draw(
+        &mut renderer,
+        &pbr_quad([0.0, 0.0, -1.0], unit_uvs(), scalar(1.0, 0.9, [0.0; 3])),
+        &DecodedImageCache::new(),
+    );
+
+    // A mirror lobe samples the horizon band; a rough lobe is pulled `r²` toward
+    // the cosine-weighted irradiance, which is the (much darker) ground mix for a
+    // `-Z` normal. The two must not collapse to the same reflect.
+    assert!(
+        (luma(sharp) - luma(diffuse_like)).abs() > 20.0,
+        "roughness must select the environment lobe: sharp={sharp:?} \
+         rough={diffuse_like:?}"
+    );
+}
+
+#[test]
+fn ibl_occlusion_scales_the_indirect_term() {
+    let Some(gpu) = gpu_or_skip("IBL occlusion") else {
+        return;
+    };
+    let mut renderer = init(&gpu);
+    renderer.set_ibl_enabled(true);
+
+    let mut occluded_material = scalar(1.0, 0.35, [0.0; 3]);
+    occluded_material.occlusion_strength = 1.0;
+    occluded_material.occlusion = Some(ResourceKey(OCCLUSION_KEY.to_owned()));
+    // Open: `ao = 1`, so the environment term is unscaled.
+    let mut open = occluded_material.clone();
+    open.occlusion_strength = 0.0;
+    open.occlusion = None;
+
+    let open_pixel = draw(
+        &mut renderer,
+        &pbr_quad([0.0, 0.0, -1.0], unit_uvs(), open),
+        &DecodedImageCache::new(),
+    );
+    let occluded_pixel = draw(
+        &mut renderer,
+        &pbr_quad([0.0, 0.0, -1.0], unit_uvs(), occluded_material),
+        // `r = 0` with `strength = 1` gives `ao = 0`.
+        &texture_cache(&[(OCCLUSION_KEY, [0, 0, 0, 255])]),
+    );
+
+    assert!(
+        luma(open_pixel) - luma(occluded_pixel) > 40.0,
+        "occlusion must scale the indirect terms: open={open_pixel:?} \
+         occluded={occluded_pixel:?}"
+    );
+}
+
+#[test]
+fn ibl_off_matches_the_legacy_lighting() {
+    let Some(gpu) = gpu_or_skip("IBL off legacy parity") else {
+        return;
+    };
+    let mut renderer = init(&gpu);
+    // The default is off, but state it explicitly: this test is the fence.
+    renderer.set_ibl_enabled(false);
+
+    // A dielectric facing away from the key light: the diffuse and GGX lobes are
+    // zero, so the legacy ADR-0039 result is exactly the ambient floor
+    // `base_colour * (1 - metallic) * AMBIENT * occlusion = 0.25` for a white
+    // scalar albedo. That is a closed-form value, not a recorded one.
+    let batch = pbr_quad([0.0, 0.0, -1.0], unit_uvs(), scalar(0.0, 0.5, [0.0; 3]));
+    let first = draw(&mut renderer, &batch, &DecodedImageCache::new());
+    let second = draw(&mut renderer, &batch, &DecodedImageCache::new());
+    assert_eq!(
+        first, second,
+        "the IBL-off frame must be deterministic (self-consistency)"
+    );
+
+    let expected = srgb_byte(AMBIENT);
+    for (channel, value) in ["r", "g", "b"].iter().zip(&first[..3]) {
+        assert!(
+            (f32::from(*value) - expected).abs() <= 4.0,
+            "the legacy ambient floor must be unchanged by ADR-0044: \
+             channel {channel} = {value}, expected {expected:.1} \
+             (AMBIENT = {AMBIENT} linear), frame {first:?}"
+        );
+    }
+    assert_eq!(
+        first[3], 255,
+        "the drawn surface stays opaque, got {first:?}"
+    );
+
+    // ... and the flag is live: the same surface with IBL on is not this value.
+    renderer.set_ibl_enabled(true);
+    let ibl = draw(&mut renderer, &batch, &DecodedImageCache::new());
+    assert!(
+        (luma(ibl) - luma(first)).abs() > 5.0,
+        "enabling IBL must change the shaded result: legacy={first:?} ibl={ibl:?}"
+    );
+}

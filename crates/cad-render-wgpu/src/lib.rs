@@ -753,6 +753,12 @@ pub struct Renderer {
     /// recent color frame, so the id pass writes the same uniform layout. `a` is
     /// the frame's light-background ink flag (the pick shaders ignore it).
     last_light: [f32; 4],
+    /// Procedural image-based lighting (ADR-0044) for the PBR channel.
+    ///
+    /// Per-frame uniform data only (`Camera.pbr_eye.w`): it never selects a
+    /// pipeline or changes a vertex layout, so toggling it is a plain field write
+    /// and the next encoded frame carries the new value.
+    ibl_enabled: bool,
     /// Active id-target format (see [`IdTargetFormat`]).
     id_format: IdTargetFormat,
     /// Test hook: forces a format regardless of the adapter probe.

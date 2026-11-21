@@ -50,9 +50,23 @@
 //   * diffuse colour = `baseColour * (1 - metallic)`;
 //   * `roughness = clamp(scale * mr.g, MIN_ROUGHNESS, 1)`,
 //     `metallic = clamp(scale * mr.b, 0, 1)`;
-//   * `occlusion` multiplies the diffuse term and the ambient term only;
+//   * `occlusion` multiplies the diffuse term(s) and the ambient/indirect terms
+//     only (never the direct specular lobe);
 //   * emissive `= emissiveFactor * emissiveTexture` is added;
 //   * the result is multiplied by the vertex colour and the batch tint.
+//
+// Indirect lighting (ADR-0044): the `ambient = diffuse * AMBIENT` floor below is
+// the **legacy** ceiling only. When `camera.pbr_eye.w > 0.5` the ambient floor is
+// replaced by a *procedural analytic* environment (a sky gradient plus one sun
+// lobe — no cubemap, no prefiltered mip chain): the mirror direction is shaded by
+// `sky_radiance` (prefiltered toward `sky_irradiance` by `roughness²`) and
+// modulated by a split-sum BRDF approximation, while the diffuse lobe uses the
+// cosine-weighted `sky_irradiance`. Both indirect terms are scaled by occlusion.
+// That is what stops `metallic = 1` from being black: a metal reflects the
+// environment instead of receiving an albedo-scaled ambient term it never had
+// (`base_colour * (1 - metallic) == 0`). The IBL branch deliberately skips the
+// light-background ink flip (a bright env reflection on a light background must
+// not be inverted to black); the legacy branch keeps it exactly.
 //
 // The view vector is the eye position of the frame expressed in the batch's own
 // vertex space (`camera.pbr_eye`), i.e. camera world position minus the batch
@@ -60,9 +74,10 @@
 // the eye coincides with the surface (the orthographic 2D camera plane) it falls
 // back to the `+Z` axis, which is the axis `camera.light` uses in 2D.
 //
-// Deliberately NOT implemented (ADR-0039 §3): image-based lighting, shadows,
-// tonemapping, multiple lights, `KHR_materials_*` extensions, `alphaMode = MASK`
-// cutout, UV1+ and `KHR_texture_transform`.
+// Deliberately NOT implemented (ADR-0039 §3): shadows, tonemapping, multiple
+// lights, `KHR_materials_*` extensions, `alphaMode = MASK` cutout, UV1+ and
+// `KHR_texture_transform`. Image-based lighting **is** implemented (ADR-0044) as
+// the procedural analytic environment above, not as a sampled cubemap.
 //
 // WebGL2-safe: five `texture_2d<f32>` + one filtering sampler, an integer
 // `texture_2d<u32>` for the flags table and plain vertex attributes — no storage
@@ -80,9 +95,10 @@ struct Camera {
     // ADR-0039 PBR payload: x = metallic, y = roughness, z = occlusion_strength,
     // w = PBR_CHANNEL_* bits as an exact small float (rounded back to u32).
     pbr_factors: vec4<f32>,
-    // Linear emissive RGB (xyz), w unused.
+    // Linear emissive RGB (xyz), w unused (kept zero; reserved).
     pbr_emissive: vec4<f32>,
-    // Camera position in the batch's vertex space (xyz), w unused.
+    // Camera position in the batch's vertex space (xyz), w = the frame's
+    // procedural-IBL flag (`1.0` = enabled, ADR-0044).
     pbr_eye: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> camera: Camera;
@@ -142,10 +158,50 @@ const CHANNEL_OCCLUSION: u32 = 16u;
 
 const PI: f32 = 3.141592653589793;
 // Ambient floor, the same 0.25 `mesh.wgsl` uses so a back-facing facet is never
-// pure black. It is an ambient *term*, not image-based lighting.
+// pure black. It is an ambient *term* for the legacy (IBL-off) path, not
+// image-based lighting; the IBL branch uses `sky_irradiance` instead.
 const AMBIENT: f32 = 0.25;
 // A fully smooth surface would divide by ~0 in the GGX denominator.
 const MIN_ROUGHNESS: f32 = 0.04;
+
+// --- procedural analytic environment (ADR-0044) -----------------------------
+// Linear RGB, no tonemap: the same display convention as the direct light. The
+// environment is a piecewise sky gradient (zenith / horizon / ground) plus one
+// sun lobe at the frame's key-light direction, so it stays a closed-form
+// function of the direction — no cubemap, no prefiltered mips, no extra binding.
+const SKY_ZENITH:  vec3<f32> = vec3<f32>(0.32, 0.42, 0.62);
+const SKY_HORIZON: vec3<f32> = vec3<f32>(0.60, 0.66, 0.72);
+const SKY_GROUND:  vec3<f32> = vec3<f32>(0.10, 0.10, 0.09);
+const SUN_COLOUR:  vec3<f32> = vec3<f32>(1.00, 0.96, 0.90);
+
+/// Radiance arriving from `dir` (the mirror direction for a specular lobe).
+fn sky_radiance(dir: vec3<f32>, sun: vec3<f32>) -> vec3<f32> {
+    let y = clamp(dir.y, -1.0, 1.0);
+    let above = mix(SKY_HORIZON, SKY_ZENITH, pow(clamp(y, 0.0, 1.0), 0.55));
+    var c = select(SKY_GROUND, above, y >= 0.0);
+    let s = max(dot(dir, sun), 0.0);
+    c += SUN_COLOUR * (pow(s, 64.0) * 0.60 + pow(s, 8.0) * 0.10);
+    return c;
+}
+
+/// Cosine-weighted irradiance for a surface whose normal is `n`: the same sky
+/// gradient, integrated analytically into a smooth hemisphere ramp (the diffuse
+/// lobe's environment term).
+fn sky_irradiance(n: vec3<f32>) -> vec3<f32> {
+    let t = smoothstep(0.0, 1.0, clamp(n.y * 0.5 + 0.5, 0.0, 1.0));
+    return mix(SKY_GROUND, mix(SKY_HORIZON, SKY_ZENITH, 0.5), t);
+}
+
+/// Split-sum DFG approximation (Karis, cheap analytic fit): `x` scales the
+/// mirror-lobe energy (`F0`) and `y` is the additive term that survives a zero
+/// `F0` (grazing energy). `n_dot_v` must be positive.
+fn env_brdf_approx(roughness: f32, n_dot_v: f32) -> vec2<f32> {
+    let c0 = vec4<f32>(-1.0, -0.0275, -0.572,  0.022);
+    let c1 = vec4<f32>( 1.0,  0.0425,  1.040, -0.040);
+    let r = roughness * c0 + c1;
+    let a004 = min(r.x * r.x, exp2(-9.28 * n_dot_v)) * r.x + r.y;
+    return vec2<f32>(-1.04, 1.04) * a004 + r.zw;
+}
 
 struct VsOut {
     @builtin(position) position: vec4<f32>,
@@ -321,14 +377,39 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         * geometry_schlick_ggx(n_dot_l, roughness);
     let specular = (distribution * geometry * fresnel) / max(4.0 * n_dot_v * n_dot_l, 1e-4);
 
-    // Occlusion darkens the diffuse and ambient terms only (never the specular
-    // reflection, which is a surface response, not an indirect one).
+    // Occlusion darkens the diffuse and indirect terms only (never the direct
+    // specular reflection, which is a surface response, not an indirect one).
     let direct_diffuse = diffuse_colour * n_dot_l * occlusion;
-    let ambient = diffuse_colour * AMBIENT * occlusion;
-    let lit = direct_diffuse + specular + ambient + emissive;
+    let sun = normalize(camera.light.xyz);
+    let ibl_on = camera.pbr_eye.w > 0.5;
+    var lit = direct_diffuse + specular + emissive;
+    if (ibl_on) {
+        // Procedural IBL (ADR-0044): the mirror direction reflects the sky, the
+        // diffuse lobe receives its cosine-weighted irradiance, and the split-sum
+        // BRDF approximation supplies the energy terms a metal needs (its diffuse
+        // lobe is zero, so only this path keeps `metallic = 1` from being black).
+        let r = reflect(-v, n);
+        let prefiltered = mix(sky_radiance(r, sun), sky_irradiance(n), roughness * roughness);
+        let ab = env_brdf_approx(roughness, n_dot_v);
+        let ess = ab.x + ab.y;
+        let fss_ess = f0 * ab.x + ab.y;
+        let energy = 1.0 + f0 * max(1.0 - ess, 0.0) / max(ess, 1e-4);
+        let indirect_diffuse = base_colour * (1.0 - metallic) * sky_irradiance(n) * occlusion;
+        let indirect_specular = prefiltered * fss_ess * energy * occlusion;
+        lit += indirect_diffuse + indirect_specular;
+    } else {
+        // The legacy ambient floor, arithmetically unchanged from ADR-0039 D6.
+        lit += base_colour * (1.0 - metallic) * AMBIENT * occlusion;
+    }
 
     let rgb = lit * in.color * camera.tint.rgb;
     let alpha = base_sample.a * camera.tint.a;
     let shaded = flag_tint(vec4<f32>(rgb, alpha), key);
+    // The IBL branch is a lit environment reflection, not near-white ink: a light
+    // background must not invert it to black. The legacy branch keeps the
+    // `mesh.wgsl` display convention exactly.
+    if (ibl_on) {
+        return vec4<f32>(shaded.rgb, shaded.a);
+    }
     return vec4<f32>(ink_for_background(shaded.rgb), shaded.a);
 }

@@ -205,6 +205,7 @@ mod drawing_space;
 // The 2026-11-07 extras batch contract tests.
 mod extra_reports;
 mod extras;
+mod extras_ibl;
 mod extras_vscurrent;
 mod find_mtext;
 // Run-time lookup for the third-party SHX faces (never `include_bytes!`).

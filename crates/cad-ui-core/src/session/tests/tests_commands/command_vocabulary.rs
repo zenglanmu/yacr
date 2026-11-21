@@ -242,7 +242,7 @@ command_selector_contract! {
     XdList => "XDLIST",
 
     Sketch => "SKETCH", Trace => "TRACE", Mocoro => "MOCORO", MStretch => "MSTRETCH",
-    ViewRes => "VIEWRES", VisualStyle => "VSCURRENT", WipeoutFrame => "WIPEOUTFRAME",
+    ViewRes => "VIEWRES", VisualStyle => "VSCURRENT", Ibl => "IBL", WipeoutFrame => "WIPEOUTFRAME",
     Linetype => "LINETYPE",
 
     // The bounded 2D in-place block-reference edit (2026-11-12): REFEDIT and
@@ -267,7 +267,7 @@ fn command_normalization_covers_every_variant() {
     // without a selector here. Each variant must then appear in
     // `COMMAND_TABLE` exactly once (no missing row, no duplicate mapping).
     assert_eq!(
-        EXPECTED_COMMAND_COUNT, 244,
+        EXPECTED_COMMAND_COUNT, 245,
         "the cad_app CommandId set changed; update COMMAND_TABLE and this contract"
     );
     assert_eq!(ALL_COMMAND_IDS.len(), EXPECTED_COMMAND_COUNT);

@@ -491,6 +491,15 @@ pub struct CadStatus {
     /// changes the drawing database, history or a persisted preference, and it is
     /// **not** grid snap (`SNAP`/F9 is the separate [`Self::snap_grid_enabled`]).
     pub ortho_enabled: bool,
+    /// Whether the session's PBR environment lighting is **image-based** (`IBL`).
+    ///
+    /// Session/display state only; the procedural-IBL render lane reads the same
+    /// token (`cad_app::PbrEnvironment::is_image_based`). Defaults to `true`
+    /// (image-based lighting is the shader's normal path); `IBL OFF` (or the
+    /// `LEGACY`/`0` spelling) reports `false` and falls back to the single
+    /// dominant light. It never changes the drawing, history or a preference.
+    #[serde(rename = "iblEnabled")]
+    pub ibl_enabled: bool,
     /// The best current object-snap candidate's stable kind string (ADR 0014
     /// A.7), or `null`.
     ///
@@ -631,6 +640,10 @@ pub fn unsupported_status(error: Option<String>) -> CadStatus {
         // `snap_grid_enabled: false` keeps it clear that nothing is snapping.
         snap_spacing: cad_app::DEFAULT_SNAP_SPACING,
         ortho_enabled: false,
+        // No session means no render switch is installed, so it cannot be
+        // reported as image-based. The session default (on) is `assemble_status`'s
+        // business, not the probe snapshot's.
+        ibl_enabled: false,
         snap_kind: None,
         // No CAD session draws no crosshair, so the system cursor is never
         // hidden: nothing is left pointerless.
@@ -732,6 +745,7 @@ pub(super) fn assemble_status(
     snap_grid_enabled: bool,
     snap_spacing: f64,
     ortho_enabled: bool,
+    ibl_enabled: bool,
     snap_kind: Option<String>,
     crosshair: bool,
     cursor_world: Option<[f64; 3]>,
@@ -776,6 +790,7 @@ pub(super) fn assemble_status(
         snap_grid_enabled,
         snap_spacing,
         ortho_enabled,
+        ibl_enabled,
         snap_kind,
         crosshair,
         cursor_world,

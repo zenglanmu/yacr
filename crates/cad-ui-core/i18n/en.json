@@ -721,6 +721,8 @@
   "ribbon.command.layer_toggle": "Toggle layer",
   "ribbon.command.backend_switch": "Switch backend",
   "ribbon.command.mode_toggle": "Toggle mode",
+  "ribbon.command.ibl": "Image-based lighting",
+  "ribbon.command.ibl.hint": "PBR metal shades with a procedural environment; turn it off to fall back to a single directional light",
   "ribbon.command_unsupported": "Command not available: {command}",
   "ribbon.panel_dialog_missing": "No dialog exists for this panel yet: {panel}",
   "ribbon.command_needs_target": "Command needs a selection or target the ribbon cannot supply: {command}",

@@ -87,6 +87,16 @@ impl HostController {
         self.session.toggle_snap_grid()
     }
 
+    /// Whether the session's PBR environment-lighting switch is image-based
+    /// (`IBL`).
+    ///
+    /// Session/display state only; the procedural-IBL render lane reads the same
+    /// token. `false` means the shader falls back to the single dominant light
+    /// (`LEGACY`).
+    pub fn ibl_enabled(&self) -> bool {
+        self.session.view_extras.pbr_environment.is_image_based()
+    }
+
     /// The session grid-snap spacing in drawing units (`SNAPUNIT`).
     pub fn snap_spacing(&self) -> f64 {
         self.session.snap_spacing()

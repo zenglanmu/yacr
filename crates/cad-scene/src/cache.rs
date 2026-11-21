@@ -400,8 +400,6 @@ impl SceneCache {
                     )
                 }
                 DisplayPrimitive::Mesh(mesh) | DisplayPrimitive::MeshWithoutEdgeOverlay(mesh) => {
-                    let include_edge_overlay =
-                        matches!(&fragment.primitive, DisplayPrimitive::Mesh(_));
                     let MeshStreams {
                         origin,
                         verts,
@@ -412,10 +410,25 @@ impl SceneCache {
                         texture,
                         pbr,
                     } = mesh_streams(mesh);
-                    // A plain `Mesh` keeps the legacy triangle-derived
-                    // overlay (one segment per unique triangle edge;
-                    // shared edges de-duplicated). `MeshWithoutEdgeOverlay`
-                    // (a text glyph) carries none.
+                    // Overlay rule (ADR-0044): **imported PBR meshes carry no
+                    // triangle-derived wireframe**. A `DisplayPrimitive::Mesh`
+                    // whose sanitised PBR material survives as
+                    // `pbr.is_some()` produces exactly the same
+                    // vertex/triangle/UV/tangent/PBR streams as before but
+                    // **zero** edge positions (the
+                    // `MeshWithoutEdgeOverlay` shape): a triangle-edge overlay
+                    // would paint over and hide the shaded surface that is the
+                    // whole point of the asset. **CAD bodies keep their stored
+                    // edges** — a `Body3d` never reaches this arm; it arrives as
+                    // `MeshWithStoredEdges` (handled below) and its independent
+                    // edge set is unaffected by the PBR rule. Everything else is
+                    // unchanged: a non-PBR mesh (plain or textured) keeps the
+                    // legacy overlay (one segment per unique triangle edge;
+                    // shared edges de-duplicated), and
+                    // `MeshWithoutEdgeOverlay` (a text glyph) still carries
+                    // none.
+                    let include_edge_overlay =
+                        matches!(&fragment.primitive, DisplayPrimitive::Mesh(_)) && pbr.is_none();
                     let edge_positions = if include_edge_overlay {
                         triangle_edge_positions(&kept, &verts)
                     } else {

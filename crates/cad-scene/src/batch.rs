@@ -231,7 +231,10 @@ pub struct RenderBatch {
     ///
     /// For a plain mesh batch the scene derives them from the triangle topology
     /// (legacy overlay); for a body (`DisplayPrimitive::MeshWithStoredEdges`) it
-    /// copies the body's stored edges instead.
+    /// copies the body's stored edges instead. An imported PBR mesh
+    /// ([`RenderBatch::pbr`] set) deliberately carries **none** (ADR-0044): its
+    /// shaded surface is the draw, so a triangle-derived wireframe is not
+    /// emitted.
     pub edges: Vec<[f32; 3]>,
     /// Analytic circles/arcs drawn as SDF instances. Non-empty only for
     /// [`RenderTopology::Conics`], whose `vertices` is empty. Each entry is a
@@ -295,7 +298,7 @@ impl RenderBatch {
     }
 
     /// Whether this is the display class of a shaped text glyph: a triangle mesh
-    /// with an explicit index list and **no** edge overlay.
+    /// with an explicit index list, **no** edge overlay and **no** PBR material.
     ///
     /// The renderer uses this to hide text during camera motion (navigation
     /// LOD). The representation primitive owns the decision: only
@@ -303,8 +306,15 @@ impl RenderBatch {
     /// and vendor text shaping) produces this shape, so the renderer can derive
     /// the class without a second marker field that every `RenderBatch` literal
     /// would have to set.
+    ///
+    /// An imported PBR mesh also has no edge overlay (ADR-0044: it is a shaded
+    /// surface, so a triangle-derived wireframe would hide it) but is **not**
+    /// text: the `pbr` guard keeps it visible during navigation.
     pub fn is_text_glyph(&self) -> bool {
-        self.topology == RenderTopology::Mesh && !self.indices.is_empty() && self.edges.is_empty()
+        self.topology == RenderTopology::Mesh
+            && !self.indices.is_empty()
+            && self.edges.is_empty()
+            && self.pbr.is_none()
     }
 
     pub fn approx_bytes(&self) -> usize {

@@ -7,11 +7,11 @@ use super::super::test_support::*;
 use cad_app::{CommandPayload, LinetypeCommand, MocoroCommand};
 
 use crate::session::commands::{
-    parse_cvport_argument, parse_linetype_argument, parse_mocoro_argument, parse_pan_argument,
-    parse_trace_argument, parse_viewres_argument, parse_vscurrent_argument,
-    parse_wipeoutframe_argument, ARGUMENT_SELECTORS, CVPORT_SELECTOR, LINETYPE_SELECTOR,
-    MOCORO_SELECTOR, PAN_SELECTOR, TRACE_SELECTOR, VIEWRES_SELECTOR, VSCURRENT_SELECTOR,
-    WIPEOUTFRAME_SELECTOR,
+    parse_cvport_argument, parse_ibl_argument, parse_linetype_argument, parse_mocoro_argument,
+    parse_pan_argument, parse_trace_argument, parse_viewres_argument, parse_vscurrent_argument,
+    parse_wipeoutframe_argument, ARGUMENT_SELECTORS, CVPORT_SELECTOR, IBL_SELECTOR,
+    LINETYPE_SELECTOR, MOCORO_SELECTOR, PAN_SELECTOR, TRACE_SELECTOR, VIEWRES_SELECTOR,
+    VSCURRENT_SELECTOR, WIPEOUTFRAME_SELECTOR,
 };
 
 #[test]
@@ -22,6 +22,7 @@ fn every_extras_selector_has_a_table_row_and_its_argument_form_is_admitted() {
     assert_eq!(command_name(CommandId::MStretch), Some("MSTRETCH"));
     assert_eq!(command_name(CommandId::ViewRes), Some("VIEWRES"));
     assert_eq!(command_name(CommandId::VisualStyle), Some("VSCURRENT"));
+    assert_eq!(command_name(CommandId::Ibl), Some("IBL"));
     assert_eq!(command_name(CommandId::WipeoutFrame), Some("WIPEOUTFRAME"));
     assert_eq!(command_name(CommandId::Cvport), Some("CVPORT"));
     assert_eq!(command_name(CommandId::Linetype), Some("LINETYPE"));
@@ -31,6 +32,7 @@ fn every_extras_selector_has_a_table_row_and_its_argument_form_is_admitted() {
         MOCORO_SELECTOR,
         VIEWRES_SELECTOR,
         VSCURRENT_SELECTOR,
+        IBL_SELECTOR,
         WIPEOUTFRAME_SELECTOR,
         CVPORT_SELECTOR,
         LINETYPE_SELECTOR,
@@ -209,6 +211,35 @@ fn vscurrent_admits_one_word_and_linetype_has_list_and_set_forms() {
         );
     }
     assert!(parse_vscurrent_argument("SHADED WITH EDGES").is_err());
+
+    // `IBL ON|OFF` (and `1`/`0`): the session PBR environment-lighting switch.
+    for (text, expected) in [("ON", true), ("on", true), ("1", true), (" 1 ", true)] {
+        assert!(
+            matches!(
+                parse_ibl_argument(text),
+                Ok(CommandPayload::Ibl(enabled)) if enabled == expected
+            ),
+            "`{text}` must parse as image-based"
+        );
+    }
+    for (text, expected) in [("OFF", false), ("off", false), ("0", false), (" 0 ", false)] {
+        assert!(
+            matches!(
+                parse_ibl_argument(text),
+                Ok(CommandPayload::Ibl(enabled)) if enabled == expected
+            ),
+            "`{text}` must parse as legacy"
+        );
+    }
+    for refused in ["maybe", "2", "TRUE", "", "ON OFF"] {
+        let error = parse_ibl_argument(refused)
+            .err()
+            .unwrap_or_else(|| panic!("`{refused}` must be refused"));
+        assert!(
+            error.contains("ibl.invalid_value"),
+            "`{refused}` must be refused by name: {error}"
+        );
+    }
 
     assert!(matches!(
         parse_linetype_argument("LIST"),

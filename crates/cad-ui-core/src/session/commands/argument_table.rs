@@ -190,6 +190,9 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     MOCORO_SELECTOR,
     VIEWRES_SELECTOR,
     VSCURRENT_SELECTOR,
+    // `IBL ON|OFF` (also `1`/`0`): the session PBR environment-lighting switch.
+    // The bare selector toggles, so only the value form is listed here.
+    IBL_SELECTOR,
     // `WIPEOUTFRAME <0|1|2>`: the system-variable spelling of `WIPEOUT Frames`
     // (same session token, one setter). The bare selector reports the value.
     WIPEOUTFRAME_SELECTOR,

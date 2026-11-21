@@ -19,7 +19,7 @@ import { readModule } from './helpers.ts';
 const base = {
   documentLabel: null, entityCount: null, loading: false, importProgress: null,
   error: null, canOpen: true, canNew: true, gridEnabled: true, snapGridEnabled: false,
-  snapSpacing: 10, orthoEnabled: false, canSave: false, canPlot: false, canFit: false,
+  snapSpacing: 10, orthoEnabled: false, iblEnabled: false, canSave: false, canPlot: false, canFit: false,
   backend: null, adapter: null, camera: null, importCount: 0, frameCount: 0,
   cursorWorld: null,
   selection: { count: 0, empty: true, rows: [], mixedKeys: [] },
@@ -119,7 +119,7 @@ test('the tab click emits exactly one space-switch line through the shared funne
   // The admitted line is the same text the component dispatches. Admission is
   // still the chrome's grammar; the host remains the authority for the id.
   setCommandCatalog(HOST_NAMES);
-  const loaded = { documentLabel: 'fixture.dwg', entityCount: 3, loading: false, canOpen: true, canNew: true, gridEnabled: true, snapGridEnabled: false, snapSpacing: 10, orthoEnabled: false, canSave: true, canPlot: true, canFit: true };
+  const loaded = { documentLabel: 'fixture.dwg', entityCount: 3, loading: false, canOpen: true, canNew: true, gridEnabled: true, snapGridEnabled: false, snapSpacing: 10, orthoEnabled: false, iblEnabled: false, canSave: true, canPlot: true, canFit: true };
   const admitted = admitCommandText('SPACE #12', { status: loaded });
   assert.equal(admitted.kind, 'admitted');
   assert.equal(admitted.command, 'SPACE #12');

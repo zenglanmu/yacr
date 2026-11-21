@@ -73,14 +73,15 @@ test('admission is the loaded host catalog: empty before load, capability gates 
 
 test('the grid-snap affordance is a real admitted toggle next to GRID and ORTHO', async () => {
   const { readModule } = await import('./helpers.ts');
-  // The View tab's display panel keeps GRID/SNAP/ORTHO on screen. All three are
-  // real router commands now: GRID is the display grid (F7), SNAP is grid snap
-  // (F9, with the typed `SNAPUNIT` spacing) and ORTHO is the orthographic
-  // constraint (F8).
+  // The View tab's display panel keeps GRID/SNAP/ORTHO on screen, with the IBL
+  // lighting toggle beside them. All four are real router commands now: GRID is
+  // the display grid (F7), SNAP is grid snap (F9, with the typed `SNAPUNIT`
+  // spacing), ORTHO is the orthographic constraint (F8) and IBL switches the
+  // renderer's image-based lighting.
   const view = RIBBON_TABS.find(tab => tab.id === 'view');
   const display = view.panels.find(panel => panel.id === 'display');
   assert.ok(display, 'the View tab must keep its display panel');
-  assert.deepEqual(display.items.map(item => item.id), ['GRID', 'SNAP', 'ORTHO']);
+  assert.deepEqual(display.items.map(item => item.id), ['GRID', 'SNAP', 'ORTHO', 'IBL']);
   const snap = display.items.find(item => item.id === 'SNAP');
   assert.equal(snap.command, 'SNAP');
   assert.equal(snap.labelKey, 'status.toggle.snap');

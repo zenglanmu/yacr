@@ -234,17 +234,20 @@ wasm 纹理路径、像素与性能结论一律 **NOT RUN / NOT VERIFIED**。软
 | glTF 导出 | 写 `metallicFactor`/`roughnessFactor`/`metallicRoughnessTexture`/`normalTexture(scale 1)`/`occlusionTexture(strength)`/`emissiveTexture`/`emissiveFactor`；材质去重键含整个 PBR 元组 | `pbr: None` 的网格输出逐字节不变（不写任何 PBR 键） |
 | RVT | 读 `metallicFactor`/`roughnessFactor`（上游 0.25.0 按材质名启发式），建 `MeshPbr` + 每文档一条 `import.rvt.pbr_heuristic` note | 非有限/越界 → 不建 `MeshPbr` + `import.rvt.pbr_ignored`（`Partial`）；RVT 仍无纹理/UV，PBR 贴图恒缺省 |
 | 其它格式 | IFC/SKP/OBJ 一律 `pbr: None`；IFC 样式颜色仍是 `import.ifc.style_not_imported`，SKP/OBJ 无 PBR 数据不产生 PBR 诊断 | 非 glTF 写出器仍**不写** PBR；也**没有**独立的 PBR 丢失码——基色纹理损失由既有 `export.<id>.texture_not_written` 覆盖，PBR 标量/贴图不在其消息内 |
-| 渲染 | **独立 `mesh_pbr` 通道**：Cook-Torrance GGX，单方向光 `camera.light`，`F0 = mix(0.04, base, metallic)`，`diffuse = base*(1-metallic)`，metallicRoughness 的 G/B 缩放 roughness/metallic，occlusion 只乘漫反射与环境项，emissive 相加，再乘顶点色与批次 tint，沿用 ink-flip/sRGB 约定 | 切线由 CPU 按 UV 生成；退化 UV 关闭法线通道并记 `render.pbr.tangent_unavailable`（**不**发明切线）；缺失通道绑定精确恒等纹理（白/黑/平面法线）＝“通道关闭”；PBR 批次**永不** flat-merge 或进入 pulled；原地覆盖拒绝 `pbr_not_updatable` |
+| 渲染 | **独立 `mesh_pbr` 通道**：Cook-Torrance GGX，单方向光 `camera.light`，`F0 = mix(0.04, base, metallic)`，`diffuse = base*(1-metallic)`，metallicRoughness 的 G/B 缩放 roughness/metallic，occlusion 只乘漫反射与环境项，emissive 相加，再乘顶点色与批次 tint，沿用 ink-flip/sRGB 约定。**IBL（2026-11-21，ADR-0044）**：**程序化解析天空**（split-sum + 解析 BRDF 近似，WGSL 内联计算，无环境贴图资产），**只作用于 `mesh_pbr` 通道**；会话开关命令 `IBL`（裸 `IBL` 翻转，`IBL ON\|OFF\|1\|0` 显式），**默认开**；IBL 开时 AO 同时乘间接镜面；**OFF = 旧单方向光 + 常数环境光 `AMBIENT = 0.25`，逐字相同并由 fixture 锁定**；`pbr: None` 的网格仍走 `mesh_textured`，**没有 IBL** | 切线由 CPU 按 UV 生成；退化 UV 关闭法线通道并记 `render.pbr.tangent_unavailable`（**不**发明切线）；缺失通道绑定精确恒等纹理（白/黑/平面法线）＝“通道关闭”；PBR 批次**永不** flat-merge 或进入 pulled；原地覆盖拒绝 `pbr_not_updatable`；PBR 网格（`pbr.is_some()`）**不生成三角边叠加**（`edges` 为空，与 `MeshWithoutEdgeOverlay` 同形；导入资产不携带线框，非静默抑制）；IBL 是会话态：不写文档、不进 ChangeSet/撤销、不升 `FORMAT_MINOR`；环境**相机相对**（`camera.light` 是头灯，太阳随视角移动，已声明限制） |
 | 宿主 | `SceneBatch.pbr` 携带 4 个额外贴图键；`mesh_texture_keys` 收集全部 5 个键，`load_image_cache_for_document` 按 `db.textures()` 全量解码 | 无占位图：缺键按无贴图通道处理并报告；Web 载体仍按名拒绝文档纹理，不静默画成无纹理 |
 
-**明确不在本轮范围**：IBL/环境贴图、阴影、tonemap、多光源、`KHR_materials_*`、
-`alphaMode = MASK` 镂空、UV1+/`KHR_texture_transform`、SKP/IFC/OBJ 的 PBR、RVT 纹理、
-非 glTF 导出器的 PBR。
+**明确不在本轮范围**：阴影、tonemap、多光源、`KHR_materials_*`、`alphaMode = MASK` 镂空、
+UV1+/`KHR_texture_transform`、SKP/IFC/OBJ 的 PBR、RVT 纹理、非 glTF 导出器的 PBR
+（IBL/环境贴图已由 [ADR-0044](adr/0044-procedural-ibl.md) 覆盖，见上表的「渲染」行）。
 
-**证据边界**：契约测试与真实 GPU 用例见 `docs/validation-pbr-2026-11-20.md`；合成
-`pbr-channels.glb` 的端到端渲染记录 **待补**；three.js/Blender/glTF-Validator 等厂商验收、
-Windows/macOS/Android/Web 运行、像素/golden/性能结论一律 **NOT RUN / NOT VERIFIED**。
-软件渲染不得用作像素或性能证据。
+**证据边界**：契约测试与真实 GPU 用例见 `docs/validation-pbr-2026-11-20.md`，IBL 的
+**合成数值测试 + 软件 Vulkan/headless** 记录见 `docs/validation-ibl-2026-11-21.md`（当前
+**NOT RUN**）；合成 `pbr-channels.glb` 的端到端渲染记录 **待补**；three.js/Blender/
+glTF-Validator 等厂商验收、Windows/macOS/Android/Web 运行、**真实 GPU / Metal / DX12 /
+Android / 浏览器 GPU**、像素/golden/性能结论一律 **NOT RUN / NOT VERIFIED**。
+软件渲染（SwiftShader/lavapipe）与 headless readback 只证明公式与接线，不是产品验收，
+不得用作像素或性能证据。
 
 ### 外部资源打包（自包含 `.ymodel`，2026-11-20，ADR-0040）
 

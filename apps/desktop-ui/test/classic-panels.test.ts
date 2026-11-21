@@ -12,7 +12,7 @@ import { readCatalog } from './helpers.ts';
 const base = {
   documentLabel: 'plan.dwg', entityCount: 4, loading: false, importProgress: null,
   error: null, canOpen: true, canNew: true, gridEnabled: true, snapGridEnabled: false,
-  snapSpacing: 10, orthoEnabled: false, canSave: true, canPlot: true, canFit: true,
+  snapSpacing: 10, orthoEnabled: false, iblEnabled: false, canSave: true, canPlot: true, canFit: true,
   backend: null, adapter: null, camera: null, importCount: 0, frameCount: 0,
   cursorWorld: null,
   selection: { count: 0, empty: true, rows: [], mixedKeys: [] },

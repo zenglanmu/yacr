@@ -704,6 +704,9 @@ pub enum CommandId {
     WipeoutFrame,
     /// `VSCURRENT` (Viewer-legal): store the session 3D-body visual-style token.
     VisualStyle,
+    /// `IBL [ON|OFF]` (Viewer-legal): toggle/store the session PBR
+    /// image-based-lighting switch. Contract: [`crate::command_id::extras`].
+    Ibl,
     /// `LINETYPE` (Viewer-legal for `LIST`; `SET`/`CREATE`/`DELETE` are work-only): list the drawing's linetypes, set one on the selection, or
     /// create/delete a table row. Contract: [`crate::command_id::extras`].
     Linetype,

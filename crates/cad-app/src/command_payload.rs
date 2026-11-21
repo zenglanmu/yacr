@@ -879,15 +879,14 @@ pub enum CommandPayload {
     },
     /// `VIEWRES`: the session circle-tessellation percentage (`1..=1000`).
     ViewRes(u32),
-    /// `VSCURRENT`: the session visual-style token (`WIREFRAME`/`2DWIREFRAME`/
-    /// `2D` or `SHADED`/`SHADEDWITHEDGES`; session-only, bodies only).
+    /// `VSCURRENT`: the session 3D-body visual-style token (session-only).
     VisualStyle(String),
-    /// `WIPEOUTFRAME <0|1|2>`: the session frame state for every wipeout.
-    ///
-    /// The bare selector carries [`CommandPayload::None`] and is the read-only
-    /// report (the same value `SETVAR WIPEOUTFRAME` prints). A number outside
-    /// `0..=2` never reaches this payload: the typed parser refuses it by name
-    /// (`wipeoutframe.out_of_range`) before dispatch.
+    /// `IBL`: session PBR image-based-lighting switch (`true` = IBL, `false` = LEGACY).
+    Ibl(bool),
+    /// `WIPEOUTFRAME <0|1|2>`: the session frame state for every wipeout. The
+    /// bare selector carries [`CommandPayload::None`] and is the read-only report
+    /// (the same value `SETVAR WIPEOUTFRAME` prints); a number outside `0..=2` is
+    /// refused by the typed parser (`wipeoutframe.out_of_range`) before dispatch.
     WipeoutFrame(WipeoutFrames),
     /// `CVPORT <n>`: the session current-viewport marker of the active paper
     /// layout, as a **one-based** viewport position (AutoCAD's own numbering).

@@ -98,6 +98,32 @@ fn mesh_pbr_shader_is_valid_wgsl() {
         !source.contains("var<storage"),
         "mesh_pbr.wgsl must stay WebGL2-safe: no storage buffers"
     );
+    // The `Camera` uniform is the shared per-batch layout. Adding the procedural
+    // IBL flag (ADR-0044) reuses the reserved `pbr_eye.w` word, so the declared
+    // struct must stay 160 B with every preceding member at its old offset —
+    // `UNIFORM_STRUCT_BYTES` and the 256 B dynamic-offset slot stride are derived
+    // from this declaration.
+    let module = naga::front::wgsl::parse_str(source)
+        .expect("mesh_pbr.wgsl must parse for layout inspection");
+    let (members, span) = module
+        .types
+        .iter()
+        .find_map(|(_, ty)| match (ty.name.as_deref(), &ty.inner) {
+            (Some("Camera"), naga::TypeInner::Struct { members, span }) => Some((members, *span)),
+            _ => None,
+        })
+        .expect("mesh_pbr.wgsl must declare the `Camera` uniform struct");
+    assert_eq!(
+        span, 160,
+        "the `Camera` uniform must stay 160 bytes (mat4x4 + 6 vec4)"
+    );
+    let offsets: Vec<u32> = members.iter().map(|member| member.offset).collect();
+    assert_eq!(
+        offsets,
+        vec![0, 64, 80, 96, 112, 128, 144],
+        "the `Camera` members must keep their offsets \
+         (transform/tint/key_flags/light/pbr_factors/pbr_emissive/pbr_eye)"
+    );
 }
 
 /// The two accelerated-tier shaders use vertex-stage storage buffers, so they

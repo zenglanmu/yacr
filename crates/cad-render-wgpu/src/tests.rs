@@ -639,6 +639,7 @@ fn the_uniform_struct_carries_the_light_without_moving_the_slot_stride() {
             occlusion_strength: 0.75,
             channels: PBR_CHANNEL_BASE_COLOUR | PBR_CHANNEL_NORMAL,
             emissive: [0.125, 0.25, 0.5],
+            ibl: false,
         },
         [10.0, 20.0, 30.0],
     );
@@ -656,6 +657,63 @@ fn the_uniform_struct_carries_the_light_without_moving_the_slot_stride() {
     assert_eq!(f32::from_le_bytes(pbr[136..140].try_into().unwrap()), 0.5);
     assert_eq!(f32::from_le_bytes(pbr[144..148].try_into().unwrap()), 10.0);
     assert_eq!(f32::from_le_bytes(pbr[152..156].try_into().unwrap()), 30.0);
+    // Word 35 stays reserved/zero and word 39 is the procedural-IBL flag
+    // (`Camera.pbr_eye.w`, ADR-0044). This payload has it off.
+    assert_eq!(
+        u32::from_le_bytes(pbr[140..144].try_into().unwrap()),
+        0,
+        "word 35 (`pbr_emissive.w`) is reserved and must stay zero"
+    );
+    assert_eq!(
+        u32::from_le_bytes(pbr[156..160].try_into().unwrap()),
+        0.0f32.to_bits(),
+        "an IBL-off payload writes 0.0 into `pbr_eye.w`"
+    );
+    // The non-PBR path writes zero everywhere past the shared prefix, so its
+    // `pbr_eye.w` is exactly the legacy `0.0` bit pattern too.
+    assert_eq!(u32::from_le_bytes(uniform[140..144].try_into().unwrap()), 0);
+    assert_eq!(
+        u32::from_le_bytes(uniform[156..160].try_into().unwrap()),
+        0.0f32.to_bits()
+    );
+    // IBL on: exactly one float word flips, `pbr_eye.w` = 1.0, and the struct
+    // size/slot stride are untouched.
+    let ibl_payload = PbrUniforms {
+        metallic: 0.25,
+        roughness: 0.5,
+        occlusion_strength: 0.75,
+        channels: PBR_CHANNEL_BASE_COLOUR | PBR_CHANNEL_NORMAL,
+        emissive: [0.125, 0.25, 0.5],
+        ibl: true,
+    };
+    let ibl = uniform_bytes_pbr(
+        &[1.0; 16],
+        [1.0; 4],
+        [7, 0, 0, 0],
+        [0.0, 0.0, 1.0, 0.0],
+        ibl_payload,
+        [10.0, 20.0, 30.0],
+    );
+    assert_eq!(ibl.len(), UNIFORM_STRUCT_BYTES as usize);
+    assert_eq!(ibl.len(), pbr.len());
+    assert_eq!(
+        u32::from_le_bytes(ibl[156..160].try_into().unwrap()),
+        1.0f32.to_bits(),
+        "`ibl: true` writes 1.0 into `pbr_eye.w`"
+    );
+    assert_eq!(
+        u32::from_le_bytes(ibl[140..144].try_into().unwrap()),
+        0,
+        "the IBL flag never moves into the reserved word 35"
+    );
+    assert_eq!(
+        &ibl[..156],
+        &pbr[..156],
+        "only `pbr_eye.w` differs between IBL on and off for the same payload"
+    );
+    let (slot_size_ibl, slots_ibl) = uniform_layout_params(&wgpu::Limits::default());
+    assert_eq!(slot_size_ibl, slot_size);
+    assert_eq!(slots_ibl, slots);
 }
 
 /// Numeric proof of the SDF conic **ramp-width** semantics — the root cause of

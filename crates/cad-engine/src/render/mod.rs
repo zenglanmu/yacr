@@ -105,6 +105,14 @@ pub struct ViewSnapshot {
     /// host resolves per active space — a plain value, not a configuration
     /// dependency — and the default is the renderer's documented opaque black.
     pub clear_color: [f32; 4],
+    /// Procedural analytic image-based lighting for the PBR channel (ADR-0044).
+    ///
+    /// The renderer hands this straight to `Renderer::set_ibl_enabled` before
+    /// encoding the frame, so it is uniform data only: a change repaints through
+    /// the ordinary snapshot inequality/`view_revision` path and never rebuilds
+    /// the scene or a pipeline. `false` (the default) is the legacy
+    /// `AMBIENT`-floor shading.
+    pub ibl_enabled: bool,
 }
 impl Default for ViewSnapshot {
     fn default() -> Self {
@@ -116,6 +124,7 @@ impl Default for ViewSnapshot {
             canvas_size: [1280.0, 800.0],
             canvas_origin: None,
             clear_color: [0.0, 0.0, 0.0, 1.0],
+            ibl_enabled: false,
         }
     }
 }

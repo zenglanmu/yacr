@@ -15,7 +15,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readCatalog, readCss, readModule } from './helpers.ts';
-import { columnMajorCells, pairsShareEdge, ribbonTab } from '../src/ribbon/ribbon-model.ts';
+import { columnMajorCells, pairsShareEdge } from '../src/ribbon/ribbon-layout.ts';
+import { ribbonTab } from '../src/ribbon/ribbon-model.ts';
 import { STANDARD_VIEW_PAIRS, STANDARD_VIEWS } from '../src/cad/view3d.ts';
 import {
   OVERFLOW_EPSILON, RIBBON_CUE_WIDTH, ribbonBandOverflow, ribbonCueLayout, ribbonCueReserve,

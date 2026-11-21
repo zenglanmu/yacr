@@ -397,6 +397,13 @@ export interface CadStatus {
   /** Session grid-snap spacing in drawing units (finite, strictly positive). */
   readonly snapSpacing: number;
   readonly orthoEnabled: boolean;
+  /**
+   * Whether the renderer applies image-based lighting to PBR meshes
+   * (`cad_status.iblEnabled`, set by the `IBL` command). Required: the View tab's
+   * IBL toggle reads exactly this flag, so a guessed value would show a wrong
+   * checked state.
+   */
+  readonly iblEnabled: boolean;
   readonly snapKind?: string | null;
   readonly crosshair?: boolean;
   readonly cursorWorld: WorldPoint | null;
@@ -718,7 +725,7 @@ export function parseCadStatus(value: unknown): CadStatus {
   const camera = status?.camera;
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || !['documentLabel', 'error', 'backend', 'adapter'].every(nullableString)
-    || !['loading', 'canOpen', 'canNew', 'canSave', 'canPlot', 'canFit', 'gridEnabled', 'orthoEnabled', 'snapGridEnabled'].every(field => typeof status[field] === 'boolean')
+    || !['loading', 'canOpen', 'canNew', 'canSave', 'canPlot', 'canFit', 'gridEnabled', 'orthoEnabled', 'snapGridEnabled', 'iblEnabled'].every(field => typeof status[field] === 'boolean')
     || !(status.entityCount === null || count('entityCount'))
     || !['importCount', 'frameCount'].every(count)
     || !(camera === null || isCamera(camera))) {

@@ -3,11 +3,11 @@
 //! These are **argument forms of canonical selectors**, never new IPC:
 //! [`PAN_SELECTOR`] (`-PAN`), [`TRACE_SELECTOR`], [`MOCORO_SELECTOR`],
 //! [`MSTRETCH_SELECTOR`], [`VIEWRES_SELECTOR`], [`VSCURRENT_SELECTOR`],
-//! [`WIPEOUTFRAME_SELECTOR`], [`CVPORT_SELECTOR`], [`ELEV_SELECTOR`],
-//! [`FSMODE_SELECTOR`], [`COLOR_SELECTOR`] (`-COLOR` is the same token) and
-//! [`LINETYPE_SELECTOR`] are admitted by [`super::ARGUMENT_SELECTORS`], parsed
-//! here, and dispatched by the session as the matching [`cad_app::CommandId`]
-//! with a payload.
+//! [`IBL_SELECTOR`], [`WIPEOUTFRAME_SELECTOR`], [`CVPORT_SELECTOR`],
+//! [`ELEV_SELECTOR`], [`FSMODE_SELECTOR`], [`COLOR_SELECTOR`] (`-COLOR` is the
+//! same token) and [`LINETYPE_SELECTOR`] are admitted by
+//! [`super::ARGUMENT_SELECTORS`], parsed here, and dispatched by the session as
+//! the matching [`cad_app::CommandId`] with a payload.
 //!
 //! `SKETCH` has **no** command-line grammar in this build: its complete input (a
 //! sampled point sequence) is carried by a host/IPC payload, not by one selector
@@ -25,6 +25,8 @@
 //! * `VIEWRES <integer 1..=1000>`;
 //! * `VSCURRENT <WIREFRAME|2DWIREFRAME|2D|SHADED|SHADEDWITHEDGES>` (the command
 //!   layer names the unsupported styles);
+//! * `IBL ON|OFF` (also `1`/`0`; the session PBR environment-lighting switch —
+//!   the bare selector toggles);
 //! * `WIPEOUTFRAME <0|1|2>` (the system-variable spelling of `WIPEOUT Frames`;
 //!   the bare selector reports the current value);
 //! * `CVPORT <n>` (the session current-viewport marker of the active paper
@@ -55,6 +57,10 @@ pub const MOCORO_SELECTOR: &str = "MOCORO";
 pub const VIEWRES_SELECTOR: &str = "VIEWRES";
 /// `VSCURRENT <WIREFRAME|2DWIREFRAME|2D|SHADED|SHADEDWITHEDGES>`.
 pub const VSCURRENT_SELECTOR: &str = "VSCURRENT";
+/// `IBL ON|OFF` (also `1`/`0`) — the session PBR environment-lighting switch.
+///
+/// A bare `IBL` is the toggle form and never reaches the argument dispatch.
+pub const IBL_SELECTOR: &str = "IBL";
 /// `WIPEOUTFRAME [0|1|2]` — the system-variable spelling of `WIPEOUT Frames`.
 pub const WIPEOUTFRAME_SELECTOR: &str = "WIPEOUTFRAME";
 /// `CVPORT [<n>]` — the session current-viewport marker of the active layout.
@@ -203,6 +209,31 @@ pub fn parse_vscurrent_argument(argument: &str) -> Result<CommandPayload, String
         ));
     }
     Ok(CommandPayload::VisualStyle(style.to_string()))
+}
+
+/// `IBL ON|OFF`: the session PBR environment-lighting switch.
+///
+/// `ON`/`1` selects the procedural image-based environment, `OFF`/`0` the legacy
+/// single dominant light. Those four spellings (case-insensitive) are the whole
+/// grammar: anything else is the named `ibl.invalid_value` refusal, never a
+/// toggle, and the bare selector is the toggle form (it never reaches this
+/// parser). The token is session-only and is projected to `cad_status` as
+/// `iblEnabled`.
+pub fn parse_ibl_argument(argument: &str) -> Result<CommandPayload, String> {
+    let tokens = tokens(argument);
+    let [value] = tokens.as_slice() else {
+        return Err(
+            "ibl.invalid_value: IBL needs ON or OFF (1 or 0 also parse); nothing was changed"
+                .into(),
+        );
+    };
+    match crate::session::commands::parse_sysvar_toggle(value) {
+        Some(enabled) => Ok(CommandPayload::Ibl(enabled)),
+        None => Err(format!(
+            "ibl.invalid_value: IBL needs ON or OFF (1 or 0 also parse), got '{value}'; nothing \
+             was changed"
+        )),
+    }
 }
 
 /// `WIPEOUTFRAME <0|1|2>`: the session frame state for every wipeout.

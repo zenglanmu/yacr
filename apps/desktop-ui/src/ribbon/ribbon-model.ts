@@ -18,6 +18,7 @@ import { BIM_PANEL } from './bim-panel.ts';
 import { ANNOTATE_TEXT_COMMAND_ITEMS } from './annotate-text-commands.ts';
 import { CIRCLE_ITEM, HATCHEDIT_ITEM, MEASUREGEOM_ITEM, POLYGON_ITEM } from './variants.ts';
 import { INTERFACE_PANEL } from './ribbon-interface.ts';
+import type { CadStatusFlagKey } from './ribbon-active.ts';
 
 /** Shell actions that never touch the CAD protocol. */
 export const SHELL_ACTIONS = Object.freeze({
@@ -122,6 +123,12 @@ interface RibbonItemBase {
    * `status.tool_parameter.*.hint`.
    */
   readonly hintKey?: string;
+  /**
+   * The `cad_status` boolean this item is a **toggle** for, when it is one: the
+   * renderer reads `shell.status[key]`, never a local mirror. See
+   * `ribbon-active.ts` for the key set and the pressed-state helpers.
+   */
+  readonly activeKey?: CadStatusFlagKey;
   /** The item's own popover (a small caret); its entries are items too. */
   readonly variants?: readonly RibbonItem[];
 }
@@ -178,13 +185,6 @@ export interface RibbonTab {
   readonly labelKey: string;
   readonly accent?: boolean;
   readonly panels: readonly RibbonPanel[];
-}
-
-/** One cell of a column-major panel grid. */
-export interface RibbonCell<T> {
-  readonly item: T;
-  readonly column: number;
-  readonly row: number;
 }
 
 /**
@@ -924,6 +924,20 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           { id: 'GRID', labelKey: 'overlay.grid', icon: 'grid', command: 'GRID' },
           { id: 'SNAP', labelKey: 'status.toggle.snap', icon: 'snap', command: 'SNAP' },
           { id: 'ORTHO', labelKey: 'status.toggle.ortho', icon: 'angle', command: 'ORTHO' },
+          // IBL is the renderer's image-based lighting switch for PBR meshes:
+          // a bare `IBL` toggles and `IBL ON|OFF|1|0` sets it explicitly. It is a
+          // real router command (never a shell action), so admission is the loaded
+          // host vocabulary; the checked state is the host's own
+          // `cad_status.iblEnabled` (`activeKey`), never a local mirror. The `sun`
+          // glyph is the icon set's lighting mark.
+          {
+            id: 'IBL',
+            labelKey: 'ribbon.command.ibl',
+            icon: 'sun',
+            command: 'IBL',
+            hintKey: 'ribbon.command.ibl.hint',
+            activeKey: 'iblEnabled',
+          },
         ],
       },
       {
@@ -946,42 +960,6 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
 
 export function ribbonTab(id: string): RibbonTab {
   return RIBBON_TABS.find(tab => tab.id === id) ?? RIBBON_TABS[1];
-}
-
-/**
- * Cell coordinates for a column-major panel grid with `rows` rows.
- *
- * This mirrors the layout `.ribbon-panel__group.is-small` actually produces
- * (`display: grid; grid-auto-flow: column; grid-template-rows: repeat(rows, …)`),
- * so a test can assert what a reader will see from the model alone: item 1 and
- * item 2 are neighbours *only* because they share a column.
- */
-export function columnMajorCells<T>(items: readonly T[], rows: number): RibbonCell<T>[] {
-  const height = Math.max(1, Math.trunc(rows) || 1);
-  return items.map((item, index) => ({ item, column: Math.floor(index / height), row: index % height }));
-}
-
-/**
- * Whether every pair in `pairs` lands in two cells that share an edge
- * (vertically adjacent in one column, or horizontally adjacent in one row).
- *
- * `key` extracts the comparison token from an item, so the same helper works for
- * `standardView` names and for any other pairwise grouping.
- */
-export function pairsShareEdge<T extends { readonly id: string }>(
-  items: readonly T[],
-  rows: number,
-  pairs: readonly (readonly [string, string])[],
-  key: (item: T) => string = item => item.id,
-): boolean {
-  const cells = new Map(columnMajorCells(items, rows).map(cell => [key(cell.item), cell]));
-  return pairs.every(([a, b]) => {
-    const first = cells.get(a);
-    const second = cells.get(b);
-    if (!first || !second) return false;
-    if (first.column === second.column) return Math.abs(first.row - second.row) === 1;
-    return first.row === second.row && Math.abs(first.column - second.column) === 1;
-  });
 }
 
 /** All command ids referenced by the ribbon (used to keep the catalog honest). */

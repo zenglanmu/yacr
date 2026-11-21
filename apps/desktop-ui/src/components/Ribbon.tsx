@@ -33,6 +33,7 @@ import type { ShellValue } from '../context.ts';
 import type { RibbonItem, RibbonPanel } from '../ribbon/ribbon-model.ts';
 import type { Translator } from '../i18n.ts';
 import { offeredItems, offeredPanels, panelLauncherCommand, RIBBON_TABS, ribbonTab } from '../ribbon/ribbon-model.ts';
+import { ribbonItemActive } from '../ribbon/ribbon-active.ts';
 import { PANEL_DIALOG_MISSING_KEY } from '../limits.ts';
 import { NO_DOCUMENT_KEY, unavailableReasonKey } from '../commands/commands.ts';
 import { DOCUMENT_SCOPED_COMMANDS } from '../commands/gating.ts';
@@ -115,16 +116,20 @@ function ItemButton({ item }: { readonly item: RibbonItem }) {
   const { t } = useI18n();
   const shell = useShell();
   const enabled = itemEnabled(shell, item);
-  // The About dialog is a host window, so `cad_status.popup` is the only honest
-  // "open" signal. The button reads pressed while it is open and stays
-  // clickable: the host answers `existing: true` and focuses the live window.
-  const active = item.action === 'about' ? Boolean(shell.popupOpen) : false;
+  // A toggle item (`activeKey`) reads its checked state from the host's own
+  // `cad_status` flag, never from a local mirror; every other item is a one-shot
+  // command with no pressed state, so it emits no `aria-pressed`. The About
+  // dialog keeps its host-window rule: `cad_status.popup` is the only honest
+  // "open" signal. The button stays clickable while it is pressed: the host
+  // answers `existing: true` and focuses the live window.
+  const pressed = item.activeKey === undefined ? undefined : ribbonItemActive(shell.status, item);
+  const active = item.action === 'about' ? Boolean(shell.popupOpen) : Boolean(pressed);
   if (!enabled) {
-    return <RibbonButton icon={item.icon as IconName} label={t(item.labelKey)} disabled hint={unavailable(t, item, shell)} />;
+    return <RibbonButton icon={item.icon as IconName} label={t(item.labelKey)} disabled hint={unavailable(t, item, shell)} active={active} pressed={pressed} />;
   }
   // Enabled: the tooltip is the item's **own limit** (`hintKey`), never the
   // refusal sentence — a live button must not word a reason it does not have.
-  return <RibbonButton icon={item.icon as IconName} label={t(item.labelKey)} active={active} hint={item.hintKey ? t(item.hintKey) : undefined} onClick={() => runItem(shell, item)} />;
+  return <RibbonButton icon={item.icon as IconName} label={t(item.labelKey)} active={active} pressed={pressed} hint={item.hintKey ? t(item.hintKey) : undefined} onClick={() => runItem(shell, item)} />;
 }
 
 /** One item cell, plus the variant caret when the item has variants. */

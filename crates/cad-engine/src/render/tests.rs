@@ -187,6 +187,37 @@ fn a_clear_colour_change_is_a_live_render_input() {
 }
 
 #[test]
+fn an_ibl_toggle_is_a_live_render_input_without_a_scene_rebuild() {
+    let session = RenderSessionHandle::new(BackendPreference::Auto);
+    let view = ViewSnapshot::default();
+    assert!(!view.ibl_enabled, "the legacy lighting is the default");
+    assert!(!session.apply_view_snapshot(view).unwrap());
+
+    // ADR-0044: the flag is per-frame uniform data, so a toggle must repaint
+    // through the ordinary snapshot inequality/`view_revision` path — and must
+    // not be treated as a scene-identity change (that would rebuild the base).
+    let before = session.input_revision();
+    let enabled = ViewSnapshot {
+        ibl_enabled: true,
+        ..ViewSnapshot::default()
+    };
+    session.apply_view_snapshot(enabled.clone()).unwrap();
+    assert!(session.view_snapshot().ibl_enabled);
+    assert!(session.cad_frame_dirty(), "the frame must repaint");
+    assert_eq!(
+        session.input_revision(),
+        before,
+        "an IBL toggle is a view change, never a scene-identity rebuild"
+    );
+
+    // Round-trips back to the legacy lighting.
+    session
+        .apply_view_snapshot(ViewSnapshot::default())
+        .unwrap();
+    assert!(!session.view_snapshot().ibl_enabled);
+}
+
+#[test]
 fn drawing_replacement_and_equal_view_are_ui_free_inputs() {
     let session = RenderSessionHandle::new(BackendPreference::Auto);
     let drawing = cad_app::host::HostController::with_demo_document([800.0, 600.0])

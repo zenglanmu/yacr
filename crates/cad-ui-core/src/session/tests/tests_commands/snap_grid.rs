@@ -346,6 +346,9 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             "MOCORO",
             "VIEWRES",
             "VSCURRENT",
+            // `IBL ON|OFF` (also `1`/`0`): the session PBR environment-lighting
+            // switch. The bare selector toggles and is not an argument form.
+            "IBL",
             // The system-variable spelling of `WIPEOUT Frames` (same token).
             "WIPEOUTFRAME",
             // The session current-colour token (`-COLOR` is its prompt spelling).

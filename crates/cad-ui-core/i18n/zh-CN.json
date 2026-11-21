@@ -721,6 +721,8 @@
   "ribbon.command.layer_toggle": "切换图层",
   "ribbon.command.backend_switch": "切换后端",
   "ribbon.command.mode_toggle": "切换模式",
+  "ribbon.command.ibl": "环境光照",
+  "ribbon.command.ibl.hint": "PBR 金属用程序化环境光着色，关闭则回退为单方向光",
   "ribbon.command_unsupported": "命令不可用：{command}",
   "ribbon.panel_dialog_missing": "此面板暂无可打开的对话框：{panel}",
   "ribbon.command_needs_target": "命令需要选择或目标，功能区无法提供：{command}",

@@ -48,7 +48,7 @@ const en = await readCatalog('en');
 const HOST_NAMES = ['MLEADER', 'TEXT', 'CONFIRM', 'CANCEL'];
 setCommandCatalog(HOST_NAMES);
 
-const loaded = { documentLabel: 'fixture.dwg', entityCount: 3, loading: false, canOpen: true, canNew: true, gridEnabled: true, snapGridEnabled: false, snapSpacing: 10, orthoEnabled: false, canSave: true, canPlot: true, canFit: true };
+const loaded = { documentLabel: 'fixture.dwg', entityCount: 3, loading: false, canOpen: true, canNew: true, gridEnabled: true, snapGridEnabled: false, snapSpacing: 10, orthoEnabled: false, iblEnabled: false, canSave: true, canPlot: true, canFit: true };
 const withTool = tool => ({ ...loaded, tool });
 
 // A structurally complete status payload, so `parseCadStatus` is exercised for
@@ -60,7 +60,7 @@ const BASE = {
   importProgress: null,
   error: null,
   canOpen: true,
-  canNew: true, gridEnabled: true, snapGridEnabled: false, snapSpacing: 10, orthoEnabled: false,
+  canNew: true, gridEnabled: true, snapGridEnabled: false, snapSpacing: 10, orthoEnabled: false, iblEnabled: false,
   canSave: true,
   canPlot: true,
   canFit: true,

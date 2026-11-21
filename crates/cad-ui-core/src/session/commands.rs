@@ -319,6 +319,10 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("MSTRETCH", CommandId::MStretch),
     ("VIEWRES", CommandId::ViewRes),
     ("VSCURRENT", CommandId::VisualStyle),
+    // IBL is the session PBR environment-lighting switch. The bare selector
+    // toggles; `IBL ON|OFF` (and `1`/`0`) sets it explicitly. Session state only:
+    // no database write, revision, history entry or undo step.
+    ("IBL", CommandId::Ibl),
     // WIPEOUTFRAME is the system-variable spelling of the `WIPEOUT Frames` option:
     // the same session token (`WipeoutFrames`), one setter. `0` hides the frames,
     // `1` displays and plots them, `2` displays without plotting; any other value

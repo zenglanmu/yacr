@@ -22,6 +22,7 @@ mod gradient;
 mod hatchedit;
 mod hatchedit_pattern_file;
 mod header_arguments;
+mod ibl_environment;
 mod image_arguments;
 mod import_accounting;
 mod input_and_lifecycle;

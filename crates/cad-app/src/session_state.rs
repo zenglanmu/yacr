@@ -35,7 +35,7 @@ pub use erase_snapshot::{EraseEntry, EraseSnapshot};
 pub use modify_options::ModifyOptions;
 pub use refedit::{RefEditActive, RefEditMember, RefEditSession};
 pub use sysvar_monitor::SysVarMonitor;
-pub use view_extras::{ViewExtras, VisualStyleToken};
+pub use view_extras::{PbrEnvironment, ViewExtras, VisualStyleToken};
 pub use viewport_marker::ViewportMarkers;
 
 // The viewport-targeting resolver the `CVPORT` consumers (`LAYVPI`, `VPSCALE`,

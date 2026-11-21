@@ -117,18 +117,27 @@ export interface RibbonButtonProps {
    */
   readonly hint?: string;
   readonly disabled?: boolean;
+  /** The visual active treatment (the About dialog uses it while it is open). */
   readonly active?: boolean;
+  /**
+   * A toggle's checked state. A boolean makes it a real toggle: it maps to
+   * `aria-pressed` and the same `is-active` treatment. `undefined` is a one-shot
+   * command button and must never claim a pressed state.
+   */
+  readonly pressed?: boolean;
   readonly onClick?: () => void;
 }
 
 /** A ribbon command button: large icon over a label, AutoCAD-style. */
-export function RibbonButton({ icon, label, hint, disabled, active, onClick }: RibbonButtonProps) {
+export function RibbonButton({ icon, label, hint, disabled, active, pressed, onClick }: RibbonButtonProps) {
+  const toggle = typeof pressed === 'boolean';
   return (
     <button
       type="button"
-      className={['ribbon-button', active ? 'is-active' : '', disabled ? 'is-disabled' : ''].filter(Boolean).join(' ')}
+      className={['ribbon-button', active || (toggle && pressed) ? 'is-active' : '', disabled ? 'is-disabled' : ''].filter(Boolean).join(' ')}
       disabled={disabled}
       title={hint}
+      aria-pressed={toggle ? pressed : undefined}
       aria-disabled={disabled || undefined}
       onClick={disabled ? undefined : onClick}
     >

@@ -25,7 +25,7 @@ function status(overrides = {}) {
     error: null, canNew: true, canOpen: true, canSave: false, canPlot: false, canFit: false,
     backend: null, adapter: null, camera: null, importCount: 0, frameCount: 0,
     cursorWorld: null, gridEnabled: true, snapGridEnabled: false, snapSpacing: 10,
-    orthoEnabled: false,
+    orthoEnabled: false, iblEnabled: false,
     selection: { count: 0, empty: true, rows: [], mixedKeys: [], text: null, text_multiline: false },
     hostProfile: { surfaceMode: 'native-below', documentOwner: 'native', palettesAvailable: true, standardViews: null },
     ...overrides,

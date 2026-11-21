@@ -790,6 +790,17 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
   MVSETUP: Object.freeze({ parse: isMvSetupArgument }),
   TOLERANCE: Object.freeze({ parse: isToleranceArgument }),
   SSX: Object.freeze({ parse: isSsxArgument }),
+  /**
+   * `IBL [ON|OFF|1|0]`: the renderer's image-based lighting switch for PBR
+   * meshes. A bare `IBL` toggles and stays on the name-only funnel (the host
+   * reads the current state); the explicit forms are admitted here,
+   * case-insensitively, and everything else is the shared
+   * `command.unsupported` refusal before IPC. Appended last so no shipped row
+   * moves.
+   */
+  IBL: Object.freeze({
+    parse: (argument: string) => ['ON', 'OFF', '1', '0'].includes(argument.trim().toUpperCase()),
+  }),
 });
 
 /** `DIMSTYLE`/`-DIMSTYLE`: `LIST`, `CURRENT` or `SET <name>` (name may have spaces). */

@@ -827,6 +827,11 @@ export const HOST_NAMES = [
   'OLERESET',
   'OLESCALE',
   'OPENDWFMARKUP',
+  // IBL (image-based lighting): the renderer's PBR lighting toggle. One canonical
+  // payload-free selector — a bare `IBL` toggles, and `IBL ON|OFF|1|0` is its
+  // typed grammar in `ARGUMENT_COMMANDS`. This mirror stands in for the loaded
+  // `cad_commands` vocabulary and never proves the host advertises it.
+  'IBL',
   // Full-word aliases.
   'EXPORT', 'PRINT', 'SAVEAS', 'QSAVE', 'ZOOM EXTENTS', 'ENTER', 'DBA', 'DCO',
   // AutoCAD's default `acad.pgp` abbreviations, restricted to implemented

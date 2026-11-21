@@ -10,7 +10,7 @@ import { readAppSource, readComponentsSource, readModule } from './helpers.ts';
 // explicitly unsupported, so load a representative set once.
 setCommandCatalog(['OPEN', 'NEW', 'SAVE', 'PLOT', 'FIT', 'LINE', 'MOVE', 'CONFIRM', 'CANCEL', 'UNDO']);
 
-const empty = { documentLabel: null, entityCount: null, loading: false, importProgress: null, error: null, canOpen: true, canNew: true, gridEnabled: true, snapGridEnabled: false, snapSpacing: 10, orthoEnabled: false, canSave: false, canPlot: false, canFit: false, backend: null, adapter: null, camera: null, importCount: 0, frameCount: 0, cursorWorld: null, selection: { count: 0, empty: true, rows: [], mixedKeys: [] } };
+const empty = { documentLabel: null, entityCount: null, loading: false, importProgress: null, error: null, canOpen: true, canNew: true, gridEnabled: true, snapGridEnabled: false, snapSpacing: 10, orthoEnabled: false, iblEnabled: false, canSave: false, canPlot: false, canFit: false, backend: null, adapter: null, camera: null, importCount: 0, frameCount: 0, cursorWorld: null, selection: { count: 0, empty: true, rows: [], mixedKeys: [] } };
 const loaded = { ...empty, documentLabel: 'fixture.dwg', entityCount: 3, canSave: true, canPlot: true, canFit: true, backend: 'Vulkan', adapter: 'hardware', camera: { center: [10, 20], scale: 2 }, importCount: 1, frameCount: 10 };
 const importing = { ...empty, loading: true, canOpen: false, canNew: false, importProgress: { phase: 'entities', entitiesDone: 40, entitiesTotal: 200, bytes: 4096, cancellable: true } };
 const settle = () => new Promise(resolve => setImmediate(resolve));

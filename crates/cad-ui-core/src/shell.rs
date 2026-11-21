@@ -522,6 +522,7 @@ mod tests {
             snap_grid_enabled: false,
             snap_spacing: cad_app::DEFAULT_SNAP_SPACING,
             ortho_enabled: false,
+            ibl_enabled: true,
             snap_kind: None,
             crosshair: false,
             cursor_world: None,

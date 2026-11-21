@@ -1,7 +1,7 @@
-//! Session-only display tokens from the 2026-11-07 extras batch: `VIEWRES` and
-//! `VSCURRENT`.
+//! Session-only display tokens from the 2026-11-07 extras batch: `VIEWRES`,
+//! `VSCURRENT` and `IBL`.
 //!
-//! Both are **session view state only**: no database write, revision bump,
+//! All three are **session view state only**: no database write, revision bump,
 //! `cad-history` entry or `ChangeSet`.
 //!
 //! * `VIEWRES` is **consumed** by the display build: the percentage becomes a
@@ -60,6 +60,37 @@ impl VisualStyleToken {
     }
 }
 
+/// The `IBL` PBR environment-lighting switch.
+///
+/// This is the **value** the procedural image-based-lighting lane reads at
+/// render time; this crate only stores and reports it. Session-only: no database
+/// write, revision bump, `cad-history` entry, `ChangeSet` or persisted
+/// preference.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PbrEnvironment {
+    /// Legacy single-direction lighting (`LEGACY`/`OFF`/`0`).
+    Legacy,
+    /// Procedural image-based lighting (`IBL`/`ON`/`1`/`IMAGEBASED`), the
+    /// default so the pre-toggle scene is unchanged.
+    #[default]
+    ImageBased,
+}
+
+impl PbrEnvironment {
+    /// The stable token spelling a host reads.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Legacy => "LEGACY",
+            Self::ImageBased => "IBL",
+        }
+    }
+
+    /// Whether procedural image-based lighting is active.
+    pub const fn is_image_based(self) -> bool {
+        matches!(self, Self::ImageBased)
+    }
+}
+
 /// Session display tokens that are not drawing data.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ViewExtras {
@@ -71,6 +102,8 @@ pub struct ViewExtras {
     pub viewres_percent: u32,
     /// `VSCURRENT` visual-style token.
     pub visual_style: VisualStyleToken,
+    /// `IBL` PBR environment-lighting switch.
+    pub pbr_environment: PbrEnvironment,
 }
 
 impl Default for ViewExtras {
@@ -82,6 +115,9 @@ impl Default for ViewExtras {
             // build had before `VSCURRENT` reached the body representation, so
             // the default is pixel-identical to the pre-token scene.
             visual_style: VisualStyleToken::Shaded,
+            // Image-based lighting is the default: the procedural environment is
+            // what the PBR shader already renders, so the switch starts on.
+            pbr_environment: PbrEnvironment::ImageBased,
         }
     }
 }
@@ -128,6 +164,36 @@ impl ViewExtras {
             )));
         };
         self.visual_style = token;
+        Ok(())
+    }
+
+    /// Store one `IBL` environment-lighting value.
+    ///
+    /// Accepted spellings (case-insensitive, one token):
+    ///
+    /// * `IBL`, `ON`, `1`, `IMAGEBASED` → [`PbrEnvironment::ImageBased`];
+    /// * `LEGACY`, `OFF`, `0` → [`PbrEnvironment::Legacy`].
+    ///
+    /// Every other value is a named refusal (`ibl.invalid_value`), never a
+    /// toggle or a silent fallback. Session-only: the drawing is not written and
+    /// no revision, history entry or `ChangeSet` is produced.
+    pub fn set_pbr_environment(&mut self, value: &str) -> CadResult<()> {
+        let token = value.trim();
+        let environment = if token.eq_ignore_ascii_case("IBL")
+            || token.eq_ignore_ascii_case("ON")
+            || token == "1"
+            || token.eq_ignore_ascii_case("IMAGEBASED")
+        {
+            PbrEnvironment::ImageBased
+        } else if token.eq_ignore_ascii_case("LEGACY")
+            || token.eq_ignore_ascii_case("OFF")
+            || token == "0"
+        {
+            PbrEnvironment::Legacy
+        } else {
+            return Err(CadError::Unsupported(format!("ibl.invalid_value: {value}")));
+        };
+        self.pbr_environment = environment;
         Ok(())
     }
 }

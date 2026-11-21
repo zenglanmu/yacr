@@ -616,6 +616,9 @@ pub(crate) struct PbrUniforms {
     pub(crate) channels: u32,
     /// **Linear** emissive RGB in `[0, 1]`.
     pub(crate) emissive: [f32; 3],
+    /// Procedural image-based lighting (ADR-0044) for this frame
+    /// (`camera.pbr_eye.w`). Defaults to the legacy `AMBIENT` floor.
+    pub(crate) ibl: bool,
 }
 
 impl Default for PbrUniforms {
@@ -626,6 +629,7 @@ impl Default for PbrUniforms {
             occlusion_strength: 0.0,
             channels: 0,
             emissive: [0.0, 0.0, 0.0],
+            ibl: false,
         }
     }
 }
@@ -692,7 +696,8 @@ pub(crate) fn uniform_bytes_pbr(
     words[36] = camera_position[0].to_bits();
     words[37] = camera_position[1].to_bits();
     words[38] = camera_position[2].to_bits();
-    words[39] = 0;
+    // Word 39 is `Camera.pbr_eye.w`, the frame's procedural-IBL flag (ADR-0044).
+    words[39] = (if pbr.ibl { 1.0f32 } else { 0.0 }).to_bits();
     let mut bytes = [0u8; UNIFORM_STRUCT_BYTES as usize];
     for (slot, word) in words.iter().enumerate() {
         bytes[slot * 4..slot * 4 + 4].copy_from_slice(&word.to_le_bytes());
@@ -715,6 +720,9 @@ pub(crate) fn uniform_bytes_pbr(
 /// The normal-map bit additionally requires a generated tangent frame
 /// ([`GpuBatch::has_tangents`]); without one the channel is disabled rather than
 /// evaluated against an invented tangent.
+///
+/// `ibl` is the frame's procedural-IBL switch (ADR-0044) and travels in
+/// `Camera.pbr_eye.w`; it is per-frame renderer state, not a batch property.
 pub(crate) fn batch_uniform(
     batch: &GpuBatch,
     matrix: &[f32; 16],
@@ -722,6 +730,7 @@ pub(crate) fn batch_uniform(
     key_flags: [u32; 4],
     light: [f32; 4],
     camera_position: [f32; 3],
+    ibl: bool,
 ) -> [u8; UNIFORM_STRUCT_BYTES as usize] {
     let Some(pbr) = &batch.pbr else {
         return uniform_bytes(matrix, tint, key_flags, light);
@@ -753,6 +762,7 @@ pub(crate) fn batch_uniform(
             occlusion_strength: pbr.occlusion_strength,
             channels,
             emissive: pbr.emissive,
+            ibl,
         },
         [
             camera_position[0] - batch.origin[0],

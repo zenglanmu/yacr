@@ -63,6 +63,9 @@ impl CadRenderRuntime {
             // writes the tiny transient instance buffer and never touches the
             // committed batches, revisions, planning or pacing.
             renderer.set_cursor_transient(self.cursor_transient.clone());
+            // Per-frame PBR environment switch (ADR-0044): uniform data only, no
+            // pipeline/scene rebuild.
+            renderer.set_ibl_enabled(view.ibl_enabled);
             let target = RenderTarget::new(size.0, size.1).with_clear_color(view.clear_color);
             let stats = match view.mode {
                 ProjectionKind::TwoD => {

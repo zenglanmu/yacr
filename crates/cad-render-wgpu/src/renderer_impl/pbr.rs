@@ -459,6 +459,10 @@ impl Renderer {
     /// This frame's per-batch uniform: the frame-constant light and camera
     /// position come from the renderer (`last_light`/`last_camera_position`, set at
     /// the top of the frame), so the draw loop passes only the batch's own values.
+    ///
+    /// `ibl_enabled` is renderer-level frame state (ADR-0044), not per batch: it
+    /// rides the shared uniform and needs no pipeline change, so toggling it
+    /// only affects the next frame's uniform data.
     pub(super) fn batch_uniform(
         &self,
         batch: &GpuBatch,
@@ -473,6 +477,18 @@ impl Renderer {
             key_flags,
             self.last_light,
             self.last_camera_position.unwrap_or([0.0; 3]),
+            self.ibl_enabled,
         )
+    }
+
+    /// Enable or disable the procedural analytic IBL in the PBR channel
+    /// (ADR-0044).
+    ///
+    /// This only stores the flag: the value travels as per-frame uniform data
+    /// (`Camera.pbr_eye.w`), so the next frame picks it up without a pipeline
+    /// rebuild, a plan invalidation or a re-upload. `false` restores the legacy
+    /// `AMBIENT` floor exactly.
+    pub fn set_ibl_enabled(&mut self, enabled: bool) {
+        self.ibl_enabled = enabled;
     }
 }

@@ -160,6 +160,7 @@ impl Renderer {
             last_camera_matrix: [0.0; 16],
             last_camera_position: None,
             last_light: [0.0, 0.0, 1.0, 0.0],
+            ibl_enabled: false,
             id_format: IdTargetFormat::R32Uint,
             id_format_override: None,
             pick_target: None,

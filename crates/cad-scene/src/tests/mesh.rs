@@ -628,7 +628,9 @@ fn pbr_material_bytes_charge_the_keys_and_the_tangent_stream() {
     // The normal map needs a `Float32x4` tangent per vertex.
     let tangent_bytes = batch.vertices.len() * 16;
     assert_eq!(pbr.key_bytes(), key_bytes);
-    let geometry = 4 * 12 * 3 + 2 * 12 + 10 * 12 + 4 * 8;
+    // ADR-0044: a PBR mesh emits no triangle-derived edge overlay, so the
+    // geometry term is positions + normals + colours + indices + UV0 only.
+    let geometry = 4 * 12 * 3 + 2 * 12 + 4 * 8;
     assert_eq!(
         batch.upload_size_bytes(),
         geometry + key_bytes + tangent_bytes,
@@ -636,11 +638,11 @@ fn pbr_material_bytes_charge_the_keys_and_the_tangent_stream() {
     );
     assert_eq!(
         batch.vertex_bytes(),
-        4 * 12 * 2 + 10 * 12 + 4 * 8 + key_bytes + tangent_bytes
+        4 * 12 * 2 + 4 * 8 + key_bytes + tangent_bytes
     );
     assert_eq!(
         batch.approx_bytes(),
-        (4 + 4 + 10) * 12 + 2 * 12 + 4 * 8 + key_bytes + tangent_bytes
+        (4 + 4) * 12 + 2 * 12 + 4 * 8 + key_bytes + tangent_bytes
     );
 
     // A material without a normal map needs no tangent frame.
@@ -659,9 +661,10 @@ fn pbr_material_bytes_charge_the_keys_and_the_tangent_stream() {
         "no normal map, no tangent frame"
     );
     // With no texture channel active, nothing samples UV0, so the batch keeps
-    // the untextured form and uploads no UV stream either.
+    // the untextured form and uploads no UV stream either. Its PBR material is
+    // still a shaded surface, so it too carries no edge overlay (ADR-0044).
     assert!(batch.uvs.is_empty());
-    assert_eq!(batch.upload_size_bytes(), 4 * 12 * 3 + 2 * 12 + 10 * 12);
+    assert_eq!(batch.upload_size_bytes(), 4 * 12 * 3 + 2 * 12);
 }
 
 #[test]
@@ -674,4 +677,92 @@ fn mesh_texture_keys_collect_the_base_colour_and_all_four_pbr_keys() {
     let mut expected = vec![TEXTURE_KEY, MR_KEY, NORMAL_KEY, EMISSIVE_KEY, OCCLUSION_KEY];
     expected.sort_unstable();
     assert_eq!(names, expected, "all five keys, deduped and sorted");
+}
+
+// ---- PBR meshes carry no triangle-derived wireframe (ADR-0044) ----------
+
+#[test]
+fn pbr_mesh_emits_no_edge_overlay() {
+    // The same quad twice: textured but not PBR keeps yesterday's overlay, PBR
+    // gets the `MeshWithoutEdgeOverlay` shape with identical mesh streams.
+    let plain_delta = SceneCache::default()
+        .build(&mesh_representation(30, textured_quad()), stamp())
+        .unwrap();
+    let pbr_delta = SceneCache::default()
+        .build(&mesh_representation(31, pbr_quad()), stamp())
+        .unwrap();
+    let plain = &plain_delta.added[0];
+    let shaded = &pbr_delta.added[0];
+
+    assert!(plain.pbr.is_none(), "the control mesh has no PBR material");
+    assert!(shaded.pbr.is_some(), "the PBR material survives conversion");
+
+    // A textured non-PBR mesh keeps the legacy triangle-derived overlay: two
+    // triangles de-duplicate to the quad's five undirected segments.
+    assert_eq!(
+        plain.edges.len(),
+        10,
+        "a textured but non-PBR mesh keeps today's overlay"
+    );
+    assert!(
+        shaded.edges.is_empty(),
+        "an imported PBR mesh emits zero edge-overlay positions"
+    );
+
+    // Every other stream is the same as today.
+    assert_eq!(shaded.topology, plain.topology);
+    assert_eq!(shaded.local_origin, plain.local_origin);
+    assert_eq!(shaded.vertices, plain.vertices);
+    assert_eq!(shaded.normals, plain.normals);
+    assert_eq!(shaded.colors, plain.colors);
+    assert_eq!(shaded.uvs, plain.uvs);
+    assert_eq!(shaded.indices, plain.indices);
+    assert_eq!(
+        shaded.texture.as_ref().map(|key| key.as_str()),
+        plain.texture.as_ref().map(|key| key.as_str())
+    );
+
+    // No edges must not turn the shaded asset into the navigation-time text
+    // glyph class: a PBR mesh stays visible while the camera moves.
+    assert!(
+        !shaded.is_text_glyph(),
+        "a PBR mesh is a shaded surface, not text"
+    );
+}
+
+#[test]
+fn a_body3d_still_emits_its_stored_edges() {
+    // ADR-0044 only removes the *triangle-derived* overlay of imported PBR
+    // meshes. A `Body3d` reaches the scene as `MeshWithStoredEdges`, and its
+    // stored wireframe must render unchanged — even if the display mesh ever
+    // carried a PBR material.
+    let mesh = pbr_quad();
+    let stored = vec![
+        Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        },
+        Point3 {
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
+        },
+    ];
+    let mut representation = mesh_representation(32, mesh.clone());
+    representation.fragments[0].primitive = DisplayPrimitive::MeshWithStoredEdges {
+        mesh: Arc::new(mesh),
+        edges: Arc::from(stored.into_boxed_slice()),
+    };
+    let delta = SceneCache::default()
+        .build(&representation, stamp())
+        .unwrap();
+    let batch = &delta.added[0];
+    assert_eq!(
+        batch.edges,
+        vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+        "the body's stored segment is still drawn"
+    );
+    assert!(batch.pbr.is_some(), "the material survives conversion");
+    assert!(!batch.is_text_glyph());
 }

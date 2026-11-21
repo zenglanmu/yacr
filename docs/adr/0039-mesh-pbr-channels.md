@@ -179,7 +179,8 @@ metallicRoughnessTexture`、`normalTexture{index,scale:1}`、
 | `KHR_materials_*` 扩展族（clearcoat/transmission/sheen/ior…） | 需要额外通道与 BRDF；本轮只做核心 metallic-roughness |
 | 多 UV 集（`TEXCOORD_1+`）与 `KHR_texture_transform` | 域模型只有 UV0；`texCoord != 0` 的槽按名报告后不导入 |
 | `alphaMode = MASK` 镂空 | 需要裁剪/alpha-test 语义；本轮 PBR 通道沿用既有 alpha blending，不新增 cutout |
-| 环境贴图/IBL、tonemap、阴影、多光源 | 会改变既有资产观感，且需要新资源与预算模型；着色只用既有单方向光 `camera.light` |
+| 环境贴图/IBL | ~~会改变既有资产观感，且需要新资源与预算模型~~ **已作废，由 [ADR-0044](0044-procedural-ibl.md) 取代（2026-11-21）：改为程序化解析天空，不引入环境贴图资产** |
+| tonemap、阴影、多光源 | 会改变既有资产观感，且需要新资源与预算模型；着色只用既有单方向光 `camera.light` |
 | RVT 纹理 | 上游 0.25.0 仍不产出 `images`/`TEXCOORD_0`；要支持必须扩展 ADR-0035 补丁并自行解析 Revit 外观资源位图 |
 | 非 glTF 导出器的 PBR（STL/OBJ/PLY/OFF/IFC4/SKP/DXF/DWG） | 这些写出器仍不写 PBR；也**没有**独立的 PBR 丢失码——基色纹理的损失已由 `export.<id>.texture_not_written` 覆盖，PBR 标量/贴图不在其消息内 |
 
@@ -226,4 +227,24 @@ metallicRoughnessTexture`、`normalTexture{index,scale:1}`、
   `docs/validation-pbr-2026-11-20.md`）；合成 `pbr-channels.glb` 的端到端渲染记录 **待补**。
   IBL/环境贴图、阴影、tonemap、多光源、`KHR_materials_*`、`alphaMode = MASK`、UV1+
   /`KHR_texture_transform`、SKP/IFC/OBJ 的 PBR、RVT 纹理、非 glTF 导出器的 PBR 仍
-  **NOT RUN / 未实现**（§3）。
+  **NOT RUN / 未实现**（§3；IBL 项已由 ADR-0044 取代，见 §6）。
+
+---
+
+## 6. 修订（ADR-0044，2026-11-21）
+
+1. **§3 的 IBL 行作废**：“环境贴图/IBL”从"明确不做"中移除，改由
+   [ADR-0044](0044-procedural-ibl.md) 覆盖：环境是 WGSL 内联计算的**程序化解析天空**
+   （split-sum + 解析 BRDF 近似），不是环境贴图资产、不做启动期预滤波。tonemap、阴影、
+   多光源仍在 §3 中保持"不做"。
+2. **D6 的着色新增 IBL 分支**。间接漫反射 = `base * (1 - metallic) * sky_irradiance(n) * occlusion`；
+   间接镜面 = `mix(sky_radiance(reflect(-v, n), sun), sky_irradiance(n), roughness²)` ×
+   (`f0 * A + B`) × 多散射能量补偿 × `occlusion`；AO 因此**同时**作用于间接镜面——这修订 D6 的
+   "occlusion 只乘漫反射与环境项"：现在是漫反射 + 间接镜面，**直接光镜面仍不受 AO**。
+   `IBL OFF`（渲染器默认 `Legacy`）时走**本文 D6 原式**：单方向光 + `AMBIENT = 0.25` +
+   `base * (1 - metallic) * AMBIENT`，逐字相同，并由 fixture 锁定，不是"顺手一致"。
+3. **不变量 1 的"逐像素一致"只适用于 `pbr: None`**。`pbr: Some` 的批次在 IBL 默认开时像素改变
+   是预期结果；`pbr: None` 的网格仍必须与 ADR-0038 当前输出逐像素一致。`.ymodel` 布局、
+   `FORMAT_MINOR`、uniform 尺寸（`Camera` 160 B / 槽步长 256 B）与导出字节均不变——
+   IBL 是会话态显示派生概念，不写入文档。
+

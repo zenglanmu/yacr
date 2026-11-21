@@ -125,6 +125,11 @@ impl HostCore {
                 // no-op.
                 canvas_origin: Some(self.canvas_metrics.get().origin_logical),
                 clear_color,
+                // ADR-0044: the PBR channel's procedural environment is a session
+                // switch (`IBL`), not a per-drawing property, so the frame reads
+                // the session token directly. Toggling it repaints without a
+                // scene rebuild (`ibl_enabled` is part of the render input).
+                ibl_enabled: c.session.view_extras.pbr_environment.is_image_based(),
             };
             // The pointer-cursor geometry: the cursor's world point on the work
             // plane plus the view scale (world units per logical pixel), both only

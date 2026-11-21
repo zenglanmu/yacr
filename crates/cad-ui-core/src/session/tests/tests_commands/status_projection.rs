@@ -133,6 +133,9 @@ fn blank_status_reports_no_document_capabilities() {
         true,
         2.5,
         true,
+        // IBL image-based lighting is the session default in this hand-built
+        // snapshot; it is carried verbatim like every other flag.
+        true,
         None,
         false,
         // No cursor on a blank session: no world coordinate to report.
@@ -184,6 +187,10 @@ fn blank_status_reports_no_document_capabilities() {
     assert!(
         status.ortho_enabled,
         "the assembled status carries the ORTHO flag it was given"
+    );
+    assert!(
+        status.ibl_enabled,
+        "the assembled status carries the IBL flag it was given"
     );
     // The selection block is always carried, never omitted.
     assert_eq!(status.selection, CadSelection::empty());
@@ -304,6 +311,8 @@ fn document_status_reports_counts_and_camera() {
         false,
         10.0,
         false,
+        // IBL image-based lighting is the session default.
+        true,
         None,
         true,
         // The world coordinate is carried verbatim, never re-derived here.
@@ -340,6 +349,10 @@ fn document_status_reports_counts_and_camera() {
     assert!(
         !status.ortho_enabled,
         "the ORTHO flag is projected from what the caller supplied, not guessed"
+    );
+    assert!(
+        status.ibl_enabled,
+        "the IBL flag is projected from what the caller supplied, not guessed"
     );
     assert!(
         status.crosshair,
@@ -475,6 +488,8 @@ fn the_status_carries_the_grip_drag_flag_on_the_wire_in_both_states() {
         false,
         10.0,
         false,
+        // The default IBL switch travels with the rest of the display flags.
+        true,
         None,
         false,
         None,
