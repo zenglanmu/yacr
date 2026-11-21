@@ -38,7 +38,7 @@ fn round_trip(
     attributes: Option<&EntityRenderAttributes>,
     invisible: bool,
 ) -> DecodedElement {
-    let encoded = encode(entity, attributes, invisible, None).expect("encode");
+    let encoded = encode(entity, attributes, invisible, None, None).expect("encode");
     let text = serde_json::to_string(&encoded).expect("serialize");
     let parsed: Value = serde_json::from_str(&text).expect("parse");
     let mut decoded = decode(&parsed).expect("decode");
@@ -61,7 +61,7 @@ fn model_paper_block_and_opaque_rows_round_trip() {
     );
     assert_eq!(decoded.entity.draw_order, 0, "draw order is runtime state");
 
-    let value = encode(&model, None, false, None).expect("encode");
+    let value = encode(&model, None, false, None, None).expect("encode");
     assert_eq!(value["space"], json!({ "kind": "model" }));
     assert_eq!(value["layer"], json!(LayerId(2).persistent().raw()));
     assert_eq!(value["source_handle"], json!("2F"));
@@ -77,7 +77,7 @@ fn model_paper_block_and_opaque_rows_round_trip() {
         round_trip(&paper, None, false).entity.space,
         SpaceId::Paper(LayoutId(1))
     );
-    let value = encode(&paper, None, false, None).expect("encode");
+    let value = encode(&paper, None, false, None, None).expect("encode");
     assert_eq!(
         value["space"],
         json!({ "kind": "paper", "id": LayoutId(1).persistent().raw() }),
@@ -92,7 +92,7 @@ fn model_paper_block_and_opaque_rows_round_trip() {
         LayerId(3),
         "a block member still belongs to a layer"
     );
-    let value = encode(&block, None, false, None).expect("encode");
+    let value = encode(&block, None, false, None, None).expect("encode");
     assert_eq!(
         value["space"],
         json!({ "kind": "block", "id": BlockId(2).persistent().raw() })
@@ -152,7 +152,7 @@ fn render_attributes_round_trip_with_nan_scale_and_clip() {
     };
     let entity = sample(7, 2, SpaceId::Model, line());
 
-    let encoded = encode(&entity, Some(&attributes), false, None).expect("encode");
+    let encoded = encode(&entity, Some(&attributes), false, None, None).expect("encode");
     assert_eq!(
         encoded["render_attributes"]["linetype_scale"],
         json!({ "$f64": "nan" }),
@@ -211,7 +211,7 @@ fn absent_source_handle_and_invisible_round_trip() {
     assert!(decoded.invisible);
     assert_eq!(decoded.entity, entity);
 
-    let value = encode(&entity, None, true, None).expect("encode");
+    let value = encode(&entity, None, true, None, None).expect("encode");
     assert!(value["source_handle"].is_null());
     assert_eq!(value["invisible"], json!(true));
 }
@@ -219,7 +219,7 @@ fn absent_source_handle_and_invisible_round_trip() {
 #[test]
 fn malformed_rows_are_refused() {
     let entity = sample(1, 2, SpaceId::Model, line());
-    let base = encode(&entity, None, false, None).expect("encode");
+    let base = encode(&entity, None, false, None, None).expect("encode");
     let refused = |value: Value, needle: &str| {
         let error = decode(&value).expect_err("must be refused");
         assert!(error.detail.contains(needle), "{error}");
@@ -257,6 +257,7 @@ fn malformed_rows_are_refused() {
         Some(&EntityRenderAttributes::default()),
         false,
         None,
+        None,
     )
     .expect("encode");
     unknown_escape["render_attributes"]["linetype_scale"] = json!({ "$f64": "snan" });
@@ -271,6 +272,7 @@ fn the_encoded_row_matches_the_descriptor() {
         Some(&EntityRenderAttributes::default()),
         true,
         None,
+        None,
     )
     .expect("encode");
     let object = value.as_object().expect("object");
@@ -282,6 +284,9 @@ fn the_encoded_row_matches_the_descriptor() {
     // has no BIM data (a minor-5 row is this row minus the key), so the "exactly
     // the descriptor" assertion is made over every other field.
     expected.remove("bim");
+    // ADR-0043 D7: same rule for `params` — an element without bindings omits
+    // the key, so a minor-7 row is this row minus it.
+    expected.remove("params");
     assert_eq!(
         keys, expected,
         "the row is exactly the descriptor's field set"
@@ -313,6 +318,7 @@ fn the_encoded_row_matches_the_descriptor() {
             FieldKind::Bool => check(encoded.is_boolean(), name),
             FieldKind::RenderAttributes => check(encoded.is_object() || encoded.is_null(), name),
             FieldKind::Bim => check(encoded.is_object() || encoded.is_null(), name),
+            FieldKind::Params => check(encoded.is_object() || encoded.is_null(), name),
             FieldKind::Geometry => check(encoded.get("class").is_some_and(Value::is_string), name),
             other => panic!("{name} uses {other:?}, which no test here exercises"),
         }

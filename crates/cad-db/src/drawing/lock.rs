@@ -169,6 +169,21 @@ impl DrawingDatabase {
         }
     }
 
+    /// Refuse a row-level write on an entity whose layer is locked.
+    ///
+    /// The parametric `params` block is part of the element shard row, so a real
+    /// binding change is a modification exactly like a geometry write. The
+    /// caller supplies the action so the message keeps the same
+    /// `layer.locked: {action} locked layer '…'` shape as the entity checks.
+    pub(crate) fn ensure_row_writable(&self, id: EntityId, action: &str) -> CadResult<()> {
+        match self.entities.get(&id) {
+            Some(entity) => self.refuse_locked_layer(entity.layer, action.to_string()),
+            // A row that does not exist has no layer to lock; the apply path
+            // reports that as its own target-missing invariant.
+            None => Ok(()),
+        }
+    }
+
     /// The refusal itself: `layer.locked` when `layer` is locked, naming the
     /// layer row.
     ///

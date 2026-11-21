@@ -75,6 +75,16 @@ pub enum BimRelationKind {
     Group,
     /// A connectivity relation (`IfcRelConnects*`).
     Connects,
+    /// `IfcRelVoidsElement`: host element → opening element (ADR-0043 P2).
+    ///
+    /// A D1 **reference** edge: P2 registers no `(host, hosted)` rule, so it is
+    /// [`cad_domain::relation::Propagation::NoRule`] and the IFC exporter reports
+    /// it as not written instead of inventing a wall-reflow heuristic.
+    Voids,
+    /// `IfcRelFillsElement`: opening element → filling element (ADR-0043 P2).
+    ///
+    /// Same reference family and `rel.no_rule` policy as [`Self::Voids`].
+    Fills,
     /// Any other source edge, spelled `other:<token>`.
     Other(String),
 }
@@ -91,6 +101,8 @@ impl BimRelationKind {
             BimRelationKind::Contains => "contains".to_string(),
             BimRelationKind::Group => "group".to_string(),
             BimRelationKind::Connects => "connects".to_string(),
+            BimRelationKind::Voids => "voids".to_string(),
+            BimRelationKind::Fills => "fills".to_string(),
             BimRelationKind::Other(token) => format!("{}{token}", Self::OTHER_PREFIX),
         }
     }
@@ -106,6 +118,8 @@ impl BimRelationKind {
             "contains" => Some(BimRelationKind::Contains),
             "group" => Some(BimRelationKind::Group),
             "connects" => Some(BimRelationKind::Connects),
+            "voids" => Some(BimRelationKind::Voids),
+            "fills" => Some(BimRelationKind::Fills),
             other => other
                 .strip_prefix(Self::OTHER_PREFIX)
                 .filter(|token| !token.trim().is_empty())

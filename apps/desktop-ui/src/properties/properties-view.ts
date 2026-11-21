@@ -26,6 +26,7 @@ export const PROPERTY_GROUP_ORDER: readonly string[] = Object.freeze([
   'geometry',
   'text',
   'display',
+  'param',
 ]);
 
 /** The numeric bounds a key's field shows (the client mirror only rejects). */

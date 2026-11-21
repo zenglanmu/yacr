@@ -132,6 +132,7 @@ impl CommandId {
                 | Self::SetPointDisplayMode
                 | Self::SetPointDisplaySize
                 | Self::SetEntityProperty
+                | Self::Param
                 | Self::MatchProp
                 | Self::GripStretch
                 // INSERT writes one new block-reference entity; the block table

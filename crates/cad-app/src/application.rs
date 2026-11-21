@@ -703,6 +703,7 @@ impl Application {
             | CommandId::OffsetEntity
             | CommandId::SetActiveLayer
             | CommandId::SetEntityProperty
+            | CommandId::Param
             | CommandId::MatchProp
             | CommandId::GripStretch
             | CommandId::Reverse

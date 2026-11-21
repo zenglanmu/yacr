@@ -574,15 +574,19 @@ fn the_bim_read_seam_is_registered_and_reads_the_open_document() {
     );
 
     // No session (before the first tick, or after a failed creation) is the named
-    // refusal — never an empty page that would read as "no BIM data".
+    // refusal — never an empty page that would read as "no data".
     assert!(
-        HOST_READ.contains("None => Err(super::no_document_refusal()),"),
+        HOST_READ.contains("None => Err(super::no_document_refusal(&request)),"),
         "a missing session must answer the named refusal"
     );
-    let refusal_fn = slice_between(HOST_READ, "pub fn no_document_refusal() -> String {", "\n}");
+    let refusal_fn = slice_between(
+        HOST_READ,
+        "pub fn no_document_refusal(request: &HostReadRequest) -> String {",
+        "\n}",
+    );
     assert!(
-        refusal_fn.contains("BIM_UNSUPPORTED.to_string()"),
-        "the refusal must be the shared constant"
+        refusal_fn.contains("cad_ui_core::host_read::no_seam_refusal(request)"),
+        "the refusal must come from the shared per-kind seam"
     );
     let respelled = concat!("unsupported-runtime: ", "bimQuery");
     assert!(

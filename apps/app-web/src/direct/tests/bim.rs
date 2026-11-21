@@ -207,7 +207,9 @@ fn the_generic_host_read_answers_what_the_query_command_answers() {
             limit: 100,
         })
         .expect("the direct read answers");
-    let HostReadAnswer::BimQuery(response) = answer;
+    let HostReadAnswer::BimQuery(response) = answer else {
+        panic!("a BIM request must answer with the BIM kind");
+    };
     assert_eq!(
         wire,
         serde_json::to_value(&response).expect("serialize"),

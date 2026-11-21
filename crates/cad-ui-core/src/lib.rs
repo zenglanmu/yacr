@@ -17,6 +17,7 @@ pub mod host_read;
 pub mod i18n;
 pub mod launch;
 pub mod layout;
+pub mod param;
 pub mod popup;
 pub mod protocol;
 pub mod session;
@@ -32,6 +33,7 @@ pub use host_read::{
     HostReadAnswer, HostReadHost, HostReadRequest, HostReadSeam, HostReads, BIM_QUERY_KIND,
     HOST_READ_UNKNOWN_KIND,
 };
+pub use param::{ParamListResponse, ParamListRow, PARAM_LIST_KIND, PARAM_LIST_UNSUPPORTED};
 
 pub use i18n::{
     format_message, locale_from_env, placeholders, resolve_locale, supported_locale_for,

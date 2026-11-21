@@ -85,6 +85,12 @@ impl Application {
         if let Some(slot) = crate::selection_bim::BimPropertyKey::parse(key) {
             return self.set_bim_property(session, command, slot, value);
         }
+        // A document parameter row (`param.<name>`, ADR-0043 D9) is the same
+        // shape: the key names a value in the parameter table, not an
+        // entity/display field, and `property_value` must not learn it.
+        if let Some(name) = crate::selection_param::param_name(key) {
+            return self.set_param_property(session, command, name, value);
+        }
         let target = property_value::parse(&drawing, key, value)?;
 
         let references = session.selection.refs();

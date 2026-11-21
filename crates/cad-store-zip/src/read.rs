@@ -326,7 +326,7 @@ fn parse_tables(
 /// `cad-db`, and `check-architecture.py` forbids this crate from editing it), so
 /// the reverse map is written out and a table missing from it is refused by
 /// [`unknown_live_entry`] rather than silently dropped.
-const TABLE_ENTRIES: [(TableKind, &str); 15] = [
+const TABLE_ENTRIES: [(TableKind, &str); 19] = [
     (TableKind::Layers, "tables/layers.json"),
     (TableKind::Layouts, "tables/layouts.json"),
     (TableKind::Styles, "tables/styles.json"),
@@ -350,6 +350,16 @@ const TABLE_ENTRIES: [(TableKind, &str); 15] = [
     // BIM relation edges (ADR-0042 D3 tail/D12). Opaque rows: the endpoints use
     // the element `bim.source` key shape and the snapshot codec owns budgets.
     (TableKind::BimRelations, "tables/bim-relations.json"),
+    // Document parameters (ADR-0043 D4). Opaque rows here: `cad-db`'s snapshot
+    // codec owns the expression shape and its budgets.
+    (TableKind::Parameters, "tables/parameters.json"),
+    // Named parameter configurations (ADR-0043 P1). Opaque rows here: the
+    // snapshot codec owns the overlay shape and its budgets.
+    (TableKind::Configurations, "tables/configurations.json"),
+    // P2 feature definitions and P3 in-context relations (opaque rows; the
+    // snapshot codec owns their shapes and budgets).
+    (TableKind::Features, "tables/features.json"),
+    (TableKind::Relations, "tables/relations.json"),
 ];
 
 /// The table kind one entry path holds, if this build models it.
@@ -701,6 +711,10 @@ mod tests {
             TableKind::Compat,
             TableKind::BimDefinitions,
             TableKind::BimRelations,
+            TableKind::Parameters,
+            TableKind::Configurations,
+            TableKind::Features,
+            TableKind::Relations,
         ];
         let mut paths = std::collections::BTreeSet::new();
         for kind in kinds {
@@ -723,6 +737,10 @@ mod tests {
                 TableKind::Compat => "Compat",
                 TableKind::BimDefinitions => "BimDefinitions",
                 TableKind::BimRelations => "BimRelations",
+                TableKind::Parameters => "Parameters",
+                TableKind::Configurations => "Configurations",
+                TableKind::Features => "Features",
+                TableKind::Relations => "Relations",
             };
             assert_eq!(name, format!("{kind:?}"));
             let path = table_entry(kind);

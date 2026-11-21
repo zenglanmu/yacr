@@ -11,7 +11,7 @@
 //! `tests/archive.rs` rather than inventing a second mechanism.
 //!
 //! The sample drawing is one shared fixture, populated once with every persisted
-//! surface (all ten tables, the header variables, the hidden set, render
+//! surface (the ten tables it writes, the header variables, the hidden set, render
 //! attributes) so the fixed-point test cannot pass by writing a near-empty
 //! document.
 
@@ -92,9 +92,9 @@ fn viewport(layer_overrides: BTreeMap<LayerId, bool>) -> PaperViewport {
     }
 }
 
-/// One database that touches every persisted surface: all ten tables, a block
-/// registered out of id order, two viewports, header variables (including a
-/// non-finite `$PDSIZE`) and the display side tables.
+/// One database that touches every persisted surface: the ten tables it writes,
+/// a block registered out of id order, two viewports, header variables (including
+/// a non-finite `$PDSIZE`) and the display side tables.
 fn database() -> DrawingDatabase {
     let mut builder = DrawingDatabaseBuilder::new(DatabaseId(7));
 

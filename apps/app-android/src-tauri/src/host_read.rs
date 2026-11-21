@@ -13,14 +13,15 @@
 //!
 //! [`CadSession`]: cad_ui_core::session::CadSession
 
-use cad_ui_core::bim::BIM_UNSUPPORTED;
+use cad_ui_core::host_read::HostReadRequest;
 
 /// The answer when this carrier has no native document to read.
 ///
-/// Named, never an empty page: "no read lane right now" and "this document has no
-/// BIM data" are different facts and the chrome renders them differently.
-pub fn no_document_refusal() -> String {
-    BIM_UNSUPPORTED.to_string()
+/// Named for the request kind, never an empty page: "no read lane right now" and
+/// "this document has no data" are different facts and the chrome renders them
+/// differently.
+pub fn no_document_refusal(request: &HostReadRequest) -> String {
+    cad_ui_core::host_read::no_seam_refusal(request)
 }
 
 #[cfg(target_os = "android")]
@@ -67,7 +68,7 @@ mod android_host {
                         Some(session) => session.host_read(&request),
                         // Before the session exists (the chrome can ask on the
                         // first mount) or after a failed creation: no document.
-                        None => Err(super::no_document_refusal()),
+                        None => Err(super::no_document_refusal(&request)),
                     })
                 },
                 MAIN_THREAD_WAIT,
@@ -79,13 +80,40 @@ mod android_host {
 #[cfg(test)]
 mod tests {
     use super::no_document_refusal;
+    use cad_ui_core::bim::{BimFilterWire, BIM_UNSUPPORTED};
+    use cad_ui_core::host_read::HostReadRequest;
+    use cad_ui_core::param::PARAM_LIST_UNSUPPORTED;
 
-    /// The carrier's "no session yet" answer is the shared marker word for word,
-    /// never an empty page. Runs on the development host (the refusal half is not
-    /// Android-gated); the marshalling half is pinned by `crate::contract`.
+    fn bim_request() -> HostReadRequest {
+        HostReadRequest::BimQuery {
+            filter: BimFilterWire::default(),
+            offset: 0,
+            limit: 10,
+        }
+    }
+
+    /// The carrier's "no session yet" answer is the kind's shared marker word for
+    /// word, never an empty page. Runs on the development host (the refusal half is
+    /// not Android-gated); the marshalling half is pinned by `crate::contract`.
     #[test]
-    fn a_carrier_with_no_live_session_refuses_bim_by_name() {
-        assert_eq!(no_document_refusal(), cad_ui_core::bim::BIM_UNSUPPORTED);
-        assert_eq!(no_document_refusal(), "unsupported-runtime: bimQuery");
+    fn a_carrier_with_no_live_session_refuses_a_bim_query_by_name() {
+        assert_eq!(no_document_refusal(&bim_request()), BIM_UNSUPPORTED);
+        assert_eq!(
+            no_document_refusal(&bim_request()),
+            "unsupported-runtime: bimQuery"
+        );
+    }
+
+    /// A parameter list is not BIM and must report its own word.
+    #[test]
+    fn a_carrier_with_no_live_session_refuses_a_parameter_list_by_name() {
+        assert_eq!(
+            no_document_refusal(&HostReadRequest::ParamList),
+            PARAM_LIST_UNSUPPORTED
+        );
+        assert_eq!(
+            no_document_refusal(&HostReadRequest::ParamList),
+            "unsupported-runtime: paramList"
+        );
     }
 }

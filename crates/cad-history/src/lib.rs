@@ -8,6 +8,10 @@ use cad_db::{DbEntity, EntityDisplayState};
 use cad_domain::*;
 use std::collections::{HashSet, VecDeque};
 
+mod param_bytes;
+
+use param_bytes::{expr_bytes, param_row_bytes};
+
 /// A reversible change to one drawing entity (spec F-EDIT).
 ///
 /// It keeps the full [`DbEntity`] before and after so an undo or redo restores
@@ -436,8 +440,26 @@ impl DrawingUndoRecord {
 /// The step is the unit undo and redo move: the record's entity/table rows and
 /// the linetype row are applied through the database's combined write path, the
 /// BIM patches through [`cad_db::DrawingDatabase::apply_bim_updates`], each as
-/// one revision. A step carries at most one kind of write (see `validate`),
-/// so one undo can never span two revisions.
+/// one revision. Parameter rows and binding rows are applied through
+/// [`cad_db::DrawingDatabase::apply_parametric_update`], also one revision.
+///
+/// A step carries at most one kind of write (see `validate`): a BIM step is
+/// exclusive, and a parametric step must carry an **empty** `record.patches` as
+/// well. ADR-0043 D8's "one command" intent is satisfied by carrying the derived
+/// geometry on [`cad_db::ParamBindingPatch`] (`before_geometry`/`after_geometry`),
+/// not by duplicating entity rows in the record — a mixed step would be silently
+/// dropped by the parametric replay branch, so it is refused instead.
+///
+/// # Replay contract
+///
+/// A step with param patches is replayed by calling
+/// [`cad_db::DrawingDatabase::apply_parametric_update`] with the direction's
+/// before/after sides: redo passes the stored `before`/`after`, undo passes the
+/// swapped pair (the `after` row as `before` and vice versa), and the matching
+/// `before_geometry`/`after_geometry` travels with each binding patch. The
+/// record's entity patches are **not** replayed on that branch (geometry is
+/// derived, or restored from the binding patch's geometry) — which is exactly
+/// why `validate` requires them to be empty.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DrawingHistoryStep {
     pub record: DrawingUndoRecord,
@@ -446,23 +468,44 @@ pub struct DrawingHistoryStep {
     /// sides always present), so a step carrying these never creates or deletes
     /// a `bim` block — see [`cad_db::BimPatch`].
     pub bim_patches: Vec<cad_db::BimPatch>,
+    /// Reversible parameter rows (ADR-0043 D8). Unlike [`Self::bim_patches`],
+    /// these do **not** ride with any `DrawingUndoRecord` batch: the derived
+    /// geometry travels on [`cad_db::ParamBindingPatch::before_geometry`]/
+    /// `after_geometry`, so a parametric step carries no record entity/table
+    /// rows. Both halves still go through a single
+    /// [`cad_db::DrawingDatabase::apply_parametric_update`] call (one revision).
+    pub param_patches: Vec<cad_db::ParamPatch>,
+    /// Reversible element slot-binding rows committed with the parameter rows.
+    pub param_binding_patches: Vec<cad_db::ParamBindingPatch>,
 }
 
 impl DrawingHistoryStep {
-    /// Validate the step as a whole: at least one entity/table row, linetype row
-    /// or BIM patch; the record's own batch rules; and no duplicate ids.
+    /// Validate the step as a whole: at least one entity/table row, linetype row,
+    /// BIM patch or parameter patch; the record's own batch rules; and no
+    /// duplicate ids.
     ///
     /// A step carrying BIM patches must be **that alone**: the record's batches
     /// and the linetype batch are applied by a different database path than
     /// [`cad_db::DrawingDatabase::apply_bim_updates`], so mixing them would make
-    /// one undo span two revisions. A merge key is refused for the same reason
-    /// the other tables refuse it — coalescing cannot drop a row.
+    /// one undo span two revisions.
+    ///
+    /// A step carrying parameter patches is the deliberate opposite of a BIM
+    /// step. ADR-0043 D8's "one command" intent lives on the binding patches
+    /// (`before_geometry`/`after_geometry`), so a parametric step must have an
+    /// **empty** `record.patches` and every other record batch empty. A mixed
+    /// step would be silently dropped by the parametric replay branch, so it is
+    /// refused. A linetype row or BIM patch is refused for the same
+    /// one-revision reason, and a merge key cannot coalesce a row.
     fn validate(&self) -> CadResult<()> {
-        if self.record.is_empty() && self.linetype_patches.is_empty() && self.bim_patches.is_empty()
+        let parametric = !self.param_patches.is_empty() || !self.param_binding_patches.is_empty();
+        if self.record.is_empty()
+            && self.linetype_patches.is_empty()
+            && self.bim_patches.is_empty()
+            && !parametric
         {
             return Err(CadError::InvalidInput(
                 "a drawing undo step needs at least one entity, block, layer, layout, style, \
-                 linetype or BIM row"
+                 linetype, BIM or parameter row"
                     .into(),
             ));
         }
@@ -511,6 +554,68 @@ impl DrawingHistoryStep {
                     .into(),
             ));
         }
+        let mut param_seqs = HashSet::new();
+        for patch in &self.param_patches {
+            if !param_seqs.insert(patch.seq) {
+                return Err(CadError::InvalidInput(
+                    "a drawing undo step cannot contain duplicate parameter sequences".into(),
+                ));
+            }
+            if patch.before.is_none() && patch.after.is_none() {
+                return Err(CadError::InvalidInput(
+                    "a parameter patch needs a before or after row".into(),
+                ));
+            }
+        }
+        let mut binding_ids = HashSet::new();
+        for patch in &self.param_binding_patches {
+            if !binding_ids.insert(patch.id) {
+                return Err(CadError::InvalidInput(
+                    "a drawing undo step cannot contain duplicate parameter binding ids".into(),
+                ));
+            }
+            if patch.before.is_none() && patch.after.is_none() {
+                return Err(CadError::InvalidInput(
+                    "a parameter binding patch needs a before or after state".into(),
+                ));
+            }
+        }
+        if parametric {
+            // A parametric commit is one `apply_parametric_update` revision, so it
+            // cannot ride with the BIM write path or a linetype row (each is its
+            // own revision). Record rows are refused too: derived geometry travels
+            // on the binding patches, and the replay branch never applies record
+            // rows.
+            if !self.bim_patches.is_empty() || !self.linetype_patches.is_empty() {
+                return Err(CadError::InvalidInput(
+                    "a drawing undo step with parameter patches cannot also carry BIM or \
+                     linetype rows"
+                        .into(),
+                ));
+            }
+            // A parametric step must not carry record rows at all: the replay
+            // branch never applies them, so a mixed step would be silently
+            // dropped. Derived geometry travels on the binding patches instead.
+            if !self.record.patches.is_empty()
+                || !self.record.block_patches.is_empty()
+                || !self.record.layer_patches.is_empty()
+                || !self.record.layout_patches.is_empty()
+                || !self.record.style_patches.is_empty()
+                || !self.record.dim_style_patches.is_empty()
+                || !self.record.mleader_style_patches.is_empty()
+            {
+                return Err(CadError::InvalidInput(
+                    "a drawing undo step with parameter patches may not carry record rows; \
+                     derived geometry travels on the binding patches"
+                        .into(),
+                ));
+            }
+            if self.record.merge_key.is_some() {
+                return Err(CadError::InvalidInput(
+                    "a drawing undo record with parameter patches cannot be merged".into(),
+                ));
+            }
+        }
         Ok(())
     }
 
@@ -528,6 +633,21 @@ impl DrawingHistoryStep {
             // Both sides are retained, so both are counted: a property edit
             // keeps the pre-edit pset alongside its replacement.
             bytes += bim_element_bytes(&patch.before) + bim_element_bytes(&patch.after);
+        }
+        for patch in &self.param_patches {
+            bytes += std::mem::size_of::<cad_db::ParamPatch>();
+            for row in patch.before.iter().chain(patch.after.iter()) {
+                bytes += param_row_bytes(row);
+            }
+        }
+        for patch in &self.param_binding_patches {
+            bytes += std::mem::size_of::<cad_db::ParamBindingPatch>();
+            for bindings in patch.before.iter().chain(patch.after.iter()) {
+                bytes += std::mem::size_of::<cad_domain::param::ParamBindings>();
+                for (slot, expr) in bindings.entries() {
+                    bytes += slot.len() + expr_bytes(expr);
+                }
+            }
         }
         bytes
     }
@@ -639,7 +759,7 @@ impl History {
     /// An empty patch list is rejected, so a command can never claim success
     /// while recording nothing.
     pub fn record_drawing(&mut self, record: DrawingUndoRecord) -> CadResult<()> {
-        self.record_drawing_step(record, Vec::new(), Vec::new())
+        self.record_drawing_step(record, Vec::new(), Vec::new(), Vec::new(), Vec::new())
     }
 
     /// Record a committed drawing change plus the linetype-table rows it wrote.
@@ -653,7 +773,7 @@ impl History {
         record: DrawingUndoRecord,
         linetype_patches: Vec<cad_db::LinetypePatch>,
     ) -> CadResult<()> {
-        self.record_drawing_step(record, linetype_patches, Vec::new())
+        self.record_drawing_step(record, linetype_patches, Vec::new(), Vec::new(), Vec::new())
     }
 
     /// Record a committed BIM property edit plus its element patches.
@@ -669,7 +789,33 @@ impl History {
         record: DrawingUndoRecord,
         bim_patches: Vec<cad_db::BimPatch>,
     ) -> CadResult<()> {
-        self.record_drawing_step(record, Vec::new(), bim_patches)
+        self.record_drawing_step(record, Vec::new(), bim_patches, Vec::new(), Vec::new())
+    }
+
+    /// Record a committed parametric edit plus the parameter and binding rows it
+    /// wrote (ADR-0043 D8).
+    ///
+    /// The patches are carried beside the record like the linetype/BIM batches
+    /// (see [`DrawingHistoryStep`]), are never coalesced, and count toward "this
+    /// step records something". A parametric step carries **no** record entity or
+    /// table rows: the derived geometry travels on
+    /// [`cad_db::ParamBindingPatch::before_geometry`]/`after_geometry` instead,
+    /// and `validate()` refuses any non-empty record batch. `validate()` runs
+    /// before the step is recorded, so a refused mix leaves the retained history
+    /// untouched.
+    pub fn record_drawing_with_params(
+        &mut self,
+        record: DrawingUndoRecord,
+        param_patches: Vec<cad_db::ParamPatch>,
+        param_binding_patches: Vec<cad_db::ParamBindingPatch>,
+    ) -> CadResult<()> {
+        self.record_drawing_step(
+            record,
+            Vec::new(),
+            Vec::new(),
+            param_patches,
+            param_binding_patches,
+        )
     }
 
     fn record_drawing_step(
@@ -677,12 +823,16 @@ impl History {
         record: DrawingUndoRecord,
         linetype_patches: Vec<cad_db::LinetypePatch>,
         bim_patches: Vec<cad_db::BimPatch>,
+        param_patches: Vec<cad_db::ParamPatch>,
+        param_binding_patches: Vec<cad_db::ParamBindingPatch>,
     ) -> CadResult<()> {
         self.ensure_no_pending_drawing()?;
         let mut step = DrawingHistoryStep {
             record,
             linetype_patches,
             bim_patches,
+            param_patches,
+            param_binding_patches,
         };
         step.validate()?;
         if let Some(key) = step.record.merge_key.clone() {
@@ -830,6 +980,9 @@ struct PendingDrawing {
     step: DrawingHistoryStep,
     direction: UndoDirection,
 }
+
+#[cfg(test)]
+mod param_tests;
 
 #[cfg(test)]
 mod tests;

@@ -1,7 +1,9 @@
 # ADR 0043：参数化依赖与求值（iTwin `ElementDrivesElement` + SolidWorks 取舍）
 
-- 状态：**Proposed（2026-11-21）**，**未实现任何代码**。本文件是待审核的方案，不是已落地决策。
-- 日期：2026-11-21。
+- 状态：**Accepted（2026-11-21）**。**P0/P1 已实现并验证；P2/P3 已实现 schema + 状态机/策略，
+  但特征求值器与几何传播仍未接线**（显式 `rel.not_implemented` / `rel.no_rule`）。实现证据见
+  `docs/validation-parametric-2026-11-21.md`，能力边界见 `docs/compatibility.md`。
+- 日期：2026-11-21（P0–P3 实现同日）。
 - 相关：[ADR-0037](0037-ymodel-schema-and-persistence.md)（`.ymodel` 唯一原生格式、`(kind << 45) | seq`、
   Definition/Geometry 三段）、[ADR-0042](0042-bim-semantics-in-ymodel.md)（元素可选 `bim` 块、
   `tables/bim-relations.json`、`PropertyRow` 动态行、`cad_ui_core::host_read`）、
@@ -130,14 +132,14 @@
 
 参数命令必然同时写「参数表行」和「N 个重算实体」，所以：
 
-- 新增 `DrawingDatabase::apply_parametric_update(reason, txn, param_patches, entity_updates)`：
-  先全量校验（引用/类型/单位/环/预算/元素存在）→ 再改 → 一个 revision、一个 `ChangeSet`、一条 undo。
-  空批不 bump、不伪造 changes（照 `apply_bim_updates`）。
+- 新增 `DrawingDatabase::apply_parametric_update(reason, txn, param_patches, binding_patches)`：
+  先全量校验（引用/类型/单位/环/预算/元素存在/锁定层）→ 再改 → 一个 revision、一个 `ChangeSet`、
+  一条 undo。空批不 bump、不伪造 changes（照 `apply_bim_updates`）。
 - `ChangeScope` 必须同时填 `TableKind::Parameters` 与**每一个被重写元素的 shard**。
   `apply_bim_updates` 的注释已写明这一失败模式：漏一个 shard 只会在**第二次保存**暴露（旧字节被 raw-copy）。
-- `DrawingHistoryStep` 增加 `param_patches`，并且**必须允许与 `record.patches` 同行**——这与
-  `bim_patches` 的「必须独占一步」相反，因为参数与它产出的几何不是正交编辑。该放宽要写成校验规则 + 测试，
-  不能靠调用方自觉。
+- `DrawingHistoryStep` 增加 `param_patches` / `param_binding_patches`。**实现修正**：几何由绑定 patch 的
+  `before_geometry` / `after_geometry` 携带，因此参数步要求 `record.patches` 与其它表批次为空，混合步
+  显式拒绝（若允许再丢弃 record 行，会把实体 patch 静默吞掉）。该规则写成校验规则 + 测试，不靠调用方自觉。
 - 不给 `DrawingUndoRecord` 加字段（102 个字面构造点），沿用 `c87e4046` 的 step 侧批先例。
 
 ### D9 — 编辑走现成动态行；结构变更走一个新命令
@@ -160,7 +162,11 @@ P0 的参数行来自选择投影（`cad_select_entities` 路径），不需要�
 - 8 = 元素 `params` 块 + `tables/parameters.json`。7 及以下保持可打开。
 - `document_minor()` 显式分档：`has_params` → 8；`has_bim` → 7；有资源 → 5；否则 → 4。不得直接返回
   `FORMAT_MINOR`。`has_params` 落在 `cad-db`（store 不认识 `"params"` 字面量或表路径）。
-- 兼容：旧读新 → `ymodel.unsupported_minor`，不静默丢；新读旧 → 无块 = 无绑定、无表 = 空参数。
+- **实现增补（P1–P3）**：P1 的 `neg/pow/fn/if` 表达式与 `tables/configurations.json` 升到 **9**，
+  P2 的 `tables/features.json` 升到 **10**，P3 的 `tables/relations.json` 升到 **11**；分档顺序
+  `has_relations → 11`、`has_features → 10`、`has_p1_params || has_configurations → 9`、
+  `has_params → 8`、`has_bim → 7`、资源 → 5、否则 4。每个新表只在非空时写，普通文档的档位不被抬高。
+- 兼容：旧读新 → `ymodel.unsupported_minor`，不静默丢；新读旧 → 无块 = 无绑定、无表 = 空表。
 
 ### D12 — 不启用 `IdKind` 12/13
 
@@ -237,13 +243,14 @@ P1 追加 `pow`/`neg`/一元函数/`{"if":…}`/文本模板（`cad:Text.text` �
 
 ---
 
-## 4. 分期与验收（计划，尚未运行）
+## 4. 分期与验收（P0/P1 已落地并运行；P2/P3 为 schema + 显式拒绝）
 
-**P0 — 垂直切片**：参数表 + 元素 `params` 块 + `num/ref/四则/pi` + 三个槽位（`Circle.radius`、
-`Polyline.width`、`Text.height`）+ `PARAM` 命令 + `SETENTITYPROPERTY` 的 `param.*` 拦截 +
-合并写入路径 + 参数行。
+**P0 — 垂直切片（已实现）**：参数表 + 元素 `params` 块 + `num/ref/四则/pi` + 三个槽位
+（`Circle.radius`、`Polyline.width`、`Text.height`）+ `PARAM` 命令 + `SETENTITYPROPERTY` 的
+`param.*` 拦截 + 合并写入路径 + 参数行。逐条契约与运行结果见
+`docs/validation-parametric-2026-11-21.md`。
 
-计划中的契约测试（命名先定，实现时逐条落地）：
+P0 契约测试（已落地；逐条见验证记录）：
 
 - 格式：元素 `params` 往返 + 缺省省略；`"params": null` 与未知槽位被拒；参数表严格解码、拒重复名与
   悬空 `ref`；预算超限显式报错。
@@ -269,16 +276,22 @@ python3 scripts/check-fixture-manifest.py && python3 scripts/check-command-docs.
 (cd apps/desktop-ui && npm test)
 ```
 
-**P1 — 表达式与配置**：一元函数/`if`/文本模板；`tables/configurations.json` = 参数 `seq` 的稀疏覆盖 +
-抑制集合；派生配置 = 父 + 显式 override，必须区分 inherited/overridden；文档级参数列表（`host_read`
-新 kind）。`Insert.scale` 槽位。
+**P1 — 表达式与配置（已实现，两个子项显式推迟）**：`neg`/`pow`/`fn`（`abs/sqrt/sin/cos/tan/
+floor/ceil/round`）/`if`；`tables/configurations.json` = 参数 `seq` 的稀疏覆盖 + 抑制集合；父链先应用、
+子覆盖；活动配置是运行时状态（不落盘），`PARAM CONFIG` 切换并重算（一 revision，无 undo）；文档级
+参数列表经 `host_read` 的 `paramList` kind（`cad-host` + session；无 React 消费者）。**未实现**：
+`Insert.scale`（缺 transform/base 拆分，`param.no_evaluator`）与文本模板（`cad:Text.text`）。
 
-**P2 — 3D 特征**：`order` 字段 + 特征定义元素（参数 + 输入引用 + 操作枚举）→ evaluator 调用
-`cad-kernel-solidcore`（content in / content out）。`voids`/`fills` 具名 kind + `(host,hosted)` 规则；
-未注册 = `rel.no_rule`。fillet/shell 仍显式拒绝。
+**P2 — 3D 特征（schema only）**：`tables/features.json`（元素 id + `order` + 操作枚举 + 输入 +
+参数绑定）已存储/校验/编解码；`order` 唯一、按序求值。**求值器未接线**：`evaluate_feature` 对所有
+操作返回 `rel.not_implemented`，不伪造几何、不 bump revision。`voids`/`fills` 已作为具名关系 kind；
+`relation_propagation` 对它们返回 `NoRule`（`rel.no_rule`），**(host,hosted) 规则未注册**，因此没有
+“墙厚变了门跟着动”的传播；IFC 导出仍只写 `contains`/`nests`。fillet/shell 与内核接入是后续工作。
 
-**P3 — 自上而下**：显式 typed 边 + 状态机 `InContext/OutOfContext/Locked/Broken/Dangling`，
-自有边表 `tables/relations.json`；评估 `cad-dependencies` 与统一调度的关系。
+**P3 — 自上而下（schema + 状态机）**：`tables/relations.json` 已存储 typed `source/target/
+reference{face|edge|vertex,key}/state` 边；状态机 `InContext/OutOfContext/Locked/Broken/Dangling`
+在写入期校验，`Dangling` 终态；`update_relation_state` 一 revision + `TableKind::Relations` scope。
+**没有几何传播**，`cad-dependencies` 与统一调度的关系仍未接线（P3 原计划的“评估”部分）。
 
 ---
 
@@ -286,9 +299,10 @@ python3 scripts/check-fixture-manifest.py && python3 scripts/check-command-docs.
 
 1. **第二次保存的脏分片**：BIM 写入路径已经踩过。规避：`apply_parametric_update` 自建 scope.shards，
    「保存两次」成为必测项。
-2. **放宽 `DrawingHistoryStep` 排他规则**：可能让一条 undo 跨两个 db 路径。规避：只在参数路径放宽，
-   校验器显式写规则，BIM 的独占规则不变。
-3. **表达式/单位蔓延**：P0 封闭语法 + 预算；文本模板、函数库进 P1。量纲不符拒绝，不静默换算。
+2. **历史步排他规则**：实现时改为「参数步要求 `record.patches` 与其它表批次为空」，几何由绑定 patch
+   的 `before/after_geometry` 携带；原计划的“允许与 record 同行”会静默吞掉实体行，已放弃。校验器显式
+   写规则 + 测试，BIM 的独占规则不变。
+3. **表达式/单位蔓延**：P0/P1 封闭语法 + 预算；量纲不符拒绝，不静默换算。文本模板仍未实现。
 4. **`PropertyRow` 动态键冲突**：`param.<name>` 前缀 + 选择内唯一性检查；多选交集按名字。
 5. **求值器不确定**：纯函数约束 + 「同一输入求值两次结果相同」测试；禁止 db/时间/GPU 访问。
 6. **打开即重算的耗时**：闭包与参数数量都有硬上限；P0 实测后再调。
@@ -306,7 +320,19 @@ python3 scripts/check-fixture-manifest.py && python3 scripts/check-command-docs.
 - 记录三条「文档与实现不一致」，避免以后照着误传设计：① EDE 的 `priority` 默认 = 创建序只写在头文件，
   实现里全 0、顺序取决于 SQLite 扫描；② 环上「所有边 status=1」只写在 JSDoc，代码只置检测点那一条；
   ③ `ElementAspect` 不是「派生数据容器」，官方只把它定位为非 essential 属性的容器。
-- 本 ADR **没有任何实现、没有运行任何测试**；§4 的测试名与命令是计划。所有平台结论（Windows/macOS/
-  Android/Web）为 **NOT VERIFIED**，P0 只在 Linux 做契约与运行验证。
+- **P0/P1 实现证据（2026-11-21）**：`cargo test -p cad-domain/-p cad-db/-p cad-history/
+  -p cad-store-zip/-p cad-ui-core/-p cad-host/-p cad-app/-p cad-cli-tools`、
+  `cargo check --workspace --all-targets`、`cargo check --workspace --lib --target
+  wasm32-unknown-unknown`、clippy、fmt、architecture/i18n/command-docs/file-size 门禁与
+  `(cd apps/desktop-ui && npm test)` 全部通过；逐条命令与结果见
+  `docs/validation-parametric-2026-11-21.md`。这些是**契约/单元/编译证据**，不是 GPU、像素、性能或
+  真机验收。
+- **P2/P3 实现边界**：特征表/in-context 表已存储、严格编解码、校验与状态机写入，但
+  `evaluate_feature` 一律 `rel.not_implemented`，`voids`/`fills` 一律 `rel.no_rule`，
+  in-context 边没有几何传播、`cad-dependencies` 未接入。不得把 schema 与显式拒绝写成已实现的
+  特征图或装配求解。
+- **仍未实现**：`Insert.scale`、文本模板、文档级参数面板的 React 消费者、solidcore 特征求值、
+  `(host,hosted)` 传播规则、P3 统一调度。所有平台结论（Windows/macOS/Android/Web）为
+  **NOT VERIFIED**；Linux 只有测试运行，没有真实宿主运行/视觉证据。
 - 更正一条已被推翻的既有结论：`de9b02b3` 时「BIM 只有导入写路径、没有命令写路径」成立；
   `c87e4046` 之后不成立。

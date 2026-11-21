@@ -485,6 +485,17 @@ pub enum CommandId {
     /// Entities that already hold the value are not staged; if nothing changes overall the command creates **no** undo entry (`property.unchanged`).
     /// `text` is not a writable property here (it has its own `TEXTEDIT` path). Work-only.
     SetEntityProperty,
+    /// `PARAM {op: create|delete|rename|bind|unbind}` (Work-only): one
+    /// structural edit of the document's parameter table or the selected
+    /// elements' slot bindings (ADR-0043 D8/D9).
+    ///
+    /// Payload is [`crate::CommandPayload::Param`]. One command performs one op
+    /// in **one transaction / one undo step**; `Bind`/`Unbind` read the session
+    /// selection at apply time. `Delete` refuses a parameter a binding or another
+    /// expression still references (`param.referenced`); nothing cascades. An op
+    /// that changes nothing reports `param.unchanged` and records no history.
+    /// Contract: [`crate::app_drawing::param_command`].
+    Param,
     /// `MATCHPROP` (Work-only): paint the first selection's properties onto the rest; see [`crate::command_id::match_prop`].
     MatchProp,
     /// `GRIPSTRETCH` (Work-only): apply one grip drag as one entity update; see [`crate::command_id::grip_stretch`].

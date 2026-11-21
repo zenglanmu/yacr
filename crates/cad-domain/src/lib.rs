@@ -17,7 +17,9 @@ mod multileader_create;
 // The MULTILEADER annotation content kinds and their payloads (block / MText /
 // tolerance), split out for the code-size gate; `multileader` re-exports them.
 mod multileader_content;
+pub mod param;
 mod pbr;
+pub mod relation;
 pub mod resource;
 pub mod table_entity;
 mod texture;

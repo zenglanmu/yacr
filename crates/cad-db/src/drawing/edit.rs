@@ -337,7 +337,59 @@ impl DrawingDatabase {
         self.entities.remove(&id);
         self.render_attributes.remove(&id);
         self.hidden_entities.remove(&id);
+        // A deleted element cannot keep a `params` block (the row is gone), and
+        // a stale load diagnostic for it would name a non-element. Feature rows
+        // and relation endpoints are refused before deletion
+        // (`ensure_delete_allowed`), so there is nothing to prune in those
+        // tables.
+        self.param_bindings.remove(&id);
+        self.param_diagnostics
+            .retain(|diagnostic| diagnostic.entity != Some(id));
         self.detach_block_membership(id);
+    }
+
+    /// Refuse deleting an element that a P2 feature or a P3 relation still
+    /// references.
+    ///
+    /// The deletion paths prune display state and block membership, but a
+    /// feature row's `id`/`inputs` and a relation's `source`/`target` are
+    /// document tables with no cascade rule: silently rewriting or dropping them
+    /// would change the feature/relation meaning. The writer would then save a
+    /// table the reader refuses, so the delete is refused up front with a stable
+    /// marker and nothing mutates.
+    pub(super) fn ensure_delete_allowed(&self, id: EntityId) -> CadResult<()> {
+        if self.features.get(id).is_some() {
+            return Err(CadError::InvalidInput(format!(
+                "feature.referenced: entity {} has a feature definition; delete the feature first",
+                id.0
+            )));
+        }
+        for feature in self.features.iter() {
+            if feature.inputs.contains(&id) {
+                return Err(CadError::InvalidInput(format!(
+                    "feature.referenced: entity {} is an input of feature {} on entity {}",
+                    id.0, feature.order, feature.id.0
+                )));
+            }
+        }
+        for relation in self.relations.iter() {
+            if relation.source == id || relation.target == id {
+                return Err(CadError::InvalidInput(format!(
+                    "rel.endpoint_missing: entity {} is a {} endpoint of {} {} -> {}; delete the \
+                     relation first",
+                    id.0,
+                    if relation.source == id {
+                        "source"
+                    } else {
+                        "target"
+                    },
+                    relation.reference.token(),
+                    relation.source.0,
+                    relation.target.0
+                )));
+            }
+        }
+        Ok(())
     }
 
     /// Prune old block references on deletion or a change of owning space.

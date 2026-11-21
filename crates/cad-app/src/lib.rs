@@ -53,6 +53,10 @@ pub mod selection;
 // `is_bim_property_key` before queueing; the rows themselves are wired from
 // `selection` only.
 pub mod selection_bim;
+// The parameter property rows (ADR-0043 D9) plus the `param.<name>` key grammar
+// the wire admission and the property dispatch check. Public for the same reason
+// as `selection_bim`.
+pub mod selection_param;
 pub mod snap;
 mod ssx;
 pub mod tasks;
@@ -495,7 +499,7 @@ pub use command_payload::{
     MLeaderEditAction, MLeaderEditCommand, MLeaderLineOverrideField, MatchPropSettings,
     MeasureGeomOption, MirrorOptions, MlEditCommand, MlEditMode, MocoroCommand, NamedObjectKind,
     OffsetGapType, OffsetLayer, OffsetMode, OffsetOptions, OrdinateAxis, OrdinateDimensionCommand,
-    PatternFileText, PeditEditCommand, PeditEditOption, PeditOption, PeditVertexAction,
+    ParamOp, PatternFileText, PeditEditCommand, PeditEditOption, PeditOption, PeditVertexAction,
     PeditVertexCommand, PurgeTarget, QDimCommand, QDimMode, QDimSnap, QSelectRequest,
     RadialDimensionCommand, RefCloseOption, RefSetOption, RenameCommand, RevCloudStyle,
     RevisionCloudMode, RevisionCloudOptions, RotatedLinearDimensionCommand, SelectSimilarSettings,

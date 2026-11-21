@@ -416,6 +416,9 @@ impl DrawingDatabase {
                     if !self.entities.contains_key(id) {
                         return Err(CadError::Invariant(format!("entity {id:?} does not exist")));
                     }
+                    // P2/P3 rows still naming this element refuse the delete
+                    // before anything mutates (no cascade rule exists).
+                    self.ensure_delete_allowed(*id)?;
                 }
             }
         }

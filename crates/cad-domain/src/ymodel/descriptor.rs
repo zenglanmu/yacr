@@ -200,6 +200,14 @@ pub enum FieldKind {
     /// minor-5 row is the same object minus this key. It is never written as
     /// `null`, because a strict minor-5 reader would refuse the extra key.
     Bim,
+    /// The element's optional parameter-binding block (ADR-0043 D3), or
+    /// **absent** when the element binds no slot. Encoded by `cad-db`
+    /// (`snapshot/parameters.rs`), not by this crate: the nested shape is that
+    /// module's contract, exactly like [`Self::RenderAttributes`].
+    ///
+    /// Same absent-means-`None` rule as [`Self::Bim`]: a minor-7 row is the same
+    /// object minus this key, and the writer never emits `"params": null`.
+    Params,
 }
 
 /// One field of a class payload.
@@ -264,6 +272,10 @@ pub const CAD_ELEMENT: ClassDescriptor = ClassDescriptor {
         // BIM data, so a minor-5 row is the same object minus this key. The
         // writer never emits `"bim": null`.
         field("bim", FieldKind::Bim),
+        // ADR-0043 D3: the element's closed-slot bindings, appended last and
+        // omitted when empty. A minor-7 reader refuses the key, so it is never
+        // written as `null`.
+        field("params", FieldKind::Params),
     ],
 };
 
@@ -811,7 +823,8 @@ mod tests {
                 | FieldKind::ImageAdjust
                 | FieldKind::Space
                 | FieldKind::RenderAttributes
-                | FieldKind::Bim => kind,
+                | FieldKind::Bim
+                | FieldKind::Params => kind,
             }
         };
         let probes: Vec<FieldKind> = vec![
@@ -867,6 +880,7 @@ mod tests {
             FieldKind::Space,
             FieldKind::RenderAttributes,
             FieldKind::Bim,
+            FieldKind::Params,
         ];
         for kind in probes {
             let kind = all_kinds(kind);

@@ -54,6 +54,10 @@ mod dimension_space;
 mod dimension_style;
 mod divide;
 mod drawing_create;
+// ADR-0043 D8/D9: the `PARAM` structural command and the `param.<name>` value
+// write dispatched from `SETENTITYPROPERTY`.
+mod param_command;
+mod param_properties;
 // The 2026-11-07 draw variants (WIPEOUT, POLYGON CIRCUMSCRIBED): split out of
 // `drawing_create` so both files stay inside the code-size limit.
 mod draw_variants;

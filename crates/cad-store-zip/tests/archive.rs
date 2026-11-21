@@ -583,8 +583,8 @@ fn the_manifest_pins_the_document_and_the_import_baseline() {
     );
     assert_eq!(
         cad_domain::ymodel::FORMAT_MINOR,
-        7,
-        "ADR-0042 D3 tail/D6: relations moved the BIM tier to 7"
+        11,
+        "ADR-0043: P1 expressions/configurations moved the tier to 9, P2 features to 10 and P3 relations to 11"
     );
 
     let loaded = read_archive(&bytes).expect("read");

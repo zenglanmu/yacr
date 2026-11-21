@@ -36,8 +36,12 @@ use cad_domain::ymodel::{shard_of, DocumentHeader, ModelKey, PersistentIdOf, Sha
 use cad_domain::{CadResult, DocumentIdentity, Revision, SpaceId, UnitContext};
 
 use super::bim;
+use super::configurations;
 use super::elements;
+use super::features;
+use super::parameters;
 use super::relations;
+use super::relations_in_context;
 use super::resources;
 use super::tables;
 use super::variables;
@@ -100,6 +104,34 @@ impl DrawingDatabase {
         if !self.bim_relations.is_empty() {
             tables.set(TableKind::BimRelations, relations::encode_relations(self)?);
         }
+        // ADR-0043 D11: the parameter table exists **only** when it holds rows,
+        // the same rule as the BIM tables. An unconditional table would make
+        // every document a minor-8 archive an older build refuses, for no data.
+        // Per-element bindings are written by the element codec, in the shard
+        // rows themselves (D7).
+        if !self.parameters.is_empty() {
+            tables.set(TableKind::Parameters, parameters::encode_parameters(self)?);
+        }
+        // ADR-0043 P1: configuration overlays share the expression tier and are
+        // written only when they hold rows. The base parameter table above stays
+        // the authority; a configuration is derived and never written back.
+        if !self.param_configs.is_empty() {
+            tables.set(
+                TableKind::Configurations,
+                configurations::encode_configurations(self)?,
+            );
+        }
+        // ADR-0043 P2/P3: feature definitions and self-authored relations are
+        // written only when they hold rows; each table owns its own minor tier.
+        if !self.features.is_empty() {
+            tables.set(TableKind::Features, features::encode_features(self)?);
+        }
+        if !self.relations.is_empty() {
+            tables.set(
+                TableKind::Relations,
+                relations_in_context::encode_relations_in_context(self)?,
+            );
+        }
         Ok(DocumentSnapshot {
             header,
             revision,
@@ -146,6 +178,40 @@ impl DrawingDatabase {
             checked(
                 builder.set_bim_relations(bim_relations),
                 table_entry(TableKind::BimRelations),
+            )?;
+        }
+        // Parameter rows are decoded and installed before the element loop, so
+        // `set_param_bindings` never has to defer a reference. The codec owns
+        // row shape, duplicates, dangling references/cycles and the budgets; the
+        // builder's `finish()` owns slot validity against the element's type.
+        let parameters = parameters::decode_parameters(&snapshot.tables)?;
+        // Configuration rows are validated against the decoded base table, so
+        // they are decoded before the builder consumes it.
+        let configs = configurations::decode_configurations(&snapshot.tables, &parameters)?;
+        let features = features::decode_features(&snapshot.tables)?;
+        let relations = relations_in_context::decode_relations_in_context(&snapshot.tables)?;
+        if !parameters.is_empty() {
+            checked(
+                builder.set_parameters(parameters),
+                table_entry(TableKind::Parameters),
+            )?;
+        }
+        if !configs.is_empty() {
+            checked(
+                builder.set_param_configs(configs),
+                table_entry(TableKind::Configurations),
+            )?;
+        }
+        if !features.is_empty() {
+            checked(
+                builder.set_features(features),
+                table_entry(TableKind::Features),
+            )?;
+        }
+        if !relations.is_empty() {
+            checked(
+                builder.set_relations(relations),
+                table_entry(TableKind::Relations),
             )?;
         }
 
@@ -301,6 +367,7 @@ impl DrawingDatabase {
                     attributes,
                     invisible,
                     bim,
+                    params,
                 } = elements::decode(&element.payload)?;
                 // The row id is the shard key; `decode` reads the copy inside the
                 // payload. They must agree or one of the two writers is lying.
@@ -340,6 +407,12 @@ impl DrawingDatabase {
                         format!("elements: entity {}", id.0),
                     )?;
                 }
+                if let Some(params) = params {
+                    checked(
+                        builder.set_param_bindings(id, params),
+                        format!("elements: entity {}", id.0),
+                    )?;
+                }
             }
         }
         checked(
@@ -349,6 +422,11 @@ impl DrawingDatabase {
 
         let mut database = checked(builder.finish(), "snapshot rows")?;
         variables::apply_to(&mut database, &snapshot.header.variables)?;
+        // ADR-0043 D7: opening re-derives bound geometry from the table. A
+        // failure here means the archive contradicted its own decoded rows; it
+        // is surfaced as an invalid document, never as an empty success.
+        crate::drawing::param::reconcile_loaded_parameters(&mut database)
+            .map_err(|error| SnapshotError::invalid(format!("{error}")))?;
         Ok(database)
     }
 
@@ -396,6 +474,7 @@ impl DrawingDatabase {
                 self.render_attributes.get(&entity.id),
                 self.hidden_entities.contains(&entity.id),
                 self.bim_elements.get(&entity.id),
+                self.param_bindings.get(&entity.id),
             )?;
             grouped
                 .entry((model, shard_of(entity.id.0)))

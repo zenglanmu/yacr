@@ -2,8 +2,9 @@
 //!
 //! [`CadSession::host_read`] is the one place a host — native or wasm — turns a
 //! [`HostReadRequest`] into a [`HostReadAnswer`] on the thread that owns the
-//! `!Send` document. Today the only kind is a BIM query, whose backend rules live
-//! in `cad_query::bim`; this module only routes, never filters or counts.
+//! `!Send` document. Today the kinds are a BIM query (backend rules in
+//! `cad_query::bim`) and the document-level parameter list (ADR-0043 P1); this
+//! module only routes, never filters or counts.
 //!
 //! Desktop carriers do not call the session directly: the registry row goes
 //! through [`HostReads`], which [`super::wire::QueueReads`] forwards to the host's
@@ -21,7 +22,9 @@
 use std::sync::Arc;
 
 use crate::bim::{BimFilterWire, BimQueryRequest, BimQueryResponse};
-use crate::host_read::{HostReadAnswer, HostReadHost, HostReadRequest, HostReadSeam, HostReads};
+use crate::host_read::{
+    HostReadAnswer, HostReadHost, HostReadRequest, HostReadSeam, HostReads, HOST_READ_UNKNOWN_KIND,
+};
 
 use super::wire::QueueReads;
 use super::CadSession;
@@ -40,6 +43,7 @@ impl CadSession {
             } => Ok(HostReadAnswer::BimQuery(self.bim_query(
                 &BimQueryRequest::new(filter.clone(), *offset, *limit),
             )?)),
+            HostReadRequest::ParamList => Ok(HostReadAnswer::ParamList(self.param_list()?)),
         }
     }
 }
@@ -65,8 +69,10 @@ impl HostReads for QueueReads<'_> {
 /// answer carries the explicit `bim.filter.unsupported_value` refusal when the
 /// kind is unknown. `limit: 0` answers only the total — and still the summary.
 ///
-/// The match has one arm because the envelope has one kind: adding a kind makes
-/// this an exhaustive-match error instead of letting it be answered as BIM.
+/// The match stays explicit per kind: adding a kind makes this an
+/// exhaustive-match error instead of letting it be answered as BIM. A host that
+/// returns the wrong kind is a transport fault, refused by the same stable
+/// marker as an unknown request kind.
 pub fn bim_query(
     reads: &dyn HostReads,
     filter: BimFilterWire,
@@ -79,5 +85,8 @@ pub fn bim_query(
         limit,
     })? {
         HostReadAnswer::BimQuery(response) => Ok(response),
+        HostReadAnswer::ParamList(_) => Err(format!(
+            "{HOST_READ_UNKNOWN_KIND}: the host answered a parameter list to a BIM query"
+        )),
     }
 }

@@ -104,7 +104,25 @@ pub const FORMAT_WRITE: u32 = 1;
 /// (both landed in one release, and a minor-6 reader refuses the element block
 /// anyway, so splitting them would not let an older build open anything more).
 /// No `IdKind` 12/13 and no header counter backs these rows.
-pub const FORMAT_MINOR: u32 = 7;
+///
+/// `8` adds document parameters (ADR-0043 D11): the `tables/parameters.json`
+/// row array and the optional `params` block on an element row. Both are
+/// written only when the document actually holds them, so an ordinary document
+/// keeps the minor its other features imply. The block is the third
+/// absent-means-`None` element field (`bim`, then this), and a minor-7 reader
+/// refuses it rather than dropping it.
+///
+/// `9` adds the P1 expression/naming features (ADR-0043 P1): `neg`/`pow`/`fn`/`if`
+/// tags in a parameter expression, plus the P1 configuration table. The tier is
+/// per document (`has_p1_params`), because a minor-8 reader would refuse an
+/// unknown expression tag as `ymodel.invalid_document` rather than
+/// `unsupported_minor`.
+///
+/// `10` adds `tables/features.json` (ADR-0043 P2 schema) and `11` adds
+/// `tables/relations.json` (ADR-0043 P3 in-context edges). Both are written only
+/// when non-empty; their evaluators are not wired, so the tables are the
+/// explicit schema boundary rather than a claimed feature pipeline.
+pub const FORMAT_MINOR: u32 = 11;
 
 /// Stable failure markers.
 ///

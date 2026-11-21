@@ -23,8 +23,12 @@
 
 pub(crate) mod bim;
 pub(crate) mod build;
+pub(crate) mod configurations;
 pub(crate) mod elements;
+pub(crate) mod features;
+pub(crate) mod parameters;
 pub(crate) mod relations;
+pub(crate) mod relations_in_context;
 pub(crate) mod resources;
 pub(crate) mod tables;
 pub(crate) mod variables;
@@ -176,6 +180,19 @@ pub const fn table_entry(kind: TableKind) -> &'static str {
         // table holds rows; it contributes the minor-7 tier, not a new identity
         // kind (no `IdKind` 12/13, no header counters).
         TableKind::BimRelations => "tables/bim-relations.json",
+        // Document parameters (ADR-0043 D4). Written only when the table holds
+        // rows; it contributes the minor-8 tier. Identity is the table-local
+        // `seq`, never a `PersistentId`.
+        TableKind::Parameters => "tables/parameters.json",
+        // Named parameter configurations (ADR-0043 P1). Written only when the
+        // table holds rows; it shares the minor-9 tier with P1 expressions.
+        TableKind::Configurations => "tables/configurations.json",
+        // Parametric feature definitions (ADR-0043 P2). Written only when the
+        // table holds rows; minor-10 tier.
+        TableKind::Features => "tables/features.json",
+        // Self-authored in-context relations (ADR-0043 P3). Written only when
+        // the table holds rows; minor-11 tier.
+        TableKind::Relations => "tables/relations.json",
     }
 }
 
@@ -317,6 +334,77 @@ impl DocumentSnapshot {
                 .iter()
                 .flat_map(|shard| shard.elements.iter())
                 .any(|element| element.payload.get("bim").is_some())
+    }
+
+    /// Whether this document carries any parameter data (ADR-0043 D11).
+    ///
+    /// True when the parameter table is present — even an empty one, because the
+    /// writer emits the entry whenever the snapshot holds it and a minor-7
+    /// reader refuses a table path it does not model — **or** any element row
+    /// carries a `params` block. The store asks this instead of naming the
+    /// table path (the same split as [`Self::has_bim`]).
+    pub fn has_params(&self) -> bool {
+        self.tables.get(TableKind::Parameters).is_some()
+            || self
+                .shards
+                .iter()
+                .flat_map(|shard| shard.elements.iter())
+                .any(|element| element.payload.get("params").is_some())
+    }
+
+    /// Whether this document uses a P1-only expression node (ADR-0043 P1).
+    ///
+    /// P1 adds `neg`/`pow`/`fn`/`if` tags to the parameter grammar. A minor-8
+    /// reader refuses an unknown tag as `ymodel.invalid_document`, which is a
+    /// hard failure rather than the version refusal `unsupported_minor`; the
+    /// writer therefore stamps the P1 tier per document. The check walks the
+    /// encoded rows/blocks because a [`DocumentSnapshot`] is bytes, not a
+    /// [`cad_domain::param::ParamTable`].
+    pub fn has_p1_params(&self) -> bool {
+        let table_uses_p1 = self.tables.get(TableKind::Parameters).is_some_and(|rows| {
+            rows.iter()
+                .any(|row| row.get("expr").is_some_and(uses_p1_tag))
+        });
+        table_uses_p1
+            || self
+                .shards
+                .iter()
+                .flat_map(|shard| shard.elements.iter())
+                .any(|element| element.payload.get("params").is_some_and(uses_p1_tag))
+    }
+
+    /// Whether this document carries a configuration overlay (ADR-0043 P1).
+    pub fn has_configurations(&self) -> bool {
+        self.tables.get(TableKind::Configurations).is_some()
+    }
+
+    /// Whether this document carries feature definitions (ADR-0043 P2).
+    pub fn has_features(&self) -> bool {
+        self.tables.get(TableKind::Features).is_some()
+    }
+
+    /// Whether this document carries in-context relations (ADR-0043 P3).
+    pub fn has_relations(&self) -> bool {
+        self.tables.get(TableKind::Relations).is_some()
+    }
+}
+
+/// Whether an encoded expression tree carries a P1-only tag.
+///
+/// This mirrors the tag names the `cad-db` parameter codec writes; the codec's
+/// own strict decoder is the authority on legality, this is only a cheap
+/// version-tier probe over bytes that were already validated.
+fn uses_p1_tag(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Object(map) => {
+            map.contains_key("neg")
+                || map.contains_key("pow")
+                || map.contains_key("fn")
+                || map.contains_key("if")
+                || map.values().any(uses_p1_tag)
+        }
+        serde_json::Value::Array(items) => items.iter().any(uses_p1_tag),
+        _ => false,
     }
 }
 

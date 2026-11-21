@@ -34,6 +34,8 @@ mod linetype_edit;
 mod linetype_scale;
 mod lock;
 mod named_delete;
+pub(crate) mod param;
+pub(crate) mod param_build;
 mod point_style;
 mod scale_edit;
 mod style_edit;
@@ -50,6 +52,10 @@ pub use layer_inherit::LayerScope;
 pub use layer_patch::{LayerPatch, LayerRow};
 pub use layout_edit::{LayoutPatch, LayoutRow, ILLEGAL_LAYOUT_NAME_CHARS, MAX_LAYOUT_NAME_CHARS};
 pub use linetype_edit::LinetypePatch;
+pub use param::{
+    ParamBindingPatch, ParamDiagnostic, ParamPatch, ParametricOutcome, PARAM_MAX_CONFIGS,
+    PARAM_MAX_CONFIG_BYTES, PARAM_MAX_TABLE_BYTES,
+};
 pub use scale_edit::{ScalePatch, ScaleReferenceCounts};
 pub use style_edit::{
     DimStylePatch, MLeaderStylePatch, StylePatch, StyleTableChanges, DEFAULT_DIM_STYLE_NAME,
@@ -350,6 +356,52 @@ pub struct DrawingDatabase {
     /// with them only because `has_bim` already names that release (minor 7),
     /// not because this table is written unconditionally.
     pub(crate) bim_relations: BimRelations,
+    /// Document parameter rows (`tables/parameters.json`, ADR-0043 D4).
+    ///
+    /// Empty for every document without parameters; the writer then emits no
+    /// table, so a document without parametric data keeps the minor tier its
+    /// resources/BIM content earns. Identity is the table-local
+    /// [`cad_domain::param::ParamSeq`], never a `PersistentId` (D4/D12), so this
+    /// table never moves a header counter.
+    pub(crate) parameters: cad_domain::param::ParamTable,
+    /// Named parameter configurations (`tables/configurations.json`,
+    /// ADR-0043 P1). Empty for every document without configurations; the
+    /// writer then emits no table and the document keeps its lower minor tier.
+    ///
+    /// The base [`Self::parameters`] table stays the authority: a configuration
+    /// is a sparse overlay resolved at read time, never written back.
+    pub(crate) param_configs: cad_domain::param::ParamConfigTable,
+    /// The configuration currently applied to derivations, or `None`.
+    ///
+    /// **Runtime only**: like [`Self::param_diagnostics`], this is not a
+    /// `DocumentSnapshot` field, so it is never saved. Selecting a configuration
+    /// re-derives the bound geometry but does not change persisted data.
+    pub(crate) active_configuration: Option<String>,
+    /// Per-element slot bindings (ADR-0043 D3/D7), kept **beside**
+    /// [`Self::entities`] exactly like [`Self::bim_elements`]: the entity row
+    /// keeps its six fields and a document without bindings pays nothing.
+    ///
+    /// An absent entry means "this element has no `params` block". The bound
+    /// geometry itself is the element's last successful evaluation (D7); no
+    /// derived value is stored here.
+    pub(crate) param_bindings: BTreeMap<EntityId, cad_domain::param::ParamBindings>,
+    /// Load-time reconciliation diagnostics (ADR-0043 D7/D6).
+    ///
+    /// **Never persisted**: the snapshot builder names its fields explicitly, so
+    /// this list cannot reach `DocumentSnapshot`. It describes what the last
+    /// `from_snapshot` derivation found — `param.recomputed` when the stored
+    /// geometry disagreed with the table and was replaced, `param.blocked` when a
+    /// slot failed and the stored geometry was kept (D6 second tier).
+    pub(crate) param_diagnostics: Vec<ParamDiagnostic>,
+    /// Parametric feature definitions (`tables/features.json`, ADR-0043 P2).
+    ///
+    /// Empty for every document without features; the writer then emits no
+    /// table. Each row is attached to an existing element (see
+    /// [`crate::feature`] for the documented identity deviation).
+    pub(crate) features: crate::feature::FeatureDefinitions,
+    /// Self-authored in-context relations (`tables/relations.json`, ADR-0043
+    /// P3). Empty for every document without them.
+    pub(crate) relations: crate::relation::InContextRelations,
     /// Cache of [`Self::bounds`] tagged with the [`Revision`] it was computed
     /// at. Interior mutability is required because `bounds` takes `&self` (the
     /// scene-preparation worker shares one `Arc<DrawingDatabase>` across

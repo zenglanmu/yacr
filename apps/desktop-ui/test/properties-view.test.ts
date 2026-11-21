@@ -78,6 +78,7 @@ test('sections follow the fixed entity → geometry → text → display order, 
     row({ key: 'id', group: 'entity', kind: 'text', editable: false }),
     row({ key: 'text', group: 'text', kind: 'text' }),
     row({ key: 'height', group: 'text', kind: 'number' }),
+    row({ key: 'param.r', group: 'param', kind: 'number' }),
   ];
   const view = propertiesView(selection(rows), t);
   assert.deepEqual(view.sections.map(section => section.group), [...PROPERTY_GROUP_ORDER]);
@@ -86,6 +87,7 @@ test('sections follow the fixed entity → geometry → text → display order, 
     zh['properties.group.geometry'],
     zh['properties.group.text'],
     zh['properties.group.display'],
+    zh['properties.group.param'],
   ]);
   // Backend row order inside a section is preserved.
   assert.deepEqual(view.sections[2].rows.map(item => item.key), ['text', 'height']);
@@ -317,6 +319,20 @@ test('every known refusal maps to catalog copy and keeps the raw code for the ti
     assert.equal(propertyEditMessage(code, tEn).text, en[key]);
   }
   assert.ok(!zh['properties.edit.failed'].includes('{code}'), 'the visible sentence never shows the raw code');
+});
+
+test('parameter refusals use their own properties.edit.param_* namespace', () => {
+  for (const [code, key] of [
+    ['param.mixed', 'properties.edit.param_mixed'],
+    ['param.unknown_name', 'properties.edit.param_unknown_name'],
+    ['param.referenced', 'properties.edit.param_referenced'],
+  ]) {
+    assert.equal(typeof zh[key], 'string', `zh-CN missing ${key}`);
+    assert.equal(typeof en[key], 'string', `en missing ${key}`);
+    assert.equal(propertyEditMessage(code, t).text, zh[key]);
+    assert.equal(propertyEditMessage(code, tEn).text, en[key]);
+    assert.equal(propertyErrorCode(`write refused: ${code}`), code);
+  }
 });
 
 test('an unknown or host-only code falls back to the generic refusal with the code kept aside', () => {

@@ -18,7 +18,6 @@
 //! The composed [`HostPlatform`] must already report a surface
 //! ([`cad_platform::SurfaceSource::surface`]) when the session is built: an
 //! unmapped surface is an explicit `Cancelled`, never a fabricated canvas.
-
 mod admission;
 mod annot_arguments;
 mod api;
@@ -33,6 +32,7 @@ mod command_log;
 mod command_overrides;
 mod commands;
 mod diagnostics;
+mod param;
 // The Options > Files directory-picker vocabulary (name + carrier refusals).
 mod dim_arguments;
 mod directory_pick;

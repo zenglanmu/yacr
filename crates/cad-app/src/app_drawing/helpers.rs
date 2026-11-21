@@ -655,6 +655,15 @@ pub(super) fn offset_arc(
 /// itself used. [`cad_history::DrawingHistoryStep`] refuses a step that mixes
 /// them with the record's batches or a linetype row, so the two branches are
 /// mutually exclusive and one undo can never span two revisions.
+///
+/// A step carrying parameter or binding patches takes the **parametric** branch
+/// first: the rows are swapped by direction and applied through
+/// [`DrawingDatabase::apply_parametric_update`], which re-derives the element
+/// geometry from the restored table/bindings. The record's entity patches are
+/// not replayed on that branch — the validator already restricts a parametric
+/// step to entity patches only, and the geometry is derived, not stored (ADR-0043
+/// D7). The BIM branch stays exclusive and is reached only when no parameter
+/// patch is present.
 pub(crate) fn apply_drawing_patches(
     drawing: &mut DrawingDatabase,
     reason: &str,
@@ -662,6 +671,63 @@ pub(crate) fn apply_drawing_patches(
     step: &cad_history::DrawingHistoryStep,
     forward: bool,
 ) -> CadResult<ChangeSet> {
+    // A parametric step is replayed through the same merged write path the edit
+    // used: the parameter rows and the binding rows are swapped (redo takes the
+    // stored `before`/`after`, undo swaps them) and `apply_parametric_update`
+    // re-derives every affected element geometry. The record's entity patches are
+    // deliberately **not** replayed: the history validator restricts a parametric
+    // step to entity patches only, and the geometry is derived from the restored
+    // table/bindings, so replaying a stored geometry row as well would be a
+    // second, unvalidated source of truth (D7).
+    if !step.param_patches.is_empty() || !step.param_binding_patches.is_empty() {
+        let param_patches: Vec<cad_db::ParamPatch> = step
+            .param_patches
+            .iter()
+            .map(|patch| cad_db::ParamPatch {
+                seq: patch.seq,
+                before: if forward {
+                    patch.before.clone()
+                } else {
+                    patch.after.clone()
+                },
+                after: if forward {
+                    patch.after.clone()
+                } else {
+                    patch.before.clone()
+                },
+            })
+            .collect();
+        let binding_patches: Vec<cad_db::ParamBindingPatch> = step
+            .param_binding_patches
+            .iter()
+            .map(|patch| cad_db::ParamBindingPatch {
+                id: patch.id,
+                before: if forward {
+                    patch.before.clone()
+                } else {
+                    patch.after.clone()
+                },
+                after: if forward {
+                    patch.after.clone()
+                } else {
+                    patch.before.clone()
+                },
+                before_geometry: if forward {
+                    patch.before_geometry.clone()
+                } else {
+                    patch.after_geometry.clone()
+                },
+                after_geometry: if forward {
+                    patch.after_geometry.clone()
+                } else {
+                    patch.before_geometry.clone()
+                },
+            })
+            .collect();
+        return drawing
+            .apply_parametric_update(reason, transaction, &param_patches, &binding_patches)
+            .map(|outcome| outcome.changes);
+    }
     if !step.bim_patches.is_empty() {
         let updates: Vec<(EntityId, cad_db::BimElement)> = step
             .bim_patches

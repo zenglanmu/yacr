@@ -128,6 +128,34 @@ pub enum TableKind {
     /// counter and no high-water mark backs these rows, so this variant never
     /// makes `document.json` stale.
     BimRelations,
+    /// Document parameter rows (`tables/parameters.json`, ADR-0043 D4):
+    /// the named typed expressions a document owns, keyed by their table-local
+    /// `seq`.
+    ///
+    /// Informational like the other side tables: the snapshot is the authority
+    /// and the store re-encodes every present table. No `IdKind` and no header
+    /// counter backs these rows (D4/D12). Per-element slot bindings are **not**
+    /// here — they are the optional `params` block of the element shard row,
+    /// which keeps its raw-copy incrementality.
+    Parameters,
+    /// Named parameter configurations (`tables/configurations.json`, ADR-0043
+    /// P1): sparse overrides and suppression sets over the base parameter table.
+    ///
+    /// Informational like the other side tables: the snapshot is the authority
+    /// and the store re-encodes every present table. No `IdKind` and no header
+    /// counter backs these rows; the active configuration is runtime state, not
+    /// persisted.
+    Configurations,
+    /// Parametric feature definitions (`tables/features.json`, ADR-0043 P2):
+    /// an ordered operation over input elements and parameter-bound slots.
+    ///
+    /// The table is the schema half of P2; the evaluator (solidcore) is not
+    /// wired, so every operation is an explicit `rel.not_implemented` refusal
+    /// rather than a fabricated body.
+    Features,
+    /// Self-authored in-context relation edges (`tables/relations.json`,
+    /// ADR-0043 P3): typed face/edge/vertex references and their state machine.
+    Relations,
 }
 
 /// The set of persisted rows one commit made stale.

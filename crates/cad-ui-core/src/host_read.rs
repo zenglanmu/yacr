@@ -24,9 +24,10 @@
 //!
 //! # Adding a request kind
 //!
-//! Today [`HostReadRequest`] has one variant, `bimQuery`, and its `kind` is
-//! spelled once, in [`BIM_QUERY_KIND`] (the serialized tag and the decoder read
-//! that constant; a test pins them together).
+//! Today [`HostReadRequest`] has two variants: `bimQuery` and `paramList`. Each
+//! `kind` is spelled once, in its module's constant (`BIM_QUERY_KIND`,
+//! `PARAM_LIST_KIND`); the serialized tag and the decoder read that constant, and
+//! a test pins them together.
 //!
 //! **A new kind must not add a per-carrier file.** Add a variant here plus the
 //! matching [`HostReadAnswer`] variant, give it its own honest
@@ -51,8 +52,9 @@ use serde::ser::SerializeStruct;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::bim::{BimFilterWire, BimQueryResponse, BIM_DEFAULT_LIMIT, BIM_UNSUPPORTED};
+use crate::param::{ParamListResponse, PARAM_LIST_KIND, PARAM_LIST_UNSUPPORTED};
 
-/// The wire spelling of the one request kind that exists today.
+/// The wire spelling of the BIM request kind.
 ///
 /// `camelCase`, like every other wire key. This constant is the **only** place
 /// the spelling lives: it is the serialized `kind` tag and the decoder's
@@ -72,6 +74,7 @@ pub const HOST_READ_UNKNOWN_KIND: &str = "unsupported-runtime: hostRead.kind";
 /// (`cad_bim_query` keeps `filter`/`offset`/`limit` and its reply shape); the
 /// envelope adds only the `kind` tag, and the wire command itself is unchanged.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(clippy::large_enum_variant)]
 pub enum HostReadRequest {
     /// `kind: "bimQuery"` — one filtered, paged BIM query.
     BimQuery {
@@ -82,6 +85,9 @@ pub enum HostReadRequest {
         /// Maximum rows; `0` requests only the total.
         limit: usize,
     },
+    /// `kind: "paramList"` — the document-level parameter list under the active
+    /// configuration (ADR-0043 P1). No fields.
+    ParamList,
 }
 
 impl HostReadRequest {
@@ -89,6 +95,7 @@ impl HostReadRequest {
     pub fn kind(&self) -> &'static str {
         match self {
             Self::BimQuery { .. } => BIM_QUERY_KIND,
+            Self::ParamList => PARAM_LIST_KIND,
         }
     }
 }
@@ -104,6 +111,8 @@ impl HostReadRequest {
 pub enum HostReadAnswer {
     /// `kind: "bimQuery"` — the page plus its facet summary.
     BimQuery(BimQueryResponse),
+    /// `kind: "paramList"` — the document-level parameter list.
+    ParamList(ParamListResponse),
 }
 
 /// Serialize a request as `{"kind": ..., <fields>}`.
@@ -123,6 +132,11 @@ impl Serialize for HostReadRequest {
                 state.serialize_field("filter", filter)?;
                 state.serialize_field("offset", offset)?;
                 state.serialize_field("limit", limit)?;
+                state.end()
+            }
+            Self::ParamList => {
+                let mut state = serializer.serialize_struct("HostReadRequest", 1)?;
+                state.serialize_field("kind", PARAM_LIST_KIND)?;
                 state.end()
             }
         }
@@ -160,8 +174,9 @@ impl<'de> Deserialize<'de> for HostReadRequest {
                     limit: raw.limit.unwrap_or(BIM_DEFAULT_LIMIT),
                 })
             }
+            PARAM_LIST_KIND => Ok(Self::ParamList),
             other => Err(serde::de::Error::custom(format!(
-                "{HOST_READ_UNKNOWN_KIND}: `kind` {other:?} is not one of [{BIM_QUERY_KIND:?}]"
+                "{HOST_READ_UNKNOWN_KIND}: `kind` {other:?} is not one of [{BIM_QUERY_KIND:?}, {PARAM_LIST_KIND:?}]"
             ))),
         }
     }
@@ -227,6 +242,7 @@ impl<'a> HostReadSeam<'a> {
 pub fn no_seam_refusal(request: &HostReadRequest) -> String {
     match request {
         HostReadRequest::BimQuery { .. } => BIM_UNSUPPORTED.to_string(),
+        HostReadRequest::ParamList => PARAM_LIST_UNSUPPORTED.to_string(),
     }
 }
 

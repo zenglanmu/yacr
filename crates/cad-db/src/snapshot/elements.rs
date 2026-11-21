@@ -34,6 +34,7 @@
 //! `draw_order` and `DbObject::revision` are runtime values too: decode uses the
 //! defaults `cad-db` builds rows with (`0`, `Revision(0)`).
 
+use cad_domain::param::ParamBindings;
 use cad_domain::ymodel::descriptor::CAD_ELEMENT;
 use cad_domain::ymodel::id::{IdKind, PersistentId, PersistentIdOf};
 use cad_domain::ymodel::{json, payload};
@@ -50,6 +51,7 @@ use crate::entity::{
     EntityColor, EntityLineType, EntityLineWeight, EntityRenderAttributes, EntityTransparency,
     LinetypePattern,
 };
+use crate::snapshot::parameters;
 
 /// The class key of this row. Part of the format.
 const CLASS: &str = CAD_ELEMENT.type_key;
@@ -65,6 +67,8 @@ pub(crate) struct DecodedElement {
     pub invisible: bool,
     /// `None` for a minor ≤ 5 row and for an element without BIM data.
     pub bim: Option<BimElement>,
+    /// `None` for a minor ≤ 7 row and for an element without bindings.
+    pub params: Option<ParamBindings>,
 }
 
 /// Encode one element row.
@@ -81,6 +85,7 @@ pub(crate) fn encode(
     attributes: Option<&EntityRenderAttributes>,
     invisible: bool,
     bim: Option<&BimElement>,
+    params: Option<&ParamBindings>,
 ) -> Result<Value, SnapshotError> {
     let type_key = Value::String(entity.object.type_key.clone());
     let space = encode_space(&entity.space);
@@ -106,6 +111,18 @@ pub(crate) fn encode(
         match &mut row {
             Value::Object(map) => {
                 map.insert("bim".to_string(), bim::encode(bim)?);
+            }
+            _ => unreachable!("`fields` builds an object"),
+        }
+    }
+    // ADR-0043 D7: the block is written only when the element has bindings, so
+    // a document without parametric data keeps the shape a minor-7 reader
+    // accepts and `"params": null` is never produced. An empty map is no block:
+    // writing `{}` would stamp the minor-8 tier for nothing.
+    if let Some(params) = params.filter(|bindings| !bindings.is_empty()) {
+        match &mut row {
+            Value::Object(map) => {
+                map.insert("params".to_string(), parameters::encode_bindings(params));
             }
             _ => unreachable!("`fields` builds an object"),
         }
@@ -149,6 +166,20 @@ pub(crate) fn decode(value: &Value) -> Result<DecodedElement, SnapshotError> {
         Some(value) => Some(bim::decode(&value).map_err(super::bim::prefixed)?),
     };
 
+    // ADR-0043 D7: same optional-block rule as `bim`. An absent key is `None`
+    // (a minor ≤ 7 row); a present key must be an object — `"params": null` is
+    // refused rather than treated as "no bindings".
+    let params = match reader.opt_take("params") {
+        None => None,
+        Some(Value::Null) => {
+            return Err(reader.error("params: expected an object, not null"));
+        }
+        Some(value) => Some(parameters::decode_bindings(
+            &value,
+            format!("{}.params", reader.context()),
+        )?),
+    };
+
     reader.finish()?;
 
     Ok(DecodedElement {
@@ -172,6 +203,7 @@ pub(crate) fn decode(value: &Value) -> Result<DecodedElement, SnapshotError> {
         attributes,
         invisible,
         bim,
+        params,
     })
 }
 

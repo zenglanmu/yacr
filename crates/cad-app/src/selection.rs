@@ -45,6 +45,8 @@ pub enum PropertyGroup {
     Display,
     /// BIM semantics attached to the element (ADR-0042 D4).
     Bim,
+    /// Document parameters the element's bindings reference (ADR-0043 D9).
+    Param,
 }
 
 impl PropertyGroup {
@@ -56,6 +58,7 @@ impl PropertyGroup {
             PropertyGroup::Text => "text",
             PropertyGroup::Display => "display",
             PropertyGroup::Bim => "bim",
+            PropertyGroup::Param => "param",
         }
     }
 
@@ -69,7 +72,9 @@ impl PropertyGroup {
     /// [`crate::selection_bim`] (ADR-0042 D4); `bim_properties` is the retired
     /// one-line PSet summary key, kept mapped so an older wire sample still
     /// groups the same way. A dynamic PSet row is placed in
-    /// [`PropertyGroup::Bim`] explicitly by [`crate::selection_bim`].
+    /// [`PropertyGroup::Bim`] explicitly by [`crate::selection_bim`], and a
+    /// `param.<name>` key (ADR-0043 D9) is
+    /// [`PropertyGroup::Param`].
     pub fn for_key(key: &str) -> Self {
         match key {
             "id" | "handle" | "type" | "layer" | "space" | "draw_order" | "instance"
@@ -80,6 +85,7 @@ impl PropertyGroup {
             }
             "bim_category" | "bim_name" | "bim_level" | "bim_type" | "bim_material"
             | "bim_source" | "bim_properties" | "bim_evidence" => PropertyGroup::Bim,
+            key if key.starts_with("param.") => PropertyGroup::Param,
             _ => PropertyGroup::Geometry,
         }
     }
@@ -571,6 +577,11 @@ pub fn entity_property_rows(
     // BIM semantics (ADR-0042 D4) come last: an element without a `bim` block
     // adds nothing, so the existing row set is unchanged for every other entity.
     rows.extend(crate::selection_bim::bim_property_rows(
+        database, reference, entity.id,
+    ));
+    // Parameter rows (ADR-0043 D9): an element with no bindings adds nothing, so
+    // every other entity keeps its existing row set.
+    rows.extend(crate::selection_param::param_property_rows(
         database, reference, entity.id,
     ));
     rows

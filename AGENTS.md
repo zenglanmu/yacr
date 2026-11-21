@@ -198,7 +198,13 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
   网格 PBR 通道（`cad:Mesh.pbr`：metallic/roughness/emissive/occlusion 标量 + 4 张 UV0 贴图）
   再升到 **4**（minor ≤ 3 仍可打开）。IFC 导入/导出、RVT/DGN 语义、BIM 查询/面板均已接线（IFC
   `Partial`；RVT/DGN `Unverified`），`FORMAT_MINOR` 升到 **7**（BIM 元素 6、关系 7，写入按文档取
-  **4/5/7**，minor 6 为只读档）。**IFC 关系只导出 `contains`/`nests`**（
+  **4/5/7**，minor 6 为只读档）；参数化 ADR-0043 P0–P3 再升到 **11**（P0 参数表 + 元素 `params` 块 →
+  8；P1 `neg/pow/fn/if` + `tables/configurations.json` → 9；P2 `tables/features.json` → 10；
+  P3 `tables/relations.json` → 11；写入按文档取 **4/5/7/8/9/10/11**）。`PARAM` 的 create/delete/
+  rename/bind/unbind/config 与 `SETENTITYPROPERTY param.<name>` 是**命令层**实现（尚无 payload producer /
+  UI / IPC 路径；生产可达的写入是属性面板的 `param.<name>`），`paramList` host-read 已接线；
+  **P2/P3 只有 schema/状态机**：特征求值 `rel.not_implemented`、`voids`/`fills` 与 in-context 传播
+  `rel.no_rule`；`Insert.scale` 与文本模板未实现。**IFC 关系只导出 `contains`/`nests`**（
   `IfcRelContainedInSpatialStructure`/`IfcRelNests`）；`aggregates`/`group`/`connects`/`other:*`
   因上游 plan API 无法表达任意产品间关系而**不导出并按 kind 报告**（`export.ifc.bim.relation_not_written`，
   端点未导出计 `relation_endpoint_missing`），不得写成容器/嵌套冒充；

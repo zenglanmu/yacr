@@ -142,6 +142,8 @@ pub(crate) fn plan_relations(
             BimRelationKind::Aggregates
             | BimRelationKind::Group
             | BimRelationKind::Connects
+            | BimRelationKind::Voids
+            | BimRelationKind::Fills
             | BimRelationKind::Other(_) => count_unwritten(counts, &kind),
         }
     }

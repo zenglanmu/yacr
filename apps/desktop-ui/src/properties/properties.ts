@@ -174,7 +174,7 @@ export function propertyCommit(
 /** The stable `property.*`/`popup.*` code inside an IPC failure, or its text. */
 export function propertyErrorCode(error: unknown): string {
   const text = String(error ?? '');
-  const match = text.match(/(?:property|popup)\.[a-z_]+/);
+  const match = text.match(/(?:property|popup|param)\.[a-z_]+/);
   if (match) return match[0];
   return text || PROPERTY_ERRORS.writeFailed;
 }
@@ -192,8 +192,16 @@ export function propertyEditMessage(
   t: Translator,
 ): { readonly code: string; readonly text: string } {
   const raw = typeof code === 'string' ? code : '';
-  const match = raw.match(/^(?:property|popup)\.([a-z_]+)$/);
-  const key = match ? `properties.edit.${match[1]}` : null;
+  // `param.<suffix>` uses its own catalog namespace (`properties.edit.param_*`),
+  // so the suffix alone would look up an unrelated key (e.g. `param.mixed` must
+  // not read `properties.edit.mixed`).
+  const param = raw.match(/^param\.([a-z_]+)$/);
+  const standard = raw.match(/^(?:property|popup)\.([a-z_]+)$/);
+  const key = param
+    ? `properties.edit.param_${param[1]}`
+    : standard
+      ? `properties.edit.${standard[1]}`
+      : null;
   const text = key ? t(key) : null;
   return {
     code: raw,

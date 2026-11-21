@@ -8,6 +8,7 @@
 //!    refuses an element that references a definition it does not hold;
 //! 3. every budget is a refusal, never a truncation.
 
+use cad_domain::relation::{Propagation, RelationFamily};
 use cad_domain::*;
 use serde_json::Value;
 
@@ -129,14 +130,15 @@ fn element_bim_round_trips_and_is_omitted_when_absent() {
     let attributes = EntityRenderAttributes::default();
 
     // Absent: the key is not written at all (not `"bim": null`).
-    let without = elements::encode(&entity, Some(&attributes), false, None).expect("encode");
+    let without = elements::encode(&entity, Some(&attributes), false, None, None).expect("encode");
     assert!(
         without.get("bim").is_none(),
         "an element without BIM data must omit the key: {without}"
     );
 
     let bim = element();
-    let encoded = elements::encode(&entity, Some(&attributes), false, Some(&bim)).expect("encode");
+    let encoded =
+        elements::encode(&entity, Some(&attributes), false, Some(&bim), None).expect("encode");
     assert!(encoded.get("bim").is_some(), "the block is written");
     let text = serde_json::to_string(&encoded).expect("serialize");
     let parsed: Value = serde_json::from_str(&text).expect("parse");
@@ -152,7 +154,7 @@ fn element_bim_round_trips_and_is_omitted_when_absent() {
 fn absent_bim_on_a_minor_five_row_decodes_as_none() {
     // A literal minor-5 row shape: exactly the pre-0042 descriptor field set.
     let entity = line(2);
-    let value = elements::encode(&entity, None, false, None).expect("encode");
+    let value = elements::encode(&entity, None, false, None, None).expect("encode");
     let decoded = elements::decode(&value).expect("decode");
     assert_eq!(decoded.bim, None);
     // And the row really has no `bim` key to begin with.
@@ -162,7 +164,7 @@ fn absent_bim_on_a_minor_five_row_decodes_as_none() {
 #[test]
 fn a_row_with_bim_null_is_rejected() {
     let entity = line(3);
-    let mut value = elements::encode(&entity, None, false, None).expect("encode");
+    let mut value = elements::encode(&entity, None, false, None, None).expect("encode");
     value["bim"] = Value::Null;
     let error = elements::decode(&value).expect_err("null bim");
     assert_eq!(error.marker, cad_domain::ymodel::markers::INVALID_DOCUMENT);
@@ -176,7 +178,7 @@ fn a_row_with_bim_null_is_rejected() {
 #[test]
 fn a_unknown_bim_field_is_rejected() {
     let entity = line(4);
-    let mut value = elements::encode(&entity, None, false, Some(&element())).expect("encode");
+    let mut value = elements::encode(&entity, None, false, Some(&element()), None).expect("encode");
     value["bim"]["future_field"] = Value::from(1);
     let error = elements::decode(&value).expect_err("unknown field");
     assert!(error.detail.contains("future_field"), "{}", error.detail);
@@ -367,4 +369,30 @@ fn an_oversized_bim_string_in_an_archive_is_refused() {
         "{}",
         error.detail
     );
+}
+
+#[test]
+fn voids_and_fills_are_reference_edges_without_a_rule() {
+    for (token, kind) in [
+        ("voids", crate::BimRelationKind::Voids),
+        ("fills", crate::BimRelationKind::Fills),
+    ] {
+        assert_eq!(kind.as_token(), token);
+        assert_eq!(crate::BimRelationKind::parse(token), Some(kind));
+        assert_eq!(
+            cad_domain::relation::relation_family(token),
+            RelationFamily::Reference,
+            "{token} is a D1 reference edge"
+        );
+        assert_eq!(
+            cad_domain::relation::relation_propagation(token, "IfcWall", "IfcDoor"),
+            Propagation::NoRule,
+            "P2 registers no (host, hosted) rule"
+        );
+        // The IFC exporter only writes `contains`/`nests`; its wildcard arm
+        // reports every other kind as `export.ifc.bim.relation_not_written`, so
+        // these tokens can never masquerade as a container/nesting edge.
+        assert_ne!(token, "contains");
+        assert_ne!(token, "nests");
+    }
 }

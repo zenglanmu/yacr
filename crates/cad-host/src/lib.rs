@@ -64,6 +64,7 @@ mod input;
 mod open;
 mod orbit_sensitivity;
 mod p4;
+pub mod param;
 pub mod policy;
 mod recent;
 mod recovery;
@@ -81,6 +82,7 @@ pub use command_log::{
     CommandLogEntry, CommandLogKind, CommandLogMeasurement, CommandLogPoint, COMMAND_LOG_CAPACITY,
 };
 pub(crate) use document_archive::sha256_hex;
+pub use param::{ParamList, ParamListRow};
 pub use recent::{
     recent_files_from_preference, RecentEntry, RECENT_FILES_CAP, RECENT_FILES_PREFERENCE_KEY,
 };

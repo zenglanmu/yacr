@@ -127,6 +127,7 @@ impl Application {
             CommandId::DrawOrder => self.draw_order(session, command),
             CommandId::SetActiveLayer => self.set_active_layer(session, command),
             CommandId::SetEntityProperty => self.set_entity_property(session, command),
+            CommandId::Param => self.param_command(session, command),
             CommandId::MatchProp => self.match_prop(session, command),
             CommandId::GripStretch => self.grip_stretch(command),
             _ => Err(CadError::InvalidInput(

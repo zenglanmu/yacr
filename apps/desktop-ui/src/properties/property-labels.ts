@@ -98,6 +98,7 @@ export function propertyGroupLabel(t: CatalogTranslate, group: string): string {
     case 'text': return t('properties.group.text');
     case 'display': return t('properties.group.display');
     case 'bim': return t('properties.group.bim');
+    case 'param': return t('properties.group.param');
     default: return group;
   }
 }

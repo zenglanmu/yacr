@@ -9,6 +9,10 @@
 //!
 //! | the document has | minor | what a minor-4 reader misses |
 //! |---|---|---|
+//! | in-context relations (ADR-0043 P3) | `11` | `tables/relations.json` |
+//! | feature definitions (ADR-0043 P2) | `10` | `tables/features.json` |
+//! | a P1 expression node or configuration (ADR-0043 P1) | `9` | `neg`/`pow`/`fn`/`if` tags, `tables/configurations.json` |
+//! | parameter rows or element bindings (ADR-0043) | `8` | `tables/parameters.json`, the element `params` block |
 //! | BIM data (elements, definitions or **relations**) | `7` | the element `bim` block, `tables/bim-definitions.json`, `tables/bim-relations.json` |
 //! | only bundled resources | `5` | `resources/<kind>/<key>`, `tables/resources.json`, the flag |
 //! | neither | `4` | — |
@@ -44,8 +48,25 @@ pub(crate) const FORMAT_MINOR_BIM_ELEMENTS: u32 = 6;
 /// D6 and D3 tail: one release, so one minor).
 pub(crate) const FORMAT_MINOR_BIM: u32 = 7;
 
+/// A document that carries parameter rows or element bindings (ADR-0043 D11).
+pub(crate) const FORMAT_MINOR_PARAMS: u32 = 8;
+
+/// A document that uses a P1 expression node or a P1 configuration
+/// (ADR-0043 P1).
+pub(crate) const FORMAT_MINOR_EXPRESSIONS: u32 = 9;
+
+/// A document that carries feature definitions (ADR-0043 P2).
+pub(crate) const FORMAT_MINOR_FEATURES: u32 = 10;
+
+/// A document that carries self-authored in-context relations (ADR-0043 P3).
+pub(crate) const FORMAT_MINOR_RELATIONS: u32 = 11;
+
 // The chain is a compile-time fact, not a convention: a future tier inserted in
 // the middle cannot silently leave the constants out of order.
+const _: () = assert!(FORMAT_MINOR_FEATURES + 1 == FORMAT_MINOR_RELATIONS);
+const _: () = assert!(FORMAT_MINOR_EXPRESSIONS + 1 == FORMAT_MINOR_FEATURES);
+const _: () = assert!(FORMAT_MINOR_PARAMS + 1 == FORMAT_MINOR_EXPRESSIONS);
+const _: () = assert!(FORMAT_MINOR_BIM + 1 == FORMAT_MINOR_PARAMS);
 const _: () = assert!(FORMAT_MINOR_BIM_ELEMENTS + 1 == FORMAT_MINOR_BIM);
 const _: () = assert!(FORMAT_MINOR_RESOURCES + 1 == FORMAT_MINOR_BIM_ELEMENTS);
 const _: () = assert!(FORMAT_MINOR_PLAIN + 1 == FORMAT_MINOR_RESOURCES);
@@ -58,6 +79,24 @@ const _: () = assert!(FORMAT_MINOR_PLAIN + 1 == FORMAT_MINOR_RESOURCES);
 /// tier here is about archive entries and the header flag, both of which the
 /// store already models.
 pub(crate) fn document_minor(snapshot: &DocumentSnapshot) -> u32 {
+    if snapshot.has_relations() {
+        return FORMAT_MINOR_RELATIONS;
+    }
+    if snapshot.has_features() {
+        return FORMAT_MINOR_FEATURES;
+    }
+    // P1 expression tags need their own tier: a minor-8 reader would refuse the
+    // unknown tag as a malformed document instead of `unsupported_minor`. The
+    // configuration table shares the tier (both landed in P1).
+    if snapshot.has_p1_params() || snapshot.has_configurations() {
+        return FORMAT_MINOR_EXPRESSIONS;
+    }
+    // Parameters are the newest P0 tier and imply nothing about BIM: a document
+    // may carry both, and minor 8 is the only level that models the table and
+    // the element `params` block.
+    if snapshot.has_params() {
+        return FORMAT_MINOR_PARAMS;
+    }
     if snapshot.has_bim() {
         return FORMAT_MINOR_BIM;
     }
@@ -79,8 +118,12 @@ mod tests {
 
     /// The top tier is the format constant, not an independent number.
     #[test]
-    fn the_bim_tier_is_the_format_minor() {
-        assert_eq!(FORMAT_MINOR_BIM, cad_domain::ymodel::FORMAT_MINOR);
+    fn the_top_tier_is_the_format_minor() {
+        assert_eq!(FORMAT_MINOR_RELATIONS, cad_domain::ymodel::FORMAT_MINOR);
+        assert_eq!(FORMAT_MINOR_RELATIONS, FORMAT_MINOR_FEATURES + 1);
+        assert_eq!(FORMAT_MINOR_FEATURES, FORMAT_MINOR_EXPRESSIONS + 1);
+        assert_eq!(FORMAT_MINOR_EXPRESSIONS, FORMAT_MINOR_PARAMS + 1);
+        assert_eq!(FORMAT_MINOR_PARAMS, FORMAT_MINOR_BIM + 1);
         assert_eq!(FORMAT_MINOR_BIM, FORMAT_MINOR_BIM_ELEMENTS + 1);
         assert_eq!(FORMAT_MINOR_BIM_ELEMENTS, FORMAT_MINOR_RESOURCES + 1);
         assert_eq!(FORMAT_MINOR_RESOURCES, FORMAT_MINOR_PLAIN + 1);

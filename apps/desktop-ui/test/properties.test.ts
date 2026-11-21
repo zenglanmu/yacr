@@ -35,8 +35,10 @@ test('property groups have catalog labels and unknown groups stay raw', () => {
   assert.equal(propertyGroupLabel(t, 'text'), zh['properties.group.text']);
   assert.equal(propertyGroupLabel(t, 'display'), zh['properties.group.display']);
   assert.equal(propertyGroupLabel(t, 'bim'), zh['properties.group.bim']);
+  assert.equal(propertyGroupLabel(t, 'param'), zh['properties.group.param']);
   assert.equal(propertyGroupLabel(tEn, 'display'), en['properties.group.display']);
   assert.equal(propertyGroupLabel(tEn, 'bim'), en['properties.group.bim']);
+  assert.equal(propertyGroupLabel(tEn, 'param'), en['properties.group.param']);
   assert.equal(propertyGroupLabel(t, 'future_group'), 'future_group');
 });
 
@@ -54,6 +56,25 @@ test('a dynamic row shows its source label verbatim instead of the machine key',
   // Source data is never translated: the label is what the import declared.
   assert.equal(view.label, 'Pset_WallCommon.IsExternal');
   assert.notEqual(view.label, propertyRowLabel(t, 'bim.pset.0.0'));
+});
+
+test('a parameter row keeps its source name and stays editable', () => {
+  const view = propertyRowView({
+    key: 'param.r',
+    label: 'r',
+    value: '20',
+    group: 'param',
+    mixed: false,
+    editable: true,
+    kind: 'number',
+    options: [],
+  }, t);
+  // The parameter name is document data, so it is shown verbatim, not by key.
+  assert.equal(view.label, 'r');
+  assert.equal(view.group, 'param');
+  assert.equal(view.editor, 'number');
+  assert.equal(view.editable, true);
+  assert.notEqual(view.label, propertyRowLabel(t, 'param.r'));
 });
 
 test('a row without a label falls back to its catalog label', () => {

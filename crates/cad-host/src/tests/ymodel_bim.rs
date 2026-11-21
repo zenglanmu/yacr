@@ -131,8 +131,26 @@ impl DocumentArchive for BimArchive {
 /// blocks or the definition table, this projection drops to 4/5 and the test
 /// fails, which is the regression the contract is about.
 fn stand_in_document_minor(snapshot: &DocumentSnapshot) -> u32 {
-    if snapshot.has_bim() {
+    if snapshot.has_relations() {
         return FORMAT_MINOR;
+    }
+    const FORMAT_MINOR_FEATURES: u32 = 10;
+    if snapshot.has_features() {
+        return FORMAT_MINOR_FEATURES;
+    }
+    const FORMAT_MINOR_EXPRESSIONS: u32 = 9;
+    if snapshot.has_p1_params() || snapshot.has_configurations() {
+        return FORMAT_MINOR_EXPRESSIONS;
+    }
+    const FORMAT_MINOR_PARAMS: u32 = 8;
+    if snapshot.has_params() {
+        return FORMAT_MINOR_PARAMS;
+    }
+    // The BIM tier is one below the parameter tier this build writes; keeping
+    // the literal here would make the stand-in disagree with `minor.rs`.
+    const FORMAT_MINOR_BIM: u32 = 7;
+    if snapshot.has_bim() {
+        return FORMAT_MINOR_BIM;
     }
     const FORMAT_MINOR_PLAIN: u32 = 4;
     const FORMAT_MINOR_RESOURCES: u32 = 5;
@@ -393,13 +411,15 @@ fn a_bim_document_is_written_at_minor_seven() {
 
     assert_eq!(
         archive.minors(),
-        vec![FORMAT_MINOR, FORMAT_MINOR],
-        "a BIM-bearing document is stamped minor {FORMAT_MINOR} on every save"
+        vec![7, 7],
+        "a BIM-bearing document without parameters is stamped minor 7 on every save"
     );
-    assert_eq!(
-        FORMAT_MINOR, 7,
-        "ADR-0042 raised the ceiling to 6 for BIM elements and to 7 for relations"
-    );
+    const {
+        assert!(
+            FORMAT_MINOR >= 7,
+            "the build ceiling must be at least the BIM tier"
+        );
+    }
     for (index, snapshot) in archive.writes().iter().enumerate() {
         assert!(
             snapshot.has_bim(),

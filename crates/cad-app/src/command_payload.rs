@@ -34,10 +34,8 @@ pub use basic::*;
 
 mod style_tables;
 pub use style_tables::*;
-
 mod refedit_options;
 pub use refedit_options::{RefCloseOption, RefSetOption};
-
 pub enum CommandPayload {
     None,
     Points(Vec<Point3>),
@@ -752,6 +750,8 @@ pub enum CommandPayload {
         key: String,
         value: String,
     },
+    /// `PARAM {op: ...}`: structural parameter edit (ADR-0043 D9); see [`ParamOp`].
+    Param(ParamOp),
     /// `GRIPSTRETCH`: move **one** handle of **one** entity to a world point (the
     /// payload of a pointer gesture; the gesture itself lives in `cad-host`).
     ///

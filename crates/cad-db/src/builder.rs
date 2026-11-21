@@ -94,6 +94,13 @@ impl DrawingDatabaseBuilder {
                 bim_elements: BTreeMap::new(),
                 bim_definitions: crate::bim::BimDefinitions::new(),
                 bim_relations: crate::bim::BimRelations::new(),
+                parameters: cad_domain::param::ParamTable::new(),
+                param_configs: cad_domain::param::ParamConfigTable::new(),
+                active_configuration: None,
+                param_bindings: BTreeMap::new(),
+                param_diagnostics: Vec::new(),
+                features: crate::feature::FeatureDefinitions::new(),
+                relations: crate::relation::InContextRelations::new(),
                 bounds_cache: Default::default(),
             },
             errors: Vec::new(),
@@ -896,6 +903,9 @@ impl DrawingDatabaseBuilder {
         // document lie. The check itself lives in `bim.rs` (new code, new
         // module); this line is the only wiring here.
         if let Err(error) = crate::bim::validate_all(&self.database) {
+            self.errors.push(error.to_string());
+        }
+        if let Err(error) = crate::drawing::param_build::validate_all(&self.database) {
             self.errors.push(error.to_string());
         }
         if !self.errors.is_empty() {

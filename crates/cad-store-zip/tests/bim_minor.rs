@@ -300,10 +300,13 @@ fn a_minor_five_archive_without_bim_opens() {
     assert!(!loaded.snapshot.has_bim());
 
     // The ceiling still applies: one above this build's minor is refused.
-    let mut source = MemorySource::new(with_minor(&bytes, 8));
+    let mut source = MemorySource::new(with_minor(
+        &bytes,
+        u64::from(cad_domain::ymodel::FORMAT_MINOR) + 1,
+    ));
     let error = ZipDocumentStore::new()
         .read(&mut source)
-        .expect_err("minor 8 is newer than this build");
+        .expect_err("a newer minor is refused");
     assert_eq!(
         error.marker,
         cad_domain::ymodel::markers::UNSUPPORTED_MINOR,

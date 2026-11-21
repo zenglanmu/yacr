@@ -170,11 +170,16 @@ face-with-hole 1/8、instance-scaled 3/36；theater-2017 1246 实体/96,333 三�
   外部资源打包的 `resources/{font,xref,image}/<key>` 条目与 `document.json.embed_resources`
   把**可读上限**提到 **5**；BIM 语义的元素行**可选** `bim` 块与 `tables/bim-definitions.json`
   （仅在非空时写）再提到 **6**，多对多关系的 `tables/bim-relations.json`（仅非空时写）再提到 **7**，
-  写入时按文档内容取 **7 / 5 / 4**（有 BIM 元素/定义/关系 → 7；只有资源 → 5；否则 → 4，
-  老构建仍可打开）；**6 是只读旧档**，本构建能打开 minor-6 归档但再保存一律写 7。
-  minor ≤ 6 的归档仍可打开（缺 `bim` 键 → `None`、缺定义表 → 空定义、缺关系表 → 空关系；
+  参数化的 `tables/parameters.json` 与元素行**可选** `params` 块（ADR-0043 P0）再提到 **8**；
+  P1 的 `neg`/`pow`/`fn`/`if` 表达式与 `tables/configurations.json`、P2 的
+  `tables/features.json`、P3 的 `tables/relations.json` 依次提到 **9 / 10 / 11**；
+  写入时按文档内容取 **11 / 10 / 9 / 8 / 7 / 5 / 4**（有 in-context 关系 → 11；有特征定义 → 10；
+  有 P1 表达式/配置 → 9；有参数 → 8；有 BIM 元素/定义/关系 → 7；只有资源 → 5；否则 → 4）；
+  **6 是只读旧档**，本构建能打开 minor-6 归档但再保存一律写当前档。
+  minor ≤ 10 的归档仍可打开（缺 `bim` 键 → `None`、缺定义表 → 空定义、缺关系表 → 空关系；
+  缺 `params` 键 → 无绑定、缺参数表 → 空参数；缺配置/特征/关系表 → 空表；
   缺 `pbr` → `None`；缺 UV/纹理按空/无解码；缺 `embed_resources` → `false`）；
-  minor > 7 的归档按 `ymodel.unsupported_minor` 拒绝打开（不静默丢字段）。BIM 块、定义表与关系表的预算
+  minor > 11 的归档按 `ymodel.unsupported_minor` 拒绝打开（不静默丢字段）。BIM 块、定义表与关系表的预算
   （定义/关系各 100 000 行、各 32 MiB 编码体积、单元素 64 PSet / 每 PSet 256 属性 / 字符串 4 KiB）在
   **写读两侧都强制**，超限是显式拒绝而不是截断，稳定标记 `ymodel.bim.invalid` /
   `ymodel.bim.budget_exceeded` / `ymodel.bim.dangling_reference`。
@@ -323,6 +328,38 @@ Windows/macOS/Android 只有编译/契约证据，见 `docs/validation-bim-2026-
 DGN 真实 V8i/CONNECT 的 tag 解码、Windows/macOS/Android 的 BIM 查询与 `cad_select_entities` 运行、
 wasm/Android 运行时、设备/GPU/像素与跨机自包含一律 **NOT RUN / NOT VERIFIED**；**IFC 关系导出只覆盖 `contains`/`nests`**（其余 kind 显式报告，无产物）。
 RVT 那份样本计数是**契约观察，不是验收**。
+
+### 参数化依赖与求值（2026-11-21，ADR-0043 P0）
+
+范围是「改一个命名参数，直接绑定它的构件按依赖顺序重算」的**最小垂直切片**；它不是特征图、约束求解器、
+配置或自上而下外部参考（ADR-0043 D14）。`cad-db` 仍是唯一权威：参数表与元素槽位绑定是权威，几何与
+显示是派生；打开时重算并诊断，但**不在打开时写回**。
+
+| 层 | 实现 | 边界 |
+|---|---|---|
+| 存储 | `tables/parameters.json`：`{seq,name,kind,unit?,expr}`，`seq` 是表内身份（非 `PersistentId`、不占 `IdKind` 12/13 或高水位）；元素行可选 `params` 块（`slot → expr`），`None`/空时**省略整键** | 名称文档内唯一；重复名、未知槽位、悬空 `ref`、环、超预算一律显式拒绝（`param.*`）；`"params": null` 拒绝 |
+| 版本 | `FORMAT_MINOR` **11**，写入按文档取 **11/10/9/8/7/5/4**（有 in-context 关系 → 11；有特征定义 → 10；有 P1 表达式/配置 → 9；有参数 → 8；有 BIM → 7；只有资源 → 5；否则 4）；10 及以下可打开 | 旧构建读 11 按 `ymodel.unsupported_minor` 拒绝；新构建读旧档缺表 = 空表、缺块 = 无绑定 |
+| 表达式（P0/P1） | P0：`{"num"} / {"ref"} / {"op": add\|sub\|mul\|div} / {"const":"pi"}`；P1：`{"neg"} / {"pow","exp"} / {"fn","arg"} / {"if":{cond,then,else}}`（`abs/sqrt/sin/cos/tan/floor/ceil/round`）。量纲在解析/求值期检查，规范单位 `mm`/`rad`，不静默换算；`number` 参数无量纲，可缩放长度；`pow`/`sqrt` 只接受无量纲操作数；`if` 只求值被选中的分支 | 深度 ≤ 32、单表达式节点 ≤ 256、参数 ≤ 4096、闭包 ≤ 10 000 元素；超限 `param.budget_exceeded`，**整单拒绝**；未知 `fn`/多余 tag/缺 `exp`/`arg` 在解码期拒绝 |
+| 配置（P1） | `tables/configurations.json`：`{name,parent,overrides{seq:expr},suppressed[seq]}`；父链先应用、子覆盖；派生表 = 基表 + 活动配置；活动配置是**运行时状态**（不落盘），`PARAM CONFIG` 切换并重算全部绑定元素（一 revision/ChangeSet，**不记 undo**）；`param.<name>` 在活动配置覆盖/抑制该参数时按 `param.config_override` 拒绝 | 未知父/环 `param.config_cycle`/`param.unknown_config`；覆盖/抑制不存在的 `seq` 拒绝；抑制被其它表达式引用 → 配置无效；绑定到被抑制参数 → 元素 `param.suppressed` 保留 last-good |
+| 槽位（P0/P1） | `cad:Circle.radius`、`cad:Polyline.width`、`cad:Text.height`（均不改变拓扑） | `cad:Insert.scale` **未实现**（需要 transform/base 拆分）：按 `param.no_evaluator` 显式拒绝；其它类型/槽位 `param.no_evaluator` / `param.unknown_slot`，不猜 |
+| 写入 | `DrawingDatabase::apply_parametric_update`：先全量校验 → 再改 → **一个 revision / 一个 ChangeSet / 一条 undo**；`ChangeScope` 同时标 `TableKind::Parameters` 与每个被重写元素的 shard | 空批不 bump；锁定层按 `layer.locked` 拒绝；几何构造失败只发 `param.blocked` 并保留 last-good，参数仍提交（D6 第二档） |
+| 打开 | 按 D5 重算并与存储几何比较：不一致只发 `param.recomputed`，构造失败发 `param.blocked`，**不修改、不 bump、不产生脏 scope** | 存储行是上一次成功求值结果（D7）；诊断目前只在 `cad-db` 可读（`param_diagnostics()`），宿主 UI 尚未展示 |
+| undo/redo | 参数 patch 与绑定 patch 同一步；绑定 patch 携带 `before/after_geometry`，undo 恢复精确的绑定前几何（值编辑由纯函数重算） | 参数步拒绝与 record 实体行/其它表批次的混合（实现说明见 ADR-0043 D8）；`PARAM CONFIG` 不记 undo |
+| 命令 | `PARAM {op: create\|delete\|rename\|bind\|unbind\|config}`（Work-only，一命令一事务；config 例外：一 revision 但无 undo）；值编辑走 `SETENTITYPROPERTY` 的 `param.<name>` | **`PARAM` 只有命令层**：没有 payload producer / IPC / UI 路径，生产可达的写入是 `param.<name>`；多选时每个选中元素都必须直接引用该参数，否则 `param.mixed` 整单拒绝；无变化不记历史 |
+| 面板 | 动态行 `param.<name>`（`PropertyGroup::Param`，label = 参数名，值 = 求值结果），只列当前选择**直接引用**的参数；多选按 key 交集，部分绑定不出现该行 | P0/P1 不做文档级参数面板；`paramList` 只有 wire（`host_read` 新 kind，见下），没有 React 消费者 |
+| `paramList`（P1 host-read） | 唯一 `cad_ui_core::host_read` seam 的新 kind：`HostReadRequest::ParamList` → `HostReadAnswer::ParamList`；`cad-host::HostCore::param_list()` 返回 base/effective 值、`inherited/overridden/suppressed` 状态与活动配置名；无文档 = 空表 | 无 seam 的载体按 `unsupported-runtime: paramList` 拒绝（未知 kind 仍是 `hostRead.kind`）；只有 Linux 编译/契约证据 |
+| 特征（P2，schema only） | `tables/features.json`：`{id(元素),order,operation,inputs,parameters}`；`order` 唯一、按序求值；操作枚举含 extrude/revolve/loft/sweep/boolean_*/fillet/shell/hole/pattern；构建期校验元素/输入存在、无自输入、槽位可解析 | **没有求值器**：`evaluate_feature` 对所有操作（含 fillet/shell）返回 `rel.not_implemented`，不伪造几何、不 bump revision；solidcore 接入是后续工作 |
+| `voids`/`fills`（P2） | 作为 `BimRelationKind` 具名 kind 导入/存储；D1 归类为 Reference，`relation_propagation` 返回 `NoRule`（`rel.no_rule`）；IFC 导出仍只写 `contains`/`nests`，它们按 kind 计 `export.ifc.bim.relation_not_written` | **(host,hosted) 规则未注册**：没有“墙厚变了门跟着动”的传播；不得当成参数化更新 |
+| in-context（P3，schema only） | `tables/relations.json`：`{source,target,reference{kind:face\|edge\|vertex,key},state,label}`；`(source,target,reference)` 唯一；状态机 `InContext/OutOfContext/Locked/Broken/Dangling`，`Dangling` 终态；`update_relation_state` 一 revision + `TableKind::Relations` scope | **没有几何传播**：表是显式 typed 记录，不是可执行的 rebuild；`cad-dependencies` 未接入统一调度 |
+
+**仍明确未实现**：`Insert.scale`（缺少 transform/base 拆分，按 `param.no_evaluator` 拒绝）、文本模板
+（`cad:Text.text` 的 `{name}` 占位）、文档级参数面板的 React 消费者、P2 的特征求值器（solidcore 内核
+接入）、`voids`/`fills` 的 `(host,hosted)` 传播规则、P3 的几何 in-context 传播与 `cad-dependencies`
+统一调度。约束求解器、配合/装配求解、特征历史 rollback、跨文档外部参考仍是**非目标**（ADR-0043 D14）。
+
+**证据边界**：见 `docs/validation-parametric-2026-11-21.md`。只有库层/命令层契约与单元测试、
+`cargo check`/clippy/门禁、以及无 GPU 的 headless 求值测试；**没有**真实 GPU/像素/性能、真实宿主运行、
+跨机自包含或 vendor 验收。Linux 是唯一有测试运行的载体，其余平台 **NOT VERIFIED**。
 
 ### 测量命令与 §3.3 的逐条对应（2026-10-26 对账补齐）
 

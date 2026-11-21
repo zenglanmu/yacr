@@ -227,6 +227,10 @@ pub const CAD_SELECTED_PROPERTY_CAP: usize = CAD_COMMAND_CAP;
 ///   to the BIM write path. It is deliberately **not** added to
 ///   `property_value::SUPPORTED_KEYS`: that module must never see a key that
 ///   addresses stored PSet data rather than a display attribute.
+/// * a document parameter key, `param.<name>`
+///   ([`cad_app::selection_param::is_param_property_key`], ADR-0043 D9), which
+///   `cad-app` dispatches to the merged parametric write path. Like the BIM keys
+///   it is deliberately **not** in `SUPPORTED_KEYS`.
 ///
 /// Only the **key** is checked here, because it is database-independent
 /// (`property.unsupported_key`, the same stable code the host write path uses
@@ -238,6 +242,7 @@ pub const CAD_SELECTED_PROPERTY_CAP: usize = CAD_COMMAND_CAP;
 pub fn parse_property_write(key: &str, value: &str) -> Result<(String, String), String> {
     if !cad_app::property_value::is_supported_key(key)
         && !cad_app::selection_bim::is_bim_property_key(key)
+        && !cad_app::selection_param::is_param_property_key(key)
     {
         return Err("property.unsupported_key".to_string());
     }

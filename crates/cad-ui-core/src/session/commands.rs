@@ -259,6 +259,8 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("LAYWALK", CommandId::LayWalk),
     // A payload-requiring edit: the selector normalizes, and the application refuses a bare invocation explicitly (the panel/IPC path supplies the `EntityProperty { key, value }` payload).
     ("SETENTITYPROPERTY", CommandId::SetEntityProperty),
+    // PARAM is the structural parameter edit (ADR-0043 D9). It needs a `Param(ParamOp)` payload from the properties/IPC path; the bare typed selector normalizes and is then refused explicitly by the application layer (`param.invalid_payload`), never turned into a guessed create.
+    ("PARAM", CommandId::Param),
     // MATCHPROP is the **selection-based** property painter: the bare selector is the whole input (`CommandPayload::None`), because the current selection's first entity is the source and the rest are destinations. No IPC of its own.
     ("MATCHPROP", CommandId::MatchProp),
     // GRIPSTRETCH is the **payload path of a pointer gesture**: `GripStretch { id, to }` carries the resolved handle id plus the world point the drag resolved to. That payload comes from the host's own pointer routing on the release of an armed grip drag (`cad_host`), never from this table: this layer only maps the selector, and the typed command line carries no handle, so the bare selector normalizes and is then refused explicitly by the application layer — it must never be routed to `BeginDraw` or turned into a fabricated drag.
