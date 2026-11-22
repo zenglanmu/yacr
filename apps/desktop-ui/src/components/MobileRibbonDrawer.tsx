@@ -1,4 +1,4 @@
-// The mobile ribbon: a drawer that drops from the top bar, not a 92px band.
+// The mobile ribbon: a drawer that drops from the top edge, not a 92px band.
 //
 // It renders the **same model** the desktop band renders (`RIBBON_TABS`), through
 // the same carrier reduction (`layout/mobile-ribbon.ts`) and the same dispatch
@@ -9,11 +9,11 @@
 //
 // Shape, and why it differs from the band:
 //
-//   * **The drawing's name heads the panel.** The compact top bar keeps one
-//     control, so the open document's label (the same string the bar used) is the
-//     drawer's first row: one ellipsized line with the full name in `title`, next
-//     to the close button. It is a 44px row, so it costs the chips nothing on a
-//     short landscape viewport.
+//   * **The drawing's name heads the panel.** The compact chrome keeps one
+//     control, so the open document's label (the same string the old top strip
+//     carried) is the drawer's first row: one ellipsized line with the full name in
+//     `title`, next to the close button. It is a 44px row, so it costs the chips
+//     nothing on a short landscape viewport.
 //   * **Tab chips, not a tab strip.** The seven tabs cannot share 390px, so the
 //     chip row scrolls horizontally and every chip is a 44px target.
 //   * **A two-or-more column touch grid, not a 92px band.** Each cell is an icon,
@@ -39,7 +39,7 @@ import type { RibbonItem } from '../ribbon/ribbon-model.ts';
 import { mobileRibbonDomId, mobileRibbonSections, mobileRibbonTabs, panelRefusalKey, sharedRefusal } from '../layout/mobile-ribbon.ts';
 import { layoutTabsView, layoutUnsupportedTitle } from '../layout/layout-tabs.ts';
 
-/** The drawer's DOM id: the top bar's `aria-controls` names it. */
+/** The drawer's DOM id: the floating menu button's `aria-controls` names it. */
 export const MOBILE_DRAWER_ID = 'cad-mobile-drawer';
 
 export interface MobileRibbonDrawerProps {
@@ -184,11 +184,11 @@ export function MobileRibbonDrawer({ open, onClose }: MobileRibbonDrawerProps) {
   const drawerRef = useRef<HTMLDivElement | null>(null);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const tab = ribbonTab(shell.ribbonTab);
-  // The top bar keeps one control (the menu button), so the open drawing's name
-  // lives here: the same label the bar used, one ellipsized line, with the full
-  // name in `title` for a truncated one. On the start state it is the same
-  // "Get started" the start panel and the desktop doc tab already use, so it never
-  // reads as an invented file name.
+  // The compact chrome keeps one control (the floating menu button), so the open
+  // drawing's name lives here: the same label the old top strip carried, one
+  // ellipsized line, with the full name in `title` for a truncated one. On the
+  // start state it is the same "Get started" the start panel and the desktop doc
+  // tab already use, so it never reads as an invented file name.
   const documentLabel = shell.documentLabel ?? t('start.title');
   // The compact layout's stand-in for the desktop model/layout strip. It reads
   // the very same projection (`layoutTabsView`) from the same `cad_status`, so

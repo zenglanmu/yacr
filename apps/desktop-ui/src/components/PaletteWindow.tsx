@@ -20,6 +20,7 @@
 import React, { useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useI18n } from '../context.ts';
 import {
+  PALETTE_MAX_WIDTH,
   PALETTE_MIN_WIDTH,
   PALETTE_RESIZE_STEP,
   PALETTE_Z_BASE,
@@ -212,9 +213,11 @@ export function PaletteWindow({ windowKey, initialIndex = 0, children }: Palette
   // window that was moved on a wide drawing stays reachable after a resize; the
   // stored geometry is left alone and is restored when the layer grows again.
   const view = layer === null ? state.geometry : clampGeometry(state.geometry, layer);
+  // The gripper's own bounds, matching `clampWidth`: the minimum, and the smaller
+  // of the layer and the absolute design ceiling.
   const maximumWidth = layer === null
     ? Math.max(PALETTE_MIN_WIDTH, view.width)
-    : Math.max(PALETTE_MIN_WIDTH, Math.round(layer.width));
+    : Math.max(PALETTE_MIN_WIDTH, Math.min(PALETTE_MAX_WIDTH, Math.round(layer.width)));
 
   function startSession(mode: DragMode, event: PointerStart): void {
     const size = measureLayer(windowRef.current) ?? layer;

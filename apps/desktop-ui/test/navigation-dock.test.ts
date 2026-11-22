@@ -232,7 +232,13 @@ test('the desktop dock floats over the right edge and takes no width from the pa
 test('the compact dock is a content-sized card, never a full-height strip', async () => {
   const mobile = await readModule('mobile.css');
   const card = ruleFor(mobile, ':root[data-layout="mobile"] .navdock');
-  assert.ok(card.includes('top: 8px'), 'pinned 8px below the drawing row\'s top edge');
+  // The card takes the same cutout inset as the floating menu button and the
+  // orientation ball. Without it, an edge-to-edge notched phone puts the card's
+  // head under the status bar / notch — where it can neither be read nor tapped.
+  assert.ok(
+    card.includes('top: calc(8px + env(safe-area-inset-top))'),
+    'pinned 8px below the drawing row\'s top edge, clear of the cutout',
+  );
   assert.ok(card.includes('right: 8px'), 'and 8px in from its right edge');
   assert.ok(card.includes('bottom: auto'), 'the strip\'s full-height bottom edge is gone');
   assert.ok(card.includes('height: auto'), 'the card is as tall as the head it shows');
@@ -240,7 +246,13 @@ test('the compact dock is a content-sized card, never a full-height strip', asyn
   assert.equal(/bottom:\s*0/.test(card), false, 'no full-height mobile strip rule survives');
   assert.equal(card.includes('position: fixed'), false, 'the card stays inside the workspace row, not over the bars');
   assert.ok(card.includes('max-width: calc(100vw - 16px)'), 'it never spans a phone screen');
-  assert.ok(mobile.includes('max-height: min(60dvh, calc(100% - 16px))'), 'open, it is capped and scrolls inside');
+  // The cap subtracts the inset the card was moved down by, so an open rail can
+  // never push the card's bottom past the drawing row on a notched phone.
+  assert.ok(
+    card.includes('max-height: min(60dvh, calc(100% - 16px - env(safe-area-inset-top)))'),
+    'open, it is capped and scrolls inside, inset included',
+  );
+  assert.ok(card.includes('max-height: 60dvh'), 'the dvh cap is the fallback before the exact one');
   assert.ok(card.includes('border: 1px solid'), 'the card has its own frame, not a left-edge strip');
   assert.ok(card.includes('border-radius: 8px'), 'a rounded card');
   assert.ok(card.includes('box-shadow:'), 'it floats above the drawing');
@@ -248,21 +260,38 @@ test('the compact dock is a content-sized card, never a full-height strip', asyn
   assert.ok(card.includes('background: var(--chrome-3)'), 'the card is opaque chrome');
   assert.equal(card.includes('border-left: 1px solid var(--line)'), false, 'the desktop left-border edge is replaced');
 
-  // The head is the card's definite width and the collapsed footprint: the cube
-  // plus one 44px control, nothing else.
+  // The head is the card's definite width and the collapsed footprint: the compact
+  // theme switch plus the one 44px collapse control, nothing else. The ball is not
+  // a card child — it floats beside the card (see the compact corner rule below).
   const head = ruleFor(mobile, ':root[data-layout="mobile"] .navdock__head');
   assert.ok(head.includes('width: var(--navrail-w)'), 'one control column wide');
-  assert.match(head, /gap:\s*4px/, 'at least 4px between the cube and the toggle');
+  assert.match(head, /gap:\s*4px/, 'at least 4px between the theme switch and the toggle');
   const toggle = ruleFor(mobile, ':root[data-layout="mobile"] .navdock__toggle');
   assert.ok(toggle.includes('width: 44px') && toggle.includes('height: 44px'), 'a finger-sized toggle');
   assert.ok(ruleFor(mobile, ':root[data-layout="mobile"] .navrail__button').includes('width: 44px'), '44px rail buttons');
   assert.ok(mobile.includes(':root[data-layout="mobile"] .viewcube__home'), 'Home is finger-sized on mobile too');
-  // The ball moves to the drawing's top-left, away from the dock card at the
-  // top-right, and shrinks; the rail width token is untouched.
+  // The ball keeps the **desktop corner** (the drawing's top-right) and moves left
+  // of the dock card, exactly as the desktop ball sits left of the 56px rail: the
+  // offset is the card's own footprint (8px inset + 56px column + 2px frame) plus
+  // an 8px gap. It shrinks; the rail width token is untouched, and the top-left
+  // corner belongs to the floating menu button.
   const ballCard = ruleFor(mobile, ':root[data-layout="mobile"] .viewcube');
   assert.ok(ballCard.includes('--viewball-size: 96px'), 'a smaller compact ball');
-  assert.ok(ballCard.includes('top: 8px') && ballCard.includes('left: 8px'), 'top-left, 8px margins');
-  assert.ok(ballCard.includes('right: auto'), 'no longer pinned to the rail edge');
+  assert.ok(
+    ballCard.includes('right: calc(var(--navrail-w) + 18px)'),
+    'left of the dock card by its inset, frame and an 8px gap',
+  );
+  assert.ok(ballCard.includes('left: auto'), 'not at the top-left corner any more');
+  assert.ok(
+    ballCard.includes('top: calc(8px + env(safe-area-inset-top))'),
+    'the ball, the card and the menu button share one cutout inset, so the top row stays level',
+  );
+  const ballUnavailable = ruleFor(mobile, ':root[data-layout="mobile"] .viewcube--unavailable');
+  assert.ok(
+    ballUnavailable.includes('right: calc(var(--navrail-w) + 18px)')
+      && ballUnavailable.includes('top: calc(8px + env(safe-area-inset-top))'),
+    'the unavailable state holds the same corner',
+  );
   assert.ok(ruleFor(mobile, ':root[data-layout="mobile"] .viewcube__home').includes('width: 44px'), 'a 44px Home touch target');
   const theme = ruleFor(mobile, ':root[data-layout="mobile"] .navdock__theme .ui-icon-button');
   assert.ok(theme.includes('width: 44px') && theme.includes('height: 44px'), 'the theme switch is a 44px target in the card head');

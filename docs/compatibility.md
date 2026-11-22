@@ -284,7 +284,7 @@ Windows/macOS/Android 仅编译。
 | `SAVE` / `SAVEAS` / `QSAVE` | **只写原生 `.ymodel`**，默认名 `<stem>.ymodel`，选择器只给 `*.ymodel` | 无归档适配器的载体在**打开选择器之前**就以 `unsupported-runtime: ymodel` 失败（不弹框、不写盘、不静默退回 DXF） |
 | `EXPORT` | 真命令（不再是 `PLOT` 别名）；选择器含 dxf/dwg/stl/obj/ply/off/coff/ifc/skp/glb/gltf，**目标扩展名决定写出器** | `PLOT`/`PRINT` 仍是矢量 SVG/PDF，行为不变；`export.step|dgn|rvt.not_implemented` 仍按名拒绝 |
 | 覆盖源文件 | **允许**（不再预填 `<stem>-export.dwg`、不再弹 DWG 确认框、不再有 `save.refused_source_path` 拦截） | 安全性由原子写的 `.bak` 兜底（Linux `atomic_replace` 对所有 `write_atomic` 写出生效，已有契约测试断言旧字节在 `.bak` 里）；没有原子替换能力的载体必须显式说"没有备份"，不得假装有 |
-| 打开提示 | `cad_status.openedSource`（仅 `spec = reverse_engineered` 时出现），非模态可关闭横幅 | 四个逆向连接器：DWG、DGN、SKP、RVT（`SpecVisibility` + `ExportCapability.experimental` 为唯一来源）；DXF/STEP/IFC/glTF/网格格式为公开规范，不提示；`.ymodel` 与 New/Close 清除该字段 |
+| 打开提示 | `cad_status.openedSource`（仅 `spec = reverse_engineered` 时出现），非模态横幅；**“知道了”只关本次**，**“不再提示”写宿主 `formatNoticeEnabled=false` 并在读回确认为 `false` 后才关闭** | 四个逆向连接器：DWG、DGN、SKP、RVT（`SpecVisibility` + `ExportCapability.experimental` 为唯一来源）；**全局开关**（Options → 用户页）关闭 = 对四种格式全部静默，重新打开 = 恢复所有提示（无按格式记录）；持久化为各载体 `preference.json` 的**根级布尔**（默认 `true`；Linux/Windows/macOS/Android 落盘，Web/X11 `dom-canvas` 是内存态、刷新后回到默认）；写入未被宿主读回确认时横幅保留并显示 `role="alert"` 原因，**不假关闭**；DXF/STEP/IFC/glTF/网格格式为公开规范，不提示；`.ymodel` 与 New/Close 清除该字段 |
 
 横幅文案按格式分开（`open.notice.detail.{dwg,dgn,skp,rvt}`），并如实说明回存能力：DWG/SKP 写出为实验性，
 DGN/RVT 无写出器。**不阻止打开**，也不在保存时重复弹窗。
@@ -1138,7 +1138,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
   Windows/macOS/Android/Web 运行时 **NOT VERIFIED**。Web/`dom-canvas` 仍是 2D-only
   （`hostProfile.orbit=false`、`standardViews: []`），不套用这套 3D 默认。
 - **方位球（2026-11-22）**：ViewCube 从 56px 导航列移到绘图区独立浮层（桌面右上、列左侧；
-  紧凑布局左上），渲染为不透明球面 + 六个方向帽 + 网格；`--navrail-w` 仍为 **56px**，
+  **紧凑布局同为右上**，让开右上角导航卡），渲染为不透明球面 + 六个方向帽 + 网格；`--navrail-w` 仍为 **56px**，
   导航列宽度与 CAD 分区矩形不变。点击方向帽 / Home 仍走 `cad_standard_view`，拖动仍走
   `cad_orbit`；sr-only 六键、admission、可见性门禁不变。**证据**：`apps/desktop-ui`
   契约测试 + Vite build；真实 GUI/像素 **NOT VERIFIED**。
@@ -1365,6 +1365,14 @@ Ctrl+滚轮。`interaction.leftDragPans`（默认 false，Options → Drafting�
 五行可编辑（`enum`/`number`/`text` 编辑器按 `kind` 选，值语法与写侧一致），提交走
 `cad_set_selected_property`（本地暂存 → Enter/失焦/下拉即提交，拒绝则回滚并显示 i18n 文案、
 code 只进 `title`）；`Ctrl+1` 与命令行 `PROPERTIES` 均可开关（Chrome 本地命令，**不进** Rust 路由）。
+**2026-11-22 自适应宽度与紧凑布局**：桌面打开宽度 = `clamp(round(绘图区宽 × 0.38), 300, min(560, 绘图区宽))`，
+拖拽/键盘上限 = `min(绘图区宽, 720)`（下限仍 280；永不超出实测绘图区），workspace preset 范围同步放宽到
+[280, 720]；宽度仍是 `PaletteWindow` 的 absolute overlay 内联 style，不改 CAD 分区矩形。紧凑布局
+（≤1024px）不再拒绝属性面板：`PROPERTIES`/`QUICKPROPERTIES`、`Ctrl+1` 与抽屉入口打开**全宽底部抽屉**
+（`MobilePropertiesSheet`，同一个 `PropertiesDock`/编辑状态机，`variant="floating"`），backdrop 或头部
+关闭按钮回到同一个 `propertiesOpen`；图层面板与其它 docked palette 仍按 `mobile.refusal.docked_panel`
+拒绝。运行时、真机、像素 **NOT VERIFIED**（仅契约测试 + Vite build）。
+
 **选项弹窗（2026-10-22）**：独立弹窗（ADR-0021），五个页签、12 个写键 + 语言 + 只读字体目录；
 Apply/OK/Cancel 为 AutoCAD 语义（本地暂存、只发 diff、写失败标字段）；入口三处（File 页、
 `OPTIONS` 命令行拦截、状态栏设置按钮）。**拾取框/孔径**：`view.pickbox.sizePixels`(1..=50, 默认 3；
@@ -1774,7 +1782,7 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 | `HELP` / `CLASSICINSERT` / `CLASSICGROUP` | **部分实现（具名拒绝）**：`help.unsupported` / `classicinsert.unsupported` / `classicgroup.unsupported` | 不写库/不升修订/不入历史 |
 | `FILETAB` / `FILETABCLOSE` / `HIDEPALETTES` / `SHOWPALETTES` / `RIBBONCLOSE` / `GOTOSTART` | **部分实现（具名拒绝）**：窗口/选项板/功能区/开始页 chrome 由宿主负责 | 同上 |
 | `TRANSPARENCY` | **部分实现（具名拒绝）**：`transparency.unsupported: image transparency is not modeled` | 同上 |
-| `DSETTINGS` / `QUICKPROPERTIES` / `CLASSICLAYER` / `COMMANDLINE` / `COMMANDLINEHIDE` | **部分实现（chrome 本地选择子）**：分别打开 Options / 特性面板 / 图层面板，或显示/隐藏命令行 | 不读写图纸；紧凑布局对特性/图层面板给出既有拒绝句 |
+| `DSETTINGS` / `QUICKPROPERTIES` / `CLASSICLAYER` / `COMMANDLINE` / `COMMANDLINEHIDE` | **部分实现（chrome 本地选择子）**：分别打开 Options / 特性面板 / 图层面板，或显示/隐藏命令行 | 不读写图纸；紧凑布局下**特性面板改为全宽底部抽屉**（不再拒绝），**图层面板**仍给既有拒绝句 |
 
 ### 2026-11-09 Wave 11 扩展命令（3D/网格/曲面拒绝）
 

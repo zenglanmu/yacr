@@ -91,7 +91,8 @@ test('the chrome-local selectors open the existing surfaces', () => {
   assert.deepEqual(localSelectorFor('DSETTINGS', 'desktop'), { kind: 'options' });
   assert.deepEqual(localSelectorFor('DSETTINGS', 'mobile'), { kind: 'options' });
   assert.deepEqual(localSelectorFor('QUICKPROPERTIES', 'desktop'), { kind: 'properties' });
-  assert.equal(localSelectorFor('QUICKPROPERTIES', 'mobile').kind, 'refused');
+  // The inspector is the palette the compact layout keeps, as its own sheet.
+  assert.deepEqual(localSelectorFor('QUICKPROPERTIES', 'mobile'), { kind: 'properties' });
   assert.deepEqual(localSelectorFor('CLASSICLAYER', 'desktop'), { kind: 'layers' });
   assert.equal(localSelectorFor('CLASSICLAYER', 'mobile').kind, 'refused');
   assert.deepEqual(localSelectorFor('COMMANDLINE', 'desktop'), { kind: 'commandLine', value: true });

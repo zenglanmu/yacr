@@ -7,18 +7,22 @@
 //
 // Two deliberate reductions, both of them honesty rules rather than styling:
 //
-//   * **No desktop palettes.** The mobile layout never renders the 300px
-//     palette windows (`Workspace`'s palette layer and the nav rail are hidden by
-//     CSS, and no mobile surface re-opens them), so the drawer asks `offeredPanels` with
+//   * **No desktop palette windows.** The mobile layout never renders the 300px
+//     palette windows (`Workspace`'s palette layer is hidden by CSS and no mobile
+//     surface re-opens it), so the drawer asks `offeredPanels` with
 //     `palettesAvailable: false`. That is the exact rule a `dom-canvas` carrier
 //     already uses: a toggle for a panel that is never rendered is a dead
 //     affordance, so it is dropped with the panel instead of being shown.
+//     **One exemption:** the properties inspector has a compact surface of its
+//     own (the bottom sheet `MobilePropertiesSheet` mounts), so its entry is
+//     passed through as a sheet action and stays tappable. `fileinfo`,
+//     `diagnostics` and the layer run have no compact surface and stay dropped.
 //   * **No chrome-mode switches.** `cleanScreen` and `commandLine` collapse
 //     desktop chrome regions. The mobile layout has no ribbon band, no status
 //     bar and no docking, and its top bar is the only way back to the menu, so
 //     neither switch has an effect worth offering. They are dropped here only;
 //     the desktop ribbon keeps both.
-import { RIBBON_TABS, SHELL_ACTIONS, offeredItems, offeredPanels, ribbonTab } from '../ribbon/ribbon-model.ts';
+import { RIBBON_TABS, SHEET_PALETTE_ACTIONS, SHELL_ACTIONS, offeredItems, offeredPanels, ribbonTab } from '../ribbon/ribbon-model.ts';
 import type { RibbonItem, RibbonTab } from '../ribbon/ribbon-model.ts';
 
 /**
@@ -27,8 +31,8 @@ import type { RibbonItem, RibbonTab } from '../ribbon/ribbon-model.ts';
  * Both are chrome-collapse switches with nothing to collapse on a phone (see the
  * module comment). Every other shell action (`about`, `options`, `fileinfo`,
  * `diagnostics`, `properties`, `language`) stays in the drawer and keeps its
- * desktop meaning — `fileinfo`/`diagnostics`/`properties` are removed by the
- * palette rule above, not here.
+ * desktop meaning — `fileinfo`/`diagnostics` are removed by the palette rule
+ * above, while `properties` survives it as a sheet action.
  */
 export const MOBILE_HIDDEN_ACTIONS: readonly string[] = Object.freeze([
   SHELL_ACTIONS.cleanScreen,
@@ -73,7 +77,8 @@ function mobileItem(item: RibbonItem): boolean {
  * `palettesAvailable` is the same carrier flag the band passes to
  * `offeredPanels`; the drawer passes `false` because the compact layout never
  * renders the desktop palette windows, whatever the host reports (see the module
- * comment).
+ * comment). [`SHEET_PALETTE_ACTIONS`] is the one exemption: the properties
+ * inspector is a compact sheet here, so its entry is not dropped.
  *
  * A panel that loses every item is dropped whole (title included), exactly like
  * `offeredPanels` drops a palette panel on a carrier that has no palette: a
@@ -81,8 +86,8 @@ function mobileItem(item: RibbonItem): boolean {
  */
 export function mobileRibbonSectionsFor(tab: RibbonTab, palettesAvailable = false): MobileRibbonSection[] {
   const sections: MobileRibbonSection[] = [];
-  for (const panel of offeredPanels(tab.panels, palettesAvailable)) {
-    const items = offeredItems(panel.items, palettesAvailable).filter(mobileItem);
+  for (const panel of offeredPanels(tab.panels, palettesAvailable, SHEET_PALETTE_ACTIONS)) {
+    const items = offeredItems(panel.items, palettesAvailable, SHEET_PALETTE_ACTIONS).filter(mobileItem);
     if (items.length > 0) sections.push({ id: panel.id, titleKey: panel.titleKey, items });
   }
   return sections;

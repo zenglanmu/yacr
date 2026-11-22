@@ -6,11 +6,17 @@
 // `PropertiesPalette`. The stale panel is cleared on that fallback, so simply
 // reselecting the same entity does not resurrect a panel the user never asked
 // for again — `PROPERTIES` is the one request path.
+//
+// The dock is placement-agnostic: `PaletteWindow` wraps it on the desktop band and
+// `MobilePropertiesSheet` mounts it as the compact layout's bottom sheet. Both
+// children therefore receive the same `variant`, so the sheet's surface, head and
+// dialog roles are chosen in one place instead of being re-derived here.
 import React, { useEffect } from 'react';
 import { useShell } from '../context.ts';
 import { clearPluginPanel, usePluginPanel } from '../plugins/host.ts';
 import { PluginPropertiesPalette } from './PluginPropertiesPalette.tsx';
 import { PropertiesPalette } from './PropertiesPalette.tsx';
+import type { PropertiesPaletteVariant } from './PropertiesPalette.tsx';
 import type { CadSelection } from '../cad/cad-status.ts';
 
 /** The live single-selection provenance handle, or `null` when unavailable. */
@@ -23,7 +29,12 @@ function selectedHandle(selection: CadSelection | null): string | null {
   return row && !row.mixed && typeof row.value === 'string' ? row.value.toUpperCase() : null;
 }
 
-export function PropertiesDock() {
+export interface PropertiesDockProps {
+  /** The desktop palette window, or the compact bottom sheet. */
+  readonly variant?: PropertiesPaletteVariant;
+}
+
+export function PropertiesDock({ variant = 'window' }: PropertiesDockProps) {
   const shell = useShell();
   const panel = usePluginPanel();
   const selection = (shell.status?.selection ?? null) as CadSelection | null;
@@ -40,6 +51,7 @@ export function PropertiesDock() {
     return (
       <PluginPropertiesPalette
         panel={panel}
+        variant={variant}
         onClose={() => {
           clearPluginPanel();
           shell.runCommand('PROPERTIESCLOSE');
@@ -48,5 +60,5 @@ export function PropertiesDock() {
       />
     );
   }
-  return <PropertiesPalette />;
+  return <PropertiesPalette variant={variant} />;
 }

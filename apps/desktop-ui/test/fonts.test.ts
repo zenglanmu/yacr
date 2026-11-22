@@ -53,13 +53,15 @@ test('the selector is one local word, case-insensitive', () => {
   assert.equal(isFontsCommand(null), false);
 });
 
-test('FONTS opens the panel on both layouts while the desktop palette pair is refused on mobile', () => {
+test('FONTS and PROPERTIES open a panel on both layouts while LAYER is refused on mobile', () => {
   assert.deepEqual(localSelectorFor('FONTS', 'desktop'), { kind: 'fonts' });
   assert.deepEqual(localSelectorFor('fonts', 'mobile'), { kind: 'fonts' });
   assert.deepEqual(localSelectorFor('RESOURCES', 'mobile'), { kind: 'resources' });
   assert.deepEqual(localSelectorFor('LAYER', 'desktop'), { kind: 'layers' });
   assert.deepEqual(localSelectorFor('LAYER', 'mobile'), { kind: 'refused', panelKey: 'layers.panel' });
-  assert.deepEqual(localSelectorFor('PROPERTIES', 'mobile'), { kind: 'refused', panelKey: 'properties.panel' });
+  // The inspector is the palette the compact layout keeps (as a bottom sheet).
+  assert.deepEqual(localSelectorFor('PROPERTIES', 'mobile'), { kind: 'properties' });
+  assert.deepEqual(localSelectorFor('PROPERTIES', 'desktop'), { kind: 'properties' });
   assert.equal(localSelectorFor('LINE', 'desktop'), null);
 });
 

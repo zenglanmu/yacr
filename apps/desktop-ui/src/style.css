@@ -2809,8 +2809,9 @@ button, input, select { font: inherit; color: inherit; }
    cards can never fight and the portalled dialog layers (60/62) still paint
    above it. The tone stays quiet on purpose: the accent left rule carries the
    caution the way the GPU-fallback and experimental-DWG cards do, and the copy
-   does the rest. This is information about a format, not a failed open, so no
-   danger red anywhere in the card. */
+   does the rest. This is information about a format, not a failed open, so the
+   card itself carries no danger red - only the one line that reports a refused
+   setting write does, because that *is* a failure. */
 .format-notice-layer {
   position: absolute;
   inset: 0 var(--navrail-w) 0 0;
@@ -2825,7 +2826,8 @@ button, input, select { font: inherit; color: inherit; }
   grid-template-columns: auto minmax(0, 1fr);
   grid-template-areas:
     "mark content"
-    "actions actions";
+    "actions actions"
+    "alert alert";
   align-items: start;
   gap: 9px 10px;
   /* Wider than the update banner: this card carries the explanation, the
@@ -2881,6 +2883,25 @@ button, input, select { font: inherit; color: inherit; }
   padding-top: 2px;
 }
 .format-notice__actions .ui-button { min-height: 24px; }
+/* The quiet second answer is a text button: "Got it" keeps the chip surface, so
+   the card still has one obvious default. While the preference write is in
+   flight both buttons are disabled - a second press would queue a duplicate
+   write - and the busy one reads as busy rather than as broken. */
+.format-notice__actions .ui-button[aria-busy="true"] {
+  color: var(--text-disabled);
+  cursor: progress;
+  opacity: .7;
+}
+/* The one refusal this card can hit: "don't show again" was not saved. The card
+   and its copy stay exactly as they were - nothing pretends the preference
+   changed - and this line, announced as an `alert`, is the reason. */
+.format-notice__alert {
+  grid-area: alert;
+  margin: 0;
+  color: var(--danger);
+  font-size: 11px; line-height: 1.4;
+  overflow-wrap: anywhere;
+}
 /* Compact layout: the same single React tree, full-width-ish card above the
    command bar. The command bar already owns the bottom safe-area inset, so this
    card only respects the left/right cutouts. `data-layout` is the one breakpoint
@@ -2896,12 +2917,23 @@ button, input, select { font: inherit; color: inherit; }
 }
 :root[data-layout="mobile"] .format-notice__title { font-size: 13px; }
 :root[data-layout="mobile"] .format-notice__body { font-size: 12px; }
-/* The dismiss control is a 44px touch target that fills the card's width. */
-:root[data-layout="mobile"] .format-notice__actions .ui-button {
-  width: 100%;
-  height: 44px;
-  justify-content: center;
+/* Both answers are touch targets in one row, exactly like the update banner's
+   Later/Skip row, so the card grows by no extra line. `min-height`/wrapping
+   rather than a fixed height: "Don't show again" is a long label and must wrap
+   inside its half instead of overflowing the card. */
+:root[data-layout="mobile"] .format-notice__actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
+:root[data-layout="mobile"] .format-notice__actions .ui-button {
+  height: auto;
+  min-height: 44px;
+  padding: 6px 8px;
+  justify-content: center;
+  white-space: normal;
+  text-align: center;
+}
+:root[data-layout="mobile"] .format-notice__alert { font-size: 12px; }
 
 /* CAD shortcut menu ------------------------------------------------------- */
 /* The right-click menu (the one in-DOM overlay `ContextMenu.jsx` renders). It

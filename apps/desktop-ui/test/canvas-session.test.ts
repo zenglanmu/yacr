@@ -291,8 +291,10 @@ test('the palettes are what the carrier reports, not what it is called', async (
   assert.ok(workspace.includes('const showDiagnostics = palettesAvailable && Boolean(shell.diagnosticsOpen);'));
   // Both panels render from the gated flags, so no empty panel is possible. They
   // are floating windows now: the gate wraps a shared `PaletteWindow`, and the
-  // palette itself is never mounted outside that wrapper.
-  assert.match(workspace, /\{showProperties \? \(\s*<PaletteWindow windowKey="properties"[^>]*>\s*<PropertiesDock \/>\s*<\/PaletteWindow>\s*\) : null\}/);
+  // palette itself is never mounted outside that wrapper. The properties window
+  // is additionally desktop-only: the compact layout mounts the same dock as its
+  // bottom sheet, so the hidden layer must not mount a second instance.
+  assert.match(workspace, /\{showProperties && !shell\.mobile \? \(\s*<PaletteWindow windowKey="properties"[^>]*>\s*<PropertiesDock \/>\s*<\/PaletteWindow>\s*\) : null\}/);
   assert.match(workspace, /\{showFileInfo \? \(\s*<PaletteWindow windowKey="fileinfo"[^>]*>\s*<FileInfoPalette \/>\s*<\/PaletteWindow>\s*\) : null\}/);
   assert.match(workspace, /\{showDiagnostics \? \(\s*<PaletteWindow windowKey="diagnostics"[^>]*>\s*<DiagnosticsPalette \/>\s*<\/PaletteWindow>\s*\) : null\}/);
   assert.ok(!workspace.includes('{shell.fileInfoOpen ?'));

@@ -3,9 +3,11 @@
 //
 // It deliberately reuses the *same* surface as `PropertiesPalette`: the same
 // `.palette` / `.properties__*` skeleton and the same two-column rows, so it is
-// wrapped by the same `PaletteWindow` and inherits the one drag/resize/placement
-// behaviour. The plugin supplies only group/row keys and verbatim values; this
-// file owns the layout, the i18n lookup and the fallbacks.
+// wrapped by the same `PaletteWindow` on the desktop band and by the same compact
+// sheet (`variant="floating"`, see `MobilePropertiesSheet`) on a phone, and it
+// inherits the one drag/resize/placement behaviour. The plugin supplies only
+// group/row keys and verbatim values; this file owns the layout, the i18n lookup
+// and the fallbacks.
 //
 // Everything here is display-only. There is no input, no label editor and no
 // hover state that could read as "editable": in this ADR's scope every vendor
@@ -18,6 +20,7 @@ import { Button } from './primitives.tsx';
 import { useI18n } from '../context.ts';
 import type { Translator } from '../i18n.ts';
 import type { PluginPropertyPanel } from '../plugins/types.ts';
+import type { PropertiesPaletteVariant } from './PropertiesPalette.tsx';
 
 export interface PluginPropertiesPaletteProps {
   /** The provider's panel descriptor; already validated by the host. */
@@ -26,6 +29,8 @@ export interface PluginPropertiesPaletteProps {
   readonly onClose: () => void;
   /** Reopen the built-in `PropertiesPalette` for the same selection. */
   readonly onShowDefault: () => void;
+  /** The desktop window, or the compact bottom sheet (same sheet frame). */
+  readonly variant?: PropertiesPaletteVariant;
 }
 
 /**
@@ -53,16 +58,21 @@ function rowLabel(key: string, t: Translator): string {
   return label === catalogKey ? t('properties.vendor.unknown_key', { key }) : label;
 }
 
-export function PluginPropertiesPalette({ panel, onClose, onShowDefault }: PluginPropertiesPaletteProps) {
+export function PluginPropertiesPalette({ panel, onClose, onShowDefault, variant = 'window' }: PluginPropertiesPaletteProps) {
   const { t } = useI18n();
   // A group with no rows is not a section: skipping it keeps the panel honest
   // instead of printing an empty heading the plugin did not describe.
   const groups = panel.groups.filter(group => group.rows.length > 0);
   const handle = panel.handle === '' ? '\u2014' : panel.handle;
+  const floating = variant === 'floating';
   return (
     <section
-      className="palette properties plugin-properties"
+      className={[
+        'palette', 'properties', 'plugin-properties', floating ? 'properties--floating' : '',
+      ].filter(Boolean).join(' ')}
       aria-label={t('properties.vendor.subtitle', { kind: kindLabel(panel.kind, t) })}
+      role={floating ? 'dialog' : undefined}
+      aria-modal={floating ? true : undefined}
     >
       <header className="palette__head plugin-properties__head">
         <h2 className="plugin-properties__title">

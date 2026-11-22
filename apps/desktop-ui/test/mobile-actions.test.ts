@@ -3,12 +3,11 @@
 // Three defects are locked here, none of them a screenshot:
 //
 //   * a chrome shortcut must mean something in the layout that receives it: on
-//     mobile it either opens the compact equivalent (the history sheet) or is
-//     not claimed at all, and the properties palette — which the compact layout
-//     never renders — is refused in words;
-//   * a typed `PROPERTIES` / `LAYER` is a desktop-palette selector, so the same
-//     rule applies: open the floating palette on desktop, refuse with the one
-//     catalog sentence on mobile (never flip a flag that paints nothing);
+//     mobile it either opens the compact equivalent (the history sheet, the
+//     properties sheet) or is not claimed at all;
+//   * a typed `PROPERTIES` opens the inspector on **both** layouts (window or
+//     bottom sheet) while `LAYER` — the palette with no compact surface — is
+//     refused with the one catalog sentence, never a flag that paints nothing;
 //   * `data-layout` has exactly one writer (the hook, on the document element),
 //     and every compact rule keys on `:root[data-layout="mobile"]`;
 //   * the model/layout strip that the drawer does not inherit from the desktop
@@ -17,6 +16,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DOCKED_PANEL_REFUSAL_KEY, dockedPaletteOpenable, shortcutAction } from '../src/layout/layout-surfaces.ts';
+import { localSelectorFor } from '../src/commands/local-selectors.ts';
 import { readCatalog, readMobileCss, readModule } from './helpers.ts';
 
 test('the desktop layout keeps all four chrome shortcuts', () => {
@@ -28,9 +28,10 @@ test('the desktop layout keeps all four chrome shortcuts', () => {
   assert.equal(shortcutAction('desktop', 'history', { textStep: true }), 'toggle-history');
 });
 
-test('the compact layout never claims a shortcut whose surface it does not render', () => {
-  // The palette layer is hidden, so the properties key is refused in words, not ignored.
-  assert.equal(shortcutAction('mobile', 'properties'), 'refuse-docked-panel');
+test('the compact layout claims exactly the shortcuts whose surface it renders', () => {
+  // The properties inspector has a compact surface of its own (the bottom sheet),
+  // so the chord toggles it there instead of being refused.
+  assert.equal(shortcutAction('mobile', 'properties'), 'toggle-properties');
   // There is no clean screen to toggle and no docked command line to hide: the
   // mobile bar's reveal belongs to its floating trigger and the must-see rule
   // (`layout/mobile-commandbar.ts`), not to a chrome chord. The shell claims
@@ -44,7 +45,7 @@ test('the compact layout never claims a shortcut whose surface it does not rende
   assert.equal(shortcutAction('mobile', 'history', { textStep: true }), 'none');
 });
 
-test('only the desktop layout renders the desktop palettes', () => {
+test('only the desktop layout renders the desktop palette layer', () => {
   assert.equal(dockedPaletteOpenable('desktop'), true);
   assert.equal(dockedPaletteOpenable('mobile'), false);
 });
@@ -53,7 +54,8 @@ test('App routes every shortcut through the layout table', async () => {
   const app = await readModule('App.tsx');
   const runner = await readModule('layout/shell-shortcuts.ts');
   assert.ok(runner.includes('shortcutAction(layout, shortcut, { textStep })'), 'the pure table decides');
-  assert.ok(app.includes('createShortcutRunner(layout, textStep, t, {'), 'App uses the one runner');
+  assert.ok(app.includes('createShortcutRunner(layout, textStep, {'), 'App uses the one runner');
+  assert.equal(runner.includes('refuse-docked-panel'), false, 'no chord refuses any more');
   for (const shortcut of ['cleanScreen', 'properties', 'commandLine', 'history']) {
     assert.ok(app.includes(`runShortcut('${shortcut}')`), `${shortcut} is routed, never toggled inline`);
   }
@@ -67,21 +69,61 @@ test('App routes every shortcut through the layout table', async () => {
   }
 });
 
-test('a typed PROPERTIES / LAYER is refused on mobile and opens the palette on desktop', async () => {
+test('PROPERTIES opens the inspector on both layouts; LAYER is the one docked palette still refused', async () => {
   const app = await readModule('App.tsx');
   const selectors = await readModule('commands/local-selectors.ts');
   // Both selectors go through the one chrome-local table.
   assert.ok(app.includes('if (runLocalSelector(text, options.fromInput === true)) return;'));
   assert.ok(selectors.includes('if (isPropertiesCommand(text))'));
   assert.ok(selectors.includes('if (isLayersCommand(text))'));
-  const guardAt = selectors.indexOf('dockedPaletteOpenable(layout)');
-  assert.ok(guardAt > 0, 'the layout check is paired with each desktop palette');
-  assert.ok(selectors.includes('LOCAL_SELECTOR_PANEL_KEYS.properties'));
+  // The inspector is layout-independent: the compact layout mounts the same dock
+  // as its own sheet, so the word opens a real surface on both layouts.
+  assert.deepEqual(localSelectorFor('PROPERTIES', 'mobile'), { kind: 'properties' });
+  assert.deepEqual(localSelectorFor('QUICKPROPERTIES', 'mobile'), { kind: 'properties' });
+  assert.deepEqual(localSelectorFor('PROPERTIES', 'desktop'), { kind: 'properties' });
+  // The layers palette has no compact surface, so it keeps the one refusal.
+  assert.deepEqual(localSelectorFor('LAYER', 'mobile'), { kind: 'refused', panelKey: 'layers.panel' });
+  assert.deepEqual(localSelectorFor('LAYER', 'desktop'), { kind: 'layers' });
+  assert.ok(selectors.includes('dockedPaletteOpenable(layout)'), 'the layer branch still asks the table');
   assert.ok(selectors.includes('LOCAL_SELECTOR_PANEL_KEYS.layers'));
+  assert.equal(selectors.includes('LOCAL_SELECTOR_PANEL_KEYS.properties'), false, 'no properties refusal key survives');
   assert.ok(app.includes('setLayersFocus(value => value + 1)'), 'the desktop LAYER refresh is unchanged');
   // The refusal is the catalog's own sentence, naming the panel that is missing.
   assert.ok(selectors.includes('DOCKED_PANEL_REFUSAL_KEY'), 'the typed path uses the one refusal key');
   assert.ok(selectors.includes('panel: translate(result.panelKey)'), 'and the panel label');
+});
+
+test('the compact layout mounts the same inspector as a sheet, and only once', async () => {
+  const app = await readModule('App.tsx');
+  // One flag, one panel: the sheet is mounted on the compact layout only...
+  assert.ok(app.includes('{mobile && propertiesOpen ? <MobilePropertiesSheet /> : null}'));
+  // ...and the desktop window is gated off there. Without that gate the hidden
+  // `.palette-layer` window would still mount a second `PropertiesDock` (a second
+  // edit state machine and duplicate `properties-value-*` ids) behind the sheet.
+  const workspace = await readModule('components/Workspace.tsx');
+  assert.ok(workspace.includes('{showProperties && !shell.mobile ? ('), 'one instance per layout');
+  const sheet = await readModule('components/MobilePropertiesSheet.tsx');
+  assert.ok(sheet.includes('className="properties-layer"'), 'the sheet layer');
+  assert.ok(sheet.includes('className="properties-layer__backdrop"'), 'a real backdrop button');
+  assert.ok(sheet.includes('<PropertiesDock variant="floating" />'), 'the same dock, sheet placement');
+  assert.ok(sheet.includes('shell.setPropertiesOpen(false)'), 'the backdrop closes the one flag');
+  // The dock owns the variant contract for both of its children.
+  const dock = await readModule('components/PropertiesDock.tsx');
+  assert.ok(dock.includes('readonly variant?: PropertiesPaletteVariant;'));
+  assert.ok(dock.includes('<PropertiesPalette variant={variant} />'));
+  assert.ok(dock.includes('variant={variant}'), 'the vendor panel takes the same placement');
+  // The panel itself only changes its surface and its dialog roles.
+  const palette = await readModule('components/PropertiesPalette.tsx');
+  assert.ok(palette.includes("floating ? 'properties--floating' : ''"));
+  assert.ok(palette.includes("role={floating ? 'dialog' : undefined}"));
+  assert.ok(palette.includes("aria-modal={floating ? true : undefined}"));
+  // The sheet's styling is part of the compact bundle, guarded like every other
+  // compact rule, and the sheet frame is shared with the other sheets.
+  const css = await readMobileCss();
+  assert.ok(css.includes(':root[data-layout="mobile"] .properties-layer'));
+  assert.ok(css.includes(':root[data-layout="mobile"] .properties-layer__backdrop'));
+  assert.ok(css.includes(':root[data-layout="mobile"] .properties--floating'));
+  assert.ok(css.includes(':root[data-layout="mobile"] .properties--floating .palette__head'));
 });
 
 test('the refusal copy is one catalog sentence in both languages', async () => {

@@ -16,7 +16,7 @@
 // shell and the selector read one source through `useSyncExternalStore`. All
 // functions are pure state transitions over frozen rows, which is what the Node
 // contract tests exercise without a DOM.
-import { PALETTE_DEFAULT_WIDTH, PALETTE_MAX_DEFAULT_WIDTH, PALETTE_MIN_WIDTH } from '../layout/palette-window.ts';
+import { PALETTE_DEFAULT_WIDTH, PALETTE_MAX_WIDTH, PALETTE_MIN_WIDTH } from '../layout/palette-window.ts';
 import { DEFAULT_CHROME_VISIBILITY } from './visibility.ts';
 import type { ChromeVisibility } from './visibility.ts';
 import type { Translator } from '../i18n.ts';
@@ -30,8 +30,8 @@ export const DRAFTING_WORKSPACE_NAME_KEY = 'workspace.drafting_annotation';
 /** The narrowest panel width a preset may capture (the palette store's own bound). */
 export const WORKSPACE_PANEL_MIN_WIDTH = PALETTE_MIN_WIDTH;
 
-/** The widest panel width a preset may capture (the responsive default's ceiling). */
-export const WORKSPACE_PANEL_MAX_WIDTH = PALETTE_MAX_DEFAULT_WIDTH;
+/** The widest panel width a preset may capture (the palette store's resize ceiling). */
+export const WORKSPACE_PANEL_MAX_WIDTH = PALETTE_MAX_WIDTH;
 
 /** One workspace preset. */
 export interface WorkspacePreset {
@@ -119,7 +119,7 @@ export function normalizeWorkspaceName(name: unknown): string {
 export function clampWorkspaceWidth(width: unknown): number {
   const value = typeof width === 'number' ? width : Number(width);
   if (!Number.isFinite(value)) return PALETTE_DEFAULT_WIDTH;
-  return Math.max(PALETTE_MIN_WIDTH, Math.min(PALETTE_MAX_DEFAULT_WIDTH, Math.round(value)));
+  return Math.max(PALETTE_MIN_WIDTH, Math.min(WORKSPACE_PANEL_MAX_WIDTH, Math.round(value)));
 }
 
 function nameTaken(name: string, exceptId: string | null = null): boolean {

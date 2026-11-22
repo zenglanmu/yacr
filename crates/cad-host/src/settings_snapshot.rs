@@ -76,6 +76,10 @@ pub struct HostSettings {
     /// ViewCube visibility in 3D views (root `viewCubeIn3d` leaf, default
     /// `true`).
     pub view_cube_in_3d: bool,
+    /// Reverse-engineered-format notice (root `formatNoticeEnabled` leaf, default
+    /// `true`): `true` shows the post-open hint for reverse-engineered formats,
+    /// `false` silences it. The React shell is the only consumer.
+    pub format_notice_enabled: bool,
     /// Drawing unit token (`ui.units.drawingUnit`): `drawing` (default), `mm`,
     /// `cm`, `m`, `in` or `ft`.
     pub drawing_unit: String,
@@ -226,9 +230,9 @@ impl HostCore {
             aperture_size,
             gpu_budget_percent,
             wgpu_backend: normalize_wgpu_backend(self.wgpu_backend.borrow().as_deref()).to_string(),
-            // The five host-owned appearance/navigation leaves live outside the
-            // `ViewerConfig` schema; the documented defaults apply when the user
-            // never chose one.
+            // The six host-owned appearance/navigation/notice leaves live outside
+            // the `ViewerConfig` schema; the documented defaults apply when the
+            // user never chose one.
             theme: {
                 let preferences = self.root_preferences.borrow();
                 preferences.theme().to_string()
@@ -237,6 +241,7 @@ impl HostCore {
             navvcube_display: self.root_preferences.borrow().navvcube_display(),
             view_cube_in_2d: self.root_preferences.borrow().view_cube_in_2d(),
             view_cube_in_3d: self.root_preferences.borrow().view_cube_in_3d(),
+            format_notice_enabled: self.root_preferences.borrow().format_notice_enabled(),
             drawing_unit,
             display_unit,
             unit_precision,

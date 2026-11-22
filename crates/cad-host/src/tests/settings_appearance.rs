@@ -1,5 +1,6 @@
-//! The five host-owned appearance/navigation preferences: `theme`,
-//! `navbarVisible`, `navvcubeDisplay`, `viewCubeIn2d`, `viewCubeIn3d`.
+//! The six host-owned appearance/navigation/notice preferences: `theme`,
+//! `navbarVisible`, `navvcubeDisplay`, `viewCubeIn2d`, `viewCubeIn3d` and
+//! `formatNoticeEnabled`.
 //!
 //! They are root-level `preference.json` leaves (like `wgpu_backend`), not
 //! `ViewerConfig` paths, so these contracts cover the closed key table, the
@@ -36,10 +37,10 @@ fn theme_background(core: &HostCore) -> (String, String) {
 }
 
 #[test]
-fn the_five_appearance_keys_are_in_the_closed_table() {
+fn the_six_appearance_keys_are_in_the_closed_table() {
     assert_eq!(
         CadSettingKey::ALL.len(),
-        31,
+        32,
         "one writable key per contract"
     );
     for (key, wire) in [
@@ -48,6 +49,7 @@ fn the_five_appearance_keys_are_in_the_closed_table() {
         (CadSettingKey::NavvcubeDisplay, "navvcubeDisplay"),
         (CadSettingKey::ViewCubeIn2d, "viewCubeIn2d"),
         (CadSettingKey::ViewCubeIn3d, "viewCubeIn3d"),
+        (CadSettingKey::FormatNoticeEnabled, "formatNoticeEnabled"),
     ] {
         assert_eq!(
             CadSettingKey::ALL
@@ -80,6 +82,10 @@ fn the_appearance_defaults_are_the_documented_host_values() {
     assert_eq!(settings.navvcube_display, 3, "both view classes visible");
     assert!(settings.view_cube_in_2d);
     assert!(settings.view_cube_in_3d);
+    assert!(
+        settings.format_notice_enabled,
+        "the reverse-engineering notice is on by default"
+    );
     // Reading never writes a preference.
     assert!(!HOST_ALLOWED_PATHS_JSON.contains("navbarVisible"));
 }
@@ -237,6 +243,11 @@ fn the_appearance_leaves_persist_at_the_preference_root_and_survive_other_writes
         .unwrap();
     core.apply_setting(CadSettingKey::Theme, CadSettingValue::Text("light".into()))
         .unwrap();
+    core.apply_setting(
+        CadSettingKey::FormatNoticeEnabled,
+        CadSettingValue::Bool(false),
+    )
+    .unwrap();
 
     let written = persisted(&config).expect("each write persists");
     for leaf in [
@@ -245,12 +256,14 @@ fn the_appearance_leaves_persist_at_the_preference_root_and_survive_other_writes
         r#""viewCubeIn2d":false"#,
         r#""viewCubeIn3d":false"#,
         r#""theme":"light""#,
+        r#""formatNoticeEnabled":false"#,
     ] {
         assert!(written.contains(leaf), "{leaf} missing: {written}");
     }
     // Root leaves, not nested viewer paths.
     let document: serde_json::Value = serde_json::from_str(&written).expect("valid JSON");
     assert_eq!(document["navbarVisible"], serde_json::json!(false));
+    assert_eq!(document["formatNoticeEnabled"], serde_json::json!(false));
     assert!(document
         .get("ui")
         .is_none_or(|ui| ui.get("theme").is_none()));
@@ -263,6 +276,7 @@ fn the_appearance_leaves_persist_at_the_preference_root_and_survive_other_writes
         r#""navbarVisible":false"#,
         r#""navvcubeDisplay":2"#,
         r#""theme":"light""#,
+        r#""formatNoticeEnabled":false"#,
     ] {
         assert!(written.contains(leaf), "{leaf} dropped: {written}");
     }
@@ -276,6 +290,7 @@ fn the_appearance_leaves_persist_at_the_preference_root_and_survive_other_writes
     assert_eq!(settings.navvcube_display, 2);
     assert!(!settings.view_cube_in_2d);
     assert!(!settings.view_cube_in_3d);
+    assert!(!settings.format_notice_enabled);
     assert_eq!(
         theme_background(&reloaded),
         ("#ffffff".to_string(), "#ffffff".to_string())
@@ -298,6 +313,22 @@ fn malformed_appearance_leaves_fall_back_to_their_defaults() {
         assert_eq!(settings.navvcube_display, 3, "{preference}");
         assert!(settings.view_cube_in_2d, "{preference}");
         assert!(settings.view_cube_in_3d, "{preference}");
+        assert!(settings.format_notice_enabled, "{preference}");
+    }
+}
+
+#[test]
+fn a_malformed_notice_leaf_falls_back_to_the_documented_default() {
+    // A non-boolean `formatNoticeEnabled` is ignored (never coerced), so the
+    // documented `true` default applies instead of a silent `false`.
+    for raw in [r#""yes""#, "1", "null"] {
+        let preference = format!(r#"{{"formatNoticeEnabled":{raw}}}"#);
+        let core = core_with_settings(Rc::new(SettingsConfig::with_preference(&preference)));
+        core.load_startup();
+        assert!(
+            core.settings().format_notice_enabled,
+            "{preference} must fall back to true"
+        );
     }
 }
 
@@ -306,6 +337,11 @@ fn a_clear_removes_the_appearance_leaves() {
     let (core, config) = settings_core();
     core.apply_setting(CadSettingKey::NavbarVisible, CadSettingValue::Bool(false))
         .unwrap();
+    core.apply_setting(
+        CadSettingKey::FormatNoticeEnabled,
+        CadSettingValue::Bool(false),
+    )
+    .unwrap();
     core.apply_setting(CadSettingKey::Theme, CadSettingValue::Text("light".into()))
         .unwrap();
     core.clear_user_preference().unwrap();
@@ -315,6 +351,7 @@ fn a_clear_removes_the_appearance_leaves() {
         "navvcubeDisplay",
         "viewCubeIn2d",
         "viewCubeIn3d",
+        "formatNoticeEnabled",
         "theme",
     ] {
         assert!(
@@ -324,4 +361,8 @@ fn a_clear_removes_the_appearance_leaves() {
     }
     assert_eq!(core.settings().theme, "dark");
     assert!(core.settings().navbar_visible);
+    assert!(
+        core.settings().format_notice_enabled,
+        "a real clear restores the documented notice default"
+    );
 }

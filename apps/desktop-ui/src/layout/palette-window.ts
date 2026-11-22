@@ -28,11 +28,38 @@ export interface PaletteLayerSize {
 /** The width a palette opens at on a narrow drawing: the old 300px dock width. */
 export const PALETTE_DEFAULT_WIDTH = 300;
 
-/** The widest the responsive default may grow to on a wide drawing. */
-export const PALETTE_MAX_DEFAULT_WIDTH = 460;
+/**
+ * The share of the drawing a palette's responsive default asks for.
+ *
+ * A properties row is a label column plus a value well, and 32% of a 1920px
+ * drawing (≈ 590px) never materialised because the ceiling was lower; 38% is
+ * what actually reads as "wider than the old dock" on a wide screen without the
+ * panel eating half the drawing.
+ */
+export const PALETTE_DEFAULT_SHARE = 0.38;
+
+/**
+ * The widest the responsive default may grow to on a wide drawing.
+ *
+ * Wider than the old 460px ceiling: at 38% of a 1440px window the share itself is
+ * already ~530px, and a 560px inspector still leaves two thirds of the drawing
+ * visible. This is the *default's* ceiling only — a user may drag wider
+ * ([`PALETTE_MAX_WIDTH`]).
+ */
+export const PALETTE_MAX_DEFAULT_WIDTH = 560;
 
 /** The narrowest a palette may be resized to. */
 export const PALETTE_MIN_WIDTH = 280;
+
+/**
+ * The absolute resize ceiling, whatever the layer is (and never more than it).
+ *
+ * A dragged or preset width is clamped to `min(layerWidth, PALETTE_MAX_WIDTH)`, so
+ * a very wide drawing cannot produce a 1000px inspector that buries the CAD
+ * partition, and a narrow one still gets the layer's own width. 720 is two 300px
+ * value columns plus their labels: past that a property row is mostly empty space.
+ */
+export const PALETTE_MAX_WIDTH = 720;
 
 /**
  * How much of a window must stay inside the layer while dragging. The header is
@@ -92,16 +119,21 @@ export function cascadeOffset(index = 0): number {
  *
  * A property row needs a readable label column *and* a value well, and the old
  * fixed 300px window was too narrow for both. The default therefore follows the
- * drawing area a little (32% of it), bounded below by the old 300px and above by
- * [`PALETTE_MAX_DEFAULT_WIDTH`]. A missing, zero or non-finite layer keeps the
- * fixed default instead of inventing a size.
+ * drawing area (`PALETTE_DEFAULT_SHARE` of it), bounded below by the old 300px,
+ * above by [`PALETTE_MAX_DEFAULT_WIDTH`] and — so the stored default never asks
+ * for more width than the drawing has — by the layer itself. A missing, zero or
+ * non-finite layer keeps the fixed default instead of inventing a size.
  */
 export function defaultPaletteWidth(layerWidth?: number): number {
   if (typeof layerWidth !== 'number' || !Number.isFinite(layerWidth) || layerWidth <= 0) {
     return PALETTE_DEFAULT_WIDTH;
   }
-  const share = Math.round(layerWidth * 0.32);
-  return Math.max(PALETTE_DEFAULT_WIDTH, Math.min(PALETTE_MAX_DEFAULT_WIDTH, share));
+  const ceiling = Math.min(
+    PALETTE_MAX_DEFAULT_WIDTH,
+    Math.max(PALETTE_MIN_WIDTH, Math.round(layerWidth)),
+  );
+  const share = Math.round(layerWidth * PALETTE_DEFAULT_SHARE);
+  return Math.min(ceiling, Math.max(PALETTE_DEFAULT_WIDTH, share));
 }
 
 /** The default placement of the `index`-th palette: left edge, cascaded down. */
@@ -109,11 +141,19 @@ export function defaultPaletteGeometry(index = 0, layerWidth?: number): PaletteG
   return { left: 0, top: cascadeOffset(index), width: defaultPaletteWidth(layerWidth) };
 }
 
-/** Clamp a width to `[PALETTE_MIN_WIDTH, layerWidth]` (min wins on a tiny layer). */
+/**
+ * Clamp a width to `[PALETTE_MIN_WIDTH, min(layerWidth, PALETTE_MAX_WIDTH)]`.
+ *
+ * The layer is the hard limit: no palette may ask for more width than the drawing
+ * has (min wins on a tiny layer, where the window stays usable and the layer clips
+ * it). [`PALETTE_MAX_WIDTH`] is the design limit on top of that, so a 4K drawing
+ * does not turn a resize drag into a full-screen panel.
+ */
 export function clampWidth(width: number, layerWidth: number): number {
-  const maximum = Number.isFinite(layerWidth)
+  const limit = Number.isFinite(layerWidth)
     ? Math.max(PALETTE_MIN_WIDTH, Math.round(layerWidth))
-    : PALETTE_DEFAULT_WIDTH;
+    : PALETTE_MAX_WIDTH;
+  const maximum = Math.min(limit, PALETTE_MAX_WIDTH);
   const requested = Number.isFinite(width) ? Math.round(width) : PALETTE_DEFAULT_WIDTH;
   return Math.max(PALETTE_MIN_WIDTH, Math.min(requested, maximum));
 }

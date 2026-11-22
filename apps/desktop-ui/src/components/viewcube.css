@@ -7,7 +7,10 @@
  * floating palettes (`10`) and the notice layers. On the desktop the ball sits
  * at the drawing's top-right, offset left of the 56px rail
  * (`right: calc(var(--navrail-w) + 14px)`); the rail keeps its width and its
- * other buttons.
+ * other buttons. The compact layout keeps the same corner and the same idea —
+ * the ball sits left of the dock **card** — with the offset recomputed for the
+ * card's 8px inset and frame (`mobile.css`); the top-left corner belongs to the
+ * floating menu button there.
  *
  * Geometry: a square canvas whose size is owned by `--viewball-size` (112px).
  * `cad/viewcube-canvas.ts` draws an opaque sphere that fills 92 % of that box

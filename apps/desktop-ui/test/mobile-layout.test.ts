@@ -9,11 +9,12 @@
 //   * the drawer's ribbon grouping is the real model minus exactly the items a
 //     phone cannot offer (no docked palettes, no chrome-collapse switches), and
 //     its refusals collapse **by reason key**, not by rendered sentence;
-//   * the compact chrome is minimal: the top bar keeps one control (the menu
-//     button), the drawing's name and the theme switch live in the drawer and the
-//     navigation rail, and the command bar is hidden by default behind a floating
-//     trigger while still auto-revealing for a prompt, a text step, a host failure
-//     or the history sheet;
+//   * the compact chrome is minimal: one **floating** menu button over the
+//     drawing's top-left corner (no top strip takes height from the drawing), the
+//     drawing's name and the theme switch live in the drawer and the navigation
+//     rail, and the command bar is hidden by default behind a floating trigger
+//     while still auto-revealing for a prompt, a text step, a host failure or the
+//     history sheet;
 //   * the app renders the compact regions on mobile only, keeps the desktop
 //     regions gated on it, and hides — rather than unmounts — the docked chrome
 //     inside `<Workspace />`, so a live breakpoint crossing never remounts the
@@ -33,7 +34,7 @@ import {
   MOBILE_HIDDEN_ACTIONS, mobileRibbonDomId, mobileRibbonSections, mobileRibbonTabs, panelRefusalKey, sharedRefusal,
 } from '../src/layout/mobile-ribbon.ts';
 import {
-  PALETTE_ACTIONS, PALETTE_COMMANDS, RIBBON_TABS, SHELL_ACTIONS,
+  PALETTE_ACTIONS, PALETTE_COMMANDS, RIBBON_TABS, SHEET_PALETTE_ACTIONS, SHELL_ACTIONS,
 } from '../src/ribbon/ribbon-model.ts';
 
 test('the layout breakpoint is one constant, and the resolver agrees with it', () => {
@@ -190,12 +191,17 @@ test('the drawer offers the real ribbon model minus the two chrome-collapse swit
     const order = sections.map(section => section.id);
     const expected = tab.panels.map(panel => panel.id).filter(id => order.includes(id));
     assert.deepEqual(order, expected, `${tab.id} keeps its panel order`);
-    // No dead affordance: nothing that opens a docked palette (never rendered on
-    // mobile) and nothing that collapses chrome sizes the drawer does not have.
+    // No dead affordance: nothing that opens a *docked* palette (never rendered on
+    // mobile), nothing that collapses chrome sizes the drawer does not have. The
+    // properties inspector is the one palette action with a compact surface (its
+    // own sheet), so it is the only palette action allowed through — and it must
+    // really be there, or the sheet would have no entry from the drawer.
     for (const section of sections) {
       for (const item of section.items) {
         if (typeof item.action === 'string') {
-          assert.equal(PALETTE_ACTIONS.includes(item.action), false, `${tab.id}: palette action ${item.action}`);
+          if (PALETTE_ACTIONS.includes(item.action)) {
+            assert.ok(SHEET_PALETTE_ACTIONS.includes(item.action), `${tab.id}: ${item.action} has no compact surface`);
+          }
           assert.equal(MOBILE_HIDDEN_ACTIONS.includes(item.action), false, `${tab.id}: hidden action ${item.action}`);
         }
         if (typeof item.command === 'string') {
@@ -207,6 +213,21 @@ test('the drawer offers the real ribbon model minus the two chrome-collapse swit
 
   // The Home tab keeps its tool panels and drops the two palette-only ones.
   assert.deepEqual(mobileRibbonSections('home').map(section => section.id), ['clipboard', 'draw', 'modify', 'properties', 'bim', 'navigate']);
+  // The one palette action with a compact surface is actually reachable there:
+  // the properties entry survives the carrier filter, as an action token (never a
+  // router command).
+  assert.deepEqual([...SHEET_PALETTE_ACTIONS], [SHELL_ACTIONS.properties]);
+  const propertiesEntries = RIBBON_TABS
+    .flatMap(tab => mobileRibbonSections(tab.id).flatMap(section => section.items))
+    .filter(item => item.action === SHELL_ACTIONS.properties);
+  assert.ok(propertiesEntries.length > 0, 'the properties inspector is reachable from the drawer');
+  for (const item of propertiesEntries) assert.equal(item.command, undefined, 'a sheet entry is chrome-local');
+  // Every other palette action is still dropped, whatever panel it lives in: the
+  // drawer keeps no toggle for a window the compact layout cannot render.
+  const drawerItems = RIBBON_TABS.flatMap(tab => mobileRibbonSections(tab.id).flatMap(section => section.items));
+  for (const obsolete of [SHELL_ACTIONS.fileinfo, SHELL_ACTIONS.diagnostics]) {
+    assert.equal(drawerItems.some(item => item.action === obsolete), false, `${obsolete} has no compact surface`);
+  }
   // The File tab keeps both panels: the utilities cluster still offers Audit,
   // the recovery report, About, Options and the direct Plugins page after its
   // palette and chrome switches are gone. Plugins is a dialog entry, so the
@@ -275,7 +296,7 @@ test('App renders the compact regions on mobile only and keeps the desktop regio
   assert.ok(app.includes("const mobile = layout === 'mobile';"));
   assert.equal(app.includes('data-layout={'), false, 'one writer, on the document element');
   // Compact regions.
-  assert.ok(app.includes('<MobileTopBar menuOpen={mobileDrawer.open}'));
+  assert.ok(app.includes('<MobileMenuButton menuOpen={mobileDrawer.open}'));
   assert.ok(app.includes('<MobileRibbonDrawer open={mobileDrawer.open}'));
   assert.ok(app.includes('{mobile ? <MobileCommandSurface /> : commandLineOpen ? <CommandLine /> : null}'));
   // Desktop regions are gated on the compact layout, not rendered alongside it.
@@ -293,21 +314,61 @@ test('App renders the compact regions on mobile only and keeps the desktop regio
   assert.ok(app.includes("setMobileDrawer(state => mobileDrawerNext(state, 'close'));"));
 });
 
-test('the compact regions exist and the top bar is the only control that takes width', async () => {
-  const topbar = await readModule('components/MobileTopBar.tsx');
+test('the compact menu is one floating button: no bar, no reserved height, no second control', async () => {
+  const menu = await readModule('components/MobileMenuButton.tsx');
   // One control: the menu button. The drawing's name moved into the drawer, and
-  // the theme switch moved into the navigation rail, so neither competes with the
-  // drawing for the bar's width.
-  assert.equal((topbar.match(/<button\b/g) ?? []).length, 1, 'exactly one button in the top bar');
-  assert.equal(topbar.includes('mobile-topbar__title'), false, 'no document label in the bar');
-  assert.equal(topbar.includes('documentLabel'), false, 'the bar does not read the document label');
-  assert.equal(topbar.includes('ThemeToggle'), false, 'no theme switch in the bar');
-  assert.ok(topbar.includes('aria-expanded={menuOpen}'));
-  assert.ok(topbar.includes('aria-controls={drawerId}'));
-  assert.ok(topbar.includes('aria-label={t(\'mobile.menu\')}'));
-  assert.ok(topbar.includes('importProgressView(shell.importProgress'), 'the host import strip stays');
-  // The bar still drags the window.
-  assert.ok(topbar.includes('className="mobile-topbar app-region"'));
+  // the theme switch moved into the navigation dock's head, so neither competes
+  // with the drawing for a strip of its height.
+  assert.equal((menu.match(/<button\b/g) ?? []).length, 1, 'exactly one button in the menu region');
+  assert.equal(menu.includes('role="banner"'), false, 'no whole-row banner is announced or rendered');
+  assert.equal(menu.includes('mobile-topbar__title'), false, 'no document label in the button');
+  assert.equal(menu.includes('documentLabel'), false, 'the button does not read the document label');
+  assert.equal(menu.includes('ThemeToggle'), false, 'no theme switch beside the button');
+  assert.ok(menu.includes('aria-expanded={menuOpen}'));
+  assert.ok(menu.includes('aria-controls={drawerId}'));
+  assert.ok(menu.includes('aria-label={t(\'mobile.menu\')}'));
+  assert.ok(menu.includes('importProgressView(shell.importProgress'), 'the host import strip stays');
+  // The wrapper is the button's own anchored box. `.mobile-topbar` stays as the
+  // compact chrome's selector for the web smoke harness and the Android layout log;
+  // it no longer paints a row.
+  assert.ok(menu.includes('className="mobile-topbar app-region"'), 'one anchored region, tagged for metrics');
+
+  const css = await readMobileCss();
+  const rule = selector => {
+    const start = css.indexOf(`${selector} {`);
+    assert.ok(start > 0, `${selector} must exist`);
+    return css.slice(start, css.indexOf('}', start));
+  };
+  // No top strip: the anchor is fixed over the drawing, paints nothing, and is
+  // never wider than the button, so the drawing keeps every pixel around it.
+  const anchor = rule('.mobile-topbar');
+  assert.ok(anchor.includes('position: fixed'), 'it takes no flex height from the drawing');
+  assert.equal(/\bflex:/.test(anchor), false, 'a fixed anchor reserves no flex basis');
+  assert.equal(/min-height/.test(anchor), false, 'no strip height survives');
+  assert.equal(anchor.includes('background'), false, 'nothing is painted behind the button');
+  assert.equal(anchor.includes('border'), false, 'and no divider separates the drawing from a bar');
+  assert.ok(anchor.includes('top: calc(8px + env(safe-area-inset-top))'), 'clear of the cutout');
+  assert.ok(anchor.includes('left: max(8px, env(safe-area-inset-left))'), 'and of the left inset');
+  // The button itself: a 44px target with its own surface, because it now floats
+  // over the drawing instead of over a chrome fill.
+  const button = rule('.mobile-topbar__menu');
+  assert.ok(button.includes('width: 44px') && button.includes('height: 44px'), 'a 44px touch target');
+  assert.ok(button.includes('background: var(--chrome-2)'), 'it carries its own surface');
+  assert.ok(button.includes('box-shadow:'), 'and floats above the drawing');
+  assert.ok(button.includes('border-radius: 999px'), 'round like the other compact floating controls');
+  // The import strip reports on the drawing's own top edge and takes no press.
+  const progress = rule('.mobile-topbar__progress');
+  assert.ok(progress.includes('position: fixed') && progress.includes('pointer-events: none'), 'a report, never a hit area');
+  assert.ok(progress.includes('top: env(safe-area-inset-top, 0px)'), 'pinned below the cutout');
+  // The drawer starts below the button band (8 + 44 + 8), so the button stays
+  // visible and tappable while the drawer is open — the band is the overlay's
+  // padding, not a row in the shell.
+  const layer = rule('.mobile-drawer-layer');
+  assert.ok(
+    layer.includes('padding-top: calc(var(--mobile-menubar-h) + env(safe-area-inset-top))'),
+    'the drawer clears the floating button',
+  );
+  assert.ok(css.includes('--mobile-menubar-h: 60px'), 'one band height, 8 + 44 + 8');
 
   const drawer = await readModule('components/MobileRibbonDrawer.tsx');
   assert.ok(drawer.includes('role="dialog"'));
@@ -315,8 +376,8 @@ test('the compact regions exist and the top bar is the only control that takes w
   assert.ok(drawer.includes('mobileRibbonSections('), 'the real model, reduced for touch');
   assert.ok(drawer.includes('mobileRibbonTabs()'), 'the real tab list');
   assert.ok(drawer.includes('MOBILE_DRAWER_ID'));
-  // The drawer's header carries the label the top bar used to show, one line,
-  // with the full name in `title`.
+  // The drawer's header carries the label the removed strip used to show, one
+  // line, with the full name in `title`.
   assert.ok(drawer.includes("const documentLabel = shell.documentLabel ?? t('start.title');"), 'the label lives here now');
   assert.ok(drawer.includes('className="mobile-drawer__title" title={documentLabel}'), 'one ellipsized line with the full name');
   // Same gating and same dispatch as the band: imported, never re-spelled.
@@ -347,7 +408,7 @@ test('the compact regions exist and the top bar is the only control that takes w
 
 test('no compact component binds the CAD surface or mounts a second session', async () => {
   for (const name of [
-    'components/MobileTopBar.tsx',
+    'components/MobileMenuButton.tsx',
     'components/MobileRibbonDrawer.tsx',
     'components/MobileCommandBar.tsx',
   ]) {
@@ -371,9 +432,12 @@ test('the mobile stylesheets are guarded by the one layout attribute and fit a p
   assert.equal(css.includes('@media'), false, 'the compact bundle must not add a second breakpoint');
   assert.ok(css.includes(':root[data-layout="mobile"] .shell'));
   assert.ok(css.includes('height: 100dvh'), 'the drawing follows the visual viewport');
-  // Safe areas on both bars: the top bar pads the cutout, and the command bar
-  // takes the larger of the platform inset and the host's own variable.
-  assert.ok(css.includes('padding-top: env(safe-area-inset-top)'));
+  // Safe areas on both ends: the floating menu button is inset from the cutout,
+  // and the command bar takes the larger of the platform inset and the host's own
+  // variable. There is no top strip left to pad.
+  assert.ok(css.includes('top: calc(8px + env(safe-area-inset-top))'), 'the menu button clears the cutout');
+  assert.ok(css.includes('left: max(8px, env(safe-area-inset-left))'), 'and the left inset');
+  assert.equal(css.includes('padding-top: env(safe-area-inset-top)'), false, 'no bar-level top padding survives');
   assert.ok(
     css.includes('padding-bottom: calc(8px + max(env(safe-area-inset-bottom, 0px), var(--yacr-safe-bottom, 0px)))'),
     'the command bar honours the host bottom inset',
@@ -385,12 +449,17 @@ test('the mobile stylesheets are guarded by the one layout attribute and fit a p
   assert.ok(css.includes(':root[data-layout="mobile"] .workspace__left'));
   assert.ok(css.includes(':root[data-layout="mobile"] .palette-layer'));
   assert.ok(css.includes(':root[data-layout="mobile"] .navrail'));
+  // The properties inspector is the one palette the compact layout keeps, so its
+  // sheet belongs to the compact bundle (layer, scrim, surface).
+  assert.ok(css.includes(':root[data-layout="mobile"] .properties-layer'));
+  assert.ok(css.includes(':root[data-layout="mobile"] .properties-layer__backdrop'));
+  assert.ok(css.includes(':root[data-layout="mobile"] .properties--floating'));
   // 44px touch targets on the menu button and the command bar controls.
   const menu = css.slice(css.indexOf('.mobile-topbar__menu {'), css.indexOf('.mobile-topbar__menu {') + 400);
   assert.ok(menu.includes('width: 44px') && menu.includes('height: 44px'));
-  // The top bar keeps no styling for the removed label or theme switch.
+  // The removed strip keeps no styling for a label or a theme switch.
   assert.equal(css.includes('.mobile-topbar__title'), false, 'no title rule survives');
-  assert.equal(css.includes('.mobile-topbar .ui-icon-button'), false, 'no theme-switch rule survives in the bar');
+  assert.equal(css.includes('.mobile-topbar .ui-icon-button'), false, 'no theme-switch rule survives beside the button');
   // The sheet is capped near half the drawing and opens upward from the bar.
   assert.ok(css.includes('--mobile-sheet-h: 45dvh'));
   assert.ok(css.includes('bottom: calc(100% + 6px)'));
@@ -573,7 +642,7 @@ test('the compact copy is catalog copy in both languages', async () => {
   assert.deepEqual(Object.keys(zh).sort(), Object.keys(en).sort(), 'the catalogs keep identical key sets');
   // No CJK literal may leak into the compact components: every word is a key.
   for (const name of [
-    'components/MobileTopBar.tsx',
+    'components/MobileMenuButton.tsx',
     'components/MobileRibbonDrawer.tsx',
     'components/MobileCommandBar.tsx',
     'components/MobileCommandBarToggle.tsx',

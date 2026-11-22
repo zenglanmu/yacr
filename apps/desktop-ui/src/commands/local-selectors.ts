@@ -8,15 +8,20 @@
 // paints nothing).
 //
 // `FONTS` is deliberately **not** refused on mobile: the compact layout renders
-// the same panel as a floating sheet, exactly like `RESOURCES`. `ABOUT` opens the
-// same dialog the File tab's About action opens, so it needs no layout either.
+// the same panel as a floating sheet, exactly like `RESOURCES`. `PROPERTIES` and
+// `QUICKPROPERTIES` are the same case for the same reason: the compact layout
+// mounts the properties inspector as its own bottom sheet, so the word opens a
+// real surface there instead of being refused. `ABOUT` opens the same dialog the
+// File tab's About action opens, so it needs no layout either.
 // `CLEANSCREENON` sets the existing clean-screen state, so it needs no layout;
 // `CLEANSCREENOFF` clears that same state and needs no layout either.
-// `PROPERTIESCLOSE` closes the properties window, so it likewise needs no layout:
-// closing a window that is already closed is an idempotent success, not a
-// refusal (unlike `PROPERTIES`, which cannot open on the compact layout).
-// `LAYERCLOSE` closes the layers palette for the same reason, and is resolved
-// right after it: a second close on any layout is still a success.
+// `PROPERTIESCLOSE` closes the properties surface (window or sheet), so it
+// likewise needs no layout: closing a surface that is already closed is an
+// idempotent success, not a refusal.
+// `LAYER`/`CLASSICLAYER` are the remaining docked-palette selectors: the layers
+// palette has **no** compact equivalent, so those two are still refused there in
+// the catalog's words. `LAYERCLOSE` closes the palette for the same reason, and is
+// resolved right after it: a second close on any layout is still a success.
 import { useCallback } from 'react';
 import type { Translator } from '../i18n.ts';
 import type { LayoutMode } from '../layout/layout-mode.ts';
@@ -121,9 +126,8 @@ export type LocalSelectorResult =
   | { readonly kind: 'performanceAnalyzer'; readonly value: boolean }
   | { readonly kind: 'refused'; readonly panelKey: string };
 
-/** The panel labels the layout refusal names. */
+/** The panel labels the layout refusal names (the docked palettes with no sheet). */
 export const LOCAL_SELECTOR_PANEL_KEYS = Object.freeze({
-  properties: 'properties.panel',
   layers: 'layers.panel',
 });
 
@@ -144,15 +148,16 @@ export function toolPalettesTabRefusalKey(tab: string): string | null {
  * line belongs to the router.
  *
  * The order mirrors the old inline branch: dialog selectors first, then the
- * desktop palette windows. `PROPERTIES`/`LAYER` are refused where the palette
- * layer is not rendered; `FONTS`/`RESOURCES` have a compact sheet and are never
- * refused by layout. `ABOUT` opens the existing host-owned dialog and is
- * likewise layout-independent. `CLEANSCREENON` only sets the chrome's own
- * clean-screen state, so it too needs no layout; `CLEANSCREENOFF` clears that
- * same state and is resolved directly after it. `PROPERTIESCLOSE` closes the
- * properties window and is resolved last: it is layout-independent because
- * closing an already-closed window is a valid no-op on every layout;
- * `LAYERCLOSE` closes the layers palette right after it for the same reason.
+ * desktop palette windows. `LAYER`/`CLASSICLAYER` are refused where the palette
+ * layer is not rendered; `FONTS`/`RESOURCES`/`PROPERTIES`/`QUICKPROPERTIES` all
+ * have a compact sheet and are never refused by layout. `ABOUT` opens the
+ * existing host-owned dialog and is likewise layout-independent. `CLEANSCREENON`
+ * only sets the chrome's own clean-screen state, so it too needs no layout;
+ * `CLEANSCREENOFF` clears that same state and is resolved directly after it.
+ * `PROPERTIESCLOSE` closes the properties surface and is resolved last: it is
+ * layout-independent because closing an already-closed surface is a valid no-op
+ * on every layout; `LAYERCLOSE` closes the layers palette right after it for the
+ * same reason.
  *
  * The UI-visibility and window selectors (`RIBBON*`, `FILETAB*`,
  * `HIDEPALETTES`/`SHOWPALETTES`, `TOOLBAR`/`-TOOLBAR`, the two Quick View
@@ -194,16 +199,8 @@ export function localSelectorFor(text: string, layout: LayoutMode): LocalSelecto
   if (isWorkspaceSettingsCommand(text)) return { kind: 'workspaceSettings', mode: 'settings' };
   if (isResourcesCommand(text)) return { kind: 'resources' };
   if (isFontsCommand(text)) return { kind: 'fonts' };
-  if (isPropertiesCommand(text)) {
-    return dockedPaletteOpenable(layout)
-      ? { kind: 'properties' }
-      : { kind: 'refused', panelKey: LOCAL_SELECTOR_PANEL_KEYS.properties };
-  }
-  if (isQuickPropertiesCommand(text)) {
-    return dockedPaletteOpenable(layout)
-      ? { kind: 'properties' }
-      : { kind: 'refused', panelKey: LOCAL_SELECTOR_PANEL_KEYS.properties };
-  }
+  if (isPropertiesCommand(text)) return { kind: 'properties' };
+  if (isQuickPropertiesCommand(text)) return { kind: 'properties' };
   if (isLayersCommand(text)) {
     return dockedPaletteOpenable(layout)
       ? { kind: 'layers' }

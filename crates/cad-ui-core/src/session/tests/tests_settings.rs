@@ -52,6 +52,10 @@ fn session_settings_report_the_effective_defaults() {
         "the renderer backend default is `auto`"
     );
     assert_eq!(settings.fonts_dir, None);
+    assert!(
+        settings.format_notice_enabled,
+        "the reverse-engineering notice is on by default"
+    );
 }
 
 #[test]

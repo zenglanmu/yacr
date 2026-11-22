@@ -7,24 +7,35 @@
  * the breakpoint lives in one place (`layout-mode.ts`), so the stylesheet and the
  * hook cannot drift apart.
  *
- * Composition: one top bar holding a single control (the menu button), the CAD
- * partition and the right-edge navigation dock filling the space below it, and —
- * hidden by default behind a floating bottom-right trigger — the command bar (see
+ * Composition: there is **no top bar**. The drawing starts at the viewport's first
+ * pixel and a floating 44x44 menu button sits over its top-left corner; the right
+ * edge carries the navigation dock as a small card, and — hidden by default behind
+ * a floating bottom-right trigger — the command bar (see
  * `mobile-commandbar.css`). The open drawing's name and the tools live in the
  * drawer the menu button opens; the theme switch lives in the navigation dock's
  * fixed head (the only part of that card that never scrolls).
  * The desktop palette layer, the ribbon band, the drawing/layout tab strips and
  * the status bar are not rendered on mobile; the chrome inside `<Workspace />`
  * (the start column and the palette layer) stays *mounted* and is hidden below,
- * which is what lets a live breakpoint crossing keep the CAD session alive. The
+ * which is what lets a live breakpoint crossing keep the CAD session alive.
+ * **The properties inspector is the one palette the compact layout keeps**: it is
+ * re-mounted as its own bottom sheet (`MobilePropertiesSheet`) in the sheet frame
+ * below, together with references, fonts and BIM — one frame, one scrim, one
+ * geometry. Every other palette (layers, file info, diagnostics) has no compact
+ * surface and is refused by name instead of painted empty. The
  * dock stays visible, but as a small floating card at the drawing's top-right
  * corner: it holds the compact theme switch and one control that folds the icon
- * rail out of that card (it starts collapsed). The orientation ball is a separate
- * overlay at the drawing's top-left (see `viewcube.css` / the compact rule below),
- * so the two floating controls never collide. It is never a full-height strip
+ * rail out of that card (it starts collapsed). It is never a full-height strip
  * here — a phone cannot spare 56px of drawing width.
  *
- * Safe areas: the top bar pads the cutout, and the command bar and its trigger pad
+ * The orientation ball keeps the desktop corner — the drawing's **top-right** —
+ * and is offset left of the dock card by the card's own footprint (its 8px inset,
+ * its control column and its frame) plus an 8px gap, exactly as the desktop ball
+ * sits left of the 56px rail. It is a separate overlay, so the menu button
+ * (top-left) and the ball (top-right) never share a corner and never overlap.
+ *
+ * Safe areas: the floating menu button takes `env(safe-area-inset-top)` and
+ * `max(8px, env(safe-area-inset-left))`, and the command bar and its trigger pad
  * the gesture bar with `env(safe-area-inset-*)`, so a notched phone does not put a
  * control under the cutout or the gesture bar.
  *
@@ -38,9 +49,11 @@
  */
 
 :root {
-  /* The top bar's own height (excluding the safe-area padding). The drawer layer
-     starts exactly below it, so the menu button stays tappable while it is open. */
-  --mobile-topbar-h: 52px;
+  /* The menu-button band on the drawing's top edge: the 8px inset + the 44px
+     button + an 8px gap. The drawing reserves none of it — the button floats over
+     the drawing — but the drawer layer starts below it, so the button that opened
+     the drawer stays visible and tappable while the drawer is open. */
+  --mobile-menubar-h: 60px;
   /* The mobile sheet's cap: it may cover a little under half the drawing, never
      more, and it scrolls inside itself. */
   --mobile-sheet-h: 45dvh;
@@ -49,14 +62,14 @@
      drawing, which is the thing the user came for. The second limit keeps a
      *usable* strip on a short viewport (a phone in landscape is ~412px tall,
      where 68dvh alone would bury the drawing entirely): the drawer never grows
-     past "viewport minus top bar minus 96px", which is the floating command-line
-     trigger (44px) plus its 8px inset plus a 44px strip of drawing beside it. The
-     command bar itself is hidden by default now, so the floor no longer reserves
-     a docked bar's height. `env()` is subtracted because the layer's own padding
-     adds the top inset. */
+     past "viewport minus the menu-button band minus 96px", which is the floating
+     command-line trigger (44px) plus its 8px inset plus a 44px strip of drawing
+     beside it. The command bar itself is hidden by default now, so the floor no
+     longer reserves a docked bar's height. `env()` is subtracted because the
+     layer's own padding adds the top inset. */
   --mobile-drawer-h: min(
     68dvh,
-    calc(100dvh - var(--mobile-topbar-h) - env(safe-area-inset-top) - 96px)
+    calc(100dvh - var(--mobile-menubar-h) - env(safe-area-inset-top) - 96px)
   );
   /* How far the panel's bottom fade reaches into the drawer body. The body pads
      itself by the fade plus a gap, so the last row is fully readable above it. */
@@ -97,10 +110,12 @@
  *
  * Height: two limits, like the drawer. `60dvh` is the design cap (the card may
  * never take more than 60% of the phone). The second is the exact one:
- * `.workspace` *is* the drawing row between the top bar and the command bar, so
- * "the row's height minus the 8px margins" needs no second copy of those bars'
- * heights. If a carrier cannot resolve the percentage, the `60dvh` declaration
- * before it stands.
+ * `.workspace` *is* the drawing row between the viewport's top edge and the
+ * command bar, so "the row's height minus the two 8px margins" needs no second copy
+ * of the command bar's height. The cutout inset is subtracted as well: the card
+ * starts one inset lower (see `top`), so without it the card's capped bottom would
+ * be pushed that far past the row on a notched, edge-to-edge phone. If a carrier
+ * cannot resolve the percentage, the `60dvh` declaration before it stands.
  *
  * Width is content-sized (`width: auto`) with `--navrail-w` as the head's own
  * width, without the card ever being wider than one 44px control column plus
@@ -113,7 +128,7 @@
  * `border-left` edge. The head itself is `flex: 0 0 auto` with no overflow rule
  * (`style.css`), so it neither scrolls nor clips its switch. */
 :root[data-layout="mobile"] .navdock {
-  top: 8px;
+  top: calc(8px + env(safe-area-inset-top));
   right: 8px;
   bottom: auto;
   left: auto;
@@ -121,7 +136,7 @@
   height: auto;
   max-width: calc(100vw - 16px);
   max-height: 60dvh;
-  max-height: min(60dvh, calc(100% - 16px));
+  max-height: min(60dvh, calc(100% - 16px - env(safe-area-inset-top)));
   overflow: hidden;
   border: 1px solid var(--line-soft);
   border-radius: 8px;
@@ -165,41 +180,59 @@
   width: 44px;
   height: 44px;
 }
-/* The orientation ball on the compact layout: a smaller sphere at the drawing's
-   **top-left**, away from the dock card at the top-right. The layer still spans
-   the drawing area; the ball itself re-enables input. Home grows to the 44px
-   touch minimum and sits under the ball, so it never covers a cap. */
+/* The orientation ball on the compact layout: the **same corner as the desktop**
+   (the drawing's top-right), a smaller sphere, and offset left of the dock card by
+   the card's own footprint plus an 8px gap — the desktop rule's
+   `right: calc(var(--navrail-w) + 14px)` recomputed for a card that is inset 8px
+   and carries a 1px frame on each side (8 + 2 + 8 = 18). At 390px the ball ends at
+   316px and the card's left edge starts at 324px, so the two never touch; the
+   drawing keeps the 168px between the menu button and the ball at the top, and the
+   whole width below the ball.
+ *
+ * `top` is the menu button's and the dock card's own inset (8px + the cutout), so
+ * the whole top row — button, card, ball — stays level and none of them can slide
+ * under a notch. The layer still spans the drawing area; the ball itself
+ * re-enables input. Home grows to the 44px touch minimum and sits under the ball,
+ * so it never covers a cap. */
 :root[data-layout="mobile"] .viewcube {
   --viewball-size: 96px;
-  top: 8px;
-  left: 8px;
-  right: auto;
+  top: calc(8px + env(safe-area-inset-top));
+  right: calc(var(--navrail-w) + 18px);
+  left: auto;
 }
 :root[data-layout="mobile"] .viewcube--unavailable {
-  top: 8px;
-  left: 8px;
-  right: auto;
+  top: calc(8px + env(safe-area-inset-top));
+  right: calc(var(--navrail-w) + 18px);
+  left: auto;
 }
 :root[data-layout="mobile"] .viewcube__home { width: 44px; height: 44px; }
 
-/* Top bar ---------------------------------------------------------------- */
-/* One control, one row. The bar exists for the menu button (and the 2px import
-   strip), so everything else here is padding and the safe area. */
+/* The floating menu button ----------------------------------------------- */
+/* There is no top bar. The drawing owns the viewport from its first pixel; this
+   wrapper is the button's own 44px box over the drawing's top-left corner, not a
+   row: it is `position: fixed`, so it takes no flex height, paints no background
+   and draws no divider, and it is never wider than the button, so a press anywhere
+   outside the button still reaches the CAD surface. `z-index` 30 keeps it above the
+   workspace and the dock (5) and below the drawer layer (55).
+ *
+   The class names are kept on purpose: `scripts/web-ui-smoke.cjs` and the Android
+   host's layout log (`MainActivity.kt`) select `.mobile-topbar` /
+   `.mobile-topbar__menu` as the compact chrome's anchor. They name the anchored
+   menu region now — nothing under them paints a bar. */
 .mobile-topbar {
-  position: relative;
+  position: fixed;
+  top: calc(8px + env(safe-area-inset-top));
+  left: max(8px, env(safe-area-inset-left));
   z-index: 30;
-  flex: 0 0 auto;
   display: flex;
   align-items: center;
-  min-height: var(--mobile-topbar-h);
-  padding-top: env(safe-area-inset-top);
-  padding-left: max(8px, env(safe-area-inset-left));
-  padding-right: max(8px, env(safe-area-inset-right));
-  background: var(--chrome-2);
-  border-bottom: 1px solid var(--line);
 }
-/* The one control in the bar. 44px square is the minimum comfortable touch
-   target; there is nothing beside it to shrink, so it keeps its size. */
+/* The one control. 44px square is the minimum comfortable touch target; there is
+   nothing beside it to shrink, so it keeps its size. It floats over the drawing,
+   so it carries a surface and a shadow (the command-bar trigger's own treatment)
+   instead of the old bar's flat fill: a 22px glyph over a line drawing is neither
+   readable nor findable without one. Round, like the two other compact floating
+   controls (the command trigger and the cube's Home). */
 .mobile-topbar__menu {
   display: grid;
   place-items: center;
@@ -207,29 +240,36 @@
   width: 44px;
   height: 44px;
   padding: 0;
-  border: 1px solid transparent;
-  border-radius: var(--radius);
-  background: transparent;
-  color: var(--text);
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  background: var(--chrome-2);
+  color: var(--text-dim);
+  box-shadow: 0 8px 20px rgba(var(--shadow-rgb), .45);
   cursor: pointer;
-  transition: background var(--t-fast), border-color var(--t-fast);
+  transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
 }
-.mobile-topbar__menu:hover { background: var(--hover); }
+.mobile-topbar__menu:hover { background: var(--hover); color: var(--text); }
 .mobile-topbar__menu:active { background: var(--pressed); }
+/* The open drawer is anchored to this button, so the button says so: accent frame
+   plus the pressed fill, no second "open" indicator anywhere. */
 .mobile-topbar__menu[aria-expanded="true"] {
   background: var(--pressed);
-  border-color: var(--line-soft);
+  color: var(--text);
+  border-color: var(--accent);
 }
-/* Import progress: 2px, pinned to the bar's lower edge, so it costs no width and
-   no height. Determinate fills to the host's own ratio; indeterminate slides. */
+/* Import progress: 2px, pinned to the drawing's top edge. It costs the drawing no
+   height and, being `pointer-events: none`, no press either. It starts below the
+   cutout inset so a notched phone never hides the only sign that an import is
+   running. Determinate fills to the host's own ratio; indeterminate slides. */
 .mobile-topbar__progress {
-  position: absolute;
+  position: fixed;
+  top: env(safe-area-inset-top, 0px);
   left: 0;
   right: 0;
-  bottom: -1px;
   height: 2px;
   background: var(--field);
   overflow: hidden;
+  pointer-events: none;
 }
 .mobile-topbar__progress-fill {
   display: block;
@@ -244,16 +284,17 @@
 }
 
 /* Ribbon drawer ---------------------------------------------------------- */
-/* The layer starts below the top bar, so the menu button stays visible (and
-   tappable) while the drawer is open. It is a fixed overlay: no height is taken
-   from the drawing, so the CAD partition's rect never changes. */
+/* The layer starts below the menu-button band — the 8px inset, the 44px button and
+   an 8px gap, plus the cutout — so the button that opened it stays visible and
+   tappable. It is a fixed overlay: no height is taken from the drawing, so the CAD
+   partition's rect never changes. */
 .mobile-drawer-layer {
   position: fixed;
   inset: 0;
   z-index: 55;
   display: flex;
   flex-direction: column;
-  padding-top: calc(var(--mobile-topbar-h) + env(safe-area-inset-top));
+  padding-top: calc(var(--mobile-menubar-h) + env(safe-area-inset-top));
 }
 .mobile-drawer {
   position: relative;
@@ -294,7 +335,7 @@
 }
 /* The head and the chip row are `flex: 0 0 auto` siblings of the scroller, so
    they stay pinned while the body scrolls underneath them. The head is one 44px
-   row: the open drawing's name (the label the top bar used to carry) and the close
+   row: the open drawing's name (the label the old top strip used to carry) and the close
    control. No vertical padding, so the row is exactly the close button's 44px and
    a short landscape viewport loses nothing to it. */
 .mobile-drawer__head {
@@ -582,10 +623,14 @@
   font-style: normal;
 }
 
-/* References sheet ------------------------------------------------------- */
-/* The compact layout renders no desktop palette window, so the same
-   `ReferencesPanel` becomes a bottom sheet in this tree. It sits above the drawer
-   layer (which closes before it opens) and below the host-owned popup layer (60). */
+/* Compact sheets ---------------------------------------------------------- */
+/* The compact layout renders no desktop palette window, so the same panels become
+   bottom sheets in this tree: references, the Font Manager, BIM, and the
+   properties inspector (the one palette the compact layout keeps — see
+   `MobilePropertiesSheet`). They sit above the drawer layer (which closes before
+   they open) and below the host-owned popup layer (60). One frame, one scrim, one
+   geometry; each panel keeps its own body. */
+:root[data-layout="mobile"] .properties-layer,
 :root[data-layout="mobile"] .references-layer,
 :root[data-layout="mobile"] .fonts-layer,
 :root[data-layout="mobile"] .bim-layer {
@@ -595,6 +640,7 @@
   display: flex;
   align-items: flex-end;
 }
+:root[data-layout="mobile"] .properties-layer__backdrop,
 :root[data-layout="mobile"] .references-layer__backdrop,
 :root[data-layout="mobile"] .fonts-layer__backdrop,
 :root[data-layout="mobile"] .bim-layer__backdrop {
@@ -603,6 +649,7 @@
   border: 0;
   background: var(--scrim-sheet);
 }
+:root[data-layout="mobile"] .properties--floating,
 :root[data-layout="mobile"] .references--floating,
 :root[data-layout="mobile"] .fonts--floating,
 :root[data-layout="mobile"] .bim--floating {
@@ -618,6 +665,7 @@
   padding-bottom: max(env(safe-area-inset-bottom, 0px), var(--yacr-safe-bottom, 0px));
   animation: mobile-rise var(--t-med) both;
 }
+:root[data-layout="mobile"] .properties--floating .palette__head,
 :root[data-layout="mobile"] .references--floating .palette__head,
 :root[data-layout="mobile"] .fonts--floating .palette__head,
 :root[data-layout="mobile"] .bim--floating .palette__head { height: 44px; padding: 0 6px 0 12px; }
@@ -630,6 +678,34 @@
 /* The compact sheet's only control is its close button, and it is a 44px target:
    a phone cannot rely on the 26px desktop head. */
 :root[data-layout="mobile"] .fonts--floating .ui-icon-button { width: 44px; height: 44px; }
+/* The properties sheet: the desktop inspector, readable at 390px. The label column
+   narrows to 88px (both columns already ellipsize) so the value well keeps ~250px
+   at 390px, and every control in a row takes a finger-sized height. The "no
+   selection" band and the multi-selection summary keep their slot, only wider. */
+:root[data-layout="mobile"] .properties--floating .palette__head .ui-icon-button { width: 44px; height: 44px; }
+:root[data-layout="mobile"] .properties--floating .properties__row {
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 0 8px;
+  min-height: 36px;
+  padding: 2px 10px;
+  font-size: 12px;
+}
+:root[data-layout="mobile"] .properties--floating .properties__row dt { font-size: 12px; }
+:root[data-layout="mobile"] .properties--floating .properties__readonly,
+:root[data-layout="mobile"] .properties--floating .properties__input,
+:root[data-layout="mobile"] .properties--floating .properties__select {
+  min-height: 30px;
+  font-size: 12px;
+}
+:root[data-layout="mobile"] .properties--floating .properties__input,
+:root[data-layout="mobile"] .properties--floating .properties__select { height: 30px; }
+:root[data-layout="mobile"] .properties--floating .properties__group-toggle { height: auto; min-height: 44px; }
+:root[data-layout="mobile"] .properties--floating .properties__empty,
+:root[data-layout="mobile"] .properties--floating .properties__multi { padding: 8px 10px; }
+:root[data-layout="mobile"] .properties--floating .properties__hint,
+:root[data-layout="mobile"] .properties--floating .properties__row-error { font-size: 11.5px; }
+/* The colour cell's trigger is a tap target here, not the 20px desktop swatch. */
+:root[data-layout="mobile"] .properties--floating .color-field__trigger { width: 30px; height: 30px; }
 /* The BIM sheet is the densest compact surface here (facets, a filter form and a
    paged table), so it gets a little more height than the report sheets and
    finger-sized controls. The table never scrolls sideways: both columns are
@@ -726,34 +802,29 @@
   min-height: 0;
 }
 
-/* Vendor panel and refusal notice on a phone ------------------------------ */
-/* The desktop palette layer is not rendered on the compact layout
-   (`.palette-layer` is hidden), so a carrier that offers vendor properties here
-   mounts the same panel as a bottom sheet, exactly like the references/fonts
-   palettes. These rules give it that sheet's surface, touch heights and
-   wrapping; the 300px desktop window never sees them. */
-:root[data-layout="mobile"] .plugin-properties {
+/* Vendor properties inside the sheet, and the refusal notice --------------- */
+/* A carrier that offers vendor properties mounts the same panel: on the compact
+   layout it is the **child** of the properties sheet (one frame, one scrim, one
+   scrim tap), so it drops the window surface it wears on the desktop 300px column
+   and keeps only its finger-sized rows, head and footer. The desktop window never
+   sees these rules; there is no second sheet frame here. */
+:root[data-layout="mobile"] .properties--floating .plugin-properties {
   width: 100%;
-  max-height: min(72dvh, 620px);
-  overflow: hidden;
-  background: var(--chrome-3);
-  border: 1px solid var(--line-soft);
-  border-bottom: 0;
-  border-radius: 8px 8px 0 0;
-  box-shadow: 0 -12px 34px rgba(var(--shadow-rgb), .48);
-  padding-bottom: max(env(safe-area-inset-bottom, 0px), var(--yacr-safe-bottom, 0px));
-  animation: mobile-rise var(--t-med) both;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  animation: none;
 }
-:root[data-layout="mobile"] .plugin-properties .palette__head { height: 44px; padding: 0 12px; }
-:root[data-layout="mobile"] .plugin-properties .palette__body { padding: 10px 12px 14px; }
-:root[data-layout="mobile"] .plugin-properties__row { grid-template-columns: 92px minmax(0, 1fr); }
-:root[data-layout="mobile"] .plugin-properties__footer { padding: 8px 12px; }
-/* Both panel actions and the notice's one action are the sheet's only controls,
+:root[data-layout="mobile"] .properties--floating .plugin-properties .palette__body { padding: 10px 12px 14px; }
+:root[data-layout="mobile"] .properties--floating .plugin-properties__row { grid-template-columns: 92px minmax(0, 1fr); }
+:root[data-layout="mobile"] .properties--floating .plugin-properties__footer { padding: 8px 12px; }
+/* Both panel actions and the notice's one action are the surface's only controls,
    so they get a finger-sized height instead of the 20-24px desktop one. */
-:root[data-layout="mobile"] .plugin-properties__footer .ui-button,
+:root[data-layout="mobile"] .properties--floating .plugin-properties__footer .ui-button,
 :root[data-layout="mobile"] .plugin-notice__footer .ui-button,
 :root[data-layout="mobile"] .host-notice__footer .ui-button { height: 44px; }
-:root[data-layout="mobile"] .plugin-properties__footer .ui-button { font-size: 13px; }
+:root[data-layout="mobile"] .properties--floating .plugin-properties__footer .ui-button { font-size: 13px; }
 :root[data-layout="mobile"] .plugin-notice__message,
 :root[data-layout="mobile"] .host-notice__message { font-size: 13px; }
 /* The shortcut menu is measured and clamped by `placeContextMenu`, so it only
@@ -765,7 +836,10 @@
 :root[data-layout="mobile"] .context-menu__item { min-height: 44px; }
 
 /* Motion ----------------------------------------------------------------- */
+/* The drawer's entry: it drops from just above its resting position. The 6px
+   offset is deliberately shorter than the 8px gap under the menu button, so the
+   panel never paints over the button that opened it while it slides in. */
 @keyframes mobile-drop {
-  from { opacity: 0; transform: translateY(-10px); }
+  from { opacity: 0; transform: translateY(-6px); }
   to { opacity: 1; transform: none; }
 }

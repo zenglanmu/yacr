@@ -69,8 +69,9 @@ portal 到 `document.body`，`position: fixed`，标题栏拖动、位置在会�
 它是 `data-layout` 的**唯一写入者**，把结果写到 `document.documentElement`（即 `<html>`）上；
 `main.shell` 不再携带该属性，所有紧凑样式都用 `:root[data-layout="mobile"]` 守卫。窗口实时改变宽度即切换，
 不重新加载文档，也不重建 `<Workspace />`（它在两种布局里处于同一位置；左侧开始栏与浮动面板层在
-`mobile.css` 里隐藏而非卸载，因此 CAD 会话不会被重挂）。方位球是独立浮层：桌面在绘图区右上方、
-导航列左侧；紧凑布局移到绘图区左上方，避开右上角的导航卡。导航列在紧凑布局保留，
+`mobile.css` 里隐藏而非卸载，因此 CAD 会话不会被重挂）。方位球是独立浮层：桌面与紧凑布局**同在绘图区
+右上方**（桌面让出 56px 导航竖条，紧凑布局让出导航卡宽度 + 8px），紧凑布局的左上角留给浮动菜单按钮。
+导航列在紧凑布局保留，
 图标栏默认收起（本地 chevron 展开），列宽不变，所以展开/收起不会移动 CAD 分区矩形；主题开关在导航卡的
 **固定头部**（图标栏会滚动，头部不会；桌面用标题行，同一布局只出现一次）。
 
@@ -80,15 +81,16 @@ portal 到 `document.body`，`position: fixed`，标题栏拖动、位置在会�
 
 | 区域 | 桌面 | 紧凑 |
 |---|---|---|
-| 顶部 | 标题/QAT · 功能区 · 图纸标签 | `.mobile-topbar`：只有菜单按钮（44×44，`aria-expanded`/`aria-controls`）；图纸名并入抽屉首行（一行省略号 + `title` 全名），主题开关移到导航卡固定头部 |
+| 顶部 | 标题/QAT · 功能区 · 图纸标签 | **无顶栏**：绘图区从屏幕第一像素开始；左上角浮动 44×44 菜单按钮（`aria-expanded`/`aria-controls`，不占 flex 高度、不画背景/分隔线，只覆盖按钮本身）；方位球与桌面同向留在**右上角**、位于导航卡左侧（让出卡宽 + 8px 间距）；图纸名并入抽屉首行（一行省略号 + `title` 全名），主题开关在导航卡固定头部 |
 | 工具 | 92px 功能区 | 抽屉式覆盖层（同一 React 树）：图纸名首行（一行省略号 + `title` 全名）+ 标签 chip 行（横向滚动，固定不滚走）+ 触摸网格（正文滚动，底部渐隐 + 细滚动条）；高度 ≤ `68dvh` 且始终给图纸留下 ≥96px（浮动按钮 + 一条图纸）；关闭方式 = 背景点击 / Escape / 执行后 |
-| 中部 | 浮动面板层（默认贴左、可拖动/调宽）+ 导航列 | CAD 分区铺满剩余高度（`100dvh` 里减掉顶栏；命令栏展开时再减掉它）；导航列保留（ViewCube 常驻，图标栏默认收起） |
+| 中部 | 浮动面板层（默认贴左、可拖动/调宽）+ 导航列 | CAD 分区铺满整屏（`100dvh`；命令栏展开时才减掉它的高度）；导航列保留（ViewCube 常驻，图标栏默认收起）。属性/外部引用/字体/BIM 共用底部 sheet：属性是**唯一保留的调色板**（同一 `PropertiesDock` + `variant="floating"`，`PROPERTIES`、Ctrl+1 与抽屉里的入口都通向它），图层/文件信息/诊断仍无紧凑表面 |
 | 底部 | 命令行 + 状态栏 | 默认隐藏；右下角浮动按钮（44×44）展开 `.mobile-commandbar`：输入、发送、消息（含错误）、向上展开的候选/历史 sheet（≤45dvh）。文字输入步 / 插件提示、宿主故障横幅、已展开的历史 sheet 存在时强制保持展开 |
 
 抽屉与命令栏都不重写规则：抽屉用 `RIBBON_TABS` + `offeredPanels`/`offeredItems` + `runItem`/
 `itemEnabled`/`unavailable`；命令栏用共享控制器 `useCommandLine()` 与 `CommandField`。
-移动端不提供浮动面板开关与“干净屏幕”折叠开关（没有可折叠的 chrome），
-这是与 `dom-canvas` 载体同一条“不给死按钮”的规则。命令栏自己的显隐在右下角浮动按钮上，
+移动端不提供“干净屏幕”折叠开关与没有紧凑表面的调色板开关（**属性是例外**：它是底部 sheet，
+`SHEET_PALETTE_ACTIONS` 让它穿过载波过滤），这是与 `dom-canvas` 载体同一条“不给死按钮”的规则。
+命令栏自己的显隐在右下角浮动按钮上，
 但文字输入步 / 插件提示、宿主故障横幅、已展开的历史 sheet 在场时由纯规则强制展开
 （`layout/mobile-commandbar.ts`）。桌面布局（>1024 px）不变。
 
@@ -109,6 +111,11 @@ Android 宿主（`apps/app-android` 的 `MainActivity`）读 `WindowInsets.Type.
 `page layout:` 行），实现与实测见 `docs/android-host.md` §5。
 浏览器/桌面宿主的 `env()` 与变量都是 0，行为与之前一致（8px）。
 
+顶部同理：紧凑布局的三个浮层——浮动菜单按钮、方位球、右上角导航卡——都在 `mobile.css` 里取
+`env(safe-area-inset-top)`（`top: calc(8px + env(safe-area-inset-top))`），因此 edge-to-edge + 刘海
+设备上它们整体落在切口下方、彼此同高；导航卡的 `max-height` 也把这一个切口内缩减掉，展开图标栏时
+底部不会越出绘图区。桌面布局的 `.navdock` 仍是 `top: 0` 的整列，不受影响。
+
 | 区域 | 文件（相对 `src/components/`） |
 |---|---|
 | 标题 / 快速访问工具栏 / 语言 | `TitleBar.tsx` |
@@ -118,12 +125,12 @@ Android 宿主（`apps/app-android` 的 `MainActivity`）读 `WindowInsets.Type.
 | 浮动面板容器 | `PaletteWindow.tsx`（唯一容器：拖动、调宽、层级与几何存储；几何规则在 `src/layout/palette-window.ts`） |
 | 开始页 / 属性 / 图层 / 文件信息 / 诊断（性能）/ 外部引用 / 字体管理器 | `StartPanel.tsx`、`PropertiesDock.tsx`、`LayersPalette.tsx`、`FileInfoPalette.tsx`（静态文件信息）、`DiagnosticsPalette.tsx`（动态性能诊断；两者数据契约见 `docs/file-info-panel.md`）、`ReferencesPanel.tsx`、`FontsPanel.tsx` |
 | 导航列（图标栏） | `NavigationDock.tsx`（固定宽度右缘列；紧凑布局的头部还挂主题开关）、`NavRail.tsx`（可收起、只放工具与面板开关；桌面跟宿主 `NAVBAR`，紧凑布局本地展开） |
-| 方位球（独立浮动层） | `ViewCube.tsx` + `viewcube.css`（不透明球面 + 六个方向帽 + Home；由宿主相机基算出；位于绘图区右上方、导航列左侧，紧凑布局在左上方） |
+| 方位球（独立浮动层） | `ViewCube.tsx` + `viewcube.css`（不透明球面 + 六个方向帽 + Home；由宿主相机基算出；桌面在绘图区右上方、导航列左侧，紧凑布局同样在右上方、导航卡左侧） |
 | 主题开关 | `ThemeToggle.tsx`（桌面标题/QAT 行；紧凑布局挂在导航卡的固定头部，不随图标栏滚动，同一布局只出现一次；写入 `cad_set_setting`，不本地翻转） |
 | 模型 / 布局标签 | `LayoutTabs.tsx` |
 | 命令行 | `CommandLine.tsx`（桌面停靠区），控制器在 `src/commands/use-command-line.ts`；历史日志见 `src/commands/command-history.ts`；插件提示（原句 + 关键词 + 无效输入）与 `writeMessage` 回声在行上方的有界回声条内，不改变命令行高度 |
 | 状态栏 | `StatusBar.tsx` |
-| 紧凑布局 | `MobileTopBar.tsx`、`MobileRibbonDrawer.tsx`、`MobileCommandBar.tsx`、`MobileCommandBarToggle.tsx`（浮动触发器）；开关规则在 `src/layout/mobile-commandbar.ts`；共享输入框 `CommandField.tsx` |
+| 紧凑布局 | `MobileMenuButton.tsx`（浮动菜单按钮）、`MobileRibbonDrawer.tsx`、`MobilePropertiesSheet.tsx`（属性底部 sheet）、`MobileCommandBar.tsx`、`MobileCommandBarToggle.tsx`（浮动触发器）；开关规则在 `src/layout/mobile-commandbar.ts`；共享输入框 `CommandField.tsx` |
 | 共享控件 | `primitives.tsx`，图标在 `src/icons.tsx` |
 
 ## 合成与输入约束
@@ -170,6 +177,12 @@ shell-only 报告在有 Tauri 桥时仍回原生宿主。唯一例外是**引导
 分区矩形与宿主度量同步；浮动面板则相反——它是 `.native-input` 的绝对定位兄弟层，开关/拖动/调宽
 都不改变分区矩形，因此不会触发宿主重排或重绘。`test/metrics.test.ts` 与
 `test/palette-window.test.ts` 共同钉住这条边界。
+
+浮动面板宽度（`src/layout/palette-window.ts`，全部是纯数字，不把 CSS `min()` 塞进几何存储）：
+打开宽度 = `layerWidth × 0.38`，下限 300、上限 560，且不超过实测绘图区；拖拽/键盘调整范围是
+`[280, min(layerWidth, 720)]`（720 是绝对上限，窄绘图区仍以绘图区为准）。工作区 preset 的宽度上限
+`WORKSPACE_PANEL_MAX_WIDTH` 与运行期上限同为 720，`WorkspaceSurfaces` 表单的 min/max 直接读这两个常量；
+渲染时一律经 `clampGeometry` 收紧，所以 preset、拖拽与首次测量永远不会要求比绘图区更宽。
 
 ## 文案与能力
 

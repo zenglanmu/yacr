@@ -158,7 +158,7 @@ test('every field sits on a declared tab exactly once and nothing else exists', 
   assert.deepEqual(fieldsForTab('files').map(field => field.id), [
     'drawingUnit', 'displayUnit', 'unitPrecision', 'recoveryInterval', 'fontsDir', 'fontsDirEffective',
   ]);
-  assert.deepEqual(fieldsForTab('user').map(field => field.id), ['language', 'wgpuBackend']);
+  assert.deepEqual(fieldsForTab('user').map(field => field.id), ['language', 'wgpuBackend', 'formatNoticeEnabled']);
 });
 
 test('each control is the editor its backend value really needs', () => {
@@ -187,8 +187,7 @@ test('each control is the editor its backend value really needs', () => {
     unitPrecision: 'number',
     recoveryInterval: 'number',
     fontsDir: 'path', fontsDirEffective: 'readonly',
-    language: 'locale',
-    wgpuBackend: 'select',
+    language: 'locale', wgpuBackend: 'select', formatNoticeEnabled: 'bool',
   });
   // Number controls carry the host's own range and a unit suffix, never a clamp.
   assert.deepEqual(

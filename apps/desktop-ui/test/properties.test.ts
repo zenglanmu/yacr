@@ -16,7 +16,7 @@ import { admitCommandText, isSupportedCommand } from '../src/commands/commands.t
 import { createTranslator } from '../src/i18n.ts';
 import { isPropertiesCommand } from '../src/properties/properties.ts';
 import { RIBBON_TABS } from '../src/ribbon/ribbon-model.ts';
-import { readCatalog, readCss, readModule } from './helpers.ts';
+import { readCatalog, readCss, readMobileCss, readModule } from './helpers.ts';
 
 const zh = await readCatalog('zh-CN');
 const en = await readCatalog('en');
@@ -407,8 +407,53 @@ test('the properties palette floats in the palette layer and is toggled from the
   assert.match(workspace, /<PaletteWindow windowKey="properties"[^>]*>\s*<PropertiesDock \/>\s*<\/PaletteWindow>/);
   assert.ok(workspace.includes('shell.propertiesOpen'));
   assert.ok(statusbar.includes('shell.setPropertiesOpen'));
+  // The window is desktop-only: the compact layout mounts the same dock as a
+  // sheet, and two instances of one edit state machine must never exist.
+  assert.ok(workspace.includes('{showProperties && !shell.mobile ? ('));
   // The native CAD partition stays a childless node whose rect never changes;
   // the palette is a sibling overlay in `.palette-layer`, not a dock column.
   assert.ok(workspace.includes("'native-input'"));
   assert.ok(!workspace.includes('const leftOpen = showStart ||'));
+});
+
+test('the compact sheet keeps the inspector readable at 390px', async () => {
+  const css = await readMobileCss();
+  const block = selector => {
+    const start = css.indexOf(`${selector} {`);
+    assert.ok(start > 0, `${selector} must exist`);
+    return css.slice(start, css.indexOf('}', start));
+  };
+  // The sheet is one of the compact bottom sheets: full width, bottom-aligned,
+  // capped near three quarters of the screen, and clear of the gesture bar. It
+  // joins the shared frame rule (references/fonts/BIM), which is why the selector
+  // is the first item in that list.
+  const sheetStart = css.indexOf(':root[data-layout="mobile"] .properties--floating,');
+  assert.ok(sheetStart > 0, 'the sheet joins the shared compact sheet frame');
+  const sheet = css.slice(sheetStart, css.indexOf('}', sheetStart));
+  assert.ok(sheet.includes('width: 100%'));
+  assert.ok(sheet.includes('max-height: min(72dvh, 620px)'));
+  assert.ok(sheet.includes('border-radius: 8px 8px 0 0'));
+  assert.ok(
+    sheet.includes('padding-bottom: max(env(safe-area-inset-bottom, 0px), var(--yacr-safe-bottom, 0px))'),
+    'the sheet clears the host gesture bar',
+  );
+  // Head and close control are finger-sized, not the desktop 26px row. The head
+  // rule is shared with the other sheets, so it is read from its own list item.
+  const headStart = css.indexOf(':root[data-layout="mobile"] .properties--floating .palette__head,');
+  assert.ok(headStart > 0, 'the sheet head joins the shared 44px header rule');
+  assert.ok(css.slice(headStart, css.indexOf('}', headStart)).includes('height: 44px'));
+  const close = block(':root[data-layout="mobile"] .properties--floating .palette__head .ui-icon-button');
+  assert.ok(close.includes('width: 44px') && close.includes('height: 44px'));
+  // The row never overflows 390px: a narrower label column and a value column
+  // that takes what is left (both columns already ellipsize/wrap).
+  const row = block(':root[data-layout="mobile"] .properties--floating .properties__row');
+  assert.ok(row.includes('grid-template-columns: 88px minmax(0, 1fr)'), 'one flexible value column');
+  assert.ok(row.includes('min-height: 36px'), 'a finger-sized row');
+  const fieldStart = css.indexOf(':root[data-layout="mobile"] .properties--floating .properties__readonly,');
+  assert.ok(fieldStart > 0, 'the sheet grows every value well in one rule');
+  const fields = css.slice(fieldStart, css.indexOf('}', fieldStart));
+  assert.ok(fields.includes('min-height: 30px'), 'values are tappable high');
+  // The desktop 96px label column is untouched by the compact sheet.
+  const desktop = await readCss();
+  assert.ok(desktop.includes('grid-template-columns: 96px minmax(0, 1fr)'), 'the desktop grid is unchanged');
 });

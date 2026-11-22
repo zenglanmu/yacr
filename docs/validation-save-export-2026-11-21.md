@@ -27,7 +27,7 @@ cargo test -p cad-import-core -p cad-platform -p cad-ui-core -p cad-host -p cad-
 | 覆盖 | Linux 真实 `atomic_replace`：导出覆盖已存在文件 → `<name>.dxf.bak` 含旧字节、目标为新字节（`apps/app-linux/src/platform/tests.rs`） |
 | `.bak`/原子写 | Windows：临时文件 → `ReplaceFileW`（回退 `MoveFileExW`）→ `.bak` 硬链接；macOS：临时文件 → `rename` → `.bak`；两者均有"失败不破坏目标"的测试 |
 | 归档 | Windows 42 passed、macOS 34 passed、Android 73 passed；各含 `.ymodel` 往返 与 "`.ymodel` 打开不走连接器探测" |
-| 提示 | `openedSource` 仅对 `dwg/dgn/skp/rvt` 出现（`canWrite`/`experimental` 取连接器描述符）；DXF/STEP/IFC/glTF/网格 → 字段缺失；dwg→dxf 打开与 New/Close 会清除；前端 1860 passed 覆盖逐格式文案、`canWrite:false` 与 `experimental` 互斥、按文档记忆关闭 |
+| 提示 | `openedSource` 仅对 `dwg/dgn/skp/rvt` 出现（`canWrite`/`experimental` 取连接器描述符）；DXF/STEP/IFC/glTF/网格 → 字段缺失；dwg→dxf 打开与 New/Close 会清除；前端 1860 passed 覆盖逐格式文案、`canWrite:false` 与 `experimental` 互斥、按文档记忆关闭（**2026-11-22 起新增持久开关 `formatNoticeEnabled` 与“不再提示”，见 `docs/validation-mobile-chrome-properties-notice-2026-11-22.md`；本行记录的是当时状态**） |
 | Android 无备份 | 覆盖成功但 provider 无法建 `.bak` → 发布 `save.no_backup`；chrome 把它翻成句子（新增令牌映射 + 测试） |
 
 ### 1.2 门禁（本轮实际执行）

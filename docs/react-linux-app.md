@@ -381,8 +381,10 @@ body 内，Escape/点击外部关闭）；DOM-on-top 之后这不再是硬约束
 一处，由 live `matchMedia` 订阅驱动，**resize 即时翻转、不 reload**；`main.shell` 不携带该属性，
 紧凑样式用 `:root[data-layout="mobile"]` 守卫。
 
-移动树：`.mobile-topbar`（最左菜单按钮）→ ribbon **drawer**（in-DOM 覆盖层：标签 chip + 2 列触摸
-网格、≤ `68dvh`、44 px 目标）→ 全幅 `Workspace` → `.mobile-commandbar`（唯一底部组件）；
+移动树：`.mobile-topbar`（浮动菜单按钮，**无顶栏**，绘图区从屏幕顶端开始）→ ribbon **drawer**（in-DOM
+覆盖层：标签 chip + 2 列触摸网格、≤ `68dvh`、44 px 目标，起始位置在按钮带下方）→ 全幅 `Workspace`
+→ `.mobile-commandbar`（唯一底部组件），另有底部 sheet 层（`.properties-layer` 属性面板、外部引用、
+字体、BIM；属性是唯一保留的调色板，`PROPERTIES`/Ctrl+1/抽屉入口都通向它）；
 **不渲染**标题栏、桌面 ribbon 带、文档/布局标签、状态栏、dock。命令行规则只在
 `apps/desktop-ui/src/commands/command-line-model.ts` 一处，桌面 `CommandLine.tsx` 与
 `MobileCommandBar.tsx` 都从它渲染。Android 宿主发布 `--yacr-safe-bottom`，由 `.mobile-commandbar` 消费。

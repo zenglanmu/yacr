@@ -53,6 +53,7 @@ import {
 } from '../src/chrome/quick-calc.ts';
 import {
   DRAFTING_WORKSPACE_ID,
+  WORKSPACE_PANEL_MAX_WIDTH,
   deleteWorkspace,
   renameWorkspace,
   requestApplyWorkspace,
@@ -465,7 +466,8 @@ test('workspaces save, rename, delete and apply in memory only', () => {
   assert.equal(saved.ok, true);
   const preset = workspacePreset(saved.id);
   assert.equal(preset.name, 'Plot Sheet', 'internal whitespace collapses');
-  assert.equal(preset.panelWidth, 460, 'the width is clamped to the palette ceiling');
+  assert.equal(preset.panelWidth, WORKSPACE_PANEL_MAX_WIDTH, 'the width is clamped to the palette ceiling');
+  assert.equal(WORKSPACE_PANEL_MAX_WIDTH, 720, 'the preset range now matches the runtime resize ceiling');
   assert.equal(workspaceSnapshot().currentId, saved.id, 'saving makes it current');
   assert.equal(workspaceSnapshot().applyRevision, 0, 'saving does not repaint the running chrome');
 

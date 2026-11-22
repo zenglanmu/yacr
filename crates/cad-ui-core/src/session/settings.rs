@@ -1,6 +1,6 @@
 //! Typed settings wire surface for the Options dialog.
 //!
-//! The session exposes the same closed thirty-one-key surface the host
+//! The session exposes the same closed thirty-two-key surface the host
 //! persists; it adds no second validation and no raw-JSON entry point. A UI
 //! writes one typed key/value pair, the host validates it against the closed
 //! table, persists the matching preference leaf and applies it to the live
@@ -22,7 +22,7 @@ pub use cad_host::{
 /// the font directory actually used and `fontsDirOverride` the persisted choice
 /// behind it; both are omitted when the carrier cannot answer them (the Web
 /// `dom-canvas` host has no local font directory), which renders the row
-/// disabled rather than inventing a path. The other thirty fields correspond
+/// disabled rather than inventing a path. The other thirty-one fields correspond
 /// one-to-one with [`CadSettingKey`] (`fontsDir` included), the two
 /// backgrounds as canonical `#rrggbb` strings, the crosshair and the GPU memory
 /// budget as integer percentages, the pickbox/aperture as integer pixel counts,
@@ -99,6 +99,11 @@ pub struct CadSettings {
     /// ViewCube visibility in 3D views (root leaf `viewCubeIn3d`, default
     /// `true`).
     pub view_cube_in_3d: bool,
+    /// Reverse-engineered-format notice (root leaf `formatNoticeEnabled`, default
+    /// `true`). When `true` the shell shows the post-open hint that the drawing
+    /// came from a reverse-engineered format; `false` silences it. Written with
+    /// the same key through `cad_set_setting`.
+    pub format_notice_enabled: bool,
     /// Drawing unit of the document's coordinates (`ui.units.drawingUnit`):
     /// `drawing` (default), `mm`, `cm`, `m`, `in` or `ft`.
     pub drawing_unit: String,
@@ -165,6 +170,7 @@ impl From<HostSettings> for CadSettings {
             navvcube_display: value.navvcube_display,
             view_cube_in_2d: value.view_cube_in_2d,
             view_cube_in_3d: value.view_cube_in_3d,
+            format_notice_enabled: value.format_notice_enabled,
             drawing_unit: value.drawing_unit,
             display_unit: value.display_unit,
             unit_precision: value.unit_precision,

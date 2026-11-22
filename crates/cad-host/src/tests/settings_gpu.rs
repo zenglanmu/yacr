@@ -35,7 +35,7 @@ fn the_gpu_budget_key_is_in_the_closed_table() {
     // asserted deliberately so a new key is never added by accident.
     assert_eq!(
         CadSettingKey::ALL.len(),
-        31,
+        32,
         "one writable key per contract"
     );
     assert_eq!(

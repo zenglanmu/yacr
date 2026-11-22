@@ -1,11 +1,11 @@
-//! The host-owned appearance/navigation preferences and the UI theme.
+//! The host-owned appearance/navigation/notice preferences and the UI theme.
 //!
-//! `theme`, `navbarVisible`, `navvcubeDisplay`, `viewCubeIn2d` and
-//! `viewCubeIn3d` are **root-level** `preference.json` leaves outside the
-//! `ViewerConfig` schema (exactly like `wgpu_backend`). This module owns their
-//! in-memory shape, their extraction/merge helpers and the writes that keep them
-//! durable; [`crate::settings`] owns the closed key table and the projection into
-//! [`crate::settings::HostSettings`].
+//! `theme`, `navbarVisible`, `navvcubeDisplay`, `viewCubeIn2d`,
+//! `viewCubeIn3d` and `formatNoticeEnabled` are **root-level** `preference.json`
+//! leaves outside the `ViewerConfig` schema (exactly like `wgpu_backend`). This
+//! module owns their in-memory shape, their extraction/merge helpers and the
+//! writes that keep them durable; [`crate::settings`] owns the closed key table
+//! and the projection into [`crate::settings::HostSettings`].
 
 use super::*;
 
@@ -69,22 +69,23 @@ pub const HOST_ALLOWED_PATHS_JSON: &str = r#"{"ui":{"userCustomization":{"allowe
     "ui.paths.fontsDir"
 ]}}}"#;
 
-/// The five host-owned appearance/navigation preference keys.
+/// The six host-owned appearance/navigation/notice preference keys.
 ///
 /// They are **root-level** leaves of `preference.json`, exactly like
 /// [`WGPU_BACKEND_PREFERENCE_KEY`]: they describe the React shell (theme,
-/// navigation bar, ViewCube), not the `ViewerConfig` scene schema, so they are
-/// not camelCased into a dotted viewer path and are not in
-/// [`HOST_ALLOWED_PATHS_JSON`].
-pub const ROOT_PREFERENCE_KEYS: [&str; 5] = [
+/// navigation bar, ViewCube, reverse-engineering notice), not the `ViewerConfig`
+/// scene schema, so they are not camelCased into a dotted viewer path and are
+/// not in [`HOST_ALLOWED_PATHS_JSON`].
+pub const ROOT_PREFERENCE_KEYS: [&str; 6] = [
     "theme",
     "navbarVisible",
     "navvcubeDisplay",
     "viewCubeIn2d",
     "viewCubeIn3d",
+    "formatNoticeEnabled",
 ];
 
-/// The five host-owned leaves, in the shape the host keeps in memory.
+/// The six host-owned leaves, in the shape the host keeps in memory.
 ///
 /// `None` means "the user never chose", which is exactly the documented default
 /// ([`HostSettings::theme`] etc.). Keeping `None` present-or-absent lets a real
@@ -96,6 +97,7 @@ pub(crate) struct RootPreferences {
     pub(crate) navvcube_display: Option<u32>,
     pub(crate) view_cube_in_2d: Option<bool>,
     pub(crate) view_cube_in_3d: Option<bool>,
+    pub(crate) format_notice_enabled: Option<bool>,
 }
 
 impl RootPreferences {
@@ -119,9 +121,14 @@ impl RootPreferences {
     pub(crate) fn view_cube_in_3d(&self) -> bool {
         self.view_cube_in_3d.unwrap_or(true)
     }
+
+    /// The reverse-engineering format notice, or the documented `true` default.
+    pub(crate) fn format_notice_enabled(&self) -> bool {
+        self.format_notice_enabled.unwrap_or(true)
+    }
 }
 
-/// Extract the five host-owned leaves from a durable preference document.
+/// Extract the six host-owned leaves from a durable preference document.
 ///
 /// One malformed or absent leaf yields that leaf's default (`None` = "not
 /// chosen"), never an error and never a whole-document rejection: a preference
@@ -149,16 +156,20 @@ pub(crate) fn root_preferences_from_preference(text: &str) -> RootPreferences {
     let view_cube_in_3d = document
         .get("viewCubeIn3d")
         .and_then(serde_json::Value::as_bool);
+    let format_notice_enabled = document
+        .get("formatNoticeEnabled")
+        .and_then(serde_json::Value::as_bool);
     RootPreferences {
         theme,
         navbar_visible,
         navvcube_display,
         view_cube_in_2d,
         view_cube_in_3d,
+        format_notice_enabled,
     }
 }
 
-/// Remove the five host-owned leaves from a durable preference document.
+/// Remove the six host-owned leaves from a durable preference document.
 ///
 /// The store's allowed-path validation is strict, so the leaves are captured
 /// separately ([`root_preferences_from_preference`]) and stripped here before the
@@ -177,7 +188,7 @@ pub(crate) fn without_root_preferences(text: &str) -> String {
     serde_json::to_string(&document).unwrap_or_else(|_| text.to_string())
 }
 
-/// Merge the five host-owned leaves into the projected preference document.
+/// Merge the six host-owned leaves into the projected preference document.
 ///
 /// `projected` is the store's allowed-leaf projection (exactly what the host
 /// persists). A chosen leaf is written at the root; an unchosen (`None`) leaf is
@@ -209,6 +220,7 @@ pub(crate) fn merge_root_preferences_into_preference(
         ("navbarVisible", preferences.navbar_visible),
         ("viewCubeIn2d", preferences.view_cube_in_2d),
         ("viewCubeIn3d", preferences.view_cube_in_3d),
+        ("formatNoticeEnabled", preferences.format_notice_enabled),
     ] {
         match value {
             Some(enabled) => {
@@ -336,7 +348,7 @@ pub(crate) fn merge_wgpu_backend_into_preference(
 
 impl HostCore {
     /// Persist one boolean root preference (`navbarVisible`, `viewCubeIn2d`,
-    /// `viewCubeIn3d`).
+    /// `viewCubeIn3d`, `formatNoticeEnabled`).
     ///
     /// The leaf lives outside the `ViewerConfig` schema, so this is the
     /// `apply_wgpu_backend` pattern: keep the live value in memory, write

@@ -8,17 +8,17 @@
 //! `SNAPUNIT` spacing), the persisted 2D left-drag input scheme, the renderer
 //! backend preference (`wgpu_backend`, read by the next presenter construction),
 //! the GPU memory budget percentage the renderer lane reads
-//! (`view.gpuBudget.percent`), the five host-owned appearance/navigation leaves
-//! (`theme`, `navbarVisible`, `navvcubeDisplay`, `viewCubeIn2d`,
-//! `viewCubeIn3d`), the 3D orbit sensitivity percentage
+//! (`view.gpuBudget.percent`), the six host-owned appearance/navigation/notice
+//! leaves (`theme`, `navbarVisible`, `navvcubeDisplay`, `viewCubeIn2d`,
+//! `viewCubeIn3d`, `formatNoticeEnabled`), the 3D orbit sensitivity percentage
 //! (`interaction.orbitSensitivityPercent`), the drawing/display units and their
 //! precision (`ui.units.*`, applied to the document header), the recovery
 //! interval (`ui.recovery.intervalSeconds`) and the persisted CAD font directory
 //! (`ui.paths.fontsDir`, which selects the directory the next font load reads;
 //! `--fonts-dir` still wins over it).
 //! Every write goes through the same validated store/persistence path as
-//! [`HostCore::apply_user_preference_json`] — the backend leaf and the five
-//! appearance/navigation leaves are merged into the same durable preference
+//! [`HostCore::apply_user_preference_json`] — the backend leaf and the six
+//! appearance/navigation/notice leaves are merged into the same durable preference
 //! document (see [`merge_wgpu_backend_into_preference`] and
 //! [`crate::settings_root::merge_root_preferences_into_preference`]); no raw JSON
 //! is accepted from a UI.
@@ -133,11 +133,16 @@ pub enum CadSettingKey {
     /// host's discovery order. A relative or missing directory is refused with
     /// [`SETTINGS_INVALID_VALUE`]; nothing is normalized.
     FontsDir,
+    /// Reverse-engineered-format notice (root `formatNoticeEnabled` leaf): `true`
+    /// (the default) shows the "imported from a reverse-engineered format" hint
+    /// after such a document is opened; `false` silences it. The React shell
+    /// reads the leaf from [`HostSettings`]/`CadSettings` and owns the rendering.
+    FormatNoticeEnabled,
 }
 
 impl CadSettingKey {
     /// Every writable key, in a stable order.
-    pub const ALL: [Self; 31] = [
+    pub const ALL: [Self; 32] = [
         Self::Grid,
         Self::Axes,
         Self::SelectionHighlight,
@@ -169,15 +174,16 @@ impl CadSettingKey {
         Self::UnitPrecision,
         Self::RecoveryInterval,
         Self::FontsDir,
+        Self::FormatNoticeEnabled,
     ];
 
     /// The stable camelCase wire key (also the `cad_set_setting` key).
     ///
     /// Every key but [`Self::WgpuBackend`], [`Self::GpuBudgetPercent`] and the
-    /// five [`ROOT_PREFERENCE_KEYS`] leaves is the final segment of a camelCase
-    /// `ViewerConfig` path. The backend and the appearance/navigation keys are
-    /// root-level host preferences, so their wire key, `cad_set_setting` key and
-    /// persisted key are identical; the GPU budget is persisted under
+    /// six [`ROOT_PREFERENCE_KEYS`] leaves is the final segment of a camelCase
+    /// `ViewerConfig` path. The backend and the appearance/navigation/notice keys
+    /// are root-level host preferences, so their wire key, `cad_set_setting` key
+    /// and persisted key are identical; the GPU budget is persisted under
     /// `view.gpuBudget.percent`, whose leaf is `percent`.
     pub fn key(self) -> &'static str {
         match self {
@@ -212,6 +218,7 @@ impl CadSettingKey {
             Self::UnitPrecision => "unitPrecision",
             Self::RecoveryInterval => "recoveryInterval",
             Self::FontsDir => "fontsDir",
+            Self::FormatNoticeEnabled => "formatNoticeEnabled",
         }
     }
 
@@ -384,7 +391,8 @@ impl CadSettingKey {
             | Self::LeftDragPans
             | Self::NavbarVisible
             | Self::ViewCubeIn2d
-            | Self::ViewCubeIn3d => match value {
+            | Self::ViewCubeIn3d
+            | Self::FormatNoticeEnabled => match value {
                 CadSettingValue::Bool(_) => Ok(()),
                 CadSettingValue::Text(_)
                 | CadSettingValue::Number(_)
@@ -509,6 +517,9 @@ impl HostCore {
             CadSettingKey::UnitPrecision => self.apply_unit_precision(&value),
             CadSettingKey::RecoveryInterval => self.apply_recovery_interval(&value),
             CadSettingKey::FontsDir => self.apply_fonts_dir(&value),
+            CadSettingKey::FormatNoticeEnabled => {
+                self.apply_root_flag(&value, |preferences| &mut preferences.format_notice_enabled)
+            }
         }
     }
 

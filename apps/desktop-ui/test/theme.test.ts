@@ -95,10 +95,10 @@ test('the toggle never applies a theme locally, and each layout mounts it exactl
   assert.equal(dock.includes('setTheme('), false, 'the dock head writes no setting');
   const rail = await readModule('components/NavRail.tsx');
   assert.equal(rail.includes('ThemeToggle'), false, 'the scrolling rail mounts no switch');
-  // The compact top bar is one menu button: no theme switch (and no second copy
-  // of the state) rides there.
-  const mobileTopBar = await readModule('components/MobileTopBar.tsx');
-  assert.equal(mobileTopBar.includes('ThemeToggle'), false, 'the top bar carries no theme switch');
+  // The compact menu is one floating button: no theme switch (and no second copy
+  // of the state) rides there. The dock head is the compact layout's only switch.
+  const menuButton = await readModule('components/MobileMenuButton.tsx');
+  assert.equal(menuButton.includes('ThemeToggle'), false, 'the floating menu button carries no theme switch');
 });
 
 test('the light theme overrides the whole token set and the hardcoded colours are tokenised', async () => {

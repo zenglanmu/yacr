@@ -1,9 +1,12 @@
 // Properties palette: an AutoCAD-style inspector for the current selection.
 //
-// A floating window in `.palette-layer` (wrapped by `PaletteWindow`), so it never
-// shrinks the drawing area: the host composites the native CAD surface at the
-// unchanged `.native-input` rect. The rows come only from
-// `cad_status.selection`; this file is layout plus the edit state machine.
+// One component, two placements: a floating window in `.palette-layer` on the
+// desktop band (wrapped by `PaletteWindow`), and the same panel as the compact
+// layout's bottom sheet (`variant="floating"`, mounted by
+// `MobilePropertiesSheet`). Neither placement shrinks the drawing area: the host
+// composites the native CAD surface at the unchanged `.native-input` rect. The
+// rows come only from `cad_status.selection`; this file is layout plus the edit
+// state machine.
 // The view model (`properties-view.ts`) decides the sections, labels, editors
 // and the mixed placeholder; the write contract (`properties.ts`) owns the
 // grammar mirror and the one IPC name.
@@ -47,6 +50,18 @@ import {
 
 /** How many status polls a queued write may wait for the host's echo. */
 const PROPERTY_CONFIRM_POLLS = 8;
+
+/** The panel's `variant`: the desktop window, or the modal compact sheet. */
+export type PropertiesPaletteVariant = 'window' | 'floating';
+
+export interface PropertiesPaletteProps {
+  /**
+   * `floating` is the compact layout's bottom sheet: the same body and the same
+   * edit state machine, with the sheet's own surface, 44px head and dialog roles
+   * (`mobile.css` owns the geometry; this file owns the class contract).
+   */
+  readonly variant?: PropertiesPaletteVariant;
+}
 
 /** One row's local edit: the draft, the baseline it was typed against, the queued write. */
 interface EditEntry {
@@ -230,9 +245,10 @@ function RowEditor({ row, entry, t, onChange, onCommit, onCancel, onPick }: RowE
   return textField;
 }
 
-export function PropertiesPalette() {
+export function PropertiesPalette({ variant = 'window' }: PropertiesPaletteProps) {
   const { t } = useI18n();
   const shell = useShell();
+  const floating = variant === 'floating';
   const selection = shell.status?.selection ?? null;
   const view = propertiesView(selection, t);
   const [edits, setEdits] = useState<Record<string, EditEntry>>({});
@@ -406,7 +422,12 @@ export function PropertiesPalette() {
   }
 
   return (
-    <section className="palette properties" aria-label={t('properties.panel')}>
+    <section
+      className={['palette', 'properties', floating ? 'properties--floating' : ''].filter(Boolean).join(' ')}
+      aria-label={t('properties.panel')}
+      role={floating ? 'dialog' : undefined}
+      aria-modal={floating ? true : undefined}
+    >
       <header className="palette__head">
         <h2><Icon name="properties" size={15} />{t('properties.panel')}</h2>
         <IconButton

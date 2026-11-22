@@ -68,7 +68,9 @@ export function Workspace() {
     && (shell.chromeVisibility.palettes || palettesRequested);
   // The inspector is only meaningful with a drawing open; on the start screen the
   // start panel owns the left column. Off by default so the startup partition
-  // geometry is unchanged until the user opens it.
+  // geometry is unchanged until the user opens it. The compact layout mounts the
+  // same dock as its own bottom sheet (`MobilePropertiesSheet`), so this window is
+  // desktop-only here: `propertiesOpen` is one flag and one panel, never two.
   const showProperties = palettesAvailable && shell.propertiesOpen && !showStart;
   // The static File info panel and the live diagnostics panel are independent
   // windows behind the same carrier flag; either can be open without the other.
@@ -141,7 +143,7 @@ export function Workspace() {
             is the open order below; z-index (owned by `PaletteWindow`) decides
             stacking after a press, with properties starting on top. */}
         <div className="palette-layer">
-          {showProperties ? (
+          {showProperties && !shell.mobile ? (
             <PaletteWindow windowKey="properties" initialIndex={0}>
               <PropertiesDock />
             </PaletteWindow>

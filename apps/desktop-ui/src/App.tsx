@@ -46,7 +46,8 @@ import { PopupOverlay } from './components/PopupOverlay.tsx';
 import { ContextMenu } from './components/ContextMenu.tsx';
 import { MobileCommandSurface } from './components/MobileCommandSurface.tsx';
 import { MOBILE_DRAWER_ID, MobileRibbonDrawer } from './components/MobileRibbonDrawer.tsx';
-import { MobileTopBar } from './components/MobileTopBar.tsx';
+import { MobileMenuButton } from './components/MobileMenuButton.tsx';
+import { MobilePropertiesSheet } from './components/MobilePropertiesSheet.tsx';
 import { MOBILE_DRAWER_CLOSED, mobileDrawerNext } from './layout/mobile-drawer.ts';
 import { useLayoutMode } from './layout/use-layout-mode.ts';
 import { createShortcutRunner } from './layout/shell-shortcuts.ts';
@@ -618,8 +619,8 @@ function Shell() {
     // action" — it does not promise the platform acts either: WebKit's Ctrl+0
     // zoom reset is separately suppressed in every layout (`defaults.ts`), so
     // the compact layout's Ctrl+0 is deliberately inert rather than half-handled.
-    const runShortcut = createShortcutRunner(layout, textStep, t, {
-      setError, setCleanScreen, setPropertiesOpen, setCommandLineOpen, setHistoryOpen,
+    const runShortcut = createShortcutRunner(layout, textStep, {
+      setCleanScreen, setPropertiesOpen, setCommandLineOpen, setHistoryOpen,
     });
     const onKeyDown = (event: KeyboardEvent) => {
       // A popup owns its own Escape, and the global error dialog is portalled
@@ -927,14 +928,12 @@ function Shell() {
     <I18nContext.Provider value={i18n}>
       <ShellContext.Provider value={shell}>
         <main className={['shell', cleanScreen ? 'is-clean' : ''].filter(Boolean).join(' ')}>
-          {/* Compact layout: the top bar (one menu button) and the drawer it
-              opens. The drawer is a fixed overlay, so it costs the drawing no
-              height; it is also where the drawing's name and the tools live. The
-              start column and the palette layer are desktop chrome: they stay
-              mounted and are hidden by CSS on mobile, so a breakpoint crossing
-              never remounts the CAD session. The navigation dock stays on both
-              layouts (the cube is the compact 3D cue). */}
-          {mobile ? <MobileTopBar menuOpen={mobileDrawer.open} onMenu={toggleMobileDrawer} drawerId={MOBILE_DRAWER_ID} /> : null}
+          {/* Compact layout: the floating menu button over the drawing's top-left
+              corner, and the fixed drawer it opens — neither costs the drawing any
+              height. The drawing's name and the tools live in the drawer; the start
+              column and palette layer stay mounted (hidden by CSS), so a breakpoint
+              crossing never remounts the CAD session. */}
+          {mobile ? <MobileMenuButton menuOpen={mobileDrawer.open} onMenu={toggleMobileDrawer} drawerId={MOBILE_DRAWER_ID} /> : null}
           {mobile ? <MobileRibbonDrawer open={mobileDrawer.open} onClose={closeMobileDrawer} /> : null}
           {mobile || cleanScreen ? null : <TitleBar />}
           {mobile || cleanScreen || !chromeVisibility.ribbon ? null : <Ribbon />}
@@ -968,6 +967,7 @@ function Shell() {
             <FontsPanel variant="floating" />
           </div>
         ) : null}
+        {mobile && propertiesOpen ? <MobilePropertiesSheet /> : null}
         {/* The CAD shortcut menu: one in-DOM overlay above the workspace. It has
             no backdrop, so the press that dismisses it still reaches whatever is
             underneath — the CAD partition keeps forwarding every press to the

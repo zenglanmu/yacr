@@ -436,6 +436,23 @@ export const OPTIONS_FIELDS: readonly OptionField[] = Object.freeze<OptionField[
     labelKey: 'options.field.wgpuBackend',
     helpKey: 'options.help.wgpuBackend',
   },
+  {
+    // The open-time format notice (`open.notice.*`, ADR-0041 D5). One switch for
+    // every reverse-engineered format (DWG, DGN, SKP, RVT): a **root-level**
+    // preference with no per-format record, so off silences them all and on
+    // restores them all. `true` (the host default) shows the card once per open;
+    // the card's own "Don't show again" button writes the same key through the
+    // same `cad_set_setting` command, so the two entry points cannot disagree.
+    // A host that does not report it leaves the row "not reported" rather than
+    // seeding a `true` the host never said.
+    id: 'formatNoticeEnabled',
+    tab: 'user',
+    kind: 'bool',
+    wire: 'formatNoticeEnabled',
+    key: 'formatNoticeEnabled',
+    labelKey: 'options.field.formatNotice',
+    helpKey: 'options.help.formatNotice',
+  },
 ]);
 
 const FIELD_BY_ID = new Map<string, OptionField>(OPTIONS_FIELDS.map(field => [field.id, field]));

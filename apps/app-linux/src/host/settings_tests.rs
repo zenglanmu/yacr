@@ -30,6 +30,7 @@ fn cad_settings_wire_shape_is_a_flat_camel_case_object() {
         navvcube_display: 2,
         view_cube_in_2d: false,
         view_cube_in_3d: true,
+        format_notice_enabled: false,
         drawing_unit: "mm".to_string(),
         display_unit: "cm".to_string(),
         unit_precision: 2,
@@ -66,6 +67,7 @@ fn cad_settings_wire_shape_is_a_flat_camel_case_object() {
             "navvcubeDisplay": 2,
             "viewCubeIn2d": false,
             "viewCubeIn3d": true,
+            "formatNoticeEnabled": false,
             "drawingUnit": "mm",
             "displayUnit": "cm",
             "unitPrecision": 2,
@@ -75,8 +77,8 @@ fn cad_settings_wire_shape_is_a_flat_camel_case_object() {
             "fontsDirMissing": true,
         })
     );
-    // Exactly the thirty-one documented fields; no unrelated Options fields.
-    assert_eq!(wire.as_object().expect("object").len(), 31);
+    // Exactly the thirty-two documented fields; no unrelated Options fields.
+    assert_eq!(wire.as_object().expect("object").len(), 32);
     // The backend choice keeps the shared snake_case key on the snapshot wire
     // (`settings.wgpu_backend` in the UI), never camelCased into `wgpuBackend`.
     assert!(

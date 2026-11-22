@@ -11,10 +11,12 @@ import assert from 'node:assert/strict';
 import { readCss, readModule } from './helpers.ts';
 import {
   PALETTE_CASCADE_STEP,
+  PALETTE_DEFAULT_SHARE,
   PALETTE_DEFAULT_WIDTH,
   PALETTE_DRAG_BLOCKER_SELECTOR,
   PALETTE_HEADER_HEIGHT,
   PALETTE_MAX_DEFAULT_WIDTH,
+  PALETTE_MAX_WIDTH,
   PALETTE_MIN_VISIBLE_WIDTH,
   PALETTE_MIN_WIDTH,
   cascadeOffset,
@@ -53,21 +55,28 @@ test('a palette defaults to the left edge and cascades down by a fixed step', ()
   assert.equal(cascadeOffset(Number.NaN), 0);
 });
 
-test('a palette opens wider on a wide drawing, within [300, 460]', () => {
+test('a palette opens wider on a wide drawing, within [300, 560]', () => {
   assert.equal(PALETTE_DEFAULT_WIDTH, 300);
-  assert.equal(PALETTE_MAX_DEFAULT_WIDTH, 460);
+  assert.equal(PALETTE_DEFAULT_SHARE, 0.38);
+  assert.equal(PALETTE_MAX_DEFAULT_WIDTH, 560);
   assert.equal(defaultPaletteWidth(), 300);
   assert.equal(defaultPaletteWidth(Number.NaN), 300);
   assert.equal(defaultPaletteWidth(0), 300);
   assert.equal(defaultPaletteWidth(-1000), 300);
-  // 32% of the drawing, never below 300 and never above 460.
+  // 38% of the drawing, never below the old 300px dock and never above the
+  // 560px default ceiling — and never wider than the drawing itself.
   assert.equal(defaultPaletteWidth(500), 300);
-  assert.equal(defaultPaletteWidth(1000), 320);
-  assert.equal(defaultPaletteWidth(1250), 400);
-  assert.equal(defaultPaletteWidth(1600), 460);
-  assert.equal(defaultPaletteWidth(100000), 460);
+  assert.equal(defaultPaletteWidth(1000), 380);
+  assert.equal(defaultPaletteWidth(1250), 475);
+  assert.equal(defaultPaletteWidth(1440), 547, '38% of a 1440px window is below the ceiling');
+  assert.equal(defaultPaletteWidth(1600), 560);
+  assert.equal(defaultPaletteWidth(100000), 560);
+  // A drawing narrower than the old dock gives what the drawing has (the store
+  // never asks for more width than the layer reports), floored by the minimum.
+  assert.equal(defaultPaletteWidth(320), 300);
+  assert.equal(defaultPaletteWidth(240), PALETTE_MIN_WIDTH);
   // The placement stays at the left edge and keeps its cascade.
-  assert.deepEqual(defaultPaletteGeometry(1, 1000), { left: 0, top: 24, width: 320 });
+  assert.deepEqual(defaultPaletteGeometry(1, 1000), { left: 0, top: 24, width: 380 });
   assert.deepEqual(defaultPaletteGeometry(1), { left: 0, top: 24, width: 300 });
 });
 
@@ -85,11 +94,18 @@ test('dragging clamps at all four edges and keeps 80px of width visible', () => 
   assert.deepEqual(moveGeometry(start, 120, 80, LAYER), { left: 120, top: 80, width: 300 });
 });
 
-test('resizing clamps to [280, layerWidth] and re-clamps the position', () => {
+test('resizing clamps to [280, min(layerWidth, 720)] and re-clamps the position', () => {
   const start = defaultPaletteGeometry(0);
+  assert.equal(PALETTE_MAX_WIDTH, 720);
   assert.equal(resizeGeometry(start, 100, LAYER).width, PALETTE_MIN_WIDTH);
   assert.equal(resizeGeometry(start, 400, LAYER).width, 400);
-  assert.equal(resizeGeometry(start, 5000, LAYER).width, LAYER.width);
+  // The absolute ceiling wins over a wider layer: a drag never turns the
+  // inspector into a full-screen panel on a 4K drawing.
+  assert.equal(resizeGeometry(start, 5000, LAYER).width, PALETTE_MAX_WIDTH);
+  assert.equal(clampWidth(5000, 5000), PALETTE_MAX_WIDTH);
+  assert.equal(clampWidth(700, 5000), 700, 'a width under the ceiling is kept exactly');
+  // The layer is still the hard limit when it is narrower than the ceiling.
+  assert.equal(clampWidth(600, 400), 400);
   // A window overhanging the left edge is pulled back when it narrows: the
   // visible share must still be inside the layer.
   const overhanging = { left: -220, top: 0, width: 300 };
@@ -104,9 +120,9 @@ test('a whole placement is clamped before it is rendered or dragged', () => {
   // Width is clamped first; a full-width window can keep only 80px on either
   // side, and a leftward request resolves to the left-edge limit.
   assert.deepEqual(clampGeometry({ left: -9999, top: 9999, width: 9999 }, LAYER), {
-    left: -(LAYER.width - PALETTE_MIN_VISIBLE_WIDTH),
+    left: -(PALETTE_MAX_WIDTH - PALETTE_MIN_VISIBLE_WIDTH),
     top: LAYER.height - PALETTE_HEADER_HEIGHT,
-    width: LAYER.width,
+    width: PALETTE_MAX_WIDTH,
   });
   assert.equal(clampGeometry({ left: 9999, top: 0, width: 300 }, LAYER).left, LAYER.width - PALETTE_MIN_VISIBLE_WIDTH);
   assert.equal(clampLeft(0, 300, LAYER.width), 0);

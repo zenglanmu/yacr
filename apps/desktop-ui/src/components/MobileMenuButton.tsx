@@ -1,31 +1,37 @@
-// The mobile top bar: one button, and nothing else.
+// The compact layout's menu button: one floating control, no top bar.
 //
-// It replaces the title/QAT row, the ribbon tab strip and the drawing-tab strip on
-// the compact layout. The CAD drawing is the thing that must get the space, so the
-// bar keeps exactly one control: the 44x44 menu button that opens the ribbon
-// drawer (`aria-expanded`/`aria-controls`, the smallest comfortable touch target,
-// and the only way into the tools).
+// The compact layout has no title row, no ribbon band and no drawing-tab strip,
+// and it no longer spends a 52px strip on the one control the drawing needs. The
+// CAD drawing starts at the viewport's first pixel; this 44x44 button floats over
+// its **top-left corner** as a fixed overlay (`aria-expanded`/`aria-controls` name
+// the ribbon drawer) and is the only way into the tools. 44px square is the
+// smallest comfortable touch target, and it is the only painted node: no row, no
+// scrim, no wrapper wider than the button, so every pixel around it still reaches
+// the CAD surface (`mobile.css` keeps the `.mobile-topbar` class names because the
+// web smoke harness and the Android host's layout log select them as the compact
+// chrome's anchor; nothing under that name paints a bar any more).
 //
 // The open drawing's name is **not** here. A filename is not a control, and on a
 // 390px phone a title line either truncates a name the user cannot read or pushes
-// the one button aside; it now lives in the drawer's own header, where a tap on the
-// menu button shows the full name and the tools at the same time. The theme switch
-// moved to the navigation dock's fixed head (mobile only) for the same reason: one
-// row, one control, and it stays reachable without scrolling. Nothing else competes
-// with the drawing.
+// the one button aside; it lives in the drawer's own header, where a tap on this
+// button shows the full name and the tools at the same time. The theme switch
+// lives in the navigation dock's fixed head (mobile only) for the same reason: it
+// stays reachable without scrolling, and nothing competes with the drawing.
 //
 // The import strip is the one addition, and it is 2px tall: the desktop puts open
 // progress in the drawing-tab strip, which does not exist here, so a long DWG
 // import would otherwise be invisible (a blank drawing area with no hint that
 // something is running). It reports the host's own progress figure and never
-// invents one; a determinate import fills the bar, an indeterminate one slides.
+// invents one; a determinate import fills the strip, an indeterminate one slides.
+// It is pinned to the drawing's own top edge (below the cutout inset) and takes no
+// input, because a progress report must not cost the drawing a press.
 import React from 'react';
 import { Icon } from '../icons.tsx';
 import { useI18n, useShell } from '../context.ts';
 import { importProgressView } from '../cad/cad-status.ts';
 import type { CadImportProgress } from '../cad/cad-status.ts';
 
-export interface MobileTopBarProps {
+export interface MobileMenuButtonProps {
   /** Whether the ribbon drawer is open (`aria-expanded`). */
   readonly menuOpen: boolean;
   /** Toggle the drawer. */
@@ -34,14 +40,14 @@ export interface MobileTopBarProps {
   readonly drawerId: string;
 }
 
-export function MobileTopBar({ menuOpen, onMenu, drawerId }: MobileTopBarProps) {
+export function MobileMenuButton({ menuOpen, onMenu, drawerId }: MobileMenuButtonProps) {
   const { t } = useI18n();
   const shell = useShell();
   const progress = importProgressView(shell.importProgress as CadImportProgress | null, t);
   const percent = progress && progress.determinate ? Math.round((progress.ratio ?? 1) * 100) : null;
   const running = progress !== null || shell.loading;
   return (
-    <header className="mobile-topbar app-region" role="banner">
+    <div className="mobile-topbar app-region">
       <button
         type="button"
         className={['mobile-topbar__menu', menuOpen ? 'is-open' : ''].filter(Boolean).join(' ')}
@@ -67,6 +73,6 @@ export function MobileTopBar({ menuOpen, onMenu, drawerId }: MobileTopBarProps) 
           />
         </span>
       ) : null}
-    </header>
+    </div>
   );
 }

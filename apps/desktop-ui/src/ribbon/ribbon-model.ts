@@ -51,6 +51,16 @@ export const PALETTE_ACTIONS: readonly string[] = Object.freeze([
 ]);
 
 /**
+ * The palette actions a compact layout can still render — as its own sheet.
+ *
+ * The properties inspector is the one desktop palette with a compact equivalent
+ * (the layout mounts the same `PropertiesDock` as a bottom sheet), so its entry
+ * survives the carrier filter below; `fileinfo`, `diagnostics` and the layer run
+ * still have no compact surface and are dropped.
+ */
+export const SHEET_PALETTE_ACTIONS: readonly string[] = Object.freeze([SHELL_ACTIONS.properties]);
+
+/**
  * Palette toggles that dispatch a **command name** instead of a shell action.
  *
  * `LAYER` opens the layers palette but rides the command funnel (it is a
@@ -196,14 +206,22 @@ export interface RibbonTab {
  * palette toggles are filtered; every other item is returned as the very same
  * array, so a carrier with the palettes (`native-below`, and any chrome state
  * without the flag) renders exactly the ribbon it always did.
+ *
+ * `sheetActions` is the one exemption (see [`SHEET_PALETTE_ACTIONS`]): palette
+ * actions with a compact surface survive `palettesAvailable === false`.
  */
 export function offeredItems(
   items: readonly RibbonItem[],
   palettesAvailable: boolean | undefined,
+  sheetActions: readonly string[] = [],
 ): readonly RibbonItem[] {
   if (palettesAvailable !== false) return items;
-  return items.filter(item => !(typeof item.action === 'string' && PALETTE_ACTIONS.includes(item.action))
-    && !(typeof item.command === 'string' && PALETTE_COMMANDS.includes(item.command)));
+  return items.filter(item => {
+    if (typeof item.action === 'string' && sheetActions.includes(item.action)) return true;
+    if (typeof item.action === 'string' && PALETTE_ACTIONS.includes(item.action)) return false;
+    if (typeof item.command === 'string' && PALETTE_COMMANDS.includes(item.command)) return false;
+    return true;
+  });
 }
 
 /**
@@ -213,13 +231,17 @@ export function offeredItems(
  * panels hold nothing but palette toggles, so on a carrier without the palettes
  * they would render as empty titled boxes. A panel that has nothing left is
  * dropped whole, together with its title and launcher.
+ *
+ * `sheetActions` is passed through to [`offeredItems`], so a panel whose only
+ * survivor is a sheet palette (the compact properties inspector) is kept.
  */
 export function offeredPanels(
   panels: readonly RibbonPanel[],
   palettesAvailable: boolean | undefined,
+  sheetActions: readonly string[] = [],
 ): readonly RibbonPanel[] {
   if (palettesAvailable !== false) return panels;
-  return panels.filter(panel => offeredItems(panel.items, palettesAvailable).length > 0);
+  return panels.filter(panel => offeredItems(panel.items, palettesAvailable, sheetActions).length > 0);
 }
 
 /**
