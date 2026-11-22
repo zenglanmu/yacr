@@ -9,7 +9,15 @@ repository.workspace = true
 description = "UI-independent CAD render session orchestration."
 
 [dependencies]
-cad-app.workspace = true
+# `default-features = false` so the wasm `dom-canvas` graph (which reaches
+# `cad-app` through this crate) links only the DWG/DXF lanes. A **new shared crate
+# between `app-web` and `cad-app` must disable defaults too**, or the bundle
+# regains every format. Native carriers enable the default `formats-all`.
+#
+# Spelled as a path (not `workspace = true`) because this workspace is edition
+# 2021: Cargo ignores `default-features` on an inherited edge there. Same package,
+# same lock entry — the build graph is unchanged.
+cad-app = { path = "../cad-app", default-features = false }
 cad-db.workspace = true
 cad-domain.workspace = true
 cad-render-wgpu.workspace = true

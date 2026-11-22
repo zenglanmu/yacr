@@ -19,15 +19,25 @@
 #                                 CLI version equals the `Cargo.toml` pin exactly;
 #                                 sets YACR_CARGO_BIN, YACR_WASM_BINDGEN_BIN,
 #                                 YACR_WASM_BINDGEN_VERSION, YACR_WASM_FILE
-#   yacr_build_app_web_wasm       `cargo build -p app-web --target wasm32-unknown-unknown
-#                                 --profile wasm --locked` (the size profile in
-#                                 `Cargo.toml`), then asserts the .wasm exists
+#   yacr_build_app_web_wasm [slim|full]
+#                                 `cargo build -p app-web --target
+#                                 wasm32-unknown-unknown --profile wasm --locked`
+#                                 (the size profile in `Cargo.toml`). `slim`
+#                                 (default) is the deployed browser bundle:
+#                                 DWG/DXF connector lanes only, then asserts the
+#                                 .wasm exists and fails closed when the resolved
+#                                 tree regained a `cad-app` `formats-*` feature or
+#                                 a connector crate. `full` passes `--features
+#                                 full-formats` for the desktop `dom-canvas`
+#                                 carrier and skips both the leak guard and the
+#                                 20 MiB budget
 #   yacr_bindgen_web <out-dir>    wasm-bindgen `--target web --no-typescript` into
 #                                 <out-dir>, asserts both artifacts, then runs
 #                                 `yacr_optimize_wasm` on the module
 #   yacr_optimize_wasm <wasm>     `wasm-opt -Oz --strip-debug --strip-producers` in
-#                                 place; a module still over the 25 MiB Cloudflare
-#                                 Pages per-file limit is a hard error
+#                                 place; a slim module over the 20 MiB DWG/DXF-only
+#                                 budget, or any module over the 25 MiB Cloudflare
+#                                 Pages per-file limit, is a hard error
 #   yacr_rotate_generated_dir <dir> <expected> <label>
 #                                 removes + recreates a **generated** directory, and
 #                                 refuses any path other than <expected>
@@ -52,6 +62,15 @@ readonly YACR_PINNED_WASM_BINDGEN="0.2.130"
 readonly YACR_PINNED_WASM_OPT="120"
 # Cloudflare Pages per-file upload ceiling: 25 MiB (26,214,400 bytes).
 readonly YACR_MAX_WASM_BYTES=26214400
+# Headroom budget for the DWG/DXF-only bundle: 20 MiB. This is **not** the publish
+# ceiling. The module was ~24 MiB when every connector was linked; trimming the
+# connector set is what buys the margin, so a silent return to the full set must
+# fail loudly here, well before Cloudflare's 25 MiB per-file limit is reached.
+readonly YACR_WASM_BUDGET_BYTES=20971520
+# Which connector set the last `yacr_build_app_web_wasm` asked for. `1` (slim,
+# DWG/DXF only) is the deployed browser bundle and the fail-closed default;
+# `yacr_build_app_web_wasm full` clears it for the desktop `dom-canvas` carrier.
+YACR_WASM_SLIM=1
 # Custom size profile (`[profile.wasm]` in the workspace manifest); its output
 # lands in `target/<target>/wasm/`, not `.../release/`.
 readonly YACR_WASM_PROFILE="wasm"
@@ -134,20 +153,86 @@ yacr_init_wasm_toolchain() {
 }
 
 yacr_build_app_web_wasm() {
+  local formats="${1:-slim}"
+  local -a extra=()
+  case "$formats" in
+    # The deployed browser bundle: `cad-app`'s default features stay off, so the
+    # module links the DWG/DXF lanes only and the 20 MiB budget applies.
+    slim) YACR_WASM_SLIM=1 ;;
+    # The desktop `dom-canvas` carrier: no per-file size ceiling and the same
+    # capabilities as the native carriers, so `app-web`'s `full-formats` turns
+    # every connector back on. Neither the leak guard nor the budget applies.
+    full) YACR_WASM_SLIM=0; extra=(--features full-formats) ;;
+    *) yacr_die "yacr_build_app_web_wasm takes 'slim' (the deployed browser bundle) or 'full' (the desktop dom-canvas carrier), got '$formats'" ;;
+  esac
   [ -n "${YACR_CARGO_BIN:-}" ] || yacr_die "yacr_build_app_web_wasm called before yacr_init_wasm_toolchain"
-  printf 'building app-web for %s (profile %s, locked)\n' \
-    "$YACR_WASM_TARGET" "$YACR_WASM_PROFILE"
+  printf 'building app-web for %s (profile %s, %s formats, locked)\n' \
+    "$YACR_WASM_TARGET" "$YACR_WASM_PROFILE" "$formats"
   "$YACR_CARGO_BIN" build -p app-web --target "$YACR_WASM_TARGET" \
-    --profile "$YACR_WASM_PROFILE" --locked
+    --profile "$YACR_WASM_PROFILE" --locked ${extra[@]+"${extra[@]}"}
   [ -f "$YACR_WASM_FILE" ] || yacr_die "cargo reported success but $YACR_WASM_FILE is missing"
+  if [ "$YACR_WASM_SLIM" = 1 ]; then
+    yacr_assert_app_web_slim
+  fi
 }
 
-# Shrink the bindgen output in place and enforce the publishable ceiling.
+# Fail closed when the **resolved** app-web tree is not the DWG/DXF-only one.
+#
+# `apps/app-web/Cargo.toml` is one edge; Cargo unifies features per build, so the
+# bundle can regain the full connector set two ways that the manifest text alone
+# does not show:
+#
+# 1. a **shared crate** that depends on `cad-app` without
+#    `default-features = false` re-enables every `formats-*` feature. The same
+#    happens when a member writes `default-features = false` but the
+#    `[workspace.dependencies]` entry omits the key: Cargo silently drops the
+#    member's value (verified against a scratch workspace), so that entry has to
+#    carry `default-features = false` and native carriers opt back in with
+#    `default-features = true`;
+# 2. an edge that links a connector crate directly (`rvt`, `cadmpeg-*`,
+#    `ifc-lite-*`, `skpwright`, `cadkit-*`, `gltf`, `image`).
+#
+# Both checks read the real tree, not the manifest, because the leak is a
+# *resolution* result. A `cargo tree` failure is loud on purpose: an unverifiable
+# tree must never pass as a slim one.
+yacr_assert_app_web_slim() {
+  [ -n "${YACR_CARGO_BIN:-}" ] || yacr_die "yacr_assert_app_web_slim called before yacr_init_wasm_toolchain"
+  local features_tree normal_tree leaked
+
+  # `--edges features,normal,build --target <wasm>` is the wasm build's own unit
+  # graph, on purpose: the default edge set also walks `dev`, and `cad-host`'s
+  # `[dev-dependencies] cad-app` legitimately keeps the default `formats-all` so
+  # its fixture tests can open STL/DGN/IFC. `cargo tree -e features` folds that
+  # dev edge into the displayed resolution, so a dev-inclusive tree would fail
+  # this gate on a correctly slim bundle.
+  if ! features_tree="$("$YACR_CARGO_BIN" tree -p app-web --target "$YACR_WASM_TARGET" --edges features,normal,build -i cad-app --locked --offline)"; then
+    yacr_die "cargo tree -e features -i cad-app failed; cannot prove the wasm bundle kept its DWG/DXF-only format set"
+  fi
+  if leaked="$(grep -E 'formats-' <<<"$features_tree")"; then
+    printf '%s\n' "$leaked" >&2
+    yacr_die "the app-web wasm bundle regained cad-app 'formats-*' features (lines above): fix apps/app-web/Cargo.toml (the cad-app edge must set default-features = false and name no formats-* feature) and every shared crate with a [dependencies.cad-app] edge the same way"
+  fi
+
+  if ! normal_tree="$("$YACR_CARGO_BIN" tree -p app-web --target "$YACR_WASM_TARGET" -e normal --locked --offline)"; then
+    yacr_die "cargo tree -p app-web --target $YACR_WASM_TARGET failed; cannot prove the bundle dropped the other connectors"
+  fi
+  # `^<tree glyphs>*<crate> v<version>` anchors on a package line, so a crate that
+  # merely contains one of these names (`cad-import-rvt`, `cad-export-gltf`) does
+  # not match: the name must be followed by its version.
+  if leaked="$(grep -E '^[│├└─ ]*(rvt|cadmpeg-[a-z0-9_-]+|ifc-lite-[a-z0-9_-]+|skpwright|cadkit-[a-z0-9_-]+|gltf|image) v[0-9]' <<<"$normal_tree")"; then
+    printf '%s\n' "$leaked" >&2
+    yacr_die "the app-web wasm bundle still links connector crates it must have dropped (lines above): this carrier is DWG/DXF only; check apps/app-web/Cargo.toml and every shared crate's [dependencies.cad-app] edge (formats-* features must stay off)"
+  fi
+}
+
+# Shrink the bindgen output in place and enforce the size gates.
 #
 # `web-deploy` uploads this module to Cloudflare Pages, which rejects any file
 # over 25 MiB. A module that optimizes above the limit is a hard error here (not
 # a deploy-time surprise) with the size and the remedy, so the bundle can never
-# be published partially or silently.
+# be published partially or silently. The tighter 20 MiB budget catches a
+# regression -- the full connector set creeping back in -- before it can reach
+# the publish ceiling.
 yacr_optimize_wasm() {
   local wasm="$1"
   local optimized="$wasm.opt"
@@ -174,6 +259,9 @@ yacr_optimize_wasm() {
   after="$(stat -c '%s' "$wasm")"
   if [ "$after" -gt "$YACR_MAX_WASM_BYTES" ]; then
     yacr_die "$wasm is $after bytes after wasm-opt -Oz, over the $YACR_MAX_WASM_BYTES-byte (25 MiB) Cloudflare Pages per-file limit; shrink the module (dependencies or [profile.wasm]) instead of deploying it"
+  fi
+  if [ "$YACR_WASM_SLIM" = 1 ] && [ "$after" -gt "$YACR_WASM_BUDGET_BYTES" ]; then
+    yacr_die "$wasm is $after bytes after wasm-opt -Oz, over the $YACR_WASM_BUDGET_BYTES-byte (20 MiB) budget for the DWG/DXF-only bundle: it regained connector formats; keep app-web's cad-app edge at default-features = false with no formats-* feature (and the same on every shared crate)"
   fi
   printf '  %-22s %10s -> %s bytes\n' "$(basename -- "$wasm")" "$before" "$after"
 }

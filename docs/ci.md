@@ -167,6 +167,13 @@ CLI 版本与 pin 一致——不依赖 runner 上恰好存在的工具。**本�
 `cargo build -p app-web --target wasm32-unknown-unknown --profile wasm --locked`、`wasm-opt` 与
 25 MiB 上限不被删除。
 
+`web-build` 构建的是**slim** 连接器集（2026-11-22）：`apps/app-web` 对 `cad-app` 用
+`default-features = false`，共享库在 `cargo build` 之后强制两条 `cargo tree` 泄漏守卫（不得出现
+`cad-app` 的 `formats-*`；不得链 `rvt`/`cadmpeg-*`/`ifc-lite-*`/`skpwright`/`cadkit-*`/`gltf`/`image`），
+并在 `wasm-opt` 之后检查 20 MiB 预算（实测 11,680,561 字节）。桌面 `dom-canvas`
+（`scripts/build-canvas-wasm.sh`）走 `full`，不受这两条检查约束。`check-workflows.py` 只钉 25 MiB
+上限；20 MiB 预算与泄漏守卫在共享库里，由构建本身 fail-closed。
+
 ## 子模块推送契约（pre-push hook）
 
 `plugins/tch` 是 git submodule，superproject 的 gitlink 必须指向 `tangent-ts` 远端**已发布**的

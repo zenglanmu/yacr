@@ -43,6 +43,14 @@
     "  * application/octet-stream is added on Android only: content providers routinely",
     "    report CAD files as octet-stream, and without it 'Open with' never matches.",
     "",
+    "webOpenExtensions is the **browser carrier's picker policy**, NOT an OS file",
+    "association: the wasm bundle (apps/app-web) is compiled with only the DWG/DXF",
+    "connector tail, so its picker may advertise those two plus .ymodel (which the",
+    "session refuses by name, `unsupported-runtime: ymodel`). Native pickers keep the",
+    "full `extensions` list; the browser set must stay a subset of it, and",
+    "scripts/test-file-associations.py fails when the page advertises more than the",
+    "bundle can import (or apps/app-web/Cargo.toml re-enables a `formats-*` feature).",
+    "",
     "Windows is deliberately absent: the release is a zip of executables with no",
     "installer, and registry associations can only be written by an installer. See",
     "docs/windows-app.md."
@@ -68,6 +76,7 @@
     "skp",
     "dgn"
   ],
+  "webOpenExtensions": ["ymodel", "dwg", "dxf"],
   "mimeTypes": [
     { "type": "application/x-yacr-ymodel", "extensions": ["ymodel"] },
     { "type": "image/vnd.dwg", "extensions": ["dwg"] },

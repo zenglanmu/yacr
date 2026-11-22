@@ -21,6 +21,7 @@ import {
   WEB_SESSION_COMMAND,
   WEB_UNAVAILABLE_PREFIX,
   createWebAdapter,
+  drawingFileRefusal,
   isDrawingFileName,
   loadWebShellModule,
 } from '../src/host/web-adapter.ts';
@@ -581,6 +582,43 @@ test('the extension check is case-insensitive and matches only the last dot', as
   assert.equal(isDrawingFileName('.dwg'), false);
   assert.equal(isDrawingFileName(undefined), false);
   assert.equal(isDrawingFileName('plan.dwg'), true);
+});
+
+test('the browser bundle advertises exactly its DWG/DXF tail plus .ymodel', () => {
+  // `app-web` compiles `cad-app` with `default-features = false` and no
+  // `formats-*` feature, so DWG/DXF is all the wasm session can read. `.ymodel`
+  // stays listed so the session's own `unsupported-runtime: ymodel` refusal
+  // reaches the user instead of a page-level "not a drawing" (see the constant's
+  // doc comment). The list is compared case-insensitively on the selected name.
+  assert.deepEqual([...WEB_OPEN_EXTENSIONS], ['.ymodel', '.dwg', '.dxf']);
+  for (const name of ['plan.dwg', 'PLAN.DWG', 'plan.v2.dxf', 'plan.DXF', 'plan.ymodel', 'PLAN.YMODEL']) {
+    assert.equal(isDrawingFileName(name), true, name);
+  }
+});
+
+test('the formats this bundle no longer compiles are refused by the page gate', () => {
+  // Each was a native carrier's importer format; the wasm bundle dropped the
+  // connector, so the gate must not hand the file to the session.
+  const rejected = ['.stl', '.obj', '.ply', '.off', '.step', '.ifc', '.rvt', '.skp', '.glb', '.gltf', '.dgn'];
+  for (const extension of rejected) {
+    assert.equal(isDrawingFileName(`model${extension}`), false, extension);
+    assert.equal(isDrawingFileName(`MODEL${extension.toUpperCase()}`), false, `${extension} (uppercase)`);
+  }
+  // And the refusal never claims one of them is openable.
+  const message = drawingFileRefusal('holiday.png');
+  for (const extension of rejected) {
+    assert.equal(message.includes(extension), false, `${extension} must not appear in: ${message}`);
+  }
+});
+
+test('the refusal names exactly the accepted set', () => {
+  // The sentence is interpolated from the constant, so a shrink here cannot leave
+  // a stale "supported formats" list behind.
+  const message = drawingFileRefusal('holiday.png');
+  assert.match(message, /OPEN refused "holiday\.png": only \.ymodel/);
+  for (const extension of ['.dwg', '.dxf', '.ymodel']) {
+    assert.ok(message.includes(extension), `${extension} must be named in: ${message}`);
+  }
 });
 
 test('a failed open rejects with the real module error', async () => {

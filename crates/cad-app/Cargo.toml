@@ -7,6 +7,37 @@ license.workspace = true
 authors.workspace = true
 description = "Session/Workspace, commands, capability and tool state."
 
+# Format lanes are feature-gated so a carrier that links only the DWG/DXF
+# exchange (the `dom-canvas` wasm bundle) does not pull every adapter into its
+# artifact. `cad-import-acadrust` stays mandatory: it is the DWG/DXF base and
+# `lib.rs` re-exports `cad_acadrust::…` unconditionally. The feature names below
+# are a contract — a carrier that disables defaults relies on them.
+[features]
+default = ["formats-all"]
+# Native carriers rely on this default; the web wasm bundle is slim only because
+# every `cad-app` edge in `app-web`'s graph disables defaults.
+formats-all = [
+  "formats-mesh",
+  "formats-ifc",
+  "formats-step",
+  "formats-dgn",
+  "formats-rvt",
+  "formats-skp",
+  "formats-gltf",
+]
+formats-mesh = [
+  "dep:cad-import-obj",
+  "dep:cad-import-stl",
+  "dep:cad-import-mesh",
+  "dep:cad-export-mesh",
+]
+formats-ifc = ["dep:cad-import-ifc", "dep:cad-export-ifc"]
+formats-step = ["dep:cad-import-step"]
+formats-dgn = ["dep:cad-import-dgn"]
+formats-rvt = ["dep:cad-import-rvt"]
+formats-skp = ["dep:cad-import-skp", "dep:cad-export-skp"]
+formats-gltf = ["dep:cad-import-gltf", "dep:cad-export-gltf"]
+
 [dependencies]
 cad-domain.workspace = true
 cad-db.workspace = true
@@ -16,19 +47,19 @@ cad-history.workspace = true
 cad-measure.workspace = true
 cad-import-core.workspace = true
 cad-import-acadrust.workspace = true
-cad-import-obj.workspace = true
-cad-import-stl.workspace = true
-cad-import-mesh.workspace = true
-cad-import-step.workspace = true
-cad-import-ifc.workspace = true
-cad-import-dgn.workspace = true
-cad-import-rvt.workspace = true
-cad-import-skp.workspace = true
-cad-import-gltf.workspace = true
-cad-export-mesh.workspace = true
-cad-export-ifc.workspace = true
-cad-export-skp.workspace = true
-cad-export-gltf.workspace = true
+cad-import-obj = { workspace = true, optional = true }
+cad-import-stl = { workspace = true, optional = true }
+cad-import-mesh = { workspace = true, optional = true }
+cad-import-step = { workspace = true, optional = true }
+cad-import-ifc = { workspace = true, optional = true }
+cad-import-dgn = { workspace = true, optional = true }
+cad-import-rvt = { workspace = true, optional = true }
+cad-import-skp = { workspace = true, optional = true }
+cad-import-gltf = { workspace = true, optional = true }
+cad-export-mesh = { workspace = true, optional = true }
+cad-export-ifc = { workspace = true, optional = true }
+cad-export-skp = { workspace = true, optional = true }
+cad-export-gltf = { workspace = true, optional = true }
 cad-representation.workspace = true
 cad-scene.workspace = true
 cad-query.workspace = true

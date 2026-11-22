@@ -20,6 +20,13 @@ default = []
 # compiles; it enables nothing.
 debug-session = []
 
+# The desktop `dom-canvas` carrier (Linux X11/XWayland, ADR 0024) builds this
+# same crate into `apps/desktop-ui/public/canvas/`, where no per-file size ceiling
+# applies, so `scripts/build-canvas-wasm.sh` opts back into every connector.
+# The deployed browser bundle (`scripts/build-web.sh`) stays on the default slim
+# edge: `cad-app` with `default-features = false`, i.e. DWG/DXF only.
+full-formats = ["cad-app/formats-all"]
+
 [dependencies]
 # The **host-agnostic shell surface** (`src/shell.rs`): the frozen `cad_status`
 # snapshot the shared React chrome (`apps/desktop-ui`) validates, plus the command
@@ -40,7 +47,16 @@ serde_json.workspace = true
 # arrow still points app → cad, never back.
 cad-domain.workspace = true
 cad-db.workspace = true
-cad-app.workspace = true
+# `default-features = false` keeps the browser artifact to the DWG/DXF lanes: the
+# `formats-*` adapters are linked only when a carrier enables them, and Cloudflare
+# Pages caps a single deployed file at 25 MiB. A **new shared crate between
+# `app-web` and `cad-app` must disable defaults too**, or the bundle regains every
+# format. Native carriers keep the default `formats-all`.
+#
+# Spelled as a path (not `workspace = true`) because this workspace is edition
+# 2021: Cargo ignores `default-features` on an inherited edge there. Same package,
+# same lock entry — the build graph is unchanged.
+cad-app = { path = "../../crates/cad-app", default-features = false }
 # The `dom-canvas` wire transport (`src/direct.rs`) decodes `invoke` arguments
 # into the typed values the desktop `#[tauri::command]` signatures produce, so it
 # needs `serde`'s derive. `serde_json` is already a dependency (the shell status

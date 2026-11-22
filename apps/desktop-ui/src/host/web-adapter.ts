@@ -30,7 +30,12 @@
 //    `status-changed` frame cannot reset it.
 //    The input carries **no** `accept` filter (it sends Android to the media
 //    picker) and the selected file is validated by extension instead — see
-//    `pickDrawingFile`/`openThroughHost`.
+//    `pickDrawingFile`/`openThroughHost`. That gate advertises exactly what the
+//    wasm bundle is compiled with: the DWG/DXF connector tail (`cad-app`'s
+//    `formats-*` features stay off) plus `.ymodel`, which the session refuses by
+//    its own name. Every other format is refused by the registry with
+//    `unsupported-runtime: import.<id>`, and this page must not pretend the
+//    bundle can read one.
 //
 // The two other names that are not forwarded are reports the chrome *sends*, not
 // asks for: `canvas_session_status` (the session's own drawing identity) and
@@ -232,38 +237,33 @@ export const WEB_OPEN_COMMAND = 'OPEN';
 export const WEB_HOST_COMMANDS: readonly string[] = [WEB_OPEN_COMMAND];
 
 /**
- * The file extensions this carrier opens and the importer reads.
+ * The file extensions this carrier's picker advertises, and the gate it applies
+ * to the selected file.
  *
- * The dispatcher behind the wasm session reads every one of these formats
- * (`cad-import-core::detect`), and all importers are wasm-clean; so this list is
- * the importer's set, not a narrower browser subset.
+ * The browser bundle is compiled with **only** the DWG/DXF connector tail: the
+ * `app-web` → `cad-app` edge is `default-features = false` and names no
+ * `formats-*` feature, so the wasm session cannot read the formats a native
+ * carrier still imports. This list therefore tracks the compiled connector set,
+ * not the importer's full set; `packaging/mime/formats.json` records it as
+ * `webOpenExtensions` and the file-association gate compares the two.
  *
- * `.ymodel` is the exception: it is Yacr's native zip+JSON document, not an
- * importer format, and the wasm session has no archive adapter. It is listed so
- * the accept set stays identical to `packaging/mime/formats.json`; the session
- * refuses it by name (`unsupported-runtime: ymodel`), never by a silent fallback
- * into a connector import.
+ * `.ymodel` is kept deliberately. It is Yacr's native zip+JSON document, not a
+ * connector format, and the wasm session has no archive adapter: the session
+ * refuses it by name (`unsupported-runtime: ymodel`). Filtering it out here would
+ * replace that precise refusal with a page-level "not a drawing", so it stays
+ * listed and reaches the session.
  *
- * `.rfa`/`.rft` are included deliberately: a Revit family has no geometry and the
- * RVT adapter refuses it with a precise `import.rvt.family_no_geometry`
- * diagnostic, which beats an unexplained "not a drawing" from this gate. They are
- * deliberately *not* in any "supported formats" copy.
- *
- * `.skp` is the SketchUp preview lane (`cad-import-skp`): triangle preview
- * geometry, never a measurement source, refusals by name
- * (`import.skp.edge_only_geometry` for an edge-only model).
- *
- * `.dgn` is the MicroStation drawing lane; the importer sniffs the bytes, so a
- * file that only claims the extension is refused by the importer, not here.
+ * Every other format (STEP, IFC, RVT, SKP, glTF, the mesh formats, DGN, …) is
+ * refused here before a byte is read — the picker must not advertise a format
+ * this bundle cannot import, and the registry's answer for an uncompiled
+ * connector is `unsupported-runtime: import.<id>`.
  *
  * Used **after** the picker returns, never as an `accept` filter (see
  * [`pickDrawingFile`]).
  */
 export const WEB_OPEN_EXTENSIONS: readonly string[] = Object.freeze([
   '.ymodel',
-  '.dwg', '.dxf', '.dgn', '.obj', '.stl', '.ply', '.off', '.coff',
-  '.step', '.stp', '.ifc', '.rvt', '.rte', '.rfa', '.rft', '.skp',
-  '.gltf', '.glb',
+  '.dwg', '.dxf',
 ]);
 
 /** The stable prefix of every module-unavailable failure. */
@@ -280,7 +280,7 @@ function fileExtension(name: unknown): string {
 }
 
 /**
- * Whether `name` is a file this carrier may hand to the importer.
+ * Whether `name` is a file this carrier's bundle may hand to the session.
  *
  * Checked on the **selected** file's name, because the picker deliberately does
  * not filter by type: the browser's `accept` list would otherwise decide the
@@ -291,7 +291,7 @@ export function isDrawingFileName(name: unknown): boolean {
 }
 
 /**
- * The stable refusal for a selected file this carrier cannot import.
+ * The stable refusal for a selected file this carrier cannot read.
  *
  * The extension list is interpolated, never spelled out separately, so the
  * message cannot drift from [`WEB_OPEN_EXTENSIONS`]: one refusal, naming the
@@ -396,9 +396,9 @@ function pickDrawingFile(doc: Document): Promise<File | null> {
  * nothing about the document changed). A selected file that is not a drawing is a
  * real failure and rejects with [`drawingFileRefusal`] before any byte is read —
  * the picker no longer filters by type (see [`pickDrawingFile`]), so this is the
- * one place that keeps a non-drawing out of the importer. Every other real failure
- * — no canvas, no `open_bytes`, an unreadable file, a refused import — rejects with
- * the real message instead.
+ * one place that keeps an unreadable format away from the session. Every other
+ * real failure — no canvas, no `open_bytes`, an unreadable file, a refused import
+ * — rejects with the real message instead.
  */
 async function openThroughHost(module: WebShellModule, doc: Document | null): Promise<unknown> {
   if (doc === null) {
@@ -418,7 +418,8 @@ async function openThroughHost(module: WebShellModule, doc: Document | null): Pr
   const file = await pickDrawingFile(doc);
   if (file === null) return { accepted: true };
   // The picker shows every file the document provider offers, so the format gate
-  // lives here: a wrong type is named and refused, never handed to the importer.
+  // lives here: a format this bundle cannot read is named and refused, never
+  // handed to the session.
   if (!isDrawingFileName(file.name)) throw new Error(drawingFileRefusal(file.name));
   const bytes = new Uint8Array(await file.arrayBuffer());
   let status: unknown;

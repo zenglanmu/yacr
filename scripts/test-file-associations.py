@@ -23,10 +23,16 @@ What it checks:
   declaration).
 * **in-app pickers** -- the three Rust ``OPEN_EXTENSIONS`` arrays
   (``app-linux`` / ``app-windows`` / ``app-macos`` ``src/platform.rs``, the
-  ``const`` definition only, never the ``#[cfg(test)]`` uses) and the frontend
-  ``WEB_OPEN_EXTENSIONS`` (``apps/desktop-ui/src/host/web-adapter.ts``) must hold
-  the canonical extension set. The Rust arrays are display order, so they must
-  match the canonical order exactly; the web array is compared as a set.
+  ``const`` definition only, never the ``#[cfg(test)]`` uses) must equal the
+  canonical ``extensions`` array exactly, in order: a native carrier opens every
+  format the authority associates. The **browser** picker makes a narrower
+  claim -- ``WEB_OPEN_EXTENSIONS`` (``apps/desktop-ui/src/host/web-adapter.ts``)
+  must equal ``webOpenExtensions`` from the authority (the connector tail the
+  DWG/DXF-only wasm bundle is compiled with) and that policy set must stay a
+  subset of ``extensions``: a page may advertise less than the OS association,
+  never more. ``apps/app-web/Cargo.toml`` must keep the Rust half of that
+  contract -- a ``cad-app`` edge with ``default-features = false`` and no
+  ``formats-*`` feature -- or the bundle silently regains every connector.
 * **Linux** -- the ``.desktop`` ``MimeType=`` set equals the canonical MIME-type
   set and keeps its trailing ``;``; the Flatpak manifest installs the
   shared-mime-info XML at ``/app/share/mime/packages/<app-id>.xml`` and ships it
@@ -63,6 +69,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+import tomllib
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -80,6 +87,8 @@ RUST_PICKERS = {
     "macos": ROOT / "apps" / "app-macos" / "src" / "platform.rs",
 }
 WEB_PICKER = ROOT / "apps" / "desktop-ui" / "src" / "host" / "web-adapter.ts"
+APP_WEB_MANIFEST = ROOT / "apps" / "app-web" / "Cargo.toml"
+WORKSPACE_MANIFEST = ROOT / "Cargo.toml"
 
 ANDROID_CONF = ROOT / "apps" / "app-android" / "src-tauri" / "tauri.conf.json"
 ANDROID_MANIFEST = (
@@ -147,6 +156,17 @@ def read_json(path: Path) -> tuple[object, str]:
         raise ShapeError("%s: invalid JSON (%s)" % (path, exc)) from exc
 
 
+def read_toml(path: Path) -> dict:
+    text = read_text(path)
+    try:
+        document = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as exc:
+        raise ShapeError("%s: invalid TOML (%s)" % (path, exc)) from exc
+    if not isinstance(document, dict):
+        raise ShapeError("%s: top level must be a table" % path)
+    return document
+
+
 def read_xml(path: Path) -> ET.Element:
     try:
         return ET.parse(path).getroot()
@@ -172,11 +192,12 @@ class Canonical:
 
     def __init__(self, extensions: list[str], mime_types: list[dict],
                  shared_mime_info: list[dict], android_extra: list[str],
-                 text: str) -> None:
+                 web_open_extensions: list[str], text: str) -> None:
         self.extensions = extensions
         self.mime_types = mime_types
         self.shared_mime_info = shared_mime_info
         self.android_extra = android_extra
+        self.web_open_extensions = web_open_extensions
         self.text = text
 
     @property
@@ -198,8 +219,16 @@ def load_canonical() -> Canonical:
     mime_types = document.get("mimeTypes")
     shared = document.get("sharedMimeInfo")
     android_extra = document.get("androidExtraMimeTypes", [])
+    web_open_extensions = document.get("webOpenExtensions")
     if not isinstance(extensions, list) or not all(isinstance(item, str) for item in extensions):
         raise ShapeError("%s: `extensions` must be a list of strings" % FORMATS)
+    if not isinstance(web_open_extensions, list) or not all(
+        isinstance(item, str) for item in web_open_extensions
+    ):
+        raise ShapeError(
+            "%s: `webOpenExtensions` must be a list of strings (the browser "
+            "carrier's picker policy)" % FORMATS
+        )
     if not isinstance(mime_types, list):
         raise ShapeError("%s: `mimeTypes` must be a list" % FORMATS)
     if not isinstance(shared, list):
@@ -226,7 +255,7 @@ def load_canonical() -> Canonical:
             raise ShapeError(
                 "%s: sharedMimeInfo[%d].globs must be a list of strings" % (FORMATS, index)
             )
-    return Canonical(extensions, mime_types, shared, android_extra, text)
+    return Canonical(extensions, mime_types, shared, android_extra, web_open_extensions, text)
 
 
 # ---------------------------------------------------------------------------
@@ -247,6 +276,36 @@ def check_canonical(canonical: Canonical) -> list[str]:
             problems.append("[canonical] extension %r must be lowercase" % extension)
         if extension.startswith("."):
             problems.append("[canonical] extension %r must not start with a dot" % extension)
+
+    # `webOpenExtensions` is the browser picker policy, not an OS association: it
+    # is dot-free and lowercase like the canonical list, and it must be a subset
+    # of it -- a page cannot advertise a format the authority does not associate.
+    if not canonical.web_open_extensions:
+        problems.append("[canonical] `webOpenExtensions` must not be empty")
+    web_known: set[str] = set()
+    for extension in canonical.web_open_extensions:
+        if not extension:
+            problems.append("[canonical] empty extension in `webOpenExtensions`")
+            continue
+        if extension in web_known:
+            problems.append(
+                "[canonical] duplicate extension %r in `webOpenExtensions`" % extension
+            )
+        web_known.add(extension)
+        if extension != extension.lower():
+            problems.append(
+                "[canonical] webOpenExtensions extension %r must be lowercase" % extension
+            )
+        if extension.startswith("."):
+            problems.append(
+                "[canonical] webOpenExtensions extension %r must not start with a dot"
+                % extension
+            )
+        if extension not in known:
+            problems.append(
+                "[canonical] webOpenExtensions member %r is not in `extensions`"
+                % extension
+            )
 
     types: list[str] = []
     covered: set[str] = set()
@@ -326,10 +385,7 @@ def web_picker_extensions(path: Path) -> list[str]:
         raise ShapeError(
             "%s: cannot find `export const WEB_OPEN_EXTENSIONS: readonly string[]`" % path
         )
-    return [
-        value[1:] if value.startswith(".") else value
-        for value in re.findall(r"'([^']*)'", match.group(1))
-    ]
+    return re.findall(r"'([^']*)'", match.group(1))
 
 
 def describe_set_drift(declared: list[str], expected: list[str]) -> str:
@@ -367,11 +423,106 @@ def check_pickers(canonical: Canonical) -> list[str]:
             )
 
     declared = web_picker_extensions(WEB_PICKER)
-    if set(declared) != set(canonical.extensions):
+    expected = ["." + extension for extension in canonical.web_open_extensions]
+    if set(declared) != set(expected) or len(declared) != len(set(declared)):
         problems.append(
-            "[picker:web] %s WEB_OPEN_EXTENSIONS drifts from "
-            "packaging/mime/formats.json: %s"
-            % (rel(WEB_PICKER), describe_set_drift(declared, canonical.extensions))
+            "[picker:web] %s WEB_OPEN_EXTENSIONS must equal `webOpenExtensions` in "
+            "packaging/mime/formats.json (the DWG/DXF-only wasm bundle): %s"
+            % (rel(WEB_PICKER), describe_set_drift(declared, expected))
+        )
+    return problems
+
+
+def check_web_wasm_bundle() -> list[str]:
+    """The Rust half of the browser picker contract.
+
+    ``WEB_OPEN_EXTENSIONS`` only *says* DWG/DXF; this checks the bundle is really
+    compiled that way. ``cad-app`` carries the connector crates behind
+    ``formats-*`` features, so a ``cad-app`` edge that leaves ``default-features``
+    on (or names a ``formats-*`` feature) re-links every importer into the wasm
+    module and the page's narrowed picker becomes a lie.
+    """
+    problems: list[str] = []
+    manifest = read_toml(APP_WEB_MANIFEST)
+    dependencies = manifest.get("dependencies")
+    if not isinstance(dependencies, dict):
+        raise ShapeError("%s: missing the `[dependencies]` table" % APP_WEB_MANIFEST)
+    edge = dependencies.get("cad-app")
+    if not isinstance(edge, dict):
+        raise ShapeError(
+            "%s: missing the `cad-app` dependency (expected a table declaring "
+            "`default-features = false`)" % APP_WEB_MANIFEST
+        )
+
+    # Cargo ignores a member's `default-features = false` when the
+    # `[workspace.dependencies]` entry omits the key -- the member's value is
+    # silently dropped and the default features stay on (verified against a
+    # scratch workspace) -- so resolve what Cargo actually does instead of
+    # trusting the edge text.
+    declared_default = edge.get("default-features")
+    inherited_from: str | None = None
+    if edge.get("workspace") is True:
+        workspace = read_toml(WORKSPACE_MANIFEST).get("workspace")
+        if not isinstance(workspace, dict):
+            raise ShapeError("%s: missing the `[workspace]` table" % WORKSPACE_MANIFEST)
+        workspace_deps = workspace.get("dependencies")
+        if not isinstance(workspace_deps, dict):
+            raise ShapeError(
+                "%s: missing `[workspace.dependencies]`" % WORKSPACE_MANIFEST
+            )
+        workspace_edge = workspace_deps.get("cad-app")
+        if not isinstance(workspace_edge, dict):
+            raise ShapeError(
+                "%s: `[workspace.dependencies]` declares no `cad-app` table"
+                % WORKSPACE_MANIFEST
+            )
+        workspace_default = workspace_edge.get("default-features")
+        if declared_default is not None and workspace_default is None:
+            problems.append(
+                "[web-bundle] %s: `[workspace.dependencies] cad-app` must declare "
+                "`default-features = false`; because it omits the key, Cargo drops "
+                "app-web's `default-features = false` and the bundle links every "
+                "format (native carriers then opt in with `default-features = true`)"
+                % rel(WORKSPACE_MANIFEST)
+            )
+            effective_default = True
+        elif declared_default is not None:
+            effective_default = declared_default
+            inherited_from = rel(WORKSPACE_MANIFEST)
+        else:
+            effective_default = workspace_default
+            inherited_from = rel(WORKSPACE_MANIFEST)
+    else:
+        effective_default = declared_default
+
+    if effective_default is not False:
+        problems.append(
+            "[web-bundle] %s: the `cad-app` edge must declare "
+            "`default-features = false`%s; with defaults on, every `formats-*` "
+            "feature is re-enabled and the wasm bundle regains all connectors"
+            % (
+                rel(APP_WEB_MANIFEST),
+                " (read through `[workspace.dependencies]` in %s)" % inherited_from
+                if inherited_from
+                else "",
+            )
+        )
+
+    features = edge.get("features", [])
+    if not isinstance(features, list):
+        raise ShapeError(
+            "%s: the `cad-app` edge `features` must be a list" % APP_WEB_MANIFEST
+        )
+    enabled = [
+        feature
+        for feature in features
+        if isinstance(feature, str) and feature.startswith("formats-")
+    ]
+    if enabled:
+        problems.append(
+            "[web-bundle] %s: the `cad-app` edge enables %s, but the browser "
+            "bundle is DWG/DXF only (see `webOpenExtensions`); no `formats-*` "
+            "feature may be named here" % (rel(APP_WEB_MANIFEST), enabled)
         )
     return problems
 
@@ -692,6 +843,7 @@ def main() -> int:
         problems: list[str] = []
         problems.extend(check_canonical(canonical))
         problems.extend(check_pickers(canonical))
+        problems.extend(check_web_wasm_bundle())
         problems.extend(check_linux(canonical))
         problems.extend(check_android(canonical))
         problems.extend(check_macos(canonical))

@@ -896,6 +896,9 @@ pub fn shell_command(command: &str) -> Result<String, String> {
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
+mod connector_tests;
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod native_tests {
     //! The honesty rule of the native target: every browser-only export refuses
     //! with the explicit NOT IMPLEMENTED diagnostic, and the **pure** answers keep

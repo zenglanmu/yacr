@@ -163,12 +163,25 @@ pub mod command_id;
 pub use app_chamfer_edge::{chamfer_edge_target, ChamferEdgeTarget};
 pub use app_drawing::solids::SOLID_MODELER_UNSUPPORTED;
 pub use command_id::{AppMode, CommandId, ExtendedCommandId, RefusalId};
+#[cfg(feature = "formats-dgn")]
+pub use connector::DESCRIPTOR_DGN;
+#[cfg(feature = "formats-gltf")]
+pub use connector::DESCRIPTOR_GLTF;
+#[cfg(feature = "formats-ifc")]
+pub use connector::DESCRIPTOR_IFC;
+#[cfg(feature = "formats-rvt")]
+pub use connector::DESCRIPTOR_RVT;
+#[cfg(feature = "formats-skp")]
+pub use connector::DESCRIPTOR_SKP;
+#[cfg(feature = "formats-step")]
+pub use connector::DESCRIPTOR_STEP;
 pub use connector::{
-    ConnectorRegistry, ExportConnector, ExportSettings, ImportConnector, OpenedSource,
-    DESCRIPTOR_DGN, DESCRIPTOR_DWG, DESCRIPTOR_DXF, DESCRIPTOR_GLTF, DESCRIPTOR_IFC,
-    DESCRIPTOR_OBJ, DESCRIPTOR_OFF, DESCRIPTOR_PLY, DESCRIPTOR_RVT, DESCRIPTOR_SKP,
-    DESCRIPTOR_STEP, DESCRIPTOR_STL,
+    absent_export_reason, absent_import_reason, unclaimed_input, ConnectorRegistry,
+    ExportConnector, ExportSettings, ImportConnector, OpenedSource, ALL_FORMATS_COMPILED,
+    DESCRIPTOR_DWG, DESCRIPTOR_DXF, KNOWN_EXPORT_KEYS,
 };
+#[cfg(feature = "formats-mesh")]
+pub use connector::{DESCRIPTOR_OBJ, DESCRIPTOR_OFF, DESCRIPTOR_PLY, DESCRIPTOR_STL};
 pub use draw_tool::{
     circle_radius, AlignPairSet, DrawIntent, DrawPreview, DrawTool, DrawToolKind, PointArity,
     StretchWindowMode, StretchWindowStep, ToolParameter, ToolParameterStore, ToolValue,

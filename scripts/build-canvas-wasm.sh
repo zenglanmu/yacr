@@ -312,7 +312,11 @@ yacr_rotate_generated_dir \
 
 # --- build -----------------------------------------------------------------
 
-yacr_build_app_web_wasm
+# `full`: the desktop `dom-canvas` carrier has no per-file size ceiling and must
+# keep the same formats as the native carriers, so it opts back into every
+# connector (`app-web`'s `full-formats`). The deployed browser bundle
+# (`scripts/build-web.sh`) stays DWG/DXF-only.
+yacr_build_app_web_wasm full
 yacr_bindgen_web "$OUT_DIR"
 
 printf 'writing %s (public/, so no bundler rewrites its imports)\n' "$BOOTSTRAP_JS"

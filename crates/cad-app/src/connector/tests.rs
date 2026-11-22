@@ -305,7 +305,8 @@ fn dxf_export_goes_through_the_acadrust_adapter() {
 /// Every read-only descriptor must be a **named** refusal.
 ///
 /// A descriptor with `export: None` has no writer; if its id were missing
-/// from `REFUSALS`, `export(id)` would fall through to `export.unknown_format`
+/// from the refusal table, `export(id)` would fall through to
+/// `export.unknown_format`
 /// and imply the format merely does not exist. The invariant is the inverse
 /// of the existing "every export lane's descriptor declares a capability":
 /// every capability that is absent is still an answerable format.
@@ -318,8 +319,8 @@ fn every_descriptor_without_a_writer_is_a_named_refusal() {
         if descriptor.export.is_none() {
             assert!(
                 registry.refusals.iter().any(|(id, _)| *id == descriptor.id),
-                "{} has no writer and is not in REFUSALS, so its id would be \
-                     export.unknown_format",
+                "{} has no writer and is not in the refusal table, so its id would \
+                     be export.unknown_format",
                 descriptor.id
             );
             read_only.push(descriptor.id);
@@ -328,7 +329,8 @@ fn every_descriptor_without_a_writer_is_a_named_refusal() {
     assert_eq!(
         read_only.len(),
         registry.refusals.len(),
-        "REFUSALS must contain exactly the descriptors without a writer: {read_only:?}"
+        "the refusal table must contain exactly the descriptors without a writer: \
+         {read_only:?}"
     );
 
     let database = one_line_db();
@@ -376,7 +378,7 @@ fn every_descriptor_is_listed_once() {
     }
     // Every export key names a registered descriptor, and every refusal's
     // descriptor declares no writer.
-    for (id, descriptor) in registry.refusals {
+    for (id, descriptor) in &registry.refusals {
         assert!(
             registry.descriptor(id).is_some(),
             "refusal key {id} has no descriptor"
@@ -440,7 +442,7 @@ fn every_export_key_matches_its_descriptor_capability() {
         // (`stl-ascii`) reports `stl` like the binary key does.
         assert_eq!(output.report.connector, descriptor.id);
     }
-    for (id, _) in registry.refusals {
+    for (id, _) in &registry.refusals {
         assert!(
             !registry.exports.iter().any(|c| c.format_id == *id),
             "{id} is both a writer lane and a refusal"

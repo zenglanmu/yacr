@@ -11,7 +11,15 @@ description = "Platform-common, UI-free host orchestration and open/save/plot fu
 [dependencies]
 cad-domain.workspace = true
 cad-db.workspace = true
-cad-app.workspace = true
+# `default-features = false` so the wasm `dom-canvas` graph (which reaches
+# `cad-app` through this crate) links only the DWG/DXF lanes. A **new shared crate
+# between `app-web` and `cad-app` must disable defaults too**, or the bundle
+# regains every format. Native carriers enable the default `formats-all`.
+#
+# Spelled as a path (not `workspace = true`) because this workspace is edition
+# 2021: Cargo ignores `default-features` on an inherited edge there. Same package,
+# same lock entry — the build graph is unchanged.
+cad-app = { path = "../cad-app", default-features = false }
 cad-engine.workspace = true
 cad-platform.workspace = true
 cad-representation.workspace = true
@@ -34,6 +42,9 @@ sha2.workspace = true
 web-time.workspace = true
 
 [dev-dependencies]
+# The host tests open committed STL/DGN/IFC fixtures, so the test build needs the
+# full lane set even though the normal edge above is slim.
+cad-app = { workspace = true }
 # CHAMFEREDGE's tool-start gate needs an injected `SolidModeler` to prove the
 # Viewer refusal happens *before* the capability/selection checks. The seam trait
 # is all this test target links (the kernel itself stays carrier-owned; see
