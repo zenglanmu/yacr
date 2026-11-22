@@ -290,19 +290,19 @@ impl Application {
         let bounds = self.document_bounds(command.document);
         let viewport = self.viewport_mut(command)?;
         let entering_from_plan = viewport.view_mode.kind() == ProjectionKind::TwoD;
-        let target = viewport.camera.target;
-        let distance = if entering_from_plan {
-            viewport
+        // Entering 3D from the plan takes the fitted target as well as the
+        // distance: the plan target's `z = 0` is not the model's centre, so a
+        // VPOINT orbit would otherwise turn about a point below/above the solid.
+        // An existing 3D observation keeps its own target and distance.
+        let (target, distance) = if entering_from_plan {
+            let fitted = viewport
                 .camera
-                .enter_3d(bounds, camera::DEFAULT_PERSPECTIVE_FOV_RADIANS)?
-                .distance()
+                .enter_3d(bounds, camera::DEFAULT_PERSPECTIVE_FOV_RADIANS)?;
+            (fitted.target, fitted.distance())
         } else {
             let d = viewport.camera.distance();
-            if d.is_finite() && d > 1e-6 {
-                d
-            } else {
-                1000.0
-            }
+            let distance = if d.is_finite() && d > 1e-6 { d } else { 1000.0 };
+            (viewport.camera.target, distance)
         };
         // A top/bottom direction needs a non-Z up hint; every other direction
         // uses world +Z. `ViewBasis` would correct a parallel hint anyway, but

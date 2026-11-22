@@ -121,7 +121,7 @@ test('a missing or degenerate basis never fabricates an orientation', () => {
   assert.equal(viewCubeBasis(camera({ eye: [Number.NaN, 0, 1] })), null);
 });
 
-test('the component is a canvas with hidden real faces, Home and an orbit drag', async () => {
+test('the component is a sphere canvas with hidden real directions, Home and an orbit drag', async () => {
   const source = await readModule('components/ViewCube.tsx');
   assert.ok(source.includes('useSyncExternalStore('), 'the orbit lives in the leaf');
   assert.ok(source.includes('volatileStatusStore.subscribe'));
@@ -133,21 +133,22 @@ test('the component is a canvas with hidden real faces, Home and an orbit drag',
   assert.ok(source.includes('setTransform(ratio, 0, 0, ratio, 0, 0)'), 'the backing store follows devicePixelRatio');
   assert.ok(source.includes('ResizeObserver'), 'a size change redraws');
   assert.ok(source.includes('MutationObserver') && source.includes('THEME_ATTRIBUTE'), 'a theme switch re-reads the tokens');
-  assert.ok(source.includes('readCubePalette'), 'the palette comes from the CSS tokens');
+  assert.ok(source.includes('readSpherePalette'), 'the palette comes from the CSS tokens');
   assert.ok(source.includes("getPropertyValue('--font-ui')"), 'the label font is the chrome token, not the UA default');
   assert.equal(source.includes('requestAnimationFrame'), false, 'no permanent animation loop in the component');
-  // Six faces + Home stay real, focusable controls.
-  assert.ok(source.includes('CUBE_FACES.map'), 'the face table is the single source');
-  assert.ok(source.includes('className="sr-only"'), 'the faces are visually hidden, not removed');
+  // Six directions + Home stay real, focusable controls.
+  assert.ok(source.includes('SPHERE_DIRECTIONS.map'), 'the direction table is the single source');
+  assert.ok(source.includes('className="sr-only"'), 'the directions are visually hidden, not removed');
   for (const face of ['front', 'back', 'left', 'right', 'top', 'bottom']) {
     assert.ok(source.includes(`'viewcube.face.${face}'`), `${face} has a catalog key`);
   }
-  assert.ok(source.includes('shell.runStandardView(face.view)'), 'a face is a standard view, never a camera write');
+  assert.ok(source.includes('shell.runStandardView(direction.view)'), 'a cap is a standard view, never a camera write');
   assert.ok(source.includes("shell.runStandardView('isometric')"));
-  assert.ok(source.includes('standardViewAvailable(shell, face.view)'), 'shared admission, not a local guess');
+  assert.ok(source.includes('standardViewAvailable(shell, direction.view)'), 'shared admission, not a local guess');
   assert.ok(source.includes('standardViewUnavailableReasonKey'), 'a refusal keeps the shared reason key');
-  // The pointer split: a click picks a face, a drag orbits through the coalescer.
-  assert.ok(source.includes('pickFace('), 'a click hit-tests the visible faces');
+  // The pointer split: a click picks a cap, a drag orbits through the coalescer.
+  assert.ok(source.includes('pickSphere('), 'a click hit-tests the front caps');
+  assert.ok(source.includes('drawSphere('), 'the painter takes the host basis, not a stored mesh');
   assert.ok(source.includes('new OrbitDrag('), 'a drag goes through the one coalescer');
   assert.ok(source.includes('orbitDelta('), 'the drag uses the host-mirroring delta');
   assert.ok(source.includes('orbitRadiansPerPixel('), 'the drag rate comes from the sensitivity helper');
@@ -167,24 +168,40 @@ test('the component is a canvas with hidden real faces, Home and an orbit drag',
   assert.ok(source.includes("'viewcube.orbit_needs_3d'"), 'the 2D refusal has the cube wording');
 });
 
-test('the cube stylesheet sizes the canvas and is not a floating overlay', async () => {
+test('the ball stylesheet is its own layer, sized larger than the old cube and not fixed', async () => {
   const css = await readModule('components/viewcube.css');
-  assert.ok(css.includes('--viewcube-size: 48px'), 'the cube size is a token');
   const ruleFor = selector => {
     const start = css.indexOf(`${selector} {`);
     assert.ok(start >= 0, `${selector} has a rule`);
     return css.slice(start, css.indexOf('}', start));
   };
+  assert.ok(ruleFor('.viewcube').includes('--viewball-size: 112px'), 'the ball size is a token');
+  const layer = ruleFor('.viewball-layer');
+  for (const declaration of ['position: absolute', 'inset: 0', 'z-index: 6', 'overflow: visible', 'pointer-events: none']) {
+    assert.ok(layer.includes(declaration), `.viewball-layer keeps ${declaration}`);
+  }
+  const ball = ruleFor('.viewcube');
+  assert.ok(ball.includes('position: absolute'), 'the ball floats over the drawing');
+  assert.ok(ball.includes('top: 14px'), 'desktop: 14px below the drawing edge');
+  assert.ok(ball.includes('right: calc(var(--navrail-w) + 14px)'), 'desktop: offset left of the rail');
+  assert.ok(ball.includes('width: var(--viewball-size)'));
+  assert.ok(ball.includes('pointer-events: none'), 'the card lets the drawing through');
   const canvas = ruleFor('.viewcube__canvas');
-  for (const declaration of ['width: 100%', 'height: auto', 'aspect-ratio: 1', 'display: block', 'touch-action: none']) {
+  for (const declaration of ['width: 100%', 'height: 100%', 'display: block', 'touch-action: none', 'pointer-events: auto', 'clip-path: circle(47%)']) {
     assert.ok(canvas.includes(declaration), `.viewcube__canvas keeps ${declaration}`);
   }
-  // The size token owns the box: the stage is exactly one cube wide.
-  assert.ok(ruleFor('.viewcube__stage').includes('width: var(--viewcube-size)'));
-  assert.equal(/position:\s*fixed/.test(css), false, 'the cube is docked, never a floating overlay');
-  assert.equal(css.includes('.viewcube__face'), false, 'the faces are canvas paint, not DOM faces');
-  // Cube styles stay in their own file: the shared sheet only owns the dock frame.
+  // The Home button is a real adjacent target, not a caption inside the ball.
+  assert.ok(ruleFor('.viewcube__home').includes('width: 24px'), 'a 24px desktop Home target');
+  assert.equal(/position:\s*fixed/.test(css), false, 'the ball is an overlay in the workspace, never viewport-fixed');
+  assert.equal(css.includes('.viewcube__face'), false, 'the caps are canvas paint, not DOM faces');
+  // Ball styles stay in their own file except the theme tokens (style.css owns
+  // every colour); the shared sheet keeps the dock frame and owns no canvas rule.
   const style = await readModule('style.css');
-  assert.equal(style.includes('.viewcube__canvas'), false, 'no cube canvas rule in style.css');
+  assert.equal(style.includes('.viewcube__canvas'), false, 'no ball canvas rule in style.css');
   assert.ok(style.includes('.navdock'), 'the dock frame lives with the other regions');
+  assert.ok(style.includes('--ball-surface:') && style.includes('--ball-rim:'), 'the ball tokens exist');
+  assert.equal(style.includes('--cube-'), false, 'the old cube face tokens are gone with the cube');
+  const lightStart = style.indexOf(':root[data-theme="light"]');
+  const lightBlock = style.slice(lightStart, style.indexOf('\n}', lightStart));
+  assert.ok(lightBlock.includes('--ball-surface:') && lightBlock.includes('--ball-highlight:'), 'the light theme re-reads the ball');
 });

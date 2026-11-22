@@ -316,7 +316,7 @@ export const OPTIONS_FIELDS: readonly OptionField[] = Object.freeze<OptionField[
     // The 3D orbit drag rate as a percentage of the base rate: 100 is the base
     // rate (`ORBIT_RADIANS_PER_PIXEL` in `cad/orbit.ts`), 25 is a quarter of it
     // and 200 twice. One multiplier for both mouse drags and touch swipes, so
-    // the ViewCube and a one-finger drag across the surface speed up together.
+    // the orientation ball and a one-finger drag across the surface speed up together.
     // Read from `cad_settings.orbitSensitivityPercent`, written through the
     // `cad_set_setting` key of the same spelling; the host re-validates `25..=200`
     // and its refusal is authoritative.

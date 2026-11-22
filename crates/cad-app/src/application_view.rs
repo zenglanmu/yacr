@@ -144,6 +144,44 @@ impl Application {
             .and_then(|document| document.drawing.bounds())
     }
 
+    /// Whether the document is a **3D model** rather than a flat XY drawing.
+    ///
+    /// This is what decides the default observation after an open: a 3D model
+    /// must land in the 3D isometric view, everything else keeps the plan view.
+    ///
+    /// A document is 3D when either:
+    ///
+    /// * any model-space entity is a [`SemanticGeometry::Body3d`] — a solid,
+    ///   sheet or wire body is 3D by construction, even when its extent is flat
+    ///   in one axis; or
+    /// * the model-space bounds have a **significant `z` extent** relative to
+    ///   the bounding-box diagonal (`extent_z > max(diagonal * 1e-6, 1e-9)`).
+    ///   That catches non-planar meshes, 3D lines and polylines without treating
+    ///   a single stray sub-micron `z` as depth.
+    ///
+    /// A missing document is `false` (nothing to observe), never a panic.
+    pub(crate) fn document_is_3d(&self, document: DocumentId) -> bool {
+        let Some(document) = self.workspace.documents.get(&document) else {
+            return false;
+        };
+        let drawing = &document.drawing;
+        if drawing.entities().any(|entity| {
+            matches!(entity.space, SpaceId::Model)
+                && matches!(&entity.geometry, SemanticGeometry::Body3d(_))
+        }) {
+            return true;
+        }
+        let Some((min, max)) = drawing.bounds() else {
+            return false;
+        };
+        let extent_z = (max.z - min.z).abs();
+        let diagonal = camera::length3(camera::sub(max, min));
+        if !extent_z.is_finite() || !diagonal.is_finite() {
+            return false;
+        }
+        extent_z > (diagonal * 1e-6).max(1e-9)
+    }
+
     pub(crate) fn viewport_mut(&mut self, command: &Command) -> CadResult<&mut Viewport> {
         self.workspace
             .viewports
@@ -339,13 +377,15 @@ impl Application {
     ///
     /// Every other standard view is a 3D observation: the camera is placed at
     /// `target + offset * distance`, where `offset` is the standard view's unit
-    /// eye direction. Entering 3D **from the plan** derives the distance from the
-    /// document bounds ([`Camera::enter_3d`]), exactly like the other 3D entry
-    /// points: the plan camera's fixed eye height (1000 world units) says nothing
-    /// about the model's size, so a small model would be a speck and a large one
-    /// would put the eye inside the geometry. From an existing 3D observation the
-    /// current distance is kept — a standard view re-orients, it does not reset
-    /// the user's zoom. The resulting basis is right-handed and orthonormal
+    /// eye direction. Entering 3D **from the plan** derives the distance *and*
+    /// the target from the document bounds ([`Camera::enter_3d`]), exactly like
+    /// the other 3D entry points: the plan camera's fixed eye height (1000 world
+    /// units) says nothing about the model's size, so a small model would be a
+    /// speck and a large one would put the eye inside the geometry, and its
+    /// `z = 0` target would orbit about a point outside a solid that does not
+    /// straddle the plane. From an existing 3D observation the current target
+    /// and distance are kept — a standard view re-orients, it does not reset the
+    /// user's zoom or pivot. The resulting basis is right-handed and orthonormal
     /// ([`Camera::view_basis`]).
     pub(crate) fn apply_standard_view(
         &mut self,
@@ -363,19 +403,21 @@ impl Application {
         }
 
         let entering_from_plan = matches!(viewport.view_mode.kind(), ProjectionKind::TwoD);
-        let target = viewport.camera.target;
-        let distance = if entering_from_plan {
-            viewport
+        // Entering 3D from the plan takes **both** the fitted distance and the
+        // fitted target: `enter_3d` sets the target to the bounds centre (z
+        // included), so an isometric/front/… pivot sits in the middle of the
+        // model instead of on the plan target's `z = 0` plane point. An existing
+        // 3D observation keeps its own target and distance — a standard view
+        // re-orients, it does not reset the user's zoom or pivot.
+        let (target, distance) = if entering_from_plan {
+            let fitted = viewport
                 .camera
-                .enter_3d(bounds, camera::DEFAULT_PERSPECTIVE_FOV_RADIANS)?
-                .distance()
+                .enter_3d(bounds, camera::DEFAULT_PERSPECTIVE_FOV_RADIANS)?;
+            (fitted.target, fitted.distance())
         } else {
             let d = viewport.camera.distance();
-            if d.is_finite() && d > 1e-6 {
-                d
-            } else {
-                1000.0
-            }
+            let distance = if d.is_finite() && d > 1e-6 { d } else { 1000.0 };
+            (viewport.camera.target, distance)
         };
         let offset = camera::scale3(view.eye_offset(), distance);
         let eye = camera::add(target, offset);

@@ -18,9 +18,11 @@
  * (the start column and the palette layer) stays *mounted* and is hidden below,
  * which is what lets a live breakpoint crossing keep the CAD session alive. The
  * dock stays visible, but as a small floating card at the drawing's top-right
- * corner: the ViewCube is the compact 3D orientation cue, and one control under
- * it folds the icon rail out of that card (it starts collapsed). It is never a
- * full-height strip here — a phone cannot spare 56px of drawing width.
+ * corner: it holds the compact theme switch and one control that folds the icon
+ * rail out of that card (it starts collapsed). The orientation ball is a separate
+ * overlay at the drawing's top-left (see `viewcube.css` / the compact rule below),
+ * so the two floating controls never collide. It is never a full-height strip
+ * here — a phone cannot spare 56px of drawing width.
  *
  * Safe areas: the top bar pads the cutout, and the command bar and its trigger pad
  * the gesture bar with `env(safe-area-inset-*)`, so a notched phone does not put a
@@ -84,10 +86,10 @@
    handful of icons, so the compact layout turns the **same** element into a
    small floating card pinned to the drawing's top-right corner:
  *
- *   * closed, the card is exactly its head — the ViewCube, the compact theme
- *     switch, and the one expand control under it, nothing else. There is no
- *     full-height background and no left border strip, because nothing is painted
- *     that the card does not use. The theme switch is here rather than in the rail
+ *   * closed, the card is exactly its head — the compact theme switch and the
+ *     one expand control under it, nothing else. There is no full-height
+ *     background and no left border strip, because nothing is painted that the
+ *     card does not use. The theme switch is here rather than in the rail
  *     because the head never scrolls: it must stay reachable at 960x600 and on a
  *     phone, where the rail's visible part is already full;
  *   * open, it is the same head with the icon rail below it, capped and
@@ -101,11 +103,10 @@
  * before it stands.
  *
  * Width is content-sized (`width: auto`) with `--navrail-w` as the head's own
- * width: that gives the cube a definite parent for its `width: 100%` canvas
- * without the card ever being wider than one 44px control column plus padding.
- * The card is inside `.workspace`, so it cannot paint over either bar, and its
- * `z-index` is the dock's own (`5`): above the CAD carriers, below the palette
- * layer and the notices.
+ * width, without the card ever being wider than one 44px control column plus
+ * padding. The card is inside `.workspace`, so it cannot paint over either bar,
+ * and its `z-index` is the dock's own (`5`): above the CAD carriers, below the
+ * orientation ball (`6`), the palette layer and the notices.
  *
  * `overflow: hidden` keeps the rail's scrollbar and a pressed button's hover fill
  * inside the 8px radius; the border is a full 1px frame rather than the desktop
@@ -164,7 +165,21 @@
   width: 44px;
   height: 44px;
 }
-:root[data-layout="mobile"] .viewcube { padding: 4px 0; }
+/* The orientation ball on the compact layout: a smaller sphere at the drawing's
+   **top-left**, away from the dock card at the top-right. The layer still spans
+   the drawing area; the ball itself re-enables input. Home grows to the 44px
+   touch minimum and sits under the ball, so it never covers a cap. */
+:root[data-layout="mobile"] .viewcube {
+  --viewball-size: 96px;
+  top: 8px;
+  left: 8px;
+  right: auto;
+}
+:root[data-layout="mobile"] .viewcube--unavailable {
+  top: 8px;
+  left: 8px;
+  right: auto;
+}
 :root[data-layout="mobile"] .viewcube__home { width: 44px; height: 44px; }
 
 /* Top bar ---------------------------------------------------------------- */

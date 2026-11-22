@@ -314,9 +314,16 @@ impl Camera {
     /// Zoom by `factor` (>1 zooms in) about a screen cursor.
     ///
     /// Orthographic: multiplies the world-per-pixel scale and shifts the target
-    /// so the world point under the cursor stays put. Perspective: moves the eye
-    /// toward/away from the target along the view ray by the same factor so the
-    /// cursor's world direction is preserved. Rejects non-positive factors.
+    /// so the world point under the cursor stays put.
+    ///
+    /// Perspective: keeps the **target** (the orbit pivot) fixed and dollies the
+    /// eye along the view axis to `distance / factor`, then pans eye and target
+    /// together in the screen plane just enough for the world point under the
+    /// cursor to keep its pixel. The pan is purely lateral to the view axis, so
+    /// the pivot approaches the picked point without ever being pushed past the
+    /// model along the view direction, and the translation leaves the projection
+    /// linear — the picked point stays under the cursor. Rejects non-positive
+    /// factors.
     pub fn zoom_at(&mut self, factor: f64, cursor: [f64; 2], size: [f64; 2]) -> CadResult<()> {
         if !factor.is_finite() || factor <= 0.0 {
             return Err(CadError::InvalidInput(
@@ -338,31 +345,44 @@ impl Camera {
                     }
                 }
             }
-            Projection::Perspective { .. } => {
+            Projection::Perspective {
+                vertical_fov_radians,
+            } => {
                 let distance = self.distance();
                 if distance < 1e-9 {
                     return Err(CadError::InvalidInput(
                         "camera eye and target coincide".into(),
                     ));
                 }
-                // Anchor the cursor with a dolly: shift both the eye and the
-                // target along the cursor ray so every pixel ray line is
-                // preserved (the world point under the cursor stays put).
                 let focus = self
                     .cursor_on_target_plane(cursor, size)
                     .unwrap_or(self.target);
-                let to_focus = sub(focus, self.eye);
-                let focus_distance = length3(to_focus);
-                if !focus_distance.is_finite() || focus_distance < 1e-9 {
-                    return Err(CadError::InvalidInput(
-                        "zoom focus point is degenerate".into(),
-                    ));
+                let basis = self.view_basis()?;
+                let (right, up, forward) = (basis.right, basis.up, basis.forward);
+                // Dolly along the view axis with the target pinned: the pivot
+                // stays where it was, so a following orbit still turns about the
+                // model instead of a point the zoom dragged past it.
+                let new_distance = (distance / factor).max(MIN_3D_DISTANCE);
+                self.eye = add(self.target, scale3(forward, -new_distance));
+                // Re-anchor the picked point by a lateral pan. A pure translation
+                // keeps the projection linear, so this restores the cursor pixel
+                // exactly; it never moves the camera along the view axis.
+                if let Some(after) = self.world_to_screen(focus, size) {
+                    let depth = dot3(sub(focus, self.eye), forward);
+                    let tan_half = (vertical_fov_radians * 0.5).tan();
+                    if depth.is_finite() && depth > 1e-9 && size[1] > 0.0 && tan_half > 0.0 {
+                        // World units per pixel at the focus depth; x uses the
+                        // same scale because aspect = width / height.
+                        let world_per_px = 2.0 * depth * tan_half / size[1];
+                        let s_right = (after[0] - cursor[0]) * world_per_px;
+                        let s_up = (cursor[1] - after[1]) * world_per_px;
+                        let shift = add(scale3(right, s_right), scale3(up, s_up));
+                        if is_finite_point(shift) {
+                            self.eye = add(self.eye, shift);
+                            self.target = add(self.target, shift);
+                        }
+                    }
                 }
-                let new_focus_distance = (focus_distance / factor).max(MIN_ORTHO_SCALE);
-                let dir = scale3(to_focus, 1.0 / focus_distance);
-                let delta = scale3(dir, focus_distance - new_focus_distance);
-                self.eye = add(self.eye, delta);
-                self.target = add(self.target, delta);
             }
         }
         self.validate()

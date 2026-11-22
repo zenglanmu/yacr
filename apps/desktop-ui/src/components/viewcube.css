@@ -1,84 +1,115 @@
-/* ViewCube — the docked orientation control (its own CSS only; the dock frame
- * lives in `style.css` and the compact layout in `mobile.css`).
+/* ViewCube — the floating sphere orientation control (its own CSS only; the
+ * dock frame lives in `style.css` and the compact placement in `mobile.css`).
  *
- * Geometry: a square canvas whose size is owned by `--viewcube-size` (48px, small
- * enough for the 56px dock column with room for the frame). The canvas draws in
- * CSS pixels and the component multiplies by `devicePixelRatio` for the backing
- * store, so this file only fixes the box. The projected cube is fitted inside it
- * by `cad/viewcube-canvas.ts` (the worst-case silhouette is the isometric one);
- * `aspect-ratio: 1` keeps the box square when the CSS width is fluid.
+ * It is **not** part of the navigation rail: `.viewball-layer` is an absolute
+ * overlay inside `.workspace__canvas`, pointer-transparent everywhere outside the
+ * control, at `z-index: 6` — above the CAD carriers and the dock (`5`), below the
+ * floating palettes (`10`) and the notice layers. On the desktop the ball sits
+ * at the drawing's top-right, offset left of the 56px rail
+ * (`right: calc(var(--navrail-w) + 14px)`); the rail keeps its width and its
+ * other buttons.
  *
- * Colour is drawn from the shared tokens by the canvas (`--cube-*`, `--line-soft`,
+ * Geometry: a square canvas whose size is owned by `--viewball-size` (112px).
+ * `cad/viewcube-canvas.ts` draws an opaque sphere that fills 92 % of that box
+ * (≈ 103px visible diameter) and fits every cap inside it. The canvas is clipped
+ * to a circle, so the transparent corners never block the drawing and the
+ * painted sphere never spills. The device-pixel transform is the component's;
+ * this file only fixes the box.
+ *
+ * Colour is drawn from the shared tokens by the canvas (`--ball-*`, `--line-soft`,
  * `--text`, `--text-disabled`, `--accent`, `--hover`), so a theme switch re-reads
- * them instead of leaving stale fills. Nothing here paints a face.
+ * them instead of leaving stale fills. Nothing here paints the sphere.
  */
-.viewcube {
-  --viewcube-size: 48px;
-  flex: 0 0 auto;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 3px;
-  width: 100%;
-  padding: 6px 0 6px;
-  border-bottom: 1px solid var(--line);
+.viewball-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  overflow: visible;
+  pointer-events: none;
 }
 
-/* The stage is exactly the cube box: the canvas fills it and the dock column
- * centres it. A rotated silhouette never grows past the box, so it cannot spill
- * over the opaque dock edge onto the drawing. */
+.viewcube {
+  --viewball-size: 112px;
+  position: absolute;
+  top: 14px;
+  right: calc(var(--navrail-w) + 14px);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  width: var(--viewball-size);
+  /* Only the ball and Home take input; the rest of the layer lets the drawing
+     through. */
+  pointer-events: none;
+}
+
+/* Exactly the ball box. The drop shadow lives on the stage, not the canvas: a
+ * CSS filter is clipped by the element's own `clip-path`, while this wrapper's
+ * content (the clipped circle) still casts the floating shadow. */
 .viewcube__stage {
-  display: grid;
-  place-items: center;
-  width: var(--viewcube-size);
-  max-width: 100%;
+  position: relative;
+  flex: none;
+  width: var(--viewball-size);
+  aspect-ratio: 1;
+  filter: drop-shadow(0 8px 16px rgba(var(--shadow-rgb), .5));
 }
 
 .viewcube__canvas {
   width: 100%;
-  height: auto;
+  height: 100%;
   aspect-ratio: 1;
   display: block;
-  /* The cube itself is the pointer surface: no scrolling, no double-tap zoom,
-   * no text selection while dragging an orbit. */
+  /* The sphere is the pointer surface: no scrolling, no double-tap zoom, no
+   * text selection while dragging an orbit. `clip-path` matches the painted
+   * sphere (47 % > its 46 % radius) so the transparent corners never intercept
+   * clicks meant for the drawing. */
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
   cursor: pointer;
-  border-radius: var(--radius);
+  pointer-events: auto;
+  clip-path: circle(47%);
+  border-radius: 50%;
 }
 
-/* Home/isometric target under the cube: a real button, 24px on the desktop dock
- * (the compact stylesheet grows it to the 44px touch minimum). */
+/* Home/isometric target at the card's bottom-right, below the sphere (never over
+ * a cap). A real button, 24px on the desktop; the compact stylesheet grows it to
+ * the 44px touch minimum. */
 .viewcube__home {
   display: grid;
   place-items: center;
   flex: none;
   width: 24px;
-  height: 22px;
+  height: 24px;
   padding: 0;
-  border: 1px solid transparent;
-  border-radius: var(--radius);
-  background: transparent;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  background: var(--chrome-3);
   color: var(--text-muted);
   cursor: pointer;
+  pointer-events: auto;
+  box-shadow: 0 2px 6px rgba(var(--shadow-rgb), .35);
   transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
 }
-.viewcube__home:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+.viewcube__home:hover:not(:disabled) { background: var(--hover); color: var(--text); border-color: var(--accent); }
 .viewcube__home:active:not(:disabled) { background: var(--pressed); }
 .viewcube__home:disabled { color: var(--text-disabled); cursor: not-allowed; }
 
 /* The two honest states: no authoritative camera basis, and a canvas that could
  * not get a 2D context (or a theme whose tokens are missing). Both are a static
- * dashed frame with the explicit sentence as title/accessible name — never a
+ * dashed circle with the explicit sentence as title/accessible name — never a
  * blank box and never a guessed orientation. */
+.viewcube--unavailable {
+  top: 14px;
+  right: calc(var(--navrail-w) + 14px);
+}
 .viewcube__unavailable {
   display: grid;
   place-items: center;
-  width: var(--viewcube-size);
-  height: var(--viewcube-size);
+  width: var(--viewball-size);
+  height: var(--viewball-size);
   border: 1px dashed var(--line-soft);
-  border-radius: var(--radius);
-  background: var(--field);
+  border-radius: 50%;
+  background: var(--chrome-3);
   color: var(--text-muted);
 }

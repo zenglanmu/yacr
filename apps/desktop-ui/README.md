@@ -47,7 +47,7 @@ npm run dev     # http://127.0.0.1:1420
 ## 区域栈（自上而下）
 
 `标题/QAT · 功能区 · 图纸标签 · 工作区（CAD 分区 + 浮动面板层：属性/图层/诊断/外部引用/字体，
-默认贴左 | 导航列：ViewCube + 图标栏）· 模型/布局标签 · 命令行 · 状态栏`
+默认贴左 | 方位球浮层，绘图区右上方 | 导航列：图标栏）· 模型/布局标签 · 命令行 · 状态栏`
 
 左侧栏只剩开始页。五个面板（属性/图层/诊断/外部引用/字体）都由同一个
 `components/PaletteWindow.tsx` 包成**非模态浮窗**，默认贴在绘图区左缘，可拖动、可调宽；
@@ -69,7 +69,8 @@ portal 到 `document.body`，`position: fixed`，标题栏拖动、位置在会�
 它是 `data-layout` 的**唯一写入者**，把结果写到 `document.documentElement`（即 `<html>`）上；
 `main.shell` 不再携带该属性，所有紧凑样式都用 `:root[data-layout="mobile"]` 守卫。窗口实时改变宽度即切换，
 不重新加载文档，也不重建 `<Workspace />`（它在两种布局里处于同一位置；左侧开始栏与浮动面板层在
-`mobile.css` 里隐藏而非卸载，因此 CAD 会话不会被重挂）。导航列在紧凑布局保留：ViewCube 始终可见，
+`mobile.css` 里隐藏而非卸载，因此 CAD 会话不会被重挂）。方位球是独立浮层：桌面在绘图区右上方、
+导航列左侧；紧凑布局移到绘图区左上方，避开右上角的导航卡。导航列在紧凑布局保留，
 图标栏默认收起（本地 chevron 展开），列宽不变，所以展开/收起不会移动 CAD 分区矩形；主题开关在导航卡的
 **固定头部**（图标栏会滚动，头部不会；桌面用标题行，同一布局只出现一次）。
 
@@ -116,7 +117,8 @@ Android 宿主（`apps/app-android` 的 `MainActivity`）读 `WindowInsets.Type.
 | 工作区 | `Workspace.tsx` |
 | 浮动面板容器 | `PaletteWindow.tsx`（唯一容器：拖动、调宽、层级与几何存储；几何规则在 `src/layout/palette-window.ts`） |
 | 开始页 / 属性 / 图层 / 文件信息 / 诊断（性能）/ 外部引用 / 字体管理器 | `StartPanel.tsx`、`PropertiesDock.tsx`、`LayersPalette.tsx`、`FileInfoPalette.tsx`（静态文件信息）、`DiagnosticsPalette.tsx`（动态性能诊断；两者数据契约见 `docs/file-info-panel.md`）、`ReferencesPanel.tsx`、`FontsPanel.tsx` |
-| 导航列（ViewCube + 图标栏） | `NavigationDock.tsx`（固定宽度右缘列；紧凑布局的头部还挂主题开关）、`ViewCube.tsx` + `viewcube.css`（六面 + Home；CSS 3D 由宿主相机基算出）、`NavRail.tsx`（可收起、只放工具与面板开关；桌面跟宿主 `NAVBAR`，紧凑布局本地展开） |
+| 导航列（图标栏） | `NavigationDock.tsx`（固定宽度右缘列；紧凑布局的头部还挂主题开关）、`NavRail.tsx`（可收起、只放工具与面板开关；桌面跟宿主 `NAVBAR`，紧凑布局本地展开） |
+| 方位球（独立浮动层） | `ViewCube.tsx` + `viewcube.css`（不透明球面 + 六个方向帽 + Home；由宿主相机基算出；位于绘图区右上方、导航列左侧，紧凑布局在左上方） |
 | 主题开关 | `ThemeToggle.tsx`（桌面标题/QAT 行；紧凑布局挂在导航卡的固定头部，不随图标栏滚动，同一布局只出现一次；写入 `cad_set_setting`，不本地翻转） |
 | 模型 / 布局标签 | `LayoutTabs.tsx` |
 | 命令行 | `CommandLine.tsx`（桌面停靠区），控制器在 `src/commands/use-command-line.ts`；历史日志见 `src/commands/command-history.ts`；插件提示（原句 + 关键词 + 无效输入）与 `writeMessage` 回声在行上方的有界回声条内，不改变命令行高度 |

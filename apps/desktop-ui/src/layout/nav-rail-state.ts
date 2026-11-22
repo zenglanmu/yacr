@@ -1,5 +1,5 @@
 // The navigation rail's open state, lifted out of the rail so the one collapse
-// control can sit in the dock's head, directly under the ViewCube.
+// control can sit in the dock's head.
 //
 // Two carriers of the same boolean, because the two layouts answer to different
 // owners:
@@ -12,7 +12,7 @@
 //     the user collapsed it.
 //   * **Compact (<= 1024 CSS px).** The desktop navbar flag describes the desktop
 //     band, which this layout does not render, so the rail is local state. It
-//     starts collapsed — the ViewCube alone is the compact orientation cue and
+//     starts collapsed — the compact theme switch is the card's only head row and
 //     the card must not open onto a drawing a phone can barely see — and returns
 //     to collapsed on a **breakpoint crossing** only. The reset lives in a
 //     `useLayoutEffect` keyed on `shell.mobile`, so an ordinary render (a status

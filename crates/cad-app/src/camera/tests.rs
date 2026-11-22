@@ -173,23 +173,22 @@ fn zoom_to_cursor_anchors_in_both_projections() {
     let after = ortho.screen_to_plan_world(cursor, size).unwrap();
     assert!(length3(sub(anchor, after)) < 1e-9);
 
-    // Perspective: the world point under the cursor stays on the same ray.
+    // Perspective: the same pixel anchor, with the pivot only panning sideways
+    // (never along the view axis), so an orbit afterwards stays on the model.
     let mut persp = Camera {
         eye: p(0.0, -500.0, 200.0),
         target: p(0.0, 0.0, 0.0),
         up: p(0.0, 0.0, 1.0),
         projection: Projection::perspective(std::f64::consts::FRAC_PI_4).unwrap(),
     };
-    let ray_before = persp.screen_to_ray(cursor, size).unwrap();
+    let forward = persp.view_basis().unwrap().forward;
+    let target_before = persp.target;
     let focus_before = persp.cursor_on_target_plane(cursor, size).unwrap();
     persp.zoom_at(1.5, cursor, size).unwrap();
-    let ray_after = persp.screen_to_ray(cursor, size).unwrap();
-    // Same direction and the focus point still lies on the pixel ray.
-    assert!(length3(sub(ray_before.direction, ray_after.direction)) < 1e-9);
-    let rel = sub(focus_before, ray_after.origin);
-    let t = dot3(rel, ray_after.direction);
-    let closest = add(ray_after.origin, scale3(ray_after.direction, t));
-    assert!(length3(sub(closest, focus_before)) < 1e-9);
+    let screen = persp.world_to_screen(focus_before, size).unwrap();
+    assert!((screen[0] - cursor[0]).abs() < 1e-9, "{screen:?}");
+    assert!((screen[1] - cursor[1]).abs() < 1e-9, "{screen:?}");
+    assert!(dot3(sub(persp.target, target_before), forward).abs() < 1e-9);
 }
 
 #[test]
@@ -299,4 +298,94 @@ fn standard_view_all_index_round_trips() {
     }
     assert_eq!(StandardView::from_index(-1), None);
     assert_eq!(StandardView::from_index(99), None);
+}
+
+// --- perspective zoom pivot ------------------------------------------------
+
+fn perspective_camera() -> Camera {
+    Camera {
+        eye: p(0.0, -500.0, 200.0),
+        target: p(0.0, 0.0, 0.0),
+        up: p(0.0, 0.0, 1.0),
+        projection: Projection::perspective(std::f64::consts::FRAC_PI_4).unwrap(),
+    }
+}
+
+#[test]
+fn perspective_zoom_at_the_centre_keeps_the_target_and_scales_the_distance() {
+    let size = [800.0, 600.0];
+    let centre = [size[0] * 0.5, size[1] * 0.5];
+    let mut camera = perspective_camera();
+    let target_before = camera.target;
+    let distance_before = camera.distance();
+    let direction_before = camera.view_basis().unwrap().forward;
+
+    camera.zoom_at(2.0, centre, size).unwrap();
+
+    assert!(
+        length3(sub(camera.target, target_before)) < 1e-9,
+        "a centre zoom dollies along the view ray: the pivot stays put"
+    );
+    let ratio = distance_before / camera.distance();
+    assert!((ratio - 2.0).abs() < 1e-9, "distance scaled by {ratio}");
+    assert!(
+        length3(sub(camera.view_basis().unwrap().forward, direction_before)) < 1e-9,
+        "the dolly is along the view axis: the direction is unchanged"
+    );
+}
+
+#[test]
+fn perspective_zoom_off_centre_keeps_the_pixel_and_only_pans_the_pivot() {
+    let size = [800.0, 600.0];
+    let cursor = [200.0, 150.0];
+    let mut camera = perspective_camera();
+    let forward = camera.view_basis().unwrap().forward;
+    let target_before = camera.target;
+    let distance_before = camera.distance();
+    let focus = camera
+        .cursor_on_target_plane(cursor, size)
+        .expect("an interior cursor hits the target plane");
+
+    camera.zoom_at(1.5, cursor, size).unwrap();
+
+    // The picked point keeps its pixel: the pan is exactly the linear
+    // compensation the projection needs.
+    let screen = camera
+        .world_to_screen(focus, size)
+        .expect("the focus is in front of the eye");
+    assert!((screen[0] - cursor[0]).abs() < 1e-9, "{screen:?}");
+    assert!((screen[1] - cursor[1]).abs() < 1e-9, "{screen:?}");
+    // The pivot moved only across the view axis — never along it, so the zoom
+    // can never push the orbit target past the model.
+    let shift = sub(camera.target, target_before);
+    assert!(
+        dot3(shift, forward).abs() < 1e-9,
+        "target moved {} along the view axis",
+        dot3(shift, forward)
+    );
+    // The dolly itself scaled by the factor (the lateral pan changes neither the
+    // direction nor the eye-target distance).
+    let ratio = distance_before / camera.distance();
+    assert!((ratio - 1.5).abs() < 1e-9, "distance scaled by {ratio}");
+}
+
+#[test]
+fn an_orbit_after_a_perspective_zoom_keeps_the_pivot_and_distance() {
+    let size = [800.0, 600.0];
+    let cursor = [200.0, 150.0];
+    let mut camera = perspective_camera();
+    camera.zoom_at(1.5, cursor, size).unwrap();
+    let target = camera.target;
+    let distance = camera.distance();
+
+    camera.orbit(0.3, 0.2).unwrap();
+
+    assert!(
+        length3(sub(camera.target, target)) < 1e-12,
+        "the orbit pivot is unchanged by the orbit"
+    );
+    assert!(
+        (camera.distance() - distance).abs() < 1e-9,
+        "the orbit preserves the zoomed distance"
+    );
 }

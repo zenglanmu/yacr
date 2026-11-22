@@ -529,17 +529,6 @@ impl HostController {
         self.async_open.clone()
     }
 
-    /// Fit the active viewport to the current drawing bounds.
-    ///
-    /// Discards the "framed" flag for open flows: a blank drawing's fit is a
-    /// documented no-op. Callers that need to report that use the command path
-    /// (`CommandId::FitDrawing`), which carries the `fit.empty` diagnostic.
-    pub fn fit(&mut self) -> CadResult<()> {
-        self.application
-            .fit_viewport(&mut self.session, &self.viewport_id)
-            .map(|_| ())
-    }
-
     /// The session's active drawing space.
     ///
     /// Pure getter: reading it dispatches no command and mutates nothing. It is

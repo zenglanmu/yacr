@@ -256,6 +256,17 @@ impl Application {
     /// discrete view change, so the pre-fit view is recorded) and the automatic
     /// fit after a space switch (which must not burn a zoom step: the switch
     /// itself is the user action).
+    ///
+    /// The observation mode decides what "fit" means:
+    ///
+    /// * **2D** is the historic plan fit: [`Self::framing_rect`] →
+    ///   [`Self::plan_camera`], and the viewport is (re)set to the 2D mode with
+    ///   that camera as its saved snapshot.
+    /// * **3D** only re-frames: [`Camera::enter_3d`] keeps the current eye
+    ///   direction and `up`, targets the bounds centre (`z` included) and
+    ///   rescales the eye distance with [`camera::FIT_3D_MARGIN`]. The mode and
+    ///   its saved 2D camera are untouched, so `FIT` never silently drops the
+    ///   user out of 3D.
     pub(crate) fn fit_active_space(
         &mut self,
         session: &mut SessionState,
@@ -273,13 +284,34 @@ impl Application {
             .viewports
             .get_mut(viewport_id)
             .ok_or_else(|| CadError::InvalidInput("unknown viewport".into()))?;
-        let (centre, scale) = Self::framing_rect(min, max, viewport.logical_size, FIT_MARGIN);
-        let camera = Self::plan_camera(centre, scale, viewport.camera.eye.z);
+        let camera = match viewport.view_mode.kind() {
+            ProjectionKind::ThreeD => {
+                // Re-frame at the FOV the observation already uses; a viewport
+                // still carrying an orthographic projection (an inconsistent
+                // mode) uses the documented 3D default instead of deriving an
+                // angle from the orthographic scale — `enter_3d` would reject a
+                // non-perspective FOV and a silent 2D fallback is not an option.
+                let fov = match viewport.camera.projection {
+                    Projection::Perspective {
+                        vertical_fov_radians,
+                    } => vertical_fov_radians,
+                    Projection::Orthographic { .. } => camera::DEFAULT_PERSPECTIVE_FOV_RADIANS,
+                };
+                viewport.camera.enter_3d(Some((min, max)), fov)?
+            }
+            ProjectionKind::TwoD => {
+                let (centre, scale) =
+                    Self::framing_rect(min, max, viewport.logical_size, FIT_MARGIN);
+                Self::plan_camera(centre, scale, viewport.camera.eye.z)
+            }
+        };
         if record_history {
             viewport.push_view_snapshot();
         }
         viewport.camera = camera;
-        viewport.view_mode = ViewMode2d3d::TwoD { saved: camera };
+        if viewport.view_mode.kind() == ProjectionKind::TwoD {
+            viewport.view_mode = ViewMode2d3d::TwoD { saved: camera };
+        }
         session.generation += 1;
         Ok(FitResult::Framed)
     }
@@ -287,11 +319,12 @@ impl Application {
     /// Fit a viewport to the current **active space**. Hosts call this after an
     /// import so the first frame is usable without a synthetic command.
     ///
-    /// Fitting always returns the viewport to the 2D plan view (audit F13), so a
-    /// fit is a deterministic reset-and-frame, not a 3D manipulation. In model
-    /// space it frames the model bounds; in paper space it frames the sheet (its
-    /// entities plus viewport paper rectangles, or the plot paper size when the
-    /// sheet has no content).
+    /// In 2D the fit is a deterministic reset-and-frame of the plan view (audit
+    /// F13). In 3D it only re-frames — same direction, same `up`, target moved to
+    /// the bounds centre and the distance rescaled — so it stays a 3D
+    /// observation. In model space it frames the model bounds; in paper space it
+    /// frames the sheet (its entities plus viewport paper rectangles, or the plot
+    /// paper size when the sheet has no content).
     ///
     /// Returns `false` when the active space has no measurable extent: the
     /// camera is left untouched and nothing is framed, so a caller can report

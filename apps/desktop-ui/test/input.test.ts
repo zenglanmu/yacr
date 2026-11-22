@@ -287,8 +287,8 @@ test('ordinary UI strings use existing bilingual dictionary keys', async () => {
   // ADR 0024 D3: the only **pixel carrier** canvas is the host-flag-gated
   // `dom-canvas` one. It is a pixel surface - never a wrapper around the
   // partition and never a text host - so it adds no user-visible string and
-  // keeps `.native-input` the single label/input owner. The ViewCube's canvas is
-  // decoration (`aria-hidden`) and is the only other canvas in the tree.
+  // keeps `.native-input` the single label/input owner. The orientation ball's
+  // canvas is decoration (`aria-hidden`) and is the only other canvas in the tree.
   const canvases = [...source.matchAll(/<canvas\s+[a-zA-Z][^>]*>/g)].map(match => match[0]);
   const carriers = canvases.filter(element => element.includes('id="cad-canvas"'));
   assert.equal(carriers.length, 1);

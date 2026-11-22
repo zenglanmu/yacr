@@ -3,6 +3,8 @@ use super::*;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use crate::{Projection, ProjectionKind, StandardView};
+
 use cad_db::ExternalReferenceStatus;
 use cad_resources::{XrefFileSource, XrefSourceError};
 
@@ -235,6 +237,127 @@ fn fit_on_a_blank_drawing_is_a_documented_no_op() {
         controller.session.generation, generation,
         "an empty drawing has nothing to frame; fit must not pretend to"
     );
+}
+
+/// Replace the open document's drawing with one model-space polyline spanning
+/// `min..max`, so the open path has a known extent to default-frame.
+fn install_extent(controller: &mut HostController, min: Point3, max: Point3) {
+    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
+    builder
+        .insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+    builder
+        .insert_entity(DbEntity {
+            object: DbObject {
+                id: ObjectId(1),
+                type_key: "AcDbPolyline".into(),
+                revision: Revision(0),
+                source_handle: None,
+            },
+            id: EntityId(1),
+            layer: LayerId(0),
+            space: SpaceId::Model,
+            geometry: SemanticGeometry::Polyline {
+                points: vec![min, max],
+                bulges: Vec::new(),
+                closed: false,
+                width: 0.0,
+            },
+            draw_order: 0,
+        })
+        .unwrap();
+    controller
+        .application
+        .workspace
+        .documents
+        .get_mut(&controller.document_id)
+        .unwrap()
+        .drawing = Arc::new(builder.finish().unwrap());
+}
+
+#[test]
+fn fit_opened_document_enters_the_isometric_3d_view_for_a_3d_model() {
+    let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+    let min = Point3 {
+        x: -4.0,
+        y: -2.0,
+        z: -3.0,
+    };
+    let max = Point3 {
+        x: 4.0,
+        y: 2.0,
+        z: 3.0,
+    };
+    install_extent(&mut controller, min, max);
+    let steps =
+        controller.application.workspace.viewports[&controller.viewport_id].zoom_history_len();
+
+    controller.fit_opened_document().unwrap();
+
+    let viewport = &controller.application.workspace.viewports[&controller.viewport_id];
+    assert_eq!(
+        viewport.view_mode.kind(),
+        ProjectionKind::ThreeD,
+        "a 3D model opens in the 3D observation"
+    );
+    assert!(matches!(
+        viewport.camera.projection,
+        Projection::Perspective { .. }
+    ));
+    // The eye sits on the isometric direction at a positive distance.
+    let distance = viewport.camera.distance();
+    assert!(distance.is_finite() && distance > 0.0, "{distance}");
+    let offset = StandardView::Isometric.eye_offset();
+    for (axis, expected) in [
+        (viewport.camera.eye.x - viewport.camera.target.x, offset.x),
+        (viewport.camera.eye.y - viewport.camera.target.y, offset.y),
+        (viewport.camera.eye.z - viewport.camera.target.z, offset.z),
+    ] {
+        assert!(
+            (axis / distance - expected).abs() < 1e-9,
+            "{axis} vs {expected}"
+        );
+    }
+    // The target is the bounds centre, z included.
+    for (axis, expected) in [
+        (viewport.camera.target.x, 0.0),
+        (viewport.camera.target.y, 0.0),
+        (viewport.camera.target.z, 0.0),
+    ] {
+        assert!((axis - expected).abs() < 1e-12, "{axis} != {expected}");
+    }
+    // The plan fit recorded its one ZOOM PREVIOUS; entering 3D by default must
+    // not add another (the user never saw a pre-3D frame).
+    assert_eq!(viewport.zoom_history_len(), steps + 1);
+}
+
+#[test]
+fn fit_opened_document_keeps_a_flat_drawing_in_plan() {
+    let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+    let min = Point3 {
+        x: -4.0,
+        y: -2.0,
+        z: 0.0,
+    };
+    let max = Point3 {
+        x: 4.0,
+        y: 2.0,
+        z: 0.0,
+    };
+    install_extent(&mut controller, min, max);
+
+    controller.fit_opened_document().unwrap();
+
+    let viewport = &controller.application.workspace.viewports[&controller.viewport_id];
+    assert_eq!(viewport.view_mode.kind(), ProjectionKind::TwoD);
+    assert!(viewport.camera.projection.is_orthographic());
+    assert!((viewport.camera.target.x - 0.0).abs() < 1e-12);
+    assert!((viewport.camera.target.y - 0.0).abs() < 1e-12);
+    assert!((viewport.camera.eye.x - viewport.camera.target.x).abs() < 1e-12);
 }
 
 #[test]

@@ -19,7 +19,7 @@ export interface VolatileStatus {
   readonly cursor: WorldCursorReadout;
   /** The rolling frame-rate reading (`null` while unknown/stale). */
   readonly fps: number | null;
-  /** The host's live view orientation for the ViewCube, or `null`. */
+  /** The host's live view orientation for the orientation ball, or `null`. */
   readonly view: CadViewOrientation | null;
 }
 

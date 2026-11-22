@@ -7,12 +7,18 @@
 // (an absolute overlay that takes no layout space). Opening, closing, dragging
 // or resizing a palette therefore never changes the `.native-input` rect, so the
 // host gets no resize report and never re-presents/re-renders the CAD surface.
-// The navigation dock (ViewCube above the icon rail) is docked at the right edge
+// The navigation dock (its head and the icon rail) is docked at the right edge
 // as an absolute overlay: it sits inside this row but takes no flex space, so
 // `.workspace__canvas` owns the full row and the 56px column of chrome
 // (`--navrail-w`) is simply painted over the CAD surface. It stays after
 // `.workspace__canvas` in DOM order, so keyboard focus still reaches the CAD
 // input first.
+//
+// The orientation ball is its own floating overlay inside `.workspace__canvas`
+// (`<ViewCube />` in `.viewball-layer`): it is offset left of the rail at the
+// desktop top-right and never widens the dock. The layer is pointer-transparent,
+// paints at `z-index: 6` (above the dock's `5`, below the palette layer's `10`),
+// and keeps its Home button inside the control's own bounds.
 //
 // A `dom-canvas` host (ADR 0024 D3) carries its pixels inside this tree instead:
 // an empty, input-transparent `<canvas>` fills the same rect and paints under
@@ -20,6 +26,7 @@
 // document state - so `.native-input` stays the single input funnel.
 import React from 'react';
 import { NavigationDock } from './NavigationDock.tsx';
+import { ViewCube } from './ViewCube.tsx';
 import { StartPanel } from './StartPanel.tsx';
 import { PaletteWindow } from './PaletteWindow.tsx';
 import { LayersPalette } from './LayersPalette.tsx';
@@ -120,6 +127,14 @@ export function Workspace() {
           className={['native-input', crosshair ? 'is-crosshair' : ''].filter(Boolean).join(' ')}
           aria-label={t('a11y.canvas_label')}
         />
+        {/* The orientation ball: a floating overlay after the native input (so it
+            paints above the CAD surface) and before the palettes (so a palette
+            still covers it). The layer takes no layout space and is
+            pointer-transparent; the ball re-enables input only on its own
+            canvas and Home button. */}
+        <div className="viewball-layer">
+          <ViewCube />
+        </div>
         {/* Floating palettes: an overlay sibling *after* `.native-input`, so it
             paints above the CAD surface and takes no layout space. The layer
             itself is pointer-transparent; each window re-enables input. DOM order

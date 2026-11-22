@@ -1120,8 +1120,28 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
   | `dom-canvas`（X11/XWayland / Web） | 声明 `standardViews: []`（前端禁用七键） | **声明不可用**：`orbit: false`，adapter/front-end 按名拒绝；wasm 会话是 2D-only，若请求到达会话亦为同一真实拒绝 | `false` | 同上（会话侧真实拒绝；载体侧前端显式禁用） |
 
   **证据边界**：只有编译 + 契约测试（`cad-ui-core` 的 admission/wire/`CadSession::orbit` 测试、
-  `app-web` 双 sink 等价矩阵）。轨道**手感**、ViewCube 交互、真机输入、GPU/像素、性能一律
+  `app-web` 双 sink 等价矩阵）。轨道**手感**、方位球（ViewCube 组件）交互、真机输入、GPU/像素、性能一律
   **NOT VERIFIED**；Windows/macOS/Android 只有编译门禁（未构建的平台写 NOT RUN），不得写成已验收。
+- **3D 默认观察 / 3D FIT / 透视缩放（2026-11-22）**：native 载体（`native-below`：Wayland /
+  Windows / macOS / Android）打开文档后，若 model space 含 `SemanticGeometry::Body3d`，或包围盒
+  `z` 范围显著（`extent_z > max(diagonal × 1e-6, 1e-9)`），默认应用等轴测 3D
+  （`StandardView::Isometric`）；纯 2D 文档仍是俯视 plan。判定在 `cad-app::document_is_3d`，
+  打开漏斗是 `cad-host::HostCore::fit_opened_document`（同步 deliver / 异步 publish /
+  `.ymodel` / demo）。自动进入 3D **不额外记录** `ZOOM PREVIOUS`；plan fit 自身仍按既有规则记一步。
+  **3D `FIT` 只重取景**：保持当前 eye 方向与 `up`，target 移到包围盒中心（含 `z`），距离按
+  `radius / tan(fov/2) × FIT_3D_MARGIN` 重算，`view_mode` 保持 3D；2D FIT 不变（plan + `1.05`）。
+  **透视 `zoom_at`**：target 固定做 dolly（距离 `/factor`），再在屏幕平面平移 eye+target，使光标下
+  世界点的像素不变；因此后续 orbit 围绕模型的 target，不再被缩放推过模型。orbit 速率未改
+  （`0.0035 rad/逻辑像素 × orbitSensitivityPercent/100`）。**证据**：`cad-app` / `cad-host`
+  契约测试 + `cargo check -p app-linux` + 前端 `npm test`/`build`
+  （`docs/validation-3d-view-2026-11-22.md`）；真实 GUI/像素、真实 3D DWG 打开手感、
+  Windows/macOS/Android/Web 运行时 **NOT VERIFIED**。Web/`dom-canvas` 仍是 2D-only
+  （`hostProfile.orbit=false`、`standardViews: []`），不套用这套 3D 默认。
+- **方位球（2026-11-22）**：ViewCube 从 56px 导航列移到绘图区独立浮层（桌面右上、列左侧；
+  紧凑布局左上），渲染为不透明球面 + 六个方向帽 + 网格；`--navrail-w` 仍为 **56px**，
+  导航列宽度与 CAD 分区矩形不变。点击方向帽 / Home 仍走 `cad_standard_view`，拖动仍走
+  `cad_orbit`；sr-only 六键、admission、可见性门禁不变。**证据**：`apps/desktop-ui`
+  契约测试 + Vite build；真实 GUI/像素 **NOT VERIFIED**。
 - 直接网格（Mesh/3DFACE）：数据、法向、深度、绘制顺序与透明通道已实现；透明合成有
   软件 Vulkan（lavapipe）无头测试。真实 GPU 行为未验收。
 - 底图透明度：importer 读取 acadrust `Transparency`（`ByLayer`/`ByObject`/`ByBlock`）
@@ -1333,7 +1353,7 @@ Ctrl+滚轮。`interaction.leftDragPans`（默认 false，Options → Drafting�
 2D 主键拖拽改为平移；仲裁在共享 `cad-host`，原生与 wasm 载体一致。**3D 视角拖拽**：3D 下 mouse/pen
 主键拖拽与 touch 单指拖拽都是 orbit（`yaw = -dx·K`、`pitch = +dy·K`），速率
 `K = 0.0035 rad/逻辑像素 × orbitSensitivityPercent/100`（`interaction.orbitSensitivityPercent`,
-25–200 闭区间，默认 100；宿主每次事件读 effective config，鼠标与触控共用同一倍率；ViewCube 拖拽经
+25–200 闭区间，默认 100；宿主每次事件读 effective config，鼠标与触控共用同一倍率；方位球拖拽经
 `cad_status.navigation.orbitSensitivityPercent` 用同一倍率，旧宿主缺该字段按 100）。**上限**：Web 的 Options 可用但只在会话内
 持久；Android 的 Options 可用且偏好写入应用 `filesDir`（`preference.json`，设备落盘 NOT VERIFIED），此前
 「Android 无弹窗宿主/配置不持久」的记载已被 2026-11-01 的弹窗与 `AndroidConfigStore` 一轮取代。真实触摸硬件、

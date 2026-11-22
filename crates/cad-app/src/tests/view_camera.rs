@@ -690,3 +690,230 @@ fn incremental_orbit_accumulates_the_pitch() {
     let basis = camera.view_basis().unwrap();
     assert!(basis.is_orthonormal(1e-9));
 }
+
+// --- FIT inside an observation ----------------------------------------------
+
+/// Replace the open document's drawing with `entities` on layer `0`.
+fn set_document_entities(app: &mut Application, entities: Vec<cad_db::DbEntity>) {
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layer(Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
+    .unwrap();
+    for entity in entities {
+        b.insert_entity(entity).unwrap();
+    }
+    let drawing = b.finish().unwrap();
+    app.workspace
+        .documents
+        .get_mut(&DocumentId(1))
+        .unwrap()
+        .drawing = Arc::new(drawing);
+}
+
+#[test]
+fn fit_in_three_d_keeps_the_direction_and_only_reframes() {
+    let (mut app, mut session) = application_with_document();
+    let min = Point3 {
+        x: -4.0,
+        y: -2.0,
+        z: -3.0,
+    };
+    let max = Point3 {
+        x: 4.0,
+        y: 2.0,
+        z: 3.0,
+    };
+    set_document_extent(&mut app, min, max);
+    // Enter 3D and tilt away from top-down, so "keeps the direction" is not
+    // trivially satisfied by the plan direction.
+    app.execute(
+        &mut session,
+        command(CommandId::Switch2d3d, CommandPayload::None),
+    )
+    .unwrap();
+    app.execute(
+        &mut session,
+        command(
+            CommandId::Orbit,
+            CommandPayload::Orbit {
+                yaw: 0.4,
+                pitch: 0.3,
+            },
+        ),
+    )
+    .unwrap();
+    let before = app.workspace.viewports[&ViewportId(1)].camera;
+    let direction = |camera: &Camera| {
+        camera::normalize3(camera::sub(camera.eye, camera.target)).expect("non-degenerate camera")
+    };
+    let direction_before = direction(&before);
+    let steps = app.workspace.viewports[&ViewportId(1)].zoom_history_len();
+    let saved_2d_before = app.workspace.viewports[&ViewportId(1)]
+        .view_mode
+        .saved_2d_camera();
+
+    app.execute(
+        &mut session,
+        command(CommandId::FitDrawing, CommandPayload::None),
+    )
+    .unwrap();
+
+    let vp = &app.workspace.viewports[&ViewportId(1)];
+    assert_eq!(
+        vp.view_mode.kind(),
+        ProjectionKind::ThreeD,
+        "FIT in 3D must stay a 3D observation"
+    );
+    let after = vp.camera;
+    assert!(
+        camera::length3(camera::sub(direction(&after), direction_before)) < 1e-9,
+        "the eye direction is preserved"
+    );
+    assert_eq!(after.up, before.up, "up is preserved");
+    // The target is the bounds centre, z included.
+    for (axis, expected) in [
+        (after.target.x, 0.0),
+        (after.target.y, 0.0),
+        (after.target.z, 0.0),
+    ] {
+        assert!((axis - expected).abs() < 1e-12, "{axis} != {expected}");
+    }
+    // Re-framed at the current FOV: the visible height at the target covers the
+    // whole diagonal with the documented 3D margin.
+    let diagonal = camera::length3(camera::sub(max, min));
+    let visible_height = 2.0 * after.distance() * (fov_of(&after) * 0.5).tan();
+    let expected = diagonal * camera::FIT_3D_MARGIN;
+    assert!(
+        (visible_height - expected).abs() < expected * 1e-9,
+        "visible height {visible_height} != diagonal*margin {expected}"
+    );
+    // The saved 2D camera survives the in-3D fit untouched.
+    assert_eq!(vp.view_mode.saved_2d_camera(), saved_2d_before);
+    // One ZOOM PREVIOUS step for the fit itself, and nothing extra.
+    assert_eq!(vp.zoom_history_len(), steps + 1);
+}
+
+#[test]
+fn fit_in_two_d_still_returns_the_plan_camera() {
+    let (mut app, mut session) = application_with_document();
+    let min = Point3 {
+        x: -4.0,
+        y: -2.0,
+        z: -3.0,
+    };
+    let max = Point3 {
+        x: 4.0,
+        y: 2.0,
+        z: 3.0,
+    };
+    set_document_extent(&mut app, min, max);
+
+    app.execute(
+        &mut session,
+        command(CommandId::FitDrawing, CommandPayload::None),
+    )
+    .unwrap();
+
+    let vp = &app.workspace.viewports[&ViewportId(1)];
+    assert_eq!(vp.view_mode.kind(), ProjectionKind::TwoD);
+    assert!(vp.camera.projection.is_orthographic());
+    // The historic plan camera: target on the XY centre, eye straight above it.
+    assert!((vp.camera.target.x - 0.0).abs() < 1e-12);
+    assert!((vp.camera.target.y - 0.0).abs() < 1e-12);
+    assert!((vp.camera.eye.x - vp.camera.target.x).abs() < 1e-12);
+    assert!((vp.camera.eye.y - vp.camera.target.y).abs() < 1e-12);
+    assert_eq!(vp.view_mode, ViewMode2d3d::TwoD { saved: vp.camera });
+}
+
+// --- document_is_3d ---------------------------------------------------------
+
+/// A flat (z = 0) wire body: no `z` extent at all, so only the `Body3d` match
+/// can classify this drawing as 3D.
+fn flat_wire_body() -> cad_db::DbEntity {
+    let point = |x: f64, y: f64| Point3 { x, y, z: 0.0 };
+    cad_db::DbEntity {
+        object: cad_db::DbObject {
+            id: ObjectId(2),
+            type_key: "AcDb3dSolid".into(),
+            revision: Revision(0),
+            source_handle: None,
+        },
+        id: EntityId(2),
+        layer: LayerId(0),
+        space: SpaceId::Model,
+        geometry: SemanticGeometry::Body3d(Box::new(Body3d {
+            kind: BodyKind::Wire,
+            exact: BodyExact::Unavailable {
+                reason: "test body without exact geometry".into(),
+            },
+            display: BodyDisplay {
+                mesh: Mesh {
+                    vertices: Vec::new(),
+                    triangles: Vec::new(),
+                    normals: Vec::new(),
+                    face_sources: Vec::new(),
+                    colors: Vec::new(),
+                    uvs: Vec::new(),
+                    texture: None,
+                    pbr: None,
+                },
+                edges: vec![vec![point(0.0, 0.0), point(1.0, 0.0)]],
+                tolerance: None,
+                precision: Precision::Unknown,
+                completeness: Completeness::Partial(vec!["test display cache".into()]),
+            },
+        })),
+        draw_order: 1,
+    }
+}
+
+#[test]
+fn document_is_3d_detects_bodies_and_depth_but_not_a_flat_xy_drawing() {
+    let (mut app, _session) = application_with_document();
+    assert!(
+        !app.document_is_3d(DocumentId(1)),
+        "an empty drawing is not a 3D model"
+    );
+
+    // A flat XY polyline is a plan drawing.
+    set_document_extent(
+        &mut app,
+        Point3 {
+            x: -1.0,
+            y: -1.0,
+            z: 0.0,
+        },
+        Point3 {
+            x: 1.0,
+            y: 1.0,
+            z: 0.0,
+        },
+    );
+    assert!(!app.document_is_3d(DocumentId(1)));
+
+    // A genuine z extent makes it a 3D model.
+    set_document_extent(
+        &mut app,
+        Point3 {
+            x: -1.0,
+            y: -1.0,
+            z: -1.0,
+        },
+        Point3 {
+            x: 1.0,
+            y: 1.0,
+            z: 1.0,
+        },
+    );
+    assert!(app.document_is_3d(DocumentId(1)));
+
+    // A flat body is 3D by construction, with no z extent to fall back on.
+    set_document_entities(&mut app, vec![flat_wire_body()]);
+    assert!(app.document_is_3d(DocumentId(1)));
+
+    // A missing document is `false`, never a panic.
+    assert!(!app.document_is_3d(DocumentId(99)));
+}

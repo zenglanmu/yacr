@@ -158,6 +158,54 @@ impl HostController {
 }
 
 impl HostController {
+    /// Fit the active viewport to the current drawing bounds.
+    ///
+    /// Discards the "framed" flag for open flows: a blank drawing's fit is a
+    /// documented no-op. Callers that need to report that use the command path
+    /// (`CommandId::FitDrawing`), which carries the `fit.empty` diagnostic.
+    ///
+    /// Moved here from `host/mod.rs` (physical-line gate) together with
+    /// [`Self::fit_opened_document`], so the open-path framing pair stays in one
+    /// place. The method is unchanged.
+    pub fn fit(&mut self) -> CadResult<()> {
+        self.application
+            .fit_viewport(&mut self.session, &self.viewport_id)
+            .map(|_| ())
+    }
+
+    /// Fit a freshly opened document and enter its default observation.
+    ///
+    /// The plan fit runs first, so every open has a valid, bounded framing (and
+    /// an empty document keeps the documented no-op). If the document is a 3D
+    /// model ([`Application::document_is_3d`]), the isometric standard view is
+    /// applied next: it re-orients and re-frames from the bounds, which is where
+    /// a 3D model should start instead of a top-down plan of its XY footprint.
+    ///
+    /// The isometric step is applied **directly** rather than through
+    /// [`Self::execute`]: it is the open path's default observation, not a user
+    /// view command, so it must not record a `ZOOM PREVIOUS` step — otherwise
+    /// the first `ZOOM PREVIOUS` after opening would restore a view the user
+    /// never saw.
+    pub fn fit_opened_document(&mut self) -> CadResult<()> {
+        self.application
+            .fit_viewport(&mut self.session, &self.viewport_id)?;
+        if self.application.document_is_3d(self.document_id) {
+            let command = Command {
+                schema_version: 1,
+                id: crate::CommandId::StandardView,
+                document: self.document_id,
+                viewport: self.viewport_id,
+                payload: crate::CommandPayload::StandardView(crate::StandardView::Isometric),
+            };
+            self.application.apply_standard_view(
+                &mut self.session,
+                &command,
+                crate::StandardView::Isometric,
+            )?;
+        }
+        Ok(())
+    }
+
     /// The provenance of the connector that opened the current document
     /// (ADR-0041 D5), or `None`.
     ///

@@ -77,7 +77,7 @@ impl HostCore {
     /// With no configured drawing there is nothing to open: an empty start
     /// ([`StartDocument::Empty`]) has no document and a blank production
     /// document ([`StartDocument::Blank`]) has no extent, so neither attempts a
-    /// `fit()`; only the historical demo path keeps its framing. Uses the
+    /// fit; only the historical demo path keeps its framing. Uses the
     /// already-owned render session; no UI bridge is required.
     pub fn open_configured_drawing(&self) -> CadResult<()> {
         self.metrics()?;
@@ -93,7 +93,7 @@ impl HostCore {
         } else if self.options.document_at_start == StartDocument::Demo {
             // Historical demo framing only: an empty start has no document and a
             // blank document has no extent.
-            self.controller.borrow_mut().fit()?;
+            self.controller.borrow_mut().fit_opened_document()?;
         }
         Ok(())
     }
@@ -258,7 +258,7 @@ impl HostCore {
         if let Err(error) = self.record_recent_success(&target) {
             self.note_post_commit_error(&error);
         }
-        self.controller.borrow_mut().fit()?;
+        self.controller.borrow_mut().fit_opened_document()?;
         self.controller.borrow_mut().cancel_tool()?;
         // Resource installation is NON-FATAL for presentation (mirroring the
         // asynchronous publish in `poll_loading`): the drawing is still shown,
@@ -533,7 +533,7 @@ impl HostCore {
                     self.note_post_commit_error(&error);
                 }
             }
-            self.controller.borrow_mut().fit()?;
+            self.controller.borrow_mut().fit_opened_document()?;
             self.controller.borrow_mut().cancel_tool()?;
             // Arm the corruption guard against the real delivered target (its
             // opaque handle, not a path derived from the display name).
@@ -659,7 +659,7 @@ impl HostCore {
         if let Err(error) = self.record_recent_success(&target) {
             self.note_post_commit_error(&error);
         }
-        self.controller.borrow_mut().fit()?;
+        self.controller.borrow_mut().fit_opened_document()?;
         self.controller.borrow_mut().cancel_tool()?;
         // Resource installation is non-fatal for presentation, exactly like the
         // connector open path: the document is shown and the failure is a status.

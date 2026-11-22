@@ -102,16 +102,16 @@ test('the shipped tree has exactly one pixel carrier canvas', async () => {
   // ``<canvas>`` (comments/docs) carry no attributes, so only real elements
   // match here; the stacking regression fixture stays canvas-free on purpose.
   //
-  // The ViewCube's own canvas is not a carrier: it paints the 54px decoration
-  // inside the dock, is `aria-hidden`, holds no label and is never sampled by the
+  // The orientation ball's own canvas is not a carrier: it paints the floating
+  // sphere overlay, is `aria-hidden`, holds no label and is never sampled by the
   // host as a partition. It is therefore asserted by identity, not by count.
   const app = await readAppSource();
   const elements = [...app.matchAll(/<canvas\s+[a-zA-Z][^>]*>/g)].map(match => match[0]);
   const carriers = elements.filter(element => element.includes('id="cad-canvas"'));
   assert.equal(carriers.length, 1, 'one dom-canvas carrier');
   const decorations = elements.filter(element => element.includes('className="viewcube__canvas"'));
-  assert.equal(decorations.length, 1, 'the cube canvas is the only other canvas');
-  assert.ok(decorations[0].includes('aria-hidden="true"'), 'the cube canvas is decoration');
-  assert.ok(!decorations[0].includes('aria-label'), 'the cube canvas owns no accessible name');
+  assert.equal(decorations.length, 1, 'the ball canvas is the only other canvas');
+  assert.ok(decorations[0].includes('aria-hidden="true"'), 'the ball canvas is decoration');
+  assert.ok(!decorations[0].includes('aria-label'), 'the ball canvas owns no accessible name');
   assert.equal(elements.length, carriers.length + decorations.length, 'no third canvas');
 });

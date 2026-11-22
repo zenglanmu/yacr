@@ -3,10 +3,12 @@
 // Presentational only. Whether the rail is open is owned by
 // `layout/nav-rail-state.ts` (host `NAVBAR` truth on the desktop, local state on
 // the compact layout) and the one collapse/expand control lives in the dock's
-// head, directly under the ViewCube — so this component takes `open` as a prop
+// head — so this component takes `open` as a prop
 // and renders nothing at all when it is closed. That is deliberate: a closed
 // rail is not an empty toolbar, it is absent, which is what lets the compact dock
-// shrink to the cube plus one icon instead of showing a full-height empty strip.
+// shrink to the theme switch plus one icon instead of showing a full-height empty
+// strip. The orientation ball is a separate overlay over the drawing, not a rail
+// item.
 //
 // Inside the rail: the five view commands, then the palette toggles behind the
 // one carrier gate (`palettesOffered`) — the layers, file-info, diagnostics and

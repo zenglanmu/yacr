@@ -1,11 +1,13 @@
 // Contract tests for the right-edge navigation dock, its collapse control and
 // the icon rail.
 //
-// The dock is one column inside the workspace row: a **head** (the ViewCube,
-// then the one collapse/expand control directly under it) and, below it, the
-// rail. The head is what survives both rail states — that is what lets the
-// compact layout shrink to a card with a cube and one icon instead of a
-// full-height 56px strip of chrome over the drawing.
+// The dock is one column inside the workspace row: a **head** (the compact theme
+// switch, then the one collapse/expand control directly under it) and, below it,
+// the rail. The head is what survives both rail states — that is what lets the
+// compact layout shrink to a card with a switch and one icon instead of a
+// full-height 56px strip of chrome over the drawing. The orientation ball is a
+// separate floating overlay inside the drawing area (`.viewball-layer`), not a
+// dock child: it paints above the dock and below the palettes.
 //
 // The rail's expanded state is host truth on the desktop (`navbarVisible`,
 // toggled by the real `NAVBAR` command) and local on the compact layout, where it
@@ -23,21 +25,24 @@ function ruleFor(css, selector) {
 
 const zOf = rule => Number(/z-index:\s*(\d+)/.exec(rule)[1]);
 
-test('the dock head is the cube, the compact theme switch and its toggle, then the rail', async () => {
+test('the dock head is the compact theme switch and its toggle; the ball is a separate overlay', async () => {
   const dock = await readModule('components/NavigationDock.tsx');
-  // DOM order inside the dock: head (cube, theme, toggle) then the rail. The
-  // toggle and the theme switch are *not* in the rail: they must exist in both
-  // rail states and on both layouts (the theme one on compact only).
+  // DOM order inside the dock: head (theme, toggle) then the rail. The toggle and
+  // the theme switch are *not* in the rail: they must exist in both rail states
+  // and on both layouts (the theme one on compact only). The orientation ball is
+  // deliberately not a dock child.
   const head = dock.indexOf('className="navdock__head"');
-  const cube = dock.indexOf('<ViewCube />');
   const theme = dock.indexOf('className="navdock__theme"');
   const toggle = dock.indexOf('className="navdock__toggle"');
   const rail = dock.indexOf('<NavRail open={open} />');
-  assert.ok(head > 0 && cube > head, 'the cube is the head\'s first child');
+  assert.ok(head > 0);
+  assert.equal(dock.includes('<ViewCube'), false, 'the ball is not mounted in the dock');
+  assert.equal(dock.includes('ViewCube.tsx'), false, 'the dock does not import the ball');
+  assert.equal(dock.includes('viewcube__'), false, 'the dock owns no ball styling hook');
   // The order is deliberate: the chevron acts on the rail, so it stays the last
   // control directly above it; the theme switch is chrome appearance and sits
   // before it, never as the rail's first tool.
-  assert.ok(theme > cube, 'the theme switch is under the cube');
+  assert.ok(theme > head, 'the theme switch is a head row');
   assert.ok(toggle > theme, 'the collapse control stays the last head control');
   assert.ok(rail > toggle, 'the rail is rendered after the head');
   assert.ok(dock.includes('className="navdock app-region"'), 'one layout region, tagged for metrics');
@@ -58,11 +63,23 @@ test('the dock head is the cube, the compact theme switch and its toggle, then t
   assert.ok(workspace.includes("import { NavigationDock } from './NavigationDock.tsx';"));
   assert.ok(workspace.includes('<NavigationDock />'));
   assert.equal(workspace.includes('<NavRail />'), false, 'the workspace renders the dock, not the bare rail');
+  // The ball is a workspace overlay: after the native input (so it paints above
+  // the CAD surface) and before the palette layer (so palettes stay above it).
+  assert.ok(workspace.includes("import { ViewCube } from './ViewCube.tsx';"));
+  const area = workspace.indexOf('className="workspace__canvas"');
+  const nativeInput = workspace.indexOf("['native-input'");
+  const layer = workspace.indexOf('className="viewball-layer"');
+  const ball = workspace.indexOf('<ViewCube />', layer);
+  const palettes = workspace.indexOf('className="palette-layer"');
+  assert.ok(area > 0 && nativeInput > area, 'the drawing area holds the native input');
+  assert.ok(layer > nativeInput, 'the ball layer follows the native input');
+  assert.ok(ball > layer, 'the ball is mounted in that layer');
+  assert.ok(palettes > ball, 'the floating palettes stay above the ball');
   // DOM order is unchanged: the dock follows the drawing area (so it paints over
   // it) and precedes the notice hosts, so focus order still reaches the CAD input
   // before the dock's controls.
   const dockAt = workspace.indexOf('<NavigationDock />');
-  assert.ok(dockAt > workspace.indexOf('className="workspace__canvas"'), 'the dock comes after the drawing area');
+  assert.ok(dockAt > palettes, 'the dock comes after the drawing area and its ball layer');
   assert.ok(dockAt < workspace.indexOf('<PluginNoticeHost />'), 'the dock stays ahead of the notice hosts');
 });
 
@@ -167,8 +184,8 @@ test('the desktop dock floats over the right edge and takes no width from the pa
   assert.ok(dockRule.includes('border-left: 1px solid var(--line)'), 'opaque chrome keeps its edge over the drawing');
   assert.equal(dockRule.includes('border-radius'), false, 'the desktop column is not a card');
 
-  // The head stacks the cube above the toggle, and the toggle is the one control
-  // present in both rail states.
+  // The head is ordinary flow inside the dock and holds only the compact theme
+  // switch and the toggle; the orientation ball is a separate overlay.
   const headRule = ruleFor(css, '.navdock__head');
   assert.ok(headRule.includes('flex-direction: column'));
   assert.equal(headRule.includes('position:'), false, 'the head is ordinary flow inside the dock');
@@ -184,6 +201,17 @@ test('the desktop dock floats over the right edge and takes no width from the pa
   assert.ok(ruleFor(css, '.workspace__canvas').includes('flex: 1 1 auto'), 'the drawing area owns the whole row');
   const dockZ = zOf(dockRule);
   assert.ok(dockZ > 0, 'the dock carries its own stacking level');
+  // The floating ball is its own layer inside the drawing area: above the dock,
+  // below the palettes and the update banner, so neither control is ever hidden.
+  const ballCss = await readModule('components/viewcube.css');
+  const ballLayer = ruleFor(ballCss, '.viewball-layer');
+  assert.ok(ballLayer.includes('position: absolute'), 'the ball layer is out of flow');
+  assert.ok(ballLayer.includes('inset: 0'), 'and spans the drawing area');
+  assert.ok(ballLayer.includes('pointer-events: none'), 'the layer lets the drawing through');
+  const ballZ = zOf(ballLayer);
+  assert.ok(ballZ > dockZ, 'the ball paints above the dock');
+  assert.ok(ballZ < zOf(ruleFor(css, '.palette-layer')), 'palettes paint above the ball');
+  assert.ok(ballZ < zOf(ruleFor(css, '.update-notice-layer')), 'the update banner paints above the ball');
   // Both CAD carriers keep the default level (`auto`), so the dock's positive
   // level paints over the drawing — that is what makes the opaque column visible.
   assert.equal(ruleFor(css, '.native-input').includes('z-index'), false, 'the CAD input keeps the default stacking level');
@@ -229,6 +257,13 @@ test('the compact dock is a content-sized card, never a full-height strip', asyn
   assert.ok(toggle.includes('width: 44px') && toggle.includes('height: 44px'), 'a finger-sized toggle');
   assert.ok(ruleFor(mobile, ':root[data-layout="mobile"] .navrail__button').includes('width: 44px'), '44px rail buttons');
   assert.ok(mobile.includes(':root[data-layout="mobile"] .viewcube__home'), 'Home is finger-sized on mobile too');
+  // The ball moves to the drawing's top-left, away from the dock card at the
+  // top-right, and shrinks; the rail width token is untouched.
+  const ballCard = ruleFor(mobile, ':root[data-layout="mobile"] .viewcube');
+  assert.ok(ballCard.includes('--viewball-size: 96px'), 'a smaller compact ball');
+  assert.ok(ballCard.includes('top: 8px') && ballCard.includes('left: 8px'), 'top-left, 8px margins');
+  assert.ok(ballCard.includes('right: auto'), 'no longer pinned to the rail edge');
+  assert.ok(ruleFor(mobile, ':root[data-layout="mobile"] .viewcube__home').includes('width: 44px'), 'a 44px Home touch target');
   const theme = ruleFor(mobile, ':root[data-layout="mobile"] .navdock__theme .ui-icon-button');
   assert.ok(theme.includes('width: 44px') && theme.includes('height: 44px'), 'the theme switch is a 44px target in the card head');
   // The rail paints nothing of its own inside the card, so a *collapsed* card (and
