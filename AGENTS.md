@@ -238,6 +238,17 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
   Android `apps/app-android/dist`（分别由 `npm run build`、`scripts/build-web-ui.sh`、
   `scripts/build-android-ui.sh` 生成）。`scripts/build-web.sh` 写的 `apps/app-web/dist` 是另一份
   独立 harness 产物，也不要覆盖。
+- **wasm 连接器集在 X11 与 web 之间分岔**（2026-11-22，不是同一份构建）：
+
+  | 载体 | 产出目录 | 构建 | 连接器 |
+  |---|---|---|---|
+  | 桌面 `dom-canvas`（Linux X11/XWayland 的 Tauri WebView） | `apps/desktop-ui/public/canvas/` | `scripts/build-canvas-wasm.sh`（默认 `desktop`）→ `yacr_build_app_web_wasm full` | **全部格式** |
+  | Web（`apps/app-web/dist/pkg`，`web-smoke` 的 harness） | `apps/app-web/web/pkg` + `dist/pkg` | `scripts/build-web.sh` → `yacr_build_app_web_wasm slim` | **只有 DWG/DXF** |
+  | Web（Pages 站点实际加载的模块） | `apps/app-web/dist-ui/canvas/` | `scripts/build-web-ui.sh` 在 Vite 之后调 `scripts/build-canvas-wasm.sh web-ui` | **只有 DWG/DXF** |
+
+  两种连接器集都经 `scripts/lib/wasm-toolchain.sh`；`slim` 额外强制 `cargo tree` 泄漏守卫与 20 MiB
+  预算，`full` 只受 25 MiB 发布上限约束。**不要**把 `public/canvas` 当 web 的模块来源，也不要让
+  `build-web-ui.sh` 写 `public/canvas` —— 否则桌面载体静默降级成 DWG/DXF。
 
 ## i18n（文案唯一权威）
 

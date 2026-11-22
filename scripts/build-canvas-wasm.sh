@@ -68,7 +68,17 @@
 #     artifacts exist, nothing about a browser or a GPU.
 #
 # Usage:
-#   bash scripts/build-canvas-wasm.sh
+#   bash scripts/build-canvas-wasm.sh [desktop|web-ui]
+#
+# Targets (the pair is fixed, so a caller cannot stage the wrong connector set in
+# the wrong bundle):
+#   desktop (default)  `apps/desktop-ui/public/canvas/`, compiled with every
+#                      connector (`full`): the Tauri `dom-canvas` hosts load it
+#                      from `public/` and have no per-file size ceiling.
+#   web-ui             `apps/app-web/dist-ui/canvas/`, compiled DWG/DXF-only
+#                      (`slim`): this is the directory the Cloudflare Pages site
+#                      serves, and `scripts/build-web-ui.sh` stages it after the
+#                      Vite build (which empties `outDir`).
 #
 # Environment:
 #   CARGO        cargo binary to use (default: `cargo` on PATH, else ~/.cargo/bin)
@@ -83,7 +93,19 @@ YACR_SCRIPT_NAME="$(basename -- "${BASH_SOURCE[0]}")"
 # shellcheck source=scripts/lib/wasm-toolchain.sh
 . "$REPO_ROOT/scripts/lib/wasm-toolchain.sh"
 
-readonly OUT_DIR="$REPO_ROOT/apps/desktop-ui/public/canvas"
+case "${1:-desktop}" in
+  desktop)
+    readonly OUT_DIR="$REPO_ROOT/apps/desktop-ui/public/canvas"
+    readonly CONNECTOR_SET="full"
+    ;;
+  web-ui)
+    readonly OUT_DIR="$REPO_ROOT/apps/app-web/dist-ui/canvas"
+    readonly CONNECTOR_SET="slim"
+    ;;
+  *)
+    yacr_die "unknown target '${1:-}': expected 'desktop' (public/canvas, every connector) or 'web-ui' (dist-ui/canvas, DWG/DXF only)"
+    ;;
+esac
 readonly ESM_JS="app_web.js"
 readonly WASM_ARTIFACT="app_web_bg.wasm"
 readonly BOOTSTRAP_JS="bootstrap.js"
@@ -305,21 +327,27 @@ yacr_init_wasm_toolchain
 
 # --- output directory ------------------------------------------------------
 
-# Only ever a generated, git-ignored directory under the UI package: refuse
-# anything else before deleting, so a mangled variable cannot wipe source.
-yacr_rotate_generated_dir \
-  "$OUT_DIR" "$REPO_ROOT/apps/desktop-ui/public/canvas" "apps/desktop-ui/public/canvas"
+# Only ever a generated, git-ignored directory under the two carriers that serve
+# it: refuse anything else before deleting, so a mangled variable cannot wipe
+# source.
+case "$CONNECTOR_SET" in
+  full) EXPECTED_DIR="$REPO_ROOT/apps/desktop-ui/public/canvas"; LABEL="apps/desktop-ui/public/canvas" ;;
+  slim) EXPECTED_DIR="$REPO_ROOT/apps/app-web/dist-ui/canvas"; LABEL="apps/app-web/dist-ui/canvas" ;;
+esac
+readonly EXPECTED_DIR LABEL
+yacr_rotate_generated_dir "$OUT_DIR" "$EXPECTED_DIR" "$LABEL"
 
 # --- build -----------------------------------------------------------------
 
-# `full`: the desktop `dom-canvas` carrier has no per-file size ceiling and must
-# keep the same formats as the native carriers, so it opts back into every
-# connector (`app-web`'s `full-formats`). The deployed browser bundle
-# (`scripts/build-web.sh`) stays DWG/DXF-only.
-yacr_build_app_web_wasm full
+# `desktop` keeps every connector (`full`): the Tauri `dom-canvas` hosts have no
+# per-file size ceiling and must match the native carriers. `web-ui` is the
+# directory the Cloudflare Pages site serves, so it gets the DWG/DXF-only tail
+# (`slim`) the deployed browser bundle also uses. `scripts/build-web.sh` builds
+# its own `dist/` copy of the same slim set.
+yacr_build_app_web_wasm "$CONNECTOR_SET"
 yacr_bindgen_web "$OUT_DIR"
 
-printf 'writing %s (public/, so no bundler rewrites its imports)\n' "$BOOTSTRAP_JS"
+printf 'writing %s (served verbatim, so no bundler rewrites its imports)\n' "$BOOTSTRAP_JS"
 printf '%s\n' "$BOOTSTRAP_SOURCE" > "$OUT_DIR/$BOOTSTRAP_JS"
 [ -s "$OUT_DIR/$BOOTSTRAP_JS" ] || die "generated $BOOTSTRAP_JS is missing or empty: $OUT_DIR/$BOOTSTRAP_JS"
 

@@ -12,6 +12,7 @@
 | `opt-level = "s"` + `-Oz --converge`（实验） | 28,220,150 B | 收益 < 15 KB，放弃 |
 | `opt-level = "z"`（全连接器） | 24,166,298 B（CI run 45027532154）/ 24,164,727 B（本地） | 合规，余量 ~2.0 MiB |
 | `opt-level = "z"` + slim（DWG/DXF） | **11,680,561 B**（本地 `WITH_FONTS=0 bash scripts/build-web.sh`） | 距 25 MiB 发布上限 ~13.9 MiB，距新增 20 MiB 预算 ~8.3 MiB |
+| 同上，Pages 站点实际加载的模块 | **11,680,561 B**（`apps/app-web/dist-ui/canvas/app_web_bg.wasm`，`WITH_FONTS=0 bash scripts/build-web-ui.sh`） | 部署产物同样 slim（桌面 `public/canvas` 仍是 full） |
 
 slim 的 bindgen 输出（未优化）为 22,793,732 B，`wasm-opt` 后 11,680,561 B。
 
@@ -32,6 +33,11 @@ slim 的 bindgen 输出（未优化）为 22,793,732 B，`wasm-opt` 后 11,680,5
   `wasm-opt` 后检查 20 MiB 预算；`scripts/test-file-associations.py` + `packaging/mime/formats.json`
   把 web picker 的证据收窄成 `webOpenExtensions = ["ymodel","dwg","dxf"]`，并静态断言 `app-web` 的
   `cad-app` 边没有 `formats-*`。
+- **wasm 分岔**：`scripts/build-canvas-wasm.sh [desktop|web-ui]` —— `desktop`（默认）写
+  `apps/desktop-ui/public/canvas/` 并编全格式（Tauri `dom-canvas` 宿主，无单文件上限）；`web-ui`
+  写 `apps/app-web/dist-ui/canvas/` 并编 slim。`scripts/build-web-ui.sh` 把 canvas staging 移到 Vite
+  之后（`--outDir` 会清空目录），所以 Pages 站点加载的也是 slim 模块，且 `build-web-ui.sh` 不再写
+  `public/canvas`，桌面载体不会静默降级。
 - 载体面：`apps/desktop-ui/src/host/web-adapter.ts` 的 `WEB_OPEN_EXTENSIONS`、`apps/app-web/web/index.html`
   的独立 harness picker；原生载体清单与 i18n 未改。
 
@@ -48,6 +54,8 @@ slim 的 bindgen 输出（未优化）为 22,793,732 B，`wasm-opt` 后 11,680,5
   `check-fixture-manifest.py`、`test-file-associations.py`：0 mismatch。
 - `(cd apps/desktop-ui && npm test)`：1949 passed / 0 failed。
 - `WITH_FONTS=0 bash scripts/build-web.sh`：slim 产物 11,680,561 B，两条泄漏守卫与 20 MiB 预算通过。
+- `WITH_FONTS=0 bash scripts/build-web-ui.sh`：`dist-ui/canvas/app_web_bg.wasm` 11,680,561 B，
+  `test-web-font-package.py` 也通过（canvas staging 仍在 Vite 之后、字体仍在最后）。
 - `cargo tree -p app-web --target wasm32-unknown-unknown --edges features,normal,build -i cad-app
   --locked --offline`：无 `formats-*`。
 

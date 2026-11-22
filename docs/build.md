@@ -213,15 +213,17 @@ python3 scripts/serve-web.py --directory apps/app-web/dist --port 8090
   `wasm-opt -Oz` 后为 28,234,659 字节（超限），`"z"` 下为 24,164,727 字节（2026-11-22 实测）；改回
   `"s"` 会先撞上这条硬失败，而不是悄悄改变 web 端可用格式。产物目录每次从零重建，构件缺失/为空即非零退出，
   **不产出半成品 bundle**。
-- **连接器集按载体编译**（`cad-app` 的 `formats-*` features，2026-11-22）：部署的浏览器 bundle 走
-  `yacr_build_app_web_wasm slim`（默认），`apps/app-web` 对 `cad-app` 用
-  `default-features = false`，所以只链 DWG/DXF 导入与 DWG/DXF 导出；桌面 `dom-canvas`
-  （`scripts/build-canvas-wasm.sh`）走 `yacr_build_app_web_wasm full`，即 `--features full-formats`，
-  格式集与 native 相同（桌面没有单文件上限，**不**随 web 裁剪）。slim 构建在 `cargo build` 之后强制两条
-  泄漏守卫（`cargo tree` 不得出现 `cad-app` 的 `formats-*`，也不得链 `rvt`/`cadmpeg-*`/`ifc-lite-*`/
-  `skpwright`/`cadkit-*`/`gltf`/`image`），并在 `wasm-opt` 之后检查 20 MiB 预算；实测 slim 产物
-  11,680,561 字节，full 仍 ~24 MB（`opt-level = "z"` 下）。这两条守卫只在 slim 上生效，full 构建只保留
-  25 MiB 发布上限。
+- **连接器集按载体编译**（`cad-app` 的 `formats-*` features，2026-11-22）：部署的浏览器产物走
+  **slim**（DWG/DXF 导入 + DWG/DXF 导出）。两个 web 产物都是 slim：`apps/app-web/dist`
+  （`scripts/build-web.sh` → `yacr_build_app_web_wasm slim`）与 **`apps/app-web/dist-ui/canvas`**
+  （`scripts/build-web-ui.sh` 在 Vite 之后调 `scripts/build-canvas-wasm.sh web-ui`，这是 Pages 站点
+  真正加载的模块）。`apps/app-web` 对 `cad-app` 用 `default-features = false`。桌面 Tauri 宿主读
+  `apps/desktop-ui/public/canvas`（`scripts/build-canvas-wasm.sh`，默认 `desktop` 目标 →
+  `yacr_build_app_web_wasm full`，即 `--features full-formats`），格式集与 native 相同（桌面没有
+  单文件上限，**不**随 web 裁剪）。slim 构建在 `cargo build` 之后强制两条泄漏守卫（`cargo tree`
+  不得出现 `cad-app` 的 `formats-*`，也不得链 `rvt`/`cadmpeg-*`/`ifc-lite-*`/`skpwright`/
+  `cadkit-*`/`gltf`/`image`），并在 `wasm-opt` 之后检查 20 MiB 预算；实测 slim 产物 11,680,561 字节，
+  full 仍 ~24 MB（`opt-level = "z"` 下）。守卫与预算只在 slim 上生效，full 构建只保留 25 MiB 发布上限。
 - **上限**：本地证据只到**合成夹具**（`docs/validation-dom-canvas-wasm-2026-10-24.md`：Chromium 141 /
   WebKitGTK 2.52.6 + 真实 GPU，出图与 zoom；无浏览器矩阵、无 golden、无性能结论）。CI 侧
   `web-build` 构建并上传 bundle、`web-smoke` 在 **SwiftShader 软件渲染**下断言 `start: ok` /

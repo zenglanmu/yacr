@@ -11,20 +11,24 @@
 #
 # What this script produces (all **generated**, git-ignored):
 #
-#   apps/desktop-ui/public/canvas/   the wasm session artifacts, via
-#                                    `scripts/build-canvas-wasm.sh`
-#                                    (`app_web.js`, `app_web_bg.wasm`,
-#                                    `bootstrap.js`)
 #   apps/app-web/dist-ui/            the chrome bundle: `index.html`, `assets/*`,
-#                                    a verbatim copy of `canvas/` and the staged
-#                                    `fonts/` package (`fonts.json` + every face of
-#                                    the mlightcad catalogue merged with the
-#                                    committed `fonts/`, `WITH_FONTS=1` by
-#                                    default). The page still fetches only the
-#                                    faces a drawing needs, lazily after a document
-#                                    opens; carrying the package just means a
-#                                    local/preview run does not depend on the
-#                                    project Pages CDN.
+#                                    `canvas/` and the staged `fonts/` package
+#                                    (`fonts.json` + every face of the mlightcad
+#                                    catalogue merged with the committed `fonts/`,
+#                                    `WITH_FONTS=1` by default). The page still
+#                                    fetches only the faces a drawing needs,
+#                                    lazily after a document opens; carrying the
+#                                    package just means a local/preview run does
+#                                    not depend on the project Pages CDN.
+#   apps/app-web/dist-ui/canvas/     the wasm session (`app_web.js`,
+#                                    `app_web_bg.wasm`, `bootstrap.js`) via
+#                                    `scripts/build-canvas-wasm.sh web-ui`, which
+#                                    is the **slim** DWG/DXF connector set: this
+#                                    directory is what the deployed Pages site
+#                                    loads, and Cloudflare rejects a single file
+#                                    over 25 MiB. The Tauri hosts' copy in
+#                                    `apps/desktop-ui/public/canvas/` keeps every
+#                                    connector and is **not** written here.
 #
 # `apps/app-web/dist/` (the standalone vanilla harness) is **not** touched: it is
 # a different artifact built by `scripts/build-web.sh`, and the two must not
@@ -108,23 +112,29 @@ command -v python3 >/dev/null 2>&1 \
 grep -qF '"build:web"' "$UI_DIR/package.json" \
   || die "$UI_DIR/package.json has no build:web script (this entry point would build nothing)"
 
-# --- 1. the wasm session ---------------------------------------------------
+# --- 1. the chrome bundle --------------------------------------------------
 
-# The chrome loads its canvas session from `/canvas/bootstrap.js`, which
-# `apps/desktop-ui/public/` serves verbatim. Vite copies `public/**` into the
-# output, so this has to exist *before* the UI build; the shared script asserts
-# the four artifacts itself and exits non-zero on any failure.
-printf '==> wasm CAD session artifacts (scripts/build-canvas-wasm.sh)\n'
-bash "$REPO_ROOT/scripts/build-canvas-wasm.sh" \
-  || die "scripts/build-canvas-wasm.sh failed; no UI bundle was produced"
-
-# --- 2. the chrome bundle --------------------------------------------------
-
+# Vite copies `apps/desktop-ui/public/**` verbatim, but the canvas session is
+# **staged after** this build instead: `dist-ui/canvas/` is the module the
+# Cloudflare Pages site actually loads, so it must carry the DWG/DXF-only
+# (`slim`) connector set, while `apps/desktop-ui/public/canvas/` keeps every
+# connector for the Tauri `dom-canvas` hosts. Vite's `--outDir` is emptied during
+# the build, so staging first would be discarded anyway.
 printf '==> React chrome, runtime=web (npm run build:web)\n'
 (
   cd "$UI_DIR"
   "$NPM_BIN" run build:web
 ) || die "npm run build:web failed; no UI bundle was produced"
+
+# --- 2. the wasm session ---------------------------------------------------
+
+# `web-ui`: `apps/app-web/dist-ui/canvas/` with the slim (DWG/DXF) connectors.
+# The loader in `apps/desktop-ui/src/cad/canvas-host.ts` fetches
+# `/canvas/bootstrap.js`, and the shared script asserts the artifacts itself and
+# exits non-zero on any failure.
+printf '==> wasm CAD session artifacts, web-ui target (scripts/build-canvas-wasm.sh web-ui)\n'
+bash "$REPO_ROOT/scripts/build-canvas-wasm.sh" web-ui \
+  || die "scripts/build-canvas-wasm.sh web-ui failed; no canvas session in the UI bundle"
 
 # --- 2b. bundled font package ----------------------------------------------
 
