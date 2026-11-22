@@ -138,6 +138,7 @@ pub(crate) fn pbr_quad(normal: [f32; 3], uvs: Vec<[f32; 2]>, pbr: RenderPbr) -> 
         linetype_unresolved: true,
         sources: vec![source(9)],
         draw_order: 0,
+        text_glyph: false,
     }
 }
 

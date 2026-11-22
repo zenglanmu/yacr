@@ -76,6 +76,7 @@ fn lines_batch(vertices: Vec<[f32; 3]>) -> RenderBatch {
         linetype_unresolved: true,
         sources: vec![source()],
         draw_order: 0,
+        text_glyph: false,
     }
 }
 
@@ -122,6 +123,7 @@ fn triangle_mesh() -> RenderBatch {
         linetype_unresolved: true,
         sources: vec![source()],
         draw_order: 0,
+        text_glyph: false,
     }
 }
 
@@ -198,6 +200,7 @@ fn quad_mesh() -> RenderBatch {
         linetype_unresolved: true,
         sources: vec![source()],
         draw_order: 0,
+        text_glyph: false,
     }
 }
 
@@ -252,6 +255,7 @@ fn gradient_quad(left: [f32; 3], right: [f32; 3]) -> RenderBatch {
         linetype_unresolved: false,
         sources: vec![source()],
         draw_order: 0,
+        text_glyph: false,
     }
 }
 

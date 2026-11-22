@@ -30,6 +30,7 @@ mod batch;
 mod budget;
 mod cache;
 mod transient;
+mod wireframe;
 
 pub use batch::*;
 pub use budget::*;

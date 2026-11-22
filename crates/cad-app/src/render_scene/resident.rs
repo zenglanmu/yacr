@@ -464,6 +464,7 @@ mod tests {
             linetype_unresolved: true,
             sources: Vec::new(),
             draw_order: index as i64,
+            text_glyph: false,
         }
     }
 

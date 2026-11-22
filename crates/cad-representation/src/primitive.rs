@@ -166,17 +166,24 @@ pub enum DisplayPrimitive {
     /// An analytic conic (circle/arc/ellipse). Named `Conic`, not `Arc`, to
     /// avoid colliding with [`std::sync::Arc`] in this enum.
     Conic(Arc<ConicSegment>),
+    /// A filled triangle mesh. The scene draws its **surface boundary** as the
+    /// wireframe overlay (an edge kept only when the triangles use it an odd
+    /// number of times), so a tessellation diagonal shared by two triangles of
+    /// one face is never drawn.
     Mesh(Arc<Mesh>),
-    /// Filled mesh that deliberately omits the per-triangle-edge overlay.
+    /// Filled mesh that deliberately omits the wireframe overlay entirely.
     ///
     /// **This variant is the text-glyph display class.** Only standard and vendor
-    /// text shaping emit it (a triangulated font glyph), and the overlay is omitted
-    /// because it would expose internal tessellation edges. In the render batch that
-    /// becomes `RenderTopology::Mesh` with a non-empty index list and empty
-    /// `edges`, which is exactly the predicate the renderer uses for its
-    /// navigation-time text LOD (`RenderBatch::is_text_glyph`). Do not use it for
-    /// general "mesh without a wireframe" work: that would silently classify the
-    /// geometry as text.
+    /// text shaping emit it (a triangulated font glyph), and the overlay —
+    /// including the surface boundary a plain [`DisplayPrimitive::Mesh`] draws —
+    /// is omitted because a glyph is defined by its shaped outline, so any extra
+    /// wireframe would only expose its tessellation. In the render batch that
+    /// becomes `RenderTopology::Mesh` with a non-empty index list, empty
+    /// `edges`, and `RenderBatch::text_glyph` set, which is exactly what the
+    /// renderer uses for its navigation-time text LOD
+    /// (`RenderBatch::is_text_glyph`). Do not use it for general "mesh without a
+    /// wireframe" work: that would silently classify the geometry as text and
+    /// hide it during camera motion.
     MeshWithoutEdgeOverlay(Arc<Mesh>),
     /// A filled triangle mesh plus the **stored** display edges beside it.
     ///
@@ -190,7 +197,8 @@ pub enum DisplayPrimitive {
     /// `RenderBatch::edges` from them instead of re-deriving an overlay from the
     /// triangle topology (internal tessellation diagonals are not real edges),
     /// and the renderer draws them. Use plain [`DisplayPrimitive::Mesh`] when a
-    /// mesh has no stored edges; that keeps the legacy triangle-derived overlay.
+    /// mesh has no stored edges; it draws the mesh's own surface boundary (the
+    /// odd-use edges), never the tessellation.
     MeshWithStoredEdges {
         mesh: Arc<Mesh>,
         edges: Arc<[Point3]>,

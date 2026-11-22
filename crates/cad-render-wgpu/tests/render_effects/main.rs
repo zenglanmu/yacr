@@ -139,6 +139,7 @@ fn lines_batch(vertices: Vec<[f32; 3]>) -> RenderBatch {
         linetype_unresolved: true,
         sources: vec![source()],
         draw_order: 0,
+        text_glyph: false,
     }
 }
 
@@ -195,6 +196,7 @@ fn quad_mesh(
         linetype_unresolved: true,
         sources: vec![source()],
         draw_order,
+        text_glyph: false,
     }
 }
 
@@ -452,6 +454,7 @@ fn merged_quad(
             sub_element: None,
         }],
         draw_order,
+        text_glyph: false,
     }
 }
 

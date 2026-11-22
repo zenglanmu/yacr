@@ -785,6 +785,7 @@ fn sdf_conic_field_is_unit_gradient_and_triangle_ink_is_one_pixel() {
         linetype_unresolved: false,
         sources: Vec::new(),
         draw_order: 0,
+        text_glyph: false,
     };
     let mut instances = Vec::new();
     assert!(crate::plan::push_arc_instance(

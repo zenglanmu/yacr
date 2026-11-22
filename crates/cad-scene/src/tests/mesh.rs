@@ -16,9 +16,114 @@ fn mesh_batch_is_indexed_and_carries_normals_and_edges() {
     assert_eq!(batch.normals.len(), 4);
     assert_eq!(batch.indices, vec![[0, 1, 2], [0, 2, 3]]);
     assert_eq!(batch.triangle_count(), 2);
-    // Two triangles => six directed edges, de-duplicated to the five unique
-    // undirected segments of a quad (the diagonal is shared) => ten positions.
-    assert_eq!(batch.edges.len(), 10);
+    // The overlay is the surface **boundary**: the diagonal (shared by both
+    // triangles) cancels, so a quad has 4 boundary segments => 8 positions.
+    assert_eq!(batch.edges.len(), 8);
+}
+
+#[test]
+fn quad_overlay_is_the_surface_boundary_without_the_diagonal() {
+    // The overlay is the mesh's surface boundary (odd-use rule), not every
+    // triangle edge: the diagonal shared by the quad's two triangles is not an
+    // edge of the surface and must never be drawn as one.
+    let delta = SceneCache::default()
+        .build(&mesh_representation(6, quad()), stamp())
+        .unwrap();
+    let batch = &delta.added[0];
+    assert_eq!(
+        batch.edges.len(),
+        8,
+        "a quad has four boundary segments, not five triangle edges"
+    );
+    let segments: Vec<([f32; 3], [f32; 3])> = batch
+        .edges
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|pair| (pair[0], pair[1]))
+        .collect();
+    let has_segment = |a: [f32; 3], b: [f32; 3]| {
+        segments
+            .iter()
+            .any(|&(x, y)| (x == a && y == b) || (x == b && y == a))
+    };
+    // The diagonal is v0=(0,0,0) → v2=(1,1,0).
+    assert!(
+        !has_segment([0.0, 0.0, 0.0], [1.0, 1.0, 0.0]),
+        "the tessellation diagonal must not be drawn as an edge"
+    );
+    // Every outer edge of the quad is present.
+    for (a, b) in [
+        ([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
+        ([1.0, 0.0, 0.0], [1.0, 1.0, 0.0]),
+        ([1.0, 1.0, 0.0], [0.0, 1.0, 0.0]),
+        ([0.0, 1.0, 0.0], [0.0, 0.0, 0.0]),
+    ] {
+        assert!(has_segment(a, b), "missing boundary segment {a:?} -> {b:?}");
+    }
+}
+
+#[test]
+fn a_mesh_with_only_shared_edges_has_no_boundary_and_is_not_a_text_glyph() {
+    // A closed mesh (every edge used by both triangles) has an empty boundary.
+    // That is the same edge list a text glyph has, so the explicit
+    // `text_glyph` field — not an empty `edges` — must decide the class;
+    // otherwise an imported closed mesh would vanish during camera motion.
+    let mut mesh = quad();
+    mesh.triangles = vec![[0, 1, 2], [0, 1, 2]];
+    let delta = SceneCache::default()
+        .build(&mesh_representation(7, mesh), stamp())
+        .unwrap();
+    let batch = &delta.added[0];
+    assert!(
+        batch.edges.is_empty(),
+        "every edge is used twice, so nothing is a boundary"
+    );
+    assert!(!batch.text_glyph, "a closed mesh is not a shaped glyph");
+    assert!(!batch.is_text_glyph());
+}
+
+#[test]
+fn text_glyph_is_explicit_and_stored_edges_are_never_text() {
+    // `MeshWithoutEdgeOverlay` is the only primitive that sets the explicit
+    // class; it stays true even though the batch also carries no edges.
+    let mut glyph_rep = mesh_representation(8, quad());
+    glyph_rep.fragments[0].primitive = DisplayPrimitive::MeshWithoutEdgeOverlay(Arc::new(quad()));
+    let glyph_delta = SceneCache::default().build(&glyph_rep, stamp()).unwrap();
+    let glyph = &glyph_delta.added[0];
+    assert!(glyph.edges.is_empty());
+    assert!(glyph.text_glyph, "the glyph class is set explicitly");
+    assert!(glyph.is_text_glyph());
+
+    // A body's stored edges are the wireframe source and the batch is never the
+    // text class.
+    let mesh = quad();
+    let stored = vec![
+        Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        },
+        Point3 {
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
+        },
+    ];
+    let mut body_rep = mesh_representation(9, mesh.clone());
+    body_rep.fragments[0].primitive = DisplayPrimitive::MeshWithStoredEdges {
+        mesh: Arc::new(mesh),
+        edges: Arc::from(stored.into_boxed_slice()),
+    };
+    let body_delta = SceneCache::default().build(&body_rep, stamp()).unwrap();
+    let body = &body_delta.added[0];
+    assert_eq!(
+        body.edges,
+        vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+        "the stored segment is the overlay, not the boundary"
+    );
+    assert!(!body.text_glyph);
+    assert!(!body.is_text_glyph());
 }
 
 #[test]
@@ -401,7 +506,7 @@ fn untextured_mesh_uploads_no_uv_stream_even_when_it_carries_uvs() {
     assert!(batch.texture.is_none());
     assert_eq!(
         batch.upload_size_bytes(),
-        4 * 12 * 3 + 2 * 12 + 10 * 12,
+        4 * 12 * 3 + 2 * 12 + 8 * 12,
         "no UV bytes are charged for an untextured batch"
     );
 }
@@ -447,15 +552,15 @@ fn textured_mesh_upload_bytes_and_cpu_bytes_charge_the_uv_stream() {
         .unwrap();
     let batch = &delta.added[0];
     // positions + normals + colours (4 × 12 each) + indices (2 × 12) + edges
-    // (10 × 12) + UVs (4 × 8).
+    // (8 × 12: the 4 boundary segments) + UVs (4 × 8).
     assert_eq!(
         batch.upload_size_bytes(),
-        4 * 12 * 3 + 2 * 12 + 10 * 12 + 4 * 8
+        4 * 12 * 3 + 2 * 12 + 8 * 12 + 4 * 8
     );
-    assert_eq!(batch.vertex_bytes(), 4 * 12 * 2 + 10 * 12 + 4 * 8);
+    assert_eq!(batch.vertex_bytes(), 4 * 12 * 2 + 8 * 12 + 4 * 8);
     // `approx_bytes` counts the streams the cache actually holds (the batch has
     // no per-vertex colour stream) plus the UV0 stream.
-    assert_eq!(batch.approx_bytes(), (4 + 4 + 10) * 12 + 2 * 12 + 4 * 8);
+    assert_eq!(batch.approx_bytes(), (4 + 4 + 8) * 12 + 2 * 12 + 4 * 8);
 }
 
 #[test]
@@ -697,11 +802,11 @@ fn pbr_mesh_emits_no_edge_overlay() {
     assert!(plain.pbr.is_none(), "the control mesh has no PBR material");
     assert!(shaded.pbr.is_some(), "the PBR material survives conversion");
 
-    // A textured non-PBR mesh keeps the legacy triangle-derived overlay: two
-    // triangles de-duplicate to the quad's five undirected segments.
+    // A textured non-PBR mesh keeps the surface-boundary overlay: the quad's
+    // tessellation diagonal cancels, leaving 4 boundary segments.
     assert_eq!(
         plain.edges.len(),
-        10,
+        8,
         "a textured but non-PBR mesh keeps today's overlay"
     );
     assert!(

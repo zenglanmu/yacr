@@ -88,6 +88,7 @@ fn base_band() -> RenderBatch {
         linetype_unresolved: true,
         sources: vec![source(BASE_ENTITY)],
         draw_order: 0,
+        text_glyph: false,
     }
 }
 

@@ -121,9 +121,9 @@ fn upload_bytes_of_counts_every_uploaded_buffer() {
     // 4 positions + 4 normals = 8 vertex vectors * 12 = 96.
     // 4 per-vertex colours * 12 = 48 (a mesh always binds the colour attribute).
     // 2 triangles * 12 = 24 index bytes.
-    // The triangle-derived overlay de-duplicates shared edges: a quad has 5
-    // unique segments = 10 positions * 12 = 120 bytes.
-    assert_eq!(batch.vertex_bytes(), (4 + 4 + 10) * 12);
+    // The surface-boundary overlay: a quad's tessellation diagonal cancels, so
+    // it has 4 boundary segments = 8 positions * 12 = 96 bytes.
+    assert_eq!(batch.vertex_bytes(), (4 + 4 + 8) * 12);
     let expected = batch.vertex_bytes() + 4 * 12 + 2 * 12;
     assert_eq!(batch.upload_size_bytes(), expected);
 }

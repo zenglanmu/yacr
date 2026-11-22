@@ -946,8 +946,7 @@ fn marker_batch(
 /// Previews are not database objects: the batch is a constant-colour,
 /// continuous, solid line list whose source is the synthetic
 /// [`preview_source_id`] identity. It is never textured and carries no UVs
-/// (ADR-0038 D8), and it has no wireframe overlay because it *is* the line
-/// geometry.
+/// (ADR-0038 D8) and no wireframe overlay — it *is* the line geometry.
 fn line_preview_batch(
     origin: Point3,
     vertices: Vec<[f32; 3]>,
@@ -983,6 +982,7 @@ fn line_preview_batch(
             sub_element: None,
         }],
         draw_order,
+        text_glyph: false,
     }
 }
 /// A stable synthetic source id for a preview batch.

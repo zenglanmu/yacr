@@ -61,6 +61,7 @@ fn batch(index: usize) -> RenderBatch {
             sub_element: None,
         }],
         draw_order: index as i64,
+        text_glyph: false,
     }
 }
 

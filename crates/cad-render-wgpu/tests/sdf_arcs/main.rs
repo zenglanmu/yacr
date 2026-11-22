@@ -60,6 +60,7 @@ fn conic_batch(conics: Vec<RenderConic>, entity: u128) -> RenderBatch {
         linetype_unresolved: false,
         sources: vec![source(entity)],
         draw_order: 0,
+        text_glyph: false,
     }
 }
 
@@ -269,6 +270,7 @@ fn straight_lines(origin: Point3, segments: Vec<[f64; 3]>, entity: u128) -> Rend
         linetype_unresolved: false,
         sources: vec![source(entity)],
         draw_order: 0,
+        text_glyph: false,
     }
 }
 
@@ -397,6 +399,7 @@ fn chord_lines_batch(conics: &[RenderConic], entity: u128) -> RenderBatch {
         linetype_unresolved: false,
         sources: vec![source(entity)],
         draw_order: 0,
+        text_glyph: false,
     }
 }
 

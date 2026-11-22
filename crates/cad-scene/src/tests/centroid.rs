@@ -68,6 +68,7 @@ fn empty_batch_centroid_falls_back_to_local_origin() {
         linetype_unresolved: true,
         sources: Vec::new(),
         draw_order: 0,
+        text_glyph: false,
     };
     assert_eq!(batch.centroid(), [3.0, 4.0, 5.0]);
 }

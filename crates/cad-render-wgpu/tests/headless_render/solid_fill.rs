@@ -128,6 +128,7 @@ pub(super) fn acis_cube(with_edge_overlay: bool) -> RenderBatch {
         linetype_unresolved: true,
         sources: vec![source()],
         draw_order: 0,
+        text_glyph: false,
     }
 }
 

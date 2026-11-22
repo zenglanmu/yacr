@@ -100,6 +100,7 @@ fn line_batch(entity: u128, y: f32) -> RenderBatch {
         linetype_unresolved: true,
         sources: vec![source(entity)],
         draw_order: 0,
+        text_glyph: false,
     }
 }
 

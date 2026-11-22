@@ -353,6 +353,7 @@ fn sdf_arc_draw_order_ties() {
             linetype_unresolved: false,
             sources: vec![source(2)],
             draw_order: 0,
+            text_glyph: false,
         };
         // Both at draw_order 0: upload order is the plan tie-break.
         let batches = if arc_first {
@@ -447,6 +448,7 @@ fn sdf_arc_draw_order_ties() {
             linetype_unresolved: false,
             sources: vec![source(3)],
             draw_order: 0,
+            text_glyph: false,
         };
         let cam = aligned_camera(base, 0.5);
         renderer.upload(&scene(vec![mesh, conic])).expect("upload");

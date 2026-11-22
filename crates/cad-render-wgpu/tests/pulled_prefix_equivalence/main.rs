@@ -153,6 +153,7 @@ fn line_span_rows(
         linetype_unresolved: true,
         sources: vec![source(entity)],
         draw_order: 0,
+        text_glyph: false,
     }
 }
 

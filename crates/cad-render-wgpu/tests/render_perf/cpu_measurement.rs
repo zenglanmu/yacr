@@ -34,6 +34,7 @@ fn line_batch(index: usize, transparent: bool) -> RenderBatch {
         linetype_unresolved: true,
         sources: vec![source(index)],
         draw_order: index as i64,
+        text_glyph: false,
     }
 }
 

@@ -318,10 +318,13 @@ fn face_only(
     color: [f32; 3],
 ) -> Option<RenderBatch> {
     match &fragment.primitive {
-        DisplayPrimitive::Mesh(mesh)
-        | DisplayPrimitive::MeshWithoutEdgeOverlay(mesh)
-        | DisplayPrimitive::MeshWithStoredEdges { mesh, .. } => {
-            mesh_batch(reference, mesh, id, draw_order, alpha, color)
+        DisplayPrimitive::Mesh(mesh) | DisplayPrimitive::MeshWithStoredEdges { mesh, .. } => {
+            mesh_batch(reference, mesh, id, draw_order, alpha, color, false)
+        }
+        // A highlight over a text glyph must hide with the glyph during
+        // navigation, so the overlay carries the source class.
+        DisplayPrimitive::MeshWithoutEdgeOverlay(mesh) => {
+            mesh_batch(reference, mesh, id, draw_order, alpha, color, true)
         }
         _ => None,
     }
@@ -341,6 +344,7 @@ fn mesh_batch(
     draw_order: i64,
     alpha: f32,
     color: [f32; 3],
+    text_glyph: bool,
 ) -> Option<RenderBatch> {
     let selected: Vec<[u32; 3]> = mesh
         .triangles
@@ -424,6 +428,9 @@ fn mesh_batch(
         linetype_unresolved: false,
         sources: vec![reference.clone()],
         draw_order,
+        // The tint overlay follows its source's display class: a highlighted
+        // text glyph must hide with the glyph during navigation.
+        text_glyph,
     })
 }
 

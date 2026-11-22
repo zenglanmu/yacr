@@ -65,6 +65,7 @@ fn quad(entity: u128) -> RenderBatch {
         linetype_unresolved: true,
         sources: vec![source(entity)],
         draw_order: 0,
+        text_glyph: false,
     }
 }
 

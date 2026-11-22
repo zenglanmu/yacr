@@ -156,6 +156,7 @@ fn lines_batch(vertices: Vec<[f32; 3]>) -> RenderBatch {
         linetype_unresolved: true,
         sources: vec![source(1)],
         draw_order: 0,
+        text_glyph: false,
     }
 }
 
@@ -205,6 +206,7 @@ fn quad_mesh(
         linetype_unresolved: true,
         sources: vec![source(1)],
         draw_order,
+        text_glyph: false,
     }
 }
 
@@ -377,6 +379,7 @@ fn conic_batch(conics: Vec<RenderConic>, entity: u128) -> RenderBatch {
         linetype_unresolved: false,
         sources: vec![source(entity)],
         draw_order: 0,
+        text_glyph: false,
     }
 }
 

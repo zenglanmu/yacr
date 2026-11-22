@@ -114,6 +114,7 @@ fn textured_quad(color: [f32; 3], texture: &str) -> RenderBatch {
         linetype_unresolved: true,
         sources: vec![source(9)],
         draw_order: 0,
+        text_glyph: false,
     }
 }
 

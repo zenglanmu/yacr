@@ -34,6 +34,7 @@ fn mesh_batch(mirrored: bool) -> RenderBatch {
             sub_element: None,
         }],
         draw_order: 0,
+        text_glyph: false,
     }
 }
 

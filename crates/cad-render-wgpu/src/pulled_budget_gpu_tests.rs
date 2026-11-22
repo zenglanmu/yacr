@@ -103,6 +103,7 @@ fn lines_batch(entity: u128, y: f32) -> RenderBatch {
         linetype_unresolved: true,
         sources: vec![source(entity)],
         draw_order: 0,
+        text_glyph: false,
     }
 }
 
@@ -135,6 +136,7 @@ fn quad_mesh(entity: u128, half: f32, x: f64, y: f64) -> RenderBatch {
         linetype_unresolved: true,
         sources: vec![source(entity)],
         draw_order: 0,
+        text_glyph: false,
     }
 }
 

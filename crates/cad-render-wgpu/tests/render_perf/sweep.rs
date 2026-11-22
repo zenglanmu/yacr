@@ -54,6 +54,7 @@ fn grid_batch(first: usize, count: usize, draw_order: i64) -> RenderBatch {
         linetype_unresolved: true,
         sources: vec![source(first)],
         draw_order,
+        text_glyph: false,
     }
 }
 

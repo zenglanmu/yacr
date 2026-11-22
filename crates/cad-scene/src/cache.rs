@@ -1,6 +1,9 @@
 //! cache module.
 
 use super::*;
+use crate::wireframe::{
+    mesh_boundary_edge_positions, stored_edge_positions, triangle_edge_positions,
+};
 use cad_representation::DisplayFragment;
 
 /// Bounds and caching for the CPU-side scene.
@@ -308,6 +311,7 @@ impl SceneCache {
                         linetype_unresolved: fragment.linetype_unresolved,
                         sources: vec![fragment.source.clone()],
                         draw_order: fragment.draw_order,
+                        text_glyph: false,
                     });
                     previous_was_lines = false;
                     previous_was_conic = true;
@@ -326,6 +330,7 @@ impl SceneCache {
                 pbr,
                 indices,
                 edges,
+                text_glyph,
                 origin,
                 mirrored,
             ) = match &fragment.primitive {
@@ -358,6 +363,7 @@ impl SceneCache {
                         None,
                         Vec::new(),
                         Vec::new(),
+                        false,
                         origin,
                         false,
                     )
@@ -395,11 +401,12 @@ impl SceneCache {
                         None,
                         Vec::new(),
                         Vec::new(),
+                        false,
                         origin,
                         false,
                     )
                 }
-                DisplayPrimitive::Mesh(mesh) | DisplayPrimitive::MeshWithoutEdgeOverlay(mesh) => {
+                DisplayPrimitive::Mesh(mesh) => {
                     let MeshStreams {
                         origin,
                         verts,
@@ -410,27 +417,26 @@ impl SceneCache {
                         texture,
                         pbr,
                     } = mesh_streams(mesh);
-                    // Overlay rule (ADR-0044): **imported PBR meshes carry no
-                    // triangle-derived wireframe**. A `DisplayPrimitive::Mesh`
-                    // whose sanitised PBR material survives as
-                    // `pbr.is_some()` produces exactly the same
-                    // vertex/triangle/UV/tangent/PBR streams as before but
-                    // **zero** edge positions (the
-                    // `MeshWithoutEdgeOverlay` shape): a triangle-edge overlay
-                    // would paint over and hide the shaded surface that is the
-                    // whole point of the asset. **CAD bodies keep their stored
-                    // edges** — a `Body3d` never reaches this arm; it arrives as
-                    // `MeshWithStoredEdges` (handled below) and its independent
-                    // edge set is unaffected by the PBR rule. Everything else is
-                    // unchanged: a non-PBR mesh (plain or textured) keeps the
-                    // legacy overlay (one segment per unique triangle edge;
-                    // shared edges de-duplicated), and
-                    // `MeshWithoutEdgeOverlay` (a text glyph) still carries
-                    // none.
-                    let include_edge_overlay =
-                        matches!(&fragment.primitive, DisplayPrimitive::Mesh(_)) && pbr.is_none();
+                    // Overlay rule: a plain mesh draws its **surface boundary**,
+                    // never its tessellation. [`mesh_boundary_edge_positions`]
+                    // keeps an edge only when the kept triangles use it an odd
+                    // number of times, so the diagonal shared by the two
+                    // triangles of one face cancels and is not drawn. Drawing
+                    // every triangle edge painted an unlit anti-aliased line
+                    // over the shaded surface along each diagonal — a bright
+                    // hairline on every face of an imported mesh.
+                    //
+                    // ADR-0044 still suppresses the overlay **entirely** for an
+                    // imported PBR mesh: `pbr.is_some()` means the shaded
+                    // surface is the draw, so even a boundary wireframe would
+                    // cover it and the batch takes the no-edge shape. **CAD
+                    // bodies keep their stored edges** — a `Body3d` never reaches
+                    // this arm; it arrives as `MeshWithStoredEdges` (handled
+                    // below) and its independent edge set is unaffected by both
+                    // rules.
+                    let include_edge_overlay = pbr.is_none();
                     let edge_positions = if include_edge_overlay {
-                        triangle_edge_positions(&kept, &verts)
+                        mesh_boundary_edge_positions(&kept, &verts)
                     } else {
                         Vec::new()
                     };
@@ -444,6 +450,39 @@ impl SceneCache {
                         pbr,
                         kept,
                         edge_positions,
+                        false,
+                        origin,
+                        false,
+                    )
+                }
+                // A text glyph omits the boundary the same way it omitted the
+                // triangle-edge overlay: its outline is the shaped glyph, so an
+                // extra wireframe would expose the tessellation. It is the only
+                // primitive that sets `text_glyph`, which is what keeps a
+                // boundary-less imported mesh out of the navigation-LOD text
+                // class.
+                DisplayPrimitive::MeshWithoutEdgeOverlay(mesh) => {
+                    let MeshStreams {
+                        origin,
+                        verts,
+                        kept,
+                        normals,
+                        colors,
+                        uvs,
+                        texture,
+                        pbr,
+                    } = mesh_streams(mesh);
+                    (
+                        RenderTopology::Mesh,
+                        verts,
+                        normals,
+                        colors,
+                        uvs,
+                        texture,
+                        pbr,
+                        kept,
+                        Vec::new(),
+                        true,
                         origin,
                         false,
                     )
@@ -484,6 +523,7 @@ impl SceneCache {
                         pbr,
                         kept,
                         edge_positions,
+                        false,
                         origin,
                         false,
                     )
@@ -518,6 +558,10 @@ impl SceneCache {
                 pbr,
                 indices,
                 edges,
+                // Only `MeshWithoutEdgeOverlay` (a shaped text glyph) is the
+                // navigation-LOD text class; every other arm sets `false` in its
+                // value tuple above.
+                text_glyph,
                 conics: Vec::new(),
                 mirrored: false,
                 alpha: sanitize_alpha(fragment.alpha),
@@ -782,112 +826,6 @@ fn mesh_streams(mesh: &Mesh) -> MeshStreams {
         uvs,
         texture: texture.flatten(),
         pbr,
-    }
-}
-
-/// The legacy triangle-derived edge overlay: one segment per **unique**
-/// triangle edge.
-///
-/// The directed pairs of every kept triangle are de-duplicated through
-/// [`dedup_pairs`] (an unordered endpoint pair is one segment), so the shared
-/// diagonal of two triangles is emitted once — the same five-segment quad
-/// wireframe as before the P0.1 change, with no doubled AA fringe on shared
-/// edges. It is also the defensive fallback for a `MeshWithStoredEdges` that
-/// carries no usable stored segment.
-fn triangle_edge_positions(kept: &[[u32; 3]], verts: &[[f32; 3]]) -> Vec<[f32; 3]> {
-    let mut pairs = Vec::with_capacity(kept.len() * 6);
-    for tri in kept {
-        for &(i, j) in &[(tri[0], tri[1]), (tri[1], tri[2]), (tri[2], tri[0])] {
-            pairs.push(verts[i as usize]);
-            pairs.push(verts[j as usize]);
-        }
-    }
-    dedup_pairs(pairs)
-}
-
-/// Stored body edge positions relative to `origin`, reduced to `f32`, with
-/// duplicate segments removed.
-///
-/// The input is a flat list of independent endpoint pairs (the
-/// [`DisplayPrimitive::MeshWithStoredEdges`] contract). A non-finite endpoint is
-/// dropped, then [`dedup_pairs`] removes a repeated unordered pair (`-0.0`
-/// normalized to `0.0`) while preserving first-occurrence order and dropping
-/// zero-length segments.
-///
-/// Defensive only: `cad-db` validates a body's edge polylines (at least two
-/// points, finite), so a release-path cache cannot contain a bad endpoint. There
-/// is no diagnostics channel in this scene build, so the drop is not reported
-/// here; the provider's `representation.body_empty` is the missing-geometry
-/// signal.
-fn stored_edge_positions(points: &[Point3], origin: Point3) -> Vec<[f32; 3]> {
-    let mut pairs = Vec::with_capacity(points.len());
-    for pair in points.as_chunks::<2>().0 {
-        let (Some(a), Some(b)) = (relative_f32(pair[0], origin), relative_f32(pair[1], origin))
-        else {
-            continue;
-        };
-        pairs.push(a);
-        pairs.push(b);
-    }
-    dedup_pairs(pairs)
-}
-
-/// Drop duplicate and degenerate segments from a flat endpoint-pair list.
-///
-/// A segment is an **unordered** endpoint pair compared bitwise
-/// ([`canonical_segment`]), so the same edge emitted in either direction is one
-/// segment. The first occurrence keeps its order; a zero-length pair is dropped.
-/// Both wireframe sources (stored body edges and the triangle-derived overlay)
-/// go through this one rule.
-fn dedup_pairs(pairs: Vec<[f32; 3]>) -> Vec<[f32; 3]> {
-    let mut seen: std::collections::BTreeSet<[[u32; 3]; 2]> = std::collections::BTreeSet::new();
-    let mut out = Vec::with_capacity(pairs.len());
-    for pair in pairs.as_chunks::<2>().0 {
-        let key = canonical_segment(pair[0], pair[1]);
-        if key[0] == key[1] {
-            // Degenerate: both endpoints are the same reduced position.
-            continue;
-        }
-        if seen.insert(key) {
-            out.push(pair[0]);
-            out.push(pair[1]);
-        }
-    }
-    out
-}
-
-/// One world point reduced against `origin` and narrowed to `f32`, `None` when a
-/// component is not finite.
-fn relative_f32(point: Point3, origin: Point3) -> Option<[f32; 3]> {
-    let values = [
-        (point.x - origin.x) as f32,
-        (point.y - origin.y) as f32,
-        (point.z - origin.z) as f32,
-    ];
-    values
-        .iter()
-        .all(|value| value.is_finite())
-        .then_some(values)
-}
-
-/// A bitwise key for one `f32` position, with `-0.0` folded onto `0.0`.
-fn f32_key(value: f32) -> u32 {
-    if value == 0.0 {
-        0
-    } else {
-        value.to_bits()
-    }
-}
-
-/// The unordered bitwise key of one segment: endpoints are sorted so both
-/// directions produce the same key.
-fn canonical_segment(a: [f32; 3], b: [f32; 3]) -> [[u32; 3]; 2] {
-    let a = a.map(f32_key);
-    let b = b.map(f32_key);
-    if a <= b {
-        [a, b]
-    } else {
-        [b, a]
     }
 }
 

@@ -230,12 +230,23 @@ pub struct RenderBatch {
     /// draws exactly these positions and never joins adjacent pairs.
     ///
     /// For a plain mesh batch the scene derives them from the triangle topology
-    /// (legacy overlay); for a body (`DisplayPrimitive::MeshWithStoredEdges`) it
-    /// copies the body's stored edges instead. An imported PBR mesh
-    /// ([`RenderBatch::pbr`] set) deliberately carries **none** (ADR-0044): its
-    /// shaded surface is the draw, so a triangle-derived wireframe is not
-    /// emitted.
+    /// as the mesh's **surface boundary**: an edge is emitted only when the kept
+    /// triangles use it an odd number of times, so a tessellation diagonal
+    /// (shared by the two triangles of one face) cancels and is never drawn. For
+    /// a body (`DisplayPrimitive::MeshWithStoredEdges`) it copies the body's
+    /// stored edges instead. An imported PBR mesh ([`RenderBatch::pbr`] set)
+    /// deliberately carries **none** (ADR-0044): its shaded surface is the draw,
+    /// so even a boundary wireframe is not emitted.
     pub edges: Vec<[f32; 3]>,
+    /// Whether this batch is the display class of a shaped text glyph.
+    ///
+    /// Set by [`SceneCache`] from
+    /// [`cad_representation::DisplayPrimitive::MeshWithoutEdgeOverlay`] only.
+    /// It is an explicit field because a mesh with no wireframe is no longer
+    /// distinguishable from a glyph by its edge list: an imported closed mesh
+    /// (a welded STL/glTF/OBJ surface) legitimately has **no boundary edges** and
+    /// must stay visible during camera motion instead of being hidden as text.
+    pub text_glyph: bool,
     /// Analytic circles/arcs drawn as SDF instances. Non-empty only for
     /// [`RenderTopology::Conics`], whose `vertices` is empty. Each entry is a
     /// slice-1 circle/arc (see [`RenderConic`]).
@@ -297,24 +308,19 @@ impl RenderBatch {
         }
     }
 
-    /// Whether this is the display class of a shaped text glyph: a triangle mesh
-    /// with an explicit index list, **no** edge overlay and **no** PBR material.
+    /// Whether this is the display class of a shaped text glyph.
     ///
     /// The renderer uses this to hide text during camera motion (navigation
     /// LOD). The representation primitive owns the decision: only
     /// [`cad_representation::DisplayPrimitive::MeshWithoutEdgeOverlay`] (standard
-    /// and vendor text shaping) produces this shape, so the renderer can derive
-    /// the class without a second marker field that every `RenderBatch` literal
-    /// would have to set.
+    /// and vendor text shaping) sets [`RenderBatch::text_glyph`], so this reads
+    /// the explicit class instead of inferring it from `edges`/`pbr`.
     ///
-    /// An imported PBR mesh also has no edge overlay (ADR-0044: it is a shaded
-    /// surface, so a triangle-derived wireframe would hide it) but is **not**
-    /// text: the `pbr` guard keeps it visible during navigation.
+    /// The inference is gone because an imported closed mesh has no boundary
+    /// edges either (its every edge is shared) and would otherwise be hidden as
+    /// text during navigation.
     pub fn is_text_glyph(&self) -> bool {
-        self.topology == RenderTopology::Mesh
-            && !self.indices.is_empty()
-            && self.edges.is_empty()
-            && self.pbr.is_none()
+        self.text_glyph
     }
 
     pub fn approx_bytes(&self) -> usize {

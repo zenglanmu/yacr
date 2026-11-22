@@ -13,11 +13,13 @@ fn right_line() -> RenderBatch {
 }
 
 /// A text-glyph mesh on the left half (`x` in `[-1, 0]`): `quad_mesh` is a mesh
-/// with a non-empty index list and no edge overlay, which is exactly the derived
-/// glyph class.
+/// with a non-empty index list and no edge overlay, and the batch declares the
+/// text class explicitly (a closed imported mesh has the same empty edge list
+/// but is not text).
 fn left_glyph() -> RenderBatch {
     let mut batch = quad_mesh();
     batch.local_origin.x = -0.5;
+    batch.text_glyph = true;
     batch
 }
 

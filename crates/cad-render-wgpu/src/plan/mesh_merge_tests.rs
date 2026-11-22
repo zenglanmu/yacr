@@ -50,6 +50,7 @@ fn quad(origin: [f64; 3], color: [f32; 3], entity: u128) -> cad_scene::RenderBat
         linetype_unresolved: true,
         sources: vec![source(entity)],
         draw_order: 0,
+        text_glyph: false,
     }
 }
 

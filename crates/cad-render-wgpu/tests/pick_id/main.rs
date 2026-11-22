@@ -175,6 +175,7 @@ fn base_batch(topology: RenderTopology, vertices: Vec<[f32; 3]>, entity: u128) -
         linetype_unresolved: true,
         sources: vec![source(entity)],
         draw_order: 0,
+        text_glyph: false,
     }
 }
 

@@ -37,6 +37,7 @@ fn batch(topology: RenderTopology, vertices: Vec<[f32; 3]>, alpha: f32) -> cad_s
         linetype_unresolved: false,
         sources: vec![source()],
         draw_order: 0,
+        text_glyph: false,
     }
 }
 
