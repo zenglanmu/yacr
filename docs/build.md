@@ -207,9 +207,11 @@ python3 scripts/serve-web.py --directory apps/app-web/dist --port 8090
 - 与桌面 `dom-canvas` 共用**同一条** wasm 构建链：`scripts/build-canvas-wasm.sh` 与
   `scripts/build-web.sh` 都经 `scripts/lib/wasm-toolchain.sh`（wasm-bindgen CLI 必须与 `Cargo.toml`
   的 `=0.2.130`、`wasm-opt` 必须与 binaryen `120` 钉住**完全一致**，否则硬失败）。`app-web` 的
-  wasm 用工作区的 `[profile.wasm]`（`opt-level = "s"`、`panic = "abort"`、fat LTO）构建，再经
+  wasm 用工作区的 `[profile.wasm]`（`opt-level = "z"`、`panic = "abort"`、fat LTO）构建，再经
   `wasm-opt -Oz`（跳过 `merge-similar-functions`，避免 V8 的参数上限）压缩；结果必须 ≤ 26,214,400 字节（Cloudflare Pages 单文件 25 MiB 上限），否则
-  `web-deploy` 无法发布，构建直接失败。产物目录每次从零重建，构件缺失/为空即非零退出，
+  `web-deploy` 无法发布，构建直接失败。`opt-level = "z"` 是体积约束的一部分：同一棵树在 `"s"` 下
+  `wasm-opt -Oz` 后为 28,234,659 字节（超限），`"z"` 下为 24,164,727 字节（2026-11-22 实测）；改回
+  `"s"` 会先撞上这条硬失败，而不是悄悄改变 web 端可用格式。产物目录每次从零重建，构件缺失/为空即非零退出，
   **不产出半成品 bundle**。
 - **上限**：本地证据只到**合成夹具**（`docs/validation-dom-canvas-wasm-2026-10-24.md`：Chromium 141 /
   WebKitGTK 2.52.6 + 真实 GPU，出图与 zoom；无浏览器矩阵、无 golden、无性能结论）。CI 侧
