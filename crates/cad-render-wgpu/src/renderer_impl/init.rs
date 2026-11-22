@@ -73,7 +73,14 @@ impl Renderer {
             overlay_depth: None,
             overlay_depth_view: None,
             target_size: (1, 1),
+            target_samples: 0,
             target_format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            msaa_samples: 1,
+            requested_msaa_samples: 1,
+            supported_msaa_samples: Vec::new(),
+            msaa_diagnostic: None,
+            last_msaa_diagnostic: None,
+            ui_geometry: None,
             batches: Vec::new(),
             base_end: 0,
             instance_streams: Vec::new(),
@@ -219,6 +226,17 @@ impl Renderer {
         queue: wgpu::Queue,
     ) -> CadResult<BackendCapabilities> {
         let caps = Self::caps_for(&device);
+        // Resolve the host's requested MSAA count against what this adapter
+        // guarantees/reports *before* any pipeline is created. A clamp is
+        // labelled, never silent; the overlay/mask passes stay at 1×.
+        self.msaa_samples =
+            msaa::effective_samples(self.requested_msaa_samples, &self.supported_msaa_samples);
+        self.msaa_diagnostic =
+            msaa::clamp_diagnostic(self.requested_msaa_samples, self.msaa_samples);
+        if let Some(diagnostic) = self.msaa_diagnostic.as_deref() {
+            eprintln!("[render] {diagnostic}");
+            self.last_msaa_diagnostic = Some(diagnostic.to_string());
+        }
         // Choose the draw tier once per device from the device's own
         // backend/limits. Storage buffers in the vertex stage are core WebGPU but
         // absent on WebGL2, so this is capability-gated rather than assumed; a
@@ -305,7 +323,7 @@ impl Renderer {
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
-            multisample: wgpu::MultisampleState::default(),
+            multisample: self.msaa_state(),
             fragment: Some(wgpu::FragmentState {
                 module: &line_shader,
                 entry_point: Some("fs_main"),
@@ -357,7 +375,7 @@ impl Renderer {
                     stencil: wgpu::StencilState::default(),
                     bias: wgpu::DepthBiasState::default(),
                 }),
-                multisample: wgpu::MultisampleState::default(),
+                multisample: self.msaa_state(),
                 fragment: Some(wgpu::FragmentState {
                     module: &line_instanced_shader,
                     entry_point: Some("fs_main"),
@@ -406,7 +424,7 @@ impl Renderer {
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
-            multisample: wgpu::MultisampleState::default(),
+            multisample: self.msaa_state(),
             fragment: Some(wgpu::FragmentState {
                 module: &arc_shader,
                 entry_point: Some("fs_main"),
@@ -442,6 +460,7 @@ impl Renderer {
             self.target_format,
             wgpu::FrontFace::Ccw,
             true,
+            self.msaa_samples,
             "cad-mesh-pipeline",
         );
         let mesh_pipeline_mirrored = Self::create_mesh_pipeline(
@@ -451,6 +470,7 @@ impl Renderer {
             self.target_format,
             wgpu::FrontFace::Cw,
             true,
+            self.msaa_samples,
             "cad-mesh-pipeline-mirrored",
         );
         // Transparent variants: depth-tested but not depth-written, so the
@@ -462,6 +482,7 @@ impl Renderer {
             self.target_format,
             wgpu::FrontFace::Ccw,
             false,
+            self.msaa_samples,
             "cad-mesh-pipeline-transparent",
         );
         let mesh_pipeline_mirrored_transparent = Self::create_mesh_pipeline(
@@ -471,6 +492,7 @@ impl Renderer {
             self.target_format,
             wgpu::FrontFace::Cw,
             false,
+            self.msaa_samples,
             "cad-mesh-pipeline-mirrored-transparent",
         );
         // Merged-mesh pipelines: the flat-merge layout (one interleaved buffer
@@ -487,6 +509,7 @@ impl Renderer {
             &mesh_merged_shader,
             self.target_format,
             wgpu::FrontFace::Ccw,
+            self.msaa_samples,
             "cad-mesh-merged-pipeline",
         );
         let mesh_pipeline_merged_mirrored = Self::create_mesh_merged_pipeline(
@@ -495,6 +518,7 @@ impl Renderer {
             &mesh_merged_shader,
             self.target_format,
             wgpu::FrontFace::Cw,
+            self.msaa_samples,
             "cad-mesh-merged-pipeline-mirrored",
         );
         let image_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -535,6 +559,19 @@ impl Renderer {
                 ],
                 immediate_size: 0,
             });
+        // The overlay pass draws UI (grid/axes/cursor/previews) at 1× even when
+        // the base pass is multisampled, so mask edges and 1 px UI strokes are
+        // never resolved. With MSAA off the base set is reused (`None`).
+        let ui_geometry = (self.msaa_samples > 1).then(|| {
+            Self::create_geometry_pipelines(
+                &device,
+                &pipeline_layout,
+                &image_pipeline_layout,
+                self.target_format,
+                accelerated,
+                1,
+            )
+        });
         // Textured mesh (ADR-0038 D9): a **separate** pipeline family, so the
         // untextured `mesh` pipelines keep exactly their previous vertex layouts,
         // bind groups and draw state. Group 2 is the image pipeline's texture
@@ -551,6 +588,7 @@ impl Renderer {
             &flags_layout,
             &image_texture_layout,
             self.target_format,
+            self.msaa_samples,
         );
         // PBR channel (ADR-0039 D6): another separate family, so the untextured and
         // textured pipelines keep their exact layout/state. Group 2 is the PBR
@@ -565,6 +603,7 @@ impl Renderer {
                 &flags_layout,
                 &pbr_texture_layout,
                 self.target_format,
+                self.msaa_samples,
             );
         let image_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("cad-image-pipeline"),
@@ -595,7 +634,7 @@ impl Renderer {
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
-            multisample: wgpu::MultisampleState::default(),
+            multisample: self.msaa_state(),
             fragment: Some(wgpu::FragmentState {
                 module: &image_shader,
                 entry_point: Some("fs_main"),
@@ -723,6 +762,7 @@ impl Renderer {
         self.overlay_view = None;
         self.overlay_depth = None;
         self.overlay_depth_view = None;
+        self.target_samples = 0;
         self.base_end = 0;
         self.target_size = (0, 0);
         // A fresh device generation has no resident base: drop derived state.
@@ -738,6 +778,7 @@ impl Renderer {
             .reset();
         self.refresh_gpu_budget_from_probe();
         self.layout = Some(layout);
+        self.ui_geometry = ui_geometry;
         self.line_pipeline = Some(line_pipeline);
         self.line_instanced_pipeline = Some(line_instanced_pipeline);
         self.arc_pipeline = Some(arc_pipeline);

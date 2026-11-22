@@ -574,6 +574,7 @@ impl Win32CadSurface {
         };
         if let Some(presenter) = self.presenter.as_ref() {
             let (device, queue) = presenter.device_queue();
+            session.set_msaa_supported_samples(presenter.supported_msaa_samples());
             if let Err(error) = session.attach_device_with_gpu_time(device, queue, self.gpu_time) {
                 session.fail_device(format!("attach_device: {error}"), false);
                 return Err(format!("render session attach failed: {error}"));
@@ -852,6 +853,9 @@ impl Win32CadSurface {
             .as_ref()
             .expect("presenter was just set")
             .device_queue();
+        if let Some(presenter) = self.presenter.as_ref() {
+            session.set_msaa_supported_samples(presenter.supported_msaa_samples());
+        }
         if let Err(error) = session.attach_device_with_gpu_time(device, queue, self.gpu_time) {
             session.fail_device(format!("attach_device: {error}"), false);
             let message = format!("render session attach failed: {error}");

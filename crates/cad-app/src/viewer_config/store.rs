@@ -54,6 +54,11 @@ impl ViewerConfig {
                 "GPU budget must be an integer percentage from 10 to 100",
             ));
         }
+        // Canvas anti-aliasing has no numeric leaf to bound: `MsaaMode` is a
+        // closed enum whose serde tokens (`off`/`2x`/`4x`) are the accepted set,
+        // so an unknown token (including `8x`) is refused by name at
+        // deserialization and `samples()` is total (`1`/`2`/`4`). There is
+        // deliberately nothing here to clamp or range-check.
         // The `SNAPUNIT` spacing is a real drafting quantity: a non-finite or
         // non-positive value is refused by name (it would otherwise divide by
         // zero in the grid quantiser), never replaced with the default.

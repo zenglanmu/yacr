@@ -146,7 +146,7 @@ test('every field sits on a declared tab exactly once and nothing else exists', 
   assert.equal(fieldById('nope'), null);
   assert.deepEqual(fieldsForTab('display').map(field => field.id), [
     'backgroundModel', 'backgroundPaper', 'crosshairSize', 'grid', 'axes', 'selectionHighlight',
-    'snapHints', 'gpuBudgetPercent',
+    'snapHints', 'gpuBudgetPercent', 'msaaMode',
   ]);
   assert.deepEqual(fieldsForTab('drafting').map(field => field.id), [
     'snapEnabled', 'hoverPreview', 'snapSpacing', 'pickboxSize', 'apertureSize', 'leftDragPans',
@@ -179,6 +179,7 @@ test('each control is the editor its backend value really needs', () => {
     leftDragPans: 'bool',
     orbitSensitivity: 'real',
     gpuBudgetPercent: 'number',
+    msaaMode: 'select',
     plotFormat: 'select',
     dxfVersion: 'select',
     acisVersion: 'select',

@@ -86,7 +86,10 @@ WGSL 以 `include_str!` 从 `crates/cad-render-wgpu/shaders/{line,mesh}.wgsl` �
 - 无头软件适配器上的管线创建/深度/透明排序/镜像剔除已有像素级测试（`docs/headless-render.md`）；
   但这些**未**在真实 GPU、Android 或浏览器后端核对；
 - WebGL2 下 `Depth32Float` 的可用性未在真实浏览器核对；
-- 纹理桥、MSAA resolve、sRGB/预乘、resize 时序仍未实测；
+- MSAA base 通道的离屏 resolve 已在 lavapipe 上有像素契约（ADR-0047、
+  `docs/validation-msaa-2026-11-22.md`），但真实 GPU 的视觉/性能与真实浏览器 WebGL2
+  仍未实测；Web 当前显式报告 1×，不启用 MSAA；
+- 纹理桥、sRGB/预乘、resize 时序仍未实测；
 - Auto 初始化失败的真实回退与 `BackendCapabilities` 运行时核对仍待真实设备及宿主接线；
 - 无头提交的 `poll` 等待默认 1 秒面向交互式宿主，软件大帧需显式
   `Renderer::set_poll_timeout`（见 `docs/headless-render.md` §4.5）。

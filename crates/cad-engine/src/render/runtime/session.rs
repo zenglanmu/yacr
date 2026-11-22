@@ -19,10 +19,16 @@ impl CadRenderRuntime {
         queue: wgpu::Queue,
         preference: BackendPreference,
         gpu_time: cad_render_wgpu::gpu_time::GpuTimeConfig,
+        msaa_samples: u32,
+        msaa_supported_samples: Vec<u32>,
     ) {
         self.detach();
         let mut renderer = Renderer::new(preference);
         renderer.set_progressive_rendering(true);
+        // A fresh renderer must be told the host's MSAA request and the
+        // adapter's real capability before any pipeline is created.
+        renderer.set_requested_msaa_samples(msaa_samples);
+        renderer.set_supported_msaa_samples(msaa_supported_samples);
         match renderer.initialize_with_device(device, queue) {
             Ok(caps) => {
                 // The production session uses the in-stream flags path for

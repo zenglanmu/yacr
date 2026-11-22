@@ -342,6 +342,23 @@ pub(crate) struct PulledMesh {
     table_charge: GpuCharge,
 }
 
+/// Geometry pipelines for one MSAA sample count.
+///
+/// The base pass uses the effective count; the overlay pass always uses a 1×
+/// set (the same set is reused when MSAA is off). Masks and pick stay 1×.
+pub(crate) struct GeometryPipelines {
+    pub(crate) line: wgpu::RenderPipeline,
+    pub(crate) line_instanced: wgpu::RenderPipeline,
+    pub(crate) arc: wgpu::RenderPipeline,
+    pub(crate) mesh: wgpu::RenderPipeline,
+    pub(crate) mesh_mirrored: wgpu::RenderPipeline,
+    pub(crate) mesh_transparent: wgpu::RenderPipeline,
+    pub(crate) mesh_mirrored_transparent: wgpu::RenderPipeline,
+    pub(crate) mesh_merged: wgpu::RenderPipeline,
+    pub(crate) mesh_merged_mirrored: wgpu::RenderPipeline,
+    pub(crate) image: wgpu::RenderPipeline,
+}
+
 /// The CAD renderer. Owns only derived GPU resources.
 pub struct Renderer {
     pub preference: BackendPreference,
@@ -490,7 +507,26 @@ pub struct Renderer {
     overlay_depth: Option<wgpu::Texture>,
     overlay_depth_view: Option<wgpu::TextureView>,
     target_size: (u32, u32),
+    /// The sample count the current offscreen targets and base pipelines were
+    /// built with. `0` means no target has been allocated yet.
+    target_samples: u32,
     target_format: wgpu::TextureFormat,
+    /// Effective MSAA sample count for the persistent base pass (`1` = off).
+    /// The overlay pass and wipeout masks always stay at 1×.
+    msaa_samples: u32,
+    /// The host's requested sample count (`1`, `2` or `4`), applied through
+    /// [`RenderTarget::samples`](crate::RenderTarget::samples).
+    requested_msaa_samples: u32,
+    /// Sample counts the attached adapter really supports. Empty means "the
+    /// WebGPU guarantee": `1` and `4`.
+    supported_msaa_samples: Vec<u32>,
+    /// Stable diagnostic when the requested count had to be clamped.
+    msaa_diagnostic: Option<String>,
+    /// Last diagnostic already logged, so the clamp is reported once per change.
+    last_msaa_diagnostic: Option<String>,
+    /// Single-sample geometry pipelines for the overlay pass. `None` while MSAA
+    /// is off (the base set is already 1×) or before initialization.
+    ui_geometry: Option<GeometryPipelines>,
     batches: Vec<GpuBatch>,
     /// Number of resident **base** batches: base indices are `[0, base_end)`,
     /// the transient overlay is `[base_end, batch_count)`. Set by
@@ -882,7 +918,6 @@ mod pbr_texture;
 mod pick;
 mod plan;
 mod renderer_impl;
-
 pub(crate) use cull::{ChunkCull, WorldAabb};
 mod mask_coverage;
 pub(crate) use gpu_batch::GpuBatch;
@@ -938,3 +973,28 @@ pub(crate) use gpu_image::*;
 pub(crate) use gpu_mask::GpuMask;
 pub use renderer_state::*;
 pub(crate) use uniform_arena::*;
+/// The MSAA sample counts this adapter supports for the renderer's colour and
+/// depth attachments.
+///
+/// The renderer's base colour format is `Rgba8UnormSrgb`; `Depth32Float` is its
+/// depth format. A count is reported only when **both** formats support it and
+/// the colour format can resolve. `1` is always present. A `wgpu::Device` cannot
+/// answer this question, so the host reads it from its adapter at presenter
+/// construction and hands it to [`Renderer::set_supported_msaa_samples`].
+pub fn supported_msaa_samples(adapter: &wgpu::Adapter) -> Vec<u32> {
+    let colour = adapter.get_texture_format_features(wgpu::TextureFormat::Rgba8UnormSrgb);
+    let depth = adapter.get_texture_format_features(wgpu::TextureFormat::Depth32Float);
+    [1, 2, 4]
+        .into_iter()
+        .filter(|&count| {
+            if count == 1 {
+                return true;
+            }
+            colour.flags.sample_count_supported(count)
+                && depth.flags.sample_count_supported(count)
+                && colour
+                    .flags
+                    .contains(wgpu::TextureFormatFeatureFlags::MULTISAMPLE_RESOLVE)
+        })
+        .collect()
+}

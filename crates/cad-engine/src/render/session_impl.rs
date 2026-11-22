@@ -104,6 +104,14 @@ impl RenderSessionHandle {
         if let Some(doc) = self.0.borrow().incoming.borrow().as_ref() {
             cad_app::validate_space(doc, view.space)?;
         }
+        // The requested MSAA sample count is one of the three supported levels.
+        // Anything else (a clamp candidate such as 3) is refused by name rather
+        // than silently rounded to a neighbour.
+        if !matches!(view.msaa_samples, 1 | 2 | 4) {
+            return Err(CadError::InvalidInput(
+                "msaa samples must be 1, 2 or 4".into(),
+            ));
+        }
         Ok(())
     }
 
@@ -695,9 +703,16 @@ impl RenderSessionHandle {
     ) -> Result<(), String> {
         let mut state = self.0.borrow_mut();
         let preference = state.preference;
-        state
-            .runtime
-            .attach_with_gpu_time(device, queue, preference, gpu_time);
+        let msaa_samples = state.msaa_samples;
+        let msaa_supported_samples = state.msaa_supported_samples.clone();
+        state.runtime.attach_with_gpu_time(
+            device,
+            queue,
+            preference,
+            gpu_time,
+            msaa_samples,
+            msaa_supported_samples,
+        );
         // A device attach constructs a fresh renderer, so the host's policy (if
         // any) is re-applied here instead of being dropped with the old device.
         if let Some(config) = state.gpu_budget_config {

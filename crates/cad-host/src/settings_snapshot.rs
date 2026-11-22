@@ -57,6 +57,10 @@ pub struct HostSettings {
     /// GPU memory budget as an integer percentage of the graphics card's memory
     /// (`10..=100`). A budget for CAD rendering, not the card's total memory.
     pub gpu_budget_percent: u32,
+    /// Canvas anti-aliasing token (`view.msaa.mode`): `"off"`, `"2x"` or `"4x"`
+    /// (default `"4x"`). The host resolves it to the frame's sample count
+    /// (`1`/`2`/`4`) when it publishes the next view snapshot.
+    pub msaa_mode: String,
     /// Renderer graphics backend: one of [`WGPU_BACKEND_VALUES`], `"auto"` when
     /// the user never chose one. Takes effect on the next presenter
     /// construction (the renderer backend cannot change inside a live surface).
@@ -121,6 +125,7 @@ impl HostCore {
             pickbox_size,
             aperture_size,
             gpu_budget_percent,
+            msaa_mode,
         ) = {
             let store = self.viewer_config.borrow();
             let effective = store.effective();
@@ -136,6 +141,7 @@ impl HostCore {
                 effective.view.pickbox.size_pixels,
                 effective.view.aperture.size_pixels,
                 effective.view.gpu_budget.percent,
+                effective.view.msaa.mode.as_token().to_string(),
             )
         };
         // A plain preference (no session state): the gesture reads the effective
@@ -229,6 +235,7 @@ impl HostCore {
             pickbox_size,
             aperture_size,
             gpu_budget_percent,
+            msaa_mode,
             wgpu_backend: normalize_wgpu_backend(self.wgpu_backend.borrow().as_deref()).to_string(),
             // The six host-owned appearance/navigation/notice leaves live outside
             // the `ViewerConfig` schema; the documented defaults apply when the

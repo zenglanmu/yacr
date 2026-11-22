@@ -22,6 +22,8 @@ mod images;
 mod init;
 mod masks;
 mod memory;
+mod msaa;
+mod msaa_geometry;
 mod overlay;
 mod overwrite;
 pub(crate) mod pbr;

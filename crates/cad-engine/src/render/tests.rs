@@ -218,6 +218,56 @@ fn an_ibl_toggle_is_a_live_render_input_without_a_scene_rebuild() {
 }
 
 #[test]
+fn an_msaa_sample_request_is_a_live_view_input_and_only_1_2_4_are_accepted() {
+    let session = RenderSessionHandle::new(BackendPreference::Auto);
+    let view = ViewSnapshot::default();
+    assert_eq!(
+        view.msaa_samples, 1,
+        "a direct/test renderer caller defaults to no MSAA"
+    );
+    assert!(!session.apply_view_snapshot(view.clone()).unwrap());
+
+    // A sample-count-only change is a real view change: the snapshot inequality
+    // covers the field, so it bumps `view_revision` and dirties the frame — and,
+    // like the other frame uniform inputs, it must not invalidate the scene.
+    let before = session.view_revision();
+    let input_before = session.input_revision();
+    let multisampled = ViewSnapshot {
+        msaa_samples: 4,
+        ..ViewSnapshot::default()
+    };
+    assert_ne!(view, multisampled, "the field participates in equality");
+    session.apply_view_snapshot(multisampled.clone()).unwrap();
+    assert_eq!(session.view_snapshot().msaa_samples, 4);
+    assert!(
+        session.view_revision() > before,
+        "a sample-count change must advance the view revision"
+    );
+    assert!(session.cad_frame_dirty(), "the frame must repaint");
+    assert_eq!(
+        session.input_revision(),
+        input_before,
+        "MSAA is a view change, never a scene-identity rebuild"
+    );
+
+    // An unchanged request is a no-op.
+    assert!(!session.apply_view_snapshot(multisampled).unwrap());
+
+    // 3 is not one of the three supported levels: refused by name, never
+    // rounded to 2 or 4, and the accepted view is left untouched.
+    let invalid = ViewSnapshot {
+        msaa_samples: 3,
+        ..ViewSnapshot::default()
+    };
+    let error = session.apply_view_snapshot(invalid).unwrap_err();
+    assert!(
+        error.to_string().contains("msaa samples must be 1, 2 or 4"),
+        "{error:?}"
+    );
+    assert_eq!(session.view_snapshot().msaa_samples, 4);
+}
+
+#[test]
 fn drawing_replacement_and_equal_view_are_ui_free_inputs() {
     let session = RenderSessionHandle::new(BackendPreference::Auto);
     let drawing = cad_app::host::HostController::with_demo_document([800.0, 600.0])

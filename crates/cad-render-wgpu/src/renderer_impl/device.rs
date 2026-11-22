@@ -11,6 +11,7 @@ impl Renderer {
         self.line_instanced_pipeline = None;
         self.arc_pipeline = None;
         self.unit_quad_buffer = None;
+        self.ui_geometry = None;
         self.mesh_pipeline = None;
         self.mesh_pipeline_mirrored = None;
         self.mesh_pipeline_transparent = None;
@@ -33,6 +34,7 @@ impl Renderer {
         self.overlay_view = None;
         self.overlay_depth = None;
         self.overlay_depth_view = None;
+        self.target_samples = 0;
         self.base_end = 0;
         self.batches.clear();
         self.images.clear();
@@ -122,6 +124,7 @@ impl Renderer {
         self.line_instanced_pipeline = None;
         self.arc_pipeline = None;
         self.unit_quad_buffer = None;
+        self.ui_geometry = None;
         self.mesh_pipeline = None;
         self.mesh_pipeline_mirrored = None;
         self.mesh_pipeline_transparent = None;
@@ -144,6 +147,7 @@ impl Renderer {
         self.overlay_view = None;
         self.overlay_depth = None;
         self.overlay_depth_view = None;
+        self.target_samples = 0;
         self.base_end = 0;
         self.batches.clear();
         self.images.clear();

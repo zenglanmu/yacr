@@ -97,18 +97,22 @@ impl HostCore {
             // The frame's background: the active space's configured colour, as
             // the renderer's linear channels. Model and paper really are
             // distinguishable here because the clear is per frame and this
-            // snapshot names the frame's space.
-            let clear_color = self
-                .viewer_config
-                .borrow()
-                .effective()
-                .view
-                .background
-                .resolve(matches!(
-                    space,
-                    cad_representation::SpaceSelection::Paper(_)
-                ))
-                .to_linear_rgba();
+            // snapshot names the frame's space. The MSAA choice is resolved from
+            // the same effective view (it is a per-frame request; the renderer
+            // clamps it to the device and reports the effective count).
+            let (clear_color, msaa_samples) = {
+                let store = self.viewer_config.borrow();
+                let view = &store.effective().view;
+                (
+                    view.background
+                        .resolve(matches!(
+                            space,
+                            cad_representation::SpaceSelection::Paper(_)
+                        ))
+                        .to_linear_rgba(),
+                    view.msaa.mode.samples(),
+                )
+            };
             let view = ViewSnapshot {
                 document: c.document_id,
                 camera: viewport.camera,
@@ -130,6 +134,10 @@ impl HostCore {
                 // the session token directly. Toggling it repaints without a
                 // scene rebuild (`ibl_enabled` is part of the render input).
                 ibl_enabled: c.session.view_extras.pbr_environment.is_image_based(),
+                // The requested canvas MSAA sample count, resolved from the same
+                // effective view above. It is a per-frame render input, so a
+                // settings write repaints without a scene rebuild.
+                msaa_samples,
             };
             // The pointer-cursor geometry: the cursor's world point on the work
             // plane plus the view scale (world units per logical pixel), both only

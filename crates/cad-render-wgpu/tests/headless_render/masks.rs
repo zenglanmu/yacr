@@ -88,6 +88,45 @@ fn is_clear(pixel: [u8; 4], background: [u8; 4]) -> bool {
 }
 
 #[test]
+fn mask_rectangle_at_four_samples_has_no_ghost_edge() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    renderer
+        .upload(&mask_scene(
+            vec![crossing_line()],
+            vec![mask(mask_rectangle())],
+        ))
+        .expect("upload line + mask");
+    let target = RenderTarget::new(64, 64).with_samples(4);
+    renderer
+        .render(camera_2d(), &target)
+        .expect("render 4x frame");
+    assert_eq!(renderer.msaa_samples(), 4);
+    assert_eq!(renderer.frame_texture().unwrap().sample_count(), 1);
+    let image = renderer.read_target_rgba().expect("read back frame");
+    let background = image.pixel(0, 0);
+    // The mask moved to the 1x overlay pass at n×. Its interior — including the
+    // boundary-adjacent column just inside x = -0.5 — must be the exact clear
+    // colour; a mask left in the MSAA base pass would resolve the hidden line
+    // into it (the ADR 0022 ghost edge).
+    for row in LINE_ROWS {
+        for x in [-0.49, 0.0, 0.49] {
+            let inside = image.pixel(column(x), row);
+            assert_eq!(
+                inside, background,
+                "4x mask boundary must not blend hidden line ink at x={x} row {row}: {inside:?}"
+            );
+        }
+    }
+    // Outside the mask the line still rasterizes.
+    for row in LINE_ROWS {
+        assert_ne!(image.pixel(column(-0.85), row), background);
+    }
+}
+
+#[test]
 fn mask_rectangle_hides_a_crossing_line_and_paints_the_clear_colour() {
     let Some(gpu) = gpu() else {
         return;

@@ -24,6 +24,7 @@ fn cad_settings_wire_shape_is_a_flat_camel_case_object() {
         pickbox_size: 3,
         aperture_size: 12,
         gpu_budget_percent: 90,
+        msaa_mode: "4x".to_string(),
         wgpu_backend: "dx12".to_string(),
         theme: "light".to_string(),
         navbar_visible: false,
@@ -61,6 +62,7 @@ fn cad_settings_wire_shape_is_a_flat_camel_case_object() {
             "pickboxSize": 3,
             "apertureSize": 12,
             "gpuBudgetPercent": 90,
+            "msaaMode": "4x",
             "wgpu_backend": "dx12",
             "theme": "light",
             "navbarVisible": false,
@@ -77,8 +79,8 @@ fn cad_settings_wire_shape_is_a_flat_camel_case_object() {
             "fontsDirMissing": true,
         })
     );
-    // Exactly the thirty-two documented fields; no unrelated Options fields.
-    assert_eq!(wire.as_object().expect("object").len(), 32);
+    // Exactly the thirty-three documented fields; no unrelated Options fields.
+    assert_eq!(wire.as_object().expect("object").len(), 33);
     // The backend choice keeps the shared snake_case key on the snapshot wire
     // (`settings.wgpu_backend` in the UI), never camelCased into `wgpuBackend`.
     assert!(

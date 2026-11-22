@@ -117,6 +117,11 @@ pub struct CanvasPresenter {
     config: wgpu::SurfaceConfiguration,
     info: CanvasAdapterInfo,
     blitter: FullscreenBlitter,
+    /// MSAA counts this carrier claims. The WebGL2 path returns `[1]`: wgpu-hal
+    /// forces `antialias:false` on the canvas context, and offscreen MSAA resolve
+    /// has no real-browser evidence yet, so the setting is explicitly downgraded
+    /// rather than silently pretending to work.
+    supported_msaa_samples: Vec<u32>,
     /// Number of `Surface::configure` calls (`create` is the first one). Evidence
     /// only, but it is what makes the "reconfigure once on Outdated/Lost" rule
     /// observable instead of implied.
@@ -287,6 +292,11 @@ impl CanvasPresenter {
         surface.configure(&device, &config);
 
         let blitter = FullscreenBlitter::new(&device, config.format);
+        let supported_msaa_samples = if adapter_info.backend == wgpu::Backend::Gl {
+            vec![1]
+        } else {
+            crate::supported_msaa_samples(&adapter)
+        };
         let info = CanvasAdapterInfo {
             name: adapter_info.name,
             backend: adapter_info.backend.to_str(),
@@ -302,6 +312,7 @@ impl CanvasPresenter {
             config,
             info,
             blitter,
+            supported_msaa_samples,
             configure_count: 1,
             presented_frames: 0,
         })
@@ -331,6 +342,12 @@ impl CanvasPresenter {
     /// direct `wgpu` dependency.
     pub fn device_queue(&self) -> (wgpu::Device, wgpu::Queue) {
         (self.device.clone(), self.queue.clone())
+    }
+
+    /// The MSAA sample counts this carrier reports. The WebGL2 path is `[1]`
+    /// (see the field doc); the host hands this to the render session.
+    pub fn supported_msaa_samples(&self) -> Vec<u32> {
+        self.supported_msaa_samples.clone()
     }
 
     /// The adapter/session description evidence records (see

@@ -8,9 +8,11 @@
 //! `SNAPUNIT` spacing), the persisted 2D left-drag input scheme, the renderer
 //! backend preference (`wgpu_backend`, read by the next presenter construction),
 //! the GPU memory budget percentage the renderer lane reads
-//! (`view.gpuBudget.percent`), the six host-owned appearance/navigation/notice
-//! leaves (`theme`, `navbarVisible`, `navvcubeDisplay`, `viewCubeIn2d`,
-//! `viewCubeIn3d`, `formatNoticeEnabled`), the 3D orbit sensitivity percentage
+//! (`view.gpuBudget.percent`), the canvas anti-aliasing choice
+//! (`view.msaa.mode`, resolved into the next `ViewSnapshot`'s sample count), the
+//! six host-owned appearance/navigation/notice leaves (`theme`, `navbarVisible`,
+//! `navvcubeDisplay`, `viewCubeIn2d`, `viewCubeIn3d`, `formatNoticeEnabled`), the
+//! 3D orbit sensitivity percentage
 //! (`interaction.orbitSensitivityPercent`), the drawing/display units and their
 //! precision (`ui.units.*`, applied to the document header), the recovery
 //! interval (`ui.recovery.intervalSeconds`) and the persisted CAD font directory
@@ -138,11 +140,16 @@ pub enum CadSettingKey {
     /// after such a document is opened; `false` silences it. The React shell
     /// reads the leaf from [`HostSettings`]/`CadSettings` and owns the rendering.
     FormatNoticeEnabled,
+    /// Canvas anti-aliasing (`view.msaa.mode`): the tokens `off`, `2x`, `4x`
+    /// (default `4x`). Applies live through the next `ViewSnapshot`, whose
+    /// `msaa_samples` the host resolves from this choice (`1`/`2`/`4`); the
+    /// renderer clamps the request to the device and reports the effective count.
+    MsaaMode,
 }
 
 impl CadSettingKey {
     /// Every writable key, in a stable order.
-    pub const ALL: [Self; 32] = [
+    pub const ALL: [Self; 33] = [
         Self::Grid,
         Self::Axes,
         Self::SelectionHighlight,
@@ -175,16 +182,19 @@ impl CadSettingKey {
         Self::RecoveryInterval,
         Self::FontsDir,
         Self::FormatNoticeEnabled,
+        Self::MsaaMode,
     ];
 
     /// The stable camelCase wire key (also the `cad_set_setting` key).
     ///
-    /// Every key but [`Self::WgpuBackend`], [`Self::GpuBudgetPercent`] and the
-    /// six [`ROOT_PREFERENCE_KEYS`] leaves is the final segment of a camelCase
-    /// `ViewerConfig` path. The backend and the appearance/navigation/notice keys
-    /// are root-level host preferences, so their wire key, `cad_set_setting` key
-    /// and persisted key are identical; the GPU budget is persisted under
-    /// `view.gpuBudget.percent`, whose leaf is `percent`.
+    /// Every key but [`Self::WgpuBackend`], [`Self::GpuBudgetPercent`],
+    /// [`Self::MsaaMode`] and the six [`ROOT_PREFERENCE_KEYS`] leaves is the
+    /// final segment of a camelCase `ViewerConfig` path. The backend and the
+    /// appearance/navigation/notice keys are root-level host preferences, so
+    /// their wire key, `cad_set_setting` key and persisted key are identical; the
+    /// GPU budget is persisted under `view.gpuBudget.percent`, whose leaf is
+    /// `percent`; the MSAA choice is persisted under `view.msaa.mode`, whose leaf
+    /// is `mode` while the wire key names the option.
     pub fn key(self) -> &'static str {
         match self {
             Self::Grid => "grid",
@@ -219,6 +229,7 @@ impl CadSettingKey {
             Self::RecoveryInterval => "recoveryInterval",
             Self::FontsDir => "fontsDir",
             Self::FormatNoticeEnabled => "formatNoticeEnabled",
+            Self::MsaaMode => "msaaMode",
         }
     }
 
@@ -237,9 +248,10 @@ impl CadSettingKey {
     /// [`SETTINGS_INVALID_VALUE`] — never coerced to `auto`), the two backgrounds
     /// accept only a canonical `#rrggbb` colour, `crosshairSize` accepts only an
     /// integer percentage in `1..=100`, `pickboxSize` an integer pixel count in
-    /// `1..=50`, `apertureSize` an integer pixel count in `1..=50` and
+    /// `1..=50`, `apertureSize` an integer pixel count in `1..=50`,
     /// `gpuBudgetPercent` an integer percentage of the graphics card's memory in
-    /// `10..=100` (all four rejected, never clamped), `snapSpacing` a finite
+    /// `10..=100` (all four rejected, never clamped), `msaaMode` only the three
+    /// canvas-anti-aliasing tokens (`off`/`2x`/`4x`), `snapSpacing` a finite
     /// spacing greater than zero drawing units (an integer or a real; `0`,
     /// negative, non-finite and a wrong shape are rejected, never defaulted),
     /// `orbitSensitivityPercent` a finite percentage in `25..=200` (again an
@@ -378,6 +390,17 @@ impl CadSettingKey {
             Self::FontsDir => match value {
                 CadSettingValue::Text(path) if path.is_empty() => Ok(()),
                 CadSettingValue::Text(path) if paths::fonts_dir_is_usable(path) => Ok(()),
+                _ => Err(SETTINGS_INVALID_VALUE),
+            },
+            // Canvas anti-aliasing: exactly the schema's three tokens. A number
+            // such as `4` is not a token and `8x` is not a choice, so both are
+            // refused with the generic code — never clamped to a neighbour.
+            Self::MsaaMode => match value {
+                CadSettingValue::Text(token)
+                    if cad_app::viewer_config::MsaaMode::parse(token).is_some() =>
+                {
+                    Ok(())
+                }
                 _ => Err(SETTINGS_INVALID_VALUE),
             },
             Self::Grid
@@ -520,6 +543,7 @@ impl HostCore {
             CadSettingKey::FormatNoticeEnabled => {
                 self.apply_root_flag(&value, |preferences| &mut preferences.format_notice_enabled)
             }
+            CadSettingKey::MsaaMode => self.apply_msaa_mode(&value),
         }
     }
 
@@ -614,6 +638,27 @@ impl HostCore {
         self.apply_user_preference_json(&format!(
             r#"{{"view":{{"gpuBudget":{{"percent":{percent}}}}}}}"#
         ))
+    }
+
+    /// Persist `view.msaa.mode`.
+    ///
+    /// The value is already validated against the schema's three tokens, so the
+    /// token written here is exactly what the schema parses back. The live path is
+    /// the next `ViewSnapshot`: the host resolves this leaf to the renderer's
+    /// sample count when `sync_render` publishes the frame, so this write persists
+    /// and republishes without touching a render session directly.
+    fn apply_msaa_mode(&self, value: &CadSettingValue) -> CadResult<()> {
+        let CadSettingValue::Text(token) = value else {
+            return Err(CadError::InvalidInput(SETTINGS_INVALID_VALUE.into()));
+        };
+        self.apply_user_preference_json(&format!(r#"{{"view":{{"msaa":{{"mode":"{token}"}}}}}}"#))?;
+        // Keep the next device attach in sync with the persisted request. The
+        // live frame path reads the same leaf through `ViewSnapshot`, so this is
+        // only startup/re-attach bookkeeping, not a second source of truth.
+        if let Some(mode) = cad_app::viewer_config::MsaaMode::parse(token) {
+            self.render.set_requested_msaa_samples(mode.samples());
+        }
+        Ok(())
     }
 
     /// Persist one `view.overlays.<leaf>` preference. `apply_user_preference_json`

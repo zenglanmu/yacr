@@ -479,6 +479,7 @@ async fn start_session(
     // the device comes from the page canvas presenter.
     let render = RenderSessionHandle::new(BackendPreference::WebGl2);
     let (device, queue) = presenter.device_queue();
+    render.set_msaa_supported_samples(presenter.supported_msaa_samples());
     render
         .attach_device(device, queue)
         .map_err(|error| Failure::new(STEP_DEVICE, error))?;

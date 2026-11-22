@@ -376,3 +376,60 @@ fn the_failed_preference_path_is_unknown_until_the_schema_defines_it() {
         .unwrap_err();
     assert_eq!(error.path, "ui.userCustomization.allowedPaths[0]");
 }
+
+#[test]
+fn msaa_mode_defaults_to_4x_and_round_trips_only_its_tokens() {
+    let store = ViewerConfigStore::default();
+    assert_eq!(store.effective().view.msaa.mode, MsaaMode::X4);
+    assert_eq!(MsaaMode::default(), MsaaMode::X4);
+
+    for (token, mode, samples) in [
+        ("off", MsaaMode::Off, 1),
+        ("2x", MsaaMode::X2, 2),
+        ("4x", MsaaMode::X4, 4),
+    ] {
+        assert_eq!(MsaaMode::parse(token), Some(mode));
+        assert_eq!(mode.as_token(), token);
+        assert_eq!(mode.samples(), samples);
+
+        // A host config value selects the mode, and the persisted JSON is the
+        // documented `{"view":{"msaa":{"mode":"…"}}}` spelling.
+        let mut store = ViewerConfigStore::default();
+        store
+            .update_config(json!({ "view": { "msaa": { "mode": token } } }))
+            .unwrap();
+        assert_eq!(store.effective().view.msaa.mode, mode);
+        let wire = serde_json::to_value(ViewMsaa { mode }).expect("serializes");
+        assert_eq!(wire, json!({ "mode": token }));
+        let decoded: ViewMsaa = serde_json::from_value(wire).expect("round-trips");
+        assert_eq!(decoded.mode, mode);
+    }
+
+    // `8x` is outside the closed set: serde refuses it by name instead of
+    // choosing a neighbouring sample count.
+    let error = serde_json::from_value::<ViewMsaa>(json!({ "mode": "8x" })).unwrap_err();
+    assert!(
+        error.to_string().contains("unknown variant"),
+        "an unknown MSAA token must be a schema error: {error}"
+    );
+
+    // The host-allowed preference path reaches the same leaf (the host policy
+    // itself is pinned in `cad-host`).
+    let mut store = ViewerConfigStore::default();
+    store
+        .update_config(json!({
+            "ui": { "userCustomization": { "allowedPaths": ["view.msaa.mode"] } }
+        }))
+        .unwrap();
+    store
+        .apply_user_preference(json!({ "view": { "msaa": { "mode": "2x" } } }))
+        .unwrap();
+    assert_eq!(store.effective().view.msaa.mode, MsaaMode::X2);
+    assert!(
+        store
+            .projected_user_preference_json()
+            .contains(r#""msaa":{"mode":"2x"}"#),
+        "{}",
+        store.projected_user_preference_json()
+    );
+}

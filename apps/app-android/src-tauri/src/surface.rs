@@ -459,6 +459,7 @@ pub fn bind_session(session: &RenderSessionHandle) -> Result<u64, String> {
         }
         live.presenter.clear_binding_cache();
         let (device, queue) = live.presenter.device_queue();
+        session.set_msaa_supported_samples(live.presenter.supported_msaa_samples());
         match session.attach_device_with_gpu_time(device, queue, live.gpu_time) {
             Ok(()) => {
                 live.session = Some(session.clone());

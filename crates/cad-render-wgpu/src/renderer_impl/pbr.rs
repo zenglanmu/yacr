@@ -65,6 +65,7 @@ impl Renderer {
         format: wgpu::TextureFormat,
         front_face: wgpu::FrontFace,
         depth_write: bool,
+        samples: u32,
         label: &str,
         layout: PbrVertexLayout,
     ) -> wgpu::RenderPipeline {
@@ -122,7 +123,10 @@ impl Renderer {
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
-            multisample: wgpu::MultisampleState::default(),
+            multisample: wgpu::MultisampleState {
+                count: samples.max(1),
+                ..Default::default()
+            },
             fragment: Some(wgpu::FragmentState {
                 module: shader,
                 entry_point: Some("fs_main"),
@@ -150,6 +154,7 @@ impl Renderer {
         flags_layout: &wgpu::BindGroupLayout,
         pbr_texture_layout: &wgpu::BindGroupLayout,
         format: wgpu::TextureFormat,
+        samples: u32,
     ) -> (
         [wgpu::RenderPipeline; 4],
         [wgpu::RenderPipeline; 4],
@@ -177,6 +182,7 @@ impl Renderer {
                     format,
                     front_face,
                     depth_write,
+                    samples,
                     &label,
                     layout,
                 )
@@ -354,6 +360,21 @@ impl Renderer {
         identities: PbrIdentities,
         identity_bind_group: wgpu::BindGroup,
     ) {
+        self.install_pbr_pipelines(full, uv, flat);
+        self.pbr_texture_layout = Some(layout);
+        self.pbr_identities = Some(identities);
+        self.pbr_identity_bind_group = Some(identity_bind_group);
+    }
+
+    /// Install only the twelve PBR pipelines (used when rebuilding after an
+    /// MSAA sample-count change; the bind-group layout and identity textures
+    /// survive that rebuild).
+    pub(super) fn install_pbr_pipelines(
+        &mut self,
+        full: [wgpu::RenderPipeline; 4],
+        uv: [wgpu::RenderPipeline; 4],
+        flat: [wgpu::RenderPipeline; 4],
+    ) {
         let [pbr, mirrored, transparent, mirrored_transparent] = full;
         self.mesh_pipeline_pbr = Some(pbr);
         self.mesh_pipeline_pbr_mirrored = Some(mirrored);
@@ -369,9 +390,6 @@ impl Renderer {
         self.mesh_pipeline_pbr_flat_mirrored = Some(flat_mirrored);
         self.mesh_pipeline_pbr_flat_transparent = Some(flat_transparent);
         self.mesh_pipeline_pbr_flat_mirrored_transparent = Some(flat_mirrored_transparent);
-        self.pbr_texture_layout = Some(layout);
-        self.pbr_identities = Some(identities);
-        self.pbr_identity_bind_group = Some(identity_bind_group);
     }
 
     /// The `mesh_pbr` pipeline for a batch's mirror/alpha class and vertex layout

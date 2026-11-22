@@ -552,7 +552,10 @@ impl Renderer {
                     stencil: wgpu::StencilState::default(),
                     bias: wgpu::DepthBiasState::default(),
                 }),
-                multisample: wgpu::MultisampleState::default(),
+                multisample: wgpu::MultisampleState {
+                    count: self.msaa_samples.max(1),
+                    ..Default::default()
+                },
                 fragment: Some(wgpu::FragmentState {
                     module: &line_shader,
                     entry_point: Some("fs_main"),
@@ -593,7 +596,10 @@ impl Renderer {
                     stencil: wgpu::StencilState::default(),
                     bias: wgpu::DepthBiasState::default(),
                 }),
-                multisample: wgpu::MultisampleState::default(),
+                multisample: wgpu::MultisampleState {
+                    count: self.msaa_samples.max(1),
+                    ..Default::default()
+                },
                 fragment: Some(wgpu::FragmentState {
                     module: &mesh_shader,
                     entry_point: Some("fs_main"),
@@ -624,5 +630,151 @@ impl Renderer {
         self.pulled_line_storage_layout = Some(line_storage_layout);
         self.pulled_mesh_storage_layout = Some(mesh_storage_layout);
         true
+    }
+
+    /// Recreate only the accelerated pulled pipelines after an MSAA sample-count
+    /// change. The storage layouts, camera uniform/bind group and resident
+    /// buffers are untouched; only the pipelines bake `MultisampleState::count`.
+    pub(super) fn rebuild_pulled_pipelines(&mut self, device: &wgpu::Device) {
+        let (
+            Some(flags_layout),
+            Some(camera_layout),
+            Some(line_storage_layout),
+            Some(mesh_storage_layout),
+        ) = (
+            self.flags_layout.clone(),
+            self.pulled_camera_layout.clone(),
+            self.pulled_line_storage_layout.clone(),
+            self.pulled_mesh_storage_layout.clone(),
+        )
+        else {
+            self.line_pulled_pipeline = None;
+            self.mesh_pulled_pipeline = None;
+            self.mesh_pulled_mirrored_pipeline = None;
+            return;
+        };
+        let line_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("cad-pulled-line-pipeline-layout"),
+            bind_group_layouts: &[
+                Some(&camera_layout),
+                Some(&flags_layout),
+                Some(&line_storage_layout),
+            ],
+            immediate_size: 0,
+        });
+        let mesh_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("cad-pulled-mesh-pipeline-layout"),
+            bind_group_layouts: &[
+                Some(&camera_layout),
+                Some(&flags_layout),
+                Some(&mesh_storage_layout),
+            ],
+            immediate_size: 0,
+        });
+        let line_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("cad-pulled-lines"),
+            source: wgpu::ShaderSource::Wgsl(LINE_PULLED_SHADER.into()),
+        });
+        let mesh_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("cad-pulled-mesh"),
+            source: wgpu::ShaderSource::Wgsl(MESH_PULLED_SHADER.into()),
+        });
+        let samples = self.msaa_samples.max(1);
+        self.line_pulled_pipeline = Some(device.create_render_pipeline(
+            &wgpu::RenderPipelineDescriptor {
+                label: Some("cad-pulled-lines-pipeline"),
+                layout: Some(&line_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &line_shader,
+                    entry_point: Some("vs_main"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    unclipped_depth: false,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    conservative: false,
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: DEPTH_FORMAT,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
+                multisample: wgpu::MultisampleState {
+                    count: samples,
+                    ..Default::default()
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &line_shader,
+                    entry_point: Some("fs_main"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: self.target_format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            },
+        ));
+        let mesh_pipeline = |front_face: wgpu::FrontFace, label: &str| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(&mesh_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &mesh_shader,
+                    entry_point: Some("vs_main"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face,
+                    cull_mode: Some(wgpu::Face::Back),
+                    unclipped_depth: false,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    conservative: false,
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: DEPTH_FORMAT,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::Less),
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
+                multisample: wgpu::MultisampleState {
+                    count: samples,
+                    ..Default::default()
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &mesh_shader,
+                    entry_point: Some("fs_main"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: self.target_format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        self.mesh_pulled_pipeline = Some(mesh_pipeline(
+            wgpu::FrontFace::Ccw,
+            "cad-pulled-mesh-pipeline",
+        ));
+        self.mesh_pulled_mirrored_pipeline = Some(mesh_pipeline(
+            wgpu::FrontFace::Cw,
+            "cad-pulled-mesh-pipeline-mirrored",
+        ));
     }
 }

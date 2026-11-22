@@ -38,6 +38,7 @@ fn snapshot_with_snap_spacing(snap_spacing: f64) -> CadSettings {
         pickbox_size: 3,
         aperture_size: 12,
         gpu_budget_percent: 90,
+        msaa_mode: "4x".to_string(),
         wgpu_backend: "auto".to_string(),
         theme: "dark".to_string(),
         navbar_visible: true,

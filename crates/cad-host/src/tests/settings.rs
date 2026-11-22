@@ -216,6 +216,16 @@ fn each_writable_key_is_persisted_and_reported() {
         .unwrap()
         .contains(r#""hoverPreview":false"#));
 
+    core.apply_setting(
+        CadSettingKey::MsaaMode,
+        CadSettingValue::Text("off".to_string()),
+    )
+    .unwrap();
+    assert_eq!(core.settings().msaa_mode, "off");
+    assert!(persisted(&config)
+        .unwrap()
+        .contains(r#""msaa":{"mode":"off"}"#));
+
     // The persisted projection is the allowed leaves only: no capability and no
     // unrelated configuration field leaked into durable storage.
     let persisted = persisted(&config).unwrap();

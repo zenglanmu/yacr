@@ -303,6 +303,17 @@ impl RenderTarget {
         self
     }
 
+    /// Request this frame's MSAA sample count (builder form).
+    ///
+    /// The count is a *request*: the renderer clamps it to what the device
+    /// supports and reports the effective count. [`RenderTarget::new`] supplies
+    /// `1` (no MSAA), so a caller that never sets it keeps the single-sampled
+    /// path.
+    pub fn with_samples(mut self, samples: u32) -> Self {
+        self.samples = samples;
+        self
+    }
+
     /// The sanitised clear colour this frame will use.
     ///
     /// A caller-supplied channel is clamped into `0..=1` (a non-finite channel

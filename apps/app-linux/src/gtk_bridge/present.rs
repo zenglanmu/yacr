@@ -117,6 +117,7 @@ impl GtkOverlayOwner {
         };
         if let Some(presenter) = self.presenter.as_ref() {
             let (device, queue) = presenter.device_queue();
+            session.set_msaa_supported_samples(presenter.supported_msaa_samples());
             if let Err(error) = session.attach_device_with_gpu_time(device, queue, self.gpu_time) {
                 session.fail_device(format!("attach_device: {error}"), false);
                 return Err(format!("render session attach failed: {error}"));

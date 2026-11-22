@@ -52,6 +52,7 @@ pub const HOST_ALLOWED_PATHS_JSON: &str = r#"{"ui":{"userCustomization":{"allowe
     "view.pickbox.sizePixels",
     "view.aperture.sizePixels",
     "view.gpuBudget.percent",
+    "view.msaa.mode",
     "ui.export.plotFormat",
     "ui.export.acisVersion",
     "ui.export.dxfVersion",

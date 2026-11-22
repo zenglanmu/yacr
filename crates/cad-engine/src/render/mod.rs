@@ -45,6 +45,7 @@ pub use runtime::{
 mod diagnostics;
 mod session_display;
 mod session_impl;
+mod session_msaa;
 pub use diagnostics::{RenderDiagnostics, RenderGateReason};
 
 fn backend_kind(actual: ActiveBackend) -> ActiveBackendKind {
@@ -113,6 +114,14 @@ pub struct ViewSnapshot {
     /// the scene or a pipeline. `false` (the default) is the legacy
     /// `AMBIENT`-floor shading.
     pub ibl_enabled: bool,
+    /// Requested MSAA sample count for this frame: `1` (off), `2` or `4`.
+    ///
+    /// The host resolves `view.msaa.mode` into this value; it is a per-frame
+    /// render input, not scene identity, so a change repaints through the ordinary
+    /// snapshot inequality/`view_revision` path. The renderer clamps the request
+    /// to what the device supports and reports the effective count. `1` is the
+    /// default for direct/test renderer callers.
+    pub msaa_samples: u32,
 }
 impl Default for ViewSnapshot {
     fn default() -> Self {
@@ -125,6 +134,7 @@ impl Default for ViewSnapshot {
             canvas_origin: None,
             clear_color: [0.0, 0.0, 0.0, 1.0],
             ibl_enabled: false,
+            msaa_samples: 1,
         }
     }
 }
@@ -291,6 +301,13 @@ struct State {
     /// [`CadRenderRuntime::attach_with_gpu_time`] constructs a **fresh**
     /// renderer that would otherwise silently fall back to the environment.
     gpu_budget_config: Option<GpuBudgetConfig>,
+    /// The host's requested MSAA sample count for the next device attach
+    /// (`1`/`2`/`4`). A fresh renderer is constructed on every attach, so the
+    /// request is re-applied there.
+    msaa_samples: u32,
+    /// Adapter-reported MSAA counts (empty = WebGPU guarantee `1`/`4`), also
+    /// re-applied on every attach.
+    msaa_supported_samples: Vec<u32>,
     preference: BackendPreference,
     redraw_requests: u64,
     stopped: bool,
@@ -345,6 +362,8 @@ impl Default for State {
             published_base_identity: None,
             runtime: CadRenderRuntime::default(),
             gpu_budget_config: None,
+            msaa_samples: 1,
+            msaa_supported_samples: Vec::new(),
             preference: BackendPreference::Auto,
             redraw_requests: 0,
             stopped: false,

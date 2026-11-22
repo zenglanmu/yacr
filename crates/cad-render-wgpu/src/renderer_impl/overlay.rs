@@ -318,22 +318,98 @@ impl Renderer {
         overlay_depth_view: &wgpu::TextureView,
         background: [f32; 4],
         plan: &OverlayPlan,
+        mask_slots: &[(u32, Option<u32>)],
+        masks_first: bool,
         transient: Option<(&wgpu::Buffer, u32, u32)>,
-        line_pipeline: &wgpu::RenderPipeline,
-        line_instanced_pipeline: &wgpu::RenderPipeline,
-        arc_pipeline: &wgpu::RenderPipeline,
-        mesh_pipeline: &wgpu::RenderPipeline,
-        mesh_pipeline_mirrored: &wgpu::RenderPipeline,
-        mesh_pipeline_transparent: &wgpu::RenderPipeline,
-        mesh_pipeline_mirrored_transparent: &wgpu::RenderPipeline,
-        mesh_pipeline_merged: &wgpu::RenderPipeline,
-        mesh_pipeline_merged_mirrored: &wgpu::RenderPipeline,
-        image_pipeline: &wgpu::RenderPipeline,
-        unit_quad_buffer: &wgpu::Buffer,
     ) -> OverlayOutcome {
+        // Overlay batches are UI/highlight geometry (grid, axes, cursor, preview,
+        // selection tint); the scene builder creates them with `texture: None`
+        // and `pbr: None`. The 1× overlay set therefore has no textured/PBR
+        // variants. A textured overlay would be a planning bug: drawing it with
+        // the n× base pipeline into a 1× attachment is a validation failure, not
+        // a silently wrong image.
+        debug_assert!(
+            plan.opaque
+                .iter()
+                .chain(plan.transparent.iter())
+                .filter(|&&index| index != plan::TRANSIENT_CURSOR)
+                .all(|&index| self.batches[index].texture.is_none()
+                    && self.batches[index].pbr.is_none()),
+            "overlay batches must stay untextured/solid"
+        );
+        // The overlay always draws at 1×. When MSAA is on, `ui_geometry` holds
+        // the single-sample twin of the base set; when it is off, the base set is
+        // already 1× and is reused.
+        let ui = self.ui_geometry.as_ref();
+        let line_pipeline = ui.map_or_else(
+            || self.line_pipeline.as_ref().expect("line pipeline"),
+            |pipelines| &pipelines.line,
+        );
+        let line_instanced_pipeline = ui.map_or_else(
+            || {
+                self.line_instanced_pipeline
+                    .as_ref()
+                    .expect("instanced line pipeline")
+            },
+            |pipelines| &pipelines.line_instanced,
+        );
+        let arc_pipeline = ui.map_or_else(
+            || self.arc_pipeline.as_ref().expect("arc pipeline"),
+            |pipelines| &pipelines.arc,
+        );
+        let mesh_pipeline = ui.map_or_else(
+            || self.mesh_pipeline.as_ref().expect("mesh pipeline"),
+            |pipelines| &pipelines.mesh,
+        );
+        let mesh_pipeline_mirrored = ui.map_or_else(
+            || {
+                self.mesh_pipeline_mirrored
+                    .as_ref()
+                    .expect("mirrored mesh pipeline")
+            },
+            |pipelines| &pipelines.mesh_mirrored,
+        );
+        let mesh_pipeline_transparent = ui.map_or_else(
+            || {
+                self.mesh_pipeline_transparent
+                    .as_ref()
+                    .expect("transparent mesh pipeline")
+            },
+            |pipelines| &pipelines.mesh_transparent,
+        );
+        let mesh_pipeline_mirrored_transparent = ui.map_or_else(
+            || {
+                self.mesh_pipeline_mirrored_transparent
+                    .as_ref()
+                    .expect("transparent mirrored mesh pipeline")
+            },
+            |pipelines| &pipelines.mesh_mirrored_transparent,
+        );
+        let mesh_pipeline_merged = ui.map_or_else(
+            || {
+                self.mesh_pipeline_merged
+                    .as_ref()
+                    .expect("merged mesh pipeline")
+            },
+            |pipelines| &pipelines.mesh_merged,
+        );
+        let mesh_pipeline_merged_mirrored = ui.map_or_else(
+            || {
+                self.mesh_pipeline_merged_mirrored
+                    .as_ref()
+                    .expect("mirrored merged mesh pipeline")
+            },
+            |pipelines| &pipelines.mesh_merged_mirrored,
+        );
+        let image_pipeline = ui.map_or_else(
+            || self.image_pipeline.as_ref().expect("image pipeline"),
+            |pipelines| &pipelines.image,
+        );
+        let unit_quad_buffer = self.unit_quad_buffer.as_ref().expect("unit quad");
         let outcome = self.encode_frame(
             device,
             overlay_view,
+            None,
             overlay_depth_view,
             false,
             true,
@@ -346,7 +422,8 @@ impl Renderer {
             &[],
             &[],
             &[],
-            &[],
+            mask_slots,
+            masks_first,
             transient,
             line_pipeline,
             line_instanced_pipeline,

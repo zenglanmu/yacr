@@ -1,6 +1,6 @@
 //! Typed settings wire surface for the Options dialog.
 //!
-//! The session exposes the same closed thirty-two-key surface the host
+//! The session exposes the same closed thirty-three-key surface the host
 //! persists; it adds no second validation and no raw-JSON entry point. A UI
 //! writes one typed key/value pair, the host validates it against the closed
 //! table, persists the matching preference leaf and applies it to the live
@@ -22,11 +22,12 @@ pub use cad_host::{
 /// the font directory actually used and `fontsDirOverride` the persisted choice
 /// behind it; both are omitted when the carrier cannot answer them (the Web
 /// `dom-canvas` host has no local font directory), which renders the row
-/// disabled rather than inventing a path. The other thirty-one fields correspond
+/// disabled rather than inventing a path. The other thirty-two fields correspond
 /// one-to-one with [`CadSettingKey`] (`fontsDir` included), the two
 /// backgrounds as canonical `#rrggbb` strings, the crosshair and the GPU memory
 /// budget as integer percentages, the pickbox/aperture as integer pixel counts,
-/// the snap spacing as a real number of drawing units, the orbit sensitivity as
+/// the canvas anti-aliasing as one of `off`/`2x`/`4x`, the snap spacing as a real
+/// number of drawing units, the orbit sensitivity as
 /// a real percentage of the host's base rate, the graphics backend as
 /// one of `auto`/`vulkan`/`dx12`, the theme as `dark`/`light`, the
 /// navigation/ViewCube switches as their host-owned values, the drawing/display
@@ -77,6 +78,10 @@ pub struct CadSettings {
     /// GPU memory budget as an integer percentage of the graphics card's memory
     /// (`10..=100`): a budget for CAD rendering, not the card's total memory.
     pub gpu_budget_percent: u32,
+    /// Canvas anti-aliasing (`view.msaa.mode`): `"off"`, `"2x"` or `"4x"`
+    /// (default `"4x"`). The host resolves the token to the renderer's sample
+    /// count (`1`/`2`/`4`) on the next frame; `off` is exactly one sample.
+    pub msaa_mode: String,
     /// Graphics backend preference: `"auto"` (default), `"vulkan"` or `"dx12"`.
     ///
     /// Deliberately the **snake_case** wire key, unlike every other field: the
@@ -164,6 +169,7 @@ impl From<HostSettings> for CadSettings {
             pickbox_size: value.pickbox_size,
             aperture_size: value.aperture_size,
             gpu_budget_percent: value.gpu_budget_percent,
+            msaa_mode: value.msaa_mode,
             wgpu_backend: value.wgpu_backend,
             theme: value.theme,
             navbar_visible: value.navbar_visible,

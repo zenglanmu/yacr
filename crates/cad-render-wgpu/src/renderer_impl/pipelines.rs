@@ -232,6 +232,7 @@ impl Renderer {
         (mask_pipeline, mask_frame_pipeline)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn create_mesh_pipeline(
         device: &wgpu::Device,
         pipeline_layout: &wgpu::PipelineLayout,
@@ -239,6 +240,7 @@ impl Renderer {
         format: wgpu::TextureFormat,
         front_face: wgpu::FrontFace,
         depth_write: bool,
+        samples: u32,
         label: &str,
     ) -> wgpu::RenderPipeline {
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -270,7 +272,10 @@ impl Renderer {
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
-            multisample: wgpu::MultisampleState::default(),
+            multisample: wgpu::MultisampleState {
+                count: samples.max(1),
+                ..Default::default()
+            },
             fragment: Some(wgpu::FragmentState {
                 module: shader,
                 entry_point: Some("fs_main"),
@@ -295,6 +300,7 @@ impl Renderer {
         shader: &wgpu::ShaderModule,
         format: wgpu::TextureFormat,
         front_face: wgpu::FrontFace,
+        samples: u32,
         label: &str,
     ) -> wgpu::RenderPipeline {
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -322,7 +328,10 @@ impl Renderer {
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
-            multisample: wgpu::MultisampleState::default(),
+            multisample: wgpu::MultisampleState {
+                count: samples.max(1),
+                ..Default::default()
+            },
             fragment: Some(wgpu::FragmentState {
                 module: shader,
                 entry_point: Some("fs_main"),
@@ -361,6 +370,7 @@ impl Renderer {
         format: wgpu::TextureFormat,
         front_face: wgpu::FrontFace,
         depth_write: bool,
+        samples: u32,
         label: &str,
     ) -> wgpu::RenderPipeline {
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -393,7 +403,10 @@ impl Renderer {
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
-            multisample: wgpu::MultisampleState::default(),
+            multisample: wgpu::MultisampleState {
+                count: samples.max(1),
+                ..Default::default()
+            },
             fragment: Some(wgpu::FragmentState {
                 module: shader,
                 entry_point: Some("fs_main"),
@@ -423,6 +436,7 @@ impl Renderer {
         flags_layout: &wgpu::BindGroupLayout,
         texture_layout: &wgpu::BindGroupLayout,
         format: wgpu::TextureFormat,
+        samples: u32,
     ) -> (
         wgpu::RenderPipeline,
         wgpu::RenderPipeline,
@@ -452,6 +466,7 @@ impl Renderer {
                 format,
                 front_face,
                 depth_write,
+                samples,
                 label,
             )
         };
@@ -542,9 +557,16 @@ impl Renderer {
     }
 
     pub(super) fn ensure_target(&mut self, target: &RenderTarget) -> Result<(), RenderError> {
+        let size = (target.width.max(1), target.height.max(1));
+        // The frame input is the live MSAA request. Reconciling may rebuild the
+        // base pipeline family and drop the old attachments; it never touches
+        // the committed batches or the resident scene.
+        self.reconcile_msaa(target.samples)?;
+        let samples = self.msaa_samples.max(1);
         if self.target.is_some()
             && self.overlay_target.is_some()
-            && self.target_size == (target.width.max(1), target.height.max(1))
+            && self.target_size == size
+            && self.target_samples == samples
         {
             return Ok(());
         }
@@ -552,77 +574,84 @@ impl Renderer {
             .device
             .as_ref()
             .ok_or_else(|| RenderError::NotInitialized("renderer not initialized".into()))?;
-        let size = wgpu::Extent3d {
-            width: target.width.max(1),
-            height: target.height.max(1),
+        let extent = wgpu::Extent3d {
+            width: size.0,
+            height: size.1,
             depth_or_array_layers: 1,
         };
         // A frame larger than the adapter's texture limit must fail with a
         // structured frame error, not a `create_texture` validation panic.
         let limit = device.limits().max_texture_dimension_2d;
-        if size.width > limit || size.height > limit {
+        if extent.width > limit || extent.height > limit {
             return Err(RenderError::Frame(format!(
                 "render target {}x{} exceeds the adapter's maximum texture dimension {limit}",
-                size.width, size.height
+                extent.width, extent.height
             )));
         }
         // Budget gate **before** any target exists: a refused frame size costs no
         // allocation and the previous targets keep rendering (see `gpu_memory`).
         // All four attachments are admitted in one call, so a refusal can never
-        // publish a partially allocated base/overlay pair.
-        let colour_request = gpu_memory::texture_alloc_bytes(self.target_format, size, 1, 1);
-        let depth_request = gpu_memory::texture_alloc_bytes(DEPTH_FORMAT, size, 1, 1);
+        // publish a partially allocated base/overlay pair. The base pair carries
+        // the MSAA sample multiplier; the presented pair stays 1×.
+        let base_colour_request =
+            gpu_memory::texture_alloc_bytes(self.target_format, extent, samples, 1);
+        let base_depth_request = gpu_memory::texture_alloc_bytes(DEPTH_FORMAT, extent, samples, 1);
+        let overlay_colour_request =
+            gpu_memory::texture_alloc_bytes(self.target_format, extent, 1, 1);
+        let overlay_depth_request = gpu_memory::texture_alloc_bytes(DEPTH_FORMAT, extent, 1, 1);
         self.try_admit_gpu_memory(&[
-            (GpuMemoryCategory::ColorTarget, colour_request),
-            (GpuMemoryCategory::DepthTarget, depth_request),
-            (GpuMemoryCategory::ColorTarget, colour_request),
-            (GpuMemoryCategory::DepthTarget, depth_request),
+            (GpuMemoryCategory::ColorTarget, base_colour_request),
+            (GpuMemoryCategory::DepthTarget, base_depth_request),
+            (GpuMemoryCategory::ColorTarget, overlay_colour_request),
+            (GpuMemoryCategory::DepthTarget, overlay_depth_request),
         ])?;
         let texture = self.create_texture_checked(
             device,
             &wgpu::TextureDescriptor {
                 label: Some("cad-base-target"),
-                size,
+                size: extent,
                 mip_level_count: 1,
-                sample_count: 1,
+                sample_count: samples,
                 dimension: wgpu::TextureDimension::D2,
                 format: self.target_format,
-                // COPY_SRC lets the base be copied into the presented overlay
-                // every frame. The headless evidence path reads the *overlay*
-                // (presented) texture back to a buffer; production composition
-                // never does a per-frame GPU→CPU copy.
+                // COPY_SRC is only legal on a single-sample texture; the MSAA
+                // path resolves into the presented overlay instead of copying.
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT
                     | wgpu::TextureUsages::TEXTURE_BINDING
-                    | wgpu::TextureUsages::COPY_SRC,
+                    | if samples == 1 {
+                        wgpu::TextureUsages::COPY_SRC
+                    } else {
+                        wgpu::TextureUsages::empty()
+                    },
                 view_formats: &[],
             },
             GpuMemoryCategory::ColorTarget,
-            colour_request,
+            base_colour_request,
         )?;
         let depth = self.create_texture_checked(
             device,
             &wgpu::TextureDescriptor {
                 label: Some("cad-base-depth"),
-                size,
+                size: extent,
                 mip_level_count: 1,
-                sample_count: 1,
+                sample_count: samples,
                 dimension: wgpu::TextureDimension::D2,
                 format: DEPTH_FORMAT,
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
                 view_formats: &[],
             },
             GpuMemoryCategory::DepthTarget,
-            depth_request,
+            base_depth_request,
         )?;
-        // The presented target: `copy(base colour)` then the transient overlay,
-        // composited with its own depth (cleared every frame). COPY_DST receives
-        // the base copy; COPY_SRC serves the headless readback and the host's
+        // The presented target: at 1× it receives `copy(base colour)`; at n× it
+        // is the base pass's resolve target. Then the 1× overlay/mask pass draws
+        // UI on top. COPY_SRC serves the headless readback and the host's
         // presentation path.
         let overlay_texture = self.create_texture_checked(
             device,
             &wgpu::TextureDescriptor {
                 label: Some("cad-overlay-target"),
-                size,
+                size: extent,
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
@@ -634,13 +663,13 @@ impl Renderer {
                 view_formats: &[],
             },
             GpuMemoryCategory::ColorTarget,
-            colour_request,
+            overlay_colour_request,
         )?;
         let overlay_depth = self.create_texture_checked(
             device,
             &wgpu::TextureDescriptor {
                 label: Some("cad-overlay-depth"),
-                size,
+                size: extent,
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
@@ -649,7 +678,7 @@ impl Renderer {
                 view_formats: &[],
             },
             GpuMemoryCategory::DepthTarget,
-            depth_request,
+            overlay_depth_request,
         )?;
         // Replace the charges with the new targets': dropping the previous set
         // releases exactly the bytes the old offscreen targets held.
@@ -679,7 +708,8 @@ impl Renderer {
         self.overlay_target = Some(overlay_texture);
         self.overlay_depth = Some(overlay_depth);
         self.texture_revision += 1;
-        self.target_size = (size.width, size.height);
+        self.target_size = size;
+        self.target_samples = samples;
         Ok(())
     }
 }

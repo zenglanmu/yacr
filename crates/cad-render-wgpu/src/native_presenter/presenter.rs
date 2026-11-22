@@ -22,6 +22,8 @@ pub struct SurfaceProbePresenter {
     pub(super) preferred_names: Vec<String>,
     /// The backend policy this presenter was constructed with.
     backend_policy: ProbeBackendPolicy,
+    /// MSAA counts the adapter supports for the renderer's colour/depth formats.
+    supported_msaa_samples: Vec<u32>,
     /// Requested present-mode policy (the concrete mode lives in `config`).
     present_mode_request: ProbePresentMode,
     /// Wall-clock microseconds of the most recent `Surface::configure`.
@@ -354,6 +356,7 @@ impl SurfaceProbePresenter {
             choose_surface_format(&capabilities.formats).ok_or(ProbeError::NoSupportedFormat)?;
         let max_dimension = adapter.limits().max_texture_dimension_2d;
         validate_size(width, height, max_dimension)?;
+        let supported_msaa_samples = crate::supported_msaa_samples(&adapter);
 
         let negotiated = crate::headless::request_device_with_negotiated_limits(
             &adapter,
@@ -429,6 +432,7 @@ impl SurfaceProbePresenter {
             size: (width, height),
             preferred_names,
             backend_policy,
+            supported_msaa_samples,
             present_mode_request,
             last_configure_us,
             frame_index: 0,
@@ -622,6 +626,13 @@ impl SurfaceProbePresenter {
     /// direct `wgpu` dependency).
     pub fn device_queue(&self) -> (wgpu::Device, wgpu::Queue) {
         (self.device.clone(), self.queue.clone())
+    }
+
+    /// The MSAA sample counts this adapter supports for the CAD render formats.
+    /// The host hands this to
+    /// [`Renderer::set_supported_msaa_samples`](crate::Renderer::set_supported_msaa_samples).
+    pub fn supported_msaa_samples(&self) -> Vec<u32> {
+        self.supported_msaa_samples.clone()
     }
 
     /// Present a native CAD texture directly on the surface (no CPU readback, no

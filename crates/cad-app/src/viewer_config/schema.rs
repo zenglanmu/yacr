@@ -602,6 +602,62 @@ impl ViewGpuBudget {
     pub const RANGE: std::ops::RangeInclusive<u32> = 10..=100;
 }
 
+/// Canvas anti-aliasing: the user's MSAA choice (`view.msaa.mode`).
+///
+/// The persisted/wire spelling is the user-visible token — `off`, `2x` or `4x` —
+/// which is why each variant carries an explicit `rename` (serde cannot derive
+/// `2x` from an identifier). The choice maps to the renderer's sample count in
+/// [`Self::samples`]; the renderer clamps a request to what the device supports
+/// and reports the effective count, so this enum is only the *requested* value.
+/// The default `4x` is the shipped canvas quality; `off` is exactly one sample.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum MsaaMode {
+    #[serde(rename = "off")]
+    Off,
+    #[serde(rename = "2x")]
+    X2,
+    #[default]
+    #[serde(rename = "4x")]
+    X4,
+}
+
+impl MsaaMode {
+    /// Every token, in the schema's declaration order.
+    pub const ALL: [Self; 3] = [Self::Off, Self::X2, Self::X4];
+
+    /// The stable persisted/wire token (`off`/`2x`/`4x`), also the
+    /// `cad_set_setting` value.
+    pub fn as_token(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::X2 => "2x",
+            Self::X4 => "4x",
+        }
+    }
+
+    /// Parse an exact token; anything else is `None`, never a default.
+    pub fn parse(token: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|mode| mode.as_token() == token)
+    }
+
+    /// The MSAA sample count the renderer is asked for: `1` (off), `2` or `4`.
+    pub fn samples(self) -> u32 {
+        match self {
+            Self::Off => 1,
+            Self::X2 => 2,
+            Self::X4 => 4,
+        }
+    }
+}
+
+/// The `view.msaa` block: one canvas anti-aliasing choice.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
+pub struct ViewMsaa {
+    /// `off`/`2x`/`4x`; the default is `4x` ([`MsaaMode::X4`]).
+    pub mode: MsaaMode,
+}
+
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct ViewConfig {
@@ -611,6 +667,7 @@ pub struct ViewConfig {
     pub pickbox: ViewPickbox,
     pub aperture: ViewAperture,
     pub gpu_budget: ViewGpuBudget,
+    pub msaa: ViewMsaa,
 }
 
 impl ViewConfig {

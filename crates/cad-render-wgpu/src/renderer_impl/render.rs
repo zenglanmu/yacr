@@ -725,9 +725,17 @@ impl Renderer {
             }
         }
 
+        let msaa = self.msaa_samples > 1;
+        // At n× the base pass resolves directly into the presented 1× target;
+        // masks move to the overlay pass (1×) so their boundary never blends with
+        // hidden geometry. At 1× everything keeps the historical order.
+        let resolve_target = msaa.then_some(overlay_view);
+        let base_mask_slots: &[(u32, Option<u32>)] = if msaa { &[] } else { &mask_slots };
+        let overlay_mask_slots: &[(u32, Option<u32>)] = if msaa { &mask_slots } else { &[] };
         let base_outcome = self.encode_frame(
             device,
             view,
+            resolve_target,
             depth_view,
             clear_color,
             clear_depth,
@@ -740,7 +748,8 @@ impl Renderer {
             &stream_slots,
             &chunk_slots,
             &arc_slots,
-            &mask_slots,
+            base_mask_slots,
+            false,
             // The base pass never draws the renderer-owned transient cursor.
             None,
             line_pipeline,
@@ -769,9 +778,12 @@ impl Renderer {
         let (mask_draws, mask_frames) = masks::mask_draw_counts(&self.masks);
 
         // Present the copy of the base plus the transient overlay (see
-        // `overlay.rs`). The copy runs on every render, even when the base page
-        // is a continuation and even when there is no overlay.
-        self.copy_base_to_overlay(&mut encoder);
+        // `overlay.rs`). At 1× the copy runs on every render, even when the base
+        // page is a continuation and even when there is no overlay; at n× the
+        // base pass's resolve target already wrote the presented texture.
+        if !msaa {
+            self.copy_base_to_overlay(&mut encoder);
+        }
 
         let submit_started = Instant::now();
         // Measurement-only: close the bracket, resolve the two queries and copy
@@ -809,18 +821,9 @@ impl Renderer {
             overlay_depth_view,
             clear_color_value,
             &overlay_plan,
+            overlay_mask_slots,
+            msaa,
             transient_draw,
-            line_pipeline,
-            line_instanced_pipeline,
-            arc_pipeline,
-            mesh_pipeline,
-            mesh_pipeline_mirrored,
-            mesh_pipeline_transparent,
-            mesh_pipeline_mirrored_transparent,
-            mesh_pipeline_merged,
-            mesh_pipeline_merged_mirrored,
-            image_pipeline,
-            unit_quad_buffer,
         );
         let submission = overlay.submission;
         // Draw-time texture failures (both passes) must stay observable.

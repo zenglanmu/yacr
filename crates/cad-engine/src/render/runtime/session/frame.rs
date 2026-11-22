@@ -66,7 +66,18 @@ impl CadRenderRuntime {
             // Per-frame PBR environment switch (ADR-0044): uniform data only, no
             // pipeline/scene rebuild.
             renderer.set_ibl_enabled(view.ibl_enabled);
-            let target = RenderTarget::new(size.0, size.1).with_clear_color(view.clear_color);
+            // MSAA is a 3D-view quality setting: the 2D path already has
+            // analytic 1 px line coverage (ADR-0009) and must keep its exact
+            // pixels at any requested level. A view-mode switch is a real
+            // sample-count change, so the renderer reconfigures once.
+            let msaa_samples = if view.mode == ProjectionKind::ThreeD {
+                view.msaa_samples
+            } else {
+                1
+            };
+            let target = RenderTarget::new(size.0, size.1)
+                .with_clear_color(view.clear_color)
+                .with_samples(msaa_samples);
             let stats = match view.mode {
                 ProjectionKind::TwoD => {
                     let params = view

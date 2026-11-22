@@ -1334,16 +1334,24 @@ Distance/Angle/Delta X/Y/Z，点不足两个时只显示距离，`unit:null` 不
 `kind`、`options` 取图纸真实图层/线型表名，上限 256）与**写侧** `SETENTITYPROPERTY`（一次事务/
 一步撤销；`layer`、`color`=ByLayer/ByBlock/`aci:0..=256`/`#RRGGBB`、`linetype`、`lineweight`
 = 规范毫米列表、`transparency`=0..90 百分比→不透明度；非直接可寻址引用拒绝；无变化不产生撤销步）；
-**选项设置** **19** 个类型化键（grid/axes/selectionHighlight/snapHints/plotFormat/snapEnabled/
+**选项设置** **20** 个类型化键（grid/axes/selectionHighlight/snapHints/plotFormat/snapEnabled/
 hoverPreview/gridSnapEnabled/orthoEnabled/snapSpacing/backgroundModel/backgroundPaper/
 crosshairSize/pickboxSize/apertureSize/gpuBudgetPercent/wgpu_backend/leftDragPans/
-orbitSensitivityPercent，另有 `theme`/`navbarVisible`/`navvcubeDisplay`/`viewCubeIn2d`/
+orbitSensitivityPercent/msaaMode，另有 `theme`/`navbarVisible`/`navvcubeDisplay`/`viewCubeIn2d`/
 `viewCubeIn3d` 五个根级叶子见导航一节），持久化到
 `preference.json`、**实时生效**并在 open/替换后重新播种（七个 `interaction.*` 叶子：对象捕捉、悬停预览、
 `SNAP`、`ORTHO`、`SNAPUNIT` 间距、左键拖动平移、3D 旋转灵敏度倍率）；**语言默认**按 `显式选择 > 宿主注入 > navigator > 英文`
 （`zh-TW/zh-Hant` 无对应目录 ⇒ **英文**，不静默给简体）；**显示**：模型/图纸背景色 `#rrggbb`
 （sRGB→linear 在配置→渲染器接缝，真机核对 0.5 读回 188、遮罩内部同值）与十字光标 1..100%
 （默认 5、以光标为中心对称、按视图尺寸计算；100% 位级不变），均**即时**生效。
+
+**MSAA（2026-11-22，ADR-0047；离屏 lavapipe 证据，真机 NOT VERIFIED）**：显示选项新增
+`msaaMode`（`off`/`2x`/`4x`，默认 `4x`，持久化 `view.msaa.mode`）。MSAA 只在 3D 视图
+作用于持久 base 通道；2D 视图固定 1×（保持解析线条像素），presented overlay 与 wipeout
+mask 始终 1×（否则 mask 边界会透出被遮几何），pick 也保持 1×。`n==1` 保持原 copy 路径；`n>1` 由 base pass 直接 resolve 到 presented
+单采样目标。运行时切换会重建 base 管线并重新分配附件，不清空场景。渲染器按适配器支持集
+下调并以 `render.msaa.unsupported_samples` 诊断记录一次；WebGL2 的 `CanvasPresenter`
+显式报告 `[1]`，因此 Web 当前不启用 MSAA。证据见 `docs/validation-msaa-2026-11-22.md`。
 
 **输入模态（2026-11-01，源码/契约测试证据；设备 NOT RUN）**：React 输入层按每个
 `PointerEvent.pointerType` 在指针事件上附带可选 `device: "mouse" | "touch" | "pen"`（缺失/未知 ⇒ mouse；

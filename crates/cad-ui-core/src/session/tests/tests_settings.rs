@@ -51,6 +51,10 @@ fn session_settings_report_the_effective_defaults() {
         settings.wgpu_backend, "auto",
         "the renderer backend default is `auto`"
     );
+    assert_eq!(
+        settings.msaa_mode, "4x",
+        "canvas anti-aliasing defaults to 4x"
+    );
     assert_eq!(settings.fonts_dir, None);
     assert!(
         settings.format_notice_enabled,
@@ -474,4 +478,54 @@ fn session_backend_setting_reports_and_accepts_only_the_wire_tokens() {
         CadSettingKey::parse("wgpu_backend"),
         Some(CadSettingKey::WgpuBackend)
     );
+}
+
+/// The canvas anti-aliasing choice is a plain preference: `4x` by default,
+/// reported under the camelCase wire key, honouring the three schema tokens and
+/// refusing everything else without rewriting the reported value.
+#[test]
+fn session_msaa_mode_round_trips_only_its_tokens() {
+    let session = plain_session();
+    assert_eq!(session.settings().msaa_mode, "4x");
+    let wire = serde_json::to_value(session.settings()).expect("settings serialize");
+    assert_eq!(
+        wire["msaaMode"],
+        serde_json::json!("4x"),
+        "the default is reported under the camelCase wire key: {wire}"
+    );
+
+    for token in ["off", "2x", "4x"] {
+        let settings = session
+            .apply_setting(
+                CadSettingKey::MsaaMode,
+                CadSettingValue::Text(token.to_string()),
+            )
+            .expect("a schema token");
+        assert_eq!(settings.msaa_mode, token);
+        assert_eq!(
+            serde_json::to_value(&settings).expect("settings serialize")["msaaMode"],
+            serde_json::json!(token)
+        );
+    }
+
+    // Outside the closed token set every shape is the stable refusal, and the
+    // reported value is exactly the last accepted one.
+    for value in [
+        CadSettingValue::Text("8x".to_string()),
+        CadSettingValue::Text("4".to_string()),
+        CadSettingValue::Number(4),
+        CadSettingValue::Bool(true),
+    ] {
+        let error = session
+            .apply_setting(CadSettingKey::MsaaMode, value.clone())
+            .unwrap_err();
+        assert_eq!(error, SETTINGS_INVALID_VALUE, "{value:?}");
+    }
+    assert_eq!(session.settings().msaa_mode, "4x");
+
+    // A persisted startup preference is visible as soon as the config loads.
+    let seeded = session_with_config(Rc::new(StaticConfig::preference(
+        r#"{"view":{"msaa":{"mode":"2x"}}}"#,
+    )));
+    assert_eq!(seeded.settings().msaa_mode, "2x");
 }

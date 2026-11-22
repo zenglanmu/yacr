@@ -19,10 +19,12 @@
 // Nothing here invents a value. A field the host does not report stays `null`
 // (rendered as "not reported"), is never dirty and is never written.
 import type { Translator } from '../i18n.ts';
+import { MSAA_FIELDS } from './msaa-fields.ts';
 import type { OptionField } from './unit-fields.ts';
 import { UNIT_FIELDS, UNIT_TOKENS, unitPairError } from './unit-fields.ts';
 
 export type { OptionField } from './unit-fields.ts';
+export { MSAA_MODES, MSAA_FIELDS } from './msaa-fields.ts';
 export { UNIT_TOKENS, UNIT_FIELDS } from './unit-fields.ts';
 
 /** The IPC that returns the effective settings snapshot. */
@@ -235,6 +237,7 @@ export const OPTIONS_FIELDS: readonly OptionField[] = Object.freeze<OptionField[
     labelKey: 'options.field.gpuBudgetPercent',
     helpKey: 'options.help.gpuBudgetPercent',
   },
+  ...MSAA_FIELDS,
   {
     id: 'snapEnabled',
     tab: 'drafting',

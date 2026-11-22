@@ -1,6 +1,69 @@
 use super::*;
 
 #[test]
+fn msaa_four_samples_renders_and_presents_a_single_sample_frame() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let mut renderer = init(gpu);
+    renderer
+        .upload(&scene(vec![triangle_mesh()]))
+        .expect("upload mesh batch");
+    // Four samples is the spec-guaranteed maximum for the renderer's formats;
+    // the default supported set is exactly {1,4}. The product path requests it
+    // only in a 3D view (the 2D path keeps its analytic-line pixels).
+    let camera = Camera3d {
+        eye: Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 4.0,
+        },
+        target: Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        },
+        up: Point3 {
+            x: 0.0,
+            y: 1.0,
+            z: 0.0,
+        },
+        fov_y: std::f64::consts::FRAC_PI_4,
+        near: 0.1,
+        far: 100.0,
+    };
+    let target = RenderTarget::new(64, 64).with_samples(4);
+    let stats = renderer
+        .render_3d(camera, &target)
+        .expect("render 4x MSAA frame");
+    assert_eq!(renderer.msaa_samples(), 4);
+    assert!(stats.draw_calls > 0, "4x MSAA submitted no draw calls");
+    // Presentation stays 1x: the overlay/mask target is the resolve output.
+    let presented = renderer.frame_texture().expect("frame texture");
+    assert_eq!(presented.sample_count(), 1);
+    let image = renderer.read_target_rgba().expect("read back 4x frame");
+    let background = image.pixel(0, 0);
+    assert!(
+        image.count_differing_from(background, 8) > 0,
+        "4x MSAA rasterized nothing (background {background:?})"
+    );
+
+    // Off is a real sample-count change, not a cache flag: the renderer rebuilds
+    // the base pipelines and reallocates the attachments at 1x.
+    let off = RenderTarget::new(64, 64).with_samples(1);
+    renderer.render_3d(camera, &off).expect("render 1x frame");
+    assert_eq!(renderer.msaa_samples(), 1);
+    assert_eq!(renderer.frame_texture().unwrap().sample_count(), 1);
+    assert!(
+        renderer
+            .read_target_rgba()
+            .unwrap()
+            .count_differing_from(background, 8)
+            > 0
+    );
+}
+
+#[test]
 fn progressive_pages_match_full_scene_without_raising_per_frame_budget() {
     let Some(gpu) = gpu() else {
         return;

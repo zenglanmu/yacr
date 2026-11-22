@@ -57,6 +57,7 @@ mod settings_drafting;
 mod settings_export;
 mod settings_gpu;
 mod settings_input;
+mod settings_msaa;
 mod settings_orbit;
 mod settings_paths;
 mod settings_units;

@@ -142,6 +142,7 @@ impl Renderer {
         &self,
         device: &wgpu::Device,
         view: &wgpu::TextureView,
+        resolve_target: Option<&wgpu::TextureView>,
         depth_view: &wgpu::TextureView,
         clear_color: bool,
         clear_depth: bool,
@@ -155,6 +156,7 @@ impl Renderer {
         chunk_slots: &[u32],
         arc_slots: &[u32],
         mask_slots: &[(u32, Option<u32>)],
+        masks_first: bool,
         transient: Option<(&wgpu::Buffer, u32, u32)>,
         line_pipeline: &wgpu::RenderPipeline,
         line_instanced_pipeline: &wgpu::RenderPipeline,
@@ -209,7 +211,7 @@ impl Renderer {
                 label: Some("cad-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view,
-                    resolve_target: None,
+                    resolve_target,
                     ops: wgpu::Operations {
                         load: if clear_color {
                             wgpu::LoadOp::Clear(clear_value)
@@ -243,6 +245,14 @@ impl Renderer {
             // state dedup.
             if let Some(flags_bind_group) = self.flags_bind_group.as_ref() {
                 pass.set_bind_group(1, flags_bind_group, &[]);
+            }
+
+            // Wipeout masks paint before the overlay geometry when the MSAA base
+            // pass moved them to the presented 1× target; at 1× they keep their
+            // historical end-of-pass position. Either way masks ignore depth and
+            // never write it (see `create_mask_pipelines`).
+            if masks_first {
+                self.encode_masks(&mut pass, &mut encode_state, mask_slots);
             }
 
             // Pass 1 — opaque, in ascending draw order. Depth writes are on.
@@ -894,45 +904,15 @@ impl Renderer {
             // coloured mesh: in the shared pass a filled quad drawn later at the
             // same world z is rejected by the depth test (meshes `Less` + write,
             // lines `LessEqual` + write). `depth_compare: Always` with no depth
-            // write (pipeline state, see `initialize_with_device`) makes every
+            // write (pipeline state, see `create_mask_pipelines`) makes every
             // mask fragment land on top of everything already painted, and the
             // fragment colour is the renderer's clear colour.
             //
-            // Masks paint after images and after both geometry passes; masks do
-            // not interleave with higher/lower `draw_order` geometry (ADR 0022
-            // D2 subset). Under progressive accumulation they paint on every
-            // page, so the last page still ends with every mask on top.
-            if !self.masks.is_empty() {
-                if let Some(mask_pipeline) = self.mask_pipeline.as_ref() {
-                    // `mask_slots` is one fill slot (plus an optional frame slot)
-                    // per resident mask on the base page (masks belong to the base
-                    // target). The overlay pass passes an empty slice: masks are
-                    // never recomposited there.
-                    //
-                    // Each mask draws its fill first; a framed mask then draws its
-                    // boundary with the frame pipeline. Both live in this same
-                    // `depth_compare: Always` pass, so the frame is never covered by
-                    // the fill it outlines.
-                    for (mask, &(fill_slot, frame_slot)) in self.masks.iter().zip(mask_slots.iter())
-                    {
-                        let (bind_group, offset) = self.uniforms.binding(fill_slot as usize);
-                        encode_state.set_pipeline(&mut pass, mask_pipeline);
-                        masks::draw_mask(&mut pass, &mut encode_state, mask, bind_group, offset);
-                        if let (Some(frame_slot), Some(frame_pipeline)) =
-                            (frame_slot, self.mask_frame_pipeline.as_ref())
-                        {
-                            let (bind_group, offset) = self.uniforms.binding(frame_slot as usize);
-                            encode_state.set_pipeline(&mut pass, frame_pipeline);
-                            masks::draw_mask_frame(
-                                &mut pass,
-                                &mut encode_state,
-                                mask,
-                                bind_group,
-                                offset,
-                            );
-                        }
-                    }
-                }
+            // At 1× masks paint after images and after both geometry passes; on
+            // the MSAA path they were moved to the 1× overlay pass (`masks_first`)
+            // so their edges never blend with hidden geometry.
+            if !masks_first {
+                self.encode_masks(&mut pass, &mut encode_state, mask_slots);
             }
         }
         let encode_ms = encode_started.elapsed().as_secs_f64() * 1000.0;
@@ -954,6 +934,38 @@ impl Renderer {
             transient_draws,
             mesh_texture_fallbacks,
             encode_ms,
+        }
+    }
+
+    /// Draw the resident wipeout masks into the open pass.
+    ///
+    /// The mask pipelines are always 1×: masks hide geometry on the presented
+    /// target, so resolving a mask fill with the hidden geometry would leak it
+    /// through at the boundary (ADR 0022). Each fill draws first; a framed mask
+    /// then draws its boundary, which must never be covered by the fill.
+    fn encode_masks(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        encode_state: &mut EncodeState,
+        mask_slots: &[(u32, Option<u32>)],
+    ) {
+        if self.masks.is_empty() {
+            return;
+        }
+        let Some(mask_pipeline) = self.mask_pipeline.as_ref() else {
+            return;
+        };
+        for (mask, &(fill_slot, frame_slot)) in self.masks.iter().zip(mask_slots.iter()) {
+            let (bind_group, offset) = self.uniforms.binding(fill_slot as usize);
+            encode_state.set_pipeline(pass, mask_pipeline);
+            masks::draw_mask(pass, encode_state, mask, bind_group, offset);
+            if let (Some(frame_slot), Some(frame_pipeline)) =
+                (frame_slot, self.mask_frame_pipeline.as_ref())
+            {
+                let (bind_group, offset) = self.uniforms.binding(frame_slot as usize);
+                encode_state.set_pipeline(pass, frame_pipeline);
+                masks::draw_mask_frame(pass, encode_state, mask, bind_group, offset);
+            }
         }
     }
 }
