@@ -1,11 +1,14 @@
 //! CRC-32 (IEEE 802.3), the checksum a zip entry carries.
 //!
-//! The manifest records the CRC of every entry's **uncompressed** bytes, and the
-//! reader cross-checks it against the value the zip central directory holds. The
-//! zip writer computes that value internally but does not expose it, and this
-//! crate deliberately has no second checksum dependency (`crc32fast` is only
-//! reached through `zip`), so the polynomial is implemented here: 256-entry
-//! table, built at compile time, ~1 GB/s — not the bottleneck of a save.
+//! The manifest records each entry's zip CRC. Every encoded entry is zip `Stored`,
+//! so for those the CRC covers exactly the bytes the entry stores (the zstd frame,
+//! or a `raw` payload's verbatim bytes); a copied foreign entry keeps the CRC its
+//! writer recorded, which for a `Deflated` entry covers the uncompressed bytes. The
+//! reader cross-checks the recorded value against the zip central directory. The zip
+//! writer computes its own copy internally but does not expose it, and this crate
+//! deliberately has no second checksum dependency (`crc32fast` is only reached
+//! through `zip`), so the polynomial is implemented here: 256-entry table, built at
+//! compile time, ~1 GB/s — not the bottleneck of a save.
 //!
 //! Reflected polynomial `0xEDB88320`, initial value `0xFFFF_FFFF`, final NOT —
 //! i.e. exactly what `zip`/`crc32fast` produce, which the round-trip test in

@@ -7,7 +7,9 @@
 //!
 //! Kept out of `tests/archive.rs` because that file is at the 1000-line gate.
 
-use std::io::{Cursor, Read, Write};
+mod common;
+
+use std::io::{Cursor, Read};
 
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -22,6 +24,8 @@ use cad_domain::{
     BundledKind, DatabaseId, DocumentIdentity, EntityId, Revision, Unit, UnitContext,
 };
 use cad_store_zip::{ZipDocumentStore, MANIFEST_ENTRY};
+
+use common::with_manifest;
 
 fn header() -> DocumentHeader {
     DocumentHeader {
@@ -113,38 +117,15 @@ fn minor_of(bytes: &[u8]) -> u64 {
     manifest["format"]["minor"].as_u64().expect("minor")
 }
 
-/// Rewrite `manifest.format.minor`, leaving every other entry untouched.
+/// Rewrite `manifest.format.minor`, leaving every entry payload untouched.
+///
+/// The v2 entry payloads stay `Stored` zstd frames: flipping the tier must not
+/// also flip the container's codec, or the fixture would be refused for the wrong
+/// reason.
 fn with_minor(bytes: &[u8], minor: u64) -> Vec<u8> {
-    use zip::write::SimpleFileOptions;
-
-    let mut archive = ZipArchive::new(Cursor::new(bytes.to_vec())).expect("zip");
-    let mut entries = Vec::new();
-    for index in 0..archive.len() {
-        let mut file = archive.by_index(index).expect("entry");
-        let name = file.name().expect("name").to_string();
-        let mut body = Vec::new();
-        file.read_to_end(&mut body).expect("body");
-        entries.push((name, body));
-    }
-    let mut patched = Vec::new();
-    {
-        let mut writer = zip::ZipWriter::new(Cursor::new(&mut patched));
-        let options = SimpleFileOptions::default()
-            .compression_method(zip::CompressionMethod::Deflated)
-            .last_modified_time(zip::DateTime::default());
-        for (name, body) in &entries {
-            writer.start_file(name.as_str(), options).expect("start");
-            if name == MANIFEST_ENTRY {
-                let mut manifest: Value = serde_json::from_slice(body).expect("json");
-                manifest["format"]["minor"] = Value::from(minor);
-                serde_json::to_writer(&mut writer, &manifest).expect("manifest");
-            } else {
-                writer.write_all(body).expect("body");
-            }
-        }
-        writer.finish().expect("finish");
-    }
-    patched
+    with_manifest(bytes, |manifest| {
+        manifest["format"]["minor"] = Value::from(minor);
+    })
 }
 
 /// One plain expression row and one that references the first by sequence — the

@@ -9,10 +9,12 @@
 //!    Opening a newer minor and re-saving it would silently drop the fields this
 //!    build does not model (D11).
 //! 2. Every entry the manifest lists is checked against the archive: it must
-//!    exist, and its zip CRC must equal the recorded one (O(1), from the central
+//!    exist, its zip CRC and stored length must equal the recorded ones, and a
+//!    modelled entry must be a `Stored` zip entry (O(1), from the central
 //!    directory).
-//! 3. Every entry this build models is then re-encoded from scratch: length,
-//!    SHA-256 and JSON shape are all verified, and the payload is decoded.
+//! 3. Every entry this build models is then decoded: the stored payload's
+//!    `sha256_c` and `len_c` are verified first, the frame's declared size is
+//!    compared with `len`, and the logical bytes are checked against `sha256`.
 //! 4. Entries that are **not** listed, or listed with `foreign: true`, are never
 //!    opened. They are reported as `foreign_entries` and preserved by the next
 //!    save.
@@ -26,30 +28,37 @@
 //! entry is not special-cased: it is a foreign entry and is preserved verbatim, so
 //! a document written by another tool keeps its blobs.
 //!
-//! # `sha256_c` and what this build actually verifies
+//! # `sha256_c` and what this build verifies
 //!
-//! The format records both hashes so a raw-copy can be checked at O(compressed)
-//! instead of O(uncompressed). This writer sets `sha256_c` only for copied
-//! entries; the reader therefore verifies the **uncompressed** `sha256` (plus
-//! `len` and the zip CRC) for every entry it parses. That check is strictly
-//! stronger than a compressed-byte check for *content* integrity — decompressing
-//! to a different byte string cannot pass it — and it is the check the format
-//! requires when `sha256_c` is absent, which is every entry this writer encodes.
-//! The compressed-level pass is not performed in Phase 1: `zip` 9.5 keeps its raw
-//! (compressed) reader crate-private, so no caller can hash those bytes without
-//! re-parsing the container by hand. Phase 2's raw-copy verification (D17) needs
-//! that pass; it is recorded here as a known gap rather than faked.
+//! Every entry this build **encodes** is a zip `Stored` entry, so its stored
+//! payload **is** a buffer the writer holds and hashes: `sha256_c` is recorded for
+//! every modelled entry and verified here **before** the payload is decoded. For a
+//! `codec: "zstd"` entry the check is: stored bytes hash to `sha256_c` and their
+//! length is `len_c`, the frame declares exactly `len` (`manifest.json`'s logical
+//! length), decoding into a `len`-sized slice writes exactly `len`, and those
+//! logical bytes hash to `sha256`. A `codec: "raw"` entry skips the frame (its
+//! stored bytes are its logical bytes) but runs the same `sha256`/`len` checks.
+//! `codec: "opaque"` entries are foreign and never decoded; the central directory
+//! checks in step 2 (`crc`, `len_c`, and for foreign entries `len`) still refuse a
+//! corrupted blob.
+//!
+//! The frame's declared content size is compared with `len` **before any block is
+//! decoded**, and the output buffer is allocated at exactly `len`, so a header
+//! that lies about its size cannot drive the allocation. The reader never uses a
+//! streaming `read_to_end` here: that is what would let a lying frame grow the
+//! buffer.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Cursor, Read};
 use std::sync::Arc;
 
 use serde_json::Value;
-use zip::ZipArchive;
+use zip::{CompressionMethod, ZipArchive};
 
 use cad_db::{
-    table_entry, DocumentSnapshot, ElementSnapshot, LoadedDocument, ModelRecord, ShardSnapshot,
-    StoreError, TableKind, TableSnapshot, CLASSES_ENTRY, DOCUMENT_ENTRY, MODELS_ENTRY,
+    table_entry, DocumentSnapshot, ElementSnapshot, FormatVersion, LoadedDocument, ModelRecord,
+    ShardSnapshot, StoreError, TableKind, TableSnapshot, CLASSES_ENTRY, DOCUMENT_ENTRY,
+    MODELS_ENTRY,
 };
 use cad_domain::ymodel::{
     markers, DocumentHeader, IdKind, ModelKey, PersistentId, PersistentIdOf, Shard, FORMAT_MINOR,
@@ -57,11 +66,20 @@ use cad_domain::ymodel::{
 };
 use cad_domain::{BundledKind, EntityId, Revision};
 
+use crate::codec;
 use crate::json::{malformed, sha256_hex, Reader};
-use crate::manifest::{EntryRecord, Manifest};
+use crate::manifest::{probe_format, Codec, EntryRecord, Manifest};
 use crate::models::models_from_value;
 use crate::resources::{self, resource_entry};
 use crate::MANIFEST_ENTRY;
+
+/// The largest logical or stored entry this build will decode: 1 GiB.
+///
+/// The archive is untrusted input, so a manifest-declared length is refused before
+/// a buffer of that size is allocated. A modelled entry larger than this is not a
+/// document this build can represent; the limit is well above any real shard (the
+/// web budget is 256 MB for the whole archive, ADR-0037 D16).
+const MAX_ENTRY_BYTES: u64 = 1 << 30;
 
 /// The element shards plus the raw-model → paths map they imply.
 type ShardEntries = (Vec<ShardSnapshot>, BTreeMap<i64, Vec<String>>);
@@ -87,14 +105,18 @@ const ARCHIVE: &str = "archive";
 pub(crate) fn parse(bytes: &[u8]) -> Result<Parsed, StoreError> {
     let mut archive = open(bytes)?;
 
-    // 1. The manifest, then the version gate — before anything else is read.
+    // 1. The manifest, then the version gate — before anything else is read. The
+    // gate only needs `format.{read,write,minor}`, so it runs on a probe of the
+    // decoded JSON: an archive with a different entry codec is refused as an
+    // unsupported version, not as a malformed manifest.
     let manifest = {
         let raw = read_all(&mut archive, MANIFEST_ENTRY)?;
         let value: Value =
             serde_json::from_slice(&raw).map_err(|error| malformed(MANIFEST_ENTRY, error))?;
+        let format = probe_format(&value)?;
+        gate(&format)?;
         Manifest::from_json_value(&value)?
     };
-    gate(&manifest)?;
 
     // 2. Structural checks that need only the central directory.
     let names = entry_names(&mut archive)?;
@@ -143,23 +165,32 @@ fn open(bytes: &[u8]) -> Result<ZipArchive<Cursor<&[u8]>>, StoreError> {
 }
 
 /// D13: refuse what this build cannot represent faithfully.
-fn gate(manifest: &Manifest) -> Result<(), StoreError> {
-    if manifest.format.read > FORMAT_READ {
+///
+/// `read` is an **equality** gate, not a minimum: version 2 changed the per-entry
+/// payload codec (JSON is now a zstd frame in a `Stored` zip entry, with
+/// `sha256_c`/`len_c` describing it). A version-1 archive is not unreadable in
+/// principle, but this build has no codec for its deflated payloads, and opening
+/// it only to refuse an entry mid-way would be worse than a clear version error.
+/// Re-importing the source document is the supported path.
+fn gate(format: &FormatVersion) -> Result<(), StoreError> {
+    if format.read != FORMAT_READ {
         return Err(StoreError::new(
             markers::UNSUPPORTED_VERSION,
             format!(
-                "the archive requires format.read {}, this build reads up to {}",
-                manifest.format.read, FORMAT_READ
+                "the archive requires format.read {}, but this build reads only \
+                 v{FORMAT_READ} zstd-frame archives; a document written before that \
+                 codec change must be re-imported",
+                format.read
             ),
         ));
     }
-    if manifest.format.minor > FORMAT_MINOR {
+    if format.minor > FORMAT_MINOR {
         return Err(StoreError::new(
             markers::UNSUPPORTED_MINOR,
             format!(
                 "the archive was written at minor {}, this build writes up to {} \
                  (refusing rather than dropping the fields it does not model)",
-                manifest.format.minor, FORMAT_MINOR
+                format.minor, FORMAT_MINOR
             ),
         ));
     }
@@ -185,12 +216,25 @@ fn entry_names(archive: &mut ZipArchive<Cursor<&[u8]>>) -> Result<Vec<String>, S
     Ok(names)
 }
 
-/// Every listed entry exists and matches the recorded zip CRC.
+/// Every listed entry exists and matches what the manifest records about its
+/// stored and logical bytes.
 fn check_listed_entries(
     archive: &mut ZipArchive<Cursor<&[u8]>>,
     manifest: &Manifest,
 ) -> Result<(), StoreError> {
     for record in &manifest.entries {
+        // The declared lengths are the allocation bounds a decode would use, so
+        // they are capped before anything is read.
+        if record.len > MAX_ENTRY_BYTES || record.len_c > MAX_ENTRY_BYTES {
+            return Err(malformed(
+                &record.path,
+                format!(
+                    "manifest.json declares {} logical / {} stored bytes, over the \
+                     {MAX_ENTRY_BYTES}-byte entry limit",
+                    record.len, record.len_c
+                ),
+            ));
+        }
         let file = archive
             .by_name(&record.path)
             .map_err(|error| malformed(&record.path, error))?;
@@ -200,15 +244,55 @@ fn check_listed_entries(
                 "the archive's zip CRC does not match manifest.json",
             ));
         }
-        if file.size() != record.len {
+        if file.compressed_size() != record.len_c {
             return Err(malformed(
                 &record.path,
                 format!(
-                    "the archive holds {} bytes, manifest.json records {}",
-                    file.size(),
-                    record.len
+                    "the archive stores {} bytes, manifest.json records {}",
+                    file.compressed_size(),
+                    record.len_c
                 ),
             ));
+        }
+        match record.codec {
+            // A modelled payload is Stored, so the zip entry's bytes are exactly
+            // the payload `sha256_c`/`len_c` describe and `len_c == size`.
+            Codec::Zstd | Codec::Raw => {
+                if file.compression() != CompressionMethod::Stored {
+                    return Err(malformed(
+                        &record.path,
+                        format!(
+                            "a {} entry must be zip Stored, the archive has {:?}",
+                            record.codec.as_str(),
+                            file.compression()
+                        ),
+                    ));
+                }
+                if file.size() != record.len_c {
+                    return Err(malformed(
+                        &record.path,
+                        format!(
+                            "the stored entry is {} bytes, manifest.json records {}",
+                            file.size(),
+                            record.len_c
+                        ),
+                    ));
+                }
+            }
+            // A foreign entry may be deflated by another writer and is never
+            // decoded here, but its logical length is still a recorded claim.
+            Codec::Opaque => {
+                if file.size() != record.len {
+                    return Err(malformed(
+                        &record.path,
+                        format!(
+                            "the archive holds {} logical bytes, manifest.json records {}",
+                            file.size(),
+                            record.len
+                        ),
+                    ));
+                }
+            }
         }
     }
     Ok(())
@@ -446,9 +530,10 @@ fn texture_key(path: &str) -> Option<&str> {
 /// texture table (ADR-0038 D3/D4).
 ///
 /// Verification is the existing entry path — [`check_listed_entries`] already
-/// compared the zip CRC and `len`, and [`read_entry`] decompresses and checks the
-/// SHA-256 and length — so a corrupted or truncated image refuses the open instead
-/// of entering the document. An **unlisted** `textures/...` entry never reaches
+/// compared the zip CRC and `len_c`, and [`read_entry`] checks the stored payload's
+/// `sha256_c` and the SHA-256/length of the bytes it yields — so a corrupted or
+/// truncated image refuses the open instead of entering the document. An
+/// **unlisted** `textures/...` entry never reaches
 /// here: [`foreign_entries`] keeps it as a preserved foreign entry, exactly like
 /// any other unmodelled blob.
 fn parse_textures(
@@ -588,32 +673,83 @@ fn required_entry<'a>(
     }
 }
 
-/// Read one entry's bytes and verify its length and SHA-256.
-fn read_entry(
+/// The stored payload of one entry, bounded by `len_c` and verified against
+/// `sha256_c` when the manifest records one.
+///
+/// The read is capped at `len_c + 1` so a truncated or padded entry fails the
+/// length comparison instead of growing the buffer; for a modelled entry the
+/// digest then matches the bytes the manifest describes.
+fn read_payload(
     archive: &mut ZipArchive<Cursor<&[u8]>>,
     record: &EntryRecord,
 ) -> Result<Vec<u8>, StoreError> {
     let file = archive
         .by_name(&record.path)
         .map_err(|error| malformed(&record.path, error))?;
-    // Bound the read by the manifest's declared length: a truncated or padded
-    // entry then fails the comparison below instead of growing the buffer.
     let mut bytes = Vec::new();
     let read = file
-        .take(record.len.saturating_add(1))
+        .take(record.len_c.saturating_add(1))
         .read_to_end(&mut bytes)
         .map_err(|error| malformed(&record.path, error))?;
-    if read as u64 != record.len {
+    if read as u64 != record.len_c {
         return Err(malformed(
             &record.path,
-            format!("read {read} bytes, manifest.json records {}", record.len),
+            format!(
+                "read {read} stored bytes, manifest.json records {}",
+                record.len_c
+            ),
         ));
     }
+    if let Some(expected) = &record.sha256_c {
+        if sha256_hex(&bytes) != *expected {
+            return Err(malformed(
+                &record.path,
+                "SHA-256 of the stored payload does not match manifest.json",
+            ));
+        }
+    }
+    Ok(bytes)
+}
+
+/// Read one entry's logical bytes, by codec, and verify them.
+///
+/// The order is integrity first: the **stored** payload is hashed before it is
+/// decoded, so a corrupt frame is refused without spending decode work on it; the
+/// decoded bytes are then hashed again (a decode to a different byte string must
+/// fail even if the stored bytes were intact).
+fn read_entry(
+    archive: &mut ZipArchive<Cursor<&[u8]>>,
+    record: &EntryRecord,
+) -> Result<Vec<u8>, StoreError> {
+    let bytes = match record.codec {
+        Codec::Zstd => {
+            codec::decode_frame(&read_payload(archive, record)?, record.len, &record.path)?
+        }
+        Codec::Raw => read_payload(archive, record)?,
+        // Every caller is a listed, non-foreign entry; an opaque record there is a
+        // manifest that describes bytes no codec can produce.
+        Codec::Opaque => {
+            return Err(malformed(
+                &record.path,
+                "an opaque entry is copied, never decoded as a modelled entry",
+            ))
+        }
+    };
     let digest = sha256_hex(&bytes);
     if digest != record.sha256 {
         return Err(malformed(
             &record.path,
-            "SHA-256 of the uncompressed bytes does not match manifest.json",
+            "SHA-256 of the logical bytes does not match manifest.json",
+        ));
+    }
+    if bytes.len() as u64 != record.len {
+        return Err(malformed(
+            &record.path,
+            format!(
+                "decoded {} bytes, manifest.json records {}",
+                bytes.len(),
+                record.len
+            ),
         ));
     }
     Ok(bytes)

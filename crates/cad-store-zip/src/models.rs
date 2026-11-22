@@ -23,7 +23,7 @@
 use serde_json::{Map, Value};
 
 use cad_db::{ModelKind, ModelRecord, StoreError};
-use cad_domain::ymodel::{ModelKey, PersistentId};
+use cad_domain::ymodel::{IdKind, ModelKey, PersistentId};
 
 use crate::json::{malformed, Reader};
 
@@ -58,6 +58,31 @@ fn record_value(model: &ModelRecord) -> Value {
         },
     );
     Value::Object(map)
+}
+
+/// The persisted id of `key`, or `None` when this format cannot represent it.
+///
+/// Defense in depth for the sequence-0 reservation in
+/// [`ModelKey::from_persistent`]: `Paper(LayoutId(0))` and `Block(BlockId(0))`
+/// encode `PaperModel`/`BlockModel` sequence 0, which is model space's id, so a
+/// reader would reject the row. A writer must refuse such a key instead of
+/// emitting an archive nothing can open.
+///
+/// This deliberately does not call `ModelKey::persistent`: its debug assertion
+/// *is* the malformed case being checked, and a release build would silently
+/// write the undecodable id. The composite is built here and then round-tripped
+/// through [`PersistentId::from_raw`] + [`ModelKey::from_persistent`], which is
+/// exactly the reader's test.
+pub(crate) fn storable_model_id(key: ModelKey) -> Option<PersistentId> {
+    let (kind, seq) = match key {
+        ModelKey::ModelSpace => (IdKind::ModelSpace, 0),
+        ModelKey::Definitions => (IdKind::DefinitionModel, 0),
+        ModelKey::Paper(layout) => (IdKind::PaperModel, layout.0),
+        ModelKey::Block(block) => (IdKind::BlockModel, block.0),
+    };
+    PersistentId::new(kind, seq).filter(|id| {
+        PersistentId::from_raw(id.raw()).and_then(ModelKey::from_persistent) == Some(key)
+    })
 }
 
 /// Read `tables/models.json`.

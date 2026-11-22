@@ -3,26 +3,28 @@
 //! What is asserted here, all through real archives:
 //!
 //! * a snapshot texture becomes one `textures/<key>` entry, stored (not re-deflated)
-//!   and described by the manifest with `foreign: false`, `len` and `sha256`;
+//!   and described by the manifest with `codec: "raw"`, `foreign: false`, the two
+//!   digests and the stored-payload length;
 //! * save → read returns the identical bytes;
 //! * a corrupted or truncated texture entry refuses the open through the existing
 //!   entry-verification path;
 //! * an **unlisted** `textures/...` entry is a foreign entry and is preserved and
 //!   re-written verbatim.
 
+mod common;
+
 use std::collections::BTreeMap;
-use std::io::{Cursor, Read, Write};
 use std::sync::Arc;
 
 use serde_json::Value;
-use sha2::{Digest, Sha256};
-use zip::write::SimpleFileOptions;
-use zip::{CompressionMethod, DateTime, ZipArchive, ZipWriter};
+use zip::CompressionMethod;
 
 use cad_db::{ChangeScope, DocumentSnapshot, DocumentStore, MemorySink, MemorySource, StoreError};
 use cad_domain::ymodel::{markers, DocumentHeader, IdCounters};
 use cad_domain::{DatabaseId, DocumentIdentity, Revision, UnitContext};
-use cad_store_zip::{ZipDocumentStore, MANIFEST_ENTRY};
+use cad_store_zip::ZipDocumentStore;
+
+use common::{assemble, assemble_raw, explode, explode_raw, sha256_hex, v2_record};
 
 /// A canonical texture key (32 lowercase hex + extension).
 const KEY: &str = "4c2f2e0a5f3d9b7c1e8a6d4b2c0f9e71.png";
@@ -82,65 +84,6 @@ fn read_archive(bytes: &[u8]) -> Result<cad_db::LoadedDocument, StoreError> {
     ZipDocumentStore::new().read(&mut source)
 }
 
-fn sha256_hex(bytes: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    let digest = hasher.finalize();
-    digest.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
-fn zip_options() -> SimpleFileOptions {
-    SimpleFileOptions::default()
-        .compression_method(CompressionMethod::Deflated)
-        .last_modified_time(DateTime::default())
-}
-
-/// Every entry as `(name, body, compression)`, plus the parsed manifest.
-fn explode(bytes: &[u8]) -> (Vec<(String, Vec<u8>, CompressionMethod)>, Value) {
-    let mut archive = ZipArchive::new(Cursor::new(bytes)).expect("zip");
-    let mut entries = Vec::new();
-    for index in 0..archive.len() {
-        let mut file = archive.by_index(index).expect("entry");
-        let name = file.name().expect("name").to_string();
-        let method = file.compression();
-        let mut body = Vec::new();
-        file.read_to_end(&mut body).expect("body");
-        if name != MANIFEST_ENTRY {
-            entries.push((name, body, method));
-        }
-    }
-    let mut manifest_file = archive.by_name(MANIFEST_ENTRY).expect("manifest");
-    let mut manifest_bytes = Vec::new();
-    manifest_file
-        .read_to_end(&mut manifest_bytes)
-        .expect("manifest");
-    (
-        entries,
-        serde_json::from_slice(&manifest_bytes).expect("manifest json"),
-    )
-}
-
-/// Rebuild an archive from `entries` plus `manifest`, manifest last.
-///
-/// The manifest is passed through unchanged, which is what makes a tampered entry
-/// fail the recorded `len`/`sha256` instead of being silently accepted.
-fn assemble(entries: &[(String, Vec<u8>)], manifest: &Value) -> Vec<u8> {
-    let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
-    let mut sorted: Vec<&(String, Vec<u8>)> = entries.iter().collect();
-    sorted.sort_by(|left, right| left.0.cmp(&right.0));
-    for (name, body) in sorted {
-        writer
-            .start_file(name.as_str(), zip_options())
-            .expect("start");
-        writer.write_all(body).expect("body");
-    }
-    writer
-        .start_file(MANIFEST_ENTRY, zip_options())
-        .expect("manifest start");
-    serde_json::to_writer(&mut writer, manifest).expect("manifest body");
-    writer.finish().expect("finish").into_inner()
-}
-
 fn manifest_entry<'a>(manifest: &'a Value, path: &str) -> &'a Value {
     manifest["entries"]
         .as_array()
@@ -160,22 +103,31 @@ fn a_snapshot_texture_is_one_stored_binary_entry_with_a_verified_record() {
     assert!(report.entries_written >= 1);
 
     let path = format!("textures/{KEY}");
-    let (entries, manifest) = explode(&archive);
-    let (_, body, method) = entries
+    let (entries, manifest, methods) = explode_raw(&archive);
+    let index = entries
         .iter()
-        .find(|(name, _, _)| name == &path)
+        .position(|(name, _)| name == &path)
         .unwrap_or_else(|| panic!("no {path:?} entry"));
-    assert_eq!(body, &bytes, "the bytes are written verbatim");
     assert_eq!(
-        *method,
+        entries[index].1, bytes,
+        "the raw codec stores the bytes verbatim"
+    );
+    assert_eq!(
+        methods[index],
         CompressionMethod::Stored,
         "an already-compressed image is not deflated again"
     );
 
     let record = manifest_entry(&manifest, &path);
+    assert_eq!(record["codec"], Value::String("raw".to_string()));
     assert_eq!(record["foreign"], Value::Bool(false));
-    assert_eq!(record["len"], Value::from(bytes.len()));
+    assert_eq!(record["len"], Value::from(bytes.len() as u64));
+    assert_eq!(record["len_c"], Value::from(bytes.len() as u64));
     assert_eq!(record["sha256"], Value::String(sha256_hex(&bytes)));
+    assert_eq!(
+        record["sha256_c"], record["sha256"],
+        "a raw entry stores its logical bytes, so both digests agree"
+    );
     assert!(record["crc"].is_u64());
 }
 
@@ -214,17 +166,13 @@ fn a_texture_entry_with_the_wrong_bytes_is_refused() {
     let path = format!("textures/{KEY}");
 
     // Same length, one changed byte: only the recorded hash can catch this.
-    for (name, body, _) in entries.iter_mut() {
+    for (name, body) in entries.iter_mut() {
         if name == &path {
             let last = body.len() - 1;
             body[last] ^= 0xff;
         }
     }
-    let rebuilt: Vec<(String, Vec<u8>)> = entries
-        .iter()
-        .map(|(name, body, _)| (name.clone(), body.clone()))
-        .collect();
-    let tampered = assemble(&rebuilt, &manifest);
+    let tampered = assemble(&entries, &manifest);
     let error = read_archive(&tampered).expect_err("refused");
     assert_eq!(error.marker, markers::INVALID_DOCUMENT, "{error}");
     assert!(error.to_string().contains(&path), "{error}");
@@ -237,16 +185,12 @@ fn a_truncated_texture_entry_is_refused() {
     let (archive, _) = write_snapshot(&mut ZipDocumentStore::new(), &snapshot);
     let (mut entries, manifest) = explode(&archive);
     let path = format!("textures/{KEY}");
-    for (name, body, _) in entries.iter_mut() {
+    for (name, body) in entries.iter_mut() {
         if name == &path {
             body.truncate(body.len() / 2);
         }
     }
-    let rebuilt: Vec<(String, Vec<u8>)> = entries
-        .iter()
-        .map(|(name, body, _)| (name.clone(), body.clone()))
-        .collect();
-    let truncated = assemble(&rebuilt, &manifest);
+    let truncated = assemble(&entries, &manifest);
     let error = read_archive(&truncated).expect_err("refused");
     assert_eq!(error.marker, markers::INVALID_DOCUMENT, "{error}");
 }
@@ -259,52 +203,16 @@ fn a_listed_texture_with_a_non_canonical_name_is_refused() {
     let snapshot = snapshot_with(&[(KEY, &png_bytes())]);
     let (archive, _) = write_snapshot(&mut ZipDocumentStore::new(), &snapshot);
     let (mut entries, mut manifest) = explode(&archive);
-    entries.push((
-        "textures/not-a-key.png".to_string(),
-        vec![1, 2, 3],
-        CompressionMethod::Deflated,
-    ));
-    let record = serde_json::json!({
-        "path": "textures/not-a-key.png",
-        "sha256": sha256_hex(&[1, 2, 3]),
-        "sha256_c": null,
-        "len": 3,
-        "crc": crc32(&[1u8, 2, 3]),
-        "foreign": false,
-    });
+    let body = vec![1u8, 2, 3];
+    let path = "textures/not-a-key.png";
+    entries.push((path.to_string(), body.clone()));
     manifest["entries"]
         .as_array_mut()
         .expect("entries")
-        .push(record);
-    let rebuilt: Vec<(String, Vec<u8>)> = entries
-        .into_iter()
-        .map(|(name, body, _)| (name, body))
-        .collect();
-    let archive = assemble(&rebuilt, &manifest);
+        .push(v2_record(path, "raw", &body, Some(&body)));
+    let archive = assemble(&entries, &manifest);
     let error = read_archive(&archive).expect_err("refused");
     assert_eq!(error.marker, markers::UNSUPPORTED_MINOR, "{error}");
-}
-
-/// The zip CRC-32 of a byte string (the store's own algorithm, recomputed here so
-/// the fixture does not depend on crate internals).
-fn crc32(bytes: &[u8]) -> u32 {
-    let mut table = [0u32; 256];
-    for (index, entry) in table.iter_mut().enumerate() {
-        let mut value = index as u32;
-        for _ in 0..8 {
-            value = if value & 1 == 1 {
-                0xedb8_8320 ^ (value >> 1)
-            } else {
-                value >> 1
-            };
-        }
-        *entry = value;
-    }
-    let mut crc = 0xffff_ffffu32;
-    for byte in bytes {
-        crc = table[((crc ^ u32::from(*byte)) & 0xff) as usize] ^ (crc >> 8);
-    }
-    crc ^ 0xffff_ffff
 }
 
 // ------------------------------------------------------- foreign textures ---
@@ -314,21 +222,20 @@ fn an_unlisted_texture_entry_survives_as_a_foreign_entry() {
     let png = png_bytes();
     let snapshot = snapshot_with(&[(KEY, &png)]);
     let (archive, _) = write_snapshot(&mut ZipDocumentStore::new(), &snapshot);
-    let (mut entries, manifest) = explode(&archive);
+    let (mut entries, manifest, mut methods) = explode_raw(&archive);
 
     // A blob this build may not model: a `textures/` path with no manifest record.
+    // Written `Deflated` on purpose: a foreign entry keeps another writer's method.
     let unlisted_path = "textures/00000000000000000000000000000000.png";
     let unlisted_body = b"a blob another writer left in textures/".to_vec();
-    entries.push((
-        unlisted_path.to_string(),
-        unlisted_body.clone(),
-        CompressionMethod::Deflated,
-    ));
-    let rebuilt: Vec<(String, Vec<u8>)> = entries
+    entries.push((unlisted_path.to_string(), unlisted_body.clone()));
+    methods.push(CompressionMethod::Deflated);
+    let with_methods: Vec<(String, Vec<u8>, CompressionMethod)> = entries
         .into_iter()
-        .map(|(name, body, _)| (name, body))
+        .zip(methods)
+        .map(|((name, body), method)| (name, body, method))
         .collect();
-    let with_foreign = assemble(&rebuilt, &manifest);
+    let with_foreign = assemble_raw(&with_methods, &manifest);
 
     let mut store = ZipDocumentStore::new();
     let mut source = MemorySource::new(with_foreign.clone());
@@ -349,13 +256,22 @@ fn an_unlisted_texture_entry_survives_as_a_foreign_entry() {
     // the unlisted blob through unchanged.
     let (resaved, _) = write_snapshot(&mut store, &loaded.snapshot);
     let (entries, manifest) = explode(&resaved);
-    let (_, body, _) = entries
+    let (_, body) = entries
         .iter()
-        .find(|(name, _, _)| name == unlisted_path)
+        .find(|(name, _)| name == unlisted_path)
         .unwrap_or_else(|| panic!("the unlisted texture entry was dropped"));
     assert_eq!(body, &unlisted_body);
     assert_eq!(
         manifest_entry(&manifest, unlisted_path)["foreign"],
         Value::Bool(true)
+    );
+    // The carried entry is opaque and records no stored-payload digest.
+    assert_eq!(
+        manifest_entry(&manifest, unlisted_path)["codec"],
+        Value::String("opaque".to_string())
+    );
+    assert_eq!(
+        manifest_entry(&manifest, unlisted_path)["sha256_c"],
+        Value::Null
     );
 }

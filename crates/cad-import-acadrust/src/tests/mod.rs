@@ -11,6 +11,7 @@ mod acis;
 mod acis_arcs;
 mod arc_sweep;
 mod basics;
+mod blocks;
 mod colour_provenance;
 mod dimension;
 mod dxf;

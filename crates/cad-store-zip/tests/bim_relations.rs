@@ -4,6 +4,8 @@
 //! the actual `.ymodel` container and hydrate back into a database. Kept apart
 //! from `tests/bim_minor.rs` so neither file approaches the 1000-line gate.
 
+mod common;
+
 use cad_db::{
     BimKey, BimRelation, BimRelationKind, BimRelations, ChangeScope, DocumentSnapshot,
     DocumentStore, DrawingDatabase, DrawingDatabaseBuilder, MemorySink, MemorySource, TableKind,

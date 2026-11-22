@@ -6,6 +6,98 @@
 
 use super::*;
 
+/// Whether a conic's plane normal is vertical (parallel to ±Z) within the
+/// format's tolerance, so the curve lies in an XY-parallel plane.
+///
+/// A degenerate/zero normal is **not** vertical: it carries no usable plane, so
+/// the conservative answer (treat it as 3D) is safer than calling it flat.
+fn normal_is_vertical(normal: Point3) -> bool {
+    let length = camera::length3(normal);
+    if !length.is_finite() || length <= 1e-12 {
+        return false;
+    }
+    (normal.x.abs() + normal.y.abs()) <= length * 1e-12
+}
+
+/// Add one geometry's **tight** `z` contribution to `bounds`.
+///
+/// Returns `true` when the geometry is 3D by construction (a body, a tilted
+/// conic, a non-planar insert), so the caller can stop immediately. Point-based
+/// variants are added directly; only annotations/hatches fall back to the
+/// geometry crate's bounded tessellation.
+fn add_tight_geometry_z(
+    bounds: &mut cad_geometry::BoundsAccumulator,
+    geometry: &SemanticGeometry,
+) -> bool {
+    match geometry {
+        SemanticGeometry::Body3d(_) => true,
+        SemanticGeometry::Circle { center, normal, .. }
+        | SemanticGeometry::Arc { center, normal, .. }
+        | SemanticGeometry::Ellipse { center, normal, .. } => {
+            if !normal_is_vertical(*normal) {
+                return true;
+            }
+            // A plan conic is flat at its centre's elevation; the culling sphere
+            // would add ±radius in z.
+            bounds.union_point(*center);
+            false
+        }
+        SemanticGeometry::Insert { transform, .. } => {
+            let matrix = &transform.matrix;
+            if !matrix.iter().flatten().all(|value| value.is_finite()) {
+                return true;
+            }
+            // A plan insert (rotation about Z, X/Y translation) keeps a flat block
+            // flat; a tilt or out-of-plane translation does not. The block's own
+            // entities are visited separately.
+            matrix[2][0].abs() > 1e-12 || matrix[2][1].abs() > 1e-12 || matrix[2][3].abs() > 1e-12
+        }
+        SemanticGeometry::Line { start, end } => {
+            bounds.union_point(*start);
+            bounds.union_point(*end);
+            false
+        }
+        SemanticGeometry::Polyline { points, .. } => {
+            for point in points {
+                bounds.union_point(*point);
+            }
+            false
+        }
+        SemanticGeometry::Spline { control_points, .. } => {
+            // A B-spline lies in the convex hull of its control points; this is a
+            // tight z bound without tessellating the curve.
+            for point in control_points {
+                bounds.union_point(*point);
+            }
+            false
+        }
+        SemanticGeometry::Mesh(mesh) => {
+            for point in &mesh.vertices {
+                bounds.union_point(*point);
+            }
+            false
+        }
+        SemanticGeometry::Point(point) => {
+            bounds.union_point(*point);
+            false
+        }
+        SemanticGeometry::Text { position, .. } | SemanticGeometry::Shape { position, .. } => {
+            bounds.union_point(*position);
+            false
+        }
+        SemanticGeometry::Compound(items) => {
+            items.iter().any(|item| add_tight_geometry_z(bounds, item))
+        }
+        // Hatches, dimensions, multileaders, tables, images, opaque payloads:
+        // their display geometry is the authoritative z source, and they are far
+        // fewer than the line/polyline bulk handled above.
+        other => {
+            bounds.add_geometry(other);
+            false
+        }
+    }
+}
+
 impl Application {
     /// Validate the complete batch before publishing a replacement override set.
     /// Drawing data and history are untouched; unrelated overrides are retained.
@@ -151,13 +243,18 @@ impl Application {
     ///
     /// A document is 3D when either:
     ///
-    /// * any model-space entity is a [`SemanticGeometry::Body3d`] — a solid,
+    /// * any model/block entity is a [`SemanticGeometry::Body3d`] — a solid,
     ///   sheet or wire body is 3D by construction, even when its extent is flat
     ///   in one axis; or
-    /// * the model-space bounds have a **significant `z` extent** relative to
-    ///   the bounding-box diagonal (`extent_z > max(diagonal * 1e-6, 1e-9)`).
-    ///   That catches non-planar meshes, 3D lines and polylines without treating
-    ///   a single stray sub-micron `z` as depth.
+    /// * the **tight** model/block geometry has a significant `z` extent
+    ///   (`extent_z > max(diagonal * 1e-6, 1e-9)`).
+    ///
+    /// The tight extent matters: [`DrawingDatabase::bounds`] is a culling bound
+    /// that inflates a circle/arc/ellipse to a **sphere** (`center ± radius`),
+    /// so a flat plan drawing containing one circle would look 1 600 mm deep.
+    /// Here a conic whose normal is vertical contributes only its centre `z`;
+    /// a tilted conic, a non-planar insert transform or a mesh/line/spline with
+    /// real `z` variation is 3D.
     ///
     /// A missing document is `false` (nothing to observe), never a panic.
     pub(crate) fn document_is_3d(&self, document: DocumentId) -> bool {
@@ -165,17 +262,21 @@ impl Application {
             return false;
         };
         let drawing = &document.drawing;
-        if drawing.entities().any(|entity| {
-            matches!(entity.space, SpaceId::Model)
-                && matches!(&entity.geometry, SemanticGeometry::Body3d(_))
-        }) {
-            return true;
+
+        let mut tight = cad_geometry::BoundsAccumulator::new();
+        for entity in drawing.entities() {
+            if !matches!(entity.space, SpaceId::Model | SpaceId::Block(_)) {
+                continue;
+            }
+            if add_tight_geometry_z(&mut tight, &entity.geometry) {
+                return true;
+            }
         }
-        let Some((min, max)) = drawing.bounds() else {
+        let Some(bounds) = tight.finish() else {
             return false;
         };
-        let extent_z = (max.z - min.z).abs();
-        let diagonal = camera::length3(camera::sub(max, min));
+        let extent_z = (bounds.max.z - bounds.min.z).abs();
+        let diagonal = camera::length3(camera::sub(bounds.max, bounds.min));
         if !extent_z.is_finite() || !diagonal.is_finite() {
             return false;
         }

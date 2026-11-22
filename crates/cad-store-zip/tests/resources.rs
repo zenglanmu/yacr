@@ -7,14 +7,12 @@
 //! both of which exist to prove the store refuses or takes over rather than
 //! silently losing bytes.
 
+mod common;
+
 use std::collections::BTreeMap;
-use std::io::{Cursor, Read, Write};
 use std::sync::Arc;
 
 use serde_json::Value;
-use sha2::{Digest, Sha256};
-use zip::write::SimpleFileOptions;
-use zip::{CompressionMethod, DateTime, ZipArchive, ZipWriter};
 
 use cad_db::{
     ChangeScope, DocumentSnapshot, DocumentStore, DrawingDatabase, DrawingDatabaseBuilder,
@@ -22,22 +20,14 @@ use cad_db::{
 };
 use cad_domain::ymodel::{markers, DocumentHeader, IdCounters};
 use cad_domain::{BundledKind, DatabaseId, DocumentIdentity, Revision, UnitContext};
-use cad_store_zip::{ZipDocumentStore, MANIFEST_ENTRY};
+use cad_store_zip::ZipDocumentStore;
+
+use common::{assemble, crc32, explode, sha256_hex, v2_record};
 
 /// A `.shx` font payload: small, opaque, not JSON.
 const FONT: &[u8] = b"\x01\x00shx font bytes\xff";
 
 // ---------------------------------------------------------------- fixtures ---
-
-fn sha256_hex(bytes: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    hasher
-        .finalize()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
-}
 
 /// The content-addressed key of `bytes`: `<sha256 prefix as 32 hex>.<ext>`.
 fn key_for(bytes: &[u8], ext: &str) -> String {
@@ -141,59 +131,6 @@ fn read_archive(bytes: &[u8]) -> Result<cad_db::LoadedDocument, StoreError> {
 
 // --------------------------------------------------------- archive helpers ---
 
-fn zip_options(method: CompressionMethod) -> SimpleFileOptions {
-    SimpleFileOptions::default()
-        .compression_method(method)
-        .last_modified_time(DateTime::default())
-}
-
-/// Every entry of `bytes` except `manifest.json`, plus the parsed manifest.
-fn explode(bytes: &[u8]) -> (Vec<(String, Vec<u8>)>, Value) {
-    let mut archive = ZipArchive::new(Cursor::new(bytes)).expect("zip");
-    let mut entries = Vec::new();
-    for index in 0..archive.len() {
-        let mut file = archive.by_index(index).expect("entry");
-        let name = file.name().expect("name").to_string();
-        let mut body = Vec::new();
-        file.read_to_end(&mut body).expect("body");
-        if name != MANIFEST_ENTRY {
-            entries.push((name, body));
-        }
-    }
-    let mut manifest_file = archive.by_name(MANIFEST_ENTRY).expect("manifest");
-    let mut manifest_bytes = Vec::new();
-    manifest_file
-        .read_to_end(&mut manifest_bytes)
-        .expect("manifest");
-    (
-        entries,
-        serde_json::from_slice(&manifest_bytes).expect("manifest json"),
-    )
-}
-
-/// Rebuild an archive from `entries` plus `manifest`, manifest last.
-fn assemble(entries: &[(String, Vec<u8>)], manifest: &Value, stored: Option<&str>) -> Vec<u8> {
-    let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
-    let mut sorted: Vec<&(String, Vec<u8>)> = entries.iter().collect();
-    sorted.sort_by(|left, right| left.0.cmp(&right.0));
-    for (name, body) in sorted {
-        let method = if Some(name.as_str()) == stored {
-            CompressionMethod::Stored
-        } else {
-            CompressionMethod::Deflated
-        };
-        writer
-            .start_file(name.as_str(), zip_options(method))
-            .expect("start");
-        writer.write_all(body).expect("body");
-    }
-    writer
-        .start_file(MANIFEST_ENTRY, zip_options(CompressionMethod::Deflated))
-        .expect("manifest start");
-    serde_json::to_writer(&mut writer, manifest).expect("manifest body");
-    writer.finish().expect("finish").into_inner()
-}
-
 fn manifest_entry<'a>(manifest: &'a Value, path: &str) -> &'a Value {
     manifest["entries"]
         .as_array()
@@ -201,28 +138,6 @@ fn manifest_entry<'a>(manifest: &'a Value, path: &str) -> &'a Value {
         .iter()
         .find(|entry| entry["path"] == path)
         .unwrap_or_else(|| panic!("manifest has no entry {path:?}"))
-}
-
-/// The zip CRC-32 of a byte string, recomputed here (the fixture must not depend
-/// on crate internals).
-fn crc32(bytes: &[u8]) -> u32 {
-    let mut table = [0u32; 256];
-    for (index, entry) in table.iter_mut().enumerate() {
-        let mut value = index as u32;
-        for _ in 0..8 {
-            value = if value & 1 == 1 {
-                0xedb8_8320 ^ (value >> 1)
-            } else {
-                value >> 1
-            };
-        }
-        *entry = value;
-    }
-    let mut crc = 0xffff_ffffu32;
-    for byte in bytes {
-        crc = table[((crc ^ u32::from(*byte)) & 0xff) as usize] ^ (crc >> 8);
-    }
-    crc ^ 0xffff_ffff
 }
 
 /// Remove one entry's manifest record, leaving the blob: the shape an archive
@@ -233,7 +148,7 @@ fn unlist(base: &[u8], path: &str) -> Vec<u8> {
         .as_array_mut()
         .expect("entries")
         .retain(|record| record["path"].as_str() != Some(path));
-    assemble(&entries, &manifest, Some(path))
+    assemble(&entries, &manifest)
 }
 
 /// Replace one entry's bytes and keep it unlisted.
@@ -248,7 +163,7 @@ fn replace_unlisted(base: &[u8], path: &str, body: &[u8]) -> Vec<u8> {
             *old = body.to_vec();
         }
     }
-    assemble(&entries, &manifest, Some(path))
+    assemble(&entries, &manifest)
 }
 
 /// Move one entry **and** its manifest record to a new path, leaving the body and
@@ -265,7 +180,7 @@ fn rename_entry(base: &[u8], from: &str, to: &str) -> Vec<u8> {
             record["path"] = Value::from(to);
         }
     }
-    assemble(&entries, &manifest, None)
+    assemble(&entries, &manifest)
 }
 
 /// Add a **listed, modelled** entry this build may not accept, with a correct
@@ -273,18 +188,13 @@ fn rename_entry(base: &[u8], from: &str, to: &str) -> Vec<u8> {
 fn with_listed_entry(base: &[u8], path: &str, body: &[u8]) -> Vec<u8> {
     let (mut entries, mut manifest) = explode(base);
     entries.push((path.to_string(), body.to_vec()));
+    // A `raw` record is a complete `Stored` v2 entry; it still names a path this
+    // build does not model, so the read gate refuses it as a newer writer's data.
     manifest["entries"]
         .as_array_mut()
         .expect("entries")
-        .push(serde_json::json!({
-            "path": path,
-            "sha256": sha256_hex(body),
-            "sha256_c": null,
-            "len": body.len(),
-            "crc": crc32(body),
-            "foreign": false,
-        }));
-    assemble(&entries, &manifest, Some(path))
+        .push(v2_record(path, "raw", body, Some(body)));
+    assemble(&entries, &manifest)
 }
 
 // ------------------------------------------------------------- round trip ---
@@ -327,7 +237,8 @@ fn three_resources_round_trip_with_their_names_sources_and_table_body() {
     let (bytes, report) = write_snapshot(&mut ZipDocumentStore::new(), &snapshot);
     assert!(report.entries_written >= 6, "{report:?}");
 
-    // Each payload is one Stored entry at its content-addressed path.
+    // Each payload is one `raw` entry at its content-addressed path; `explode`
+    // returns it verbatim (a raw payload is its own logical form).
     let (entries, manifest) = explode(&bytes);
     for (kind, key, payload) in [
         (BundledKind::Font, &font, FONT),
@@ -343,9 +254,15 @@ fn three_resources_round_trip_with_their_names_sources_and_table_body() {
             .clone();
         assert_eq!(body, payload, "{path} bytes are written verbatim");
         let record = manifest_entry(&manifest, &path);
+        assert_eq!(record["codec"], Value::String("raw".to_string()));
         assert_eq!(record["foreign"], Value::Bool(false));
         assert_eq!(record["sha256"], Value::String(sha256_hex(payload)));
+        assert_eq!(
+            record["sha256_c"], record["sha256"],
+            "a raw entry stores its logical bytes, so both digests agree"
+        );
         assert_eq!(record["len"], Value::from(payload.len() as u64));
+        assert_eq!(record["len_c"], record["len"]);
         assert_eq!(record["crc"], Value::from(u64::from(crc32(payload))));
     }
 
@@ -484,7 +401,7 @@ fn an_unchanged_resource_is_raw_copied_and_the_archive_stays_stable() {
         manifest_entry(&before, &path),
         manifest_entry(&after, &path),
     );
-    for field in ["sha256", "len", "crc"] {
+    for field in ["sha256", "sha256_c", "len", "len_c", "crc"] {
         assert_eq!(old[field], new[field], "{field} must survive the copy");
     }
     let body = explode(&second)

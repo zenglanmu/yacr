@@ -6,10 +6,11 @@
 //! archives that contain entries this build does not model — the situation the
 //! store must preserve.
 
-use std::io::{Cursor, Read, Write};
+mod common;
+
+use std::io::{Cursor, Write};
 
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, DateTime, ZipArchive, ZipWriter};
 
@@ -21,6 +22,8 @@ use cad_db::{
 use cad_domain::ymodel::{markers, DocumentHeader, IdCounters, ModelKey, PersistentIdOf, Shard};
 use cad_domain::{DatabaseId, DocumentIdentity, EntityId, LayoutId, Revision, Unit, UnitContext};
 use cad_store_zip::{ZipDocumentStore, MANIFEST_ENTRY};
+
+use common::{assemble, explode, frame, sha256_hex, v2_record, with_manifest};
 
 const FOREIGN_PATH: &str = "raw/source-17.bin";
 const FOREIGN_BODY: &[u8] = b"\x00\x01\x02opaque source bytes\xff";
@@ -159,108 +162,28 @@ fn read_archive(bytes: &[u8]) -> Result<cad_db::LoadedDocument, StoreError> {
 
 // ------------------------------------------------------- archive surgery ----
 
-fn zip_options(method: CompressionMethod) -> SimpleFileOptions {
-    SimpleFileOptions::default()
-        .compression_method(method)
-        .last_modified_time(DateTime::default())
-}
-
-fn sha256_hex(bytes: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    let digest = hasher.finalize();
-    digest.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
-/// Every entry of `bytes` as `(name, body)`, plus the parsed manifest.
-fn explode(bytes: &[u8]) -> (Vec<(String, Vec<u8>)>, Value) {
-    let mut archive = ZipArchive::new(Cursor::new(bytes)).expect("zip");
-    let mut entries = Vec::new();
-    for index in 0..archive.len() {
-        let mut file = archive.by_index(index).expect("entry");
-        let name = file.name().expect("name").to_string();
-        let mut body = Vec::new();
-        file.read_to_end(&mut body).expect("body");
-        if name != MANIFEST_ENTRY {
-            entries.push((name, body));
-        }
-    }
-    let mut manifest_file = archive.by_name(MANIFEST_ENTRY).expect("manifest");
-    let mut manifest_bytes = Vec::new();
-    manifest_file
-        .read_to_end(&mut manifest_bytes)
-        .expect("manifest");
-    (
-        entries,
-        serde_json::from_slice(&manifest_bytes).expect("manifest json"),
-    )
-}
-
-/// Rebuild an archive from `entries` plus `manifest`, manifest last.
-fn assemble(entries: &[(String, Vec<u8>)], manifest: &Value) -> Vec<u8> {
-    let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
-    let mut sorted: Vec<&(String, Vec<u8>)> = entries.iter().collect();
-    sorted.sort_by(|left, right| left.0.cmp(&right.0));
-    for (name, body) in sorted {
-        writer
-            .start_file(name.as_str(), zip_options(CompressionMethod::Deflated))
-            .expect("start");
-        writer.write_all(body).expect("body");
-    }
-    writer
-        .start_file(MANIFEST_ENTRY, zip_options(CompressionMethod::Deflated))
-        .expect("manifest start");
-    serde_json::to_writer(&mut writer, manifest).expect("manifest body");
-    writer.finish().expect("finish").into_inner()
-}
-
 /// Add entries this build does not model to `base`.
 ///
-/// `listed` decides whether the entry also appears in `manifest.entries` with
-/// `"foreign": true` — the two shapes a foreign entry really takes (a conformant
-/// writer's unlisted blob, and this store's own record of one it carried over).
+/// `listed` decides whether the entry also appears in `manifest.entries` as an
+/// `opaque` foreign record — the two shapes a foreign entry really takes (a
+/// conformant writer's unlisted blob, and this store's own record of one it
+/// carried over).
 fn with_foreign(base: &[u8], path: &str, body: &[u8], listed: bool) -> Vec<u8> {
     let (mut entries, mut manifest) = explode(base);
     entries.push((path.to_string(), body.to_vec()));
     if listed {
-        let record = serde_json::json!({
-            "path": path,
-            // Written with `Stored`, so the compressed bytes are the body itself.
-            "sha256": sha256_hex(body),
-            "sha256_c": sha256_hex(body),
-            "len": body.len(),
-            "crc": zip_crc32(body),
-            "foreign": true,
-        });
         manifest["entries"]
             .as_array_mut()
             .expect("entries")
-            .push(record);
+            .push(v2_record(path, "opaque", body, Some(body)));
         manifest["entries"]
             .as_array_mut()
             .expect("entries")
             .sort_by(|left, right| left["path"].as_str().cmp(&right["path"].as_str()));
     }
-    // The inserted entry has to be `Stored` for the `sha256_c` above to be true.
-    let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
-    let mut sorted = entries.clone();
-    sorted.sort_by(|left, right| left.0.cmp(&right.0));
-    for (name, entry_body) in &sorted {
-        let method = if name == path {
-            CompressionMethod::Stored
-        } else {
-            CompressionMethod::Deflated
-        };
-        writer
-            .start_file(name.as_str(), zip_options(method))
-            .expect("start");
-        writer.write_all(entry_body).expect("body");
-    }
-    writer
-        .start_file(MANIFEST_ENTRY, zip_options(CompressionMethod::Deflated))
-        .expect("manifest start");
-    serde_json::to_writer(&mut writer, &manifest).expect("manifest body");
-    writer.finish().expect("finish").into_inner()
+    // `assemble` writes the unlisted entry `Stored` verbatim and frames the
+    // modelled JSON entries, so the archive is a valid v2 container.
+    assemble(&entries, &manifest)
 }
 
 /// Replace one entry's bytes, leaving `manifest.json` untouched (tampering).
@@ -286,24 +209,24 @@ fn tamper(base: &[u8], path: &str, body: &[u8]) -> Vec<u8> {
     assemble(&entries, &manifest)
 }
 
-/// Patch `manifest.json` and leave everything else alone.
+/// Patch `manifest.json` and leave every entry payload alone.
 fn patch_manifest(base: &[u8], patch: impl FnOnce(&mut Value)) -> Vec<u8> {
-    let (entries, mut manifest) = explode(base);
-    patch(&mut manifest);
-    assemble(&entries, &manifest)
+    with_manifest(base, patch)
 }
 
-fn zip_crc32(bytes: &[u8]) -> u64 {
-    // Computed with the zip crate so the fixture cannot disagree with the reader.
+/// Write entries with no `manifest.json` at all: not an archive this store opens.
+fn write_entries_without_manifest(entries: &[(String, Vec<u8>, CompressionMethod)]) -> Vec<u8> {
     let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
-    writer
-        .start_file("crc", zip_options(CompressionMethod::Stored))
-        .expect("start");
-    writer.write_all(bytes).expect("body");
-    let bytes = writer.finish().expect("finish").into_inner();
-    let mut archive = ZipArchive::new(Cursor::new(bytes)).expect("zip");
-    let file = archive.by_index(0).expect("entry");
-    u64::from(file.crc32())
+    let mut sorted = entries.to_vec();
+    sorted.sort_by(|left, right| left.0.cmp(&right.0));
+    for (name, body, method) in &sorted {
+        let options = SimpleFileOptions::default()
+            .compression_method(*method)
+            .last_modified_time(DateTime::default());
+        writer.start_file(name.as_str(), options).expect("start");
+        writer.write_all(body).expect("body");
+    }
+    writer.finish().expect("finish").into_inner()
 }
 
 // ------------------------------------------------------------------ tests ---
@@ -356,7 +279,11 @@ fn a_snapshot_survives_a_full_round_trip_with_a_foreign_entry() {
         .find(|record| record["path"] == FOREIGN_PATH)
         .expect("recorded");
     assert_eq!(record["foreign"], Value::Bool(true));
-    assert_eq!(record["sha256_c"], Value::String(sha256_hex(FOREIGN_BODY)));
+    assert_eq!(record["codec"], Value::String("opaque".to_string()));
+    assert_eq!(record["sha256"], Value::String(sha256_hex(FOREIGN_BODY)));
+    // An opaque entry is never decoded, so this contract records no stored
+    // payload digest for it (the copied source record is inherited verbatim).
+    assert_eq!(record["sha256_c"], Value::Null);
 }
 
 #[test]
@@ -411,7 +338,8 @@ fn a_newer_read_version_is_refused_before_anything_else_is_parsed() {
     // INVALID_DOCUMENT instead of UNSUPPORTED_VERSION.
     let broken = tamper(&base, DOCUMENT_ENTRY, b"not json at all");
     let archive = patch_manifest(&broken, |manifest| {
-        manifest["format"]["read"] = Value::from(2);
+        // `2` is this build's current read version; `3` is newer.
+        manifest["format"]["read"] = Value::from(3);
     });
     let error = read_archive(&archive).expect_err("refused");
     assert_eq!(error.marker, markers::UNSUPPORTED_VERSION, "{error}");
@@ -574,8 +502,12 @@ fn the_manifest_pins_the_document_and_the_import_baseline() {
     assert_eq!(manifest["open_revision"], Value::from(4));
     assert_eq!(manifest["saved_revision"], Value::from(12));
     assert_eq!(manifest["saved_at"], "2026-11-18T00:00:00Z");
-    assert_eq!(manifest["format"]["read"], Value::from(1));
-    assert_eq!(manifest["format"]["write"], Value::from(1));
+    assert_eq!(
+        manifest["format"]["read"],
+        Value::from(2),
+        "this build reads only v2 zstd-frame archives"
+    );
+    assert_eq!(manifest["format"]["write"], Value::from(2));
     assert_eq!(
         manifest["format"]["minor"],
         Value::from(4),
@@ -634,12 +566,17 @@ fn every_modelled_entry_is_in_the_manifest_and_the_shard_map_agrees() {
         assert_eq!(
             record["sha256"].as_str().map(str::len),
             Some(64),
-            "{record}"
+            "a modelled entry records the logical digest: {record}"
         );
         assert_eq!(
-            record["sha256_c"],
-            Value::Null,
-            "encoded entries write null"
+            record["sha256_c"].as_str().map(str::len),
+            Some(64),
+            "a modelled entry records the stored-payload digest: {record}"
+        );
+        assert_eq!(
+            record["codec"],
+            Value::String("zstd".to_string()),
+            "every entry of this snapshot is a modelled JSON entry: {record}"
         );
     }
 
@@ -691,15 +628,15 @@ fn elements_are_sorted_by_id_and_a_duplicate_is_refused() {
             }
         })
         .collect();
-    // The manifest hashes would no longer match, so recompute them for this entry
-    // only: the duplicate must be caught by the decoder, not the hash check.
+    // The manifest record would no longer describe the re-framed payload, so
+    // rebuild it for this entry only: the duplicate must be caught by the
+    // decoder, not by a stale hash.
     let mut manifest = manifest;
     let body = serde_json::to_vec(&rows).expect("encode");
-    for record in manifest["entries"].as_array_mut().expect("entries") {
-        if record["path"] == shard_path.as_str() {
-            record["sha256"] = Value::String(sha256_hex(&body));
-            record["len"] = Value::from(body.len() as u64);
-            record["crc"] = Value::from(zip_crc32(&body));
+    let record = v2_record(&shard_path, "zstd", &frame(&body), Some(&body));
+    for entry in manifest["entries"].as_array_mut().expect("entries") {
+        if entry["path"] == shard_path.as_str() {
+            *entry = record.clone();
         }
     }
     let duplicate = assemble(&entries, &manifest);
@@ -720,14 +657,12 @@ fn a_shard_map_that_disagrees_with_the_entries_is_refused() {
 #[test]
 fn an_archive_without_a_manifest_is_refused() {
     let (entries, _) = explode(&archive_bytes(&snapshot()));
-    let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
-    for (name, body) in &entries {
-        writer
-            .start_file(name.as_str(), zip_options(CompressionMethod::Deflated))
-            .expect("start");
-        writer.write_all(body).expect("body");
-    }
-    let bytes = writer.finish().expect("finish").into_inner();
+    let entries: Vec<(String, Vec<u8>, CompressionMethod)> = entries
+        .into_iter()
+        .map(|(name, body)| (name, body, CompressionMethod::Deflated))
+        .collect();
+    // No manifest at all: the entries alone are not an archive.
+    let bytes = write_entries_without_manifest(&entries);
     let error = read_archive(&bytes).expect_err("no manifest");
     assert_eq!(error.marker, markers::INVALID_DOCUMENT, "{error}");
 
@@ -743,17 +678,12 @@ fn a_listed_entry_this_build_does_not_model_is_refused_not_dropped() {
     let (mut entries, mut manifest) = explode(&base);
     let body = b"{}".to_vec();
     entries.push(("raw/source-99.bin".to_string(), body.clone()));
+    // A complete, non-foreign v2 record: the refusal must be "this build does
+    // not model the path", not a hash or version error.
     manifest["entries"]
         .as_array_mut()
         .expect("entries")
-        .push(serde_json::json!({
-            "path": "raw/source-99.bin",
-            "sha256": sha256_hex(&body),
-            "sha256_c": null,
-            "len": body.len(),
-            "crc": zip_crc32(&body),
-            "foreign": false,
-        }));
+        .push(v2_record("raw/source-99.bin", "raw", &body, Some(&body)));
     let archive = assemble(&entries, &manifest);
     let error = read_archive(&archive).expect_err("unmodelled entry");
     assert_eq!(error.marker, markers::UNSUPPORTED_MINOR, "{error}");

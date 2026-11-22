@@ -14,6 +14,17 @@
 //! Raw-copying a modelled entry needs the previous archive's manifest to describe
 //! it; a first save has no previous archive, so every entry is encoded then.
 //!
+//! # Entry payloads
+//!
+//! Every entry this save encodes is a `Stored` zip entry (a copied foreign entry
+//! keeps its original compression method). A modelled JSON entry's payload is one
+//! zstd frame ([`crate::codec`]) whose header pledges the logical JSON length; a
+//! texture or resource entry's payload is its bytes verbatim. The manifest records
+//! which (`codec`) plus the logical and stored lengths and digests. Because the
+//! frame is a buffer, it is hashed (`sha256_c`) before it is written, and a
+//! raw-copied entry inherits the source record verbatim — the copied payload is
+//! unchanged.
+//!
 //! The write order is the format's: every entry in sorted path order, then
 //! `manifest.json` **last** (its entry table can only be built once every other
 //! entry has been hashed), then the zip central directory via `finish`.
@@ -21,8 +32,9 @@
 //! # Streaming, and why `begin` gets no size hint
 //!
 //! Entries are fed to the sink one at a time through [`SinkWriter`]: at most one
-//! shard's JSON exists as a buffer, so a 200 MB document does not need a 400 MB
-//! spike. The consequence is that the archive's total size is genuinely unknown
+//! entry's JSON and its compressed frame exist as buffers, so a 200 MB document
+//! does not need a 400 MB spike. The consequence is that the archive's total size
+//! is genuinely unknown
 //! when `sink.begin` runs — a hint would be a guess, and a wrong hint is worse
 //! than `None` (a carrier could reserve the wrong amount or refuse a save that
 //! would have fit). The budget is therefore enforced per chunk, which is what
@@ -30,7 +42,7 @@
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::{self, Cursor, Write};
+use std::io::{Cursor, Write};
 
 use serde_json::Value;
 use zip::write::SimpleFileOptions;
@@ -43,13 +55,15 @@ use cad_db::{
 use cad_domain::ymodel::{markers, DocumentHeader, ModelKey, Shard};
 use cad_domain::{BundledKind, DocumentIdentity};
 
+use crate::codec::FrameEncoder;
 use crate::crc32::crc32;
 use crate::json::{hex_lower, malformed, sha256_hex, Sha256Sum};
-use crate::manifest::{EntryRecord, Manifest};
-use crate::models::models_value;
+use crate::manifest::{Codec, EntryRecord, Manifest};
+use crate::models::{models_value, storable_model_id};
 use crate::previous::{self, PreviousArchive};
 use crate::resources::{self, check_write_key_matches_digest};
 use crate::schema::classes_value;
+use crate::sink::{io_error, zip_error, SinkWriter, WriteMetrics};
 use crate::MANIFEST_ENTRY;
 
 /// The `open_revision` written when the store was never told the import baseline.
@@ -122,11 +136,6 @@ impl Body<'_> {
             )),
         }
     }
-
-    /// Whether this entry holds JSON (deflated) or opaque bytes (stored).
-    fn is_json(&self) -> bool {
-        !matches!(self, Body::Binary(_) | Body::Resource { .. })
-    }
 }
 
 fn encode_error(error: serde_json::Error) -> StoreError {
@@ -154,67 +163,6 @@ struct Planned<'a> {
     /// bytes are already in memory and ADR-0040 D14 keeps `textures/<key>` out of
     /// the raw copy.
     copy: Option<CopySource>,
-}
-
-/// Everything that must survive the borrow of the sink.
-struct WriteMetrics {
-    written: u64,
-    failure: Option<StoreError>,
-}
-
-/// A zip sink that streams straight into a [`ByteSink`] and enforces the budget.
-///
-/// The budget check happens **before** the chunk reaches the sink, so the failure
-/// is `PERSISTENCE_TOO_LARGE` rather than a partially written archive. After a
-/// failure the writer goes quiet (every later `write` returns `Ok` and discards),
-/// which lets the zip writer's `Drop` finalize without touching an aborted sink
-/// and without printing to stderr.
-struct SinkWriter<'a> {
-    sink: &'a mut dyn ByteSink,
-    metrics: &'a RefCell<WriteMetrics>,
-    budget: Option<u64>,
-    poisoned: bool,
-}
-
-impl SinkWriter<'_> {
-    fn poison(&mut self, error: StoreError) {
-        self.metrics.borrow_mut().failure = Some(error);
-        self.poisoned = true;
-    }
-}
-
-impl Write for SinkWriter<'_> {
-    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
-        if self.poisoned {
-            return Ok(buffer.len());
-        }
-        let written = self.metrics.borrow().written;
-        if let Some(limit) = self.budget {
-            if written.saturating_add(buffer.len() as u64) > limit {
-                self.poison(StoreError::new(
-                    markers::PERSISTENCE_TOO_LARGE,
-                    format!("writing this document would exceed the {limit}-byte budget"),
-                ));
-                return Err(io::Error::other("ymodel serialization budget exceeded"));
-            }
-        }
-        match self.sink.write_chunk(buffer) {
-            Ok(()) => {
-                self.metrics.borrow_mut().written = written + buffer.len() as u64;
-                Ok(buffer.len())
-            }
-            Err(error) => {
-                let detail = error.to_string();
-                self.poison(error);
-                Err(io::Error::other(detail))
-            }
-        }
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        // The sink has no flush: `commit` is the durability point (D16).
-        Ok(())
-    }
 }
 
 type ZipSink<'a> = ZipWriter<zip::write::StreamWriter<SinkWriter<'a>>>;
@@ -278,22 +226,12 @@ pub(crate) fn encode(
             let source = previous
                 .record(&entry.path)
                 .expect("a copyable entry has a source record");
-            copy_records.insert(
-                entry.path.clone(),
-                EntryRecord {
-                    path: entry.path.clone(),
-                    // The compressed bytes are copied unchanged, so the source's
-                    // uncompressed hashes still describe them.
-                    sha256: source.sha256.clone(),
-                    // This build never holds the compressed bytes as a buffer
-                    // (`zip`'s raw reader is crate-private), so it cannot claim a
-                    // value for them.
-                    sha256_c: None,
-                    len: source.len,
-                    crc: source.crc,
-                    foreign: false,
-                },
-            );
+            // Inherited verbatim: the source record already describes the very
+            // bytes `raw_copy_file` carries over (including a true `sha256_c` for
+            // a stored payload this build wrote). Re-deriving it would either
+            // recompute the same values or — for a field the source measured
+            // differently — make the copy unverifiable.
+            copy_records.insert(entry.path.clone(), source.clone());
             entry.body = None;
         }
     }
@@ -332,13 +270,12 @@ pub(crate) fn encode(
                 }
                 return Err(previous::conflict(path));
             }
-            let record = match previous.reusable(path) {
-                Some(record) => {
-                    let mut record = record.clone();
-                    record.foreign = true;
-                    record
-                }
-                // Not described by the source manifest: hash it from the bytes.
+            let record = match previous.record_for_copy(path) {
+                // Copied verbatim: an unmodelled entry's record already describes
+                // the bytes raw-copied below, and it was `foreign: true` in the
+                // source manifest (that is why it is in `foreign()` at all).
+                Some(record) => record.clone(),
+                // Not described by the source manifest: measure it from the bytes.
                 None => previous::measure(bytes, path)?,
             };
             copy_records.insert(path.clone(), record);
@@ -408,6 +345,16 @@ fn plan_entries(snapshot: &DocumentSnapshot) -> Result<(Vec<Planned<'_>>, ShardM
         body: Some(Body::Classes),
         copy: None,
     });
+    // A model key the format cannot represent is refused before anything is
+    // written. This is defense in depth for the sequence-0 reservation
+    // (`ModelKey::from_persistent`): the allocators never issue it, so only a
+    // malformed snapshot reaches here, and it must fail the save rather than
+    // produce a `tables/models.json` row no reader can decode.
+    for model in &snapshot.models {
+        if storable_model_id(model.key).is_none() {
+            return Err(unrepresentable_model(MODELS_ENTRY, model.key));
+        }
+    }
     planned.push(Planned {
         path: MODELS_ENTRY.to_string(),
         body: Some(Body::Models(&snapshot.models)),
@@ -452,7 +399,16 @@ fn plan_entries(snapshot: &DocumentSnapshot) -> Result<(Vec<Planned<'_>>, ShardM
     let mut shard_map = ShardMap::new();
     let mut seen = BTreeSet::new();
     for shard in &snapshot.shards {
-        let path = shard_entry(shard.model.persistent().raw(), shard.shard);
+        // Same reservation check as the model list above, applied where the
+        // entry path is built: `elements/<model>-<shard>.json` is only readable
+        // if the model id round-trips back to this key.
+        let Some(id) = storable_model_id(shard.model) else {
+            return Err(unrepresentable_model(
+                &format!("elements/{:?}-{}.json", shard.model, shard.shard.0),
+                shard.model,
+            ));
+        };
+        let path = shard_entry(id.raw(), shard.shard);
         if !seen.insert(path.clone()) {
             return Err(malformed(
                 "elements",
@@ -460,7 +416,7 @@ fn plan_entries(snapshot: &DocumentSnapshot) -> Result<(Vec<Planned<'_>>, ShardM
             ));
         }
         shard_map
-            .entry(shard.model.persistent().raw().to_string())
+            .entry(id.raw().to_string())
             .or_default()
             .push(path.clone());
         planned.push(Planned {
@@ -473,6 +429,18 @@ fn plan_entries(snapshot: &DocumentSnapshot) -> Result<(Vec<Planned<'_>>, ShardM
         paths.sort();
     }
     Ok((planned, shard_map))
+}
+
+/// A refused [`ModelKey`]: the entry it would have named, and the key itself.
+///
+/// Stable marker [`markers::UNREPRESENTABLE_MODEL`] — never `invalid_document`,
+/// which describes a malformed *archive*; here the snapshot is malformed and the
+/// save is refused before an unreadable archive can be produced.
+fn unrepresentable_model(path: &str, model: ModelKey) -> StoreError {
+    StoreError::new(
+        markers::UNREPRESENTABLE_MODEL,
+        format!("{path} names {model:?}, which has no model id this format can read back"),
+    )
 }
 
 /// Whether a shard entry may be copied from the previous archive instead of
@@ -536,6 +504,10 @@ fn write_entries(
         poisoned: false,
     };
     let mut zip = ZipWriter::new_stream(writer);
+    // One compression context for the whole save: the match-finder tables are
+    // built once, and every frame is still independent (each pledges its own
+    // content size and is verified on its own).
+    let mut encoder = FrameEncoder::new();
 
     let mut records: Vec<EntryRecord> = Vec::with_capacity(planned.len() + 1);
     let mut entries_written = 0usize;
@@ -560,20 +532,32 @@ fn write_entries(
                 entries_written += 1;
             }
             Some(body) => {
-                let bytes = body.encode()?;
+                // The JSON is already a buffer (`Body::encode`), so the frame is
+                // compressed from memory and can pledge its exact logical size.
+                let json = body.encode()?;
+                let frame = encoder.frame(&json)?;
                 let record = EntryRecord {
                     path: entry.path.clone(),
-                    sha256: sha256_hex(&bytes),
-                    // See the crate docs: encoding streams through the zip writer, so
-                    // the compressed bytes are never a buffer this store can hash.
-                    sha256_c: None,
-                    len: bytes.len() as u64,
-                    crc: crc32(&bytes),
+                    codec: Codec::Zstd,
+                    sha256: sha256_hex(&json),
+                    sha256_c: Some(sha256_hex(&frame)),
+                    len: json.len() as u64,
+                    len_c: frame.len() as u64,
+                    // The CRC is of the STORED payload, matching what the zip
+                    // central directory records for this entry.
+                    crc: crc32(&frame),
                     foreign: false,
                 };
-                start_entry(&mut zip, metrics, &entry.path, body.is_json())?;
-                zip.write_all(&bytes)
-                    .map_err(|error| io_error(metrics, error, &entry.path))?;
+                // Drop the uncompressed JSON before the frame reaches the sink:
+                // the peak is one entry's `json + frame`, not the whole archive's.
+                drop(json);
+                start_entry(&mut zip, metrics, &entry.path)?;
+                // Chunked so `SinkWriter`'s per-chunk budget check still aborts
+                // mid-entry instead of after the whole frame is handed over.
+                for chunk in frame.chunks(resources::BINARY_CHUNK) {
+                    zip.write_all(chunk)
+                        .map_err(|error| io_error(metrics, error, &entry.path))?;
+                }
                 records.push(record);
                 entries_written += 1;
             }
@@ -622,7 +606,7 @@ fn write_entries(
         entries: records,
     };
     let bytes = serde_json::to_vec(&manifest.to_json_value()).map_err(encode_error)?;
-    start_json(&mut zip, metrics, MANIFEST_ENTRY)?;
+    start_entry(&mut zip, metrics, MANIFEST_ENTRY)?;
     zip.write_all(&bytes)
         .map_err(|error| io_error(metrics, error, MANIFEST_ENTRY))?;
     zip.finish()
@@ -649,36 +633,34 @@ fn write_binary(
     if let Some((kind, key)) = expected_key {
         check_write_key_matches_digest(kind, key, &sha256, path)?;
     }
-    start_entry(zip, metrics, path, false)?;
+    start_entry(zip, metrics, path)?;
     for chunk in bytes.chunks(resources::BINARY_CHUNK) {
         zip.write_all(chunk)
             .map_err(|error| io_error(metrics, error, path))?;
     }
     Ok(EntryRecord {
         path: path.to_string(),
+        codec: Codec::Raw,
+        // The stored payload is the logical payload, so both digests are the
+        // same value and both lengths are the same number.
+        sha256_c: Some(sha256.clone()),
         sha256,
-        // See the crate docs: the compressed bytes never exist as a buffer.
-        sha256_c: None,
         len,
+        len_c: len,
         crc,
         foreign: false,
     })
 }
 
-/// The options every JSON entry is written with: one compression method, one
-/// timestamp, so two saves produce the same bytes.
-pub(crate) fn json_options() -> SimpleFileOptions {
-    SimpleFileOptions::default()
-        .compression_method(CompressionMethod::Deflated)
-        .last_modified_time(DateTime::default())
-}
-
-/// The options a binary resource entry is written with.
+/// The options every entry is written with.
 ///
-/// `Stored`, not `Deflated`: PNG/JPEG are already compressed, so deflating them
-/// again spends CPU to produce slightly larger bytes. The timestamp is the same
-/// fixed value as every other entry, so a save stays byte-deterministic.
-pub(crate) fn binary_options() -> SimpleFileOptions {
+/// `Stored`, never deflated: the payload of a JSON entry is already a zstd frame
+/// (the format's own codec, see [`crate::codec`]) and a binary payload is already
+/// compressed. Deflating either again would spend CPU to produce a different
+/// compressed byte string for the same logical bytes — and `Stored` is what makes
+/// the manifest's `len_c`/`sha256_c` describe exactly the bytes the zip holds.
+/// The timestamp is fixed so two saves stay byte-deterministic.
+pub(crate) fn entry_options() -> SimpleFileOptions {
     SimpleFileOptions::default()
         .compression_method(CompressionMethod::Stored)
         .last_modified_time(DateTime::default())
@@ -688,42 +670,9 @@ fn start_entry(
     zip: &mut ZipSink<'_>,
     metrics: &RefCell<WriteMetrics>,
     path: &str,
-    is_json: bool,
 ) -> Result<(), StoreError> {
-    let options = if is_json {
-        json_options()
-    } else {
-        binary_options()
-    };
-    zip.start_file(path, options)
+    zip.start_file(path, entry_options())
         .map_err(|error| zip_error(metrics, error, path))
-}
-
-fn start_json(
-    zip: &mut ZipSink<'_>,
-    metrics: &RefCell<WriteMetrics>,
-    path: &str,
-) -> Result<(), StoreError> {
-    zip.start_file(path, json_options())
-        .map_err(|error| zip_error(metrics, error, path))
-}
-
-/// A zip failure: the carrier's own error if the sink refused a chunk, otherwise
-/// a malformed-output diagnostic.
-fn zip_error(
-    metrics: &RefCell<WriteMetrics>,
-    error: zip::result::ZipError,
-    context: &str,
-) -> StoreError {
-    take_failure(metrics).unwrap_or_else(|| malformed(context, error))
-}
-
-fn io_error(metrics: &RefCell<WriteMetrics>, error: io::Error, context: &str) -> StoreError {
-    take_failure(metrics).unwrap_or_else(|| malformed(context, error))
-}
-
-fn take_failure(metrics: &RefCell<WriteMetrics>) -> Option<StoreError> {
-    metrics.borrow_mut().failure.take()
 }
 
 /// A UUID-shaped, deterministic document identifier derived from the header's
@@ -763,6 +712,7 @@ mod tests {
     use std::sync::Arc;
 
     use cad_db::ModelKind;
+    use cad_domain::ymodel::markers;
     use cad_domain::ymodel::ModelKey;
     use cad_domain::ymodel::{IdCounters, Shard};
     use cad_domain::{DatabaseId, Revision, UnitContext};
@@ -777,6 +727,72 @@ mod tests {
             variables: serde_json::json!({}),
             next: IdCounters::default(),
         }
+    }
+
+    #[test]
+    fn a_saved_archive_reads_back_through_the_zstd_codec() {
+        use cad_db::{ChangeScope, MemorySink};
+
+        let snapshot = DocumentSnapshot {
+            header: header(1),
+            revision: Revision(3),
+            models: Vec::new(),
+            shards: Vec::new(),
+            tables: Default::default(),
+            textures: Default::default(),
+            resources: Default::default(),
+            resource_names: Default::default(),
+            resource_sources: Default::default(),
+        };
+        let mut sink = MemorySink::new();
+        encode(
+            None,
+            None,
+            &ChangeScope::default(),
+            None,
+            None,
+            None,
+            &snapshot,
+            &mut sink,
+        )
+        .expect("save");
+        let bytes = sink.into_committed_bytes().expect("committed");
+        let parsed = crate::read::parse(&bytes).expect("parse");
+        assert_eq!(parsed.loaded.snapshot.revision, Revision(3));
+
+        // Every modelled JSON entry is a zstd frame in a Stored zip entry, and the
+        // manifest records the stored payload's digest and length for it.
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(&bytes)).expect("zip");
+        let mut manifest = Vec::new();
+        {
+            use std::io::Read as _;
+            archive
+                .by_name(MANIFEST_ENTRY)
+                .expect("manifest")
+                .read_to_end(&mut manifest)
+                .expect("read manifest");
+        }
+        let manifest: Value = serde_json::from_slice(&manifest).expect("manifest json");
+        let entries = manifest["entries"].as_array().expect("entries");
+        assert!(!entries.is_empty());
+        let mut saw_zstd = false;
+        for entry in entries {
+            assert_eq!(entry["codec"], Value::from("zstd"), "{entry}");
+            assert!(entry["sha256_c"].is_string(), "a modelled entry records it");
+            let record_len_c = entry["len_c"].as_u64().expect("len_c");
+            let file = archive
+                .by_name(entry["path"].as_str().expect("path"))
+                .expect("entry");
+            assert_eq!(
+                file.compression(),
+                zip::CompressionMethod::Stored,
+                "{} must be Stored",
+                entry["path"]
+            );
+            assert_eq!(file.compressed_size(), record_len_c);
+            saw_zstd = true;
+        }
+        assert!(saw_zstd);
     }
 
     #[test]

@@ -18,7 +18,12 @@
 //! shard the commit did not touch can be carried over at the compressed-byte
 //! level too (ADR-0037 D11 Phase 2), using the source manifest's `shard_map` and
 //! entry record. Only entries the source manifest describes as non-foreign are
-//! eligible; everything else in the archive remains foreign data.
+//! eligible; everything else in the archive remains foreign data. A copied entry
+//! **inherits its source record verbatim** (codec, `sha256`, `sha256_c`, `len`,
+//! `len_c`, `crc`): `raw_copy_file` carries the stored payload over unchanged, so
+//! every field still describes the bytes in the new archive. A foreign entry the
+//! source manifest does not describe is measured once here and recorded as
+//! [`Codec::Opaque`].
 //!
 //! Failure to read the previous archive is
 //! [`cad_domain::ymodel::markers::FOREIGN_ENTRIES_UNREADABLE`], never a save that
@@ -33,7 +38,7 @@ use cad_db::StoreError;
 use cad_domain::ymodel::markers;
 
 use crate::json::{malformed, Sha256Sum};
-use crate::manifest::{EntryRecord, Manifest};
+use crate::manifest::{Codec, EntryRecord, Manifest};
 use crate::MANIFEST_ENTRY;
 
 /// What one previous archive says about its entries.
@@ -103,24 +108,24 @@ impl PreviousArchive {
 
     /// The source manifest's record for a modelled (non-foreign) entry.
     ///
-    /// Unlike [`Self::reusable`], this does not require `sha256_c`: a shard copied
-    /// from the source archive carries its compressed bytes over unchanged, so the
-    /// uncompressed `sha256`/`len`/`crc` it records is still true. The next reader
-    /// verifies those by decompressing (`crate::read`), which is why a corrupt
-    /// source record surfaces as a load failure instead of being trusted.
+    /// A shard copied from the source archive carries its stored payload over
+    /// unchanged (`raw_copy_file`), so the record's `sha256`/`sha256_c`/`len`/
+    /// `len_c`/`crc` all still describe the copied entry and are inherited
+    /// verbatim by the next save. The next reader verifies them (`crate::read`),
+    /// which is why a corrupt source record surfaces as a load failure instead of
+    /// being trusted.
     pub(crate) fn record(&self, path: &str) -> Option<&EntryRecord> {
         self.records.get(path).filter(|record| !record.foreign)
     }
 
-    /// A source record that can be reused verbatim.
+    /// The source record of any entry a raw copy may take, foreign or modelled.
     ///
-    /// Only a record with a compressed-byte hash is reusable: that is the one the
-    /// next reader will check instead of decompressing, and the value is only
-    /// true because the compressed bytes are copied unchanged.
-    pub(crate) fn reusable(&self, path: &str) -> Option<&EntryRecord> {
-        self.records
-            .get(path)
-            .filter(|record| record.sha256_c.is_some())
+    /// A foreign entry is described by the source manifest only when it was
+    /// listed there (as foreign); an unlisted one is measured from the bytes
+    /// instead. Either way the record describes the very payload
+    /// `raw_copy_file` copies, so it is reused verbatim rather than re-derived.
+    pub(crate) fn record_for_copy(&self, path: &str) -> Option<&EntryRecord> {
+        self.records.get(path)
     }
 }
 
@@ -129,23 +134,22 @@ pub(crate) fn open(bytes: &[u8]) -> Result<ZipArchive<Cursor<&[u8]>>, StoreError
     ZipArchive::new(Cursor::new(bytes)).map_err(unreadable)
 }
 
-/// The manifest record for one entry, computed from the bytes themselves.
+/// The manifest record for one entry, measured from the bytes themselves.
 ///
 /// Needed when a foreign entry is **not** described by the source manifest: the
-/// next archive still has to record a `sha256`/`len`/`crc` for it, and inventing
-/// those is not an option. The pass is streaming — the entry is never buffered,
-/// so a preserved source file of any size is fine.
+/// next archive still has to record what describes it, and inventing values is not
+/// an option. The `sha256` pass is streaming — the entry is never buffered, so a
+/// preserved source file of any size is fine.
 ///
-/// `sha256_c` stays `None`. The compressed bytes cannot be hashed through the zip
-/// crate's public API, and the reader's rule already covers that case: with no
-/// `sha256_c` it verifies by decompressing and checking `sha256`/`len`
-/// (`crate::read`). Recording a value that was not computed would be worse than
-/// recording none.
+/// The record is [`Codec::Opaque`] with `sha256_c: None`: this entry is copied,
+/// never decoded, so this build does not claim a stored-payload digest it has not
+/// computed. `len` is the entry's logical size and `len_c` its stored size, both
+/// from the central directory (and both preserved by `raw_copy_file`).
 pub(crate) fn measure(bytes: &[u8], path: &str) -> Result<EntryRecord, StoreError> {
     let mut archive = ZipArchive::new(Cursor::new(bytes)).map_err(unreadable)?;
-    let (crc, len) = {
+    let (crc, len, len_c) = {
         let file = archive.by_name(path).map_err(unreadable)?;
-        (file.crc32(), file.size())
+        (file.crc32(), file.size(), file.compressed_size())
     };
     let sha256 = {
         let mut file = archive.by_name(path).map_err(unreadable)?;
@@ -162,9 +166,11 @@ pub(crate) fn measure(bytes: &[u8], path: &str) -> Result<EntryRecord, StoreErro
     };
     Ok(EntryRecord {
         path: path.to_string(),
+        codec: Codec::Opaque,
         sha256,
         sha256_c: None,
         len,
+        len_c,
         crc,
         foreign: true,
     })
@@ -218,5 +224,33 @@ mod tests {
     fn measuring_an_unreadable_entry_is_an_error_not_a_guess() {
         let error = measure(b"not a zip", "raw/x.bin").expect_err("garbage");
         assert_eq!(error.marker, markers::FOREIGN_ENTRIES_UNREADABLE);
+    }
+
+    #[test]
+    fn a_measured_foreign_entry_is_opaque_and_records_both_lengths() {
+        use std::io::Write as _;
+
+        let mut buffer = std::io::Cursor::new(Vec::new());
+        {
+            let mut zip = zip::ZipWriter::new(&mut buffer);
+            zip.start_file(
+                "raw/x.bin",
+                zip::write::SimpleFileOptions::default()
+                    .compression_method(zip::CompressionMethod::Stored),
+            )
+            .expect("start");
+            zip.write_all(b"hello").expect("write");
+            zip.finish().expect("finish");
+        }
+        let bytes = buffer.into_inner();
+        let record = measure(&bytes, "raw/x.bin").expect("measure");
+        assert_eq!(record.codec, Codec::Opaque);
+        assert_eq!(
+            record.sha256_c, None,
+            "an opaque entry has no stored digest"
+        );
+        assert!(record.foreign);
+        assert_eq!(record.len, 5);
+        assert_eq!(record.len_c, 5);
     }
 }

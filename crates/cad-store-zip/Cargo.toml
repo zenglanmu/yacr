@@ -14,11 +14,21 @@ cad-db.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 
+# The per-entry payload codec (ADR-0046): one RFC 8878 zstd frame per modelled
+# JSON entry, written into a zip `Stored` entry. `std` only, no encoder SIMD
+# kernels / dictionaries / legacy frames — the frame bytes must stay a function of
+# (pinned version, level, features, input).
+structured-zstd.workspace = true
+
 # The container (ADR-0037 D11) and the reason this crate can link on
 # `wasm32-unknown-unknown`: `zip`'s default features pull `bzip2`, `zstd`,
 # `lzma`/`xz` and `aes`, i.e. C or heavy dependencies the `dom-canvas` web
-# session cannot link. `deflate-flate2` alone, with `flate2`'s default pure-Rust
-# `rust_backend` (miniz_oxide), keeps the whole tree pure Rust.
+# session cannot link. The container is still zip, but JSON payloads are zstd
+# frames in `Stored` entries, so `zip`'s own `zstd` feature stays off.
+# `deflate-flate2` is retained **only** so `previous::measure` can hash a foreign
+# Deflated entry copied over from another writer; this build writes nothing
+# Deflated. `flate2`'s default pure-Rust `rust_backend` (miniz_oxide) keeps the
+# whole tree pure Rust.
 zip = { version = "9.5", default-features = false, features = ["deflate-flate2"] }
 
 # Not called directly: this enables `flate2`'s **default backend** for the deflate

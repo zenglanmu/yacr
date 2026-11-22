@@ -265,7 +265,7 @@ ymodel 为唯一权威数据源；是 DWG/DXF 的可验证超集；其它格式�
 manifest.json                 -- format{read,write,minor}, generator, document_uuid,
                                  open_revision, saved_revision, saved_at,
                                  shard_map: {model_id: [entry...]},
-                                 entries[{path, sha256, sha256_c, len, crc, foreign}]
+                                 entries[{path, codec, sha256, sha256_c, len, len_c, crc, foreign}]
 document.json                 -- DocumentHeader: 单位/身份/resource_keys + identity.next_*（9 个）
 schema/classes.json
 tables/models.json            -- Model 元数据（kind、所属 layout/block、名称）
@@ -286,13 +286,15 @@ textures/<key>                -- 文档自有基色纹理，STORED（minor 3，A
   raw-copy 只复制 `旧 manifest.shard_map` 中**仍存在**的 entry。被删除的 layout/block/model
   的旧分片不会被复制回来（否则重开时"复活"）。
 - **manifest 自身不在 `entries` 里**（自引用无定义）；它的完整性由 zip CRC 保护。
-- **两个 hash**：`sha256` 是解压后字节（格式契约）；`sha256_c` 是压缩字节。
-  **实测约束（rev.8）**：`zip` 9.5.0 不公开压缩字节（`take_raw_reader` 是 crate-private），
-  所以本仓库既算不出也验不了 `sha256_c`。Phase 1 对**每个** entry 校验解压后的 `sha256`
-  + `len` + zip 中央目录 CRC（对内容完整性严格更强，且覆盖 foreign entry）；`sha256_c` 只作为
-  拷贝 entry 的原始记录从旧 manifest 透传，读侧标注"未校验"。Phase 2 要么换 zip API/自写
-  容器，要么按 minor 迁移删掉该字段——**不得**把它写成已验证。
-- **压缩**：JSON entry 用 deflate；`raw/*.bin` STORED；`textures/<key>` 也是 STORED（PNG/JPEG 已压缩）。
+- **两个 hash**：`sha256` 是逻辑字节（JSON）的哈希；`sha256_c` 是 Stored payload
+  （zstd 帧或 raw 字节）的哈希。**rev.8 的历史缺口已由
+  [ADR-0046](0046-ymodel-zstd-entry-codec.md) 关闭**：JSON 条目现在由本仓库在写 zip 前压缩，
+  压缩字节成为可哈希的 buffer，因此 `sha256_c` 对 `codec != opaque` 必然写入并在读侧解压前校验。
+  旧记录（deflate 时代无法计算 `sha256_c`）保留在此仅作历史；[ADR-0046](0046-ymodel-zstd-entry-codec.md)
+  同时把 `crc` 重新定义为 Stored payload 的 CRC-32，并新增 `len_c`/`codec`。
+- **压缩**：JSON entry 用 **zstd（标准 RFC 8878 帧，level 6，`structured-zstd =0.4.3`）**，
+  以 zip `Stored` 条目承载；`raw/*.bin` 与 `textures/<key>` 仍是 STORED。
+  详见 [ADR-0046](0046-ymodel-zstd-entry-codec.md)。
 - **minor 3（2026-11-20，ADR-0038 D4）**：新增 `textures/<key>` 受管二进制条目（键为
   `<sha256 前 32 hex>.png|.jpg`，manifest 记 `len`/`sha256` + zip CRC，读取逐条校验，
   `foreign: false`），并在 `cad:Mesh` 上新增 `uvs` 与 `texture` 两个字段。**minor ≤ 2 的归档
@@ -321,7 +323,8 @@ textures/<key>                -- 文档自有基色纹理，STORED（minor 3，A
   2. 在同目录写**唯一**临时文件 `foo.ymodel.<pid>-<nonce>.tmp`：未修改且仍存在的 entry
      raw-copy（Phase 2 起；Phase 1 全量重写）；脏 entry 重写；`manifest.json` 最后写。
   3. fsync；重开校验 manifest 与每个 entry 的 `sha256` + `len` + CRC。被拷贝的 foreign entry
-     同样走解压后校验（`sha256_c` 在 `zip` 9.5.0 上不可验，见 D11）。
+     同样走 payload 哈希校验；`sha256_c` 与 `sha256` 均可见
+     [ADR-0046](0046-ymodel-zstd-entry-codec.md)。
   4. 原子替换：先 `link(target → target.bak)`（无硬链接则复制），再
      `rename(tmp → target)`；Linux/macOS 加目录 fsync；Windows `ReplaceFileW`。
      **绝不**先 `rename(target → bak)`（会留下"目标不存在"的窗口）。
@@ -360,6 +363,13 @@ textures/<key>                -- 文档自有基色纹理，STORED（minor 3，A
 - 更高 read → 拒绝（`ymodel.unsupported_version`）；更高 minor → 拒绝
   （`ymodel.unsupported_minor`）。**退出码 8 只是 CLI / `native-below` 的映射**；
   wasm/浏览器没有退出码，稳定标记才是契约。
+- **read 是等值门禁（ADR-0046 起）**：本构建只读 `read == 2`（zstd entry codec）。
+  门禁必须在完整 manifest 解析之前只探测 `format` 字段；否则旧 manifest 会先因缺少
+  `codec`/`len_c` 报 `invalid_document`，破坏 `unsupported_version` 的标记契约。
+- **写出侧不可表示 model**：`BlockId(0)`/`LayoutId(0)` 等无法经
+  `ModelKey::from_persistent` 回读的 key 以 `ymodel.unrepresentable_model` 拒绝，
+  不产生自己的 reader 拒绝的归档；acadrust 导入的块 id 从 **1** 起分配
+  （`cad-db` 的 `next_block_id: 1` 同源）。
 - 迁移是确定性链 + 历史 `.ymodel` 样本；未知 entry 原样保留。
 - 另存为 = 新 `document_uuid`、保留元素 GUID、新 `database_id`。
 - 打开视为不可信输入：版本 + manifest/schema 校验 + entry hash/尺寸上限。
@@ -407,7 +417,8 @@ textures/<key>                -- 文档自有基色纹理，STORED（minor 3，A
    （`docs/ymodel-phase1-inventory.md`）；
    `Send + Sync` 断言；打开/保存/重开契约测试。
 3. **Phase 2**：DXF 导入；DXF 导出 + L1 不动点；报告落盘；**脏分片 raw-copy +
-   `sha256_c` 校验 + live entry 集合**；撤销/恢复快照生命周期；冲突检测。
+   `sha256_c` 校验 + live entry 集合**（`sha256_c` 的可计算/可校验由
+   [ADR-0046](0046-ymodel-zstd-entry-codec.md) 交付）；撤销/恢复快照生命周期；冲突检测。
 4. **Phase 3**：DWG 导入 + `raw/source` + L0 直通；单位/比例；兼容性弹窗；
    acadrust 源 span 可行性验证；Web 保存实测。
 5. **Phase 4**：dynamic class 注册 + STEP/SKP mesh 连接器；RVT 不变。
@@ -458,7 +469,8 @@ SAF copy-in 仍在。JSON+zip 的 O(doc) 保存被 raw-copy 压到"O(脏分片) 
 ## 4. 依赖与许可
 
 - `zip`（MIT）、`serde_json`（MIT/Apache-2.0）、`sha2`（MIT/Apache-2.0）、
-  `flate2`/`miniz_oxide`（纯 Rust 路径）。全部纯 Rust，可编 wasm。
+  `structured-zstd =0.4.3`（Apache-2.0，纯 Rust，RFC 8878 编解码）、
+  `flate2`/`miniz_oxide`（纯 Rust，只用于读 foreign deflate 条目）。全部纯 Rust，可编 wasm。
   新增依赖记入 `THIRD_PARTY_NOTICES.md`。
 - 不新增 `[patch.crates-io]` 键；无 C 工具链依赖。
 

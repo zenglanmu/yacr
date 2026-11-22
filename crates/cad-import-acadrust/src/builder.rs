@@ -67,7 +67,12 @@ impl<'a> ImporterBuilder<'a> {
             xref_causes: HashMap::new(),
             xref_pending: BTreeSet::new(),
             xref_recorded: BTreeSet::new(),
-            next_block: 0,
+            // Never a reserved id: sequence 0 of every family belongs to model
+            // space in the `.ymodel` format (ADR-0037 D5), and the `cad-db`
+            // builder allocator starts at 1 for the same reason. `read_blocks`
+            // overwrites this before any splice allocates, so the value here only
+            // matters if a caller builds block rows without reading the table.
+            next_block: 1,
             next_layer: 0,
             xref_layer_names: HashMap::new(),
             block_entities: HashMap::new(),
@@ -662,7 +667,12 @@ impl<'a> ImporterBuilder<'a> {
     }
 
     pub(crate) fn read_blocks(&mut self) -> CadResult<()> {
-        let mut next = 0u128;
+        // Block ids start at 1, not 0: sequence 0 is reserved by the `.ymodel`
+        // format (`ModelKey::from_persistent` refuses `BlockModel` seq 0 because
+        // it is model space's id), and the `cad-db` builder allocator
+        // (`next_block_id`) also starts at 1. Names, order and the `block_ids`
+        // lookup are unaffected; only the numeric ids are shifted by one.
+        let mut next = 1u128;
         for block in self.acad.block_records.iter() {
             if is_space_block_name(&block.name) {
                 continue;

@@ -31,7 +31,12 @@
   分发前需做完整依赖审计。
 - cadmpeg-codec-step 0.6.12：ISO 10303-21（STEP，AP203/AP214/AP242）Part 21 解码器，
   Apache-2.0，上游 <https://github.com/cadmpeg/cadmpeg>。仅由 `cad-import-step` 依赖；未修改。
-- cadmpeg-ir 0.6.12：cadmpeg 的中立 CAD IR（拓扑、单位、产品/occurrence、loss 报告与
+- structured-zstd 0.4.3：纯 Rust 的 RFC 8878 zstd 编解码器，Apache-2.0，上游
+  <https://github.com/structured-world/structured-zstd>。仅由 `cad-store-zip` 依赖，
+  用于 `.ymodel` JSON 条目的 zstd 帧；workspace 中**精确固定**（`=0.4.3`），
+  `default-features = false, features = ["std"]`（不引入 CLI、字典训练、legacy 解码或
+  SIMD kernel 依赖），可编 `wasm32-unknown-unknown`。未修改上游源码、无 Cargo patch。
+  其输出是标准 zstd 帧，C `zstd` / `ruzstd` 均可读取；实际版本与许可证见 Cargo.lock。- cadmpeg-ir 0.6.12：cadmpeg 的中立 CAD IR（拓扑、单位、产品/occurrence、loss 报告与
   `Codec` 契约），Apache-2.0，同一上游。仅由 `cad-import-step` 直接依赖（`Codec`/
   `DecodeOptions` 定义在此 crate，不在 codec crate）；未修改。
 - cadmpeg-tessellate 0.6.12：cadmpeg 的 B-rep 逐面三角化器，Apache-2.0，同一上游。

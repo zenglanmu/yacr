@@ -9,6 +9,8 @@
 //! Kept in its own file because `tests/archive.rs` is at the 1000-line gate; it
 //! needs only the public store/db API plus `zip` to read the manifest.
 
+mod common;
+
 use std::io::{Cursor, Read};
 use std::sync::Arc;
 
@@ -25,6 +27,8 @@ use cad_domain::{
     BundledKind, DatabaseId, DocumentIdentity, EntityId, Revision, Unit, UnitContext,
 };
 use cad_store_zip::{ZipDocumentStore, MANIFEST_ENTRY};
+
+use common::with_manifest;
 
 fn header() -> DocumentHeader {
     DocumentHeader {
@@ -254,40 +258,17 @@ fn a_document_with_relations_writes_minor_seven() {
     assert_eq!(minor_of(&write_bytes(&loaded.snapshot)), 7);
 }
 
-/// Rewrite `manifest.format.minor`, leaving every other entry untouched.
+/// Restamp `manifest.format` to `read: 2, minor: <minor>`, leaving every entry
+/// payload untouched.
+///
+/// Every fixture here is a v2 archive: the read version stays `2`, so only the
+/// minor tier differs from what this build writes. In particular the minor-6
+/// read-only fixture must still read as a v2 container.
 fn with_minor(bytes: &[u8], minor: u64) -> Vec<u8> {
-    use std::io::Write;
-
-    use zip::write::SimpleFileOptions;
-
-    let mut archive = ZipArchive::new(Cursor::new(bytes.to_vec())).expect("zip");
-    let mut entries = Vec::new();
-    for index in 0..archive.len() {
-        let mut file = archive.by_index(index).expect("entry");
-        let name = file.name().expect("name").to_string();
-        let mut body = Vec::new();
-        file.read_to_end(&mut body).expect("body");
-        entries.push((name, body));
-    }
-    let mut patched = Vec::new();
-    {
-        let mut writer = zip::ZipWriter::new(Cursor::new(&mut patched));
-        let options = SimpleFileOptions::default()
-            .compression_method(zip::CompressionMethod::Deflated)
-            .last_modified_time(zip::DateTime::default());
-        for (name, body) in &entries {
-            writer.start_file(name.as_str(), options).expect("start");
-            if name == MANIFEST_ENTRY {
-                let mut manifest: Value = serde_json::from_slice(body).expect("json");
-                manifest["format"]["minor"] = Value::from(minor);
-                serde_json::to_writer(&mut writer, &manifest).expect("manifest");
-            } else {
-                writer.write_all(body).expect("body");
-            }
-        }
-        writer.finish().expect("finish");
-    }
-    patched
+    with_manifest(bytes, |manifest| {
+        manifest["format"]["read"] = Value::from(2);
+        manifest["format"]["minor"] = Value::from(minor);
+    })
 }
 
 #[test]

@@ -8,11 +8,9 @@
 //! The fixture keeps one entity in shard 0 (sequence 1) and one in shard 1
 //! (sequence 2048): two shards, so "copy the untouched one" is observable.
 
-use std::io::{Cursor, Read, Write};
+mod common;
 
 use serde_json::Value;
-use zip::write::SimpleFileOptions;
-use zip::{CompressionMethod, DateTime, ZipArchive, ZipWriter};
 
 use cad_db::{
     ChangeScope, DbEntity, DbObject, DocumentSnapshot, DocumentStore, DrawingDatabase,
@@ -23,7 +21,9 @@ use cad_domain::{
     DatabaseId, DocumentIdentity, EntityId, LayerId, LayoutId, Point3, Revision, SemanticGeometry,
     SpaceId, UnitContext,
 };
-use cad_store_zip::{ZipDocumentStore, MANIFEST_ENTRY};
+use cad_store_zip::ZipDocumentStore;
+
+use common::{assemble, explode};
 
 // ---------------------------------------------------------------- fixtures ---
 
@@ -114,54 +114,6 @@ fn shard_path(shard: u64) -> String {
     )
 }
 
-/// Every entry of `bytes` except `manifest.json`, plus the parsed manifest.
-fn explode(bytes: &[u8]) -> (Vec<(String, Vec<u8>)>, Value) {
-    let mut archive = ZipArchive::new(Cursor::new(bytes)).expect("zip archive");
-    let mut entries = Vec::new();
-    for index in 0..archive.len() {
-        let mut file = archive.by_index(index).expect("entry");
-        let name = file.name().expect("entry name").to_string();
-        let mut body = Vec::new();
-        file.read_to_end(&mut body).expect("entry body");
-        if name != MANIFEST_ENTRY {
-            entries.push((name, body));
-        }
-    }
-    let mut manifest_file = archive.by_name(MANIFEST_ENTRY).expect("manifest");
-    let mut manifest_bytes = Vec::new();
-    manifest_file
-        .read_to_end(&mut manifest_bytes)
-        .expect("manifest body");
-    (
-        entries,
-        serde_json::from_slice(&manifest_bytes).expect("manifest json"),
-    )
-}
-
-fn zip_options() -> SimpleFileOptions {
-    SimpleFileOptions::default()
-        .compression_method(CompressionMethod::Deflated)
-        .last_modified_time(DateTime::default())
-}
-
-/// Rebuild an archive from `entries` plus `manifest`, manifest last.
-fn assemble(entries: &[(String, Vec<u8>)], manifest: &Value) -> Vec<u8> {
-    let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
-    let mut sorted: Vec<&(String, Vec<u8>)> = entries.iter().collect();
-    sorted.sort_by(|left, right| left.0.cmp(&right.0));
-    for (name, body) in sorted {
-        writer
-            .start_file(name.as_str(), zip_options())
-            .expect("start");
-        writer.write_all(body).expect("body");
-    }
-    writer
-        .start_file(MANIFEST_ENTRY, zip_options())
-        .expect("start manifest");
-    serde_json::to_writer(&mut writer, manifest).expect("manifest body");
-    writer.finish().expect("finish").into_inner()
-}
-
 fn manifest_of(bytes: &[u8]) -> Value {
     explode(bytes).1
 }
@@ -175,11 +127,17 @@ fn entry_record<'a>(manifest: &'a Value, path: &str) -> &'a Value {
         .unwrap_or_else(|| panic!("no manifest record for {path}"))
 }
 
-/// The three verified fields of one entry's manifest record.
-fn checksum(record: &Value) -> (Value, Value, Value) {
+/// The verified fields of one entry's manifest record.
+///
+/// Both digests and both lengths are included: a v2 modelled entry records the
+/// logical pair (`sha256`/`len`) and the stored-payload pair (`sha256_c`/`len_c`),
+/// and a raw copy must inherit all of them unchanged.
+fn checksum(record: &Value) -> (Value, Value, Value, Value, Value) {
     (
         record["sha256"].clone(),
+        record["sha256_c"].clone(),
         record["len"].clone(),
+        record["len_c"].clone(),
         record["crc"].clone(),
     )
 }
@@ -194,6 +152,23 @@ fn corrupt_record(bytes: &[u8], path: &str) -> Vec<u8> {
         .find(|record| record["path"] == path)
         .unwrap_or_else(|| panic!("no manifest record for {path}"));
     record["sha256"] = Value::String("f".repeat(64));
+    assemble(&entries, &manifest)
+}
+
+/// Break only the **stored-payload** digest of one entry.
+///
+/// The frame and every other record field stay valid, so a reader that checked
+/// the logical hash first (or decoded before hashing the payload) would accept
+/// the archive. Refusing it proves `sha256_c` is verified before decompression.
+fn corrupt_stored_record(bytes: &[u8], path: &str) -> Vec<u8> {
+    let (entries, mut manifest) = explode(bytes);
+    let record = manifest["entries"]
+        .as_array_mut()
+        .expect("manifest entries")
+        .iter_mut()
+        .find(|record| record["path"] == path)
+        .unwrap_or_else(|| panic!("no manifest record for {path}"));
+    record["sha256_c"] = Value::String("f".repeat(64));
     assemble(&entries, &manifest)
 }
 
@@ -426,4 +401,39 @@ fn a_corrupt_previous_record_fails_the_reopened_archive() {
     // does not describe them; the reader verifies instead of trusting the copy.
     let error = read_archive(&second).expect_err("a wrong recorded hash must fail the open");
     assert_eq!(error.marker, markers::INVALID_DOCUMENT, "{error}");
+}
+
+/// Only the stored-payload digest is wrong: the pre-decompression check refuses it.
+#[test]
+fn a_wrong_stored_digest_is_refused_before_decompression() {
+    let (first, _) = {
+        let db = database(&[(1, 10.0), (2048, 20.0)]);
+        let snapshot = snapshot_of(&db, Revision(7));
+        write_snapshot(
+            &mut ZipDocumentStore::new(),
+            &snapshot,
+            &ChangeScope::default(),
+        )
+    };
+    let corrupted = corrupt_stored_record(&first, &shard_path(1));
+
+    // Save with the untouched shard 1 copied from the corrupt source record.
+    let db = database(&[(1, 30.0), (2048, 20.0)]);
+    let snapshot = snapshot_of(&db, Revision(8));
+    let mut dirty = ChangeScope::default();
+    dirty.element_in(ModelKey::ModelSpace, 1);
+
+    let mut store = ZipDocumentStore::new().with_previous(Some(corrupted));
+    let (second, report) = write_snapshot(&mut store, &snapshot, &dirty);
+    assert_eq!(report.entries_copied, 1, "{report:?}");
+
+    // The frame still decodes to bytes whose logical `sha256`/`len` match the
+    // record; only `sha256_c` is a lie, so the stored-payload check must be what
+    // refuses the open (before any frame is decompressed).
+    let error = read_archive(&second).expect_err("a wrong stored digest must fail the open");
+    assert_eq!(error.marker, markers::INVALID_DOCUMENT, "{error}");
+    assert!(
+        error.to_string().contains("stored payload"),
+        "the pre-decompression check must be what refused it: {error}"
+    );
 }

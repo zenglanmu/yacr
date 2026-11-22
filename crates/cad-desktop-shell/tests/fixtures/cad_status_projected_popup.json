@@ -29,6 +29,7 @@
     "surfaceMode": "native-below"
   },
   "hoverPreview": false,
+  "iblEnabled": false,
   "images": [],
   "importCount": 0,
   "importProgress": null,

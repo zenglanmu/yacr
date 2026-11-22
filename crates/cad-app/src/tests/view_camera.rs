@@ -917,3 +917,62 @@ fn document_is_3d_detects_bodies_and_depth_but_not_a_flat_xy_drawing() {
     // A missing document is `false`, never a panic.
     assert!(!app.document_is_3d(DocumentId(99)));
 }
+
+/// A conic in the XY plane (or a deliberately tilted one) with the demo's size.
+fn conic(normal: Point3) -> cad_db::DbEntity {
+    cad_db::DbEntity {
+        object: cad_db::DbObject {
+            id: ObjectId(7),
+            type_key: "AcDbCircle".into(),
+            revision: Revision(0),
+            source_handle: None,
+        },
+        id: EntityId(7),
+        layer: LayerId(0),
+        space: SpaceId::Model,
+        geometry: SemanticGeometry::Circle {
+            center: Point3 {
+                x: 2000.0,
+                y: 1500.0,
+                z: 0.0,
+            },
+            normal,
+            radius: 800.0,
+        },
+        draw_order: 0,
+    }
+}
+
+/// Regression: `DrawingDatabase::bounds` is a **culling** bound that inflates a
+/// plan circle to a sphere (`center ± radius` in z). A flat drawing with one
+/// circle must still keep the plan default — the demo database is exactly that
+/// shape (plan lines + a plan circle + a bulge polyline).
+#[test]
+fn a_planar_conic_does_not_make_a_flat_drawing_three_dimensional() {
+    let (mut app, _session) = application_with_document();
+
+    set_document_entities(
+        &mut app,
+        vec![conic(Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 1.0,
+        })],
+    );
+    assert!(
+        !app.document_is_3d(DocumentId(1)),
+        "a circle in the XY plane is a plan drawing; only the culling bound \
+         gives it a z extent"
+    );
+
+    // The same circle tilted out of the XY plane is genuinely 3D.
+    set_document_entities(
+        &mut app,
+        vec![conic(Point3 {
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
+        })],
+    );
+    assert!(app.document_is_3d(DocumentId(1)));
+}

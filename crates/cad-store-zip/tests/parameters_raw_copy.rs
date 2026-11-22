@@ -7,6 +7,8 @@
 //! the edited shard would be copied from the first archive and the reopened
 //! radius would still be the old value.
 
+mod common;
+
 use cad_db::{
     ChangeScope, DbEntity, DbObject, DocumentSnapshot, DocumentStore, DrawingDatabase,
     DrawingDatabaseBuilder, Layer, Layout, MemorySink, MemorySource, ParamBindingPatch, ParamPatch,

@@ -184,10 +184,10 @@ pins the regression directly.
 
 ## 8. Open items
 
-1. `manifest.sha256_c` cannot be computed or verified with `zip` 9.5.0 (crate-private raw reader),
-   so it is carried through from the previous manifest and marked unverified; every entry is
-   verified on its decompressed `sha256` + `len` + CRC instead. Dropping the field needs a minor
-   bump — decide in Phase 2.
+1. ~~`manifest.sha256_c` cannot be computed or verified with `zip` 9.5.0~~ — **closed by
+   ADR-0046**: JSON entries are compressed in-process before the zip write, so `sha256_c` is
+   written and verified before decompression. The field is retained; every entry is still also
+   verified on its decompressed `sha256` + `len`.
 2. `TableKind` has no `ALL` constant, so the store keeps its own mirror of `table_entry`; a new row
    table needs both, and a missed one is refused as `UNSUPPORTED_MINOR` rather than dropped.
 3. `snapshot/tables.rs` is at ~998 lines behind a `#[rustfmt::skip]` module, so `cargo fmt` cannot

@@ -1205,16 +1205,16 @@ Windows/macOS 的人工验收（本轮 **NOT VERIFIED**，无真机）：在真�
 
 ### ymodel 原生文档格式（2026-11-18，ADR-0037）
 
-`ymodel` 是本仓库的**原生**保存格式：zip 容器 + 分片 JSON + 保留的原始源字节。DWG / DXF /
-STEP / SKP 等一律是连接器格式（打开/另存为边界）。保真等级：**L0** 源字节保留（`revision ==
+`ymodel` 是本仓库的**原生**保存格式：zip 容器 + zstd 帧承载的分片 JSON + 保留的原始源字节。
+DWG / DXF / STEP / SKP 等一律是连接器格式（打开/另存为边界）。保真等级：**L0** 源字节保留（`revision ==
 manifest.open_revision` 且源字节仍在才同格式直通）、**L1** 已建模语义不动点、**L3** 视觉等同
 （**永不承诺**）。
 
 | 项 | 状态 | 证据 / 边界 |
 |---|---|---|
 | 文档模型与快照 | 已实现 | `cad-db` 323 测试；文档级不动点（`snapshot → hydrate → snapshot` 逐字段相等） |
-| 容器读写 | 已实现 | `cad-store-zip` 59 测试（29 unit + 17 archive + 7 fixed-point + 6 raw-copy）：manifest/哈希/长度/CRC、版本门禁（更高 `read`/`minor` 在解析其它 entry 之前拒绝）、foreign entry 原样保留、未变分片按压缩字节 raw-copy、两次保存字节相同、超预算 abort |
-| 增量保存（Phase 2 dirty-shard raw-copy） | 已实现（库层 + 宿主接线） | 宿主累积每个 commit 的 `ChangeScope`（命令、interaction、plugin commit、engine funnel）；保存以文档**自身**的上一个归档为 base：未触及分片 raw-copy、脏分片重编码、删除分片不复活、header/classes/models/tables 始终重写；打开/New/Close 与成功保存后清空累积范围。`cad-store-zip/tests/raw_copy.rs` 6 项 + `cad-app` dirty-scope 契约 4 项 + `cad-host/tests/ymodel.rs` 的保存范围断言。**边界**：`sha256_c` 仍不可计算/校验（`zip` 9.5.0），复制条目读侧按解压后 `sha256` + `len` + CRC 复核；**host FakeArchive → 真实 store 的端到端 narrowed-save 与真实大文件性能 NOT RUN**；X11 dom-canvas / Web / Android / Windows / macOS 的归档保存仍 `unsupported-runtime: ymodel` |
+| 容器读写 | 已实现 | `cad-store-zip` 契约测试（本轮见 `docs/validation-ymodel-zstd-2026-11-22.md`）：JSON 条目是 zip `Stored` 承载的标准 zstd 帧（`structured-zstd =0.4.3`，level 6），`textures`/`resources` 为 `Stored` raw；manifest 记 `codec`/`len`/`len_c`/`sha256`/`sha256_c`/CRC；版本门禁只接受 `read == 2`（旧归档 `unsupported_version`）、更高 `minor` 拒绝、foreign entry 原样保留、未变分片按压缩字节 raw-copy、两次保存字节相同、超预算 abort |
+| 增量保存（Phase 2 dirty-shard raw-copy） | 已实现（库层 + 宿主接线） | 宿主累积每个 commit 的 `ChangeScope`（命令、interaction、plugin commit、engine funnel）；保存以文档**自身**的上一个归档为 base：未触及分片 raw-copy、脏分片重编码、删除分片不复活、header/classes/models/tables 始终重写；打开/New/Close 与成功保存后清空累积范围。`cad-store-zip/tests/raw_copy.rs` 6 项 + `cad-app` dirty-scope 契约 4 项 + `cad-host/tests/ymodel.rs` 的保存范围断言。**边界**：`sha256_c`/`len_c` 由 ADR-0046 写入并在解压前校验；复制条目继承上一归档的完整记录（含真实 `sha256_c`）；**host FakeArchive → 真实 store 的端到端 narrowed-save 与真实大文件性能 NOT RUN**；X11 dom-canvas / Web / Android / Windows / macOS 的归档保存仍 `unsupported-runtime: ymodel` |
 | 文件级往返 | 已实现 | `cad-store-zip/tests/document_fixed_point.rs` 7 项（含 layout 与 block 序列相同的碰撞回归）；`apps/app-linux/tests/ymodel_round_trip.rs` 走真实适配器 |
 | 原生打开/保存（Linux） | 已接线 | `cad-host` 的 `ymodel` 契约 11 项（全 crate 398 测试内）：安装文档、缺适配器拒绝、损坏归档不破坏当前文档、保存推进 `saved_revision`、外部修改拒绝、保存目的按源格式选择、第二次保存只携带增量范围、Save As 保留源归档与范围。保存前把上一版留在 `<name>.bak`（硬链接，失败回退复制；首存不建；配置写入不建），失败只告警不阻断——重命名本身仍是原子的 |
 | 自动恢复快照 | 已接线（仅 Linux 载体） | 脏文档**默认每 60 s**（选项里可改，0 = 关闭）把**同一份** `.ymodel` 写到 `<config>/recovery/<key>.ymodel`（+ 同名 `.json` 记录），从不触碰文档本身；成功保存后丢弃；安装文档时 `record.revision <= saved_revision` 判为过期并丢弃；只有严格更新才通过 `cad_status.error` 的一次性横幅告知（`recovery.available`，指向可用 `OPEN` 打开的恢复文件）。13 项 host 契约 + 8 项 Linux 存储 + 2 项 wire + 2 项命令接缝 + 7 项前端测试；单快照上限 512 MiB。**欢迎页**：无 `--open` 启动时进入无文档状态（`StartDocument::Empty`），恢复快照与最近文件一起列在开始页，点击按**key**打开（UI 不接触路径）。**边界**：`File > Revert` 仍未做；Web/Android 无恢复快照；真实崩溃恢复、横幅在真实窗口中的呈现 **NOT RUN** |
@@ -1226,10 +1226,11 @@ manifest.open_revision` 且源字节仍在才同格式直通）、**L1** 已建�
 | 真实窗口内保存/重开 | **NOT RUN** | 只有库层与 carrier 契约证据；无 agent 侧 GUI 操作 |
 | 性能（打开 / 保存 / 峰值磁盘） | **NOT RUN** | ADR-0037 D17 的门槛数字未测量 |
 
-已知格式限制（记录在 ADR，不是待办猜测）：`manifest.sha256_c`（压缩字节哈希）在 `zip` 9.5.0
-上**无法计算或校验**，因此每个 entry 改验解压后的 `sha256` + `len` + CRC；`tables/*.json` 的
-行表（图层/块/样式/线型/比例/布局/页面设置/xref）是 v1 的**显式存储偏差**，对象模型里它们仍是
-DefinitionElement。
+已知格式限制（记录在 ADR，不是待办猜测）：ADR-0046 起 JSON 条目在 zip 内是标准 zstd 帧，
+**不是**可直接 `unzip -p` 读的明文；外部检查需 `unzip -p … | zstd -d`（manifest 仍是明文）。
+`sha256_c`/`len_c` 已写入并在解压前校验，不再有"压缩字节哈希不可计算"的限制。
+`tables/*.json` 的行表（图层/块/样式/线型/比例/布局/页面设置/xref）是 v1 的**显式存储偏差**，
+对象模型里它们仍是 DefinitionElement。
 
 ### 插件管理器载体矩阵（2026-11-05）
 

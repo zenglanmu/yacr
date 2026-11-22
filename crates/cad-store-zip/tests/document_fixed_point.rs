@@ -15,12 +15,11 @@
 //! attributes) so the fixed-point test cannot pass by writing a near-empty
 //! document.
 
+mod common;
+
 use std::collections::BTreeMap;
-use std::io::{Cursor, Read, Write};
 
 use serde_json::Value;
-use zip::write::SimpleFileOptions;
-use zip::{CompressionMethod, DateTime, ZipArchive, ZipWriter};
 
 use cad_db::{
     BimDefinition, BimDefinitions, BimElement, BimEvidence, BimProperty, BimPropertySet, BimSource,
@@ -36,7 +35,9 @@ use cad_domain::{
     LinetypeId, MLeaderStyleId, ObjectId, Point3, Revision, ScaleId, SemanticGeometry, SpaceId,
     StyleId, TransactionId, Transform3, UnitContext,
 };
-use cad_store_zip::{ZipDocumentStore, MANIFEST_ENTRY};
+use cad_store_zip::ZipDocumentStore;
+
+use common::{assemble, explode};
 
 const FOREIGN_PATH: &str = "raw/source-17.bin";
 const FOREIGN_BODY: &[u8] = b"\x00\x01opaque source bytes\xff";
@@ -312,36 +313,6 @@ fn round_trip(db: &DrawingDatabase) -> DrawingDatabase {
 
 // ------------------------------------------------------------ archive surgery ---
 
-fn zip_options(method: CompressionMethod) -> SimpleFileOptions {
-    SimpleFileOptions::default()
-        .compression_method(method)
-        .last_modified_time(DateTime::default())
-}
-
-/// Every entry of `bytes` as `(name, body)`, plus the parsed manifest.
-fn explode(bytes: &[u8]) -> (Vec<(String, Vec<u8>)>, Value) {
-    let mut archive = ZipArchive::new(Cursor::new(bytes)).expect("zip archive");
-    let mut entries = Vec::new();
-    for index in 0..archive.len() {
-        let mut file = archive.by_index(index).expect("entry");
-        let name = file.name().expect("entry name").to_string();
-        let mut body = Vec::new();
-        file.read_to_end(&mut body).expect("entry body");
-        if name != MANIFEST_ENTRY {
-            entries.push((name, body));
-        }
-    }
-    let mut manifest_file = archive.by_name(MANIFEST_ENTRY).expect("manifest");
-    let mut manifest_bytes = Vec::new();
-    manifest_file
-        .read_to_end(&mut manifest_bytes)
-        .expect("manifest body");
-    (
-        entries,
-        serde_json::from_slice(&manifest_bytes).expect("manifest json"),
-    )
-}
-
 /// Add an entry this build does not model to `base`, leaving it unlisted.
 ///
 /// This is the `listed: false` shape of `tests/archive.rs::with_foreign`: the
@@ -350,25 +321,9 @@ fn explode(bytes: &[u8]) -> (Vec<(String, Vec<u8>)>, Value) {
 fn with_unlisted_entry(base: &[u8], path: &str, body: &[u8]) -> Vec<u8> {
     let (mut entries, manifest) = explode(base);
     entries.push((path.to_string(), body.to_vec()));
-    entries.sort_by(|left, right| left.0.cmp(&right.0));
-
-    let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
-    for (name, entry_body) in &entries {
-        let method = if name.as_str() == path {
-            CompressionMethod::Stored
-        } else {
-            CompressionMethod::Deflated
-        };
-        writer
-            .start_file(name.as_str(), zip_options(method))
-            .expect("start entry");
-        writer.write_all(entry_body).expect("entry body");
-    }
-    writer
-        .start_file(MANIFEST_ENTRY, zip_options(CompressionMethod::Deflated))
-        .expect("start manifest");
-    serde_json::to_writer(&mut writer, &manifest).expect("manifest body");
-    writer.finish().expect("finish").into_inner()
+    // `assemble` writes the unlisted entry `Stored` verbatim and frames the
+    // modelled JSON entries; the unchanged manifest still describes those.
+    assemble(&entries, &manifest)
 }
 
 // ------------------------------------------------------------------ tests ---

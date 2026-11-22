@@ -56,12 +56,12 @@ members = [
 [workspace.package]
 version = "0.1.16"
 edition = "2021"
-# True MSRV floor, not a preference: `cadmpeg-ir`/`cadmpeg-codec-step`/
-# `cadmpeg-tessellate` 0.6.12 declare `rust-version = "1.88"` and `rvt` 0.24.0
-# declares `1.87`, so no lower workspace claim can be honest. Every crate takes
+# True MSRV floor, not a preference: `structured-zstd` 0.4.3 (the entry payload
+# codec, ADR-0046) declares `rust-version = "1.92"`, above `cadmpeg-*` 0.6.12
+# (1.88) and `rvt` 0.24.0 (1.87), so 1.92 is the honest floor. Every crate takes
 # this single value via `rust-version.workspace = true`; do not re-declare it per
 # crate. The pinned toolchain (`rust-toolchain.toml`, 1.99.1) is unrelated.
-rust-version = "1.88"
+rust-version = "1.92"
 # Must match `LICENSE` (AGPL-3.0). The previous `Apache-2.0 OR MIT` here was a
 # stale field contradicting the repository licence; every crate inherits this
 # value via `license.workspace = true`. AGPL-3.0 may combine with GPL-3.0 code
@@ -122,7 +122,11 @@ acadrust = { version = "0.6.8", features = ["serde", "import"] }
 wgpu = "=30.0.2"
 glam = { version = "0.34", features = ["serde", "bytemuck"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["raw_value"] }
+# `float_roundtrip` parses decimal floats to the nearest f64 exactly. Without it the
+# fast parser can shift the last bits, which made `.ymodel` snapshots compare unequal
+# after a save/read of real geometry (the entry hashes still matched; the parsed
+# document drifted). This is a correctness feature, not a performance knob.
+serde_json = { version = "1", features = ["raw_value", "float_roundtrip"] }
 thiserror = "2"
 uuid = { version = "1", features = ["v4", "serde", "js"] }
 bytemuck = { version = "1", features = ["derive"] }
@@ -132,6 +136,13 @@ getrandom = { version = "0.3", features = ["wasm_js"] }
 time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
 ttf-parser = "0.25"
 flate2 = "1"
+# `.ymodel` entry payload codec (ADR-0046): pure-Rust RFC 8878 zstd, used by
+# `cad-store-zip` to write one frame per modelled JSON entry into a zip `Stored`
+# entry. Pinned exactly and taken with `std` only (no encoder SIMD kernels, no
+# dictionaries, no legacy frames): the archive's output bytes are a function of
+# (pinned version, level, feature set, input), so all three are format constants,
+# not tuning knobs. Changing any of them changes every saved archive.
+structured-zstd = { version = "=0.4.3", default-features = false, features = ["std"] }
 encoding_rs = "0.8"
 # Headless (native) software-Vulkan render path: blocking on wgpu's async
 # adapter/device requests, and encoding the offscreen frame to PNG.

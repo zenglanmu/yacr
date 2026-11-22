@@ -1,4 +1,10 @@
-//! The `.ymodel` archive store: zip container + sharded JSON (ADR-0037 D11/D12).
+//! The `.ymodel` archive store: zip container + zstd-frame JSON (ADR-0037
+//! D11/D12).
+//!
+//! The crate name is historical: the container is still zip (one entry per
+//! table/shard/blob), but a modelled JSON entry's payload is one RFC 8878 zstd
+//! frame in a zip `Stored` entry, not deflated JSON. [`crate::codec`] owns that
+//! frame codec; `manifest.json` says which codec each entry uses.
 //!
 //! This crate is the only implementation of [`cad_db::DocumentStore`]. Its whole
 //! job is **bytes ⇄ [`DocumentSnapshot`]**: it never sees a
@@ -11,7 +17,7 @@
 //!
 //! ```text
 //! manifest.json                 -- the table of contents; always the LAST entry
-//! document.json                 -- DocumentHeader (units, identity, id counters)
+//! document.json                 -- DocumentHeader (zstd frame)
 //! schema/classes.json           -- the class registry materialised from CAD_DOMAIN
 //! tables/models.json            -- Vec<ModelRecord>
 //! tables/<table>.json           -- one per present TableKind (cad_db::table_entry)
@@ -20,6 +26,15 @@
 //! resources/<kind>/<key>        -- bundled font/xref/image payloads (ADR-0040 D1)
 //! raw/<anything>                -- foreign/preserved entries (never parsed)
 //! ```
+//!
+//! Every entry this build **encodes** is written as a zip `Stored` entry; a
+//! foreign entry is copied with its original compression method (it is opaque and
+//! never decoded). The per-entry `codec` field in the manifest says how to
+//! interpret the stored payload: `zstd` (a zstd frame holding the JSON bytes; all
+//! modelled JSON entries), `raw` (the bytes verbatim: `textures/<key>`,
+//! `resources/<kind>/<key>`) or `opaque` (a foreign/unmodelled entry: never
+//! decoded, only copied). `manifest.json` itself is plain JSON in a `Stored`
+//! entry.
 //!
 //! `tables/resources.json` is a plain row array mapping a logical name to one of
 //! those `resources/<kind>/<key>` entries (ADR-0040 D4). A resource key is the
@@ -31,36 +46,36 @@
 //!
 //! # Integrity
 //!
-//! Every entry the build models records, in the manifest:
+//! Every entry this build models records, in the manifest:
 //!
-//! * `sha256` — lowercase hex of the **uncompressed** bytes (the format
-//!   contract: any reader can recompute it);
-//! * `len` — the uncompressed length;
-//! * `crc` — the zip CRC-32 of the uncompressed bytes (cross-checked against the
-//!   central directory on read);
-//! * `sha256_c` — lowercase hex of the **compressed** bytes, or `null`.
+//! * `codec` — `zstd`, `raw` or `opaque` (see above);
+//! * `sha256` — lowercase hex of the **logical** bytes (after decoding);
+//! * `len` — the logical length;
+//! * `sha256_c` — lowercase hex of the **stored** payload, present for every
+//!   modelled entry and `null` exactly for `opaque` ones;
+//! * `len_c` — the stored payload's length, i.e. the zip entry's `compressed_size`;
+//! * `crc` — the zip CRC-32 the central directory records for the entry. For every
+//!   entry this build encodes (`Stored`) that is the CRC of the stored payload; a
+//!   copied foreign entry keeps whatever value its writer recorded.
 //!
-//! `sha256_c` is `Option` on purpose. Encoding streams each entry through the zip
-//! writer, so the compressed bytes of an entry it *encodes* never exist as a
-//! buffer the store could hash: computing `sha256_c` would mean buffering the whole
-//! archive first, which the chunked-sink rule (ADR-0037 D16, the web memory
-//! budget) forbids. Freshly encoded entries therefore write `"sha256_c": null`.
-//! Raw-copied entries (a foreign blob, or an untouched shard in Phase 2) carry
-//! their compressed bytes over unchanged, but this build still cannot hash those
-//! bytes — `zip` keeps its raw reader crate-private — so a copied shard records
-//! `null` rather than claim a value it did not compute. (A foreign entry whose
-//! source manifest already recorded `sha256_c` keeps that value: it describes the
-//! very bytes being copied.) Every entry is verified on read by decompressing and
-//! checking `sha256`/`len`/CRC; a copy whose source record was corrupt therefore
-//! fails the open instead of being trusted.
+//! Because modelled entries are `Stored` and their payload is a buffer before it
+//! is written, the store can and does hash the stored bytes: `sha256_c` is
+//! computed on write and verified on read **before** the frame is decoded. The
+//! zstd frame also pledges its logical size, so the reader compares that with
+//! `len`, allocates exactly `len`, and requires the decode to fill it. A copy
+//! (`raw_copy_file`) carries the stored payload over unchanged, so the copied
+//! record — inherited verbatim from the source manifest — still describes the
+//! bytes in the new archive.
 //!
 //! # Determinism
 //!
 //! Two writes of the same snapshot produce byte-identical archives: entries are
-//! emitted in sorted path order, every zip entry gets [`zip::DateTime::default`],
-//! JSON entries are always `Deflated` and foreign copies are byte-identical.
-//! There is one apparent exception — `saved_at` — and it is handled by not being
-//! a clock: see [`ZipDocumentStore::with_saved_at`].
+//! emitted in sorted path order, every zip entry is `Stored` with
+//! [`zip::DateTime::default`], every JSON frame is produced by the pinned
+//! `structured-zstd` version at the format's fixed level ([`codec::ZSTD_LEVEL`]),
+//! and foreign copies are byte-identical. There is one apparent exception —
+//! `saved_at` — and it is handled by not being a clock: see
+//! [`ZipDocumentStore::with_saved_at`].
 //!
 //! # Foreign entries
 //!
@@ -75,12 +90,13 @@
 //! producing an archive that silently lost data (ADR-0037 D11).
 //!
 //! A preserved entry is still *checked*, just never interpreted: the manifest
-//! records its zip CRC and length, and opening the archive again verifies both
-//! against the central directory, so a corrupted preserved blob is refused
-//! instead of being carried forward. The payload itself is only compared when the
-//! source manifest already described it (`sha256_c`, copied verbatim); an entry
-//! that nobody described is measured once (`sha256`, `len`, `crc`) so the next
-//! archive records real values rather than placeholders.
+//! records its zip CRC, logical length and stored length, and opening the archive
+//! again verifies all three against the central directory, so a corrupted
+//! preserved blob is refused instead of being carried forward. The payload itself
+//! is hashed (`sha256`) when the source manifest did not describe it; a source
+//! record is inherited verbatim because the copied payload is unchanged. A
+//! preserved entry is `opaque` with `sha256_c: null`: this build never hashes a
+//! payload it does not decode.
 //!
 //! # Budget
 //!
@@ -89,6 +105,7 @@
 //! [`cad_db::ByteSink::abort`] the moment the budget is exceeded, so a browser
 //! never has to allocate the oversized archive first.
 
+mod codec;
 mod crc32;
 mod json;
 mod manifest;
@@ -98,6 +115,7 @@ mod previous;
 mod read;
 mod resources;
 mod schema;
+mod sink;
 mod write;
 
 use cad_db::{

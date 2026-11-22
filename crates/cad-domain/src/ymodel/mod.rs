@@ -50,13 +50,18 @@ pub use payload::{decode as decode_payload, encode as encode_payload, PayloadErr
 /// Container name written into `manifest.json`.
 pub const FORMAT_NAME: &str = "ymodel";
 
-/// Oldest/newest `Read.Write` versions this build understands.
+/// The `Read.Write` version this build understands. Read and write are equal:
+/// the gate is an **equality** gate tied to the entry codec (`codec.rs`/`read.rs`
+/// in `cad-store-zip`), not a minimum.
 ///
-/// `read` is the minimum version this build can open, `write` the version it
-/// emits. A document whose `manifest.format.read` is greater than
-/// [`FORMAT_READ`] is refused ([`markers::UNSUPPORTED_VERSION`]).
-pub const FORMAT_READ: u32 = 1;
-pub const FORMAT_WRITE: u32 = 1;
+/// `2` changed the payload of every modelled zip entry from deflated JSON to one
+/// RFC 8878 zstd frame in a `Stored` entry, and added the manifest's `codec` /
+/// `len_c` fields plus a `sha256_c` this build computes and verifies before
+/// decompression. A version-1 archive has a different entry codec this build does
+/// not carry, so it is refused with [`markers::UNSUPPORTED_VERSION`] and must be
+/// re-imported from its source document. `write` is the version it emits.
+pub const FORMAT_READ: u32 = 2;
+pub const FORMAT_WRITE: u32 = 2;
 
 /// Feature level inside one `Read.Write` version pair.
 ///
@@ -130,7 +135,8 @@ pub const FORMAT_MINOR: u32 = 11;
 /// carriers have no exit status, and the desktop hosts only map these onto
 /// exit code 8. Callers must match on the marker.
 pub mod markers {
-    /// `manifest.format.read` is newer than [`super::FORMAT_READ`].
+    /// `manifest.format.read` is not [`super::FORMAT_READ`] (an equality gate:
+    /// the archive uses an entry codec this build does not read).
     pub const UNSUPPORTED_VERSION: &str = "ymodel.unsupported_version";
     /// `manifest.format.minor` is newer than [`super::FORMAT_MINOR`].
     pub const UNSUPPORTED_MINOR: &str = "ymodel.unsupported_minor";
@@ -138,6 +144,16 @@ pub mod markers {
     pub const FOREIGN_ENTRIES_UNREADABLE: &str = "ymodel.foreign_entries_unreadable";
     /// The archive is malformed: missing entry, bad hash, bad size, bad JSON.
     pub const INVALID_DOCUMENT: &str = "ymodel.invalid_document";
+    /// A model key has no id this format can read back, so a save would write an
+    /// entry its own reader rejects.
+    ///
+    /// Sequence 0 belongs to model space: [`super::ModelKey::from_persistent`]
+    /// refuses a `PaperModel`/`BlockModel` id with sequence 0, which is exactly
+    /// what `Paper(LayoutId(0))`/`Block(BlockId(0))` encode. The writer refuses
+    /// such a snapshot up front (defense in depth: the allocators never issue 0)
+    /// instead of producing an `elements/…` or `tables/models.json` row no build
+    /// can decode. The detail names the entry path and the offending key.
+    pub const UNREPRESENTABLE_MODEL: &str = "ymodel.unrepresentable_model";
     /// The file on disk changed since it was opened (`sha256`/`mtime` drift).
     pub const CONFLICT: &str = "ymodel.conflict";
     /// Writing would exceed the carrier's serialization budget.

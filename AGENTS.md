@@ -175,11 +175,11 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
 - 退出码：`0` 成功、`1` 通用失败、`2` 后端策略错误、`3` postload-pan 驱动失败、`4` **历史** X11
   拒绝（不再产生）、`5` Windows 缺 WebView2、`6` dom-canvas 缺 WebGL2、`7` GPU 预算拒绝。
   分类以稳定标记行为第一依据。
-- **`.ymodel` 是原生保存格式**（zip 容器 + 分片 JSON）：`--open <x.ymodel>` 走
+- **`.ymodel` 是原生保存格式**（zip 容器 + zstd 帧承载的分片 JSON）：`--open <x.ymodel>` 走
   `cad_platform::DocumentArchive` 解码，**不经过 importer**；`SAVE` 对无源文档或 `.ymodel`
   源写 `.ymodel`，`.dwg` 源仍是实验性 DWG 导出，其它源仍是 DXF。归档拒绝用稳定标记
   `ymodel.*`（`unsupported_version` / `unsupported_minor` / `invalid_document` / `conflict` /
-  `foreign_entries_unreadable`）；**目前没有进程退出码映射**（ADR-0037 D13 的 `8` 只是计划）。
+  `foreign_entries_unreadable` / 写出侧 `unrepresentable_model`）；**目前没有进程退出码映射**（ADR-0037 D13 的 `8` 只是计划）。
   L0 源字节直通与 L1 不动点**都还没有证据**。保存是**显式保存 + 原子替换**；Phase 2 起
   保存以文档**自身**的上一个归档为 base，未触及分片按压缩字节 raw-copy、脏分片重编码，
   `ChangeScope` 由宿主累积（命令 / interaction / plugin commit / engine funnel），打开/New/Close
@@ -200,7 +200,9 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
   `Partial`；RVT/DGN `Unverified`），`FORMAT_MINOR` 升到 **7**（BIM 元素 6、关系 7，写入按文档取
   **4/5/7**，minor 6 为只读档）；参数化 ADR-0043 P0–P3 再升到 **11**（P0 参数表 + 元素 `params` 块 →
   8；P1 `neg/pow/fn/if` + `tables/configurations.json` → 9；P2 `tables/features.json` → 10；
-  P3 `tables/relations.json` → 11；写入按文档取 **4/5/7/8/9/10/11**）。`PARAM` 的 create/delete/
+  P3 `tables/relations.json` → 11；写入按文档取 **4/5/7/8/9/10/11**）。条目压缩自 ADR-0046 起是
+  标准 zstd 帧（zip `Stored` + `structured-zstd =0.4.3`，level 6），`FORMAT_READ/WRITE = 2`；
+  `read != 2` 的归档以 `unsupported_version` 拒绝，`sha256_c`/`len_c` 已写入并在解压前校验。`PARAM` 的 create/delete/
   rename/bind/unbind/config 与 `SETENTITYPROPERTY param.<name>` 是**命令层**实现（尚无 payload producer /
   UI / IPC 路径；生产可达的写入是属性面板的 `param.<name>`），`paramList` host-read 已接线；
   **P2/P3 只有 schema/状态机**：特征求值 `rel.not_implemented`、`voids`/`fills` 与 in-context 传播
