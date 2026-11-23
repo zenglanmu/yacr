@@ -29,7 +29,7 @@ members = [
     "crates/cad-connector-step",
     "crates/cad-import-ifc",
     "crates/cad-connector-dgn",
-    "crates/cad-import-rvt",
+    "crates/cad-connector-rvt",
     "crates/cad-import-skp",
     "crates/cad-import-gltf",
     "crates/cad-export-mesh",
@@ -97,7 +97,7 @@ cad-import-mesh = { path = "crates/cad-import-mesh" }
 cad-connector-step = { path = "crates/cad-connector-step" }
 cad-import-ifc = { path = "crates/cad-import-ifc" }
 cad-connector-dgn = { path = "crates/cad-connector-dgn" }
-cad-import-rvt = { path = "crates/cad-import-rvt" }
+cad-connector-rvt = { path = "crates/cad-connector-rvt" }
 cad-import-skp = { path = "crates/cad-import-skp" }
 cad-import-gltf = { path = "crates/cad-import-gltf" }
 # Writers above the neutral import/export contract. They read `cad-db` and

@@ -55,7 +55,7 @@ use cad_import_mesh::{OffImporter, PlyImporter};
 #[cfg(feature = "formats-mesh")]
 use cad_import_obj::ObjImporter;
 #[cfg(feature = "formats-rvt")]
-use cad_import_rvt::RvtImporter;
+use cad_connector_rvt::RvtImporter;
 #[cfg(feature = "formats-skp")]
 use cad_import_skp::SkpImporter;
 #[cfg(feature = "formats-step")]
@@ -81,7 +81,7 @@ pub use cad_import_mesh::{DESCRIPTOR_OFF, DESCRIPTOR_PLY};
 #[cfg(feature = "formats-mesh")]
 pub use cad_import_obj::DESCRIPTOR_OBJ;
 #[cfg(feature = "formats-rvt")]
-pub use cad_import_rvt::DESCRIPTOR_RVT;
+pub use cad_connector_rvt::DESCRIPTOR_RVT;
 #[cfg(feature = "formats-skp")]
 pub use cad_import_skp::DESCRIPTOR_SKP;
 #[cfg(feature = "formats-step")]

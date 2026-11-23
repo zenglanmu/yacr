@@ -176,7 +176,7 @@ mod tests {
         };
         match error {
             CadError::Unsupported(message) => assert!(
-                message.contains(cad_import_rvt::NO_GEOMETRY),
+                message.contains(cad_connector_rvt::NO_GEOMETRY),
                 "the RVT lane must answer: {message}"
             ),
             other => panic!("expected Unsupported, got {other:?}"),

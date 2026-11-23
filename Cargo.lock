@@ -693,6 +693,7 @@ version = "0.1.16"
 dependencies = [
  "cad-connector-acadrust",
  "cad-connector-dgn",
+ "cad-connector-rvt",
  "cad-connector-step",
  "cad-db",
  "cad-dependencies",
@@ -709,7 +710,6 @@ dependencies = [
  "cad-import-ifc",
  "cad-import-mesh",
  "cad-import-obj",
- "cad-import-rvt",
  "cad-import-skp",
  "cad-import-stl",
  "cad-kernel-adapter",
@@ -778,6 +778,20 @@ dependencies = [
  "cad-import-core",
  "cadkit-core",
  "cadkit-dgn",
+ "web-time",
+]
+
+[[package]]
+name = "cad-connector-rvt"
+version = "0.1.16"
+dependencies = [
+ "cad-db",
+ "cad-domain",
+ "cad-import-core",
+ "cfb 0.16.0",
+ "gltf",
+ "rvt",
+ "serde_json",
  "web-time",
 ]
 
@@ -990,20 +1004,6 @@ dependencies = [
  "cad-domain",
  "cad-import-core",
  "tobj",
- "web-time",
-]
-
-[[package]]
-name = "cad-import-rvt"
-version = "0.1.16"
-dependencies = [
- "cad-db",
- "cad-domain",
- "cad-import-core",
- "cfb 0.16.0",
- "gltf",
- "rvt",
- "serde_json",
  "web-time",
 ]
 
