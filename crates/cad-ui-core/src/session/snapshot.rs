@@ -27,6 +27,37 @@ impl CadSession {
         self.core.take_vendor_records()
     }
 
+    /// Take the semantics rows a `.ymodel` open owes one `YANS` pass
+    /// (ADR-0030 D8). `None` means this document has no such pass.
+    pub fn take_vendor_semantics(&self) -> Option<Vec<serde_json::Value>> {
+        self.core.take_vendor_semantics()
+    }
+
+    /// Persist one validated import-time `YANE` batch (host resolves handles).
+    pub fn apply_vendor_semantics(&self, rows: Vec<serde_json::Value>) -> Result<usize, String> {
+        self.core.apply_vendor_semantics(rows)
+    }
+
+    /// The last actual present count recorded through [`Self::note_frame`].
+    pub fn frames_presented(&self) -> u64 {
+        self.frames.get()
+    }
+
+    /// Whether the current authoritative document finished its open pipeline
+    /// (ADR-0030 D9): `false` while a vendor pass is still applying, so
+    /// `SAVE`/`EXPORT`/`PLOT` refuse by name. Not `loading`: NEW/OPEN stay
+    /// available so the user can cancel or switch files.
+    pub fn document_ready(&self) -> bool {
+        self.core.document_ready()
+    }
+
+    /// Mark the current authoritative document ready (or not) for writing.
+    /// Carriers flip this on the owner thread when their pipeline settles; the
+    /// next [`Self::snapshot`] projects the host value (no second authority).
+    pub fn set_document_ready(&self, ready: bool) {
+        self.core.set_document_ready(ready);
+    }
+
     pub fn snapshot(
         &self,
         backend: Option<String>,
@@ -208,20 +239,28 @@ impl CadSession {
             .as_ref()
             .map(|database| database.entity_count() as u64);
         let loading = self.core.loading();
+        // The current authoritative document's open-pipeline readiness (ADR-0030
+        // D9). A document-less session is never ready, so the start page and a
+        // closed document report `false` even though the host's own default is
+        // `true` (a published/blank document is ready until a vendor pass starts).
+        let document_ready = has_document && self.core.document_ready();
         let can_open = self.core.capabilities.open
             && (!self.core.options.headless || self.core.options.drawing.is_some())
             && !loading;
         // The document-dependent capabilities (NEW/SAVE/PLOT) are a pure
         // projection of the advertised host flags × the real session state: an
-        // open/import in flight gates all three, and SAVE/PLOT additionally
-        // need an authoritative document and no save/plot target chooser or
-        // export still pending (`HostCore::save_pending`, the same slot
-        // `request_save`/`request_plot` refuse on).
+        // open/import in flight gates all three, SAVE/PLOT additionally need an
+        // authoritative document, no save/plot target chooser or export still
+        // pending (`HostCore::save_pending`, the same slot
+        // `request_save`/`request_plot` refuse on) **and** a ready document (the
+        // vendor pass of a new open must finish first). NEW stays independent of
+        // readiness so the user can switch files.
         let capabilities = document_capabilities(
             self.core.capabilities,
             has_document,
             loading,
             self.core.save_pending(),
+            document_ready,
         );
         // A frame the caller did not measure falls back to the last real present
         // count the GPU lane recorded; nothing is invented either way.
@@ -310,6 +349,11 @@ impl CadSession {
             // The controller's own prompt state: a session with a pending plugin
             // prompt reports it, and the last invalid-input sentence with it.
             self.pending_prompt(),
+            // The open-pipeline gate (ADR-0030 D9): projected from the host, and
+            // no terminal summary is retained here yet (a carrier that tracks one
+            // overlays it; nothing is invented).
+            document_ready,
+            None,
         );
         // Real live open progress (running only) from the host snapshot, so the
         // chrome can show a determinate/indeterminate bar without inventing data.
@@ -318,6 +362,12 @@ impl CadSession {
             .import_snapshot()
             .as_ref()
             .and_then(CadImportProgress::from_snapshot);
+        // One open pipeline (ADR-0030 D9): while the connector import is live it
+        // *is* the current stage, and the document is not ready to write yet.
+        if let Some(import) = status.import_progress.as_ref() {
+            status.open_progress = Some(CadOpenProgress::from_import(import));
+            status.document_ready = false;
+        }
         // The opened source's connector provenance (ADR-0041 D5), read from the
         // document's own import report — the record a successful publish wrote
         // and New/Close/`install_snapshot` clear. Never derived from `label`

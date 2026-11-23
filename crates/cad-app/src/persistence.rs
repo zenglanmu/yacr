@@ -19,7 +19,7 @@ use cad_domain::Revision;
 use std::sync::Arc;
 
 /// The persistence state of one document slot.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PersistenceState {
     /// The revision last written to the document's file. `Revision(0)` for a
     /// document that has never been saved, which is also the revision a fresh
@@ -59,6 +59,19 @@ pub struct PersistenceState {
     /// connector-imported drawing — which is also the honest statement that
     /// "there is nothing to copy through or passthrough".
     pub archive_bytes: Option<Arc<[u8]>>,
+    /// Host-owned vendor semantics rows (ADR-0030 D7).
+    ///
+    /// Written to `tables/vendor.json`, not cad-db content: one row per imported
+    /// vendor entity, keyed by entity id, carrying the version-independent
+    /// class/status/attributes/params/refs/diagnostics model rather than the
+    /// vendor binary encoding. It stays on the document slot because the row
+    /// shape belongs to the vendor/plugin boundary, which `cad-db` never sees.
+    pub vendor_rows: Vec<serde_json::Value>,
+    /// Whether the rows loaded from a `.ymodel` still owe one semantics pass to
+    /// the WebView plugin (ADR-0030 D8). Runtime state, never written to the
+    /// archive: `install_snapshot` sets it, the owner tick's
+    /// `take_vendor_semantics` clears it. Imported documents start `false`.
+    pub vendor_semantics_pending: bool,
 }
 
 /// A fresh document identity.
@@ -82,6 +95,8 @@ impl PersistenceState {
             foreign_entries: Vec::new(),
             source_sha256: None,
             archive_bytes: None,
+            vendor_rows: Vec::new(),
+            vendor_semantics_pending: false,
         }
     }
 
@@ -99,6 +114,8 @@ impl PersistenceState {
             foreign_entries: Vec::new(),
             source_sha256: None,
             archive_bytes: None,
+            vendor_rows: Vec::new(),
+            vendor_semantics_pending: false,
         }
     }
 
@@ -106,6 +123,20 @@ impl PersistenceState {
     /// `revision != saved_revision`).
     pub fn is_dirty(&self, current: Revision) -> bool {
         current != self.saved_revision
+    }
+
+    /// Replace the host-owned vendor semantics rows (ADR-0030 D7).
+    ///
+    /// The caller (host/plugin boundary) owns the row shape and the save/load
+    /// filtering of orphans; this record only carries the rows to
+    /// `tables/vendor.json` and back.
+    pub fn set_vendor_rows(&mut self, rows: Vec<serde_json::Value>) {
+        self.vendor_rows = rows;
+    }
+
+    /// The host-owned vendor semantics rows, in archive order.
+    pub fn vendor_rows(&self) -> &[serde_json::Value] {
+        &self.vendor_rows
     }
 }
 
@@ -174,6 +205,8 @@ mod tests {
             foreign_entries: Vec::new(),
             source_sha256: None,
             archive_bytes: None,
+            vendor_rows: Vec::new(),
+            vendor_semantics_pending: false,
         };
         assert!(!state.is_dirty(Revision(2)));
         assert!(state.is_dirty(Revision(3)));

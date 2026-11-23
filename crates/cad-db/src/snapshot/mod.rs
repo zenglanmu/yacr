@@ -193,6 +193,9 @@ pub const fn table_entry(kind: TableKind) -> &'static str {
         // Self-authored in-context relations (ADR-0043 P3). Written only when
         // the table holds rows; minor-11 tier.
         TableKind::Relations => "tables/relations.json",
+        // Host-owned vendor semantics (ADR-0030 D7). Written only when the
+        // document really has vendor rows; minor-12 tier.
+        TableKind::Vendor => "tables/vendor.json",
     }
 }
 

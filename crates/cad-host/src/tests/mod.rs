@@ -48,6 +48,7 @@ mod queue;
 mod recent_files;
 mod recovery;
 mod render_batch;
+mod save_gate;
 mod save_resources;
 mod select;
 mod select_entities;

@@ -214,6 +214,65 @@ pub fn encode_records_frame(
     Ok(frame)
 }
 
+/// Host → plugin semantics frame magic (`"YANS"`, ADR-0030 D8).
+pub const SEMANTICS_REQUEST_MAGIC: u32 = 0x5941_4e53;
+/// Upper bound of one semantics frame (rows are JSON).
+pub const MAX_SEMANTICS_FRAME_BYTES: usize = 32 * 1024 * 1024;
+/// Upper bound of one semantics row.
+pub const MAX_SEMANTICS_ROW_BYTES: usize = 1024 * 1024;
+/// Upper bound of rows in one semantics frame.
+pub const MAX_SEMANTICS_ROWS: usize = 200_000;
+
+/// Encode the `tables/vendor.json` rows as one `YANS` frame.
+///
+/// The pass key is the row's `source.handle` (the same key as the records pass),
+/// so the existing `VendorRepresentationStore`/scene lookup stays unchanged. The
+/// table's `entity` id is persistence identity, not a pass key.
+pub fn encode_semantics_frame(
+    token: u64,
+    generation: u64,
+    rows: &[serde_json::Value],
+) -> Result<Vec<u8>, String> {
+    if rows.len() > MAX_SEMANTICS_ROWS {
+        return Err("vendor.semantics.too_many_rows".to_string());
+    }
+    let mut frame = Vec::with_capacity(28 + rows.len().saturating_mul(256));
+    frame.extend_from_slice(&SEMANTICS_REQUEST_MAGIC.to_le_bytes());
+    frame.extend_from_slice(&VENDOR_ABI_VERSION.to_le_bytes());
+    frame.extend_from_slice(&token.to_le_bytes());
+    frame.extend_from_slice(&generation.to_le_bytes());
+    frame.extend_from_slice(&(rows.len() as u32).to_le_bytes());
+    for row in rows {
+        let handle = row
+            .get("source")
+            .and_then(|source| source.get("handle"))
+            .and_then(serde_json::Value::as_str)
+            .and_then(parse_hex_handle)
+            .ok_or_else(|| "vendor.semantics.source_handle".to_string())?;
+        let bytes = serde_json::to_vec(row).map_err(|error| error.to_string())?;
+        if bytes.len() > MAX_SEMANTICS_ROW_BYTES {
+            return Err("vendor.semantics.row_too_large".to_string());
+        }
+        let length = u32::try_from(bytes.len()).map_err(|_| "vendor.semantics.row_too_large")?;
+        frame.extend_from_slice(&handle.to_le_bytes());
+        frame.extend_from_slice(&handle.to_le_bytes());
+        frame.extend_from_slice(&length.to_le_bytes());
+        frame.extend_from_slice(&bytes);
+        if frame.len() > MAX_SEMANTICS_FRAME_BYTES {
+            return Err("vendor.semantics.frame_too_large".to_string());
+        }
+    }
+    Ok(frame)
+}
+
+fn parse_hex_handle(text: &str) -> Option<u64> {
+    let text = text.trim();
+    if text.is_empty() || text.len() > 16 {
+        return None;
+    }
+    u64::from_str_radix(text, 16).ok()
+}
+
 fn push_stream(frame: &mut Vec<u8>, bytes: &[u8], bits: u32) -> Result<(), String> {
     if bytes.len() > MAX_VENDOR_STREAM_BYTES {
         return Err("vendor.stream_too_long".to_string());

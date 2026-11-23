@@ -445,6 +445,17 @@ pub struct HostCore {
     pub(crate) presenting_open: Rc<Cell<bool>>,
     /// A save dialog is in flight.
     pub(crate) save_pending: Rc<Cell<bool>>,
+    /// Whether the current authoritative document finished its open pipeline
+    /// (ADR-0030 D9): the vendor pass settled and the derived snapshot is
+    /// installed.
+    ///
+    /// Deliberately separate from [`Self::loading`]: a vendor decode/apply pass is
+    /// **not** a loading state (NEW/OPEN stay available so the user can cancel or
+    /// switch files), but the writing funnels (`SAVE`/`EXPORT`/`PLOT`) must wait
+    /// for it. Defaults to `true`: a published/blank document is ready until a
+    /// vendor pass starts. Carriers flip it on the owner thread
+    /// ([`Self::set_document_ready`]).
+    pub(crate) document_ready: Rc<Cell<bool>>,
     /// A completed save interaction, awaiting export.
     pub(crate) pending_save: Rc<RefCell<Option<PendingSave>>>,
     /// The writer a typed `EXPORT <TOKEN>` forced for the save interaction that
@@ -687,6 +698,21 @@ impl HostCore {
     /// previous pass); `None` means no document was published since the last call.
     pub fn take_vendor_records(&self) -> Option<Vec<VendorRecord>> {
         self.controller.borrow_mut().take_vendor_records()
+    }
+
+    /// Take the vendor semantics rows a `.ymodel` open owes one `YANS` pass
+    /// (ADR-0030 D8). `None` means this document has no such pass.
+    pub fn take_vendor_semantics(&self) -> Option<Vec<serde_json::Value>> {
+        self.controller.borrow_mut().take_vendor_semantics()
+    }
+
+    /// Persist one validated import-time `YANE` batch on the document slot.
+    ///
+    /// The controller resolves source handles to entity ids; this wrapper only
+    /// marshals to the owner thread. Errors are stable `vendor.semantics.*` /
+    /// `vendor.*` strings, never an empty success.
+    pub fn apply_vendor_semantics(&self, rows: Vec<serde_json::Value>) -> Result<usize, String> {
+        self.controller.borrow_mut().apply_vendor_semantics(rows)
     }
 
     /// Install the vendor derived-representation snapshot and invalidate the

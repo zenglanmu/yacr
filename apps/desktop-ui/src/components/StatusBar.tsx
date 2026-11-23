@@ -52,7 +52,11 @@ export function StatusBar() {
     volatileStatusStore.getCursor,
     volatileStatusStore.getCursor,
   );
-  const progress = importProgressView(shell.importProgress as CadImportProgress | null, t);
+  const progress = importProgressView(
+    shell.importProgress as CadImportProgress | null,
+    t,
+    shell.openProgress,
+  );
   // A known host token gets its short translated label; every other sentence is
   // shown verbatim. The raw technical string stays the banner's `title`, so the
   // byte counts remain available on hover without filling the bar.

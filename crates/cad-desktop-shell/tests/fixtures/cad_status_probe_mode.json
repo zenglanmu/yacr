@@ -15,6 +15,7 @@
   "crosshair": false,
   "cursorWorld": null,
   "documentLabel": null,
+  "documentReady": false,
   "entityCount": null,
   "error": "CAD is disabled in probe mode",
   "frameCount": 0,
@@ -42,6 +43,8 @@
     "viewCubeIn2d": true,
     "viewCubeIn3d": true
   },
+  "openProgress": null,
+  "openSummary": null,
   "orthoEnabled": false,
   "pendingPrompt": null,
   "performance": null,

@@ -75,6 +75,17 @@ pub const MAX_BLOCK_SCALE: f64 = 1.0e6;
 /// Upper bound of one result payload (base64-decoded bytes).
 pub const MAX_RESULT_BYTES: usize = 4 * 1024 * 1024;
 
+/// Plugin → host semantics frame magic (`"YANE"`, ADR-0030 D8).
+pub const SEMANTICS_RESULT_MAGIC: u32 = 0x5941_4e45;
+/// Upper bound of one semantics frame (base64-decoded bytes).
+pub const MAX_SEMANTICS_BYTES: usize = 32 * 1024 * 1024;
+/// Upper bound of one semantics row's JSON.
+pub const MAX_SEMANTICS_ROW_BYTES: usize = 1024 * 1024;
+/// Upper bound of rows in one semantics frame.
+pub const MAX_SEMANTICS_ROWS: usize = 200_000;
+/// Highest vendor semantics schema this build accepts.
+pub const MAX_SEMANTICS_SCHEMA: u64 = 1;
+
 /// Upper bound of diagnostics carried by one result frame.
 pub const MAX_DIAGNOSTICS: usize = 16;
 
@@ -180,6 +191,45 @@ impl VendorStore {
         });
         self.unreported = None;
         Ok((token, generation))
+    }
+
+    /// Stage the `tables/vendor.json` rows of an opened `.ymodel` as one `YANS`
+    /// pass (ADR-0030 D8).
+    ///
+    /// The rows are host-owned JSON; this only frames them with a fresh
+    /// token/generation. A row without a valid `source.handle` is refused before
+    /// any pass is armed (`vendor.semantics.source_handle`), never silently
+    /// dropped.
+    pub fn stage_semantics(&mut self, rows: Vec<serde_json::Value>) -> Result<(u64, u64), String> {
+        if !self.enabled {
+            return Err("vendor.disabled".to_string());
+        }
+        self.next_token = self.next_token.saturating_add(1);
+        let token = self.next_token;
+        let generation = token;
+        let frame = cad_app::vendor::encode_semantics_frame(token, generation, &rows)?;
+        self.active = Some(VendorPass {
+            token,
+            generation,
+            records_frame: frame,
+            entities: rows.len().min(u32::MAX as usize) as u32,
+            announced: false,
+            settled: None,
+        });
+        self.unreported = None;
+        Ok((token, generation))
+    }
+
+    /// Whether a pass is armed and has not settled yet.
+    pub fn is_pending(&self) -> bool {
+        self.active
+            .as_ref()
+            .is_some_and(|pass| pass.settled.is_none())
+    }
+
+    /// Vendor items in the active pass (`0` when none is armed).
+    pub fn entities(&self) -> u32 {
+        self.active.as_ref().map_or(0, |pass| pass.entities)
     }
 
     /// Report a staging failure through the next `vendor-settled` event.
@@ -397,6 +447,72 @@ fn point(x: f64, y: f64, z: f64) -> Result<Point3, String> {
         return Err("vendor.nonfinite_primitive".to_string());
     }
     Ok(Point3 { x, y, z })
+}
+
+/// Parse and validate one plugin `YANE` semantics frame (ADR-0030 D8).
+///
+/// Bound checks, magic/ABI/token/generation, UTF-8 JSON, `kind: "tch"` and the
+/// row `schema` are enforced here; the host then resolves handles to entity ids.
+/// A trailing byte, a non-object row or an unknown schema is refused rather than
+/// repaired.
+pub fn parse_semantics_frame(
+    bytes: &[u8],
+    token: u64,
+    generation: u64,
+) -> Result<Vec<serde_json::Value>, String> {
+    if bytes.len() > MAX_SEMANTICS_BYTES {
+        return Err("vendor.semantics.payload_too_large".to_string());
+    }
+    let mut cursor = Cursor::new(bytes);
+    if cursor.u32()? != SEMANTICS_RESULT_MAGIC {
+        return Err("vendor.semantics.bad_magic".to_string());
+    }
+    let abi = cursor.u32()?;
+    if abi != VENDOR_ABI_VERSION {
+        return Err(format!("vendor.semantics.unsupported_abi: {abi}"));
+    }
+    if cursor.u64()? != token {
+        return Err("vendor.semantics.frame_token_mismatch".to_string());
+    }
+    if cursor.u64()? != generation {
+        return Err("vendor.semantics.frame_generation_mismatch".to_string());
+    }
+    let count = cursor.u32()? as usize;
+    if count > MAX_SEMANTICS_ROWS {
+        return Err("vendor.semantics.too_many_rows".to_string());
+    }
+    let mut rows = Vec::with_capacity(count);
+    for _ in 0..count {
+        let _key = cursor.u64()?;
+        let _source_handle = cursor.u64()?;
+        let length = cursor.u32()? as usize;
+        if length == 0 || length > MAX_SEMANTICS_ROW_BYTES {
+            return Err("vendor.semantics.row_too_large".to_string());
+        }
+        let raw = cursor.bytes(length)?;
+        let text =
+            std::str::from_utf8(raw).map_err(|_| "vendor.semantics.row_not_utf8".to_string())?;
+        let value: serde_json::Value = serde_json::from_str(text)
+            .map_err(|error| format!("vendor.semantics.row_json: {error}"))?;
+        let object = value
+            .as_object()
+            .ok_or_else(|| "vendor.semantics.row_not_object".to_string())?;
+        if object.get("kind").and_then(serde_json::Value::as_str) != Some("tch") {
+            return Err("vendor.semantics.invalid_kind".to_string());
+        }
+        let schema = object
+            .get("schema")
+            .and_then(serde_json::Value::as_u64)
+            .ok_or_else(|| "vendor.semantics.invalid_schema".to_string())?;
+        if schema > MAX_SEMANTICS_SCHEMA {
+            return Err(format!("vendor.semantics.unsupported_schema: {schema}"));
+        }
+        rows.push(value);
+    }
+    if cursor.remaining() != 0 {
+        return Err("vendor.semantics.trailing_bytes".to_string());
+    }
+    Ok(rows)
 }
 
 fn parse_result_frame(bytes: &[u8]) -> Result<ParsedResult, String> {

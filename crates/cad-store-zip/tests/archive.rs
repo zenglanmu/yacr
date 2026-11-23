@@ -515,8 +515,9 @@ fn the_manifest_pins_the_document_and_the_import_baseline() {
     );
     assert_eq!(
         cad_domain::ymodel::FORMAT_MINOR,
-        11,
-        "ADR-0043: P1 expressions/configurations moved the tier to 9, P2 features to 10 and P3 relations to 11"
+        12,
+        "ADR-0043: P1 expressions/configurations moved the tier to 9, P2 features to 10 and \
+         P3 relations to 11; ADR-0030 D7 vendor semantics moved it to 12"
     );
 
     let loaded = read_archive(&bytes).expect("read");

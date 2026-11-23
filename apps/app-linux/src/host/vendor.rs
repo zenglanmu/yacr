@@ -10,17 +10,12 @@ use cad_desktop_shell::state::Shared;
 
 use super::CAD;
 
-/// Stage this tick's vendor records and install any settled derived snapshot.
+/// Stage this tick's vendor input, install any settled snapshot/semantics, and
+/// publish the real `documentReady` state (ADR-0030 D9).
 pub(crate) fn tick(shared: &Arc<Mutex<Shared>>) {
-    let records = CAD.with(|cell| {
-        cell.borrow()
-            .as_ref()
-            .and_then(|session| session.take_vendor_records())
-    });
-    cad_desktop_shell::vendor::stage_from_tick(shared, records);
     CAD.with(|cell| {
         if let Some(session) = cell.borrow().as_ref() {
-            cad_desktop_shell::vendor::apply_pending_representations(shared, session);
+            cad_desktop_shell::vendor::tick(shared, session);
         }
     });
 }

@@ -195,6 +195,12 @@ impl HostCore {
             self.recovery.borrow_mut().last_attempt = None;
             return;
         }
+        if !self.document_ready() {
+            // The vendor pass of a newly installed document has not persisted its
+            // rows yet; a snapshot now would be a baseline missing them
+            // (ADR-0030 D9). Do not arm the interval until the document is ready.
+            return;
+        }
         if !self.controller.borrow().is_dirty() {
             // Clean: nothing to snapshot, and the next edit starts a fresh
             // interval instead of inheriting an expired one.

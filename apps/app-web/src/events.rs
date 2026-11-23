@@ -33,8 +33,8 @@
 use std::cell::{Cell, RefCell};
 
 use cad_ui_core::session::events::{
-    cursor_changed, derive_batch, same_status_ignoring_volatile, CadEvent, CadEventKind, EventBus,
-    StatusFrame,
+    cursor_changed, derive_batch, derive_open_ready, document_ready_event,
+    same_status_ignoring_volatile, CadEvent, CadEventKind, EventBus, StatusFrame,
 };
 use cad_ui_core::session::{CadStatus, HostProfile};
 
@@ -123,10 +123,30 @@ impl EventHub {
         vendor: impl FnOnce() -> Vec<CadEventKind>,
     ) -> Vec<CadEvent> {
         let mut emitted = Vec::new();
-        for kind in derive_batch(self.prev.as_ref(), status) {
+        let batch = derive_batch(self.prev.as_ref(), status);
+        let opened = batch
+            .iter()
+            .any(|kind| matches!(kind, CadEventKind::DocumentOpened { .. }));
+        for kind in batch {
             emitted.extend(self.bus.push(kind));
         }
         for kind in vendor() {
+            emitted.extend(self.bus.push(kind));
+        }
+        // `document-ready` follows `vendor-settled`; a synchronous open that never
+        // emitted an intermediate `documentReady: false` is caught by `opened`.
+        let ready = self
+            .prev
+            .as_ref()
+            .and_then(|prev| derive_open_ready(prev, status))
+            .or_else(|| {
+                if opened && status.document_ready {
+                    document_ready_event(status)
+                } else {
+                    None
+                }
+            });
+        if let Some(kind) = ready {
             emitted.extend(self.bus.push(kind));
         }
         let volatile = self

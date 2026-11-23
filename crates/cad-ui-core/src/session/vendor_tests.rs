@@ -454,3 +454,76 @@ fn encode_base64(bytes: &[u8]) -> String {
     }
     output
 }
+
+fn yane_row(handle: u64, schema: u64) -> serde_json::Value {
+    serde_json::json!({
+        "kind": "tch",
+        "class": "TCH_WALL",
+        "schema": schema,
+        "status": "ok",
+        "source": { "handle": format!("{handle:X}") },
+        "params": {},
+        "refs": [],
+        "diagnostics": [],
+    })
+}
+
+fn yane_frame(token: u64, generation: u64, rows: &[serde_json::Value]) -> Vec<u8> {
+    let mut frame = Vec::new();
+    frame.extend_from_slice(&SEMANTICS_RESULT_MAGIC.to_le_bytes());
+    frame.extend_from_slice(&VENDOR_ABI_VERSION.to_le_bytes());
+    frame.extend_from_slice(&token.to_le_bytes());
+    frame.extend_from_slice(&generation.to_le_bytes());
+    frame.extend_from_slice(&(rows.len() as u32).to_le_bytes());
+    for row in rows {
+        let bytes = serde_json::to_vec(row).expect("row JSON");
+        frame.extend_from_slice(&0x2Fu64.to_le_bytes());
+        frame.extend_from_slice(&0x2Fu64.to_le_bytes());
+        frame.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+        frame.extend_from_slice(&bytes);
+    }
+    frame
+}
+
+#[test]
+fn a_semantics_pass_stages_yans_and_settles_like_a_records_pass() {
+    let mut store = VendorStore::default();
+    store.enable();
+    let (token, generation) = store
+        .stage_semantics(vec![yane_row(0x2F, 1)])
+        .expect("stage semantics");
+    assert!(store.is_pending());
+    let frame = store.records_frame(token).expect("YANS frame");
+    assert_eq!(
+        &frame[0..4],
+        &cad_app::vendor::SEMANTICS_REQUEST_MAGIC.to_le_bytes()
+    );
+    assert_eq!(store.entities(), 1);
+    let result = result_frame(token, generation, 1, 0, &["vendor.unsupported"]);
+    store
+        .settle_bytes(token, generation, &result)
+        .expect("settle");
+    assert!(!store.is_pending(), "a settled pass is not pending");
+}
+
+#[test]
+fn the_plugin_semantics_frame_is_validated_before_it_is_stored() {
+    let rows =
+        parse_semantics_frame(&yane_frame(7, 7, &[yane_row(0x2F, 1)]), 7, 7).expect("valid YANE");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["class"], serde_json::json!("TCH_WALL"));
+
+    let error = parse_semantics_frame(&yane_frame(7, 7, &[yane_row(0x2F, 2)]), 7, 7)
+        .expect_err("schema 2 is refused");
+    assert!(
+        error.starts_with("vendor.semantics.unsupported_schema"),
+        "{error}"
+    );
+
+    let mut trailing = yane_frame(7, 7, &[yane_row(0x2F, 1)]);
+    trailing.push(0);
+    assert_eq!(
+        parse_semantics_frame(&trailing, 7, 7),
+        Err("vendor.semantics.trailing_bytes".to_string())
+    );
+}

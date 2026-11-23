@@ -64,9 +64,9 @@ pub fn is_vendor_command(name: &str) -> bool {
 /// cleared, so an old token can never settle into the replacement document. A
 /// staging failure is reported through the next `vendor-settled` event instead of
 /// being dropped.
-pub fn stage_from_tick(shared: &Arc<Mutex<Shared>>, records: Option<Vec<VendorRecord>>) {
+pub fn stage_from_tick(shared: &Arc<Mutex<Shared>>, records: Option<Vec<VendorRecord>>) -> bool {
     let Some(records) = records else {
-        return;
+        return false;
     };
     let mut state = lock(shared);
     // A published document starts with no derived geometry. The old snapshot is
@@ -74,12 +74,66 @@ pub fn stage_from_tick(shared: &Arc<Mutex<Shared>>, records: Option<Vec<VendorRe
     // the plugin's apply installs the replacement later.
     state.vendor_representations_clear = true;
     state.vendor_pending_representations = None;
+    state.vendor_pending_semantics = None;
+    state.vendor_last_ack = None;
     if records.is_empty() {
         state.vendor.clear();
-        return;
+        return false;
     }
     if let Err(reason) = state.vendor.stage(records) {
         state.vendor.report_failure(reason);
+    }
+    state.vendor.is_pending()
+}
+
+/// Stage the semantics rows loaded from a `.ymodel` as one `YANS` pass.
+///
+/// Same contract as [`stage_from_tick`], but the input is the persisted row
+/// array instead of raw DWG records (ADR-0030 D8). Returns whether a pass is
+/// now pending (the owner tick sets `documentReady = false`).
+pub fn stage_semantics_from_tick(
+    shared: &Arc<Mutex<Shared>>,
+    rows: Option<Vec<serde_json::Value>>,
+) -> bool {
+    let Some(rows) = rows else {
+        return false;
+    };
+    let mut state = lock(shared);
+    state.vendor_representations_clear = true;
+    state.vendor_pending_representations = None;
+    state.vendor_pending_semantics = None;
+    state.vendor_last_ack = None;
+    if rows.is_empty() {
+        state.vendor.clear();
+        return false;
+    }
+    if let Err(reason) = state.vendor.stage_semantics(rows) {
+        state.vendor.report_failure(reason);
+    }
+    state.vendor.is_pending()
+}
+
+/// One owner-tick vendor step for every native host.
+///
+/// Takes the current document's input (semantics rows for a `.ymodel`, raw
+/// records for an import), stages it, applies any settled rows/snapshot, and
+/// publishes the real readiness: `documentReady` is false exactly while a pass is
+/// pending (ADR-0030 D9). A host with no input and no pass simply reports ready.
+pub fn tick(shared: &Arc<Mutex<Shared>>, session: &CadSession) {
+    let semantics = session.take_vendor_semantics();
+    let records = session.take_vendor_records();
+    if let Some(rows) = semantics {
+        stage_semantics_from_tick(shared, Some(rows));
+    } else {
+        stage_from_tick(shared, records);
+    }
+    apply_pending_representations(shared, session);
+    let ready = !lock(shared).vendor.is_pending();
+    session.set_document_ready(ready);
+    // Keep the mirrored status consistent before this tick's event flush; the
+    // next status projection would otherwise carry the previous `false`.
+    if let Some(status) = lock(shared).shell.cad_status.as_mut() {
+        status.document_ready = ready;
     }
 }
 
@@ -89,14 +143,31 @@ pub fn stage_from_tick(shared: &Arc<Mutex<Shared>>, records: Option<Vec<VendorRe
 /// on the owner thread, where `CadSession` lives. A snapshot whose pass is no
 /// longer active (the user opened another document) is dropped.
 pub fn apply_pending_representations(shared: &Arc<Mutex<Shared>>, session: &CadSession) {
-    let (clear, pending, active) = {
+    let (clear, pending, active, semantics) = {
         let mut state = lock(shared);
         (
             std::mem::take(&mut state.vendor_representations_clear),
             state.vendor_pending_representations.take(),
             state.vendor.active(),
+            state.vendor_pending_semantics.take(),
         )
     };
+    // Persist the plugin's version-independent rows before display. A failure is
+    // named on the last acknowledgement (the pass itself already settled) rather
+    // than silently dropping the archive data.
+    if let Some((token, generation, rows)) = semantics {
+        // A pass for a document the user already replaced must never write its
+        // rows into the new document.
+        if active == Some((token, generation)) {
+            if let Err(error) = session.apply_vendor_semantics(rows) {
+                let mut state = lock(shared);
+                if let Some(ack) = state.vendor_last_ack.as_mut() {
+                    ack.accepted = false;
+                    ack.diagnostics.push(error);
+                }
+            }
+        }
+    }
     if clear {
         session.set_vendor_representations(None);
     }
@@ -133,6 +204,7 @@ pub fn cad_vendor_apply(
     token: u64,
     generation: u64,
     payload: String,
+    semantics: Option<String>,
 ) -> Result<VendorAck, String> {
     let mut state = lock(&shared.0);
     let settlement = state
@@ -144,7 +216,22 @@ pub fn cad_vendor_apply(
         generation,
         store,
     });
-    Ok(settlement.ack)
+    let mut ack = settlement.ack;
+    // Semantics are optional and validated independently: a display pass is
+    // never blocked by a bad/missing semantics frame, and a bad frame never
+    // writes a partial table (ADR-0030 D8).
+    if let Some(encoded) = semantics {
+        match cad_ui_core::session::vendor::decode_base64(&encoded).and_then(|bytes| {
+            cad_ui_core::session::vendor::parse_semantics_frame(&bytes, token, generation)
+        }) {
+            Ok(rows) => {
+                state.vendor_pending_semantics = Some((token, generation, rows));
+            }
+            Err(error) => ack.diagnostics.push(error),
+        }
+    }
+    state.vendor_last_ack = Some(ack.clone());
+    Ok(ack)
 }
 
 /// `cad_vendor_status`: the active pass descriptor, or explicit nulls.

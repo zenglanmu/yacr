@@ -15,6 +15,7 @@
   "crosshair": false,
   "cursorWorld": null,
   "documentLabel": "/fixtures/complex-test.dwg",
+  "documentReady": false,
   "entityCount": 7,
   "error": null,
   "frameCount": 12,
@@ -42,6 +43,8 @@
     "viewCubeIn2d": true,
     "viewCubeIn3d": true
   },
+  "openProgress": null,
+  "openSummary": null,
   "orthoEnabled": false,
   "pendingPrompt": null,
   "performance": null,

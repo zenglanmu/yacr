@@ -35,6 +35,7 @@ mod snapshot;
 mod solids;
 mod tolerance;
 mod vendor_properties;
+mod vendor_semantics;
 
 #[cfg(test)]
 mod tests;
@@ -289,21 +290,6 @@ impl HostController {
             self.session.complete_tool();
         }
         Ok(traced)
-    }
-
-    /// Take the vendor records copied by the most recent successful import.
-    ///
-    /// The owner tick calls this exactly once per published document and hands
-    /// the bytes to the WebView vendor pass. `Some([])` is a real answer — the new
-    /// document carries no `TCH_*` objects — and the caller must clear the
-    /// previous pass so a stale token cannot settle into it. `None` means "no new
-    /// document since the last call".
-    pub fn take_vendor_records(&mut self) -> Option<Vec<crate::VendorRecord>> {
-        if !self.vendor_records_pending {
-            return None;
-        }
-        self.vendor_records_pending = false;
-        Some(std::mem::take(&mut self.last_vendor_records))
     }
 
     /// The current immutable drawing, for the render/composition pipeline.

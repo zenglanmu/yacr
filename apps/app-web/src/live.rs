@@ -345,12 +345,18 @@ impl Live {
         // open is known to have succeeded. `Some([])` means "a new document with no
         // vendor objects" and clears any previous pass, so an old token can never
         // settle into this document. The export's own flush announces it.
+        let semantics = session.take_vendor_semantics();
         let records = session.take_vendor_records();
-        if records.is_some() {
+        if semantics.is_some() || records.is_some() {
             // The previous document's derived display is not this document's.
             session.set_vendor_representations(None);
         }
-        crate::vendor::stage(records);
+        if semantics.is_some() {
+            crate::vendor::stage_semantics(semantics);
+        } else {
+            crate::vendor::stage(records);
+        }
+        session.set_document_ready(!crate::vendor::is_pending());
         let measured = heap();
         Ok(Self {
             session,
@@ -403,11 +409,18 @@ impl Live {
         // Same rule as `Live::install`: stage only after the replacement really
         // happened, so a refused open leaves the previous pass (and the previous
         // document) untouched.
+        let semantics = self.session.take_vendor_semantics();
         let records = self.session.take_vendor_records();
-        if records.is_some() {
+        if semantics.is_some() || records.is_some() {
             self.session.set_vendor_representations(None);
         }
-        crate::vendor::stage(records);
+        if semantics.is_some() {
+            crate::vendor::stage_semantics(semantics);
+        } else {
+            crate::vendor::stage(records);
+        }
+        self.session
+            .set_document_ready(!crate::vendor::is_pending());
         self.import_ms = (self.clock_now() - started).max(0.0);
         self.label = label.to_string();
         self.bytes = bytes.len();

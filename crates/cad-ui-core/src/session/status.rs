@@ -17,6 +17,7 @@ use super::command_log::CadCommandLogEntry;
 use super::performance::CadPerformance;
 
 pub use super::import_progress::CadImportProgress;
+pub use super::open_progress::{CadOpenProgress, CadOpenSummary};
 pub use super::reference_status::CadReferenceStatus;
 
 /// Camera block of the frontend status (`{center, scale}`).
@@ -377,6 +378,29 @@ pub struct CadStatus {
     pub loading: bool,
     /// Live import progress, or `null` when no import is running.
     pub import_progress: Option<CadImportProgress>,
+    /// Live open-pipeline progress (ADR-0030 D9), or `null` when no open is
+    /// running.
+    ///
+    /// The carrier overlays its live stage (import → vendor → representations)
+    /// onto this field; [`super::CadSession::snapshot`] leaves it `None` and never
+    /// fabricates a stage. Once ready it is `null` again and
+    /// [`Self::open_summary`] keeps the terminal outcome.
+    pub open_progress: Option<CadOpenProgress>,
+    /// Whether the **current authoritative document** finished its open pipeline
+    /// (vendor settled, derived snapshot installed).
+    ///
+    /// Distinct from [`Self::loading`] (picker/import only): a vendor pass keeps
+    /// this `false` while NEW/OPEN stay available. It is `false` without a
+    /// document, and a failed/cancelled OPEN never flips it for the document that
+    /// was already open.
+    pub document_ready: bool,
+    /// Terminal summary of the last successful open (label, entities, vendor
+    /// outcome and bounded diagnostics), or `null`.
+    ///
+    /// Retained after readiness so a late-joining consumer reads it from the
+    /// status instead of relying on event replay ([`Self::document_ready`] is the
+    /// gate, this is the explanation).
+    pub open_summary: Option<CadOpenSummary>,
     /// Provenance of the connector that opened the current document (ADR-0041
     /// D5), or **absent**.
     ///
@@ -604,6 +628,11 @@ pub fn unsupported_status(error: Option<String>) -> CadStatus {
         entity_count: None,
         loading: false,
         import_progress: None,
+        // No session runs no open pipeline: no progress, nothing ready and no
+        // terminal summary are invented.
+        open_progress: None,
+        document_ready: false,
+        open_summary: None,
         // No session means no opened connector: absent, never a fabricated object.
         opened_source: None,
         error,
@@ -694,22 +723,27 @@ pub(super) struct DocumentCapabilities {
 ///
 /// * NEW needs the capability and an **idle** session (no open/import running);
 ///   it deliberately does **not** need a document — a blank drawing needs no
-///   source file.
-/// * SAVE/PLOT need the capability, an authoritative document, and an idle
-///   session: no open/import running **and** no save/plot target chooser or
-///   export still pending. The host serialises save and plot through the same
-///   pending slot, so neither is advertised while the other is in flight.
+///   source file — and it stays available while the open pipeline is not ready,
+///   so the user can cancel or switch files (ADR-0030 D9).
+/// * SAVE/PLOT need the capability, an authoritative document, an **idle**
+///   session (no open/import running and no save/plot target chooser or export
+///   still pending) **and** a ready document: `document_ready` is `false` while
+///   the vendor pass of a newly opened document is still applying, and writing
+///   must not race it (ADR-0030 D9). The host serialises save and plot through
+///   the same pending slot, so neither is advertised while the other is in
+///   flight.
 pub(super) fn document_capabilities(
     capabilities: cad_platform::HostCapabilities,
     has_document: bool,
     loading: bool,
     save_pending: bool,
+    document_ready: bool,
 ) -> DocumentCapabilities {
     let document_idle = has_document && !loading && !save_pending;
     DocumentCapabilities {
         can_new: capabilities.new && !loading,
-        can_save: capabilities.save && document_idle,
-        can_plot: capabilities.plot && document_idle,
+        can_save: capabilities.save && document_idle && document_ready,
+        can_plot: capabilities.plot && document_idle && document_ready,
     }
 }
 
@@ -756,12 +790,19 @@ pub(super) fn assemble_status(
     view: Option<CadViewOrientation>,
     navigation: CadNavigation,
     pending_prompt: Option<super::api_prompt::CadPendingPrompt>,
+    document_ready: bool,
+    open_summary: Option<CadOpenSummary>,
 ) -> CadStatus {
     CadStatus {
         document_label: has_document.then_some(label),
         entity_count,
         loading,
         import_progress: None,
+        // The carrier overlays the live open stage; the assembler never invents
+        // one, exactly like `import_progress`.
+        open_progress: None,
+        document_ready,
+        open_summary,
         // The session owns the document: `CadSession::snapshot` projects the
         // opened source's provenance onto this field (never inferred here).
         opened_source: None,

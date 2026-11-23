@@ -286,7 +286,6 @@ function Shell() {
     // popup window) and now survives a restart. A blocked storage is a no-op.
     storeLocale(locale);
   }, [locale, t]);
-
   // Live language propagation. The Options dialog is rendered in this same tree
   // (an in-DOM overlay), so its `setLocale` is this provider's setter and the
   // change is immediate. The stored-value subscription is kept as a defensive
@@ -428,6 +427,7 @@ function Shell() {
   const documentVisible = documentOpen || canvasSession !== null;
   const loading = Boolean(status?.loading);
   const importProgress = status?.importProgress ?? null;
+  const openProgress = status?.openProgress ?? null;
   const cadReady = Boolean(status) && !loading;
   const toolActive = Boolean(status?.tool?.key);
   // The active tool's terminal text step (ADR 0019 A.1). It is a step of a tool,
@@ -443,7 +443,6 @@ function Shell() {
   // A pending plugin prompt owns Enter/Escape like a tool does (Enter = its
   // default or `None`, Escape = cancel), but the tool block stays as it was.
   const pluginPromptPending = status?.pendingPrompt != null;
-
   // The one open path for every dialog. The host owns admission and the gate;
   // this only keeps the fresh payload for the overlay. `existing: true` means
   // the same dialog is already open, so the success is a no-op here and no
@@ -761,6 +760,7 @@ function Shell() {
     pending,
     loading,
     importProgress,
+    openProgress,
     cadReady,
     documentLabel,
     documentOpen,

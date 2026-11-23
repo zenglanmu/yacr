@@ -244,6 +244,17 @@ pub(crate) fn apply_vendor_representations(
     .is_some()
 }
 
+/// Persist one validated semantics batch on the live session (ADR-0030 D7/D8).
+pub(crate) fn apply_vendor_semantics(rows: Vec<serde_json::Value>) -> Result<usize, String> {
+    with_live(|page| page.live.session.apply_vendor_semantics(rows))
+        .unwrap_or_else(|| Err("vendor.no_session".to_string()))
+}
+
+/// Publish the open-pipeline readiness on the live session (ADR-0030 D9).
+pub(crate) fn set_document_ready(ready: bool) -> bool {
+    with_live(|page| page.live.session.set_document_ready(ready)).is_some()
+}
+
 /// Run `action` on the live page session, or answer `None` when there is none.
 fn with_live<T>(action: impl FnOnce(&mut PageSession) -> T) -> Option<T> {
     STATE.with(|cell| match cell.try_borrow_mut() {
@@ -502,7 +513,11 @@ fn page_with_status(page: &PageSession) -> String {
 /// uses, and the descriptor is the same object `shell::Carrier` embeds.
 pub(crate) fn event_snapshot() -> Option<(CadStatus, Option<String>)> {
     with_live(|page| {
-        let status = page.live.cad_status(&facts(page));
+        let mut status = page.live.cad_status(&facts(page));
+        // The vendor pass lives on this carrier, not in the session; overlay its
+        // live stage and terminal summary exactly like the native shell does
+        // (ADR-0030 D9).
+        crate::vendor::overlay_open(&mut status);
         let canvas = serde_json::to_string(&shell::CanvasSession {
             label: page.live.label.clone(),
             batches: page.live.batches(),

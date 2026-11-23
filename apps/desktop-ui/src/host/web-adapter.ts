@@ -142,7 +142,12 @@ export interface WebShellModule {
   /** The ABI v1 records frame (`Uint8Array`/`ArrayBuffer`), or a `vendor.*` rejection. */
   vendor_records?(token: number | bigint): unknown;
   /** Settle one pass; answers the JSON `VendorAck`, or a `vendor.*` rejection. */
-  vendor_apply?(token: number | bigint, generation: number | bigint, payload: string): unknown;
+  vendor_apply?(
+    token: number | bigint,
+    generation: number | bigint,
+    payload: string,
+    semantics?: string,
+  ): unknown;
   /** The active pass descriptor as JSON (`{token, generation, entities}`, nulls allowed). */
   vendor_status?(): unknown;
 }
@@ -593,10 +598,18 @@ async function invokeVendor(module: WebShellModule, command: string, args: unkno
       if (typeof payload !== 'string') {
         throw new Error(`web-adapter: ${command}: payload must be the base64 result frame`);
       }
+      const semantics = record.semantics;
+      if (semantics !== undefined && typeof semantics !== 'string') {
+        throw new Error(`web-adapter: ${command}: semantics must be the base64 YANE frame`);
+      }
       if (typeof module.vendor_apply !== 'function') {
         throw new Error(`unsupported-runtime: ${command}: the canvas module has no vendor_apply export`);
       }
-      return parseJson(command, await module.vendor_apply(token, generation, payload), 'object');
+      return parseJson(
+        command,
+        await module.vendor_apply(token, generation, payload, semantics),
+        'object',
+      );
     }
     case WEB_VENDOR_STATUS_COMMAND: {
       if (typeof module.vendor_status !== 'function') {

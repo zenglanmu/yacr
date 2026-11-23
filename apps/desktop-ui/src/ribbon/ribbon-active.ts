@@ -7,7 +7,10 @@ import type { CadStatus } from '../cad/cad-status.ts';
 
 /** The `cad_status` keys whose value is a real on/off flag. */
 export type CadStatusFlagKey = {
-  [K in keyof CadStatus]-?: CadStatus[K] extends boolean ? K : never;
+  [K in keyof CadStatus]-?:
+    undefined extends CadStatus[K] ? never
+      : CadStatus[K] extends boolean ? K
+        : never;
 }[keyof CadStatus];
 
 /** The status flag `item` is a toggle for, or `null` for a one-shot button. */

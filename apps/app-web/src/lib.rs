@@ -78,7 +78,7 @@
 //! shell_aliases()                                           -> JSON array of `{alias, command}` rows
 //! shell_command(name)                                       -> `{"accepted":true}` or a refusal
 //! vendor_records(token)                                     -> binary ABI v1 records frame
-//! vendor_apply(token, generation, payload_b64)              -> JSON `VendorAck` (flushes the pass)
+//! vendor_apply(token, generation, payload_b64, semantics_b64?) -> JSON `VendorAck` (flushes the pass)
 //! vendor_status()                                           -> JSON `VendorStatus`
 //! start_offscreen(canvas, css_w, css_h, dpr)                -> JSON status (async, Worker only)
 //! open_bytes_offscreen(canvas, label, css_w, css_h, dpr, bytes) -> JSON status (async, Worker only)

@@ -127,7 +127,12 @@ pub const FORMAT_WRITE: u32 = 2;
 /// `tables/relations.json` (ADR-0043 P3 in-context edges). Both are written only
 /// when non-empty; their evaluators are not wired, so the tables are the
 /// explicit schema boundary rather than a claimed feature pipeline.
-pub const FORMAT_MINOR: u32 = 11;
+///
+/// `12` adds the host-owned `tables/vendor.json` (ADR-0030 D7): the
+/// version-independent vendor semantics for imported vendor objects, one row per
+/// entity keyed by entity id. It is written only when the document has vendor
+/// rows, so a document without them keeps the minor its other features imply.
+pub const FORMAT_MINOR: u32 = 12;
 
 /// Stable failure markers.
 ///

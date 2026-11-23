@@ -17,7 +17,11 @@ export function DocTabs() {
   const { t } = useI18n();
   const shell = useShell();
   const label = shell.documentLabel;
-  const progress = importProgressView(shell.importProgress as CadImportProgress | null, t);
+  const progress = importProgressView(
+    shell.importProgress as CadImportProgress | null,
+    t,
+    shell.openProgress,
+  );
   const percent = progress && progress.determinate ? Math.round((progress.ratio ?? 1) * 100) : null;
   return (
     <div className="region region--doctabs doctabs app-region" aria-label={t('doctabs.label')}>

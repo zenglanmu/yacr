@@ -119,7 +119,8 @@ test('vendor_apply forwards token, generation and payload, and parses the ack', 
     payload: 'AAAA',
   });
   assert.deepEqual(answer, ack);
-  assert.deepEqual(fake.calls, [['vendor_apply', 7n, 9n, 'AAAA']]);
+  assert.deepEqual(fake.calls, [['vendor_apply', 7n, 9n, 'AAAA', undefined]]);
+  assert.equal(fake.calls.length, 1);
 
   // A session refusal (a bare string from the wasm `Result::Err`) surfaces as the
   // host's own words, never as a settled pass.

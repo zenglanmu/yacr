@@ -280,6 +280,24 @@ test('import progress view is determinate only with a real total and never inven
   assert.equal(importProgressView({ phase: 'entities', entitiesDone: 9, entitiesTotal: 4, bytes: null, cancellable: false }, t).ratio, 1);
 });
 
+test('the open pipeline keeps the progress bar live after the import terminal', () => {
+  const t = (key, params) => (params ? `${key}(${Object.values(params).join('/')})` : key);
+  const vendor = importProgressView(null, t, {
+    stage: 'vendor', phase: 'decode', done: 0, total: 9899, unit: 'vendorRecords', cancellable: false,
+  });
+  assert.equal(vendor.determinate, true);
+  assert.equal(vendor.ratio, 0);
+  assert.equal(vendor.phase, 'open.stage.vendor · open.phase.decode');
+  assert.equal(vendor.count, 'open.progress.vendorRecords(0/9899)');
+  assert.equal(vendor.cancellable, false);
+  const rebuild = importProgressView(null, t, {
+    stage: 'representations', phase: 'rebuild', done: 0, total: null, unit: 'entities', cancellable: false,
+  });
+  assert.equal(rebuild.determinate, false);
+  assert.equal(rebuild.ratio, null);
+  assert.equal(rebuild.phase, 'open.stage.representations · open.phase.rebuild');
+});
+
 test('cancel is offered only for a live cancellable import and is admission, not completion', async () => {
   assert.deepEqual(await requestImportCancel(() => assert.fail('cancel reached IPC while unavailable'), loaded), { kind: 'unavailable' });
   assert.deepEqual(await requestImportCancel(() => assert.fail('cancel reached IPC while terminal'), { ...importing, importProgress: { ...importing.importProgress, cancellable: false } }), { kind: 'unavailable' });
@@ -299,7 +317,7 @@ test('the progress affordance reads only real status fields and offers cancel th
   const source = await readAppSource();
   // The real status field still feeds the view through the catalog translator; the
   // only tolerance is the TypeScript assertion narrowing the loose context field.
-  assert.match(components, /importProgressView\(shell\.importProgress(?:\s+as\s+[^,]+)?, t\)/);
+  assert.match(components, /importProgressView\([\s\S]*?shell\.importProgress[\s\S]*?shell\.openProgress[\s\S]*?\)/);
   assert.ok(components.includes('role="progressbar"'));
   assert.ok(components.includes("is-indeterminate"));
   assert.ok(components.includes("shell.cancelImport()"));

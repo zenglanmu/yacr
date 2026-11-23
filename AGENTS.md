@@ -206,7 +206,8 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
   `Partial`；RVT/DGN `Unverified`），`FORMAT_MINOR` 升到 **7**（BIM 元素 6、关系 7，写入按文档取
   **4/5/7**，minor 6 为只读档）；参数化 ADR-0043 P0–P3 再升到 **11**（P0 参数表 + 元素 `params` 块 →
   8；P1 `neg/pow/fn/if` + `tables/configurations.json` → 9；P2 `tables/features.json` → 10；
-  P3 `tables/relations.json` → 11；写入按文档取 **4/5/7/8/9/10/11**）。条目压缩自 ADR-0046 起是
+  P3 `tables/relations.json` → 11；ADR-0030 D7 host-owned `tables/vendor.json` → 12；
+  写入按文档取 **4/5/7/8/9/10/11/12**）。条目压缩自 ADR-0046 起是
   标准 zstd 帧（zip `Stored` + `structured-zstd =0.4.3`，level 6），`FORMAT_READ/WRITE = 2`；
   `read != 2` 的归档以 `unsupported_version` 拒绝，`sha256_c`/`len_c` 已写入并在解压前校验。`PARAM` 的 create/delete/
   rename/bind/unbind/config 与 `SETENTITYPROPERTY param.<name>` 是**命令层**实现（尚无 payload producer /

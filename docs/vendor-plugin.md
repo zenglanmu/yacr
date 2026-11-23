@@ -11,6 +11,14 @@
 > `TCH_OPENING` 70、旧 `TCH_DIMENSION` 35、`TCH_SHEET` 1、`TCH_ERRORMSG` 1）显式列在
 > `vendor.tch.unsupported`；合法但无可见几何的记录列在 `vendor.tch.no_display`；
 > `applied` 必须等于帧内 primitive 总数，空成功会被拒绝。
+>
+> **2026-11-23 增补（ADR 0030 D7–D9，P0 已实现）**：插件另有
+> `extractSemantics(YAND) -> YANE`，把支持类的**版本无关语义**交给宿主写入
+> `.ymodel` 的 host-owned `tables/vendor.json`（minor **12**）；重开 `.ymodel` 时宿主用
+> `YANS` 帧把语义送回插件重算 primitive。P0 覆盖墙/洞/文字/块插入；其余类显式
+> `status: unsupported` + `vendor.tch.semantics_not_implemented`（P1）。宿主同时接线
+> `openProgress`/`documentReady`/`document-ready` 与 SAVE/EXPORT/PLOT 门禁。
+> raw class body 默认不落盘；解码覆盖仍只到 base-6 明文类，base 9–14/cipher 未实现。
 
 ## 1. 形态
 
@@ -22,7 +30,8 @@
   同一模式）。经插件管理器安装的外部解码器由 `cad_plugin_read_entry` 读出 base64 字节，再用
   Blob URL 以 ES module 导入（§8）。两条路径都把唯一门面注册到
   `globalThis.__YACR_VENDOR_PLUGIN__ = { abiVersion, decode }`。
-- 插件只做 **字节 → 图元**；它不读写 `cad-db`、不调用 Tauri `invoke`、不碰文件系统。
+- 插件做两件事：**字节 → 语义**（`extractSemantics`，仅 import）与 **字节/语义 → 图元**
+  （`decode`）。它不读写 `cad-db`、不调用 Tauri `invoke`、不碰文件系统。
 - 内置 `tch` 的 `.js` 由 native 与 web 共用；**外部安装的解码器只在 `native-below` 上加载**
   （§8）。CLI/headless **没有 WebView**，因此 CLI 不使用插件，TCH 在 CLI 侧保持显式不支持。
 - **可选注册扩展（ABI 仍为 1，二进制帧不变；ADR 0030）**：模块可导出
@@ -58,6 +67,22 @@
   pass，避免旧 token settle 进新文档。同一文档重复 flush 不会重复 arm。
 - 迟到/旧文档的 apply 以 `vendor.stale_token` / `vendor.stale_generation` 拒绝。
 - 事件与命令都**不是每帧**：只有打开/重新导入时发生。
+
+`.ymodel` 重开没有 raw records，走语义帧：
+
+```
+打开 .ymodel（含 tables/vendor.json）
+  → 宿主发布基础文档
+  → owner tick 用语义行构造 YANS 帧并发出 vendor-pending
+  → 前端 cad_vendor_records(token) 取 YANS（同一命令、按 magic 分派）
+  → 插件 decode(YANS) 返回 YANR primitives
+  → cad_vendor_apply 校验并 settle
+  → 派生快照装入；发出 vendor-settled + document-ready
+```
+
+无 vendor 行的文档跳过 vendor 阶段，直接 `document-ready`。表行按 **entity id** 索引，
+但 YANS 的 pass key 仍是行的 `source.handle`（与 YAND 一致），现有派生存储/场景查找不变；
+`entity` 只用于 orphan 过滤与持久身份。
 
 ## 3. 命令
 
@@ -154,6 +179,24 @@ magic/ABI/token/generation 不匹配、非 UTF-8 诊断都显式拒绝。
 `vendor.record_skipped` 诊断。真实样本已验证：`test-tangent-real.dwg` 的 `TCH_WALL`
 class body 在 skip 后首字节为 6；R2000 代理样本首字节为 `0x0e`。
 
+## 4.2 语义帧（YANE / YANS）
+
+第二个 ABI 命名空间，不改 records/result 帧：
+
+- `extractSemantics(recordsYAND) -> YANE`：插件 → 宿主，import 时调用；同一
+  token/generation，≤ 32 MiB；逐行 `{ key, class, schema, status, source, units,
+  attributes, params, refs, diagnostics }`。`key` 是本次 pass 的定位键
+  （import 与 reopen 都是 source handle；表本身按 entity id 索引）。
+- `YANS`：宿主 → 插件，reopen 时由 `tables/vendor.json` 构造；布局与 YANE 相同。
+- `decode` 按输入 magic 分派：`YAND`/`YANS` 都返回现有 `YANR` primitive result，
+  `applied == primitive_count`、token/generation 校验不变。
+- `cad_vendor_apply` 可附带 `semantics`（base64 YANE）；primitive 与 semantics
+  独立校验，semantics 失败只记 `vendor.semantics.*`，不写半张表、不阻止显示 settle。
+- `schema` 是 vendor 语义版本；插件不支持更高 major 时显式拒绝
+  `vendor.semantics.unsupported_schema`，不渲染空。
+
+逐类可持久化字段见 §5.4。
+
 ## 5. 失败闭合
 
 - 插件缺失/加载失败/帧非法：`vendor-pass.ts` 构造一个真实 `status=1` result 帧回传，
@@ -166,8 +209,9 @@ class body 在 skip 后首字节为 6；R2000 代理样本首字节为 `0x0e`。
 ## 5.1 落库语义：派生表示（已选 C）
 
 插件返回的 primitives **不写入 `cad-db`**。原始 `TCH_*` 实体保持为唯一数据源；
-解码结果进入 `cad-app::vendor::VendorRepresentationStore`，按 `(pass revision, source handle)`
-索引；每个 pass 生成一个不可变快照，渲染会话在 `SceneVersion` 里比较 revision 后重建 base：
+解码结果进入 `cad-app::vendor::VendorRepresentationStore`。pass 内的 `u64` 是 pass-local key
+（import 与 reopen 都是 source handle，ADR 0030 D8），因此现有按 handle 的存储与场景查找不变；
+每个 pass 生成一个不可变快照，渲染会话在 `SceneVersion` 里比较 revision 后重建 base：
 
 - 渲染/装配：`cad-app` 在生成 `DisplayFragment` 时查询该存储，把派生片段挂到
   **源实体的 id** 上，来源标记 `GeometrySource::ProxyCache`、`Precision::Approximate`；
@@ -235,6 +279,46 @@ handle；API/编辑/COPY 创建并提交的实体有 `EntityId` 但 `source_hand
   显示各对象共有键的交集与 mixed 值，`vendor_*` 逐实体行不出现。
 - 插件仍是同权 module script（§6.3）；命令拦截只发生在 chrome 漏斗，**不是**安全边界；Rust 命令仍可被
   其他入口直接调用。
+
+## 5.4 ymodel 语义持久化与完整打开（ADR 0030 D7–D9，2026-11-23）
+
+**存什么**：只存版本无关语义，不存 raw class body。
+
+- 通用：`kind: "tch"`、`class`、`schema`（语义版本）、`status ∈ ok|partial|unsupported` +
+  import 时的 reason codes、`source {handle, dwg_version, tch_base?, class_version?, decoder,
+  raw_sha256?}`（provenance，解码不依赖；raw hash 可选）、`units {scale?, unit?, note?}`、
+  `attributes`（property bag + `TDBXDATAMAP` 的 typed `name → value`，未知键/类型原样保留；
+  P0 为空数组，P1 接线）、`refs [{role, kind: entity|block, handle}]`（host 负责解析为
+  persistent id）、`diagnostics`。
+- 逐类：墙 `start/end/angle/left/right/height/joins/material/insulation`；洞口
+  `position(z=sill)/width/thickness/height/angle/mirror/kind/flags/segments/label/labelHeight`
+  + wall/2D block/3D block/style refs + 组合洞口 `parts`；柱 `position/vertices(x,y,bulge)/height`
+  （material 需按 TCH 版本归一化）；文字 `text/origin/height/rotation/attachment/wrapWidth/line spacing`
+  + 样式上的 `_TCH` XData；块插入 `origin/scale/rotation/normal` + block ref；标注/符号/
+  楼梯/折断线/MODI/图名图号/指北针/转角窗存其点/线/文本/数值参数与 label。
+- **不存**：bit 布局、base/class version、property bag 槽位、84 字节保护几何 + XOR key、
+  T20/T30 cipher、CLASSES index、proxy retained framing、未使用 double/padding、sentinel 字符串。
+- **不存"切好洞的墙"**：墙与洞的关系、切口在插件 render 时按语义重算；否则删洞口后无法更新。
+- 值一律 world space + import 时 unit/scale 快照；refs 优先 entity id，handle 只作 fallback。
+- 表按 **entity id** 索引；删除实体后的 orphan row 在 save/load 过滤并报 `vendor.orphan_rows`。
+  copy/paste 走 copy hook（P1）；未接线时显式声明"pasted TCH 重开无派生显示"。
+
+**落点**：host-owned `tables/vendor.json`，`minor 12`。它是 import provenance，不是 `cad-db`
+几何、不是插件 primitive；`cad-db` 唯一权威与"primitives 不落库"不变。默认**不**保留 raw
+fallback；仅 `partial/unsupported` 行可选的 `reimport_required` blob 属 P2，永不优先于语义。
+
+**打开进度/事件/门禁**：
+
+- `cad_status.openProgress` 覆盖 import → vendor → representations，直到
+  `document_ready = true`；`importProgress` 只是 import 子阶段的兼容投影。
+  P0 的 representations 在 vendor settle 的同一 owner tick 内完成（不单独发一帧）；
+  阶段键保留给未来异步重建。
+- vendor 阶段计数单位是 vendor records；插件内同步 decode 无逐条 tick 时用 indeterminate，
+  不伪造百分比。vendor 不支持/失败/超时仍是"打开完成"，但带 `vendor.timeout` 等诊断。
+- `document-ready` 在 `vendor-settled` 之后同批发出；无 vendor 的文档在 `document-opened`
+  同批发出。`document-opened` = 已发布，`document-ready` = 打开管线完成（不冒充 GPU 首帧）。
+- `can_save`/`can_plot` 与 `require_save_ready` 要求 `document_ready`；vendor pending 时
+  `SAVE`/`EXPORT`/`PLOT` 返回 `save.document_not_ready`；恢复快照在未 ready 时不写。
 
 ## 6. 已知缺口
 

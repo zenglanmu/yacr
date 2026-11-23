@@ -242,6 +242,12 @@ impl HostCore {
         // The authoritative document was replaced: bump the host document epoch
         // and record the real opened terminal before any fallible post-step.
         self.note_document_replaced();
+        // A document that owes a vendor pass is not ready to write yet; setting
+        // this at publish closes the tick-sized gap before the owner stages it
+        // (ADR-0030 D9).
+        let vendor_pending =
+            !self.options.headless && self.controller.borrow().vendor_input_pending();
+        self.set_document_ready(!vendor_pending);
         *self.sync_terminal.borrow_mut() =
             Some(ImportProgressSnapshot::terminal(ImportTerminal::Opened {
                 entities: opened.entities,
@@ -509,6 +515,9 @@ impl HostCore {
         // stale even if a later step fails.
         if opened {
             self.note_document_replaced();
+            let vendor_pending =
+                !self.options.headless && self.controller.borrow().vendor_input_pending();
+            self.set_document_ready(!vendor_pending);
         }
         if matches!(
             poll,
@@ -629,6 +638,11 @@ impl HostCore {
             // forward instead of adopting the destination file's contents
             // (ADR-0037 D8/D11/D12 Phase 2).
             archive_bytes: Some(bytes.clone()),
+            // Filled from `tables/vendor.json` by `install_snapshot` (ADR-0030
+            // D7); the reader owns that table, not this manifest-derived state.
+            vendor_rows: Vec::new(),
+            // Set by `install_snapshot` when those rows are non-empty.
+            vendor_semantics_pending: false,
         };
         let label = target.display_name.clone();
         if let Err(error) = self.controller.borrow_mut().install_snapshot(
@@ -642,6 +656,9 @@ impl HostCore {
         // and record the real opened terminal before any fallible post-step.
         self.presenting_open.set(false);
         self.note_document_replaced();
+        let vendor_pending =
+            !self.options.headless && self.controller.borrow().vendor_input_pending();
+        self.set_document_ready(!vendor_pending);
         let entities = self
             .controller
             .borrow()

@@ -113,7 +113,7 @@ fn blank_status_reports_no_document_capabilities() {
         // NEW needs no source file; SAVE/PLOT still need a document, so the
         // projection of an empty session with all caps advertised is
         // `true/false/false`.
-        document_capabilities(advertised_capabilities(), false, false, false),
+        document_capabilities(advertised_capabilities(), false, false, false, true),
         None,
         Some(CadCamera {
             center: [1.0, 2.0],
@@ -148,6 +148,10 @@ fn blank_status_reports_no_document_capabilities() {
         "dark".into(),
         None,
         CadNavigation::default(),
+        None,
+        // The open-pipeline gate is carried verbatim; these hand-built statuses
+        // describe a ready document with no retained summary.
+        true,
         None,
     );
     assert_eq!(status.document_label, None);
@@ -292,7 +296,7 @@ fn document_status_reports_counts_and_camera() {
         Some(3),
         false,
         true,
-        document_capabilities(advertised_capabilities(), true, false, false),
+        document_capabilities(advertised_capabilities(), true, false, false, true),
         None,
         Some(CadCamera {
             center: [10.0, 20.0],
@@ -324,6 +328,10 @@ fn document_status_reports_counts_and_camera() {
         "dark".into(),
         None,
         CadNavigation::default(),
+        None,
+        // The open-pipeline gate is carried verbatim; these hand-built statuses
+        // describe a ready document with no retained summary.
+        true,
         None,
     );
     assert_eq!(status.document_label.as_deref(), Some("fixture.dwg"));
@@ -376,7 +384,7 @@ fn document_status_reports_counts_and_camera() {
 #[test]
 fn document_capabilities_follow_the_host_flags_and_the_live_session_state() {
     // Advertised, idle, with a document: everything is available.
-    let ready = document_capabilities(advertised_capabilities(), true, false, false);
+    let ready = document_capabilities(advertised_capabilities(), true, false, false, true);
     assert_eq!(
         ready,
         DocumentCapabilities {
@@ -387,7 +395,7 @@ fn document_capabilities_follow_the_host_flags_and_the_live_session_state() {
     );
 
     // A host that advertises nothing reports nothing, even with a document.
-    let unsupported = document_capabilities(no_capabilities(), true, false, false);
+    let unsupported = document_capabilities(no_capabilities(), true, false, false, true);
     assert_eq!(
         unsupported,
         DocumentCapabilities {
@@ -398,20 +406,96 @@ fn document_capabilities_follow_the_host_flags_and_the_live_session_state() {
     );
 
     // No authoritative document: NEW still needs no source file, SAVE/PLOT do.
-    let blank = document_capabilities(advertised_capabilities(), false, false, false);
+    let blank = document_capabilities(advertised_capabilities(), false, false, false, true);
     assert!(blank.can_new);
     assert!(!blank.can_save && !blank.can_plot);
 
     // While an open/import is running nothing can start, including a new
     // drawing (the session is busy).
-    let loading = document_capabilities(advertised_capabilities(), true, true, false);
+    let loading = document_capabilities(advertised_capabilities(), true, true, false, true);
     assert!(!loading.can_new && !loading.can_save && !loading.can_plot);
 
     // A save/plot target chooser (or its pending export) blocks SAVE and PLOT
     // but not NEW: the host serialises only the two export funnels.
-    let pending = document_capabilities(advertised_capabilities(), true, false, true);
+    let pending = document_capabilities(advertised_capabilities(), true, false, true, true);
     assert!(pending.can_new);
     assert!(!pending.can_save && !pending.can_plot);
+
+    // A document whose open pipeline is not ready gates SAVE/PLOT only: the
+    // label is installed and NEW/OPEN stay available so the user can cancel or
+    // switch files (ADR-0030 D9).
+    let not_ready = document_capabilities(advertised_capabilities(), true, false, false, false);
+    assert!(not_ready.can_new);
+    assert!(!not_ready.can_save && !not_ready.can_plot);
+}
+
+#[test]
+fn session_document_readiness_flips_can_save_in_the_projected_status() {
+    let mut host_platform = platform(Rc::new(FakeFiles {
+        events: RefCell::new(Vec::new()),
+    }));
+    host_platform.capabilities = advertised_capabilities();
+    let session = session_with_platform(host_platform);
+
+    // A published document is ready until a vendor pass starts.
+    assert!(session.document_ready());
+    let ready = session.snapshot(None, None, 0);
+    assert!(ready.document_ready);
+    assert!(ready.can_save && ready.can_plot);
+    assert!(
+        ready.open_progress.is_none(),
+        "a settled open reports no live stage"
+    );
+
+    // The open pipeline is not finished: the label is already installed, the
+    // document is not ready, and writing is gated while NEW/OPEN stay usable.
+    session.set_document_ready(false);
+    assert!(!session.document_ready());
+    let applying = session.snapshot(None, None, 0);
+    assert!(!applying.document_ready);
+    assert!(
+        !applying.can_save && !applying.can_plot,
+        "SAVE/PLOT must wait for the open pipeline (ADR-0030 D9)"
+    );
+    assert!(
+        applying.can_new,
+        "NEW stays available so the user can cancel or switch files"
+    );
+    assert!(
+        applying.document_label.is_some(),
+        "`document-opened` already installed the label"
+    );
+
+    // Readiness is not `loading`: the session is idle throughout.
+    assert!(!session.core.loading());
+
+    // Settling flips the same gate back, with no second authority.
+    session.set_document_ready(true);
+    let settled = session.snapshot(None, None, 0);
+    assert!(settled.document_ready && settled.can_save && settled.can_plot);
+}
+
+#[test]
+fn the_status_wire_carries_the_open_pipeline_keys() {
+    let idle = unsupported_status(None);
+    assert!(idle.open_progress.is_none());
+    assert!(
+        !idle.document_ready,
+        "a session without a document is never ready"
+    );
+    assert!(idle.open_summary.is_none());
+
+    let names = super::super::tests_text::wire_field_names(&idle);
+    for key in ["openProgress", "documentReady", "openSummary"] {
+        assert!(
+            names.iter().any(|name| name == key),
+            "the additive key `{key}` is missing from the wire: {names:?}"
+        );
+    }
+    let value = serde_json::to_value(&idle).expect("the status serializes");
+    assert!(value["openProgress"].is_null());
+    assert_eq!(value["documentReady"].as_bool(), Some(false));
+    assert!(value["openSummary"].is_null());
 }
 
 #[test]
@@ -473,7 +557,7 @@ fn the_status_carries_the_grip_drag_flag_on_the_wire_in_both_states() {
         Some(1),
         false,
         true,
-        document_capabilities(advertised_capabilities(), true, false, false),
+        document_capabilities(advertised_capabilities(), true, false, false, true),
         None,
         None,
         None,
@@ -499,6 +583,10 @@ fn the_status_carries_the_grip_drag_flag_on_the_wire_in_both_states() {
         "dark".into(),
         None,
         CadNavigation::default(),
+        None,
+        // The open-pipeline gate is carried verbatim; these hand-built statuses
+        // describe a ready document with no retained summary.
+        true,
         None,
     );
     assert!(dragging.grip_drag);

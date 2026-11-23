@@ -52,6 +52,7 @@ mod layout_arguments;
 mod layout_tabs;
 mod measuregeom;
 mod mleader_arguments;
+mod open_progress;
 mod paper_commands;
 mod payload_options;
 mod pedit;
@@ -182,8 +183,9 @@ pub use self::directory_pick::{
 };
 pub use self::draw2_arguments::invalid_draw2_argument_reason;
 pub use self::events::{
-    cursor_changed, derive_batch, same_status_ignoring_volatile, CadEvent, CadEventKind,
-    CanvasJson, EventBus, EventSink, StatusFrame, EVENT_RING_CAPACITY,
+    cursor_changed, derive_batch, derive_open_ready, same_status_ignoring_volatile, CadEvent,
+    CadEventKind, CanvasJson, DocumentReadyVendor, EventBus, EventSink, StatusFrame,
+    EVENT_RING_CAPACITY,
 };
 pub use self::fonts::{CadFont, CadFonts};
 pub use self::hatch_arguments::{
@@ -198,6 +200,10 @@ pub use self::hatchedit::{
 };
 pub use self::input::{native_pinch_input, NativePinch, PinchViewport};
 pub use self::layers::{CadLayer, CadLayerColor, CadLayerWrite, CadLayers};
+pub use self::open_progress::{
+    CadOpenProgress, CadOpenStage, CadOpenSummary, CadVendorOpenStatus, CadVendorSummary,
+    OPEN_SUMMARY_DIAGNOSTIC_CAP,
+};
 pub use self::performance::CadPerformance;
 pub use self::profile::{
     wire_status_json, DocumentOwner, HostProfile, HostSurfaceMode, WireStatus,
@@ -815,12 +821,6 @@ impl CadSession {
     pub fn note_frame(&self, frame_count: u64) {
         self.frames.set(frame_count);
     }
-
-    /// The last actual present count recorded through [`Self::note_frame`].
-    pub fn frames_presented(&self) -> u64 {
-        self.frames.get()
-    }
-
     /// Advance the engine queue by one bounded pass.
     fn pump(&self) -> Result<(), String> {
         match self.core.pump() {

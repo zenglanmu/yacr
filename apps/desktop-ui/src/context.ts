@@ -4,7 +4,7 @@
 import { createContext, useContext } from 'react';
 import type { Dispatch, RefCallback, SetStateAction } from 'react';
 import type { CommandHistoryEntry } from './commands/command-history.ts';
-import type { CadPendingPrompt } from './cad/cad-status.ts';
+import type { CadOpenProgress, CadPendingPrompt } from './cad/cad-status.ts';
 import type { ToolTextAnswerResult } from './tools/text.ts';
 import type { OrbitResult } from './cad/orbit.ts';
 import type { Locale, Translator } from './i18n.ts';
@@ -55,6 +55,8 @@ export interface ShellValue {
   readonly loading: boolean;
   /** The host's import progress block, or `null`. */
   readonly importProgress: ShellRecord | null;
+  /** The one open pipeline (import → vendor → representations), or `null`. */
+  readonly openProgress: CadOpenProgress | null;
   /** Whether the CAD session can admit commands at all. */
   readonly cadReady: boolean;
   /** The open drawing's label, or `null` on the start page. */

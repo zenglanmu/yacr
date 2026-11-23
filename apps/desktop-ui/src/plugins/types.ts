@@ -167,5 +167,12 @@ export interface VendorPluginHost {
 export interface VendorPluginModule {
   readonly abiVersion: number;
   decode(records: ArrayBuffer): ArrayBuffer;
+  /**
+   * Optional ABI v1 semantics extension (ADR 0030 D8): import-time only,
+   * `YAND` records in, `YANE` semantics out. A missing export keeps the pass
+   * display-only; the host reports `vendor.semantics.missing` rather than
+   * fabricating rows.
+   */
+  extractSemantics?(records: ArrayBuffer): ArrayBuffer;
   register?(host: VendorPluginHost): void;
 }

@@ -61,6 +61,17 @@ impl HostController {
         snapshot
             .tables
             .set(cad_db::TableKind::Sources, document.sources.clone());
+        // Vendor semantics are host-owned too (ADR-0030 D7), but unlike the two
+        // report tables an **empty** table must not be written: the table is the
+        // minor-12 tier, so a document with no vendor rows has to stay at the
+        // minor its other features imply. `set` only when the document really
+        // has rows.
+        if !document.persistence.vendor_rows.is_empty() {
+            snapshot.tables.set(
+                cad_db::TableKind::Vendor,
+                document.persistence.vendor_rows.clone(),
+            );
+        }
         Ok(snapshot)
     }
 
@@ -80,12 +91,28 @@ impl HostController {
     pub fn install_snapshot(
         &mut self,
         snapshot: &cad_db::DocumentSnapshot,
-        persistence: crate::PersistenceState,
+        mut persistence: crate::PersistenceState,
         name_hint: Option<String>,
     ) -> CadResult<()> {
         let drawing = DrawingDatabase::from_snapshot(snapshot).map_err(|error| {
             CadError::Unsupported(format!("{}: {}", error.marker, error.detail))
         })?;
+        // Host-owned vendor semantics travel with the archive (ADR-0030 D7).
+        // The database hydration above ignores the table by construction; the
+        // document slot is their runtime authority. Rows whose entity id is not
+        // in the loaded drawing are stale (the entity was deleted before the
+        // save); drop them here and name the count below instead of attaching
+        // them to an unrelated entity.
+        let stored = snapshot
+            .tables
+            .get(cad_db::TableKind::Vendor)
+            .map(<[serde_json::Value]>::to_vec)
+            .unwrap_or_default();
+        let (vendor_rows, orphan_rows) =
+            super::vendor_semantics::drop_orphan_rows(stored, &drawing);
+        persistence.vendor_rows = vendor_rows;
+        let semantics_pending = !persistence.vendor_rows.is_empty();
+        persistence.vendor_semantics_pending = semantics_pending;
         let label = name_hint.unwrap_or_else(|| self.document_name_hint.clone());
         let document = Document {
             id: self.document_id,
@@ -116,13 +143,22 @@ impl HostController {
         self.reset_for_new_content();
         self.document_name_hint = label;
         // No connector ran: a `.ymodel` open has no import report and no vendor
-        // records. `Some([])` on the next tick clears any previous vendor pass.
+        // records. A document with persisted semantics owes a `YANS` pass
+        // (ADR-0030 D8); one without any row still stages `Some([])` so the next
+        // tick clears the previous pass.
         self.last_import_report = None;
         self.last_vendor_records = Vec::new();
-        self.vendor_records_pending = true;
+        self.vendor_records_pending = !semantics_pending;
         // Not a localized sentence: the host owns the user-facing status line and
         // reads `document_name_hint` for it (the crate must not hardcode one).
-        self.last_status = format!("opened {}", self.document_name_hint);
+        self.last_status = if orphan_rows == 0 {
+            format!("opened {}", self.document_name_hint)
+        } else {
+            format!(
+                "opened {} (vendor.orphan_rows: {orphan_rows})",
+                self.document_name_hint
+            )
+        };
         Ok(())
     }
 
@@ -202,16 +238,17 @@ impl HostController {
         &self.dirty_scope
     }
 
-    /// Mark the two host-owned report tables dirty after an import publish.
+    /// Mark the host-owned report/vendor tables dirty after an import publish.
     ///
-    /// `tables/compat.json` and `tables/sources.json` are written from the
-    /// `Document` slot, not from `cad-db`, so no database commit would otherwise
-    /// name them. Called **after** [`HostController::reset_for_new_content`],
-    /// which clears the accumulated scope because it described the replaced
-    /// document.
+    /// `tables/compat.json`, `tables/sources.json` and `tables/vendor.json` are
+    /// written from the `Document` slot, not from `cad-db`, so no database commit
+    /// would otherwise name them. Called **after**
+    /// [`HostController::reset_for_new_content`], which clears the accumulated
+    /// scope because it described the replaced document.
     pub(super) fn mark_import_metadata_dirty(&mut self) {
         self.dirty_scope.table(cad_db::TableKind::Compat);
         self.dirty_scope.table(cad_db::TableKind::Sources);
+        self.dirty_scope.table(cad_db::TableKind::Vendor);
     }
 
     /// Append one export report to the document's persisted compatibility table.

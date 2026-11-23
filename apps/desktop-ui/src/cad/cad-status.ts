@@ -14,7 +14,24 @@ import { parseOrbitCapability } from './host-profile.ts';
 import { parseCadNavigation } from './navigation.ts';
 import type { CadNavigationSettings } from './navigation.ts';
 import type { Translator } from '../i18n.ts';
+import {
+  openProgressView,
+  parseOpenProgress,
+  parseOpenSummary,
+} from './open-progress.ts';
+import type {
+  CadImportProgress,
+  CadOpenProgress,
+  CadOpenSummary,
+  ImportProgressView,
+} from './open-progress.ts';
 
+export type {
+  CadImportProgress,
+  CadOpenProgress,
+  CadOpenSummary,
+  ImportProgressView,
+} from './open-progress.ts';
 /** The `invoke` callable the shell threads in (Tauri IPC, or a test double). */
 export type Invoke = (command: string, args?: Record<string, unknown>) => Promise<unknown>;
 
@@ -48,19 +65,7 @@ export interface CadViewOrientation {
   readonly up: WorldPoint;
 }
 
-/** Live import progress; present only while an import is genuinely running. */
-export interface CadImportProgress {
-  /** Stable machine key of the latest phase, or `null` before the first tick. */
-  readonly phase: string | null;
-  /** Real entities normalised/inserted so far. */
-  readonly entitiesDone: number;
-  /** Total entities expected, or `null` when the format does not expose it. */
-  readonly entitiesTotal: number | null;
-  /** Source bytes measured so far, only when actually known. */
-  readonly bytes: number | null;
-  /** Whether a cancel request can still be issued for this import. */
-  readonly cancellable: boolean;
-}
+
 
 /** The closed set of editing-control machine keys a selection row may carry. */
 export type CadSelectionRowKind = 'text' | 'number' | 'enum' | 'bool';
@@ -359,6 +364,12 @@ export interface CadStatus {
   readonly entityCount: number | null;
   readonly loading: boolean;
   readonly importProgress: CadImportProgress | null;
+  /** One live open pipeline (import → vendor → representations), or `null`. */
+  readonly openProgress?: CadOpenProgress | null;
+  /** Whether the current document finished its open pipeline (SAVE gate). */
+  readonly documentReady?: boolean;
+  /** The terminal summary of the last successful open, or `null`. */
+  readonly openSummary?: CadOpenSummary | null;
   readonly error: string | null;
   readonly canNew: boolean;
   readonly canOpen: boolean;
@@ -745,6 +756,11 @@ export function parseCadStatus(value: unknown): CadStatus {
   // Live import progress is optional (`null` when idle) but, when present, must
   // be well-formed; a malformed block is never rendered as a guessed bar.
   parseImportProgress(status.importProgress);
+  parseOpenProgress(status.openProgress);
+  parseOpenSummary(status.openSummary);
+  if (status.documentReady !== undefined && typeof status.documentReady !== 'boolean') {
+    throw Error('CAD_STATUS_INVALID');
+  }
   // The selection block is always present; a malformed one is rejected outright.
   parseSelection(status.selection);
   // Idle hover preview is optional for older hosts, but a present flag must be a
@@ -918,16 +934,6 @@ function importPhaseLabel(t: Translator, phase: string | null): string {
 }
 
 /** A localised view of real import progress for the chrome. */
-export interface ImportProgressView {
-  readonly phase: string;
-  readonly count: string;
-  readonly detail: string;
-  /** `null` while the importer exposed no total (indeterminate). */
-  readonly ratio: number | null;
-  readonly determinate: boolean;
-  readonly cancellable: boolean;
-}
-
 /**
  * A localised view of real import progress for the chrome.
  *
@@ -939,7 +945,12 @@ export interface ImportProgressView {
 export function importProgressView(
   progress: CadImportProgress | null | undefined,
   t: Translator,
+  openProgress?: CadOpenProgress | null,
 ): ImportProgressView | null {
+  // The open pipeline covers the post-import vendor/representation stages; the
+  // import block alone ends at publish and would hide the bar while the vendor
+  // pass is still running (ADR 0030 D9).
+  if (openProgress) return openProgressView(openProgress, t);
   if (!progress) return null;
   const determinate = progress.entitiesTotal !== null;
   const ratio = determinate

@@ -2,7 +2,7 @@
 //! the command-log derivation.
 
 use super::*;
-use crate::session::unsupported_status;
+use crate::session::{unsupported_status, CadOpenSummary, CadVendorSummary};
 use std::sync::{Arc, Mutex};
 
 #[derive(Default)]
@@ -51,6 +51,7 @@ fn kinds(events: &[CadEventKind]) -> Vec<&'static str> {
             CadEventKind::PopupChanged { .. } => "popup-changed",
             CadEventKind::VendorPending { .. } => "vendor-pending",
             CadEventKind::VendorSettled { .. } => "vendor-settled",
+            CadEventKind::DocumentReady { .. } => "document-ready",
             CadEventKind::EventsDropped { .. } => "events-dropped",
             CadEventKind::CursorChanged { .. } => "cursor-changed",
         })
@@ -575,6 +576,62 @@ fn volatile_fields_do_not_make_a_status_semantically_different() {
     moved.cursor_world = Some([5.0, 6.0, 7.0]);
     assert!(cursor_changed(&previous, &moved));
     assert!(!cursor_changed(&previous, &previous));
+}
+
+#[test]
+fn document_ready_is_derived_once_from_the_transition_and_never_by_derive_batch() {
+    let mut previous = status();
+    previous.document_ready = false;
+    let mut ready = status();
+    ready.document_ready = true;
+    ready.document_label = Some("plan.dwg".to_string());
+    ready.entity_count = Some(7);
+    ready.open_summary = Some(CadOpenSummary::new(
+        "plan.dwg".to_string(),
+        7,
+        CadVendorSummary::new("ok", 3, vec!["vendor.note".to_string()]),
+    ));
+
+    let event = derive_open_ready(&previous, &ready).expect("the transition emits once");
+    assert!(matches!(
+        &event,
+        CadEventKind::DocumentReady { label, entities, vendor }
+            if label == "plan.dwg"
+                && *entities == 7
+                && vendor.status == "ok"
+                && vendor.applied == 3
+                && vendor.diagnostics == vec!["vendor.note".to_string()]
+    ));
+    assert_eq!(
+        serde_json::to_value(CadEvent {
+            revision: 1,
+            kind: event,
+        })
+        .expect("serializes"),
+        serde_json::json!({
+            "revision": 1,
+            "type": "document-ready",
+            "label": "plan.dwg",
+            "entities": 7,
+            "vendor": {"status": "ok", "applied": 3, "diagnostics": ["vendor.note"]},
+        })
+    );
+
+    // A ready document that stays ready never re-emits: one event per install.
+    assert!(derive_open_ready(&ready, &ready).is_none());
+    // It is never part of the generic diff, so the carrier owns the ordering.
+    assert!(!kinds(&derive_batch(Some(&previous), &ready)).contains(&"document-ready"));
+
+    // No retained summary: the fallback reports the honest label/count and that
+    // no vendor pass ran, instead of a fabricated `ok`.
+    let mut fallback = ready.clone();
+    fallback.open_summary = None;
+    let event = derive_open_ready(&previous, &fallback).expect("the transition still emits");
+    assert!(matches!(
+        &event,
+        CadEventKind::DocumentReady { label, entities, vendor }
+            if label == "plan.dwg" && *entities == 7 && vendor.status == "none"
+    ));
 }
 
 #[test]

@@ -9,6 +9,7 @@
 //!
 //! | the document has | minor | what a minor-4 reader misses |
 //! |---|---|---|
+//! | host-owned vendor semantics (ADR-0030 D7) | `12` | `tables/vendor.json` |
 //! | in-context relations (ADR-0043 P3) | `11` | `tables/relations.json` |
 //! | feature definitions (ADR-0043 P2) | `10` | `tables/features.json` |
 //! | a P1 expression node or configuration (ADR-0043 P1) | `9` | `neg`/`pow`/`fn`/`if` tags, `tables/configurations.json` |
@@ -61,8 +62,12 @@ pub(crate) const FORMAT_MINOR_FEATURES: u32 = 10;
 /// A document that carries self-authored in-context relations (ADR-0043 P3).
 pub(crate) const FORMAT_MINOR_RELATIONS: u32 = 11;
 
+/// A document that carries host-owned vendor semantics rows (ADR-0030 D7).
+pub(crate) const FORMAT_MINOR_VENDOR: u32 = 12;
+
 // The chain is a compile-time fact, not a convention: a future tier inserted in
 // the middle cannot silently leave the constants out of order.
+const _: () = assert!(FORMAT_MINOR_RELATIONS + 1 == FORMAT_MINOR_VENDOR);
 const _: () = assert!(FORMAT_MINOR_FEATURES + 1 == FORMAT_MINOR_RELATIONS);
 const _: () = assert!(FORMAT_MINOR_EXPRESSIONS + 1 == FORMAT_MINOR_FEATURES);
 const _: () = assert!(FORMAT_MINOR_PARAMS + 1 == FORMAT_MINOR_EXPRESSIONS);
@@ -79,6 +84,16 @@ const _: () = assert!(FORMAT_MINOR_PLAIN + 1 == FORMAT_MINOR_RESOURCES);
 /// tier here is about archive entries and the header flag, both of which the
 /// store already models.
 pub(crate) fn document_minor(snapshot: &DocumentSnapshot) -> u32 {
+    // The vendor tier is about a host-owned table only: no geometry, no element
+    // block. An empty (or absent) table is not a vendor document, so an ordinary
+    // `.ymodel` never pays the minor-12 gate.
+    if snapshot
+        .tables
+        .get(TableKind::Vendor)
+        .is_some_and(|rows| !rows.is_empty())
+    {
+        return FORMAT_MINOR_VENDOR;
+    }
     if snapshot.has_relations() {
         return FORMAT_MINOR_RELATIONS;
     }
@@ -119,7 +134,8 @@ mod tests {
     /// The top tier is the format constant, not an independent number.
     #[test]
     fn the_top_tier_is_the_format_minor() {
-        assert_eq!(FORMAT_MINOR_RELATIONS, cad_domain::ymodel::FORMAT_MINOR);
+        assert_eq!(FORMAT_MINOR_VENDOR, cad_domain::ymodel::FORMAT_MINOR);
+        assert_eq!(FORMAT_MINOR_VENDOR, FORMAT_MINOR_RELATIONS + 1);
         assert_eq!(FORMAT_MINOR_RELATIONS, FORMAT_MINOR_FEATURES + 1);
         assert_eq!(FORMAT_MINOR_FEATURES, FORMAT_MINOR_EXPRESSIONS + 1);
         assert_eq!(FORMAT_MINOR_EXPRESSIONS, FORMAT_MINOR_PARAMS + 1);

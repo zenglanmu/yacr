@@ -306,6 +306,11 @@ textures/<key>                -- 文档自有基色纹理，STORED（minor 3，A
   输出。两者是同一个 JSON 对象，读取端一律按名字取值；**同一次构建内**同一个快照两次写仍
   逐字节相同（插入序固定），但**跨构建**的字节不同，不是兼容性问题。测试不得固定键序——
   `schema::tests::the_object_is_deterministic` 曾因此只在合并构建时失败。
+- **minor 12（2026-11-23，[ADR-0030](0030-vendor-entity-selection-and-plugin-properties.md) D7）**：
+  新增 host-owned `tables/vendor.json`，保存厂商对象（当前是天正 `TCH_*`）的**版本无关语义**
+  （class/status/attributes/params/refs/diagnostics），按 entity id 索引。它记录 import 语义，
+  不是 `cad-db` 几何，也不是插件 primitive；raw class-body 默认不落盘。**minor ≤ 11 的 reader
+  按 `ymodel.unsupported_minor` 拒绝**（不静默丢行）；无 vendor 行的文档不写该表、不改 minor。
 - **未知 entry**：`foreign: true`，保存时按压缩字节 raw-copy，永不解析、永不丢弃；
   **全量重写/compaction 也必须复制它们**，不可读则 `ymodel.foreign_entries_unreadable`。
   foreign entry 与保留路径冲突 → 显式失败，不覆盖。

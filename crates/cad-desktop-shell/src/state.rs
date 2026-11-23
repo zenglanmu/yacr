@@ -358,6 +358,13 @@ pub struct Shared {
     /// A settled derived-representation snapshot waiting for the owner tick to
     /// install it on the render session. Display-only; never written to `cad-db`.
     pub vendor_pending_representations: Option<crate::vendor::PendingVendorRepresentation>,
+    /// Vendor semantics rows the `cad_vendor_apply` command parsed from the
+    /// plugin's `YANE` frame, waiting for the owner tick to resolve handles and
+    /// persist them (ADR-0030 D7/D8). Not display data.
+    pub vendor_pending_semantics: Option<(u64, u64, Vec<serde_json::Value>)>,
+    /// The last settled vendor acknowledgement, for `openSummary` (ADR-0030 D9).
+    /// Cleared when a new pass is staged or the document is replaced.
+    pub vendor_last_ack: Option<crate::vendor::VendorAck>,
     /// Set by the next `set_vendor_representations(None)` the tick must apply
     /// (a new document has no derived geometry yet).
     pub vendor_representations_clear: bool,
@@ -418,6 +425,8 @@ impl Shared {
             directory_picker: None,
             vendor: crate::vendor::VendorStore::default(),
             vendor_pending_representations: None,
+            vendor_pending_semantics: None,
+            vendor_last_ack: None,
             vendor_representations_clear: false,
             plugin_store: None,
             plugins_supported: false,

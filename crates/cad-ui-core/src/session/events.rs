@@ -95,6 +95,7 @@ use serde::ser::Error as _;
 use serde::{Serialize, Serializer};
 
 use super::command_log::{CadCommandLogEntry, CadCommandLogKind};
+use super::open_progress::CadVendorOpenStatus;
 use super::profile::HostProfile;
 use super::status::{CadPopup, CadStatus, CadViewOrientation};
 
@@ -285,6 +286,40 @@ pub enum CadEventKind {
         /// How many events were dropped since the previous marker.
         count: u32,
     },
+    /// The open pipeline for a newly installed document finished (ADR-0030 D9).
+    ///
+    /// Emitted at most once per successfully installed document. It is **not**
+    /// part of [`derive_batch`]: the carrier calls [`derive_open_ready`] itself
+    /// **after** the vendor events (`vendor-pending`/`vendor-settled`) of the same
+    /// flush, so the pipeline order stays the carrier's knowledge. Wire type:
+    /// `document-ready`.
+    ///
+    /// `document-opened` means the label was installed; `document-ready` means
+    /// the whole open pipeline settled (vendor pass finished, derived snapshot
+    /// installed). It is not a GPU first-frame or pixel acceptance claim.
+    DocumentReady {
+        /// The installed document label.
+        label: String,
+        /// Real entity count of the installed document.
+        entities: u64,
+        /// The terminal vendor outcome that finished this open.
+        vendor: DocumentReadyVendor,
+    },
+}
+
+/// The vendor block of a [`CadEventKind::DocumentReady`] payload.
+///
+/// `status` is one of [`CadVendorOpenStatus`]'s terminal values, `applied` the
+/// primitives the host actually wrote and `diagnostics` the bounded stable
+/// reasons. Field names are already the wire names (no camelCase difference).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DocumentReadyVendor {
+    /// One of [`CadVendorOpenStatus`]'s terminal value strings.
+    pub status: String,
+    /// Primitives the host actually wrote (never an invented count).
+    pub applied: u32,
+    /// Bounded stable diagnostics.
+    pub diagnostics: Vec<String>,
 }
 
 /// One revisioned event on the wire.
@@ -572,6 +607,66 @@ pub fn derive_batch(prev: Option<&CadStatus>, next: &CadStatus) -> Vec<CadEventK
     }
 
     events
+}
+
+/// Derive the single `document-ready` event of an open pipeline (ADR-0030 D9).
+///
+/// Returns `Some` **only** on the `!prev.document_ready → next.document_ready`
+/// transition, from `next.open_summary` when present (falling back to
+/// `next.document_label`/`next.entity_count` and `vendor.status = "none"`), so
+/// the event fires at most once per installed document.
+///
+/// It is deliberately **not** part of [`derive_batch`]: the batch diff is
+/// unordered from the pipeline's point of view, while `document-ready` must come
+/// after the same flush's `vendor-settled` (or alongside `document-opened` for a
+/// document with no vendor records). The native and wasm carriers therefore call
+/// this themselves after their vendor step — one shared derivation, never a
+/// per-carrier copy.
+pub fn derive_open_ready(prev: &CadStatus, next: &CadStatus) -> Option<CadEventKind> {
+    if prev.document_ready || !next.document_ready {
+        return None;
+    }
+    document_ready_event(next)
+}
+
+/// Build the `document-ready` event for an already-ready status.
+///
+/// Carriers use this in addition to [`derive_open_ready`] when a synchronous
+/// open publishes and settles inside one flush (no intermediate
+/// `documentReady: false` snapshot was observed): the `document-opened` batch is
+/// the proof that a new document was installed, and this event must still follow
+/// it exactly once.
+pub fn document_ready_event(next: &CadStatus) -> Option<CadEventKind> {
+    if !next.document_ready {
+        return None;
+    }
+    let (label, entities, vendor) = match &next.open_summary {
+        Some(summary) => (
+            summary.label.clone(),
+            summary.entities,
+            DocumentReadyVendor {
+                status: summary.vendor.status.clone(),
+                applied: summary.vendor.applied,
+                diagnostics: summary.vendor.diagnostics.clone(),
+            },
+        ),
+        // No retained summary (the host did not project one): report the honest
+        // installed label/count and state that no vendor pass ran.
+        None => (
+            next.document_label.clone().unwrap_or_default(),
+            next.entity_count.unwrap_or(0),
+            DocumentReadyVendor {
+                status: CadVendorOpenStatus::NONE.to_string(),
+                applied: 0,
+                diagnostics: Vec::new(),
+            },
+        ),
+    };
+    Some(CadEventKind::DocumentReady {
+        label,
+        entities,
+        vendor,
+    })
 }
 
 /// The `command-*` events of one flush.

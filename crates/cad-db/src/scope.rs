@@ -156,6 +156,17 @@ pub enum TableKind {
     /// Self-authored in-context relation edges (`tables/relations.json`,
     /// ADR-0043 P3): typed face/edge/vertex references and their state machine.
     Relations,
+    /// Host-owned import/vendor semantics (`tables/vendor.json`, ADR-0030 D7):
+    /// one row per entity, keyed by entity id.
+    ///
+    /// Not `cad-db` geometry: the rows carry the version-independent vendor
+    /// object model (class/status/attributes/params/refs/diagnostics) that the
+    /// importer and plugin decoded, so a reopen does not need the vendor binary
+    /// encoding. `DrawingDatabase::from_snapshot` ignores the table, exactly like
+    /// [`TableKind::Sources`]/[`TableKind::Compat`]; the document slot is the
+    /// runtime authority. It contributes the minor-12 tier and is only present
+    /// when the document really has vendor rows.
+    Vendor,
 }
 
 /// The set of persisted rows one commit made stale.

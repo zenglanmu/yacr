@@ -410,7 +410,7 @@ fn parse_tables(
 /// `cad-db`, and `check-architecture.py` forbids this crate from editing it), so
 /// the reverse map is written out and a table missing from it is refused by
 /// [`unknown_live_entry`] rather than silently dropped.
-const TABLE_ENTRIES: [(TableKind, &str); 19] = [
+const TABLE_ENTRIES: [(TableKind, &str); 20] = [
     (TableKind::Layers, "tables/layers.json"),
     (TableKind::Layouts, "tables/layouts.json"),
     (TableKind::Styles, "tables/styles.json"),
@@ -444,6 +444,9 @@ const TABLE_ENTRIES: [(TableKind, &str); 19] = [
     // snapshot codec owns their shapes and budgets).
     (TableKind::Features, "tables/features.json"),
     (TableKind::Relations, "tables/relations.json"),
+    // Host-owned vendor semantics (ADR-0030 D7). Opaque rows here too: the host
+    // owns the row shape, the store only carries it across a save.
+    (TableKind::Vendor, "tables/vendor.json"),
 ];
 
 /// The table kind one entry path holds, if this build models it.
@@ -851,6 +854,7 @@ mod tests {
             TableKind::Configurations,
             TableKind::Features,
             TableKind::Relations,
+            TableKind::Vendor,
         ];
         let mut paths = std::collections::BTreeSet::new();
         for kind in kinds {
@@ -877,6 +881,7 @@ mod tests {
                 TableKind::Configurations => "Configurations",
                 TableKind::Features => "Features",
                 TableKind::Relations => "Relations",
+                TableKind::Vendor => "Vendor",
             };
             assert_eq!(name, format!("{kind:?}"));
             let path = table_entry(kind);

@@ -43,7 +43,11 @@ export interface MobileMenuButtonProps {
 export function MobileMenuButton({ menuOpen, onMenu, drawerId }: MobileMenuButtonProps) {
   const { t } = useI18n();
   const shell = useShell();
-  const progress = importProgressView(shell.importProgress as CadImportProgress | null, t);
+  const progress = importProgressView(
+    shell.importProgress as CadImportProgress | null,
+    t,
+    shell.openProgress,
+  );
   const percent = progress && progress.determinate ? Math.round((progress.ratio ?? 1) * 100) : null;
   const running = progress !== null || shell.loading;
   return (

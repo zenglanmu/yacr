@@ -195,6 +195,7 @@ impl HostCore {
             open_status_graded: Rc::new(Cell::new(false)),
             presenting_open: Rc::new(Cell::new(false)),
             save_pending: Rc::new(Cell::new(false)),
+            document_ready: Rc::new(Cell::new(true)),
             pending_save: Rc::new(RefCell::new(None)),
             pending_export_format: Rc::new(RefCell::new(None)),
             drawing_path: Rc::new(RefCell::new(None)),
@@ -746,6 +747,26 @@ impl HostCore {
                 .borrow()
                 .async_open_snapshot()
                 .is_some_and(|s| s.running)
+    }
+
+    /// Whether the current authoritative document finished its open pipeline
+    /// (ADR-0030 D9).
+    ///
+    /// A vendor decode/apply pass keeps this `false`; it is **not** part of
+    /// [`Self::loading`] (which stays scoped to picker/import), so `NEW`/`OPEN`
+    /// remain available while `SAVE`/`EXPORT`/`PLOT` wait.
+    pub fn document_ready(&self) -> bool {
+        self.document_ready.get()
+    }
+
+    /// Mark the current authoritative document ready (or not) for writing.
+    ///
+    /// The carrier owns the pipeline and calls this on the owner thread: `false`
+    /// when a vendor pass starts for a newly installed document, `true` once it
+    /// settled (including unsupported/failed/timeout outcomes, which are still a
+    /// finished open). No second readiness authority exists.
+    pub fn set_document_ready(&self, ready: bool) {
+        self.document_ready.set(ready);
     }
 
     /// Cancel an in-flight open/read (`CancelLoading`).

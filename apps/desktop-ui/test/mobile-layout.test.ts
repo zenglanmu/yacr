@@ -327,7 +327,7 @@ test('the compact menu is one floating button: no bar, no reserved height, no se
   assert.ok(menu.includes('aria-expanded={menuOpen}'));
   assert.ok(menu.includes('aria-controls={drawerId}'));
   assert.ok(menu.includes('aria-label={t(\'mobile.menu\')}'));
-  assert.ok(menu.includes('importProgressView(shell.importProgress'), 'the host import strip stays');
+  assert.ok(menu.includes('shell.openProgress'), 'the host open-progress strip stays');
   // The wrapper is the button's own anchored box. `.mobile-topbar` stays as the
   // compact chrome's selector for the web smoke harness and the Android layout log;
   // it no longer paints a row.

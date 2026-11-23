@@ -50,10 +50,15 @@ use cad_app::vendor::VendorRepresentationStore;
 use cad_app::VendorRecord;
 use cad_ui_core::session::events::CadEventKind;
 use cad_ui_core::session::vendor::{VendorAck, VendorStatus, VendorStore};
+use cad_ui_core::session::{
+    CadOpenProgress, CadOpenStage, CadOpenSummary, CadStatus, CadVendorOpenStatus, CadVendorSummary,
+};
 
 thread_local! {
     /// The one pass this wasm instance owns (enabled: the exports exist).
     static STORE: RefCell<VendorStore> = RefCell::new(enabled_store());
+    /// The last settled acknowledgement, for `openSummary` (ADR-0030 D9).
+    static LAST_ACK: RefCell<Option<VendorAck>> = const { RefCell::new(None) };
 }
 
 /// A store that serves the vendor commands (see the module docs).
@@ -79,6 +84,7 @@ pub(crate) fn stage(records: Option<Vec<VendorRecord>>) {
     let Some(records) = records else {
         return;
     };
+    LAST_ACK.with(|ack| *ack.borrow_mut() = None);
     if records.is_empty() {
         with_store(|store| store.clear());
         return;
@@ -87,6 +93,74 @@ pub(crate) fn stage(records: Option<Vec<VendorRecord>>) {
     if let Err(reason) = outcome {
         with_store(|store| store.report_failure(reason));
     }
+}
+
+/// Stage the `tables/vendor.json` rows of an opened `.ymodel` as one `YANS`
+/// pass (ADR-0030 D8). Same empty/`None` contract as [`stage`].
+pub(crate) fn stage_semantics(rows: Option<Vec<serde_json::Value>>) {
+    let Some(rows) = rows else {
+        return;
+    };
+    LAST_ACK.with(|ack| *ack.borrow_mut() = None);
+    if rows.is_empty() {
+        with_store(|store| store.clear());
+        return;
+    }
+    if let Err(reason) = with_store(|store| store.stage_semantics(rows)) {
+        with_store(|store| store.report_failure(reason));
+    }
+}
+
+/// Whether a vendor pass is currently armed and unsettled.
+pub(crate) fn is_pending() -> bool {
+    with_store(|store| store.is_pending())
+}
+
+/// Overlay the live vendor stage / terminal summary onto a status snapshot.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // native: tests only
+pub(crate) fn overlay_open(status: &mut CadStatus) {
+    if is_pending() {
+        status.open_progress = Some(CadOpenProgress {
+            stage: CadOpenStage::VENDOR.to_string(),
+            phase: Some("decode".to_string()),
+            done: 0,
+            total: Some(u64::from(with_store(|store| store.entities()))),
+            unit: CadOpenStage::UNIT_VENDOR_RECORDS.to_string(),
+            cancellable: false,
+        });
+        status.document_ready = false;
+        status.open_summary = None;
+        return;
+    }
+    let ack = LAST_ACK.with(|ack| ack.borrow().clone());
+    let Some(ack) = ack else {
+        return;
+    };
+    let (Some(label), Some(entities)) = (status.document_label.clone(), status.entity_count) else {
+        return;
+    };
+    let timed_out = ack
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic == "vendor.timeout");
+    let semantics_failed = ack
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.starts_with("vendor.semantics."));
+    let vendor_status = if timed_out {
+        CadVendorOpenStatus::TIMEOUT
+    } else if semantics_failed {
+        CadVendorOpenStatus::FAILED
+    } else if ack.accepted && ack.applied > 0 {
+        CadVendorOpenStatus::OK
+    } else {
+        CadVendorOpenStatus::UNSUPPORTED
+    };
+    status.open_summary = Some(CadOpenSummary::new(
+        label,
+        entities,
+        CadVendorSummary::new(vendor_status, ack.applied, ack.diagnostics.clone()),
+    ));
 }
 
 /// Take the vendor events the next flush owes, in their frozen order.
@@ -180,13 +254,32 @@ pub fn vendor_apply(
     token: u64,
     generation: u64,
     payload: &str,
+    semantics: Option<String>,
 ) -> Result<String, wasm_bindgen::JsValue> {
     let settlement = settle_base64_full(token, generation, payload)
         .map_err(|message| wasm_bindgen::JsValue::from_str(&message))?;
     let store = Arc::new(VendorRepresentationStore::new(token, settlement.primitives));
     crate::page::apply_vendor_representations(store);
+    let mut ack = settlement.ack;
+    // Semantics are validated independently: a bad/missing frame never blocks
+    // display, and a bad frame never writes a partial table (ADR-0030 D8).
+    if let Some(encoded) = semantics {
+        match cad_ui_core::session::vendor::decode_base64(&encoded).and_then(|bytes| {
+            cad_ui_core::session::vendor::parse_semantics_frame(&bytes, token, generation)
+        }) {
+            Ok(rows) => {
+                if let Err(error) = crate::page::apply_vendor_semantics(rows) {
+                    ack.accepted = false;
+                    ack.diagnostics.push(error);
+                }
+            }
+            Err(error) => ack.diagnostics.push(error),
+        }
+    }
+    LAST_ACK.with(|stored| *stored.borrow_mut() = Some(ack.clone()));
+    crate::page::set_document_ready(true);
     crate::events::flush_live();
-    Ok(serde_json::to_string(&settlement.ack).expect("VendorAck is a plain JSON value"))
+    Ok(serde_json::to_string(&ack).expect("VendorAck is a plain JSON value"))
 }
 
 /// `cad_vendor_status`: the active pass descriptor, for a chrome that connected

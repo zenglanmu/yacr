@@ -47,6 +47,14 @@ export interface VendorAck {
 const VENDOR_ABI_VERSION = 1;
 const RESULT_MAGIC = 0x59414e52;
 const RESULT_STATUS_UNSUPPORTED = 1;
+/** Host → plugin semantics frame (`YANS`, ADR 0030 D8). */
+const SEMANTICS_REQUEST_MAGIC = 0x59414e53;
+/**
+ * Bound on one pass. The import is already published, so a plugin that never
+ * answers must not leave the document permanently "not ready" (and SAVE gated).
+ * The host settles the timeout as a real unsupported result, never a hang.
+ */
+const VENDOR_PASS_TIMEOUT_MS = 30_000;
 
 /** The plugin URL, resolved against the document root (Tauri and browser alike). */
 function pluginUrl(): string {
@@ -76,6 +84,10 @@ function validated(candidate: Partial<VendorPluginModule> | undefined): VendorPl
   // `register` is optional (ADR 0030 D3), but a present value must be callable:
   // a truthy non-function is a contract violation, never "no providers".
   if (candidate.register !== undefined && typeof candidate.register !== 'function') {
+    throw new Error('vendor.plugin_contract');
+  }
+  // Optional semantics extension (ADR 0030 D8): a present value must be callable.
+  if (candidate.extractSemantics !== undefined && typeof candidate.extractSemantics !== 'function') {
     throw new Error('vendor.plugin_contract');
   }
   return candidate as VendorPluginModule;
@@ -246,11 +258,34 @@ export function encodeBase64(buffer: ArrayBuffer): string {
   return btoa(binary);
 }
 
+/** Reject `work` after the pass budget instead of leaving the host pending. */
+function withPassTimeout<T>(work: Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('vendor.timeout')), VENDOR_PASS_TIMEOUT_MS);
+    work.then(
+      value => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      error => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 /**
  * Run one pass to completion and return the host's acknowledgement.
  *
  * A stale token (the user opened another file while decoding) is rejected by the
  * host with `vendor.stale_token`; the caller may ignore that specific rejection.
+ *
+ * Import (`YAND`) also asks the plugin for its optional `YANE` semantics frame
+ * and posts it with the result, so the host can persist the version-independent
+ * rows. A `YANS` reopen already *is* semantics; it is not extracted again.
+ * Semantics extraction failing never blocks the display pass: the host settles
+ * the primitives and reports the missing/failed semantics by name.
  */
 export async function runVendorPass(
   frame: VendorPendingFrame,
@@ -258,27 +293,42 @@ export async function runVendorPass(
 ): Promise<VendorAck> {
   const call = deps.invoke ?? invoke;
   let result: ArrayBuffer;
+  let semantics: ArrayBuffer | null = null;
   try {
-    const module = await loadVendorPlugin(deps);
+    const module = await withPassTimeout(loadVendorPlugin(deps));
     if (module.abiVersion !== VENDOR_ABI_VERSION) {
       throw new Error(`vendor.unsupported_abi: ${module.abiVersion}`);
     }
     const records = asArrayBuffer(
-      await call('cad_vendor_records', { token: frame.token }),
+      await withPassTimeout(call('cad_vendor_records', { token: frame.token })),
     );
+    const semanticsPass = records.byteLength >= 4
+      && new DataView(records).getUint32(0, true) === SEMANTICS_REQUEST_MAGIC;
+    if (!semanticsPass && typeof module.extractSemantics === 'function') {
+      try {
+        semantics = asArrayBuffer(module.extractSemantics(records));
+      } catch {
+        // Display still owns the pass; the host reports `vendor.semantics.*`.
+        semantics = null;
+      }
+    }
     result = module.decode(records);
   } catch (error) {
     const message = String(error);
-    // A disabled decoder is a deliberate configuration, not a decode failure:
-    // report the stable reason verbatim so the host can surface it as such.
+    // A disabled decoder is a deliberate configuration, a timeout is its own
+    // stable reason, and everything else is a decode failure. Never a hang.
     const reason = message.includes('vendor.decoder_disabled')
       ? 'vendor.decoder_disabled'
-      : `vendor.decode_failed: ${message}`;
+      : message.includes('vendor.timeout')
+        ? 'vendor.timeout'
+        : `vendor.decode_failed: ${message}`;
     result = unsupportedResult(frame.token, frame.generation, reason);
   }
-  return (await call('cad_vendor_apply', {
+  const args: Record<string, unknown> = {
     token: frame.token,
     generation: frame.generation,
     payload: encodeBase64(result),
-  })) as VendorAck;
+  };
+  if (semantics !== null) args.semantics = encodeBase64(semantics);
+  return (await call('cad_vendor_apply', args)) as VendorAck;
 }

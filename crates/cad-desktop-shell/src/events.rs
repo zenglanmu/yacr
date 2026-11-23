@@ -52,10 +52,13 @@
 use std::sync::{Arc, Mutex};
 
 use cad_ui_core::session::events::{
-    cursor_changed, derive_batch, same_status_ignoring_volatile, CadEvent, CadEventKind,
-    CanvasJson, EventSink, StatusFrame,
+    cursor_changed, derive_batch, derive_open_ready, document_ready_event,
+    same_status_ignoring_volatile, CadEvent, CadEventKind, CanvasJson, EventSink, StatusFrame,
 };
-use cad_ui_core::session::{unsupported_status, CadStatus, HostProfile};
+use cad_ui_core::session::{
+    unsupported_status, CadOpenProgress, CadOpenStage, CadOpenSummary, CadStatus,
+    CadVendorOpenStatus, CadVendorSummary, HostProfile,
+};
 use cad_ui_core::shell::{projected_popup, projected_status};
 use serde::Serialize;
 use tauri::Emitter;
@@ -74,10 +77,54 @@ pub fn project_current_status(shared: &Shared) -> CadStatus {
         .cad_host_error
         .as_ref()
         .map(|error| error.text.as_str());
-    let status = match shared.shell.cad_status.clone() {
+    let mut status = match shared.shell.cad_status.clone() {
         Some(snapshot) => projected_status(snapshot, host_error),
         None => unsupported_status(None),
     };
+    // Live vendor stage (ADR-0030 D9): the session projects import progress and
+    // the host readiness flag; the pass itself lives on this carrier, so the
+    // vendor stage and the terminal summary are overlaid here. Nothing is
+    // invented: no pass => no vendor stage.
+    if shared.vendor.is_pending() {
+        status.open_progress = Some(CadOpenProgress {
+            stage: CadOpenStage::VENDOR.to_string(),
+            phase: Some("decode".to_string()),
+            done: 0,
+            total: Some(u64::from(shared.vendor.entities())),
+            unit: CadOpenStage::UNIT_VENDOR_RECORDS.to_string(),
+            cancellable: false,
+        });
+        status.document_ready = false;
+        status.open_summary = None;
+    } else if let Some(ack) = &shared.vendor_last_ack {
+        if let (Some(label), Some(entities)) = (status.document_label.clone(), status.entity_count)
+        {
+            let timed_out = ack
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic == "vendor.timeout");
+            let semantics_failed = ack
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.starts_with("vendor.semantics."));
+            let vendor_status = if timed_out {
+                CadVendorOpenStatus::TIMEOUT
+            } else if semantics_failed {
+                CadVendorOpenStatus::FAILED
+            } else if ack.accepted && ack.applied > 0 {
+                CadVendorOpenStatus::OK
+            } else {
+                // A settled plugin that decoded no primitives is an explicit
+                // unsupported result, not a host failure.
+                CadVendorOpenStatus::UNSUPPORTED
+            };
+            status.open_summary = Some(CadOpenSummary::new(
+                label,
+                entities,
+                CadVendorSummary::new(vendor_status, ack.applied, ack.diagnostics.clone()),
+            ));
+        }
+    }
     projected_popup(status, shared.shell.popup.as_ref())
 }
 
@@ -118,6 +165,9 @@ pub fn flush_events_current<C: Serialize>(
         let closed = batch
             .iter()
             .any(|kind| matches!(kind, CadEventKind::DocumentClosed));
+        let opened = batch
+            .iter()
+            .any(|kind| matches!(kind, CadEventKind::DocumentOpened { .. }));
         let mut emitted = Vec::new();
         for kind in batch {
             emitted.extend(state.events.push_quiet(kind));
@@ -125,6 +175,8 @@ pub fn flush_events_current<C: Serialize>(
         if closed {
             state.vendor.clear();
             state.vendor_pending_representations = None;
+            state.vendor_pending_semantics = None;
+            state.vendor_last_ack = None;
             state.vendor_representations_clear = true;
         }
         // The owner tick stages the records copied by the import; the flush only
@@ -137,11 +189,32 @@ pub fn flush_events_current<C: Serialize>(
             }));
         }
         if let Some((token, ack)) = state.vendor.take_unreported() {
+            let stored = ack.clone();
             emitted.extend(state.events.push_quiet(CadEventKind::VendorSettled {
                 token,
                 applied: ack.applied,
                 diagnostics: ack.diagnostics,
             }));
+            state.vendor_last_ack = Some(stored);
+        }
+        // `document-ready` comes after `vendor-settled` (or alongside
+        // `document-opened` for a document with no vendor rows). The transition
+        // is the normal path; a synchronous open that never emitted an
+        // intermediate `documentReady: false` is caught by the `opened` batch.
+        let ready = if let Some(previous) = previous.as_ref() {
+            derive_open_ready(previous, &status)
+        } else {
+            None
+        };
+        let ready = ready.or_else(|| {
+            if opened && status.document_ready {
+                document_ready_event(&status)
+            } else {
+                None
+            }
+        });
+        if let Some(kind) = ready {
+            emitted.extend(state.events.push_quiet(kind));
         }
         // Order: derived semantic events, vendor events, cursor-changed, status.
         if volatile {
@@ -232,6 +305,7 @@ mod tests {
                 CadEventKind::PopupChanged { .. } => "popup-changed",
                 CadEventKind::VendorPending { .. } => "vendor-pending",
                 CadEventKind::VendorSettled { .. } => "vendor-settled",
+                CadEventKind::DocumentReady { .. } => "document-ready",
                 CadEventKind::EventsDropped { .. } => "events-dropped",
                 CadEventKind::CursorChanged { .. } => "cursor-changed",
                 _ => "unknown",
@@ -363,6 +437,40 @@ mod tests {
                 .as_ref()
                 .map(|p| p.kind.as_str()),
             Some("about")
+        );
+    }
+
+    #[test]
+    fn a_settled_vendor_ack_emits_document_ready_after_vendor_settled() {
+        let shared = shared();
+        let mut status = unsupported_status(None);
+        status.document_label = Some("tch.dwg".to_string());
+        status.entity_count = Some(1);
+        lock(&shared).shell.cad_status = Some(status);
+        // First flush records the not-ready baseline and emits document-opened.
+        let _ = flush_events_current(&shared, &HostProfile::native_below(), None::<String>);
+
+        lock(&shared).vendor_last_ack = Some(crate::vendor::VendorAck {
+            accepted: true,
+            applied: 2,
+            diagnostics: Vec::new(),
+        });
+        // The owner tick's `vendor::tick` mirrors the host readiness before the
+        // flush; reproduce that contract here.
+        if let Some(status) = lock(&shared).shell.cad_status.as_mut() {
+            status.document_ready = true;
+        }
+        let events = flush_events_current(&shared, &HostProfile::native_below(), None::<String>);
+        let names = kinds(&events);
+        assert!(names.contains(&"document-ready"), "{names:?}");
+        let ready = &status_of(&events).status;
+        assert!(ready.document_ready);
+        assert_eq!(
+            ready
+                .open_summary
+                .as_ref()
+                .map(|summary| summary.vendor.status.as_str()),
+            Some("ok")
         );
     }
 

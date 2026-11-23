@@ -84,6 +84,14 @@ impl HostCore {
             self.report_plot_failed(&reason)?;
             return Err(CadError::Unsupported(reason));
         }
+        // Same open-pipeline gate as SAVE/EXPORT (ADR-0030 D9): the vector export
+        // must not read a document whose vendor pass is still applying. PLOT keeps
+        // its own graded status key, like its existing busy refusal.
+        if !self.document_ready() {
+            let reason = self.message("save.document_not_ready", &[]);
+            self.report_plot_failed(&reason)?;
+            return Err(CadError::Unsupported(reason));
+        }
         if self.loading() || self.save_pending.get() || self.pending_save.borrow().is_some() {
             let busy = self.message("linux.busy", &[]);
             self.report_plot_failed(&busy)?;
@@ -174,6 +182,15 @@ impl HostCore {
     fn require_save_ready(&self, command: &str) -> CadResult<()> {
         if !self.capabilities.save {
             let reason = self.message("command.unsupported", &[("command", command)]);
+            self.set_catalog_status("save.export_failed", &[("reason", &reason)])?;
+            return Err(CadError::Unsupported(reason));
+        }
+        // The open pipeline of a newly installed document is not finished: its
+        // vendor pass may still be applying rows, so a write now would serialise a
+        // document missing them. Stable marker; the live `openProgress.stage` is
+        // the UI's explanation (ADR-0030 D9).
+        if !self.document_ready() {
+            let reason = self.message("save.document_not_ready", &[]);
             self.set_catalog_status("save.export_failed", &[("reason", &reason)])?;
             return Err(CadError::Unsupported(reason));
         }
