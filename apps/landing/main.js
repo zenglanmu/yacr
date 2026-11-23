@@ -10,12 +10,12 @@
     'zh-CN': {
       title: 'yacr — Yet Another CAD in Rust · 用 Rust 写的开源 CAD',
       description:
-        'yacr 是一个用 Rust 写核心、React + Tauri 写界面的开源 CAD 查看与测量系统。一个核心，多种载体。预览版可直接下载：Linux、Windows、macOS、Android 与 Web 均有构建；Linux/Wayland 是主开发目标。它不是生产级 CAD。',
+        'yacr 是一个开源 CAD：Rust 核心负责图纸、几何、命令与 wgpu 渲染，一套 React 界面跑在 Linux、Windows、macOS、Android 与浏览器上。预览构建可直接下载，尚非生产级 CAD。',
       ogTitle: 'yacr — Yet Another CAD in Rust',
       ogDescription:
-        'Rust 核心负责文档、几何、命令与 wgpu 渲染；React + Tauri 负责界面。一个核心，多种载体。预览版已可直接下载，但 DWG 兼容性、真实图纸与性能验收尚未完成。',
+        '一个 Rust 核心，一套 React 界面，五种载体。原生的 .ymodel 保存只重编码被改动的分片。预览构建可直接下载，尚非生产级 CAD。',
       twitterDescription:
-        '用 Rust 写核心、React + Tauri 写界面的开源 CAD 查看与测量系统。预览版可直接下载：Linux、Windows、macOS、Android 与 Web 均有构建；Linux/Wayland 是主开发目标。',
+        '开源 CAD：Rust 核心加一套 React 界面，跑在 Linux、Windows、macOS、Android 与浏览器上。预览构建可直接下载。',
       navOpen: '打开导航菜单',
       navClose: '关闭导航菜单',
       copied: '命令已复制',
@@ -24,12 +24,12 @@
     en: {
       title: 'yacr — Yet Another CAD in Rust · Open-source CAD',
       description:
-        'yacr is an open-source CAD viewer and measurement system with a Rust core, React + Tauri interface, and one core across five surfaces. Preview builds are downloadable for Linux, Windows, macOS, Android, and the Web; Linux/Wayland is the primary development target. It is not a production-grade CAD tool.',
+        'yacr is an open-source CAD application: a Rust core owns drawings, geometry, commands and wgpu rendering, and one React interface runs on Linux, Windows, macOS, Android and the web. Preview builds are downloadable; not yet production-grade.',
       ogTitle: 'yacr — Yet Another CAD in Rust',
       ogDescription:
-        'A Rust core for documents, geometry, commands, and wgpu rendering. A React + Tauri interface. One core, many surfaces. Preview builds are downloadable; DWG compatibility, real drawings, and performance acceptance are not finished.',
+        'One Rust core, one React interface, five surfaces. Native .ymodel saves only re-encode the shards that changed. Preview builds are downloadable; not yet production-grade.',
       twitterDescription:
-        'Open-source CAD with a Rust core and a React + Tauri interface. Preview builds are downloadable for Linux, Windows, macOS, Android, and the Web; Linux/Wayland is the primary development target.',
+        'Open-source CAD with a Rust core and one React interface across Linux, Windows, macOS, Android and the web. Preview builds are downloadable.',
       navOpen: 'Open navigation menu',
       navClose: 'Close navigation menu',
       copied: 'Command copied',

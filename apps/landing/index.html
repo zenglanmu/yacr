@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>yacr — Yet Another CAD in Rust · 用 Rust 写的开源 CAD</title>
-  <meta name="description" content="yacr 是一个用 Rust 写核心、React + Tauri 写界面的开源 CAD 查看与测量系统。一个核心，多种载体。预览版可直接下载：Linux、Windows、macOS、Android 与 Web 均有构建；Linux/Wayland 是主开发目标。它不是生产级 CAD。">
+  <meta name="description" content="yacr 是一个开源 CAD：Rust 核心负责图纸、几何、命令与 wgpu 渲染，一套 React 界面同时跑在 Linux、Windows、macOS、Android 与浏览器上。预览构建可直接下载，尚非生产级 CAD。">
   <link rel="canonical" href="https://yacr.pages.dev/">
   <meta name="theme-color" content="#08151D">
   <meta name="robots" content="index, follow">
@@ -14,7 +14,7 @@
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="yacr">
   <meta property="og:title" content="yacr — Yet Another CAD in Rust">
-  <meta property="og:description" content="Rust 核心负责文档、几何、命令与 wgpu 渲染；React + Tauri 负责界面。一个核心，多种载体。预览版可直接下载，尚非生产级 CAD。">
+  <meta property="og:description" content="Rust 核心负责图纸、几何、命令与 wgpu 渲染；一套 React 界面跑在 Linux、Windows、macOS、Android 与浏览器上。预览构建可直接下载，尚非生产级 CAD。">
   <meta property="og:url" content="https://yacr.pages.dev/">
   <meta property="og:image" content="https://yacr.pages.dev/assets/yacr-1024.png">
   <meta property="og:image:width" content="1024">
@@ -24,7 +24,7 @@
   <meta property="og:locale:alternate" content="en_US">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="yacr — Yet Another CAD in Rust">
-  <meta name="twitter:description" content="Open-source CAD with a Rust core and a React + Tauri interface. Preview builds are downloadable for Linux, Windows, macOS, Android, and the Web; Linux/Wayland is the primary development target.">
+  <meta name="twitter:description" content="Open-source CAD: a Rust core owns drawings, geometry, commands and wgpu rendering, and one React interface runs on Linux, Windows, macOS, Android and the web. Preview builds are downloadable; not yet production-grade.">
   <meta name="twitter:image" content="https://yacr.pages.dev/assets/yacr-1024.png">
 
   <link rel="icon" href="assets/yacr-icon.svg" type="image/svg+xml">
@@ -43,10 +43,10 @@
     "applicationCategory": "DesignApplication",
     "operatingSystem": "Linux, Windows, macOS, Android, Web",
     "url": "https://yacr.pages.dev/",
-    "downloadUrl": "https://github.com/zenglanmu/yacr/releases/tag/v0.1.16",
+    "downloadUrl": "https://github.com/zenglanmu/yacr/releases",
     "license": "https://www.gnu.org/licenses/agpl-3.0.html",
     "isAccessibleForFree": true,
-    "description": "Open-source CAD viewing and measurement system with a Rust core and a React + Tauri interface. Preview builds are downloadable across Linux, Windows, macOS, Android, and the Web; not yet production-grade."
+    "description": "Open-source CAD application: a Rust core owns drawings, geometry, commands and wgpu rendering, and one React interface runs on Linux, Windows, macOS, Android and the web. Preview builds are downloadable; not yet production-grade."
   }
   </script>
 </head>
@@ -109,8 +109,8 @@
               <span class="lang--en" lang="en">One core. Every surface.</span>
             </p>
             <p class="hero-lead">
-              <span class="lang--zh">Rust 核心负责 DWG/DXF 文档、几何、命令与 wgpu 渲染；React + Tauri 负责界面。一个核心，多种载体。</span>
-              <span class="lang--en" lang="en">The Rust core owns DWG/DXF documents, geometry, commands, and wgpu rendering. React and Tauri handle the interface. One core, many surfaces.</span>
+              <span class="lang--zh">Rust 核心负责图纸、几何、命令与 wgpu 渲染；一套 React 界面跑在 Linux、Windows、macOS、Android 和浏览器上。</span>
+              <span class="lang--en" lang="en">A Rust core owns drawings, geometry, commands and wgpu rendering. One React interface runs on Linux, Windows, macOS, Android and the web.</span>
             </p>
 
             <div class="hero-notice" role="note">
@@ -137,8 +137,8 @@
             </div>
 
             <p class="hero-hint">
-              <span class="lang--zh">浏览器版首次打开需下载较大的 wasm 模块（约 20 MB 以上），网络较慢时可能需要一段时间。</span>
-              <span class="lang--en" lang="en">The browser build downloads a large wasm module (20 MB+) on first open, so it may take a while on a slow connection.</span>
+              <span class="lang--zh">浏览器版首次打开需下载较大的 wasm 模块，网络较慢时请等一会儿。</span>
+              <span class="lang--en" lang="en">The browser build downloads a large wasm module on first open, so give it a moment on a slow connection.</span>
             </p>
           </div>
 
@@ -280,7 +280,7 @@
             <div class="stat">
               <p class="stat-value">DWG<span class="stat-plus">+</span>DXF</p>
               <p class="stat-label">
-                <span class="lang--zh">读取 / 解析</span><span class="lang--en" lang="en">read / parse</span>
+                <span class="lang--zh">读取 / 解析 · 也支持 DGN</span><span class="lang--en" lang="en">read / parse · DGN too</span>
               </p>
             </div>
             <div class="stat">
@@ -311,15 +311,15 @@
             <p class="section-index">
               <span class="idx" aria-hidden="true">A</span>
               <span class="rule" aria-hidden="true"></span>
-              <span class="lang--zh">实机截图</span><span class="lang--en" lang="en">Real screenshot</span>
+              <span class="lang--zh">实机截图</span><span class="lang--en" lang="en">Real screenshots</span>
             </p>
             <h2 class="showcase-title" id="showcase-title">
-              <span class="lang--zh">实际运行时的一帧。</span>
-              <span class="lang--en" lang="en">One frame from the running app.</span>
+              <span class="lang--zh">真实运行时的画面。</span>
+              <span class="lang--en" lang="en">Frames from the running app.</span>
             </h2>
             <p class="showcase-lead">
-              <span class="lang--zh">下面这张是 yacr 桌面程序在 Linux 原生 Wayland 会话里的真实截图：上方是 React + Tauri 界面，中间由 Rust 核心和 wgpu 绘制，底部是文件标签、命令行与状态栏。</span>
-              <span class="lang--en" lang="en">A real screenshot of the yacr desktop app in a native Wayland session on Linux: React + Tauri chrome on top, drawing driven by the Rust core and wgpu, with the file tab, command line, and status bar below.</span>
+              <span class="lang--zh">下面五张都是真实截图：yacr 的 Linux 宿主跑在原生 Wayland 会话里，界面是英文，画面由 Rust 核心与 wgpu 绘制。每一张都打开了一个真实文件。</span>
+              <span class="lang--en" lang="en">All five frames below are real screenshots of the yacr Linux host in a native Wayland session, with the English interface and the drawing produced by the Rust core and wgpu. Each frame has a real file open.</span>
             </p>
           </div>
 
@@ -337,12 +337,12 @@
               <dd>wgpu</dd>
             </div>
             <div>
-              <dt><span class="lang--zh">截图</span><span class="lang--en" lang="en">Captured</span></dt>
-              <dd>2026-11-08</dd>
+              <dt><span class="lang--zh">界面</span><span class="lang--en" lang="en">Interface</span></dt>
+              <dd><span class="lang--zh">React + Tauri · 英文</span><span class="lang--en" lang="en">React + Tauri · English</span></dd>
             </div>
             <div>
-              <dt><span class="lang--zh">图纸</span><span class="lang--en" lang="en">Drawing</span></dt>
-              <dd><code>qcad-flange/flange.dxf</code></dd>
+              <dt><span class="lang--zh">截图</span><span class="lang--en" lang="en">Captured</span></dt>
+              <dd><time datetime="2026-11">2026-11</time></dd>
             </div>
           </dl>
         </div>
@@ -353,47 +353,161 @@
               <p class="plate-rail" aria-hidden="true">
                 <span class="rail-capture"><span class="rail-dot"></span>REAL SCREENSHOT</span>
                 <span class="rail-mid">LINUX · NATIVE WAYLAND</span>
-                <span class="rail-end">1206 × 834</span>
+                <span class="rail-end">1600 × 904</span>
               </p>
               <img
-                src="assets/screenshots/desktop-flange-2026-11-08.png"
-                width="1206" height="834"
-                loading="lazy" decoding="async"
-                alt="yacr 的真实截图：Linux 主机上的桌面窗口，React/Tauri 界面打开了 qcad-flange 法兰图纸；黑色画布上是白色与红色的二维线框，顶部是功能区，底部是命令行与状态栏。"
-                data-alt-zh="yacr 的真实截图：Linux 主机上的桌面窗口，React/Tauri 界面打开了 qcad-flange 法兰图纸；黑色画布上是白色与红色的二维线框，顶部是功能区，底部是命令行与状态栏。"
-                data-alt-en="A real screenshot of yacr on a Linux host: the desktop window with the React/Tauri interface showing the qcad-flange drawing. White and red 2D linework sits on the black canvas, with the ribbon above and the command line and status bar below.">
+                src="assets/screenshots/01-desktop-hero.png"
+                width="1600" height="904"
+                loading="eager" decoding="async"
+                alt="yacr 在 Linux 原生 Wayland 上的真实截图：英文界面打开 fixtures/dxf/qcad-flange/flange.dxf，画布上有三个二维视图和一个着色三维视图，上方是 Ribbon 与文件标签，下方是命令行与状态栏。"
+                data-alt-zh="yacr 在 Linux 原生 Wayland 上的真实截图：英文界面打开 fixtures/dxf/qcad-flange/flange.dxf，画布上有三个二维视图和一个着色三维视图，上方是 Ribbon 与文件标签，下方是命令行与状态栏。"
+                data-alt-en="A real yacr screenshot on Linux native Wayland: the English interface with fixtures/dxf/qcad-flange/flange.dxf open — three 2D views and one shaded 3D view, with the ribbon and file tab above and the command line and status bar below.">
             </div>
           </div>
           <figcaption class="showcase-caption">
             <span class="fig-mark" aria-hidden="true">FIG. A</span>
             <p class="showcase-caption-text">
-              <span class="lang--zh">真实截图：Linux 原生 Wayland 会话中的 yacr，通过 React / Tauri 界面打开 <code>fixtures/dxf/qcad-flange/flange.dxf</code>。黑色画布上是法兰的二维视图，顶部是功能区与文件标签，底部是命令行与状态栏。</span>
-              <span class="lang--en" lang="en">A real screenshot: yacr in a native Wayland session on Linux, with <code>fixtures/dxf/qcad-flange/flange.dxf</code> open in the React / Tauri interface. The flange’s 2D views sit on the black canvas, below the ribbon and file tab and above the command line and status bar.</span>
+              <span class="lang--zh">打开 <code>fixtures/dxf/qcad-flange/flange.dxf</code>：三个二维视图加一个着色三维视图都在同一个视口里。上方是 React 界面的 Ribbon 与文件标签，下方是命令行与状态栏。</span>
+              <span class="lang--en" lang="en">With <code>fixtures/dxf/qcad-flange/flange.dxf</code> open: three 2D views and one shaded 3D view in the same viewport. The React ribbon and file tab sit above, the command line and status bar below.</span>
             </p>
             <p class="showcase-caption-meta">
-              <span>2026-11-08</span>
-              <span>1206 × 834</span>
+              <span>qcad-flange / DXF</span>
+              <span>1600 × 904</span>
               <span><span class="lang--zh">窗口截图</span><span class="lang--en" lang="en">window capture</span></span>
             </p>
           </figcaption>
         </figure>
 
+        <ul class="shot-grid">
+          <li class="shot-card shot-card--wide reveal">
+            <figure>
+              <div class="shot-plate">
+                <p class="plate-rail plate-rail--sm" aria-hidden="true">
+                  <span class="rail-capture"><span class="rail-dot"></span>REAL · LINUX WAYLAND</span>
+                  <span class="rail-end">1600 × 904</span>
+                </p>
+                <img
+                  src="assets/screenshots/02-gltf-helmet.png"
+                  width="1600" height="904"
+                  loading="lazy" decoding="async"
+                  alt="真实截图：glTF 模型 DamagedHelmet 在 yacr 的三维视口中显示，带贴图的头盔立在深色画布上，上方是英文 Ribbon。"
+                  data-alt-zh="真实截图：glTF 模型 DamagedHelmet 在 yacr 的三维视口中显示，带贴图的头盔立在深色画布上，上方是英文 Ribbon。"
+                  data-alt-en="A real screenshot: the glTF model DamagedHelmet in a yacr 3D viewport, a textured helmet on the dark canvas under the English ribbon.">
+              </div>
+              <figcaption class="shot-caption">
+                <span class="fig-mark" aria-hidden="true">FIG. B</span>
+                <div>
+                  <p class="shot-title">glTF / PBR <span>DamagedHelmet</span></p>
+                  <p class="shot-text">
+                    <span class="lang--zh">glTF 导入：DamagedHelmet 的贴图与材质通道由原生 wgpu 路径渲染。</span>
+                    <span class="lang--en" lang="en">glTF import: DamagedHelmet with its textures and material channels, rendered by the native wgpu path.</span>
+                  </p>
+                </div>
+              </figcaption>
+            </figure>
+          </li>
+
+          <li class="shot-card shot-card--narrow reveal reveal--d1">
+            <figure>
+              <div class="shot-plate">
+                <p class="plate-rail plate-rail--sm" aria-hidden="true">
+                  <span class="rail-capture"><span class="rail-dot"></span>REAL · LINUX WAYLAND</span>
+                  <span class="rail-end">1600 × 904</span>
+                </p>
+                <img
+                  src="assets/screenshots/03-step-3d.png"
+                  width="1600" height="904"
+                  loading="lazy" decoding="async"
+                  alt="真实截图：STEP 装配体在 yacr 的三维视口中以着色实体显示，白灰色机械焊接件占据画面中央。"
+                  data-alt-zh="真实截图：STEP 装配体在 yacr 的三维视口中以着色实体显示，白灰色机械焊接件占据画面中央。"
+                  data-alt-en="A real screenshot: a STEP assembly shown as a shaded solid in a yacr 3D viewport, a white-grey welded mechanical part centred on the dark canvas.">
+              </div>
+              <figcaption class="shot-caption">
+                <span class="fig-mark" aria-hidden="true">FIG. C</span>
+                <div>
+                  <p class="shot-title">STEP <span>assembly</span></p>
+                  <p class="shot-text">
+                    <span class="lang--zh">STEP 导入：装配体按着色实体显示，整件都在视野内。</span>
+                    <span class="lang--en" lang="en">STEP import: an assembly shown as a shaded solid, whole part in view.</span>
+                  </p>
+                </div>
+              </figcaption>
+            </figure>
+          </li>
+
+          <li class="shot-card shot-card--narrow reveal reveal--d2">
+            <figure>
+              <div class="shot-plate">
+                <p class="plate-rail plate-rail--sm" aria-hidden="true">
+                  <span class="rail-capture"><span class="rail-dot"></span>REAL · LINUX WAYLAND</span>
+                  <span class="rail-end">1600 × 904</span>
+                </p>
+                <img
+                  src="assets/screenshots/06-skp-preview.png"
+                  width="1600" height="904"
+                  loading="lazy" decoding="async"
+                  alt="真实截图：SketchUp 房屋模型在 yacr 中作为三角面预览显示，可以看到房间、门窗与带贴图的楼面。"
+                  data-alt-zh="真实截图：SketchUp 房屋模型在 yacr 中作为三角面预览显示，可以看到房间、门窗与带贴图的楼面。"
+                  data-alt-en="A real screenshot: a SketchUp house shown as a triangle preview in yacr — rooms, openings and textured floors on the dark canvas.">
+              </div>
+              <figcaption class="shot-caption">
+                <span class="fig-mark" aria-hidden="true">FIG. D</span>
+                <div>
+                  <p class="shot-title">SketchUp <span>triangle preview</span></p>
+                  <p class="shot-text">
+                    <span class="lang--zh">SketchUp 导入：房间、门窗与楼面带贴图，作为三角面预览——这条路径没有完整的边线显示与测量。</span>
+                    <span class="lang--en" lang="en">SketchUp import: rooms, openings and a textured floor as a triangle preview — no full edge display or measurement on this path.</span>
+                  </p>
+                </div>
+              </figcaption>
+            </figure>
+          </li>
+
+          <li class="shot-card shot-card--wide reveal reveal--d3">
+            <figure>
+              <div class="shot-plate">
+                <p class="plate-rail plate-rail--sm" aria-hidden="true">
+                  <span class="rail-capture"><span class="rail-dot"></span>REAL · LINUX WAYLAND</span>
+                  <span class="rail-end">1600 × 904</span>
+                </p>
+                <img
+                  src="assets/screenshots/07-rvt-preview.png"
+                  width="1600" height="904"
+                  loading="lazy" decoding="async"
+                  alt="真实截图：Revit 工程在 yacr 中作为白色预览体显示，建筑轮廓立在深色画布上，上方是英文 Ribbon。"
+                  data-alt-zh="真实截图：Revit 工程在 yacr 中作为白色预览体显示，建筑轮廓立在深色画布上，上方是英文 Ribbon。"
+                  data-alt-en="A real screenshot: a Revit project shown as a white preview massing in yacr — the building outline on the dark canvas under the English ribbon.">
+              </div>
+              <figcaption class="shot-caption">
+                <span class="fig-mark" aria-hidden="true">FIG. E</span>
+                <div>
+                  <p class="shot-title">RVT <span>bounding-box preview</span></p>
+                  <p class="shot-text">
+                    <span class="lang--zh">Revit 导入：直接打开 <code>.rvt</code> 工程，按包围盒预览显示，预览体为白色（材质未映射）。</span>
+                    <span class="lang--en" lang="en">Revit import: an <code>.rvt</code> project opened directly as a bounding-box preview, with white preview geometry (materials unmapped).</span>
+                  </p>
+                </div>
+              </figcaption>
+            </figure>
+          </li>
+        </ul>
+
         <ul class="showcase-metrics reveal">
           <li class="shot-metric">
-            <p class="shot-metric-value"><span>979</span><span class="metric-sep">/</span><span>981</span></p>
-            <p class="shot-metric-label"><span class="lang--zh">条命令有实现路径</span><span class="lang--en" lang="en">commands with an implementation path</span></p>
+            <p class="shot-metric-value">05</p>
+            <p class="shot-metric-label"><span class="lang--zh">张真实截图</span><span class="lang--en" lang="en">real frames</span></p>
           </li>
           <li class="shot-metric">
-            <p class="shot-metric-value">DWG<span class="metric-sep">·</span>DXF</p>
-            <p class="shot-metric-label"><span class="lang--zh">导入</span><span class="lang--en" lang="en">import</span></p>
+            <p class="shot-metric-value">1600<span class="metric-sep">×</span>904</p>
+            <p class="shot-metric-label"><span class="lang--zh">整窗截图尺寸</span><span class="lang--en" lang="en">full-window captures</span></p>
+          </li>
+          <li class="shot-metric">
+            <p class="shot-metric-value">Linux<span class="metric-sep">·</span>Wayland</p>
+            <p class="shot-metric-label"><span class="lang--zh">每一帧的宿主</span><span class="lang--en" lang="en">host for every frame</span></p>
           </li>
           <li class="shot-metric">
             <p class="shot-metric-value">wgpu<span class="metric-sep">·</span>Vulkan</p>
-            <p class="shot-metric-label"><span class="lang--zh">渲染器</span><span class="lang--en" lang="en">renderer</span></p>
-          </li>
-          <li class="shot-metric" id="metric-large-drawing" data-metric="large-drawing">
-            <p class="shot-metric-value">725K</p>
-            <p class="shot-metric-label"><span class="lang--zh">图元（复杂测试图纸展开）</span><span class="lang--en" lang="en">entities (expanded large test drawing)</span></p>
+            <p class="shot-metric-label"><span class="lang--zh">渲染器 · Quadro P620</span><span class="lang--en" lang="en">renderer · Quadro P620</span></p>
           </li>
         </ul>
       </div>
@@ -404,17 +518,17 @@
         <header class="section-head reveal">
           <p class="section-index"><span class="idx">01</span><span class="rule" aria-hidden="true"></span><span class="lang--zh">架构</span><span class="lang--en" lang="en">Architecture</span></p>
           <h2 class="display" id="arch-title">
-            <span class="lang--zh">Rust 是核心，<br>但不是全部。</span>
-            <span class="lang--en" lang="en">Rust at the core.<br>Not the whole story.</span>
+            <span class="lang--zh">一个核心，一套界面，<br>五种载体。</span>
+            <span class="lang--en" lang="en">One core. One interface.<br>Five surfaces.</span>
           </h2>
           <p class="lead">
-            <span class="lang--zh">yacr 的文档、几何、命令和渲染核心是 Rust；界面是 React + TypeScript，运行在 Tauri WebView 中。不是 100% pure Rust，这是为了“一棵 React 树，多种载体”的有意取舍。</span>
-            <span class="lang--en" lang="en">yacr’s document, geometry, command, and rendering core is Rust. The interface is React + TypeScript running inside a Tauri WebView. It is not 100% pure Rust — a deliberate trade-off for one React tree across many surfaces.</span>
+            <span class="lang--zh">核心（<code>cad-*</code> crate）拥有文档、几何与命令；<code>cad-db</code> 是唯一权威，场景与每个像素都由它派生，桌面界面和 headless CLI 共用同一条命令路径。界面是所有载体共用的一个 React + TypeScript 包——变化的只是谁持有文档。</span>
+            <span class="lang--en" lang="en">The core (<code>cad-*</code> crates) owns documents, geometry and commands. <code>cad-db</code> is the single source of truth, the scene and every pixel are derived from it, and the desktop GUI and the headless CLI share one command path. The interface is one React + TypeScript package for every carrier — only the document owner changes.</span>
           </p>
         </header>
 
         <div class="arch-diagram reveal">
-          <ol class="arch-strip" data-aria-zh="架构条：Rust 核心到 cad-host 与 cad-ui-core，再到 React + Tauri，最后到五种载体" data-aria-en="Architecture strip: Rust core to cad-host and cad-ui-core, then React + Tauri, then five surfaces">
+          <ol class="arch-strip" data-aria-zh="架构条：Rust 核心到 cad-host 与 cad-ui-core，再到 React 界面，最后到五种载体" data-aria-en="Architecture strip: Rust core to cad-host and cad-ui-core, then the React interface, then five surfaces">
             <li class="arch-node arch-node--core">
               <span class="node-tag">01 / DATA &amp; RENDER</span>
               <span class="node-title">Rust core</span>
@@ -431,9 +545,9 @@
             </li>
             <li class="arch-node">
               <span class="node-tag">03 / INTERFACE</span>
-              <span class="node-title">React + Tauri</span>
+              <span class="node-title">React UI</span>
               <span class="node-items">
-                <code>React</code><code>TypeScript</code><code>WebView</code>
+                <code>React</code><code>TypeScript</code><code>host bridge</code>
               </span>
             </li>
             <li class="arch-node arch-node--surface">
@@ -453,24 +567,24 @@
             <p class="micro-num">01</p>
             <h3>Rust core</h3>
             <p>
-              <span class="lang--zh">文档、几何、命令、渲染的唯一权威。UI 和渲染都是派生。</span>
-              <span class="lang--en" lang="en">The single authority for documents, geometry, commands, and rendering. UI and rendering are derived.</span>
+              <span class="lang--zh">文档、几何、命令与渲染的唯一权威；场景、显示表示与像素都由它派生。</span>
+              <span class="lang--en" lang="en">The single authority for documents, geometry, commands and rendering. The scene, the display representation and every pixel are derived from it.</span>
             </p>
           </article>
           <article class="micro-card">
             <p class="micro-num">02</p>
-            <h3>React chrome</h3>
+            <h3>React interface</h3>
             <p>
-              <span class="lang--zh">同一棵 React 树覆盖桌面与移动，按宽度切换，不按构建目标分叉。</span>
-              <span class="lang--en" lang="en">One React tree covers desktop and mobile, switching by width rather than by build target.</span>
+              <span class="lang--zh">所有载体共用同一个 React + TypeScript 包，按宽度切换，不按构建目标分叉。</span>
+              <span class="lang--en" lang="en">One React + TypeScript package for every carrier, switching by width rather than by build target.</span>
             </p>
           </article>
           <article class="micro-card">
             <p class="micro-num">03</p>
-            <h3>Native surface</h3>
+            <h3>Document owner</h3>
             <p>
-              <span class="lang--zh">native-below 用原生会话，dom-canvas 用 wasm 会话；两条路径各自持有文档。</span>
-              <span class="lang--en" lang="en">Native sessions for native-below; wasm sessions for dom-canvas. Each path owns its document.</span>
+              <span class="lang--zh">native-below 由原生会话持有文档，dom-canvas 由 wasm 会话持有；没有第二份文档状态，也没有静默回退。</span>
+              <span class="lang--en" lang="en">Native sessions own the document on native-below; the wasm session owns it on dom-canvas. No second document state, no silent fallback.</span>
             </p>
           </article>
         </div>
@@ -505,12 +619,12 @@
         <header class="section-head reveal">
           <p class="section-index"><span class="idx">02</span><span class="rule" aria-hidden="true"></span><span class="lang--zh">功能</span><span class="lang--en" lang="en">Capabilities</span></p>
           <h2 class="display" id="features-title">
-            <span class="lang--zh">先把看图和测量做对。</span>
-            <span class="lang--en" lang="en">Get viewing and measuring right first.</span>
+            <span class="lang--zh">打开你手上的图纸，<br>看清、量准、改对。</span>
+            <span class="lang--en" lang="en">Open your drawings.<br>See, measure, edit.</span>
           </h2>
           <p class="lead">
-            <span class="lang--zh">从导入、数据库、渲染到测量与命令覆盖。</span>
-            <span class="lang--en" lang="en">From import and the database to rendering, measurement, and command coverage.</span>
+            <span class="lang--zh">从导入、二维绘制与编辑、测量、三维观察到出图——都在同一个 Rust 核心上。</span>
+            <span class="lang--en" lang="en">From import and 2D editing to measurement, 3D viewing and output — all on the same Rust core.</span>
           </p>
         </header>
 
@@ -520,38 +634,38 @@
               <span class="feature-num">01</span>
               <svg class="feature-icon" viewBox="0 0 32 32" aria-hidden="true"><path d="M8 4h10l6 6v18H8z"/><path d="M18 4v6h6M12 20h8M16 16v8"/></svg>
             </div>
-            <h3><span class="lang--zh">打开 DWG / DXF</span><span class="lang--en" lang="en">Open DWG / DXF</span></h3>
+            <h3><span class="lang--zh">打开你已有的图纸</span><span class="lang--en" lang="en">Open the drawings you have</span></h3>
             <p>
-              <span class="lang--zh"><code>acadrust</code> 0.6.8（未修改）。DWG 与 DXF ASCII/二进制导入，异步导入、进度与取消。</span>
-              <span class="lang--en" lang="en"><code>acadrust</code> 0.6.8, unmodified. DWG and DXF ASCII/binary import with asynchronous loading, progress, and cancel.</span>
+              <span class="lang--zh">DWG、DXF（ASCII 与二进制）与 Bentley DGN V7/V8 作为 CAD 数据打开：图层、直线、圆弧、椭圆、样条、文字、共享单元。单一导入器，带进度与取消。</span>
+              <span class="lang--en" lang="en">DWG, DXF (ASCII and binary) and Bentley DGN V7/V8 open as CAD data — layers, lines, arcs, ellipses, splines, text and shared cells — through one importer with progress and cancel.</span>
             </p>
-            <div class="chips" aria-hidden="true"><span>DWG</span><span>DXF ASCII</span><span>DXF BINARY</span></div>
+            <div class="chips" aria-hidden="true"><span>DWG</span><span>DXF ASCII</span><span>DXF BINARY</span><span>DGN</span></div>
           </article>
 
           <article class="feature-card reveal reveal--d1">
             <div class="feature-top">
               <span class="feature-num">02</span>
-              <svg class="feature-icon" viewBox="0 0 32 32" aria-hidden="true"><ellipse cx="16" cy="7" rx="9" ry="4"/><path d="M7 7v9c0 2.2 4 4 9 4s9-1.8 9-4V7M7 16v9c0 2.2 4 4 9 4s9-1.8 9-4v-9"/></svg>
+              <svg class="feature-icon" viewBox="0 0 32 32" aria-hidden="true"><path d="m16 4 10 6v12l-10 6-10-6V10z"/><path d="m6 10 10 6 10-6M16 16v12"/></svg>
             </div>
-            <h3><span class="lang--zh">数据库是唯一权威</span><span class="lang--en" lang="en">The database is the authority</span></h3>
+            <h3><span class="lang--zh">其余格式也能进来看</span><span class="lang--en" lang="en">Bring in everything else</span></h3>
             <p>
-              <span class="lang--zh"><code>cad-db</code> 持有文档；写入走事务与 <code>ChangeSet</code>，依赖失效后只重建受影响的显示表示。不重解析底图。</span>
-              <span class="lang--en" lang="en"><code>cad-db</code> owns the document. Writes go through transactions and <code>ChangeSet</code>; dependency invalidation rebuilds only the affected display representations. The source drawing is not re-parsed.</span>
+              <span class="lang--zh">OBJ、STL、PLY、OFF、STEP（AP203/214/242）、glTF/GLB 与 IFC 作为可显示、可拾取的网格；Revit 工程给包围盒预览，SketchUp 模型给三角面预览。</span>
+              <span class="lang--en" lang="en">OBJ, STL, PLY, OFF, STEP (AP203/214/242), glTF/GLB and IFC arrive as display-and-pick meshes; Revit projects as a bounding-box preview, SketchUp models as a triangle preview.</span>
             </p>
-            <div class="chips" aria-hidden="true"><span>TRANSACTION</span><span>CHANGESET</span><span>INVALIDATION</span></div>
+            <div class="chips" aria-hidden="true"><span>STEP</span><span>GLTF</span><span>IFC</span><span>SKP</span><span>RVT</span></div>
           </article>
 
           <article class="feature-card reveal reveal--d2">
             <div class="feature-top">
               <span class="feature-num">03</span>
-              <svg class="feature-icon" viewBox="0 0 32 32" aria-hidden="true"><path d="m16 4 10 6v12l-10 6-10-6V10z"/><path d="m6 10 10 6 10-6M16 16v12"/></svg>
+              <svg class="feature-icon" viewBox="0 0 32 32" aria-hidden="true"><path d="M7 25h6L26 12l-6-6L7 19z"/><path d="m17 9 6 6"/></svg>
             </div>
-            <h3><span class="lang--zh">wgpu 渲染，面向大图纸</span><span class="lang--en" lang="en">wgpu rendering for large drawings</span></h3>
+            <h3><span class="lang--zh">二维绘制与编辑</span><span class="lang--en" lang="en">Draw and edit in 2D</span></h3>
             <p>
-              <span class="lang--zh">Rust + wgpu 使用现代 GPU 特性；批处理、导航 LOD、VRAM 预检。测试图纸展开后约 72 万图元，已在真实 GPU 宿主上打开并渲染。渲染是派生，不反向成为数据源。</span>
-              <span class="lang--en" lang="en">Rust + wgpu uses modern GPU features: batching, navigation LOD, and VRAM preflight. Test drawings expand to roughly 725K entities and open and render on a real GPU host. Rendering is derived and never becomes the data source.</span>
+              <span class="lang--zh">直线、多段线、圆、圆弧、椭圆、样条、文字、引线、表格与填充；移动、复制、旋转、修剪、延伸、偏移、圆角、阵列与块参照。每次编辑都走数据库事务，带撤销。</span>
+              <span class="lang--en" lang="en">Line, polyline, circle, arc, ellipse, spline, text, leaders, tables and hatch; move, copy, rotate, trim, extend, offset, fillet, array and block references. Every edit runs through a database transaction with undo.</span>
             </p>
-            <div class="chips" aria-hidden="true"><span>2D / 3D</span><span>725K ENTITIES</span><span>LOD / VRAM</span></div>
+            <div class="chips" aria-hidden="true"><span>2D</span><span>EDIT</span><span>TRANSACTION</span><span>UNDO</span></div>
           </article>
 
           <article class="feature-card feature-card--narrow reveal">
@@ -561,15 +675,28 @@
             </div>
             <h3><span class="lang--zh">测量</span><span class="lang--en" lang="en">Measurement</span></h3>
             <p>
-              <span class="lang--zh">距离、折线长度、角度、面积；单位、精度与几何来源可追溯。</span>
-              <span class="lang--en" lang="en">Distance, polyline length, angle, and area — with traceable units, precision, and geometry provenance.</span>
+              <span class="lang--zh">距离、多段线长度、角度、多边形面积；每个结果都带着它来自的单位、精度与几何来源。</span>
+              <span class="lang--en" lang="en">Distance, polyline length, angle and polygon area, each with the unit, precision and geometry source it came from.</span>
             </p>
             <div class="chips" aria-hidden="true"><span>DISTANCE</span><span>AREA</span><span>ANGLE</span></div>
           </article>
 
-          <article class="feature-card feature-card--wide reveal reveal--d1">
+          <article class="feature-card feature-card--narrow reveal reveal--d1">
             <div class="feature-top">
               <span class="feature-num">05</span>
+              <svg class="feature-icon" viewBox="0 0 32 32" aria-hidden="true"><path d="m16 4 10 6v12l-10 6-10-6V10z"/><path d="m6 10 10 6 10-6M16 16v12"/></svg>
+            </div>
+            <h3><span class="lang--zh">三维观察</span><span class="lang--en" lang="en">Look at it in 3D</span></h3>
+            <p>
+              <span class="lang--zh">环绕、标准视图、正交或透视；wgpu 渲染器带块级视锥剔除与硬性场景预算，渲染始终是派生。</span>
+              <span class="lang--en" lang="en">Orbit, standard views, orthographic or perspective, on a wgpu renderer with block-level frustum culling and hard scene budgets. Rendering stays derived.</span>
+            </p>
+            <div class="chips" aria-hidden="true"><span>ORBIT</span><span>LOD</span><span>BUDGETS</span></div>
+          </article>
+
+          <article class="feature-card feature-card--wide reveal reveal--d2">
+            <div class="feature-top">
+              <span class="feature-num">06</span>
               <svg class="feature-icon" viewBox="0 0 32 32" aria-hidden="true"><path d="M4 6h24v20H4z"/><path d="m8 11 4 3-4 3M15 17h6"/></svg>
             </div>
             <h3><span class="lang--zh">命令覆盖</span><span class="lang--en" lang="en">Command coverage</span></h3>
@@ -596,26 +723,42 @@
             </div>
           </article>
 
-          <article class="feature-card feature-card--narrow reveal reveal--d2">
+          <article class="feature-card feature-card--wide feature-card--highlight reveal">
             <div class="feature-top">
-              <span class="feature-num">06</span>
+              <span class="feature-num">07 <em>HIGHLIGHT</em></span>
               <svg class="feature-icon" viewBox="0 0 32 32" aria-hidden="true"><rect x="4" y="5" width="10" height="8"/><rect x="18" y="5" width="10" height="8"/><rect x="11" y="20" width="10" height="8"/><path d="M9 13v3h14v-3M16 16v4"/></svg>
             </div>
-            <h3><span class="lang--zh">一棵 React 树，多种载体</span><span class="lang--en" lang="en">One React tree, many surfaces</span></h3>
+            <h3>
+              <span class="lang--zh">一个 Rust 核心，一套 React 界面，五种载体</span>
+              <span class="lang--en" lang="en">One Rust core, one React UI, five surfaces</span>
+            </h3>
             <p>
-              <span class="lang--zh">桌面与移动共用同一 UI，按宽度切换。Android 也是 <code>native-below</code>，不按构建目标把 CAD 命令送到 wasm。</span>
-              <span class="lang--en" lang="en">Desktop and mobile share one UI, switching by width. Android is also <code>native-below</code>; CAD commands are not routed to wasm by build target.</span>
+              <span class="lang--zh">核心（<code>cad-*</code> crate）拥有文档、几何与命令，桌面界面和 headless CLI 共用同一条命令路径。界面是所有载体共用的一个 React + TypeScript 包：原生 Wayland、Windows、macOS、Android 上由 native 会话持有 <code>cad-db</code>，X11/XWayland 与 Web 上由 wasm 会话持有。没有第二套界面，也没有第二份文档状态。</span>
+              <span class="lang--en" lang="en">The core (<code>cad-*</code> crates) owns documents, geometry and commands, so the desktop GUI and the headless CLI share one command path. The interface is one React + TypeScript package for every carrier: a native session owns <code>cad-db</code> on native Wayland, Windows, macOS and Android; the wasm session owns it on X11/XWayland and the web. No second UI, no second document state.</span>
             </p>
-            <div class="tree-visual" aria-hidden="true">
-              <span class="tree-root">React</span>
-              <span class="tree-leaf">DESKTOP</span><span class="tree-leaf">TABLET</span><span class="tree-leaf">MOBILE</span>
+            <div class="chips" aria-hidden="true"><span>CAD-DB</span><span>NATIVE-BELOW</span><span>DOM-CANVAS</span></div>
+          </article>
+
+          <article class="feature-card feature-card--wide feature-card--highlight reveal reveal--d1">
+            <div class="feature-top">
+              <span class="feature-num">08 <em>HIGHLIGHT</em></span>
+              <svg class="feature-icon" viewBox="0 0 32 32" aria-hidden="true"><rect x="7" y="4" width="18" height="24"/><path d="M14 4v4M14 10v3M14 15v3M14 20v3M11 8h6"/></svg>
             </div>
+            <h3>
+              <span class="lang--zh"><code>.ymodel</code> — 自己的文档格式</span>
+              <span class="lang--en" lang="en"><code>.ymodel</code> — a document format of its own</span>
+            </h3>
+            <p>
+              <span class="lang--zh">zip 容器，每个建模条目是一帧 zstd 承载的分片 JSON，外来条目按字节原样保留。<strong>保存只重编码被改动的分片</strong>，未触及的条目从上一份归档按压缩字节复制，写入以原子替换落盘。字体、外部参照、图片与 BIM 定义可以随文档一起走。</span>
+              <span class="lang--en" lang="en">A zip container where each modelled entry is one zstd frame of sharded JSON, with foreign entries preserved byte-for-byte. <strong>Saving only re-encodes the shards that changed</strong>; untouched entries are raw-copied from the previous archive and the file is replaced atomically. Fonts, external references, images and BIM definitions can travel with the document.</span>
+            </p>
+            <div class="chips" aria-hidden="true"><span>ZIP</span><span>ZSTD</span><span>SHARDED JSON</span><span>ATOMIC SAVE</span></div>
           </article>
 
           <article class="feature-card feature-card--full reveal">
             <div class="feature-main">
               <div class="feature-top">
-                <span class="feature-num">07</span>
+                <span class="feature-num">09</span>
                 <svg class="feature-icon" viewBox="0 0 32 32" aria-hidden="true"><path d="M12 4h8v5a3 3 0 1 0 0 6v5h-5a3 3 0 1 1-6 0H4v-8h5a3 3 0 1 1 6 0V4z"/></svg>
               </div>
               <h3>
@@ -658,8 +801,8 @@
             <span class="lang--en" lang="en">From open to output, in four moves.</span>
           </h2>
           <p class="lead">
-            <span class="lang--zh">查看与测量是主线；保存与出图各有明确的格式边界。</span>
-            <span class="lang--en" lang="en">Viewing and measuring are the main line. Saving and output each have explicit format boundaries.</span>
+            <span class="lang--zh">打开、查看与编辑是主线；保存与出图各有明确的格式边界。</span>
+            <span class="lang--en" lang="en">Opening, viewing and editing are the main line. Saving and output each have explicit format boundaries.</span>
           </p>
         </header>
 
@@ -668,10 +811,10 @@
             <span class="flow-num" aria-hidden="true">01</span>
             <h3><span class="lang--zh">打开</span><span class="lang--en" lang="en">Open</span></h3>
             <p>
-              <span class="lang--zh">本地打开 DWG/DXF，或在 Web 版直接上传文件。</span>
-              <span class="lang--en" lang="en">Open DWG/DXF locally, or upload a file directly in the web app.</span>
+              <span class="lang--zh">本地打开 DWG、DXF、DGN 或网格格式，或在 Web 版直接上传文件。</span>
+              <span class="lang--en" lang="en">Open DWG, DXF, DGN or a mesh format locally, or upload a file directly in the web app.</span>
             </p>
-            <span class="flow-tag">DWG · DXF · UPLOAD</span>
+            <span class="flow-tag">DWG · DXF · DGN · UPLOAD</span>
           </li>
           <li class="flow-step reveal reveal--d1">
             <span class="flow-num" aria-hidden="true">02</span>
@@ -695,8 +838,8 @@
             <span class="flow-num" aria-hidden="true">04</span>
             <h3><span class="lang--zh">保存 / 出图</span><span class="lang--en" lang="en">Save / Output</span></h3>
             <p>
-              <span class="lang--zh">DXF 另存（有损）、实验性新 DWG 导出、PNG/SVG/PDF（CLI/Web）。</span>
-              <span class="lang--en" lang="en">Lossy DXF Save As, experimental new-DWG export, and PNG/SVG/PDF (CLI/web).</span>
+              <span class="lang--zh">保存走原生 <code>.ymodel</code>：增量、原子替换。也可导出 DXF 或实验性 DWG，出图到 PNG/SVG/PDF。</span>
+              <span class="lang--en" lang="en">Save to the native <code>.ymodel</code>: incremental and atomic. Export DXF or an experimental DWG, and plot to PNG/SVG/PDF.</span>
             </p>
             <span class="flow-warning"><span class="lang--zh">没有 DWG 原地回写</span><span class="lang--en" lang="en">No in-place DWG writeback</span></span>
           </li>
@@ -713,8 +856,8 @@
             <span class="lang--en" lang="en">One core. Five surfaces.</span>
           </h2>
           <p class="lead">
-            <span class="lang--zh">Linux/Wayland 是主开发目标；Android APK 已由维护者侧载运行。</span>
-            <span class="lang--en" lang="en">Linux/Wayland is the primary development target; the Android APK has been sideloaded and run by the maintainer.</span>
+            <span class="lang--zh">Linux/Wayland 是主开发目标；其余载体都提供预览构建。</span>
+            <span class="lang--en" lang="en">Linux/Wayland is the primary development target; every other carrier ships as a preview build.</span>
           </p>
         </header>
 
@@ -727,8 +870,8 @@
             <h3>Linux</h3>
             <p class="platform-mode">native-below · Wayland / dom-canvas · X11</p>
             <p class="platform-desc">
-              <span class="lang--zh">原生 Wayland 走 native-below，X11/XWayland 走 dom-canvas。Flatpak 分发；当前主开发目标，Wayland 支持最完整。</span>
-              <span class="lang--en" lang="en">Native Wayland uses native-below; X11/XWayland uses dom-canvas. Distributed as Flatpak — the primary development target, with the strongest Wayland support.</span>
+              <span class="lang--zh">原生 Wayland 走 native-below，X11/XWayland 自动切到 dom-canvas。以 Flatpak 分发，是当前支持最完整的载体。</span>
+              <span class="lang--en" lang="en">Native Wayland uses native-below; X11/XWayland switches to dom-canvas automatically. Distributed as a Flatpak and the best-supported carrier today.</span>
             </p>
             <ul class="platform-evidence">
               <li><span class="ev-label">Flatpak</span><span>io.github.zenglanmu.yacr</span></li>
@@ -743,8 +886,8 @@
             <h3>Web</h3>
             <p class="platform-mode">dom-canvas · wasm CadSession</p>
             <p class="platform-desc">
-              <span class="lang--zh">wasm <code>CadSession</code> + DOM canvas。OPEN 走页面上传；SAVE/PLOT 走浏览器下载（DXF/SVG/PDF），不回写 DWG。</span>
-              <span class="lang--en" lang="en">wasm <code>CadSession</code> + DOM canvas. OPEN uses an in-page upload; SAVE/PLOT uses browser downloads (DXF/SVG/PDF) and never writes DWG back.</span>
+              <span class="lang--zh">wasm 会话，CAD 画在 DOM canvas 上；在页面上直接打开图纸。写出为 DXF、PNG、SVG 或 PDF。</span>
+              <span class="lang--en" lang="en">wasm session with CAD drawn on a DOM canvas. Open a drawing right in the page; writes go out as DXF, PNG, SVG or PDF.</span>
             </p>
             <ul class="platform-evidence">
               <li><span class="ev-label"><span class="lang--zh">入口</span><span class="lang--en" lang="en">Entry</span></span><a href="https://yacr-examples.pages.dev/" target="_blank" rel="noopener">yacr-examples.pages.dev <span class="ext" aria-hidden="true">↗</span></a></li>
@@ -759,8 +902,8 @@
             <h3>Windows</h3>
             <p class="platform-mode">native-below · Win32 child HWND</p>
             <p class="platform-desc">
-              <span class="lang--zh">真实 Tauri/WebView2 加 Win32 child HWND。缺少 WebView2 时以退出码 5 拒绝。</span>
-              <span class="lang--en" lang="en">Real Tauri/WebView2 with a Win32 child HWND. Refuses with exit code 5 when WebView2 is missing.</span>
+              <span class="lang--zh">Tauri/WebView2 宿主，加一个 Win32 CAD 子窗口。</span>
+              <span class="lang--en" lang="en">A Tauri/WebView2 host with a Win32 CAD child window.</span>
             </p>
           </article>
 
@@ -772,8 +915,8 @@
             <h3>macOS</h3>
             <p class="platform-mode">native-below · WKWebView + NSView</p>
             <p class="platform-desc">
-              <span class="lang--zh">真实 Tauri/WKWebView 加 CAD 子 <code>NSView</code>（Metal）。</span>
-              <span class="lang--en" lang="en">Real Tauri/WKWebView with a CAD child <code>NSView</code> (Metal).</span>
+              <span class="lang--zh">Tauri/WKWebView 加原生 <code>NSView</code> CAD 表面。ad-hoc 签名，未公证。</span>
+              <span class="lang--en" lang="en">Tauri/WKWebView with a native <code>NSView</code> CAD surface. Ad-hoc signed, not notarized.</span>
             </p>
           </article>
 
@@ -785,11 +928,16 @@
             <h3>Android</h3>
             <p class="platform-mode">native-below · Vulkan SurfaceView</p>
             <p class="platform-desc">
-              <span class="lang--zh">Tauri WebView + 原生 <code>CadSession</code> + Vulkan <code>SurfaceView</code>；wasm 会话不实例化。SAF 打开与 DXF 导出已接线，DWG 保存显式延后。维护者已侧载 APK 并运行成功。</span>
-              <span class="lang--en" lang="en">Tauri WebView + native <code>CadSession</code> + Vulkan <code>SurfaceView</code>; the wasm session is not instantiated. SAF open and DXF export are wired; DWG save is explicitly deferred. The maintainer has sideloaded the APK and run it successfully.</span>
+              <span class="lang--zh">同一套 React 界面，原生 CAD 会话与 Vulkan 表面。通过 APK 侧载安装。</span>
+              <span class="lang--en" lang="en">The same React UI with a native CAD session and a Vulkan surface. Installed by sideloading the APK.</span>
             </p>
           </article>
         </div>
+
+        <p class="platform-note">
+          <span class="lang--zh">每个构建都是预览版，不是生产级 CAD。各载体的能力范围与证据边界见 <a href="https://github.com/zenglanmu/yacr/blob/main/docs/compatibility.md" target="_blank" rel="noopener">docs/compatibility.md <span class="ext" aria-hidden="true">↗</span></a>。</span>
+          <span class="lang--en" lang="en">Every build is a preview, not a production CAD system. Per-carrier capabilities and evidence boundaries live in <a href="https://github.com/zenglanmu/yacr/blob/main/docs/compatibility.md" target="_blank" rel="noopener">docs/compatibility.md <span class="ext" aria-hidden="true">↗</span></a>.</span>
+        </p>
       </div>
     </section>
 
@@ -1241,21 +1389,21 @@
               </summary>
               <div class="faq-a">
                 <p>
-                  <span class="lang--zh">还不能。项目处于活跃开发的预览阶段：可以打开 DWG/DXF、查看 2D/3D、测量；请自留副本。</span>
-                  <span class="lang--en" lang="en">Not yet. The project is in an active-development preview stage: it can open DWG/DXF, view 2D/3D, and measure — keep your own copies.</span>
+                  <span class="lang--zh">还不能。项目处于活跃开发的预览阶段：可以打开 DWG/DXF/DGN 与常见网格格式、查看 2D/3D、测量并编辑二维图形；请自留副本。</span>
+                  <span class="lang--en" lang="en">Not yet. The project is in an active-development preview stage: it can open DWG/DXF/DGN and common mesh formats, view 2D/3D, measure, and edit 2D geometry — keep your own copies.</span>
                 </p>
               </div>
             </details>
 
             <details>
               <summary>
-                <span class="faq-q"><span class="lang--zh">为什么 UI 用 Web 技术而不是纯 Rust？</span><span class="lang--en" lang="en">Why use web tech for the UI instead of pure Rust?</span></span>
+                <span class="faq-q"><span class="lang--zh">为什么界面用 React 而不是 Rust UI 工具包？</span><span class="lang--en" lang="en">Why is the interface React instead of a Rust UI toolkit?</span></span>
                 <span class="faq-icon" aria-hidden="true"></span>
               </summary>
               <div class="faq-a">
                 <p>
-                  <span class="lang--zh">因为界面要覆盖桌面、移动与 Web。一棵 React 树可以由同一套组件和布局规则驱动，Rust 核心继续作为唯一数据源。代价是它不是 100% pure Rust；这是有意的取舍，不是遗漏。</span>
-                  <span class="lang--en" lang="en">Because the interface has to cover desktop, mobile, and the web. One React tree can be driven by the same components and layout rules while the Rust core remains the single data source. The cost is that this is not 100% pure Rust — a deliberate trade-off, not an oversight.</span>
+                  <span class="lang--zh">因为界面要覆盖桌面、移动与浏览器。一套 React + TypeScript 界面由同一套组件与布局规则驱动，Rust 核心继续作为唯一数据源；换来的不是第二套 UI，而是一个界面覆盖五种载体。</span>
+                  <span class="lang--en" lang="en">Because the interface has to cover desktop, mobile and the browser. One React + TypeScript interface is driven by the same components and layout rules while the Rust core remains the single data source — so there is no second UI, just one interface across five surfaces.</span>
                 </p>
               </div>
             </details>
@@ -1267,8 +1415,8 @@
               </summary>
               <div class="faq-a">
                 <p>
-                  <span class="lang--zh">没有 DWG 原地回写。<code>SAVE</code> 目前是有损 DXF 另存；源文件是 DWG 时，会写出一个实验性的新 DWG 文件，而不是覆盖原文件。</span>
-                  <span class="lang--en" lang="en">There is no in-place DWG writeback. <code>SAVE</code> is a lossy DXF Save As today; when the source is DWG, it writes an experimental new DWG file instead of overwriting the original.</span>
+                  <span class="lang--zh">没有 DWG 原地回写。原生保存格式是 <code>.ymodel</code>；其它来源的 <code>SAVE</code> 会写出 DXF，DWG 来源则写出一个实验性的新 DWG 文件，而不是覆盖原文件。</span>
+                  <span class="lang--en" lang="en">There is no in-place DWG writeback. The native format is <code>.ymodel</code>; for other sources <code>SAVE</code> writes DXF, and a DWG source produces an experimental new DWG file instead of overwriting the original.</span>
                 </p>
               </div>
             </details>

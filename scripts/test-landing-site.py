@@ -37,31 +37,40 @@ KNOWN_ASSETS = {
     "android": ("app-universal-release.apk", 119703388),
 }
 
-# The page shows one genuine product screenshot; the asset must exist, be a PNG
-# and keep the declared pixel size (the <img width/height> derive from it).
-SCREENSHOT = LANDING / "assets" / "screenshots" / "desktop-flange-2026-11-08.png"
-SCREENSHOT_SIZE = (1206, 834)
+# The page shows five genuine product screenshots (one hero plate plus a
+# gallery of four); every asset must exist, be a PNG and keep the declared
+# pixel size (the <img width/height> derive from it).
+SCREENSHOT_DIR = LANDING / "assets" / "screenshots"
+SCREENSHOTS = {
+    "01-desktop-hero.png": (1600, 904),
+    "02-gltf-helmet.png": (1600, 904),
+    "03-step-3d.png": (1600, 904),
+    "06-skp-preview.png": (1600, 904),
+    "07-rvt-preview.png": (1600, 904),
+}
 
 
-def check_screenshot(errors: list[str]) -> None:
-    if not SCREENSHOT.is_file():
-        fail(f"missing screenshot asset: {SCREENSHOT.relative_to(ROOT)}", errors)
-        return
-    data = SCREENSHOT.read_bytes()
-    if data[:8] != b"\x89PNG\r\n\x1a\n":
-        fail(f"{SCREENSHOT.name} is not a PNG", errors)
-        return
-    if len(data) < 24:
-        fail(f"{SCREENSHOT.name} is truncated", errors)
-        return
-    width = int.from_bytes(data[16:20], "big")
-    height = int.from_bytes(data[20:24], "big")
-    if (width, height) != SCREENSHOT_SIZE:
-        fail(
-            f"{SCREENSHOT.name} is {width}x{height}; page/contract expect "
-            f"{SCREENSHOT_SIZE[0]}x{SCREENSHOT_SIZE[1]}",
-            errors,
-        )
+def check_screenshots(errors: list[str]) -> None:
+    for name, expected in SCREENSHOTS.items():
+        path = SCREENSHOT_DIR / name
+        if not path.is_file():
+            fail(f"missing screenshot asset: {path.relative_to(ROOT)}", errors)
+            continue
+        data = path.read_bytes()
+        if data[:8] != b"\x89PNG\r\n\x1a\n":
+            fail(f"{name} is not a PNG", errors)
+            continue
+        if len(data) < 24:
+            fail(f"{name} is truncated", errors)
+            continue
+        width = int.from_bytes(data[16:20], "big")
+        height = int.from_bytes(data[20:24], "big")
+        if (width, height) != expected:
+            fail(
+                f"{name} is {width}x{height}; page/contract expect "
+                f"{expected[0]}x{expected[1]}",
+                errors,
+            )
 
 
 def fail(message: str, errors: list[str]) -> None:
@@ -259,7 +268,6 @@ def check_index(text: str, errors: list[str]) -> None:
     for fragment in (
         "yacr.pages.dev",
         "yacr-examples.pages.dev",
-        "assets/screenshots/desktop-flange-2026-11-08.png",
         "REAL SCREENSHOT",
         "725K",
         "979",
@@ -275,6 +283,18 @@ def check_index(text: str, errors: list[str]) -> None:
     ):
         if fragment not in text:
             fail(f"apps/landing/index.html is missing {fragment!r}", errors)
+
+    # The showcase must reference exactly the five checked captures — no stale
+    # Chinese-UI asset and no undeclared screenshot file.
+    referenced = set(re.findall(r"assets/screenshots/[A-Za-z0-9._-]+", text))
+    expected = {f"assets/screenshots/{name}" for name in SCREENSHOTS}
+    for path in sorted(expected - referenced):
+        fail(f"apps/landing/index.html does not reference {path!r}", errors)
+    for path in sorted(referenced - expected):
+        fail(
+            f"apps/landing/index.html references an undeclared screenshot: {path!r}",
+            errors,
+        )
 
 
 def check_main_js(text: str, errors: list[str]) -> None:
@@ -388,7 +408,7 @@ def main() -> int:
     check_changelog_freshness(errors)
     if "index.html" in texts:
         check_index(texts["index.html"], errors)
-    check_screenshot(errors)
+    check_screenshots(errors)
     if "main.js" in texts:
         check_main_js(texts["main.js"], errors)
     headers = non_empty(HEADERS, errors)

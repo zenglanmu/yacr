@@ -760,6 +760,78 @@ html[data-lang="en"] .lang--en { display: inline !important; }
 .shot-metric--slot { background: var(--paper-2); }
 .shot-metric-value--empty { color: rgba(8, 21, 29, 0.35); }
 
+/* Showcase gallery ------------------------------------------------------- */
+.shot-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: clamp(20px, 2.6vw, 34px);
+  margin-top: clamp(26px, 3.4vw, 42px);
+  list-style: none;
+}
+.shot-card { grid-column: span 6; min-width: 0; }
+.shot-card--wide { grid-column: span 7; }
+.shot-card--narrow { grid-column: span 5; }
+.shot-card figure {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.shot-plate {
+  position: relative;
+  margin-bottom: 16px;
+  padding: 0 8px 8px;
+  background: #07131a;
+  box-shadow: 0 18px 46px rgba(8, 21, 29, 0.17), 0 0 0 1px rgba(8, 21, 29, 0.28);
+  transition: box-shadow 0.28s var(--ease);
+}
+.shot-plate::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 1px solid rgba(134, 222, 241, 0.14);
+  pointer-events: none;
+  transition: border-color 0.28s var(--ease);
+}
+.shot-plate img {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #000;
+  box-shadow: 0 0 0 1px rgba(134, 222, 241, 0.16);
+}
+.shot-card:hover .shot-plate {
+  box-shadow: 0 24px 60px rgba(8, 21, 29, 0.24), 0 0 0 1px rgba(8, 21, 29, 0.34);
+}
+.shot-card:hover .shot-plate::after { border-color: rgba(255, 155, 88, 0.62); }
+.plate-rail--sm { min-height: 30px; font-size: 7.5px; letter-spacing: 0.12em; }
+.shot-caption {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px 16px;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-strong);
+}
+.shot-title {
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.4;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.shot-title span {
+  color: var(--cyan-deep);
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+.shot-text {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 0.87rem;
+  line-height: 1.68;
+}
+
 /* Section heads ---------------------------------------------------------- */
 .section-head {
   display: grid;
@@ -1033,6 +1105,26 @@ html[data-lang="en"] .lang--en { display: inline !important; }
 }
 .feature-card:hover { background: var(--white); }
 
+.feature-card--highlight { background: var(--ink); }
+.feature-card--highlight:hover { background: #0c1f29; }
+.feature-card--highlight h3 { color: var(--white); }
+.feature-card--highlight h3 code { color: var(--cyan); }
+.feature-card--highlight > p { color: rgba(243, 240, 232, 0.74); }
+.feature-card--highlight p code,
+.feature-card--highlight > p strong { color: var(--cyan); }
+.feature-card--highlight .feature-num { color: rgba(134, 222, 241, 0.58); }
+.feature-card--highlight .feature-num em {
+  margin-left: 8px;
+  color: var(--orange);
+  font-style: normal;
+  letter-spacing: 0.16em;
+}
+.feature-card--highlight .feature-icon { color: var(--cyan); }
+.feature-card--highlight .chips span {
+  border-color: rgba(134, 222, 241, 0.28);
+  color: rgba(243, 240, 232, 0.8);
+}
+
 .feature-top {
   display: flex;
   align-items: flex-start;
@@ -1123,7 +1215,7 @@ html[data-lang="en"] .lang--en { display: inline !important; }
   border: 1px solid var(--line-strong);
   background: rgba(8, 21, 29, 0.03);
 }
-/* 981 commands: 107 complete = 10.907238%, 872 partial = 88.888889%,
+/* 981 commands: 185 complete = 18.858308%, 794 partial = 80.937819%,
    2 not implemented = 0.203873%. The three widths sum to exactly 100.000000%,
    so the bar keeps its 1px frame with no gap and no overflow. 2/981 is
    sub-pixel at card widths (~0.7-1.1px), so that sliver keeps a 2px floor and
@@ -1131,9 +1223,9 @@ html[data-lang="en"] .lang--en { display: inline !important; }
    worst case) instead of the proportion being inflated. Do not set
    `flex-shrink: 0` here: it would push the floor outside the frame. */
 .seg { display: block; flex: 0 1 auto; height: 100%; }
-.seg--full { width: 10.907238%; background: var(--cyan-deep); }
+.seg--full { width: 18.858308%; background: var(--cyan-deep); }
 .seg--partial {
-  width: 88.888889%;
+  width: 80.937819%;
   background: repeating-linear-gradient(135deg, var(--cyan-2) 0 2px, rgba(100, 182, 206, 0.22) 2px 5px);
 }
 .seg--none {
@@ -1363,6 +1455,15 @@ html[data-lang="en"] .lang--en { display: inline !important; }
 }
 .platform--linux code { color: var(--cyan); }
 .platform--web code { color: var(--cyan-deep); }
+.platform-note {
+  margin-top: 22px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.7;
+}
+.platform-note a { color: var(--cyan-deep); text-underline-offset: 3px; }
 
 /* Download --------------------------------------------------------------- */
 .section--download {
@@ -2429,6 +2530,8 @@ html[data-lang="en"] .copy-btn::after { content: attr(data-copied-en) !important
   .platform--wide { grid-column: span 6; }
   .showcase-head { gap: 32px; }
   .showcase-spec > div { grid-template-columns: 76px minmax(0, 1fr); }
+  .shot-card--wide,
+  .shot-card--narrow { grid-column: span 6; }
   .release-hero { grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr); }
   .dl-card--feature,
   .dl-card--wide,
@@ -2606,6 +2709,13 @@ html[data-lang="en"] .copy-btn::after { content: attr(data-copied-en) !important
   .showcase-plate { padding: 0 6px 6px; }
   .showcase-frame::before { inset: 10px -7px -7px 10px; }
   .plate-rail { min-height: 30px; gap: 10px; font-size: 7.5px; letter-spacing: 0.1em; }
+  .shot-grid { grid-template-columns: minmax(0, 1fr); gap: 26px; }
+  .shot-card,
+  .shot-card--wide,
+  .shot-card--narrow { grid-column: auto; }
+  .shot-plate { padding: 0 6px 6px; }
+  .plate-rail--sm { min-height: 28px; font-size: 7px; }
+  .shot-caption { grid-template-columns: minmax(0, 1fr); gap: 8px; }
   .showcase-caption { grid-template-columns: minmax(0, 1fr); gap: 9px; margin-top: 20px; }
   .showcase-caption-meta { justify-content: flex-start; }
   .shot-metric { padding: 14px 15px 15px; }
@@ -2666,6 +2776,8 @@ html[data-lang="en"] .copy-btn::after { content: attr(data-copied-en) !important
   .rail-end { margin-left: auto; }
   .shot-metric-value { font-size: 1.1rem; }
   .shot-metric-label { font-size: 0.74rem; }
+  .shot-title { font-size: 9px; }
+  .shot-text { font-size: 0.84rem; }
   .showcase-caption-text { font-size: 0.85rem; }
 }
 

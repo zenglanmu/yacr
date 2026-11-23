@@ -153,16 +153,23 @@ python3 scripts/build-landing-changelog.py --check   # 只校验是否已过期�
   或创建直接失败。此时需改 `CF_PAGES_PROJECT`（以及 `site.yml` 里的值）并同步页面的
   canonical/OG URL，不要静默复用别人的项目。
 
-## 实机截图（Real screenshot）
+## 实机截图（Real screenshots）
 
-- 资产：`apps/landing/assets/screenshots/desktop-flange-2026-11-08.png`（1206 × 834）。
-- 来源：2026-11-08 本机 Linux 原生 Wayland（`native-below`）上的 `app-linux` 真实运行
-  （NVIDIA Quadro P620 / Vulkan / wgpu），打开 `fixtures/dxf/qcad-flange/flange.dxf`。
-  由同 UID Mutter ScreenCast 抓整屏合成帧后**只做窗口裁剪**（去掉桌面与其它窗口），未修图；
-  它是产品截图，不是渲染图或插画。
-- 复跑采集：`bash scripts/collect-evidence.sh --backend wayland --dwg
-  fixtures/dxf/qcad-flange/flange.dxf --no-build --capture-at 12 --out <dir>`；整屏原始帧在
-  `<dir>/wayland/wayland-frame.png`，裁剪框与页面资产一致（1206 × 834 于 1920 × 1080 帧）。
+- 资产：`apps/landing/assets/screenshots/` 下的
+  `01-desktop-hero` / `02-gltf-helmet` / `03-step-3d` / `06-skp-preview` / `07-rvt-preview`.png
+  （均 **1600 × 904**）。它们是 `docs/images/readme/` 同名文件的**逐字节副本**（`cmp` 一致）：
+  README 直接引用 `docs/images/readme/`，落地页因为是独立静态部署才复制一份。
+- 来源：2026-11-22/23 本机 Linux 原生 Wayland（`native-below`）上的 `app-linux` 真实运行
+  （NVIDIA Quadro P620 / Vulkan / wgpu），英文界面（`yacr.locale = en`）。由同 UID Mutter
+  ScreenCast 抓整屏合成帧后**只做窗口裁剪**（裁剪框 `(66,32,1854,1048)`，源帧 1920 × 1080），
+  再缩到 1600 px 宽；未修图，不是渲染图或插画。
+- 每张图打开的文件、逐图 `run.log` 证据行、裁剪框与已知限制：见
+  `docs/images/readme/SOURCES.md`（唯一台账，不要在这里另写一份）。当前五张的宿主都是
+  `native-below` + `backend=vulkan` + `adapter=Quadro P620`，没有软件渲染。
+- 复跑：按 `SOURCES.md` 里的 env 直跑 release 二进制，再用 `scripts/screencast-capture.py`
+  抓帧。注意 Mutter 同时只允许一个 ScreenCast 会话，被占用时抓帧会报
+  `Session creation inhibited`；本机没有 per-window 截图 API（GNOME Shell 50.1 移除了
+  `ScreenshotWindow`），`gnome-screenshot -w` 与 portal 也都不可用。
 - 页面上的“725K 图元（复杂测试图纸展开）”来自 `docs/handoff-archive/2026-11.md` 对 `fixtures/complex-test.dwg`
   的场景实测（725k 实体 / 145,776 batches）；2026-11-08 在同一宿主复跑读到 `resident_batches` 166,686、
   `verts` 约 120 万。`cad-cli-tools scan` 对该文件读到 44,591 顶层实体 / 1,081 块定义
