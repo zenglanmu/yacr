@@ -18,10 +18,11 @@
 //! module only wires them together, so the UI can list capabilities without
 //! naming an adapter crate.
 //!
-//! Export keys are split in two: `exports` holds the lanes that write real bytes,
-//! and `refusals` holds the keys with no writer in this build. A refusal is an
-//! **explicit** `export.<id>.not_implemented`, never an empty success, and a
-//! descriptor may only declare `export: Some(..)` when its key is in `exports`.
+//! One [`FormatConnector`] per format holds both directions: an optional import
+//! lane with its ordered probes, and the export keys this build wires. A
+//! descriptor declares `export: Some(..)` iff it has at least one export key; a
+//! compiled-in format with no writer is an **explicit**
+//! `export.<id>.not_implemented`, never an empty success.
 //!
 //! Evidence note: the descriptors' version strings are documentation. The only
 //! verification this repository has for the readers is the committed fixture /
@@ -118,29 +119,40 @@ static OFF: OffImporter = OffImporter;
 #[cfg(feature = "formats-mesh")]
 static OBJ: ObjImporter = ObjImporter;
 
-/// One import lane: descriptor, reader and its bytes probe.
-pub struct ImportConnector {
-    pub descriptor: &'static ConnectorDescriptor,
+/// One import direction: the reader and the ordered probes that claim bytes for
+/// it.
+pub struct ImportLane {
     pub importer: &'static dyn Importer,
-    /// `true` when this lane owns the bytes, and an earlier lane's `true` shadows
-    /// every later lane.
+    /// `true` when this lane owns the bytes; an earlier probe's `true` shadows
+    /// every later probe (across lanes, in connector order).
     ///
     /// Probes are bounded reads, not necessarily header-only: the DGN V8 probe
     /// reads the OLE compound-file directory, so callers of
     /// [`ConnectorRegistry::route`] must apply
     /// [`ImportRequest::limits`]`::max_file_bytes` first.
-    pub probe: fn(&[u8]) -> bool,
+    pub probes: &'static [fn(&[u8]) -> bool],
 }
 
-/// One export lane: descriptor, registry key and its writer entry point.
-pub struct ExportConnector {
-    pub descriptor: &'static ConnectorDescriptor,
+/// One export direction: a registry key and its writer entry point.
+pub struct ExportLane {
     /// The registry key (`"stl"` and `"stl-ascii"` are two keys of one
     /// descriptor), also the id the report is stamped with.
     pub format_id: &'static str,
     /// The writer, called with the concrete registry key so it can stamp the
     /// exact variant into its report instead of only the descriptor's default.
     pub export: fn(&'static str, &ExportJob<'_>, &ExportSettings) -> CadResult<ExportOutput>,
+}
+
+/// One format: its descriptor and the directions this build compiled for it.
+///
+/// `import` is `Some` **iff** the descriptor declares an import capability, and
+/// `exports` is non-empty **iff** it declares an export capability. The registry
+/// invariant tests pin both directions of that equivalence, so a lane cannot be
+/// dropped or invented silently.
+pub struct FormatConnector {
+    pub descriptor: &'static ConnectorDescriptor,
+    pub import: Option<ImportLane>,
+    pub exports: &'static [ExportLane],
 }
 
 /// Every export key this product knows, whether or not this build compiles a
@@ -276,212 +288,211 @@ impl OpenedSource {
 
 /// The ordered connector table used by every carrier.
 pub struct ConnectorRegistry {
-    imports: Vec<ImportConnector>,
-    exports: Vec<ExportConnector>,
-    /// Export keys with no writer **in this build**. A slim build cfg-pushes
-    /// only the descriptors it compiled, so it never refuses a format by a
-    /// `not_implemented` code it does not know.
-    refusals: Vec<(&'static str, &'static ConnectorDescriptor)>,
+    /// One entry per format, in the order imports are decided in.
+    connectors: Vec<FormatConnector>,
 }
 
 impl ConnectorRegistry {
     /// The one production registry: every reader and every export key.
     ///
-    /// Cheap to build (small vectors of `&'static` entries), so a carrier may
+    /// Cheap to build (a small vector of `&'static` entries), so a carrier may
     /// keep one for the process or build one per call site.
     pub fn builtin() -> Self {
-        let imports = vec![
+        let connectors = vec![
             // The `.skp` header only says "SketchUp model"; the release and its
             // status ceiling are the adapter's answer.
             #[cfg(feature = "formats-skp")]
-            ImportConnector {
+            FormatConnector {
                 descriptor: &DESCRIPTOR_SKP,
-                importer: &SKP,
-                probe: is_skp,
+                import: Some(ImportLane {
+                    importer: &SKP,
+                    probes: &[is_skp],
+                }),
+                exports: &[ExportLane {
+                    format_id: "skp",
+                    export: export_skp,
+                }],
             },
-            // DGN V7 has a fixed ISFF header; V8 is an OLE container and is
-            // claimed by the OLE probe below through the DGN adapter's `sniff`.
+            // DGN owns two probes: the fixed V7 ISFF header, and the V8 OLE
+            // container the adapter tells apart by its `Dgn~H` root storage.
+            // Both run before the RVT lane, which claims every other OLE file.
             #[cfg(feature = "formats-dgn")]
-            ImportConnector {
+            FormatConnector {
                 descriptor: &DESCRIPTOR_DGN,
-                importer: &DGN,
-                probe: is_dgn,
+                import: Some(ImportLane {
+                    importer: &DGN,
+                    probes: &[is_dgn, is_dgn_v8],
+                }),
+                // No writer in this build: `export("dgn")` is a named refusal.
+                exports: &[],
             },
-            // OLE is the one ambiguity: the DGN adapter reads the compound-file
-            // directory for its `Dgn~H` root storage, and everything else goes to
-            // the RVT adapter (which refuses families by name, never by suffix).
-            #[cfg(feature = "formats-dgn")]
-            ImportConnector {
-                descriptor: &DESCRIPTOR_DGN,
-                importer: &DGN,
-                probe: is_dgn_v8,
-            },
+            // OLE is the one ambiguity: everything the DGN V8 probe did not
+            // claim goes to the RVT adapter, which refuses families by name
+            // rather than by suffix.
             #[cfg(feature = "formats-rvt")]
-            ImportConnector {
+            FormatConnector {
                 descriptor: &DESCRIPTOR_RVT,
-                importer: &RVT,
-                probe: is_ole,
+                import: Some(ImportLane {
+                    importer: &RVT,
+                    probes: &[is_ole],
+                }),
+                exports: &[],
             },
-            ImportConnector {
+            FormatConnector {
                 descriptor: &DESCRIPTOR_DWG,
-                importer: &*ACADRUST,
-                probe: is_dwg,
+                import: Some(ImportLane {
+                    importer: &*ACADRUST,
+                    probes: &[is_dwg],
+                }),
+                exports: &[ExportLane {
+                    format_id: "dwg",
+                    export: export_dwg,
+                }],
             },
-            ImportConnector {
+            FormatConnector {
                 descriptor: &DESCRIPTOR_DXF,
-                importer: &*ACADRUST,
-                probe: is_dxf,
+                import: Some(ImportLane {
+                    importer: &*ACADRUST,
+                    probes: &[is_dxf],
+                }),
+                exports: &[ExportLane {
+                    format_id: "dxf",
+                    export: export_dxf,
+                }],
             },
             // IFC and STEP share the Part 21 container; `FILE_SCHEMA` is the
             // discriminator, so the STEP lane never sees IFC bytes.
             #[cfg(feature = "formats-ifc")]
-            ImportConnector {
+            FormatConnector {
                 descriptor: &DESCRIPTOR_IFC,
-                importer: &IFC,
-                probe: is_ifc,
+                import: Some(ImportLane {
+                    importer: &IFC,
+                    probes: &[is_ifc],
+                }),
+                exports: &[ExportLane {
+                    format_id: "ifc",
+                    export: export_ifc,
+                }],
             },
             #[cfg(feature = "formats-step")]
-            ImportConnector {
+            FormatConnector {
                 descriptor: &DESCRIPTOR_STEP,
-                importer: &STEP,
-                probe: is_step,
+                import: Some(ImportLane {
+                    importer: &STEP,
+                    probes: &[is_step],
+                }),
+                exports: &[],
             },
             // glTF is self-identifying (GLB header, or a JSON object with the
             // `asset` block), so it runs before the magic-less mesh formats.
             #[cfg(feature = "formats-gltf")]
-            ImportConnector {
+            FormatConnector {
                 descriptor: &DESCRIPTOR_GLTF,
-                importer: &GLTF,
-                probe: is_gltf,
+                import: Some(ImportLane {
+                    importer: &GLTF,
+                    probes: &[is_gltf],
+                }),
+                // Two containers of one connector (`glb` binary, `gltf` JSON
+                // with an embedded base64 buffer).
+                exports: &[
+                    ExportLane {
+                        format_id: "glb",
+                        export: export_glb,
+                    },
+                    ExportLane {
+                        format_id: "gltf",
+                        export: export_gltf,
+                    },
+                ],
             },
             #[cfg(feature = "formats-mesh")]
-            ImportConnector {
+            FormatConnector {
                 descriptor: &DESCRIPTOR_STL,
-                importer: &STL,
-                probe: is_stl,
+                import: Some(ImportLane {
+                    importer: &STL,
+                    probes: &[is_stl],
+                }),
+                // Neutral mesh: `stl` and `stl-ascii` are two keys of the one
+                // STL descriptor (binary vs. ASCII container).
+                exports: &[
+                    ExportLane {
+                        format_id: "stl",
+                        export: export_stl_binary,
+                    },
+                    ExportLane {
+                        format_id: "stl-ascii",
+                        export: export_stl_ascii,
+                    },
+                ],
             },
             #[cfg(feature = "formats-mesh")]
-            ImportConnector {
+            FormatConnector {
                 descriptor: &DESCRIPTOR_PLY,
-                importer: &PLY,
-                probe: is_ply,
+                import: Some(ImportLane {
+                    importer: &PLY,
+                    probes: &[is_ply],
+                }),
+                exports: &[ExportLane {
+                    format_id: "ply",
+                    export: export_ply,
+                }],
             },
             #[cfg(feature = "formats-mesh")]
-            ImportConnector {
+            FormatConnector {
                 descriptor: &DESCRIPTOR_OFF,
-                importer: &OFF,
-                probe: is_off,
+                import: Some(ImportLane {
+                    importer: &OFF,
+                    probes: &[is_off],
+                }),
+                exports: &[ExportLane {
+                    format_id: "off",
+                    export: export_off,
+                }],
             },
             #[cfg(feature = "formats-mesh")]
-            ImportConnector {
+            FormatConnector {
                 descriptor: &DESCRIPTOR_OBJ,
-                importer: &OBJ,
-                probe: is_obj,
+                import: Some(ImportLane {
+                    importer: &OBJ,
+                    probes: &[is_obj],
+                }),
+                exports: &[ExportLane {
+                    format_id: "obj",
+                    export: export_obj,
+                }],
             },
         ];
-        let exports = vec![
-            ExportConnector {
-                descriptor: &DESCRIPTOR_DXF,
-                format_id: "dxf",
-                export: export_dxf,
-            },
-            ExportConnector {
-                descriptor: &DESCRIPTOR_DWG,
-                format_id: "dwg",
-                export: export_dwg,
-            },
-            // Neutral mesh: `stl` and `stl-ascii` are two keys of the one STL
-            // descriptor (binary vs. ASCII container).
-            #[cfg(feature = "formats-mesh")]
-            ExportConnector {
-                descriptor: &DESCRIPTOR_STL,
-                format_id: "stl",
-                export: export_stl_binary,
-            },
-            #[cfg(feature = "formats-mesh")]
-            ExportConnector {
-                descriptor: &DESCRIPTOR_STL,
-                format_id: "stl-ascii",
-                export: export_stl_ascii,
-            },
-            #[cfg(feature = "formats-mesh")]
-            ExportConnector {
-                descriptor: &DESCRIPTOR_OBJ,
-                format_id: "obj",
-                export: export_obj,
-            },
-            #[cfg(feature = "formats-mesh")]
-            ExportConnector {
-                descriptor: &DESCRIPTOR_PLY,
-                format_id: "ply",
-                export: export_ply,
-            },
-            #[cfg(feature = "formats-mesh")]
-            ExportConnector {
-                descriptor: &DESCRIPTOR_OFF,
-                format_id: "off",
-                export: export_off,
-            },
-            #[cfg(feature = "formats-ifc")]
-            ExportConnector {
-                descriptor: &DESCRIPTOR_IFC,
-                format_id: "ifc",
-                export: export_ifc,
-            },
-            #[cfg(feature = "formats-skp")]
-            ExportConnector {
-                descriptor: &DESCRIPTOR_SKP,
-                format_id: "skp",
-                export: export_skp,
-            },
-            // glTF: two containers of one connector (`glb` binary, `gltf` JSON
-            // with an embedded base64 buffer).
-            #[cfg(feature = "formats-gltf")]
-            ExportConnector {
-                descriptor: &DESCRIPTOR_GLTF,
-                format_id: "glb",
-                export: export_glb,
-            },
-            #[cfg(feature = "formats-gltf")]
-            ExportConnector {
-                descriptor: &DESCRIPTOR_GLTF,
-                format_id: "gltf",
-                export: export_gltf,
-            },
-        ];
-        // Every pair's descriptor has `export: None` (the tests pin that
-        // invariant), so the refusal is the only honest answer. The mesh, IFC
-        // and SKP writers are real lanes above; only STEP, DGN and RVT have no
-        // writer, and each is pushed only when its reader is compiled in.
-        let refusals: Vec<(&'static str, &'static ConnectorDescriptor)> = vec![
-            #[cfg(feature = "formats-step")]
-            ("step", &DESCRIPTOR_STEP),
-            #[cfg(feature = "formats-dgn")]
-            ("dgn", &DESCRIPTOR_DGN),
-            #[cfg(feature = "formats-rvt")]
-            ("rvt", &DESCRIPTOR_RVT),
-        ];
-        ConnectorRegistry {
-            imports,
-            exports,
-            refusals,
-        }
+        ConnectorRegistry { connectors }
+    }
+
+    /// The first import lane that claims `bytes`, without importing them, and
+    /// the descriptor it belongs to.
+    ///
+    /// Lanes are tried in connector order and each lane's probes in slice
+    /// order, so the effective evaluation order is the flat historical one and
+    /// the first `true` wins. This looks only at the bytes: a request is not an
+    /// argument, so no limit is applied here and a `Some` is *not* an admission
+    /// decision. **The caller must apply [`ImportRequest::limits`]
+    /// `::max_file_bytes` before calling this**, because probes are bounded
+    /// reads rather than header-only sniffs — the DGN V8 probe reads the OLE
+    /// compound-file directory. The guard itself lives only in [`Self::import`],
+    /// which refuses an over-limit OLE container before that probe runs.
+    fn claim(&self, bytes: &[u8]) -> Option<(&'static dyn Importer, &'static ConnectorDescriptor)> {
+        self.connectors.iter().find_map(|connector| {
+            let lane = connector.import.as_ref()?;
+            lane.probes
+                .iter()
+                .any(|probe| probe(bytes))
+                .then_some((lane.importer, connector.descriptor))
+        })
     }
 
     /// The first lane that claims `bytes`, without importing them.
     ///
-    /// This looks only at the bytes: a request is not an argument, so no limit
-    /// is applied here and a `Some` is *not* an admission decision. **The caller
-    /// must apply [`ImportRequest::limits`]`::max_file_bytes` before calling
-    /// this**, because probes are bounded reads rather than header-only sniffs —
-    /// the DGN V8 probe reads the OLE compound-file directory. The guard itself
-    /// lives only in [`Self::import`], which refuses an over-limit OLE container
-    /// before that probe runs.
+    /// See [`Self::claim`] for the evaluation order and for the caller's
+    /// `max_file_bytes` duty.
     pub fn route(&self, bytes: &[u8]) -> Option<&'static ConnectorDescriptor> {
-        self.imports
-            .iter()
-            .find(|connector| (connector.probe)(bytes))
-            .map(|connector| connector.descriptor)
+        self.claim(bytes).map(|(_, descriptor)| descriptor)
     }
 
     /// Import `request.bytes` through the first lane that claims them.
@@ -512,11 +523,7 @@ impl ConnectorRegistry {
                 request.limits.max_file_bytes
             )));
         }
-        let Some(connector) = self
-            .imports
-            .iter()
-            .find(|connector| (connector.probe)(&request.bytes))
-        else {
+        let Some((importer, _)) = self.claim(&request.bytes) else {
             // A compiled-out probe cannot claim bytes, so the shared detector is
             // the only honest source for "which format did this look like". It
             // never parses, and every arm it returns is a real format. The one
@@ -524,8 +531,9 @@ impl ConnectorRegistry {
             // the compound-file directory, which is the adapter's work, so those
             // bytes are named `import.ole`.
             let compiled: Vec<&str> = self
-                .imports
+                .connectors
                 .iter()
+                .filter(|connector| connector.import.is_some())
                 .map(|connector| connector.descriptor.id)
                 .collect();
             if let Some(reason) = absent_import_reason(detect_format(&request.bytes), &compiled) {
@@ -533,19 +541,18 @@ impl ConnectorRegistry {
             }
             return Err(CadError::CorruptData(unclaimed_input().into()));
         };
-        connector
-            .importer
-            .import_with_progress(request, cancelled, progress)
+        importer.import_with_progress(request, cancelled, progress)
     }
 
     /// Export `job` with the lane registered for `format_id`.
     ///
     /// Resolution order is fixed:
     ///
-    /// 1. a registered lane writes real bytes through its writer;
-    /// 2. a key in the refusal table fails with
-    ///    `export.<id>.not_implemented: writer is not wired in this build`;
-    /// 3. a known key with no compiled writer fails with
+    /// 1. a registered export lane writes real bytes through its writer;
+    /// 2. a compiled-in format (its descriptor is registered) with no writer
+    ///    fails with `export.<id>.not_implemented: writer is not wired in this
+    ///    build`;
+    /// 3. a known key with no compiled lane fails with
     ///    `unsupported-runtime: export.<id>`;
     /// 4. anything else is `export.unknown_format`.
     ///
@@ -561,22 +568,26 @@ impl ConnectorRegistry {
         job: &ExportJob<'_>,
         settings: &ExportSettings,
     ) -> CadResult<ExportOutput> {
-        if let Some(connector) = self
-            .exports
-            .iter()
-            .find(|connector| connector.format_id == format_id)
-        {
-            return (connector.export)(connector.format_id, job, settings);
+        for connector in &self.connectors {
+            for lane in connector.exports {
+                if lane.format_id == format_id {
+                    return (lane.export)(lane.format_id, job, settings);
+                }
+            }
         }
-        if self.refusals.iter().any(|(key, _)| *key == format_id) {
+        if self
+            .connectors
+            .iter()
+            .any(|connector| connector.descriptor.id == format_id)
+        {
             return Err(CadError::Unsupported(format!(
                 "export.{format_id}.not_implemented: writer is not wired in this build"
             )));
         }
         let compiled: Vec<&str> = self
-            .exports
+            .connectors
             .iter()
-            .map(|connector| connector.format_id)
+            .flat_map(|connector| connector.exports.iter().map(|lane| lane.format_id))
             .collect();
         if let Some(reason) = absent_export_reason(format_id, &compiled) {
             return Err(CadError::Unsupported(reason));
@@ -586,45 +597,31 @@ impl ConnectorRegistry {
         )))
     }
 
-    /// Every descriptor, once each, in import-probe order.
+    /// Every registered descriptor, once each, in connector order.
     ///
-    /// DGN appears twice in the probe list (V7 header, V8 OLE storage), so the
-    /// list is de-duplicated by id. Every registered descriptor has an import
-    /// lane (a read-only format included), so probing order covers the set.
-    pub fn descriptors(&self) -> impl Iterator<Item = &'static ConnectorDescriptor> {
-        let mut descriptors: Vec<&'static ConnectorDescriptor> =
-            Vec::with_capacity(self.imports.len());
-        for connector in &self.imports {
-            if !descriptors
-                .iter()
-                .any(|seen| seen.id == connector.descriptor.id)
-            {
-                descriptors.push(connector.descriptor);
-            }
-        }
-        descriptors.into_iter()
+    /// Connector order is the import-probe order (DGN's two probes live on one
+    /// entry), and every connector declares an import lane, so this is also the
+    /// set of formats the build can be asked about.
+    pub fn descriptors(&self) -> impl Iterator<Item = &'static ConnectorDescriptor> + '_ {
+        self.connectors.iter().map(|connector| connector.descriptor)
     }
 
     /// The descriptor registered under `id`, when the registry knows it.
     ///
-    /// Resolves every import descriptor, every registered export key (including
-    /// `"stl-ascii"`, which has no descriptor of its own) and every refusal key,
-    /// so a caller can ask about any id it can pass to [`Self::export`].
+    /// Resolves every export key (including `"stl-ascii"`, which has no
+    /// descriptor of its own and resolves to the STL descriptor) and every
+    /// connector id, so a caller can ask about any id it can pass to
+    /// [`Self::export`].
     pub fn descriptor(&self, id: &str) -> Option<&'static ConnectorDescriptor> {
-        if let Some(connector) = self
-            .exports
-            .iter()
-            .find(|connector| connector.format_id == id)
-        {
-            return Some(connector.descriptor);
+        for connector in &self.connectors {
+            if connector.exports.iter().any(|lane| lane.format_id == id) {
+                return Some(connector.descriptor);
+            }
         }
-        if let Some((_, descriptor)) = self.refusals.iter().find(|(key, _)| *key == id) {
-            return Some(descriptor);
-        }
-        self.imports
+        self.connectors
             .iter()
+            .find(|connector| connector.descriptor.id == id)
             .map(|connector| connector.descriptor)
-            .find(|descriptor| descriptor.id == id)
     }
 
     /// Project one import report's connector id onto the `openedSource` block
@@ -886,5 +883,7 @@ fn export_gltf_container(
 
 #[cfg(test)]
 mod slim_tests;
+#[cfg(test)]
+mod table_tests;
 #[cfg(test)]
 mod tests;

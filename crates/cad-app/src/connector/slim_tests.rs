@@ -71,18 +71,22 @@ fn absent_export_reasons_cover_the_known_keys_only() {
 #[test]
 fn known_export_keys_cover_every_lane_and_refusal() {
     let registry = ConnectorRegistry::builtin();
-    for connector in &registry.exports {
-        assert!(
-            KNOWN_EXPORT_KEYS.contains(&connector.format_id),
-            "{} is a lane but is not a known key",
-            connector.format_id
-        );
-    }
-    for (key, _) in &registry.refusals {
-        assert!(
-            KNOWN_EXPORT_KEYS.contains(key),
-            "{key} is a refusal but is not a known key"
-        );
+    for connector in &registry.connectors {
+        for lane in connector.exports {
+            assert!(
+                KNOWN_EXPORT_KEYS.contains(&lane.format_id),
+                "{} is a lane but is not a known key",
+                lane.format_id
+            );
+        }
+        // A read-only connector refuses by its own id, so that id is the key.
+        if connector.descriptor.export.is_none() {
+            assert!(
+                KNOWN_EXPORT_KEYS.contains(&connector.descriptor.id),
+                "{} is a refusal but is not a known key",
+                connector.descriptor.id
+            );
+        }
     }
 
     let mut expected = vec![
@@ -107,6 +111,50 @@ fn known_export_keys_cover_every_lane_and_refusal() {
     assert_eq!(actual, expected);
 }
 
+/// A slim build has no descriptor for a compiled-out format, so its export key
+/// must be answered by the **runtime** refusal: never `not_implemented` (which
+/// would claim the product ships a writer it does not), never
+/// `export.unknown_format` (which would deny the product knows the format).
+#[cfg(not(feature = "formats-all"))]
+#[test]
+fn a_slim_build_answers_compiled_out_export_keys_by_name() {
+    let registry = ConnectorRegistry::builtin();
+    let database = cad_db::DrawingDatabaseBuilder::new(cad_domain::DatabaseId(1))
+        .finish()
+        .expect("an empty database is valid");
+    let job = ExportJob {
+        database: &database,
+        document_id: cad_domain::DocumentId(1),
+        units: None,
+        space: cad_import_core::ExportSpace::Model,
+        limits: cad_import_core::ExportLimits::default(),
+    };
+    let settings = ExportSettings::default();
+    // A key with no descriptor is a format compiled out of this build; the
+    // compiled ones are covered key-by-key in `export_resolution_matrix_is_pinned`.
+    let mut compiled_out = Vec::new();
+    for key in KNOWN_EXPORT_KEYS {
+        if registry.descriptor(key).is_some() {
+            continue;
+        }
+        compiled_out.push(*key);
+        match registry.export(key, &job, &settings) {
+            Err(CadError::Unsupported(message)) => assert_eq!(
+                message,
+                format!("unsupported-runtime: export.{key}"),
+                "{key} must be the runtime refusal"
+            ),
+            other => panic!("{key}: expected a runtime refusal, got {other:?}"),
+        }
+    }
+    // Every carrier that disables defaults lands here with the exchange-only
+    // set, so this assertion is not vacuous today.
+    assert!(
+        !compiled_out.is_empty(),
+        "a build without `formats-all` compiles some formats out"
+    );
+}
+
 #[cfg(feature = "formats-all")]
 #[test]
 fn the_full_build_keeps_the_historical_unsupported_input() {
@@ -115,8 +163,9 @@ fn the_full_build_keeps_the_historical_unsupported_input() {
 
     let registry = ConnectorRegistry::builtin();
     let compiled: Vec<&str> = registry
-        .imports
+        .connectors
         .iter()
+        .filter(|connector| connector.import.is_some())
         .map(|connector| connector.descriptor.id)
         .collect();
     for descriptor in registry.descriptors() {

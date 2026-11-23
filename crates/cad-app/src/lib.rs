@@ -176,9 +176,8 @@ pub use connector::DESCRIPTOR_SKP;
 #[cfg(feature = "formats-step")]
 pub use connector::DESCRIPTOR_STEP;
 pub use connector::{
-    absent_export_reason, absent_import_reason, unclaimed_input, ConnectorRegistry,
-    ExportConnector, ExportSettings, ImportConnector, OpenedSource, ALL_FORMATS_COMPILED,
-    DESCRIPTOR_DWG, DESCRIPTOR_DXF, KNOWN_EXPORT_KEYS,
+    absent_export_reason, absent_import_reason, unclaimed_input, ConnectorRegistry, ExportSettings,
+    OpenedSource, ALL_FORMATS_COMPILED, DESCRIPTOR_DWG, DESCRIPTOR_DXF, KNOWN_EXPORT_KEYS,
 };
 #[cfg(feature = "formats-mesh")]
 pub use connector::{DESCRIPTOR_OBJ, DESCRIPTOR_OFF, DESCRIPTOR_PLY, DESCRIPTOR_STL};

@@ -1,17 +1,21 @@
+use super::table_tests::export_lanes;
 use super::*;
 use cad_domain::{DatabaseId, DocumentId};
 use cad_import_core::FidelityLevel;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+#[allow(dead_code)] // used only by the full-build cases
 fn fixtures_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures")
 }
 
+#[allow(dead_code)] // used only by the full-build cases
 fn fixture(relative: &str) -> Vec<u8> {
     std::fs::read(fixtures_root().join(relative)).expect("fixture is committed")
 }
 
+#[allow(dead_code)] // used only by the full-build cases
 fn request(bytes: Vec<u8>) -> ImportRequest {
     ImportRequest {
         document: DocumentId(1),
@@ -66,7 +70,7 @@ fn one_line_db() -> cad_db::DrawingDatabase {
 /// A one-triangle model-space mesh on layer `0`, the smallest database every
 /// mesh/IFC/SKP writer accepts (same minimal pattern as
 /// `cad-import-core::mesh_import`).
-fn triangle_db() -> cad_db::DrawingDatabase {
+pub(super) fn triangle_db() -> cad_db::DrawingDatabase {
     use cad_db::{DbEntity, DbObject, DrawingDatabaseBuilder, Layer};
     use cad_domain::{
         EntityId, LayerId, Mesh, ObjectId, Point3, Revision, SemanticGeometry, SpaceId,
@@ -130,6 +134,7 @@ fn triangle_db() -> cad_db::DrawingDatabase {
 /// Every fixture must be claimed by the same lane the old `detect_format`
 /// decision named, so the registry is the dispatch authority and the enum is
 /// only a helper.
+#[cfg(feature = "formats-all")]
 #[test]
 fn committed_fixtures_route_to_the_expected_connector() {
     let registry = ConnectorRegistry::builtin();
@@ -185,6 +190,7 @@ fn committed_fixtures_route_to_the_expected_connector() {
     assert_eq!(registry.route(&header).map(|d| d.id), Some("skp"));
 }
 
+#[cfg(feature = "formats-all")]
 #[test]
 fn unknown_bytes_are_the_single_unsupported_input_refusal() {
     let registry = ConnectorRegistry::builtin();
@@ -205,6 +211,7 @@ fn unknown_bytes_are_the_single_unsupported_input_refusal() {
     }
 }
 
+#[cfg(feature = "formats-gltf")]
 #[test]
 fn gltf_bytes_route_like_the_shared_detector() {
     // The registry owns dispatch and `detect_format` is only a helper; a glTF
@@ -221,6 +228,7 @@ fn gltf_bytes_route_like_the_shared_detector() {
     assert_eq!(registry.route(&glb).map(|d| d.id), Some("gltf"));
 }
 
+#[cfg(any(feature = "formats-dgn", feature = "formats-rvt"))]
 #[test]
 fn ole_sniff_happens_after_the_file_size_limit() {
     let registry = ConnectorRegistry::builtin();
@@ -233,6 +241,7 @@ fn ole_sniff_happens_after_the_file_size_limit() {
     assert!(matches!(error, CadError::InvalidInput(_)), "{error:?}");
 }
 
+#[cfg(feature = "formats-all")]
 #[test]
 fn unimplemented_export_keys_refuse_by_name() {
     let registry = ConnectorRegistry::builtin();
@@ -304,34 +313,30 @@ fn dxf_export_goes_through_the_acadrust_adapter() {
 
 /// Every read-only descriptor must be a **named** refusal.
 ///
-/// A descriptor with `export: None` has no writer; if its id were missing
-/// from the refusal table, `export(id)` would fall through to
-/// `export.unknown_format`
-/// and imply the format merely does not exist. The invariant is the inverse
-/// of the existing "every export lane's descriptor declares a capability":
-/// every capability that is absent is still an answerable format.
+/// A descriptor with `export: None` has no writer, so `export(id)` must fail
+/// with `export.<id>.not_implemented` instead of falling through to
+/// `export.unknown_format` (which would imply the format merely does not
+/// exist). The registry derives that refusal from the connector id, so the
+/// table invariant is what makes it structural: an empty export slice means a
+/// read-only descriptor, and every such id is answerable by name.
+#[cfg(feature = "formats-all")]
 #[test]
 fn every_descriptor_without_a_writer_is_a_named_refusal() {
     let registry = ConnectorRegistry::builtin();
     assert_eq!(registry.descriptors().count(), 12);
     let mut read_only = Vec::new();
-    for descriptor in registry.descriptors() {
-        if descriptor.export.is_none() {
-            assert!(
-                registry.refusals.iter().any(|(id, _)| *id == descriptor.id),
-                "{} has no writer and is not in the refusal table, so its id would \
-                     be export.unknown_format",
-                descriptor.id
-            );
-            read_only.push(descriptor.id);
+    for connector in &registry.connectors {
+        let id = connector.descriptor.id;
+        assert_eq!(
+            connector.exports.is_empty(),
+            connector.descriptor.export.is_none(),
+            "{id}: a descriptor without a writer must have no export key, and \
+             vice versa"
+        );
+        if connector.descriptor.export.is_none() {
+            read_only.push(id);
         }
     }
-    assert_eq!(
-        read_only.len(),
-        registry.refusals.len(),
-        "the refusal table must contain exactly the descriptors without a writer: \
-         {read_only:?}"
-    );
 
     let database = one_line_db();
     let job = ExportJob {
@@ -358,6 +363,7 @@ fn every_descriptor_without_a_writer_is_a_named_refusal() {
     }
 }
 
+#[cfg(feature = "formats-all")]
 #[test]
 fn every_descriptor_is_listed_once() {
     let registry = ConnectorRegistry::builtin();
@@ -376,24 +382,28 @@ fn every_descriptor_is_listed_once() {
             "descriptor({id}) is None"
         );
     }
-    // Every export key names a registered descriptor, and every refusal's
-    // descriptor declares no writer.
-    for (id, descriptor) in &registry.refusals {
-        assert!(
-            registry.descriptor(id).is_some(),
-            "refusal key {id} has no descriptor"
-        );
-        assert!(
-            descriptor.export.is_none(),
-            "{id} refuses but its descriptor declares an export capability"
-        );
-    }
-    for connector in &registry.exports {
-        assert!(
-            registry.descriptor(connector.format_id).is_some(),
-            "{} has no descriptor",
-            connector.format_id
-        );
+    // Every export key names a registered descriptor, and a read-only
+    // connector is never an export lane.
+    for connector in &registry.connectors {
+        for lane in connector.exports {
+            assert!(
+                registry.descriptor(lane.format_id).is_some(),
+                "{} has no descriptor",
+                lane.format_id
+            );
+            assert!(
+                connector.descriptor.export.is_some(),
+                "{} is a lane on a connector that declares no export capability",
+                lane.format_id
+            );
+        }
+        if connector.descriptor.export.is_none() {
+            assert!(
+                connector.exports.is_empty(),
+                "{} declares no writer but carries an export key",
+                connector.descriptor.id
+            );
+        }
     }
 }
 
@@ -417,48 +427,38 @@ fn every_export_key_matches_its_descriptor_capability() {
         limits: cad_import_core::ExportLimits::default(),
     };
     let settings = ExportSettings::default();
+    let lanes = export_lanes(&registry);
     assert!(
-        !registry.exports.is_empty(),
+        !lanes.is_empty(),
         "the production registry must wire at least one writer"
     );
-    for connector in &registry.exports {
+    for (key, _) in &lanes {
         let descriptor = registry
-            .descriptor(connector.format_id)
+            .descriptor(key)
             .expect("a registered lane has a descriptor");
         assert!(
             descriptor.export.is_some(),
-            "{} is a lane but its descriptor has no export capability",
-            connector.format_id
+            "{key} is a lane but its descriptor has no export capability"
         );
         let output = registry
-            .export(connector.format_id, &job, &settings)
-            .unwrap_or_else(|error| panic!("{} lane failed: {error:?}", connector.format_id));
+            .export(key, &job, &settings)
+            .unwrap_or_else(|error| panic!("{key} lane failed: {error:?}"));
         assert!(
             !output.bytes.is_empty(),
-            "{} advertised a writer but wrote no bytes",
-            connector.format_id
+            "{key} advertised a writer but wrote no bytes"
         );
         // The report names the *descriptor* id, so the ASCII STL variant
         // (`stl-ascii`) reports `stl` like the binary key does.
         assert_eq!(output.report.connector, descriptor.id);
     }
-    for (id, _) in &registry.refusals {
-        assert!(
-            !registry.exports.iter().any(|c| c.format_id == *id),
-            "{id} is both a writer lane and a refusal"
-        );
-    }
     // Conversely, a declared capability must have a lane; a descriptor may
     // not advertise a writer nothing can dispatch to.
-    for descriptor in registry.descriptors() {
-        if descriptor.export.is_some() {
+    for connector in &registry.connectors {
+        if connector.descriptor.export.is_some() {
             assert!(
-                registry
-                    .exports
-                    .iter()
-                    .any(|connector| connector.descriptor.id == descriptor.id),
+                !connector.exports.is_empty(),
                 "{} declares an export capability but has no export lane",
-                descriptor.id
+                connector.descriptor.id
             );
         }
     }
@@ -468,6 +468,7 @@ fn every_export_key_matches_its_descriptor_capability() {
 /// descriptor. The byte prefixes are the container signatures this build's
 /// readers recognise, so the smoke test would catch a lane wired to the wrong
 /// exporter (for example `stl-ascii` writing binary STL).
+#[cfg(feature = "formats-all")]
 #[test]
 fn every_writer_lane_writes_real_bytes_and_names_its_connector() {
     let registry = ConnectorRegistry::builtin();
@@ -523,6 +524,7 @@ fn every_writer_lane_writes_real_bytes_and_names_its_connector() {
     assert_eq!(registry.descriptor("stl-ascii").map(|d| d.id), Some("stl"));
 }
 
+#[cfg(feature = "formats-gltf")]
 #[test]
 fn a_glb_export_round_trips_through_the_registry_import() {
     // The writer and the reader are two lanes of one connector: the GLB it
@@ -568,6 +570,7 @@ fn a_glb_export_round_trips_through_the_registry_import() {
     assert_eq!(triangles, vec![1]);
 }
 
+#[cfg(feature = "formats-mesh")]
 #[test]
 fn registry_import_matches_the_probe_decision() {
     // The registry delegates to `Importer::import_with_progress`, so a
@@ -615,6 +618,7 @@ fn a_connector_descriptor_is_available_through_the_trait() {
 /// be enumerated. The match is exhaustive on purpose: a third
 /// [`cad_import_core::SpecVisibility`] variant fails to compile here instead of
 /// silently defaulting to "public".
+#[cfg(feature = "formats-all")]
 #[test]
 fn every_registry_descriptor_declares_a_spec_visibility() {
     let registry = ConnectorRegistry::builtin();
@@ -643,6 +647,7 @@ fn every_registry_descriptor_declares_a_spec_visibility() {
 /// DXF stays public because the repository settles its ambiguities against
 /// Autodesk's published DXF reference (`docs/adr/0017-dimension-family.md`:349,
 /// `docs/hatch-gradient.md`:46).
+#[cfg(feature = "formats-all")]
 #[test]
 fn spec_visibility_is_pinned_per_format() {
     use cad_import_core::SpecVisibility;
@@ -697,6 +702,7 @@ fn only_the_unverified_writers_are_experimental() {
 
 /// The `openedSource` projection (ADR-0041 D5): only a reverse-engineered
 /// source produces an object, with the descriptor's own export capability.
+#[cfg(feature = "formats-all")]
 #[test]
 fn the_opened_source_projection_names_the_connector_and_its_writer() {
     let registry = ConnectorRegistry::builtin();

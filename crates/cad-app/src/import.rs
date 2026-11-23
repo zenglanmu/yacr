@@ -89,6 +89,12 @@ impl Importer for FormatImporter {
 
 #[cfg(test)]
 mod tests {
+    // Most cases below are gated on their format feature: a slim build
+    // (`--no-default-features`, the DWG/DXF-only `dom-canvas` edge) compiles
+    // those lanes out, so their helpers and imports go unused there instead of
+    // failing the build.
+    #![allow(unused_imports, dead_code)]
+
     use super::*;
     use cad_domain::{CadError, DatabaseId, DocumentId};
     use cad_import_core::{detect_format, DrawingFormat};
@@ -120,6 +126,7 @@ mod tests {
         std::fs::read(path).expect("fixture is committed")
     }
 
+    #[cfg(feature = "formats-ifc")]
     #[test]
     fn ifc_is_routed_to_the_ifc_importer_not_streamed_into_step() {
         let drawing = FormatImporter::new()
@@ -131,6 +138,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "formats-ifc")]
     #[test]
     fn ifc_bytes_without_geometry_hit_the_ifc_lane_and_fail_honestly() {
         // A header-only IFC file reaches the IFC importer (the STEP adapter
@@ -150,6 +158,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "formats-rvt")]
     #[test]
     fn revit_is_routed_to_the_rvt_importer_and_refuses_empty_geometry() {
         // The OLE signature alone cannot tell a project from a family; the
@@ -190,6 +199,7 @@ mod tests {
         bytes
     }
 
+    #[cfg(feature = "formats-skp")]
     #[test]
     fn sketchup_is_routed_to_the_skp_importer_and_fails_honestly() {
         // A valid `.skp` header followed by garbage is the SKP lane's problem:
@@ -214,6 +224,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "formats-skp")]
     #[test]
     fn sketchup_bytes_are_not_mistaken_for_another_format() {
         // A 32-byte-valid header must not be read as OLE, AC10xx, DXF, STL, PLY,
@@ -253,6 +264,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "formats-all")]
     #[test]
     fn a_truncated_glb_header_is_not_a_drawing() {
         // glTF is a user format (the registry owns both lanes), but the GLB
@@ -270,6 +282,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "formats-dgn")]
     #[test]
     fn dgn_v7_is_routed_to_the_dgn_importer() {
         let drawing = FormatImporter::new()
@@ -285,6 +298,7 @@ mod tests {
         assert_eq!(drawing.database.entity_count(), 4);
     }
 
+    #[cfg(feature = "formats-dgn")]
     #[test]
     fn dgn_v8_is_routed_to_the_dgn_importer_not_rvt() {
         let drawing = FormatImporter::new()
@@ -315,6 +329,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "formats-dgn")]
     #[test]
     fn ole_sniff_happens_after_the_file_size_limit() {
         let mut request = request(fixture_at("dgn", "test_dgnv8.dgn"));
@@ -334,6 +349,7 @@ mod tests {
         assert!(UNSUPPORTED_INPUT.contains("DGN"));
     }
 
+    #[cfg(feature = "formats-mesh")]
     #[test]
     fn ply_is_routed_to_the_ply_importer() {
         let drawing = FormatImporter::new()
@@ -345,6 +361,7 @@ mod tests {
         assert_eq!(drawing.database.entities().count(), 1);
     }
 
+    #[cfg(feature = "formats-mesh")]
     #[test]
     fn off_is_routed_to_the_off_importer() {
         let drawing = FormatImporter::new()
