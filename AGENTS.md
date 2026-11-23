@@ -55,9 +55,9 @@ ADR 0027。
 
 ## 分层与边界（`scripts/check-architecture.py` 强制）
 
-唯一依赖：`cad-render-wgpu` → wgpu；`cad-import-acadrust` → acadrust（0.6.8，当前未修改；如需补丁
+唯一依赖：`cad-render-wgpu` → wgpu；`cad-connector-acadrust` → acadrust（0.6.8，当前未修改；如需补丁
 只允许 acadrust 且必须在 `docs/acadrust-patches.md` 登记，见 ADR-0031）；
-`cad-import-rvt` → rvt（0.25.0，`vendor/rvt` 固定路径补丁：只改 `src/ifc/gltf.rs` 的透明度
+`cad-connector-rvt` → rvt（0.25.0，`vendor/rvt` 固定路径补丁：只改 `src/ifc/gltf.rs` 的透明度
 选择，见 ADR-0035 与 `docs/rvt-patches.md`）。
 架构规则：`cad-desktop-shell` 是唯一允许依赖 `tauri` 的共享层（脚本强制的是 iced 全局禁用
 与逐 crate 的 ban 列表，不正向断言 tauri 唯一性——不要因此绕过该规则）。平台类型
@@ -67,7 +67,7 @@ ADR 0027。
 
 ```
 cad-domain → cad-db/dependencies/history → geometry/kernel-adapter/representation
-→ spatial/scene/render-wgpu → proxy/import-acadrust/resources → measure/query/app
+→ spatial/scene/render-wgpu → proxy/connector-acadrust/resources → measure/query/app
 → engine/platform/diagnostics/cli-tools → cad-host → cad-ui-core
 → cad-desktop-shell + apps/desktop-ui（React）→ apps/app-{linux,windows,macos,android,web}
 ```

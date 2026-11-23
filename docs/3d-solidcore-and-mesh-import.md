@@ -35,7 +35,7 @@
   `BodyDisplay{mesh,edges,tolerance,precision,completeness}`（`crates/cad-domain/src/body.rs`）。
 - 中性 B-Rep（`BrepData`/`BrepFace`/`BrepSurface`…）已从 `cad-kernel-adapter` 下沉到
   `cad-domain`，adapter 用重导出保持路径。
-- ACIS 导入已发出 `Body3d` 并保留 `exact`（`crates/cad-import-acadrust/src/support.rs`）。
+- ACIS 导入已发出 `Body3d` 并保留 `exact`（`crates/cad-connector-acadrust/src/support.rs`）。
 - `cad-db` 强校验 `Solid ⇒ Exact 且 B-Rep 非空`；非均匀缩放降级为 `Unavailable`。
 - 但：
   - `cad-kernel-adapter` 只会 **BRep → 网格**（`BrepTessellator`），没有创建/布尔/圆角；
@@ -122,7 +122,7 @@ solidcore 1.0.1 的公开 API 覆盖（详见 ADR-0036 与 docs.rs）：
 |---|---|
 | `cad-domain` | `Body3d`/`BodyKind`/`BodyExact`/`BodyDisplay`；`BrepData` 等中性数据下沉；`SemanticGeometry::Body3d` |
 | `cad-db` | `validate_body`（Solid⇒Exact、边线、容差）、bounds、相似变换复合 `BrepPlacement::composed_with` |
-| `cad-import-acadrust` | ACIS 发出 `Body3d`，保留 `exact`/`edges`/`tolerance`；导出：P0 只写 `POLYFACE`，**P3a 起**单壳全平面直线体的精确 B-Rep 写回 `3DSOLID`（SAT 文本），其余仍 `POLYFACE` 并记 `acis.*` |
+| `cad-connector-acadrust` | ACIS 发出 `Body3d`，保留 `exact`/`edges`/`tolerance`；导出：P0 只写 `POLYFACE`，**P3a 起**单壳全平面直线体的精确 B-Rep 写回 `3DSOLID`（SAT 文本），其余仍 `POLYFACE` 并记 `acis.*` |
 | `cad-representation`/`cad-scene` | body → `Mesh` / `LineSegments` / `Missing`；精度与来源透传 |
 | `cad-spatial`/`cad-measure`/`cad-app` | 独立 pick family `body`；无 snap；`MASSPROP` 显式拒绝（P0 时；C3a 已改为精确测量，见 §4.3）；`select_filter` 用 `type_key` |
 | 文档 | ADR-0036、`kernel-acis.md`、`compatibility.md`、`dxf-entity-coverage.md`、`handoff-archive/2026-11.md` |
@@ -186,7 +186,7 @@ solidcore 1.0.1 的公开 API 覆盖（详见 ADR-0036 与 docs.rs）：
 
 1. **新 crate `cad-kernel-solidcore`**（已实现）
    - 唯一允许命名 `solidcore` 的包；其它 `cad-*` 被 `check-architecture.py` 拒绝
-     （形状对齐 `cad-import-acadrust` ↔ `acadrust`）。
+     （形状对齐 `cad-connector-acadrust` ↔ `acadrust`）。
    - 固定 git revision `55ae49ef919b606bf77901df626ed9bb543e5212`（`solidcore-ops` +
      `solidcore-record` + P2.1b 新增的 `solidcore`（只用 `eval::form`）与 `solidcore-convert`，
      同一 pin、Apache-2.0，目标表 `cfg(not(wasm32))`，无 Cargo patch）；
@@ -326,7 +326,7 @@ solidcore 1.0.1 的公开 API 覆盖（详见 ADR-0036 与 docs.rs）：
 
 ### 4.5 P3：ACIS 写出
 
-- **P3a（已实现，2026-11-17）**：`crates/cad-import-acadrust/src/export/acis.rs` 用中性 `BrepData`
+- **P3a（已实现，2026-11-17）**：`crates/cad-connector-acadrust/src/export/acis.rs` 用中性 `BrepData`
   构建 `SatDocument`（body→lump→shell→face→loop→coedge→edge→vertex→point；几何边跨面焊接、
   每条边两个 coedge、平面框架归一化并校验正交、外环绕向与面朝向一致）。子集：单壳、全平面、
   直线边界、真相似放置（无剪切/镜像）。
@@ -377,7 +377,7 @@ solidcore 1.0.1 的公开 API 覆盖（详见 ADR-0036 与 docs.rs）：
 
 ### 5.2 现有映射（已实现，事实）
 
-**STL**（`crates/cad-import-stl`）：
+**STL**（`crates/cad-connector-mesh` 的 `src/stl/`）：
 
 | 项 | 现状 |
 |---|---|
@@ -391,7 +391,7 @@ solidcore 1.0.1 的公开 API 覆盖（详见 ADR-0036 与 docs.rs）：
 | 完整性 | 干净文件 `Complete`；丢面则 `Partial` |
 | 能力 | `read/render/pick = Verified`，`measure = Unsupported`（`MeshImport` 固定） |
 
-**SKP**（`crates/cad-import-skp`）：
+**SKP**（`crates/cad-connector-skp`）：
 
 | 项 | 现状 |
 |---|---|
@@ -460,11 +460,11 @@ solidcore 1.0.1 的公开 API 覆盖（详见 ADR-0036 与 docs.rs）：
 
 ### 5.6 接线点（改映射时只需动三处）
 
-1. **发射**：`cad-import-skp/src/lib.rs` / `cad-import-stl/src/lib.rs`。今天都走
-   `cad-import-core::MeshImport`，它只构造 `Mesh`、固定 layer 0、`measure = Unsupported`。
-   要发 `Body3d` 必须绕过 `MeshImport`（参照 `cad-import-acadrust/src/support.rs`）。
+1. **发射**：`cad-connector-skp/src/lib.rs` / `cad-connector-mesh/src/stl/mod.rs`。今天都走
+   `cad-connector-core::MeshImport`，它只构造 `Mesh`、固定 layer 0、`measure = Unsupported`。
+   要发 `Body3d` 必须绕过 `MeshImport`（参照 `cad-connector-acadrust/src/support.rs`）。
 2. **类型键与能力行**：`SkpPreviewMesh` / `StlMesh` + `MeshImport::finish()` 的能力行。
-3. **分发**：只有格式嗅探变化才需要动 `cad-import-core::detect` 与
+3. **分发**：只有格式嗅探变化才需要动 `cad-connector-core::detect` 与
    `cad-app::import::FormatImporter`；纯映射变化不需要。
 
 ---
@@ -475,7 +475,7 @@ solidcore 1.0.1 的公开 API 覆盖（详见 ADR-0036 与 docs.rs）：
 
 | 项 | 现状 |
 |---|---|
-| 解码链 | `cad-import-step`：`cadmpeg-codec-step` 0.6.12（Apache-2.0）→ `cadmpeg-ir` 中性拓扑 → `cadmpeg-tessellate` 逐面三角化 |
+| 解码链 | `cad-connector-step`：`cadmpeg-codec-step` 0.6.12（Apache-2.0）→ `cadmpeg-ir` 中性拓扑 → `cadmpeg-tessellate` 逐面三角化 |
 | 粒度 | 每个 body 一个 `DbEntity`；同一 body 的每个 occurrence 实例各一个实体 |
 | 定位 | `Model::occurrences` 沿 `OccurrenceParent` 复合后**烘焙进模型空间**；未解析/歧义且多 body 时按名拒绝 `import.step.assembly_placement_unsupported` |
 | 几何 | `SemanticGeometry::Mesh`，`type_key = StepTessellatedMesh` |
@@ -577,8 +577,8 @@ StepImporter::import
 
 | 文件 | 改动 | 阶段 |
 |---|---|---|
-| `crates/cad-import-step/src/brep_lift.rs`（新） | `lift(&CadIr) -> Vec<LiftedBody { kind, brep, diagnostics }>`；只做映射与显式拒绝 | 1a |
-| `crates/cad-import-step/src/lib.rs` | lifter 与 tessellator 组合；改用能发 `Body3d` 的构建路径（参照 `cad-import-acadrust/src/support.rs`）；新增 `STEP_BODY_TYPE_KEY = "StepBody"`，`StepTessellatedMesh` 留给纯面片文件 | 1a |
+| `crates/cad-connector-step/src/brep_lift.rs`（新） | `lift(&CadIr) -> Vec<LiftedBody { kind, brep, diagnostics }>`；只做映射与显式拒绝 | 1a |
+| `crates/cad-connector-step/src/lib.rs` | lifter 与 tessellator 组合；改用能发 `Body3d` 的构建路径（参照 `cad-connector-acadrust/src/support.rs`）；新增 `STEP_BODY_TYPE_KEY = "StepBody"`，`StepTessellatedMesh` 留给纯面片文件 | 1a |
 | `crates/cad-domain/src/brep.rs` | 1a 不改；`BrepSurface::Nurbs` 已随 P2.1b 落地，1b 只补 `BrepCurve::{Nurbs, Ellipse}`（`Arc` 与 `BrepFace.tolerance` 已随 P2.1a，`Face.domain` 随 P2.1b） | 1b |
 | `crates/cad-kernel-adapter/src/brep/` | 1a 复用 `BrepTessellator`；1b 增加 NURBS 剖分（或走 `SolidModeler::Tessellate`） | 1b |
 | `crates/cad-db` | 无新逻辑；`validate_body` 的 `Solid ⇒ Exact` 直接约束 lifter 输出 | — |

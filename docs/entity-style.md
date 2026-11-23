@@ -1,7 +1,7 @@
 # 实体样式管线：颜色、线宽与线型（§3.2 / §7.1）
 
 规范 §3.2（显示表示）与 §7.1（图层/实体样式）；审计 §2.1.3。本文记录 `cad-db` →
-`cad-import-acadrust` → `cad-representation` → `cad-scene` → `cad-render-wgpu` 的
+`cad-connector-acadrust` → `cad-representation` → `cad-scene` → `cad-render-wgpu` 的
 **颜色（color）**、**线宽（lineweight）**、**线型（linetype / 虚线比例）** 与
 **透明度（transparency / alpha）的 `ByLayer` 解析** 数据路径，
 区分已实现、显式未实现和只能在真实设备上验证的部分。alpha 进入场景/渲染器后的混合与
@@ -100,7 +100,7 @@ pub struct LayerAttributes {
 出图与命名打印样式**显式未实现**。
 
 **`ByLayer` 颜色/线型/线宽/透明度现在全部按图层解析（(e) 已完成）**：导入不再把 `ByLayer` 拍平成显式 sRGB
-（`cad-import-acadrust` 保留符号 `EntityColor::ByLayer`），表示层
+（`cad-connector-acadrust` 保留符号 `EntityColor::ByLayer`），表示层
 `provider/expand.rs` 在展开时用实体自身 `layer` 的 `LayerAttributes::color.rgb` 解析，
 缺行则用 `layer_attributes()` 的既有 `Default`（ACI 7 白）。因此**改图层颜色会在下一次展开时
 重着色其 `ByLayer` 实体，且不写任何实体、不产生实体历史**。块内实体的 `ByLayer` 取**生效图层**：
@@ -115,7 +115,7 @@ pub struct LayerAttributes {
 （表示层不钳制、不消毒，`cad_scene::sanitize_alpha` 是唯一消毒点：非有限 → 不透明，否则钳 `[0,1]`）。
 四者都**不写实体**。
 
-## cad-import-acadrust：解析（ByObject → ByLayer → ByBlock）
+## cad-connector-acadrust：解析（ByObject → ByLayer → ByBlock）
 
 图层表现在只读入 `layer_linetypes`（**仅诊断用途**：图层线型名不在图纸线型表时按实体报一次）与
 线型表；`layer_colors`、`layer_lineweights` 与 `layer_transparency` 三张旁表**已全部删除**——
@@ -264,7 +264,7 @@ pub struct LayerAttributes {
 - **纯逻辑已运行并通过**（宿主无 GPU）：
   - `cad-db`：默认即 `ByLayer`/不透明/连续；`Explicit`/`ByBlock` 往返与符号保真；
     `LinetypePattern` 构造过滤非有限元素、零周期退化连续。
-  - `cad-import-acadrust`：ByObject→ByLayer→ByBlock 颜色/线宽/线型解析、ACI 解析、
+  - `cad-connector-acadrust`：ByObject→ByLayer→ByBlock 颜色/线宽/线型解析、ACI 解析、
     `lineweight_mm` 只报具体值、未知命名线型连续回退、复杂线型标志、非有限比例回退。
   - `cad-geometry`：`dash_polyline` 的划/空/点、比例、前导空跳过、弧长曲线、折线拐点、
     零周期/全空/非法比例/退化线的永不 panic 回退。

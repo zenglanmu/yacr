@@ -9,7 +9,7 @@
 ## 1. 依赖与许可
 
 - `cadkit-dgn` **`=0.5.4`**（MIT OR Apache-2.0，纯 Rust，`unsafe` 禁止；上游自证 wasm
-  可编译，本轮 wasm32 编译 **NOT RUN**），只由 `cad-import-dgn` 依赖。
+  可编译，本轮 wasm32 编译 **NOT RUN**），只由 `cad-connector-dgn` 依赖。
 - `default-features = false`：关闭 seed-based V8 writer 与可选 `cfb` 依赖；读取器自带 CFB
   解析，所以读取路径仍是纯 Rust。
 - `cadkit-core =0.5.4` 是它的中性文档模型（`Document`/`EntityKind`），直接依赖以便映射类型。
@@ -24,7 +24,7 @@
 
 ## 2. 检测与路由
 
-`cad-import-core::detect_format` 仍只做保守嗅探：
+`cad-connector-core::detect_format` 仍只做保守嗅探：
 
 - **DGN V7**：固定魔数 `08 05 17 00`，或第二字节 `09 FE 02` 且首字节为 `08`/`C8`。
 - **DGN V8**：OLE/CFB 魔数 `D0 CF 11 E0 A1 B1 1A E1` 且根存储含 `Dgn~H`。
@@ -149,7 +149,7 @@ BIM 语义（ADR-0042 D9）：`import.dgn.bim.tags_stored_as_properties`、
 - 提交的夹具只有 GDAL 的 `smalltest.dgn`（V7，4 个图形）与 `test_dgnv8.dgn`（V8，27 KB，
   **ODA Teigha 4.02 写出，不是 MicroStation**）；来源、SHA-256 与许可见
   `fixtures/dgn/SOURCE.md` 与 `fixtures/manifest`。
-- 31 条 crate 契约测试（`cargo test -p cad-import-dgn`）覆盖：V7 的 text/circle/polyline/line
+- 31 条 crate 契约测试（`cargo test -p cad-connector-dgn`）覆盖：V7 的 text/circle/polyline/line
   与单位；V8 的 metres、3 个 level、shared cell 定义/Insert 位置与 10000 缩放、group 扁平化、
   2 个 Unknown 类型、tags、恒 Partial；纸面线型换算为 0.0045 m（0.5.2 时代夹具值 0.00045 m
   是把纸面毫米当 UOR 再除 UOR 因子的错误结果），无 master-unit 尺寸的纸面线型退 continuous
@@ -164,7 +164,7 @@ BIM 语义（ADR-0042 D9）：`import.dgn.bim.tags_stored_as_properties`、
   `tags_not_stored`。**不证明** V8i/CONNECT/ORD、真实 MicroStation 文件、
   level 显示标志、references、真实 Item Types、尺寸/多线/网格/实体、栅格像素或字体度量。
 - **2026-11-21 依赖升级**（`cadkit` 0.5.2 → 0.5.4）：只重跑了上述 crate 契约测试（23 passed）、
-  `cargo check -p cad-import-dgn --all-targets --locked`、该 crate 的
+  `cargo check -p cad-connector-dgn --all-targets --locked`、该 crate 的
   `clippy --all-targets -- -D warnings` 与 `cargo fmt --all -- --check`；没有用真实 DGN 样本
   复跑，wasm32 编译与全量门禁 **NOT RUN**（详见 `docs/validation-deps-2026-11-21.md`）。
 - **真实 GPU 视觉运行（2026-11-14）**：Linux GNOME/Mutter Wayland 会话内启动嵌套 Weston 14，

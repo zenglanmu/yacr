@@ -110,7 +110,7 @@ solid.
 
 ## 3. Importer behaviour and reason codes
 
-`cad_import_acadrust::translate_gradient` maps `HatchGradientPattern`:
+`cad_connector_acadrust::hatch::import_gradient` maps `HatchGradientPattern`:
 
 | gradient name | result | completeness |
 | --- | --- | --- |
@@ -152,7 +152,7 @@ reports `Partial` with the underlying `FillError::reason()`; it is never faked.
 * Pure-function unit tests in `crates/cad-geometry/src/hatch.rs` cover known
   endpoints, angle rotation, single-colour tinting, stop ordering, `shift`, and
   spherical radius.
-* Importer tests in `crates/cad-import-acadrust/src/tests.rs` assert `Complete`
+* Importer tests in `crates/cad-connector-acadrust/src/tests.rs` assert `Complete`
   plus graded vertices for `LINEAR`/`SPHERICAL`/single-colour, and the explicit
   `Partial` reason codes for curve kinds and unusable definitions.
 * Real software-Vulkan (lavapipe) frames in

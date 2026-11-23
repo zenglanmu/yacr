@@ -121,7 +121,7 @@ pub fn DrawingDatabase::set_block_visibility_state(
 `ProviderRegistry::build_expanded` 经 `block_entities` 只发出激活状态成员，切换后自动
 改变派生几何，**不重新导入底图**（符合 §4.6 / 增量更新）。
 
-## 4. 导入器映射（cad-import-acadrust）
+## 4. 导入器映射（cad-connector-acadrust）
 
 `read_entities` 处理块定义时收集：源 handle 值 → `EntityId`、源 handle 值 →
 `!invisible`。两条解析路径：
@@ -173,7 +173,7 @@ pub fn DrawingDatabase::set_block_visibility_state(
 - cad-app
   - `visible_model_entities` 同时排除烘焙隐藏实体与隐藏图层实体（override 无法复活烘焙隐藏）。
   - `build_scene_stats_with_vendor` 的模型/图纸空间装配都不为烘焙隐藏实体产生批次。
-- cad-import-acadrust
+- cad-connector-acadrust
   - 合成 acadrust 文档（程序化 `BlockRecord` + 成员实体 + `BlockVisibilityParameter`）
     经 `record_dynamic_visibility` 记录状态并解析出激活状态 A / B。
   - 合成文档无可见性参数、3 成员中 1 个 `invisible`：导入后 `block_entities` 只含 2 个，

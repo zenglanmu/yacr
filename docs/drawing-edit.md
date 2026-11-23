@@ -67,7 +67,7 @@ impl<'a> DrawingTransaction<'a> {
    **两条被认可的简写**（各自独立判定，互不遮蔽）：`knots` 为空 = "clamped uniform"，
    `weights` 为空 = "全 1"。它们不是宽松容错，而是本仓库真实产生的形态：
    `cad-domain/src/multileader.rs::path_geometry` 与
-   `cad-import-acadrust/src/dimension/multileader.rs::multileader_path` 都用
+   `cad-connector-acadrust/src/dimension/multileader.rs::multileader_path` 都用
    `knots: Vec::new(), weights: Vec::new()` 构造 MULTILEADER 引线的显示样条；
    `cad-geometry::tessellate_spline` 会在空 knot 时回退到 `clamped_uniform_knots`，
    `NurbsCurve::new` 会把空权重展开成全 1。**不做任何补齐/均匀化/修复**，拒绝先于任何变更。

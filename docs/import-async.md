@@ -10,7 +10,7 @@
 
 ## 契约
 
-`cad-import-acadrust`：
+`cad-connector-acadrust`：
 
 - `ImportPhase`：`Reading` / `Parsing` / `Tables` / `Entities` / `Resolving` /
   `Finishing`，是同步导入器**真实到达**的边界，不是定时器阶段。
@@ -50,7 +50,7 @@
 - `ImportProgressSnapshot { running, phase: Option<ImportPhase>, entities_done,
   entities_total: Option<usize>, bytes: Option<u64>, cancellable, terminal:
   Option<ImportTerminal> }`，`phase_key()` 给出与目录键对应的稳定机器键
-  （`reading`/`parsing`/…），使旧 UI crate 无需依赖 `cad-import-acadrust`。
+  （`reading`/`parsing`/…），使旧 UI crate 无需依赖 `cad-connector-acadrust`。
 - `ImportTerminal::{Opened{entities}, Cancelled, Failed{error}}`。
 - `ImportProgressSnapshot::from_poll(&AsyncOpenPoll, previous)` 是 manager 轮询 →
   UI 快照的**唯一**映射；`Running` 无新 tick 时保留上一次真实阶段/计数，终态被保留

@@ -15,7 +15,7 @@
 
 **透明度数据路径（已实现）**：acadrust 0.6.5 暴露 `EntityCommon.transparency: Transparency`
 （`types/transparency.rs`：`ByLayer` / `ByBlock` / `Explicit(u8)`，0 不透明、255 全透明）
-与 `tables::Layer.transparency`。importer 在 `cad-import-acadrust` 里解析：
+与 `tables::Layer.transparency`。importer 在 `cad-connector-acadrust` 里解析：
 
 - `ByObject`（`Explicit`）→ `alpha = 1 - a/255`（唯一在导入时解析的形式）；
 - `ByLayer` → **保留符号** `EntityTransparency::ByLayer`（2026-10-26 起不再拍平），由表示层在

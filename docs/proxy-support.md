@@ -79,7 +79,7 @@ u32 record_count
 - `ProxyOutput.completeness`：全部记录证据解码成功 → `Complete`；有拒绝/超限 →
   `Partial`（已产出几何）或 `Missing`（无几何）。
 - `proxy.capture` 诊断记录类名、handle、缓存字节数、源版本。
-- 普通语义实体已成功绘制时不得再叠加代理缓存。实现（audit B21，`cad-import-acadrust`）：
+- 普通语义实体已成功绘制时不得再叠加代理缓存。实现（audit B21，`cad-connector-acadrust`）：
   仅 `EntityType::Unknown(_)` 与 `EntityType::Extended(class_name == "ACAD_PROXY_ENTITY")`
   走代理路径（`proxy_geometry_allowed`）；已知实体（LINE/HATCH/…）只画语义几何，其
   `graphic_data` 不会被叠加，因此不会重复绘制。
@@ -103,7 +103,7 @@ u32 record_count
 - 合成字节语料（`crates/cad-proxy/tests/synthetic_corpus.rs` +
   `fixtures/proxy/*.hex`）：**合成，非厂商证据**，见
   `fixtures/proxy/README.md`。
-- 导入/表示契约（`crates/cad-import-acadrust`、`crates/cad-representation`）：
+- 导入/表示契约（`crates/cad-connector-acadrust`、`crates/cad-representation`）：
   `proxy_geometry_compound` 保留全部片段、`proxy_geometry_allowed` 只对无语义几何的
   实体放行、代理来源记为 `ProxyCache`、`ByObject/ByLayer/ByBlock` 透明度解析。
 - **仍缺**：天正/探索者真实样本（有缓存、无缓存、仅包围盒、不同版本、

@@ -12,7 +12,7 @@
 ## 1. 能力与数据流
 
 ```
-DWG ──cad-import-acadrust::plot──▶ cad-db plot_settings 表
+DWG ──cad-connector-acadrust::plot──▶ cad-db plot_settings 表
                                           │
 布局名 ──cad-representation::enumerate_layouts──▶ LayoutId
                                           │
@@ -67,7 +67,7 @@ cad-cli-tools::run_plot ──────────────────�
 
 ## 3. 导入：PLOTSETTINGS 与布局内嵌字段
 
-`cad-import-acadrust::plot`（新模块，**不修改** `src/entity.rs`）在布局读取后运行，按优先级
+`cad-connector-acadrust::plot`（新模块，**不修改** `src/entity.rs`）在布局读取后运行，按优先级
 读取两处来源：
 
 1. **独立 `ObjectType::PlotSettings` 对象**（DXF PLOTSETTINGS）：通过 `owner` 指向布局
@@ -93,7 +93,7 @@ cad-cli-tools::run_plot ──────────────────�
 的配置。落库记录 `provenance = Imported`。
 
 除纸张字段外，导入还会检查源里的 **plot-style 引用**：赢得优先级的来源若带非空
-`current_style_sheet`/`plot_style_sheet`，或非缺省 shade plot 模式，`cad-import-acadrust`
+`current_style_sheet`/`plot_style_sheet`，或非缺省 shade plot 模式，`cad-connector-acadrust`
 在导入报告里各产出一条显式诊断（`import.plot_style_unsupported` /
 `import.shade_plot_unsupported`）。这两个字段被读取但值本身无法在本系统内表达/应用，
 所以既不落库也不静默忽略（§8）。
@@ -183,7 +183,7 @@ cad-cli-tools plot <input.dwg> [--layout <name>] [--dpi <f64>|--width <u32> --he
 ## 7. 测试与证据
 
 - `cad-db`：plot 表可缺省 + 缺省页、记录往返（旋转/页边距）、未知布局写入被拒。
-- `cad-import-acadrust`：`fixtures/plot/a4-layout.dwg`（**合成**，acadrust `DwgWriter`
+- `cad-connector-acadrust`：`fixtures/plot/a4-layout.dwg`（**合成**，acadrust `DwgWriter`
   产出）导入后取到独立 PLOTSETTINGS 的 A3/90°/12mm 值；无记录布局解析为显式缺省 A4。
   另有纯逻辑与端到端契约：非空 plot style 表引用产出 `import.plot_style_unsupported`、
   空/缺省引用不产出（`a_referenced_plot_style_sheet_is_reported_unsupported`、
@@ -198,7 +198,7 @@ cad-cli-tools plot <input.dwg> [--layout <name>] [--dpi <f64>|--width <u32> --he
 
 ```bash
 VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
-  cargo test -p cad-cli-tools -p cad-representation -p cad-import-acadrust -p cad-db --locked
+  cargo test -p cad-cli-tools -p cad-representation -p cad-connector-acadrust -p cad-db --locked
 ```
 
 实际执行证据由控制器汇总到 `docs/validation.md`，**本文不代填**。
@@ -209,7 +209,7 @@ VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
   `PlotSettings.current_style_sheet` 与 `Layout.plot_style_sheet` 现**被读取**，但名称本身
   无法表达颜色/线宽/淡显映射（acadrust 只暴露引用名，不暴露解析后的表值），因此不导入、
   不应用；颜色/线宽仍按既有实体样式渲染。**带非空样式表引用的布局会产出显式
-  `import.plot_style_unsupported` 诊断**（`cad-import-acadrust::plot`），导入报告据此
+  `import.plot_style_unsupported` 诊断**（`cad-connector-acadrust::plot`），导入报告据此
   把完整性降为 `Partial`，不再静默成功。
 - **打印机/绘图仪配置未实现**：`printer_name` 未使用；输出尺寸由用户 DPI/像素决定，不查询
   系统打印机能力。

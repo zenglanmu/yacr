@@ -9,7 +9,7 @@
 
 ## 1. 目的
 
-`rvt` 是 `cad-import-rvt` 唯一的 Revit 解码/glTF 导出依赖（AGENTS.md 铁律 1）。它的
+`rvt` 是 `cad-connector-rvt` 唯一的 Revit 解码/glTF 导出依赖（AGENTS.md 铁律 1）。它的
 glTF 导出把“类型由多个材质组成的构件”整块退回类别颜色**并且 alpha = 1**，材质自身的
 透明度被丢弃；单材质但颜色未读到的构件同样丢 alpha。真实样本
 （`rmeadvancedsampleproject.rvt`，Revit 2024）上这是 17 个玻璃门 + 149 个玻璃灯具
@@ -34,7 +34,7 @@ glTF 导出把“类型由多个材质组成的构件”整块退回类别颜色
   （上游 3 + 补丁 4），vendored `rvt` 自测 **331 passed**。
 - #1826（并入 0.20.0+）只改 `src/ifc/step_writer.rs`：IFC 的
   `IfcSurfaceStyleRendering.Transparency` 在未读到透明度时写 `$` 而非 0。它**不碰 GLB**，
-  对 `cad-import-rvt` 读取的 glTF 路径没有影响。
+  对 `cad-connector-rvt` 读取的 glTF 路径没有影响。
 - 多材质构件“整块退回类别颜色且 alpha = 1”的选择逻辑在 0.22.0、0.24.0、0.25.0 与 `main` 的
   `src/ifc/gltf.rs` 中**仍然没有变化**：`single_material` 仍只接受“单材质且读到颜色”的集合，
   其余走 `category_material`。无自身材质的构件取类别材质仍是上游 #1603（open）。
@@ -47,7 +47,7 @@ glTF 导出把“类型由多个材质组成的构件”整块退回类别颜色
   变化（`src/ifc/pbr.rs` 抽取、构件体 placement/extrusion 数学）都不在本补丁的修改范围内。
 
 因此升级到 0.24.0 或 0.25.0 都不能修复该问题；工作区侧也无法规避（GLB 里没有材质与构件的
-多材质关联，`cad-import-rvt` 只读 GLB）。补丁先于 2026-11-15 重挂到 0.24.0、再于 2026-11-20
+多材质关联，`cad-connector-rvt` 只读 GLB）。补丁先于 2026-11-15 重挂到 0.24.0、再于 2026-11-20
 重挂到 **0.25.0**（同一处理，删掉上游已有的 extras 部分）。
 
 **上游 PR（2026-11-20）**：已按上游最新 `main`（`gltf.rs` 与 `v0.25.0` 相同）提交 draft
@@ -75,15 +75,15 @@ mod element_alpha_tests`（上游禁止 unit test），改为 `tests/gltf_elemen
    `vendor/rvt/SHA256SUMS` 必须列出除 `src/ifc/gltf.rs` 外每个 vendored 文件的摘要、逐文件
    校验通过、且目录里没有未登记文件。
 4. **一行一个补丁**：所有列都要填写；“NOT RUN”如实写 NOT RUN。
-5. **不做第二套 API**：业务层仍只通过 `cad-import-rvt` 使用 `rvt`；`rvt` 只允许
-   `cad-import-rvt` 依赖的规则不变。
+5. **不做第二套 API**：业务层仍只通过 `cad-connector-rvt` 使用 `rvt`；`rvt` 只允许
+   `cad-connector-rvt` 依赖的规则不变。
 6. **随时可移除**：上游发布等价修复后优先删补丁、退版本、删除 `vendor/rvt`。
 
 ## 3. 台账
 
 | id | upstream version / rev | local commit or path | files touched | why | behaviour delta | tests run | NOT RUN | upstream issue / PR | remove when |
 |---|---|---|---|---|---|---|---|---|---|
-| `rvt-alpha-1` | `rvt` 0.25.0（crates.io，registry 复制，未改 `Cargo.toml` 版本号；2026-11-20 由 0.24.0 重挂，0.24.0 于 2026-11-15 由 0.22.0 重挂，0.22.0 于 2026-11-14 由 0.17.0 重挂） | `vendor/rvt`（仓库内固定路径；由 `Cargo.toml` 的 `[patch.crates-io] rvt = { path = "vendor/rvt" }` 选中） | `src/ifc/gltf.rs`（`MaterialInfo` 导入 / `most_transparent_alpha` / `element_alpha`（含单材质但颜色未读到的构件与单 profile、层集）/ `category_alpha_materials` 与类别回退的 alpha；**保留**上游的 material 索引越界过滤（过滤闭包只保留 `index < model.materials.len()` 的索引），并放进重写后的 `match`；文件末尾新增 `#[cfg(test)] mod element_alpha_tests`，加在上游 `mod tests` 之后。**不含** extras：上游已自带 #1818 的 `MaterialExtras` / `SOURCE_FILE` / `SOURCE_RVT_RS`） | 0.25.0 的 glTF 导出仍丢弃多材质构件与“颜色未读到”构件的材质透明度（issue #1812 已按子项关闭，但选择逻辑自 0.22.0 起未改；0.23.0/0.24.0/0.25.0 的 release notes 与源码都没有实现；#1818 只加来源标记、#1826 只改 IFC 侧 `$`），Revit 预览里玻璃门/玻璃灯具被画成不透明 | ① 多材质类型（`IfcMaterialConstituentSet` ≥ 2 个材质）的整块预览体沿用类别颜色，但 alpha 取**最透明构件**材质的不透明度（`1 - transparency` 的最小值），且只在该集合里至少一个材质**读到了** transparency 时生效；② 未按层绘制的层集构件（`material_layer_set_index`）同样按层材质取该 alpha；③ 单材质但**颜色未读到**、或单 profile 颜色未读到的构件：颜色仍取类别色板（**不**换成 `PbrMaterial` 的灰色，`single_material`/单 profile 的过滤条件保持“必须读到颜色”），只补上读到的 alpha；④ extras 的来源标记由上游写（本补丁不再重复实现）；⑤ material 索引越界按“该构件没有自身材质”处理（上游）后再走类别/alpha 回退，不再写出指向 `materials[]` 之外的索引；⑥ 其余（几何、节点、颜色选取、类别色板、IFC/STEP 导出、release 状态）不变 | `bash scripts/test-rvt-patch.sh` **7 passed**（`--locked` 用上游随包 `Cargo.lock`；脚本断言“7 passed”＝上游 3 个 writer 测试 + 补丁 4 个，删掉 `element_alpha_tests` 会失败）；`cargo test -p cad-import-rvt --locked` **41 passed**（0.25.0 工作树，PBR 实现 lane 报告；0.24.0 轮次为 33 passed，本文件未保存 0.25.0 的测试日志）；`YACR_TEST_RVT=<本地 rmeadvancedsampleproject.rvt> cargo test -p cad-import-rvt --locked a_real_revit_project_imports_when_supplied` 在 **0.24.0 + 本补丁**上实跑通过（0.25.0 上 **NOT RUN**）：`meshes=6783`、`triangles=3317956`、`explicit_opacity=746`、`explicit_colors=6783`、`by_layer_colors=0`，诊断 `import.rvt.alpha_chosen` 存在（0.22.0 轮次记录为 `meshes=6785`、`triangles=3317804`、`explicit_opacity=746`：alpha 结果不变，几何差 -2 mesh / +152 三角形，来自上游构件体改动）；`python3 scripts/check-architecture.py` 通过（0.25.0 / 210 个 vendored 文件 / `Cargo.lock` 无 `source`）；`cargo check -p cad-import-rvt --target wasm32-unknown-unknown --locked`、`rustfmt --check --edition 2024 vendor/rvt/src/ifc/gltf.rs`、`cargo fmt --all -- --check`、`cargo clippy -p cad-import-rvt --all-targets --locked -- -D warnings` 在 **0.24.0 轮次**通过（0.25.0 重挂后 NOT RUN） | 未打补丁的 0.24.0 与 0.22.0 的 580 → 746 对比来自 2026-11-14 轮次记录，本轮未重跑基线；真实 Revit 样本在 **0.25.0** 上的重基线 **NOT RUN**；真实 Revit 透明度保真度（单一样本，无第二份交叉验证）；逐像素/GPU 渲染证据本轮 **NOT RUN**（沿用 0.17.0 补丁时 Quadro P620 的 580→746 记录）；Windows/macOS/Android/Web 只到编译/契约；`scripts/test-ui-migration-guards.py` 与漂移探针本轮 NOT RUN；上游 issue #1812 已关闭但多材质 alpha 与 #1603 仍未修 | 上游 issue #1812（closed，多材质 alpha 未修）与 #1603（open）；PR #1818 / #1826（已并入 0.20.0+）；本仓提交的上游 PR **#2109**（draft，2026-11-20，含 `tests/gltf_element_alpha.rs` 契约测试） | 上游 `rvt` 在 glTF 里为多材质构件保留材质 alpha（或提供等价选择规则）且 **PR #2109** 合并并发布后，删 `vendor/rvt`、删 `[patch.crates-io]`、升版本 |
+| `rvt-alpha-1` | `rvt` 0.25.0（crates.io，registry 复制，未改 `Cargo.toml` 版本号；2026-11-20 由 0.24.0 重挂，0.24.0 于 2026-11-15 由 0.22.0 重挂，0.22.0 于 2026-11-14 由 0.17.0 重挂） | `vendor/rvt`（仓库内固定路径；由 `Cargo.toml` 的 `[patch.crates-io] rvt = { path = "vendor/rvt" }` 选中） | `src/ifc/gltf.rs`（`MaterialInfo` 导入 / `most_transparent_alpha` / `element_alpha`（含单材质但颜色未读到的构件与单 profile、层集）/ `category_alpha_materials` 与类别回退的 alpha；**保留**上游的 material 索引越界过滤（过滤闭包只保留 `index < model.materials.len()` 的索引），并放进重写后的 `match`；文件末尾新增 `#[cfg(test)] mod element_alpha_tests`，加在上游 `mod tests` 之后。**不含** extras：上游已自带 #1818 的 `MaterialExtras` / `SOURCE_FILE` / `SOURCE_RVT_RS`） | 0.25.0 的 glTF 导出仍丢弃多材质构件与“颜色未读到”构件的材质透明度（issue #1812 已按子项关闭，但选择逻辑自 0.22.0 起未改；0.23.0/0.24.0/0.25.0 的 release notes 与源码都没有实现；#1818 只加来源标记、#1826 只改 IFC 侧 `$`），Revit 预览里玻璃门/玻璃灯具被画成不透明 | ① 多材质类型（`IfcMaterialConstituentSet` ≥ 2 个材质）的整块预览体沿用类别颜色，但 alpha 取**最透明构件**材质的不透明度（`1 - transparency` 的最小值），且只在该集合里至少一个材质**读到了** transparency 时生效；② 未按层绘制的层集构件（`material_layer_set_index`）同样按层材质取该 alpha；③ 单材质但**颜色未读到**、或单 profile 颜色未读到的构件：颜色仍取类别色板（**不**换成 `PbrMaterial` 的灰色，`single_material`/单 profile 的过滤条件保持“必须读到颜色”），只补上读到的 alpha；④ extras 的来源标记由上游写（本补丁不再重复实现）；⑤ material 索引越界按“该构件没有自身材质”处理（上游）后再走类别/alpha 回退，不再写出指向 `materials[]` 之外的索引；⑥ 其余（几何、节点、颜色选取、类别色板、IFC/STEP 导出、release 状态）不变 | `bash scripts/test-rvt-patch.sh` **7 passed**（`--locked` 用上游随包 `Cargo.lock`；脚本断言“7 passed”＝上游 3 个 writer 测试 + 补丁 4 个，删掉 `element_alpha_tests` 会失败）；`cargo test -p cad-connector-rvt --locked` **41 passed**（0.25.0 工作树，PBR 实现 lane 报告；0.24.0 轮次为 33 passed，本文件未保存 0.25.0 的测试日志）；`YACR_TEST_RVT=<本地 rmeadvancedsampleproject.rvt> cargo test -p cad-connector-rvt --locked a_real_revit_project_imports_when_supplied` 在 **0.24.0 + 本补丁**上实跑通过（0.25.0 上 **NOT RUN**）：`meshes=6783`、`triangles=3317956`、`explicit_opacity=746`、`explicit_colors=6783`、`by_layer_colors=0`，诊断 `import.rvt.alpha_chosen` 存在（0.22.0 轮次记录为 `meshes=6785`、`triangles=3317804`、`explicit_opacity=746`：alpha 结果不变，几何差 -2 mesh / +152 三角形，来自上游构件体改动）；`python3 scripts/check-architecture.py` 通过（0.25.0 / 210 个 vendored 文件 / `Cargo.lock` 无 `source`）；`cargo check -p cad-connector-rvt --target wasm32-unknown-unknown --locked`、`rustfmt --check --edition 2024 vendor/rvt/src/ifc/gltf.rs`、`cargo fmt --all -- --check`、`cargo clippy -p cad-connector-rvt --all-targets --locked -- -D warnings` 在 **0.24.0 轮次**通过（0.25.0 重挂后 NOT RUN） | 未打补丁的 0.24.0 与 0.22.0 的 580 → 746 对比来自 2026-11-14 轮次记录，本轮未重跑基线；真实 Revit 样本在 **0.25.0** 上的重基线 **NOT RUN**；真实 Revit 透明度保真度（单一样本，无第二份交叉验证）；逐像素/GPU 渲染证据本轮 **NOT RUN**（沿用 0.17.0 补丁时 Quadro P620 的 580→746 记录）；Windows/macOS/Android/Web 只到编译/契约；`scripts/test-ui-migration-guards.py` 与漂移探针本轮 NOT RUN；上游 issue #1812 已关闭但多材质 alpha 与 #1603 仍未修 | 上游 issue #1812（closed，多材质 alpha 未修）与 #1603（open）；PR #1818 / #1826（已并入 0.20.0+）；本仓提交的上游 PR **#2109**（draft，2026-11-20，含 `tests/gltf_element_alpha.rs` 契约测试） | 上游 `rvt` 在 glTF 里为多材质构件保留材质 alpha（或提供等价选择规则）且 **PR #2109** 合并并发布后，删 `vendor/rvt`、删 `[patch.crates-io]`、升版本 |
 
 ## 4. 如何更新这个补丁
 
@@ -93,15 +93,15 @@ mod element_alpha_tests`（上游禁止 unit test），改为 `tests/gltf_elemen
    版本号（`[patch]` 必须能匹配 `=0.25.0`）。
 3. **同步契约测试**：`vendor/rvt` 内 `#[cfg(test)] mod element_alpha_tests` 覆盖新规则
    （上游 0.25.0 自带的 3 个 writer 测试保留，`scripts/test-rvt-patch.sh` 断言合计 7）；
-   `cad-import-rvt` 覆盖 GLB 侧可观测结果（`GlbScene::alpha_chosen` 与
+   `cad-connector-rvt` 覆盖 GLB 侧可观测结果（`GlbScene::alpha_chosen` 与
    `import.rvt.alpha_chosen`）。
 4. **跑证据**（`vendor/rvt/Cargo.lock` 是上游随包 lock，随补丁源码一起跟踪，供
    `--locked` 使用；改 `src/ifc/gltf.rs` 以外任何 vendored 文件都要重生成
    `vendor/rvt/SHA256SUMS` 才会过门禁）：
    ```bash
    bash scripts/test-rvt-patch.sh
-   cargo test -p cad-import-rvt --locked
-   YACR_TEST_RVT=<absolute .rvt> cargo test -p cad-import-rvt real_revit_project --locked -- --nocapture
+   cargo test -p cad-connector-rvt --locked
+   YACR_TEST_RVT=<absolute .rvt> cargo test -p cad-connector-rvt real_revit_project --locked -- --nocapture
    python3 scripts/check-architecture.py
    ```
 5. **更新本文件**（行、行为差异、已运行/未运行）。
@@ -115,5 +115,5 @@ mod element_alpha_tests`（上游禁止 unit test），改为 `tests/gltf_elemen
   `load_packages` 不把 `vendor/rvt` 当 workspace 成员，`cargo fmt/clippy --workspace`
   也不会覆盖它。
 - 补丁产生的 alpha 是**导出器选择**（`extras.alphaSource = "rvt-rs"`），
-  `cad-import-rvt` 必须把这类构件计进 `import.rvt.alpha_chosen` 诊断，不允许当成
+  `cad-connector-rvt` 必须把这类构件计进 `import.rvt.alpha_chosen` 诊断，不允许当成
   “文件自身的构件透明度”。

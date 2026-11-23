@@ -18,7 +18,7 @@ crate 重导出，因为 `cad-db` 只允许依赖 `cad-domain`，而实体几何
 * `TessellationRequest` / `TessellationResult`（原始契约）；
 * `SolidExchange`（见 §2）与其中的中性 `BrepData`（`cad_domain::brep`）。
 
-`cad-import-acadrust` 是唯一依赖 acadrust 的 crate；它把 SAT/SAB 解析为
+`cad-connector-acadrust` 是唯一依赖 acadrust 的 crate；它把 SAT/SAB 解析为
 `BrepData`，此后再无 acadrust 类型越过内核 seam。`cad-kernel-adapter` 自身
 **不**依赖 acadrust，也不解析 SAT/SAB 字节。
 
@@ -166,7 +166,7 @@ TessellationOutcome::Failed     { diagnostics }
 
 ## 7. importer 数据路径
 
-`cad-import-acadrust`：
+`cad-connector-acadrust`：
 
 * `solid_exchange_from_entity(&EntityType) -> Option<SolidExchange>`：对
   `3DSOLID` / `REGION` / `BODY` / `SURFACE` 取 `AcisData`，解析成功则返回
@@ -245,7 +245,7 @@ alpha)` 把 `TessellationResult` 转为显示图元：
 
 ## 11. 写回（P3a/P3b 已实现子集）
 
-本节描述**导出**方向：`cad-import-acadrust` 的 `export::acis` 用中性 `BrepData`
+本节描述**导出**方向：`cad-connector-acadrust` 的 `export::acis` 用中性 `BrepData`
 构建 acadrust `SatDocument`，再由 `DxfWriter` 写成 DXF `3DSOLID` 的内联 ACIS SAT
 文本（AC1024），或用 `SabWriter` 从**同一份** `SatDocument` 生成**二进制 SAB**、
 经 `Solid3D::from_sab` 挂到 DWG `3DSOLID` 上（P3b，2026-11-17；由上游 `DwgWriter`

@@ -30,7 +30,7 @@
 | `src/entities/curve.rs` | cad-geometry 曲线/NURBS | 曲线离散与容差语义、非均匀变换 | 行为参考 |
 | `src/scene/convert/curve_tol.rs` | cad-geometry 离散容差 | 弦高/角度伺服 | 行为参考 |
 | `src/scene/convert/solid3d_tess.rs` | cad-kernel-adapter | 3DSOLID 面离散边界 | 行为参考 |
-| `src/scene/convert/acis_kernel.rs` | cad-import-acadrust ACIS 数据路径 | ACIS 载荷与坐标 | 行为参考 |
+| `src/scene/convert/acis_kernel.rs` | cad-connector-acadrust ACIS 数据路径 | ACIS 载荷与坐标 | 行为参考 |
 | `docs/cadkernel-body-path.md` | cad-kernel-adapter | body/face 路径与降级 | 行为参考 |
 
 未移植 Iced UI、opencadcodec、opencadkernel 依赖树，也未修改 acadrust。

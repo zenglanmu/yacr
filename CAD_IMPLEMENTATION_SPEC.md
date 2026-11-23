@@ -198,7 +198,7 @@ ADR-0037 把"稳定记录 source handle"升级为强制契约：本地 id 不复
 |---|---|---|
 | cad-domain | ID、单位、语义几何、来源/精度类型 | 外部 UI/GPU 类型 |
 | cad-db | 对象存储、查询、引用校验、事务、revision、ChangeSet | 直接渲染 |
-| cad-import-acadrust | 读取和数据库 Builder 适配、导入报告 | 改 acadrust 源码 |
+| cad-connector-acadrust | 读取和数据库 Builder 适配、导入报告 | 改 acadrust 源码 |
 | cad-proxy | 公开代理缓存解析、状态回放 | 伪造缺失图形 |
 | cad-kernel-adapter | ACIS/曲面到可离散几何的隔离接口 | 对外泄露内核对象 |
 | cad-geometry | 曲线、坐标变换、几何运算、容差策略 | UI 数据绑定 |
@@ -807,7 +807,7 @@ CLI 操作通过与 UI 相同的 Command/Transaction 路径，不另外维护一
   Android 入口打印退役诊断后 abort）；该历史限制对任何平台都不构成“现行桌面 UI 基线”。
 - **保留的核心不变量**（不因本节改变）：
   - `cad-db` 仍是唯一权威数据源；业务层只操作数据库/命令/事务，不调用 GPU。
-  - renderer-only wgpu：仅 `cad-render-wgpu` 依赖 wgpu；acadrust 仍仅由 `cad-import-acadrust` 依赖。
+  - renderer-only wgpu：仅 `cad-render-wgpu` 依赖 wgpu；acadrust 仍仅由 `cad-connector-acadrust` 依赖。
   - ChangeSet → 依赖失效 → 显示表示重建的增量语义不变；不无条件全帧重解析底图。
   - **每条合成路径只有一个 CAD presenter**；不与 UI 争抢同一 drawable；不做整幅回读。
   - 未支持/未验证能力必须显式 `Unsupported`/`Partial`/诊断；禁止空成功与假数据。

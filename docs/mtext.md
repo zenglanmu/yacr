@@ -102,7 +102,7 @@
 
 ## 与其他模块的关系
 
-- `cad-import-acadrust` 已存储 TEXT/MTEXT 的样式字段（`Text` 几何的 `style`/`font`/
+- `cad-connector-acadrust` 已存储 TEXT/MTEXT 的样式字段（`Text` 几何的 `style`/`font`/
   `h_align`/`v_align`）；本次**未修改导入器**。
 - `cad-scene` 的批注文本仍走简单 `outline`（批注不是 MTEXT）。
 - `FontEngine::shape` 复用现有回退链与 kern 逻辑；未注册字体的诊断行为不变。

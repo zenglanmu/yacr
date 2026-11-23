@@ -202,7 +202,7 @@ paper = (model - view_center) * paper_per_model + paper_center
 
 ### 3.1 与当前 importer 的闭环（审计 B22）
 
-`cad-import-acadrust::read_layouts` 现在为每个纸空间布局的**内容视口**写入：
+`cad-connector-acadrust::read_layouts` 现在为每个纸空间布局的**内容视口**写入：
 
 1. **四角纸面矩形**：`clip = [c0, c1, c2, c3]`。没有 VPCLIP 边界时是
    `center ± (width/2, height/2)` 的四个轴对齐角点（acadrust 的 `Viewport.center` /
@@ -351,7 +351,7 @@ world = OCS(normal) · translate(insert_point) · R(rotation) · S(x_scale, y_sc
 `layout.fit_empty` 且相机不动），以及 `viewport_measurement_space` 提供已验证逆变换 /
 不可支持时禁用模型测量。
 
-`cargo test -p cad-import-acadrust` 覆盖：1:100 视口四角与纸面→模型变换、图纸/关闭视口
+`cargo test -p cad-connector-acadrust` 覆盖：1:100 视口四角与纸面→模型变换、图纸/关闭视口
 不写入、扭转/倾斜/复杂裁剪视口为 `Partial`；布局按 LAYOUT `tab_order` 排序、显示名来自
 LAYOUT 对象、纸空间实体与视口仍关联到正确布局 id、无 LAYOUT 对象的纸块按块名追加；
 INSERT 基点相减、正值逆时针旋转、OCS normal 提升、数组单元为 pre-scale 行主序、未知块为
@@ -366,5 +366,5 @@ INSERT 基点相减、正值逆时针旋转、OCS normal 提升、数组单元�
 
 旧 UI crate 的桥接测试与 `LayoutPanelState` 测试**已随桌面 UI 迁移删除**（该 runner 在仓库中
 不存在）；对应能力现在由 `LayoutTabs`/`layout-tabs.ts` 与上述 `cad-ui-core` 测试承接。本节有效
-验证是 `cargo test -p cad-representation`、`-p cad-app`、`-p cad-import-acadrust`、
+验证是 `cargo test -p cad-representation`、`-p cad-app`、`-p cad-connector-acadrust`、
 `-p cad-ui-core` 与 `apps/desktop-ui` 的 `npm test`。

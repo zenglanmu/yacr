@@ -8,7 +8,7 @@
 
 ## 1. 目的
 
-`acadrust` 是 `cad-import-acadrust` 唯一的解析/写出依赖（AGENTS.md 铁律 1）。上游 bug 或缺失
+`acadrust` 是 `cad-connector-acadrust` 唯一的解析/写出依赖（AGENTS.md 铁律 1）。上游 bug 或缺失
 能力（例如 DWG 写出缺陷）有时只能通过本地补丁解决。本台账让每一个补丁都**可追溯、可复现、
 可移除**，并保证“改了上游”这件事不会被静默忘记。
 
@@ -25,8 +25,8 @@
    且正文必须包含 workspace 解析出的 `acadrust` 版本字符串。缺失台账或不含该版本 ⇒ 架构门禁
    失败。
 4. **一行一个补丁**：每个补丁在下方台账中占一行，所有列都要填写；“NOT RUN”如实写 NOT RUN。
-5. **不做第二套 API**：业务层仍然只通过 `cad-import-acadrust` 的适配层使用 acadrust；“acadrust
-   只允许 `cad-import-acadrust` 依赖”的规则不变。
+5. **不做第二套 API**：业务层仍然只通过 `cad-connector-acadrust` 的适配层使用 acadrust；“acadrust
+   只允许 `cad-connector-acadrust` 依赖”的规则不变。
 6. **随时可移除**：每行必须写明“remove when”条件；上游修复发布后优先删除补丁并升级版本。
 
 ## 3. 台账
@@ -48,8 +48,8 @@
    acadrust = { git = "https://github.com/<owner>/acadrust", rev = "<40-hex>" }
    ```
    同时在 `docs/acadrust-patches.md` 台账新增一行（含 `0.6.8` / 新版本字符串，门禁会检查）。
-5. **补测试与证据**：补丁必须有契约测试（优先在 `cad-import-acadrust` 内，用合成夹具）；跑
-   `cargo test -p cad-import-acadrust --locked`，并如实登记未运行项。
+5. **补测试与证据**：补丁必须有契约测试（优先在 `cad-connector-acadrust` 内，用合成夹具）；跑
+   `cargo test -p cad-connector-acadrust --locked`，并如实登记未运行项。
 6. **跑门禁**：`python3 scripts/check-architecture.py`、`cargo check --workspace --all-targets
    --locked`、`cargo fmt --all -- --check`，以及改动 crate 的 clippy。
 7. **写上游 issue/PR**（若可提交），填入台账；上游合并后按“remove when”删除补丁并升级。
@@ -59,7 +59,7 @@
 - 台账不是兼容性声明：补丁测试通过只证明该补丁的合成用例；真实 DWG/AutoCAD 兼容性仍然是
   **NOT VERIFIED**，除非有明确的 vendor/AutoCAD 证据。
 - 不得用补丁把“未支持能力”改成“空成功”或假数据（AGENTS.md 铁律 2）。
-- 不得通过 patch 机制把平台/UI 依赖塞进 `cad-*`，也不得绕过 `cad-import-acadrust` 的单一
+- 不得通过 patch 机制把平台/UI 依赖塞进 `cad-*`，也不得绕过 `cad-connector-acadrust` 的单一
   依赖边界。
 
 > **2026-11-12（Wave 26）**：本轮未使用 `[patch.crates-io]`，台账仍为空。DWG 保存仍走上游

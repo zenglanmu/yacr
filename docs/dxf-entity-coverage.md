@@ -12,7 +12,7 @@ DXF 图元与 `../opencadstudio` 当前支持的图元，并要求“务必实�
 - 出图与覆盖报告：`scripts/check-qcad-examples.py`（默认真实 GPU；软件 Mesa lavapipe 须
   `--software` 显式开启并标注 SOFTWARE；`--export-references` 时用可选
   `ezdxf`+`matplotlib` 导出参考 PNG，见 §5）。
-- 图元实现位置：`crates/cad-import-acadrust/src/{entity,dimension,primitives,geometry}.rs`。
+- 图元实现位置：`crates/cad-connector-acadrust/src/{entity,dimension,primitives,geometry}.rs`。
 
 ## 2. 本轮新实现的图元
 

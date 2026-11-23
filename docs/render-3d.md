@@ -21,7 +21,7 @@
 
 `SceneCache::build` 会丢弃越界索引构成的三角形，而不是上传非法拓扑。
 
-### HATCH 多环填充（`cad-geometry` → `cad-import-acadrust` → `cad-representation`）
+### HATCH 多环填充（`cad-geometry` → `cad-connector-acadrust` → `cad-representation`）
 
 `cad_domain::hatch::fill_rings` 按**奇偶规则**填充多环 HATCH：环按包含深度分层（该函数用 **0 基**：偶数深度为实体，
 等价于 1 基的**奇数深度**；ADR-0018 用 1 基表述，勿差一）、

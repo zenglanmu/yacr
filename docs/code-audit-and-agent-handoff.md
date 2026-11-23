@@ -197,7 +197,7 @@
 
 ### B15 · P1 · 源码确认：块定义当顶层画，INSERT/文字被跳过
 
-- 位置：`cad-import-acadrust/src/lib.rs:343–355` 将块内实体记 SpaceId::Model；`cad-db/src/lib.rs:294–301` 无 owner 区分；`cad-scene/src/lib.rs:164–169` 跳过 Instance/Text/Image。
+- 位置：`cad-connector-acadrust/src/lib.rs:343–355` 将块内实体记 SpaceId::Model；`cad-db/src/lib.rs:294–301` 无 owner 区分；`cad-scene/src/lib.rs:164–169` 跳过 Instance/Text/Image。
 - 影响：块定义在原点误显示，实际 INSERT 位置缺失；TEXT/MTEXT 与代理 UnicodeText 无最终绘制；fit bounds 也不展开 insert。
 - 修复：明确实体 owner/空间区分顶层和定义；递归有界实例展开/共享，保留 InstancePath、块基点、OCS 与继承样式；文字真实 shaping/图集。不支持时传播 Missing，不空成功。
 - 回归：一块两 INSERT + 嵌套/镜像/非均匀变换，顶层无多画、实例独立拾取/锚定、bounds 正确；中文文字有可见输出与替代诊断。
@@ -239,7 +239,7 @@
 
 ### B21 · P1 · 源码确认：代理只保留第一个图形，来源丢失
 
-- 位置：`cad-import-acadrust/src/lib.rs:533–538` into_iter().next()；representation 统一 GeometrySource::Analytic。
+- 位置：`cad-connector-acadrust/src/lib.rs:533–538` into_iter().next()；representation 统一 GeometrySource::Analytic。
 - 修复：单 entity 支持多片段，保留 proxy source/precision；普通语义已画时不得重复叠代理。
 - 回归：两条 UnicodeText 记录输出都保留；未来线面 decoder 同样适用；缓存几何测量不能报解析精度。
 

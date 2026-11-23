@@ -3,7 +3,7 @@
 本文描述 **2026-11-02 落地的 XREF v1**：打开图纸时按宿主策略解析外部参照，把可读到的
 参照内容**在导入期合并进宿主数据库**，并在 References 面板显示每个参照的真实状态。
 规范条款：spec v2.0 §7.3、§16.2；实现入口
-`crates/cad-import-acadrust/src/xref.rs`、`crates/cad-resources/src/xref_path.rs`、
+`crates/cad-connector-acadrust/src/xref.rs`、`crates/cad-resources/src/xref_path.rs`、
 `crates/cad-platform/src/xref_loader.rs`、`crates/cad-db/src/xref.rs`。
 
 > **证据边界**：本文所列能力由**合成 DWG/DXF 夹具的契约测试**覆盖，**不是**真实 DWG
@@ -183,7 +183,7 @@ DXF 另存（v1）**不能**写外部参照记录或路径，因此拒绝把 xre
   URL/`file:`、UNC、Windows 盘符、`..`、绝对根包含、相对基准、无图纸目录、UTF-8、重复分隔符）。
 - `cad-platform`：真实临时目录下的相对/绝对读取、缺失文件为错误、根外路径拒绝、符号链接逃逸
   拒绝、空文件返回空字节、空根忽略、`NoXrefSource` 显式“无文件系统”。
-- `cad-import-acadrust`：浏览器源不可用、缺失文件、非法绝对路径不读取、unloaded 不读取、
+- `cad-connector-acadrust`：浏览器源不可用、缺失文件、非法绝对路径不读取、unloaded 不读取、
   深度 9 在读取前拒绝、字节预算在解析前拒绝、成功合并且图层命名空间、空模型 `Loaded` +
   信息诊断、宿主图层覆盖优先、`INSERT` 到 unloaded/missing/无 loader、循环收敛、嵌套 overlay
   跳过而顶层 overlay 加载、嵌套图层链、匿名块不碰撞。

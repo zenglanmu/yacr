@@ -142,7 +142,7 @@ magic/ABI/token/generation 不匹配、非 UTF-8 诊断都显式拒绝。
 
 ## 4.1 records 从哪里来
 
-`cad-import-acadrust::vendor::extract_vendor_records` 在导入后遍历所有 block 记录：
+`cad-connector-acadrust::vendor::extract_vendor_records` 在导入后遍历所有 block 记录：
 
 - `EntityType::Unknown` 且 `dxf_name` 以 `TCH_` 开头：按 R2007/R2010+ 的 framing 拆分
   `raw_dwg_data` 为 main/text/handle，再用 acadrust 的 `read_common_entity_data` 计算
@@ -310,7 +310,7 @@ handle；API/编辑/COPY 创建并提交的实体有 `EntityId` 但 `source_hand
   与 settled-once 测试；`apps/app-web/src/vendor.rs` 的 wasm 侧 stage/settle/清空测试；
   `crates/cad-app/src/render_scene/vendor_tests.rs` 的源实体合并 + 块内成员 + 派生面积测试；
   `crates/cad-app/src/host/tests/properties.rs` 的 `vendor_*` 属性行；
-  `crates/cad-import-acadrust/src/vendor.rs` 的 `YACR_TEST_DWG` 抽取测试。
+  `crates/cad-connector-acadrust/src/vendor.rs` 的 `YACR_TEST_DWG` 抽取测试。
 - 前端：`apps/desktop-ui/test/vendor-plugin.test.ts`（ABI v1 帧、墙/柱/文字/门窗、块图元、
   洞口侧线、弧墙/profile 诊断、截断/坏 magic、bulge→arc），以及每个新类的合成契约测试
   （annotation / dimension / stair / opening-symbols / block-insert / break-line /

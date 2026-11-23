@@ -104,7 +104,7 @@
 
 1. **能力表的 importer 侧错误**（F11/B20）：`note_capability` 的 `read` 恒为
    `Verified`、render/pick 复制 semantic、`model_render` 未汇总实体完整性。
-   位于 `crates/cad-import-acadrust`，本轮不可改 → OPEN。
+   位于 `crates/cad-connector-acadrust`，本轮不可改 → OPEN。
 2. **UI 只取首条诊断**（U08）：该条原写「状态栏/诊断抽屉接线在旧 UI crate/`apps/**`」——
    该 crate **已随桌面 UI 迁移删除**；当前旧抽屉内容已拆成**文件信息面板**
    （`FileInfoPalette.tsx`，静态），新的**诊断面板**（`DiagnosticsPalette.tsx`）展示动态性能，
@@ -113,7 +113,7 @@
 3. **表示缺失不汇总**（B20/F11）：应读取/语义/表示/场景/GPU/拾取分别判定，
    位于 importer/representation/CLI → OPEN。
 4. **代理线面/状态栈与对象级缺图报告**（F11/B21）：位于 `cad-proxy`/
-   `cad-import-acadrust` → OPEN。
+   `cad-connector-acadrust` → OPEN。
 5. **资源包 UI、外参/图片显示、SHX/BigFont 真正解码、字体图集**（F10）：
    跨 representation/宿主 → OPEN；本 crate 只提供真实能力表与预算契约。
 6. **CLI/诊断包共享结构化输出与原子导出**（B30）：位于 `cad-cli-tools`，
