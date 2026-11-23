@@ -30,7 +30,7 @@
 //!   [`SessionState::authorize`](crate::SessionState::authorize) →
 //!   `CadError::PermissionDenied`), the same rule every layer/database write uses.
 //! * **the DXF exporter writes both values** (the acadrust export path in
-//!   `cad_import_acadrust::export`), so a SAVE→OPEN cycle keeps the style: this is
+//!   `cad_connector_acadrust::export`), so a SAVE→OPEN cycle keeps the style: this is
 //!   the acadrust writer's `$PDMODE` / `$PDSIZE` header pair plus our own reader,
 //!   i.e. **internal consistency**, not a third-party-vendor compatibility claim.
 

@@ -20,10 +20,10 @@ use super::*;
 
 use cad_domain::hatch::GradientStop;
 use cad_domain::HatchGradient;
-use cad_import_acadrust::export::{
+use cad_connector_acadrust::export::{
     export, AcisVersion, DxfTarget, ExportFormat, ExportLimits, ExportRequest, ExportSpace,
 };
-use cad_import_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
+use cad_connector_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
 
 /// A closed axis-aligned rectangle `[x0, x1] x [y0, y1]`, so the ramp covers a
 /// non-square extent (which also keeps `SPHERICAL` visibly distinct from a

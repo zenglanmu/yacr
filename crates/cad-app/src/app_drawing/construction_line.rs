@@ -3,7 +3,7 @@
 //! `cad-db` has **no infinite-line geometry**, so neither command can store the
 //! thing AutoCAD calls an XLINE or a RAY. This module performs exactly the
 //! reduction the DWG importer performs
-//! (`cad_import_acadrust::construct_line::ray_semantics`): the construct line is
+//! (`cad_connector_acadrust::construct_line::ray_semantics`): the construct line is
 //! clipped to the drawing's XY model bounds (or a default 1000-unit box around
 //! `base` when the drawing is empty) and stored as one
 //! [`SemanticGeometry::Line`]. The entity keeps its source class name in

@@ -685,10 +685,10 @@ fn mesh_volume(mesh: &cad_domain::Mesh) -> f64 {
 /// nothing here is GPU, pixel or vendor-compatibility evidence.
 #[test]
 fn a_modeler_box_survives_a_dxf_round_trip_as_an_exact_solid3d() {
-    use cad_import_acadrust::export::{
+    use cad_connector_acadrust::export::{
         export, AcisVersion, DxfTarget, ExportFormat, ExportLimits, ExportRequest, ExportSpace,
     };
-    use cad_import_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
+    use cad_connector_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
 
     let mut controller = modeler_controller();
     let document = controller.document_id;

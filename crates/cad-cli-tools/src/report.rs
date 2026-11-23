@@ -34,7 +34,7 @@ pub(crate) fn is_completeness_diagnostic(code: &str) -> bool {
 }
 
 pub(crate) fn import_completeness_issues(
-    report: &cad_import_acadrust::ImportReport,
+    report: &cad_connector_acadrust::ImportReport,
 ) -> Vec<serde_json::Value> {
     report
         .diagnostics

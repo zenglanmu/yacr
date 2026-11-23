@@ -124,8 +124,8 @@ fn async_progress_stream_is_ordered_and_monotonic() {
 
     // Read start/end, tables, entity batches, resolve, finish — in order.
     let index =
-        |phase: cad_import_acadrust::ImportPhase| events.iter().position(|p| p.phase == phase);
-    use cad_import_acadrust::ImportPhase::*;
+        |phase: cad_connector_acadrust::ImportPhase| events.iter().position(|p| p.phase == phase);
+    use cad_connector_acadrust::ImportPhase::*;
     assert_eq!(events.first().map(|p| p.phase), Some(Reading));
     assert_eq!(events.last().map(|p| p.phase), Some(Finishing));
     assert!(index(Parsing).unwrap() < index(Tables).unwrap());
@@ -206,7 +206,7 @@ fn stale_stamp_is_discarded_by_the_job_guard() {
         document: DocumentId(1),
         database: cad_domain::DatabaseId(1),
         bytes: dwg_bytes(),
-        limits: cad_import_acadrust::ImportLimits::default(),
+        limits: cad_connector_acadrust::ImportLimits::default(),
         generation: 0,
         xref: None,
     };
@@ -270,14 +270,14 @@ fn snapshot_is_none_when_idle_and_never_fabricates_a_phase() {
 #[test]
 fn snapshot_keeps_unknown_totals_unknown_and_real_totals_exact() {
     // Indeterminate: total unknown stays None, bytes unknown stays None.
-    let indeterminate = ImportProgress::at(cad_import_acadrust::ImportPhase::Parsing, 0, None);
+    let indeterminate = ImportProgress::at(cad_connector_acadrust::ImportPhase::Parsing, 0, None);
     let snapshot = ImportProgressSnapshot::from_progress(&indeterminate, true);
     assert_eq!(snapshot.entities_total, None);
     assert_eq!(snapshot.bytes, None);
     assert!(snapshot.running);
 
     // Determinate: the real total is carried verbatim.
-    let determinate = ImportProgress::at(cad_import_acadrust::ImportPhase::Entities, 2, Some(4));
+    let determinate = ImportProgress::at(cad_connector_acadrust::ImportPhase::Entities, 2, Some(4));
     let snapshot = ImportProgressSnapshot::from_progress(&determinate, true);
     assert_eq!(snapshot.entities_done, 2);
     assert_eq!(snapshot.entities_total, Some(4));
@@ -289,7 +289,7 @@ fn snapshot_projection_retains_running_fields_and_maps_terminals() {
     // phase is never lost or invented.
     let previous = ImportProgressSnapshot {
         running: true,
-        phase: Some(cad_import_acadrust::ImportPhase::Entities),
+        phase: Some(cad_connector_acadrust::ImportPhase::Entities),
         entities_done: 3,
         entities_total: Some(4),
         bytes: Some(123),
@@ -303,7 +303,7 @@ fn snapshot_projection_retains_running_fields_and_maps_terminals() {
     let projected = ImportProgressSnapshot::from_poll(&running, Some(&previous)).unwrap();
     assert_eq!(
         projected.phase,
-        Some(cad_import_acadrust::ImportPhase::Entities)
+        Some(cad_connector_acadrust::ImportPhase::Entities)
     );
     assert_eq!(projected.entities_done, 3);
     assert_eq!(projected.entities_total, Some(4));
@@ -311,7 +311,7 @@ fn snapshot_projection_retains_running_fields_and_maps_terminals() {
     assert!(projected.running);
 
     // A later tick without bytes must not erase an already-measured count.
-    let tick = ImportProgress::at(cad_import_acadrust::ImportPhase::Entities, 4, Some(4));
+    let tick = ImportProgress::at(cad_connector_acadrust::ImportPhase::Entities, 4, Some(4));
     let projected = ImportProgressSnapshot::from_poll(
         &AsyncOpenPoll::Running {
             progress: vec![tick],

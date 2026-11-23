@@ -150,7 +150,7 @@ pub use app_extended_scale_list::ScaleListCommand;
 pub use app_extended_w9_reports::install_outline_fonts;
 pub use app_measure_object::FULL_TURN_TOLERANCE_RADIANS;
 pub use app_zoom::{canonical_logical_rect, FIT_MARGIN, WINDOW_MARGIN};
-pub use cad_import_acadrust::{VendorRecord, VendorSource};
+pub use cad_connector_acadrust::{VendorRecord, VendorSource};
 pub use cad_spatial::{
     BackFacePolicy, GeometryHit, PickItem, PickOptions, PickOutcome, PickReport, SkippedGeometry,
 };

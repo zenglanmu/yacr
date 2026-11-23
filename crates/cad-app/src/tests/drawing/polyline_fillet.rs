@@ -6,8 +6,8 @@ use crate::app_drawing::{
     plan_polyline_corners, polyline_corner_tolerance, two_line_fillet_plan, PolylineCornerSpec,
 };
 use cad_geometry::bulge_arc_geometry;
-use cad_import_acadrust::export::{export, ExportFormat, ExportLimits, ExportRequest, ExportSpace};
-use cad_import_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
+use cad_connector_acadrust::export::{export, ExportFormat, ExportLimits, ExportRequest, ExportSpace};
+use cad_connector_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
 
 fn polyline_geometry(points: Vec<Point3>, bulges: Vec<f64>, closed: bool) -> SemanticGeometry {
     SemanticGeometry::Polyline {
@@ -943,8 +943,8 @@ fn a_rounded_polyline_round_trips_through_the_dxf_export() {
         document_id: DocumentId(1),
         space: ExportSpace::Model,
         format: ExportFormat::DxfText,
-        acis_version: cad_import_acadrust::export::AcisVersion::default(),
-        dxf_target: cad_import_acadrust::export::DxfTarget::default(),
+        acis_version: cad_connector_acadrust::export::AcisVersion::default(),
+        dxf_target: cad_connector_acadrust::export::DxfTarget::default(),
         limits: ExportLimits::default(),
         units: Some(UnitContext::drawing_units()),
     })

@@ -9,7 +9,7 @@
 //! It is deliberately dependency-light: a plain [`std::thread`], a
 //! [`std::sync::mpsc`] progress channel and [`cad_platform::CancellationToken`].
 //! No Tokio, no platform API, so it is exercisable on a bare Linux host. The
-//! worker thread runs the synchronous [`cad_import_acadrust::Importer`]; a host
+//! worker thread runs the synchronous [`cad_connector_acadrust::Importer`]; a host
 //! that has a real executor can drive the same [`ImportJob`] contract without
 //! this default implementation (see `docs/import-async.md`).
 //!
@@ -33,7 +33,7 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 
 use cad_domain::{CadError, CadResult, DocumentId, TaskStamp};
-use cad_import_acadrust::{
+use cad_connector_acadrust::{
     ImportPhase, ImportProgress, ImportProgressSink, ImportRequest, ImportedDrawing, Importer,
     XrefOptions,
 };
@@ -522,7 +522,7 @@ impl HostController {
             document: self.document_id,
             database: cad_domain::DatabaseId(1),
             bytes,
-            limits: cad_import_acadrust::ImportLimits::default(),
+            limits: cad_connector_acadrust::ImportLimits::default(),
             generation: self.session.generation,
             xref,
         };

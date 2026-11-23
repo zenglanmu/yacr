@@ -13,7 +13,7 @@
 //! an XY box**, and the stored entity keeps its source class name in
 //! `DbObject::type_key` (`AcDbXline` / `AcDbRay`). The reduction is the same one
 //! the DWG importer performs
-//! (`cad_import_acadrust::construct_line::ray_semantics`), so a command-created
+//! (`cad_connector_acadrust::construct_line::ray_semantics`), so a command-created
 //! XLINE/RAY and an imported one are interchangeable in the database, the
 //! renderer and the exporter.
 //!

@@ -8,7 +8,7 @@ use cad_app::render_scene::build_scene;
 use cad_app::render_scene::{CadSceneController, OverlayInputs};
 use cad_db::{DbEntity, DbObject};
 use cad_domain::*;
-use cad_import_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
+use cad_connector_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
 
 #[test]
 #[ignore = "real fixture CPU timing; run explicitly with --ignored --nocapture"]

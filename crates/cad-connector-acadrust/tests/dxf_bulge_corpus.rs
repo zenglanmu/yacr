@@ -38,7 +38,7 @@ use std::sync::Arc;
 
 use cad_domain::{Point3, SemanticGeometry};
 use cad_geometry::{tessellate_geometry, TessellationParams};
-use cad_import_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
+use cad_connector_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
 
 /// Segments with `|bulge|` below this are not checked for the apex side: the
 /// apex offset is `|bulge| * chord / 2`, and below 1e-6 it is inside f64 noise

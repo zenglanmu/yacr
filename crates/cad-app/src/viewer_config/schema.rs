@@ -206,11 +206,11 @@ impl PlotExportFormat {
 pub struct ExportConfig {
     pub plot_format: PlotExportFormat,
     /// ACIS payload version (`"7.0"` / `"21.0"`), default `"7.0"`.
-    pub acis_version: cad_import_acadrust::export::AcisVersion,
+    pub acis_version: cad_connector_acadrust::export::AcisVersion,
     /// DXF container version (`"2010"` / `"2013"` / `"2018"`), default
     /// `"2010"`. A DWG is always AC1032 (R2018); see
-    /// [`cad_import_acadrust::export::DxfTarget`].
-    pub dxf_version: cad_import_acadrust::export::DxfTarget,
+    /// [`cad_connector_acadrust::export::DxfTarget`].
+    pub dxf_version: cad_connector_acadrust::export::DxfTarget,
 }
 
 /// One drawing/display unit token (ADR-0037 D9).

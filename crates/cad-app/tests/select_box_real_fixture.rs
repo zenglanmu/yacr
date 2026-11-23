@@ -21,7 +21,7 @@ use cad_app::{
     AppMode, Application, Command, CommandId, CommandPayload, Document, SessionState, Viewport,
 };
 use cad_domain::*;
-use cad_import_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
+use cad_connector_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
 use cad_spatial::pick_world_bounds;
 
 const DOC: DocumentId = DocumentId(1);

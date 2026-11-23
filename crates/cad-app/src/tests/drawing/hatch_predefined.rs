@@ -18,10 +18,10 @@ use super::hatch::{
 use super::*;
 
 use cad_domain::hatch::predefined_patterns;
-use cad_import_acadrust::export::{
+use cad_connector_acadrust::export::{
     export, AcisVersion, DxfTarget, ExportFormat, ExportLimits, ExportRequest, ExportSpace,
 };
-use cad_import_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
+use cad_connector_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
 
 /// A closed axis-aligned rectangle `[x0, x1] x [y0, y1]` (unlike [`square`] the
 /// two extents differ, which keeps the 45/135 degree families off every corner

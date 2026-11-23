@@ -26,10 +26,10 @@
 
 use super::*;
 
-use cad_import_acadrust::export::{
+use cad_connector_acadrust::export::{
     export, AcisVersion, DxfTarget, ExportFormat, ExportLimits, ExportRequest, ExportSpace,
 };
-use cad_import_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
+use cad_connector_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
 
 const CIRCLE_ID: u128 = 1;
 const ARC_ID: u128 = 2;

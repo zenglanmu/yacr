@@ -160,7 +160,7 @@ pub(crate) fn run_benchmark(
 /// `DocumentIdentity::Temporary` carries no content hash, so this returns `None`
 /// and the benchmark leaves the hash absent rather than inventing one.
 #[cfg(not(target_arch = "wasm32"))]
-fn sample_hash_of(report: &cad_import_acadrust::ImportReport) -> Option<[u8; 32]> {
+fn sample_hash_of(report: &cad_connector_acadrust::ImportReport) -> Option<[u8; 32]> {
     match &report.identity {
         DocumentIdentity::Sha256(hash) => Some(*hash),
         _ => None,

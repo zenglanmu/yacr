@@ -10,7 +10,7 @@
 use super::*;
 
 use super::hatch::{circle, entity_count, filled_area, square, the_hatch, undo_depth};
-use cad_import_acadrust::export::{
+use cad_connector_acadrust::export::{
     export, AcisVersion, DxfTarget, ExportFormat, ExportLimits, ExportRequest, ExportSpace,
 };
 

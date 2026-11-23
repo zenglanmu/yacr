@@ -429,7 +429,7 @@ fn gradient_stop(value: f64, aci: f64, label: &str) -> CadResult<GradientStop> {
 
 /// One pattern-definition row at offset `(0, 1)` in pattern space.
 ///
-/// This mirrors `cad_import_acadrust::hatch::import_pattern`'s `76=0`/`78=0`
+/// This mirrors `cad_connector_acadrust::hatch::import_pattern`'s `76=0`/`78=0`
 /// synthesis exactly: the hatch-level scale is then the line spacing, the
 /// hatch-level angle rotates the family and the double flag adds the
 /// perpendicular family in [`HatchPattern::families`]. The generated geometry is

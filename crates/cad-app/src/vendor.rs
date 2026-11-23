@@ -290,17 +290,17 @@ mod tests {
         let Ok(path) = std::env::var("YACR_TEST_DWG") else {
             return;
         };
-        use cad_import_acadrust::Importer as _;
+        use cad_connector_acadrust::Importer as _;
         let bytes = std::fs::read(path).expect("read fixture");
-        let request = cad_import_acadrust::ImportRequest {
+        let request = cad_connector_acadrust::ImportRequest {
             document: cad_domain::DocumentId(1),
             database: cad_domain::DatabaseId(1),
             bytes: std::sync::Arc::from(bytes),
-            limits: cad_import_acadrust::ImportLimits::default(),
+            limits: cad_connector_acadrust::ImportLimits::default(),
             generation: 0,
             xref: None,
         };
-        let drawing = cad_import_acadrust::AcadrustImporter::new()
+        let drawing = cad_connector_acadrust::AcadrustImporter::new()
             .import(&request, &|| false)
             .expect("import");
         let frame = encode_records_frame(1, 1, &drawing.vendor_records).expect("frame");

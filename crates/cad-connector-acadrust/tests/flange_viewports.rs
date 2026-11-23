@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use cad_domain::{DatabaseId, DocumentId, Point3};
-use cad_import_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
+use cad_connector_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
 
 fn import() -> cad_db::DrawingDatabase {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");

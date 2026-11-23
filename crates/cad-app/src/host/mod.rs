@@ -11,7 +11,7 @@ use cad_db::{
     transform_geometry, DbEntity, DbObject, DrawingDatabase, DrawingDatabaseBuilder, Layer,
 };
 use cad_domain::*;
-use cad_import_acadrust::ImportedDrawing;
+use cad_connector_acadrust::ImportedDrawing;
 use cad_measure::{MeasurementEngine, SnapCandidate, SnapTarget};
 
 use crate::{
@@ -43,13 +43,13 @@ mod tests;
 ///
 /// Re-exported so host-side code and contract tests can name the report they
 /// read (the type itself lives in the importer and is unchanged here).
-pub use cad_import_acadrust::ImportReport;
+pub use cad_connector_acadrust::ImportReport;
 /// External-reference loading policy and host file access.
 ///
 /// Re-exported because [`HostController::open_bytes_with_xref`] and
 /// [`HostController::begin_async_open_with_xref`] take it: host-side code should
 /// not need a direct `cad-import-acadrust` dependency to pass the policy.
-pub use cad_import_acadrust::XrefOptions;
+pub use cad_connector_acadrust::XrefOptions;
 /// A connector's compatibility report and export result (bytes + report).
 pub use cad_import_core::{CompatReport, ExportOutput};
 pub use databases::{

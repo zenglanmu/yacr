@@ -38,8 +38,8 @@ use cad_export_ifc::IfcExporter;
 use cad_export_mesh::{MeshExporter, MeshFormat};
 #[cfg(feature = "formats-skp")]
 use cad_export_skp::SkpExporter;
-use cad_import_acadrust::export::{AcadrustExporter, AcisVersion, DxfTarget, ExportFormat};
-use cad_import_acadrust::AcadrustImporter;
+use cad_connector_acadrust::export::{AcadrustExporter, AcisVersion, DxfTarget, ExportFormat};
+use cad_connector_acadrust::AcadrustImporter;
 use cad_import_core::{
     detect_format, ConnectorDescriptor, DrawingFormat, ExportJob, ExportOutput, Exporter,
     ImportProgressSink, ImportRequest, ImportedDrawing, Importer, SpecVisibility,
@@ -69,7 +69,7 @@ use std::sync::LazyLock;
 // paths (and the crate-root re-exports) working. A descriptor is only visible
 // when its adapter is compiled in, so a slim registry cannot name a format it
 // cannot back.
-pub use cad_import_acadrust::export::{DESCRIPTOR_DWG, DESCRIPTOR_DXF};
+pub use cad_connector_acadrust::export::{DESCRIPTOR_DWG, DESCRIPTOR_DXF};
 #[cfg(feature = "formats-dgn")]
 pub use cad_import_dgn::DESCRIPTOR_DGN;
 #[cfg(feature = "formats-gltf")]

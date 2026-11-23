@@ -20,10 +20,10 @@
 
 use super::*;
 
-use cad_import_acadrust::export::{
+use cad_connector_acadrust::export::{
     export, AcisVersion, DxfTarget, ExportFormat, ExportLimits, ExportRequest, ExportSpace,
 };
-use cad_import_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
+use cad_connector_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
 
 /// The stored dimension for a created object, asserting the type key.
 fn dimension(app: &Application, object: ObjectId) -> DimensionGeometry {

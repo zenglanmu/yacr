@@ -46,7 +46,7 @@ cad-geometry.workspace = true
 cad-history.workspace = true
 cad-measure.workspace = true
 cad-import-core.workspace = true
-cad-import-acadrust.workspace = true
+cad-connector-acadrust.workspace = true
 cad-import-obj = { workspace = true, optional = true }
 cad-import-stl = { workspace = true, optional = true }
 cad-import-mesh = { workspace = true, optional = true }

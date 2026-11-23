@@ -433,7 +433,7 @@ def check(root: pathlib.Path) -> int:
         # build or dev: used by the bans that must not be evadable through a
         # build script or a test target.
         declared = declared_dependencies(manifest, workspace_dependencies)
-        if name != "cad-import-acadrust":
+        if name != "cad-connector-acadrust":
             assert "acadrust" not in deps, f"parser escaped importer: {name}"
         # The modelling kernel (ADR-0036 D1) is owned by `cad-kernel-solidcore`
         # alone, exactly as `acadrust` is owned by the importer: no other crate

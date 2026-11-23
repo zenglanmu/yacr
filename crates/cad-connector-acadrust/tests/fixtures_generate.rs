@@ -53,7 +53,7 @@ use std::sync::Arc;
 use acadrust::entities::Solid3D;
 use acadrust::{CadDocument, DwgReader, DwgWriter, DxfReader, DxfVersion, DxfWriter, EntityType};
 use cad_domain::{DatabaseId, DocumentId, Mesh, SemanticGeometry};
-use cad_import_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
+use cad_connector_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
 
 /// Raw ACIS payload the drawing fixture is built from.
 const CUBE_SAT: &str = "fixtures/acis/cube.sat";

@@ -9,10 +9,10 @@
 //! The container/payload matrix is enforced by the exporter itself, before any
 //! writer runs (`export.acis_asm_requires_r2013`, `export.dwg_version_fixed`).
 //! This module never rewrites a refused combination into an accepted one.
-pub use cad_import_acadrust::export::{AcisVersion, DxfTarget, ExportOptions};
+pub use cad_connector_acadrust::export::{AcisVersion, DxfTarget, ExportOptions};
 
 use cad_domain::{CadError, CadResult};
-use cad_import_acadrust::export::{
+use cad_connector_acadrust::export::{
     export, ExportFormat, ExportLimits, ExportReport, ExportRequest, ExportSpace,
 };
 use cad_import_core::ExportOutput;

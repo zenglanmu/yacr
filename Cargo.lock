@@ -691,6 +691,7 @@ dependencies = [
 name = "cad-app"
 version = "0.1.16"
 dependencies = [
+ "cad-connector-acadrust",
  "cad-db",
  "cad-dependencies",
  "cad-diagnostics",
@@ -701,7 +702,6 @@ dependencies = [
  "cad-export-skp",
  "cad-geometry",
  "cad-history",
- "cad-import-acadrust",
  "cad-import-core",
  "cad-import-dgn",
  "cad-import-gltf",
@@ -730,10 +730,10 @@ name = "cad-cli-tools"
 version = "0.1.16"
 dependencies = [
  "cad-app",
+ "cad-connector-acadrust",
  "cad-db",
  "cad-diagnostics",
  "cad-domain",
- "cad-import-acadrust",
  "cad-kernel-adapter",
  "cad-kernel-solidcore",
  "cad-measure",
@@ -745,6 +745,28 @@ dependencies = [
  "cad-scene",
  "cad-spatial",
  "serde_json",
+]
+
+[[package]]
+name = "cad-connector-acadrust"
+version = "0.1.16"
+dependencies = [
+ "acadrust",
+ "cad-db",
+ "cad-diagnostics",
+ "cad-domain",
+ "cad-geometry",
+ "cad-import-core",
+ "cad-kernel-adapter",
+ "cad-proxy",
+ "cad-representation",
+ "cad-resources",
+ "getrandom 0.3.4",
+ "log",
+ "serde",
+ "sha2 0.11.1",
+ "thiserror 2.0.21",
+ "web-time",
 ]
 
 [[package]]
@@ -885,28 +907,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.1",
- "web-time",
-]
-
-[[package]]
-name = "cad-import-acadrust"
-version = "0.1.16"
-dependencies = [
- "acadrust",
- "cad-db",
- "cad-diagnostics",
- "cad-domain",
- "cad-geometry",
- "cad-import-core",
- "cad-kernel-adapter",
- "cad-proxy",
- "cad-representation",
- "cad-resources",
- "getrandom 0.3.4",
- "log",
- "serde",
- "sha2 0.11.1",
- "thiserror 2.0.21",
  "web-time",
 ]
 

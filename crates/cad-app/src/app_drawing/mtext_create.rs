@@ -28,7 +28,7 @@
 //!   relative to `position`.
 //!
 //! What is **NOT modelled** and therefore not accepted (the three stable reasons
-//! the importer already names — `cad_import_acadrust::entity::convert`'s
+//! the importer already names — `cad_connector_acadrust::entity::convert`'s
 //! `MTEXT_UNMODELLED`): columns (`text.columns_unsupported`), background fill
 //! (`text.background_unsupported`) and drawing direction
 //! (`text.drawing_direction_unsupported`). There is no payload field for any of

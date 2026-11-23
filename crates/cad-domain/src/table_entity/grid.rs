@@ -10,7 +10,7 @@
 //! writes carries none of those blocks — acadrust 0.6.8's entity writer emits
 //! only the legacy groups (`65`-`69`, `275`-`279`, `285`-`289`) — so the values
 //! ride the **`TABLECONTENT` object** the exporter writes beside the entity and
-//! the importer reads back (see `cad_import_acadrust::export::table`). The
+//! the importer reads back (see `cad_connector_acadrust::export::table`). The
 //! per-cell margin block (`CELLMARGIN`, four group `40` values plus the two
 //! spacings) is written and read the same way.
 //!

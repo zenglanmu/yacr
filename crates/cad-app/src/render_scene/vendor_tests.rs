@@ -126,21 +126,21 @@ fn a_store_for_another_handle_contributes_nothing() {
 #[test]
 #[ignore]
 fn a_real_tangent_handle_maps_to_its_source_entity() {
-    use cad_import_acadrust::Importer as _;
+    use cad_connector_acadrust::Importer as _;
 
     let Ok(path) = std::env::var("YACR_TEST_DWG") else {
         return;
     };
     let bytes = std::fs::read(path).expect("read fixture");
-    let request = cad_import_acadrust::ImportRequest {
+    let request = cad_connector_acadrust::ImportRequest {
         document: DocumentId(1),
         database: DatabaseId(1),
         bytes: std::sync::Arc::from(bytes),
-        limits: cad_import_acadrust::ImportLimits::default(),
+        limits: cad_connector_acadrust::ImportLimits::default(),
         generation: 0,
         xref: None,
     };
-    let drawing = cad_import_acadrust::AcadrustImporter::new()
+    let drawing = cad_connector_acadrust::AcadrustImporter::new()
         .import(&request, &|| false)
         .expect("import");
     let overrides = LayerOverrideSet::new();
@@ -615,21 +615,21 @@ fn a_vendor_entity_inside_a_block_is_expanded_under_its_insert() {
 #[test]
 #[ignore]
 fn a_real_block_containing_tch_entities_expands_them() {
-    use cad_import_acadrust::Importer as _;
+    use cad_connector_acadrust::Importer as _;
 
     let Ok(path) = std::env::var("YACR_TEST_DWG") else {
         return;
     };
     let bytes = std::fs::read(path).expect("read fixture");
-    let request = cad_import_acadrust::ImportRequest {
+    let request = cad_connector_acadrust::ImportRequest {
         document: DocumentId(1),
         database: DatabaseId(1),
         bytes: std::sync::Arc::from(bytes),
-        limits: cad_import_acadrust::ImportLimits::default(),
+        limits: cad_connector_acadrust::ImportLimits::default(),
         generation: 0,
         xref: None,
     };
-    let drawing = cad_import_acadrust::AcadrustImporter::new()
+    let drawing = cad_connector_acadrust::AcadrustImporter::new()
         .import(&request, &|| false)
         .expect("import");
     // A model-space INSERT whose block owns a TCH member that the vendor pass

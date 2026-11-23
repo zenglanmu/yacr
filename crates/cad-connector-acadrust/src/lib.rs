@@ -42,7 +42,7 @@ pub mod vendor;
 pub use vendor::{VendorExtraction, VendorRecord, VendorSource};
 
 // The format-neutral import contract lives in `cad-import-core`. These are
-// re-exported so every existing `cad_import_acadrust::<Type>` path — and every
+// re-exported so every existing `cad_connector_acadrust::<Type>` path — and every
 // `use crate::<Type>` inside this crate — keeps working untouched.
 pub use cad_import_core::{
     ImportLimits, ImportPhase, ImportProgress, ImportProgressSink, ImportReport, ImportRequest,

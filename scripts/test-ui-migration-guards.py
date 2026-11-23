@@ -76,8 +76,8 @@ ARCH_MEMBERS: dict[str, str] = {
         '[package]\nname = "cad-render-wgpu"\nversion = "0.1.0"\n\n'
         '[dependencies]\nwgpu = "=30.0.1"\n'
     ),
-    "crates/cad-import-acadrust": (
-        '[package]\nname = "cad-import-acadrust"\nversion = "0.1.0"\n\n'
+    "crates/cad-connector-acadrust": (
+        '[package]\nname = "cad-connector-acadrust"\nversion = "0.1.0"\n\n'
         '[dependencies]\nacadrust = "0.6.3"\n'
     ),
     "crates/cad-kernel-adapter": (
