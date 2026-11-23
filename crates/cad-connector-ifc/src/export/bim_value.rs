@@ -15,7 +15,7 @@ use std::collections::BTreeSet;
 use cad_db::{BimEvidence, BimPropertySet, BimValue};
 use ifc_lite_export::plan::{NewProperty, NewPropertySet, PropertyValue, PsetKind};
 
-use crate::bim::{BimExportPolicy, Counts};
+use crate::export::bim::{BimExportPolicy, Counts};
 
 /// The numeric IFC measures this writer lets a real value keep its type.
 ///
@@ -59,7 +59,7 @@ const NUMERIC_MEASURES: &[&str] = &[
 ];
 
 /// The metre factor of an IFC length unit symbol (the symbols
-/// `cad-import-ifc` stores in `BimValue::Real.unit`).
+/// this crate's reader stores in `BimValue::Real.unit`).
 ///
 /// A value whose unit is not convertible here is **not** written: writing a
 /// foot value as metres is exactly the silent unit error D10 forbids.

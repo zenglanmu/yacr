@@ -75,8 +75,8 @@ use ifc_lite_export::plan::{
 };
 
 use super::{mesh_global_id, skeleton_roots, stable_global_id, CollectedMesh, PlannedExport};
-use crate::bim_relations::{plan_relations, RelationInputs};
-use crate::bim_value::{convert_psets, decode_global_id, hash_text};
+use crate::export::bim_relations::{plan_relations, RelationInputs};
+use crate::export::bim_value::{convert_psets, decode_global_id, hash_text};
 
 /// Stable conversion code: an element names a storey the writer could not
 /// place it in; it stays in the building.

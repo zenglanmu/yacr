@@ -1,10 +1,10 @@
 //! Contract tests for the IFC4 writer.
 //!
 //! **Evidence boundary.** The "roundtrip" test below proves *self-consistency*
-//! only: the bytes this writer produces are read back by the pinned
-//! `cad-import-ifc` reader with the same triangle count. It is not a golden
-//! file, not an external IFC checker, not a vendor application opening the file
-//! and not a certification.
+//! only: the bytes this writer produces are read back by the pinned IFC reader
+//! in this crate (`crate::IfcImporter`) with the same triangle count. It is not
+//! a golden file, not an external IFC checker, not a vendor application opening
+//! the file and not a certification.
 
 use std::sync::Arc;
 
@@ -20,7 +20,7 @@ use cad_connector_core::{
 use super::*;
 
 fn exporter() -> IfcExporter {
-    IfcExporter::new(&cad_import_ifc::DESCRIPTOR_IFC)
+    IfcExporter::new(&crate::DESCRIPTOR_IFC)
 }
 
 fn triangle_mesh() -> Mesh {
@@ -159,7 +159,7 @@ fn the_written_bytes_round_trip_through_the_pinned_reader() {
         generation: 0,
         xref: None,
     };
-    let drawing = cad_import_ifc::IfcImporter::new()
+    let drawing = crate::IfcImporter::new()
         .import(&request, &|| false)
         .expect("the written IFC4 bytes are readable by the pinned reader");
     let meshes: Vec<&Mesh> = drawing

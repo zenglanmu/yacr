@@ -27,7 +27,7 @@ pub use export::{
 /// Stable refusal code for ISO 10303-21 input whose `FILE_SCHEMA` is IFC when
 /// it is handed to the **STEP** adapter.
 ///
-/// IFC has its own importer lane (`cad-import-ifc`); the dispatcher routes it
+/// IFC has its own importer lane (`cad-connector-ifc`); the dispatcher routes it
 /// there. The STEP adapter repeats the `FILE_SCHEMA` check so a direct caller
 /// cannot decode IFC as AP203/AP214/AP242 either, and refuses by name before
 /// cadmpeg is invoked at all.

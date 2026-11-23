@@ -27,9 +27,9 @@
 //! output, which the crate's tests pin.
 //!
 //! The only validation of the produced bytes is a **self-consistency**
-//! roundtrip through `cad-import-ifc` (the pinned reader reads back the same
-//! triangle count). That is not vendor acceptance, not a golden file and not a
-//! certification: no external IFC checker or vendor application was run.
+//! roundtrip through this crate's own reader (the pinned reader reads back the
+//! same triangle count). That is not vendor acceptance, not a golden file and
+//! not a certification: no external IFC checker or vendor application was run.
 //!
 //! What the writer does not represent: per-vertex colours, normals, materials,
 //! property sets, layers, blocks, paper space and analytic (non-mesh) geometry.

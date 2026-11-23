@@ -53,7 +53,7 @@
 //!
 //! IFC files also start with `ISO-10303-21;`. `detect_format` separates them
 //! into `DrawingFormat::Ifc`, and the dispatcher routes them to
-//! `cad-import-ifc`. This adapter repeats the `FILE_SCHEMA` check before
+//! `cad-connector-ifc`. This adapter repeats the `FILE_SCHEMA` check before
 //! invoking cadmpeg and refuses with [`IFC_SCHEMA_REFUSED`], so a direct caller
 //! cannot decode IFC as AP203/AP214/AP242 either.
 

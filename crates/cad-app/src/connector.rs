@@ -32,8 +32,6 @@
 use cad_domain::{CadError, CadResult};
 #[cfg(feature = "formats-gltf")]
 use cad_export_gltf::{GltfContainer, GltfExporter};
-#[cfg(feature = "formats-ifc")]
-use cad_export_ifc::IfcExporter;
 #[cfg(feature = "formats-mesh")]
 use cad_export_mesh::{MeshExporter, MeshFormat};
 #[cfg(feature = "formats-skp")]
@@ -46,10 +44,10 @@ use cad_connector_core::{
 };
 #[cfg(feature = "formats-dgn")]
 use cad_connector_dgn::DgnImporter;
+#[cfg(feature = "formats-ifc")]
+use cad_connector_ifc::{IfcExporter, IfcImporter};
 #[cfg(feature = "formats-gltf")]
 use cad_import_gltf::GltfImporter;
-#[cfg(feature = "formats-ifc")]
-use cad_import_ifc::IfcImporter;
 #[cfg(feature = "formats-mesh")]
 use cad_import_mesh::{OffImporter, PlyImporter};
 #[cfg(feature = "formats-mesh")]
@@ -75,7 +73,7 @@ pub use cad_connector_dgn::DESCRIPTOR_DGN;
 #[cfg(feature = "formats-gltf")]
 pub use cad_import_gltf::DESCRIPTOR_GLTF;
 #[cfg(feature = "formats-ifc")]
-pub use cad_import_ifc::DESCRIPTOR_IFC;
+pub use cad_connector_ifc::DESCRIPTOR_IFC;
 #[cfg(feature = "formats-mesh")]
 pub use cad_import_mesh::{DESCRIPTOR_OFF, DESCRIPTOR_PLY};
 #[cfg(feature = "formats-mesh")]

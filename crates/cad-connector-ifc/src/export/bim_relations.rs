@@ -13,11 +13,11 @@
 //!   validated; a cycle cannot be written and one edge per cycle is dropped.
 //! - `aggregates`, `group`, `connects`, `other:<token>`: no plan-level
 //!   expression exists (nothing relates two products). Each edge is counted
-//!   ([`crate::bim::RELATION_NOT_WRITTEN`]) and never faked as a container or a
+//!   ([`crate::export::bim::RELATION_NOT_WRITTEN`]) and never faked as a container or a
 //!   nest.
 //!
 //! An endpoint this export did not write is counted
-//! ([`crate::bim::RELATION_ENDPOINT_MISSING`]) and the edge is skipped; no
+//! ([`crate::export::bim::RELATION_ENDPOINT_MISSING`]) and the edge is skipped; no
 //! endpoint is invented. Rows are visited in `(kind, parent, child)` order
 //! (`BimRelations` is a `BTreeMap`), so the same document always resolves the
 //! same way.
@@ -27,7 +27,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use cad_db::{BimKey, BimRelationKind, DrawingDatabase};
 use ifc_lite_export::plan::{GlobalId, ObjectRef};
 
-use crate::bim::Counts;
+use crate::export::bim::Counts;
 
 /// The exported objects a relation endpoint may name.
 pub(crate) struct RelationInputs<'a> {
@@ -61,7 +61,7 @@ pub(crate) struct RelationPlan {
 /// `BimRelations` iterates in `(kind, parent, child)` order, so the outcome is
 /// independent of the order the document stored the rows in. Only `contains`
 /// and `nests` have a plan-level expression; every other kind is counted
-/// ([`crate::bim::RELATION_NOT_WRITTEN`]) and never substituted for one of
+/// ([`crate::export::bim::RELATION_NOT_WRITTEN`]) and never substituted for one of
 /// those two.
 pub(crate) fn plan_relations(
     database: &DrawingDatabase,
@@ -203,7 +203,7 @@ fn count_missing(counts: &mut Counts, kind: &str) {
 ///
 /// `nests` maps child → host, so a cycle is a closed chain of hosts that no
 /// order can satisfy; one edge per cycle is dropped and counted
-/// ([`crate::bim::RELATION_NOT_WRITTEN`], kind `nests`). The walk is
+/// ([`crate::export::bim::RELATION_NOT_WRITTEN`], kind `nests`). The walk is
 /// deterministic: roots (objects with no host) first in index order, then the
 /// remaining cycles in index order, each host's children in child order.
 fn nest_order(

@@ -1,9 +1,9 @@
 //! Contract tests for relation export (ADR-0042 D10 leftovers, D3 tail).
 //!
 //! **Evidence boundary.** The roundtrip is *self-consistency* only: the bytes
-//! this writer produces are read back by the pinned `cad-import-ifc` reader.
-//! It is not a golden file, not an external IFC checker, not a vendor
-//! application opening the file, and not a certification.
+//! this writer produces are read back by the pinned IFC reader in this crate
+//! (`crate::IfcImporter`). It is not a golden file, not an external IFC checker,
+//! not a vendor application opening the file, and not a certification.
 
 use std::sync::Arc;
 
@@ -36,7 +36,7 @@ const WALL2_GID: &str = "2O2Fr$t4X7Zf8NOew3FLSM";
 const TYPE_GID: &str = "2O2Fr$t4X7Zf8NOew3FLSL";
 
 fn exporter() -> IfcExporter {
-    IfcExporter::new(&cad_import_ifc::DESCRIPTOR_IFC)
+    IfcExporter::new(&crate::DESCRIPTOR_IFC)
 }
 
 fn triangle_mesh() -> Mesh {
@@ -348,7 +348,7 @@ fn import(bytes: &[u8]) -> DrawingDatabase {
         generation: 0,
         xref: None,
     };
-    cad_import_ifc::IfcImporter::new()
+    crate::IfcImporter::new()
         .import(&request, &|| false)
         .expect("the written IFC4 bytes are readable by the pinned reader")
         .database
@@ -462,7 +462,7 @@ fn a_nesting_order_does_not_orphan_a_shared_type() {
         .report
         .entries
         .iter()
-        .any(|entry| entry.code == crate::ADD_REFUSED));
+        .any(|entry| entry.code == crate::export::ADD_REFUSED));
     assert_eq!(
         text.matches("=IFCWALLTYPE(").count(),
         1,

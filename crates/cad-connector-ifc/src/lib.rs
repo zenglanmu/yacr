@@ -64,9 +64,9 @@
 //! * `vendor_records` is empty and `ImportRequest::xref` is ignored: IFC has
 //!   neither Tianzheng records nor CAD external references.
 //!
-//! There is **no glTF exposure in this crate**. The IFC4 writer is a separate
-//! crate (`cad-export-ifc`), declared as an L1 lossy export on
-//! [`DESCRIPTOR_IFC`].
+//! There is **no glTF exposure in this crate**. The IFC4 writer lives in the
+//! [`export`] module of this same connector and is declared as an L1 lossy
+//! export on [`DESCRIPTOR_IFC`].
 
 use cad_db::EntityColor;
 use cad_domain::{CadError, CadResult, Diagnostic, Unit, UnitContext};
@@ -83,9 +83,11 @@ use ifc_lite_geometry::{
     Mesh as IfcMesh, TextureAttachment,
 };
 
+pub mod export;
 mod mesh;
 mod semantics;
 mod texture;
+pub use export::{BimExportPolicy, IfcExporter};
 use mesh::element_mesh;
 use semantics::IfcSemantics;
 pub use texture::{
@@ -882,8 +884,8 @@ mod tests;
 
 /// The IFC connector descriptor (IFC2X3 / IFC4 / IFC4X3).
 ///
-/// Import is owned by this crate. Export is the separate `cad-export-ifc`
-/// writer: it projects model-space meshes into a fresh IFC4 file, so it is L1
+/// Import is owned by this crate. Export is the [`export`] module of the same
+/// connector: it projects model-space meshes into a fresh IFC4 file, so it is L1
 /// and lossy (analytic geometry, layers, blocks and paper space are not
 /// represented; every drop is reported).
 ///

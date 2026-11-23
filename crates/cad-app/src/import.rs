@@ -151,7 +151,7 @@ mod tests {
             .expect("a header-only IFC file has no geometry");
         match error {
             CadError::CorruptData(message) => assert!(
-                message.contains(cad_import_ifc::NO_GEOMETRY_PRODUCTS),
+                message.contains(cad_connector_ifc::NO_GEOMETRY_PRODUCTS),
                 "the IFC lane must answer: {message}"
             ),
             other => panic!("expected CorruptData, got {other:?}"),

@@ -694,6 +694,7 @@ dependencies = [
  "cad-connector-acadrust",
  "cad-connector-core",
  "cad-connector-dgn",
+ "cad-connector-ifc",
  "cad-connector-rvt",
  "cad-connector-step",
  "cad-db",
@@ -701,13 +702,11 @@ dependencies = [
  "cad-diagnostics",
  "cad-domain",
  "cad-export-gltf",
- "cad-export-ifc",
  "cad-export-mesh",
  "cad-export-skp",
  "cad-geometry",
  "cad-history",
  "cad-import-gltf",
- "cad-import-ifc",
  "cad-import-mesh",
  "cad-import-obj",
  "cad-import-skp",
@@ -788,6 +787,22 @@ dependencies = [
  "cad-domain",
  "cadkit-core",
  "cadkit-dgn",
+ "web-time",
+]
+
+[[package]]
+name = "cad-connector-ifc"
+version = "0.1.16"
+dependencies = [
+ "cad-connector-core",
+ "cad-connector-step",
+ "cad-db",
+ "cad-domain",
+ "ifc-lite-core",
+ "ifc-lite-export",
+ "ifc-lite-geometry",
+ "ifc-lite-processing",
+ "png",
  "web-time",
 ]
 
@@ -890,18 +905,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cad-export-ifc"
-version = "0.1.16"
-dependencies = [
- "cad-connector-core",
- "cad-db",
- "cad-domain",
- "cad-import-ifc",
- "ifc-lite-export",
- "ifc-lite-processing",
-]
-
-[[package]]
 name = "cad-export-mesh"
 version = "0.1.16"
 dependencies = [
@@ -969,20 +972,6 @@ dependencies = [
  "cad-domain",
  "gltf",
  "serde_json",
- "web-time",
-]
-
-[[package]]
-name = "cad-import-ifc"
-version = "0.1.16"
-dependencies = [
- "cad-connector-core",
- "cad-connector-step",
- "cad-db",
- "cad-domain",
- "ifc-lite-core",
- "ifc-lite-geometry",
- "png",
  "web-time",
 ]
 

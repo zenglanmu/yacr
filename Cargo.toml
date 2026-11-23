@@ -27,13 +27,12 @@ members = [
     "crates/cad-import-stl",
     "crates/cad-import-mesh",
     "crates/cad-connector-step",
-    "crates/cad-import-ifc",
+    "crates/cad-connector-ifc",
     "crates/cad-connector-dgn",
     "crates/cad-connector-rvt",
     "crates/cad-import-skp",
     "crates/cad-import-gltf",
     "crates/cad-export-mesh",
-    "crates/cad-export-ifc",
     "crates/cad-export-skp",
     "crates/cad-export-gltf",
     "crates/cad-resources",
@@ -95,16 +94,16 @@ cad-import-obj = { path = "crates/cad-import-obj" }
 cad-import-stl = { path = "crates/cad-import-stl" }
 cad-import-mesh = { path = "crates/cad-import-mesh" }
 cad-connector-step = { path = "crates/cad-connector-step" }
-cad-import-ifc = { path = "crates/cad-import-ifc" }
+cad-connector-ifc = { path = "crates/cad-connector-ifc" }
 cad-connector-dgn = { path = "crates/cad-connector-dgn" }
 cad-connector-rvt = { path = "crates/cad-connector-rvt" }
 cad-import-skp = { path = "crates/cad-import-skp" }
 cad-import-gltf = { path = "crates/cad-import-gltf" }
 # Writers above the neutral import/export contract. They read `cad-db` and
 # produce bytes plus a `CompatReport`; none of them is linked by a carrier
-# directly — `cad-app`/`cad-host` wire them.
+# directly — `cad-app`/`cad-host` wire them. (`cad-connector-ifc` is the one
+# merged reader+writer connector and sits with the readers above.)
 cad-export-mesh = { path = "crates/cad-export-mesh" }
-cad-export-ifc = { path = "crates/cad-export-ifc" }
 cad-export-skp = { path = "crates/cad-export-skp" }
 cad-export-gltf = { path = "crates/cad-export-gltf" }
 cad-resources = { path = "crates/cad-resources" }
@@ -177,18 +176,19 @@ cadmpeg-codec-step = "0.6.12"
 cadmpeg-ir = "0.6.12"
 cadmpeg-tessellate = "0.6.12"
 
-# IFC (IFC2X3/IFC4/IFC4X3) reader + mesh generation (`cad-import-ifc`).
+# IFC (IFC2X3/IFC4/IFC4X3) reader + mesh generation (`cad-connector-ifc`).
 # MPL-2.0, upstream <https://github.com/LTplus-AG/ifc-lite>. **Pinned exactly**:
 # the crate has published 100+ releases since 2026-01, so a caret range would
 # float across breaking API churn. The geometry crate also carries the placement
 # chain, units-to-metres scaling and void subtraction; see the crate source
-# findings recorded in `crates/cad-import-ifc/src/lib.rs`.
+# findings recorded in `crates/cad-connector-ifc/src/lib.rs`.
 ifc-lite-core = "=28.3.0"
 ifc-lite-geometry = "=28.3.0"
-# IFC4 writer (`cad-export-ifc`): IFC4 `IfcTriangulatedFaceSet` / `IfcFacetedBrep`
-# emission from a neutral mesh, MPL-2.0, same release train as the pinned reader.
-# `ifc-lite-processing` is pinned too because `ifc-lite-export` declares caret
-# deps on the 28.3.0 family and this workspace must not float one of them.
+# IFC4 writer (`cad-connector-ifc::export`): IFC4 `IfcTriangulatedFaceSet` /
+# `IfcFacetedBrep` emission from a neutral mesh, MPL-2.0, same release train as
+# the pinned reader. `ifc-lite-processing` is pinned too because
+# `ifc-lite-export` declares caret deps on the 28.3.0 family and this workspace
+# must not float one of them.
 ifc-lite-export = "=28.3.0"
 ifc-lite-processing = "=28.3.0"
 

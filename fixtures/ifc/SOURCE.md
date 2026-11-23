@@ -23,7 +23,7 @@ evidence.
 | `synthetic-wall-semantics.ifc` | IFC4 | Two walls with `IfcSite`/`IfcBuilding`/two `IfcBuildingStorey` aggregates, `IfcWallType` + `IfcRelDefinesByType`, `IfcMaterial` + `IfcRelAssociatesMaterial`, and a `Pset_WallCommon` with a bool, an identifier and an `IfcComplexProperty`; pins the ADR-0042 D7 BIM mapping | two entities, 24 triangles, `Partial`, `import.ifc.bim.property_value_unsupported`; `Level 1` elevation stored as 3 m |
 
 Every expected triangle count above is asserted by
-`crates/cad-import-ifc/src/tests.rs`. A hand-written file that no longer parses
+`crates/cad-connector-ifc/src/tests.rs`. A hand-written file that no longer parses
 with `ifc-lite` fails those tests: the fixtures are themselves part of the
 contract.
 

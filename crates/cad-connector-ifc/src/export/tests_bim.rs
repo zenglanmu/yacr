@@ -1,8 +1,8 @@
 //! Contract tests for the BIM-aware IFC4 export path (ADR-0042 Phase 2, D10).
 //!
 //! **Evidence boundary.** The "roundtrip" here is *self-consistency* only: the
-//! bytes this writer produces are read back by the pinned `cad-import-ifc`
-//! reader. It is not a golden file, not an external IFC checker, not a vendor
+//! bytes this writer produces are read back by the pinned IFC reader in this
+//! crate. It is not a golden file, not an external IFC checker, not a vendor
 //! application opening the file, and not a certification. The GlobalId
 //! roundtrip uses a GlobalId copied from the synthetic IFC fixture, not a real
 //! model.
@@ -23,7 +23,7 @@ use cad_connector_core::{
 use ifc_lite_export::plan::PropertyValue;
 
 use super::*;
-use crate::bim_value::{convert_psets, decode_global_id, real_value};
+use crate::export::bim_value::{convert_psets, decode_global_id, real_value};
 use crate::IfcExporter;
 
 /// The wall GlobalId of `fixtures/ifc/synthetic-wall-semantics.ifc`.
@@ -32,7 +32,7 @@ const FIXTURE_WALL_GLOBAL_ID: &str = "2O2Fr$t4X7Zf8NOew3FLSJ";
 const FIXTURE_DOCUMENT_ID: &str = "2O2Fr$t4X7Zf8NOew3FLSE";
 
 fn exporter() -> IfcExporter {
-    IfcExporter::new(&cad_import_ifc::DESCRIPTOR_IFC)
+    IfcExporter::new(&crate::DESCRIPTOR_IFC)
 }
 
 fn triangle_mesh() -> Mesh {
@@ -409,7 +409,7 @@ fn a_bim_database_writes_storeys_types_psets_and_materials() {
         generation: 0,
         xref: None,
     };
-    let drawing = cad_import_ifc::IfcImporter::new()
+    let drawing = crate::IfcImporter::new()
         .import(&request, &|| false)
         .expect("the written IFC4 bytes are readable by the pinned reader");
     let meshes = drawing
@@ -450,7 +450,7 @@ fn ifc_global_id_round_trips_through_the_database() {
         generation: 0,
         xref: None,
     };
-    let drawing = cad_import_ifc::IfcImporter::new()
+    let drawing = crate::IfcImporter::new()
         .import(&request, &|| false)
         .expect("the written IFC4 bytes are readable by the pinned reader");
     assert!(

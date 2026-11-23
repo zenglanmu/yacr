@@ -1,12 +1,12 @@
 [package]
-name = "cad-import-ifc"
+name = "cad-connector-ifc"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "IFC (IFC2X3/IFC4/IFC4X3) adapter: parse and mesh into the neutral mesh contract."
+description = "IFC (IFC2X3/IFC4/IFC4X3) connector: parse and mesh into the neutral mesh contract, and write IFC4 IfcTriangulatedFaceSet."
 
 [dependencies]
 # RGBA8 IFC textures are encoded to PNG before they enter the document store.
@@ -22,6 +22,11 @@ ifc-lite-geometry.workspace = true
 # `std::time::Instant::now()` panics on wasm32-unknown-unknown; `web-time` uses
 # `Performance.now()` there and re-exports std elsewhere.
 web-time.workspace = true
+# The writer half (`src/export/`) executes an `ifc-lite-export` plan.
+ifc-lite-export.workspace = true
+# Pinned so `ifc-lite-export`'s caret dependency cannot float this member of
+# the 28.3.0 family past the reader's `=28.3.0` pins.
+ifc-lite-processing.workspace = true
 
 [dev-dependencies]
 # Proves IFC bytes never reach the STEP adapter (which refuses them by name).
