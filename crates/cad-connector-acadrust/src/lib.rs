@@ -38,6 +38,7 @@ pub use solid::{
 };
 
 pub mod export;
+pub use export::{DESCRIPTOR_DWG, DESCRIPTOR_DXF};
 pub mod vendor;
 pub use vendor::{VendorExtraction, VendorRecord, VendorSource};
 

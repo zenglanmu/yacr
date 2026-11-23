@@ -23,7 +23,7 @@
 | `cargo test -p cad-connector-mesh --locked` | **84 passed**，0 failed |
 | `cargo check --workspace --all-targets --locked` | 通过（`Finished dev profile`） |
 | `cargo clippy -p cad-connector-core -p cad-connector-acadrust -p cad-connector-dgn -p cad-connector-step -p cad-connector-rvt -p cad-connector-ifc -p cad-connector-gltf -p cad-connector-skp -p cad-connector-mesh --all-targets --locked -- -D warnings` | 通过（40.00 s，无 warning 升级为 error） |
-| `cargo check -p app-web --target wasm32-unknown-unknown --locked` | 通过；`cad-render-wgpu` 在 wasm 目标有 1 条**既有** `dead_code` warning（`pick_arc_pipeline`/`PICK_REASON_*`），与本轮 crate 合并无关，也不在 `-D warnings` 范围内 |
+| `cargo check -p app-web --target wasm32-unknown-unknown --locked` | 通过；4 个 crate 有**既有** `dead_code` warning（`cad-render-wgpu` 7、`cad-engine` 2、`cad-host` 1、`app-web` 1），与本轮 crate 合并无关，也不在 `-D warnings` 范围内 |
 | `python3 scripts/check-architecture.py` | `Architecture OK: 38 packages, acyclic and core boundaries intact` |
 | `python3 scripts/check-file-size.py` | `file-size OK: 2633 code file(s), limit 1000 lines` |
 | `python3 scripts/check-i18n.py` | `i18n OK: 3129 keys, 2 catalogs`（文档改动不影响键集） |
@@ -43,7 +43,8 @@
 `cad-import-obj` + `cad-import-stl` + `cad-export-mesh` 的并集与合并后的
 `cad-connector-mesh` 一致，`tobj`/`stl_io` 是唯一格式专属依赖）。本轮**没有重跑"旧四棵树"对比**：
 旧 crate 已在本提交范围内删除，工作树里无法再生成那四棵树；上表只做了合并后树的抽查。
-`formats-*` feature 树与 slim 泄漏守卫（`scripts/lib/wasm-toolchain.sh`）本轮未重跑。
+`formats-*` feature 树与 slim 泄漏守卫（`scripts/lib/wasm-toolchain.sh`）在合并提交轮未重跑；
+集成轮的 `build-web-ui.sh`（slim）已重跑并通过（见上表），本记录只用它作构建产物证据。
 
 ## 文档轮验证
 

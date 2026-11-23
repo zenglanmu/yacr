@@ -154,8 +154,9 @@ FormatConnector {
 2026-11-23 的编译/契约记录见 `docs/validation-connectors-2026-11-23.md`：连接器注册表测试
 （full 与 `--no-default-features` 两套）、各合并 crate 的契约测试、`app-web` 测试、workspace
 `cargo check`、合并 crate 的 clippy、`app-web` wasm check、`check-architecture.py`、
-`check-file-size.py` 与 `cargo tree` 第三方并集对比。
+`check-file-size.py`、`cargo tree` 第三方并集对比，以及 slim bundle 构建
+（`scripts/build-web-ui.sh`，构建产物证据；**不是**浏览器/GPU/像素验收）。
 
-明确 **NOT RUN**：全量 `cargo test --workspace`、真实 GPU/像素/性能测试、浏览器 slim bundle 的
-`scripts/build-web-ui.sh` 构建（若未运行则如实记为 NOT RUN）、任何 vendor/真机运行。crate 名变化
-没有改变任何格式字节，但该结论只是代码契约证据，不是格式兼容性验收。
+明确 **NOT RUN**：全量 `cargo test --workspace`、真实 GPU/像素/性能测试、浏览器 smoke、任何
+vendor/真机运行。crate 名变化没有改变任何格式字节，但该结论只是代码契约与构建产物证据，不是
+格式兼容性验收。
