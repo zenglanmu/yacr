@@ -176,8 +176,9 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
   拒绝（不再产生）、`5` Windows 缺 WebView2、`6` dom-canvas 缺 WebGL2、`7` GPU 预算拒绝。
   分类以稳定标记行为第一依据。
 - **`.ymodel` 是原生保存格式**（zip 容器 + zstd 帧承载的分片 JSON）：`--open <x.ymodel>` 走
-  `cad_platform::DocumentArchive` 解码，**不经过 importer**；`SAVE` 对无源文档或 `.ymodel`
-  源写 `.ymodel`，`.dwg` 源仍是实验性 DWG 导出，其它源仍是 DXF。归档拒绝用稳定标记
+  `cad_platform::DocumentArchive` 解码，**不经过 importer**；`SAVE` **恒写** `.ymodel`（ADR-0041 D1），
+  源格式只贡献建议名里的 stem，不再按源扩展名切换写出器；其它格式一律走 `EXPORT`（ADR-0052）。
+  归档拒绝用稳定标记
   `ymodel.*`（`unsupported_version` / `unsupported_minor` / `invalid_document` / `conflict` /
   `foreign_entries_unreadable` / 写出侧 `unrepresentable_model`）；**目前没有进程退出码映射**（ADR-0037 D13 的 `8` 只是计划）。
   L0 源字节直通与 L1 不动点**都还没有证据**。保存是**显式保存 + 原子替换**；Phase 2 起
@@ -188,11 +189,16 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
   （`<config>/recovery/<key>.ymodel`），恢复 = 用 `OPEN` 打开它；默认每 60 s 写一次（选项里可改，0 = 关闭），保存成功后丢弃，
   过期快照（`revision <= saved_revision`）直接丢弃而不是提示——**不得**用旧快照回滚文档。
 
-  连接器与导出（2026-11-20）：`cad-app::ConnectorRegistry` 是唯一派发表（导入有序 probe、导出按
+  连接器与导出（2026-11-20；导出入口 2026-11-23）：`cad-app::ConnectorRegistry` 是唯一派发表（导入有序 probe、导出按
   `format_id`）；`ConnectorDescriptor` 由实现 crate 声明，`cad-app` 只接线。写出一律读 `cad-db` 并
   返回 `CompatReport`：DXF/DWG/STL/OBJ/PLY/OFF/IFC4/SKP/glTF（GLB + JSON `.gltf`）已接线；
   STEP/DGN/RVT 为稳定拒绝
-  `export.<id>.not_implemented`。对象级报告随 `.ymodel` 落 `tables/compat.json`（导出记录最多 32 条，
+  `export.<id>.not_implemented`。`EXPORT` 是单个规范命令：裸 `EXPORT` 打开全格式选择器且建议名取
+  源格式（ADR-0052；`.dwg`/`.skp` 这类实验性写回与只读/未知源回退 `.dxf`），`EXPORT <TOKEN>`
+  （`DXF DWG STL OBJ PLY OFF COFF IFC SKP GLB GLTF`）是它的参数形式、不新增命令 id，目标扩展名仍是
+  最终权威，不符按 `export.format_mismatch` 在写前拒绝；所有载体共用一个“全部导出格式”过滤器，
+  slim Web bundle 里未编译的格式按 `unsupported-runtime: export.<id>` 显式拒绝。对象级报告随
+  `.ymodel` 落 `tables/compat.json`（导出记录最多 32 条，
   导入记录不淘汰）与 `tables/sources.json`；新增两张表使 `FORMAT_MINOR` 升到 **2**，
   网格基色纹理（`textures/<key>` 二进制条目 + `cad:Mesh` 的 `uvs`/`texture`）再升到 **3**，
   网格 PBR 通道（`cad:Mesh.pbr`：metallic/roughness/emissive/occlusion 标量 + 4 张 UV0 贴图）
@@ -272,7 +278,7 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
 | Windows `app-windows`（`yacr-windows`） | 真实 Tauri/WebView2 + Win32 child HWND，`native-below`；`.ymodel` 保存/打开已接线（COM `IFileSaveDialog` + 临时文件→`ReplaceFileW` 原子替换 + `.bak` + `%APPDATA%\yacr\recovery` 恢复快照）；**当前证据**为编译门禁（含 `--target x86_64-pc-windows-msvc` 类型检查）+ Wine 拒绝合同（缺 WebView2 → 退出码 5）；真实 Windows 运行/对话框/NTFS `.bak` **NOT VERIFIED**（PENDING user real-Windows spike） |
 | macOS `app-macos`（`yacr-macos`） | 真实 Tauri/WKWebView + CAD 子 `NSView`（Metal），`native-below`；`.ymodel` 保存/打开已接线（`NSSavePanel` + 临时文件→`rename` 原子替换 + `.bak` + `~/Library/Application Support/yacr/recovery`）；**当前证据**为编译/类型检查（mac target，AppKit 调用经桩编译器校验）；真实 macOS 运行/面板点击/APFS `.bak`/层序/DPI/像素一律 **NOT VERIFIED** |
 | Android `app-android` | 真实 Tauri WebView + 原生 `CadSession` + Vulkan `SurfaceView`，`native-below`，wasm 会话**不实例化**。SAF 打开 + **`.ymodel` 保存/打开已接线**（SAF 写非原子；`.bak` 仅在 provider 支持时创建，否则 `save.no_backup`），其它格式走 `EXPORT`；恢复快照装在 `filesDir/recovery`。维护者已侧载 APK 并运行成功（2026-11-08，非 CI 验收）；上述新链路只有编译/契约证据，设备运行 NOT VERIFIED；设备/真实 GPU/像素的正式验收仍 **NOT VERIFIED** |
-| Web `app-web` | wasm `CadSession` + DOM canvas（`dom-canvas`）。OPEN 走页面上传；**`SAVE` 无归档适配器，按 `unsupported-runtime: ymodel` 拒绝**，写文件走 `EXPORT`（**浏览器 bundle 只编了 DWG/DXF 连接器，实际只能落 `.dxf`**）/`PLOT` 的浏览器下载（SVG/PDF）；**连接器按载体编译**（`cad-app` 的 `formats-*`）：该 bundle 其余格式按 `unsupported-runtime: import.<id>` / `export.<id>` 显式拒绝，不静默回退；Linux X11/XWayland 的 `dom-canvas` 走 `app-web` 的 `full-formats`，格式集不受此裁剪；CI `web-smoke` 是 SwiftShader 冒烟，非 GPU/像素；native host target 是显式 NOT IMPLEMENTED 空壳 |
+| Web `app-web` | wasm `CadSession` + DOM canvas（`dom-canvas`）。OPEN 走页面上传；**`SAVE` 无归档适配器，按 `unsupported-runtime: ymodel` 拒绝**，写文件走 `EXPORT`（**浏览器 bundle 只编了 DWG/DXF 连接器：裸 `EXPORT` 的实际落盘仍是 `.dxf`（源为 `.dwg` 也回退 `.dxf`），显式 `EXPORT DWG` 写实验性 DWG；其它格式按 `unsupported-runtime: export.<id>` 拒绝**）/`PLOT` 的浏览器下载（SVG/PDF）；**连接器按载体编译**（`cad-app` 的 `formats-*`）：该 bundle 其余格式按 `unsupported-runtime: import.<id>` / `export.<id>` 显式拒绝，不静默回退；Linux X11/XWayland 的 `dom-canvas` 走 `app-web` 的 `full-formats`，格式集不受此裁剪；CI `web-smoke` 是 SwiftShader 冒烟，非 GPU/像素；native host target 是显式 NOT IMPLEMENTED 空壳 |
 | CLI `cad-cli-tools` | 保留，headless 开图/出图（PNG/SVG/PDF） |
 
 `ymodel` 原生读写的载体状态：**Linux、Android、Windows、macOS 已接线**（Linux：`apps/app-linux/src/ymodel_archive.rs`

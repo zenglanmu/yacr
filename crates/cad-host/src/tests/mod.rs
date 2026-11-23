@@ -25,6 +25,7 @@ mod display_modes;
 mod document_lifecycle;
 mod edit_receipt;
 mod engine_config;
+mod export_formats;
 mod file_open_save;
 mod fonts;
 mod gate;

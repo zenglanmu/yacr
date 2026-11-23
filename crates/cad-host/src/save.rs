@@ -164,6 +164,27 @@ impl HostCore {
         policy::default_save_name(&stem_source, "ymodel")
     }
 
+    /// The shared "this host can write at all, and is not already busy" guards of
+    /// `SAVE`/`EXPORT`/`EXPORT <TOKEN>`.
+    ///
+    /// The graded status key is the same for all three (`save.export_failed`):
+    /// they are one write intent, and the busy/unsupported reason is the real
+    /// answer. The caller adds its own additional guards (the ymodel archive for
+    /// `SAVE`, nothing for the lossy exports) afterwards.
+    fn require_save_ready(&self, command: &str) -> CadResult<()> {
+        if !self.capabilities.save {
+            let reason = self.message("command.unsupported", &[("command", command)]);
+            self.set_catalog_status("save.export_failed", &[("reason", &reason)])?;
+            return Err(CadError::Unsupported(reason));
+        }
+        if self.loading() || self.save_pending.get() || self.pending_save.borrow().is_some() {
+            let busy = self.message("linux.busy", &[]);
+            self.set_catalog_status("save.export_failed", &[("reason", &busy)])?;
+            return Err(CadError::Unsupported(busy));
+        }
+        Ok(())
+    }
+
     /// Save the active drawing as the native `.ymodel` archive, host-owned.
     ///
     /// `SAVE` is **always** [`SavePurpose::SaveYmodel`] (ADR-0041 D1), whatever
@@ -173,16 +194,7 @@ impl HostCore {
     /// silent export to another format. Every other writing format is reached
     /// through [`Self::request_export`].
     pub(crate) fn request_save(&self) -> CadResult<()> {
-        if !self.capabilities.save {
-            let reason = self.message("command.unsupported", &[("command", "SAVE")]);
-            self.set_catalog_status("save.export_failed", &[("reason", &reason)])?;
-            return Err(CadError::Unsupported(reason));
-        }
-        if self.loading() || self.save_pending.get() || self.pending_save.borrow().is_some() {
-            let busy = self.message("linux.busy", &[]);
-            self.set_catalog_status("save.export_failed", &[("reason", &busy)])?;
-            return Err(CadError::Unsupported(busy));
-        }
+        self.require_save_ready("SAVE")?;
         // A carrier with no archive cannot write the native format. Refusing
         // before the picker is the honest answer; opening a chooser that can only
         // fail would look like a save that ran.
@@ -211,25 +223,55 @@ impl HostCore {
     /// extension** decides the writer (the same dispatch `poll_pending_save`
     /// uses for SAVE before this ADR); an unsupported extension keeps its stable
     /// `save.unknown_format` / `<id>.not_implemented` marker. The default name is
-    /// the document's stem with the DXF extension, exactly what the picker used
-    /// to suggest for a drawing Save As.
+    /// the document's stem with the source format's own extension when that
+    /// source format is a non-experimental write-back format (ADR-0052), else
+    /// `.dxf`; `.dwg`/`.skp` sources therefore still suggest `.dxf`.
     pub(crate) fn request_export(&self) -> CadResult<()> {
-        if !self.capabilities.save {
-            let reason = self.message("command.unsupported", &[("command", "EXPORT")]);
-            self.set_catalog_status("save.export_failed", &[("reason", &reason)])?;
-            return Err(CadError::Unsupported(reason));
-        }
-        if self.loading() || self.save_pending.get() || self.pending_save.borrow().is_some() {
-            let busy = self.message("linux.busy", &[]);
-            self.set_catalog_status("save.export_failed", &[("reason", &busy)])?;
-            return Err(CadError::Unsupported(busy));
-        }
+        self.require_save_ready("EXPORT")?;
         let hint = self.controller.borrow().document_name_hint.clone();
-        let default_name = policy::default_save_name(&hint, "dxf");
+        let extension =
+            policy::export_format_for_source(&hint).map_or("dxf", |spec| spec.extension);
+        let default_name = policy::default_save_name(&hint, extension);
+        // A bare EXPORT forces no writer: the chosen extension stays the
+        // authority. Clearing here drops anything a previous typed request left.
+        *self.pending_export_format.borrow_mut() = None;
         if let Err(error) = self
             .files
             .begin_save(SavePurpose::SaveExport, &default_name)
         {
+            *self.pending_export_format.borrow_mut() = None;
+            self.set_catalog_status("save.export_failed", &[("reason", &error_text(&error))])?;
+            return Err(error);
+        }
+        self.save_pending.set(true);
+        self.drain_files()?;
+        self.finish_or_wait_save(SavePurpose::SaveExport)
+    }
+
+    /// The typed `EXPORT <TOKEN>` form: the same picker, with the chosen writer
+    /// fixed for this one interaction (ADR-0052).
+    ///
+    /// Called by `cad-ui-core` after it resolved the token through
+    /// [`policy::export_format_for_token`], so `format_id` is one of the registry
+    /// keys and `extension` is that token's own suggested extension. The picker
+    /// still runs — the user picks the actual destination — but the chosen
+    /// target's extension is still the final authority: a mismatch is refused
+    /// before any write by [`Self::export_save`] (`export.format_mismatch`),
+    /// never written as a different format.
+    pub fn request_export_format(
+        &self,
+        format_id: &'static str,
+        extension: &'static str,
+    ) -> CadResult<()> {
+        self.require_save_ready("EXPORT")?;
+        let hint = self.controller.borrow().document_name_hint.clone();
+        let default_name = policy::default_save_name(&hint, extension);
+        *self.pending_export_format.borrow_mut() = Some(format_id);
+        if let Err(error) = self
+            .files
+            .begin_save(SavePurpose::SaveExport, &default_name)
+        {
+            *self.pending_export_format.borrow_mut() = None;
             self.set_catalog_status("save.export_failed", &[("reason", &error_text(&error))])?;
             return Err(error);
         }
@@ -246,6 +288,15 @@ impl HostCore {
     pub(crate) fn poll_pending_save(&self) -> CadResult<()> {
         let Some(PendingSave { purpose, result }) = self.pending_save.borrow_mut().take() else {
             return Ok(());
+        };
+        // A typed `EXPORT <TOKEN>` armed the writer for exactly this interaction.
+        // Taking it here covers the target, the cancel and the platform failure
+        // alike, so a forced writer never leaks into a later save; a bare EXPORT
+        // and every other purpose leave the slot `None`.
+        let forced_export = if purpose == SavePurpose::SaveExport {
+            self.pending_export_format.borrow_mut().take()
+        } else {
+            None
         };
         let catalog = |key: &str, args: &[(&str, &str)]| StatusMessage::Catalog {
             key: key.to_string(),
@@ -271,7 +322,7 @@ impl HostCore {
                 catalog("plot.export_failed", &[("reason", &reason)])
             }
             (SavePurpose::SaveExport, Ok(target)) => {
-                match self.export_save(&target) {
+                match self.export_save(&target, forced_export) {
                     // A connector export (mesh/IFC/SKP) has its own wording: the
                     // file is not a DXF, and the format key is what the user
                     // chose. Complete vs. partial still comes from the report's
@@ -432,7 +483,17 @@ impl HostCore {
     /// After the bytes are durable, the report is recorded in the in-memory
     /// `Document.compat` table (the next `.ymodel` save persists it). A recording
     /// failure never fails the save: the file is already written.
-    fn export_save(&self, target: &FileTarget) -> Result<SaveOutcome, SaveFailure> {
+    ///
+    /// `forced` is the writer a typed `EXPORT <TOKEN>` fixed for this interaction
+    /// (ADR-0052). The classification below is still derived from the **chosen
+    /// target's extension**, which remains the authority: a forced writer that
+    /// disagrees with it is refused as `export.format_mismatch` **before** any
+    /// bytes are produced or written, never silently written as the other format.
+    fn export_save(
+        &self,
+        target: &FileTarget,
+        forced: Option<&'static str>,
+    ) -> Result<SaveOutcome, SaveFailure> {
         let (wrote_dwg, format_id): (bool, &'static str) =
             match policy::save_format(&policy::extension_of(&target.display_name)) {
                 SaveFormat::Dwg => (true, "dwg"),
@@ -449,6 +510,17 @@ impl HostCore {
                     ))
                 }
             };
+        if let Some(requested) = forced {
+            // The extension, not the token, decides: `.coff` classifies to the
+            // `off` writer, so `EXPORT COFF` matched against `.coff` or `.off`
+            // both succeed while `EXPORT GLB` against `.dxf` is refused.
+            if requested != format_id {
+                return Err(SaveFailure::Reason(format!(
+                    "export.format_mismatch: requested {requested}, target .{} is {format_id}",
+                    policy::extension_of(&target.display_name)
+                )));
+            }
+        }
         // Install the configured Save-As options on the controller first: the
         // ACIS payload version and DXF container are host settings, and the DXF
         // and DWG lanes read them when they build their request. The mesh/IFC/SKP

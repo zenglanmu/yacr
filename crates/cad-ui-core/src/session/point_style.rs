@@ -181,6 +181,10 @@ impl CadSession {
             // session resolves the one selected table and the host writes the
             // bytes (see `session::table_export`).
             TABLEEXPORT_SELECTOR => self.table_export_argument(argument, text),
+            // `EXPORT <TOKEN>` (ADR-0052): the token fixes the writer (and the
+            // picker's suggested extension) for one interaction; the chosen
+            // target's extension is still the authority.
+            super::commands::EXPORT_SELECTOR => self.export_argument(argument, text),
             // The 2026-11-07 view batch: named views and the camera direction.
             // `-VIEW` normalises to `VIEW` before this dispatch, so it lands on
             // the same arm.

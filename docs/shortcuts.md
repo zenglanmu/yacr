@@ -134,7 +134,7 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 | `NEW` | 宿主 | 否 | — |
 | `CLOSE` | 宿主（关闭当前图纸并回到开始页；无未保存提示/多文档） | 否 | — |
 | `SAVE` | 宿主（保存为原生 `.ymodel`） | 否 | `QSAVE`、`SAVEAS` |
-| `EXPORT` | 宿主（导出为其它格式；目标扩展名决定写出器） | 否 | — |
+| `EXPORT` | 宿主（导出为其它格式；目标扩展名决定写出器。参数形式 `EXPORT <token>`（ADR-0052）：`DXF` `DWG` `STL` `OBJ` `PLY` `OFF` `COFF` `IFC` `SKP` `GLB` `GLTF`，建议该格式的名字；目标扩展名不符按 `export.format_mismatch` 拒绝） | 否 | — |
 | `PLOT` | 宿主（矢量导出 SVG/PDF） | 否 | `PRINT` |
 | `SWITCH2D3D` | 观察（2D 俯视 ↔ 3D 透视切换；切回 2D 恢复保存的相机） | 否 | — |
 | `PROJECTION` | 观察（透视/正交切换） | 否 | — |

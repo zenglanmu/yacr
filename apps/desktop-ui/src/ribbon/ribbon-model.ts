@@ -17,6 +17,7 @@ import { LAYER_PANEL_ITEMS } from './layers-panel.ts';
 import { BIM_PANEL } from './bim-panel.ts';
 import { ANNOTATE_TEXT_COMMAND_ITEMS } from './annotate-text-commands.ts';
 import { CIRCLE_ITEM, HATCHEDIT_ITEM, MEASUREGEOM_ITEM, POLYGON_ITEM } from './variants.ts';
+import { EXPORT_ITEM } from './ribbon-file-export.ts';
 import { INTERFACE_PANEL } from './ribbon-interface.ts';
 import type { CadStatusFlagKey } from './ribbon-active.ts';
 
@@ -281,12 +282,10 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
           { id: 'NEW', labelKey: 'qat.new', icon: 'new', command: 'NEW', large: true },
           { id: 'SAVE', labelKey: 'qat.save', icon: 'save', command: 'SAVE', large: true },
           // EXPORT writes a copy in the format the host's picker chooses
-          // (ADR-0041). It is not a PLOT alias any more: its own router selector
-          // opens an export picker whose extension decides the writer, and the
-          // chrome offers no format submenu. It carries SAVE's gate
-          // (`canSave`): the host advertises it through the save capability, and
-          // an export needs the same open, idle document.
-          { id: 'EXPORT', labelKey: 'file.export', icon: 'export', command: 'EXPORT', large: true },
+          // (ADR-0041/ADR-0052); the caret rows are `EXPORT <TOKEN>` argument
+          // forms of the same selector, so they inherit its `canSave` gate
+          // (see `ribbon-file-export.ts`).
+          EXPORT_ITEM,
           // Plot renders the drawing to SVG/PDF through the host's own picker,
           // gated by `canPlot`. `PRINT` remains its alias; `EXPORT` no longer
           // is. The entry reuses the `save` glyph (there is no dedicated plot

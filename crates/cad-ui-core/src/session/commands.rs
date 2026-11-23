@@ -844,6 +844,21 @@ pub const ZOOM_STEP_SELECTORS: &[(&str, f64)] =
 
 mod argument_table;
 pub use argument_table::ARGUMENT_SELECTORS;
+
+/// The canonical `EXPORT` selector, shared by the bare command and its typed
+/// `EXPORT <TOKEN>` argument form (ADR-0052).
+///
+/// `EXPORT` keeps the host-owned all-format picker; the typed form only fixes the
+/// writer (and the picker's suggested extension) for one interaction, so it is an
+/// argument of this selector, never a second command id.
+pub const EXPORT_SELECTOR: &str = "EXPORT";
+
+// The typed `EXPORT <TOKEN>` grammar and its host hand-off (ADR-0052), split out
+// for the code-size gate. `pub(crate)` so the session tests can pin the grammar
+// directly; nothing outside `cad-ui-core` reaches it (the dispatch arm in
+// `point_style.rs` and the selector table use [`EXPORT_SELECTOR`] only).
+pub(crate) mod export_argument;
+
 // The alias table lives in `cad-app`: the `ALIASEDIT` read-only report runs
 // there and cannot depend on this UI crate. Re-exported here so
 // `commands::COMMAND_ALIASES`, `alias_pairs()` and every existing import path

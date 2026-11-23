@@ -447,6 +447,11 @@ pub struct HostCore {
     pub(crate) save_pending: Rc<Cell<bool>>,
     /// A completed save interaction, awaiting export.
     pub(crate) pending_save: Rc<RefCell<Option<PendingSave>>>,
+    /// The writer a typed `EXPORT <TOKEN>` forced for the save interaction that
+    /// is in flight (a connector registry key). `None` for a bare `EXPORT` and
+    /// for every other purpose: the chosen target's extension is then the only
+    /// dispatch authority. Consumed by the one `SaveExport` poll it belongs to.
+    pub(crate) pending_export_format: Rc<RefCell<Option<&'static str>>>,
     /// Path of the drawing being opened (or already open), used to resolve its
     /// sibling raster images. Armed only on a **successful** open.
     pub(crate) drawing_path: Rc<RefCell<Option<PathBuf>>>,

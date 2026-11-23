@@ -16,6 +16,7 @@ mod command_vocabulary_text;
 mod dash_layer_arguments;
 mod dimension_arguments;
 mod draw2_arguments;
+mod export_arguments;
 mod extended_vocabulary;
 mod extras_arguments;
 mod gradient;

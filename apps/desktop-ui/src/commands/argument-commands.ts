@@ -14,6 +14,7 @@
 // `RENAME` — live in `argument-extras-grammar.ts`.
 import { isHatchEditArgument } from './argument-hatchedit.ts';
 import { isColorArgument } from './argument-color-grammar.ts';
+import { EXPORT_ARGUMENT_SPEC } from './argument-export-grammar.ts';
 import {
   isApertureArgument,
   isPtypeArgument,
@@ -801,6 +802,8 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
   IBL: Object.freeze({
     parse: (argument: string) => ['ON', 'OFF', '1', '0'].includes(argument.trim().toUpperCase()),
   }),
+  // `EXPORT <format>`: the typed format token (grammar in `argument-export-grammar.ts`).
+  EXPORT: EXPORT_ARGUMENT_SPEC,
 });
 
 /** `DIMSTYLE`/`-DIMSTYLE`: `LIST`, `CURRENT` or `SET <name>` (name may have spaces). */

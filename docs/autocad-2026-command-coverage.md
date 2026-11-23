@@ -640,7 +640,7 @@
 | `EXOFFSET` | 完整实现 | `OFFSET` 独立思考拼写，同一规划器：`LINE`/`CIRCLE`/`ARC`/`LWPOLYLINE`（含弧段）/`ELLIPSE`→样条/`SPLINE`→样条，`Through`/`Distance`/`Multiple`/`Erase`/`Layer`/`OFFSETGAPTYPE` 全部继承，一条事务/一步撤销（逐类 + `Multiple` + 拒绝均有契约） |
 | `EXPLAN` | 部分实现 | 具名拒绝（`explan.unsupported: this build has no UCS model; the world +Z plan path is PLAN`）。 |
 | `EXPLODE` | 部分实现 | 一层分解；标注→线/弧/箭头/文字、多重引线→引线/样条/箭头/MTEXT、非均匀块可表示子集；`EXPMODE` 无会话通道 |
-| `EXPORT` | 部分实现 | 导出为其它格式，目标扩展名决定写出器（dxf/dwg/stl/obj/ply/off/coff/ifc/skp/glb/gltf）；DWG/SKP 写出为实验性，vendor **NOT VERIFIED** |
+| `EXPORT` | 部分实现 | 导出为其它格式，目标扩展名决定写出器（dxf/dwg/stl/obj/ply/off/coff/ifc/skp/glb/gltf）；DWG/SKP 写出为实验性，vendor **NOT VERIFIED**。参数形式 `EXPORT <TOKEN>`（ADR-0052）建议该格式的名字，扩展名不符按 `export.format_mismatch` 在写前拒绝 |
 | `EXPORTDWF` | 部分实现 | 具名拒绝（`exportdwf.unsupported: this build has no DWF/DWFx exporter`）。 |
 | `EXPORTDWFX` | 部分实现 | 具名拒绝（`exportdwfx.unsupported: this build has no DWF/DWFx exporter`）。 |
 | `EXPORTLAYOUT` | 部分实现 | 具名拒绝（`exportlayout.unsupported`）：请用 PLOT（单一布局，SVG/PDF）。 |

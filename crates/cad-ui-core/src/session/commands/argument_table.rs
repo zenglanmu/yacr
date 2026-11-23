@@ -122,6 +122,11 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     TABLE_SELECTOR,
     DASH_TABLE_SELECTOR,
     TABLEDIT_SELECTOR,
+    // `EXPORT <TOKEN>` (ADR-0052): the token only fixes the writer and the
+    // picker's suggested extension for one interaction; the chosen target's
+    // extension stays the authority (`export.format_mismatch` otherwise). A bare
+    // `EXPORT` keeps the all-format picker.
+    EXPORT_SELECTOR,
     // The post-creation table forms (2026-11-15): the cell-style copy, the style
     // field list and the CSV export destination. The bare `TABLESTYLE` keeps the
     // extended report, so only its argument form is listed here.

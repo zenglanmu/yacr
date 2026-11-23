@@ -53,6 +53,10 @@
 同时把 `EXPORT` 从 `PLOT` 的别名表里移除：矢量出图仍由 `PLOT`/`PRINT` 负责，`EXPORT` 回到
 AutoCAD 的语义（导出为其它格式）。`docs/shortcuts.md` §2b 与覆盖表同步。
 
+> **2026-11-23 增补**：`EXPORT <TOKEN>` 显式格式选择、裸 `EXPORT` 的源格式默认名与
+> `export.format_mismatch` 见 [ADR-0052](0052-export-format-selection.md)。D2 的“目标扩展名决定
+> 写出器”不变；D6 的“不做导出预设”不包含单一格式的显式导出入口。
+
 `SavePurpose` 收敛为三个：`SaveYmodel`、`SaveExport`、`Plot`。旧 `SaveDwg` 变体删除——
 DWG 只是 `SaveExport` 里的一种扩展名。
 
@@ -111,7 +115,8 @@ pub experimental: bool,
 
 ### D6 — 不做
 
-- 不做导出预设/批量导出/`EXPORTOFFICE`/`WBLOCK` 真实现。
+- 不做导出预设/批量导出/`EXPORTOFFICE`/`WBLOCK` 真实现。（单一格式的显式 `EXPORT <TOKEN>`
+  入口由 ADR-0052 增补，不属于“预设”。）
 - 不做 L0 源字节直通；不做"导出后回写源格式并保持原文件其余部分不变"。
 - 不改 `.ymodel` 的载体接线范围（仍只有 Linux）。
 - 不做格式授权/版权校验。

@@ -196,6 +196,7 @@ impl HostCore {
             presenting_open: Rc::new(Cell::new(false)),
             save_pending: Rc::new(Cell::new(false)),
             pending_save: Rc::new(RefCell::new(None)),
+            pending_export_format: Rc::new(RefCell::new(None)),
             drawing_path: Rc::new(RefCell::new(None)),
             source_target: Rc::new(RefCell::new(None)),
             archive: Rc::new(RefCell::new(None)),

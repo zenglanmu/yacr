@@ -107,6 +107,116 @@ pub fn save_format(extension: &str) -> SaveFormat {
     }
 }
 
+/// One `EXPORT <TOKEN>` spelling and the writer it names.
+///
+/// `token` is the typed word (matched ASCII case-insensitively), `format_id` is
+/// the `cad-app` connector-registry key the host dispatches, and `extension` is
+/// the extension the picker suggests for it. The two are not always the same
+/// spelling: `COFF` is the colour-capable OFF header written by the one `off`
+/// registry descriptor under a `.coff` name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExportFormatSpec {
+    pub token: &'static str,
+    pub format_id: &'static str,
+    pub extension: &'static str,
+}
+
+/// Every format a typed `EXPORT <TOKEN>` can select, in the documented order.
+///
+/// The bare `EXPORT` picker is still the all-format chooser: this table only
+/// names the ones a typed token may force. A token outside it is refused with a
+/// stable reason (never silently mapped onto another writer).
+pub const EXPORT_FORMATS: &[ExportFormatSpec] = &[
+    ExportFormatSpec {
+        token: "DXF",
+        format_id: "dxf",
+        extension: "dxf",
+    },
+    ExportFormatSpec {
+        token: "DWG",
+        format_id: "dwg",
+        extension: "dwg",
+    },
+    ExportFormatSpec {
+        token: "STL",
+        format_id: "stl",
+        extension: "stl",
+    },
+    ExportFormatSpec {
+        token: "OBJ",
+        format_id: "obj",
+        extension: "obj",
+    },
+    ExportFormatSpec {
+        token: "PLY",
+        format_id: "ply",
+        extension: "ply",
+    },
+    ExportFormatSpec {
+        token: "OFF",
+        format_id: "off",
+        extension: "off",
+    },
+    ExportFormatSpec {
+        token: "COFF",
+        format_id: "off",
+        extension: "coff",
+    },
+    ExportFormatSpec {
+        token: "IFC",
+        format_id: "ifc",
+        extension: "ifc",
+    },
+    ExportFormatSpec {
+        token: "SKP",
+        format_id: "skp",
+        extension: "skp",
+    },
+    ExportFormatSpec {
+        token: "GLB",
+        format_id: "glb",
+        extension: "glb",
+    },
+    ExportFormatSpec {
+        token: "GLTF",
+        format_id: "gltf",
+        extension: "gltf",
+    },
+];
+
+/// Resolve one typed `EXPORT <TOKEN>` word, trimmed and ASCII case-insensitive.
+pub fn export_format_for_token(token: &str) -> Option<&'static ExportFormatSpec> {
+    let token = token.trim();
+    EXPORT_FORMATS
+        .iter()
+        .find(|spec| spec.token.eq_ignore_ascii_case(token))
+}
+
+/// The format a document opened from `name` would be written back as, when that
+/// is a **non-experimental write-back** format the bare `EXPORT` picker may
+/// suggest as its own extension; `None` means the caller falls back to DXF.
+///
+/// `.dwg` and `.skp` are excluded on purpose: both writers are experimental
+/// (ADR-0041 D5 for DWG, the SKP descriptor for SketchUp) and a picker default
+/// must not steer an ordinary export into an experimental writer. `.ymodel`,
+/// a blank/unknown name and the read-only formats (STEP/DGN/RVT) have no
+/// writable entry in [`EXPORT_FORMATS`], so they fall back as well.
+pub fn export_format_for_source(name: &str) -> Option<&'static ExportFormatSpec> {
+    let extension = extension_of(name);
+    match save_format(&extension) {
+        // Experimental writers are never a suggested default (ADR-0041 D5).
+        SaveFormat::Dwg => None,
+        SaveFormat::Connector("skp") => None,
+        // DXF and every other writable connector extension map to the spec whose
+        // own extension is exactly this one (`.coff` keeps its own spelling).
+        SaveFormat::Dxf | SaveFormat::Connector(_) => EXPORT_FORMATS
+            .iter()
+            .find(|spec| spec.extension == extension.as_str()),
+        // No extension, `.ymodel`, and read-only/unknown sources.
+        SaveFormat::NoExtension | SaveFormat::Unknown(_) => None,
+    }
+}
+
 /// Classification of a vector-plot target by extension.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlotFormat {
@@ -212,5 +322,74 @@ mod tests {
         assert_eq!(plot_format("png"), PlotFormat::Png);
         assert_eq!(plot_format(""), PlotFormat::NoExtension);
         assert_eq!(plot_format("txt"), PlotFormat::Unknown("txt".into()));
+    }
+
+    #[test]
+    fn export_tokens_resolve_case_insensitively_to_their_writer() {
+        for (token, format_id, extension) in [
+            ("DXF", "dxf", "dxf"),
+            ("DWG", "dwg", "dwg"),
+            ("STL", "stl", "stl"),
+            ("OBJ", "obj", "obj"),
+            ("PLY", "ply", "ply"),
+            ("OFF", "off", "off"),
+            ("COFF", "off", "coff"),
+            ("IFC", "ifc", "ifc"),
+            ("SKP", "skp", "skp"),
+            ("GLB", "glb", "glb"),
+            ("GLTF", "gltf", "gltf"),
+        ] {
+            let spec = export_format_for_token(token).expect("a documented token");
+            assert_eq!((spec.format_id, spec.extension), (format_id, extension));
+            // Surrounding whitespace and any ASCII case spelling are the same token.
+            assert_eq!(
+                export_format_for_token(&format!("  {}  ", token.to_ascii_lowercase()))
+                    .map(|spec| spec.token),
+                Some(token)
+            );
+        }
+        assert!(export_format_for_token("ZIP").is_none());
+        assert!(export_format_for_token("").is_none());
+        assert!(export_format_for_token("gl tf").is_none());
+    }
+
+    #[test]
+    fn a_source_extension_only_suggests_a_non_experimental_write_back_format() {
+        // Writable, non-experimental: the source's own extension is suggested.
+        for (name, extension) in [
+            ("/tmp/plan.dxf", "dxf"),
+            ("mesh.stl", "stl"),
+            ("mesh.obj", "obj"),
+            ("mesh.ply", "ply"),
+            ("mesh.off", "off"),
+            ("mesh.coff", "coff"),
+            ("model.ifc", "ifc"),
+            ("model.glb", "glb"),
+            ("model.gltf", "gltf"),
+        ] {
+            assert_eq!(
+                export_format_for_source(name).map(|spec| spec.extension),
+                Some(extension),
+                "{name}"
+            );
+        }
+        // Experimental writers (ADR-0041 D5) and everything read-only/unknown
+        // fall back, so the caller suggests `.dxf`.
+        for name in [
+            "/tmp/plan.dwg",
+            "/tmp/plan.SKP",
+            "plan.ymodel",
+            "plan.step",
+            "plan.dgn",
+            "plan.rvt",
+            "plan",
+            "",
+            "plan.txt",
+        ] {
+            assert!(
+                export_format_for_source(name).is_none(),
+                "{name} must fall back to dxf"
+            );
+        }
     }
 }
