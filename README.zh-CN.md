@@ -1,364 +1,136 @@
-# yacr — 跨平台开源 CAD
+# yacr
 
 [English](README.md) | [中文](README.zh-CN.md)
 
-yacr 是一个跨平台开源 CAD 项目：共享的 Rust 核心负责 CAD 文档（DWG/DXF/DGN，以及网格、STEP、
-IFC 与 Revit 导入）、几何、命令与渲染，React + Tauri 提供界面，wgpu 负责绘制。同一套文档与渲染管线
-面向 Linux（Wayland 原生或 X11/`dom-canvas`）、Windows、macOS、Android 与 Web。
+**用 Rust 写的另一个 CAD。** 开源跨平台 CAD：Rust 核心负责图纸、几何、命令与 wgpu
+渲染，一套 React 界面跑在 Linux、Windows、macOS、Android 和浏览器上。
 
-**宣传页：** <https://yacr.pages.dev/> · **Web 版：** <https://yacr-examples.pages.dev/>
+> **PREVIEW** — 预览版今天就能下载运行，但还不是生产级 CAD。能力范围与证据边界记录在
+> [`docs/compatibility.md`](docs/compatibility.md)。
 
-yacr 处于活跃开发中，**预览版现在即可下载**：Linux Flatpak、Windows zip、macOS tarball、Android APK
-与浏览器版本。它可以打开 DWG/DXF/DGN，可导入网格/STEP/IFC 文件用于显示、可预览 Revit 工程，能用 wgpu
-查看 2D/3D 图纸、做测量，命令清单 981 条中有 979 条有实现路径（185 完整 + 794 部分），其余 2 条
-（MEASURE / TRACE）按同名不同义不计入；未支持的选项按名拒绝，不静默成功。它**还不是生产级 CAD**；
-各平台状态与证据边界见 `AGENTS.md` 平台表与 `docs/compatibility.md`。
+**官网** <https://yacr.pages.dev/> · **在线试用** <https://yacr-examples.pages.dev/> ·
+**下载** <https://github.com/zenglanmu/yacr/releases>
 
-**作者 / 联系：** zenglanmu@126.com · **许可证：** AGPL-3.0（`LICENSE`）
+![Linux/Wayland 上的 yacr：机械零件的四视口、Ribbon 与命令行](docs/images/readme/01-desktop-hero.png)
 
-## 项目架构
+*Linux 原生 Wayland 上的真实运行截图（NVIDIA Quadro P620，Vulkan/wgpu），打开
+`fixtures/dxf/qcad-flange/flange.dxf`。*
 
-数据流（UI 与 CLI 共用）：
+## 它能做什么
 
-```
-UI / CLI → Application 与权限 → Command / DrawingTransaction → DB transaction → ChangeSet
-         → 查询 / 历史 / 依赖失效 → Representation → SceneDelta → Renderer → RenderHost
-```
+- **打开你手上已有的图纸。** DWG、DXF（ASCII 与二进制）、Bentley DGN V7/V8 作为 CAD 数据
+  打开——图层、直线、圆弧、椭圆、样条、文字、共享单元——单一导入器，带进度与取消。
+- **其余格式也能进来看。** OBJ、STL、PLY、OFF、STEP（AP203/214/242）、glTF/GLB、IFC
+  （2X3/4/4X3）作为可显示可拾取的网格导入；Revit 工程（`.rvt`/`.rte`）给包围盒预览，
+  SketchUp 模型（`.skp`）给三角面预览。
+- **2D 绘制与编辑。** LINE、POLYLINE、CIRCLE、ARC、ELLIPSE、SPLINE、POINT、RECTANGLE、
+  POLYGON，文字、引线、表格、填充；移动、复制、旋转、缩放、镜像、修剪、延伸、打断、偏移、
+  圆角、倒角、阵列、块参照，以及图层与属性写入——每一次编辑都走数据库事务，带撤销。
+- **把图纸看清楚。** 实体选择与高亮、图层显示/隐藏/搜索、属性、模型空间与布局切换、
+  光栅图像、渐变填充、TEXT/MTEXT 的真实字体整形。
+- **量你看到的。** 距离、多段线长度、角度、多边形面积，每个结果都带着它来自的单位、精度与
+  几何来源。
+- **3D 观察。** 环绕、标准视图、正交或透视，跑在 wgpu 渲染器上，带块级视锥剔除与硬性场景
+  预算。
+- **出图与导出。** 界面里光栅出图到 PNG；headless CLI 还能出 SVG 与 PDF。可导出 DXF、
+  DWG、STL、OBJ、PLY、OFF、IFC4、SKP、glTF。
+- **中文或英文。** 一份 i18n 目录驱动整个界面。
+- **大图也撑得住。** `fixtures/complex-test.dwg`（约 72.5 万展开图元）能打开并显示；超出
+  场景预算时显式失败，而不是把内存吃爆。
 
-图纸数据与业务逻辑**只**操作数据库、事务和命令；渲染是数据库的**派生**结果。`cad-db` 是唯一权威
-数据源，UI 与渲染均由它派生；同一套核心被桌面宿主与无头 CLI 复用，因此行为可独立测试。crate 分层
-（自底向上；由 `scripts/check-architecture.py` 强制）：
+厂商自定义对象不会被悄悄丢掉：天正一类的自定义实体按公开的代理图形缓存记录显示。
 
-```
-cad-domain                                   领域模型：强类型 ID、f64 几何、单位、容差
-  ↑
-cad-db ─ cad-dependencies ─ cad-history      数据库/事务、依赖失效、撤销/恢复
-  ↑
-cad-geometry ─ cad-kernel-adapter ─ cad-representation   几何、ACIS/SAT 隔离、显示表示
-  ↑
-cad-spatial ─ cad-scene ─ cad-render-wgpu    空间索引、场景缓存、wgpu 渲染器
-  ↑
-cad-proxy ─ cad-import-core ─ cad-import-* ─ cad-resources   代理图形、格式派发与各导入器、资源解析
-  ↑
-cad-measure ─ cad-query ─ cad-app            测量、分页查询、应用/会话/命令
-  ↑
-cad-engine ─ cad-platform ─ cad-diagnostics ─ cad-cli-tools   渲染会话、平台契约、诊断、CLI
-  ↑
-cad-host                                     平台无关宿主编排（不依赖任何 UI 工具包）
-  ↑
-cad-ui-core                                  wire protocol、逻辑布局、CAD 会话、shell、i18n
-  ↑
-apps/app-linux（React + Tauri）   apps/app-{windows,macos,android}（Tauri 宿主）   apps/app-web（wasm 浏览器载体）
-```
+**命令覆盖。** 981 个 AutoCAD 命令名里有 979 个有实现路径——185 个完整、794 个部分——不
+支持的选项按名字拒绝，而不是悄悄干成别的事情。
 
-**必须保持的边界**（详见 `docs/architecture.md`、`docs/core-invariants.md`）：
+## 截图
 
-- **renderer-only wgpu**——只有 `cad-render-wgpu` 依赖 wgpu。
-- **importer-only acadrust**——只有 `cad-import-acadrust` 依赖 acadrust（**未修改的 0.6.3**）；
-  **禁止 Cargo patch**。
-- `cad-host` **不依赖任何 UI 工具包**；平台 I/O 只存在于 `apps/app-*`，经 `cad-platform` 契约
-  （`PlatformFiles` / `ConfigStore` / `SurfaceSource` / `FontLoader` / …，事件式、无 futures、无 `Send`）。
-- `cad-ui-core` 承载平台无关 UI 逻辑（wire protocol、逻辑布局、CAD 会话、宿主 admission/error 状态、
-  i18n 目录），必须保持 UI 工具包与 GPU 无关。
-- `cad-engine` 是 UI 无关的渲染会话协调层；`cad-app` 不依赖它，它也不依赖 `cad-ui-core` / `cad-host`
-  或任何 UI 工具包。
-- GPU/内核/UI 工具包/平台类型不得进入 `cad-domain` / `cad-db`；无整幅回读；单 presenter per drawable。
+| | |
+|---|---|
+| ![glTF 头盔](docs/images/readme/02-gltf-helmet.png)<br/>**glTF / PBR** — DamagedHelmet，真实贴图与材质通道 | ![STEP](docs/images/readme/03-step-3d.png)<br/>**STEP** — 装配体按实体 3D 导入 |
+| ![SketchUp](docs/images/readme/06-skp-preview.png)<br/>**SketchUp** — 房间、门窗与带贴图地面，三角面预览 | ![RVT](docs/images/readme/07-rvt-preview.png)<br/>**Revit** — 直接开的 `.rvt` 样本建筑预览 |
 
-**桌面宿主组合**（Linux，`apps/app-linux`，二进制 `yacr`）：GTK `GtkOverlay` 内是**原生 GTK/wgpu CAD
-分区**（Rust + renderer-only wgpu），Tauri 2 `WebView` 作为透明 sibling 呈现 React（Vite）chrome，
-二者 **co-visible**。宿主支持 **X11/XWayland**（CAD 分区获得自己的原生 X child 窗口）与**原生
-Wayland**（宿主自建 app-owned `wl_surface` + `wl_subsurface`，经 `apps/app-linux/native/` 私有 C shim）。
-后端在 GTK 启动前由 `apps/app-linux/src/backend.rs` 显式决议，**无静默回退**。见 ADR 0010、ADR 0011。
+## 两个决定产品形态的选择
 
-## 特色
+### 一个 Rust 核心，一套 React 界面，五种载体
 
-- **一套核心，多消费者**：共享 `cad-*` 核心 + 平台无关的 `cad-ui-core` 层被桌面宿主与无头 CLI 复用，
-  二者共用同一应用命令路径与同一数据库。
-- **数据库为权威，渲染为派生**：修改经事务与 `ChangeSet`；依赖失效只重建受影响的显示表示，不重新解析底图。
-- **依赖隔离由构造保证**（见上「边界」），并由 CI 强制。
-- **诚实的建模**：未支持/未验证能力显式建模（`Unsupported` / `Partial` / 诊断）；占位与假数据不计完成，
-  失败绝不改成空成功。
-- **i18n 唯一权威**：所有用户可见文案来自 `crates/cad-ui-core/i18n/{zh-CN,en}.json`（键集必须一致）；
-  代码里硬编码 CJK 会被拒绝。
-- **桌面宿主做真实原生渲染**：React chrome 合成在原生 GTK/wgpu CAD 分区之上，同时支持 X11/XWayland 与
-  原生 Wayland，后端决议显式、无回退。
-- **能力集**（核心、桌面 GUI 与无头 CLI 共享；各载体覆盖度不同，均有契约/合成测试支撑）。
-  **保真度不一**：不少图元只是近似表示或仍有缺口，逐项状态以
-  `docs/compatibility.md`、`docs/dxf-entity-coverage.md` 为准：
-  - **打开与解析**：本地图纸走同一派发器与同一语义/数据库转换，异步导入带进度与取消：DWG / DXF
-    （ASCII 与二进制）与 Bentley DGN V7/V8 作为 CAD 数据（DGN：level、线/弧/椭圆/样条、文字、
-    共享单元；level 显示标志、references、栅格与 tags 仍是显式缺口，见 `docs/dgn.md`）；
-    OBJ、STL、PLY / OFF、STEP（AP203/214/242）与 IFC（2X3/4/4X3）
-    作为**可显示、可拾取的网格**（不可测量；源信息有损处为 `Partial`）；Revit 工程（`.rvt`/`.rte`）
-    仅为**包围盒预览**；Revit 族文件（`.rfa`/`.rft`）按名拒绝。
-  - **查看**：模型空间与受支持布局切换；图层显隐、搜索、恢复；图元选择、高亮与基本属性。
-  - **导航**：平移、缩放、适应图纸、重置；**2D 与 3D 观察**（轨道旋转、标准视图、正交/透视）。
-  - **测量**：距离、折线长度、角度、多边形面积，单位/精度/几何来源可追踪。
-  - **绘制与编辑**：LINE/POLYLINE/CIRCLE/ARC/ELLIPSE/SPLINE/POINT/RECTANGLE/POLYGON、
-    文字/引线/表格/填充，以及移动/复制/旋转/缩放/镜像、修剪/延伸/打断、偏移、圆角/倒角、
-    阵列、块引用、图层与属性写入，经 `cad-db` 写事务与撤销历史；逐命令边界见
-    `docs/compatibility.md`。**三维实体建模未实现**（显式拒绝）。
-  - **图元显示**：覆盖全部可绘制 DXF 图元（LINE/POLYLINE/CIRCLE/ARC/ELLIPSE/SPLINE/INSERT/TEXT/
-    MTEXT/HATCH/DIMENSION/LEADER/MULTILEADER/MLINE/TABLE/…）。TEXT/MTEXT 用真实字体整形为线段
-    （TTF/OTF/WOFF 与 SHX）；HATCH 支持多环实心填充与渐变；DIMENSION 对线性/对齐/半径/直径/角度/
-    坐标/弧长合成显示几何（部分子类为近似）。
-  - **光栅图像**：RASTERIMAGE 端到端纹理显示（相对路径解析 + PNG/JPEG 解码 + GPU 纹理、每键去重、
-    UV 方向修正、裁剪多边形）。
-  - **ACIS 实体（子集）**：3DSOLID / BODY / REGION / SURFACE 解析为中性 B-rep，仅平面（含孔）/球/
-    柱/环面/锥面离散；其余显式标记未支持。
-  - **代理图元**：天正、探索者等自定义图元仅按公开的**代理图形缓存记录**显示，无缓存几何不显示。
-  - **出图**：模型/布局光栅 PNG（CLI 另有 SVG/PDF 纯矢量路径）；无矢量打印样式表（CTB）。
-  - **大图保护**：场景批次/顶点硬预算，超限**显式失败**而不是 OOM。
+核心（`cad-*` crate）拥有文档、几何与命令。`cad-db` 是唯一权威，场景、显示表示与每个像素
+都由它派生，所以桌面界面和 headless CLI 共用同一条命令路径。事务产生的 `ChangeSet` 只让
+被触碰的部分失效，一次编辑不会重解析整张图。
 
-## 源码编译与运行
+界面是所有载体共用的一个 React + TypeScript 包，变化的只是文档持有者：原生 Wayland、
+Windows、macOS、Android 上由 native 会话持有 `cad-db`，WebView 是覆盖在原生 CAD 表面上的
+透明层；X11/XWayland 与 Web 上由 wasm 会话持有，CAD 画在 DOM `<canvas>` 里。没有第二套界面，
+也没有第二份文档状态——更没有静默回退：某个载体不具备的能力，按名字显式拒绝。
 
-工具链 **1.99.1**（`rust-toolchain.toml`），`Cargo.lock` 已锁定；若 `PATH` 无 cargo，加上 `$HOME/.cargo/bin`。
+### `.ymodel` — 自己的文档格式
 
-### Linux 桌面宿主（主开发目标）
+`.ymodel` 是 yacr 的原生存档格式：zip 容器，每个建模条目是一帧 zstd 承载的分片 JSON，外来
+条目按字节原样保留，别的工具写进去的数据不会被重新压缩，也不会丢。
 
-系统前置（脚本不自动安装）：
+- **保存是增量的。** 提交没碰过的条目，从文档自己上一份归档按压缩字节 raw-copy；只有被改动
+  的分片重新编码。保存以原子替换落盘。
+- **文档可以自包含。** 字体、外部参照与图片可以内嵌，BIM 定义与关系随文件一起走。
+- **有版本、有校验。** manifest 记录格式版本与每条目的摘要，解压前先校验；更新的归档按稳定
+  原因拒绝，而不是读一半。
 
-```bash
-sudo apt-get install -y pkgconf libgtk-3-dev libwebkit2gtk-4.1-dev libwayland-dev \
-  libfontconfig-dev libfreetype-dev mesa-vulkan-drivers
-pkg-config --exists webkit2gtk-4.1 gtk+-3.0 wayland-client   # 应通过
-```
+## 平台
 
-推荐入口（不强制 `GDK_BACKEND`；构建 Vite 前端并以 `tauri/custom-protocol` 运行）：
+| 平台 | 怎么拿到 | 说明 |
+|---|---|---|
+| **Linux**（`yacr`） | [Flatpak](https://github.com/zenglanmu/yacr/releases) 或[从源码构建](docs/build.md) | 主开发目标。原生 Wayland 走生产路径；X11/XWayland 切换到 DOM-canvas 载体。 |
+| **Windows**（`yacr-windows`） | [zip](https://github.com/zenglanmu/yacr/releases) | 真实 Tauri/WebView2 宿主，加一个 Win32 CAD 子窗口。 |
+| **macOS**（`yacr-macos`） | [tar.gz](https://github.com/zenglanmu/yacr/releases) | Tauri/WKWebView 加原生 `NSView` CAD 表面。ad-hoc 签名，未公证。 |
+| **Android** | [APK](https://github.com/zenglanmu/yacr/releases) | 同一套 React 界面，原生 `CadSession` 与 Vulkan 表面。 |
+| **Web** | [yacr-examples.pages.dev](https://yacr-examples.pages.dev/) | wasm 会话，CAD 画在 DOM canvas 上。在页面上打开图纸；浏览器包只编了 DWG/DXF 连接器，写出只有 `.dxf`、PNG、SVG 或 PDF。 |
+
+每个产物都是预览版。打包成功不等于运行或 GPU 验收；各载体状态见
+[`docs/compatibility.md`](docs/compatibility.md) 与 [`docs/`](docs/) 下的宿主文档。
+
+## 上手
+
+**下载**：到 [Releases 页面](https://github.com/zenglanmu/yacr/releases)取对应平台的构建，
+或者直接[打开网页版](https://yacr-examples.pages.dev/)。
+
+**从源码跑（Linux，主目标）：**
 
 ```bash
 bash scripts/run-react-linux.sh --open /absolute/drawing.dwg
 ```
 
-直接运行（需先构建前端）：
+工具链、系统依赖和其它载体见 [`docs/build.md`](docs/build.md)；Linux 宿主参数与后端策略见
+[`docs/react-linux-app.md`](docs/react-linux-app.md)。
 
-```bash
-(cd apps/desktop-ui && npm ci && npm run build)
-cargo run --release --locked -p app-linux --bin yacr \
-  --features tauri/custom-protocol -- --open /absolute/drawing.dwg
-```
-
-原生 Wayland（真实原生，非 XWayland）与显式 X11 替代：
-
-```bash
-env -u DISPLAY -u XAUTHORITY GDK_BACKEND=wayland WAYLAND_DISPLAY=wayland-0 \
-    XDG_RUNTIME_DIR=/run/user/1000 ./target/release/yacr --open /absolute/drawing.dwg
-# 显式 X11/XWayland：GDK_BACKEND=x11 DISPLAY=:0 ./target/release/yacr --open ...
-```
-
-宿主参数：`--open <path>`、`--fonts-dir <path>`、`--images-dir <path>`、`--probe`。配置目录为
-`~/.config/yacr/`（由旧的 `~/.config/yacr-react/` 迁移，**不自动迁移**）。宿主需要真实显示；
-**无显示的 SSH/无头不支持**。完整参数、后端策略与限制见 `docs/react-linux-app.md`。
-
-### 无头 CLI
+**Headless 出图：**
 
 ```bash
 cargo build -p cad-cli-tools --release --locked
-./target/release/cad-cli-tools render /absolute/drawing.dwg --png /tmp/opencode/out.png
-./target/release/cad-cli-tools --help
+./target/release/cad-cli-tools render /absolute/drawing.dwg --png out.png
 ```
 
-成功时 stdout 只输出一份 JSON 结果文档，失败为非零退出码 + 结构化错误。见 `docs/cli.md`。
+## 已知限制
 
-### 本地 Flatpak bundle（Linux）
+- 不是生产级，DWG 兼容性没有针对语料验证过；各类实体保真度不一。
+- `.ymodel` 是原生格式。DWG 来源的图纸回写 DWG 仍是实验性的；其它导入来源存为 DXF。
+- 没有 3D 实体建模（显式拒绝）；ACIS 实体只按子集做剖分显示。
+- Revit 是包围盒预览，SketchUp 是三角面预览——这两者没有边、贴图或测量。
+- 没有代理图形缓存的厂商实体无可显示内容。
+- 3D 观察与出图属于显示能力，没有 CTB/HPGL 打印路径。
 
-```bash
-bash scripts/package-linux-release.sh
-# → target/release/dist/yacr-<version>-linux-<arch>.flatpak  (+ .sha256)
-flatpak install --user target/release/dist/yacr-<version>-linux-<arch>.flatpak
-flatpak run io.github.zenglanmu.yacr --open /absolute/drawing.dwg
-```
+逐项状态见 [`docs/compatibility.md`](docs/compatibility.md) 与
+[`docs/dxf-entity-coverage.md`](docs/dxf-entity-coverage.md)。
 
-它构建单文件 Flatpak bundle（`bin/yacr` + 字体包，runtime `org.gnome.Platform//51`）。默认
-（`WITH_FONTS=1`）在 host 侧用 `scripts/fetch-fonts.sh` 把 mlightcad 全量目录与提交的
-`fonts/`（`osifont` + `Noto Sans CJK SC`）合并进 payload，图纸能解析的不止提交的两个面；
-`WITH_FONTS=0` 只放提交包，`FONTS_DIR=<dir>` 复用已组装目录，两者打包时都不联网。
-**不是**发布通道：未上 Flathub；CI 的 `linux-release` job 只在 `v*` tag 或手工 dispatch 时运行，
-只上传 workflow artifact。见 `docs/flatpak.md`。
+## 开发者
 
-### 代码签名
+需求规格：[`CAD_IMPLEMENTATION_SPEC.md`](CAD_IMPLEMENTATION_SPEC.md) · crate 边界与不变量：
+[`docs/architecture.md`](docs/architecture.md)、[`docs/core-invariants.md`](docs/core-invariants.md) ·
+构建与门禁：[`docs/build.md`](docs/build.md) · CLI：[`docs/cli.md`](docs/cli.md) · 界面决策：
+[`docs/adr/`](docs/adr/)。
 
-发布产物使用仓库自持凭据自签名，绝不声称公共信任：
+yacr 是独立实现。DWG/DXF 读写使用 [acadrust](https://github.com/hakanaktt/acadrust)
+（未修改的 0.6.8），开源 QCAD `flange` 样本用作 fixture。更多参考与第三方许可见
+[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) 与 [`fonts/SOURCE.md`](fonts/SOURCE.md)。
 
-- **Windows / Android / macOS**——仓库自持密钥的**自签名**：Windows 两个 `.exe` 做 Authenticode
-  （PFX，并随包导出 `.cer`）、Android 用 keystore 签 APK、macOS 用 ad-hoc `codesign`。这些签名
-  **没有公共信任**，SmartScreen 与 Gatekeeper 仍会拦；Windows 缺 PFX 时回退 `-unsigned`，
-  Android release 缺 keystore 时**直接失败**（只发布签名 APK），macOS tarball 始终 ad-hoc 签名
-  但从不公证。
-- **Flatpak（Linux）**——可选 OSTree/GPG commit 签名（`FLATPAK_GPG_*` secrets/variables），
-  签名 bundle 会附带匹配的 `*.flatpak.gpg`。
+## 许可
 
-Windows/Android/macOS 的真实签名请求在凭据存在前一律 **NOT RUN**，且不涉及公共 CA 或公证。
-运行手册、所需 secrets 与证据边界见 `docs/code-signing.md`。
-
-### 全量门禁（CI 同款；发版前运行）
-
-```bash
-cargo fmt --all -- --check
-cargo clippy --workspace --exclude app-android --exclude app-web --all-targets --locked -- -D warnings
-python3 scripts/check-architecture.py
-python3 scripts/check-fixture-manifest.py
-python3 scripts/check-workflows.py
-python3 scripts/check-i18n.py
-cargo check --workspace --all-targets --locked
-cargo check --workspace --lib --target wasm32-unknown-unknown --locked
-cargo test --workspace --locked -- --test-threads=1   # GPU/CLI 用例串行跑
-(cd apps/desktop-ui && npm ci && npm test && npm run build)
-```
-
-日常开发只验证改动范围（改动 crate 的编译/测试/fmt/clippy）；上述全量门禁用于明确要求与发版验收。
-未运行一律标注 `NOT RUN`，绝不用旧证据冒充当前结果。
-
-### 各平台打包与运行（本地）
-
-所有打包入口都是真实入口：缺前置条件时**非零失败**，不产出半成品、不静默回退。所有前端构建共用
-前置：`plugins/tch` submodule（`git submodule update --init --recursive`；缺 `dist/plugins/tch.js`
-即硬失败）、Node/npm 与钉住的 Rust 工具链。字体统一来自 `scripts/fetch-fonts.sh`：`WITH_FONTS=1`
-（默认）下载 mlightcad 全量目录，`WITH_FONTS=0` 离线只放提交包，`FONTS_DIR=<dir>` 复用预置目录。
-下载按文件缓存到 `${XDG_CACHE_HOME:-$HOME/.cache}/yacr/fonts`（`FONT_CACHE_DIR` 可覆盖；显式空值
-关闭缓存；`FORCE=1` 刷新），重复打包不会重复下载。**产物不等于运行 / GPU / 设备 / 像素验收。**
-
-| 平台 | 命令（仓库根目录） | 产物 |
-|---|---|---|
-| Linux（Flatpak） | `bash scripts/package-linux-release.sh` | `target/release/dist/yacr-<version>-linux-<arch>.flatpak` + `.sha256` |
-| Windows（zip） | `bash scripts/package-windows-release.sh` | `target/<target>/release/dist/yacr-<version>-windows-x86_64.zip` + `.sha256` |
-| macOS（tar.gz） | `bash scripts/package-macos-release.sh` | `target/macos/<arch>/dist/yacr-<version>-macos-<arch>.tar.gz` + `.sha256` |
-| Android（APK） | `bash scripts/build-android.sh --release --target aarch64` | `apps/app-android/src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk` |
-| Web（bundle） | `bash scripts/build-web.sh` / `bash scripts/build-web-ui.sh` | `apps/app-web/dist/` / `apps/app-web/dist-ui/` |
-
-Linux/Wayland 是主开发目标；Flatpak 的打包、安装与运行命令见上文
-[本地 Flatpak bundle（Linux）](#本地-flatpak-bundlelinux)。
-
-**Windows zip。** 在 Windows 上用原生 MSVC + 普通 `cargo`（静态 CRT）；在本机 Linux 上可经
-MinGW-w64 或 `cargo xwin` 交叉构建：
-
-```bash
-bash scripts/package-windows-release.sh                                  # Windows（MSVC）
-TARGET=x86_64-pc-windows-gnu bash scripts/package-windows-release.sh     # Linux + MinGW-w64
-CARGO_XWIN=1 TARGET=x86_64-pc-windows-msvc bash scripts/package-windows-release.sh  # Linux + xwin
-```
-
-本地 zip 是**未签名**的（`WITH_FONTS=1` 联网抓完整字体目录，`0` 只用已提交的 `fonts/` 离线打包）。
-CI 走签名路径：`SKIP_ZIP=1` → `signtool` →
-`bash scripts/finalize-windows-release.sh --signed <stage> <dist>`。运行
-`yacr-windows.exe --open <dwg>`；缺 WebView2 时打印诊断并退出码 5。
-
-**macOS tar.gz。** 必须在 macOS 上运行——Mach-O 需要 Apple SDK/链接器，Linux 无法交叉产出：
-
-```bash
-rustup target add aarch64-apple-darwin x86_64-apple-darwin   # universal（默认）
-bash scripts/package-macos-release.sh                        # universal
-MACOS_ARCH=arm64 bash scripts/package-macos-release.sh       # 或 x86_64
-```
-
-默认 **ad-hoc 签名**（`MACOS_SIGN_IDENTITY`，缺省 `-`），**不公证**；换机首次启动需
-`xattr -dr com.apple.quarantine Yacr.app` 或右键 → 打开。运行
-`open ./Yacr.app --args --open /absolute/drawing.dwg`。
-
-**Android APK。** 需要 `ANDROID_HOME`、`NDK_HOME`（`ndk/29.0.13846066`）与 `JAVA_HOME` 指向 JDK 17：
-
-```bash
-bash scripts/build-android.sh --release --target aarch64   # 真机；release APK 未签名
-bash scripts/build-android.sh --debug   --target x86_64    # 本地模拟器；debug 签名
-adb install -r apps/app-android/src-tauri/gen/android/app/build/outputs/apk/universal/debug/*.apk
-```
-
-本地 release APK 需先用 `apksigner` 签名才能安装；CI 是唯一会签 release APK 的地方。
-
-脚本先跑 `scripts/build-android-ui.sh`（`YACR_RUNTIME=android`）再跑 Gradle。该步骤还会把 APK
-字体包组装到生成的 `apps/app-android/font-assets/`（默认 `scripts/fetch-fonts.sh` 的 mlightcad
-全量 + 提交包；`WITH_FONTS=0` 只放提交包，`FONTS_DIR=<dir>` 复用预置目录），Gradle 把它作为
-assets；该 `native-below` 载体**不实例化** wasm `dom-canvas` 会话。
-
-**Web bundle。** 两份互不覆盖的产物：
-
-```bash
-bash scripts/build-web.sh       # 独立 vanilla harness → apps/app-web/dist
-bash scripts/build-web-ui.sh    # 共享 React chrome → apps/app-web/dist-ui
-python3 scripts/serve-web.py --directory apps/app-web/dist-ui --port 8090
-# 浏览器打开 http://127.0.0.1:8090/ ；file:// 不能实例化 wasm
-```
-
-两份 bundle 默认都把字体包 staged 到 `fonts/`：`WITH_FONTS=1` 用 `scripts/fetch-fonts.sh` 组装
-mlightcad 全量（需网络），`WITH_FONTS=0` 只放提交包（离线），`FONTS_DIR=<dir>` 复用预置目录。
-页面仍在打开图纸后从同源 `fonts/` 懒加载。wasm 构建另需 `wasm32-unknown-unknown` target 与钉住的
-`wasm-bindgen 0.2.130`。
-
-### 其他平台
-
-Windows/macOS/Android/Web 的实现程度不同；宿主细节与证据边界见 `docs/windows-app.md`、
-`docs/macos-app.md`、`docs/android-host.md` 与 `docs/validation-web.md`。打包/签名不等于运行或
-GPU 验收。
-
-## 现有进度
-
-**编译通过不等于运行验收。** 各端实现状态与证据统一维护在内部文档：
-
-- Linux（主开发目标）：`docs/react-linux-app.md`、`docs/validation*.md`
-- Windows：`docs/windows-app.md`
-- macOS：`docs/macos-app.md`
-- Android：`docs/android-host.md`
-- Web：`docs/validation-web.md`
-- 能力矩阵：`docs/compatibility.md` · 逐轮证据：`docs/handoff-archive/`
-
-近期（2026-10-17/18）在真实使用下打磨了渲染与拾取路径：CPU 拾取接入场景空间索引（ADR 0012，S4；
-`cad-spatial` 每 chunk R-tree，实测权衡如实记录）、帧 pacing / 增量提交修复、每帧 CPU plan 与 encode
-跳过的优化、GPU 帧时间测量、块级视锥剔除、设备 limits 协商。当前本地 Flatpak bundle 与自动证据采集
-脚本（`scripts/collect-evidence.sh`）也出自同期。逐轮证据见 `docs/handoff-archive/` 与 `docs/validation*.md`。
-
-### 诚实边界
-
-- **没有已验收的 DWG 兼容性、实体或平台。** `fixtures/manifest` 含合成夹具与一个开源 QCAD `flange`
-  样本（`Partial`）；构建证据不等于兼容性。
-- **验证证据的边界**：能力与证据边界见 `AGENTS.md` 平台表与 `docs/compatibility.md`，详细验证记录见
-  `docs/validation*.md`。静态门禁与合成测试不等于真实 GPU、真机、golden 或性能验收。
-- **明确未支持 / 未实现**（不伪造成功）：
-  - 代理图元的厂商 opcode 记录（仅公开缓存记录）；无缓存几何不显示。
-  - 外部内容：DWG **内部的** PDF/DWF/DGN underlay、OLE2 嵌入对象、CoordinationModel /
-    Navisworks NWD 不加载。（独立 `.dgn` 文档可作为 CAD 数据打开；它自己的 references/栅格仍是
-    缺口，见 `docs/dgn.md`。）
-  - ACIS 完整几何内核（3DSOLID/REGION/BODY/SURFACE 仅子集离散）、点云点数据（仅范围盒）。
-  - 绘制顺序 `draw_order` 未贯通（=上传顺序）；WIPEOUT 掩码填充未渲染；线宽显式不绘制。
-  - 图像不支持编解码器（TIFF/CCITT/EPS）、亮度/对比/淡出、outside/mask 裁剪。
-  - 出图仅光栅 PNG（CLI 另有 SVG/PDF）；无 CTB/HPGL；不写回 DWG 文件。
-  - 用户批注已整体移除；2D 绘制/编辑已实现（逐命令边界见 `docs/compatibility.md`）；
-    三维实体建模未实现。
-- 未支持项逐项标注在 `docs/compatibility.md`，图元逐项状态见 `docs/dxf-entity-coverage.md`；
-  **未验证即未验证**，不冒充完成。
-
-## 文档索引
-
-**总览**——需求权威：`CAD_IMPLEMENTATION_SPEC.md`（v2.0）；逐轮交接：`docs/handoff-archive/`；架构边界与
-不变量：`docs/architecture.md`、`docs/core-invariants.md`；兼容性与能力矩阵：`docs/compatibility.md`；
-验证与运行证据：`docs/validation.md`、`docs/validation-dwg.md`。
-
-**构建与平台**——各平台构建：`docs/build.md`；Linux 桌面宿主（当前）：`docs/react-linux-app.md`；
-Linux Flatpak（本地 bundle，未发布）：`docs/flatpak.md`；决策记录：`docs/adr/`（ADR 0010 = React/Tauri
-桌面宿主、ADR 0011 = 原生 Wayland 子表面、ADR 0012 = 场景空间索引与交互）；无头渲染：
-`docs/headless-render.md`；CI 分层：`docs/ci.md`；CLI：`docs/cli.md`；字体：`docs/fonts.md`；
-应用图标：`docs/app-icon.md`。已退役（历史，含横幅）：`docs/linux-app.md`、`docs/windows-app.md`、
-`docs/macos-app.md`、`docs/verify-ui.md`。
-
-**能力与专题**——图元覆盖：`docs/dxf-entity-coverage.md`；代理支持：`docs/proxy-support.md`；曲线几何：
-`docs/curve-geometry.md`；ACIS：`docs/kernel-acis.md`；三维观察：`docs/view-3d.md`；绘制顺序：
-`docs/render-order.md`；渲染后端：`docs/render-backends.md`；测量：`docs/measure.md`；布局：
-`docs/layouts.md`；出图：`docs/plot.md`；动态块：`docs/dynamic-blocks.md`；注释性缩放：
-`docs/annotative-scaling.md`；命令行与键位：`docs/shortcuts.md`；绘图/编辑子集：`docs/drawing-edit.md`；
-性能与预算：`docs/performance.md`；DWG 测试流程：`docs/testing-dwg.md`。
-
-## 参考项目与致谢
-
-yacr 是独立实现。下列开源项目为 yacr 提供了参考或测试输入。
-
-- **acadrust** — <https://github.com/hakanaktt/acadrust>：纯 Rust 的 DWG/DXF 读写与检查库。固定
-  `0.6.8`，上游未修改，仅通过 `cad-import-acadrust` 使用。
-- **QCAD** — <https://qcad.org>：成熟的开源二维 CAD。其开源 `flange` 示例被用作导入/渲染夹具
-  （见 `fixtures/dxf/qcad-flange/SOURCE.md` 与 `THIRD_PARTY_NOTICES.md`）。
-- **OpenCADStudio** — <https://www.opencadstudio.com/>：用户可见功能范围与 UI 交互的参考。
-  **仅功能规格参考，未采用其源码**。
-- **MiniCAD** — 轻量开源 2D/3D CAD，作为功能与实现参考；未复制其源码。
-
-## 许可与第三方
-
-本仓库以 **AGPL-3.0** 发布（`LICENSE`）。依赖与捆绑资源（acadrust、wgpu/Tauri/GTK、QCAD 样本、
-osifont、mlightcad 字体等）的来源与许可见 `THIRD_PARTY_NOTICES.md` 及 `fonts/SOURCE.md`。
+AGPL-3.0，见 [`LICENSE`](LICENSE)。联系：zenglanmu@126.com
