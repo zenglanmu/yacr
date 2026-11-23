@@ -99,6 +99,9 @@ pub text_glyph: bool, // 只有 DisplayPrimitive::MeshWithoutEdgeOverlay（文�
 **未实现**处理，本 ADR 只保证**不把剖分对角线冒充成边**。显示层从三角形拓扑推出来的边界是
 几何上可证明的表面边界（奇偶判据），不是新建的文档数据。
 
+> 2026-11-23：**implementation superseded by ADR-0049 for real SKP edges; the anti-fabrication
+> invariant remains.**
+
 ---
 
 ## 2. 不变量

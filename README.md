@@ -26,7 +26,7 @@ and one React interface runs on Linux, Windows, macOS, Android and the web.
 - **Bring in everything else.** OBJ, STL, PLY, OFF, STEP (AP203/214/242), glTF/GLB and IFC
   (2X3/4/4X3) open as display-and-pick meshes; Revit projects (`.rvt`/`.rte`) as a
   preview mesh with BIM metadata, SketchUp models (`.skp`) as a textured
-  triangle mesh.
+  triangle mesh with real display edges (display and picking only).
 - **Draw and edit in 2D.** LINE, POLYLINE, CIRCLE, ARC, ELLIPSE, SPLINE, POINT,
   RECTANGLE, POLYGON, text, leaders, tables, hatch; move, copy, rotate, scale,
   mirror, trim, extend, break, offset, fillet, chamfer, array, block references,
@@ -138,7 +138,9 @@ cargo build -p cad-cli-tools --release --locked
   displayed from a subset tessellation.
 - Revit previews carry BIM metadata (element bodies are bounding boxes on older
   releases, with more decoded geometry on newer ones); SketchUp previews carry
-  base-colour textures. Neither imports edges or supports measurement.
+  base-colour textures and real display edges (display/pick only). Revit previews
+  have no real edge data — the visible boundaries are a derived display overlay.
+  Neither supports measurement.
 - Vendor entities without cached proxy graphics have nothing to display.
 - 3D observation and plotting are display features; there is no CTB/HPGL print
   path.

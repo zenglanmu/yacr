@@ -14,15 +14,21 @@
 //!   per-instance transforms, tags (layers), hidden flags, materials with
 //!   colour, opacity, and front-face base-colour textures (ADR-0038): an
 //!   embedded image is registered as a document asset and the face group carries
-//!   §4v UV0.
-//! * **Not imported:** edges (SketchUp's line/curve geometry), back-face
-//!   textures, images that only exist as external paths, scenes/pages, section
-//!   planes, annotations, dynamic-component attributes, and any CAD semantics. A
-//!   file whose only geometry is edges is an **explicit refusal**
-//!   ([`EDGE_ONLY_GEOMETRY`]), never an empty success.
+//!   §4v UV0. SketchUp's own line/curve geometry is carried as real edges
+//!   (ADR-0049): a material group whose visible face rings are all backed by
+//!   `MeshEdge` records becomes a display body with those boundary edges, and
+//!   the remaining visible edges become standalone wire bodies.
+//! * **Not imported:** back-face textures, images that only exist as external
+//!   paths, scenes/pages, section planes, annotations, dynamic-component
+//!   attributes, and any CAD semantics. Edge soft/smooth flags, per-edge
+//!   materials on face boundaries, and curve geometry (flattened to its chord)
+//!   are reported rather than modelled. A file with neither triangles nor edges
+//!   is an **explicit refusal** ([`NO_GEOMETRY`]); an edge-only file imports as
+//!   `Partial` wire bodies ([`DIAG_EDGES_ONLY`]), never as an empty success.
 //! * Tags are flattened onto layer `0` (the shared mesh-import contract inserts
 //!   a single layer) but **visibility is honoured**: hidden instances, hidden
-//!   faces and invisible tags are pruned, and the counts are reported.
+//!   faces, hidden/soft edges and invisible tags are pruned, and the counts are
+//!   reported.
 //! * Every successful import is `Completeness::Partial` and `measure` is
 //!   always [`SupportStatus::Unsupported`].
 //!
@@ -36,6 +42,10 @@
 //! node translations to metres. See [`DIAG_UNITS_METRES`].
 
 mod convert;
+// Real `MeshEdge` records: visibility, canonical endpoints and the
+// face-boundary / standalone-wire split (ADR-0049). Split out for the code-size
+// gate.
+mod edges;
 // The textured-material bridge (asset registration + §4v UV planning), split
 // out for the code-size gate.
 mod texture;
@@ -47,9 +57,10 @@ pub mod export;
 mod tests;
 
 pub use convert::{
-    determinant3, material_style, read_scene, style_of, FaceSkip, PlacedMesh, SkpScene, SkpStats,
-    MAX_DEPTH,
+    determinant3, material_style, read_scene, style_of, FaceSkip, PlacedEdges, PlacedMesh,
+    SkpScene, SkpStats, DEFAULT_MAX_MESH_EDGES, MAX_DEPTH,
 };
+pub use edges::EdgeStats;
 pub use export::SkpExporter;
 
 use cad_connector_core::{
@@ -58,7 +69,18 @@ use cad_connector_core::{
     NoopProgress,
 };
 use cad_db::{EntityColor, EntityRenderAttributes, EntityTransparency};
-use cad_domain::{CadError, CadResult, Diagnostic, EntityCapability, SupportStatus, UnitContext};
+use cad_domain::{
+    Body3d, BodyDisplay, BodyExact, BodyKind, CadError, CadResult, Completeness, Diagnostic,
+    EntityCapability, Mesh, Point3, Precision, SupportStatus, UnitContext,
+};
+
+/// The `BodyDisplay` completeness reason every preview body carries.
+const PREVIEW_BODY_REASON: &str =
+    "import.skp.preview_geometry: SketchUp supplies display geometry only, no exact B-rep";
+/// The `BodyExact::Unavailable` reason of a preview body that carries a mesh.
+const PREVIEW_EXACT_REASON: &str = "the SketchUp source supplied display geometry only";
+/// The `BodyExact::Unavailable` reason of a wire-only preview body.
+const PREVIEW_WIRE_EXACT_REASON: &str = "the SketchUp source supplied edges only";
 
 /// Stable refusal code: the fixed header is missing or truncated, so the file
 /// never was a SketchUp model.
@@ -68,13 +90,10 @@ pub const PARSE_FAILED: &str = "import.skp.parse_failed";
 /// Stable refusal code: the file reads but its release is outside every
 /// container the reader models.
 pub const VERSION_UNSUPPORTED: &str = "import.skp.version_unsupported";
-/// Stable refusal code: nothing visible has face geometry.
+/// Stable refusal code: nothing visible has face geometry or edges.
 pub const NO_GEOMETRY: &str = "import.skp.no_geometry";
-/// Stable refusal code: the visible geometry is **edges only** (SketchUp line
-/// and curve work), which this triangle-only adapter cannot draw.
-pub const EDGE_ONLY_GEOMETRY: &str = "import.skp.edge_only_geometry";
 /// Stable refusal code: a caller limit (`max_file_bytes`, `max_entities`,
-/// `max_mesh_faces`, `max_mesh_face_indices`) was exceeded.
+/// `max_mesh_faces`, `max_mesh_face_indices`, `max_mesh_edges`) was exceeded.
 pub const LIMITS_EXCEEDED: &str = "import.skp.limits_exceeded";
 
 /// Informational code: coordinates and translations are metres, `+Z` up.
@@ -102,11 +121,31 @@ pub const DIAG_BACK_TEXTURE_NOT_IMPORTED: &str = "import.skp.back_texture_not_im
 pub const DIAG_FACES_DROPPED: &str = "import.skp.faces_dropped";
 /// Partial code: the release is read by container equivalence only.
 pub const DIAG_VERSION_UNVERIFIED: &str = "import.skp.version_unverified";
-/// Always-partial code: this is preview triangle geometry, not CAD semantics.
+/// Always-partial code: this is preview triangle/edge display geometry, not CAD
+/// semantics (no exact B-rep, no measurement source).
 pub const DIAG_PREVIEW_GEOMETRY: &str = "import.skp.preview_geometry";
+/// Informational code: the file's visible geometry is edges only, imported as
+/// `Partial` wire bodies (ADR-0049).
+pub const DIAG_EDGES_ONLY: &str = "import.skp.edges_only";
+/// Informational code: which edge record flags/semantics are not modelled
+/// (soft/hidden pruning, smooth smoothing, per-edge material on face boundaries,
+/// layer colour). Emitted only when at least one record actually carried such a
+/// flag, not merely because records exist.
+pub const DIAG_EDGE_FLAGS_NOT_MODELED: &str = "import.skp.edge_flags_not_modeled";
+/// Informational code: curve edges are stored as their chord.
+pub const DIAG_EDGE_CURVES_FLATTENED: &str = "import.skp.edge_curves_flattened";
+/// Informational code: material groups that kept the mesh carrier because a
+/// face-ring segment had no `MeshEdge` record.
+pub const DIAG_GROUPS_WITHOUT_EDGE_RECORDS: &str = "import.skp.groups_without_edge_records";
+/// Partial code: a face group had a complete `MeshEdge` record set but every
+/// boundary record was pruned (hidden/soft/invisible tag), so the group fell
+/// back to the plain mesh carrier instead of an edge-less body (ADR-0049 D3).
+pub const DIAG_EDGES_HIDDEN_FALLBACK: &str = "import.skp.edges_hidden_fallback";
 
-/// Entity type key every inserted mesh carries.
+/// Entity type key every inserted face/material group carries (mesh or body).
 pub const SKP_MESH_TYPE_KEY: &str = "SkpPreviewMesh";
+/// Entity type key every standalone wire body carries.
+pub const SKP_EDGE_TYPE_KEY: &str = "SkpPreviewEdges";
 
 /// SketchUp `.skp` preview importer.
 #[derive(Debug, Default, Clone, Copy)]
@@ -179,19 +218,15 @@ impl Importer for SkpImporter {
         let mut import = MeshImport::new(request, SKP_MESH_TYPE_KEY)?;
         let scene = read_scene(&model, &request.limits, cancelled, &mut import)?;
         let stats = &scene.stats;
-        if scene.placed.is_empty() {
-            let code = if stats.edges_not_imported > 0 {
-                EDGE_ONLY_GEOMETRY
-            } else {
-                NO_GEOMETRY
-            };
+        if scene.placed.is_empty() && scene.edges.is_empty() {
             return Err(CadError::Unsupported(format!(
-                "{code}: release {}, {} placed run(s), {} face(s) emitted, {} edge(s) not \
-                 importable, {} face(s) dropped as untriangulable",
+                "{NO_GEOMETRY}: release {}, {} placed run(s), {} face(s) emitted, {} edge \
+                 record(s) with {} stored segment(s), {} face(s) dropped as untriangulable",
                 model.version,
                 stats.placed_runs,
                 stats.faces_emitted,
-                stats.edges_not_imported,
+                stats.edges.records,
+                stats.edges.emitted,
                 stats.faces_untriangulable + stats.faces_malformed
             )));
         }
@@ -211,22 +246,60 @@ impl Importer for SkpImporter {
         ));
         record_version(&mut import, &model);
         record_document(&mut import, stats);
+        record_edges(&mut import, stats);
         record_losses(&mut import, stats);
+        let edge_only = scene.placed.is_empty();
+        let wire_groups = scene.edges.len();
 
         for placed in scene.placed {
             if cancelled() {
                 return Err(CadError::Cancelled);
             }
             let object = import.reserve_object()?;
-            import.push_mesh_with_attributes(
+            let attributes = EntityRenderAttributes {
+                clip: None,
+                color: placed
+                    .color
+                    .map_or(EntityColor::ByLayer, EntityColor::Explicit),
+                transparency: placed
+                    .opacity
+                    .map_or(EntityTransparency::ByLayer, |opacity| {
+                        EntityTransparency::Explicit(opacity)
+                    }),
+                ..Default::default()
+            };
+            if placed.edges.is_empty() {
+                import.push_mesh_with_attributes(object, placed.mesh, attributes)?;
+            } else {
+                import.push_body_with_attributes(
+                    object,
+                    preview_body(placed.mesh, placed.edges, BodyKind::Unknown),
+                    SKP_MESH_TYPE_KEY,
+                    attributes,
+                )?;
+            }
+            progress.report(ImportProgress::at(
+                ImportPhase::Entities,
+                import.entity_count(),
+                Some(entity_total),
+            ));
+        }
+
+        for wires in scene.edges {
+            if cancelled() {
+                return Err(CadError::Cancelled);
+            }
+            let object = import.reserve_object()?;
+            import.push_body_with_attributes(
                 object,
-                placed.mesh,
+                preview_body(Mesh::default(), wires.edges, BodyKind::Wire),
+                SKP_EDGE_TYPE_KEY,
                 EntityRenderAttributes {
                     clip: None,
-                    color: placed
+                    color: wires
                         .color
                         .map_or(EntityColor::ByLayer, EntityColor::Explicit),
-                    transparency: placed
+                    transparency: wires
                         .opacity
                         .map_or(EntityTransparency::ByLayer, |opacity| {
                             EntityTransparency::Explicit(opacity)
@@ -245,17 +318,33 @@ impl Importer for SkpImporter {
             Diagnostic {
                 object: None,
                 code: DIAG_PREVIEW_GEOMETRY.into(),
-                message: "SketchUp preview: triangles, instance transforms, tags, materials and \
-                          front-face base-colour textures are read; edges, back-face textures, \
-                          scenes, sections and annotations are not. Not a measurement source."
+                message: "SketchUp preview: triangles, real boundary/standalone edges, instance \
+                          transforms, tags, materials and front-face base-colour textures are \
+                          read as display geometry; back-face textures, scenes, sections, \
+                          annotations and any exact B-rep are not. Not a measurement source."
                     .into(),
             },
             Some(
-                "SketchUp preview geometry: triangle meshes only, no edges, scenes or measurement \
-                 semantics"
+                "SketchUp preview geometry: display meshes and edges only, no exact B-rep, scenes \
+                 or measurement semantics"
                     .into(),
             ),
         );
+        if edge_only {
+            import.record(
+                Diagnostic {
+                    object: None,
+                    code: DIAG_EDGES_ONLY.into(),
+                    message: format!(
+                        "the visible geometry is edges only ({} stored segment(s) in {} wire \
+                         group(s)); it is imported as Partial wire bodies, not as an empty \
+                         document.",
+                        stats.edges.emitted, wire_groups
+                    ),
+                },
+                None,
+            );
+        }
         if ceiling == SupportStatus::Unverified {
             import.record(
                 Diagnostic {
@@ -310,6 +399,29 @@ impl Importer for SkpImporter {
             report,
             vendor_records: Vec::new(),
         })
+    }
+}
+
+/// The display-only body ADR-0049 inserts for a group with real boundary edges
+/// (`BodyKind::Unknown`) or for standalone wire edges (`BodyKind::Wire`).
+fn preview_body(mesh: Mesh, edges: Vec<Vec<Point3>>, kind: BodyKind) -> Body3d {
+    let reason = if kind == BodyKind::Wire {
+        PREVIEW_WIRE_EXACT_REASON
+    } else {
+        PREVIEW_EXACT_REASON
+    };
+    Body3d {
+        kind,
+        exact: BodyExact::Unavailable {
+            reason: reason.into(),
+        },
+        display: BodyDisplay {
+            mesh,
+            edges,
+            tolerance: None,
+            precision: Precision::Unknown,
+            completeness: Completeness::Partial(vec![PREVIEW_BODY_REASON.into()]),
+        },
     }
 }
 
@@ -407,14 +519,21 @@ fn record_document(import: &mut MeshImport, stats: &SkpStats) {
             code: DIAG_DOCUMENT.into(),
             message: format!(
                 "{} run(s), {} placed, {} scene node(s), {} face(s) emitted ({} textured), {} \
-                 edge(s) not importable, {} material(s), {} tag(s) ({} textured), {} textured \
-                 group(s)",
+                 edge record(s) with {} stored segment(s) ({} face boundary, {} standalone wire, \
+                 {} skipped, {} stored on a preview body, {} drawn by a mesh's derived boundary), \
+                 {} material(s), {} tag(s) ({} textured), {} textured group(s)",
                 stats.runs,
                 stats.placed_runs,
                 stats.nodes,
                 stats.faces_emitted,
                 stats.textured_faces,
-                stats.edges_not_imported,
+                stats.edges.records,
+                stats.edges.emitted,
+                stats.edges.boundary,
+                stats.edges.wire,
+                stats.edges.skipped(),
+                stats.edges.covered_by_body,
+                stats.edges.covered_by_mesh,
                 stats.materials,
                 stats.layers,
                 stats.textured_materials,
@@ -439,6 +558,9 @@ fn record_document(import: &mut MeshImport, stats: &SkpStats) {
         + stats.layer_instances_pruned
         + stats.hidden_faces_skipped
         + stats.invisible_layer_faces_skipped
+        + stats.edges.hidden_skipped
+        + stats.edges.soft_skipped
+        + stats.edges.invisible_layer_skipped
         > 0
     {
         import.record(
@@ -447,14 +569,110 @@ fn record_document(import: &mut MeshImport, stats: &SkpStats) {
                 code: DIAG_HIDDEN_PRUNED.into(),
                 message: format!(
                     "WYSIWYG pruning: {} hidden instance(s), {} instance(s) on invisible tags, \
-                     {} hidden face(s), {} face(s) on invisible tags",
+                     {} hidden face(s), {} face(s) on invisible tags, {} hidden edge(s), {} soft \
+                     edge(s), {} edge(s) on invisible tags",
                     stats.hidden_instances_pruned,
                     stats.layer_instances_pruned,
                     stats.hidden_faces_skipped,
-                    stats.invisible_layer_faces_skipped
+                    stats.invisible_layer_faces_skipped,
+                    stats.edges.hidden_skipped,
+                    stats.edges.soft_skipped,
+                    stats.edges.invisible_layer_skipped
                 ),
             },
             None,
+        );
+    }
+}
+
+/// Edge records: what was stored, what the flags mean, and what is not modelled.
+fn record_edges(import: &mut MeshImport, stats: &SkpStats) {
+    let edges = &stats.edges;
+    if edges.records == 0 {
+        return;
+    }
+    // A plain visible record has no story to tell: the note is emitted only when
+    // a record really carried a flag this preview cannot model, or when malformed
+    // records were dropped (zero-length/collapsed and unresolved-index). The
+    // document totals stay in `import.skp.document`; this note explains them.
+    if edges.flag_records > 0 || edges.zero_length_skipped > 0 || edges.index_skipped > 0 {
+        let mut message = if edges.flag_records > 0 {
+            format!(
+                "{} of {} edge record(s) carry a flag or semantic this preview does not \
+                 model: soft/hidden/invisible-tag edges are pruned ({} pruned here); `smooth` \
+                 edges keep no smoothed normals; a per-edge material selects the wire group \
+                 colour only (a face-boundary edge keeps its group's colour); edge layer \
+                 colour and cast/receive-shadow flags are not carried.",
+                edges.flag_records,
+                edges.records,
+                edges.hidden_skipped + edges.soft_skipped + edges.invisible_layer_skipped,
+            )
+        } else {
+            "Malformed edge records are dropped, not approximated.".to_string()
+        };
+        message.push_str(&format!(
+            " {} zero-length or collapsed and {} unresolved-index record(s) are dropped.",
+            edges.zero_length_skipped, edges.index_skipped
+        ));
+        import.record(
+            Diagnostic {
+                object: None,
+                code: DIAG_EDGE_FLAGS_NOT_MODELED.into(),
+                message,
+            },
+            None,
+        );
+    }
+    if edges.curves_flattened > 0 {
+        import.record(
+            Diagnostic {
+                object: None,
+                code: DIAG_EDGE_CURVES_FLATTENED.into(),
+                message: format!(
+                    "{} stored edge segment(s) belong to a SketchUp curve; each is stored as the \
+                     chord between its two endpoints, not as an arc.",
+                    edges.curves_flattened
+                ),
+            },
+            None,
+        );
+    }
+    if edges.groups_without_records > 0 {
+        import.record(
+            Diagnostic {
+                object: None,
+                code: DIAG_GROUPS_WITHOUT_EDGE_RECORDS.into(),
+                message: format!(
+                    "{} material group(s) kept the plain mesh carrier because {} visible face-ring \
+                     segment(s) have no MeshEdge record; their wireframe is the triangulated \
+                     surface boundary (ADR-0045), not the source's own edges.",
+                    edges.groups_without_records, edges.unrecorded_boundary_segments
+                ),
+            },
+            None,
+        );
+    }
+    if edges.groups_empty_boundary > 0 {
+        // Complete records, empty visible set: the group fell back to the mesh
+        // carrier. That is a real loss of the source's edges, not a silent
+        // degradation, so it is named and marks the import Partial.
+        import.record(
+            Diagnostic {
+                object: None,
+                code: DIAG_EDGES_HIDDEN_FALLBACK.into(),
+                message: format!(
+                    "{} material group(s) had a complete MeshEdge record set but every boundary \
+                     record was hidden, soft or on an invisible tag, so they kept the plain mesh \
+                     carrier; their wireframe is the triangulated surface boundary (ADR-0045), \
+                     not the source's own hidden edges.",
+                    edges.groups_empty_boundary
+                ),
+            },
+            Some(
+                "some SketchUp groups fell back to the mesh carrier because every boundary \
+                 edge record was hidden, soft or on an invisible tag"
+                    .into(),
+            ),
         );
     }
 }

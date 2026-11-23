@@ -10,7 +10,7 @@
 //! This helper intentionally knows nothing about a file format. It never
 //! invents units, colours or completeness: the caller supplies every value.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use cad_db::{
@@ -18,8 +18,8 @@ use cad_db::{
     DrawingDatabaseBuilder, EntityColor, EntityRenderAttributes, Layer, LayerAttributes,
 };
 use cad_domain::{
-    CadError, CadResult, Completeness, Diagnostic, EntityCapability, EntityId, LayerId, Mesh,
-    ObjectId, Revision, SemanticGeometry, SpaceId, SupportStatus,
+    Body3d, CadError, CadResult, Completeness, Diagnostic, EntityCapability, EntityId, LayerId,
+    Mesh, ObjectId, Revision, SemanticGeometry, SpaceId, SupportStatus,
 };
 
 use crate::{ImportLimits, ImportRequest};
@@ -76,6 +76,15 @@ fn texture_key(bytes: &[u8], extension: &str) -> String {
 pub struct MeshImport {
     builder: DrawingDatabaseBuilder,
     type_key: String,
+    /// Every entity type key this import actually inserted, in sorted order.
+    ///
+    /// Starts empty and gains a key only when [`Self::insert_geometry`] stores a
+    /// row, so a single-key importer that inserts one entity reports exactly one
+    /// capability row while an import that inserts nothing reports none (no
+    /// phantom row for a carrier it never used). A body-carrying importer that
+    /// names per-entity keys through [`Self::push_body_with_attributes`] reports
+    /// one row per used key with the same statuses.
+    type_keys: BTreeSet<String>,
     diagnostics: Vec<Diagnostic>,
     reasons: Vec<String>,
     inserted: usize,
@@ -117,9 +126,11 @@ impl MeshImport {
             visible: true,
         })?;
         builder.set_layer_attributes(layer, LayerAttributes::default())?;
+        let type_key = type_key.into();
         Ok(MeshImport {
             builder,
-            type_key: type_key.into(),
+            type_keys: BTreeSet::new(),
+            type_key,
             diagnostics: Vec::new(),
             reasons: Vec::new(),
             inserted: 0,
@@ -256,18 +267,73 @@ impl MeshImport {
                 "refusing to insert a triangle-less mesh entity".into(),
             ));
         }
-        let geometry = SemanticGeometry::Mesh(mesh);
-        // The shared writer enforces the `cad-db` mesh invariants (finite
-        // vertices/normals, in-range non-degenerate triangles, colour length).
-        // A format adapter cannot publish an inconsistent mesh through here.
+        let type_key = self.type_key.clone();
+        self.insert_geometry(object, SemanticGeometry::Mesh(mesh), &type_key, attributes)
+    }
+
+    /// Insert one validated [`Body3d`] as a model-space entity on layer `0`,
+    /// under the entity type key the source class maps to.
+    ///
+    /// A body is drawable when it has a display mesh **or** display edges: a
+    /// `BodyKind::Wire` body legitimately has no triangles, and an edge-only
+    /// surface body is the honest display of a body whose faces could not be
+    /// tessellated. A body with neither is refused by name
+    /// (`no drawable geometry`) instead of being stored as an invisible row.
+    ///
+    /// The `cad-db` body invariants (edge polyline length/finiteness, mesh
+    /// validity, solid/wire topology rules) are enforced by [`validate_geometry`],
+    /// so a format adapter cannot publish an inconsistent body through here.
+    pub fn push_body_with_attributes(
+        &mut self,
+        object: ObjectId,
+        body: Body3d,
+        type_key: &str,
+        attributes: EntityRenderAttributes,
+    ) -> CadResult<EntityId> {
+        if body.display.mesh.triangles.is_empty() && body.display.edges.is_empty() {
+            return Err(CadError::InvalidInput(format!(
+                "import.body.no_geometry: refusing to insert a body '{type_key}' with \
+                 no drawable geometry (no display triangles and no display edges)"
+            )));
+        }
+        self.insert_geometry(
+            object,
+            SemanticGeometry::Body3d(Box::new(body)),
+            type_key,
+            attributes,
+        )
+    }
+
+    /// Default-attribute shorthand for [`Self::push_body_with_attributes`].
+    pub fn push_body(
+        &mut self,
+        object: ObjectId,
+        body: Body3d,
+        type_key: &str,
+    ) -> CadResult<EntityId> {
+        self.push_body_with_attributes(object, body, type_key, EntityRenderAttributes::default())
+    }
+
+    /// Shared insert path: validate, store, set attributes, account for the row.
+    fn insert_geometry(
+        &mut self,
+        object: ObjectId,
+        geometry: SemanticGeometry,
+        type_key: &str,
+        attributes: EntityRenderAttributes,
+    ) -> CadResult<EntityId> {
+        // The shared writer enforces the `cad-db` geometry invariants (finite
+        // vertices/normals, in-range non-degenerate triangles, colour length, body
+        // edge polylines, body topology rules). A format adapter cannot publish
+        // inconsistent geometry through here.
         validate_geometry(&geometry)?;
         let entity_id = EntityId(object.0);
         self.builder.insert_entity(DbEntity {
             object: DbObject {
                 id: object,
-                type_key: self.type_key.clone(),
+                type_key: type_key.to_string(),
                 revision: Revision(0),
-                // Mesh formats have no CAD handle; do not invent one.
+                // Mesh/body formats have no CAD handle; do not invent one.
                 source_handle: None,
             },
             id: entity_id,
@@ -279,6 +345,7 @@ impl MeshImport {
         self.builder
             .set_entity_render_attributes(entity_id, attributes)?;
         self.inserted += 1;
+        self.type_keys.insert(type_key.to_string());
         Ok(entity_id)
     }
 
@@ -412,14 +479,23 @@ impl MeshImport {
         };
         Ok(MeshImportOutcome {
             database,
-            capabilities: vec![EntityCapability {
-                type_key: self.type_key,
-                read: SupportStatus::Verified,
-                semantic,
-                render: SupportStatus::Verified,
-                pick: SupportStatus::Verified,
-                measure: SupportStatus::Unsupported,
-            }],
+            // One row per entity type key actually inserted, all with the same
+            // statuses: a body/mesh is drawable and pickable but is not a MEASURE
+            // target, matching the DWG/DXF mesh mapping. A single-key importer
+            // that inserted geometry still reports exactly one row; an import
+            // that inserted nothing reports none.
+            capabilities: self
+                .type_keys
+                .into_iter()
+                .map(|type_key| EntityCapability {
+                    type_key,
+                    read: SupportStatus::Verified,
+                    semantic,
+                    render: SupportStatus::Verified,
+                    pick: SupportStatus::Verified,
+                    measure: SupportStatus::Unsupported,
+                })
+                .collect(),
             completeness,
             diagnostics: self.diagnostics,
         })
@@ -427,326 +503,5 @@ impl MeshImport {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use cad_db::EntityTransparency;
-    use cad_domain::{DatabaseId, DocumentId, Point3};
-
-    fn request() -> ImportRequest {
-        ImportRequest {
-            document: DocumentId(1),
-            database: DatabaseId(1),
-            bytes: std::sync::Arc::from(Vec::new().into_boxed_slice()),
-            limits: crate::ImportLimits::default(),
-            generation: 0,
-            xref: None,
-        }
-    }
-
-    fn triangle() -> Mesh {
-        Mesh {
-            vertices: vec![
-                Point3 {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 0.0,
-                },
-                Point3 {
-                    x: 1.0,
-                    y: 0.0,
-                    z: 0.0,
-                },
-                Point3 {
-                    x: 0.0,
-                    y: 1.0,
-                    z: 0.0,
-                },
-            ],
-            triangles: vec![[0, 1, 2]],
-            ..Mesh::default()
-        }
-    }
-
-    #[test]
-    fn push_mesh_keeps_the_documented_bylayer_defaults() {
-        let mut import = MeshImport::new(&request(), "TestMesh").unwrap();
-        let object = import.reserve_object().unwrap();
-        let id = import
-            .push_mesh(object, triangle(), EntityColor::Explicit([1, 2, 3]))
-            .unwrap();
-        let outcome = import.finish().unwrap();
-        let attributes = outcome.database.entity_render_attributes(id);
-        assert_eq!(attributes.color, EntityColor::Explicit([1, 2, 3]));
-        assert_eq!(attributes.transparency, EntityTransparency::ByLayer);
-    }
-
-    #[test]
-    fn push_mesh_with_attributes_stores_an_explicit_opacity() {
-        let mut import = MeshImport::new(&request(), "TestMesh").unwrap();
-        let object = import.reserve_object().unwrap();
-        let id = import
-            .push_mesh_with_attributes(
-                object,
-                triangle(),
-                EntityRenderAttributes {
-                    clip: None,
-                    color: EntityColor::Explicit([10, 20, 30]),
-                    transparency: EntityTransparency::Explicit(0.5),
-                    ..Default::default()
-                },
-            )
-            .unwrap();
-        let outcome = import.finish().unwrap();
-        let attributes = outcome.database.entity_render_attributes(id);
-        assert_eq!(attributes.color, EntityColor::Explicit([10, 20, 30]));
-        assert_eq!(attributes.transparency, EntityTransparency::Explicit(0.5));
-        // Nothing else is invented: the layer keeps its opaque, ACI 7 defaults.
-        assert_eq!(outcome.database.entity_count(), 1);
-    }
-
-    // ------------------------------------------------------------ BIM ---
-
-    fn bim(connector: &str, id: &str) -> cad_db::BimElement {
-        cad_db::BimElement {
-            category: Some("IfcWall".into()),
-            name: None,
-            source: cad_db::BimSource {
-                connector: connector.into(),
-                document_id: Some("doc".into()),
-                id: Some(id.into()),
-                native_id: None,
-            },
-            level: None,
-            element_type: None,
-            material: None,
-            psets: Vec::new(),
-            evidence: cad_db::BimEvidence::Declared,
-        }
-    }
-
-    #[test]
-    fn set_entity_bim_reaches_the_finished_database() {
-        let mut import = MeshImport::new(&request(), "TestMesh").unwrap();
-        let object = import.reserve_object().unwrap();
-        let id = import
-            .push_mesh(object, triangle(), EntityColor::ByLayer)
-            .unwrap();
-        import.set_entity_bim(id, bim("ifc", "guid")).unwrap();
-        assert_eq!(import.bim_element_count(), 1);
-        let outcome = import.finish().unwrap();
-        let stored = outcome.database.bim_element(id).expect("BIM block stored");
-        assert_eq!(stored.source.id.as_deref(), Some("guid"));
-    }
-
-    #[test]
-    fn set_entity_bim_for_an_unknown_entity_reports_and_fails() {
-        let mut import = MeshImport::new(&request(), "TestMesh").unwrap();
-        let error = import
-            .set_entity_bim(EntityId(99), bim("ifc", "guid"))
-            .expect_err("no entity row owns id 99");
-        assert!(error.to_string().contains("ymodel.bim.invalid"), "{error}");
-        assert_eq!(import.bim_element_count(), 0, "nothing was stored");
-        let outcome = import.finish().unwrap();
-        assert!(outcome.database.bim_element(EntityId(99)).is_none());
-        assert!(matches!(
-            outcome.completeness,
-            Completeness::Partial(ref reasons)
-                if reasons.iter().any(|reason| reason.contains("BIM block was refused"))
-        ));
-        assert!(outcome
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == DIAG_BIM_ENTITY_REFUSED));
-    }
-
-    // ------------------------------------------------------------ textures ---
-
-    fn png(tail: u8) -> Vec<u8> {
-        let mut bytes = PNG_MAGIC.to_vec();
-        bytes.extend_from_slice(&[tail, 0x1a, 0x2b, 0x3c]);
-        bytes
-    }
-
-    fn jpeg() -> Vec<u8> {
-        let mut bytes = JPEG_MAGIC.to_vec();
-        bytes.extend_from_slice(&[0xe0, 0x00, 0x10, 0x4a]);
-        bytes
-    }
-
-    fn request_with(limits: ImportLimits) -> ImportRequest {
-        ImportRequest {
-            limits,
-            ..request()
-        }
-    }
-
-    fn is_texture_key(key: &str, extension: &str) -> bool {
-        let Some(stem) = key.strip_suffix(extension) else {
-            return false;
-        };
-        stem.len() == 32
-            && stem
-                .chars()
-                .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
-    }
-
-    #[test]
-    fn a_png_and_a_jpeg_get_deterministic_content_addressed_keys() {
-        let mut import = MeshImport::new(&request(), "TestMesh").unwrap();
-        let png_key = import.register_texture(&png(0x01)).expect("png");
-        let jpeg_key = import.register_texture(&jpeg()).expect("jpeg");
-        assert!(is_texture_key(&png_key, ".png"), "{png_key}");
-        assert!(is_texture_key(&jpeg_key, ".jpg"), "{jpeg_key}");
-        assert_ne!(png_key, jpeg_key, "different bytes, different keys");
-
-        // Same bytes, fresh import: the key is a function of the bytes alone, so a
-        // saved document stays addressable across sessions.
-        let mut second = MeshImport::new(&request(), "TestMesh").unwrap();
-        assert_eq!(second.register_texture(&png(0x01)).expect("png"), png_key);
-        assert_ne!(
-            second.register_texture(&png(0x02)).expect("other png"),
-            png_key
-        );
-    }
-
-    #[test]
-    fn a_non_image_is_refused_by_name() {
-        let mut import = MeshImport::new(&request(), "TestMesh").unwrap();
-        for bytes in [
-            Vec::new(),
-            b"not an image".to_vec(),
-            // A truncated PNG signature must not pass the sniff.
-            PNG_MAGIC[..7].to_vec(),
-            // A two-byte JPEG prefix is not a JPEG either.
-            JPEG_MAGIC[..2].to_vec(),
-        ] {
-            let error = import.register_texture(&bytes).expect_err("not a PNG/JPEG");
-            assert!(
-                error
-                    .to_string()
-                    .contains("import.texture.unsupported_format"),
-                "{error}"
-            );
-        }
-        assert_eq!(import.textures().count(), 0, "a refusal changes no state");
-    }
-
-    #[test]
-    fn identical_bytes_are_stored_once() {
-        let mut import = MeshImport::new(&request(), "TestMesh").unwrap();
-        let first = import.register_texture(&png(0x07)).expect("first");
-        let second = import.register_texture(&png(0x07)).expect("second");
-        assert_eq!(first, second);
-        assert_eq!(import.textures().count(), 1, "one copy, one key");
-        // The second registration must not consume budget a second time: the whole
-        // document budget is already spent by the one copy.
-        let mut tight = MeshImport::new(
-            &request_with(ImportLimits {
-                max_texture_bytes: png(0x07).len(),
-                max_total_texture_bytes: png(0x07).len(),
-                max_textures: 1,
-                ..ImportLimits::default()
-            }),
-            "TestMesh",
-        )
-        .unwrap();
-        assert!(tight.register_texture(&png(0x07)).is_ok());
-        assert!(
-            tight.register_texture(&png(0x07)).is_ok(),
-            "a duplicate is not charged twice"
-        );
-    }
-
-    #[test]
-    fn each_texture_budget_is_a_named_refusal_that_keeps_state() {
-        // Per-image budget.
-        let mut import = MeshImport::new(
-            &request_with(ImportLimits {
-                max_texture_bytes: 4,
-                ..ImportLimits::default()
-            }),
-            "TestMesh",
-        )
-        .unwrap();
-        let error = import.register_texture(&png(0x01)).expect_err("too large");
-        assert!(
-            error.to_string().contains("import.texture.too_large"),
-            "{error}"
-        );
-        assert_eq!(import.textures().count(), 0);
-
-        // Per-document total budget: each image fits, the sum does not.
-        let one = png(0x01).len();
-        let mut import = MeshImport::new(
-            &request_with(ImportLimits {
-                max_total_texture_bytes: one + 1,
-                ..ImportLimits::default()
-            }),
-            "TestMesh",
-        )
-        .unwrap();
-        import.register_texture(&png(0x01)).expect("first fits");
-        let error = import.register_texture(&png(0x02)).expect_err("budget");
-        assert!(
-            error.to_string().contains("import.texture.budget_exceeded"),
-            "{error}"
-        );
-        assert_eq!(import.textures().count(), 1, "the first texture stays");
-
-        // Texture count budget.
-        let mut import = MeshImport::new(
-            &request_with(ImportLimits {
-                max_textures: 1,
-                ..ImportLimits::default()
-            }),
-            "TestMesh",
-        )
-        .unwrap();
-        import.register_texture(&png(0x01)).expect("first");
-        let error = import.register_texture(&png(0x02)).expect_err("too many");
-        assert!(
-            error.to_string().contains("import.texture.too_many"),
-            "{error}"
-        );
-        assert_eq!(import.textures().count(), 1);
-    }
-
-    #[test]
-    fn finish_carries_the_bytes_into_the_database() {
-        let mut import = MeshImport::new(&request(), "TestMesh").unwrap();
-        let key = import.register_texture(&png(0x01)).expect("png");
-        // Registered but referenced by no mesh: the importer decided the asset
-        // belongs to the document, so it is still carried.
-        let outcome = import.finish().expect("finish");
-        assert_eq!(
-            outcome.database.texture(&key).map(|bytes| &bytes[..]),
-            Some(&png(0x01)[..])
-        );
-        assert_eq!(outcome.database.textures().count(), 1);
-    }
-
-    #[test]
-    fn a_textured_mesh_reaches_the_finished_database() {
-        let mut import = MeshImport::new(&request(), "TestMesh").unwrap();
-        let key = import.register_texture(&png(0x01)).expect("png");
-        let object = import.reserve_object().unwrap();
-        let mut mesh = triangle();
-        mesh.uvs = vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]];
-        mesh.texture = Some(key.clone());
-        import
-            .push_mesh(object, mesh, EntityColor::Explicit([1, 2, 3]))
-            .expect("a textured mesh validates");
-        let outcome = import.finish().expect("finish");
-        let entity = outcome
-            .database
-            .entities()
-            .find(|entity| entity.id == EntityId(1))
-            .expect("the mesh row");
-        let SemanticGeometry::Mesh(mesh) = &entity.geometry else {
-            panic!("expected a mesh");
-        };
-        assert_eq!(mesh.texture.as_deref(), Some(key.as_str()));
-        assert_eq!(mesh.uvs.len(), 3);
-        assert!(outcome.database.texture(&key).is_some());
-    }
-}
+#[path = "mesh_import/tests.rs"]
+mod tests;

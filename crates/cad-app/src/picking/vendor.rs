@@ -139,7 +139,12 @@ fn collect_items<'a>(
         None => (
             Cow::Borrowed(geometry),
             match geometry {
-                SemanticGeometry::Mesh(_) => GeometrySource::DirectMesh,
+                // A mesh and a display body both carry their own triangles (and
+                // a body may carry display edges), so the precise stage reads
+                // them as direct geometry, not as an analytic proxy.
+                SemanticGeometry::Mesh(_) | SemanticGeometry::Body3d(_) => {
+                    GeometrySource::DirectMesh
+                }
                 _ => GeometrySource::Analytic,
             },
         ),

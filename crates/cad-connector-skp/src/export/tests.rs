@@ -22,8 +22,8 @@ use cad_domain::{
 
 use crate::export::{
     metres_per_source_unit, COLORS_DROPPED, DEGENERATE_TRIANGLE, LAYER_MATERIAL_FLATTENED,
-    LIMITS_EXCEEDED, MISMATCHED_DESCRIPTOR, NORMALS_DROPPED, TEXTURE_NOT_WRITTEN, UNITS_UNKNOWN,
-    UNSUPPORTED_GEOMETRY,
+    LIMITS_EXCEEDED, MISMATCHED_DESCRIPTOR, NORMALS_DROPPED, STORED_EDGES_NOT_WRITTEN,
+    TEXTURE_NOT_WRITTEN, UNITS_UNKNOWN, UNSUPPORTED_GEOMETRY, WIRE_BODY_NOT_WRITTEN,
 };
 
 const SKP_MAGIC: [u8; 3] = [0xFF, 0xFE, 0xFF];
@@ -127,13 +127,24 @@ fn codes(output: &ExportOutput) -> Vec<&str> {
         .collect()
 }
 
+/// The mesh an entity displays, whichever carrier the importer chose.
+///
+/// The writer always emits the face ring's `MeshEdge`s, so a read-back triangle
+/// is a `Body3d` display body (ADR-0049), not a bare `Mesh`; the export oracle
+/// must look at the display geometry in both cases.
+fn display_mesh(entity: &DbEntity) -> Option<&Mesh> {
+    match &entity.geometry {
+        SemanticGeometry::Mesh(mesh) => Some(mesh),
+        SemanticGeometry::Body3d(body) => Some(&body.display.mesh),
+        _ => None,
+    }
+}
+
 fn mesh_triangles(database: &DrawingDatabase) -> usize {
     database
         .entities()
-        .filter_map(|entity| match &entity.geometry {
-            SemanticGeometry::Mesh(mesh) => Some(mesh.triangles.len()),
-            _ => None,
-        })
+        .filter_map(display_mesh)
+        .map(|mesh| mesh.triangles.len())
         .sum()
 }
 
@@ -189,7 +200,7 @@ fn the_pinned_reader_reads_the_written_triangle_back() {
     let entities = imported
         .database
         .entities()
-        .filter(|entity| matches!(entity.geometry, SemanticGeometry::Mesh(_)))
+        .filter(|entity| display_mesh(entity).is_some_and(|mesh| !mesh.triangles.is_empty()))
         .count();
     assert!(entities >= 1, "the written triangles must read back");
     assert_eq!(mesh_triangles(&imported.database), 1);
@@ -209,10 +220,7 @@ fn the_source_unit_scale_survives_the_round_trip() {
     let mesh = imported
         .database
         .entities()
-        .find_map(|entity| match &entity.geometry {
-            SemanticGeometry::Mesh(mesh) => Some(mesh),
-            _ => None,
-        })
+        .find_map(display_mesh)
         .expect("one mesh entity");
     let mut xs: Vec<f64> = mesh.vertices.iter().map(|p| p.x).collect();
     xs.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -457,4 +465,136 @@ fn a_mismatched_format_id_is_refused_by_name() {
     let message = unsupported(exporter.export("stl", &job).unwrap_err());
     assert!(message.starts_with(MISMATCHED_DESCRIPTOR), "{message}");
     assert!(message.contains("\"stl\""), "{message}");
+}
+
+// ---- Stored edges and wire bodies (ADR-0049 §2) ---------------------------
+
+fn one_edge() -> Vec<Vec<Point3>> {
+    vec![vec![point(0.0, 0.0, 0.0), point(1.0, 0.0, 0.0)]]
+}
+
+fn display_body(kind: BodyKind, mesh: Mesh, edges: Vec<Vec<Point3>>) -> Body3d {
+    Body3d {
+        kind,
+        exact: BodyExact::Unavailable {
+            reason: "synthetic".into(),
+        },
+        display: BodyDisplay {
+            mesh,
+            edges,
+            tolerance: None,
+            precision: Precision::Unknown,
+            completeness: Completeness::Partial(vec!["synthetic".into()]),
+        },
+    }
+}
+
+#[test]
+fn a_body_with_stored_edges_writes_its_triangles_and_reports_the_edges() {
+    let body = display_body(BodyKind::Unknown, triangle(), one_edge());
+    let database = database(vec![(SemanticGeometry::Body3d(Box::new(body)), LayerId(0))]);
+    let output = export(&database, Some(&meter())).unwrap();
+
+    assert_eq!(output.report.counts.exact, 1, "the triangles are written");
+    assert_eq!(output.report.counts.dropped, 0);
+    assert_eq!(
+        output.report.counts.converted, 1,
+        "one affected body counts one conversion"
+    );
+    assert!(
+        matches!(output.report.completeness, Completeness::Partial(_)),
+        "triangles written, edges not: Partial, never Complete"
+    );
+    let entry = output
+        .report
+        .entries
+        .iter()
+        .find(|entry| entry.code == STORED_EDGES_NOT_WRITTEN)
+        .expect("the dropped edges are named");
+    assert_eq!(entry.status, cad_domain::SupportStatus::Partial);
+    assert_eq!(entry.object, Some(ObjectId(1)));
+    assert!(
+        entry.message.contains("does not copy the stored edge set")
+            && entry.message.contains("regenerates"),
+        "the message must say the set is not copied and triangle boundaries are regenerated: {}",
+        entry.message
+    );
+    // The written container really has the triangle.
+    assert!(mesh_triangles(&import(output.bytes).unwrap().database) >= 1);
+}
+
+/// A stored edge that coincides with a triangle boundary is not copied as such,
+/// but the writer regenerates it from the written triangle — so the round trip
+/// really carries that boundary edge.
+#[test]
+fn a_stored_triangle_boundary_edge_is_regenerated_in_the_written_container() {
+    let body = display_body(BodyKind::Unknown, triangle(), one_edge());
+    let database = database(vec![(SemanticGeometry::Body3d(Box::new(body)), LayerId(0))]);
+    let output = export(&database, Some(&meter())).unwrap();
+
+    let parsed = skpwright::Model::parse(&output.bytes).expect("the written container parses");
+    assert_eq!(parsed.geometry.len(), 1);
+    let written: Vec<(u32, u32)> = parsed.geometry[0]
+        .mesh
+        .edges
+        .iter()
+        .map(|edge| (edge.v0.min(edge.v1), edge.v0.max(edge.v1)))
+        .collect();
+    for boundary in [(0, 1), (1, 2), (0, 2)] {
+        assert!(
+            written.contains(&boundary),
+            "the written triangle boundary {boundary:?} is missing from {written:?}"
+        );
+    }
+    // The stored edge set itself is not copied: the report still says so.
+    assert_eq!(codes(&output), [STORED_EDGES_NOT_WRITTEN]);
+}
+
+/// `converted` counts affected entities: two bodies with stored edges are two
+/// conversions, not one boolean.
+#[test]
+fn each_affected_body_counts_one_conversion() {
+    let first = display_body(BodyKind::Unknown, triangle(), one_edge());
+    let second = display_body(BodyKind::Unknown, triangle(), one_edge());
+    let database = database(vec![
+        (SemanticGeometry::Body3d(Box::new(first)), LayerId(0)),
+        (SemanticGeometry::Body3d(Box::new(second)), LayerId(0)),
+    ]);
+    let output = export(&database, Some(&meter())).unwrap();
+    assert_eq!(output.report.counts.exact, 2);
+    assert_eq!(output.report.counts.converted, 2);
+    assert_eq!(
+        output
+            .report
+            .entries
+            .iter()
+            .filter(|entry| entry.code == STORED_EDGES_NOT_WRITTEN)
+            .count(),
+        2
+    );
+    assert!(matches!(
+        output.report.completeness,
+        Completeness::Partial(_)
+    ));
+}
+
+#[test]
+fn a_wire_only_body_is_dropped_by_name_not_written_as_empty() {
+    let body = display_body(BodyKind::Wire, Mesh::default(), one_edge());
+    let database = database(vec![(SemanticGeometry::Body3d(Box::new(body)), LayerId(0))]);
+    // Only a wire body: it is accounted for as dropped (nothing of it is
+    // written), and the report is `Missing` rather than an empty success.
+    let output = export(&database, Some(&meter())).unwrap();
+    assert_eq!(output.report.counts.dropped, 1);
+    assert!(matches!(
+        output.report.completeness,
+        Completeness::Missing(_)
+    ));
+    let entry = output
+        .report
+        .entries
+        .iter()
+        .find(|entry| entry.code == WIRE_BODY_NOT_WRITTEN)
+        .expect("a wire body is named, not silently skipped");
+    assert_eq!(entry.status, cad_domain::SupportStatus::Unsupported);
 }

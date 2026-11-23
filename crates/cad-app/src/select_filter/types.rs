@@ -63,9 +63,16 @@ pub fn type_matches(entity: &DbEntity, value: &str) -> bool {
 ///
 /// The mapping is from the entity's own `type_key` to AutoCAD's type name (the
 /// geometry variant cannot tell a solid from a surface or a planar REGION); an
-/// unknown/vendor body class answers only the neutral `BODY` alias.
+/// unknown/vendor body class answers only the neutral `BODY` alias. The
+/// SketchUp preview mesh class is the exception: it carries triangles, so it
+/// answers `MESH` as well as `BODY` (ADR-0049 D1).
 fn body_type_matches(type_key: &str, value: &str) -> bool {
     let alias = match () {
+        // A SketchUp preview group is a display body whose source class is the
+        // neutral mesh it carries (ADR-0049 D1): it must keep answering
+        // `TYPE=MESH`, or body-ified SKP groups silently vanish from that
+        // filter. Wire-only preview bodies (`SkpPreviewEdges`) answer `BODY`.
+        _ if type_key.eq_ignore_ascii_case("SkpPreviewMesh") => "MESH",
         _ if type_key.eq_ignore_ascii_case("AcDb3dSolid") => "SOLID",
         _ if type_key.eq_ignore_ascii_case("AcDbSurface") => "SURFACE",
         _ if type_key.eq_ignore_ascii_case("AcDbRegion") => "REGION",

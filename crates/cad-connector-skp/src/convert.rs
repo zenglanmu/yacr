@@ -18,19 +18,33 @@
 //!   ([`cad_domain::hatch::fill_rings`]). It validates its output area against
 //!   the ring nesting, so a face whose rings are degenerate is **skipped and
 //!   reported**, never filled with an invented approximation.
+//!
+//! Real `MeshEdge` records are carried alongside (ADR-0049): a material group
+//! whose visible face rings are all backed by records becomes a
+//! [`cad_domain::Body3d`] body with its own boundary edges, and the remaining
+//! visible records become standalone wire bodies. [`crate::edges`] owns that
+//! filtering and indexing; this module only decides the carrier.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use cad_connector_core::{ImportLimits, MeshImport};
 use cad_domain::hatch::{fill_rings, triangulate};
 use cad_domain::{CadError, Mesh, Point3};
 
+use crate::edges::{face_ring_pairs, Boundary, EdgeStats, RunEdges, VertexPair};
 use crate::texture::{self, TextureSlots};
 use skpwright::UvXform;
 
 /// Maximum instance nesting depth walked. A corrupt or hostile file must not
 /// turn the scene walk into unbounded recursion.
 pub const MAX_DEPTH: usize = 64;
+
+/// Edge segments one import may emit when the caller leaves
+/// [`ImportLimits::max_mesh_edges`] unset.
+///
+/// This is the reader's own budget, never a truncation: exceeding it is
+/// `import.skp.limits_exceeded` with the real count.
+pub const DEFAULT_MAX_MESH_EDGES: usize = 2_000_000;
 
 /// Why one face produced no triangles.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,6 +61,13 @@ pub enum FaceSkip {
 #[derive(Debug, Clone)]
 pub struct PlacedMesh {
     pub mesh: Mesh,
+    /// The group's real boundary edges, in world metres (two points each).
+    ///
+    /// Empty means the group is inserted as a plain
+    /// [`cad_domain::SemanticGeometry::Mesh`]; a non-empty set means every
+    /// visible face ring of the group was backed by `MeshEdge` records and the
+    /// group is inserted as a [`cad_domain::Body3d`] body (ADR-0049).
+    pub edges: Vec<Vec<Point3>>,
     /// `None` = no material anywhere on this group (`ByLayer`).
     pub color: Option<[u8; 3]>,
     /// `Some(opacity)` only when the material is genuinely translucent.
@@ -55,6 +76,18 @@ pub struct PlacedMesh {
     pub material: u16,
     /// Triangles contributed (equal to `mesh.triangles.len()`).
     pub triangles: usize,
+}
+
+/// One standalone wire entity: visible edges no visible face boundary covers.
+#[derive(Debug, Clone)]
+pub struct PlacedEdges {
+    /// World-metre two-point polylines, deduplicated within the group.
+    pub edges: Vec<Vec<Point3>>,
+    /// `None` = the edge's effective material slot has no colour.
+    pub color: Option<[u8; 3]>,
+    pub opacity: Option<f32>,
+    /// Effective edge material slot (`0` = none).
+    pub material: u16,
 }
 
 /// What the scene walk saw. Every field is either reported as a diagnostic or
@@ -83,9 +116,9 @@ pub struct SkpStats {
     pub faces_malformed: usize,
     /// Placement nests deeper than [`MAX_DEPTH`].
     pub depth_exceeded: usize,
-    /// Edges in the placed runs (SketchUp line/curve geometry). Recorded, not
-    /// imported: this adapter publishes triangles only.
-    pub edges_not_imported: usize,
+    /// Edge records and the segments they became (ADR-0049). Every record is
+    /// either stored or in exactly one skip counter; nothing is a silent drop.
+    pub edges: EdgeStats,
     /// Materials in the model.
     pub materials: usize,
     /// Tags (layers) in the model.
@@ -115,14 +148,17 @@ pub struct SkpStats {
 /// The plottable result of a scene walk.
 #[derive(Debug, Default)]
 pub struct SkpScene {
+    /// Face/material groups (each inserted as a mesh or a body).
     pub placed: Vec<PlacedMesh>,
+    /// Standalone wire entities (edges no visible face boundary covers).
+    pub edges: Vec<PlacedEdges>,
     pub stats: SkpStats,
 }
 
 impl SkpScene {
     /// Entities this scene will insert.
     pub fn entity_count(&self) -> usize {
-        self.placed.len()
+        self.placed.len() + self.edges.len()
     }
 }
 
@@ -149,6 +185,7 @@ pub fn read_scene(
         ..SkpStats::default()
     };
     let mut placed = Vec::new();
+    let mut edges = Vec::new();
     let mut textures = TextureSlots::default();
     let layer_visible = |slot: u16| model.layer_of(slot).is_none_or(|layer| layer.visible);
 
@@ -171,6 +208,7 @@ pub fn read_scene(
             import,
             &mut textures,
             &mut placed,
+            &mut edges,
             &mut stats,
         )?;
     }
@@ -186,11 +224,16 @@ pub fn read_scene(
             import,
             &mut textures,
             &mut placed,
+            &mut edges,
             &mut stats,
         )?;
     }
 
-    Ok(SkpScene { placed, stats })
+    Ok(SkpScene {
+        placed,
+        edges,
+        stats,
+    })
 }
 
 const IDENTITY: [f64; 16] = [
@@ -208,6 +251,7 @@ fn walk(
     import: &mut MeshImport,
     textures: &mut TextureSlots,
     placed: &mut Vec<PlacedMesh>,
+    edges: &mut Vec<PlacedEdges>,
     stats: &mut SkpStats,
 ) -> cad_domain::CadResult<()> {
     if depth > MAX_DEPTH {
@@ -235,6 +279,7 @@ fn walk(
             import,
             textures,
             placed,
+            edges,
             stats,
         )?;
     }
@@ -249,6 +294,7 @@ fn walk(
             import,
             textures,
             placed,
+            edges,
             stats,
         )?;
     }
@@ -267,6 +313,7 @@ fn place_run(
     import: &mut MeshImport,
     textures: &mut TextureSlots,
     placed: &mut Vec<PlacedMesh>,
+    edges: &mut Vec<PlacedEdges>,
     stats: &mut SkpStats,
 ) -> cad_domain::CadResult<()> {
     let Some(run) = model.geometry.get(run_index) else {
@@ -283,6 +330,14 @@ fn place_run(
         .filter(|face| texture::has_textured_back(model, face))
         .count();
     let groups = group_faces(&run.mesh, inherited_material, layer_visible, stats);
+    let run_edges = RunEdges::new(&run.mesh, layer_visible, &mut stats.edges);
+    // Ring pairs a visible face boundary already accounts for, split by the
+    // carrier that draws them: a preview body stores its face-ring records, and a
+    // mesh-carrier group draws its triangulated surface boundary. Those faces'
+    // edges must not also become standalone wires, and each covered record is
+    // counted in exactly one bucket.
+    let mut covered_by_body: BTreeSet<VertexPair> = BTreeSet::new();
+    let mut covered_by_mesh: BTreeSet<VertexPair> = BTreeSet::new();
 
     for (material, faces) in groups {
         let (color, opacity) = material_style(model, material);
@@ -295,7 +350,11 @@ fn place_run(
         }
         stats.uv_unavailable += plan.uv_unavailable;
         let uv_ok = plan.key.is_some();
+        // The boundary is decided before triangulation: a group's real edges do
+        // not depend on whether its faces tessellate (ADR-0049).
+        let boundary = run_edges.boundary(&run.mesh, &faces, world);
         let mut out = GroupBuffers::default();
+        let mut meshed: BTreeSet<VertexPair> = BTreeSet::new();
         for (index, face) in faces.iter().enumerate() {
             if cancelled() {
                 return Err(CadError::Cancelled);
@@ -311,6 +370,7 @@ fn place_run(
                     if uv.is_some() {
                         stats.textured_faces += 1;
                     }
+                    meshed.extend(face_ring_pairs(face));
                 }
                 Err(FaceSkip::Malformed) => stats.faces_malformed += 1,
                 Err(FaceSkip::Untriangulable) => stats.faces_untriangulable += 1,
@@ -321,6 +381,8 @@ fn place_run(
             if plan.material_is_textured {
                 stats.untextured_textured_groups += 1;
             }
+            // No triangles anywhere in this group: its faces contribute no
+            // visible boundary, so their records stay available as wires.
             continue;
         }
         let mut mesh = Mesh {
@@ -345,16 +407,80 @@ fn place_run(
                 stats.untextured_textured_groups += 1;
             }
         }
+        let edges = match boundary {
+            Boundary::Complete { edges, curves } if !edges.is_empty() => {
+                // A body carries the group's whole ring boundary, including a
+                // face whose triangulation failed but whose edges are real.
+                covered_by_body.extend(faces.iter().flat_map(|face| face_ring_pairs(face)));
+                stats.edges.curves_flattened += curves;
+                edges
+            }
+            Boundary::Complete { .. } => {
+                // Complete records but nothing visible survived the filter: the
+                // honest carrier is the mesh (never an edge-less body).
+                stats.edges.groups_empty_boundary += 1;
+                covered_by_mesh.extend(meshed);
+                Vec::new()
+            }
+            Boundary::MissingRecords(missing) => {
+                // A ring segment is not a SketchUp edge: keep the mesh carrier
+                // and let ADR-0045 derive the wireframe from the triangles.
+                stats.edges.groups_without_records += 1;
+                stats.edges.unrecorded_boundary_segments += missing;
+                covered_by_mesh.extend(meshed);
+                Vec::new()
+            }
+        };
+        stats.edges.emitted += edges.len();
+        stats.edges.boundary += edges.len();
+        check_edge_budget(stats, limits)?;
         placed.push(PlacedMesh {
             triangles: mesh.triangles.len(),
             mesh,
+            edges,
             color,
             opacity,
             material,
         });
     }
 
-    stats.edges_not_imported += run.mesh.edges.len();
+    // Visible records no visible face boundary covers: loose line work and the
+    // edges of faces whose triangulation failed.
+    for (material, wires) in run_edges.wires(
+        &run.mesh,
+        &covered_by_body,
+        &covered_by_mesh,
+        world,
+        &mut stats.edges,
+    ) {
+        stats.edges.duplicate_skipped += wires.duplicates;
+        stats.edges.zero_length_skipped += wires.degenerate;
+        if wires.edges.is_empty() {
+            continue;
+        }
+        stats.edges.curves_flattened += wires.curves;
+        stats.edges.emitted += wires.edges.len();
+        stats.edges.wire += wires.edges.len();
+        check_edge_budget(stats, limits)?;
+        let (color, opacity) = material_style(model, material);
+        edges.push(PlacedEdges {
+            edges: wires.edges,
+            color,
+            opacity,
+            material,
+        });
+    }
+    Ok(())
+}
+
+fn check_edge_budget(stats: &SkpStats, limits: &ImportLimits) -> cad_domain::CadResult<()> {
+    let max = limits.max_mesh_edges.unwrap_or(DEFAULT_MAX_MESH_EDGES);
+    if stats.edges.emitted > max {
+        return Err(CadError::InvalidInput(format!(
+            "import.skp.limits_exceeded: {} edge segment(s) over the {max} segment budget",
+            stats.edges.emitted
+        )));
+    }
     Ok(())
 }
 
@@ -651,7 +777,7 @@ fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
 }
 
 /// Row-major 4x4 point transform (`p' = M · [p, 1]`).
-fn apply_point(m: &[f64; 16], p: [f64; 3]) -> [f64; 3] {
+pub(crate) fn apply_point(m: &[f64; 16], p: [f64; 3]) -> [f64; 3] {
     [
         m[0] * p[0] + m[1] * p[1] + m[2] * p[2] + m[3],
         m[4] * p[0] + m[5] * p[1] + m[6] * p[2] + m[7],
@@ -676,250 +802,4 @@ pub fn determinant3(m: &[f64; 16]) -> f64 {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    const IDENTITY_WORLD: [f64; 16] = [
-        1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
-    ];
-
-    fn mesh_with(vertices: Vec<[f64; 3]>, faces: Vec<skpwright::MeshFace>) -> skpwright::Mesh {
-        skpwright::Mesh {
-            vertices,
-            faces,
-            ..Default::default()
-        }
-    }
-
-    fn face(outer: Vec<u32>) -> skpwright::MeshFace {
-        skpwright::MeshFace {
-            outer,
-            ..Default::default()
-        }
-    }
-
-    fn quad() -> (skpwright::Mesh, skpwright::MeshFace) {
-        let vertices = vec![
-            [0.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0],
-            [1.0, 1.0, 0.0],
-            [0.0, 1.0, 0.0],
-        ];
-        (mesh_with(vertices, vec![]), face(vec![0, 1, 2, 3]))
-    }
-
-    fn triangle_area(a: Point3, b: Point3, c: Point3) -> f64 {
-        let ab = [b.x - a.x, b.y - a.y, b.z - a.z];
-        let ac = [c.x - a.x, c.y - a.y, c.z - a.z];
-        let n = cross(ab, ac);
-        (dot(n, n)).sqrt() * 0.5
-    }
-
-    fn total_area(out: &GroupBuffers) -> f64 {
-        out.triangles
-            .iter()
-            .map(|t| {
-                triangle_area(
-                    out.vertices[t[0] as usize],
-                    out.vertices[t[1] as usize],
-                    out.vertices[t[2] as usize],
-                )
-            })
-            .sum()
-    }
-
-    /// Every triangle's geometric normal must agree with the stored vertex
-    /// normal, or back-face culling would hide geometry SketchUp shows.
-    fn assert_winding_matches_normals(out: &GroupBuffers) {
-        for triangle in &out.triangles {
-            let a = out.vertices[triangle[0] as usize];
-            let b = out.vertices[triangle[1] as usize];
-            let c = out.vertices[triangle[2] as usize];
-            let geometric = cross(
-                [b.x - a.x, b.y - a.y, b.z - a.z],
-                [c.x - a.x, c.y - a.y, c.z - a.z],
-            );
-            let normal = out.normals[triangle[0] as usize];
-            let normal = [normal.x, normal.y, normal.z];
-            assert!(
-                dot(geometric, normal) > 0.0,
-                "triangle winding disagrees with its vertex normal"
-            );
-        }
-    }
-
-    #[test]
-    fn a_quad_becomes_two_triangles_with_the_face_normal() {
-        let (mesh, face) = quad();
-        let mut out = GroupBuffers::default();
-        emit_face(&mesh, &face, &IDENTITY_WORLD, None, &mut out).expect("a planar quad fills");
-
-        assert_eq!(out.triangles.len(), 2);
-        assert!(
-            (total_area(&out) - 1.0).abs() < 1e-9,
-            "area must be preserved"
-        );
-        for normal in &out.normals {
-            assert!((normal.z - 1.0).abs() < 1e-9, "flat face normal is +Z");
-        }
-        assert_winding_matches_normals(&out);
-    }
-
-    #[test]
-    fn a_face_with_a_hole_keeps_the_hole_open() {
-        // 4x4 outer square with a 2x2 hole: 12 m² of fill, nothing inside it.
-        let vertices = vec![
-            [-2.0, -2.0, 0.0],
-            [2.0, -2.0, 0.0],
-            [2.0, 2.0, 0.0],
-            [-2.0, 2.0, 0.0],
-            [-1.0, -1.0, 0.0],
-            [1.0, -1.0, 0.0],
-            [1.0, 1.0, 0.0],
-            [-1.0, 1.0, 0.0],
-        ];
-        let mesh = mesh_with(vertices, vec![]);
-        let mut with_hole = face(vec![0, 1, 2, 3]);
-        with_hole.holes = vec![vec![4, 5, 6, 7]];
-
-        let mut out = GroupBuffers::default();
-        emit_face(&mesh, &with_hole, &IDENTITY_WORLD, None, &mut out).expect("donut fills");
-
-        assert!(
-            (total_area(&out) - 12.0).abs() < 1e-6,
-            "outer minus hole area, got {}",
-            total_area(&out)
-        );
-        for triangle in &out.triangles {
-            let pts: Vec<Point3> = triangle.iter().map(|i| out.vertices[*i as usize]).collect();
-            let cx = (pts[0].x + pts[1].x + pts[2].x) / 3.0;
-            let cy = (pts[0].y + pts[1].y + pts[2].y) / 3.0;
-            assert!(
-                !(cx > -0.999 && cx < 0.999 && cy > -0.999 && cy < 0.999),
-                "a triangle lies inside the hole at ({cx}, {cy})"
-            );
-        }
-        assert_winding_matches_normals(&out);
-    }
-
-    #[test]
-    fn a_mirroring_instance_flips_winding_and_normal() {
-        let (mesh, face) = quad();
-        let mirrored_world = [
-            -1.0, 0.0, 0.0, 0.0, //
-            0.0, 1.0, 0.0, 0.0, //
-            0.0, 0.0, 1.0, 0.0, //
-            0.0, 0.0, 0.0, 1.0,
-        ];
-        assert!(determinant3(&mirrored_world) < 0.0);
-        let mut out = GroupBuffers::default();
-        emit_face(&mesh, &face, &mirrored_world, None, &mut out).expect("a mirrored quad fills");
-
-        for normal in &out.normals {
-            assert!(
-                (normal.z + 1.0).abs() < 1e-9,
-                "mirroring negates the normal"
-            );
-        }
-        assert_winding_matches_normals(&out);
-        let xs: Vec<f64> = out.vertices.iter().map(|p| p.x).collect();
-        assert!(
-            xs.iter().all(|x| *x <= 0.0),
-            "mirrored vertices are on -X: {xs:?}"
-        );
-    }
-
-    #[test]
-    fn a_translated_instance_moves_its_vertices() {
-        let (mesh, face) = quad();
-        let world = [
-            1.0, 0.0, 0.0, 10.0, //
-            0.0, 1.0, 0.0, 20.0, //
-            0.0, 0.0, 1.0, 30.0, //
-            0.0, 0.0, 0.0, 1.0,
-        ];
-        let mut out = GroupBuffers::default();
-        emit_face(&mesh, &face, &world, None, &mut out).expect("a translated quad fills");
-        for vertex in &out.vertices {
-            assert!((vertex.x - 10.0).abs() < 1e-9 || (vertex.x - 11.0).abs() < 1e-9);
-            assert!((vertex.y - 20.0).abs() < 1e-9 || (vertex.y - 21.0).abs() < 1e-9);
-            assert!((vertex.z - 30.0).abs() < 1e-9);
-        }
-    }
-
-    #[test]
-    fn an_invisible_tag_and_a_hidden_face_are_pruned() {
-        let mut visible = face(vec![0, 1, 2, 3]);
-        visible.layer = 5;
-        let mut on_invisible_tag = face(vec![0, 1, 2, 3]);
-        on_invisible_tag.layer = 6;
-        let mut hidden = face(vec![0, 1, 2, 3]);
-        hidden.hidden = true;
-        let mesh = mesh_with(
-            vec![
-                [0.0, 0.0, 0.0],
-                [1.0, 0.0, 0.0],
-                [1.0, 1.0, 0.0],
-                [0.0, 1.0, 0.0],
-            ],
-            vec![visible, on_invisible_tag, hidden],
-        );
-        let mut stats = SkpStats::default();
-        let visible_tag = |slot: u16| slot != 6;
-        let groups = group_faces(&mesh, 0, &visible_tag, &mut stats);
-
-        assert_eq!(groups.len(), 1);
-        assert_eq!(groups[&0].len(), 1);
-        assert_eq!(stats.hidden_faces_skipped, 1);
-        assert_eq!(stats.invisible_layer_faces_skipped, 1);
-    }
-
-    #[test]
-    fn an_inherited_material_paints_only_unpainted_faces() {
-        let mut own = face(vec![0, 1, 2, 3]);
-        own.front_material = Some(7);
-        let inherited = face(vec![0, 1, 2, 3]);
-        let mesh = mesh_with(
-            vec![
-                [0.0, 0.0, 0.0],
-                [1.0, 0.0, 0.0],
-                [1.0, 1.0, 0.0],
-                [0.0, 1.0, 0.0],
-            ],
-            vec![own, inherited],
-        );
-        let mut stats = SkpStats::default();
-        let groups = group_faces(&mesh, 3, &|_| true, &mut stats);
-
-        assert_eq!(groups[&7].len(), 1, "the face's own material wins");
-        assert_eq!(
-            groups[&3].len(),
-            1,
-            "the rest inherit the instance material"
-        );
-    }
-
-    #[test]
-    fn a_degenerate_face_is_reported_instead_of_approximated() {
-        // Three collinear vertices: the filler refuses rather than inventing fill.
-        let mesh = mesh_with(
-            vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]],
-            vec![],
-        );
-        let mut degenerate = face(vec![0, 1, 2]);
-        degenerate.normal = [0.0, 0.0, 1.0];
-        let mut out = GroupBuffers::default();
-        let result = emit_face(&mesh, &degenerate, &IDENTITY_WORLD, None, &mut out);
-
-        assert_eq!(result, Err(FaceSkip::Untriangulable));
-        assert!(out.vertices.is_empty() && out.triangles.is_empty());
-    }
-
-    #[test]
-    fn a_ring_index_outside_the_run_is_malformed() {
-        let mesh = mesh_with(vec![[0.0, 0.0, 0.0]], vec![]);
-        let mut out = GroupBuffers::default();
-        let result = emit_face(&mesh, &face(vec![0, 1, 2]), &IDENTITY_WORLD, None, &mut out);
-        assert_eq!(result, Err(FaceSkip::Malformed));
-    }
-}
+mod tests;

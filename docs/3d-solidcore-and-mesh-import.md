@@ -395,14 +395,14 @@ solidcore 1.0.1 的公开 API 覆盖（详见 ADR-0036 与 docs.rs）：
 
 | 项 | 现状 |
 |---|---|
-| 几何 | 每个（placement × 生效材质）组 → 一个 `Mesh`；**实例已烘焙到世界坐标**，不用 `Insert`/块 |
-| `type_key` | `SkpPreviewMesh` |
+| 几何 | 每个（placement × 生效材质）组 → 一个 `Mesh`；**实例已烘焙到世界坐标**，不用 `Insert`/块；有完整真实边记录的组升级为 `Body3d`（三角形 + `BodyDisplay.edges`，ADR-0049） |
+| `type_key` | `SkpPreviewMesh`（面组；wire 体为 `SkpPreviewEdges`，ADR-0049） |
 | 单位 | 米、`+Z` up，`import.skp.units_metres` |
 | 层级 | tag **扁平化到 layer 0**，`import.skp.layers_flattened` |
 | 材质 | 逐实体 `EntityColor::Explicit` 或 `ByLayer`；纹理只取平均色，`import.skp.textures_not_sampled` |
 | 透明度 | `0 ≤ opacity < 1` 时 `Explicit`，否则 `ByLayer` |
 | 可见性 | 遵守隐藏实例/隐藏 tag/隐藏面，`import.skp.hidden_pruned` |
-| 未导入 | 边/曲线、纹理图像与 UV、场景/页面、剖切面、标注、动态组件属性；**只有边几何的文件显式拒绝** |
+| 未导入 / 边界 | 纹理图像与 UV、场景/页面、剖切面、标注、动态组件属性；**边/曲线按真实 `MeshEdge` 记录携带**（`BodyDisplay.edges`，ADR-0049；见 §5.3），纯边文件导入为 `Partial` wire 体、不再拒绝 |
 | 完整性 | 每个成功导入恒 `Partial`（`import.skp.preview_geometry`） |
 | 能力 | 受 release 上限约束；测量恒 `Unsupported` |
 | 许可 | `skpwright = 0.6.0` 是 **GPL-3.0-only**；本仓库 AGPL-3.0 兼容，但任何非 AGPL 分发都会被阻断 |
@@ -417,7 +417,7 @@ solidcore 1.0.1 的公开 API 覆盖（详见 ADR-0036 与 docs.rs）：
 | SKP 组件实例 | 烘焙 | **P-SKP-1**：`BlockDefinition` + `Insert` | 保留组件身份、可移动/旋转实例、数据库更小；需要嵌套变换与选择语义 |
 | SKP tag | 扁平化到 layer 0 | **P-SKP-2**：tag → `Layer` | 已有诊断；改后可按图层显隐/过滤 |
 | SKP 材质/透明度 | 逐实体颜色 | 保持 | `Mesh.colors` 目前未用；纹理平均色已是诚实降级 |
-| SKP 边/曲线 | 拒绝 | **P-SKP-3**：`LineSegments` | 补齐 "wireframe" 观感；纯边文件不再只能拒绝 |
+| SKP 边/曲线 | **已实现（2026-11-23，ADR-0049）**：真实 `MeshEdge` 记录进 `Body3d` 载体（完整边记录的面组 → `SkpPreviewMesh` body 的 `BodyDisplay.edges`；游离/未被 body 或已三角化面环覆盖的边 → `SkpPreviewEdges` wire 体），`hidden`/`soft`/不可见图层剔除，曲线存两点弦，边只作显示/拾取 | **P-SKP-3 完成**：不新增 `LineSegments` 图元，复用既有 `Body3d` + `BodyDisplay.edges` | 不做边 id/子元素与编辑；测量仍 `Unsupported`（无 snap）；纯边文件不再拒绝，导入为 `Partial` wire 体 |
 | STL/SKP 的"实体编辑" | 无 | **P-MESH-1**（可选）：独立的网格体类别 + 网格布尔 | 产物仍是网格；**不要**复用 `BodyKind::Solid` |
 
 ### 5.4 如果一定要"编辑 STL/SKP"
@@ -462,8 +462,10 @@ solidcore 1.0.1 的公开 API 覆盖（详见 ADR-0036 与 docs.rs）：
 
 1. **发射**：`cad-connector-skp/src/lib.rs` / `cad-connector-mesh/src/stl/mod.rs`。今天都走
    `cad-connector-core::MeshImport`，它只构造 `Mesh`、固定 layer 0、`measure = Unsupported`。
-   要发 `Body3d` 必须绕过 `MeshImport`（参照 `cad-connector-acadrust/src/support.rs`）。
-2. **类型键与能力行**：`SkpPreviewMesh` / `StlMesh` + `MeshImport::finish()` 的能力行。
+   要发 `Body3d` 曾必须绕过 `MeshImport`（参照 `cad-connector-acadrust/src/support.rs`）；ADR-0049
+   起 `MeshImport` 提供 `push_body*`，SKP 的 wire 体键为 `SkpPreviewEdges`。
+2. **类型键与能力行**：`SkpPreviewMesh` / `SkpPreviewEdges` / `StlMesh` + `MeshImport::finish()`
+   的能力行（按实际插入的 `type_key` 各出一行）。
 3. **分发**：只有格式嗅探变化才需要动 `cad-connector-core::detect` 与
    `cad-app::import::FormatImporter`；纯映射变化不需要。
 
@@ -606,7 +608,7 @@ StepImporter::import
 | 阶段 | 内容 | 验收 |
 |---|---|---|
 | P0.1 | 存储边线直送 `RenderBatch.edges`；拆分到限文件（**已完成**，Linux 契约/单元证据） | 表示/场景契约测试；无三角形重推 |
-| P-SKP-1/2/3 | SKP 组件实例、tag 图层、边线 | 导入契约测试 + 同一文件重复导入稳定；`Partial` 理由收窄 |
+| P-SKP-1/2/3 | SKP 组件实例、tag 图层、边线（**P-SKP-3 已实现 2026-11-23，ADR-0049**：真实边进 `Body3d`/`BodyDisplay.edges`） | 导入契约测试 + 同一文件重复导入稳定；`Partial` 理由收窄；边证据仅契约测试，corpus 重跑 **NOT RUN** |
 | P-MESH-1（可选） | `manifold3d` 网格布尔 + `MeshBody` | 网格布尔样本 + 显式"非精确"标记；`MASSPROP` 仍拒绝精确体积 |
 | P-STEP-1a | `cadmpeg-ir → BrepData` 解析曲面 lifter（Plane/Cylinder/Cone/Sphere/Torus + Line/Circle） | 解析样本 → `Body3d{Solid,Exact}`；三角面与现 `StepTessellatedMesh` 一致；失败面显式 |
 | P-STEP-1b | NURBS/椭圆/部分圆弧/pcurve | 依赖 P2；逐面计数，禁止无样本证据的"全部精确" |

@@ -372,3 +372,39 @@ fn select_all_includes_a_vendor_backed_opaque_entity_and_refuses_an_unsupported_
         Err(CadError::Unsupported(_))
     ));
 }
+
+/// A display body carries its own triangles/edges, so the precise stage reads it
+/// as direct geometry exactly like a mesh — not as an analytic proxy. A line
+/// entity keeps the analytic classification.
+#[test]
+fn a_display_body_is_a_direct_mesh_pick_item_not_analytic() {
+    let body = cad_domain::Body3d {
+        kind: cad_domain::BodyKind::Wire,
+        exact: cad_domain::BodyExact::Unavailable {
+            reason: "pick-classification-test".into(),
+        },
+        display: cad_domain::BodyDisplay {
+            mesh: Mesh::default(),
+            edges: vec![vec![p(0.0, -1.0, 0.0), p(0.0, 1.0, 0.0)]],
+            tolerance: None,
+            precision: cad_domain::Precision::Unknown,
+            completeness: Completeness::Partial(vec!["display-only".into()]),
+        },
+    };
+    let db = database_with(vec![
+        model_entity(1, SemanticGeometry::Body3d(Box::new(body)), 0),
+        model_entity(2, vertical_line(5.0), 1),
+    ]);
+    let items = drawing_pick_items(&db, DOC);
+
+    let body_item = items
+        .iter()
+        .find(|item| item.source.entity == EntityId(1))
+        .expect("the body is in the catalogue");
+    assert_eq!(body_item.geometry_source, GeometrySource::DirectMesh);
+    let line_item = items
+        .iter()
+        .find(|item| item.source.entity == EntityId(2))
+        .expect("the line is in the catalogue");
+    assert_eq!(line_item.geometry_source, GeometrySource::Analytic);
+}

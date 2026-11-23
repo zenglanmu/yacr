@@ -20,6 +20,14 @@
 //!   separately ([`COLORS_DROPPED`], [`NORMALS_DROPPED`]) because neither has a
 //!   SketchUp face carrier. Geometry the writer cannot represent is a
 //!   dropped entry ([`UNSUPPORTED_GEOMETRY`]), never a silent omission.
+//! * A display body's **stored edge set/segmentation** is not copied (ADR-0049
+//!   §2): the triangles are, and each written triangle's boundary is
+//!   regenerated as `MeshEdge`s, so a stored face-boundary edge survives as a
+//!   triangle boundary while loose or separately segmented stored edges do not.
+//!   Each affected entity gets a `Partial` [`STORED_EDGES_NOT_WRITTEN`] entry.
+//!   A wire-only body (edges, no triangles) is dropped by name
+//!   ([`WIRE_BODY_NOT_WRITTEN`]). Free-edge export is not implemented, so no
+//!   SketchUp edge round trip is claimed.
 //! * Byte-identical output for the same document: the save time and the GUID
 //!   seed are fixed ([`export_env`]) instead of taken from the system clock.
 //!
@@ -51,8 +59,9 @@ use cad_domain::{CadError, CadResult, Completeness, EntityCapability, SupportSta
 pub use write::{
     export_env, metres_per_source_unit, COLORS_DROPPED, DEGENERATE_TRIANGLE,
     LAYER_MATERIAL_FLATTENED, LIMITS_EXCEEDED, MISMATCHED_DESCRIPTOR, MODEL_REJECTED,
-    NORMALS_DROPPED, NO_GEOMETRY, PAPER_SPACE_DROPPED, TEXTURE_NOT_WRITTEN, UNITS_UNKNOWN,
-    UNSUPPORTED_GEOMETRY, WRITE_FAILED, WRITE_SEED, WRITE_UNIX_TIME,
+    NORMALS_DROPPED, NO_GEOMETRY, PAPER_SPACE_DROPPED, STORED_EDGES_NOT_WRITTEN,
+    TEXTURE_NOT_WRITTEN, UNITS_UNKNOWN, UNSUPPORTED_GEOMETRY, WIRE_BODY_NOT_WRITTEN, WRITE_FAILED,
+    WRITE_SEED, WRITE_UNIX_TIME,
 };
 
 /// SketchUp `.skp` writer for the connector whose descriptor it was built with.
@@ -153,6 +162,11 @@ struct Report {
     texture_losses: Vec<(cad_domain::ObjectId, String)>,
     /// How many of those texture entries were recorded by the last model build.
     texture_count: usize,
+    /// Display bodies whose stored edges were not written, one entry per source
+    /// entity (ADR-0049 §2).
+    stored_edge_losses: Vec<(cad_domain::ObjectId, usize)>,
+    /// How many of those edge entries were recorded by the last model build.
+    stored_edge_count: usize,
 }
 
 impl Report {
@@ -169,6 +183,8 @@ impl Report {
             normals_dropped: false,
             texture_losses: Vec::new(),
             texture_count: 0,
+            stored_edge_losses: Vec::new(),
+            stored_edge_count: 0,
         }
     }
 
@@ -193,7 +209,26 @@ impl Report {
                 cad_domain::SemanticGeometry::Body3d(body)
                     if !body.display.mesh.triangles.is_empty() =>
                 {
+                    // The triangles are written; the stored display edges have
+                    // no writer path yet, so they are reported per entity
+                    // instead of being dropped silently (ADR-0049 §2).
+                    if !body.display.edges.is_empty() {
+                        self.stored_edge_losses
+                            .push((entity.object.id, body.display.edges.len()));
+                    }
                     &body.display.mesh
+                }
+                cad_domain::SemanticGeometry::Body3d(body) if !body.display.edges.is_empty() => {
+                    self.drop_entity(
+                        entity,
+                        WIRE_BODY_NOT_WRITTEN,
+                        format!(
+                            "{} display edge segment(s) and no triangles; a free-edge body is \
+                             not written",
+                            body.display.edges.len()
+                        ),
+                    );
+                    continue;
                 }
                 _ => {
                     self.drop_entity(
@@ -440,6 +475,32 @@ impl Report {
             });
         }
         self.texture_count = losses.len();
+        // The triangles were written and their boundaries were regenerated as
+        // `MeshEdge`s; the body's stored edge *set/segmentation* is not copied.
+        // One entry per affected source entity, with its real segment count.
+        let edge_losses = std::mem::take(&mut self.stored_edge_losses);
+        for (object, segments) in &edge_losses {
+            let message = format!(
+                "entity #{} carries {segments} stored display edge segment(s); the SketchUp \
+                 writer does not copy the stored edge set or its segmentation — it regenerates \
+                 each written triangle's boundary as MeshEdges, so a face-ring boundary edge \
+                 survives as a triangle boundary while loose or separately segmented stored \
+                 edges do not",
+                object.0
+            );
+            self.reasons.push(message.clone());
+            self.entries.push(CompatEntry {
+                connector: self.connector,
+                direction: ReportDirection::Export,
+                level: FidelityLevel::L1,
+                object: Some(*object),
+                type_key: None,
+                status: SupportStatus::Partial,
+                code: STORED_EDGES_NOT_WRITTEN.to_string(),
+                message,
+            });
+        }
+        self.stored_edge_count = edge_losses.len();
         Ok(model)
     }
 
@@ -471,11 +532,13 @@ impl Report {
     fn finish_counts(&self, bytes: usize) -> CompatCounts {
         CompatCounts {
             exact: self.exact,
-            // One conversion per attribute kind actually lost, matching the
-            // `Partial` entries appended in `model_and_report`.
+            // One conversion per attribute kind actually lost, plus one per
+            // affected body whose stored edge set was not copied (so multiple
+            // affected bodies count once each, not as a single boolean).
             converted: usize::from(self.colours_dropped)
                 + usize::from(self.normals_dropped)
-                + self.texture_count,
+                + self.texture_count
+                + self.stored_edge_count,
             dropped: self.dropped,
             bytes,
         }

@@ -233,6 +233,9 @@ ASCII 与二进制同一路径；缺失/零/非有限法向由三角形几何重
   没有可视面 → `Unsupported(import.skp.no_geometry)`；**几何只有边/曲线** →
   `Unsupported(import.skp.edge_only_geometry)`（SketchUp 的线/曲线工作无法用三角形表达，
   显式拒绝，**不是空成功**）；超限 → 命名真实计数的 `InvalidInput(import.skp.limits_exceeded)`。
+   **2026-11-23：superseded by ADR-0049 for SKP edge-only files**（纯边文件改为 `Partial` 的
+   `Body3d::Wire`，不再拒绝；本节其余格式结论与证据不变，`edge_only_geometry` 的 corpus 计数在
+   重跑前为 stale）。
 - **wasm**：导入 lane 是纯 Rust、无平台依赖（`miniz_oxide` 亦为纯 Rust），因此 `dom-canvas`
   的 wasm 会话可以链接它；本轮实跑 `cargo check -p cad-import-skp --target
   wasm32-unknown-unknown --locked` **通过**（编译证据，不是 Web 运行/像素证据）。

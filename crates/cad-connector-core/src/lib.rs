@@ -64,6 +64,10 @@ pub struct ImportLimits {
     /// `None` means the reader's own behaviour (its system-derived budget); see
     /// [`ImportLimits::max_mesh_faces`].
     pub max_mesh_face_indices: Option<usize>,
+    /// Total stored edge segments (2-point display polylines) one import may create.
+    /// `None` = the reader's own budget. Counts emitted segments across all
+    /// placements, not unique source edges.
+    pub max_mesh_edges: Option<usize>,
     /// Upper bound on the decompressed bytes one archive-backed read may
     /// allocate for its sections and system pages.
     ///
@@ -91,6 +95,7 @@ impl Default for ImportLimits {
             max_block_depth: 32,
             max_mesh_faces: None,
             max_mesh_face_indices: None,
+            max_mesh_edges: None,
             max_decompressed_bytes: None,
             // ADR-0038 D5: 16 MiB per image, 64 MiB per document, 256 images.
             // Real base-colour maps are far below every one of them; the budgets

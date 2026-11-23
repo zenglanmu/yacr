@@ -22,6 +22,12 @@ pub const COLORS_DROPPED: &str = "export.skp.colors_dropped";
 pub const NORMALS_DROPPED: &str = "export.skp.normals_dropped";
 /// A written mesh references a base-colour texture; the writer carries no texture.
 pub const TEXTURE_NOT_WRITTEN: &str = "export.skp.texture_not_written";
+/// A display body carries stored edges; the writer keeps its triangles only
+/// (ADR-0049 §2). The triangles are written, so this is a `Partial` note.
+pub const STORED_EDGES_NOT_WRITTEN: &str = "export.skp.stored_edges_not_written";
+/// A wire-only body (display edges, no triangles) has nothing this writer can
+/// write; the entity is dropped by name (ADR-0049 §2).
+pub const WIRE_BODY_NOT_WRITTEN: &str = "export.skp.wire_body_not_written";
 /// A non-model-space entity was left out (the writer has no paper space).
 pub const PAPER_SPACE_DROPPED: &str = "export.skp.paper_space_dropped";
 /// A caller budget (`ExportLimits`) was exceeded; nothing was written.

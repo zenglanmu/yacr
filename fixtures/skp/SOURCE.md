@@ -38,7 +38,7 @@ YACR_TEST_SKP_2026=/absolute/path/theater-2026.skp \
 - Both variables take an **absolute path**; a relative path is the caller's
   problem, not silently resolved.
 - **Unset means skip.** A skip is **not** a run and **not** evidence. A CI run
-  without these variables proves only the 19 in-crate contract tests (release
+  without these variables proves only the in-crate contract tests (release
   ceilings, materials, triangulation, visibility pruning, explicit refusals).
 - No download script is provided: the corpus is not redistributable, so the
   operator supplies the file.
@@ -47,7 +47,11 @@ YACR_TEST_SKP_2026=/absolute/path/theater-2026.skp \
 
 A bounded scan of the `skpwright` corpus (763 `.skp` files, external, not
 committed) produced: **728 imported, 25 refused `import.skp.edge_only_geometry`,
-10 refused `import.skp.no_geometry`, 0 failures, 0 panics**. The two theater
+10 refused `import.skp.no_geometry`, 0 failures, 0 panics**. Those counts predate
+ADR-0049: edge-only files now import as `Partial` wire bodies instead of being
+refused, so the 25-refusal figure is a **historical measurement, not current
+behaviour**. The scan has **not been re-run** under the edge-carrying importer
+(NOT RUN); do not quote the counts as the current outcome. The two theater
 models (2017 stream container and 2026 ZIP container) hold the same geometry:
 1246 entities each, 96,333 vs 96,344 triangles, surface area **1020.981869 m²**
 in both (relative difference 5e-14).

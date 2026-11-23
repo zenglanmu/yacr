@@ -897,4 +897,18 @@ fn body_type_names_come_from_the_stored_source_class() {
     }
     // The geometry alias is the neutral discriminant, not a guessed subtype.
     assert_eq!(crate::select_filter::geometry_key(&body_geometry()), "BODY");
+
+    // SketchUp preview groups are display bodies carrying triangles: they keep
+    // answering `MESH` (ADR-0049 D1) while the wire-only class answers `BODY`
+    // only. Without the alias, body-ified SKP groups would vanish from
+    // `TYPE=MESH` with no report.
+    let preview = entity(EntityId(91), "SkpPreviewMesh", LayerId(0), body_geometry());
+    assert!(crate::select_filter::type_matches(&preview, "MESH"));
+    assert!(crate::select_filter::type_matches(&preview, "BODY"));
+    let wire = entity(EntityId(92), "SkpPreviewEdges", LayerId(0), body_geometry());
+    assert!(crate::select_filter::type_matches(&wire, "BODY"));
+    assert!(
+        !crate::select_filter::type_matches(&wire, "MESH"),
+        "a wire-only preview body is not a mesh"
+    );
 }

@@ -183,6 +183,7 @@ struct Counted {
     meshes: usize,
     triangles: usize,
     vertices: usize,
+    edges: usize,
     area: f64,
 }
 
@@ -200,7 +201,13 @@ fn triangle_area(a: cad_domain::Point3, b: cad_domain::Point3, c: cad_domain::Po
 fn count(drawing: &cad_connector_core::ImportedDrawing) -> Counted {
     let mut counted = Counted::default();
     for entity in drawing.database.entities() {
-        if let SemanticGeometry::Mesh(mesh) = &entity.geometry {
+        let (mesh, edges) = match &entity.geometry {
+            SemanticGeometry::Mesh(mesh) => (mesh, &[][..]),
+            SemanticGeometry::Body3d(body) => (&body.display.mesh, &body.display.edges[..]),
+            _ => continue,
+        };
+        counted.edges += edges.len();
+        if !mesh.triangles.is_empty() {
             counted.meshes += 1;
             counted.triangles += mesh.triangles.len();
             counted.vertices += mesh.vertices.len();
@@ -241,13 +248,14 @@ fn a_real_sketchup_model_imports_when_supplied() {
     let drawing = match SkpImporter::new().import(&request(bytes), &|| false) {
         Ok(drawing) => drawing,
         Err(cad_domain::CadError::Unsupported(message)) => {
-            // A sample may legitimately be edge-only (SketchUp line work) or
+            // A sample may legitimately have no visible geometry at all, or be
             // carried by a release this reader does not model. Both are
             // **explicit** refusals with a stable code — never an empty success.
+            // Edge-only files are no longer refused (ADR-0049): they import as
+            // `Partial` wire bodies.
             eprintln!("refused: {message}");
             assert!(
-                message.starts_with(crate::EDGE_ONLY_GEOMETRY)
-                    || message.starts_with(crate::NO_GEOMETRY)
+                message.starts_with(crate::NO_GEOMETRY)
                     || message.starts_with(crate::VERSION_UNSUPPORTED),
                 "an unsupported sample must be refused by a documented code: {message}"
             );
@@ -698,6 +706,18 @@ fn codes_of(drawing: &cad_connector_core::ImportedDrawing) -> Vec<&str> {
         .collect()
 }
 
+/// The display mesh of a preview entity, whichever carrier it chose.
+///
+/// A written quad carries its face ring's four `MeshEdge`s, so ADR-0049 makes it
+/// a body; a group without complete records stays a plain mesh.
+fn preview_mesh(entity: &cad_db::DbEntity) -> &cad_domain::Mesh {
+    match &entity.geometry {
+        SemanticGeometry::Mesh(mesh) => mesh,
+        SemanticGeometry::Body3d(body) => &body.display.mesh,
+        other => panic!("unexpected preview geometry {other:?}"),
+    }
+}
+
 #[test]
 fn a_written_textured_model_imports_with_uvs_and_its_image() {
     let image = encode_png();
@@ -752,9 +772,7 @@ fn a_written_textured_model_imports_with_uvs_and_its_image() {
         "one material group over one painted run is one preview entity"
     );
     let entity = drawing.database.entities().next().expect("the entity");
-    let SemanticGeometry::Mesh(mesh) = &entity.geometry else {
-        panic!("a preview import yields a mesh");
-    };
+    let mesh = preview_mesh(entity);
     assert_eq!(
         mesh.uvs.len(),
         mesh.vertices.len(),
@@ -846,9 +864,7 @@ fn the_same_written_model_without_a_texture_reports_nothing_texture_related() {
 
     assert_eq!(drawing.database.entities().count(), 1);
     let entity = drawing.database.entities().next().expect("the entity");
-    let SemanticGeometry::Mesh(mesh) = &entity.geometry else {
-        panic!("a preview import yields a mesh");
-    };
+    let mesh = preview_mesh(entity);
     assert!(mesh.uvs.is_empty(), "a solid has no UV set");
     assert!(mesh.texture.is_none(), "a solid names no texture");
     assert_eq!(
@@ -874,3 +890,5 @@ fn the_same_written_model_without_a_texture_reports_nothing_texture_related() {
         Completeness::Partial(_)
     ));
 }
+
+mod edges;
