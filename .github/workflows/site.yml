@@ -31,7 +31,7 @@ on:
       release_tag:
         description: "Release tag to mirror to R2"
         required: true
-        default: "v0.1.16"
+        default: "v0.1.17"
         type: string
       upload_downloads:
         description: "Mirror release assets to R2 and rewrite downloads.json"
