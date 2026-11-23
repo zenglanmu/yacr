@@ -6,8 +6,8 @@
 
 use std::sync::Arc;
 
-use cad_domain::SemanticGeometry;
 use cad_connector_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
+use cad_domain::SemanticGeometry;
 
 fn import(path: &str) -> cad_db::DrawingDatabase {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");

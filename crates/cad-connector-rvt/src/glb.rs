@@ -62,8 +62,8 @@
 //! scalar to stay `Mesh.pbr = None` rather than acquire glTF's default (which
 //! would draw an unlit CAD body as black metal).
 
-use cad_domain::{CadError, CadResult, Mesh, MeshPbr, Point3};
 use cad_connector_core::ImportLimits;
+use cad_domain::{CadError, CadResult, Mesh, MeshPbr, Point3};
 use gltf::accessor::{Accessor, DataType, Dimensions};
 use gltf::buffer::Source;
 use gltf::material::AlphaMode;

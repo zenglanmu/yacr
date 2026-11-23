@@ -21,9 +21,9 @@
 
 use std::collections::BTreeMap;
 
+use cad_connector_core::{ImportLimits, MeshImport};
 use cad_domain::hatch::{fill_rings, triangulate};
 use cad_domain::{CadError, Mesh, Point3};
-use cad_connector_core::{ImportLimits, MeshImport};
 
 use crate::texture::{self, TextureSlots};
 use skpwright::UvXform;

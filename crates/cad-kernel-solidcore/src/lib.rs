@@ -3,7 +3,7 @@
 //! (ADR-0036, phase B2).
 //!
 //! This crate is the **only** place in the workspace allowed to name
-//! `solidcore` (the same single-owner rule `cad-import-acadrust` has for
+//! `solidcore` (the same single-owner rule `cad-connector-acadrust` has for
 //! `acadrust`; `scripts/check-architecture.py` enforces both). It owns three
 //! things and nothing else:
 //!

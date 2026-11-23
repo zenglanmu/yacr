@@ -217,7 +217,7 @@ yacr_assert_app_web_slim() {
     yacr_die "cargo tree -p app-web --target $YACR_WASM_TARGET failed; cannot prove the bundle dropped the other connectors"
   fi
   # `^<tree glyphs>*<crate> v<version>` anchors on a package line, so a crate that
-  # merely contains one of these names (`cad-import-rvt`, `cad-export-gltf`) does
+  # merely contains one of these names (`cad-connector-rvt`, `cad-connector-gltf`) does
   # not match: the name must be followed by its version.
   if leaked="$(grep -E '^[│├└─ ]*(rvt|cadmpeg-[a-z0-9_-]+|ifc-lite-[a-z0-9_-]+|skpwright|cadkit-[a-z0-9_-]+|gltf|image) v[0-9]' <<<"$normal_tree")"; then
     printf '%s\n' "$leaked" >&2

@@ -480,7 +480,7 @@ fn dxf_entities(pairs: &[(i32, String)], name: &str) -> Vec<Vec<(i32, String)>> 
 
 #[test]
 fn rectangle_round_trips_through_the_dxf_export_as_a_closed_lwpolyline() {
-    // The export code lives in the frozen `cad-import-acadrust` crate, but the
+    // The export code lives in the frozen `cad-connector-acadrust` crate, but the
     // host's `export_dxf` is the real production Save path, so the rectangle can be
     // round-tripped here without touching that crate: the emitted DXF text must
     // contain exactly one closed (`70` bit 1) four-vertex LWPOLYLINE at the two
@@ -647,7 +647,7 @@ fn group(record: &[(i32, String)], code: i32) -> f64 {
 #[test]
 fn exported_ellipse_round_trips_idempotently() {
     // AUTH is the production save path (`HostController::export_dxf`), so the
-    // ellipse is round-tripped without touching the frozen `cad-import-acadrust`
+    // ellipse is round-tripped without touching the frozen `cad-connector-acadrust`
     // crate. DXF ELLIPSE groups: 10/20/30 centre, 11/21/31 endpoint of the major
     // axis **relative to the centre**, 40 ratio, 41/42 start/end parameter,
     // 210/220/230 extrusion normal.
@@ -698,7 +698,7 @@ fn exported_ellipse_round_trips_idempotently() {
 #[test]
 fn polygon_round_trips_through_the_dxf_export_as_a_closed_lwpolyline() {
     // `HostController::export_dxf` is the production Save path, so the polygon is
-    // round-tripped here without touching the frozen `cad-import-acadrust` crate:
+    // round-tripped here without touching the frozen `cad-connector-acadrust` crate:
     // the emitted DXF must contain exactly one closed (`70` bit 1) `n`-vertex
     // LWPOLYLINE (one vertex per side).
     let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
@@ -890,7 +890,7 @@ fn spline_open_capture_never_auto_confirms_and_confirm_at_four_commits() {
 #[test]
 fn point_round_trips_through_the_dxf_export_as_one_point() {
     // `HostController::export_dxf` is the production Save path, so the point is
-    // round-tripped here without touching the frozen `cad-import-acadrust` crate:
+    // round-tripped here without touching the frozen `cad-connector-acadrust` crate:
     // the emitted DXF must contain exactly one POINT at the captured location, and
     // the report records it as an exact mapping (nothing converted or dropped).
     let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();

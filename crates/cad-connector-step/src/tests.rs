@@ -3,8 +3,8 @@
 use std::sync::{Arc, Mutex};
 
 use super::*;
-use cad_domain::{Completeness, DatabaseId, DocumentId, EntityCapability, SemanticGeometry};
 use cad_connector_core::ImportPhase;
+use cad_domain::{Completeness, DatabaseId, DocumentId, EntityCapability, SemanticGeometry};
 
 fn request_bytes(bytes: Vec<u8>) -> ImportRequest {
     ImportRequest {

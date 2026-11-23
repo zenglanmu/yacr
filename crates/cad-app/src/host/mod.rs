@@ -7,11 +7,11 @@
 
 use std::sync::Arc;
 
+use cad_connector_acadrust::ImportedDrawing;
 use cad_db::{
     transform_geometry, DbEntity, DbObject, DrawingDatabase, DrawingDatabaseBuilder, Layer,
 };
 use cad_domain::*;
-use cad_connector_acadrust::ImportedDrawing;
 use cad_measure::{MeasurementEngine, SnapCandidate, SnapTarget};
 
 use crate::{
@@ -48,7 +48,7 @@ pub use cad_connector_acadrust::ImportReport;
 ///
 /// Re-exported because [`HostController::open_bytes_with_xref`] and
 /// [`HostController::begin_async_open_with_xref`] take it: host-side code should
-/// not need a direct `cad-import-acadrust` dependency to pass the policy.
+/// not need a direct `cad-connector-acadrust` dependency to pass the policy.
 pub use cad_connector_acadrust::XrefOptions;
 /// A connector's compatibility report and export result (bytes + report).
 pub use cad_connector_core::{CompatReport, ExportOutput};
@@ -59,7 +59,7 @@ pub use databases::{
 /// The Save-As export option types (ACIS payload version, DXF container).
 ///
 /// Re-exported so host-side code can name the option types without a direct
-/// `cad-import-acadrust` dependency, exactly like [`XrefOptions`].
+/// `cad-connector-acadrust` dependency, exactly like [`XrefOptions`].
 pub use export_options::{AcisVersion, DxfTarget, ExportOptions};
 /// The poll result of the background solid boolean (ADR-0036 phase C2).
 pub use solids::SolidBooleanPoll;

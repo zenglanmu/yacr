@@ -73,7 +73,7 @@
 //! the definition cannot be written. Tolerance content is `172 = 3` plus the
 //! `CONTEXT_DATA` text fields; acadrust 0.6.8's DXF **reader** reports `172 = 3`
 //! as "no content", so a reload resolves the kind from the `MLEADERSTYLE 170`
-//! record the same writer sets to `3` (see `cad-import-acadrust`'s multileader
+//! record the same writer sets to `3` (see `cad-connector-acadrust`'s multileader
 //! module docs).
 //!
 //! Deliberate subset (see [`crate::CommandId::MLeader`]): the typed line has

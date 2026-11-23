@@ -20,11 +20,11 @@
 //! trailing non-comment data are all [`CadError::CorruptData`], never a silent
 //! partial success.
 
-use cad_domain::{CadError, CadResult, Point3};
 use cad_connector_core::{
     compute_identity, ImportPhase, ImportProgress, ImportProgressSink, ImportRequest,
     ImportedDrawing, Importer, NoopProgress, OFF_FAMILY_PREFIXES,
 };
+use cad_domain::{CadError, CadResult, Point3};
 
 use crate::{publish, Note, ParsedMesh};
 

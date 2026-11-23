@@ -14,8 +14,8 @@
 
 use std::collections::BTreeMap;
 
-use cad_domain::{CadResult, Diagnostic, MeshPbr, ObjectId};
 use cad_connector_core::MeshImport;
+use cad_domain::{CadResult, Diagnostic, MeshPbr, ObjectId};
 use gltf::{
     material::{NormalTexture, OcclusionTexture},
     texture::{Info as TextureInfo, Texture},

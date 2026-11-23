@@ -2,7 +2,7 @@
 //!
 //! Split out of `dimension.rs` to keep that file under the file-size limit.
 //! The synthesis was moved verbatim from the former
-//! `cad-import-acadrust::dimension` module, and the numbers it produces are
+//! `cad-connector-acadrust::dimension` module, and the numbers it produces are
 //! unchanged; the local vector algebra exists because `cad-domain` cannot
 //! depend on `cad-geometry` (which depends on this crate).
 
@@ -67,7 +67,7 @@ pub(crate) fn is_finite_point(p: Point3) -> bool {
 }
 
 // ---------------------------------------------------------------------------
-// Synthesis (moved verbatim from cad-import-acadrust::dimension).
+// Synthesis (moved verbatim from cad-connector-acadrust::dimension).
 // ---------------------------------------------------------------------------
 
 /// Geometry derived from one dimension, before the text primitive is attached.

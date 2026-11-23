@@ -6,8 +6,8 @@
 //! entity that could not be written is one `dropped` entry. Notes (the unit
 //! statement) never change the verdict.
 
-use cad_domain::{Completeness, ObjectId, SupportStatus, UnitContext};
 use cad_connector_core::{CompatCounts, CompatEntry, CompatReport, FidelityLevel, ReportDirection};
+use cad_domain::{Completeness, ObjectId, SupportStatus, UnitContext};
 
 use crate::export::collect::{DropEntry, SourceMesh};
 

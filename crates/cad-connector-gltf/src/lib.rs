@@ -91,12 +91,12 @@ pub use export::{GltfContainer, GltfExporter};
 #[cfg(test)]
 mod tests;
 
-use cad_domain::{CadError, CadResult, Diagnostic, UnitContext};
 use cad_connector_core::{
     compute_identity, ConnectorDescriptor, ExportCapability, FidelityLevel, ImportCapability,
     ImportPhase, ImportProgress, ImportProgressSink, ImportReport, ImportRequest, ImportedDrawing,
     Importer, MeshImport, NoopProgress, SpecVisibility,
 };
+use cad_domain::{CadError, CadResult, Diagnostic, UnitContext};
 
 use buffers::resolve_buffers;
 use scene::SceneWalker;

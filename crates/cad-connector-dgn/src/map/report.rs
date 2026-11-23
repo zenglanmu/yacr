@@ -1,8 +1,8 @@
 //! Diagnostics aggregation, capability rows and the finished report.
 
+use cad_connector_core::ImportReport;
 use cad_db::{BIM_MAX_PROPERTIES_PER_SET, BIM_MAX_PSETS_PER_ELEMENT, BIM_MAX_STRING_BYTES};
 use cad_domain::{CadError, CadResult, Completeness, EntityCapability, SupportStatus, UnitContext};
-use cad_connector_core::ImportReport;
 
 use super::{no_geometry_message, unknown_only_message, Mapper};
 use crate::{

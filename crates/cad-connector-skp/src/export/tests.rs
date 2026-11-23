@@ -6,6 +6,10 @@
 //! these files, so a passing round trip is **not** vendor acceptance, and no
 //! pixel, GPU or measurement claim follows from it.
 
+use cad_connector_core::{
+    ExportJob, ExportLimits, ExportOutput, ExportSpace, Exporter, ImportLimits, ImportRequest,
+    Importer,
+};
 use cad_db::{
     DbEntity, DbObject, DrawingDatabase, DrawingDatabaseBuilder, EntityColor,
     EntityRenderAttributes, Layer,
@@ -14,10 +18,6 @@ use cad_domain::{
     Body3d, BodyDisplay, BodyExact, BodyKind, CadError, CadResult, Completeness, DatabaseId,
     DocumentId, EntityId, LayerId, Mesh, ObjectId, Point3, Precision, Revision, SemanticGeometry,
     SpaceId, Unit, UnitContext,
-};
-use cad_connector_core::{
-    ExportJob, ExportLimits, ExportOutput, ExportSpace, Exporter, ImportLimits, ImportRequest,
-    Importer,
 };
 
 use crate::export::{
@@ -162,7 +162,10 @@ fn an_exported_triangle_is_a_sketchup_container_with_a_complete_report() {
     );
     let report = &output.report;
     assert_eq!(report.connector, "skp");
-    assert_eq!(report.direction, cad_connector_core::ReportDirection::Export);
+    assert_eq!(
+        report.direction,
+        cad_connector_core::ReportDirection::Export
+    );
     assert_eq!(report.level, cad_connector_core::FidelityLevel::L1);
     assert_eq!(report.counts.exact, 1);
     assert_eq!(report.counts.dropped, 0);

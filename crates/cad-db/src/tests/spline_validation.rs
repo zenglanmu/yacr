@@ -173,7 +173,7 @@ fn accepts_an_empty_weight_vector_as_the_documented_all_ones_convention() {
 #[test]
 fn accepts_an_empty_knot_vector_as_the_documented_clamped_uniform_convention() {
     // `knots: []` is what both MULTILEADER leader-path constructors store
-    // (`cad-domain/src/multileader.rs`, `cad-import-acadrust/src/dimension/
+    // (`cad-domain/src/multileader.rs`, `cad-connector-acadrust/src/dimension/
     // multileader.rs`) to mean "clamped uniform". `tessellate_spline` expands it
     // through `clamped_uniform_knots`, so it is a real form the repo produces and
     // it must stay writable; only a *non-empty* vector has to match

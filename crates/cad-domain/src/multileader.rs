@@ -15,7 +15,7 @@
 //! with the definition.
 //!
 //! The display derivation is a **verbatim move** of the pre-P7b importer's
-//! `cad-import-acadrust::dimension::multileader` synthesis: the same leader
+//! `cad-connector-acadrust::dimension::multileader` synthesis: the same leader
 //! paths (polyline or spline), the same arrowhead triangle, the same dogleg
 //! formula and the same text placement. The acceptance for P7b-1 is display
 //! equivalence with that `Compound` output, not a new rendering.

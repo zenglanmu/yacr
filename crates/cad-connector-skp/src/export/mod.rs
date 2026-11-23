@@ -42,11 +42,11 @@ mod write;
 #[cfg(test)]
 mod tests;
 
-use cad_domain::{CadError, CadResult, Completeness, EntityCapability, SupportStatus};
 use cad_connector_core::{
     CompatCounts, CompatEntry, CompatReport, ConnectorDescriptor, ExportJob, ExportOutput,
     ExportSpace, Exporter, FidelityLevel, ReportDirection,
 };
+use cad_domain::{CadError, CadResult, Completeness, EntityCapability, SupportStatus};
 
 pub use write::{
     export_env, metres_per_source_unit, COLORS_DROPPED, DEGENERATE_TRIANGLE,

@@ -114,7 +114,7 @@ pub struct DrawingDatabase {
     /// on construction, never on a geometry edit, so the identity stays O(1).
     ///
     /// Deliberately not named `generation`: that word already means the
-    /// xref/import generation (`cad-import-acadrust`), the session tool
+    /// xref/import generation (`cad-connector-acadrust`), the session tool
     /// generation and the render device generation.
     ///
     /// Preserved by `Clone`: a clone is the same drawing.

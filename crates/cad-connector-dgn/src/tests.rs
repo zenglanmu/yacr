@@ -8,12 +8,12 @@
 
 use std::sync::Arc;
 
+use cad_connector_core::{
+    compute_identity, ImportLimits, ImportReport, ImportRequest, ImportedDrawing, Importer,
+};
 use cad_db::DrawingDatabase;
 use cad_domain::{
     CadError, DatabaseId, DocumentId, Point3, SemanticGeometry, TransactionId, Unit, UnitContext,
-};
-use cad_connector_core::{
-    compute_identity, ImportLimits, ImportReport, ImportRequest, ImportedDrawing, Importer,
 };
 use cadkit_core::{
     Block as KitBlock, Entity, EntityKind, Layer as KitLayer, LengthUnit, Model, ModelKind,

@@ -1,6 +1,6 @@
 //! Host-side file access for external references (XREFs).
 //!
-//! Spec v2.0 §7.3, §16.2: `cad-resources` and `cad-import-acadrust` are
+//! Spec v2.0 §7.3, §16.2: `cad-resources` and `cad-connector-acadrust` are
 //! platform-neutral and must stay wasm-clean. They may decide *whether* a
 //! reference path is allowed ([`crate::check_xref_path`]) and *what* to do with
 //! the bytes, but they never open a file. The concrete carrier (native host,

@@ -7,8 +7,13 @@
 
 use std::sync::Arc;
 
+use crate::{GltfImporter, DESCRIPTOR_GLTF};
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine as _;
+use cad_connector_core::{
+    ExportJob, ExportLimits, ExportOutput, ExportSpace, Exporter, ImportLimits, ImportRequest,
+    ImportedDrawing, Importer,
+};
 use cad_db::{
     DbEntity, DbObject, DrawingDatabase, DrawingDatabaseBuilder, EntityColor,
     EntityRenderAttributes, EntityTransparency, Layer,
@@ -17,11 +22,6 @@ use cad_domain::{
     DatabaseId, DocumentId, EntityId, LayerId, Mesh, ObjectId, Point3, Revision, SemanticGeometry,
     SpaceId, UnitContext,
 };
-use cad_connector_core::{
-    ExportJob, ExportLimits, ExportOutput, ExportSpace, Exporter, ImportLimits, ImportRequest,
-    ImportedDrawing, Importer,
-};
-use crate::{GltfImporter, DESCRIPTOR_GLTF};
 use gltf::buffer::Source;
 
 use super::{GltfContainer, GltfExporter};

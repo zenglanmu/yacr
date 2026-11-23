@@ -1,16 +1,16 @@
 # 第三方来源与许可
 
-- acadrust：正式 0.6.8，唯一依赖入口 cad-import-acadrust；未修改上游，未使用 Cargo patch。
+- acadrust：正式 0.6.8，唯一依赖入口 cad-connector-acadrust；未修改上游，未使用 Cargo patch。
   上游 <https://github.com/hakanaktt/acadrust>。DWG/DXF 导入与实验性 DWG 导出都经该适配层；
   采用 API 与对外分发前审计锁定包许可及其传递依赖。
 - tobj 4.0.5：Wavefront OBJ 读取器，MIT，上游 <https://github.com/Twinklebear/tobj>。
-  仅由 `cad-import-obj` 依赖；`default-features = false`（不启用 `ahash`）以保持
+  仅由 `cad-connector-mesh` 依赖；`default-features = false`（不启用 `ahash`）以保持
   `wasm32-unknown-unknown` 可编译。
 - stl_io 0.11.0：ASCII/二进制 STL 读取器，MIT，上游 <https://github.com/hmeyer/stl_io>。
-  仅由 `cad-import-stl` 依赖；纯 Rust、无传递依赖。
+  仅由 `cad-connector-mesh` 依赖；纯 Rust、无传递依赖。
 - cadkit-dgn / cadkit-core 0.5.4：Bentley DGN V7（ISFF）/ V8（OLE-CFB）的 clean-room
   读取器与中性 `Document` 模型，**MIT OR Apache-2.0**，上游
-  <https://github.com/TNYCL/cadkit>。仅由 `cad-import-dgn` 依赖；版本在 workspace 中
+  <https://github.com/TNYCL/cadkit>。仅由 `cad-connector-dgn` 依赖；版本在 workspace 中
   **精确固定**（`=0.5.4`），`cadkit-dgn` 关闭默认 `write` feature（不引入 V8 writer 与可选
   `cfb`）。读取路径是纯 Rust、无 C 依赖、上游 `unsafe_code = forbid`；**未修改上游源码、
   无 Cargo patch、无 vendoring**。它是 2026-10 才出现的 0.x crate（单一维护者），因此只按
@@ -30,27 +30,27 @@
   布尔、质量属性；曲面 lift 显式拒绝）使用它，其传递依赖的实际版本与许可证见 Cargo.lock，
   分发前需做完整依赖审计。
 - cadmpeg-codec-step 0.6.12：ISO 10303-21（STEP，AP203/AP214/AP242）Part 21 解码器，
-  Apache-2.0，上游 <https://github.com/cadmpeg/cadmpeg>。仅由 `cad-import-step` 依赖；未修改。
+  Apache-2.0，上游 <https://github.com/cadmpeg/cadmpeg>。仅由 `cad-connector-step` 依赖；未修改。
 - structured-zstd 0.4.3：纯 Rust 的 RFC 8878 zstd 编解码器，Apache-2.0，上游
   <https://github.com/structured-world/structured-zstd>。仅由 `cad-store-zip` 依赖，
   用于 `.ymodel` JSON 条目的 zstd 帧；workspace 中**精确固定**（`=0.4.3`），
   `default-features = false, features = ["std"]`（不引入 CLI、字典训练、legacy 解码或
   SIMD kernel 依赖），可编 `wasm32-unknown-unknown`。未修改上游源码、无 Cargo patch。
   其输出是标准 zstd 帧，C `zstd` / `ruzstd` 均可读取；实际版本与许可证见 Cargo.lock。- cadmpeg-ir 0.6.12：cadmpeg 的中立 CAD IR（拓扑、单位、产品/occurrence、loss 报告与
-  `Codec` 契约），Apache-2.0，同一上游。仅由 `cad-import-step` 直接依赖（`Codec`/
+  `Codec` 契约），Apache-2.0，同一上游。仅由 `cad-connector-step` 直接依赖（`Codec`/
   `DecodeOptions` 定义在此 crate，不在 codec crate）；未修改。
 - cadmpeg-tessellate 0.6.12：cadmpeg 的 B-rep 逐面三角化器，Apache-2.0，同一上游。
-  仅由 `cad-import-step` 依赖；未修改。三个 cadmpeg crate 都未启用额外 feature。
+  仅由 `cad-connector-step` 依赖；未修改。三个 cadmpeg crate 都未启用额外 feature。
 - ifc-lite-core / ifc-lite-geometry 28.3.0：IFC（IFC2X3/IFC4/IFC4X3）Part 21 读取器与
   建筑几何网格化器，**MPL-2.0**，上游 <https://github.com/LTplus-AG/ifc-lite>。仅由
-  `cad-import-ifc` 依赖；版本在 workspace 中**精确固定**（`=28.3.0`），未启用额外 feature；
+  `cad-connector-ifc` 依赖；版本在 workspace 中**精确固定**（`=28.3.0`），未启用额外 feature；
   **两个 crate 的文件均未修改**（未打补丁、未复制其源码，也不修改其源文件）。MPL-2.0 是
   文件级 copyleft：披露义务针对被修改的源文件，本仓库不作任何修改，仅以编译产物形式链接；
   其源码可从上游与 crates.io 取得。该 crate 内含若干传递依赖（如 `i_overlay`、
   `geometry-predicates`、`nalgebra`）；实际版本与许可证见 Cargo.lock，分发前需做完整依赖审计。
 - ifc-lite-export / ifc-lite-processing 28.3.0：同一上游的 IFC4 导出计划执行器（skeleton、
   `Disposition::Add`、`IfcTriangulatedFaceSet` 写出）与几何处理管线，**MPL-2.0**，上游
-  <https://github.com/LTplus-AG/ifc-lite>。`ifc-lite-export` 仅由 `cad-export-ifc` 的 IFC4
+  <https://github.com/LTplus-AG/ifc-lite>。`ifc-lite-export` 仅由 `cad-connector-ifc` 的 IFC4
   writer 依赖；`ifc-lite-processing` 在同一 workspace 中一并固定，使 `ifc-lite-export` 的 caret
   依赖不能把 28.3.0 家族漂移到读取器 `=28.3.0` 之外。两者版本在 workspace 中**精确固定**
   （`=28.3.0`），未启用额外 feature（28.3.0 的默认 feature 会编入 CityJSON 写出器与其传递
@@ -60,7 +60,7 @@
   取得。其传递依赖的实际版本与许可证见 Cargo.lock，分发前需做完整依赖审计。
 - rvt 0.25.0：Autodesk Revit（`.rvt`/`.rte`/`.rfa`/`.rft`）的 clean-room 读取器与
   IFC4/glTF/plan-SVG 导出器，**Apache-2.0**，上游 <https://github.com/DrunkOnJava/rvt-rs>。
-  仅由 `cad-import-rvt` 依赖；版本在 workspace 中**精确固定**（`=0.25.0`），未启用额外
+  仅由 `cad-connector-rvt` 依赖；版本在 workspace 中**精确固定**（`=0.25.0`），未启用额外
   feature。**源码有本地补丁**：上游 0.25.0 的一份完整副本以固定路径 `vendor/rvt` 引入
   （Apache-2.0 允许修改与再分发），只改 `src/ifc/gltf.rs` 的透明度选择（材质来源标记 `extras`
   自上游 0.20.0、material 索引越界过滤自 0.24.0 起已包含在上游 0.25.0）；改动、
@@ -71,28 +71,28 @@
   Cargo.lock，分发前需做完整依赖审计。
 - gltf 1.4.1（含 `gltf-json` 1.4.1、`gltf-derive` 1.4.1）：glTF 2.0 / GLB 读取器与
   文档校验器，**MIT OR Apache-2.0**，上游 <https://github.com/gltf-rs/gltf>。由
-  `cad-import-gltf`（用户可见的 `.gltf`/`.glb` 导入 lane）与 `cad-import-rvt`（读取 `rvt`
+  `cad-connector-gltf`（用户可见的 `.gltf`/`.glb` 导入 lane）与 `cad-connector-rvt`（读取 `rvt`
   生成的**内部**单缓冲 GLB）依赖；`default-features = false` 并只启用
   `utils`/`names`/`extras`（`extras` 只读 `rvt` 材质的 `colourSource`/`alphaSource`
   来源字段），因此不引入 `image` 及其编解码依赖；版本在 workspace 中**精确固定**（`=1.4.1`），
   **未修改上游源码**（未打补丁、未复制其源码）。
 - base64 0.22.1：Base64 编解码，**MIT OR Apache-2.0**，上游
-  <https://github.com/marshallpierce/rust-base64>。由 `cad-import-gltf`
-  （`.gltf` 的 `data:` buffer 解码）与 `cad-export-gltf`（JSON `.gltf` 的 buffer 内嵌为 base64
-  data URI）依赖；该版本已在 `Cargo.lock` 中（既有传递依赖），workspace 以 `base64 = "0.22"`
+  <https://github.com/marshallpierce/rust-base64>。由 `cad-connector-gltf` 依赖
+  （`.gltf` 的 `data:` buffer 解码与 JSON `.gltf` 的 buffer 内嵌为 base64 data URI）；
+  该版本已在 `Cargo.lock` 中（既有传递依赖），workspace 以 `base64 = "0.22"`
   声明，**未修改上游源码**。
 - png 0.18.1：PNG 编解码，**MIT OR Apache-2.0**，上游 <https://github.com/image-rs/png>。
-  由 `cad-import-ifc`（IFC 纹理 RGBA8 → 确定性 PNG，ADR-0038）与既有图像解码路径
+  由 `cad-connector-ifc`（IFC 纹理 RGBA8 → 确定性 PNG，ADR-0038）与既有图像解码路径
   （`cad-resources`/`cad-platform`/`cad-render-wgpu`）依赖；workspace 以
   `png = "0.18"` 声明，`Cargo.lock` 解析为 0.18.1，**未修改上游源码、未打补丁、未做 vendoring**。
 - sha2 0.11.1：SHA-256 摘要，**MIT OR Apache-2.0**，上游
-  <https://github.com/RustCrypto/hashes>。由 `cad-import-core`（文档纹理的内容寻址键）、
+  <https://github.com/RustCrypto/hashes>。由 `cad-connector-core`（文档纹理的内容寻址键）、
   `cad-store-zip`（`.ymodel` entry 的 `sha256` 校验）与 `cad-host`（保存冲突检测）直接依赖
-  （`cad-import-acadrust` 既有依赖沿用）；workspace 以 `sha2 = "0.11"` 声明，`Cargo.lock`
+  （`cad-connector-acadrust` 既有依赖沿用）；workspace 以 `sha2 = "0.11"` 声明，`Cargo.lock`
   解析为 0.11.1，**未修改上游源码、未打补丁、未做 vendoring**。（`Cargo.lock` 中的
   `sha2 0.10.9` 来自 `rvt` 等传递依赖，不是本仓库的直接依赖。）
 - skpwright 0.6.0：SketchUp（`.skp`）的 clean-room 读取器，**GPL-3.0-only**，上游
-  <https://github.com/hew3d/skpwright>。仅由 `cad-import-skp` 依赖；版本在 workspace 中
+  <https://github.com/hew3d/skpwright>。仅由 `cad-connector-skp` 依赖；版本在 workspace 中
   **精确固定**（`=0.6.0`），未启用额外 feature，上游源码**未修改**（未打补丁、未复制其源码）；
   它只有**一个**依赖 `miniz_oxide`（纯 Rust），本仓库的导入 lane 也是纯 Rust、无平台依赖。
   它是 **preview** 读取器：输出三角形、实例变换、tag、材质颜色/不透明度与**正面**基色纹理

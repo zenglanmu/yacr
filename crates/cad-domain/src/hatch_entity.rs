@@ -269,7 +269,7 @@ pub enum HatchPatternType {
 /// in each definition row's base point (groups 43/44), which is what AutoCAD's
 /// HATCHEDIT ORIGIN rewrites. This field is therefore the displacement from the
 /// stored rows: `[0.0, 0.0]` means "the file's own origin", and the export folds
-/// a non-zero value back into the rows (see `cad-import-acadrust`'s
+/// a non-zero value back into the rows (see `cad-connector-acadrust`'s
 /// `export::hatch`), never into a field no consumer would read.
 #[derive(Debug, Clone, PartialEq)]
 pub struct HatchGeometry {

@@ -147,7 +147,7 @@
 //!
 //! - **Bytes in, one file.** `open_bytes` takes the DWG bytes from the caller; there
 //!   is no filesystem in wasm and no reading of a path. Import, proxy and resource
-//!   decoding are exactly what `cad-import-acadrust` does on this target.
+//!   decoding are exactly what `cad-connector-acadrust` does on this target.
 //! - **WebGL2 only.** Neither target runtime exposes `navigator.gpu`, so the
 //!   presenter requests `Backends::GL`. A missing/broken WebGL2 context is an
 //!   explicit refusal, never a blank canvas.

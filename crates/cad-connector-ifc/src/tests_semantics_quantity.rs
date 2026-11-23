@@ -9,9 +9,9 @@
 use std::sync::Arc;
 
 use crate::*;
+use cad_connector_core::{ImportLimits, ImportRequest, ImportedDrawing};
 use cad_db::{BimElement, BimPropertySet, BimValue, BIM_MAX_PROPERTIES_PER_SET};
 use cad_domain::{Completeness, DatabaseId, DocumentId};
-use cad_connector_core::{ImportLimits, ImportRequest, ImportedDrawing};
 
 fn request_bytes(bytes: Vec<u8>) -> ImportRequest {
     ImportRequest {

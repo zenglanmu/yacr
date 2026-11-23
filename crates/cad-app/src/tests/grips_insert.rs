@@ -5,7 +5,7 @@
 //! stores a 4x4 affine placement, and the handle is that placement's **insertion
 //! point** — the image of the block-space origin under it (the importer folds the
 //! block base point into the placement, so this is the stored `INSERT` insertion
-//! point; see `cad-import-acadrust`'s `insert_array_transform`/`block_placement`).
+//! point; see `cad-connector-acadrust`'s `insert_array_transform`/`block_placement`).
 //! `Transform3::apply_point` has no homogeneous divide, so that image is exactly
 //! the matrix's translation column.
 //!

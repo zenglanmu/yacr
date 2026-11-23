@@ -11,7 +11,7 @@
 //!
 //! The synthesis lives in `cad-domain` (not the importer) so creation and import
 //! share one builder; it was moved verbatim from the former
-//! `cad-import-acadrust::dimension` module, and the numbers it produces are
+//! `cad-connector-acadrust::dimension` module, and the numbers it produces are
 //! unchanged. `cad-domain` is the lowest layer, so the small amount of vector
 //! algebra it needs is implemented locally rather than pulled from
 //! `cad-geometry` (which depends on this crate).

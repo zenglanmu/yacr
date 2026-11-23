@@ -3,7 +3,7 @@
 //! This is the **one** tolerance rule shared by the two paths that produce a
 //! body's display cache:
 //!
-//! * import-time ACIS lift (`cad-import-acadrust` → `tessellate_exchange`);
+//! * import-time ACIS lift (`cad-connector-acadrust` → `tessellate_exchange`);
 //! * command-time primitive creation (`cad-app` → the injected `SolidModeler`
 //!   → `tessellate_exchange`).
 //!

@@ -5,14 +5,14 @@ use std::cell::Cell;
 use std::sync::Arc;
 
 use super::*;
-use cad_domain::{
-    CadError, Completeness, DatabaseId, DocumentId, EntityCapability, Mesh, SemanticGeometry,
-    SupportStatus,
-};
 use cad_connector_core::{
     detect_format, DrawingFormat, ImportLimits, ImportPhase, IFC_SCHEMA_REFUSED,
 };
 use cad_connector_step::StepImporter;
+use cad_domain::{
+    CadError, Completeness, DatabaseId, DocumentId, EntityCapability, Mesh, SemanticGeometry,
+    SupportStatus,
+};
 
 fn request_bytes(bytes: Vec<u8>) -> ImportRequest {
     ImportRequest {

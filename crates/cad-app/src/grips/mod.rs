@@ -103,7 +103,7 @@
 //! that transform, so the block-space origin lands exactly on the `INSERT`'s
 //! insertion point. The handle is therefore `transform * (0, 0, 0)` — the
 //! translation column of the matrix, which is the one existing convention for "the
-//! insertion point of an insert" in this repo (`cad-import-acadrust`'s
+//! insertion point of an insert" in this repo (`cad-connector-acadrust`'s
 //! `insert_array_transform` / `block_placement`); no second convention is invented
 //! here. The handle is the *origin's image*, not "the translation as a point":
 //! those are the same `f64` bits, and the contract test pins that a change to the

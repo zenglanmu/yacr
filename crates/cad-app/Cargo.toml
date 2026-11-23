@@ -9,7 +9,7 @@ description = "Session/Workspace, commands, capability and tool state."
 
 # Format lanes are feature-gated so a carrier that links only the DWG/DXF
 # exchange (the `dom-canvas` wasm bundle) does not pull every adapter into its
-# artifact. `cad-import-acadrust` stays mandatory: it is the DWG/DXF base and
+# artifact. `cad-connector-acadrust` stays mandatory: it is the DWG/DXF base and
 # `lib.rs` re-exports `cad_acadrust::…` unconditionally. The feature names below
 # are a contract — a carrier that disables defaults relies on them.
 [features]

@@ -202,7 +202,7 @@
 //! # `XDLIST`
 //!
 //! `XDLIST` (payload-free; the selection is the input) is a **read-only** report
-//! of the selected entities' preserved extended data. `cad-import-acadrust` can
+//! of the selected entities' preserved extended data. `cad-connector-acadrust` can
 //! summarise source `ExtendedEntityData`/`object_xdata` during import, but
 //! `cad-domain::SemanticGeometry` and `cad-db::DbEntity` **do not retain xdata**:
 //! there is no application name, no values and no per-entity store to read back.

@@ -7,7 +7,7 @@
 //! [`BrepData`](cad_domain::BrepData) that callers commit through `cad-db`. No
 //! kernel type crosses this seam: the only implementation allowed to name
 //! `solidcore` is `cad-kernel-solidcore` (phase B2), exactly as
-//! `cad-import-acadrust` is the only `acadrust` consumer.
+//! `cad-connector-acadrust` is the only `acadrust` consumer.
 //!
 //! # Honest status
 //!

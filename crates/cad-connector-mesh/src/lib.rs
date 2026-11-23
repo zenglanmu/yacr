@@ -47,11 +47,6 @@ pub use obj::{
     DIAG_EMPTY_OBJECT, DIAG_MTL_NOT_LOADED, DIAG_NGON_FAN as OBJ_DIAG_NGON_FAN,
     DIAG_TEXTURE_NOT_IMPORTED as OBJ_DIAG_TEXTURE_NOT_IMPORTED, OBJ_MESH_TYPE_KEY,
 };
-pub use stl::{
-    detect_variant, StlImporter, StlVariant, DESCRIPTOR_STL,
-    DIAG_DEGENERATE_TRIANGLE as STL_DIAG_DEGENERATE_TRIANGLE, DIAG_NORMAL_RECOMPUTED,
-    STL_MESH_TYPE_KEY,
-};
 pub use off::{
     OffImporter, DIAG_ALPHA_DROPPED, DIAG_COLORS_DROPPED, DIAG_DEGENERATE_TRIANGLE,
     DIAG_FACE_COLOR_NOT_IMPORTED, DIAG_FACE_TOO_FEW_VERTICES, DIAG_NGON_FAN, ERR_INDEX_RANGE,
@@ -68,17 +63,22 @@ pub use ply::{
     ERR_TRUNCATED as PLY_ERR_TRUNCATED, ERR_UNSUPPORTED_FORMAT, ERR_UNSUPPORTED_PROPERTY_TYPE,
     PLY_MESH_TYPE_KEY,
 };
+pub use stl::{
+    detect_variant, StlImporter, StlVariant, DESCRIPTOR_STL,
+    DIAG_DEGENERATE_TRIANGLE as STL_DIAG_DEGENERATE_TRIANGLE, DIAG_NORMAL_RECOMPUTED,
+    STL_MESH_TYPE_KEY,
+};
 
 #[cfg(test)]
 mod tests;
 
-use cad_db::EntityColor;
-use cad_domain::{CadError, CadResult, Diagnostic, DocumentIdentity, Mesh, Point3, UnitContext};
 use cad_connector_core::{
     ConnectorDescriptor, ExportCapability, FidelityLevel, ImportCapability, ImportLimits,
     ImportPhase, ImportProgress, ImportProgressSink, ImportReport, ImportRequest, ImportedDrawing,
     MeshImport, SpecVisibility,
 };
+use cad_db::EntityColor;
+use cad_domain::{CadError, CadResult, Diagnostic, DocumentIdentity, Mesh, Point3, UnitContext};
 
 /// One non-fatal fact the parser found. `partial` marks lost/inexact geometry;
 /// attribute-only losses use `false` (matching the STL normal note).

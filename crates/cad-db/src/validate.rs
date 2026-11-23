@@ -285,7 +285,7 @@ pub fn validate_geometry(geometry: &SemanticGeometry) -> CadResult<()> {
             //
             // * `knots: []` means "clamped uniform". Two shipped constructors
             //   produce it deliberately — `cad-domain/src/multileader.rs`
-            //   (`path_geometry`) and `cad-import-acadrust/src/dimension/
+            //   (`path_geometry`) and `cad-connector-acadrust/src/dimension/
             //   multileader.rs` (`multileader_path`) — for a MULTILEADER leader
             //   path of type Spline. `cad-geometry`'s `tessellate_spline` expands
             //   it: `NurbsCurve::new` rejects the wrong-length vector, and the

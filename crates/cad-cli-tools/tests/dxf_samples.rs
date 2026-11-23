@@ -10,7 +10,7 @@
 //! These checks are **structural** (import + non-empty representation). The
 //! geometric shape of every non-zero bulge in the same corpus — apex side,
 //! analytic circle, angular span — is asserted by
-//! `cad-import-acadrust/tests/dxf_bulge_corpus.rs`, which can reach both the
+//! `cad-connector-acadrust/tests/dxf_bulge_corpus.rs`, which can reach both the
 //! importer and the tessellator; a mirrored arc expansion passed this file.
 
 use std::path::PathBuf;

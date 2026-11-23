@@ -3,7 +3,7 @@
 //! The option moves the **pattern phase** — the hatch-plane displacement applied
 //! to the pattern's definition rows — because neither the DXF nor the DWG hatch
 //! record has a dedicated origin group (the phase lives in each row's base point,
-//! groups 43/44; `cad-import-acadrust`'s export folds it back there). These tests
+//! groups 43/44; `cad-connector-acadrust`'s export folds it back there). These tests
 //! pin the stored value, the rebuilt display, the one-transaction/one-undo shape,
 //! the interaction with the other pattern edits, and every refusal.
 

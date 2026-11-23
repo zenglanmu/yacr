@@ -28,11 +28,11 @@ is added to `fixtures/manifest` (there is no committed file to declare).
 ```bash
 # A release 3–8 / 2013–2020 (stream container) model, e.g. box.skp
 YACR_TEST_SKP=/absolute/path/box.skp \
-  cargo test -p cad-import-skp --locked
+  cargo test -p cad-connector-skp --locked
 
 # A 2026/2027 (ZIP/tagged-record container) model
 YACR_TEST_SKP_2026=/absolute/path/theater-2026.skp \
-  cargo test -p cad-import-skp --locked
+  cargo test -p cad-connector-skp --locked
 ```
 
 - Both variables take an **absolute path**; a relative path is the caller's

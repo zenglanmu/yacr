@@ -9,9 +9,9 @@
 //! drop entry instead of being skipped. Model space is the only space written;
 //! paper layouts and block definitions are dropped by name.
 
+use cad_connector_core::ExportJob;
 use cad_db::DbEntity;
 use cad_domain::{CadError, CadResult, ObjectId, Point3, SemanticGeometry, SpaceId};
-use cad_connector_core::ExportJob;
 
 /// One writable source entity, copied out of the read-only database.
 pub(crate) struct SourceMesh {

@@ -29,13 +29,6 @@
 //! contract tests and the bounded runs listed in `docs/compatibility.md`; no
 //! entry here is a vendor-compatibility claim.
 
-use cad_domain::{CadError, CadResult};
-#[cfg(feature = "formats-gltf")]
-use cad_connector_gltf::{GltfContainer, GltfExporter, GltfImporter};
-#[cfg(feature = "formats-mesh")]
-use cad_connector_mesh::{
-    MeshExporter, MeshFormat, ObjImporter, OffImporter, PlyImporter, StlImporter,
-};
 use cad_connector_acadrust::export::{AcadrustExporter, AcisVersion, DxfTarget, ExportFormat};
 use cad_connector_acadrust::AcadrustImporter;
 use cad_connector_core::{
@@ -44,14 +37,21 @@ use cad_connector_core::{
 };
 #[cfg(feature = "formats-dgn")]
 use cad_connector_dgn::DgnImporter;
+#[cfg(feature = "formats-gltf")]
+use cad_connector_gltf::{GltfContainer, GltfExporter, GltfImporter};
 #[cfg(feature = "formats-ifc")]
 use cad_connector_ifc::{IfcExporter, IfcImporter};
+#[cfg(feature = "formats-mesh")]
+use cad_connector_mesh::{
+    MeshExporter, MeshFormat, ObjImporter, OffImporter, PlyImporter, StlImporter,
+};
 #[cfg(feature = "formats-rvt")]
 use cad_connector_rvt::RvtImporter;
 #[cfg(feature = "formats-skp")]
 use cad_connector_skp::{SkpExporter, SkpImporter};
 #[cfg(feature = "formats-step")]
 use cad_connector_step::StepImporter;
+use cad_domain::{CadError, CadResult};
 use std::sync::LazyLock;
 
 // Each format crate owns its descriptor; this module only wires the constants
@@ -266,7 +266,7 @@ impl OpenedSource {
     /// value this host produces: a public source yields no `openedSource`).
     ///
     /// Exposes the classification to the wire layer without making it depend on
-    /// `cad-import-core` just to name the enum.
+    /// `cad-connector-core` just to name the enum.
     pub fn spec_is_public(&self) -> bool {
         matches!(self.spec, SpecVisibility::Public)
     }

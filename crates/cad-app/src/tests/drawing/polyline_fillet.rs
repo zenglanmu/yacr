@@ -5,9 +5,11 @@ use super::*;
 use crate::app_drawing::{
     plan_polyline_corners, polyline_corner_tolerance, two_line_fillet_plan, PolylineCornerSpec,
 };
-use cad_geometry::bulge_arc_geometry;
-use cad_connector_acadrust::export::{export, ExportFormat, ExportLimits, ExportRequest, ExportSpace};
+use cad_connector_acadrust::export::{
+    export, ExportFormat, ExportLimits, ExportRequest, ExportSpace,
+};
 use cad_connector_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
+use cad_geometry::bulge_arc_geometry;
 
 fn polyline_geometry(points: Vec<Point3>, bulges: Vec<f64>, closed: bool) -> SemanticGeometry {
     SemanticGeometry::Polyline {

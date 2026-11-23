@@ -4,8 +4,8 @@
 use std::sync::Arc;
 
 use super::*;
-use cad_domain::{CadError, Completeness, DatabaseId, DocumentId, Mesh, SemanticGeometry, Unit};
 use cad_connector_core::{ImportRequest, Importer};
+use cad_domain::{CadError, Completeness, DatabaseId, DocumentId, Mesh, SemanticGeometry, Unit};
 
 const PLY_ASCII_FIXTURE: &[u8] = include_bytes!("../../../fixtures/ply/synthetic-attrs-ascii.ply");
 const PLY_LE_FIXTURE: &[u8] = include_bytes!("../../../fixtures/ply/synthetic-binary-le.ply");

@@ -26,8 +26,8 @@ mod ply;
 mod report;
 mod stl;
 
-use cad_domain::{CadError, CadResult};
 use cad_connector_core::{ConnectorDescriptor, ExportJob, ExportOutput, Exporter};
+use cad_domain::{CadError, CadResult};
 
 /// One concrete neutral-mesh wire format.
 ///

@@ -26,11 +26,11 @@
 use super::offset::app_with_drawing;
 use super::offset_polyline::{created_polyline, polyline_app, undo_depth};
 use super::*;
-use cad_geometry::bulge_arc_geometry;
 use cad_connector_acadrust::export::{
     export, AcisVersion, DxfTarget, ExportFormat, ExportLimits, ExportRequest, ExportSpace,
 };
 use cad_connector_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
+use cad_geometry::bulge_arc_geometry;
 
 /// The `+Z` normal the DXF bulge convention uses for 2D data.
 const Z: Point3 = Point3 {

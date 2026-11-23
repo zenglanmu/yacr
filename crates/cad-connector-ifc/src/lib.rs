@@ -68,13 +68,13 @@
 //! [`export`] module of this same connector and is declared as an L1 lossy
 //! export on [`DESCRIPTOR_IFC`].
 
-use cad_db::EntityColor;
-use cad_domain::{CadError, CadResult, Diagnostic, Unit, UnitContext};
 use cad_connector_core::{
     compute_identity, ifc_schema as ifc_file_schema, ConnectorDescriptor, ExportCapability,
     FidelityLevel, ImportCapability, ImportPhase, ImportProgress, ImportProgressSink, ImportReport,
     ImportRequest, ImportedDrawing, Importer, MeshImport, NoopProgress, SpecVisibility,
 };
+use cad_db::EntityColor;
+use cad_domain::{CadError, CadResult, Diagnostic, Unit, UnitContext};
 use ifc_lite_core::{
     build_entity_index, is_geometry_job, resolve_length_unit, EntityDecoder, EntityScanner, IfcType,
 };

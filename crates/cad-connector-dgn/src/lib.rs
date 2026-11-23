@@ -45,12 +45,12 @@ mod map;
 mod tests;
 mod transform;
 
-use cad_domain::{CadError, CadResult, UnitContext};
 use cad_connector_core::{
     compute_identity, ConnectorDescriptor, ImportCapability, ImportLimits, ImportPhase,
     ImportProgress, ImportProgressSink, ImportReport, ImportRequest, ImportedDrawing, Importer,
     NoopProgress, SpecVisibility,
 };
+use cad_domain::{CadError, CadResult, UnitContext};
 
 /// Stable refusal code: the DGN reader produced no drawable entity.
 pub const NO_GEOMETRY: &str = "import.dgn.no_geometry";

@@ -1,7 +1,7 @@
 use super::table_tests::export_lanes;
 use super::*;
-use cad_domain::{DatabaseId, DocumentId};
 use cad_connector_core::FidelityLevel;
+use cad_domain::{DatabaseId, DocumentId};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -69,7 +69,7 @@ fn one_line_db() -> cad_db::DrawingDatabase {
 
 /// A one-triangle model-space mesh on layer `0`, the smallest database every
 /// mesh/IFC/SKP writer accepts (same minimal pattern as
-/// `cad-import-core::mesh_import`).
+/// `cad-connector-core::mesh_import`).
 pub(super) fn triangle_db() -> cad_db::DrawingDatabase {
     use cad_db::{DbEntity, DbObject, DrawingDatabaseBuilder, Layer};
     use cad_domain::{
@@ -579,7 +579,11 @@ fn registry_import_matches_the_probe_decision() {
     let bytes = fixture("stl/synthetic-quad.stl");
     assert_eq!(registry.route(&bytes).map(|d| d.id), Some("stl"));
     let drawing = registry
-        .import(&request(bytes), &|| false, &cad_connector_core::NoopProgress)
+        .import(
+            &request(bytes),
+            &|| false,
+            &cad_connector_core::NoopProgress,
+        )
         .expect("the STL lane imports");
     assert_eq!(drawing.database.entity_count(), 1);
 }
@@ -594,7 +598,10 @@ fn a_connector_descriptor_is_available_through_the_trait() {
     // `descriptor` exists on both `Connector` and `Exporter`; the test names
     // the trait it is exercising.
     assert_eq!(Exporter::descriptor(&exporter).id, "dxf");
-    assert_eq!(cad_connector_core::Connector::descriptor(&exporter).id, "dxf");
+    assert_eq!(
+        cad_connector_core::Connector::descriptor(&exporter).id,
+        "dxf"
+    );
     assert_eq!(exporter.format_id(), "dxf");
     let descriptor = Exporter::descriptor(&exporter);
     assert!(descriptor.extensions.contains(&"dxf"));
@@ -613,7 +620,7 @@ fn a_connector_descriptor_is_available_through_the_trait() {
 
 /// Every registered descriptor must declare one of the two spec visibilities.
 ///
-/// `cad-import-core` owns the vocabulary but cannot depend on the format crates,
+/// `cad-connector-core` owns the vocabulary but cannot depend on the format crates,
 /// so the registry (this crate) is the only place the whole descriptor set can
 /// be enumerated. The match is exhaustive on purpose: a third
 /// [`cad_connector_core::SpecVisibility`] variant fails to compile here instead of

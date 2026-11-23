@@ -3,7 +3,7 @@
 //!
 //! # The table is real, and the writes are real
 //!
-//! This build has a genuine scale table: `cad-import-acadrust` reads every
+//! This build has a genuine scale table: `cad-connector-acadrust` reads every
 //! non-temporary `AcDbScale` object into
 //! [`DrawingDatabase::scales`](cad_db::DrawingDatabase::scales), and
 //! `cad_db::drawing::scale_edit` is the sanctioned post-import writer. So both

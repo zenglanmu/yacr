@@ -511,7 +511,7 @@ pub(crate) fn is_paper_space_name(name: &str) -> bool {
 
 /// SHA-256 content identity of the imported bytes.
 ///
-/// Implemented once in `cad-import-core` so every importer reports the same
+/// Implemented once in `cad-connector-core` so every importer reports the same
 /// identity for the same bytes; re-exported crate-internally to keep the
 /// existing `compute_identity(..)` call sites unchanged.
 pub(crate) use cad_connector_core::compute_identity;

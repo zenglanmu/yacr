@@ -11,8 +11,8 @@
 //! SKP imports ignore it; those formats have no CAD external references, and
 //! reporting otherwise would invent a resolution that never happened.
 
-use cad_domain::CadResult;
 use cad_connector_core::{ImportProgressSink, ImportedDrawing, NoopProgress};
+use cad_domain::CadResult;
 
 use crate::connector::ConnectorRegistry;
 
@@ -96,8 +96,8 @@ mod tests {
     #![allow(unused_imports, dead_code)]
 
     use super::*;
-    use cad_domain::{CadError, DatabaseId, DocumentId};
     use cad_connector_core::{detect_format, DrawingFormat};
+    use cad_domain::{CadError, DatabaseId, DocumentId};
     use std::sync::Arc;
 
     fn request(bytes: Vec<u8>) -> ImportRequest {

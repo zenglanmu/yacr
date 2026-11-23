@@ -43,7 +43,7 @@
 //! Run it with:
 //!
 //! ```text
-//! cargo test -p cad-import-acadrust --test fixtures_generate -- --ignored
+//! cargo test -p cad-connector-acadrust --test fixtures_generate -- --ignored
 //! ```
 
 use std::io::Cursor;
@@ -52,8 +52,8 @@ use std::sync::Arc;
 
 use acadrust::entities::Solid3D;
 use acadrust::{CadDocument, DwgReader, DwgWriter, DxfReader, DxfVersion, DxfWriter, EntityType};
-use cad_domain::{DatabaseId, DocumentId, Mesh, SemanticGeometry};
 use cad_connector_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
+use cad_domain::{DatabaseId, DocumentId, Mesh, SemanticGeometry};
 
 /// Raw ACIS payload the drawing fixture is built from.
 const CUBE_SAT: &str = "fixtures/acis/cube.sat";

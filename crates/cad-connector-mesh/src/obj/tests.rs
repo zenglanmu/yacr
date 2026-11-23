@@ -3,10 +3,10 @@
 use std::sync::{Arc, Mutex};
 
 use super::*;
+use cad_connector_core::{ImportPhase, ImportProgress};
 use cad_domain::{
     CadError, Completeness, DatabaseId, DocumentId, EntityCapability, SemanticGeometry,
 };
-use cad_connector_core::{ImportPhase, ImportProgress};
 
 fn request(bytes: &str) -> ImportRequest {
     request_bytes(bytes.as_bytes().to_vec())

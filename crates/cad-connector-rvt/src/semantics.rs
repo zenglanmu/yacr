@@ -47,13 +47,13 @@
 
 use std::collections::BTreeMap;
 
+use cad_connector_core::MeshImport;
 use cad_db::{
     BimDefinition, BimDefinitions, BimElement, BimEvidence, BimProperty, BimPropertySet, BimSource,
     BimValue, BIM_MAX_DEFINITIONS, BIM_MAX_PROPERTIES_PER_SET, BIM_MAX_PSETS_PER_ELEMENT,
     BIM_MAX_STRING_BYTES,
 };
 use cad_domain::Diagnostic;
-use cad_connector_core::MeshImport;
 use rvt::ifc::entities::{IfcEntity, PropertySet, PropertyValue};
 use rvt::ifc::IfcModel;
 

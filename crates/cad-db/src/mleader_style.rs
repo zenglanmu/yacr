@@ -37,7 +37,7 @@
 //! ## What the import does and does not feed
 //!
 //! The importer reads the source `MLEADERSTYLE` objects into this table
-//! (`cad-import-acadrust`'s `read_mleader_styles`), so the table is authoritative
+//! (`cad-connector-acadrust`'s `read_mleader_styles`), so the table is authoritative
 //! for creation even for an imported drawing. Fields the entity model does not
 //! carry — leader colour/linetype/lineweight, the arrowhead block handle, block
 //! content parameters, draw order, annotative flags and the R2013+ flag — are

@@ -9,8 +9,8 @@ use std::io::{Cursor, Write};
 use std::path::Path;
 use std::sync::Arc;
 
-use cad_domain::{CadError, DatabaseId, DocumentId, MeshPbr, SupportStatus};
 use cad_connector_core::{detect_format, DrawingFormat, ImportLimits, ImportRequest};
+use cad_domain::{CadError, DatabaseId, DocumentId, MeshPbr, SupportStatus};
 use serde_json::{json, Value};
 
 use super::*;
@@ -104,7 +104,7 @@ fn import_error(request: &ImportRequest) -> CadError {
 ///
 /// ```text
 /// YACR_TEST_RVT=fixtures/rvt/samples/racbasicsampleproject.rvt \
-///   cargo test -p cad-import-rvt real_revit_project -- --nocapture
+///   cargo test -p cad-connector-rvt real_revit_project -- --nocapture
 /// ```
 #[test]
 fn a_real_revit_project_imports_when_supplied() {

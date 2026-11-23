@@ -2,7 +2,7 @@
 //! selection/filter, properties, EXPLODE and grip refusals.
 //!
 //! The import/export round trips and the display-equivalence contract live in
-//! `cad-import-acadrust`; this module exercises the application surfaces a user
+//! `cad-connector-acadrust`; this module exercises the application surfaces a user
 //! actually reaches.
 
 use super::*;

@@ -26,8 +26,8 @@ use std::time::Instant;
 
 use cad_app::camera::{Camera, Projection};
 use cad_app::picking::pick_at_screen;
-use cad_domain::{DatabaseId, DocumentId, Point3, TolerancePolicy};
 use cad_connector_acadrust::{AcadrustImporter, ImportLimits, ImportRequest, Importer};
+use cad_domain::{DatabaseId, DocumentId, Point3, TolerancePolicy};
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

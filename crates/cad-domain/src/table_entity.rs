@@ -12,7 +12,7 @@
 //! that disagrees with the definition.
 //!
 //! The display derivation is a **verbatim move** of the pre-table-entity
-//! importer's `cad-import-acadrust::entity::table` cell-grid synthesis: one
+//! importer's `cad-connector-acadrust::entity::table` cell-grid synthesis: one
 //! `Line` per visible cell edge (a double border adds a second, inward-offset
 //! line) and one `Text` per anchoring cell with content. The acceptance for that
 //! migration was display equivalence with the old `Compound` output; the two

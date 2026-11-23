@@ -243,13 +243,13 @@ pub(super) fn create_and_bind_session(shared: &Arc<Mutex<Shared>>, cad_mode: boo
                     )));
                     // P2.1c part 1: the display mesher rides on the same injection.
                     // No import path in this build can produce a
-                    // `BrepSurface::Nurbs` face (`cad-import-acadrust`'s ACIS reader
+                    // `BrepSurface::Nurbs` face (`cad-connector-acadrust`'s ACIS reader
                     // refuses spline surfaces by name, so the importer never lifts
                     // one), which means nothing *reachable* exercises this today.
                     // It is wired anyway because the seam is the carrier's
                     // composition: a body with a NURBS face (a future importer, or a
                     // kernel product) must draw here, not fall back to a missing
-                    // face, and `cad-import-acadrust` stays free of kernel types.
+                    // face, and `cad-connector-acadrust` stays free of kernel types.
                     session.set_solid_tessellator(Some(std::sync::Arc::new(
                         cad_kernel_solidcore::SolidCoreTessellator::new(),
                     )));

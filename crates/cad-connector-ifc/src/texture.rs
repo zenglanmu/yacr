@@ -26,8 +26,8 @@
 
 use std::collections::BTreeMap;
 
-use cad_domain::Diagnostic;
 use cad_connector_core::MeshImport;
+use cad_domain::Diagnostic;
 use ifc_lite_core::EntityDecoder;
 use ifc_lite_geometry::{TextureAttachment, TextureSource};
 

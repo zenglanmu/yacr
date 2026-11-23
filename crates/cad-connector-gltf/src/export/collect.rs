@@ -19,9 +19,9 @@
 
 use std::sync::Arc;
 
+use cad_connector_core::ExportJob;
 use cad_db::{DbEntity, EntityColor, EntityRenderAttributes, EntityTransparency};
 use cad_domain::{CadError, CadResult, ObjectId, Point3, SemanticGeometry, SpaceId};
-use cad_connector_core::ExportJob;
 
 /// One document-owned base-colour texture resolved from `cad-db`.
 ///

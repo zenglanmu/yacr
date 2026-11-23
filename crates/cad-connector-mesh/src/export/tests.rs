@@ -2,19 +2,19 @@
 
 use std::sync::Arc;
 
-use cad_db::{DbEntity, DbObject, DrawingDatabase, DrawingDatabaseBuilder, Layer, Layout};
-use cad_domain::{
-    BlockId, Body3d, BodyDisplay, BodyExact, BodyKind, CadError, Completeness, DatabaseId,
-    DocumentId, EntityId, LayerId, LayoutId, Mesh, ObjectId, Point3, Precision, Revision,
-    SemanticGeometry, SpaceId, SupportStatus, UnitContext,
+use crate::{
+    ObjImporter, OffImporter, PlyImporter, StlImporter, DESCRIPTOR_OBJ, DESCRIPTOR_OFF,
+    DESCRIPTOR_PLY, DESCRIPTOR_STL,
 };
 use cad_connector_core::{
     ConnectorDescriptor, ExportJob, ExportLimits, ExportOutput, ExportSpace, Exporter,
     ImportLimits, ImportRequest, ImportedDrawing, Importer,
 };
-use crate::{
-    ObjImporter, OffImporter, PlyImporter, StlImporter, DESCRIPTOR_OBJ, DESCRIPTOR_OFF,
-    DESCRIPTOR_PLY, DESCRIPTOR_STL,
+use cad_db::{DbEntity, DbObject, DrawingDatabase, DrawingDatabaseBuilder, Layer, Layout};
+use cad_domain::{
+    BlockId, Body3d, BodyDisplay, BodyExact, BodyKind, CadError, Completeness, DatabaseId,
+    DocumentId, EntityId, LayerId, LayoutId, Mesh, ObjectId, Point3, Precision, Revision,
+    SemanticGeometry, SpaceId, SupportStatus, UnitContext,
 };
 
 use super::{MeshExporter, MeshFormat};

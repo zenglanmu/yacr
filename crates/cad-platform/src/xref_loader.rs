@@ -1,6 +1,6 @@
 //! Host-side carriers for external-reference (XREF) file access.
 //!
-//! `cad-resources`/`cad-import-acadrust` decide *whether* a reference path is
+//! `cad-resources`/`cad-connector-acadrust` decide *whether* a reference path is
 //! allowed and *what* to do with the bytes; the concrete carrier lives here.
 //! Native hosts read real files (the CLI/headless tool included), while a wasm
 //! carrier without a host bridge reports "no filesystem" explicitly with

@@ -30,13 +30,13 @@
 
 use std::io::Cursor;
 
-use cad_db::EntityColor;
-use cad_domain::{CadError, CadResult, Diagnostic, Mesh, Point3, UnitContext};
 use cad_connector_core::{
     compute_identity, ConnectorDescriptor, ExportCapability, FidelityLevel, ImportCapability,
     ImportLimits, ImportPhase, ImportProgress, ImportProgressSink, ImportReport, ImportRequest,
     ImportedDrawing, Importer, MeshImport, NoopProgress, SpecVisibility,
 };
+use cad_db::EntityColor;
+use cad_domain::{CadError, CadResult, Diagnostic, Mesh, Point3, UnitContext};
 use tobj::{LoadOptions, Material, Model};
 
 /// Stable diagnostic code: an n-gon was fan-triangulated.

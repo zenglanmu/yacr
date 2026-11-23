@@ -52,8 +52,8 @@ mod report;
 mod texture;
 mod write;
 
-use cad_domain::{CadError, CadResult};
 use cad_connector_core::{ConnectorDescriptor, ExportJob, ExportOutput, Exporter};
+use cad_domain::{CadError, CadResult};
 
 use write::{Written, MISMATCHED_DESCRIPTOR};
 

@@ -437,7 +437,7 @@ fn hatch_boundary_bulge_samples_match_the_analytic_arc() {
         let mut out: Vec<[f64; 2]> = Vec::new();
         push_bulge_segment(&mut out, case.p0, case.p1, case.bulge);
         bulge_cases::assert_samples(
-            "cad-import-acadrust hatch boundary (push_bulge_segment)",
+            "cad-connector-acadrust hatch boundary (push_bulge_segment)",
             &case,
             &out,
             1e-9 * (1.0 + case.radius),
@@ -447,7 +447,7 @@ fn hatch_boundary_bulge_samples_match_the_analytic_arc() {
         let steps = ((case.included_angle.abs() / 0.05).ceil() as usize).clamp(2, 4096);
         let half_step = 0.5 * case.included_angle.abs() / steps as f64;
         bulge_cases::assert_apex(
-            "cad-import-acadrust hatch boundary (push_bulge_segment)",
+            "cad-connector-acadrust hatch boundary (push_bulge_segment)",
             &case,
             &out,
             2.0 * case.radius * (1.0 - half_step.cos()) + 1e-9,

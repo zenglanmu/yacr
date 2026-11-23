@@ -52,13 +52,13 @@ pub use convert::{
 };
 pub use export::SkpExporter;
 
-use cad_db::{EntityColor, EntityRenderAttributes, EntityTransparency};
-use cad_domain::{CadError, CadResult, Diagnostic, EntityCapability, SupportStatus, UnitContext};
 use cad_connector_core::{
     compute_identity, ConnectorDescriptor, ImportCapability, ImportPhase, ImportProgress,
     ImportProgressSink, ImportReport, ImportRequest, ImportedDrawing, Importer, MeshImport,
     NoopProgress,
 };
+use cad_db::{EntityColor, EntityRenderAttributes, EntityTransparency};
+use cad_domain::{CadError, CadResult, Diagnostic, EntityCapability, SupportStatus, UnitContext};
 
 /// Stable refusal code: the fixed header is missing or truncated, so the file
 /// never was a SketchUp model.

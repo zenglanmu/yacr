@@ -26,11 +26,11 @@
 //!   are reported ([`DIAG_TEXTURE_COORDS_NOT_IMPORTED`] + `Partial`) instead of
 //!   disappearing as unknown properties (ADR-0038 D6).
 
-use cad_domain::{CadError, CadResult};
 use cad_connector_core::{
     compute_identity, ImportPhase, ImportProgress, ImportProgressSink, ImportRequest,
     ImportedDrawing, Importer, NoopProgress,
 };
+use cad_domain::{CadError, CadResult};
 
 use crate::publish;
 

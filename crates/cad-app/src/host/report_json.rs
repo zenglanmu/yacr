@@ -26,8 +26,8 @@
 
 use serde_json::{json, Value};
 
-use cad_domain::{Completeness, DocumentIdentity, SupportStatus};
 use cad_connector_core::{CompatReport, FidelityLevel, ImportReport, ReportDirection};
+use cad_domain::{Completeness, DocumentIdentity, SupportStatus};
 
 /// The two persisted rows one successful import publishes.
 ///

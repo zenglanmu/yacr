@@ -62,13 +62,13 @@ mod placement;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Cursor;
 
-use cad_db::EntityColor;
-use cad_domain::{CadError, CadResult, Diagnostic, Mesh, Point3, Unit, UnitContext};
 use cad_connector_core::{
     compute_identity, ifc_schema, ConnectorDescriptor, ImportCapability, ImportLimits, ImportPhase,
     ImportProgress, ImportProgressSink, ImportReport, ImportRequest, ImportedDrawing, Importer,
     MeshImport, NoopProgress, SpecVisibility, IFC_SCHEMA_REFUSED,
 };
+use cad_db::EntityColor;
+use cad_domain::{CadError, CadResult, Diagnostic, Mesh, Point3, Unit, UnitContext};
 use cadmpeg_codec_step::StepCodec;
 use cadmpeg_ir::document::CadIr;
 use cadmpeg_ir::ids::FaceId;

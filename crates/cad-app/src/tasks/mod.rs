@@ -32,11 +32,11 @@ use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
-use cad_domain::{CadError, CadResult, DocumentId, TaskStamp};
 use cad_connector_acadrust::{
     ImportPhase, ImportProgress, ImportProgressSink, ImportRequest, ImportedDrawing, Importer,
     XrefOptions,
 };
+use cad_domain::{CadError, CadResult, DocumentId, TaskStamp};
 
 use crate::import::FormatImporter;
 use cad_platform::CancellationToken;

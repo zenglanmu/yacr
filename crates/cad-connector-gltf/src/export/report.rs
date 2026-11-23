@@ -10,8 +10,8 @@
 //! `exact` is set from the writer's own count of meshes that lost no triangle
 //! and no UV/texture; a drop entry never subtracts from it.
 
-use cad_domain::{Completeness, ObjectId, SupportStatus};
 use cad_connector_core::{CompatCounts, CompatEntry, CompatReport, FidelityLevel, ReportDirection};
+use cad_domain::{Completeness, ObjectId, SupportStatus};
 
 use crate::export::collect::DropEntry;
 

@@ -3,7 +3,7 @@
 //! Run from the workspace root:
 //!
 //! ```text
-//! cargo run -p cad-import-acadrust --example generate_acis_fixtures -- fixtures/acis
+//! cargo run -p cad-connector-acadrust --example generate_acis_fixtures -- fixtures/acis
 //! ```
 //!
 //! The payloads are authored in this repository from acadrust's documented

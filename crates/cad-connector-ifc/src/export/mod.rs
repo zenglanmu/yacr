@@ -48,13 +48,13 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use cad_domain::{
-    CadError, CadResult, Completeness, EntityId, ObjectId, SemanticGeometry, SpaceId,
-    SupportStatus, Unit, UnitContext,
-};
 use cad_connector_core::{
     CompatCounts, CompatEntry, CompatReport, Connector, ConnectorDescriptor, ExportJob,
     ExportOutput, Exporter, FidelityLevel, ReportDirection,
+};
+use cad_domain::{
+    CadError, CadResult, Completeness, EntityId, ObjectId, SemanticGeometry, SpaceId,
+    SupportStatus, Unit, UnitContext,
 };
 use ifc_lite_export::plan::{
     execute, skeleton, Disposition, ExportPlan, GlobalId, IfcClass, NewObject, NewPlacement,

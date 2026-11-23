@@ -13,9 +13,9 @@
 //! unmodelled element, so it must stay a `import.dgn.tags_not_stored` report and
 //! must never become a property with a fabricated name.
 
+use cad_connector_core::{compute_identity, ImportLimits, ImportReport, Importer};
 use cad_db::{BimValue, DrawingDatabase, BIM_MAX_PROPERTIES_PER_SET, BIM_MAX_PSETS_PER_ELEMENT};
 use cad_domain::DatabaseId;
-use cad_connector_core::{compute_identity, ImportLimits, ImportReport, Importer};
 use cadkit_core::{
     Attribute, Entity, EntityKind, Layer as KitLayer, LengthUnit, Model, ModelKind,
     Point3 as KitPoint3, Units, Value,

@@ -235,7 +235,7 @@ const MAX_GRIP_INDEX: usize = u8::MAX as usize;
 ///
 /// This is the INSERT's own insertion point, and it reuses the existing
 /// convention instead of inventing one: the importer folds the block's base point
-/// into the placement (`cad-import-acadrust`'s `block_placement` is the
+/// into the placement (`cad-connector-acadrust`'s `block_placement` is the
 /// translation `-base_point`), so the stored `INSERT` insertion point *is* where
 /// the block-space origin lands. `Transform3` is a 4x4 affine whose point mapping
 /// has no homogeneous divide ([`Transform3::apply_point`]), so the origin's image

@@ -7,9 +7,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use cad_connector_core::{ImportLimits, MeshImport};
 use cad_db::{EntityColor, EntityRenderAttributes, EntityTransparency};
 use cad_domain::{CadError, CadResult, Diagnostic, Mesh, ObjectId, Point3};
-use cad_connector_core::{ImportLimits, MeshImport};
 use gltf::{
     material::AlphaMode, mesh::Mode, texture::Info as TextureInfo, Node, Primitive, Semantic,
 };

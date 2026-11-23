@@ -3,8 +3,8 @@
 //! Kept apart from the report/model assembly so the conversion arithmetic and the
 //! one `Result` boundary into a third-party crate are readable on their own.
 
-use cad_domain::{CadError, CadResult, Unit, UnitContext};
 use cad_connector_core::ExportJob;
+use cad_domain::{CadError, CadResult, Unit, UnitContext};
 
 /// The exporter was handed a registry key it does not write.
 pub const MISMATCHED_DESCRIPTOR: &str = "export.skp.mismatched_descriptor";

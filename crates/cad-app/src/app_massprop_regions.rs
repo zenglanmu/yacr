@@ -40,7 +40,7 @@
 //!   area-weighted loop centroid (the same analytic straight-edge +
 //!   circular-segment moments the closed polyline uses);
 //! * the import path samples every boundary edge into the loop's points and
-//!   stores zero bulges (see `cad-import-acadrust`'s `hatch_geometry`), so a loop
+//!   stores zero bulges (see `cad-connector-acadrust`'s `hatch_geometry`), so a loop
 //!   whose `source_edges` carries anything other than `Line` is a **sampled**
 //!   boundary: that hatch is reported as approximate
 //!   (`massprop.approx_hatch_boundary`). A loop with no source edges is a

@@ -21,8 +21,8 @@
 //!   cargo test -p cad-connector-skp --locked -- --nocapture
 //! ```
 
-use cad_domain::{Completeness, DatabaseId, DocumentId, SemanticGeometry, SupportStatus, Unit};
 use cad_connector_core::{ImportLimits, MeshImport};
+use cad_domain::{Completeness, DatabaseId, DocumentId, SemanticGeometry, SupportStatus, Unit};
 
 use crate::convert::read_scene;
 use crate::{

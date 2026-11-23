@@ -9,9 +9,9 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use crate::*;
+use cad_connector_core::{ImportLimits, ImportRequest, ImportedDrawing};
 use cad_db::{BimDefinition, BimElement, BimEvidence, BimKey, BimValue, BIM_MAX_PSETS_PER_ELEMENT};
 use cad_domain::{Completeness, DatabaseId, DocumentId};
-use cad_connector_core::{ImportLimits, ImportRequest, ImportedDrawing};
 
 fn request_bytes(bytes: Vec<u8>) -> ImportRequest {
     ImportRequest {

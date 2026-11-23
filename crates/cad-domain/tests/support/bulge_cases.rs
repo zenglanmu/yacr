@@ -2,7 +2,7 @@
 //!
 //! The workspace has **six** independent implementations of this one piece of
 //! math (`cad-geometry` display + EXPLODE, `cad-spatial` pick bounds,
-//! `cad-measure` object snap, `cad-import-acadrust` hatch boundaries,
+//! `cad-measure` object snap, `cad-connector-acadrust` hatch boundaries,
 //! `cad-domain` hatch fill) plus a seventh, deliberately different one in the
 //! SHX glyph decoder (`cad-representation`). They must all agree on *which side
 //! of the chord the centre goes*, because a single flipped sign mirrors every

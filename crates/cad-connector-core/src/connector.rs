@@ -138,7 +138,7 @@ mod tests {
     fn a_descriptor_carries_the_spec_visibility_of_its_own_field() {
         // Shape test only: the per-format classification lives with each
         // descriptor and is pinned by the registry test in `cad-app`
-        // (`cad-import-core` cannot depend on the format crates).
+        // (`cad-connector-core` cannot depend on the format crates).
         const PUBLIC: ExportCapability = ExportCapability {
             versions: "synthetic",
             level: FidelityLevel::L1,

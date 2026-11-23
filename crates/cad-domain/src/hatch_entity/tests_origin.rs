@@ -3,7 +3,7 @@
 //! Split out of `hatch_entity/tests.rs` to stay inside the code-size gate. The
 //! displacement is the only origin the model has, because neither the DXF nor the
 //! DWG hatch record stores one separately: the phase lives in each definition
-//! row's base point, so the exported rows carry it (see `cad-import-acadrust`'s
+//! row's base point, so the exported rows carry it (see `cad-connector-acadrust`'s
 //! `export::hatch`).
 
 use super::*;

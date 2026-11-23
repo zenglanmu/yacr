@@ -157,7 +157,7 @@ tobj = { version = "4.0.5", default-features = false }
 # STereoLithography reader (`cad-connector-mesh`): ASCII and binary, pure Rust.
 stl_io = "0.11"
 
-# ISO 10303-21 (STEP) reader + B-rep tessellation (`cad-import-step`).
+# ISO 10303-21 (STEP) reader + B-rep tessellation (`cad-connector-step`).
 # `cadmpeg-ir` is a mandatory direct dependency: the `Codec` trait and
 # `DecodeOptions` live there, not in the codec crate. The codec canonicalises
 # every length to millimetres and exposes no source-unit field; the adapter
@@ -184,7 +184,7 @@ ifc-lite-export = "=28.3.0"
 ifc-lite-processing = "=28.3.0"
 
 # MicroStation DGN V7 (ISFF) and V8 (OLE compound file) reader
-# (`cad-import-dgn`). MIT OR Apache-2.0, pure Rust, `unsafe_code = "forbid"`,
+# (`cad-connector-dgn`). MIT OR Apache-2.0, pure Rust, `unsafe_code = "forbid"`,
 # no platform dependency, so the `dom-canvas` wasm session can link it. Pinned
 # exactly: pre-1.0, one maintainer, 15 releases in 31 days, and each release has
 # changed the decoded format surface (level tables, raster placement, tag
@@ -200,7 +200,7 @@ cadkit-dgn = { version = "=0.5.4", default-features = false }
 # not rely on a re-export from the reader crate.
 cadkit-core = { version = "=0.5.4" }
 
-# Autodesk Revit reader (`cad-import-rvt`). Apache-2.0, pure Rust, pinned
+# Autodesk Revit reader (`cad-connector-rvt`). Apache-2.0, pure Rust, pinned
 # exactly: pre-1.0, and the crate publishes faster than any range can track
 # (0.22.0 on 2026-11-13, 0.23.0/0.24.0 on 2026-11-14, 0.25.0 on 2026-11-15). It is a **preview**
 # reader: element bodies are bounding boxes on Revit 2008-2023, 2024/2025 are
@@ -218,7 +218,7 @@ cadkit-core = { version = "=0.5.4" }
 # `record-elevation-storey-bind`: `verified` → `partial`); this crate's own
 # ceiling follows the per-release status instead, which did not change.
 # Its MSRV is 1.87, below the workspace floor of 1.88 which `cadmpeg-*` sets;
-# `cad-import-rvt` therefore takes `rust-version` from the workspace rather than
+# `cad-connector-rvt` therefore takes `rust-version` from the workspace rather than
 # re-declaring a value. The pinned toolchain is 1.99.
 # glTF is only its internal hand-off format (the crate has no gltf dependency);
 # `gltf` reads that single-buffer GLB. `default-features = false` drops the

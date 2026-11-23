@@ -50,7 +50,7 @@ pub const MAX_VENDOR_STREAM_BYTES: usize = 16 * 1024 * 1024;
 
 // The record shape is part of the format-neutral import contract: the import
 // copies bytes and the host/plugin decodes them, so the type lives in
-// `cad-import-core` and is re-exported here unchanged.
+// `cad-connector-core` and is re-exported here unchanged.
 pub use cad_connector_core::{VendorRecord, VendorSource};
 
 /// The extraction result carried by the import.

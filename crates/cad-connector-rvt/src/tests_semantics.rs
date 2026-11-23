@@ -13,8 +13,8 @@
 use rvt::ifc::entities::{IfcEntity, Property, PropertySet, PropertyValue};
 use rvt::ifc::{IfcModel, MaterialInfo, Storey};
 
-use cad_db::BimDefinitionKind;
 use cad_connector_core::{ImportLimits, Importer};
+use cad_db::BimDefinitionKind;
 
 use super::{map_model, normalize_ifc_category};
 use crate::tests::{fixture, glb_parts, rebuild_glb, request};

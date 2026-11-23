@@ -4,7 +4,7 @@
 //!
 //! These tests pin the domain half of the feature: the creation rule, the stored
 //! payload, and the display derivation each kind produces (the DXF half lives in
-//! `cad-import-acadrust` and the typed command in `cad-app`).
+//! `cad-connector-acadrust` and the typed command in `cad-app`).
 
 use cad_domain::{
     BlockId, CadError, MLeaderBlockContent, MLeaderContent, MLeaderContentKind,

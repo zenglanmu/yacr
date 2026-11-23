@@ -31,12 +31,12 @@
 //! `Unsupported`. `Exact` geometries emit no diagnostic at all; they exist only
 //! in `counts.exact`, so no entry is ever `Verified`.
 
-use cad_domain::{CadError, CadResult, SupportStatus};
 use cad_connector_core::{
     CompatCounts, CompatEntry, CompatReport, Connector, ConnectorDescriptor, ExportCapability,
     ExportJob, ExportOutput, ExportSpace as CoreExportSpace, Exporter, FidelityLevel,
     ImportCapability, ReportDirection, SpecVisibility,
 };
+use cad_domain::{CadError, CadResult, SupportStatus};
 
 use super::{
     export, AcisVersion, DxfTarget, ExportFormat, ExportLimits, ExportOutcome, ExportReport,
@@ -271,12 +271,12 @@ mod tests {
     use super::*;
     use crate::export::accumulator::ExportAccumulator;
     use crate::export::report::ExportDiagnostic;
+    use cad_connector_core::ExportLimits as CoreExportLimits;
     use cad_db::{DbEntity, DbObject, DrawingDatabase, DrawingDatabaseBuilder, Layer};
     use cad_domain::{
         Completeness, DatabaseId, DocumentId, EntityId, LayerId, ObjectId, Point3, Revision,
         SemanticGeometry, SpaceId,
     };
-    use cad_connector_core::ExportLimits as CoreExportLimits;
 
     fn one_line_db() -> DrawingDatabase {
         let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
