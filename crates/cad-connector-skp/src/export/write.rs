@@ -10,7 +10,8 @@ use cad_domain::{CadError, CadResult, Unit, UnitContext};
 pub const MISMATCHED_DESCRIPTOR: &str = "export.skp.mismatched_descriptor";
 /// The job carries no usable source unit, so a metre scale cannot be derived.
 pub const UNITS_UNKNOWN: &str = "export.skp.units_unknown";
-/// A source geometry has no SketchUp mesh representation.
+/// A source geometry has no SketchUp representation: it is not a mesh, and it
+/// is not a body with triangles or display edges.
 pub const UNSUPPORTED_GEOMETRY: &str = "export.skp.unsupported_geometry";
 /// A triangle has zero area and cannot become a SketchUp face.
 pub const DEGENERATE_TRIANGLE: &str = "export.skp.degenerate_triangle";
@@ -22,12 +23,23 @@ pub const COLORS_DROPPED: &str = "export.skp.colors_dropped";
 pub const NORMALS_DROPPED: &str = "export.skp.normals_dropped";
 /// A written mesh references a base-colour texture; the writer carries no texture.
 pub const TEXTURE_NOT_WRITTEN: &str = "export.skp.texture_not_written";
-/// A display body carries stored edges; the writer keeps its triangles only
+/// A display body carries stored edges; when its triangles are written the
+/// writer keeps only those triangles and regenerates their boundaries
 /// (ADR-0049 §2). The triangles are written, so this is a `Partial` note.
 pub const STORED_EDGES_NOT_WRITTEN: &str = "export.skp.stored_edges_not_written";
-/// A wire-only body (display edges, no triangles) has nothing this writer can
-/// write; the entity is dropped by name (ADR-0049 §2).
-pub const WIRE_BODY_NOT_WRITTEN: &str = "export.skp.wire_body_not_written";
+/// Free display edges were written as plain `MeshEdge`s; curve/arc identity,
+/// per-edge flags, material and layer have no carrier in a display polyline.
+pub const EDGE_SEMANTICS_NOT_WRITTEN: &str = "export.skp.edge_semantics_not_written";
+/// A display edge segment had coincident endpoints and was skipped.
+pub const ZERO_LENGTH_EDGE: &str = "export.skp.zero_length_edge";
+/// A wire-only body's display edges contributed **no** writable segment (every
+/// segment had coincident endpoints), so the entity wrote no edge at all. The
+/// whole entity is dropped: an empty written model must not be reported as a
+/// `Partial` success.
+pub const WIRE_BODY_NO_WRITABLE_EDGES: &str = "export.skp.wire_body_no_writable_edges";
+/// More than one source entity was written into the single SketchUp root
+/// geometry run; per-entity grouping is not preserved.
+pub const ENTITY_GROUPING_FLATTENED: &str = "export.skp.entity_grouping_flattened";
 /// A non-model-space entity was left out (the writer has no paper space).
 pub const PAPER_SPACE_DROPPED: &str = "export.skp.paper_space_dropped";
 /// A caller budget (`ExportLimits`) was exceeded; nothing was written.

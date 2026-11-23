@@ -442,3 +442,531 @@ fn aperture_token_widens_the_snap_pick_aperture() {
         .expect("the 30 px session aperture reaches the midpoint");
     assert_eq!(candidate.point, p(2000.0, 0.0));
 }
+
+// -------------------------------- stored display-edge snap (SKP carriers) ---
+
+/// One drawing holding the given `(id, type_key, geometry)` rows on layer `0`.
+fn drawing_with(rows: Vec<(u128, &str, SemanticGeometry)>) -> DrawingDatabase {
+    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
+    builder
+        .insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+    for (id, type_key, geometry) in rows {
+        builder
+            .insert_entity(DbEntity {
+                object: DbObject {
+                    id: ObjectId(id),
+                    type_key: type_key.into(),
+                    revision: Revision(0),
+                    source_handle: None,
+                },
+                id: EntityId(id),
+                layer: LayerId(0),
+                space: SpaceId::Model,
+                geometry,
+                draw_order: id as i64,
+            })
+            .unwrap();
+    }
+    builder.finish().unwrap()
+}
+
+fn edge_body(edges: Vec<Vec<Point3>>, precision: Precision) -> SemanticGeometry {
+    SemanticGeometry::Body3d(Box::new(Body3d {
+        kind: BodyKind::Unknown,
+        exact: BodyExact::Unavailable {
+            reason: "test-display-only".into(),
+        },
+        display: BodyDisplay {
+            mesh: Mesh::default(),
+            edges,
+            tolerance: None,
+            precision,
+            completeness: Completeness::Complete,
+        },
+    }))
+}
+
+fn straight_edge() -> Vec<Vec<Point3>> {
+    vec![vec![p(0.0, 0.0), p(10.0, 0.0)]]
+}
+
+#[cfg(feature = "formats-skp")]
+#[test]
+fn skp_body_and_wire_carriers_expose_endpoint_and_midpoint_snaps() {
+    for type_key in [
+        cad_connector_skp::SKP_MESH_TYPE_KEY,
+        cad_connector_skp::SKP_EDGE_TYPE_KEY,
+    ] {
+        let drawing = drawing_with(vec![(
+            1,
+            type_key,
+            edge_body(
+                straight_edge(),
+                Precision::Approximate {
+                    error_bound: Some(0.25),
+                },
+            ),
+        )]);
+        let endpoint =
+            snap_candidates_near(&drawing, DocumentId(1), p(0.0, 0.5), 1.0, SpaceId::Model)
+                .unwrap()
+                .into_iter()
+                .find(|candidate| candidate.kind == cad_measure::SnapKind::Endpoint)
+                .unwrap_or_else(|| panic!("{type_key} stores a real edge start"));
+        assert_eq!(endpoint.point, p(0.0, 0.0));
+        assert_eq!(
+            endpoint.precision,
+            Precision::Approximate {
+                error_bound: Some(0.25)
+            },
+            "the candidate reports the body's display precision, not Analytic"
+        );
+        assert_eq!(endpoint.geometry_source, GeometrySource::DirectMesh);
+
+        let middle =
+            snap_candidates_near(&drawing, DocumentId(1), p(5.0, 0.5), 1.0, SpaceId::Model)
+                .unwrap();
+        assert!(
+            middle.iter().any(|candidate| {
+                candidate.kind == cad_measure::SnapKind::Midpoint && candidate.point == p(5.0, 0.0)
+            }),
+            "{type_key}: {middle:?}"
+        );
+    }
+}
+
+#[cfg(feature = "formats-skp")]
+#[test]
+fn a_triangle_only_skp_mesh_is_not_an_edge_snap_target() {
+    let mesh = Mesh {
+        vertices: vec![p(0.0, 0.0), p(10.0, 0.0), p(0.0, 10.0)],
+        triangles: vec![[0, 1, 2]],
+        ..Mesh::default()
+    };
+    let drawing = drawing_with(vec![(
+        1,
+        cad_connector_skp::SKP_MESH_TYPE_KEY,
+        SemanticGeometry::Mesh(mesh),
+    )]);
+    // Hovering over a triangle vertex exposes no snap: a mesh is not a target.
+    assert!(
+        snap_candidates_near(&drawing, DocumentId(1), p(0.0, 0.0), 1.0, SpaceId::Model,)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn an_acis_body_is_not_an_edge_snap_target() {
+    // ACIS bodies carry a display tessellation, not stored document edges, so
+    // even a non-empty edge list must not become a snap source.
+    let drawing = drawing_with(vec![(
+        1,
+        "AcDb3dSolid",
+        edge_body(straight_edge(), Precision::Unknown),
+    )]);
+    assert!(
+        snap_candidates_near(&drawing, DocumentId(1), p(0.0, 0.5), 1.0, SpaceId::Model,)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        snap_candidates_near(&drawing, DocumentId(1), p(5.0, 0.5), 1.0, SpaceId::Model,)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+// -------------------------------------- measurement provenance summary ---
+
+fn measure_command(controller: &HostController) -> crate::Command {
+    crate::Command {
+        schema_version: 1,
+        id: crate::CommandId::Measure,
+        document: controller.document_id,
+        viewport: controller.viewport_id,
+        payload: crate::CommandPayload::None,
+    }
+}
+
+fn input_snap(
+    kind: cad_measure::SnapKind,
+    precision: Precision,
+    geometry_source: GeometrySource,
+) -> Option<InputSnap> {
+    Some(InputSnap {
+        kind,
+        precision,
+        geometry_source,
+        logical_pixel_distance: 1.0,
+    })
+}
+
+#[test]
+fn a_measurement_from_body_snaps_records_mesh_provenance_and_weakest_precision() {
+    let controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+    let command = measure_command(&controller);
+    let outcome = controller
+        .application
+        .evaluate_measurement(
+            &SpaceId::Model,
+            &command,
+            cad_db::MeasurementAlgorithm::Distance3d,
+            vec![p(0.0, 0.0), p(10.0, 0.0)],
+            &[
+                input_snap(
+                    cad_measure::SnapKind::Endpoint,
+                    Precision::Analytic,
+                    GeometrySource::DirectMesh,
+                ),
+                input_snap(
+                    cad_measure::SnapKind::Midpoint,
+                    Precision::Unknown,
+                    GeometrySource::DirectMesh,
+                ),
+            ],
+        )
+        .unwrap();
+    let record = outcome.measurement.expect("the distance is a measurement");
+    assert_eq!(
+        record.source,
+        GeometrySource::DirectMesh,
+        "a body-snapped measurement is derived from mesh geometry"
+    );
+    assert_eq!(
+        record.precision,
+        Precision::Unknown,
+        "the weakest snapped precision governs the record"
+    );
+}
+
+#[test]
+fn one_snapped_and_one_raw_pick_keeps_the_snap_claim_at_its_measured_strength() {
+    let controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+    let command = measure_command(&controller);
+    let outcome = controller
+        .application
+        .evaluate_measurement(
+            &SpaceId::Model,
+            &command,
+            cad_db::MeasurementAlgorithm::Distance3d,
+            vec![p(0.0, 0.0), p(10.0, 0.0)],
+            &[
+                input_snap(
+                    cad_measure::SnapKind::Endpoint,
+                    Precision::Approximate {
+                        error_bound: Some(0.5),
+                    },
+                    GeometrySource::DirectMesh,
+                ),
+                // A raw pick contributes no precision claim: it must not
+                // strengthen or weaken the snapped point's statement.
+                None,
+            ],
+        )
+        .unwrap();
+    let record = outcome.measurement.expect("the distance is a measurement");
+    assert_eq!(record.source, GeometrySource::DirectMesh);
+    assert_eq!(
+        record.precision,
+        Precision::Approximate {
+            error_bound: Some(0.5)
+        }
+    );
+}
+
+#[test]
+fn a_measurement_with_no_snapped_point_stays_a_user_point_measurement() {
+    let controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+    let command = measure_command(&controller);
+    let outcome = controller
+        .application
+        .evaluate_measurement(
+            &SpaceId::Model,
+            &command,
+            cad_db::MeasurementAlgorithm::Distance3d,
+            vec![p(0.0, 0.0), p(10.0, 0.0)],
+            &[],
+        )
+        .unwrap();
+    let record = outcome.measurement.expect("the distance is a measurement");
+    assert_eq!(record.source, GeometrySource::UserPoints);
+    assert_eq!(record.precision, Precision::Analytic);
+}
+
+#[test]
+fn a_pure_analytic_snap_reports_analytic_provenance() {
+    let controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+    let command = measure_command(&controller);
+    let outcome = controller
+        .application
+        .evaluate_measurement(
+            &SpaceId::Model,
+            &command,
+            cad_db::MeasurementAlgorithm::Distance3d,
+            vec![p(0.0, 0.0), p(10.0, 0.0)],
+            &[
+                input_snap(
+                    cad_measure::SnapKind::Endpoint,
+                    Precision::Analytic,
+                    GeometrySource::Analytic,
+                ),
+                input_snap(
+                    cad_measure::SnapKind::Endpoint,
+                    Precision::Analytic,
+                    GeometrySource::Analytic,
+                ),
+            ],
+        )
+        .unwrap();
+    let record = outcome.measurement.expect("the distance is a measurement");
+    assert_eq!(
+        record.source,
+        GeometrySource::Analytic,
+        "a LINE/POLYLINE snap stays analytic; it is not a mesh-derived value"
+    );
+    assert_eq!(record.precision, Precision::Analytic);
+}
+
+#[test]
+fn a_proxy_cache_snap_reports_proxy_cache_provenance() {
+    let controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+    let command = measure_command(&controller);
+    let outcome = controller
+        .application
+        .evaluate_measurement(
+            &SpaceId::Model,
+            &command,
+            cad_db::MeasurementAlgorithm::Distance3d,
+            vec![p(0.0, 0.0), p(10.0, 0.0)],
+            &[
+                input_snap(
+                    cad_measure::SnapKind::Endpoint,
+                    Precision::Analytic,
+                    GeometrySource::Analytic,
+                ),
+                input_snap(
+                    cad_measure::SnapKind::Endpoint,
+                    Precision::Approximate { error_bound: None },
+                    GeometrySource::ProxyCache,
+                ),
+            ],
+        )
+        .unwrap();
+    let record = outcome.measurement.expect("the distance is a measurement");
+    assert_eq!(
+        record.source,
+        GeometrySource::ProxyCache,
+        "a vendor proxy cache is weaker evidence than analytic geometry"
+    );
+    assert_eq!(
+        record.precision,
+        Precision::Approximate { error_bound: None },
+        "a proxy cache's stand-in points are sampled from a display snapshot: \
+         the record may not claim analytic precision"
+    );
+}
+
+/// The target and the candidate it resolves must both say "proxy cache, and
+/// approximate": the source and the precision are two statements about the same
+/// evidence, so a `ProxyCache` target that claimed `Analytic` would overstate it.
+#[test]
+fn a_proxy_cache_snap_target_and_candidate_claim_approximate_precision() {
+    let start = p(0.0, 0.0);
+    let end = p(10.0, 0.0);
+    let drawing = drawing_with(vec![(7, "TCH_BODY", SemanticGeometry::Line { start, end })]);
+    let source = SelectionRef {
+        document: DocumentId(1),
+        entity: EntityId(7),
+        instance: InstancePath::default(),
+        sub_element: None,
+    };
+    let target = crate::host::databases::body_aware_target(
+        &drawing,
+        source,
+        GeometrySource::ProxyCache,
+        SemanticGeometry::Line { start, end },
+    );
+    assert_eq!(
+        target.geometry_source,
+        GeometrySource::ProxyCache,
+        "the proxy provenance must survive the target build"
+    );
+    assert_eq!(
+        target.precision,
+        Precision::Approximate { error_bound: None },
+        "a synthesized stand-in cannot claim analytic precision"
+    );
+
+    // The same claim reaches the resolved candidate, which is what the measure
+    // path consumes: there is no second place where the precision is invented.
+    let candidates = crate::host::databases::resolve_candidates(
+        std::slice::from_ref(&target),
+        p(0.0, 0.5),
+        1.0,
+        &SpaceId::Model,
+        "test",
+        &TolerancePolicy::default(),
+    )
+    .unwrap();
+    let candidate = candidates
+        .iter()
+        .find(|candidate| candidate.kind == cad_measure::SnapKind::Endpoint)
+        .unwrap_or_else(|| panic!("the LINE endpoint resolves: {candidates:?}"));
+    assert_eq!(candidate.point, start);
+    assert_eq!(candidate.geometry_source, GeometrySource::ProxyCache);
+    assert_eq!(
+        candidate.precision,
+        Precision::Approximate { error_bound: None }
+    );
+
+    // The analytic path is unchanged: the very same line with an analytic source
+    // keeps its `Analytic` claim, so the proxy rule did not weaken plain lines.
+    let analytic = crate::host::databases::body_aware_target(
+        &drawing,
+        SelectionRef {
+            document: DocumentId(1),
+            entity: EntityId(7),
+            instance: InstancePath::default(),
+            sub_element: None,
+        },
+        GeometrySource::Analytic,
+        SemanticGeometry::Line { start, end },
+    );
+    assert_eq!(analytic.geometry_source, GeometrySource::Analytic);
+    assert_eq!(analytic.precision, Precision::Analytic);
+}
+
+#[test]
+fn a_raw_pick_beside_an_analytic_snap_reports_user_points() {
+    let controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+    let command = measure_command(&controller);
+    let outcome = controller
+        .application
+        .evaluate_measurement(
+            &SpaceId::Model,
+            &command,
+            cad_db::MeasurementAlgorithm::Distance3d,
+            vec![p(0.0, 0.0), p(10.0, 0.0)],
+            &[
+                input_snap(
+                    cad_measure::SnapKind::Endpoint,
+                    Precision::Analytic,
+                    GeometrySource::Analytic,
+                ),
+                // The second point is a raw pick, so the value is not derived
+                // purely from object geometry.
+                None,
+            ],
+        )
+        .unwrap();
+    let record = outcome.measurement.expect("the distance is a measurement");
+    assert_eq!(record.source, GeometrySource::UserPoints);
+    assert_eq!(
+        record.precision,
+        Precision::Analytic,
+        "a raw pick makes no precision claim; the snap's Analytic claim stands"
+    );
+}
+
+#[test]
+fn a_mixed_direct_and_kernel_mesh_snap_reports_the_least_authoritative_source() {
+    let controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+    let command = measure_command(&controller);
+    let outcome = controller
+        .application
+        .evaluate_measurement(
+            &SpaceId::Model,
+            &command,
+            cad_db::MeasurementAlgorithm::Distance3d,
+            vec![p(0.0, 0.0), p(10.0, 0.0)],
+            &[
+                input_snap(
+                    cad_measure::SnapKind::Endpoint,
+                    Precision::Analytic,
+                    GeometrySource::DirectMesh,
+                ),
+                input_snap(
+                    cad_measure::SnapKind::Endpoint,
+                    Precision::Analytic,
+                    GeometrySource::KernelMesh,
+                ),
+            ],
+        )
+        .unwrap();
+    let record = outcome.measurement.expect("the distance is a measurement");
+    assert_eq!(
+        record.source,
+        GeometrySource::DirectMesh,
+        "the display mesh is the weakest source, so it governs the summary"
+    );
+}
+
+#[test]
+fn a_pick_list_that_is_not_parallel_to_the_points_is_refused() {
+    let controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+    let command = measure_command(&controller);
+    let error = controller
+        .application
+        .evaluate_measurement(
+            &SpaceId::Model,
+            &command,
+            cad_db::MeasurementAlgorithm::Distance3d,
+            vec![p(0.0, 0.0), p(10.0, 0.0)],
+            &[input_snap(
+                cad_measure::SnapKind::Endpoint,
+                Precision::Analytic,
+                GeometrySource::Analytic,
+            )],
+        )
+        .expect_err("a short snap array cannot be attributed point by point");
+    let message = error.to_string();
+    assert!(
+        message.contains("measurement.snaps_not_parallel"),
+        "the refusal must be named: {message}"
+    );
+}
+
+#[test]
+fn non_body_snap_targets_keep_their_pick_geometry_source() {
+    let mesh = Mesh {
+        vertices: vec![p(0.0, 0.0), p(10.0, 0.0), p(0.0, 10.0)],
+        triangles: vec![[0, 1, 2]],
+        ..Mesh::default()
+    };
+    let drawing = drawing_with(vec![
+        (
+            1,
+            "AcDbLine",
+            SemanticGeometry::Line {
+                start: p(0.0, 0.0),
+                end: p(10.0, 0.0),
+            },
+        ),
+        (2, "AcDbSubDMesh", SemanticGeometry::Mesh(mesh)),
+    ]);
+    let targets = crate::host::databases::snap_targets_for(&drawing, DocumentId(1));
+    let source_of = |id: u128| {
+        targets
+            .iter()
+            .find(|target| target.source.entity == EntityId(id))
+            .unwrap_or_else(|| panic!("entity {id} has a snap target"))
+            .geometry_source
+            .clone()
+    };
+    assert_eq!(
+        source_of(1),
+        GeometrySource::Analytic,
+        "an analytic LINE target keeps its analytic source"
+    );
+    assert_eq!(
+        source_of(2),
+        GeometrySource::DirectMesh,
+        "a Mesh pick is a direct mesh, not the SnapTarget::new Analytic default"
+    );
+}

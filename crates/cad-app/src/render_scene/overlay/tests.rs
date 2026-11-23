@@ -602,6 +602,7 @@ fn hint(kind: SnapHintKind, point: Point3) -> SnapHint {
         source: model_ref(1),
         secondary: None,
         precision: Precision::Analytic,
+        geometry_source: cad_domain::GeometrySource::Analytic,
         logical_pixel_distance: 0.0,
     }
 }

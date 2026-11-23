@@ -56,6 +56,7 @@ fn candidate(kind: SnapKind, point: Point3, space: SpaceId) -> SnapCandidate {
         source: selection(),
         secondary: None,
         precision: Precision::Analytic,
+        geometry_source: cad_domain::GeometrySource::Analytic,
         logical_pixel_distance: 0.0,
     }
 }

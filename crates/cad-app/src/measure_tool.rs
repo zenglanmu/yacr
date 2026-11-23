@@ -202,12 +202,14 @@ pub struct MeasurementTool {
     kind: MeasurementToolKind,
     points: Vec<Point3>,
     cursor: Option<Point3>,
-    /// Snap provenance of the last captured point, when the host resolved one.
+    /// Snap provenance of each captured point, positionally parallel to
+    /// [`Self::points`].
     ///
-    /// Only `ID` reports it, but it is stored for every kind: the capture path is
-    /// one entry point, and dropping the provenance for the other kinds is the
-    /// caller's reading decision, not this state machine's.
-    snap: Option<InputSnap>,
+    /// A captured point with no object snap stores `None` rather than a
+    /// fabricated provenance. Every capture pushes exactly one entry, so the
+    /// vectors cannot drift; cancel/new drops the whole tool (and therefore the
+    /// list), so a stale pick can never be attributed to a later measurement.
+    snaps: Vec<Option<InputSnap>>,
 }
 
 impl MeasurementTool {
@@ -216,7 +218,7 @@ impl MeasurementTool {
             kind,
             points: Vec::new(),
             cursor: None,
-            snap: None,
+            snaps: Vec::new(),
         }
     }
 
@@ -237,7 +239,17 @@ impl MeasurementTool {
     /// `None` means "no object snap resolved for that pick" — it is never a
     /// fabricated `analytic` provenance.
     pub fn snap(&self) -> Option<&InputSnap> {
-        self.snap.as_ref()
+        self.snaps.last().and_then(Option::as_ref)
+    }
+
+    /// Snap provenance of every captured point, positionally parallel to
+    /// [`Self::points`].
+    ///
+    /// The measurement summary reads this to decide whether the result is a raw
+    /// user-point measurement or one derived from snapped object geometry (and
+    /// how exact that geometry is).
+    pub fn snaps(&self) -> &[Option<InputSnap>] {
+        &self.snaps
     }
 
     /// Move the preview cursor without capturing a point.
@@ -248,11 +260,11 @@ impl MeasurementTool {
     /// Capture one point with the snap provenance the host resolved for it.
     ///
     /// Capture is unbounded; [`Self::is_ready`] decides when an evaluation is
-    /// defined. The provenance is stored beside the point it belongs to (the last
-    /// capture wins), so a report reads the same pick the evaluation does.
+    /// defined. The provenance is stored beside the point it belongs to, so the
+    /// report and the measurement summary read the same picks the preview shows.
     pub fn push_point_with_snap(&mut self, point: Point3, snap: Option<InputSnap>) {
         self.points.push(point);
-        self.snap = snap;
+        self.snaps.push(snap);
     }
 
     /// Capture one point without snap provenance.
@@ -340,11 +352,12 @@ mod tests {
         assert!(tool.auto_ready(), "one pick completes ID");
         assert_eq!(tool.snap(), None, "no snap resolved for this pick");
 
-        // A later pick replaces the stored provenance: a stale snap is never
-        // attributed to a different point.
+        // A later pick becomes the "last" snap without erasing the earlier
+        // pick's entry: a stale snap is never attributed to a different point.
         let snap = InputSnap {
             kind: cad_measure::SnapKind::Endpoint,
             precision: cad_domain::Precision::Analytic,
+            geometry_source: cad_domain::GeometrySource::Analytic,
             logical_pixel_distance: 2.0,
         };
         let mut tool = MeasurementTool::new(kind);
@@ -352,6 +365,9 @@ mod tests {
         tool.push_point_with_snap(p(3.0, 4.0), Some(snap.clone()));
         assert_eq!(tool.snap(), Some(&snap));
         assert_eq!(tool.points().len(), 2);
+        // Every pick keeps its own provenance, positionally parallel to the
+        // points: the raw pick stays `None`, the snapped one keeps its snap.
+        assert_eq!(tool.snaps(), &[None, Some(snap)]);
     }
 
     #[test]

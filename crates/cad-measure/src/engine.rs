@@ -225,6 +225,7 @@ impl MeasurementEngine {
                         source: c.source.clone(),
                         secondary: c.secondary.clone(),
                         precision: c.precision.clone(),
+                        geometry_source: c.geometry_source.clone(),
                         logical_pixel_distance: d / world_per_px,
                     },
                 ));

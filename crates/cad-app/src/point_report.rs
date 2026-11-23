@@ -26,7 +26,7 @@
 //!
 //! This is a project decision, not a claim about AutoCAD's internal order.
 
-use cad_domain::{Point3, Precision, SpaceId, Unit, UnitContext};
+use cad_domain::{GeometrySource, Point3, Precision, SpaceId, Unit, UnitContext};
 use cad_measure::{SnapCandidate, SnapKind};
 
 /// The snap provenance stored with one captured point entry.
@@ -40,6 +40,8 @@ pub struct InputSnap {
     pub kind: SnapKind,
     /// The precision of the geometry the snap was derived from.
     pub precision: Precision,
+    /// Where the snapped geometry came from (analytic curve, kernel mesh, …).
+    pub geometry_source: GeometrySource,
     /// Perpendicular distance from the raw pick, in logical pixels.
     pub logical_pixel_distance: f64,
 }
@@ -50,6 +52,7 @@ impl InputSnap {
         InputSnap {
             kind: candidate.kind,
             precision: candidate.precision.clone(),
+            geometry_source: candidate.geometry_source.clone(),
             logical_pixel_distance: candidate.logical_pixel_distance,
         }
     }

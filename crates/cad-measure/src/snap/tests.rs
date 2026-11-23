@@ -312,6 +312,7 @@ fn snapped_measurement_records_provenance() {
             source: source(1),
             secondary: None,
             precision: Precision::Analytic,
+            geometry_source: GeometrySource::Analytic,
             logical_pixel_distance: 0.5,
         },
         SnapProvenance {
@@ -319,6 +320,7 @@ fn snapped_measurement_records_provenance() {
             source: source(2),
             secondary: Some(source(3)),
             precision: Precision::Analytic,
+            geometry_source: GeometrySource::Analytic,
             logical_pixel_distance: 0.25,
         },
     ];
@@ -338,6 +340,7 @@ fn snapped_measurement_records_provenance() {
                 source: source(1),
                 secondary: None,
                 precision: Precision::Analytic,
+                geometry_source: GeometrySource::Analytic,
                 logical_pixel_distance: 0.0,
             }]
         )
@@ -366,12 +369,8 @@ fn image_and_mask_yield_no_snap_candidates() {
     assert!(snaps(&[target(mask)], 5.0, 5.0, 1.0).is_empty());
 }
 
-/// A body's display cache is a tessellation, not an analytic surface: like a
-/// `Mesh` it contributes no snap candidates rather than inventing endpoints on a
-/// fabricated plane.
-#[test]
-fn body_yields_no_snap_candidates() {
-    let body = SemanticGeometry::Body3d(Box::new(Body3d {
+fn display_body(edges: Vec<Vec<Point3>>, precision: Precision) -> SemanticGeometry {
+    SemanticGeometry::Body3d(Box::new(Body3d {
         kind: BodyKind::Solid,
         exact: BodyExact::Unavailable {
             reason: "snap-test-display-only".into(),
@@ -387,15 +386,146 @@ fn body_yields_no_snap_candidates() {
                 texture: None,
                 pbr: None,
             },
-            edges: vec![vec![flat(0.0, 0.0), flat(10.0, 0.0)]],
+            edges,
             tolerance: Some(0.01),
-            precision: Precision::Approximate {
-                error_bound: Some(0.01),
-            },
+            precision,
             completeness: Completeness::Partial(vec!["exact-brep".into()]),
         },
-    }));
-    // Hovering exactly over a display vertex/edge midpoint still yields nothing.
+    }))
+}
+
+/// A body's display cache is a tessellation, so it contributes no snap
+/// candidates unless the caller explicitly enables stored-edge snapping.
+#[test]
+fn body_without_edge_snaps_still_yields_no_candidates() {
+    let body = display_body(
+        vec![vec![flat(0.0, 0.0), flat(10.0, 0.0)]],
+        Precision::Approximate {
+            error_bound: Some(0.01),
+        },
+    );
+    // Hovering exactly over a display vertex/edge midpoint yields nothing while
+    // the flag is off (the default).
     assert!(snaps(&[target(body.clone())], 0.0, 0.0, 1.0).is_empty());
     assert!(snaps(&[target(body)], 5.0, 0.0, 1.0).is_empty());
+}
+
+#[test]
+fn body_edge_snaps_offer_only_endpoints_and_midpoints() {
+    let body = display_body(
+        vec![vec![flat(0.0, 0.0), flat(10.0, 0.0)]],
+        Precision::Approximate {
+            error_bound: Some(0.01),
+        },
+    );
+    let target = SnapTarget::new(
+        body,
+        source(1),
+        SpaceId::Model,
+        Precision::Approximate {
+            error_bound: Some(0.01),
+        },
+    )
+    .with_body_edge_snaps(GeometrySource::DirectMesh);
+
+    let endpoint = snaps(std::slice::from_ref(&target), 0.0, 0.0, 1.0)
+        .into_iter()
+        .find(|c| c.kind == SnapKind::Endpoint)
+        .expect("the stored edge start is an endpoint");
+    assert_eq!(endpoint.point, flat(0.0, 0.0));
+    assert_eq!(endpoint.geometry_source, GeometrySource::DirectMesh);
+    assert_eq!(
+        endpoint.precision,
+        Precision::Approximate {
+            error_bound: Some(0.01)
+        },
+        "candidate precision comes from the target, not a hardcoded Analytic"
+    );
+
+    let middle = snaps(std::slice::from_ref(&target), 5.0, 0.0, 1.0);
+    assert!(
+        middle
+            .iter()
+            .any(|c| c.kind == SnapKind::Midpoint && c.point == flat(5.0, 0.0)),
+        "{middle:?}"
+    );
+
+    // No analytic gestures are invented on a display edge: no perpendicular at
+    // an interior point, and no center/quadrant/intersection anywhere.
+    let on_edge = snaps(&[target], 3.0, 0.0, 1.0);
+    assert!(
+        on_edge
+            .iter()
+            .all(|c| matches!(c.kind, SnapKind::Endpoint | SnapKind::Midpoint)),
+        "{on_edge:?}"
+    );
+}
+
+#[test]
+fn body_edge_snaps_dedup_shared_interior_vertices_and_key_midpoints() {
+    // One chain: 0 -- 10 -- 20. The interior vertex at 10 belongs to two
+    // segments but must produce exactly one endpoint candidate; the two
+    // segments each produce their own midpoint.
+    let body = display_body(
+        vec![vec![flat(0.0, 0.0), flat(10.0, 0.0), flat(20.0, 0.0)]],
+        Precision::Analytic,
+    );
+    let target = SnapTarget::new(body, source(1), SpaceId::Model, Precision::Analytic)
+        .with_body_edge_snaps(GeometrySource::DirectMesh);
+    // A wide aperture so every candidate is in tolerance at once.
+    let all = snaps(&[target], 10.0, 0.0, 1000.0);
+    let endpoints: Vec<Point3> = all
+        .iter()
+        .filter(|c| c.kind == SnapKind::Endpoint)
+        .map(|c| c.point)
+        .collect();
+    assert_eq!(endpoints.len(), 3, "one endpoint per distinct vertex");
+    assert_eq!(
+        endpoints
+            .iter()
+            .filter(|point| **point == flat(10.0, 0.0))
+            .count(),
+        1,
+        "the shared interior vertex yields one candidate"
+    );
+    let midpoints: Vec<Point3> = all
+        .iter()
+        .filter(|c| c.kind == SnapKind::Midpoint)
+        .map(|c| c.point)
+        .collect();
+    assert_eq!(
+        midpoints,
+        vec![flat(5.0, 0.0), flat(15.0, 0.0)],
+        "one midpoint per segment"
+    );
+}
+
+#[test]
+fn body_edge_vertex_keys_normalise_negative_zero() {
+    // Two polylines share the same geometric vertex, written with different
+    // signed zeroes; the coordinate key must name it once.
+    let body = display_body(
+        vec![
+            vec![
+                Point3 {
+                    x: -0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                flat(10.0, 0.0),
+            ],
+            vec![flat(0.0, 0.0), flat(0.0, 10.0)],
+        ],
+        Precision::Analytic,
+    );
+    let target = SnapTarget::new(body, source(1), SpaceId::Model, Precision::Analytic)
+        .with_body_edge_snaps(GeometrySource::DirectMesh);
+    let all = snaps(&[target], 0.0, 0.0, 1000.0);
+    assert_eq!(
+        all.iter()
+            .filter(|c| c.kind == SnapKind::Endpoint && c.point == flat(0.0, 0.0))
+            .count(),
+        1,
+        "{all:?}"
+    );
 }

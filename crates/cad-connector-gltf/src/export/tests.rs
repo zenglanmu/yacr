@@ -19,8 +19,8 @@ use cad_db::{
     EntityRenderAttributes, EntityTransparency, Layer,
 };
 use cad_domain::{
-    DatabaseId, DocumentId, EntityId, LayerId, Mesh, ObjectId, Point3, Revision, SemanticGeometry,
-    SpaceId, UnitContext,
+    Body3d, BodyDisplay, BodyExact, BodyKind, DatabaseId, DocumentId, EntityId, LayerId, Mesh,
+    ObjectId, Point3, Precision, Revision, SemanticGeometry, SpaceId, UnitContext,
 };
 use gltf::buffer::Source;
 
@@ -122,6 +122,53 @@ fn triangle_mesh() -> Mesh {
 
 fn mesh_database(mesh: Mesh) -> DrawingDatabase {
     database(vec![entity(1, "AcDbMesh", SemanticGeometry::Mesh(mesh))])
+}
+
+/// A sheet body whose display cache carries `edges` (empty = edge-less).
+fn display_body(mesh: Mesh, edges: Vec<Vec<Point3>>) -> SemanticGeometry {
+    SemanticGeometry::Body3d(Box::new(Body3d {
+        kind: BodyKind::Sheet,
+        exact: BodyExact::Unavailable {
+            reason: "test body".into(),
+        },
+        display: BodyDisplay {
+            mesh,
+            edges,
+            tolerance: None,
+            precision: Precision::Unknown,
+            completeness: cad_domain::Completeness::Complete,
+        },
+    }))
+}
+
+/// A wire body: stored edges only, no display triangles.
+fn wire_body(edges: Vec<Vec<Point3>>) -> SemanticGeometry {
+    SemanticGeometry::Body3d(Box::new(Body3d {
+        kind: BodyKind::Wire,
+        exact: BodyExact::Unavailable {
+            reason: "test wire body".into(),
+        },
+        display: BodyDisplay {
+            mesh: Mesh::default(),
+            edges,
+            tolerance: None,
+            precision: Precision::Unknown,
+            completeness: cad_domain::Completeness::Partial(vec!["edges only".into()]),
+        },
+    }))
+}
+
+/// Two stored edge polylines: 3 segments + 1 segment = 4 stored segments.
+fn stored_edges() -> Vec<Vec<Point3>> {
+    vec![
+        vec![
+            point(0.0, 0.0, 0.0),
+            point(1.0, 0.0, 0.0),
+            point(1.0, 1.0, 0.0),
+            point(0.0, 1.0, 0.0),
+        ],
+        vec![point(0.0, 0.0, 0.5), point(1.0, 0.0, 0.5)],
+    ]
 }
 
 fn export_with(

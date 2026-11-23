@@ -19,6 +19,9 @@ const DEGENERATE_TRIANGLE: &str = "export.stl.degenerate_triangle";
 const COLORS_DROPPED: &str = "export.stl.colors_dropped";
 /// Stable marker: a written mesh's base-colour texture has no STL channel.
 const TEXTURE_NOT_WRITTEN: &str = "export.stl.texture_not_written";
+/// Stable marker: a written body's stored display edges have no STL channel
+/// (STL is a triangle soup, so the edge set cannot be carried).
+pub(crate) const STORED_EDGES_NOT_WRITTEN: &str = "export.stl.stored_edges_not_written";
 
 struct Facet {
     normal: Point3,
@@ -95,8 +98,7 @@ fn collect_facets(collected: &Collected, report: &mut ReportBuilder) -> Vec<Face
         }
         if degenerate > 0 {
             report.lost_triangles(
-                mesh.object,
-                &mesh.type_key,
+                mesh,
                 degenerate,
                 DEGENERATE_TRIANGLE,
                 format!(

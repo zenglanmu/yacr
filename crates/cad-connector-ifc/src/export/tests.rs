@@ -13,8 +13,9 @@ use cad_connector_core::{
 };
 use cad_db::{DbEntity, DbObject, DrawingDatabase, DrawingDatabaseBuilder, Layer, Layout};
 use cad_domain::{
-    CadError, Completeness, DatabaseId, DocumentId, EntityId, LayerId, LayoutId, Mesh, ObjectId,
-    Point3, Revision, SemanticGeometry, SpaceId, SupportStatus, Unit, UnitContext,
+    Body3d, BodyDisplay, BodyExact, BodyKind, CadError, Completeness, DatabaseId, DocumentId,
+    EntityId, LayerId, LayoutId, Mesh, ObjectId, Point3, Precision, Revision, SemanticGeometry,
+    SpaceId, SupportStatus, Unit, UnitContext,
 };
 
 use super::*;
@@ -93,6 +94,80 @@ fn triangle_database() -> DrawingDatabase {
         "TestMesh",
         SemanticGeometry::Mesh(triangle_mesh()),
     )])
+}
+
+/// A sheet body whose display cache carries `edges` (empty = edge-less).
+fn display_body(mesh: Mesh, edges: Vec<Vec<Point3>>) -> SemanticGeometry {
+    SemanticGeometry::Body3d(Box::new(Body3d {
+        kind: BodyKind::Sheet,
+        exact: BodyExact::Unavailable {
+            reason: "test body".into(),
+        },
+        display: BodyDisplay {
+            mesh,
+            edges,
+            tolerance: None,
+            precision: Precision::Unknown,
+            completeness: Completeness::Complete,
+        },
+    }))
+}
+
+/// A wire body: stored edges only, no display triangles.
+fn wire_body(edges: Vec<Vec<Point3>>) -> SemanticGeometry {
+    SemanticGeometry::Body3d(Box::new(Body3d {
+        kind: BodyKind::Wire,
+        exact: BodyExact::Unavailable {
+            reason: "test wire body".into(),
+        },
+        display: BodyDisplay {
+            mesh: Mesh::default(),
+            edges,
+            tolerance: None,
+            precision: Precision::Unknown,
+            completeness: Completeness::Partial(vec!["edges only".into()]),
+        },
+    }))
+}
+
+/// Two stored edge polylines: 3 segments + 1 segment = 4 stored segments.
+fn stored_edges() -> Vec<Vec<Point3>> {
+    vec![
+        vec![
+            Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            Point3 {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            Point3 {
+                x: 1.0,
+                y: 1.0,
+                z: 0.0,
+            },
+            Point3 {
+                x: 0.0,
+                y: 1.0,
+                z: 0.0,
+            },
+        ],
+        vec![
+            Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.5,
+            },
+            Point3 {
+                x: 1.0,
+                y: 0.0,
+                z: 0.5,
+            },
+        ],
+    ]
 }
 
 fn job<'a>(database: &'a DrawingDatabase, units: Option<&'a UnitContext>) -> ExportJob<'a> {
@@ -400,6 +475,163 @@ fn a_textured_mesh_reports_the_texture_not_written_and_writes_the_same_bytes() {
         "an untextured mesh must not report a texture loss"
     );
     assert_eq!(without.report.completeness, Completeness::Complete);
+}
+
+/// A written body that carries stored display edges keeps its triangles in the
+/// file and reports one `Partial` conversion naming the entity and the real
+/// segment count. The bytes are identical to the edge-less body.
+#[test]
+fn a_body_with_stored_edges_reports_the_edge_loss_and_writes_the_same_bytes() {
+    let units = UnitContext::from_meter();
+    let with = export(
+        &database(vec![entity(
+            1,
+            "AcDbSurface",
+            display_body(triangle_mesh(), stored_edges()),
+        )]),
+        &units,
+    );
+    let without = export(
+        &database(vec![entity(
+            1,
+            "AcDbSurface",
+            display_body(triangle_mesh(), Vec::new()),
+        )]),
+        &units,
+    );
+    assert_eq!(
+        with.bytes, without.bytes,
+        "the IFC writer must write the same bytes with and without stored edges"
+    );
+    assert_eq!(with.report.counts.exact, 1, "the face set is written");
+    assert_eq!(with.report.counts.dropped, 0);
+    assert_eq!(with.report.counts.converted, 1);
+
+    let entries: Vec<&CompatEntry> = with
+        .report
+        .entries
+        .iter()
+        .filter(|entry| entry.code == STORED_EDGES_NOT_WRITTEN)
+        .collect();
+    assert_eq!(entries.len(), 1, "{:?}", with.report.entries);
+    assert_eq!(entries[0].status, SupportStatus::Partial);
+    assert_eq!(entries[0].object, Some(ObjectId(1)));
+    assert_eq!(entries[0].type_key.as_deref(), Some("AcDbSurface"));
+    assert!(
+        entries[0].message.contains("#1")
+            && entries[0].message.contains("AcDbSurface")
+            && entries[0]
+                .message
+                .contains("4 stored display edge segment(s)")
+            && entries[0].message.contains("writes surfaces only"),
+        "the message must name the entity and the real segment count: {}",
+        entries[0].message
+    );
+    assert!(matches!(with.report.completeness, Completeness::Partial(_)));
+    assert!(
+        !without
+            .report
+            .entries
+            .iter()
+            .any(|entry| entry.code == STORED_EDGES_NOT_WRITTEN),
+        "an edge-less body must not report an edge loss"
+    );
+}
+
+/// A body with both per-vertex colours and stored edges is two conversions: the
+/// colour loss (one per kind) and the edge loss (one per affected body).
+#[test]
+fn a_body_with_colours_and_stored_edges_counts_two_conversions() {
+    let units = UnitContext::from_meter();
+    let mut mesh = triangle_mesh();
+    mesh.colors = vec![[200, 10, 10]; 3];
+    let output = export(
+        &database(vec![entity(
+            1,
+            "AcDbSurface",
+            display_body(mesh, stored_edges()),
+        )]),
+        &units,
+    );
+    assert_eq!(output.report.counts.exact, 1);
+    assert_eq!(output.report.counts.converted, 2);
+    assert_eq!(
+        output.report.entries.len(),
+        2,
+        "{:?}",
+        output.report.entries
+    );
+    let codes: Vec<&str> = output
+        .report
+        .entries
+        .iter()
+        .map(|entry| entry.code.as_str())
+        .collect();
+    assert!(codes.contains(&COLORS_DROPPED), "{codes:?}");
+    assert!(codes.contains(&STORED_EDGES_NOT_WRITTEN), "{codes:?}");
+    assert!(matches!(
+        output.report.completeness,
+        Completeness::Partial(_)
+    ));
+}
+
+/// An edge-less body keeps the clean `Complete` verdict.
+#[test]
+fn an_edge_less_body_stays_complete() {
+    let units = UnitContext::from_meter();
+    let output = export(
+        &database(vec![entity(
+            1,
+            "AcDbSurface",
+            display_body(triangle_mesh(), Vec::new()),
+        )]),
+        &units,
+    );
+    assert_eq!(output.report.counts.converted, 0);
+    assert_eq!(output.report.completeness, Completeness::Complete);
+    assert!(!output
+        .report
+        .entries
+        .iter()
+        .any(|entry| entry.code == STORED_EDGES_NOT_WRITTEN));
+}
+
+/// A body with stored edges and no triangles is a wire body: dropped by name,
+/// never counted as a written edge loss.
+#[test]
+fn a_wire_body_is_dropped_by_name_and_not_counted_as_written() {
+    let units = UnitContext::from_meter();
+    let database = database(vec![
+        entity(1, "TestMesh", SemanticGeometry::Mesh(triangle_mesh())),
+        entity(2, "AcDbWire", wire_body(stored_edges())),
+    ]);
+    let output = export(&database, &units);
+    assert_eq!(output.report.counts.exact, 1);
+    assert_eq!(output.report.counts.dropped, 1);
+    assert_eq!(output.report.counts.converted, 0);
+    assert_eq!(
+        output.report.entries.len(),
+        1,
+        "{:?}",
+        output.report.entries
+    );
+    let entry = &output.report.entries[0];
+    assert_eq!(entry.code, WIRE_BODY_NOT_WRITTEN);
+    assert_eq!(entry.status, SupportStatus::Unsupported);
+    assert_eq!(entry.object, Some(ObjectId(2)));
+    assert_eq!(entry.type_key.as_deref(), Some("AcDbWire"));
+    assert!(
+        entry.message.contains("4 stored display edge segment(s)")
+            && entry.message.contains("no edge channel"),
+        "the message must name the segment count and the missing channel: {}",
+        entry.message
+    );
+    assert!(matches!(
+        output.report.completeness,
+        Completeness::Missing(_)
+    ));
+    let text = std::str::from_utf8(&output.bytes).expect("IFC is ASCII");
+    assert!(text.contains("IFCTRIANGULATEDFACESET"));
 }
 
 /// An entity that is not in the file at all is reported once: the texture on it

@@ -291,11 +291,14 @@ fn a_real_sketchup_model_imports_when_supplied() {
     assert!(codes.contains(&DIAG_UNITS_METRES));
     assert!(codes.contains(&DIAG_DOCUMENT));
     for capability in &drawing.report.capabilities {
-        assert_eq!(
-            capability.measure,
-            SupportStatus::Unsupported,
-            "SKP preview geometry is never a MEASURE target: {}",
-            capability.type_key
+        assert!(
+            matches!(
+                capability.measure,
+                SupportStatus::Partial | SupportStatus::Unsupported
+            ),
+            "SKP measure is at most display-edge endpoint/midpoint snap, never Verified: {} ({:?})",
+            capability.type_key,
+            capability.measure
         );
         assert_ne!(capability.render, SupportStatus::Unsupported);
     }

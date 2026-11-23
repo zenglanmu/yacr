@@ -29,8 +29,10 @@
 //!   a single layer) but **visibility is honoured**: hidden instances, hidden
 //!   faces, hidden/soft edges and invisible tags are pruned, and the counts are
 //!   reported.
-//! * Every successful import is `Completeness::Partial` and `measure` is
-//!   always [`SupportStatus::Unsupported`].
+//! * Every successful import is `Completeness::Partial`. `measure` is
+//!   `Unsupported` for triangle-only carriers and `Partial` for a carrier that
+//!   stored real visible display edges (endpoint/midpoint snap only, no
+//!   area/volume).
 //!
 //! The status ceiling follows the release, because the reader's own support
 //! matrix does: releases with observed corpus files (3–8, 2013–2020, 2026,
@@ -141,6 +143,11 @@ pub const DIAG_GROUPS_WITHOUT_EDGE_RECORDS: &str = "import.skp.groups_without_ed
 /// boundary record was pruned (hidden/soft/invisible tag), so the group fell
 /// back to the plain mesh carrier instead of an edge-less body (ADR-0049 D3).
 pub const DIAG_EDGES_HIDDEN_FALLBACK: &str = "import.skp.edges_hidden_fallback";
+/// Informational code: stored visible display edges are a narrow MEASURE source.
+///
+/// Endpoint and midpoint snap only, on the stored edges; no face, triangle,
+/// center, quadrant or intersection snap and no area/volume.
+pub const DIAG_MEASURE_EDGES_PARTIAL: &str = "import.skp.measure_edges_partial";
 
 /// Entity type key every inserted face/material group carries (mesh or body).
 pub const SKP_MESH_TYPE_KEY: &str = "SkpPreviewMesh";
@@ -216,6 +223,7 @@ impl Importer for SkpImporter {
         }
 
         let mut import = MeshImport::new(request, SKP_MESH_TYPE_KEY)?;
+        import.declare_edge_snap_measure(true);
         let scene = read_scene(&model, &request.limits, cancelled, &mut import)?;
         let stats = &scene.stats;
         if scene.placed.is_empty() && scene.edges.is_empty() {
@@ -248,6 +256,21 @@ impl Importer for SkpImporter {
         record_document(&mut import, stats);
         record_edges(&mut import, stats);
         record_losses(&mut import, stats);
+        if stats.edges.emitted > 0 {
+            import.record(
+                Diagnostic {
+                    object: None,
+                    code: DIAG_MEASURE_EDGES_PARTIAL.into(),
+                    message: format!(
+                        "{} stored visible display edge segment(s) are a MEASURE source for \
+                         endpoint and midpoint snap only; there is no face, triangle, center, \
+                         quadrant or intersection snap and no area/volume.",
+                        stats.edges.emitted
+                    ),
+                },
+                None,
+            );
+        }
         let edge_only = scene.placed.is_empty();
         let wire_groups = scene.edges.len();
 
@@ -321,12 +344,14 @@ impl Importer for SkpImporter {
                 message: "SketchUp preview: triangles, real boundary/standalone edges, instance \
                           transforms, tags, materials and front-face base-colour textures are \
                           read as display geometry; back-face textures, scenes, sections, \
-                          annotations and any exact B-rep are not. Not a measurement source."
+                          annotations and any exact B-rep are not. Triangles are not a \
+                          measurement source; stored visible edges allow endpoint/midpoint \
+                          snap only."
                     .into(),
             },
             Some(
                 "SketchUp preview geometry: display meshes and edges only, no exact B-rep, scenes \
-                 or measurement semantics"
+                 or CAD measurement semantics beyond endpoint/midpoint snap on stored edges"
                     .into(),
             ),
         );
@@ -462,8 +487,11 @@ fn apply_ceiling(capabilities: &mut [EntityCapability], ceiling: SupportStatus) 
         capability.semantic = weaker(capability.semantic, ceiling);
         capability.render = weaker(capability.render, ceiling);
         capability.pick = weaker(capability.pick, ceiling);
-        // A preview mesh is never a MEASURE target.
-        capability.measure = SupportStatus::Unsupported;
+        // Never force the MEASURE claim to a fixed status: the import has
+        // already decided it (Unsupported for triangle-only carriers, Partial
+        // for stored display edges), and the release ceiling can only narrow
+        // it (Partial + Unverified → Unverified). Unsupported stays Unsupported.
+        capability.measure = weaker(capability.measure, ceiling);
     }
 }
 

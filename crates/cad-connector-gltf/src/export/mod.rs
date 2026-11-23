@@ -32,6 +32,16 @@
 //! lacks is the same `texture_not_written` conversion as a lost base-colour
 //! texture, and the remaining channels are still written.
 //!
+//! glTF writes triangle primitives only, so a body that still writes its
+//! triangles but also carries stored display-edge polylines
+//! (`BodyDisplay::edges`) gets one per-entity `Partial` conversion
+//! (`export.gltf.stored_edges_not_written`) naming the real segment count; the
+//! written bytes stay identical to the same mesh without stored edges and
+//! `exact` is unchanged. A body with stored edges but no triangles is a wire
+//! body this writer cannot carry at all, so it is a named drop
+//! (`export.gltf.wire_body_not_written`) and is never double-reported as
+//! written-geometry edge loss.
+//!
 //! glTF is **metres, +Y up**; `cad-db` coordinates are +Z up in the document's
 //! own source unit. The scale and the frame rotation are applied exactly once,
 //! in [`write`], and both are reported as provenance notes. Unknown units are

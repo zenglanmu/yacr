@@ -17,6 +17,9 @@ const NORMALS_DROPPED: &str = "export.ply.normals_dropped";
 const COLORS_DROPPED: &str = "export.ply.colors_dropped";
 /// Stable marker: a written mesh's base-colour texture has no PLY channel here.
 const TEXTURE_NOT_WRITTEN: &str = "export.ply.texture_not_written";
+/// Stable marker: a written body's stored display edges have no PLY channel
+/// here (the face element is written, no edge element).
+pub(crate) const STORED_EDGES_NOT_WRITTEN: &str = "export.ply.stored_edges_not_written";
 
 pub(crate) fn write(collected: &Collected, report: &mut ReportBuilder) -> Vec<u8> {
     let write_colors = collected.colors_complete();

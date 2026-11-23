@@ -8,6 +8,13 @@
 //! [`SemanticGeometry::Body3d`] — and every other entity produces one explicit
 //! drop entry instead of being skipped. Model space is the only space written;
 //! paper layouts and block definitions are dropped by name.
+//!
+//! A [`SemanticGeometry::Body3d`] may also carry stored display-edge polylines
+//! (`BodyDisplay::edges`). The neutral-mesh formats have no edge channel, so a
+//! body that still writes its triangles keeps a count of those polylines and
+//! segments here for the shared entry point to report once per entity; a body
+//! with edges but no triangles is a wire body and is dropped as a whole with
+//! its own truthful code, never reported as edge loss on written geometry.
 
 use cad_connector_core::ExportJob;
 use cad_db::DbEntity;
@@ -27,6 +34,13 @@ pub(crate) struct SourceMesh {
     /// texture. The neutral-mesh formats have no texture channel, so a writer
     /// that writes the geometry still reports the texture as a conversion.
     pub texture: Option<String>,
+    /// Stored display-edge polylines carried by the source body, `0` for a
+    /// standalone [`SemanticGeometry::Mesh`] (which has no edge cache).
+    pub edge_polylines: usize,
+    /// Total stored display-edge segments, `Σ(polyline.len() − 1)`. The
+    /// neutral-mesh formats write surfaces only, so a written body with a
+    /// non-zero count reports one conversion naming this number.
+    pub edge_segments: usize,
 }
 
 /// One source entity that cannot be written, with its stable marker.
@@ -94,7 +108,14 @@ impl Collected {
 /// fails without allocating the copies. Exceeding either is an explicit error
 /// naming the writer; nothing is truncated. A document with no writable mesh is
 /// refused instead of producing an empty file.
-pub(crate) fn collect(job: &ExportJob<'_>, format_id: &str) -> CadResult<Collected> {
+///
+/// `report_prefix` is the writer's report-code prefix (`stl`, `obj`, `ply`,
+/// `off`); the two STL containers share `stl`, matching their other codes.
+pub(crate) fn collect(
+    job: &ExportJob<'_>,
+    format_id: &str,
+    report_prefix: &str,
+) -> CadResult<Collected> {
     let entity_count = job.database.entity_count();
     if entity_count > job.limits.max_output_entities {
         return Err(CadError::InvalidInput(format!(
@@ -124,7 +145,7 @@ pub(crate) fn collect(job: &ExportJob<'_>, format_id: &str) -> CadResult<Collect
             });
             continue;
         }
-        let mesh = match &entity.geometry {
+        let (mesh, edge_polylines, edge_segments) = match &entity.geometry {
             SemanticGeometry::Mesh(mesh) => {
                 if mesh.triangles.is_empty() {
                     drops.push(DropEntry {
@@ -135,10 +156,29 @@ pub(crate) fn collect(job: &ExportJob<'_>, format_id: &str) -> CadResult<Collect
                     });
                     continue;
                 }
-                mesh
+                (mesh, 0, 0)
             }
             SemanticGeometry::Body3d(body) => {
                 if body.display.mesh.triangles.is_empty() {
+                    // A wire body is a body with stored edges and no surface.
+                    // The format has no edge channel, so nothing of it can be
+                    // written: drop it as a whole with its real segment count
+                    // instead of reporting edge loss on geometry that is absent.
+                    if !body.display.edges.is_empty() {
+                        let segments = count_edge_segments(&body.display.edges);
+                        drops.push(DropEntry {
+                            object,
+                            type_key,
+                            code: format!("export.{report_prefix}.wire_body_not_written"),
+                            message: format!(
+                                "entity #{} ({}) carries {segments} stored display edge \
+                                 segment(s) and no triangles; this format has no edge channel, so \
+                                 the wire body was not written",
+                                object.0, entity.object.type_key
+                            ),
+                        });
+                        continue;
+                    }
                     drops.push(DropEntry {
                         object,
                         type_key,
@@ -148,7 +188,11 @@ pub(crate) fn collect(job: &ExportJob<'_>, format_id: &str) -> CadResult<Collect
                     });
                     continue;
                 }
-                &body.display.mesh
+                (
+                    &body.display.mesh,
+                    body.display.edges.len(),
+                    count_edge_segments(&body.display.edges),
+                )
             }
             other => {
                 let variant = geometry_variant(other);
@@ -180,6 +224,8 @@ pub(crate) fn collect(job: &ExportJob<'_>, format_id: &str) -> CadResult<Collect
             normals: mesh.normals.clone(),
             colors: mesh.colors.clone(),
             texture: mesh.texture.clone(),
+            edge_polylines,
+            edge_segments,
         });
     }
 
@@ -191,6 +237,18 @@ pub(crate) fn collect(job: &ExportJob<'_>, format_id: &str) -> CadResult<Collect
     }
 
     Ok(Collected { meshes, drops })
+}
+
+/// The number of segments in a set of stored display-edge polylines.
+///
+/// One polyline of `n` points is `n − 1` segments (a stored edge polyline has
+/// at least two points; the saturating subtraction keeps a defensive zero for a
+/// hand-built shorter one instead of underflowing).
+fn count_edge_segments(polylines: &[Vec<Point3>]) -> usize {
+    polylines
+        .iter()
+        .map(|polyline| polyline.len().saturating_sub(1))
+        .sum()
 }
 
 /// The variant name reported for an unsupported geometry.

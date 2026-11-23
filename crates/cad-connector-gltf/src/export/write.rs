@@ -80,6 +80,9 @@ pub(crate) const VERTEX_COLOR_OPACITY: &str = "export.gltf.vertex_color_opacity_
 /// written (no texture bytes, no texture key, or bytes that do not match the
 /// key's extension).
 pub(crate) const TEXTURE_NOT_WRITTEN: &str = "export.gltf.texture_not_written";
+/// A written body's stored display edges have no glTF channel here: the writer
+/// emits triangle primitives only.
+pub(crate) const STORED_EDGES_NOT_WRITTEN: &str = "export.gltf.stored_edges_not_written";
 
 /// `ARRAY_BUFFER` bufferView target.
 const ARRAY_BUFFER: u32 = 34962;
@@ -214,6 +217,21 @@ pub(crate) fn write(
             // Every triangle was degenerate; an empty primitive is invalid glTF
             // and the dropped triangles are already reported.
             continue;
+        }
+        // The primitive is written, but a body's stored display edges have no
+        // glTF channel here (triangle primitives only). One conversion per
+        // affected entity, and it does not change `exact`.
+        if mesh.edge_polylines > 0 {
+            report.converted_entity(
+                STORED_EDGES_NOT_WRITTEN,
+                mesh.object,
+                &mesh.type_key,
+                format!(
+                    "entity #{} ({}) carries {} stored display edge segment(s); glTF writes \
+                     surfaces only, so the stored edge set was not written",
+                    mesh.object.0, mesh.type_key, mesh.edge_segments
+                ),
+            );
         }
 
         let mut attributes = Vec::new();

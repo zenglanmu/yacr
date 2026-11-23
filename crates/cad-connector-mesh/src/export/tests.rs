@@ -792,3 +792,5 @@ fn units_are_reported_as_notes() {
         .any(|entry| entry.code == "export.obj.units_unknown"
             && entry.status == SupportStatus::Unverified));
 }
+
+mod stored_edges;

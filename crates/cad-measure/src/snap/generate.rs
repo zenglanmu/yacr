@@ -105,9 +105,10 @@ pub(super) fn generate(
         G::Mesh(_)
         | G::Insert { .. }
         // A body's display cache is a tessellation, not an analytic surface:
-        // like `Mesh`, it contributes no snap vertices here rather than
-        // inventing endpoints on a fabricated plane. (Body edge snapping is a
-        // later concern; the display edges stay pickable via `cad-spatial`.)
+        // like `Mesh`, it contributes no snap vertices here. The one exception
+        // is the opt-in `body_edge_snaps` path, which generates endpoint and
+        // midpoint candidates from stored display edges in
+        // `collect_candidates` (see `generate_body_edges`).
         | G::Body3d(_)
         | G::Text { .. }
         | G::Shape { .. }
@@ -122,6 +123,58 @@ pub(super) fn generate(
 fn push_point(out: &mut Vec<Raw>, kind: SnapKind, point: Point3, key: String) {
     if cad_geometry::is_finite(point) {
         out.push(Raw { kind, point, key });
+    }
+}
+
+/// Endpoint and midpoint candidates from a body's stored display edges.
+///
+/// Only those two kinds are produced: a display cache is a tessellation, so it
+/// carries no face, triangle, center, quadrant or intersection semantics. A
+/// polyline is chained segment by segment (`windows(2)`); shared interior
+/// vertices derive the same coordinate key, so the global dedup keeps one
+/// candidate for them. Midpoints are per segment and keyed by the canonical
+/// (sorted) pair of their endpoint keys.
+pub(super) fn generate_body_edges(edges: &[Vec<Point3>], out: &mut Vec<Raw>) {
+    for polyline in edges {
+        for pair in polyline.windows(2) {
+            let (a, b) = (pair[0], pair[1]);
+            let key_a = vertex_key(a);
+            let key_b = vertex_key(b);
+            push_point(out, SnapKind::Endpoint, a, key_a.clone());
+            push_point(out, SnapKind::Endpoint, b, key_b.clone());
+            push_point(
+                out,
+                SnapKind::Midpoint,
+                midpoint(a, b),
+                midpoint_key(&key_a, &key_b),
+            );
+        }
+    }
+}
+
+/// Coordinate-derived key for one display vertex.
+///
+/// Bit-normalised so `-0.0` and `0.0` name the same vertex; two segments that
+/// share an interior vertex therefore produce one candidate, not two.
+fn vertex_key(point: Point3) -> String {
+    let bits = |value: f64| {
+        let value = if value == 0.0 { 0.0 } else { value };
+        value.to_bits()
+    };
+    format!(
+        "body-vertex:{}:{}:{}",
+        bits(point.x),
+        bits(point.y),
+        bits(point.z)
+    )
+}
+
+/// Canonical key for a segment midpoint: the sorted pair of endpoint keys.
+fn midpoint_key(a: &str, b: &str) -> String {
+    if a <= b {
+        format!("body-mid:{a}|{b}")
+    } else {
+        format!("body-mid:{b}|{a}")
     }
 }
 

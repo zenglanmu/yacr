@@ -238,6 +238,110 @@ fn degenerate_triangle_is_dropped_and_not_counted_exact() {
 }
 
 #[test]
+fn a_body_with_stored_edges_writes_its_triangles_and_reports_the_edge_loss() {
+    for container in [GltfContainer::Glb, GltfContainer::Gltf] {
+        let with = export(
+            container,
+            &database(vec![entity(
+                1,
+                "AcDbSurface",
+                display_body(triangle_mesh(), stored_edges()),
+            )]),
+        );
+        let without = export(
+            container,
+            &database(vec![entity(
+                1,
+                "AcDbSurface",
+                display_body(triangle_mesh(), Vec::new()),
+            )]),
+        );
+
+        assert_eq!(
+            with.bytes, without.bytes,
+            "{container:?}: stored edges must not change the written bytes"
+        );
+        assert_eq!(with.report.counts.exact, 1, "the triangle is still exact");
+        assert_eq!(with.report.counts.converted, 1);
+        assert_eq!(with.report.counts.dropped, 0);
+        assert!(matches!(with.report.completeness, Completeness::Partial(_)));
+
+        let entries: Vec<_> = with
+            .report
+            .entries
+            .iter()
+            .filter(|entry| entry.code == "export.gltf.stored_edges_not_written")
+            .collect();
+        assert_eq!(entries.len(), 1, "{container:?}: {:?}", with.report.entries);
+        assert_eq!(entries[0].status, SupportStatus::Partial);
+        assert_eq!(entries[0].object, Some(ObjectId(1)));
+        assert_eq!(entries[0].type_key.as_deref(), Some("AcDbSurface"));
+        assert!(
+            entries[0].message.contains("#1")
+                && entries[0]
+                    .message
+                    .contains("4 stored display edge segment(s)")
+                && entries[0].message.contains("writes surfaces only"),
+            "the message must name the entity and the real segment count: {}",
+            entries[0].message
+        );
+
+        // The primitive really is triangles; the edge set did not change it.
+        let gltf = gltf::Gltf::from_slice(&with.bytes).expect("valid glTF");
+        assert_eq!(gltf.meshes().count(), 1);
+        let primitive = gltf.meshes().next().unwrap().primitives().next().unwrap();
+        assert_eq!(primitive.mode(), gltf::mesh::Mode::Triangles);
+    }
+}
+
+#[test]
+fn a_wire_body_is_dropped_by_name_and_not_counted_as_written() {
+    let database = database(vec![
+        entity(1, "AcDbMesh", SemanticGeometry::Mesh(triangle_mesh())),
+        entity(2, "AcDbWire", wire_body(stored_edges())),
+    ]);
+    let output = export(GltfContainer::Glb, &database);
+    assert_eq!(output.report.counts.exact, 1);
+    assert_eq!(output.report.counts.dropped, 1);
+    assert_eq!(
+        output.report.counts.converted, 0,
+        "a wire body is a drop, never written-geometry edge loss"
+    );
+    let entry = output
+        .report
+        .entries
+        .iter()
+        .find(|entry| entry.object == Some(ObjectId(2)))
+        .expect("the wire body is named, not silently skipped");
+    assert_eq!(entry.code, "export.gltf.wire_body_not_written");
+    assert_eq!(entry.status, SupportStatus::Unsupported);
+    assert_eq!(entry.type_key.as_deref(), Some("AcDbWire"));
+    assert!(
+        entry.message.contains("4 stored display edge segment(s)")
+            && entry.message.contains("no edge channel"),
+        "the message must name the segment count and the missing channel: {}",
+        entry.message
+    );
+    assert!(
+        !output
+            .report
+            .entries
+            .iter()
+            .any(|other| other.object == Some(ObjectId(2))
+                && other.code == "export.gltf.stored_edges_not_written"),
+        "a dropped wire body must not also report a written edge loss"
+    );
+
+    // Only the triangle entity became a node; the wire body wrote nothing.
+    let gltf = gltf::Gltf::from_slice(&output.bytes).expect("valid GLB");
+    assert_eq!(gltf.meshes().count(), 1);
+    assert!(matches!(
+        output.report.completeness,
+        Completeness::Missing(_)
+    ));
+}
+
+#[test]
 fn mismatched_format_id_is_refused() {
     let database = mesh_database(triangle_mesh());
     let units = UnitContext::from_meter();

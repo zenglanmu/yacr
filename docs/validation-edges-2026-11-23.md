@@ -6,6 +6,11 @@
 > 本记录只有**编译/契约测试**证据。没有任何运行时、真实 GPU、像素、性能、真机或 vendor
 > 格式验收证据；真实 SKP corpus 未重跑。
 
+> **Superseded（2026-11-23）**：本记录中「测量仍 `Unsupported`（无 snap）」与「SKP 自由边写出
+> 未做」两句已被 ADR-0050/0051 取代，当前行为见 `docs/validation-edge-followups-2026-11-23.md`
+> 与 `docs/adr/0050-display-edge-snap-and-measure.md`、`docs/adr/0051-skp-single-run-free-edge-export.md`；
+> 其余内容按历史原样保留。
+
 ## 跑过的命令与结果（最终工作树）
 
 | 命令 | 结果 |

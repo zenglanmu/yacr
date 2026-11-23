@@ -249,9 +249,14 @@ pub(super) fn snap_target_build_count() -> u64 {
 /// Every expanded item is presented in **world model space** (block children
 /// are inlined by their composed transform), so all targets are tagged
 /// [`SpaceId::Model`]. The precision mirrors the source: a spline's snap points
-/// come from a fixed sample set ([`Precision::Approximate`]); analytic kinds are
-/// [`Precision::Analytic`].
-fn snap_targets_for(drawing: &DrawingDatabase, document: DocumentId) -> Vec<SnapTarget> {
+/// come from a fixed sample set ([`Precision::Approximate`]), a vendor proxy
+/// cache's points come from a derived display snapshot
+/// ([`Precision::Approximate`], no stated bound), analytic kinds are
+/// [`Precision::Analytic`], and a body reports its own
+/// [`BodyDisplay::precision`](cad_domain::BodyDisplay::precision). A non-body
+/// target keeps the pick item's [`GeometrySource`], so a direct display mesh or
+/// a vendor proxy cache is not relabelled as analytic.
+pub(crate) fn snap_targets_for(drawing: &DrawingDatabase, document: DocumentId) -> Vec<SnapTarget> {
     let identity = Transform3::identity();
     crate::drawing_pick_items(drawing, document)
         .into_iter()
@@ -266,18 +271,88 @@ fn snap_targets_for(drawing: &DrawingDatabase, document: DocumentId) -> Vec<Snap
                     Err(_) => return None,
                 }
             };
-            let precision = match &geometry {
-                SemanticGeometry::Spline { .. } => Precision::Approximate { error_bound: None },
-                _ => Precision::Analytic,
-            };
-            Some(SnapTarget::new(
-                geometry,
+            Some(body_aware_target(
+                drawing,
                 item.source,
-                SpaceId::Model,
-                precision,
+                item.geometry_source,
+                geometry,
             ))
         })
         .collect()
+}
+
+/// Build one target, deriving body provenance and the display-edge gate.
+///
+/// A non-body keeps the pick item's geometry source ([`GeometrySource`]) instead
+/// of collapsing to the [`SnapTarget::new`] `Analytic` default: a `Mesh` pick is
+/// a `DirectMesh`, and a vendor-backed analytic stand-in is a `ProxyCache`. Its
+/// [`Precision`] follows that source: a spline is sampled
+/// ([`Precision::Approximate`]), and so is a proxy cache (a synthesized stand-in
+/// drawn from a display snapshot cannot claim analytic accuracy); every other
+/// non-body kind stays [`Precision::Analytic`]. A `Body3d` overrides that with
+/// its own provenance: `KernelMesh` only when the body has an exact B-rep,
+/// `DirectMesh` otherwise, plus its display precision (never a hardcoded
+/// `Analytic`). Body-edge snapping stays limited to the SKP display carriers
+/// that actually store real visible edges. ACIS and every other body stay
+/// edge-snap disabled: their display cache is a tessellation, not a stored edge
+/// set.
+pub(super) fn body_aware_target(
+    drawing: &DrawingDatabase,
+    source: SelectionRef,
+    geometry_source: GeometrySource,
+    geometry: SemanticGeometry,
+) -> SnapTarget {
+    let SemanticGeometry::Body3d(body) = &geometry else {
+        let precision = match (&geometry, &geometry_source) {
+            (SemanticGeometry::Spline { .. }, _) => Precision::Approximate { error_bound: None },
+            // A proxy cache is a derived analytic stand-in, not the source
+            // document's own analytic geometry: no bound is known for its
+            // sampling, so `Approximate { error_bound: None }` is the most it
+            // may claim.
+            (_, GeometrySource::ProxyCache) => Precision::Approximate { error_bound: None },
+            _ => Precision::Analytic,
+        };
+        return SnapTarget::new(geometry, source, SpaceId::Model, precision)
+            .with_provenance(geometry_source);
+    };
+    let precision = body.display.precision.clone();
+    let geometry_source = if body.is_exact() {
+        GeometrySource::KernelMesh
+    } else {
+        GeometrySource::DirectMesh
+    };
+    let type_key = drawing
+        .entity(source.entity)
+        .map(|entity| entity.object.type_key.as_str());
+    let edge_snaps = !body.display.edges.is_empty() && carrier_has_stored_edge_snaps(type_key);
+    let target = SnapTarget::new(geometry, source, SpaceId::Model, precision)
+        .with_provenance(geometry_source.clone());
+    if edge_snaps {
+        target.with_body_edge_snaps(geometry_source)
+    } else {
+        target
+    }
+}
+
+/// Whether this entity type key is a carrier whose stored display edges are real
+/// document geometry (rather than a pure tessellation).
+///
+/// Only the SketchUp preview carriers qualify. The predicate is feature-gated:
+/// without `formats-skp` the constants do not exist, so no body is edge-snappable
+/// instead of matching on a hand-copied string.
+#[cfg(feature = "formats-skp")]
+fn carrier_has_stored_edge_snaps(type_key: Option<&str>) -> bool {
+    matches!(
+        type_key,
+        Some(key)
+            if key == cad_connector_skp::SKP_MESH_TYPE_KEY
+                || key == cad_connector_skp::SKP_EDGE_TYPE_KEY
+    )
+}
+
+#[cfg(not(feature = "formats-skp"))]
+fn carrier_has_stored_edge_snaps(_type_key: Option<&str>) -> bool {
+    false
 }
 
 /// The cached, transform-baked targets for `drawing`/`document`.
@@ -357,7 +432,7 @@ fn validate_snap_inputs(cursor: Point3, world_per_px: f64) -> CadResult<()> {
 ///
 /// `mode` only labels the profile line (`cached`, `uncached`); the geometry and
 /// engine inputs are identical on every path, so results cannot differ by mode.
-fn resolve_candidates(
+pub(super) fn resolve_candidates(
     targets: &[SnapTarget],
     cursor: Point3,
     world_per_px: f64,

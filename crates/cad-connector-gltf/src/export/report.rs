@@ -107,6 +107,31 @@ impl ReportBuilder {
         });
     }
 
+    /// Record one reported conversion tied to a source entity.
+    ///
+    /// The geometry **is** written; only an attribute it carries is not, so this
+    /// is one conversion per affected entity (never a drop).
+    pub(crate) fn converted_entity(
+        &mut self,
+        code: &'static str,
+        object: ObjectId,
+        type_key: &str,
+        message: String,
+    ) {
+        self.converted += 1;
+        self.convert_reasons.push(message.clone());
+        self.entries.push(CompatEntry {
+            connector: self.connector,
+            direction: ReportDirection::Export,
+            level: FidelityLevel::L1,
+            object: Some(object),
+            type_key: Some(type_key.to_string()),
+            status: SupportStatus::Partial,
+            code: code.to_string(),
+            message,
+        });
+    }
+
     /// Record one provenance/evidence note. Notes never change completeness.
     pub(crate) fn note(&mut self, code: &'static str, message: String) {
         self.entries.push(CompatEntry {

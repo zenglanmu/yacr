@@ -81,6 +81,7 @@ pub(super) fn accept(
         source,
         secondary,
         precision: target.precision.clone(),
+        geometry_source: target.geometry_source.clone(),
         logical_pixel_distance: perpendicular / world_per_px,
     })
 }

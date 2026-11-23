@@ -19,6 +19,10 @@ pub(crate) struct ReportBuilder {
     dropped: usize,
     /// Source meshes that lost at least one facet; they are not `exact`.
     degraded_meshes: std::collections::BTreeSet<ObjectId>,
+    /// Source meshes whose every facet was dropped, so no surface reached the
+    /// file. They keep only their facet-drop reporting; the shared edge-loss
+    /// entry point must not describe edges of geometry that was not written.
+    surfaces_not_written: std::collections::BTreeSet<ObjectId>,
     drop_reasons: Vec<String>,
     convert_reasons: Vec<String>,
 }
@@ -32,6 +36,7 @@ impl ReportBuilder {
             converted: 0,
             dropped: 0,
             degraded_meshes: std::collections::BTreeSet::new(),
+            surfaces_not_written: std::collections::BTreeSet::new(),
             drop_reasons: Vec::new(),
             convert_reasons: Vec::new(),
         }
@@ -67,24 +72,28 @@ impl ReportBuilder {
     ///
     /// A degenerate facet is lost geometry, so it counts as dropped and makes
     /// the report `Missing`; it is aggregated per source mesh rather than
-    /// emitting one entry per facet.
+    /// emitting one entry per facet. When every source facet was dropped the
+    /// mesh wrote no surface at all, which also suppresses the shared
+    /// stored-edge-loss entry (see [`Self::stored_edges_not_written`]).
     pub(crate) fn lost_triangles(
         &mut self,
-        object: ObjectId,
-        type_key: &str,
+        mesh: &SourceMesh,
         count: usize,
         code: &'static str,
         message: String,
     ) {
         self.dropped += count;
-        self.degraded_meshes.insert(object);
+        self.degraded_meshes.insert(mesh.object);
+        if count >= mesh.triangles.len() {
+            self.surfaces_not_written.insert(mesh.object);
+        }
         self.drop_reasons.push(message.clone());
         self.entries.push(CompatEntry {
             connector: self.connector,
             direction: ReportDirection::Export,
             level: FidelityLevel::L1,
-            object: Some(object),
-            type_key: Some(type_key.to_string()),
+            object: Some(mesh.object),
+            type_key: Some(mesh.type_key.clone()),
             status: SupportStatus::Unsupported,
             code: code.to_string(),
             message,
@@ -131,6 +140,45 @@ impl ReportBuilder {
                 mesh.object.0, mesh.type_key
             ),
         );
+    }
+
+    /// Record that one written source entity's stored display-edge set has no
+    /// channel in this format.
+    ///
+    /// The triangles **are** written; only the stored edge polylines are not,
+    /// so this is one conversion per affected source entity (never a drop,
+    /// never `Missing`), and the bytes are identical to the same mesh exported
+    /// without stored edges.
+    ///
+    /// A mesh whose every facet was dropped wrote no surface, so there is no
+    /// written geometry whose edge set could be lost; its facet drop is already
+    /// reported and no edge entry is added.
+    pub(crate) fn stored_edges_not_written(
+        &mut self,
+        code: &str,
+        format_label: &str,
+        mesh: &SourceMesh,
+    ) {
+        if mesh.edge_polylines == 0 || self.surfaces_not_written.contains(&mesh.object) {
+            return;
+        }
+        let message = format!(
+            "entity #{} ({}) carries {} stored display edge segment(s); {format_label} writes \
+             surfaces only, so the stored edge set was not written",
+            mesh.object.0, mesh.type_key, mesh.edge_segments
+        );
+        self.converted += 1;
+        self.convert_reasons.push(message.clone());
+        self.entries.push(CompatEntry {
+            connector: self.connector,
+            direction: ReportDirection::Export,
+            level: FidelityLevel::L1,
+            object: Some(mesh.object),
+            type_key: Some(mesh.type_key.clone()),
+            status: SupportStatus::Partial,
+            code: code.to_string(),
+            message,
+        });
     }
 
     /// Record one provenance/evidence note. Notes never change completeness.

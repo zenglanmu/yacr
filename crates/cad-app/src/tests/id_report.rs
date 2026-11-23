@@ -47,6 +47,7 @@ fn one_pick_reports_the_point_with_its_space_and_no_history_step() {
     let snap = InputSnap {
         kind: cad_measure::SnapKind::Endpoint,
         precision: Precision::Analytic,
+        geometry_source: cad_domain::GeometrySource::Analytic,
         logical_pixel_distance: 3.5,
     };
     let ready = session

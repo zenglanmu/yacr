@@ -522,6 +522,7 @@ fn snap_hint(kind: cad_measure::SnapKind, point: cad_domain::Point3) -> SnapHint
         },
         secondary: None,
         precision: cad_domain::Precision::Analytic,
+        geometry_source: cad_domain::GeometrySource::Analytic,
         logical_pixel_distance: 0.0,
     }
 }

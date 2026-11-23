@@ -38,6 +38,14 @@
 //! (`export.ifc.colors_dropped`, `export.ifc.normals_dropped`,
 //! `export.ifc.layers_dropped`) and moves the verdict to `Partial`.
 //!
+//! A body that still writes its triangles but also carries stored display-edge
+//! polylines (`BodyDisplay::edges`) gets one per-entity `Partial` conversion
+//! (`export.ifc.stored_edges_not_written`) naming the real polyline/segment
+//! counts; its `IfcTriangulatedFaceSet` is still written and stays exact. A body
+//! with stored edges but no triangles is a wire body the writer cannot carry at
+//! all, so it is a named drop (`export.ifc.wire_body_not_written`) and is never
+//! double-reported as written-geometry edge loss.
+//!
 //! An empty database is not an error: the writer still emits the valid IFC4
 //! skeleton and reports `Complete`, because there was no geometry to lose.
 //!
@@ -88,6 +96,12 @@ pub const NORMALS_DROPPED: &str = "export.ifc.normals_dropped";
 /// Stable conversion code: the entity carries a layer (or display attribute),
 /// which the IFC skeleton does not model.
 pub const LAYERS_DROPPED: &str = "export.ifc.layers_dropped";
+/// Stable conversion code: a written body's stored display-edge set has no IFC
+/// channel (the written face set carries surfaces only).
+pub const STORED_EDGES_NOT_WRITTEN: &str = "export.ifc.stored_edges_not_written";
+/// Stable drop code: a body with stored edges and no triangle is a wire body,
+/// and the IFC writer has no edge channel.
+pub const WIRE_BODY_NOT_WRITTEN: &str = "export.ifc.wire_body_not_written";
 /// Stable conversion code: a written mesh references a base-colour texture, which
 /// the IFC skeleton does not project.
 pub const TEXTURE_NOT_WRITTEN: &str = "export.ifc.texture_not_written";
@@ -280,6 +294,12 @@ struct AttributeLoss {
     /// Kept per entity because the message names both the source entity and the
     /// texture key; the loss itself is one conversion per affected mesh.
     textures: Vec<TextureLoss>,
+    /// Written bodies whose stored display-edge set is not in the IFC file.
+    ///
+    /// Kept per entity because the message names the entity, its polyline count
+    /// and its real segment count; the loss itself is one conversion per
+    /// affected body.
+    stored_edges: Vec<StoredEdgeLoss>,
 }
 
 /// One written mesh whose base-colour texture is not in the IFC file.
@@ -287,6 +307,20 @@ struct TextureLoss {
     object: ObjectId,
     type_key: String,
     key: String,
+}
+
+/// One written body whose stored display-edge set is not in the IFC file.
+///
+/// The triangles **are** written as an `IfcTriangulatedFaceSet`; the stored
+/// edge polylines have no representation, so this stays a `Partial` conversion
+/// and never counts as a drop.
+struct StoredEdgeLoss {
+    object: ObjectId,
+    type_key: String,
+    /// Number of stored edge polylines (`BodyDisplay::edges.len()`).
+    polylines: usize,
+    /// Total stored segments, `Σ(polyline.len() − 1)`.
+    segments: usize,
 }
 
 impl AttributeLoss {
@@ -368,6 +402,30 @@ impl AttributeLoss {
                 ),
             });
         }
+        // One entry per written body that carries stored display edges: the
+        // face set is written, the edge set is not. An entity the file does not
+        // contain at all was already reported as a drop, so its edge loss is not
+        // reported again.
+        for loss in &self.stored_edges {
+            if dropped.contains(&loss.object) {
+                continue;
+            }
+            entries.push(CompatEntry {
+                connector: "ifc",
+                direction: ReportDirection::Export,
+                level: FidelityLevel::L1,
+                object: Some(loss.object),
+                type_key: Some(loss.type_key.clone()),
+                status: SupportStatus::Partial,
+                code: STORED_EDGES_NOT_WRITTEN.to_string(),
+                message: format!(
+                    "entity #{} ({}) carries {} stored display edge segment(s); IFC writes \
+                     surfaces only, so the stored edge set was not written ({} stored \
+                     polyline(s))",
+                    loss.object.0, loss.type_key, loss.segments, loss.polylines
+                ),
+            });
+        }
         entries
     }
 }
@@ -407,6 +465,18 @@ fn metre_factor(units: &UnitContext) -> CadResult<f64> {
     }
 }
 
+/// The number of segments in a set of stored display-edge polylines.
+///
+/// One polyline of `n` points is `n − 1` segments (a stored edge polyline has
+/// at least two points; the saturating subtraction keeps a defensive zero for a
+/// hand-built shorter one instead of underflowing).
+fn count_edge_segments<T>(polylines: &[Vec<T>]) -> usize {
+    polylines
+        .iter()
+        .map(|polyline| polyline.len().saturating_sub(1))
+        .sum()
+}
+
 /// Every model-space mesh the writer projects, with everything else reported.
 fn collect_meshes(
     job: &ExportJob<'_>,
@@ -438,7 +508,39 @@ fn collect_meshes(
             // A 3D body's derived display mesh is the drawable geometry; the
             // exact B-rep is not written (and the report says so when the cache
             // is empty).
-            SemanticGeometry::Body3d(body) => &body.display.mesh,
+            SemanticGeometry::Body3d(body) => {
+                if body.display.mesh.triangles.is_empty() {
+                    // A body with stored edges and no triangles is a wire body.
+                    // IFC has no edge channel here, so nothing of it can be
+                    // written: one drop with its real segment count, never
+                    // written-geometry edge loss.
+                    if !body.display.edges.is_empty() {
+                        let segments = count_edge_segments(&body.display.edges);
+                        let message = format!(
+                            "entity #{} ({}) carries {segments} stored display edge segment(s) \
+                             and no triangles; this format has no edge channel, so the wire body \
+                             was not written",
+                            object.0, type_key
+                        );
+                        drops.push(DropRecord {
+                            object: Some(object),
+                            type_key: Some(type_key),
+                            code: WIRE_BODY_NOT_WRITTEN,
+                            message,
+                        });
+                        continue;
+                    }
+                } else if !body.display.edges.is_empty() {
+                    // The face set is written; the stored edge set is not.
+                    attributes.stored_edges.push(StoredEdgeLoss {
+                        object,
+                        type_key: type_key.clone(),
+                        polylines: body.display.edges.len(),
+                        segments: count_edge_segments(&body.display.edges),
+                    });
+                }
+                &body.display.mesh
+            }
             _ => {
                 let message = format!(
                     "entity #{} ({}) is not mesh geometry; the IFC writer writes meshes as \

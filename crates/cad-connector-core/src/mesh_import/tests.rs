@@ -511,3 +511,84 @@ fn only_the_body_key_of_an_edge_only_insert_is_reported() {
         .collect();
     assert_eq!(keys, vec!["TestWire"], "the unused mesh key is absent");
 }
+
+// ------------------------------------------------ edge-snap measure claim ---
+
+fn measure_of(outcome: &MeshImportOutcome, type_key: &str) -> SupportStatus {
+    outcome
+        .capabilities
+        .iter()
+        .find(|capability| capability.type_key == type_key)
+        .unwrap_or_else(|| panic!("no capability row for {type_key}"))
+        .measure
+}
+
+#[test]
+fn stored_display_edges_stay_unsupported_without_an_explicit_declaration() {
+    // Default false: a body with real display edges is still not a MEASURE
+    // source unless the importer declares the claim.
+    let mut import = MeshImport::new(&request(), "TestBody").unwrap();
+    let object = import.reserve_object().unwrap();
+    import
+        .push_body(
+            object,
+            body(BodyKind::Wire, Mesh::default(), vec![edge_polyline()]),
+            "TestBody",
+        )
+        .unwrap();
+    let outcome = import.finish().unwrap();
+    assert_eq!(measure_of(&outcome, "TestBody"), SupportStatus::Unsupported);
+}
+
+#[test]
+fn declared_edge_snap_measure_is_partial_only_for_keys_that_stored_edges() {
+    // A triangle-only carrier: drawable and pickable, still not measurable.
+    let mut triangles = MeshImport::new(&request(), "SkpPreviewMesh").unwrap();
+    triangles.declare_edge_snap_measure(true);
+    let mesh_object = triangles.reserve_object().unwrap();
+    triangles
+        .push_mesh(mesh_object, triangle(), EntityColor::ByLayer)
+        .unwrap();
+    let triangles = triangles.finish().unwrap();
+    assert_eq!(
+        measure_of(&triangles, "SkpPreviewMesh"),
+        SupportStatus::Unsupported,
+        "triangles alone never claim measurement"
+    );
+
+    // An edge-bearing face-group body under the same key (the SKP face-group
+    // body shape) does claim the narrow endpoint/midpoint source.
+    let mut mesh_body = MeshImport::new(&request(), "SkpPreviewMesh").unwrap();
+    mesh_body.declare_edge_snap_measure(true);
+    let mesh_body_object = mesh_body.reserve_object().unwrap();
+    mesh_body
+        .push_body(
+            mesh_body_object,
+            body(BodyKind::Unknown, triangle(), vec![edge_polyline()]),
+            "SkpPreviewMesh",
+        )
+        .unwrap();
+    let mesh_body = mesh_body.finish().unwrap();
+    assert_eq!(
+        measure_of(&mesh_body, "SkpPreviewMesh"),
+        SupportStatus::Partial,
+        "a body that stored display edges claims endpoint/midpoint snap"
+    );
+
+    // A wire-only carrier (the SKP edge-only shape).
+    let mut wire = MeshImport::new(&request(), "SkpPreviewEdges").unwrap();
+    wire.declare_edge_snap_measure(true);
+    let wire_object = wire.reserve_object().unwrap();
+    wire.push_body(
+        wire_object,
+        body(BodyKind::Wire, Mesh::default(), vec![edge_polyline()]),
+        "SkpPreviewEdges",
+    )
+    .unwrap();
+    let wire = wire.finish().unwrap();
+    assert_eq!(
+        measure_of(&wire, "SkpPreviewEdges"),
+        SupportStatus::Partial,
+        "wire bodies store display edges too"
+    );
+}

@@ -415,6 +415,13 @@ fn an_edge_only_written_model_imports_as_wire_bodies() {
         vec![crate::SKP_EDGE_TYPE_KEY],
         "an edge-only SKP reports only the edge carrier"
     );
+    for capability in &drawing.report.capabilities {
+        assert_eq!(
+            capability.measure,
+            SupportStatus::Partial,
+            "stored visible edges are an endpoint/midpoint MEASURE source"
+        );
+    }
 
     let codes = codes_of(&drawing);
     assert!(
@@ -757,4 +764,98 @@ fn a_mixed_face_and_wire_import_reports_both_carriers() {
         vec![crate::SKP_EDGE_TYPE_KEY, crate::SKP_MESH_TYPE_KEY],
         "both inserted carriers get exactly one row"
     );
+    for capability in &drawing.report.capabilities {
+        assert_eq!(
+            capability.measure,
+            SupportStatus::Partial,
+            "both carriers stored visible edges: {}",
+            capability.type_key
+        );
+    }
+}
+
+// ------------------------------------------ measure claim / release ceiling ---
+
+use cad_domain::{BodyKind, Mesh, Point3};
+
+fn unit_triangle() -> Mesh {
+    Mesh {
+        vertices: vec![
+            Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            Point3 {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            Point3 {
+                x: 0.0,
+                y: 1.0,
+                z: 0.0,
+            },
+        ],
+        triangles: vec![[0, 1, 2]],
+        ..Mesh::default()
+    }
+}
+
+#[test]
+fn a_triangle_only_skp_carrier_stays_unsupported_and_a_ceiling_cannot_force_it() {
+    let mut import =
+        MeshImport::new(&request(Vec::new()), crate::SKP_MESH_TYPE_KEY).expect("import");
+    import.declare_edge_snap_measure(true);
+    let object = import.reserve_object().unwrap();
+    import
+        .push_mesh(object, unit_triangle(), cad_db::EntityColor::ByLayer)
+        .unwrap();
+    let mut capabilities = import.finish().unwrap().capabilities;
+    assert_eq!(capabilities.len(), 1);
+    assert_eq!(capabilities[0].measure, SupportStatus::Unsupported);
+
+    // The ceiling narrows, never forces: an Unsupported claim stays Unsupported
+    // even when the release is fully verified.
+    crate::apply_ceiling(&mut capabilities, SupportStatus::Verified);
+    assert_eq!(capabilities[0].measure, SupportStatus::Unsupported);
+    assert_eq!(capabilities[0].read, SupportStatus::Verified);
+}
+
+#[test]
+fn the_release_ceiling_narrows_a_partial_measure_claim() {
+    let mut import =
+        MeshImport::new(&request(Vec::new()), crate::SKP_EDGE_TYPE_KEY).expect("import");
+    import.declare_edge_snap_measure(true);
+    let object = import.reserve_object().unwrap();
+    import
+        .push_body(
+            object,
+            crate::preview_body(
+                Mesh::default(),
+                vec![vec![
+                    Point3 {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                    Point3 {
+                        x: 1.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                ]],
+                BodyKind::Wire,
+            ),
+            crate::SKP_EDGE_TYPE_KEY,
+        )
+        .unwrap();
+    let mut capabilities = import.finish().unwrap().capabilities;
+    assert_eq!(capabilities[0].measure, SupportStatus::Partial);
+
+    // 2021–2025 releases are read by container equivalence only: the Partial
+    // measure claim narrows to Unverified rather than being forced either way.
+    crate::apply_ceiling(&mut capabilities, SupportStatus::Unverified);
+    assert_eq!(capabilities[0].measure, SupportStatus::Unverified);
+    assert_eq!(capabilities[0].read, SupportStatus::Unverified);
 }

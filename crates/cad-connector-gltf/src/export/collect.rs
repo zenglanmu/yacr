@@ -140,6 +140,13 @@ pub(crate) struct SourceMesh {
     pub color: EntityColor,
     /// The entity's display opacity; `Explicit` becomes the material alpha.
     pub transparency: EntityTransparency,
+    /// Stored display-edge polylines carried by the source body, `0` for a
+    /// standalone [`SemanticGeometry::Mesh`] (which has no edge cache).
+    pub edge_polylines: usize,
+    /// Total stored display-edge segments, `Σ(polyline.len() − 1)`. glTF
+    /// writes triangle primitives only, so a written body with a non-zero count
+    /// reports one conversion naming this number.
+    pub edge_segments: usize,
 }
 
 /// One source entity that cannot be written, with its stable marker.
@@ -233,9 +240,34 @@ pub(crate) fn collect(job: &ExportJob<'_>, connector: &str) -> CadResult<Collect
             });
             continue;
         }
-        let mesh = match &entity.geometry {
-            SemanticGeometry::Mesh(mesh) => mesh,
-            SemanticGeometry::Body3d(body) => &body.display.mesh,
+        let (mesh, edge_polylines, edge_segments) = match &entity.geometry {
+            SemanticGeometry::Mesh(mesh) => (mesh, 0, 0),
+            SemanticGeometry::Body3d(body) => {
+                // A body with stored edges and no triangles is a wire body:
+                // glTF has no edge primitive here, so nothing of it can be
+                // written and it is a named drop, never written-geometry edge
+                // loss.
+                if body.display.mesh.triangles.is_empty() && !body.display.edges.is_empty() {
+                    let segments = count_edge_segments(&body.display.edges);
+                    drops.push(DropEntry {
+                        object,
+                        type_key,
+                        code: format!("export.{connector}.wire_body_not_written"),
+                        message: format!(
+                            "entity #{} ({}) carries {segments} stored display edge segment(s) \
+                             and no triangles; this format has no edge channel, so the wire body \
+                             was not written",
+                            object.0, entity.object.type_key
+                        ),
+                    });
+                    continue;
+                }
+                (
+                    &body.display.mesh,
+                    body.display.edges.len(),
+                    count_edge_segments(&body.display.edges),
+                )
+            }
             other => {
                 let variant = geometry_variant(other);
                 drops.push(DropEntry {
@@ -315,6 +347,8 @@ pub(crate) fn collect(job: &ExportJob<'_>, connector: &str) -> CadResult<Collect
                 .map(|pbr| SourcePbr::resolve(pbr, job.database)),
             color: render.color,
             transparency: render.transparency,
+            edge_polylines,
+            edge_segments,
         });
     }
 
@@ -326,6 +360,18 @@ pub(crate) fn collect(job: &ExportJob<'_>, connector: &str) -> CadResult<Collect
     }
 
     Ok(Collected { meshes, drops })
+}
+
+/// The number of segments in a set of stored display-edge polylines.
+///
+/// One polyline of `n` points is `n − 1` segments (a stored edge polyline has
+/// at least two points; the saturating subtraction keeps a defensive zero for a
+/// hand-built shorter one instead of underflowing).
+fn count_edge_segments(polylines: &[Vec<Point3>]) -> usize {
+    polylines
+        .iter()
+        .map(|polyline| polyline.len().saturating_sub(1))
+        .sum()
 }
 
 /// The variant name reported for an unsupported geometry.

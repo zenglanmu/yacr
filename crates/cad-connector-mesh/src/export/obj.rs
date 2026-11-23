@@ -16,6 +16,9 @@ const COLORS_DROPPED: &str = "export.obj.colors_dropped";
 const NORMALS_DROPPED: &str = "export.obj.normals_dropped";
 /// Stable marker: a written mesh's base-colour texture has no OBJ channel here.
 const TEXTURE_NOT_WRITTEN: &str = "export.obj.texture_not_written";
+/// Stable marker: a written body's stored display edges have no OBJ channel
+/// here (no `l` line is written).
+pub(crate) const STORED_EDGES_NOT_WRITTEN: &str = "export.obj.stored_edges_not_written";
 
 pub(crate) fn write(collected: &Collected, report: &mut ReportBuilder) -> Vec<u8> {
     if collected.has_any_colors() {

@@ -13,6 +13,16 @@
 //! reconstructed from its bulge, an ellipse from its axes); nothing here is
 //! derived from the display LOD, so a change of display density cannot change a
 //! snap result.
+//!
+//! One opt-in exception exists for geometry that has no analytic form at all: a
+//! [`SnapTarget`] may set
+//! [`body_edge_snaps`](SnapTarget::body_edge_snaps) for a `Body3d` whose
+//! [`display.edges`](cad_domain::BodyDisplay::edges) are **real stored document
+//! edges** (the SketchUp preview carriers, ADR-0049). That path produces
+//! endpoint and midpoint candidates only — never face, triangle, center,
+//! quadrant, perpendicular or intersection gestures — and the caller owns the
+//! claim that the edges are real. With the flag unset (the default) a body
+//! contributes nothing, exactly like a mesh.
 
 use cad_db::MeasurementRecord;
 use cad_domain::*;
@@ -68,6 +78,8 @@ pub struct SnapCandidate {
     pub secondary: Option<SelectionRef>,
     /// Precision of the geometry the candidate was derived from.
     pub precision: Precision,
+    /// Where the geometry the candidate was derived from came from.
+    pub geometry_source: GeometrySource,
     /// Perpendicular distance from the cursor, in logical pixels.
     pub logical_pixel_distance: f64,
 }
@@ -79,6 +91,15 @@ pub struct SnapTarget {
     pub source: SelectionRef,
     pub space: SpaceId,
     pub precision: Precision,
+    /// Provenance of the target geometry, copied onto every candidate it yields.
+    pub geometry_source: GeometrySource,
+    /// Whether a `Body3d`'s stored display edges may yield endpoint/midpoint
+    /// candidates.
+    ///
+    /// Off by default: a body's display cache is a tessellation, so it only
+    /// becomes a snap source when the caller has decided the stored edges are
+    /// real (for example an importer that carries SketchUp's own edge records).
+    pub body_edge_snaps: bool,
 }
 
 impl SnapTarget {
@@ -93,7 +114,32 @@ impl SnapTarget {
             source,
             space,
             precision,
+            geometry_source: GeometrySource::Analytic,
+            body_edge_snaps: false,
         }
+    }
+
+    /// Enable endpoint/midpoint snap on the stored display edges of a `Body3d`.
+    ///
+    /// Only those two kinds are produced: the display cache carries no face,
+    /// triangle, center, quadrant or intersection semantics, so this never
+    /// widens the snap set beyond real stored edges.
+    #[must_use]
+    pub fn with_body_edge_snaps(mut self, geometry_source: GeometrySource) -> Self {
+        self.geometry_source = geometry_source;
+        self.body_edge_snaps = true;
+        self
+    }
+
+    /// Build a target with explicit geometry provenance.
+    ///
+    /// Used for a body that is not edge-snappable (for example an ACIS body):
+    /// the candidate still reports where its geometry came from, but the
+    /// display-edge path stays disabled.
+    #[must_use]
+    pub fn with_provenance(mut self, geometry_source: GeometrySource) -> Self {
+        self.geometry_source = geometry_source;
+        self
     }
 }
 
@@ -104,6 +150,7 @@ pub struct SnapProvenance {
     pub source: SelectionRef,
     pub secondary: Option<SelectionRef>,
     pub precision: Precision,
+    pub geometry_source: GeometrySource,
     pub logical_pixel_distance: f64,
 }
 
@@ -115,6 +162,7 @@ impl SnapProvenance {
             source: candidate.source.clone(),
             secondary: candidate.secondary.clone(),
             precision: candidate.precision.clone(),
+            geometry_source: candidate.geometry_source.clone(),
             logical_pixel_distance: candidate.logical_pixel_distance,
         }
     }
@@ -196,7 +244,10 @@ pub fn collect_candidates(
             continue;
         }
         let mut raw: Vec<Raw> = Vec::new();
-        generate(&target.geometry, probe, &mut raw, "");
+        match body_edge_source(target) {
+            Some(edges) => generate_body_edges(edges, &mut raw),
+            None => generate(&target.geometry, probe, &mut raw, ""),
+        }
         for r in raw {
             if let Some(candidate) = accept(
                 r,
@@ -300,8 +351,24 @@ pub fn best_candidate(
 mod generate;
 mod resolve;
 
-use generate::generate;
+use generate::{generate, generate_body_edges};
 use resolve::{accept, dedup, engine_is_local, ray_plane_point, unit_direction};
+
+/// The stored display edges of a body when the target allows edge snapping.
+///
+/// Returns `None` for every other target, so the ordinary analytic generation
+/// path is untouched (and `generate` keeps ignoring `Body3d`).
+fn body_edge_source(target: &SnapTarget) -> Option<&[Vec<Point3>]> {
+    if !target.body_edge_snaps {
+        return None;
+    }
+    match &target.geometry {
+        SemanticGeometry::Body3d(body) if !body.display.edges.is_empty() => {
+            Some(&body.display.edges)
+        }
+        _ => None,
+    }
+}
 
 #[cfg(test)]
 mod tests;

@@ -104,6 +104,19 @@ pub struct MeshImport {
     bim_definitions: usize,
     /// Rows in the BIM relation table, for the importer's reporting.
     bim_relations: usize,
+    /// Whether this import declares stored display edges a MEASURE source.
+    ///
+    /// Off by default: a display cache is a tessellation, so an importer must
+    /// opt in explicitly (the SketchUp preview lane does, for its real edge
+    /// records). Every existing importer therefore keeps `measure =
+    /// Unsupported`.
+    edge_snap_measure: bool,
+    /// Type keys that actually inserted a `Body3d` with non-empty display edges.
+    ///
+    /// Only these keys can claim `measure = Partial`: a triangle-only carrier
+    /// (for example a `SkpPreviewMesh` group with no stored edge records) is
+    /// still not a measurement source.
+    edge_body_keys: BTreeSet<String>,
     limits: ImportLimits,
 }
 
@@ -141,8 +154,23 @@ impl MeshImport {
             bim_elements: 0,
             bim_definitions: 0,
             bim_relations: 0,
+            edge_snap_measure: false,
+            edge_body_keys: BTreeSet::new(),
             limits: request.limits,
         })
+    }
+
+    /// Declare whether stored display edges are a MEASURE source for this import.
+    ///
+    /// Off by default. When enabled, a type key reports `measure = Partial` only
+    /// if it actually inserted a [`Body3d`] with non-empty
+    /// [`BodyDisplay::edges`](cad_domain::BodyDisplay::edges); every other key
+    /// (including a triangle-only carrier of the same import) stays
+    /// `Unsupported`. The claim is deliberately narrow: it means endpoint and
+    /// midpoint snap on the stored visible edges only, never face, triangle,
+    /// center, quadrant or intersection snap and never area/volume.
+    pub fn declare_edge_snap_measure(&mut self, enabled: bool) {
+        self.edge_snap_measure = enabled;
     }
 
     /// Register one base-colour texture and return the key a mesh may carry
@@ -327,6 +355,10 @@ impl MeshImport {
         // edge polylines, body topology rules). A format adapter cannot publish
         // inconsistent geometry through here.
         validate_geometry(&geometry)?;
+        let body_has_edges = match &geometry {
+            SemanticGeometry::Body3d(body) => !body.display.edges.is_empty(),
+            _ => false,
+        };
         let entity_id = EntityId(object.0);
         self.builder.insert_entity(DbEntity {
             object: DbObject {
@@ -346,6 +378,9 @@ impl MeshImport {
             .set_entity_render_attributes(entity_id, attributes)?;
         self.inserted += 1;
         self.type_keys.insert(type_key.to_string());
+        if body_has_edges {
+            self.edge_body_keys.insert(type_key.to_string());
+        }
         Ok(entity_id)
     }
 
@@ -456,8 +491,11 @@ impl MeshImport {
     /// what a save writes; a key nothing references simply is not reachable from
     /// geometry.
     ///
-    /// A mesh is drawable and pickable but is not a MEASURE target; the
-    /// capability rows say exactly that, matching the DWG/DXF mesh mapping.
+    /// A mesh is drawable and pickable but is not a MEASURE target; a body's
+    /// stored display edges become `Partial` only when the importer declared
+    /// them ([`Self::declare_edge_snap_measure`]) **and** that type key actually
+    /// stored edges. Everything else reports `Unsupported`, matching the
+    /// DWG/DXF mesh mapping.
     pub fn finish(mut self) -> CadResult<MeshImportOutcome> {
         // Borrow the two fields separately: iterating the texture map while the
         // builder is mutated is fine because they are disjoint.
@@ -487,13 +525,25 @@ impl MeshImport {
             capabilities: self
                 .type_keys
                 .into_iter()
-                .map(|type_key| EntityCapability {
-                    type_key,
-                    read: SupportStatus::Verified,
-                    semantic,
-                    render: SupportStatus::Verified,
-                    pick: SupportStatus::Verified,
-                    measure: SupportStatus::Unsupported,
+                .map(|type_key| {
+                    // Stored-edge snapping is the one narrow measurement claim:
+                    // endpoint/midpoint only, and only for a key that actually
+                    // stored display edges. Everything else stays Unsupported
+                    // (meshes are drawable and pickable, not measurable).
+                    let measure =
+                        if self.edge_snap_measure && self.edge_body_keys.contains(&type_key) {
+                            SupportStatus::Partial
+                        } else {
+                            SupportStatus::Unsupported
+                        };
+                    EntityCapability {
+                        type_key,
+                        read: SupportStatus::Verified,
+                        semantic,
+                        render: SupportStatus::Verified,
+                        pick: SupportStatus::Verified,
+                        measure,
+                    }
                 })
                 .collect(),
             completeness,

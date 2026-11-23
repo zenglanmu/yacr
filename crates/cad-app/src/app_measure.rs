@@ -58,7 +58,7 @@ impl Application {
             }
             match &session.tool {
                 ToolState::Measuring(tool) if tool.auto_ready() => {
-                    Some((kind, tool.points().to_vec()))
+                    Some((kind, tool.points().to_vec(), tool.snaps().to_vec()))
                 }
                 _ => None,
             }
@@ -66,14 +66,19 @@ impl Application {
             None
         };
 
-        if let Some((kind, captured)) = auto_complete {
+        if let Some((kind, captured, snaps)) = auto_complete {
             let algorithm = kind.algorithm().ok_or_else(|| {
                 CadError::InvalidInput(
                     "this tool has no measurement algorithm; it is not evaluated".into(),
                 )
             })?;
-            let outcome =
-                self.evaluate_measurement(&session.active_space, command, algorithm, captured)?;
+            let outcome = self.evaluate_measurement(
+                &session.active_space,
+                command,
+                algorithm,
+                captured,
+                &snaps,
+            )?;
             if let Some(record) = &outcome.measurement {
                 session.set_last_measurement(record.clone());
             }
@@ -98,8 +103,15 @@ impl Application {
                 ));
             }
         };
-        let outcome =
-            self.evaluate_measurement(&session.active_space, command, algorithm, points.to_vec())?;
+        // A `Points` payload has no acquisition layer, so there is no snap
+        // provenance to attribute to any of its points.
+        let outcome = self.evaluate_measurement(
+            &session.active_space,
+            command,
+            algorithm,
+            points.to_vec(),
+            &[],
+        )?;
         if let Some(record) = &outcome.measurement {
             session.set_last_measurement(record.clone());
         }
@@ -118,10 +130,13 @@ impl Application {
         session: &mut SessionState,
         command: &Command,
     ) -> CadResult<CommandOutcome> {
-        let (kind, points, snap) = match &session.tool {
-            ToolState::Measuring(tool) if tool.is_ready() => {
-                (tool.kind(), tool.points().to_vec(), tool.snap().cloned())
-            }
+        let (kind, points, snap, snaps) = match &session.tool {
+            ToolState::Measuring(tool) if tool.is_ready() => (
+                tool.kind(),
+                tool.points().to_vec(),
+                tool.snap().cloned(),
+                tool.snaps().to_vec(),
+            ),
             ToolState::Measuring(tool) => {
                 return Err(CadError::InvalidInput(format!(
                     "measurement needs {} more point(s)",
@@ -142,7 +157,8 @@ impl Application {
             )
         })?;
         let active_space = session.active_space.clone();
-        let outcome = self.evaluate_measurement(&active_space, command, algorithm, points)?;
+        let outcome =
+            self.evaluate_measurement(&active_space, command, algorithm, points, &snaps)?;
         if let Some(record) = &outcome.measurement {
             session.set_last_measurement(record.clone());
         }
@@ -262,13 +278,51 @@ impl Application {
     /// record. The space comes from the session's active space (F04) and the
     /// algorithm from the tool; area uses the viewport work plane so non-coplanar
     /// input is rejected rather than silently flattened (audit B24).
+    ///
+    /// ## Provenance summary rule
+    ///
+    /// `snaps` is positionally parallel to `points` (one entry per capture,
+    /// `None` for a raw pick); it may be empty for a stateless `Points` payload,
+    /// which has no acquisition layer at all. A non-empty list of a different
+    /// length is refused with `measurement.snaps_not_parallel`, so a shifted
+    /// parallel array can never attribute one pick's provenance to another.
+    ///
+    /// * **No snapped point** → `UserPoints` / `Analytic`, the unchanged legacy
+    ///   answer: the value comes from coordinates the user supplied, and a raw
+    ///   pick has no approximated source.
+    /// * **At least one snapped point** → the record names the **least
+    ///   authoritative** geometry any snapped point depended on:
+    ///   `DirectMesh` if any snapped point came from a display/direct mesh, else
+    ///   `ProxyCache` if any came from a vendor proxy cache, else `KernelMesh`
+    ///   if any came from an exact kernel mesh. When every snapped point is
+    ///   analytic, the presence of **any unsnapped (raw) input point** makes the
+    ///   measurement `UserPoints`; only an all-analytic, all-snapped input is
+    ///   reported as `Analytic`.
+    /// * The precision is the **weakest observed** among the snapped points:
+    ///   `Unknown` is weaker than `Approximate`, which is weaker than `Analytic`.
+    ///   A raw pick makes no precision claim: it neither strengthens nor weakens
+    ///   the snapped points' statement. Two `Approximate` values resolve to the
+    ///   one with the larger error bound (`None` = unknown bound, the weakest).
+    ///
+    /// The record has one `source`/`precision` pair for the whole measurement, so
+    /// this is a summary, not a per-point claim. [`CommandOutcome`] carries only
+    /// this scalar record: per-point `SnapProvenance` is **not** exposed beside
+    /// it (the tool session keeps its own capture-layer snaps).
     pub(crate) fn evaluate_measurement(
         &self,
         active_space: &SpaceId,
         command: &Command,
         algorithm: MeasurementAlgorithm,
         points: Vec<Point3>,
+        snaps: &[Option<InputSnap>],
     ) -> CadResult<CommandOutcome> {
+        if !snaps.is_empty() && snaps.len() != points.len() {
+            return Err(CadError::InvalidInput(format!(
+                "measurement.snaps_not_parallel: {} snap entries for {} points",
+                snaps.len(),
+                points.len()
+            )));
+        }
         let document = self
             .workspace
             .documents
@@ -281,14 +335,15 @@ impl Application {
             .ok_or_else(|| CadError::InvalidInput("unknown viewport".into()))?;
         let (algorithm, space) =
             resolve_measurement_space(active_space, viewport.work_plane, algorithm)?;
+        let (source, precision) = measurement_provenance(snaps);
         let request = MeasurementRequest {
             algorithm,
             points,
             tapped: Vec::new(),
             space,
             units: document.units.clone(),
-            source: GeometrySource::UserPoints,
-            precision: Precision::Analytic,
+            source,
+            precision,
         };
         let record = self.measurement.measure(&request)?;
         Ok(CommandOutcome {
@@ -302,5 +357,74 @@ impl Application {
             measurement: Some(record),
             point_report: None,
         })
+    }
+}
+
+/// Summarise per-point snap provenance into the record's single source and
+/// precision (see [`Application::evaluate_measurement`] for the documented rule).
+fn measurement_provenance(snaps: &[Option<InputSnap>]) -> (GeometrySource, Precision) {
+    let snapped: Vec<&InputSnap> = snaps.iter().flatten().collect();
+    if snapped.is_empty() {
+        // No object snap resolved (or no acquisition layer at all): the legacy
+        // user-point answer, never a fabricated mesh provenance.
+        return (GeometrySource::UserPoints, Precision::Analytic);
+    }
+    let has = |source: GeometrySource| snapped.iter().any(|snap| snap.geometry_source == source);
+    // The least authoritative source wins: a direct display mesh is weaker
+    // evidence than a vendor proxy cache, which is weaker than an exact kernel
+    // mesh, because the record may not claim more fidelity than its worst input.
+    let source = if has(GeometrySource::DirectMesh) {
+        GeometrySource::DirectMesh
+    } else if has(GeometrySource::ProxyCache) {
+        GeometrySource::ProxyCache
+    } else if has(GeometrySource::KernelMesh) {
+        GeometrySource::KernelMesh
+    } else if snaps.iter().any(Option::is_none) {
+        // Every snapped point is analytic, but at least one input point was a
+        // raw pick: the value is not derived purely from object geometry.
+        GeometrySource::UserPoints
+    } else {
+        GeometrySource::Analytic
+    };
+    // A raw pick contributes no precision claim; only the snapped points can
+    // weaken the record.
+    let precision = snapped
+        .into_iter()
+        .map(|snap| &snap.precision)
+        .reduce(weaker_precision)
+        .cloned()
+        .unwrap_or(Precision::Analytic);
+    (source, precision)
+}
+
+/// The weaker of two precisions (`Unknown` < `Approximate` < `Analytic`).
+fn weaker_precision<'a>(left: &'a Precision, right: &'a Precision) -> &'a Precision {
+    fn rank(precision: &Precision) -> u8 {
+        match precision {
+            Precision::Analytic => 2,
+            Precision::Approximate { .. } => 1,
+            Precision::Unknown => 0,
+        }
+    }
+    match (left, right) {
+        (
+            Precision::Approximate {
+                error_bound: left_bound,
+            },
+            Precision::Approximate {
+                error_bound: right_bound,
+            },
+        ) => {
+            // Both approximate: the larger bound is the weaker claim, and an
+            // unknown bound (`None`) is weaker than any stated one.
+            match (left_bound, right_bound) {
+                (None, _) => left,
+                (_, None) => right,
+                (Some(l), Some(r)) if l >= r => left,
+                _ => right,
+            }
+        }
+        _ if rank(left) <= rank(right) => left,
+        _ => right,
     }
 }

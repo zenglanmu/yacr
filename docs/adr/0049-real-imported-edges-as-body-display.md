@@ -3,6 +3,12 @@
 - 状态：**Accepted（2026-11-23）**。本 ADR 是**决策记录**：它取代 ADR-0045 D3 中「SKP 真实边继续按
   P-SKP-3 未实现」的**实现边界**，但**完整保留**其反伪造不变量；ADR-0033 D8 的「纯边文件拒绝」对 SKP
   退役。实现按阶段落地，状态与证据边界见 §5（**本文件只提交决策，不附运行证据**）。
+- **Superseded（部分，2026-11-23）**：本文件 §2 中「测量仍是 `Unsupported`、不做任何 snap 声明」与
+  §2/§4 中「SKP 自由边写出延后」「wire 体记 `export.skp.wire_body_not_written`」的**实现边界**已被
+  [ADR-0050](0050-display-edge-snap-and-measure.md)（端点/中点吸附 + `measure = Partial` 的窄声明）
+  与 [ADR-0051](0051-skp-single-run-free-edge-export.md)（单一合并 root run + 自由边写出）取代。
+  下文历史决策文本按原样保留，**不得**据此描述当前行为；载体、反伪造不变量与 RVT 无边的结论仍然
+  有效。
 - 日期：2026-11-23。
 - 相关：[ADR-0045](0045-mesh-wireframe-is-surface-boundary.md)（表面边界叠加、三角剖分对角线不是边、
   D3 的不伪造判据）、[ADR-0033](0033-multi-format-import.md)（SKP/RVT 的 preview 上限与
