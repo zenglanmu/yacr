@@ -21,7 +21,7 @@ use cad_connector_core::{
     ExportJob, ExportLimits, ExportOutput, ExportSpace, Exporter, ImportLimits, ImportRequest,
     ImportedDrawing, Importer,
 };
-use cad_import_gltf::{GltfImporter, DESCRIPTOR_GLTF};
+use crate::{GltfImporter, DESCRIPTOR_GLTF};
 use gltf::buffer::Source;
 
 use super::{GltfContainer, GltfExporter};
@@ -146,7 +146,7 @@ fn export(container: GltfContainer, database: &DrawingDatabase) -> ExportOutput 
     export_with(container, database, Some(&units))
 }
 
-/// Run the written bytes back through `cad_import_gltf`, the only reader that
+/// Run the written bytes back through [`crate::GltfImporter`], the only reader that
 /// defines what these files mean, so a round trip is an actual fixed point.
 fn import_bytes(bytes: Vec<u8>) -> ImportedDrawing {
     let request = ImportRequest {

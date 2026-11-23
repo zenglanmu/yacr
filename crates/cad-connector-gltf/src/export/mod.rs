@@ -41,10 +41,10 @@
 //! order and no clock, random id or hash-order-dependent value reaches the file,
 //! so two exports of one database are byte-identical.
 //!
-//! The descriptor is supplied by the caller ([`GltfExporter::new`]) so this crate
-//! does not own connector metadata: `cad-import-gltf` declares the single
-//! `DESCRIPTOR_GLTF` (it already describes both directions) and the registry
-//! passes it in.
+//! The descriptor is supplied by the caller ([`GltfExporter::new`]) so this
+//! writer half does not declare connector metadata of its own: the merged crate
+//! root declares the single [`crate::DESCRIPTOR_GLTF`] (it describes both
+//! directions) and the registry passes it in.
 
 mod collect;
 mod pbr;
@@ -59,7 +59,7 @@ use write::{Written, MISMATCHED_DESCRIPTOR};
 
 /// One glTF 2.0 container spelling.
 ///
-/// Both spellings are the same connector (`cad_import_gltf::DESCRIPTOR_GLTF`) but
+/// Both spellings are the same connector ([`crate::DESCRIPTOR_GLTF`]) but
 /// distinct registry keys, so each keeps its own output bytes and report id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GltfContainer {
@@ -83,7 +83,7 @@ impl GltfContainer {
 ///
 /// The descriptor is borrowed for the exporter's whole life so the report can
 /// name the connector without inventing metadata here. The single glTF
-/// descriptor is `cad_import_gltf::DESCRIPTOR_GLTF`; this crate declares none.
+/// descriptor is [`crate::DESCRIPTOR_GLTF`]; this writer declares none.
 pub struct GltfExporter {
     container: GltfContainer,
     descriptor: &'static ConnectorDescriptor,

@@ -1,22 +1,18 @@
 [package]
-name = "cad-export-gltf"
+name = "cad-connector-gltf"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "glTF 2.0 / GLB writer from neutral cad-db meshes."
+description = "glTF 2.0 / GLB connector: import meshes from .gltf/.glb and write GLB + JSON .gltf."
 
 [dependencies]
 cad-domain.workspace = true
 cad-db.workspace = true
 cad-connector-core.workspace = true
+gltf.workspace = true
 base64.workspace = true
 serde_json.workspace = true
-
-[dev-dependencies]
-gltf.workspace = true
-# The descriptor is owned by the import crate; the tests exercise the writer
-# against that single declaration instead of a local copy.
-cad-import-gltf.workspace = true
+web-time.workspace = true

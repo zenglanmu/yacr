@@ -17,10 +17,10 @@
 use cad_domain::ObjectId;
 use serde_json::{json, Value};
 
-use crate::collect::{PbrChannel, SourcePbr};
-use crate::report::ReportBuilder;
-use crate::texture::{texture_mime, Textures, Uv0};
-use crate::write::{Builder, TEXTURE_NOT_WRITTEN};
+use crate::export::collect::{PbrChannel, SourcePbr};
+use crate::export::report::ReportBuilder;
+use crate::export::texture::{texture_mime, Textures, Uv0};
+use crate::export::write::{Builder, TEXTURE_NOT_WRITTEN};
 
 /// The `textures[]` indices one mesh's PBR channels reach.
 #[derive(Default)]

@@ -31,10 +31,9 @@ members = [
     "crates/cad-connector-dgn",
     "crates/cad-connector-rvt",
     "crates/cad-import-skp",
-    "crates/cad-import-gltf",
+    "crates/cad-connector-gltf",
     "crates/cad-export-mesh",
     "crates/cad-export-skp",
-    "crates/cad-export-gltf",
     "crates/cad-resources",
     "crates/cad-query",
     "crates/cad-app",
@@ -98,14 +97,14 @@ cad-connector-ifc = { path = "crates/cad-connector-ifc" }
 cad-connector-dgn = { path = "crates/cad-connector-dgn" }
 cad-connector-rvt = { path = "crates/cad-connector-rvt" }
 cad-import-skp = { path = "crates/cad-import-skp" }
-cad-import-gltf = { path = "crates/cad-import-gltf" }
+cad-connector-gltf = { path = "crates/cad-connector-gltf" }
 # Writers above the neutral import/export contract. They read `cad-db` and
 # produce bytes plus a `CompatReport`; none of them is linked by a carrier
-# directly — `cad-app`/`cad-host` wire them. (`cad-connector-ifc` is the one
-# merged reader+writer connector and sits with the readers above.)
+# directly — `cad-app`/`cad-host` wire them. (`cad-connector-ifc` and
+# `cad-connector-gltf` are the merged reader+writer connectors and sit with the
+# readers above.)
 cad-export-mesh = { path = "crates/cad-export-mesh" }
 cad-export-skp = { path = "crates/cad-export-skp" }
-cad-export-gltf = { path = "crates/cad-export-gltf" }
 cad-resources = { path = "crates/cad-resources" }
 cad-query = { path = "crates/cad-query" }
 cad-app = { path = "crates/cad-app" }

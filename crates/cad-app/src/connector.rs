@@ -31,7 +31,7 @@
 
 use cad_domain::{CadError, CadResult};
 #[cfg(feature = "formats-gltf")]
-use cad_export_gltf::{GltfContainer, GltfExporter};
+use cad_connector_gltf::{GltfContainer, GltfExporter, GltfImporter};
 #[cfg(feature = "formats-mesh")]
 use cad_export_mesh::{MeshExporter, MeshFormat};
 #[cfg(feature = "formats-skp")]
@@ -46,8 +46,6 @@ use cad_connector_core::{
 use cad_connector_dgn::DgnImporter;
 #[cfg(feature = "formats-ifc")]
 use cad_connector_ifc::{IfcExporter, IfcImporter};
-#[cfg(feature = "formats-gltf")]
-use cad_import_gltf::GltfImporter;
 #[cfg(feature = "formats-mesh")]
 use cad_import_mesh::{OffImporter, PlyImporter};
 #[cfg(feature = "formats-mesh")]
@@ -71,7 +69,7 @@ pub use cad_connector_acadrust::export::{DESCRIPTOR_DWG, DESCRIPTOR_DXF};
 #[cfg(feature = "formats-dgn")]
 pub use cad_connector_dgn::DESCRIPTOR_DGN;
 #[cfg(feature = "formats-gltf")]
-pub use cad_import_gltf::DESCRIPTOR_GLTF;
+pub use cad_connector_gltf::DESCRIPTOR_GLTF;
 #[cfg(feature = "formats-ifc")]
 pub use cad_connector_ifc::DESCRIPTOR_IFC;
 #[cfg(feature = "formats-mesh")]
@@ -712,7 +710,7 @@ fn is_step(bytes: &[u8]) -> bool {
 /// header and JSON-object rules, so the registry cannot drift from the reader.
 #[cfg(feature = "formats-gltf")]
 fn is_gltf(bytes: &[u8]) -> bool {
-    cad_import_gltf::sniff(bytes)
+    cad_connector_gltf::sniff(bytes)
 }
 
 #[cfg(feature = "formats-mesh")]

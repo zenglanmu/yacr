@@ -42,11 +42,11 @@ use serde_json::{json, Value};
 
 use std::collections::BTreeMap;
 
-use crate::collect::{Collected, SourceMesh, SourcePbr};
-use crate::pbr::{self, PbrKey, PbrTextures};
-use crate::report::ReportBuilder;
-use crate::texture::{base_colour_texture, Textures, Uv0};
-use crate::GltfContainer;
+use crate::export::collect::{Collected, SourceMesh, SourcePbr};
+use crate::export::pbr::{self, PbrKey, PbrTextures};
+use crate::export::report::ReportBuilder;
+use crate::export::texture::{base_colour_texture, Textures, Uv0};
+use crate::export::GltfContainer;
 
 /// The exporter was handed a registry key it does not write.
 pub(crate) const MISMATCHED_DESCRIPTOR: &str = "export.gltf.mismatched_descriptor";
@@ -188,7 +188,7 @@ pub(crate) fn write(
         {
             // A coordinate outside the f32 range cannot be stored honestly; the
             // entity is refused by name instead of being written as infinity.
-            report.lost_entity(crate::collect::DropEntry {
+            report.lost_entity(crate::export::collect::DropEntry {
                 object: mesh.object,
                 type_key: mesh.type_key.clone(),
                 code: UNSUPPORTED_GEOMETRY.to_string(),
@@ -418,7 +418,7 @@ fn normals(mesh: &SourceMesh) -> Vec<[f32; 3]> {
 
 /// sRGB byte -> linear glTF component (the IEC 61966-2-1 decode).
 ///
-/// Exact inverse of `cad_import_gltf::scene`'s `linear_to_srgb_byte`, so an
+/// Exact inverse of `crate::scene`'s `linear_to_srgb_byte`, so an
 /// export/import round trip returns the stored byte (± rounding). Both halves
 /// of the piecewise curve are used: the linear segment below the 0.0031308
 /// breakpoint and the 2.4-power segment above it.

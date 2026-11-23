@@ -694,6 +694,7 @@ dependencies = [
  "cad-connector-acadrust",
  "cad-connector-core",
  "cad-connector-dgn",
+ "cad-connector-gltf",
  "cad-connector-ifc",
  "cad-connector-rvt",
  "cad-connector-step",
@@ -701,12 +702,10 @@ dependencies = [
  "cad-dependencies",
  "cad-diagnostics",
  "cad-domain",
- "cad-export-gltf",
  "cad-export-mesh",
  "cad-export-skp",
  "cad-geometry",
  "cad-history",
- "cad-import-gltf",
  "cad-import-mesh",
  "cad-import-obj",
  "cad-import-skp",
@@ -787,6 +786,19 @@ dependencies = [
  "cad-domain",
  "cadkit-core",
  "cadkit-dgn",
+ "web-time",
+]
+
+[[package]]
+name = "cad-connector-gltf"
+version = "0.1.16"
+dependencies = [
+ "base64 0.22.1",
+ "cad-connector-core",
+ "cad-db",
+ "cad-domain",
+ "gltf",
+ "serde_json",
  "web-time",
 ]
 
@@ -892,19 +904,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cad-export-gltf"
-version = "0.1.16"
-dependencies = [
- "base64 0.22.1",
- "cad-connector-core",
- "cad-db",
- "cad-domain",
- "cad-import-gltf",
- "gltf",
- "serde_json",
-]
-
-[[package]]
 name = "cad-export-mesh"
 version = "0.1.16"
 dependencies = [
@@ -959,19 +958,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.1",
- "web-time",
-]
-
-[[package]]
-name = "cad-import-gltf"
-version = "0.1.16"
-dependencies = [
- "base64 0.22.1",
- "cad-connector-core",
- "cad-db",
- "cad-domain",
- "gltf",
- "serde_json",
  "web-time",
 ]
 

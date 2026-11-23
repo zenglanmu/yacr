@@ -73,12 +73,20 @@
 //!
 //! A document whose `asset.version` is not `2.x` is refused by name
 //! ([`DIAG_UNSUPPORTED_VERSION`]); it is never read as if it were glTF 2.0.
+//!
+//! The writer half lives in the [`export`] module of this same connector and is
+//! declared on [`DESCRIPTOR_GLTF`] as an L1 lossy export; [`GltfExporter`] and
+//! [`GltfContainer`] are re-exported at the crate root for the registry.
 
 mod buffers;
 mod geometry;
 mod pbr;
 mod scene;
 mod texture;
+
+pub mod export;
+
+pub use export::{GltfContainer, GltfExporter};
 
 #[cfg(test)]
 mod tests;
@@ -182,7 +190,7 @@ pub const DIAG_UNREFERENCED_MESH: &str = "import.gltf.unreferenced_mesh";
 
 /// The glTF connector descriptor.
 ///
-/// Owned by this crate. The writer half (`cad-export-gltf`) emits glTF 2.0 at
+/// Owned by this crate. The writer half ([`export`]) emits glTF 2.0 at
 /// L1; the format cannot carry `cad-db`'s analytic curves, layers or units, so
 /// the export direction is lossy and every conversion is reported.
 ///

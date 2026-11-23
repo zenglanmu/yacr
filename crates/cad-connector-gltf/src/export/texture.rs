@@ -17,9 +17,9 @@ use std::collections::BTreeMap;
 
 use serde_json::{json, Value};
 
-use crate::collect::SourceMesh;
-use crate::report::ReportBuilder;
-use crate::write::{Builder, TEXTURE_NOT_WRITTEN};
+use crate::export::collect::SourceMesh;
+use crate::export::report::ReportBuilder;
+use crate::export::write::{Builder, TEXTURE_NOT_WRITTEN};
 
 /// The 8-byte PNG signature (ISO/IEC 15948 §5.2).
 const PNG_MAGIC: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
