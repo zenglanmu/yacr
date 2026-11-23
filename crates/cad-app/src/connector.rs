@@ -59,7 +59,7 @@ use cad_import_rvt::RvtImporter;
 #[cfg(feature = "formats-skp")]
 use cad_import_skp::SkpImporter;
 #[cfg(feature = "formats-step")]
-use cad_import_step::StepImporter;
+use cad_connector_step::StepImporter;
 #[cfg(feature = "formats-mesh")]
 use cad_import_stl::StlImporter;
 use std::sync::LazyLock;
@@ -85,7 +85,7 @@ pub use cad_import_rvt::DESCRIPTOR_RVT;
 #[cfg(feature = "formats-skp")]
 pub use cad_import_skp::DESCRIPTOR_SKP;
 #[cfg(feature = "formats-step")]
-pub use cad_import_step::DESCRIPTOR_STEP;
+pub use cad_connector_step::DESCRIPTOR_STEP;
 #[cfg(feature = "formats-mesh")]
 pub use cad_import_stl::DESCRIPTOR_STL;
 

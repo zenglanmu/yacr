@@ -12,7 +12,7 @@ use cad_domain::{
 use cad_import_core::{
     detect_format, DrawingFormat, ImportLimits, ImportPhase, IFC_SCHEMA_REFUSED,
 };
-use cad_import_step::StepImporter;
+use cad_connector_step::StepImporter;
 
 fn request_bytes(bytes: Vec<u8>) -> ImportRequest {
     ImportRequest {

@@ -693,6 +693,7 @@ version = "0.1.16"
 dependencies = [
  "cad-connector-acadrust",
  "cad-connector-dgn",
+ "cad-connector-step",
  "cad-db",
  "cad-dependencies",
  "cad-diagnostics",
@@ -710,7 +711,6 @@ dependencies = [
  "cad-import-obj",
  "cad-import-rvt",
  "cad-import-skp",
- "cad-import-step",
  "cad-import-stl",
  "cad-kernel-adapter",
  "cad-measure",
@@ -778,6 +778,19 @@ dependencies = [
  "cad-import-core",
  "cadkit-core",
  "cadkit-dgn",
+ "web-time",
+]
+
+[[package]]
+name = "cad-connector-step"
+version = "0.1.16"
+dependencies = [
+ "cad-db",
+ "cad-domain",
+ "cad-import-core",
+ "cadmpeg-codec-step",
+ "cadmpeg-ir",
+ "cadmpeg-tessellate",
  "web-time",
 ]
 
@@ -949,10 +962,10 @@ dependencies = [
 name = "cad-import-ifc"
 version = "0.1.16"
 dependencies = [
+ "cad-connector-step",
  "cad-db",
  "cad-domain",
  "cad-import-core",
- "cad-import-step",
  "ifc-lite-core",
  "ifc-lite-geometry",
  "png",
@@ -1003,19 +1016,6 @@ dependencies = [
  "cad-import-core",
  "png",
  "skpwright",
- "web-time",
-]
-
-[[package]]
-name = "cad-import-step"
-version = "0.1.16"
-dependencies = [
- "cad-db",
- "cad-domain",
- "cad-import-core",
- "cadmpeg-codec-step",
- "cadmpeg-ir",
- "cadmpeg-tessellate",
  "web-time",
 ]
 
