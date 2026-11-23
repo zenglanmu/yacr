@@ -1,13 +1,15 @@
-//! PLY (Polygon File Format) and OFF (Object File Format) import adapters.
+//! Neutral-mesh connectors: STL, OBJ, PLY and OFF readers and writers.
 //!
-//! Both formats are display-mesh formats: no layers, no blocks, no units and no
-//! external references. This crate owns the parsers (hand-written; no third
-//! party parsing dependency) and turns one file into exactly one
+//! Every adapter here treats the format as a display-mesh container: no layers,
+//! no blocks, no units and no external references. One file becomes one
 //! `SemanticGeometry::Mesh` entity on layer `0` in model space through
-//! [`cad_connector_core::MeshImport`]. The shared
-//! scaffold calls `cad_db::validate_geometry`, so neither parser can publish a
-//! mesh whose normals/colours do not match its vertices or whose triangles
-//! reference unknown vertices.
+//! [`cad_connector_core::MeshImport`]; every writer reads the read-only
+//! `cad-db` display model and reports each conversion instead of dropping it
+//! silently. STL and OBJ delegate parsing to `stl_io`/`tobj`, PLY and OFF are
+//! hand-written parsers and writers. The shared scaffold calls
+//! `cad_db::validate_geometry`, so no reader can publish a mesh whose
+//! normals/colours do not match its vertices or whose triangles reference
+//! unknown vertices.
 //!
 //! Losses are never silent:
 //! * `n`-gons (`n > 3`) are fan-triangulated and recorded with
@@ -26,15 +28,30 @@
 //!   vanishing as unknown properties (ADR-0038 D6).
 //!
 //! Deliberate boundaries:
-//! * PLY is one mesh per file, so one `DbEntity`; OFF likewise.
+//! * PLY is one mesh per file, so one `DbEntity`; OFF likewise. STL and OBJ may
+//!   produce more entities (OBJ has one per object/material group).
 //! * Units are unknown (`UnitContext::drawing_units()`), never guessed.
 //! * Meshes are draw/pick targets only; measure stays `Unsupported`.
 //! * OFF is ASCII-only. Only `OFF` and `COFF` are accepted; other OFF-family
 //!   prefixes are refused by name ([`off::ERR_VARIANT_REFUSED`]).
 
+mod export;
+mod obj;
 mod off;
 mod ply;
+mod stl;
 
+pub use export::{MeshExporter, MeshFormat};
+pub use obj::{
+    ObjImporter, DESCRIPTOR_OBJ, DIAG_DEGENERATE_TRIANGLE as OBJ_DIAG_DEGENERATE_TRIANGLE,
+    DIAG_EMPTY_OBJECT, DIAG_MTL_NOT_LOADED, DIAG_NGON_FAN as OBJ_DIAG_NGON_FAN,
+    DIAG_TEXTURE_NOT_IMPORTED as OBJ_DIAG_TEXTURE_NOT_IMPORTED, OBJ_MESH_TYPE_KEY,
+};
+pub use stl::{
+    detect_variant, StlImporter, StlVariant, DESCRIPTOR_STL,
+    DIAG_DEGENERATE_TRIANGLE as STL_DIAG_DEGENERATE_TRIANGLE, DIAG_NORMAL_RECOMPUTED,
+    STL_MESH_TYPE_KEY,
+};
 pub use off::{
     OffImporter, DIAG_ALPHA_DROPPED, DIAG_COLORS_DROPPED, DIAG_DEGENERATE_TRIANGLE,
     DIAG_FACE_COLOR_NOT_IMPORTED, DIAG_FACE_TOO_FEW_VERTICES, DIAG_NGON_FAN, ERR_INDEX_RANGE,
@@ -182,9 +199,9 @@ pub(crate) fn publish(
 
 /// The PLY connector descriptor.
 ///
-/// Owned by this crate. `cad-export-mesh` writes binary little-endian PLY 1.0;
-/// the writer is lossy because PLY stores no layers/units and an incomplete
-/// normal or colour set is dropped rather than invented.
+/// Owned by this crate. The PLY writer here emits binary little-endian PLY
+/// 1.0; it is lossy because PLY stores no layers/units and an incomplete normal
+/// or colour set is dropped rather than invented.
 ///
 /// `spec` is [`SpecVisibility::Public`]: PLY 1.0 is a plain-text header format
 /// with a published description, implemented by the hand-written parser here.
@@ -208,9 +225,9 @@ pub const DESCRIPTOR_PLY: ConnectorDescriptor = ConnectorDescriptor {
 
 /// The OFF/COFF connector descriptor.
 ///
-/// Owned by this crate. `cad-export-mesh` writes ASCII `OFF`, or `COFF` when
-/// every vertex has a colour; the writer is lossy because OFF stores no
-/// layers/units and merges every source mesh into one table.
+/// Owned by this crate. The OFF writer here emits ASCII `OFF`, or `COFF` when
+/// every vertex has a colour; it is lossy because OFF stores no layers/units and
+/// merges every source mesh into one table.
 ///
 /// `spec` is [`SpecVisibility::Public`]: OFF/COFF is a plain-text format with a
 /// published description, implemented by the hand-written parser here.

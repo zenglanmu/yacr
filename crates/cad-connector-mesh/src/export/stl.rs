@@ -10,8 +10,8 @@ use std::fmt::Write as _;
 
 use cad_domain::Point3;
 
-use crate::collect::Collected;
-use crate::report::ReportBuilder;
+use crate::export::collect::Collected;
+use crate::export::report::ReportBuilder;
 
 /// Stable marker: a zero-area facet was dropped.
 const DEGENERATE_TRIANGLE: &str = "export.stl.degenerate_triangle";

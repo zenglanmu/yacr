@@ -33,7 +33,9 @@ use cad_domain::{CadError, CadResult};
 #[cfg(feature = "formats-gltf")]
 use cad_connector_gltf::{GltfContainer, GltfExporter, GltfImporter};
 #[cfg(feature = "formats-mesh")]
-use cad_export_mesh::{MeshExporter, MeshFormat};
+use cad_connector_mesh::{
+    MeshExporter, MeshFormat, ObjImporter, OffImporter, PlyImporter, StlImporter,
+};
 use cad_connector_acadrust::export::{AcadrustExporter, AcisVersion, DxfTarget, ExportFormat};
 use cad_connector_acadrust::AcadrustImporter;
 use cad_connector_core::{
@@ -44,18 +46,12 @@ use cad_connector_core::{
 use cad_connector_dgn::DgnImporter;
 #[cfg(feature = "formats-ifc")]
 use cad_connector_ifc::{IfcExporter, IfcImporter};
-#[cfg(feature = "formats-mesh")]
-use cad_import_mesh::{OffImporter, PlyImporter};
-#[cfg(feature = "formats-mesh")]
-use cad_import_obj::ObjImporter;
 #[cfg(feature = "formats-rvt")]
 use cad_connector_rvt::RvtImporter;
 #[cfg(feature = "formats-skp")]
 use cad_connector_skp::{SkpExporter, SkpImporter};
 #[cfg(feature = "formats-step")]
 use cad_connector_step::StepImporter;
-#[cfg(feature = "formats-mesh")]
-use cad_import_stl::StlImporter;
 use std::sync::LazyLock;
 
 // Each format crate owns its descriptor; this module only wires the constants
@@ -71,17 +67,13 @@ pub use cad_connector_gltf::DESCRIPTOR_GLTF;
 #[cfg(feature = "formats-ifc")]
 pub use cad_connector_ifc::DESCRIPTOR_IFC;
 #[cfg(feature = "formats-mesh")]
-pub use cad_import_mesh::{DESCRIPTOR_OFF, DESCRIPTOR_PLY};
-#[cfg(feature = "formats-mesh")]
-pub use cad_import_obj::DESCRIPTOR_OBJ;
+pub use cad_connector_mesh::{DESCRIPTOR_OBJ, DESCRIPTOR_OFF, DESCRIPTOR_PLY, DESCRIPTOR_STL};
 #[cfg(feature = "formats-rvt")]
 pub use cad_connector_rvt::DESCRIPTOR_RVT;
 #[cfg(feature = "formats-skp")]
 pub use cad_connector_skp::DESCRIPTOR_SKP;
 #[cfg(feature = "formats-step")]
 pub use cad_connector_step::DESCRIPTOR_STEP;
-#[cfg(feature = "formats-mesh")]
-pub use cad_import_stl::DESCRIPTOR_STL;
 
 /// Whether this build compiled every format lane.
 ///

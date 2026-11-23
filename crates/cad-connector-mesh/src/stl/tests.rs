@@ -259,7 +259,7 @@ fn variant_detection_is_conservative() {
 
 #[test]
 fn committed_ascii_fixture_imports() {
-    let bytes = include_bytes!("../../../fixtures/stl/synthetic-quad.stl");
+    let bytes = include_bytes!("../../../../fixtures/stl/synthetic-quad.stl");
     let drawing = StlImporter::new()
         .import(&request(bytes), &|| false)
         .expect("ASCII fixture imports");
@@ -269,7 +269,7 @@ fn committed_ascii_fixture_imports() {
 
 #[test]
 fn committed_binary_fixture_imports() {
-    let bytes = include_bytes!("../../../fixtures/stl/synthetic-quad-binary.stl");
+    let bytes = include_bytes!("../../../../fixtures/stl/synthetic-quad-binary.stl");
     assert_eq!(detect_variant(bytes), Some(StlVariant::Binary));
     let drawing = StlImporter::new()
         .import(&request(bytes), &|| false)

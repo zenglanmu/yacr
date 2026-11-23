@@ -8,8 +8,8 @@
 
 use std::fmt::Write as _;
 
-use crate::collect::Collected;
-use crate::report::ReportBuilder;
+use crate::export::collect::Collected;
+use crate::export::report::ReportBuilder;
 
 /// Stable marker: declared normals could not be kept for every vertex.
 const NORMALS_DROPPED: &str = "export.ply.normals_dropped";

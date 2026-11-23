@@ -597,8 +597,8 @@ mod tests;
 
 /// The Wavefront OBJ connector descriptor.
 ///
-/// Owned by this crate. `cad-export-mesh` writes the geometry (`v`/`vn`/`f`,
-/// one `o` per source entity); the writer is lossy because OBJ stores no
+/// Owned by this crate. This crate writes the geometry (`v`/`vn`/`f`, one `o`
+/// per source entity); the writer is lossy because OBJ stores no
 /// per-vertex colours here (no `mtllib` is emitted) and no units.
 ///
 /// `spec` is [`SpecVisibility::Public`]: Wavefront OBJ is a plain-text format

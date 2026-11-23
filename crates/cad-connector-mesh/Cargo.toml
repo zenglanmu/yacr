@@ -1,17 +1,21 @@
 [package]
-name = "cad-import-mesh"
+name = "cad-connector-mesh"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "PLY and OFF adapters: hand-written parsers into the neutral mesh contract."
+description = "Neutral-mesh connectors: STL/OBJ/PLY/OFF readers and writers over cad-db."
 
 [dependencies]
 cad-domain.workspace = true
 cad-db.workspace = true
 cad-connector-core.workspace = true
+# `default-features = false` keeps the optional `ahash` hasher (and its
+# `getrandom 0.3` transitive) out of the wasm32 build.
+tobj.workspace = true
+stl_io.workspace = true
 # `std::time::Instant::now()` panics on wasm32-unknown-unknown; `web_time` uses
 # `Performance.now()` there and re-exports std elsewhere.
 web-time.workspace = true

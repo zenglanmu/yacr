@@ -7,8 +7,8 @@
 
 use std::fmt::Write as _;
 
-use crate::collect::Collected;
-use crate::report::ReportBuilder;
+use crate::export::collect::Collected;
+use crate::export::report::ReportBuilder;
 
 /// Stable marker: source vertex colours have no OBJ channel in this writer.
 const COLORS_DROPPED: &str = "export.obj.colors_dropped";

@@ -390,7 +390,7 @@ fn capability_rows_say_mesh_is_not_measurable() {
 
 #[test]
 fn committed_quad_fixture_imports_with_two_triangles() {
-    let bytes = include_str!("../../../fixtures/obj/synthetic-quad.obj");
+    let bytes = include_str!("../../../../fixtures/obj/synthetic-quad.obj");
     let drawing = ObjImporter::new()
         .import(&request(bytes), &|| false)
         .expect("fixture imports");

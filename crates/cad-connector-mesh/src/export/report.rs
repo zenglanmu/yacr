@@ -9,7 +9,7 @@
 use cad_domain::{Completeness, ObjectId, SupportStatus, UnitContext};
 use cad_connector_core::{CompatCounts, CompatEntry, CompatReport, FidelityLevel, ReportDirection};
 
-use crate::collect::{DropEntry, SourceMesh};
+use crate::export::collect::{DropEntry, SourceMesh};
 
 pub(crate) struct ReportBuilder {
     connector: &'static str,

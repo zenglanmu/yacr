@@ -15,9 +15,9 @@
 //! These formats store no unit header. Coordinates are written **unscaled** and
 //! the report carries one note saying whether the source units were known.
 //!
-//! The descriptor is supplied by the caller ([`MeshExporter::new`]) because each
-//! format crate owns its own `DESCRIPTOR_*` constant; this crate only knows the
-//! wire formats.
+//! The descriptor is supplied by the caller ([`MeshExporter::new`]) so the
+//! writer never invents connector metadata: `cad-app` passes the same
+//! `DESCRIPTOR_*` constant the matching reader declares.
 
 mod collect;
 mod obj;
@@ -63,10 +63,10 @@ impl MeshFormat {
 
 /// A writer for one neutral-mesh format.
 ///
-/// The descriptor is the importing format crate's own `const`
-/// (`DESCRIPTOR_STL`, `DESCRIPTOR_OBJ`, `DESCRIPTOR_PLY`, `DESCRIPTOR_OFF`); it
-/// is borrowed for the whole exporter life so the report can name the connector
-/// without inventing metadata here.
+/// The descriptor is the matching reader's own `const` (`DESCRIPTOR_STL`,
+/// `DESCRIPTOR_OBJ`, `DESCRIPTOR_PLY`, `DESCRIPTOR_OFF`, all declared in this
+/// crate); it is borrowed for the whole exporter life so the report can name the
+/// connector without inventing metadata here.
 pub struct MeshExporter {
     format: MeshFormat,
     descriptor: &'static ConnectorDescriptor,

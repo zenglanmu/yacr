@@ -12,9 +12,10 @@ use cad_connector_core::{
     ConnectorDescriptor, ExportJob, ExportLimits, ExportOutput, ExportSpace, Exporter,
     ImportLimits, ImportRequest, ImportedDrawing, Importer,
 };
-use cad_import_mesh::{OffImporter, PlyImporter};
-use cad_import_obj::{ObjImporter, DESCRIPTOR_OBJ};
-use cad_import_stl::{StlImporter, DESCRIPTOR_STL};
+use crate::{
+    ObjImporter, OffImporter, PlyImporter, StlImporter, DESCRIPTOR_OBJ, DESCRIPTOR_OFF,
+    DESCRIPTOR_PLY, DESCRIPTOR_STL,
+};
 
 use super::{MeshExporter, MeshFormat};
 
@@ -24,8 +25,8 @@ fn descriptor(format: MeshFormat) -> &'static ConnectorDescriptor {
     match format {
         MeshFormat::StlBinary | MeshFormat::StlAscii => &DESCRIPTOR_STL,
         MeshFormat::Obj => &DESCRIPTOR_OBJ,
-        MeshFormat::Ply => &cad_import_mesh::DESCRIPTOR_PLY,
-        MeshFormat::Off => &cad_import_mesh::DESCRIPTOR_OFF,
+        MeshFormat::Ply => &DESCRIPTOR_PLY,
+        MeshFormat::Off => &DESCRIPTOR_OFF,
     }
 }
 
@@ -595,7 +596,7 @@ fn triangle_limit_refuses_by_name() {
             ..ExportLimits::default()
         },
     };
-    let error = MeshExporter::new(MeshFormat::Ply, &cad_import_mesh::DESCRIPTOR_PLY)
+    let error = MeshExporter::new(MeshFormat::Ply, &DESCRIPTOR_PLY)
         .export("ply", &task)
         .unwrap_err();
     assert!(
@@ -642,7 +643,7 @@ fn triangle_limit_is_checked_before_copying_each_mesh() {
             ..ExportLimits::default()
         },
     };
-    let error = MeshExporter::new(MeshFormat::Off, &cad_import_mesh::DESCRIPTOR_OFF)
+    let error = MeshExporter::new(MeshFormat::Off, &DESCRIPTOR_OFF)
         .export("off", &task)
         .unwrap_err();
     assert!(

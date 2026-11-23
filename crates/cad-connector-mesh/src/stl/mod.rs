@@ -341,8 +341,8 @@ mod tests;
 
 /// The STL connector descriptor.
 ///
-/// Owned by this crate. `cad-export-mesh` writes both containers (`stl` =
-/// binary, `stl-ascii` = ASCII); the writer is lossy because STL has no colours,
+/// Owned by this crate. This crate writes both containers (`stl` = binary,
+/// `stl-ascii` = ASCII); the writer is lossy because STL has no colours,
 /// layers or units and per-face normals replace the neutral per-vertex normals.
 ///
 /// `spec` is [`SpecVisibility::Public`]: ASCII and binary STL are plain,

@@ -25,12 +25,7 @@ formats-all = [
   "formats-skp",
   "formats-gltf",
 ]
-formats-mesh = [
-  "dep:cad-import-obj",
-  "dep:cad-import-stl",
-  "dep:cad-import-mesh",
-  "dep:cad-export-mesh",
-]
+formats-mesh = ["dep:cad-connector-mesh"]
 formats-ifc = ["dep:cad-connector-ifc"]
 formats-step = ["dep:cad-connector-step"]
 formats-dgn = ["dep:cad-connector-dgn"]
@@ -47,16 +42,13 @@ cad-history.workspace = true
 cad-measure.workspace = true
 cad-connector-core.workspace = true
 cad-connector-acadrust.workspace = true
-cad-import-obj = { workspace = true, optional = true }
-cad-import-stl = { workspace = true, optional = true }
-cad-import-mesh = { workspace = true, optional = true }
+cad-connector-mesh = { workspace = true, optional = true }
 cad-connector-step = { workspace = true, optional = true }
 cad-connector-ifc = { workspace = true, optional = true }
 cad-connector-dgn = { workspace = true, optional = true }
 cad-connector-rvt = { workspace = true, optional = true }
 cad-connector-skp = { workspace = true, optional = true }
 cad-connector-gltf = { workspace = true, optional = true }
-cad-export-mesh = { workspace = true, optional = true }
 cad-representation.workspace = true
 cad-scene.workspace = true
 cad-query.workspace = true

@@ -23,16 +23,13 @@ members = [
     "crates/cad-proxy",
     "crates/cad-connector-core",
     "crates/cad-connector-acadrust",
-    "crates/cad-import-obj",
-    "crates/cad-import-stl",
-    "crates/cad-import-mesh",
+    "crates/cad-connector-mesh",
     "crates/cad-connector-step",
     "crates/cad-connector-ifc",
     "crates/cad-connector-dgn",
     "crates/cad-connector-rvt",
     "crates/cad-connector-skp",
     "crates/cad-connector-gltf",
-    "crates/cad-export-mesh",
     "crates/cad-resources",
     "crates/cad-query",
     "crates/cad-app",
@@ -88,9 +85,7 @@ cad-measure = { path = "crates/cad-measure" }
 cad-proxy = { path = "crates/cad-proxy" }
 cad-connector-core = { path = "crates/cad-connector-core" }
 cad-connector-acadrust = { path = "crates/cad-connector-acadrust" }
-cad-import-obj = { path = "crates/cad-import-obj" }
-cad-import-stl = { path = "crates/cad-import-stl" }
-cad-import-mesh = { path = "crates/cad-import-mesh" }
+cad-connector-mesh = { path = "crates/cad-connector-mesh" }
 cad-connector-step = { path = "crates/cad-connector-step" }
 cad-connector-ifc = { path = "crates/cad-connector-ifc" }
 cad-connector-dgn = { path = "crates/cad-connector-dgn" }
@@ -102,7 +97,6 @@ cad-connector-gltf = { path = "crates/cad-connector-gltf" }
 # directly — `cad-app`/`cad-host` wire them. (`cad-connector-ifc`,
 # `cad-connector-gltf` and `cad-connector-skp` are the merged reader+writer
 # connectors and sit with the readers above.)
-cad-export-mesh = { path = "crates/cad-export-mesh" }
 cad-resources = { path = "crates/cad-resources" }
 cad-query = { path = "crates/cad-query" }
 cad-app = { path = "crates/cad-app" }
@@ -155,12 +149,12 @@ futures-lite = "2.6"
 # explicitly so a future default cannot silently widen the dependency.
 rstar = { version = "0.13.0", default-features = false }
 
-# Wavefront OBJ reader (`cad-import-obj`). `default-features = false` is
+# Wavefront OBJ reader (`cad-connector-mesh`). `default-features = false` is
 # mandatory: the default `ahash` feature pulls `getrandom 0.3`, which does not
 # compile for `wasm32-unknown-unknown`. The loader falls back to `std`'s hasher.
 tobj = { version = "4.0.5", default-features = false }
 
-# STereoLithography reader (`cad-import-stl`): ASCII and binary, pure Rust.
+# STereoLithography reader (`cad-connector-mesh`): ASCII and binary, pure Rust.
 stl_io = "0.11"
 
 # ISO 10303-21 (STEP) reader + B-rep tessellation (`cad-import-step`).

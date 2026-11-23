@@ -696,6 +696,7 @@ dependencies = [
  "cad-connector-dgn",
  "cad-connector-gltf",
  "cad-connector-ifc",
+ "cad-connector-mesh",
  "cad-connector-rvt",
  "cad-connector-skp",
  "cad-connector-step",
@@ -703,12 +704,8 @@ dependencies = [
  "cad-dependencies",
  "cad-diagnostics",
  "cad-domain",
- "cad-export-mesh",
  "cad-geometry",
  "cad-history",
- "cad-import-mesh",
- "cad-import-obj",
- "cad-import-stl",
  "cad-kernel-adapter",
  "cad-measure",
  "cad-platform",
@@ -818,6 +815,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "cad-connector-mesh"
+version = "0.1.16"
+dependencies = [
+ "cad-connector-core",
+ "cad-db",
+ "cad-domain",
+ "stl_io",
+ "tobj",
+ "web-time",
+]
+
+[[package]]
 name = "cad-connector-rvt"
 version = "0.1.16"
 dependencies = [
@@ -915,18 +924,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cad-export-mesh"
-version = "0.1.16"
-dependencies = [
- "cad-connector-core",
- "cad-db",
- "cad-domain",
- "cad-import-mesh",
- "cad-import-obj",
- "cad-import-stl",
-]
-
-[[package]]
 name = "cad-geometry"
 version = "0.1.16"
 dependencies = [
@@ -958,38 +955,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.1",
- "web-time",
-]
-
-[[package]]
-name = "cad-import-mesh"
-version = "0.1.16"
-dependencies = [
- "cad-connector-core",
- "cad-db",
- "cad-domain",
- "web-time",
-]
-
-[[package]]
-name = "cad-import-obj"
-version = "0.1.16"
-dependencies = [
- "cad-connector-core",
- "cad-db",
- "cad-domain",
- "tobj",
- "web-time",
-]
-
-[[package]]
-name = "cad-import-stl"
-version = "0.1.16"
-dependencies = [
- "cad-connector-core",
- "cad-db",
- "cad-domain",
- "stl_io",
  "web-time",
 ]
 
