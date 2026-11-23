@@ -455,8 +455,8 @@
                 <div>
                   <p class="shot-title">SketchUp <span>triangle preview</span></p>
                   <p class="shot-text">
-                    <span class="lang--zh">SketchUp 导入：房间、门窗与楼面带贴图，作为三角面预览——这条路径没有完整的边线显示与测量。</span>
-                    <span class="lang--en" lang="en">SketchUp import: rooms, openings and a textured floor as a triangle preview — no full edge display or measurement on this path.</span>
+                    <span class="lang--zh">SketchUp 导入：房间、门窗与带贴图的楼面作为三角面预览，模型原有的边线一并显示。</span>
+                    <span class="lang--en" lang="en">SketchUp import: rooms, openings and a textured floor as a triangle preview, with the model's own edge lines shown too.</span>
                   </p>
                 </div>
               </figcaption>
@@ -474,17 +474,17 @@
                   src="assets/screenshots/07-rvt-preview.png"
                   width="1600" height="904"
                   loading="lazy" decoding="async"
-                  alt="真实截图：Revit 工程在 yacr 中作为白色预览体显示，建筑轮廓立在深色画布上，上方是英文 Ribbon。"
-                  data-alt-zh="真实截图：Revit 工程在 yacr 中作为白色预览体显示，建筑轮廓立在深色画布上，上方是英文 Ribbon。"
-                  data-alt-en="A real screenshot: a Revit project shown as a white preview massing in yacr — the building outline on the dark canvas under the English ribbon.">
+                  alt="真实截图：Revit 工程在 yacr 中以预览体显示，颜色接近白色，建筑轮廓立在深色画布上，上方是英文 Ribbon。"
+                  data-alt-zh="真实截图：Revit 工程在 yacr 中以预览体显示，颜色接近白色，建筑轮廓立在深色画布上，上方是英文 Ribbon。"
+                  data-alt-en="A real screenshot: a Revit project shown as a preview body in yacr — near-white — the building outline on the dark canvas under the English ribbon.">
               </div>
               <figcaption class="shot-caption">
                 <span class="fig-mark" aria-hidden="true">FIG. E</span>
                 <div>
-                  <p class="shot-title">RVT <span>bounding-box preview</span></p>
+                  <p class="shot-title">RVT <span>preview body</span></p>
                   <p class="shot-text">
-                    <span class="lang--zh">Revit 导入：直接打开 <code>.rvt</code> 工程，按包围盒预览显示，预览体为白色（材质未映射）。</span>
-                    <span class="lang--en" lang="en">Revit import: an <code>.rvt</code> project opened directly as a bounding-box preview, with white preview geometry (materials unmapped).</span>
+                    <span class="lang--zh">Revit 导入：直接打开 <code>.rvt</code> 工程，按预览体显示，材质颜色与透明度随构件带上（暂无贴图）。</span>
+                    <span class="lang--en" lang="en">Revit import: an <code>.rvt</code> project opened directly as a preview body, carrying material colour and transparency per element (no textures yet).</span>
                   </p>
                 </div>
               </figcaption>
@@ -649,8 +649,8 @@
             </div>
             <h3><span class="lang--zh">其余格式也能进来看</span><span class="lang--en" lang="en">Bring in everything else</span></h3>
             <p>
-              <span class="lang--zh">OBJ、STL、PLY、OFF、STEP（AP203/214/242）、glTF/GLB 与 IFC 作为可显示、可拾取的网格；Revit 工程给包围盒预览，SketchUp 模型给三角面预览。</span>
-              <span class="lang--en" lang="en">OBJ, STL, PLY, OFF, STEP (AP203/214/242), glTF/GLB and IFC arrive as display-and-pick meshes; Revit projects as a bounding-box preview, SketchUp models as a triangle preview.</span>
+              <span class="lang--zh">OBJ、STL、PLY、OFF、STEP（AP203/214/242）、glTF/GLB 与 IFC 作为可显示、可拾取的网格；Revit 工程给预览体，SketchUp 模型给三角面预览并带原有边线。</span>
+              <span class="lang--en" lang="en">OBJ, STL, PLY, OFF, STEP (AP203/214/242), glTF/GLB and IFC arrive as display-and-pick meshes; Revit projects as a preview body, SketchUp models as a triangle preview that keeps their edge lines.</span>
             </p>
             <div class="chips" aria-hidden="true"><span>STEP</span><span>GLTF</span><span>IFC</span><span>SKP</span><span>RVT</span></div>
           </article>
@@ -1415,8 +1415,8 @@
               </summary>
               <div class="faq-a">
                 <p>
-                  <span class="lang--zh">没有 DWG 原地回写。原生保存格式是 <code>.ymodel</code>；其它来源的 <code>SAVE</code> 会写出 DXF，DWG 来源则写出一个实验性的新 DWG 文件，而不是覆盖原文件。</span>
-                  <span class="lang--en" lang="en">There is no in-place DWG writeback. The native format is <code>.ymodel</code>; for other sources <code>SAVE</code> writes DXF, and a DWG source produces an experimental new DWG file instead of overwriting the original.</span>
+                  <span class="lang--zh">没有 DWG 原地回写。原生格式是 <code>.ymodel</code>：<code>SAVE</code> 始终写 <code>.ymodel</code>，其它格式用 <code>EXPORT</code> 导出为新文件，不会覆盖源文件。</span>
+                  <span class="lang--en" lang="en">There is no in-place DWG writeback. The native format is <code>.ymodel</code>: <code>SAVE</code> always writes <code>.ymodel</code>, and other formats go through <code>EXPORT</code> as a new file — never overwriting the source.</span>
                 </p>
               </div>
             </details>
