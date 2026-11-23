@@ -40,7 +40,7 @@ use cad_export_mesh::{MeshExporter, MeshFormat};
 use cad_export_skp::SkpExporter;
 use cad_connector_acadrust::export::{AcadrustExporter, AcisVersion, DxfTarget, ExportFormat};
 use cad_connector_acadrust::AcadrustImporter;
-use cad_import_core::{
+use cad_connector_core::{
     detect_format, ConnectorDescriptor, DrawingFormat, ExportJob, ExportOutput, Exporter,
     ImportProgressSink, ImportRequest, ImportedDrawing, Importer, SpecVisibility,
 };
@@ -557,7 +557,7 @@ impl ConnectorRegistry {
     /// 4. anything else is `export.unknown_format`.
     ///
     /// A key is registered **iff** its descriptor declares
-    /// [`ExportCapability`](cad_import_core::ExportCapability) and the call
+    /// [`ExportCapability`](cad_connector_core::ExportCapability) and the call
     /// produces bytes; no key silently writes nothing and no descriptor
     /// advertises a writer this build does not have. Step 3 is what keeps a slim
     /// build from reporting STEP/DGN/RVT as if the product had never heard of

@@ -27,7 +27,7 @@
 //!   disappearing as unknown properties (ADR-0038 D6).
 
 use cad_domain::{CadError, CadResult};
-use cad_import_core::{
+use cad_connector_core::{
     compute_identity, ImportPhase, ImportProgress, ImportProgressSink, ImportRequest,
     ImportedDrawing, Importer, NoopProgress,
 };

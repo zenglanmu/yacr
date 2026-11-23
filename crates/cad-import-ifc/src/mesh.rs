@@ -5,7 +5,7 @@
 //! within the code-size gate.
 
 use cad_domain::{CadError, CadResult, Diagnostic, Mesh, Point3};
-use cad_import_core::{ImportLimits, MeshImport};
+use cad_connector_core::{ImportLimits, MeshImport};
 use ifc_lite_geometry::Mesh as IfcMesh;
 
 use crate::{DIAG_DEGENERATE_TRIANGLE, DIAG_NORMALS_DROPPED};

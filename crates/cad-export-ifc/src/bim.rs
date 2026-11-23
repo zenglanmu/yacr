@@ -67,7 +67,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use cad_db::{BimDefinition, BimEvidence, BimKey, BimPropertySet, BimSource, DrawingDatabase};
 use cad_domain::{CadError, CadResult, ObjectId, SupportStatus};
-use cad_import_core::{CompatEntry, FidelityLevel, ReportDirection};
+use cad_connector_core::{CompatEntry, FidelityLevel, ReportDirection};
 use ifc_lite_export::plan::{
     Disposition, ExportPlan, GlobalId, IfcClass, MaterialLink, NewMaterial, NewObject,
     NewPlacement, NewPropertySet, NewType, ObjectRef, PlanContext, Representation, TriangleMesh,

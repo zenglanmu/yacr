@@ -11,7 +11,7 @@
 
 use cad_db::DbEntity;
 use cad_domain::{CadError, CadResult, ObjectId, Point3, SemanticGeometry, SpaceId};
-use cad_import_core::ExportJob;
+use cad_connector_core::ExportJob;
 
 /// One writable source entity, copied out of the read-only database.
 pub(crate) struct SourceMesh {

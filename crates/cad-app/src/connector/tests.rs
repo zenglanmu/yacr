@@ -1,7 +1,7 @@
 use super::table_tests::export_lanes;
 use super::*;
 use cad_domain::{DatabaseId, DocumentId};
-use cad_import_core::FidelityLevel;
+use cad_connector_core::FidelityLevel;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -21,7 +21,7 @@ fn request(bytes: Vec<u8>) -> ImportRequest {
         document: DocumentId(1),
         database: DatabaseId(1),
         bytes: Arc::from(bytes.into_boxed_slice()),
-        limits: cad_import_core::ImportLimits::default(),
+        limits: cad_connector_core::ImportLimits::default(),
         generation: 0,
         xref: None,
     }
@@ -199,7 +199,7 @@ fn unknown_bytes_are_the_single_unsupported_input_refusal() {
         .import(
             &request(b"not a drawing".to_vec()),
             &|| false,
-            &cad_import_core::NoopProgress,
+            &cad_connector_core::NoopProgress,
         )
         .err()
         .expect("unknown bytes are refused");
@@ -235,7 +235,7 @@ fn ole_sniff_happens_after_the_file_size_limit() {
     let mut request = request(fixture("dgn/test_dgnv8.dgn"));
     request.limits.max_file_bytes = 8;
     let error = registry
-        .import(&request, &|| false, &cad_import_core::NoopProgress)
+        .import(&request, &|| false, &cad_connector_core::NoopProgress)
         .err()
         .expect("the OLE container is over the limit");
     assert!(matches!(error, CadError::InvalidInput(_)), "{error:?}");
@@ -250,8 +250,8 @@ fn unimplemented_export_keys_refuse_by_name() {
         database: &database,
         document_id: DocumentId(1),
         units: None,
-        space: cad_import_core::ExportSpace::Model,
-        limits: cad_import_core::ExportLimits::default(),
+        space: cad_connector_core::ExportSpace::Model,
+        limits: cad_connector_core::ExportLimits::default(),
     };
     let settings = ExportSettings::default();
     for (id, code) in [
@@ -297,8 +297,8 @@ fn dxf_export_goes_through_the_acadrust_adapter() {
         database: &database,
         document_id: DocumentId(1),
         units: None,
-        space: cad_import_core::ExportSpace::Model,
-        limits: cad_import_core::ExportLimits::default(),
+        space: cad_connector_core::ExportSpace::Model,
+        limits: cad_connector_core::ExportLimits::default(),
     };
     let output = registry
         .export("dxf", &job, &ExportSettings::default())
@@ -307,7 +307,7 @@ fn dxf_export_goes_through_the_acadrust_adapter() {
     assert_eq!(output.report.connector, "dxf");
     assert_eq!(
         output.report.direction,
-        cad_import_core::ReportDirection::Export
+        cad_connector_core::ReportDirection::Export
     );
 }
 
@@ -343,8 +343,8 @@ fn every_descriptor_without_a_writer_is_a_named_refusal() {
         database: &database,
         document_id: DocumentId(1),
         units: None,
-        space: cad_import_core::ExportSpace::Model,
-        limits: cad_import_core::ExportLimits::default(),
+        space: cad_connector_core::ExportSpace::Model,
+        limits: cad_connector_core::ExportLimits::default(),
     };
     for id in read_only {
         match registry.export(id, &job, &ExportSettings::default()) {
@@ -423,8 +423,8 @@ fn every_export_key_matches_its_descriptor_capability() {
         database: &database,
         document_id: DocumentId(1),
         units: Some(&units),
-        space: cad_import_core::ExportSpace::Model,
-        limits: cad_import_core::ExportLimits::default(),
+        space: cad_connector_core::ExportSpace::Model,
+        limits: cad_connector_core::ExportLimits::default(),
     };
     let settings = ExportSettings::default();
     let lanes = export_lanes(&registry);
@@ -478,8 +478,8 @@ fn every_writer_lane_writes_real_bytes_and_names_its_connector() {
         database: &database,
         document_id: DocumentId(1),
         units: Some(&units),
-        space: cad_import_core::ExportSpace::Model,
-        limits: cad_import_core::ExportLimits::default(),
+        space: cad_connector_core::ExportSpace::Model,
+        limits: cad_connector_core::ExportLimits::default(),
     };
     let settings = ExportSettings::default();
     // (registry key, expected byte prefix)
@@ -510,7 +510,7 @@ fn every_writer_lane_writes_real_bytes_and_names_its_connector() {
         );
         assert_eq!(
             output.report.direction,
-            cad_import_core::ReportDirection::Export,
+            cad_connector_core::ReportDirection::Export,
             "{id} must be an export report"
         );
         if let Some(prefix) = prefix {
@@ -538,8 +538,8 @@ fn a_glb_export_round_trips_through_the_registry_import() {
         database: &database,
         document_id: DocumentId(1),
         units: Some(&units),
-        space: cad_import_core::ExportSpace::Model,
-        limits: cad_import_core::ExportLimits::default(),
+        space: cad_connector_core::ExportSpace::Model,
+        limits: cad_connector_core::ExportLimits::default(),
     };
     let output = registry
         .export("glb", &job, &ExportSettings::default())
@@ -551,7 +551,7 @@ fn a_glb_export_round_trips_through_the_registry_import() {
         .import(
             &request(output.bytes),
             &|| false,
-            &cad_import_core::NoopProgress,
+            &cad_connector_core::NoopProgress,
         )
         .expect("the glTF lane imports the bytes it wrote");
     assert_eq!(
@@ -579,7 +579,7 @@ fn registry_import_matches_the_probe_decision() {
     let bytes = fixture("stl/synthetic-quad.stl");
     assert_eq!(registry.route(&bytes).map(|d| d.id), Some("stl"));
     let drawing = registry
-        .import(&request(bytes), &|| false, &cad_import_core::NoopProgress)
+        .import(&request(bytes), &|| false, &cad_connector_core::NoopProgress)
         .expect("the STL lane imports");
     assert_eq!(drawing.database.entity_count(), 1);
 }
@@ -594,7 +594,7 @@ fn a_connector_descriptor_is_available_through_the_trait() {
     // `descriptor` exists on both `Connector` and `Exporter`; the test names
     // the trait it is exercising.
     assert_eq!(Exporter::descriptor(&exporter).id, "dxf");
-    assert_eq!(cad_import_core::Connector::descriptor(&exporter).id, "dxf");
+    assert_eq!(cad_connector_core::Connector::descriptor(&exporter).id, "dxf");
     assert_eq!(exporter.format_id(), "dxf");
     let descriptor = Exporter::descriptor(&exporter);
     assert!(descriptor.extensions.contains(&"dxf"));
@@ -616,7 +616,7 @@ fn a_connector_descriptor_is_available_through_the_trait() {
 /// `cad-import-core` owns the vocabulary but cannot depend on the format crates,
 /// so the registry (this crate) is the only place the whole descriptor set can
 /// be enumerated. The match is exhaustive on purpose: a third
-/// [`cad_import_core::SpecVisibility`] variant fails to compile here instead of
+/// [`cad_connector_core::SpecVisibility`] variant fails to compile here instead of
 /// silently defaulting to "public".
 #[cfg(feature = "formats-all")]
 #[test]
@@ -625,8 +625,8 @@ fn every_registry_descriptor_declares_a_spec_visibility() {
     let mut seen = 0;
     for descriptor in registry.descriptors() {
         match descriptor.spec {
-            cad_import_core::SpecVisibility::Public => {}
-            cad_import_core::SpecVisibility::ReverseEngineered => {}
+            cad_connector_core::SpecVisibility::Public => {}
+            cad_connector_core::SpecVisibility::ReverseEngineered => {}
         }
         seen += 1;
     }
@@ -650,7 +650,7 @@ fn every_registry_descriptor_declares_a_spec_visibility() {
 #[cfg(feature = "formats-all")]
 #[test]
 fn spec_visibility_is_pinned_per_format() {
-    use cad_import_core::SpecVisibility;
+    use cad_connector_core::SpecVisibility;
     let registry = ConnectorRegistry::builtin();
     let expected = [
         ("dwg", SpecVisibility::ReverseEngineered),

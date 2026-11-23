@@ -63,7 +63,7 @@
 //! would draw an unlit CAD body as black metal).
 
 use cad_domain::{CadError, CadResult, Mesh, MeshPbr, Point3};
-use cad_import_core::ImportLimits;
+use cad_connector_core::ImportLimits;
 use gltf::accessor::{Accessor, DataType, Dimensions};
 use gltf::buffer::Source;
 use gltf::material::AlphaMode;

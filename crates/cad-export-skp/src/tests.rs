@@ -15,7 +15,7 @@ use cad_domain::{
     DocumentId, EntityId, LayerId, Mesh, ObjectId, Point3, Precision, Revision, SemanticGeometry,
     SpaceId, Unit, UnitContext,
 };
-use cad_import_core::{
+use cad_connector_core::{
     ExportJob, ExportLimits, ExportOutput, ExportSpace, Exporter, ImportLimits, ImportRequest,
     Importer,
 };
@@ -137,7 +137,7 @@ fn mesh_triangles(database: &DrawingDatabase) -> usize {
         .sum()
 }
 
-fn import(bytes: Vec<u8>) -> cad_domain::CadResult<cad_import_core::ImportedDrawing> {
+fn import(bytes: Vec<u8>) -> cad_domain::CadResult<cad_connector_core::ImportedDrawing> {
     let request = ImportRequest {
         document: DocumentId(1),
         database: DatabaseId(1),
@@ -162,8 +162,8 @@ fn an_exported_triangle_is_a_sketchup_container_with_a_complete_report() {
     );
     let report = &output.report;
     assert_eq!(report.connector, "skp");
-    assert_eq!(report.direction, cad_import_core::ReportDirection::Export);
-    assert_eq!(report.level, cad_import_core::FidelityLevel::L1);
+    assert_eq!(report.direction, cad_connector_core::ReportDirection::Export);
+    assert_eq!(report.level, cad_connector_core::FidelityLevel::L1);
     assert_eq!(report.counts.exact, 1);
     assert_eq!(report.counts.dropped, 0);
     assert_eq!(report.counts.bytes, output.bytes.len());

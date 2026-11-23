@@ -4,7 +4,7 @@
 //! external references. This crate owns the parsers (hand-written; no third
 //! party parsing dependency) and turns one file into exactly one
 //! `SemanticGeometry::Mesh` entity on layer `0` in model space through
-//! [`cad_import_core::MeshImport`]. The shared
+//! [`cad_connector_core::MeshImport`]. The shared
 //! scaffold calls `cad_db::validate_geometry`, so neither parser can publish a
 //! mesh whose normals/colours do not match its vertices or whose triangles
 //! reference unknown vertices.
@@ -57,7 +57,7 @@ mod tests;
 
 use cad_db::EntityColor;
 use cad_domain::{CadError, CadResult, Diagnostic, DocumentIdentity, Mesh, Point3, UnitContext};
-use cad_import_core::{
+use cad_connector_core::{
     ConnectorDescriptor, ExportCapability, FidelityLevel, ImportCapability, ImportLimits,
     ImportPhase, ImportProgress, ImportProgressSink, ImportReport, ImportRequest, ImportedDrawing,
     MeshImport, SpecVisibility,

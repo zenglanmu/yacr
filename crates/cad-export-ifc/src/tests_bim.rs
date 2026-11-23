@@ -17,7 +17,7 @@ use cad_domain::{
     Completeness, DatabaseId, DocumentId, EntityId, LayerId, LayoutId, Mesh, ObjectId, Point3,
     Revision, SemanticGeometry, SpaceId, SupportStatus, UnitContext,
 };
-use cad_import_core::{
+use cad_connector_core::{
     ExportJob, ExportLimits, ExportSpace, Exporter, ImportLimits, ImportRequest, Importer,
 };
 use ifc_lite_export::plan::PropertyValue;
@@ -225,7 +225,7 @@ fn plain_database() -> DrawingDatabase {
     builder.finish().unwrap()
 }
 
-fn export(database: &DrawingDatabase, exporter: &IfcExporter) -> cad_import_core::ExportOutput {
+fn export(database: &DrawingDatabase, exporter: &IfcExporter) -> cad_connector_core::ExportOutput {
     let units = UnitContext::from_meter();
     exporter
         .export(
@@ -241,7 +241,7 @@ fn export(database: &DrawingDatabase, exporter: &IfcExporter) -> cad_import_core
         .expect("the model exports")
 }
 
-fn text(output: &cad_import_core::ExportOutput) -> String {
+fn text(output: &cad_connector_core::ExportOutput) -> String {
     std::str::from_utf8(&output.bytes)
         .expect("IFC is ASCII")
         .to_string()

@@ -692,6 +692,7 @@ name = "cad-app"
 version = "0.1.16"
 dependencies = [
  "cad-connector-acadrust",
+ "cad-connector-core",
  "cad-connector-dgn",
  "cad-connector-rvt",
  "cad-connector-step",
@@ -705,7 +706,6 @@ dependencies = [
  "cad-export-skp",
  "cad-geometry",
  "cad-history",
- "cad-import-core",
  "cad-import-gltf",
  "cad-import-ifc",
  "cad-import-mesh",
@@ -752,11 +752,11 @@ name = "cad-connector-acadrust"
 version = "0.1.16"
 dependencies = [
  "acadrust",
+ "cad-connector-core",
  "cad-db",
  "cad-diagnostics",
  "cad-domain",
  "cad-geometry",
- "cad-import-core",
  "cad-kernel-adapter",
  "cad-proxy",
  "cad-representation",
@@ -770,12 +770,22 @@ dependencies = [
 ]
 
 [[package]]
-name = "cad-connector-dgn"
+name = "cad-connector-core"
 version = "0.1.16"
 dependencies = [
  "cad-db",
  "cad-domain",
- "cad-import-core",
+ "cad-resources",
+ "sha2 0.11.1",
+]
+
+[[package]]
+name = "cad-connector-dgn"
+version = "0.1.16"
+dependencies = [
+ "cad-connector-core",
+ "cad-db",
+ "cad-domain",
  "cadkit-core",
  "cadkit-dgn",
  "web-time",
@@ -785,9 +795,9 @@ dependencies = [
 name = "cad-connector-rvt"
 version = "0.1.16"
 dependencies = [
+ "cad-connector-core",
  "cad-db",
  "cad-domain",
- "cad-import-core",
  "cfb 0.16.0",
  "gltf",
  "rvt",
@@ -799,9 +809,9 @@ dependencies = [
 name = "cad-connector-step"
 version = "0.1.16"
 dependencies = [
+ "cad-connector-core",
  "cad-db",
  "cad-domain",
- "cad-import-core",
  "cadmpeg-codec-step",
  "cadmpeg-ir",
  "cadmpeg-tessellate",
@@ -871,9 +881,9 @@ name = "cad-export-gltf"
 version = "0.1.16"
 dependencies = [
  "base64 0.22.1",
+ "cad-connector-core",
  "cad-db",
  "cad-domain",
- "cad-import-core",
  "cad-import-gltf",
  "gltf",
  "serde_json",
@@ -883,9 +893,9 @@ dependencies = [
 name = "cad-export-ifc"
 version = "0.1.16"
 dependencies = [
+ "cad-connector-core",
  "cad-db",
  "cad-domain",
- "cad-import-core",
  "cad-import-ifc",
  "ifc-lite-export",
  "ifc-lite-processing",
@@ -895,9 +905,9 @@ dependencies = [
 name = "cad-export-mesh"
 version = "0.1.16"
 dependencies = [
+ "cad-connector-core",
  "cad-db",
  "cad-domain",
- "cad-import-core",
  "cad-import-mesh",
  "cad-import-obj",
  "cad-import-stl",
@@ -907,9 +917,9 @@ dependencies = [
 name = "cad-export-skp"
 version = "0.1.16"
 dependencies = [
+ "cad-connector-core",
  "cad-db",
  "cad-domain",
- "cad-import-core",
  "cad-import-skp",
  "skpwright",
 ]
@@ -950,23 +960,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "cad-import-core"
-version = "0.1.16"
-dependencies = [
- "cad-db",
- "cad-domain",
- "cad-resources",
- "sha2 0.11.1",
-]
-
-[[package]]
 name = "cad-import-gltf"
 version = "0.1.16"
 dependencies = [
  "base64 0.22.1",
+ "cad-connector-core",
  "cad-db",
  "cad-domain",
- "cad-import-core",
  "gltf",
  "serde_json",
  "web-time",
@@ -976,10 +976,10 @@ dependencies = [
 name = "cad-import-ifc"
 version = "0.1.16"
 dependencies = [
+ "cad-connector-core",
  "cad-connector-step",
  "cad-db",
  "cad-domain",
- "cad-import-core",
  "ifc-lite-core",
  "ifc-lite-geometry",
  "png",
@@ -990,9 +990,9 @@ dependencies = [
 name = "cad-import-mesh"
 version = "0.1.16"
 dependencies = [
+ "cad-connector-core",
  "cad-db",
  "cad-domain",
- "cad-import-core",
  "web-time",
 ]
 
@@ -1000,9 +1000,9 @@ dependencies = [
 name = "cad-import-obj"
 version = "0.1.16"
 dependencies = [
+ "cad-connector-core",
  "cad-db",
  "cad-domain",
- "cad-import-core",
  "tobj",
  "web-time",
 ]
@@ -1011,9 +1011,9 @@ dependencies = [
 name = "cad-import-skp"
 version = "0.1.16"
 dependencies = [
+ "cad-connector-core",
  "cad-db",
  "cad-domain",
- "cad-import-core",
  "png",
  "skpwright",
  "web-time",
@@ -1023,9 +1023,9 @@ dependencies = [
 name = "cad-import-stl"
 version = "0.1.16"
 dependencies = [
+ "cad-connector-core",
  "cad-db",
  "cad-domain",
- "cad-import-core",
  "stl_io",
  "web-time",
 ]

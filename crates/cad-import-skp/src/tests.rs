@@ -22,7 +22,7 @@
 //! ```
 
 use cad_domain::{Completeness, DatabaseId, DocumentId, SemanticGeometry, SupportStatus, Unit};
-use cad_import_core::{ImportLimits, MeshImport};
+use cad_connector_core::{ImportLimits, MeshImport};
 
 use crate::convert::read_scene;
 use crate::{
@@ -32,8 +32,8 @@ use crate::{
 };
 use std::sync::Arc;
 
-fn request(bytes: Vec<u8>) -> cad_import_core::ImportRequest {
-    cad_import_core::ImportRequest {
+fn request(bytes: Vec<u8>) -> cad_connector_core::ImportRequest {
+    cad_connector_core::ImportRequest {
         document: DocumentId(1),
         database: DatabaseId(1),
         bytes: Arc::from(bytes.into_boxed_slice()),
@@ -197,7 +197,7 @@ fn triangle_area(a: cad_domain::Point3, b: cad_domain::Point3, c: cad_domain::Po
     (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt() * 0.5
 }
 
-fn count(drawing: &cad_import_core::ImportedDrawing) -> Counted {
+fn count(drawing: &cad_connector_core::ImportedDrawing) -> Counted {
     let mut counted = Counted::default();
     for entity in drawing.database.entities() {
         if let SemanticGeometry::Mesh(mesh) = &entity.geometry {
@@ -689,7 +689,7 @@ fn write_and_reread(model: &skpwright::Model) -> Vec<u8> {
     reread
 }
 
-fn codes_of(drawing: &cad_import_core::ImportedDrawing) -> Vec<&str> {
+fn codes_of(drawing: &cad_connector_core::ImportedDrawing) -> Vec<&str> {
     drawing
         .report
         .diagnostics

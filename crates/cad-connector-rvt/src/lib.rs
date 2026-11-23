@@ -43,7 +43,7 @@ pub use semantics::{map_model, normalize_ifc_category, RvtSemantics, SemanticsCo
 
 use cad_db::{EntityColor, EntityRenderAttributes, EntityTransparency};
 use cad_domain::{CadError, CadResult, Diagnostic, EntityCapability, SupportStatus, UnitContext};
-use cad_import_core::{
+use cad_connector_core::{
     compute_identity, ConnectorDescriptor, ImportCapability, ImportPhase, ImportProgress,
     ImportProgressSink, ImportReport, ImportRequest, ImportedDrawing, Importer, MeshImport,
     NoopProgress, SpecVisibility,

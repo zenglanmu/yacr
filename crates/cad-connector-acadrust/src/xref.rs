@@ -42,7 +42,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use cad_import_core::DEFAULT_XREF_BYTE_BUDGET;
+use cad_connector_core::DEFAULT_XREF_BYTE_BUDGET;
 use cad_resources::{check_xref_path, ResourceLimits, XrefPathVerdict, XrefSourceError};
 
 use super::*;

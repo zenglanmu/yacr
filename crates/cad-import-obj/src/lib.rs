@@ -5,7 +5,7 @@
 //! [`SemanticGeometry::Mesh`] entity on layer `0` in model space, with
 //! `UnitContext::drawing_units()` (OBJ is unitless) and empty
 //! [`ImportedDrawing::vendor_records`]. The shared database scaffolding lives in
-//! [`cad_import_core::MeshImport`], so STL and a future STEP tessellation path
+//! [`cad_connector_core::MeshImport`], so STL and a future STEP tessellation path
 //! publish identical capability rows.
 //!
 //! Losses are never silent:
@@ -32,7 +32,7 @@ use std::io::Cursor;
 
 use cad_db::EntityColor;
 use cad_domain::{CadError, CadResult, Diagnostic, Mesh, Point3, UnitContext};
-use cad_import_core::{
+use cad_connector_core::{
     compute_identity, ConnectorDescriptor, ExportCapability, FidelityLevel, ImportCapability,
     ImportLimits, ImportPhase, ImportProgress, ImportProgressSink, ImportReport, ImportRequest,
     ImportedDrawing, Importer, MeshImport, NoopProgress, SpecVisibility,

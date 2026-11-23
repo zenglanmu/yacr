@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use cad_db::{BimKey, BimRelation, BimRelationKind};
 use cad_domain::{Completeness, DatabaseId, DocumentId};
-use cad_import_core::{ImportLimits, ImportRequest, ImportedDrawing, Importer};
+use cad_connector_core::{ImportLimits, ImportRequest, ImportedDrawing, Importer};
 use ifc_lite_core::{build_entity_index, EntityDecoder};
 
 use super::{collect_with_budget, Scan};

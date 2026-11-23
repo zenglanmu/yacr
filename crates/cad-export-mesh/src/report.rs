@@ -7,7 +7,7 @@
 //! statement) never change the verdict.
 
 use cad_domain::{Completeness, ObjectId, SupportStatus, UnitContext};
-use cad_import_core::{CompatCounts, CompatEntry, CompatReport, FidelityLevel, ReportDirection};
+use cad_connector_core::{CompatCounts, CompatEntry, CompatReport, FidelityLevel, ReportDirection};
 
 use crate::collect::{DropEntry, SourceMesh};
 

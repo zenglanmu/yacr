@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use super::*;
 use cad_domain::{CadError, Completeness, DatabaseId, DocumentId, Mesh, SemanticGeometry, Unit};
-use cad_import_core::{ImportRequest, Importer};
+use cad_connector_core::{ImportRequest, Importer};
 
 const PLY_ASCII_FIXTURE: &[u8] = include_bytes!("../../../fixtures/ply/synthetic-attrs-ascii.ply");
 const PLY_LE_FIXTURE: &[u8] = include_bytes!("../../../fixtures/ply/synthetic-binary-le.ply");
@@ -511,8 +511,8 @@ fn unknown_off_variant_is_refused_by_stable_code() {
     let bytes = OFF_TRI.replacen("OFF", "NOFF", 1);
     // Detection routes the known family to the OFF adapter, where it refuses.
     assert_eq!(
-        cad_import_core::detect_format(bytes.as_bytes()),
-        cad_import_core::DrawingFormat::Off
+        cad_connector_core::detect_format(bytes.as_bytes()),
+        cad_connector_core::DrawingFormat::Off
     );
     corrupt_with(&off_error(bytes.as_bytes()), off::ERR_VARIANT_REFUSED);
     for variant in ["STOFF", "4OFF", "CNOFF"] {

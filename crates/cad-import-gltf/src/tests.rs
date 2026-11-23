@@ -8,7 +8,7 @@ use cad_domain::{
     CadError, Completeness, DatabaseId, DocumentId, Point3, SemanticGeometry, SupportStatus,
     UnitContext,
 };
-use cad_import_core::{FidelityLevel, ImportLimits, ImportRequest, ImportedDrawing};
+use cad_connector_core::{FidelityLevel, ImportLimits, ImportRequest, ImportedDrawing};
 
 use super::*;
 

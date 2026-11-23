@@ -421,7 +421,7 @@ impl HostCore {
     /// Every extension — `.dxf`, `.dwg` and the connector keys
     /// `.stl`/`.obj`/`.ply`/`.off`/`.coff`/`.ifc`/`.skp` — is dispatched through
     /// the connector registry ([`HostController::export_connector`]), so the
-    /// writer's own [`cad_import_core::CompatReport`] is the single source of the
+    /// writer's own [`cad_connector_core::CompatReport`] is the single source of the
     /// counts, the verdict and the note codes. Any other extension fails.
     ///
     /// **Overwriting is allowed** (ADR-0041 D4): a target that names the opened

@@ -12,13 +12,13 @@
 //! reporting otherwise would invent a resolution that never happened.
 
 use cad_domain::CadResult;
-use cad_import_core::{ImportProgressSink, ImportedDrawing, NoopProgress};
+use cad_connector_core::{ImportProgressSink, ImportedDrawing, NoopProgress};
 
 use crate::connector::ConnectorRegistry;
 
 // Re-exported so call sites name one module (`cad_app::import`) instead of
 // mixing the neutral contract crate with the dispatcher.
-pub use cad_import_core::{ImportLimits, ImportPhase, ImportProgress, ImportRequest, Importer};
+pub use cad_connector_core::{ImportLimits, ImportPhase, ImportProgress, ImportRequest, Importer};
 
 /// The single user-facing refusal for bytes no supported reader claims.
 pub const UNSUPPORTED_INPUT: &str = "input is not a supported drawing: expected a DWG \
@@ -97,7 +97,7 @@ mod tests {
 
     use super::*;
     use cad_domain::{CadError, DatabaseId, DocumentId};
-    use cad_import_core::{detect_format, DrawingFormat};
+    use cad_connector_core::{detect_format, DrawingFormat};
     use std::sync::Arc;
 
     fn request(bytes: Vec<u8>) -> ImportRequest {

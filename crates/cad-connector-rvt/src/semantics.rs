@@ -53,7 +53,7 @@ use cad_db::{
     BIM_MAX_STRING_BYTES,
 };
 use cad_domain::Diagnostic;
-use cad_import_core::MeshImport;
+use cad_connector_core::MeshImport;
 use rvt::ifc::entities::{IfcEntity, PropertySet, PropertyValue};
 use rvt::ifc::IfcModel;
 

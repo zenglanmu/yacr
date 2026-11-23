@@ -235,8 +235,8 @@ fn export_resolution_matrix_is_pinned() {
         database: &database,
         document_id: DocumentId(1),
         units: Some(&units),
-        space: cad_import_core::ExportSpace::Model,
-        limits: cad_import_core::ExportLimits::default(),
+        space: cad_connector_core::ExportSpace::Model,
+        limits: cad_connector_core::ExportLimits::default(),
     };
     let settings = ExportSettings::default();
     for key in KNOWN_EXPORT_KEYS {

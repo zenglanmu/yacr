@@ -21,7 +21,7 @@
 //! partial success.
 
 use cad_domain::{CadError, CadResult, Point3};
-use cad_import_core::{
+use cad_connector_core::{
     compute_identity, ImportPhase, ImportProgress, ImportProgressSink, ImportRequest,
     ImportedDrawing, Importer, NoopProgress, OFF_FAMILY_PREFIXES,
 };

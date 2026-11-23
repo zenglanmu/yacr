@@ -13,7 +13,7 @@ use cad_domain::{
     CadError, Completeness, DatabaseId, DocumentId, EntityId, LayerId, LayoutId, Mesh, ObjectId,
     Point3, Revision, SemanticGeometry, SpaceId, SupportStatus, Unit, UnitContext,
 };
-use cad_import_core::{
+use cad_connector_core::{
     ExportJob, ExportLimits, ExportSpace, Exporter, ImportLimits, ImportRequest, Importer,
 };
 

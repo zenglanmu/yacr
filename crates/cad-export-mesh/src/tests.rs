@@ -8,7 +8,7 @@ use cad_domain::{
     DocumentId, EntityId, LayerId, LayoutId, Mesh, ObjectId, Point3, Precision, Revision,
     SemanticGeometry, SpaceId, SupportStatus, UnitContext,
 };
-use cad_import_core::{
+use cad_connector_core::{
     ConnectorDescriptor, ExportJob, ExportLimits, ExportOutput, ExportSpace, Exporter,
     ImportLimits, ImportRequest, ImportedDrawing, Importer,
 };

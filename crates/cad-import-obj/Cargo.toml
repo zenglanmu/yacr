@@ -11,7 +11,7 @@ description = "Wavefront OBJ adapter: read into the neutral mesh contract and da
 [dependencies]
 cad-domain.workspace = true
 cad-db.workspace = true
-cad-import-core.workspace = true
+cad-connector-core.workspace = true
 # `default-features = false` keeps the optional `ahash` hasher (and its
 # `getrandom 0.3` transitive) out of the wasm32 build.
 tobj.workspace = true

@@ -21,7 +21,7 @@ members = [
     "crates/cad-render-wgpu",
     "crates/cad-measure",
     "crates/cad-proxy",
-    "crates/cad-import-core",
+    "crates/cad-connector-core",
     "crates/cad-connector-acadrust",
     "crates/cad-import-obj",
     "crates/cad-import-stl",
@@ -89,7 +89,7 @@ cad-scene = { path = "crates/cad-scene" }
 cad-render-wgpu = { path = "crates/cad-render-wgpu" }
 cad-measure = { path = "crates/cad-measure" }
 cad-proxy = { path = "crates/cad-proxy" }
-cad-import-core = { path = "crates/cad-import-core" }
+cad-connector-core = { path = "crates/cad-connector-core" }
 cad-connector-acadrust = { path = "crates/cad-connector-acadrust" }
 cad-import-obj = { path = "crates/cad-import-obj" }
 cad-import-stl = { path = "crates/cad-import-stl" }

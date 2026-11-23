@@ -25,7 +25,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use base64::Engine as _;
 use cad_domain::{CadError, CadResult, Diagnostic, ObjectId};
-use cad_import_core::MeshImport;
+use cad_connector_core::MeshImport;
 use gltf::{
     image::Source as ImageSource,
     texture::{Info as TextureInfo, Texture},

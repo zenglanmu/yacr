@@ -10,7 +10,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use cad_domain::{CadError, DatabaseId, DocumentId, MeshPbr, SupportStatus};
-use cad_import_core::{detect_format, DrawingFormat, ImportLimits, ImportRequest};
+use cad_connector_core::{detect_format, DrawingFormat, ImportLimits, ImportRequest};
 use serde_json::{json, Value};
 
 use super::*;
@@ -424,7 +424,7 @@ fn glb_texture_references_are_counted_not_ignored() {
 fn a_texture_reference_marks_the_import_partial_with_its_own_code() {
     let req = request(fixture("upstream-metadata-scaffold-2024-no-geometry.rvt"));
     let mut import =
-        cad_import_core::MeshImport::new(&req, RVT_MESH_TYPE_KEY).expect("scaffold import");
+        cad_connector_core::MeshImport::new(&req, RVT_MESH_TYPE_KEY).expect("scaffold import");
     let object = import.reserve_object().expect("reserve an object");
     import
         .push_mesh(

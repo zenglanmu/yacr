@@ -2,9 +2,9 @@
 //!
 //! The writer itself ([`super::export`]) is unchanged: this module only builds
 //! its [`ExportRequest`](super::ExportRequest) from a shared
-//! [`ExportJob`](cad_import_core::ExportJob) and converts the writer's own
+//! [`ExportJob`](cad_connector_core::ExportJob) and converts the writer's own
 //! [`ExportReport`](super::ExportReport) into the format-neutral
-//! [`CompatReport`](cad_import_core::CompatReport).
+//! [`CompatReport`](cad_connector_core::CompatReport).
 //!
 //! # Per-entry status comes from the recorded outcome, never from the code
 //!
@@ -32,7 +32,7 @@
 //! in `counts.exact`, so no entry is ever `Verified`.
 
 use cad_domain::{CadError, CadResult, SupportStatus};
-use cad_import_core::{
+use cad_connector_core::{
     CompatCounts, CompatEntry, CompatReport, Connector, ConnectorDescriptor, ExportCapability,
     ExportJob, ExportOutput, ExportSpace as CoreExportSpace, Exporter, FidelityLevel,
     ImportCapability, ReportDirection, SpecVisibility,
@@ -276,7 +276,7 @@ mod tests {
         Completeness, DatabaseId, DocumentId, EntityId, LayerId, ObjectId, Point3, Revision,
         SemanticGeometry, SpaceId,
     };
-    use cad_import_core::ExportLimits as CoreExportLimits;
+    use cad_connector_core::ExportLimits as CoreExportLimits;
 
     fn one_line_db() -> DrawingDatabase {
         let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));

@@ -9,7 +9,7 @@ use cad_domain::{
     CadError, Completeness, DatabaseId, DocumentId, EntityCapability, Mesh, SemanticGeometry,
     SupportStatus,
 };
-use cad_import_core::{
+use cad_connector_core::{
     detect_format, DrawingFormat, ImportLimits, ImportPhase, IFC_SCHEMA_REFUSED,
 };
 use cad_connector_step::StepImporter;
@@ -32,13 +32,13 @@ fn fixture(name: &str) -> Vec<u8> {
     std::fs::read(path).expect("fixture is committed")
 }
 
-fn import_fixture(name: &str) -> cad_import_core::ImportedDrawing {
+fn import_fixture(name: &str) -> cad_connector_core::ImportedDrawing {
     IfcImporter::new()
         .import(&request_bytes(fixture(name)), &|| false)
         .unwrap_or_else(|error| panic!("{name} must import: {error:?}"))
 }
 
-fn meshes(drawing: &cad_import_core::ImportedDrawing) -> Vec<&Mesh> {
+fn meshes(drawing: &cad_connector_core::ImportedDrawing) -> Vec<&Mesh> {
     drawing
         .database
         .entities()
@@ -94,7 +94,7 @@ fn assert_mesh_invariants(mesh: &Mesh) {
     }
 }
 
-fn diagnostic_codes(drawing: &cad_import_core::ImportedDrawing) -> Vec<&str> {
+fn diagnostic_codes(drawing: &cad_connector_core::ImportedDrawing) -> Vec<&str> {
     drawing
         .report
         .diagnostics
@@ -500,7 +500,7 @@ const PIXEL_TEXTURE_2X1: &str =
 /// `IfcImageTexture` names a sibling file; its bytes are not in the model.
 const EXTERNAL_IMAGE_TEXTURE: &str = "IFCIMAGETEXTURE(.T.,.T.,$,$,$,'panel.png')";
 
-fn import_textured(texture: &str) -> cad_import_core::ImportedDrawing {
+fn import_textured(texture: &str) -> cad_connector_core::ImportedDrawing {
     IfcImporter::new()
         .import(&request_bytes(textured_tessellation(texture)), &|| false)
         .unwrap_or_else(|error| panic!("the textured fixture must import: {error:?}"))

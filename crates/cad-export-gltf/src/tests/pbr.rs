@@ -292,7 +292,7 @@ fn a_pbr_texture_without_bytes_is_reported_and_the_rest_is_written() {
         output.report.counts.exact, 0,
         "a mesh that lost a channel is not exact"
     );
-    let lost: Vec<&cad_import_core::CompatEntry> = output
+    let lost: Vec<&cad_connector_core::CompatEntry> = output
         .report
         .entries
         .iter()

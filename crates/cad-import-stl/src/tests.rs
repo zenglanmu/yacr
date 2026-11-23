@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use super::*;
 use cad_domain::{CadError, Completeness, DatabaseId, DocumentId, SemanticGeometry};
-use cad_import_core::ImportRequest;
+use cad_connector_core::ImportRequest;
 
 fn request_bytes(bytes: Vec<u8>) -> ImportRequest {
     ImportRequest {
@@ -21,7 +21,7 @@ fn request(bytes: &[u8]) -> ImportRequest {
     request_bytes(bytes.to_vec())
 }
 
-fn meshes(drawing: &cad_import_core::ImportedDrawing) -> Vec<&Mesh> {
+fn meshes(drawing: &cad_connector_core::ImportedDrawing) -> Vec<&Mesh> {
     drawing
         .database
         .entities()
@@ -45,7 +45,7 @@ fn meshes(drawing: &cad_import_core::ImportedDrawing) -> Vec<&Mesh> {
         .collect()
 }
 
-fn diag_codes(drawing: &cad_import_core::ImportedDrawing) -> Vec<&str> {
+fn diag_codes(drawing: &cad_connector_core::ImportedDrawing) -> Vec<&str> {
     drawing
         .report
         .diagnostics

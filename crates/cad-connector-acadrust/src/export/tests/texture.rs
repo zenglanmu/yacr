@@ -4,7 +4,7 @@
 //! Evidence boundary: these are contract tests over the writer + our own reader
 //! agreement. No AutoCAD/ODA or any other vendor consumer was run.
 
-use cad_import_core::{
+use cad_connector_core::{
     ExportJob, ExportLimits as CoreExportLimits, ExportSpace as CoreExportSpace, Exporter,
 };
 
@@ -72,7 +72,7 @@ fn a_textured_mesh_records_the_texture_loss_for_dxf_and_dwg() {
             "{format_id}: the mesh geometry is still exact"
         );
 
-        let entries: Vec<&cad_import_core::CompatEntry> = with
+        let entries: Vec<&cad_connector_core::CompatEntry> = with
             .report
             .entries
             .iter()

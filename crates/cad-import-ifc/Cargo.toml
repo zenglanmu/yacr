@@ -13,7 +13,7 @@ description = "IFC (IFC2X3/IFC4/IFC4X3) adapter: parse and mesh into the neutral
 png.workspace = true
 cad-domain.workspace = true
 cad-db.workspace = true
-cad-import-core.workspace = true
+cad-connector-core.workspace = true
 # MPL-2.0, pinned exactly in the workspace. `ifc-lite-geometry` owns the
 # placement chain, the file-unit → metre scaling and the void subtraction; this
 # adapter only walks products and converts the resulting f32 mesh.

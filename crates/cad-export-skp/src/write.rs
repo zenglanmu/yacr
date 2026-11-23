@@ -4,7 +4,7 @@
 //! one `Result` boundary into a third-party crate are readable on their own.
 
 use cad_domain::{CadError, CadResult, Unit, UnitContext};
-use cad_import_core::ExportJob;
+use cad_connector_core::ExportJob;
 
 /// The exporter was handed a registry key it does not write.
 pub const MISMATCHED_DESCRIPTOR: &str = "export.skp.mismatched_descriptor";

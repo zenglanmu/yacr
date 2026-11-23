@@ -170,7 +170,7 @@ impl<'a> Mapper<'a> {
     pub(crate) fn new(
         database: cad_domain::DatabaseId,
         doc: &'a Document,
-        limits: &cad_import_core::ImportLimits,
+        limits: &cad_connector_core::ImportLimits,
         cancelled: &'a dyn Fn() -> bool,
     ) -> Self {
         Mapper {

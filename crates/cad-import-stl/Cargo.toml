@@ -11,7 +11,7 @@ description = "STL adapter: ASCII/binary read into the neutral mesh contract and
 [dependencies]
 cad-domain.workspace = true
 cad-db.workspace = true
-cad-import-core.workspace = true
+cad-connector-core.workspace = true
 stl_io.workspace = true
 # `std::time::Instant::now()` panics on wasm32-unknown-unknown; `web_time` uses
 # `Performance.now()` there and re-exports std elsewhere.

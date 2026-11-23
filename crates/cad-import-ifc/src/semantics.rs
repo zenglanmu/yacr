@@ -44,7 +44,7 @@ use cad_db::{
     BIM_MAX_DEFINITIONS, BIM_MAX_STRING_BYTES,
 };
 use cad_domain::Diagnostic;
-use cad_import_core::MeshImport;
+use cad_connector_core::MeshImport;
 use ifc_lite_core::{slot, DecodedEntity, EntityDecoder, EntityScanner, IfcType, ProjectUnits};
 
 use crate::{

@@ -58,7 +58,7 @@ fn only_primitive<'a>(gltf: &'a gltf::Gltf) -> gltf::Primitive<'a> {
 }
 
 /// The `texture_not_written` entry, which must exist exactly once.
-fn texture_not_written(output: &ExportOutput) -> &cad_import_core::CompatEntry {
+fn texture_not_written(output: &ExportOutput) -> &cad_connector_core::CompatEntry {
     let mut entries = output
         .report
         .entries

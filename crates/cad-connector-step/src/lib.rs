@@ -4,7 +4,7 @@
 //! [`cadmpeg_codec_step`] to decode the Part 21 file into `cadmpeg-ir`'s neutral
 //! topology and [`cadmpeg_tessellate`] to turn each face into triangles. The
 //! neutral meshes are written through the shared
-//! [`cad_import_core::MeshImport`] scaffold, so STEP publishes exactly the same
+//! [`cad_connector_core::MeshImport`] scaffold, so STEP publishes exactly the same
 //! capability rows as OBJ/STL: draw/pick verified, measure unsupported (a mesh
 //! is not a MEASURE target, and the exact B-rep is not exposed to the domain).
 //!
@@ -64,7 +64,7 @@ use std::io::Cursor;
 
 use cad_db::EntityColor;
 use cad_domain::{CadError, CadResult, Diagnostic, Mesh, Point3, Unit, UnitContext};
-use cad_import_core::{
+use cad_connector_core::{
     compute_identity, ifc_schema, ConnectorDescriptor, ImportCapability, ImportLimits, ImportPhase,
     ImportProgress, ImportProgressSink, ImportReport, ImportRequest, ImportedDrawing, Importer,
     MeshImport, NoopProgress, SpecVisibility, IFC_SCHEMA_REFUSED,

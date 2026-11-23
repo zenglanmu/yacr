@@ -15,7 +15,7 @@ use cad_domain::{CadError, CadResult};
 use cad_connector_acadrust::export::{
     export, ExportFormat, ExportLimits, ExportReport, ExportRequest, ExportSpace,
 };
-use cad_import_core::ExportOutput;
+use cad_connector_core::ExportOutput;
 
 use super::HostController;
 
@@ -70,12 +70,12 @@ impl HostController {
             .documents
             .get(&self.document_id)
             .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
-        let job = cad_import_core::ExportJob {
+        let job = cad_connector_core::ExportJob {
             database: document.drawing.as_ref(),
             document_id: self.document_id,
             units: Some(&document.units),
-            space: cad_import_core::ExportSpace::Model,
-            limits: cad_import_core::ExportLimits::default(),
+            space: cad_connector_core::ExportSpace::Model,
+            limits: cad_connector_core::ExportLimits::default(),
         };
         let settings = crate::ExportSettings {
             acis_version: self.export_options.acis_version,

@@ -38,7 +38,7 @@ mod write;
 mod tests;
 
 use cad_domain::{CadError, CadResult, Completeness, EntityCapability, SupportStatus};
-use cad_import_core::{
+use cad_connector_core::{
     CompatCounts, CompatEntry, CompatReport, ConnectorDescriptor, ExportJob, ExportOutput,
     ExportSpace, Exporter, FidelityLevel, ReportDirection,
 };

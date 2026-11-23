@@ -11,7 +11,7 @@ description = "Autodesk Revit (.rvt/.rte) preview adapter: rvt -> internal glTF 
 [dependencies]
 cad-domain.workspace = true
 cad-db.workspace = true
-cad-import-core.workspace = true
+cad-connector-core.workspace = true
 # Apache-2.0, pinned exactly. `rvt` owns decode, per-release coverage and the
 # GLB emitter; this crate owns the status ceiling, the glb reader and the
 # database adapter.

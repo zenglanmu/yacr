@@ -53,7 +53,7 @@ mod texture;
 mod write;
 
 use cad_domain::{CadError, CadResult};
-use cad_import_core::{ConnectorDescriptor, ExportJob, ExportOutput, Exporter};
+use cad_connector_core::{ConnectorDescriptor, ExportJob, ExportOutput, Exporter};
 
 use write::{Written, MISMATCHED_DESCRIPTOR};
 

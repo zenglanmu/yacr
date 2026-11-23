@@ -302,7 +302,7 @@ pub struct CadPopup {
 /// Which specification a connector's format was implemented from (ADR-0041
 /// D5), as the wire names it.
 ///
-/// Mirrors `cad_import_core::SpecVisibility` (which deliberately carries no
+/// Mirrors `cad_connector_core::SpecVisibility` (which deliberately carries no
 /// serde) so the `openedSource.spec` value is `"public"` /
 /// `"reverse_engineered"` and nothing else.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

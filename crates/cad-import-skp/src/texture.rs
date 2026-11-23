@@ -21,7 +21,7 @@
 
 use std::collections::BTreeMap;
 
-use cad_import_core::MeshImport;
+use cad_connector_core::MeshImport;
 use skpwright::{MeshFace, Model, Side, UvXform};
 
 /// Whether `slot` names a `Textured` material (embedded image or external path).

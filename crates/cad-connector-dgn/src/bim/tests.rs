@@ -15,7 +15,7 @@
 
 use cad_db::{BimValue, DrawingDatabase, BIM_MAX_PROPERTIES_PER_SET, BIM_MAX_PSETS_PER_ELEMENT};
 use cad_domain::DatabaseId;
-use cad_import_core::{compute_identity, ImportLimits, ImportReport, Importer};
+use cad_connector_core::{compute_identity, ImportLimits, ImportReport, Importer};
 use cadkit_core::{
     Attribute, Entity, EntityKind, Layer as KitLayer, LengthUnit, Model, ModelKind,
     Point3 as KitPoint3, Units, Value,
@@ -403,7 +403,7 @@ fn the_v8_fixture_tag_is_reported_and_never_stored() {
     let path =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/dgn/test_dgnv8.dgn");
     let bytes = std::fs::read(path).expect("fixture is committed");
-    let request = cad_import_core::ImportRequest {
+    let request = cad_connector_core::ImportRequest {
         document: cad_domain::DocumentId(1),
         database: DatabaseId(1),
         bytes: std::sync::Arc::from(bytes.into_boxed_slice()),

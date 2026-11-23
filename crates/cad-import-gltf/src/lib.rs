@@ -84,7 +84,7 @@ mod texture;
 mod tests;
 
 use cad_domain::{CadError, CadResult, Diagnostic, UnitContext};
-use cad_import_core::{
+use cad_connector_core::{
     compute_identity, ConnectorDescriptor, ExportCapability, FidelityLevel, ImportCapability,
     ImportPhase, ImportProgress, ImportProgressSink, ImportReport, ImportRequest, ImportedDrawing,
     Importer, MeshImport, NoopProgress, SpecVisibility,
@@ -214,8 +214,8 @@ pub const DESCRIPTOR_GLTF: ConnectorDescriptor = ConnectorDescriptor {
 /// `version` keys. Anything else is `false`, never a guess.
 pub fn sniff(bytes: &[u8]) -> bool {
     matches!(
-        cad_import_core::detect_format(bytes),
-        cad_import_core::DrawingFormat::Gltf
+        cad_connector_core::detect_format(bytes),
+        cad_connector_core::DrawingFormat::Gltf
     )
 }
 

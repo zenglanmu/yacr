@@ -51,7 +51,7 @@ pub use cad_connector_acadrust::ImportReport;
 /// not need a direct `cad-import-acadrust` dependency to pass the policy.
 pub use cad_connector_acadrust::XrefOptions;
 /// A connector's compatibility report and export result (bytes + report).
-pub use cad_import_core::{CompatReport, ExportOutput};
+pub use cad_connector_core::{CompatReport, ExportOutput};
 pub use databases::{
     blank_database, demo_database, snap_candidates_near, snap_candidates_near_uncached,
     snap_candidates_near_with_policy,

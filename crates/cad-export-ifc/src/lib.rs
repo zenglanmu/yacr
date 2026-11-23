@@ -1,6 +1,6 @@
 //! IFC4 export writer: neutral `cad-db` meshes to `IfcTriangulatedFaceSet`.
 //!
-//! The writer is a thin adapter from the shared [`cad_import_core::Exporter`]
+//! The writer is a thin adapter from the shared [`cad_connector_core::Exporter`]
 //! contract onto `ifc-lite-export`'s export-plan executor:
 //!
 //! 1. every model-space mesh entity is collected (a [`cad_domain::Mesh`] body,
@@ -9,7 +9,7 @@
 //!    (project / site / building, SI metres);
 //! 3. each mesh is added as an `IfcBuildingElementProxy` contained in the
 //!    building, with its triangles as an `IfcTriangulatedFaceSet`;
-//! 4. the executor's output is returned with a [`cad_import_core::CompatReport`]
+//! 4. the executor's output is returned with a [`cad_connector_core::CompatReport`]
 //!    that names every written mesh and every drop.
 //!
 //! # Units
@@ -52,7 +52,7 @@ use cad_domain::{
     CadError, CadResult, Completeness, EntityId, ObjectId, SemanticGeometry, SpaceId,
     SupportStatus, Unit, UnitContext,
 };
-use cad_import_core::{
+use cad_connector_core::{
     CompatCounts, CompatEntry, CompatReport, Connector, ConnectorDescriptor, ExportJob,
     ExportOutput, Exporter, FidelityLevel, ReportDirection,
 };

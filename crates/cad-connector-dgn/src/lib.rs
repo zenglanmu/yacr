@@ -46,7 +46,7 @@ mod tests;
 mod transform;
 
 use cad_domain::{CadError, CadResult, UnitContext};
-use cad_import_core::{
+use cad_connector_core::{
     compute_identity, ConnectorDescriptor, ImportCapability, ImportLimits, ImportPhase,
     ImportProgress, ImportProgressSink, ImportReport, ImportRequest, ImportedDrawing, Importer,
     NoopProgress, SpecVisibility,

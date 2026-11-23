@@ -126,8 +126,8 @@ fn a_slim_build_answers_compiled_out_export_keys_by_name() {
         database: &database,
         document_id: cad_domain::DocumentId(1),
         units: None,
-        space: cad_import_core::ExportSpace::Model,
-        limits: cad_import_core::ExportLimits::default(),
+        space: cad_connector_core::ExportSpace::Model,
+        limits: cad_connector_core::ExportLimits::default(),
     };
     let settings = ExportSettings::default();
     // A key with no descriptor is a format compiled out of this build; the

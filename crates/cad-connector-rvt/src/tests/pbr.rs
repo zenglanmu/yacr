@@ -9,7 +9,7 @@
 
 use super::*;
 use crate::pbr::validate_pbr_factors;
-use cad_import_core::MeshImportOutcome;
+use cad_connector_core::MeshImportOutcome;
 
 // ---- Unit 2: glTF PBR scalars (ADR-0039 D4) ------------------------------
 
