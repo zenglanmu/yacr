@@ -18,7 +18,7 @@
 //! ```text
 //! YACR_TEST_SKP=/path/to/model.skp \
 //! YACR_TEST_SKP_2026=/path/to/same-model-2026.skp \
-//!   cargo test -p cad-import-skp --locked -- --nocapture
+//!   cargo test -p cad-connector-skp --locked -- --nocapture
 //! ```
 
 use cad_domain::{Completeness, DatabaseId, DocumentId, SemanticGeometry, SupportStatus, Unit};
@@ -229,7 +229,7 @@ fn count(drawing: &cad_connector_core::ImportedDrawing) -> Counted {
 /// returns early and that skip is **not** evidence:
 ///
 /// ```text
-/// YACR_TEST_SKP=/path/to/model.skp cargo test -p cad-import-skp real_sketchup -- --nocapture
+/// YACR_TEST_SKP=/path/to/model.skp cargo test -p cad-connector-skp real_sketchup -- --nocapture
 /// ```
 #[test]
 fn a_real_sketchup_model_imports_when_supplied() {
@@ -299,7 +299,7 @@ fn a_real_sketchup_model_imports_when_supplied() {
 /// ```text
 /// YACR_TEST_SKP=/path/to/model-2017.skp \
 /// YACR_TEST_SKP_2026=/path/to/model-2026.skp \
-///   cargo test -p cad-import-skp same_model -- --nocapture
+///   cargo test -p cad-connector-skp same_model -- --nocapture
 /// ```
 #[test]
 fn the_same_model_in_two_containers_imports_alike() {
@@ -657,7 +657,7 @@ fn write_and_reread(model: &skpwright::Model) -> Vec<u8> {
     let document = skpwright::Document::from_model_with(
         model,
         skpwright::WriteEnv {
-            // Same convention as `cad-export-skp::export_env`: a fixed save
+            // Same convention as `crate::export::export_env`: a fixed save
             // time, so the written bytes are reproducible.
             unix_time: 1_700_000_000,
             seed: 0x5941_4352_534b_5000,

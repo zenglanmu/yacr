@@ -697,18 +697,17 @@ dependencies = [
  "cad-connector-gltf",
  "cad-connector-ifc",
  "cad-connector-rvt",
+ "cad-connector-skp",
  "cad-connector-step",
  "cad-db",
  "cad-dependencies",
  "cad-diagnostics",
  "cad-domain",
  "cad-export-mesh",
- "cad-export-skp",
  "cad-geometry",
  "cad-history",
  "cad-import-mesh",
  "cad-import-obj",
- "cad-import-skp",
  "cad-import-stl",
  "cad-kernel-adapter",
  "cad-measure",
@@ -833,6 +832,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "cad-connector-skp"
+version = "0.1.16"
+dependencies = [
+ "cad-connector-core",
+ "cad-db",
+ "cad-domain",
+ "png",
+ "skpwright",
+ "web-time",
+]
+
+[[package]]
 name = "cad-connector-step"
 version = "0.1.16"
 dependencies = [
@@ -916,17 +927,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cad-export-skp"
-version = "0.1.16"
-dependencies = [
- "cad-connector-core",
- "cad-db",
- "cad-domain",
- "cad-import-skp",
- "skpwright",
-]
-
-[[package]]
 name = "cad-geometry"
 version = "0.1.16"
 dependencies = [
@@ -979,18 +979,6 @@ dependencies = [
  "cad-db",
  "cad-domain",
  "tobj",
- "web-time",
-]
-
-[[package]]
-name = "cad-import-skp"
-version = "0.1.16"
-dependencies = [
- "cad-connector-core",
- "cad-db",
- "cad-domain",
- "png",
- "skpwright",
  "web-time",
 ]
 

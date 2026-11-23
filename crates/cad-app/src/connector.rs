@@ -34,8 +34,6 @@ use cad_domain::{CadError, CadResult};
 use cad_connector_gltf::{GltfContainer, GltfExporter, GltfImporter};
 #[cfg(feature = "formats-mesh")]
 use cad_export_mesh::{MeshExporter, MeshFormat};
-#[cfg(feature = "formats-skp")]
-use cad_export_skp::SkpExporter;
 use cad_connector_acadrust::export::{AcadrustExporter, AcisVersion, DxfTarget, ExportFormat};
 use cad_connector_acadrust::AcadrustImporter;
 use cad_connector_core::{
@@ -53,7 +51,7 @@ use cad_import_obj::ObjImporter;
 #[cfg(feature = "formats-rvt")]
 use cad_connector_rvt::RvtImporter;
 #[cfg(feature = "formats-skp")]
-use cad_import_skp::SkpImporter;
+use cad_connector_skp::{SkpExporter, SkpImporter};
 #[cfg(feature = "formats-step")]
 use cad_connector_step::StepImporter;
 #[cfg(feature = "formats-mesh")]
@@ -79,7 +77,7 @@ pub use cad_import_obj::DESCRIPTOR_OBJ;
 #[cfg(feature = "formats-rvt")]
 pub use cad_connector_rvt::DESCRIPTOR_RVT;
 #[cfg(feature = "formats-skp")]
-pub use cad_import_skp::DESCRIPTOR_SKP;
+pub use cad_connector_skp::DESCRIPTOR_SKP;
 #[cfg(feature = "formats-step")]
 pub use cad_connector_step::DESCRIPTOR_STEP;
 #[cfg(feature = "formats-mesh")]

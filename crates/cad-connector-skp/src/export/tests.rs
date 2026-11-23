@@ -1,10 +1,10 @@
 //! Contract tests for the SketchUp export writer.
 //!
-//! The reader side (`cad-import-skp`) is used only as a **self-consistency**
-//! oracle: it proves the bytes are the container the pinned `skpwright` 0.6.0
-//! models, nothing more. No SketchUp/Trimble product opened these files, so a
-//! passing round trip is **not** vendor acceptance, and no pixel, GPU or
-//! measurement claim follows from it.
+//! The reader side (this same crate's root importer) is used only as a
+//! **self-consistency** oracle: it proves the bytes are the container the pinned
+//! `skpwright` 0.6.0 models, nothing more. No SketchUp/Trimble product opened
+//! these files, so a passing round trip is **not** vendor acceptance, and no
+//! pixel, GPU or measurement claim follows from it.
 
 use cad_db::{
     DbEntity, DbObject, DrawingDatabase, DrawingDatabaseBuilder, EntityColor,
@@ -20,7 +20,7 @@ use cad_connector_core::{
     Importer,
 };
 
-use crate::{
+use crate::export::{
     metres_per_source_unit, COLORS_DROPPED, DEGENERATE_TRIANGLE, LAYER_MATERIAL_FLATTENED,
     LIMITS_EXCEEDED, MISMATCHED_DESCRIPTOR, NORMALS_DROPPED, TEXTURE_NOT_WRITTEN, UNITS_UNKNOWN,
     UNSUPPORTED_GEOMETRY,
@@ -108,7 +108,7 @@ fn job<'a>(database: &'a DrawingDatabase, units: Option<&'a UnitContext>) -> Exp
 
 fn export(database: &DrawingDatabase, units: Option<&UnitContext>) -> CadResult<ExportOutput> {
     let job = job(database, units);
-    crate::SkpExporter::new(&cad_import_skp::DESCRIPTOR_SKP).export("skp", &job)
+    crate::SkpExporter::new(&crate::DESCRIPTOR_SKP).export("skp", &job)
 }
 
 fn unsupported(error: CadError) -> String {
@@ -146,7 +146,7 @@ fn import(bytes: Vec<u8>) -> cad_domain::CadResult<cad_connector_core::ImportedD
         generation: 0,
         xref: None,
     };
-    cad_import_skp::SkpImporter.import(&request, &|| false)
+    crate::SkpImporter.import(&request, &|| false)
 }
 
 #[test]
@@ -430,7 +430,7 @@ fn a_triangle_budget_is_refused_by_name() {
     let mut job = job(&database, Some(&units));
     job.limits.max_output_triangles = 0;
     let message = unsupported(
-        crate::SkpExporter::new(&cad_import_skp::DESCRIPTOR_SKP)
+        crate::SkpExporter::new(&crate::DESCRIPTOR_SKP)
             .export("skp", &job)
             .unwrap_err(),
     );
@@ -441,7 +441,7 @@ fn a_triangle_budget_is_refused_by_name() {
 fn an_empty_database_is_refused_instead_of_writing_an_empty_success() {
     let database = database(Vec::new());
     let message = unsupported(export(&database, Some(&meter())).unwrap_err());
-    assert!(message.starts_with(crate::NO_GEOMETRY), "{message}");
+    assert!(message.starts_with(crate::export::NO_GEOMETRY), "{message}");
 }
 
 #[test]
@@ -449,7 +449,7 @@ fn a_mismatched_format_id_is_refused_by_name() {
     let database = database(vec![(SemanticGeometry::Mesh(triangle()), LayerId(0))]);
     let units = meter();
     let job = job(&database, Some(&units));
-    let exporter = crate::SkpExporter::new(&cad_import_skp::DESCRIPTOR_SKP);
+    let exporter = crate::SkpExporter::new(&crate::DESCRIPTOR_SKP);
     assert_eq!(exporter.format_id(), "skp");
     let message = unsupported(exporter.export("stl", &job).unwrap_err());
     assert!(message.starts_with(MISMATCHED_DESCRIPTOR), "{message}");

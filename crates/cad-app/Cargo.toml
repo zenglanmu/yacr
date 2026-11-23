@@ -35,7 +35,7 @@ formats-ifc = ["dep:cad-connector-ifc"]
 formats-step = ["dep:cad-connector-step"]
 formats-dgn = ["dep:cad-connector-dgn"]
 formats-rvt = ["dep:cad-connector-rvt"]
-formats-skp = ["dep:cad-import-skp", "dep:cad-export-skp"]
+formats-skp = ["dep:cad-connector-skp"]
 formats-gltf = ["dep:cad-connector-gltf"]
 
 [dependencies]
@@ -54,10 +54,9 @@ cad-connector-step = { workspace = true, optional = true }
 cad-connector-ifc = { workspace = true, optional = true }
 cad-connector-dgn = { workspace = true, optional = true }
 cad-connector-rvt = { workspace = true, optional = true }
-cad-import-skp = { workspace = true, optional = true }
+cad-connector-skp = { workspace = true, optional = true }
 cad-connector-gltf = { workspace = true, optional = true }
 cad-export-mesh = { workspace = true, optional = true }
-cad-export-skp = { workspace = true, optional = true }
 cad-representation.workspace = true
 cad-scene.workspace = true
 cad-query.workspace = true

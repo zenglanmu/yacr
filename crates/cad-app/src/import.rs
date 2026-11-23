@@ -215,7 +215,7 @@ mod tests {
         match error {
             CadError::CorruptData(message) => {
                 assert!(
-                    message.contains(cad_import_skp::PARSE_FAILED),
+                    message.contains(cad_connector_skp::PARSE_FAILED),
                     "the SKP lane must answer: {message}"
                 );
                 assert_ne!(message, UNSUPPORTED_INPUT);

@@ -40,6 +40,9 @@ mod convert;
 // out for the code-size gate.
 mod texture;
 
+/// The writer half of this connector (the 2026/2027 container).
+pub mod export;
+
 #[cfg(test)]
 mod tests;
 
@@ -47,6 +50,7 @@ pub use convert::{
     determinant3, material_style, read_scene, style_of, FaceSkip, PlacedMesh, SkpScene, SkpStats,
     MAX_DEPTH,
 };
+pub use export::SkpExporter;
 
 use cad_db::{EntityColor, EntityRenderAttributes, EntityTransparency};
 use cad_domain::{CadError, CadResult, Diagnostic, EntityCapability, SupportStatus, UnitContext};
@@ -543,8 +547,8 @@ fn record_losses(import: &mut MeshImport, stats: &SkpStats) {
 /// The SketchUp connector descriptor.
 ///
 /// Owned by this crate (one declaration per format): the reader is this preview
-/// importer and the writer is `cad-export-skp`, which authors the 2026/2027
-/// container at L1 (lossy: triangles, tags/materials flattened).
+/// importer and the writer is the [`export`] module, which authors the
+/// 2026/2027 container at L1 (lossy: triangles, tags/materials flattened).
 ///
 /// `spec` is [`cad_connector_core::SpecVisibility::ReverseEngineered`]:
 /// `skpwright` is a clean-room reader with no Trimble SDK or SDK-derived

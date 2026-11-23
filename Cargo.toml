@@ -30,10 +30,9 @@ members = [
     "crates/cad-connector-ifc",
     "crates/cad-connector-dgn",
     "crates/cad-connector-rvt",
-    "crates/cad-import-skp",
+    "crates/cad-connector-skp",
     "crates/cad-connector-gltf",
     "crates/cad-export-mesh",
-    "crates/cad-export-skp",
     "crates/cad-resources",
     "crates/cad-query",
     "crates/cad-app",
@@ -96,15 +95,14 @@ cad-connector-step = { path = "crates/cad-connector-step" }
 cad-connector-ifc = { path = "crates/cad-connector-ifc" }
 cad-connector-dgn = { path = "crates/cad-connector-dgn" }
 cad-connector-rvt = { path = "crates/cad-connector-rvt" }
-cad-import-skp = { path = "crates/cad-import-skp" }
+cad-connector-skp = { path = "crates/cad-connector-skp" }
 cad-connector-gltf = { path = "crates/cad-connector-gltf" }
 # Writers above the neutral import/export contract. They read `cad-db` and
 # produce bytes plus a `CompatReport`; none of them is linked by a carrier
-# directly — `cad-app`/`cad-host` wire them. (`cad-connector-ifc` and
-# `cad-connector-gltf` are the merged reader+writer connectors and sit with the
-# readers above.)
+# directly — `cad-app`/`cad-host` wire them. (`cad-connector-ifc`,
+# `cad-connector-gltf` and `cad-connector-skp` are the merged reader+writer
+# connectors and sit with the readers above.)
 cad-export-mesh = { path = "crates/cad-export-mesh" }
-cad-export-skp = { path = "crates/cad-export-skp" }
 cad-resources = { path = "crates/cad-resources" }
 cad-query = { path = "crates/cad-query" }
 cad-app = { path = "crates/cad-app" }
@@ -234,7 +232,7 @@ cadkit-core = { version = "=0.5.4" }
 rvt = "=0.25.0"
 gltf = { version = "=1.4.1", default-features = false, features = ["utils", "names", "extras"] }
 
-# SketchUp `.skp` reader (`cad-import-skp`). **GPL-3.0-only**, pure Rust with a
+# SketchUp `.skp` connector (`cad-connector-skp`). **GPL-3.0-only**, pure Rust with a
 # single `miniz_oxide` dependency (sha-free, wasm-safe). The workspace licence is
 # AGPL-3.0, which may combine with GPL-3.0 code (AGPLv3 §13); the GPL part stays
 # GPLv3 for downstream consumers — see `THIRD_PARTY_NOTICES.md`.

@@ -639,7 +639,7 @@ fn every_registry_descriptor_declares_a_spec_visibility() {
 /// * DWG — independent `acadrust` reader (`THIRD_PARTY_NOTICES.md`:3-5); writer
 ///   `docs/compatibility.md`:138 vendor/AutoCAD NOT VERIFIED;
 /// * DGN — `cadkit-dgn` clean-room reader (`THIRD_PARTY_NOTICES.md`:11-12);
-/// * SKP — `skpwright` clean-room reader (`cad-import-skp/src/lib.rs`:3-6,
+/// * SKP — `skpwright` clean-room reader (`cad-connector-skp/src/lib.rs`:3-6,
 ///   `THIRD_PARTY_NOTICES.md`:87);
 /// * RVT — `rvt` clean-room reader (`THIRD_PARTY_NOTICES.md`:54-55,
 ///   `vendor/rvt/README.md`:116).

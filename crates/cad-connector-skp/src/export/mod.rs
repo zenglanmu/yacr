@@ -27,6 +27,11 @@
 //! back (self-consistency only). No SketchUp/Trimble product was used to open
 //! them, and this is not a vendor acceptance claim.
 //!
+//! The descriptor is supplied by the caller ([`SkpExporter::new`]) so this
+//! writer half does not declare connector metadata of its own: the merged crate
+//! root declares the single [`crate::DESCRIPTOR_SKP`] (it describes both
+//! directions) and the registry passes it in.
+//!
 //! ```text
 //! cad-db (source units) --× metres per source unit--> skpwright::Model (metres)
 //!     --Document::from_model_with(WriteEnv)--> 2026 container bytes
@@ -59,7 +64,7 @@ pub struct SkpExporter {
 }
 
 impl SkpExporter {
-    /// Build a writer for `descriptor` (normally `cad_import_skp::DESCRIPTOR_SKP`,
+    /// Build a writer for `descriptor` (normally [`crate::DESCRIPTOR_SKP`],
     /// the single declaration of the `skp` connector).
     pub fn new(descriptor: &'static ConnectorDescriptor) -> Self {
         SkpExporter { descriptor }
