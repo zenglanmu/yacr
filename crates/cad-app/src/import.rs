@@ -316,7 +316,7 @@ mod tests {
                 .report
                 .diagnostics
                 .iter()
-                .any(|diagnostic| diagnostic.code == cad_import_dgn::UNKNOWN_ELEMENT),
+                .any(|diagnostic| diagnostic.code == cad_connector_dgn::UNKNOWN_ELEMENT),
             "the DGN lane's own diagnostics are present"
         );
         assert!(

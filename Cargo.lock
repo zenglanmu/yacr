@@ -692,6 +692,7 @@ name = "cad-app"
 version = "0.1.16"
 dependencies = [
  "cad-connector-acadrust",
+ "cad-connector-dgn",
  "cad-db",
  "cad-dependencies",
  "cad-diagnostics",
@@ -703,7 +704,6 @@ dependencies = [
  "cad-geometry",
  "cad-history",
  "cad-import-core",
- "cad-import-dgn",
  "cad-import-gltf",
  "cad-import-ifc",
  "cad-import-mesh",
@@ -766,6 +766,18 @@ dependencies = [
  "serde",
  "sha2 0.11.1",
  "thiserror 2.0.21",
+ "web-time",
+]
+
+[[package]]
+name = "cad-connector-dgn"
+version = "0.1.16"
+dependencies = [
+ "cad-db",
+ "cad-domain",
+ "cad-import-core",
+ "cadkit-core",
+ "cadkit-dgn",
  "web-time",
 ]
 
@@ -918,18 +930,6 @@ dependencies = [
  "cad-domain",
  "cad-resources",
  "sha2 0.11.1",
-]
-
-[[package]]
-name = "cad-import-dgn"
-version = "0.1.16"
-dependencies = [
- "cad-db",
- "cad-domain",
- "cad-import-core",
- "cadkit-core",
- "cadkit-dgn",
- "web-time",
 ]
 
 [[package]]

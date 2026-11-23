@@ -33,7 +33,7 @@ formats-mesh = [
 ]
 formats-ifc = ["dep:cad-import-ifc", "dep:cad-export-ifc"]
 formats-step = ["dep:cad-import-step"]
-formats-dgn = ["dep:cad-import-dgn"]
+formats-dgn = ["dep:cad-connector-dgn"]
 formats-rvt = ["dep:cad-import-rvt"]
 formats-skp = ["dep:cad-import-skp", "dep:cad-export-skp"]
 formats-gltf = ["dep:cad-import-gltf", "dep:cad-export-gltf"]
@@ -52,7 +52,7 @@ cad-import-stl = { workspace = true, optional = true }
 cad-import-mesh = { workspace = true, optional = true }
 cad-import-step = { workspace = true, optional = true }
 cad-import-ifc = { workspace = true, optional = true }
-cad-import-dgn = { workspace = true, optional = true }
+cad-connector-dgn = { workspace = true, optional = true }
 cad-import-rvt = { workspace = true, optional = true }
 cad-import-skp = { workspace = true, optional = true }
 cad-import-gltf = { workspace = true, optional = true }

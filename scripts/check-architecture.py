@@ -453,15 +453,15 @@ def check(root: pathlib.Path) -> int:
             }
             assert not escaped, f"solid kernel escaped adapter: {name} -> {sorted(escaped)}"
         # The cadkit DGN reader (and its neutral document model) is owned by
-        # `cad-import-dgn` only. `cadkit-core` is not a shared domain model: it
+        # `cad-connector-dgn` only. `cadkit-core` is not a shared domain model: it
         # is the parser's document type, and leaking it into another crate would
         # create a second document authority beside `cad-db`.
-        if name != "cad-import-dgn":
+        if name != "cad-connector-dgn":
             escaped = deps & {"cadkit-dgn", "cadkit-core"}
             assert not escaped, f"cadkit parser escaped importer: {name} -> {sorted(escaped)}"
         # The DGN reader and its neutral document model are only reachable from
         # the format adapter; no other package may import either crate directly.
-        if name != "cad-import-dgn":
+        if name != "cad-connector-dgn":
             assert "cadkit-dgn" not in deps, f"DGN parser escaped importer: {name}"
             assert "cadkit-core" not in deps, f"DGN document model escaped importer: {name}"
         # Every package is banned from the toolkit, including build and dev

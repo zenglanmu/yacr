@@ -45,7 +45,7 @@ use cad_import_core::{
     ImportProgressSink, ImportRequest, ImportedDrawing, Importer, SpecVisibility,
 };
 #[cfg(feature = "formats-dgn")]
-use cad_import_dgn::DgnImporter;
+use cad_connector_dgn::DgnImporter;
 #[cfg(feature = "formats-gltf")]
 use cad_import_gltf::GltfImporter;
 #[cfg(feature = "formats-ifc")]
@@ -71,7 +71,7 @@ use std::sync::LazyLock;
 // cannot back.
 pub use cad_connector_acadrust::export::{DESCRIPTOR_DWG, DESCRIPTOR_DXF};
 #[cfg(feature = "formats-dgn")]
-pub use cad_import_dgn::DESCRIPTOR_DGN;
+pub use cad_connector_dgn::DESCRIPTOR_DGN;
 #[cfg(feature = "formats-gltf")]
 pub use cad_import_gltf::DESCRIPTOR_GLTF;
 #[cfg(feature = "formats-ifc")]

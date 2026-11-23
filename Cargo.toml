@@ -28,7 +28,7 @@ members = [
     "crates/cad-import-mesh",
     "crates/cad-import-step",
     "crates/cad-import-ifc",
-    "crates/cad-import-dgn",
+    "crates/cad-connector-dgn",
     "crates/cad-import-rvt",
     "crates/cad-import-skp",
     "crates/cad-import-gltf",
@@ -96,7 +96,7 @@ cad-import-stl = { path = "crates/cad-import-stl" }
 cad-import-mesh = { path = "crates/cad-import-mesh" }
 cad-import-step = { path = "crates/cad-import-step" }
 cad-import-ifc = { path = "crates/cad-import-ifc" }
-cad-import-dgn = { path = "crates/cad-import-dgn" }
+cad-connector-dgn = { path = "crates/cad-connector-dgn" }
 cad-import-rvt = { path = "crates/cad-import-rvt" }
 cad-import-skp = { path = "crates/cad-import-skp" }
 cad-import-gltf = { path = "crates/cad-import-gltf" }
