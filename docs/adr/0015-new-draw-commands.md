@@ -188,6 +188,13 @@ AutoCAD 用提示行输入数字；本项目没有数值输入通道，且命令
     `overlay.point-mode-shape-bits` 诊断**已删除**（不再有「未实现」可报）；保留 `point-mode-dot` /
     `-unsupported` / `point-size-sanitized` / `point-marker-limit`。基码解码不变：裸 `32` = 基码 0 的 `+` 近似
     + 圆 + 一条 dot 诊断，裸 `33` = 只有圆。
+  - **2026-11-22 增补（错误横幅）**：上述 overlay 诊断属于**显示近似**，不再经
+    `RenderSessionHandle::view_diagnostic()` 提升为 `cad_status.error`（React 的“宿主报告的错误”）。
+    只有 `Completeness::Missing`（例如 `highlight.unresolved` 的未解析选择引用）仍进入该横幅；
+    `Partial` / `Unverified` 诊断保留在 `PreparedScene::highlight_diagnostics`，宿主可读但不弹错
+    （`crates/cad-engine/src/render/host_error.rs`）。起因：QCAD 导出的
+    `fixtures/dxf/qcad-flange/flange.dxf` 头里是 DWG 缺省 `$PDMODE 0`，打开即弹“宿主报告的错误”，
+    而图纸本身已正确打开；2 个 POINT 的 `+` 近似外观不变。
 - **3D 视图：NOT IMPLEMENTED**——`viewport_bounds` 在 3D 为 `None`，屏占比尺寸没有定义域，因此 3D 下不画
   点标记（显式记录，不猜一个 fallback）。
 - **已知偏差**：标记在 overlay 顺序里绘制（始终在最上层），与基础场景实体的遮挡关系不同。

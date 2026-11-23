@@ -693,3 +693,105 @@ fn an_origin_less_snapshot_stays_accepted() {
         .expect("the legacy origin-less snapshot stays accepted");
     assert_eq!(session.view_snapshot().canvas_origin, None);
 }
+
+/// A prepared scene with the given highlight verdict, mounted on a live session.
+fn session_with_highlight(
+    diagnostics: Vec<cad_domain::Diagnostic>,
+    completeness: cad_domain::Completeness,
+) -> RenderSessionHandle {
+    let delta = Arc::new(controller::SceneDelta {
+        stamp: cad_domain::TaskStamp::new(cad_domain::DocumentId(1), 1),
+        added: Vec::new(),
+        images: Vec::new(),
+        masks: Vec::new(),
+    });
+    let ready = controller::PreparedScene {
+        revision: 1,
+        base_revision: 1,
+        flags_revision: 0,
+        base: controller::ResidentScene::from_prefix(delta.clone()),
+        base_append: None,
+        overwrites: Vec::new(),
+        highlight: delta,
+        entity_flags: Vec::new(),
+        highlight_diagnostics: diagnostics,
+        highlight_completeness: completeness,
+        images: None,
+    };
+    let session = RenderSessionHandle::new(BackendPreference::Auto);
+    {
+        let mut state = session.0.borrow_mut();
+        state.controller.ready = Some(ready);
+        // The mounted scene stands in for a published preparation of the current
+        // input, so `current_prepared_scene` can read it back.
+        state.prepared_identity = Some(state.input_revision);
+    }
+    session
+}
+
+fn diagnostic(message: &str) -> cad_domain::Diagnostic {
+    cad_domain::Diagnostic {
+        object: None,
+        code: "test".into(),
+        message: message.into(),
+    }
+}
+
+/// A display approximation (`Partial`) must never be presented as the host-
+/// visible error: `$PDMODE 0`'s plus-for-dot is the case a normal QCAD export
+/// hits on open (`flange.dxf`), and the drawing has opened correctly.
+#[test]
+fn a_partial_overlay_diagnostic_is_not_a_host_error() {
+    let message = "PDMODE 0 selects the dot base shape (0), which the Lines-only \
+                   marker topology cannot draw";
+    let session = session_with_highlight(
+        vec![diagnostic(message)],
+        cad_domain::Completeness::Partial(vec![message.into()]),
+    );
+    assert_eq!(
+        session.view_diagnostic(),
+        None,
+        "a display approximation is not a host error"
+    );
+    // It is still recorded on the scene, so a host can inspect it.
+    assert_eq!(
+        session
+            .current_prepared_scene()
+            .expect("the mounted scene is readable")
+            .highlight_diagnostics,
+        vec![diagnostic(message)]
+    );
+}
+
+/// A genuinely `Missing` highlight verdict still surfaces, because it names
+/// something that could not be resolved at all (an unmatched selection ref).
+#[test]
+fn a_missing_overlay_diagnostic_stays_the_host_error() {
+    let message = "highlight.unresolved: selection ref (entity 7) does not resolve";
+    let session = session_with_highlight(
+        vec![diagnostic(message)],
+        cad_domain::Completeness::Missing(vec![message.into()]),
+    );
+    assert_eq!(session.view_diagnostic().as_deref(), Some(message));
+
+    // A Missing verdict whose first diagnostic is a Partial approximation still
+    // reports the missing reason, never the approximation.
+    let approximation = "PDMODE 0 selects the dot base shape (0)";
+    let session = session_with_highlight(
+        vec![diagnostic(approximation), diagnostic(message)],
+        cad_domain::Completeness::Missing(vec![message.into()]),
+    );
+    assert_eq!(session.view_diagnostic().as_deref(), Some(message));
+}
+
+/// The demotion is scoped to the highlight verdict: an explicit view diagnostic
+/// is still the host error (a real view failure is not an overlay approximation).
+#[test]
+fn an_explicit_view_diagnostic_outranks_the_demoted_overlay_verdict() {
+    let session = session_with_highlight(
+        vec![diagnostic("PDMODE 0 approximation")],
+        cad_domain::Completeness::Partial(vec!["PDMODE 0 approximation".into()]),
+    );
+    session.set_view_diagnostic(Some("camera refused".into()));
+    assert_eq!(session.view_diagnostic().as_deref(), Some("camera refused"));
+}

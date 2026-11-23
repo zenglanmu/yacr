@@ -43,6 +43,7 @@ pub use runtime::{
 };
 
 mod diagnostics;
+mod host_error;
 mod session_display;
 mod session_impl;
 mod session_msaa;

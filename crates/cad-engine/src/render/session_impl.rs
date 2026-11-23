@@ -444,7 +444,7 @@ impl RenderSessionHandle {
                     .controller
                     .ready
                     .as_ref()
-                    .and_then(|s| s.highlight_diagnostics.first().map(|d| d.message.clone()))
+                    .and_then(host_error::highlight_failure_message)
             })
             // Lowest priority: the sticky pulled-copy warning, so `cad_status.error`
             // can carry the `gpu.pulled.insufficient-vram` token (the React notice)

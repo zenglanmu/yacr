@@ -21,7 +21,11 @@
 //! shapes (`32` circle, `64` square, `96` both) *are* drawn — as explicit
 //! segments in the same batch, see [`super::point_surrounds`] — and a circle is
 //! therefore a closed chord ring, not a conic. The dot approximation is reported,
-//! never dropped silently.
+//! never dropped silently: it is recorded as `Partial` on
+//! `PreparedScene::highlight_diagnostics`, and the engine does **not** promote a
+//! `Partial` overlay verdict to the host-visible error banner
+//! (`cad-engine::render::host_error`), because a display approximation is not a
+//! failure of the open.
 
 use super::point_surrounds::push_point_surrounds;
 use super::preview::line_batch;
