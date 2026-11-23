@@ -25,7 +25,8 @@ and one React interface runs on Linux, Windows, macOS, Android and the web.
   shared cells — through one importer with progress and cancellation.
 - **Bring in everything else.** OBJ, STL, PLY, OFF, STEP (AP203/214/242), glTF/GLB and IFC
   (2X3/4/4X3) open as display-and-pick meshes; Revit projects (`.rvt`/`.rte`) as a
-  bounding-box preview, SketchUp models (`.skp`) as a triangle preview.
+  preview mesh with BIM metadata, SketchUp models (`.skp`) as a textured
+  triangle mesh.
 - **Draw and edit in 2D.** LINE, POLYLINE, CIRCLE, ARC, ELLIPSE, SPLINE, POINT,
   RECTANGLE, POLYGON, text, leaders, tables, hatch; move, copy, rotate, scale,
   mirror, trim, extend, break, offset, fillet, chamfer, array, block references,
@@ -135,8 +136,9 @@ cargo build -p cad-cli-tools --release --locked
   experimental; other imported sources save as DXF.
 - 3D solid modelling is not implemented (refused explicitly); ACIS entities are
   displayed from a subset tessellation.
-- Revit is a bounding-box preview and SketchUp a triangle preview — no edges,
-  textures or measurement for those.
+- Revit previews carry BIM metadata (element bodies are bounding boxes on older
+  releases, with more decoded geometry on newer ones); SketchUp previews carry
+  base-colour textures. Neither imports edges or supports measurement.
 - Vendor entities without cached proxy graphics have nothing to display.
 - 3D observation and plotting are display features; there is no CTB/HPGL print
   path.
