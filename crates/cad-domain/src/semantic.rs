@@ -172,6 +172,14 @@ pub enum SemanticGeometry {
     Insert {
         block: BlockId,
         transform: Transform3,
+        /// The concrete attribute values this reference carries, in the same
+        /// block-local frame as the referenced block's `ATTDEF`s (ADR-0055).
+        ///
+        /// Empty is the ordinary case: a block with no attributes, or an
+        /// `INSERT` written before minor 14 (the payload field is absent on
+        /// disk there). The definition is never copied here — only the values
+        /// differ per reference.
+        attributes: Vec<AttributeValue>,
     },
     Text {
         text: String,
@@ -290,4 +298,13 @@ pub enum SemanticGeometry {
         boundary: Vec<Point3>,
         inverted: bool,
     },
+    /// An `ATTDEF` (ADR-0055): a block member entity that templates one
+    /// attribute for every `INSERT` of its owning block.
+    ///
+    /// The definition owns the tag, prompt, default value, flags and the text
+    /// placement in the block's local frame. Concrete per-reference values live
+    /// in the `attributes` field of [`Self::Insert`], never here.
+    ///
+    /// Boxed for the same reason as `Dimension`.
+    AttributeDefinition(Box<AttributeDefinition>),
 }

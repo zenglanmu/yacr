@@ -103,6 +103,7 @@ fn a_block_with_an_insert_is_refused_by_name_and_changes_nothing() {
         SemanticGeometry::Insert {
             block: BlockId(7),
             transform: Transform3::translation(p(0.0, 0.0)),
+            attributes: Vec::new(),
         },
     ))
     .unwrap();

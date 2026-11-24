@@ -512,6 +512,7 @@ pub(super) fn db_with_blocked_solid() -> DrawingDatabase {
             geometry: SemanticGeometry::Insert {
                 block: BlockId(1),
                 transform: Transform3::translation(p(10.0, 0.0, 0.0)),
+                attributes: Vec::new(),
             },
             draw_order: 0,
         })

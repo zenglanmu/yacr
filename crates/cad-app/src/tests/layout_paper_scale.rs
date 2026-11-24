@@ -272,6 +272,7 @@ fn block(id: u128, space: SpaceId) -> cad_db::DbEntity {
         SemanticGeometry::Insert {
             block: cad_domain::BlockId(0),
             transform: Transform3::scale(1.0),
+            attributes: Vec::new(),
         },
     )
 }

@@ -531,6 +531,11 @@ fn index_local_bounds(geometry: &SemanticGeometry) -> Option<(Point3, Point3)> {
                 return None;
             }
         }
+        // ADR-0055: an `ATTDEF` is picked through the text box it would draw,
+        // so reuse the `Text` rule instead of duplicating the placeholder math.
+        SemanticGeometry::AttributeDefinition(definition) => {
+            return index_local_bounds(&definition.text.as_text(&definition.default_value));
+        }
         SemanticGeometry::Image {
             origin,
             u,

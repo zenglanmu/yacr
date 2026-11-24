@@ -127,6 +127,7 @@ fn clip_app() -> (Application, SessionState) {
         SemanticGeometry::Insert {
             block: cad_domain::BlockId(0),
             transform: Transform3::identity(),
+            attributes: Vec::new(),
         },
         3,
     ))
@@ -136,6 +137,7 @@ fn clip_app() -> (Application, SessionState) {
         SemanticGeometry::Insert {
             block: cad_domain::BlockId(0),
             transform: Transform3::translation(p3(5.0, 5.0, 0.0)),
+            attributes: Vec::new(),
         },
         4,
     ))
@@ -145,6 +147,7 @@ fn clip_app() -> (Application, SessionState) {
         SemanticGeometry::Insert {
             block: cad_domain::BlockId(0),
             transform: rotation_z(45.0),
+            attributes: Vec::new(),
         },
         16,
     ))
@@ -154,6 +157,7 @@ fn clip_app() -> (Application, SessionState) {
         SemanticGeometry::Insert {
             block: cad_domain::BlockId(0),
             transform: tilt_out_of_plane(),
+            attributes: Vec::new(),
         },
         17,
     ))
@@ -163,6 +167,7 @@ fn clip_app() -> (Application, SessionState) {
         SemanticGeometry::Insert {
             block: cad_domain::BlockId(0),
             transform: rotation_z(90.0),
+            attributes: Vec::new(),
         },
         18,
     ))

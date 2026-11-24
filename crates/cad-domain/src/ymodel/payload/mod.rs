@@ -43,6 +43,7 @@ use crate::ymodel::id::{IdKind, PersistentId};
 use crate::ymodel::json::{self, JsonError, ObjectReader};
 use crate::SemanticGeometry;
 
+mod attribute;
 mod basic;
 mod dimension;
 mod hatch;
@@ -136,7 +137,11 @@ pub fn encode(geometry: &SemanticGeometry) -> Value {
         SemanticGeometry::Point(point) => basic::encode_point(*point),
         SemanticGeometry::Mesh(mesh) => mesh::encode_mesh(mesh),
         SemanticGeometry::Body3d(body) => mesh::encode_body(body),
-        SemanticGeometry::Insert { block, transform } => basic::encode_insert(block.0, transform),
+        SemanticGeometry::Insert {
+            block,
+            transform,
+            attributes,
+        } => basic::encode_insert(block.0, transform, attributes),
         SemanticGeometry::Text {
             text,
             position,
@@ -207,6 +212,9 @@ pub fn encode(geometry: &SemanticGeometry) -> Value {
             adjust,
         ),
         SemanticGeometry::Mask { boundary, inverted } => basic::encode_mask(boundary, *inverted),
+        SemanticGeometry::AttributeDefinition(definition) => {
+            attribute::encode_attribute_definition(definition)
+        }
     }
 }
 
@@ -237,8 +245,9 @@ pub fn decode(value: &Value) -> Result<SemanticGeometry, PayloadError> {
         "cad:Table" => table::decode_table(value),
         "cad:Image" => basic::decode_image(value),
         "cad:Mask" => basic::decode_mask(value),
+        "cad:AttributeDefinition" => attribute::decode_attribute_definition(value),
         other => Err(PayloadError::new(format!(
-            "unknown element class {other:?} (this build models 20 geometry classes)"
+            "unknown element class {other:?} (this build models 21 geometry classes)"
         ))),
     }
 }

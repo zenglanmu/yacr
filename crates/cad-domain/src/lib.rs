@@ -1,7 +1,9 @@
 //! Platform-independent identities and semantic contracts.
 use std::fmt;
 
+pub mod appearance;
 pub mod application;
+pub mod attribute;
 mod block_clip;
 pub mod body;
 pub mod brep;
@@ -24,7 +26,14 @@ pub mod relation;
 pub mod resource;
 pub mod table_entity;
 mod texture;
+pub use appearance::{
+    sanitize_linetype_scale, EntityColor, EntityLineType, EntityLineWeight, EntityTransparency,
+    LinetypePattern,
+};
 pub use application::ApplicationDomain;
+pub use attribute::{
+    AttributeAppearance, AttributeDefinition, AttributeFlags, AttributeText, AttributeValue,
+};
 pub use block_clip::{validate_clip_depth, BlockClip, ClipDepthError};
 pub use body::{Body3d, BodyDisplay, BodyExact, BodyKind};
 pub use brep::{BrepCurve, BrepData, BrepFace, BrepLoop, BrepPlacement, BrepShell, BrepSurface};

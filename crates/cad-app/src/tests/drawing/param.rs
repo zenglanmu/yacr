@@ -186,6 +186,7 @@ fn insert_app() -> (Application, SessionState) {
             SemanticGeometry::Insert {
                 block: cad_domain::BlockId(0),
                 transform: cad_domain::Transform3::identity(),
+                attributes: Vec::new(),
             },
             0,
         ))

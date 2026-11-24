@@ -275,9 +275,12 @@ impl Application {
                 // (the transform's translation) fixed and scales the block's
                 // local extents — "scale the reference about its insertion
                 // point".
-                SemanticGeometry::Insert { block, transform } => SemanticGeometry::Insert {
+                SemanticGeometry::Insert {
+                    block, transform, ..
+                } => SemanticGeometry::Insert {
                     block: *block,
                     transform: transform.matrix_mul(&Transform3::scale(factor)),
+                    attributes: Vec::new(),
                 },
                 // A multileader or a table is a compound annotation object: its
                 // own text is what the paper-space factor applies to, exactly

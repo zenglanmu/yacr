@@ -123,6 +123,11 @@ fn field_kind_spelling(kind: FieldKind) -> String {
         FieldKind::Bim => "bim",
         // ADR-0043 D3: same split — the binding codec is `cad-db`'s.
         FieldKind::Params => "params",
+        // ADR-0055: the attribute value shapes are owned by `cad-domain`'s
+        // payload codec; these are their registry spellings.
+        FieldKind::AttributeFlags => "attribute_flags",
+        FieldKind::AttributeText => "attribute_text",
+        FieldKind::AttributeValues => "attribute_values",
         FieldKind::IdRef(kind) => return format!("id:{}", id_kind_spelling(kind)),
     };
     fixed.to_string()

@@ -920,7 +920,10 @@ fn the_block_option_inserts_one_independent_insert_per_division_point() {
         .collect();
     assert_eq!(inserts.len(), 2);
     for (index, expected) in [point(3.0, 0.0), point(6.0, 0.0)].into_iter().enumerate() {
-        let SemanticGeometry::Insert { block, transform } = &inserts[index].geometry else {
+        let SemanticGeometry::Insert {
+            block, transform, ..
+        } = &inserts[index].geometry
+        else {
             panic!("expected an INSERT");
         };
         assert_eq!(*block, cad_domain::BlockId(0));

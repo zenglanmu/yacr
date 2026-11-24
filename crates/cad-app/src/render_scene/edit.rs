@@ -355,6 +355,9 @@ fn appends_like_full_rebuild(geometry: &SemanticGeometry) -> bool {
         // update always invalidates like a geometry change; it is never a
         // silent no-op.
         SemanticGeometry::Body3d(_) => false,
+        // ADR-0055: an attribute definition is text-like and has no append
+        // proof, so it invalidates like a geometry change (never a silent no-op).
+        SemanticGeometry::AttributeDefinition(_) => false,
         SemanticGeometry::Line { .. }
         | SemanticGeometry::Polyline { .. }
         | SemanticGeometry::Circle { .. }

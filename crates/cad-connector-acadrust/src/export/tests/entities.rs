@@ -473,6 +473,7 @@ fn insert_explodes_block_members_with_the_placement_transform() {
             geometry: SemanticGeometry::Insert {
                 block: BlockId(1),
                 transform,
+                attributes: Vec::new(),
             },
             draw_order: 0,
         })

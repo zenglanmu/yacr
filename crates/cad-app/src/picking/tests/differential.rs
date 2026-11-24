@@ -242,6 +242,7 @@ fn random_scene(rng: &mut XorShift, entities: usize, span: f64) -> DrawingDataba
         SemanticGeometry::Insert {
             block: BlockId(0),
             transform: Transform3::translation(rand_point(rng, span * 0.2)),
+            attributes: Vec::new(),
         },
         1,
         SpaceId::Block(BlockId(1)),
@@ -257,6 +258,7 @@ fn random_scene(rng: &mut XorShift, entities: usize, span: f64) -> DrawingDataba
                     BlockId(0)
                 },
                 transform: Transform3::translation(rand_point(rng, span)),
+                attributes: Vec::new(),
             }
         } else {
             rand_geometry(rng, span)

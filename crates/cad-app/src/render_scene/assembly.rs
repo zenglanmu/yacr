@@ -574,6 +574,7 @@ fn append_vendor_fragments(
                 geometry: cad_domain::SemanticGeometry::Insert {
                     block: block_id,
                     transform,
+                    attributes: Vec::new(),
                 },
                 draw_order: entity.draw_order,
             };
@@ -710,7 +711,9 @@ fn append_block_vendor_fragments(
     stack: &mut Vec<cad_domain::BlockId>,
 ) {
     match geometry {
-        cad_domain::SemanticGeometry::Insert { block, transform } => {
+        cad_domain::SemanticGeometry::Insert {
+            block, transform, ..
+        } => {
             if depth >= cad_representation::MAX_INSTANCE_DEPTH || stack.contains(block) {
                 return;
             }

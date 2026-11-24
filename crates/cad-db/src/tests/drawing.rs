@@ -423,6 +423,7 @@ fn drawing_transform_insert_composes_onto_the_instance() {
         geometry: SemanticGeometry::Insert {
             block: BlockId(0),
             transform: Transform3::translation(point(1.0, 0.0)),
+            attributes: Vec::new(),
         },
         draw_order: 1,
     };
@@ -721,6 +722,7 @@ fn drawing_validate_geometry_covers_supported_kinds() {
         SemanticGeometry::Insert {
             block: BlockId(0),
             transform: Transform3::identity(),
+            attributes: Vec::new(),
         },
         SemanticGeometry::Mesh(Mesh {
             vertices: vec![point(0.0, 0.0), point(1.0, 0.0), point(0.0, 1.0)],

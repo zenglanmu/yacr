@@ -103,6 +103,7 @@ pub fn geometry_key(geometry: &SemanticGeometry) -> &'static str {
         SemanticGeometry::Table(_) => "TABLE",
         SemanticGeometry::Image { .. } => "IMAGE",
         SemanticGeometry::Mask { .. } => "MASK",
+        SemanticGeometry::AttributeDefinition(_) => "ATTDEF",
         // A body's source class is not derivable from the geometry variant; this
         // is the neutral geometry alias, and `type_matches` reads the type key.
         SemanticGeometry::Body3d(_) => "BODY",

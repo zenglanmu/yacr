@@ -35,6 +35,7 @@ fn insert_instances_expand_with_transform_and_instance_path() {
     nested.geometry = SemanticGeometry::Insert {
         block: BlockId(2),
         transform: Transform3::translation(p(0.0, 5.0)),
+        attributes: Vec::new(),
     };
     b.insert_entity(nested).unwrap();
     // Model: a single insert of block 1 at x=10.

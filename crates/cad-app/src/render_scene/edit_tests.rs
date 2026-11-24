@@ -442,6 +442,7 @@ fn declined_append_fixture() -> (
         SemanticGeometry::Insert {
             block,
             transform: Transform3::identity(),
+            attributes: Vec::new(),
         },
         "AcDbBlockReference",
     );

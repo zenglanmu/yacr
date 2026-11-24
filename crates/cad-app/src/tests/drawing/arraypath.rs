@@ -56,7 +56,9 @@ pub(super) fn all_inserts(app: &Application) -> Vec<(Point3, BlockId)> {
         .model_space()
         .iter()
         .filter_map(|entity| match &entity.geometry {
-            SemanticGeometry::Insert { block, transform } => {
+            SemanticGeometry::Insert {
+                block, transform, ..
+            } => {
                 let base = drawing
                     .block_base_point(*block)
                     .expect("test block metadata");
@@ -105,6 +107,7 @@ pub(super) fn insert_item_app(
                     z: -block_base.z,
                 },
             )),
+            attributes: Vec::new(),
         },
         1,
     ))

@@ -28,7 +28,10 @@ impl Application {
 
         let mut products = Vec::new();
         for entity in &entities {
-            let SemanticGeometry::Insert { block, transform } = &entity.geometry else {
+            let SemanticGeometry::Insert {
+                block, transform, ..
+            } = &entity.geometry
+            else {
                 return Err(unsupported(
                     "ncopy",
                     "unsupported",
@@ -192,7 +195,10 @@ impl Application {
                 ),
             ));
         }
-        let SemanticGeometry::Insert { block, transform } = &entities[0].geometry else {
+        let SemanticGeometry::Insert {
+            block, transform, ..
+        } = &entities[0].geometry
+        else {
             return Err(unsupported(
                 prefix,
                 "boundary",
@@ -313,9 +319,11 @@ fn insert_member_geometry(
             SemanticGeometry::Insert {
                 block: nested,
                 transform: nested_transform,
+                ..
             } => SemanticGeometry::Insert {
                 block: *nested,
                 transform: transform.matrix_mul(nested_transform),
+                attributes: Vec::new(),
             },
             other => transform_geometry(other, transform).map_err(|error| {
                 unsupported(

@@ -229,6 +229,7 @@ impl Application {
             geometry: SemanticGeometry::Insert {
                 block: new_block,
                 transform: Transform3::translation(insertion).matrix_mul(&to_origin),
+                attributes: Vec::new(),
             },
             draw_order: member_max_order,
         };

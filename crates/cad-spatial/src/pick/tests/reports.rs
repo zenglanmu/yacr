@@ -165,6 +165,7 @@ fn insert_is_not_silently_claimed_as_a_hit() {
         SemanticGeometry::Insert {
             block: BlockId(0),
             transform: Transform3::identity(),
+            attributes: Vec::new(),
         },
     )];
     let r = ray(p(0.0, 0.0, 0.0), p(1.0, 0.0, 0.0));

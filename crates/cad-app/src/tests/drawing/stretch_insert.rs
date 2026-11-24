@@ -140,7 +140,9 @@ fn diagnostic_message(outcome: &CommandOutcome, code: &str) -> Option<String> {
 /// The stored `(block, transform)` of the INSERT `id`.
 fn insert_of(app: &Application, id: u128) -> (BlockId, Transform3) {
     match geometry_of(app, id) {
-        SemanticGeometry::Insert { block, transform } => (block, transform),
+        SemanticGeometry::Insert {
+            block, transform, ..
+        } => (block, transform),
         other => panic!("expected an insert, got {other:?}"),
     }
 }
@@ -184,6 +186,7 @@ fn insert_app(placement: Transform3) -> (Application, SessionState) {
         SemanticGeometry::Insert {
             block: BlockId(0),
             transform: placement,
+            attributes: Vec::new(),
         },
         1,
     );
@@ -475,6 +478,7 @@ fn stretch_insert_and_line_in_one_window_share_one_transaction_and_one_undo() {
         SemanticGeometry::Insert {
             block: BlockId(0),
             transform: Transform3::translation(p3(5.0, 5.0, 0.0)),
+            attributes: Vec::new(),
         },
         1,
     );

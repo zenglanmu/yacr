@@ -570,6 +570,7 @@ mod tests {
             insert.geometry = SemanticGeometry::Insert {
                 block: BlockId(9),
                 transform: Transform3::identity(),
+                attributes: Vec::new(),
             };
             b.insert_entity(insert).unwrap();
         }

@@ -597,6 +597,7 @@ fn a_binding_on_an_insert_is_refused_by_the_build() {
     entity.geometry = SemanticGeometry::Insert {
         block: cad_domain::BlockId(1),
         transform: cad_domain::Transform3::identity(),
+        attributes: Vec::new(),
     };
     b.insert_entity(entity).expect("entity");
     b.set_param_bindings(EntityId(1), bindings("radius", Expr::num(1.0)))

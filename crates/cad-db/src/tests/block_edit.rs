@@ -79,6 +79,7 @@ fn reference_entity(id: u128, block: BlockId, base: Point3) -> DbEntity {
         geometry: SemanticGeometry::Insert {
             block,
             transform: Transform3::translation(base),
+            attributes: Vec::new(),
         },
         draw_order: id as i64,
     }
@@ -236,6 +237,7 @@ fn atomic_create_moves_members_and_inserts_the_reference_in_one_revision() {
         SemanticGeometry::Insert {
             block: referenced,
             transform,
+            ..
         } => {
             assert_eq!(*referenced, block);
             assert_eq!(transform.apply_point(point(0.0, 0.0)), base);

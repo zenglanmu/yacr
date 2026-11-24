@@ -456,9 +456,13 @@ impl GeometryEngine for DefaultGeometryEngine {
             G::Insert {
                 block,
                 transform: inner,
+                attributes,
             } => G::Insert {
                 block: *block,
                 transform: t.matrix_mul(inner),
+                // ADR-0055: value text is block-local, so the instance transform
+                // maps it; the values themselves are not rewritten here.
+                attributes: attributes.clone(),
             },
             G::Text {
                 text,
@@ -564,6 +568,35 @@ impl GeometryEngine for DefaultGeometryEngine {
                 boundary: boundary.iter().map(|p| tp(*p)).collect(),
                 inverted: *inverted,
             },
+            // ADR-0055: an `ATTDEF` accepts the same similarity as a `TEXT`
+            // (this is the second transform surface; `cad-db` is the other), so
+            // both guards and the field mapping match exactly.
+            G::AttributeDefinition(definition) => {
+                if !is_uniform(t) {
+                    return Err(CadError::Unsupported(
+                        "transform of attribute definition requires a rotation + uniform \
+                         scale; non-uniform scale or shear cannot be represented exactly"
+                            .to_string(),
+                    ));
+                }
+                if t.determinant() < 0.0 {
+                    return Err(CadError::Unsupported(
+                        "transform of attribute definition would mirror it; a reflected \
+                         text is not represented by this build and is refused rather \
+                         than dropped"
+                            .to_string(),
+                    ));
+                }
+                let mut moved = definition.as_ref().clone();
+                moved.text.position = tp(definition.text.position);
+                moved.text.height *= uniform_scale(t);
+                moved.text.rotation += rotation_of(t);
+                moved.text.wrap_width = definition
+                    .text
+                    .wrap_width
+                    .map(|width| width * uniform_scale(t));
+                G::AttributeDefinition(Box::new(moved))
+            }
             G::Compound(children) => {
                 let mut out = Vec::with_capacity(children.len());
                 for child in children {

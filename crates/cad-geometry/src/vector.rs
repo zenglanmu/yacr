@@ -199,6 +199,18 @@ pub fn geometry_is_finite(geometry: &SemanticGeometry) -> bool {
                     .is_none_or(|tolerance| tolerance.is_finite() && tolerance > 0.0)
         }
         G::Insert { transform, .. } => transform.matrix.iter().flatten().all(|v| v.is_finite()),
+        // ADR-0055: the definition's placement must be finite, including the
+        // oblique angle and both dimensionless ratios the layout multiplies by.
+        G::AttributeDefinition(definition) => {
+            let text = &definition.text;
+            finite(text.position)
+                && text.height.is_finite()
+                && text.rotation.is_finite()
+                && text.oblique.is_finite()
+                && text.width_factor.is_finite()
+                && text.line_spacing.factor.is_finite()
+                && text.wrap_width.is_none_or(|width| width.is_finite())
+        }
         G::Text {
             position,
             height,

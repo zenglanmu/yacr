@@ -211,6 +211,10 @@ fn geometry_summary(database: &cad_db::DrawingDatabase, geometry: &SemanticGeome
             fmt_point(*normal),
             fmt_point(*major_axis)
         ),
+        SemanticGeometry::AttributeDefinition(definition) => format!(
+            "attdef tag={:?} default={:?} height={:.6}",
+            definition.tag, definition.default_value, definition.text.height
+        ),
         SemanticGeometry::Polyline {
             points,
             bulges,

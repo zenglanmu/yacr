@@ -123,10 +123,12 @@ fn array_insert_is_a_compound_of_cell_instances() {
         SemanticGeometry::Insert {
             block: BlockId(7),
             transform: Transform3::identity(),
+            attributes: Vec::new(),
         },
         SemanticGeometry::Insert {
             block: BlockId(7),
             transform: Transform3::identity(),
+            attributes: Vec::new(),
         },
     ]);
     assert_eq!(referenced_blocks(&geometry), vec![BlockId(7), BlockId(7)]);

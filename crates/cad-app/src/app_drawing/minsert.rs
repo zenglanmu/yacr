@@ -192,7 +192,11 @@ impl Application {
                     id,
                     layer: session.active_layer,
                     space: SpaceId::Model,
-                    geometry: SemanticGeometry::Insert { block, transform },
+                    geometry: SemanticGeometry::Insert {
+                        block,
+                        transform,
+                        attributes: Vec::new(),
+                    },
                     draw_order: base_order + index as i64,
                 });
                 index += 1;

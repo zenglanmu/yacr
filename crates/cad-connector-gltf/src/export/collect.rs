@@ -397,5 +397,6 @@ fn geometry_variant(geometry: &SemanticGeometry) -> &'static str {
         SemanticGeometry::Table(_) => "Table",
         SemanticGeometry::Image { .. } => "Image",
         SemanticGeometry::Mask { .. } => "Mask",
+        SemanticGeometry::AttributeDefinition(_) => "AttributeDefinition",
     }
 }

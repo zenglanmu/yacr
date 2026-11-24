@@ -54,7 +54,7 @@
 use std::collections::BTreeSet;
 
 use cad_domain::ymodel::{shard_of, ModelKey, Shard};
-use cad_domain::{BlockId, EntityId, LayerId, LayoutId, LinetypeId, SpaceId};
+use cad_domain::{BlockId, EntityId, LayerId, LayoutId, LinetypeId, SemanticGeometry, SpaceId};
 
 /// A named table whose rows are persisted as a table rather than as elements.
 ///
@@ -308,6 +308,13 @@ impl crate::drawing::DrawingDatabase {
         linetype_changes: &[(LinetypeId, Option<crate::tables::LineType>)],
     ) -> ChangeScope {
         let mut scope = ChangeScope::default();
+        // ADR-0055: a definition edit changes the block's attribute set, so the
+        // `Blocks` table row (which owns the member list the definition lives in)
+        // is dirty alongside the member entity's own shard. An `INSERT` value
+        // edit is an ordinary entity update and needs nothing extra.
+        let is_attribute_definition = |entity: &crate::entity::DbEntity| {
+            matches!(entity.geometry, SemanticGeometry::AttributeDefinition(_))
+        };
         for (id, change) in changes {
             match change {
                 Some(entity) => {
@@ -319,10 +326,16 @@ impl crate::drawing::DrawingDatabase {
                         // the explicitly supplied id) already advanced.
                         None => scope.header(),
                     }
+                    if is_attribute_definition(entity) {
+                        scope.table(TableKind::Blocks);
+                    }
                 }
                 None => {
                     if let Some(previous) = self.entities.get(id) {
                         scope.prev_element(&previous.space, id.0);
+                        if is_attribute_definition(previous) {
+                            scope.table(TableKind::Blocks);
+                        }
                     }
                 }
             }

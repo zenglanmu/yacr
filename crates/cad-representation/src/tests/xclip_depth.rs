@@ -68,6 +68,7 @@ fn block_db(member: DbEntity, transform: Transform3, clip: Option<BlockClip>) ->
     insert.geometry = SemanticGeometry::Insert {
         block: BlockId(1),
         transform,
+        attributes: Vec::new(),
     };
     b.insert_entity(insert).unwrap();
     b.set_entity_render_attributes(

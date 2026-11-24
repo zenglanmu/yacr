@@ -652,6 +652,7 @@ fn block_app() -> (Application, SessionState) {
             geometry: SemanticGeometry::Insert {
                 block: BlockId(block),
                 transform: Transform3::translation(point(x, 0.0)),
+                attributes: Vec::new(),
             },
             draw_order: id as i64,
         })

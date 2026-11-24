@@ -259,7 +259,9 @@ fn pasteblock_creates_one_auto_named_block_and_reference() {
     assert_eq!(reference.layer, session.active_layer);
     let delta = point(10.0, 5.0);
     let transform = match &reference.geometry {
-        SemanticGeometry::Insert { block, transform } => {
+        SemanticGeometry::Insert {
+            block, transform, ..
+        } => {
             assert_eq!(*block, new_block);
             *transform
         }
@@ -464,6 +466,7 @@ fn pasteblock_refuses_bad_input_without_writing() {
         geometry: SemanticGeometry::Insert {
             block: BlockId(999),
             transform: Transform3::identity(),
+            attributes: Vec::new(),
         },
         draw_order: 0,
     };
@@ -527,6 +530,7 @@ fn pasteblock_allows_a_nested_insert_entry() {
         geometry: SemanticGeometry::Insert {
             block: BlockId(0),
             transform: Transform3::translation(point(3.5, -2.25)),
+            attributes: Vec::new(),
         },
         draw_order: 4,
     };

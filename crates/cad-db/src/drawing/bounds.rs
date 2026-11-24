@@ -294,12 +294,20 @@ impl DrawingDatabase {
         if let SemanticGeometry::Insert {
             block,
             transform: insert,
+            attributes,
         } = &entity.geometry
         {
             if depth >= MAX_INSTANCE_DEPTH || stack.contains(block) {
                 return;
             }
             let composed = transform.matrix_mul(insert);
+            // ADR-0055: a value's text is stored in the block's local frame, so
+            // it folds under the composed instance transform. This happens even
+            // when the block expansion itself is cut (depth/cycle), because the
+            // value belongs to this reference, not to the block's members.
+            for value in attributes {
+                acc.add_geometry_transformed(&value.text.as_text(&value.value), &composed);
+            }
             self.accumulate_block_bounds(acc, *block, &composed, depth, stack, context);
         } else {
             acc.add_geometry_transformed(&entity.geometry, transform);

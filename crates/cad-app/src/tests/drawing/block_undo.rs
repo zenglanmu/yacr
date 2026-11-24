@@ -99,6 +99,7 @@ fn block_create_undo_and_redo_apply_all_patches_in_one_revision_each() {
         geometry: SemanticGeometry::Insert {
             block,
             transform: Transform3::translation(base),
+            attributes: Vec::new(),
         },
         draw_order: 1,
     };

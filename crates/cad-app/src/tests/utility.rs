@@ -193,6 +193,7 @@ fn purge_table_fixture() -> (Application, SessionState) {
     reference.geometry = SemanticGeometry::Insert {
         block: BlockId(8),
         transform: Transform3::translation(point(0.0, 0.0)),
+        attributes: Vec::new(),
     };
     builder.insert_entity(reference).unwrap();
 

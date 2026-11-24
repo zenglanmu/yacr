@@ -14,6 +14,7 @@ fn insert_at(block: u128, dx: f64) -> SemanticGeometry {
     SemanticGeometry::Insert {
         block: BlockId(block),
         transform: Transform3::translation(point(dx, 0.0)),
+        attributes: Vec::new(),
     }
 }
 
@@ -142,6 +143,7 @@ fn block_with_late_member_db() -> DrawingDatabase {
         SemanticGeometry::Insert {
             block: BlockId(0),
             transform: Transform3::identity(),
+            attributes: Vec::new(),
         },
     ))
     .unwrap();
@@ -207,6 +209,7 @@ fn visibility_bounds_db(active: Option<&str>) -> DrawingDatabase {
         SemanticGeometry::Insert {
             block: BlockId(0),
             transform: Transform3::translation(point(0.0, 0.0)),
+            attributes: Vec::new(),
         },
     ))
     .unwrap();
@@ -234,6 +237,7 @@ fn block_chain_db(length: usize) -> DrawingDatabase {
             SemanticGeometry::Insert {
                 block: BlockId((i + 1) as u128),
                 transform: Transform3::translation(point(1.0, 0.0)),
+                attributes: Vec::new(),
             }
         } else {
             SemanticGeometry::Line {
@@ -254,6 +258,7 @@ fn block_chain_db(length: usize) -> DrawingDatabase {
         SemanticGeometry::Insert {
             block: BlockId(0),
             transform: Transform3::identity(),
+            attributes: Vec::new(),
         },
     ))
     .unwrap();
@@ -412,6 +417,7 @@ fn model_bounds_match_reference_for_translated_and_rotated_blocks() {
         SemanticGeometry::Insert {
             block: BlockId(0),
             transform: Transform3::translation(point(5.0, 0.0)),
+            attributes: Vec::new(),
         },
     ))
     .unwrap();
@@ -421,6 +427,7 @@ fn model_bounds_match_reference_for_translated_and_rotated_blocks() {
         SemanticGeometry::Insert {
             block: BlockId(0),
             transform: rotate_degrees(90.0),
+            attributes: Vec::new(),
         },
     ))
     .unwrap();
@@ -432,6 +439,7 @@ fn model_bounds_match_reference_for_translated_and_rotated_blocks() {
         SemanticGeometry::Insert {
             block: BlockId(1),
             transform: Transform3::translation(point(0.0, 0.0)),
+            attributes: Vec::new(),
         },
     ))
     .unwrap();
@@ -441,6 +449,7 @@ fn model_bounds_match_reference_for_translated_and_rotated_blocks() {
         SemanticGeometry::Insert {
             block: BlockId(1),
             transform: Transform3::translation(point(100.0, 0.0)),
+            attributes: Vec::new(),
         },
     ))
     .unwrap();
@@ -485,6 +494,7 @@ fn model_bounds_match_reference_for_cyclic_blocks() {
         SemanticGeometry::Insert {
             block: BlockId(0),
             transform: Transform3::translation(point(1.0, 0.0)),
+            attributes: Vec::new(),
         },
     ))
     .unwrap();
@@ -494,6 +504,7 @@ fn model_bounds_match_reference_for_cyclic_blocks() {
         SemanticGeometry::Insert {
             block: BlockId(0),
             transform: Transform3::translation(point(0.0, 0.0)),
+            attributes: Vec::new(),
         },
     ))
     .unwrap();
@@ -735,5 +746,119 @@ fn scene_identity_does_not_consult_or_repair_the_bounds_memo() {
         db.valid_bounds_cache_revision_for_test(),
         Some(db.revision())
     );
+    assert_bounds_match_reference(&db);
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0055: attribute text contributes to bounds.
+// ---------------------------------------------------------------------------
+
+fn attribute_text(x: f64, y: f64, height: f64) -> AttributeText {
+    AttributeText {
+        position: point(x, y),
+        height,
+        rotation: 0.0,
+        style: StyleId(0),
+        width_factor: 1.0,
+        h_align: TextAlignH::Left,
+        v_align: TextAlignV::Baseline,
+        wrap_width: None,
+        line_spacing: TextLineSpacing::default(),
+        font: None,
+        oblique: 0.0,
+    }
+}
+
+#[test]
+fn insert_attribute_values_fold_under_the_insert_transform() {
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layer(Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
+    .unwrap();
+    b.insert_block(BlockDefinition {
+        id: BlockId(0),
+        entities: Vec::new(),
+        dynamic_visibility: None,
+    })
+    .unwrap();
+    // A value-only insert: the block has no members, so the extent comes from
+    // the value text, mapped through the instance transform.
+    b.insert_entity(raw_entity(
+        1,
+        SpaceId::Model,
+        SemanticGeometry::Insert {
+            block: BlockId(0),
+            transform: Transform3::translation(point(10.0, 0.0)),
+            attributes: vec![AttributeValue {
+                tag: "PART".into(),
+                value: "AB".into(),
+                flags: AttributeFlags::default(),
+                text: attribute_text(0.0, 0.0, 2.5),
+                layer: LayerId(0),
+                appearance: AttributeAppearance::default(),
+                source_handle: None,
+            }],
+        },
+    ))
+    .unwrap();
+    let db = b.finish().unwrap();
+    // `BoundsAccumulator` expands text conservatively by the transform's
+    // Frobenius scale (here sqrt(3) for identity), exactly like a `Text` entity.
+    let (min, max) = db.bounds().expect("bounds");
+    let h = 2.5 * 3.0f64.sqrt();
+    assert_eq!(min, point(10.0, 0.0));
+    assert!((max.x - (10.0 + 2.0 * h)).abs() < 1e-9, "{max:?}");
+    assert!((max.y - h).abs() < 1e-9, "{max:?}");
+    assert_bounds_match_reference(&db);
+}
+
+#[test]
+fn an_attdef_member_is_bounded_like_text() {
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layer(Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
+    .unwrap();
+    b.insert_block(BlockDefinition {
+        id: BlockId(0),
+        entities: vec![EntityId(2)],
+        dynamic_visibility: None,
+    })
+    .unwrap();
+    b.insert_entity(raw_entity(
+        2,
+        SpaceId::Block(BlockId(0)),
+        SemanticGeometry::AttributeDefinition(Box::new(AttributeDefinition {
+            tag: "PART".into(),
+            prompt: "Part?".into(),
+            default_value: "A".into(),
+            flags: AttributeFlags::default(),
+            order: 0,
+            text: attribute_text(0.0, 0.0, 1.0),
+            source_handle: None,
+        })),
+    ))
+    .unwrap();
+    b.insert_entity(raw_entity(
+        1,
+        SpaceId::Model,
+        SemanticGeometry::Insert {
+            block: BlockId(0),
+            transform: Transform3::translation(point(5.0, 5.0)),
+            attributes: Vec::new(),
+        },
+    ))
+    .unwrap();
+    let db = b.finish().unwrap();
+    let (min, max) = db.bounds().expect("bounds");
+    let h = 3.0f64.sqrt();
+    assert_eq!(min, point(5.0, 5.0));
+    assert!((max.x - (5.0 + h)).abs() < 1e-9, "{max:?}");
+    assert!((max.y - (5.0 + h)).abs() < 1e-9, "{max:?}");
     assert_bounds_match_reference(&db);
 }

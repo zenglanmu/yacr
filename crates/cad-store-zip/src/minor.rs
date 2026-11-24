@@ -9,6 +9,7 @@
 //!
 //! | the document has | minor | what a minor-4 reader misses |
 //! |---|---|---|
+//! | block attributes (ADR-0055) | `14` | `cad:AttributeDefinition`, `cad:Insert.attributes` |
 //! | host-owned vendor semantics (ADR-0030 D7) | `12` | `tables/vendor.json` |
 //! | in-context relations (ADR-0043 P3) | `11` | `tables/relations.json` |
 //! | feature definitions (ADR-0043 P2) | `10` | `tables/features.json` |
@@ -68,8 +69,18 @@ pub(crate) const FORMAT_MINOR_VENDOR: u32 = 12;
 /// A document that names an interface domain in `document.json` (ADR-0053 D2).
 pub(crate) const FORMAT_MINOR_APPLICATION_DOMAIN: u32 = 13;
 
+/// A document that carries block attributes (ADR-0055): an `ATTDEF` member or an
+/// `INSERT` with values.
+///
+/// The definitions and values are both element-payload data, so the tier is
+/// decided by [`DocumentSnapshot::has_block_attributes`] before the header-based
+/// application-domain tier: a domain document with attributes must be written at
+/// `14`, not `13`.
+pub(crate) const FORMAT_MINOR_BLOCK_ATTRIBUTES: u32 = 14;
+
 // The chain is a compile-time fact, not a convention: a future tier inserted in
 // the middle cannot silently leave the constants out of order.
+const _: () = assert!(FORMAT_MINOR_APPLICATION_DOMAIN + 1 == FORMAT_MINOR_BLOCK_ATTRIBUTES);
 const _: () = assert!(FORMAT_MINOR_VENDOR + 1 == FORMAT_MINOR_APPLICATION_DOMAIN);
 const _: () = assert!(FORMAT_MINOR_RELATIONS + 1 == FORMAT_MINOR_VENDOR);
 const _: () = assert!(FORMAT_MINOR_FEATURES + 1 == FORMAT_MINOR_RELATIONS);
@@ -88,9 +99,17 @@ const _: () = assert!(FORMAT_MINOR_PLAIN + 1 == FORMAT_MINOR_RESOURCES);
 /// tier here is about archive entries and the header flag, both of which the
 /// store already models.
 pub(crate) fn document_minor(snapshot: &DocumentSnapshot) -> u32 {
-    // A named interface domain is a `document.json` scalar and the newest tier:
-    // a minor-12 reader would refuse the unknown header key, so it decides
-    // before every table-based tier.
+    // Block attributes are the newest tier and can coexist with any other
+    // feature (including a named interface domain), so they decide first: a
+    // minor-13 reader would refuse the `cad:AttributeDefinition` class or the
+    // insert `attributes` array, and a domain-bearing document would otherwise
+    // be stamped 13 and lose them on the reader side.
+    if snapshot.has_block_attributes() {
+        return FORMAT_MINOR_BLOCK_ATTRIBUTES;
+    }
+    // A named interface domain is a `document.json` scalar: a minor-12 reader
+    // would refuse the unknown header key, so it decides before every
+    // table-based tier.
     if snapshot.header.application_domain.is_some() {
         return FORMAT_MINOR_APPLICATION_DOMAIN;
     }
@@ -145,8 +164,12 @@ mod tests {
     #[test]
     fn the_top_tier_is_the_format_minor() {
         assert_eq!(
-            FORMAT_MINOR_APPLICATION_DOMAIN,
+            FORMAT_MINOR_BLOCK_ATTRIBUTES,
             cad_domain::ymodel::FORMAT_MINOR
+        );
+        assert_eq!(
+            FORMAT_MINOR_BLOCK_ATTRIBUTES,
+            FORMAT_MINOR_APPLICATION_DOMAIN + 1
         );
         assert_eq!(FORMAT_MINOR_APPLICATION_DOMAIN, FORMAT_MINOR_VENDOR + 1);
         assert_eq!(FORMAT_MINOR_VENDOR, FORMAT_MINOR_RELATIONS + 1);

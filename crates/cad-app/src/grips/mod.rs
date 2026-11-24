@@ -97,7 +97,7 @@
 //!
 //! `INSERT` (a block reference) exposes exactly **one** [`GripKind::Insertion`]
 //! grip, `index` 0, at the placement's **insertion point**. The stored
-//! `SemanticGeometry::Insert { block, transform }` carries the reference and a
+//! `SemanticGeometry::Insert { block, transform , attributes: Vec::new()}` carries the reference and a
 //! 4x4 affine `Transform3` whose point mapping has no homogeneous divide
 //! (`Transform3::apply_point`), and the importer folds the block's base point into
 //! that transform, so the block-space origin lands exactly on the `INSERT`'s

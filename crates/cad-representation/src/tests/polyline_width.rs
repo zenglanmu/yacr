@@ -240,6 +240,7 @@ fn an_xclip_rectangle_clips_the_wide_stroke_mesh() {
     insert.geometry = SemanticGeometry::Insert {
         block: BlockId(1),
         transform: Transform3::identity(),
+        attributes: Vec::new(),
     };
     builder.insert_entity(insert).unwrap();
     builder

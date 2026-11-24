@@ -220,7 +220,9 @@ fn content_block_creates_stores_and_draws_the_named_block() {
         .display()
         .iter()
         .find_map(|child| match child {
-            SemanticGeometry::Insert { block, transform } => Some((*block, *transform)),
+            SemanticGeometry::Insert {
+                block, transform, ..
+            } => Some((*block, *transform)),
             _ => None,
         })
         .expect("the content block instance");
@@ -322,7 +324,9 @@ fn content_block_places_the_blocks_base_point_on_the_content_point() {
         .display()
         .iter()
         .find_map(|child| match child {
-            SemanticGeometry::Insert { block, transform } => Some((*block, *transform)),
+            SemanticGeometry::Insert {
+                block, transform, ..
+            } => Some((*block, *transform)),
             _ => None,
         })
         .expect("the content block instance");
@@ -347,7 +351,9 @@ fn content_block_places_the_blocks_base_point_on_the_content_point() {
         .display()
         .iter()
         .find_map(|child| match child {
-            SemanticGeometry::Insert { block, transform } => Some((*block, *transform)),
+            SemanticGeometry::Insert {
+                block, transform, ..
+            } => Some((*block, *transform)),
             _ => None,
         })
         .expect("the re-imported block instance");
@@ -374,7 +380,9 @@ fn a_zero_base_point_block_writes_the_same_groups_as_before() {
         .display()
         .iter()
         .find_map(|child| match child {
-            SemanticGeometry::Insert { block, transform } => Some((*block, *transform)),
+            SemanticGeometry::Insert {
+                block, transform, ..
+            } => Some((*block, *transform)),
             _ => None,
         })
         .expect("the content block instance");

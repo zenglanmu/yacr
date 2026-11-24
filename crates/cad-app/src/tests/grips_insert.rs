@@ -1,7 +1,7 @@
 //! `INSERT` (block reference) insertion-point grip contract tests (`crate::grips`).
 //!
 //! A block reference is the first geometry in this model whose handle position is
-//! **derived from a transform**: `SemanticGeometry::Insert { block, transform }`
+//! **derived from a transform**: `SemanticGeometry::Insert { block, transform , attributes: Vec::new()}`
 //! stores a 4x4 affine placement, and the handle is that placement's **insertion
 //! point** — the image of the block-space origin under it (the importer folds the
 //! block base point into the placement, so this is the stored `INSERT` insertion
@@ -69,6 +69,7 @@ fn translated_at(at: Point3) -> SemanticGeometry {
     SemanticGeometry::Insert {
         block: BLOCK,
         transform: Transform3::translation(at),
+        attributes: Vec::new(),
     }
 }
 
@@ -102,12 +103,15 @@ fn rotated() -> SemanticGeometry {
     SemanticGeometry::Insert {
         block: BLOCK,
         transform: rotated_transform(),
+        attributes: Vec::new(),
     }
 }
 
 fn insert_parts(geometry: &SemanticGeometry) -> (BlockId, Transform3) {
     match geometry {
-        SemanticGeometry::Insert { block, transform } => (*block, *transform),
+        SemanticGeometry::Insert {
+            block, transform, ..
+        } => (*block, *transform),
         other => panic!("expected an INSERT, got {other:?}"),
     }
 }
@@ -222,6 +226,7 @@ fn the_handle_is_the_origin_image_not_a_point_of_the_linear_part() {
         SemanticGeometry::Insert {
             block: BLOCK,
             transform: other,
+            attributes: Vec::new(),
         },
     ))[0]
         .position;
@@ -341,6 +346,7 @@ fn a_singular_but_finite_placement_is_still_translatable() {
     let geometry = SemanticGeometry::Insert {
         block: BLOCK,
         transform: flat,
+        attributes: Vec::new(),
     };
     let dragged = apply_grip(
         &geometry,
@@ -441,6 +447,7 @@ fn handle_identity_is_checked_before_the_target_and_before_the_placement() {
         &SemanticGeometry::Insert {
             block: BLOCK,
             transform: corrupt_placement(),
+            attributes: Vec::new(),
         },
         &grip_id(112, GripKind::Vertex, 0),
         p3(1.0, 1.0, 1.0),
@@ -476,6 +483,7 @@ fn a_non_finite_stored_placement_is_refused_by_name() {
         let geometry = SemanticGeometry::Insert {
             block: BLOCK,
             transform,
+            attributes: Vec::new(),
         };
         let error = apply_grip(
             &geometry,
@@ -603,6 +611,7 @@ fn a_non_finite_insertion_point_is_never_a_hit() {
         SemanticGeometry::Insert {
             block: BLOCK,
             transform: nan_translation_placement(),
+            attributes: Vec::new(),
         },
     );
     let grips = grips_for_entity(&entity);

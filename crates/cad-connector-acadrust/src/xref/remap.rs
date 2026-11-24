@@ -33,7 +33,11 @@ pub(crate) fn remap_geometry(
     missing: &mut Vec<BlockId>,
 ) -> SemanticGeometry {
     match geometry {
-        SemanticGeometry::Insert { block, transform } => {
+        SemanticGeometry::Insert {
+            block,
+            transform,
+            attributes,
+        } => {
             let mapped = match block_map.get(block).copied() {
                 Some(mapped) => mapped,
                 None => {
@@ -44,6 +48,9 @@ pub(crate) fn remap_geometry(
             SemanticGeometry::Insert {
                 block: mapped,
                 transform: *transform,
+                // ADR-0055: value text is block-local and names no block, so a
+                // block remap keeps it unchanged.
+                attributes: attributes.clone(),
             }
         }
         SemanticGeometry::Compound(children) => SemanticGeometry::Compound(

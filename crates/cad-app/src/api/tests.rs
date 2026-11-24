@@ -358,6 +358,7 @@ fn valid_block_instance_reference_selects_but_object_id_leaf_is_rejected() {
     let insert_geometry = SemanticGeometry::Insert {
         block: BlockId(2),
         transform: Transform3::identity(),
+        attributes: Vec::new(),
     };
     builder
         .insert_entity(DbEntity {

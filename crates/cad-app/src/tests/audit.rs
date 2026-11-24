@@ -371,6 +371,7 @@ fn audit_fix_yes_reports_reference_errors_it_cannot_repair() {
             SemanticGeometry::Insert {
                 block: BlockId(9),
                 transform: Transform3::identity(),
+                attributes: Vec::new(),
             },
         ))
         .unwrap();

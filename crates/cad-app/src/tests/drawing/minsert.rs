@@ -126,7 +126,9 @@ fn minsert_writes_rows_times_columns_independent_references_in_one_transaction()
         let row = index / 3;
         let column = index % 3;
         match &entity.geometry {
-            SemanticGeometry::Insert { block, transform } => {
+            SemanticGeometry::Insert {
+                block, transform, ..
+            } => {
                 assert_eq!(*block, BlockId(0));
                 let cell = p3(100.0 + column as f64 * 20.0, 200.0 + row as f64 * 10.0, 0.0);
                 assert_eq!(

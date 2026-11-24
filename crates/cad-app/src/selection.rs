@@ -784,6 +784,10 @@ fn geometry_property_rows(geometry: &SemanticGeometry) -> Vec<PropertyRow> {
             PropertyRow::new("control_points", control_points.len().to_string()),
         ],
         SemanticGeometry::Point(p) => vec![PropertyRow::new("position", point_label(*p))],
+        // ADR-0055: the attribute editing panel is a later lane. Returning no
+        // rows keeps the shared identity/space/layer rows and adds no new i18n
+        // key that nothing can edit yet.
+        SemanticGeometry::AttributeDefinition(_) => Vec::new(),
         SemanticGeometry::Mesh(mesh) => vec![
             PropertyRow::new("vertices", mesh.vertices.len().to_string()),
             PropertyRow::new("triangles", mesh.triangle_count().to_string()),

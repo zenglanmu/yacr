@@ -99,6 +99,7 @@ fn collect_items<'a>(
     if let SemanticGeometry::Insert {
         block,
         transform: insert,
+        ..
     } = geometry
     {
         if depth >= MAX_INSTANCE_DEPTH || stack.contains(block) {

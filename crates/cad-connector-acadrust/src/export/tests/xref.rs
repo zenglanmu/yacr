@@ -50,7 +50,11 @@ fn entity(id: u128, geometry: SemanticGeometry, space: SpaceId, draw_order: i64)
 fn insert_at(block: BlockId, x: f64) -> SemanticGeometry {
     let mut transform = Transform3::identity();
     transform.matrix[0][3] = x;
-    SemanticGeometry::Insert { block, transform }
+    SemanticGeometry::Insert {
+        block,
+        transform,
+        attributes: Vec::new(),
+    }
 }
 
 fn xref(

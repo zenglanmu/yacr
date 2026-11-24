@@ -874,5 +874,7 @@ fn child_kind(geometry: &SemanticGeometry) -> &'static str {
         SemanticGeometry::MultiLeader(_) => "MultiLeader",
         // A dimension's display never contains a table (defensive kind name).
         SemanticGeometry::Table(_) => "Table",
+        // A dimension's display never contains a block attribute definition.
+        SemanticGeometry::AttributeDefinition(_) => "AttributeDefinition",
     }
 }

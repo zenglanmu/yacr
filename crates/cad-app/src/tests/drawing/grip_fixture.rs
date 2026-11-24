@@ -332,6 +332,7 @@ pub(super) fn grip_app() -> (Application, SessionState) {
         SemanticGeometry::Insert {
             block: BlockId(3),
             transform: insert_transform(),
+            attributes: Vec::new(),
         },
         10,
     ))
@@ -554,7 +555,9 @@ pub(super) fn text_parts(
 /// The stored `INSERT` fields of `entity` (`block, transform`).
 pub(super) fn insert_parts(app: &Application, entity: u128) -> (BlockId, Transform3) {
     match geometry_of(app, entity) {
-        SemanticGeometry::Insert { block, transform } => (block, transform),
+        SemanticGeometry::Insert {
+            block, transform, ..
+        } => (block, transform),
         other => panic!("entity {entity} is not an INSERT: {other:?}"),
     }
 }

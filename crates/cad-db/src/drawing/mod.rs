@@ -20,6 +20,7 @@ use crate::tables::{
 use crate::xref::ExternalReference;
 
 mod access;
+mod attributes;
 mod bim;
 mod block_edit;
 mod bounds;

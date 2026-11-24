@@ -241,6 +241,7 @@ fn app_with_insert(member_layer: LayerId, locked: Option<LayerId>) -> (Applicati
     insert.geometry = SemanticGeometry::Insert {
         block: BlockId(0),
         transform: Transform3::identity(),
+        attributes: Vec::new(),
     };
     insert.draw_order = 1;
     builder.insert_entity(insert).unwrap();

@@ -180,6 +180,7 @@ fn app_with(extra: Vec<DbEntity>) -> (Application, SessionState) {
             SemanticGeometry::Insert {
                 block: BlockId(1),
                 transform: cad_domain::Transform3::identity(),
+                attributes: Vec::new(),
             },
         ))
         .unwrap();

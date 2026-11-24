@@ -240,6 +240,7 @@ impl Application {
             geometry: SemanticGeometry::Insert {
                 block: new_block,
                 transform,
+                attributes: Vec::new(),
             },
             // The highest member order: an unselected entity with a higher draw
             // order still draws above the new reference.

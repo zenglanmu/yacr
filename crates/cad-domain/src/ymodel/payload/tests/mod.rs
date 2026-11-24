@@ -72,13 +72,18 @@ fn assert_round_trips(geometry: &SemanticGeometry) {
 fn assert_keys_match(type_key: &str, value: &Value) {
     let class: &ClassDescriptor =
         by_type_key(type_key).unwrap_or_else(|| panic!("no descriptor for {type_key}"));
-    let expected: BTreeSet<&str> = class.fields.iter().map(|field| field.name).collect();
+    let mut expected: BTreeSet<&str> = class.fields.iter().map(|field| field.name).collect();
     let object = value.as_object().expect("payload object");
     let actual: BTreeSet<&str> = object
         .keys()
         .map(String::as_str)
         .filter(|key| *key != "class")
         .collect();
+    // ADR-0055: `cad:Insert.attributes` is omitted when empty (a minor-13 row),
+    // so the descriptor's field is allowed to be absent on an ordinary insert.
+    if type_key == "cad:Insert" && !object.contains_key("attributes") {
+        expected.remove("attributes");
+    }
     assert_eq!(
         actual, expected,
         "{type_key} payload fields disagree with its descriptor"
@@ -148,6 +153,7 @@ fn samples() -> Vec<SemanticGeometry> {
                     [0.0, 0.0, 0.0, 1.0],
                 ],
             },
+            attributes: Vec::new(),
         },
         text_sample(),
         SemanticGeometry::Shape {
@@ -187,13 +193,14 @@ fn samples() -> Vec<SemanticGeometry> {
             ],
             inverted: false,
         },
+        attribute_definition_sample(),
     ]
 }
 
 #[test]
-fn all_twenty_variants_are_a_payload_fixed_point() {
+fn all_twenty_one_variants_are_a_payload_fixed_point() {
     let samples = samples();
-    assert_eq!(samples.len(), 20, "one sample per SemanticGeometry variant");
+    assert_eq!(samples.len(), 21, "one sample per SemanticGeometry variant");
     let mut seen = BTreeSet::new();
     for geometry in &samples {
         assert_round_trips(geometry);
@@ -204,7 +211,7 @@ fn all_twenty_variants_are_a_payload_fixed_point() {
             .to_string();
         assert!(seen.insert(type_key), "duplicate class in the sample list");
     }
-    assert_eq!(seen.len(), 20);
+    assert_eq!(seen.len(), 21);
     // Every geometry class in the registry is covered.
     let registered: BTreeSet<&str> = crate::ymodel::descriptor::CLASSES
         .iter()
@@ -306,6 +313,31 @@ fn nested_alternatives_round_trip() {
         adjust: ImageAdjust::default(),
     };
     assert_round_trips(&bare_image);
+}
+
+/// ADR-0055: the value array is a fixed point; an absent key is an empty list
+/// (a minor-13 insert) and an explicit `null` is refused, never guessed.
+#[test]
+fn insert_attributes_round_trip_and_absent_means_empty() {
+    let with_values = insert_with_attributes_sample();
+    assert_round_trips(&with_values);
+
+    let encoded = encode(&with_values);
+    let object = encoded.as_object().expect("insert object");
+    assert!(object.contains_key("attributes"), "{object:?}");
+
+    let mut bare = object.clone();
+    bare.remove("attributes");
+    let decoded = decode(&Value::Object(bare)).expect("a minor-13 insert decodes");
+    let SemanticGeometry::Insert { attributes, .. } = decoded else {
+        panic!("expected an insert");
+    };
+    assert!(attributes.is_empty(), "absent attributes mean no values");
+
+    let mut nulled = object.clone();
+    nulled.insert("attributes".to_string(), Value::Null);
+    let error = decode(&Value::Object(nulled)).expect_err("null attributes are refused");
+    assert!(error.message().contains("attributes"), "{error}");
 }
 
 fn mleader_with_content(content: MLeaderContent) -> MultiLeaderGeometry {
@@ -491,6 +523,7 @@ fn id_refs_must_belong_to_the_declared_family() {
     let insert = encode(&SemanticGeometry::Insert {
         block: BlockId(1),
         transform: Transform3::identity(),
+        attributes: Vec::new(),
     });
     let mut object = insert.as_object().expect("object").clone();
     // A Style id where the descriptor declares a Block reference.

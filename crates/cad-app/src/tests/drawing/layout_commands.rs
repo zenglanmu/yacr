@@ -109,6 +109,7 @@ fn insert_geometry(scale: f64) -> SemanticGeometry {
     SemanticGeometry::Insert {
         block: cad_domain::BlockId(0),
         transform: Transform3 { matrix },
+        attributes: Vec::new(),
     }
 }
 
