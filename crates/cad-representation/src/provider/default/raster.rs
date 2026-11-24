@@ -114,6 +114,31 @@ pub(super) fn image_fragment(
                         },
                     });
                 }
+                // `TFRAMES` ON: the placed rectangle's closed outline follows the
+                // texture, exactly the frame the fallback branch below draws for
+                // an image that cannot become a texture.
+                if context.image_frames {
+                    let corners = image_frame_corners(*origin, *u, *v, *pixels);
+                    if corners.len() >= 2 {
+                        representation.fragments.push(DisplayFragment {
+                            source,
+                            geometry_source,
+                            precision: Precision::Analytic,
+                            alpha: 1.0,
+                            draw_order: entity.draw_order,
+                            color: DEFAULT_RENDER_COLOR,
+                            color_unresolved: true,
+                            lineweight: DEFAULT_LINEWEIGHT_MM,
+                            lineweight_unresolved: true,
+                            linetype: LinetypePattern::continuous(),
+                            linetype_unresolved: true,
+                            linetype_scale: 1.0,
+                            primitive: DisplayPrimitive::Lines(Arc::from(
+                                corners.into_boxed_slice(),
+                            )),
+                        });
+                    }
+                }
             }
             (resource, decoded) => {
                 // No usable texture, or a clip that is not a usable

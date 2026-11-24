@@ -245,6 +245,18 @@ pub struct RepresentationContext {
     /// primitive carries the resolved flag so the renderer/plot consumer never
     /// re-reads session state.
     pub wipeout_frames: bool,
+    /// Whether a raster image draws its **boundary frame** (`TFRAMES`/`IMAGEFRAME`).
+    ///
+    /// `false` is the pre-`TFRAMES` behaviour: a texture that resolves draws the
+    /// placed quad and no frame, and only an image that cannot become a texture
+    /// falls back to the outline placeholder. `true` adds the closed frame around
+    /// a textured image so the image's extent is visible and selectable the way
+    /// AutoCAD's `IMAGEFRAME 1` shows it.
+    ///
+    /// The vector-plot path resolves its own value (this build plots images as
+    /// their frame only when the texture cannot be drawn), so this display flag
+    /// never changes what a plot writes.
+    pub image_frames: bool,
     /// Whether filled areas are drawn **filled** (`FILL`, AutoCAD's `FILLMODE`).
     ///
     /// `true` is AutoCAD's documented initial value and the pre-`FILL` build's
@@ -337,6 +349,9 @@ impl RepresentationContext {
             conic_stats: None,
             force_chord_conics: false,
             wipeout_frames: false,
+            // No image boundary frame unless a caller asks for one: a textured
+            // image keeps the pre-`TFRAMES` draw.
+            image_frames: false,
             // AutoCAD's documented `FILLMODE`/`QTEXT` initial values: filled
             // areas on, quick text off.
             fill: true,
@@ -397,6 +412,17 @@ impl RepresentationContext {
     /// out of the plot without a second flag.
     pub fn with_wipeout_frames(mut self, enabled: bool) -> Self {
         self.wipeout_frames = enabled;
+        self
+    }
+
+    /// Emit a drawable boundary frame on every raster image (`TFRAMES` ON).
+    ///
+    /// The default is `false`, which keeps the pre-`TFRAMES` draw: a textured
+    /// image contributes its quad only. Setting this adds the closed outline
+    /// (`DisplayPrimitive::Lines`) of the placed image rectangle, with the same
+    /// `image.*` diagnostics for an image that cannot become a texture.
+    pub fn with_image_frames(mut self, enabled: bool) -> Self {
+        self.image_frames = enabled;
         self
     }
 

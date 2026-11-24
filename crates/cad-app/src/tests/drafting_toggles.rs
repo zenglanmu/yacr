@@ -5,10 +5,10 @@
 //! `*.toggled` diagnostic, never writes the drawing, never bumps the revision and
 //! never records an undo step.
 //!
-//! Two of them are **consumed** by the display build (`FILL`, `QTEXT`): their
-//! report names what the derived display now does. The other three (`TFRAMES`,
-//! `REGENAUTO`, `ISODRAFT`) have no consumer in this build and still say their
-//! effect is NOT IMPLEMENTED.
+//! Three of them are **consumed** by the display build (`FILL`, `QTEXT`,
+//! `TFRAMES`): their report names what the derived display now does. The other
+//! two (`REGENAUTO`, `ISODRAFT`) have no consumer in this build and still say
+//! their effect is NOT IMPLEMENTED.
 //!
 //! The display half itself is pinned by `render_scene::display_mode_tests` (the
 //! rebuilt batches) and `cad_host::tests::display_modes` (the session token
@@ -40,8 +40,9 @@ fn flag(session: &SessionState, ext: ExtendedCommandId) -> bool {
 fn drafting_toggles_flip_session_flags_without_drawing_writes() {
     let (mut app, mut session) = application_with_document();
     let revision = app.workspace.documents[&DocumentId(1)].drawing.revision();
-    // FILL starts ON (AutoCAD's default); the rest start OFF.
+    // FILL and TFRAMES start ON (AutoCAD's defaults); the rest start OFF.
     assert!(session.drafting_extras.fill());
+    assert!(session.drafting_extras.tframes());
     assert!(!session.drafting_extras.qtext());
     for ext in [
         ExtendedCommandId::QText,
@@ -75,9 +76,12 @@ fn drafting_toggles_flip_session_flags_without_drawing_writes() {
             "the message states the new state: {}",
             diagnostic.message
         );
-        // The three tokens without a consumer must still say so; the two
+        // The two tokens without a consumer must still say so; the three
         // display tokens must not claim "not implemented" any more.
-        let consumed = matches!(ext, ExtendedCommandId::QText | ExtendedCommandId::Fill);
+        let consumed = matches!(
+            ext,
+            ExtendedCommandId::QText | ExtendedCommandId::Fill | ExtendedCommandId::TFrames
+        );
         assert_eq!(
             diagnostic.message.contains("NOT IMPLEMENTED"),
             !consumed,
@@ -92,6 +96,28 @@ fn drafting_toggles_flip_session_flags_without_drawing_writes() {
         "session toggles never write the drawing"
     );
     assert!(!app.can_undo(&DocumentId(1)), "no undo step is recorded");
+}
+
+/// `TFRAMES OFF` names the two frames it hides and the xref frame it cannot.
+#[test]
+fn tframes_off_names_the_frames_it_hides_and_the_xref_boundary() {
+    let (mut app, mut session) = application_with_document();
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::Extended(ExtendedCommandId::TFrames),
+        CommandPayload::None,
+    )
+    .expect("TFRAMES is admitted");
+    assert!(
+        !session.drafting_extras.tframes(),
+        "TFRAMES started ON and flipped"
+    );
+    assert!(outcome.changes.is_none(), "TFRAMES writes nothing");
+    let message = &outcome.diagnostics[0].message;
+    assert!(message.contains("image"), "{message}");
+    assert!(message.contains("WIPEOUT"), "{message}");
+    assert!(message.contains("External-reference frames"), "{message}");
 }
 
 /// `FILL OFF` reports the outline-only rule it triggers — and the primitives it

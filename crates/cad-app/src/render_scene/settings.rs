@@ -32,6 +32,19 @@ use super::*;
 pub struct DisplaySettings {
     /// Display the WIPEOUT boundary frame (`WIPEOUTFRAME` 1/2 maps to `true`).
     pub wipeout_frames: bool,
+    /// Display every frame this build models (`TFRAMES`).
+    ///
+    /// AutoCAD's `TFRAMES` toggles the frames of all images, wipeouts and
+    /// external references at once. This build models two of those frames: the
+    /// WIPEOUT boundary frame and the raster-image frame. `frames_visible` is the
+    /// global gate — with it off both frames are hidden regardless of their own
+    /// token, and with it on the WIPEOUT frame still follows `WIPEOUTFRAME`.
+    /// Xref frames are not modelled (an xref is expanded block geometry, with no
+    /// frame geometry to toggle), which the command reports by name.
+    ///
+    /// Part of `SceneVersion`, so a flip rebuilds the base; never a `cad-db`
+    /// write and not applied to the plot path (a plot resolves its own frames).
+    pub frames_visible: bool,
     /// Draw filled areas filled (`FILL ON`, AutoCAD's initial value) or
     /// outline-only (`FILL OFF`).
     pub fill: bool,
@@ -58,6 +71,11 @@ impl Default for DisplaySettings {
     fn default() -> Self {
         Self {
             wipeout_frames: false,
+            // `TFRAMES` starts ON (AutoCAD shows frames by default and
+            // `WIPEOUTFRAME` starts at 1); the pre-`TFRAMES` image draw is kept
+            // because `image_frames` also requires this gate and a textured image
+            // only gains a frame here.
+            frames_visible: true,
             // `FILL` and text drawing start in AutoCAD's documented states, so
             // a controller that never receives a token builds exactly the
             // pre-token scene.
@@ -80,7 +98,8 @@ impl DisplaySettings {
         context: cad_representation::RepresentationContext,
     ) -> cad_representation::RepresentationContext {
         context
-            .with_wipeout_frames(self.wipeout_frames)
+            .with_wipeout_frames(self.wipeout_frames && self.frames_visible)
+            .with_image_frames(self.frames_visible)
             .with_fill(self.fill)
             .with_qtext(self.qtext)
             .with_attdisp(self.attdisp)
