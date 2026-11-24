@@ -883,6 +883,9 @@ pub use helpers::*;
 mod arguments;
 pub use arguments::*;
 pub(crate) use arguments::{parse_positive_decimal, parse_signed_decimal};
+// `LAYFRZ VP [...]`'s grammar, split out of `arguments.rs` for the code-size gate.
+mod layfrz;
+pub use layfrz::*;
 mod header;
 pub use header::*;
 

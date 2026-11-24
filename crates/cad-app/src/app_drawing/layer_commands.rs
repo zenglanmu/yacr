@@ -16,17 +16,27 @@
 //!
 //! ## What "selected object" means here
 //!
-//! Only directly addressable **model-space entity rows** are accepted. The
-//! preflight refuses, by name ([`ensure_model_space_addressable`]):
+//! Two preflights, because the two families of command need different things
+//! from a selection:
 //!
-//! * a ref from another document (`<command>.not_addressable`);
-//! * a block-instance member (`InstancePath`) or a sub-element
-//!   (`<command>.not_addressable`, `Unsupported`: those have no entity identity
-//!   of their own, exactly like the property-write path);
-//! * an entity that does not resolve (`<command>.not_addressable`);
-//! * an entity in paper space or a block definition
-//!   (`<command>.not_addressable`, `Unsupported`: there is no model-space layer
-//!   row to act on).
+//! * commands that **write entity rows** (`LAYCUR`) need a directly
+//!   addressable model-space identity, so they keep
+//!   [`ensure_model_space_addressable`]: a ref from another document, a
+//!   block-instance member or a sub-element, an unresolvable entity, and a
+//!   paper-space or block-definition entity are refused by name
+//!   (`<command>.not_addressable`).
+//! * commands that only **write a layer row** (`LAYLCK`, `LAYULK`, `LAYFRZ`)
+//!   need nothing more than the layer the pick names, so they use
+//!   [`layer_named_by`]: `cad-db` keeps model-space entities, every paper
+//!   layout's entities and every block definition's members in one `entities`
+//!   table, and every row carries its `layer` — the same single-table fact
+//!   `LAYDEL`'s selection rule rests on. A top-level object in model space **or**
+//!   a paper-space layout, and a block-definition member, all name their layer;
+//!   a **nested pick** (`InstancePath`) resolves through the one effective-layer
+//!   walk the visibility answer uses, so a member drawn on layer `0` inside an
+//!   `INSERT` names the INSERT's layer — the layer its geometry is actually
+//!   displayed on. Still refused by name: another document's ref and a
+//!   sub-element (sub-object selection is not a layer input in this build).
 //!
 //! ## Writes
 //!
@@ -41,6 +51,11 @@
 //! whole command records **one** undo step through
 //! [`Application::publish_layer_record`]: undo/redo restores every changed
 //! row's exact before/after attribute set in one transaction.
+//!
+//! The **per-viewport** write (`LAYFRZ`'s Viewports form) goes through
+//! [`cad_db::DrawingDatabase::set_layout_viewports`] on the active paper layout —
+//! one revision, one [`cad_db::LayoutPatch`], one undo step, the same path
+//! `VPLAYER`/`LAYVPI` use, so there is no second per-viewport model.
 //!
 //! Every refusal happens before anything is published: the original drawing
 //! keeps its revision, its layer rows and its history. A locked destination
@@ -71,16 +86,42 @@
 //! ## `LAYFRZ`
 //!
 //! "Freezes the layer of selected objects." Applies to **every distinct layer**
-//! in the selection. The current layer can never be frozen, so when the
-//! selection contains it the whole command is refused (`layfrz.current_layer`)
-//! rather than partially applied. v1 handles **Entity** selection only: there
-//! are no Settings / Viewports / Block options, and it freezes the layer in
-//! **all viewports** (this build has no per-viewport freeze model); the
-//! `frozen_in_new_viewport` flag and every other attribute are left untouched.
-//! One `set_layer_attributes` call per changed layer means one revision bump per
-//! layer; the command still records **one** undo step. Success is `layfrz.applied`
-//! with the changed-layer count; an all-frozen selection is `layfrz.unchanged`.
-//! Work-only.
+//! in the selection, named through any drawing space (see above).
+//!
+//! The current layer follows AutoCAD's own two rules:
+//!
+//! * at **drawing level** it can never be frozen, so when the selection contains
+//!   it the whole command is refused (`layfrz.current_layer`) rather than
+//!   partially applied;
+//! * in the **Viewports** form it may be frozen in the layout's *other*
+//!   viewports, but not in the current one (`layfrz.current_layer` again, naming
+//!   that viewport) — the viewport being worked in keeps the current layer
+//!   visible.
+//!
+//! Two scopes, one transaction / one undo step each:
+//!
+//! * bare `LAYFRZ` ([`crate::CommandPayload::None`]) freezes at **drawing
+//!   level**: each distinct layer's `frozen` flag, one
+//!   `set_layer_attributes` call per changed layer, so one revision bump per
+//!   layer and **one** [`crate::DrawingUndoRecord`] for the command. The
+//!   `frozen_in_new_viewport` flag and every other attribute are untouched.
+//! * the **Viewports** form ([`crate::SelectionToolPayload::LayFrzViewports`],
+//!   AutoCAD's Settings ▸ Viewports / `Vpfreeze`) freezes the same layers in
+//!   the named viewports of the **active paper layout** by writing each
+//!   viewport's [`cad_db::PaperViewport::layer_overrides`] (`true` = frozen
+//!   there). The layer table is not touched at all — no row write, no `Layer`
+//!   revision — and the whole form is one `set_layout_viewports` call with one
+//!   layout patch, so `LAYTHW`, `VPLAYER` and `LAYVPI` see and clear exactly
+//!   what it wrote. An empty viewport list is the whole layout; an index outside
+//!   the layout is refused (`layfrz.unknown_viewport`), never clamped. The typed
+//!   line `LAYFRZ VP [<index>,<index>,...]` drives this form (bare `LAYFRZ VP`
+//!   is every viewport; `VP` may also be spelled `VIEWPORTS`), with the
+//!   **zero-based** `Layout::viewports` numbering `VPLAYER`'s `[n]` token and
+//!   every payload index already use — no one-based conversion at this boundary.
+//!
+//! Success is `layfrz.applied` with the changed-layer count and the scope; an
+//! all-frozen selection (all overrides already `true` in the targeted viewports,
+//! for the Viewports form) is `layfrz.unchanged`. Work-only.
 //!
 //! ## `LAYTHW`
 //!
@@ -98,12 +139,13 @@
 //! ## `LAYLCK` / `LAYULK`
 //!
 //! "Locks/unlocks the layer of a selected object." Applies to every distinct
-//! layer in the selection, **including the current layer** (locking is a write
-//! permission, not visibility; creating on a locked current layer is then
-//! refused by `cad-db`'s own `layer.locked` rule). Only `locked` changes; every
-//! other attribute is preserved. Already-locked (or already-unlocked) rows are
-//! not staged, and an all-unchanged selection reports `laylck.unchanged` /
-//! `layulk.unchanged` without a write. Unknown layer rows are refused by name.
+//! layer in the selection, named through any drawing space (see above), and
+//! **including the current layer** (locking is a write permission, not
+//! visibility; creating on a locked current layer is then refused by `cad-db`'s
+//! own `layer.locked` rule). Only `locked` changes; every other attribute is
+//! preserved. Already-locked (or already-unlocked) rows are not staged, and an
+//! all-unchanged selection reports `laylck.unchanged` / `layulk.unchanged`
+//! without a write. Unknown layer rows are refused by name.
 //! One revision bump per changed layer, but exactly **one** undo step for the
 //! command. Success is `laylck.applied` / `layulk.applied` with the changed-layer
 //! count. Work-only.
@@ -126,10 +168,12 @@
 
 mod current_layer;
 mod setbylayer;
+mod viewport_freeze;
 
 use super::*;
 
 use super::layer_record::layer_row;
+use crate::SelectionToolPayload;
 use cad_db::ChangeScope;
 
 /// A named, non-capability refusal (`<command>.<code>: <detail>`).
@@ -247,6 +291,135 @@ pub(super) fn selected_distinct_layers(
     Ok(layers)
 }
 
+/// Take the selection snapshot for a **layer-table** command, which names layers
+/// through any drawing space rather than needing a writable entity identity.
+pub(super) fn selection_snapshot_across_spaces(
+    session: &SessionState,
+    prefix: &str,
+    label: &str,
+) -> CadResult<Vec<SelectionRef>> {
+    let references = session.selection.refs().to_vec();
+    if references.is_empty() {
+        return Err(invalid(
+            prefix,
+            "selection",
+            format!(
+                "{label} needs at least one selected object in model space, a paper-space layout or \
+                 a block definition"
+            ),
+        ));
+    }
+    Ok(references)
+}
+
+/// Resolve the layer one selected ref **names** for a layer-table write.
+///
+/// A layer-table command does not need a writable entity identity, only the
+/// layer row the pick names, so this accepts strictly more than
+/// [`ensure_model_space_addressable`]:
+///
+/// * a top-level object in model space **or** a paper-space layout names its
+///   stored layer (the single `entities` table `LAYDEL` filters by layer);
+/// * a block-definition member names the layer row it is stored on;
+/// * a **nested pick** ([`SelectionRef::instance`]) resolves through the one
+///   effective-layer walk the visibility answer uses
+///   ([`crate::picking::ref_effective_layer`]): a member drawn on layer `0`
+///   inside an `INSERT` names the INSERT's layer, which is the layer its
+///   geometry is displayed on.
+///
+/// Refused by name (`<prefix>.not_addressable`): another document's ref, a
+/// sub-element (sub-object selection is not a layer input in this build), a ref
+/// that does not exist, and a nested path that does not resolve — never guessed.
+pub(super) fn layer_named_by(
+    drawing: &DrawingDatabase,
+    command: &Command,
+    reference: &SelectionRef,
+    prefix: &str,
+) -> CadResult<LayerId> {
+    let id = reference.entity.0;
+    if reference.document != command.document {
+        return Err(invalid(
+            prefix,
+            "not_addressable",
+            format!("the selected ref for entity {id} belongs to another document"),
+        ));
+    }
+    if reference.sub_element.is_some() {
+        return Err(unsupported(
+            prefix,
+            "not_addressable",
+            format!(
+                "entity {id} is selected through a sub-element; the layer commands read whole \
+                 objects, not sub-object selections"
+            ),
+        ));
+    }
+    if reference.instance.0.is_empty() {
+        return match drawing.entity(reference.entity) {
+            Some(entity) => Ok(entity.layer),
+            None => Err(invalid(
+                prefix,
+                "not_addressable",
+                format!("entity {id} does not exist in this drawing"),
+            )),
+        };
+    }
+    crate::picking::ref_effective_layer(drawing, drawing.root_layer_scope(), reference).ok_or_else(
+        || {
+            invalid(
+                prefix,
+                "not_addressable",
+                format!(
+                    "entity {id} does not resolve through its block-instance path in this drawing"
+                ),
+            )
+        },
+    )
+}
+
+/// [`layer_named_by`] over a whole selection, first-seen order (so the
+/// diagnostic and the write order follow the user's pick order).
+pub(super) fn selected_distinct_layers_across_spaces(
+    drawing: &DrawingDatabase,
+    command: &Command,
+    references: &[SelectionRef],
+    prefix: &str,
+) -> CadResult<Vec<LayerId>> {
+    let mut layers = Vec::new();
+    for reference in references {
+        let layer = layer_named_by(drawing, command, reference, prefix)?;
+        if !layers.contains(&layer) {
+            layers.push(layer);
+        }
+    }
+    Ok(layers)
+}
+
+/// `LAYFRZ`'s scope: `None` is the drawing-level freeze, `Some(indices)` is the
+/// Viewports form of the active paper layout (an empty list = every viewport).
+///
+/// Only its own scope is accepted; any other payload is a named refusal, never a
+/// silently ignored argument.
+fn layfrz_viewport_scope(command: &Command) -> CadResult<Option<Vec<usize>>> {
+    match &command.payload {
+        CommandPayload::None => Ok(None),
+        CommandPayload::SelectionTool(payload) => match payload.as_ref() {
+            SelectionToolPayload::LayFrzViewports(indices) => Ok(Some(indices.clone())),
+            _ => Err(invalid(
+                "layfrz",
+                "payload",
+                "LAYFRZ accepts only its own Viewports scope",
+            )),
+        },
+        _ => Err(invalid(
+            "layfrz",
+            "payload",
+            "LAYFRZ takes no payload; the current selection is the input and its Viewports form \
+             carries the per-viewport scope",
+        )),
+    }
+}
+
 impl Application {
     /// Dispatch a layer **selection** command.
     pub(crate) fn layer_selection_command(
@@ -270,14 +443,19 @@ impl Application {
 
     /// `LAYFRZ`: freeze every distinct layer in the selection except the current
     /// one. Freezing the current layer is never a partial operation: the whole
-    /// command is refused (`layfrz.current_layer`).
+    /// command is refused (`layfrz.current_layer`) in both scopes.
+    ///
+    /// The scope comes from the payload: bare `LAYFRZ` writes the drawing-level
+    /// `frozen` flag on each distinct layer row, and the Viewports form
+    /// ([`SelectionToolPayload::LayFrzViewports`]) writes the per-viewport
+    /// overrides of the active paper layout instead (see `viewport_freeze`).
     fn layfrz(
         &mut self,
         session: &mut SessionState,
         command: &Command,
     ) -> CadResult<CommandOutcome> {
-        ensure_no_payload(command, "layfrz", "LAYFRZ")?;
-        let references = selection_snapshot(session, "layfrz", "LAYFRZ")?;
+        let viewports = layfrz_viewport_scope(command)?;
+        let references = selection_snapshot_across_spaces(session, "layfrz", "LAYFRZ")?;
         let document_id = command.document;
         let drawing = self
             .workspace
@@ -286,11 +464,20 @@ impl Application {
             .ok_or_else(|| CadError::InvalidInput("document not open".into()))?
             .drawing
             .clone();
-        let layers = selected_distinct_layers(drawing.as_ref(), command, &references, "layfrz")?;
+        let layers = selected_distinct_layers_across_spaces(
+            drawing.as_ref(),
+            command,
+            &references,
+            "layfrz",
+        )?;
 
-        // AutoCAD cannot freeze the current layer. This build refuses the whole
-        // command rather than freezing the other layers and skipping it.
-        if layers.contains(&session.active_layer) {
+        // AutoCAD cannot freeze the current layer *at drawing level*. This build
+        // refuses the whole command rather than freezing the other layers and
+        // skipping it, so an all-or-nothing selection keeps its meaning. The
+        // Viewports form has its own, AutoCAD-consistent rule (the current layer
+        // may be frozen in other viewports but never in the current one): see
+        // `freeze_layers_in_viewports`.
+        if viewports.is_none() && layers.contains(&session.active_layer) {
             let name = drawing
                 .layer(session.active_layer)
                 .map(|row| row.name.as_str())
@@ -299,8 +486,9 @@ impl Application {
                 "layfrz",
                 "current_layer",
                 format!(
-                    "layer '{name}' is the current layer and cannot be frozen; switch the \
-                     current layer first"
+                    "layer '{name}' is the current layer and cannot be frozen at drawing level; \
+                     switch the current layer first, or use the Viewports form to freeze it in \
+                     other viewports"
                 ),
             ));
         }
@@ -312,6 +500,10 @@ impl Application {
                     format!("layer {} does not exist in this drawing", layer.0),
                 ));
             }
+        }
+
+        if let Some(indices) = viewports {
+            return self.freeze_layers_in_viewports(session, command, &layers, &indices);
         }
 
         let (changes, count) =
@@ -344,8 +536,9 @@ impl Application {
                 object: None,
                 code: "layfrz.applied".into(),
                 message: format!(
-                    "LAYFRZ: froze {count} layer(s) in all viewports (one transaction / one \
-                     undo step; Settings/Viewports/Block options are not implemented)"
+                    "LAYFRZ: froze {count} layer(s) at drawing level, so every viewport hides \
+                     them (one transaction / one undo step; per-viewport freeze is the Viewports \
+                     form)"
                 ),
             }],
             measurement: None,
@@ -473,7 +666,9 @@ impl Application {
     }
 
     /// `LAYLCK` / `LAYULK`: set the `locked` flag on every distinct selected
-    /// layer (the current layer included).
+    /// layer (the current layer included). A layer is named through any drawing
+    /// space — model space, a paper-space layout, a block definition or a nested
+    /// pick (`layer_named_by`) — because only the layer row is written.
     fn set_selected_layers_locked(
         &mut self,
         session: &mut SessionState,
@@ -483,7 +678,7 @@ impl Application {
         locked: bool,
     ) -> CadResult<CommandOutcome> {
         ensure_no_payload(command, prefix, label)?;
-        let references = selection_snapshot(session, prefix, label)?;
+        let references = selection_snapshot_across_spaces(session, prefix, label)?;
         let document_id = command.document;
         let drawing = self
             .workspace
@@ -492,7 +687,8 @@ impl Application {
             .ok_or_else(|| CadError::InvalidInput("document not open".into()))?
             .drawing
             .clone();
-        let layers = selected_distinct_layers(drawing.as_ref(), command, &references, prefix)?;
+        let layers =
+            selected_distinct_layers_across_spaces(drawing.as_ref(), command, &references, prefix)?;
         for layer in &layers {
             if drawing.layer(*layer).is_none() {
                 return Err(invalid(

@@ -120,6 +120,9 @@ impl CadSession {
             super::commands::LAYWALK_SELECTOR => self.layer_walk_argument(argument, text),
             super::commands::LTSCALE_SELECTOR => self.linetype_scale_argument(argument, text),
             super::commands::LAYERPMODE_SELECTOR => self.layer_pmode_argument(argument, text),
+            // `LAYFRZ VP [<index>,...]`: the per-viewport freeze scope (AutoCAD's
+            // Settings ▸ Viewports). The selection still names the layers.
+            super::commands::LAYFRZ_SELECTOR => self.layfrz_argument(argument, text),
             // `-LAYER NEW …` / `MAKE` / `ON` … : the command-line layer editor's
             // one-option-per-line write forms (`?` stays the read-only report).
             super::commands::DASH_LAYER_SELECTOR => self.dash_layer_argument(argument, text),

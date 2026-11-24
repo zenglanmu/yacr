@@ -101,6 +101,96 @@ fn ltscale_and_layerpmode_grammars_are_narrow() {
 }
 
 #[test]
+fn layfrz_argument_form_admits_only_the_viewport_scope() {
+    // The whole-layout spelling: bare `VP` (or `VIEWPORTS`) is an empty list.
+    assert_eq!(parse_layfrz_argument("VP"), Some(Vec::new()));
+    assert_eq!(parse_layfrz_argument(" vp "), Some(Vec::new()));
+    assert_eq!(parse_layfrz_argument("VIEWPORTS"), Some(Vec::new()));
+    assert_eq!(parse_layfrz_argument("viewports"), Some(Vec::new()));
+    // Bare and bracketed index lists, zero-based like `VPLAYER`'s `[n]` token.
+    assert_eq!(parse_layfrz_argument("VP 0,1"), Some(vec![0, 1]));
+    assert_eq!(parse_layfrz_argument("vp [0,1]"), Some(vec![0, 1]));
+    assert_eq!(parse_layfrz_argument("VP [2]"), Some(vec![2]));
+    assert_eq!(parse_layfrz_argument("VIEWPORTS 1"), Some(vec![1]));
+    // Duplicates are admitted here and deduped by the application.
+    assert_eq!(parse_layfrz_argument("VP 1,1"), Some(vec![1, 1]));
+    for refused in [
+        "",
+        " ",
+        "ON",
+        "ALL",
+        "VP -1",
+        "VP +1",
+        "VP 1.5",
+        "VP 1e3",
+        "VP 1,,2",
+        "VP 1,",
+        "VP ,1",
+        "VP []",
+        "VP [0,1",
+        "VP 0,1]",
+        "VP [0],[1]",
+        "VP 0 1",
+        "VIEWPORT 0",
+    ] {
+        assert_eq!(parse_layfrz_argument(refused), None, "{refused:?}");
+    }
+
+    assert!(ARGUMENT_SELECTORS.contains(&LAYFRZ_SELECTOR));
+    assert_eq!(LAYFRZ_SELECTOR, "LAYFRZ");
+    assert_eq!(
+        typed_command_argument("LAYFRZ VP 0,1"),
+        Some(("LAYFRZ", "VP 0,1"))
+    );
+    assert_eq!(
+        typed_command_argument("  layfrz\tvp  "),
+        Some(("LAYFRZ", "vp"))
+    );
+    assert_eq!(
+        typed_command_argument("LAYFRZ"),
+        None,
+        "bare LAYFRZ keeps the drawing-level freeze and is name-only"
+    );
+    // The form is an argument of the Work-only command, not a second command.
+    assert!(CommandId::LayFrz.requires_work_mode());
+    assert_eq!(command_name(CommandId::LayFrz), Some("LAYFRZ"));
+    assert_eq!(normalize_command("LAYFRZ VP 0"), None);
+
+    // Dispatch: the typed scope reaches the application's own LAYFRZ refusals
+    // (this harness has no selection), never the funnel's "unsupported".
+    let session = session(Rc::new(FakeFiles {
+        events: RefCell::new(Vec::new()),
+    }));
+    for line in ["LAYFRZ VP", "LAYFRZ VP 0,1", "LAYFRZ VP [1]"] {
+        let error = session.command(line).unwrap_err();
+        assert!(error.contains("layfrz.selection"), "{line}: {error}");
+    }
+    let error = session.command("LAYFRZ VP bogus").unwrap_err();
+    assert!(error.contains("LAYFRZ VP"), "{error}");
+    assert!(error.contains("unsupported CAD command"), "{error}");
+
+    // End to end: the typed scope reaches the **Viewports** writer. A bare,
+    // drawing-level `LAYFRZ` never consults viewports, so
+    // `layfrz.paper_space_required` can only come from the typed line having
+    // carried the per-viewport payload.
+    session
+        .core
+        .controller
+        .borrow_mut()
+        .set_selection(vec![cad_domain::SelectionRef {
+            document: cad_domain::DocumentId(1),
+            entity: cad_domain::EntityId(1),
+            instance: cad_domain::InstancePath::default(),
+            sub_element: None,
+        }])
+        .expect("the demo document's entity 1 is selectable");
+    let error = session.command("LAYFRZ VP").unwrap_err();
+    assert!(error.contains("layfrz.paper_space_required"), "{error}");
+    let error = session.command("LAYFRZ VP 0,1").unwrap_err();
+    assert!(error.contains("layfrz.paper_space_required"), "{error}");
+}
+
+#[test]
 fn the_dash_spellings_are_aliases_not_second_commands() {
     for (alias, id) in [
         ("-LAYMCH", CommandId::LayMCh),

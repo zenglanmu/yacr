@@ -24,7 +24,8 @@ use super::*;
 ///
 /// PEDIT/HATCHEDIT/MEASUREGEOM take one declared option; the text batch takes
 /// `<H> <V>`, a factor, an edge word, a numbering run or a shape; the layer
-/// batch takes its layer-state/laywalk/ltscale/layerpmode grammars and
+/// batch takes its layer-state/laywalk/ltscale/layerpmode grammars, `LAYFRZ`'s
+/// `VP [<index>,...]` viewport scope ([`parse_layfrz_argument`]) and
 /// `-LAYER`'s write options ([`parse_dash_layer_argument`]); a bare selector is
 /// refused by name, never defaulted.
 pub const ARGUMENT_SELECTORS: &[&str] = &[
@@ -167,6 +168,10 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     VPCLIP_SELECTOR,
     VPSCALE_SELECTOR,
     LAYVPI_SELECTOR,
+    // `LAYFRZ VP [<index>,...]` (2026-11-24): the per-viewport freeze scope of
+    // the layer-selection command. An argument form of `LAYFRZ`, not a new
+    // command; the bare selector keeps the drawing-level freeze.
+    LAYFRZ_SELECTOR,
     // `DIMSPACE` is a dimension argument form of its own (not the editing batch).
     DIMSPACE_SELECTOR,
     // The named style tables: the bare selector is the read-only report, and a

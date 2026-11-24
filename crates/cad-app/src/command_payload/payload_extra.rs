@@ -516,6 +516,23 @@ pub enum SelectionToolPayload {
     /// `AUDIT` answers (the `Fix any errors detected?` prompt and `AUDITCTL`).
     /// Contract: [`crate::app_audit`].
     Audit(crate::app_audit::AuditRequest),
+    /// `LAYFRZ`'s **Viewports** option (AutoCAD's Settings ▸ Viewports, the
+    /// `Vpfreeze` column): freeze the selected layers' per-viewport overrides
+    /// instead of the drawing-level layer table.
+    ///
+    /// The list is the **zero-based** viewport indices of the active paper
+    /// layout (the numbering `cad_db::Layout::viewports`, `CVPORT`'s payload
+    /// side and `LAYVPI`'s explicit form already use). An empty list is the
+    /// documented "every viewport of the active layout" scope; a model-space
+    /// session is refused (`layfrz.paper_space_required`) because a per-viewport
+    /// freeze needs a viewport to live in.
+    ///
+    /// Nothing here is a dialog: the option set is the same typed channel every
+    /// other selection tool uses, and the write goes to
+    /// [`cad_db::PaperViewport::layer_overrides`] — the state `VPLAYER` /
+    /// `LAYVPI` / `LAYTHW` already read and write — so there is no second
+    /// per-viewport model.
+    LayFrzViewports(Vec<usize>),
 }
 
 /// A property QSELECT/FILTER can compare.
