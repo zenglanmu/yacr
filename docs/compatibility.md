@@ -890,7 +890,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `TORIENT` | 实现 | 裸命令 Most Readable（归一到 `(-π/2, π/2]`）、`TORIENT <角度>` 绝对旋转、`TORIENT REVERSE/R` 再加 180°（**本项目扩展**）；只改 TEXT/MTEXT rotation，位置不变 | ATTDEF/带属性块因无属性模型不适用（全局范围）；MULTILEADER/标注文字不在 AutoCAD TORIENT 范围内，报告跳过 |
 | `TCASE` | 部分实现 | 裸命令按 Title，`TCASE U/L/T/S/G` 分别大写/小写/标题/句首/切换；保留 MTEXT 转义序列 | 属性定义/标注文字未建模；MULTILEADER 只在可实现时改写 |
 | `TXT2MTXT` | 完整实现 | 选中 Text/MText 排序合并为一个 `AcDbMText`（含 `UNIFORM` 行距），同时删除来源（一条事务/一步撤销） | Settings 对话框与分栏未实现（全局范围）；保留原字符串转义 |
-| `HATCHGENERATEBOUNDARY` | 部分实现 | 每个选中 HATCH 的每个 loop 生成一条同层/同空间、非关联的闭合 LWPOLYLINE（保留 bulge） | 无关联性；无选项提示 |
+| `HATCHGENERATEBOUNDARY` | 完整实现 | 每个选中 HATCH（模型空间或图纸边界）的每个 loop 生成一条同层/同空间、非关联的闭合 LWPOLYLINE（保留 bulge、含内岛）；图纸布局边界走既有 layout 实体写入路径；一条事务/一步撤销 | 无关联性（AutoCAD 亦为非关联）；无交互选项提示 |
 | `GRADIENT` | 完整实现 | 当前选择为闭合边界（整实体 Circle/完整 Ellipse/闭合 Polyline/LINE+ARC 边链），复用 HATCH 创建路径并强制渐变填充（会话 kind/角度/双色 ACI，默认线性 0°、ACI 1→5；测试钉住 SPHERICAL/45°/ACI 3→7 落到存储的 `AcDbHatch`）；一个 `AcDbHatch`、一条事务/一步撤销；边界实体保留 | 全局范围：无渐变预览、无 `-GRADIENT` 选项提示、无 .pat/关联性；非 `+Z` 平面/非闭合按名拒绝 |
 | `HATCHEDIT` | 部分实现 | 恰好一个直接可寻址的模型空间 HATCH；`ANGLE`/`SCALE`/`SOLID`/`GRADIENT` 等既有选项；`ADDBOUNDARIES`/`REMOVEBOUNDARIES` 现在真实：一个选中 hatch + 其余选中闭合实体为边界，重建 loop 集，一条事务/一步撤销 | 无交互对话框；`Origin` 无字段、`Associate`/`Annotative` 无模型、Boundary draw order 拒绝；证据只有契约测试 |
 | `HATCHTOBACK` | 完整实现 | 把所有 HATCH 的 draw order 排到其所在 `SpaceId` 范围内的所有非 HATCH 对象之后（模型空间、各图纸布局、各块定义逐范围规划后一次写入），保留相对顺序；一条事务/一步撤销 | 无 AutoCAD 独立的 Draw Order 表（沿用实体存储的 `draw_order`）；块定义重排对全部块参照生效（模型固有）；无 Draw Order 对话框 |
@@ -908,9 +908,9 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 |---|---|---|---|
 | `JUSTIFYTEXT` / `TJUST` | 部分实现 | `JUSTIFYTEXT <H> <V>`（H∈LEFT/CENTER/RIGHT，V∈BASELINE/BOTTOM/MIDDLE/TOP）；只改 `h_align`/`v_align`，`position` 不动；一条事务/一步撤销；`TJUST` 是同一 `CommandId` 的别名 | 非文字/不可寻址目标逐条 `justifytext.not_text` 跳过（TORIENT 策略）；空选择拒绝；无对话框 |
 | `TSCALE` | 部分实现 | `TSCALE <factor>`；复用 SCALETEXT 的唯一 `scaled_text` 规则（`height` + MText `wrap_width`）；factor=1 为 `tscale.unchanged` 且不开事务 | factor 必须有限且 >0；非文字目标整命令拒绝；无 AutoCAD 的“按参照缩放”交互 |
-| `TEXTALIGN` | 部分实现 | `TEXTALIGN LEFT/RIGHT/CENTER/TOP/MIDDLE/BOTTOM`；把选中 Text/MText 的 `position` 对齐到共同边/中心；一条事务/一步撤销 | 宽/高是**估算**（宽 = `height × 字符数`，高 = `height`，忽略旋转；cad-app 无字形外框 API）；<2 个目标拒绝；无垂直/倾斜的对齐对话框 |
+| `TEXTALIGN` | 完整实现 | 15 个对齐拼写按并集包围盒两轴对齐；`DISTRIBUTE [X\|Y]`（默认 Y）按阅读序等间隙（首尾固定、≥3）；`SETSPACING <d> [X\|Y]` 固定间距（首固定）；`CURRENTVERTICAL`/`CURRENTHORIZONTAL` 按各文本自身 justification 对齐到首个目标；只移动参照点，一条事务/一步撤销 | 无交互 base-object + second-point 步骤（并集包围盒为确定性替代）；宽高为 `height × 字符数` 估算，忽略旋转 |
 | `TCOUNT` | 部分实现 | `TCOUNT <start> <step> [prefix] [suffix]`；按上→下/左→右顺序把每个选中 Text/MText 替换为 `prefix+编号+suffix`；一条事务/一步撤销 | `step` 必须 >0；AutoCAD 的逐项前缀/后缀对话框、Find & Replace 模式未实现；替换整串、不解析格式 run |
-| `TCIRCLE` | 部分实现 | `TCIRCLE CIRCLE/RECTANGLE`；用估算文字外框在文字所在图层建真实 `Circle`（中心=外框中心，半径=半对角线）或闭合 4 顶点 `Polyline`；保留文字；一条事务/一步撤销 | 无 SLOT；无关联性；外框是估算值；无“按对象/按文字”选项 |
+| `TCIRCLE` | 完整实现 | `TCIRCLE CIRCLE\|SLOT\|RECTANGLE [OFFSET <factor>] [VARIABLE\|CONSTANT [BOTH\|WIDTH\|HEIGHT]]`；估算文字外框 + 默认 0.35 偏移因子；在文字图层建 `Circle` / 闭合 `Polyline`（slot 半圆端）或矩形；保留文字；一条事务/一步撤销 | 无关联性（AutoCAD 亦为非关联）；外框是估算值；无交互 Object/Multiple 提示 |
 | `TEXTMASK` | 部分实现 | 为每个选中 Text/MText 用估算外框创建独立 `SemanticGeometry::Mask`（type-key `AcDbWipeout`），`draw_order = 文字 − 1`；一条事务/一步撤销 | 无关联模型（遮罩是独立实体）；无“掩膜偏移/边框”选项；外框估算 |
 | `TEXTUNMASK` | 部分实现 | 只删除**选中**的、落在选中文字估算外框内的 `Mask`；没有选中文字时删除选中的 Mask；一条事务/一步撤销 | 启发式无法证明 Mask 由 TEXTMASK 创建；未选中的 Mask 永不扫描；无关联性 |
 | `MTEDIT` | 部分实现 | `TEXTEDIT` 的别名（同一 `CommandId`/路径）：编辑当前单选的 Text/MText/MULTILEADER 字符串 | 无第二编辑路径；无 AutoCAD 的 MText 就地编辑器/格式工具栏 |
@@ -939,7 +939,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 |---|---|---|---|
 | `QSELECT` | 部分实现 | `QSELECT <PROPERTY> <VALUE>`（TYPE/LAYER/COLOR/LINETYPE，ASCII 不区分大小写）；替换选择；零匹配 = 空选择 + 诊断 | 无 Quick Select 对话框、无 `Append`/`Exclude` 模式、无用户自定义对象类型/特性列表；只枚举顶层模型空间（不展开块成员）；层 off/frozen 不参与过滤 |
 | `FILTER` | 部分实现 | 同 QSELECT 语法，但**并入**现有选择（空选择也可并入） | 无命名过滤器列表/对话框/逻辑组合；只枚举顶层模型空间 |
-| `GETSEL` | 部分实现 | `GETSEL LAYER\|TYPE <name>`；替换选择 | 仅 `LAYER`/`TYPE` 两种特性；无对话框；只枚举顶层模型空间 |
+| `GETSEL` | 完整实现 | `GETSEL LAYER\|TYPE\|COLOR\|LINETYPE\|SPACE <value>`；替换选择；只读（不写库/不升修订/不入历史） | 无对话框；只枚举当前空间顶层实体（声明 scope）；更丰富的 QSELECT/FILTER 特性仍按名拒绝 |
 | `SSX` | 部分实现 | 以**第一个选中对象**的五特性（类型/层/颜色/线型/空间）为模板，把匹配的模型空间对象并入选择 | 只枚举顶层模型空间；空选择/不可寻址模板拒绝；无交互选择提示 |
 | `SELECTCOUNT` | 完整实现 | 只读：统计与第一个选中对象五特性相同的模型空间对象数并报告；图纸布局按 `selectcount.model_space_only` 具名拒绝 | 不修改选择、不写库、无事务；不展开块成员 |
 | `-FIND` | 部分实现 | `-FIND <needle>`；在模型空间 Text/MText/MULTILEADER 中做 ASCII 不区分大小写子串搜索并报告计数/ids | 只读；不解析 MTEXT 格式 run；不搜索属性定义/表格/标注文字 |
@@ -969,7 +969,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 
 | 命令 | 状态 | 结果 | 显式未实现 / 有意偏离 |
 |---|---|---|---|
-| `DONUT` | 部分实现 | 类型化 `DONUT <cx> <cy> <inner> <outer>`；两个同心 `Circle`，一条事务/一步撤销 | 无中心点拾取提示（中心必须键入）；`inner=0` 只建外圆并报 `donut.inner_zero`；无宽度/填充环模型 |
+| `DONUT` | 完整实现 | 类型化 `DONUT <cx> <cy> <inner> <outer>`；用 SOLID 三角网格路径建填充圆盘（`inner=0`，三角扇）或环（`inner>0`，内外环三角带），一条事务/一步撤销 | 无中心点拾取提示（中心必须键入）；无带宽折线表示（用网格面） |
 | `SOLID` | 完整实现 | 3-4 个 `x,y` 点 → 两三角 `Mesh`（type-key `AcDbSolid`），一条事务/一步撤销；导出写**真类记录**：`AcDbSolid`→`0/SOLID`、`AcDbTrace`→`0/TRACE`（均 `100/AcDbTrace`，边界→存储角序末两位互换，三角重复 `13`）；类溯源由导入器 `Solid::is_trace` 保留，DXF 与 DWG 双路径都有导入→导出→再导入往返测试 | 声明式边界：5+ 点、逐点颜色、不在 `+Z` 共面（3D 旋转块内无 OCS 重建）、异三角化 → 保留 polyface 并在 `export.converted.mesh` 里注明类；无厚度/挤出（导入侧标 Partial） |
 | `HELIX` | 部分实现 | 平面 2D 螺旋 `Polyline`（64 段/圈，上限 4096 顶点），一条事务/一步撤销 | `height>0` 的 3D 弹簧按 `helix.3d_not_implemented` 拒绝；无扭转/半径渐变 |
 | `MLINE` | 部分实现 | 2..=1024 点基线，每段每元素一条 `LINE`，拐点按**斜接**偏移（默认接头）；180° 反向 `mline.join_degenerate` | 无 cap/fill/bevel/弧接头（需 `MLSTYLE` 元素/端帽表）；无存储的 `AcDbMline` 实体（导入折叠为 `Compound`） |
@@ -1626,14 +1626,14 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 | 命令 | 结果 | 明示未实现 / 证据边界 |
 | --- | --- | --- |
 | `MASSPROP` | **完整实现（只读；2D 区域 + 精确 3D body）**：逐对象与汇总报告面积、周长、精确包围盒、形心，以及 **`Ix`/`Iy`/`Ixy`（绕各自形心）、`J`、`kx`/`ky`**；汇总再给出**主惯性矩 `I1`/`I2`、主轴 `axis1`/`axis2`、主角 `principal_angle_deg`** 与所用坐标系（`origin/u/v/n`）。二阶矩：圆 `πr⁴/4`、整椭圆 `πa³b/4`/`πab³/4`（旋转到区域系）、闭合折线用 Green 公式 + 每段 bulge 的**圆缺精确矩**（扇形 − 等腰三角形；`α<1e-2` 用级数避免抵消）、HATCH 按环嵌套奇偶符号求和（岛取自身形心矩）、闭合 SPLINE 与导入时被拉直的填充边为**采样并标注**（`exact=false`）；各区域矩先平移到形心，再经一次精确换标 `reexpress` 汇入同一选择坐标系，平动/旋转写错即拒。当前选择为**闭合、共面**的 `CIRCLE` / 完整 `ELLIPSE`（`|sweep| >= 2π − 1e-9`）/ 闭合 `POLYLINE`（任意 bulge，同一平面）。逐对象与汇总诊断报告**面积、周长、精确包围盒（min/max）、形心**；圆/椭圆用解析值，bulged 闭合折线用 `cad_geometry::measure_bulged_ring_area` 的精确面积、直线+圆弧精确周长、直线边+圆缺一阶矩形心。椭圆周长是 **Ramanujan 第二近似**，以 `massprop.approx_ellipse_perimeter` 明示，不是精确椭圆积分。空选择 `massprop.selection`；跨对象法向（符号无关）/标高不一致 `massprop.not_coplanar`；开放折线/圆弧/椭圆弧/样条/文字/块参照/填充/标注/无精确 B-Rep 的 3D 几何/不可寻址引用分别按名拒绝。**无**数据库写、revision、撤销或 `ChangeSet`；Viewer 与 Work 均可用 | **body 与区域是两条报告形状（C3a，2026-11-17）**：选择**全部**为 `Body3d{Solid, Exact}` 时，逐体经**注入的**模型器**同步**报**体积、表面积、质心、`Ixx`/`Iyy`/`Izz`/`Iyz`/`Izx`/`Ixy`（绕形心）、密度与质量**（density 1.0、请求相对精度 1e-6，明写“估计、不是已证明的界”；无惯性张量时写 `NOT REPORTED`；**显示网格永不积分**），行码 `massprop.object`；稳定拒绝 `massprop.body_modeler_unavailable`（载体无模型器）/`body_not_liftable`（模型器拒绝该 B-Rep：曲面已可 lift，剩下的是无 `(u,v)` box 的曲面面、无精确 pcurve 的边界、多壳/空腔等结构性原因）/`body_kernel_failed`/`body_not_exact`/`body_not_solid`/`mixed_selection`（body 与平面区域混选）。**区域报告仍无体积**：`massprop.solid_unsupported` 仍是区域路径对体积/质量/密度/3D 惯性矩的具名拒绝；`Add`/`Subtract` 区域组合与 `.mpr` 文件（交互提示环/文件输出通道）仍未建模。退化面积 `massprop.inertia_degenerate`。证据：区域为源码 + `cad_app`/`cad_geometry` 契约测试（矩形 `Ix=bh³/12`、椭圆 `3π/4`/`27π/4`、旋转 3×4 的 `Ix=Iy=12.5`/`Ixy=−3.5`/主轴 16/9 与 45°、平行轴合成、样条采样标注、带岛填充 `Ix=16−2/3`）；body 为 `cad-app` 契约 + `cad-cli-tools` **真实内核**的 `solid_command` 契约（BOX 报 `volume=1.000000`/`surface_area=6.000000`/形心 0.5³，CYLINDER 报 `volume=62.831853 surface_area=87.964594`，即 20π/28π）；无 GUI/真实图纸/像素证据 |
-| `MEASUREGEOM` | **部分实现（选项路由）**：`MEASUREGEOM DISTANCE\|ANGLE\|AREA\|POLYLINE` 发送与 `DIST`/`MEASUREANGLE`/`AREA`/`MEASUREPOLYLINE` **相同**的 `BeginMeasurement` 请求（不是第二套测量引擎）；`MEASUREGEOM RADIUS` 只读报告当前选择中**恰好一个** `ARC`/`CIRCLE` 的圆心、半径、直径、圆周长（圆弧另报弧长，代码 `measuregeom.radius`）。裸名 `measuregeom.needs_option`；未知/缩写选项由 `invalid_measuregeom_argument_reason` 列出六个完整选项。只接受完整选项词（大小写不敏感），**不接受**单字母缩写 | **未实现**：`VOLUME`（本构建无 3D 实体/体积模型，显式 `Unsupported` `measuregeom.volume_unsupported`，绝不编造数值）；AutoCAD 其它 `MEASUREGEOM` 选项与动态测量未接线。证据为 `cad-ui-core` 路由契约（每个选项启动与基选择子相同的 `tool.key`）+ `cad_app` RADIUS/VOLUME 契约测试；无真机/像素/性能证据 |
+| `MEASUREGEOM` | **完整实现（选项路由 + 只读报告）**：`MEASUREGEOM DISTANCE\|ANGLE\|AREA\|POLYLINE` 发送与 `DIST`/`MEASUREANGLE`/`AREA`/`MEASUREPOLYLINE` **相同**的 `BeginMeasurement` 请求；`RADIUS` 只读报告单个 `ARC`/`CIRCLE`；`VOLUME` 走与 `MASSPROP` **相同**的单体精确 body 路径（`mass_prop_bodies`/`integrate_body`）报告体积/表面积/质心 | **未实现**：多体选择（`measuregeom.volume.multiple`）、非实体选择（`measuregeom.volume.unsupported`）、无精确 B-Rep/非 solid 拓扑（沿用 `massprop.body_*` 具名拒绝）；AutoCAD 其它 `MEASUREGEOM` 选项与动态测量未接线。证据为 `cad-ui-core` 路由契约 + `cad_app` RADIUS/VOLUME 契约；无真机/像素/性能证据 |
 
 ### 2026-11-09 Wave 4 扩展命令（真实 2D 编辑 + 具名拒绝）
 
 | 命令 | 结果 | 明示未实现 / 证据边界 |
 | --- | --- | --- |
-| `CENTERMARK` | **部分实现**：每个选中顶层模型空间 `CIRCLE`/`ARC` 圆心创建两条交叉 `LINE`，臂长 = 半径 **10%**（声明规则）；一条事务/一步撤销 | 无关联式 CENTERMARK 对象、无可配置尺寸 |
-| `CENTERLINE` | **部分实现**：恰好两条非退化 `LINE`，平行容差内；创建一条中间 `LINE`，跨两条投影重叠段；一条事务/一步撤销 | 无延伸/间隙选项；非平行/混合选择按名拒绝 |
+| `CENTERMARK` | **完整实现**：每个选中顶层模型空间 `CIRCLE`/`ARC` 圆心创建两条交叉 `LINE`；默认臂长 = 半径 **10%**，`ARM <distance>` 或 `<factor>x` 可配；一条事务/一步撤销 | 产出普通 `LINE`，**非关联**（AutoCAD 的 associative 对象未建模，声明边界） |
+| `CENTERLINE` | **完整实现**：恰好两条非退化 `LINE`，平行容差内；创建一条中间 `LINE`，跨两条投影重叠段；`EXTENSION <d>`/`GAP <d>` 可调；一条事务/一步撤销 | 产出普通 `LINE`，**非关联**（AutoCAD 的 associative 对象未建模，声明边界）；非平行/混合选择按名拒绝 |
 | `NCOPY` | **部分实现**：选中 `INSERT` 的可见成员几何按世界变换复制到模型空间（新顶层实体）；一条事务/一步撤销 | 无嵌套选择界面；非 INSERT 按名拒绝 |
 | `COPYTOLAYER` | **部分实现**：首个选中实体的图层为目标；其余选中顶层模型空间实体以新 id 复制到该层，原实体不变；一条事务/一步撤销 | 无图层提示；块成员/图纸空间按名拒绝 |
 | `-COPYTOLAYER` | **部分实现**：与 `COPYTOLAYER` 相同的实现，命令行拼写；一条事务/一步撤销 | 同上 |
@@ -1656,7 +1656,7 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 | `CLIP` | **完整实现**：`RECT`（目标自身裁剪空间）/`POLY`（仅光栅图像，凸且不自交）/`ON`/`OFF`/`DELETE`，分派到既有 `IMAGECLIP`/`XCLIP` 写路径，一条事务/一步撤销 | 块参照的多边形裁剪按名拒绝（`clip.polygon_block_not_renderable`，表示层只画矩形块裁剪）；旋转/倾斜参照沿用 `xclip.rotation_not_renderable`/`xclip.non_xy_plane`；图像 ON/OFF 无字段；PDF/DGN/DWF 底图未建模 |
 | `CLIPIT` | **完整实现**：预选择 1 个图像目标 + 闭合边界（`LINE`/`ARC`/`LWPOLYLINE`，复用 JOIN 链与 `VPCLIP` 多边形校验），一条事务/一步撤销 | 块参照目标按名拒绝（`clipit.polygon_block_not_renderable`，用 `CLIP RECT`）；开放/自交/退化/非凸/多目标/无边界具名拒绝；圆弧边界为 32 弦近似 |
 | `REGION` | **部分实现（具名拒绝）**：`region.unsupported: this build has no Region geometry model` | 同上 |
-| `ADDSELECTED` | **部分实现（具名拒绝）**：`addselected.unsupported: add-selected needs per-type creation prompts that this build does not model` | 同上 |
+| `ADDSELECTED` | **完整实现**（后续 Wave 26 落地） | 点锚定型 LINE/CIRCLE/ARC/POLYLINE/INSERT/POINT/TEXT/MTEXT 新建，保留五项属性；一条事务/一步撤销 | 其它种类按名拒绝；仅模型空间 |
 | `WBLOCK` | **部分实现（具名拒绝）**：`wblock.unsupported: writing a block definition to a separate drawing file is not implemented` | 同上 |
 | `-WBLOCK` | **部分实现（具名拒绝）**：`-wblock.unsupported: writing a block definition to a separate drawing file is not implemented` | 同上 |
 | `BSAVE` | **部分实现（具名拒绝）**：`bsave.unsupported: this build has no block editor` | 同上 |
@@ -2348,7 +2348,7 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 | `SHAPE` | **完整实现** | `SHAPE <name-or-code> <x> <y> [size] [rotation_deg]` 创建 `SemanticGeometry::Shape` | 按 name 只建行不解析（本构建 SHX 只保留编号）；表示层保持既有 `Partial` |
 | `SHP2BLK` | **完整实现** | 选中 SHAPE → `(font, code)` 块（轮廓多段线）+ 每个源位置 INSERT，删除源 | 需宿主安装字体引擎；块不链接回 SHX 字体 |
 | `MINSERT` | **完整实现** | 矩形 INSERT 阵列（ARRAYRECT 单元规则 + INSERT `T(-base)`），一条事务 | 独立副本（域无 MINSERT 实体，非关联） |
-| `ADDSELECTED` | 部分实现 | 点锚定型 LINE/CIRCLE/POINT/TEXT/MTEXT 新建，保留五项属性 | ARC/POLYLINE/INSERT 等按名拒绝；仅模型空间 |
+| `ADDSELECTED` | 完整实现 | 点锚定型 LINE/CIRCLE/ARC/POLYLINE/INSERT/POINT/TEXT/MTEXT 新建，保留图层/颜色/线型/线宽/透明度；ARC 以圆心、POLYLINE 以首顶点、INSERT 以插入点锚定 | 其它种类（ELLIPSE/SPLINE/HATCH 等）按名拒绝；仅模型空间 |
 | `IMAGECLIP` | 完整实现 | 矩形 + `POLY` N 边形 + `OFF`；世界坐标经 u/v 映射；非凸环耳切成凸片段（每片段与图像矩形各自求交），面积精确、凹口为空、`Completeness::Complete` 且无诊断；凸环顶点逐字节不变 | **全局范围**：无交互拖拽裁剪顶点（grip 编辑未建模）、`inside=false`（补集裁剪）未授权；自交/点数不足/零面积按 `image.clip_*` 具名拒绝 |
 | `APERTURE` | **完整实现** | `APERTURE <n>` 写会话孔径，snap/候选拾取真实使用 | `PICKBOX` 保持独立；未显式设置时配置默认值不变 |
 | `PTYPE` | **完整实现** | `PTYPE <code> [size]` 委托 PDMODE/PDSIZE 头部写入 | 两次 header 写、无 header undo 补丁 |
@@ -2565,7 +2565,7 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 
 | 命令 | 状态 | 当前行为 | 剩余边界 |
 | --- | --- | --- | --- |
-| `TEXTALIGN` | 部分实现 | 接受 15 个对齐拼写（原 6 个单轴 + `TOPLEFT/TOPCENTER/TOPRIGHT/MIDDLELEFT/MIDDLECENTER/MIDDLERIGHT/BOTTOMLEFT/BOTTOMCENTER/BOTTOMRIGHT`）；组合模式按选择并集包围盒在两轴对齐；`DISTRIBUTE [X|Y]`（默认 Y）按阅读序做等间隙分布，首尾固定、至少 3 个目标；只移动参照点（内容/字高/旋转/justification 不变），一条事务/一步撤销 | 无交互 base-object + second-point 步骤（用并集包围盒作为确定性替代）；`SETSPACING`/`CURRENTVERTICAL`/`CURRENTHORIZONTAL` 解析后具名拒绝；没有 oblique 选项（AutoCAD 也无）；宽高为 `height × 字符数` 估算 |
+| `TEXTALIGN` | 完整实现 | 15 个对齐拼写按并集包围盒两轴对齐；`DISTRIBUTE [X\|Y]`（默认 Y）按阅读序等间隙（首尾固定、≥3）；`SETSPACING <d> [X\|Y]` 固定间距（首固定）；`CURRENTVERTICAL`/`CURRENTHORIZONTAL` 按各文本自身 justification 对齐到首个目标；只移动参照点，一条事务/一步撤销 | 无交互 base-object + second-point 步骤（并集包围盒为确定性替代）；宽高为 `height × 字符数` 估算，忽略旋转 |
 ### 2026-11-12 XCLIP（display-only 块参照裁剪）
 
 | 命令 | 状态 | 当前行为 | 剩余边界 |
