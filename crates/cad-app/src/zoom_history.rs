@@ -9,29 +9,31 @@
 //! different cameras and "the previous view" is a statement about one of them.
 //!
 //! ## What is recorded, and when
-//! Exactly one rule: **before** a **discrete** view change, the pre-change view
-//! is pushed. The discrete change sites are the ones the user names a view with:
+//! Exactly one rule: **before** a view change, the pre-change view is pushed.
+//! The change sites are:
 //!
 //! * `FIT` / `ZOOM ALL` / `ZOOM EXTENTS` ([`crate::CommandId::FitDrawing`]),
-//! * `ZOOM <factor>` and the `ZOOMIN` / `ZOOMOUT` button steps,
+//! * `ZOOM <factor>` (including a wheel notch) and the `ZOOMIN` / `ZOOMOUT`
+//!   button steps,
 //! * `ZOOM WINDOW` ([`crate::CommandPayload::ZoomWindow`]),
-//! * `STANDARDVIEW`, `SWITCH2D3D`, `PROJECTION` and `RESETVIEW`.
+//! * `STANDARDVIEW`, `SWITCH2D3D`, `PROJECTION` and `RESETVIEW`,
+//! * a continuous **pan** or **orbit** run: the first command records the
+//!   pre-run view and the rest merge into that same step (see below).
 //!
 //! A change that frames nothing (`FIT` of an empty drawing) or that is refused
 //! (an out-of-grammar factor, a 3D `ZOOM WINDOW`, a degenerate rectangle) pushes
 //! **nothing**: otherwise `ZOOM PREVIOUS` would burn presses on phantom steps
 //! that restore the view the user is already looking at.
 //!
-//! ## Explicit deviation from AutoCAD: discrete views only
-//! **Pans, wheel zooms and orbit drags never push a step.** AutoCAD's `ZOOM
-//! Previous` walks back through the zoom/pan history it accumulated
-//! interactively; this build records only the *discrete* view commands listed
-//! above. Continuous navigation (a middle-drag pan, a wheel notch, a 3D orbit
-//! drag) is one command per pointer event, so recording it would turn a single
-//! gesture into hundreds of steps and `ZOOM PREVIOUS` into "undo one pixel of
-//! my drag". This is a deliberate divergence, not parity: an interactive pan
-//! does not become restorable, and the history may therefore be older than
-//! AutoCAD's would be.
+//! ## Continuous pan/orbit runs
+//! Pointer move events dispatch one `PAN`/`ORBIT` command each, so recording
+//! every event would turn one drag into hundreds of one-pixel steps. The
+//! session's `NavigationStepKind` marker makes the first command of a run record
+//! the pre-run view and later commands of the same kind merge. A pointer release
+//! (`cancel_tool`), a switch between pan and orbit, or any other command closes
+//! the run. Pinch is continuous multi-touch with no begin/end signal in this
+//! build and is deliberately not recorded; a ViewCube `cad_orbit` drag also has
+//! no end signal, so two ViewCube drags with no intervening command can merge.
 //!
 //! ## Bound
 //! [`ZOOM_HISTORY_CAP`] = **16** snapshots, the same bound and the same

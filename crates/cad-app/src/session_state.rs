@@ -4,10 +4,12 @@
 use cad_db::MeasurementRecord;
 use cad_domain::*;
 mod accessors;
+mod clipboard;
 mod drafting_extras;
 mod draw_plan;
 mod erase_snapshot;
 mod modify_options;
+mod navigation;
 // The bounded session-only in-place block edit (`REFEDIT`), split out so this
 // file stays inside the code-size ceiling.
 mod refedit;
@@ -30,36 +32,19 @@ use crate::selection::SelectionSet;
 use crate::tool_state::{DrawCapture, ToolSnapshot, ToolState};
 use crate::view_states::ViewStates;
 use crate::{AppMode, CommandId, ExtendedCommandId};
+pub use clipboard::ClipboardEntry;
 pub use drafting_extras::{ChamferMethod, DraftingExtras, IsoPlane, WipeoutFrames};
 pub use erase_snapshot::{EraseEntry, EraseSnapshot};
 pub use modify_options::ModifyOptions;
+pub(crate) use navigation::NavigationStepKind;
 pub use refedit::{RefEditActive, RefEditMember, RefEditSession};
 pub use sysvar_monitor::SysVarMonitor;
 pub use view_extras::{PbrEnvironment, ViewExtras, VisualStyleToken};
-pub use viewport_marker::ViewportMarkers;
+pub use viewport_marker::{LayoutViewportRef, ViewportMarkers};
 
 // The viewport-targeting resolver the `CVPORT` consumers (`LAYVPI`, `VPSCALE`,
 // `VPCLIP`) share. Crate-internal: it is a command-layer helper, not session API.
 pub(crate) use viewport_marker::target_viewport;
-
-/// One entity captured into the in-process clipboard: the row plus the
-/// per-entity render/visibility state the row does **not** carry.
-#[derive(Debug, Clone)]
-pub struct ClipboardEntry {
-    pub entity: cad_db::DbEntity,
-    pub display: cad_db::EntityDisplayState,
-}
-
-/// The session-only "maximized layout viewport" marker (`VPMAX` / `VPMIN`).
-///
-/// `index` is the zero-based viewport index inside the layout. The command layer
-/// uses index `0` because this build has no per-viewport selection model; the
-/// marker is a display hint for a host, never drawing data.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct LayoutViewportRef {
-    pub layout: LayoutId,
-    pub index: usize,
-}
 
 pub struct SessionState {
     pub document: DocumentId,
@@ -90,6 +75,9 @@ pub struct SessionState {
     pub layer_states: LayerStates,
     /// Session-only named views (`VIEW` / `VIEWGO`), at most 32.
     pub view_states: ViewStates,
+    /// The continuous pan/orbit run currently open for one `ZOOM PREVIOUS`
+    /// step; session state only (see [`NavigationStepKind`]).
+    navigation_step: Option<NavigationStepKind>,
     /// Session-only named entity groups (`GROUP` / `UNGROUP` / `GROUPEDIT`),
     /// at most 64. Never a DWG group object.
     pub groups: EntityGroups,
@@ -296,6 +284,7 @@ impl SessionState {
             layer_history: LayerOverrideHistory::new(),
             layer_states: LayerStates::new(),
             view_states: ViewStates::new(),
+            navigation_step: None,
             groups: EntityGroups::new(),
             regen_generation: 0,
             maximized_viewport: None,
@@ -575,6 +564,9 @@ impl SessionState {
             self.tool = ToolState::Idle;
             self.bump_tool_generation();
         }
+        // A pointer release ends the continuous pan/orbit run; the next one
+        // records its own pre-change step even without an intervening command.
+        self.navigation_step = None;
         Ok(())
     }
 
@@ -723,6 +715,7 @@ impl SessionState {
     pub fn begin_pan(&mut self) {
         self.tool = ToolState::Panning;
         self.bump_tool_generation();
+        self.navigation_step = None;
     }
 
     /// Clear only the active draw/measurement cursor, preserving capture and generation.

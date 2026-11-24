@@ -127,46 +127,99 @@ fn an_empty_history_is_a_named_diagnostic_and_changes_nothing() {
 }
 
 #[test]
-fn pans_and_orbit_drags_record_no_step() {
+fn pans_and_orbit_runs_record_one_step_per_gesture() {
     let (mut app, mut session) = app_with_extent();
     run(&mut app, &mut session, CommandId::FitDrawing);
     let recorded = steps(&app);
     assert_eq!(recorded, 1);
 
-    // A pan, a modal-pan replacement and a 2D/3D round trip are navigation, but
-    // only the *discrete* switch records: the pans are the divergence.
-    for delta in [
-        Point3 {
-            x: 15.0,
-            y: -7.0,
-            z: 0.0,
-        },
-        Point3 {
-            x: -3.0,
-            y: 2.0,
-            z: 0.0,
-        },
-    ] {
-        app.execute(
-            &mut session,
-            command(CommandId::Pan, CommandPayload::Points(vec![delta])),
-        )
-        .unwrap();
-        assert_eq!(steps(&app), recorded, "a pan must not record a step");
-    }
+    // One continuous pan run: the first command records the pre-change view and
+    // the rest merge into that step (pointer moves are one command per event).
+    let pan = |delta: Point3| CommandPayload::Points(vec![delta]);
+    app.execute(
+        &mut session,
+        command(
+            CommandId::Pan,
+            pan(Point3 {
+                x: 15.0,
+                y: -7.0,
+                z: 0.0,
+            }),
+        ),
+    )
+    .unwrap();
+    assert_eq!(steps(&app), recorded + 1, "the first pan records one step");
+    app.execute(
+        &mut session,
+        command(
+            CommandId::Pan,
+            pan(Point3 {
+                x: -3.0,
+                y: 2.0,
+                z: 0.0,
+            }),
+        ),
+    )
+    .unwrap();
+    assert_eq!(steps(&app), recorded + 1, "the same run merges");
 
-    // Enter 3D (one discrete step), then orbit: the orbit is a drag, not a view.
+    // A pointer release ends the run (`cancel_tool` is the host's end call).
+    session.cancel_tool().unwrap();
+    app.execute(
+        &mut session,
+        command(
+            CommandId::Pan,
+            pan(Point3 {
+                x: 5.0,
+                y: 0.0,
+                z: 0.0,
+            }),
+        ),
+    )
+    .unwrap();
+    assert_eq!(
+        steps(&app),
+        recorded + 2,
+        "a new pan run records a new step"
+    );
+
+    // Enter 3D (one discrete step), then one orbit run.
+    session.cancel_tool().unwrap();
     run(&mut app, &mut session, CommandId::Switch2d3d);
     let after_switch = steps(&app);
-    assert_eq!(after_switch, recorded + 1);
-    for (yaw, pitch) in [(0.1, 0.05), (0.2, -0.1), (-0.3, 0.2)] {
+    assert_eq!(after_switch, recorded + 3);
+    for (index, (yaw, pitch)) in [(0.1, 0.05), (0.2, -0.1), (-0.3, 0.2)]
+        .into_iter()
+        .enumerate()
+    {
         app.execute(
             &mut session,
             command(CommandId::Orbit, CommandPayload::Orbit { yaw, pitch }),
         )
         .unwrap();
-        assert_eq!(steps(&app), after_switch, "an orbit must not record a step");
+        assert_eq!(
+            steps(&app),
+            after_switch + 1,
+            "orbit {index} is part of the same run"
+        );
     }
+    session.cancel_tool().unwrap();
+    app.execute(
+        &mut session,
+        command(
+            CommandId::Orbit,
+            CommandPayload::Orbit {
+                yaw: 0.1,
+                pitch: 0.0,
+            },
+        ),
+    )
+    .unwrap();
+    assert_eq!(
+        steps(&app),
+        after_switch + 2,
+        "a new orbit run records a new step"
+    );
 }
 
 #[test]
