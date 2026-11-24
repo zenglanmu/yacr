@@ -86,11 +86,17 @@
 //! ## `LAYFRZ`
 //!
 //! "Freezes the layer of selected objects." Applies to **every distinct layer**
-//! in the selection, named through any drawing space (see above). The current
-//! layer can never be frozen, so when the selection contains it the whole
-//! command is refused (`layfrz.current_layer`) rather than partially applied —
-//! in both scopes below (`VPLAYER`/`LAYVPI` stay the per-viewport route for the
-//! current layer, exactly as AutoCAD requires its current viewport to keep it).
+//! in the selection, named through any drawing space (see above).
+//!
+//! The current layer follows AutoCAD's own two rules:
+//!
+//! * at **drawing level** it can never be frozen, so when the selection contains
+//!   it the whole command is refused (`layfrz.current_layer`) rather than
+//!   partially applied;
+//! * in the **Viewports** form it may be frozen in the layout's *other*
+//!   viewports, but not in the current one (`layfrz.current_layer` again, naming
+//!   that viewport) — the viewport being worked in keeps the current layer
+//!   visible.
 //!
 //! Two scopes, one transaction / one undo step each:
 //!
@@ -107,7 +113,11 @@
 //!   revision — and the whole form is one `set_layout_viewports` call with one
 //!   layout patch, so `LAYTHW`, `VPLAYER` and `LAYVPI` see and clear exactly
 //!   what it wrote. An empty viewport list is the whole layout; an index outside
-//!   the layout is refused (`layfrz.unknown_viewport`), never clamped.
+//!   the layout is refused (`layfrz.unknown_viewport`), never clamped. The typed
+//!   line `LAYFRZ VP [<index>,<index>,...]` drives this form (bare `LAYFRZ VP`
+//!   is every viewport; `VP` may also be spelled `VIEWPORTS`), with the
+//!   **zero-based** `Layout::viewports` numbering `VPLAYER`'s `[n]` token and
+//!   every payload index already use — no one-based conversion at this boundary.
 //!
 //! Success is `layfrz.applied` with the changed-layer count and the scope; an
 //! all-frozen selection (all overrides already `true` in the targeted viewports,
@@ -461,12 +471,13 @@ impl Application {
             "layfrz",
         )?;
 
-        // AutoCAD cannot freeze the current layer. This build refuses the whole
-        // command rather than freezing the other layers and skipping it, for the
-        // drawing-level scope and the per-viewport scope alike: the current layer
-        // keeps its visible state in the current viewport by definition, and
-        // `VPLAYER`/`LAYVPI` are the per-viewport route for it.
-        if layers.contains(&session.active_layer) {
+        // AutoCAD cannot freeze the current layer *at drawing level*. This build
+        // refuses the whole command rather than freezing the other layers and
+        // skipping it, so an all-or-nothing selection keeps its meaning. The
+        // Viewports form has its own, AutoCAD-consistent rule (the current layer
+        // may be frozen in other viewports but never in the current one): see
+        // `freeze_layers_in_viewports`.
+        if viewports.is_none() && layers.contains(&session.active_layer) {
             let name = drawing
                 .layer(session.active_layer)
                 .map(|row| row.name.as_str())
@@ -475,8 +486,9 @@ impl Application {
                 "layfrz",
                 "current_layer",
                 format!(
-                    "layer '{name}' is the current layer and cannot be frozen; switch the \
-                     current layer first (VPLAYER/LAYVPI freeze the current layer per viewport)"
+                    "layer '{name}' is the current layer and cannot be frozen at drawing level; \
+                     switch the current layer first, or use the Viewports form to freeze it in \
+                     other viewports"
                 ),
             ));
         }

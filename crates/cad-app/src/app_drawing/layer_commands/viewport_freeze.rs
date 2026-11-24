@@ -16,7 +16,18 @@
 //!   option is likewise unavailable from model space);
 //! * `layfrz.no_viewport` — the layout has no viewport at all;
 //! * `layfrz.unknown_viewport` — an explicit index outside
-//!   [`cad_db::Layout::viewports`]; never clamped to the first viewport.
+//!   [`cad_db::Layout::viewports`]; never clamped to the first viewport;
+//! * `layfrz.current_layer` — the selection contains the current layer **and**
+//!   the target set includes the session `CVPORT` viewport. AutoCAD's own rule:
+//!   the current layer may be frozen in the layout's other viewports, but the
+//!   viewport being worked in must keep it visible. Freezing it in other
+//!   viewports is therefore allowed here (the drawing-level bare form still
+//!   refuses the current layer outright);
+//! * `layfrz.current_viewport_out_of_range` — the selection contains the current
+//!   layer and the stored `CVPORT` marker no longer names a viewport of this
+//!   layout, so which viewport is "current" cannot be answered honestly (never
+//!   clamped to the first; a stale marker is not a reason to refuse a freeze the
+//!   current layer has no say in).
 //!
 //! The empty index list is the documented "every viewport of the active layout"
 //! scope. An already-frozen state is `layfrz.unchanged` and opens no
@@ -24,9 +35,9 @@
 //! as one [`cad_db::LayoutPatch`], so the command is one revision / one undo
 //! step like the drawing-level form.
 //!
-//! The current layer is refused by the caller before this write (see
-//! `Application::layfrz`): `VPLAYER` / `LAYVPI` remain the per-viewport route for
-//! it.
+//! The current-layer rule of this scope is checked here (it needs the layout's
+//! `CVPORT` marker); the drawing-level bare form keeps its own, stricter
+//! refusal in `Application::layfrz`.
 
 use super::*;
 
@@ -34,6 +45,7 @@ use cad_history::layout_patch;
 
 use crate::app_drawing::{layout_row, next_transaction_id};
 use crate::app_layout::{layout_viewports, require_paper_space};
+use crate::session_state::target_viewport;
 
 impl Application {
     /// Freeze `layers` in `targets` viewports of the active paper layout.
@@ -84,6 +96,39 @@ impl Application {
         }
         wanted.sort_unstable();
         wanted.dedup();
+
+        // AutoCAD's rule for this scope: the current layer may be frozen in the
+        // layout's **other** viewports, but never in the current one (the
+        // viewport the user is working in keeps the current layer visible). The
+        // `CVPORT` marker is resolved only when that rule can actually decide this
+        // command — a stale marker cannot refuse a freeze it has no say in — and
+        // then it is validated, never clamped, so it is reported rather than
+        // guessed.
+        if layers.contains(&session.active_layer) {
+            let current = target_viewport(
+                layout_id,
+                None,
+                session.viewport_marker(layout_id),
+                viewport_count,
+                "layfrz",
+            )?;
+            if wanted.contains(&current) {
+                let name = drawing
+                    .layer(session.active_layer)
+                    .map(|row| row.name.as_str())
+                    .unwrap_or("<unknown>");
+                return Err(invalid(
+                    "layfrz",
+                    "current_layer",
+                    format!(
+                        "layer '{name}' is the current layer and cannot be frozen in the current \
+                         viewport (viewport {current} of layout {}); freeze it in another viewport \
+                         or switch the current layer first",
+                        layout_id.0
+                    ),
+                ));
+            }
+        }
 
         let mut changed = false;
         for index in &wanted {

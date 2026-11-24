@@ -462,19 +462,22 @@ fn layfrz_viewports_form_refuses_without_writing() {
         "nothing was frozen before the bad index was reported"
     );
 
-    // The current layer stays refused in this scope too.
+    // The current layer is refused in the **current** viewport (CVPORT 1 =>
+    // zero-based 0); the other-viewport branch has its own test below.
     session.active_layer = LayerId(5);
     let before = state(&app);
     let error = execute(
         &mut app,
         &mut session,
         CommandId::LayFrz,
-        viewports_scope(&[1]),
+        viewports_scope(&[0]),
     )
-    .expect_err("the current layer cannot be frozen");
-    assert!(refusal(error).starts_with("layfrz.current_layer:"));
+    .expect_err("the current layer cannot be frozen in the current viewport");
+    let message = refusal(error);
+    assert!(message.starts_with("layfrz.current_layer:"), "{message}");
+    assert!(message.contains("current viewport"), "{message}");
     assert_untouched(&app, before);
-    assert!(viewport_overrides(&app, LayoutId(1), 1).is_empty());
+    assert!(viewport_overrides(&app, LayoutId(1), 0).is_empty());
 
     // Any other payload is refused by name, never ignored.
     session.active_layer = LayerId(0);
@@ -487,6 +490,153 @@ fn layfrz_viewports_form_refuses_without_writing() {
     .expect_err("a foreign payload is refused");
     assert!(refusal(error).starts_with("layfrz.payload:"));
     assert_untouched(&app, before);
+}
+
+/// AutoCAD's rule for the Viewports scope: the current layer may be frozen in
+/// the layout's **other** viewports (the one being worked in keeps it visible).
+/// The bare, drawing-level form keeps its stricter all-or-nothing refusal, which
+/// `layfrz_refuses_the_whole_command_when_the_current_layer_is_selected` pins.
+#[test]
+fn layfrz_viewports_form_allows_the_current_layer_in_other_viewports() {
+    let (mut app, mut session) = multi_space_app([Vec::new(), Vec::new()]);
+    session.active_space = SpaceId::Paper(LayoutId(1));
+    select(&mut app, &mut session, &[2]);
+    // The paper-space member is on DOORS, which is also the current layer here.
+    session.active_layer = LayerId(5);
+    assert_eq!(
+        session.viewport_marker(LayoutId(1)),
+        0,
+        "the default CVPORT marker is the layout's first viewport"
+    );
+    let before = state(&app);
+
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::LayFrz,
+        viewports_scope(&[1]),
+    )
+    .expect("the current layer may be frozen in another viewport");
+
+    assert_eq!(
+        viewport_overrides(&app, LayoutId(1), 1).get(&LayerId(5)),
+        Some(&true),
+        "the other viewport receives the override"
+    );
+    assert!(
+        viewport_overrides(&app, LayoutId(1), 0).is_empty(),
+        "the current viewport keeps the current layer"
+    );
+    assert!(
+        !layer_attributes(&app, LayerId(5)).frozen,
+        "the layer table is untouched"
+    );
+    assert_eq!(revision(&app), Revision(before.0 .0 + 1));
+    assert_eq!(undo_depth(&app), before.1 + 1, "one undo step");
+    assert_eq!(diagnostic_codes(&outcome), vec!["layfrz.applied"]);
+
+    // The marker is the authority: with CVPORT on viewport 2 (zero-based 1) the
+    // same layer may be frozen in viewport 1 instead, and the earlier target is
+    // now the refused one.
+    let (mut app, mut session) = multi_space_app([Vec::new(), Vec::new()]);
+    session.active_space = SpaceId::Paper(LayoutId(1));
+    session.set_viewport_marker(LayoutId(1), 1);
+    session.active_layer = LayerId(5);
+    select(&mut app, &mut session, &[2]);
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::LayFrz,
+        viewports_scope(&[0]),
+    )
+    .expect("viewport 1 is no longer the current one");
+    assert_eq!(
+        viewport_overrides(&app, LayoutId(1), 0).get(&LayerId(5)),
+        Some(&true)
+    );
+    assert!(viewport_overrides(&app, LayoutId(1), 1).is_empty());
+}
+
+#[test]
+fn layfrz_viewports_form_refuses_the_current_layer_in_the_current_viewport() {
+    let (mut app, mut session) = multi_space_app([Vec::new(), Vec::new()]);
+    session.active_space = SpaceId::Paper(LayoutId(1));
+    select(&mut app, &mut session, &[2]);
+    session.active_layer = LayerId(5);
+    let before = state(&app);
+
+    // The whole-layout spelling always contains the current viewport.
+    for targets in [vec![], vec![0], vec![0, 1]] {
+        let error = execute(
+            &mut app,
+            &mut session,
+            CommandId::LayFrz,
+            viewports_scope(&targets),
+        )
+        .expect_err("a target set containing the current viewport is refused");
+        let message = refusal(error);
+        assert!(message.starts_with("layfrz.current_layer:"), "{message}");
+        assert!(message.contains("current viewport"), "{message}");
+        assert_untouched(&app, before);
+        for index in 0..2 {
+            assert!(
+                viewport_overrides(&app, LayoutId(1), index).is_empty(),
+                "nothing is written for {targets:?}"
+            );
+        }
+    }
+
+    // With the marker moved, the marker (not index 0) decides.
+    session.set_viewport_marker(LayoutId(1), 1);
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::LayFrz,
+        viewports_scope(&[1]),
+    )
+    .expect_err("viewport 2 is the current one now");
+    assert!(refusal(error).starts_with("layfrz.current_layer:"));
+    assert_untouched(&app, before);
+
+    // A stale marker is reported, never clamped to the first viewport: the
+    // command cannot answer which viewport is current.
+    session.set_viewport_marker(LayoutId(1), 7);
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::LayFrz,
+        viewports_scope(&[0]),
+    )
+    .expect_err("a stale CVPORT marker is a named refusal");
+    assert!(refusal(error).starts_with("layfrz.current_viewport_out_of_range:"));
+    assert_untouched(&app, before);
+}
+
+/// The `CVPORT` marker only decides this command when the current layer is part
+/// of the selection: a stale marker must not refuse a freeze it cannot affect.
+#[test]
+fn layfrz_viewports_form_ignores_a_marker_it_cannot_affect() {
+    let (mut app, mut session) = multi_space_app([Vec::new(), Vec::new()]);
+    session.active_space = SpaceId::Paper(LayoutId(1));
+    select(&mut app, &mut session, &[2]);
+    // The selection is DOORS; `0` is the current layer and is not selected.
+    session.active_layer = LayerId(0);
+    session.set_viewport_marker(LayoutId(1), 7);
+    let before = state(&app);
+
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::LayFrz,
+        viewports_scope(&[1]),
+    )
+    .expect("a marker that cannot affect the current layer refuses nothing");
+    assert_eq!(
+        viewport_overrides(&app, LayoutId(1), 1).get(&LayerId(5)),
+        Some(&true)
+    );
+    assert_eq!(undo_depth(&app), before.1 + 1, "one undo step");
+    assert!(!layer_attributes(&app, LayerId(0)).frozen);
 }
 
 #[test]
