@@ -133,6 +133,20 @@ fn every_extended_variant_has_one_table_row_and_normalizes() {
                 | ExtendedCommandId::ChamferEdge
                 // XEDGES inserts one LINE per stored display-edge segment.
                 | ExtendedCommandId::Xedges
+                // ADR-0055 M3: block-attribute definitions and value edits
+                // rewrite definition members / INSERT rows; BURST creates text
+                // rows and consumes the references.
+                | ExtendedCommandId::AttDef
+                | ExtendedCommandId::DashAttDef
+                | ExtendedCommandId::AttEdit
+                | ExtendedCommandId::DashAttEdit
+                | ExtendedCommandId::AttIpEdit
+                | ExtendedCommandId::EAttEdit
+                | ExtendedCommandId::Gatte
+                | ExtendedCommandId::AttRedef
+                | ExtendedCommandId::AttSync
+                | ExtendedCommandId::BattOrder
+                | ExtendedCommandId::Burst
         );
         assert_eq!(
             variant.requires_work_mode(),

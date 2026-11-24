@@ -245,6 +245,8 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             "LTSCALE",
             "LAYERPMODE",
             "-LAYER",
+            // `-PARAMETERS` is the command-line Parameter Manager write form.
+            "-PARAMETERS",
             "QSELECT",
             "FILTER",
             "GETSEL",
@@ -256,6 +258,8 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             "RENAME",
             "SETVAR",
             "SYSVARMONITOR",
+            // `JULIAN <date>`: the calendar-to-Julian report form.
+            "JULIAN",
             // The annotation-scale table's typed writes (2026-11-16).
             "SCALELISTEDIT",
             "-SCALELISTEDIT",
@@ -324,6 +328,18 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             // `LAYFRZ VP [<index>,...]` (2026-11-24): the per-viewport freeze
             // scope, an argument form of the layer command.
             "LAYFRZ",
+            // ADR-0055 M3 block-attribute typed forms.
+            "ATTDEF",
+            "-ATTDEF",
+            "ATTEDIT",
+            "-ATTEDIT",
+            "EATTEDIT",
+            "ATTIPEDIT",
+            "GATTE",
+            "ATTSYNC",
+            "ATTREDEF",
+            "BATTORDER",
+            "ATTDISP",
             // The dimension argument forms.
             "DIMSPACE",
             "STYLE",
@@ -344,6 +360,9 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             "LEADER",
             "TEXTFIT",
             "HATCHSETORIGIN",
+            // The 2026-11-24 centre-mark/line typed forms.
+            "CENTERMARK",
+            "CENTERLINE",
             // The 2026-11-07 extras batch.
             "PAN",
             "TRACE",
@@ -391,7 +410,15 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             // The 2026-11-12 session-only vocabulary controls.
             "UNDEFINE",
             "REDEFINE",
-            "ALIASEDIT"
+            "ALIASEDIT",
+            // ADR-0056 action-recorder typed lines.
+            "ACTRECORD",
+            "ACTSTOP",
+            "-ACTSTOP",
+            "ACTUSERINPUT",
+            "ACTUSERMESSAGE",
+            "-ACTUSERMESSAGE",
+            "ACTMANAGER"
         ]
     );
     assert_eq!(
