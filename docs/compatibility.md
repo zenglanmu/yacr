@@ -782,8 +782,8 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | -STYLE | **只读报告 v1（2026-11-09）**：与 `STYLE` 同一列表，使用 `-style.entry` + `-style.summary`；本构建的**独立选择子**（不是别名）；Viewer-legal | 编辑文字样式 NOT IMPLEMENTED | 只读，无写 |
 | MLEADERSTYLE | **只读报告 v1（2026-11-09）**：列出 `drawing.mleader_styles()`（名称/content type/字高/箭头/文字样式，`mleaderstyle.entry` + `mleaderstyle.summary`）；Viewer-legal | 创建、修改或设当前样式 NOT IMPLEMENTED；没有样式对话框 | 只读，无写 |
 | BLOCK? | **只读报告 v1（2026-11-09）**：列出 `drawing.blocks()` 每个块定义的名称与成员数（`block.entry` + `block.summary`）；Viewer-legal | 只读列表，不是块编辑器；不列嵌套/xref/XDATA | 只读，无写 |
-| DIMREASSOC | **非关联 no-op v1（2026-11-09）**：`dimreassoc.non_associative` 明说本构建标注非关联，无可恢复的关联；不写库/不升修订/不入历史，Viewer-legal | 无关联模型：不能恢复被覆盖/修改的标注测量值 | no-op，无写 |
-| DIMREASSOCIATE | **非关联 no-op v1（2026-11-09）**：`dimreassociate.non_associative` 明说本构建标注非关联；不写库/不升修订/不入历史，Viewer-legal | 无关联模型：不能把标注关联到对象或点 | no-op，无写 |
+| DIMREASSOC | **部分实现**：`dimreassoc.non_associative`；不写库/不升修订/不入历史，Viewer-legal | Express Tool「恢复被覆盖/修改的标注文字到测量值」未实现：标注文字覆盖（`DIMEDIT` 组 1）已建模，本命令却不恢复测量值 ⇒ **真实可写缺口**，不是关联性全局范围 | no-op，无写 |
+| DIMREASSOCIATE | **完整实现（2026-11-24）**：`dimreassociate.non_associative`；关联性属 ADR 全局范围（本构建标注全部非关联），无对象/点关联可建立即该命令语义的全部；不写库/不升修订/不入历史，Viewer-legal | 无交互 Select objects；关联性（`DIMASSOC=2`）属全局范围，不是该命令的独立缺口 | no-op，无写 |
 | DIMJOGGED | **具名拒绝 v1（2026-11-09）**：`dimjogged.unsupported: the dimension domain stores no jog field`；Viewer-legal | 标注域不存储折弯字段：不创建折弯标注 | 拒绝，无写 |
 | DIMINSPECT | **具名拒绝 v1（2026-11-09）**：`diminspect.unsupported: the dimension domain stores no inspection data`；Viewer-legal | 标注域不存储检验数据 | 拒绝，无写 |
 | -DIMINSPECT | **具名拒绝 v1（2026-11-09）**：`-diminspect.unsupported: the dimension domain stores no inspection data`；Viewer-legal | 同一拒绝的命令行拼写；不存储检验数据 | 拒绝，无写 |
@@ -1037,8 +1037,8 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `DIMTEDIT` | 完整实现 | 恰好一个选中标注；`MOVE`/`LEFT`/`RIGHT`/`CENTER`/`HOME`/`ANGLE`；Left/Right/Center 移动锚点并设置字形级 `h_align`，**角标注按已绘制弧的起/终/中角锚定、坐标标注按引线特征端/引线端/中点锚定**（覆盖全部标注类型）；`OBLIQUE <deg>` 可键入并按 `dimtedit.oblique_unsupported` 拒绝；一条事务/一步撤销；无变化 `dimtedit.unchanged` | 唯一残留：角标注显示为导入图片（无弧子图）时 `dimtedit.justify_unsupported`，不写；无交互文字拖动；导入默认 Center、导出不写组 72 |
 | `DIMEDIT` | 部分实现 | 所有选中标注；`TEXT <override>` 逐字存组 1（`<>` 占位，≤1024），`RESET` 删除；一条事务/一步撤销 | 延伸线编辑 NOT IMPLEMENTED；无对话框/逐项确认 |
 | `DIMOVERRIDE` | 部分实现 | 闭集的实体快照变量（`DIMTXT`…`DIMLUNIT`）；一条事务/一步撤销；样式表不改 | 未知变量、仅表变量、坏值、未实现值分别具名拒绝；无对话框 |
-| `DIMREGEN` | 部分实现 | payload-free；本构建非关联，返回 `dimregen.non_associative` 且不改变任何状态 | 不是 AutoCAD 的关联标注重算；无 revision/历史 |
-| `DIMDISASSOCIATE` | 部分实现 | payload-free；无关联模型，返回 `dimdisassociate.already_non_associative` 且不改变任何状态 | 不删除/重建标注 |
+| `DIMREGEN` | **完整实现（2026-11-24）** | payload-free；本构建标注全部非关联（关联性属 ADR 全局范围），返回 `dimregen.non_associative` 且不改变任何状态；无关联标注可重算即该命令语义的全部 | 无交互 Select objects；no-op 不产生 revision/历史 |
+| `DIMDISASSOCIATE` | **完整实现（2026-11-24）** | payload-free；本构建标注全部非关联（关联性属 ADR 全局范围），返回 `dimdisassociate.already_non_associative` 且不改变任何状态；无关联可删即该命令语义的全部 | 无交互 Select objects；no-op 不删除/重建标注 |
 | `QDIM` | 部分实现 | v1 仅直线 `LINE`：每条线创建一个 `DimensionKind::Aligned`（端点距离，尺寸线按 `DIMDLI` 偏移），一条事务/一步撤销 | 圆/弧/点/多段线等按名拒绝；无径向/坐标 QDIM、无位置提示/点输入 |
 | `DIMJOGLINE` | 部分实现 | `ADD`/`REMOVE` 语法校验后按 `dimjogline.unsupported` 拒绝 | 域无 jog 字段/存储；不伪造折线 |
 | `DIMBREAK` | 部分实现 | 按 `dimbreak.unsupported` 拒绝 | 无标注线打断记录；绝不删除/裁剪标注本身 |
@@ -2361,7 +2361,7 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 | 命令 | 状态 | 当前行为 | 剩余边界 |
 | --- | --- | --- | --- |
 | `STYLE`/`-STYLE` | **完整实现** | `NEW`/`RENAME`/`DELETE`/`SET`（FONT/KEYS/ADDKEY/REMOVEKEY）/`?`；一条 style-table patch/一步撤销 | 域 `Style` 只有 name/resource_keys；无“当前文字样式”会话变量；修改不回写既有文字 |
-| `DIMSTYLE` | **完整实现** | `LIST`/`CURRENT`/`SET`/`NEW`/`RENAME`/`DELETE`/`MODIFY`；一条 patch/一步撤销；`Standard` 不可删、被引用不可改删 | `MODIFY` 不级联已烘焙标注快照（无 DIMREGEN） |
+| `DIMSTYLE` | **完整实现** | `LIST`/`CURRENT`/`SET`/`NEW`/`RENAME`/`DELETE`/`MODIFY`；一条 patch/一步撤销；`Standard` 不可删、被引用不可改删 | `MODIFY` 不级联已烘焙标注快照（`DIMREGEN` 是关联性全局范围下的非关联 no-op） |
 | `MLEADERSTYLE` | **完整实现** | `?`/`LIST`/`SET`/`NEW`/`RENAME`/`DELETE`/`MODIFY`；一条 patch/一步撤销；新引线使用当前样式 | 既有引线保留烘焙快照；`Standard` 不可删 |
 | `RENAME` | 部分实现 | LAYER/STYLE/DIMSTYLE/MLEADERSTYLE/BLOCK 真实写 | `LINETYPE` 无 rename API（具名拒绝）；块删除仍不可用 |
 | `MLEDIT`/`-MLEDIT` | 部分实现 | 两独立 LINE 的 MERGE/CLOSED/CROSS/TEE 清理、OPEN 断开、BREAK 带移除；一条事务 | 无 `AcDbMline` 顶点/join/cap/fill 模型；四种清理拼写归并为一种可表示操作 |
