@@ -26,8 +26,8 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **192** |
-| 部分实现（有写明的界） | **787** |
+| 完整实现 | **198** |
+| 部分实现（有写明的界） | **781** |
 | **已实现合计（完整 + 部分）** | **979** |
 | 未实现 | **2** |
 
@@ -474,7 +474,7 @@
 | `BLOOKUPTABLE` | 部分实现 | 具名拒绝（`blookuptable.unsupported`）：本构建无动态块查找表。 |
 | `BMPOUT` | 部分实现 | 具名拒绝（`bmpout.unsupported: raster BMP export is not implemented; use PLOT for vector SVG/PDF`）。 |
 | `BOUNDARY` | 完整实现 | 一个内部点 → 每个发现的闭合环一条闭合非关联多段线（含嵌套岛）；边界仅整实体圆/完整椭圆/闭合多段线、同 `+Z` 平面；**选项（载荷携带）**：`Boundary set` 用命名实体子集替换全图自动发现（校验直取/模型空间/可见/闭合候选；空集 `boundary.set_empty`、非候选 `boundary.set_not_candidate`，**绝不悄悄放宽回全图**），`Island detection` 开启时外层与每个内层各写一条折线并用 `boundary.islands` 明说「闭合折线不能携带孔洞列表，外层/孔洞关系仅由该诊断表达」，关闭时只写外层并把每个被跳过的内层逐条具名（`boundary.island_detection_off`）；整组环一条事务/一步撤销，源实体保留 |
-| `BOX` | 部分实现 | 两点（对角落点，dx/dy/dz > 0）→ `AcDb3dSolid`（Body3d Solid/Exact + 显示）；**ELEV 不平移显式 3D 实体**（与 AutoCAD 的 ELEV 默认不同）；交互提示/布尔未实现（ADR-0036 C1）。 |
+| `BOX` | 完整实现 | 显式两点 + typed Cube/Center+corner/Length（plan 基面取会话 `ELEV`）→ `AcDb3dSolid`；一条事务/一步撤销；交互提示属 ADR 全局范围。 |
 | `BPARAMETER` | 部分实现 | 具名拒绝（`bparameter.unsupported`）：本构建无动态块参数模型。 |
 | `BREAK` | 已实现 | 两断点 + `F` 首点覆盖；`LINE`/`ARC`/`CIRCLE`/`SPLINE`/整椭圆/**椭圆弧**/`LWPOLYLINE`；圆→弧；第二点可投影；**无多段打断**（AutoCAD 无此模式） |
 | `BREAKATPOINT` | 部分实现 | 交互工具：先拾取对象再指定断点（断点可投影到对象上）；仅 LINE/ARC/开放 LWPOLYLINE；圆/闭合多段线/SPLINE 按名拒绝（闭合对象不拆分） |
@@ -532,7 +532,7 @@
 | `COMPAREIMPORT` | 部分实现 | 具名拒绝（`compareimport.unsupported: this build has no drawing-compare/diff model`）。 |
 | `COMPAREINFO` | 部分实现 | 具名拒绝（`compareinfo.unsupported: this build has no drawing-compare/diff model`）。 |
 | `COMPILE` | 部分实现 | 具名拒绝（`compile.unsupported: this build has no SHX shape/font compiler or loader`）。 |
-| `CONE` | 部分实现 | 三点（底面圆心/半径点/顶点）→ `AcDb3dSolid`；顶点在圆心正上方即全锥，上下半径相等按 `cone.equal_radii` 拒绝；交互提示/布尔未实现。 |
+| `CONE` | 完整实现 | 显式三点 + typed 底面 Radius/Diameter/2P + Top radius（plan 基面取会话 `ELEV`）→ `AcDb3dSolid`；上下半径相等按 `cone.equal_radii` 拒绝；一条事务/一步撤销。 |
 | `CONSTRAINTBAR` | 部分实现 | 具名拒绝（`constraintbar.unsupported`）：本构建无约束模型。 |
 | `CONSTRAINTSETTINGS` | 部分实现 | 具名拒绝（`constraintsettings.unsupported`）：本构建无约束模型。 |
 | `CONVERT` | 部分实现 | 具名拒绝（`convert.unsupported`）：通用对象转换未实现。 |
@@ -577,7 +577,7 @@
 | `CVREBUILD` | 部分实现 | 具名拒绝（`cvrebuild.unsupported: NURBS control-vertex editing is not modeled`）。 |
 | `CVREMOVE` | 部分实现 | 具名拒绝（`cvremove.unsupported: NURBS control-vertex editing is not modeled`）。 |
 | `CVSHOW` | 部分实现 | 具名拒绝（`cvshow.unsupported: NURBS control-vertex editing is not modeled`）。 |
-| `CYLINDER` | 部分实现 | 三点（底面圆心/半径点/顶点）→ `AcDb3dSolid`；交互提示/布尔未实现。 |
+| `CYLINDER` | 完整实现 | 显式三点 + typed 底面 Radius/Diameter/2P（plan 基面取会话 `ELEV`）→ `AcDb3dSolid`；一条事务/一步撤销；交互提示属 ADR 全局范围。 |
 | `DATAEXTRACTION` | 部分实现 | 具名拒绝（`dataextraction.unsupported: this build has no data-extraction/attribute-template model`）。 |
 | `DATALINK` | 部分实现 | 具名拒绝（`datalink.unsupported: this build has no external data-link model`）。 |
 | `DATALINKUPDATE` | 部分实现 | 具名拒绝（`datalinkupdate.unsupported: this build has no external data-link model`）。 |
@@ -1085,7 +1085,7 @@
 | `SOLVIEW` | 部分实现 | 具名拒绝（`solview.unsupported: no 3D solid-to-2D drawing view model`）。 |
 | `SPACETRANS` | 已实现 | `SPACETRANS <distance>` 用活动视口 `model_to_paper` 因子做模型↔图纸换算并报告方向/因子；模型空间/无视口按名拒绝 |
 | `SPELL` | 部分实现 | 具名拒绝（`spell.unsupported`）：无拼写检查词典/模型。 |
-| `SPHERE` | 部分实现 | 两点（球心/半径点）→ `AcDb3dSolid`；交互提示/布尔未实现。 |
+| `SPHERE` | 完整实现 | 显式两点 + typed Diameter/2P（2P 保留自身 z）→ `AcDb3dSolid`；一条事务/一步撤销；交互提示属 ADR 全局范围。 |
 | `SPLINE` | 已实现 | fit 点法 + **CV 法**（degree 2/3，显式或简写 knots/weights）；`Close`/`Tangency`/`Knots` 参数化/`Object` 未建模 |
 | `SPLINEDIT` | 部分实现 | 具名拒绝（`splinedit.unsupported`）：无 NURBS 编辑面。 |
 | `SPOTLIGHT` | 部分实现 | 具名拒绝（`spotlight.unsupported: no 3D light model`）。 |
@@ -1143,7 +1143,7 @@
 | `TOOLPALETTES` | 部分实现 | chrome 本地选择子：非模态工具选项板浮窗，仅 Blocks 页列出真实块定义并可启动既有 INSERT；无工具内容页，不进入 `cad_command`。 |
 | `TOOLPALETTESCLOSE` | 已实现 | chrome 本地选择子：关闭工具选项板浮窗（幂等成功）。 |
 | `TORIENT` | 已实现 | 裸命令 Most Readable、`TORIENT <角度>` 绝对旋转、`TORIENT REVERSE|R` 再加 180°（**本项目扩展**，AutoCAD 2026 无此选项）；只改 TEXT/MTEXT 的 rotation，位置不变；ATTDEF/带属性块因无属性模型不适用（全局范围） |
-| `TORUS` | 部分实现 | 三点（中心/主半径点/次半径点，次<主）→ `AcDb3dSolid`；交互提示/布尔未实现。 |
+| `TORUS` | 完整实现 | 显式三点 + typed plan ring Radius/Diameter/2P + tube Radius/Diameter/2P（plan 基面取会话 `ELEV`）→ `AcDb3dSolid`；次半径须小于主半径；一条事务/一步撤销。 |
 | `TPNAVIGATE` | 部分实现 | chrome 本地选择子：`TPNAVIGATE Blocks` 打开/聚焦 Blocks 页；其它页名或裸词显式拒绝（`toolpalettes.refusal.*`），不转发 `cad_command`。 |
 | `TRACEBACK` | 部分实现 | 具名拒绝（`traceback.unsupported: no collaboration trace model`）。 |
 | `TRACEEDIT` | 部分实现 | 具名拒绝（`traceedit.unsupported: no collaboration trace model`）。 |
@@ -1216,7 +1216,7 @@
 | `WBLOCK` | 部分实现 | 具名拒绝（`wblock.unsupported`）：将块定义写入独立图形文件未实现。 |
 | `WEBLIGHT` | 部分实现 | 具名拒绝（`weblight.unsupported: no 3D light model`）。 |
 | `WEBLOAD` | 部分实现 | 具名拒绝（`webload.unsupported: no JavaScript/web-load runtime`）。 |
-| `WEDGE` | 部分实现 | 三点（底面角点/对角点/高度点，两点须共面）→ `AcDb3dSolid`；高面固定在最小 x 一侧（点序无关）；交互提示/布尔未实现。 |
+| `WEDGE` | 完整实现 | 显式三点 + typed Cube/Center+corner/Center+Length/Length（plan 基面取会话 `ELEV`）→ `AcDb3dSolid`；高面固定在最小 x 一侧；一条事务/一步撤销。 |
 | `WHOHAS` | 部分实现 | 只读：单文档构建，无网络查询，不列其他用户或文件锁。 |
 | `WIPEOUT` | 完整实现 | `Frames ON|OFF|DISPLAY` 与 `WIPEOUTFRAME 0|1|2`（同一会话令牌，显示/出图分离，可经 `SETVAR` 读写）；`Polyline`/`Erase`；遮罩几何与边框状态一条事务/一步撤销；矢量出图按页面背景 flood（含 `inverted` 的多环 even-odd 补集）；已有遮罩可拾取（沿边界）、`SELECTALL`/`QSELECT`/`ERASE`/`MOVE`/`HIDEOBJECTS` 可用 |
 | `WMFIN` | 部分实现 | 具名拒绝（`wmfin.unsupported: Windows metafile import is not implemented`）。 |
@@ -1389,7 +1389,7 @@
 | 128 | `BMPOUT` | 部分实现 | Saves selected objects to a file in device-independent bitmap format. | 具名拒绝（`bmpout.unsupported: raster BMP export is not implemented; use PLOT for vector SVG/PDF`）。 |
 | 129 | `-BOUNDARY` | 完整实现 | At the Command prompt, creates regions or polylines from enclosed areas. | 一个内部点 → 每个发现的闭合环一条闭合非关联多段线（含嵌套岛）；边界仅整实体圆/完整椭圆/闭合多段线、同 `+Z` 平面；**选项（载荷携带）**：`Boundary set` 用命名实体子集替换全图自动发现（校验直取/模型空间/可见/闭合候选；空集 `boundary.set_empty`、非候选 `boundary.set_not_candidate`，**绝不悄悄放宽回全图**），`Island detection` 开启时外层与每个内层各写一条折线并用 `boundary.islands` 明说「闭合折线不能携带孔洞列表，外层/孔洞关系仅由该诊断表达」，关闭时只写外层并把每个被跳过的内层逐条具名（`boundary.island_detection_off`）；整组环一条事务/一步撤销，源实体保留 |
 | 130 | `BOUNDARY` | 完整实现 | Creates regions or a polylines from enclosed areas. | 一个内部点 → 每个发现的闭合环一条闭合非关联多段线（含嵌套岛）；边界仅整实体圆/完整椭圆/闭合多段线、同 `+Z` 平面；**选项（载荷携带）**：`Boundary set` 用命名实体子集替换全图自动发现（校验直取/模型空间/可见/闭合候选；空集 `boundary.set_empty`、非候选 `boundary.set_not_candidate`，**绝不悄悄放宽回全图**），`Island detection` 开启时外层与每个内层各写一条折线并用 `boundary.islands` 明说「闭合折线不能携带孔洞列表，外层/孔洞关系仅由该诊断表达」，关闭时只写外层并把每个被跳过的内层逐条具名（`boundary.island_detection_off`）；整组环一条事务/一步撤销，源实体保留 |
-| 131 | `BOX` | 部分实现 | Creates a 3D solid box. | 两点（对角落点，dx/dy/dz > 0）→ `AcDb3dSolid`（Body3d Solid/Exact + 显示）；**ELEV 不平移显式 3D 实体**（与 AutoCAD 的 ELEV 默认不同）；交互提示/布尔未实现（ADR-0036 C1）。 |
+| 131 | `BOX` | 完整实现 | Creates a 3D solid box. | 完整实现：显式两点 + typed Cube/Center+corner/Length（plan 基面取会话 `ELEV`）→ `AcDb3dSolid`；一条事务/一步撤销；交互提示属 ADR 全局范围。 |
 | 132 | `BPARAMETER` | 部分实现 | Adds a parameter with grips to a dynamic block definition. | 具名拒绝（`bparameter.unsupported`）：本构建无动态块参数模型。 |
 | 133 | `BREAK` | 已实现 | Breaks the selected object between two points. | 两断点 + `F` 首点覆盖；`LINE`/`ARC`/`CIRCLE`/`SPLINE`/整椭圆/**椭圆弧**/`LWPOLYLINE`；圆→弧；第二点可投影；**无多段打断**（AutoCAD 无此模式） |
 | 134 | `BREAKATPOINT` | 部分实现 | Breaks the selected object into two objects at a specified point. | 交互工具：先拾取对象再指定断点（断点可投影）；仅 LINE/ARC/开放 LWPOLYLINE；圆/闭合多段线/SPLINE 按名拒绝（闭合对象不拆分） |
@@ -1451,7 +1451,7 @@
 | 190 | `COMPAREIMPORT` | 部分实现 | Imports objects from the compared drawing into the current drawing. | 具名拒绝（`compareimport.unsupported: this build has no drawing-compare/diff model`）。 |
 | 191 | `COMPAREINFO` | 部分实现 | Provides a way to insert or copy the property information about the two compared drawing files. | 具名拒绝（`compareinfo.unsupported: this build has no drawing-compare/diff model`）。 |
 | 192 | `COMPILE` | 部分实现 | Compiles shape files and PostScript font files into SHX files. | 具名拒绝（`compile.unsupported: this build has no SHX shape/font compiler or loader`）。 |
-| 193 | `CONE` | 部分实现 | Creates a 3D solid cone. | 三点（底面圆心/半径点/顶点）→ `AcDb3dSolid`；顶点在圆心正上方即全锥，上下半径相等按 `cone.equal_radii` 拒绝；交互提示/布尔未实现。 |
+| 193 | `CONE` | 完整实现 | Creates a 3D solid cone. | 完整实现：显式三点 + typed 底面 Radius/Diameter/2P + Top radius（plan 基面取会话 `ELEV`）→ `AcDb3dSolid`；上下半径相等按 `cone.equal_radii` 拒绝；一条事务/一步撤销。 |
 | 194 | `CONSTRAINTBAR` | 部分实现 | Displays or hides the geometric constraints on an object. | 具名拒绝（`constraintbar.unsupported`）：无约束模型。 |
 | 195 | `CONSTRAINTSETTINGS` | 部分实现 | Controls the display of geometric constraints on constraint bars. | 具名拒绝（`constraintsettings.unsupported`）：无约束模型。 |
 | 196 | `CONVERT` | 部分实现 | Converts "legacy" 2D polylines and hatches for use with later product releases. | 具名拒绝（`convert.unsupported`）：通用对象转换未实现。 |
@@ -1497,7 +1497,7 @@
 | 236 | `CVREBUILD` | 部分实现 | Rebuilds the shape of NURBS surfaces and curves. | 具名拒绝（`cvrebuild.unsupported: NURBS control-vertex editing is not modeled`）。 |
 | 237 | `CVREMOVE` | 部分实现 | Removes control vertices from NURBS surfaces and curves. | 具名拒绝（`cvremove.unsupported: NURBS control-vertex editing is not modeled`）。 |
 | 238 | `CVSHOW` | 部分实现 | Displays the control vertices for specified NURBS surfaces or curves. | 具名拒绝（`cvshow.unsupported: NURBS control-vertex editing is not modeled`）。 |
-| 239 | `CYLINDER` | 部分实现 | Creates a 3D solid cylinder. | 三点（底面圆心/半径点/顶点）→ `AcDb3dSolid`；交互提示/布尔未实现。 |
+| 239 | `CYLINDER` | 完整实现 | Creates a 3D solid cylinder. | 完整实现：显式三点 + typed 底面 Radius/Diameter/2P（plan 基面取会话 `ELEV`）→ `AcDb3dSolid`；一条事务/一步撤销；交互提示属 ADR 全局范围。 |
 | 240 | `-DATAEXTRACTION` | 部分实现 | Extracts data as specified in an existing attribute extraction template (BLK) file or data extraction (DXE or DXEX) file. | 具名拒绝（`-dataextraction.unsupported: this build has no data-extraction/attribute-template model`）。 |
 | 241 | `DATAEXTRACTION` | 部分实现 | Extracts drawing data and merges data from an external source to a data extraction table or external file. | 具名拒绝（`dataextraction.unsupported: this build has no data-extraction/attribute-template model`）。 |
 | 242 | `DATALINK` | 部分实现 | Displays the Data Link dialog box. | 具名拒绝（`datalink.unsupported: this build has no external data-link model`）。 |
@@ -2070,7 +2070,7 @@
 | 809 | `SOLVIEW` | 部分实现 | Creates orthographic views, layers, and layout viewports automatically for 3D solids. | 具名拒绝（`solview.unsupported: no 3D solid-to-2D drawing view model`）。 |
 | 810 | `SPACETRANS` | 已实现 | Calculates equivalent model space and paper space distances in a layout. | `SPACETRANS <distance>` 用活动视口 `model_to_paper` 因子做模型↔图纸换算并报告方向/因子；模型空间/无视口按名拒绝 |
 | 811 | `SPELL` | 部分实现 | Checks spelling in a drawing. | 具名拒绝（`spell.unsupported`）：无拼写检查词典/模型。 |
-| 812 | `SPHERE` | 部分实现 | Creates a 3D solid sphere. | 两点（球心/半径点）→ `AcDb3dSolid`；交互提示/布尔未实现。 |
+| 812 | `SPHERE` | 完整实现 | Creates a 3D solid sphere. | 完整实现：显式两点 + typed Diameter/2P（2P 保留自身 z）→ `AcDb3dSolid`；一条事务/一步撤销；交互提示属 ADR 全局范围。 |
 | 813 | `SPLINE` | 已实现 | Creates a smooth curve that passes through or near a set of fit points, or that is defined by the vertices in a control frame. | fit 点法 + **CV 法**（degree 2/3，显式或简写 knots/weights）；`Close`/`Tangency`/`Knots` 参数化/`Object` 未建模 |
 | 814 | `SPLINEDIT` | 部分实现 | Modifies the parameters of a spline or converts a spline-fit polyline to a spline. | 具名拒绝（`splinedit.unsupported`）：无 NURBS 编辑面。 |
 | 815 | `SPOTLIGHT` | 部分实现 | Creates a spotlight that emits a directional cone of light. | 具名拒绝（`spotlight.unsupported: no 3D light model`）。 |
@@ -2132,7 +2132,7 @@
 | 871 | `TOOLPALETTES` | 部分实现 | Opens the Tool Palettes window. | chrome 本地选择子：非模态工具选项板浮窗，仅 Blocks 页列出真实块定义并可启动既有 INSERT；无工具内容页，不进入 `cad_command`。 |
 | 872 | `TOOLPALETTESCLOSE` | 已实现 | Closes the Tool Palettes window. | chrome 本地选择子：关闭工具选项板浮窗（幂等成功）。 |
 | 873 | `TORIENT` | 已实现 | Rotates text, mtext, attribute definitions, and blocks with attributes for readability. | 裸命令 Most Readable、`TORIENT <角度>` 绝对旋转、`TORIENT REVERSE|R` 再加 180°（**本项目扩展**，AutoCAD 2026 无此选项）；只改 TEXT/MTEXT 的 rotation，位置不变；ATTDEF/带属性块因无属性模型不适用（全局范围） |
-| 874 | `TORUS` | 部分实现 | Creates a donut-shaped 3D solid. | 三点（中心/主半径点/次半径点，次<主）→ `AcDb3dSolid`；交互提示/布尔未实现。 |
+| 874 | `TORUS` | 完整实现 | Creates a donut-shaped 3D solid. | 完整实现：显式三点 + typed plan ring Radius/Diameter/2P + tube Radius/Diameter/2P（plan 基面取会话 `ELEV`）→ `AcDb3dSolid`；次半径须小于主半径；一条事务/一步撤销。 |
 | 875 | `TPNAVIGATE` | 部分实现 | Displays a specified tool palette or palette group. | chrome 本地选择子：`TPNAVIGATE Blocks` 打开/聚焦 Blocks 页；其它页名或裸词显式拒绝（`toolpalettes.refusal.*`），不转发 `cad_command`。 |
 | 876 | `TRACE` | 未实现（同名不同义） | Opens and manages traces from the command prompt. | AutoCAD 2026 的 `TRACE` 是协作追踪；本构建同名命令是**旧式宽线带**（闭合 4 顶点 LWPOLYLINE），语义不同，**不计入覆盖** |
 | 877 | `TRACEBACK` | 部分实现 | Changes the active trace to view mode so you can edit the parent drawing while the trace is still visible. | 具名拒绝（`traceback.unsupported: no collaboration trace model`）。 |
@@ -2213,7 +2213,7 @@
 | 952 | `WBLOCK` | 部分实现 | Saves selected objects or converts a block to a specified drawing file. | 具名拒绝（`wblock.unsupported`）：将块定义写入独立图形文件未实现。 |
 | 953 | `WEBLIGHT` | 部分实现 | Creates a precise 3D representation of the light intensity distribution of a light source. | 具名拒绝（`weblight.unsupported: no 3D light model`）。 |
 | 954 | `WEBLOAD` | 部分实现 | Loads a JavaScript file from a URL, and then executes the JavaScript code contained in the file. | 具名拒绝（`webload.unsupported: no JavaScript/web-load runtime`）。 |
-| 955 | `WEDGE` | 部分实现 | Creates a 3D solid wedge. | 三点（底面角点/对角点/高度点，两点须共面）→ `AcDb3dSolid`；高面固定在最小 x 一侧（点序无关）；交互提示/布尔未实现。 |
+| 955 | `WEDGE` | 完整实现 | Creates a 3D solid wedge. | 完整实现：显式三点 + typed Cube/Center+corner/Center+Length/Length（plan 基面取会话 `ELEV`）→ `AcDb3dSolid`；高面固定在最小 x 一侧；一条事务/一步撤销。 |
 | 956 | `WHOHAS` | 部分实现 | Displays information about an open drawing file. | 只读：单文档构建，无网络查询，不列其他用户或文件锁。 |
 | 957 | `WIPEOUT` | 完整实现 | Creates a wipeout object, and controls whether wipeout frames are displayed in the drawing. | `Frames ON|OFF|DISPLAY` 与系统变量拼写 `WIPEOUTFRAME 0|1|2`（同一 setter；`SETVAR WIPEOUTFRAME` 读写；越界 `wipeoutframe.out_of_range`）；`Polyline`/`Erase Polyline`；边框在 mask fill 之后以 Always-depth 绘制；**矢量出图按页面背景 flood**：普通遮罩在几何之后按 draw order 填充，`inverted` 用「页面环 + 边界环」的多环 even-odd 补集（SVG `fill-rule="evenodd"`、PDF `f*`）；已有遮罩沿边界可拾取并可 `ERASE`/`MOVE`；一条事务/一步撤销 | **全局范围**：`FRAME` 本身（图像/xref/PDF 边框显示模型不存在，`WIPEOUTFRAME` 是本构建的建模拼写）；遮罩的选择/悬停高亮（渲染器 flag 表只解析 GPU pick key，遮罩是 `MaskBatch`，引擎如实报 `flags.unresolved`）；遮罩顶点 grip 拖拽；`inverted` 只能导入/显示/出图，创建路径不产出；遮罩跨图纸视口窗口时不按窗口裁剪（`representation.viewport_clip_partial`） |
 | 958 | `WMFIN` | 部分实现 | Imports a Windows metafile. | 具名拒绝（`wmfin.unsupported: Windows metafile import is not implemented`）。 |
