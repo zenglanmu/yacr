@@ -25,7 +25,14 @@
 //!   with their own stable code (`layoutwizard.plot_device_not_implemented`,
 //!   `layoutwizard.plot_style_not_implemented`,
 //!   `layoutwizard.title_block_not_implemented`) and are never applied.
-//! * `VPORTS` creates a declared simple `rows * cols` grid.
+//! * `VPORTS` creates a declared simple `rows * cols` grid, or one symmetric
+//!   **standard** configuration (`SINGLE`, `2 VERTICAL|HORIZONTAL`, `3
+//!   VERTICAL|HORIZONTAL`, `4 [EQUAL]`), through the same equal-cell helper and
+//!   the same one-revision write. Named configurations (`SAVE`/`RESTORE`/
+//!   `DELETE`/`JOIN`) need a persisted named-viewport table and are refused by
+//!   name (`vports.named_configuration_not_implemented`); the asymmetric
+//!   Standard arrangements are refused with
+//!   `vports.asymmetric_configuration_not_implemented` rather than approximated.
 //! * `VPCLIP RECT`/`VPCLIP` polygon and `VPSCALE` target the **session
 //!   `CVPORT` current viewport** of the active paper layout when their payload
 //!   carries no index, and the payload's explicit zero-based index otherwise

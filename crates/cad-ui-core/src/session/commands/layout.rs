@@ -17,7 +17,9 @@
 //!   [0|90|180|270]`;
 //! * `PSETUPIN|-PSETUPIN <source-layout> <target-layout>`;
 //! * `MVIEW <minx> <miny> <maxx> <maxy>`;
-//! * `VPORTS <rows> <cols>` (`-VPORTS` normalizes here);
+//! * `VPORTS <rows> <cols>|SINGLE|2 VERTICAL|HORIZONTAL|3 VERTICAL|HORIZONTAL|
+//!   4 [EQUAL]` (`-VPORTS` normalizes here); named configurations and the
+//!   asymmetric Standard arrangements are named refusals;
 //! * `VPCLIP RECT <minx> <miny> <maxx> <maxy>`;
 //! * `VPSCALE <scale-name-or-ratio>`;
 //! * `LAYVPI <layer>[,<layer>...]`.
@@ -30,7 +32,10 @@
 //! reason. `-PAGESETUP`/`-PSETUPIN` are distinct extended selectors, not
 //! aliases, and share their canonical sibling's grammar.
 
-use cad_app::{LayoutPayload, PaperSetup, UnavailableWizardStep, WizardArrangement};
+use cad_app::{
+    LayoutPayload, PaperSetup, StandardViewportConfiguration, UnavailableWizardStep,
+    WizardArrangement,
+};
 use cad_db::PlotRotation;
 use cad_domain::Point3;
 
@@ -517,23 +522,151 @@ pub fn parse_mview_argument(argument: &str) -> Result<(Point3, Point3), String> 
     Ok((min, max))
 }
 
-/// Parse one `VPORTS <rows> <cols>` argument.
+/// Parse one `VPORTS` argument.
+///
+/// Two accepted families, both writing the same equal-cell grid:
+///
+/// * the historical explicit grid `VPORTS <rows> <cols>` (both positive whole
+///   numbers);
+/// * a documented **standard configuration** — `SINGLE`, `2 VERTICAL`,
+///   `2 HORIZONTAL`, `3 VERTICAL`, `3 HORIZONTAL`, `4` / `4 EQUAL` and the
+///   `TWO:VERTICAL`-style spellings (case-insensitive; spaces/`-`/`_`/`:`
+///   around the words are ignored).
+///
+/// The asymmetric Standard configurations (`Three:Left`, `Four:Below`, …) are
+/// refused with `vports.asymmetric_configuration_not_implemented`: this build's
+/// viewport helper writes equal cells only, so they are neither approximated nor
+/// written. The named forms (`SAVE`/`RESTORE`/`DELETE`/`JOIN`, and a bare name)
+/// need a persisted named-viewport table that `.ymodel` does not have; they are
+/// refused with `vports.named_configuration_not_implemented`. A bare `2`/`3`
+/// requires an orientation (`vports.orientation_required`) instead of guessing
+/// one.
 pub fn parse_vports_argument(argument: &str) -> Result<LayoutPayload, String> {
     let tokens: Vec<&str> = argument.split_whitespace().collect();
-    let [rows, cols] = tokens.as_slice() else {
-        return Err(invalid("vports", "VPORTS needs <rows> <cols> >= 1"));
-    };
-    let rows = rows
-        .parse::<u32>()
-        .ok()
-        .filter(|value| *value >= 1)
-        .ok_or_else(|| invalid("vports", "VPORTS needs <rows> <cols> >= 1"))?;
-    let cols = cols
-        .parse::<u32>()
-        .ok()
-        .filter(|value| *value >= 1)
-        .ok_or_else(|| invalid("vports", "VPORTS needs <rows> <cols> >= 1"))?;
-    Ok(LayoutPayload::Viewports { rows, cols })
+    if tokens.is_empty() {
+        return Err(invalid("vports", VPORTS_USAGE));
+    }
+    // The explicit grid form is preserved byte for byte: two positive whole
+    // numbers. A pair of integers that is not positive is still the grid form's
+    // error, never a configuration name.
+    if tokens.len() == 2 {
+        if let (Ok(rows), Ok(cols)) = (tokens[0].parse::<i64>(), tokens[1].parse::<i64>()) {
+            if rows < 1 || cols < 1 || rows > i64::from(u32::MAX) || cols > i64::from(u32::MAX) {
+                return Err(invalid("vports", VPORTS_USAGE));
+            }
+            return Ok(LayoutPayload::Viewports {
+                rows: rows as u32,
+                cols: cols as u32,
+            });
+        }
+    }
+    let normalized = normalize_vports_words(argument);
+    if let Some(configuration) = standard_viewport_configuration(&normalized) {
+        return Ok(LayoutPayload::ViewportsConfiguration { configuration });
+    }
+    match normalized.as_str() {
+        "TWO" | "2" => {
+            return Err(
+                "vports.orientation_required: VPORTS 2 needs VERTICAL or HORIZONTAL; nothing was \
+                 written"
+                    .into(),
+            );
+        }
+        "THREE" | "3" => {
+            return Err(
+                "vports.orientation_required: VPORTS 3 needs VERTICAL or HORIZONTAL; nothing was \
+                 written"
+                    .into(),
+            );
+        }
+        _ => {}
+    }
+    if is_asymmetric_viewport_configuration(&normalized) {
+        return Err(format!(
+            "vports.asymmetric_configuration_not_implemented: {:?} needs non-uniform viewport \
+             cells; this build writes every viewport through the equal-cell grid helper, so \
+             Three:Left/Right/Above/Below and Four:Left/Right/Above/Below are NOT IMPLEMENTED and \
+             nothing was written",
+            argument.trim()
+        ));
+    }
+    if is_named_viewport_configuration(tokens[0]) {
+        return Err(named_configuration_refusal(argument));
+    }
+    if tokens.len() == 1 {
+        return Err(named_configuration_refusal(argument));
+    }
+    Err(invalid("vports", VPORTS_USAGE))
+}
+
+/// The accepted `VPORTS` grammar, used by every parse refusal.
+const VPORTS_USAGE: &str = "VPORTS needs <rows> <cols> >= 1, SINGLE, 2 VERTICAL|HORIZONTAL, 3 \
+     VERTICAL|HORIZONTAL, or 4 [EQUAL]";
+
+/// Fold the separators and case a standard configuration may be typed with.
+fn normalize_vports_words(argument: &str) -> String {
+    argument
+        .chars()
+        .filter(|character| {
+            !character.is_whitespace() && !matches!(character, ':' | '-' | '_' | '/')
+        })
+        .collect::<String>()
+        .to_ascii_uppercase()
+}
+
+/// Resolve the normalized spelling of one **symmetric** Standard configuration.
+fn standard_viewport_configuration(normalized: &str) -> Option<StandardViewportConfiguration> {
+    match normalized {
+        "SINGLE" => Some(StandardViewportConfiguration::Single),
+        "TWOVERTICAL" | "2VERTICAL" => Some(StandardViewportConfiguration::TwoVertical),
+        "TWOHORIZONTAL" | "2HORIZONTAL" => Some(StandardViewportConfiguration::TwoHorizontal),
+        "THREEVERTICAL" | "3VERTICAL" => Some(StandardViewportConfiguration::ThreeVertical),
+        "THREEHORIZONTAL" | "3HORIZONTAL" => Some(StandardViewportConfiguration::ThreeHorizontal),
+        "FOUR" | "FOUREQUAL" | "4" | "4EQUAL" => Some(StandardViewportConfiguration::FourEqual),
+        _ => None,
+    }
+}
+
+/// The documented asymmetric Standard configurations this build cannot write.
+fn is_asymmetric_viewport_configuration(normalized: &str) -> bool {
+    matches!(
+        normalized,
+        "THREELEFT"
+            | "3LEFT"
+            | "THREERIGHT"
+            | "3RIGHT"
+            | "THREEABOVE"
+            | "3ABOVE"
+            | "THREEBELOW"
+            | "3BELOW"
+            | "FOURLEFT"
+            | "4LEFT"
+            | "FOURRIGHT"
+            | "4RIGHT"
+            | "FOURABOVE"
+            | "4ABOVE"
+            | "FOURBELOW"
+            | "4BELOW"
+    )
+}
+
+/// `SAVE`/`RESTORE`/`DELETE`/`JOIN`: the named-configuration options.
+fn is_named_viewport_configuration(first: &str) -> bool {
+    matches!(
+        first.to_ascii_uppercase().as_str(),
+        "SAVE" | "RESTORE" | "DELETE" | "JOIN"
+    )
+}
+
+/// The stable refusal for every named-configuration form.
+fn named_configuration_refusal(text: &str) -> String {
+    format!(
+        "vports.named_configuration_not_implemented: {:?} requests a named viewport \
+         configuration; named configurations need a persisted named-viewport table and `.ymodel` \
+         has none (that is a new table/minor, outside this build), so SAVE/RESTORE/DELETE/JOIN \
+         and bare names are NOT IMPLEMENTED and nothing was written",
+        text.trim()
+    )
 }
 
 /// Parse one `VPCLIP RECT <minx> <miny> <maxx> <maxy>` argument.

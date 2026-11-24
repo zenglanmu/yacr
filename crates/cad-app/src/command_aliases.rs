@@ -153,7 +153,7 @@ pub const COMMAND_ALIASES: &[(&str, &str)] = &[
     ("-VIEW", "VIEW"),
     // `-VPORTS` is AutoCAD's command-line spelling of VPORTS; this build has no
     // viewport dialog, so the alias only normalizes the name onto the one
-    // selector and its one named refusal.
+    // selector and its one viewport write/refusal grammar.
     ("-VPORTS", "VPORTS"),
     // `-DIMSTYLE` is AutoCAD's dialog-free spelling of the same command; this
     // build has one selector path, so it normalizes onto `DIMSTYLE`.

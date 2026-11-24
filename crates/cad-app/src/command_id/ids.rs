@@ -656,7 +656,10 @@ pub enum CommandId {
     LayoutMerge,
     /// `LAYOUTWIZARD <name> [<paper> <width> <height>]`: named refusal (no page setup/layout creation API). Contract: [`crate::command_id::layout`].
     LayoutWizard,
-    /// `VPORTS <rows> <cols>` (`-VPORTS` alias): named refusal (no viewport creation API). Contract: [`crate::command_id::layout`].
+    /// `VPORTS <rows> <cols>` or a symmetric standard configuration (`SINGLE`, `2 VERTICAL|HORIZONTAL`, `3
+    /// VERTICAL|HORIZONTAL`, `4 [EQUAL]`): write one equal-cell viewport grid in the active paper layout.
+    /// Named configurations and asymmetric Standard arrangements are named refusals. Contract:
+    /// [`crate::command_id::layout`].
     Vports,
     /// `VPMAX`: maximize the active paper layout's first viewport in session state only. Contract: [`crate::command_id::layout`].
     VpMax,

@@ -467,50 +467,11 @@ impl Application {
                 })
             }
             LayoutPayload::Viewports { rows, cols } => {
-                if *rows < 1 || *cols < 1 {
-                    return Err(CadError::InvalidInput(
-                        "vports.invalid_grid: VPORTS needs rows and columns >= 1".into(),
-                    ));
-                }
-                let total = rows.checked_mul(*cols).ok_or_else(|| {
-                    CadError::InvalidInput(
-                        "vports.invalid_grid: VPORTS rows x columns overflows".into(),
-                    )
-                })?;
-                let layout_id = require_paper_space(session, "vports")?;
-                let document_id = command.document;
-                let drawing = self.drawing(document_id)?.clone();
-                let before = layout_row(&drawing, layout_id);
-                let viewports = grid_viewports(&drawing, layout_id, *rows, *cols, total);
-                let transaction = next_transaction_id();
-                let mut candidate = drawing;
-                let change_set =
-                    candidate.set_layout_viewports(layout_id, viewports, transaction, "vports")?;
-                let after = layout_row(&candidate, layout_id);
-                self.publish_layout_record(
-                    document_id,
-                    candidate,
-                    transaction,
-                    "vports",
-                    vec![layout_patch(layout_id, before, after)],
-                )?;
-                Ok(CommandOutcome {
-                    objects: Vec::new(),
-                    changes: Some(Arc::new(change_set)),
-                    diagnostics: vec![Diagnostic {
-                        object: None,
-                        code: "vports.created".into(),
-                        message: format!(
-                            "VPORTS: created a {rows} x {cols} grid of {total} viewports in \
-                             layout {} as a declared simple layout (equal cells, model origin at \
-                             each cell centre); this is not an AutoCAD Standard viewport \
-                             configuration",
-                            layout_id.0
-                        ),
-                    }],
-                    measurement: None,
-                    point_report: None,
-                })
+                self.write_vports_grid(session, command, *rows, *cols, None)
+            }
+            LayoutPayload::ViewportsConfiguration { configuration } => {
+                let (rows, cols) = configuration.grid();
+                self.write_vports_grid(session, command, rows, cols, Some(*configuration))
             }
             LayoutPayload::ClipRect { min, max, viewport } => {
                 self.clip_rect(session, command, *min, *max, *viewport)
@@ -534,6 +495,75 @@ impl Application {
                 self.page_setup_write(command, payload.as_ref())
             }
         }
+    }
+
+    /// Write one `VPORTS` viewport list.
+    ///
+    /// Both the historical `<rows> <cols>` form (`configuration == None`) and a
+    /// standard configuration (`Some`) resolve to the same equal-cell grid built
+    /// by [`grid_viewports`], so they share this one validated write: one
+    /// `set_layout_viewports` call, one revision and one undo step. The paper
+    /// space check runs **before** the candidate is cloned or the transaction id
+    /// is allocated, so a model-space request writes nothing.
+    fn write_vports_grid(
+        &mut self,
+        session: &SessionState,
+        command: &Command,
+        rows: u32,
+        cols: u32,
+        configuration: Option<StandardViewportConfiguration>,
+    ) -> CadResult<CommandOutcome> {
+        if rows < 1 || cols < 1 {
+            return Err(CadError::InvalidInput(
+                "vports.invalid_grid: VPORTS needs rows and columns >= 1".into(),
+            ));
+        }
+        let total = rows.checked_mul(cols).ok_or_else(|| {
+            CadError::InvalidInput("vports.invalid_grid: VPORTS rows x columns overflows".into())
+        })?;
+        let layout_id = require_paper_space(session, "vports")?;
+        let document_id = command.document;
+        let drawing = self.drawing(document_id)?.clone();
+        let before = layout_row(&drawing, layout_id);
+        let viewports = grid_viewports(&drawing, layout_id, rows, cols, total);
+        let transaction = next_transaction_id();
+        let mut candidate = drawing;
+        let change_set =
+            candidate.set_layout_viewports(layout_id, viewports, transaction, "vports")?;
+        let after = layout_row(&candidate, layout_id);
+        self.publish_layout_record(
+            document_id,
+            candidate,
+            transaction,
+            "vports",
+            vec![layout_patch(layout_id, before, after)],
+        )?;
+        let message = match configuration {
+            Some(configuration) => format!(
+                "VPORTS: created the {} standard viewport configuration ({rows} x {cols} equal \
+                 cells, {total} viewport(s)) in layout {} as a declared simple layout (model \
+                 origin at each cell centre)",
+                configuration.name(),
+                layout_id.0
+            ),
+            None => format!(
+                "VPORTS: created a {rows} x {cols} grid of {total} viewports in layout {} as a \
+                 declared simple layout (equal cells, model origin at each cell centre); this is \
+                 the explicit grid form, not an AutoCAD Standard viewport configuration",
+                layout_id.0
+            ),
+        };
+        Ok(CommandOutcome {
+            objects: Vec::new(),
+            changes: Some(Arc::new(change_set)),
+            diagnostics: vec![Diagnostic {
+                object: None,
+                code: "vports.created".into(),
+                message,
+            }],
+            measurement: None,
+            point_report: None,
+        })
     }
 
     /// `VPSCALE <scale>`: apply a scale to the targeted viewport.

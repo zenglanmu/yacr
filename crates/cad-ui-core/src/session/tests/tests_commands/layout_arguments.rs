@@ -173,6 +173,65 @@ fn vports_typed_form_and_the_dash_vports_alias_share_one_path() {
 }
 
 #[test]
+fn vports_standard_configurations_are_typed_and_unmodelled_forms_refuse_by_name() {
+    let session = session_with_layouts(&[(2, "Sheet One", None)]);
+    // The standard form parses and dispatches, so model space reports the same
+    // explicit paper-space refusal as the grid form.
+    let single = session
+        .command("VPORTS SINGLE")
+        .expect_err("model space cannot host paper viewports");
+    assert!(single.contains("vports.paper_space_required"), "{single}");
+
+    switch_to_sheet(&session);
+    for text in [
+        "VPORTS SINGLE",
+        "VPORTS 2 VERTICAL",
+        "VPORTS two:horizontal",
+        "VPORTS 3 vertical",
+        "VPORTS 3 HORIZONTAL",
+        "VPORTS 4",
+        "VPORTS four:equal",
+        "-VPORTS 4 EQUAL",
+    ] {
+        session
+            .command(text)
+            .unwrap_or_else(|error| panic!("{text}: {error}"));
+    }
+    for (text, code) in [
+        ("VPORTS 2", "vports.orientation_required"),
+        ("VPORTS 3", "vports.orientation_required"),
+        (
+            "VPORTS 3 LEFT",
+            "vports.asymmetric_configuration_not_implemented",
+        ),
+        (
+            "VPORTS FOUR BELOW",
+            "vports.asymmetric_configuration_not_implemented",
+        ),
+        (
+            "VPORTS SAVE MyView",
+            "vports.named_configuration_not_implemented",
+        ),
+        (
+            "VPORTS RESTORE MyView",
+            "vports.named_configuration_not_implemented",
+        ),
+        (
+            "VPORTS DELETE MyView",
+            "vports.named_configuration_not_implemented",
+        ),
+        ("VPORTS JOIN", "vports.named_configuration_not_implemented"),
+        (
+            "VPORTS MyView",
+            "vports.named_configuration_not_implemented",
+        ),
+    ] {
+        let error = session.command(text).expect_err(text);
+        assert!(error.contains(code), "{text}: {error}");
+    }
+}
+
+#[test]
 fn vpclip_rect_is_the_only_grammar_and_degenerate_rects_are_named() {
     let session = session_with_layouts(&[(2, "Sheet One", None)]);
     let polygon = session
