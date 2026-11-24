@@ -167,6 +167,14 @@ pub enum TableKind {
     /// runtime authority. It contributes the minor-12 tier and is only present
     /// when the document really has vendor rows.
     Vendor,
+    /// Persisted named views (`tables/views.json`, AutoCAD's `VIEW` table):
+    /// the camera, 2D/3D mode, work plane and active space of every saved view.
+    ///
+    /// Unlike [`TableKind::Vendor`] these rows are document content: they are
+    /// held by [`crate::DrawingDatabase`], written only when the table holds a
+    /// row, and contribute the minor-18 tier. A `VIEW SAVE`/`DELETE` is one
+    /// database revision and one undo step.
+    Views,
 }
 
 /// The set of persisted rows one commit made stale.

@@ -102,6 +102,7 @@ impl DrawingDatabaseBuilder {
                 param_diagnostics: Vec::new(),
                 features: crate::feature::FeatureDefinitions::new(),
                 relations: crate::relation::InContextRelations::new(),
+                named_views: cad_domain::NamedViewTable::new(),
                 bounds_cache: Default::default(),
             },
             errors: Vec::new(),

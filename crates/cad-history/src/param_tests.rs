@@ -111,6 +111,7 @@ fn step() -> DrawingHistoryStep {
         bim_patches: Vec::new(),
         param_patches: Vec::new(),
         param_binding_patches: Vec::new(),
+        view_patches: Vec::new(),
     }
 }
 

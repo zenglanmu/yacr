@@ -45,6 +45,7 @@ use super::relations_in_context;
 use super::resources;
 use super::tables;
 use super::variables;
+use super::views;
 use super::{
     table_entry, DocumentSnapshot, ElementSnapshot, ModelKind, ModelRecord, ShardSnapshot,
     SnapshotError,
@@ -133,6 +134,12 @@ impl DrawingDatabase {
                 relations_in_context::encode_relations_in_context(self)?,
             );
         }
+        // Named views are document content and get the same "no rows, no table"
+        // rule as the other side tables: a document without views stays at the
+        // minor its other features imply.
+        if !self.named_views.is_empty() {
+            tables.set(TableKind::Views, views::encode_views(self));
+        }
         Ok(DocumentSnapshot {
             header,
             revision,
@@ -192,6 +199,7 @@ impl DrawingDatabase {
         let configs = configurations::decode_configurations(&snapshot.tables, &parameters)?;
         let features = features::decode_features(&snapshot.tables)?;
         let relations = relations_in_context::decode_relations_in_context(&snapshot.tables)?;
+        let named_views = views::decode_views(&snapshot.tables)?;
         if !parameters.is_empty() {
             checked(
                 builder.set_parameters(parameters),
@@ -214,6 +222,12 @@ impl DrawingDatabase {
             checked(
                 builder.set_relations(relations),
                 table_entry(TableKind::Relations),
+            )?;
+        }
+        if !named_views.is_empty() {
+            checked(
+                builder.set_named_views(named_views),
+                table_entry(TableKind::Views),
             )?;
         }
 

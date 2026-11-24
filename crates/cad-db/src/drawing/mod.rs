@@ -41,6 +41,7 @@ mod point_style;
 mod scale_edit;
 mod style_edit;
 mod transaction;
+mod views;
 
 #[cfg(test)]
 mod test_support;
@@ -62,6 +63,7 @@ pub use style_edit::{
     DimStylePatch, MLeaderStylePatch, StylePatch, StyleTableChanges, DEFAULT_DIM_STYLE_NAME,
 };
 pub use transaction::DrawingTransaction;
+pub use views::{ViewPatch, ViewWrite};
 
 pub(crate) use bounds::BoundsCache;
 
@@ -410,6 +412,9 @@ pub struct DrawingDatabase {
     /// Self-authored in-context relations (`tables/relations.json`, ADR-0043
     /// P3). Empty for every document without them.
     pub(crate) relations: crate::relation::InContextRelations,
+    /// Persisted named views (`tables/views.json`, minor 18). Empty for a
+    /// document without saved views.
+    pub(crate) named_views: cad_domain::NamedViewTable,
     /// Cache of [`Self::bounds`] tagged with the [`Revision`] it was computed
     /// at. Interior mutability is required because `bounds` takes `&self` (the
     /// scene-preparation worker shares one `Arc<DrawingDatabase>` across

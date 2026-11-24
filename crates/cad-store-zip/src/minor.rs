@@ -9,6 +9,7 @@
 //!
 //! | the document has | minor | what a minor-4 reader misses |
 //! |---|---|---|
+//! | persisted named views (`tables/views.json`) | `18` | the `VIEW` table |
 //! | block attributes (ADR-0055) | `14` | `cad:AttributeDefinition`, `cad:Insert.attributes` |
 //! | host-owned vendor semantics (ADR-0030 D7) | `12` | `tables/vendor.json` |
 //! | in-context relations (ADR-0043 P3) | `11` | `tables/relations.json` |
@@ -18,6 +19,10 @@
 //! | BIM data (elements, definitions or **relations**) | `7` | the element `bim` block, `tables/bim-definitions.json`, `tables/bim-relations.json` |
 //! | only bundled resources | `5` | `resources/<kind>/<key>`, `tables/resources.json`, the flag |
 //! | neither | `4` | — |
+//!
+//! `15` (`cad:Text.mirrored`), `16` (2D constraints) and `17` (GROUP
+//! persistence) are reserved tiers owned by other lanes; this build does not
+//! produce them, and named views take the next free tier, `18`.
 //!
 //! `6` is the **read-only legacy** BIM tier: this build opens a minor-6 archive
 //! (the writer that produced it had no relation table), but a resave stamps `7`.
@@ -78,8 +83,29 @@ pub(crate) const FORMAT_MINOR_APPLICATION_DOMAIN: u32 = 13;
 /// `14`, not `13`.
 pub(crate) const FORMAT_MINOR_BLOCK_ATTRIBUTES: u32 = 14;
 
+/// Reserved tiers between block attributes and named views.
+///
+/// * `15` — `cad:Text.mirrored` (MIRROR text flag).
+/// * `16` — ADR-0054 2D constraints (`tables/constraints.json`).
+/// * `17` — GROUP persistence.
+///
+/// This crate does not define their constants until those lanes land; the gap is
+/// asserted below so inserting a tier in the middle cannot silently renumber the
+/// named-view tier.
+const NAMED_VIEWS_TIER_OFFSET: u32 = 4;
+
+/// A document that persists named views (`tables/views.json`).
+///
+/// Named views are document data (AutoCAD's `VIEW` table), so they own the
+/// newest tier. The row carries a renderer-independent camera DTO, the 2D/3D
+/// mode, the work plane and the active space; a reader below this tier refuses
+/// the table path rather than dropping the user's views.
+pub(crate) const FORMAT_MINOR_NAMED_VIEWS: u32 = 18;
+
 // The chain is a compile-time fact, not a convention: a future tier inserted in
 // the middle cannot silently leave the constants out of order.
+const _: () =
+    assert!(FORMAT_MINOR_BLOCK_ATTRIBUTES + NAMED_VIEWS_TIER_OFFSET == FORMAT_MINOR_NAMED_VIEWS);
 const _: () = assert!(FORMAT_MINOR_APPLICATION_DOMAIN + 1 == FORMAT_MINOR_BLOCK_ATTRIBUTES);
 const _: () = assert!(FORMAT_MINOR_VENDOR + 1 == FORMAT_MINOR_APPLICATION_DOMAIN);
 const _: () = assert!(FORMAT_MINOR_RELATIONS + 1 == FORMAT_MINOR_VENDOR);
@@ -99,10 +125,16 @@ const _: () = assert!(FORMAT_MINOR_PLAIN + 1 == FORMAT_MINOR_RESOURCES);
 /// tier here is about archive entries and the header flag, both of which the
 /// store already models.
 pub(crate) fn document_minor(snapshot: &DocumentSnapshot) -> u32 {
-    // Block attributes are the newest tier and can coexist with any other
-    // feature (including a named interface domain), so they decide first: a
-    // minor-13 reader would refuse the `cad:AttributeDefinition` class or the
-    // insert `attributes` array, and a domain-bearing document would otherwise
+    // Named views are the newest tier and can coexist with any other feature, so
+    // they decide first: a minor-17 reader refuses the `tables/views.json` path
+    // (`unsupported_minor`) rather than dropping the user's saved views.
+    if snapshot.has_named_views() {
+        return FORMAT_MINOR_NAMED_VIEWS;
+    }
+    // Block attributes are the newest element-payload tier and can coexist with
+    // any other feature (including a named interface domain), so they decide
+    // next: a minor-13 reader would refuse the `cad:AttributeDefinition` class or
+    // the insert `attributes` array, and a domain-bearing document would otherwise
     // be stamped 13 and lose them on the reader side.
     if snapshot.has_block_attributes() {
         return FORMAT_MINOR_BLOCK_ATTRIBUTES;
@@ -163,9 +195,10 @@ mod tests {
     /// The top tier is the format constant, not an independent number.
     #[test]
     fn the_top_tier_is_the_format_minor() {
+        assert_eq!(FORMAT_MINOR_NAMED_VIEWS, cad_domain::ymodel::FORMAT_MINOR);
         assert_eq!(
-            FORMAT_MINOR_BLOCK_ATTRIBUTES,
-            cad_domain::ymodel::FORMAT_MINOR
+            FORMAT_MINOR_NAMED_VIEWS,
+            FORMAT_MINOR_BLOCK_ATTRIBUTES + NAMED_VIEWS_TIER_OFFSET
         );
         assert_eq!(
             FORMAT_MINOR_BLOCK_ATTRIBUTES,

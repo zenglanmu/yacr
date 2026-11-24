@@ -146,7 +146,14 @@ pub const FORMAT_WRITE: u32 = 2;
 /// empty, so an ordinary drawing and a minor-13 archive keep their minor; a
 /// minor-13 reader refuses a document that really carries attributes rather than
 /// dropping them.
-pub const FORMAT_MINOR: u32 = 14;
+///
+/// `15` reserves `cad:Text.mirrored`, `16` ADR-0054 2D constraints and `17`
+/// GROUP persistence (other lanes; this build does not produce them). `18` adds
+/// persisted named views: `tables/views.json` rows carrying the camera, 2D/3D
+/// mode, the 2D camera a switch back restores, the work plane and the active
+/// space. A document without a view row keeps the lower tier; a reader below
+/// `18` refuses the table path instead of dropping the views.
+pub const FORMAT_MINOR: u32 = 18;
 
 /// Stable failure markers.
 ///

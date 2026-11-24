@@ -32,6 +32,7 @@ pub(crate) mod relations_in_context;
 pub(crate) mod resources;
 pub(crate) mod tables;
 pub(crate) mod variables;
+pub(crate) mod views;
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -196,6 +197,9 @@ pub const fn table_entry(kind: TableKind) -> &'static str {
         // Host-owned vendor semantics (ADR-0030 D7). Written only when the
         // document really has vendor rows; minor-12 tier.
         TableKind::Vendor => "tables/vendor.json",
+        // Persisted named views (AutoCAD `VIEW` table). Written only when the
+        // document holds a row; minor-18 tier.
+        TableKind::Views => "tables/views.json",
     }
 }
 
@@ -419,6 +423,18 @@ impl DocumentSnapshot {
                     _ => false,
                 }
             })
+    }
+
+    /// Whether this document carries persisted named views (`tables/views.json`,
+    /// minor 18).
+    ///
+    /// The writer emits the table only when it holds a row, so a present table is
+    /// evidence of at least one view; an ordinary document stays at the minor its
+    /// other features imply.
+    pub fn has_named_views(&self) -> bool {
+        self.tables
+            .get(TableKind::Views)
+            .is_some_and(|rows| !rows.is_empty())
     }
 }
 

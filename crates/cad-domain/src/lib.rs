@@ -26,6 +26,7 @@ pub mod relation;
 pub mod resource;
 pub mod table_entity;
 mod texture;
+pub mod view;
 pub use appearance::{
     sanitize_linetype_scale, EntityColor, EntityLineType, EntityLineWeight, EntityTransparency,
     LinetypePattern,
@@ -47,6 +48,10 @@ pub use resource::{
 };
 pub use table_entity::*;
 pub use texture::{is_valid_texture_key, TEXTURE_KEY_HEX_LEN, TEXTURE_KEY_MAX_LEN};
+pub use view::{
+    NamedView, NamedViewError, NamedViewTable, ViewCamera, ViewProjection,
+    MAX_NAMED_VIEW_NAME_CHARS, NAMED_VIEW_CAP,
+};
 
 #[cfg(test)]
 mod dimension_tests;
