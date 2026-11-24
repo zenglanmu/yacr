@@ -3,7 +3,8 @@
 // Thirty names are wired into the chrome so the command line can complete them:
 // one **session token** (ATTDISP), six **read-only reports** (BATTMAN,
 // BATTORDER, XREF, -XREF, EXTERNALREFERENCES, EXTERNALREFERENCESCLOSE),
-// twenty-two **named refusals** (ATTDEF through XOPEN) and one **chrome-local
+// nine **real attribute commands** (ATTDEF through GATTE), thirteen **named
+// refusals** (the file lanes plus XDATA/xref attachment) and one **chrome-local
 // panel** (CLASSICXREF). The Rust lane is
 // the behaviour authority; this suite pins only the user-facing surface: one
 // catalog row each, real label and hint keys in both catalogs, membership in the
@@ -27,16 +28,23 @@ const REPORTS = [
   'EXTERNALREFERENCESCLOSE',
 ];
 
+// ADR-0055 M3: the in-drawing attribute family is real now. Each name is a
+// canonical selector; the bare form is a report/sync and the typed line writes.
+const ATTRIBUTE_COMMANDS = [
+  'ATTDEF', '-ATTDEF', 'ATTEDIT', '-ATTEDIT', 'ATTIPEDIT', 'EATTEDIT',
+  'ATTREDEF', 'ATTSYNC', 'GATTE',
+];
+
+// The six file lanes remain a separate implementation slice.
 const REFUSALS = [
-  'ATTDEF', '-ATTDEF', 'ATTEDIT', '-ATTEDIT', 'ATTIPEDIT', 'ATTIN', 'ATTOUT',
-  'ATTEXT', '-ATTEXT', 'EATTEDIT', 'EATTEXT', '-EATTEXT', 'ATTREDEF', 'ATTSYNC',
-  'GATTE', 'XDATA', 'XBIND', '-XBIND', 'XATTACH', 'ATTACH', '-ATTACH', 'XOPEN',
+  'ATTIN', 'ATTOUT', 'ATTEXT', '-ATTEXT', 'EATTEXT', '-EATTEXT', 'XDATA',
+  'XBIND', '-XBIND', 'XATTACH', 'ATTACH', '-ATTACH', 'XOPEN',
 ];
 
 /** `CLASSICXREF` is answered by the chrome before the router. */
 const LOCAL = ['CLASSICXREF'];
 
-const BATCH = [...TOKEN, ...REPORTS, ...REFUSALS, ...LOCAL];
+const BATCH = [...TOKEN, ...REPORTS, ...ATTRIBUTE_COMMANDS, ...REFUSALS, ...LOCAL];
 
 const DOC = { documentLabel: 'drawing.dwg', loading: false };
 const NO_DOC = { documentLabel: null, loading: false };
@@ -87,17 +95,29 @@ test('the token and the six reports state their read-only, not-modeled boundarie
     const key = `${labelSlug(id)}.hint`;
     assert.ok(en[key].length > 20, `en ${key} must say something specific`);
     assert.ok(zh[key].length > 10, `zh ${key} must say something specific`);
-    assert.match(en[key], /read-only|session token|no-op/i, `${id} must state its boundary`);
-    assert.match(en[key], /not modeled|no |not implemented/i, `${id} must state its honest gap`);
+    assert.match(en[key], /read-only|session|no-op|display setting/i, `${id} must state its boundary`);
+    assert.match(en[key], /not modeled|not implemented|no |nothing|zero/i, `${id} must state its honest gap`);
   }
 });
 
-test('the twenty-two refusals say they are named refusals and promise no effect', async () => {
+test('the attribute commands state their typed write or report boundary', async () => {
+  const en = await readCatalog('en');
+  const zh = await readCatalog('zh-CN');
+  for (const id of ATTRIBUTE_COMMANDS) {
+    const key = `${labelSlug(id)}.hint`;
+    assert.match(en[key], /one transaction|read-only|report|propagates/i,
+      `${id} hint must name its write or report boundary: ${en[key]}`);
+    assert.ok(zh[key].length > 10, `zh ${key}`);
+    assert.doesNotMatch(en[key], /named refusal/i, `${id} is no longer a refusal`);
+  }
+});
+
+test('the remaining file lanes still say they are named refusals', async () => {
   const en = await readCatalog('en');
   const zh = await readCatalog('zh-CN');
   for (const id of REFUSALS) {
     const key = `${labelSlug(id)}.hint`;
-    assert.match(en[key], /named refusal/i, `${id} hint must say it is a refusal: ${en[key]}`);
+    assert.match(en[key], /named refusal|not implemented/i, `${id} hint must say it is a refusal: ${en[key]}`);
     assert.ok(zh[key].length > 10, `zh ${key}`);
   }
 });

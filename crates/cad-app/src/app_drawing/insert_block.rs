@@ -56,7 +56,7 @@ impl Application {
 
         // Resolve the definition and its metadata from the authoritative drawing
         // and release the borrow before the create funnel mutates the document.
-        let (block, block_name, base_point) = {
+        let (block, block_name, base_point, attributes) = {
             let document = self
                 .workspace
                 .documents
@@ -74,7 +74,12 @@ impl Application {
                     definition.id
                 ))
             })?;
-            (definition.id, metadata.name.clone(), metadata.base_point)
+            (
+                definition.id,
+                metadata.name.clone(),
+                metadata.base_point,
+                drawing.default_attribute_values(definition.id),
+            )
         };
 
         // The importer stores `T(insertion) · T(−base_point)`; a new reference
@@ -88,7 +93,7 @@ impl Application {
         let geometry = SemanticGeometry::Insert {
             block,
             transform,
-            attributes: Vec::new(),
+            attributes,
         };
         let mut outcome = self.commit_new_entity_typed(
             session,

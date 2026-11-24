@@ -9,7 +9,6 @@
 //! Threading: the session owns `Rc`/`RefCell` state and a `RenderSessionHandle`,
 //! so it is created, driven (`tick`/`handle_input`/`command`) and dropped on the
 //! host main thread only. It is not `Send`/`Sync`.
-//!
 //! Scope: this module implements the CAD-facing slice only — status, commands,
 //! pointer/wheel input, canvas metrics, completion accounting and resource
 //! diagnostics. The per-host IPC wiring and the GPU presenter live in each host
@@ -27,6 +26,7 @@ mod api_object;
 mod api_prompt;
 mod api_submit;
 mod application_domain;
+mod attribute_arguments;
 mod bim;
 mod bytes;
 mod command_log;

@@ -892,7 +892,11 @@ pub use helpers::*;
 // code-size gate). Re-exported so every `commands::parse_*` path is unchanged.
 mod arguments;
 pub use arguments::*;
+
+// ADR-0055 M3: the typed block-attribute command lines.
+mod attribute;
 pub(crate) use arguments::{parse_positive_decimal, parse_signed_decimal};
+pub use attribute::*;
 // `LAYFRZ VP [...]`'s grammar, split out of `arguments.rs` for the code-size gate.
 mod layfrz;
 pub use layfrz::*;

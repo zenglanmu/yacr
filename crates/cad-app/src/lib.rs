@@ -502,7 +502,9 @@ pub use layout_payload::{LayoutPayload, PaperSetup, UnavailableWizardStep, Wizar
 pub use ml_style::{MultilineStyle, MultilineStyleStore, MULTILINE_STYLE_CAP};
 
 pub use command_payload::{
-    AddSelectedCommand, AngularDimensionInput, AnnotationBatchPayload, CenterArm,
+    AddSelectedCommand, AngularDimensionInput, AnnotationBatchPayload, AttributeAssignment,
+    AttributeCommand, AttributeDefinitionCommand, AttributeDisplayMode, AttributeEditCommand,
+    AttributeEditScope, AttributeOrderCommand, AttributeSyncCommand, CenterArm,
     CenterEditPayload, CenterLineCommand, CenterMarkCommand, ClipCommand, CommandPayload,
     DashLayerOps, DimEditCommand, DimJogLineCommand, DimOverrideCommand, DimStyleCommand,
     DimTextEditCommand, DimensionBatchPayload, DimensionChainCommand, FilterExpression,

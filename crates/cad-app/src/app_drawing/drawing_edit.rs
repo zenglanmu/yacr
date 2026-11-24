@@ -562,8 +562,9 @@ impl Application {
     /// The full MIRROR option set: `MIRRTEXT` and `Erase source objects`.
     ///
     /// `MIRRTEXT = 0` (readable) is the default and the implemented behaviour:
-    /// text/MTEXT positions mirror and the run stays readable (ATTDEF would
-    /// follow the same rule, but this build has no attribute model), and a
+    /// text/MTEXT positions mirror and the run stays readable (an ATTRIB value
+    /// is block-local data, not a mirrored glyph, so it follows the same rule),
+    /// and a
     /// mirrored block reference reflects its placement, so member glyphs
     /// (including constant-attribute text) are reversed with it **regardless** of
     /// `MIRRTEXT`; that is a global note, not a per-attribute rule. `MIRRTEXT = 1`

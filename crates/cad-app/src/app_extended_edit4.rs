@@ -12,8 +12,8 @@
 //!   entity's layer as new ids; the originals are untouched.
 //! * `CDORDER` rewrites stored draw order by colour index.
 //! * `FLATTEN` rewrites the supported geometry's z to 0.
-//! * `XPLODE` reuses the EXPLODE path for INSERTs and reports the attributes
-//!   gap.
+//! * `XPLODE` reuses the EXPLODE path for INSERTs and reports that it does not
+//!   convert attribute values (`BURST` is the converting path).
 //! * `BTRIM` / `BEXTEND` reuse `plan_trim` / `plan_extend` with the first
 //!   selected INSERT's member geometry as the boundary.
 //! * `CHANGE` / `CHPROP` reuse the property-write planner (`plan_entity`) to
@@ -521,8 +521,8 @@ impl Application {
         let mut outcome = self.explode_entities(session, command)?;
         outcome.diagnostics.push(Diagnostic {
             object: None,
-            code: "xplode.attributes_not_implemented".into(),
-            message: "XPLODE: uses the EXPLODE path; attribute/property control is NOT IMPLEMENTED"
+            code: "xplode.attributes_not_converted".into(),
+            message: "XPLODE: uses the EXPLODE path; the reference's own attribute values are NOT CONVERTED (use BURST), and attribute/property control is not implemented"
                 .into(),
         });
         Ok(outcome)

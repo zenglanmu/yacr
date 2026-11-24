@@ -254,6 +254,13 @@ impl Application {
                     y: -base_point.y,
                     z: -base_point.z,
                 });
+                let attributes = self
+                    .workspace
+                    .documents
+                    .get(&document_id)
+                    .ok_or_else(|| CadError::InvalidInput("document not open".into()))?
+                    .drawing
+                    .default_attribute_values(block);
                 let geometries = marks
                     .into_iter()
                     .map(|(insertion, tangent)| {
@@ -274,7 +281,7 @@ impl Application {
                             transform: Transform3::translation(insertion)
                                 .matrix_mul(&rotate)
                                 .matrix_mul(&to_origin),
-                            attributes: Vec::new(),
+                            attributes: attributes.clone(),
                         }
                     })
                     .collect();

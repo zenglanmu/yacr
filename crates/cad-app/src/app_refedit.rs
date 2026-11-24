@@ -395,11 +395,11 @@ fn place_in_model_space(
         SemanticGeometry::Insert {
             block,
             transform: nested,
-            ..
+            attributes,
         } => Ok(SemanticGeometry::Insert {
             block: *block,
             transform: transform.matrix_mul(nested),
-            attributes: Vec::new(),
+            attributes: attributes.clone(),
         }),
         other => transform_geometry(other, transform).map_err(|error| {
             invalid(
@@ -423,11 +423,11 @@ fn place_in_block_space(
         SemanticGeometry::Insert {
             block,
             transform: nested,
-            ..
+            attributes,
         } => Ok(SemanticGeometry::Insert {
             block: *block,
             transform: inverse.matrix_mul(nested),
-            attributes: Vec::new(),
+            attributes: attributes.clone(),
         }),
         other => transform_geometry(other, inverse).map_err(|error| {
             invalid(

@@ -37,6 +37,8 @@ mod array;
 // command dispatches these keys here, never to the display-property grammar.
 mod bim_properties;
 mod block_define;
+// ADR-0055 M3: the ATTDEF/ATTEDIT/ATTSYNC/ATTREDEF/BATTORDER/BATTMAN/BURST family.
+pub(crate) mod attribute_commands;
 mod boundary;
 mod break_curve;
 mod chamfer_fillet;

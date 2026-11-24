@@ -24,8 +24,9 @@
 //!   descends into a member's block definition, no cycle stack or depth cap is
 //!   needed: a self-referential block exploded once simply yields the
 //!   self-reference again. Members keep their **own block-definition layers**
-//!   (AutoCAD consistent). Block attribute values are dropped: this project has
-//!   no attribute model, which is the global rule for every INSERT.
+//!   (AutoCAD consistent). A nested block reference keeps its own attribute
+//!   value list; the exploded reference's **own** values are not converted —
+//!   `BURST` is the command whose contract is to turn them into `TEXT`.
 //! * **Non-uniformly scaled INSERT → the deterministic subset.** AutoCAD warns
 //!   that the result may be unexpected; instead of refusing the whole reference,
 //!   every member with an **exact** image under the composed transform is placed.
@@ -410,7 +411,8 @@ fn polyline_segments(
 /// A plain (non-nested) MINSERT never reaches this function: it imports as a
 /// `Compound(Insert…)` and is refused by [`explode_compound`]. An XREF block
 /// reference is refused here by name. Block attribute values are dropped (this
-/// project has no attribute model), which is the global rule for every INSERT.
+/// list is preserved, and the exploded reference's own values are dropped
+/// (`BURST` is the value-preserving command).
 fn explode_insert(
     drawing: &DrawingDatabase,
     space: &SpaceId,
@@ -462,12 +464,12 @@ fn explode_insert(
             SemanticGeometry::Insert {
                 block: nested,
                 transform: nested_transform,
-                ..
+                attributes: nested_attributes,
             } => {
                 let geometry = SemanticGeometry::Insert {
                     block: *nested,
                     transform: transform.matrix_mul(nested_transform),
-                    attributes: Vec::new(),
+                    attributes: nested_attributes.clone(),
                 };
                 push_produced(child.layer, space.clone(), geometry, out)?;
             }
@@ -516,7 +518,7 @@ fn explode_insert(
 /// The parameter offset between `θ` and the ellipse's own `start` is read from
 /// the transformed start point; the sweep magnitude and sign are preserved
 /// (the parameter map has slope +1 in both directions).
-fn affine_conic_image(
+pub(super) fn affine_conic_image(
     geometry: &SemanticGeometry,
     transform: &Transform3,
 ) -> Option<SemanticGeometry> {

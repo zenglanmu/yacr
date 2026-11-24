@@ -4,8 +4,7 @@
 //! item is re-exported by [`crate`] under its original name, so the public paths
 //! (`cad_app::CommandPayload`, `cad_app::TwoLineCommand`, …) are unchanged.
 //!
-//! A payload describes the **input** of exactly one [`crate::CommandId`] and never
-//! carries behaviour: the command layer validates it, then writes or refuses.
+//! A payload describes the **input** of exactly one [`crate::CommandId`] and never carries behaviour: the command layer validates it, then writes or refuses.
 
 use cad_domain::{
     LayerId, MLeaderTextAngle, Point3, SelectionRef, SemanticGeometry, SpaceId, TextAlignH,
@@ -26,6 +25,9 @@ pub use clip::ClipCommand;
 
 mod payload_extra;
 pub use payload_extra::*;
+
+mod attribute;
+pub use attribute::*;
 
 mod basic;
 pub use basic::*;
@@ -742,17 +744,16 @@ pub enum CommandPayload {
     /// (no instance path, no sub-element); one that is not refuses the whole
     /// command with `property.not_addressable`. The whole selection is written in
     /// **one transaction / one undo step**; an entity that already holds the value
-    /// is not staged, and if nothing changes the command records no undo entry
-    /// (`property.unchanged`) and a bad value refuses before anything is staged.
+    /// is not staged; a no-op records no undo entry and a bad value refuses.
     EntityProperty {
         key: String,
         value: String,
     },
     /// `PARAM {op: ...}`: structural parameter edit (ADR-0043 D9); see [`ParamOp`].
     Param(ParamOp),
+    Attribute(AttributeCommand),
     /// `GRIPSTRETCH`: move **one** handle of **one** entity to a world point (the
     /// payload of a pointer gesture; the gesture itself lives in `cad-host`).
-    ///
     /// The host resolves `to` in the plan view and runs it through the same
     /// drafting constraint the capture path uses, so the previewed marker and the
     /// committed point are one coordinate. The handler re-reads `id.entity`,

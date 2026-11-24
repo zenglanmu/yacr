@@ -1,9 +1,9 @@
 // The 2026-11-09 Wave 4 batch of command-line names.
 //
 // Twenty-eight names are wired into the chrome so the command line can complete
-// them: twelve **real selection-based 2D edits** (CENTERMARK, CENTERLINE, NCOPY,
-// COPYTOLAYER, -COPYTOLAYER, CDORDER, FLATTEN, XPLODE, BTRIM, BEXTEND, CHANGE,
-// CHPROP) and sixteen **named refusals** (BSCALE through CHSPACE). The Rust lane
+// them: thirteen **real selection-based 2D edits** (CENTERMARK through CHPROP,
+// plus BURST now that block attributes are modeled) and fifteen **named
+// refusals** (BSCALE through CHSPACE). The Rust lane
 // is the behaviour authority (the twelve edits are Work-only there); this suite
 // pins only the user-facing surface: one catalog row each, real label and hint
 // keys in both catalogs, membership in the host vocabulary mirror, and the
@@ -25,11 +25,13 @@ import { HOST_NAMES, readCatalog, readModule } from './helpers.ts';
 const REAL_EDITS = [
   'CENTERMARK', 'CENTERLINE', 'NCOPY', 'COPYTOLAYER', '-COPYTOLAYER',
   'CDORDER', 'FLATTEN', 'XPLODE', 'BTRIM', 'BEXTEND', 'CHANGE', 'CHPROP',
+  // ADR-0055 M3: BURST is now a real write (EXPLODE + value-to-TEXT).
+  'BURST',
 ];
 
 const REFUSALS = [
   'BSCALE', 'MINSERT', 'BLOCKREPLACE', 'BREPLACE', '-BREPLACE', 'SPLINEDIT',
-  'MLEDIT', '-MLEDIT', 'BURST', 'REGION', 'ADDSELECTED',
+  'MLEDIT', '-MLEDIT', 'REGION', 'ADDSELECTED',
   'WBLOCK', '-WBLOCK', 'BSAVE', 'BSAVEAS', 'CHSPACE',
 ];
 
@@ -73,7 +75,7 @@ test('every Wave 4 command is catalogued exactly once with real label and hint k
   }
 });
 
-test('the twelve real edits state their transaction boundary and partial gap', async () => {
+test('the real edits state their transaction boundary and partial gap', async () => {
   const en = await readCatalog('en');
   const zh = await readCatalog('zh-CN');
   for (const id of REAL_EDITS) {
@@ -85,7 +87,7 @@ test('the twelve real edits state their transaction boundary and partial gap', a
   }
 });
 
-test('the sixteen refusals say they are named refusals and promise no effect', async () => {
+test('the refusals say they are named refusals and promise no effect', async () => {
   const en = await readCatalog('en');
   const zh = await readCatalog('zh-CN');
   for (const id of REFUSALS) {

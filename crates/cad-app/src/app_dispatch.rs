@@ -150,39 +150,42 @@ impl Application {
             | ExtendedCommandId::BReplace
             | ExtendedCommandId::DashBReplace
             | ExtendedCommandId::SplineEdit
-            | ExtendedCommandId::Burst
             | ExtendedCommandId::Region
             | ExtendedCommandId::WBlock
             | ExtendedCommandId::DashWBlock
             | ExtendedCommandId::BSave
             | ExtendedCommandId::BSaveAs => self.extended_refusal4(command, ext)?,
+            // ADR-0055 M3: the block-attribute command family. Every write is one
+            // transaction / one undo step; `ATTDISP` stays with the Wave 5
+            // session-token handler because it is a display setting.
+            ExtendedCommandId::AttDef
+            | ExtendedCommandId::DashAttDef
+            | ExtendedCommandId::AttEdit
+            | ExtendedCommandId::DashAttEdit
+            | ExtendedCommandId::AttIpEdit
+            | ExtendedCommandId::EAttEdit
+            | ExtendedCommandId::Gatte
+            | ExtendedCommandId::AttRedef
+            | ExtendedCommandId::AttSync
+            | ExtendedCommandId::BattMan
+            | ExtendedCommandId::BattOrder
+            | ExtendedCommandId::Burst => self.attribute_command(session, command, ext)?,
             // Wave 5 session token + attribute/xref reports: ATTDISP flips one
             // session flag; the rest read the block and xref tables this build
             // really stores. All are Viewer-legal.
             ExtendedCommandId::AttDisp
-            | ExtendedCommandId::BattMan
-            | ExtendedCommandId::BattOrder
             | ExtendedCommandId::XRef
             | ExtendedCommandId::DashXRef
             | ExtendedCommandId::ExternalReferences
             | ExtendedCommandId::ExternalReferencesClose
             | ExtendedCommandId::ClassicXRef => self.extended_attrs5(session, command, ext)?,
             // Wave 5 named refusals: a stable `Unsupported` reason per name.
-            ExtendedCommandId::AttDef
-            | ExtendedCommandId::DashAttDef
-            | ExtendedCommandId::AttEdit
-            | ExtendedCommandId::DashAttEdit
-            | ExtendedCommandId::AttIpEdit
-            | ExtendedCommandId::AttIn
+            ExtendedCommandId::AttIn
             | ExtendedCommandId::AttOut
             | ExtendedCommandId::AttExt
             | ExtendedCommandId::DashAttExt
-            | ExtendedCommandId::EAttEdit
             | ExtendedCommandId::EAttExt
             | ExtendedCommandId::DashEAttExt
-            | ExtendedCommandId::AttRedef
-            | ExtendedCommandId::AttSync
-            | ExtendedCommandId::Gatte
             | ExtendedCommandId::XData
             | ExtendedCommandId::XBind
             | ExtendedCommandId::DashXBind

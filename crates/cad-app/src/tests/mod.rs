@@ -194,6 +194,7 @@ fn application_with_layouts() -> (Application, SessionState) {
 }
 
 mod area_object;
+mod attribute_commands;
 mod audit;
 mod chrome_commands;
 mod cjk_baseline;
