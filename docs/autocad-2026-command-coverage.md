@@ -26,8 +26,8 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **258** |
-| 部分实现（有写明的界） | **721** |
+| 完整实现 | **261** |
+| 部分实现（有写明的界） | **718** |
 | **已实现合计（完整 + 部分）** | **979** |
 | 未实现 | **2** |
 
@@ -49,6 +49,8 @@
 > View→坐标（`UCSICON`）、Insert→内容（`TOOLPALETTES`）、Annotate→注释缩放（`SCALELISTEDIT`），
 > 以及 chrome-local 的 `DOMAIN` 命令。无实现的参考面板继续 `pending`；这不改变 981 条的
 > 实现状态计数，也没有运行/像素证据（`autocad-structure` 契约测试锁定接线）。
+
+> **2026-11-24 增补（严格会话令牌收口：`FINDINCLUDE`/`MULTIPLE`/`TFRAMES`）**：`FINDINCLUDE` 不再是死设置——会话令牌 `find_include` 直接决定 `-FIND`/`FIND` 的块通道：ON 搜索块定义与已加载外部参照物化出的块（按 `external reference 'NAME'` 命名），OFF 只搜模型空间/图纸布局并在报告写明排除；未加载或无块的参照无论令牌如何都按名与状态（`missing` 等）列为未搜索来源。`MULTIPLE` 的重复循环接到唯一捕获确认漏斗：每次成功确认后重开同一绘图/编辑捕获（`multiple.repeated`），`Esc`/`CANCEL` 停止，重开失败 `multiple.repeat_failed`，512 次守卫 `multiple.repeat_limit`；一次性/测量命令无捕获可重开，按名 `multiple.not_repeatable` 拒绝且不武装。`TFRAMES` 经 `DisplaySettings::frames_visible` 到达派生批次：ON 显示光栅图像边框（并按 `WIPEOUTFRAME` 显示遮罩边框），OFF 同时隐藏两者而 WIPEOUT 仍遮罩、图像仍绘制纹理；外部参照边框未建模（xref 是展开块几何），按名声明。三者均为会话状态，无库写/修订/历史。`HIGHLIGHTNEW` 仍为**部分实现**：渲染器只有选中/悬停/隐藏三个 in-stream 位，新对象高亮需要新增第四位与各管线着色（或新增绘制通道），本轮不加，标志不消费。计入 **261 完整 + 718 部分 / 979 已实现**；证据仅 Linux Rust 契约，GUI/GPU/像素/真机 NOT VERIFIED。
 
 > **2026-11-24 增补（严格 2D 收口）**：`TEXTALIGN`（`SETSPACING`/`CURRENTVERTICAL`/`CURRENTHORIZONTAL`）、`TCIRCLE`（`SLOT`/`OFFSET`/`CONSTANT`）、`DONUT`（填充圆盘/环）、`HATCHGENERATEBOUNDARY`（图纸布局 hatch）、`ADDSELECTED`（ARC/POLYLINE/INSERT）、`GETSEL`（COLOR/LINETYPE/SPACE）、`MEASUREGEOM VOLUME`（单一体精确 body 路径）、`CENTERMARK`（可配置臂长）、`CENTERLINE`（延伸/间隙）九个命令按严格口径升为**完整实现**；`CENTERMARK`/`CENTERLINE` 的产出是普通 `LINE`（非关联为声明边界，与 `DIMCENTER` 同类）。计入 **213 完整 + 766 部分 / 979 已实现**；窗口/GPU/像素/真机证据仍 NOT VERIFIED。
 
@@ -716,7 +718,7 @@
 | `FILLETEDGE` | 部分实现 | 具名拒绝（`filletedge.unsupported: no 3D edge fillet model`）。 |
 | `FILTER` | 部分实现 | `AND`/`OR`/`XOR`/`NOT` 递归逻辑树（括号、元数校验）、相对运算符、已建模属性集；只读；**分类/自定义特性未建模**；**命名 `.nfl` 过滤器未实现** |
 | `FIND` | 完整实现 | `FIND <needle> [=> <replacement>]`：**整图遍历**（模型空间 + 每个图纸布局，按空间分组报告），跨空间替换**一条事务/一步撤销**，拒绝时哪里都不写；**所有文字通道按「画出来的文本」匹配**（MTEXT/带文字 MULTILEADER/`AcDbText`（含导入成 `Text` 的 ATTRIB/ATTDEF）/表格单元格，经同一投影与转义往返）；块定义内命中按**只读通道**具名列出（`block definitions, read-only (edit with BEDIT)`），FIND 不改块定义；比较方式读取会话 `FINDMATCH`（默认 OFF = ASCII 不区分大小写，ON = 区分大小写） |
-| `FINDINCLUDE` | 部分实现 | 会话令牌（默认 ON）；跨块/外部参照文字搜索未实现。 |
+| `FINDINCLUDE` | 完整实现 | **完整实现（2026-11-24）**：会话令牌 `find_include`（默认 ON）是 `-FIND`/`FIND` 的块通道开关：ON 搜索块定义与已加载外部参照物化出的块（按 `external reference 'NAME'` 命名），OFF 只搜索模型空间与各图纸布局并在报告写明 `excluded by FINDINCLUDE OFF`；未加载/无块的参照始终按名与状态（`missing` 等）列为未搜索来源；无库写/修订/历史，Viewer-legal。 |
 | `FINDMATCH` | 完整实现 | 切换会话 `find_match_case`（默认 OFF）；`-FIND`/`FIND` 的报告与替换共用该标志：ON 按精确字节（区分大小写），OFF 按 ASCII 不区分大小写；覆盖 MTEXT/单行 TEXT/MULTILEADER/表格单元格。 |
 | `FLATSHOT` | 部分实现 | 具名拒绝（`flatshot.unsupported: 3D solids are not modeled, so there is nothing to flatten`）。 |
 | `FLATTEN` | 部分实现 | 真实编辑：LINE/POLYLINE/CIRCLE/ARC/ELLIPSE/POINT/SPLINE、TEXT/SHAPE/MASK/XY 平面 IMAGE/COMPOUND，以及竖直 INSERT（只改插入点 z 与属性文字 z，不编辑块定义；成员非平/放置倾斜按名拒绝）的 z 置 0；一条事务/一步撤销；MESH/Body3d/派生显示的 DIMENSION/HATCH/MULTILEADER/TABLE 按名拒绝（Express 投影行为简化为 z=0）。 |
@@ -899,7 +901,7 @@
 | `MSTRETCH` | 完整实现 | `MSTRETCH <base_x> <base_y> <delta_x> <delta_y> <x1> <y1> <x2> <y2> [<x1> <y1> <x2> <y2> …]` 与载荷一一对应（窗口是逻辑像素，base/delta 是世界点）；奇数 token 按 `mstretch.argument_odd` 拒绝（绝不截断半个窗口）；退化窗口/零位移由规划器在事务前拒绝；一个包络计划、一条事务/一步撤销 |
 | `MTEDIT` | 部分实现 | `TEXTEDIT` 的别名（同一 `CommandId`/路径）；编辑当前单选的 Text/MText/MULTILEADER 字符串；无第二编辑路径 |
 | `MTEXT` | 部分实现 | 两角宽度模型；无行距/分栏/背景填充 |
-| `MULTIPLE` | 部分实现 | 设置会话 `MultipleRepeat` 标志；本宿主无重复循环，报告 `multiple.repeat_not_implemented`，不伪造重复 |
+| `MULTIPLE` | 完整实现 | 裸命令武装「下一次捕获命令」，`MULTIPLE <捕获命令>` 武装指定命令；每次成功确认后经唯一捕获确认漏斗重开同一捕获（`multiple.repeated`），`Esc`/`CANCEL` 停止（清除武装），重开失败 `multiple.repeat_failed`，512 次守卫 `multiple.repeat_limit`；裸命令首次确认后固定为该命令；一次性/测量命令无捕获可重开，按名 `multiple.not_repeatable` 拒绝且不武装；会话状态 only，无库写/修订/历史。 |
 | `MVIEW` | 完整实现 | 矩形（2 点）与**多边形（≥3 点）视口创建**，两种形状都真实渲染（多边形裁剪对折线/圆锥曲线/网格/图像全支持）；导入的多边形视口边界经组 340 解析后同样渲染；退化/自交/非共面按名拒绝 |
 | `MVSETUP` | 部分实现 | `MVSETUP <rows> <cols> <scale>` 在活动图纸布局建等分视口网格并设比例；非 AutoCAD Standard 配置；无 Align/Create/Options/title-block 提示 |
 | `NAVBAR` | 部分实现 | 真实设置写入 `NAVBAR [ON\|OFF]`（持久化导航栏可见性）；无 SteeringWheels/ShowMotion/3Dconnexion。 |
@@ -1151,7 +1153,7 @@
 | `TEXTSCR` | 完整实现 | 置会话文本屏幕旗标（`cad_status.textScreen`）；共享 chrome 的文本屏幕窗口显示**同一**命令行历史（`commandWindowRows` + `commandWindowText`，无第二套历史模型）；无历史通道时显式说明而非空窗。 |
 | `TEXTTOFRONT` | 完整实现 | 选择式；按 `SpaceId` 逐范围把 Text/MultiLeader/Dimension 上移到该范围所有非合格对象之前（保持相对顺序，`texttofront.unchanged` 不建事务，耗尽 `texttofront.order_exhausted`）；其它选中对象逐条 `texttofront.skipped` | 载荷无「全图文字」选项（声明）；无 Draw Order 对话框 |
 | `TEXTUNMASK` | 部分实现 | 组优先删除 + 估计外框启发；清理已擦除文字留下的陈旧组；未分组遮罩来源不可证明（声明）；无匹配为具名无操作成功 |
-| `TFRAMES` | 部分实现 | 会话令牌 `tframes`；不改变图像/外部参照边框可见性。 |
+| `TFRAMES` | 完整实现 | **完整实现（2026-11-24）**：会话令牌 `tframes`（默认 ON）经 `DisplaySettings::frames_visible` 到达派生批次：ON 显示光栅图像边框，并按 `WIPEOUTFRAME` 显示遮罩边框；OFF 同时隐藏两者（WIPEOUT 仍遮罩、图像仍绘制纹理）；外部参照边框未建模（xref 是展开的块几何），命令按名声明；无库写/修订/历史，出图不跟随（出图各自解析边框）。 |
 | `THICKEN` | 部分实现 | 具名拒绝（`thicken.unsupported: no surface-to-solid model`）。 |
 | `TIFOUT` | 部分实现 | 具名拒绝（`tifout.unsupported: raster TIFF export is not implemented; use PLOT for vector SVG/PDF`）。 |
 | `TIME` | 部分实现 | 真实 UTC/文档/修订/计数 + 4 个显式 `time.not_tracked`（创建、最后更新、命令耗时、计时器）；未跟踪值不杜撰 |
@@ -1647,7 +1649,7 @@
 | 368 | `FILTER` | 部分实现 | Creates a list of requirements that an object must meet to be included in a selection set. | `AND`/`OR`/`XOR`/`NOT` 递归逻辑树（括号、元数校验）、相对运算符、已建模属性集；只读；**分类/自定义特性未建模**；**命名 `.nfl` 过滤器未实现** |
 | 369 | `-FIND` | 完整实现 | Searches for the text that you specify in the entire drawing, the current space or layout, or selected objects. | `-FIND <needle>`：与 `FIND` 同一实现（整图：模型空间 + 全部图纸布局；按画出来的文本匹配）；比较方式读取会话 `FINDMATCH`（默认 OFF = ASCII 不区分大小写，ON = 区分大小写）；只报告不写库 |
 | 370 | `FIND` | 完整实现 | Finds the text that you specify, and can optionally replace it with other text. | `FIND <needle> [=> <replacement>]`；遍历模型空间与全部图纸布局并分组报告；跨空间替换一条事务/一步撤销，拒绝时任何空间都不写；MTEXT/`AcDbText`/表格单元格均按投影（画出来的文本）匹配与替换，含 `\P`/`%%d`/`\S`/`^I` 语义；块定义命中只读具名；比较方式读取会话 `FINDMATCH`（OFF 默认 ASCII 不区分大小写 / ON 区分大小写） |
-| 371 | `FINDINCLUDE` | 部分实现 | Controls the types of text objects included in a search when using the -FIND command. | 会话令牌（默认 ON）；跨块/外部参照文字搜索未实现。 |
+| 371 | `FINDINCLUDE` | 完整实现 | Controls the types of text objects included in a search when using the -FIND command. | 会话令牌 `find_include`（默认 ON）决定 `-FIND`/`FIND` 的块通道：ON 搜索块定义与已加载外部参照物化块（按名标注 external reference），OFF 只搜模型空间/图纸布局并在报告写明排除；未加载/无块参照按名与状态列为未搜索来源；无库写/修订/历史。 |
 | 372 | `FINDMATCH` | 完整实现 | Controls how the entered text string is compared with text in objects when using the -FIND command. | 切换会话 `find_match_case`（默认 OFF）；`-FIND`/`FIND` 的报告与替换共用该标志：ON 精确字节（区分大小写），OFF ASCII 不区分大小写；覆盖 MTEXT/单行 TEXT/MULTILEADER/表格单元格。 |
 | 373 | `FLATSHOT` | 部分实现 | Creates a 2D representation of all 3D objects based on the current view. | 具名拒绝（`flatshot.unsupported: 3D solids are not modeled, so there is nothing to flatten`）。 |
 | 374 | `FLATTEN` | 部分实现 | Converts 3D geometry to a projected 2D representation. | 真实编辑：LINE/POLYLINE/CIRCLE/ARC/ELLIPSE/POINT/SPLINE、TEXT/SHAPE/MASK/XY 平面 IMAGE/COMPOUND，以及竖直 INSERT（只改插入点 z 与属性文字 z，不编辑块定义；成员非平/放置倾斜按名拒绝）的 z 置 0；一条事务/一步撤销；MESH/Body3d/派生显示的 DIMENSION/HATCH/MULTILEADER/TABLE 按名拒绝（Express 投影行为简化为 z=0）。 |
@@ -1852,7 +1854,7 @@
 | 573 | `MTEDIT` | 部分实现 | Edits multiline text. | `TEXTEDIT` 的别名（同一 `CommandId`/路径）；编辑当前单选的 Text/MText/MULTILEADER 字符串；无第二编辑路径 |
 | 574 | `-MTEXT` | 部分实现 | Creates a multiline text object. | `MTEXT` 创建工具的别名（同一两角 + 终端文本捕获）；无第二实现 |
 | 575 | `MTEXT` | 部分实现 | Creates a multiline text object. | 两角宽度模型；无行距/分栏/背景填充 |
-| 576 | `MULTIPLE` | 部分实现 | Repeats the next command until canceled. | 设置会话 `MultipleRepeat` 标志；本宿主无重复循环，报告 `multiple.repeat_not_implemented`，不伪造重复 |
+| 576 | `MULTIPLE` | 完整实现 | Repeats the next command until canceled. | 裸命令/`MULTIPLE <捕获命令>` 武装捕获重复：每次成功确认后经唯一确认漏斗重开同一捕获（`multiple.repeated`），`Esc`/`CANCEL` 停止，重开失败 `multiple.repeat_failed`，512 次守卫 `multiple.repeat_limit`；一次性/测量命令按名 `multiple.not_repeatable` 拒绝且不武装；无库写/修订/历史。 |
 | 577 | `MVIEW` | 完整实现 | Creates and controls layout viewports. | 矩形（2 点）与多边形（≥3 点）视口创建并真实渲染；导入的多边形边界（DXF 组 340 → 边界实体）解析为真多边形；退化/自交/非共面按 `mview.*`/`viewport.polygon_*` 拒绝 |
 | 578 | `MVSETUP` | 部分实现 | Sets up the specifications of a drawing. | `MVSETUP <rows> <cols> <scale>` 在活动图纸布局建等分视口网格并设比例；非 AutoCAD Standard 配置；无 Align/Create/Options/title-block 提示 |
 | 579 | `NAVBAR` | 部分实现 | Provides access to viewing tools from a unified interface. | 真实设置写入 `NAVBAR [ON\|OFF]`（持久化导航栏可见性）；无 SteeringWheels/ShowMotion/3Dconnexion。 |
@@ -2138,7 +2140,7 @@
 | 859 | `TEXTSCR` | 完整实现 | Opens a text window that displays a history of prompts and command line entries for the current session. | 置会话文本屏幕旗标（`cad_status.textScreen`）；共享 chrome 的文本屏幕窗口显示同一命令行历史（`commandWindowRows` + `commandWindowText`，无第二套历史模型），关闭经 `GRAPHSCR` 回写旗标。 |
 | 860 | `TEXTTOFRONT` | 完整实现 | Brings text, leaders, and dimensions in front of all other objects in the drawing. | 以**当前选择**为输入；按 `SpaceId` 逐范围（模型空间、各图纸布局、各块定义）上移到该范围非合格对象之前，范围内相对顺序保持，`texttofront.unchanged` 不建事务；其它选中对象 `texttofront.skipped` | 载荷无「全图文字」选项；无 Draw Order 对话框 |
 | 861 | `TEXTUNMASK` | 部分实现 | Removes the mask from selected text or mtext that were masked with TEXTMASK. | 组优先删除 + 估计外框启发；清理已擦除文字留下的陈旧组；未分组遮罩来源不可证明（声明）；无匹配为具名无操作成功 |
-| 862 | `TFRAMES` | 部分实现 | Toggles the display of frames for all wipeout and image objects. | 会话令牌 `tframes`；不改变图像/外部参照边框可见性。 |
+| 862 | `TFRAMES` | 完整实现 | Toggles the display of frames for all wipeout and image objects. | 会话令牌 `tframes`（默认 ON）经 `DisplaySettings::frames_visible` 到达派生批次：ON 显示图像边框与 `WIPEOUTFRAME` 允许的遮罩边框，OFF 同时隐藏（遮罩/纹理仍在）；外部参照边框未建模按名声明；无库写/修订/历史。 |
 | 863 | `THICKEN` | 部分实现 | Converts a surface into a 3D solid with a specified thickness. | 具名拒绝（`thicken.unsupported: no surface-to-solid model`）。 |
 | 864 | `TIFOUT` | 部分实现 | Saves selected objects to a file in TIFF file format. | 具名拒绝（`tifout.unsupported: raster TIFF export is not implemented; use PLOT for vector SVG/PDF`）。 |
 | 865 | `TIME` | 部分实现 | Displays the date and time statistics of a drawing. | 真实 UTC/文档/修订/计数 + 4 个显式 `time.not_tracked`（创建、最后更新、命令耗时、计时器）；未跟踪值不杜撰 |
