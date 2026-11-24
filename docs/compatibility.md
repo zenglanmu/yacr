@@ -995,8 +995,8 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `VIEW` | **完整实现** | `SAVE/RESTORE/LIST/DELETE <name>`；命名视图持久化到文档 `tables/views.json`（`.ymodel` minor 18：相机+2D/3D 模式+保存的 2D 相机+工作平面+活动空间），名称不区分大小写；上限 32，第 33 个按 `view.cap_exceeded` 拒绝且不驱逐；`SAVE`/`DELETE` 一条事务/一步撤销，`RESTORE` 只应用会话相机/空间；Viewer 下 `SAVE`/`DELETE` 按 `PermissionDenied` 拒绝（`RESTORE`/`LIST` 仍可用） | 无 View 对话框/缩略图（构建级全局范围）；DXF/DWG `VIEW` 表经 acadrust 导入导出，源只存世界高度 ⇒ 正交比例按 `height/1000` 转换并逐行报告 `import/export.view_camera_approximated`；无布局名的 paper-space 行按 `import.view_paper_space_unresolved` 跳过 |
 | `-VIEW` | **完整实现** | `VIEW` 的别名（同一 `CommandId`/路径/持久化表） | 无命令行选项提示差异 |
 | `VIEWGO` | **完整实现** | `VIEWGO <name>`；走与 `VIEW RESTORE` 相同的持久化恢复路径，未知名 `view.unknown` | 无自动补全/对话框 |
-| `VIEWBACK` | 部分实现 | 从每视口既有 `ZOOM PREVIOUS` 栈弹出；空栈为 `view.back.empty` no-op；记录前进项 | 不是 AutoCAD 的完整 ViewBack 顺序；pan/滚轮/orbit 不入栈（既有声明） |
-| `VIEWFORWARD` | 部分实现 | 从新的每视口前进栈（上限 16）弹出并回记后退项；空栈为 `view.forward.empty` | **声明式偏离**：AutoCAD 的 VIEWFORWARD 与 ZOOM PREVIOUS 共用历史；本实现另建有界前进栈 |
+| `VIEWBACK` | 部分实现 | 从每视口后退栈弹出；pan/orbit 连续手势按一次手势记入（首个命令记录、后续合并；指针抬起/`cancel_tool` 结束）；空栈为 `view.back.empty` no-op | 剩余缺口：ViewCube `cad_orbit` 拖拽没有结束信号（两次拖拽间无其它命令会合并）；pinch 无起止边界、按连续导航不记录 |
+| `VIEWFORWARD` | 部分实现 | 从同一后退/前进历史的前进栈（上限 16）弹出并回记后退项；空栈为 `view.forward.empty` | 与 `VIEWBACK` 相同的 ViewCube/pinch 边界；不再有独立引擎偏离（与 `ZOOM PREVIOUS` 共用历史） |
 | `VPOINT` | 部分实现 | 向量或 `TOP/BOTTOM/FRONT/BACK/LEFT/RIGHT`；标准词复用标准视图路径，向量进入 3D 透视方向；零/非有限向量按 `vpoint.invalid_vector` 拒绝；不改模型 | 无 `Rotate`/`Set UCS` 等子选项；向量形式的相机距离/目标沿用现有 3D 进入规则 |
 
 > **证据边界**：以上 10 条只有 Rust 契约测试与前端纯函数/结构测试；**没有** GUI、像素、真实 GPU、
@@ -1816,7 +1816,7 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 | --- | --- | --- |
 | `-LAYER` | **部分实现（只读报告）**：真实图层表（名称/可见/off/frozen/locked/当前层） | 图层增删改名/开关/冻结/锁定写形式未实现；不写库 |
 | `LAYERSTATESAVE` | **部分实现（载荷路由）**：`LayerState` 载荷转交既有 `LAYERSTATE` 会话存储 | 无收录对话框；无载荷只报告；会话状态不持久化 |
-| `NEWVIEW` | **部分实现（载荷路由）**：`View` 载荷转交持久化命名视图表（`tables/views.json`，minor 18） | 无窗口/名称提示；无矩形窗口定义形式；无载荷只报告 `newview.needs_name` |
+| `NEWVIEW` | **完整实现** | typed `NEWVIEW <name>` 保存当前显示；`NEWVIEW WINDOW <name> <x1> <y1> <x2> <y2>` 按世界矩形取景并保存（复用 `ZOOM WINDOW` 的 `framing_rect`/`plan_camera`，不改当前相机）；两者写入 `tables/views.json`，一条事务/一步撤销；Viewer 下写形式按 `PermissionDenied` 拒绝 | 无 NEWVIEW 对话框/缩略图（构建级全局范围）；窗口形式仅 2D 正交（`newview.window.requires_2d`）；无参数只报告 `newview.needs_name` |
 | `-SCALELISTEDIT` | **部分实现（只读报告）**：真实 `ACAD_SCALELIST` 条目 | 创建/编辑/删除/排序比例未实现 |
 | `LWEIGHT` / `-LWEIGHT` | **部分实现（只读报告）**：会话线宽显示令牌（默认 ON） | 渲染器不消费该标志；LWEIGHT 对话框未实现 |
 | `COLOR` / `-COLOR` | **完整实现**：`<0..=256>` / `BYLAYER` / `BYNAME` / `BYBLOCK` 写会话当前颜色（`color.set`，无库写、无撤销），裸命令报告（`color.report`，默认 256=ByLayer）；**新实体由创建漏斗写入该 ACI**（`256` 行逐字节不变，`0` = ByBlock 符号值，`1..=255` 经 `property_value::rgb_for_aci` 解析），撤销随实体行一起回退 | **全局范围**：无调色板/Select Color 对话框（`src/components/ColorChooser.tsx` 是实体属性选择器，不是会话令牌）；无颜色名表（只接受 ACI 与三个符号词）；`CELTSCALE` 等颜色相关变量不在范围 |
