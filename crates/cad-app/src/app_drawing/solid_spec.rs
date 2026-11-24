@@ -32,10 +32,12 @@
 //!   the axis is world +Z. The AutoCAD `Axis endpoint` height option (an axis
 //!   in any 3D direction) and the `3P` / `Ttr` / `Elliptical` base options are
 //!   **not** modelled, because the modeler seam has no oriented-axis or
-//!   elliptical primitive. `PYRAMID`'s `Edge` / `Sides` / `Top radius` need a
-//!   regular n-gon (possibly truncated) base, which the seam's square,
-//!   apex-centred `PrimitiveSpec::Pyramid` cannot express — those constructions
-//!   are refused as `solid.option_not_supported` and PYRAMID stays partial.
+//!   elliptical primitive. `PYRAMID`'s regular `n`-gon base is modelled
+//!   ([`SolidPrimitiveCommand::PyramidPolygon`], reusing the `POLYGON` ring
+//!   math); its `Edge` base pick and `Top radius` truncation are not — the
+//!   former is an interactive-prompt branch, the latter has no truncated
+//!   pyramid spec in the seam, so both are refused by absence rather than
+//!   approximated.
 
 use super::*;
 use crate::command_payload::{PlanCircle, PlanLength, SolidPrimitiveCommand};
@@ -70,7 +72,7 @@ pub(crate) fn solid_primitive_spec(
                 height,
             })
         }
-        PrimitiveKind::Pyramid => pyramid_spec(input),
+        PrimitiveKind::Pyramid => pyramid_spec(input, elevation),
         PrimitiveKind::Cylinder => cylinder_spec(input, elevation),
         PrimitiveKind::Sphere => sphere_spec(input, elevation),
         PrimitiveKind::Cone => cone_spec(input, elevation),
@@ -202,10 +204,72 @@ fn wedge_points(points: &[Point3]) -> CadResult<(Point3, f64, f64, f64)> {
     Ok((origin, length, width, height))
 }
 
-/// `PYRAMID`: only the explicit square-base form is modelled (see the module
-/// docs for why the `Edge`/`Sides`/`Top radius` constructions are absent).
-fn pyramid_spec(input: &SolidPrimitiveCommand) -> CadResult<PrimitiveSpec> {
+/// `PYRAMID`: the explicit 3D square-base form and the typed regular n-gon base.
+///
+/// The n-gon form reuses the `POLYGON` command's construction
+/// ([`crate::draw_tool::polygon_vertices`] /
+/// [`crate::draw_tool::circumscribed_polygon_vertices`]) to place the ring, then
+/// passes the ring's own vertex radius and first-vertex angle to the modeler
+/// seam, so the base vertices are exactly what `POLYGON` would draw. The
+/// truncation (`Top radius`) has no seam spec and is refused by absence.
+fn pyramid_spec(input: &SolidPrimitiveCommand, elevation: f64) -> CadResult<PrimitiveSpec> {
     let kind = PrimitiveKind::Pyramid;
+    if let SolidPrimitiveCommand::PyramidPolygon {
+        base,
+        radius,
+        sides,
+        circumscribed,
+        height,
+    } = input
+    {
+        let [x, y] = *base;
+        if !x.is_finite() || !y.is_finite() {
+            return Err(CadError::InvalidInput(format!(
+                "pyramid.invalid_point: the base centre must be finite, got ({x}, {y})"
+            )));
+        }
+        if !(crate::draw_tool::MIN_POLYGON_SIDES..=crate::draw_tool::MAX_POLYGON_SIDES)
+            .contains(sides)
+        {
+            return Err(CadError::InvalidInput(format!(
+                "pyramid.sides: the side count must be between {} and {}, got {sides}",
+                crate::draw_tool::MIN_POLYGON_SIDES,
+                crate::draw_tool::MAX_POLYGON_SIDES
+            )));
+        }
+        // Pre-check with the same floor the `POLYGON` ring uses, so a degenerate
+        // radius is this command's named refusal rather than the shared
+        // construction's unqualified message.
+        if !radius.is_finite() || *radius <= crate::draw_tool::polygon_radius_floor() {
+            return Err(CadError::InvalidInput(format!(
+                "pyramid.radius: the base radius must be finite and positive, got {radius}"
+            )));
+        }
+        let base_z = plan_z(elevation)?;
+        let centre = point3(x, y, base_z);
+        // The picked direction is `+X` (`POLYGON`'s pointer direction is arbitrary
+        // but the typed form has no second pick); the circumscribed ring derives
+        // its own vertex radius and half-step offset from it.
+        let radius_point = point3(x + radius, y, base_z);
+        let ring = if *circumscribed {
+            crate::draw_tool::circumscribed_polygon_vertices(centre, radius_point, *sides)
+        } else {
+            crate::draw_tool::polygon_vertices(centre, radius_point, *sides)
+        }
+        .map_err(|error| CadError::InvalidInput(format!("pyramid.invalid_base: {error}")))?;
+        let first = *ring.first().ok_or_else(|| {
+            CadError::InvalidInput("pyramid.invalid_base: the base ring is empty".into())
+        })?;
+        let vertex_radius = planar_distance(centre, first);
+        let rotation = (first.y - centre.y).atan2(first.x - centre.x);
+        return Ok(PrimitiveSpec::PyramidNgon {
+            base_center: centre,
+            radius: vertex_radius,
+            sides: *sides,
+            rotation,
+            height: require_extent(kind, "height", *height)?,
+        });
+    }
     let SolidPrimitiveCommand::Points(points) = input else {
         return Err(option_not_supported(kind, input));
     };
@@ -474,6 +538,7 @@ fn option_name(input: &SolidPrimitiveCommand) -> &'static str {
         SolidPrimitiveCommand::SphereDiameter { .. } => "Diameter",
         SolidPrimitiveCommand::SphereTwoPoint { .. } => "2P",
         SolidPrimitiveCommand::TorusPlan { .. } => "plan ring and tube",
+        SolidPrimitiveCommand::PyramidPolygon { .. } => "regular n-gon base",
     }
 }
 

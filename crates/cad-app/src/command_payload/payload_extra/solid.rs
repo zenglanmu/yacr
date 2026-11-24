@@ -36,7 +36,12 @@
 //! own **capture tool**. The solid family has no capture (the per-option prompts
 //! are out of scope), so a selector that could only ever arrive without a payload
 //! would be a fake surface. The typed payload is therefore the whole supported
-//! surface, exactly as `Points([..])` already was.
+//! surface, exactly as `Points([..])` already was. The one exception is
+//! `PYRAMID`, whose *base* is a whole construction (side count + centre + radius +
+//! inscribed/circumscribed) rather than a single field, so the session admits it
+//! as the typed command line `PYRAMID [INSCRIBED|CIRCUMSCRIBED] <sides> <cx> <cy>
+//! <radius> <height>` and dispatches this payload — still no second command id
+//! and no second write path.
 
 use cad_domain::Point3;
 
@@ -83,10 +88,11 @@ pub enum PlanLength {
 ///
 /// `BOX` and `WEDGE` share their whole prompt set (first corner or `Center`;
 /// other corner, `Cube` or `Length`; height), so they share these variants.
-/// `PYRAMID` keeps only [`Self::Points`]: its `Edge` / `Sides` / `Top radius`
-/// constructions need a regular n-gon (possibly truncated) base that the
-/// injected modeler seam does not expose; see `crate::app_drawing::solid_spec`
-/// for the exact boundary.
+/// `PYRAMID` takes [`Self::Points`] (the explicit square-base form) and
+/// [`Self::PyramidPolygon`] (the typed regular n-gon base, AutoCAD's `Sides` +
+/// `Inscribed`/`Circumscribed` construction); its `Top radius` truncation is not
+/// modelled because the modeler seam has no truncated pyramid spec — it is
+/// refused by absence, never folded into a full pyramid.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SolidPrimitiveCommand {
     /// The explicit 3D form: every point is the caller's (arity per kind).
@@ -144,4 +150,27 @@ pub enum SolidPrimitiveCommand {
     SphereTwoPoint { first: Point3, second: Point3 },
     /// `TORUS`: a plan ring plus its tube.
     TorusPlan { ring: PlanCircle, tube: PlanLength },
+    /// `PYRAMID`'s **regular n-gon base** construction:
+    /// `PYRAMID [CIRCUMSCRIBED] <sides> <cx> <cy> <radius> <height>`.
+    ///
+    /// `base` is the plan centre (its z is the session `ELEV`), `radius` is the
+    /// typed base radius and `circumscribed` selects which circle it names —
+    /// exactly like `POLYGON`/`POLYGON CIRCUMSCRIBED`: `false` (the default)
+    /// inscribes the base ring in the radius circle (the first vertex lies on
+    /// `+X`), `true` has the ring's edges touch a radius circle (the extracted
+    /// ring is `POLYGON CIRCUMSCRIBED`'s). The command converts the typed radius
+    /// to the ring's vertex radius with the same polygon math the `POLYGON`
+    /// command uses, so the two commands agree on the base vertices.
+    ///
+    /// The apex stays over the centre; the result is the same exact
+    /// `Body3d { kind: Solid }` / `AcDb3dSolid` the explicit point form creates.
+    /// AutoCAD's `Top radius` (truncated pyramid) is **not** modelled: the seam
+    /// has no truncated spec, so it is absent rather than silently squared.
+    PyramidPolygon {
+        base: [f64; 2],
+        radius: f64,
+        sides: u32,
+        circumscribed: bool,
+        height: f64,
+    },
 }

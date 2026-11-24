@@ -237,3 +237,39 @@ fn torus_ring_diameter_and_tube_radius_build_a_ring() {
     assert!((max.x - 12.0).abs() < 0.05, "{max:?}");
     assert!((min.z - (1.0 - 2.0)).abs() < 0.05, "{min:?}");
 }
+
+#[test]
+fn pyramid_polygon_base_commits_the_ngon_body_through_the_real_modeler() {
+    // A regular hexagon of vertex radius 2 at ELEV 1: its vertices sit at
+    // `k·60°`, so the display bounds are exactly `x ± 2` and `y ± √3`, and the
+    // apex is 3 units above the base plane. The real `solidcore` modeler must
+    // lift and tessellate the authored planar B-rep, and the row must be the
+    // same exact `AcDb3dSolid` the point forms commit.
+    let mut controller = modeler_controller();
+    set_elev(&mut controller, 1.0);
+    let (min, max) = run_bounds(
+        &mut controller,
+        ExtendedCommandId::Pyramid,
+        cad_app::SolidPrimitiveCommand::PyramidPolygon {
+            base: [0.0, 0.0],
+            radius: 2.0,
+            sides: 6,
+            circumscribed: false,
+            height: 3.0,
+        },
+    );
+    let root_three = 3.0_f64.sqrt();
+    for (actual, expected, axis) in [
+        (min.x, -2.0, "min x"),
+        (min.y, -root_three, "min y"),
+        (min.z, 1.0, "min z"),
+        (max.x, 2.0, "max x"),
+        (max.y, root_three, "max y"),
+        (max.z, 4.0, "max z"),
+    ] {
+        assert!(
+            (actual - expected).abs() < 1e-9,
+            "{axis}: {actual} vs {expected}"
+        );
+    }
+}

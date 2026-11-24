@@ -17,7 +17,7 @@ pub enum PrimitiveKind {
     Box,
     /// `WEDGE`: a right triangular prism.
     Wedge,
-    /// `PYRAMID`: a rectangular base tapering to a point.
+    /// `PYRAMID`: a square or regular n-gon base tapering to a point.
     Pyramid,
     /// `CYLINDER`.
     Cylinder,
@@ -70,6 +70,23 @@ pub enum PrimitiveSpec {
         length: f64,
         height: f64,
     },
+    /// A pyramid with a **regular `sides`-gon base** (AutoCAD's
+    /// `PYRAMID <sides> …` construction): the base ring is centred on
+    /// `base_center` in the plane `z = base_center.z`, its first vertex at
+    /// `rotation` radians about `+Z`, every vertex at the same `radius`, and the
+    /// apex `height` above the centre.
+    ///
+    /// `radius` is the **vertex (circumscribed-circle) radius**, the value the
+    /// `POLYGON` construction's own ring uses; the command layer converts a
+    /// circumscribed (tangent-circle) radius to it, so both spellings produce the
+    /// same ring the `POLYGON` command would.
+    PyramidNgon {
+        base_center: Point3,
+        radius: f64,
+        sides: u32,
+        rotation: f64,
+        height: f64,
+    },
     Cylinder {
         origin: Point3,
         radius: f64,
@@ -100,6 +117,7 @@ impl PrimitiveSpec {
             PrimitiveSpec::Box { .. } => PrimitiveKind::Box,
             PrimitiveSpec::Wedge { .. } => PrimitiveKind::Wedge,
             PrimitiveSpec::Pyramid { .. } => PrimitiveKind::Pyramid,
+            PrimitiveSpec::PyramidNgon { .. } => PrimitiveKind::Pyramid,
             PrimitiveSpec::Cylinder { .. } => PrimitiveKind::Cylinder,
             PrimitiveSpec::Sphere { .. } => PrimitiveKind::Sphere,
             PrimitiveSpec::Cone { .. } => PrimitiveKind::Cone,
@@ -141,6 +159,32 @@ impl PrimitiveSpec {
             } => {
                 require_finite_point("base_center", base_center)?;
                 require_positive("length", length)?;
+                require_positive("height", height)
+            }
+            PrimitiveSpec::PyramidNgon {
+                base_center,
+                radius,
+                sides,
+                rotation,
+                height,
+            } => {
+                require_finite_point("base_center", base_center)?;
+                require_positive("radius", radius)?;
+                if !(MIN_PYRAMID_NGON_SIDES..=MAX_PYRAMID_NGON_SIDES).contains(&sides) {
+                    return Err(SolidInputError {
+                        code: codes::SOLID_INVALID_DIMENSION,
+                        message: format!(
+                            "sides must be between {MIN_PYRAMID_NGON_SIDES} and \
+                             {MAX_PYRAMID_NGON_SIDES}, got {sides}"
+                        ),
+                    });
+                }
+                if !rotation.is_finite() {
+                    return Err(SolidInputError {
+                        code: codes::SOLID_INVALID_DIMENSION,
+                        message: format!("rotation must be finite, got {rotation}"),
+                    });
+                }
                 require_positive("height", height)
             }
             PrimitiveSpec::Cylinder {
@@ -237,6 +281,16 @@ impl std::fmt::Display for SolidOperationFamily {
         f.write_str(self.as_str())
     }
 }
+
+/// The smallest regular n-gon base a `PyramidNgon` may have (a triangle).
+pub const MIN_PYRAMID_NGON_SIDES: u32 = 3;
+
+/// The largest regular n-gon base a `PyramidNgon` may have.
+///
+/// This is the seam's sanity bound, not a new capability claim: it mirrors the
+/// `POLYGON` command's `POLYSIDES` ceiling so a corrupted side count is refused
+/// before any kernel work instead of building an unbounded face ring.
+pub const MAX_PYRAMID_NGON_SIDES: u32 = 1024;
 
 /// A seam-level sanity bound on a chamfer set-back.
 ///

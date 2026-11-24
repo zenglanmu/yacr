@@ -893,6 +893,10 @@ pub use helpers::*;
 mod arguments;
 pub use arguments::*;
 
+// The typed `PYRAMID` regular n-gon base line (the one typed 3D primitive).
+mod solid_arguments;
+pub use solid_arguments::*;
+
 // `DWGPROPS`'s typed summary-metadata line (the bare selector is the report).
 mod document_meta;
 pub use document_meta::*;

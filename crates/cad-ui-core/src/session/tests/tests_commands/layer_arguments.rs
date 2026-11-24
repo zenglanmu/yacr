@@ -7,6 +7,7 @@
 
 use super::super::super::*;
 use super::super::test_support::*;
+use crate::session::commands::parse_layerstatesave_argument;
 
 #[test]
 fn layerstate_has_one_typed_grammar_and_no_second_selector() {
@@ -230,4 +231,46 @@ fn bare_names_and_out_of_grammar_arguments_are_refused_at_the_funnel() {
     session
         .command("LAYERPMODE")
         .expect("bare LAYERPMODE reports");
+}
+
+#[test]
+fn layerstatesave_grammar_is_a_name_or_the_list_spelling() {
+    assert_eq!(
+        parse_layerstatesave_argument("Plan A"),
+        Some(LayerStateOption::Save("Plan A".into())),
+        "the name is the trimmed remainder and may contain spaces"
+    );
+    assert_eq!(
+        parse_layerstatesave_argument("?"),
+        Some(LayerStateOption::List)
+    );
+    for bad in ["? extra", "?name"] {
+        assert_eq!(parse_layerstatesave_argument(bad), None, "{bad:?}");
+    }
+    // The parser never produces the other two options.
+    for name in ["SAVE", "RESTORE x", "DELETE x"] {
+        assert_eq!(
+            parse_layerstatesave_argument(name),
+            Some(LayerStateOption::Save(name.into())),
+            "{name:?} is a legal state name, never a second option grammar"
+        );
+    }
+}
+
+#[test]
+fn layerstatesave_typed_line_reaches_the_one_store_and_lists() {
+    let session = session(Rc::new(FakeFiles {
+        events: RefCell::new(Vec::new()),
+    }));
+    // The fake host has the session layer-state store; a name saves and `?`
+    // lists through the same `LayerStateSave` route `LAYERSTATE` uses.
+    session
+        .command("LAYERSTATESAVE Plan A")
+        .expect("a name saves the current layer state");
+    session
+        .command("LAYERSTATESAVE ?")
+        .expect("? is the read-only list");
+    // `?` with trailing text is outside the grammar and changes nothing.
+    let error = session.command("LAYERSTATESAVE ? extra").unwrap_err();
+    assert!(error.contains("LAYERSTATESAVE needs"), "{error}");
 }

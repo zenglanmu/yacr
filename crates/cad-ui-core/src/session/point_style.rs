@@ -114,12 +114,20 @@ impl CadSession {
             // (`DISTANCE`/`ANGLE`/`AREA`/`POLYLINE`) or the report-only `RADIUS`
             // (and the explicit `VOLUME` refusal). It is not a second engine.
             super::commands::MEASUREGEOM_SELECTOR => self.measuregeom_argument(argument, text),
+            // `PYRAMID …`: the typed regular n-gon base construction of the one
+            // 3D primitive that has a real argument grammar.
+            super::commands::PYRAMID_SELECTOR => self.pyramid_argument(argument, text),
             // The 2026-11-07 2D text batch: `<H> <V>` / factor / edge / run /
             // shape ride the payload; the selection is still the input.
             JUSTIFYTEXT_SELECTOR | TSCALE_SELECTOR | TEXTALIGN_SELECTOR | TCOUNT_SELECTOR
             | TCIRCLE_SELECTOR => self.text_batch_argument(selector, argument, text),
             // The 2026-11-07 layer batch argument forms.
             super::commands::LAYERSTATE_SELECTOR => self.layer_state_argument(argument, text),
+            // `LAYERSTATESAVE [<name>|?]`: the dialog's command-line form, routed
+            // to the same session layer-state store (no second write path).
+            super::commands::LAYERSTATESAVE_SELECTOR => {
+                self.layerstatesave_argument(argument, text)
+            }
             super::commands::LAYWALK_SELECTOR => self.layer_walk_argument(argument, text),
             super::commands::LTSCALE_SELECTOR => self.linetype_scale_argument(argument, text),
             super::commands::LAYERPMODE_SELECTOR => self.layer_pmode_argument(argument, text),

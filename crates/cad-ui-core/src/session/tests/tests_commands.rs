@@ -44,6 +44,7 @@ mod select_filter;
 mod shape_block_arguments;
 mod shell_settings;
 mod snap_grid;
+mod solid_arguments;
 mod space_argument;
 mod standard_view;
 mod status_projection;
