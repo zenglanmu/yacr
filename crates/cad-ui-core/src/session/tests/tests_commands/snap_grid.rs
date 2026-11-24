@@ -324,6 +324,7 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             "VPORTS",
             "VPCLIP",
             "VPSCALE",
+            "VPSYNC",
             "LAYVPI",
             // `LAYFRZ VP [<index>,...]` (2026-11-24): the per-viewport freeze
             // scope, an argument form of the layer command.
