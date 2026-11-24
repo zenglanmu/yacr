@@ -26,8 +26,8 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **237** |
-| 部分实现（有写明的界） | **742** |
+| 完整实现 | **241** |
+| 部分实现（有写明的界） | **738** |
 | **已实现合计（完整 + 部分）** | **979** |
 | 未实现 | **2** |
 
@@ -51,6 +51,8 @@
 > 实现状态计数，也没有运行/像素证据（`autocad-structure` 契约测试锁定接线）。
 
 > **2026-11-24 增补（严格 2D 收口）**：`TEXTALIGN`（`SETSPACING`/`CURRENTVERTICAL`/`CURRENTHORIZONTAL`）、`TCIRCLE`（`SLOT`/`OFFSET`/`CONSTANT`）、`DONUT`（填充圆盘/环）、`HATCHGENERATEBOUNDARY`（图纸布局 hatch）、`ADDSELECTED`（ARC/POLYLINE/INSERT）、`GETSEL`（COLOR/LINETYPE/SPACE）、`MEASUREGEOM VOLUME`（单一体精确 body 路径）、`CENTERMARK`（可配置臂长）、`CENTERLINE`（延伸/间隙）九个命令按严格口径升为**完整实现**；`CENTERMARK`/`CENTERLINE` 的产出是普通 `LINE`（非关联为声明边界，与 `DIMCENTER` 同类）。计入 **213 完整 + 766 部分 / 979 已实现**；窗口/GPU/像素/真机证据仍 NOT VERIFIED。
+
+> **2026-11-24 增补（严格 2D 收口续）**：`HATCH`/`-HATCH` 的支持域（`Circle`/完整 `Ellipse`/闭合 `Polyline`/`LINE`+`ARC` 边链；solid/user-defined/predefined/gradient 四种会话填充与 `PATTERN`/`PATTERNFILE` 两种命令名通道）已无剩余拒绝路径，契约测试逐组合证明——仅剩创建期**关联性**与实时预览/对话框，二者都是构建级全局范围。`IMAGEATTACH` 新增可选的 `[<rotation_deg>]`（绕 `+Z` 逆时针、烘进 `u`/`v` 基）与**活动图纸布局**目标（走布局自身 draw-order 的实体写入路径；`Block` 定义 `imageattach.block_space`、失效布局 `imageattach.unknown_layout` 按名拒绝）。`VPSYNC` 新增可选的**0 基**主视口索引（`VPSYNC [<master>]`，默认 `0`；越界 `vpsync.master_out_of_range`、不 clamp、一条事务/一步撤销）。`HATCH`、`-HATCH`、`IMAGEATTACH`、`VPSYNC` 四个官方名字晋升为**完整实现**，计入 **241 完整 + 738 部分 / 979 已实现**；无 GUI/GPU/像素/真机证据。
 
 ## 下一批 100 条命令实施计划与进度（2026-11-07）
 
@@ -252,7 +254,7 @@
 
 > **这不是验收，是当前排期与口径。** 本轮目标是把命令从 `部分实现`/具名拒绝推进到支持域内
 > **没有剩余可写缺口**的 `完整实现`；不放宽为“改状态不实现”，也不把 ADR 全局范围缺口算作
-> 单命令完成。当前清单 **237 完整 / 742 部分 / 2 未实现**，只有真正合并且契约测试通过的
+> 单命令完成。当前清单 **241 完整 / 738 部分 / 2 未实现**，只有真正合并且契约测试通过的
 > 命令才改状态。
 
 | 批次 | 范围 | 状态 |
@@ -266,6 +268,7 @@
 | M2 块属性 | ADR-0055：ATTDEF/ATTRIB 模型、minor 14、DXF/渲染/命令/面板 | **已合并**（+13 complete；ATTIN/ATTOUT/ATTEXT/EATTEXT 文件 lane 仍 partial） |
 | M3 约束 | ADR-0054：有界二维几何/尺寸约束求解器、minor 15、DXF 节点 | ADR 已接受；P0 未开始，命令仍 partial |
 | M4 动作录制器 | ADR-0056：ACTRECORD/ACTSTOP/ACTUSERINPUT/ACTUSERMESSAGE/ACTMANAGER | **已合并**（+7 complete + Manage 面板；无真实文件对话框/GUI 证据） |
+| M1g 填充/底图/视口 | `HATCH`/`-HATCH` 支持域闭合（关联性/预览为全局范围）、`IMAGEATTACH` 旋转 + 图纸布局、`VPSYNC` 可选主视口 | **已合并**（+4 complete；`HATCHEDIT` 仅 `ORIGIN` 已并入的既有状态，本轮未改状态） |
 | M5 其他面板 | 发布/传递/标准/CUI/点云/PDF 底图 | 分析完成；多数是 `L`/架构级缺口，按 ADR/子系统逐个评估 |
 
 **已明确的诚实缺口**：`ARCHIVE`、`STANDARDS`、`CHECKSTANDARDS`、全部 `CUI*`、`CUSTOMIZE` 仍是
@@ -311,7 +314,7 @@
 | `-FIND` | 完整实现 | `-FIND <needle>`：与 `FIND` 同一遍历与匹配实现（模型空间 + 全部图纸布局，ASCII 不区分大小写子串，按画出来的文本）；只报告、不写库 |
 | `-GRAPHICSCONFIG` | 部分实现 | 具名拒绝（`-graphicsconfig.unsupported: renderer/graphics configuration is owned by the host`）。 |
 | `-GROUP` | 部分实现 | `GROUP` 的别名（同一 `CommandId`/会话组表路径）；无 DWG group 对象/修订/历史 |
-| `-HATCH` | 部分实现 | `HATCH` 的命令行拼写；同一实现与边界（含 `PATTERN`/`PATTERNFILE`） |
+| `-HATCH` | 完整实现 | `HATCH` 的命令行拼写：同一解析器/处理器与同一支持域（整实体闭合边界 + LINE/ARC 边链；solid/user/predefined/gradient 与 `PATTERN`/`PATTERNFILE`）；hatch 写入边界所在空间（模型空间或同一图纸布局，`hatch.block_space`/`hatch.mixed_space` 按名拒绝）；创建期关联性与实时预览属全局范围 |
 | `-HATCHEDIT` | 完整实现 | `HATCHEDIT` 的命令行拼写：同一解析器与同一处理器（含 `ORIGIN` 与 `PATTERNFILE`；全局范围的 `Associate`/`Annotative`/`DRAWORDER BOUNDARY` 同样按名拒绝） |
 | `-HYPERLINK` | 部分实现 | 具名拒绝（`-hyperlink.unsupported: this build has no hyperlink storage model`）。 |
 | `-IMAGE` | 部分实现 | 只读报告所有 IMAGE 实体（id/空间/file key/pixels/visible/clip/origin，`-image.*` 诊断码）；Viewer-legal，不写库。 |
@@ -743,7 +746,7 @@
 | `GRID` | 已实现 | — |
 | `GROUP` | 部分实现 | 会话内组表（上限 64、名字大小写不敏感）；裸命令/`LIST` 只读、`CREATE` 从选择集建组、`DELETE` 只移除名字；不写 DWG group 对象/修订/历史/事务 |
 | `GROUPEDIT` | 部分实现 | `ADD`/`REMOVE` 从选择集或键入实体 id 增删、`RENAME`（允许仅改大小写）；单次会话变更；不写实体/数据库 |
-| `HATCH` | 部分实现 | 整实体闭合边界 + LINE/ARC 边链；**`HATCH PATTERN <name>` 与 `HATCH PATTERNFILE <path.pat> [<name>]` 已接入**，复用 `HATCHEDIT` 的解析（文件优先→内置回退；无名的文件须恰好一个图案；组 76 = 2/1）；角度/比例/`HPDOUBLE`/样式仍走会话通道；拒绝码 `hatch.needs_pattern_name`/`hatch.unknown_pattern`（列出两个来源）/`hatch.pattern_file_*`/`hatch.fill_not_pattern`，空边界 `hatch.selection` | **仍部分实现**：创建期**关联性**无模型（`HatchGeometry` 只存派生环，没有边界句柄/反应器记录 —— 与 `HATCHEDIT ASSOCIATE` 同一缺口） |
+| `HATCH` | 完整实现 | 整实体闭合边界（`Circle`/完整 `Ellipse`/闭合 `Polyline`）+ `LINE`/`ARC` 边链；**`HATCH PATTERN <name>` 与 `HATCH PATTERNFILE <path.pat> [<name>]`**（文件优先→内置回退；无名的文件须恰好一个图案；组 76 = 2/1）；solid/user/predefined/gradient 四种会话填充与角度/比例/`HPDOUBLE`/样式；hatch 写入边界所在空间（模型空间走共享漏斗、图纸布局走布局自身 draw-order；块定义/混合空间按名拒绝）；空边界 `hatch.selection`、未知/缺名/文件读失败逐条具名拒绝。**全局范围**：创建期关联性（`HatchGeometry` 只存派生环，无边界句柄/反应器）、实时预览与图案选择对话框 |
 |  `HATCHEDIT` | 部分实现 | 多目标；`Style`/`PatternType`（含 **CUSTOM 76=2**）/**`PATTERN <内置图案名>`**（现有 `.pat` 库；任意用户 `.pat` 文件需宿主 I/O）/`Angle`/`Scale`/`Solid`/`Gradient`/`Color`/`Transparency`/`Layer`/`DrawOrder`/`Recreate Boundary`/`Separate`/**Add-Remove Boundaries**；`Origin`/`Associate`/`Annotative` 未建模 |
 | `HATCHGENERATEBOUNDARY` | 完整实现 | 预选择 hatch（模型空间或图纸布局）；每个 loop 一条非关联闭合多段线（同层同空间、保留 bulge、含内岛）；源 hatch 保留；无关联性 |
 | `HATCHSETBOUNDARY` | 完整实现 | 恰好一个 hatch + 一条闭合 Polyline/Circle/**完整 Ellipse**（整椭圆采样为单个 64 点环、无 bulge），共面性校验；部分椭圆按 `hatchsetboundary.open_ellipse` 拒绝且不开事务；用 `HatchGeometry::new` 重建、丢弃旧种子 |
@@ -765,7 +768,7 @@
 | `IMAGEADJUST` | 部分实现 | 真实：选中一个 IMAGE，`IMAGEADJUST <brightness> <contrast> <fade> [MONO|COLOR]` 或 `RESET`（各 0..=100，50/50/0 中性）；一条事务/一步撤销；渲染顺序 mono→contrast→brightness→fade-to-background（声明近似）。 |
 | `IMAGEAPP` | 部分实现 | 具名拒绝（`imageapp.unsupported: no external image-editor association model`）。 |
 | `IMAGEASYNCWAIT` | 部分实现 | 具名拒绝（`imageasyncwait.unsupported: no asynchronous image loading model`）。 |
-| `IMAGEATTACH` | 部分实现 | 真实创建 `SemanticGeometry::Image`：`IMAGEATTACH <file> <x> <y> <w_px> <h_px> <units_per_pixel>`；逻辑 key 经 `image_resource_key` 规范化（拒绝绝对路径/`..`/URL），+Z 平面、`u=(upp,0,0)`/`v=(0,upp,0)`，一条事务/一步撤销；宿主在提交后按 key 集变化重载纹理（大小写敏感文件系统用逐段不敏感回退），未解析 key 进入宿主图像报告。 |
+| `IMAGEATTACH` | 完整实现 | 真实创建 `SemanticGeometry::Image`：`IMAGEATTACH <file> <x> <y> <w_px> <h_px> <units_per_pixel> [<rotation_deg>]`；逻辑 key 经 `image_resource_key` 规范化（拒绝绝对路径/`..`/URL）；`+Z` 平面、可选绕 `+Z` 逆时针旋转烘进 `u`/`v` 基（0° 逐字节不变）；目标是会话活动空间：模型空间走共享创建漏斗，图纸布局走该布局自身 draw-order 的实体写入路径（`imageattach.block_space`/`.unknown_layout`/`.invalid_rotation` 按名拒绝）；一条事务/一步撤销；宿主在提交后按 key 集变化重载纹理（大小写敏感文件系统用逐段不敏感回退），未解析 key 进入宿主图像报告。 |
 | `IMAGECLIP` | 完整实现 | `IMAGECLIP <minx> <miny> <maxx> <maxy>` / `IMAGECLIP POLY <x1> <y1> …` / `IMAGECLIP OFF`：clip 存 `Vec<[f64;2]>`，世界坐标经 u/v 映射；**非凸环按耳切分块**，每块与图像矩形各自求交后作为凸片段绘制（面积精确、无重叠、凹口为空），凸边形输出逐字节不变；无法三角化的环按名拒绝（`image.clip_self_intersecting`/`.clip_arity`/`.clip_degenerate`/`.clip_unsupported`），绝不丢面积 |
 | `IMAGEEDIT` | 部分实现 | 具名拒绝（`imageedit.unsupported: no external image-editor model`）。 |
 | `IMAGEQUALITY` | 部分实现 | 具名拒绝（`imagequality.unsupported: no image display-quality model`）。 |
@@ -1212,7 +1215,7 @@
 | `VPOINT` | 部分实现 | 向量或 `TOP/BOTTOM/FRONT/BACK/LEFT/RIGHT`；零/非有限向量拒绝；不改模型；向量形式进入 3D 透视 |
 | `VPORTS` | 部分实现 | 在活动图纸布局创建简单 rows×cols 视口网格（四角 clip、`model_per_paper=1`），一条事务/一步撤销；命名/标准视口配置未实现 |
 | `VPSCALE` | 完整实现 | 设置 **`CVPORT` 当前视口**的比例（无索引），显式索引可指定视口；存储对角线 `1/factor` 并重算平移以保留模型锚点；越界索引 `vpscale.unknown_viewport`；一条事务/一步撤销 |
-| `VPSYNC` | 部分实现 | 把 viewport 0 的 `model_to_paper` 复制到其余视口；主视口不可选择（无逐视口选择模型） |
+| `VPSYNC` | 完整实现 | `VPSYNC [<master>]`：把 **0 基** 主视口（默认 `0`）的 `model_to_paper` 复制到同布局其余视口；索引按视口数校验（越界 `vpsync.master_out_of_range`、不 clamp），主视口自身不改写；一条事务/一步撤销，已同步为 `vpsync.unchanged` 空操作 |
 | `VSCURRENT` | 部分实现 | 会话级 **3D body 视觉样式**（**默认 SHADED**，与 AutoCAD 的 2D-wireframe 初始值**有意偏离**，以保留 token 前的填充网格显示）；接受 `WIREFRAME`/`2DWIREFRAME`/`2D` → wireframe（有存储 body 边线用边线，否则用去重三角形边段），`SHADED`/`SHADEDWITHEDGES` → 填充；其余样式 `vscurrent.style_not_implemented` | **仅 body**（只切 `RepresentationContext::body_wireframe`，其它几何不变）；无库写/无 revision/无历史；保存与矢量出图**不接收**该标志（出图仍为阴影/填充）；契约证据 only，像素/GPU NOT VERIFIED |
 | `VSLIDE` | 部分实现 | 具名拒绝（`vslide.unsupported: no slide (.sld) format model`）。 |
 | `VSSAVE` | 部分实现 | 具名拒绝（`vssave.unsupported: no slide (.sld) format model`）。 |
@@ -1676,8 +1679,8 @@
 | 410 | `-GROUP` | 部分实现 | Creates and manages saved sets of objects called groups. | `GROUP` 的别名（同一 `CommandId`/会话组表路径）；无 DWG group 对象/修订/历史 |
 | 411 | `GROUP` | 部分实现 | Creates and manages saved sets of objects called groups. | 会话内组表（上限 64、名字大小写不敏感）；裸命令/`LIST` 只读、`CREATE` 从选择集建组、`DELETE` 只移除名字；不写 DWG group 对象/修订/历史/事务 |
 | 412 | `GROUPEDIT` | 部分实现 | Adds and removes objects from the selected group, or renames a selected group. | `ADD`/`REMOVE` 从选择集或键入实体 id 增删、`RENAME`（允许仅改大小写）；单次会话变更；不写实体/数据库 |
-| 413 | `-HATCH` | 部分实现 | Uses command prompts to fill an enclosed area or selected objects with a hatch pattern, solid fill, or gradient fill. | `HATCH` 的命令行拼写；同一实现与边界。 |
-| 414 | `HATCH` | 部分实现 | Fills an enclosed area or selected objects with a hatch pattern, solid fill, or gradient fill. | 整实体闭合边界 + LINE/ARC 边链；**`HATCH PATTERN <name>` 与 `HATCH PATTERNFILE <path.pat> [<name>]` 已接入**，复用 `HATCHEDIT` 的解析（文件优先→内置回退；无名的文件须恰好一个图案；组 76 = 2/1）；角度/比例/`HPDOUBLE`/样式仍走会话通道；拒绝码 `hatch.needs_pattern_name`/`hatch.unknown_pattern`（列出两个来源）/`hatch.pattern_file_*`/`hatch.fill_not_pattern`，空边界 `hatch.selection` | **仍部分实现**：创建期**关联性**无模型（`HatchGeometry` 只存派生环，没有边界句柄/反应器记录 —— 与 `HATCHEDIT ASSOCIATE` 同一缺口） |
+| 413 | `-HATCH` | 完整实现 | Uses command prompts to fill an enclosed area or selected objects with a hatch pattern, solid fill, or gradient fill. | `HATCH` 的命令行拼写；同一解析器/处理器与同一支持域（整实体闭合边界 + LINE/ARC 边链；solid/user/predefined/gradient 与 `PATTERN`/`PATTERNFILE`）；hatch 写入边界所在空间（模型空间或同一图纸布局，`hatch.block_space`/`hatch.mixed_space` 按名拒绝）；创建期关联性与实时预览属全局范围 |
+| 414 | `HATCH` | 完整实现 | Fills an enclosed area or selected objects with a hatch pattern, solid fill, or gradient fill. | 整实体闭合边界（`Circle`/完整 `Ellipse`/闭合 `Polyline`）+ `LINE`/`ARC` 边链；**`HATCH PATTERN <name>` 与 `HATCH PATTERNFILE <path.pat> [<name>]`**（文件优先→内置回退；无名的文件须恰好一个图案；组 76 = 2/1）；solid/user/predefined/gradient 四种会话填充与角度/比例/`HPDOUBLE`/样式；hatch 写入边界所在空间（模型空间走共享漏斗、图纸布局走布局自身 draw-order；块定义/混合空间按名拒绝）；空边界 `hatch.selection`、未知/缺名/文件读失败逐条具名拒绝。**全局范围**：创建期关联性（`HatchGeometry` 只存派生环，无边界句柄/反应器）、实时预览与图案选择对话框 |
 | 415 | `-HATCHEDIT` | 完整实现 | From the Command prompt, modifies existing hatches or fills. | `HATCHEDIT` 的命令行拼写：同一解析器与同一处理器（含 `ORIGIN` 与 `PATTERNFILE`；全局范围的 `Associate`/`Annotative`/`DRAWORDER BOUNDARY` 同样按名拒绝） |
 |  416 | `HATCHEDIT` | 完整实现 | Modifies an existing hatch or fill. | 多目标；`Style`/`PatternType`/`PATTERN <内置图案名>`/`PATTERNFILE <path.pat> [<name>]`（经宿主文件桥读取用户 `.pat`，单图案/文件优先/内置回退，组 76 = 2 Custom；读取失败逐条具名拒绝）/`ORIGIN <x> <y>`（图案相位原点，导入导出按 pattern 行往返）/`Angle`/`Scale`/`Solid`/`Gradient`/`Color`/`Transparency`/`Layer`/`DrawOrder`/`Recreate Boundary`/`Separate Hatches`/`Add**/**Remove Boundaries`，一条事务/一步撤销。**全局范围**：`Associate`/`Disassociate`/`Annotative`（无关联/反应器模型）、`DRAWORDER BOUNDARY`（无边界实体 id，属于同一反应器模型）、逐 loop 原点、交互对话框 |
 | 417 | `HATCHGENERATEBOUNDARY` | 完整实现 | Creates a non-associated polyline around a selected hatch. | 预选择 hatch（模型空间或图纸布局）；每个 loop 一条非关联闭合多段线（同层同空间、保留 bulge、含内岛）；源 hatch 保留；无关联性 |
@@ -1703,7 +1706,7 @@
 | 437 | `IMAGEADJUST` | 部分实现 | Controls the brightness, contrast, and fade values of images. | 真实：选中一个 IMAGE，`IMAGEADJUST <brightness> <contrast> <fade> [MONO|COLOR]` 或 `RESET`（各 0..=100，50/50/0 中性）；一条事务/一步撤销；渲染顺序 mono→contrast→brightness→fade-to-background（声明近似）。
 | 438 | `IMAGEAPP` | 部分实现 | Specifies the image editing program for IMAGEEDIT. | 具名拒绝（`imageapp.unsupported: no external image-editor association model`）。 |
 | 439 | `IMAGEASYNCWAIT` | 部分实现 | Ensures that raster images being loaded in the background during file opening are complete before proceeding. | 具名拒绝（`imageasyncwait.unsupported: no asynchronous image loading model`）。 |
-| 440 | `IMAGEATTACH` | 部分实现 | Inserts a reference to an image file. | 真实创建 `SemanticGeometry::Image`：`IMAGEATTACH <file> <x> <y> <w_px> <h_px> <units_per_pixel>`；逻辑 key 经 `image_resource_key` 规范化（拒绝绝对路径/`..`/URL），+Z 平面、`u=(upp,0,0)`/`v=(0,upp,0)`，一条事务/一步撤销；宿主在提交后按 key 集变化重载纹理（大小写敏感文件系统用逐段不敏感回退），未解析 key 进入宿主图像报告。 |
+| 440 | `IMAGEATTACH` | 完整实现 | Inserts a reference to an image file. | `IMAGEATTACH <file> <x> <y> <w_px> <h_px> <units_per_pixel> [<rotation_deg>]`：逻辑 key 经 `image_resource_key` 规范化（拒绝绝对路径/`..`/URL）；可选绕 `+Z` 逆时针旋转烘进 `u`/`v` 基（0° 逐字节不变）；目标为会话活动空间（模型空间共享创建漏斗、图纸布局走布局自身 draw-order 的实体写入路径；`imageattach.block_space`/`.unknown_layout`/`.invalid_rotation` 按名拒绝）；一条事务/一步撤销；宿主在提交后按 key 集变化重载纹理，未解析 key 进入宿主图像报告 |
 | 441 | `IMAGECLIP` | 完整实现 | Crops the display of a selected image to a specified boundary. | `IMAGECLIP <minx> <miny> <maxx> <maxy>` / `IMAGECLIP POLY <x1> <y1> …` / `IMAGECLIP OFF`；clip 存 `Vec<[f64;2]>` 并经 u/v 映射到世界坐标；非凸环耳切成凸片段逐个绘制（面积精确、凹口为空、`Complete` 且无诊断），凸环字节不变；自交/点数不足/零面积按名拒绝 |
 | 442 | `IMAGEEDIT` | 部分实现 | Launches the image editing program specified by IMAGEAPP for the selected image. | 具名拒绝（`imageedit.unsupported: no external image-editor model`）。 |
 | 443 | `IMAGEQUALITY` | 部分实现 | Controls the display quality of images. | 具名拒绝（`imagequality.unsupported: no image display-quality model`）。 |
@@ -2208,7 +2211,7 @@
 | 942 | `-VPORTS` | 部分实现 | Creates multiple viewports in model space or paper space. | `VPORTS` 的别名，同一实现；同一边界 |
 | 943 | `VPORTS` | 部分实现 | Creates multiple viewports in model space or in a layout (paper space). | 在活动图纸布局创建简单 rows×cols 视口网格（四角 clip、`model_per_paper=1`），一条事务/一步撤销；命名/标准视口配置未实现 |
 | 944 | `VPSCALE` | 完整实现 | On a layout, displays the scale of the current viewport or of a selected layout viewport. | 目标为 `CVPORT` 当前视口（无索引）或显式索引；写对角线 `1/factor` 并保留模型锚点；越界 `vpscale.unknown_viewport`；一条事务/一步撤销 |
-| 945 | `VPSYNC` | 部分实现 | Aligns the views in one or more adjacent layout viewports with a master layout viewport. | 把 viewport 0 的 `model_to_paper` 复制到其余视口；主视口不可选择（无逐视口选择模型） |
+| 945 | `VPSYNC` | 完整实现 | Aligns the views in one or more adjacent layout viewports with a master layout viewport. | `VPSYNC [<master>]`：把**0 基**主视口（默认 `0`）的 `model_to_paper` 复制到同布局其余视口；索引按视口数校验（越界 `vpsync.master_out_of_range`、不 clamp），主视口自身不改写；一条事务/一步撤销，已同步为 `vpsync.unchanged` 空操作 |
 | 946 | `VSCURRENT` | 部分实现 | Sets the visual style in the current viewport. | 会话级 **3D body 视觉样式**（**默认 SHADED**，与 AutoCAD 的 2D-wireframe 初始值**有意偏离**，以保留 token 前的填充网格显示）；接受 `WIREFRAME`/`2DWIREFRAME`/`2D` → wireframe（有存储 body 边线用边线，否则用去重三角形边段），`SHADED`/`SHADEDWITHEDGES` → 填充，其余样式 `vscurrent.style_not_implemented`；**仅 body**（只切 `RepresentationContext::body_wireframe`，其它几何不变），无库写/无 revision/无历史，保存与矢量出图不接收该标志；契约证据 only，像素/GPU NOT VERIFIED |
 | 947 | `VSLIDE` | 部分实现 | Displays an image slide file in the current viewport. | 具名拒绝（`vslide.unsupported: no slide (.sld) format model`）。 |
 | 948 | `VSSAVE` | 部分实现 | Saves the current visual style under a new name. | 具名拒绝（`vssave.unsupported: no slide (.sld) format model`）。 |
