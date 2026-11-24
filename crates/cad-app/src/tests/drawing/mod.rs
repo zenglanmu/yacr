@@ -324,6 +324,7 @@ mod dimension_edit_override;
 mod dimension_extra;
 mod dimension_qdim;
 mod dimension_radial;
+mod dimension_reassoc;
 mod dimension_space;
 mod divide;
 mod draw2_batch;

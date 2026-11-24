@@ -969,6 +969,10 @@ impl ExtendedCommandId {
                 | Self::AttSync
                 | Self::BattOrder
                 | Self::Burst
+                // DIMREASSOC restores the measured value by clearing a dimension
+                // text override (one transaction / one undo step), so it is a
+                // drawing write. DIMREASSOCIATE stays a payload-free report.
+                | Self::DimReassoc
         )
     }
 }

@@ -4,7 +4,10 @@
 //! The two space switches must reuse the existing `MODEL`/`SPACE` session path
 //! (session state only). The reports are pure reads: no transaction, no revision
 //! bump, no undo step and no `ChangeSet`, and each test pins the diagnostic codes
-//! so a report can never silently invent a row.
+//! so a report can never silently invent a row. `DIMREASSOC` is the one real
+//! write here (its own contract lives in `tests::drawing::dimension_reassoc`);
+//! this file only pins that an empty selection is its named refusal while
+//! `DIMREASSOCIATE` stays the non-associative no-op.
 
 use super::*;
 use cad_db::Style;
@@ -212,22 +215,23 @@ fn block_list_reports_definitions_and_a_read_only_summary() {
 }
 
 #[test]
-fn dimreassoc_and_dimreassociate_are_named_non_associative_noops() {
+fn dimreassociate_is_a_named_non_associative_noop_and_dimreassoc_needs_a_selection() {
     let (mut app, mut session) = application_with_document();
     let before = revision(&app);
-    for (ext, code) in [
-        (ExtendedCommandId::DimReassoc, "dimreassoc.non_associative"),
-        (
-            ExtendedCommandId::DimReassociate,
-            "dimreassociate.non_associative",
-        ),
-    ] {
-        let outcome = execute(&mut app, &mut session, ext).expect("report is admitted");
-        assert!(outcome.changes.is_none());
-        assert!(diagnostic(&outcome, code)
-            .message
-            .contains("nothing changed"));
-    }
+    let outcome = execute(&mut app, &mut session, ExtendedCommandId::DimReassociate)
+        .expect("report is admitted");
+    assert!(outcome.changes.is_none());
+    assert!(diagnostic(&outcome, "dimreassociate.non_associative")
+        .message
+        .contains("nothing changed"));
+    // `DIMREASSOC` is the real text-restoring write, so an empty pre-selection is
+    // its named refusal — it is not DIMREASSOCIATE's no-op under another code.
+    let refused = execute(&mut app, &mut session, ExtendedCommandId::DimReassoc)
+        .expect_err("DIMREASSOC needs a selected dimension");
+    assert!(
+        format!("{refused}").contains("dimreassoc.selection"),
+        "{refused}"
+    );
     assert_eq!(revision(&app), before);
     assert!(!app.can_undo(&DocumentId(1)));
 }
