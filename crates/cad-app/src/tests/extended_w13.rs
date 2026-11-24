@@ -540,3 +540,61 @@ fn vpsync_refuses_a_single_viewport_and_a_non_uniform_master() {
         "{invalid_master}"
     );
 }
+
+#[test]
+fn vpsync_copies_an_explicit_master_and_refuses_a_bad_index_without_writing() {
+    let (mut app, mut session) = layout_fixture(vec![
+        viewport(1.0, 0.0, 0.0),
+        viewport(2.0, 5.0, 6.0),
+        viewport(100.0, 70.0, 30.0),
+    ]);
+    switch_to_sheet(&mut app, &mut session);
+    let before = revision(&app);
+
+    // Out-of-range master: named refusal, no revision and no undo step.
+    let out_of_range = refusal_text(extended(
+        &mut app,
+        &mut session,
+        ExtendedCommandId::VpSync,
+        CommandPayload::VpSyncMaster(3),
+    ));
+    assert!(
+        out_of_range.contains("vpsync.master_out_of_range"),
+        "{out_of_range}"
+    );
+    assert_eq!(revision(&app), before);
+    assert!(!app.can_undo(&DocumentId(1)));
+
+    // Master index 2 (zero-based) is copied onto viewports 0 and 1, and the
+    // master itself is untouched. One transaction / one undo step.
+    let outcome = extended(
+        &mut app,
+        &mut session,
+        ExtendedCommandId::VpSync,
+        CommandPayload::VpSyncMaster(2),
+    )
+    .expect("VPSYNC copies the third viewport onto the other two");
+    assert_eq!(
+        outcome
+            .diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.code.as_str())
+            .collect::<Vec<_>>(),
+        vec!["vpsync.applied"]
+    );
+    let viewports = stored_viewports(&app);
+    assert_eq!(viewports[0].model_to_paper, viewports[2].model_to_paper);
+    assert_eq!(viewports[1].model_to_paper, viewports[2].model_to_paper);
+    assert_eq!(
+        viewports[2],
+        viewport(100.0, 70.0, 30.0),
+        "the master viewport itself is not rewritten"
+    );
+    assert_eq!(revision(&app), Revision(before.0 + 1), "one revision");
+
+    app.execute(&mut session, command(CommandId::Undo, CommandPayload::None))
+        .expect("undo restores both synchronized viewports");
+    let restored = stored_viewports(&app);
+    assert_eq!(restored[0], viewport(1.0, 0.0, 0.0));
+    assert_eq!(restored[1], viewport(2.0, 5.0, 6.0));
+}

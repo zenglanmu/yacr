@@ -3,11 +3,12 @@
 //!
 //! All three commands are **Work-only** and write through the normal drawing
 //! transaction path: an attach inserts one entity through the shared
-//! [`Application::commit_new_entity`] funnel (active layer, model space, one
-//! transaction / one undo step), and a clip or adjustment updates one selected
-//! image row in one transaction / one undo step. Every refusal happens before a
-//! transaction, so a refused command writes nothing, bumps no revision and
-//! records no history.
+//! [`Application::commit_new_entity`] model-space funnel or the paper-layout
+//! insert path ([`Application::commit_new_layout_entity`], active layout, its own
+//! draw-order sequence), one transaction / one undo step, and a clip or
+//! adjustment updates one selected image row in one transaction / one undo step.
+//! Every refusal happens before a transaction, so a refused command writes
+//! nothing, bumps no revision and records no history.
 //!
 //! `IMAGE` / `-IMAGE` are the read-only report and live in
 //! `crate::app_extended_w16_reports`; the quality/editor names remain named
@@ -16,7 +17,8 @@
 //! Stable refusal codes:
 //!
 //! * `imageattach.payload` / `.unsafe_reference` / `.invalid_origin` /
-//!   `.invalid_pixels` / `.invalid_units_per_pixel` / `.invalid_extent`;
+//!   `.invalid_pixels` / `.invalid_units_per_pixel` / `.invalid_rotation` /
+//!   `.invalid_extent` / `.unknown_layout` / `.block_space`;
 //! * `imageclip.payload` / `.no_selection` / `.multiple` / `.not_image` /
 //!   `.invalid_rect` / `.polygon_points` / `.polygon_non_coplanar` /
 //!   `.polygon_self_intersection` / `.degenerate_plane`;
@@ -54,17 +56,22 @@ impl Application {
         }
     }
 
-    /// `IMAGEATTACH <file> <x> <y> <width_px> <height_px> <units_per_pixel>`.
+    /// `IMAGEATTACH <file> <x> <y> <width_px> <height_px> <units_per_pixel>
+    /// [<rotation_deg>]`.
     ///
-    /// Builds one `SemanticGeometry::Image` on the `+Z` work plane:
-    /// `origin` is the typed point, `u`/`v` are the per-pixel edge vectors
-    /// `(units_per_pixel, 0, 0)` and `(0, units_per_pixel, 0)`, `pixels` is the
-    /// typed `(width, height)` in pixels, `file` is the **normalised** logical key
-    /// and the clip starts empty with the image visible.
+    /// Builds one `SemanticGeometry::Image`: `origin` is the typed point,
+    /// `u`/`v` are the per-pixel edge vectors rotated by the optional degrees
+    /// (counter-clockwise about `+Z`; omitted = axis-aligned `(upp, 0, 0)` /
+    /// `(0, upp, 0)`), `pixels` is the typed `(width, height)` in pixels, `file`
+    /// is the **normalised** logical key and the clip starts empty with the
+    /// image visible.
     ///
-    /// The command is inserted through the shared create funnel, so it lands on
-    /// the active layer in model space in one transaction / one undo step. All
-    /// four named refusals are checked before that transaction.
+    /// The target is the session's active space. Model space goes through the
+    /// shared create funnel; a paper layout is inserted on that layout's own
+    /// draw-order sequence. A block definition is the named
+    /// `imageattach.block_space` refusal, and a stale layout id is
+    /// `imageattach.unknown_layout`. Every named refusal is checked before the
+    /// transaction.
     fn image_attach(
         &mut self,
         session: &SessionState,
@@ -82,6 +89,7 @@ impl Application {
             origin,
             pixels,
             units_per_pixel,
+            rotation,
         } = payload.as_ref();
         let Some(key) = cad_resources::image_resource_key(file) else {
             return Err(image_refusal(
@@ -118,6 +126,12 @@ impl Application {
                 ),
             ));
         }
+        if !rotation.is_finite() {
+            return Err(image_refusal(
+                "imageattach.invalid_rotation",
+                format!("the image rotation must be finite, got {rotation} degrees"),
+            ));
+        }
         // The world-space extent is `pixels * units_per_pixel`; both products
         // must stay finite or the frame/basis has no representable extent.
         let width = pixels[0] * units_per_pixel;
@@ -133,33 +147,68 @@ impl Application {
             ));
         }
         let stored_key = key.0;
+        // The target is the session's active space: model space is the default,
+        // a paper layout is the real layout entity write path, and a block
+        // definition is refused by name (an image placed inside a block would be
+        // shared by every reference, which this placement model cannot express).
+        let space = match &session.active_space {
+            SpaceId::Model => SpaceId::Model,
+            SpaceId::Paper(layout) => {
+                let document = self
+                    .workspace
+                    .documents
+                    .get(&command.document)
+                    .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+                if document.drawing.layout(*layout).is_none() {
+                    return Err(image_refusal(
+                        "imageattach.unknown_layout",
+                        format!(
+                            "the active space names layout {} but this drawing has no such \
+                             layout; nothing was written",
+                            layout.0
+                        ),
+                    ));
+                }
+                SpaceId::Paper(*layout)
+            }
+            SpaceId::Block(block) => {
+                return Err(CadError::Unsupported(format!(
+                    "imageattach.block_space: the active space is block definition {}; an image \
+                     attach targets model space or a paper layout, and a block definition would \
+                     share one placement across every reference",
+                    block.0
+                )))
+            }
+        };
+        let (u, v) = image_basis(*units_per_pixel, *rotation);
         let geometry = SemanticGeometry::Image {
             origin: *origin,
-            u: Point3 {
-                x: *units_per_pixel,
-                y: 0.0,
-                z: 0.0,
-            },
-            v: Point3 {
-                x: 0.0,
-                y: *units_per_pixel,
-                z: 0.0,
-            },
+            u,
+            v,
             pixels: *pixels,
             file: Some(stored_key.clone()),
             clip: None,
             visible: true,
             adjust: ImageAdjust::default(),
         };
-        let mut outcome = self.commit_new_entity(session, command, geometry, "attach image")?;
+        let mut outcome = match &space {
+            SpaceId::Paper(layout) => {
+                self.commit_new_layout_entity(session, command, geometry, *layout, "attach image")?
+            }
+            _ => self.commit_new_entity(session, command, geometry, "attach image")?,
+        };
+        let target = match &space {
+            SpaceId::Paper(layout) => format!("paper layout {}", layout.0),
+            _ => "model space".to_string(),
+        };
         outcome.diagnostics.push(Diagnostic {
             object: outcome.objects.first().copied(),
             code: "imageattach.created".into(),
             message: format!(
-                "IMAGEATTACH: attached `{stored_key}` as {} x {} px at ({}, {}, {}); \
-                 extent {} x {} world units ({} per pixel); the texture is resolved from \
-                 the drawing directory by the host, which reloads image resources after \
-                 this command (unresolved keys appear in the host image report)",
+                "IMAGEATTACH: attached `{stored_key}` as {} x {} px at ({}, {}, {}) in {target}; \
+                 extent {} x {} world units ({} per pixel), rotation {rotation} degrees; the \
+                 texture is resolved from the drawing directory by the host, which reloads image \
+                 resources after this command (unresolved keys appear in the host image report)",
                 pixels[0], pixels[1], origin.x, origin.y, origin.z, width, height, units_per_pixel
             ),
         });
@@ -571,6 +620,42 @@ impl Application {
 /// One stable, code-prefixed refusal for an image authoring command.
 fn image_refusal(code: impl std::fmt::Display, detail: impl std::fmt::Display) -> CadError {
     CadError::InvalidInput(format!("{code}: {detail}"))
+}
+
+/// The stored per-pixel `u`/`v` basis of an image placement rotated by
+/// `rotation` **degrees** counter-clockwise about `+Z`.
+///
+/// `u` is the image's +x edge (one pixel along the rotated x axis) and `v` its
+/// +y edge. A zero rotation is special-cased so the axis-aligned placement
+/// stays byte-identical to the pre-rotation command (no `-0.0` components).
+fn image_basis(units_per_pixel: f64, rotation: f64) -> (Point3, Point3) {
+    if rotation == 0.0 {
+        return (
+            Point3 {
+                x: units_per_pixel,
+                y: 0.0,
+                z: 0.0,
+            },
+            Point3 {
+                x: 0.0,
+                y: units_per_pixel,
+                z: 0.0,
+            },
+        );
+    }
+    let (sin, cos) = rotation.to_radians().sin_cos();
+    (
+        Point3 {
+            x: units_per_pixel * cos,
+            y: units_per_pixel * sin,
+            z: 0.0,
+        },
+        Point3 {
+            x: -units_per_pixel * sin,
+            y: units_per_pixel * cos,
+            z: 0.0,
+        },
+    )
 }
 
 /// Convert a world-space polygon boundary into the image's pixel-space clip.

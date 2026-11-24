@@ -127,15 +127,18 @@ impl Application {
     /// HATCH the pre-selected boundary entities into one entity (ADR 0018 D).
     ///
     /// One transaction / one undo step through the shared create funnel, on the
-    /// active layer, with `type_key`/`class_name` = `AcDbHatch`. The selected
-    /// boundary entities are **retained**: the hatch is a derived annotation over
-    /// them, exactly like an AutoCAD "select objects" hatch (no associativity).
+    /// active layer, with `type_key`/`class_name` = `AcDbHatch`. The hatch is
+    /// written into the **common space of its boundaries**: model space through
+    /// the shared funnel, a paper layout through that layout's own draw-order
+    /// sequence. The selected boundary entities are **retained**: the hatch is a
+    /// derived annotation over them, exactly like an AutoCAD "select objects"
+    /// hatch (no associativity).
     ///
     /// Refusals (nothing written, no transaction):
     ///
     /// * an empty selection;
     /// * a selection entry referenced through a block instance or a sub-element
-    ///   (the boundary must be a model-space entity);
+    ///   (the boundary must be a directly addressable entity);
     /// * any kind other than `Circle`, a full `Ellipse`, a closed `Polyline` or
     ///   `Line`/`Arc` edges (open polyline/spline/text/block/…);
     /// * an ellipse that is not a full turn (an ellipse arc is not a closed loop);
@@ -273,7 +276,7 @@ impl Application {
         };
 
         let document_id = command.document;
-        let (loops, plane, stitched_edges) = {
+        let (loops, plane, stitched_edges, space) = {
             let document = self
                 .workspace
                 .documents
@@ -284,8 +287,8 @@ impl Application {
             for reference in refs {
                 if !reference.instance.0.is_empty() || reference.sub_element.is_some() {
                     return Err(CadError::InvalidInput(format!(
-                        "{} boundary must be a model-space entity; entity {} is referenced \
-                         through a block instance or a sub-element",
+                        "{} boundary must be a directly addressable entity; entity {} is \
+                         referenced through a block instance or a sub-element",
                         if gradient { "GRADIENT" } else { "HATCH" },
                         reference.entity.0
                     )));
@@ -300,6 +303,8 @@ impl Application {
             let (sources, _diagnostics) =
                 Self::resolve_selection(drawing, document_id, refs, code, operation, action, false)
                     .map_err(|error| mode.relabel(error))?;
+            let space = hatch_target_space(&sources, if gradient { "gradient" } else { "hatch" })
+                .map_err(|error| mode.relabel(error))?;
             let shapes = boundary_shapes(&sources).map_err(|error| mode.relabel(error))?;
             let stitched = stitch_boundary(&shapes).map_err(|error| mode.relabel(error))?;
             let plane = resolve_plane(&shapes, &stitched).map_err(|error| mode.relabel(error))?;
@@ -313,7 +318,7 @@ impl Application {
             let loops =
                 boundary_loops(&shapes, &stitched, &plane).map_err(|error| mode.relabel(error))?;
             let edge_count = stitched.edge_count();
-            (loops, plane, edge_count)
+            (loops, plane, edge_count, space)
         };
         let loop_count = loops.len();
         let style = hatch_style(parameters.style)?;
@@ -340,16 +345,17 @@ impl Application {
             .map_err(|error| mode.relabel(hatch_creation_refusal(error)))?;
         let geometry = SemanticGeometry::Hatch(Box::new(hatch));
 
-        let mut outcome = self.commit_new_entity(
-            session,
-            command,
-            geometry,
-            if gradient {
-                "create gradient"
-            } else {
-                "create hatch"
-            },
-        )?;
+        let label = if gradient {
+            "create gradient"
+        } else {
+            "create hatch"
+        };
+        let mut outcome = match &space {
+            SpaceId::Paper(layout) => {
+                self.commit_new_layout_entity(session, command, geometry, *layout, label)?
+            }
+            _ => self.commit_new_entity(session, command, geometry, label)?,
+        };
         if let Some(object) = outcome.objects.first().copied() {
             outcome.diagnostics.push(hatch_diagnostic(
                 object,
@@ -362,6 +368,43 @@ impl Application {
         }
         Ok(outcome)
     }
+}
+
+/// The one space a new hatch may be written into: every boundary entity must
+/// be directly addressable in the **same** space, and that space is the entity
+/// write target.
+///
+/// Model space and a paper layout are supported (the hatch lives where its
+/// boundary lives, exactly like [`Self::hatch_generate_boundary`] writes next to
+/// its source). A block-definition boundary is refused by name: the hatch would
+/// be shared by every reference. Mixed spaces are refused rather than picking
+/// one silently.
+fn hatch_target_space(sources: &[cad_db::DbEntity], prefix: &str) -> CadResult<SpaceId> {
+    let mut space: Option<SpaceId> = None;
+    for source in sources {
+        match &source.space {
+            SpaceId::Model | SpaceId::Paper(_) => {}
+            SpaceId::Block(block) => {
+                return Err(CadError::Unsupported(format!(
+                    "{prefix}.block_space: boundary entity {} is inside block definition {}; a \
+                     hatch is written next to its boundary in model space or a paper layout",
+                    source.id.0, block.0
+                )))
+            }
+        }
+        match &space {
+            None => space = Some(source.space.clone()),
+            Some(existing) if existing != &source.space => {
+                return Err(CadError::InvalidInput(format!(
+                    "{prefix}.mixed_space: boundary entity {} is in {:?} while an earlier \
+                     boundary entity is in {existing:?}; one hatch needs one common space",
+                    source.id.0, source.space
+                )))
+            }
+            _ => {}
+        }
+    }
+    Ok(space.unwrap_or(SpaceId::Model))
 }
 
 /// Resolve the typed `PATTERN <name>` / `PATTERNFILE <path> [<name>]` selection.

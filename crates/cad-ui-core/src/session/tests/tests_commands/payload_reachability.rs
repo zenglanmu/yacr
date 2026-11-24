@@ -22,7 +22,8 @@ use cad_app::{CommandPayload, ExtendedCommandId};
 
 use crate::session::commands::{
     parse_alignspace_argument, parse_elev_argument, parse_fsmode_argument, parse_mstretch_argument,
-    ALIGNSPACE_SELECTOR, ARGUMENT_SELECTORS, ELEV_SELECTOR, FSMODE_SELECTOR, MSTRETCH_SELECTOR,
+    parse_vpsync_argument, ALIGNSPACE_SELECTOR, ARGUMENT_SELECTORS, ELEV_SELECTOR, FSMODE_SELECTOR,
+    MSTRETCH_SELECTOR, VPSYNC_SELECTOR,
 };
 
 /// The refusal text of a parser that must not accept `what` (the payload type has
@@ -332,6 +333,50 @@ fn the_alignspace_line_reaches_the_handler_and_its_own_refusal() {
             || error.contains("alignspace.no_viewport"),
         "{error}"
     );
+    assert_eq!(revision(&session), revision_before, "nothing was written");
+    assert!(!undo_available(&session), "no undo step");
+}
+
+// ---------------------------------------------------------------------------
+// VPSYNC
+// ---------------------------------------------------------------------------
+
+#[test]
+fn vpsync_is_admitted_and_parses_a_zero_based_master_index() {
+    assert!(ARGUMENT_SELECTORS.contains(&VPSYNC_SELECTOR));
+    assert_eq!(
+        typed_command_argument("VPSYNC 2"),
+        Some((VPSYNC_SELECTOR, "2"))
+    );
+    assert_eq!(parse_vpsync_argument("0"), Ok(0));
+    assert_eq!(parse_vpsync_argument("2"), Ok(2));
+}
+
+#[test]
+fn vpsync_refuses_any_other_arity_or_a_non_integer_with_nothing_changed() {
+    for argument in ["", "1 2", "-1", "1.5", "x", "4294967296"] {
+        let error = parse_refusal(parse_vpsync_argument(argument), argument);
+        assert!(error.starts_with("vpsync.argument"), "{argument}: {error}");
+        assert!(error.contains("nothing was changed"), "{argument}: {error}");
+    }
+    let session = fresh();
+    let revision_before = revision(&session);
+    let error = session.command("VPSYNC x").expect_err("refused");
+    assert!(error.starts_with("vpsync.argument"), "{error}");
+    assert_eq!(revision(&session), revision_before, "nothing was written");
+    assert!(!undo_available(&session), "no undo step");
+}
+
+#[test]
+fn the_vpsync_line_reaches_the_handler_and_its_own_refusal() {
+    // Model space is not a paper layout: the handler's own reason comes back,
+    // proving the typed line reached `vp_sync` with its master index.
+    let session = fresh();
+    let revision_before = revision(&session);
+    let error = session
+        .command("VPSYNC 3")
+        .expect_err("model space cannot be synchronized");
+    assert!(error.contains("vpsync.paper_space_required"), "{error}");
     assert_eq!(revision(&session), revision_before, "nothing was written");
     assert!(!undo_available(&session), "no undo step");
 }

@@ -9,8 +9,8 @@ use cad_domain::Point3;
 /// The input of an `IMAGEATTACH` command: one raster image placement.
 ///
 /// The typed form is `IMAGEATTACH <file> <x> <y> <width_px> <height_px>
-/// <units_per_pixel>`; the file token is a **single** token (a path with spaces
-/// cannot be typed here — a declared limit of the v1 grammar).
+/// <units_per_pixel> [<rotation_deg>]`; the file token is a **single** token (a
+/// path with spaces cannot be typed here — a declared limit of the v1 grammar).
 ///
 /// `file` is the raw reference as typed. The command normalises it through
 /// [`cad_resources::image_resource_key`] before storing, so the entity carries a
@@ -19,12 +19,17 @@ use cad_domain::Point3;
 /// refusal. `pixels` is `(width, height)` in pixels and `units_per_pixel` is the
 /// world length of one pixel along both image axes (`u` and `v`), so the placed
 /// extent is `pixels[0] * units_per_pixel` by `pixels[1] * units_per_pixel`.
+/// `rotation` is the counter-clockwise `+Z` plane rotation in **degrees** (the
+/// command-line convention; the handler converts it once and bakes it into the
+/// stored `u`/`v` basis). `0.0` is the default and keeps the byte-identical
+/// axis-aligned basis.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImageAttachCommand {
     pub file: String,
     pub origin: Point3,
     pub pixels: [f64; 2],
     pub units_per_pixel: f64,
+    pub rotation: f64,
 }
 
 /// The input of an `IMAGECLIP` command: a clip boundary, or the `OFF` form that

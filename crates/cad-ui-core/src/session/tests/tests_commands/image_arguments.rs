@@ -38,6 +38,22 @@ fn imageattach_argument_is_a_single_token_file_plus_five_numbers() {
             },
             pixels: [640.0, 480.0],
             units_per_pixel: 0.05,
+            rotation: 0.0,
+        })
+    );
+    // The optional seventh token is the `+Z` rotation in degrees.
+    assert_eq!(
+        parse_imageattach_argument("textures/logo.png 10 20 640 480 0.05 30"),
+        Some(ImageAttachCommand {
+            file: "textures/logo.png".into(),
+            origin: Point3 {
+                x: 10.0,
+                y: 20.0,
+                z: 0.0
+            },
+            pixels: [640.0, 480.0],
+            units_per_pixel: 0.05,
+            rotation: 30.0,
         })
     );
     // Sign and fraction are legal on the point; the three sizes are positive.
@@ -48,7 +64,8 @@ fn imageattach_argument_is_a_single_token_file_plus_five_numbers() {
         "",
         "logo.png",
         "logo.png 0 0 1 1",
-        "logo.png 0 0 1 1 1 2",
+        "logo.png 0 0 1 1 1 2 3",
+        "logo.png 0 0 1 1 1 rot",
         "logo.png a 0 1 1 1",
         "logo.png 0 0 0 1 1",
         "logo.png 0 0 -1 1 1",
@@ -283,7 +300,7 @@ fn malformed_image_arguments_are_refused_before_dispatch() {
     let session = fresh_session();
     for (line, code) in [
         ("IMAGEATTACH logo.png 0 0 1 1", "imageattach.argument"),
-        ("IMAGEATTACH logo.png 0 0 1 1 1 2", "imageattach.argument"),
+        ("IMAGEATTACH logo.png 0 0 1 1 1 2 3", "imageattach.argument"),
         ("IMAGECLIP 0 0 1", "imageclip.argument"),
         ("IMAGECLIP NONE", "imageclip.argument"),
         ("IMAGEADJUST 30 70", "imageadjust.argument"),

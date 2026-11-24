@@ -61,7 +61,8 @@ pub(crate) fn invalid_image_argument_reason(selector: &str, text: &str) -> Strin
     let (code, forms) = if selector == IMAGEATTACH_SELECTOR {
         (
             "imageattach.argument",
-            "`IMAGEATTACH <file> <x> <y> <width_px> <height_px> <units_per_pixel>`",
+            "`IMAGEATTACH <file> <x> <y> <width_px> <height_px> <units_per_pixel> \
+             [<rotation_deg>]`",
         )
     } else if selector == IMAGECLIP_SELECTOR {
         (

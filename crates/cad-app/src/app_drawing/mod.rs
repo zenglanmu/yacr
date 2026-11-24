@@ -71,6 +71,9 @@ mod drawing_edit;
 mod drawing_transform;
 // The shared create funnel's input bundle and session-COLOUR resolution.
 mod create_inputs;
+// The **paper layout** one-entity insert path (the model-space funnel keeps its
+// pinned model draw-order base for OFFSET copies).
+mod layout_insert;
 // `ELEV`: the session elevation the shared create funnel offsets new entities by
 // (one rule, one transform authority; copies are deliberately excluded).
 mod elevation;

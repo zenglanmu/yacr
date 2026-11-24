@@ -19,17 +19,24 @@ pub const IMAGECLIP_SELECTOR: &str = "IMAGECLIP";
 pub const IMAGEADJUST_SELECTOR: &str = "IMAGEADJUST";
 pub const DASH_IMAGEADJUST_SELECTOR: &str = "-IMAGEADJUST";
 
-/// `IMAGEATTACH <file> <x> <y> <width_px> <height_px> <units_per_pixel>`.
+/// `IMAGEATTACH <file> <x> <y> <width_px> <height_px> <units_per_pixel>
+/// [<rotation_deg>]`.
 ///
 /// The file is a **single** token (the declared v1 limit: a path with spaces
-/// cannot be typed here). `x`/`y` are signed plain decimals, and the pixel size
-/// plus the units-per-pixel scale are positive plain decimals; the command
-/// re-checks them and refuses an unsafe reference by name.
+/// cannot be typed here). `x`/`y` are signed plain decimals, the pixel size
+/// plus the units-per-pixel scale are positive plain decimals, and the optional
+/// rotation is a signed plain decimal in **degrees** about the `+Z` axis
+/// (omitted = `0`, the axis-aligned placement). The command re-checks them and
+/// refuses an unsafe reference by name.
 pub fn parse_imageattach_argument(argument: &str) -> Option<ImageAttachCommand> {
     let tokens = tokens(argument);
-    if tokens.len() != 6 {
+    if tokens.len() != 6 && tokens.len() != 7 {
         return None;
     }
+    let rotation = match tokens.get(6) {
+        Some(token) => parse_signed_decimal(token)?,
+        None => 0.0,
+    };
     Some(ImageAttachCommand {
         file: tokens[0].to_string(),
         origin: Point3 {
@@ -42,6 +49,7 @@ pub fn parse_imageattach_argument(argument: &str) -> Option<ImageAttachCommand> 
             parse_positive_decimal(tokens[4])?,
         ],
         units_per_pixel: parse_positive_decimal(tokens[5])?,
+        rotation,
     })
 }
 

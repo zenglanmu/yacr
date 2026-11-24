@@ -9,7 +9,7 @@
 //! revision and undo stack untouched.
 
 use super::*;
-use cad_db::{DrawingDatabaseBuilder, Layer};
+use cad_db::{DrawingDatabaseBuilder, Layer, Layout};
 use cad_history::History;
 
 use crate::command_payload::{ImageAttachCommand, ImageClipCommand};
@@ -57,7 +57,7 @@ pub(super) fn image_app(mode: AppMode) -> (Application, SessionState) {
 }
 
 /// The one stored `SemanticGeometry::Image` row.
-fn stored_image(app: &Application, id: EntityId) -> cad_db::DbEntity {
+pub(super) fn stored_image(app: &Application, id: EntityId) -> cad_db::DbEntity {
     app.workspace.documents[&DocumentId(1)]
         .drawing
         .entity(id)
@@ -76,6 +76,7 @@ fn attach_payload(
         origin,
         pixels,
         units_per_pixel,
+        rotation: 0.0,
     }))
 }
 

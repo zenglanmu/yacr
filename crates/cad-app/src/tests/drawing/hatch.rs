@@ -630,7 +630,7 @@ fn a_block_instance_or_sub_element_boundary_is_refused() {
     )
     .expect_err("a sub-element boundary must be refused");
     assert!(
-        format!("{error:?}").contains("model-space entity"),
+        format!("{error:?}").contains("directly addressable entity"),
         "{error:?}"
     );
 }

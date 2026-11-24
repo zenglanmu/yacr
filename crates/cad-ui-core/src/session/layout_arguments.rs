@@ -19,10 +19,10 @@ use super::commands::{
     parse_alignspace_argument, parse_layout_argument, parse_layoutmerge_argument,
     parse_layoutwizard_argument, parse_layvpi_argument, parse_mview_argument,
     parse_pagesetup_argument, parse_psetupin_argument, parse_vpclip_argument,
-    parse_vports_argument, parse_vpscale_argument, ALIGNSPACE_SELECTOR, DASH_PAGESETUP_SELECTOR,
-    DASH_PSETUPIN_SELECTOR, LAYOUTMERGE_SELECTOR, LAYOUTWIZARD_SELECTOR, LAYOUT_SELECTOR,
-    LAYVPI_SELECTOR, MVIEW_SELECTOR, PAGESETUP_SELECTOR, PSETUPIN_SELECTOR, VPCLIP_SELECTOR,
-    VPORTS_SELECTOR, VPSCALE_SELECTOR,
+    parse_vports_argument, parse_vpscale_argument, parse_vpsync_argument, ALIGNSPACE_SELECTOR,
+    DASH_PAGESETUP_SELECTOR, DASH_PSETUPIN_SELECTOR, LAYOUTMERGE_SELECTOR, LAYOUTWIZARD_SELECTOR,
+    LAYOUT_SELECTOR, LAYVPI_SELECTOR, MVIEW_SELECTOR, PAGESETUP_SELECTOR, PSETUPIN_SELECTOR,
+    VPCLIP_SELECTOR, VPORTS_SELECTOR, VPSCALE_SELECTOR, VPSYNC_SELECTOR,
 };
 use super::CadSession;
 
@@ -46,6 +46,19 @@ impl CadSession {
             return self.dispatch_payload(
                 CommandId::Extended(ExtendedCommandId::AlignSpace),
                 CommandPayload::Points(points),
+            );
+        }
+        // `VPSYNC <master>`: the optional zero-based master viewport index rides
+        // its own payload; a bare `VPSYNC` keeps the default master `0`.
+        if selector == VPSYNC_SELECTOR {
+            let master = match parse_vpsync_argument(argument) {
+                Ok(master) => master,
+                Err(reason) => return self.refuse_argument(reason),
+            };
+            self.core.record_command(selector);
+            return self.dispatch_payload(
+                CommandId::Extended(ExtendedCommandId::VpSync),
+                CommandPayload::VpSyncMaster(master),
             );
         }
         let (id, payload) = match selector {
