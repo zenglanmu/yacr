@@ -172,6 +172,19 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     // the layer-selection command. An argument form of `LAYFRZ`, not a new
     // command; the bare selector keeps the drawing-level freeze.
     LAYFRZ_SELECTOR,
+    // ADR-0055 M3: the typed block-attribute command lines. The bare selectors
+    // keep their report/no-op forms; these rows admit the write grammars.
+    ATTDEF_SELECTOR,
+    DASH_ATTDEF_SELECTOR,
+    ATTEDIT_SELECTOR,
+    DASH_ATTEDIT_SELECTOR,
+    EATTEDIT_SELECTOR,
+    ATTIPEDIT_SELECTOR,
+    GATTE_SELECTOR,
+    ATTSYNC_SELECTOR,
+    ATTREDEF_SELECTOR,
+    BATTORDER_SELECTOR,
+    ATTDISP_SELECTOR,
     // `DIMSPACE` is a dimension argument form of its own (not the editing batch).
     DIMSPACE_SELECTOR,
     // The named style tables: the bare selector is the read-only report, and a

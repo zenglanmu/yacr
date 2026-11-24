@@ -123,6 +123,20 @@ impl CadSession {
             // `LAYFRZ VP [<index>,...]`: the per-viewport freeze scope (AutoCAD's
             // Settings ▸ Viewports). The selection still names the layers.
             super::commands::LAYFRZ_SELECTOR => self.layfrz_argument(argument, text),
+            // ADR-0055 M3: the typed block-attribute command lines.
+            super::commands::ATTDEF_SELECTOR
+            | super::commands::DASH_ATTDEF_SELECTOR
+            | super::commands::ATTEDIT_SELECTOR
+            | super::commands::DASH_ATTEDIT_SELECTOR
+            | super::commands::EATTEDIT_SELECTOR
+            | super::commands::ATTIPEDIT_SELECTOR
+            | super::commands::GATTE_SELECTOR
+            | super::commands::ATTSYNC_SELECTOR
+            | super::commands::ATTREDEF_SELECTOR
+            | super::commands::BATTORDER_SELECTOR
+            | super::commands::ATTDISP_SELECTOR => {
+                self.attribute_argument(selector, argument, text)
+            }
             // `-LAYER NEW …` / `MAKE` / `ON` … : the command-line layer editor's
             // one-option-per-line write forms (`?` stays the read-only report).
             super::commands::DASH_LAYER_SELECTOR => self.dash_layer_argument(argument, text),
