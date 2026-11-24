@@ -490,9 +490,11 @@ pub enum CommandPayload {
     /// active layer. The kind (baseline stacking vs continuous chain) comes from
     /// the [`CommandId`].
     DimChain(Box<DimensionChainCommand>),
-    /// DIMROTATED: the two extension-line origins, the dimension-line location
-    /// and the dimension line's rotation in **radians** (AutoCAD 2026). The
-    /// handler validates the points, builds one `DimensionKind::Linear { rotation }`
+    /// DIMROTATED: its two documented input forms — the three points (two
+    /// extension-line origins plus the dimension-line location) or the selected
+    /// object that supplies both origins — together with the dimension line's
+    /// rotation in **radians** and an optional text override (AutoCAD 2026). The
+    /// handler validates the input, builds one `DimensionKind::Linear { rotation }`
     /// through the shared synthesis and inserts it on the active layer in one
     /// transaction / one undo step. Any finite rotation is accepted (a negative
     /// angle is legal and is not normalised).

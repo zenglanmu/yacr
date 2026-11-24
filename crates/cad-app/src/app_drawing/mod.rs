@@ -46,12 +46,14 @@ mod circle_options;
 mod clipboard;
 mod construction_line;
 mod dimension;
+// DIMROTATED's create path (split out of `dimension` for the code-size gate).
 mod dimension_angular;
 mod dimension_chain;
 mod dimension_edit;
 mod dimension_ordinate;
 mod dimension_override;
 mod dimension_qdim;
+mod dimension_rotated;
 mod dimension_space;
 mod dimension_style;
 mod divide;
@@ -103,6 +105,8 @@ pub(crate) mod xplode;
 mod hatch_pattern;
 mod hatch_stitch;
 mod hatch_utilities;
+// The per-space draw-order scope model (`HATCHTOBACK`, reused by `CDORDER`).
+pub(crate) use hatch_utilities::DrawOrderScope;
 mod helpers;
 mod image_edit;
 mod view_replay;
@@ -226,7 +230,15 @@ mod trim_extend;
 // the code-size limit).
 mod trim_hatch;
 mod trim_polyline;
+// The arc-length midpoint the block-boundary TRIM pick uses, so a polyline
+// target is picked exactly like TRIM's own implicit `EXTRIM` pick.
+pub(crate) use trim_polyline::polyline_midpoint;
 mod trim_spline;
+// The one TRIM/EXTEND target dispatch (shared by TRIM, EXTEND and the BTRIM /
+// BEXTEND block-boundary commands), split out of `trim_extend` so the target
+// policy cannot drift between commands and every file stays inside the
+// code-size limit.
+mod trim_targets;
 
 pub(crate) use helpers::{apply_drawing_patches, class_name, next_transaction_id};
 pub(crate) use layout_record::layout_row;
@@ -254,8 +266,11 @@ pub(crate) fn utility_payload(
 pub(crate) use draw2_edit::CurveChange;
 pub(crate) use properties::plan_entity;
 pub(crate) use trim_boundary::{collect_boundaries, BoundarySet};
-pub(crate) use trim_curves::{
-    cut_tolerance, plan_extend, plan_trim, PlanRefusal, TargetCurve, TrimPlan,
+pub(crate) use trim_curves::{cut_tolerance, plan_trim, TargetCurve, TrimPlan};
+// The shared TRIM/EXTEND target dispatch (and its named gap predicates) that
+// `TRIM`, `EXTEND`, `BTRIM` and `BEXTEND` all route through.
+pub(crate) use trim_targets::{
+    extend_target_gap, plan_extend_target, plan_trim_target, trim_target_gap, TargetPlan,
 };
 // The POLYLINE-mode FILLET/CHAMFER planner, its spec and the two-line parity
 // reference: exposed to the crate's tests only (`tests::drawing::polyline_fillet`

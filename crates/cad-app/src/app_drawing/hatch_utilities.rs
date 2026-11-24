@@ -335,15 +335,18 @@ impl Application {
 
 /// One draw-order scope: a `SpaceId` without its `Ord`/`Hash` (the domain enum
 /// has neither), so the scopes iterate in a stable model → layout → block order.
+///
+/// `CDORDER` reuses this same scope model, so "a draw-order sequence" is one
+/// definition for every colour/draw-order command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum DrawOrderScope {
+pub(crate) enum DrawOrderScope {
     Model,
     Paper(LayoutId),
     Block(BlockId),
 }
 
 impl DrawOrderScope {
-    fn of(space: &SpaceId) -> Self {
+    pub(crate) fn of(space: &SpaceId) -> Self {
         match space {
             SpaceId::Model => DrawOrderScope::Model,
             SpaceId::Paper(layout) => DrawOrderScope::Paper(*layout),
@@ -352,7 +355,7 @@ impl DrawOrderScope {
     }
 
     /// The report label: the space's own name where the drawing has one.
-    fn label(self, drawing: &DrawingDatabase) -> String {
+    pub(crate) fn label(self, drawing: &DrawingDatabase) -> String {
         match self {
             DrawOrderScope::Model => "model space".into(),
             DrawOrderScope::Paper(layout) => match drawing.layout(layout) {

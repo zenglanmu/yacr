@@ -227,6 +227,8 @@ mod extended_edit4;
 mod extended_edit4_properties;
 // The XPLODE property/attribute-control contracts, split out for the code gate.
 mod extended_edit4_xplode;
+// The strict per-scope CDORDER and shared-target-set BTRIM/BEXTEND contracts.
+mod extended_edit4_strict;
 mod extended_refusals4;
 
 mod extended_attrs5;

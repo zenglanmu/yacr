@@ -14,8 +14,10 @@
 //! * `FLATTEN` rewrites the supported geometry's z to 0.
 //! * `XPLODE` reuses the EXPLODE path for INSERTs and reports that it does not
 //!   convert attribute values (`BURST` is the converting path).
-//! * `BTRIM` / `BEXTEND` reuse `plan_trim` / `plan_extend` with the first
-//!   selected INSERT's member geometry as the boundary.
+//! * `BTRIM` / `BEXTEND` reuse the shared TRIM/EXTEND target dispatch
+//!   (`plan_trim_target` / `plan_extend_target`, the same functions the standalone
+//!   commands call) with the first selected INSERT's member geometry as the
+//!   boundary.
 //! * `CHANGE` / `CHPROP` apply a **typed property list** (layer, colour,
 //!   linetype, lineweight, transparency) through the same `plan_entity` /
 //!   `PropertyValue` surface `SETENTITYPROPERTY` uses; unsupported property names
@@ -27,8 +29,9 @@
 
 use super::*;
 use crate::app_drawing::{
-    class_name, collect_boundaries, cut_tolerance, next_transaction_id, plan_entity, plan_extend,
-    plan_trim, BoundarySet, CurveChange, PlanRefusal, TargetCurve, TrimPlan,
+    class_name, collect_boundaries, cut_tolerance, extend_target_gap, next_transaction_id,
+    plan_entity, plan_extend_target, plan_trim_target, polyline_midpoint, trim_target_gap,
+    BoundarySet, CurveChange, DrawOrderScope, TargetCurve, TrimPlan,
 };
 use crate::property_value::aci_for_rgb;
 use cad_db::{transform_geometry, DbEntity, EntityColor};
@@ -374,8 +377,21 @@ impl Application {
         Ok(outcome)
     }
 
-    /// `CDORDER`: rewrite the selection's (or all model-space) draw order by
-    /// colour index ascending.
+    /// `CDORDER`: rewrite the selection's draw order by colour index ascending,
+    /// **per draw-order scope**.
+    ///
+    /// A scope is one [`SpaceId`] value — model space, one paper layout, or one
+    /// block definition — because that is the only grouping every consumer of
+    /// `draw_order` performs (`HATCHTOBACK` and `DRAWORDER` already plan per
+    /// scope). With no selection the command reorders **every** scope in the
+    /// document; with a selection it reorders only the scopes the selected rows
+    /// live in. Candidates keep the exact set of draw-order slots they already
+    /// occupy and are sorted only *among* themselves, so a non-selected row can
+    /// never end up underneath a reordered one by accident.
+    ///
+    /// All scopes are planned before the transaction opens and staged in **one**
+    /// transaction / one undo step. Nothing to do is `cdorder.unchanged` with no
+    /// transaction and no revision bump.
     fn cdorder(&mut self, session: &SessionState, command: &Command) -> CadResult<CommandOutcome> {
         require_none_payload(command, "CDORDER")?;
         let document_id = command.document;
@@ -387,50 +403,73 @@ impl Application {
             .drawing
             .clone();
 
-        let mut entities = if session.selection.refs().is_empty() {
-            drawing
-                .entities()
-                .filter(|entity| entity.space == SpaceId::Model)
-                .cloned()
-                .collect()
+        // No selection is "every row in the document" (model space, every paper
+        // layout and every block definition); a selection is resolved without the
+        // model-space restriction, so paper-space rows are addressable. A
+        // block-instance member/sub-element stays a named refusal because it has no
+        // directly addressable row of its own.
+        let selected: Vec<DbEntity> = if session.selection.refs().is_empty() {
+            drawing.entities().cloned().collect()
         } else {
-            resolve_direct(session, &drawing, command, "cdorder", true)?
+            resolve_direct(session, &drawing, command, "cdorder", false)?
         };
-        if entities.is_empty() {
+        if selected.is_empty() {
             return Ok(CommandOutcome {
                 objects: Vec::new(),
                 changes: None,
                 diagnostics: vec![Diagnostic {
                     object: None,
                     code: "cdorder.unchanged".into(),
-                    message: "CDORDER: there is no model-space entity to reorder".into(),
+                    message: "CDORDER: there is no entity to reorder".into(),
                 }],
                 measurement: None,
                 point_report: None,
             });
         }
 
-        // Keep the exact set of draw-order slots the candidates occupy, sorting
-        // only *among* them: a non-selected entity can never end up underneath a
-        // reordered one by accident.
-        let mut slots: Vec<i64> = entities.iter().map(|entity| entity.draw_order).collect();
-        slots.sort_unstable();
-        entities.sort_by_key(|entity| {
-            (
-                color_index(&drawing, entity),
-                entity.draw_order,
-                entity.id.0,
-            )
-        });
+        // One scope per `SpaceId`, iterated in the stable model → layout → block
+        // order the scope model defines. `SpaceId` is neither `Ord` nor `Hash`, so
+        // sorting the mapped scope keys is the honest dedup.
+        let mut scopes: Vec<DrawOrderScope> = selected
+            .iter()
+            .map(|entity| DrawOrderScope::of(&entity.space))
+            .collect();
+        scopes.sort_unstable();
+        scopes.dedup();
 
-        let mut planned: Vec<(DbEntity, DbEntity)> = Vec::new();
-        for (entity, order) in entities.into_iter().zip(slots) {
-            if entity.draw_order == order {
-                continue;
+        let mut planned: Vec<(DbEntity, i64)> = Vec::new();
+        let mut reports: Vec<String> = Vec::with_capacity(scopes.len());
+        for scope in &scopes {
+            let mut candidates: Vec<DbEntity> = selected
+                .iter()
+                .filter(|entity| DrawOrderScope::of(&entity.space) == *scope)
+                .cloned()
+                .collect();
+            // Keep the exact set of draw-order slots the candidates occupy,
+            // sorting only *among* them.
+            let mut slots: Vec<i64> = candidates.iter().map(|entity| entity.draw_order).collect();
+            slots.sort_unstable();
+            candidates.sort_by_key(|entity| {
+                (
+                    color_index(&drawing, entity),
+                    entity.draw_order,
+                    entity.id.0,
+                )
+            });
+            let mut moved = 0usize;
+            for (entity, order) in candidates.into_iter().zip(slots) {
+                if entity.draw_order == order {
+                    continue;
+                }
+                moved += 1;
+                planned.push((entity, order));
             }
-            let mut after = entity.clone();
-            after.draw_order = order;
-            planned.push((entity, after));
+            let label = scope.label(&drawing);
+            reports.push(if moved == 0 {
+                format!("{label}: already ordered")
+            } else {
+                format!("{label}: {moved} moved")
+            });
         }
         if planned.is_empty() {
             return Ok(CommandOutcome {
@@ -450,8 +489,10 @@ impl Application {
         let transaction = next_transaction_id();
         let change_set = {
             let mut staged = candidate.begin_drawing_transaction("cdorder", transaction)?;
-            for (_, after) in &planned {
-                staged.update_entity(after.clone())?;
+            for (before, order) in &planned {
+                let mut after = before.clone();
+                after.draw_order = *order;
+                staged.update_entity(after)?;
             }
             staged.commit()?
         };
@@ -488,8 +529,9 @@ impl Application {
                 object: None,
                 code: "cdorder.applied".into(),
                 message: format!(
-                    "CDORDER: rewrote the draw order of {count} entity/entities by \
-                                  colour index"
+                    "CDORDER: rewrote the draw order of {count} entity/entities by colour index \
+                     within their own scope — {}",
+                    reports.join("; ")
                 ),
             }],
             measurement: None,

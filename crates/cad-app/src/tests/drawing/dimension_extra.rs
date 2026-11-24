@@ -23,11 +23,12 @@ fn payload(
     location: Point3,
     rotation_degrees: f64,
 ) -> CommandPayload {
-    CommandPayload::RotatedLinearDimension(Box::new(crate::RotatedLinearDimensionCommand {
+    CommandPayload::RotatedLinearDimension(Box::new(crate::RotatedLinearDimensionCommand::Points {
         first,
         second,
         location,
         rotation: rotation_degrees.to_radians(),
+        text_override: None,
     }))
 }
 
@@ -262,12 +263,15 @@ fn refusals_change_nothing_and_name_their_reason() {
         &mut app,
         &mut session,
         CommandId::DimRotated,
-        CommandPayload::RotatedLinearDimension(Box::new(crate::RotatedLinearDimensionCommand {
-            first: origin,
-            second: point(10.0, 0.0),
-            location: point(5.0, 5.0),
-            rotation: f64::NAN,
-        })),
+        CommandPayload::RotatedLinearDimension(Box::new(
+            crate::RotatedLinearDimensionCommand::Points {
+                first: origin,
+                second: point(10.0, 0.0),
+                location: point(5.0, 5.0),
+                rotation: f64::NAN,
+                text_override: None,
+            },
+        )),
     )
     .unwrap_err();
     assert!(
@@ -292,4 +296,208 @@ fn dimrotated_is_work_only_and_refused_in_viewer_mode() {
     .unwrap_err();
     assert!(matches!(error, CadError::PermissionDenied), "{error:?}");
     assert_eq!(revision(&app), before);
+}
+
+// ---------------------------------------------------------------------------
+// The documented text-override and object-selection forms (2026-11-24).
+// ---------------------------------------------------------------------------
+
+fn ref_to(entity: u128) -> SelectionRef {
+    SelectionRef {
+        document: DocumentId(1),
+        entity: EntityId(entity),
+        instance: InstancePath::default(),
+        sub_element: None,
+    }
+}
+
+fn object_payload(
+    target: u128,
+    location: Point3,
+    rotation_degrees: f64,
+    text_override: Option<&str>,
+) -> CommandPayload {
+    CommandPayload::RotatedLinearDimension(Box::new(crate::RotatedLinearDimensionCommand::Object {
+        target: ref_to(target),
+        location,
+        rotation: rotation_degrees.to_radians(),
+        text_override: text_override.map(str::to_string),
+    }))
+}
+
+fn points_payload_with_text(
+    first: Point3,
+    second: Point3,
+    location: Point3,
+    rotation_degrees: f64,
+    text_override: Option<&str>,
+) -> CommandPayload {
+    CommandPayload::RotatedLinearDimension(Box::new(crate::RotatedLinearDimensionCommand::Points {
+        first,
+        second,
+        location,
+        rotation: rotation_degrees.to_radians(),
+        text_override: text_override.map(str::to_string),
+    }))
+}
+
+#[test]
+fn dimrotated_points_form_stores_the_text_override_like_dimedit() {
+    let (mut app, mut session) = drawing_app();
+    let out = execute(
+        &mut app,
+        &mut session,
+        CommandId::DimRotated,
+        points_payload_with_text(
+            point(0.0, 0.0),
+            point(10.0, 0.0),
+            point(5.0, 5.0),
+            0.0,
+            Some("<> mm"),
+        ),
+    )
+    .unwrap();
+    let dimension = stored(&app, out.objects[0]);
+    assert_eq!(dimension.text_override(), Some("<> mm"));
+    assert!(approx(dimension.measurement(), 10.0));
+    assert_eq!(undo_depth(&app), 1, "one transaction / one undo step");
+
+    // An absent override stays absent: the measured text is unchanged.
+    let out = execute(
+        &mut app,
+        &mut session,
+        CommandId::DimRotated,
+        payload(point(0.0, 0.0), point(10.0, 0.0), point(5.0, 5.0), 0.0),
+    )
+    .unwrap();
+    assert_eq!(stored(&app, out.objects[0]).text_override(), None);
+}
+
+#[test]
+fn dimrotated_object_form_uses_the_selected_line_endpoints() {
+    let (mut app, mut session) = drawing_app();
+    // Entity 1 is the LINE (0,0) -> (10,0).
+    let out = execute(
+        &mut app,
+        &mut session,
+        CommandId::DimRotated,
+        object_payload(1, point(5.0, 5.0), 0.0, None),
+    )
+    .unwrap();
+    let dimension = stored(&app, out.objects[0]);
+    assert_eq!(
+        linear_points(&dimension),
+        (point(0.0, 0.0), point(10.0, 0.0), point(5.0, 5.0))
+    );
+    assert!(approx(dimension.measurement(), 10.0));
+    assert_eq!(undo_depth(&app), 1);
+}
+
+#[test]
+fn dimrotated_object_form_measures_a_circle_along_the_dimension_direction() {
+    // A circle of radius 2: the object form takes the two extent points along the
+    // dimension-line direction, so a 90 degree line measures the 4 unit diameter.
+    let (mut app, mut session) = application_with_document();
+    let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
+    b.insert_layer(Layer {
+        id: LayerId(0),
+        name: "0".into(),
+        visible: true,
+    })
+    .unwrap();
+    b.insert_entity(ent(
+        10,
+        SemanticGeometry::Circle {
+            center: point(0.0, 0.0),
+            normal: p3(0.0, 0.0, 1.0),
+            radius: 2.0,
+        },
+        0,
+    ))
+    .unwrap();
+    app.workspace
+        .documents
+        .get_mut(&DocumentId(1))
+        .unwrap()
+        .drawing = Arc::new(b.finish().unwrap());
+
+    let out = execute(
+        &mut app,
+        &mut session,
+        CommandId::DimRotated,
+        object_payload(10, point(5.0, 0.0), 90.0, None),
+    )
+    .unwrap();
+    let dimension = stored(&app, out.objects[0]);
+    let (first, second, _) = linear_points(&dimension);
+    assert!(approx(first.x, 0.0) && approx(first.y, 2.0), "{first:?}");
+    assert!(
+        approx(second.x, 0.0) && approx(second.y, -2.0),
+        "{second:?}"
+    );
+    assert!(
+        approx(dimension.measurement(), 4.0),
+        "the diameter is 4, got {}",
+        dimension.measurement()
+    );
+}
+
+#[test]
+fn dimrotated_new_forms_refuse_by_name_without_writing() {
+    let (mut app, mut session) = drawing_app();
+    let before = revision(&app);
+    let before_undo = undo_depth(&app);
+    let cases: Vec<(CommandPayload, &str)> = vec![
+        (
+            points_payload_with_text(
+                point(0.0, 0.0),
+                point(10.0, 0.0),
+                point(5.0, 5.0),
+                0.0,
+                Some("   "),
+            ),
+            "dimrotated.bad_text",
+        ),
+        (
+            points_payload_with_text(
+                point(0.0, 0.0),
+                point(10.0, 0.0),
+                point(5.0, 5.0),
+                0.0,
+                Some(&"a".repeat(MAX_TOOL_TEXT_CHARS + 1)),
+            ),
+            "dimrotated.bad_text",
+        ),
+        // Entity 3 is an INSERT: it has no two-origin object model.
+        (
+            object_payload(3, point(5.0, 5.0), 0.0, None),
+            "dimrotated.object_unsupported",
+        ),
+        // Another document's ref is not addressable.
+        (
+            CommandPayload::RotatedLinearDimension(Box::new(
+                crate::RotatedLinearDimensionCommand::Object {
+                    target: SelectionRef {
+                        document: DocumentId(2),
+                        entity: EntityId(1),
+                        instance: InstancePath::default(),
+                        sub_element: None,
+                    },
+                    location: point(5.0, 5.0),
+                    rotation: 0.0,
+                    text_override: None,
+                },
+            )),
+            "dimrotated.not_addressable",
+        ),
+    ];
+    for (payload, code) in cases {
+        let error = execute(&mut app, &mut session, CommandId::DimRotated, payload).unwrap_err();
+        assert!(
+            format!("{error:?}").contains(code),
+            "expected {code}, got {error:?}"
+        );
+        assert_eq!(revision(&app), before, "{code} bumps no revision");
+        assert_eq!(undo_depth(&app), before_undo, "{code} records no undo");
+    }
 }
