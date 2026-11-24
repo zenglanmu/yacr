@@ -37,6 +37,7 @@
 mod accumulator;
 mod acis;
 mod adapter;
+mod attribute;
 mod body;
 mod common;
 mod dimension;

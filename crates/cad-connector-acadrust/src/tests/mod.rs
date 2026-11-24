@@ -10,6 +10,7 @@ use std::sync::Arc;
 mod acis;
 mod acis_arcs;
 mod arc_sweep;
+mod attributes;
 mod basics;
 mod blocks;
 mod colour_provenance;

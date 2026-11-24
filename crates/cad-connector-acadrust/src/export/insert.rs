@@ -152,6 +152,15 @@ pub(super) fn emit_insert(
     insert.common.handle = doc.allocate_handle();
     let handle = insert.common.handle;
 
+    // ADR-0055: the reference's concrete attribute values are block-local, so
+    // they attach to this `INSERT` unchanged. acadrust then writes group `66`,
+    // the `ATTRIB` children and the terminating `SEQEND`.
+    if let SemanticGeometry::Insert { attributes, .. } = &entity.geometry {
+        let (written, attribute_reasons) = super::attribute::attributes_for(doc, attributes, ctx);
+        insert.attributes = written;
+        reasons.extend(attribute_reasons);
+    }
+
     if let Some(clip) = ctx.database.entity_render_attributes(entity.id).clip {
         match write_clip(doc, handle, &clip, placement) {
             Ok((xdict, depth_loss)) => {
@@ -394,6 +403,14 @@ pub(super) fn ensure_block_written(
     record.handle = block_handle;
     record.block_entity_handle = doc.allocate_handle();
     record.block_end_handle = doc.allocate_handle();
+    // ADR-0055: group 70 bit 2 tells a reader the definition owns `ATTDEF`
+    // members. It is derived from the members actually written, never set on a
+    // block that has none.
+    record.flags.has_attributes = members.iter().any(|id| {
+        ctx.database.entity(*id).is_some_and(|member| {
+            matches!(member.geometry, SemanticGeometry::AttributeDefinition(_))
+        })
+    });
     // The base point the importer bakes into every reference transform, written
     // back verbatim so a reference re-imports to the same placement.
     record.base_point = v3(metadata.base_point);

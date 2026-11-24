@@ -222,9 +222,13 @@ impl<'a> ImporterBuilder<'a> {
         }
     }
 
-    /// Text geometry for an ATTRIB/ATTDEF value, at its insertion point and
-    /// using its own text style.
-    pub(crate) fn attribute_text(
+    /// Plain-TEXT geometry for an orphan `ATTRIB` (one with no owning INSERT).
+    ///
+    /// The honest fallback keeps the value visible while the caller reports
+    /// `import.orphan_attrib`; it is deliberately not used for a member of a
+    /// block definition, which has its own [`SemanticGeometry::AttributeDefinition`]
+    /// class.
+    pub(crate) fn attribute_fallback_text(
         &self,
         style: &str,
         text: String,

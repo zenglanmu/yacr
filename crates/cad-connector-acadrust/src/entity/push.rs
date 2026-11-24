@@ -285,6 +285,8 @@ impl<'a> ImporterBuilder<'a> {
             SemanticGeometry::Mesh(_)
             | SemanticGeometry::Opaque { .. }
             | SemanticGeometry::Text { .. } => SupportStatus::Unsupported,
+            // An attribute definition is an annotation, not a MEASURE target.
+            SemanticGeometry::AttributeDefinition(_) => SupportStatus::Unsupported,
             // A 3D body is a derived display cache, not a MEASURE target: body
             // measurement is not implemented, so a drawable body must not claim
             // the completeness-derived status.

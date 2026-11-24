@@ -29,12 +29,21 @@ impl<'a> ImporterBuilder<'a> {
     /// be double-drawn. Unknown block names are reported `Missing` rather than
     /// expanded as an empty success.
     pub(crate) fn insert_semantics(
-        &self,
+        &mut self,
         i: &acadrust::entities::Insert,
     ) -> (SemanticGeometry, Completeness) {
         let name = i.block_name.clone();
         let base = self.block_base(&name);
         let mut completeness = Completeness::Complete;
+        // ADR-0055: the concrete ATTRIB values the reference carries are stored
+        // block-local on every instance cell. Their tags/flags/placements are
+        // copied; the owning ATTDEF is never duplicated here.
+        let mut attributes = Vec::with_capacity(i.attributes.len());
+        for attribute in &i.attributes {
+            let (value, value_completeness) = self.attribute_value(attribute);
+            completeness = completeness.combine(value_completeness);
+            attributes.push(value);
+        }
         if !self.block_ids.contains_key(&name) {
             completeness =
                 Completeness::Missing(vec![format!("insert references unknown block '{name}'")]);
@@ -93,7 +102,7 @@ impl<'a> ImporterBuilder<'a> {
                         column as f64 * i.column_spacing,
                         row as f64 * i.row_spacing,
                     ),
-                    attributes: Vec::new(),
+                    attributes: attributes.clone(),
                 });
             }
         }

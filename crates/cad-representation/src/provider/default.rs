@@ -2,11 +2,13 @@ use crate::*;
 
 use super::registry::RepresentationProvider;
 
+mod attribute;
 mod fragments;
 mod raster;
 mod table;
 mod text;
 
+pub(crate) use attribute::attribute_value_fragments;
 pub(crate) use fragments::chord_tessellation_params;
 use fragments::{body_fragment, conic_from_geometry, push_chord_fragment, push_mesh_fragment};
 use raster::{image_fragment, ImageGeometry};
@@ -301,6 +303,56 @@ impl DefaultRepresentationProvider {
                         transform: *transform,
                     },
                 });
+            }
+            // ADR-0055: a standalone `ATTDEF` entity (model space) is drawn as
+            // the text it templates, exactly like the pre-M2 TEXT fold. A block
+            // definition's members are skipped during INSERT expansion instead
+            // (their per-reference values are what draw there).
+            SemanticGeometry::AttributeDefinition(definition) => {
+                let text = if definition.default_value.is_empty() {
+                    definition.tag.clone()
+                } else {
+                    definition.default_value.clone()
+                };
+                if definition.text.oblique.abs() > 1e-12 {
+                    representation.completeness =
+                        representation
+                            .completeness
+                            .clone()
+                            .combine(Completeness::Partial(vec![
+                                "attribute oblique angle is stored but drawn upright".into(),
+                            ]));
+                    representation.diagnostics.push(Diagnostic {
+                        object: Some(ObjectId(entity.id.0)),
+                        code: "attribute.oblique_not_drawn".into(),
+                        message: format!(
+                            "attribute {:?} has an oblique angle {} rad; the shared text path draws \
+                             it upright",
+                            definition.tag, definition.text.oblique
+                        ),
+                    });
+                }
+                text_fragment(
+                    entity,
+                    context,
+                    annotative,
+                    TextGeometry {
+                        text: &text,
+                        position: &definition.text.position,
+                        style: &definition.text.style,
+                        height: &definition.text.height,
+                        rotation: &definition.text.rotation,
+                        font: &definition.text.font,
+                        h_align: &definition.text.h_align,
+                        v_align: &definition.text.v_align,
+                        wrap_width: &definition.text.wrap_width,
+                        width_factor: &definition.text.width_factor,
+                        line_spacing: &definition.text.line_spacing,
+                    },
+                    source,
+                    geometry_source,
+                    &mut representation,
+                )
             }
             SemanticGeometry::Text {
                 text,

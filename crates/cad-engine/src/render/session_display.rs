@@ -51,6 +51,17 @@ impl RenderSessionHandle {
         self.set_display_settings(settings)
     }
 
+    /// Set the session `ATTDISP` state for block-attribute values. Returns
+    /// whether it changed.
+    ///
+    /// A change rebuilds the base (`ATTDISP` decides which attribute text
+    /// fragments exist), exactly like `FILL`/`QTEXT`; it never writes `cad-db`.
+    pub fn set_attdisp(&self, mode: cad_representation::AttributeDisplay) -> bool {
+        let mut settings = self.display();
+        settings.attdisp = mode;
+        self.set_display_settings(settings)
+    }
+
     /// Set the session `VIEWRES` percentage (a ceiling on chord segments per
     /// curve). Returns whether the value changed.
     ///

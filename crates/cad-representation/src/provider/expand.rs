@@ -7,6 +7,7 @@ use super::clip::{
     block_clip_boundary, block_clip_depth, rejection_code, rejection_message, ClipDepth,
 };
 use super::clip_emit::emit_clipped;
+use super::default::attribute_value_fragments;
 use super::default::chord_tessellation_params;
 use super::depth::{
     conic_depth_span, depth_straddle_message, filter_runs_by_depth, primitive_depth_kind,
@@ -243,15 +244,85 @@ impl ProviderRegistry {
                     if !empty_clip {
                         let mut child_path = path.clone();
                         child_path.0.push(entity.id);
-                        stack.push(block);
                         // The children inherit this INSERT's **effective** layer,
                         // so a layer-`0` INSERT passes the outer block's layer one
                         // level further down (the chained rule).
                         let child_layers = layers.child_scope(effective_layer);
+                        // ADR-0055 M2: the reference's own attribute values draw
+                        // as text in the same block-local frame as the members,
+                        // under this reference's transform, in definition order.
+                        // A block-definition `ATTDEF` is skipped by the child loop
+                        // below; it is a template, not an extra drawable.
+                        if let SemanticGeometry::Insert { attributes, .. } = &entity.geometry {
+                            let definitions: Vec<(&str, u32, bool)> = database
+                                .block_entities(block)
+                                .into_iter()
+                                .filter_map(|member| match &member.geometry {
+                                    SemanticGeometry::AttributeDefinition(definition) => Some((
+                                        definition.tag.as_str(),
+                                        definition.order,
+                                        definition.flags.constant,
+                                    )),
+                                    _ => None,
+                                })
+                                .collect();
+                            // Stable: values with the same definition keep their
+                            // stored relative order, so duplicate tags stay legal.
+                            let definition_of = |value: &AttributeValue| {
+                                definitions
+                                    .iter()
+                                    .find(|(tag, _, _)| *tag == value.tag.as_str())
+                                    .copied()
+                            };
+                            let mut visible: Vec<&AttributeValue> = attributes
+                                .iter()
+                                .filter(|value| {
+                                    // The **definition** decides whether a value is
+                                    // constant: a source may omit the flag on the
+                                    // ATTRIB record even though its ATTDEF is
+                                    // constant, and a constant definition draws in
+                                    // every ATTDISP mode.
+                                    let mut flags = value.flags;
+                                    if let Some((_, _, constant)) = definition_of(value) {
+                                        flags.constant |= constant;
+                                    }
+                                    context.attdisp.shows(flags)
+                                })
+                                .collect();
+                            visible.sort_by_key(|value| {
+                                definition_of(value)
+                                    .map(|(_, order, _)| order)
+                                    .unwrap_or(u32::MAX)
+                            });
+                            for value in visible {
+                                emit_attribute_value(
+                                    database,
+                                    entity,
+                                    value,
+                                    context,
+                                    &composed,
+                                    path,
+                                    child_layers,
+                                    own_alpha,
+                                    Some(own_color),
+                                    Some(own_lineweight),
+                                    &own_linetype,
+                                    linetype_scale,
+                                    draw_order,
+                                    child_clip.as_ref(),
+                                    child_depth,
+                                    out,
+                                );
+                            }
+                        }
+                        stack.push(block);
                         // The owning INSERT of the fragment is the entity whose
                         // `attributes` were read above; every child of this loop
                         // belongs to the same instance path.
                         for child in database.block_entities(block) {
+                            if matches!(child.geometry, SemanticGeometry::AttributeDefinition(_)) {
+                                continue;
+                            }
                             self.expand_entity(
                                 database,
                                 child,
@@ -783,4 +854,104 @@ fn clip_polyline_runs(
         }
     }
     out
+}
+
+/// Draw one `INSERT` attribute value through the shared text path.
+///
+/// The value is stored in the reference's block-local frame, so it takes the
+/// same composed transform, the same block-clip/depth treatment and the same
+/// appearance resolution as a block member. The text itself is produced by
+/// [`attribute_value_fragments`] (the one text renderer), never by a second
+/// shaping path.
+#[allow(clippy::too_many_arguments)]
+fn emit_attribute_value(
+    database: &DrawingDatabase,
+    entity: &DbEntity,
+    value: &AttributeValue,
+    context: &RepresentationContext,
+    transform: &Transform3,
+    path: &InstancePath,
+    layers: LayerScope,
+    parent_alpha: f32,
+    parent_color: Option<[f32; 3]>,
+    parent_lineweight: Option<f32>,
+    parent_linetype: &LinetypePattern,
+    parent_linetype_scale: f32,
+    draw_order: i64,
+    clip: Option<&WorldRectBoundary>,
+    depth: Option<ClipDepth>,
+    out: &mut DisplayRepresentation,
+) {
+    let layer = database.layer_attributes(layers.effective_layer(value.layer));
+    let alpha = resolve_alpha(value.appearance.transparency, parent_alpha, layer.opacity);
+    let (color, color_unresolved) =
+        resolve_color(value.appearance.color, parent_color, layer.color.rgb);
+    let (lineweight, lineweight_unresolved) = resolve_lineweight(
+        value.appearance.lineweight,
+        parent_lineweight,
+        layer.lineweight,
+    );
+    let layer_linetype = layer_linetype_pattern(database, &layer);
+    let (linetype, linetype_unresolved, linetype_scale) = resolve_linetype(
+        value.appearance.linetype.clone(),
+        value.appearance.linetype_scale,
+        Some((parent_linetype, parent_linetype_scale)),
+        layer_linetype.as_ref(),
+    );
+
+    let representation = attribute_value_fragments(entity, context, value);
+    out.completeness = weaker_completeness(&out.completeness, &representation.completeness);
+    out.diagnostics.extend(representation.diagnostics);
+    for fragment in representation.fragments {
+        // Text primitives (unshaped) and glyph outlines (shaped) both transform
+        // the same way every other primitive does.
+        let primitive = fragment.primitive.transformed(transform);
+        if let Some(band) = depth {
+            match primitive_depth_span(&primitive) {
+                Some((min, max)) if band.excludes(min, max) => continue,
+                Some((min, max)) if !band.contains(min, max) => report_xclip(
+                    out,
+                    entity,
+                    "representation.xclip_depth_straddle",
+                    &depth_straddle_message(band),
+                ),
+                Some(_) => {}
+                None => report_xclip(
+                    out,
+                    entity,
+                    "representation.xclip_depth_unsupported",
+                    &format!(
+                        "the attribute text has no finite z extent, so the clip depth band is not \
+                         applied to it and it is kept ({})",
+                        primitive_depth_kind(&primitive)
+                    ),
+                ),
+            }
+        }
+        let mut source = fragment.source.clone();
+        source.instance = path.clone();
+        let geometry_source = fragment.geometry_source;
+        let precision = fragment.precision;
+        let emit = |primitive: DisplayPrimitive, out: &mut DisplayRepresentation| {
+            out.fragments.push(DisplayFragment {
+                source: source.clone(),
+                geometry_source: geometry_source.clone(),
+                precision: precision.clone(),
+                alpha,
+                color,
+                color_unresolved,
+                lineweight,
+                lineweight_unresolved,
+                linetype: linetype.clone(),
+                linetype_unresolved,
+                linetype_scale,
+                draw_order,
+                primitive,
+            });
+        };
+        match clip {
+            None => emit(primitive, out),
+            Some(region) => emit_clipped(entity, primitive, region, &emit, out),
+        }
+    }
 }

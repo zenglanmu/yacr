@@ -14,6 +14,7 @@ use cad_resources::{image_resource_key, DecodedImage, ResourceLimits};
 
 mod annotative;
 mod attributes;
+mod attributes_block;
 mod basic;
 mod blocks;
 mod body3d;

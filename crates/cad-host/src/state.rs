@@ -22,6 +22,16 @@ pub(crate) fn display_settings(
         ),
         fill: session.drafting_extras.fill(),
         qtext: session.drafting_extras.qtext(),
+        // The session `ATTDISP` token is a single ON/OFF bool in this build; it
+        // maps to Normal (ON: visible values draw, invisible ones do not) or Off
+        // (every non-constant value hidden). The representation model already
+        // carries all three states, so a later command lane can expose `On`
+        // without changing the display contract.
+        attdisp: if session.drafting_extras.attdisp() {
+            cad_representation::AttributeDisplay::Normal
+        } else {
+            cad_representation::AttributeDisplay::Off
+        },
         curve_segments: Some(cad_representation::viewres_segment_ceiling(
             session.view_extras.viewres_percent,
         )),

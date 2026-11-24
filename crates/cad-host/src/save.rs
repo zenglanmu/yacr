@@ -858,6 +858,10 @@ impl HostCore {
         // the display base applies. `QTEXT` is deliberately not applied here —
         // quick text is a screen mode and AutoCAD plots the real text.
         context = context.with_fill(fill);
+        // `ATTDISP` is a screen mode: the plot always uses `NORMAL`, so an
+        // `ATTDISP OFF` on screen cannot hide the drawing's visible attribute
+        // values in a plot. Constant definitions draw in every mode.
+        context = context.with_attdisp(cad_representation::AttributeDisplay::Normal);
         if let Some(engine) = self.load_plot_fonts(&requested, text_needed)? {
             context = context.with_fonts(engine);
         }
