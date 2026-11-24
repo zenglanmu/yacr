@@ -29,6 +29,7 @@ mod tests_native_pinch;
 mod tests_param;
 mod tests_polyline_width;
 mod tests_properties;
+mod tests_session_surfaces;
 mod tests_settings;
 mod tests_stretch;
 mod tests_text;

@@ -400,6 +400,14 @@ impl CadSession {
             .iter()
             .map(CadCommandLogEntry::from_host)
             .collect();
+        // The two chrome-facing session tokens: the text-screen window and the
+        // status-bar tray are chrome surfaces that read the session's own flags,
+        // so the wire carries them instead of the chrome keeping a local mirror.
+        {
+            let controller = self.core.controller.borrow();
+            status.text_screen = controller.session.drafting_extras.text_screen();
+            status.tray_settings = controller.session.drafting_extras.traysettings();
+        }
         status
     }
 }

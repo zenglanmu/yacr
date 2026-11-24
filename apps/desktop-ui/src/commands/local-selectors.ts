@@ -33,6 +33,7 @@ import { DOCKED_PANEL_REFUSAL_KEY, dockedPaletteOpenable } from '../layout/layou
 import { isLayersCommand } from '../layers/layers.ts';
 import { isParametersCloseCommand, isParametersCommand } from '../params/params.ts';
 import { closeParamsPanel, openParamsPanel } from '../params/panel.ts';
+import { openTraySettings } from '../chrome/surfaces.ts';
 import { openRecorderPanel } from '../recorder/panel.ts';
 import { isActionManagerOpenCommand } from '../recorder/recorder.ts';
 import { isOptionsCommand } from '../options/options.ts';
@@ -73,6 +74,7 @@ import {
   isToolbarCommand,
   isToolPalettesCloseCommand,
   isToolPalettesCommand,
+  isTraySettingsCommand,
   isUpdateThumbsNowCommand,
   isWorkspaceCommand,
   isWorkspaceSaveCommand,
@@ -134,6 +136,10 @@ export type LocalSelectorResult =
   | { readonly kind: 'workspace' }
   /** Open the workspace settings dialog in list or save-current mode. */
   | { readonly kind: 'workspaceSettings'; readonly mode: WorkspaceDialogMode }
+  /** Open the Tray Settings surface (`TRAYSETTINGS`, typed form only). */
+  | { readonly kind: 'traySettings' }
+  /** `TRAYSETTINGS` on a carrier with no status bar/tray: refused in words. */
+  | { readonly kind: 'traySettingsUnavailable' }
   /** Open (or re-focus) the Tool Palettes float (`TOOLPALETTES`). */
   | { readonly kind: 'toolPalettes' }
   /** Close the Tool Palettes float; already closed is a success. */
@@ -250,6 +256,13 @@ export function localSelectorFor(text: string, layout: LayoutMode): LocalSelecto
   // layout-independent like the closes above; a close on any layout is a
   // success. `TPNAVIGATE` keeps every tab name local (the dispatch refuses the
   // ones this build does not have), so no `TPNAVIGATE …` line reaches the router.
+  // `TRAYSETTINGS` typed opens the tray surface; the surface's checkbox sends the
+  // same word programmatically (which falls through to the router and toggles the
+  // session flag). The compact layout has no status bar/tray, so it refuses the
+  // typed word by name instead of opening a surface with nothing to configure.
+  if (isTraySettingsCommand(text)) {
+    return layout === 'mobile' ? { kind: 'traySettingsUnavailable' } : { kind: 'traySettings' };
+  }
   if (isToolPalettesCommand(text)) return { kind: 'toolPalettes' };
   if (isToolPalettesCloseCommand(text)) return { kind: 'toolPalettesClose' };
   const tab = toolPalettesTab(text);
@@ -365,7 +378,15 @@ export function useLocalSelectors(host: LocalSelectorHost): (text: string, fromI
   return useCallback((text: string, fromInput: boolean): boolean => {
     const result = localSelectorFor(text, layout);
     if (!result) return false;
+    // A programmatic `TRAYSETTINGS` (the surface's own checkbox) is the router's
+    // line: forwarding it is what toggles the session flag. Only the typed word
+    // opens the surface.
+    if (result.kind === 'traySettings' && !fromInput) return false;
     clearResult();
+    if (result.kind === 'traySettingsUnavailable') {
+      reportError(translate('traysettings.refusal.no_status_bar'));
+      return true;
+    }
     if (result.kind === 'refused') {
       reportError(translate(DOCKED_PANEL_REFUSAL_KEY, { panel: translate(result.panelKey) }));
       return true;
@@ -415,6 +436,7 @@ export function useLocalSelectors(host: LocalSelectorHost): (text: string, fromI
       case 'toolbar': setToolbarVisible(result.value); break;
       case 'workspace': openWorkspace(); break;
       case 'workspaceSettings': openWorkspaceSettings(result.mode); break;
+      case 'traySettings': openTraySettings(); break;
       case 'toolPalettes': openToolPalettes(); break;
       case 'toolPalettesClose': closeToolPalettes(); break;
       case 'toolPalettesTab': {

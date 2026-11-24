@@ -523,6 +523,24 @@ pub struct CadStatus {
     /// changes the drawing database, history or a persisted preference, and it is
     /// **not** grid snap (`SNAP`/F9 is the separate [`Self::snap_grid_enabled`]).
     pub ortho_enabled: bool,
+    /// Whether the session text screen is open (`TEXTSCR` / `GRAPHSCR`).
+    ///
+    /// Session/display state only, projected from the session's own
+    /// `drafting_extras` token. `true` means a carrier whose chrome hosts the
+    /// text-screen surface shows this session's command history over the
+    /// drawing; `false` (the default) means the drawing is shown. It never
+    /// changes the document, history or a persisted preference.
+    #[serde(rename = "textScreen")]
+    pub text_screen: bool,
+    /// Whether the status-bar tray is shown (`TRAYSETTINGS`, default `true`).
+    ///
+    /// Session/display state only, projected from the session's own
+    /// `drafting_extras` token. A carrier's chrome hides its status-bar tray
+    /// (the icon/notification cluster) while this is `false`, and the Tray
+    /// Settings surface toggles the very same flag. It never changes the
+    /// document, history or a persisted preference.
+    #[serde(rename = "traySettings")]
+    pub tray_settings: bool,
     /// Whether the session's PBR environment lighting is **image-based** (`IBL`).
     ///
     /// Session/display state only; the procedural-IBL render lane reads the same
@@ -679,6 +697,11 @@ pub fn unsupported_status(error: Option<String>) -> CadStatus {
         // `snap_grid_enabled: false` keeps it clear that nothing is snapping.
         snap_spacing: cad_app::DEFAULT_SNAP_SPACING,
         ortho_enabled: false,
+        // No session means no text screen and no status-bar tray to hide: the
+        // documented session defaults (text screen closed, tray shown) are
+        // reported rather than a fabricated open window.
+        text_screen: false,
+        tray_settings: true,
         // No session means no render switch is installed, so it cannot be
         // reported as image-based. The session default (on) is `assemble_status`'s
         // business, not the probe snapshot's.
@@ -843,6 +866,11 @@ pub(super) fn assemble_status(
         snap_grid_enabled,
         snap_spacing,
         ortho_enabled,
+        // The session owns the two chrome-facing session tokens: `CadSession`
+        // projects their real values onto the snapshot it returns. These are the
+        // documented session defaults for a status assembled without them.
+        text_screen: false,
+        tray_settings: true,
         ibl_enabled,
         snap_kind,
         crosshair,

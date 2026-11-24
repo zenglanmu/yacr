@@ -139,13 +139,16 @@ export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze([
   'QTEXT', 'FILL', 'TFRAMES', 'REGENAUTO', 'ISODRAFT',
   'BCOUNT', 'COUNT', 'EDITTIME', 'JULIAN', 'XLIST',
 
-  // The 2026-11-09 Wave 2 batch: ten session tokens, eight read-only reports and
-  // twelve named refusals. All thirty need the open drawing (the tokens are
+  // The 2026-11-09 Wave 2 batch: nine session tokens, eight read-only reports and
+  // twelve named refusals. These need the open drawing (the tokens are
   // per-drawing session state; the reports read it; the refusals answer from the
   // build's model, which is only meaningful with a document open), so the start
   // page disables them with the catalog's own "no drawing is open" sentence.
-  // None takes a capability gate: no file I/O is involved.
-  'DRAGMODE', 'APERTURE', 'ISOPLANE', 'HIGHLIGHTNEW', 'TRAYSETTINGS', 'TEXTSCR',
+  // None takes a capability gate: no file I/O is involved. TRAYSETTINGS is
+  // deliberately **not** here: its typed word opens the chrome's Tray Settings
+  // surface and its programmatic form toggles a status-bar visibility flag,
+  // neither of which needs a drawing.
+  'DRAGMODE', 'APERTURE', 'ISOPLANE', 'HIGHLIGHTNEW', 'TEXTSCR',
   'GRAPHSCR', 'FINDINCLUDE', 'FINDMATCH', 'REVCLOUDPROPERTIES',
   'SYSVARMONITOR', 'SYSVDLG', 'VTOPTIONS', 'ALIASEDIT', 'WHOHAS', 'ACADINFO',
   'PTYPE', 'SCALELISTEDIT',

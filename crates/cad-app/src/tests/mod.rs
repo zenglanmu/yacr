@@ -208,6 +208,7 @@ mod extra_reports;
 mod extras;
 mod extras_ibl;
 mod extras_vscurrent;
+mod find_match_case;
 mod find_mtext;
 // Run-time lookup for the third-party SHX faces (never `include_bytes!`).
 mod font_fixture;

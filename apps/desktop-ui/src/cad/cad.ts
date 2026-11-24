@@ -897,3 +897,28 @@ export function snapKindLabelKey(status: Partial<CadStatus> | null | undefined):
   if (typeof kind !== 'string') return null;
   return SNAP_KIND_LABELS[kind]?.labelKey ?? null;
 }
+
+/** The single router command that toggles the session status-bar tray. */
+export const TRAY_SETTINGS_COMMAND = 'TRAYSETTINGS';
+
+/**
+ * Whether the status-bar tray is shown (`cad_status.traySettings`).
+ *
+ * The host session token is the single source of truth (`TRAYSETTINGS`); an
+ * older host that omits the field keeps the historical behaviour (tray shown),
+ * and an explicit `false` hides it. The Tray Settings surface reads the same
+ * function, so the checkbox and the bar cannot disagree.
+ */
+export function traySettingsOn(status: Partial<CadStatus> | null | undefined): boolean {
+  return status?.traySettings !== false;
+}
+
+/**
+ * Whether the text screen is open (`cad_status.textScreen`, `TEXTSCR`).
+ *
+ * The host session flag is the single source of truth; an absent field (older
+ * host) is closed. The text-screen surface only exists while this is `true`.
+ */
+export function textScreenOpen(status: Partial<CadStatus> | null | undefined): boolean {
+  return status?.textScreen === true;
+}

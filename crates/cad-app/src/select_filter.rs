@@ -118,8 +118,8 @@ impl Application {
             CommandId::HideObjects => self.hide_objects(session, command),
             CommandId::IsolateObjects => self.isolate_objects(session, command),
             CommandId::UnisolateObjects => self.unisolate_objects(session, command),
-            CommandId::FindReport => self.find_report(command),
-            CommandId::FindReplace => self.find_replace(command),
+            CommandId::FindReport => self.find_report(session, command),
+            CommandId::FindReplace => self.find_replace(session, command),
             other => Err(CadError::Invariant(format!(
                 "{other:?} is not part of the select/filter batch"
             ))),

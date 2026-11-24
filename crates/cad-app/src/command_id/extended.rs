@@ -44,15 +44,20 @@ pub enum ExtendedCommandId {
     IsoPlane,
     /// `HIGHLIGHTNEW`: toggle the session "highlight new features" flag.
     HighlightNew,
-    /// `TRAYSETTINGS`: toggle the session status-tray settings flag.
+    /// `TRAYSETTINGS`: toggle the session status-tray flag (projected as
+    /// `cad_status.traySettings`; the status-bar tray and its settings surface
+    /// consume it).
     TraySettings,
-    /// `TEXTSCR`: set the session `text_screen` token to ON.
+    /// `TEXTSCR`: set the session `text_screen` flag ON (projected as
+    /// `cad_status.textScreen`; the chrome's text-screen surface opens).
     TextScreen,
-    /// `GRAPHSCR`: set the session `text_screen` token to OFF.
+    /// `GRAPHSCR`: set the session `text_screen` flag OFF (the text-screen
+    /// surface closes).
     GraphScreen,
     /// `FINDINCLUDE`: toggle the session `find_include` token.
     FindInclude,
-    /// `FINDMATCH`: toggle the session `find_match_case` token.
+    /// `FINDMATCH`: toggle the session `find_match_case` token read by
+    /// `-FIND`/`FIND`.
     FindMatch,
     /// `REVCLOUDPROPERTIES`: read-only report of the session revision-cloud arc
     /// length token.

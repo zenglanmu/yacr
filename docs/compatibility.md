@@ -750,11 +750,11 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | APERTURE | **只读报告 v1（2026-11-09）**：报告会话靶框令牌（默认 10），`aperture.value`；Viewer-legal | `APERTURE <n>` 设置形式 **NOT IMPLEMENTED**；不绘制捕捉靶框，也不改变捕捉判定 | 只读，无写 |
 | ISOPLANE | **会话令牌 v1（2026-11-09）**：循环 `LEFT→TOP→RIGHT`，`isoplane.toggled`；会话状态 only，Viewer-legal | 无等轴测光标、无捕捉/正交变化，绘图平面不真正切换 | 近似实现：仅命令路径/状态 |
 | HIGHLIGHTNEW | **会话令牌 v1（2026-11-09）**：翻转 `highlightnew`（默认 ON），`highlightnew.toggled`；Viewer-legal | 不渲染新功能高亮（无橙点） | 近似实现：仅命令路径/状态 |
-| TRAYSETTINGS | **会话令牌 v1（2026-11-09）**：翻转 `traysettings`（默认 ON），`traysettings.toggled`；Viewer-legal | 本构建无状态栏托盘 UI，图标/通知不变化 | 近似实现：仅命令路径/状态 |
-| TEXTSCR | **会话令牌 v1（2026-11-09）**：置 `text_screen = true`，`textscr.toggled`；会话状态 only，Viewer-legal | 无文本屏幕窗口、不显示提示历史 | 近似实现：仅命令路径/状态 |
-| GRAPHSCR | **会话令牌 v1（2026-11-09）**：置 `text_screen = false`，`graphscr.toggled`；会话状态 only，Viewer-legal | 无文本屏幕窗口可隐藏 | 近似实现：仅命令路径/状态 |
+| TRAYSETTINGS | **完整实现（2026-11-24）**：翻转会话 `traysettings`（默认 ON），经 `cad_status.traySettings` 投影；状态栏托盘（右侧图标/通知簇）跟随该旗标显示/隐藏，托盘设置面的唯一开关即该旗标；紧凑布局无状态栏时键入按名拒绝（`traysettings.refusal.no_status_bar`）；Viewer-legal，无库写/修订/历史 | 声明的偏差：本构建的托盘只含自己的状态栏右侧控件簇，不模拟 AutoCAD 的托盘图标清单；无 GUI/像素证据 |
+| TEXTSCR | **完整实现（2026-11-24）**：置会话文本屏幕旗标（`cad_status.textScreen`），共享 chrome 的文本屏幕窗口随之显示本次会话的命令历史；正文复用命令行历史的同一折叠与序列化（`commandWindowRows` + `commandWindowText`），**无第二套历史模型**；`GRAPHSCR`/Esc 经 router 回写旗标；Viewer-legal，无库写/修订/历史 | 无历史通道时显式说明（`textscreen.unavailable`）而不是空窗；窗口/像素证据 NOT VERIFIED |
+| GRAPHSCR | **完整实现（2026-11-24）**：清除会话文本屏幕旗标（`cad_status.textScreen`），共享 chrome 的同一文本屏幕窗口关闭并返回图形；Viewer-legal，无库写/修订/历史 | 与 TEXTSCR 共用同一窗口与旗标（无第二套状态）；窗口/像素证据 NOT VERIFIED |
 | FINDINCLUDE | **会话令牌 v1（2026-11-09）**：翻转 `find_include`（默认 ON），`findinclude.toggled`；Viewer-legal | 跨块/外部参照文字搜索 **NOT IMPLEMENTED**；`-FIND`/`FIND` 仍只搜顶层模型空间，该标志不改变其范围 | 近似实现：仅命令路径/状态 |
-| FINDMATCH | **会话令牌 v1（2026-11-09）**：翻转 `find_match_case`（默认 OFF），`findmatch.toggled`；Viewer-legal | 已实现的 `-FIND`/`FIND` 恒按 ASCII 不区分大小写比较，该标志不改变匹配 | 近似实现：仅命令路径/状态 |
+| FINDMATCH | **完整实现（2026-11-24）**：翻转会话 `find_match_case`（默认 OFF），`-FIND`/`FIND` 的**报告与替换共用**该标志：ON 按精确字节（区分大小写），OFF 按 ASCII 不区分大小写；覆盖 MTEXT（按投影文本）、单行 TEXT、MULTILEADER 与表格单元格；Viewer-legal，无库写/修订/历史 | 比较是字面子串：无正则、无 Unicode 折叠/排序规则（ASCII 大小写是声明的唯一折叠）；无 GUI/像素证据 |
 | REVCLOUDPROPERTIES | **只读报告 v1（2026-11-09）**：报告会话弧长令牌（默认 15），`revcloud.properties`；Viewer-legal | `REVCLOUDPROPERTIES <length>` 设置形式 **NOT IMPLEMENTED**；`REVCLOUD` 不读取该令牌 | 只读，无写 |
 | SYSVARMONITOR | **会话监视集（2026-11-12）**：`ADD`/`REMOVE`/`LIST [<name>]`；`LIST`/裸命令对比上次快照，变化报 `sysvarmonitor.changed`，并报 `sysvarmonitor.value`/`.summary`；Viewer-legal | 仅在被查询时检测变化，没有后台通知；闭集之外的变量不建模也不杜撰 | 只有会话状态，无写 |
 | SYSVDLG | **只读报告（2026-11-12）**：列出全部已建模变量当前值（`sysvdlg.value`/`.summary`）+ `sysvdlg.not_tracked` + `sysvdlg.dialog_not_implemented`；Viewer-legal | 本构建无系统变量对话框：不能编辑/保存/恢复，单值读取请用 `SETVAR <name>` | 只读，无写 |
@@ -942,8 +942,8 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `GETSEL` | 完整实现 | `GETSEL LAYER\|TYPE\|COLOR\|LINETYPE\|SPACE <value>`；替换选择；只读（不写库/不升修订/不入历史） | 无对话框；只枚举当前空间顶层实体（声明 scope）；更丰富的 QSELECT/FILTER 特性仍按名拒绝 |
 | `SSX` | 部分实现 | 以**第一个选中对象**的五特性（类型/层/颜色/线型/空间）为模板，把匹配的模型空间对象并入选择 | 只枚举顶层模型空间；空选择/不可寻址模板拒绝；无交互选择提示 |
 | `SELECTCOUNT` | 完整实现 | 只读：统计与第一个选中对象五特性相同的模型空间对象数并报告；图纸布局按 `selectcount.model_space_only` 具名拒绝 | 不修改选择、不写库、无事务；不展开块成员 |
-| `-FIND` | 部分实现 | `-FIND <needle>`；在模型空间 Text/MText/MULTILEADER 中做 ASCII 不区分大小写子串搜索并报告计数/ids | 只读；不解析 MTEXT 格式 run；不搜索属性定义/表格/标注文字 |
-| `FIND` | 完整实现 | `FIND <needle> [=> <replacement>]`：遍历模型空间与全部图纸布局（分组报告：`model space` / `layout 'X'`），跨空间替换一条事务/一步撤销，拒绝时任何空间都不写；MTEXT / 带文字 MULTILEADER / `AcDbText`（含导入为 `Text` 的 ATTRIB/ATTDEF）/ 表格单元格都按**画出来的文本**匹配与替换（`\P` 换行、`%%d`/`\~` 转义、`\S` 分数、`^I` 制表）；多 run 命中保留各段格式码，插入文本被转义 | **全局范围**：无 Find 对话框/逐项确认/缩放高亮；块定义内命中只读具名（`block definitions, read-only (edit with BEDIT)`，一份定义被所有实例绘制，FIND 不动它）；部分命中结构化码 `find.mtext_partial_code`、替换被语法重画 `find.mtext_replacement_not_literal`；单行目标拒绝换行 `text.single_line_newline`；动态块未激活可见性成员不搜索（不绘制） |
+| `-FIND` | 完整实现 | `-FIND <needle>`：与 `FIND` 同一遍历与匹配（模型空间 + 全部图纸布局，按**画出来的文本**匹配 MTEXT/单行 TEXT/带文字 MULTILEADER/表格单元格），只报告、不写库；比较方式读取会话 `FINDMATCH`（默认 OFF = ASCII 不区分大小写，ON = 区分大小写） | 只读；块定义内命中按只读通道具名（不改块定义）；无跨块/xref 搜索（`FINDINCLUDE` 仍 partial） |
+| `FIND` | 完整实现 | `FIND <needle> [=> <replacement>]`：遍历模型空间与全部图纸布局（分组报告：`model space` / `layout 'X'`），跨空间替换一条事务/一步撤销，拒绝时任何空间都不写；MTEXT / 带文字 MULTILEADER / `AcDbText`（含导入为 `Text` 的 ATTRIB/ATTDEF）/ 表格单元格都按**画出来的文本**匹配与替换（`\P` 换行、`%%d`/`\~` 转义、`\S` 分数、`^I` 制表）；多 run 命中保留各段格式码，插入文本被转义；比较方式读取会话 `FINDMATCH`（默认 OFF = ASCII 不区分大小写，ON = 区分大小写），报告与替换共用同一标志 | **全局范围**：无 Find 对话框/逐项确认/缩放高亮；块定义内命中只读具名（`block definitions, read-only (edit with BEDIT)`，一份定义被所有实例绘制，FIND 不动它）；部分命中结构化码 `find.mtext_partial_code`、替换被语法重画 `find.mtext_replacement_not_literal`；单行目标拒绝换行 `text.single_line_newline`；动态块未激活可见性成员不搜索（不绘制） |
 | `HIDEOBJECTS` | 部分实现 | 会话隐藏集：隐藏当前选择；共享可见性谓词影响拾取与渲染（`FLAG_HIDDEN`） | 无数据库写/撤销；隐藏对象仍留在常驻场景，仅 fragment 丢弃；屏幕空间 POINT 标记 overlay 仍可能绘制（声明） |
 | `ISOLATEOBJECTS` | 部分实现 | 会话隐藏集：隐藏除当前选择外的顶层模型空间对象 | 只按顶层身份隔离（只选中块成员时不会保留该成员所在的整个块）；无数据库写/撤销 |
 | `UNISOLATEOBJECTS` | 部分实现 | 清空会话隐藏集，恢复所有隐藏对象 | 无数据库写/撤销；不恢复已被删除的对象 |

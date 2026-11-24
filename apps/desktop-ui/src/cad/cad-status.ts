@@ -380,11 +380,8 @@ export interface CadStatus {
   readonly adapter: string | null;
   readonly camera: CadCamera | null;
   /**
-   * The host's persisted UI theme (`"dark"` or `"light"`).
-   *
-   * Optional only for a recorded pre-theme payload; the readers default to
-   * `"dark"` (the historical chrome). The host remains the authority: a theme
-   * toggle is a real setting write, and the chrome follows this value.
+   * The host's persisted UI theme (`"dark"` or `"light"`); optional only for a
+   * pre-theme payload (readers default to `"dark"`). The host stays the authority.
    */
   readonly theme?: string;
   /**
@@ -408,6 +405,8 @@ export interface CadStatus {
   /** Session grid-snap spacing in drawing units (finite, strictly positive). */
   readonly snapSpacing: number;
   readonly orthoEnabled: boolean;
+  /** Additive host session surfaces: text screen open (`TEXTSCR`) and status-bar tray shown (`TRAYSETTINGS`); absent = closed / shown. */
+  readonly textScreen?: boolean; readonly traySettings?: boolean;
   /**
    * Whether the renderer applies image-based lighting to PBR meshes
    * (`cad_status.iblEnabled`, set by the `IBL` command). Required: the View tab's

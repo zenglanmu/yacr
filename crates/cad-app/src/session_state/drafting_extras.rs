@@ -13,11 +13,15 @@
 //! [`crate::render_scene::DisplaySettings`], `COLOR` reaches every entity the
 //! create funnel inserts, `ELEV` is the elevation that same funnel creates new
 //! entities at (`crate::app_drawing::elevation`), `FSMODE` selects which `FS`
-//! contact pass runs, and two are consumed where they are stored:
+//! contact pass runs, and others are consumed where they are stored:
 //! `APERTURE` is the object-snap aperture
-//! ([`crate::SessionState::interaction_tolerance`], once set explicitly) and
-//! `REVCLOUDPROPERTIES` is the `REVCLOUD` chord token and `ATTDISP` is the
-//! block-attribute display mode the representation lane reads (ADR-0055 D6).
+//! ([`crate::SessionState::interaction_tolerance`], once set explicitly),
+//! `REVCLOUDPROPERTIES` is the `REVCLOUD` chord token, `ATTDISP` is the
+//! block-attribute display mode the representation lane reads (ADR-0055 D6),
+//! `FINDMATCH` is the comparison mode of `-FIND`/`FIND`, and
+//! `TEXTSCR`/`GRAPHSCR`/`TRAYSETTINGS` are projected to the chrome through
+//! `cad_status.textScreen`/`traySettings`, where the text-screen surface and the
+//! status-bar tray read them.
 
 /// The session `WIPEOUTFRAME` state.
 ///
@@ -379,11 +383,17 @@ impl DraftingExtras {
     }
 
     /// The session `TRAYSETTINGS` flag (default ON).
+    ///
+    /// The chrome's status-bar tray follows it (`cad_status.traySettings`), and
+    /// the Tray Settings surface toggles this very flag.
     pub fn traysettings(&self) -> bool {
         self.traysettings
     }
 
-    /// Whether the session text screen token is set (`TEXTSCR`/`GRAPHSCR`).
+    /// Whether the session text screen is open (`TEXTSCR`/`GRAPHSCR`).
+    ///
+    /// The chrome's text-screen surface shows the session command history while
+    /// this is set (`cad_status.textScreen`).
     pub fn text_screen(&self) -> bool {
         self.text_screen
     }
@@ -394,6 +404,9 @@ impl DraftingExtras {
     }
 
     /// Whether a find compares case-sensitively (`FINDMATCH`).
+    ///
+    /// `-FIND`/`FIND` read it for the report **and** the replacement: ON compares
+    /// exact bytes, OFF (the default) compares ASCII case-insensitively.
     pub fn find_match_case(&self) -> bool {
         self.find_match_case
     }

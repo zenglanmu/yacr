@@ -69,7 +69,7 @@ fn flag_tokens_flip_without_drawing_writes() {
         (
             ExtendedCommandId::TraySettings,
             "traysettings.toggled",
-            "no status-bar tray UI",
+            "status-bar tray follows it",
             |session| session.drafting_extras.traysettings(),
         ),
         (
@@ -81,7 +81,7 @@ fn flag_tokens_flip_without_drawing_writes() {
         (
             ExtendedCommandId::FindMatch,
             "findmatch.toggled",
-            "case-insensitively",
+            "MULTILEADER and table cells",
             |session| session.drafting_extras.find_match_case(),
         ),
     ];
@@ -149,7 +149,7 @@ fn isoplane_cycles_left_top_right_without_drawing_writes() {
 }
 
 #[test]
-fn text_screen_tokens_set_the_session_flag_polarity() {
+fn textscr_and_graphscr_set_the_session_flag_polarity() {
     let (mut app, mut session) = application_with_document();
     assert!(!session.drafting_extras.text_screen());
 
@@ -164,12 +164,40 @@ fn text_screen_tokens_set_the_session_flag_polarity() {
 
     let outcome = execute(&mut app, &mut session, ExtendedCommandId::TextScreen)
         .expect("TEXTSCR is admitted twice");
+    let message = &diagnostic(&outcome, "textscr.toggled").message;
     assert!(
-        diagnostic(&outcome, "textscr.toggled")
-            .message
-            .contains("no text-screen window"),
-        "the missing window is declared"
+        message.contains("text-screen surface shows this session's command history"),
+        "the real consumer is named: {message}"
     );
+    assert!(
+        message.contains("no drawing write"),
+        "it stays a session-only flag: {message}"
+    );
+    assert!(!app.can_undo(&DocumentId(1)));
+}
+
+#[test]
+fn traysettings_toggles_the_session_flag_and_names_its_consumer() {
+    let (mut app, mut session) = application_with_document();
+    let before_revision = revision(&app);
+    assert!(
+        session.drafting_extras.traysettings(),
+        "TRAYSETTINGS starts ON"
+    );
+
+    let outcome =
+        execute(&mut app, &mut session, ExtendedCommandId::TraySettings).expect("admitted");
+    assert!(!session.drafting_extras.traysettings(), "it flips the flag");
+    let message = &diagnostic(&outcome, "traysettings.toggled").message;
+    assert!(
+        message.contains("status-bar tray follows it"),
+        "the real consumer is named: {message}"
+    );
+    assert!(
+        message.contains("Tray Settings surface reads the same flag"),
+        "the settings surface is named: {message}"
+    );
+    assert_eq!(revision(&app), before_revision, "no drawing write");
     assert!(!app.can_undo(&DocumentId(1)));
 }
 

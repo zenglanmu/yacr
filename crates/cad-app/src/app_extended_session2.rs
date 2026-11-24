@@ -11,11 +11,14 @@
 //! is re-validated here (the command-line grammar lives in `cad-ui-core`).
 //! `APERTURE` is consumed by the object-snap aperture of the host pick/snap
 //! paths ([`crate::SessionState::interaction_tolerance`]); `REVCLOUDPROPERTIES`
-//! is consumed by `REVCLOUD` ([`crate::app_drawing::revision_cloud`]). Every
-//! other arm here only reports the session value: this build has no drag
-//! preview, no isometric cursor, no new-feature highlighting, no status-bar tray,
-//! no text-screen window and no cross-block find, and each outcome says exactly
-//! that instead of claiming a renderer effect.
+//! is consumed by `REVCLOUD` ([`crate::app_drawing::revision_cloud`]);
+//! `FINDMATCH` is consumed by `-FIND`/`FIND` ([`crate::Application::find_text`]);
+//! and `TEXTSCR`/`GRAPHSCR`/`TRAYSETTINGS` are projected to the chrome through
+//! `cad_status.textScreen`/`cad_status.traySettings`, where the text-screen
+//! surface and the status-bar tray read them. Every other arm here only reports
+//! the session value: this build has no drag preview, no isometric cursor, no
+//! new-feature highlighting and no cross-block find, and each outcome says
+//! exactly that instead of claiming a renderer effect.
 //!
 //! `ISOPLANE` and `APERTURE`/`REVCLOUDPROPERTIES` are **tokens, not toggles**:
 //! `ISOPLANE` cycles `LEFT → TOP → RIGHT`, and the other two report or set a
@@ -85,8 +88,9 @@ impl Application {
                 Ok(toggle_outcome(
                     "traysettings.toggled",
                     format!(
-                        "{name}: session flag is now {} (session state only); this build has no \
-                         status-bar tray UI, so no icon or notification change is claimed",
+                        "{name}: session tray flag is now {} (session state only); the chrome's \
+                         status-bar tray follows it (hid when OFF, shown when ON) and the Tray \
+                         Settings surface reads the same flag — no drawing write, no revision",
                         state(enabled)
                     ),
                 ))
@@ -96,9 +100,9 @@ impl Application {
                 Ok(toggle_outcome(
                     "textscr.toggled",
                     format!(
-                        "{name}: session text-screen token is now ON (session state only); this \
-                         build has no text-screen window, so no window is shown and no prompt \
-                         history is displayed"
+                        "{name}: session text-screen flag is now ON (session state only); a \
+                         carrier whose chrome hosts the text-screen surface shows this session's \
+                         command history while the flag is set — no drawing write, no revision"
                     ),
                 ))
             }
@@ -107,8 +111,9 @@ impl Application {
                 Ok(toggle_outcome(
                     "graphscr.toggled",
                     format!(
-                        "{name}: session text-screen token is now OFF (session state only); this \
-                         build has no text-screen window to hide, so no window change is claimed"
+                        "{name}: session text-screen flag is now OFF (session state only); the \
+                         chrome hides the text-screen surface and returns to the drawing — no \
+                         drawing write, no revision"
                     ),
                 ))
             }
@@ -130,9 +135,14 @@ impl Application {
                     "findmatch.toggled",
                     format!(
                         "{name}: session flag is now {} (session state only); the implemented \
-                         `-FIND`/`FIND` reports always compare ASCII case-insensitively, so this \
-                         token does not change their matching",
-                        state(enabled)
+                         `-FIND`/`FIND` reports and replacements now compare {} across every text \
+                         channel (MTEXT, single-line TEXT, MULTILEADER and table cells)",
+                        state(enabled),
+                        if enabled {
+                            "case-sensitively (exact bytes)"
+                        } else {
+                            "ASCII case-insensitively"
+                        }
                     ),
                 ))
             }
