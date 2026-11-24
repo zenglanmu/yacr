@@ -942,9 +942,10 @@ fn find_reports_block_definition_text_as_a_read_only_channel() {
     // No editable hit: the INSERT carries no text of its own.
     assert!(message.contains("0 match(es)"), "{message}");
     assert!(
-        message.contains("block definitions, read-only (edit with BEDIT)"),
+        message.contains("block definitions / external references, read-only"),
         "{message}"
     );
+    assert!(message.contains("(edit with BEDIT or XREF)"), "{message}");
     assert!(message.contains("'Frame': 1 match(es)"), "{message}");
     assert!(message.contains("41"), "the member id is named: {message}");
 

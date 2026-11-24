@@ -37,6 +37,20 @@
 //! definition blocks hold derived content (dimension/table/hatch displays) that
 //! other channels own. `BEDIT` is the channel for that edit, not `FIND`.
 //!
+//! ## `FINDINCLUDE` scope
+//!
+//! The session token `FINDINCLUDE` decides whether that block channel is
+//! searched at all. ON (AutoCAD's default) searches local block definitions and
+//! the blocks a **loaded** external reference materialized, naming the latter as
+//! `external reference 'STRUCT'`. OFF searches model space and every layout
+//! only, and the report says `block-definition and external-reference text
+//! excluded by FINDINCLUDE OFF` — a scope decision, never an empty result that
+//! reads as "no such text". An external reference whose content was not attached
+//! (missing, refused path, browser without a host bridge, cycle, overlay skipped,
+//! unsupported, or a reference with no block) has no text in the model at all, so
+//! it is **named with its recorded status** rather than silently missed; that
+//! naming is independent of the token.
+//!
 //! Each projected character carries the byte range of the markup that produced
 //! it, so a replace can rebuild the markup instead of rewriting the whole
 //! value: the replacement is inserted at the **first** matched character's byte
@@ -74,6 +88,7 @@
 //! (`text.single_line_newline`); MTEXT/MULTILEADER store line breaks as `\P` via
 //! the one policy in [`super::text_policy`].
 
+use super::find_xref::{collect_xref_sources, XrefSourceNote};
 use super::*;
 use cad_domain::{MLeaderContentKind, SemanticGeometry};
 use cad_representation::mtext_projection;
@@ -117,6 +132,10 @@ impl Application {
 
         let document_id = command.document;
         let case_sensitive = session.drafting_extras.find_match_case();
+        // `FINDINCLUDE` ON (the default) searches text stored in block
+        // definitions and exposes loaded external-reference text through the
+        // blocks the importer materialized; OFF excludes both channels by name.
+        let include_blocks = session.drafting_extras.find_include();
         let drawing = self
             .workspace
             .documents
@@ -126,9 +145,16 @@ impl Application {
             .clone();
 
         // Search the whole drawing: model space, then every paper-space layout.
-        // Block definitions are a separate, read-only channel.
+        // Block definitions are a separate, read-only channel gated by
+        // `FINDINCLUDE`; external references whose content is not attached are
+        // named as unsearchable sources rather than silently skipped.
         let hits = collect_hits(&drawing, needle, case_sensitive);
-        let block_hits = collect_block_hits(&drawing, needle, case_sensitive);
+        let block_hits = if include_blocks {
+            collect_block_hits(&drawing, needle, case_sensitive)
+        } else {
+            Vec::new()
+        };
+        let xref_sources = collect_xref_sources(&drawing);
 
         // Replacement works per entity; several cell hits on one table collapse
         // into one update so the table is rebuilt once. The space travels with
@@ -141,10 +167,24 @@ impl Application {
             .collect();
 
         let Some(replacement) = replacement else {
-            return Ok(report_outcome(&hits, &block_hits, needle, case_sensitive));
+            return Ok(report_outcome(
+                &hits,
+                &block_hits,
+                &xref_sources,
+                needle,
+                case_sensitive,
+                include_blocks,
+            ));
         };
         if matches.is_empty() {
-            return Ok(report_outcome(&hits, &block_hits, needle, case_sensitive));
+            return Ok(report_outcome(
+                &hits,
+                &block_hits,
+                &xref_sources,
+                needle,
+                case_sensitive,
+                include_blocks,
+            ));
         }
 
         // Plan every replacement in every space first: all-or-nothing, no
@@ -263,8 +303,14 @@ enum FindSpace {
     Model,
     Layout(LayoutId, String),
     /// Text stored in a block definition: reported, never edited (see
-    /// [`collect_block_hits`]).
-    Block(BlockId, Option<String>),
+    /// [`collect_block_hits`]). `xref_owned` marks a block materialized by an
+    /// external reference, so the report names it as an external reference
+    /// rather than as a local block definition.
+    Block {
+        id: BlockId,
+        name: Option<String>,
+        xref_owned: bool,
+    },
 }
 
 impl FindSpace {
@@ -273,19 +319,26 @@ impl FindSpace {
         match self {
             FindSpace::Model => "model space".to_string(),
             FindSpace::Layout(_, name) => format!("layout '{name}'"),
-            FindSpace::Block(_, Some(name)) => format!("block definition '{name}'"),
-            FindSpace::Block(id, None) => format!("block definition #{} (unnamed)", id.0),
-        }
-    }
-
-    /// The bare name, used in the block-definition channel where the sentence
-    /// already says what these are.
-    fn name_label(&self) -> String {
-        match self {
-            FindSpace::Model => "model space".to_string(),
-            FindSpace::Layout(_, name) => format!("'{name}'"),
-            FindSpace::Block(_, Some(name)) => format!("'{name}'"),
-            FindSpace::Block(id, None) => format!("#{} (unnamed)", id.0),
+            FindSpace::Block {
+                id: _,
+                name: Some(name),
+                xref_owned: true,
+            } => format!("external reference '{name}'"),
+            FindSpace::Block {
+                id: _,
+                name: Some(name),
+                xref_owned: false,
+            } => format!("block definition '{name}'"),
+            FindSpace::Block {
+                id,
+                name: None,
+                xref_owned: true,
+            } => format!("external reference #{} (unnamed)", id.0),
+            FindSpace::Block {
+                id,
+                name: None,
+                xref_owned: false,
+            } => format!("block definition #{} (unnamed)", id.0),
         }
     }
 }
@@ -365,7 +418,12 @@ fn collect_block_hits(
     blocks.sort_by_key(|block| block.id.0);
     let mut hits = Vec::new();
     for block in blocks {
-        let space = FindSpace::Block(block.id, drawing.block_name(block.id).map(str::to_string));
+        let xref_owned = drawing.is_xref_block(block.id);
+        let space = FindSpace::Block {
+            id: block.id,
+            name: drawing.block_name(block.id).map(str::to_string),
+            xref_owned,
+        };
         for entity in drawing.block_entities(block.id) {
             hits.extend(find_hits(entity, space.clone(), needle, case_sensitive));
         }
@@ -466,8 +524,10 @@ fn id_list(hits: &[FindHit]) -> String {
 fn report_outcome(
     hits: &[FindHit],
     blocks: &[FindHit],
+    xref_sources: &[XrefSourceNote],
     needle: &str,
     case_sensitive: bool,
+    include_blocks: bool,
 ) -> CommandOutcome {
     // One section per space, so a hit's layout is visible while the total and
     // the per-entity ids stay where they were.
@@ -500,14 +560,14 @@ fn report_outcome(
     } else {
         format!("; cells: {}", cells.join(", "))
     };
-    // Block definitions are declared, not hidden: they are named with their
-    // count because FIND does not edit them.
+    // Block definitions and loaded external references are declared, not
+    // hidden: they are named with their count because FIND does not edit them.
     let blocks = space_groups(blocks)
         .iter()
         .map(|(space, group)| {
             format!(
                 "{}: {} match(es) (ids: {})",
-                space.name_label(),
+                space.label(),
                 group.len(),
                 id_list(group)
             )
@@ -517,7 +577,30 @@ fn report_outcome(
     let blocks = if blocks.is_empty() {
         String::new()
     } else {
-        format!("; block definitions, read-only (edit with BEDIT): {blocks}")
+        format!(
+            "; block definitions / external references, read-only (edit with BEDIT or XREF): \
+             {blocks}"
+        )
+    };
+    // `FINDINCLUDE` OFF is a real scope decision, not an empty result: name the
+    // excluded channel so `0 match(es)` is never read as "the drawing has no
+    // such text".
+    let excluded = if include_blocks {
+        String::new()
+    } else {
+        "; block-definition and external-reference text excluded by FINDINCLUDE OFF".to_string()
+    };
+    // External references whose content was never attached cannot be searched:
+    // name each one with its recorded status instead of a silent miss.
+    let xrefs = if xref_sources.is_empty() {
+        String::new()
+    } else {
+        let names = xref_sources
+            .iter()
+            .map(|note| format!("'{}' ({})", note.name, note.status))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("; external references not searched (content not attached): {names}")
     };
     // The comparison mode is part of the result: a user reading `0 match(es)`
     // must be able to tell whether case mattered.
@@ -533,7 +616,8 @@ fn report_outcome(
             object: None,
             code: "find.result".into(),
             message: format!(
-                "FIND: {} match(es) for '{needle}'{mode} [{spaces}] first: {preview}{cells}{blocks}",
+                "FIND: {} match(es) for '{needle}'{mode} [{spaces}] first: {preview}{cells}{blocks}\
+                 {excluded}{xrefs}",
                 hits.len(),
             ),
         }],

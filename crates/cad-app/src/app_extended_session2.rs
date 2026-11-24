@@ -12,13 +12,14 @@
 //! `APERTURE` is consumed by the object-snap aperture of the host pick/snap
 //! paths ([`crate::SessionState::interaction_tolerance`]); `REVCLOUDPROPERTIES`
 //! is consumed by `REVCLOUD` ([`crate::app_drawing::revision_cloud`]);
-//! `FINDMATCH` is consumed by `-FIND`/`FIND` ([`crate::Application::find_text`]);
-//! and `TEXTSCR`/`GRAPHSCR`/`TRAYSETTINGS` are projected to the chrome through
+//! `FINDMATCH` is consumed by `-FIND`/`FIND` ([`crate::Application::find_text`]),
+//! `FINDINCLUDE` is the same search's block/xref scope switch, and
+//! `TEXTSCR`/`GRAPHSCR`/`TRAYSETTINGS` are projected to the chrome through
 //! `cad_status.textScreen`/`cad_status.traySettings`, where the text-screen
 //! surface and the status-bar tray read them. Every other arm here only reports
-//! the session value: this build has no drag preview, no isometric cursor, no
-//! new-feature highlighting and no cross-block find, and each outcome says
-//! exactly that instead of claiming a renderer effect.
+//! the session value: this build has no drag preview, no isometric cursor and
+//! no new-feature highlighting, and each outcome says exactly that instead of
+//! claiming a renderer effect.
 //!
 //! `ISOPLANE` and `APERTURE`/`REVCLOUDPROPERTIES` are **tokens, not toggles**:
 //! `ISOPLANE` cycles `LEFT → TOP → RIGHT`, and the other two report or set a
@@ -119,12 +120,19 @@ impl Application {
             }
             ExtendedCommandId::FindInclude => {
                 let enabled = session.drafting_extras.toggle_find_include();
+                let scope = if enabled {
+                    "`-FIND`/`FIND` now search text in block definitions and in blocks a loaded \
+                     external reference materialized (named as external references); unattached \
+                     references stay named with their status"
+                } else {
+                    "`-FIND`/`FIND` now search model space and every layout only; the report names \
+                     block/xref text as excluded by FINDINCLUDE OFF"
+                };
                 Ok(toggle_outcome(
                     "findinclude.toggled",
                     format!(
-                        "{name}: session flag is now {} (session state only); cross-block/xref \
-                         text search is NOT IMPLEMENTED in this build, so no search scope change \
-                         is claimed",
+                        "{name}: session flag is now {} (session state only; the drawing was not \
+                         written): {scope}",
                         state(enabled)
                     ),
                 ))

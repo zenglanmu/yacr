@@ -75,7 +75,7 @@ fn flag_tokens_flip_without_drawing_writes() {
         (
             ExtendedCommandId::FindInclude,
             "findinclude.toggled",
-            "cross-block/xref text search is NOT IMPLEMENTED",
+            "excluded by FINDINCLUDE OFF",
             |session| session.drafting_extras.find_include(),
         ),
         (
