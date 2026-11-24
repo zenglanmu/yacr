@@ -40,6 +40,9 @@ impl Gate {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Answer {
     Body,
+    /// A real, but unrepresentable, folded result: two disjoint shells (the
+    /// shape a disjoint `UNION` produces).
+    MultiShell,
     Unsupported,
 }
 
@@ -94,6 +97,10 @@ impl SolidModeler for GatedModeler {
                             code: "solid.test_note".into(),
                             message: "the fake kernel folded the operands".into(),
                         }],
+                    }),
+                    Answer::MultiShell => SolidOutcome::Success(SolidProduct::Body {
+                        brep: two_shell_box(),
+                        diagnostics: Vec::new(),
                     }),
                     Answer::Unsupported => SolidOutcome::Unsupported {
                         reason: cad_kernel_adapter::SolidUnsupportedReason {
@@ -333,17 +340,17 @@ fn plane_face(id: u32, cycle: &[Point3]) -> BrepFace {
     }
 }
 
-/// A closed planar unit box `[0,1]³`.
-fn unit_box() -> BrepData {
+/// A closed planar unit box `[0,1]³` with its minimum corner at `origin`.
+fn box_at(origin: Point3) -> BrepData {
     let corners = [
-        p3(0.0, 0.0, 0.0),
-        p3(1.0, 0.0, 0.0),
-        p3(1.0, 1.0, 0.0),
-        p3(0.0, 1.0, 0.0),
-        p3(0.0, 0.0, 1.0),
-        p3(1.0, 0.0, 1.0),
-        p3(1.0, 1.0, 1.0),
-        p3(0.0, 1.0, 1.0),
+        p3(origin.x, origin.y, origin.z),
+        p3(origin.x + 1.0, origin.y, origin.z),
+        p3(origin.x + 1.0, origin.y + 1.0, origin.z),
+        p3(origin.x, origin.y + 1.0, origin.z),
+        p3(origin.x, origin.y, origin.z + 1.0),
+        p3(origin.x + 1.0, origin.y, origin.z + 1.0),
+        p3(origin.x + 1.0, origin.y + 1.0, origin.z + 1.0),
+        p3(origin.x, origin.y + 1.0, origin.z + 1.0),
     ];
     let cycles: [&[usize]; 6] = [
         &[0, 3, 2, 1],
@@ -363,6 +370,26 @@ fn unit_box() -> BrepData {
         .collect();
     BrepData {
         shells: vec![BrepShell { id: 0, faces }],
+        placement: None,
+        tolerance: None,
+    }
+}
+
+/// A closed planar unit box `[0,1]³`.
+fn unit_box() -> BrepData {
+    box_at(p3(0.0, 0.0, 0.0))
+}
+
+/// The multi-lump shape a disjoint `UNION` answers with: two separated closed
+/// shells, i.e. exactly what this build cannot store as one connected body.
+fn two_shell_box() -> BrepData {
+    let first = box_at(p3(0.0, 0.0, 0.0));
+    let mut second = box_at(p3(3.0, 0.0, 0.0));
+    second.shells[0].id = 1;
+    let mut shells = first.shells;
+    shells.extend(second.shells);
+    BrepData {
+        shells,
         placement: None,
         tolerance: None,
     }
@@ -503,6 +530,46 @@ fn an_unsupported_kernel_answer_is_reported_and_writes_nothing() {
     assert_eq!(entity_count(&controller), 2);
     assert_eq!(revision(&controller), revision_before);
     assert_eq!(undo_depth(&controller), undo_before);
+}
+
+#[test]
+fn a_multi_shell_boolean_result_is_refused_by_name_and_writes_nothing() {
+    let (mut controller, gate, _) = controller(Answer::MultiShell);
+    let first = create_box(&mut controller, 0.0);
+    let second = create_box(&mut controller, 0.5);
+    select(&mut controller, &[first, second]);
+    let revision_before = revision(&controller);
+    let undo_before = undo_depth(&controller);
+
+    controller
+        .execute(boolean(&controller, ExtendedCommandId::Union))
+        .expect("UNION starts");
+    assert!(
+        matches!(controller.poll_solid_boolean(), SolidBooleanPoll::Running),
+        "the worker folds before the host can reject the shape"
+    );
+    gate.release();
+    match wait_settled(&mut controller) {
+        SolidBooleanPoll::Failed { error } => match error {
+            CadError::Unsupported(reason) => assert!(
+                reason.starts_with(crate::app_drawing::solids::BOOLEAN_RESULT_NOT_SINGLE_SHELL),
+                "{reason}"
+            ),
+            other => panic!("a multi-shell result must be Unsupported, got {other:?}"),
+        },
+        poll => panic!("a multi-shell result must be refused, got {poll:?}"),
+    }
+
+    // Nothing was written: both operands survive, no revision and no undo step.
+    assert_eq!(entity_count(&controller), 2, "the operands survive");
+    assert_eq!(revision(&controller), revision_before);
+    assert_eq!(undo_depth(&controller), undo_before);
+    assert!(is_solid(&controller, first));
+    assert!(is_solid(&controller, second));
+    assert!(
+        matches!(controller.poll_solid_boolean(), SolidBooleanPoll::Idle),
+        "the job slot is released after the refusal"
+    );
 }
 
 #[test]

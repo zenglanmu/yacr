@@ -447,6 +447,13 @@ fn run_boolean(
     if cancelled() {
         return Terminal::Failed(CadError::Cancelled);
     }
+    // Representability gate (C2 strict): the build stores one connected shell
+    // per body. A disjoint union (multi-lump) or a cavity (an extra inner
+    // shell) is refused **before** tessellation and before the host can stage
+    // anything, so no operand is deleted and no undo record is written.
+    if let Err(error) = crate::app_drawing::solids::validate_boolean_result(&accumulated) {
+        return Terminal::Failed(error);
+    }
     match crate::app_drawing::solids::solid_body(accumulated, tessellator) {
         Ok(body) => Terminal::Body {
             body: Box::new(body),

@@ -13,6 +13,17 @@
 //! modeler and the host commits the result in one transaction (see
 //! [`Application::boolean_solids`] and `crate::tasks::SolidBooleanJob`).
 //!
+//! # Result representability
+//!
+//! Before the host may commit, the folded B-rep must be **one connected,
+//! non-empty shell** ([`validate_boolean_result`]). This build stores a
+//! `Body3d { kind: Solid }` that way, and every later lift (`MASSPROP`, another
+//! boolean) requires it. A disjoint `UNION` (a multi-lump body, two or more
+//! shells) or a cavity (an extra inner shell) is refused with the stable
+//! [`BOOLEAN_RESULT_NOT_SINGLE_SHELL`] reason instead of being committed: the
+//! refusal happens before any staging, so the drawing, its revision and history
+//! stay untouched and the operands survive.
+//!
 //! # Point contract (this build; no interactive prompt yet)
 //!
 //! AutoCAD prompts for the dimensions interactively. This carrier has no such
@@ -85,8 +96,37 @@ use cad_kernel_adapter::{
 /// The stable refusal a carrier without a modeler reports.
 pub const SOLID_MODELER_UNSUPPORTED: &str = "unsupported-runtime: solid-modeler";
 
+/// The stable refusal for a boolean result this build cannot store faithfully.
+///
+/// A `Body3d { kind: Solid }` is stored as **one connected shell**. The modeler
+/// answers a disjoint `UNION` (a multi-lump body) with two or more shells, and a
+/// cavity arrives as an extra inner shell; both are shapes every later lift
+/// (`MASSPROP`, another boolean) refuses, so committing one would store a row the
+/// build cannot use. The command refuses instead of writing it.
+pub const BOOLEAN_RESULT_NOT_SINGLE_SHELL: &str = "solid.boolean_result_not_single_shell";
+
 /// The ACIS class key every created/combined body is stored under.
 pub(crate) const SOLID_TYPE_KEY: &str = "AcDb3dSolid";
+
+/// Whether a folded boolean result is one connected, non-empty shell.
+///
+/// The check runs **before** any staging (the worker refuses the result, and the
+/// host re-checks before it begins its transaction), so a refused shape never
+/// bumps the revision, never records an undo step and never deletes an operand.
+/// Only the neutral B-rep is inspected: the display tessellation is derived from
+/// it, so validating the mesh instead would be a proxy for the same fact.
+pub(crate) fn validate_boolean_result(brep: &BrepData) -> CadResult<()> {
+    let shells = brep.shells.len();
+    let faces = brep.face_count();
+    if shells == 1 && faces > 0 {
+        return Ok(());
+    }
+    Err(CadError::Unsupported(format!(
+        "{BOOLEAN_RESULT_NOT_SINGLE_SHELL}: the modeler returned {shells} shell(s) with {faces} \
+         face(s); this build stores one connected shell per body, so a multi-lump or cavity (void) \
+         result cannot be represented faithfully and nothing was written"
+    )))
+}
 
 impl Application {
     /// Create one primitive solid body and commit it as an `AcDb3dSolid` row.
