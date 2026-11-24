@@ -53,6 +53,7 @@ use cad_platform::{
     ConfigLoad, ConfigStore, FileTarget, HostCapabilities, PlatformFiles, SavePurpose,
     SurfaceMetrics, SurfaceSource,
 };
+mod aliases;
 mod bim;
 mod command_log;
 mod command_log_echo;
@@ -226,6 +227,7 @@ impl HostCore {
             wgpu_backend: Rc::new(RefCell::new(None)),
             root_preferences: Rc::new(RefCell::new(settings_root::RootPreferences::default())),
             recent_files: Rc::new(RefCell::new(Vec::new())),
+            command_aliases: Rc::new(RefCell::new(std::collections::BTreeMap::new())),
             queue: Rc::new(RequestQueue::new()),
             request_waker: Rc::new(RefCell::new(None)),
             document_epoch: Rc::new(Cell::new(0)),
@@ -854,13 +856,20 @@ impl HostCore {
                 // is captured before the strict allowed-path projection strips
                 // it, so the list survives every later preference write.
                 *self.recent_files.borrow_mut() = recent::recent_files_from_preference(&text);
+                // The runtime alias set is the same kind of root user data: the
+                // session validates each row against its command table when it
+                // seeds its override layer.
+                *self.command_aliases.borrow_mut() =
+                    aliases::command_aliases_from_preference(&text)
+                        .into_iter()
+                        .collect();
                 // The document is already durable: a store that cannot
                 // *re-persist* its normalized projection must not make the
                 // loaded values disappear (`load_user_preference` applies them
                 // in memory; only runtime writes demand durability).
                 match self.load_user_preference(&recent::without_recent_files(
-                    &settings_root::without_root_preferences(&settings::without_wgpu_backend(
-                        &text,
+                    &aliases::without_command_aliases(&settings_root::without_root_preferences(
+                        &settings::without_wgpu_backend(&text),
                     )),
                 )) {
                     Ok(()) => {
@@ -914,6 +923,10 @@ impl HostCore {
         )?;
         let merged =
             recent::merge_recent_files_into_preference(&merged, &self.recent_files.borrow())?;
+        let merged = aliases::merge_command_aliases_into_preference(
+            &merged,
+            &self.command_aliases.borrow(),
+        )?;
         self.config_store.persist_preference(&merged)
     }
 

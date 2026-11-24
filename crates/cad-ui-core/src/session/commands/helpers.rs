@@ -216,8 +216,9 @@ pub const REDEFINE_SELECTOR: &str = "REDEFINE";
 /// read-only `AliasEdit` report). `CadSession` intercepts the typed forms
 /// `ALIASEDIT ADD <alias> <target>`, `ALIASEDIT REMOVE <alias>` and
 /// `ALIASEDIT LIST` (bare `ALIASEDIT` is `LIST`) before the `CommandId` dispatch,
-/// because the runtime rows are session state the application layer does not
-/// hold. Session-only: no `acad.pgp` file is read or written.
+/// because the runtime rows live in the session's resolution layer. `ADD` and
+/// `REMOVE` persist the validated set through the host's root `commandAliases`
+/// preference (no `acad.pgp` file is read or written).
 pub const ALIASEDIT_SELECTOR: &str = "ALIASEDIT";
 
 /// The selectors that exist only in the session's own resolution layer.

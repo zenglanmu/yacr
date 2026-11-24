@@ -20,11 +20,12 @@
 //! canonicalise onto a `COMMAND_TABLE` name, to be unique, and to collide with no
 //! canonical name.
 //!
-//! Runtime aliases are **session state**, not rows here: `CadSession` owns the
+//! Runtime aliases are **not rows here**: `CadSession` owns the
 //! `ALIASEDIT ADD|REMOVE|LIST` command-line forms (`crates/cad-ui-core`), which
-//! shadow these rows and the canonical selectors for the lifetime of the session
-//! and are never written back to a file. `ALIASEDIT`'s payload-path report below
-//! therefore still describes this build table only.
+//! shadow these rows and the canonical selectors and are persisted through the
+//! host's root `commandAliases` preference (never an `acad.pgp` file).
+//! `ALIASEDIT`'s payload-path report below therefore describes this build table
+//! only; the live runtime rows are the session's own validated set.
 //!
 //! There is no `SNAP` alias row. AutoCAD's `SNAP` is **grid snap** (F9), a real
 //! selector of its own (`CommandId::ToggleSnapGrid`, with the `SNAPUNIT` spacing

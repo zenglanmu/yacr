@@ -552,6 +552,14 @@ pub const SETVAR_SELECTOR: &str = "SETVAR";
 /// `SYSVARMONITOR ADD|REMOVE|LIST <name>`: the session watch set.
 pub const SYSVARMONITOR_SELECTOR: &str = "SYSVARMONITOR";
 
+/// `JULIAN [<date>]`: the current UTC Julian day, or one typed calendar date.
+///
+/// The bare selector is the read-only "now" report; the argument form
+/// (`YYYY-MM-DD` / `YYYY/MM/DD` with an optional `[T ]HH:MM[:SS]`) is parsed and
+/// validated by `cad-app` (the one authority for the date grammar), so the same
+/// typed line works on every carrier instead of adding a second parser here.
+pub const JULIAN_SELECTOR: &str = "JULIAN";
+
 /// `SCALELISTEDIT [ADD|RENAME|DELETE|?]`: the drawing's annotation-scale table.
 pub const SCALELIST_SELECTOR: &str = "SCALELISTEDIT";
 

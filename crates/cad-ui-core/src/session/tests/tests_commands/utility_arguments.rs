@@ -205,3 +205,34 @@ fn sysvarmonitor_typed_forms_add_remove_and_list_one_or_all() {
     let error = session.command("SYSVARMONITOR ADD NOT_A_VAR").unwrap_err();
     assert!(error.contains("sysvarmonitor.unknown_variable"), "{error}");
 }
+
+#[test]
+fn julian_typed_date_routes_to_the_report_and_refuses_impossible_dates() {
+    let session = fresh_session();
+    session
+        .command("JULIAN 2000-01-01T12:00:00")
+        .expect("a real date is admitted");
+    session
+        .command("JULIAN 2026/11/24")
+        .expect("the slash spelling is admitted");
+    let echoed = session
+        .snapshot(None, None, 0)
+        .command_log
+        .iter()
+        .filter(|entry| entry.command.as_deref() == Some("JULIAN"))
+        .count();
+    assert_eq!(echoed, 2, "each typed line echoes the canonical selector");
+
+    for line in [
+        "JULIAN 2026-02-30",
+        "JULIAN 2026-13-01",
+        "JULIAN 2026-01-01T24:00",
+        "JULIAN not-a-date",
+    ] {
+        let error = session.command(line).unwrap_err();
+        assert!(
+            error.contains("julian.invalid_date"),
+            "{line}: expected a named refusal, got {error}"
+        );
+    }
+}

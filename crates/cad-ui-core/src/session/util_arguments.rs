@@ -21,8 +21,8 @@ use super::commands::{
     invalid_rename_argument_reason, invalid_setvar_value_reason,
     invalid_sysvarmonitor_argument_reason, parse_mredo_argument, parse_multiple_argument,
     parse_purge_argument, parse_rename_argument, parse_setvar_argument, parse_sysvar_toggle,
-    parse_sysvarmonitor_argument, MREDO_SELECTOR, MULTIPLE_SELECTOR, PURGE_SELECTOR,
-    RENAME_SELECTOR, SETVAR_SELECTOR, SYSVARMONITOR_SELECTOR,
+    parse_sysvarmonitor_argument, JULIAN_SELECTOR, MREDO_SELECTOR, MULTIPLE_SELECTOR,
+    PURGE_SELECTOR, RENAME_SELECTOR, SETVAR_SELECTOR, SYSVARMONITOR_SELECTOR,
 };
 use super::shell_settings::parse_display_mask;
 use super::CadSession;
@@ -85,6 +85,7 @@ impl CadSession {
             MREDO_SELECTOR => self.mredo_argument(argument, text),
             MULTIPLE_SELECTOR => self.multiple_argument(argument, text),
             SYSVARMONITOR_SELECTOR => self.sysvarmonitor_argument(argument, text),
+            JULIAN_SELECTOR => self.julian_argument(argument, text),
             _ => self.refuse_argument(format!("unsupported utility selector: {selector}")),
         }
     }
@@ -152,6 +153,19 @@ impl CadSession {
             SYSVARMONITOR_SELECTOR,
             CommandId::Extended(cad_app::ExtendedCommandId::SysVarMonitor),
             CommandPayload::SysVarMonitor(action),
+        )
+    }
+
+    /// `JULIAN <date>`: the calendar-to-Julian report.
+    ///
+    /// The date grammar is validated by `cad-app` (the one authority), so this
+    /// method only carries the trimmed argument; an impossible date comes back
+    /// as the stable `julian.invalid_date` refusal, recorded on the session.
+    fn julian_argument(&self, argument: &str, _text: &str) -> Result<(), String> {
+        self.dispatch_typed_argument(
+            JULIAN_SELECTOR,
+            CommandId::Extended(cad_app::ExtendedCommandId::JulianDate),
+            CommandPayload::JulianDate(argument.trim().to_string()),
         )
     }
 

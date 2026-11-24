@@ -7,7 +7,7 @@
 use super::*;
 use crate::selection::model_ref;
 
-use cad_db::{BlockDefinition, DbEntity, DbObject, DrawingDatabaseBuilder, Layer};
+use cad_db::{BlockDefinition, DbEntity, DbObject, DrawingDatabaseBuilder, Layer, Layout};
 
 fn line(id: u128, space: SpaceId, order: i64) -> DbEntity {
     DbEntity {
@@ -159,12 +159,160 @@ fn bcount_groups_model_space_inserts_by_block_name() {
         summary.message
     );
     assert!(
-        summary.message.contains("whole model space"),
-        "the divergence is declared: {}",
+        summary.message.contains("whole drawing"),
+        "the whole-drawing scope is named: {}",
+        summary.message
+    );
+    assert!(
+        summary.message.contains("paper space"),
+        "paper space is part of the scope: {}",
         summary.message
     );
     assert_eq!(revision(&app), before, "BCOUNT writes no drawing");
     assert!(!app.can_undo(&DocumentId(1)));
+}
+
+/// A drawing with one model INSERT, one INSERT in each of two paper layouts,
+/// and one nested INSERT inside `TABLE`'s definition.
+fn app_with_paper_and_nested() -> (Application, SessionState) {
+    let (mut app, session) = application_with_document();
+    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
+    builder
+        .insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+    let mut nested = insert(20, BlockId(1), 0);
+    nested.space = SpaceId::Block(BlockId(2));
+    builder.insert_entity(nested).unwrap();
+    for (id, name) in [(BlockId(1), "CHAIR"), (BlockId(2), "TABLE")] {
+        builder
+            .insert_block(BlockDefinition {
+                id,
+                entities: if id == BlockId(2) {
+                    vec![EntityId(20)]
+                } else {
+                    Vec::new()
+                },
+                dynamic_visibility: None,
+            })
+            .unwrap();
+        builder
+            .set_block_metadata(
+                id,
+                name,
+                Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            )
+            .unwrap();
+    }
+    for (id, name) in [(LayoutId(7), "Sheet1"), (LayoutId(8), "Sheet2")] {
+        builder
+            .insert_layout(Layout {
+                id,
+                name: name.into(),
+                viewports: Vec::new(),
+            })
+            .unwrap();
+    }
+    let mut model_insert = insert(1, BlockId(2), 1);
+    model_insert.space = SpaceId::Model;
+    builder.insert_entity(model_insert).unwrap();
+    let mut first_paper = insert(2, BlockId(1), 2);
+    first_paper.space = SpaceId::Paper(LayoutId(7));
+    builder.insert_entity(first_paper).unwrap();
+    let mut second_paper = insert(3, BlockId(2), 3);
+    second_paper.space = SpaceId::Paper(LayoutId(8));
+    builder.insert_entity(second_paper).unwrap();
+    app.workspace
+        .documents
+        .get_mut(&DocumentId(1))
+        .unwrap()
+        .drawing = Arc::new(builder.finish().unwrap());
+    (app, session)
+}
+
+#[test]
+fn bcount_counts_paper_space_and_names_nested_references() {
+    let (mut app, mut session) = app_with_paper_and_nested();
+    let before = revision(&app);
+    let outcome =
+        execute(&mut app, &mut session, ExtendedCommandId::BlockCount).expect("BCOUNT is admitted");
+    let mut rows: Vec<(&str, &str)> = outcome
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "bcount.block")
+        .map(|diagnostic| {
+            let (name, count) = diagnostic
+                .message
+                .split_once(" instances=")
+                .expect("block row carries a count");
+            (name, count)
+        })
+        .collect();
+    rows.sort();
+    assert_eq!(
+        rows,
+        vec![
+            ("BCOUNT: block 'CHAIR'", "1"),
+            ("BCOUNT: block 'TABLE'", "2")
+        ],
+        "model space and both paper layouts are counted"
+    );
+    let summary = report(&outcome, "bcount.summary");
+    assert!(
+        summary.message.contains("3 block instance"),
+        "{}",
+        summary.message
+    );
+    assert!(
+        summary.message.contains("whole drawing"),
+        "{}",
+        summary.message
+    );
+    let nested = report(&outcome, "bcount.nested_not_counted");
+    assert!(
+        nested.message.contains("CHAIR=1"),
+        "the nested reference is named, not silently counted: {}",
+        nested.message
+    );
+    assert_eq!(revision(&app), before, "BCOUNT writes no drawing");
+    assert!(!app.can_undo(&DocumentId(1)));
+}
+
+#[test]
+fn bcount_counts_only_selected_block_references() {
+    let (mut app, mut session) = app_with_blocks();
+    session.selection = SelectionSet::from_refs([
+        model_ref(DocumentId(1), EntityId(1)),
+        model_ref(DocumentId(1), EntityId(4)),
+    ]);
+    let outcome =
+        execute(&mut app, &mut session, ExtendedCommandId::BlockCount).expect("BCOUNT is admitted");
+    let summary = report(&outcome, "bcount.summary");
+    assert!(
+        summary.message.contains("current selection"),
+        "{}",
+        summary.message
+    );
+    assert!(
+        summary.message.contains("1 block instance"),
+        "{}",
+        summary.message
+    );
+    assert!(report(&outcome, "bcount.non_block_ignored")
+        .message
+        .contains("1 selected non-block"));
+    assert_eq!(
+        session.selection.len(),
+        2,
+        "BCOUNT never mutates the selection"
+    );
 }
 
 #[test]
@@ -251,12 +399,61 @@ fn julian_reports_a_day_number_for_the_current_instant() {
     let value = report(&outcome, "julian.value");
     assert!(value.message.contains("integer day"), "{}", value.message);
     assert!(
-        value.message.contains("NOT IMPLEMENTED"),
-        "date arguments are declared partial: {}",
+        value.message.contains("current UTC instant"),
+        "{}",
         value.message
     );
     assert_eq!(revision(&app), before);
     assert!(!app.can_undo(&DocumentId(1)));
+
+    // The typed date form converts a real calendar instant: 2000-01-01 12:00 UT
+    // is the J2000 epoch (2451545.0), and the Unix epoch is 2440587.5.
+    for (date, expected) in [
+        ("2000-01-01T12:00:00", "2451545.000000"),
+        ("1970-01-01", "2440587.500000"),
+        ("2026/11/24", "2461368.500000"),
+    ] {
+        let outcome = app
+            .execute(
+                &mut session,
+                command(
+                    CommandId::Extended(ExtendedCommandId::JulianDate),
+                    CommandPayload::JulianDate(date.into()),
+                ),
+            )
+            .expect("a real date converts");
+        let value = report(&outcome, "julian.value");
+        assert!(
+            value.message.contains(expected),
+            "{date}: expected {expected}, got {}",
+            value.message
+        );
+    }
+    assert_eq!(revision(&app), before);
+
+    // Impossible dates are named refusals; nothing is clamped.
+    for date in [
+        "2026-02-30",
+        "2026-13-01",
+        "2026-01-01T24:00",
+        "not-a-date",
+        "202601",
+    ] {
+        let error = app
+            .execute(
+                &mut session,
+                command(
+                    CommandId::Extended(ExtendedCommandId::JulianDate),
+                    CommandPayload::JulianDate(date.into()),
+                ),
+            )
+            .expect_err("an impossible date is refused");
+        assert!(
+            error.to_string().contains("julian.invalid_date"),
+            "{date}: {error}"
+        );
+    }
+    assert_eq!(revision(&app), before, "refusals write nothing");
 }
 
 #[test]

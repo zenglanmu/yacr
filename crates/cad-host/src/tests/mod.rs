@@ -12,6 +12,7 @@ use cad_platform::{
 };
 use std::collections::BTreeMap;
 
+mod aliases;
 mod api_prompt;
 mod area_object_echo;
 mod bim_edit;

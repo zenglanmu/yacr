@@ -741,10 +741,10 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | TFRAMES | **会话令牌 v1（2026-11-09）**：翻转 `tframes`；会话状态 only，Viewer-legal | 不改变图像/外部参照/文字边框可见性 | 近似实现：仅命令路径/状态 |
 | REGENAUTO | **会话令牌 v1（2026-11-09）**：翻转 `regenauto`；会话状态 only，Viewer-legal | 本构建无自动重生成开关；需显式 `REGEN` | 近似实现：仅命令路径/状态 |
 | ISODRAFT | **会话令牌 v1（2026-11-09）**：翻转 `isodraft`；会话状态 only，Viewer-legal | 不切换等轴测平面或光标、不改变捕捉/正交行为 | 近似实现：仅命令路径/状态 |
-| BCOUNT | **只读报告 v1（2026-11-09）**：统计整个模型空间的 `SemanticGeometry::Insert` 实例，按块名分组，输出 `bcount.block` + `bcount.summary`；无事务/修订/历史，Viewer-legal | 无 AutoCAD 的 `Select objects` 提示（声明为整模型空间）；不展开块成员、不统计图纸空间；不修改图形 | 只读，无写 |
+| BCOUNT | **完整实现（2026-11-24）**：统计整图（模型空间 + 各图纸布局）的 `SemanticGeometry::Insert` 实例，按块名分组，输出 `bcount.block` + `bcount.summary`；选择集非空时只统计所选块参照（`bcount.non_block_ignored`/`bcount.unresolved` 按名报告）；块定义内嵌套参照按 `bcount.nested_not_counted` 列名不计数（与 AutoCAD 的 BCOUNT 限制一致）；无事务/修订/历史，Viewer-legal | 无 AutoCAD 的 `Select objects` 交互提示（ADR 全局范围；宿主选择集已是同一作用域）；不修改图形 | 只读，无写 |
 | COUNT | **只读报告 v1（2026-11-09）**：当前选择非空时按选择统计，否则统计全部模型空间顶层实体；按 `type_key` 分组，输出 `count.type`/`count.summary`；块成员/子元素/失效引用另报 `count.unresolved`；不改选择、无事务/修订/历史，Viewer-legal | 不实现 AutoCAD 的计数高亮/导航面板；不统计块内成员 | 只读，无写 |
 | EDITTIME | **只读报告 v1（2026-11-09）**：当前 UTC 时钟 + 文档 id/修订/实体数（`edittime.report`）；创建/修改时间与会话用时恒 `edittime.not_tracked`；Viewer-legal | 数据库不存时间戳，会话不跟踪 uptime；不伪造日期 | 只读，无写 |
-| JULIAN | **只读报告 v1（2026-11-09）**：当前 UTC 时刻的儒略日（整数日 + 小数，`julian.value`）；Viewer-legal | 不解析日期参数、不做 DATE/CAL 转换；只报"现在" | 只读，无写 |
+| JULIAN | **完整实现（2026-11-24）**：裸命令报当前 UTC 时刻的儒略日（整数日 + 小数，`julian.value`）；`JULIAN <YYYY-MM-DD>`（也接受 `YYYY/MM/DD`，可跟 `[T ]HH:MM[:SS]`）把日历时刻（UTC，前推格里高利历）转换为儒略日；非法/不存在的日期按 `julian.invalid_date` 拒绝，不 clamp；Viewer-legal | 无交互 DATE 窗口；LISP 转换函数（CTOJ/DTOJ/JTOC/JTOD/JTOW）不建模 | 只读，无写 |
 | XLIST | **只读报告 v1（2026-11-09）**：列出 `drawing.blocks()` 的每个块定义与成员数（`xlist.block` + `xlist.summary`）；`xlist.xdata_not_retained` 明说 XDATA 不保留；Viewer-legal | 不是 AutoCAD 的“列出嵌套对象类型/块名/图层/颜色/线型”全格式；不列出 xref 嵌套、不读 XDATA | 只读，无写 |
 | DRAGMODE | **会话令牌 v1（2026-11-09）**：payload-free，翻转 `drafting_extras.dragmode`（默认 ON），`dragmode.toggled`；会话状态 only，无事务/修订/历史，Viewer-legal | 渲染器不消费该标志：本构建无拖动预览，不显示拖动中的图像 | 近似实现：仅命令路径/状态 |
 | APERTURE | **只读报告 v1（2026-11-09）**：报告会话靶框令牌（默认 10），`aperture.value`；Viewer-legal | `APERTURE <n>` 设置形式 **NOT IMPLEMENTED**；不绘制捕捉靶框，也不改变捕捉判定 | 只读，无写 |
@@ -759,7 +759,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | SYSVARMONITOR | **会话监视集（2026-11-12）**：`ADD`/`REMOVE`/`LIST [<name>]`；`LIST`/裸命令对比上次快照，变化报 `sysvarmonitor.changed`，并报 `sysvarmonitor.value`/`.summary`；Viewer-legal | 仅在被查询时检测变化，没有后台通知；闭集之外的变量不建模也不杜撰 | 只有会话状态，无写 |
 | SYSVDLG | **只读报告（2026-11-12）**：列出全部已建模变量当前值（`sysvdlg.value`/`.summary`）+ `sysvdlg.not_tracked` + `sysvdlg.dialog_not_implemented`；Viewer-legal | 本构建无系统变量对话框：不能编辑/保存/恢复，单值读取请用 `SETVAR <name>` | 只读，无写 |
 | VTOPTIONS | **只读报告 v1（2026-11-09）**：`vtoptions.not_tracked` 明说视图过渡设置未建模（代码串按 Wave 2 契约原样保留）；Viewer-legal | 不报告也不杜撰平滑/时长/缩放平移过渡选项 | 只读，无写 |
-| ALIASEDIT | **只读报告 v1（2026-11-09）**：逐行列出规范 `COMMAND_ALIASES`（`aliasedit.alias`）+ `aliasedit.summary`；表本身在 `cad-app::command_aliases`，`cad-ui-core` 重导出同一份；Viewer-legal | 创建/修改/删除别名 **NOT IMPLEMENTED**（无 `acad.pgp` 解析、无用户别名存储） | 只读，无写 |
+| ALIASEDIT | **完整实现（2026-11-24）**：`ADD <alias> <target>`/`REMOVE <alias>`/`LIST`/bare；运行时别名先于静态表解析并遮蔽内建，仅删除运行时行；`ADD`/`REMOVE` 经宿主 `preference.json` 根键 `commandAliases` 持久化并在新会话恢复；写入失败按 `aliasedit.not_persisted` 回滚；目标失效/冲突的持久行启动时按名丢弃并记诊断 | 无交互对话框（ADR 全局范围）；不解析 `acad.pgp` 文件 | 写宿主偏好（不是绘图）；`LIST`/裸命令只读 |
 | WHOHAS | **只读报告 v1（2026-11-09）**：`whohas.single_document`；Viewer-legal | 单文档构建：无网络查询，无法列出其他用户、其他打开文档或文件锁 | 只读，无写 |
 | ACADINFO | **只读报告 v1（2026-11-09）**：产品版本（`CARGO_PKG_VERSION`）+ debug/release 构建配置 + 文档修订/实体数（`acadinfo.report`）；`acadinfo.not_collected` 明说许可证/硬件/模块数据不收集；Viewer-legal | 不写文件、不导出安装信息；没有的数据一律不杜撰 | 只读，无写 |
 | PTYPE | **只读报告 v1（2026-11-09）**：报告 `$PDMODE`/`$PDSIZE`（`ptype.report`）；Viewer-legal | 写入仍只走现有 `PDMODE`/`PDSIZE`；PTYPE 对话框形式 **NOT IMPLEMENTED** | 只读，无写 |
@@ -960,7 +960,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `RENAME` / `-RENAME` | 完整实现 | `RENAME <kind> <old> <new>`：`LAYER`/`STYLE`/`DIMSTYLE`/`MLEADERSTYLE`/`BLOCK`/`LINETYPE` 真实写，一条表补丁/一步撤销；`LINETYPE` 改名在 `cad-db` 单次校验写入内把层属性与实体属性的引用一并级联（一次 revision、一次 `ChangeSet`），撤销/重做对称 | 创建/删除线型仍不支持（`linetype.delete_unsupported`）；`Continuous` 不可改名；无对话框 |
 | `SETVAR` | 完整实现 | `SETVAR <name>` 报告、`SETVAR <name> <value>` 写，闭集 **13 个**：`PDMODE/PDSIZE/SNAPUNIT/LTSCALE/GRID/SNAP/ORTHO/TEXTSIZE/WIPEOUTFRAME/CVPORT/INSBASE/LIMMIN/LIMMAX`，全部复用各自命令（`CVPORT` 纯会话、不写库；`INSBASE`/`LIMIN*` 经 `BASE`/`LIMITS`） | 未知名 `setvar.unknown_variable`；已建模但无值 `setvar.not_stored`（不编造默认值）；`LIMMIN`/`LIMMAX` 另一角未存时 `limits.other_corner_unset` |
 | `TIME` | 部分实现 | 只读报告：文档 revision/实体数 + UTC 时钟 | 创建/编辑时间、会话 uptime、本地时区格式显式 NOT TRACKED；不发明日期 |
-| `DBLIST` | 部分实现 | 只读列出所有顶层模型/图纸实体（id/type/layer/space/draw order） | 块定义成员只计数并跳过；无分页/过滤对话框 |
+| `DBLIST` | 完整实现 | 只读列出模型空间、各图纸布局与各块定义内的全部实体（id/handle/type/layer/space/draw order）；块成员单独成行（`dblist.block_object`，`Block(<name>)`）；XDATA/扩展字典/字典/代理对象按 `dblist.not_modelled` 命名 | 无分页/过滤对话框（ADR 全局范围） |
 | `TREESTAT` | 部分实现 | 只读；显式 `treestat.not_tracked` | 本构建不保留可查询的持久空间索引，不造假计数 |
 | `MREDO` | 部分实现 | 重做 N 步（默认 1），每步一条既有 `Redo` 历史移动；空栈拒绝；不足时 `mredo.partial` | 不合并历史粒度；不新增 redo 栈 |
 | `MULTIPLE` | 部分实现 | 设置会话 `MultipleRepeat` 标志（下一次命令或指定命令） | 本宿主没有命令重复循环，实际重复按 `multiple.repeat_not_implemented` 具名拒绝，绝不假装已重复 |
@@ -1897,8 +1897,8 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 
 | 命令 | 结果 | 明示未实现 / 证据边界 |
 | --- | --- | --- |
-| `PAGESETUP` | **部分实现**：只读报告每个布局的入库 `PLOTSETTINGS`（纸张/旋转/比例/出图类型/provenance）；修改未实现（`pagesetup.report_only`）。 | 不写库/不升修订/不入历史（报告类只读） |
-| `-PAGESETUP` | **部分实现**：同一只读页面设置报告的命令行拼写。 | 不写库/不升修订/不入历史（报告类只读） |
+| `PAGESETUP` | **完整实现**：裸命令只读报告每个布局的入库 `PLOTSETTINGS`（纸张/旋转/比例/出图类型/provenance）；typed 形式写入 Authored 记录，未知布局/空纸名/非正尺寸/非正比例在写前按名拒绝，一条事务/一步撤销。 | 绘图仪/CTB/STB 属 ADR 全局范围；报告形式无写 |
+| `-PAGESETUP` | **完整实现**：同一报告与 typed 写入的命令行拼写。 | 绘图仪/CTB/STB 属 ADR 全局范围；报告形式无写 |
 | `PSETUPIN` | **部分实现**：具名拒绝（`psetupin.unsupported`）：从其他图纸导入页面设置未实现。 | 不写库/不升修订/不入历史（报告类只读） |
 | `-PSETUPIN` | 完整实现 | `PAGESETUPIN` 的命令行拼写：同一实现臂（`page_setup_write`），一次 revision 复制源记录的纸张/尺寸/比例/旋转 | 跨文件导入（`PSETUPIN` 的文件形式）未建模；无对话框 |
 | `PLOTSTYLE` | **部分实现**：具名拒绝（`plotstyle.unsupported`）：命名打印样式未实现（无 CTB/STB 表）。 | 不写库/不升修订/不入历史（报告类只读） |
@@ -2281,7 +2281,7 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 | `VPORTS` / `-VPORTS` | 活动布局创建简单 rows×cols 网格（四角 clip、`model_per_paper=1`），一步撤销 | 命名/标准视口配置未实现 |
 | `VPCLIP RECT` | 对活动布局第一个视口应用矩形裁剪，一步撤销 | 无视口选择；多边形裁剪未实现 |
 | `VPSCALE` | 设置活动布局第一个视口比例（对角线 `1/factor`，保留模型锚点），一步撤销 | 无视口选择 |
-| `PAGESETUP` / `-PAGESETUP` | 裸命令只读报告；typed 形式写入 Authored `PLOTSETTINGS`（纸张/比例/旋转），一步撤销 | 无绘图仪/CTB/STB |
+| `PAGESETUP` / `-PAGESETUP` | **完整实现**：裸命令只读报告；typed 形式写入 Authored `PLOTSETTINGS`（纸张/比例/旋转），非法布局/纸名/尺寸/比例在写前按名拒绝，一步撤销 | 绘图仪/CTB/STB 属 ADR 全局范围 |
 | `PSETUPIN` / `-PSETUPIN` | 同图纸内复制已存 `PLOTSETTINGS` 到目标布局，一步撤销 | 跨文件导入未实现；无源记录拒绝 |
 | `MVIEW` | 活动图纸空间创建矩形视口，一步撤销 | 无多边形/非矩形；无视口选择 |
 | `VPMAX` / `VPMIN` | 会话标记（不变） | 仅第一个视口 |
@@ -2384,7 +2384,7 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 | `CLASSICIMAGE` | 部分实现 | chrome 面板只读列出 IMAGE 实体（id/空间/file key/pixels/可见/clip 摘要） | attach/clip/adjust 是独立命令；面板不写库 |
 | `REDEFINE` | **完整实现** | 重新启用被 `UNDEFINE` 禁用的内建命令；essential 双向拒绝 | 会话状态；不持久化 DWG |
 | `UNDEFINE` | **完整实现** | 会话内禁用内建命令；`command.undefined: <NAME>`；别名指向禁用目标亦禁用 | 会话状态；不持久化 DWG |
-| `ALIASEDIT` | 部分实现 | `ADD`/`REMOVE`/`LIST`；运行时别名先于静态表解析并遮蔽内建；仅删除运行时行 | 无交互对话框；会话状态不持久化；原生宿主同一 pre-tick 批次内新增并使用需等下一 tick |
+| `ALIASEDIT` | **完整实现** | `ADD`/`REMOVE`/`LIST`；运行时别名先于静态表解析并遮蔽内建；仅删除运行时行；`ADD`/`REMOVE` 持久化到宿主 `preference.json` 根键 `commandAliases` 并在新会话恢复，写入失败回滚 | 无交互对话框（ADR 全局范围）；不解析 `acad.pgp` 文件；原生宿主同一 pre-tick 批次内新增并使用需等下一 tick |
 ## Wave 27 边界更新（2026-11-12）
 
 > 以下条目**取代正文中同名命令的旧界**。证据仅 Linux 编译 + Rust 契约测试 + React 单测；

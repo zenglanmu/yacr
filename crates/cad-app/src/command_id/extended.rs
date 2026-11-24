@@ -66,7 +66,8 @@ pub enum ExtendedCommandId {
     /// `VTOPTIONS`: view-transition settings are not tracked.
     ViewTransitionOptions,
     /// `ALIASEDIT`: read-only list of the build's canonical alias table (runtime
-    /// editing is the session-only `ALIASEDIT ADD|REMOVE|LIST` command line).
+    /// editing is the session `ALIASEDIT ADD|REMOVE|LIST` command line, persisted
+    /// through the host's root `commandAliases` preference).
     AliasEdit,
     /// `WHOHAS`: single-document build report.
     WhoHas,
