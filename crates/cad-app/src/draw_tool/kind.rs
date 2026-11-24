@@ -6,6 +6,7 @@
 //! so `crate::draw_tool::DrawToolKind`, `crate::draw_tool::PointArity` and the
 //! crate-root re-exports are unchanged.
 
+mod command;
 mod definition;
 
 /// How many points a capture needs: a fixed complement, or an open-ended

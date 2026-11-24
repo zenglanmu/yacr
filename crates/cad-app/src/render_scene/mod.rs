@@ -36,6 +36,8 @@ pub use settings::DisplaySettings;
 mod attribute_edit_tests;
 #[cfg(test)]
 mod display_mode_tests;
+#[cfg(test)]
+mod tframes_tests;
 mod update;
 #[cfg(test)]
 mod update_tests;
@@ -43,10 +45,9 @@ mod update_tests;
 mod vendor_tests;
 #[cfg(test)]
 mod wipeout_tests;
+use entity_index::EntityBatchIndex;
 pub use overlay::*;
 pub use resident::ResidentScene;
-
-use entity_index::EntityBatchIndex;
 
 /// Decoded raster-image cache fed to the base scene build, re-exported so the UI
 /// bridge can name the type carried by [`PreparedScene::images`].

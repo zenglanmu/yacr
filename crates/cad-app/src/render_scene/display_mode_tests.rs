@@ -276,6 +276,7 @@ fn display_settings_batch_is_one_rebuild_and_a_repeat_is_a_no_op() {
 
     let changed = DisplaySettings {
         wipeout_frames: false,
+        frames_visible: false,
         fill: false,
         qtext: true,
         attdisp: cad_representation::AttributeDisplay::Off,

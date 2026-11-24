@@ -84,6 +84,7 @@ mod extend_spline;
 mod explode;
 mod extras_batch;
 mod find_text;
+mod find_xref;
 mod grip;
 mod hatch;
 mod hatch_boundary;

@@ -40,10 +40,12 @@
 //! * **MREDO** applies independent existing redo records (`CommandId::Redo`), one
 //!   history move per step. It refuses an empty redo stack and reports a partial
 //!   run when fewer steps are available than requested.
-//! * **MULTIPLE** records the session repeat flag. This host has no command
-//!   repeat loop, so the arming succeeds and the actual repetition is reported as
-//!   `multiple.repeat_not_implemented`; the command never claims it repeated
-//!   anything.
+//! * **MULTIPLE** arms the bounded repeat loop. The armed interactive
+//!   draw/edit capture command repeats through the one confirmation funnel
+//!   (`HostController::confirm_draw`) until `Esc`/`CANCEL`, a failed re-start or
+//!   the `MULTIPLE_MAX_REPEATS` guard. A one-shot command is refused by name
+//!   (`multiple.not_repeatable`) without arming; the command never claims a
+//!   repetition it did not perform.
 //!
 //! `RENAME LAYER` reuses the ordinary `RENAMELAYER` command, so it records the
 //! same one-step layer patch; `PURGE` still publishes its layer deletes without
@@ -338,6 +340,13 @@ impl Application {
     /// The flag is real session state, but this host has no command repeat loop.
     /// The command therefore reports both the arming and the named boundary; it
     /// never claims that anything was repeated.
+    /// `MULTIPLE [command]`: arm the bounded capture repeat loop.
+    ///
+    /// The armed command repeats through the one capture-confirm funnel
+    /// ([`crate::host::HostController::confirm_draw`]) until `Esc`/`CANCEL`, a
+    /// failed re-start or [`crate::MULTIPLE_MAX_REPEATS`]. Only an interactive
+    /// draw/edit capture command can repeat; a one-shot command is refused by
+    /// name **without arming** (the previous arm, if any, is unchanged).
     fn multiple(
         &mut self,
         session: &mut SessionState,
@@ -352,29 +361,34 @@ impl Application {
                 ))
             }
         };
-        session.arm_multiple(target.clone());
-        let label = target.as_deref().unwrap_or("<the next command>");
+        if let Some(target) = &target {
+            if !crate::DrawToolKind::is_capture_command(target.command) {
+                return Err(CadError::Unsupported(format!(
+                    "multiple.not_repeatable: '{}' does not start an interactive draw/edit \
+                     capture, so this build cannot repeat it until canceled; nothing was armed",
+                    target.selector
+                )));
+            }
+            session.arm_multiple(Some(target.command));
+        } else {
+            session.arm_multiple(None);
+        }
+        let label = target
+            .as_ref()
+            .map(|target| target.selector.as_str())
+            .unwrap_or("the next draw/edit capture command");
         Ok(CommandOutcome {
             objects: Vec::new(),
             changes: None,
-            diagnostics: vec![
-                Diagnostic {
-                    object: None,
-                    code: "multiple.armed".into(),
-                    message: format!(
-                        "MULTIPLE: session repeat flag armed for {label}; this is session state \
-                         only"
-                    ),
-                },
-                Diagnostic {
-                    object: None,
-                    code: "multiple.repeat_not_implemented".into(),
-                    message: "MULTIPLE: this host has no command repeat loop, so no command was \
-                              repeated; a caller must implement the loop before repetition is \
-                              available"
-                        .into(),
-                },
-            ],
+            diagnostics: vec![Diagnostic {
+                object: None,
+                code: "multiple.armed".into(),
+                message: format!(
+                    "MULTIPLE: {label} repeats after each successful confirm until CANCEL/Esc (or \
+                     the {limit}-repetition guard); session state only, nothing was written",
+                    limit = crate::MULTIPLE_MAX_REPEATS
+                ),
+            }],
             measurement: None,
             point_report: None,
         })

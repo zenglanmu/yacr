@@ -20,6 +20,10 @@ pub(crate) fn display_settings(
             session.drafting_extras.wipeout_frames(),
             cad_app::WipeoutFrames::On | cad_app::WipeoutFrames::DisplayNotPlot
         ),
+        // `TFRAMES` is the global frame gate: ON shows the image frames and the
+        // WIPEOUT frames their own token allows, OFF hides both. It is session
+        // state only, never a `cad-db` write or a plot setting.
+        frames_visible: session.drafting_extras.tframes(),
         fill: session.drafting_extras.fill(),
         qtext: session.drafting_extras.qtext(),
         // The session `ATTDISP` token is a single ON/OFF bool in this build; it

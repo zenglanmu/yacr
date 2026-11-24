@@ -738,7 +738,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 
 | QTEXT | **完整实现（2026-11-16）**：`QTEXT` payload-free，翻转会话令牌；`qtext` 经 `DisplaySettings` → `RepresentationContext::qtext` 到达派生批次，字形片段被替换为按其本应绘制几何 bbox 的闭合 `Lines` 矩形；会话状态 only，无事务/修订/历史，Viewer-legal | 无法推导范围的文字保留原绘制并报 `qtext.extent_unknown`（不编造宽度）；出图与显示共用同一上下文；无像素证据 |
 | FILL | **完整实现（2026-11-16）**：翻转 `fill`（默认 ON），经 `DisplaySettings` → `RepresentationContext::fill` 到达派生批次；`FILL OFF` 时 HATCH 画边界环、`AcDbSolid` 画奇偶边界边、宽折线画闭合偏移轮廓；矢量出图同路径 | 声明不切换：裸内核/B-rep 网格、标注箭头、WIPEOUT 遮罩（自有令牌）、图像；会话状态 only，无库写/无撤销；无像素证据 |
-| TFRAMES | **会话令牌 v1（2026-11-09）**：翻转 `tframes`；会话状态 only，Viewer-legal | 不改变图像/外部参照/文字边框可见性 | 近似实现：仅命令路径/状态 |
+| TFRAMES | **完整实现（2026-11-24）**：翻转会话 `tframes`（默认 ON），经 `DisplaySettings::frames_visible` → `RepresentationContext::image_frames`（图像边框）与 `wipeout_frames && frames_visible`（遮罩边框）到达派生批次；ON 显示光栅图像边框并按 `WIPEOUTFRAME` 显示遮罩边框，OFF 同时隐藏两者而 WIPEOUT 仍遮罩、图像仍绘制纹理；翻转在 `SceneVersion` 内，基场景重建一次；会话状态 only，无库写/修订/历史，Viewer-legal | 外部参照边框**未建模**（xref 是展开的块几何，无 XCLIPFRAME/边框实体可切换），命令按名声明；无纹理的图像仍保留占位边框与 `image.*` 诊断；出图不跟随该显示令牌（出图各自解析边框）；无 GPU/像素证据 |
 | REGENAUTO | **会话令牌 v1（2026-11-09）**：翻转 `regenauto`；会话状态 only，Viewer-legal | 本构建无自动重生成开关；需显式 `REGEN` | 近似实现：仅命令路径/状态 |
 | ISODRAFT | **会话令牌 v1（2026-11-09）**：翻转 `isodraft`；会话状态 only，Viewer-legal | 不切换等轴测平面或光标、不改变捕捉/正交行为 | 近似实现：仅命令路径/状态 |
 | BCOUNT | **完整实现（2026-11-24）**：统计整图（模型空间 + 各图纸布局）的 `SemanticGeometry::Insert` 实例，按块名分组，输出 `bcount.block` + `bcount.summary`；选择集非空时只统计所选块参照（`bcount.non_block_ignored`/`bcount.unresolved` 按名报告）；块定义内嵌套参照按 `bcount.nested_not_counted` 列名不计数（与 AutoCAD 的 BCOUNT 限制一致）；无事务/修订/历史，Viewer-legal | 无 AutoCAD 的 `Select objects` 交互提示（ADR 全局范围；宿主选择集已是同一作用域）；不修改图形 | 只读，无写 |
@@ -753,7 +753,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | TRAYSETTINGS | **完整实现（2026-11-24）**：翻转会话 `traysettings`（默认 ON），经 `cad_status.traySettings` 投影；状态栏托盘（右侧图标/通知簇）跟随该旗标显示/隐藏，托盘设置面的唯一开关即该旗标；紧凑布局无状态栏时键入按名拒绝（`traysettings.refusal.no_status_bar`）；Viewer-legal，无库写/修订/历史 | 声明的偏差：本构建的托盘只含自己的状态栏右侧控件簇，不模拟 AutoCAD 的托盘图标清单；无 GUI/像素证据 |
 | TEXTSCR | **完整实现（2026-11-24）**：置会话文本屏幕旗标（`cad_status.textScreen`），共享 chrome 的文本屏幕窗口随之显示本次会话的命令历史；正文复用命令行历史的同一折叠与序列化（`commandWindowRows` + `commandWindowText`），**无第二套历史模型**；`GRAPHSCR`/Esc 经 router 回写旗标；Viewer-legal，无库写/修订/历史 | 无历史通道时显式说明（`textscreen.unavailable`）而不是空窗；窗口/像素证据 NOT VERIFIED |
 | GRAPHSCR | **完整实现（2026-11-24）**：清除会话文本屏幕旗标（`cad_status.textScreen`），共享 chrome 的同一文本屏幕窗口关闭并返回图形；Viewer-legal，无库写/修订/历史 | 与 TEXTSCR 共用同一窗口与旗标（无第二套状态）；窗口/像素证据 NOT VERIFIED |
-| FINDINCLUDE | **会话令牌 v1（2026-11-09）**：翻转 `find_include`（默认 ON），`findinclude.toggled`；Viewer-legal | 跨块/外部参照文字搜索 **NOT IMPLEMENTED**；`-FIND`/`FIND` 仍只搜顶层模型空间，该标志不改变其范围 | 近似实现：仅命令路径/状态 |
+| FINDINCLUDE | **完整实现（2026-11-24）**：会话令牌 `find_include`（默认 ON）是 `-FIND`/`FIND` 的块通道开关；ON 搜索块定义与**已加载**外部参照物化出的块（按 `external reference 'NAME'` 标注），OFF 只搜索模型空间与各图纸布局，并在 `find.result` 写明 `block-definition and external-reference text excluded by FINDINCLUDE OFF`；未加载/无块的参照无论令牌如何都以 `'NAME' (missing|refused-path|...)` 列为「content not attached」；Viewer-legal，无库写/修订/历史 | 声明边界：外部参照自身文件不做跨文件解析（只搜索导入已物化的内容）；无 GUI/像素证据 |
 | FINDMATCH | **完整实现（2026-11-24）**：翻转会话 `find_match_case`（默认 OFF），`-FIND`/`FIND` 的**报告与替换共用**该标志：ON 按精确字节（区分大小写），OFF 按 ASCII 不区分大小写；覆盖 MTEXT（按投影文本）、单行 TEXT、MULTILEADER 与表格单元格；Viewer-legal，无库写/修订/历史 | 比较是字面子串：无正则、无 Unicode 折叠/排序规则（ASCII 大小写是声明的唯一折叠）；无 GUI/像素证据 |
 | REVCLOUDPROPERTIES | **只读报告 v1（2026-11-09）**：报告会话弧长令牌（默认 15），`revcloud.properties`；Viewer-legal | `REVCLOUDPROPERTIES <length>` 设置形式 **NOT IMPLEMENTED**；`REVCLOUD` 不读取该令牌 | 只读，无写 |
 | SYSVARMONITOR | **会话监视集（2026-11-12）**：`ADD`/`REMOVE`/`LIST [<name>]`；`LIST`/裸命令对比上次快照，变化报 `sysvarmonitor.changed`，并报 `sysvarmonitor.value`/`.summary`；Viewer-legal | 仅在被查询时检测变化，没有后台通知；闭集之外的变量不建模也不杜撰 | 只有会话状态，无写 |
@@ -963,7 +963,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `DBLIST` | 完整实现 | 只读列出模型空间、各图纸布局与各块定义内的全部实体（id/handle/type/layer/space/draw order）；块成员单独成行（`dblist.block_object`，`Block(<name>)`）；XDATA/扩展字典/字典/代理对象按 `dblist.not_modelled` 命名 | 无分页/过滤对话框（ADR 全局范围） |
 | `TREESTAT` | 部分实现 | 只读；显式 `treestat.not_tracked` | 本构建不保留可查询的持久空间索引，不造假计数 |
 | `MREDO` | 部分实现 | 重做 N 步（默认 1），每步一条既有 `Redo` 历史移动；空栈拒绝；不足时 `mredo.partial` | 不合并历史粒度；不新增 redo 栈 |
-| `MULTIPLE` | 部分实现 | 设置会话 `MultipleRepeat` 标志（下一次命令或指定命令） | 本宿主没有命令重复循环，实际重复按 `multiple.repeat_not_implemented` 具名拒绝，绝不假装已重复 |
+| `MULTIPLE` | 完整实现 | 裸命令/`MULTIPLE <捕获命令>` 武装重复：每次成功的绘图/编辑捕获确认后经唯一确认漏斗重开同一捕获（`multiple.repeated`），`Esc`/`CANCEL` 清除武装、重开失败 `multiple.repeat_failed`、512 次守卫 `multiple.repeat_limit`；裸命令首次确认后固定为该命令；会话状态 only，无库写/修订/历史 | 一次性命令与测量工具没有可重开的捕获，按名 `multiple.not_repeatable` 拒绝且不武装（不伪造重复）；交互提示串行化属全局范围 |
 
 #### 2026-11-07 绘制/修改补充批次（10 条）
 

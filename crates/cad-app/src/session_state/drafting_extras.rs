@@ -9,7 +9,7 @@
 //! no database write, revision bump, `cad-history` entry or `ChangeSet`. Most
 //! tokens have no renderer/behaviour consumer, so their handler reports that the
 //! effect is not implemented rather than pretending the drawing changed. Several
-//! do: `FILL`, `QTEXT` and `WIPEOUTFRAME` reach the derived display through
+//! do: `FILL`, `QTEXT`, `TFRAMES`/`WIPEOUTFRAME` reach the derived display through
 //! [`crate::render_scene::DisplaySettings`], `COLOR` reaches every entity the
 //! create funnel inserts, `ELEV` is the elevation that same funnel creates new
 //! entities at (`crate::app_drawing::elevation`), `FSMODE` selects which `FS`
@@ -242,6 +242,16 @@ pub struct DraftingExtras {
     /// `crates/cad-app/src/app_drawing/fs_chain.rs`). Session state only — no
     /// database write, revision bump, history entry or persisted preference.
     fs_mode: bool,
+    /// `TFRAMES`: whether the frames this build models are drawn.
+    ///
+    /// AutoCAD's `TFRAMES` toggles the frames of images, wipeouts and external
+    /// references at once. Consumed by the display build
+    /// (`render_scene::DisplaySettings::frames_visible`): it gates the raster
+    /// image boundary frame and the WIPEOUT boundary frame (the latter still
+    /// follows its own `WIPEOUTFRAME` token when `TFRAMES` is on). External
+    /// reference frames are not modelled — an xref is expanded block geometry,
+    /// not a framed reference — and the command names that boundary. No database
+    /// write, revision, history entry or plot change.
     tframes: bool,
     regenauto: bool,
     isodraft: bool,
@@ -289,9 +299,9 @@ pub struct DraftingExtras {
 impl Default for DraftingExtras {
     fn default() -> Self {
         // AutoCAD's defaults where they are documented: `FILL`, `DRAGMODE`,
-        // `HIGHLIGHTNEW`, `TRAYSETTINGS` and `FINDINCLUDE` start ON, the aperture
-        // is 10, the isometric plane is Left and the revision-cloud arc length is
-        // 15. `QTEXT`/`TFRAMES`/`REGENAUTO`/`ISODRAFT`, the text screen and
+        // `HIGHLIGHTNEW`, `TRAYSETTINGS`, `FINDINCLUDE` and `TFRAMES` start ON,
+        // the aperture is 10, the isometric plane is Left and the revision-cloud
+        // arc length is 15. `QTEXT`/`REGENAUTO`/`ISODRAFT`, the text screen and
         // case-insensitive find start OFF; the Wave 5 `ATTDISP` token starts ON
         // (AutoCAD's default) and the Wave 6 `DWGLOG` token starts OFF. These are
         // session defaults only — nothing here is read from or written to the
@@ -301,7 +311,7 @@ impl Default for DraftingExtras {
             qtext: false,
             fill: true,
             fs_mode: false,
-            tframes: false,
+            tframes: true,
             regenauto: false,
             isodraft: false,
             dragmode: true,

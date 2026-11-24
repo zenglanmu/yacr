@@ -29,7 +29,7 @@ use crate::measure_tool::{MeasurementPreview, MeasurementTool, MeasurementToolKi
 use crate::selection::SelectionSet;
 use crate::tool_state::{DrawCapture, ToolSnapshot, ToolState};
 use crate::view_states::ViewStates;
-use crate::{AppMode, CommandId, ExtendedCommandId};
+use crate::{AppMode, CommandId};
 pub use drafting_extras::{ChamferMethod, DraftingExtras, IsoPlane, WipeoutFrames};
 pub use erase_snapshot::{EraseEntry, EraseSnapshot};
 pub use modify_options::ModifyOptions;
@@ -264,15 +264,19 @@ pub struct SessionState {
     pub sysvar_monitor: SysVarMonitor,
     /// The `MULTIPLE` repeat request, if one is armed.
     ///
-    /// Session state only. This host has no command repeat loop, so the flag is
-    /// recorded and `MULTIPLE` reports the named boundary; no command is
-    /// repeated and nothing is written to the drawing.
+    /// Session state only: the host's capture-confirm funnel reads it and
+    /// re-opens the same draw/edit capture until `Esc`/`CANCEL`, a failure or
+    /// [`crate::MULTIPLE_MAX_REPEATS`]. Nothing is written to the drawing.
     pub(crate) multiple: Option<MultipleRepeat>,
+    /// Repetitions already run by the current `MULTIPLE` arm (the bounded-loop
+    /// counter; reset by arming and by clearing).
+    pub(crate) multiple_repeats: u32,
 }
 
-// `MultipleRepeat` and its accessors live in `session_multiple` so this file
-// stays inside the code-size ceiling; the public path is re-exported below.
-pub use crate::session_multiple::MultipleRepeat;
+// `MultipleRepeat`/`MultipleTarget` and their accessors live in
+// `session_multiple` so this file stays inside the code-size ceiling; the public
+// paths are re-exported below.
+pub use crate::session_multiple::{MultipleRepeat, MultipleTarget, MULTIPLE_MAX_REPEATS};
 
 /// CAD backend preference shared by UI, app state and hosts (spec §6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -330,6 +334,7 @@ impl SessionState {
             clipboard_base: None,
             last_erase: None,
             multiple: None,
+            multiple_repeats: 0,
             sysvar_monitor: SysVarMonitor::default(),
             ml_styles: crate::MultilineStyleStore::default(),
         }
@@ -584,95 +589,12 @@ impl SessionState {
 
     /// Begin drawing capture and snapshot the current selection identity.
     pub fn begin_draw(&mut self, kind: DrawToolKind) -> CadResult<()> {
-        // The command this capture belongs to. It is recorded on the capture (and
-        // exposed through [`Self::draw_command`]) because a kind is not always one
-        // command: `COPYBASE` and `CUTBASE` share the `CopyBase` capture shape but
-        // differ in authorization (Viewer-legal vs work-only) and in the confirmed
-        // payload (capture only vs capture **and** delete).
-        let command = match kind {
-            DrawToolKind::Line => CommandId::CreateLine,
-            // XLINE/RAY store one finite clipped segment each; the kind is what
-            // distinguishes the two commands (and their stored `type_key`).
-            DrawToolKind::XLine => CommandId::CreateXLine,
-            DrawToolKind::Ray => CommandId::CreateRay,
-            DrawToolKind::Circle => CommandId::CreateCircle,
-            // The three CIRCLE options are their own commands.
-            DrawToolKind::Circle2P => CommandId::CreateCircle2P,
-            DrawToolKind::Circle3P => CommandId::CreateCircle3P,
-            DrawToolKind::CircleDiameter => CommandId::CreateCircleDiameter,
-            DrawToolKind::Arc => CommandId::CreateArc,
-            DrawToolKind::Polyline => CommandId::CreatePolyline,
-            // WIPEOUT stores one `Mask` entity (`AcDbWipeout`).
-            DrawToolKind::Wipeout => CommandId::Wipeout,
-            DrawToolKind::Rectang => CommandId::CreateRectangle,
-            DrawToolKind::Ellipse => CommandId::CreateEllipse,
-            DrawToolKind::Polygon => CommandId::CreatePolygon,
-            // POLYGON CIRCUMSCRIBED is the tangent variant.
-            DrawToolKind::PolygonCircumscribed => CommandId::CreatePolygonCircumscribed,
-            DrawToolKind::Point => CommandId::CreatePoint,
-            DrawToolKind::Spline => CommandId::CreateSpline,
-            DrawToolKind::Move => CommandId::MoveEntities,
-            DrawToolKind::Trim => CommandId::TrimEntity,
-            DrawToolKind::Copy => CommandId::CopyEntities,
-            DrawToolKind::Extend => CommandId::ExtendEntity,
-            DrawToolKind::Break => CommandId::Break,
-            // BREAKATPOINT: entity pick, then a projected break point.
-            DrawToolKind::BreakAtPoint => CommandId::BreakAtPoint,
-            // The zero-point single-curve edit pair: the selection is the input and
-            // the settings are the typed parameter channel.
-            DrawToolKind::Divide => CommandId::Divide,
-            DrawToolKind::Lengthen => CommandId::Lengthen,
-            // SCALETEXT is the same zero-point pre-selection edit: the selection is
-            // the input and the factor is the typed parameter channel.
-            DrawToolKind::ScaleText => CommandId::ScaleText,
-            // BLOCK: the selection snapshot plus one base point and the terminal
-            // name define the new block definition and its reference.
-            DrawToolKind::BlockDefine => CommandId::DefineBlock,
-            DrawToolKind::Rotate => CommandId::RotateEntities,
-            DrawToolKind::Scale => CommandId::ScaleEntities,
-            DrawToolKind::Mirror => CommandId::MirrorEntities,
-            DrawToolKind::Offset => CommandId::OffsetEntity,
-            DrawToolKind::Chamfer => CommandId::ChamferLines,
-            DrawToolKind::Fillet => CommandId::FilletLines,
-            DrawToolKind::ArrayRect => CommandId::ArrayRectangular,
-            DrawToolKind::ArrayPolar => CommandId::ArrayPolar,
-            DrawToolKind::Align => CommandId::AlignEntities,
-            DrawToolKind::Stretch => CommandId::StretchEntities,
-            DrawToolKind::DimLinear => CommandId::DimLinear,
-            DrawToolKind::DimAligned => CommandId::DimAligned,
-            DrawToolKind::DimRadius => CommandId::DimRadius,
-            DrawToolKind::DimDiameter => CommandId::DimDiameter,
-            DrawToolKind::DimCenter => CommandId::DimCenter,
-            DrawToolKind::DimAngular => CommandId::DimAngular,
-            DrawToolKind::DimOrdinate => CommandId::DimOrdinate,
-            DrawToolKind::DimBaseline => CommandId::DimBaseline,
-            DrawToolKind::DimContinue => CommandId::DimContinue,
-            DrawToolKind::DimRotated => CommandId::DimRotated,
-            DrawToolKind::Hatch => CommandId::Hatch,
-            DrawToolKind::HatchPoint => CommandId::HatchPoint,
-            // BOUNDARY: one internal point, shared discovery, new polylines.
-            DrawToolKind::Boundary => CommandId::Boundary,
-            DrawToolKind::ChamferEdge => CommandId::Extended(ExtendedCommandId::ChamferEdge),
-            DrawToolKind::Text => CommandId::CreateText,
-            // INSERT is point-then-name; the reference is created from existing
-            // block metadata, never by writing the block table.
-            DrawToolKind::InsertBlock => CommandId::InsertBlock,
-            // MTEXT is the multiline create command (one `AcDbMText`).
-            DrawToolKind::MText => CommandId::CreateMText,
-            DrawToolKind::MLeader => CommandId::MLeader,
-            DrawToolKind::TextEdit => CommandId::TextEdit,
-            // COPYBASE is a read-only capture (Viewer-legal); CUTBASE is the same
-            // capture for the work-only cutting command. The host reads the recorded
-            // command to choose `CopyBase` vs `CutBase`.
-            DrawToolKind::CopyBase => CommandId::CopyToClipboardBase,
-            DrawToolKind::CutBase => CommandId::CutToClipboardBase,
-            // PASTECLIP is work-only through its command (the capture itself needs
-            // no selection).
-            DrawToolKind::PasteClip => CommandId::PasteFromClipboard,
-            // PASTEBLOCK writes a new block definition plus its reference; the
-            // capture itself needs no selection (the clipboard is the input).
-            DrawToolKind::PasteBlock => CommandId::PasteBlock,
-        };
+        // The command this capture belongs to is the one `DrawToolKind::command`
+        // records (one mapping shared with the `MULTIPLE` repeat loop): the kind
+        // is not always one command — `COPYBASE`/`CUTBASE` share the
+        // `CopyBase` shape but differ in authorization and payload — so the
+        // command, not the kind, is the stored identity.
+        let command = kind.command();
         self.authorize(command)?;
         let selection = self.selection.refs().to_vec();
         let mut tool = DrawTool::new(kind, selection.len());
