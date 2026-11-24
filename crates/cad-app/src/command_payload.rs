@@ -883,16 +883,13 @@ pub enum CommandPayload {
     /// (the same value `SETVAR WIPEOUTFRAME` prints); a number outside `0..=2` is
     /// refused by the typed parser (`wipeoutframe.out_of_range`) before dispatch.
     WipeoutFrame(WipeoutFrames),
-    /// `CVPORT <n>`: the session current-viewport marker of the active paper
-    /// layout, as a **one-based** viewport position (AutoCAD's own numbering).
-    ///
-    /// The bare selector carries [`CommandPayload::None`] and reports the
-    /// stored marker (and the viewport the three viewport-scoped commands will
-    /// target). `n` is validated against the active layout's viewport count by
-    /// the handler (`cvport.out_of_range`), never clamped. Session state only:
-    /// no database write, revision bump, `cad-history` entry or `ChangeSet`.
-    /// Contract: [`crate::command_id::extras`].
+    /// `CVPORT <n>`: one-based current-viewport marker of the active paper
+    /// layout. A bare `CVPORT` reports it; `n` is validated by the handler
+    /// (`cvport.out_of_range`, never clamped) — session state only, no write.
     Cvport(u32),
+    /// `VPSYNC [<master>]`: zero-based master viewport index (default `0`); the
+    /// handler validates it (`vpsync.master_out_of_range`, no clamp).
+    VpSyncMaster(u32),
     /// `ELEV <height>`: the session elevation new objects are created at.
     ///
     /// The bare selector carries [`CommandPayload::None`] and reports the stored

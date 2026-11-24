@@ -354,9 +354,11 @@ mod hatch_pattern_name;
 mod hatch_predefined;
 mod hatch_set_origin;
 mod hatch_stitch;
+mod hatch_supported;
 mod hatch_utilities;
 mod image;
 mod image_adjust;
+mod image_attach_layout;
 mod xclip;
 // The generic boundary commands over the image/block clip models.
 mod clip;

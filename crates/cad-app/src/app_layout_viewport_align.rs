@@ -37,9 +37,11 @@
 //!
 //! # VPSYNC
 //!
-//! Copies the stored alignment (scale + translation) of the **master**
-//! viewport — viewport 0, again because there is no viewport selection — onto
-//! every other viewport of the active layout in one transaction. Refusals:
+//! Copies the stored alignment (scale + translation) of one **master** viewport
+//! onto every other viewport of the active layout in one transaction. The
+//! master is chosen by an optional **zero-based** index (`VPSYNC <master>`,
+//! default `0`); the index is validated against the layout's viewport count
+//! (`vpsync.master_out_of_range`) and never clamped. Refusals:
 //! `vpsync.paper_space_required`, `vpsync.insufficient_viewports` (fewer than
 //! two viewports, so there is nothing to synchronize), `vpsync.invalid_master`
 //! (non-finite or non-uniform master scale) and the usual payload refusal. An
@@ -59,7 +61,6 @@ use super::*;
 
 use crate::app_drawing::{layout_row, next_transaction_id};
 use crate::app_layout::{layout_viewports, require_paper_space};
-use crate::app_utility::require_none_payload;
 
 /// A plan-view alignment cannot rotate, so anything above this cross-product
 /// magnitude (of two unit direction vectors) is a rotation the caller asked
@@ -204,7 +205,16 @@ impl Application {
     ) -> CadResult<CommandOutcome> {
         require_work_mode(session, "vpsync", "VPSYNC")?;
         let layout_id = require_paper_space(session, "vpsync")?;
-        require_none_payload(command, "VPSYNC")?;
+        let master_index =
+            match &command.payload {
+                CommandPayload::None => 0,
+                CommandPayload::VpSyncMaster(index) => *index,
+                _ => return Err(CadError::InvalidInput(
+                    "vpsync.payload: VPSYNC takes an optional zero-based master viewport index \
+                     (`VPSYNC [<master>]`); nothing was written"
+                        .into(),
+                )),
+            };
         let document_id = command.document;
         let drawing = self.drawing(document_id)?.clone();
         let mut viewports = layout_viewports(&drawing, layout_id)?;
@@ -216,7 +226,18 @@ impl Application {
                 viewports.len()
             )));
         }
-        let master = viewports[0].model_to_paper;
+        if master_index as usize >= viewports.len() {
+            return Err(CadError::InvalidInput(format!(
+                "vpsync.master_out_of_range: layout {} has {} viewport(s) (zero-based indexes \
+                 {}..={}); the requested master index {master_index} does not exist and is not \
+                 clamped",
+                layout_id.0,
+                viewports.len(),
+                0,
+                viewports.len() - 1
+            )));
+        }
+        let master = viewports[master_index as usize].model_to_paper;
         let matrix = master.matrix;
         let scale_x = matrix[0][0];
         let scale_y = matrix[1][1];
@@ -227,14 +248,17 @@ impl Application {
             || (scale_x - scale_y).abs() > 1e-9 * extent
         {
             return Err(CadError::Unsupported(format!(
-                "vpsync.invalid_master: viewport 0 of layout {} stores a non-finite or non-uniform \
-                 model_to_paper scale ({scale_x}, {scale_y}); only a uniform pan+zoom alignment can \
-                 be copied",
+                "vpsync.invalid_master: viewport {master_index} of layout {} stores a non-finite \
+                 or non-uniform model_to_paper scale ({scale_x}, {scale_y}); only a uniform \
+                 pan+zoom alignment can be copied",
                 layout_id.0
             )));
         }
         let mut changed = 0usize;
-        for viewport in viewports.iter_mut().skip(1) {
+        for (index, viewport) in viewports.iter_mut().enumerate() {
+            if index == master_index as usize {
+                continue;
+            }
             if viewport.model_to_paper != master {
                 viewport.model_to_paper = master;
                 changed += 1;
@@ -249,7 +273,7 @@ impl Application {
                     code: "vpsync.unchanged".into(),
                     message: format!(
                         "VPSYNC: every viewport of layout {} already stores the alignment of \
-                         viewport 0; no transaction was opened",
+                         master viewport {master_index}; no transaction was opened",
                         layout_id.0
                     ),
                 }],
@@ -278,9 +302,9 @@ impl Application {
                 object: None,
                 code: "vpsync.applied".into(),
                 message: format!(
-                    "VPSYNC: copied the alignment of viewport 0 (model units per paper unit \
-                     {scale_x}, translation {}, {}) to {changed} of the other {} viewport(s) of \
-                     layout {}; this build has no viewport selection, so viewport 0 is the master",
+                    "VPSYNC: copied the alignment of master viewport {master_index} (model units \
+                     per paper unit {scale_x}, translation {}, {}) to {changed} of the other {} \
+                     viewport(s) of layout {}; zero-based index, no viewport selection model",
                     matrix[0][3],
                     matrix[1][3],
                     viewport_count - 1,

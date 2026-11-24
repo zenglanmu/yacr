@@ -167,6 +167,8 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     VPORTS_SELECTOR,
     VPCLIP_SELECTOR,
     VPSCALE_SELECTOR,
+    // `VPSYNC [<master>]`: the optional zero-based master viewport index.
+    VPSYNC_SELECTOR,
     LAYVPI_SELECTOR,
     // `LAYFRZ VP [<index>,...]` (2026-11-24): the per-viewport freeze scope of
     // the layer-selection command. An argument form of `LAYFRZ`, not a new

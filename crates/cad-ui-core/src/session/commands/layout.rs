@@ -58,6 +58,8 @@ pub const VPCLIP_SELECTOR: &str = "VPCLIP";
 pub const VPSCALE_SELECTOR: &str = "VPSCALE";
 /// `ALIGNSPACE`: the typed two-pair pan+zoom alignment of the first viewport.
 pub const ALIGNSPACE_SELECTOR: &str = "ALIGNSPACE";
+/// `VPSYNC`: copy one master viewport's alignment to every other viewport.
+pub const VPSYNC_SELECTOR: &str = "VPSYNC";
 /// `LAYVPI`: freeze layers in every viewport of the active paper layout (per-viewport override).
 pub const LAYVPI_SELECTOR: &str = "LAYVPI";
 
@@ -445,6 +447,37 @@ pub fn parse_alignspace_argument(argument: &str) -> Result<Vec<Point3>, String> 
         point(model_bx, model_by)?,
         point(paper_bx, paper_by)?,
     ])
+}
+
+/// Parse one `VPSYNC [<master>]` argument.
+///
+/// `master` is the **zero-based** index of the viewport whose stored alignment
+/// is copied to every other viewport, matching the drawing's stored viewport
+/// order and the command's documented default of `0` (the first viewport). The
+/// grammar admits exactly one non-negative plain decimal; the handler validates
+/// it against the active layout's viewport count (`vpsync.master_out_of_range`)
+/// and never clamps it. Anything else is `vpsync.argument` and changes nothing.
+pub fn parse_vpsync_argument(argument: &str) -> Result<u32, String> {
+    let tokens: Vec<&str> = argument.split_whitespace().collect();
+    let [master] = tokens.as_slice() else {
+        return Err(
+            "vpsync.argument: VPSYNC takes one optional zero-based master viewport \
+                    index (`VPSYNC [<master>]`); nothing was changed"
+                .to_string(),
+        );
+    };
+    if !master.bytes().all(|byte| byte.is_ascii_digit()) || master.is_empty() {
+        return Err(format!(
+            "vpsync.argument: the master viewport index must be a non-negative integer, got \
+             '{master}'; nothing was changed"
+        ));
+    }
+    master.parse().map_err(|_| {
+        format!(
+            "vpsync.argument: the master viewport index '{master}' does not fit the viewport \
+             index type; nothing was changed"
+        )
+    })
 }
 
 /// Parse one `MVIEW <minx> <miny> <maxx> <maxy>` argument.

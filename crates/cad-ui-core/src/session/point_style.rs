@@ -226,9 +226,8 @@ impl CadSession {
             | super::commands::VPCLIP_SELECTOR
             | super::commands::VPSCALE_SELECTOR
             | super::commands::LAYVPI_SELECTOR
-            | super::commands::ALIGNSPACE_SELECTOR => {
-                self.layout_argument(selector, argument, text)
-            }
+            | super::commands::ALIGNSPACE_SELECTOR
+            | super::commands::VPSYNC_SELECTOR => self.layout_argument(selector, argument, text),
             // `MVIEW <minx> <miny> <maxx> <maxy>` carries a two-corner point
             // payload, so it takes its own typed path.
             super::commands::MVIEW_SELECTOR => self.mview_argument(argument, text),
