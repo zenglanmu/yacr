@@ -34,6 +34,7 @@ import { LayersPalette } from './LayersPalette.tsx';
 import { PropertiesDock } from './PropertiesDock.tsx';
 import { BimPanel } from './BimPanel.tsx';
 import { ParamsPanel } from './ParamsPanel.tsx';
+import { ActionRecorderPanel } from './ActionRecorderPanel.tsx';
 import { PluginNoticeHost } from './PluginNoticeHost.tsx';
 import { HostNoticeHost } from './HostNoticeHost.tsx';
 import { UpdateNoticeHost } from './UpdateNoticeHost.tsx';
@@ -48,6 +49,8 @@ import { closeBimPanel } from '../bim/panel.ts';
 import { useBimPanelOpen } from '../bim/use-bim-panel.ts';
 import { closeParamsPanel } from '../params/panel.ts';
 import { useParamsPanelOpen } from '../params/use-params-panel.ts';
+import { closeRecorderPanel } from '../recorder/panel.ts';
+import { useRecorderPanelOpen } from '../recorder/use-recorder-panel.ts';
 
 export function Workspace() {
   const { t } = useI18n();
@@ -58,6 +61,7 @@ export function Workspace() {
   const bimOpen = useBimPanelOpen();
   // The Parameters Manager is the same kind of module-store flag.
   const paramsOpen = useParamsPanelOpen();
+  const recorderOpen = useRecorderPanelOpen();
   // Whether the desktop palettes exist on the reported carrier. A `dom-canvas`
   // host holds no host-side document state, so it has none of the projections they
   // read: they are not rendered at all rather than as empty panels. The carrier
@@ -196,6 +200,11 @@ export function Workspace() {
               <ParamsPanel />
             </PaletteWindow>
           ) : null}
+          {recorderOpen && !shell.mobile ? (
+            <PaletteWindow windowKey="recorder" initialIndex={8}>
+              <ActionRecorderPanel />
+            </PaletteWindow>
+          ) : null}
         </div>
       </div>
       {/* The compact BIM sheet: the same panel as a bottom sheet, because the
@@ -212,6 +221,13 @@ export function Workspace() {
         <div className="params-layer">
           <button type="button" className="params-layer__backdrop" aria-label={t('parameters.close')} onClick={closeParamsPanel} />
           <ParamsPanel variant="floating" />
+        </div>
+      ) : null}
+      {/* The compact Action Recorder sheet: the same panel as a bottom sheet. */}
+      {recorderOpen && shell.mobile ? (
+        <div className="params-layer">
+          <button type="button" className="params-layer__backdrop" aria-label={t('recorder.close')} onClick={closeRecorderPanel} />
+          <ActionRecorderPanel variant="floating" />
         </div>
       ) : null}
       <NavigationDock />

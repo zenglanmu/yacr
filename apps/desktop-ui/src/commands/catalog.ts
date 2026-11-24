@@ -16,6 +16,7 @@ import { EXTENDED_COMMAND_CATALOG } from './catalog-extended.ts';
 import { FILE_COMMAND_CATALOG } from './catalog-file.ts';
 import { INTERFACE_COMMAND_CATALOG } from './catalog-interface.ts';
 import { REFUSAL_COMMAND_CATALOG } from './catalog-refusals.ts';
+import { ACTION_RECORDER_COMMAND_CATALOG } from './catalog-recorder.ts';
 import { TABLE_COMMAND_CATALOG } from './catalog-tables.ts';
 
 /**
@@ -876,6 +877,7 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // their original order.
   ...EXTENDED_COMMAND_CATALOG,
   ...REFUSAL_COMMAND_CATALOG,
+  ...ACTION_RECORDER_COMMAND_CATALOG,
   // The 2026-11-09 Wave 13 batch: page-setup/conversion reports, table/field
   // surfaces and named refusals. `TABLEEXPORT` is a real read-only export — the
   // host writes the CSV through its file channel, like `SAVE`/`PLOT` — so the

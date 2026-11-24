@@ -87,6 +87,9 @@ test('the wired reference panels carry only commands this build actually exposes
     // The Parameters Manager is a shell action, not a router token: it opens the
     // chrome-local panel whose writes ride `-PARAMETERS`.
     parametric_manage: [SHELL_ACTIONS.parameters],
+    // The Action Recorder is the same shape: a chrome-local panel action that
+    // reads `cad_action_recorder` and writes through the typed ACT* lines.
+    action_recorder: [SHELL_ACTIONS.actionRecorder],
   };
   const panels = new Map(RIBBON_TABS.flatMap(tab => tab.panels).map(panel => [panel.id, panel]));
   for (const [id, commands] of Object.entries(expected)) {

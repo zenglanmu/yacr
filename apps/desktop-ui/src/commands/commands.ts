@@ -196,6 +196,15 @@ const CASE_PRESERVING_ARGUMENTS: Readonly<Record<string, (argument: string) => b
   LINETYPE: linetypeCreateCarriesDescription,
   '-LINETYPE': linetypeCreateCarriesDescription,
   '-PARAMETERS': () => true,
+  // ADR-0056: a macro name/path and a user message are opaque content tails
+  // (a path keeps its case; a message must keep its exact words).
+  ACTRECORD: () => true,
+  ACTSTOP: () => true,
+  '-ACTSTOP': () => true,
+  ACTUSERINPUT: () => true,
+  ACTUSERMESSAGE: () => true,
+  '-ACTUSERMESSAGE': () => true,
+  ACTMANAGER: () => true,
 });
 
 /**

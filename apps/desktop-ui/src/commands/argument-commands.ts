@@ -1,17 +1,16 @@
 // The typed-argument grammar `gating.ts` exposes as `ARGUMENT_COMMANDS`, split
 // verbatim into a sibling module when the batch tables pushed the parent past the
 // 1000-line code gate. Nothing here decides anything by itself: every predicate
-// is a local syntax aid, and the host stays the authority for semantics.
-//
-// The clip-family predicates (`CLIP`/`XCLIP`) and the two token helpers they
-// share with this table live in `argument-clip-grammar.ts`, so the two clip
+// is a local syntax aid; the host stays the authority for semantics.
+// The clip-family predicates (`CLIP`/`XCLIP`) live in `argument-clip-grammar.ts`,
+// so the two clip
 // grammars sit side by side and this table stays inside the code-size gate. The
 // `HATCHEDIT` option grammar lives in `argument-hatchedit.ts` for the same reason,
 // the `COLOR`/`-COLOR` token grammar in `argument-color-grammar.ts` (one predicate
 // shared by both spellings), and the MULTILEADER/`SSX`/record grammars in
 // `argument-{mleader,selection,record}-grammar.ts`. The `LINETYPE`/`MLINE`/
 // `LAYOUT`/`TABLEEXPORT` shapes — plus the quote-aware tokenizer they share with
-// `RENAME` — live in `argument-extras-grammar.ts`.
+// `RENAME` live in `argument-extras-grammar.ts`.
 import { isHatchEditArgument } from './argument-hatchedit.ts';
 import { isColorArgument } from './argument-color-grammar.ts';
 import { EXPORT_ARGUMENT_SPEC } from './argument-export-grammar.ts';
@@ -31,6 +30,7 @@ import {
   isTableExportArgument, splitQuotedTokens,
 } from './argument-extras-grammar.ts';
 import { isAddSelectedArgument, isAliasEditArgument, isMvSetupArgument } from './argument-record-grammar.ts';
+import { ACTION_RECORDER_ARGUMENT_COMMANDS } from './argument-recorder-commands.ts';
 import { isSsxArgument } from './argument-selection-grammar.ts';
 
 /** The parser for the one typed-argument form a selector accepts. */
@@ -805,6 +805,7 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
   // `EXPORT <format>`: the typed format token (grammar in `argument-export-grammar.ts`).
   EXPORT: EXPORT_ARGUMENT_SPEC,
   '-PARAMETERS': Object.freeze({ parse: isDashParametersArgument }),
+  ...ACTION_RECORDER_ARGUMENT_COMMANDS,
 });
 
 /** `DIMSTYLE`/`-DIMSTYLE`: `LIST`, `CURRENT` or `SET <name>` (name may have spaces). */
@@ -997,4 +998,3 @@ function isRenameArgument(argument: string): boolean {
   if (!['LAYER', 'BLOCK', 'STYLE', 'LINETYPE'].includes(tokens[0].toUpperCase())) return false;
   return tokens[1].length > 0 && tokens[2].length > 0;
 }
-

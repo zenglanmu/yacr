@@ -28,6 +28,7 @@ npm run dev     # http://127.0.0.1:1420
 | `src/layers/` | 图层投影、属性与标签 |
 | `src/properties/` | 实体属性投影、显示模型与标签 |
 | `src/params/` | 参数管理器：`cad_param_list` 严格解析、`-PARAMETERS` 命令构造与单飞写回状态机、面板开关（`PARAMETERS`/`PARAMETERSCLOSE` 本地选择子） |
+| `src/recorder/` | 动作录制器面板：`cad_action_recorder` 严格解析、`ACTRECORD`/`ACTSTOP`/`ACTMANAGER` 命令构造与单飞写回、面板开关（ADR-0056） |
 | `src/references/` | 外部引用投影（宿主状态码、稳定原因码）与 `RESOURCES` 本地选择器 |
 | `src/fonts/` | 字体报告投影：严格 `cad_fonts` 解析（不把坏载荷折成空成功）、loaded/failed/unresolved 只读分组与 `FONTS` 本地选择器 |
 | `src/popup/` | 弹窗状态、布局度量与文字编辑接线 |

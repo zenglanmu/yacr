@@ -1,4 +1,5 @@
-// The Wave 17-24 named-refusal catalog rows (199 names).
+// The Wave 17-24 named-refusal catalog rows (190 names). The seven ADR-0056
+// action-recorder names moved to `catalog-recorder.ts` when they graduated.
 //
 // Split out of `catalog.ts` to keep every frontend file inside the
 // 1000-line code gate. Every row is display-only and resolves to a stable
@@ -13,13 +14,6 @@ export const REFUSAL_COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.fr
   { id: 'ACTBASEPOINT', labelKey: 'draw.kind.actbasepoint', icon: 'settings', group: 'modify' },
   { id: 'ACTIVITYINSIGHTSCLOSE', labelKey: 'draw.kind.activityinsightsclose', icon: 'settings', group: 'modify' },
   { id: 'ACTIVITYINSIGHTSOPEN', labelKey: 'draw.kind.activityinsightsopen', icon: 'settings', group: 'modify' },
-  { id: 'ACTMANAGER', labelKey: 'draw.kind.actmanager', icon: 'settings', group: 'modify' },
-  { id: 'ACTRECORD', labelKey: 'draw.kind.actrecord', icon: 'settings', group: 'modify' },
-  { id: '-ACTSTOP', labelKey: 'draw.kind.dashactstop', icon: 'settings', group: 'modify' },
-  { id: 'ACTSTOP', labelKey: 'draw.kind.actstop', icon: 'settings', group: 'modify' },
-  { id: 'ACTUSERINPUT', labelKey: 'draw.kind.actuserinput', icon: 'settings', group: 'modify' },
-  { id: '-ACTUSERMESSAGE', labelKey: 'draw.kind.dashactusermessage', icon: 'settings', group: 'modify' },
-  { id: 'ACTUSERMESSAGE', labelKey: 'draw.kind.actusermessage', icon: 'settings', group: 'modify' },
   { id: 'ADCCLOSE', labelKey: 'draw.kind.adcclose', icon: 'settings', group: 'modify' },
   { id: 'ADCENTER', labelKey: 'draw.kind.adcenter', icon: 'settings', group: 'modify' },
   { id: 'ADCNAVIGATE', labelKey: 'draw.kind.adcnavigate', icon: 'settings', group: 'modify' },

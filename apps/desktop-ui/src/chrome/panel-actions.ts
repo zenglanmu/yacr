@@ -6,9 +6,11 @@
 // hook dependency and a test can resolve an action without a DOM.
 import { openBimPanel } from '../bim/panel.ts';
 import { openParamsPanel } from '../params/panel.ts';
+import { openRecorderPanel } from '../recorder/panel.ts';
 
 /** Shell action token → the panel it opens (a repeat press re-focuses). */
 export const PANEL_ACTIONS: Readonly<Record<string, () => void>> = Object.freeze({
   bim: openBimPanel,
   parameters: openParamsPanel,
+  actionRecorder: openRecorderPanel,
 });
