@@ -700,7 +700,7 @@ fn flatten_sets_z_to_zero_and_refuses_mesh_by_name() {
 }
 
 #[test]
-fn xplode_reuses_explode_and_reports_the_unconverted_attribute_gap() {
+fn xplode_reuses_explode_and_reports_the_decomposition() {
     let (mut app, mut session) = block_app(Transform3::identity());
     select(&mut session, &[1]);
     let outcome = run(&mut app, &mut session, ExtendedCommandId::XPlode).unwrap();
@@ -708,8 +708,8 @@ fn xplode_reuses_explode_and_reports_the_unconverted_attribute_gap() {
         outcome
             .diagnostics
             .iter()
-            .any(|diagnostic| diagnostic.code == "xplode.attributes_not_converted"),
-        "the attributes/property gap must be reported"
+            .any(|diagnostic| diagnostic.code == "xplode.decomposed"),
+        "the decomposition must be reported"
     );
     assert_eq!(undo_depth(&app), 1);
     assert!(

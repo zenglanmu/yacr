@@ -26,8 +26,8 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **258** |
-| 部分实现（有写明的界） | **721** |
+| 完整实现 | **259** |
+| 部分实现（有写明的界） | **720** |
 | **已实现合计（完整 + 部分）** | **979** |
 | 未实现 | **2** |
 
@@ -59,6 +59,8 @@
 > **2026-11-24 增补（严格 2D 收口续）**：`HATCH`/`-HATCH` 的支持域（`Circle`/完整 `Ellipse`/闭合 `Polyline`/`LINE`+`ARC` 边链；solid/user-defined/predefined/gradient 四种会话填充与 `PATTERN`/`PATTERNFILE` 两种命令名通道）已无剩余拒绝路径，契约测试逐组合证明——仅剩创建期**关联性**与实时预览/对话框，二者都是构建级全局范围。`IMAGEATTACH` 新增可选的 `[<rotation_deg>]`（绕 `+Z` 逆时针、烘进 `u`/`v` 基）与**活动图纸布局**目标（走布局自身 draw-order 的实体写入路径；`Block` 定义 `imageattach.block_space`、失效布局 `imageattach.unknown_layout` 按名拒绝）。`VPSYNC` 新增可选的**0 基**主视口索引（`VPSYNC [<master>]`，默认 `0`；越界 `vpsync.master_out_of_range`、不 clamp、一条事务/一步撤销）。`HATCH`、`-HATCH`、`IMAGEATTACH`、`VPSYNC` 四个官方名字晋升为**完整实现**。
 >
 > **2026-11-24 增补（严格报告收口）**：`BCOUNT` 扩到**整图**（模型空间 + 各图纸布局）与选择集作用域，块定义内嵌套参照按名报告不计数（AutoCAD 同限），Select objects 交互提示属 ADR 全局范围；`DBLIST` 列出块定义成员与全部三个已建模空间，XDATA/扩展字典/字典/代理对象不保留并按名报告；`JULIAN` 新增 `JULIAN <YYYY-MM-DD>`（也接受 `YYYY/MM/DD`，可跟 `[T ]HH:MM[:SS]`）日历转儒略日形式，非法日期按 `julian.invalid_date` 拒绝；`PAGESETUP`/`-PAGESETUP` 的 typed 写入与拒绝契约补齐后晋升（唯一残留绘图仪/CTB/STB 属 ADR 全局范围）。`ALIASEDIT` 的 `ADD`/`REMOVE` 补上宿主 `preference.json` 根键 `commandAliases` 持久化（跨会话恢复；写入失败按 `aliasedit.not_persisted` 回滚；失效/冲突的持久行启动时按名丢弃并记诊断）后晋升；`SYSVARMONITOR`（无后台通知、不持久化）仍有真实缺口，保持**部分实现**。四批合计计入 **254 完整 + 725 部分 / 979 已实现**；证据仅 Linux Rust 契约，GUI/GPU/像素/真机 NOT VERIFIED。
+>
+> **2026-11-24 增补（严格 2D 收口 IV，`XPLODE`）**：`XPLODE` 按严格口径升为**完整实现**。在既有 EXPLODE 一级块分解之上补齐 AutoCAD 的 `All/Color/LAyer/LType/LWeight/Inherit from parent block/Explode` 控制：`layer`/`color`/`linetype`/`lineweight` 经与 `CHPROP`/`SETENTITYPROPERTY` 共用的 `plan_entity` 属性应用器写入每个子实体；`Inherit` 把块成员 layer 0 归到参照图层，并把 `ByBlock` 颜色/线型/线宽/透明度按参照的实际值（显式或参照图层的表行）解析；块属性值按 AutoCAD 的 XPLODE/EXPLODE 行为丢弃，块定义的 `ATTDEF` 作为普通实体产出（`BURST` 才是保值命令），成功诊断报告丢弃数量。块参照是唯一输入域（与 `BURST` 相同的一级块范围）；`transparency`/`ltscale`/`thickness`/`material`/plot style 按名拒绝，`Inherit` 与显式属性列表互斥；非均匀放置/冻结层/XREF 按名拒绝；`Individually` 交互提示不提供（全局交互范围）。一条事务/一步撤销。`TOLERANCE` **不晋升**：其分解本身是声明式表示，但单元格语法仍是 `|` 分隔的 ≤6 个纯文本格，未实现 AutoCAD 对话框的槽位语义（两个公差槽、三个基准槽、投影高度、基准标识）与 GDT 符号字体、`%%v`、`^J` 语法（新增 `tolerance.gdt_symbol`/`tolerance.multiline`/`tolerance.dxf_separator` 具名拒绝），故保持部分。计入 **259 完整 + 720 部分 / 979 已实现**；证据仅 Linux Rust 契约，GUI/GPU/像素/真机 NOT VERIFIED。
 
 ## 下一批 100 条命令实施计划与进度（2026-11-07）
 
@@ -260,7 +262,7 @@
 
 > **这不是验收，是当前排期与口径。** 本轮目标是把命令从 `部分实现`/具名拒绝推进到支持域内
 > **没有剩余可写缺口**的 `完整实现`；不放宽为“改状态不实现”，也不把 ADR 全局范围缺口算作
-> 单命令完成。当前清单 **258 完整 / 721 部分 / 2 未实现**，只有真正合并且契约测试通过的
+> 单命令完成。当前清单 **259 完整 / 720 部分 / 2 未实现**，只有真正合并且契约测试通过的
 > 命令才改状态。
 
 | 批次 | 范围 | 状态 |
@@ -279,6 +281,7 @@
 | M1i 报告/会话 | `BCOUNT`（整图/选择集）、`DBLIST`（块成员+三空间）、`JULIAN <date>`、`ALIASEDIT` 持久化、`PAGESETUP`/`-PAGESETUP` | **已合并**（+6 complete；`SYSVARMONITOR` 因无后台通知/持久化仍 partial） |
 | M1j 参照编辑族 | `REFEDIT`/`-REFEDIT`/`REFSET`/`REFCLOSE` 的成员图层/绘图次序/渲染属性回写、动态可见性成员保留与描述符剪除、嵌套引用保留 + 嵌套实例具名拒绝 | **已合并**（+4 complete） |
 | M1k 文本屏幕/托盘/查找大小写 | `TEXTSCR`/`GRAPHSCR` 接共享 chrome 文本屏幕（`cad_status.textScreen`，正文复用命令行历史同一折叠与序列化，无第二套历史）；`TRAYSETTINGS` 接状态栏托盘与托盘设置面（`cad_status.traySettings`，唯一开关即该会话旗标；无状态栏载体按名拒绝）；`FINDMATCH` 接入 `-FIND`/`FIND` 同一匹配器（ON 区分大小写，覆盖 MTEXT/单行 TEXT/MULTILEADER/表格单元格） | **已合并**（+4 complete；无 GUI/像素/真机证据） |
+| M1l XPLODE 属性控制 | `XPLODE` 的 `All`/`Color`/`LAyer`/`LType`/`LWeight`/`Inherit from parent block`/`Explode` typed 控制、属性值回退为块定义 `ATTDEF`、非均匀/冻结层/XREF 具名拒绝；`TOLERANCE` 单元格语法缺口保持 partial | **已合并**（+1 complete） |
 | M5 其他面板 | 发布/传递/标准/CUI/点云/PDF 底图 | 分析完成；多数是 `L`/架构级缺口，按 ADR/子系统逐个评估 |
 
 **已明确的诚实缺口**：`ARCHIVE`、`STANDARDS`、`CHECKSTANDARDS`、全部 `CUI*`、`CUSTOMIZE` 仍是
@@ -1157,7 +1160,7 @@
 | `TIME` | 部分实现 | 真实 UTC/文档/修订/计数 + 4 个显式 `time.not_tracked`（创建、最后更新、命令耗时、计时器）；未跟踪值不杜撰 |
 | `TINSERT` | 部分实现 | **无块进入单元格的创建**（`tinsert.unsupported`）；导入的单元格块内容未建模。
 | `TJUST` | 部分实现 | `JUSTIFYTEXT` 的别名，同一语法与实现 |
-| `TOLERANCE` | 部分实现 | `TOLERANCE <x> <y> <text>`（`|` 分格）→ 闭合边框 LWPOLYLINE + 分隔 LINE + 每格 TEXT，活动图层，一条事务；是独立实体而非单个 `AcDbFcf`；轴对齐、格宽/行高为声明估计、≤6 格 |
+| `TOLERANCE` | 部分实现 | `TOLERANCE <x> <y> <text>`（`|` 分格）→ 闭合边框 LWPOLYLINE + 分隔 LINE + 每格 TEXT，活动图层，一条事务；是独立实体而非单个 `AcDbFcf`；轴对齐、格宽/行高为声明估计、≤6 格。**单元格语法缺口**：未实现对话框的槽位语义（两个公差槽、三个基准槽、投影高度、基准标识）与 GDT 符号字体、`%%v`、`^J`；这些输入按 `tolerance.gdt_symbol`/`tolerance.multiline`/`tolerance.dxf_separator` 具名拒绝 |
 | `TOOLPALETTES` | 部分实现 | chrome 本地选择子：非模态工具选项板浮窗，仅 Blocks 页列出真实块定义并可启动既有 INSERT；无工具内容页，不进入 `cad_command`。 |
 | `TOOLPALETTESCLOSE` | 已实现 | chrome 本地选择子：关闭工具选项板浮窗（幂等成功）。 |
 | `TORIENT` | 已实现 | 裸命令 Most Readable、`TORIENT <角度>` 绝对旋转、`TORIENT REVERSE|R` 再加 180°（**本项目扩展**，AutoCAD 2026 无此选项）；只改 TEXT/MTEXT 的 rotation，位置不变；ATTDEF/带属性块因无属性模型不适用（全局范围） |
@@ -1253,7 +1256,7 @@
 | `XLINE` | 部分实现 | 两点创建，但落库为裁剪到模型包围盒的有限线段 |
 | `XLIST` | 部分实现 | 只读：列出块定义及成员数；实体 XDATA 不保留，不列出。 |
 | `XOPEN` | 部分实现 | 具名拒绝（`xopen.unsupported`）：本构建无外部参照编辑会话。 |
-| `XPLODE` | 部分实现 | 真实编辑：复用 EXPLODE 分解选中 INSERT；一条事务/一步撤销；属性/特性控制未实现。 |
+| `XPLODE` | 完整实现 | 块参照的一级 EXPLODE 分解 + `layer`/`color`/`linetype`/`lineweight`/`Inherit from parent block` 控制（共用 `plan_entity` 应用器）；`Inherit` 把 layer 0 与 `ByBlock` 按参照/参照图层解析；属性值丢弃、块定义 `ATTDEF` 作为普通实体产出（保值用 `BURST`）；一条事务/一步撤销；`transparency`/`ltscale`/未建模属性按名拒绝；非均匀放置/冻结层/XREF 按名拒绝 |
 | `XREF` | 部分实现 | 只读：外部参照导入溯源报告（`xref.entry`/`xref.summary`）；附着/卸载/重载/绑定未实现。 |
 | `ZOOM` | 部分实现 | OBJECT（当前选择包围盒，含块展开）/nX/图纸空间 nXP/WINDOW/PREVIOUS 已实现；仅 DYNAMIC（交互式指针跟随缩放）具名未实现（`zoom.dynamic_not_implemented`） |
 
@@ -2144,7 +2147,7 @@
 | 865 | `TIME` | 部分实现 | Displays the date and time statistics of a drawing. | 真实 UTC/文档/修订/计数 + 4 个显式 `time.not_tracked`（创建、最后更新、命令耗时、计时器）；未跟踪值不杜撰 |
 | 866 | `TINSERT` | 部分实现 | Inserts a block in a table cell. | **无块进入单元格的创建**（`tinsert.unsupported`）；导入的单元格块内容未建模。
 | 867 | `TJUST` | 部分实现 | Changes the justification point of a text object without moving the text. Works with text, mtext, and attribute definition objects. | `JUSTIFYTEXT` 的别名，同一语法与实现 |
-| 868 | `TOLERANCE` | 部分实现 | Creates geometric tolerances contained in a feature control frame. | `TOLERANCE <x> <y> <text>`（`|` 分格）→ 闭合边框 LWPOLYLINE + 分隔 LINE + 每格 TEXT，活动图层，一条事务；是独立实体而非单个 `AcDbFcf`；轴对齐、格宽/行高为声明估计、≤6 格 |
+| 868 | `TOLERANCE` | 部分实现 | Creates geometric tolerances contained in a feature control frame. | `TOLERANCE <x> <y> <text>`（`|` 分格）→ 闭合边框 LWPOLYLINE + 分隔 LINE + 每格 TEXT，活动图层，一条事务；是独立实体而非单个 `AcDbFcf`；轴对齐、格宽/行高为声明估计、≤6 格。**单元格语法缺口**：未实现对话框的槽位语义（两个公差槽、三个基准槽、投影高度、基准标识）与 GDT 符号字体、`%%v`、`^J`；这些输入按 `tolerance.gdt_symbol`/`tolerance.multiline`/`tolerance.dxf_separator` 具名拒绝 |
 | 869 | `-TOOLBAR` | 已实现 | Displays, hides, and customizes toolbars from the Command prompt. | chrome 本地选择子：`-TOOLBAR [SHOW|HIDE]` 设置快速访问工具栏可见性 |
 | 870 | `TOOLBAR` | 已实现 | Displays, hides, and customizes toolbars. | chrome 本地选择子：显示快速访问工具栏 |
 | 871 | `TOOLPALETTES` | 部分实现 | Opens the Tool Palettes window. | chrome 本地选择子：非模态工具选项板浮窗，仅 Blocks 页列出真实块定义并可启动既有 INSERT；无工具内容页，不进入 `cad_command`。 |
@@ -2254,7 +2257,7 @@
 | 975 | `XLINE` | 部分实现 | Creates a construction line of infinite length. | 两点创建，但落库为裁剪到模型包围盒的有限线段 |
 | 976 | `XLIST` | 部分实现 | Lists the type, block name, layer name, color and linetype of a nested object in a block or an xref. | 只读：列出块定义及成员数；实体 XDATA 不保留，不列出。 |
 | 977 | `XOPEN` | 部分实现 | Opens a selected drawing reference (xref) in a new window. | 具名拒绝（`xopen.unsupported`）：本构建无外部参照编辑会话。 |
-| 978 | `XPLODE` | 部分实现 | Breaks a compound object into its component objects, with specified properties for the resulting objects. | 真实编辑：复用 EXPLODE 分解选中 INSERT；一条事务/一步撤销；属性/特性控制未实现。 |
+| 978 | `XPLODE` | 完整实现 | Breaks a compound object into its component objects, with specified properties for the resulting objects. | 块参照的一级 EXPLODE 分解 + `layer`/`color`/`linetype`/`lineweight`/`Inherit from parent block` 控制（共用 `plan_entity` 应用器）；`Inherit` 把 layer 0 与 `ByBlock` 按参照/参照图层解析；属性值丢弃、块定义 `ATTDEF` 作为普通实体产出（保值用 `BURST`）；一条事务/一步撤销；`transparency`/`ltscale`/未建模属性按名拒绝；非均匀放置/冻结层/XREF 按名拒绝 |
 | 979 | `-XREF` | 部分实现 | From the Command prompt, manages drawings inserted as external references (xrefs). | 只读：外部参照导入溯源报告（`-xref.entry`/`-xref.summary`）；附着/卸载/重载/绑定未实现。 |
 | 980 | `XREF` | 部分实现 | Starts the EXTERNALREFERENCES command. | 只读：外部参照导入溯源报告（`xref.entry`/`xref.summary`）；附着/卸载/重载/绑定/编辑未实现；本构建无选项板。 |
 | 981 | `ZOOM` | 部分实现 | Increases or decreases the magnification of the view in the current viewport. | OBJECT（当前选择包围盒，含块展开）/nX/图纸空间 nXP/WINDOW/PREVIOUS 已实现；仅 DYNAMIC（交互式指针跟随缩放）具名未实现（`zoom.dynamic_not_implemented`） |

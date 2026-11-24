@@ -37,6 +37,7 @@ use cad_history::{drawing_patch, DrawingPatch, DrawingUndoRecord};
 
 mod block_ops;
 mod property_ops;
+mod xplode;
 
 const INSERT_SIMILARITY_TOLERANCE: f64 = 1e-9;
 const PARALLEL_TOLERANCE: f64 = 1e-9;
@@ -494,41 +495,6 @@ impl Application {
             measurement: None,
             point_report: None,
         })
-    }
-
-    /// `XPLODE`: route the selected INSERTs through the existing EXPLODE path.
-    fn xplode(&mut self, session: &SessionState, command: &Command) -> CadResult<CommandOutcome> {
-        require_none_payload(command, "XPLODE")?;
-        let document_id = command.document;
-        let drawing = self
-            .workspace
-            .documents
-            .get(&document_id)
-            .ok_or_else(|| invalid("xplode", "not_addressable", "document not open"))?
-            .drawing
-            .clone();
-        let entities = resolve_direct(session, &drawing, command, "xplode", true)?;
-        for entity in &entities {
-            if !matches!(entity.geometry, SemanticGeometry::Insert { .. }) {
-                return Err(unsupported(
-                    "xplode",
-                    "unsupported",
-                    format!(
-                        "entity {} is {}; XPLODE supports selected INSERT references only",
-                        entity.id.0,
-                        class_name(&entity.geometry)
-                    ),
-                ));
-            }
-        }
-        let mut outcome = self.explode_entities(session, command)?;
-        outcome.diagnostics.push(Diagnostic {
-            object: None,
-            code: "xplode.attributes_not_converted".into(),
-            message: "XPLODE: uses the EXPLODE path; the reference's own attribute values are NOT CONVERTED (use BURST), and attribute/property control is not implemented"
-                .into(),
-        });
-        Ok(outcome)
     }
 
     /// Insert a batch of new model-space entities in one transaction / undo step.

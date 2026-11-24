@@ -79,6 +79,7 @@
 //! polyline/arc/insert policy is selected on the user's behalf.
 
 use super::*;
+use cad_db::EntityRenderAttributes;
 
 /// The similarity tolerance for the uniform-scale INSERT check: the same
 /// judgement the transform surface uses (`cad_db::transform::SIMILARITY_TOLERANCE`).
@@ -88,15 +89,24 @@ const INSERT_SIMILARITY_TOLERANCE: f64 = 1e-9;
 const STRAIGHT_BULGE: f64 = 1e-12;
 
 /// One child entity produced by a decomposition, before it is given a fresh id.
-struct Produced {
-    layer: LayerId,
-    space: SpaceId,
-    type_key: String,
-    geometry: SemanticGeometry,
+pub(crate) struct Produced {
+    pub(crate) layer: LayerId,
+    pub(crate) space: SpaceId,
+    pub(crate) type_key: String,
+    pub(crate) geometry: SemanticGeometry,
     /// The draw order the child must inherit, when the source kind prescribes
     /// one (`DIMENSION`/`MULTILEADER` display children keep their source's
     /// order); otherwise the command allocates a fresh ascending order.
-    draw_order: Option<i64>,
+    pub(crate) draw_order: Option<i64>,
+    /// The block member's own display attributes, captured for XPLODE's
+    /// `Inherit from parent block` option. `None` for children of a polyline,
+    /// compound or display decomposition (they have no block-member display).
+    pub(crate) display: Option<EntityRenderAttributes>,
+    /// The containing block reference's layer and display attributes, captured
+    /// for XPLODE's `Inherit` rule (layer `0` + `ByBlock` resolve against the
+    /// reference being exploded).
+    pub(crate) parent_layer: Option<LayerId>,
+    pub(crate) parent_display: Option<EntityRenderAttributes>,
 }
 
 impl Application {
@@ -251,7 +261,7 @@ impl Application {
 
 /// The next free draw order above every model-space entity (the multi-entity
 /// copy shape).
-fn next_explode_draw_order(drawing: &DrawingDatabase) -> i64 {
+pub(crate) fn next_explode_draw_order(drawing: &DrawingDatabase) -> i64 {
     drawing
         .model_space()
         .iter()
@@ -262,7 +272,7 @@ fn next_explode_draw_order(drawing: &DrawingDatabase) -> i64 {
 }
 
 /// Decompose one selected entity (one level), appending its children to `out`.
-fn explode_source(
+pub(crate) fn explode_source(
     drawing: &DrawingDatabase,
     source: &DbEntity,
     out: &mut Vec<Produced>,
@@ -276,7 +286,7 @@ fn explode_source(
         } => explode_polyline(source, points, bulges, *closed, out),
         SemanticGeometry::Insert {
             block, transform, ..
-        } => explode_insert(drawing, &source.space, *block, transform, out),
+        } => explode_insert(drawing, source, *block, transform, out),
         SemanticGeometry::Compound(children) => explode_compound(source, children, out),
         SemanticGeometry::Image { .. } => Err(policy_refusal("IMAGE")),
         SemanticGeometry::Mask { .. } => Err(policy_refusal("MASK")),
@@ -415,7 +425,7 @@ fn polyline_segments(
 /// (`BURST` is the value-preserving command).
 fn explode_insert(
     drawing: &DrawingDatabase,
-    space: &SpaceId,
+    parent: &DbEntity,
     block: BlockId,
     transform: &Transform3,
     out: &mut Vec<Produced>,
@@ -471,7 +481,7 @@ fn explode_insert(
                     transform: transform.matrix_mul(nested_transform),
                     attributes: nested_attributes.clone(),
                 };
-                push_produced(child.layer, space.clone(), geometry, out)?;
+                push_block_member(drawing, parent, child, parent.space.clone(), geometry, out)?;
             }
             other => {
                 let placed = match transform_geometry(other, transform) {
@@ -498,7 +508,7 @@ fn explode_insert(
                         )))
                     }
                 };
-                push_produced(child.layer, space.clone(), placed, out)?;
+                push_block_member(drawing, parent, child, parent.space.clone(), placed, out)?;
             }
         }
     }
@@ -804,6 +814,9 @@ fn push_display_child(
                     .to_string(),
                 geometry,
                 draw_order: Some(draw_order),
+                display: None,
+                parent_layer: None,
+                parent_display: None,
             });
             Ok(())
         }
@@ -843,10 +856,37 @@ fn push_produced(
                 type_key,
                 geometry,
                 draw_order: None,
+                display: None,
+                parent_layer: None,
+                parent_display: None,
             });
             Ok(())
         }
     }
+}
+
+/// Push one block-member child and capture the member/reference display state
+/// XPLODE's `Inherit from parent block` option needs.
+///
+/// The ordinary [`push_produced`] call is the single refused-kind gate, so this
+/// wrapper never bypasses it; it only attaches the two display snapshots after
+/// the child has passed that gate.
+fn push_block_member(
+    drawing: &DrawingDatabase,
+    parent: &DbEntity,
+    member: &DbEntity,
+    space: SpaceId,
+    geometry: SemanticGeometry,
+    out: &mut Vec<Produced>,
+) -> CadResult<()> {
+    let before = out.len();
+    push_produced(member.layer, space, geometry, out)?;
+    debug_assert_eq!(out.len(), before + 1);
+    let child = out.last_mut().expect("push_produced pushed one child");
+    child.display = Some(drawing.entity_render_attributes(member.id));
+    child.parent_layer = Some(parent.layer);
+    child.parent_display = Some(drawing.entity_render_attributes(parent.id));
+    Ok(())
 }
 
 /// The `IMAGE`/`MASK` policy refusal: AutoCAD does not explode raster images,

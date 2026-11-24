@@ -264,8 +264,24 @@ pub(crate) fn plan_entity(
     before: DbEntity,
     targets: &[&PropertyValue],
 ) -> Option<StagedChange> {
+    let attributes = drawing.entity_render_attributes(before.id);
+    plan_entity_with_attributes(before, attributes, targets)
+}
+
+/// Apply a resolved [`PropertyValue`] list to an entity row and a **caller
+/// supplied** display-attribute snapshot.
+///
+/// [`plan_entity`] reads the display attributes from the database; a command
+/// that is creating the entity in the same transaction (XPLODE applies its
+/// property controls to freshly produced children) has no committed row yet, so
+/// it passes the attributes it is about to write instead. The comparison rules
+/// are the same because this is the same function body.
+pub(crate) fn plan_entity_with_attributes(
+    before: DbEntity,
+    mut attributes: EntityRenderAttributes,
+    targets: &[&PropertyValue],
+) -> Option<StagedChange> {
     let mut after = before.clone();
-    let mut attributes = drawing.entity_render_attributes(before.id);
     let before_attributes = attributes.clone();
     let mut entity_changed = false;
     let mut attributes_changed = false;

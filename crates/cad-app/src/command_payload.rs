@@ -36,6 +36,8 @@ mod style_tables;
 pub use style_tables::*;
 mod refedit_options;
 pub use refedit_options::{RefCloseOption, RefSetOption};
+mod xplode;
+pub use xplode::XPlodeSettings;
 pub enum CommandPayload {
     None,
     Points(Vec<Point3>),
