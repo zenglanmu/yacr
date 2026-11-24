@@ -53,6 +53,7 @@ mod report;
 mod solid_record;
 mod table;
 mod tables;
+mod views;
 
 pub use adapter::{AcadrustExporter, DESCRIPTOR_DWG, DESCRIPTOR_DXF};
 pub use report::{
@@ -255,6 +256,7 @@ pub fn export(request: &ExportRequest<'_>) -> CadResult<(Vec<u8>, ExportReport)>
     write_header_points(&mut doc, request.database, &mut report);
     write_scale_list(&mut doc, request.database, &mut report);
     tables::write_tables(&mut doc, request.database, &mut report);
+    let view_counts = views::write_views(&mut doc, request.database, &mut report);
 
     // Colour, lineweight, linetype and transparency **provenance** is preserved
     // on import, so all four are written back symbolically where the source was
@@ -371,6 +373,11 @@ pub fn export(request: &ExportRequest<'_>) -> CadResult<(Vec<u8>, ExportReport)>
     report.entries.extend(acc.entries);
     report.notes.extend(acc.notes);
     report.counts = acc.counts;
+    // Named-view rows are table data, not entity geometry, so the accumulator
+    // above does not know about them: add the counts the view pass recorded after
+    // the geometry counts are installed.
+    report.counts.converted += view_counts.0;
+    report.counts.dropped += view_counts.1;
 
     // Add every mapped entity to the document (handles are allocated here, never
     // fabricated by us) and route it to model space. The accumulator already

@@ -380,6 +380,7 @@ struct XrefCause {
 }
 
 mod builder;
+mod builder_views;
 mod construct_line;
 mod dimension;
 mod dynamic;

@@ -122,6 +122,7 @@ impl<'a> ImporterBuilder<'a> {
         self.read_layouts()?;
         self.read_plot_settings()?;
         self.read_annotation_scales()?;
+        self.read_views()?;
         self.read_blocks()?;
         self.check_cancelled()?;
         self.progress.report(ImportProgress::at(

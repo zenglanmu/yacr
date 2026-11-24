@@ -40,6 +40,7 @@ mod point_style;
 mod report_limits;
 mod solid;
 mod texture;
+mod views;
 mod writer;
 mod xref;
 
