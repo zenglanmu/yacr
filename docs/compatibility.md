@@ -1055,7 +1055,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 
 | 命令 | 状态 | 结果 | 显式未实现 / 有意偏离 |
 |---|---|---|---|
-| `GROUP` / `-GROUP` | **完整实现** | 文档持久编组表 `tables/groups.json`（minor 17；行序列号/名字/描述/DXF selectable/有序成员实体 id，上限 64、名字大小写不敏感）；裸命令/`LIST` 只读、`CREATE` 从选择集建组、`DELETE` 只移除名字；一条事务/一步撤销，`ChangeScope.tables = {Groups}`；DXF/DWG 按 `AcDbGroup` 导入导出（名字经 `ACAD_GROUP` 字典），描述/selectable 保留 | 未写出的成员（v1 图纸空间延后）按 `export.group_member_not_written` 具名报告；组名含空格只能由导入产生，命令行语法按单 token 寻址 |
+| `GROUP` / `-GROUP` | **完整实现** | 文档持久编组表 `tables/groups.json`（minor 17；行序列号/名字/描述/DXF selectable/有序成员实体 id，上限 64、名字大小写不敏感）；裸命令/`LIST` 只读、`CREATE` 从选择集建组、`DELETE` 只移除名字；一条事务/一步撤销，`ChangeScope.tables = {Groups}`；DXF/DWG 按 `AcDbGroup` 导入导出（名字经 `ACAD_GROUP` 字典），描述/selectable 保留 | 未写出的成员（v1 图纸空间延后）按 `export.group_member_not_written` 具名报告；含空格的组名用双引号寻址（如 `UNGROUP "My Group"`） |
 | `UNGROUP` | **完整实现** | `UNGROUP <name>` 移除一个持久编组行，保留全部实体；未知组名拒绝；一条事务/一步撤销 | 不写实体几何 |
 | `GROUPEDIT` | **完整实现** | `<name> ADD|REMOVE|RENAME <arg>`；成员来自当前选择集或键入实体 id；`RENAME` 允许仅改大小写；持久表一条事务/一步撤销 | 不写实体几何；无组选择对话框 |
 | `QLEADER` / `LEADER` | 部分实现 | `<arrow x,y> <landing x,y> <文本>` 创建**一个** `MULTILEADER`（旧实体映射为 MULTILEADER）；一条事务/一步撤销 | 无 QLEADER 设置对话框、引线样式、注释类型、多引线段/附着选项 |

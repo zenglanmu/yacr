@@ -36,9 +36,9 @@
 //! [`cad_ui_core::session::COMMAND_ALIASES`](https://docs.rs/cad-ui-core), not a
 //! second `CommandId`: it normalises onto `GROUP` and therefore the same path.
 //!
-//! Names are one non-whitespace token, stored trimmed and unique
-//! **case-insensitively** (a source drawing may hold a name with spaces; the
-//! typed grammar cannot address it, and the table itself allows it). The
+//! Names are stored trimmed and unique **case-insensitively**. An unquoted name
+//! is one token; a name with spaces (legal in a source drawing and in
+//! `tables/groups.json`) is addressed by double-quoting it. The
 //! command-layer cap is [`crate::ENTITY_GROUP_CAP`] = 64 groups; creating one
 //! more is the named `group.cap` refusal rather than a silent drop. A duplicate
 //! name is `group.duplicate`; an empty selection is `group.selection_required`;

@@ -98,6 +98,10 @@ fn group_grammar_is_create_list_or_delete() {
         parse_group_argument("DELETE Walls"),
         Some(GroupCommand::Delete("Walls".into()))
     );
+    assert_eq!(
+        parse_group_argument("CREATE \"My Group\""),
+        Some(GroupCommand::Create("My Group".into()))
+    );
     for bad in ["", "LIST extra", "CREATE", "CREATE two words", "DELETE"] {
         assert_eq!(parse_group_argument(bad), None, "{bad:?}");
     }
@@ -106,7 +110,11 @@ fn group_grammar_is_create_list_or_delete() {
 #[test]
 fn ungroup_grammar_is_one_name() {
     assert_eq!(parse_ungroup_argument("walls"), Some("walls".into()));
-    for bad in ["", "two words", "  "] {
+    assert_eq!(
+        parse_ungroup_argument("\"My Group\""),
+        Some("My Group".into())
+    );
+    for bad in ["", "two words", "  ", "\"unterminated"] {
         assert_eq!(parse_ungroup_argument(bad), None, "{bad:?}");
     }
 }
@@ -132,6 +140,20 @@ fn groupedit_grammar_is_name_verb_arg() {
         Some(GroupEditCommand::Remove {
             name: "walls".into(),
             entities: vec![12, 13]
+        })
+    );
+    assert_eq!(
+        parse_groupedit_argument("\"My Group\" ADD 12,13"),
+        Some(GroupEditCommand::Add {
+            name: "My Group".into(),
+            entities: vec![12, 13]
+        })
+    );
+    assert_eq!(
+        parse_groupedit_argument("\"My Group\" RENAME \"Other Group\""),
+        Some(GroupEditCommand::Rename {
+            name: "My Group".into(),
+            new_name: "Other Group".into()
         })
     );
     assert_eq!(

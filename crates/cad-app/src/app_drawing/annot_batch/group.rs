@@ -41,8 +41,7 @@ fn group_report(group: &GroupRow, code: &str) -> Diagnostic {
 
 /// A direct-call group name guard (the typed grammar already enforces it).
 fn valid_group_name(name: &str) -> bool {
-    let name = name.trim();
-    !name.is_empty() && !name.chars().any(char::is_whitespace)
+    !name.trim().is_empty()
 }
 
 impl Application {
@@ -147,7 +146,7 @@ impl Application {
                 if !valid_group_name(&name) {
                     return Err(invalid(
                         "group.invalid_name",
-                        format!("'{name}' is not a valid one-token group name"),
+                        format!("'{name}' is not a valid group name"),
                     ));
                 }
                 if drawing.group_name_taken(&name) {
@@ -442,7 +441,7 @@ impl Application {
                 if !valid_group_name(&new_name) {
                     return Err(invalid(
                         "groupedit.invalid_name",
-                        format!("'{new_name}' is not a valid one-token group name"),
+                        format!("'{new_name}' is not a valid group name"),
                     ));
                 }
                 if drawing.group_name_taken(&new_name)
