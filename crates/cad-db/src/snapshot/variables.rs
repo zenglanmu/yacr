@@ -22,6 +22,8 @@
 //! active_annotation_scale null | {name, value, named, scale}
 //! metadata                absent | {title?, author?, subject?, keywords?,
 //!                         comments?, custom?: {name: value}}
+//! units_display           absent | {length_format, angle_format,
+//!                         angle_precision, angle_base_degrees, angle_clockwise}
 //! ```
 //!
 //! `metadata` is the `DWGPROPS` summary block. It is **absent** when nothing is
@@ -29,6 +31,10 @@
 //! header; it needs no format bump. Fields inside the block are optional
 //! (absent = `None`), and `custom` is a string→string object. Unknown keys are
 //! refused, like every other header variable.
+//!
+//! `units_display` is the same opt-in shape: absent (or `null`) means the
+//! documented `UnitsDisplay::default` values, and it is written only when a
+//! setting differs from that default. The block carries all five fields.
 //!
 //! Every `f64` goes through [`cad_domain::ymodel::json`], so a legacy non-finite
 //! `$PDSIZE` survives bit-exactly as `{"$f64":"nan"}` instead of forcing the
@@ -93,7 +99,41 @@ pub(crate) fn encode(db: &DrawingDatabase) -> Result<Value, SnapshotError> {
     if !db.document_metadata.is_empty() {
         map.insert("metadata".to_string(), encode_metadata(db));
     }
+    // Same opt-in rule for the Units-dialog settings: a default block is not
+    // written at all.
+    if db.units_display != crate::UnitsDisplay::default() {
+        map.insert(
+            "units_display".to_string(),
+            encode_units_display(&db.units_display),
+        );
+    }
     Ok(Value::Object(map))
+}
+
+/// The `UNITS` dialog's non-unit-context settings.
+fn encode_units_display(units: &crate::UnitsDisplay) -> Value {
+    let mut map = Map::new();
+    map.insert(
+        "length_format".to_string(),
+        Value::from(units.length_format.as_token()),
+    );
+    map.insert(
+        "angle_format".to_string(),
+        Value::from(units.angle_format.as_token()),
+    );
+    map.insert(
+        "angle_precision".to_string(),
+        Value::from(units.angle_precision),
+    );
+    map.insert(
+        "angle_base_degrees".to_string(),
+        encode_f64(units.angle_base_degrees),
+    );
+    map.insert(
+        "angle_clockwise".to_string(),
+        Value::Bool(units.angle_clockwise),
+    );
+    Value::Object(map)
 }
 
 /// The `DWGPROPS` summary/metadata block.
@@ -169,6 +209,7 @@ pub(crate) fn apply_to(
     let code_page = reader.opt_string("code_page")?;
     let active = reader.take_active_annotation_scale("active_annotation_scale", db)?;
     let metadata = reader.take_document_metadata("metadata")?;
+    let units_display = reader.take_units_display("units_display")?;
     reader.finish()?;
 
     db.linetype_scale = linetype_scale;
@@ -180,6 +221,7 @@ pub(crate) fn apply_to(
     db.code_page = code_page;
     db.active_annotation_scale = active;
     db.document_metadata = metadata;
+    db.units_display = units_display;
 
     // `DrawingDatabase::invalidate_bounds_cache` is `pub(super)` to the
     // `drawing` module, so a sibling module cannot call it. Replacing the memo
@@ -343,6 +385,60 @@ impl Reader {
         };
         reader.finish()?;
         Ok(metadata)
+    }
+
+    /// Read the `UNITS` display block. A missing key (or `null`) is the
+    /// documented default; a present block must carry all five fields, with a
+    /// closed token and an in-range precision. Nothing is clamped.
+    fn take_units_display(&mut self, variable: &str) -> Result<crate::UnitsDisplay, SnapshotError> {
+        let Some(value) = self.map.remove(variable) else {
+            return Ok(crate::UnitsDisplay::default());
+        };
+        if value.is_null() {
+            return Ok(crate::UnitsDisplay::default());
+        }
+        let context = format!("{} {variable}", self.context);
+        let mut reader = Reader::new(&value, &context)?;
+        let length_format = {
+            let token = reader.string("length_format")?;
+            crate::LengthFormat::from_token(&token)
+                .ok_or_else(|| reader.error(format!("length_format: unknown token {token:?}")))?
+        };
+        let angle_format = {
+            let token = reader.string("angle_format")?;
+            crate::AngleFormat::from_token(&token)
+                .ok_or_else(|| reader.error(format!("angle_format: unknown token {token:?}")))?
+        };
+        let angle_precision = {
+            let raw = reader
+                .take("angle_precision")?
+                .as_u64()
+                .ok_or_else(|| reader.error("angle_precision: expected a JSON integer"))?;
+            let precision = u8::try_from(raw)
+                .map_err(|_| reader.error(format!("angle_precision: {raw} is out of range")))?;
+            if precision > crate::UNITS_MAX_PRECISION {
+                return Err(reader.error(format!(
+                    "angle_precision: {precision} is above {}",
+                    crate::UNITS_MAX_PRECISION
+                )));
+            }
+            precision
+        };
+        let angle_base_degrees = reader.f64("angle_base_degrees")?;
+        let angle_clockwise = match reader.take("angle_clockwise")? {
+            Value::Bool(value) => value,
+            _ => return Err(reader.error("angle_clockwise: expected a boolean")),
+        };
+        let units = crate::UnitsDisplay {
+            length_format,
+            angle_format,
+            angle_precision,
+            angle_base_degrees,
+            angle_clockwise,
+        };
+        units.validate().map_err(|error| reader.error(error))?;
+        reader.finish()?;
+        Ok(units)
     }
 
     fn take_custom(

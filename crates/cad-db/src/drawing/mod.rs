@@ -44,6 +44,7 @@ mod point_style;
 mod scale_edit;
 mod style_edit;
 mod transaction;
+mod units_display;
 
 #[cfg(test)]
 mod test_support;
@@ -69,6 +70,7 @@ pub use style_edit::{
     DimStylePatch, MLeaderStylePatch, StylePatch, StyleTableChanges, DEFAULT_DIM_STYLE_NAME,
 };
 pub use transaction::DrawingTransaction;
+pub use units_display::{AngleFormat, LengthFormat, UnitsDisplay, UNITS_MAX_PRECISION};
 
 pub(crate) use bounds::BoundsCache;
 
@@ -251,6 +253,11 @@ pub struct DrawingDatabase {
     /// keywords/comments plus custom properties. Empty for every document that
     /// stores none; written by [`DrawingDatabase::set_document_metadata`].
     pub(crate) document_metadata: DocumentMetadata,
+    /// Document-level `UNITS` display settings that are not part of
+    /// [`cad_domain::UnitContext`]: length format, angular format/precision and
+    /// the base-angle/clockwise direction. Defaults for every document that never
+    /// edited them; written by [`DrawingDatabase::set_units_display`].
+    pub(crate) units_display: UnitsDisplay,
     /// The source drawing's declared text code page (`$DWGCODEPAGE` /
     /// `DOCUMENT.header.code_page`), exactly as the reader reported it.
     ///

@@ -95,6 +95,7 @@ impl CadSession {
             DWGPROPS_SELECTOR => self.dwgprops_argument(argument, text),
             UNITS_SELECTOR | DASH_UNITS_SELECTOR => self.units_argument(selector, argument, text),
             super::sysvdlg_dialog::SYSVDLG_SELECTOR => self.sysvdlg_argument(argument, text),
+            super::commands::ACADINFO_SELECTOR => self.acadinfo_argument(argument, text),
             _ => self.refuse_argument(format!("unsupported utility selector: {selector}")),
         }
     }
@@ -201,8 +202,10 @@ impl CadSession {
     ) -> Result<(), String> {
         let Some(units) = parse_units_argument(argument) else {
             return self.refuse_argument(format!(
-                "units.invalid_argument: '{text}' needs `<unit> <precision>` where <unit> is \
-                 drawing, mm, cm, m, in or ft and <precision> is 0 to 8; nothing was written"
+                "units.invalid_argument: '{text}' needs `<unit> <precision>` (unit drawing, mm, \
+                 cm, m, in or ft; precision 0 to 8), `LENGTH <format>`, `ANGLE <format> \
+                 <precision>` or `ANGLE DIRECTION <east|north|west|south|other> [<degrees>] \
+                 [CW|CCW]`; nothing was written"
             ));
         };
         let id = if selector == DASH_UNITS_SELECTOR {

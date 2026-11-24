@@ -513,11 +513,46 @@ fn acadinfo_reports_real_product_and_document_counts_only() {
     assert!(diagnostic(&outcome, "acadinfo.not_collected")
         .message
         .contains("not collected"));
-    // The one non-global gap is named: no information file is written.
-    assert!(diagnostic(&outcome, "acadinfo.file_not_written")
-        .message
-        .contains("writes no file"));
+    // The file form is real and named; only the global-scope omissions remain.
+    assert!(
+        diagnostic(&outcome, "acadinfo.file_available")
+            .message
+            .contains("ACADINFO <file.json>")
+            && diagnostic(&outcome, "acadinfo.file_available")
+                .message
+                .contains("yacr.acadinfo")
+    );
     assert_eq!(revision(&app), before);
+}
+
+#[test]
+fn acadinfo_file_snapshot_is_versioned_and_reads_the_live_document() {
+    let (app, _session) = application_with_document();
+    let snapshot = app
+        .acad_info_snapshot(DocumentId(1))
+        .expect("the open document has an ACADINFO snapshot");
+    let file = snapshot.to_file_value();
+    assert_eq!(file["format"], "yacr.acadinfo");
+    assert_eq!(file["version"], 1);
+    assert_eq!(file["product"]["name"], "yacr");
+    assert_eq!(file["product"]["component"], "cad-app");
+    assert_eq!(file["product"]["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(file["product"]["targetOs"], std::env::consts::OS);
+    assert_eq!(file["product"]["targetArch"], std::env::consts::ARCH);
+    assert_eq!(file["document"]["id"], "1");
+    assert_eq!(file["document"]["revision"], 0);
+    assert_eq!(file["document"]["entities"], 0);
+    assert_eq!(file["document"]["units"], "drawing units");
+    assert_eq!(file["document"]["decimalPlaces"], 3);
+    assert!(file["document"]["applicationDomain"].is_null());
+    assert_eq!(file["notCollected"][0], "licence");
+    assert_eq!(file["notCollected"][1], "hardware");
+    assert_eq!(file["notCollected"][2], "installedModules");
+    // No invented timestamp: the build tracks no document clock.
+    assert!(file.get("savedAt").is_none());
+    assert!(file["document"].get("createdAt").is_none());
+    assert!(file["document"].get("updatedAt").is_none());
+    assert!(app.acad_info_snapshot(DocumentId(99)).is_none());
 }
 
 #[test]

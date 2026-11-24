@@ -21,21 +21,73 @@ pub enum DwgPropsCommand {
     SetCustom { name: String, value: String },
 }
 
-/// One `UNITS`/`-UNITS` drawing-unit write.
+/// One `UNITS`/`-UNITS` document-units write.
 ///
-/// The command's representable domain is the document's declared source and
-/// display unit plus the linear decimal precision. Angle format/precision/
-/// direction and the AutoCAD length *format* table are not modeled, so the
-/// command reports that gap instead of accepting values it cannot store.
+/// The command carries a **patch**: `None` leaves that setting alone. The
+/// representable domain is the document's declared unit + linear decimal
+/// precision (`cad_domain::UnitContext`) plus the document-level settings the
+/// Units dialog also edits — the length *format* and the angular
+/// format/precision/base-angle/clockwise direction ([`cad_db::UnitsDisplay`]).
+/// No field is defaulted by this layer: an absent field is unchanged and an
+/// empty patch is refused.
+///
+/// `$INSUNITS` insertion scaling (scaling an inserted drawing by the source and
+/// target units) is not modelled; the command reports that boundary by name.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UnitsCommand {
+    /// The declared unit and linear decimal precision, when the line writes
+    /// them. The two are chosen together: one typed unit keeps the stored
+    /// numbers unchanged (`display_per_source = 1.0`).
+    pub declared: Option<DeclaredUnits>,
+    /// The linear length format (`Scientific`/`Decimal`/…).
+    pub length_format: Option<cad_db::LengthFormat>,
+    /// The angular format (`DecimalDegrees`/`DegreesMinutesSeconds`/…).
+    pub angle_format: Option<cad_db::AngleFormat>,
+    /// Angular decimal places, `0..=8`.
+    pub angle_precision: Option<u8>,
+    /// `ANGBASE` in degrees (0 East, 90 North, 180 West, 270 South, anything
+    /// else is the dialog's `Other`).
+    pub angle_base_degrees: Option<f64>,
+    /// `ANGDIR`: `true` clockwise, `false` counter-clockwise.
+    pub angle_clockwise: Option<bool>,
+}
+
+/// One declared-unit write inside [`UnitsCommand`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeclaredUnits {
     /// The unit the drawing's coordinates are declared in, and the unit they
-    /// are displayed in. The two are chosen together: one typed unit keeps the
-    /// stored numbers unchanged (`display_per_source = 1.0`), which is exactly
-    /// what "declare the drawing in mm" means.
+    /// are displayed in.
     pub unit: cad_domain::Unit,
     /// Linear decimal places, `0..=8`.
     pub decimal_places: u8,
+}
+
+impl UnitsCommand {
+    /// The declared-unit context this patch would write, or `None` when it does
+    /// not touch the declared unit.
+    pub fn declared_context(&self) -> Option<cad_domain::UnitContext> {
+        self.declared
+            .as_ref()
+            .map(|declared| cad_domain::UnitContext {
+                source: declared.unit.clone(),
+                display: declared.unit.clone(),
+                display_per_source: match declared.unit {
+                    cad_domain::Unit::DrawingUnits => None,
+                    _ => Some(1.0),
+                },
+                decimal_places: declared.decimal_places,
+            })
+    }
+
+    /// Whether the patch names no setting at all.
+    pub fn is_empty(&self) -> bool {
+        self.declared.is_none()
+            && self.length_format.is_none()
+            && self.angle_format.is_none()
+            && self.angle_precision.is_none()
+            && self.angle_base_degrees.is_none()
+            && self.angle_clockwise.is_none()
+    }
 }
 
 /// One `SYSVDLG` action that is not the bare report.

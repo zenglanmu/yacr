@@ -428,15 +428,17 @@ impl Application {
             Diagnostic {
                 object: None,
                 code: "time.not_tracked".into(),
-                message: "time.not_tracked: drawing creation time (this database stores no \
-                          timestamps)"
+                message: "time.not_tracked: drawing creation time — `document.json` stores no \
+                          timestamp and adding one is a new persisted header schema; no value was \
+                          fabricated"
                     .into(),
             },
             Diagnostic {
                 object: None,
                 code: "time.not_tracked".into(),
-                message: "time.not_tracked: drawing last-update time (this database stores no \
-                          timestamps; the revision counter is the only change evidence)"
+                message: "time.not_tracked: drawing last-update time — every revision would need \
+                          a write-path timestamp, which this database has no field to carry; the \
+                          revision counter is the only change evidence"
                     .into(),
             },
             Diagnostic {

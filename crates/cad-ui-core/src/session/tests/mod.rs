@@ -6,6 +6,7 @@
 //! fixtures through `super::test_support::*`.
 
 mod test_support;
+mod tests_acadinfo;
 mod tests_action_recorder;
 mod tests_admission;
 mod tests_align;
