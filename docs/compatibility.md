@@ -392,7 +392,10 @@ RVT 那份样本计数是**契约观察，不是验收**。
 **仍明确未实现**：`Insert.scale`（缺少 transform/base 拆分，按 `param.no_evaluator` 拒绝）、文本模板
 （`cad:Text.text` 的 `{name}` 占位）、文档级参数面板的 React 消费者、P2 的特征求值器（solidcore 内核
 接入）、`voids`/`fills` 的 `(host,hosted)` 传播规则、P3 的几何 in-context 传播与 `cad-dependencies`
-统一调度。约束求解器、配合/装配求解、特征历史 rollback、跨文档外部参考仍是**非目标**（ADR-0043 D14）。
+统一调度。**二维几何/尺寸约束求解器**已由 ADR-0054（2026-11-24）放开为有界支持域；在实现与契约
+测试落地前，`GEOMCONSTRAINT`/`DIMCONSTRAINT`/`DC*`/`DELCONSTRAINT`/`AUTOCONSTRAIN`/
+`CONSTRAINTBAR`/`CONSTRAINTSETTINGS` 仍是具名拒绝。三维配合/装配求解、全局优先级、特征历史
+rollback、跨文档外部参考仍是**非目标**（ADR-0043 D14 由 ADR-0054 收窄）。
 
 **证据边界**：见 `docs/validation-parametric-2026-11-21.md`。只有库层/命令层契约与单元测试、
 `cargo check`/clippy/门禁、以及无 GPU 的 headless 求值测试；**没有**真实 GPU/像素/性能、真实宿主运行、

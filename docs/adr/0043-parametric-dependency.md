@@ -4,7 +4,9 @@
   但特征求值器与几何传播仍未接线**（显式 `rel.not_implemented` / `rel.no_rule`）。实现证据见
   `docs/validation-parametric-2026-11-21.md`，能力边界见 `docs/compatibility.md`。
 - 日期：2026-11-21（P0–P3 实现同日）。
-- 相关：[ADR-0037](0037-ymodel-schema-and-persistence.md)（`.ymodel` 唯一原生格式、`(kind << 45) | seq`、
+- 相关：[ADR-0054](0054-2d-constraint-solver.md)（2026-11-24 修订 D14：二维几何/尺寸约束求解器
+  在范围内；三维装配/配合、全局优先级、特征历史仍是非目标）、
+  [ADR-0037](0037-ymodel-schema-and-persistence.md)（`.ymodel` 唯一原生格式、`(kind << 45) | seq`、
   Definition/Geometry 三段）、[ADR-0042](0042-bim-semantics-in-ymodel.md)（元素可选 `bim` 块、
   `tables/bim-relations.json`、`PropertyRow` 动态行、`cad_ui_core::host_read`）、
   [ADR-0017](0017-dimension-family.md)（`display = f(definition, style)` 的纯函数先例）、
@@ -184,9 +186,10 @@ P0 的参数行来自选择投影（`cad_select_entities` 路径），不需要�
 - 只有「我方自造、无源词汇」的边（Phase 3 的 in-context 面/边引用）才需要新表，届时叫
   `tables/relations.json`。
 
-### D14 — 非目标
+### D14 — 非目标（2026-11-24 由 ADR-0054 收窄）
 
-- 不做约束求解器、不做配合/装配求解、不做「全局优先级表」（SolidWorks 自己也没有）。
+- **二维几何/尺寸约束求解器现由 [ADR-0054](0054-2d-constraint-solver.md) 接管，不再属于本 ADR 的
+  非目标**；三维配合/装配求解、「全局优先级表」仍不做（SolidWorks 自己也没有）。
 - 不做特征历史 rollback/freeze、不做跨文档外部参考（P3 才评估）。
 - 不引入脚本语言；表达式是封闭语法，不是求值器插件。
 - 不把参数当通用属性系统（不做任意 key→value；槽位必须由类型注册）。

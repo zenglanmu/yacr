@@ -225,6 +225,10 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
   （`cad_ui_core::host_read`：`HostReadRequest{kind:"bimQuery"}` → `HostReadAnswer`，
   `cad-desktop-shell` 只提供 `HostReadFn` 闭包适配），**新增 kind 不得再新增每载体文件**；未知 kind
   按 `unsupported-runtime: hostRead.kind` 拒绝。
+  **二维约束**：ADR-0054（2026-11-24）放开有界二维几何/尺寸约束求解器（`GEOMCONSTRAINT`/
+  `DIMCONSTRAINT`/`DC*`/`DELCONSTRAINT`/`AUTOCONSTRAIN`/`CONSTRAINTBAR`/`CONSTRAINTSETTINGS`）；
+  实现前这些命令仍是具名拒绝，三维装配/配合、全局优先级、特征历史仍非目标。计划新增
+  `tables/constraints.json`，minor 在块属性（计划 14）之后取 15。
   **报告弹窗 UI、
   L0 源字节直通、DXF L1 不动点仍未实现**，不得写成已完成。
 
