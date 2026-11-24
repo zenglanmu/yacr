@@ -147,7 +147,7 @@ fn missing_block_is_reported_missing_not_an_empty_success() {
     let req = request(bytes);
     let acad = acadrust::CadDocument::new();
     let stats = ReadStats::default();
-    let builder = ImporterBuilder::new(&req, &acad, stats, compute_identity(&[]));
+    let mut builder = ImporterBuilder::new(&req, &acad, stats, compute_identity(&[]));
     let mut i = acadrust::entities::Insert::new("NOPE", acadrust::types::Vector3::ZERO);
     i.column_count = 1;
     i.row_count = 1;

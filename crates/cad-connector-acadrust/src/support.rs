@@ -234,6 +234,12 @@ pub(crate) fn display_support(geometry: &SemanticGeometry) -> (SupportStatus, Su
         // a host-resource question, not a missing representation. Whether the
         // font resolves is reported by the representation/text build, not here.
         SemanticGeometry::Text { .. } => (SupportStatus::Unverified, SupportStatus::Unverified),
+        // An ATTDEF is text-like: its definition draws its own default at model
+        // space, and the reference path draws the per-INSERT values. Glyph
+        // availability is a host-font question, so it is never `Verified` here.
+        SemanticGeometry::AttributeDefinition(_) => {
+            (SupportStatus::Unverified, SupportStatus::Unverified)
+        }
         SemanticGeometry::Insert { .. } => (SupportStatus::Unverified, SupportStatus::Unverified),
         SemanticGeometry::Compound(children) => {
             let mut render = SupportStatus::Verified;

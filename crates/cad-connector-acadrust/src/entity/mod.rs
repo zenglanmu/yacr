@@ -6,6 +6,7 @@
 
 use super::*;
 
+mod attribute;
 mod convert;
 mod extended;
 mod hatch;
@@ -18,6 +19,8 @@ mod xclip;
 // former single-file `entity` module keep resolving. Most of these items are
 // inherent `ImporterBuilder` methods, which are reachable through the type
 // regardless; the allow keeps the uniform surface from tripping `-D warnings`.
+#[allow(unused_imports)]
+use attribute::*;
 #[allow(unused_imports)]
 use convert::*;
 #[allow(unused_imports)]

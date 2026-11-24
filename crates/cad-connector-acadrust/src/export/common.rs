@@ -26,7 +26,7 @@ use super::report::MappingOutcome;
 /// empty or exactly `ByLayer`, so the canonical upper-case token is what makes
 /// the symbolic form visible in the written file instead of implied by an
 /// omission.
-const BY_LAYER_LINETYPE: &str = "BYLAYER";
+pub(super) const BY_LAYER_LINETYPE: &str = "BYLAYER";
 
 /// Fold extra per-entity reasons into a base outcome.
 ///
@@ -143,7 +143,7 @@ pub(super) fn common_for(
     (common, reasons)
 }
 
-fn linetype_from_pattern(name: &str, pattern: &LinetypePattern) -> DxfLineType {
+pub(super) fn linetype_from_pattern(name: &str, pattern: &LinetypePattern) -> DxfLineType {
     let mut entry = DxfLineType::new(name);
     entry.elements = pattern
         .elements

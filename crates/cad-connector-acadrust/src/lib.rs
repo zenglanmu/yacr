@@ -265,6 +265,10 @@ struct ImporterBuilder<'a> {
     layout_ids: HashMap<String, LayoutId>,
     next_entity: u128,
     next_object: u128,
+    /// Monotonic ordering key for imported `ATTDEF` definitions (ADR-0055
+    /// `AttributeDefinition::order`). It preserves the source order within each
+    /// block; it is never an identity (the tag is).
+    next_attribute_order: u32,
     entity_total: usize,
     dropped: usize,
     proxy: ProxyPlayer,

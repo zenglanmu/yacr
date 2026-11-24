@@ -183,6 +183,24 @@ pub(super) fn emit(
                 };
             // Declared fallback: this reference genuinely cannot be one `INSERT`,
             // so its members are expanded in place and the reason is recorded.
+            // Its concrete ATTRIB values have no place to attach once the
+            // reference is exploded (they are reference-owned, not block
+            // members), so that loss gets its own stable code rather than
+            // disappearing with the reference.
+            if let SemanticGeometry::Insert { attributes, .. } = &entity.geometry {
+                if !attributes.is_empty() {
+                    acc.record_dropped_code(
+                        object,
+                        "export.insert.attributes_dropped",
+                        vec![format!(
+                            "the exploded reference carries {} attribute value(s); they belong to \
+                             the reference and are not written because no INSERT record exists to \
+                             attach them to",
+                            attributes.len()
+                        )],
+                    );
+                }
+            }
             if depth + 1 > ctx.limits.max_explode_depth {
                 return Err(CadError::InvalidInput(format!(
                     "insert explode depth exceeds the {} limit",
@@ -722,13 +740,11 @@ fn emit_leaf(
                 "wipeout/mask has no DXF representation in this export".into(),
             ]),
         ),
-        // ADR-0055: an `ATTDEF` has no export path yet. Record the drop by name
-        // instead of writing something else (M2 owns ATTRIB export).
-        SemanticGeometry::AttributeDefinition(_) => acc.record(
-            object,
-            "attribute_definition",
-            MappingOutcome::Dropped(vec!["ATTDEF export is not implemented in this build".into()]),
-        ),
+        // ADR-0055: an `ATTDEF` is written as a real block member through the
+        // normal member path, carrying its tag/prompt/default/flags/placement.
+        SemanticGeometry::AttributeDefinition(definition) => {
+            super::attribute::emit_definition(doc, entity, definition, ctx, acc)?;
+        }
         SemanticGeometry::Opaque { type_key, .. } => acc.record(
             object,
             "opaque",

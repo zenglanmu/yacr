@@ -366,32 +366,39 @@ impl<'a> ImporterBuilder<'a> {
                 ),
                 Completeness::Complete,
             ),
-            EntityType::AttributeDefinition(a) => {
-                let text = if a.default_value.is_empty() {
-                    a.tag.clone()
-                } else {
-                    a.default_value.clone()
-                };
-                let (position, rotation) =
-                    text_ocs_placement(p3(a.normal), p3(a.insertion_point), a.rotation);
-                (
-                    self.attribute_text(&a.text_style, text, position, a.height, rotation),
-                    Completeness::Complete,
-                )
-            }
+            // ADR-0055: an ATTDEF is a block-definition member of its own class,
+            // not a flattened TEXT. The definition carries the tag, prompt,
+            // default, flags and the placement in the block's local frame.
+            EntityType::AttributeDefinition(a) => self.attribute_definition_semantics(a),
+            // An ATTRIB that reached the entity walk with no owning INSERT keeps
+            // its pre-M2 Text fallback, but the loss is declared: ownership is
+            // never guessed. `insert_semantics` consumes the values acadrust
+            // attached to a reference, so this arm is the genuinely orphan case.
             EntityType::AttributeEntity(a) => {
                 let (position, rotation) =
                     text_ocs_placement(p3(a.normal), p3(a.insertion_point), a.rotation);
-                (
-                    self.attribute_text(
-                        &a.text_style,
-                        a.value.clone(),
-                        position,
-                        a.height,
-                        rotation,
-                    ),
-                    Completeness::Complete,
-                )
+                let geometry = self.attribute_fallback_text(
+                    &a.text_style,
+                    a.value.clone(),
+                    position,
+                    a.height,
+                    rotation,
+                );
+                let reason =
+                    "attribute value has no owning INSERT; drawn as plain TEXT".to_string();
+                if self.reported_reasons.insert(reason.clone()) {
+                    self.diagnostics.push(Diagnostic {
+                        object: None,
+                        code: "import.orphan_attrib".into(),
+                        message: format!(
+                            "attribute {:?} (handle {:X}) has no owning INSERT; it is drawn as a \
+                             plain TEXT and its tag/flags are not stored",
+                            a.tag,
+                            a.common.handle.value()
+                        ),
+                    });
+                }
+                (geometry, Completeness::Partial(vec![reason]))
             }
             // The three mesh kinds keep only vertices and face topology, so
             // `Complete` was a false claim. Each dropped *class* of data is a
@@ -424,7 +431,7 @@ impl<'a> ImporterBuilder<'a> {
             EntityType::Tolerance(t) => {
                 let (frame, _width, _height) = tolerance_frame(t);
                 let style_name = self.dim_text_style(&t.dimension_style_name);
-                let text = self.attribute_text(
+                let text = self.attribute_fallback_text(
                     &style_name,
                     t.text.clone(),
                     p3(t.insertion_point),

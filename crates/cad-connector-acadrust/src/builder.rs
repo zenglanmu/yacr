@@ -50,6 +50,7 @@ impl<'a> ImporterBuilder<'a> {
             layout_ids: HashMap::new(),
             next_entity: 1,
             next_object: 1,
+            next_attribute_order: 0,
             entity_total: 0,
             dropped: 0,
             proxy,
