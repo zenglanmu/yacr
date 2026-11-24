@@ -1845,11 +1845,11 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 | `3DFORBIT` | **部分实现（具名拒绝）**：`3dforbit.unsupported: no free 3D orbit controller` | 不写库/不升修订/不入历史 |
 | `3DMESH` | **部分实现（具名拒绝）**：`3dmesh.unsupported: no free-form mesh creation model` | 不写库/不升修订/不入历史 |
 | `3DMOVE` | **部分实现（具名拒绝）**：`3dmove.unsupported: no 3D move gizmo` | 不写库/不升修订/不入历史 |
-| `3DORBIT` | **部分实现（具名拒绝）**：`3dorbit.unsupported: no interactive 3D orbit controller; use ORBIT` | 不写库/不升修订/不入历史 |
+| `3DORBIT` | **完整实现**：`ORBIT` 的别名，同一相机/拖动处理与拒绝路径 | 无第二导航引擎；`3DORBITCTR` 仍是独立具名拒绝 |
 | `3DORBITCTR` | **部分实现（具名拒绝）**：`3dorbitctr.unsupported: no 3D orbit-center model` | 不写库/不升修订/不入历史 |
 | `-3DOSNAP` | **部分实现（具名拒绝）**：`-3dosnap.unsupported: no 3D object-snap model` | 不写库/不升修订/不入历史 |
 | `3DOSNAP` | **部分实现（具名拒绝）**：`3dosnap.unsupported: no 3D object-snap model` | 不写库/不升修订/不入历史 |
-| `3DPAN` | **部分实现（具名拒绝）**：`3dpan.unsupported: no 3D pan navigation` | 不写库/不升修订/不入历史 |
+| `3DPAN` | **完整实现**：`PAN` 的别名，同一导航漏斗与拒绝路径 | 无第二导航引擎 |
 | `3DPOLY` | **部分实现（具名拒绝）**：`3dpoly.unsupported: no 3D polyline entity model` | 不写库/不升修订/不入历史 |
 | `3DPRINT` | **部分实现（具名拒绝）**：`3dprint.unsupported: no 3D print model` | 不写库/不升修订/不入历史 |
 | `3DPRINTSERVICE` | **部分实现（具名拒绝）**：`3dprintservice.unsupported: no STL export or 3D print service` | 不写库/不升修订/不入历史 |
@@ -1965,9 +1965,9 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 | `REVOLVE` | **部分实现（具名拒绝）**：`revolve.unsupported: 3D revolution is not implemented` | 不写库/不升修订/不入历史 |
 | `SWEEP` | **部分实现（具名拒绝）**：`sweep.unsupported: 3D sweep is not implemented` | 不写库/不升修订/不入历史 |
 | `LOFT` | **部分实现（具名拒绝）**：`loft.unsupported: 3D loft is not implemented` | 不写库/不升修订/不入历史 |
-| `INTERSECT` | **部分实现（后台布尔，C2）**：选中 ≥2 个平面或曲面 `AcDb3dSolid` 实体 → worker 左折叠 → poll 在一条事务/一步撤销里删除操作数并插入交集实体 | 曲面操作数参与内核布尔（P2.1b part 2）；无精确 pcurve / 无 `(u,v)` box 的曲面面仍按名拒绝（`solid.lift_unsupported`），`nurbs: false` 的模型器答 `solid.nurbs_not_supported`；`boolean.needs_two`/`boolean.non_solid_operand`/`boolean.sub_element_not_supported`/`boolean.layer_mismatch`/`boolean.space_mismatch`；操作数被编辑 → `Stale`（图纸不变）；无模型器 → `unsupported-runtime: solid-modeler`；证据仅 Linux 契约（真实 solidcore），GPU/像素 NOT VERIFIED |
-| `UNION` | **部分实现（后台布尔，C2）**：选中 ≥2 个平面或曲面 `AcDb3dSolid` 实体 → worker 左折叠 → poll 提交一个合并实体（一条事务/一步撤销） | 同上：曲面操作数参与内核布尔（P2.1b）、无精确 pcurve/box 的曲面面仍按名拒绝、具名校验码、`Stale` 丢弃（`solid.boolean_stale` 状态）、`solid.boolean_busy` 拒绝、无模型器拒绝；证据仅 Linux 契约，GPU/像素 NOT VERIFIED |
-| `SUBTRACT` | **部分实现（后台布尔，C2）**：第一个选中实体减去其余实体 → poll 提交差集实体（一条事务/一步撤销）；操作数可为平面或曲面体（P2.1b） | 同上：曲面操作数参与内核布尔、无精确 pcurve/box 的曲面面仍按名拒绝、其余具名校验码、`Stale` 丢弃（`solid.boolean_stale` 状态）、`solid.boolean_busy` 拒绝、无模型器拒绝；证据仅 Linux 契约，GPU/像素 NOT VERIFIED |
+| `INTERSECT` | **完整实现（后台布尔，C2，单壳结果）**：选中 ≥2 个平面或曲面 `AcDb3dSolid` 实体 → worker 左折叠 → poll 在一条事务/一步撤销里删除操作数并插入交集实体；提交前校验结果为单个连通非空壳，多壳/空壳按 `solid.boolean_result_not_single_shell` 拒绝且不写库/不升修订/不退操作数 | 曲面操作数参与内核布尔（P2.1b part 2）；无精确 pcurve / 无 `(u,v)` box 的曲面面仍按名拒绝（`solid.lift_unsupported`），`nurbs: false` 的模型器答 `solid.nurbs_not_supported`；`boolean.needs_two`/`boolean.non_solid_operand`/`boolean.sub_element_not_supported`/`boolean.layer_mismatch`/`boolean.space_mismatch`；操作数被编辑 → `Stale`（图纸不变）；无模型器 → `unsupported-runtime: solid-modeler`；证据仅 Linux 契约（真实 solidcore），GPU/像素 NOT VERIFIED |
+| `UNION` | **完整实现（后台布尔，C2，单壳结果）**：选中 ≥2 个平面或曲面 `AcDb3dSolid` 实体 → worker 左折叠 → poll 提交一个合并实体（一条事务/一步撤销）；提交前校验结果为单个连通非空壳，多壳/空壳按 `solid.boolean_result_not_single_shell` 拒绝且不写库/不升修订/不退操作数 | 同上：曲面操作数参与内核布尔（P2.1b）、无精确 pcurve/box 的曲面面仍按名拒绝、具名校验码、`Stale` 丢弃（`solid.boolean_stale` 状态）、`solid.boolean_busy` 拒绝、无模型器拒绝；证据仅 Linux 契约，GPU/像素 NOT VERIFIED |
+| `SUBTRACT` | **完整实现（后台布尔，C2，单壳结果）**：第一个选中实体减去其余实体 → poll 提交差集实体（一条事务/一步撤销）；操作数可为平面或曲面体（P2.1b）；提交前校验结果为单个连通非空壳，多壳/空壳按 `solid.boolean_result_not_single_shell` 拒绝且不写库/不升修订/不退操作数 | 同上：曲面操作数参与内核布尔、无精确 pcurve/box 的曲面面仍按名拒绝、其余具名校验码、`Stale` 丢弃（`solid.boolean_stale` 状态）、`solid.boolean_busy` 拒绝、无模型器拒绝；证据仅 Linux 契约，GPU/像素 NOT VERIFIED |
 | `SLICE` | **部分实现（具名拒绝）**：`slice.unsupported: no 3D slicing model` | 不写库/不升修订/不入历史 |
 | `THICKEN` | **部分实现（具名拒绝）**：`thicken.unsupported: no surface-to-solid model` | 不写库/不升修订/不入历史 |
 | `PRESSPULL` | **部分实现（具名拒绝）**：`presspull.unsupported: no press/pull model` | 不写库/不升修订/不入历史 |
@@ -2421,7 +2421,7 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 | `TABSURF` | **部分实现（具名拒绝）**：`tabsurf.unsupported: no 3D surface (NURBS) model` | 不写库/不升修订/不入历史 |
 | `REVSURF` | **部分实现（具名拒绝）**：`revsurf.unsupported: no 3D surface (NURBS) model` | 不写库/不升修订/不入历史 |
 | `RULESURF` | **部分实现（具名拒绝）**：`rulesurf.unsupported: no 3D surface (NURBS) model` | 不写库/不升修订/不入历史 |
-| `XEDGES` | **部分实现（具名拒绝）**：`xedges.unsupported: no 3D solid/surface wireframe extraction model` | 不写库/不升修订/不入历史 |
+| `XEDGES` | **完整实现**：存储的 `BodyDisplay.edges` 逐段复制为 `LINE` 实体（同层/同空间、源 body 保留、零长段跳过），一条事务/一步撤销；空选择/非 body/子元素/无显示边按名拒绝 | 不焊接、不去重、不删除源；证据仅 Linux 契约，GPU/像素 NOT VERIFIED |
 | `SECTION` | **部分实现（具名拒绝）**：`section.unsupported: no 3D section-plane model` | 不写库/不升修订/不入历史 |
 | `SECTIONPLANE` | **部分实现（具名拒绝）**：`sectionplane.unsupported: no 3D section-plane model` | 不写库/不升修订/不入历史 |
 | `SECTIONPLANEJOG` | **部分实现（具名拒绝）**：`sectionplanejog.unsupported: no 3D section-plane model` | 不写库/不升修订/不入历史 |

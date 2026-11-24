@@ -26,8 +26,8 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **186** |
-| 部分实现（有写明的界） | **793** |
+| 完整实现 | **192** |
+| 部分实现（有写明的界） | **787** |
 | **已实现合计（完整 + 部分）** | **979** |
 | 未实现 | **2** |
 
@@ -369,10 +369,10 @@
 | `3DFORBIT` | 部分实现 | 具名拒绝（`3dforbit.unsupported: no free 3D orbit controller`）。 |
 | `3DMESH` | 部分实现 | 具名拒绝（`3dmesh.unsupported: no free-form mesh creation model`）。 |
 | `3DMOVE` | 部分实现 | 具名拒绝（`3dmove.unsupported: no 3D move gizmo`）。 |
-| `3DORBIT` | 部分实现 | 具名拒绝（`3dorbit.unsupported: no interactive 3D orbit controller; use ORBIT`）。 |
+| `3DORBIT` | 完整实现 | `ORBIT` 的别名：同一相机/拖动处理与拒绝路径，无第二导航引擎；`3DORBITCTR` 仍是独立具名拒绝。 |
 | `3DORBITCTR` | 部分实现 | 具名拒绝（`3dorbitctr.unsupported: no 3D orbit-center model`）。 |
 | `3DOSNAP` | 部分实现 | 具名拒绝（`3dosnap.unsupported: no 3D object-snap model`）。 |
-| `3DPAN` | 部分实现 | 具名拒绝（`3dpan.unsupported: no 3D pan navigation`）。 |
+| `3DPAN` | 完整实现 | `PAN` 的别名：同一导航漏斗与拒绝路径，无第二导航引擎。 |
 | `3DPOLY` | 部分实现 | 具名拒绝（`3dpoly.unsupported: no 3D polyline entity model`）。 |
 | `3DPRINT` | 部分实现 | 具名拒绝（`3dprint.unsupported: no 3D print model`）。 |
 | `3DPRINTSERVICE` | 部分实现 | 具名拒绝（`3dprintservice.unsupported: no STL export or 3D print service`）。 |
@@ -770,7 +770,7 @@
 | `INSERT` | 已实现 | — |
 | `INSERTOBJ` | 部分实现 | 具名拒绝（`insertobj.unsupported: this build has no OLE object storage model`）。 |
 | `INTERFERE` | 部分实现 | 具名拒绝（`interfere.unsupported: 3D solids are not modeled, so interference has nothing to compute`）。 |
-| `INTERSECT` | 部分实现 | 后台布尔（C2）：选中 ≥2 个平面或曲面 `AcDb3dSolid` 实体，worker 折叠后一条事务/一步撤销替换为一个实体；曲面操作数参与内核布尔（`nurbs.faces`；无 box / 无精确 pcurve 仍按名拒绝）；无模型器按 `unsupported-runtime: solid-modeler` 拒绝；操作数被编辑则 `Stale`（状态 `solid.boolean_stale`，图纸不变）；布尔运行期间图元创建按 `solid.boolean_busy` 拒绝。 |
+| `INTERSECT` | 完整实现 | 后台布尔（C2）：选中 ≥2 个平面或曲面 `AcDb3dSolid` 实体，worker 折叠后一条事务/一步撤销替换为一个实体；曲面操作数参与内核布尔（`nurbs.faces`；无 box / 无精确 pcurve 仍按名拒绝）；无模型器按 `unsupported-runtime: solid-modeler` 拒绝；操作数被编辑则 `Stale`（状态 `solid.boolean_stale`，图纸不变）；布尔运行期间图元创建按 `solid.boolean_busy` 拒绝；布尔结果在提交前校验为单个连通非空壳，多壳/空壳按 `solid.boolean_result_not_single_shell` 拒绝且不写库/不升修订/不退操作数。 |
 | `ISODRAFT` | 部分实现 | 会话令牌 `isodraft`；不切换等轴测平面/光标，无视觉变化。 |
 | `ISOLATEOBJECTS` | 部分实现 | 会话隐藏集：隐藏除当前选择外的模型空间对象；无数据库写/撤销 |
 | `ISOPLANE` | 部分实现 | 循环会话令牌 LEFT→TOP→RIGHT；无等轴测光标/捕捉变化。 |
@@ -1096,7 +1096,7 @@
 | `STRETCH` | 完整实现 | 交叉矩形、交叉多边形（连续点击、`CONFIRM` 或点回首顶点闭合）与**自由手绘 lasso**（一次拖拽采样、释放闭合并用既有 transient CROSSING 预览）都经工具捕获进入同一条 `StretchPolygon` → `polygon_window` 规划（`stretchWindow` 参数 0/1/2，默认 0）；even-odd 包含、部分包围逐顶点、完全包围整移；圆按圆心、块/文字按插入点；**IMAGE/MASK/TABLE 移动型分类**；环顶点数<3/非有限/零面积/未闭合按名拒绝，取消不写；`MULTILEADER` 整命令拒绝；一条事务/一步撤销 |
 | `STYLE` | 已实现 | `NEW <name> [<base>]`/`RENAME <old> <new>`/`DELETE <name>`/`SET <name> <FONT/KEYS/ADDKEY/REMOVEKEY> <value>`/`?`；一条 style-table patch/一步撤销；域 `Style` 只有 name/resource_keys，故只可写这两类字段；无“当前文字样式”会话变量 |
 | `STYLESMANAGER` | 部分实现 | 具名拒绝（`stylesmanager.unsupported`）：本构建无 CTB/STB 打印样式模型。 |
-| `SUBTRACT` | 部分实现 | 后台布尔（C2）：选中 ≥2 个平面或曲面 `AcDb3dSolid` 实体，worker 折叠后一条事务/一步撤销替换为一个实体；曲面操作数参与内核布尔（`nurbs.faces`；无 box / 无精确 pcurve 仍按名拒绝）；无模型器按 `unsupported-runtime: solid-modeler` 拒绝；操作数被编辑则 `Stale`（状态 `solid.boolean_stale`，图纸不变）；布尔运行期间图元创建按 `solid.boolean_busy` 拒绝。（第一个实体减其余）。 |
+| `SUBTRACT` | 完整实现 | 后台布尔（C2）：选中 ≥2 个平面或曲面 `AcDb3dSolid` 实体，worker 折叠后一条事务/一步撤销替换为一个实体；曲面操作数参与内核布尔（`nurbs.faces`；无 box / 无精确 pcurve 仍按名拒绝）；无模型器按 `unsupported-runtime: solid-modeler` 拒绝；操作数被编辑则 `Stale`（状态 `solid.boolean_stale`，图纸不变）；布尔运行期间图元创建按 `solid.boolean_busy` 拒绝；布尔结果在提交前校验为单个连通非空壳，多壳/空壳按 `solid.boolean_result_not_single_shell` 拒绝且不写库/不升修订/不退操作数。（第一个实体减其余）。 |
 | `SUNPROPERTIES` | 部分实现 | 具名拒绝（`sunproperties.unsupported: no sun/sky lighting model`）。 |
 | `SUNPROPERTIESCLOSE` | 部分实现 | 具名拒绝（`sunpropertiesclose.unsupported: no sun/sky lighting model`）。 |
 | `SUPERHATCH` | 部分实现 | 具名拒绝（`superhatch.unsupported`）：基于图像/块的超级填充未实现。 |
@@ -1166,7 +1166,7 @@
 | `ULAYERS` | 部分实现 | 具名拒绝（`ulayers.unsupported: no DWF/PDF/DGN underlay layer-display model`）。 |
 | `UNDO` | 已实现 | — |
 | `UNGROUP` | 部分实现 | 仅移除一个组名并保留全部实体；未知组名拒绝；不写实体/数据库 |
-| `UNION` | 部分实现 | 后台布尔（C2）：选中 ≥2 个平面或曲面 `AcDb3dSolid` 实体，worker 折叠后一条事务/一步撤销替换为一个实体；曲面操作数参与内核布尔（`nurbs.faces`；无 box / 无精确 pcurve 仍按名拒绝）；无模型器按 `unsupported-runtime: solid-modeler` 拒绝；操作数被编辑则 `Stale`（状态 `solid.boolean_stale`，图纸不变）；布尔运行期间图元创建按 `solid.boolean_busy` 拒绝。 |
+| `UNION` | 完整实现 | 后台布尔（C2）：选中 ≥2 个平面或曲面 `AcDb3dSolid` 实体，worker 折叠后一条事务/一步撤销替换为一个实体；曲面操作数参与内核布尔（`nurbs.faces`；无 box / 无精确 pcurve 仍按名拒绝）；无模型器按 `unsupported-runtime: solid-modeler` 拒绝；操作数被编辑则 `Stale`（状态 `solid.boolean_stale`，图纸不变）；布尔运行期间图元创建按 `solid.boolean_busy` 拒绝；布尔结果在提交前校验为单个连通非空壳，多壳/空壳按 `solid.boolean_result_not_single_shell` 拒绝且不写库/不升修订/不退操作数。 |
 | `UNISOLATEOBJECTS` | 部分实现 | 清空会话隐藏集；无数据库写/撤销 |
 | `UNITS` | 部分实现 | 只读报告（`units.report`/`units.dialog_not_implemented`）：图纸单位 4 位小数、角度用度；UNITS 对话框与逐图纸单位表未实现。 |
 | `UPDATEFIELD` | 部分实现 | 具名拒绝（`updatefield.unsupported`）：未建模字段。 |
@@ -1231,7 +1231,7 @@
 | `XCOMPARERCPREV` | 部分实现 | 具名拒绝（`xcomparercprev.unsupported: no xref comparison/diff model`）。 |
 | `XDATA` | 部分实现 | 具名拒绝（`xdata.unsupported`）：本数据库不保留实体 XDATA。 |
 | `XDLIST` | 部分实现 | 只读；每个选中实体报告 `xdlist.not_retained`；不伪造 xdata |
-| `XEDGES` | 部分实现 | 具名拒绝（`xedges.unsupported: no 3D solid/surface wireframe extraction model`）。 |
+| `XEDGES` | 完整实现 | 把存储的 `BodyDisplay.edges` 逐段复制为 `LINE` 实体（同层/同空间、源 body 保留、零长段跳过），一条事务/一步撤销；空选择/非 body/子元素/无显示边按名拒绝；不焊接、不去重、不删除源。 |
 | `XLINE` | 部分实现 | 两点创建，但落库为裁剪到模型包围盒的有限线段 |
 | `XLIST` | 部分实现 | 只读：列出块定义及成员数；实体 XDATA 不保留，不列出。 |
 | `XOPEN` | 部分实现 | 具名拒绝（`xopen.unsupported`）：本构建无外部参照编辑会话。 |
@@ -1271,11 +1271,11 @@
 | 10 | `3DFORBIT` | 部分实现 | Rotates the view in 3D space without constraining roll. | 具名拒绝（`3dforbit.unsupported: no free 3D orbit controller`）。 |
 | 11 | `3DMESH` | 部分实现 | Creates a free-form polygon mesh. | 具名拒绝（`3dmesh.unsupported: no free-form mesh creation model`）。 |
 | 12 | `3DMOVE` | 部分实现 | In a 3D view, displays the 3D Move gizmo to aid in moving 3D objects a specified distance in a specified direction. | 具名拒绝（`3dmove.unsupported: no 3D move gizmo`）。 |
-| 13 | `3DORBIT` | 部分实现 | Provides interactive viewing in 3D with the mouse. Right-click to display viewing options. | 具名拒绝（`3dorbit.unsupported: no interactive 3D orbit controller; use ORBIT`）。 |
+| 13 | `3DORBIT` | 完整实现 | Provides interactive viewing in 3D with the mouse. Right-click to display viewing options. | `ORBIT` 的别名：同一相机/拖动处理与拒绝路径，无第二导航引擎；`3DORBITCTR` 仍是独立具名拒绝。 |
 | 14 | `3DORBITCTR` | 部分实现 | Sets a specific center of rotation in 3D Orbit view. | 具名拒绝（`3dorbitctr.unsupported: no 3D orbit-center model`）。 |
 | 15 | `-3DOSNAP` | 部分实现 | Uses command prompts to set running object snap modes for 3D objects. | 具名拒绝（`-3dosnap.unsupported: no 3D object-snap model`）。 |
 | 16 | `3DOSNAP` | 部分实现 | Sets the object snap modes for 3D objects. | 具名拒绝（`3dosnap.unsupported: no 3D object-snap model`）。 |
-| 17 | `3DPAN` | 部分实现 | Shifts the view without changing the viewing direction or magnification. | 具名拒绝（`3dpan.unsupported: no 3D pan navigation`）。 |
+| 17 | `3DPAN` | 完整实现 | Shifts the view without changing the viewing direction or magnification. | `PAN` 的别名：同一导航漏斗与拒绝路径，无第二导航引擎。 |
 | 18 | `3DPOLY` | 部分实现 | Creates a 3D polyline. | 具名拒绝（`3dpoly.unsupported: no 3D polyline entity model`）。 |
 | 19 | `3DPRINT` | 部分实现 | Specifies 3D Plot settings, and prepares your drawing for 3D printing. | 具名拒绝（`3dprint.unsupported: no 3D print model`）。 |
 | 20 | `3DPRINTSERVICE` | 部分实现 | Creates an STL file that can be sent to a 3D printing service. | 具名拒绝（`3dprintservice.unsupported: no STL export or 3D print service`）。 |
@@ -1712,7 +1712,7 @@
 | 451 | `INSERTOBJ` | 部分实现 | Inserts a linked or embedded object. | 具名拒绝（`insertobj.unsupported: this build has no OLE object storage model`）。 |
 | 452 | `-INTERFERE` | 部分实现 | At the Command prompt, creates a temporary 3D solid from the interferences between two sets of selected 3D solids | 具名拒绝（`-interfere.unsupported: 3D solids are not modeled, so interference has nothing to compute`）。 |
 | 453 | `INTERFERE` | 部分实现 | Creates a temporary 3D solid from the interferences between two sets of selected 3D solids. | 具名拒绝（`interfere.unsupported: 3D solids are not modeled, so interference has nothing to compute`）。 |
-| 454 | `INTERSECT` | 部分实现 | Creates a 3D solid, surface, or 2D region from overlapping solids, surfaces, or regions. | 后台布尔（C2）：选中 ≥2 个平面或曲面 `AcDb3dSolid` 实体，worker 折叠后一条事务/一步撤销替换为一个实体；曲面操作数参与内核布尔（`nurbs.faces`；无 box / 无精确 pcurve 仍按名拒绝）；无模型器按 `unsupported-runtime: solid-modeler` 拒绝；操作数被编辑则 `Stale`（状态 `solid.boolean_stale`，图纸不变）；布尔运行期间图元创建按 `solid.boolean_busy` 拒绝。 |
+| 454 | `INTERSECT` | 完整实现 | Creates a 3D solid, surface, or 2D region from overlapping solids, surfaces, or regions. | 后台布尔（C2）：选中 ≥2 个平面或曲面 `AcDb3dSolid` 实体，worker 折叠后一条事务/一步撤销替换为一个实体；曲面操作数参与内核布尔（`nurbs.faces`；无 box / 无精确 pcurve 仍按名拒绝）；无模型器按 `unsupported-runtime: solid-modeler` 拒绝；操作数被编辑则 `Stale`（状态 `solid.boolean_stale`，图纸不变）；布尔运行期间图元创建按 `solid.boolean_busy` 拒绝；布尔结果在提交前校验为单个连通非空壳，多壳/空壳按 `solid.boolean_result_not_single_shell` 拒绝且不写库/不升修订/不退操作数。 |
 | 455 | `ISODRAFT` | 部分实现 | Turns isometric drafting settings on or off, and specifies the current 2D isometric drafting plane. | 会话令牌 `isodraft`；不切换等轴测平面/光标，无视觉变化。 |
 | 456 | `ISOLATEOBJECTS` | 部分实现 | Temporarily suppresses the display of all objects except those you select. | 会话隐藏集：隐藏除当前选择外的模型空间对象；无数据库写/撤销 |
 | 457 | `ISOPLANE` | 部分实现 | Specifies the current plane for 2D isometric drawing. | 循环会话令牌 LEFT→TOP→RIGHT；无等轴测光标/捕捉变化。 |
@@ -2082,7 +2082,7 @@
 | 821 | `-STYLE` | 已实现 | Creates, modifies, or specifies text styles. | `STYLE` 的命令行拼写，同一 grammar/写入路径与边界 |
 | 822 | `STYLE` | 已实现 | Creates, modifies, or specifies text styles. | `NEW <name> [<base>]`/`RENAME <old> <new>`/`DELETE <name>`/`SET <name> <FONT/KEYS/ADDKEY/REMOVEKEY> <value>`/`?`；一条 style-table patch/一步撤销；域 `Style` 只有 name/resource_keys，故只可写这两类字段；无“当前文字样式”会话变量 |
 | 823 | `STYLESMANAGER` | 部分实现 | Displays the Plot Style Manager, where you can revise plot style tables. | 具名拒绝（`stylesmanager.unsupported`）：本构建无 CTB/STB 打印样式模型。 |
-| 824 | `SUBTRACT` | 部分实现 | Creates as a new object by subtracting one overlapping region or 3D solid from another. | 后台布尔（C2）：选中 ≥2 个平面或曲面 `AcDb3dSolid` 实体，worker 折叠后一条事务/一步撤销替换为一个实体；曲面操作数参与内核布尔（`nurbs.faces`；无 box / 无精确 pcurve 仍按名拒绝）；无模型器按 `unsupported-runtime: solid-modeler` 拒绝；操作数被编辑则 `Stale`（状态 `solid.boolean_stale`，图纸不变）；布尔运行期间图元创建按 `solid.boolean_busy` 拒绝。（第一个实体减其余）。 |
+| 824 | `SUBTRACT` | 完整实现 | Creates as a new object by subtracting one overlapping region or 3D solid from another. | 后台布尔（C2）：选中 ≥2 个平面或曲面 `AcDb3dSolid` 实体，worker 折叠后一条事务/一步撤销替换为一个实体；曲面操作数参与内核布尔（`nurbs.faces`；无 box / 无精确 pcurve 仍按名拒绝）；无模型器按 `unsupported-runtime: solid-modeler` 拒绝；操作数被编辑则 `Stale`（状态 `solid.boolean_stale`，图纸不变）；布尔运行期间图元创建按 `solid.boolean_busy` 拒绝；布尔结果在提交前校验为单个连通非空壳，多壳/空壳按 `solid.boolean_result_not_single_shell` 拒绝且不写库/不升修订/不退操作数。（第一个实体减其余）。 |
 | 825 | `SUNPROPERTIES` | 部分实现 | Displays the Sun Properties palette. | 具名拒绝（`sunproperties.unsupported: no sun/sky lighting model`）。 |
 | 826 | `SUNPROPERTIESCLOSE` | 部分实现 | Closes the Sun Properties palette | 具名拒绝（`sunpropertiesclose.unsupported: no sun/sky lighting model`）。 |
 | 827 | `SUPERHATCH` | 部分实现 | Hatches an area using a selected image, block, xref, or wipeout object. | 具名拒绝（`superhatch.unsupported`）：基于图像/块的超级填充未实现。 |
@@ -2157,7 +2157,7 @@
 | 896 | `UNDEFINE` | 已实现 | Allows an application-defined command to override an internal command. | `UNDEFINE <name>` 会话内禁用内建命令；被禁用名按 `command.undefined: <NAME>` 拒绝且不派发；静态/运行时别名指向禁用目标时同样禁用；不写图 |
 | 897 | `UNDO` | 已实现 | Reverses the effect of commands. | — |
 | 898 | `UNGROUP` | 部分实现 | Disassociates the objects from a group. | 仅移除一个组名并保留全部实体；未知组名拒绝；不写实体/数据库 |
-| 899 | `UNION` | 部分实现 | Combines two or more 3D solids, surfaces, or 2D regions into a single, composite 3D solid, surface, or region. | 后台布尔（C2）：选中 ≥2 个平面或曲面 `AcDb3dSolid` 实体，worker 折叠后一条事务/一步撤销替换为一个实体；曲面操作数参与内核布尔（`nurbs.faces`；无 box / 无精确 pcurve 仍按名拒绝）；无模型器按 `unsupported-runtime: solid-modeler` 拒绝；操作数被编辑则 `Stale`（状态 `solid.boolean_stale`，图纸不变）；布尔运行期间图元创建按 `solid.boolean_busy` 拒绝。 |
+| 899 | `UNION` | 完整实现 | Combines two or more 3D solids, surfaces, or 2D regions into a single, composite 3D solid, surface, or region. | 后台布尔（C2）：选中 ≥2 个平面或曲面 `AcDb3dSolid` 实体，worker 折叠后一条事务/一步撤销替换为一个实体；曲面操作数参与内核布尔（`nurbs.faces`；无 box / 无精确 pcurve 仍按名拒绝）；无模型器按 `unsupported-runtime: solid-modeler` 拒绝；操作数被编辑则 `Stale`（状态 `solid.boolean_stale`，图纸不变）；布尔运行期间图元创建按 `solid.boolean_busy` 拒绝；布尔结果在提交前校验为单个连通非空壳，多壳/空壳按 `solid.boolean_result_not_single_shell` 拒绝且不写库/不升修订/不退操作数。 |
 | 900 | `UNISOLATEOBJECTS` | 部分实现 | Displays objects previously hidden with the ISOLATEOBJECTS or HIDEOBJECTS command. | 清空会话隐藏集；无数据库写/撤销 |
 | 901 | `-UNITS` | 部分实现 | Controls the precision and display formats for coordinates, distances, and angles. | 只读报告固定单位显示规则（`-units.*` 诊断码）；Units 对话框/逐图纸单位表未实现。 |
 | 902 | `UNITS` | 部分实现 | Controls the precision and display formats for coordinates, distances, and angles. | 只读报告（`units.report`/`units.dialog_not_implemented`）：图纸单位 4 位小数、角度用度；UNITS 对话框与逐图纸单位表未实现。 |
@@ -2232,7 +2232,7 @@
 | 971 | `XCOMPARERCPREV` | 部分实现 | Zooms to the previous change set of the xref comparison result. | 具名拒绝（`xcomparercprev.unsupported: no xref comparison/diff model`）。 |
 | 972 | `XDATA` | 部分实现 | Attaches extended object data (xdata) to a selected object. | 具名拒绝（`xdata.unsupported`）：本数据库不保留实体 XDATA。 |
 | 973 | `XDLIST` | 部分实现 | Lists the xdata attached to an object. | 只读；每个选中实体报告 `xdlist.not_retained`；不伪造 xdata |
-| 974 | `XEDGES` | 部分实现 | Creates wireframe geometry from the edges of a 3D solid, surface, mesh, region, or subobject. | 具名拒绝（`xedges.unsupported: no 3D solid/surface wireframe extraction model`）。 |
+| 974 | `XEDGES` | 完整实现 | Creates wireframe geometry from the edges of a 3D solid, surface, mesh, region, or subobject. | 把存储的 `BodyDisplay.edges` 逐段复制为 `LINE` 实体（同层/同空间、源 body 保留、零长段跳过），一条事务/一步撤销；空选择/非 body/子元素/无显示边按名拒绝；不焊接、不去重、不删除源。 |
 | 975 | `XLINE` | 部分实现 | Creates a construction line of infinite length. | 两点创建，但落库为裁剪到模型包围盒的有限线段 |
 | 976 | `XLIST` | 部分实现 | Lists the type, block name, layer name, color and linetype of a nested object in a block or an xref. | 只读：列出块定义及成员数；实体 XDATA 不保留，不列出。 |
 | 977 | `XOPEN` | 部分实现 | Opens a selected drawing reference (xref) in a new window. | 具名拒绝（`xopen.unsupported`）：本构建无外部参照编辑会话。 |
