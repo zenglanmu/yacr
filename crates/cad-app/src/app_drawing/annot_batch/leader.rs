@@ -67,7 +67,10 @@ pub(crate) struct LeaderOptions {
 /// `row` is the **stored** row (the raw `arrowhead_size` matters: the resolved
 /// snapshot clamps a `0` to the pinned default, which would hide an
 /// arrowhead-off style), `resolution` the single resolved snapshot the created
-/// entity stores.
+/// entity stores. `arrowhead` is the typed `QLEADER ARROW ON|OFF` request:
+/// `Some(false)` creates a line with no arrowhead (size `0` plus the per-line
+/// override bit), so a style that draws none is usable; every other request
+/// draws the style arrowhead, so a non-positive style size is refused.
 ///
 /// The annotation kind is **not** decided here: the typed `CONTENT` option (or,
 /// without one, the typed text) decides what the created entity carries, and
@@ -78,7 +81,8 @@ pub(crate) struct LeaderOptions {
 ///
 /// * `mleader.content_unsupported` — a style row whose content code is outside
 ///   the four known kinds (`0`..`3`);
-/// * `mleader.option_arrowhead_off` — the row disables the arrowhead (size `0`);
+/// * `mleader.option_arrowhead_off` — the row disables the arrowhead (size `0`)
+///   and the creation does not explicitly ask for no arrowhead;
 /// * `mleader.path_type` — an invisible leader path (no line at all);
 /// * `mleader.option_max_points` — a requested vertex count above
 ///   [`MAX_CREATED_LEADER_POINTS`];
@@ -86,6 +90,7 @@ pub(crate) struct LeaderOptions {
 pub(crate) fn plan_leader_options(
     row: &MLeaderStyle,
     resolution: &MLeaderStyleResolution,
+    arrowhead: Option<bool>,
 ) -> CadResult<LeaderOptions> {
     let style_content = MLeaderContentKind::from_dxf(row.content_type).ok_or_else(|| {
         CadError::Unsupported(format!(
@@ -100,10 +105,12 @@ pub(crate) fn plan_leader_options(
             row.arrowhead_size
         )));
     }
-    if row.arrowhead_size <= 0.0 {
+    let draw_arrowhead = arrowhead.unwrap_or(true);
+    if draw_arrowhead && row.arrowhead_size <= 0.0 {
         return Err(CadError::Unsupported(format!(
             "mleader.option_arrowhead_off: the resolved MLEADERSTYLE disables the arrowhead \
-             (size {}); creation always draws the style arrowhead, so nothing was written",
+             (size {}); this creation draws the style arrowhead, so nothing was written (ask for \
+             `ARROW OFF` to create an arrow-less leader)",
             row.arrowhead_size
         )));
     }
@@ -122,7 +129,7 @@ pub(crate) fn plan_leader_options(
     Ok(LeaderOptions {
         path,
         max_points,
-        arrowhead: true,
+        arrowhead: draw_arrowhead,
         style_content,
     })
 }
@@ -162,6 +169,11 @@ pub(crate) fn options_report(options: LeaderOptions, content: MLeaderContentKind
         MLeaderContentKind::Block => "block (an inserted block reference)",
         MLeaderContentKind::Tolerance => "tolerance (a feature-control frame)",
     };
+    let arrowhead = if options.arrowhead {
+        "on (line LEADER_LINE 40 = the style size)"
+    } else {
+        "off (line LEADER_LINE 40 = 0 with the per-line override bit 16)"
+    };
     Diagnostic {
         object: None,
         code: "mleader.options".into(),
@@ -171,7 +183,7 @@ pub(crate) fn options_report(options: LeaderOptions, content: MLeaderContentKind
              bit 0x400 when the two differ), {} point(s) (creation derives the captured arrow \
              plus the style dogleg start; the typed line carries exactly two coordinates, more \
              leader lines come from MLEADEREDIT ADD and multi-vertex lines only arrive by \
-             import), arrowhead on (style size); QLEADER and LEADER share this one plan",
+             import), arrowhead {arrowhead}; QLEADER and LEADER share this one plan",
             options.style_content.dxf(),
             options.max_points
         ),
@@ -230,9 +242,28 @@ impl Application {
                 "both the arrow and the landing point must be finite",
             ));
         }
+        // `QLEADER MAXPOINTS` is an input bound, not a geometry field: the
+        // creation derives exactly two vertices, so anything smaller than two is
+        // unusable and anything larger is the shared `mleader.option_max_points`
+        // refusal (raised by `create_mleader_with`). Both happen before any work.
+        if let Some(requested) = request.max_points {
+            if requested < 2 {
+                return Err(invalid(
+                    &format!("{prefix}.invalid_max_points"),
+                    format!(
+                        "MAXPOINTS must be at least 2 (the created leader's arrow and dogleg \
+                         start), got {requested}; nothing was written"
+                    ),
+                ));
+            }
+        }
+        let arrowhead = request.arrowhead;
+        let max_points = request.max_points;
+        let content = request.content.clone();
         // Reuse the one MLEADER creation path by rebuilding its ordinary
-        // payload; `create_mleader` owns every style/geometry/text/option refusal
-        // and the single transaction.
+        // payload; `create_mleader_with` owns every style/geometry/text/option
+        // refusal and the single transaction. The legacy `CONTENT`/`ARROW`/
+        // `MAXPOINTS` ride beside it as the same typed values `MLEADER` uses.
         let mleader = Command {
             schema_version: command.schema_version,
             id: CommandId::MLeader,
@@ -242,17 +273,18 @@ impl Application {
                 arrow: request.arrow,
                 landing: request.landing,
                 text: request.text,
-                // `QLEADER`/`LEADER` have no typed option line: the style row is
-                // their only option source, exactly as documented in this module.
+                // The style is the resolved session/`Standard` row: neither
+                // legacy command has a typed `STYLE` option.
                 style_name: None,
                 dogleg_length: None,
                 dogleg_angle: None,
                 attachment: None,
                 text_angle: None,
-                // QLEADER/LEADER always create MText (or content-less) leaders.
+                // The content kind is the shared `CONTENT` request, passed to the
+                // creation path below (never silently dropped).
                 content: None,
             },
         };
-        self.create_mleader(session, &mleader)
+        self.create_mleader_with(session, &mleader, content, arrowhead, max_points)
     }
 }

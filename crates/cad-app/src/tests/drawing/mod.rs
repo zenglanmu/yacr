@@ -380,6 +380,9 @@ mod mleader_options;
 // Block and tolerance content kinds (`172 = 1` / `172 = 3`), split out of
 // `mleader_create` for the code-size limit.
 mod mleader_content;
+// `QLEADER`/`LEADER` content + arrow/max-point options, split out of
+// `mleader_content` for the code-size limit.
+mod qleader_content;
 // The 2026-11-12 SHAPE/MINSERT/ADDSELECTED contracts.
 mod addselected;
 mod minsert;

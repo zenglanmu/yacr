@@ -10,6 +10,7 @@ mod dash_layer;
 mod dimension_batch;
 mod hatch_edit_payload;
 mod image;
+mod leader;
 mod param;
 mod qdim_payload;
 mod table;
@@ -19,6 +20,7 @@ pub use dash_layer::*;
 pub use dimension_batch::*;
 pub use hatch_edit_payload::*;
 pub use image::*;
+pub use leader::*;
 pub use param::*;
 pub use qdim_payload::*;
 pub use table::*;
@@ -313,17 +315,6 @@ pub enum GroupEditCommand {
     Remove { name: String, entities: Vec<u128> },
     /// Rename the group; membership is unchanged.
     Rename { name: String, new_name: String },
-}
-
-/// The input of a `QLEADER` / `LEADER` line (both map to one `MULTILEADER`).
-#[derive(Debug, Clone, PartialEq)]
-pub struct LeaderCommand {
-    /// The arrowhead point.
-    pub arrow: Point3,
-    /// The landing point (where the leader line ends and the text begins).
-    pub landing: Point3,
-    /// The non-empty, bounded text content.
-    pub text: String,
 }
 
 /// The input of a `TEXTFIT <target width>` line.

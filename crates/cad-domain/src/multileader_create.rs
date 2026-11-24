@@ -245,9 +245,19 @@ impl MultiLeaderGeometry {
                 style.text_height
             )));
         }
-        if !style.arrowhead_size.is_finite() || style.arrowhead_size <= 0.0 {
+        // `QLEADER ARROW OFF` stores the arrowhead on the **line** (size `0` +
+        // the per-line override bit), so a style that draws no arrowhead is only
+        // unusable when the created line is expected to draw one.
+        let draw_arrowhead = options.arrowhead.unwrap_or(true);
+        if draw_arrowhead && (!style.arrowhead_size.is_finite() || style.arrowhead_size <= 0.0) {
             return Err(CadError::InvalidInput(format!(
                 "mleader.style_invalid: the arrowhead size must be finite and positive, got {}",
+                style.arrowhead_size
+            )));
+        }
+        if !style.arrowhead_size.is_finite() {
+            return Err(CadError::InvalidInput(format!(
+                "mleader.style_invalid: the arrowhead size must be finite, got {}",
                 style.arrowhead_size
             )));
         }
@@ -372,9 +382,19 @@ impl MultiLeaderGeometry {
                 index: 0,
                 points: vec![arrow, dogleg_start],
                 path_type: MLeaderPathType::StraightLineSegments,
-                // No per-line overrides: the root/style values apply.
-                override_flags: 0,
-                arrowhead_size: style.arrowhead_size,
+                // The arrowhead override is the one per-line flag creation sets:
+                // `ARROW OFF` pins size `0` on the line so a reload reads it from
+                // the entity instead of the style.
+                override_flags: if draw_arrowhead {
+                    0
+                } else {
+                    MLeaderLine::ARROWHEAD_SIZE
+                },
+                arrowhead_size: if draw_arrowhead {
+                    style.arrowhead_size
+                } else {
+                    0.0
+                },
                 arrowhead_handle: None,
             }],
             reserved: MLeaderReserved::default(),

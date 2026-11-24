@@ -99,6 +99,7 @@ fn created_with_typed_options() -> MultiLeaderGeometry {
             attachment_point: Some(1),
             left_attachment: Some(4),
             text_angle: None,
+            ..MLeaderCreateOptions::default()
         },
     )
     .expect("the creation options are usable")

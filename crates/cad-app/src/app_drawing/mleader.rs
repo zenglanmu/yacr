@@ -85,7 +85,7 @@
 
 use super::*;
 use crate::app_drawing::annot_batch::leader::{
-    options_report, plan_leader_options, MAX_CREATED_LEADER_POINTS,
+    check_leader_points, options_report, plan_leader_options, MAX_CREATED_LEADER_POINTS,
 };
 use crate::command_payload::MLeaderContentSpec;
 use cad_domain::{
@@ -135,6 +135,35 @@ impl Application {
         session: &SessionState,
         command: &Command,
     ) -> CadResult<CommandOutcome> {
+        self.create_mleader_with(session, command, None, None, None)
+    }
+
+    /// [`Self::create_mleader`] plus the legacy-leader creation options that
+    /// `QLEADER`/`LEADER` add on top of the `MLEADER` payload.
+    ///
+    /// * `content` — the shared `CONTENT MTEXT|BLOCK <name>|TOLERANCE` request.
+    ///   It is the same [`MLeaderContentSpec`] the `MLEADER` payload carries and
+    ///   goes through [`Self::resolve_mleader_content`] unchanged, so block and
+    ///   tolerance content follow exactly the same domain rules and DXF
+    ///   round-trip; `None` keeps the payload's own content.
+    /// * `arrowhead` — `QLEADER ARROW ON|OFF`; it becomes the created line's own
+    ///   arrowhead override (size `0` plus bit `16` for `OFF`) and the style-row
+    ///   arrowhead-off refusal is skipped only when it is explicitly `OFF`.
+    /// * `max_points` — `QLEADER MAXPOINTS <n>`: the typed request is checked
+    ///   against [`MAX_CREATED_LEADER_POINTS`] **before** any work, so a higher
+    ///   count is the named `mleader.option_max_points` refusal and `2` (the
+    ///   creation's own count) is honored.
+    pub(crate) fn create_mleader_with(
+        &mut self,
+        session: &SessionState,
+        command: &Command,
+        content_override: Option<MLeaderContentSpec>,
+        arrowhead: Option<bool>,
+        max_points: Option<u32>,
+    ) -> CadResult<CommandOutcome> {
+        if let Some(requested) = max_points {
+            check_leader_points(usize::try_from(requested).unwrap_or(usize::MAX))?;
+        }
         let CommandPayload::MLeader {
             arrow,
             landing,
@@ -156,8 +185,12 @@ impl Application {
         };
         // A block-content leader carries no annotation string: the text field is
         // only the MText value (or the tolerance frame). Refusing here keeps the
-        // two from being silently dropped.
-        if matches!(content, Some(MLeaderContentSpec::Block(_))) && !text.trim().is_empty() {
+        // two from being silently dropped. The effective content is the caller's
+        // override (the legacy `QLEADER`/`LEADER` `CONTENT`) when present.
+        let effective_content = content_override.as_ref().or(content.as_ref());
+        if matches!(effective_content, Some(MLeaderContentSpec::Block(_)))
+            && !text.trim().is_empty()
+        {
             return Err(CadError::InvalidInput(format!(
                 "mleader.block_text_unexpected: CONTENT BLOCK creates a leader whose annotation \
                  is the inserted block, so it takes no annotation text (got {} character(s)); \
@@ -215,7 +248,7 @@ impl Application {
                 style_requested.is_some(),
             )
         };
-        let options = plan_leader_options(&row, &resolution)?;
+        let options = plan_leader_options(&row, &resolution, arrowhead)?;
         // The definition is derived by the one `created` rule, which only accepts
         // a straight path type; the plan has already refused the invisible one, and
         // a spline style is re-stamped onto the derived definition below rather
@@ -228,8 +261,13 @@ impl Application {
             attachment_point: attachment.map(|pair| pair.point),
             left_attachment: attachment.map(|pair| pair.left),
             text_angle: *text_angle,
+            arrowhead,
         };
-        let create_content = self.resolve_mleader_content(content, text, &command.document)?;
+        // The legacy leader's `CONTENT` is the same typed spec `MLEADER` carries;
+        // it wins over the payload's own field (which is always `None` for
+        // `QLEADER`/`LEADER`) and goes through exactly one resolution.
+        let create_content =
+            self.resolve_mleader_content(effective_content, text, &command.document)?;
         let geometry = MultiLeaderGeometry::created_with_content(
             values,
             resolved_style_name.clone(),
@@ -379,6 +417,20 @@ fn create_options_report(
             geometry.override_mask() & MASK_TEXT_ANGLE
         ));
     }
+    if options.arrowhead.is_some() {
+        let line = geometry.lines().first();
+        rows.push(format!(
+            "arrowhead {} (line LEADER_LINE 40 = {}, override bit 16 = {})",
+            if options.arrowhead == Some(false) {
+                "off"
+            } else {
+                "on"
+            },
+            line.map(|line| line.arrowhead_size).unwrap_or(f64::NAN),
+            line.map(|line| line.override_flags & cad_domain::MLeaderLine::ARROWHEAD_SIZE != 0)
+                .unwrap_or(false)
+        ));
+    }
     if rows.is_empty() {
         return None;
     }
@@ -456,7 +508,7 @@ impl Application {
     ///   string; an empty one is the domain's `mleader.tolerance_text_required`.
     pub(crate) fn resolve_mleader_content(
         &self,
-        spec: &Option<MLeaderContentSpec>,
+        spec: Option<&MLeaderContentSpec>,
         text: &str,
         document: &crate::DocumentId,
     ) -> CadResult<MLeaderCreateContent> {

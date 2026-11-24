@@ -16,12 +16,13 @@
 //!
 //! Group names are one non-whitespace token in this build (a space-separated
 //! name would make `GROUPEDIT <name> ADD` ambiguous). `LEADER`/`QLEADER` text is
-//! the whole trimmed remainder and may contain spaces.
+//! the whole trimmed remainder and may contain spaces (or be empty: an empty
+//! text is a content-less leader, and `CONTENT BLOCK` requires it).
 
 use cad_app::{
     AnnotationBatchPayload, CenterArm, CenterEditPayload, CenterLineCommand, CenterMarkCommand,
     CommandId, CommandPayload, ExtendedCommandId, GroupCommand, GroupEditCommand,
-    HatchOriginCommand, LeaderCommand, TextFitCommand,
+    HatchOriginCommand, LeaderCommand, MLeaderContentSpec, TextFitCommand,
 };
 
 use super::diagnostics::cad_error_text;
@@ -42,10 +43,12 @@ pub const UNGROUP_SELECTOR: &str = "UNGROUP";
 /// `GROUPEDIT <name> ADD|REMOVE|RENAME <arg>`.
 pub const GROUPEDIT_SELECTOR: &str = "GROUPEDIT";
 
-/// `QLEADER <arrow x,y> <landing x,y> <text>` (maps to MULTILEADER).
+/// `QLEADER [CONTENT …] [ARROW ON|OFF] [MAXPOINTS <n>] <arrow x,y> <landing x,y> [text]`
+/// (maps to MULTILEADER).
 pub const QLEADER_SELECTOR: &str = "QLEADER";
 
-/// `LEADER <arrow x,y> <landing x,y> <text>` (legacy name, maps to MULTILEADER).
+/// `LEADER [CONTENT …] <arrow x,y> <landing x,y> [text]` (legacy name, maps to
+/// MULTILEADER).
 pub const LEADER_SELECTOR: &str = "LEADER";
 
 /// `TEXTFIT <target width>`: stretch only the horizontal width factor under the
@@ -104,23 +107,98 @@ pub fn parse_groupedit_argument(argument: &str) -> Option<GroupEditCommand> {
     None
 }
 
-/// Parse `QLEADER <arrow x,y> <landing x,y> <text>`.
+/// Parse `QLEADER [CONTENT …] [ARROW ON|OFF] [MAXPOINTS <n>] <arrow x,y> <landing x,y> [text]`.
 pub fn parse_qleader_argument(argument: &str) -> Option<LeaderCommand> {
-    parse_leader_argument(argument)
+    parse_leader_line(argument, true)
 }
 
-/// Parse `LEADER <arrow x,y> <landing x,y> <text>`.
+/// Parse `LEADER [CONTENT …] <arrow x,y> <landing x,y> [text]`.
 pub fn parse_leader_argument(argument: &str) -> Option<LeaderCommand> {
-    let trimmed = argument.trim();
-    let (arrow, rest) = split_word(trimmed);
-    let (landing, text) = split_word(rest);
-    if arrow.is_empty() || landing.is_empty() || text.is_empty() {
+    parse_leader_line(argument, false)
+}
+
+/// The shared legacy-leader grammar.
+///
+/// Both names take the annotation `CONTENT MTEXT|BLOCK <name>|TOLERANCE` prefix
+/// exactly as `MLEADER` does, so a block or tolerance leader is reachable from
+/// the legacy spellings too; the payload then rides the one `MLEADER` creation
+/// path. `QLEADER` additionally takes `ARROW ON|OFF` (the created line's own
+/// arrowhead override) and `MAXPOINTS <n>` (checked against the creation's two
+/// vertices by the command layer). The text is the whole trimmed remainder and
+/// may be empty: an empty text is a content-less leader (or, with `CONTENT
+/// BLOCK`, the required absence of an annotation string).
+///
+/// Options are a prefix and each may appear once; a repeated option, an unknown
+/// option word, a missing block name and an unparsable point are `None` (the
+/// session turns that into the selector's stable `*.argument` refusal).
+fn parse_leader_line(argument: &str, qleader: bool) -> Option<LeaderCommand> {
+    let mut rest = argument.trim();
+    let mut content: Option<MLeaderContentSpec> = None;
+    let mut arrowhead: Option<bool> = None;
+    let mut max_points: Option<u32> = None;
+    loop {
+        let (word, after_word) = split_word(rest);
+        if word.eq_ignore_ascii_case("CONTENT") {
+            if content.is_some() {
+                return None;
+            }
+            let (value, after_value) = split_word(after_word);
+            if value.eq_ignore_ascii_case("MTEXT") {
+                content = Some(MLeaderContentSpec::MText);
+                rest = after_value;
+            } else if value.eq_ignore_ascii_case("TOLERANCE") {
+                content = Some(MLeaderContentSpec::Tolerance);
+                rest = after_value;
+            } else if value.eq_ignore_ascii_case("BLOCK") {
+                let (name, after_name) = split_word(after_value);
+                if name.is_empty() {
+                    return None;
+                }
+                content = Some(MLeaderContentSpec::Block(name.to_string()));
+                rest = after_name;
+            } else {
+                return None;
+            }
+        } else if qleader && word.eq_ignore_ascii_case("ARROW") {
+            if arrowhead.is_some() {
+                return None;
+            }
+            let (value, after_value) = split_word(after_word);
+            if value.eq_ignore_ascii_case("ON") {
+                arrowhead = Some(true);
+            } else if value.eq_ignore_ascii_case("OFF") {
+                arrowhead = Some(false);
+            } else {
+                return None;
+            }
+            rest = after_value;
+        } else if qleader && word.eq_ignore_ascii_case("MAXPOINTS") {
+            if max_points.is_some() {
+                return None;
+            }
+            let (value, after_value) = split_word(after_word);
+            if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+                return None;
+            }
+            max_points = Some(value.parse::<u32>().ok()?);
+            rest = after_value;
+        } else {
+            // The first non-option token is the arrow X: options are a prefix.
+            break;
+        }
+    }
+    let (arrow, after_arrow) = split_word(rest);
+    let (landing, text) = split_word(after_arrow);
+    if arrow.is_empty() || landing.is_empty() {
         return None;
     }
     Some(LeaderCommand {
         arrow: parse_point(arrow)?,
         landing: parse_point(landing)?,
         text: text.to_string(),
+        content,
+        arrowhead,
+        max_points,
     })
 }
 
