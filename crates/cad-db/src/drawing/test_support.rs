@@ -61,12 +61,17 @@ impl DrawingDatabase {
         if let SemanticGeometry::Insert {
             block,
             transform: insert,
+            attributes,
         } = &entity.geometry
         {
             if depth >= MAX_INSTANCE_DEPTH || stack.contains(block) {
                 return;
             }
             let composed = transform.matrix_mul(insert);
+            // ADR-0055: mirror the production fold for the reference algorithm.
+            for value in attributes {
+                acc.add_geometry_transformed(&value.text.as_text(&value.value), &composed);
+            }
             stack.push(*block);
             for child in self.block_entities(*block) {
                 self.accumulate_bounds_reference(acc, child, &composed, depth + 1, stack);

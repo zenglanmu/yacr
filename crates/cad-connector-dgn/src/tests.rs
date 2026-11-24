@@ -192,7 +192,9 @@ fn v8_imports_metres_block_insert_and_flattens_groups() {
     })
     .expect("the shared cell instance is stored");
     match &insert.geometry {
-        SemanticGeometry::Insert { block, transform } => {
+        SemanticGeometry::Insert {
+            block, transform, ..
+        } => {
             assert_eq!(*block, block_id);
             assert!(
                 close(

@@ -93,6 +93,7 @@ impl<'a> ImporterBuilder<'a> {
                         column as f64 * i.column_spacing,
                         row as f64 * i.row_spacing,
                     ),
+                    attributes: Vec::new(),
                 });
             }
         }

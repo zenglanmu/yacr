@@ -129,6 +129,7 @@ fn instances(dynamic_visibility: Option<DynamicBlockVisibility>) -> DrawingDatab
                 SemanticGeometry::Insert {
                     block: BlockId(1),
                     transform: Transform3::identity(),
+                    attributes: Vec::new(),
                 },
             ))
             .unwrap();
@@ -262,6 +263,7 @@ fn database_hidden_ancestor_excludes_nested_insert_descendants() {
             SemanticGeometry::Insert {
                 block: BlockId(1),
                 transform: Transform3::identity(),
+                attributes: Vec::new(),
             },
         ))
         .unwrap();
@@ -273,6 +275,7 @@ fn database_hidden_ancestor_excludes_nested_insert_descendants() {
             SemanticGeometry::Insert {
                 block: BlockId(2),
                 transform: Transform3::identity(),
+                attributes: Vec::new(),
             },
         ))
         .unwrap();
@@ -386,6 +389,7 @@ fn cyclic_insert_traversal_refuses_instead_of_publishing_partial_selection() {
             SemanticGeometry::Insert {
                 block: BlockId(2),
                 transform: Transform3::identity(),
+                attributes: Vec::new(),
             },
         ))
         .unwrap();
@@ -397,6 +401,7 @@ fn cyclic_insert_traversal_refuses_instead_of_publishing_partial_selection() {
             SemanticGeometry::Insert {
                 block: BlockId(2),
                 transform: Transform3::identity(),
+                attributes: Vec::new(),
             },
         ))
         .unwrap();
@@ -474,6 +479,7 @@ fn depth_limited_insert_traversal_preserves_prior_selection() {
             SemanticGeometry::Insert {
                 block: BlockId(depth as u128 + 1),
                 transform: Transform3::identity(),
+                attributes: Vec::new(),
             }
         };
         builder
@@ -488,6 +494,7 @@ fn depth_limited_insert_traversal_preserves_prior_selection() {
             SemanticGeometry::Insert {
                 block: BlockId(0),
                 transform: Transform3::identity(),
+                attributes: Vec::new(),
             },
         ))
         .unwrap();
@@ -509,6 +516,7 @@ fn missing_insert_definition_is_unsupported_not_an_empty_success() {
             SemanticGeometry::Insert {
                 block: BlockId(99),
                 transform: Transform3::identity(),
+                attributes: Vec::new(),
             },
         ))
         .unwrap();
@@ -530,6 +538,7 @@ fn compound_with_opaque_or_unexpanded_insert_cannot_claim_complete_selection() {
         SemanticGeometry::Insert {
             block: BlockId(1),
             transform: Transform3::identity(),
+            attributes: Vec::new(),
         },
     ] {
         let mut builder = instances(None);
@@ -595,6 +604,7 @@ fn layer_zero_member() -> DrawingDatabaseBuilder {
             SemanticGeometry::Insert {
                 block: BlockId(7),
                 transform: Transform3::identity(),
+                attributes: Vec::new(),
             },
         ))
         .unwrap();

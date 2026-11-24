@@ -85,7 +85,11 @@ impl Application {
             z: -base_point.z,
         });
         let transform = Transform3::translation(*insertion).matrix_mul(&to_origin);
-        let geometry = SemanticGeometry::Insert { block, transform };
+        let geometry = SemanticGeometry::Insert {
+            block,
+            transform,
+            attributes: Vec::new(),
+        };
         let mut outcome = self.commit_new_entity_typed(
             session,
             command,

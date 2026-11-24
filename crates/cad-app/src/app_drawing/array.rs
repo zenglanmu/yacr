@@ -863,7 +863,9 @@ fn array_path_anchor(
     let mut anchors = Vec::with_capacity(items.len());
     for item in items {
         let anchor = match &item.geometry {
-            SemanticGeometry::Insert { block, transform } => {
+            SemanticGeometry::Insert {
+                block, transform, ..
+            } => {
                 let base = drawing.block_base_point(*block).ok_or_else(|| {
                     CadError::Unsupported(format!(
                         "ARRAYPATH cannot determine the insertion base point of block {:?} \

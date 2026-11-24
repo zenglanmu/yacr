@@ -743,6 +743,7 @@ fn block_app() -> (Application, SessionState) {
             SemanticGeometry::Insert {
                 block: BlockId(7),
                 transform: Transform3::identity(),
+                attributes: Vec::new(),
             },
         ))
         .unwrap();

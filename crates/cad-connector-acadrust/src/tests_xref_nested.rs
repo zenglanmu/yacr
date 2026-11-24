@@ -340,6 +340,7 @@ fn referenced_dimension_display_insert_is_remapped_instead_of_aliasing_a_host_bl
         SemanticGeometry::Insert {
             block: referenced_block,
             transform: Transform3::default(),
+            attributes: Vec::new(),
         },
     ])));
     let mut block_map = HashMap::new();
@@ -364,6 +365,7 @@ fn unmapped_referenced_block_uses_the_sentinel_and_reports_it() {
     let geometry = SemanticGeometry::Insert {
         block: referenced_block,
         transform: Transform3::default(),
+        attributes: Vec::new(),
     };
     let mut missing = Vec::new();
     let remapped = crate::xref::remap_geometry(&geometry, &HashMap::new(), &mut missing);

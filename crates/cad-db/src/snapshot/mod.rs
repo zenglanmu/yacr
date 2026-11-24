@@ -390,6 +390,36 @@ impl DocumentSnapshot {
     pub fn has_relations(&self) -> bool {
         self.tables.get(TableKind::Relations).is_some()
     }
+
+    /// Whether this document carries block attributes (ADR-0055).
+    ///
+    /// True when any element payload is an `ATTDEF`
+    /// (`cad:AttributeDefinition`) **or** any `cad:Insert` carries a non-empty
+    /// `attributes` array. Both are element-payload data, so there is no table
+    /// path to test and no header flag: the store asks this predicate instead of
+    /// naming the geometry class or the insert field (the same split as
+    /// [`Self::has_bim`]).
+    ///
+    /// An empty `attributes` array is never written (the writer omits the key),
+    /// so a present array is always evidence of at least one value.
+    pub fn has_block_attributes(&self) -> bool {
+        self.shards
+            .iter()
+            .flat_map(|shard| shard.elements.iter())
+            .any(|element| {
+                let Some(geometry) = element.payload.get("geometry") else {
+                    return false;
+                };
+                match geometry.get("class").and_then(|class| class.as_str()) {
+                    Some("cad:AttributeDefinition") => true,
+                    Some("cad:Insert") => geometry
+                        .get("attributes")
+                        .and_then(|values| values.as_array())
+                        .is_some_and(|values| !values.is_empty()),
+                    _ => false,
+                }
+            })
+    }
 }
 
 /// Whether an encoded expression tree carries a P1-only tag.

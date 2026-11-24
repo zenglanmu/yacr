@@ -208,7 +208,10 @@ impl Application {
         }
 
         // --- the placement must be a positive-determinant similarity --------
-        let SemanticGeometry::Insert { block, transform } = &source.geometry else {
+        let SemanticGeometry::Insert {
+            block, transform, ..
+        } = &source.geometry
+        else {
             return Err(invalid(
                 "refedit",
                 "not_insert",
@@ -392,9 +395,11 @@ fn place_in_model_space(
         SemanticGeometry::Insert {
             block,
             transform: nested,
+            ..
         } => Ok(SemanticGeometry::Insert {
             block: *block,
             transform: transform.matrix_mul(nested),
+            attributes: Vec::new(),
         }),
         other => transform_geometry(other, transform).map_err(|error| {
             invalid(
@@ -418,9 +423,11 @@ fn place_in_block_space(
         SemanticGeometry::Insert {
             block,
             transform: nested,
+            ..
         } => Ok(SemanticGeometry::Insert {
             block: *block,
             transform: inverse.matrix_mul(nested),
+            attributes: Vec::new(),
         }),
         other => transform_geometry(other, inverse).map_err(|error| {
             invalid(

@@ -320,6 +320,7 @@ fn app_with_a_layer_zero_block_member() -> (Application, SessionState) {
     insert.geometry = SemanticGeometry::Insert {
         block: BlockId(7),
         transform: Transform3::identity(),
+        attributes: Vec::new(),
     };
     b.insert_entity(insert).unwrap();
 

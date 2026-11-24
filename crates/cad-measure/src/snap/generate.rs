@@ -111,6 +111,8 @@ pub(super) fn generate(
         // `collect_candidates` (see `generate_body_edges`).
         | G::Body3d(_)
         | G::Text { .. }
+        // ADR-0055: an `ATTDEF` is text-like and contributes no analytic snaps.
+        | G::AttributeDefinition(_)
         | G::Shape { .. }
         | G::Opaque { .. }
         // Images and masks carry no analytic snap vertices here; picking and

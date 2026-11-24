@@ -278,6 +278,7 @@ fn baked_hidden_block_db(hidden: &[u128]) -> DrawingDatabase {
         SemanticGeometry::Insert {
             block: BlockId(0),
             transform: Transform3::identity(),
+            attributes: Vec::new(),
         },
     ))
     .unwrap();

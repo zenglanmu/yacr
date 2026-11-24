@@ -119,6 +119,7 @@ fn app_with_selectables() -> (Application, SessionState) {
         SemanticGeometry::Insert {
             block: BlockId(1),
             transform: Transform3::translation(p3(50.0, 50.0, 0.0)),
+            attributes: Vec::new(),
         },
     ))
     .unwrap();

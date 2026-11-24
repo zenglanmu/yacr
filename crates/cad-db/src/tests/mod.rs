@@ -4,6 +4,7 @@ use super::*;
 use cad_domain::param::{Expr, ParamBindings, ParamKind, ParamRow, ParamSeq, ParamTable};
 use cad_domain::*;
 
+mod attribute;
 mod bim_edit;
 mod block_edit;
 mod bounds;

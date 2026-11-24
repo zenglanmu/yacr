@@ -138,7 +138,15 @@ pub const FORMAT_WRITE: u32 = 2;
 /// interface domain the document is edited in. It is written only when the
 /// document names one, so an older archive and a document that never chose a
 /// profile stay at their previous minor.
-pub const FORMAT_MINOR: u32 = 13;
+///
+/// `14` adds block attributes (ADR-0055): the `cad:AttributeDefinition` class and
+/// the optional `cad:Insert.attributes` array. Both are per-document tiers — a
+/// definition is a block member entity and a value list rides in the insert's
+/// element row, so no archive table is added. The value array is omitted when
+/// empty, so an ordinary drawing and a minor-13 archive keep their minor; a
+/// minor-13 reader refuses a document that really carries attributes rather than
+/// dropping them.
+pub const FORMAT_MINOR: u32 = 14;
 
 /// Stable failure markers.
 ///

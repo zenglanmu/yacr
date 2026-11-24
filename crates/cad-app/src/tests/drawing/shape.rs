@@ -409,7 +409,9 @@ fn shp2blk_defines_one_outline_block_and_places_every_insert() {
             .entity(EntityId(object.0))
             .expect("stored reference");
         match &entity.geometry {
-            SemanticGeometry::Insert { block, transform } => {
+            SemanticGeometry::Insert {
+                block, transform, ..
+            } => {
                 assert_eq!(*block, definition.id);
                 assert_eq!(transform.apply_point(Point3::default()), position);
                 let x = transform.apply_vector(Point3 {

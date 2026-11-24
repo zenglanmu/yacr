@@ -118,6 +118,14 @@ impl BoundsAccumulator {
             // Inserts are expanded by `DrawingDatabase::bounds`, which owns the
             // block definitions; a bare insert contributes no bounds here.
             SemanticGeometry::Insert { .. } => {}
+            // ADR-0055: an `ATTDEF` is bounded by the text run it would draw.
+            // The block-local placement is transformed by the caller exactly like
+            // any other member, so a definition inside a block expands with the
+            // instance transform.
+            SemanticGeometry::AttributeDefinition(definition) => {
+                let text = definition.text.as_text(&definition.default_value);
+                self.add_geometry_transformed(&text, transform);
+            }
             SemanticGeometry::Text {
                 position,
                 height,

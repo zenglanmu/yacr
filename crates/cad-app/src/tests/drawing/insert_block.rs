@@ -132,7 +132,9 @@ fn insert_places_a_reference_with_the_base_point_on_the_pick() {
         .entity(EntityId(outcome.objects[0].0))
         .expect("the stored reference");
     match &entity.geometry {
-        SemanticGeometry::Insert { block, transform } => {
+        SemanticGeometry::Insert {
+            block, transform, ..
+        } => {
             assert_eq!(*block, BlockId(0));
             // The importer's convention: block point `base_point` lands on
             // `insertion`, so the member (0,0)-(2,0) lands at (9,5)-(11,5).
@@ -306,6 +308,7 @@ fn insert_accepts_a_block_whose_definition_contains_a_nested_insert() {
         SemanticGeometry::Insert {
             block: BlockId(1),
             transform: Transform3::identity(),
+            attributes: Vec::new(),
         },
         BlockId(0),
     ))

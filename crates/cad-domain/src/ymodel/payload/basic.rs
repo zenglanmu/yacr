@@ -229,24 +229,46 @@ pub(super) fn decode_point(value: &Value) -> Result<SemanticGeometry, PayloadErr
 // Insert / transform.
 // ---------------------------------------------------------------------------
 
-pub(super) fn encode_insert(block: u128, transform: &Transform3) -> Value {
-    object(
-        "cad:Insert",
-        vec![
-            ("block", id_ref_value(IdKind::Block, block)),
-            ("transform", encode_transform3(transform)),
-        ],
-    )
+pub(super) fn encode_insert(
+    block: u128,
+    transform: &Transform3,
+    attributes: &[crate::AttributeValue],
+) -> Value {
+    let mut entries = vec![
+        ("block", id_ref_value(IdKind::Block, block)),
+        ("transform", encode_transform3(transform)),
+    ];
+    // ADR-0055: the list is omitted when empty, so a minor-13 reader sees the
+    // two-field object it models. A present non-empty list is a minor-14 row.
+    if !attributes.is_empty() {
+        entries.push((
+            "attributes",
+            super::attribute::encode_attribute_values(attributes),
+        ));
+    }
+    object("cad:Insert", entries)
 }
 
 pub(super) fn decode_insert(value: &Value) -> Result<SemanticGeometry, PayloadError> {
     let mut reader = ObjectReader::payload(value, "cad:Insert")?;
     let block = reader.id_seq("block", IdKind::Block)?;
     let transform = decode_transform3(&reader.take("transform")?)?;
+    // Absent `attributes` is `[]` (a minor-13 row); a present key must be an
+    // array — `"attributes": null` is refused rather than guessed.
+    let attributes = match reader.raw_if_present("attributes") {
+        None => Vec::new(),
+        Some(Value::Null) => {
+            return Err(PayloadError::new(
+                "cad:Insert.attributes: expected an array, not null",
+            ));
+        }
+        Some(value) => super::attribute::decode_attribute_values(&value, "cad:Insert.attributes")?,
+    };
     reader.finish()?;
     Ok(SemanticGeometry::Insert {
         block: BlockId(block),
         transform,
+        attributes,
     })
 }
 
@@ -597,7 +619,7 @@ pub(super) fn encode_vec_f64(values: &[f64]) -> Value {
     )
 }
 
-fn encode_line_spacing(spacing: &TextLineSpacing) -> Value {
+pub(super) fn encode_line_spacing(spacing: &TextLineSpacing) -> Value {
     fields(vec![
         ("factor", json::encode_f64(spacing.factor)),
         (
@@ -613,7 +635,7 @@ fn encode_line_spacing(spacing: &TextLineSpacing) -> Value {
     ])
 }
 
-fn decode_line_spacing(value: &Value) -> Result<TextLineSpacing, PayloadError> {
+pub(super) fn decode_line_spacing(value: &Value) -> Result<TextLineSpacing, PayloadError> {
     let mut reader = ObjectReader::new(value, "line_spacing")?;
     let factor = reader.f64("factor")?;
     let style = match reader.take("style")? {
@@ -661,7 +683,7 @@ pub(super) fn decode_align_h(value: &Value) -> Result<TextAlignH, PayloadError> 
     }
 }
 
-fn align_v_token(align: TextAlignV) -> Value {
+pub(super) fn align_v_token(align: TextAlignV) -> Value {
     Value::String(
         match align {
             TextAlignV::Baseline => "baseline",
@@ -673,7 +695,7 @@ fn align_v_token(align: TextAlignV) -> Value {
     )
 }
 
-fn decode_align_v(value: &Value) -> Result<TextAlignV, PayloadError> {
+pub(super) fn decode_align_v(value: &Value) -> Result<TextAlignV, PayloadError> {
     match value {
         Value::String(token) => match token.as_str() {
             "baseline" => Ok(TextAlignV::Baseline),

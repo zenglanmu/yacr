@@ -109,6 +109,7 @@ fn nested_block_app() -> (Application, SessionState) {
             SemanticGeometry::Insert {
                 block: cad_domain::BlockId(1),
                 transform: Transform3::identity(),
+                attributes: Vec::new(),
             },
         ))
         .unwrap();

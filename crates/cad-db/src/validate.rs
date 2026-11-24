@@ -25,6 +25,9 @@ use crate::entity::DbEntity;
 use crate::math::{cross, length, transform_is_finite};
 use crate::mesh_validation::{validate_mesh, validate_texture_references};
 
+mod attribute;
+pub use attribute::*;
+
 /// Smallest length/radius a stored curve may have. Chosen well above f64 noise
 /// and below any real drawing unit, so legitimate tiny geometry survives while a
 /// nominal zero is rejected.
@@ -358,12 +361,22 @@ pub fn validate_geometry(geometry: &SemanticGeometry) -> CadResult<()> {
         SemanticGeometry::Body3d(body) => {
             validate_body(body)?;
         }
-        SemanticGeometry::Insert { transform, .. } => {
+        SemanticGeometry::Insert {
+            transform,
+            attributes,
+            ..
+        } => {
             if !transform_is_finite(transform) {
                 return Err(degenerate("insert transform is non-finite"));
             }
             if transform.determinant().abs() < MIN_GEOMETRY_EXTENT {
                 return Err(degenerate("insert transform is singular"));
+            }
+            // ADR-0055: values are block-local text; each one must be drawable
+            // and carry a real tag. Duplicate tags are legal (see
+            // [`REASON_ATTRIBUTE_TAG`]).
+            for value in attributes {
+                validate_attribute_text(&value.text, &value.tag)?;
             }
         }
         SemanticGeometry::Text {
@@ -665,6 +678,9 @@ pub fn validate_geometry(geometry: &SemanticGeometry) -> CadResult<()> {
                 validate_geometry(child)?;
             }
         }
+        SemanticGeometry::AttributeDefinition(definition) => {
+            validate_attribute_text(&definition.text, &definition.tag)?;
+        }
         SemanticGeometry::Hatch(hatch) => {
             // A hatch must have at least one loop with three finite vertices;
             // bulges and seeds are finite; the derived display is validated like
@@ -865,7 +881,7 @@ pub fn validate_entity(
 ///
 /// `staged_blocks` are the definitions the *same* transaction creates/updates:
 /// they do not exist in `db` yet, so both `SpaceId::Block(id)` and
-/// `SemanticGeometry::Insert { block: id }` must accept them for the batch to be
+/// `SemanticGeometry::Insert { block: id , attributes: Vec::new()}` must accept them for the batch to be
 /// expressible in one revision. `staged_layers` is the same widening for the
 /// entity's `layer` reference, and `staged_layouts` for `SpaceId::Paper(id)`: an
 /// undo record that restores a layer/layout and the entities that sit in it
@@ -905,6 +921,18 @@ pub(crate) fn validate_entity_in(
         // Referential half of the mesh texture rule (ADR-0038 D3): the image a
         // mesh names must be part of this document.
         validate_texture_references(db, &entity.geometry)?;
+        // ADR-0055: an `ATTDEF` resolves its text style through the STYLE table.
+        // The rule runs on the write path only; a stored row replayed from
+        // history is restored verbatim (an imported definition may name a style
+        // the source never resolved), exactly like the geometry rule above.
+        if let SemanticGeometry::AttributeDefinition(definition) = &entity.geometry {
+            if !db.styles.contains_key(&definition.text.style) {
+                return Err(CadError::Invariant(format!(
+                    "entity {id:?} attribute definition references missing style {:?}",
+                    definition.text.style
+                )));
+            }
+        }
     }
     if !db.layers.contains_key(&entity.layer) && !staged_layers.contains(&entity.layer) {
         return Err(CadError::Invariant(format!(
@@ -949,6 +977,6 @@ pub(crate) fn degenerate(message: &str) -> CadError {
 /// message" form the layer refusal codes use (`layer.name_empty`,
 /// `layer.duplicate_name`): the code is the machine-stable part, the detail names
 /// the actual values so a caller can explain the refusal without guessing.
-fn degenerate_reason(code: &str, detail: &str) -> CadError {
+pub(crate) fn degenerate_reason(code: &str, detail: &str) -> CadError {
     CadError::Invariant(format!("invalid entity geometry: {code}: {detail}"))
 }

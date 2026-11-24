@@ -367,6 +367,7 @@ pub(crate) fn db_with_block(member: SemanticGeometry, transform: Transform3) -> 
             geometry: SemanticGeometry::Insert {
                 block: BlockId(1),
                 transform,
+                attributes: Vec::new(),
             },
             draw_order: 1,
         })

@@ -495,6 +495,7 @@ fn insert_app() -> (Application, SessionState) {
         SemanticGeometry::Insert {
             block: BlockId(0),
             transform: Transform3::translation(p3(5.0, 5.0, 0.0)),
+            attributes: Vec::new(),
         },
         1,
     );

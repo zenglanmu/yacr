@@ -387,6 +387,7 @@ fn list_reports_paper_and_block_space_with_every_modelled_display_property() {
             SemanticGeometry::Insert {
                 block: BlockId(9),
                 transform: Transform3::identity(),
+                attributes: Vec::new(),
             },
             LayerId(0),
             SpaceId::Model,

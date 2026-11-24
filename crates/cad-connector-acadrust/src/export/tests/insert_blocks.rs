@@ -194,6 +194,7 @@ fn a_named_block_with_two_references_exports_blocks_and_inserts() {
             SemanticGeometry::Insert {
                 block: BlockId(1),
                 transform: rotated,
+                attributes: Vec::new(),
             },
             SpaceId::Model,
             0,
@@ -205,6 +206,7 @@ fn a_named_block_with_two_references_exports_blocks_and_inserts() {
             SemanticGeometry::Insert {
                 block: BlockId(1),
                 transform: scaled,
+                attributes: Vec::new(),
             },
             SpaceId::Model,
             1,
@@ -304,6 +306,7 @@ fn a_nested_block_reference_round_trips_as_a_nested_insert() {
             SemanticGeometry::Insert {
                 block: BlockId(1),
                 transform: nested,
+                attributes: Vec::new(),
             },
             SpaceId::Block(BlockId(2)),
             0,
@@ -316,6 +319,7 @@ fn a_nested_block_reference_round_trips_as_a_nested_insert() {
             SemanticGeometry::Insert {
                 block: BlockId(2),
                 transform: outer,
+                attributes: Vec::new(),
             },
             SpaceId::Model,
             0,
@@ -396,6 +400,7 @@ fn a_mirrored_reference_still_explodes_with_its_declared_reason() {
             SemanticGeometry::Insert {
                 block: BlockId(1),
                 transform: mirror_at(p(4.0, 0.0, 0.0)),
+                attributes: Vec::new(),
             },
             SpaceId::Model,
             0,
@@ -477,6 +482,7 @@ fn a_definition_without_a_table_name_still_explodes_with_its_reason() {
             SemanticGeometry::Insert {
                 block: BlockId(1),
                 transform: placement(p(3.0, 0.0, 0.0), 0.0, [1.0; 3]),
+                attributes: Vec::new(),
             },
             SpaceId::Model,
             0,
@@ -547,6 +553,7 @@ pub(super) fn clipped_database_with_scale(
             SemanticGeometry::Insert {
                 block: BlockId(1),
                 transform: placement(p(10.0, 20.0, 0.0), std::f64::consts::FRAC_PI_6, scale),
+                attributes: Vec::new(),
             },
             SpaceId::Model,
             0,
@@ -656,6 +663,7 @@ fn a_clip_on_an_exploded_reference_is_reported_with_the_explosion_reason() {
             SemanticGeometry::Insert {
                 block: BlockId(1),
                 transform: mirror_at(p(4.0, 0.0, 0.0)),
+                attributes: Vec::new(),
             },
             SpaceId::Model,
             0,
@@ -786,6 +794,7 @@ fn a_non_uniform_reference_is_written_as_one_insert_not_exploded() {
             SemanticGeometry::Insert {
                 block: BlockId(1),
                 transform: squashed,
+                attributes: Vec::new(),
             },
             SpaceId::Model,
             0,
@@ -854,6 +863,7 @@ fn a_named_dynamic_block_writes_only_the_active_state_and_declares_it() {
             SemanticGeometry::Insert {
                 block: BlockId(1),
                 transform: placement(p(10.0, 0.0, 0.0), 0.0, [1.0; 3]),
+                attributes: Vec::new(),
             },
             SpaceId::Model,
             0,
@@ -894,6 +904,7 @@ fn a_named_block_that_contains_itself_does_not_write_a_recursive_definition() {
             SemanticGeometry::Insert {
                 block: BlockId(1),
                 transform: Transform3::identity(),
+                attributes: Vec::new(),
             },
             SpaceId::Block(BlockId(1)),
             0,
@@ -905,6 +916,7 @@ fn a_named_block_that_contains_itself_does_not_write_a_recursive_definition() {
             SemanticGeometry::Insert {
                 block: BlockId(1),
                 transform: placement(p(5.0, 0.0, 0.0), 0.0, [1.0; 3]),
+                attributes: Vec::new(),
             },
             SpaceId::Model,
             0,

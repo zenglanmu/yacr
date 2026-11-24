@@ -50,6 +50,7 @@ fn insert_entity(id: u128, block: u128) -> DbEntity {
         geometry: SemanticGeometry::Insert {
             block: BlockId(block),
             transform: Transform3::identity(),
+            attributes: Vec::new(),
         },
         draw_order: 0,
     }

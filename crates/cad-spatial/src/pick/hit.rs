@@ -144,6 +144,8 @@ fn geometry_family(geometry: &SemanticGeometry) -> usize {
         // cell-text hit selects the whole entity.
         SemanticGeometry::Table(_) => FAMILY_COMPOUND,
         SemanticGeometry::Text { .. } => FAMILY_TEXT,
+        // ADR-0055: an `ATTDEF` picks through its text box.
+        SemanticGeometry::AttributeDefinition(_) => FAMILY_TEXT,
         SemanticGeometry::Shape { .. } => FAMILY_SHAPE,
         SemanticGeometry::Mask { .. } => FAMILY_MASK,
         SemanticGeometry::Image { .. } => FAMILY_IMAGE,
@@ -292,6 +294,9 @@ fn hit_validated(
         | SemanticGeometry::Ellipse { .. }
         | SemanticGeometry::Spline { .. }
         | SemanticGeometry::Text { .. }
+        // ADR-0055: an `ATTDEF` tessellates to the text placeholder box, so it
+        // picks like text.
+        | SemanticGeometry::AttributeDefinition(_)
         // A mask tessellates to its closed boundary polygon, so it picks like a
         // polyline. A raster image has no analytic pick outline in this build
         // (the representation layer draws it), so it tessellates to no points

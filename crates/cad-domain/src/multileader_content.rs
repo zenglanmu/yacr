@@ -395,6 +395,7 @@ impl MLeaderBlockContent {
         Some(SemanticGeometry::Insert {
             block,
             transform: self.transform()?,
+            attributes: Vec::new(),
         })
     }
 }

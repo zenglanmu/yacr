@@ -226,7 +226,9 @@ fn block_define_keeps_member_geometry_and_stores_the_picked_base() {
     assert_eq!(reference.layer, session.active_layer);
     assert_eq!(reference.draw_order, 5, "max member draw order");
     match &reference.geometry {
-        SemanticGeometry::Insert { block, transform } => {
+        SemanticGeometry::Insert {
+            block, transform, ..
+        } => {
             assert_eq!(*block, new_block);
             assert_eq!(
                 transform.apply_point(base),
@@ -432,6 +434,7 @@ fn block_define_allows_a_nested_insert_member_untouched() {
         geometry: SemanticGeometry::Insert {
             block: BlockId(0),
             transform,
+            attributes: Vec::new(),
         },
         draw_order: 4,
     };
@@ -455,7 +458,9 @@ fn block_define_allows_a_nested_insert_member_untouched() {
         "the nested reference's own transform is untouched"
     );
     match &after.geometry {
-        SemanticGeometry::Insert { block, transform } => {
+        SemanticGeometry::Insert {
+            block, transform, ..
+        } => {
             assert_eq!(*block, BlockId(0));
             let original = match &insert.geometry {
                 SemanticGeometry::Insert { transform, .. } => transform,

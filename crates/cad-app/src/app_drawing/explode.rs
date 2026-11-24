@@ -273,9 +273,9 @@ fn explode_source(
             closed,
             ..
         } => explode_polyline(source, points, bulges, *closed, out),
-        SemanticGeometry::Insert { block, transform } => {
-            explode_insert(drawing, &source.space, *block, transform, out)
-        }
+        SemanticGeometry::Insert {
+            block, transform, ..
+        } => explode_insert(drawing, &source.space, *block, transform, out),
         SemanticGeometry::Compound(children) => explode_compound(source, children, out),
         SemanticGeometry::Image { .. } => Err(policy_refusal("IMAGE")),
         SemanticGeometry::Mask { .. } => Err(policy_refusal("MASK")),
@@ -462,10 +462,12 @@ fn explode_insert(
             SemanticGeometry::Insert {
                 block: nested,
                 transform: nested_transform,
+                ..
             } => {
                 let geometry = SemanticGeometry::Insert {
                     block: *nested,
                     transform: transform.matrix_mul(nested_transform),
+                    attributes: Vec::new(),
                 };
                 push_produced(child.layer, space.clone(), geometry, out)?;
             }

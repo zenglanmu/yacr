@@ -62,6 +62,7 @@ fn drawing() -> DrawingDatabase {
         SemanticGeometry::Insert {
             block: BlockId(0),
             transform: Transform3::translation(p(10.0, 0.0, 0.0)),
+            attributes: Vec::new(),
         },
         1,
     ))
@@ -71,6 +72,7 @@ fn drawing() -> DrawingDatabase {
         SemanticGeometry::Insert {
             block: BlockId(0),
             transform: Transform3::translation(p(20.0, 0.0, 0.0)),
+            attributes: Vec::new(),
         },
         2,
     ))
@@ -561,6 +563,7 @@ fn mesh_insert_database() -> DrawingDatabase {
             SemanticGeometry::Insert {
                 block: BlockId(0),
                 transform: Transform3::translation(p(x, 0.0, 0.0)),
+                attributes: Vec::new(),
             },
             id as i64,
         ))

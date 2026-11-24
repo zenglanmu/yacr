@@ -490,7 +490,9 @@ fn explode_nested_block_reference_member_stays_a_block_reference() {
     let produced = model_geometry(&app);
     assert_eq!(produced.len(), 1, "the INSERT yields its one direct member");
     match &produced[0].1 {
-        SemanticGeometry::Insert { block, transform } => {
+        SemanticGeometry::Insert {
+            block, transform, ..
+        } => {
             assert_eq!(
                 *block,
                 cad_domain::BlockId(2),
@@ -599,7 +601,9 @@ fn explode_a_self_referential_block_once_yields_the_self_reference_without_recur
     let produced = model_geometry(&app);
     assert_eq!(produced.len(), 1);
     match &produced[0].1 {
-        SemanticGeometry::Insert { block, transform } => {
+        SemanticGeometry::Insert {
+            block, transform, ..
+        } => {
             assert_eq!(*block, cad_domain::BlockId(1));
             assert!(
                 (transform.matrix[0][3] - 10.0).abs() < 1e-9,

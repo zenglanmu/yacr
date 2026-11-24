@@ -66,7 +66,9 @@ fn block_insert(leader: &MultiLeaderGeometry) -> (BlockId, cad_domain::Transform
         .display()
         .iter()
         .find_map(|child| match child {
-            SemanticGeometry::Insert { block, transform } => Some((*block, *transform)),
+            SemanticGeometry::Insert {
+                block, transform, ..
+            } => Some((*block, *transform)),
             _ => None,
         })
         .expect("block content draws one block instance")

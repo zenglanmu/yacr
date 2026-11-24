@@ -552,6 +552,7 @@ fn a_vendor_entity_inside_a_block_is_expanded_under_its_insert() {
                     y: 0.0,
                     z: 0.0,
                 }),
+                attributes: Vec::new(),
             },
             draw_order: 0,
         })

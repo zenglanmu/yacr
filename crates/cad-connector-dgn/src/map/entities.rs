@@ -470,7 +470,11 @@ impl Mapper<'_> {
                     self.mirrored_cells += 1;
                 }
                 Mapped {
-                    geometry: SemanticGeometry::Insert { block, transform },
+                    geometry: SemanticGeometry::Insert {
+                        block,
+                        transform,
+                        attributes: Vec::new(),
+                    },
                     partial: mirrored,
                     type_key: "DgnInsert",
                 }

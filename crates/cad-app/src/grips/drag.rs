@@ -735,6 +735,7 @@ fn apply_insert(
             Ok(SemanticGeometry::Insert {
                 block,
                 transform: Transform3 { matrix },
+                attributes: Vec::new(),
             })
         }
         (GripKind::Insertion, index) => Err(stale_handle(format!(
@@ -919,7 +920,9 @@ pub fn apply_grip(
             }
             Ok(SemanticGeometry::Point(to))
         }
-        SemanticGeometry::Insert { block, transform } => apply_insert(*block, transform, id, to),
+        SemanticGeometry::Insert {
+            block, transform, ..
+        } => apply_insert(*block, transform, id, to),
         SemanticGeometry::Dimension(dimension) => {
             super::dimension::apply_dimension(dimension, id, to)
         }

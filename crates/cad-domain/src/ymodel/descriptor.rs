@@ -22,7 +22,7 @@
 //! Two schema ids are in use:
 //!
 //! * [`GEOMETRY_SCHEMA`] — the semantic geometry classes of
-//!   [`crate::SemanticGeometry`] (one class per variant, 20 of them).
+//!   [`crate::SemanticGeometry`] (one class per variant, 21 of them).
 //! * [`ELEMENT_SCHEMA`] — the element envelope the database owns
 //!   ([`CadElement`]). `cad-db` encodes it; this registry is only the shared
 //!   contract, so its field list is exactly what `cad-db`'s entity row plus its
@@ -208,6 +208,20 @@ pub enum FieldKind {
     /// Same absent-means-`None` rule as [`Self::Bim`]: a minor-7 row is the same
     /// object minus this key, and the writer never emits `"params": null`.
     Params,
+    /// `AttributeFlags` (the six `ATTDEF` behaviour booleans, ADR-0055).
+    AttributeFlags,
+    /// `AttributeText` (an attribute's placement, plus the oblique angle).
+    AttributeText,
+    /// `Vec<AttributeValue>` on `cad:Insert`: the values one block reference
+    /// carries (ADR-0055).
+    ///
+    /// This is a **nested** array whose element shape [`super::payload`] owns,
+    /// like [`Self::HatchLoops`]. It joins the documented absent-means-empty
+    /// exception (with the mesh texture trio and the `bim`/`params` blocks): a
+    /// minor-13 `cad:Insert` is the same object minus this key, and the writer
+    /// omits it entirely when the list is empty so an older reader never sees an
+    /// unknown field.
+    AttributeValues,
 }
 
 /// One field of a class payload.
@@ -281,9 +295,9 @@ pub const CAD_ELEMENT: ClassDescriptor = ClassDescriptor {
 
 /// Every element class this build understands, in format order.
 ///
-/// Ordinals `1..=20` are the [`crate::SemanticGeometry`] variants **in
+/// Ordinals `1..=21` are the [`crate::SemanticGeometry`] variants **in
 /// declaration order**; [`CAD_ELEMENT`] belongs to [`ELEMENT_SCHEMA`] and is
-/// last because it is a different generation, not a 21st geometry.
+/// last because it is a different generation, not a 22nd geometry.
 pub const CLASSES: &[ClassDescriptor] = &[
     ClassDescriptor {
         id: geometry(1),
@@ -385,6 +399,9 @@ pub const CLASSES: &[ClassDescriptor] = &[
         fields: &[
             field("block", FieldKind::IdRef(IdKind::Block)),
             field("transform", FieldKind::Transform3),
+            // ADR-0055: appended last and omitted when the list is empty, so a
+            // minor-13 reader sees exactly the two-field object it models.
+            field("attributes", FieldKind::AttributeValues),
         ],
     },
     ClassDescriptor {
@@ -511,6 +528,19 @@ pub const CLASSES: &[ClassDescriptor] = &[
             field("inverted", FieldKind::Bool),
         ],
     },
+    ClassDescriptor {
+        id: geometry(21),
+        type_key: "cad:AttributeDefinition",
+        fields: &[
+            field("tag", FieldKind::String),
+            field("prompt", FieldKind::String),
+            field("default_value", FieldKind::String),
+            field("flags", FieldKind::AttributeFlags),
+            field("order", FieldKind::U32),
+            field("text", FieldKind::AttributeText),
+            field("source_handle", FieldKind::OptString),
+        ],
+    },
     CAD_ELEMENT,
 ];
 
@@ -560,6 +590,7 @@ mod tests {
             SemanticGeometry::Table(_) => "cad:Table",
             SemanticGeometry::Image { .. } => "cad:Image",
             SemanticGeometry::Mask { .. } => "cad:Mask",
+            SemanticGeometry::AttributeDefinition(_) => "cad:AttributeDefinition",
         }
     }
 
@@ -623,6 +654,7 @@ mod tests {
             "cad:Insert" => SemanticGeometry::Insert {
                 block: crate::BlockId(1),
                 transform: crate::Transform3::identity(),
+                attributes: Vec::new(),
             },
             "cad:Text" => SemanticGeometry::Text {
                 text: String::new(),
@@ -665,13 +697,24 @@ mod tests {
                 boundary: vec![p(0.0), p(1.0), p(2.0)],
                 inverted: false,
             },
+            "cad:AttributeDefinition" => {
+                SemanticGeometry::AttributeDefinition(Box::new(crate::AttributeDefinition {
+                    tag: "TAG".into(),
+                    prompt: "Prompt".into(),
+                    default_value: "Default".into(),
+                    flags: crate::AttributeFlags::default(),
+                    order: 0,
+                    text: crate::AttributeText::default(),
+                    source_handle: None,
+                }))
+            }
             other => panic!("no sample for {other}"),
         }
     }
 
     /// One sample per non-recursive variant; the recursive families build their
     /// own samples in `payload::tests`.
-    const SAMPLE_KEYS: [&str; 16] = [
+    const SAMPLE_KEYS: [&str; 17] = [
         "cad:Line",
         "cad:Polyline",
         "cad:Circle",
@@ -688,6 +731,7 @@ mod tests {
         "cad:Compound",
         "cad:Image",
         "cad:Mask",
+        "cad:AttributeDefinition",
     ];
 
     #[test]
@@ -696,7 +740,7 @@ mod tests {
             .iter()
             .filter(|class| class.id.schema() == GEOMETRY_SCHEMA)
             .collect();
-        assert_eq!(geometry_classes.len(), 20);
+        assert_eq!(geometry_classes.len(), 21);
         for (index, class) in geometry_classes.iter().enumerate() {
             assert_eq!(
                 class.id.ordinal(),
@@ -747,7 +791,7 @@ mod tests {
             assert_eq!(by_type_key(class.type_key), Some(class));
         }
         assert_eq!(by_type_key("cad:Nope"), None);
-        assert_eq!(by_class_id(ClassId::new(GEOMETRY_SCHEMA, 21)), None);
+        assert_eq!(by_class_id(ClassId::new(GEOMETRY_SCHEMA, 22)), None);
         assert_eq!(CAD_ELEMENT.id.schema(), ELEMENT_SCHEMA);
         assert_eq!(CAD_ELEMENT.id.ordinal(), 1);
     }
@@ -824,7 +868,10 @@ mod tests {
                 | FieldKind::Space
                 | FieldKind::RenderAttributes
                 | FieldKind::Bim
-                | FieldKind::Params => kind,
+                | FieldKind::Params
+                | FieldKind::AttributeFlags
+                | FieldKind::AttributeText
+                | FieldKind::AttributeValues => kind,
             }
         };
         let probes: Vec<FieldKind> = vec![
@@ -881,6 +928,9 @@ mod tests {
             FieldKind::RenderAttributes,
             FieldKind::Bim,
             FieldKind::Params,
+            FieldKind::AttributeFlags,
+            FieldKind::AttributeText,
+            FieldKind::AttributeValues,
         ];
         for kind in probes {
             let kind = all_kinds(kind);

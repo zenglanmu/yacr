@@ -227,6 +227,7 @@ fn explode_refuses_an_in_block_multileader_by_type_key_and_writes_nothing() {
                 SemanticGeometry::Insert {
                     block: BlockId(0),
                     transform: Transform3::identity(),
+                    attributes: Vec::new(),
                 },
                 "AcDbBlockReference",
                 1,

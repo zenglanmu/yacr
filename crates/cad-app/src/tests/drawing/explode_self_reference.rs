@@ -37,6 +37,7 @@ fn insert(block: u128, transform: Transform3) -> SemanticGeometry {
     SemanticGeometry::Insert {
         block: cad_domain::BlockId(block),
         transform,
+        attributes: Vec::new(),
     }
 }
 
@@ -153,7 +154,9 @@ fn explode_self_referential_block_yields_the_reference_again() {
     assert_eq!(produced.len(), 1, "no expansion to leaf geometry");
     let reference_id = produced[0].0;
     match &produced[0].1 {
-        SemanticGeometry::Insert { block, transform } => {
+        SemanticGeometry::Insert {
+            block, transform, ..
+        } => {
             assert_eq!(*block, cad_domain::BlockId(1), "still a block-1 reference");
             // The composed transform (10,0)∘(0,5) = (10,5), with unit scale.
             assert!(
@@ -180,7 +183,9 @@ fn explode_self_referential_block_yields_the_reference_again() {
     let produced = model_geometry(&app);
     assert_eq!(produced.len(), 1, "no recursion, no expansion to leaves");
     match &produced[0].1 {
-        SemanticGeometry::Insert { block, transform } => {
+        SemanticGeometry::Insert {
+            block, transform, ..
+        } => {
             assert_eq!(*block, cad_domain::BlockId(1));
             assert!(
                 (transform.matrix[0][3] - 10.0).abs() < 1e-9,

@@ -512,6 +512,7 @@ fn dynamic_block_visibility_exports_only_visible_members() {
             SemanticGeometry::Insert {
                 block: BlockId(1),
                 transform,
+                attributes: Vec::new(),
             },
             SpaceId::Model,
             0,
@@ -547,6 +548,7 @@ fn insert_cycle_is_dropped_with_an_explicit_reason() {
             SemanticGeometry::Insert {
                 block: BlockId(1),
                 transform: Transform3::identity(),
+                attributes: Vec::new(),
             },
             SpaceId::Block(BlockId(1)),
             0,
@@ -558,6 +560,7 @@ fn insert_cycle_is_dropped_with_an_explicit_reason() {
             SemanticGeometry::Insert {
                 block: BlockId(1),
                 transform: Transform3::identity(),
+                attributes: Vec::new(),
             },
             SpaceId::Model,
             0,
@@ -603,6 +606,7 @@ fn insert_depth_beyond_the_limit_is_an_explicit_error() {
             SemanticGeometry::Insert {
                 block: BlockId(2),
                 transform: Transform3::identity(),
+                attributes: Vec::new(),
             },
             SpaceId::Block(BlockId(1)),
             0,
@@ -614,6 +618,7 @@ fn insert_depth_beyond_the_limit_is_an_explicit_error() {
             SemanticGeometry::Insert {
                 block: BlockId(3),
                 transform: Transform3::identity(),
+                attributes: Vec::new(),
             },
             SpaceId::Block(BlockId(2)),
             0,
@@ -636,6 +641,7 @@ fn insert_depth_beyond_the_limit_is_an_explicit_error() {
             SemanticGeometry::Insert {
                 block: BlockId(1),
                 transform: Transform3::identity(),
+                attributes: Vec::new(),
             },
             SpaceId::Model,
             0,
@@ -705,6 +711,7 @@ fn insert_applies_rotation_and_scale_in_the_right_order() {
             SemanticGeometry::Insert {
                 block: BlockId(1),
                 transform,
+                attributes: Vec::new(),
             },
             SpaceId::Model,
             0,

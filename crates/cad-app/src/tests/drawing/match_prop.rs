@@ -134,6 +134,7 @@ fn match_app_with_source_and_locked(
         SemanticGeometry::Insert {
             block: BlockId(0),
             transform: Transform3::translation(p3(5.0, 5.0, 0.0)),
+            attributes: Vec::new(),
         },
         4,
     ))

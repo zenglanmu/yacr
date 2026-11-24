@@ -346,6 +346,7 @@ fn clipped_body_rep(id: u128, clip: BlockClip, display: BodyDisplay) -> DisplayR
     insert.geometry = SemanticGeometry::Insert {
         block: BlockId(1),
         transform: Transform3::identity(),
+        attributes: Vec::new(),
     };
     b.insert_entity(insert).unwrap();
     b.set_entity_render_attributes(

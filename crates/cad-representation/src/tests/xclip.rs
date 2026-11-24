@@ -60,6 +60,7 @@ fn block_db(member: DbEntity, transform: Transform3, clip: Option<BlockClip>) ->
     insert.geometry = SemanticGeometry::Insert {
         block: BlockId(1),
         transform,
+        attributes: Vec::new(),
     };
     b.insert_entity(insert).unwrap();
     let attributes = EntityRenderAttributes {
@@ -289,6 +290,7 @@ fn nested_clip_db_with_line(
     nested.geometry = SemanticGeometry::Insert {
         block: BlockId(2),
         transform: Transform3::identity(),
+        attributes: Vec::new(),
     };
     b.insert_entity(nested).unwrap();
     b.insert_entity(insert_entity(1, SpaceId::Model, 1, 0.0))

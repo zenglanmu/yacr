@@ -274,6 +274,7 @@ impl Application {
                             transform: Transform3::translation(insertion)
                                 .matrix_mul(&rotate)
                                 .matrix_mul(&to_origin),
+                            attributes: Vec::new(),
                         }
                     })
                     .collect();

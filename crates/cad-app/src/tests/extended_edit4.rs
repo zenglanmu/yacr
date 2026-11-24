@@ -24,6 +24,7 @@ fn insert(block: u128, transform: Transform3) -> SemanticGeometry {
     SemanticGeometry::Insert {
         block: BlockId(block),
         transform,
+        attributes: Vec::new(),
     }
 }
 

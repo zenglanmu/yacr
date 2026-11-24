@@ -96,6 +96,7 @@ fn insert_entity(id: u128, space: SpaceId, block: u128, dx: f64) -> DbEntity {
         geometry: SemanticGeometry::Insert {
             block: BlockId(block),
             transform: Transform3::translation(p(dx, 0.0)),
+            attributes: Vec::new(),
         },
         draw_order: id as i64,
     }
@@ -537,6 +538,7 @@ fn insert_with_transform(id: u128, space: SpaceId, block: u128, transform: Trans
         SemanticGeometry::Insert {
             block: BlockId(block),
             transform,
+            attributes: Vec::new(),
         },
     );
     e.space = space;

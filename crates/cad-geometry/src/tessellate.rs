@@ -118,6 +118,10 @@ pub fn tessellate_geometry(geometry: &SemanticGeometry, params: TessellationPara
             out
         }
         G::Point(p) => vec![*p, *p],
+        // ADR-0055: an `ATTDEF` tessellates as the text run it would draw.
+        G::AttributeDefinition(definition) => {
+            tessellate_geometry(&definition.text.as_text(&definition.default_value), params)
+        }
         G::Text {
             position,
             height,

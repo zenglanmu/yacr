@@ -52,6 +52,7 @@ pub(super) fn insert(block: u128, transform: Transform3) -> SemanticGeometry {
     SemanticGeometry::Insert {
         block: cad_domain::BlockId(block),
         transform,
+        attributes: Vec::new(),
     }
 }
 

@@ -88,7 +88,7 @@ fn a_named_domain_is_written_at_minor_thirteen_and_reads_back() {
     let mut document = snapshot();
     document.header.application_domain = Some(ApplicationDomain::Bim);
     let bytes = write_bytes(&document);
-    assert_eq!(minor_of(&bytes), 13, "the domain scalar is the newest tier");
+    assert_eq!(minor_of(&bytes), 13, "the domain scalar earns the minor-13 tier");
     let loaded = read_bytes(&bytes);
     assert_eq!(
         loaded.snapshot.header.application_domain,

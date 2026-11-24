@@ -123,6 +123,9 @@ pub(super) fn emit(
         SemanticGeometry::Insert {
             block,
             transform: insert_transform,
+            // ADR-0055: attribute values are not written by this export lane;
+            // they are recorded as dropped when present (see the arm's end).
+            ..
         } => {
             let object = Some(entity.object.id);
             if stack.contains(block) {
@@ -719,6 +722,13 @@ fn emit_leaf(
                 "wipeout/mask has no DXF representation in this export".into(),
             ]),
         ),
+        // ADR-0055: an `ATTDEF` has no export path yet. Record the drop by name
+        // instead of writing something else (M2 owns ATTRIB export).
+        SemanticGeometry::AttributeDefinition(_) => acc.record(
+            object,
+            "attribute_definition",
+            MappingOutcome::Dropped(vec!["ATTDEF export is not implemented in this build".into()]),
+        ),
         SemanticGeometry::Opaque { type_key, .. } => acc.record(
             object,
             "opaque",
@@ -869,5 +879,6 @@ pub(crate) fn kind_name(geometry: &SemanticGeometry) -> &'static str {
         SemanticGeometry::Table(_) => "Table",
         SemanticGeometry::Image { .. } => "Image",
         SemanticGeometry::Mask { .. } => "Mask",
+        SemanticGeometry::AttributeDefinition(_) => "AttributeDefinition",
     }
 }

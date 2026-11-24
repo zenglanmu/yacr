@@ -439,6 +439,7 @@ impl Application {
                     geometry: SemanticGeometry::Insert {
                         block: new_block,
                         transform,
+                        attributes: Vec::new(),
                     },
                     draw_order: base_order + insert_count as i64,
                 });

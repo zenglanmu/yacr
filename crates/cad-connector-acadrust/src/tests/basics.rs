@@ -253,6 +253,7 @@ fn display_support_separates_drawn_from_unrendered() {
     let insert = SemanticGeometry::Insert {
         block: BlockId(0),
         transform: Transform3::identity(),
+        attributes: Vec::new(),
     };
     assert_eq!(display_support(&insert).0, SupportStatus::Unverified);
 }

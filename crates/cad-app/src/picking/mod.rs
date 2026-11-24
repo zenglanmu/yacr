@@ -322,6 +322,7 @@ pub fn resolve_pick_transform(
         let SemanticGeometry::Insert {
             block,
             transform: local,
+            ..
         } = &insert.geometry
         else {
             return None;

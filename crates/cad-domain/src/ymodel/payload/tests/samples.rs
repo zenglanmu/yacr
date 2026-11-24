@@ -22,6 +22,7 @@ use crate::{
     TableCellAlignV, TableCellAlignment, TableCellBorders, TableCellGeometry, TableCellMargins,
     TableColumnGeometry, TableDisplayAppearance, TableFrame, TableGeometry, TableRowGeometry,
     TableRowStyle, TableStyleValues, TextAlignH, TextAlignV, TextLineSpacing, TextLineSpacingStyle,
+    Transform3,
 };
 
 // ---------------------------------------------------------------------------
@@ -195,6 +196,81 @@ pub(super) fn text_sample() -> SemanticGeometry {
             factor: 2.0,
             style: TextLineSpacingStyle::Exactly,
         },
+    }
+}
+
+/// An `ATTDEF` sample (ADR-0055): a non-default flag mix, a non-default text
+/// placement and an oblique angle, so the codec is exercised field by field.
+pub(super) fn attribute_definition_sample() -> SemanticGeometry {
+    SemanticGeometry::AttributeDefinition(Box::new(crate::AttributeDefinition {
+        tag: "PART_NUMBER".to_string(),
+        prompt: "Enter part number".to_string(),
+        default_value: "N/A".to_string(),
+        flags: crate::AttributeFlags {
+            invisible: true,
+            constant: false,
+            verify: true,
+            preset: true,
+            locked_position: true,
+            annotative: false,
+        },
+        order: 3,
+        text: crate::AttributeText {
+            position: p(4.0, 5.0, 0.0),
+            height: 2.5,
+            rotation: 0.5,
+            style: StyleId(2),
+            width_factor: 0.75,
+            h_align: TextAlignH::Center,
+            v_align: TextAlignV::Top,
+            wrap_width: Some(30.0),
+            line_spacing: TextLineSpacing {
+                factor: 1.5,
+                style: TextLineSpacingStyle::Exactly,
+            },
+            font: Some("arial.ttf".to_string()),
+            oblique: 0.25,
+        },
+        source_handle: Some("2A".to_string()),
+    }))
+}
+
+/// An `INSERT` that carries one concrete value (the minor-14 shape).
+pub(super) fn insert_with_attributes_sample() -> SemanticGeometry {
+    SemanticGeometry::Insert {
+        block: BlockId(3),
+        transform: Transform3::identity(),
+        attributes: vec![crate::AttributeValue {
+            tag: "PART_NUMBER".to_string(),
+            value: "A-100".to_string(),
+            flags: crate::AttributeFlags::default(),
+            text: crate::AttributeText {
+                position: p(1.0, 1.0, 0.0),
+                height: 2.5,
+                rotation: 0.0,
+                style: StyleId(0),
+                width_factor: 1.0,
+                h_align: TextAlignH::Left,
+                v_align: TextAlignV::Baseline,
+                wrap_width: None,
+                line_spacing: TextLineSpacing::default(),
+                font: None,
+                oblique: 0.0,
+            },
+            layer: crate::LayerId(1),
+            appearance: crate::AttributeAppearance {
+                transparency: crate::EntityTransparency::Explicit(0.5),
+                color: crate::EntityColor::Explicit([10, 20, 30]),
+                lineweight: crate::EntityLineWeight::Explicit(0.25),
+                linetype: crate::EntityLineType::Explicit {
+                    name: "DASHED".to_string(),
+                    pattern: crate::LinetypePattern::from_elements([0.5, -0.25]),
+                    scale: 2.0,
+                },
+                linetype_scale: 2.0,
+            },
+            source_handle: Some("2B".to_string()),
+        }],
     }
 }
 

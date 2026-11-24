@@ -278,7 +278,11 @@ impl DefaultRepresentationProvider {
                         Completeness::Partial(vec!["mesh has no triangles".into()]);
                 }
             }
-            SemanticGeometry::Insert { block, transform } => {
+            // ADR-0055: attribute text rendering is a later lane; the block
+            // instance primitive is unchanged here.
+            SemanticGeometry::Insert {
+                block, transform, ..
+            } => {
                 representation.fragments.push(DisplayFragment {
                     source,
                     geometry_source,

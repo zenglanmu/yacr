@@ -204,6 +204,7 @@ pub fn grips_for_entity(entity: &DbEntity) -> Vec<Grip> {
         SemanticGeometry::Insert {
             block: _,
             transform,
+            ..
         } => vec![Grip {
             id: id(GripKind::Insertion, 0),
             position: insert_origin(transform),

@@ -277,10 +277,15 @@ pub fn transform_geometry(
         SemanticGeometry::Insert {
             block,
             transform: insert,
+            attributes,
         } => SemanticGeometry::Insert {
             block: *block,
             // Apply the move first, then the instance placement.
             transform: transform.matrix_mul(insert),
+            // ADR-0055: values are stored in the block's local frame, which the
+            // instance transform already maps; moving the reference must not
+            // bake the move into them.
+            attributes: attributes.clone(),
         },
         // A raster image is a rigid placement: `origin` transforms as a point,
         // while the edge vectors `u`/`v` transform through the linear part only
@@ -312,6 +317,24 @@ pub fn transform_geometry(
             boundary: boundary.iter().map(|p| transform.apply_point(*p)).collect(),
             inverted: *inverted,
         },
+        // ADR-0055: an `ATTDEF` is a block-local text template, so it accepts the
+        // same similarity a standalone `TEXT` does (ADR 0019 decision B).
+        // `position` moves as a point, `rotation` accumulates the in-plane angle,
+        // `height` and the wrap boundary scale uniformly, and the oblique angle,
+        // width factor, style, font and alignment are preserved. A non-uniform
+        // scale or a mirror is refused because the flat-text domain cannot
+        // represent stretched or reflected glyphs.
+        SemanticGeometry::AttributeDefinition(definition) => {
+            require_similarity(transform, "attribute definition")?;
+            require_orientation_preserving(transform, "attribute definition")?;
+            let scale = uniform_scale(transform);
+            let mut moved: AttributeDefinition = definition.as_ref().clone();
+            moved.text.position = transform.apply_point(definition.text.position);
+            moved.text.height *= scale;
+            moved.text.rotation += rotation_of(transform);
+            moved.text.wrap_width = definition.text.wrap_width.map(|width| width * scale);
+            SemanticGeometry::AttributeDefinition(Box::new(moved))
+        }
         // A standalone TEXT is a similarity-only entity (ADR 0019 decision B):
         // translation moves `position`, rotation accumulates into `rotation` and a
         // uniform scale multiplies `height`. A non-uniform scale would stretch the

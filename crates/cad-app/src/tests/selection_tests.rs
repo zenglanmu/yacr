@@ -76,6 +76,7 @@ fn database() -> DrawingDatabase {
         SemanticGeometry::Insert {
             block: BlockId(0),
             transform: Transform3::translation(point(10.0, 0.0)),
+            attributes: Vec::new(),
         },
         LayerId(0),
     ))
