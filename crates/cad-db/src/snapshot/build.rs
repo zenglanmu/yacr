@@ -140,6 +140,7 @@ impl DrawingDatabase {
         // lower minor; a document with them is minor 17.
         if !self.groups.is_empty() {
             tables.set(TableKind::Groups, groups::encode_groups(self)?);
+        }
         // Named views are document content and get the same "no rows, no table"
         // rule as the other side tables: a document without views stays at the
         // minor its other features imply.
@@ -237,6 +238,8 @@ impl DrawingDatabase {
             checked(
                 builder.set_groups(group_rows),
                 table_entry(TableKind::Groups),
+            )?;
+        }
         if !named_views.is_empty() {
             checked(
                 builder.set_named_views(named_views),

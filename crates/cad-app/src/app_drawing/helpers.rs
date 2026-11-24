@@ -1,5 +1,4 @@
 use super::*;
-
 /// A monotonic transaction id for drawing commits.
 ///
 /// Mirrors the layer counter style but lives in the app layer so a
@@ -10,7 +9,6 @@ pub(crate) fn next_transaction_id() -> TransactionId {
     static COUNTER: AtomicU64 = AtomicU64::new(1);
     TransactionId(COUNTER.fetch_add(1, Ordering::Relaxed) as u128)
 }
-
 /// The stored class name for a semantic geometry, matching the importer's keys.
 pub(crate) fn class_name(geometry: &SemanticGeometry) -> &'static str {
     match geometry {
@@ -50,12 +48,10 @@ pub(crate) fn class_name(geometry: &SemanticGeometry) -> &'static str {
         SemanticGeometry::Table(_) => "AcDbTable",
     }
 }
-
 /// A short, stable kind label for diagnostics (never a UI string).
 pub(super) fn geometry_kind(geometry: &SemanticGeometry) -> &'static str {
     class_name(geometry)
 }
-
 /// Whether a stored `Text` entity came from MTEXT (`AcDbMText`).
 ///
 /// The string is the **raw** DXF content: only `AcDbMText` interprets `\P` (and
@@ -65,11 +61,9 @@ pub(super) fn geometry_kind(geometry: &SemanticGeometry) -> &'static str {
 pub(super) fn is_multiline_text_source(entity: &DbEntity) -> bool {
     entity.object.type_key == text_policy::MTEXT_TYPE_KEY
 }
-
 /// The text style `TEXT`/`MTEXT` creation resolves by name before falling back to
 /// the documented `StyleId(0)` entry (ADR 0019 F.1).
 pub(super) const TEXT_STYLE_NAME: &str = "Standard";
-
 /// Resolve the session's current DIMSTYLE row for a create command.
 ///
 /// The name comes from [`SessionState::current_dim_style_name`] (`DIMSTYLE SET`
@@ -88,7 +82,6 @@ pub(super) fn current_dim_style(
     })?;
     Ok((name.to_string(), style))
 }
-
 /// Resolve the `(style, font)` pair a **created** text entity stores.
 ///
 /// The single style path for both text-creation commands: `Standard` by name,
@@ -99,7 +92,6 @@ pub(super) fn current_dim_style(
 pub(super) fn resolve_created_text_style(drawing: &DrawingDatabase) -> (StyleId, Option<String>) {
     resolve_created_text_style_named(drawing, TEXT_STYLE_NAME)
 }
-
 /// Resolve `(style, font)` for a **named** current text style.
 ///
 /// Used by the table-write tests to pin that a renamed/created row resolves; an
@@ -117,18 +109,15 @@ pub(super) fn resolve_created_text_style_named(
         resolved.and_then(|style| style.resource_keys.first().cloned()),
     )
 }
-
 pub(super) fn distance(a: Point3, b: Point3) -> f64 {
     let dx = a.x - b.x;
     let dy = a.y - b.y;
     let dz = a.z - b.z;
     (dx * dx + dy * dy + dz * dz).sqrt()
 }
-
 pub(super) fn is_finite_point(p: Point3) -> bool {
     p.x.is_finite() && p.y.is_finite() && p.z.is_finite()
 }
-
 /// The default world tolerance used by the OFFSET construction.
 pub(super) fn offset_tolerance() -> f64 {
     let policy = TolerancePolicy::default();
@@ -137,7 +126,6 @@ pub(super) fn offset_tolerance() -> f64 {
         .max(1e-12)
         .max(policy.topology_world)
 }
-
 /// The world tolerance shared by the CHAMFER/FILLET corner construction.
 pub(super) fn corner_tolerance() -> f64 {
     offset_tolerance()

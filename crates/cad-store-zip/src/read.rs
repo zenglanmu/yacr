@@ -410,7 +410,7 @@ fn parse_tables(
 /// `cad-db`, and `check-architecture.py` forbids this crate from editing it), so
 /// the reverse map is written out and a table missing from it is refused by
 /// [`unknown_live_entry`] rather than silently dropped.
-const TABLE_ENTRIES: [(TableKind, &str); 21] = [
+const TABLE_ENTRIES: [(TableKind, &str); 22] = [
     (TableKind::Layers, "tables/layers.json"),
     (TableKind::Layouts, "tables/layouts.json"),
     (TableKind::Styles, "tables/styles.json"),
