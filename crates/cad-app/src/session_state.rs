@@ -90,9 +90,9 @@ pub struct SessionState {
     pub layer_states: LayerStates,
     /// Session-only named views (`VIEW` / `VIEWGO`), at most 32.
     pub view_states: ViewStates,
-    /// Session-only named entity groups (`GROUP` / `UNGROUP` / `GROUPEDIT`),
-    /// at most 64. Never a DWG group object.
-    pub groups: EntityGroups,
+    /// Session-only `TEXTMASK` text/mask pairs. **Not** the entity-group
+    /// authority: `GROUP` data lives in the document (`tables/groups.json`).
+    pub textmask_groups: EntityGroups,
     /// Document-wide `REGEN` stamp. REDRAW uses `generation` instead.
     pub regen_generation: u64,
     /// `VPMAX`/`VPMIN` session marker; never drawing data.
@@ -296,7 +296,7 @@ impl SessionState {
             layer_history: LayerOverrideHistory::new(),
             layer_states: LayerStates::new(),
             view_states: ViewStates::new(),
-            groups: EntityGroups::new(),
+            textmask_groups: EntityGroups::new(),
             regen_generation: 0,
             maximized_viewport: None,
             viewport_markers: ViewportMarkers::default(),

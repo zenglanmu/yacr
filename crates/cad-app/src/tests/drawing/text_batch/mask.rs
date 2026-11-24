@@ -91,7 +91,7 @@ fn textmask_zero_offset_is_the_exact_estimate_and_an_empty_string_refuses() {
     assert_eq!(revision(&app), before, "the refusal writes nothing");
     assert_eq!(undo_depth(&app), 0);
     assert!(masks(&app).is_empty());
-    assert!(session.groups.is_empty());
+    assert!(session.textmask_groups.is_empty());
 }
 
 #[test]
@@ -111,11 +111,11 @@ fn textmask_groups_each_text_with_its_own_mask_on_the_texts_layer() {
     let stored = masks(&app);
     assert_eq!(stored.len(), 2);
     assert_eq!(
-        session.groups.len(),
+        session.textmask_groups.len(),
         2,
         "one pair group per text, never a combined group"
     );
-    for group in session.groups.groups() {
+    for group in session.textmask_groups.groups() {
         assert!(group.name.starts_with("*TEXTMASK-"), "{}", group.name);
         assert_eq!(group.members.len(), 2, "text + its own mask");
         let text = group.members[0].entity;
@@ -164,7 +164,11 @@ fn textmask_rerun_with_a_new_offset_replaces_the_previous_mask_geometry() {
         p3(-2.0, -2.0, 0.0),
         "the new offset factor is applied"
     );
-    assert_eq!(session.groups.len(), 1, "the group is replaced in place");
+    assert_eq!(
+        session.textmask_groups.len(),
+        1,
+        "the group is replaced in place"
+    );
     assert_eq!(undo_depth(&app), 2, "each TEXTMASK is one undo step");
 }
 
@@ -175,7 +179,7 @@ fn textmask_refuses_a_full_group_store_and_a_non_text_target_without_writing() {
     let (mut app, mut session) = app_with(vec![simple_text(1, "abcd", p3(0.0, 0.0, 0.0), 5)]);
     for index in 0..64 {
         session
-            .groups
+            .textmask_groups
             .create(&format!("FULLER-{index}"), Vec::new());
     }
     select(&mut session, &[1]);
@@ -190,7 +194,7 @@ fn textmask_refuses_a_full_group_store_and_a_non_text_target_without_writing() {
     assert_unsupported(error, "textmask.group_cap");
     assert_eq!(revision(&app), before, "the refusal writes nothing");
     assert!(masks(&app).is_empty());
-    assert_eq!(session.groups.len(), 64);
+    assert_eq!(session.textmask_groups.len(), 64);
 
     // A non-text target refuses the whole command.
     let (mut app, mut session) = app_with(vec![
@@ -209,7 +213,7 @@ fn textmask_refuses_a_full_group_store_and_a_non_text_target_without_writing() {
     assert_unsupported(error, "textmask.not_text");
     assert_eq!(revision(&app), before);
     assert!(masks(&app).is_empty());
-    assert!(session.groups.is_empty());
+    assert!(session.textmask_groups.is_empty());
 }
 
 #[test]
@@ -226,9 +230,9 @@ fn textunmask_keeps_another_texts_mask_and_group_intact() {
         CommandPayload::None,
     )
     .expect("mask both texts");
-    assert_eq!(session.groups.len(), 2);
+    assert_eq!(session.textmask_groups.len(), 2);
     let second_mask = session
-        .groups
+        .textmask_groups
         .groups()
         .find(|group| group.members[0].entity == EntityId(2))
         .expect("the second text's group")
@@ -250,9 +254,13 @@ fn textunmask_keeps_another_texts_mask_and_group_intact() {
         "the other mask stays"
     );
     assert_eq!(masks(&app).len(), 1);
-    assert_eq!(session.groups.len(), 1, "only the first group is dropped");
     assert_eq!(
-        session.groups.groups().next().unwrap().members[0].entity,
+        session.textmask_groups.len(),
+        1,
+        "only the first group is dropped"
+    );
+    assert_eq!(
+        session.textmask_groups.groups().next().unwrap().members[0].entity,
         EntityId(2)
     );
 
@@ -265,7 +273,10 @@ fn textunmask_keeps_another_texts_mask_and_group_intact() {
     )
     .expect("TEXTUNMASK the second text");
     assert!(masks(&app).is_empty(), "no orphan mask is left behind");
-    assert!(session.groups.is_empty(), "no orphan group is left behind");
+    assert!(
+        session.textmask_groups.is_empty(),
+        "no orphan group is left behind"
+    );
 }
 
 #[test]
@@ -332,7 +343,7 @@ fn textunmask_drops_a_stale_group_when_its_mask_is_already_gone() {
     )
     .expect("TEXTMASK");
     let mask = find_by_type(&app, "AcDbWipeout").expect("mask").id;
-    assert_eq!(session.groups.len(), 1);
+    assert_eq!(session.textmask_groups.len(), 1);
 
     // Erase the mask row directly, as any other erase path would.
     select(&mut session, &[mask.0]);
@@ -345,7 +356,7 @@ fn textunmask_drops_a_stale_group_when_its_mask_is_already_gone() {
     .expect("ERASE the mask");
     assert!(masks(&app).is_empty());
     assert_eq!(
-        session.groups.len(),
+        session.textmask_groups.len(),
         1,
         "ERASE leaves the session group (it is not drawing data)"
     );
@@ -377,6 +388,9 @@ fn textunmask_drops_a_stale_group_when_its_mask_is_already_gone() {
         outcome.diagnostics
     );
     assert!(outcome.changes.is_none(), "no drawing transaction");
-    assert!(session.groups.is_empty(), "the stale group is gone");
+    assert!(
+        session.textmask_groups.is_empty(),
+        "the stale group is gone"
+    );
     assert_eq!(revision(&app), before, "no revision bump");
 }

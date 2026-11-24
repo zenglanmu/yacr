@@ -60,13 +60,17 @@ impl CommandId {
                 | Self::DimOverride
                 | Self::QDim
                 // The 2026-11-07 annotation batch: the leader/text/hatch forms
-                // write entity rows; GROUP/UNGROUP/GROUPEDIT are session-only and
-                // XDLIST is a read-only report, so they stay Viewer-legal.
+                // write entity rows, and GROUP/UNGROUP/GROUPEDIT now write the
+                // persisted `tables/groups.json` table (one revision, one undo
+                // step). XDLIST is a read-only report, so it stays Viewer-legal.
                 | Self::QLeader
                 | Self::Leader
                 | Self::TextFit
                 | Self::HatchSetBoundary
                 | Self::HatchSetOrigin
+                | Self::Group
+                | Self::Ungroup
+                | Self::GroupEdit
                 | Self::Hatch
                 | Self::HatchPoint
                 // BOUNDARY writes new polylines from the discovered loops.

@@ -2,24 +2,26 @@
 //! `GROUP` / `-GROUP`, `UNGROUP`, `GROUPEDIT`, `QLEADER`, `LEADER`, `TEXTFIT`,
 //! `HATCHSETBOUNDARY`, `HATCHSETORIGIN` and `XDLIST`.
 //!
-//! The implementation lives in [`crate::app_drawing::annot_batch`] (except the
-//! session group store, [`crate::groups`]). This module is the contract and
-//! names every boundary, so no command silently does less than it says.
+//! The implementation lives in [`crate::app_drawing::annot_batch`]. This module
+//! is the contract and names every boundary, so no command silently does less
+//! than it says.
 //!
 //! # `GROUP` / `-GROUP`
 //!
-//! ## Storage boundary
+//! ## Storage
 //!
-//! A group is a **session-only** value: a name plus an ordered list of
-//! [`cad_domain::SelectionRef`]s, held in [`crate::EntityGroups`]. This build has
-//! **no DWG group object** (`cad-db` has no group table and `cad-domain` has no
-//! group geometry), so:
+//! A group is **document data**, not a session value: [`cad_db::DrawingDatabase::groups`]
+//! holds `tables/groups.json` rows (a table-local sequence, name, description,
+//! DXF selectable flag and ordered member entity ids). It is written to
+//! `.ymodel` (format minor 17), imported from DXF/DWG `AcDbGroup` objects and
+//! exported back to them. There is no second session authority: `SESSION`'s
+//! `textmask_groups` is TEXTMASK's private text/mask association and is never
+//! read by these commands.
 //!
-//! * no database write, revision bump, `ChangeSet` or `cad-history` entry;
-//! * nothing survives a session rebuild or a document replacement;
-//! * a saved DWG that contains `GROUP` objects is imported as ordinary entities
-//!   and does **not** populate this store (there is no importer path for groups);
-//! * `GROUP` never changes an entity's layer, selection, visibility or geometry.
+//! Each create/delete/rename/member edit is **one transaction, one revision,
+//! one `ChangeSet` and one undo step** (`ChangeScope::tables = {Groups}`); undo
+//! and redo restore the exact row through the same validated write path. A
+//! read-only report or a named refusal bumps no revision and records no history.
 //!
 //! ## Typed forms
 //!
@@ -35,24 +37,24 @@
 //! second `CommandId`: it normalises onto `GROUP` and therefore the same path.
 //!
 //! Names are one non-whitespace token, stored trimmed and unique
-//! **case-insensitively**. The store is capped at
-//! [`crate::ENTITY_GROUP_CAP`] = 64 groups; creating one more is the named
-//! `group.cap` refusal rather than a silent drop. A duplicate name is
-//! `group.duplicate`; an empty selection is `group.selection_required`; a ref
-//! that no longer resolves is `group.stale_ref`; an unknown delete name is
-//! `group.unknown`. All refusals happen before the store is mutated and nothing
-//! is written.
+//! **case-insensitively** (a source drawing may hold a name with spaces; the
+//! typed grammar cannot address it, and the table itself allows it). The
+//! command-layer cap is [`crate::ENTITY_GROUP_CAP`] = 64 groups; creating one
+//! more is the named `group.cap` refusal rather than a silent drop. A duplicate
+//! name is `group.duplicate`; an empty selection is `group.selection_required`;
+//! a ref that no longer resolves, names a block-instance member or repeats an
+//! entity is `group.stale_ref`; an unknown delete name is `group.unknown`. All
+//! refusals happen before the transaction and nothing is written.
 //!
-//! `GROUP` is Viewer-legal: it can never write the drawing.
+//! `GROUP` is Work-only: it writes the drawing's group table.
 //!
 //! # `UNGROUP`
 //!
 //! `UNGROUP <name>` removes exactly one named group and **keeps every entity**.
 //! The entities are not deleted, moved, unselected or rewritten; only the
-//! session's name → refs mapping is dropped. Refusals: `ungroup.needs_name` (a
-//! bare selector), `ungroup.unknown` (the name does not resolve),
-//! `ungroup.payload` (a non-annotation payload). Session mutation only, so
-//! Viewer-legal.
+//! `tables/groups.json` row is removed (one revision, one undo step). Refusals:
+//! `ungroup.needs_name` (a bare selector), `ungroup.unknown` (the name does not
+//! resolve), `ungroup.payload` (a non-annotation payload). Work-only.
 //!
 //! # `GROUPEDIT`
 //!
@@ -61,18 +63,17 @@
 //! * `ADD` and `REMOVE` use the **current selection** when it is non-empty;
 //!   when the selection is empty they parse `<arg>` as comma-separated
 //!   `EntityId` values in the command's document. Both forms are validated
-//!   before the store is touched: a duplicate entity id, a non-existent entity,
-//!   a block-instance/sub-element ref, or an empty input list is refused.
+//!   before the transaction: a duplicate entity id, a non-existent entity, a
+//!   block-instance/sub-element ref, or an empty input list is refused.
 //! * `RENAME` changes only the group name, with the same trimmed,
 //!   case-insensitively unique rule as `GROUP CREATE`. Membership is unchanged.
 //!
-//! One session mutation per run; **no entity/database write**, no revision bump
-//! and no undo entry. A run that adds/removes/renames nothing reports the named
-//! `groupedit.unchanged` outcome with no mutation. Refusals:
-//! `groupedit.needs_argument`, `groupedit.payload`, `groupedit.unknown`,
-//! `groupedit.rename_duplicate`, `groupedit.stale_ref`, `groupedit.invalid_entity`
-//! (a typed id is not a positive entity id) and `groupedit.selection_required`
-//! (no selection and no typed ids). Viewer-legal.
+//! One revision and one undo step per real change; a run that adds/removes/
+//! renames nothing reports the named `groupedit.unchanged` outcome with no
+//! write. Refusals: `groupedit.needs_argument`, `groupedit.payload`,
+//! `groupedit.unknown`, `groupedit.rename_duplicate`, `groupedit.stale_ref`,
+//! `groupedit.invalid_entity` (a typed id is not a positive entity id) and
+//! `groupedit.selection_required` (no selection and no typed ids). Work-only.
 //!
 //! # `QLEADER` / `LEADER`
 //!

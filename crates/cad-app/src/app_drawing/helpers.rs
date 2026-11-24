@@ -680,6 +680,28 @@ pub(crate) fn apply_drawing_patches(
     // step to entity patches only, and the geometry is derived from the restored
     // table/bindings, so replaying a stored geometry row as well would be a
     // second, unvalidated source of truth (D7).
+    // A group-only step replays through the same validated `apply_group_changes`
+    // path the command used; the history validator makes this branch exclusive.
+    if !step.group_patches.is_empty() {
+        let patches: Vec<cad_db::GroupPatch> = step
+            .group_patches
+            .iter()
+            .map(|patch| cad_db::GroupPatch {
+                seq: patch.seq,
+                before: if forward {
+                    patch.before.clone()
+                } else {
+                    patch.after.clone()
+                },
+                after: if forward {
+                    patch.after.clone()
+                } else {
+                    patch.before.clone()
+                },
+            })
+            .collect();
+        return drawing.apply_group_changes(reason, transaction, &patches);
+    }
     if !step.param_patches.is_empty() || !step.param_binding_patches.is_empty() {
         let param_patches: Vec<cad_db::ParamPatch> = step
             .param_patches

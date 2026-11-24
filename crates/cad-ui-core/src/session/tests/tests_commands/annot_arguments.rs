@@ -74,15 +74,15 @@ fn only_the_writing_commands_require_work_mode() {
         CommandId::TextFit,
         CommandId::HatchSetBoundary,
         CommandId::HatchSetOrigin,
-    ] {
-        assert!(id.requires_work_mode(), "{id:?} writes/declares a write");
-    }
-    for id in [
+        // The group commands write `tables/groups.json` (one revision / one
+        // undo step), so they are Work-only now.
         CommandId::Group,
         CommandId::Ungroup,
         CommandId::GroupEdit,
-        CommandId::XdList,
     ] {
+        assert!(id.requires_work_mode(), "{id:?} writes/declares a write");
+    }
+    for id in [CommandId::XdList] {
         assert!(!id.requires_work_mode(), "{id:?} cannot write the drawing");
     }
 }
