@@ -316,7 +316,13 @@ export const ADDINS_PLUGINS_PANEL = panel('addins', 'ribbon.panel.addins', [
 
 export const PARAMETRIC_GEOMETRIC_PANEL = pending('geometric', 'ribbon.panel.geometric');
 export const PARAMETRIC_DIMENSIONAL_PANEL = pending('dimensional', 'ribbon.panel.dimensional');
-export const PARAMETRIC_MANAGE_PANEL = pending('parametric_manage', 'ribbon.panel.parametric_manage');
+export const PARAMETRIC_MANAGE_PANEL = panel('parametric_manage', 'ribbon.panel.parametric_manage', [
+  // The Parameters Manager surface. It is chrome-local (`SHELL_ACTIONS.parameters`)
+  // because the panel reads `cad_param_list` and writes through the
+  // `-PARAMETERS` command line; there is no payload-free `PARAMETERS` router
+  // command, so the ribbon must never send `cad_command` for it.
+  { id: 'PARAMETERS', labelKey: 'parameters.open', icon: 'properties', action: SHELL_ACTIONS.parameters, large: true },
+]);
 export const INSERT_DATA_PANEL = pending('data', 'ribbon.panel.data');
 export const INSERT_LINKING_PANEL = pending('linking', 'ribbon.panel.linking');
 // Content: the Tool Palettes float is this build's real Blocks surface (the

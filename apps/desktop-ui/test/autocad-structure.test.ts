@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { readCatalog } from './helpers.ts';
 import { RIBBON_TABS, ribbonCommandIds } from '../src/ribbon/tabs.ts';
+import { SHELL_ACTIONS } from '../src/ribbon/actions.ts';
 import { COMMAND_CATALOG } from '../src/commands/catalog.ts';
 import { LOCAL_CHROME_COMMANDS } from '../src/commands/gating.ts';
 
@@ -83,15 +84,28 @@ test('the wired reference panels carry only commands this build actually exposes
     coordinates: ['UCSICON'],
     content: ['TOOLPALETTES'],
     annotation_scaling: ['SCALELISTEDIT'],
+    // The Parameters Manager is a shell action, not a router token: it opens the
+    // chrome-local panel whose writes ride `-PARAMETERS`.
+    parametric_manage: [SHELL_ACTIONS.parameters],
   };
   const panels = new Map(RIBBON_TABS.flatMap(tab => tab.panels).map(panel => [panel.id, panel]));
   for (const [id, commands] of Object.entries(expected)) {
     const panel = panels.get(id);
     assert.ok(panel, `missing reference panel ${id}`);
     assert.equal(Boolean(panel.pending), false, `${id} must no longer be a placeholder`);
-    assert.deepEqual(panel.items.map(item => item.command), commands, `${id} wiring drifted`);
+    // A panel entry carries exactly one dispatch token: a router/chrome command,
+    // or a DOM-only shell action (`parametric_manage`).
+    assert.deepEqual(
+      panel.items.map(item => item.command ?? item.action),
+      commands,
+      `${id} wiring drifted`,
+    );
+    const actions = new Set(Object.values(SHELL_ACTIONS));
     for (const command of commands) {
-      assert.ok(known.has(command) || local.has(command), `${id}/${command} is not in the command catalog`);
+      assert.ok(
+        known.has(command) || local.has(command) || actions.has(command),
+        `${id}/${command} is not a known command or shell action`,
+      );
     }
   }
 });

@@ -25,6 +25,7 @@ use crate::bim::{BimFilterWire, BimQueryRequest, BimQueryResponse};
 use crate::host_read::{
     HostReadAnswer, HostReadHost, HostReadRequest, HostReadSeam, HostReads, HOST_READ_UNKNOWN_KIND,
 };
+use crate::param::ParamListResponse;
 
 use super::wire::QueueReads;
 use super::CadSession;
@@ -87,6 +88,21 @@ pub fn bim_query(
         HostReadAnswer::BimQuery(response) => Ok(response),
         HostReadAnswer::ParamList(_) => Err(format!(
             "{HOST_READ_UNKNOWN_KIND}: the host answered a parameter list to a BIM query"
+        )),
+    }
+}
+
+/// `cad_param_list`: the document-level parameter list under the active
+/// configuration (ADR-0043 P1).
+///
+/// One request-carrying read over the shared seam; the session's handler is
+/// [`CadSession::param_list`]. A host that answers a different kind is a
+/// transport fault and is refused by the same marker as an unknown request kind.
+pub fn param_list(reads: &dyn HostReads) -> Result<ParamListResponse, String> {
+    match reads.host_read(&HostReadRequest::ParamList)? {
+        HostReadAnswer::ParamList(response) => Ok(response),
+        HostReadAnswer::BimQuery(_) => Err(format!(
+            "{HOST_READ_UNKNOWN_KIND}: the host answered a BIM query to a parameter list"
         )),
     }
 }

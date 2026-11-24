@@ -1,10 +1,11 @@
-//! `PARAM {op: create|delete|rename|bind|unbind}` — structural parameter edits
-//! (ADR-0043 D8/D9).
+//! `PARAM {op: create|set|delete|rename|bind|unbind}` — parameter table and
+//! binding edits (ADR-0043 D8/D9).
 //!
-//! Value edits do not live here: changing a parameter's number is the property
-//! command's `param.<name>` write ([`super::param_properties`]). This command
-//! owns the four structural operations that add/remove/rename rows and attach or
-//! detach element slot bindings.
+//! [`crate::ParamOp::SetValue`] is the table-level value/expression write; the
+//! property command's selection-scoped `param.<name>` write
+//! ([`super::param_properties`]) is its narrow sibling. The structural operations
+//! add/remove/rename rows, and the binding operations attach/detach element slot
+//! bindings.
 //!
 //! Every op runs through the database's one merged write path,
 //! [`cad_db::DrawingDatabase::apply_parametric_update`], so one command is one
@@ -194,6 +195,92 @@ impl Application {
             point_report: None,
         })
     }
+    /// `-PARAMETERS`: the command-line Parameter Manager list.
+    ///
+    /// Read-only: it evaluates the table under the active configuration and
+    /// reports one line per stored row plus the explicit "solver-driven
+    /// constraint parameters are not modeled" boundary: this build implements no
+    /// geometric/dimensional constraint solver, so the Parameters Manager owns
+    /// the user-parameter table only. No transaction, revision bump or undo
+    /// entry.
+    ///
+    /// A returned value is the **effective** one; a row the active configuration
+    /// suppresses has no effective value, so it reports `n/a` instead of a
+    /// fabricated number.
+    pub(crate) fn param_list_report(&self, command: &Command) -> CadResult<CommandOutcome> {
+        if !matches!(command.payload, CommandPayload::None) {
+            return Err(CadError::InvalidInput(
+                "param.invalid_payload: -PARAMETERS takes no payload".into(),
+            ));
+        }
+        let drawing = self
+            .workspace
+            .documents
+            .get(&command.document)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?
+            .drawing
+            .clone();
+        let status = drawing.param_config_status()?;
+        let values = drawing.param_values()?;
+        let mut diagnostics = Vec::new();
+        let active = match status.name.as_deref() {
+            Some(name) => format!(" under configuration {name:?}"),
+            None => String::new(),
+        };
+        diagnostics.push(Diagnostic {
+            object: None,
+            code: "param.list".into(),
+            message: format!(
+                "-PARAMETERS: {} user parameter(s){active}",
+                drawing.parameters().len()
+            ),
+        });
+        for row in drawing.parameters().rows() {
+            let status_token = if status.suppressed.contains(&row.seq) {
+                "suppressed"
+            } else if status.overridden.contains(&row.seq) {
+                "overridden"
+            } else {
+                "inherited"
+            };
+            let value = match values.get(row.seq) {
+                Some(value) => format!("{:.6}", value.value),
+                None => "n/a (suppressed)".to_string(),
+            };
+            let unit = row
+                .unit
+                .or_else(|| row.kind.canonical_unit())
+                .map(|unit| unit.token())
+                .unwrap_or("");
+            diagnostics.push(Diagnostic {
+                object: None,
+                code: "param.row".into(),
+                message: format!(
+                    "  seq {}  {}  {} {}  = {}  ({status_token})",
+                    row.seq.0,
+                    row.name,
+                    row.kind.token(),
+                    unit,
+                    value
+                ),
+            });
+        }
+        diagnostics.push(Diagnostic {
+            object: None,
+            code: "param.constraint_not_modeled".into(),
+            message: "PARAMETERS: dimensional/geometric constraint parameters are solver-driven \
+                      and are not modeled by this build; only the user-parameter table above \
+                      exists"
+                .into(),
+        });
+        Ok(CommandOutcome {
+            objects: Vec::new(),
+            changes: None,
+            diagnostics,
+            measurement: None,
+            point_report: None,
+        })
+    }
 }
 
 impl crate::command_payload::ParamOp {
@@ -201,6 +288,7 @@ impl crate::command_payload::ParamOp {
     fn label(&self) -> &'static str {
         match self {
             Self::Create { .. } => "create",
+            Self::SetValue { .. } => "set",
             Self::Config { .. } => "config",
             Self::Delete { .. } => "delete",
             Self::Rename { .. } => "rename",
@@ -229,6 +317,47 @@ impl crate::command_payload::ParamOp {
                     seq,
                     before: None,
                     after: Some(row),
+                });
+            }
+            Self::SetValue { seq, expr } => {
+                let row = drawing.parameters().get(*seq).cloned().ok_or_else(|| {
+                    CadError::InvalidInput(format!(
+                        "param.unknown_reference: this document has no parameter {}",
+                        seq.0
+                    ))
+                })?;
+                // A base-row edit cannot change a value the active configuration
+                // overrides or suppresses: the derived value comes from the
+                // overlay. Refuse by name instead of reporting a write with no
+                // visible effect (the same rule as the `param.<name>` property
+                // write).
+                let status = drawing.param_config_status()?;
+                if let Some(config) = status.name.as_deref() {
+                    if status.overridden.contains(seq) {
+                        return Err(CadError::InvalidInput(format!(
+                            "param.config_override: parameter {} is overridden by configuration \
+                             {config}",
+                            seq.0
+                        )));
+                    }
+                    if status.suppressed.contains(seq) {
+                        return Err(CadError::InvalidInput(format!(
+                            "param.config_override: parameter {} is suppressed by configuration \
+                             {config}",
+                            seq.0
+                        )));
+                    }
+                }
+                let mut after = row.clone();
+                after.expr = expr.clone();
+                // Structural validation only (empty name, expression shape/budget);
+                // the dimension and reference checks belong to the merged write
+                // path, which evaluates the whole table before committing.
+                after.validate().map_err(to_cad)?;
+                param_patches.push(ParamPatch {
+                    seq: *seq,
+                    before: Some(row),
+                    after: Some(after),
                 });
             }
             Self::Config { .. } => {

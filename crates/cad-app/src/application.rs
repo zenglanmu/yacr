@@ -451,6 +451,9 @@ impl Application {
             }
             CommandId::Resources => self.resources_report(&command),
             CommandId::Diagnostics => self.diagnostics_report(&command),
+            // `-PARAMETERS`: the read-only command-line Parameter Manager list
+            // (`PARAMETERS` itself is the chrome-local panel, never a router row).
+            CommandId::ParamList => self.param_list_report(&command),
             // AUDIT is the detect-only drawing audit: it reads every stored entity
             // through `cad_db::validate_entity` and repairs nothing.
             CommandId::AuditDrawing => self.audit_drawing(session, &command),

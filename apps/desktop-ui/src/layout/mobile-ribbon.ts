@@ -105,9 +105,9 @@ export function mobileRibbonSections(tabId: string, palettesAvailable = false): 
  * are `RIBBON_TABS` itself, never a hand-written subset that could lose a tab.
  */
 export function mobileRibbonTabs(): readonly RibbonTab[] {
-  // A tab whose panels are all pending (Parametric today) has nothing the drawer
-  // can tap, so it stays in the desktop band and is not a dead chip here. The
-  // reference order of the remaining chips is still `RIBBON_TABS`' own order.
+  // A tab whose panels are all pending has nothing the drawer can tap, so it
+  // stays in the desktop band and is not a dead chip here. The reference order of
+  // the remaining chips is still `RIBBON_TABS`' own order.
   return RIBBON_TABS.filter(tab => mobileRibbonSectionsFor(tab, false).length > 0);
 }
 

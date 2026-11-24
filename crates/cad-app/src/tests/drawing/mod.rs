@@ -304,6 +304,7 @@ mod break_curve;
 mod chamfer_fillet;
 // ADR-0043: the `PARAM` command and the `param.<name>` value write.
 mod param;
+mod param_value;
 // ADR-0036 P2.0: the real one-pick `CHAMFEREDGE` command.
 mod chamfer_edge;
 mod circle_options;

@@ -14,7 +14,7 @@ use cad_domain::param::{
 };
 
 /// A model-space circle with the given radius.
-fn circle(id: u128, radius: f64) -> (u128, SemanticGeometry) {
+pub(super) fn circle(id: u128, radius: f64) -> (u128, SemanticGeometry) {
     (
         id,
         SemanticGeometry::Circle {
@@ -63,7 +63,7 @@ fn text(id: u128, height: f64) -> (u128, SemanticGeometry) {
 }
 
 /// A Work-mode application over the given entities (no parameters, no bindings).
-fn param_app(entities: Vec<(u128, SemanticGeometry)>) -> (Application, SessionState) {
+pub(super) fn param_app(entities: Vec<(u128, SemanticGeometry)>) -> (Application, SessionState) {
     let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
     builder
         .insert_layer(Layer {
@@ -125,7 +125,7 @@ fn app_with(builder: DrawingDatabaseBuilder) -> (Application, SessionState) {
 
 /// Base rows `r=20`, `q=10`, `s=7`; one circle bound to `r`. Configurations:
 /// `small` overrides `r=5`, `qonly` overrides `q=99`, `hide` suppresses `s`.
-fn configured_app() -> (Application, SessionState) {
+pub(super) fn configured_app() -> (Application, SessionState) {
     let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
     builder
         .insert_layer(Layer {
@@ -194,11 +194,11 @@ fn insert_app() -> (Application, SessionState) {
     app_with(builder)
 }
 
-fn stored_drawing(app: &Application) -> Arc<DrawingDatabase> {
+pub(super) fn stored_drawing(app: &Application) -> Arc<DrawingDatabase> {
     app.workspace.documents[&DocumentId(1)].drawing.clone()
 }
 
-fn undo_depth(app: &Application) -> usize {
+pub(super) fn undo_depth(app: &Application) -> usize {
     app.history
         .get(&DocumentId(1))
         .map(|history| history.undo_depth())
@@ -213,14 +213,14 @@ fn geometry(app: &Application, id: u128) -> SemanticGeometry {
         .clone()
 }
 
-fn radius(app: &Application, id: u128) -> f64 {
+pub(super) fn radius(app: &Application, id: u128) -> f64 {
     match geometry(app, id) {
         SemanticGeometry::Circle { radius, .. } => radius,
         other => panic!("expected a circle, got {other:?}"),
     }
 }
 
-fn seq_of(app: &Application, name: &str) -> ParamSeq {
+pub(super) fn seq_of(app: &Application, name: &str) -> ParamSeq {
     stored_drawing(app)
         .parameters()
         .get_by_name(name)
@@ -228,7 +228,7 @@ fn seq_of(app: &Application, name: &str) -> ParamSeq {
         .seq
 }
 
-fn create(
+pub(super) fn create(
     app: &mut Application,
     session: &mut SessionState,
     name: &str,
@@ -248,7 +248,7 @@ fn create(
     .expect("create");
 }
 
-fn bind(
+pub(super) fn bind(
     app: &mut Application,
     session: &mut SessionState,
     slots: Vec<(String, Expr)>,
@@ -278,11 +278,11 @@ fn set_property(
     )
 }
 
-fn undo(app: &mut Application, session: &mut SessionState) -> CommandOutcome {
+pub(super) fn undo(app: &mut Application, session: &mut SessionState) -> CommandOutcome {
     execute(app, session, CommandId::Undo, CommandPayload::None).expect("undo")
 }
 
-fn redo(app: &mut Application, session: &mut SessionState) -> CommandOutcome {
+pub(super) fn redo(app: &mut Application, session: &mut SessionState) -> CommandOutcome {
     execute(app, session, CommandId::Redo, CommandPayload::None).expect("redo")
 }
 

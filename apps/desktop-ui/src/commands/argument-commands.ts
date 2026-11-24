@@ -27,8 +27,8 @@ import {
   isMLeaderAlignArgument, isMLeaderEditArgument, isMlEditArgument, isToleranceArgument,
 } from './argument-mleader-grammar.ts';
 import {
-  isLayoutArgument, isLinetypeArgument, isMlineArgument, isTableExportArgument,
-  splitQuotedTokens,
+  isDashParametersArgument, isLayoutArgument, isLinetypeArgument, isMlineArgument,
+  isTableExportArgument, splitQuotedTokens,
 } from './argument-extras-grammar.ts';
 import { isAddSelectedArgument, isAliasEditArgument, isMvSetupArgument } from './argument-record-grammar.ts';
 import { isSsxArgument } from './argument-selection-grammar.ts';
@@ -804,6 +804,7 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
   }),
   // `EXPORT <format>`: the typed format token (grammar in `argument-export-grammar.ts`).
   EXPORT: EXPORT_ARGUMENT_SPEC,
+  '-PARAMETERS': Object.freeze({ parse: isDashParametersArgument }),
 });
 
 /** `DIMSTYLE`/`-DIMSTYLE`: `LIST`, `CURRENT` or `SET <name>` (name may have spaces). */

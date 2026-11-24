@@ -183,7 +183,10 @@ test('the drawer offers the real ribbon model minus the two chrome-collapse swit
     .filter(tab => mobileRibbonSections(tab.id, false).length > 0)
     .map(tab => tab.id);
   assert.deepEqual(mobileRibbonTabs().map(tab => tab.id), expectedTabs);
-  assert.equal(expectedTabs.includes('parametric'), false, 'the pending-only tab is desktop structure');
+  // Parametric is no longer pending-only: its Manage panel now carries the
+  // Parameters Manager, which has a compact sheet of its own, so the tab is a
+  // real chip (the two reference panels beside it remain pending notes).
+  assert.equal(expectedTabs.includes('parametric'), true, 'the Parameters Manager reaches the drawer');
 
   for (const tab of mobileRibbonTabs()) {
     const sections = mobileRibbonSections(tab.id);

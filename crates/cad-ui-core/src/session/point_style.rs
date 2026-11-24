@@ -123,6 +123,10 @@ impl CadSession {
             // `-LAYER NEW …` / `MAKE` / `ON` … : the command-line layer editor's
             // one-option-per-line write forms (`?` stays the read-only report).
             super::commands::DASH_LAYER_SELECTOR => self.dash_layer_argument(argument, text),
+            // `-PARAMETERS NEW|SET|RENAME|DELETE …`: the command-line Parameter
+            // Manager (`?`/`LIST` is the read-only list; the bare selector is
+            // `CommandId::ParamList`).
+            super::commands::DASH_PARAMETERS_SELECTOR => self.param_argument(argument, text),
             // The 2026-11-07 selection/filter batch: all five are typed argument
             // forms of canonical selectors, never new commands.
             QSELECT_SELECTOR | FILTER_SELECTOR | GETSEL_SELECTOR => {

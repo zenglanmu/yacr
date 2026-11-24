@@ -196,3 +196,27 @@ export function isLayoutArgument(argument: string): boolean {
 export function isTableExportArgument(argument: string): boolean {
   return argument.trim().length > 0;
 }
+
+
+/**
+ * `-PARAMETERS ?|LIST|NEW|SET|RENAME|DELETE …`: the command-line Parameter
+ * Manager's **shape** only.
+ *
+ * The host grammar owns the names, kinds and expressions (`NEW <name> <kind>
+ * <expr>`, `SET <target> <expr>`, `RENAME <target> <name>`, `DELETE <target>`),
+ * including every `param.*` refusal. This predicate only refuses a line that
+ * cannot be one of those forms, so a malformed line is the shared
+ * `command.unsupported` refusal before IPC rather than a fabricated command.
+ * Quoted names with spaces are tokenised like the host's own `take_token`.
+ */
+export function isDashParametersArgument(argument: string): boolean {
+  const parts = splitQuotedTokens(argument);
+  if (parts === null || parts.length === 0) return false;
+  const option = parts[0].toUpperCase();
+  if (option === '?' || option === 'LIST') return parts.length === 1;
+  if (option === 'DELETE' || option === 'D') return parts.length === 2;
+  if (option === 'SET' || option === 'S') return parts.length >= 3;
+  if (option === 'RENAME' || option === 'R') return parts.length >= 3;
+  if (option === 'NEW' || option === 'N') return parts.length >= 4;
+  return false;
+}

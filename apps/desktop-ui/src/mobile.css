@@ -843,3 +843,39 @@
   from { opacity: 0; transform: translateY(-6px); }
   to { opacity: 1; transform: none; }
 }
+
+/* The Parameters sheet: the same panel as the desktop window, with finger-sized
+   inputs and the shared bottom-sheet geometry. */
+:root[data-layout="mobile"] .params-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 56;
+  display: flex;
+  align-items: flex-end;
+}
+:root[data-layout="mobile"] .params-layer__backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: var(--scrim-sheet);
+}
+:root[data-layout="mobile"] .params--floating {
+  position: relative;
+  width: 100%;
+  max-height: min(86dvh, 760px);
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 8px 8px 0 0;
+  border: 1px solid var(--line-soft);
+  border-bottom: 0;
+  box-shadow: 0 -12px 34px rgba(var(--shadow-rgb), .48);
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), var(--yacr-safe-bottom, 0px));
+  animation: mobile-rise var(--t-med) both;
+}
+:root[data-layout="mobile"] .params--floating .palette__head { height: 44px; padding: 0 6px 0 12px; }
+:root[data-layout="mobile"] .params--floating .ui-icon-button { width: 44px; height: 44px; }
+:root[data-layout="mobile"] .params--floating .params__body { padding: 8px 10px 14px; }
+:root[data-layout="mobile"] .params--floating .params__input { height: 34px; font-size: 13px; }
+:root[data-layout="mobile"] .params--floating .params__select { height: 34px; font-size: 13px; }
+:root[data-layout="mobile"] .params--floating .params__edit .ui-button,
+:root[data-layout="mobile"] .params--floating .params__actions .ui-button { min-height: 34px; }

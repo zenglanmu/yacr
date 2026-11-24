@@ -33,6 +33,7 @@ import { PaletteWindow } from './PaletteWindow.tsx';
 import { LayersPalette } from './LayersPalette.tsx';
 import { PropertiesDock } from './PropertiesDock.tsx';
 import { BimPanel } from './BimPanel.tsx';
+import { ParamsPanel } from './ParamsPanel.tsx';
 import { PluginNoticeHost } from './PluginNoticeHost.tsx';
 import { HostNoticeHost } from './HostNoticeHost.tsx';
 import { UpdateNoticeHost } from './UpdateNoticeHost.tsx';
@@ -45,6 +46,8 @@ import { useI18n, useShell } from '../context.ts';
 import { palettesOffered, SURFACE_MODE_DOM_CANVAS, surfaceModeFromShell } from '../cad/surface.ts';
 import { closeBimPanel } from '../bim/panel.ts';
 import { useBimPanelOpen } from '../bim/use-bim-panel.ts';
+import { closeParamsPanel } from '../params/panel.ts';
+import { useParamsPanelOpen } from '../params/use-params-panel.ts';
 
 export function Workspace() {
   const { t } = useI18n();
@@ -53,6 +56,8 @@ export function Workspace() {
   // The BIM browse panel is a module-store flag (`bim/panel.ts`) so the ribbon
   // action, the palette window and the compact sheet all read one owner.
   const bimOpen = useBimPanelOpen();
+  // The Parameters Manager is the same kind of module-store flag.
+  const paramsOpen = useParamsPanelOpen();
   // Whether the desktop palettes exist on the reported carrier. A `dom-canvas`
   // host holds no host-side document state, so it has none of the projections they
   // read: they are not rendered at all rather than as empty panels. The carrier
@@ -64,7 +69,7 @@ export function Workspace() {
   // to see it: a window flag that is set is never allowed to paint nothing.
   const palettesRequested = Boolean(shell.propertiesOpen || shell.layersOpen
     || shell.fileInfoOpen || shell.diagnosticsOpen || shell.referencesOpen || shell.fontsOpen
-    || bimOpen);
+    || bimOpen || paramsOpen);
   const palettesAvailable = palettesOffered(shell)
     && (shell.chromeVisibility.palettes || palettesRequested);
   // The inspector is only meaningful with a drawing open; on the start screen the
@@ -94,6 +99,10 @@ export function Workspace() {
   // It renders on exactly one band at a time: the desktop palette window, or the
   // compact bottom sheet below (never both, so one panel store is not duplicated).
   const showBim = palettesAvailable && bimOpen;
+  // The Parameters Manager reads the document (not a selection), so it is the
+  // same kind of document-wide surface as the BIM panel and follows its carrier
+  // rule: one band at a time, never both.
+  const showParams = palettesAvailable && paramsOpen;
   // The left column is now the start screen's alone. Palettes live in the
   // floating layer below, so no palette flag may widen the partition.
   const leftOpen = showStart;
@@ -182,6 +191,11 @@ export function Workspace() {
               <BimPanel />
             </PaletteWindow>
           ) : null}
+          {showParams && !shell.mobile ? (
+            <PaletteWindow windowKey="params" initialIndex={7}>
+              <ParamsPanel />
+            </PaletteWindow>
+          ) : null}
         </div>
       </div>
       {/* The compact BIM sheet: the same panel as a bottom sheet, because the
@@ -191,6 +205,13 @@ export function Workspace() {
         <div className="bim-layer">
           <button type="button" className="bim-layer__backdrop" aria-label={t('bim.close')} onClick={closeBimPanel} />
           <BimPanel variant="floating" />
+        </div>
+      ) : null}
+      {/* The compact Parameters sheet: the same panel as a bottom sheet. */}
+      {showParams && shell.mobile ? (
+        <div className="params-layer">
+          <button type="button" className="params-layer__backdrop" aria-label={t('parameters.close')} onClick={closeParamsPanel} />
+          <ParamsPanel variant="floating" />
         </div>
       ) : null}
       <NavigationDock />

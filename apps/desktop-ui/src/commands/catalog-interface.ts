@@ -76,4 +76,11 @@ export const INTERFACE_COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.
   // `DOMAIN <token>` writes the document (or previews with no document). It is
   // chrome-local like the rows above and never reaches the router.
   { id: 'DOMAIN', labelKey: 'draw.kind.domain', icon: 'app', group: 'view' },
+  // The Parameters Manager (ADR-0043 D9): `PARAMETERS` opens the chrome-owned
+  // panel, `PARAMETERSCLOSE` closes it (idempotent), and the dashed
+  // `-PARAMETERS` is the command-line list/editor the panel itself drives. The
+  // two bare words are chrome-local; the dashed one is a real router selector.
+  { id: 'PARAMETERS', labelKey: 'draw.kind.parameters', icon: 'properties', group: 'properties' },
+  { id: 'PARAMETERSCLOSE', labelKey: 'draw.kind.parametersclose', icon: 'close', group: 'properties' },
+  { id: '-PARAMETERS', labelKey: 'draw.kind.dashparameters', icon: 'terminal', group: 'properties' },
 ]);

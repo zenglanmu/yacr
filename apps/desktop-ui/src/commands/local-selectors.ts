@@ -31,6 +31,8 @@ import type { Translator } from '../i18n.ts';
 import type { LayoutMode } from '../layout/layout-mode.ts';
 import { DOCKED_PANEL_REFUSAL_KEY, dockedPaletteOpenable } from '../layout/layout-surfaces.ts';
 import { isLayersCommand } from '../layers/layers.ts';
+import { isParametersCloseCommand, isParametersCommand } from '../params/params.ts';
+import { closeParamsPanel, openParamsPanel } from '../params/panel.ts';
 import { isOptionsCommand } from '../options/options.ts';
 import { isPropertiesCommand } from '../properties/properties.ts';
 import { isResourcesCommand } from '../references/references.ts';
@@ -87,6 +89,10 @@ export type LocalSelectorResult =
   | { readonly kind: 'domainUnknown'; readonly token: string }
   | { readonly kind: 'resources' }
   | { readonly kind: 'properties' }
+  /** Open the Parameters Manager panel (`PARAMETERS`). */
+  | { readonly kind: 'parameters' }
+  /** Close the Parameters Manager panel; already closed is a success. */
+  | { readonly kind: 'parametersClose' }
   | { readonly kind: 'layers' }
   | { readonly kind: 'fonts' }
   | { readonly kind: 'about' }
@@ -213,6 +219,11 @@ export function localSelectorFor(text: string, layout: LayoutMode): LocalSelecto
   if (isFontsCommand(text)) return { kind: 'fonts' };
   if (isPropertiesCommand(text)) return { kind: 'properties' };
   if (isQuickPropertiesCommand(text)) return { kind: 'properties' };
+  // The Parameters Manager is a document-wide panel with no router command of its
+  // own: bare `PARAMETERS` opens it and `PARAMETERSCLOSE` closes it. The writes it
+  // performs are the dashed `-PARAMETERS` router command, never these words.
+  if (isParametersCommand(text)) return { kind: 'parameters' };
+  if (isParametersCloseCommand(text)) return { kind: 'parametersClose' };
   if (isLayersCommand(text)) {
     return dockedPaletteOpenable(layout)
       ? { kind: 'layers' }
@@ -375,6 +386,8 @@ export function useLocalSelectors(host: LocalSelectorHost): (text: string, fromI
       case 'resources': openResources(); break;
       case 'properties': openProperties(); break;
       case 'layers': openLayers(); break;
+      case 'parameters': openParamsPanel(); break;
+      case 'parametersClose': closeParamsPanel(); break;
       case 'fonts': openFonts(); break;
       case 'about': openAbout(); break;
       case 'cleanScreen': setCleanScreen(result.value); break;
