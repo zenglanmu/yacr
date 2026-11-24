@@ -481,6 +481,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
         // carrier cannot persist.
         CAD.with(|cell| {
             cad_desktop_shell::state::drain_embed_resources(shared, cell.borrow().as_ref());
+            cad_desktop_shell::state::drain_application_domains(shared, cell.borrow().as_ref());
         });
         if queued > 0 {
             CAD.with(|cell| {

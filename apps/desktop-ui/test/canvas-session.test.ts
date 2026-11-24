@@ -347,11 +347,12 @@ test('the ribbon does not offer a palette toggle either', () => {
       paletteEntries += panel.items.filter(item => PALETTE_ACTIONS.includes(item.action)
         || PALETTE_COMMANDS.includes(item.command)).length;
       const offered = offeredItems(panel.items, false);
-      assert.equal(offeredPanels([panel], false).length > 0, offered.length > 0, panel.id);
+      assert.equal(offeredPanels([panel], false).length > 0, panel.pending || offered.length > 0, panel.id);
       if (offered.length === 0) droppedPanels += 1;
     }
     assert.ok(offeredPanels(tab.panels, false).length > 0, `tab ${tab.id} keeps at least one panel`);
     for (const panel of offeredPanels(tab.panels, false)) {
+      if (panel.pending) continue;
       assert.ok(offeredItems(panel.items, false).length > 0, `offered panel ${panel.id} keeps at least one item`);
     }
   }

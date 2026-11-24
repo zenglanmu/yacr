@@ -15,6 +15,7 @@ mod curve_edits;
 mod dimension;
 mod dirty_scope;
 mod document;
+mod domain;
 mod draw_pick;
 mod explode;
 mod mtext;

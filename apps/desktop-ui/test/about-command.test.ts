@@ -82,7 +82,7 @@ test('the typed command and the File tab share requestOpenPopup(about)', async (
   assert.ok(app.includes("requestOpenPopup('about');"), 'both paths call the one opener');
   // The ribbon token is unchanged, so its active-state logic (`action === 'about'`)
   // keeps matching the dialog it opens.
-  const ribbon = await readModule('ribbon/ribbon-model.ts');
+  const ribbon = await readModule('ribbon/panel-items.ts');
   assert.ok(
     ribbon.includes("{ id: 'about', labelKey: POPUP_KEYS.ribbonEntry, icon: 'app', action: 'about' }"),
     'the File tab keeps its About affordance and action token',

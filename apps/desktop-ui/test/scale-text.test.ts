@@ -71,32 +71,27 @@ test('SCALETEXT is a draw-group catalogue row beside the text commands', () => {
 
 // --- ribbon ------------------------------------------------------------------
 
-test('both draw panels carry SCALETEXT as one small router button with no popover', () => {
-  for (const tabId of ['home', 'draw']) {
-    const items = drawPanel(tabId).items;
+test('Home Annotation and the Annotate Text panel carry SCALETEXT as one small router button', () => {
+  const home = RIBBON_TABS.find(tab => tab.id === 'home').panels.find(panel => panel.id === 'annotation');
+  const annotate = RIBBON_TABS.find(tab => tab.id === 'annotate').panels.find(panel => panel.id === 'text');
+  for (const [name, panel] of [['home/annotation', home], ['annotate/text', annotate]]) {
+    const items = panel.items;
     const at = items.findIndex(item => item.id === ID);
-    assert.ok(at !== -1, `${tabId}/draw must carry the SCALETEXT affordance`);
-    assert.equal(items[at - 1].id, 'MTEXT', `${tabId}: SCALETEXT sits directly after MTEXT`);
+    assert.ok(at !== -1, `${name} must carry the SCALETEXT affordance`);
+    assert.equal(items[at - 1].id, 'MTEXT', `${name}: SCALETEXT sits directly after MTEXT`);
     const item = items[at];
     assert.equal(item.command, ID, 'the dispatch token is the router name');
     assert.equal(item.labelKey, LABEL_KEY);
     assert.equal(item.icon, 'scale');
-    assert.equal(item.large, undefined, `${tabId}: SCALETEXT is a small button`);
-    assert.equal(item.variants, undefined, `${tabId}: there is no options popover`);
+    assert.equal(item.variants, undefined, `${name}: there is no options popover`);
     assert.equal(item.action, undefined, 'SCALETEXT must dispatch through the router');
     assert.equal(item.standardView, undefined);
-    assert.equal(items.filter(candidate => candidate.id === ID).length, 1, `${tabId}: one SCALETEXT`);
-    // The HATCH pair still closes the draw group.
-    assert.deepEqual(
-      items.slice(-4).map(candidate => candidate.id),
-      ['HATCHPOINT', 'BOUNDARY', 'REVCLOUD', 'GRADIENT'],
-      `${tabId}/draw ends with the HATCH pair and REVCLOUD`,
-    );
+    assert.equal(items.filter(candidate => candidate.id === ID).length, 1, `${name}: one SCALETEXT`);
   }
   // No other panel smuggles the command in.
   for (const tab of RIBBON_TABS) {
     for (const panel of tab.panels) {
-      if (panel.id === 'draw') continue;
+      if (panel.id === 'annotation' || panel.id === 'text') continue;
       assert.equal(panel.items.some(item => item.command === ID), false, `${tab.id}/${panel.id}`);
     }
   }

@@ -54,43 +54,25 @@ const INSERT = Object.freeze({
 const TOOL = points => ({ key: INSERT.toolKey, points, ready: false });
 const AWAITING = points => ({ ...TOOL(points), awaiting_text: true });
 
-const drawPanel = tabId => RIBBON_TABS.find(tab => tab.id === tabId).panels.find(panel => panel.id === 'draw');
+const drawPanel = tabId => RIBBON_TABS.find(tab => tab.id === 'home').panels.find(panel => panel.id === 'draw');
 
-test('INSERT is one small draw-panel button on both tabs, with no variant popover', () => {
-  for (const tabId of ['home', 'draw']) {
-    const items = drawPanel(tabId).items;
-    const ids = items.map(item => item.id);
-    const at = ids.indexOf(INSERT.id);
-    assert.ok(at !== -1, `${tabId}/draw must carry the INSERT affordance`);
-    // INSERT sits at the tail of the creation run, directly after SPLINE, with
-    // the block **definition** command BLOCK beside it before OFFSET, so no
-    // shipped row moves and the HATCH/HATCHPOINT tail keeps its slot.
-    assert.equal(ids[at - 1], 'SPLINE', `${tabId}: INSERT follows SPLINE`);
-    assert.equal(ids[at + 1], 'BLOCK', `${tabId}: INSERT precedes BLOCK`);
-    assert.equal(ids[at + 2], 'OFFSET', `${tabId}: BLOCK precedes OFFSET`);
-    assert.deepEqual(
-      ids.slice(-4),
-      ['HATCHPOINT', 'BOUNDARY', 'REVCLOUD', 'GRADIENT'],
-      `${tabId}: the HATCH pair and REVCLOUD close the draw group`,
-    );
-    assert.equal(items.filter(item => item.id === INSERT.id).length, 1, `${tabId}: one INSERT button`);
-
-    const item = items[at];
+test('INSERT is the Block tile on Home and Insert, with no variant popover', () => {
+  const home = RIBBON_TABS.find(tab => tab.id === 'home').panels.find(panel => panel.id === 'block');
+  const insert = RIBBON_TABS.find(tab => tab.id === 'insert').panels.find(panel => panel.id === 'block');
+  for (const [name, panel] of [['home/block', home], ['insert/block', insert]]) {
+    const item = panel.items.find(entry => entry.id === INSERT.id);
+    assert.ok(item, `${name}: the Block panel carries INSERT`);
     assert.equal(item.command, INSERT.id);
     assert.equal(item.labelKey, INSERT.labelKey);
-    assert.equal(item.icon, INSERT.icon);
-    assert.equal(item.action, undefined, 'INSERT must dispatch through the router');
-    assert.equal(item.standardView, undefined);
-    assert.equal(item.large, undefined, `${tabId}: INSERT is a small draw button, not a primary tile`);
     // No block picker, no scale/rotation/attribute controls: a caret would imply
     // choices the command does not have.
-    assert.equal(item.variants, undefined, `${tabId}: INSERT has no variant popover`);
-    assert.ok(ribbonCommandIds().includes(INSERT.id), `${tabId}: the ribbon reaches INSERT`);
+    assert.equal(item.variants, undefined, `${name}: INSERT has no variant popover`);
+    assert.ok(ribbonCommandIds().includes(INSERT.id), `${name}: the ribbon reaches INSERT`);
   }
   // No other panel smuggles the command in.
   for (const tab of RIBBON_TABS) {
     for (const panel of tab.panels) {
-      if (panel.id === 'draw') continue;
+      if (panel.id === 'block' || panel.id === 'block_definition') continue;
       assert.equal(panel.items.some(item => item.command === INSERT.id), false, `${tab.id}/${panel.id}`);
     }
   }

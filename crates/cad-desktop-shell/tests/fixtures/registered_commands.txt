@@ -23,6 +23,7 @@ cad_rename_layer
 cad_restore_layers
 cad_select_entities
 cad_set_active_layer
+cad_set_application_domain
 cad_set_embed_resources
 cad_set_layer_property
 cad_set_layer_visible

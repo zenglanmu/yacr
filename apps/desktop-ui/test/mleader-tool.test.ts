@@ -89,45 +89,40 @@ const MLEADER = Object.freeze({
 const TOOL = points => ({ key: MLEADER.toolKey, points, ready: false });
 const AWAITING = points => ({ ...TOOL(points), awaiting_text: true });
 
-const drawPanel = tabId => RIBBON_TABS.find(tab => tab.id === tabId).panels.find(panel => panel.id === 'draw');
+const drawPanel = tabId => RIBBON_TABS.find(tab => tab.id === 'home').panels.find(panel => panel.id === 'draw');
 
-test('MLEADER sits between TEXT and HATCH on both draw panels, with no variant popover', () => {
-  for (const tabId of ['home', 'draw']) {
-    const items = drawPanel(tabId).items;
-    const ids = items.map(item => item.id);
-    const at = ids.indexOf(MLEADER.id);
-    assert.ok(at !== -1, `${tabId}/draw must carry the MLEADER affordance`);
-    // Annotation neighbours: MLEADER directly follows SCALETEXT, which follows
-    // MTEXT, which follows TEXT; the HATCH pair still closes the group.
-    assert.equal(ids[at - 1], 'SCALETEXT', `${tabId}: MLEADER follows SCALETEXT`);
-    assert.equal(ids[at - 2], 'MTEXT', `${tabId}: SCALETEXT follows MTEXT`);
-    assert.equal(ids[at - 3], 'TEXT', `${tabId}: MTEXT follows TEXT`);
-    assert.deepEqual(
-      ids.slice(-10),
-      ['OFFSET', 'TEXT', 'MTEXT', 'SCALETEXT', 'MLEADER', 'HATCH', 'HATCHPOINT', 'BOUNDARY', 'REVCLOUD', 'GRADIENT'],
-      `${tabId}: fixed tail order`,
-    );
-    assert.equal(items.at(-1).id, 'GRADIENT', `${tabId}/draw ends with the GRADIENT row`);
-    assert.equal(items.filter(item => item.id === MLEADER.id).length, 1, `${tabId}: one MLEADER button`);
+test('MLEADER sits in the Home Annotation panel and the Annotate Leader panel, with no variant popover', () => {
+  const home = RIBBON_TABS.find(tab => tab.id === 'home');
+  const annotation = home.panels.find(panel => panel.id === 'annotation');
+  const ids = annotation.items.map(item => item.id);
+  const at = ids.indexOf(MLEADER.id);
+  assert.ok(at !== -1, 'home/annotation must carry the MLEADER affordance');
+  // Home > Annotation keeps the compact reference set: TEXT, MTEXT, a dimension
+  // tile, the leader and a table. MLEADER follows the dimension tile.
+  assert.equal(ids[at - 1], 'DIMLINEAR', 'MLEADER follows the dimension tile');
+  assert.equal(ids[at + 1], 'TABLE', 'MLEADER precedes the table tile');
+  assert.equal(annotation.items.filter(item => item.id === MLEADER.id).length, 1, 'one MLEADER button');
+  const item = annotation.items[at];
+  assert.equal(item.command, MLEADER.id);
+  assert.equal(item.labelKey, MLEADER.labelKey);
+  assert.equal(item.icon, MLEADER.icon);
+  assert.equal(item.action, undefined, 'MLEADER must dispatch through the router');
+  assert.equal(item.large, undefined, 'the Home tile is a small button');
+  assert.equal(item.variants, undefined, 'MLEADER has no variant popover');
 
-    const item = items[at];
-    assert.equal(item.command, MLEADER.id);
-    assert.equal(item.labelKey, MLEADER.labelKey);
-    assert.equal(item.icon, MLEADER.icon);
-    assert.equal(item.action, undefined, 'MLEADER must dispatch through the router');
-    assert.equal(item.large, undefined, 'MLEADER is a small draw button, not a primary tile');
-    // The command has no `Options` sub-prompt, so a caret here would imply choices
-    // the tool does not have (leader type / content type / max points / angle).
-    assert.equal(item.variants, undefined, 'MLEADER has no variant popover');
-    assert.ok(ribbonCommandIds().includes(MLEADER.id));
-  }
+  const annotate = RIBBON_TABS.find(tab => tab.id === 'annotate');
+  const leader = annotate.panels.find(panel => panel.id === 'leader');
+  assert.deepEqual(leader.items.map(entry => entry.id), [MLEADER.id]);
+  assert.equal(leader.items[0].large, true, 'the Annotate Leader tile is the primary one');
+
   // No other panel smuggles the command in.
   for (const tab of RIBBON_TABS) {
     for (const panel of tab.panels) {
-      if (panel.id === 'draw') continue;
-      assert.equal(panel.items.some(item => item.command === MLEADER.id), false, `${tab.id}/${panel.id}`);
+      if (panel.id === 'annotation' || panel.id === 'leader') continue;
+      assert.equal(panel.items.some(entry => entry.command === MLEADER.id), false, `${tab.id}/${panel.id}`);
     }
   }
+  assert.ok(ribbonCommandIds().includes(MLEADER.id));
 });
 
 test('MLEADER is a catalogued draw command enabled only by router admission', () => {
@@ -273,7 +268,7 @@ test('the text step keeps its generic semantics for MLEADER — no special case'
     .sort();
   assert.deepEqual(owners, [
     'argument-commands.ts', 'argument-mleader-grammar.ts',
-    'cad.ts', 'catalog-extended.ts', 'catalog.ts', 'gating.ts', 'icons.tsx', 'ribbon-model.ts',
+    'cad.ts', 'catalog-extended.ts', 'catalog.ts', 'gating.ts', 'icons.tsx', 'panel-items.ts',
   ]);
 });
 
@@ -338,8 +333,10 @@ test('the MLEADER glyph is a dedicated leader-with-text mark in the shared icon 
   assert.ok(defined.has(MLEADER.icon), `icons.jsx must define '${MLEADER.icon}'`);
   // Ribbon and catalog agree on the dedicated name (an unknown name would make
   // <Icon> silently fall back to a dot).
-  for (const tabId of ['home', 'draw']) {
-    assert.equal(drawPanel(tabId).items.find(item => item.id === MLEADER.id).icon, MLEADER.icon, tabId);
+  for (const tabId of ['home']) {
+    const home = RIBBON_TABS.find(tab => tab.id === 'home');
+    const annotation = home.panels.find(panel => panel.id === 'annotation');
+    assert.equal(annotation.items.find(item => item.id === MLEADER.id).icon, MLEADER.icon, tabId);
   }
   assert.equal(COMMAND_CATALOG.find(command => command.id === MLEADER.id).icon, MLEADER.icon);
   // `mleader` belongs to MLEADER alone, and every draw-panel glyph is real.
@@ -347,7 +344,7 @@ test('the MLEADER glyph is a dedicated leader-with-text mark in the shared icon 
     COMMAND_CATALOG.filter(command => command.icon === MLEADER.icon).map(command => command.id),
     ['MLEADER', 'MLEADERALIGN', 'MLEADEREDIT', 'MLEADERCOLLECT'],
   );
-  for (const tabId of ['home', 'draw']) {
+  for (const tabId of ['home']) {
     for (const item of drawPanel(tabId).items) {
       assert.ok(defined.has(item.icon), `${item.id} icon '${item.icon}' must exist`);
     }

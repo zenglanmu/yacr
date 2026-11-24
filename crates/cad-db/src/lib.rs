@@ -8,6 +8,7 @@
 mod bim;
 mod bounds;
 mod builder;
+mod builder_domain;
 mod change;
 mod dim_style;
 mod drawing;

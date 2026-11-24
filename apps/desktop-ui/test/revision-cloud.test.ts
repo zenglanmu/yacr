@@ -70,7 +70,7 @@ test('REVCLOUD is catalogued as its own draw selector', () => {
 });
 
 test('both draw panels carry the small REVCLOUD router button', () => {
-  for (const tabId of ['home', 'draw']) {
+  for (const tabId of ['home']) {
   const panel = drawPanel(tabId);
   const item = panel.items.find(candidate => candidate.id === ID);
   assert.ok(item, `${tabId}/draw must carry REVCLOUD`);

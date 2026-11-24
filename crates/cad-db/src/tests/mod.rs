@@ -9,6 +9,7 @@ mod block_edit;
 mod bounds;
 mod builder;
 mod deletion_guards;
+mod domain;
 mod drawing;
 mod drawing_clip;
 mod drawing_display;

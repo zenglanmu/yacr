@@ -22,6 +22,7 @@ use crate::{
 mod databases;
 mod display_switches;
 mod documents;
+mod domain;
 mod draw_create;
 mod draw_intent_map;
 mod draw_pick;
@@ -314,6 +315,14 @@ impl HostController {
         _stamp: &TaskStamp,
     ) -> CadResult<OpenedDrawing> {
         let vendor_records = std::mem::take(&mut imported.vendor_records);
+        // ADR-0053 D2: the connector names the document's initial interface
+        // domain. A connector with no domain mapping leaves the header unnamed,
+        // which the reader derives conservatively (never a guessed profile).
+        let domain = imported
+            .report
+            .connector
+            .and_then(ApplicationDomain::from_connector);
+        imported.database.set_application_domain(domain);
         let opened = OpenedDrawing {
             entities: imported.database.entity_count(),
             completeness_label: imported.report.completeness_label(),

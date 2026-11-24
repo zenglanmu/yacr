@@ -969,9 +969,10 @@ test('every entry point opens the same host-owned popup, and Plugins selects its
   assert.equal(app.includes("requestOpenPopup('plugins')"), false);
   assert.ok(app.indexOf("action === 'plugins'") < app.indexOf("openOptionsDialog(requestOpenPopup, 'plugins')"));
 
-  const ribbon = await readModule('ribbon/ribbon-model.ts');
-  assert.ok(ribbon.includes("options: 'options'"));
-  assert.ok(ribbon.includes("plugins: 'plugins'"));
+  const ribbon = await readModule('ribbon/panel-items.ts');
+  const actions = await readModule('ribbon/actions.ts');
+  assert.ok(actions.includes("options: 'options'"));
+  assert.ok(actions.includes("plugins: 'plugins'"));
   assert.ok(ribbon.includes('labelKey: OPTIONS_KEYS.ribbonEntry'));
   assert.ok(ribbon.includes("action: 'options'"));
   // The Plugins entry is a File-tab action with its own label key, never a

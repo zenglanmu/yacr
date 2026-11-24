@@ -278,6 +278,27 @@ impl DrawingDatabase {
         self.embed_resources
     }
 
+    /// The interface domain this document names (ADR-0053 D2), if any.
+    pub fn application_domain(&self) -> Option<ApplicationDomain> {
+        self.application_domain
+    }
+
+    /// The domain the chrome must render for this document.
+    ///
+    /// A named value wins verbatim. An unnamed document is derived
+    /// conservatively: BIM data implies the BIM profile (the only other
+    /// fully-modelled one), everything else is two-dimensional drafting. This is
+    /// a display default, not a claim that the document was imported from a DWG.
+    pub fn effective_application_domain(&self) -> ApplicationDomain {
+        self.application_domain.unwrap_or_else(|| {
+            if !self.bim_elements.is_empty() || !self.bim_definitions.is_empty() {
+                ApplicationDomain::Bim
+            } else {
+                ApplicationDomain::Cad2d
+            }
+        })
+    }
+
     pub fn layer(&self, id: LayerId) -> Option<&Layer> {
         self.layers.get(&id)
     }

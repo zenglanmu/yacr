@@ -172,7 +172,7 @@ test('a multi-word id is admitted whole before the argument grammar (host order)
 });
 
 test('the AREA button carries AREA OBJECT as a variant now that admission is whole-line', () => {
-  const measure = panel('measure', 'measure');
+  const measure = panel('home', 'utilities');
   const area = measure.items.find(item => item.id === 'AREA');
   assert.ok(area, 'the Measure panel keeps its AREA button');
   // AutoCAD keeps Object mode inside the Area split button; now that admission

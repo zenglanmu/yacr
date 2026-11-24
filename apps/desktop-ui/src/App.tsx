@@ -34,17 +34,16 @@ import type { ContextMenuState } from './commands/context-menu.ts';
 import { openPopup, type PopupKind, type PopupPayload } from './popup/popup.ts';
 import { I18nContext, ShellContext, type I18nValue, type ShellValue } from './context.ts';
 import { TitleBar } from './components/TitleBar.tsx';
-import { Ribbon } from './components/Ribbon.tsx';
+import { DomainCommandLine, DomainMobileCommandSurface, DomainRibbon } from './domains/chrome.tsx';
 import { DocTabs } from './components/DocTabs.tsx';
 import { Workspace } from './components/Workspace.tsx';
 import { LayoutTabs } from './components/LayoutTabs.tsx';
 import { ReferencesPanel } from './components/ReferencesPanel.tsx';
 import { FontsPanel } from './components/FontsPanel.tsx';
-import { CommandLine } from './components/CommandLine.tsx';
+
 import { StatusBar } from './components/StatusBar.tsx';
 import { PopupOverlay } from './components/PopupOverlay.tsx';
 import { ContextMenu } from './components/ContextMenu.tsx';
-import { MobileCommandSurface } from './components/MobileCommandSurface.tsx';
 import { MOBILE_DRAWER_ID, MobileRibbonDrawer } from './components/MobileRibbonDrawer.tsx';
 import { MobileMenuButton } from './components/MobileMenuButton.tsx';
 import { MobilePropertiesSheet } from './components/MobilePropertiesSheet.tsx';
@@ -936,14 +935,14 @@ function Shell() {
           {mobile ? <MobileMenuButton menuOpen={mobileDrawer.open} onMenu={toggleMobileDrawer} drawerId={MOBILE_DRAWER_ID} /> : null}
           {mobile ? <MobileRibbonDrawer open={mobileDrawer.open} onClose={closeMobileDrawer} /> : null}
           {mobile || cleanScreen ? null : <TitleBar />}
-          {mobile || cleanScreen || !chromeVisibility.ribbon ? null : <Ribbon />}
+          {mobile || cleanScreen || !chromeVisibility.ribbon ? null : <DomainRibbon />}
           {mobile || cleanScreen || !chromeVisibility.fileTabs ? null : <DocTabs />}
           <Workspace />
           {mobile || cleanScreen ? null : <LayoutTabs />}
           {/* One bottom component per layout: the docked command line below the
               status bar on desktop, the compact command surface (the bar and its
               floating trigger, which own the hidden-by-default rule) on mobile. */}
-          {mobile ? <MobileCommandSurface /> : commandLineOpen ? <CommandLine /> : null}
+          {mobile ? <DomainMobileCommandSurface /> : commandLineOpen ? <DomainCommandLine /> : null}
           {mobile ? null : <StatusBar />}
         </main>
         {/* The chrome-local surfaces: Quick View panels, QuickCalc, the workspace

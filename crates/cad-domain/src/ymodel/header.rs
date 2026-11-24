@@ -36,7 +36,7 @@ use serde_json::{Map, Number, Value};
 
 use crate::ymodel::id::{IdKind, MAX_SEQ};
 use crate::ymodel::json::{JsonError, ObjectReader};
-use crate::{DatabaseId, Unit, UnitContext};
+use crate::{ApplicationDomain, DatabaseId, Unit, UnitContext};
 
 pub use crate::DocumentIdentity;
 
@@ -214,14 +214,14 @@ pub struct DocumentHeader {
     pub resource_keys: Vec<String>,
     /// Whether this document embeds external resources (fonts, xref sources and
     /// `IMAGE` rasters) in its own archive (ADR-0040 D3, simplified to one
-    /// toggle).
-    ///
-    /// `false` is the default and is **not written at all**, so a document that
+    /// toggle). `false` is the default and is **not written at all**, so a document that
     /// packs nothing stays byte-compatible with a minor ≤ 4 archive; absent
     /// decodes to `false`. One boolean is enough because the collector decides
     /// *what* to pack (and reports what it skipped) — the document only records
     /// whether it is meant to be self-contained.
     pub embed_resources: bool,
+    /// The interface domain this document is edited in (ADR-0053 D2), or `None`; written only when present, and an unknown token is refused.
+    pub application_domain: Option<ApplicationDomain>,
     /// The next sequence number of every allocated family.
     pub next: IdCounters,
     /// Drawing header variables (`$LTSCALE`, `$PDMODE`, `$PDSIZE`, `$INSBASE`,
@@ -292,6 +292,10 @@ impl DocumentHeader {
         if self.embed_resources {
             map.insert("embed_resources".to_string(), Value::Bool(true));
         }
+        // ADR-0053 D2: written only when the document names a domain.
+        if let Some(value) = super::header_domain::encode(self.application_domain) {
+            map.insert("application_domain".to_string(), value);
+        }
         map.insert("next".to_string(), self.next.to_json_value());
         map.insert("variables".to_string(), self.variables.clone());
         Value::Object(map)
@@ -318,6 +322,7 @@ impl DocumentHeader {
                 });
             }
         };
+        let application_domain = super::header_domain::decode(&mut reader)?;
         let next = IdCounters::from_json_value(&reader.take("next")?)?;
         let variables = reader.take("variables")?;
         if !variables.is_object() {
@@ -333,6 +338,7 @@ impl DocumentHeader {
             identity,
             resource_keys,
             embed_resources,
+            application_domain,
             next,
             variables,
         };
@@ -682,6 +688,7 @@ mod tests {
             identity: DocumentIdentity::Temporary(u128::MAX),
             resource_keys: Vec::new(),
             embed_resources: false,
+            application_domain: None,
             next: IdCounters::default(),
             variables: Value::Object(Map::new()),
         }
@@ -731,6 +738,7 @@ mod tests {
             identity: DocumentIdentity::Temporary(1),
             resource_keys: Vec::new(),
             embed_resources: false,
+            application_domain: None,
             next: IdCounters::default(),
             variables: Value::Object(Map::new()),
         };

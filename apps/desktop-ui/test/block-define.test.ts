@@ -57,43 +57,28 @@ const BLOCK = Object.freeze({
 const TOOL = points => ({ key: BLOCK.toolKey, points, ready: false });
 const AWAITING = points => ({ ...TOOL(points), awaiting_text: true });
 
-const drawPanel = tabId => RIBBON_TABS.find(tab => tab.id === tabId).panels.find(panel => panel.id === 'draw');
+const drawPanel = tabId => RIBBON_TABS.find(tab => tab.id === 'home').panels.find(panel => panel.id === 'draw');
 
-test('BLOCK is one small draw-panel button beside INSERT on both tabs, with no variant popover', () => {
-  for (const tabId of ['home', 'draw']) {
-    const items = drawPanel(tabId).items;
-    const ids = items.map(item => item.id);
-    const at = ids.indexOf(BLOCK.id);
-    assert.ok(at !== -1, `${tabId}/draw must carry the BLOCK affordance`);
-    // It sits directly beside INSERT and before OFFSET, so no shipped row moves.
-    assert.equal(ids[at - 1], 'INSERT', `${tabId}: BLOCK follows INSERT`);
-    assert.equal(ids[at + 1], 'OFFSET', `${tabId}: BLOCK precedes OFFSET`);
-    assert.deepEqual(
-      ids.slice(-4),
-      ['HATCHPOINT', 'BOUNDARY', 'REVCLOUD', 'GRADIENT'],
-      `${tabId}: the HATCH pair and REVCLOUD close the draw group`,
-    );
-    assert.equal(items.filter(item => item.id === BLOCK.id).length, 1, `${tabId}: one BLOCK button`);
-
-    const item = items[at];
+test('BLOCK is the Block Definition tile on Home and Insert, with no variant popover', () => {
+  const home = RIBBON_TABS.find(tab => tab.id === 'home').panels.find(panel => panel.id === 'block');
+  const insert = RIBBON_TABS.find(tab => tab.id === 'insert').panels.find(panel => panel.id === 'block_definition');
+  for (const [name, panel] of [['home/block', home], ['insert/block_definition', insert]]) {
+    const item = panel.items.find(entry => entry.id === BLOCK.id);
+    assert.ok(item, `${name} must carry the BLOCK affordance`);
     assert.equal(item.command, BLOCK.id);
     assert.equal(item.labelKey, BLOCK.labelKey);
     assert.equal(item.icon, BLOCK.icon);
-    assert.equal(item.action, undefined, 'BLOCK must dispatch through the router');
-    assert.equal(item.standardView, undefined);
-    assert.equal(item.large, undefined, `${tabId}: BLOCK is a small draw button, not a primary tile`);
-    // No attributes, no dynamic-block options, no retain/delete choice: a caret
-    // would imply choices the command does not have.
-    assert.equal(item.variants, undefined, `${tabId}: BLOCK has no variant popover`);
-    assert.ok(ribbonCommandIds().includes(BLOCK.id), `${tabId}: the ribbon reaches BLOCK`);
+    assert.equal(item.variants, undefined, `${name}: BLOCK has no variant popover`);
+    assert.equal(item.action, undefined, `${name}: BLOCK dispatches through the router`);
   }
   // No other panel smuggles the command in.
   for (const tab of RIBBON_TABS) {
     for (const panel of tab.panels) {
-      if (panel.id === 'draw') continue;
+      if (panel.id === 'block' || panel.id === 'block_definition') continue;
       assert.equal(panel.items.some(item => item.command === BLOCK.id), false, `${tab.id}/${panel.id}`);
     }
   }
+  assert.ok(ribbonCommandIds().includes(BLOCK.id));
 });
 
 test('BLOCK is catalogued as a draw command enabled only by router admission', () => {

@@ -295,7 +295,7 @@ test('the shell wires the visibility value, the toolbar strip and the palette cl
   assert.ok(app.includes('setPaletteChrome: (value: boolean) =>'));
   assert.ok(app.includes('if (!value) closeAllPalettes();'));
   assert.ok(app.includes("if (!preset.visibility.palettes) closeAllPalettes();"));
-  assert.ok(app.includes('{mobile || cleanScreen || !chromeVisibility.ribbon ? null : <Ribbon />}'));
+  assert.ok(app.includes('{mobile || cleanScreen || !chromeVisibility.ribbon ? null : <DomainRibbon />}'));
   assert.ok(app.includes('{mobile || cleanScreen || !chromeVisibility.fileTabs ? null : <DocTabs />}'));
 
   const titlebar = await readModule('components/TitleBar.tsx');

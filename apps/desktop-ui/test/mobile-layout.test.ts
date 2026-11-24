@@ -123,7 +123,7 @@ test('the command bar starts hidden, toggles purely, and reveals for must-see fa
 test('the compact surface owns the bar state and wires the trigger to the bar it controls', async () => {
   const app = await readModule('App.tsx');
   // One region renders both halves; nothing else reads the flag.
-  assert.ok(app.includes('{mobile ? <MobileCommandSurface /> : commandLineOpen ? <CommandLine /> : null}'));
+  assert.ok(app.includes('{mobile ? <DomainMobileCommandSurface /> : commandLineOpen ? <DomainCommandLine /> : null}'));
   const surface = await readModule('components/MobileCommandSurface.tsx');
   assert.ok(surface.includes('{bar.open ? <MobileCommandBar /> : null}'), 'the bar is mounted only while revealed');
   assert.ok(surface.includes('barId={MOBILE_COMMAND_BAR_ID}'), 'one bar id, shared by element and trigger');
@@ -177,10 +177,15 @@ test('the drawer offers the real ribbon model minus the two chrome-collapse swit
   // The hidden switches are exactly the two that collapse desktop chrome; both
   // are documented in `layout/mobile-ribbon.ts`.
   assert.deepEqual([...MOBILE_HIDDEN_ACTIONS], [SHELL_ACTIONS.cleanScreen, SHELL_ACTIONS.commandLine]);
-  // The chips are the ribbon's own tabs, in ribbon order, never a subset.
-  assert.deepEqual(mobileRibbonTabs().map(tab => tab.id), RIBBON_TABS.map(tab => tab.id));
+  // The chips are the ribbon's own tabs, in ribbon order; a tab whose panels are
+  // all pending has nothing to tap and is not a chip.
+  const expectedTabs = RIBBON_TABS
+    .filter(tab => mobileRibbonSections(tab.id, false).length > 0)
+    .map(tab => tab.id);
+  assert.deepEqual(mobileRibbonTabs().map(tab => tab.id), expectedTabs);
+  assert.equal(expectedTabs.includes('parametric'), false, 'the pending-only tab is desktop structure');
 
-  for (const tab of RIBBON_TABS) {
+  for (const tab of mobileRibbonTabs()) {
     const sections = mobileRibbonSections(tab.id);
     assert.ok(sections.length > 0, `${tab.id} must offer something to tap`);
     for (const section of sections) {
@@ -212,7 +217,7 @@ test('the drawer offers the real ribbon model minus the two chrome-collapse swit
   }
 
   // The Home tab keeps its tool panels and drops the two palette-only ones.
-  assert.deepEqual(mobileRibbonSections('home').map(section => section.id), ['clipboard', 'draw', 'modify', 'properties', 'bim', 'navigate']);
+  assert.deepEqual(mobileRibbonSections('home').map(section => section.id), ['draw', 'modify', 'annotation', 'block', 'properties', 'groups', 'utilities', 'clipboard', 'bim']);
   // The one palette action with a compact surface is actually reachable there:
   // the properties entry survives the carrier filter, as an action token (never a
   // router command).
@@ -241,7 +246,7 @@ test('the drawer offers the real ribbon model minus the two chrome-collapse swit
   // command; the palette toggles, the chrome-collapse switches and the
   // workspace words are dropped from the interface panel, leaving the two
   // surfaces a phone can really use (the layout overview and QuickCalc).
-  assert.deepEqual(mobileRibbonSections('view').map(section => section.id), ['view3d', 'standard', 'navigate', 'viewstate', 'display', 'palettes', 'interface']);
+  assert.deepEqual(mobileRibbonSections('view').map(section => section.id), ['navigate', 'view3d', 'standard', 'viewstate', 'display', 'palettes', 'interface']);
   assert.deepEqual(
     mobileRibbonSections('view').find(section => section.id === 'palettes').items.map(item => item.id),
     ['STATUS'],
@@ -251,7 +256,7 @@ test('the drawer offers the real ribbon model minus the two chrome-collapse swit
     ['QVLAYOUT', 'QUICKCALC'],
   );
   // An unknown tab id resolves like `ribbonTab` (Home), never to an empty drawer.
-  assert.deepEqual(mobileRibbonSections('nope').map(section => section.id), ['clipboard', 'draw', 'modify', 'properties', 'bim', 'navigate']);
+  assert.deepEqual(mobileRibbonSections('nope').map(section => section.id), ['draw', 'modify', 'annotation', 'block', 'properties', 'groups', 'utilities', 'clipboard', 'bim']);
 });
 
 test('drawer DOM ids survive multi-word ribbon ids', () => {
@@ -298,12 +303,12 @@ test('App renders the compact regions on mobile only and keeps the desktop regio
   // Compact regions.
   assert.ok(app.includes('<MobileMenuButton menuOpen={mobileDrawer.open}'));
   assert.ok(app.includes('<MobileRibbonDrawer open={mobileDrawer.open}'));
-  assert.ok(app.includes('{mobile ? <MobileCommandSurface /> : commandLineOpen ? <CommandLine /> : null}'));
+  assert.ok(app.includes('{mobile ? <DomainMobileCommandSurface /> : commandLineOpen ? <DomainCommandLine /> : null}'));
   // Desktop regions are gated on the compact layout, not rendered alongside it.
   // The ribbon and the drawing tabs carry the finer-grained chrome visibility on
   // top of the layout/clean-screen gates; LayoutTabs and the status bar keep the
   // layout-only gate.
-  assert.ok(app.includes('{mobile || cleanScreen || !chromeVisibility.ribbon ? null : <Ribbon />}'));
+  assert.ok(app.includes('{mobile || cleanScreen || !chromeVisibility.ribbon ? null : <DomainRibbon />}'));
   assert.ok(app.includes('{mobile || cleanScreen || !chromeVisibility.fileTabs ? null : <DocTabs />}'));
   assert.ok(app.includes('{mobile || cleanScreen ? null : <LayoutTabs />}'));
   assert.ok(app.includes('{mobile ? null : <StatusBar />}'));

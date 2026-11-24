@@ -146,7 +146,7 @@ test('every entry sits in the View navigate cluster and names itself honestly', 
   const byId = Object.fromEntries(panel.items.map(item => [item.id, item]));
   assert.deepEqual(
     panel.items.map(item => item.id),
-    ['ZOOMIN', 'ZOOMOUT', 'ZOOM WINDOW', 'ZOOM OBJECT', 'PAN', 'FIT', 'ZOOM PREVIOUS', 'RESETVIEW'],
+    ['FIT', 'PAN', 'ORBIT', 'ZOOMIN', 'ZOOMOUT', 'ZOOM WINDOW', 'ZOOM OBJECT', 'ZOOM PREVIOUS', 'RESETVIEW'],
   );
   const iconNames_ = iconNames(await readModule('icons.tsx'));
   const expected = {

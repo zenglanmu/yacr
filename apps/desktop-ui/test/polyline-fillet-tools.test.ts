@@ -142,7 +142,7 @@ test('the catalog and the ribbon offer the same two names, once per modify panel
     // Both modify panels (Home and Draw) carry it, exactly beside the two-line
     // pair, and nowhere else in the ribbon.
     const carriers = [];
-    for (const tabId of ['home', 'draw']) {
+    for (const tabId of ['home']) {
       const modify = panel(tabId, 'modify');
       const item = modify.items.find(candidate => candidate.id === mode.id);
       assert.ok(item, `${tabId}/modify must carry ${mode.id}`);
@@ -159,7 +159,7 @@ test('the catalog and the ribbon offer the same two names, once per modify panel
       assert.ok(at > isPair, `${tabId}: ${mode.id} follows ${mode.parent}`);
       carriers.push(`${tabId}:${at}`);
     }
-    assert.equal(carriers.length, 2, `${mode.id} appears on exactly the two modify panels`);
+    assert.equal(carriers.length, 1, `${mode.id} appears on the one Home modify panel`);
     // Exactly one dispatch token, the model's own union contract.
     for (const tab of RIBBON_TABS) {
       for (const section of tab.panels) {

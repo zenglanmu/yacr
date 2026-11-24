@@ -12,6 +12,16 @@
 不等于兼容性（规范 §1、§11.4）。2026-10-01 已对 11 份公开样本执行导入端到端
 （AC1014–AC1032，见 `docs/validation.md`），仍未构成验收。
 
+## 应用域（界面 profile，2026-11-24）
+
+阶段 1：文档域写入 `.ymodel`（可选 `application_domain`，minor **13**）；`cad2d` 是唯一完整界面，
+BIM/SketchUp/SolidWorks 为**显式占位**（隐藏功能区与命令行，显示说明卡，零域命令）。切换器在右
+导航栏；主题按域选择 CSS token（`html[data-domain]`），渲染器画布底色仍只认宿主 `theme` 的
+dark/light。有文档时切换写文档（`cad_set_application_domain`，一个 revision），无文档只预览。
+每域主题持久化（`ui.theme.<domain>`）、`DOMAIN` 命令、文档属性入口、官方手册结构 fixture 与
+golden 截图 lane **未实现/未运行**；Windows/macOS/Android/Web 的域切换运行 **NOT VERIFIED**。
+详见 `docs/application-domains.md` 与 [ADR-0053](adr/0053-application-domains.md)。
+
 ## 实体能力（读取 / 语义 / 绘制 / 拾取 / 测量）
 
 2026-10-03 新增 DXF ASCII/二进制导入入口，共用 DWG 语义/数据库转换，只有合成 LINE

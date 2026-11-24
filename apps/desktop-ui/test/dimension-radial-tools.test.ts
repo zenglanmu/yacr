@@ -46,7 +46,7 @@ const ALL_TOOLS = [...RADIAL_TOOLS, CENTER_TOOL];
 function annotationPanel() {
   const annotate = RIBBON_TABS.find(tab => tab.id === 'annotate');
   assert.ok(annotate, 'the annotate tab must exist');
-  const panel = annotate.panels.find(entry => entry.id === 'annotation');
+  const panel = annotate.panels.find(entry => entry.id === 'dimension');
   assert.ok(panel, 'the annotate tab must keep its annotation panel');
   return panel;
 }

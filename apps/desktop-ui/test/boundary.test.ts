@@ -49,7 +49,7 @@ const drawPanel = tabId => {
 };
 
 test('BOUNDARY sits directly after HATCHPOINT on both draw panels, with no popover', () => {
-  for (const tabId of ['home', 'draw']) {
+  for (const tabId of ['home']) {
     const items = drawPanel(tabId).items;
     const at = items.findIndex(item => item.id === BOUNDARY.id);
     assert.ok(at !== -1, `${tabId}/draw must carry the BOUNDARY button`);

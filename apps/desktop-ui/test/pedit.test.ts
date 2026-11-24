@@ -55,7 +55,7 @@ test('PEDIT is one catalog row and a split button on both Modify panels', () => 
   assert.equal(entry.icon, 'polyline');
   assert.equal(entry.group, 'modify');
 
-  for (const tabId of ['home', 'draw']) {
+  for (const tabId of ['home']) {
     const panel = modifyPanel(tabId);
     const item = panel.items.find(candidate => candidate.id === 'PEDIT');
     assert.ok(item, `${tabId}/modify must carry the PEDIT affordance`);

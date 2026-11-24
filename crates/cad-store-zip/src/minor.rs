@@ -65,8 +65,12 @@ pub(crate) const FORMAT_MINOR_RELATIONS: u32 = 11;
 /// A document that carries host-owned vendor semantics rows (ADR-0030 D7).
 pub(crate) const FORMAT_MINOR_VENDOR: u32 = 12;
 
+/// A document that names an interface domain in `document.json` (ADR-0053 D2).
+pub(crate) const FORMAT_MINOR_APPLICATION_DOMAIN: u32 = 13;
+
 // The chain is a compile-time fact, not a convention: a future tier inserted in
 // the middle cannot silently leave the constants out of order.
+const _: () = assert!(FORMAT_MINOR_VENDOR + 1 == FORMAT_MINOR_APPLICATION_DOMAIN);
 const _: () = assert!(FORMAT_MINOR_RELATIONS + 1 == FORMAT_MINOR_VENDOR);
 const _: () = assert!(FORMAT_MINOR_FEATURES + 1 == FORMAT_MINOR_RELATIONS);
 const _: () = assert!(FORMAT_MINOR_EXPRESSIONS + 1 == FORMAT_MINOR_FEATURES);
@@ -84,6 +88,12 @@ const _: () = assert!(FORMAT_MINOR_PLAIN + 1 == FORMAT_MINOR_RESOURCES);
 /// tier here is about archive entries and the header flag, both of which the
 /// store already models.
 pub(crate) fn document_minor(snapshot: &DocumentSnapshot) -> u32 {
+    // A named interface domain is a `document.json` scalar and the newest tier:
+    // a minor-12 reader would refuse the unknown header key, so it decides
+    // before every table-based tier.
+    if snapshot.header.application_domain.is_some() {
+        return FORMAT_MINOR_APPLICATION_DOMAIN;
+    }
     // The vendor tier is about a host-owned table only: no geometry, no element
     // block. An empty (or absent) table is not a vendor document, so an ordinary
     // `.ymodel` never pays the minor-12 gate.
@@ -134,7 +144,11 @@ mod tests {
     /// The top tier is the format constant, not an independent number.
     #[test]
     fn the_top_tier_is_the_format_minor() {
-        assert_eq!(FORMAT_MINOR_VENDOR, cad_domain::ymodel::FORMAT_MINOR);
+        assert_eq!(
+            FORMAT_MINOR_APPLICATION_DOMAIN,
+            cad_domain::ymodel::FORMAT_MINOR
+        );
+        assert_eq!(FORMAT_MINOR_APPLICATION_DOMAIN, FORMAT_MINOR_VENDOR + 1);
         assert_eq!(FORMAT_MINOR_VENDOR, FORMAT_MINOR_RELATIONS + 1);
         assert_eq!(FORMAT_MINOR_RELATIONS, FORMAT_MINOR_FEATURES + 1);
         assert_eq!(FORMAT_MINOR_FEATURES, FORMAT_MINOR_EXPRESSIONS + 1);

@@ -96,6 +96,8 @@ pub const POPUP_HOST_UNAVAILABLE: &str =
 /// without the command refuses by name, never with an acknowledgement.
 pub const SELECT_UNAVAILABLE: &str = "unsupported-runtime: cad_select_entities";
 
+pub use super::admission::APPLICATION_DOMAIN_UNAVAILABLE;
+
 /// Admission result of a queued/applied command: **accepted**, not completed.
 ///
 /// `{accepted:true}` is the whole promise: on the desktop it means *queued* onto
@@ -149,33 +151,7 @@ pub struct OrbitDelta {
     pub pitch: f64,
 }
 
-/// The bounded channel an admission is about (used for the queue bound only).
-///
-/// One variant per queue family member; a host that keeps no queue answers `0`
-/// for every variant.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Channel {
-    /// The name-only command queue (`shell.cad_commands`).
-    Command,
-    /// Typed tool parameters (ADR 0016 decision A).
-    ToolParameter,
-    /// Terminal tool texts (ADR 0019 decision A.1).
-    ToolText,
-    /// Replacement texts for the current single selection (ADR 0020 amendment B).
-    SelectedText,
-    /// Property writes for the current selection.
-    SelectedProperty,
-    /// Typed standard views.
-    StandardView,
-    /// Typed orbit deltas (the ViewCube's yaw/pitch request).
-    Orbit,
-    /// Typed settings writes.
-    Setting,
-    /// Typed layer writes (visibility, restore, active and the table writes).
-    LayerWrite,
-    /// Selection replacements (`cad_select_entities`).
-    Selection,
-}
+pub use super::admission::Channel;
 
 /// The **sink seam**: how one host stores or applies an already-admitted request.
 ///
@@ -240,6 +216,15 @@ pub trait AdmissionTarget {
 
     /// Store or apply one typed setting.
     fn setting(&mut self, key: CadSettingKey, value: CadSettingValue) -> Result<(), String>;
+
+    /// Store or apply one document application-domain token (ADR-0053 D2).
+    ///
+    /// The token is validated and the document header rewritten on the owner
+    /// thread; the default refuses with [`APPLICATION_DOMAIN_UNAVAILABLE`], the
+    /// honest answer for a sink with no document lane.
+    fn application_domain(&mut self, _token: String) -> Result<(), String> {
+        Err(APPLICATION_DOMAIN_UNAVAILABLE.to_string())
+    }
 
     /// Store or apply one typed layer write.
     fn layer_write(&mut self, write: CadLayerWrite) -> Result<(), String>;
@@ -377,6 +362,8 @@ pub struct QueueFamily<'a> {
     pub api_results: &'a mut Vec<CadApiOutcome>,
     /// `cad_select_entities` — queued selection replacements (bounded).
     pub selection_requests: &'a mut VecDeque<Vec<EntityId>>,
+    /// `cad_set_application_domain` — queued domain tokens (bounded, ordered).
+    pub application_domains: &'a mut VecDeque<String>,
 }
 
 /// The **queue sink**: stores into a desktop host's bounded queue family.
@@ -434,6 +421,7 @@ impl AdmissionTarget for QueueSink<'_> {
             Channel::Setting => self.queues.setting_writes.len(),
             Channel::LayerWrite => self.queues.layer_writes.len(),
             Channel::Selection => self.queues.selection_requests.len(),
+            Channel::ApplicationDomain => self.queues.application_domains.len(),
         }
     }
 
@@ -478,6 +466,11 @@ impl AdmissionTarget for QueueSink<'_> {
 
     fn setting(&mut self, key: CadSettingKey, value: CadSettingValue) -> Result<(), String> {
         self.queues.setting_writes.push_back((key, value));
+        Ok(())
+    }
+
+    fn application_domain(&mut self, token: String) -> Result<(), String> {
+        self.queues.application_domains.push_back(token);
         Ok(())
     }
 
@@ -820,6 +813,8 @@ pub fn set_setting(
     target.setting(key, value)?;
     Ok(CadCommandAck::accepted())
 }
+
+pub use super::application_domain::set_application_domain;
 
 /// `cad_layers`: the layer-panel projection, or [`CAD_WAITING`].
 ///

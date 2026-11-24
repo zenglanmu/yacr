@@ -515,6 +515,72 @@ pub fn drain_orbits(
 /// It reuses the CAD command queue's capacity so every admission shares one bound.
 pub const CAD_SETTING_CAP: usize = CAD_COMMAND_CAP;
 
+/// A wire channel whose queued occupancy a sink can report.
+///
+/// The desktop queues every typed request and applies it on the owner tick; the
+/// shared gate asks a sink how many requests of one channel it already holds, so
+/// a full queue is refused before anything is stored. The enum lives here (with
+/// the `check_*` gates) so the sink seam and the bounds have one home.
+pub enum Channel {
+    /// The name-only command queue (`shell.cad_commands`).
+    Command,
+    /// Typed tool parameters (ADR 0016 decision A).
+    ToolParameter,
+    /// Terminal tool texts (ADR 0019 decision A.1).
+    ToolText,
+    /// Replacement texts for the current single selection (ADR 0020 amendment B).
+    SelectedText,
+    /// Property writes for the current selection.
+    SelectedProperty,
+    /// Typed standard views.
+    StandardView,
+    /// Typed orbit deltas (the ViewCube's yaw/pitch request).
+    Orbit,
+    /// Typed settings writes.
+    Setting,
+    /// Typed layer writes (visibility, restore, active and the table writes).
+    LayerWrite,
+    /// Selection replacements (`cad_select_entities`).
+    Selection,
+    /// Document application-domain writes (`cad_set_application_domain`).
+    ApplicationDomain,
+}
+
+/// The stable refusal of a sink with no application-domain write lane (ADR-0053
+/// D2). The sink method's default answers this.
+pub const APPLICATION_DOMAIN_UNAVAILABLE: &str = "unsupported-runtime: cad_set_application_domain";
+
+/// Bounded capacity of the application-domain write queue (ADR-0053 D2).
+pub const CAD_APPLICATION_DOMAIN_CAP: usize = CAD_COMMAND_CAP;
+
+/// The gate of the application-domain channel (ADR-0053 D2).
+///
+/// A modal popup owns host input, so a domain switch is refused by name while
+/// one is open (`domain.busy`) instead of queuing a chrome change under a dialog.
+/// Probe mode has no document to rewrite; the bound keeps the queue finite. The
+/// token itself is validated by the session (the one owner of the table), so this
+/// gate never guesses which domains exist.
+pub(super) fn check_application_domain(
+    cad_mode: bool,
+    modal_open: bool,
+    pending: usize,
+    token: &str,
+) -> Result<(), String> {
+    if modal_open {
+        return Err("domain.busy: a modal popup owns input".into());
+    }
+    if token.trim().is_empty() {
+        return Err("domain.unknown: empty".into());
+    }
+    if !cad_mode {
+        return Err("CAD is disabled in probe mode".into());
+    }
+    if pending >= CAD_APPLICATION_DOMAIN_CAP {
+        return Err("domain.queue_full".into());
+    }
+    Ok(())
+}
+
 /// The gate of the settings channel: the closed key table first (so an illegal
 /// value is refused before any host gate), then CAD mode, then the bound.
 ///

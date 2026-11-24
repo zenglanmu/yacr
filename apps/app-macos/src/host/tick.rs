@@ -568,6 +568,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
         // queueing; the drain keeps a future carrier honest too.
         CAD.with(|cell| {
             cad_desktop_shell::state::drain_embed_resources(shared, cell.borrow().as_ref());
+            cad_desktop_shell::state::drain_application_domains(shared, cell.borrow().as_ref());
         });
         let inputs_started = Instant::now();
         if queued > 0 {

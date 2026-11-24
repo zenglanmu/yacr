@@ -336,6 +336,13 @@ pub struct DrawingDatabase {
     /// `document.json` and seeded back on load, so a re-save keeps the user's
     /// choice. Defaults to `false` (opt-in) and is not written while `false`.
     pub(crate) embed_resources: bool,
+    /// The interface domain this document names (ADR-0053 D2), or `None` for a
+    /// document that has never named one.
+    ///
+    /// Written into `document.json` and seeded back on load, exactly like
+    /// [`Self::embed_resources`]; an absent value keeps older bytes and is
+    /// resolved conservatively by [`Self::effective_application_domain`].
+    pub(crate) application_domain: Option<ApplicationDomain>,
     /// Per-element BIM data (ADR-0042 D2), kept **beside** [`Self::entities`]
     /// exactly like [`Self::render_attributes`], so [`crate::DbEntity`] keeps
     /// its six fields and a non-BIM document pays nothing.

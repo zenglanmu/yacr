@@ -379,6 +379,13 @@ impl CadSession {
             .borrow()
             .opened_source()
             .map(OpenedSource::from_app);
+        // ADR-0053 D2: the interface domain, from the document's own header (or
+        // the conservative derivation). `None` without a document: the chrome's
+        // document-less preview is a UI state, never a host claim.
+        status.application_domain = self
+            .core
+            .effective_application_domain()
+            .map(|domain| domain.as_str().to_string());
         // The authoritative xref rows projected above: always carried, never
         // omitted, and empty for a document that declares none.
         status.references = references;

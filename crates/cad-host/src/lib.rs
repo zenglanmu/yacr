@@ -59,6 +59,7 @@ mod command_log_echo;
 mod core;
 mod dispatch;
 mod document_archive;
+mod domain;
 mod fonts;
 mod input;
 mod open;

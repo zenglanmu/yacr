@@ -35,7 +35,7 @@ const TEXTTOFRONT = {
 };
 
 test('TEXTTOFRONT is a Modify panel router button on both tabs, with no popover', () => {
-  for (const tabId of ['home', 'draw']) {
+  for (const tabId of ['home']) {
     const tab = RIBBON_TABS.find(candidate => candidate.id === tabId);
     const panel = tab.panels.find(entry => entry.id === 'modify');
     const items = panel.items;

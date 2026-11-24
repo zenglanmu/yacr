@@ -14,7 +14,6 @@
 //! pointer/wheel input, canvas metrics, completion accounting and resource
 //! diagnostics. The per-host IPC wiring and the GPU presenter live in each host
 //! and call into this module.
-//!
 //! The composed [`HostPlatform`] must already report a surface
 //! ([`cad_platform::SurfaceSource::surface`]) when the session is built: an
 //! unmapped surface is an explicit `Cancelled`, never a fabricated canvas.
@@ -26,6 +25,7 @@ mod api_commit;
 mod api_object;
 mod api_prompt;
 mod api_submit;
+mod application_domain;
 mod bim;
 mod bytes;
 mod command_log;

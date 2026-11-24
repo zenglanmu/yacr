@@ -164,9 +164,9 @@ test('a section caption that repeats the menu title is suppressed', async () => 
   assert.equal(properties.caption, false, 'a caption repeating its own first row is dropped');
   assert.equal(properties.rows.length, 3, 'every row still renders');
   // A caption that names something the first row does not keeps its header.
-  const navigate = entries.find(entry => entry.id === 'navigate');
-  assert.notEqual(navigate.rows[0].item.labelKey, navigate.titleKey);
-  assert.equal(navigate.caption, true);
+  const annotation = entries.find(entry => entry.id === 'annotation');
+  assert.notEqual(annotation.rows[0].item.labelKey, annotation.titleKey);
+  assert.equal(annotation.caption, true);
 
   // The renderer consumes the projection flag instead of re-deriving the rule.
   const source = await readModule('components/RibbonMenuBar.tsx');
@@ -183,19 +183,17 @@ test('consecutive panel submenus are one visual block', async () => {
     return index;
   };
   assert.equal(entries[at('clipboard')].kind, 'section');
-  assert.equal(panelStartsGroup(entries, at('draw')), true,
-    'the first submenu row opens the block, because a section came before it');
+  assert.equal(panelStartsGroup(entries, at('draw')), false,
+    'the first row never needs a rule');
   assert.equal(panelStartsGroup(entries, at('modify')), false,
     'a panel after a panel is a sibling submenu, not a new section');
-  assert.equal(panelStartsGroup(entries, at('layers')), false);
+  assert.equal(panelStartsGroup(entries, at('layers')), true,
+    'the section above Layers rules off its block');
   assert.equal(panelStartsGroup(entries, 0), false, 'the first row never needs a rule');
 
-  // The Draw tab is two panels and no section: one block, no hairlines at all.
-  const drawTab = RIBBON_TABS.find(tab => tab.id === 'draw');
-  const drawEntries = ribbonMenuEntriesFor(drawTab, true);
-  assert.deepEqual(drawEntries.map(entry => entry.kind), ['panel', 'panel']);
-  assert.equal(panelStartsGroup(drawEntries, 0), false);
-  assert.equal(panelStartsGroup(drawEntries, 1), false, 'two sibling submenus keep the block open');
+  // Home opens with two sibling panel submenus: Draw then Modify, one block.
+  assert.deepEqual(entries.slice(0, 2).map(entry => entry.kind), ['panel', 'panel']);
+  assert.equal(panelStartsGroup(entries, 1), false, 'two sibling submenus keep the block open');
   // The File tab is a section followed by a panel: that boundary still rules.
   const fileTab = RIBBON_TABS.find(tab => tab.id === 'file');
   const fileEntries = ribbonMenuEntriesFor(fileTab, true);

@@ -50,6 +50,7 @@ import { useI18n, useShell } from '../context.ts';
 import { useNavRailState } from '../layout/nav-rail-state.ts';
 import { NavRail } from './NavRail.tsx';
 import { ThemeToggle } from './ThemeToggle.tsx';
+import { DomainSwitcher } from './DomainSwitcher.tsx';
 
 export function NavigationDock() {
   const { t } = useI18n();
@@ -59,6 +60,9 @@ export function NavigationDock() {
   return (
     <div className="navdock app-region" data-rail={open ? 'open' : 'closed'}>
       <div className="navdock__head">
+        {/* Chrome appearance, first: the domain switcher is reachable in every
+            rail state and on both layouts. */}
+        <DomainSwitcher />
         {shell.mobile ? (
           // Chrome appearance, reachable without scrolling, outside the rail's
           // `tool bar|导航` landmark. `ThemeToggle` remains the one owner of the

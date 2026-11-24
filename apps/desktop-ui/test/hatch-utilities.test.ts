@@ -94,12 +94,12 @@ test('HATCHGENERATEBOUNDARY is catalogued and typed as its own selector', () => 
   assert.notEqual(GENERATE_BOUNDARY.id, 'HATCHPOINT');
 });
 
-test('the Annotate tab carries the hatch-context boundary button only once', () => {
-  const item = assertRibbonCommand('annotate', 'annotation', GENERATE_BOUNDARY);
+test('the Home Draw panel carries the hatch-context boundary button only once', () => {
+  const item = assertRibbonCommand('home', 'draw', GENERATE_BOUNDARY);
   assert.equal(item.large, undefined, 'it is a secondary hatch action');
   for (const tab of RIBBON_TABS) {
     for (const each of tab.panels) {
-      if (tab.id === 'annotate' && each.id === 'annotation') continue;
+      if (tab.id === 'home' && each.id === 'draw') continue;
       assert.equal(
         each.items.some(candidate => candidate.command === GENERATE_BOUNDARY.id),
         false,
@@ -149,7 +149,7 @@ test('HATCHTOBACK is catalogued and typed as its own selector', () => {
 });
 
 test('both Modify panels carry HATCHTOBACK as a small router button', () => {
-  for (const tabId of ['home', 'draw']) {
+  for (const tabId of ['home']) {
     const item = assertRibbonCommand(tabId, 'modify', TO_BACK);
     assert.equal(item.large, undefined, `${tabId}: it is a secondary modify action`);
   }

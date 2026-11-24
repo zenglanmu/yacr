@@ -32,6 +32,7 @@ struct Queues {
     orbits: std::collections::VecDeque<OrbitDelta>,
     setting_writes: std::collections::VecDeque<(CadSettingKey, CadSettingValue)>,
     layer_writes: std::collections::VecDeque<CadLayerWrite>,
+    application_domains: std::collections::VecDeque<String>,
     api_calls: std::collections::VecDeque<crate::session::CadApiSubmission>,
     api_results: Vec<crate::session::CadApiOutcome>,
     selection_requests: std::collections::VecDeque<Vec<super::super::EntityId>>,
@@ -51,6 +52,7 @@ impl Queues {
             orbits: std::collections::VecDeque::new(),
             setting_writes: std::collections::VecDeque::new(),
             layer_writes: std::collections::VecDeque::new(),
+            application_domains: std::collections::VecDeque::new(),
             api_calls: std::collections::VecDeque::new(),
             api_results: Vec::new(),
             selection_requests: std::collections::VecDeque::new(),
@@ -74,6 +76,7 @@ impl Queues {
                 orbits: &mut self.orbits,
                 setting_writes: &mut self.setting_writes,
                 layer_writes: &mut self.layer_writes,
+                application_domains: &mut self.application_domains,
                 api_calls: &mut self.api_calls,
                 api_results: &mut self.api_results,
                 selection_requests: &mut self.selection_requests,
@@ -210,6 +213,42 @@ fn the_gate_order_is_modal_then_probe_mode() {
     assert_eq!(
         wire::set_setting(&mut sink, "grid", &serde_json::json!(false)).expect_err("probe mode"),
         "CAD is disabled in probe mode"
+    );
+}
+
+/// The application-domain write is a shared admission: it queues the token, a
+/// modal popup refuses it by name, and probe mode has no document to rewrite.
+#[test]
+fn the_application_domain_write_queues_and_shares_the_gates() {
+    let mut queues = Queues::new(true, false);
+    wire::set_application_domain(&mut queues.sink(), "bim").expect("admitted");
+    assert_eq!(
+        queues.application_domains.front().map(String::as_str),
+        Some("bim"),
+        "the sink stored the token verbatim (validation is the session's)"
+    );
+
+    // A modal popup owns input: the chrome change is refused by name.
+    let mut modal = Queues::new(true, true);
+    assert_eq!(
+        wire::set_application_domain(&mut modal.sink(), "bim").expect_err("popup owns input"),
+        "domain.busy: a modal popup owns input"
+    );
+    assert!(modal.application_domains.is_empty());
+
+    // Probe mode has no document, so nothing is queued.
+    let mut probe = Queues::new(false, false);
+    assert_eq!(
+        wire::set_application_domain(&mut probe.sink(), "bim").expect_err("probe mode"),
+        "CAD is disabled in probe mode"
+    );
+    assert!(probe.application_domains.is_empty());
+
+    // An empty token never reaches the session.
+    let mut queues = Queues::new(true, false);
+    assert_eq!(
+        wire::set_application_domain(&mut queues.sink(), "  ").expect_err("empty token"),
+        "domain.unknown: empty"
     );
 }
 

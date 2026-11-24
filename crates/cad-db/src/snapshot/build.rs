@@ -73,6 +73,7 @@ impl DrawingDatabase {
             identity,
             resource_keys,
             embed_resources: self.embed_resources,
+            application_domain: self.application_domain,
             next: self.id_counters(),
             variables: variables::encode(self)?,
         };
@@ -157,6 +158,7 @@ impl DrawingDatabase {
         builder.set_revision(snapshot.revision);
         builder.seed_identifiers(snapshot.header.next);
         builder.set_embed_resources(snapshot.header.embed_resources);
+        builder.set_application_domain(snapshot.header.application_domain);
 
         let tables = tables::decode(&snapshot.tables)?;
         let resource_tables = resources::decode(&snapshot.tables)?;

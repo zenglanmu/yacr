@@ -184,6 +184,84 @@
   --ball-cap: #ffffff;
 }
 
+/* Application-domain chrome presets (ADR-0053 D4) ----------------------- */
+/* The three non-drafting profiles are light chrome, the way their reference
+   applications are. The native drawing backdrop is **not** overridden here: it
+   is the renderer's `theme` setting (model/paper clear colours), and the staged
+   domain work keeps that split until the renderer gains preset backgrounds. */
+:root[data-domain="bim"],
+:root[data-domain="concept"],
+:root[data-domain="mechanical"] {
+  color-scheme: light;
+
+  --chrome: #eceff3;
+  --chrome-2: #e2e7ee;
+  --chrome-3: #d7dee8;
+  --panel: #f7f9fb;
+  --field: #ffffff;
+  --hover: #dde4ee;
+  --pressed: #c9d3e0;
+
+  --stripe: #f1f4f8;
+  --row-hover: #e6ecf4;
+  --well: #ffffff;
+  --well-hi: #f2f6fb;
+
+  --line: #c3ccd8;
+  --line-soft: #9ba8b8;
+
+  --text: #1a2430;
+  --text-dim: #33404f;
+  --text-muted: #566272;
+  --text-disabled: #7d8794;
+
+  --accent: #1f6fb2;
+  --accent-text: #165a93;
+  --accent-strong: #175c95;
+  --on: #1f6fb2;
+  --on-text: #ffffff;
+  --focus: #0d5fc0;
+  --danger: #b42318;
+  --ok: #126b43;
+
+  --shadow-rgb: 31, 42, 58;
+  --scrim-overlay: rgba(15, 23, 42, .42);
+  --scrim-drawer: rgba(15, 23, 42, .32);
+  --scrim-sheet: rgba(15, 23, 42, .34);
+  --swatch-edge: rgba(0, 0, 0, .3);
+  --chrome-0: rgba(236, 239, 243, 0);
+  --chrome-3-0: rgba(215, 222, 232, 0);
+  --accent-hover: #175c95;
+  --brand-from: #4a5f78;
+  --brand-to: #33465c;
+}
+
+/* SketchUp-like: a pale grey shell with a blue selection accent. */
+:root[data-domain="concept"] {
+  --chrome: #f1f2f3;
+  --chrome-2: #e8eaec;
+  --chrome-3: #dfe2e5;
+  --accent: #2b7bbd;
+  --accent-text: #20628f;
+  --accent-strong: #2669a0;
+  --on: #2b7bbd;
+  --accent-hover: #2669a0;
+}
+
+/* SolidWorks-like: a cool grey shell with its red action accent. */
+:root[data-domain="mechanical"] {
+  --chrome: #e9ecef;
+  --chrome-2: #dfe3e7;
+  --chrome-3: #d4d9de;
+  --accent: #9d2f2f;
+  --accent-text: #7f2323;
+  --accent-strong: #8c2727;
+  --on: #9d2f2f;
+  --accent-hover: #8c2727;
+  --brand-from: #6a4a4a;
+  --brand-to: #4a3030;
+}
+
 * { box-sizing: border-box; }
 
 html, body, #root { width: 100%; height: 100%; margin: 0; }
@@ -1753,6 +1831,90 @@ button, input, select { font: inherit; color: inherit; }
 .navrail__button:disabled { color: var(--text-disabled); cursor: not-allowed; }
 .navrail__button.is-on { background: var(--on); color: var(--on-text); }
 .navrail__rule { width: 20px; height: 1px; margin: 4px 0; background: var(--line-soft); }
+
+/* A reference panel this build has not wired yet (ADR-0053 D7): the panel keeps
+   its name and place, and says so instead of showing a fake button. */
+.ribbon-panel__pending {
+  margin: 0; padding: 0 10px;
+  align-self: center;
+  color: var(--text-muted); font-size: 11px;
+  max-width: 120px; line-height: 1.3;
+}
+
+
+/* Domain switcher (ADR-0053 D3) ------------------------------------------ */
+/* The head control: the same 32x30 face as the rail's buttons, because it is
+   chrome appearance rather than a CAD view tool. */
+.domain-switcher { position: relative; flex: none; }
+.domain-switcher__button {
+  display: grid; place-items: center;
+  width: 32px; height: 30px;
+  border: 1px solid transparent; border-radius: var(--radius);
+  background: transparent; color: var(--text-muted); cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
+}
+.domain-switcher__button:hover { background: var(--hover); color: var(--text); }
+.domain-switcher__button:active { background: var(--pressed); }
+/* Outside click closes the popover; the backdrop is a real button so keyboard
+   and pointer users share one dismissal. */
+.domain-switcher__backdrop {
+  position: fixed; inset: 0; z-index: 20;
+  background: transparent; border: 0; cursor: default;
+}
+.domain-switcher__menu {
+  position: absolute; top: 100%; right: 2px; z-index: 21;
+  width: 244px; padding: 6px;
+  display: grid; gap: 1px;
+  background: var(--panel); color: var(--text);
+  border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: 0 10px 26px rgba(var(--shadow-rgb), .35);
+}
+.domain-switcher__title {
+  margin: 2px 6px 4px; color: var(--text-muted); font-size: 11px;
+}
+.domain-switcher__row {
+  display: grid; grid-template-columns: 1fr auto; gap: 1px 6px;
+  align-items: center; width: 100%; padding: 5px 8px;
+  border: 1px solid transparent; border-radius: var(--radius);
+  background: transparent; color: var(--text); text-align: left; cursor: pointer;
+}
+.domain-switcher__row:hover { background: var(--row-hover); }
+.domain-switcher__row.is-on { background: var(--on); color: var(--on-text); }
+.domain-switcher__name { font-size: 12px; }
+.domain-switcher__reference,
+.domain-switcher__tag {
+  font-size: 10px; color: var(--text-muted);
+}
+.domain-switcher__row.is-on .domain-switcher__reference,
+.domain-switcher__row.is-on .domain-switcher__tag { color: var(--on-text); opacity: .8; }
+.domain-switcher__tag {
+  grid-column: 2; border: 1px solid currentColor; border-radius: 999px;
+  padding: 0 5px; line-height: 14px; opacity: .8;
+}
+.domain-switcher__hint,
+.domain-switcher__error { margin: 4px 6px 2px; font-size: 11px; }
+.domain-switcher__hint { color: var(--text-muted); }
+.domain-switcher__error { color: var(--danger); }
+
+/* Placeholder domain card (ADR-0053 D8) ---------------------------------- */
+.domain-surface {
+  position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+  z-index: 4; width: min(440px, calc(100% - 80px));
+  padding: 10px 14px;
+  background: var(--panel); color: var(--text);
+  border: 1px solid var(--line-soft); border-radius: var(--radius);
+  box-shadow: 0 8px 22px rgba(var(--shadow-rgb), .3);
+}
+.domain-surface__title { margin: 0 0 2px; font-size: 13px; font-weight: 600; }
+.domain-surface__reference { margin: 0 0 6px; font-size: 11px; color: var(--text-muted); }
+.domain-surface__body { margin: 0 0 8px; font-size: 12px; color: var(--text-dim); }
+.domain-surface__action {
+  padding: 4px 10px;
+  border: 1px solid var(--line-soft); border-radius: var(--radius);
+  background: var(--field); color: var(--text); cursor: pointer;
+}
+.domain-surface__action:hover { background: var(--hover); }
+
 
 /* Layout tabs ------------------------------------------------------------ */
 /* The strip is the host's real layout list, so it may be longer than the

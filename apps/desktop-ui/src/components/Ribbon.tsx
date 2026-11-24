@@ -273,6 +273,7 @@ function Panel({ panel, openMenu, setOpenMenu }: PanelProps) {
             {group.map(item => <PanelItem key={item.id} item={item} openMenu={openMenu} setOpenMenu={setOpenMenu} />)}
           </div>
         ))}
+        {panel.pending ? <p className="ribbon-panel__pending">{t('ribbon.panel_pending')}</p> : null}
         {openItem ? <VariantMenu item={openItem} onClose={() => setOpenMenu(null)} /> : null}
       </div>
       <footer className="ribbon-panel__title">

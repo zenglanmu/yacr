@@ -35,18 +35,19 @@ test('WIPEOUT is a catalog row and an Annotate affordance, admitted only by the 
   assert.equal(entry.group, 'draw');
   assert.equal(entry.icon, 'erase');
 
-  // AutoCAD 2026 exposes WIPEOUT on the Annotate tab; the draw panel does not
-  // carry a second button for it.
-  const annotation = panel('annotate', 'annotation');
-  const item = annotation.items.find(candidate => candidate.id === 'WIPEOUT');
-  assert.ok(item, 'annotate/annotation must carry the WIPEOUT affordance');
+  // The restructured reference places WIPEOUT in Home > Draw (AutoCAD keeps the
+  // mask tool in the Draw panel).
+  const draw = panel('home', 'draw');
+  const item = draw.items.find(candidate => candidate.id === 'WIPEOUT');
+  assert.ok(item, 'home/draw must carry the WIPEOUT affordance');
   assert.equal(item.command, 'WIPEOUT');
   assert.equal(item.action, undefined, 'WIPEOUT is a router command, not a shell action');
   assert.equal(item.variants, undefined, 'WIPEOUT has no variant popover');
+  const markup = panel('annotate', 'markup');
   assert.equal(
-    panel('home', 'draw').items.some(candidate => candidate.id === 'WIPEOUT'),
+    markup.items.some(candidate => candidate.id === 'WIPEOUT'),
     false,
-    'the Home draw panel must not duplicate the Annotate entry',
+    'the Annotate Markup panel keeps only the revision cloud',
   );
 
   // Router admission is the single enable gate.
@@ -127,7 +128,7 @@ test('POLYGON gains a circumscribed variant popover on both draw panels', () => 
 
   // The plain POLYGON stays the parent row (unchanged behaviour) and the caret
   // offers both constructions; the Home and Draw tabs must offer the same pair.
-  for (const [tabId] of [['home'], ['draw']]) {
+  for (const [tabId] of [['home']]) {
     const draw = panel(tabId, 'draw');
     const item = draw.items.find(candidate => candidate.id === 'POLYGON');
     assert.ok(item, `${tabId}/draw must carry the POLYGON affordance`);

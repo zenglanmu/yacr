@@ -51,7 +51,7 @@ test('every panel launcher resolves to a command token or to no target at all', 
   }
   // The panels that do carry the arrow are the ones with a real target plus the
   // ones that stay honestly empty.
-  assert.ok(LAUNCHER_PANELS.length >= 5, 'the launcher arrow is still a ribbon convention');
+  assert.ok(LAUNCHER_PANELS.length >= 3, 'the launcher arrow is still a ribbon convention');
   for (const { panel } of LAUNCHER_PANELS) {
     const command = panelLauncherCommand(panel);
     if (command === null) continue;
@@ -87,7 +87,7 @@ test('the panels with no dialog behind them stay disabled instead of launching a
   const matrix = launcherMatrix();
   // Draw/Modify lead the Draw tab, Measure the Measure tab, Navigate the View tab:
   // none of them has a settings dialog, so none may carry a command token.
-  for (const id of ['modify', 'measure', 'navigate']) {
+  for (const id of ['navigate']) {
     assert.ok(matrix.has(id), `${id} keeps its arrow`);
     assert.equal(matrix.get(id), null, `${id} must not invent a target`);
   }
@@ -123,7 +123,7 @@ test('every launcher target is a chrome-local command, so admission always answe
   assert.deepEqual(offeredItems(properties.items, false).map(item => item.id), ['LIST', 'MASSPROP']);
   // The Font Manager is the same kind of desktop-only palette surface: its Annotate entry is
   // dropped with the palettes instead of opening a panel the carrier never mounts.
-  const annotate = RIBBON_TABS.find(tab => tab.id === 'annotate').panels.find(panel => panel.id === 'annotation');
+  const annotate = RIBBON_TABS.find(tab => tab.id === 'annotate').panels.find(panel => panel.id === 'text');
   assert.equal(annotate.items.some(item => item.id === 'FONTS'), true);
   assert.equal(offeredItems(annotate.items, false).some(item => item.id === 'FONTS'), false);
 });
@@ -144,7 +144,7 @@ test('the View tab navigation cluster holds only router command tokens', () => {
   assert.ok(navigate, 'the View tab keeps its navigate panel');
   assert.deepEqual(
     navigate.items.map(item => item.id),
-    ['ZOOMIN', 'ZOOMOUT', 'ZOOM WINDOW', 'ZOOM OBJECT', 'PAN', 'FIT', 'ZOOM PREVIOUS', 'RESETVIEW'],
+    ['FIT', 'PAN', 'ORBIT', 'ZOOMIN', 'ZOOMOUT', 'ZOOM WINDOW', 'ZOOM OBJECT', 'ZOOM PREVIOUS', 'RESETVIEW'],
   );
   for (const item of navigate.items) {
     assert.equal(item.command, item.id, `${item.id} keeps its own selector`);

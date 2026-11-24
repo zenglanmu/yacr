@@ -30,7 +30,7 @@ const en = await readCatalog('en');
 
 const annotationPanel = () => RIBBON_TABS
   .find(tab => tab.id === 'annotate')
-  .panels.find(panel => panel.id === 'annotation');
+  .panels.find(panel => panel.id === 'text');
 
 const selected = count => ({
   documentLabel: 'drawing.dwg',
@@ -68,7 +68,7 @@ test('the three text commands are annotate-group catalogue rows', () => {
 test('the annotate panel carries the three buttons and TCASE five mode rows', () => {
   const items = annotationPanel().items;
   const ids = items.map(item => item.id);
-  assert.equal(ids.indexOf('TORIENT'), ids.indexOf('DIMCONTINUE') + 3);
+  assert.deepEqual(ids, ['TEXT', 'MTEXT', 'SCALETEXT', 'TORIENT', 'TCASE', 'TXT2MTXT', 'TEXTMASK', 'TEXTUNMASK', 'FONTS']);
 
   const torient = items.find(item => item.id === 'TORIENT');
   assert.equal(torient.command, 'TORIENT');
@@ -112,7 +112,7 @@ test('the annotate panel carries the three buttons and TCASE five mode rows', ()
   // selector plus the five argument rows.
   for (const tab of RIBBON_TABS) {
     for (const panel of tab.panels) {
-      if (panel.id === 'annotation') continue;
+      if (panel.id === 'annotation' || panel.id === 'text') continue;
       for (const id of ['TORIENT', 'TCASE', 'TXT2MTXT']) {
         assert.equal(
           panel.items.some(item => item.command === id),

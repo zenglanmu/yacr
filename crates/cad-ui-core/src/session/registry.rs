@@ -140,6 +140,11 @@ macro_rules! cad_wire_registry {
             @row(shared, popups, NoArgs, cad_close_popup, { }, $crate::session::wire::CadCommandAck, { $crate::session::wire::close_popup(popups) })
             @row(shared, reads, NoArgs, cad_settings, { }, $crate::session::CadSettings, { $crate::session::wire::settings(reads) })
             @row(shared, sink, SettingArgs, cad_set_setting, { arg(req, key, String) arg(req, value, $crate::session::registry::RegistryJsonValue) }, $crate::session::wire::CadCommandAck, { $crate::session::wire::set_setting(sink, &key, &value) })
+            // ADR-0053 D2: the document's application domain is written through
+            // the shared sink lane (queued on the desktop, applied inline on
+            // `dom-canvas`), exactly like a setting write. Not a drawing command:
+            // absent from `cad_commands`.
+            @row(shared, sink, ApplicationDomainArgs, cad_set_application_domain, { arg(req, domain, String) }, $crate::session::wire::CadCommandAck, { $crate::session::wire::set_application_domain(sink, &domain) })
             @row(shared, reads, NoArgs, cad_layers, { }, $crate::session::CadLayers, { $crate::session::wire::layers(reads) })
             @row(shared, reads, NoArgs, cad_fonts, { }, $crate::session::CadFonts, { $crate::session::wire::fonts(reads) })
             // The BIM query (ADR-0042 D11): one **request-carrying** read that

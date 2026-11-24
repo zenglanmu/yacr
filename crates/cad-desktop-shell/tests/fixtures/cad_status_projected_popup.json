@@ -3,6 +3,7 @@
     "kind": "model"
   },
   "adapter": null,
+  "applicationDomain": null,
   "backend": null,
   "blocks": [],
   "camera": null,

@@ -48,20 +48,20 @@ const loaded = {
   selection: { count: 0, empty: true, rows: [], mixedKeys: [] },
 };
 
-/** The View tab's display panel, where the display-style toggles live. */
+/** The View tab's Visualize panel, where the lighting/3D toggles live. */
 function displayPanel() {
-  return ribbonTab('view').panels.find(panel => panel.id === 'display');
+  return ribbonTab('view').panels.find(panel => panel.id === 'view3d');
 }
 
 function iblItem() {
   return displayPanel()?.items.find(item => item.id === 'IBL');
 }
 
-test('the View tab display panel carries the IBL toggle with both i18n keys', () => {
+test('the View tab Visualize panel carries the IBL toggle with both i18n keys', () => {
   const panel = displayPanel();
-  assert.ok(panel, 'the View tab must keep its display panel');
+  assert.ok(panel, 'the View tab must keep its Visualize panel');
   const item = iblItem();
-  assert.ok(item, 'the display panel must offer IBL');
+  assert.ok(item, 'the Visualize panel must offer IBL');
   // The ribbon entry is a router command, never a shell action, and it reads the
   // host's own flag as its checked state.
   assert.equal(item.command, 'IBL');
@@ -71,10 +71,11 @@ test('the View tab display panel carries the IBL toggle with both i18n keys', ()
   assert.equal(item.activeKey, 'iblEnabled');
   // The icon set's lighting mark; a made-up glyph would render nothing.
   assert.equal(item.icon, 'sun');
-  // It sits with the neighbouring display toggles, not in a new panel.
-  assert.ok(panel.items.some(entry => entry.id === 'GRID'));
-  assert.ok(panel.items.some(entry => entry.id === 'SNAP'));
-  assert.ok(panel.items.some(entry => entry.id === 'ORTHO'));
+  // It sits with the 3D mode/projection toggles, not in a new panel.
+  assert.ok(panel.items.some(entry => entry.id === 'SWITCH2D3D'));
+  const display = ribbonTab('view').panels.find(entry => entry.id === 'display');
+  assert.ok(display.items.some(entry => entry.id === 'SNAP'));
+  assert.ok(display.items.some(entry => entry.id === 'ORTHO'));
 });
 
 test('IBL is a catalogued command-line affordance', () => {

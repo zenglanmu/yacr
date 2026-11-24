@@ -47,7 +47,7 @@ test('GRADIENT is one catalog row and a draw/annotate hatch-family entry', () =>
 
   // Draw/Annotate: both draw panels and the Annotate hatch run expose it, never
   // twice in one panel.
-  for (const tabId of ['home', 'draw']) {
+  for (const tabId of ['home']) {
     const panel = RIBBON_TABS.find(tab => tab.id === tabId)
       .panels.find(candidate => candidate.id === 'draw');
     assert.ok(panel, `${tabId}/draw panel`);
@@ -58,12 +58,9 @@ test('GRADIENT is one catalog row and a draw/annotate hatch-family entry', () =>
     assert.equal(items[0].action, undefined, 'GRADIENT is a router command');
     assert.equal(items[0].variants, undefined, 'GRADIENT has no option popover');
   }
-  const annotate = RIBBON_TABS.find(tab => tab.id === 'annotate')
-    .panels.find(panel => panel.id === 'annotation');
-  assert.ok(annotate);
-  const annotateItem = annotate.items.find(item => item.id === 'GRADIENT');
-  assert.ok(annotateItem, 'the Annotate hatch run carries GRADIENT');
-  assert.equal(annotateItem.command, 'GRADIENT');
+  // The hatch family lives in Home > Draw after the reference restructure; the
+  // Annotate tab no longer repeats it.
+
 });
 
 test('GRADIENT takes no argument and is admitted only by the loaded vocabulary', () => {

@@ -233,7 +233,7 @@ test('all three are catalogued as modify commands next to TRIM/EXTEND', () => {
 });
 
 test('both modify panels carry the three as small router buttons with no popover', () => {
-  for (const tabId of ['home', 'draw']) {
+  for (const tabId of ['home']) {
     const modify = panel(tabId, 'modify');
     assert.ok(modify, `${tabId} keeps its modify panel`);
     const ids = modify.items.map(item => item.id);

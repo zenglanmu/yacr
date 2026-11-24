@@ -198,7 +198,7 @@ impl HostController {
 
     /// Apply one document-level edit through snapshot → hydrate (see the module
     /// docs), as one revision, and accumulate its dirty scope.
-    fn rewrite_document(
+    pub(super) fn rewrite_document(
         &mut self,
         edit: impl FnOnce(&mut DocumentSnapshot) -> CadResult<()>,
         scope: &cad_db::ChangeScope,

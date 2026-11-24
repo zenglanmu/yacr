@@ -126,6 +126,7 @@ struct Queues {
     orbits: VecDeque<OrbitDelta>,
     setting_writes: VecDeque<(CadSettingKey, CadSettingValue)>,
     layer_writes: VecDeque<CadLayerWrite>,
+    application_domains: VecDeque<String>,
     /// `cad_api_submit` — the plugin-API mutation queue (`Shared::cad_api_calls`).
     api_calls: VecDeque<CadApiSubmission>,
     /// `cad_api_poll` — completed outcomes (`Shared::cad_api_results`).
@@ -149,6 +150,7 @@ impl Queues {
             orbits: VecDeque::new(),
             setting_writes: VecDeque::new(),
             layer_writes: VecDeque::new(),
+            application_domains: VecDeque::new(),
             api_calls: VecDeque::new(),
             api_results: Vec::new(),
             selection_requests: VecDeque::new(),
@@ -172,6 +174,7 @@ impl Queues {
                 orbits: &mut self.orbits,
                 setting_writes: &mut self.setting_writes,
                 layer_writes: &mut self.layer_writes,
+                application_domains: &mut self.application_domains,
                 api_calls: &mut self.api_calls,
                 api_results: &mut self.api_results,
                 selection_requests: &mut self.selection_requests,
@@ -190,6 +193,7 @@ impl Queues {
             && self.orbits.is_empty()
             && self.setting_writes.is_empty()
             && self.layer_writes.is_empty()
+            && self.application_domains.is_empty()
             && self.selection_requests.is_empty()
             && self.api_calls.is_empty()
     }

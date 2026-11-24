@@ -92,10 +92,10 @@ function iconNames(source) {
 }
 
 test('ID is the fifth Measure button, a router command, and a catalogue row', async () => {
-  const measure = panel('measure', 'measure');
+  const measure = panel('home', 'utilities');
   // Appended after the four shipped kinds, so no existing button moved, and it
   // keeps their conventions: a large entry with no variant popover.
-  assert.deepEqual(measure.items.map(item => item.id), ['DIST', 'PLINE', 'ANGLE', 'AREA', 'ID', 'MEASUREGEOM']);
+  assert.deepEqual(measure.items.map(item => item.id), ['DIST', 'PLINE', 'ANGLE', 'AREA', 'ID', 'MEASUREGEOM', 'STATUS']);
   const id = measure.items.find(item => item.id === 'ID');
   assert.equal(id.command, 'ID');
   assert.equal(id.labelKey, 'measure.kind.id');
@@ -152,7 +152,7 @@ test('the ID tool chip names its one pick and never claims a dimension', () => {
 });
 
 test('JOIN sits at the end of the shipped Modify run and is a router command', async () => {
-  for (const tabId of ['home', 'draw']) {
+  for (const tabId of ['home']) {
     const modify = panel(tabId, 'modify');
     // AutoCAD's Modify panel ends with Join; appending keeps every shipped button
     // where it was.
@@ -167,7 +167,7 @@ test('JOIN sits at the end of the shipped Modify run and is a router command', a
       ids.slice(joinIndex + 2),
       ['REVERSE', 'PEDIT', 'OOPS', 'OVERKILL', 'BREAKATPOINT', 'HATCHTOBACK', 'TEXTTOFRONT',
         'SSX', 'SELECTCOUNT', 'HIDEOBJECTS', 'ISOLATEOBJECTS', 'UNISOLATEOBJECTS',
-        'TREX', 'EXTRIM', 'MPEDIT', 'DRAWORDER', 'CHAMFEREDGE'],
+        'TREX', 'EXTRIM', 'MPEDIT', 'DRAWORDER', 'CHAMFEREDGE', 'HATCHEDIT'],
       `${tabId}: only the documented 2026-11-07 additions follow SELECTSIMILAR`,
     );
     const join = modify.items[joinIndex];

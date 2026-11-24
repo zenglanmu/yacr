@@ -84,6 +84,7 @@ pub(super) fn apply_batch(
         // ends at the newest value.
         CAD.with(|cell| {
             cad_desktop_shell::state::drain_embed_resources(shared, cell.borrow().as_ref());
+            cad_desktop_shell::state::drain_application_domains(shared, cell.borrow().as_ref());
         });
         let inputs_started = Instant::now();
         if queued > 0 {

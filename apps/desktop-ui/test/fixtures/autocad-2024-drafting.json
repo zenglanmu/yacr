@@ -1,0 +1,119 @@
+{
+  "reference": "AutoCAD 2024 Drafting & Annotation (zh-CN)",
+  "note": "Transcribed from the official ribbon: reference tab/panel order. `file` is this build's extension tab (AutoCAD uses the application menu) and is listed separately. Panels marked in extensionPanels are this build's own additions, kept after the reference panels of their tab.",
+  "extensionTabs": [
+    "file"
+  ],
+  "tabs": [
+    {
+      "id": "home",
+      "panels": [
+        "draw",
+        "modify",
+        "annotation",
+        "layers",
+        "block",
+        "properties",
+        "groups",
+        "utilities",
+        "clipboard",
+        "bim"
+      ]
+    },
+    {
+      "id": "insert",
+      "panels": [
+        "block",
+        "block_definition",
+        "reference",
+        "import",
+        "data",
+        "linking",
+        "content"
+      ]
+    },
+    {
+      "id": "annotate",
+      "panels": [
+        "text",
+        "dimension",
+        "leader",
+        "table",
+        "markup",
+        "annotation_scaling"
+      ]
+    },
+    {
+      "id": "parametric",
+      "panels": [
+        "geometric",
+        "dimensional",
+        "parametric_manage"
+      ]
+    },
+    {
+      "id": "view",
+      "panels": [
+        "navigate",
+        "view3d",
+        "coordinates",
+        "viewports",
+        "standard",
+        "viewstate",
+        "display",
+        "palettes",
+        "interface"
+      ]
+    },
+    {
+      "id": "manage",
+      "panels": [
+        "cad_standards",
+        "action_recorder",
+        "customization",
+        "applications",
+        "cleanup",
+        "diagnostics"
+      ]
+    },
+    {
+      "id": "output",
+      "panels": [
+        "plot",
+        "export",
+        "send"
+      ]
+    },
+    {
+      "id": "addins",
+      "panels": [
+        "addins",
+        "vendor"
+      ]
+    }
+  ],
+  "extensionPanels": [
+    "standard",
+    "viewstate",
+    "display",
+    "palettes",
+    "diagnostics",
+    "bim"
+  ],
+  "pendingPanels": [
+    "data",
+    "linking",
+    "content",
+    "annotation_scaling",
+    "geometric",
+    "dimensional",
+    "parametric_manage",
+    "coordinates",
+    "viewports",
+    "cad_standards",
+    "action_recorder",
+    "customization",
+    "send",
+    "vendor"
+  ]
+}

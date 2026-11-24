@@ -90,7 +90,7 @@ test('XLINE and RAY are catalogued draw commands beside ARC, admitted only by th
 });
 
 test('both draw panels carry one small XLINE / RAY button directly after ARC', () => {
-  for (const tabId of ['home', 'draw']) {
+  for (const tabId of ['home']) {
     const items = drawPanel(tabId).items;
     for (const entry of CONSTRUCTION) {
       const at = items.findIndex(item => item.id === entry.id);
@@ -112,9 +112,9 @@ test('both draw panels carry one small XLINE / RAY button directly after ARC', (
     // The pair reads ARC -> XLINE -> RAY, in that order, on both panels.
     const arc = items.findIndex(item => item.id === 'ARC');
     assert.deepEqual(items.slice(arc, arc + 3).map(item => item.id), ['ARC', 'XLINE', 'RAY'], tabId);
-    // The draw tail that other suites pin: HATCH/HATCHPOINT, the appended
-    // BOUNDARY point-pick, REVCLOUD and the GRADIENT fill row.
-    assert.deepEqual(items.slice(-4).map(item => item.id), ['HATCHPOINT', 'BOUNDARY', 'REVCLOUD', 'GRADIENT'], tabId);
+    // The draw tail that other suites pin: the hatch-boundary row, REVCLOUD,
+    // GRADIENT and the WIPEOUT mask.
+    assert.deepEqual(items.slice(-4).map(item => item.id), ['HATCHGENERATEBOUNDARY', 'REVCLOUD', 'GRADIENT', 'WIPEOUT'], tabId);
   }
   // No other panel dispatches either selector.
   for (const tab of RIBBON_TABS) {

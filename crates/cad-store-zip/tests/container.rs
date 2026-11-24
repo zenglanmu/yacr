@@ -37,6 +37,7 @@ fn header() -> DocumentHeader {
         identity: DocumentIdentity::Temporary(1),
         resource_keys: Vec::new(),
         embed_resources: false,
+        application_domain: None,
         variables: serde_json::json!({}),
         next: IdCounters::default(),
     }

@@ -93,7 +93,7 @@ test('MEASUREGEOM is catalogued as the inquiry router', () => {
 });
 
 test('the Measure ribbon split button sends the full MEASUREGEOM option line', () => {
-  const measure = panel('measure', 'measure');
+  const measure = panel('home', 'utilities');
   const item = measure.items.find(candidate => candidate.id === 'MEASUREGEOM');
   assert.ok(item, 'Measure panel must carry MEASUREGEOM');
   assert.equal(item.command, 'MEASUREGEOM DISTANCE');

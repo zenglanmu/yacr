@@ -207,7 +207,8 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
   **4/5/7**，minor 6 为只读档）；参数化 ADR-0043 P0–P3 再升到 **11**（P0 参数表 + 元素 `params` 块 →
   8；P1 `neg/pow/fn/if` + `tables/configurations.json` → 9；P2 `tables/features.json` → 10；
   P3 `tables/relations.json` → 11；ADR-0030 D7 host-owned `tables/vendor.json` → 12；
-  写入按文档取 **4/5/7/8/9/10/11/12**）。条目压缩自 ADR-0046 起是
+  ADR-0053 应用域 `document.json` `application_domain` → 13；写入按文档取
+  **4/5/7/8/9/10/11/12/13**）。条目压缩自 ADR-0046 起是
   标准 zstd 帧（zip `Stored` + `structured-zstd =0.4.3`，level 6），`FORMAT_READ/WRITE = 2`；
   `read != 2` 的归档以 `unsupported_version` 拒绝，`sha256_c`/`len_c` 已写入并在解压前校验。`PARAM` 的 create/delete/
   rename/bind/unbind/config 与 `SETENTITYPROPERTY param.<name>` 是**命令层**实现（尚无 payload producer /
@@ -239,6 +240,10 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
 - 路由按宿主上报的 `cad_status.hostProfile.surfaceMode`，**不按构建目标**：`native-below` 的 CAD
   数据命令走 Tauri/native；`dom-canvas` 走 wasm adapter。Android 是 `native-below`，不要按
   `__YACR_RUNTIME__=android` 把 CAD 命令送到 wasm。
+- 应用域（ADR-0053）：`application_domain` 是**文档属性**（`document.json`，minor 13），profile 在
+  `src/domains/`（纯数据 + store）；`cad2d` 唯一完整，其余三域显式占位（隐藏功能区/命令行，不摆
+  可点假按钮）。有文档时切域写文档（`cad_set_application_domain`），无文档只预览；命令可用性仍由
+  文档能力决定，profile 只决定摆放与主题（`html[data-domain]`）。
 - 移动端不是第二套 UI：同一 React 树，只按宽度切换。单源是
   `src/layout/layout-mode.ts` 的 `MOBILE_MAX_WIDTH = 1024`（含端点）。
 - 三份产物**不得互相覆盖**：桌面 `apps/desktop-ui/dist`、Web `apps/app-web/dist-ui`、

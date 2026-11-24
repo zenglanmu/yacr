@@ -91,6 +91,7 @@ impl DrawingDatabaseBuilder {
                 resource_names: BTreeMap::new(),
                 resource_sources: BTreeMap::new(),
                 embed_resources: false,
+                application_domain: None,
                 bim_elements: BTreeMap::new(),
                 bim_definitions: crate::bim::BimDefinitions::new(),
                 bim_relations: crate::bim::BimRelations::new(),
@@ -406,16 +407,6 @@ impl DrawingDatabaseBuilder {
         self.database.resource_sources.remove(&id);
         self.database.resource_names.remove(&id);
         self.database.resources.remove(&id).is_some()
-    }
-
-    /// Set whether this document embeds external resources (ADR-0040 D3).
-    ///
-    /// Document state, not a carrier preference: it is written into
-    /// `document.json` and seeded back on load. `false` (the default) is not
-    /// written at all, so a document that packs nothing keeps the bytes of a
-    /// minor ≤ 4 archive.
-    pub fn set_embed_resources(&mut self, embed: bool) {
-        self.database.embed_resources = embed;
     }
 
     /// Record a block's table name and insertion base point.

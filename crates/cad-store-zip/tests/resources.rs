@@ -41,6 +41,7 @@ fn header(embed_resources: bool) -> DocumentHeader {
         identity: DocumentIdentity::Temporary(2),
         resource_keys: Vec::new(),
         embed_resources,
+        application_domain: None,
         variables: serde_json::json!({}),
         next: IdCounters::default(),
     }

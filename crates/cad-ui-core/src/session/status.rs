@@ -413,6 +413,14 @@ pub struct CadStatus {
     /// those documents, so this is a purely additive key.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub opened_source: Option<OpenedSource>,
+    /// The application domain the chrome renders for the current document
+    /// (ADR-0053 D2), or `null` without a document.
+    ///
+    /// Host truth: the document's named value, or the conservative derivation
+    /// (BIM data → `bim`, everything else → `cad2d`). It is an interface token,
+    /// not a claim about the import format; `openedSource` stays the provenance
+    /// key.
+    pub application_domain: Option<String>,
     pub error: Option<String>,
     /// Whether the host can start a **blank** document right now: the host
     /// advertises the NEW capability and no open/import is in flight
@@ -635,6 +643,8 @@ pub fn unsupported_status(error: Option<String>) -> CadStatus {
         open_summary: None,
         // No session means no opened connector: absent, never a fabricated object.
         opened_source: None,
+        // No session means no document, hence no interface domain.
+        application_domain: None,
         error,
         // No session means no document/command capability at all.
         can_new: false,
@@ -804,8 +814,10 @@ pub(super) fn assemble_status(
         document_ready,
         open_summary,
         // The session owns the document: `CadSession::snapshot` projects the
-        // opened source's provenance onto this field (never inferred here).
+        // opened source's provenance and the interface domain onto these fields
+        // (never inferred here).
         opened_source: None,
+        application_domain: None,
         error,
         can_new: capabilities.can_new,
         can_open,

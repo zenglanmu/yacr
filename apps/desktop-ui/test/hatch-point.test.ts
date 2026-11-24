@@ -57,7 +57,7 @@ const drawPanel = tabId => {
 };
 
 test('HATCHPOINT sits directly after HATCH on both draw panels, with no popover', () => {
-  for (const tabId of ['home', 'draw']) {
+  for (const tabId of ['home']) {
     const items = drawPanel(tabId).items;
     const at = items.findIndex(item => item.id === HATCH_POINT.id);
     assert.ok(at !== -1, `${tabId}/draw must carry the HATCHPOINT button`);

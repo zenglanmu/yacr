@@ -39,16 +39,16 @@ const loaded = {
   selection: { count: 1 },
 };
 
-test('HATCHEDIT is one catalog row and one Annotate hatch split button', () => {
+test('HATCHEDIT is one catalog row and one Home modify split button', () => {
   const entry = COMMAND_CATALOG.find(command => command.id === 'HATCHEDIT');
   assert.ok(entry, 'HATCHEDIT must be in the command catalog');
   assert.equal(entry.labelKey, 'draw.kind.hatchedit');
   assert.equal(entry.icon, 'hatch');
 
-  const annotate = RIBBON_TABS.find(tab => tab.id === 'annotate')
-    .panels.find(panel => panel.id === 'annotation');
-  assert.ok(annotate, 'Annotate keeps its annotation panel');
-  const items = annotate.items.filter(item => item.id === 'HATCHEDIT');
+  const modify = RIBBON_TABS.find(tab => tab.id === 'home')
+    .panels.find(panel => panel.id === 'modify');
+  assert.ok(modify, 'Home keeps its modify panel');
+  const items = modify.items.filter(item => item.id === 'HATCHEDIT');
   assert.equal(items.length, 1, 'exactly one HATCHEDIT button');
   const item = items[0];
   assert.equal(item.command, 'HATCHEDIT');

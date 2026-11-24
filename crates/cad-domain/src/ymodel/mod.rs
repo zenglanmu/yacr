@@ -31,6 +31,7 @@
 
 pub mod descriptor;
 pub mod header;
+mod header_domain;
 pub mod id;
 pub mod json;
 pub mod payload;
@@ -132,7 +133,12 @@ pub const FORMAT_WRITE: u32 = 2;
 /// version-independent vendor semantics for imported vendor objects, one row per
 /// entity keyed by entity id. It is written only when the document has vendor
 /// rows, so a document without them keeps the minor its other features imply.
-pub const FORMAT_MINOR: u32 = 12;
+///
+/// `13` adds the `document.json` `application_domain` scalar (ADR-0053 D2): the
+/// interface domain the document is edited in. It is written only when the
+/// document names one, so an older archive and a document that never chose a
+/// profile stay at their previous minor.
+pub const FORMAT_MINOR: u32 = 13;
 
 /// Stable failure markers.
 ///

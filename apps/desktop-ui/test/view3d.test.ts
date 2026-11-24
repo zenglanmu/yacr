@@ -53,7 +53,7 @@ test('the View tab exposes the 3D panel, the orbit hint and all seven standard v
   const mode = tab.panels.find(panel => panel.id === 'view3d');
   assert.ok(mode, 'the View tab must carry the 3D panel');
   // The 3D affordances lead the tab: mode toggle, projection toggle, orbit hint.
-  assert.deepEqual(mode.items.map(item => item.id), ['SWITCH2D3D', 'PROJECTION', 'ORBIT']);
+  assert.deepEqual(mode.items.map(item => item.id), ['SWITCH2D3D', 'PROJECTION', 'IBL']);
   const toggle = mode.items.find(item => item.id === 'SWITCH2D3D');
   assert.equal(toggle.command, 'SWITCH2D3D');
   assert.equal(toggle.labelKey, 'ribbon.command.view_switch2d3d');
@@ -258,9 +258,9 @@ test('a declared carrier capability list decides which standard views are live',
 });
 
 test('the orbit affordance stays visible, gesture-disabled, and emits no command', async () => {
-  const orbit = viewTab().panels.find(panel => panel.id === 'view3d').items
+  const orbit = viewTab().panels.find(panel => panel.id === 'navigate').items
     .find(item => item.id === 'ORBIT');
-  assert.ok(orbit, 'the orbit hint must stay visible in the 3D panel');
+  assert.ok(orbit, 'the orbit hint must stay visible in the Navigate panel');
   assert.equal(orbit.command, 'ORBIT');
   assert.equal(orbit.labelKey, 'view.orbit_label');
   assert.equal(orbit.standardView, undefined, 'orbit is a gesture, not a view payload');

@@ -216,6 +216,11 @@ impl AdmissionTarget for DirectSink<'_> {
         self.applied(outcome)
     }
 
+    fn application_domain(&mut self, token: String) -> Result<(), String> {
+        let outcome = self.session.set_application_domain(&token).map(|_| ());
+        self.applied(outcome)
+    }
+
     fn select_entities(&mut self, ids: Vec<EntityId>) -> Result<(), String> {
         // The session is on this thread, so the replacement applies inline through
         // the same `CadSession::select_entities` the desktop owner tick calls: the

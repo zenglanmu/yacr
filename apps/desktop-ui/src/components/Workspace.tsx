@@ -26,6 +26,7 @@
 // document state - so `.native-input` stays the single input funnel.
 import React from 'react';
 import { NavigationDock } from './NavigationDock.tsx';
+import { DomainSurface } from './DomainSurface.tsx';
 import { ViewCube } from './ViewCube.tsx';
 import { StartPanel } from './StartPanel.tsx';
 import { PaletteWindow } from './PaletteWindow.tsx';
@@ -137,6 +138,9 @@ export function Workspace() {
         <div className="viewball-layer">
           <ViewCube />
         </div>
+        {/* The placeholder domain card: a note over the partition, not a second
+            UI. It disappears for the drafting profile. */}
+        <DomainSurface />
         {/* Floating palettes: an overlay sibling *after* `.native-input`, so it
             paints above the CAD surface and takes no layout space. The layer
             itself is pointer-transparent; each window re-enables input. DOM order

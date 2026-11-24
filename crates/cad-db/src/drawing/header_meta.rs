@@ -10,13 +10,23 @@
 //! This is the same shape as a header-variable write (`drawing::header_geometry`):
 //! one revision bump, no object changes, and a scope that marks the header dirty.
 
-use cad_domain::{Revision, TransactionId};
+use cad_domain::{ApplicationDomain, Revision, TransactionId};
 
 use crate::change::ChangeSet;
 use crate::drawing::DrawingDatabase;
 use crate::scope::ChangeScope;
 
 impl DrawingDatabase {
+    /// Name this document's interface domain (ADR-0053 D2).
+    ///
+    /// Document state: the value lives in `document.json` and is seeded back on
+    /// load. This setter is the import-path writer (the host derives it from the
+    /// connector before publishing); a user-facing change goes through the host,
+    /// which also bumps the revision and marks the header dirty.
+    pub fn set_application_domain(&mut self, domain: Option<ApplicationDomain>) {
+        self.application_domain = domain;
+    }
+
     /// Record that persisted document-level metadata changed.
     ///
     /// Called after the caller has updated `cad_app::Document::units` (or another

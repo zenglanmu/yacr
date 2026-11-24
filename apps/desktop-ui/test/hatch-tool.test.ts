@@ -113,7 +113,7 @@ function drawPanel(tabId) {
 }
 
 test('HATCH closes the draw command group on both draw panels, as a router command', async () => {
-  for (const tabId of ['home', 'draw']) {
+  for (const tabId of ['home']) {
     const panel = drawPanel(tabId);
     // HATCH still closes the draw group's pre-selection run. MTEXT (2026-10-26)
     // and MLEADER (ADR 0019 P7c) are appended after TEXT — their annotation
@@ -123,8 +123,8 @@ test('HATCH closes the draw command group on both draw panels, as a router comma
     // objects it edits: `OFFSET` → `TEXT` → `MTEXT` → `SCALETEXT` → `MLEADER` →
     // `HATCH` → `HATCHPOINT`.
     assert.deepEqual(
-      panel.items.slice(-10).map(item => item.id),
-      ['OFFSET', 'TEXT', 'MTEXT', 'SCALETEXT', 'MLEADER', 'HATCH', 'HATCHPOINT', 'BOUNDARY', 'REVCLOUD', 'GRADIENT'],
+      panel.items.slice(-5).map(item => item.id),
+      ['BOUNDARY', 'HATCHGENERATEBOUNDARY', 'REVCLOUD', 'GRADIENT', 'WIPEOUT'],
       tabId,
     );
     const item = panel.items.find(candidate => candidate.id === 'HATCH');
@@ -141,7 +141,7 @@ test('HATCH closes the draw command group on both draw panels, as a router comma
   // The annotate dimension family is untouched: its seven commands still lead
   // the annotation panel in the same fixed order and HATCH is not among them.
   const annotate = RIBBON_TABS.find(tab => tab.id === 'annotate');
-  const annotation = annotate.panels.find(panel => panel.id === 'annotation');
+  const annotation = annotate.panels.find(panel => panel.id === 'dimension');
   assert.deepEqual(annotation.items.slice(0, 7).map(item => item.id), [
     'DIMLINEAR', 'DIMALIGNED', 'DIMRADIUS', 'DIMDIAMETER', 'DIMCENTER', 'DIMANGULAR', 'DIMORDINATE',
   ]);
@@ -681,7 +681,7 @@ test('the hatch glyph is a dedicated boundary-with-fill icon, not a neighbour gl
   assert.ok(defined.has(HATCH.icon), `icons.jsx must define '${HATCH.icon}'`);
   // Ribbon and catalog agree on the dedicated name (an unknown name would make
   // <Icon> silently fall back to a dot).
-  for (const tabId of ['home', 'draw']) {
+  for (const tabId of ['home']) {
     const item = drawPanel(tabId).items.find(candidate => candidate.id === HATCH.id);
     assert.equal(item.icon, HATCH.icon, tabId);
   }
@@ -694,7 +694,7 @@ test('the hatch glyph is a dedicated boundary-with-fill icon, not a neighbour gl
     ['HATCH', 'HATCHPOINT', 'HATCHGENERATEBOUNDARY', 'HATCHTOBACK', 'GRADIENT', 'HATCHEDIT', '-BOUNDARY', '-HATCH', '-HATCHEDIT', 'SUPERHATCH'],
   );
   // Every draw-panel glyph is a real name, so no draw button falls back to a dot.
-  for (const tabId of ['home', 'draw']) {
+  for (const tabId of ['home']) {
     for (const item of drawPanel(tabId).items) {
       assert.ok(defined.has(item.icon), `${item.id} icon '${item.icon}' must exist`);
     }

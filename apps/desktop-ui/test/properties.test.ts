@@ -387,7 +387,7 @@ test('the shell exposes the one property write and the palette action', async ()
 test('both ribbon PROPERTIES entries dispatch the shell action, and LAYER stays a command', () => {
   const items = RIBBON_TABS.flatMap(tab => tab.panels.flatMap(panel => panel.items))
     .filter(item => item.id === 'PROPERTIES');
-  assert.equal(items.length, 2, 'Home/Annotate and the large entry both exist');
+  assert.equal(items.length, 1, 'Home > Properties is the one ribbon entry');
   for (const item of items) {
     assert.equal(item.action, 'properties');
     assert.equal(item.command, undefined, 'the ribbon must not send cad_command for PROPERTIES');

@@ -74,7 +74,8 @@ const BASE = {
 const TEXT_TOOL = { key: 'draw.text', points: 1, ready: false };
 const AWAITING = { ...TEXT_TOOL, awaiting_text: true };
 
-const drawPanel = tabId => RIBBON_TABS.find(tab => tab.id === tabId).panels.find(panel => panel.id === 'draw');
+const drawPanel = tabId => RIBBON_TABS.find(tab => tab.id === 'home').panels.find(panel => panel.id === 'draw');
+const annotationPanel = () => RIBBON_TABS.find(tab => tab.id === 'home').panels.find(panel => panel.id === 'annotation');
 
 test('text mode is the host flag alone — never the tool key, never the point count', () => {
   assert.equal(awaitingToolText(withTool(AWAITING)), true);
@@ -323,18 +324,18 @@ test('TEXT is a draw affordance in the ribbon and the catalog, enabled only by r
   assert.equal(entry.icon, 'text');
   assert.equal(entry.group, 'draw');
   // Both draw panels carry it, declared exactly like the other draw commands.
-  for (const tabId of ['home', 'draw']) {
-    const item = drawPanel(tabId).items.find(candidate => candidate.id === 'TEXT');
+  for (const tabId of ['home']) {
+    const item = annotationPanel().items.find(candidate => candidate.id === 'TEXT');
     assert.ok(item, `${tabId}/draw must carry the TEXT affordance`);
     assert.equal(item.command, 'TEXT');
     assert.equal(item.labelKey, 'draw.kind.text');
     assert.equal(item.icon, 'text');
     assert.equal(item.action, undefined, 'TEXT must dispatch through the router');
-    assert.equal(item.large, undefined, 'TEXT is a small draw button, not a primary tile');
+    assert.equal(item.large, true, 'TEXT leads the Home annotation panel as a large tile');
     assert.equal(item.variants, undefined, 'TEXT has no variant popover');
     // HATCH still closes the draw run, with HATCHPOINT directly after it.
     const items = drawPanel(tabId).items;
-    assert.deepEqual(items.slice(-4).map(item => item.id), ['HATCHPOINT', 'BOUNDARY', 'REVCLOUD', 'GRADIENT'], `${tabId}/draw ends with the HATCH family and REVCLOUD`);
+    assert.deepEqual(drawPanel(tabId).items.slice(-3).map(item => item.id), ['REVCLOUD', 'GRADIENT', 'WIPEOUT'], `${tabId}/draw keeps the hatch family and the markup tail`);
     assert.ok(ribbonCommandIds().includes('TEXT'));
   }
   // Router admission is the single enable gate.
@@ -404,8 +405,8 @@ test('the TEXT glyph is a dedicated baseline mark, distinct from the hatch and d
   assert.ok(defined.has('text'), "icons.jsx must define 'text'");
   // Ribbon and catalog agree on the dedicated name (an unknown name would make
   // <Icon> silently fall back to a dot).
-  for (const tabId of ['home', 'draw']) {
-    assert.equal(drawPanel(tabId).items.find(item => item.id === 'TEXT').icon, 'text', tabId);
+  for (const tabId of ['home']) {
+    assert.equal(annotationPanel().items.find(item => item.id === 'TEXT').icon, 'text', tabId);
   }
   assert.equal(COMMAND_CATALOG.find(command => command.id === 'TEXT').icon, 'text');
   // `text` belongs to TEXT alone: no other catalogued command reuses it.
@@ -414,7 +415,7 @@ test('the TEXT glyph is a dedicated baseline mark, distinct from the hatch and d
     ['TEXT', 'ARCTEXT', 'UPDATEFIELD', 'FIELD', 'RTEXT', 'RTEDIT', 'SPELL', 'PDFSHXTEXT', '-PDFSHXTEXT'],
   );
   // Every draw-panel glyph is a real name, so no draw button falls back to a dot.
-  for (const tabId of ['home', 'draw']) {
+  for (const tabId of ['home']) {
     for (const item of drawPanel(tabId).items) {
       assert.ok(defined.has(item.icon), `${item.id} icon '${item.icon}' must exist`);
     }
@@ -443,8 +444,8 @@ test('MTEXT sits directly after TEXT in the catalog and both draw panels, with n
   assert.equal(entry.icon, 'mtext');
   assert.equal(entry.group, 'draw');
   // Both draw panels carry it, declared exactly like the other draw commands.
-  for (const tabId of ['home', 'draw']) {
-    const items = drawPanel(tabId).items;
+  for (const tabId of ['home']) {
+    const items = annotationPanel().items;
     const at = items.findIndex(candidate => candidate.id === 'MTEXT');
     assert.ok(at !== -1, `${tabId}/draw must carry the MTEXT affordance`);
     assert.equal(items[at - 1].id, 'TEXT', `${tabId}: MTEXT sits directly after TEXT`);
@@ -458,7 +459,7 @@ test('MTEXT sits directly after TEXT in the catalog and both draw panels, with n
     // a variant popover here would offer choices the command does not have.
     assert.equal(item.variants, undefined, 'MTEXT has no variant popover');
     // HATCH still closes the draw run, with HATCHPOINT directly after it.
-    assert.deepEqual(items.slice(-4).map(item => item.id), ['HATCHPOINT', 'BOUNDARY', 'REVCLOUD', 'GRADIENT'], `${tabId}/draw ends with the HATCH family and REVCLOUD`);
+    assert.deepEqual(drawPanel(tabId).items.slice(-3).map(item => item.id), ['REVCLOUD', 'GRADIENT', 'WIPEOUT'], `${tabId}/draw keeps the hatch family and the markup tail`);
     assert.ok(ribbonCommandIds().includes('MTEXT'));
   }
   // Router admission is the single enable gate, exactly like TEXT.
@@ -547,8 +548,8 @@ test('the MTEXT glyph is its own mark, not a reuse of the TEXT baseline', async 
   assert.doesNotMatch(glyph[1], /<rect/, 'no boundary loop');
   assert.doesNotMatch(glyph[1], /strokeDasharray/);
   // Catalog and ribbon agree on the dedicated name, and `text` stays TEXT's alone.
-  for (const tabId of ['home', 'draw']) {
-    assert.equal(drawPanel(tabId).items.find(item => item.id === 'MTEXT').icon, 'mtext', tabId);
+  for (const tabId of ['home']) {
+    assert.equal(annotationPanel().items.find(item => item.id === 'MTEXT').icon, 'mtext', tabId);
   }
   assert.equal(COMMAND_CATALOG.find(command => command.id === 'MTEXT').icon, 'mtext');
   assert.equal(COMMAND_CATALOG.filter(command => command.icon === 'mtext').length, 1);

@@ -84,7 +84,7 @@ test('the ribbon offers it as a small button in the Home clipboard panel, with n
   const shippedOrder = panel.items
     .filter(candidate => candidate.id !== 'PASTEBLOCK')
     .map(candidate => candidate.id);
-  assert.deepEqual(shippedOrder, ['SELECTALL', 'COPY', 'MOVE', 'ROTATE']);
+  assert.deepEqual(shippedOrder, ['SELECTALL', 'COPY', 'MATCHPROP']);
 });
 
 test('the shortcut menu carries the third paste beside Paste and Paste original', () => {

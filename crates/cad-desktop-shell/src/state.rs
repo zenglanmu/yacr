@@ -262,6 +262,10 @@ pub struct Shared {
     /// `cad_delete_layer` table writes): admitted by those commands and drained by
     /// the owner tick into the matching `CadSession` funnel.
     pub cad_layer_writes: VecDeque<CadLayerWrite>,
+    /// Bounded main-thread queue of document application-domain tokens
+    /// (`cad_set_application_domain`, ADR-0053 D2): admitted by the shared sink
+    /// and drained by the owner tick into `CadSession::set_application_domain`.
+    pub cad_application_domains: VecDeque<String>,
     /// Latest layer projection mirrored from the owner-thread session, so the
     /// worker-thread `cad_layers` read never touches the `!Send` session.
     ///
@@ -410,6 +414,7 @@ impl Shared {
             cad_embed_resources: None,
             cad_settings: None,
             cad_layer_writes: VecDeque::new(),
+            cad_application_domains: VecDeque::new(),
             cad_layers: None,
             cad_fonts: None,
             cad_api_snapshot: None,
@@ -473,6 +478,7 @@ impl Shared {
                 orbits: &mut self.cad_orbits,
                 setting_writes: &mut self.cad_setting_writes,
                 layer_writes: &mut self.cad_layer_writes,
+                application_domains: &mut self.cad_application_domains,
                 api_calls: &mut self.cad_api_calls,
                 api_results: &mut self.cad_api_results,
             },
@@ -643,6 +649,31 @@ pub fn drain_directory_pick(shared: &Arc<Mutex<Shared>>) {
     let picker = lock(shared).directory_picker.clone();
     if let Some(picker) = picker {
         picker.drain();
+    }
+}
+
+/// The owner tick's application-domain drain (ADR-0053 D2).
+///
+/// Applies every queued token in admission order on the owner-thread session. A
+/// host with no session this tick puts the tokens back (order preserved) for the
+/// next tick instead of applying them against nothing; a session refusal is
+/// printed and lands in `cad_status.error` (the session records it).
+pub fn drain_application_domains(shared: &Arc<Mutex<Shared>>, session: Option<&CadSession>) {
+    let tokens: Vec<String> = {
+        let mut state = lock(shared);
+        state.cad_application_domains.drain(..).collect()
+    };
+    let Some(session) = session else {
+        let mut state = lock(shared);
+        for token in tokens.into_iter().rev() {
+            state.cad_application_domains.push_front(token);
+        }
+        return;
+    };
+    for token in tokens {
+        if let Err(error) = session.set_application_domain(&token) {
+            eprintln!("[probe] cad application domain rejected: {error}");
+        }
     }
 }
 

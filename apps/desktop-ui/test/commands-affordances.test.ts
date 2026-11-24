@@ -32,7 +32,7 @@ test('ERASE is a modify affordance in the ribbon and catalog, enabled only by ro
   assert.equal(entry.group, 'modify');
   // Placed with the other modify actions on the Home and Draw tabs, never in the
   // view panel, and wired as a router command (no local shell action).
-  for (const tabId of ['home', 'draw']) {
+  for (const tabId of ['home']) {
     const modify = RIBBON_TABS.find(tab => tab.id === tabId).panels.find(panel => panel.id === 'modify');
     assert.ok(modify, `${tabId} must keep its modify panel`);
     const item = modify.items.find(candidate => candidate.id === 'ERASE');
@@ -72,7 +72,7 @@ test('EXPLODE is a modify affordance in the ribbon and catalog, enabled only by 
   assert.equal(entry.group, 'modify');
   // Placed with the other modify actions on the Home and Draw tabs, wired as a
   // router command (no local shell action).
-  for (const tabId of ['home', 'draw']) {
+  for (const tabId of ['home']) {
     const modify = RIBBON_TABS.find(tab => tab.id === tabId).panels.find(panel => panel.id === 'modify');
     assert.ok(modify, `${tabId} must keep its modify panel`);
     const item = modify.items.find(candidate => candidate.id === id);
@@ -110,8 +110,8 @@ test('PLINE is a draw affordance in the ribbon and catalog, enabled only by rout
   assert.equal(entry.group, 'draw');
   // Placed with the other draw actions on the Home and Draw tabs, wired as a
   // router command (no local shell action).
-  for (const tabId of ['home', 'draw']) {
-    const draw = RIBBON_TABS.find(tab => tab.id === tabId).panels.find(panel => panel.id === 'draw');
+  for (const tabId of ['home']) {
+    const draw = RIBBON_TABS.find(tab => tab.id === 'home').panels.find(panel => panel.id === 'draw');
     assert.ok(draw, `${tabId} must keep its draw panel`);
     const item = draw.items.find(candidate => candidate.id === 'PLINE');
     assert.ok(item, `${tabId}/draw must carry the PLINE affordance`);
@@ -122,7 +122,7 @@ test('PLINE is a draw affordance in the ribbon and catalog, enabled only by rout
   // The measurement panel must not dispatch `PLINE` (it dispatches the explicit
   // `MEASUREPOLYLINE`), so the polyline draw command never shadows the length
   // measurement.
-  const measurePanel = RIBBON_TABS.find(tab => tab.id === 'measure').panels.find(panel => panel.id === 'measure');
+  const measurePanel = RIBBON_TABS.find(tab => tab.id === 'home').panels.find(panel => panel.id === 'utilities');
   assert.equal(measurePanel.items.some(item => item.command === 'PLINE'), false);
   // Router admission is the single enable gate: admitted when the host vocabulary
   // carries PLINE, unsupported (never locally enabled) when it does not.
@@ -150,8 +150,8 @@ test('RECTANG is a draw affordance in the ribbon and catalog, enabled only by ro
   assert.equal(entry.group, 'draw');
   // Placed with the other draw actions on the Home and Draw tabs, wired as a
   // router command (no local shell action).
-  for (const tabId of ['home', 'draw']) {
-    const draw = RIBBON_TABS.find(tab => tab.id === tabId).panels.find(panel => panel.id === 'draw');
+  for (const tabId of ['home']) {
+    const draw = RIBBON_TABS.find(tab => tab.id === 'home').panels.find(panel => panel.id === 'draw');
     assert.ok(draw, `${tabId} must keep its draw panel`);
     const item = draw.items.find(candidate => candidate.id === 'RECTANG');
     assert.ok(item, `${tabId}/draw must carry the RECTANG affordance`);
@@ -160,7 +160,7 @@ test('RECTANG is a draw affordance in the ribbon and catalog, enabled only by ro
     assert.equal(item.action, undefined, 'RECTANG must not be a local shell action');
   }
   // The measurement panel never dispatches `RECTANG`: it is a draw command only.
-  const measurePanel = RIBBON_TABS.find(tab => tab.id === 'measure').panels.find(panel => panel.id === 'measure');
+  const measurePanel = RIBBON_TABS.find(tab => tab.id === 'home').panels.find(panel => panel.id === 'utilities');
   assert.equal(measurePanel.items.some(item => item.command === 'RECTANG'), false);
   // Router admission is the single enable gate: admitted when the host vocabulary
   // carries RECTANG, unsupported (never locally enabled) when it does not.
@@ -196,8 +196,8 @@ test('ELLIPSE is a draw affordance in the ribbon and catalog, enabled only by ro
   assert.equal(entry.group, 'draw');
   // Placed with the other draw actions on the Home and Draw tabs, wired as a
   // router command (no local shell action).
-  for (const tabId of ['home', 'draw']) {
-    const draw = RIBBON_TABS.find(tab => tab.id === tabId).panels.find(panel => panel.id === 'draw');
+  for (const tabId of ['home']) {
+    const draw = RIBBON_TABS.find(tab => tab.id === 'home').panels.find(panel => panel.id === 'draw');
     assert.ok(draw, `${tabId} must keep its draw panel`);
     const item = draw.items.find(candidate => candidate.id === 'ELLIPSE');
     assert.ok(item, `${tabId}/draw must carry the ELLIPSE affordance`);
@@ -206,7 +206,7 @@ test('ELLIPSE is a draw affordance in the ribbon and catalog, enabled only by ro
     assert.equal(item.action, undefined, 'ELLIPSE must not be a local shell action');
   }
   // The measurement panel never dispatches `ELLIPSE`: it is a draw command only.
-  const measurePanel = RIBBON_TABS.find(tab => tab.id === 'measure').panels.find(panel => panel.id === 'measure');
+  const measurePanel = RIBBON_TABS.find(tab => tab.id === 'home').panels.find(panel => panel.id === 'utilities');
   assert.equal(measurePanel.items.some(item => item.command === 'ELLIPSE'), false);
   // Router admission is the single enable gate: admitted when the host vocabulary
   // carries ELLIPSE, unsupported (never locally enabled) when it does not.
@@ -244,8 +244,8 @@ test('POLYGON is a draw affordance in the ribbon and catalog, enabled only by ro
   assert.equal(entry.group, 'draw');
   // Placed with the other draw actions on the Home and Draw tabs, wired as a
   // router command (no local shell action).
-  for (const tabId of ['home', 'draw']) {
-    const draw = RIBBON_TABS.find(tab => tab.id === tabId).panels.find(panel => panel.id === 'draw');
+  for (const tabId of ['home']) {
+    const draw = RIBBON_TABS.find(tab => tab.id === 'home').panels.find(panel => panel.id === 'draw');
     assert.ok(draw, `${tabId} must keep its draw panel`);
     const item = draw.items.find(candidate => candidate.id === 'POLYGON');
     assert.ok(item, `${tabId}/draw must carry the POLYGON affordance`);
@@ -254,7 +254,7 @@ test('POLYGON is a draw affordance in the ribbon and catalog, enabled only by ro
     assert.equal(item.action, undefined, 'POLYGON must not be a local shell action');
   }
   // The measurement panel never dispatches `POLYGON`: it is a draw command only.
-  const measurePanel = RIBBON_TABS.find(tab => tab.id === 'measure').panels.find(panel => panel.id === 'measure');
+  const measurePanel = RIBBON_TABS.find(tab => tab.id === 'home').panels.find(panel => panel.id === 'utilities');
   assert.equal(measurePanel.items.some(item => item.command === 'POLYGON'), false);
   // Router admission is the single enable gate: admitted when the host vocabulary
   // carries POLYGON, unsupported (never locally enabled) when it does not.
@@ -287,15 +287,15 @@ test('POINT is a draw affordance in the ribbon and catalog, enabled only by rout
   assert.equal(entry.labelKey, 'draw.kind.point');
   assert.equal(entry.icon, 'point');
   assert.equal(entry.group, 'draw');
-  for (const tabId of ['home', 'draw']) {
-    const draw = RIBBON_TABS.find(tab => tab.id === tabId).panels.find(panel => panel.id === 'draw');
+  for (const tabId of ['home']) {
+    const draw = RIBBON_TABS.find(tab => tab.id === 'home').panels.find(panel => panel.id === 'draw');
     const item = draw.items.find(candidate => candidate.id === 'POINT');
     assert.ok(item, `${tabId}/draw must carry the POINT affordance`);
     assert.equal(item.command, 'POINT');
     assert.equal(item.labelKey, 'draw.kind.point');
     assert.equal(item.action, undefined, 'POINT must not be a local shell action');
   }
-  const measurePanel = RIBBON_TABS.find(tab => tab.id === 'measure').panels.find(panel => panel.id === 'measure');
+  const measurePanel = RIBBON_TABS.find(tab => tab.id === 'home').panels.find(panel => panel.id === 'utilities');
   assert.equal(measurePanel.items.some(item => item.command === 'POINT'), false);
   assert.equal(isSupportedCommand('POINT'), true);
   assert.equal(admitCommandText('POINT', { status: loaded }).kind, 'admitted');
@@ -319,15 +319,15 @@ test('SPLINE is a draw affordance in the ribbon and catalog, enabled only by rou
   assert.equal(entry.labelKey, 'draw.kind.spline');
   assert.equal(entry.icon, 'spline');
   assert.equal(entry.group, 'draw');
-  for (const tabId of ['home', 'draw']) {
-    const draw = RIBBON_TABS.find(tab => tab.id === tabId).panels.find(panel => panel.id === 'draw');
+  for (const tabId of ['home']) {
+    const draw = RIBBON_TABS.find(tab => tab.id === 'home').panels.find(panel => panel.id === 'draw');
     const item = draw.items.find(candidate => candidate.id === 'SPLINE');
     assert.ok(item, `${tabId}/draw must carry the SPLINE affordance`);
     assert.equal(item.command, 'SPLINE');
     assert.equal(item.labelKey, 'draw.kind.spline');
     assert.equal(item.action, undefined, 'SPLINE must not be a local shell action');
   }
-  const measurePanel = RIBBON_TABS.find(tab => tab.id === 'measure').panels.find(panel => panel.id === 'measure');
+  const measurePanel = RIBBON_TABS.find(tab => tab.id === 'home').panels.find(panel => panel.id === 'utilities');
   assert.equal(measurePanel.items.some(item => item.command === 'SPLINE'), false);
   assert.equal(isSupportedCommand('SPLINE'), true);
   assert.equal(admitCommandText('SPLINE', { status: loaded }).kind, 'admitted');
@@ -354,7 +354,7 @@ test('CHAMFER and FILLET are modify affordances in the ribbon and catalog, enabl
     assert.equal(entry.icon, id.toLowerCase());
     assert.equal(entry.group, 'modify');
     // Placed with the other modify actions on the Home and Draw tabs.
-    for (const tabId of ['home', 'draw']) {
+    for (const tabId of ['home']) {
       const modify = RIBBON_TABS.find(tab => tab.id === tabId).panels.find(panel => panel.id === 'modify');
       assert.ok(modify, `${tabId} must keep its modify panel`);
       const item = modify.items.find(candidate => candidate.id === id);
@@ -364,7 +364,7 @@ test('CHAMFER and FILLET are modify affordances in the ribbon and catalog, enabl
       assert.equal(item.action, undefined, `${id} must not be a local shell action`);
     }
     // The measurement panel never dispatches it.
-    const measurePanel = RIBBON_TABS.find(tab => tab.id === 'measure').panels.find(panel => panel.id === 'measure');
+    const measurePanel = RIBBON_TABS.find(tab => tab.id === 'home').panels.find(panel => panel.id === 'utilities');
     assert.equal(measurePanel.items.some(item => item.command === id), false);
     // Router admission is the single enable gate.
     assert.equal(isSupportedCommand(id), true, id);
@@ -395,7 +395,7 @@ test('ARRAYRECT and ARRAYPOLAR are modify affordances in the ribbon and catalog,
     assert.equal(entry.icon, id.toLowerCase());
     assert.equal(entry.group, 'modify');
     // Placed with the other modify actions on the Home and Draw tabs.
-    for (const tabId of ['home', 'draw']) {
+    for (const tabId of ['home']) {
       const modify = RIBBON_TABS.find(tab => tab.id === tabId).panels.find(panel => panel.id === 'modify');
       assert.ok(modify, `${tabId} must keep its modify panel`);
       const item = modify.items.find(candidate => candidate.id === id);
@@ -405,7 +405,7 @@ test('ARRAYRECT and ARRAYPOLAR are modify affordances in the ribbon and catalog,
       assert.equal(item.action, undefined, `${id} must not be a local shell action`);
     }
     // The measurement panel never dispatches it.
-    const measurePanel = RIBBON_TABS.find(tab => tab.id === 'measure').panels.find(panel => panel.id === 'measure');
+    const measurePanel = RIBBON_TABS.find(tab => tab.id === 'home').panels.find(panel => panel.id === 'utilities');
     assert.equal(measurePanel.items.some(item => item.command === id), false);
     // Router admission is the single enable gate.
     assert.equal(isSupportedCommand(id), true, id);
@@ -436,7 +436,7 @@ test('ALIGN is a modify affordance in the ribbon and catalog, enabled only by ro
   assert.equal(entry.icon, 'align');
   assert.equal(entry.group, 'modify');
   // Placed with the other modify actions on the Home and Draw tabs.
-  for (const tabId of ['home', 'draw']) {
+  for (const tabId of ['home']) {
     const modify = RIBBON_TABS.find(tab => tab.id === tabId).panels.find(panel => panel.id === 'modify');
     assert.ok(modify, `${tabId} must keep its modify panel`);
     const item = modify.items.find(candidate => candidate.id === id);
@@ -446,7 +446,7 @@ test('ALIGN is a modify affordance in the ribbon and catalog, enabled only by ro
     assert.equal(item.action, undefined, `${id} must not be a local shell action`);
   }
   // The measurement panel never dispatches it.
-  const measurePanel = RIBBON_TABS.find(tab => tab.id === 'measure').panels.find(panel => panel.id === 'measure');
+  const measurePanel = RIBBON_TABS.find(tab => tab.id === 'home').panels.find(panel => panel.id === 'utilities');
   assert.equal(measurePanel.items.some(item => item.command === id), false);
   // Router admission is the single enable gate.
   assert.equal(isSupportedCommand(id), true, id);
@@ -476,7 +476,7 @@ test('STRETCH is a modify affordance in the ribbon and catalog, enabled only by 
   assert.equal(entry.icon, 'stretch');
   assert.equal(entry.group, 'modify');
   // Placed with the other modify actions on the Home and Draw tabs.
-  for (const tabId of ['home', 'draw']) {
+  for (const tabId of ['home']) {
     const modify = RIBBON_TABS.find(tab => tab.id === tabId).panels.find(panel => panel.id === 'modify');
     assert.ok(modify, `${tabId} must keep its modify panel`);
     const item = modify.items.find(candidate => candidate.id === id);
@@ -486,7 +486,7 @@ test('STRETCH is a modify affordance in the ribbon and catalog, enabled only by 
     assert.equal(item.action, undefined, `${id} must not be a local shell action`);
   }
   // The measurement panel never dispatches it.
-  const measurePanel = RIBBON_TABS.find(tab => tab.id === 'measure').panels.find(panel => panel.id === 'measure');
+  const measurePanel = RIBBON_TABS.find(tab => tab.id === 'home').panels.find(panel => panel.id === 'utilities');
   assert.equal(measurePanel.items.some(item => item.command === id), false);
   // Router admission is the single enable gate.
   assert.equal(isSupportedCommand(id), true, id);
@@ -517,7 +517,7 @@ test('DIMLINEAR and DIMALIGNED are annotate affordances in the ribbon and catalo
   ];
   const annotate = RIBBON_TABS.find(tab => tab.id === 'annotate');
   assert.ok(annotate, 'the annotate tab must exist');
-  const panel = annotate.panels.find(entry => entry.id === 'annotation');
+  const panel = annotate.panels.find(entry => entry.id === 'dimension');
   assert.ok(panel, 'the annotate tab must keep its annotation panel');
   // The dimension pair leads the annotation panel, linear before aligned, so a
   // CAD user finds dimension creation where AutoCAD's Annotate tab puts it.
@@ -542,6 +542,8 @@ test('DIMLINEAR and DIMALIGNED are annotate affordances in the ribbon and catalo
     for (const tab of RIBBON_TABS) {
       for (const other of tab.panels) {
         if (other === panel) continue;
+        // Home > Annotation repeats the compact dimension/leader set by design.
+        if (other.id === 'annotation') continue;
         assert.equal(other.items.some(candidate => candidate.command === id), false, `${tab.id}/${other.id} must not dispatch ${id}`);
       }
     }
@@ -597,7 +599,7 @@ test('MATCHPROP sits with the selection-acting modify commands and needs a sourc
   // Placed with the other modify actions on the Home and Draw tabs, directly
   // after ERASE/EXPLODE — the panel's other commands that act on the **current**
   // selection — and wired as a router command (no local shell action).
-  for (const tabId of ['home', 'draw']) {
+  for (const tabId of ['home']) {
     const modify = RIBBON_TABS.find(tab => tab.id === tabId).panels.find(panel => panel.id === 'modify');
     assert.ok(modify, `${tabId} must keep its modify panel`);
     const item = modify.items.find(candidate => candidate.id === id);
@@ -621,7 +623,7 @@ test('MATCHPROP sits with the selection-acting modify commands and needs a sourc
   // It is a modify action only: no draw/annotate/view panel dispatches it.
   for (const tab of RIBBON_TABS) {
     for (const panel of tab.panels) {
-      if (panel.id === 'modify') continue;
+      if (panel.id === 'modify' || panel.id === 'clipboard') continue;
       assert.equal(panel.items.some(item => item.command === id), false, `${tab.id}/${panel.id} must not dispatch ${id}`);
     }
   }

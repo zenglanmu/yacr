@@ -163,7 +163,7 @@ test('each mode is admitted as one whole selector, never CIRCLE plus an argument
 
 test('both draw panels offer the CIRCLE split button with the four definitions', () => {
   const expected = ['CIRCLE', 'CIRCLE 2P', 'CIRCLE 3P', 'CIRCLE D'];
-  for (const tabId of ['home', 'draw']) {
+  for (const tabId of ['home']) {
     const items = drawPanel(tabId).items;
     const item = items.find(candidate => candidate.id === 'CIRCLE');
     assert.ok(item, `${tabId}/draw must keep the CIRCLE button`);

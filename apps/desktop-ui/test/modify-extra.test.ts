@@ -62,7 +62,7 @@ function assertCatalogued({ id, labelKey, icon, group }) {
 }
 
 function assertRibbonButton({ id, labelKey, icon }) {
-  for (const tabId of ['home', 'draw']) {
+  for (const tabId of ['home']) {
     const item = modifyPanel(tabId).items.find(candidate => candidate.id === id);
     assert.ok(item, `${tabId}/modify must carry ${id}`);
     assert.equal(item.command, id);

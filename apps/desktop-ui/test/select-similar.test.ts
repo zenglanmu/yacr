@@ -82,7 +82,7 @@ test('SELECTSIMILAR is a modify-group catalogue row appended after the shipped r
 });
 
 test('both modify panels carry SELECTSIMILAR as one small selection-gated button', () => {
-  for (const tabId of ['home', 'draw']) {
+  for (const tabId of ['home']) {
     const items = modifyPanel(tabId).items;
     const item = items.find(candidate => candidate.id === ID);
     assert.ok(item, `${tabId}: SELECTSIMILAR is present`);
@@ -91,7 +91,7 @@ test('both modify panels carry SELECTSIMILAR as one small selection-gated button
       items.slice(items.findIndex(candidate => candidate.id === ID) + 1).map(candidate => candidate.id),
       ['REVERSE', 'PEDIT', 'OOPS', 'OVERKILL', 'BREAKATPOINT', 'HATCHTOBACK', 'TEXTTOFRONT',
         'SSX', 'SELECTCOUNT', 'HIDEOBJECTS', 'ISOLATEOBJECTS', 'UNISOLATEOBJECTS',
-        'TREX', 'EXTRIM', 'MPEDIT', 'DRAWORDER', 'CHAMFEREDGE'],
+        'TREX', 'EXTRIM', 'MPEDIT', 'DRAWORDER', 'CHAMFEREDGE', 'HATCHEDIT'],
       `${tabId}: only the documented additions follow SELECTSIMILAR`,
     );
     assert.equal(item.command, ID, 'the dispatch token is the router name');

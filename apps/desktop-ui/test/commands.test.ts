@@ -81,7 +81,9 @@ test('the grid-snap affordance is a real admitted toggle next to GRID and ORTHO'
   const view = RIBBON_TABS.find(tab => tab.id === 'view');
   const display = view.panels.find(panel => panel.id === 'display');
   assert.ok(display, 'the View tab must keep its display panel');
-  assert.deepEqual(display.items.map(item => item.id), ['GRID', 'SNAP', 'ORTHO', 'IBL']);
+  assert.deepEqual(display.items.map(item => item.id), ['GRID', 'SNAP', 'ORTHO']);
+  const visualize = view.panels.find(panel => panel.id === 'view3d');
+  assert.ok(visualize.items.some(item => item.id === 'IBL'), 'IBL stays in View > Visualize');
   const snap = display.items.find(item => item.id === 'SNAP');
   assert.equal(snap.command, 'SNAP');
   assert.equal(snap.labelKey, 'status.toggle.snap');
@@ -233,8 +235,8 @@ test('the command catalog lists exactly the router-refused dead affordances, and
 
 test('the measurement buttons dispatch their own admitted kind selectors', async () => {
   const { readModule } = await import('./helpers.ts');
-  const measure = RIBBON_TABS.find(tab => tab.id === 'measure');
-  const panel = measure.panels.find(candidate => candidate.id === 'measure');
+  const measure = RIBBON_TABS.find(tab => tab.id === 'home');
+  const panel = measure.panels.find(candidate => candidate.id === 'utilities');
   assert.ok(panel, 'the Measure tab keeps its measurement panel');
   // Each button dispatches its own selector; none collapses onto
   // `MEASURE`/Distance. The internal ids keep the familiar words, but the
@@ -251,6 +253,7 @@ test('the measurement buttons dispatch their own admitted kind selectors', async
     'AREA',
     'ID',
     'MEASUREGEOM DISTANCE',
+    'STATUS',
   ]);
   const idToSelector = Object.fromEntries(panel.items.map(item => [item.id, item.command]));
   assert.deepEqual(idToSelector, {
@@ -260,6 +263,7 @@ test('the measurement buttons dispatch their own admitted kind selectors', async
     AREA: 'AREA',
     ID: 'ID',
     MEASUREGEOM: 'MEASUREGEOM DISTANCE',
+    STATUS: 'STATUS',
   });
   for (const id of dispatched) {
     assert.equal(admitCommandText(id, { status: loaded }).kind, 'admitted', id);
@@ -272,8 +276,9 @@ test('the measurement buttons dispatch their own admitted kind selectors', async
   assert.equal(dispatched.includes('PLINE'), false, 'PLINE is not a measurement selector');
   assert.equal(isSupportedCommand('ANGLE'), false, 'ANGLE');
   assert.equal(admitCommandText('ANGLE', { status: loaded }).kind, 'unsupported', 'ANGLE');
-  // Distinct labels: the five measurement kinds plus the MEASUREGEOM router.
-  assert.equal(new Set(panel.items.map(item => item.labelKey)).size, 6);
+  // Distinct labels: the five measurement kinds, the MEASUREGEOM router and the
+  // STATUS report that shares the reference Utilities panel.
+  assert.equal(new Set(panel.items.map(item => item.labelKey)).size, 7);
   // The renderer dispatches each selector through the single command funnel.
   const ribbon = await readModule('components/Ribbon.tsx');
   assert.ok(ribbon.includes('if (item.command) return shell.runCommand(item.command);'));
@@ -282,7 +287,7 @@ test('the measurement buttons dispatch their own admitted kind selectors', async
 test('PAN is an admitted router command, not a local action', () => {
   assert.equal(isSupportedCommand('PAN'), true);
   assert.equal(admitCommandText('PAN', { status: loaded }).kind, 'admitted');
-  for (const tabId of ['home', 'view']) {
+  for (const tabId of ['view']) {
     const navigate = RIBBON_TABS.find(tab => tab.id === tabId).panels.find(panel => panel.id === 'navigate');
     const pan = navigate.items.find(item => item.id === 'PAN');
     assert.ok(pan, `${tabId} keeps its PAN affordance`);
@@ -375,7 +380,7 @@ test('ORBIT stays visible but gesture-disabled with an explicit orbit reason', a
   assert.equal(unavailableReasonKey('ORBIT'), 'view.orbit.gesture');
   assert.equal(unavailableReasonKey('GRID'), 'command.unsupported');
   // It stays in the ribbon (visible, never silently deleted) as a command.
-  const navigate = RIBBON_TABS.find(tab => tab.id === 'home').panels.find(panel => panel.id === 'navigate');
+  const navigate = RIBBON_TABS.find(tab => tab.id === 'view').panels.find(panel => panel.id === 'navigate');
   const orbit = navigate.items.find(item => item.id === 'ORBIT');
   assert.ok(orbit, 'ORBIT must stay visible');
   assert.equal(orbit.command, 'ORBIT');
