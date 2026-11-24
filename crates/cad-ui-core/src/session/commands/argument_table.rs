@@ -43,6 +43,9 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     JOIN_SELECTOR,
     OFFSET_SELECTOR,
     MIRROR_SELECTOR,
+    // `EXPLODE MODE 0|1`: the `EXPLMODE` session switch consumed by the existing
+    // explode path. A bare `EXPLODE` stays the direct selection command.
+    EXPLODE_SELECTOR,
     CHAMFER_SELECTOR,
     FILLET_SELECTOR,
     HATCHEDIT_SELECTOR,

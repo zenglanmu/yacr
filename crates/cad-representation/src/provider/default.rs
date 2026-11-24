@@ -348,6 +348,8 @@ impl DefaultRepresentationProvider {
                         wrap_width: &definition.text.wrap_width,
                         width_factor: &definition.text.width_factor,
                         line_spacing: &definition.text.line_spacing,
+                        // Attribute definitions have no MIRRTEXT bit.
+                        mirrored: &false,
                     },
                     source,
                     geometry_source,
@@ -366,6 +368,7 @@ impl DefaultRepresentationProvider {
                 wrap_width,
                 width_factor,
                 line_spacing,
+                mirrored,
             } => text_fragment(
                 entity,
                 context,
@@ -382,6 +385,7 @@ impl DefaultRepresentationProvider {
                     wrap_width,
                     width_factor,
                     line_spacing,
+                    mirrored,
                 },
                 source,
                 geometry_source,

@@ -47,6 +47,7 @@ fn text(height: f64) -> SemanticGeometry {
         wrap_width: None,
         width_factor: 1.0,
         line_spacing: TextLineSpacing::default(),
+        mirrored: false,
     }
 }
 

@@ -95,6 +95,7 @@ fn dangling_style_id_is_substituted_and_reported_as_a_conversion() {
         wrap_width: None,
         width_factor: 1.0,
         line_spacing: cad_domain::TextLineSpacing::default(),
+        mirrored: false,
     });
     assert_eq!(report.counts.exact, 0, "a substituted style is not exact");
     assert_eq!(report.counts.converted, 1);
@@ -420,6 +421,7 @@ fn aligned_text_writes_the_alignment_point_and_round_trips() {
         wrap_width: None,
         width_factor: 1.0,
         line_spacing: cad_domain::TextLineSpacing::default(),
+        mirrored: false,
     });
     assert_eq!(report.counts.exact, 1);
     match &read_entities(&bytes)[0] {
@@ -458,6 +460,7 @@ fn mtext_writes_the_attachment_point() {
         wrap_width: None,
         width_factor: 1.0,
         line_spacing: cad_domain::TextLineSpacing::default(),
+        mirrored: false,
     });
     match &read_entities(&bytes)[0] {
         EntityType::MText(mtext) => {

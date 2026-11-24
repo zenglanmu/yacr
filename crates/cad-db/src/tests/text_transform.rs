@@ -42,6 +42,7 @@ fn text_entity(id: u128) -> DbEntity {
                 factor: 1.5,
                 style: cad_domain::TextLineSpacingStyle::Exactly,
             },
+            mirrored: false,
         },
         draw_order: 1,
     }
@@ -61,6 +62,7 @@ fn stored_text(db: &DrawingDatabase) -> (String, Point3, f64, f64, Option<f64>) 
             wrap_width,
             width_factor,
             line_spacing,
+            mirrored: _,
         } => {
             assert_eq!(*style, StyleId(7), "the style identity is preserved");
             assert_eq!(font.as_deref(), Some("arial.ttf"), "the font is preserved");

@@ -154,6 +154,7 @@ fn paper_build_keeps_unshaped_text_partial_with_a_precise_reason() {
             wrap_width: None,
             width_factor: 1.0,
             line_spacing: cad_domain::TextLineSpacing::default(),
+            mirrored: false,
         },
         draw_order: 0,
     })

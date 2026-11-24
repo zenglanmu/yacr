@@ -820,6 +820,7 @@ impl MultiLeaderGeometry {
             // MULTILEADER line spacing (CONTEXT_DATA 45/170) is outside this
             // model; the neutral spacing matches what the exporter writes.
             line_spacing: crate::TextLineSpacing::default(),
+            mirrored: false,
         }
     }
 

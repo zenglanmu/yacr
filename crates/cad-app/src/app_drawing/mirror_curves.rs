@@ -8,8 +8,10 @@
 //! rewritten by hand there, and that surface's job is the proper (rotation +
 //! uniform scale) similarity. Rather than loosening that generic contract, MIRROR
 //! handles the two curved kinds **explicitly here** — the one command that really
-//! is a reflection — and delegates every other kind to `transform_geometry`
-//! unchanged (so `Text`/`Shape`/`Opaque` keep their existing refusals).
+//! is a reflection — and handles `Text` and `Dimension` explicitly too (the
+//! `MIRRTEXT` glyph-mirror bit lives on `Text`; a dimension re-synthesizes its
+//! display). It delegates every other kind to `transform_geometry` unchanged, so
+//! `Shape`/`Opaque` keep their existing refusals.
 //!
 //! ## The declared rule: the plane normal is negated
 //!
@@ -71,9 +73,10 @@ const DEGENERATE_NORMAL: f64 = 1e-12;
 /// Reflect one entity's geometry for MIRROR, with the `MIRRTEXT` policy.
 ///
 /// `mirrortext = false` (AutoCAD's default) keeps a reflected text run readable:
-/// the position mirrors and the rotation follows the reflected baseline, but the
-/// glyph order is never reversed. `mirrortext = true` is a named refusal because
-/// the flat-text domain has no mirrored-glyph representation.
+/// the position mirrors, the rotation follows the reflected baseline and the
+/// glyphs stay unmirrored. `mirrortext = true` is the true reflection: the stored
+/// `mirrored` bit toggles and the baseline turns a half turn, so the glyph frame
+/// itself is reflected (DXF TEXT generation-flag bit 2).
 ///
 /// `Arc`/`Ellipse` are handled here; every other kind keeps the generic
 /// `transform_geometry` behaviour. A **proper** transform (positive determinant)
@@ -122,6 +125,7 @@ pub(super) fn mirror_geometry_with_options(
             wrap_width,
             width_factor,
             line_spacing,
+            mirrored,
         } => mirror_text(
             text,
             *position,
@@ -134,10 +138,13 @@ pub(super) fn mirror_geometry_with_options(
             *wrap_width,
             *width_factor,
             *line_spacing,
+            *mirrored,
             transform,
             mirrortext,
         ),
-        SemanticGeometry::Dimension(dimension) => mirror_dimension(dimension, transform),
+        SemanticGeometry::Dimension(dimension) => {
+            mirror_dimension(dimension, transform, mirrortext)
+        }
         other => transform_geometry(other, transform),
     }
 }
@@ -146,13 +153,19 @@ pub(super) fn mirror_geometry_with_options(
 /// (`MIRRTEXT` 0).
 ///
 /// The stored `position` is the insertion/anchor point, so it mirrors exactly.
-/// The rotation follows the reflected baseline; when that would run the text
-/// backwards relative to the source (`cos θ · cos θ' < 0`, the upstream AutoCAD
-/// `MIRRTEXT=0` predicate), a half turn is added so the run stays upright.
+///
+/// * `MIRRTEXT = 0`: the run stays readable. The rotation follows the reflected
+///   baseline; when that would run the text backwards relative to the source
+///   (`cos θ · cos θ' < 0`, the upstream AutoCAD predicate), a half turn is
+///   added. The glyph-mirror bit is cleared.
+/// * `MIRRTEXT = 1`: the true reflection. The glyph-mirror bit toggles and the
+///   stored rotation is the reflected baseline plus a half turn, which is exactly
+///   the frame obtained by reflecting the glyph x axis (the same rule acadrust's
+///   own mirror uses: `rotation += π`, `generation_flags ^= 2`).
+///
 /// Horizontal/vertical alignment and wrap width are copied unchanged: this
 /// domain stores an anchor, not a measured run, so no width compensation is
-/// invented. `MIRRTEXT=1` would need a mirrored-glyph flag the flat-text domain
-/// does not have, so it is a named refusal.
+/// invented.
 #[allow(clippy::too_many_arguments)]
 fn mirror_text(
     text: &str,
@@ -166,19 +179,29 @@ fn mirror_text(
     wrap_width: Option<f64>,
     width_factor: f64,
     line_spacing: cad_domain::TextLineSpacing,
+    mirrored: bool,
     transform: &Transform3,
     mirrortext: bool,
 ) -> CadResult<SemanticGeometry> {
-    if mirrortext {
-        return Err(CadError::Unsupported(
-            "MIRROR mirror.mirrortext_glyphs: MIRRTEXT=1 would mirror the glyphs themselves, \
-             which the flat-text domain cannot represent; use the readable default (MIRRTEXT=0)"
-                .into(),
-        ));
-    }
     let new_position = transform.apply_point(position);
-    let reflected = reflected_angle(rotation, transform);
-    let new_rotation = readable_rotation(rotation, reflected);
+    let (new_rotation, new_mirrored) = if mirrortext {
+        // True reflection: `R·u(θ) = u(β−θ)`, and reflecting the glyph frame
+        // flips its handedness. `u(θ′) = −u(β−θ+π)` and `v(θ′) = −v(β−θ)`, so
+        // the stored frame `(−u(θ′), v(θ′))` is the reflected one when the bit
+        // toggles. This matches acadrust's `rotation += π; flags ^= 2`.
+        let angle = reflected_angle(rotation, transform) + std::f64::consts::PI;
+        (super::helpers::normalize_signed(angle), !mirrored)
+    } else {
+        // Readable: work from the source's *effective* baseline direction, so a
+        // source that is already mirrored is un-mirrored into a readable run.
+        let source_angle = if mirrored {
+            rotation + std::f64::consts::PI
+        } else {
+            rotation
+        };
+        let reflected = reflected_angle(source_angle, transform);
+        (readable_rotation(source_angle, reflected), false)
+    };
     if !is_finite_point(new_position) || !new_rotation.is_finite() {
         return Err(CadError::InvalidInput(
             "MIRROR cannot mirror TEXT: the reflected parameters are not finite".into(),
@@ -196,6 +219,7 @@ fn mirror_text(
         wrap_width,
         width_factor,
         line_spacing,
+        mirrored: new_mirrored,
     })
 }
 
@@ -212,6 +236,7 @@ fn mirror_text(
 fn mirror_dimension(
     dimension: &DimensionGeometry,
     transform: &Transform3,
+    mirrortext: bool,
 ) -> CadResult<SemanticGeometry> {
     let source = dimension.definition();
     let definition = DimensionDefinition {
@@ -234,7 +259,13 @@ fn mirror_dimension(
         dimension.style().clone(),
         dimension.text_override().map(str::to_string),
     )?;
-    Ok(SemanticGeometry::Dimension(Box::new(rebuilt)))
+    // `MIRRTEXT=1` also governs the dimension's measurement text: the glyphs of
+    // its synthesized `TEXT` child are marked mirrored. The synthesizer keeps
+    // the placement/orientation derived from the reflected definition (the
+    // dimension line is the authority here), so the flag is the only extra bit.
+    Ok(SemanticGeometry::Dimension(Box::new(
+        rebuilt.with_mirrored_text(mirrortext),
+    )))
 }
 
 /// The reflected subtype: a linear dimension's group-50 rotation follows the

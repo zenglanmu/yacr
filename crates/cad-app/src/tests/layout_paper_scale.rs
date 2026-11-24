@@ -260,6 +260,7 @@ fn text(id: u128, space: SpaceId) -> cad_db::DbEntity {
             wrap_width: None,
             width_factor: 1.0,
             line_spacing: TextLineSpacing::default(),
+            mirrored: false,
         },
     )
 }

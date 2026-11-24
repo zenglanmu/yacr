@@ -479,6 +479,7 @@ fn picture_branch_freezes_measurement_and_text_under_uniform_scale() {
             wrap_width: None,
             width_factor: crate::DEFAULT_TEXT_WIDTH_FACTOR,
             line_spacing: crate::TextLineSpacing::default(),
+            mirrored: false,
         },
     ];
     let geometry = DimensionGeometry::from_picture(

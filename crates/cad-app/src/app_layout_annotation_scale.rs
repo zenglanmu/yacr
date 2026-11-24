@@ -87,6 +87,7 @@ fn scaled_text(
         wrap_width,
         width_factor,
         line_spacing,
+        mirrored: false,
     } = geometry.clone()
     else {
         return Err(CadError::Invariant(
@@ -117,6 +118,7 @@ fn scaled_text(
         width_factor,
         // Both halves of the line spacing are dimensionless ratios too.
         line_spacing,
+        mirrored: false,
     })
 }
 

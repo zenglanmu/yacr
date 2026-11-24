@@ -601,6 +601,7 @@ fn emit_leaf(
             wrap_width,
             width_factor,
             line_spacing,
+            mirrored,
         } => {
             let style_name = ctx
                 .database
@@ -642,7 +643,14 @@ fn emit_leaf(
                 mtext.height = *height;
                 mtext.rotation = *rotation;
                 mtext.style = style_name;
-                mtext.normal = Vector3::UNIT_Z;
+                // MIRRTEXT=1 glyph mirroring is carried by the oriented normal
+                // (MTEXT has no generation flags): negating Z makes the glyph
+                // frame left-handed, which is the reflection this build draws.
+                mtext.normal = if *mirrored {
+                    Vector3::new(0.0, 0.0, -1.0)
+                } else {
+                    Vector3::UNIT_Z
+                };
                 // The wrap boundary is MTEXT's reference-rectangle width
                 // (group 41); a single-line TEXT has no equivalent, which the
                 // other branch reports. `MText::new()` seeds a placeholder
@@ -707,6 +715,10 @@ fn emit_leaf(
                     dxf_text.alignment_point = Some(v3(*position));
                 }
                 dxf_text.normal = Vector3::UNIT_Z;
+                // DXF TEXT group 71 bit 2 is the "backward" (mirrored) flag.
+                // Only the bit this build models is written; the upside-down
+                // bit 4 has no representation and is reported at import.
+                dxf_text.generation_flags = if *mirrored { 2 } else { 0 };
                 dxf_text.common = common;
                 acc.push(EntityType::Text(dxf_text), ctx)?;
                 acc.record(object, "text", with_reasons(MappingOutcome::Exact, reasons));

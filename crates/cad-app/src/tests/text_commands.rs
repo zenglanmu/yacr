@@ -45,6 +45,7 @@ fn text_entity(
             wrap_width: None,
             width_factor: 1.0,
             line_spacing: cad_domain::TextLineSpacing::default(),
+            mirrored: false,
         },
         draw_order: order,
     }
@@ -272,6 +273,7 @@ fn torient_most_readable_changes_only_rotation_and_is_one_undo_step() {
         wrap_width,
         width_factor,
         line_spacing,
+        mirrored: false,
     } = &after.geometry
     else {
         panic!("expected Text");
@@ -288,6 +290,7 @@ fn torient_most_readable_changes_only_rotation_and_is_one_undo_step() {
         wrap_width: before_wrap,
         width_factor: before_factor,
         line_spacing: before_spacing,
+        mirrored: false,
     } = &before.geometry
     else {
         panic!("expected Text");
@@ -746,6 +749,7 @@ fn txt2mtxt_sorts_top_down_then_left_right_and_joins_raw_strings() {
         wrap_width,
         width_factor,
         line_spacing,
+        mirrored: false,
     } = &combined.geometry
     else {
         panic!("expected Text geometry");

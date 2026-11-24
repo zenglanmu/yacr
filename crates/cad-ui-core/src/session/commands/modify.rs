@@ -21,6 +21,10 @@ pub const OFFSET_SELECTOR: &str = "OFFSET";
 /// `MIRROR TEXT 0|1` / `MIRROR ERASE YES|NO`: the MIRROR option line.
 pub const MIRROR_SELECTOR: &str = "MIRROR";
 
+/// `EXPLODE MODE 0|1` (also `EXPLODE EXPLMODE 0|1` / `EXPLODE EXPMODE 0|1`):
+/// the typed spelling of AutoCAD's `EXPLMODE` session switch.
+pub const EXPLODE_SELECTOR: &str = "EXPLODE";
+
 /// `CHAMFER` option line (`DISTANCE`, `ANGLE`, `TRIM`, `METHOD`, `POLYLINE`).
 pub const CHAMFER_SELECTOR: &str = "CHAMFER";
 
@@ -270,6 +274,25 @@ pub fn parse_offset_argument(argument: &str) -> Option<OffsetArgument> {
             "D" | "DISTANCE" => {
                 super::parse_positive_decimal(tokens[1]).map(OffsetArgument::Distance)
             }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Parse the `EXPLODE` argument: `MODE 0|1` (also `EXPLMODE`/`EXPMODE`).
+///
+/// `None` for anything else, including a bare `EXPLODE` (which keeps the direct
+/// payload-free command) and any value outside `0`/`1`/`ON`/`OFF`.
+pub fn parse_explode_argument(argument: &str) -> Option<bool> {
+    let tokens: Vec<&str> = argument.split_whitespace().collect();
+    if tokens.len() != 2 {
+        return None;
+    }
+    match tokens[0].to_ascii_uppercase().as_str() {
+        "MODE" | "EXPLMODE" | "EXPMODE" => match tokens[1].to_ascii_uppercase().as_str() {
+            "0" | "OFF" => Some(false),
+            "1" | "ON" => Some(true),
             _ => None,
         },
         _ => None,

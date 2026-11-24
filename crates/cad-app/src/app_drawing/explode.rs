@@ -69,14 +69,15 @@
 //! * A non-uniform INSERT member with no exact representation (named by member
 //!   id and kind).
 //!
-//! NOT IMPLEMENTED: exploding more than one level at once, `EXPLMODE`, colour /
-//! linetype / lineweight changes, associative-array decomposition, attribute
-//! semantics, and a 2D-solid arrow representation (arrows stay `MESH`).
+//! `EXPLMODE` (`EXPMODE` in some Autodesk localizations, also reachable as the
+//! typed `EXPLODE MODE 0|1` line and `SETVAR EXPLMODE 0|1`) is **session state**
+//! read by this path: `1` (the default) decomposes the representable subset of a
+//! non-uniform INSERT described above; `0` refuses every non-uniform INSERT by
+//! name (`explode.expmode_off`) before any write. A uniform INSERT is unaffected.
 //!
-//! **`EXPMODE`**: this build's session model has no `EXPMODE` switch at all (the
-//! parameter channel carries no such value), so there is nothing to honour: every
-//! EXPLODE is the one-level decomposition described above, and no implicit
-//! polyline/arc/insert policy is selected on the user's behalf.
+//! NOT IMPLEMENTED: exploding more than one level at once, colour / linetype /
+//! lineweight changes, associative-array decomposition, attribute semantics, and
+//! a 2D-solid arrow representation (arrows stay `MESH`).
 
 use super::*;
 
@@ -155,9 +156,13 @@ impl Application {
         // Decompose the whole selection before any write: EXPLODE is
         // all-or-nothing, so a single non-decomposable source fails the command
         // rather than being silently dropped.
+        // `EXPLMODE` (AutoCAD's non-uniformly scaled block switch) is session
+        // state read here, not a silent constant: `false` refuses every
+        // non-uniform INSERT before any write.
+        let explode_mode = session.explode_mode();
         let mut produced: Vec<Produced> = Vec::new();
         for source in &sources {
-            explode_source(drawing, source, &mut produced)?;
+            explode_source(drawing, source, explode_mode, &mut produced)?;
         }
         if produced.is_empty() {
             return Err(CadError::InvalidInput(
@@ -265,6 +270,7 @@ fn next_explode_draw_order(drawing: &DrawingDatabase) -> i64 {
 fn explode_source(
     drawing: &DrawingDatabase,
     source: &DbEntity,
+    explode_mode: bool,
     out: &mut Vec<Produced>,
 ) -> CadResult<()> {
     match &source.geometry {
@@ -276,7 +282,7 @@ fn explode_source(
         } => explode_polyline(source, points, bulges, *closed, out),
         SemanticGeometry::Insert {
             block, transform, ..
-        } => explode_insert(drawing, &source.space, *block, transform, out),
+        } => explode_insert(drawing, &source.space, *block, transform, explode_mode, out),
         SemanticGeometry::Compound(children) => explode_compound(source, children, out),
         SemanticGeometry::Image { .. } => Err(policy_refusal("IMAGE")),
         SemanticGeometry::Mask { .. } => Err(policy_refusal("MASK")),
@@ -418,6 +424,7 @@ fn explode_insert(
     space: &SpaceId,
     block: BlockId,
     transform: &Transform3,
+    explode_mode: bool,
     out: &mut Vec<Produced>,
 ) -> CadResult<()> {
     // AutoCAD cannot explode an external reference, and this build has no
@@ -433,13 +440,21 @@ fn explode_insert(
     let definition = drawing.block(block).ok_or_else(|| {
         CadError::Unsupported(format!("EXPLODE: block {block:?} is not in the database"))
     })?;
+    let uniform = transform.is_uniform_scale(INSERT_SIMILARITY_TOLERANCE);
+    if !uniform && !explode_mode {
+        return Err(CadError::Unsupported(
+            "EXPLODE explode.expmode_off: this INSERT is non-uniformly scaled and EXPLMODE is 0, \
+             so AutoCAD does not explode it; set EXPLMODE 1 (`SETVAR EXPLMODE 1` or \
+             `EXPLODE MODE 1`) to decompose its representable subset. Nothing was written"
+                .into(),
+        ));
+    }
     // Dynamic-block visibility follows the export layer's active-state rule; a
     // block without a descriptor exposes every member.
     let members: Vec<EntityId> = match drawing.block_visible_entities(block) {
         Some(visible) => visible,
         None => definition.entities.clone(),
     };
-    let uniform = transform.is_uniform_scale(INSERT_SIMILARITY_TOLERANCE);
     for member in &members {
         let child = drawing.entity(*member).ok_or_else(|| {
             CadError::Unsupported(format!(

@@ -29,6 +29,33 @@ pub(crate) const MTEXT_UNMODELLED: [&str; 3] = [
 /// is reported.
 pub(crate) const DEGENERATE_LINE_SPACING_FACTOR: &str = "text.line_spacing_factor_degenerate";
 
+/// The named reason for a TEXT whose DXF group-71 "upside-down" bit (0x4) is
+/// set. The domain models only the "backward" bit (0x2 → `Text.mirrored`); a
+/// vertical glyph flip is a different transform and is not folded into that
+/// flag, so the flag is dropped and reported instead of guessed.
+pub(crate) const UPSIDE_DOWN_TEXT_REASON: &str = "text.upside_down_unmodelled";
+
+/// The named reason for any other unmodelled TEXT generation-flag bit.
+pub(crate) const TEXT_GENERATION_FLAG_REASON: &str = "text.generation_flags_unmodelled";
+
+/// Split DXF TEXT generation flags (group 71) into the modeled mirror bit and
+/// the reasons for the bits this build cannot draw.
+///
+/// Bit `0x2` is "backward" and maps to [`cad_domain::SemanticGeometry::Text`]'s
+/// `mirrored`; bit `0x4` is "upside-down" and every other bit has no model. The
+/// latter are reported, never folded into `mirrored`.
+pub(crate) fn text_generation_flags(flags: i16) -> (bool, Option<&'static str>) {
+    let mirrored = flags & 0x2 != 0;
+    let reason = if flags & 0x4 != 0 {
+        Some(UPSIDE_DOWN_TEXT_REASON)
+    } else if flags & !0x6 != 0 {
+        Some(TEXT_GENERATION_FLAG_REASON)
+    } else {
+        None
+    };
+    (mirrored, reason)
+}
+
 /// Map DXF MTEXT line spacing into the domain model.
 ///
 /// Group 44 is the factor and group 73 the style. The style has only the two
@@ -223,6 +250,24 @@ impl<'a> ImporterBuilder<'a> {
                 // or non-finite value cannot be stored (the write validator
                 // rejects it), so it is reported and falls back to the neutral
                 // factor instead of being silently kept or dropped.
+                let (mirrored, flag_reason) = text_generation_flags(t.generation_flags);
+                let flag_completeness = match flag_reason {
+                    Some(reason) => {
+                        if self.reported_reasons.insert(reason.to_string()) {
+                            self.diagnostics.push(Diagnostic {
+                                object: None,
+                                code: "import.text_partial".into(),
+                                message: format!(
+                                    "the TEXT generation flags (group 71) are {}, which this \
+                                     build cannot draw; only the backward/mirror bit 0x2 is kept",
+                                    t.generation_flags
+                                ),
+                            });
+                        }
+                        Completeness::Partial(vec![reason.into()])
+                    }
+                    None => Completeness::Complete,
+                };
                 let (width_factor, width_completeness) =
                     match text_width_factor_from_dxf(t.width_factor) {
                         Some(factor) => (factor, Completeness::Complete),
@@ -260,8 +305,9 @@ impl<'a> ImporterBuilder<'a> {
                         width_factor,
                         // A single-line TEXT has no line-spacing groups.
                         line_spacing: TextLineSpacing::default(),
+                        mirrored,
                     },
-                    width_completeness,
+                    width_completeness.combine(flag_completeness),
                 )
             }
             EntityType::MText(t) => {
@@ -293,6 +339,11 @@ impl<'a> ImporterBuilder<'a> {
                         DEGENERATE_LINE_SPACING_FACTOR.into(),
                     ]));
                 }
+                // A negative extrusion normal is this build's MTEXT mirror
+                // convention (acadrust's own MIRROR negates `normal` for
+                // `MIRRTEXT=1`, because MTEXT has no generation flags). The
+                // glyph-frame reflection is stored in `mirrored`.
+                let mtext_mirrored = t.normal.z < 0.0;
                 (
                     SemanticGeometry::Text {
                         text: t.value.clone(),
@@ -310,6 +361,7 @@ impl<'a> ImporterBuilder<'a> {
                         // MTEXT has no width-factor group; the factor is neutral.
                         width_factor: DEFAULT_TEXT_WIDTH_FACTOR,
                         line_spacing,
+                        mirrored: mtext_mirrored,
                     },
                     completeness,
                 )

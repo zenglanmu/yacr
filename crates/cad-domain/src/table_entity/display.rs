@@ -237,6 +237,7 @@ pub(super) fn build(
                         // An ACAD_TABLE cell has no line-spacing group; the
                         // neutral spacing keeps the pre-line-spacing layout.
                         line_spacing: TextLineSpacing::default(),
+                        mirrored: false,
                     },
                     TableDisplayAppearance::border(cell.text_color, None),
                 );

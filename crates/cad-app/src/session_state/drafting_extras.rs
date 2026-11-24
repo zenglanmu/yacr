@@ -294,6 +294,10 @@ pub struct DraftingExtras {
     /// `ByBlock` and `1..=255` stores that ACI's resolved sRGB colour. It is
     /// session state only — nothing here is written to the drawing.
     current_color: i16,
+    /// `EXPLMODE`: AutoCAD's non-uniformly scaled block switch the EXPLODE
+    /// path reads (`true` = initial value `1`, decompose the representable
+    /// subset; `false` refuses a non-uniform INSERT by name). Session-only.
+    explode_mode: bool,
 }
 
 impl Default for DraftingExtras {
@@ -332,11 +336,22 @@ impl Default for DraftingExtras {
             corner_modes: CornerModes::default(),
             lweight_display: true,
             current_color: 256,
+            explode_mode: true,
         }
     }
 }
 
 impl DraftingExtras {
+    /// `EXPLMODE`: whether EXPLODE decomposes non-uniformly scaled INSERTs.
+    pub fn explode_mode(&self) -> bool {
+        self.explode_mode
+    }
+
+    /// Store the `EXPLMODE` answer (session-only; nothing is written).
+    pub fn set_explode_mode(&mut self, value: bool) {
+        self.explode_mode = value;
+    }
+
     pub fn qtext(&self) -> bool {
         self.qtext
     }
@@ -739,5 +754,17 @@ impl DraftingExtras {
     /// wiring lane uses; every value is validated by the `CornerModes` setters).
     pub fn corner_modes_mut(&mut self) -> &mut CornerModes {
         &mut self.corner_modes
+    }
+}
+
+impl crate::SessionState {
+    /// The `EXPLMODE` switch (`true` = explode non-uniform INSERTs).
+    pub fn explode_mode(&self) -> bool {
+        self.drafting_extras.explode_mode()
+    }
+
+    /// Store the `EXPLMODE` answer. Session-only: the drawing is untouched.
+    pub fn set_explode_mode(&mut self, value: bool) {
+        self.drafting_extras.set_explode_mode(value);
     }
 }

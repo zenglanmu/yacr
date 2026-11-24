@@ -39,6 +39,7 @@ fn plain(position: Point3) -> SemanticGeometry {
         wrap_width: None,
         width_factor: 1.0,
         line_spacing: cad_domain::TextLineSpacing::default(),
+        mirrored: false,
     }
 }
 
@@ -65,6 +66,7 @@ fn mtext_like() -> SemanticGeometry {
         wrap_width: Some(MTEXT_WRAP),
         width_factor: 1.0,
         line_spacing: cad_domain::TextLineSpacing::default(),
+        mirrored: false,
     }
 }
 
@@ -85,6 +87,7 @@ fn assert_untouched(actual: &SemanticGeometry, before: &SemanticGeometry) {
         wrap_width,
         width_factor,
         line_spacing,
+        mirrored: false,
     } = actual
     else {
         panic!("expected a TEXT, got {actual:?}");
@@ -101,6 +104,7 @@ fn assert_untouched(actual: &SemanticGeometry, before: &SemanticGeometry) {
         wrap_width: expected_wrap,
         width_factor: expected_width,
         line_spacing: expected_spacing,
+        mirrored: false,
     } = before
     else {
         panic!("the reference geometry is not a TEXT: {before:?}");
@@ -192,6 +196,7 @@ fn mtext_ish_text_exposes_the_same_single_insertion_grip() {
         wrap_width: Some(MTEXT_WRAP),
         width_factor: 1.0,
         line_spacing: cad_domain::TextLineSpacing::default(),
+        mirrored: false,
     };
     let grips = grips_for_entity(&ent(73, right_top));
     assert_eq!(grips.len(), 1);
@@ -248,6 +253,7 @@ fn dragging_an_mtext_ish_text_keeps_wrap_width_and_every_other_field() {
         wrap_width,
         width_factor,
         line_spacing,
+        mirrored: false,
     } = original
     else {
         panic!("the fixture is a TEXT");
@@ -266,6 +272,7 @@ fn dragging_an_mtext_ish_text_keeps_wrap_width_and_every_other_field() {
             wrap_width,
             width_factor,
             line_spacing,
+            mirrored: false,
         },
         "only `position` changed"
     );
@@ -288,6 +295,7 @@ fn a_text_drag_keeps_wrap_width_none_and_some_apart() {
             wrap_width: wrap,
             width_factor: 1.0,
             line_spacing: cad_domain::TextLineSpacing::default(),
+            mirrored: false,
         };
         let dragged = apply_grip(
             &original,

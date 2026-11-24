@@ -116,6 +116,7 @@ impl Application {
                 width_factor: *width_factor,
                 // Editing the string must not change the stored line spacing.
                 line_spacing: *line_spacing,
+                mirrored: false,
             },
             SemanticGeometry::MultiLeader(leader) => {
                 SemanticGeometry::MultiLeader(Box::new(leader.with_text(&stored)?))

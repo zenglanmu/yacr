@@ -584,6 +584,7 @@ fn text_without_font_is_explicitly_unknown() {
             wrap_width: None,
             width_factor: 1.0,
             line_spacing: cad_domain::TextLineSpacing::default(),
+            mirrored: false,
         },
         LayerId(0),
     ))
@@ -784,6 +785,7 @@ fn text_geometry(text: &str) -> SemanticGeometry {
         wrap_width: None,
         width_factor: 1.0,
         line_spacing: cad_domain::TextLineSpacing::default(),
+        mirrored: false,
     }
 }
 

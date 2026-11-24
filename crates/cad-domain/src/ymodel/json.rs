@@ -333,6 +333,23 @@ impl ObjectReader {
         decode_opt_point3(&self.take(field)?)
     }
 
+    /// A boolean whose **key may be absent** (absent → `false`).
+    ///
+    /// This is the documented absent-means-`false` exception for
+    /// `cad:Text.mirrored` (minor 15): a minor-14 payload has no key at all, and
+    /// the writer omits it when the flag is false so an ordinary document keeps
+    /// the older minor. Any present non-boolean value is still an error.
+    pub(crate) fn boolean_if_present(&mut self, field: &'static str) -> Result<bool, JsonError> {
+        match self.map.remove(field) {
+            None => Ok(false),
+            Some(Value::Bool(value)) => Ok(value),
+            Some(_) => Err(JsonError::WrongType {
+                field,
+                expected: "a boolean",
+            }),
+        }
+    }
+
     /// A required two-component vector.
     pub(crate) fn f64x2(&mut self, field: &'static str) -> Result<[f64; 2], JsonError> {
         decode_f64x2(&self.take(field)?)

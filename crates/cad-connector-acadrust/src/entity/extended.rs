@@ -33,6 +33,7 @@ impl<'a> ImporterBuilder<'a> {
                     wrap_width: None,
                     width_factor: 1.0,
                     line_spacing: cad_domain::TextLineSpacing::default(),
+                    mirrored: false,
                 };
                 let unhandled = rtext_unhandled_flags(d.flags);
                 let normal = p3(d.normal);
@@ -72,6 +73,7 @@ impl<'a> ImporterBuilder<'a> {
                     wrap_width: None,
                     width_factor: 1.0,
                     line_spacing: cad_domain::TextLineSpacing::default(),
+                    mirrored: false,
                 },
                 Completeness::Partial(vec![
                     "arc-aligned placement approximated as linear text".into()
@@ -109,6 +111,7 @@ impl<'a> ImporterBuilder<'a> {
                         wrap_width: None,
                         width_factor: 1.0,
                         line_spacing: cad_domain::TextLineSpacing::default(),
+                        mirrored: false,
                     });
                 }
                 if d.mtext_visible {
@@ -139,6 +142,7 @@ impl<'a> ImporterBuilder<'a> {
                             wrap_width: None,
                             width_factor: 1.0,
                             line_spacing,
+                            mirrored: false,
                         });
                     }
                 }
@@ -249,6 +253,7 @@ impl<'a> ImporterBuilder<'a> {
             wrap_width: None,
             width_factor: 1.0,
             line_spacing: cad_domain::TextLineSpacing::default(),
+            mirrored: false,
         }
     }
 }

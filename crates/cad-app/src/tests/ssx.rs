@@ -63,6 +63,7 @@ fn text(value: &str, style: StyleId) -> SemanticGeometry {
         wrap_width: None,
         width_factor: 1.0,
         line_spacing: cad_domain::TextLineSpacing::default(),
+        mirrored: false,
     }
 }
 

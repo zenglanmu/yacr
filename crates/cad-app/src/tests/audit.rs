@@ -295,6 +295,7 @@ fn audit_fix_yes_normalizes_fixable_fields_atomically() {
                 wrap_width: Some(0.0),
                 width_factor: 1.0,
                 line_spacing: cad_domain::TextLineSpacing::default(),
+                mirrored: false,
             },
         )
     };

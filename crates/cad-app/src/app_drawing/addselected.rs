@@ -236,6 +236,7 @@ impl Application {
                 // ADDSELECTED clones the stored entity, so the spacing is kept
                 // bit for bit as well.
                 line_spacing: *line_spacing,
+                mirrored: false,
             },
             other => {
                 return Err(unsupported(

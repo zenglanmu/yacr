@@ -333,26 +333,31 @@ pub(super) fn encode_text(
     wrap_width: Option<f64>,
     width_factor: f64,
     line_spacing: &TextLineSpacing,
+    mirrored: bool,
 ) -> Value {
-    object(
-        "cad:Text",
-        vec![
-            ("text", Value::String(text.to_string())),
-            ("position", json::encode_point3(position)),
-            ("style", id_ref_value(IdKind::Style, style)),
-            ("height", json::encode_f64(height)),
-            ("rotation", json::encode_f64(rotation)),
-            (
-                "font",
-                font.map_or(Value::Null, |font| Value::String(font.to_string())),
-            ),
-            ("h_align", encode_align_h(h_align)),
-            ("v_align", align_v_token(v_align)),
-            ("wrap_width", json::encode_opt_f64(wrap_width)),
-            ("width_factor", json::encode_f64(width_factor)),
-            ("line_spacing", encode_line_spacing(line_spacing)),
-        ],
-    )
+    let mut fields = vec![
+        ("text", Value::String(text.to_string())),
+        ("position", json::encode_point3(position)),
+        ("style", id_ref_value(IdKind::Style, style)),
+        ("height", json::encode_f64(height)),
+        ("rotation", json::encode_f64(rotation)),
+        (
+            "font",
+            font.map_or(Value::Null, |font| Value::String(font.to_string())),
+        ),
+        ("h_align", encode_align_h(h_align)),
+        ("v_align", align_v_token(v_align)),
+        ("wrap_width", json::encode_opt_f64(wrap_width)),
+        ("width_factor", json::encode_f64(width_factor)),
+        ("line_spacing", encode_line_spacing(line_spacing)),
+    ];
+    // Minor 15: the MIRRTEXT glyph-mirror flag. It is omitted when false so an
+    // ordinary document stays byte-compatible with the minor-14 payload and a
+    // minor-14 reader (which refuses unknown keys) can still open it.
+    if mirrored {
+        fields.push(("mirrored", Value::Bool(true)));
+    }
+    object("cad:Text", fields)
 }
 
 pub(super) fn decode_text(value: &Value) -> Result<SemanticGeometry, PayloadError> {
@@ -368,6 +373,7 @@ pub(super) fn decode_text(value: &Value) -> Result<SemanticGeometry, PayloadErro
     let wrap_width = reader.opt_f64("wrap_width")?;
     let width_factor = reader.f64("width_factor")?;
     let line_spacing = decode_line_spacing(&reader.take("line_spacing")?)?;
+    let mirrored = reader.boolean_if_present("mirrored")?;
     reader.finish()?;
     Ok(SemanticGeometry::Text {
         text,
@@ -381,6 +387,7 @@ pub(super) fn decode_text(value: &Value) -> Result<SemanticGeometry, PayloadErro
         wrap_width,
         width_factor,
         line_spacing,
+        mirrored,
     })
 }
 

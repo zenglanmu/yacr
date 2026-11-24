@@ -78,8 +78,16 @@ pub(crate) const FORMAT_MINOR_APPLICATION_DOMAIN: u32 = 13;
 /// `14`, not `13`.
 pub(crate) const FORMAT_MINOR_BLOCK_ATTRIBUTES: u32 = 14;
 
+/// A document that carries the `cad:Text.mirrored` glyph flag (minor 15).
+///
+/// The flag is element-payload data, so this tier coexists with every other
+/// feature and decides before the block-attribute tier: a document with both is
+/// written at `15` (a minor-14 reader would refuse the unknown `cad:Text` key).
+pub(crate) const FORMAT_MINOR_TEXT_MIRROR: u32 = 15;
+
 // The chain is a compile-time fact, not a convention: a future tier inserted in
 // the middle cannot silently leave the constants out of order.
+const _: () = assert!(FORMAT_MINOR_BLOCK_ATTRIBUTES + 1 == FORMAT_MINOR_TEXT_MIRROR);
 const _: () = assert!(FORMAT_MINOR_APPLICATION_DOMAIN + 1 == FORMAT_MINOR_BLOCK_ATTRIBUTES);
 const _: () = assert!(FORMAT_MINOR_VENDOR + 1 == FORMAT_MINOR_APPLICATION_DOMAIN);
 const _: () = assert!(FORMAT_MINOR_RELATIONS + 1 == FORMAT_MINOR_VENDOR);
@@ -99,8 +107,15 @@ const _: () = assert!(FORMAT_MINOR_PLAIN + 1 == FORMAT_MINOR_RESOURCES);
 /// tier here is about archive entries and the header flag, both of which the
 /// store already models.
 pub(crate) fn document_minor(snapshot: &DocumentSnapshot) -> u32 {
-    // Block attributes are the newest tier and can coexist with any other
-    // feature (including a named interface domain), so they decide first: a
+    // The glyph-mirror flag is element-payload data and can coexist with every
+    // other feature, so it decides first: a minor-14 reader refuses the unknown
+    // `cad:Text.mirrored` key, and a document that also has block attributes
+    // must still be stamped 15.
+    if snapshot.has_mirrored_text() {
+        return FORMAT_MINOR_TEXT_MIRROR;
+    }
+    // Block attributes are the next newest tier and can coexist with any other
+    // feature (including a named interface domain), so they decide next: a
     // minor-13 reader would refuse the `cad:AttributeDefinition` class or the
     // insert `attributes` array, and a domain-bearing document would otherwise
     // be stamped 13 and lose them on the reader side.
@@ -163,10 +178,8 @@ mod tests {
     /// The top tier is the format constant, not an independent number.
     #[test]
     fn the_top_tier_is_the_format_minor() {
-        assert_eq!(
-            FORMAT_MINOR_BLOCK_ATTRIBUTES,
-            cad_domain::ymodel::FORMAT_MINOR
-        );
+        assert_eq!(FORMAT_MINOR_TEXT_MIRROR, cad_domain::ymodel::FORMAT_MINOR);
+        assert_eq!(FORMAT_MINOR_TEXT_MIRROR, FORMAT_MINOR_BLOCK_ATTRIBUTES + 1);
         assert_eq!(
             FORMAT_MINOR_BLOCK_ATTRIBUTES,
             FORMAT_MINOR_APPLICATION_DOMAIN + 1

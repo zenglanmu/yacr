@@ -511,6 +511,7 @@ fn text_geometry(position: Point3, rotation: f64) -> SemanticGeometry {
         wrap_width: None,
         width_factor: 1.0,
         line_spacing: cad_domain::TextLineSpacing::default(),
+        mirrored: false,
     }
 }
 
@@ -549,7 +550,8 @@ fn mirror_options_payload_reaches_the_option_entry_point_through_dispatch() {
         1
     );
 
-    // `MIRRTEXT = 1` is a named refusal through the same routed variant.
+    // `MIRRTEXT = 1` reaches the same routed variant and produces a mirrored
+    // copy (the glyph-frame bit toggles; the baseline turns a half turn).
     let mut app = line_and_boundary_app(ent(2, text_geometry(point(2.0, 0.0), 0.3), 1), None);
     let options = MirrorOptions {
         refs: vec![ref_of(2)],
@@ -558,17 +560,27 @@ fn mirror_options_payload_reaches_the_option_entry_point_through_dispatch() {
         mirrortext: true,
         erase_source: false,
     };
-    let error = execute(
+    let outcome = execute(
         &mut app,
         &mut SessionState::new(DocumentId(1), AppMode::Work),
         CommandId::MirrorEntities,
         CommandPayload::MirrorOptions(Box::new(options)),
     )
-    .unwrap_err();
-    assert!(
-        format!("{error:?}").contains("mirror.mirrortext_glyphs"),
-        "{error:?}"
-    );
+    .expect("MIRRTEXT=1 routes");
+    let copy = EntityId(outcome.objects[0].0);
+    let SemanticGeometry::Text {
+        position, mirrored, ..
+    } = app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .entity(copy)
+        .unwrap()
+        .geometry
+        .clone()
+    else {
+        panic!("expected a mirrored TEXT");
+    };
+    assert_point_eq(position, point(-2.0, 0.0), "mirrored insertion point");
+    assert!(mirrored, "MIRRTEXT=1 toggles the stored glyph-mirror bit");
 }
 
 #[test]
@@ -606,8 +618,11 @@ fn mirror_text_position_mirrors_and_the_run_stays_readable_by_default() {
 }
 
 #[test]
-fn mirror_mirrortext_glyphs_is_a_named_refusal() {
-    let mut app = line_and_boundary_app(ent(2, text_geometry(point(2.0, 0.0), 0.0), 1), None);
+fn mirror_mirrortext_glyphs_write_the_true_reflection_and_undo_removes_it() {
+    // Reflect across the Y axis: the stored rotation (0.3) becomes β−θ+π with
+    // β=π, i.e. 0.3 (the seen direction is the reflected glyph x axis), and the
+    // glyph-mirror bit is set. One transaction, one undo step.
+    let mut app = line_and_boundary_app(ent(2, text_geometry(point(2.0, 0.0), 0.3), 1), None);
     let count = app.workspace.documents[&DocumentId(1)]
         .drawing
         .entity_count();
@@ -619,21 +634,78 @@ fn mirror_mirrortext_glyphs_is_a_named_refusal() {
         mirrortext: true,
         erase_source: false,
     };
-    let error = mirror_with_options(&mut app, &options).unwrap_err();
-    match error {
-        CadError::Unsupported(reason) => {
-            assert!(reason.contains("mirror.mirrortext_glyphs"), "{reason}");
-        }
-        other => panic!("expected Unsupported, got {other:?}"),
-    }
+    let outcome = mirror_with_options(&mut app, &options).expect("MIRRTEXT=1 mirrors");
+    let copy = EntityId(outcome.objects[0].0);
+    let SemanticGeometry::Text {
+        position,
+        rotation,
+        mirrored,
+        text,
+        ..
+    } = app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .entity(copy)
+        .unwrap()
+        .geometry
+        .clone()
+    else {
+        panic!("expected a mirrored TEXT");
+    };
+    assert_eq!(text, "ABC", "the string itself is never reversed");
+    assert_point_eq(position, point(-2.0, 0.0), "the anchor is reflected");
+    assert!(mirrored, "the glyph-mirror bit is set");
+    assert!(
+        (rotation + 0.3).abs() < 1e-9,
+        "rotation {rotation} is the reflected baseline + π (β−θ+π)"
+    );
     assert_eq!(
         app.workspace.documents[&DocumentId(1)]
             .drawing
             .entity_count(),
-        count
+        count + 1
     );
-    assert_eq!(revision(&app), rev);
-    assert!(!app.can_undo(&DocumentId(1)));
+    assert_eq!(revision(&app), Revision(rev.0 + 1));
+    assert_eq!(
+        app.history
+            .get(&DocumentId(1))
+            .map(|history| history.undo_depth())
+            .unwrap_or(0),
+        1,
+        "one transaction, one undo step"
+    );
+    let mut app = app;
+    let mut session = SessionState::new(DocumentId(1), AppMode::Work);
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .expect("undo removes the mirrored copy");
+    assert!(
+        app.workspace.documents[&DocumentId(1)]
+            .drawing
+            .entity(copy)
+            .is_none(),
+        "undo removes the mirrored copy"
+    );
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Redo,
+        CommandPayload::None,
+    )
+    .expect("redo restores the mirrored copy");
+    let SemanticGeometry::Text { mirrored, .. } = app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .entity(copy)
+        .unwrap()
+        .geometry
+        .clone()
+    else {
+        panic!("expected the redone TEXT");
+    };
+    assert!(mirrored, "redo restores the stored flag");
 }
 
 #[test]
@@ -744,4 +816,108 @@ fn mirror_reflects_a_dimension_definition_and_rebuilds_its_display() {
     assert_point_eq(*second, point(-3.0, 0.0), "second");
     assert_point_eq(*dimension_line, point(-2.0, -4.0), "dimension_line");
     assert!(!dimension.display().is_empty(), "display rebuilt");
+}
+
+/// The `mirrored` flag of the first `Text` child in a display list.
+fn text_child_mirrored(display: &[SemanticGeometry]) -> Option<bool> {
+    display.iter().find_map(|child| match child {
+        SemanticGeometry::Text { mirrored, .. } => Some(*mirrored),
+        _ => None,
+    })
+}
+
+#[test]
+fn mirror_mirrortext_governs_a_dimensions_measurement_text() {
+    // MIRRTEXT=0 keeps the synthesized measurement text readable (flag clear);
+    // MIRRTEXT=1 marks that same child with the glyph-mirror bit. The definition
+    // points are reflected either way.
+    for (mirrortext, expected) in [(false, false), (true, true)] {
+        let mut app = line_and_boundary_app(ent(2, linear_dimension_geometry(), 1), None);
+        let options = MirrorOptions {
+            refs: vec![ref_of(2)],
+            axis_start: point(0.0, 0.0),
+            axis_end: point(0.0, 1.0),
+            mirrortext,
+            erase_source: false,
+        };
+        let outcome = mirror_with_options(&mut app, &options).expect("dimension mirrors");
+        let copy = EntityId(outcome.objects[0].0);
+        let SemanticGeometry::Dimension(dimension) = app.workspace.documents[&DocumentId(1)]
+            .drawing
+            .entity(copy)
+            .unwrap()
+            .geometry
+            .clone()
+        else {
+            panic!("expected a mirrored DIMENSION");
+        };
+        assert_eq!(
+            text_child_mirrored(dimension.display()),
+            Some(expected),
+            "MIRRTEXT={expected}"
+        );
+    }
+}
+
+#[test]
+fn mirror_mtext_uses_the_same_mirrortext_rule_as_text() {
+    // MTEXT imports into the same `Text` variant (`type_key == AcDbMText`), so
+    // the option is identical. `MIRRTEXT=0` clears the bit and keeps a readable
+    // baseline; `MIRRTEXT=1` toggles it.
+    let mtext = |mirrored: bool| {
+        let mut geometry = text_geometry(point(2.0, 0.0), 0.0);
+        if let SemanticGeometry::Text { mirrored: flag, .. } = &mut geometry {
+            *flag = mirrored;
+        }
+        geometry
+    };
+    let mut app = line_and_boundary_app(ent(2, mtext(false), 1), None);
+    let options = MirrorOptions {
+        refs: vec![ref_of(2)],
+        axis_start: point(0.0, 0.0),
+        axis_end: point(0.0, 1.0),
+        mirrortext: true,
+        erase_source: false,
+    };
+    let outcome = mirror_with_options(&mut app, &options).unwrap();
+    let first_copy = EntityId(outcome.objects[0].0);
+    let SemanticGeometry::Text { mirrored, .. } = app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .entity(first_copy)
+        .unwrap()
+        .geometry
+        .clone()
+    else {
+        panic!("expected a mirrored MTEXT");
+    };
+    assert!(mirrored, "MIRRTEXT=1 mirrors MTEXT glyphs");
+
+    // Re-mirroring the mirrored run with MIRRTEXT=0 returns a readable run: the
+    // bit clears even though the source was already mirrored.
+    let options = MirrorOptions {
+        refs: vec![ref_of(first_copy.0)],
+        axis_start: point(0.0, 0.0),
+        axis_end: point(0.0, 1.0),
+        mirrortext: false,
+        erase_source: false,
+    };
+    let outcome = mirror_with_options(&mut app, &options).unwrap();
+    let copy = EntityId(outcome.objects[0].0);
+    let SemanticGeometry::Text {
+        mirrored,
+        text,
+        rotation,
+        ..
+    } = app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .entity(copy)
+        .unwrap()
+        .geometry
+        .clone()
+    else {
+        panic!("expected a mirrored MTEXT");
+    };
+    assert_eq!(text, "ABC");
+    assert!(!mirrored, "MIRRTEXT=0 keeps the run readable");
+    assert!(rotation.is_finite());
 }

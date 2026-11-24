@@ -346,6 +346,7 @@ fn breakatpoint_refuses_unrepresentable_targets_and_endpoints_without_writing() 
         wrap_width: None,
         width_factor: 1.0,
         line_spacing: cad_domain::TextLineSpacing::default(),
+        mirrored: false,
     };
     let cases: Vec<(SemanticGeometry, &str)> = vec![
         (closed_spline, "breakatpoint.closed"),

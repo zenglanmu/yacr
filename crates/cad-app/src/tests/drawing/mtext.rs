@@ -134,6 +134,7 @@ fn create_mtext_stores_one_acdbmtext_with_paragraph_breaks_in_one_transaction() 
             wrap_width,
             width_factor,
             line_spacing,
+            mirrored: _,
         } => {
             assert_eq!(text, "a\\Pb", "`\\n` is stored as `\\P`");
             assert_eq!(*position, p3(1.0, 2.0, 0.0));

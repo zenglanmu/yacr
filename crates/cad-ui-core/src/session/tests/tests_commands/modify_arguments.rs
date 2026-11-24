@@ -13,9 +13,9 @@ use super::super::super::commands::{
     invalid_filter_logic_argument_reason, invalid_join_argument_reason,
     invalid_mirror_argument_reason, invalid_offset_argument_reason,
     invalid_pedit_edit_argument_reason, invalid_qselect_argument_reason, parse_chamfer_argument,
-    parse_fillet_argument, parse_filter_request, parse_join_argument, parse_mirror_argument,
-    parse_offset_argument, parse_pedit_argument, parse_pedit_edit_argument, parse_qselect_request,
-    ChamferArgument, FilletArgument, MirrorArgument, OffsetArgument,
+    parse_explode_argument, parse_fillet_argument, parse_filter_request, parse_join_argument,
+    parse_mirror_argument, parse_offset_argument, parse_pedit_argument, parse_pedit_edit_argument,
+    parse_qselect_request, ChamferArgument, FilletArgument, MirrorArgument, OffsetArgument,
 };
 use super::super::super::*;
 use super::super::test_support::*;
@@ -329,6 +329,31 @@ fn mirror_options_parse_and_store_the_session_defaults() {
     assert!(options().mirror_erase());
     session.command("MIRROR TEXT 0").expect("MIRRTEXT stores");
     assert!(!options().mirrortext());
+}
+
+#[test]
+fn explode_mode_argument_parses_and_stores_the_session_explmode_switch() {
+    assert_eq!(parse_explode_argument("MODE 0"), Some(false));
+    assert_eq!(parse_explode_argument("mode 1"), Some(true));
+    assert_eq!(parse_explode_argument("EXPLMODE OFF"), Some(false));
+    assert_eq!(parse_explode_argument("EXPMODE ON"), Some(true));
+    for refused in ["MODE", "MODE 2", "0", "MODE 1 EXTRA", "MIRROR 1"] {
+        assert_eq!(parse_explode_argument(refused), None, "{refused:?}");
+    }
+    assert_eq!(
+        typed_command_argument("EXPLODE MODE 1"),
+        Some(("EXPLODE", "MODE 1"))
+    );
+    assert_eq!(typed_command_argument("EXPLODE"), None);
+
+    let session = fresh_session();
+    assert!(session.core.controller.borrow().session.explode_mode());
+    session.command("EXPLODE MODE 0").expect("EXPLMODE stores");
+    assert!(!session.core.controller.borrow().session.explode_mode());
+    session
+        .command("EXPLODE EXPLMODE 1")
+        .expect("EXPLMODE stores");
+    assert!(session.core.controller.borrow().session.explode_mode());
 }
 
 #[test]

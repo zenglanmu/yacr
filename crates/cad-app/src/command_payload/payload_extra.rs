@@ -112,8 +112,8 @@ pub struct MirrorOptions {
     pub refs: Vec<SelectionRef>,
     pub axis_start: Point3,
     pub axis_end: Point3,
-    /// `MIRRTEXT`: `false` keeps text readable (the default), `true` is a
-    /// named refusal because the flat-text domain cannot mirror glyphs.
+    /// `MIRRTEXT`: `false` keeps text readable (the default); `true` toggles the
+    /// stored glyph-mirror bit and turns the baseline a half turn.
     pub mirrortext: bool,
     /// AutoCAD's `Erase source objects? Yes/No`.
     pub erase_source: bool,

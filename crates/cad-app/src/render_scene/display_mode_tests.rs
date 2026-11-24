@@ -178,6 +178,7 @@ fn qtext_rebuilds_the_base_and_replaces_glyph_batches() {
             wrap_width: None,
             width_factor: 1.0,
             line_spacing: cad_domain::TextLineSpacing::default(),
+            mirrored: false,
         },
         "AcDbText",
     );

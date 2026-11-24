@@ -568,12 +568,13 @@ impl Application {
     /// mirrored block reference reflects its placement, so member glyphs
     /// (including constant-attribute text) are reversed with it **regardless** of
     /// `MIRRTEXT`; that is a global note, not a per-attribute rule. `MIRRTEXT = 1`
-    /// is a named refusal (`mirror.mirrortext_glyphs`) because the flat-text
-    /// domain cannot mirror glyphs.
+    /// writes the true reflection for top-level TEXT/MTEXT: the stored
+    /// glyph-mirror bit toggles and the baseline turns a half turn.
     ///
     /// Dimensions are mirrored as a **documented choice**: definition points are
     /// reflected and the display is re-synthesized (Autodesk does not document
-    /// MIRROR on dimensions). `erase_source` deletes every source in the same
+    /// MIRROR on dimensions); `MIRRTEXT = 1` also marks the synthesized
+    /// measurement text with the glyph-mirror bit. `erase_source` deletes every source in the same
     /// transaction as the insert, so one undo step restores them.
     ///
     /// Wiring: [`CommandPayload::MirrorOptions`] routes here directly; the bare

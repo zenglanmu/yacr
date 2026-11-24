@@ -608,6 +608,7 @@ type TextParts<'a> = (
     Option<f64>,
     f64,
     TextLineSpacing,
+    bool,
 );
 
 /// The `TEXT`/`MTEXT` drag rule: the stored insertion point, every other field
@@ -637,6 +638,7 @@ fn apply_text(text: TextParts<'_>, id: &GripId, to: Point3) -> CadResult<Semanti
         wrap_width,
         width_factor,
         line_spacing,
+        mirrored,
     ) = text;
     match (id.kind, id.index) {
         (GripKind::Insertion, 0) => {
@@ -658,6 +660,7 @@ fn apply_text(text: TextParts<'_>, id: &GripId, to: Point3) -> CadResult<Semanti
                 wrap_width,
                 width_factor,
                 line_spacing,
+                mirrored,
             })
         }
         (GripKind::Insertion, index) => Err(stale_handle(format!(
@@ -873,6 +876,7 @@ pub fn apply_grip(
             wrap_width,
             width_factor,
             line_spacing,
+            mirrored,
         } => apply_text(
             (
                 text.as_str(),
@@ -886,6 +890,7 @@ pub fn apply_grip(
                 *wrap_width,
                 *width_factor,
                 *line_spacing,
+                *mirrored,
             ),
             id,
             to,

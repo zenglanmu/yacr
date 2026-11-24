@@ -28,6 +28,7 @@ pub(super) struct TextGeometry<'a> {
     pub(super) wrap_width: &'a Option<f64>,
     pub(super) width_factor: &'a f64,
     pub(super) line_spacing: &'a TextLineSpacing,
+    pub(super) mirrored: &'a bool,
 }
 
 /// Build a TEXT/MTEXT fragment, applying the annotation-scale adjustment.
@@ -57,6 +58,7 @@ pub(super) fn text_fragment(
         wrap_width,
         width_factor,
         line_spacing,
+        mirrored,
     } = geometry;
     let font_key = font.as_deref();
     // Annotative TEXT/MTEXT: the active annotation scale factor
@@ -113,6 +115,15 @@ pub(super) fn text_fragment(
         };
         match result {
             Ok(shaped_text) => {
+                // `mirrored` is the stored glyph-frame reflection (`MIRRTEXT=1`):
+                // the glyphs are composed normally, then reflected across the
+                // text's own vertical axis through the anchor. Doing it here needs
+                // no second layout pass and keeps anchors/alignment untouched.
+                let shaped_text = if *mirrored {
+                    mirror_shaped_text(shaped_text, eff_position, eff_rotation)
+                } else {
+                    shaped_text
+                };
                 let has_renderable_content = shaped_text.has_renderable_content;
                 for mesh in shaped_text.meshes {
                     representation.fragments.push(DisplayFragment {
@@ -232,6 +243,61 @@ pub(super) fn text_fragment(
     if context.qtext {
         display_modes::apply_qtext(representation, entity.id.0);
     }
+}
+
+/// Reflect shaped text across its own vertical axis through the anchor.
+///
+/// This is the display half of `SemanticGeometry::Text.mirrored` (AutoCAD
+/// `MIRRTEXT=1`). `rotation` is the stored text rotation; the mirror axis is the
+/// local +Y direction (`v(rotation) = (-sin, cos)`), so the glyph run advances
+/// the other way while the anchor and the stored rotation stay where the model
+/// put them. Mesh winding is reversed because the reflection has determinant
+/// `-1`; otherwise back-face culling would drop the fill.
+fn mirror_shaped_text(mut shaped: ShapedText, origin: Point3, rotation: f64) -> ShapedText {
+    let axis = Point3 {
+        x: -rotation.sin(),
+        y: rotation.cos(),
+        z: 0.0,
+    };
+    let reflect_point = |point: Point3| {
+        let dx = point.x - origin.x;
+        let dy = point.y - origin.y;
+        let k = 2.0 * (dx * axis.x + dy * axis.y);
+        Point3 {
+            x: origin.x + k * axis.x - dx,
+            y: origin.y + k * axis.y - dy,
+            z: point.z,
+        }
+    };
+    let reflect_normal = |normal: Point3| {
+        let k = 2.0 * (normal.x * axis.x + normal.y * axis.y);
+        Point3 {
+            x: k * axis.x - normal.x,
+            y: k * axis.y - normal.y,
+            z: normal.z,
+        }
+    };
+    for polyline in shaped
+        .polylines
+        .iter_mut()
+        .chain(shaped.outlines.iter_mut())
+    {
+        for point in polyline.iter_mut() {
+            *point = reflect_point(*point);
+        }
+    }
+    for mesh in &mut shaped.meshes {
+        for point in &mut mesh.vertices {
+            *point = reflect_point(*point);
+        }
+        for normal in &mut mesh.normals {
+            *normal = reflect_normal(*normal);
+        }
+        for triangle in &mut mesh.triangles {
+            triangle.swap(1, 2);
+        }
+    }
+    shaped
 }
 
 /// The matched fields of one `SemanticGeometry::Shape`, borrowed from the entity.

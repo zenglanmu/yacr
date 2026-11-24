@@ -54,7 +54,7 @@ use crate::app_utility::document_drawing;
 /// report order. `SETVAR`, `SYSVDLG` and the `SYSVARMONITOR` watch set read
 /// exactly this list, so a report can never advertise a variable the router does
 /// not model.
-pub const MODELLED_SYSTEM_VARIABLES: [&str; 15] = [
+pub const MODELLED_SYSTEM_VARIABLES: [&str; 17] = [
     "PDMODE",
     "PDSIZE",
     "SNAPUNIT",
@@ -76,6 +76,12 @@ pub const MODELLED_SYSTEM_VARIABLES: [&str; 15] = [
     // the router does not model.
     "ELEV",
     "FSMODE",
+    // `EXPLMODE` (also accepted as `EXPMODE`) is the non-uniformly scaled block
+    // switch the EXPLODE path reads. Session-only, written by
+    // `EXPLODE MODE 0|1` / `SETVAR EXPLMODE 0|1`; nothing is written to the
+    // drawing.
+    "EXPLMODE",
+    "EXPMODE",
 ];
 
 /// What a modelled variable reads as right now.
@@ -109,6 +115,10 @@ pub fn modelled_system_variable(
         // values live in `SessionState::drafting_extras`.
         "ELEV" => ModelledValue::Value(session.drafting_extras.elev().to_string(), "real"),
         "FSMODE" => ModelledValue::Value(session.drafting_extras.fs_mode().to_string(), "boolean"),
+        "EXPLMODE" | "EXPMODE" => ModelledValue::Value(
+            if session.explode_mode() { "1" } else { "0" }.to_string(),
+            "integer",
+        ),
         "TEXTSIZE" => match session.tool_parameter(ToolParameter::TextHeight) {
             ToolValue::Number(height) => ModelledValue::Value(height.to_string(), "real"),
             ToolValue::Flag(flag) => ModelledValue::Value(flag.to_string(), "boolean"),

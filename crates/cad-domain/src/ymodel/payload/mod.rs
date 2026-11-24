@@ -154,6 +154,7 @@ pub fn encode(geometry: &SemanticGeometry) -> Value {
             wrap_width,
             width_factor,
             line_spacing,
+            mirrored,
         } => basic::encode_text(
             text,
             *position,
@@ -166,6 +167,7 @@ pub fn encode(geometry: &SemanticGeometry) -> Value {
             *wrap_width,
             *width_factor,
             line_spacing,
+            *mirrored,
         ),
         SemanticGeometry::Shape {
             shape_name,

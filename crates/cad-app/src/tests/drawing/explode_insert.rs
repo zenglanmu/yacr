@@ -679,3 +679,52 @@ fn explode_non_uniform_insert_turns_an_arc_member_into_an_exact_elliptical_arc()
         other => panic!("expected an elliptical ARC as ELLIPSE, got {other:?}"),
     }
 }
+
+#[test]
+fn explode_explmode_zero_refuses_a_non_uniform_insert_without_writing() {
+    // AutoCAD's EXPLMODE=0 does not explode a non-uniformly scaled block. The
+    // session switch is read by the existing path (not a constant), and the
+    // refusal happens before any write.
+    let (mut app, mut session) = insert_app(non_uniform(2.0, 1.0));
+    session.set_explode_mode(false);
+    let before = revision(&app);
+    let count = entity_count(&app);
+    select_one(&mut app, &mut session, 1);
+    let error = explode(&mut app, &mut session).expect_err("EXPLMODE=0 refuses a NUS INSERT");
+    match error {
+        CadError::Unsupported(reason) => {
+            assert!(reason.contains("explode.expmode_off"), "{reason}");
+            assert!(reason.contains("EXPLMODE"), "{reason}");
+        }
+        other => panic!("expected an Unsupported EXPLMODE refusal, got {other:?}"),
+    }
+    assert_eq!(revision(&app), before, "nothing was written");
+    assert_eq!(entity_count(&app), count, "no source was deleted");
+    assert_eq!(undo_depth(&app), 0, "no history entry");
+}
+
+#[test]
+fn explode_explmode_zero_still_explodes_a_uniform_insert() {
+    // The switch only gates the non-uniform case; a uniform block explodes even
+    // with EXPLMODE=0.
+    let transform = Transform3::translation(p3(10.0, 0.0, 0.0)).matrix_mul(&Transform3::scale(2.0));
+    let (mut app, mut session) = insert_app(transform);
+    session.set_explode_mode(false);
+    select_one(&mut app, &mut session, 1);
+    explode(&mut app, &mut session).expect("a uniform INSERT still explodes");
+    let lines = model_lines(&app);
+    assert_eq!(lines.len(), 1);
+    assert!(near(lines[0].0, p3(10.0, 0.0, 0.0)) && near(lines[0].1, p3(12.0, 0.0, 0.0)));
+    assert_eq!(undo_depth(&app), 1);
+}
+
+#[test]
+fn explode_explmode_one_is_the_default_and_decomposes_the_representable_subset() {
+    // The default session is EXPLMODE=1: the pre-existing deterministic subset.
+    let (mut app, mut session) = insert_app(non_uniform(2.0, 1.0));
+    assert!(session.explode_mode(), "the default is EXPLMODE=1");
+    select_one(&mut app, &mut session, 1);
+    explode(&mut app, &mut session).expect("EXPLMODE=1 decomposes the subset");
+    assert_eq!(model_lines(&app).len(), 1);
+    assert_eq!(undo_depth(&app), 1);
+}
