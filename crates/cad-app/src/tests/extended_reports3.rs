@@ -233,6 +233,26 @@ fn dimreassoc_and_dimreassociate_are_named_non_associative_noops() {
 }
 
 #[test]
+fn dimreassociate_refuses_a_payload_before_any_write() {
+    let (mut app, mut session) = application_with_document();
+    let before = revision(&app);
+    let refused = app.execute(
+        &mut session,
+        command(
+            CommandId::Extended(ExtendedCommandId::DimReassociate),
+            CommandPayload::Points(vec![point(1.0, 2.0)]),
+        ),
+    );
+    let error = refused.expect_err("DIMREASSOCIATE takes no payload");
+    assert!(
+        format!("{error}").contains("DIMREASSOCIATE needs no payload"),
+        "{error}"
+    );
+    assert_eq!(revision(&app), before);
+    assert!(!app.can_undo(&DocumentId(1)));
+}
+
+#[test]
 fn a_report_payload_is_refused_and_changes_nothing() {
     let (mut app, mut session) = application_with_document();
     let before = revision(&app);

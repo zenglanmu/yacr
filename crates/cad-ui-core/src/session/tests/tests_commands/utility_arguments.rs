@@ -134,6 +134,34 @@ fn purge_and_rename_arguments_are_admitted_then_handled_by_the_command_layer() {
 }
 
 #[test]
+fn dash_purge_is_the_purge_handler_and_removes_an_unused_layer() {
+    let session = fresh_session();
+    session
+        .command("-LAYER NEW UNUSED")
+        .expect("the typed NEW creates a layer");
+    assert!(drawing(&session).layers().any(|row| row.name == "UNUSED"));
+
+    // `-PURGE` canonicalises onto `PURGE`; it is the same handler, not a second
+    // implementation. The unused layer row is removed exactly as bare `PURGE`
+    // would remove it.
+    session
+        .command("-PURGE")
+        .expect("-PURGE is the command-line spelling of PURGE");
+    let names: Vec<String> = drawing(&session)
+        .layers()
+        .map(|row| row.name.clone())
+        .collect();
+    assert!(
+        !names.contains(&"UNUSED".to_string()),
+        "the unused layer survived -PURGE: {names:?}"
+    );
+    assert!(
+        names.contains(&"0".to_string()),
+        "layer 0 is never a purge candidate: {names:?}"
+    );
+}
+
+#[test]
 fn mredo_and_multiple_validate_their_typed_arguments() {
     let session = fresh_session();
     let error = session.command("MREDO 0").unwrap_err();
