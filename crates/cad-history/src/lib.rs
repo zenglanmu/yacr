@@ -790,6 +790,7 @@ impl History {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn record_drawing_step(
         &mut self,
         record: DrawingUndoRecord,

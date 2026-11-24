@@ -82,9 +82,10 @@ fn only_the_writing_commands_require_work_mode() {
     ] {
         assert!(id.requires_work_mode(), "{id:?} writes/declares a write");
     }
-    for id in [CommandId::XdList] {
-        assert!(!id.requires_work_mode(), "{id:?} cannot write the drawing");
-    }
+    assert!(
+        !CommandId::XdList.requires_work_mode(),
+        "XdList cannot write the drawing"
+    );
 }
 
 #[test]

@@ -188,9 +188,10 @@ fn group_name(text: &str) -> Option<String> {
 
 /// Split an optional double-quoted name from the rest of a `GROUPEDIT` line.
 fn split_name(text: &str) -> (&str, &str) {
-    if text.starts_with('"') {
-        if let Some(end) = text[1..].find('"') {
-            return (&text[..end + 2], text[end + 2..].trim_start());
+    if let Some(rest) = text.strip_prefix('"') {
+        if let Some(end) = rest.find('"') {
+            let quoted_len = end + 2;
+            return (&text[..quoted_len], text[quoted_len..].trim_start());
         }
     }
     split_word(text)
