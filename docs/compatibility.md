@@ -883,7 +883,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `REVERSE` | 部分实现 | 反转选中 LINE / LWPOLYLINE（含 bulge 与闭合映射）/ SPLINE（控制点+节点镜像）方向，一条事务/一步撤销 | 仅当前选择；无 helix/3D；其它种类按名拒绝 |
 | `OOPS` | 完整实现 | 恢复**最近一次 ERASE 的整批**实体，并覆盖 `BLOCK` 移出的整批行（定义保留成员、OOPS 放回独立副本）；新 id；一条事务/一步撤销；重复执行是具名空操作 `oops.already_restored`，**撤销该恢复会让快照重新可用** | `WBLOCK` 本构建无删除路径（声明）；`CUTCLIP/CUTBASE` 不记录快照 |
 | `OVERKILL` | 部分实现 | 删除同空间/同图层/同几何（1e-9）的**完全重复**选中对象，保留最低 draw order；一条事务/一步撤销 | 无部分重叠、共线合并、圆弧覆盖圆、折线段优化、容差选项、忽略图层/颜色选项 |
-| `BREAKATPOINT` | 部分实现 | 交互工具：拾取对象后指定断点（可投影到对象），把 LINE/ARC/开放 LWPOLYLINE 拆成两段 | 圆/闭合多段线/SPLINE 按名拒绝（闭合对象不在单点拆分）；无选项 |
+| `BREAKATPOINT` | 完整实现 | 交互工具：拾取对象后指定断点（可投影到对象）；LINE/ARC/CIRCLE/整椭圆与椭圆弧/开放 SPLINE/开放或闭合 LWPOLYLINE。开放曲线拆成两段；闭合环（圆、闭合多段线、整椭圆）在断点开成**单段整圈弧**并在诊断里明说（单点无法留下两段非退化片段）；一条事务/一步撤销 | 闭合 SPLINE 需旋转节点域，按名拒绝（`breakatpoint.closed`）；TEXT/IMAGE/HATCH/DIMENSION/MULTILEADER/TABLE/MESH/Body3d 等非曲线种类按名拒绝；无选项 |
 | `LIST` | 实现 | 读取当前选择；报告模型/图纸/块空间、id/handle/type/layer/space/draw order、颜色/线型/线宽/透明度/线型比例/可见性、文字样式/标注样式/块名与几何摘要；只读 | 不是交互 Select objects（输入是当前选择）；厚度/拉伸方向未建模（全局范围）；不可寻址引用逐条报告后继续 |
 | `STATUS` | 完整实现 | 报告数据库/修订/实体与表计数、模型空间范围、当前层、会话模式与绘图开关，**以及存储的基点/图形界限真实值**（`status.limits_base`），缺值时按名声明（`status.not_stored`） | 创建/编辑时间与内存仍不跟踪（`status.not_tracked`） |
 | `FS` | 完整实现 | 取当前唯一选择为种子并入接触对象；`FSMODE=ON` 走传递相切链（解析切线，样条精确 NURBS 导数），`OFF` 与旧直接接触逐字节一致；`fs.chain_nontangent`/`.chain_ambiguous`/`.chain_bound`（上限 64，不截断）在选择变更前拒绝；`FSMODE ON|OFF|1|0` 是真实命令、`SETVAR FSMODE` 读写同一令牌；`fs.mode` 报告模式/实体数/接触数 | 无功能区按钮（Express 工具，仅命令行）；无对话框 |
@@ -1638,12 +1638,12 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 | `COPYTOLAYER` | **部分实现**：首个选中实体的图层为目标；其余选中顶层模型空间实体以新 id 复制到该层，原实体不变；一条事务/一步撤销 | 无图层提示；块成员/图纸空间按名拒绝 |
 | `-COPYTOLAYER` | **部分实现**：与 `COPYTOLAYER` 相同的实现，命令行拼写；一条事务/一步撤销 | 同上 |
 | `CDORDER` | **部分实现**：按颜色索引升序重写选中（空选择 = 全部模型空间）实体的存储绘制顺序；保留候选占用的原 draw-order 槽位；一条事务/一步撤销 | 无对话框；ByBlock=0、非调色板真彩=256、缺层属性=7 是声明排序规则 |
-| `FLATTEN` | **部分实现**：选中 `LINE`/`POLYLINE`/`CIRCLE`/`ARC`/`ELLIPSE`/`POINT`/`SPLINE` 的 z 改写为 0；一条事务/一步撤销 | Express 行为简化为 z=0；`MESH`/`INSERT`/非 Z 法向 3D 几何按名拒绝 |
+| `FLATTEN` | **部分实现**：`LINE`/`POLYLINE`/`CIRCLE`/`ARC`/`ELLIPSE`/`POINT`/`SPLINE` 的 z 改写为 0；新增 `TEXT`/`SHAPE`/`MASK`/已平行世界 XY 的 `IMAGE`/`COMPOUND` 与**竖直 `INSERT`**（只移动插入点 z 与属性文字 z，块定义不改；成员非平或放置倾斜按名拒绝）；一条事务/一步撤销 | Express 的投影语义简化为 z=0；`MESH`/`Body3d`、派生显示缓存的 `DIMENSION`/`HATCH`/`MULTILEADER`/`TABLE`、非 XY 平面 `IMAGE` 按名拒绝 |
 | `XPLODE` | **部分实现**：复用既有 `EXPLODE` 路径分解选中 `INSERT`；一条事务/一步撤销 | 属性/特性控制 **NOT IMPLEMENTED**（`xplode.attributes_not_implemented`） |
 | `BTRIM` | **部分实现**：首个选中 `INSERT` 的成员几何为边界，其余选中实体复用既有 TRIM 规划器修剪（拾取点为曲线中点）；一条事务/一步撤销 | 无交互式边界提示；不可规划的目标按名拒绝 |
 | `BEXTEND` | **部分实现**：同上，复用既有 EXTEND 规划器（拾取点为曲线终点）；一条事务/一步撤销 | 无交互式边界提示；不可规划的目标按名拒绝 |
-| `CHANGE` | **部分实现**：选中顶层模型空间实体移到当前图层，并复用属性写路径把颜色/线型/线宽重置为 ByLayer；一条事务/一步撤销 | 无交互式点/特性提示；透明度不重置 |
-| `CHPROP` | **部分实现**：与 `CHANGE` 相同的层/属性重置，独立选择子；一条事务/一步撤销 | 同上 |
+| `CHANGE` | **部分实现**：与 `CHPROP` 相同的 typed 属性列表（`layer`/`color`/`linetype`/`lineweight`/`transparency`，与 `SETENTITYPROPERTY` 共用语法与 `plan_entity` 应用器），模型与图纸空间直取实体；一条事务/一步撤销 | AutoCAD 的 change-point 分支（移动点/文字）与交互式特性提示未实现；未建模属性按名拒绝 |
+| `CHPROP` | **完整实现**：typed 属性列表（`layer`/`color`/`linetype`/`lineweight`/`transparency`），与 `SETENTITYPROPERTY` 共用 `PropertyValue` 语法与 `plan_entity` 应用器；模型与图纸空间直取实体；一条事务/一步撤销 | 未建模属性（`text`、thickness、material、plot style、linetype scale）按名拒绝（`chprop.unsupported_property`）；无交互式属性提示（全局交互范围） |
 | `BSCALE` | **部分实现（具名拒绝）**：`bscale.unsupported: BSCALE needs a factor and an insertion reference; use SCALE on the selected insert` | 不写库/不升修订/不入历史 |
 | `MINSERT` | **部分实现（具名拒绝）**：`minsert.unsupported: MINSERT needs a block name and row/column counts; use INSERT then ARRAYRECT` | 同上 |
 | `BLOCKREPLACE` | **部分实现（具名拒绝）**：`blockreplace.unsupported: BLOCKREPLACE needs two block definitions; this build has no block-replace editor` | 同上 |

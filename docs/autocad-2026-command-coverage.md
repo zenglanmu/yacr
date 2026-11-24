@@ -26,8 +26,8 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **237** |
-| 部分实现（有写明的界） | **742** |
+| 完整实现 | **239** |
+| 部分实现（有写明的界） | **740** |
 | **已实现合计（完整 + 部分）** | **979** |
 | 未实现 | **2** |
 
@@ -51,6 +51,8 @@
 > 实现状态计数，也没有运行/像素证据（`autocad-structure` 契约测试锁定接线）。
 
 > **2026-11-24 增补（严格 2D 收口）**：`TEXTALIGN`（`SETSPACING`/`CURRENTVERTICAL`/`CURRENTHORIZONTAL`）、`TCIRCLE`（`SLOT`/`OFFSET`/`CONSTANT`）、`DONUT`（填充圆盘/环）、`HATCHGENERATEBOUNDARY`（图纸布局 hatch）、`ADDSELECTED`（ARC/POLYLINE/INSERT）、`GETSEL`（COLOR/LINETYPE/SPACE）、`MEASUREGEOM VOLUME`（单一体精确 body 路径）、`CENTERMARK`（可配置臂长）、`CENTERLINE`（延伸/间隙）九个命令按严格口径升为**完整实现**；`CENTERMARK`/`CENTERLINE` 的产出是普通 `LINE`（非关联为声明边界，与 `DIMCENTER` 同类）。计入 **213 完整 + 766 部分 / 979 已实现**；窗口/GPU/像素/真机证据仍 NOT VERIFIED。
+
+> **2026-11-24 增补（严格 2D 收口 II，`CHPROP`/`BREAKATPOINT`）**：`CHPROP` 与 `BREAKATPOINT` 按严格口径升为**完整实现**。`CHPROP` 从「移到当前层 + 重置 ByLayer」改为**typed 属性列表**（`layer`/`color`/`linetype`/`lineweight`/`transparency`，与 `SETENTITYPROPERTY` 共用 `PropertyValue` 语法与 `plan_entity` 应用器），模型空间与图纸空间直取实体、一条事务/一步撤销，未建模属性（`text`/thickness/material/plot style/linetype scale）**按名拒绝**；`CHANGE` 用同一属性写路径，但 AutoCAD 的 change-point 分支仍未实现，保持部分。`BREAKATPOINT` 从 LINE/ARC/开放 LWPOLYLINE 扩到 CIRCLE、整椭圆/椭圆弧、开放 SPLINE 与闭合 LWPOLYLINE：开放曲线拆两段，闭合环在断点开成单段整圈弧（单点无法留下两段非退化片段）；闭合 SPLINE（需旋转节点域）与其它非曲线种类**按名拒绝**。`FLATTEN` 扩到竖直 INSERT（只移动插入点 z 与属性文字 z，块定义不改；成员非平或放置倾斜按名拒绝）以及 TEXT/SHAPE/MASK/XY 平面 IMAGE/COMPOUND，`MESH`/`Body3d`/派生显示的 DIMENSION/HATCH/MULTILEADER/TABLE 仍按名拒绝，故保持部分。计入 **239 完整 + 740 部分 / 979 已实现**；全部结论仍只有 Linux 编译与 `cad-app` 契约测试，GUI/GPU/像素/真机证据 NOT VERIFIED。
 
 ## 下一批 100 条命令实施计划与进度（2026-11-07）
 
@@ -252,7 +254,7 @@
 
 > **这不是验收，是当前排期与口径。** 本轮目标是把命令从 `部分实现`/具名拒绝推进到支持域内
 > **没有剩余可写缺口**的 `完整实现`；不放宽为“改状态不实现”，也不把 ADR 全局范围缺口算作
-> 单命令完成。当前清单 **237 完整 / 742 部分 / 2 未实现**，只有真正合并且契约测试通过的
+> 单命令完成。当前清单 **239 完整 / 740 部分 / 2 未实现**，只有真正合并且契约测试通过的
 > 命令才改状态。
 
 | 批次 | 范围 | 状态 |
@@ -263,6 +265,7 @@
 | M1d 参数管理器 | `PARAMETERS`/`-PARAMETERS`/`PARAMETERSCLOSE` + Parametric→Manage 面板 | **已合并**（+3 complete + 面板） |
 | M1e 全局范围核对 | `-PURGE`（别名无独有缺口）、`DIMDISASSOCIATE`/`DIMREGEN`/`DIMREASSOCIATE`（关联性属全局范围） | **已合并**（+4 complete）；`DIMREASSOC`/`DIMROTATED`/`BLOCK?`/`LAYERPMODE`/`LAYCUR`/`LAYMCUR`/`LAYMCH`/`BTRIM`/`BEXTEND`/`NCOPY`/`CDORDER`/`MOCORO` 仍 partial（各有真实缺口，见各行） |
 | M1f 2D 小缺口 | `TEXTALIGN`/`TCIRCLE`/`DONUT`/`HATCHGENERATEBOUNDARY`/`ADDSELECTED`/`GETSEL`/`MEASUREGEOM`/`CENTERMARK`/`CENTERLINE` | **已合并**（+9 complete；CENTERMARK/CENTERLINE 的普通 LINE 非关联模型是声明边界） |
+| M1g 2D 严格收口 II | `CHPROP`（typed 属性列表）、`BREAKATPOINT`（CIRCLE/整椭圆/椭圆弧/开放 SPLINE/闭合 LWPOLYLINE）；`CHANGE`/`FLATTEN` 扩写但仍有具名缺口 | **已合并**（+2 complete；`CHANGE` 的 change-point 与 `FLATTEN` 的 3D/派生显示缺口见各行） |
 | M2 块属性 | ADR-0055：ATTDEF/ATTRIB 模型、minor 14、DXF/渲染/命令/面板 | **已合并**（+13 complete；ATTIN/ATTOUT/ATTEXT/EATTEXT 文件 lane 仍 partial） |
 | M3 约束 | ADR-0054：有界二维几何/尺寸约束求解器、minor 15、DXF 节点 | ADR 已接受；P0 未开始，命令仍 partial |
 | M4 动作录制器 | ADR-0056：ACTRECORD/ACTSTOP/ACTUSERINPUT/ACTUSERMESSAGE/ACTMANAGER | **已合并**（+7 complete + Manage 面板；无真实文件对话框/GUI 证据） |
@@ -482,7 +485,7 @@
 | `BOX` | 完整实现 | 显式两点 + typed Cube/Center+corner/Length（plan 基面取会话 `ELEV`）→ `AcDb3dSolid`；一条事务/一步撤销；交互提示属 ADR 全局范围。 |
 | `BPARAMETER` | 部分实现 | 具名拒绝（`bparameter.unsupported`）：本构建无动态块参数模型。 |
 | `BREAK` | 已实现 | 两断点 + `F` 首点覆盖；`LINE`/`ARC`/`CIRCLE`/`SPLINE`/整椭圆/**椭圆弧**/`LWPOLYLINE`；圆→弧；第二点可投影；**无多段打断**（AutoCAD 无此模式） |
-| `BREAKATPOINT` | 部分实现 | 交互工具：先拾取对象再指定断点（断点可投影到对象上）；仅 LINE/ARC/开放 LWPOLYLINE；圆/闭合多段线/SPLINE 按名拒绝（闭合对象不拆分） |
+| `BREAKATPOINT` | 完整实现 | 交互工具：拾取对象后指定断点（断点可投影到对象）；LINE/ARC/CIRCLE/整椭圆与椭圆弧/开放 SPLINE/开放或闭合 LWPOLYLINE；开放曲线拆两段，闭合环在断点开成单段整圈弧；闭合 SPLINE 与其它非曲线种类按名拒绝；一条事务/一步撤销 |
 | `BREAKLINE` | 部分实现 | 真实编辑：两点之间一条带声明式锯齿折断符号的开放折线；符号宽 15%、深 5%（声明规则）；无块式折断符号。 |
 | `BREP` | 部分实现 | 具名拒绝（`brep.unsupported: this build has no 3D solid history/brep model`）。 |
 | `BREPLACE` | 部分实现 | 具名拒绝（`breplace.unsupported`）：需要两个块定义；无块替换编辑器。 |
@@ -508,9 +511,9 @@
 | `CENTERRESET` | 部分实现 | 具名拒绝（`centerreset.unsupported: center marks/centerlines are not modeled, so associativity/reset has nothing to edit`）。 |
 | `CHAMFER` | 已实现 | `Distance`/`Angle`/`Method`/`Trim`/No-Trim/`Polyline` 全顶点；双零距离/角度=仅延伸相交；`Angle=0` 且距离>0 按名拒绝；`Multiple`/命令内 `Undo` 属逐选项提示全局范围；负距离按名拒绝 |
 | `CHAMFEREDGE` | 部分实现 | 一次边拾取的真实编辑：当前选择须为恰好一个精确 `AcDb3dSolid`，再拾取一条边（种子 = 像素命中点 `PickHit.point`，**不是**工作平面投影），内核按自身容差选最近边并用 `chamferDistanceA/B` 切出倒角（两者须 `> 0`；`0/0` 默认按 `chamferedge.distance_invalid` 拒绝且保留拾取）；同一实体 id、一条事务/一步撤销。无子边身份/边高亮/预览、无链式/多边、无 `FILLETEDGE`/NURBS；曲面体现在能 lift；写入方重建的合成 seam（两个 use 同属一面）被跳过，点在 rim 上答 `solid.edge_not_found`（两个不同面共享的光滑 seam 仍答 `solid.chamfer_failed`，仅谓词级钉住）；证据仅 Linux 契约（合成 `cad-app`/`cad-host` + 真实内核 `solid_command`），GPU/像素/非 Linux **NOT VERIFIED**。 |
-| `CHANGE` | 部分实现 | 真实编辑：选中模型空间实体移到当前层并重置颜色/线型/线宽为 ByLayer；一条事务/一步撤销；无交互点/特性提示。 |
+| `CHANGE` | 部分实现 | 真实编辑：与 `CHPROP` 相同的 typed 属性列表（layer/color/linetype/lineweight/transparency）；一条事务/一步撤销；AutoCAD 的 change-point 分支与交互提示未实现。 |
 | `CHECKSTANDARDS` | 部分实现 | 具名拒绝（`checkstandards.unsupported: this build has no CAD standards (DWS) model`）。 |
-| `CHPROP` | 部分实现 | 真实编辑：同 CHANGE（移到当前层并重置颜色/线型/线宽为 ByLayer）；一条事务/一步撤销；无交互提示。 |
+| `CHPROP` | 完整实现 | typed 属性列表（layer/color/linetype/lineweight/transparency），与 `SETENTITYPROPERTY` 同一语法/应用器；模型与图纸空间直取实体；未建模属性（text/thickness/material/plot style/linetype scale）按名拒绝；一条事务/一步撤销；无交互提示（全局交互范围）。 |
 | `CHSPACE` | 完整实现 | 模型↔图纸按**活动视口已解析变换**（`to_paper`/`to_model`，与显示同一解析）改写几何并重指 space，一条事务/一步撤销；无选择/无图纸/无可用视口/视口实体/跨空间混合选择/块内成员/无法精确变换的种类（`MULTILEADER`/`SHAPE`/`OPAQUE`/`COMPOUND`）/标注（本构建无关联模型，无法排除跨空间依赖）逐条具名拒绝且不写 |
 | `CHURLS` | 部分实现 | 具名拒绝（`churls.unsupported: this build has no hyperlink storage model`）。 |
 | `CIRCLE` | 已实现 | — |
@@ -706,7 +709,7 @@
 | `FINDINCLUDE` | 部分实现 | 会话令牌（默认 ON）；跨块/外部参照文字搜索未实现。 |
 | `FINDMATCH` | 部分实现 | 会话令牌（默认 OFF）；已实现的 -FIND/FIND 恒按 ASCII 不区分大小写比较。 |
 | `FLATSHOT` | 部分实现 | 具名拒绝（`flatshot.unsupported: 3D solids are not modeled, so there is nothing to flatten`）。 |
-| `FLATTEN` | 部分实现 | 真实编辑：选中 LINE/POLYLINE/CIRCLE/ARC/ELLIPSE/POINT/SPLINE 的 z 置 0；一条事务/一步撤销；MESH/INSERT/3D 按名拒绝（Express 行为简化为 z=0）。 |
+| `FLATTEN` | 部分实现 | 真实编辑：LINE/POLYLINE/CIRCLE/ARC/ELLIPSE/POINT/SPLINE、TEXT/SHAPE/MASK/XY 平面 IMAGE/COMPOUND，以及竖直 INSERT（只改插入点 z 与属性文字 z，不编辑块定义；成员非平/放置倾斜按名拒绝）的 z 置 0；一条事务/一步撤销；MESH/Body3d/派生显示的 DIMENSION/HATCH/MULTILEADER/TABLE 按名拒绝（Express 投影行为简化为 z=0）。 |
 | `FREESPOT` | 部分实现 | 具名拒绝（`freespot.unsupported: 3D light objects are not modeled`）。 |
 | `FREEWEB` | 部分实现 | 具名拒绝（`freeweb.unsupported: 3D light objects are not modeled`）。 |
 | `FS` | 完整实现 | Express 工具、仅命令行（无功能区按钮）；取当前唯一选择为种子，把接触的可见模型空间对象并入选择。**`FSMODE=ON` 走传递相切链**（每类几何解析切线，样条用精确 NURBS 导数），`OFF` 与旧直接接触逐字节一致；`fs.chain_nontangent`/`fs.chain_ambiguous`/`fs.chain_bound`（上限 64，不截断）全部在选择变更**之前**拒绝；成功时 `fs.mode` 报告模式/实体数/接触数 | **仍部分实现**：`FSMODE ON| Express 工具、仅命令行；取当前唯一选择为种子并入接触的可见模型空间对象。**`FSMODE=ON` 走传递相切链**（解析切线，样条用精确 NURBS 导数），`OFF` 与旧直接接触逐字节一致；`fs.chain_nontangent`/`.chain_ambiguous`/`.chain_bound`（上限 64，不截断）全部在选择变更前拒绝；**`FSMODE` 是真实命令**（`ON|OFF|1|0`，裸形式报告）且 `SETVAR FSMODE` 可读写；`fs.mode` 报告模式/实体数/接触数 |
@@ -1397,7 +1400,7 @@
 | 131 | `BOX` | 完整实现 | Creates a 3D solid box. | 完整实现：显式两点 + typed Cube/Center+corner/Length（plan 基面取会话 `ELEV`）→ `AcDb3dSolid`；一条事务/一步撤销；交互提示属 ADR 全局范围。 |
 | 132 | `BPARAMETER` | 部分实现 | Adds a parameter with grips to a dynamic block definition. | 具名拒绝（`bparameter.unsupported`）：本构建无动态块参数模型。 |
 | 133 | `BREAK` | 已实现 | Breaks the selected object between two points. | 两断点 + `F` 首点覆盖；`LINE`/`ARC`/`CIRCLE`/`SPLINE`/整椭圆/**椭圆弧**/`LWPOLYLINE`；圆→弧；第二点可投影；**无多段打断**（AutoCAD 无此模式） |
-| 134 | `BREAKATPOINT` | 部分实现 | Breaks the selected object into two objects at a specified point. | 交互工具：先拾取对象再指定断点（断点可投影）；仅 LINE/ARC/开放 LWPOLYLINE；圆/闭合多段线/SPLINE 按名拒绝（闭合对象不拆分） |
+| 134 | `BREAKATPOINT` | 完整实现 | Breaks the selected object into two objects at a specified point. | 交互工具：拾取对象后指定断点（断点可投影）；LINE/ARC/CIRCLE/整椭圆与椭圆弧/开放 SPLINE/开放或闭合 LWPOLYLINE；开放曲线拆两段，闭合环在断点开成单段整圈弧；闭合 SPLINE 与其它非曲线种类按名拒绝；一条事务/一步撤销 |
 | 135 | `BREAKLINE` | 部分实现 | Creates a breakline, a polyline that includes the breakline symbol. | 真实编辑：两点之间一条带声明式锯齿折断符号的开放折线；符号宽 15%、深 5%（声明规则）；无块式折断符号。 |
 | 136 | `BREP` | 部分实现 | Removes the history from 3D solids and composite solids, and associativity from surfaces. | 具名拒绝（`brep.unsupported: this build has no 3D solid history/brep model`）。 |
 | 137 | `-BREPLACE` | 部分实现 | At the Command prompt, replaces specified block references with a different block. | 具名拒绝（`-breplace.unsupported`）：BREPLACE 的命令行拼写。 |
@@ -1425,9 +1428,9 @@
 | 159 | `CENTERRESET` | 部分实现 | Resets the centerlines to the current value specified in the CENTEREXE system variable. | 具名拒绝（`centerreset.unsupported: center marks/centerlines are not modeled, so associativity/reset has nothing to edit`）。 |
 | 160 | `CHAMFER` | 已实现 | Bevels or chamfers the edges of two 2D objects or the adjacent faces of a 3D solid. | `Distance`/`Angle`/`Method`/`Trim`/No-Trim/`Polyline` 全顶点；双零距离/角度=仅延伸相交；`Angle=0` 且距离>0 按名拒绝；`Multiple`/命令内 `Undo` 属逐选项提示全局范围；负距离按名拒绝 |
 | 161 | `CHAMFEREDGE` | 部分实现 | Bevels the edges of 3D solids and surfaces. | 一次边拾取的真实编辑：选中恰好一个精确 `AcDb3dSolid`，再拾取一条边（种子 = 像素命中点 `PickHit.point`，非工作平面），内核按容差选最近边并用 `chamferDistanceA/B` 倒角（均须 `> 0`，`0/0` 默认按 `chamferedge.distance_invalid` 拒绝）；一条事务/一步撤销。无子边身份/高亮/预览、无链式/多边、无 `FILLETEDGE`/NURBS；曲面体现在能 lift；写入方重建的合成 seam（两个 use 同属一面）被跳过，点在 rim 上答 `solid.edge_not_found`（两个不同面共享的光滑 seam 仍答 `solid.chamfer_failed`，仅谓词级钉住）；证据仅 Linux 契约，GPU/像素 **NOT VERIFIED**。 |
-| 162 | `CHANGE` | 部分实现 | Changes the properties of existing objects. | 真实编辑：选中模型空间实体移到当前层并重置颜色/线型/线宽为 ByLayer；一条事务/一步撤销；无交互点/特性提示。 |
+| 162 | `CHANGE` | 部分实现 | Changes the properties of existing objects. | 真实编辑：与 `CHPROP` 相同的 typed 属性列表（layer/color/linetype/lineweight/transparency）；一条事务/一步撤销；AutoCAD 的 change-point 分支与交互提示未实现。 |
 | 163 | `CHECKSTANDARDS` | 部分实现 | Checks the current drawing for standards violations. | 具名拒绝（`checkstandards.unsupported: this build has no CAD standards (DWS) model`）。 |
-| 164 | `CHPROP` | 部分实现 | Changes the properties of an object. | 真实编辑：同 CHANGE（移到当前层并重置颜色/线型/线宽为 ByLayer）；一条事务/一步撤销；无交互提示。 |
+| 164 | `CHPROP` | 完整实现 | Changes the properties of an object. | typed 属性列表（layer/color/linetype/lineweight/transparency），与 `SETENTITYPROPERTY` 同一语法/应用器；模型与图纸空间直取实体；未建模属性（text/thickness/material/plot style/linetype scale）按名拒绝；一条事务/一步撤销；无交互提示（全局交互范围）。 |
 | 165 | `CHSPACE` | 完整实现 | On a layout, transfers selected objects between model space and paper space. | 模型↔图纸按**活动视口已解析变换**（`to_paper`/`to_model`，与显示同一解析）改写几何并重指 space，一条事务/一步撤销；无选择/无图纸/无可用视口/视口实体/跨空间混合选择/块内成员/无法精确变换的种类（`MULTILEADER`/`SHAPE`/`OPAQUE`/`COMPOUND`）/标注（本构建无关联模型，无法排除跨空间依赖）逐条具名拒绝且不写 |
 | 166 | `CHURLS` | 部分实现 | Provides a method to edit a previously attached URL for selected objects. | 具名拒绝（`churls.unsupported: this build has no hyperlink storage model`）。 |
 | 167 | `CIRCLE` | 已实现 | Creates a circle. | — |
@@ -1637,7 +1640,7 @@
 | 371 | `FINDINCLUDE` | 部分实现 | Controls the types of text objects included in a search when using the -FIND command. | 会话令牌（默认 ON）；跨块/外部参照文字搜索未实现。 |
 | 372 | `FINDMATCH` | 部分实现 | Controls how the entered text string is compared with text in objects when using the -FIND command. | 会话令牌（默认 OFF）；已实现的 -FIND/FIND 恒按 ASCII 不区分大小写比较。 |
 | 373 | `FLATSHOT` | 部分实现 | Creates a 2D representation of all 3D objects based on the current view. | 具名拒绝（`flatshot.unsupported: 3D solids are not modeled, so there is nothing to flatten`）。 |
-| 374 | `FLATTEN` | 部分实现 | Converts 3D geometry to a projected 2D representation. | 真实编辑：选中 LINE/POLYLINE/CIRCLE/ARC/ELLIPSE/POINT/SPLINE 的 z 置 0；一条事务/一步撤销；MESH/INSERT/3D 按名拒绝（Express 行为简化为 z=0）。 |
+| 374 | `FLATTEN` | 部分实现 | Converts 3D geometry to a projected 2D representation. | 真实编辑：LINE/POLYLINE/CIRCLE/ARC/ELLIPSE/POINT/SPLINE、TEXT/SHAPE/MASK/XY 平面 IMAGE/COMPOUND，以及竖直 INSERT（只改插入点 z 与属性文字 z，不编辑块定义；成员非平/放置倾斜按名拒绝）的 z 置 0；一条事务/一步撤销；MESH/Body3d/派生显示的 DIMENSION/HATCH/MULTILEADER/TABLE 按名拒绝（Express 投影行为简化为 z=0）。 |
 | 375 | `FREESPOT` | 部分实现 | Creates a free spotlight which is a spotlight without a specified target. | 具名拒绝（`freespot.unsupported: 3D light objects are not modeled`）。 |
 | 376 | `FREEWEB` | 部分实现 | Creates a free web light which is a web light without a specified target. | 具名拒绝（`freeweb.unsupported: 3D light objects are not modeled`）。 |
 | 377 | `FS` | 完整实现 | Creates a selection set of all objects that touch the selected object. | Express 工具、仅命令行（无功能区按钮）；取当前唯一选择为种子，把接触的可见模型空间对象并入选择。**`FSMODE=ON` 走传递相切链**（每类几何解析切线，样条用精确 NURBS 导数），`OFF` 与旧直接接触逐字节一致；`fs.chain_nontangent`/`fs.chain_ambiguous`/`fs.chain_bound`（上限 64，不截断）全部在选择变更**之前**拒绝；成功时 `fs.mode` 报告模式/实体数/接触数 | **仍部分实现**：`FSMODE ON| Express 工具、仅命令行；取当前唯一选择为种子并入接触的可见模型空间对象。**`FSMODE=ON` 走传递相切链**（解析切线，样条用精确 NURBS 导数），`OFF` 与旧直接接触逐字节一致；`fs.chain_nontangent`/`.chain_ambiguous`/`.chain_bound`（上限 64，不截断）全部在选择变更前拒绝；**`FSMODE` 是真实命令**（`ON|OFF|1|0`，裸形式报告）且 `SETVAR FSMODE` 可读写；`fs.mode` 报告模式/实体数/接触数 |
