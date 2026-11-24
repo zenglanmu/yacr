@@ -326,6 +326,7 @@ mod dimension_radial;
 mod dimension_space;
 mod divide;
 mod draw2_batch;
+mod draw2_donut;
 mod ellipse;
 mod explode;
 mod extrim;

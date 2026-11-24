@@ -8,7 +8,7 @@
 //! transaction opens, and one successful command is exactly one transaction /
 //! one undo step.
 
-/// `DONUT` — two concentric circles.
+/// `DONUT` — one filled disk or annulus.
 ///
 /// # Input
 ///
@@ -20,14 +20,12 @@
 ///
 /// # Write
 ///
-/// `outer` becomes the first circle and `inner` the second, both
-/// `SemanticGeometry::Circle` on the session's active layer in model space,
-/// stored in one transaction / one undo step through the shared create funnel.
-///
-/// `inner == 0` is accepted (AutoCAD's filled donut form), but a zero-radius
-/// circle is not representable: the command stores the **outer circle only**
-/// and reports the `donut.inner_zero` diagnostic. That is a declared partial
-/// result, never a fabricated second entity.
+/// The command stores **one filled face** through the same triangle-mesh
+/// representation `SOLID` uses (`AcDbSolid`): `inner == 0` is a triangle-fan
+/// disk and `inner > 0` is a triangle strip between the outer and inner rings.
+/// It lands on the session's active layer in model space, in one transaction /
+/// one undo step through the shared create funnel. The face is bounded by the
+/// two rings; there is no separate outline entity.
 ///
 /// # Refusals (before any write)
 ///

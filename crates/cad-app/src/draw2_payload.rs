@@ -16,8 +16,8 @@ use crate::PeditOption;
 /// One payload of the 2026-11-07 draw/modify batch.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Draw2Payload {
-    /// `DONUT`: two concentric circles of `inner` and `outer` radius. The
-    /// zero-inner filled form stores only the outer circle and reports it.
+    /// `DONUT`: one filled disk (`inner == 0`) or annulus of `inner` and `outer`
+    /// radius, stored through the SOLID triangle-mesh path.
     Donut {
         center: Point3,
         inner: f64,

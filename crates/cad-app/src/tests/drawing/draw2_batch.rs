@@ -6,7 +6,7 @@
 use super::*;
 use cad_db::{DbEntity, DbObject, DrawingDatabaseBuilder, Layer};
 
-fn p3(x: f64, y: f64, z: f64) -> Point3 {
+pub(super) fn p3(x: f64, y: f64, z: f64) -> Point3 {
     Point3 { x, y, z }
 }
 
@@ -26,7 +26,7 @@ fn ent(id: u128, geometry: SemanticGeometry, order: i64) -> DbEntity {
     }
 }
 
-fn build(entities: Vec<DbEntity>) -> (Application, SessionState) {
+pub(super) fn build(entities: Vec<DbEntity>) -> (Application, SessionState) {
     let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
     builder
         .insert_layer(Layer {
@@ -69,13 +69,13 @@ fn ref_of(entity: u128) -> SelectionRef {
     }
 }
 
-fn select(session: &mut SessionState, ids: &[u128]) {
+pub(super) fn select(session: &mut SessionState, ids: &[u128]) {
     session
         .selection
         .replace(ids.iter().map(|id| ref_of(*id)).collect::<Vec<_>>());
 }
 
-fn exec(
+pub(super) fn exec(
     app: &mut Application,
     session: &mut SessionState,
     id: CommandId,
@@ -87,18 +87,18 @@ fn exec(
     )
 }
 
-fn revision(app: &Application) -> Revision {
+pub(super) fn revision(app: &Application) -> Revision {
     app.workspace.documents[&DocumentId(1)].drawing.revision()
 }
 
-fn undo_depth(app: &Application) -> usize {
+pub(super) fn undo_depth(app: &Application) -> usize {
     app.history
         .get(&DocumentId(1))
         .map(|history| history.undo_depth())
         .unwrap_or(0)
 }
 
-fn entity(app: &Application, id: u128) -> DbEntity {
+pub(super) fn entity(app: &Application, id: u128) -> DbEntity {
     app.workspace.documents[&DocumentId(1)]
         .drawing
         .entity(EntityId(id))
@@ -106,7 +106,7 @@ fn entity(app: &Application, id: u128) -> DbEntity {
         .expect("entity must exist")
 }
 
-fn assert_refused_unchanged(
+pub(super) fn assert_refused_unchanged(
     app: &mut Application,
     session: &mut SessionState,
     id: CommandId,
@@ -126,113 +126,9 @@ fn assert_refused_unchanged(
     assert_eq!(undo_depth(app), depth, "a refusal must not record undo");
 }
 
-fn undo(app: &mut Application, session: &mut SessionState) {
+pub(super) fn undo(app: &mut Application, session: &mut SessionState) {
     app.execute(session, command(CommandId::Undo, CommandPayload::None))
         .unwrap();
-}
-
-// ---------------------------------------------------------------- DONUT ----
-
-#[test]
-fn donut_creates_two_concentric_circles_in_one_undo() {
-    let (mut app, mut session) = build(Vec::new());
-    let before = revision(&app);
-    let outcome = exec(
-        &mut app,
-        &mut session,
-        CommandId::Donut,
-        Draw2Payload::Donut {
-            center: p3(2.0, 3.0, 0.0),
-            inner: 3.0,
-            outer: 5.0,
-        },
-    )
-    .unwrap();
-    assert_eq!(outcome.objects.len(), 2);
-    let changes = outcome.changes.expect("change set");
-    assert_eq!(changes.after.0, before.0 + 1, "one revision bump");
-    assert_eq!(
-        changes.changes.len(),
-        2,
-        "two entity inserts in one transaction"
-    );
-    assert_eq!(undo_depth(&app), 1);
-
-    let radii: Vec<f64> = outcome
-        .objects
-        .iter()
-        .map(|object| match &entity(&app, object.0).geometry {
-            SemanticGeometry::Circle { radius, .. } => *radius,
-            other => panic!("expected a circle, got {other:?}"),
-        })
-        .collect();
-    assert_eq!(radii, vec![5.0, 3.0], "outer first, inner second");
-    let ids: Vec<u128> = outcome.objects.iter().map(|object| object.0).collect();
-    undo(&mut app, &mut session);
-    assert!(ids.iter().all(|id| app.workspace.documents[&DocumentId(1)]
-        .drawing
-        .entity(EntityId(*id))
-        .is_none()));
-    assert_eq!(undo_depth(&app), 0);
-}
-
-#[test]
-fn donut_refuses_bad_radii_and_a_non_finite_centre() {
-    let (mut app, mut session) = build(Vec::new());
-    assert_refused_unchanged(
-        &mut app,
-        &mut session,
-        CommandId::Donut,
-        Draw2Payload::Donut {
-            center: p3(0.0, 0.0, 0.0),
-            inner: -1.0,
-            outer: 2.0,
-        },
-        "donut.invalid_radius",
-    );
-    assert_refused_unchanged(
-        &mut app,
-        &mut session,
-        CommandId::Donut,
-        Draw2Payload::Donut {
-            center: p3(0.0, 0.0, 0.0),
-            inner: 2.0,
-            outer: 2.0,
-        },
-        "donut.radius_order",
-    );
-    assert_refused_unchanged(
-        &mut app,
-        &mut session,
-        CommandId::Donut,
-        Draw2Payload::Donut {
-            center: p3(f64::NAN, 0.0, 0.0),
-            inner: 1.0,
-            outer: 2.0,
-        },
-        "donut.invalid_point",
-    );
-}
-
-#[test]
-fn donut_zero_inner_stores_the_outer_circle_only() {
-    let (mut app, mut session) = build(Vec::new());
-    let outcome = exec(
-        &mut app,
-        &mut session,
-        CommandId::Donut,
-        Draw2Payload::Donut {
-            center: p3(0.0, 0.0, 0.0),
-            inner: 0.0,
-            outer: 4.0,
-        },
-    )
-    .unwrap();
-    assert_eq!(outcome.objects.len(), 1);
-    assert!(outcome
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.code == "donut.inner_zero"));
 }
 
 // ---------------------------------------------------------------- SOLID ----
