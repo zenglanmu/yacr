@@ -2278,7 +2278,7 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 | `LAYOUT` `NEW`/`RENAME`/`DELETE` | 真实创建/重命名/删除布局；删除级联 `plot_settings`，删除活动布局时回退到首个剩余布局或模型空间；一步撤销 | `COPY`/`TEMPLATE` 未实现 |
 | `LAYOUTMERGE` | 源布局的图纸空间实体移入目标，删除源布局并级联 plot settings；一步撤销；**升为完整实现** | 同一布局拒绝 |
 | `LAYOUTWIZARD` | 真实创建布局 + 纸张设置 + 等分格视口排列，一步撤销 | 打印设备/打印样式/标题栏（全局范围）；仅等分格 |
-| `VPORTS` / `-VPORTS` | 活动布局创建简单 rows×cols 网格（四角 clip、`model_per_paper=1`），一步撤销 | 命名/标准视口配置未实现 |
+| `VPORTS` / `-VPORTS` | 活动布局创建等分格视口网格：显式 `rows×cols` 或对称标准配置 `SINGLE`/`2 VERTICAL 或 HORIZONTAL`/`3 VERTICAL 或 HORIZONTAL`/`4 [EQUAL]`（同一网格助手、四角 clip、`model_per_paper=1`），一步撤销；模型空间按 `vports.paper_space_required` 拒绝 | 命名配置（`SAVE`/`RESTORE`/`DELETE`/`JOIN`）按 `vports.named_configuration_not_implemented` 拒绝：无持久化命名视口表（新 `.ymodel` table/minor 不在本切片）；非对称标准配置（`Three:Left` 等）按 `vports.asymmetric_configuration_not_implemented` 拒绝且不近似 |
 | `VPCLIP RECT` | 对活动布局第一个视口应用矩形裁剪，一步撤销 | 无视口选择；多边形裁剪未实现 |
 | `VPSCALE` | 设置活动布局第一个视口比例（对角线 `1/factor`，保留模型锚点），一步撤销 | 无视口选择 |
 | `PAGESETUP` / `-PAGESETUP` | **完整实现**：裸命令只读报告；typed 形式写入 Authored `PLOTSETTINGS`（纸张/比例/旋转），非法布局/纸名/尺寸/比例在写前按名拒绝，一步撤销 | 绘图仪/CTB/STB 属 ADR 全局范围 |

@@ -27,7 +27,7 @@ import {
 } from './argument-mleader-grammar.ts';
 import {
   isDashParametersArgument, isLayoutArgument, isLinetypeArgument, isMlineArgument,
-  isTableExportArgument, splitQuotedTokens,
+  isTableExportArgument, parseVportsGrid, splitQuotedTokens,
 } from './argument-extras-grammar.ts';
 import { isAddSelectedArgument, isAliasEditArgument, isMvSetupArgument } from './argument-record-grammar.ts';
 import { ACTION_RECORDER_ARGUMENT_COMMANDS } from './argument-recorder-commands.ts';
@@ -864,14 +864,6 @@ function isLeaderArgument(argument: string): boolean {
   const parts = tokens(argument);
   return parts.length >= 3
     && isCoordinatePair(parts[0]) && isCoordinatePair(parts[1]);
-}
-
-/** `VPORTS <rows> <cols>` / `-VPORTS`: two positive whole numbers. */
-function parseVportsGrid(argument: string): boolean {
-  const parts = tokens(argument);
-  return parts.length === 2
-    && /^[0-9]+$/.test(parts[0]) && /^[0-9]+$/.test(parts[1])
-    && Number(parts[0]) >= 1 && Number(parts[1]) >= 1;
 }
 
 /**

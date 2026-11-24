@@ -90,6 +90,18 @@ pub enum LayoutPayload {
     /// `VPORTS <rows> <cols>`: build a real `rows * cols` viewport grid in the
     /// active paper layout as one reversible write.
     Viewports { rows: u32, cols: u32 },
+    /// `VPORTS SINGLE|2 VERTICAL|2 HORIZONTAL|3 VERTICAL|3 HORIZONTAL|4 [EQUAL]`:
+    /// one documented **standard** viewport configuration, resolved to the same
+    /// equal-cell grid [`Self::Viewports`] writes.
+    ///
+    /// The configuration is a typed member of the bounded
+    /// [`StandardViewportConfiguration`] set, never a free-form name: a spelling
+    /// outside that set is refused by the parser before any document is touched.
+    /// Named (`SAVE`/`RESTORE`/`DELETE`/`JOIN`) configurations are **not**
+    /// modelled and are refused by name (see [`StandardViewportConfiguration`]).
+    ViewportsConfiguration {
+        configuration: StandardViewportConfiguration,
+    },
     /// `VPCLIP RECT <minx> <miny> <maxx> <maxy>`: validate the rectangle and
     /// replace the clip of the targeted viewport.
     ///
@@ -248,6 +260,70 @@ impl WizardArrangement {
             text,
             supported.join(", ")
         )
+    }
+}
+
+/// The bounded set of **standard** viewport configurations `VPORTS` may create.
+///
+/// AutoCAD's Standard configurations include asymmetric cells (`Three:Left`,
+/// `Four:Below`, …). This build writes every viewport through one **equal-cell**
+/// grid helper, so only the symmetric arrangements below are members. An
+/// asymmetric spelling is refused by the parser with
+/// `vports.asymmetric_configuration_not_implemented` and writes nothing; it is
+/// never approximated by the nearest equal grid.
+///
+/// Each member resolves to the `(rows, cols)` grid in [`Self::grid`] and is
+/// written by the same `set_layout_viewports` path as `VPORTS <rows> <cols>`:
+/// one revision and one undo step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StandardViewportConfiguration {
+    /// `SINGLE`: one full-sheet viewport (`1 x 1`).
+    Single,
+    /// `TWO:VERTICAL`: two side-by-side cells (`1 x 2`).
+    TwoVertical,
+    /// `TWO:HORIZONTAL`: two stacked cells (`2 x 1`).
+    TwoHorizontal,
+    /// `THREE:VERTICAL`: three side-by-side cells (`1 x 3`).
+    ThreeVertical,
+    /// `THREE:HORIZONTAL`: three stacked cells (`3 x 1`).
+    ThreeHorizontal,
+    /// `FOUR:EQUAL`: a `2 x 2` grid of four cells.
+    FourEqual,
+}
+
+impl StandardViewportConfiguration {
+    /// Every supported configuration, in the order refusals list them.
+    pub const ALL: [Self; 6] = [
+        Self::Single,
+        Self::TwoVertical,
+        Self::TwoHorizontal,
+        Self::ThreeVertical,
+        Self::ThreeHorizontal,
+        Self::FourEqual,
+    ];
+
+    /// The `(rows, cols)` grid of this configuration.
+    pub fn grid(self) -> (u32, u32) {
+        match self {
+            Self::Single => (1, 1),
+            Self::TwoVertical => (1, 2),
+            Self::TwoHorizontal => (2, 1),
+            Self::ThreeVertical => (1, 3),
+            Self::ThreeHorizontal => (3, 1),
+            Self::FourEqual => (2, 2),
+        }
+    }
+
+    /// The documented AutoCAD spelling used in diagnostics.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Single => "Single",
+            Self::TwoVertical => "Two:Vertical",
+            Self::TwoHorizontal => "Two:Horizontal",
+            Self::ThreeVertical => "Three:Vertical",
+            Self::ThreeHorizontal => "Three:Horizontal",
+            Self::FourEqual => "Four:Equal",
+        }
     }
 }
 

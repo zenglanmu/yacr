@@ -280,6 +280,7 @@ mod layout_copy;
 mod layout_cvport;
 mod layout_page_setup;
 mod layout_paper_scale;
+mod layout_vports;
 mod layout_wizard;
 mod locked_layers;
 mod measure_extra;

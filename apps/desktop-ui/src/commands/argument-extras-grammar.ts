@@ -220,3 +220,42 @@ export function isDashParametersArgument(argument: string): boolean {
   if (option === 'NEW' || option === 'N') return parts.length >= 4;
   return false;
 }
+
+/**
+ * `VPORTS` / `-VPORTS`: the explicit `<rows> <cols>` grid or a documented
+ * Standard configuration spelling.
+ *
+ * Mirrors `commands/layout.rs::parse_vports_argument`. The asymmetric Standard
+ * spellings (`Three:Left`, `Four:Below`, …) and the named options
+ * (`SAVE`/`RESTORE`/`DELETE`/`JOIN`) are admitted on purpose so the host's own
+ * `vports.asymmetric_configuration_not_implemented` /
+ * `vports.named_configuration_not_implemented` refusals can speak. A bare
+ * `2`/`3` stays incomplete: the host requires an orientation.
+ */
+export function parseVportsGrid(argument: string): boolean {
+  const parts = tokens(argument);
+  if (parts.length === 2
+      && /^[0-9]+$/.test(parts[0]) && /^[0-9]+$/.test(parts[1])
+      && Number(parts[0]) >= 1 && Number(parts[1]) >= 1) {
+    return true;
+  }
+  const normalized = argument.toUpperCase().replace(/[\s:_\-/]/g, '');
+  const symmetric = new Set([
+    'SINGLE',
+    'TWOVERTICAL', '2VERTICAL',
+    'TWOHORIZONTAL', '2HORIZONTAL',
+    'THREEVERTICAL', '3VERTICAL',
+    'THREEHORIZONTAL', '3HORIZONTAL',
+    'FOUR', 'FOUREQUAL', '4', '4EQUAL',
+  ]);
+  if (symmetric.has(normalized)) return true;
+  const asymmetric = new Set([
+    'THREELEFT', '3LEFT', 'THREERIGHT', '3RIGHT',
+    'THREEABOVE', '3ABOVE', 'THREEBELOW', '3BELOW',
+    'FOURLEFT', '4LEFT', 'FOURRIGHT', '4RIGHT',
+    'FOURABOVE', '4ABOVE', 'FOURBELOW', '4BELOW',
+  ]);
+  if (asymmetric.has(normalized)) return true;
+  const first = (parts[0] ?? '').toUpperCase();
+  return ['SAVE', 'RESTORE', 'DELETE', 'JOIN'].includes(first);
+}

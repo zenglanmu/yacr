@@ -64,6 +64,15 @@ test('the typed layout/viewport grammars mirror the host boundary', () => {
   assert.equal(vports('2 3'), true);
   assert.equal(vports('0 3'), false);
   assert.equal(vports('2'), false);
+  assert.equal(vports('SINGLE'), true);
+  assert.equal(vports('2 vertical'), true);
+  assert.equal(vports('two:horizontal'), true);
+  assert.equal(vports('3 HORIZONTAL'), true);
+  assert.equal(vports('4'), true);
+  assert.equal(vports('four:equal'), true);
+  // Asymmetric and named forms are admitted so the host's stable refusal can speak.
+  assert.equal(vports('three:left'), true);
+  assert.equal(vports('RESTORE MyView'), true);
   assert.equal(ARGUMENT_COMMANDS['-VPORTS'].parse('2 3'), true, 'the alias shares the grammar');
 
   const vpclip = ARGUMENT_COMMANDS.VPCLIP.parse;

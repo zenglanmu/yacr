@@ -367,7 +367,7 @@
 | `-UNITS` | 部分实现 | 只读报告固定单位显示规则（`-units.*` 诊断码）；Units 对话框/逐图纸单位表未实现。 |
 | `-VIEW` | 部分实现 | `VIEW` 的别名，同一实现 |
 | `-VISUALSTYLES` | 部分实现 | 具名拒绝（`-visualstyles.unsupported: no visual-style/3D display model; VSCURRENT owns the 2D display token`）。 |
-| `-VPORTS` | 部分实现 | `VPORTS` 的别名，同一实现；同一边界 |
+| `-VPORTS` | 部分实现 | `VPORTS` 的别名，同一实现（显式网格 + 对称标准配置）；同一边界 |
 | `-WBLOCK` | 部分实现 | 具名拒绝（`-wblock.unsupported`）：将块定义写入独立图形文件未实现。 |
 | `-XBIND` | 部分实现 | 具名拒绝（`-xbind.unsupported`）：本构建无外部参照绑定/插入模型；命令行拼写。 |
 | `-XREF` | 部分实现 | 只读：外部参照导入溯源报告（`-xref.entry`/`-xref.summary`）；附着/卸载/重载/绑定未实现。 |
@@ -1219,7 +1219,7 @@
 | `VPMAX` | 完整实现 | 真实最大化编辑态：保存相机+视图模式+工作平面+空间的 `ViewSnapshot`，`VPMIN` 位级恢复；一次一个视口；无宿主差异化渲染（全局宿主/像素边界，不计命令缺口） |
 | `VPMIN` | 完整实现 | 位级恢复 `VPMAX` 快照并清标记；空状态 `vpmin.nothing_to_restore` 是可重入 no-op，不是缺口 |
 | `VPOINT` | 部分实现 | 向量或 `TOP/BOTTOM/FRONT/BACK/LEFT/RIGHT`；零/非有限向量拒绝；不改模型；向量形式进入 3D 透视 |
-| `VPORTS` | 部分实现 | 在活动图纸布局创建简单 rows×cols 视口网格（四角 clip、`model_per_paper=1`），一条事务/一步撤销；命名/标准视口配置未实现 |
+| `VPORTS` | 部分实现 | 在活动图纸布局创建等分格视口网格：显式 `rows×cols`（四角 clip、`model_per_paper=1`）或**对称标准配置** `SINGLE`/`2 VERTICAL 或 HORIZONTAL`/`3 VERTICAL 或 HORIZONTAL`/`4 [EQUAL]`（同一网格助手），一条事务/一步撤销；模型空间按 `vports.paper_space_required` 拒绝（无模型空间视口配置模型）；命名配置（`SAVE`/`RESTORE`/`DELETE`/`JOIN`）按 `vports.named_configuration_not_implemented` 拒绝（无持久化命名视口表，新 `.ymodel` table/minor 不在本切片），非对称标准配置（`Three:Left` 等）按 `vports.asymmetric_configuration_not_implemented` 拒绝且不近似 |
 | `VPSCALE` | 完整实现 | 设置 **`CVPORT` 当前视口**的比例（无索引），显式索引可指定视口；存储对角线 `1/factor` 并重算平移以保留模型锚点；越界索引 `vpscale.unknown_viewport`；一条事务/一步撤销 |
 | `VPSYNC` | 完整实现 | `VPSYNC [<master>]`：把 **0 基** 主视口（默认 `0`）的 `model_to_paper` 复制到同布局其余视口；索引按视口数校验（越界 `vpsync.master_out_of_range`、不 clamp），主视口自身不改写；一条事务/一步撤销，已同步为 `vpsync.unchanged` 空操作 |
 | `VSCURRENT` | 部分实现 | 会话级 **3D body 视觉样式**（**默认 SHADED**，与 AutoCAD 的 2D-wireframe 初始值**有意偏离**，以保留 token 前的填充网格显示）；接受 `WIREFRAME`/`2DWIREFRAME`/`2D` → wireframe（有存储 body 边线用边线，否则用去重三角形边段），`SHADED`/`SHADEDWITHEDGES` → 填充；其余样式 `vscurrent.style_not_implemented` | **仅 body**（只切 `RepresentationContext::body_wireframe`，其它几何不变）；无库写/无 revision/无历史；保存与矢量出图**不接收**该标志（出图仍为阴影/填充）；契约证据 only，像素/GPU NOT VERIFIED |
@@ -2214,8 +2214,8 @@
 | 939 | `VPMAX` | 已实现 | Expands the current layout viewport for editing. | 真实最大化编辑态：保存相机+视图模式+工作平面+空间的 `ViewSnapshot`，`VPMIN` 位级恢复；一次一个视口；无宿主差异化渲染（无像素证据） |
 | 940 | `VPMIN` | 部分实现 | Restores the current layout viewport. | 恢复会话标记；空状态 `vpmin.nothing_to_restore` |
 | 941 | `VPOINT` | 部分实现 | Sets the viewing direction for a 3D visualization of the drawing. | 向量或 `TOP/BOTTOM/FRONT/BACK/LEFT/RIGHT`；零/非有限向量拒绝；不改模型；向量形式进入 3D 透视 |
-| 942 | `-VPORTS` | 部分实现 | Creates multiple viewports in model space or paper space. | `VPORTS` 的别名，同一实现；同一边界 |
-| 943 | `VPORTS` | 部分实现 | Creates multiple viewports in model space or in a layout (paper space). | 在活动图纸布局创建简单 rows×cols 视口网格（四角 clip、`model_per_paper=1`），一条事务/一步撤销；命名/标准视口配置未实现 |
+| 942 | `-VPORTS` | 部分实现 | Creates multiple viewports in model space or paper space. | `VPORTS` 的别名，同一实现；同一边界（显式网格 + 对称标准配置；命名/非对称配置具名拒绝） |
+| 943 | `VPORTS` | 部分实现 | Creates multiple viewports in model space or in a layout (paper space). | 在活动图纸布局创建等分格视口网格：显式 `rows×cols` 或对称标准配置 `SINGLE`/`2`/`3`/`4`（同一网格助手），一条事务/一步撤销；模型空间按 `vports.paper_space_required` 拒绝（无模型空间视口配置模型）；命名配置按 `vports.named_configuration_not_implemented` 拒绝（无持久化命名视口表，新 `.ymodel` table/minor 不在本切片），非对称标准配置按 `vports.asymmetric_configuration_not_implemented` 拒绝且不近似 |
 | 944 | `VPSCALE` | 完整实现 | On a layout, displays the scale of the current viewport or of a selected layout viewport. | 目标为 `CVPORT` 当前视口（无索引）或显式索引；写对角线 `1/factor` 并保留模型锚点；越界 `vpscale.unknown_viewport`；一条事务/一步撤销 |
 | 945 | `VPSYNC` | 完整实现 | Aligns the views in one or more adjacent layout viewports with a master layout viewport. | `VPSYNC [<master>]`：把**0 基**主视口（默认 `0`）的 `model_to_paper` 复制到同布局其余视口；索引按视口数校验（越界 `vpsync.master_out_of_range`、不 clamp），主视口自身不改写；一条事务/一步撤销，已同步为 `vpsync.unchanged` 空操作 |
 | 946 | `VSCURRENT` | 部分实现 | Sets the visual style in the current viewport. | 会话级 **3D body 视觉样式**（**默认 SHADED**，与 AutoCAD 的 2D-wireframe 初始值**有意偏离**，以保留 token 前的填充网格显示）；接受 `WIREFRAME`/`2DWIREFRAME`/`2D` → wireframe（有存储 body 边线用边线，否则用去重三角形边段），`SHADED`/`SHADEDWITHEDGES` → 填充，其余样式 `vscurrent.style_not_implemented`；**仅 body**（只切 `RepresentationContext::body_wireframe`，其它几何不变），无库写/无 revision/无历史，保存与矢量出图不接收该标志；契约证据 only，像素/GPU NOT VERIFIED |
