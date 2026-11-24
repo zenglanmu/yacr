@@ -1,10 +1,14 @@
 //! `-FIND` / `FIND` (2026-11-07): report or replace text across the whole
 //! drawing — model space and every paper-space layout.
 //!
-//! Search is a plain **ASCII case-insensitive substring** of what the viewport
-//! draws. Every text channel is matched on the **plain-text projection** of its
-//! stored value: MTEXT, a text-bearing MULTILEADER (which stores the same
-//! `\P`/`\f…;` markup), single-line `AcDbText` (and ATTRIB/ATTDEF, which the
+//! Search is a plain substring of what the viewport draws, ASCII
+//! case-insensitive by default and **case-sensitive** when the session
+//! `FINDMATCH` token is ON ([`crate::session_state::DraftingExtras::find_match_case`]).
+//! The comparison mode is one flag threaded through every channel below, so the
+//! report and the replace always agree. Every text channel is matched on the
+//! **plain-text projection** of its stored value: MTEXT, a text-bearing
+//! MULTILEADER (which stores the same `\P`/`\f…;` markup), single-line
+//! `AcDbText` (and ATTRIB/ATTDEF, which the
 //! importer stores as `Text` geometry) and table cells — because
 //! `cad-representation`'s provider shapes all of them through the same
 //! `parse_mtext` (see [`mtext_preview_text`]; a table's display children are
@@ -81,8 +85,13 @@ const PREVIEW_CHARS: usize = 60;
 
 impl Application {
     /// Apply one `-FIND` (report only) or `FIND` (report or replace) command.
+    ///
+    /// The comparison mode is the session's own `FINDMATCH` token: OFF (the
+    /// default) compares ASCII case-insensitively, ON compares exact bytes, and
+    /// both the report and the replacement use the one flag.
     pub(crate) fn find_text(
         &mut self,
+        session: &SessionState,
         command: &Command,
         replace_allowed: bool,
     ) -> CadResult<CommandOutcome> {
@@ -107,6 +116,7 @@ impl Application {
         }
 
         let document_id = command.document;
+        let case_sensitive = session.drafting_extras.find_match_case();
         let drawing = self
             .workspace
             .documents
@@ -117,8 +127,8 @@ impl Application {
 
         // Search the whole drawing: model space, then every paper-space layout.
         // Block definitions are a separate, read-only channel.
-        let hits = collect_hits(&drawing, needle);
-        let block_hits = collect_block_hits(&drawing, needle);
+        let hits = collect_hits(&drawing, needle, case_sensitive);
+        let block_hits = collect_block_hits(&drawing, needle, case_sensitive);
 
         // Replacement works per entity; several cell hits on one table collapse
         // into one update so the table is rebuilt once. The space travels with
@@ -131,17 +141,17 @@ impl Application {
             .collect();
 
         let Some(replacement) = replacement else {
-            return Ok(report_outcome(&hits, &block_hits, needle));
+            return Ok(report_outcome(&hits, &block_hits, needle, case_sensitive));
         };
         if matches.is_empty() {
-            return Ok(report_outcome(&hits, &block_hits, needle));
+            return Ok(report_outcome(&hits, &block_hits, needle, case_sensitive));
         }
 
         // Plan every replacement in every space first: all-or-nothing, no
         // transaction on a refusal, so a refusal writes nothing anywhere.
         let mut planned: Vec<(FindSpace, DbEntity, DbEntity)> = Vec::new();
         for (space, before) in &matches {
-            let after = replace_in_entity(before, needle, replacement)?;
+            let after = replace_in_entity(before, needle, replacement, case_sensitive)?;
             if after != *before {
                 planned.push((space.clone(), before.clone(), after));
             }
@@ -227,13 +237,21 @@ impl Application {
     }
 
     /// `-FIND` wrapper: report only.
-    pub(crate) fn find_report(&mut self, command: &Command) -> CadResult<CommandOutcome> {
-        self.find_text(command, false)
+    pub(crate) fn find_report(
+        &mut self,
+        session: &SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        self.find_text(session, command, false)
     }
 
     /// `FIND` wrapper: report, or replace when the payload carries one.
-    pub(crate) fn find_replace(&mut self, command: &Command) -> CadResult<CommandOutcome> {
-        self.find_text(command, true)
+    pub(crate) fn find_replace(
+        &mut self,
+        session: &SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        self.find_text(session, command, true)
     }
 }
 
@@ -309,17 +327,17 @@ impl FindHit {
 
 /// Every editable hit in the drawing: model space first, then each paper-space
 /// layout in layout-id order.
-fn collect_hits(drawing: &DrawingDatabase, needle: &str) -> Vec<FindHit> {
+fn collect_hits(drawing: &DrawingDatabase, needle: &str, case_sensitive: bool) -> Vec<FindHit> {
     let mut hits = Vec::new();
     for entity in drawing.model_space() {
-        hits.extend(find_hits(entity, FindSpace::Model, needle));
+        hits.extend(find_hits(entity, FindSpace::Model, needle, case_sensitive));
     }
     let mut layouts: Vec<_> = drawing.layouts().collect();
     layouts.sort_by_key(|layout| layout.id.0);
     for layout in layouts {
         let space = FindSpace::Layout(layout.id, layout.name.clone());
         for entity in drawing.layout_entities(layout.id) {
-            hits.extend(find_hits(entity, space.clone(), needle));
+            hits.extend(find_hits(entity, space.clone(), needle, case_sensitive));
         }
     }
     hits
@@ -338,14 +356,18 @@ fn collect_hits(drawing: &DrawingDatabase, needle: &str) -> Vec<FindHit> {
 /// Only the block's **drawn** members are searched
 /// ([`DrawingDatabase::block_entities`]), so a dynamic block's inactive
 /// visibility state is not reported — matching what the viewport draws.
-fn collect_block_hits(drawing: &DrawingDatabase, needle: &str) -> Vec<FindHit> {
+fn collect_block_hits(
+    drawing: &DrawingDatabase,
+    needle: &str,
+    case_sensitive: bool,
+) -> Vec<FindHit> {
     let mut blocks: Vec<_> = drawing.blocks().collect();
     blocks.sort_by_key(|block| block.id.0);
     let mut hits = Vec::new();
     for block in blocks {
         let space = FindSpace::Block(block.id, drawing.block_name(block.id).map(str::to_string));
         for entity in drawing.block_entities(block.id) {
-            hits.extend(find_hits(entity, space.clone(), needle));
+            hits.extend(find_hits(entity, space.clone(), needle, case_sensitive));
         }
     }
     hits
@@ -354,13 +376,18 @@ fn collect_block_hits(drawing: &DrawingDatabase, needle: &str) -> Vec<FindHit> {
 /// Every match in one entity. A table is searched cell by cell so a needle
 /// cannot span two cells; every other text-bearing entity contributes at most
 /// one hit.
-fn find_hits(entity: &DbEntity, space: FindSpace, needle: &str) -> Vec<FindHit> {
+fn find_hits(
+    entity: &DbEntity,
+    space: FindSpace,
+    needle: &str,
+    case_sensitive: bool,
+) -> Vec<FindHit> {
     match &entity.geometry {
         SemanticGeometry::Text { text, .. } => {
             // Both MTEXT and single-line TEXT are matched against what they
             // draw: the viewport parses the same control content for each.
             let shown = mtext_preview_text(text);
-            if contains(&shown, needle) {
+            if contains(&shown, needle, case_sensitive) {
                 vec![FindHit::entity_hit(entity, space, shown)]
             } else {
                 Vec::new()
@@ -370,7 +397,7 @@ fn find_hits(entity: &DbEntity, space: FindSpace, needle: &str) -> Vec<FindHit> 
             if leader.content().kind() == MLeaderContentKind::Text =>
         {
             let shown = mtext_preview_text(&leader.text().string);
-            if contains(&shown, needle) {
+            if contains(&shown, needle, case_sensitive) {
                 vec![FindHit::entity_hit(entity, space, shown)]
             } else {
                 Vec::new()
@@ -386,7 +413,7 @@ fn find_hits(entity: &DbEntity, space: FindSpace, needle: &str) -> Vec<FindHit> 
                         continue;
                     }
                     let shown = mtext_preview_text(&cell.text);
-                    if contains(&shown, needle) {
+                    if contains(&shown, needle, case_sensitive) {
                         hits.push(FindHit::cell_hit(
                             entity,
                             space.clone(),
@@ -436,7 +463,12 @@ fn id_list(hits: &[FindHit]) -> String {
     }
 }
 
-fn report_outcome(hits: &[FindHit], blocks: &[FindHit], needle: &str) -> CommandOutcome {
+fn report_outcome(
+    hits: &[FindHit],
+    blocks: &[FindHit],
+    needle: &str,
+    case_sensitive: bool,
+) -> CommandOutcome {
     // One section per space, so a hit's layout is visible while the total and
     // the per-entity ids stay where they were.
     let spaces = space_groups(hits)
@@ -453,7 +485,7 @@ fn report_outcome(hits: &[FindHit], blocks: &[FindHit], needle: &str) -> Command
         .join(" ; ");
     let preview = hits
         .first()
-        .map(|hit| preview(&hit.text, needle))
+        .map(|hit| preview(&hit.text, needle, case_sensitive))
         .unwrap_or_default();
     // Name the matching cells, so a table's per-cell matches are visible rather
     // than summarised as one joined string.
@@ -487,6 +519,13 @@ fn report_outcome(hits: &[FindHit], blocks: &[FindHit], needle: &str) -> Command
     } else {
         format!("; block definitions, read-only (edit with BEDIT): {blocks}")
     };
+    // The comparison mode is part of the result: a user reading `0 match(es)`
+    // must be able to tell whether case mattered.
+    let mode = if case_sensitive {
+        " (FINDMATCH on: case-sensitive)"
+    } else {
+        " (FINDMATCH off: ASCII case-insensitive)"
+    };
     CommandOutcome {
         objects: Vec::new(),
         changes: None,
@@ -494,7 +533,7 @@ fn report_outcome(hits: &[FindHit], blocks: &[FindHit], needle: &str) -> Command
             object: None,
             code: "find.result".into(),
             message: format!(
-                "FIND: {} match(es) for '{needle}' [{spaces}] first: {preview}{cells}{blocks}",
+                "FIND: {} match(es) for '{needle}'{mode} [{spaces}] first: {preview}{cells}{blocks}",
                 hits.len(),
             ),
         }],
@@ -503,12 +542,12 @@ fn report_outcome(hits: &[FindHit], blocks: &[FindHit], needle: &str) -> Command
     }
 }
 
-fn contains(haystack: &str, needle: &str) -> bool {
-    !occurrences(haystack, needle).is_empty()
+fn contains(haystack: &str, needle: &str, case_sensitive: bool) -> bool {
+    !occurrences(haystack, needle, case_sensitive).is_empty()
 }
 
 /// Every non-overlapping ASCII case-insensitive occurrence, as byte ranges.
-fn occurrences(haystack: &str, needle: &str) -> Vec<(usize, usize)> {
+fn occurrences(haystack: &str, needle: &str, case_sensitive: bool) -> Vec<(usize, usize)> {
     if needle.is_empty() {
         return Vec::new();
     }
@@ -517,7 +556,12 @@ fn occurrences(haystack: &str, needle: &str) -> Vec<(usize, usize)> {
     let mut found = Vec::new();
     let mut index = 0;
     while index + needle.len() <= hay.len() {
-        if hay[index..index + needle.len()].eq_ignore_ascii_case(needle) {
+        let equal = if case_sensitive {
+            &hay[index..index + needle.len()] == needle
+        } else {
+            hay[index..index + needle.len()].eq_ignore_ascii_case(needle)
+        };
+        if equal {
             found.push((index, index + needle.len()));
             index += needle.len();
         } else {
@@ -613,10 +657,15 @@ const PARTIAL_CODE: &str = "find.mtext_partial_code";
 ///   replacement as typed (control content has no literal form for text such as
 ///   `%%d`, `^I` or a stray trailing `\`), so the drawn result would differ from
 ///   the request. Nothing is written.
-fn replace_mtext_markup(raw: &str, needle: &str, replacement: &str) -> CadResult<String> {
+fn replace_mtext_markup(
+    raw: &str,
+    needle: &str,
+    replacement: &str,
+    case_sensitive: bool,
+) -> CadResult<String> {
     let projection = mtext_projection(raw);
     let text = projection.text();
-    let matches = occurrences(&text, needle);
+    let matches = occurrences(&text, needle, case_sensitive);
     if matches.is_empty() {
         return Ok(raw.to_string());
     }
@@ -751,7 +800,12 @@ fn push_mtext_escaped(out: &mut String, ch: char) {
     }
 }
 
-fn replace_in_entity(entity: &DbEntity, needle: &str, replacement: &str) -> CadResult<DbEntity> {
+fn replace_in_entity(
+    entity: &DbEntity,
+    needle: &str,
+    replacement: &str,
+    case_sensitive: bool,
+) -> CadResult<DbEntity> {
     let mut after = entity.clone();
     match &entity.geometry {
         SemanticGeometry::Text {
@@ -776,7 +830,7 @@ fn replace_in_entity(entity: &DbEntity, needle: &str, replacement: &str) -> CadR
                 return Err(text_policy::single_line_newline_error("FIND"));
             }
             after.geometry = SemanticGeometry::Text {
-                text: replace_mtext_markup(text, needle, replacement)?,
+                text: replace_mtext_markup(text, needle, replacement, case_sensitive)?,
                 position: *position,
                 style: *style,
                 height: *height,
@@ -792,7 +846,8 @@ fn replace_in_entity(entity: &DbEntity, needle: &str, replacement: &str) -> CadR
         }
         SemanticGeometry::MultiLeader(leader) => {
             // A text-bearing multileader stores the same MTEXT markup.
-            let replaced = replace_mtext_markup(&leader.text().string, needle, replacement)?;
+            let replaced =
+                replace_mtext_markup(&leader.text().string, needle, replacement, case_sensitive)?;
             after.geometry = SemanticGeometry::MultiLeader(Box::new(leader.with_text(&replaced)?));
         }
         SemanticGeometry::Table(table) => {
@@ -808,13 +863,15 @@ fn replace_in_entity(entity: &DbEntity, needle: &str, replacement: &str) -> CadR
             let mut changes: Vec<(usize, usize, String)> = Vec::new();
             for (row_index, row) in table.rows().iter().enumerate() {
                 for (column_index, cell) in row.cells.iter().enumerate() {
-                    if cell.text.is_empty() || !contains(&mtext_preview_text(&cell.text), needle) {
+                    if cell.text.is_empty()
+                        || !contains(&mtext_preview_text(&cell.text), needle, case_sensitive)
+                    {
                         continue;
                     }
                     changes.push((
                         row_index,
                         column_index,
-                        replace_mtext_markup(&cell.text, needle, replacement)?,
+                        replace_mtext_markup(&cell.text, needle, replacement, case_sensitive)?,
                     ));
                 }
             }
@@ -833,11 +890,14 @@ fn replace_in_entity(entity: &DbEntity, needle: &str, replacement: &str) -> CadR
     Ok(after)
 }
 
-fn preview(text: &str, needle: &str) -> String {
-    let start = text
-        .to_ascii_lowercase()
-        .find(&needle.to_ascii_lowercase())
-        .unwrap_or(0);
+fn preview(text: &str, needle: &str, case_sensitive: bool) -> String {
+    let start = if case_sensitive {
+        text.find(needle).unwrap_or(0)
+    } else {
+        text.to_ascii_lowercase()
+            .find(&needle.to_ascii_lowercase())
+            .unwrap_or(0)
+    };
     let slice: String = text[start..].chars().take(PREVIEW_CHARS).collect();
     slice.replace(['\r', '\n'], " ")
 }

@@ -26,10 +26,12 @@
 //!
 //! * **Session tokens** (`DRAGMODE`, `APERTURE`, `ISOPLANE`, `HIGHLIGHTNEW`,
 //!   `TRAYSETTINGS`, `TEXTSCR`, `GRAPHSCR`, `FINDINCLUDE`, `FINDMATCH`,
-//!   `REVCLOUDPROPERTIES`): one session flag/token each, no database write and
-//!   no renderer consumer; the two read-only forms (`APERTURE`,
-//!   `REVCLOUDPROPERTIES`) report their token and name their setter as NOT
-//!   IMPLEMENTED.
+//!   `REVCLOUDPROPERTIES`): one session flag/token each and no database write.
+//!   `APERTURE` and `REVCLOUDPROPERTIES` have report **and** validated set forms;
+//!   `TEXTSCR`/`GRAPHSCR`/`TRAYSETTINGS` are projected to the chrome
+//!   (`cad_status.textScreen`/`traySettings`) for the text-screen and tray
+//!   surfaces, and `FINDMATCH` is read by `-FIND`/`FIND`; the remaining tokens
+//!   still have no renderer consumer and say so.
 //! * **Read-only reports** (`SYSVARMONITOR`, `SYSVDLG`, `VTOPTIONS`,
 //!   `ALIASEDIT`, `WHOHAS`, `ACADINFO`, `PTYPE`, `SCALELISTEDIT`): pure reads of
 //!   data this build really has; anything absent is a named `not_tracked`
