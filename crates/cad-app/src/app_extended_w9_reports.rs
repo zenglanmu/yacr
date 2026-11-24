@@ -1,8 +1,12 @@
 //! Wave 9 **reports, real 2D edits and named refusals** for the extended batch.
 //!
-//! `UNITS` is a read-only report of the session display-format token: this
-//! build has no UNITS dialog and stores no per-drawing precision/format table,
-//! so the report states the fixed display rule instead of inventing a value.
+//! `UNITS` reports the live document units and Units-dialog settings, and its
+//! typed forms write the representable subset: the declared unit + linear
+//! precision (`cad_domain::UnitContext`) and the document-level length/angle
+//! formats, base angle and clockwise direction (`cad_db::UnitsDisplay`). This
+//! build has no Units *dialog* (a host/UI decision) and reads only settings it
+//! really stores — the remaining display-consumption and `$INSUNITS` gaps are
+//! named in the report instead of being invented.
 //!
 //! `TXTEXP` is a real 2D edit: it explodes the selected `TEXT`/`MTEXT` into font
 //! outline `LWPOLYLINE`s through the same font engine the display uses, in one
@@ -60,15 +64,17 @@ impl Application {
         Err(CadError::Unsupported(reason(ext)))
     }
 
-    /// `UNITS` / `-UNITS`: report or write the document's declared units and
-    /// linear precision.
+    /// `UNITS` / `-UNITS`: report or write the document's units and display
+    /// settings.
     ///
-    /// The bare form reports the live `Document.units` value (never a hard-coded
-    /// "4 decimal places"), names the exact remaining model gap (length *format*
-    /// and angle format/precision/direction), and changes nothing. The typed form
-    /// writes the one representable setting through the existing document-header
-    /// path: one revision, a header-only `ChangeSet`, and no undo step because
-    /// `cad-history` has no header patch kind.
+    /// The bare form reports the live `Document.units` value and the live
+    /// `cad_db::UnitsDisplay` settings (never a hard-coded "4 decimal places"),
+    /// names the exact remaining display gap (`$INSUNITS` insertion scaling and
+    /// the fixed-decimal readouts), and changes nothing. A typed form writes only
+    /// the named settings through the existing document-header path: one
+    /// revision, a header-only `ChangeSet`, and no undo step because
+    /// `cad-history` has no header patch kind. An empty patch is refused, never a
+    /// silent success.
     pub(crate) fn units_command(
         &mut self,
         session: &mut SessionState,
@@ -82,75 +88,124 @@ impl Application {
                 .documents
                 .get(&command.document)
                 .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
-            return Ok(report_outcome(units_report(name, &document.units)));
+            return Ok(report_outcome(units_report(
+                name,
+                &document.units,
+                document.drawing.units_display(),
+            )));
         };
+        if payload.is_empty() {
+            return Err(CadError::InvalidInput(format!(
+                "units.empty: {name} names no setting; expected `<unit> <precision>`, \
+                 `LENGTH <format>`, `ANGLE <format> <precision>` or `ANGLE DIRECTION ...`; \
+                 nothing was written"
+            )));
+        }
         if session.app_mode() == AppMode::Viewer {
             return Err(CadError::PermissionDenied);
         }
-        if payload.decimal_places > 8 {
-            return Err(CadError::InvalidInput(format!(
-                "units.invalid_precision: {name} accepts 0 to 8 decimal places, got {}; nothing \
-                 was written",
-                payload.decimal_places
-            )));
+        if let Some(declared) = &payload.declared {
+            if declared.decimal_places > 8 {
+                return Err(CadError::InvalidInput(format!(
+                    "units.invalid_precision: {name} accepts 0 to 8 decimal places, got {}; \
+                     nothing was written",
+                    declared.decimal_places
+                )));
+            }
         }
-        let units = cad_domain::UnitContext {
-            source: payload.unit.clone(),
-            display: payload.unit.clone(),
-            display_per_source: match payload.unit {
-                cad_domain::Unit::DrawingUnits => None,
-                _ => Some(1.0),
-            },
-            decimal_places: payload.decimal_places,
-        };
         let document = self
             .workspace
             .documents
-            .get_mut(&command.document)
+            .get(&command.document)
             .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
-        if document.units == units {
+        let current_units = document.units.clone();
+        let mut next_display = *document.drawing.units_display();
+        if let Some(format) = payload.length_format {
+            next_display.length_format = format;
+        }
+        if let Some(format) = payload.angle_format {
+            next_display.angle_format = format;
+        }
+        if let Some(precision) = payload.angle_precision {
+            next_display.angle_precision = precision;
+        }
+        if let Some(base) = payload.angle_base_degrees {
+            next_display.angle_base_degrees = base;
+        }
+        if let Some(clockwise) = payload.angle_clockwise {
+            next_display.angle_clockwise = clockwise;
+        }
+        // Validate the whole resulting block before the first mutation; an
+        // out-of-range precision or non-finite base angle leaves the document
+        // exactly as it was.
+        next_display.validate()?;
+        let next_units = payload.declared_context();
+        let units_changed = next_units
+            .as_ref()
+            .is_some_and(|units| *units != current_units);
+        let display_changed = next_display != *document.drawing.units_display();
+        if !units_changed && !display_changed {
             return Ok(report_outcome(vec![
                 diagnostic(
                     "units.unchanged",
                     format!(
-                        "{name}: the document already declares {} display units with {} decimal \
-                         place(s); no revision was raised",
-                        unit_label(&units.display),
-                        units.decimal_places
+                        "{name}: the document already stores the requested settings; no revision \
+                         was raised"
                     ),
                 ),
                 units_gap(name),
             ]));
         }
-        document.units = units.clone();
-        let changeset = Arc::make_mut(&mut document.drawing).note_document_header_change(
-            crate::app_drawing::next_transaction_id(),
-            "units changed",
-        );
+        let transaction = crate::app_drawing::next_transaction_id();
+        let document = self
+            .workspace
+            .documents
+            .get_mut(&command.document)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+        let changeset = if display_changed {
+            Arc::make_mut(&mut document.drawing).set_units_display(
+                next_display,
+                transaction,
+                "units settings changed",
+            )?
+        } else {
+            Arc::make_mut(&mut document.drawing)
+                .note_document_header_change(transaction, "units changed")
+        };
+        if let Some(units) = next_units {
+            document.units = units;
+        }
         let after = changeset.after.0;
+        let mut rows = Vec::with_capacity(5);
+        if units_changed {
+            rows.push(diagnostic(
+                "units.set",
+                format!(
+                    "{name}: the document now declares {} units and displays coordinates with {} \
+                     decimal place(s) (revision {after}); stored coordinates were not rescaled",
+                    unit_label(&document.units.display),
+                    document.units.decimal_places
+                ),
+            ));
+        }
+        if display_changed {
+            rows.push(diagnostic(
+                "units.set_display",
+                units_display_summary(name, &next_display, after),
+            ));
+        }
+        rows.push(units_gap(name));
+        rows.push(diagnostic(
+            "units.no_history",
+            format!(
+                "{name}: this write published one revision and one header-only ChangeSet and \
+                 recorded NO undo step; cad-history has no header patch kind"
+            ),
+        ));
         Ok(CommandOutcome {
             objects: Vec::new(),
             changes: Some(Arc::new(changeset)),
-            diagnostics: vec![
-                diagnostic(
-                    "units.set",
-                    format!(
-                        "{name}: the document now declares {} units and displays coordinates with \
-                         {} decimal place(s) (revision {after}); stored coordinates were not \
-                         rescaled",
-                        unit_label(&units.display),
-                        units.decimal_places
-                    ),
-                ),
-                units_gap(name),
-                diagnostic(
-                    "units.no_history",
-                    format!(
-                        "{name}: this write published one revision and one header-only ChangeSet \
-                         and recorded NO undo step; cad-history has no header patch kind"
-                    ),
-                ),
-            ],
+            diagnostics: rows,
             measurement: None,
             point_report: None,
         })
@@ -226,7 +281,11 @@ impl Application {
 }
 
 /// The read-only `UNITS`/`-UNITS` report over the live document header.
-fn units_report(name: &str, units: &cad_domain::UnitContext) -> Vec<Diagnostic> {
+fn units_report(
+    name: &str,
+    units: &cad_domain::UnitContext,
+    display: &cad_db::UnitsDisplay,
+) -> Vec<Diagnostic> {
     let conversion = match units.display_per_source {
         Some(ratio) => format!(
             "source {} → display {} (×{ratio})",
@@ -242,26 +301,69 @@ fn units_report(name: &str, units: &cad_domain::UnitContext) -> Vec<Diagnostic> 
         diagnostic(
             "units.report",
             format!(
-                "{name}: coordinates and distances are displayed in {} with {} decimal place(s); \
-                 {conversion}; angles are displayed in decimal degrees",
+                "{name}: coordinates and distances are declared in {} with {} decimal place(s); \
+                 {conversion}",
                 unit_label(&units.display),
                 units.decimal_places
             ),
+        ),
+        diagnostic(
+            "units.length_format",
+            format!(
+                "{name}: length format {} (the linear precision above is the stored decimal-place \
+                 count)",
+                display.length_format.as_token()
+            ),
+        ),
+        diagnostic(
+            "units.angle_format",
+            units_display_angle_line(name, display),
         ),
         units_gap(name),
     ]
 }
 
-/// The one exact gap the representable write cannot close.
+/// One line naming the live angular settings and the direction preset they
+/// imply.
+fn units_display_angle_line(name: &str, display: &cad_db::UnitsDisplay) -> String {
+    let direction = match display.base_direction() {
+        Some(preset) => format!("{preset} (base angle {}°)", display.angle_base_degrees),
+        None => format!("Other (base angle {}°)", display.angle_base_degrees),
+    };
+    format!(
+        "{name}: angles are formatted as {} with {} decimal place(s); zero angle points {}; \
+         positive angles run {}",
+        display.angle_format.as_token(),
+        display.angle_precision,
+        direction,
+        display.rotation_token()
+    )
+}
+
+/// The one-line write report for a changed `UnitsDisplay`.
+fn units_display_summary(name: &str, display: &cad_db::UnitsDisplay, revision: u64) -> String {
+    format!(
+        "{name}: stored length format {}, angle format {} with {} decimal place(s), base angle \
+         {}° and {} positive angles (revision {revision}); the Units dialog itself is a host UI \
+         and this command wrote the settings directly",
+        display.length_format.as_token(),
+        display.angle_format.as_token(),
+        display.angle_precision,
+        display.angle_base_degrees,
+        display.rotation_token()
+    )
+}
+
+/// The exact boundary the representable write does not close.
 fn units_gap(name: &str) -> Diagnostic {
     diagnostic(
         "units.not_implemented",
         format!(
-            "{name}: the AutoCAD Units dialog, its linear length *format* table \
-             (Scientific/Decimal/Engineering/Architectural/Fractional), the angular \
-             format/precision/direction/base-angle settings, and `$INSUNITS` insertion-scale \
-             semantics are NOT MODELED by this build; only the declared unit and the linear \
-             decimal precision are stored"
+            "{name}: the Units dialog is a host UI (no dialog is implemented); the stored \
+             length/angle formats do not yet reformat every on-screen number — the coordinate \
+             readout and measurement log still use fixed decimal counts — and `$INSUNITS` \
+             insertion scaling (rescaling an inserted drawing by its source/target units) is NOT \
+             MODELED by this build"
         ),
     )
 }

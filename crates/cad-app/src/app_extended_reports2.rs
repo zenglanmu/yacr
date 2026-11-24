@@ -111,53 +111,30 @@ impl Application {
     ///
     /// Only data the crate actually carries is reported. Licence, hardware and
     /// installed-module lists do not exist here, so they are named as not
-    /// collected rather than fabricated.
+    /// collected rather than fabricated. The information **file** is written by
+    /// the typed `ACADINFO <file.json>` form in `cad-ui-core` through the host
+    /// named-file bridge; the bare command reports the same facts and how to
+    /// write them.
     fn acad_info_report(&self, command: &Command) -> CadResult<CommandOutcome> {
         require_none_payload(command, "ACADINFO")?;
-        let document = self
-            .workspace
-            .documents
-            .get(&command.document)
+        let snapshot = self
+            .acad_info_snapshot(command.document)
             .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
-        let drawing = &document.drawing;
-        let profile = if cfg!(debug_assertions) {
-            "debug"
-        } else {
-            "release"
-        };
-        let domain = drawing
-            .application_domain()
-            .map(|domain| domain.as_str())
-            .unwrap_or("none");
         Ok(report_outcome(vec![
-            diagnostic(
-                "acadinfo.report",
-                format!(
-                    "ACADINFO: product yacr (cad-app) version {} build {profile}; target {} {}; \
-                     document {} revision {} entities {}; units {} ({} decimal place(s)); \
-                     application domain {domain}",
-                    env!("CARGO_PKG_VERSION"),
-                    std::env::consts::OS,
-                    std::env::consts::ARCH,
-                    command.document.0,
-                    drawing.revision().0,
-                    drawing.entity_count(),
-                    document.units.label(),
-                    document.units.decimal_places
-                ),
-            ),
+            diagnostic("acadinfo.report", snapshot.report_line()),
             diagnostic(
                 "acadinfo.not_collected",
                 "ACADINFO: licence, hardware and installed-module data are not collected by this \
-                 build and are not reported"
+                 build and are not reported (they stay global-scope omissions, also listed in \
+                 the information file's notCollected array)"
                     .into(),
             ),
             diagnostic(
-                "acadinfo.file_not_written",
-                "ACADINFO: the AutoCAD command creates an information file; this crate has no \
-                 host file sink and writes no file, so the same facts are reported in the command \
-                 log instead (a host-owned save path is the remaining step, not a fabricated \
-                 file)"
+                "acadinfo.file_available",
+                "ACADINFO: `ACADINFO <file.json>` writes the same facts as a versioned \
+                 (yacr.acadinfo v1) JSON information file through the host named-file bridge; \
+                 the file carries no licence, hardware, module or timestamp rows, and a host \
+                 without a named-file sink refuses the write by name instead of claiming one"
                     .into(),
             ),
         ]))

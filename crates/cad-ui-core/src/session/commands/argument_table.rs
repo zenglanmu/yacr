@@ -106,6 +106,9 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     // system-variable dialog's read/edit/file forms; the bare selector is the
     // report.
     crate::session::sysvdlg_dialog::SYSVDLG_SELECTOR,
+    // `ACADINFO <file.json>`: the versioned information-file form; the bare
+    // selector stays the read-only report.
+    crate::session::commands::acadinfo_file::ACADINFO_SELECTOR,
     // `SCALELISTEDIT` / `-SCALELISTEDIT`: the annotation-scale table's typed
     // writes (`ADD`/`RENAME`/`DELETE`) and the `?` report spelling.
     SCALELIST_SELECTOR,

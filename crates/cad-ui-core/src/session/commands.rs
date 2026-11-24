@@ -897,6 +897,11 @@ pub use arguments::*;
 mod document_meta;
 pub use document_meta::*;
 
+// `ACADINFO <file.json>`: the versioned information-file write (the bare
+// selector stays the report).
+mod acadinfo_file;
+pub use acadinfo_file::*;
+
 // The typed `UNITS`/`-UNITS` drawing-unit form (the bare selectors are reports).
 mod document_units;
 pub use document_units::*;

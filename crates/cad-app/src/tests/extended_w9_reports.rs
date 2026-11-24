@@ -1,10 +1,12 @@
 //! Wave 9 report/refusal contracts: `UNITS`, `DIM`, the `TXTEXP` explosion and
 //! the stable named refusals around them.
 //!
-//! `UNITS`, `DIM` and `SPACETRANS` are read-only reports; `TXTEXP` is a real 2D
-//! edit (font outlines to polylines, one transaction / one undo step); the rest
-//! are stable named refusals. A refusal never writes the drawing, bumps the
-//! revision or records history, so every non-writing class stays Viewer-legal.
+//! `UNITS` reports the live document settings and writes the representable subset
+//! (declared unit + linear precision + length/angle formats); `DIM` and
+//! `SPACETRANS` are read-only reports; `TXTEXP` is a real 2D edit (font outlines
+//! to polylines, one transaction / one undo step); the rest are stable named
+//! refusals. A refusal never writes the drawing, bumps the revision or records
+//! history, so every non-writing class stays Viewer-legal.
 
 use super::*;
 use crate::app_extended_w9_reports::text_explode::install_outline_fonts;
@@ -24,6 +26,31 @@ fn execute(
         session,
         command(CommandId::Extended(ext), CommandPayload::None),
     )
+}
+
+fn declared_units(unit: cad_domain::Unit, decimal_places: u8) -> UnitsCommand {
+    UnitsCommand {
+        declared: Some(DeclaredUnits {
+            unit,
+            decimal_places,
+        }),
+        length_format: None,
+        angle_format: None,
+        angle_precision: None,
+        angle_base_degrees: None,
+        angle_clockwise: None,
+    }
+}
+
+fn units_settings() -> UnitsCommand {
+    UnitsCommand {
+        declared: None,
+        length_format: None,
+        angle_format: None,
+        angle_precision: None,
+        angle_base_degrees: None,
+        angle_clockwise: None,
+    }
 }
 
 #[test]
@@ -47,13 +74,29 @@ fn units_reports_the_live_document_header_without_writing() {
         "{}",
         report.message
     );
+    let length = outcome
+        .diagnostics
+        .iter()
+        .find(|row| row.code == "units.length_format")
+        .expect("UNITS reports the live length format");
+    assert!(length.message.contains("decimal"), "{}", length.message);
+    let angle = outcome
+        .diagnostics
+        .iter()
+        .find(|row| row.code == "units.angle_format")
+        .expect("UNITS reports the live angular settings");
+    assert!(
+        angle.message.contains("decimal_degrees") && angle.message.contains("East"),
+        "{}",
+        angle.message
+    );
     let gap = outcome
         .diagnostics
         .iter()
         .find(|row| row.code == "units.not_implemented")
-        .expect("UNITS names the unmodeled angle/format settings");
-    assert!(gap.message.contains("angular"), "{}", gap.message);
-    assert!(gap.message.contains("length *format*"), "{}", gap.message);
+        .expect("UNITS names the remaining boundary");
+    assert!(gap.message.contains("INSUNITS"), "{}", gap.message);
+    assert!(gap.message.contains("dialog"), "{}", gap.message);
     assert_eq!(revision(&app), before);
     assert!(!app.can_undo(&DocumentId(1)));
 }
@@ -67,10 +110,7 @@ fn units_writes_the_declared_unit_and_precision_in_one_header_revision() {
             &mut session,
             command(
                 CommandId::Extended(ExtendedCommandId::Units),
-                CommandPayload::Units(UnitsCommand {
-                    unit: cad_domain::Unit::Millimeter,
-                    decimal_places: 2,
-                }),
+                CommandPayload::Units(declared_units(cad_domain::Unit::Millimeter, 2)),
             ),
         )
         .expect("UNITS writes the declared unit");
@@ -100,10 +140,7 @@ fn units_writes_the_declared_unit_and_precision_in_one_header_revision() {
             &mut session,
             command(
                 CommandId::Extended(ExtendedCommandId::DashUnits),
-                CommandPayload::Units(UnitsCommand {
-                    unit: cad_domain::Unit::Meter,
-                    decimal_places: 4,
-                }),
+                CommandPayload::Units(declared_units(cad_domain::Unit::Meter, 4)),
             ),
         )
         .expect("-UNITS writes the declared unit");
@@ -120,10 +157,7 @@ fn units_writes_the_declared_unit_and_precision_in_one_header_revision() {
             &mut session,
             command(
                 CommandId::Extended(ExtendedCommandId::Units),
-                CommandPayload::Units(UnitsCommand {
-                    unit: cad_domain::Unit::Meter,
-                    decimal_places: 4,
-                }),
+                CommandPayload::Units(declared_units(cad_domain::Unit::Meter, 4)),
             ),
         )
         .expect("an identical unit write is admitted");
@@ -136,7 +170,73 @@ fn units_writes_the_declared_unit_and_precision_in_one_header_revision() {
 }
 
 #[test]
-fn units_refuses_an_out_of_range_precision_and_a_viewer_write() {
+fn units_writes_length_and_angle_settings_in_one_header_revision() {
+    let (mut app, mut session) = application_with_document();
+    let before = revision(&app);
+    let mut payload = units_settings();
+    payload.length_format = Some(cad_db::LengthFormat::Architectural);
+    payload.angle_format = Some(cad_db::AngleFormat::DegreesMinutesSeconds);
+    payload.angle_precision = Some(3);
+    payload.angle_base_degrees = Some(90.0);
+    payload.angle_clockwise = Some(true);
+    let outcome = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::Extended(ExtendedCommandId::Units),
+                CommandPayload::Units(payload),
+            ),
+        )
+        .expect("UNITS writes the representable Units settings");
+    assert!(outcome.changes.is_some());
+    assert_eq!(revision(&app).0, before.0 + 1);
+    let stored = *app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .units_display();
+    assert_eq!(stored.length_format, cad_db::LengthFormat::Architectural);
+    assert_eq!(
+        stored.angle_format,
+        cad_db::AngleFormat::DegreesMinutesSeconds
+    );
+    assert_eq!(stored.angle_precision, 3);
+    assert_eq!(stored.angle_base_degrees, 90.0);
+    assert!(stored.angle_clockwise);
+    assert_eq!(stored.base_direction(), Some("North"));
+    assert!(outcome
+        .diagnostics
+        .iter()
+        .any(|row| row.code == "units.set_display" && row.message.contains("architectural")));
+    assert!(outcome
+        .diagnostics
+        .iter()
+        .any(|row| row.code == "units.no_history"));
+    assert!(!app.can_undo(&DocumentId(1)));
+
+    // A declared-unit write and a settings write in one command stay one
+    // revision: the settings go through the header patch and the declared unit
+    // rides the same ChangeSet.
+    let next = revision(&app);
+    let mut combined = declared_units(cad_domain::Unit::Centimeter, 1);
+    combined.angle_precision = Some(2);
+    let both = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::Extended(ExtendedCommandId::Units),
+                CommandPayload::Units(combined),
+            ),
+        )
+        .expect("a combined write is admitted");
+    assert!(both.changes.is_some());
+    assert_eq!(revision(&app).0, next.0 + 1);
+    let document = &app.workspace.documents[&DocumentId(1)];
+    assert_eq!(document.units.display, cad_domain::Unit::Centimeter);
+    assert_eq!(document.units.decimal_places, 1);
+    assert_eq!(document.drawing.units_display().angle_precision, 2);
+}
+
+#[test]
+fn units_refuses_empty_out_of_range_and_viewer_writes() {
     let (mut app, mut session) = application_with_document();
     let before = revision(&app);
     let error = app
@@ -144,10 +244,19 @@ fn units_refuses_an_out_of_range_precision_and_a_viewer_write() {
             &mut session,
             command(
                 CommandId::Extended(ExtendedCommandId::Units),
-                CommandPayload::Units(UnitsCommand {
-                    unit: cad_domain::Unit::Millimeter,
-                    decimal_places: 9,
-                }),
+                CommandPayload::Units(units_settings()),
+            ),
+        )
+        .expect_err("an empty patch is refused");
+    assert!(error.to_string().contains("units.empty"), "{error}");
+    assert_eq!(revision(&app), before);
+
+    let error = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::Extended(ExtendedCommandId::Units),
+                CommandPayload::Units(declared_units(cad_domain::Unit::Millimeter, 9)),
             ),
         )
         .expect_err("a precision above 8 is refused");
@@ -157,15 +266,46 @@ fn units_refuses_an_out_of_range_precision_and_a_viewer_write() {
     );
     assert_eq!(revision(&app), before);
 
+    let mut bad_angle = units_settings();
+    bad_angle.angle_precision = Some(9);
+    let error = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::Extended(ExtendedCommandId::Units),
+                CommandPayload::Units(bad_angle),
+            ),
+        )
+        .expect_err("an angular precision above 8 is refused");
+    assert!(
+        error.to_string().contains("units.invalid_angle_precision"),
+        "{error}"
+    );
+    assert_eq!(revision(&app), before);
+
+    let mut bad_base = units_settings();
+    bad_base.angle_base_degrees = Some(f64::NAN);
+    let error = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::Extended(ExtendedCommandId::Units),
+                CommandPayload::Units(bad_base),
+            ),
+        )
+        .expect_err("a non-finite base angle is refused");
+    assert!(
+        error.to_string().contains("units.invalid_angle_base"),
+        "{error}"
+    );
+    assert_eq!(revision(&app), before);
+
     session.switch_mode(AppMode::Viewer).unwrap();
     let viewer = app.execute(
         &mut session,
         command(
             CommandId::Extended(ExtendedCommandId::Units),
-            CommandPayload::Units(UnitsCommand {
-                unit: cad_domain::Unit::Millimeter,
-                decimal_places: 2,
-            }),
+            CommandPayload::Units(declared_units(cad_domain::Unit::Millimeter, 2)),
         ),
     );
     assert!(viewer.is_err(), "Viewer may not declare the drawing units");
@@ -173,6 +313,70 @@ fn units_refuses_an_out_of_range_precision_and_a_viewer_write() {
     assert_eq!(
         app.workspace.documents[&DocumentId(1)].units,
         cad_domain::UnitContext::drawing_units()
+    );
+}
+
+#[test]
+fn units_settings_round_trip_through_document_json() {
+    let (mut app, mut session) = application_with_document();
+    let mut payload = units_settings();
+    payload.length_format = Some(cad_db::LengthFormat::Fractional);
+    payload.angle_format = Some(cad_db::AngleFormat::SurveyorsUnits);
+    payload.angle_precision = Some(4);
+    payload.angle_base_degrees = Some(45.5);
+    payload.angle_clockwise = Some(true);
+    app.execute(
+        &mut session,
+        command(
+            CommandId::Extended(ExtendedCommandId::Units),
+            CommandPayload::Units(payload),
+        ),
+    )
+    .expect("settings write");
+
+    let document = &app.workspace.documents[&DocumentId(1)];
+    let snapshot = document
+        .drawing
+        .snapshot(
+            document.units.clone(),
+            document.identity.clone(),
+            document.resource_keys.clone(),
+            document.drawing.revision(),
+        )
+        .expect("snapshot");
+    let block = snapshot
+        .header
+        .variables
+        .get("units_display")
+        .expect("a non-default setting is written");
+    assert_eq!(block["length_format"], "fractional");
+    assert_eq!(block["angle_format"], "surveyors_units");
+    assert_eq!(block["angle_precision"], 4);
+    assert_eq!(block["angle_base_degrees"], 45.5);
+    assert_eq!(block["angle_clockwise"], true);
+
+    let loaded = cad_db::DrawingDatabase::from_snapshot(&snapshot).expect("hydrate");
+    assert_eq!(loaded.units_display(), document.drawing.units_display());
+
+    // A default document writes no block at all: old archives stay identical.
+    let (default_app, _session) = application_with_document();
+    let default_document = &default_app.workspace.documents[&DocumentId(1)];
+    let default_snapshot = default_document
+        .drawing
+        .snapshot(
+            default_document.units.clone(),
+            default_document.identity.clone(),
+            default_document.resource_keys.clone(),
+            default_document.drawing.revision(),
+        )
+        .expect("default snapshot");
+    assert!(
+        default_snapshot
+            .header
+            .variables
+            .get("units_display")
+            .is_none(),
+        "the default block must not be written"
     );
 }
 

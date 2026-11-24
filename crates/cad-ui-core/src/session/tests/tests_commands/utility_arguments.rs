@@ -290,6 +290,43 @@ fn dwgprops_typed_lines_write_summary_metadata_and_name_unknown_fields() {
 }
 
 #[test]
+fn units_typed_settings_lines_write_length_angle_and_direction() {
+    let session = fresh_session();
+    session
+        .command("UNITS LENGTH architectural")
+        .expect("length format write");
+    session
+        .command("UNITS ANGLE dms 3")
+        .expect("angle format write");
+    session
+        .command("UNITS ANGLE DIRECTION north CW")
+        .expect("direction write");
+    {
+        let controller = session.core.controller.borrow();
+        let display = *controller.drawing().expect("a drawing").units_display();
+        assert_eq!(display.length_format, cad_db::LengthFormat::Architectural);
+        assert_eq!(
+            display.angle_format,
+            cad_db::AngleFormat::DegreesMinutesSeconds
+        );
+        assert_eq!(display.angle_precision, 3);
+        assert_eq!(display.angle_base_degrees, 90.0);
+        assert!(display.angle_clockwise);
+    }
+    // `other` needs the one angle it cannot derive.
+    let error = session.command("UNITS ANGLE DIRECTION other").unwrap_err();
+    assert!(error.contains("units.invalid_argument"), "{error}");
+    let error = session.command("UNITS ANGLE dms 9").unwrap_err();
+    assert!(error.contains("units.invalid_argument"), "{error}");
+    let error = session.command("UNITS LENGTH bogus").unwrap_err();
+    assert!(error.contains("units.invalid_argument"), "{error}");
+    let error = session
+        .command("UNITS ANGLE DIRECTION north 45 90")
+        .unwrap_err();
+    assert!(error.contains("units.invalid_argument"), "{error}");
+}
+
+#[test]
 fn units_typed_lines_write_the_document_unit_and_refuse_bad_arguments() {
     let session = fresh_session();
     session.command("UNITS mm 2").expect("UNITS write");

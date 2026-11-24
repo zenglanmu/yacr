@@ -76,6 +76,7 @@ impl DrawingDatabaseBuilder {
                 mleader_style_ids_by_name: BTreeMap::new(),
                 active_annotation_scale: None,
                 document_metadata: crate::DocumentMetadata::default(),
+                units_display: crate::UnitsDisplay::default(),
                 code_page: None,
                 next_entity_id: 1,
                 next_block_id: 1,

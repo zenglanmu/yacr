@@ -18,6 +18,7 @@ use cad_query::QueryService;
 use cad_representation::{enumerate_layouts, viewport_transform, SpaceSelection, ViewportState};
 use std::{collections::BTreeMap, sync::Arc};
 
+pub mod acad_info;
 pub mod api;
 pub mod camera;
 // The ordered import/export connector table (Phase 1: contract + registry only).
@@ -512,13 +513,13 @@ pub use command_payload::{
     AttributeCommand, AttributeDefinitionCommand, AttributeDisplayMode, AttributeEditCommand,
     AttributeEditScope, AttributeOrderCommand, AttributeSyncCommand, CenterArm, CenterEditPayload,
     CenterLineCommand, CenterMarkCommand, ChangePropertiesRequest, ClipCommand, CommandPayload,
-    DashLayerOps, DimEditCommand, DimJogLineCommand, DimOverrideCommand, DimStyleCommand,
-    DimTextEditCommand, DimensionBatchPayload, DimensionChainCommand, DwgPropsCommand,
-    EntityPropertyWrite, FilterExpression, FilterLogic, FilterRequest, GripStretchCommand,
-    GroupCommand, GroupEditCommand, HatchDrawOrder, HatchEditOption, HatchOriginCommand,
-    ImageAdjustCommand, ImageAttachCommand, ImageClipCommand, JoinMode, JoinOptions,
-    JustifyTextCommand, LayerStateCommand, LeaderCommand, LinetypeCommand, MInsertCommand,
-    MLeaderAlignCommand, MLeaderAlignMode, MLeaderAttachment, MLeaderContentSpec,
+    DashLayerOps, DeclaredUnits, DimEditCommand, DimJogLineCommand, DimOverrideCommand,
+    DimStyleCommand, DimTextEditCommand, DimensionBatchPayload, DimensionChainCommand,
+    DwgPropsCommand, EntityPropertyWrite, FilterExpression, FilterLogic, FilterRequest,
+    GripStretchCommand, GroupCommand, GroupEditCommand, HatchDrawOrder, HatchEditOption,
+    HatchOriginCommand, ImageAdjustCommand, ImageAttachCommand, ImageClipCommand, JoinMode,
+    JoinOptions, JustifyTextCommand, LayerStateCommand, LeaderCommand, LinetypeCommand,
+    MInsertCommand, MLeaderAlignCommand, MLeaderAlignMode, MLeaderAttachment, MLeaderContentSpec,
     MLeaderEditAction, MLeaderEditCommand, MLeaderLineOverrideField, MatchPropSettings,
     MeasureGeomOption, MirrorOptions, MlEditCommand, MlEditMode, MocoroCommand, NamedObjectKind,
     OffsetGapType, OffsetLayer, OffsetMode, OffsetOptions, OrdinateAxis, OrdinateDimensionCommand,

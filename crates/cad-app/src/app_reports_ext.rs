@@ -247,7 +247,10 @@ impl Application {
         }
         diagnostics.push(diagnostic(
             "edittime.not_tracked",
-            "EDITTIME: drawing creation/edit timestamps are not tracked by this database".into(),
+            "EDITTIME: drawing creation/update timestamps are not tracked — `document.json` has \
+             no timestamp field and adding one is a new persisted header schema with a write-path \
+             clock; no value was fabricated"
+                .into(),
         ));
         diagnostics.push(diagnostic(
             "edittime.not_tracked",
