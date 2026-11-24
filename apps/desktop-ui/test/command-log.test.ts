@@ -436,7 +436,7 @@ test('the expanded history renders the host echo inside the one record', async (
   // The data is the host field, folded into the typed record by `command-window.ts`
   // — no parallel state, and no second list: the popup is the only surface.
   assert.ok(source.includes('shell.status?.commandLog'));
-  assert.ok(source.includes('commandWindowRows(shell.historyEntries, logEntries, t)'));
+  assert.ok(source.includes('commandWindowRows(shell.historyEntries, logEntries, t, units)'));
   assert.equal(source.includes('commandLogView(logEntries, t)'), false, 'the view does not format the echo itself');
   assert.equal(source.includes('className="commandlog"'), false, 'the in-flow echo strip is gone');
   assert.ok(!source.includes('setCommandLog'), 'the echo is never mirrored in local state');

@@ -25,6 +25,7 @@ mod bim;
 mod block_edit;
 mod bounds;
 mod document_metadata;
+mod document_times;
 mod edit;
 mod group;
 mod header_geometry;
@@ -54,6 +55,7 @@ pub use self::bim::BimPatch;
 pub use access::{EntityDisplayState, VisibilityMembership, VisibilityStateMembership};
 pub use block_edit::{BlockPatch, BlockRow};
 pub use document_metadata::{DocumentMetadata, DocumentMetadataField};
+pub use document_times::DocumentTimes;
 pub(crate) use group::validate_groups;
 pub use group::{GroupPatch, GroupRow, GroupSeq};
 pub use header_values::HeaderValuesPatch;
@@ -260,6 +262,10 @@ pub struct DrawingDatabase {
     /// the base-angle/clockwise direction. Defaults for every document that never
     /// edited them; written by [`DrawingDatabase::set_units_display`].
     pub(crate) units_display: UnitsDisplay,
+    /// Persisted create/update instants (`TIME`/`EDITTIME` sources). Default
+    /// (`None`/`None`) for a document that never stored one; the save path
+    /// stamps it without raising a revision.
+    pub(crate) document_times: DocumentTimes,
     /// The source drawing's declared text code page (`$DWGCODEPAGE` /
     /// `DOCUMENT.header.code_page`), exactly as the reader reported it.
     ///

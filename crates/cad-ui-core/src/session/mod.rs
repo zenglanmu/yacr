@@ -229,7 +229,7 @@ pub use self::status::{
     unsupported_status, CadActiveSpace, CadBlockStatus, CadCamera, CadGroupMember, CadGroupStatus,
     CadImageClipStatus, CadImageStatus, CadImportProgress, CadLayoutTab, CadNavigation, CadPopup,
     CadReferenceStatus, CadSelection, CadSelectionRow, CadSpecVisibility, CadStatus, CadTool,
-    CadToolParams, CadViewOrientation, OpenedSource,
+    CadToolParams, CadUnits, CadViewOrientation, OpenedSource,
 };
 pub use self::text_batch::*;
 pub use self::text_commands::*;

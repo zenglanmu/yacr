@@ -359,11 +359,10 @@ fn units_gap(name: &str) -> Diagnostic {
     diagnostic(
         "units.not_implemented",
         format!(
-            "{name}: the Units dialog is a host UI (no dialog is implemented); the stored \
-             length/angle formats do not yet reformat every on-screen number — the coordinate \
-             readout and measurement log still use fixed decimal counts — and `$INSUNITS` \
-             insertion scaling (rescaling an inserted drawing by its source/target units) is NOT \
-             MODELED by this build"
+            "{name}: the status-bar coordinate, command-log and measurement readouts use the \
+             stored length/angle formats and precisions; the Units dialog itself is a host UI (no \
+             dialog is implemented), and `$INSUNITS` insertion scaling (rescaling an inserted \
+             drawing by its source/target units) is NOT MODELED by this build"
         ),
     )
 }

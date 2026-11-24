@@ -18,12 +18,17 @@
  */
 export const COORDINATE_PLACEHOLDER: string = '\u2014, \u2014';
 
-/** Decimal places of every printed coordinate (AutoCAD's `LUPREC`-style fixed). */
+import { formatLength, unitsFormat } from './units-format.ts';
+import type { CadUnits, UnitsFormat } from './units-format.ts';
+
+/** Decimal places of the legacy readout when the host reports no `units` block. */
 export const COORDINATE_DECIMALS = 4;
 
-/** The status slice the readout reads: `cad_status.cursorWorld`, or `null`. */
+/** The status slice the readout reads: `cad_status.cursorWorld` + `units`. */
 export interface WorldCursorStatus {
   readonly cursorWorld?: unknown;
+  /** The document's stored `UNITS` block; absent keeps the legacy format. */
+  readonly units?: CadUnits | null;
 }
 
 /** The rendered readout plus the catalog key of its hint. */
@@ -33,15 +38,14 @@ export interface WorldCursorReadout {
 }
 
 /**
- * One coordinate value, fixed to [`COORDINATE_DECIMALS`] places.
+ * One coordinate value in the document's stored length format and precision.
  *
- * `-0` (and any tiny negative that rounds to zero) prints as `0`, not `-0.0000`:
- * a signed zero is not a different drawing coordinate, and the sign is noise the
- * user would have to interpret.
+ * A non-finite ordinate cannot be a drawing coordinate; the caller already
+ * rejects the whole point before this runs, so the legacy fallback here is only
+ * a defensive, honest `null` path.
  */
-function formatCoordinate(value: number): string {
-  const text = value.toFixed(COORDINATE_DECIMALS);
-  return Number(text) === 0 ? (0).toFixed(COORDINATE_DECIMALS) : text;
+function formatCoordinate(value: number, units: UnitsFormat): string {
+  return formatLength(value, units) ?? (0).toFixed(COORDINATE_DECIMALS);
 }
 
 /**
@@ -69,10 +73,12 @@ export function formatWorldCursor(status: WorldCursorStatus | null | undefined):
     return { text: COORDINATE_PLACEHOLDER, hintKey: 'status.coordinate_hint_none' };
   }
   const [x, y, z] = point as number[];
-  const zText = formatCoordinate(z);
-  const plane = `${formatCoordinate(x)}, ${formatCoordinate(y)}`;
+  const format = unitsFormat(status?.units);
+  const zero = formatCoordinate(0, format);
+  const zText = formatCoordinate(z, format);
+  const plane = `${formatCoordinate(x, format)}, ${formatCoordinate(y, format)}`;
   // The Z is part of the readout only when it is a real non-zero elevation; a
   // plane coordinate prints as `X, Y`, exactly like AutoCAD's 2D readout.
-  const text = Number(zText) === 0 ? plane : `${plane}, ${zText}`;
+  const text = zText === zero ? plane : `${plane}, ${zText}`;
   return { text, hintKey: 'status.coordinate_hint_world' };
 }

@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::*;
-use crate::app_utility::{document_drawing, format_utc, require_none_payload};
+use crate::app_utility::{document_drawing, format_utc, require_none_payload, stored_time_line};
 
 pub(crate) fn report_outcome(diagnostics: Vec<Diagnostic>) -> CommandOutcome {
     CommandOutcome {
@@ -218,12 +218,14 @@ impl Application {
 
     /// `EDITTIME`: read-only clock/document report.
     ///
-    /// The database stores no creation/edit timestamps and this build tracks no
-    /// session uptime, so both are named `edittime.not_tracked` diagnostics.
+    /// The document's persisted creation/last-update instants are reported when
+    /// stored; a document that stores none says so. Active session uptime and
+    /// the timer are not tracked by this build and remain named diagnostics.
     fn edit_time(&self, command: &Command) -> CadResult<CommandOutcome> {
         require_none_payload(command, "EDITTIME")?;
         let drawing = document_drawing(self, command)?;
-        let mut diagnostics = Vec::with_capacity(3);
+        let times = drawing.document_times();
+        let mut diagnostics = Vec::with_capacity(5);
         match SystemTime::now().duration_since(UNIX_EPOCH) {
             Ok(elapsed) => {
                 let seconds = elapsed.as_secs();
@@ -245,16 +247,25 @@ impl Application {
                     .into(),
             )),
         }
-        diagnostics.push(diagnostic(
-            "edittime.not_tracked",
-            "EDITTIME: drawing creation/update timestamps are not tracked — `document.json` has \
-             no timestamp field and adding one is a new persisted header schema with a write-path \
-             clock; no value was fabricated"
-                .into(),
+        diagnostics.push(stored_time_line(
+            "EDITTIME",
+            "edittime.creation",
+            "edittime.not_stored",
+            "drawing creation time",
+            times.created_at,
+        ));
+        diagnostics.push(stored_time_line(
+            "EDITTIME",
+            "edittime.last_updated",
+            "edittime.not_stored",
+            "drawing last-update time",
+            times.updated_at,
         ));
         diagnostics.push(diagnostic(
             "edittime.not_tracked",
-            "EDITTIME: session uptime is not tracked by this build".into(),
+            "EDITTIME: active editing time and session uptime are not tracked as durations by \
+             this build; the stored creation/last-update instants above are the real timestamps"
+                .into(),
         ));
         Ok(report_outcome(diagnostics))
     }

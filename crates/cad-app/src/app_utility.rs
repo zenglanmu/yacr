@@ -396,15 +396,15 @@ impl Application {
 
     /// `TIME`: read-only document/clock report.
     ///
-    /// One line per AutoCAD `TIME` field. Only the fields this build really has a
-    /// source for are valued: the current UTC clock and the document's stored
-    /// revision/entity/table state. Creation time, last update, the elapsed
-    /// command time and the elapsed timer are not tracked anywhere in `cad-db` or
-    /// in the session, so each names itself as `time.not_tracked` instead of
-    /// printing a fabricated date, a zero or a plausible duration.
+    /// Creation and last-update instants come from the document's own persisted
+    /// `document_times` block (stamped by the one save-path clock). A document
+    /// that has no stored instant says so instead of printing an epoch or a
+    /// plausible date. The elapsed command time, elapsed timer and local-time
+    /// rendering have no source in this build and stay explicitly named.
     fn time_report(&self, command: &Command) -> CadResult<CommandOutcome> {
         require_none_payload(command, "TIME")?;
         let drawing = document_drawing(self, command)?;
+        let times = drawing.document_times();
         let mut diagnostics = vec![
             Diagnostic {
                 object: None,
@@ -421,54 +421,52 @@ impl Application {
                 object: None,
                 code: "time.tracked".into(),
                 message: "TIME: tracked by this build: the current UTC clock (no local-offset \
-                           source), the document id, its revision and its entity/table counts"
-                    .into(),
-            },
-            // One line per unmodelled AutoCAD TIME field, each named.
-            Diagnostic {
-                object: None,
-                code: "time.not_tracked".into(),
-                message: "time.not_tracked: drawing creation time — `document.json` stores no \
-                          timestamp and adding one is a new persisted header schema; no value was \
-                          fabricated"
-                    .into(),
-            },
-            Diagnostic {
-                object: None,
-                code: "time.not_tracked".into(),
-                message: "time.not_tracked: drawing last-update time — every revision would need \
-                          a write-path timestamp, which this database has no field to carry; the \
-                          revision counter is the only change evidence"
-                    .into(),
-            },
-            Diagnostic {
-                object: None,
-                code: "time.not_tracked".into(),
-                message:
-                    "time.not_tracked: elapsed command time (no per-command timer exists; the \
-                          session records no start/stop instants)"
-                        .into(),
-            },
-            Diagnostic {
-                object: None,
-                code: "time.not_tracked".into(),
-                message: "time.not_tracked: elapsed timer and timer on/off state (no elapsed-time \
-                          accumulator exists in this build)"
-                    .into(),
-            },
-            Diagnostic {
-                object: None,
-                code: "time.uptime_not_tracked".into(),
-                message: "TIME: session uptime is not tracked by this build".into(),
-            },
-            Diagnostic {
-                object: None,
-                code: "time.local_not_tracked".into(),
-                message: "TIME: local-time rendering is not tracked by this build; only UTC is \
-                          reported"
+                           source), the document's persisted creation/last-update instants, its \
+                           id, revision and entity/table counts"
                     .into(),
             },
         ];
+        diagnostics.push(stored_time_line(
+            "TIME",
+            "time.creation",
+            "time.not_stored",
+            "drawing creation time",
+            times.created_at,
+        ));
+        diagnostics.push(stored_time_line(
+            "TIME",
+            "time.last_updated",
+            "time.not_stored",
+            "drawing last-update time",
+            times.updated_at,
+        ));
+        diagnostics.push(Diagnostic {
+            object: None,
+            code: "time.not_tracked".into(),
+            message:
+                "time.not_tracked: elapsed command time (no per-command timer exists; the session \
+                  records no start/stop instants)"
+                    .into(),
+        });
+        diagnostics.push(Diagnostic {
+            object: None,
+            code: "time.not_tracked".into(),
+            message: "time.not_tracked: elapsed timer and timer on/off state (no elapsed-time \
+                      accumulator exists in this build)"
+                .into(),
+        });
+        diagnostics.push(Diagnostic {
+            object: None,
+            code: "time.uptime_not_tracked".into(),
+            message: "TIME: session uptime is not tracked by this build".into(),
+        });
+        diagnostics.push(Diagnostic {
+            object: None,
+            code: "time.local_not_tracked".into(),
+            message: "TIME: local-time rendering is not tracked by this build; only UTC is \
+                      reported"
+                .into(),
+        });
         match SystemTime::now().duration_since(UNIX_EPOCH) {
             Ok(elapsed) => {
                 let seconds = elapsed.as_secs();
@@ -706,6 +704,32 @@ fn layer_label(database: &cad_db::DrawingDatabase, layer: LayerId) -> String {
     match database.layer(layer) {
         Some(row) => row.name.clone(),
         None => format!("unresolved({})", layer.0),
+    }
+}
+
+/// One stored timestamp line, or an explicit "not stored" line when the
+/// document has never been saved (or predates the timestamp schema).
+pub(crate) fn stored_time_line(
+    report: &str,
+    code: &str,
+    missing_code: &str,
+    label: &str,
+    seconds: Option<u64>,
+) -> Diagnostic {
+    Diagnostic {
+        object: None,
+        code: if seconds.is_some() {
+            code.to_string()
+        } else {
+            missing_code.to_string()
+        },
+        message: match seconds {
+            Some(seconds) => format!("{report}: {label} {} (unix {seconds})", format_utc(seconds)),
+            None => format!(
+                "{missing_code}: {label} — this document stores no instant yet; the first \
+                 durable save stamps it (no value was fabricated)"
+            ),
+        },
     }
 }
 

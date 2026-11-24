@@ -381,6 +381,14 @@ impl CadSession {
             .core
             .effective_application_domain()
             .map(|domain| domain.as_str().to_string());
+        // The document's own UNITS settings, projected once for the readouts.
+        // `None` without a document; never a UI-side default.
+        status.units = self
+            .core
+            .controller
+            .borrow()
+            .document_units()
+            .map(|(units, display)| CadUnits::from_parts(&units, &display));
         // The authoritative xref rows projected above: always carried, never
         // omitted, and empty for a document that declares none.
         status.references = references;

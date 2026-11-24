@@ -206,11 +206,13 @@ impl CadSelection {
 mod classic;
 mod tool;
 mod tool_params;
+mod units;
 pub use self::classic::{
     CadBlockStatus, CadGroupMember, CadGroupStatus, CadImageClipStatus, CadImageStatus,
 };
 pub(in crate::session) use self::tool::cad_tool;
 pub use self::tool_params::CadToolParams;
+pub use self::units::CadUnits;
 
 /// The active interactive tool, projected from `cad_app`'s real capture state.
 ///
@@ -638,6 +640,14 @@ pub struct CadStatus {
     /// authoritative camera or a non-finite basis" (no document, or a camera the
     /// host would not render) — never a fabricated orientation.
     pub view: Option<CadViewOrientation>,
+    /// The document's stored `UNITS` readout settings, or **absent**.
+    ///
+    /// Additive optional block: no document and older hosts omit it, and the
+    /// readouts then keep their legacy fixed format. When present it is the
+    /// document header's own values (`length_format`/`length_precision`,
+    /// angle format/precision/base/direction), never a UI-side default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub units: Option<CadUnits>,
     /// The host's real navigation/ViewCube switches (see [`CadNavigation`]);
     /// always present, never `null`.
     pub navigation: CadNavigation,
@@ -729,6 +739,7 @@ pub fn unsupported_status(error: Option<String>) -> CadStatus {
         theme: cad_host::THEME_VALUES[0].to_string(),
         // …and no session camera exists, so there is no orientation to report.
         view: None,
+        units: None,
         navigation: CadNavigation::default(),
     }
 }
@@ -894,6 +905,7 @@ pub(super) fn assemble_status(
         // The authoritative viewport orientation, or `null` when there is no
         // trustworthy camera basis.
         view,
+        units: None,
         navigation,
         pending_prompt,
     }

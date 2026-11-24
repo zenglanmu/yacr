@@ -51,7 +51,7 @@ export interface CadEventHandlers {
   readonly setStatus: (status: CadStatus | null) => void;
   readonly setPollError: (error: string) => void;
   /** Per-frame cursor slice: the status-bar leaf store, not the shell tree. */
-  readonly setCursor: (cursorWorld: CadStatus['cursorWorld']) => void;
+  readonly setCursor: (cursorWorld: CadStatus['cursorWorld'], units?: CadStatus['units']) => void;
   /** Per-frame FPS slice: the diagnostics leaf store, not the shell tree. */
   readonly setFps: (fps: number | null) => void;
   /** Per-frame view-orientation slice: the ViewCube leaf store, not the shell. */
@@ -90,11 +90,12 @@ export function useCadEvents(handlers: CadEventHandlers): void {
     /** Publish the two volatile fields to their leaf stores (never the shell). */
     const publishVolatile = (
       cursorWorld: CadStatus['cursorWorld'],
+      units: CadStatus['units'],
       frameCount: number,
       active: boolean,
       view: CadStatus['view'] | null,
     ): void => {
-      live.current.setCursor(cursorWorld);
+      live.current.setCursor(cursorWorld, units);
       live.current.setView(view);
       live.current.setFps(sampler.sample(frameCount, performance.now(), active));
       clearTimeout(staleTimer);
@@ -111,6 +112,7 @@ export function useCadEvents(handlers: CadEventHandlers): void {
       // The two per-frame fields go to their leaf readers every status frame.
       publishVolatile(
         next.cursorWorld,
+        next.units ?? null,
         next.frameCount,
         Boolean(next && !next.error && !document.hidden),
         next.view ?? null,
@@ -139,7 +141,7 @@ export function useCadEvents(handlers: CadEventHandlers): void {
       if (frame.type === 'cursor-changed') {
         // Volatile-only cadence: leaf stores and the stale timer, nothing else.
         // It never touches the shell status, the carrier route or the frame pump.
-        publishVolatile(frame.cursorWorld, frame.frameCount, !document.hidden, frame.view);
+        publishVolatile(frame.cursorWorld, undefined, frame.frameCount, !document.hidden, frame.view);
         return;
       }
       if (frame.type === 'vendor-pending') {

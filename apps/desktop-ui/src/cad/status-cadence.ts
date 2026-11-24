@@ -33,8 +33,8 @@ export interface VolatileStatusStore {
   /** The view slice; stable while only the cursor/FPS change (a selector). */
   getView(): CadViewOrientation | null;
   subscribe(listener: () => void): () => void;
-  /** Publish a new cursor; notifies only when the rendered text changes. */
-  setCursor(cursorWorld: CadStatus['cursorWorld']): void;
+  /** Publish a new cursor (and the document's units, which reformat it). */
+  setCursor(cursorWorld: CadStatus['cursorWorld'], units?: CadStatus['units']): void;
   /** Publish an FPS reading; notifies only when the number changes. */
   setFrameRate(fps: number | null): void;
   /** Publish a view orientation; notifies only when the basis changes. */
@@ -63,6 +63,10 @@ export function createVolatileStatusStore(): VolatileStatusStore {
     view: null,
   };
   const listeners = new Set<() => void>();
+  // The last reported `UNITS` block. A per-frame cursor event carries no units
+  // of its own, so retaining it keeps the readout stable between semantic
+  // statuses; `null` (a host that reports no block) resets to the legacy form.
+  let units: CadStatus['units'] = null;
   const notify = (): void => {
     for (const listener of listeners) listener();
   };
@@ -78,8 +82,11 @@ export function createVolatileStatusStore(): VolatileStatusStore {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
-    setCursor(cursorWorld: CadStatus['cursorWorld']): void {
-      const cursor = formatWorldCursor({ cursorWorld });
+    setCursor(cursorWorld: CadStatus['cursorWorld'], reportedUnits?: CadStatus['units']): void {
+      // `undefined` means "a per-frame cursor event, keep the settings"; a real
+      // `null`/block replaces them.
+      if (reportedUnits !== undefined) units = reportedUnits;
+      const cursor = formatWorldCursor({ cursorWorld, units });
       // A coordinate that formats to the same text is not a visible change.
       if (cursor.text === snapshot.cursor.text && cursor.hintKey === snapshot.cursor.hintKey) return;
       snapshot = { ...snapshot, cursor };

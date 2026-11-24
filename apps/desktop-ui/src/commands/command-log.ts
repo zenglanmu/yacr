@@ -10,23 +10,20 @@
 // by its stable code, and a `result` entry with neither a measurement nor a point
 // renders nothing at all.
 //
-// Angle precedent: **none exists in the React chrome.** No module under
-// `apps/desktop-ui/src` formats a measured angle (measurement readouts do not
-// live in the JS layer), and the only degree mark in the tree is the DXF `%%d`
-// control code mapped in `crates/cad-representation/src/text/mtext.rs`. Angles
-// are therefore printed in degrees with the same fixed decimal count as the
-// linear values plus an explicit degree sign, so an angle can never be misread as
-// a length.
+// Angle formatting: the document's stored `UNITS` angle format and precision
+// decide the text (decimal degrees, DMS, gradians, radians or a surveyor's
+// bearing), and an absolute bearing also applies `ANGBASE`/`ANGDIR`. Without a
+// host-reported `units` block the legacy fixed four-decimal degree form is used,
+// so an older carrier still renders something honest.
 //
 // Entries and measurements come off the host wire, so they are typed `unknown`
 // and narrowed here; a row is only produced from what the entry really carries.
 import type { Translator } from '../i18n.ts';
+import { formatAngle, formatLength, unitsFormat } from '../cad/units-format.ts';
+import type { CadUnits, UnitsFormat } from '../cad/units-format.ts';
 
-/** Decimal places for every measured number, matching AutoCAD's command echo. */
+/** Legacy decimal places when the host reports no `units` block. */
 export const MEASUREMENT_DECIMALS = 4;
-
-/** The degree mark: a unit symbol, not prose, so it is not a catalog value. */
-const DEGREE_SIGN = '\u00B0';
 
 /** Stable refusal codes the host emits (`cad_host::command_log::error_code`). */
 export const COMMAND_LOG_ERROR_CODES = Object.freeze([
@@ -104,14 +101,19 @@ export type CommandLogRow = CommandLogCommandRow | CommandLogResultRow | Command
 export type LogPoint = readonly number[];
 
 /**
- * A measured number with a fixed decimal count, or `null` when it is not a
- * finite number (the wire cannot carry one, so this is a contract violation and
- * must never render as a made-up value).
+ * A measured number in the document's stored length format, or `null` when it
+ * is not a finite number (the wire cannot carry one, so this is a contract
+ * violation and must never render as a made-up value).
+ *
+ * The optional `units` block drives the format; omitting it keeps the legacy
+ * fixed four-decimal form for callers that have no document status.
  */
-export function formatMeasurementValue(value: unknown): string | null {
+export function formatMeasurementValue(
+  value: unknown,
+  units?: CadUnits | null,
+): string | null {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null;
-  // `(-0).toFixed(4)` is "-0.0000": an exact zero reads as zero.
-  return (value === 0 ? 0 : value).toFixed(MEASUREMENT_DECIMALS);
+  return formatLength(value === 0 ? 0 : value, unitsFormat(units));
 }
 
 /** The XY-plane bearing of `from` → `to`, in degrees CCW from +X, in `[0, 360)`. */
@@ -181,7 +183,12 @@ function sequenceOf(entry: Record<string, unknown>): CommandLogSequence {
   return typeof value === 'number' || typeof value === 'string' ? value : null;
 }
 
-function distanceLines(t: Translator, measurement: Record<string, unknown>, formatted: string): CommandLogLine[] {
+function distanceLines(
+  t: Translator,
+  measurement: Record<string, unknown>,
+  formatted: string,
+  format: UnitsFormat,
+): CommandLogLine[] {
   // The value and every delta share one unit: the deltas are the components of
   // the same measured distance, so a drawing-units distance names drawing units on
   // all of them.
@@ -202,38 +209,49 @@ function distanceLines(t: Translator, measurement: Record<string, unknown>, form
   if (points.length !== 2 || !isPoint(from) || !isPoint(to)) return lines;
   const angle = xyAngleDegrees(from, to);
   if (angle !== null) {
-    lines.push({
-      tone: 'delta',
-      label: t('command.log.angle'),
-      text: `${formatMeasurementValue(angle)}${DEGREE_SIGN}`,
-      unit: null,
-      meta: null,
-    });
+    const text = formatAngle(angle, format, true);
+    if (text !== null) {
+      lines.push({
+        tone: 'delta',
+        label: t('command.log.angle'),
+        text,
+        unit: null,
+        meta: null,
+      });
+    }
   }
   for (const [axis, key] of DELTA_AXES) {
     const delta = pointDelta(from, to, axis);
     // A point that carries no such ordinate yields no delta line rather than a
     // zero the host never measured.
     if (delta === null) continue;
-    lines.push({ tone: 'delta', label: t(`command.log.${key}`), text: formatMeasurementValue(delta), unit, meta: null });
+    const text = formatLength(delta, format);
+    if (text === null) continue;
+    lines.push({ tone: 'delta', label: t(`command.log.${key}`), text, unit, meta: null });
   }
   return lines;
 }
 
-function measurementLines(t: Translator, measurement: unknown): CommandLogLine[] {
+function measurementLines(t: Translator, measurement: unknown, units?: CadUnits | null): CommandLogLine[] {
   if (!measurement || typeof measurement !== 'object') return [];
   const record = measurement as Record<string, unknown>;
   const { algorithm } = record;
   if (typeof algorithm !== 'string' || algorithm === '') return [];
-  const formatted = formatMeasurementValue(record.value);
+  const format = unitsFormat(units);
+  const formatted = formatMeasurementValue(record.value, units);
   if (formatted === null) return [];
-  if (algorithm === 'distance') return distanceLines(t, record, formatted);
+  if (algorithm === 'distance') return distanceLines(t, record, formatted, format);
 
   const meta = precisionLabel(t, record.precision);
   const single = (label: string, text: string, unit: string | null): CommandLogLine[] => [
     { tone: 'value', label, text, unit, meta },
   ];
-  if (algorithm === 'angle') return single(t('command.log.angle'), `${formatted}${DEGREE_SIGN}`, null);
+  if (algorithm === 'angle') {
+    const text = typeof record.value === 'number'
+      ? formatAngle(record.value, format, false)
+      : null;
+    return text === null ? [] : single(t('command.log.angle'), text, null);
+  }
   if (algorithm === 'polyline') return single(t('command.log.length'), formatted, unitLabel(t, record.unit));
   // `area_object` (2026-10-27) is the selection-based area variant: the same
   // measurement, a different input. It renders as an **area row** — the area label
@@ -313,13 +331,15 @@ function tokenLabel(
  * token when the source geometry is not analytic (`analytic` prints nothing) — a
  * coordinate picked off sampled geometry says so, exactly like a measurement row.
  */
-function pointLines(t: Translator, point: unknown): CommandLogLine[] {
+function pointLines(t: Translator, point: unknown, units?: CadUnits | null): CommandLogLine[] {
   if (!point || typeof point !== 'object') return [];
   const record = point as Record<string, unknown>;
   const position = Array.isArray(record.position) ? record.position : [];
+  const format = unitsFormat(units);
   const ordinates: string[] = [];
   for (const value of position.slice(0, 3)) {
-    const formatted = formatMeasurementValue(value);
+    if (typeof value !== 'number' || !Number.isFinite(value)) break;
+    const formatted = formatLength(value, format);
     if (formatted === null) break;
     ordinates.push(formatted);
   }
@@ -348,7 +368,11 @@ function pointLines(t: Translator, point: unknown): CommandLogLine[] {
  *
  * `code` is the diagnostic value: the component shows it in `title` only.
  */
-export function formatCommandLogEntry(entry: unknown, t: Translator): CommandLogRow | null {
+export function formatCommandLogEntry(
+  entry: unknown,
+  t: Translator,
+  units?: CadUnits | null,
+): CommandLogRow | null {
   if (!entry || typeof entry !== 'object') return null;
   const record = entry as Record<string, unknown>;
   if (record.kind === 'command') {
@@ -371,7 +395,7 @@ export function formatCommandLogEntry(entry: unknown, t: Translator): CommandLog
     // render nothing rather than a placeholder that reads as a measurement. A
     // result that carries both (a command that measures *and* reports a point)
     // prints the measurement group first, then the point line.
-    const lines = [...measurementLines(t, record.measurement), ...pointLines(t, record.point)];
+    const lines = [...measurementLines(t, record.measurement, units), ...pointLines(t, record.point, units)];
     if (lines.length === 0) return null;
     return { sequence: sequenceOf(record), kind: 'result', lines };
   }
@@ -387,11 +411,15 @@ export function formatCommandLogEntry(entry: unknown, t: Translator): CommandLog
 }
 
 /** Every renderable row of the host log, oldest first. */
-export function commandLogView(entries: unknown, t: Translator): CommandLogRow[] {
+export function commandLogView(
+  entries: unknown,
+  t: Translator,
+  units?: CadUnits | null,
+): CommandLogRow[] {
   if (!Array.isArray(entries)) return [];
   const rows: CommandLogRow[] = [];
   for (const entry of entries) {
-    const row = formatCommandLogEntry(entry, t);
+    const row = formatCommandLogEntry(entry, t, units);
     if (row) rows.push(row);
   }
   return rows;

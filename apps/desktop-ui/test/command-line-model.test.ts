@@ -205,6 +205,6 @@ test('the docked region keeps its visual identity while rendering the controller
   // merged record (typed rows in order, host echo output under them), and the
   // completion list is an overlay so neither changes the bar's height. Those are
   // the parts the mobile bar replaces with one bounded sheet.
-  assert.ok(desktop.includes('commandWindowRows(shell.historyEntries, logEntries, t)'));
+  assert.ok(desktop.includes('commandWindowRows(shell.historyEntries, logEntries, t, units)'));
   assert.equal(desktop.includes('useCommandLine'), true);
 });

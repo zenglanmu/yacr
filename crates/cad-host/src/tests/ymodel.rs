@@ -502,6 +502,81 @@ fn a_second_save_carries_only_the_edits_since_the_first_one() {
 }
 
 #[test]
+fn a_save_stamps_document_times_and_a_reopen_preserves_them() {
+    let files = Rc::new(YmodelFiles::default());
+    let core = core_with(files.clone());
+    let (snapshot, bytes) = archived_document();
+    let opened_revision = snapshot.revision;
+    files
+        .disk
+        .borrow_mut()
+        .insert(YMODEL_PATH.to_string(), bytes.clone());
+    let archive = Arc::new(FakeArchive::new(LoadedArchive {
+        snapshot,
+        manifest: manifest(opened_revision),
+    }));
+    open_ymodel(&core, archive.clone(), &bytes).expect("open");
+    assert_eq!(
+        core.controller
+            .borrow()
+            .drawing()
+            .expect("drawing")
+            .document_times(),
+        cad_db::DocumentTimes::default(),
+        "the pre-timestamp archive stores no instants"
+    );
+
+    core.request_save().expect("first save");
+    let stored = core
+        .controller
+        .borrow()
+        .drawing()
+        .expect("drawing")
+        .document_times();
+    assert!(
+        stored.created_at.is_some(),
+        "the first save stamps creation"
+    );
+    assert_eq!(
+        stored.updated_at, stored.created_at,
+        "the first save is both creation and last update"
+    );
+    let saved = archive
+        .saved
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("the save encoded a snapshot");
+    assert_eq!(
+        saved.header.variables["document_times"],
+        serde_json::json!({
+            "created_at": stored.created_at,
+            "updated_at": stored.updated_at,
+        }),
+        "the written bytes carry the same instants as the live document"
+    );
+
+    let reopened_files = Rc::new(YmodelFiles::default());
+    let reopened = core_with(reopened_files.clone());
+    let saved_revision = saved.revision;
+    let reopen_archive = Arc::new(FakeArchive::new(LoadedArchive {
+        snapshot: saved,
+        manifest: manifest(saved_revision),
+    }));
+    open_ymodel(&reopened, reopen_archive, b"SAVED").expect("reopen");
+    assert_eq!(
+        reopened
+            .controller
+            .borrow()
+            .drawing()
+            .expect("drawing")
+            .document_times(),
+        stored,
+        "the opened document reports the instants the archive carried"
+    );
+}
+
+#[test]
 fn a_layer_rename_marks_the_layers_table_and_survives_a_save_and_reopen() {
     let files = Rc::new(YmodelFiles::default());
     let core = core_with(files.clone());

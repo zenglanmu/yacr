@@ -26,8 +26,8 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **280** |
-| 部分实现（有写明的界） | **699** |
+| 完整实现 | **282** |
+| 部分实现（有写明的界） | **697** |
 | **已实现合计（完整 + 部分）** | **979** |
 | 未实现 | **2** |
 
@@ -38,6 +38,8 @@
 > **2026-11-24 增补（命名视图补全）**：`NEWVIEW` 按严格口径升为**完整实现**：新增 typed `NEWVIEW <name>`（保存当前显示）与 `NEWVIEW WINDOW <name> <x1> <y1> <x2> <y2>`（按世界矩形取景并保存，复用 `ZOOM WINDOW` 的 `framing_rect`/`plan_camera`，不改当前相机），两者都写入 `tables/views.json`，一条事务/一步撤销；无参数仍报告 `newview.needs_name`，对话框属构建级全局范围。`VIEWBACK`/`VIEWFORWARD` 现把 pan/orbit 连续手势按每次手势记入同一个每视口历史（首个命令记录，后续合并；指针抬起/`cancel_tool` 结束；离散命令开启新段），`VIEWFORWARD` 与 `ZOOM PREVIOUS` 共用同一后退/前进历史，不再有独立引擎；二者仍**部分实现**，剩余缺口是：ViewCube 的 `cad_orbit` 拖拽没有结束信号（连续两次拖拽之间若无其它命令会合并），以及 pinch 多点手势没有起止边界、按连续导航不记录。该批计入 **280 完整 + 699 部分 / 979 已实现**；无 GUI/GPU/像素/真机证据。
 
 > **2026-11-24 增补（命名视图持久化）**：`VIEW`/`-VIEW`/`VIEWGO` 三个官方名字按严格口径升为**完整实现**。命名视图从会话内存迁入文档表 `tables/views.json`（`.ymodel` minor **18**，位于块属性 14、`Text.mirrored` 15、二维约束 16、GROUP 17 之后；本批不改写任何既有档位），行内保存相机、2D/3D 模式、切回 2D 的相机、工作平面与活动空间；`VIEW SAVE`/`DELETE` 是一条事务/一步撤销，恢复仍只应用会话相机/空间。DXF/DWG 的 `VIEW` 表经 acadrust 导入导出：源只存世界高度，正交比例按 `height/1000` 显式转换并逐行报告 `import/export.view_camera_approximated`，无布局名的 paper-space 行按 `import.view_paper_space_unresolved` 跳过。`NEWVIEW` 与 `VIEWBACK`/`VIEWFORWARD` 的后续补全见上一条“命名视图补全”。该批计入 **274 完整 + 705 部分 / 979 已实现**；证据仅 Linux Rust 契约，GUI/GPU/像素/真机 NOT VERIFIED。
+
+> **2026-11-24 增补（严格读收口：时间戳/UNITS 读数）**：`document.json` → `variables.document_times` 新增可选的持久化创建/最后更新时间（Unix 秒；未保存或旧档不写键，逐字节兼容）。`SAVE` 的 `.ymodel` 写路径做**一次**时钟读取：快照编码与该次写入相同的实例，写入成功后 live 文档才记录它（失败不推进时间）；打开时由 `cad-db` 读回。`TIME`/`EDITTIME` 报告真实存储值，未保存/旧档按 `time.not_stored`/`edittime.not_stored` 明说；elapsed command time/elapsed timer/活跃编辑时长与本地时区仍具名 NOT TRACKED，因此两者**不晋升**，继续部分实现。`UNITS`/`-UNITS`：存储的 `units_display`（长度格式、角度格式/精度/基准角/旋向）与 `Document.units.decimal_places` 现在真正驱动状态栏坐标、命令窗口回显/日志与测量诊断的排版（Rust 单一 `UnitsDisplay::format_length/format_angle`，React `cad_status.units` + 同一镜像 helper），不再是固定 4 位；`$INSUNITS` 插入缩放与 UNITS 对话框仍是**全局范围**（命令报告按名声明）⇒ 两者按严格口径晋升**完整实现**。计入 **282 完整 + 697 部分 / 979 已实现**；证据仅 Linux Rust/前端契约，GUI/GPU/像素/真机 NOT VERIFIED。
 
 ## 状态口径
 
@@ -283,7 +285,7 @@
 
 > **这不是验收，是当前排期与口径。** 本轮目标是把命令从 `部分实现`/具名拒绝推进到支持域内
 > **没有剩余可写缺口**的 `完整实现`；不放宽为“改状态不实现”，也不把 ADR 全局范围缺口算作
-> 单命令完成。当前清单 **280 完整 / 699 部分 / 2 未实现**，只有真正合并且契约测试通过的
+> 单命令完成。当前清单 **282 完整 / 697 部分 / 2 未实现**，只有真正合并且契约测试通过的
 > 命令才改状态。
 
 | 批次 | 范围 | 状态 |
@@ -303,7 +305,7 @@
 | M1j 参照编辑族 | `REFEDIT`/`-REFEDIT`/`REFSET`/`REFCLOSE` 的成员图层/绘图次序/渲染属性回写、动态可见性成员保留与描述符剪除、嵌套引用保留 + 嵌套实例具名拒绝 | **已合并**（+4 complete） |
 | M1k 文本屏幕/托盘/查找大小写 | `TEXTSCR`/`GRAPHSCR` 接共享 chrome 文本屏幕（`cad_status.textScreen`，正文复用命令行历史同一折叠与序列化，无第二套历史）；`TRAYSETTINGS` 接状态栏托盘与托盘设置面（`cad_status.traySettings`，唯一开关即该会话旗标；无状态栏载体按名拒绝）；`FINDMATCH` 接入 `-FIND`/`FIND` 同一匹配器（ON 区分大小写，覆盖 MTEXT/单行 TEXT/MULTILEADER/表格单元格） | **已合并**（+4 complete；无 GUI/像素/真机证据） |
 | M1l 图层历史/漫游 | `LAYP` 恢复层属性 + 覆盖的快照（一次 LayerPatch/一步撤销）、`LAYWALK` 通配符过滤 | **已合并**（+2 complete；`LAYERSTATE` 因无 DWG 命名状态表仍 partial） |
-| M1m 元数据/系统变量/单位/信息/页面设置 | `DWGPROPS` 摘要元数据、`SYSVDLG` 编辑/保存/恢复、`UNITS`/`-UNITS` 单位/精度写入、`ACADINFO` 真实配置、`PSETUPIN`/`-PSETUPIN` 边界对账 | **已合并**（+2 complete：`DWGPROPS`、`SYSVDLG`；`-PSETUPIN` 从完整降回 partial：跨文件未实现；`UNITS`/`-UNITS` 仍 partial、`ACADINFO` 后续已晋升完整，缺口见各行） |
+| M1m 元数据/系统变量/单位/信息/页面设置 | `DWGPROPS` 摘要元数据、`SYSVDLG` 编辑/保存/恢复、`UNITS`/`-UNITS` 单位格式与读数、`ACADINFO` 真实配置、`document_times` 时间戳、`PSETUPIN`/`-PSETUPIN` 边界对账 | **已合并**（+5 complete：`DWGPROPS`、`SYSVDLG`、`ACADINFO`、`UNITS`、`-UNITS`；`-PSETUPIN` 从完整降回 partial：跨文件未实现；`TIME`/`EDITTIME` 已存时间戳但耗时/计时器未跟踪，仍 partial） |
 | M1n 查找/重复/边框 | `FINDINCLUDE` 块/xref 通道、`MULTIPLE` 捕获重复、`TFRAMES` 图像/遮罩边框开关 | **已合并**（+3 complete；`HIGHLIGHTNEW` 因渲染器无第四标志位仍 partial） |
 | M1o 镜像/分解 | `MIRROR` 的 `MIRRTEXT=1`（`Text.mirrored` + DXF 71 bit2/MTEXT normal）与 `EXPLODE` 的 `EXPLMODE` 会话通道 | **已合并**（+2 complete；`Text.mirrored` 占 minor 15） |
 | M1p XPLODE 属性控制 | `XPLODE` 的 `All`/`Color`/`LAyer`/`LType`/`LWeight`/`Inherit from parent block`/`Explode` typed 控制、属性值回退为块定义 `ATTDEF`、非均匀/冻结层/XREF 具名拒绝；`TOLERANCE` 单元格语法缺口保持 partial | **已合并**（+1 complete） |
@@ -399,7 +401,7 @@
 | `-SHAREVIEW` | 部分实现 | 具名拒绝（`-shareview.unsupported: no Autodesk cloud sharing/view model`）。 |
 | `-STYLE` | 已实现 | `STYLE` 的命令行拼写，同一 grammar/写入路径与边界 |
 | `-TABLE` | 部分实现 | 真实创建（与 `TABLE` 同实现）：`-TABLE <rows> <cols> <col_width> <row_height> <x> <y>`，+X/+Z、空单元格/Standard、一条事务/一步撤销；无对话框。
-| `-UNITS` | 部分实现 | 与 `UNITS` 同一实现臂：裸命令报告实时单位/精度/长度格式/角度设置；`<unit> <precision>`、`LENGTH <format>`、`ANGLE <format> <precision>`、`ANGLE DIRECTION ...` 写同一 `document.json` 头部（一条 revision、无 undo patch）；剩余缺口同 `UNITS`（读数未按格式重排、`$INSUNITS`、对话框）。 |
+| `-UNITS` | 完整实现 | 与 `UNITS` 同一实现臂：裸命令报告实时单位/精度/长度格式/角度设置；`<unit> <precision>`、`LENGTH <format>`、`ANGLE <format> <precision>`、`ANGLE DIRECTION ...` 写同一 `document.json` 头部（一条 revision、无 undo patch）；存储设置驱动状态栏坐标、命令窗口回显与测量诊断排版；`$INSUNITS` 插入缩放与 Units 对话框属全局范围。 |
 | `-VIEW` | 部分实现 | `VIEW` 的别名，同一实现 |
 | `-VISUALSTYLES` | 部分实现 | 具名拒绝（`-visualstyles.unsupported: no visual-style/3D display model; VSCURRENT owns the 2D display token`）。 |
 | `-VPORTS` | 部分实现 | `VPORTS` 的别名，同一实现（显式网格 + 对称标准配置）；同一边界 |
@@ -716,7 +718,7 @@
 | `EDGE` | 部分实现 | 具名拒绝（`edge.unsupported: no 3D face-edge visibility model`）。 |
 | `EDGESURF` | 部分实现 | 具名拒绝（`edgesurf.unsupported: 3D mesh surfaces are not modeled`）。 |
 | `EDITSHOT` | 部分实现 | 具名拒绝（`editshot.unsupported: this build has no ShowMotion named-view/motion model`）。 |
-| `EDITTIME` | 部分实现 | 只读：当前 UTC 时钟 + 文档修订/实体数；创建/更新时间为 `edittime.not_tracked`（`document.json` 无时间戳字段，新增属新持久化 schema，本轮不发明值），会话用时也未跟踪。 |
+| `EDITTIME` | 部分实现 | 只读：当前 UTC 时钟 + 文档修订/实体数 + 持久化的创建/最后更新时间（`variables.document_times`，`edittime.creation`/`edittime.last_updated`；旧档/未保存按 `edittime.not_stored` 明说）；活跃编辑时长与会话 uptime 仍 `edittime.not_tracked`。 |
 | `ELEV` | 完整实现 | `ELEV <height>`（有限小数，可负）写会话标高，裸形式报告；`SETVAR ELEV` 可读写；**令牌有真实消费者**：创建漏斗三个入口在事务开启前按该标高做纯 z 平移（经唯一的变换权威），`ELEV 0.0` 与旧构建逐字节相同；复制/编辑路径保留源自身 z（逐条列在 `app_drawing/elevation.rs`）；拒绝 `elev.invalid_value`/`.unsupported_kind`/`.invalid_geometry` 且不开事务 |
 | `ELLIPSE` | 已实现 | 轴端点整椭圆；payload 新增 **弧模式**（`start`/`sweep`，≤一圈）与**绕长轴旋转**（`normal` + `ratio·cos R` 的 DXF 投影规则）；点击臂仍只产整椭圆 |
 | `ERASE` | 已实现 | — |
@@ -1185,7 +1187,7 @@
 | `TFRAMES` | 完整实现 | 会话令牌 `tframes`（默认 ON）经 `DisplaySettings::frames_visible` 到达派生批次：ON 显示光栅图像边框，并按 `WIPEOUTFRAME` 显示遮罩边框；OFF 同时隐藏两者（WIPEOUT 仍遮罩、图像仍绘制纹理）；外部参照边框未建模（xref 是展开的块几何），命令按名声明；无库写/修订/历史，出图不跟随（出图各自解析边框）。 |
 | `THICKEN` | 部分实现 | 具名拒绝（`thicken.unsupported: no surface-to-solid model`）。 |
 | `TIFOUT` | 部分实现 | 具名拒绝（`tifout.unsupported: raster TIFF export is not implemented; use PLOT for vector SVG/PDF`）。 |
-| `TIME` | 部分实现 | 真实 UTC/文档/修订/计数 + 4 个显式 `time.not_tracked`（创建、最后更新、命令耗时、计时器）；创建/更新时间需新增 `document.json` 时间戳 schema，未跟踪值不杜撰 |
+| `TIME` | 部分实现 | 真实 UTC/文档/修订/计数 + 持久化的创建/最后更新时间（`time.creation`/`time.last_updated`；旧档/未保存 `time.not_stored`，不杜撰日期）+ 2 个显式 `time.not_tracked`（命令耗时、计时器） |
 | `TINSERT` | 部分实现 | **无块进入单元格的创建**（`tinsert.unsupported`）；导入的单元格块内容未建模。
 | `TJUST` | 部分实现 | `JUSTIFYTEXT` 的别名，同一语法与实现 |
 | `TOLERANCE` | 部分实现 | `TOLERANCE <x> <y> <text>`（`|` 分格）→ 闭合边框 LWPOLYLINE + 分隔 LINE + 每格 TEXT，活动图层，一条事务；是独立实体而非单个 `AcDbFcf`；轴对齐、格宽/行高为声明估计、≤6 格。**单元格语法缺口**：未实现对话框的槽位语义（两个公差槽、三个基准槽、投影高度、基准标识）与 GDT 符号字体、`%%v`、`^J`；这些输入按 `tolerance.gdt_symbol`/`tolerance.multiline`/`tolerance.dxf_separator` 具名拒绝 |
@@ -1217,7 +1219,7 @@
 | `UNGROUP` | 完整实现 | 移除一个持久编组行并保留全部实体；未知组名拒绝；一条事务/一步撤销；不写实体几何 |
 | `UNION` | 完整实现 | 后台布尔（C2）：选中 ≥2 个平面或曲面 `AcDb3dSolid` 实体，worker 折叠后一条事务/一步撤销替换为一个实体；曲面操作数参与内核布尔（`nurbs.faces`；无 box / 无精确 pcurve 仍按名拒绝）；无模型器按 `unsupported-runtime: solid-modeler` 拒绝；操作数被编辑则 `Stale`（状态 `solid.boolean_stale`，图纸不变）；布尔运行期间图元创建按 `solid.boolean_busy` 拒绝；布尔结果在提交前校验为单个连通非空壳，多壳/空壳按 `solid.boolean_result_not_single_shell` 拒绝且不写库/不升修订/不退操作数。 |
 | `UNISOLATEOBJECTS` | 部分实现 | 清空会话隐藏集；无数据库写/撤销 |
-| `UNITS` | 部分实现 | 裸命令读取实时 `Document.units` 与 `units_display`；`UNITS <unit> <precision>` 写声明单位与线性小数位，`UNITS LENGTH <format>`、`UNITS ANGLE <format> <precision>`、`UNITS ANGLE DIRECTION <east\|north\|west\|south\|other> [<degrees>] [CW\|CCW]` 写长度/角度格式与基准方向（`document.json` → `variables.units_display`，仅非默认值写出；同命令仍是一条 header revision、无 undo patch）；空补丁/越界精度/非有限基准角按名拒绝。**剩余**：坐标与测量读数仍用固定小数位、未按存储格式重排，`$INSUNITS` 插入缩放与 UNITS 对话框未建模。 |
+| `UNITS` | 完整实现 | 裸命令读取实时 `Document.units` 与 `units_display`；`UNITS <unit> <precision>` 写声明单位与线性小数位，`UNITS LENGTH <format>`、`UNITS ANGLE <format> <precision>`、`UNITS ANGLE DIRECTION <east\|north\|west\|south\|other> [<degrees>] [CW\|CCW]` 写长度/角度格式与基准方向（`document.json` → `variables.units_display`，仅非默认值写出；同命令仍是一条 header revision、无 undo patch）；空补丁/越界精度/非有限基准角按名拒绝。存储设置驱动状态栏坐标、命令窗口回显/日志与测量诊断的真实排版（长度/角度格式、精度、基准角、旋向）。**全局范围**：`$INSUNITS` 插入缩放与 UNITS 对话框。 |
 | `UPDATEFIELD` | 部分实现 | 具名拒绝（`updatefield.unsupported`）：未建模字段。 |
 | `VBAIDE` | 部分实现 | 具名拒绝（`vbaide.unsupported: no VBA IDE model`）。 |
 | `VBALOAD` | 部分实现 | 具名拒绝（`vbaload.unsupported: no VBA loader model`）。 |
@@ -1644,7 +1646,7 @@
 | 334 | `EDGE` | 部分实现 | Changes the visibility of 3D face edges. | 具名拒绝（`edge.unsupported: no 3D face-edge visibility model`）。 |
 | 335 | `EDGESURF` | 部分实现 | Creates a mesh between four contiguous edges or curves. | 具名拒绝（`edgesurf.unsupported: 3D mesh surfaces are not modeled`）。 |
 | 336 | `EDITSHOT` | 部分实现 | Edits a saved named view with or without motion. | 具名拒绝（`editshot.unsupported: this build has no ShowMotion named-view/motion model`）。 |
-| 337 | `EDITTIME` | 部分实现 | Tracks the amount of active editing time for a drawing. | 只读：当前 UTC 时钟 + 文档修订/实体数；创建/更新时间为 `edittime.not_tracked`（无时间戳字段，新增属新 schema），会话用时也未跟踪。 |
+| 337 | `EDITTIME` | 部分实现 | Tracks the amount of active editing time for a drawing. | 只读：当前 UTC 时钟 + 文档修订/实体数 + 持久化的创建/最后更新时间（`edittime.creation`/`edittime.last_updated`，旧档/未保存 `edittime.not_stored`）；活跃编辑时长/uptime 仍 `edittime.not_tracked`。 |
 | 338 | `ELEV` | 完整实现 | Sets elevation and extrusion thickness of new objects. | `ELEV <height>`（有限小数，可负）写会话标高，裸形式报告；`SETVAR ELEV` 可读写；**令牌有真实消费者**：创建漏斗三个入口在事务开启前按该标高做纯 z 平移（经唯一的变换权威），`ELEV 0.0` 与旧构建逐字节相同；复制/编辑路径保留源自身 z（逐条列在 `app_drawing/elevation.rs`）；拒绝 `elev.invalid_value`/`.unsupported_kind`/`.invalid_geometry` 且不开事务 |
 | 339 | `ELLIPSE` | 已实现 | Creates an ellipse or an elliptical arc. | 轴端点整椭圆；payload 新增 **弧模式**（`start`/`sweep`，≤一圈）与**绕长轴旋转**（`normal` + `ratio·cos R` 的 DXF 投影规则）；点击臂仍只产整椭圆 |
 | 340 | `ERASE` | 已实现 | Removes objects from a drawing. | — |
@@ -2172,7 +2174,7 @@
 | 862 | `TFRAMES` | 完整实现 | Toggles the display of frames for all wipeout and image objects. | 会话令牌 `tframes`（默认 ON）经 `DisplaySettings::frames_visible` 到达派生批次：ON 显示图像边框与 `WIPEOUTFRAME` 允许的遮罩边框，OFF 同时隐藏（遮罩/纹理仍在）；外部参照边框未建模按名声明；无库写/修订/历史。 |
 | 863 | `THICKEN` | 部分实现 | Converts a surface into a 3D solid with a specified thickness. | 具名拒绝（`thicken.unsupported: no surface-to-solid model`）。 |
 | 864 | `TIFOUT` | 部分实现 | Saves selected objects to a file in TIFF file format. | 具名拒绝（`tifout.unsupported: raster TIFF export is not implemented; use PLOT for vector SVG/PDF`）。 |
-| 865 | `TIME` | 部分实现 | Displays the date and time statistics of a drawing. | 真实 UTC/文档/修订/计数 + 4 个显式 `time.not_tracked`（创建、最后更新、命令耗时、计时器）；创建/更新时间需新增 `document.json` 时间戳 schema，未跟踪值不杜撰 |
+| 865 | `TIME` | 部分实现 | Displays the date and time statistics of a drawing. | 真实 UTC/文档/修订/计数 + 持久化创建/最后更新时间（`time.creation`/`time.last_updated`，旧档/未保存 `time.not_stored`）+ 2 个显式 `time.not_tracked`（命令耗时、计时器） |
 | 866 | `TINSERT` | 部分实现 | Inserts a block in a table cell. | **无块进入单元格的创建**（`tinsert.unsupported`）；导入的单元格块内容未建模。
 | 867 | `TJUST` | 部分实现 | Changes the justification point of a text object without moving the text. Works with text, mtext, and attribute definition objects. | `JUSTIFYTEXT` 的别名，同一语法与实现 |
 | 868 | `TOLERANCE` | 部分实现 | Creates geometric tolerances contained in a feature control frame. | `TOLERANCE <x> <y> <text>`（`|` 分格）→ 闭合边框 LWPOLYLINE + 分隔 LINE + 每格 TEXT，活动图层，一条事务；是独立实体而非单个 `AcDbFcf`；轴对齐、格宽/行高为声明估计、≤6 格。**单元格语法缺口**：未实现对话框的槽位语义（两个公差槽、三个基准槽、投影高度、基准标识）与 GDT 符号字体、`%%v`、`^J`；这些输入按 `tolerance.gdt_symbol`/`tolerance.multiline`/`tolerance.dxf_separator` 具名拒绝 |
@@ -2208,8 +2210,8 @@
 | 898 | `UNGROUP` | 完整实现 | Disassociates the objects from a group. | 移除一个持久编组行并保留全部实体；未知组名拒绝；一条事务/一步撤销；不写实体几何 |
 | 899 | `UNION` | 完整实现 | Combines two or more 3D solids, surfaces, or 2D regions into a single, composite 3D solid, surface, or region. | 后台布尔（C2）：选中 ≥2 个平面或曲面 `AcDb3dSolid` 实体，worker 折叠后一条事务/一步撤销替换为一个实体；曲面操作数参与内核布尔（`nurbs.faces`；无 box / 无精确 pcurve 仍按名拒绝）；无模型器按 `unsupported-runtime: solid-modeler` 拒绝；操作数被编辑则 `Stale`（状态 `solid.boolean_stale`，图纸不变）；布尔运行期间图元创建按 `solid.boolean_busy` 拒绝；布尔结果在提交前校验为单个连通非空壳，多壳/空壳按 `solid.boolean_result_not_single_shell` 拒绝且不写库/不升修订/不退操作数。 |
 | 900 | `UNISOLATEOBJECTS` | 部分实现 | Displays objects previously hidden with the ISOLATEOBJECTS or HIDEOBJECTS command. | 清空会话隐藏集；无数据库写/撤销 |
-| 901 | `-UNITS` | 部分实现 | Controls the precision and display formats for coordinates, distances, and angles. | 与 `UNITS` 同一实现臂：裸命令报告实时单位/精度/长度格式/角度设置；`<unit> <precision>`、`LENGTH <format>`、`ANGLE <format> <precision>`、`ANGLE DIRECTION ...` 写同一 `document.json` 头部（一条 revision、无 undo patch）；剩余缺口同 `UNITS`。 |
-| 902 | `UNITS` | 部分实现 | Controls the precision and display formats for coordinates, distances, and angles. | 裸命令读取实时 `Document.units` 与 `units_display`；`<unit> <precision>` 写声明单位与线性小数位，`LENGTH <format>`/`ANGLE <format> <precision>`/`ANGLE DIRECTION ...` 写长度/角度格式与基准方向（`variables.units_display`，仅非默认值；同一命令仍一条 header revision、无 undo patch）；剩余：读数未按格式重排、`$INSUNITS`、对话框。 |
+| 901 | `-UNITS` | 完整实现 | Controls the precision and display formats for coordinates, distances, and angles. | 与 `UNITS` 同一实现臂：裸命令报告实时单位/精度/长度格式/角度设置；`<unit> <precision>`、`LENGTH <format>`、`ANGLE <format> <precision>`、`ANGLE DIRECTION ...` 写同一 `document.json` 头部（一条 revision、无 undo patch）；存储设置驱动坐标/命令日志/测量诊断排版；全局范围：`$INSUNITS` 与 UNITS 对话框。 |
+| 902 | `UNITS` | 完整实现 | Controls the precision and display formats for coordinates, distances, and angles. | 裸命令读取实时 `Document.units` 与 `units_display`；`<unit> <precision>` 写声明单位与线性小数位，`LENGTH <format>`/`ANGLE <format> <precision>`/`ANGLE DIRECTION ...` 写长度/角度格式与基准方向（`variables.units_display`，仅非默认值；同一命令仍一条 header revision、无 undo patch）；存储设置驱动坐标/命令日志/测量诊断排版；全局范围：`$INSUNITS` 插入缩放与 UNITS 对话框。 |
 | 903 | `UPDATEFIELD` | 部分实现 | Updates fields in selected objects. | 具名拒绝（`updatefield.unsupported`）：未建模字段。 |
 | 904 | `UPDATETHUMBSNOW` | 已实现 | Manually updates thumbnail previews for named views, drawings, and layouts. | 立即刷新 Quick View 预览卡（重算预览状态并显示瞬时“已更新”；不做文件写） |
 | 905 | `VBAIDE` | 部分实现 | Displays the Visual Basic Editor. | 具名拒绝（`vbaide.unsupported: no VBA IDE model`）。 |

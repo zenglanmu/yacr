@@ -29,6 +29,7 @@ import type { CommandLogLine, CommandLogRow } from './command-log.ts';
 import type { CommandHistoryEntry } from './command-history.ts';
 import { aliasTarget, splitCommandText } from './commands.ts';
 import type { Translator } from '../i18n.ts';
+import type { CadUnits } from '../cad/units-format.ts';
 
 /** One row of the expanded command history. */
 export interface CommandWindowRow {
@@ -106,8 +107,9 @@ export function commandWindowRows(
   entries: readonly CommandHistoryEntry[],
   logEntries: unknown,
   t: Translator,
+  units?: CadUnits | null,
 ): CommandWindowRow[] {
-  const hostRows = commandLogView(logEntries, t);
+  const hostRows = commandLogView(logEntries, t, units);
   const rows: CommandWindowRow[] = [];
   let cursor = 0;
   const source: readonly CommandHistoryEntry[] = Array.isArray(entries) ? entries : [];

@@ -39,15 +39,17 @@ export function TextScreen() {
   runRef.current = shell.runCommand;
 
   const logEntries = shell.status?.commandLog;
+  const units = shell.status?.units ?? null;
+  const unitsSignature = units === null ? '' : JSON.stringify(units);
   const logSignature = Array.isArray(logEntries) && logEntries.length > 0
     ? `${logEntries.length}:${logEntries[logEntries.length - 1]?.sequence}`
     : '';
   // Fold only when the two sources change — the status poll hands over a fresh
   // array at 4 Hz, and re-folding the log on every poll would be wasted work.
   const rows = useMemo(
-    () => commandWindowRows(shell.historyEntries, logEntries ?? [], t),
-    // `logEntries` is covered by `logSignature`; see `CommandLine.tsx`.
-    [logSignature, shell.historyEntries, t],
+    () => commandWindowRows(shell.historyEntries, logEntries ?? [], t, units),
+    // `logEntries`/`units` are covered by their signatures; see `CommandLine.tsx`.
+    [logSignature, unitsSignature, shell.historyEntries, t],
   );
   const body = useMemo(() => commandWindowText(rows, t), [rows, t]);
 

@@ -71,6 +71,18 @@ struct YmodelSaveOutcome {
     resources: ResourceReport,
 }
 
+/// The wall-clock instant of a durable save, in Unix seconds.
+///
+/// `None` when the system clock is before the Unix epoch: there is no real
+/// instant to record, so the document keeps its stored timestamps rather than
+/// writing a negative or invented one.
+fn unix_seconds_now() -> Option<u64> {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|elapsed| elapsed.as_secs())
+}
+
 impl HostCore {
     /// Export the active drawing to a vector file (SVG/PDF), host-owned.
     ///
@@ -677,10 +689,14 @@ impl HostCore {
         // the scope it computes names `tables/resources.json`. A no-op for every
         // document that never opted in (the flag is a document property, D3).
         let resources = self.collect_ymodel_resources();
+        // The one clock read of this durable write. The snapshot encodes it and
+        // the live document records it only after `write_atomic` succeeds, so a
+        // failed save never advances the reported last-update instant.
+        let saved_at = unix_seconds_now();
         let snapshot = self
             .controller
             .borrow()
-            .snapshot_document()
+            .snapshot_document_at(saved_at)
             .map_err(|error| SaveFailure::Reason(error_text(&error)))?;
         // Every commit since the last save/open, accumulated by the controller
         // (command path, plugin commits and the engine request funnel). Empty for
@@ -724,6 +740,10 @@ impl HostCore {
             controller.mark_saved(encoded.saved_revision, document_uuid, foreign_entries);
             controller.set_source_sha256(Some(source_sha256));
             controller.record_saved_archive(committed);
+            // The bytes carry this instant; the live document now reports it too.
+            if let Some(saved_at) = saved_at {
+                controller.record_document_saved_at(saved_at);
+            }
         }
         // The document now *is* this file: the next save is in place against it
         // and the source-overwrite guard must name the target we just wrote.
