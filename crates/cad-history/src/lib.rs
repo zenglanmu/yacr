@@ -790,6 +790,11 @@ impl History {
         )
     }
 
+    // The one record funnel: each table lane adds one patch vector, and the
+    // wrappers above keep every caller explicit about what it wrote (the same
+    // reason the record struct carries them all). A struct here would only move
+    // the list, not shorten it.
+    #[allow(clippy::too_many_arguments)]
     fn record_drawing_step(
         &mut self,
         record: DrawingUndoRecord,
