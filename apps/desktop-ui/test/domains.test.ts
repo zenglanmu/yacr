@@ -8,6 +8,7 @@ import {
   DEFAULT_DOMAIN,
   DOMAIN_IDS,
   DOMAIN_PROFILES,
+  domainCommand,
   domainFromArgument,
   domainOf,
   domainProfile,
@@ -60,6 +61,21 @@ test('the DOMAIN argument accepts reference names as input aliases only', () => 
   assert.equal(domainFromArgument('revit2024'), null);
   assert.equal(domainFromArgument(''), null);
   assert.equal(domainFromArgument(undefined), null);
+});
+
+test('the DOMAIN word opens the switcher or carries one domain token', () => {
+  assert.deepEqual(domainCommand('DOMAIN'), { kind: 'open' });
+  assert.deepEqual(domainCommand('  domain  '), { kind: 'open' });
+  assert.deepEqual(domainCommand('DOMAIN revit'), { kind: 'set', domain: 'bim' });
+  assert.deepEqual(domainCommand('domain sketchup'), { kind: 'set', domain: 'concept' });
+  assert.deepEqual(domainCommand('DOMAIN mechanical'), { kind: 'set', domain: 'mechanical' });
+  assert.deepEqual(domainCommand('DOMAIN cad2d'), { kind: 'set', domain: 'cad2d' });
+  assert.deepEqual(domainCommand('DOMAIN revit2024'), { kind: 'unknown', token: 'revit2024' });
+  // A longer word is a different command, never `DOMAIN` with an argument.
+  assert.equal(domainCommand('DOMAINX'), null);
+  assert.equal(domainCommand('DOMAINS revit'), null);
+  assert.equal(domainCommand(''), null);
+  assert.equal(domainCommand(null), null);
 });
 
 test('a document wins over the session preview', () => {
@@ -123,6 +139,7 @@ test('every domain string the chrome renders exists in both catalogs', async () 
     'domain.placeholder_body',
     'domain.return',
     'domain.switch_failed',
+    'domain.unknown',
   ];
   for (const id of DOMAIN_IDS) {
     keys.push(DOMAIN_PROFILES[id].labelKey, DOMAIN_PROFILES[id].referenceKey);

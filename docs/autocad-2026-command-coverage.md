@@ -44,6 +44,12 @@
   （AutoCAD 2026 是协作追踪；本项目同名命令是旧式宽线带）都**不计**为已覆盖，
   表中状态写成「未实现（同名不同义）」并注明。
 
+> **2026-11-24 UI 接线（不新增官方 AutoCAD 命令名）**：`cad2d` 的 AutoCAD 2024 参考功能区补齐已实现命令的
+> 入口——View→视口（`VPORTS`/`MVIEW`/`VPCLIP`/`VPMAX`/`VPMIN`/`VPSCALE`/`LAYVPI`）、
+> View→坐标（`UCSICON`）、Insert→内容（`TOOLPALETTES`）、Annotate→注释缩放（`SCALELISTEDIT`），
+> 以及 chrome-local 的 `DOMAIN` 命令。无实现的参考面板继续 `pending`；这不改变 981 条的
+> 实现状态计数，也没有运行/像素证据（`autocad-structure` 契约测试锁定接线）。
+
 ## 下一批 100 条命令实施计划与进度（2026-11-07）
 
 > **这是排期与范围记录，不是验收。** 每条命令落地时必须在本文与 `docs/compatibility.md`

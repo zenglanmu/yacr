@@ -18,9 +18,12 @@
 BIM/SketchUp/SolidWorks 为**显式占位**（隐藏功能区与命令行，显示说明卡，零域命令）。切换器在右
 导航栏；主题按域选择 CSS token（`html[data-domain]`），渲染器画布底色仍只认宿主 `theme` 的
 dark/light。有文档时切换写文档（`cad_set_application_domain`，一个 revision），无文档只预览。
-每域主题持久化（`ui.theme.<domain>`）、`DOMAIN` 命令、文档属性入口、官方手册结构 fixture 与
-golden 截图 lane **未实现/未运行**；Windows/macOS/Android/Web 的域切换运行 **NOT VERIFIED**。
-详见 `docs/application-domains.md` 与 [ADR-0053](adr/0053-application-domains.md)。
+阶段 2：AutoCAD 2024 参考 tab/panel 顺序由 `autocad-structure` fixture 锁定；已实现命令的参考
+入口已接线（视图→视口/坐标、插入→内容、注释→注释缩放），裸 `DOMAIN` 打开切换器、`DOMAIN <id>`
+写文档或预览；无实现的参考面板仍显式 `pending`。每域主题持久化（`ui.theme.<domain>`）与 golden
+截图 lane 的 CI **未实现**；golden 基线只在本地软件 Chromium 运行过，不能当 GPU/像素/真机验收。
+Windows/macOS/Android/Web 的域切换运行 **NOT VERIFIED**。详见 `docs/application-domains.md` 与
+[ADR-0053](adr/0053-application-domains.md)。
 
 ## 实体能力（读取 / 语义 / 绘制 / 拾取 / 测量）
 

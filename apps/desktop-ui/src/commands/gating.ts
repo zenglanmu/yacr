@@ -15,6 +15,7 @@ import {
   LAYERCLOSE_COMMAND,
   PROPERTIESCLOSE_COMMAND,
 } from './chrome-commands.ts';
+import { DOMAIN_COMMAND } from '../domains/domains.ts';
 
 /** The `cad_status` slice the admission rules read (all fields are the host's). */
 export interface CommandStatusView {
@@ -938,4 +939,8 @@ export const LOCAL_CHROME_COMMANDS: readonly string[] = Object.freeze([
   // name is answered before `cad_command`; a tab this build does not have is
   // refused in words, never forwarded as a command.
   'TOOLPALETTES', 'TOOLPALETTESCLOSE', 'TPNAVIGATE', 'PERFANALYZER', 'PERFANALYZERCLOSE',
+  // `DOMAIN` is chrome-owned: bare opens the switcher, `DOMAIN <token>` writes
+  // `cad_set_application_domain` (or previews with no document). No router word
+  // is involved, so it is admitted without the host vocabulary.
+  DOMAIN_COMMAND,
 ]);

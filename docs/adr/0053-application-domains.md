@@ -70,8 +70,14 @@ schema 扩展，需要再次升 minor。缺失值由内容保守派生：有 BIM
 
 `cad2d` 的功能区已按 D7 重排：顶层 tab 为 文件（扩展）/常用/插入/注释/参数化/视图/管理/输出/
 附加模块，取消自造“绘图/测量”顶层 tab；面板顺序转录进 `apps/desktop-ui/test/fixtures/autocad-2024-drafting.json`
-并由结构契约测试锁定。参数化/插入 Data/视口/坐标等未接线面板以 `pending` 显示提示，不放可点假按钮。
-自有 golden 截图（4 域、1600×1000、软件 Chromium、两次 0.000% diff）已落地在 `scripts/ui-golden.cjs` + `apps/desktop-ui/test/golden/ui/`，但 **CI 未接线**；`DOMAIN` 命令入口、每域主题持久化仍未实现（见 `docs/application-domains.md`）。
+并由结构契约测试锁定。**已实现命令的 UI 接线已补齐**：视图→视口（`VPORTS`/`MVIEW`/`VPCLIP`/`VPMAX`/
+`VPMIN`/`VPSCALE`/`LAYVPI`）、视图→坐标（`UCSICON`）、插入→内容（`TOOLPALETTES`）、注释→注释缩放
+（`SCALELISTEDIT`）不再显示 pending；参数化/插入 Data/链接、CAD 标准、动作录制器、自定义、发送、
+第三方应用等无命令实现的面板继续显式 `pending`，不放可点假按钮。`DOMAIN` 命令入口已接线：裸
+`DOMAIN` 打开切换器，`DOMAIN <id>` 有文档时写 `cad_set_application_domain`、无文档时只预览，未知
+token 以 `domain.unknown` 具名拒绝；文件信息面板显示只读域行。自有 golden 截图（4 域、1600×1000、
+软件 Chromium、两次 0.000% diff）已落地在 `scripts/ui-golden.cjs` + `apps/desktop-ui/test/golden/ui/`，
+但 **CI 未接线**；每域主题持久化仍未实现（见 `docs/application-domains.md`）。
 
 ## 后果
 
@@ -79,11 +85,11 @@ schema 扩展，需要再次升 minor。缺失值由内容保守派生：有 BIM
 - `cad_status` 增加 `applicationDomain`（无文档为 `null`）；前端据此选择 profile。
 - 主题目前是“域默认”，不是用户可保存的每域设置；画布背景与浅色 chrome 的不一致是有界、
   已声明的阶段限制。
-- 后续阶段：AutoCAD ribbon 结构重排（取消自造“绘图/测量”顶层 tab、补 插入/输出/参数化）、
-  每域停靠布局、`DOMAIN` 命令与文档属性入口、`ui.theme.<domain>`、golden 截图 lane。
+- 后续阶段：其余参考面板（参数化、数据/链接、CAD 标准、动作录制器、自定义、发送、第三方应用）
+  的命令实现与接线、每域停靠布局、`ui.theme.<domain>`、golden 截图 lane。
 
 ## 证据边界
 
-阶段 1 只有契约测试（Rust 域读写/状态/写入 gate、前端 profile/主题/CSS/i18n）；没有运行截图、
-没有真实 GPU/像素结论，Windows/macOS/Android/Web 仅编译或契约。手册截图对照与 `ui-golden`
-**NOT RUN**（下一阶段）。
+阶段 1/2 只有契约测试（Rust 域读写/状态/写入 gate、前端 profile/主题/CSS/i18n、面板接线与
+`DOMAIN` 解析）；没有运行截图、没有真实 GPU/像素结论，Windows/macOS/Android/Web 仅编译或契约。
+`ui-golden` 本地基线已有，但 CI 与手册截图对照 **NOT RUN**（下一阶段）。

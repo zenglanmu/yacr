@@ -319,10 +319,34 @@ export const PARAMETRIC_DIMENSIONAL_PANEL = pending('dimensional', 'ribbon.panel
 export const PARAMETRIC_MANAGE_PANEL = pending('parametric_manage', 'ribbon.panel.parametric_manage');
 export const INSERT_DATA_PANEL = pending('data', 'ribbon.panel.data');
 export const INSERT_LINKING_PANEL = pending('linking', 'ribbon.panel.linking');
-export const INSERT_CONTENT_PANEL = pending('content', 'ribbon.panel.content');
-export const ANNOTATE_SCALING_PANEL = pending('annotation_scaling', 'ribbon.panel.annotation_scaling');
-export const VIEW_COORDINATES_PANEL = pending('coordinates', 'ribbon.panel.coordinates');
-export const VIEW_VIEWPORTS_PANEL = pending('viewports', 'ribbon.panel.viewports');
+// Content: the Tool Palettes float is this build's real Blocks surface (the
+// reference's Blocks palette/DesignCenter remain named refusals, so they are
+// not offered as dead entries).
+export const INSERT_CONTENT_PANEL = panel('content', 'ribbon.panel.content', [
+  { id: 'TOOLPALETTES', labelKey: 'draw.kind.toolpalettes', icon: 'palette', command: 'TOOLPALETTES', large: true, hintKey: 'draw.kind.toolpalettes.hint' },
+]);
+// Annotation scaling: the read-only Scale List report is the one implemented
+// member of the reference panel; OBJECTSCALE/ANNOSCALE are named refusals.
+export const ANNOTATE_SCALING_PANEL = panel('annotation_scaling', 'ribbon.panel.annotation_scaling', [
+  { id: 'SCALELISTEDIT', labelKey: 'draw.kind.scalelistedit', icon: 'scale', command: 'SCALELISTEDIT', large: true, hintKey: 'draw.kind.scalelistedit.hint' },
+]);
+// Coordinates: UCSICON is the one implemented UCS-family session token. UCS and
+// UCSMAN stay named refusals (no UCS model), so they are not shown as buttons.
+export const VIEW_COORDINATES_PANEL = panel('coordinates', 'ribbon.panel.coordinates', [
+  { id: 'UCSICON', labelKey: 'draw.kind.ucsicon', icon: 'axes', command: 'UCSICON', hintKey: 'draw.kind.ucsicon.hint' },
+]);
+// Viewports: every button here is a real router command (VPMIN/VPMAX are
+// payload-free session moves, the rest take their documented typed argument or
+// pick flow). MVSETUP stays a named refusal and is deliberately absent.
+export const VIEW_VIEWPORTS_PANEL = panel('viewports', 'ribbon.panel.viewports', [
+  { id: 'VPORTS', labelKey: 'draw.kind.vports', icon: 'rectang', command: 'VPORTS', large: true, hintKey: 'draw.kind.vports.hint' },
+  { id: 'MVIEW', labelKey: 'draw.kind.mview', icon: 'view', command: 'MVIEW', hintKey: 'draw.kind.mview.hint' },
+  { id: 'VPCLIP', labelKey: 'draw.kind.vpclip', icon: 'rectang', command: 'VPCLIP', hintKey: 'draw.kind.vpclip.hint' },
+  { id: 'VPMAX', labelKey: 'draw.kind.vpmax', icon: 'view', command: 'VPMAX' },
+  { id: 'VPMIN', labelKey: 'draw.kind.vpmin', icon: 'view', command: 'VPMIN' },
+  { id: 'VPSCALE', labelKey: 'draw.kind.vpscale', icon: 'properties', command: 'VPSCALE', hintKey: 'draw.kind.vpscale.hint' },
+  { id: 'LAYVPI', labelKey: 'draw.kind.layvpi', icon: 'layers', command: 'LAYVPI', hintKey: 'draw.kind.layvpi.hint' },
+]);
 export const MANAGE_STANDARDS_PANEL = pending('cad_standards', 'ribbon.panel.cad_standards');
 export const MANAGE_RECORDER_PANEL = pending('action_recorder', 'ribbon.panel.action_recorder');
 export const MANAGE_CUSTOMIZATION_PANEL = pending('customization', 'ribbon.panel.customization');

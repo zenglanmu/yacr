@@ -6,6 +6,7 @@ import React from 'react';
 import { Icon } from '../icons.tsx';
 import { Button, IconButton } from './primitives.tsx';
 import { useI18n, useShell } from '../context.ts';
+import { DOMAIN_PROFILES, domainOf } from '../domains/domains.ts';
 
 function value(input: unknown): string {
   if (input === null || input === undefined) return '\u2014';
@@ -27,6 +28,11 @@ export function FileInfoPalette() {
   const { t } = useI18n();
   const shell = useShell();
   const status = shell.status;
+  // The domain is a document property: with no drawing the row stays blank
+  // instead of reading the document-less drafting default as a file claim.
+  const domain = status?.documentLabel
+    ? DOMAIN_PROFILES[domainOf(status)]
+    : null;
   return (
     <section className="palette fileinfo" aria-label={t('fileinfo.title')}>
       <header className="palette__head">
@@ -43,6 +49,9 @@ export function FileInfoPalette() {
         <h3 className="palette__section">{t('fileinfo.section.document')}</h3>
         <dl className="kv">
           <Row label={t('resources.import.identity')}>{value(status?.documentLabel)}</Row>
+          <Row label={t('fileinfo.row.domain')}>
+            {domain ? <span title={t(domain.referenceKey)}>{t(domain.labelKey)}</span> : value(null)}
+          </Row>
           <Row label={t('fileinfo.row.entities')}>{value(status?.entityCount)}</Row>
           <Row label={t('fileinfo.row.imports')}>{value(status?.importCount)}</Row>
           <Row label={t('fileinfo.row.camera')}>{value(status?.camera)}</Row>

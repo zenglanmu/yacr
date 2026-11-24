@@ -466,6 +466,7 @@ function Shell() {
   const runLocalSelector = useLocalSelectors({
     layout,
     translate: t,
+    documentLabel,
     clearResult: () => setCommandResult(null), clearDraft: () => setCommand(''),
     requestOptions: () => openOptionsDialog(requestOpenPopup),
     openResources: () => setReferencesOpen(true),

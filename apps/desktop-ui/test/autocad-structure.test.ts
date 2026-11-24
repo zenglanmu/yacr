@@ -9,6 +9,8 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { readCatalog } from './helpers.ts';
 import { RIBBON_TABS, ribbonCommandIds } from '../src/ribbon/tabs.ts';
+import { COMMAND_CATALOG } from '../src/commands/catalog.ts';
+import { LOCAL_CHROME_COMMANDS } from '../src/commands/gating.ts';
 
 const FIXTURE = new URL('./fixtures/autocad-2024-drafting.json', import.meta.url);
 
@@ -69,6 +71,28 @@ test('the catalog names use the reference localization', async () => {
   for (const key of ['ribbon.home', 'ribbon.insert', 'ribbon.annotate', 'ribbon.parametric',
     'ribbon.view', 'ribbon.manage', 'ribbon.output', 'ribbon.addins']) {
     assert.equal(typeof zh[key], 'string', key);
+  }
+});
+
+test('the wired reference panels carry only commands this build actually exposes', () => {
+  const known = new Set(COMMAND_CATALOG.map(command => command.id));
+  const local = new Set(LOCAL_CHROME_COMMANDS);
+  const expected = {
+    // The reference panel's implemented commands, in reference reading order.
+    viewports: ['VPORTS', 'MVIEW', 'VPCLIP', 'VPMAX', 'VPMIN', 'VPSCALE', 'LAYVPI'],
+    coordinates: ['UCSICON'],
+    content: ['TOOLPALETTES'],
+    annotation_scaling: ['SCALELISTEDIT'],
+  };
+  const panels = new Map(RIBBON_TABS.flatMap(tab => tab.panels).map(panel => [panel.id, panel]));
+  for (const [id, commands] of Object.entries(expected)) {
+    const panel = panels.get(id);
+    assert.ok(panel, `missing reference panel ${id}`);
+    assert.equal(Boolean(panel.pending), false, `${id} must no longer be a placeholder`);
+    assert.deepEqual(panel.items.map(item => item.command), commands, `${id} wiring drifted`);
+    for (const command of commands) {
+      assert.ok(known.has(command) || local.has(command), `${id}/${command} is not in the command catalog`);
+    }
   }
 });
 

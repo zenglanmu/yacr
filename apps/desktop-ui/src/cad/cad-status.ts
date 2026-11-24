@@ -50,10 +50,8 @@ export interface CadCamera {
  * The authoritative 3D/2D view orientation (`cad_status.view`), used by the
  * ViewCube. Every value is the host camera's own state, never a UI guess: a
  * host that cannot report a finite basis sends `null` and the cube refuses to
- * rotate rather than fabricating an orientation.
- *
- * The block is also carried on the per-frame volatile event (a free orbit
- * changes it every frame), so it must not re-render the shell tree.
+ * rotate rather than fabricating an orientation. It rides the volatile event,
+ * so it must not re-render the shell tree.
  */
 export interface CadViewOrientation {
   /** `"2d"` or `"3d"` — the host's real view mode. */
@@ -361,6 +359,8 @@ export interface CadPerformance {
  */
 export interface CadStatus {
   readonly documentLabel: string | null;
+  /** Effective document domain (`cad2d|bim|concept|mechanical`; null with no document). */
+  readonly applicationDomain?: string | null;
   readonly entityCount: number | null;
   readonly loading: boolean;
   readonly importProgress: CadImportProgress | null;

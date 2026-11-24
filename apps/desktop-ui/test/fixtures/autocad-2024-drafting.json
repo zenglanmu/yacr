@@ -103,13 +103,9 @@
   "pendingPanels": [
     "data",
     "linking",
-    "content",
-    "annotation_scaling",
     "geometric",
     "dimensional",
     "parametric_manage",
-    "coordinates",
-    "viewports",
     "cad_standards",
     "action_recorder",
     "customization",

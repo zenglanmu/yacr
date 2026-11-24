@@ -116,6 +116,40 @@ export function domainFromArgument(text: unknown): DomainId | null {
   }
 }
 
+/** The command-line word that opens the switcher or writes one domain. */
+export const DOMAIN_COMMAND = 'DOMAIN';
+
+/** What a typed `DOMAIN …` line asks the chrome to do. */
+export type DomainCommand =
+  | { readonly kind: 'open' }
+  | { readonly kind: 'set'; readonly domain: DomainId }
+  | { readonly kind: 'unknown'; readonly token: string };
+
+/**
+ * Parse one typed `DOMAIN` line.
+ *
+ * Bare `DOMAIN` opens the switcher (ADR-0053 stage 2); `DOMAIN <token>` writes
+ * the document's domain when one is open and sets the session preview otherwise.
+ * The token accepts the same reference-name aliases as [`domainFromArgument`],
+ * but an unknown token is returned **verbatim** so the refusal can name it —
+ * never silently treated as drafting. Anything that merely starts with the word
+ * (`DOMAINX`) is not this command.
+ */
+export function domainCommand(text: unknown): DomainCommand | null {
+  const line = String(text ?? '').trim();
+  const upper = line.toUpperCase();
+  if (upper === DOMAIN_COMMAND) return { kind: 'open' };
+  if (!upper.startsWith(`${DOMAIN_COMMAND} `)) return null;
+  // The argument keeps its typed spelling for the refusal; `domainFromArgument`
+  // does the case-insensitive match and only canonical tokens are written.
+  const argument = line.slice(DOMAIN_COMMAND.length).trim();
+  if (!argument) return { kind: 'open' };
+  const domain = domainFromArgument(argument);
+  return domain === null
+    ? { kind: 'unknown', token: argument }
+    : { kind: 'set', domain };
+}
+
 /** The wire command that writes the document's domain. */
 export const SET_DOMAIN_COMMAND = 'cad_set_application_domain';
 

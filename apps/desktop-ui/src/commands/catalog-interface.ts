@@ -1,6 +1,6 @@
 // The 2026-11-12 interface wave: the chrome-owned UI selectors.
 //
-// All twenty-three names are **chrome-local** (`LOCAL_CHROME_COMMANDS`): the
+// The interface names are **chrome-local** (`LOCAL_CHROME_COMMANDS`): the
 // command line answers them before `cad_command`, and the ribbon entries dispatch
 // the same words through the same local selector table. None reaches the router
 // and none needs a document. The first fourteen are the interface wave; `QCCLOSE`,
@@ -72,4 +72,8 @@ export const INTERFACE_COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.
   // same report family the Diagnostics palette uses.
   { id: 'PERFANALYZER', labelKey: 'draw.kind.perfanalyzer', icon: 'diagnostics', group: 'view' },
   { id: 'PERFANALYZERCLOSE', labelKey: 'draw.kind.perfanalyzerclose', icon: 'close', group: 'view' },
+  // The application-domain word (ADR-0053 stage 2): bare opens the switcher,
+  // `DOMAIN <token>` writes the document (or previews with no document). It is
+  // chrome-local like the rows above and never reaches the router.
+  { id: 'DOMAIN', labelKey: 'draw.kind.domain', icon: 'app', group: 'view' },
 ]);

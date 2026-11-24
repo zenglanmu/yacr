@@ -246,7 +246,9 @@ test('the drawer offers the real ribbon model minus the two chrome-collapse swit
   // command; the palette toggles, the chrome-collapse switches and the
   // workspace words are dropped from the interface panel, leaving the two
   // surfaces a phone can really use (the layout overview and QuickCalc).
-  assert.deepEqual(mobileRibbonSections('view').map(section => section.id), ['navigate', 'view3d', 'standard', 'viewstate', 'display', 'palettes', 'interface']);
+  // Coordinates/Viewports now hold real router commands (UCSICON, VPORTS…) and
+  // stay in the drawer like every other wired panel.
+  assert.deepEqual(mobileRibbonSections('view').map(section => section.id), ['navigate', 'view3d', 'coordinates', 'viewports', 'standard', 'viewstate', 'display', 'palettes', 'interface']);
   assert.deepEqual(
     mobileRibbonSections('view').find(section => section.id === 'palettes').items.map(item => item.id),
     ['STATUS'],

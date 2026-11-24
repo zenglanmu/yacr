@@ -23,6 +23,10 @@
 // the catalog's words. `LAYERCLOSE` closes the palette for the same reason, and is
 // resolved right after it: a second close on any layout is still a success.
 import { useCallback } from 'react';
+import { invoke } from '../host/invoke.ts';
+import { domainCommand, writeDomain } from '../domains/domains.ts';
+import type { DomainId } from '../domains/domains.ts';
+import { previewDomain, setSwitcherOpen } from '../domains/store.ts';
 import type { Translator } from '../i18n.ts';
 import type { LayoutMode } from '../layout/layout-mode.ts';
 import { DOCKED_PANEL_REFUSAL_KEY, dockedPaletteOpenable } from '../layout/layout-surfaces.ts';
@@ -77,6 +81,10 @@ import type { ClassicPanelKind, QuickViewKind, WorkspaceDialogMode } from '../ch
 /** One selector's destination. `refused` names the panel the layout cannot show. */
 export type LocalSelectorResult =
   | { readonly kind: 'options' }
+  /** Open the domain switcher (`domain: null`) or apply one domain. */
+  | { readonly kind: 'domain'; readonly domain: DomainId | null }
+  /** A typed `DOMAIN <token>` this build does not know; `token` is verbatim. */
+  | { readonly kind: 'domainUnknown'; readonly token: string }
   | { readonly kind: 'resources' }
   | { readonly kind: 'properties' }
   | { readonly kind: 'layers' }
@@ -168,6 +176,10 @@ export function toolPalettesTabRefusalKey(tab: string): string | null {
  * answered (and, for any tab but Blocks, refused in words) locally.
  */
 export function localSelectorFor(text: string, layout: LayoutMode): LocalSelectorResult | null {
+  const domain = domainCommand(text);
+  if (domain?.kind === 'open') return { kind: 'domain', domain: null };
+  if (domain?.kind === 'set') return { kind: 'domain', domain: domain.domain };
+  if (domain?.kind === 'unknown') return { kind: 'domainUnknown', token: domain.token };
   if (isOptionsCommand(text)) return { kind: 'options' };
   if (isDSettingsCommand(text)) return { kind: 'options' };
   if (isCommandLineCommand(text)) return { kind: 'commandLine', value: true };
@@ -233,6 +245,8 @@ export function localSelectorFor(text: string, layout: LayoutMode): LocalSelecto
 export interface LocalSelectorHost {
   readonly layout: LayoutMode;
   readonly translate: Translator;
+  /** Whether a document owns the domain (`DOMAIN <id>` writes it vs. previews). */
+  readonly documentLabel: string | null;
   readonly clearResult: () => void;
   readonly clearDraft: () => void;
   readonly requestOptions: () => void;
@@ -299,6 +313,7 @@ export function useLocalSelectors(host: LocalSelectorHost): (text: string, fromI
   const {
     layout,
     translate,
+    documentLabel,
     clearResult,
     clearDraft,
     requestOptions,
@@ -340,6 +355,23 @@ export function useLocalSelectors(host: LocalSelectorHost): (text: string, fromI
     if (fromInput) clearDraft();
     switch (result.kind) {
       case 'options': requestOptions(); break;
+      case 'domain': {
+        // Bare `DOMAIN` opens the one switcher surface; a token writes the
+        // document (when one is open) or previews the profile with no document.
+        // The current profile never flips locally: the next status reports it.
+        setSwitcherOpen(result.domain === null);
+        if (result.domain === null) break;
+        if (!documentLabel) { previewDomain(result.domain); break; }
+        void writeDomain(invoke, result.domain).then(write => {
+          if (write.kind === 'failed') {
+            reportError(translate('domain.switch_failed', { reason: write.code }));
+          }
+        });
+        break;
+      }
+      case 'domainUnknown':
+        reportError(translate('domain.unknown', { token: result.token }));
+        break;
       case 'resources': openResources(); break;
       case 'properties': openProperties(); break;
       case 'layers': openLayers(); break;
@@ -378,6 +410,7 @@ export function useLocalSelectors(host: LocalSelectorHost): (text: string, fromI
   }, [
     layout,
     translate,
+    documentLabel,
     clearResult,
     clearDraft,
     requestOptions,
