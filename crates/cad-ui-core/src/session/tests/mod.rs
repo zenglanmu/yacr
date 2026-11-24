@@ -31,6 +31,7 @@ mod tests_polyline_width;
 mod tests_properties;
 mod tests_settings;
 mod tests_stretch;
+mod tests_sysvdlg;
 mod tests_text;
 mod tests_tools;
 mod tests_tools_routing;

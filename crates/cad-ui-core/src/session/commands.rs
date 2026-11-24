@@ -893,6 +893,14 @@ pub use helpers::*;
 mod arguments;
 pub use arguments::*;
 
+// `DWGPROPS`'s typed summary-metadata line (the bare selector is the report).
+mod document_meta;
+pub use document_meta::*;
+
+// The typed `UNITS`/`-UNITS` drawing-unit form (the bare selectors are reports).
+mod document_units;
+pub use document_units::*;
+
 // ADR-0055 M3: the typed block-attribute command lines.
 mod attribute;
 pub(crate) use arguments::{parse_positive_decimal, parse_signed_decimal};

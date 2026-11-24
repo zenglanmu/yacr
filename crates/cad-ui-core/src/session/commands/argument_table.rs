@@ -92,6 +92,17 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     // `JULIAN <date>`: the calendar-to-Julian day form of the read-only report;
     // a bare `JULIAN` keeps payload `None` (the current UTC instant).
     JULIAN_SELECTOR,
+    // `DWGPROPS <field> <text>` / `CUSTOM <name> <text>`: the summary-metadata
+    // write forms; the bare selector stays the read-only report.
+    DWGPROPS_SELECTOR,
+    // `UNITS <unit> <precision>` / `-UNITS <unit> <precision>`: the one
+    // representable document-unit write; the bare selectors stay reports.
+    UNITS_SELECTOR,
+    DASH_UNITS_SELECTOR,
+    // `SYSVDLG <name>` / `<name> <value>` / `SAVE|RESTORE <file.json>`: the
+    // system-variable dialog's read/edit/file forms; the bare selector is the
+    // report.
+    crate::session::sysvdlg_dialog::SYSVDLG_SELECTOR,
     // `SCALELISTEDIT` / `-SCALELISTEDIT`: the annotation-scale table's typed
     // writes (`ADD`/`RENAME`/`DELETE`) and the `?` report spelling.
     SCALELIST_SELECTOR,
