@@ -26,8 +26,8 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **254** |
-| 部分实现（有写明的界） | **725** |
+| 完整实现 | **256** |
+| 部分实现（有写明的界） | **723** |
 | **已实现合计（完整 + 部分）** | **979** |
 | 未实现 | **2** |
 
@@ -58,7 +58,7 @@
 >
 > **2026-11-24 增补（严格 2D 收口续）**：`HATCH`/`-HATCH` 的支持域（`Circle`/完整 `Ellipse`/闭合 `Polyline`/`LINE`+`ARC` 边链；solid/user-defined/predefined/gradient 四种会话填充与 `PATTERN`/`PATTERNFILE` 两种命令名通道）已无剩余拒绝路径，契约测试逐组合证明——仅剩创建期**关联性**与实时预览/对话框，二者都是构建级全局范围。`IMAGEATTACH` 新增可选的 `[<rotation_deg>]`（绕 `+Z` 逆时针、烘进 `u`/`v` 基）与**活动图纸布局**目标（走布局自身 draw-order 的实体写入路径；`Block` 定义 `imageattach.block_space`、失效布局 `imageattach.unknown_layout` 按名拒绝）。`VPSYNC` 新增可选的**0 基**主视口索引（`VPSYNC [<master>]`，默认 `0`；越界 `vpsync.master_out_of_range`、不 clamp、一条事务/一步撤销）。`HATCH`、`-HATCH`、`IMAGEATTACH`、`VPSYNC` 四个官方名字晋升为**完整实现**。
 >
-> **2026-11-24 增补（严格报告收口）**：`BCOUNT` 扩到**整图**（模型空间 + 各图纸布局）与选择集作用域，块定义内嵌套参照按名报告不计数（AutoCAD 同限），Select objects 交互提示属 ADR 全局范围；`DBLIST` 列出块定义成员与全部三个已建模空间，XDATA/扩展字典/字典/代理对象不保留并按名报告；`JULIAN` 新增 `JULIAN <YYYY-MM-DD>`（也接受 `YYYY/MM/DD`，可跟 `[T ]HH:MM[:SS]`）日历转儒略日形式，非法日期按 `julian.invalid_date` 拒绝；`PAGESETUP`/`-PAGESETUP` 的 typed 写入与拒绝契约补齐后晋升（唯一残留绘图仪/CTB/STB 属 ADR 全局范围）。`ALIASEDIT` 的 `ADD`/`REMOVE` 补上宿主 `preference.json` 根键 `commandAliases` 持久化（跨会话恢复；写入失败按 `aliasedit.not_persisted` 回滚；失效/冲突的持久行启动时按名丢弃并记诊断）后晋升；`SYSVARMONITOR`（无后台通知、不持久化）仍有真实缺口，保持**部分实现**。四批合计计入 **254 完整 + 725 部分 / 979 已实现**；证据仅 Linux Rust 契约，GUI/GPU/像素/真机 NOT VERIFIED。
+> **2026-11-24 增补（严格报告收口）**：`BCOUNT` 扩到**整图**（模型空间 + 各图纸布局）与选择集作用域，块定义内嵌套参照按名报告不计数（AutoCAD 同限），Select objects 交互提示属 ADR 全局范围；`DBLIST` 列出块定义成员与全部三个已建模空间，XDATA/扩展字典/字典/代理对象不保留并按名报告；`JULIAN` 新增 `JULIAN <YYYY-MM-DD>`（也接受 `YYYY/MM/DD`，可跟 `[T ]HH:MM[:SS]`）日历转儒略日形式，非法日期按 `julian.invalid_date` 拒绝；`PAGESETUP`/`-PAGESETUP` 的 typed 写入与拒绝契约补齐后晋升（唯一残留绘图仪/CTB/STB 属 ADR 全局范围）。`ALIASEDIT` 的 `ADD`/`REMOVE` 补上宿主 `preference.json` 根键 `commandAliases` 持久化（跨会话恢复；写入失败按 `aliasedit.not_persisted` 回滚；失效/冲突的持久行启动时按名丢弃并记诊断）后晋升；`SYSVARMONITOR`（无后台通知、不持久化）仍有真实缺口，保持**部分实现**。四批合计计入 **254 完整 + 725 部分 / 979 已实现**；2026-11-24 另将 `MIRROR`/`EXPLODE` 晋升为**完整实现**（`MIRRTEXT=1` 字形镜像位与 `EXPLMODE` 会话通道），合计 **256 完整 + 723 部分 / 979 已实现**；证据仅 Linux Rust 契约，GUI/GPU/像素/真机 NOT VERIFIED。
 
 ## 下一批 100 条命令实施计划与进度（2026-11-07）
 
@@ -246,8 +246,9 @@
   **2026-11-15 补齐**：`FILLET` 的 SPLINE 对与零半径全部平面对（含 CIRCLE↔CIRCLE）已实现，晋升为**完整实现**；
   `STRETCH` 的多边形/lasso **交互捕获**已接线（`stretchWindow` 参数）、`JOIN` 的 `JOIN CLOSE` 混合 SPLINE 已闭合
   （`Spline.closed` + DXF 70 bit 1 往返），三者都晋升为**完整实现**。
-  `PEDIT`（多段线宽度/`plinegen`/顶点子菜单）、`MIRROR`（`MIRRTEXT=1` 字形镜像）、
-  `EXPLODE`（MULTILEADER 未导入内容）、`QSELECT`/`FILTER`（分类/自定义特性）。
+  `PEDIT`（多段线宽度/`plinegen`/顶点子菜单）、`QSELECT`/`FILTER`（分类/自定义特性）。
+  `MIRROR`（`MIRRTEXT=1` 字形镜像）与 `EXPLODE`（`EXPMODE`/`EXPLMODE` 会话通道）已于
+  2026-11-24 补齐并晋升为**完整实现**。
 - P3 **已完成**（2026-11-09）：按严格口径 3 条晋升（`OVERKILL` `AUDIT` `QDIM`）；其余保留
   `部分实现`：`HATCHEDIT`（`Add/Remove Boundaries`）、
   `SSX`（实体标志位/厚度/挤出）、`DIMTEDIT`（字形级对齐）、`REVCLOUD`（`Calligraphy`）、
@@ -260,7 +261,7 @@
 
 > **这不是验收，是当前排期与口径。** 本轮目标是把命令从 `部分实现`/具名拒绝推进到支持域内
 > **没有剩余可写缺口**的 `完整实现`；不放宽为“改状态不实现”，也不把 ADR 全局范围缺口算作
-> 单命令完成。当前清单 **254 完整 / 725 部分 / 2 未实现**，只有真正合并且契约测试通过的
+> 单命令完成。当前清单 **256 完整 / 723 部分 / 2 未实现**，只有真正合并且契约测试通过的
 > 命令才改状态。
 
 | 批次 | 范围 | 状态 |
@@ -691,7 +692,7 @@
 | `ETRANSMIT` | 部分实现 | 具名拒绝（`etransmit.unsupported`）：本构建无 eTransmit/zip 打包模型。 |
 | `EXOFFSET` | 完整实现 | `OFFSET` 独立思考拼写，同一规划器：`LINE`/`CIRCLE`/`ARC`/`LWPOLYLINE`（含弧段）/`ELLIPSE`→样条/`SPLINE`→样条，`Through`/`Distance`/`Multiple`/`Erase`/`Layer`/`OFFSETGAPTYPE` 全部继承，一条事务/一步撤销（逐类 + `Multiple` + 拒绝均有契约） |
 | `EXPLAN` | 部分实现 | 具名拒绝（`explan.unsupported: this build has no UCS model; the world +Z plan path is PLAN`）。 |
-| `EXPLODE` | 部分实现 | 一层分解；标注→线/弧/箭头/文字、多重引线→引线/样条/箭头/MTEXT、非均匀块可表示子集；`EXPMODE` 无会话通道 |
+| `EXPLODE` | 完整实现 | 一层分解；标注→线/弧/箭头网格/文字、多重引线→引线/样条/箭头网格/MTEXT、非均匀块可表示子集；`EXPLMODE`/`EXPMODE` 会话开关（`EXPLODE MODE 0\|1`、`SETVAR EXPLMODE 0\|1`）真实门控非均匀 INSERT | `TEXT`/`SPLINE`/`SHAPE`/`OPAQUE`/`IMAGE`/`MASK`/`MINSERT`/`XREF`/`Table` 与遗留 `Compound` 键按名拒绝；箭头仍是 `MESH`（无 2D-solid 变体）；非均匀块中不可精确表示的成员按名拒绝 |
 | `EXPORT` | 部分实现 | 导出为其它格式，目标扩展名决定写出器（dxf/dwg/stl/obj/ply/off/coff/ifc/skp/glb/gltf）；DWG/SKP 写出为实验性，vendor **NOT VERIFIED**。参数形式 `EXPORT <TOKEN>`（ADR-0052）建议该格式的名字，扩展名不符按 `export.format_mismatch` 在写前拒绝 |
 | `EXPORTDWF` | 部分实现 | 具名拒绝（`exportdwf.unsupported: this build has no DWF/DWFx exporter`）。 |
 | `EXPORTDWFX` | 部分实现 | 具名拒绝（`exportdwfx.unsupported: this build has no DWF/DWFx exporter`）。 |
@@ -875,7 +876,7 @@
 | `MESHUNCREASE` | 部分实现 | 具名拒绝（`meshuncrease.unsupported: mesh uncreasing is not implemented`）。 |
 | `MIGRATEMATERIALS` | 部分实现 | 具名拒绝（`migratematerials.unsupported: this build has no material/texture model`）。 |
 | `MINSERT` | 已实现 | `MINSERT <block> <rows> <cols> <row_spacing> <col_spacing> <x> <y>`：矩形 INSERT 阵列，ARRAYRECT 单元规则 + INSERT `T(i)·T(-base)`，一条事务；独立副本（域无 MINSERT 实体，非关联） |
-| `MIRROR` | 部分实现 | `MIRRTEXT=0` 可读镜像（位置镜像、文字保持可读）、`MIRROR ERASE YES/NO`、标注反射后重合成；**`MIRRTEXT=1` 字形镜像未实现**（文字实体无镜像标志） |
+| `MIRROR` | 完整实现 | `MIRRTEXT=0` 可读镜像（位置镜像、文字保持可读）与 `MIRRTEXT=1` 真反射（文字/MTEXT 的字形镜像位、基线半转，标注测量文字同样置位）、`MIRROR ERASE YES/NO`、标注反射后重合成；文字镜像位随 `.ymodel`（minor 15）与 DXF/DWG 往返 | `Shape`/`Opaque`/`MULTILEADER`/块定义成员按名拒绝（无镜像表示）；块参照只反射放置 |
 | `MIRROR3D` | 部分实现 | 具名拒绝（`mirror3d.unsupported: no 3D mirror-plane model`）。 |
 | `MKLTYPE` | 部分实现 | 具名拒绝（`mkltype.unsupported: this build has no .lin definition-file writer`）。 |
 | `MKSHAPE` | 部分实现 | 具名拒绝（`mkshape.unsupported: this build has no SHX shape compiler`）。 |
@@ -1620,7 +1621,7 @@
 | 342 | `ETRANSMIT` | 部分实现 | Packages a set of files for Internet transmission. | 具名拒绝（`etransmit.unsupported`）：本构建无 eTransmit/zip 打包模型。 |
 | 343 | `EXOFFSET` | 完整实现 | Offsets selected objects. | `OFFSET` 独立思考拼写，同一规划器：`LINE`/`CIRCLE`/`ARC`/`LWPOLYLINE`（含弧段）/`ELLIPSE`→样条/`SPLINE`→样条，`Through`/`Distance`/`Multiple`/`Erase`/`Layer`/`OFFSETGAPTYPE` 全部继承，一条事务/一步撤销（逐类 + `Multiple` + 拒绝均有契约） |
 | 344 | `EXPLAN` | 部分实现 | Displays an orthographic view of the XY plane of a specified UCS without changing the view magnification. | 具名拒绝（`explan.unsupported: this build has no UCS model; the world +Z plan path is PLAN`）。 |
-| 345 | `EXPLODE` | 部分实现 | Breaks a compound object into its component objects. | 一层分解；标注→线/弧/箭头/文字、多重引线→引线/样条/箭头/MTEXT、非均匀块可表示子集；`EXPMODE` 无会话通道 |
+| 345 | `EXPLODE` | 完整实现 | Breaks a compound object into its component objects. | 一层分解；标注→线/弧/箭头网格/文字、多重引线→引线/样条/箭头网格/MTEXT、非均匀块可表示子集；`EXPLMODE`/`EXPMODE` 会话开关真实门控；其余种类按名拒绝 |
 | 346 | `-EXPORT` | 部分实现 | Creates a DWF, DWFx, or PDF file from the command line. | 具名拒绝（`-export.unsupported`）：请用 PLOT/EXPORT；本构建只有一条矢量导出路径；命令行拼写。 |
 | 347 | `EXPORT` | 部分实现 | Saves the objects in a drawing to a different file format. | 导出为其它格式，目标扩展名决定写出器；DWG/SKP 写出为实验性，vendor **NOT VERIFIED** |
 | 348 | `EXPORTDWF` | 部分实现 | Creates a DWF file and allows you to set individual page setup overrides on a sheet-by-sheet basis. | 具名拒绝（`exportdwf.unsupported: this build has no DWF/DWFx exporter`）。 |
@@ -1826,7 +1827,7 @@
 | 548 | `MESHUNCREASE` | 部分实现 | Removes the crease from selected mesh faces, edges, or vertices. | 具名拒绝（`meshuncrease.unsupported: mesh uncreasing is not implemented`）。 |
 | 549 | `MIGRATEMATERIALS` | 部分实现 | Finds any legacy materials in Tool Palettes and converts them to generic type. | 具名拒绝（`migratematerials.unsupported: this build has no material/texture model`）。 |
 | 550 | `MINSERT` | 已实现 | Inserts multiple instances of a block in a rectangular array. | `MINSERT <block> <rows> <cols> <row_spacing> <col_spacing> <x> <y>`：矩形 INSERT 阵列，ARRAYRECT 单元规则 + INSERT `T(i)·T(-base)`，一条事务；独立副本（域无 MINSERT 实体，非关联） |
-| 551 | `MIRROR` | 部分实现 | Creates a mirrored copy of selected objects. | `MIRRTEXT=0` 可读镜像（位置镜像、文字保持可读）、`MIRROR ERASE YES/NO`、标注反射后重合成；**`MIRRTEXT=1` 字形镜像未实现**（文字实体无镜像标志） |
+| 551 | `MIRROR` | 完整实现 | Creates a mirrored copy of selected objects. | `MIRRTEXT=0`/`1` 可读镜像与真反射（字形镜像位 + 半转）、`MIRROR ERASE YES/NO`、标注重合成；文字镜像位随 `.ymodel` minor 15 与 DXF/DWG 往返；无镜像表示的种类按名拒绝 |
 | 552 | `MIRROR3D` | 部分实现 | Creates a mirrored copy of selected 3D objects across a mirroring plane. | 具名拒绝（`mirror3d.unsupported: no 3D mirror-plane model`）。 |
 | 553 | `MKLTYPE` | 部分实现 | Creates a linetype definition based on selected objects and stores them in a specified linetype definition (LIN) file. | 具名拒绝（`mkltype.unsupported: this build has no .lin definition-file writer`）。 |
 | 554 | `MKSHAPE` | 部分实现 | Creates a shape definition based on selected objects. | 具名拒绝（`mkshape.unsupported: this build has no SHX shape compiler`）。 |
@@ -2370,7 +2371,7 @@
 | `COPY` | 实现 | 按位移复制、新 id；样式覆盖无法复制时记 `drawing.copy.style` |
 | `ROTATE` | 实现 | 绕基点旋转（相似变换）；选择含 `MultiLeader` 时**仍可旋转**（缩放则整命令失败，见 `SCALE`） |
 | `SCALE` | 实现 | **均匀**缩放；非均匀拒绝；`MultiLeader`/`TEXT` 等按类拒绝 |
-| `MIRROR` | 部分 | 镜像并**新增副本**（保留原件）；含 `Arc`/`Ellipse`（含椭圆弧）；**拒绝 `Text`**（平面文字无法表达真反射）与 `MultiLeader` |
+| `MIRROR` | 完整 | 镜像并**新增副本**（保留原件）；含 `Arc`/`Ellipse`（含椭圆弧）、`Text`/`MTEXT`（`MIRRTEXT=0` 可读 / `=1` 字形镜像位 + 半转）、`Dimension`（`MIRRTEXT=1` 同时标记测量文字）；`Shape`/`Opaque`/`MultiLeader` 与块定义成员按名拒绝（无镜像表示） |
 | `TRIM` | 部分 | 目标 LINE/ARC/CIRCLE/SPLINE/**ELLIPSE（含椭圆弧）**/**LWPOLYLINE（开放/闭合，bulge 保留为精确子弧）**；拾取投影所在的段保留（本项目 TRIM 语义，见 `docs/drawing-edit.md` §3）；边界折线/样条采样；**INSERT/HATCH/MESH/OPAQUE/COMPOUND 目标与 EXTEND 的 POLYLINE 目标按名拒绝** |
 |  `EXTEND` | 部分 | 目标 LINE/ARC/**ELLIPSE（含椭圆弧）**/**开放 SPLINE（沿端点切线直线延伸：追加 degree+1 共线控制点与新端节点，C0/G1，不重拟合、不改源参数化）**；弧可超过半圈（至整圈前）；闭合样条/非钳制端点/无前方交点/非共面边界具名拒绝；CIRCLE/整椭圆/折线/INSERT/HATCH 目标按名拒绝 |
 | `BREAK` | 部分 | 两点打断：**第一次拾取实体同时是第一断点**，第二点确定移除区间；`LINE`/`ARC`/`CIRCLE`/`SPLINE` 走同一 `TargetCurve` 精确子曲线；`CIRCLE` 变 `ARC`（补集），源实体保留为第一段、第二段新 id，一条事务/一步撤销。**按名拒绝**：`LWPOLYLINE`/其它种类、两点同参数（`break.zero_span`）、整条曲线（`break.whole_curve`）、拾取投影出界（`break.pick_outside_span`）、块成员/子元素、非模型空间。**无 `F` 第一点覆盖、无多段打断** |
@@ -2381,7 +2382,7 @@
 | `ARRAYRECT` / `ARRAYPOLAR` | 部分 | **独立副本**（非关联，有意偏离）；无 `Path`/`Levels`/`Total`/角度间隔输入/关联编辑；极坐标角度步长 `i·fill/items` 是**我们的规则**（与 AutoCAD 的 `fill/(items−1)` 不同，已测试） |
 | `STRETCH` | 部分 | 恒**交叉窗口**；逐顶点（折线）/控制点（样条）；`TEXT` 与 `MultiLeader` **整命令拒绝**；`HATCH` 部分包围不动 + 诊断；块参照只**刚性平移插入点**、不逐成员拉伸 |
 | `ALIGN` | 部分 | **两对点**（平移 + 旋转 + 可选均匀缩放）；无 3 对点 3D 对齐、无非均匀缩放、无「1 对点移动」 |
-| `EXPLODE` | 部分 | **一次一层**；`LWPOLYLINE`→线段+`ARC`、`INSERT`→直接成员（嵌套保持引用）、`Hatch`→子项；**拒绝** `Dimension`/`MULTILEADER`/非均匀 `INSERT`；`TEXT` 按子项 `child_refusal`；`SPLINE`/`SHAPE`/`OPAQUE`/镜像 `Arc`·`Ellipse` **整命令失败**；无 `EXPLMODE` |
+| `EXPLODE` | 完整 | **一次一层**；`LWPOLYLINE`→线段+`ARC`、`INSERT`→直接成员（嵌套保持引用）且非均匀放置走可精确表示子集、`Dimension`/`MultiLeader`/`Hatch`/`Compound`→派生显示子项；`EXPLMODE`/`EXPMODE` 会话开关（默认 1）真实门控非均匀 `INSERT`（0 时按 `explode.expmode_off` 写前拒绝）；一条事务/一步撤销 | `TEXT`/`SPLINE`/`SHAPE`/`OPAQUE`/`IMAGE`/`MASK`/`MINSERT`/`XREF`/`Table` 与遗留 `Compound` 键按名拒绝；箭头是 `MESH`；非均匀块中不可精确表示的成员按名拒绝 |
 | `JOIN` | 部分 | **仅**共线首尾相接 `LINE` 或同心相续 `ARC`；折线/样条/圆、需桥接空隙、跨图层/空间 ⇒ 按名拒绝 |
 | `ERASE` | 实现 | 空选择拒绝；撤销恢复渲染属性与动态可见性 |
 | `CHAMFER` | 部分 | **两线形式**：两条独立直线、两距离按拾取顺序施加；无 `Angle` 方法/`Multiple`/`Trim` 开关。**Polyline 模式是独立选择子** `CHAMFER POLYLINE`（2026-10-28，选择式、恰好 1 条开放直线段 `+Z` LWPOLYLINE；`chamferDistanceA` 沿**入边**、`B` 沿**出边**——**我们的规则**） |
