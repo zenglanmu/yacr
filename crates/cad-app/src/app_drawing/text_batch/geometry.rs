@@ -14,7 +14,7 @@ fn textmask_groups_for<'a>(
     reference: &SelectionRef,
 ) -> Vec<&'a crate::EntityGroup> {
     session
-        .groups
+        .textmask_groups
         .groups()
         .filter(|group| {
             group.name.starts_with(TEXTMASK_GROUP_PREFIX) && group.members.contains(reference)
@@ -38,7 +38,7 @@ fn allocate_textmask_names(
         let name = format!("{TEXTMASK_GROUP_PREFIX}{index}");
         index += 1;
         if removed.contains(&name.to_ascii_lowercase())
-            || session.groups.contains(&name)
+            || session.textmask_groups.contains(&name)
             || names
                 .iter()
                 .any(|existing| existing.eq_ignore_ascii_case(&name))
@@ -338,13 +338,16 @@ impl Application {
                 }
             }
         }
-        let remaining_groups = session.groups.len().saturating_sub(old_groups.len());
-        if remaining_groups + sources.len() > session.groups.cap() {
+        let remaining_groups = session
+            .textmask_groups
+            .len()
+            .saturating_sub(old_groups.len());
+        if remaining_groups + sources.len() > session.textmask_groups.cap() {
             return Err(CadError::Unsupported(format!(
                 "textmask.group_cap: grouping {} text/mask pair(s) would exceed the session group \
                  capacity of {} (currently {remaining_groups} other group(s) retained)",
                 sources.len(),
-                session.groups.cap()
+                session.textmask_groups.cap()
             )));
         }
         let names = allocate_textmask_names(session, &old_groups, sources.len());
@@ -465,10 +468,10 @@ impl Application {
             },
         )?;
         for name in &old_groups {
-            session.groups.remove(name);
+            session.textmask_groups.remove(name);
         }
         for (((reference, _), mask_id), name) in sources.iter().zip(&objects).zip(&names) {
-            session.groups.create(
+            session.textmask_groups.create(
                 name,
                 vec![
                     reference.clone(),
@@ -626,7 +629,7 @@ impl Application {
             }
         }
         for name in &stale_groups {
-            session.groups.remove(name);
+            session.textmask_groups.remove(name);
         }
         if !stale_groups.is_empty() {
             diagnostics.push(Diagnostic {
@@ -657,7 +660,7 @@ impl Application {
                 .into_iter()
                 .filter(|mask| {
                     group_names.iter().any(|name| {
-                        session.groups.resolve(name).is_some_and(|group| {
+                        session.textmask_groups.resolve(name).is_some_and(|group| {
                             group.members.iter().any(|member| {
                                 member.entity == mask.id && member.document == document_id
                             })
@@ -679,7 +682,7 @@ impl Application {
             doomed.iter().map(|mask| mask.id).collect();
         let mut groups_to_remove = group_names.clone();
         groups_to_remove.extend(stale_groups.iter().cloned());
-        for group in session.groups.groups() {
+        for group in session.textmask_groups.groups() {
             if group.name.starts_with(TEXTMASK_GROUP_PREFIX)
                 && group
                     .members
@@ -724,7 +727,7 @@ impl Application {
             },
         )?;
         for name in &groups_to_remove {
-            session.groups.remove(name);
+            session.textmask_groups.remove(name);
         }
         let removed = objects.len();
         let mut all = diagnostics;

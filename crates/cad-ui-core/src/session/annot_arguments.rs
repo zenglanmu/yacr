@@ -79,29 +79,27 @@ pub fn parse_ungroup_argument(argument: &str) -> Option<String> {
 /// Parse `GROUPEDIT <name> ADD|REMOVE|RENAME <arg>`.
 pub fn parse_groupedit_argument(argument: &str) -> Option<GroupEditCommand> {
     let trimmed = argument.trim();
-    let (name, rest) = split_word(trimmed);
-    if name.is_empty() || rest.is_empty() {
+    let (name_token, rest) = split_name(trimmed);
+    let name = group_name(name_token)?;
+    if rest.is_empty() {
         return None;
     }
     let (verb, rest) = split_word(rest);
     if verb.eq_ignore_ascii_case("ADD") {
         return Some(GroupEditCommand::Add {
-            name: name.to_string(),
+            name,
             entities: parse_entity_ids(rest)?,
         });
     }
     if verb.eq_ignore_ascii_case("REMOVE") {
         return Some(GroupEditCommand::Remove {
-            name: name.to_string(),
+            name,
             entities: parse_entity_ids(rest)?,
         });
     }
     if verb.eq_ignore_ascii_case("RENAME") {
         let new_name = group_name(rest)?;
-        return Some(GroupEditCommand::Rename {
-            name: name.to_string(),
-            new_name,
-        });
+        return Some(GroupEditCommand::Rename { name, new_name });
     }
     None
 }
@@ -168,13 +166,34 @@ fn split_word(text: &str) -> (&str, &str) {
     }
 }
 
-/// One non-empty group name with no internal whitespace.
+/// One non-empty group name.
+///
+/// A name with spaces (legal in a source drawing and in `tables/groups.json`) is
+/// addressed by double-quoting it; an unquoted name is exactly one token.
 fn group_name(text: &str) -> Option<String> {
     let text = text.trim();
+    if let Some(rest) = text.strip_prefix('"') {
+        let (name, tail) = rest.split_once('"')?;
+        let name = name.trim();
+        if name.is_empty() || !tail.trim().is_empty() {
+            return None;
+        }
+        return Some(name.to_string());
+    }
     if text.is_empty() || text.split_whitespace().count() != 1 {
         return None;
     }
     Some(text.to_string())
+}
+
+/// Split an optional double-quoted name from the rest of a `GROUPEDIT` line.
+fn split_name(text: &str) -> (&str, &str) {
+    if text.starts_with('"') {
+        if let Some(end) = text[1..].find('"') {
+            return (&text[..end + 2], text[end + 2..].trim_start());
+        }
+    }
+    split_word(text)
 }
 
 /// Empty list, or comma/whitespace separated `u128` entity ids.

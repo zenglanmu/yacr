@@ -1,33 +1,31 @@
-//! The bounded, **session-only** entity-group store behind `GROUP` / `UNGROUP` /
-//! `GROUPEDIT`.
+//! The bounded session association store behind `TEXTMASK` / `TEXTUNMASK`.
 //!
-//! A group is a named list of [`SelectionRef`]s. It is deliberately **not** a
-//! DWG object: `cad-db` has no group table, `cad-domain` has no group geometry,
-//! and nothing here is written to the drawing, the revision or the undo history.
-//! A session rebuild (a new document) loses every group, exactly like
-//! [`crate::ViewStates`].
+//! This is **not** the entity-group authority. User-facing groups (`GROUP`,
+//! `UNGROUP`, `GROUPEDIT`) live in the document
+//! ([`cad_db::DrawingDatabase::groups`], `tables/groups.json`) and are saved,
+//! imported and exported. This store only pairs a TEXTMASK text entity with the
+//! wipeout it created, so a later `TEXTUNMASK` (or a re-run of `TEXTMASK`) can
+//! find the mask without inventing a second group table. Those internal pairs
+//! are session state and are deliberately not exposed as `cad_status.groups`.
 //!
 //! ## Bounds and names
 //!
-//! [`ENTITY_GROUP_CAP`] = **64** groups. Unlike the named-view store, a full
-//! store is an explicit refusal rather than a silent drop: a group is user data
-//! the user asked to keep, so `GROUP CREATE` names the limit instead of
-//! discarding an older group.
+//! [`ENTITY_GROUP_CAP`] = **64** associations. Unlike the named-view store, a
+//! full store is an explicit refusal rather than a silent drop: a TEXTMASK run
+//! that cannot retain its pair refuses before writing the mask.
 //!
 //! Names are stored trimmed and resolved **exactly first, then by a unique ASCII
-//! case-insensitive match**. Creation of a name that already exists
-//! (case-insensitively) is a named duplicate refusal; no command renames or
-//! replaces a group behind the user's back.
+//! case-insensitive match**; `TEXTMASK` allocates `*TEXTMASK-<n>` names that do
+//! not collide with each other.
 //!
 //! ## Membership
 //!
-//! Members keep selection order and are unique by [`SelectionRef`] equality.
-//! `GROUPEDIT ADD`/`REMOVE` mutate only this list. No entity is deleted by
-//! `UNGROUP` or `GROUPEDIT`.
+//! Members keep insertion order and are unique by [`SelectionRef`] equality.
+//! No drawing entity is deleted by this store; deleting a mask prunes its pair.
 
 use cad_domain::SelectionRef;
 
-/// How many named groups a session retains.
+/// How many TEXTMASK associations a session retains.
 pub const ENTITY_GROUP_CAP: usize = 64;
 
 /// One named session group.

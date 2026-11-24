@@ -167,6 +167,16 @@ pub enum TableKind {
     /// runtime authority. It contributes the minor-12 tier and is only present
     /// when the document really has vendor rows.
     Vendor,
+    /// Persisted entity groups (`tables/groups.json`): named, ordered member
+    /// sets with a table-local sequence identity.
+    ///
+    /// Informational for the store (the snapshot is the authority and every
+    /// present table is re-encoded), but the marking is real bookkeeping: a save
+    /// that missed it would still write the table through the snapshot, so the
+    /// variant is primarily the command layer's dirty-scope answer. No `IdKind`
+    /// and no header counter backs these rows, so a group write never makes
+    /// `document.json` stale. It contributes the minor-16 tier.
+    Groups,
 }
 
 /// The set of persisted rows one commit made stale.

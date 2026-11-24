@@ -80,11 +80,12 @@ pub(super) fn emit_dimension(
             ctx,
             acc,
             &mut stack,
+            None,
         ) {
             member_result = Err(error);
             break;
         }
-        for written in &mut acc.entities[start..] {
+        for (_, written) in &mut acc.entities[start..] {
             written.common_mut().owner_handle = block_handle;
         }
     }

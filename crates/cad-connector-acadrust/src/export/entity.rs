@@ -95,8 +95,33 @@ fn finite_construct_line_outcome(type_key: &str) -> MappingOutcome {
 /// Map one model-space entity's geometry, expanding INSERTs and flattening
 /// compounds. `transform` is the accumulated block placement (identity at the
 /// model root).
+/// Emit one entity, attributing every top-level output record to `source`.
+///
+/// The source is `Some(entity.id)` only for the model-space root walk; every
+/// recursive call (block members, dimension content children) passes `None`
+/// because those records are not addressable by a group's top-level handle. The
+/// wrapper restores the accumulator's previous source so nested emission cannot
+/// leak an outer identity onto a block member.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn emit(
+    doc: &mut CadDocument,
+    entity: &DbEntity,
+    transform: &Transform3,
+    depth: usize,
+    ctx: &EntityContext,
+    acc: &mut ExportAccumulator,
+    stack: &mut Vec<BlockId>,
+    source: Option<cad_domain::EntityId>,
+) -> CadResult<()> {
+    let previous = acc.source;
+    acc.source = source;
+    let result = emit_inner(doc, entity, transform, depth, ctx, acc, stack);
+    acc.source = previous;
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_inner(
     doc: &mut CadDocument,
     entity: &DbEntity,
     transform: &Transform3,
@@ -239,7 +264,7 @@ pub(super) fn emit(
             stack.push(*block);
             for member in &members {
                 match ctx.database.entity(*member) {
-                    Some(child) => emit(doc, child, &placement, depth + 1, ctx, acc, stack)?,
+                    Some(child) => emit(doc, child, &placement, depth + 1, ctx, acc, stack, None)?,
                     // A member id that no longer resolves is explicit, never a
                     // silent omission (mirrors the missing-definition arm). The
                     // database builder and validated change path keep block
@@ -365,7 +390,7 @@ pub(super) fn flatten_children(
             geometry: child.clone(),
             ..entity.clone()
         };
-        emit(doc, &child_entity, transform, depth, ctx, acc, stack)?;
+        emit(doc, &child_entity, transform, depth, ctx, acc, stack, None)?;
     }
     Ok(())
 }

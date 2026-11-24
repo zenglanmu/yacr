@@ -131,8 +131,9 @@ impl DocumentArchive for BimArchive {
 /// blocks or the definition table, this projection drops to 4/5 and the test
 /// fails, which is the regression the contract is about.
 fn stand_in_document_minor(snapshot: &DocumentSnapshot) -> u32 {
+    const FORMAT_MINOR_RELATIONS: u32 = 11;
     if snapshot.has_relations() {
-        return FORMAT_MINOR;
+        return FORMAT_MINOR_RELATIONS;
     }
     const FORMAT_MINOR_FEATURES: u32 = 10;
     if snapshot.has_features() {

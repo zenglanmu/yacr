@@ -8,7 +8,9 @@ use cad_db::{DbEntity, EntityDisplayState};
 use cad_domain::*;
 use std::collections::{HashSet, VecDeque};
 
+mod group_patch_bytes;
 mod param_bytes;
+mod record_bytes;
 
 use param_bytes::{expr_bytes, param_row_bytes};
 
@@ -343,82 +345,7 @@ impl DrawingUndoRecord {
     }
 
     pub fn approx_bytes(&self) -> usize {
-        let mut bytes = std::mem::size_of::<Self>() + self.label.len();
-        for p in &self.patches {
-            bytes += std::mem::size_of::<DrawingPatch>();
-            if let Some(e) = &p.before {
-                bytes += std::mem::size_of::<cad_db::DbEntity>() + e.object.type_key.len();
-            }
-            if let Some(e) = &p.after {
-                bytes += std::mem::size_of::<cad_db::DbEntity>() + e.object.type_key.len();
-            }
-        }
-        for p in &self.block_patches {
-            bytes += std::mem::size_of::<cad_db::BlockPatch>();
-            for row in p.before.iter().chain(p.after.iter()) {
-                bytes += std::mem::size_of::<cad_db::BlockRow>()
-                    + row.definition.entities.len() * std::mem::size_of::<EntityId>();
-                if let Some(metadata) = &row.metadata {
-                    bytes += metadata.name.len();
-                }
-            }
-        }
-        for p in &self.layer_patches {
-            bytes += std::mem::size_of::<cad_db::LayerPatch>();
-            for row in p.before.iter().chain(p.after.iter()) {
-                bytes += std::mem::size_of::<cad_db::LayerRow>() + row.layer.name.len();
-                bytes += row.attributes.linetype.len();
-                if let Some(plot_style) = &row.attributes.plot_style {
-                    bytes += plot_style.len();
-                }
-            }
-        }
-        for p in &self.layout_patches {
-            bytes += std::mem::size_of::<cad_db::LayoutPatch>();
-            for row in p.before.iter().chain(p.after.iter()) {
-                bytes += std::mem::size_of::<cad_db::LayoutRow>() + row.layout.name.len();
-                bytes += row.layout.viewports.len() * std::mem::size_of::<cad_db::PaperViewport>();
-                for viewport in &row.layout.viewports {
-                    bytes += viewport.clip.len() * std::mem::size_of::<Point3>();
-                    // Per-viewport layer overrides are a map entry each; count
-                    // the key/value pair so a LAYVPI step is not under-budgeted.
-                    bytes +=
-                        viewport.layer_overrides.len() * std::mem::size_of::<(LayerId, bool)>();
-                }
-                if let Some(plot) = &row.plot {
-                    bytes += plot.paper_size_name.len();
-                }
-            }
-        }
-        for p in &self.style_patches {
-            bytes += std::mem::size_of::<cad_db::StylePatch>();
-            for row in p.before.iter().chain(p.after.iter()) {
-                bytes += std::mem::size_of::<cad_db::Style>() + row.name.len();
-                bytes += row
-                    .resource_keys
-                    .iter()
-                    .map(|key| key.len() + std::mem::size_of::<String>())
-                    .sum::<usize>();
-            }
-        }
-        for p in &self.dim_style_patches {
-            bytes += std::mem::size_of::<cad_db::DimStylePatch>();
-            for row in p.before.iter().chain(p.after.iter()) {
-                bytes += std::mem::size_of::<cad_db::DimStyle>()
-                    + row.name.len()
-                    + row.text_style_name.len()
-                    + row.postfix.len();
-            }
-        }
-        for p in &self.mleader_style_patches {
-            bytes += std::mem::size_of::<cad_db::MLeaderStylePatch>();
-            for row in p.before.iter().chain(p.after.iter()) {
-                bytes += std::mem::size_of::<cad_db::MLeaderStyle>()
-                    + row.name.len()
-                    + row.text_style_name.len();
-            }
-        }
-        bytes
+        record_bytes::approx_bytes(self)
     }
 }
 
@@ -477,6 +404,12 @@ pub struct DrawingHistoryStep {
     pub param_patches: Vec<cad_db::ParamPatch>,
     /// Reversible element slot-binding rows committed with the parameter rows.
     pub param_binding_patches: Vec<cad_db::ParamBindingPatch>,
+    /// Reversible persisted-group rows (create/delete/rename/member edits).
+    ///
+    /// Applied by their own one-revision database path
+    /// (`apply_group_changes`), so a step carrying them has an empty record and
+    /// no linetype/BIM/parameter batch.
+    pub group_patches: Vec<cad_db::GroupPatch>,
 }
 
 impl DrawingHistoryStep {
@@ -501,6 +434,7 @@ impl DrawingHistoryStep {
         if self.record.is_empty()
             && self.linetype_patches.is_empty()
             && self.bim_patches.is_empty()
+            && self.group_patches.is_empty()
             && !parametric
         {
             return Err(CadError::InvalidInput(
@@ -510,6 +444,31 @@ impl DrawingHistoryStep {
             ));
         }
         self.record.validate_batches()?;
+        if !self.group_patches.is_empty()
+            && (!self.record.is_empty()
+                || !self.linetype_patches.is_empty()
+                || !self.bim_patches.is_empty()
+                || parametric)
+        {
+            return Err(CadError::InvalidInput(
+                "a group undo step cannot also carry entity, table, linetype, BIM or parameter \
+                 rows"
+                    .into(),
+            ));
+        }
+        let mut group_seqs = HashSet::new();
+        for patch in &self.group_patches {
+            if !group_seqs.insert(patch.seq) {
+                return Err(CadError::InvalidInput(
+                    "a group undo step cannot contain duplicate group sequences".into(),
+                ));
+            }
+            if patch.before.is_none() && patch.after.is_none() {
+                return Err(CadError::InvalidInput(
+                    "a group patch needs a before or after state".into(),
+                ));
+            }
+        }
         let mut ids = HashSet::new();
         for patch in &self.linetype_patches {
             if !ids.insert(patch.id) {
@@ -640,6 +599,7 @@ impl DrawingHistoryStep {
                 bytes += param_row_bytes(row);
             }
         }
+        bytes += group_patch_bytes::group_patch_bytes(&self.group_patches);
         for patch in &self.param_binding_patches {
             bytes += std::mem::size_of::<cad_db::ParamBindingPatch>();
             for bindings in patch.before.iter().chain(patch.after.iter()) {
@@ -759,7 +719,14 @@ impl History {
     /// An empty patch list is rejected, so a command can never claim success
     /// while recording nothing.
     pub fn record_drawing(&mut self, record: DrawingUndoRecord) -> CadResult<()> {
-        self.record_drawing_step(record, Vec::new(), Vec::new(), Vec::new(), Vec::new())
+        self.record_drawing_step(
+            record,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
     }
 
     /// Record a committed drawing change plus the linetype-table rows it wrote.
@@ -773,7 +740,14 @@ impl History {
         record: DrawingUndoRecord,
         linetype_patches: Vec<cad_db::LinetypePatch>,
     ) -> CadResult<()> {
-        self.record_drawing_step(record, linetype_patches, Vec::new(), Vec::new(), Vec::new())
+        self.record_drawing_step(
+            record,
+            linetype_patches,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
     }
 
     /// Record a committed BIM property edit plus its element patches.
@@ -789,7 +763,14 @@ impl History {
         record: DrawingUndoRecord,
         bim_patches: Vec<cad_db::BimPatch>,
     ) -> CadResult<()> {
-        self.record_drawing_step(record, Vec::new(), bim_patches, Vec::new(), Vec::new())
+        self.record_drawing_step(
+            record,
+            Vec::new(),
+            bim_patches,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
     }
 
     /// Record a committed parametric edit plus the parameter and binding rows it
@@ -815,6 +796,28 @@ impl History {
             Vec::new(),
             param_patches,
             param_binding_patches,
+            Vec::new(),
+        )
+    }
+
+    /// Record a committed group edit plus the rows it wrote.
+    ///
+    /// The patches are carried beside the record like the linetype/BIM batches,
+    /// count toward "this step records something", and are applied by
+    /// [`cad_db::DrawingDatabase::apply_group_changes`] as one revision. The
+    /// record must be empty (see `DrawingHistoryStep::validate`).
+    pub fn record_drawing_with_groups(
+        &mut self,
+        record: DrawingUndoRecord,
+        group_patches: Vec<cad_db::GroupPatch>,
+    ) -> CadResult<()> {
+        self.record_drawing_step(
+            record,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            group_patches,
         )
     }
 
@@ -825,6 +828,7 @@ impl History {
         bim_patches: Vec<cad_db::BimPatch>,
         param_patches: Vec<cad_db::ParamPatch>,
         param_binding_patches: Vec<cad_db::ParamBindingPatch>,
+        group_patches: Vec<cad_db::GroupPatch>,
     ) -> CadResult<()> {
         self.ensure_no_pending_drawing()?;
         let mut step = DrawingHistoryStep {
@@ -833,6 +837,7 @@ impl History {
             bim_patches,
             param_patches,
             param_binding_patches,
+            group_patches,
         };
         step.validate()?;
         if let Some(key) = step.record.merge_key.clone() {

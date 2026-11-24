@@ -9,6 +9,7 @@
 //!
 //! | the document has | minor | what a minor-4 reader misses |
 //! |---|---|---|
+//! | persisted entity groups (`tables/groups.json`) | `17` | the whole group table |
 //! | block attributes (ADR-0055) | `14` | `cad:AttributeDefinition`, `cad:Insert.attributes` |
 //! | host-owned vendor semantics (ADR-0030 D7) | `12` | `tables/vendor.json` |
 //! | in-context relations (ADR-0043 P3) | `11` | `tables/relations.json` |
@@ -85,9 +86,17 @@ pub(crate) const FORMAT_MINOR_BLOCK_ATTRIBUTES: u32 = 14;
 /// written at `15` (a minor-14 reader would refuse the unknown `cad:Text` key).
 pub(crate) const FORMAT_MINOR_TEXT_MIRROR: u32 = 15;
 
+/// Persisted entity groups (`tables/groups.json`).
+///
+/// `16` is the bounded 2D constraint table (ADR-0054), not written by this build
+/// yet. Groups therefore take the next free tier, `17`.
+pub(crate) const FORMAT_MINOR_GROUPS: u32 = 17;
+
 // The chain is a compile-time fact, not a convention: a future tier inserted in
-// the middle cannot silently leave the constants out of order.
+// the middle cannot silently leave the constants out of order. `16` (constraints)
+// is reserved by another lane, so the top tier is checked by an explicit offset.
 const _: () = assert!(FORMAT_MINOR_BLOCK_ATTRIBUTES + 1 == FORMAT_MINOR_TEXT_MIRROR);
+const _: () = assert!(FORMAT_MINOR_GROUPS == FORMAT_MINOR_BLOCK_ATTRIBUTES + 3);
 const _: () = assert!(FORMAT_MINOR_APPLICATION_DOMAIN + 1 == FORMAT_MINOR_BLOCK_ATTRIBUTES);
 const _: () = assert!(FORMAT_MINOR_VENDOR + 1 == FORMAT_MINOR_APPLICATION_DOMAIN);
 const _: () = assert!(FORMAT_MINOR_RELATIONS + 1 == FORMAT_MINOR_VENDOR);
@@ -107,8 +116,15 @@ const _: () = assert!(FORMAT_MINOR_PLAIN + 1 == FORMAT_MINOR_RESOURCES);
 /// tier here is about archive entries and the header flag, both of which the
 /// store already models.
 pub(crate) fn document_minor(snapshot: &DocumentSnapshot) -> u32 {
+    // Groups are the newest tier and can coexist with every other feature
+    // (including block attributes and a named interface domain), so they decide
+    // first: a pre-17 reader refuses an unknown table path rather than dropping
+    // the group rows.
+    if snapshot.has_groups() {
+        return FORMAT_MINOR_GROUPS;
+    }
     // The glyph-mirror flag is element-payload data and can coexist with every
-    // other feature, so it decides first: a minor-14 reader refuses the unknown
+    // other feature, so it decides next: a minor-14 reader refuses the unknown
     // `cad:Text.mirrored` key, and a document that also has block attributes
     // must still be stamped 15.
     if snapshot.has_mirrored_text() {
@@ -178,7 +194,8 @@ mod tests {
     /// The top tier is the format constant, not an independent number.
     #[test]
     fn the_top_tier_is_the_format_minor() {
-        assert_eq!(FORMAT_MINOR_TEXT_MIRROR, cad_domain::ymodel::FORMAT_MINOR);
+        assert_eq!(FORMAT_MINOR_GROUPS, cad_domain::ymodel::FORMAT_MINOR);
+        assert_eq!(FORMAT_MINOR_GROUPS, FORMAT_MINOR_BLOCK_ATTRIBUTES + 3);
         assert_eq!(FORMAT_MINOR_TEXT_MIRROR, FORMAT_MINOR_BLOCK_ATTRIBUTES + 1);
         assert_eq!(
             FORMAT_MINOR_BLOCK_ATTRIBUTES,

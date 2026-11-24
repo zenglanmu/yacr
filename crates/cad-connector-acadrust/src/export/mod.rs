@@ -42,6 +42,7 @@ mod body;
 mod common;
 mod dimension;
 mod entity;
+mod groups;
 
 // The export contract test asserts the variant name.
 #[cfg(test)]
@@ -68,6 +69,7 @@ use serde::{Deserialize, Serialize};
 
 use accumulator::ExportAccumulator;
 use entity::{emit, EntityContext};
+use groups::write_groups;
 
 /// The ACIS payload version this exporter writes.
 ///
@@ -312,6 +314,7 @@ pub fn export(request: &ExportRequest<'_>) -> CadResult<(Vec<u8>, ExportReport)>
             &ctx,
             &mut acc,
             &mut stack,
+            Some(entity.id),
         )?;
     }
 
@@ -378,10 +381,22 @@ pub fn export(request: &ExportRequest<'_>) -> CadResult<(Vec<u8>, ExportReport)>
     // block definition and drained into its `BLOCK_RECORD` below, which never
     // passes through this loop.
     let has_solid3d = acc.written_solid3d;
-    for entity in std::mem::take(&mut acc.entities) {
-        doc.add_entity(entity)
+    let mut group_handles: std::collections::BTreeMap<
+        cad_domain::EntityId,
+        acadrust::types::Handle,
+    > = std::collections::BTreeMap::new();
+    for (source, entity) in std::mem::take(&mut acc.entities) {
+        let handle = doc
+            .add_entity(entity)
             .map_err(|error| CadError::InvalidInput(format!("add entity failed: {error}")))?;
+        if let Some(source) = source {
+            // First written record per source entity is its addressable handle; a
+            // source that expands to several records (a derived dimension) keeps
+            // the first, which is the record a group should name.
+            group_handles.entry(source).or_insert(handle);
+        }
     }
+    write_groups(&mut doc, request.database, &group_handles, &mut report);
 
     // A `3DSOLID` carries its ACIS payload in one of two container forms, and the
     // report names the exact combination instead of leaving the choice implicit:

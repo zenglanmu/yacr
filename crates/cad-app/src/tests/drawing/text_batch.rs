@@ -684,8 +684,12 @@ fn textmask_inserts_an_independent_wipeout_behind_the_text() {
     assert_eq!(boundary[2], p3(8.7, 2.7, 0.0));
     assert_eq!(boundary[3], p3(-0.7, 2.7, 0.0));
     assert!(entity(&app, 1).is_some(), "the text is retained");
-    assert_eq!(session.groups.len(), 1, "text and mask are grouped");
-    let group = session.groups.groups().next().unwrap();
+    assert_eq!(
+        session.textmask_groups.len(),
+        1,
+        "text and mask are grouped"
+    );
+    let group = session.textmask_groups.groups().next().unwrap();
     assert!(group.name.starts_with("*TEXTMASK-"));
     assert_eq!(group.members.len(), 2);
     assert_eq!(group.members[0].entity, EntityId(1));
@@ -770,7 +774,7 @@ fn textunmask_with_only_text_selected_removes_its_grouped_mask() {
         CommandPayload::None,
     )
     .expect("TEXTMASK");
-    assert_eq!(session.groups.len(), 1);
+    assert_eq!(session.textmask_groups.len(), 1);
     let depth = undo_depth(&app);
     // The group names the exact mask, so selecting only the text removes it.
     execute(
@@ -785,7 +789,7 @@ fn textunmask_with_only_text_selected_removes_its_grouped_mask() {
         "the grouped mask is removed without scanning unrelated masks"
     );
     assert!(
-        session.groups.is_empty(),
+        session.textmask_groups.is_empty(),
         "the TEXTMASK group is cleaned up"
     );
     assert_eq!(undo_depth(&app), depth + 1);
@@ -868,7 +872,7 @@ fn textmask_rerun_replaces_the_previous_mask_and_does_not_duplicate_groups() {
     )
     .expect("first TEXTMASK");
     let first_mask = find_by_type(&app, "AcDbWipeout").expect("first mask").id;
-    assert_eq!(session.groups.len(), 1);
+    assert_eq!(session.textmask_groups.len(), 1);
     execute(
         &mut app,
         &mut session,
@@ -887,7 +891,7 @@ fn textmask_rerun_replaces_the_previous_mask_and_does_not_duplicate_groups() {
         .collect();
     assert_eq!(masks.len(), 1, "exactly one mask remains");
     assert_eq!(
-        session.groups.len(),
+        session.textmask_groups.len(),
         1,
         "the group is replaced, not duplicated"
     );

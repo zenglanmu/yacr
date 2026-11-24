@@ -85,6 +85,8 @@ impl<'a> ImporterBuilder<'a> {
         self.next_entity += 1;
         self.next_object += 1;
         self.entity_total += 1;
+        self.entity_by_handle
+            .insert(common.handle.value(), entity_id);
 
         if !insert_blocks.is_empty() {
             self.insert_chains.push(InsertChain {

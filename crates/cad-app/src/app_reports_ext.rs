@@ -455,7 +455,7 @@ pub(crate) fn status_extended(
             session.selection.len(),
             session.hidden_entities.len(),
             session.layer_overrides.len(),
-            session.groups.len(),
+            drawing.groups().count(),
             session.view_states.len()
         ),
     ));

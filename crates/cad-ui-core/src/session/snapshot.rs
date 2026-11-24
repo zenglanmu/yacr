@@ -198,15 +198,10 @@ impl CadSession {
                     .collect()
             })
             .unwrap_or_default();
-        let groups: Vec<CadGroupStatus> = self
-            .core
-            .controller
-            .borrow()
-            .session
-            .groups
-            .groups()
-            .map(CadGroupStatus::from_group)
-            .collect();
+        let groups: Vec<CadGroupStatus> = drawing
+            .as_deref()
+            .map(|database| database.groups().map(CadGroupStatus::from_group).collect())
+            .unwrap_or_default();
         let images: Vec<CadImageStatus> = drawing
             .as_deref()
             .map(|database| {

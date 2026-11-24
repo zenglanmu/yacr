@@ -295,6 +295,7 @@ mod array;
 mod array_router;
 mod arraypath;
 mod arraypath_positions;
+mod groups;
 // The dynamic PSet property write path (`bim.pset.{set}.{prop}`).
 mod bim_properties;
 mod block_define;

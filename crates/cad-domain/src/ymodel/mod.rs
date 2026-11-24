@@ -151,7 +151,15 @@ pub const FORMAT_WRITE: u32 = 2;
 /// It is omitted when false, so ordinary text and every older document keep their
 /// minor; a minor-14 reader refuses a document that really carries a mirrored run
 /// rather than drawing it unmirrored.
-pub const FORMAT_MINOR: u32 = 15;
+///
+/// `16` is reserved for the bounded 2D constraint table (ADR-0054).
+///
+/// `17` adds persisted entity groups (`tables/groups.json`): a named, ordered
+/// member set with a table-local sequence identity, a description and the
+/// DXF selectable flag. The table is written only when the document holds a
+/// group, so an ordinary drawing keeps its lower minor; a pre-17 reader refuses
+/// an unknown table path rather than dropping the group rows.
+pub const FORMAT_MINOR: u32 = 17;
 
 /// Stable failure markers.
 ///

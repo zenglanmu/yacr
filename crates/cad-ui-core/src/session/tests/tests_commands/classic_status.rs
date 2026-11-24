@@ -1,5 +1,5 @@
 //! The classic-panel projections of `cad_status`: drawing block definitions,
-//! session-only groups and raster IMAGE entities, each copied from its authority.
+//! persisted groups and raster IMAGE entities, each copied from its authority.
 
 use std::collections::BTreeSet;
 
@@ -144,6 +144,13 @@ fn session_with_classic_rows() -> CadSession {
             None,
         ))
         .unwrap();
+    builder
+        .set_groups(vec![cad_db::GroupRow::new(
+            cad_db::GroupSeq(1),
+            "Walls",
+            vec![EntityId(20), EntityId(21)],
+        )])
+        .expect("group fixture");
     let drawing = builder.finish().expect("classic fixture builds");
     let document = {
         let mut controller = session.core.controller.borrow_mut();
@@ -157,19 +164,7 @@ fn session_with_classic_rows() -> CadSession {
             .drawing = std::sync::Arc::new(drawing);
         document
     };
-    {
-        let mut controller = session.core.controller.borrow_mut();
-        let member = |entity| SelectionRef {
-            document,
-            entity: EntityId(entity),
-            instance: InstancePath::default(),
-            sub_element: None,
-        };
-        controller
-            .session
-            .groups
-            .create("Walls", vec![member(20), member(21)]);
-    }
+    let _ = document;
     session
 }
 

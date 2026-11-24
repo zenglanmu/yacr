@@ -5,8 +5,11 @@
 //! * `blocks` is one row per drawing block definition (`BlockDefinition`), with
 //!   the stored name/base-point metadata when the drawing has it. An unnamed
 //!   definition keeps `name`/`basePoint` `None`; no zero base point is invented.
-//! * `groups` is one row per **session-only** [`cad_app::EntityGroup`], with its
-//!   captured member references. Groups are never DWG objects.
+//! * `groups` is one row per persisted [`cad_db::GroupRow`] (`tables/groups.json`),
+//!   with its ordered member entity ids. Groups are document data and are
+//!   imported/exported as `AcDbGroup`; the wire keeps the historical member shape
+//!   with an empty instance path, because a group stores directly addressable
+//!   entity handles, not block-instance paths.
 //! * `images` is one row per `SemanticGeometry::Image` entity in any space.
 //!
 //! Nothing here mutates the drawing, the session or a preference; every field is
@@ -95,22 +98,19 @@ impl CadBlockStatus {
 }
 
 impl CadGroupStatus {
-    /// Project one session group verbatim.
-    pub(crate) fn from_group(group: &cad_app::EntityGroup) -> Self {
+    /// Project one persisted group row verbatim.
+    pub(crate) fn from_group(group: &cad_db::GroupRow) -> Self {
         Self {
             name: group.name.clone(),
             member_count: group.members.len() as u64,
             members: group
                 .members
                 .iter()
-                .map(|reference| CadGroupMember {
-                    entity_id: reference.entity.0.to_string(),
-                    instance_path: reference
-                        .instance
-                        .0
-                        .iter()
-                        .map(|id| id.0.to_string())
-                        .collect(),
+                .map(|member| CadGroupMember {
+                    entity_id: member.0.to_string(),
+                    // A persisted group stores an entity handle, not an instance
+                    // path; the wire keeps the field for shape compatibility.
+                    instance_path: Vec::new(),
                 })
                 .collect(),
         }

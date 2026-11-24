@@ -26,6 +26,7 @@ mod block_edit;
 mod bounds;
 mod document_metadata;
 mod edit;
+mod group;
 mod header_geometry;
 mod header_meta;
 mod header_values;
@@ -52,6 +53,8 @@ pub use access::{EntityDisplayState, VisibilityMembership, VisibilityStateMember
 pub use block_edit::{BlockPatch, BlockRow};
 pub use document_metadata::{DocumentMetadata, DocumentMetadataField};
 pub use header_values::HeaderValuesPatch;
+pub(crate) use group::validate_groups;
+pub use group::{GroupPatch, GroupRow, GroupSeq};
 pub use layer_edit::{DEFAULT_LAYER_NAME, ILLEGAL_LAYER_NAME_CHARS};
 pub use layer_inherit::LayerScope;
 pub use layer_patch::{LayerPatch, LayerRow};
@@ -372,6 +375,15 @@ pub struct DrawingDatabase {
     /// with them only because `has_bim` already names that release (minor 7),
     /// not because this table is written unconditionally.
     pub(crate) bim_relations: BimRelations,
+    /// Persisted entity groups (`tables/groups.json`), keyed by the table-local
+    /// [`GroupSeq`].
+    ///
+    /// Empty for every document without groups; the writer then emits no table,
+    /// so an ordinary drawing keeps the minor tier its other content earns.
+    /// Unlike the former session-only store this is document data: it is saved,
+    /// loaded, imported and exported, and every write goes through
+    /// [`DrawingDatabase::apply_group_changes`] as one revision.
+    pub(crate) groups: BTreeMap<GroupSeq, GroupRow>,
     /// Document parameter rows (`tables/parameters.json`, ADR-0043 D4).
     ///
     /// Empty for every document without parameters; the writer then emits no
