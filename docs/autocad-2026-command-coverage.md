@@ -913,7 +913,7 @@
 | `MODEL` | 已实现 | payload-free 选择子，复用 SPACE MODEL 的校验 + 自动取景；Model 标签页走同一命令 |
 | `MOVE` | 已实现 | — |
 | `MOVEBAK` | 部分实现 | 具名拒绝（`movebak.unsupported: the backup-folder location is owned by the host filesystem`）。 |
-| `MPEDIT` | 部分实现 | 批量 `CLOSE`/`OPEN`/`REVERSE` + **LINE/ARC→POLYLINE 精确转换**；`JOIN`/`FIT`/`SPLINE`/`DECURVE` 委托 PEDIT；`WIDTH`/`LTYPE GEN` 仍拒绝；异质批按 PEDIT 选择规则拒绝 |
+| `MPEDIT` | 部分实现 | 批量 `CLOSE`/`OPEN`/`REVERSE` + **LINE/ARC→POLYLINE 精确转换**；`WIDTH <w>` 经共享 PEDIT 执行器对整批写统一宽度；`JOIN`/`FIT`/`SPLINE`/`DECURVE`/`UNDO` 委托 PEDIT；`LTYPE GEN` 经同一共享路径按名拒绝（无 `plinegen`）；异质批按 PEDIT 选择规则整批拒绝 |
 | `MREDO` | 部分实现 | 重做 N 步（默认 1），每步一条历史移动；空栈拒绝；不足时 `mredo.partial` |
 | `MSLIDE` | 部分实现 | 具名拒绝（`mslide.unsupported: this build has no slide (SLD) writer`）。 |
 | `MSPACE` | 部分实现 | 会话切换到模型空间，复用现有 `MODEL` 路径（仅会话状态）；已在模型空间时为具名 no-op。 |
@@ -972,7 +972,7 @@
 | `PDFIMPORT` | 部分实现 | 具名拒绝（`pdfimport.unsupported: PDF geometry import is not implemented`）。 |
 | `PDFLAYERS` | 部分实现 | 具名拒绝（`pdflayers.unsupported: no PDF underlay layer model`）。 |
 | `PDFSHXTEXT` | 部分实现 | 具名拒绝（`pdfshxtext.unsupported: PDF SHX text conversion is not implemented`）。 |
-|  `PEDIT` | 部分实现 | `Close`/`Open`/`Join`/`Fit`/`Spline`/`Decurve`/`Reverse`/`Undo` + LINE/ARC/SPLINE 转换；Edit vertex 子菜单（NEXT/PREVIOUS/INSERT/MOVE/STRAIGHTEN）；**`WIDTH <w>` 真实**：对多选多段线写统一宽度（0=细线），一条事务/一步撤销；每段锥形宽度（DXF 40/41）未建模（`pedit.vertex_width_unsupported`）；`Ltype gen` 未建模 |
+|  `PEDIT` | 部分实现 | `Close`/`Open`/`Join`/`Fit`/`Spline`/`Decurve`/`Reverse`/`Undo` + LINE/ARC/SPLINE 转换；Edit vertex 子菜单（NEXT/PREVIOUS/INSERT/MOVE/STRAIGHTEN）；**`WIDTH <w>` 真实**：对多选多段线写统一宽度（0=细线）；`EDIT WIDTH <seg> <start> <end>` 只写可表示的单段 `start==end`（即统一宽度）；一条事务/一步撤销；逐段锥形宽度（DXF 40/41）与 `Ltype gen` 未建模，按名拒绝 |
 | `PERFANALYZER` | 部分实现 | chrome 本地选择子：非模态性能面板，只读显示宿主 `cad_status.performance` 与文档/会话计数；缺失指标显示 N/A（不伪造 0），无命令录制/采样。 |
 | `PERFANALYZERCLOSE` | 已实现 | chrome 本地选择子：关闭性能分析浮窗（幂等成功）。 |
 | `PFACE` | 部分实现 | 具名拒绝（`pface.unsupported: no 3DFACE/mesh entity model`）。 |
@@ -1865,7 +1865,7 @@
 | 565 | `MODEL` | 已实现 | Switches from a named layout tab to the Model tab. | payload-free 选择子，复用 SPACE MODEL 的校验 + 自动取景；Model 标签页走同一命令 |
 | 566 | `MOVE` | 已实现 | Moves objects a specified distance in a specified direction. | — |
 | 567 | `MOVEBAK` | 部分实现 | Changes the destination folder for drawing backup (BAK) files. | 具名拒绝（`movebak.unsupported: the backup-folder location is owned by the host filesystem`）。 |
-| 568 | `MPEDIT` | 部分实现 | Edits multiple polylines; also converts multiple line and arc objects to polyline objects. | 对每个选中 LWPOLYLINE 应用 `CLOSE\|OPEN\|REVERSE`；非多段线逐条跳过；一条事务 |
+| 568 | `MPEDIT` | 部分实现 | Edits multiple polylines; also converts multiple line and arc objects to polyline objects. | 对每个选中 LWPOLYLINE 应用 `CLOSE\|OPEN\|REVERSE`；`WIDTH <w>` 经共享 PEDIT 写整批统一宽度；其余选项委托 PEDIT（`LTYPE GEN` 共享 `plinegen` 具名拒绝）；异质批按 PEDIT 规则整批拒绝；一条事务 |
 | 569 | `MREDO` | 部分实现 | Reverses the effects of several previous UNDO or U commands. | 重做 N 步（默认 1），每步一条历史移动；空栈拒绝；不足时 `mredo.partial` |
 | 570 | `MSLIDE` | 部分实现 | Creates a slide file of the current model viewport or the current layout. | 具名拒绝（`mslide.unsupported: this build has no slide (SLD) writer`）。 |
 | 571 | `MSPACE` | 部分实现 | In a layout, switches from paper space to model space in a layout viewport. | 复用 `MODEL`/`SPACE` 会话路径切到模型空间；仅会话状态，已在该空间为 `mspace.noop`，不写库。 |
@@ -1934,7 +1934,7 @@
 | 634 | `PDFLAYERS` | 部分实现 | Controls the display of layers in a PDF underlay. | 具名拒绝（`pdflayers.unsupported: no PDF underlay layer model`）。 |
 | 635 | `-PDFSHXTEXT` | 部分实现 | Converts the SHX geometry imported from PDF files into individual multiline text objects from the command line. | 具名拒绝（`-pdfshxtext.unsupported: PDF SHX text conversion is not implemented`）。 |
 | 636 | `PDFSHXTEXT` | 部分实现 | Converts the SHX geometry imported from PDF files into individual multiline text objects. | 具名拒绝（`pdfshxtext.unsupported: PDF SHX text conversion is not implemented`）。 |
-|  637 | `PEDIT` | 部分实现 | Edits polylines, objects to be joined to polylines, and related objects. | `Close`/`Open`/`Join`/`Fit`/`Spline`/`Decurve`/`Reverse`/`Undo` + LINE/ARC/SPLINE 转换；Edit vertex 子菜单（NEXT/PREVIOUS/INSERT/MOVE/STRAIGHTEN）；**`WIDTH <w>` 真实**：对多选多段线写统一宽度（0=细线），一条事务/一步撤销；每段锥形宽度（DXF 40/41）未建模（`pedit.vertex_width_unsupported`）；`Ltype gen` 未建模 |
+|  637 | `PEDIT` | 部分实现 | Edits polylines, objects to be joined to polylines, and related objects. | `Close`/`Open`/`Join`/`Fit`/`Spline`/`Decurve`/`Reverse`/`Undo` + LINE/ARC/SPLINE 转换；Edit vertex 子菜单（NEXT/PREVIOUS/INSERT/MOVE/STRAIGHTEN）；**`WIDTH <w>` 真实**：对多选多段线写统一宽度（0=细线）；`EDIT WIDTH <seg> <start> <end>` 只写可表示的单段 `start==end`；一条事务/一步撤销；逐段锥形宽度（DXF 40/41）与 `Ltype gen` 未建模，按名拒绝 |
 | 638 | `PERFANALYZER` | 部分实现 | Opens the Performance Analyzer palette from which you can diagnose operations in AutoCAD that seem slow or unresponsive. | chrome 本地选择子：非模态性能面板，只读显示宿主 `cad_status.performance` 与文档/会话计数；缺失指标显示 N/A（不伪造 0），无命令录制/采样。 |
 | 639 | `PERFANALYZERCLOSE` | 已实现 | Closes the Performance Analyzer palette. | chrome 本地选择子：关闭性能分析浮窗（幂等成功）。 |
 | 640 | `PFACE` | 部分实现 | Creates a 3D polyface mesh, vertex by vertex. | 具名拒绝（`pface.unsupported: no 3DFACE/mesh entity model`）。 |

@@ -898,7 +898,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `POLYGON CIRCUMSCRIBED` | 部分实现 | 独立选择子：中心 + 切圆上一点，用 `R=r/cos(π/n)`、顶点在 `θ±π/n` 生成闭合外切正多边形 | `POLYGON` 的 `Edge` 分支、数值半径的捕捉旋转规则仍未实现 |
 | `DIMROTATED` | 部分实现 | 三次拾取（两原点 + 尺寸线位置）+ 会话 `dimRotation` 角度，复用 `DimensionKind::Linear{rotation}` 合成一个非关联尺寸 | 无 AutoCAD 的选项子提示；非 `+Z` 平面/退化输入按名拒绝 |
 | `DIMSPACE` | 实现 | 首个线性/对齐/角度标注为基准；显式间距（`0` = 对齐）或 Auto = **2 × 基准样式文字高度**；角度标注按同心弧半径步进；一条事务/一步撤销 | 模型空间；关联重排未实现（全局范围）；径向/坐标/混合类型按名拒绝 |
-| `PEDIT` | 部分实现 | 恰好一条可寻址模型空间 LWPOLYLINE；`PEDIT CLOSE/OPEN/REVERSE` 改闭合标志或反转顶点+bulge，一条事务/一步撤销；无变化时显式 no-op | 无 `Join`/`Width`/`Fit`/`Spline`/`Decurve`/`Ltype gen`/`Undo`/`Multiple`/`Edit vertex`，无交互选项提示、无 line/arc 转换；裸 `PEDIT` 或未知参数按名拒绝 |
+| `PEDIT` | 部分实现 | 全选项行（CLOSE/OPEN/JOIN/FIT/SPLINE/DECURVE/REVERSE/UNDO + LINE/ARC/SPLINE 转换）；`WIDTH <w>` 对多选写统一宽度；`EDIT WIDTH <seg> <start> <end>` 只写可表示的单段 `start==end`；一条事务/一步撤销 | 逐段锥形宽度（DXF 40/41）、`Ltype gen`（`plinegen`）未建模，按名拒绝；无交互选项提示；裸 `PEDIT` 或未知参数按名拒绝 |
 | `BOUNDARY` / `-BOUNDARY` | 完整实现 | 一个内部点 → 每个发现的闭合环一条闭合非关联多段线；边界仅整实体圆/完整椭圆/闭合多段线、同 `+Z` 平面；**`Boundary set`**（载荷携带）用命名实体子集替换全图发现，空集/非候选按名拒绝**绝不放宽**；**`Island detection`** 开启时外层+每个内层各写一条折线并以 `boundary.islands` 明说孔洞关系只存在于该诊断，关闭时只写外层并逐条具名跳过；一条事务/一步撤销 | 无 region / 对象类型选择（本构建无 region 模型，载荷也无该字段）；`BO`/`BPOLY` 无别名；选项为载荷携带（无交互提示环） |
 | `TEXTTOFRONT` | 完整实现 | 选择式；按 `SpaceId` 逐范围（模型空间、各图纸布局、各块定义）把 Text/MultiLeader/Dimension 相对连续排到该范围非合格对象之上；其它选中对象逐条 `texttofront.skipped`；一条事务/一步撤销，`texttofront.unchanged` 不建事务，耗尽 `texttofront.order_exhausted` | 载荷无「全图文字」选项（声明）；无 Draw Order 对话框 |
 
@@ -976,7 +976,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `MLSTYLE` | 部分实现 | 会话内最多 16 个命名多线样式（`LIST`/`SET`），喂 MLINE | 不写 DWG/不持久化；无对话框、无元素/接头样式 |
 | `TREX` | 部分实现 | `TREX TRIM\|EXTEND`；选择集既是被处理对象又互为边界，复用既有 `plan_trim`/`plan_extend`；一条事务/一步撤销 | 无交互边界提示；TRIM 保留含中点的片段、EXTEND 只长 `u=1` 端 |
 | `EXTRIM` | 完整实现 | 第一个选中为边界、其余为被裁对象；目标集 = TRIM 可裁集（`LINE`/`ARC`/`CIRCLE`/`SPLINE`/`ELLIPSE`/椭圆弧/`LWPOLYLINE`）；不可裁目标按 `extrim.unsupported_target` 逐对象跳过并保留其余裁剪；采样近似切点以 `extrim.approximate_cut` 明示；一条事务/一步撤销 | 无边界拾取提示；载荷无侧点通道，按目标中点选侧（声明）；边界必须是单个可解析图元，否则整命令具名拒绝 |
-| `MPEDIT` | 部分实现 | 对每个选中 LWPOLYLINE 应用 `CLOSE\|OPEN\|REVERSE`，一条事务/一步撤销 | 非多段线/无变化逐条具名跳过；无 Join/Width/Fit/Spline/Decurve/Undo |
+| `MPEDIT` | 部分实现 | 对每个选中 LWPOLYLINE 应用 `CLOSE\|OPEN\|REVERSE`；`WIDTH <w>` 经共享 PEDIT 对整批写统一宽度；`JOIN`/`FIT`/`SPLINE`/`DECURVE`/`UNDO` 委托 PEDIT；一条事务/一步撤销 | `LTYPE GEN` 共享 `pedit.ltype_gen_unsupported`（无 `plinegen`）；非多段线/无变化逐条具名跳过，`WIDTH` 异质批按 PEDIT 整批拒绝 |
 | `-OVERKILL` | 完整实现 | `OVERKILL` 的命令行拼写：同一语法、同一去重实现，同输入字节级相同结果 | 同 `OVERKILL` 的边界：仅完全重复，无部分重叠/共线合并 |
 | `DRAWORDER` | 完整实现 | `FRONT`/`BACK`/`ABOVE`/`BELOW` 按 `SpaceId` 逐范围（模型空间、各图纸布局、各块定义）先规划后写入，范围内保持相对顺序，耗尽 `draworder.order_exhausted` 整批拒绝；ABOVE/BELOW 参照与移动对象跨范围时 `draworder.reference_scope`；一条事务/一步撤销 | 无 Draw Order 对话框 |
 
@@ -2301,7 +2301,7 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 | --- | --- | --- | --- |
 | `CHAMFER` | **完整实现** | `Distance`/`Angle`/`Method`/`Trim`；双零 ⇒ 仅延伸相交；`CHAMFER POLYLINE` 全顶点、弧段替换、过短跳过、开口闭合 | `Multiple`/命令内 `Undo` 属逐选项提示全局范围；负距离未文档化 ⇒ 具名拒绝；圆弧/圆/样条 AutoCAD 也不接受 |
 | `FILLET` | 完整实现 | 见 2026-11-15 行：任意 2D 平面对 `R>0` 相切弧 + `R=0` 尖角，一条事务/一步撤销 | 仅全局交互范围（`Multiple`/`Undo`/多解循环） |
-| `PEDIT` | 部分实现 | 全选项行；`Join` 接受线/弧/多段线；`Fit`/`Spline` 含闭合环；`Decurve`/`Reverse`/`Undo`；LINE/ARC/SPLINE 转换 | **`Width`/`Ltype gen`/`Edit vertex` 未实现**（多段线无宽度/`plinegen`/顶点子菜单模型）；偶数环无精确弧拟合 ⇒ `pedit.fit_closure` |
+| `PEDIT` | 部分实现 | 全选项行；`Join` 接受线/弧/多段线；`Fit`/`Spline` 含闭合环；`Decurve`/`Reverse`/`Undo`；LINE/ARC/SPLINE 转换；`WIDTH <w>` 写统一宽度，`Edit vertex WIDTH` 写单段 `start==end` 的可表示情形 | **`Ltype gen`（`plinegen`）与逐段锥形宽度未建模**；偶数环无精确弧拟合 ⇒ `pedit.fit_closure` |
 | `JOIN` | 完整实现 | 源对象模式；`Multiple` 把 LINE/ARC/多段线/SPLINE/椭圆弧精确焊接为**有理 B 样条**；`JOIN CLOSE` 的混合 SPLINE 焊接后置 `Spline.closed`（DXF 70 bit 1 往返，闭合样条按闭环出图/拾取），一条事务/一步撤销 | 链端不重合 `join.not_closed`、有间隙 `join.not_contiguous`（不桥接）、已闭合对象作源 `join.closed_object`；焊接仍是 C0 拼接（非周期/平滑）；非共面多段线属 3D 全局范围 |
 | `OFFSET` | **完整实现** | `Through`/`Erase`/`Layer`/`Multiple`（单步）/距离；椭圆与椭圆弧→样条；`OFFSETGAPTYPE` Sharp/**Fillet**/**Chamfer** | `OFFSET MULTIPLE` 的多点循环拒绝（单点捕获，属逐选项提示全局范围）；开放折线远端自交未检查（AutoCAD 未文档化） |
 | `STRETCH` | 完整实现 | 交叉矩形、交叉多边形（点击 + `CONFIRM`/回点首顶点闭合）与自由手绘 lasso（拖拽采样、释放闭合、CROSSING 预览）都经工具捕获进入同一 `polygon_window` 规划；even-odd 包含；部分包围逐顶点、完全包围整移；圆按圆心、块/文字按插入点；标注按定义点；一条事务/一步撤销 | `MULTILEADER` 整命令拒绝；环<3 顶点/非有限/零面积/未闭合具名拒绝；仅 2D 平面视图；lasso 采样是原始指针点（不经捕捉/正交） |
@@ -2338,7 +2338,7 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 | `FILLET` | 完整实现 | `R>0`：LINE/ARC/CIRCLE/ELLIPSE（含椭圆弧）/SPLINE 任意两两组合——SPLINE 用精确 `sub_curve` 修剪（不重拟合），椭圆/样条走数值相切解 + 交替投影抛光；插入一段相切 ARC；`R=0`：全部 10 种平面对只修剪不插入，CIRCLE↔CIRCLE 复用 TRIM 的两交点 CIRCLE→ARC 规则把两个圆都切成拾取侧弧，LINE 可延伸到角点；被修剪对象保持 id/图层/空间/draw order；一条事务/一步撤销 | `Multiple`、命令内 `Undo` 与多解循环属全局交互范围；相切/不相交/非共面/非平面逐条具名拒绝；CIRCLE→ARC 后实体 `type_key` 仍为 `Circle`（与 TRIM 同一约定） |
 | `BREAK` | **完整实现** | `LINE`/`ARC`/`CIRCLE`/`SPLINE`/整椭圆/**椭圆弧**/`LWPOLYLINE`；`F` 首点覆盖；圆→弧；一条事务/一步撤销 | 无多段打断（AutoCAD 无此模式） |
 | `DIVIDE` | **完整实现** | 直线/弧/圆/样条/**椭圆与椭圆弧**/含 bulge 折线按等弧长；开放 `N−1`、闭合 `N`；块对齐 | 非曲线种类按名拒绝 |
-| `PEDIT` | 部分实现 | 全选项行 + **Edit vertex 子菜单**（NEXT/PREVIOUS/INSERT/MOVE/STRAIGHTEN）；JOIN 接受 SPLINE 拾取 | `WIDTH`/`LTYPE GEN`/`Edit vertex TANGENT` 无域字段 |
+| `PEDIT` | 部分实现 | 全选项行 + **Edit vertex 子菜单**（NEXT/PREVIOUS/INSERT/MOVE/STRAIGHTEN）；JOIN 接受 SPLINE 拾取；`WIDTH <w>` 写统一宽度，`EDIT WIDTH` 写单段 `start==end` | `LTYPE GEN`（无 `plinegen`）、逐段锥形宽度与 `Edit vertex TANGENT` 无域字段 |
 | `TRIM`/`EXTEND` | 部分实现 | **ELLIPSE/椭圆弧目标**；EXTEND 弧可超过半圈（至整圈前）；**LWPOLYLINE 目标（仅 TRIM，2026-11-12 起）**：保留含拾取点投影的窗口、其余丢弃（原地替换），闭合折线需两条切点；INSERT/HATCH/MESH/OPAQUE/COMPOUND 等目标按名拒绝 | 折线目标**没有 EXTEND**（`extend.target_polyline`），也无宽度语义；SPLINE 目标的 EXTEND 无外推策略 |
 | `ARRAYRECT`/`ARRAYPOLAR` | 部分实现 | 有符号行/列间距；极坐标步长按 AutoCAD `fill/(items−1)`（半圈）/`fill/items`（整圈） | 独立非关联副本；`Levels`/网格角度无工具参数；关联编辑未建模 |
 | `HATCH` | 完整实现 | **`.pat` 解析器/名称解析**（内置 ANSI31/32/37 同源解析）+ `PATTERN`/`PATTERNFILE` 命令名通道；整实体闭合边界与 LINE/ARC 边链、solid/user/predefined/gradient 全部真实写入 | 关联性/实时预览属全局范围 |
@@ -2586,7 +2586,7 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 | 命令 | 状态 | 当前行为 | 剩余边界 |
 | --- | --- | --- | --- |
 | `PLINE` | 已实现 | `Geometry(Polyline)` 与捕获路径共享一个统一 `width`：捕获读 `polylineWidth` 工具参数（默认 0=细线），程序化 payload 自带 `width`；表示层以中心线 ±w/2 生成实心带宽（斜接，超过 4×半宽转斜切；开放端平头；闭合环回绕），并参与 XCLIP 矩形裁剪；相似变换缩放宽度 | 无逐段 start/end 锥形宽度（DXF 40/41）；宽虚线仍画实心并报告 `representation.polyline_width_dashes`；SPLINE/DECURVE 后宽度归 0；OFFSET/BREAK/JOIN/STRETCH/FILLET/LENGTHEN 派生折线仍从 0 开始 |
-| `PEDIT` | 部分实现 | `WIDTH <w>` 对多选写统一宽度（0 复位细线），一条事务/一步撤销；CLOSE/OPEN/REVERSE/FIT/顶点编辑保留宽度；非法值 `pedit.width_invalid`，无变化 `pedit.width_unchanged` | 每段锥形宽度（`pedit.vertex_width_unsupported`）；`Ltype gen`；SPLINE 实体无宽度字段 |
+| `PEDIT` | 部分实现 | `WIDTH <w>` 对多选写统一宽度（0 复位细线），一条事务/一步撤销；`EDIT WIDTH <seg> <start> <end>` 只写单段 `start==end`（等于统一宽度），其余按名拒绝；CLOSE/OPEN/REVERSE/FIT/顶点编辑保留宽度；非法值 `pedit.width_invalid`，无变化为具名 no-op | 逐段锥形宽度（`pedit.vertex_width_unsupported`）与 `Ltype gen`（无 `plinegen`）未建模；SPLINE 实体无宽度字段 |
 ### 2026-11-12 EXTEND 开放 SPLINE 目标
 
 | 命令 | 状态 | 当前行为 | 剩余边界 |
