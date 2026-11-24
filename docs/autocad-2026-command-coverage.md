@@ -26,8 +26,8 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **204** |
-| 部分实现（有写明的界） | **775** |
+| 完整实现 | **208** |
+| 部分实现（有写明的界） | **771** |
 | **已实现合计（完整 + 部分）** | **979** |
 | 未实现 | **2** |
 
@@ -250,7 +250,7 @@
 
 > **这不是验收，是当前排期与口径。** 本轮目标是把命令从 `部分实现`/具名拒绝推进到支持域内
 > **没有剩余可写缺口**的 `完整实现`；不放宽为“改状态不实现”，也不把 ADR 全局范围缺口算作
-> 单命令完成。当前清单 **204 完整 / 775 部分 / 2 未实现**，只有真正合并且契约测试通过的
+> 单命令完成。当前清单 **208 完整 / 771 部分 / 2 未实现**，只有真正合并且契约测试通过的
 > 命令才改状态。
 
 | 批次 | 范围 | 状态 |
@@ -259,6 +259,7 @@
 | M1b 3D 图元 | `BOX`/`CONE`/`CYLINDER`/`SPHERE`/`TORUS`/`WEDGE` 的 typed 选项与 `ELEV` | **已合并** 6/7；`PYRAMID` 因 modeler 只有方形底仍 partial |
 | M1c 3D 运算 | `UNION`/`SUBTRACT`/`INTERSECT` 提交前单壳校验、`XEDGES`、`3DORBIT`/`3DPAN` | **已合并**（+6 complete；`3DZOOM` 仍 partial） |
 | M1d 参数管理器 | `PARAMETERS`/`-PARAMETERS`/`PARAMETERSCLOSE` + Parametric→Manage 面板 | **已合并**（+3 complete + 面板） |
+| M1e 全局范围核对 | `-PURGE`（别名无独有缺口）、`DIMDISASSOCIATE`/`DIMREGEN`/`DIMREASSOCIATE`（关联性属全局范围） | **已合并**（+4 complete）；`DIMREASSOC`/`DIMROTATED`/`BLOCK?`/`LAYERPMODE`/`LAYCUR`/`LAYMCUR`/`LAYMCH`/`BTRIM`/`BEXTEND`/`NCOPY`/`CDORDER`/`MOCORO` 仍 partial（各有真实缺口，见各行） |
 | M2 块属性 | ADR-0055：ATTDEF/ATTRIB 模型、minor 14、DXF/渲染/命令/面板 | 模型/schema **已合并**；connector/renderer 与命令 lane 进行中 |
 | M3 约束 | ADR-0054：有界二维几何/尺寸约束求解器、minor 15、DXF 节点 | ADR 已接受；P0 未开始，命令仍 partial |
 | M4 动作录制器 | ADR-0056：ACTRECORD/ACTSTOP/ACTUSERINPUT/ACTUSERMESSAGE/ACTMANAGER | ADR 已接受；实现 lane 进行中 |
@@ -342,7 +343,7 @@
 | `-POINTCLOUDMANAGER` | 部分实现 | 具名拒绝（`-pointcloudmanager.unsupported: no point-cloud attachment/crop/style model`）。 |
 | `-PSETUPIN` | 完整实现 | `PAGESETUPIN` 的命令行拼写：同一实现臂（`page_setup_write`），一次 revision 复制源记录的纸张/尺寸/比例/旋转 |
 | `-PUBLISH` | 部分实现 | 具名拒绝（`-publish.unsupported`）：本构建无批量发布模型；命令行拼写。 |
-| `-PURGE` | 部分实现 | `PURGE` 的别名，同一实现 |
+| `-PURGE` | 完整实现 | `PURGE` 的命令行拼写：别名规范化到同一 `CommandId::Purge` 与同一处理器（裸命令/`Layer`/`Block`/`Style`/`Linetype`），无别名独有缺口 |
 |  `-REFEDIT` | 部分实现 | 真实：`REFEDIT`/`-REFEDIT` 仅接受一个相似变换模型空间 INSERT，把可见块成员按 INSERT 变换克隆到模型空间（一条事务），源 INSERT 走会话隐藏；`REFSET ADD|REMOVE` 只改会话工作集；`REFCLOSE SAVE` 逆变换写回块定义（成员更新/新增/删除与克隆删除，一条事务/一步撤销），`DISCARD` 删除克隆、块定义不变。仅提取可见成员；无参照淡显/锁定（其他宿主对象仍可选，REFSET 是显式选择）；成员图层/绘图次序不回写；QSAVE 应用层拒绝（`refedit.save_blocked`）。 |
 | `-RENAME` | 完整实现 | `RENAME` 的命令行拼写，同一实现：六种 kind 真实重命名，含 `LINETYPE` 与其引用级联，一条表补丁/一步撤销。 |
 | `-RENDER` | 部分实现 | 具名拒绝（`-render.unsupported: no render engine; only the 2D viewport renderer exists`）。 |
@@ -625,7 +626,7 @@
 | `DIMCONSTRAINT` | 部分实现 | 具名拒绝（`dimconstraint.unsupported`）：本构建无尺寸约束模型。 |
 | `DIMCONTINUE` | 已实现 | — |
 | `DIMDIAMETER` | 已实现 | — |
-| `DIMDISASSOCIATE` | 部分实现 | payload-free；无关联模型，`dimdisassociate.already_non_associative` 且不改变任何状态 |
+| `DIMDISASSOCIATE` | 完整实现 | payload-free；本构建标注全部非关联（关联性属 ADR 全局范围），`dimdisassociate.already_non_associative` 且不改变任何状态；无关联可删即该命令语义的全部 |
 | `DIMEDIT` | 部分实现 | 对所有选中标注 `TEXT <override>`（组 1，`<>` 占位，≤1024）、`RESET`、`HOME`（恢复组 11 哨兵）与 `ROTATE <deg>`（组 53，`0` = 派生，非有限按 `dimedit.bad_rotation`）；`OBLIQUE <deg>` 已可键入但按 `dimedit.oblique_unsupported` 具名拒绝；一条事务/一步撤销，`dimedit.unchanged` 无变化 | 延伸线 oblique（DIMSTYLE 组 52）未建模：acadrust 的 `DimStyle` 无该字段、导出器已声明丢弃组 52，加了字段也无法往返 —— 按全局范围保留具名拒绝 |
 | `DIMEX` | 部分实现 | 具名拒绝（`dimex.unsupported`）：未建模标注样式导出文件。 |
 | `DIMIM` | 部分实现 | 具名拒绝（`dimim.unsupported`）：未建模标注样式导入文件。 |
@@ -636,9 +637,9 @@
 | `DIMORDINATE` | 已实现 | — |
 | `DIMOVERRIDE` | 部分实现 | 闭集的实体快照变量（新增 `DIMTXSTY <name>`，按 `resolve_dim_style` 精确→大小写不敏感解析，未知名 `dimoverride.bad_value` 绝不静默回退 Standard，导出可往返）；未知/仅表/坏值/未实现值分别具名拒绝；一条事务/一步撤销 | `DIMCLRD/RE/RT`（标注显示无逐图元颜色）、`DIMJUST/DIMATFIT/DIMTIX/DIMTOFL/DIMTIH/DIMTOH`（无文字适配模型）、`DIMDLE`/`DIMSCALE`（无快照槽）、`DIMCONTINUEMODE`（图纸级）按名拒绝 |
 | `DIMRADIUS` | 已实现 | — |
-| `DIMREASSOC` | 部分实现 | 非关联标注的具名 no-op（`dimreassoc.non_associative`）；不改变任何状态。 |
-| `DIMREASSOCIATE` | 部分实现 | 非关联标注的具名 no-op（`dimreassociate.non_associative`）；不改变任何状态。 |
-| `DIMREGEN` | 部分实现 | payload-free；本构建非关联，`dimregen.non_associative` 且不改变任何状态 |
+| `DIMREASSOC` | 部分实现 | Express Tool「恢复被覆盖/修改的标注文字到测量值」未实现：当前返回非关联 no-op（`dimreassoc.non_associative`）且不改变状态；标注文字覆盖（DIMEDIT 组 1）已建模，因此这是真实可写缺口，不是关联性全局范围 |
+| `DIMREASSOCIATE` | 完整实现 | payload-free；本构建标注全部非关联（关联性属 ADR 全局范围），`dimreassociate.non_associative` 且不改变任何状态；无对象/点关联可建立即该命令语义的全部 |
+| `DIMREGEN` | 完整实现 | payload-free；本构建标注全部非关联（关联性属 ADR 全局范围），`dimregen.non_associative` 且不改变任何状态；无关联标注可重算即该命令语义的全部 |
 | `DIMROTATED` | 部分实现 | 三点拾取（两尺寸界线原点 + 尺寸线位置）；尺寸线角度来自会话 `dimRotation` 参数（度，任意有限值，不回绕/不归一化）；无交互角度提示、无对象选择/文字覆盖/关联 |
 | `DIMSPACE` | 已实现 | 首个线性/对齐/角度标注为基准；显式间距（`0` = 对齐）或 Auto = **2 × 基准样式文字高度**；角度标注按同心弧半径步进；模型空间；关联重排属全局范围 |
 | `DIMSTYLE` | 完整实现 | `LIST`/`CURRENT` 报告存储行；`SET <name>` 写会话当前样式（只影响**新**建标注）、`NEW <name>`（以**存储的** `Standard` 或指定基准为模板）、`RENAME`、`DELETE`、`MODIFY <var> <value>` 都真写样式表（`apply_dim_style_change`，一条记录/一次修订；重拼写为权威空操作；`Standard` 不可删）；被已存标注快照引用的行不可改名（`dimstyle.in_use`）；**非追溯**（ADR-0017）：既有标注保留解析快照并在诊断中说明；行内没有的字段按名拒绝；SAVE→OPEN 往返有测试 |
@@ -1549,7 +1550,7 @@
 | 287 | `DIMCONSTRAINT` | 部分实现 | Applies dimensional constraints to selected objects or points on objects, or converts associative dimensions to dimensional constraints. | 具名拒绝（`dimconstraint.unsupported`）：本构建无尺寸约束模型。 |
 | 288 | `DIMCONTINUE` | 已实现 | Creates a dimension that starts from an extension line of the previous or selected dimension. | — |
 | 289 | `DIMDIAMETER` | 已实现 | Creates a diameter dimension for a circle or an arc. | — |
-| 290 | `DIMDISASSOCIATE` | 部分实现 | Removes associativity from selected dimensions. | payload-free；无关联模型，`dimdisassociate.already_non_associative` 且不改变任何状态 |
+| 290 | `DIMDISASSOCIATE` | 完整实现 | Removes associativity from selected dimensions. | payload-free；本构建标注全部非关联（关联性属 ADR 全局范围），`dimdisassociate.already_non_associative` 且不改变任何状态；无关联可删即该命令语义的全部 |
 | 291 | `DIMEDIT` | 部分实现 | Edits dimension text and extension lines. | 对所有选中标注 `TEXT <override>`（组 1，`<>` 占位，≤1024）或 `RESET`；一条事务/一步撤销；延伸线编辑未实现 |
 | 292 | `DIMEX` | 部分实现 | Exports named dimension styles and their settings to an external file. | 具名拒绝（`dimex.unsupported`）：未建模标注样式导出文件。 |
 | 293 | `DIMIM` | 部分实现 | Imports named dimension styles and their settings from an external file. | 具名拒绝（`dimim.unsupported`）：未建模标注样式导入文件。 |
@@ -1561,9 +1562,9 @@
 | 299 | `DIMORDINATE` | 已实现 | Creates ordinate dimensions. | — |
 | 300 | `DIMOVERRIDE` | 部分实现 | Controls overrides of system variables used in selected dimensions. | 闭集的实体快照变量；未知变量/仅表变量/坏值/未实现值分别具名拒绝；一条事务/一步撤销；不改样式表 |
 | 301 | `DIMRADIUS` | 已实现 | Creates a radius dimension for a circle or an arc. | — |
-| 302 | `DIMREASSOC` | 部分实现 | Restores the measured value to overridden or modified dimension text. | 非关联标注 no-op（`dimreassoc.non_associative`）；无状态变化。 |
-| 303 | `DIMREASSOCIATE` | 部分实现 | Associates or reassociates selected dimensions to objects or points on objects. | 非关联标注 no-op（`dimreassociate.non_associative`）；无状态变化。 |
-| 304 | `DIMREGEN` | 部分实现 | Updates the locations of all associative dimensions. | payload-free；本构建非关联，`dimregen.non_associative` 且不改变任何状态 |
+| 302 | `DIMREASSOC` | 部分实现 | Restores the measured value to overridden or modified dimension text. | Express Tool「恢复被覆盖/修改的标注文字到测量值」未实现：返回非关联 no-op（`dimreassoc.non_associative`）；标注文字覆盖（DIMEDIT 组 1）已建模 ⇒ 真实可写缺口，不属于关联性全局范围 |
+| 303 | `DIMREASSOCIATE` | 完整实现 | Associates or reassociates selected dimensions to objects or points on objects. | payload-free；本构建标注全部非关联（关联性属 ADR 全局范围），`dimreassociate.non_associative` 且不改变任何状态；无对象/点关联可建立即该命令语义的全部 |
+| 304 | `DIMREGEN` | 完整实现 | Updates the locations of all associative dimensions. | payload-free；本构建标注全部非关联（关联性属 ADR 全局范围），`dimregen.non_associative` 且不改变任何状态；无关联标注可重算即该命令语义的全部 |
 | 305 | `DIMROTATED` | 部分实现 | Creates a rotated linear dimension. | 三点拾取（两尺寸界线原点 + 尺寸线位置）；角度为会话 `dimRotation` 参数（度，任意有限值，不回绕/不归一化）；无交互角度提示、无对象选择/文字覆盖/关联 |
 | 306 | `DIMSPACE` | 已实现 | Adjusts the spacing between linear dimensions or angular dimensions. | 首个线性/对齐/角度标注为基准；显式间距（`0` = 对齐）或 Auto = **2 × 基准样式文字高度**；角度标注按同心弧半径步进；模型空间；关联重排属全局范围 |
 | 307 | `-DIMSTYLE` | 完整实现 | At the Command prompt, creates and modifies dimension styles. | `DIMSTYLE` 的命令行拼写：同一解析器与同一处理器，七个选项（`LIST`/`CURRENT`/`SET`/`NEW`/`MODIFY`/`RENAME`/`DELETE`）逐项测试证明无第二条路径 |
@@ -1942,7 +1943,7 @@
 | 680 | `PTYPE` | 已实现 | Specifies the display style and size of point objects. | `PTYPE <code> [size]` 委托既有 `PDMODE`/`PDSIZE` 头部写入（两次 header 写、无 header undo 补丁）；bare 为只读报告 |
 | 681 | `-PUBLISH` | 部分实现 | Publishes drawings to DWF, DWFx, and PDF files, or to printers or plotters using the command line. | 具名拒绝（`-publish.unsupported`）：本构建无批量发布模型；命令行拼写。 |
 | 682 | `PUBLISH` | 部分实现 | Publishes drawings to DWF, DWFx, and PDF files, or to printers or plotters. | 具名拒绝（`publish.unsupported`）：本构建无批量发布模型。 |
-| 683 | `-PURGE` | 部分实现 | Removes unused named objects, such as block definitions and layers, from the current drawing using the command line. | `PURGE` 的别名，同一实现 |
+| 683 | `-PURGE` | 完整实现 | Removes unused named objects, such as block definitions and layers, from the current drawing using the command line. | `PURGE` 的命令行拼写：别名规范化到同一 `CommandId::Purge` 与同一处理器（裸命令/`Layer`/`Block`/`Style`/`Linetype`），无别名独有缺口 |
 | 684 | `PURGE` | 完整实现 | Removes unused items, such as block definitions and layers, from the drawing. | 图层 + 块 + 文字样式 + 线型；各表在用引用按名拒绝；块/样式/线型一条事务/一步撤销 | 图层删除不记历史（刻意保留的既有行为） |
 | 685 | `PURGEAECDATA` | 部分实现 | Removes the invisible AEC data (AutoCAD Architecture and AutoCAD Civil 3D custom objects) in the drawing at the Command prompt. | 只读能力报告：本构建不导入/建模 AEC 对象，无 AEC 数据可清理（`purgeaecdata.no_aec_model`）；不写库。 |
 | 686 | `PUSHTODOCSCLOSE` | 部分实现 | Closes the Push to Autodesk Docs palette. | 具名拒绝（`pushtodocsclose.unsupported: no Autodesk Docs connector model`）。 |
@@ -2342,7 +2343,8 @@
 | `DIMSTYLE` | 完整实现 | `LIST`/`CURRENT` 报告存储行；`SET <name>` 写会话当前样式（只影响**新**建标注）、`NEW <name>`（以**存储的** `Standard` 或指定基准为模板）、`RENAME`、`DELETE`、`MODIFY <var> <value>` 都真写样式表（`apply_dim_style_change`，一条记录/一次修订；重拼写为权威空操作；`Standard` 不可删）；被已存标注快照引用的行不可改名（`dimstyle.in_use`）；**非追溯**（ADR-0017）：既有标注保留解析快照并在诊断中说明；行内没有的字段按名拒绝；SAVE→OPEN 往返有测试 |
 | `DIMEDIT` / `DIMTEDIT` / `DIMOVERRIDE` / `DIMBREAK` / `QDIM` / `DIMSPACE` | **部分** | `DIMEDIT` 文字覆盖/复位、`DIMTEDIT` 文字移动/旋转/复位、`DIMOVERRIDE` 实体快照变量、`QDIM` 直线 v1、`DIMSPACE` 等距重排是真实写路径（一条事务/一步撤销）；`DIMBREAK` 无打断记录，按 `dimbreak.unsupported` 拒绝。逐条见上方索引 |
 | `DIMJOGLINE` | **部分** | `ADD`/`REMOVE` 语法校验后按 `dimjogline.unsupported` 拒绝（域无 jog 字段/存储） |
-| `DIMARC` / `DIMJOGGED` / `DIMREASSOCIATE` | **未实现** | 无弧长/折弯标注字段与关联模型 |
+| `DIMARC` / `DIMJOGGED` | **未实现** | 无弧长/折弯标注字段 |
+| `DIMDISASSOCIATE` / `DIMREGEN` / `DIMREASSOCIATE` | **完整实现** | 关联性属 ADR 全局范围：本构建标注全部非关联，三条命令在支持域内没有剩余可写工作（payload-free 具名 no-op；不写库/不升修订/不入历史） |
 | 关联性（`DIMASSOC=2`） | **未实现** | 创建与迁移的标注都是非关联单实体；导出不写 `ACAD_DIMASSOC` |
 
 #### 4.3 修改
@@ -2453,7 +2455,7 @@
 | `IMPORT` | **L** | 依赖 acadrust 格式能力与迁移策略；打开 DWG/DXF 走 `OPEN`，不是 `IMPORT` |
 | `PUBLISH` | **L** | 多布局/多图幅批量出图 + 设备/图幅/打印样式；`PLOT` 只到矢量单页 |
 | `DIMSTYLE` 样式表写入与追溯语义 | **已关闭（2026-11-16）** | `apply_dim_style_change` 提供 post-import 单行写；`SET`/`NEW`/`RENAME`/`DELETE`/`MODIFY` 真写，被引用的行不可改名，`Standard` 不可删；ADR-0017 的「不追溯」写进每条诊断并有快照不变测试 |
-| 标注 jog / break / 弧长 / 折弯 / 关联 | **M–L** | `DIMJOGLINE`/`DIMBREAK` 无域字段（具名拒绝）；`DIMARC`/`DIMJOGGED`/`DIMREASSOCIATE` 与 `DIMASSOC=2` 未实现 |
+| 标注 jog / break / 弧长 / 折弯 / 关联 | **M–L** | `DIMJOGLINE`/`DIMBREAK` 无域字段（具名拒绝）；`DIMARC`/`DIMJOGGED` 未实现；关联性（`DIMASSOC=2`）属全局范围，三条关联命令因此是完整 no-op |
 | HATCH 自定义 `76=2` / `.pat` 加载 | **M** | 需要 `.pat` 解析器 + 名称解析 + 缺失图案的显式拒绝；当前只有三项内置图案 |
 | HATCH 关联性 | **L** | 需要边界→填充持久引用并定义边界编辑后的重生成/失效规则；与现有非关联边界冲突，需 ADR |
 | OFFSET `ELLIPSE` | **已实现（2026-11-16）** | 等距偏移曲线不是椭圆，需要新偏移曲线类型或显式折线近似 |
