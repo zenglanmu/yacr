@@ -261,6 +261,10 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("SETENTITYPROPERTY", CommandId::SetEntityProperty),
     // PARAM is the structural parameter edit (ADR-0043 D9). It needs a `Param(ParamOp)` payload from the properties/IPC path; the bare typed selector normalizes and is then refused explicitly by the application layer (`param.invalid_payload`), never turned into a guessed create.
     ("PARAM", CommandId::Param),
+    // -PARAMETERS is the command-line Parameter Manager (read-only list on the bare
+    // name, `NEW|SET|RENAME|DELETE` write forms through the same selector). The
+    // panel word `PARAMETERS` is chrome-local and is deliberately absent here.
+    ("-PARAMETERS", CommandId::ParamList),
     // MATCHPROP is the **selection-based** property painter: the bare selector is the whole input (`CommandPayload::None`), because the current selection's first entity is the source and the rest are destinations. No IPC of its own.
     ("MATCHPROP", CommandId::MatchProp),
     // GRIPSTRETCH is the **payload path of a pointer gesture**: `GripStretch { id, to }` carries the resolved handle id plus the world point the drag resolved to. That payload comes from the host's own pointer routing on the release of an armed grip drag (`cad_host`), never from this table: this layer only maps the selector, and the typed command line carries no handle, so the bare selector normalizes and is then refused explicitly by the application layer — it must never be routed to `BeginDraw` or turned into a fabricated drag.
@@ -939,6 +943,10 @@ pub use modify::*;
 // The 2026-11-12 MULTILEADER/MLEDIT/TOLERANCE grammars.
 mod mleader;
 pub use mleader::*;
+
+// The `-PARAMETERS` command-line Parameter Manager grammar (ADR-0043 D9/D14).
+mod param_arguments;
+pub use param_arguments::*;
 
 // The selector -> interactive-tool routing table (split out for the code-size
 // gate). Re-exported so `commands::interaction_request_for` still resolves.

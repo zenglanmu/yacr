@@ -108,7 +108,7 @@ fn xclip_is_an_argument_selector_of_the_real_extended_command() {
     );
     // The refusal registry no longer owns the name, and the count dropped by one.
     assert!(!RefusalId::ALL.iter().any(|name| name.selector() == "XCLIP"));
-    assert_eq!(RefusalId::ALL.len(), 322);
+    assert_eq!(RefusalId::ALL.len(), 319);
 }
 
 #[test]

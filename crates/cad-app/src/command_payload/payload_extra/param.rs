@@ -11,13 +11,31 @@
 /// One command performs exactly one op. Except for [`ParamOp::Config`] (a
 /// runtime evaluation mode with no configuration-selection patch type), the op is
 /// one transaction and one undo step.
-/// Value edits deliberately do **not** live here: changing the number behind a
-/// parameter is the properties command's `param.<name>` write.
+///
+/// [`ParamOp::SetValue`] is the table-level value/expression write: it replaces
+/// one row's expression and lets the merged write path re-derive every bound
+/// element. The properties command's `param.<name>` write remains the
+/// **selection-scoped** spelling of the same edit (it refuses a parameter the
+/// selection does not bind); both end in the one parametric transaction.
 pub enum ParamOp {
     /// Add a row at the next free sequence, keeping the document's names unique.
     Create {
         name: String,
         kind: cad_domain::param::ParamKind,
+        expr: cad_domain::param::Expr,
+    },
+    /// Replace one row's stored expression (`value` or expression form).
+    ///
+    /// The expression is validated against the row's own kind by the one merged
+    /// write path ([`cad_db::DrawingDatabase::apply_parametric_update`]): an
+    /// unknown reference, a cycle or a dimension mismatch refuses the whole
+    /// batch before anything is stored, so the row, its dependents and the
+    /// document revision move together or not at all. A base row the active
+    /// configuration overrides or suppresses is refused (`param.config_override`)
+    /// exactly like the property write: the derived value comes from the overlay,
+    /// so writing the base row would report a change it cannot show.
+    SetValue {
+        seq: cad_domain::param::ParamSeq,
         expr: cad_domain::param::Expr,
     },
     /// Apply a named configuration overlay (`None` clears it).

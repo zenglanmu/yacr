@@ -1,8 +1,11 @@
-//! The Wave 17-24 + Wave 27 + Wave 28 named-refusal registry (322 AutoCAD 2026
-//! names: 197 existing + 91 Wave 27 + 39 Wave 28 − 4 graduated to real
+//! The Wave 17-24 + Wave 27 + Wave 28 named-refusal registry (319 AutoCAD 2026
+//! names: 197 existing + 91 Wave 27 + 39 Wave 28 − 7 graduated to real
 //! commands: `REFEDIT`, `-REFEDIT`, `REFSET` and `REFCLOSE` are now the bounded
 //! in-place block-edit session in [`crate::app_refedit`]; `XCLIP` also graduated
-//! to a real display-only block-reference clip).
+//! to a real display-only block-reference clip; and `PARAMETERS`, `-PARAMETERS`
+//! and `PARAMETERSCLOSE` graduated to the Parameter Manager — the chrome-local
+//! panel plus the `-PARAMETERS` command-line list/editor, see
+//! [`crate::app_drawing::param_command`]).
 //!
 //! Every name in this batch describes a feature with no model or API in this
 //! build: action macros, palettes, OLE/hyperlinks, LISP, 3D lights/materials/
@@ -24,8 +27,8 @@
 
 macro_rules! refusal_names {
     ($($variant:ident => $name:literal => $reason:literal),+ $(,)?) => {
-        /// One named-refusal command (197 existing + 91 Wave 27 + 39 Wave 28 − 4
-        /// graduated to real commands − `XCLIP` graduated to a real display clip = 322).
+        /// One named-refusal command (197 existing + 91 Wave 27 + 39 Wave 28 − 7
+        /// graduated to real commands = 319).
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         pub enum RefusalId {
             $($variant),+
@@ -339,9 +342,6 @@ refusal_names! {
     Securityoptions => "SECURITYOPTIONS" => "securityoptions.unsupported: no security/executable-trust settings model",
     Pastespec => "PASTESPEC" => "pastespec.unsupported: clipboard special-paste (OLE/format selection) is not modeled; use PASTECLIP or PASTEBLOCK",
     Openfromwebmobile => "OPENFROMWEBMOBILE" => "openfromwebmobile.unsupported: no Autodesk Account (web/mobile) file-exchange model",
-    DashParameters => "-PARAMETERS" => "-parameters.unsupported: no dynamic-block parameter/lookup model; the Parameters Manager palette is not implemented",
-    Parameters => "PARAMETERS" => "parameters.unsupported: no dynamic-block parameter/lookup model; the Parameters Manager palette is not implemented",
-    Parametersclose => "PARAMETERSCLOSE" => "parametersclose.unsupported: no dynamic-block parameter/lookup model; the Parameters Manager palette is not implemented",
     DashPartiaload => "-PARTIALOAD" => "-partiaload.unsupported: no partial layer-index open/load model",
     Pasteashyperlink => "PASTEASHYPERLINK" => "pasteashyperlink.unsupported: no hyperlink storage model",
     Psout => "PSOUT" => "psout.unsupported: PostScript output is not implemented; use PLOT for SVG/PDF",

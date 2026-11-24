@@ -1,7 +1,7 @@
-//! The Wave 17-24 + Wave 27 + Wave 28 named-refusal vocabulary rows (322 rows:
-//! 197 existing + 91 Wave 27 + 39 Wave 28 − 4 graduated to real commands
-//! (`REFEDIT`, `-REFEDIT`, `REFSET`, `REFCLOSE`) − `XCLIP` (now a real display
-//! clip).
+//! The Wave 17-24 + Wave 27 + Wave 28 named-refusal vocabulary rows (319 rows:
+//! 197 existing + 91 Wave 27 + 39 Wave 28 − 7 graduated to real commands
+//! (`REFEDIT`, `-REFEDIT`, `REFSET`, `REFCLOSE`, `PARAMETERS`, `-PARAMETERS`,
+//! `PARAMETERSCLOSE`) − `XCLIP` (now a real display clip).
 //!
 //! Kept in a sibling table (not `COMMAND_TABLE`) so `commands.rs` stays inside
 //! the 1000-line code gate. `normalize_command`, `canonical_command_name`,
@@ -300,9 +300,6 @@ pub const REFUSAL_TABLE: &[(&str, CommandId)] = &[
     ("SECURITYOPTIONS", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Securityoptions))),
     ("PASTESPEC", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Pastespec))),
     ("OPENFROMWEBMOBILE", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Openfromwebmobile))),
-    ("-PARAMETERS", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::DashParameters))),
-    ("PARAMETERS", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Parameters))),
-    ("PARAMETERSCLOSE", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Parametersclose))),
     ("-PARTIALOAD", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::DashPartiaload))),
     ("PASTEASHYPERLINK", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Pasteashyperlink))),
     ("PSOUT", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Psout))),

@@ -71,6 +71,9 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     // `-LAYER`'s write forms; the bare selector and `?` stay the read-only
     // report of the extended `DashLayer` command.
     DASH_LAYER_SELECTOR,
+    // `-PARAMETERS`: the command-line Parameter Manager. The bare name is the
+    // read-only list; the typed forms are the one-option write grammar.
+    DASH_PARAMETERS_SELECTOR,
     QSELECT_SELECTOR,
     FILTER_SELECTOR,
     GETSEL_SELECTOR,
