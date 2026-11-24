@@ -241,19 +241,20 @@ pub fn parse_centermark_argument(argument: &str) -> Option<CenterMarkCommand> {
 /// (it is the name-only default); an empty or unknown line is `None`.
 pub fn parse_centerline_argument(argument: &str) -> Option<CenterLineCommand> {
     let tokens: Vec<&str> = argument.split_whitespace().collect();
-    if tokens.is_empty() || tokens.len() % 2 != 0 {
+    if tokens.is_empty() || !tokens.len().is_multiple_of(2) {
         return None;
     }
     let mut extension: Option<f64> = None;
     let mut gap: Option<f64> = None;
-    for pair in tokens.chunks_exact(2) {
-        let value = super::commands::parse_signed_decimal(pair[1])?;
+    for pair in tokens.as_chunks::<2>().0 {
+        let [keyword, value] = *pair;
+        let value = super::commands::parse_signed_decimal(value)?;
         if !value.is_finite() || value < 0.0 {
             return None;
         }
-        let slot = if pair[0].eq_ignore_ascii_case("EXTENSION") {
+        let slot = if keyword.eq_ignore_ascii_case("EXTENSION") {
             &mut extension
-        } else if pair[0].eq_ignore_ascii_case("GAP") {
+        } else if keyword.eq_ignore_ascii_case("GAP") {
             &mut gap
         } else {
             return None;

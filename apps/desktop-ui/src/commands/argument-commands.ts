@@ -33,7 +33,6 @@ import { isAddSelectedArgument, isAliasEditArgument, isMvSetupArgument } from '.
 import { ACTION_RECORDER_ARGUMENT_COMMANDS } from './argument-recorder-commands.ts';
 import { ATTRIBUTE_ARGUMENT_COMMANDS } from './argument-attribute-grammar.ts';
 import { isSsxArgument } from './argument-selection-grammar.ts';
-
 /** The parser for the one typed-argument form a selector accepts. */
 export interface ArgumentSpec {
   readonly parse: (argument: string) => boolean;
