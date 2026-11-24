@@ -254,27 +254,44 @@ impl ProviderRegistry {
                         // A block-definition `ATTDEF` is skipped by the child loop
                         // below; it is a template, not an extra drawable.
                         if let SemanticGeometry::Insert { attributes, .. } = &entity.geometry {
-                            let definitions: Vec<(&str, u32)> = database
+                            let definitions: Vec<(&str, u32, bool)> = database
                                 .block_entities(block)
                                 .into_iter()
                                 .filter_map(|member| match &member.geometry {
-                                    SemanticGeometry::AttributeDefinition(definition) => {
-                                        Some((definition.tag.as_str(), definition.order))
-                                    }
+                                    SemanticGeometry::AttributeDefinition(definition) => Some((
+                                        definition.tag.as_str(),
+                                        definition.order,
+                                        definition.flags.constant,
+                                    )),
                                     _ => None,
                                 })
                                 .collect();
-                            let mut visible: Vec<&AttributeValue> = attributes
-                                .iter()
-                                .filter(|value| context.attdisp.shows(value.flags))
-                                .collect();
                             // Stable: values with the same definition keep their
                             // stored relative order, so duplicate tags stay legal.
-                            visible.sort_by_key(|value| {
+                            let definition_of = |value: &AttributeValue| {
                                 definitions
                                     .iter()
-                                    .find(|(tag, _)| *tag == value.tag.as_str())
-                                    .map(|(_, order)| *order)
+                                    .find(|(tag, _, _)| *tag == value.tag.as_str())
+                                    .copied()
+                            };
+                            let mut visible: Vec<&AttributeValue> = attributes
+                                .iter()
+                                .filter(|value| {
+                                    // The **definition** decides whether a value is
+                                    // constant: a source may omit the flag on the
+                                    // ATTRIB record even though its ATTDEF is
+                                    // constant, and a constant definition draws in
+                                    // every ATTDISP mode.
+                                    let mut flags = value.flags;
+                                    if let Some((_, _, constant)) = definition_of(value) {
+                                        flags.constant |= constant;
+                                    }
+                                    context.attdisp.shows(flags)
+                                })
+                                .collect();
+                            visible.sort_by_key(|value| {
+                                definition_of(value)
+                                    .map(|(_, order, _)| order)
                                     .unwrap_or(u32::MAX)
                             });
                             for value in visible {

@@ -84,7 +84,9 @@ fn attribute_database() -> DrawingDatabase {
         transform: Transform3::translation(p(10.0, 20.0)),
         // Deliberately reverse of definition order: expansion must sort.
         attributes: vec![
-            value("CONST", "const-value", flags(true, true), 3.0),
+            // The value's own constant bit is deliberately clear: the constant
+            // behaviour belongs to the ATTDEF, and expansion must read it there.
+            value("CONST", "const-value", flags(true, false), 3.0),
             value("HIDDEN", "hidden-value", flags(true, false), 2.0),
             value("VISIBLE", "visible-value", flags(false, false), 1.0),
         ],
