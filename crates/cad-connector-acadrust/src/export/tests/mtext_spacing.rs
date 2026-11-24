@@ -104,6 +104,7 @@ fn mtext_line_spacing_groups_44_and_73_round_trip() {
             wrap_width: None,
             width_factor: 1.0,
             line_spacing: spacing,
+            mirrored: false,
         },
     );
     // Writing the stored spacing is faithful to the database: still `Exact`.

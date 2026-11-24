@@ -419,6 +419,9 @@ pub const CLASSES: &[ClassDescriptor] = &[
             field("wrap_width", FieldKind::OptF64),
             field("width_factor", FieldKind::F64),
             field("line_spacing", FieldKind::TextLineSpacing),
+            // Minor 15: appended last and omitted when false, so a minor-14
+            // reader sees exactly the eleven-field object it models.
+            field("mirrored", FieldKind::Bool),
         ],
     },
     ClassDescriptor {
@@ -668,6 +671,7 @@ mod tests {
                 wrap_width: None,
                 width_factor: 1.0,
                 line_spacing: crate::TextLineSpacing::default(),
+                mirrored: false,
             },
             "cad:Shape" => SemanticGeometry::Shape {
                 shape_name: "BOX".into(),

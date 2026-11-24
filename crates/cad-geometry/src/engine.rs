@@ -476,6 +476,7 @@ impl GeometryEngine for DefaultGeometryEngine {
                 wrap_width,
                 width_factor,
                 line_spacing,
+                mirrored,
             } => {
                 // ADR 0019 decision B: this is the **second** transform surface
                 // (the snap path); `cad-db::transform_geometry` is the other. Both
@@ -493,8 +494,8 @@ impl GeometryEngine for DefaultGeometryEngine {
                 }
                 if t.determinant() < 0.0 {
                     return Err(CadError::Unsupported(
-                        "transform of Text would mirror it; a reflected text is not \
-                         represented by this build and is refused rather than dropped"
+                        "transform of Text would mirror it; use MIRROR (which toggles the \
+                         stored `mirrored` bit) instead of a generic reflection"
                             .to_string(),
                     ));
                 }
@@ -515,6 +516,8 @@ impl GeometryEngine for DefaultGeometryEngine {
                     // Both halves of the spacing are dimensionless ratios; a
                     // similarity keeps them, exactly like `cad-db`'s surface.
                     line_spacing: *line_spacing,
+                    // Mirroring is an orientation bit; a similarity keeps it.
+                    mirrored: *mirrored,
                 }
             }
             G::Shape {

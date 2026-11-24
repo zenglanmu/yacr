@@ -84,6 +84,11 @@ fn assert_keys_match(type_key: &str, value: &Value) {
     if type_key == "cad:Insert" && !object.contains_key("attributes") {
         expected.remove("attributes");
     }
+    // Minor 15: `cad:Text.mirrored` is omitted when false (the default), so an
+    // ordinary run is the eleven-field minor-14 object.
+    if type_key == "cad:Text" && !object.contains_key("mirrored") {
+        expected.remove("mirrored");
+    }
     assert_eq!(
         actual, expected,
         "{type_key} payload fields disagree with its descriptor"
@@ -631,4 +636,31 @@ fn table_display_appearance_must_match_geometry_len() {
     object.insert("display".to_string(), Value::Object(display));
     let error = decode(&Value::Object(object)).expect_err("length mismatch");
     assert!(error.message().contains("lockstep"), "{error}");
+}
+
+#[test]
+fn text_mirror_flag_is_omitted_when_false_and_round_trips_when_true() {
+    // Minor 15 contract: a readable run is byte-compatible with the minor-14
+    // payload (no `mirrored` key); a mirrored run writes the key and decodes
+    // back to the same value.
+    let mut text = samples()
+        .into_iter()
+        .find(|geometry| matches!(geometry, SemanticGeometry::Text { .. }))
+        .expect("the sample set has a Text");
+    let off = encode(&text);
+    assert!(
+        off.get("mirrored").is_none(),
+        "a readable run must not write the key: {off}"
+    );
+    let SemanticGeometry::Text { mirrored, .. } = &mut text else {
+        unreachable!()
+    };
+    *mirrored = true;
+    let on = encode(&text);
+    assert_eq!(on.get("mirrored"), Some(&Value::Bool(true)));
+    assert_keys_match("cad:Text", &on);
+    let decoded = decode(&on).expect("mirrored text decodes");
+    assert_eq!(decoded, text);
+    let again = encode(&decoded);
+    assert_eq!(on, again, "the mirrored payload is a fixed point");
 }

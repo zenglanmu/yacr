@@ -88,6 +88,18 @@ fn setvar_writes_route_through_the_existing_variable_handlers() {
     session.command("SETVAR ORTHO ON").expect("ORTHO ON");
     assert!(session.snapshot(None, None, 0).ortho_enabled);
 
+    // EXPLMODE (also `EXPMODE`) is the session switch the EXPLODE path reads;
+    // the write never touches the drawing.
+    assert!(session.core.controller.borrow().session.explode_mode());
+    session
+        .command("SETVAR EXPLMODE 0")
+        .expect("EXPLMODE write");
+    assert!(!session.core.controller.borrow().session.explode_mode());
+    session
+        .command("SETVAR EXPMODE ON")
+        .expect("EXPMODE alias write");
+    assert!(session.core.controller.borrow().session.explode_mode());
+
     // TEXTSIZE is the session tool-parameter channel, not a drawing header.
     session
         .command("SETVAR TEXTSIZE 7.5")

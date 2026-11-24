@@ -239,6 +239,7 @@ fn display_support_separates_drawn_from_unrendered() {
         wrap_width: None,
         width_factor: 1.0,
         line_spacing: cad_domain::TextLineSpacing::default(),
+        mirrored: false,
     };
     // Text is a supported entity whose drawing depends on a host font, so it
     // is Unverified rather than Unsupported (audit B20 still holds: no claim

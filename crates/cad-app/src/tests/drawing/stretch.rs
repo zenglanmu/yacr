@@ -585,6 +585,7 @@ fn stretch_text_moves_only_when_its_insertion_point_is_enclosed() {
         wrap_width: None,
         width_factor: 1.0,
         line_spacing: cad_domain::TextLineSpacing::default(),
+        mirrored: false,
     };
     // The insertion point is inside a crossing window that does not fully enclose
     // the run: TEXT/MTEXT follow the insertion-point rule, so the whole run moves.

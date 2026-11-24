@@ -115,6 +115,7 @@ impl AttributeText {
             wrap_width: self.wrap_width,
             width_factor: self.width_factor,
             line_spacing: self.line_spacing,
+            mirrored: false,
         }
     }
 }

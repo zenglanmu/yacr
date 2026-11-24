@@ -244,6 +244,7 @@ fn text_bearing_drawing() -> DrawingDatabase {
                 wrap_width: None,
                 width_factor: 1.0,
                 line_spacing: cad_domain::TextLineSpacing::default(),
+                mirrored: false,
             },
             draw_order: 0,
         })

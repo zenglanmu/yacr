@@ -61,6 +61,9 @@ pub(crate) fn attribute_value_fragments(
             wrap_width: &value.text.wrap_width,
             width_factor: &value.text.width_factor,
             line_spacing: &value.text.line_spacing,
+            // A block attribute's stored text carries no MIRRTEXT bit; block
+            // placement reflection is display-only and is not a per-value flag.
+            mirrored: &false,
         },
         SelectionRef {
             document: context.document,

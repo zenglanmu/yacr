@@ -32,6 +32,7 @@ fn text() -> SemanticGeometry {
         wrap_width: Some(4.0),
         width_factor: 1.5,
         line_spacing: cad_domain::TextLineSpacing::default(),
+        mirrored: false,
     }
 }
 
@@ -88,6 +89,7 @@ fn translation_rotation_and_uniform_scale_agree_across_both_faces() {
             wrap_width: write_wrap,
             width_factor: write_factor,
             line_spacing: write_spacing,
+            mirrored: false,
         } = &write
         else {
             panic!("{label}: the write face must return Text, got {write:?}");
@@ -104,6 +106,7 @@ fn translation_rotation_and_uniform_scale_agree_across_both_faces() {
             wrap_width: snap_wrap,
             width_factor: snap_factor,
             line_spacing: snap_spacing,
+            mirrored: false,
         } = &snap
         else {
             panic!("{label}: the snap face must return Text, got {snap:?}");

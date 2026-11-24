@@ -132,6 +132,7 @@ fn sfnt_text_provider_emits_meshes_without_outline_lines() {
         wrap_width: None,
         width_factor: 1.0,
         line_spacing: cad_domain::TextLineSpacing::default(),
+        mirrored: false,
     };
     let r = ProviderRegistry::with_default_provider()
         .build(&e, &context().with_fonts(Arc::new(fonts)))
@@ -206,6 +207,7 @@ fn shx_text_provider_keeps_outline_lines_when_font_is_available() {
         wrap_width: None,
         width_factor: 1.0,
         line_spacing: cad_domain::TextLineSpacing::default(),
+        mirrored: false,
     };
     let r = ProviderRegistry::with_default_provider()
         .build(&e, &context().with_fonts(Arc::new(fonts)))
@@ -431,4 +433,70 @@ fn duplicate_provider_type_key_is_rejected() {
     assert!(registry
         .register(Box::new(DefaultRepresentationProvider))
         .is_err());
+}
+
+#[test]
+fn mirrored_text_reflects_glyph_geometry_across_its_vertical_axis() {
+    // `MIRRTEXT=1` is display-real: the same shaped run with `mirrored: true`
+    // must be the exact reflection of the readable run across the local Y axis
+    // through the anchor, with the fill triangle winding reversed.
+    let mut fonts = FontEngine::new();
+    fonts
+        .register(
+            "osifont.ttf",
+            Arc::from(include_bytes!("../../../../fonts/osifont.ttf").as_slice()),
+        )
+        .unwrap();
+    let fonts = Arc::new(fonts);
+    let registry = ProviderRegistry::with_default_provider();
+    let build = |mirrored: bool| {
+        let mut e = text_entity(95, 20.0);
+        e.geometry = SemanticGeometry::Text {
+            text: "O".into(),
+            position: p(0.0, 0.0),
+            style: StyleId(0),
+            height: 20.0,
+            rotation: 0.0,
+            font: Some("osifont.ttf".into()),
+            h_align: TextAlignH::Left,
+            v_align: TextAlignV::Baseline,
+            wrap_width: None,
+            width_factor: 1.0,
+            line_spacing: cad_domain::TextLineSpacing::default(),
+            mirrored,
+        };
+        registry
+            .build(&e, &context().with_fonts(fonts.clone()))
+            .unwrap()
+    };
+    let readable = build(false);
+    let mirrored = build(true);
+    let meshes = |r: &DisplayRepresentation| -> Vec<(Vec<Point3>, Vec<[u32; 3]>)> {
+        r.fragments
+            .iter()
+            .filter_map(|fragment| match &fragment.primitive {
+                DisplayPrimitive::MeshWithoutEdgeOverlay(mesh) => {
+                    Some((mesh.vertices.clone(), mesh.triangles.clone()))
+                }
+                _ => None,
+            })
+            .collect()
+    };
+    let plain = meshes(&readable);
+    let reflected = meshes(&mirrored);
+    assert_eq!(plain.len(), reflected.len());
+    assert!(!plain.is_empty(), "the test needs filled glyph geometry");
+    for ((plain_vertices, plain_tris), (mirror_vertices, mirror_tris)) in
+        plain.iter().zip(reflected.iter())
+    {
+        assert_eq!(plain_vertices.len(), mirror_vertices.len());
+        for (a, b) in plain_vertices.iter().zip(mirror_vertices.iter()) {
+            assert!((a.x + b.x).abs() < 1e-9, "{a:?} vs {b:?}");
+            assert!((a.y - b.y).abs() < 1e-9, "{a:?} vs {b:?}");
+        }
+        assert_eq!(plain_tris.len(), mirror_tris.len());
+        for (a, b) in plain_tris.iter().zip(mirror_tris.iter()) {
+            assert_eq!([a[0], a[2], a[1]], *b, "winding is reversed");
+        }
+    }
 }

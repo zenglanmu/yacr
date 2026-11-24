@@ -354,6 +354,7 @@ pub fn transform_geometry(
             wrap_width,
             width_factor,
             line_spacing,
+            mirrored,
         } => {
             require_similarity(transform, "text")?;
             require_orientation_preserving(transform, "text")?;
@@ -374,6 +375,8 @@ pub fn transform_geometry(
                 // Both halves of the line spacing are dimensionless ratios, so a
                 // similarity keeps them.
                 line_spacing: *line_spacing,
+                // The glyph-mirror bit is orientation state; a similarity keeps it.
+                mirrored: *mirrored,
             }
         }
         // A NURBS curve is affinely invariant: the affine image of the curve is

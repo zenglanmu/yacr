@@ -42,6 +42,7 @@ fn text_fixture() -> HostController {
                 factor: 1.25,
                 style: cad_domain::TextLineSpacingStyle::Exactly,
             },
+            mirrored: false,
         },
         draw_order: 0,
     })
@@ -353,6 +354,7 @@ fn mtext_geometry(text: &str) -> SemanticGeometry {
         wrap_width: None,
         width_factor: 1.0,
         line_spacing: cad_domain::TextLineSpacing::default(),
+        mirrored: false,
     }
 }
 
@@ -482,6 +484,7 @@ fn mixed_text_fixture() -> HostController {
             wrap_width: None,
             width_factor: 1.0,
             line_spacing: cad_domain::TextLineSpacing::default(),
+            mirrored: false,
         },
         4,
     ))

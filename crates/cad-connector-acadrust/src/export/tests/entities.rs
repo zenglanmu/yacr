@@ -173,6 +173,7 @@ fn single_line_text_is_exact_and_newline_text_becomes_mtext() {
         wrap_width: None,
         width_factor: 1.0,
         line_spacing: cad_domain::TextLineSpacing::default(),
+        mirrored: false,
     });
     assert!(matches!(&read_entities(&bytes)[0], EntityType::Text(_)));
     assert_eq!(report.counts.exact, 1);
@@ -189,6 +190,7 @@ fn single_line_text_is_exact_and_newline_text_becomes_mtext() {
         wrap_width: None,
         width_factor: 1.0,
         line_spacing: cad_domain::TextLineSpacing::default(),
+        mirrored: false,
     });
     assert!(matches!(&read_entities(&bytes)[0], EntityType::MText(_)));
     assert_eq!(report.counts.converted, 1);
@@ -212,6 +214,7 @@ fn single_line_text_writes_the_width_factor_group_41() {
         wrap_width: None,
         width_factor: 2.5,
         line_spacing: cad_domain::TextLineSpacing::default(),
+        mirrored: false,
     });
     assert_eq!(report.counts.exact, 1);
     match &read_entities(&bytes)[0] {
@@ -261,6 +264,7 @@ pub(super) fn export_text_as(
             wrap_width,
             width_factor: 1.0,
             line_spacing: cad_domain::TextLineSpacing::default(),
+            mirrored: false,
         },
     )
 }

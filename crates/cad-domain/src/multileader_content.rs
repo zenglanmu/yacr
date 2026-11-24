@@ -522,6 +522,7 @@ pub fn tolerance_frame_geometries(
             wrap_width: None,
             width_factor: crate::DEFAULT_TEXT_WIDTH_FACTOR,
             line_spacing: crate::TextLineSpacing::default(),
+            mirrored: false,
         });
         cell_left += *width;
     }

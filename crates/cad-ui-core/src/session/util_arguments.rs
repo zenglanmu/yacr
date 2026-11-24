@@ -56,6 +56,11 @@ const MODELLED_VARIABLES: &[&str] = &[
     // drawing.
     "ELEV",
     "FSMODE",
+    // `EXPLMODE` (spelled `EXPMODE` in the coverage docs and accepted as an
+    // alias) is the non-uniformly scaled block switch the EXPLODE path reads.
+    // Session-only, same storage the typed `EXPLODE MODE 0|1` line writes.
+    "EXPLMODE",
+    "EXPMODE",
 ];
 
 /// The three shell settings `SETVAR` can **write** but not read.
@@ -315,6 +320,21 @@ impl CadSession {
                 }
                 Err(reason) => self.refuse_argument(reason),
             },
+            // `EXPLMODE`/`EXPMODE` are the same session switch the typed
+            // `EXPLODE MODE 0|1` line writes (the explode path reads it); the
+            // write never touches the drawing.
+            "EXPLMODE" | "EXPMODE" => {
+                let Some(value) = parse_sysvar_toggle(value) else {
+                    return invalid("0, 1, ON or OFF");
+                };
+                self.core.record_command(SETVAR_SELECTOR);
+                self.core
+                    .controller
+                    .borrow_mut()
+                    .session
+                    .set_explode_mode(value);
+                self.accept_session_mode()
+            }
             // `ELEV` and `FSMODE` are session tokens (the create funnel and `FS`
             // read them): each write rides the same command the typed setter line
             // dispatches, so there is exactly one setter and no drawing write.

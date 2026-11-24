@@ -157,6 +157,7 @@ impl Application {
             // The create payload carries no line spacing, so the created MTEXT
             // stores the neutral factor/style the layout has always used.
             line_spacing: cad_domain::TextLineSpacing::default(),
+            mirrored: false,
         };
         let mut outcome = self.commit_new_entity_typed(
             session,

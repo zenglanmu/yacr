@@ -524,6 +524,22 @@ impl DimensionGeometry {
         })
     }
 
+    /// Mark the synthesized measurement `TEXT` child as glyph-mirrored.
+    ///
+    /// This is the `MIRRTEXT=1` half of a dimension mirror: the definition
+    /// points were already reflected, so the display is rebuilt first and this
+    /// only sets the one extra glyph-frame bit on its `Text` child. A
+    /// picture-branch display (external block members) is left untouched: its
+    /// members are the source picture, not our synthesized measurement text.
+    pub fn with_mirrored_text(mut self, mirrored: bool) -> Self {
+        for child in &mut self.display {
+            if let SemanticGeometry::Text { mirrored: flag, .. } = child {
+                *flag = mirrored;
+            }
+        }
+        self
+    }
+
     /// Transform definition points, display children (including `Text`) and the
     /// measurement together (ADR 0017 A.5).
     ///
@@ -722,6 +738,7 @@ pub(crate) fn place_text(
         // A synthesized dimension run has one line; the neutral spacing keeps
         // the pre-line-spacing layout.
         line_spacing: crate::TextLineSpacing::default(),
+        mirrored: false,
     }
 }
 
@@ -825,6 +842,7 @@ fn transform_child(
             wrap_width,
             width_factor,
             line_spacing,
+            mirrored,
         } => SemanticGeometry::Text {
             text: text.clone(),
             position: p(*position),
@@ -841,6 +859,8 @@ fn transform_child(
             width_factor: *width_factor,
             // Both halves of the spacing are dimensionless ratios; keep them.
             line_spacing: *line_spacing,
+            // A similarity keeps the glyph-mirror bit.
+            mirrored: *mirrored,
         },
         other => {
             return Err(CadError::Unsupported(format!(

@@ -146,7 +146,12 @@ pub const FORMAT_WRITE: u32 = 2;
 /// empty, so an ordinary drawing and a minor-13 archive keep their minor; a
 /// minor-13 reader refuses a document that really carries attributes rather than
 /// dropping them.
-pub const FORMAT_MINOR: u32 = 14;
+///
+/// `15` adds the `cad:Text.mirrored` boolean (the `MIRRTEXT=1` glyph-frame flag).
+/// It is omitted when false, so ordinary text and every older document keep their
+/// minor; a minor-14 reader refuses a document that really carries a mirrored run
+/// rather than drawing it unmirrored.
+pub const FORMAT_MINOR: u32 = 15;
 
 /// Stable failure markers.
 ///

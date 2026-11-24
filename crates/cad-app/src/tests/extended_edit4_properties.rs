@@ -201,6 +201,7 @@ fn flatten_moves_a_text_position_z_to_zero() {
         wrap_width: None,
         width_factor: 1.0,
         line_spacing: cad_domain::TextLineSpacing::default(),
+        mirrored: false,
     };
     let (mut app, mut session) = build(
         vec![part(1, text, LayerId(0), SpaceId::Model, "AcDbText", 0)],

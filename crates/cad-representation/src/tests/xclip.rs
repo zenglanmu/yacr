@@ -628,6 +628,7 @@ fn text_and_mask_are_kept_and_reported() {
         wrap_width: None,
         width_factor: 1.0,
         line_spacing: cad_domain::TextLineSpacing::default(),
+        mirrored: false,
     };
     b.insert_entity(text).unwrap();
     let mut mask = line_entity(12, SpaceId::Block(BlockId(1)), p(0.0, 0.0), p(0.0, 0.0));

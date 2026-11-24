@@ -563,6 +563,7 @@ fn a_mixed_document_with_a_solid_and_mtext_pins_ac1024() {
             wrap_width: None,
             width_factor: 1.0,
             line_spacing: TextLineSpacing::default(),
+            mirrored: false,
         },
         SemanticGeometry::Polyline {
             points: vec![p(0.0, 0.0, 0.0), p(4.0, 0.0, 0.0), p(4.0, 4.0, 0.0)],

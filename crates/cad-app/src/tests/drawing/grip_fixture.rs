@@ -311,6 +311,7 @@ pub(super) fn grip_app() -> (Application, SessionState) {
             wrap_width: Some(TEXT_WRAP),
             width_factor: 1.0,
             line_spacing: cad_domain::TextLineSpacing::default(),
+            mirrored: false,
         },
         9,
     );
@@ -536,6 +537,7 @@ pub(super) fn text_parts(
             // The insertion-grip rule copies the spacing through; this helper
             // only compares the placement fields.
             line_spacing: _,
+            mirrored: _,
         } => (
             text,
             position,

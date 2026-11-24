@@ -220,6 +220,7 @@ fn purge_table_fixture() -> (Application, SessionState) {
         wrap_width: None,
         line_spacing: TextLineSpacing::default(),
         width_factor: 1.0,
+        mirrored: false,
     };
     builder.insert_entity(title).unwrap();
 

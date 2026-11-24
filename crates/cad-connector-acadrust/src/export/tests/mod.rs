@@ -39,6 +39,7 @@ mod mtext_spacing;
 mod point_style;
 mod report_limits;
 mod solid;
+mod text_mirror;
 mod texture;
 mod writer;
 mod xref;

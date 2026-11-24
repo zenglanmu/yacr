@@ -195,6 +195,7 @@ impl ProxyRecordDecoder for KnownOpcodeDecoder {
                     width_factor: cad_domain::DEFAULT_TEXT_WIDTH_FACTOR,
                     // Proxy text records carry no line-spacing groups.
                     line_spacing: cad_domain::TextLineSpacing::default(),
+                    mirrored: false,
                 }])
             }
             other => Err(CadError::Unsupported(format!(

@@ -26,10 +26,11 @@ use cad_app::{ChamferMethod, CommandId, CommandPayload, ToolParameter, ToolValue
 use super::commands::{
     invalid_chamfer_argument_reason, invalid_fillet_argument_reason, invalid_join_argument_reason,
     invalid_mirror_argument_reason, invalid_offset_argument_reason,
-    invalid_pedit_edit_argument_reason, parse_chamfer_argument, parse_fillet_argument,
-    parse_join_argument, parse_mirror_argument, parse_offset_argument, parse_pedit_argument,
-    parse_pedit_edit_argument, ChamferArgument, FilletArgument, MirrorArgument, OffsetArgument,
-    CHAMFER_SELECTOR, FILLET_SELECTOR, JOIN_SELECTOR, MIRROR_SELECTOR, OFFSET_SELECTOR,
+    invalid_pedit_edit_argument_reason, parse_chamfer_argument, parse_explode_argument,
+    parse_fillet_argument, parse_join_argument, parse_mirror_argument, parse_offset_argument,
+    parse_pedit_argument, parse_pedit_edit_argument, ChamferArgument, FilletArgument,
+    MirrorArgument, OffsetArgument, CHAMFER_SELECTOR, EXPLODE_SELECTOR, FILLET_SELECTOR,
+    JOIN_SELECTOR, MIRROR_SELECTOR, OFFSET_SELECTOR,
 };
 use super::diagnostics::cad_error_text;
 use super::{CadSession, PEDIT_SELECTOR};
@@ -145,6 +146,24 @@ impl CadSession {
                 self.accept_session_mode()
             }
         }
+    }
+
+    /// `EXPLODE MODE 0|1` / `EXPLODE EXPLMODE 0|1`: store the session `EXPLMODE`
+    /// switch the existing explode path reads. Nothing is written to the drawing.
+    pub(super) fn explode_argument(&self, argument: &str, text: &str) -> Result<(), String> {
+        let Some(value) = parse_explode_argument(argument) else {
+            return self.refuse_argument(format!(
+                "explode.needs_mode: '{text}' needs `MODE 0|1` (or `EXPLMODE 0|1`); \
+                 a bare EXPLODE runs on the current selection"
+            ));
+        };
+        self.core.record_command(EXPLODE_SELECTOR);
+        self.core
+            .controller
+            .borrow_mut()
+            .session
+            .set_explode_mode(value);
+        self.accept_session_mode()
     }
 
     fn mirror_argument(&self, argument: &str, text: &str) -> Result<(), String> {
@@ -282,7 +301,7 @@ impl CadSession {
     }
 
     /// Clear the error for a session-mode change that has no command payload.
-    fn accept_session_mode(&self) -> Result<(), String> {
+    pub(super) fn accept_session_mode(&self) -> Result<(), String> {
         *self.error.borrow_mut() = None;
         Ok(())
     }

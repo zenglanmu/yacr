@@ -385,6 +385,7 @@ fn plan_replacements(
             // first ordered source's stored spacing survives, exactly like its
             // style/height/rotation.
             line_spacing: uniform_line_spacing.unwrap_or(*first_line_spacing),
+            mirrored: false,
         };
         replacements.push(mtext_entity(candidate, first, geometry));
     } else {

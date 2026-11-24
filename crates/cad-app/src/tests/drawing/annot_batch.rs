@@ -59,6 +59,7 @@ fn text(id: u128, text: &str, height: f64) -> DbEntity {
             wrap_width: None,
             width_factor: 1.0,
             line_spacing: cad_domain::TextLineSpacing::default(),
+            mirrored: false,
         },
         0,
     )

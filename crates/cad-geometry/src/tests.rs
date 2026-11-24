@@ -619,6 +619,7 @@ fn text_transform_is_a_similarity_and_refuses_stretch_and_mirror() {
         wrap_width: Some(2.0),
         width_factor: 1.5,
         line_spacing: cad_domain::TextLineSpacing::default(),
+        mirrored: false,
     };
     // A translation + quarter turn + uniform scale keeps every Text field.
     let transform = Transform3 {
@@ -645,6 +646,7 @@ fn text_transform_is_a_similarity_and_refuses_stretch_and_mirror() {
             wrap_width,
             width_factor,
             line_spacing,
+            mirrored: _,
         } => {
             assert_eq!(value, "AB");
             assert_eq!(style, StyleId(4));

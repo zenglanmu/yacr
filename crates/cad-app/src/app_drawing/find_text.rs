@@ -766,6 +766,7 @@ fn replace_in_entity(entity: &DbEntity, needle: &str, replacement: &str) -> CadR
             wrap_width,
             width_factor,
             line_spacing,
+            mirrored,
         } => {
             // A single-line TEXT still refuses a stored line break
             // (`text_policy`), but the drawn text is the same projection either
@@ -786,8 +787,10 @@ fn replace_in_entity(entity: &DbEntity, needle: &str, replacement: &str) -> CadR
                 v_align: *v_align,
                 wrap_width: *wrap_width,
                 width_factor: *width_factor,
-                // A text replacement never touches the stored spacing.
+                // A text replacement never touches the stored spacing or the
+                // glyph-mirror bit.
                 line_spacing: *line_spacing,
+                mirrored: *mirrored,
             };
         }
         SemanticGeometry::MultiLeader(leader) => {

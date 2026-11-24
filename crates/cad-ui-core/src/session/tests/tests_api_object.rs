@@ -187,6 +187,7 @@ fn the_other_decodable_shapes_report_their_own_fields() {
                     wrap_width: None,
                     width_factor: 1.0,
                     line_spacing: cad_domain::TextLineSpacing::default(),
+                    mirrored: false,
                 },
             ),
         ],

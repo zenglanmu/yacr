@@ -332,6 +332,7 @@ fn text_drawing(code_page: Option<&str>) -> DrawingDatabase {
                 wrap_width: None,
                 width_factor: 1.0,
                 line_spacing: cad_domain::TextLineSpacing::default(),
+                mirrored: false,
             },
             draw_order: 0,
         })

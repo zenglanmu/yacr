@@ -33,6 +33,7 @@ fn text(style: StyleId) -> SemanticGeometry {
         wrap_width: None,
         line_spacing: TextLineSpacing::default(),
         width_factor: 1.0,
+        mirrored: false,
     }
 }
 

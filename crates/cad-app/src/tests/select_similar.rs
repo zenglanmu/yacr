@@ -180,6 +180,7 @@ fn text_entity(id: u128, layer: LayerId, style: StyleId, x: f64) -> DbEntity {
             wrap_width: None,
             width_factor: 1.0,
             line_spacing: cad_domain::TextLineSpacing::default(),
+            mirrored: false,
         },
         draw_order: id as i64,
     }

@@ -196,6 +196,7 @@ pub(super) fn text_sample() -> SemanticGeometry {
             factor: 2.0,
             style: TextLineSpacingStyle::Exactly,
         },
+        mirrored: false,
     }
 }
 

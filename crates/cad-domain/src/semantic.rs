@@ -216,6 +216,19 @@ pub enum SemanticGeometry {
         /// style "at least" — is the value every source without line-spacing
         /// data carries and renders exactly as before the field existed.
         line_spacing: TextLineSpacing,
+        /// Whether the glyphs are mirrored (AutoCAD's `MIRRTEXT=1` result, DXF
+        /// TEXT generation-flag bit 2 "backward").
+        ///
+        /// `false` (the default) is ordinary readable text. `true` means the glyph
+        /// frame is reflected across the local vertical axis: the run advances
+        /// along `-u(rotation)` while `rotation` keeps its stored value, so the
+        /// anchor and rotation together describe a true reflection. It composes
+        /// with any `h_align`/`v_align` and is copied unchanged by a similarity
+        /// transform; only a MIRROR (or a re-mirror) toggles it. Sources that
+        /// cannot express it (for example the DXF "upside-down" bit 4, which is a
+        /// different transform) report a named partial reason rather than folding
+        /// it into this flag.
+        mirrored: bool,
     },
     /// A SHAPE entity: one glyph of a compiled SHX shape font, referenced by
     /// shape code (or, when `code` is 0, by `shape_name`). `font` is the style's

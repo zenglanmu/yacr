@@ -705,6 +705,7 @@ fn paper_build_dedups_repeated_clip_diagnostics() {
             wrap_width: None,
             width_factor: 1.0,
             line_spacing: cad_domain::TextLineSpacing::default(),
+            mirrored: false,
         },
         0,
     ))

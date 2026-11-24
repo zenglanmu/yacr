@@ -36,6 +36,7 @@ fn explode_picture_branch_dimension_produces_every_display_member() {
             wrap_width: None,
             width_factor: 1.0,
             line_spacing: cad_domain::TextLineSpacing::default(),
+            mirrored: false,
         },
     ];
     let dimension = DimensionGeometry::from_picture(

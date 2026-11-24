@@ -60,6 +60,7 @@ fn rejects_non_finite_and_degenerate_geometry() {
         wrap_width,
         width_factor: 1.0,
         line_spacing: cad_domain::TextLineSpacing::default(),
+        mirrored: false,
     };
     assert!(validate_geometry(&text(None)).is_ok());
     assert!(validate_geometry(&text(Some(4.0))).is_ok());
@@ -82,6 +83,7 @@ fn text_width_factor_must_be_positive_and_finite() {
         wrap_width: None,
         width_factor,
         line_spacing: cad_domain::TextLineSpacing::default(),
+        mirrored: false,
     };
     // The neutral factor and a genuine stretch are both representable.
     assert!(validate_geometry(&text(1.0)).is_ok());
@@ -110,6 +112,7 @@ fn text_line_spacing_factor_must_be_positive_and_finite() {
         wrap_width: None,
         width_factor: 1.0,
         line_spacing,
+        mirrored: false,
     };
     // The neutral spacing, a compressed one and a stretched one with the
     // "exactly" style are all representable.

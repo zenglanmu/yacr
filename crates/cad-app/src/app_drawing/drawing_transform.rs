@@ -104,8 +104,8 @@ impl Application {
     /// the sources in the **same** transaction, so one undo step restores them.
     ///
     /// `mirrortext` is `MIRRTEXT`: `false` (the default) keeps a text run
-    /// readable, `true` is a named refusal (`mirror.mirrortext_glyphs`) because
-    /// the flat-text domain cannot mirror glyphs.
+    /// readable, `true` toggles the stored glyph-mirror bit and turns the
+    /// baseline a half turn (the true reflection).
     ///
     /// A reflection is orientation-reversing, which the generic transform surface
     /// refuses for `Arc`/`Ellipse`/`Text`. MIRROR therefore reflects those kinds

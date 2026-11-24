@@ -34,6 +34,7 @@ impl ImporterBuilder<'_> {
             wrap_width: None,
             width_factor: 1.0,
             line_spacing: cad_domain::TextLineSpacing::default(),
+            mirrored: false,
         }
     }
 
@@ -390,6 +391,7 @@ fn place_dimension_member(
         wrap_width,
         width_factor,
         line_spacing,
+        mirrored: false,
     } = geometry
     {
         let scale = transform.max_scale();
@@ -418,6 +420,7 @@ fn place_dimension_member(
             width_factor,
             // Both halves of the spacing are dimensionless ratios.
             line_spacing,
+            mirrored: false,
         });
     }
     cad_db::transform_geometry(&geometry, transform).ok()

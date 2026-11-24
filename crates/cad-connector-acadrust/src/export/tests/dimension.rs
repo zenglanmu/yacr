@@ -469,6 +469,7 @@ fn picture_branch_display_round_trips_member_for_member() {
             wrap_width: None,
             width_factor: 1.0,
             line_spacing: cad_domain::TextLineSpacing::default(),
+            mirrored: false,
         },
     ];
     let dimension = DimensionGeometry::from_picture(

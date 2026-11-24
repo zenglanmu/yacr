@@ -402,6 +402,28 @@ impl DocumentSnapshot {
     ///
     /// An empty `attributes` array is never written (the writer omits the key),
     /// so a present array is always evidence of at least one value.
+    /// Whether any `cad:Text` element carries the `mirrored` bit (minor 15).
+    ///
+    /// This is the version-tier probe for the `MIRRTEXT=1` glyph flag: the
+    /// writer omits the key when false, so an ordinary document never pays the
+    /// minor-15 gate. It is element-payload data (not a table), so it coexists
+    /// with every other tier and simply selects the newest one.
+    pub fn has_mirrored_text(&self) -> bool {
+        self.shards
+            .iter()
+            .flat_map(|shard| shard.elements.iter())
+            .any(|element| {
+                let Some(geometry) = element.payload.get("geometry") else {
+                    return false;
+                };
+                geometry.get("class").and_then(|class| class.as_str()) == Some("cad:Text")
+                    && geometry
+                        .get("mirrored")
+                        .and_then(|value| value.as_bool())
+                        .unwrap_or(false)
+            })
+    }
+
     pub fn has_block_attributes(&self) -> bool {
         self.shards
             .iter()
