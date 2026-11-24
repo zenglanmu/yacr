@@ -259,4 +259,15 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     UNDEFINE_SELECTOR,
     REDEFINE_SELECTOR,
     ALIASEDIT_SELECTOR,
+    // ADR-0056: the action recorder's seven typed command lines. The session
+    // intercepts them before the generic argument dispatch (their grammar and
+    // state live in `session::action_recorder`), but listing them here keeps the
+    // chrome's `ARGUMENT_COMMANDS` mirror exact.
+    super::super::action_recorder::ACTRECORD_SELECTOR,
+    super::super::action_recorder::ACTSTOP_SELECTOR,
+    super::super::action_recorder::DASH_ACTSTOP_SELECTOR,
+    super::super::action_recorder::ACTUSERINPUT_SELECTOR,
+    super::super::action_recorder::ACTUSERMESSAGE_SELECTOR,
+    super::super::action_recorder::DASH_ACTUSERMESSAGE_SELECTOR,
+    super::super::action_recorder::ACTMANAGER_SELECTOR,
 ];

@@ -51,6 +51,18 @@ pub trait HostResources {
         let _ = (path, bytes);
         Err(NamedFileError::Unavailable)
     }
+
+    /// Whether this strategy has a real user-named file bridge.
+    ///
+    /// The action recorder (ADR-0056) must know **before** it offers a start/stop
+    /// or a management read whether the bytes can reach a file at all: a browser
+    /// carrier has no filesystem, so it refuses the whole recorder with
+    /// `unsupported-runtime: action-recorder` instead of claiming an in-memory
+    /// macro it can never save. The default is the honest `false`; every native
+    /// strategy overrides it.
+    fn supports_named_files(&self) -> bool {
+        false
+    }
 }
 
 /// The host status key for a font/image installation failure.
@@ -360,6 +372,10 @@ impl HostResources for DesktopResources {
     /// host writes exactly the same way and a browser cannot claim a write.
     fn write_named_file(&self, path: &Path, bytes: &[u8]) -> Result<(), NamedFileError> {
         cad_platform::write_named_file(path, bytes)
+    }
+
+    fn supports_named_files(&self) -> bool {
+        true
     }
 }
 

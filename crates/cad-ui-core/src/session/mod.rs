@@ -17,6 +17,7 @@
 //! The composed [`HostPlatform`] must already report a surface
 //! ([`cad_platform::SurfaceSource::surface`]) when the session is built: an
 //! unmapped surface is an explicit `Cancelled`, never a fabricated canvas.
+mod action_recorder;
 mod admission;
 mod annot_arguments;
 mod api;
@@ -291,6 +292,8 @@ pub struct CadSession {
     /// runtime `ALIASEDIT` rows). Consulted **before** the static tables by
     /// [`CadSession::command`]; no drawing, preference or `cad-history` state.
     overrides: RefCell<CommandOverrides>,
+    /// Action-recorder macros (ADR-0056): session-only, never document content.
+    action_recorder: RefCell<action_recorder::ActionRecorderState>,
     /// Completed plugin-API mutation outcomes, waiting for the poll.
     ///
     /// Owned by the session because a synchronous carrier's sink is rebuilt per
@@ -324,7 +327,6 @@ impl CadSession {
         core.open_configured_drawing()?;
         Ok(Self::wrap(core))
     }
-
     /// Wrap an already-built host core: the one place the session's own
     /// bookkeeping fields are initialised (shared by [`CadSession::new`] and
     /// [`CadSession::from_bytes`], so the two entries cannot drift apart).
@@ -340,15 +342,14 @@ impl CadSession {
             frames: Cell::new(0),
             press: RefCell::new(None),
             overrides: RefCell::new(CommandOverrides::default()),
+            action_recorder: RefCell::new(action_recorder::ActionRecorderState::default()),
             api_outcomes: RefCell::new(Vec::new()),
         }
     }
-
     /// The host-owned render session the GPU lane attaches and draws through.
     pub fn render_session(&self) -> RenderSessionHandle {
         self.core.render.clone()
     }
-
     /// Inject (or clear) the carrier's solid modeler (ADR-0036 phase C1).
     ///
     /// The carrier owns the composition: `app-linux` passes its
@@ -363,7 +364,6 @@ impl CadSession {
             .application
             .set_solid_modeler(modeler);
     }
-
     /// Inject (or clear) the carrier's display mesher (ADR-0036 P2.1c): the same
     /// carrier-owned, trait-only composition as [`Self::set_solid_modeler`].
     pub fn set_solid_tessellator(
@@ -376,12 +376,10 @@ impl CadSession {
             .application
             .set_solid_tessellator(tessellator);
     }
-
     /// Diagnostics from reading the startup config/preference files.
     pub fn startup_diagnostics(&self) -> Vec<String> {
         self.core.startup_diagnostics()
     }
-
     /// The owner-tick mirror the IPC-thread reads need: effective settings plus
     /// the runtime `ALIASEDIT ADD` rows.
     ///
@@ -482,7 +480,9 @@ impl CadSession {
     /// a selector's grammar is refused with a stable reason, recorded for
     /// `cad_status.error`, and changes nothing; a selector with **no** argument
     /// keeps the name-only payload refusal below.
-    pub fn command(&self, text: &str) -> Result<(), String> {
+    /// The ordinary typed-command funnel; the public wrapper in
+    /// `session::action_recorder` adds the recorder capture.
+    fn command_inner(&self, text: &str) -> Result<(), String> {
         // Session-only vocabulary control (`UNDEFINE`/`REDEFINE`/`ALIASEDIT`)
         // comes first: it changes how names resolve for the rest of the session
         // and must never be routed through the static command table.

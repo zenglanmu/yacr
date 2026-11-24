@@ -1,6 +1,7 @@
-//! The Wave 17-24 + Wave 27 + Wave 28 named-refusal registry (318 AutoCAD 2026
+//! The Wave 17-24 + Wave 27 + Wave 28 named-refusal registry (311 AutoCAD 2026
 //! names: 197 existing + 91 Wave 27 + 39 Wave 28 − 4 graduated to real
-//! commands: `REFEDIT`, `-REFEDIT`, `REFSET` and `REFCLOSE` are now the bounded
+//! commands and ADR-0056 graduated the seven action-recorder names to the real
+//! recorder: `REFEDIT`, `-REFEDIT`, `REFSET` and `REFCLOSE` are now the bounded
 //! in-place block-edit session in [`crate::app_refedit`]; `XCLIP` also graduated
 //! to a real display-only block-reference clip; `XEDGES` to the real
 //! display-edge extraction in `cad_app::app_drawing::xedges`; and `PARAMETERS`,
@@ -30,7 +31,7 @@ macro_rules! refusal_names {
     ($($variant:ident => $name:literal => $reason:literal),+ $(,)?) => {
         /// One named-refusal command (197 existing + 91 Wave 27 + 39 Wave 28 − 4
         /// in-place refedit names − 3 Parameter Manager names − `XCLIP` −
-        /// `XEDGES` = 318).
+        /// `XEDGES` − the seven ADR-0056 action-recorder names = 311).
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         pub enum RefusalId {
             $($variant),+
@@ -47,8 +48,8 @@ macro_rules! refusal_names {
                 match self { $(Self::$variant => $reason),+ }
             }
 
-            /// Every named refusal (Wave 17-24, Wave 27, then Wave 28 minus the four
-            /// graduated in-place block-edit names), in declaration order.
+            /// Every named refusal (Wave 17-24, Wave 27, then Wave 28 minus the
+            /// names graduated to real commands), in declaration order.
             pub const ALL: &'static [RefusalId] = &[$(RefusalId::$variant),+];
         }
     };
@@ -59,13 +60,6 @@ refusal_names! {
     Actbasepoint => "ACTBASEPOINT" => "actbasepoint.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)",
     Activityinsightsclose => "ACTIVITYINSIGHTSCLOSE" => "activityinsightsclose.unsupported: this build has no Activity Insights data model",
     Activityinsightsopen => "ACTIVITYINSIGHTSOPEN" => "activityinsightsopen.unsupported: this build has no Activity Insights data model",
-    Actmanager => "ACTMANAGER" => "actmanager.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)",
-    Actrecord => "ACTRECORD" => "actrecord.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)",
-    DashActstop => "-ACTSTOP" => "-actstop.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)",
-    Actstop => "ACTSTOP" => "actstop.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)",
-    Actuserinput => "ACTUSERINPUT" => "actuserinput.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)",
-    DashActusermessage => "-ACTUSERMESSAGE" => "-actusermessage.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)",
-    Actusermessage => "ACTUSERMESSAGE" => "actusermessage.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)",
     Adcclose => "ADCCLOSE" => "adcclose.unsupported: this build has no DesignCenter content palette",
     Adcenter => "ADCENTER" => "adcenter.unsupported: this build has no DesignCenter content palette",
     Adcnavigate => "ADCNAVIGATE" => "adcnavigate.unsupported: this build has no DesignCenter content palette",

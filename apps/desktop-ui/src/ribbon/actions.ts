@@ -29,6 +29,10 @@ export const SHELL_ACTIONS = Object.freeze({
   // the BIM panel: the surface reads `cad_param_list`, and the panel's edits use
   // the `-PARAMETERS` command-line form.
   parameters: 'parameters',
+  // Opens the Action Recorder panel (ADR-0056). Chrome-local like Parameters:
+  // the panel reads `cad_action_recorder` and sends `ACTRECORD`/`ACTSTOP`/
+  // `ACTMANAGER` through `cad_command`; there is no payload-free panel command.
+  actionRecorder: 'actionRecorder',
 });
 
 /** The shell actions that toggle a desktop palette window. */

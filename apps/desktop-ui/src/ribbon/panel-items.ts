@@ -354,7 +354,12 @@ export const VIEW_VIEWPORTS_PANEL = panel('viewports', 'ribbon.panel.viewports',
   { id: 'LAYVPI', labelKey: 'draw.kind.layvpi', icon: 'layers', command: 'LAYVPI', hintKey: 'draw.kind.layvpi.hint' },
 ]);
 export const MANAGE_STANDARDS_PANEL = pending('cad_standards', 'ribbon.panel.cad_standards');
-export const MANAGE_RECORDER_PANEL = pending('action_recorder', 'ribbon.panel.action_recorder');
+export const MANAGE_RECORDER_PANEL = panel('action_recorder', 'ribbon.panel.action_recorder', [
+  // The panel is chrome-local (the same shape as Parameters): it reads
+  // `cad_action_recorder` and writes through the typed ACT* command lines. No
+  // dialog is offered because none exists; the typed path is the file surface.
+  { id: 'ACTIONRECORDER', labelKey: 'recorder.title', icon: 'settings', action: SHELL_ACTIONS.actionRecorder, large: true },
+]);
 export const MANAGE_CUSTOMIZATION_PANEL = pending('customization', 'ribbon.panel.customization');
 export const OUTPUT_SEND_PANEL = pending('send', 'ribbon.panel.send');
 export const ADDINS_VENDOR_PANEL = pending('vendor', 'ribbon.panel.vendor');

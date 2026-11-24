@@ -68,3 +68,38 @@ export function isAliasEditArgument(argument: string): boolean {
   if (word === 'ADD') return parts.length >= 3;
   return word === 'REMOVE' && parts.length === 2;
 }
+
+/**
+ * `ACTRECORD [<name-or-path>]` / `ACTSTOP [<path.json>]`.
+ *
+ * The optional tail is one opaque name or path. The host owns the `.json`
+ * destination check, the no-file-bridge refusal and the saved bytes; this
+ * predicate only refuses an empty tail that cannot be a name.
+ */
+export function isActionRecordArgument(argument: string): boolean {
+  return argument.trim().length > 0;
+}
+
+/** `ACTUSERINPUT [<message>]`: any non-empty prompt text. */
+export function isActionUserInputArgument(argument: string): boolean {
+  return argument.trim().length > 0;
+}
+
+/** `ACTUSERMESSAGE <text>`: the message must not be empty. */
+export function isActionUserMessageArgument(argument: string): boolean {
+  return argument.trim().length > 0;
+}
+
+/**
+ * `ACTMANAGER LIST|PLAY <name>|DELETE <name>|CONTINUE`.
+ *
+ * The session owns the macro table and the stable `actmanager.*` refusals; this
+ * predicate only decides whether the line has the documented option shape.
+ */
+export function isActionManagerArgument(argument: string): boolean {
+  const parts = tokens(argument);
+  const word = (parts[0] ?? '').toUpperCase();
+  if (word === 'LIST' || word === 'CONTINUE') return parts.length === 1;
+  if (word === 'PLAY' || word === 'DELETE') return parts.length >= 2;
+  return false;
+}

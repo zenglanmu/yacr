@@ -160,6 +160,11 @@ macro_rules! cad_wire_registry {
             // fields) over the same seam as the BIM query; a carrier with no lane
             // answers its own `unsupported-runtime: paramList` refusal.
             @row(shared, reads, NoArgs, cad_param_list, { }, $crate::param::ParamListResponse, { $crate::session::host_read::param_list(reads) })
+            // The action-recorder state (ADR-0056): one request-carrying read
+            // (`kind: "actionRecorder"`, no fields) over the same seam. A
+            // carrier with no named-file bridge answers its own
+            // `unsupported-runtime: action-recorder` refusal.
+            @row(shared, reads, NoArgs, cad_action_recorder, { }, $crate::action_recorder::ActionRecorderSnapshot, { $crate::session::host_read::action_recorder(reads) })
             @row(shared, sink, LayerVisibleArgs, cad_set_layer_visible, { arg(req, name, String) arg(req, visible, bool) }, $crate::session::wire::CadCommandAck, { $crate::session::wire::set_layer_visible(sink, &name, visible) })
             @row(shared, sink, NoArgs, cad_restore_layers, { }, $crate::session::wire::CadCommandAck, { $crate::session::wire::restore_layers(sink) })
             @row(shared, sink, ActiveLayerArgs, cad_set_active_layer, { arg(req, name, String) }, $crate::session::wire::CadCommandAck, { $crate::session::wire::set_active_layer(sink, &name) })

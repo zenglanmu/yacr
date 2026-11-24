@@ -24,7 +24,8 @@
 //!
 //! # Adding a request kind
 //!
-//! Today [`HostReadRequest`] has two variants: `bimQuery` and `paramList`. Each
+//! Today [`HostReadRequest`] has three variants: `bimQuery`, `paramList` and
+//! `actionRecorder`. Each
 //! `kind` is spelled once, in its module's constant (`BIM_QUERY_KIND`,
 //! `PARAM_LIST_KIND`); the serialized tag and the decoder read that constant, and
 //! a test pins them together.
@@ -51,6 +52,7 @@ use std::sync::Arc;
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use crate::action_recorder::{ActionRecorderSnapshot, ACTION_RECORDER_UNSUPPORTED};
 use crate::bim::{BimFilterWire, BimQueryResponse, BIM_DEFAULT_LIMIT, BIM_UNSUPPORTED};
 use crate::param::{ParamListResponse, PARAM_LIST_KIND, PARAM_LIST_UNSUPPORTED};
 
@@ -60,6 +62,9 @@ use crate::param::{ParamListResponse, PARAM_LIST_KIND, PARAM_LIST_UNSUPPORTED};
 /// the spelling lives: it is the serialized `kind` tag and the decoder's
 /// accepted value, and `a_known_kind_round_trips` pins both.
 pub const BIM_QUERY_KIND: &str = "bimQuery";
+
+/// The wire spelling of the action-recorder state read.
+pub const ACTION_RECORDER_KIND: &str = "actionRecorder";
 
 /// Stable refusal for a `kind` this build does not know.
 ///
@@ -88,6 +93,9 @@ pub enum HostReadRequest {
     /// `kind: "paramList"` — the document-level parameter list under the active
     /// configuration (ADR-0043 P1). No fields.
     ParamList,
+    /// `kind: "actionRecorder"` — the session's recorder state and its visible
+    /// macros (ADR-0056). No fields.
+    ActionRecorder,
 }
 
 impl HostReadRequest {
@@ -96,6 +104,7 @@ impl HostReadRequest {
         match self {
             Self::BimQuery { .. } => BIM_QUERY_KIND,
             Self::ParamList => PARAM_LIST_KIND,
+            Self::ActionRecorder => ACTION_RECORDER_KIND,
         }
     }
 }
@@ -113,6 +122,8 @@ pub enum HostReadAnswer {
     BimQuery(BimQueryResponse),
     /// `kind: "paramList"` — the document-level parameter list.
     ParamList(ParamListResponse),
+    /// `kind: "actionRecorder"` — the recorder state and visible macros.
+    ActionRecorder(ActionRecorderSnapshot),
 }
 
 /// Serialize a request as `{"kind": ..., <fields>}`.
@@ -137,6 +148,11 @@ impl Serialize for HostReadRequest {
             Self::ParamList => {
                 let mut state = serializer.serialize_struct("HostReadRequest", 1)?;
                 state.serialize_field("kind", PARAM_LIST_KIND)?;
+                state.end()
+            }
+            Self::ActionRecorder => {
+                let mut state = serializer.serialize_struct("HostReadRequest", 1)?;
+                state.serialize_field("kind", ACTION_RECORDER_KIND)?;
                 state.end()
             }
         }
@@ -175,8 +191,10 @@ impl<'de> Deserialize<'de> for HostReadRequest {
                 })
             }
             PARAM_LIST_KIND => Ok(Self::ParamList),
+            ACTION_RECORDER_KIND => Ok(Self::ActionRecorder),
             other => Err(serde::de::Error::custom(format!(
-                "{HOST_READ_UNKNOWN_KIND}: `kind` {other:?} is not one of [{BIM_QUERY_KIND:?}, {PARAM_LIST_KIND:?}]"
+                "{HOST_READ_UNKNOWN_KIND}: `kind` {other:?} is not one of [{BIM_QUERY_KIND:?}, \
+                 {PARAM_LIST_KIND:?}, {ACTION_RECORDER_KIND:?}]"
             ))),
         }
     }
@@ -243,6 +261,7 @@ pub fn no_seam_refusal(request: &HostReadRequest) -> String {
     match request {
         HostReadRequest::BimQuery { .. } => BIM_UNSUPPORTED.to_string(),
         HostReadRequest::ParamList => PARAM_LIST_UNSUPPORTED.to_string(),
+        HostReadRequest::ActionRecorder => ACTION_RECORDER_UNSUPPORTED.to_string(),
     }
 }
 

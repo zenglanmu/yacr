@@ -399,6 +399,18 @@ impl Application {
             | ExtendedCommandId::TableEdit
             | ExtendedCommandId::MatchCell
             | ExtendedCommandId::TableStyleList => self.table_edit(session, command, ext)?,
+            // ADR-0056: the action-recorder command line lives in the session
+            // (`cad-ui-core`); a text-less IPC command has no name/path/message,
+            // so it is refused here by name instead of fabricating a recording.
+            ExtendedCommandId::ActRecord
+            | ExtendedCommandId::ActStop
+            | ExtendedCommandId::DashActStop
+            | ExtendedCommandId::ActUserInput
+            | ExtendedCommandId::ActUserMessage
+            | ExtendedCommandId::DashActUserMessage
+            | ExtendedCommandId::ActManager => {
+                self.extended_action_recorder_refusal(command, ext)?
+            }
             ExtendedCommandId::PlotStyleList
             | ExtendedCommandId::DashPlotStyleList
             | ExtendedCommandId::ConvertPlotStyles
