@@ -1,6 +1,10 @@
 //! Wave 4 named-refusal contracts: `BSCALE`, `BLOCKREPLACE`, `BREPLACE`,
-//! `-BREPLACE`, `SPLINEDIT`, `BURST`, `REGION`, `WBLOCK`, `-WBLOCK`, `BSAVE`,
+//! `-BREPLACE`, `SPLINEDIT`, `REGION`, `WBLOCK`, `-WBLOCK`, `BSAVE`,
 //! `BSAVEAS`.
+//!
+//! `BURST` graduated on 2026-11-24 (ADR-0055 M3): it is the EXPLODE
+//! decomposition plus attribute-value-to-TEXT conversion and is no longer part
+//! of this table; its contract lives in [`crate::tests::attribute_commands`].
 //!
 //! `MINSERT`, `ADDSELECTED` and `MLEDIT`/`-MLEDIT` were refusals in this wave and
 //! graduated to real entity writes on 2026-11-12 (`app_drawing::minsert`,
@@ -24,7 +28,7 @@
 
 use super::*;
 
-const REFUSALS: [(ExtendedCommandId, &str); 11] = [
+const REFUSALS: [(ExtendedCommandId, &str); 10] = [
     (
         ExtendedCommandId::BScale,
         "bscale.unsupported: BSCALE needs a factor and an insertion reference; use SCALE on the \
@@ -48,10 +52,6 @@ const REFUSALS: [(ExtendedCommandId, &str); 11] = [
     (
         ExtendedCommandId::SplineEdit,
         "splinedit.unsupported: this build has no NURBS edit surface",
-    ),
-    (
-        ExtendedCommandId::Burst,
-        "burst.unsupported: this build has no block-attribute model to preserve",
     ),
     (
         ExtendedCommandId::Region,

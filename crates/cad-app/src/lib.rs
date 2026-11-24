@@ -501,7 +501,9 @@ pub use layout_payload::{LayoutPayload, PaperSetup, UnavailableWizardStep, Wizar
 pub use ml_style::{MultilineStyle, MultilineStyleStore, MULTILINE_STYLE_CAP};
 
 pub use command_payload::{
-    AddSelectedCommand, AngularDimensionInput, AnnotationBatchPayload, ClipCommand, CommandPayload,
+    AddSelectedCommand, AngularDimensionInput, AnnotationBatchPayload, AttributeAssignment,
+    AttributeCommand, AttributeDefinitionCommand, AttributeDisplayMode, AttributeEditCommand,
+    AttributeEditScope, AttributeOrderCommand, AttributeSyncCommand, ClipCommand, CommandPayload,
     DashLayerOps, DimEditCommand, DimJogLineCommand, DimOverrideCommand, DimStyleCommand,
     DimTextEditCommand, DimensionBatchPayload, DimensionChainCommand, FilterExpression,
     FilterLogic, FilterRequest, GripStretchCommand, GroupCommand, GroupEditCommand, HatchDrawOrder,

@@ -319,11 +319,11 @@ fn insert_member_geometry(
             SemanticGeometry::Insert {
                 block: nested,
                 transform: nested_transform,
-                ..
+                attributes: nested_attributes,
             } => SemanticGeometry::Insert {
                 block: *nested,
                 transform: transform.matrix_mul(nested_transform),
-                attributes: Vec::new(),
+                attributes: nested_attributes.clone(),
             },
             other => transform_geometry(other, transform).map_err(|error| {
                 unsupported(

@@ -130,7 +130,7 @@ impl Application {
 
         // Resolve the definition and its stored base point from the authoritative
         // drawing before the candidate clone mutates anything.
-        let (block, block_name, base_point) = {
+        let (block, block_name, base_point, attributes) = {
             let document = self
                 .workspace
                 .documents
@@ -153,7 +153,12 @@ impl Application {
                     ),
                 )
             })?;
-            (definition.id, metadata.name.clone(), metadata.base_point)
+            (
+                definition.id,
+                metadata.name.clone(),
+                metadata.base_point,
+                drawing.default_attribute_values(definition.id),
+            )
         };
 
         let to_origin = Transform3::translation(Point3 {
@@ -195,7 +200,7 @@ impl Application {
                     geometry: SemanticGeometry::Insert {
                         block,
                         transform,
-                        attributes: Vec::new(),
+                        attributes: attributes.clone(),
                     },
                     draw_order: base_order + index as i64,
                 });

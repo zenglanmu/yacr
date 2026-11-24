@@ -1,9 +1,11 @@
 //! Wave 5 **named refusals** over the attribute and xref surfaces.
 //!
-//! Twenty-two AutoCAD 2026 names describe features this build has no model or
-//! API for: block attributes (definition, editing, import/export, extraction,
-//! redefinition, synchronisation, global edit), entity XDATA, xref bind/insert,
-//! external-reference/underlay attachment and an xref editing session.
+//! Thirteen AutoCAD 2026 names remain after the block-attribute command family
+//! graduated: file-based attribute import (`ATTIN`), export (`ATTOUT`) and
+//! extraction (`ATTEXT`/`-ATTEXT`/`EATTEXT`/`-EATTEXT`), entity XDATA, xref
+//! bind/insert, external-reference/underlay attachment and an xref editing
+//! session. Those file lanes are a separate implementation slice; the in-drawing
+//! definition/value commands now live in `app_drawing::attribute_commands`.
 //!
 //! (`CLASSICXREF` graduated out of this batch: it is a real read-only xref
 //! report plus the chrome-local classic panel.)
@@ -38,41 +40,24 @@ impl Application {
 /// one is a behaviour change.
 fn reason(ext: ExtendedCommandId) -> String {
     let text = match ext {
-        ExtendedCommandId::AttDef => "attdef.unsupported: this build has no block-attribute model",
-        ExtendedCommandId::DashAttDef => {
-            "-attdef.unsupported: this build has no block-attribute model"
+        ExtendedCommandId::AttIn => {
+            "attin.unsupported: importing attributes from an external file is not implemented"
         }
-        ExtendedCommandId::AttEdit => {
-            "attedit.unsupported: this build has no block-attribute model"
+        ExtendedCommandId::AttOut => {
+            "attout.unsupported: exporting attributes to an external file is not implemented"
         }
-        ExtendedCommandId::DashAttEdit => {
-            "-attedit.unsupported: this build has no block-attribute model"
+        ExtendedCommandId::AttExt => {
+            "attext.unsupported: attribute extraction to a template/file is not implemented"
         }
-        ExtendedCommandId::AttIpEdit => {
-            "attipedit.unsupported: this build has no block-attribute model"
-        }
-        ExtendedCommandId::AttIn => "attin.unsupported: this build has no block-attribute model",
-        ExtendedCommandId::AttOut => "attout.unsupported: this build has no block-attribute model",
-        ExtendedCommandId::AttExt => "attext.unsupported: this build has no block-attribute model",
         ExtendedCommandId::DashAttExt => {
-            "-attext.unsupported: this build has no block-attribute model"
-        }
-        ExtendedCommandId::EAttEdit => {
-            "eattedit.unsupported: this build has no block-attribute model"
+            "-attext.unsupported: attribute extraction to a template/file is not implemented"
         }
         ExtendedCommandId::EAttExt => {
-            "eatttext.unsupported: this build has no block-attribute model"
+            "eatttext.unsupported: attribute extraction to a template/file is not implemented"
         }
         ExtendedCommandId::DashEAttExt => {
-            "-eatttext.unsupported: this build has no block-attribute model"
+            "-eatttext.unsupported: attribute extraction to a template/file is not implemented"
         }
-        ExtendedCommandId::AttRedef => {
-            "attredef.unsupported: this build has no block-attribute model"
-        }
-        ExtendedCommandId::AttSync => {
-            "attsync.unsupported: this build has no block-attribute model"
-        }
-        ExtendedCommandId::Gatte => "gatte.unsupported: this build has no block-attribute model",
         ExtendedCommandId::XData => "xdata.unsupported: this database does not retain entity XDATA",
         ExtendedCommandId::XBind => "xbind.unsupported: this build has no xref bind/insert model",
         ExtendedCommandId::DashXBind => {

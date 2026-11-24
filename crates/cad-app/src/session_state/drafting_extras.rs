@@ -16,7 +16,8 @@
 //! contact pass runs, and two are consumed where they are stored:
 //! `APERTURE` is the object-snap aperture
 //! ([`crate::SessionState::interaction_tolerance`], once set explicitly) and
-//! `REVCLOUDPROPERTIES` is the `REVCLOUD` chord token.
+//! `REVCLOUDPROPERTIES` is the `REVCLOUD` chord token and `ATTDISP` is the
+//! block-attribute display mode the representation lane reads (ADR-0055 D6).
 
 /// The session `WIPEOUTFRAME` state.
 ///
@@ -255,7 +256,7 @@ pub struct DraftingExtras {
     find_match_case: bool,
     revcloud_arc_length: f64,
     wipeout_frames: WipeoutFrames,
-    attdisp: bool,
+    attdisp: crate::AttributeDisplayMode,
     dwglog: bool,
     elev: f64,
     ucsicon: bool,
@@ -310,7 +311,7 @@ impl Default for DraftingExtras {
             find_match_case: false,
             revcloud_arc_length: 15.0,
             wipeout_frames: WipeoutFrames::On,
-            attdisp: true,
+            attdisp: crate::AttributeDisplayMode::Normal,
             dwglog: false,
             elev: 0.0,
             ucsicon: false,
@@ -412,12 +413,22 @@ impl DraftingExtras {
         self.wipeout_frames = value;
     }
 
-    /// The session `ATTDISP` token (default ON).
+    /// The session `ATTDISP` display mode (default [`crate::AttributeDisplayMode::Normal`]).
     ///
-    /// This build has no block-attribute model, so nothing renders either way;
-    /// the token exists so a caller can see that the command was received.
-    pub fn attdisp(&self) -> bool {
+    /// This is a **display setting** (ADR-0055 D6): the representation lane
+    /// reads it when it expands a block reference's values. It is never written
+    /// to the drawing, never bumps the revision and records no undo step.
+    pub fn attribute_display(&self) -> crate::AttributeDisplayMode {
         self.attdisp
+    }
+
+    /// Whether attributes are drawn at all (`Normal`/`On` yes, `Off` no).
+    ///
+    /// This is the historical boolean view of the token; a caller that needs to
+    /// distinguish "visible values only" from "every value including invisible
+    /// ones" reads [`Self::attribute_display`].
+    pub fn attdisp(&self) -> bool {
+        self.attdisp != crate::AttributeDisplayMode::Off
     }
 
     /// The session drawing-log token (default OFF, shared by `DWGLOG`,
@@ -555,9 +566,27 @@ impl DraftingExtras {
         self.isoplane
     }
 
-    /// Flip the `ATTDISP` token and return the new state.
-    pub fn toggle_attdisp(&mut self) -> bool {
-        self.attdisp = !self.attdisp;
+    /// Set the `ATTDISP` display mode and return it.
+    pub fn set_attribute_display(
+        &mut self,
+        mode: crate::AttributeDisplayMode,
+    ) -> crate::AttributeDisplayMode {
+        self.attdisp = mode;
+        self.attdisp
+    }
+
+    /// Toggle the bare `ATTDISP` form between `Normal` and `Off`.
+    ///
+    /// AutoCAD's bare command prompts for `Normal/On/Off`; this build has no
+    /// in-command prompt, so the payload-free line is the visibility toggle that
+    /// a ribbon button can perform. The typed line sets all three modes.
+    pub fn toggle_attdisp(&mut self) -> crate::AttributeDisplayMode {
+        self.attdisp = match self.attdisp {
+            crate::AttributeDisplayMode::Off => crate::AttributeDisplayMode::Normal,
+            crate::AttributeDisplayMode::Normal | crate::AttributeDisplayMode::On => {
+                crate::AttributeDisplayMode::Off
+            }
+        };
         self.attdisp
     }
 

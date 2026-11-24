@@ -1,75 +1,40 @@
-//! Wave 5 named-refusal contracts: `ATTDEF`, `-ATTDEF`, `ATTEDIT`, `-ATTEDIT`,
-//! `ATTIPEDIT`, `ATTIN`, `ATTOUT`, `ATTEXT`, `-ATTEXT`, `EATTEDIT`, `EATTEXT`,
-//! `-EATTEXT`, `ATTREDEF`, `ATTSYNC`, `GATTE`, `XDATA`, `XBIND`, `-XBIND`,
-//! `XATTACH`, `ATTACH`, `-ATTACH`, `XOPEN`.
+//! Wave 5 named-refusal contracts after the block-attribute command family
+//! graduated (ADR-0055 M3): `ATTIN`, `ATTOUT`, `ATTEXT`, `-ATTEXT`, `EATTEXT`,
+//! `-EATTEXT`, `XDATA`, `XBIND`, `-XBIND`, `XATTACH`, `ATTACH`, `-ATTACH`,
+//! `XOPEN`.
 //!
-//! Each name is admitted by the vocabulary and refused with
-//! `CadError::Unsupported` carrying a **stable** reason. A refusal must write
-//! nothing, bump no revision and record no history. These names are
-//! Viewer-legal (they only answer honestly).
+//! The in-drawing definition/value commands (`ATTDEF`, `-ATTDEF`, `ATTEDIT`,
+//! `-ATTEDIT`, `ATTIPEDIT`, `EATTEDIT`, `ATTREDEF`, `ATTSYNC`, `GATTE` and
+//! `BURST`) are real commands now; their contracts live in
+//! [`crate::tests::attribute_commands`]. The six file lanes above remain a
+//! separate implementation slice and are still named refusals.
 
 use super::*;
 
-const REFUSALS: [(ExtendedCommandId, &str); 22] = [
-    (
-        ExtendedCommandId::AttDef,
-        "attdef.unsupported: this build has no block-attribute model",
-    ),
-    (
-        ExtendedCommandId::DashAttDef,
-        "-attdef.unsupported: this build has no block-attribute model",
-    ),
-    (
-        ExtendedCommandId::AttEdit,
-        "attedit.unsupported: this build has no block-attribute model",
-    ),
-    (
-        ExtendedCommandId::DashAttEdit,
-        "-attedit.unsupported: this build has no block-attribute model",
-    ),
-    (
-        ExtendedCommandId::AttIpEdit,
-        "attipedit.unsupported: this build has no block-attribute model",
-    ),
+const REFUSALS: [(ExtendedCommandId, &str); 13] = [
     (
         ExtendedCommandId::AttIn,
-        "attin.unsupported: this build has no block-attribute model",
+        "attin.unsupported: importing attributes from an external file is not implemented",
     ),
     (
         ExtendedCommandId::AttOut,
-        "attout.unsupported: this build has no block-attribute model",
+        "attout.unsupported: exporting attributes to an external file is not implemented",
     ),
     (
         ExtendedCommandId::AttExt,
-        "attext.unsupported: this build has no block-attribute model",
+        "attext.unsupported: attribute extraction to a template/file is not implemented",
     ),
     (
         ExtendedCommandId::DashAttExt,
-        "-attext.unsupported: this build has no block-attribute model",
-    ),
-    (
-        ExtendedCommandId::EAttEdit,
-        "eattedit.unsupported: this build has no block-attribute model",
+        "-attext.unsupported: attribute extraction to a template/file is not implemented",
     ),
     (
         ExtendedCommandId::EAttExt,
-        "eatttext.unsupported: this build has no block-attribute model",
+        "eatttext.unsupported: attribute extraction to a template/file is not implemented",
     ),
     (
         ExtendedCommandId::DashEAttExt,
-        "-eatttext.unsupported: this build has no block-attribute model",
-    ),
-    (
-        ExtendedCommandId::AttRedef,
-        "attredef.unsupported: this build has no block-attribute model",
-    ),
-    (
-        ExtendedCommandId::AttSync,
-        "attsync.unsupported: this build has no block-attribute model",
-    ),
-    (
-        ExtendedCommandId::Gatte,
-        "gatte.unsupported: this build has no block-attribute model",
+        "-eatttext.unsupported: attribute extraction to a template/file is not implemented",
     ),
     (
         ExtendedCommandId::XData,
@@ -163,11 +128,11 @@ fn a_caller_payload_is_refused_before_the_feature_reason() {
         .execute(
             &mut session,
             command(
-                CommandId::Extended(ExtendedCommandId::AttDef),
+                CommandId::Extended(ExtendedCommandId::AttIn),
                 CommandPayload::Mode(AppMode::Work),
             ),
         )
         .expect_err("a payload is refused");
     assert!(matches!(error, CadError::InvalidInput(_)));
-    assert!(error.to_string().contains("ATTDEF needs no payload"));
+    assert!(error.to_string().contains("ATTIN needs no payload"));
 }

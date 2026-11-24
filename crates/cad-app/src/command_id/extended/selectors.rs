@@ -940,6 +940,21 @@ impl ExtendedCommandId {
                 // XEDGES inserts one LINE per stored display-edge segment (one
                 // transaction / one undo step), so it is a drawing write.
                 | Self::Xedges
+                // ADR-0055 M3: the block-attribute command family writes block
+                // definition members and/or INSERT value rows. BURST explodes
+                // and converts values to text. ATTDISP (a display setting) and
+                // BATTMAN (a report) are deliberately absent.
+                | Self::AttDef
+                | Self::DashAttDef
+                | Self::AttEdit
+                | Self::DashAttEdit
+                | Self::AttIpEdit
+                | Self::EAttEdit
+                | Self::Gatte
+                | Self::AttRedef
+                | Self::AttSync
+                | Self::BattOrder
+                | Self::Burst
         )
     }
 }

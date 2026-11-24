@@ -200,7 +200,8 @@ pub enum ExtendedCommandId {
     CDOrder,
     /// `FLATTEN`: set the supported selected geometry's z to 0.
     Flatten,
-    /// `XPLODE`: EXPLODE INSERTs with an attributes-not-implemented report.
+    /// `XPLODE`: EXPLODE INSERTs and report that their attribute values are not
+    /// converted (`BURST` is the converting command).
     XPlode,
     /// `BTRIM`: trim the selection against the first selected INSERT's members.
     BTrim,
@@ -230,7 +231,8 @@ pub enum ExtendedCommandId {
     MlEdit,
     /// `-MLEDIT`: the command-line spelling of the same edit.
     DashMlEdit,
-    /// `BURST`: no block-attribute model.
+    /// `BURST`: explode one block level and convert every attribute value
+    /// (constant values included) to a `TEXT` entity.
     Burst,
     /// `CLIP`: no image/xref clipping model.
     Clip,
@@ -253,11 +255,12 @@ pub enum ExtendedCommandId {
     ChSpace,
 
     // -- Wave 5: session token / reports (app_extended_attrs5) --------------
-    /// `ATTDISP`: toggle the session attribute-display token (default ON).
+    /// `ATTDISP`: set/toggle the session attribute-display mode (default Normal).
     AttDisp,
-    /// `BATTMAN`: read-only block definition/member list plus the attribute gap.
+    /// `BATTMAN`: read-only block attribute manager report (definitions,
+    /// values, reference counts).
     BattMan,
-    /// `BATTORDER`: read-only block definition list plus the attribute gap.
+    /// `BATTORDER`: report the stored attribute order, or (typed) rewrite it.
     BattOrder,
     /// `XREF`: read-only report of the drawing's external references.
     XRef,
@@ -268,36 +271,36 @@ pub enum ExtendedCommandId {
     /// `EXTERNALREFERENCESCLOSE`: named no-op (there is no palette to close).
     ExternalReferencesClose,
 
-    // -- Wave 5: named refusals (app_extended_refusals5) --------------------
-    /// `ATTDEF`: no block-attribute model.
+    // -- Wave 5: attribute commands + named refusals -------------------------
+    /// `ATTDEF`: add one attribute definition member to an existing block.
     AttDef,
-    /// `-ATTDEF`: the command-line spelling of the same refusal.
+    /// `-ATTDEF`: the command-line spelling of the same definition command.
     DashAttDef,
-    /// `ATTEDIT`: no block-attribute model.
+    /// `ATTEDIT`: edit one value on exactly one selected block reference.
     AttEdit,
-    /// `-ATTEDIT`: the command-line spelling of the same refusal.
+    /// `-ATTEDIT`: edit one value on every reference of the block.
     DashAttEdit,
-    /// `ATTIPEDIT`: no block-attribute model.
+    /// `ATTIPEDIT`: in-place value edit on one selected reference.
     AttIpEdit,
-    /// `ATTIN`: no block-attribute model.
+    /// `ATTIN`: file import lane (not implemented in this slice).
     AttIn,
-    /// `ATTOUT`: no block-attribute model.
+    /// `ATTOUT`: file export lane (not implemented in this slice).
     AttOut,
-    /// `ATTEXT`: no block-attribute model.
+    /// `ATTEXT`: file extraction lane (not implemented in this slice).
     AttExt,
-    /// `-ATTEXT`: the command-line spelling of the same refusal.
+    /// `-ATTEXT`: the command-line spelling of the same extraction refusal.
     DashAttExt,
-    /// `EATTEDIT`: no block-attribute model.
+    /// `EATTEDIT`: enhanced value edit (multiple tags, optional text placement).
     EAttEdit,
-    /// `EATTEXT`: no block-attribute model.
+    /// `EATTEXT`: file extraction lane (not implemented in this slice).
     EAttExt,
-    /// `-EATTEXT`: the command-line spelling of the same refusal.
+    /// `-EATTEXT`: the command-line spelling of the same extraction refusal.
     DashEAttExt,
-    /// `ATTREDEF`: no block-attribute model.
+    /// `ATTREDEF`: define/redefine one attribute and propagate it to references.
     AttRedef,
-    /// `ATTSYNC`: no block-attribute model.
+    /// `ATTSYNC`: propagate the block's definitions to every reference.
     AttSync,
-    /// `GATTE`: no block-attribute model.
+    /// `GATTE`: global value edit on every reference of a block.
     Gatte,
     /// `XDATA`: entity XDATA is not retained.
     XData,

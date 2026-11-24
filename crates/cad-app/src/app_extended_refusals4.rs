@@ -62,9 +62,6 @@ fn reason(ext: ExtendedCommandId) -> String {
         ExtendedCommandId::SplineEdit => {
             "splinedit.unsupported: this build has no NURBS edit surface"
         }
-        ExtendedCommandId::Burst => {
-            "burst.unsupported: this build has no block-attribute model to preserve"
-        }
         ExtendedCommandId::Region => "region.unsupported: this build has no Region geometry model",
         ExtendedCommandId::WBlock => {
             "wblock.unsupported: writing a block definition to a separate drawing file is not \

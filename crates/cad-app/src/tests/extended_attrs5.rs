@@ -1,11 +1,12 @@
 //! Wave 5 attribute/xref contracts: `ATTDISP`, `BATTMAN`, `BATTORDER`, `XREF`,
 //! `-XREF`, `EXTERNALREFERENCES`, `EXTERNALREFERENCESCLOSE`.
 //!
-//! `ATTDISP` flips one session token and writes nothing. The six reports are
+//! `ATTDISP` sets one session display mode and writes nothing. The reports are
 //! pure reads of the block table and the import-time external-reference
 //! provenance: no transaction, no revision bump, no undo step and no
 //! `ChangeSet`. Each test pins the diagnostic codes so a report can never
-//! silently invent a row.
+//! silently invent a row. The attribute-manager contract itself lives in
+//! [`crate::tests::attribute_commands`].
 
 use super::*;
 use cad_db::{
@@ -139,69 +140,72 @@ fn application_with_xrefs() -> (Application, SessionState) {
 }
 
 #[test]
-fn attdisp_toggles_a_session_token_and_writes_nothing() {
+fn attdisp_sets_a_session_display_mode_and_writes_nothing() {
     let (mut app, mut session) = application_with_document();
     let before = revision(&app);
-    assert!(session.drafting_extras.attdisp(), "ATTDISP defaults ON");
+    assert_eq!(
+        session.drafting_extras.attribute_display(),
+        crate::AttributeDisplayMode::Normal,
+        "ATTDISP defaults to Normal"
+    );
 
     let off =
         execute(&mut app, &mut session, ExtendedCommandId::AttDisp).expect("ATTDISP is admitted");
     assert!(off.changes.is_none());
-    assert!(!session.drafting_extras.attdisp());
-    let message = &diagnostic(&off, "attdisp.toggled").message;
+    assert_eq!(
+        session.drafting_extras.attribute_display(),
+        crate::AttributeDisplayMode::Off
+    );
+    let message = &diagnostic(&off, "attdisp.mode").message;
     assert!(message.contains("OFF"), "{message}");
-    assert!(message.contains("no block-attribute model"), "{message}");
-    assert!(message.contains("not written"), "{message}");
+    assert!(message.contains("session display setting"), "{message}");
+    assert!(message.contains("no drawing row"), "{message}");
+    assert!(!message.contains("no block-attribute model"), "{message}");
 
-    let on =
+    let normal =
         execute(&mut app, &mut session, ExtendedCommandId::AttDisp).expect("ATTDISP is admitted");
-    assert!(session.drafting_extras.attdisp());
-    assert!(diagnostic(&on, "attdisp.toggled").message.contains("ON"));
+    assert_eq!(
+        session.drafting_extras.attribute_display(),
+        crate::AttributeDisplayMode::Normal
+    );
+    assert!(diagnostic(&normal, "attdisp.mode")
+        .message
+        .contains("NORMAL"));
 
     assert_eq!(revision(&app), before, "ATTDISP writes no drawing");
     assert!(!app.can_undo(&DocumentId(1)));
 }
 
 #[test]
-fn battman_lists_block_members_and_names_the_attribute_gap() {
+fn battman_reports_that_no_block_has_attributes() {
     let (mut app, mut session) = application_with_block();
     let before = revision(&app);
     let outcome =
         execute(&mut app, &mut session, ExtendedCommandId::BattMan).expect("BATTMAN is admitted");
     assert!(outcome.changes.is_none());
-    assert_eq!(count_code(&outcome, "battman.entry"), 1);
-    let entry = diagnostic(&outcome, "battman.entry");
-    assert!(entry.message.contains("CHAIR"), "{}", entry.message);
-    assert!(entry.message.contains("members 1"), "{}", entry.message);
+    assert!(diagnostic(&outcome, "battman.no_attributes")
+        .message
+        .contains("no block"));
     assert!(diagnostic(&outcome, "battman.summary")
         .message
-        .contains("1 block definition(s)"));
-    assert!(diagnostic(&outcome, "battman.attributes_not_modeled")
-        .message
-        .contains("NOT MODELED"));
-    assert_eq!(count_code(&outcome, "battorder.entry"), 0);
+        .contains("0 block(s)"));
+    assert_eq!(count_code(&outcome, "battman.block"), 0);
     assert_eq!(revision(&app), before);
     assert!(!app.can_undo(&DocumentId(1)));
 }
 
 #[test]
-fn battorder_lists_the_same_blocks_under_its_own_codes() {
+fn battorder_lists_no_order_when_no_block_has_attributes() {
     let (mut app, mut session) = application_with_block();
     let before = revision(&app);
     let outcome = execute(&mut app, &mut session, ExtendedCommandId::BattOrder)
         .expect("BATTORDER is admitted");
-    assert_eq!(count_code(&outcome, "battorder.entry"), 1);
-    assert!(diagnostic(&outcome, "battorder.entry")
-        .message
-        .contains("CHAIR"));
-    assert_eq!(count_code(&outcome, "battman.entry"), 0);
+    assert_eq!(count_code(&outcome, "battorder.entry"), 0);
     assert!(diagnostic(&outcome, "battorder.summary")
         .message
-        .contains("read-only listing"));
-    assert!(diagnostic(&outcome, "battorder.attributes_not_modeled")
-        .message
-        .contains("display order"));
+        .contains("0 block(s)"));
     assert_eq!(revision(&app), before);
+    assert!(!app.can_undo(&DocumentId(1)));
 }
 
 #[test]
@@ -341,5 +345,34 @@ fn a_wave5_report_payload_is_refused_and_changes_nothing() {
     );
     assert!(refused.is_err(), "BATTMAN takes no payload");
     assert_eq!(revision(&app), before);
+    assert!(!app.can_undo(&DocumentId(1)));
+}
+
+#[test]
+fn attdisp_typed_modes_are_session_state_only() {
+    let (mut app, mut session) = application_with_document();
+    let before = revision(&app);
+    for mode in [
+        crate::AttributeDisplayMode::On,
+        crate::AttributeDisplayMode::Normal,
+        crate::AttributeDisplayMode::Off,
+    ] {
+        let outcome = app
+            .execute(
+                &mut session,
+                command(
+                    CommandId::Extended(ExtendedCommandId::AttDisp),
+                    CommandPayload::Attribute(crate::AttributeCommand::Display(mode)),
+                ),
+            )
+            .expect("ATTDISP accepts its typed mode");
+        assert!(outcome.changes.is_none());
+        assert_eq!(session.drafting_extras.attribute_display(), mode);
+        assert!(outcome
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "attdisp.mode"));
+    }
+    assert_eq!(revision(&app), before, "ATTDISP never writes the drawing");
     assert!(!app.can_undo(&DocumentId(1)));
 }
