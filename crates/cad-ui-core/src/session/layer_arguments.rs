@@ -1,27 +1,31 @@
-//! The typed argument lines of the 2026-11-07 layer batch:
-//! `LAYERSTATE <option>`, `LAYWALK <names>`, `LTSCALE <value>` and
-//! `LAYERPMODE [ON|OFF]`.
+//! The typed argument lines of the layer batch:
+//! `LAYERSTATE <option>`, `LAYWALK <names>`, `LTSCALE <value>`,
+//! `LAYERPMODE [ON|OFF]` and `LAYFRZ VP [<index>,...]`.
 //!
 //! These are **argument forms of their own selectors**, not new commands and not
 //! a second IPC: the session parses one line, dispatches the corresponding
 //! [`cad_app::CommandPayload`] through [`cad_app::CommandId`] and returns the
 //! application's real refusal verbatim. A bare selector keeps the name-only
-//! funnel: `LAYERPMODE` reports, the other three are refused by the application
-//! for their missing argument.
+//! funnel: `LAYERPMODE` reports, `LAYFRZ` freezes at drawing level, the other
+//! three are refused by the application for their missing argument.
 //!
 //! Kept in its own module only to keep `session/mod.rs` inside the file-size
 //! budget (the `point_style` / `pedit` split pattern).
 
-use cad_app::{CommandId, CommandPayload, DashLayerOps, ExtendedCommandId, LayerStateCommand};
+use cad_app::{
+    CommandId, CommandPayload, DashLayerOps, ExtendedCommandId, LayerStateCommand,
+    SelectionToolPayload,
+};
 
 use super::commands::{parse_dash_layer_argument, DASH_LAYER_SELECTOR};
 use super::diagnostics::cad_error_text;
 use super::{
     invalid_dash_layer_argument_reason, invalid_layerpmode_argument_reason,
-    invalid_layerstate_argument_reason, invalid_laywalk_argument_reason,
-    invalid_ltscale_argument_reason, parse_layerpmode_argument, parse_layerstate_argument,
-    parse_laywalk_argument, parse_ltscale_argument, CadSession, LAYERPMODE_SELECTOR,
-    LAYERSTATE_SELECTOR, LAYWALK_SELECTOR, LTSCALE_SELECTOR,
+    invalid_layerstate_argument_reason, invalid_layfrz_argument_reason,
+    invalid_laywalk_argument_reason, invalid_ltscale_argument_reason, parse_layerpmode_argument,
+    parse_layerstate_argument, parse_layfrz_argument, parse_laywalk_argument,
+    parse_ltscale_argument, CadSession, LAYERPMODE_SELECTOR, LAYERSTATE_SELECTOR, LAYFRZ_SELECTOR,
+    LAYWALK_SELECTOR, LTSCALE_SELECTOR,
 };
 
 impl CadSession {
@@ -76,6 +80,26 @@ impl CadSession {
             LAYERPMODE_SELECTOR,
             CommandId::LayerPmode,
             CommandPayload::LayerPmode(enabled),
+        )
+    }
+
+    /// Apply one typed `LAYFRZ VP [<index>,...]` line: the Viewports scope.
+    ///
+    /// The current selection is still the whole input (it names the layers); only
+    /// the viewport scope is typed. It dispatches the ordinary
+    /// [`CommandId::LayFrz`] with the [`SelectionToolPayload::LayFrzViewports`]
+    /// scope, so the application owns every refusal (`layfrz.paper_space_required`,
+    /// `layfrz.unknown_viewport`, `layfrz.current_layer`, …) and the write stays
+    /// one transaction / one undo step. A bare `LAYFRZ` never reaches here: it
+    /// keeps the drawing-level freeze.
+    pub(super) fn layfrz_argument(&self, argument: &str, text: &str) -> Result<(), String> {
+        let Some(indices) = parse_layfrz_argument(argument) else {
+            return self.refuse_argument(invalid_layfrz_argument_reason(text));
+        };
+        self.dispatch_typed_argument(
+            LAYFRZ_SELECTOR,
+            CommandId::LayFrz,
+            CommandPayload::SelectionTool(Box::new(SelectionToolPayload::LayFrzViewports(indices))),
         )
     }
 
