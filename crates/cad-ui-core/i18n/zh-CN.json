@@ -2090,7 +2090,7 @@
   "draw.kind.layerstatesave": "保存图层状态",
   "draw.kind.layerstatesave.hint": "将 LayerState 载荷转交唯一的会话图层状态存储；无名称时报告缺少对话框。",
   "draw.kind.newview": "新建命名视图",
-  "draw.kind.newview.hint": "将 View 载荷转交唯一的会话命名视图存储；无名称时报告缺少提示。",
+  "draw.kind.newview.hint": "从当前显示保存命名视图（`NEWVIEW <name>`），或从矩形窗口保存（`NEWVIEW WINDOW <name> <x1> <y1> <x2> <y2>`）；缺少名称时报告缺少键入形式。",
   "draw.kind.dashscalelistedit": "比例列表报告",
   "draw.kind.dashscalelistedit.hint": "只读报告图纸真实比例表；创建/编辑比例未实现。",
   "draw.kind.lweight": "线宽显示报告",

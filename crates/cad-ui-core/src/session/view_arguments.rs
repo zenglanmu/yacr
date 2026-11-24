@@ -8,14 +8,17 @@
 //! A bare `VIEW`/`VIEWGO`/`VPOINT` keeps the name-only funnel and is refused by
 //! the application for its missing argument.
 
-use cad_app::{CommandId, CommandPayload, VPointInput, ViewCommand};
+use cad_app::{CommandId, CommandPayload, ExtendedCommandId, VPointInput, ViewCommand};
 use cad_domain::Point3;
 
-use super::commands::{Point3Input, ViewOption, VIEWGO_SELECTOR, VIEW_SELECTOR, VPOINT_SELECTOR};
+use super::commands::{
+    Point3Input, ViewOption, NEWVIEW_SELECTOR, VIEWGO_SELECTOR, VIEW_SELECTOR, VPOINT_SELECTOR,
+};
 use super::diagnostics::cad_error_text;
 use super::{
-    invalid_view_argument_reason, invalid_viewgo_argument_reason, invalid_vpoint_argument_reason,
-    parse_view_argument, parse_viewgo_argument, parse_vpoint_argument, CadSession,
+    invalid_newview_argument_reason, invalid_view_argument_reason, invalid_viewgo_argument_reason,
+    invalid_vpoint_argument_reason, parse_newview_argument, parse_view_argument,
+    parse_viewgo_argument, parse_vpoint_argument, CadSession, NewViewArgument,
 };
 
 impl CadSession {
@@ -33,6 +36,34 @@ impl CadSession {
         self.dispatch_view(
             VIEW_SELECTOR,
             CommandId::View,
+            CommandPayload::View(payload),
+        )
+    }
+
+    /// Apply one typed `NEWVIEW <name>` / `NEWVIEW WINDOW <name> <x1> <y1> <x2> <y2>` line.
+    pub(super) fn newview_argument(&self, argument: &str, text: &str) -> Result<(), String> {
+        let Some(input) = parse_newview_argument(argument) else {
+            return self.refuse_argument(invalid_newview_argument_reason(text));
+        };
+        let payload = match input {
+            NewViewArgument::Current(name) => ViewCommand::Save(name),
+            NewViewArgument::Window { name, rect } => ViewCommand::Window {
+                name,
+                first: Point3 {
+                    x: rect[0],
+                    y: rect[1],
+                    z: 0.0,
+                },
+                second: Point3 {
+                    x: rect[2],
+                    y: rect[3],
+                    z: 0.0,
+                },
+            },
+        };
+        self.dispatch_view(
+            NEWVIEW_SELECTOR,
+            CommandId::Extended(ExtendedCommandId::NewView),
             CommandPayload::View(payload),
         )
     }
