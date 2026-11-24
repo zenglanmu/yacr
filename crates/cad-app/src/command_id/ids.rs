@@ -429,7 +429,7 @@ pub enum CommandId {
     LayDel,
     /// `LAYERSTATE <option>`: bounded named layer states (`SAVE`/`RESTORE`/`LIST`/`DELETE`).
     LayerState,
-    /// `LAYERPMODE [ON|OFF]`: gate whether override mutations record `LAYERP` snapshots.
+    /// `LAYERPMODE [ON|OFF]`: document-header gate for `LAYERP` snapshot recording.
     LayerPmode,
     /// `LTSCALE <value>`: write the drawing-global linetype scale (`$LTSCALE`).
     SetLinetypeScale,

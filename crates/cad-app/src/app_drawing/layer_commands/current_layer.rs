@@ -24,17 +24,17 @@ impl Application {
             .drawing
             .clone();
 
-        for reference in &references {
-            ensure_model_space_addressable(drawing.as_ref(), command, reference, "laymcur")?;
+        // The first pick names the layer; every other ref is still preflighted so
+        // an unusable selection is refused before the session changes. A layer is
+        // named through any drawing space — model, a paper layout, a block
+        // definition or a nested pick's effective layer (`layer_named_by`), the
+        // same rule `LAYLCK`/`LAYFRZ` use, because this command only reads it.
+        let first_layer = layer_named_by(drawing.as_ref(), command, &references[0], "laymcur")?;
+        for reference in &references[1..] {
+            layer_named_by(drawing.as_ref(), command, reference, "laymcur")?;
         }
-
-        let first = &references[0];
-        let layer = drawing
-            .entity(first.entity)
-            .expect("preflight verified the entity resolves")
-            .layer;
         let layer_name = drawing
-            .layer(layer)
+            .layer(first_layer)
             .map(|row| row.name.clone())
             .ok_or_else(|| {
                 invalid(
@@ -42,15 +42,15 @@ impl Application {
                     "unknown_layer",
                     format!(
                         "the first selected entity's layer ({}) does not exist in this drawing",
-                        layer.0
+                        first_layer.0
                     ),
                 )
             })?;
 
         // The one current-layer rule: locked / frozen / off are refused with the
         // existing `layer.current_*` codes before the session is touched.
-        self.ensure_layer_can_be_current(document_id, layer)?;
-        session.active_layer = layer;
+        self.ensure_layer_can_be_current(document_id, first_layer)?;
+        session.active_layer = first_layer;
 
         let mut diagnostics = vec![Diagnostic {
             object: None,
@@ -110,7 +110,7 @@ impl Application {
             })?;
 
         for reference in &references {
-            ensure_model_space_addressable(drawing.as_ref(), command, reference, "laycur")?;
+            ensure_drawing_space_addressable(drawing.as_ref(), command, reference, "laycur")?;
         }
 
         let mut changed_before: Vec<DbEntity> = Vec::new();

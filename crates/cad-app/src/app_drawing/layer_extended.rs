@@ -32,7 +32,10 @@
 //!   set are session state and are not part of history.
 //! * `LTSCALE` writes the drawing header (`$LTSCALE`): one revision bump, **no**
 //!   undo entry (there is no header-variable patch kind).
-//! * `LAYERPMODE` and `LAYWALK` are session state only: no database write, no
+//! * `LAYERPMODE` writes the document header (`document.json` →
+//!   `variables.layer_pmode`; one revision, header-only `ChangeSet`, no undo —
+//!   `cad-history` has no header patch kind), because AutoCAD saves the gate in
+//!   the drawing. `LAYWALK` is session state only: no database write, no
 //!   revision bump, no history. `LAYWALK` takes layer names or the same
 //!   `*`/`?` name filters `-LAYER ?` uses.
 
@@ -44,7 +47,7 @@ use cad_db::{ChangeScope, DbEntity, TableKind, DEFAULT_LAYER_NAME};
 use cad_domain::SelectionRef;
 
 use super::layer_commands::{
-    ensure_model_space_addressable, ensure_no_payload, invalid, selected_distinct_layers,
+    ensure_drawing_space_addressable, ensure_no_payload, invalid, selected_distinct_layers,
     selection_snapshot,
 };
 use super::layer_edit::resolve_layer;
@@ -76,12 +79,15 @@ impl Application {
     /// `LAYMCH` / `-LAYMCH`: move the selection to the first pick's layer.
     ///
     /// The destination is the **first** selected entity's stored layer; every
-    /// other selected model-space entity is moved there in one transaction / one
-    /// undo step. An empty selection is refused (`laymch.selection`), a selection
+    /// other selected **top-level drawing-space** entity (model space or any
+    /// paper-space layout, including a top-level `INSERT`) is moved there in one
+    /// transaction / one undo step. An empty selection is refused
+    /// (`laymch.selection`), a selection
     /// of one is refused (`laymch.single_selection`, there is nothing to move), and
-    /// a payload, a foreign/instance/sub-element ref or a non-model-space entity is
-    /// refused before any write. A destination the database refuses (locked layer)
-    /// keeps the whole command refused by the database's own entity-write rule.
+    /// a payload, a foreign/instance/sub-element ref, or a block-definition member
+    /// (`laymch.block_space`) is refused before any write. A destination the
+    /// database refuses (locked layer) keeps the whole command refused by the
+    /// database's own entity-write rule.
     fn laymch(
         &mut self,
         session: &mut SessionState,
@@ -107,7 +113,7 @@ impl Application {
             ));
         }
         for reference in &references {
-            ensure_model_space_addressable(drawing.as_ref(), command, reference, "laymch")?;
+            ensure_drawing_space_addressable(drawing.as_ref(), command, reference, "laymch")?;
         }
 
         let destination = drawing

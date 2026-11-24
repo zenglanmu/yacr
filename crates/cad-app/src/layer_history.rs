@@ -182,22 +182,25 @@ impl crate::SessionState {
     /// attributes (the original pure-override behaviour).
     ///
     /// Called by the command layer **before** applying a real override change; see
-    /// the module docs for the push rule.
-    pub(crate) fn push_layer_override_snapshot(&mut self) {
-        self.push_layer_previous_snapshot(BTreeMap::new());
+    /// the module docs for the push rule. `enabled` is the document's
+    /// `LAYERPMODE` ([`cad_db::DrawingDatabase::layer_pmode`]), read by the caller
+    /// from the authoritative drawing.
+    pub(crate) fn push_layer_override_snapshot(&mut self, enabled: bool) {
+        self.push_layer_previous_snapshot(BTreeMap::new(), enabled);
     }
 
     /// Record the current override set plus the pre-change attributes of the rows
     /// a layer-table command is about to rewrite.
     ///
     /// `attributes` is empty for a pure override change. `LAYERPMODE OFF`
-    /// suppresses the whole step (override half included) without changing which
-    /// mutation is applied; see `crate::layer_states`.
+    /// (`enabled == false`, the document header value) suppresses the whole step
+    /// (override half included) without changing which mutation is applied.
     pub(crate) fn push_layer_previous_snapshot(
         &mut self,
         attributes: BTreeMap<LayerId, LayerAttributes>,
+        enabled: bool,
     ) {
-        if self.layer_states.snapshot_enabled() {
+        if enabled {
             self.layer_history.push(LayerPreviousState::with_attributes(
                 self.layer_overrides.clone(),
                 attributes,

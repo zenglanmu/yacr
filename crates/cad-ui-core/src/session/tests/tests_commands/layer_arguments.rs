@@ -98,7 +98,7 @@ fn ltscale_and_layerpmode_grammars_are_narrow() {
         None,
         "bare LAYERPMODE is name-only (it reports)"
     );
-    assert!(!CommandId::LayerPmode.requires_work_mode());
+    assert!(CommandId::LayerPmode.requires_work_mode());
 }
 
 #[test]

@@ -787,7 +787,7 @@ pub enum CommandPayload {
     TextCircle(TCircleCommand),
     /// The option of a typed `LAYERSTATE <option>` line.
     LayerState(LayerStateCommand),
-    /// The target state of `LAYERPMODE ON|OFF` (session-only; gates `LAYERP`
+    /// The target state of `LAYERPMODE ON|OFF` (document header; gates `LAYERP`
     /// snapshots). Bare `LAYERPMODE` carries `None` and reports.
     LayerPmode(bool),
     /// The value of a typed `LTSCALE <value>` line: finite and strictly positive,

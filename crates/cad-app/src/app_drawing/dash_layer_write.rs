@@ -402,7 +402,7 @@ impl Application {
             Some(Arc::new(changes))
         };
         if !previous_attributes.is_empty() {
-            session.push_layer_previous_snapshot(previous_attributes);
+            session.push_layer_previous_snapshot(previous_attributes, drawing.layer_pmode());
         }
 
         // Session state after the publish: the drawing is authoritative and no
