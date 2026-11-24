@@ -26,8 +26,8 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **260** |
-| 部分实现（有写明的界） | **719** |
+| 完整实现 | **264** |
+| 部分实现（有写明的界） | **715** |
 | **已实现合计（完整 + 部分）** | **979** |
 | 未实现 | **2** |
 
@@ -61,6 +61,8 @@
 > **2026-11-24 增补（严格报告收口）**：`BCOUNT` 扩到**整图**（模型空间 + 各图纸布局）与选择集作用域，块定义内嵌套参照按名报告不计数（AutoCAD 同限），Select objects 交互提示属 ADR 全局范围；`DBLIST` 列出块定义成员与全部三个已建模空间，XDATA/扩展字典/字典/代理对象不保留并按名报告；`JULIAN` 新增 `JULIAN <YYYY-MM-DD>`（也接受 `YYYY/MM/DD`，可跟 `[T ]HH:MM[:SS]`）日历转儒略日形式，非法日期按 `julian.invalid_date` 拒绝；`PAGESETUP`/`-PAGESETUP` 的 typed 写入与拒绝契约补齐后晋升（唯一残留绘图仪/CTB/STB 属 ADR 全局范围）。`ALIASEDIT` 的 `ADD`/`REMOVE` 补上宿主 `preference.json` 根键 `commandAliases` 持久化（跨会话恢复；写入失败按 `aliasedit.not_persisted` 回滚；失效/冲突的持久行启动时按名丢弃并记诊断）后晋升；`SYSVARMONITOR`（无后台通知、不持久化）仍有真实缺口，保持**部分实现**。四批合计计入 **254 完整 + 725 部分 / 979 已实现**；证据仅 Linux Rust 契约，GUI/GPU/像素/真机 NOT VERIFIED。
 
 > **2026-11-24 增补（严格图层状态收口，`LAYERP`/`LAYWALK`）**：`LAYERP` 的快照不再是“仅覆盖”：每次真实图层设置改动前记录**会话覆盖 + 层表属性的改动前行**（`off`/`frozen`/`locked`/colour/linetype/lineweight/transparency/plottable），恢复经与其它图层写相同的 `LayerPatch` 路径，**一条事务/一步撤销**；纯覆盖步仍不写库/不升 revision，16 步上界与“仅真实改动前压栈”不变，`LAYERSTATE RESTORE` 的多行写入也计为一步。`LAYWALK` 的 typed 输入补齐**层名通配过滤**（`*`/`?`，复用 `-LAYER ?` 的同一大小写不敏感规则；零匹配按 `layers.walk.unknown_filter` 拒绝且不写任何覆盖），对话框/逐对象 walk 属交互 chrome。`LAYERSTATE` 仍是**部分实现**：会话内 32 个命名快照、RESTORE 多行一条事务/一步撤销，但没有 DWG 命名层状态表持久化（不新增表）。两者晋升后计入 **252 完整 + 727 部分 / 979 已实现**；证据仅 Linux Rust 契约（`layerp`/`layerstate`/`laywalk`），GUI/GPU/像素/真机 NOT VERIFIED。
+
+> **2026-11-24 增补（严格编组持久化，`GROUP`/`-GROUP`/`UNGROUP`/`GROUPEDIT`）**：编组不再只存在于会话，`cad-db` 新增持久表 `tables/groups.json`（行序列号、名字、描述、DXF selectable 标志、有序成员实体 id），`FORMAT_MINOR` **17**（14 = 块属性、15 = `Text.mirrored`、16 = 二维约束；不改旧档号）。`GROUP`/`-GROUP`/`UNGROUP`/`GROUPEDIT` 的 create/delete/rename/add/remove/list 全部走 `DrawingDatabase::apply_group_changes`：一条事务、一次 revision、一步撤销，`ChangeScope.tables = {Groups}`；名字大小写不敏感与 64 上限拒绝保留。DXF/DWG 按 `AcDbGroup` 导入/导出，名字经 `ACAD_GROUP` 字典往返，描述/selectable 保留；未写出的成员（v1 图纸空间延后）按 `export.group_member_not_written` 具名报告，组本身不丢。四个名字计入 **264 完整 + 715 部分 / 979 已实现**；`CLASSICGROUP` 面板仍只读（列出持久编组与成员 id，无面板内 create/delete/rename/add/remove 控件，按组替换选择无宿主通道），保持部分实现。证据仅 Linux Rust 契约（cad-app/cad-db/cad-store-zip/cad-connector-acadrust），GUI/GPU/像素/真机 NOT VERIFIED。
 
 ## 下一批 100 条命令实施计划与进度（2026-11-07）
 
@@ -262,7 +264,7 @@
 
 > **这不是验收，是当前排期与口径。** 本轮目标是把命令从 `部分实现`/具名拒绝推进到支持域内
 > **没有剩余可写缺口**的 `完整实现`；不放宽为“改状态不实现”，也不把 ADR 全局范围缺口算作
-> 单命令完成。当前清单 **260 完整 / 719 部分 / 2 未实现**，只有真正合并且契约测试通过的
+> 单命令完成。当前清单 **264 完整 / 715 部分 / 2 未实现**，只有真正合并且契约测试通过的
 > 命令才改状态。
 
 | 批次 | 范围 | 状态 |
@@ -282,6 +284,7 @@
 | M1j 参照编辑族 | `REFEDIT`/`-REFEDIT`/`REFSET`/`REFCLOSE` 的成员图层/绘图次序/渲染属性回写、动态可见性成员保留与描述符剪除、嵌套引用保留 + 嵌套实例具名拒绝 | **已合并**（+4 complete） |
 | M1k 文本屏幕/托盘/查找大小写 | `TEXTSCR`/`GRAPHSCR` 接共享 chrome 文本屏幕（`cad_status.textScreen`，正文复用命令行历史同一折叠与序列化，无第二套历史）；`TRAYSETTINGS` 接状态栏托盘与托盘设置面（`cad_status.traySettings`，唯一开关即该会话旗标；无状态栏载体按名拒绝）；`FINDMATCH` 接入 `-FIND`/`FIND` 同一匹配器（ON 区分大小写，覆盖 MTEXT/单行 TEXT/MULTILEADER/表格单元格） | **已合并**（+4 complete；无 GUI/像素/真机证据） |
 | M1l 图层历史/漫游 | `LAYP` 恢复层属性 + 覆盖的快照（一次 LayerPatch/一步撤销）、`LAYWALK` 通配符过滤 | **已合并**（+2 complete；`LAYERSTATE` 因无 DWG 命名状态表仍 partial） |
+| M1m 编组持久化 | `tables/groups.json`（minor 17）、`GROUP`/`-GROUP`/`UNGROUP`/`GROUPEDIT` 写入与撤销、DXF/DWG `AcDbGroup` 往返 | **已合并**（+4 complete；`CLASSICGROUP` 面板仍只读，保持 partial） |
 | M5 其他面板 | 发布/传递/标准/CUI/点云/PDF 底图 | 分析完成；多数是 `L`/架构级缺口，按 ADR/子系统逐个评估 |
 
 **已明确的诚实缺口**：`ARCHIVE`、`STANDARDS`、`CHECKSTANDARDS`、全部 `CUI*`、`CUSTOMIZE` 仍是
@@ -326,7 +329,7 @@
 | `-EXPORT` | 部分实现 | 具名拒绝（`-export.unsupported`）：请用 PLOT/EXPORT；本构建只有一条矢量导出路径；命令行拼写。 |
 | `-FIND` | 完整实现 | `-FIND <needle>`：与 `FIND` 同一遍历与匹配实现（模型空间 + 全部图纸布局，按画出来的文本）；比较方式读取会话 `FINDMATCH`（默认 OFF = ASCII 不区分大小写，ON = 区分大小写）；只报告、不写库 |
 | `-GRAPHICSCONFIG` | 部分实现 | 具名拒绝（`-graphicsconfig.unsupported: renderer/graphics configuration is owned by the host`）。 |
-| `-GROUP` | 部分实现 | `GROUP` 的别名（同一 `CommandId`/会话组表路径）；无 DWG group 对象/修订/历史 |
+| `-GROUP` | 完整实现 | `GROUP` 的别名（同一 `CommandId`/持久编组表路径）；建组/改名/增删成员各一条事务一步撤销，DXF/DWG 导入导出 `AcDbGroup` |
 | `-HATCH` | 完整实现 | `HATCH` 的命令行拼写：同一解析器/处理器与同一支持域（整实体闭合边界 + LINE/ARC 边链；solid/user/predefined/gradient 与 `PATTERN`/`PATTERNFILE`）；hatch 写入边界所在空间（模型空间或同一图纸布局，`hatch.block_space`/`hatch.mixed_space` 按名拒绝）；创建期关联性与实时预览属全局范围 |
 | `-HATCHEDIT` | 完整实现 | `HATCHEDIT` 的命令行拼写：同一解析器与同一处理器（含 `ORIGIN` 与 `PATTERNFILE`；全局范围的 `Associate`/`Annotative`/`DRAWORDER BOUNDARY` 同样按名拒绝） |
 | `-HYPERLINK` | 部分实现 | 具名拒绝（`-hyperlink.unsupported: this build has no hyperlink storage model`）。 |
@@ -530,7 +533,7 @@
 | `CHSPACE` | 完整实现 | 模型↔图纸按**活动视口已解析变换**（`to_paper`/`to_model`，与显示同一解析）改写几何并重指 space，一条事务/一步撤销；无选择/无图纸/无可用视口/视口实体/跨空间混合选择/块内成员/无法精确变换的种类（`MULTILEADER`/`SHAPE`/`OPAQUE`/`COMPOUND`）/标注（本构建无关联模型，无法排除跨空间依赖）逐条具名拒绝且不写 |
 | `CHURLS` | 部分实现 | 具名拒绝（`churls.unsupported: this build has no hyperlink storage model`）。 |
 | `CIRCLE` | 已实现 | — |
-| `CLASSICGROUP` | 部分实现 | chrome 面板：列出会话 `EntityGroups` 与成员数，行聚焦/展开成员引用/关闭；“按组选择成员”因无宿主替换选择路径而禁用 |
+| `CLASSICGROUP` | 部分实现 | chrome 面板：列出文档持久编组（`tables/groups.json`）与成员实体 id，行聚焦/展开/关闭；面板无 create/delete/rename/add/remove 控件，“按组选择成员”因无宿主替换选择路径仍禁用 |
 | `CLASSICIMAGE` | 部分实现 | chrome 面板：只读列出 IMAGE 实体（id/空间/file key/pixels/可见/clip 摘要），行聚焦/关闭；attach/clip/adjust 仍是独立命令 |
 | `CLASSICINSERT` | 已实现 | chrome 面板：列出真实块定义（名称/成员数/基点），插入动作走既有 `INSERT` 点位+名称流程（面板在宿主确认文字步后提交块名）；无块元数据的定义不可插入（不伪造基点） |
 | `CLASSICLAYER` | 部分实现 | chrome 本地选择子：打开现有图层面板；紧凑布局像 LAYER 一样拒绝。 |
@@ -757,8 +760,8 @@
 | `GRAPHICSCONFIG` | 部分实现 | 具名拒绝（`graphicsconfig.unsupported: renderer/graphics configuration is owned by the host`）。 |
 | `GRAPHSCR` | 完整实现 | 清除会话文本屏幕旗标（`cad_status.textScreen`）；共享 chrome 的文本屏幕窗口随之关闭并返回图形。 |
 | `GRID` | 已实现 | — |
-| `GROUP` | 部分实现 | 会话内组表（上限 64、名字大小写不敏感）；裸命令/`LIST` 只读、`CREATE` 从选择集建组、`DELETE` 只移除名字；不写 DWG group 对象/修订/历史/事务 |
-| `GROUPEDIT` | 部分实现 | `ADD`/`REMOVE` 从选择集或键入实体 id 增删、`RENAME`（允许仅改大小写）；单次会话变更；不写实体/数据库 |
+| `GROUP` | 完整实现 | 持久编组表（`tables/groups.json`，minor 17，上限 64、名字大小写不敏感）；裸命令/`LIST` 只读、`CREATE` 从选择集建组、`DELETE` 只移除名字；一条事务/一步撤销；DXF/DWG 按 `AcDbGroup` 导入导出（名字经 `ACAD_GROUP` 字典） |
+| `GROUPEDIT` | 完整实现 | `ADD`/`REMOVE` 从选择集或键入实体 id 增删、`RENAME`（允许仅改大小写）；持久编组表一条事务/一步撤销；不写实体几何 |
 | `HATCH` | 完整实现 | 整实体闭合边界（`Circle`/完整 `Ellipse`/闭合 `Polyline`）+ `LINE`/`ARC` 边链；**`HATCH PATTERN <name>` 与 `HATCH PATTERNFILE <path.pat> [<name>]`**（文件优先→内置回退；无名的文件须恰好一个图案；组 76 = 2/1）；solid/user/predefined/gradient 四种会话填充与角度/比例/`HPDOUBLE`/样式；hatch 写入边界所在空间（模型空间走共享漏斗、图纸布局走布局自身 draw-order；块定义/混合空间按名拒绝）；空边界 `hatch.selection`、未知/缺名/文件读失败逐条具名拒绝。**全局范围**：创建期关联性（`HatchGeometry` 只存派生环，无边界句柄/反应器）、实时预览与图案选择对话框 |
 | `HATCHEDIT` | 完整实现 | 多目标；`Style`/`PatternType`（含 **CUSTOM 76=2**）/`PATTERN <内置图案名>`/`PATTERNFILE <path.pat> [<name>]`/`ORIGIN <x> <y>`/`Angle`/`Scale`/`Solid`/`Gradient`/`Color`/`Transparency`/`Layer`/`DrawOrder`/`Recreate Boundary`/`Separate`/`Add-Remove Boundaries`；一条事务/一步撤销；`Associate`/`Disassociate`/`Annotative`/`DRAWORDER BOUNDARY` 属全局范围按名拒绝 |
 | `HATCHGENERATEBOUNDARY` | 完整实现 | 预选择 hatch（模型空间或图纸布局）；每个 loop 一条非关联闭合多段线（同层同空间、保留 bulge、含内岛）；源 hatch 保留；无关联性 |
@@ -1186,7 +1189,7 @@
 | `UCSMAN` | 部分实现 | 具名拒绝（`ucsman.unsupported`）：本构建无 UCS 模型。 |
 | `ULAYERS` | 部分实现 | 具名拒绝（`ulayers.unsupported: no DWF/PDF/DGN underlay layer-display model`）。 |
 | `UNDO` | 已实现 | — |
-| `UNGROUP` | 部分实现 | 仅移除一个组名并保留全部实体；未知组名拒绝；不写实体/数据库 |
+| `UNGROUP` | 完整实现 | 移除一个持久编组行并保留全部实体；未知组名拒绝；一条事务/一步撤销；不写实体几何 |
 | `UNION` | 完整实现 | 后台布尔（C2）：选中 ≥2 个平面或曲面 `AcDb3dSolid` 实体，worker 折叠后一条事务/一步撤销替换为一个实体；曲面操作数参与内核布尔（`nurbs.faces`；无 box / 无精确 pcurve 仍按名拒绝）；无模型器按 `unsupported-runtime: solid-modeler` 拒绝；操作数被编辑则 `Stale`（状态 `solid.boolean_stale`，图纸不变）；布尔运行期间图元创建按 `solid.boolean_busy` 拒绝；布尔结果在提交前校验为单个连通非空壳，多壳/空壳按 `solid.boolean_result_not_single_shell` 拒绝且不写库/不升修订/不退操作数。 |
 | `UNISOLATEOBJECTS` | 部分实现 | 清空会话隐藏集；无数据库写/撤销 |
 | `UNITS` | 部分实现 | 只读报告（`units.report`/`units.dialog_not_implemented`）：图纸单位 4 位小数、角度用度；UNITS 对话框与逐图纸单位表未实现。 |
@@ -1447,7 +1450,7 @@
 | 165 | `CHSPACE` | 完整实现 | On a layout, transfers selected objects between model space and paper space. | 模型↔图纸按**活动视口已解析变换**（`to_paper`/`to_model`，与显示同一解析）改写几何并重指 space，一条事务/一步撤销；无选择/无图纸/无可用视口/视口实体/跨空间混合选择/块内成员/无法精确变换的种类（`MULTILEADER`/`SHAPE`/`OPAQUE`/`COMPOUND`）/标注（本构建无关联模型，无法排除跨空间依赖）逐条具名拒绝且不写 |
 | 166 | `CHURLS` | 部分实现 | Provides a method to edit a previously attached URL for selected objects. | 具名拒绝（`churls.unsupported: this build has no hyperlink storage model`）。 |
 | 167 | `CIRCLE` | 已实现 | Creates a circle. | — |
-| 168 | `CLASSICGROUP` | 部分实现 | Opens the legacy Object Grouping dialog box. | chrome 面板：列出会话 `EntityGroups` 与成员数，行聚焦/展开成员引用/关闭；“按组选择成员”因无宿主替换选择路径而禁用 |
+| 168 | `CLASSICGROUP` | 部分实现 | Opens the legacy Object Grouping dialog box. | chrome 面板：列出文档持久编组（`tables/groups.json`）与成员实体 id，行聚焦/展开/关闭；面板无 create/delete/rename/add/remove 控件，“按组选择成员”因无宿主替换选择路径仍禁用 |
 | 169 | `CLASSICIMAGE` | 部分实现 | Manages referenced image files in the current drawing. | chrome 面板：只读列出 IMAGE 实体（id/空间/file key/pixels/可见/clip 摘要），行聚焦/关闭；attach/clip/adjust 仍是独立命令 |
 | 170 | `CLASSICINSERT` | 已实现 | Inserts a block or drawing into the current drawing using the classic version of the INSERT command. | chrome 面板：列出真实块定义（名称/成员数/基点），插入动作走既有 `INSERT` 点位+名称流程（面板在宿主确认文字步后提交块名）；无块元数据的定义不可插入（不伪造基点） |
 | 171 | `CLASSICLAYER` | 部分实现 | Opens the legacy Layer Properties Manager. | chrome 本地选择子：打开现有图层面板；紧凑布局像 LAYER 一样拒绝。 |
@@ -1689,9 +1692,9 @@
 | 407 | `GRAPHICSCONFIG` | 部分实现 | Sets hardware acceleration on or off and provides access to display performance options. | 具名拒绝（`graphicsconfig.unsupported: renderer/graphics configuration is owned by the host`）。 |
 | 408 | `GRAPHSCR` | 完整实现 | Causes the text window to display behind the application window. | 清除会话文本屏幕旗标（`cad_status.textScreen`）；共享 chrome 的文本屏幕窗口随即关闭并返回图形。 |
 | 409 | `GRID` | 已实现 | Displays a grid pattern in the current viewport. | — |
-| 410 | `-GROUP` | 部分实现 | Creates and manages saved sets of objects called groups. | `GROUP` 的别名（同一 `CommandId`/会话组表路径）；无 DWG group 对象/修订/历史 |
-| 411 | `GROUP` | 部分实现 | Creates and manages saved sets of objects called groups. | 会话内组表（上限 64、名字大小写不敏感）；裸命令/`LIST` 只读、`CREATE` 从选择集建组、`DELETE` 只移除名字；不写 DWG group 对象/修订/历史/事务 |
-| 412 | `GROUPEDIT` | 部分实现 | Adds and removes objects from the selected group, or renames a selected group. | `ADD`/`REMOVE` 从选择集或键入实体 id 增删、`RENAME`（允许仅改大小写）；单次会话变更；不写实体/数据库 |
+| 410 | `-GROUP` | 完整实现 | Creates and manages saved sets of objects called groups. | `GROUP` 的别名（同一 `CommandId`/持久编组表路径）；建组/改名/增删成员各一条事务一步撤销，DXF/DWG 导入导出 `AcDbGroup` |
+| 411 | `GROUP` | 完整实现 | Creates and manages saved sets of objects called groups. | 持久编组表（`tables/groups.json`，minor 17，上限 64、名字大小写不敏感）；裸命令/`LIST` 只读、`CREATE` 从选择集建组、`DELETE` 只移除名字；一条事务/一步撤销；DXF/DWG 按 `AcDbGroup` 导入导出（名字经 `ACAD_GROUP` 字典） |
+| 412 | `GROUPEDIT` | 完整实现 | Adds and removes objects from the selected group, or renames a selected group. | `ADD`/`REMOVE` 从选择集或键入实体 id 增删、`RENAME`（允许仅改大小写）；持久编组表一条事务/一步撤销；不写实体几何 |
 | 413 | `-HATCH` | 完整实现 | Uses command prompts to fill an enclosed area or selected objects with a hatch pattern, solid fill, or gradient fill. | `HATCH` 的命令行拼写；同一解析器/处理器与同一支持域（整实体闭合边界 + LINE/ARC 边链；solid/user/predefined/gradient 与 `PATTERN`/`PATTERNFILE`）；hatch 写入边界所在空间（模型空间或同一图纸布局，`hatch.block_space`/`hatch.mixed_space` 按名拒绝）；创建期关联性与实时预览属全局范围 |
 | 414 | `HATCH` | 完整实现 | Fills an enclosed area or selected objects with a hatch pattern, solid fill, or gradient fill. | 整实体闭合边界（`Circle`/完整 `Ellipse`/闭合 `Polyline`）+ `LINE`/`ARC` 边链；**`HATCH PATTERN <name>` 与 `HATCH PATTERNFILE <path.pat> [<name>]`**（文件优先→内置回退；无名的文件须恰好一个图案；组 76 = 2/1）；solid/user/predefined/gradient 四种会话填充与角度/比例/`HPDOUBLE`/样式；hatch 写入边界所在空间（模型空间走共享漏斗、图纸布局走布局自身 draw-order；块定义/混合空间按名拒绝）；空边界 `hatch.selection`、未知/缺名/文件读失败逐条具名拒绝。**全局范围**：创建期关联性（`HatchGeometry` 只存派生环，无边界句柄/反应器）、实时预览与图案选择对话框 |
 | 415 | `-HATCHEDIT` | 完整实现 | From the Command prompt, modifies existing hatches or fills. | `HATCHEDIT` 的命令行拼写：同一解析器与同一处理器（含 `ORIGIN` 与 `PATTERNFILE`；全局范围的 `Associate`/`Annotative`/`DRAWORDER BOUNDARY` 同样按名拒绝） |
@@ -2177,7 +2180,7 @@
 | 895 | `ULAYERS` | 部分实现 | Controls the display of layers in a DWF, DWFx, PDF, or DGN underlay. | 具名拒绝（`ulayers.unsupported: no DWF/PDF/DGN underlay layer-display model`）。 |
 | 896 | `UNDEFINE` | 已实现 | Allows an application-defined command to override an internal command. | `UNDEFINE <name>` 会话内禁用内建命令；被禁用名按 `command.undefined: <NAME>` 拒绝且不派发；静态/运行时别名指向禁用目标时同样禁用；不写图 |
 | 897 | `UNDO` | 已实现 | Reverses the effect of commands. | — |
-| 898 | `UNGROUP` | 部分实现 | Disassociates the objects from a group. | 仅移除一个组名并保留全部实体；未知组名拒绝；不写实体/数据库 |
+| 898 | `UNGROUP` | 完整实现 | Disassociates the objects from a group. | 移除一个持久编组行并保留全部实体；未知组名拒绝；一条事务/一步撤销；不写实体几何 |
 | 899 | `UNION` | 完整实现 | Combines two or more 3D solids, surfaces, or 2D regions into a single, composite 3D solid, surface, or region. | 后台布尔（C2）：选中 ≥2 个平面或曲面 `AcDb3dSolid` 实体，worker 折叠后一条事务/一步撤销替换为一个实体；曲面操作数参与内核布尔（`nurbs.faces`；无 box / 无精确 pcurve 仍按名拒绝）；无模型器按 `unsupported-runtime: solid-modeler` 拒绝；操作数被编辑则 `Stale`（状态 `solid.boolean_stale`，图纸不变）；布尔运行期间图元创建按 `solid.boolean_busy` 拒绝；布尔结果在提交前校验为单个连通非空壳，多壳/空壳按 `solid.boolean_result_not_single_shell` 拒绝且不写库/不升修订/不退操作数。 |
 | 900 | `UNISOLATEOBJECTS` | 部分实现 | Displays objects previously hidden with the ISOLATEOBJECTS or HIDEOBJECTS command. | 清空会话隐藏集；无数据库写/撤销 |
 | 901 | `-UNITS` | 部分实现 | Controls the precision and display formats for coordinates, distances, and angles. | 只读报告固定单位显示规则（`-units.*` 诊断码）；Units 对话框/逐图纸单位表未实现。 |
@@ -2480,7 +2483,6 @@
 | OFFSET `ELLIPSE` | **已实现（2026-11-16）** | 等距偏移曲线不是椭圆，需要新偏移曲线类型或显式折线近似 |
 | 布局/视口 post-import 写 API | **L** | `LAYOUT` 写形式、`VPORTS`/`VPCLIP`/`VPSCALE`/`LAYVPI` 目前是稳定具名拒绝；`VPMAX`/`VPMIN` 只是会话标记 |
 | xdata 模型 | **L** | `XDLIST` 只读并报告 `xdlist.not_retained`；域不保留 xdata |
-| DWG group 对象持久化 | **M** | `GROUP` 系列是会话内组表，不写 DWG group、不过撤销栈、不跨文档保留 |
 | 命名视图持久化 | **M** | `VIEW` 会话内上限 32，不持久化 DWG |
 | 系统剪贴板 | **L** | 现为应用内剪贴板；不跨应用、替换文档即清空 |
 | DWG 精确往返 | **L** | `EXPORT` 选 `.dwg` 的实验性导出有损/不完整（上游 `DwgWriter`），仅合成 self-roundtrip 证据 |

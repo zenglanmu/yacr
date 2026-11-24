@@ -1055,9 +1055,9 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 
 | 命令 | 状态 | 结果 | 显式未实现 / 有意偏离 |
 |---|---|---|---|
-| `GROUP` / `-GROUP` | 部分实现 | 会话内 `EntityGroups`（上限 64、名字大小写不敏感）；裸命令/`LIST` 只读、`CREATE` 从选择集建组、`DELETE` 只移除名字；`-GROUP` 是同一 `CommandId`/路径的别名 | 不写 DWG group 对象/修订/`ChangeSet`/历史；不跨会话/文档替换保留；导入 DWG 的组只贡献普通实体 |
-| `UNGROUP` | 部分实现 | `UNGROUP <name>` 仅移除组名，保留全部实体；未知组名拒绝 | 不写实体/数据库 |
-| `GROUPEDIT` | 部分实现 | `<name> ADD|REMOVE|RENAME <arg>`；成员来自当前选择集或键入实体 id；`RENAME` 允许仅改大小写；单次会话变更 | 不写实体/数据库；无组选择对话框 |
+| `GROUP` / `-GROUP` | **完整实现** | 文档持久编组表 `tables/groups.json`（minor 17；行序列号/名字/描述/DXF selectable/有序成员实体 id，上限 64、名字大小写不敏感）；裸命令/`LIST` 只读、`CREATE` 从选择集建组、`DELETE` 只移除名字；一条事务/一步撤销，`ChangeScope.tables = {Groups}`；DXF/DWG 按 `AcDbGroup` 导入导出（名字经 `ACAD_GROUP` 字典），描述/selectable 保留 | 未写出的成员（v1 图纸空间延后）按 `export.group_member_not_written` 具名报告；组名含空格只能由导入产生，命令行语法按单 token 寻址 |
+| `UNGROUP` | **完整实现** | `UNGROUP <name>` 移除一个持久编组行，保留全部实体；未知组名拒绝；一条事务/一步撤销 | 不写实体几何 |
+| `GROUPEDIT` | **完整实现** | `<name> ADD|REMOVE|RENAME <arg>`；成员来自当前选择集或键入实体 id；`RENAME` 允许仅改大小写；持久表一条事务/一步撤销 | 不写实体几何；无组选择对话框 |
 | `QLEADER` / `LEADER` | 部分实现 | `<arrow x,y> <landing x,y> <文本>` 创建**一个** `MULTILEADER`（旧实体映射为 MULTILEADER）；一条事务/一步撤销 | 无 QLEADER 设置对话框、引线样式、注释类型、多引线段/附着选项 |
 | `TEXTFIT` | 部分实现 | `<目标宽度>` 仅按 `height = target / char_count` 改字形高度 | 真实宽度拉伸/压缩 NOT IMPLEMENTED；坏宽度、空选择、非文字、空文本具名拒绝 |
 | `HATCHSETBOUNDARY` | 完整实现 | 恰好一个 hatch + 一条闭合 Polyline/整圆/**完整 Ellipse**（整椭圆采样为单个 64 点环、无 bulge），共面性校验；`HatchGeometry::new` 重建并丢弃旧种子；一条事务/一步撤销 | 部分椭圆 `hatchsetboundary.open_ellipse` 拒绝且不开事务；无交互边界选择、无关联边界、无椭圆弧/块内边界 |
@@ -1826,7 +1826,7 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 | `COLOR` / `-COLOR` | **完整实现**：`<0..=256>` / `BYLAYER` / `BYNAME` / `BYBLOCK` 写会话当前颜色（`color.set`，无库写、无撤销），裸命令报告（`color.report`，默认 256=ByLayer）；**新实体由创建漏斗写入该 ACI**（`256` 行逐字节不变，`0` = ByBlock 符号值，`1..=255` 经 `property_value::rgb_for_aci` 解析），撤销随实体行一起回退 | **全局范围**：无调色板/Select Color 对话框（`src/components/ColorChooser.tsx` 是实体属性选择器，不是会话令牌）；无颜色名表（只接受 ACI 与三个符号词）；`CELTSCALE` 等颜色相关变量不在范围 |
 | `-UNITS` | **部分实现（只读报告）**：固定单位显示规则 | Units 对话框/逐图纸单位表未实现 |
 | `COPYHIST` | **部分实现（只读报告）**：`copyhist.not_tracked` | 会话不存命令历史文本；不复制 |
-| `HELP` / `CLASSICINSERT` / `CLASSICGROUP` | **部分实现（具名拒绝）**：`help.unsupported` / `classicinsert.unsupported` / `classicgroup.unsupported` | 不写库/不升修订/不入历史 |
+| `HELP` / `CLASSICINSERT` | **部分实现（具名拒绝）**：`help.unsupported` / `classicinsert.unsupported` | 不写库/不升修订/不入历史 |
 | `FILETAB` / `FILETABCLOSE` / `HIDEPALETTES` / `SHOWPALETTES` / `RIBBONCLOSE` / `GOTOSTART` | **部分实现（具名拒绝）**：窗口/选项板/功能区/开始页 chrome 由宿主负责 | 同上 |
 | `TRANSPARENCY` | **部分实现（具名拒绝）**：`transparency.unsupported: image transparency is not modeled` | 同上 |
 | `DSETTINGS` / `QUICKPROPERTIES` / `CLASSICLAYER` / `COMMANDLINE` / `COMMANDLINEHIDE` | **部分实现（chrome 本地选择子）**：分别打开 Options / 特性面板 / 图层面板，或显示/隐藏命令行 | 不读写图纸；紧凑布局下**特性面板改为全宽底部抽屉**（不再拒绝），**图层面板**仍给既有拒绝句 |
@@ -2325,7 +2325,7 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 | `HATCHEDIT` | 完整实现 | 多目标；`Style`/`PatternType`/`PATTERN <name>`/`PATTERNFILE <path.pat> [<name>]`/`ORIGIN <x> <y>`/`Angle`/`Scale`/`Solid`/`Gradient`/`Color`/`Transparency`/`Layer`/`DrawOrder`/`Recreate Boundary`/`Separate Hatches`/`Add|Remove Boundaries`；一条事务/一步撤销 | 全局范围：`Associate`/`Disassociate`/`Annotative`、`DRAWORDER BOUNDARY`（需边界实体 id 即反应器模型）、逐 loop 图案原点、交互对话框 |
 | `REVCLOUD` | 部分实现 | `Object`/`Rectangular`/`Polygonal`/`Freehand`/`Arc Length`/`Style`/`Modify`；等弦弧（106.26°）；默认弦长 = 源路径 bbox 对角线 5%（声明替代）；一条事务/一步撤销 | **`Calligraphy` 样式未实现**（多段线无样式字段）；`Modify` 用确定性规则替代交互拾取；`RECT/POLY/FREEHAND/MODIFY` 的路径来自唯一选中 LWPOLYLINE |
 | `WIPEOUT` | 完整实现 | `Frames ON/OFF/DISPLAY` 与 `WIPEOUTFRAME 0|1|2`（同一会话令牌，`SETVAR` 可读写，越界 `wipeoutframe.out_of_range`）：ON = 填充 + 边框（显示与矢量出图都画边界），OFF = 仅填充，DISPLAY = 显示边框、出图不画；边框在 mask fill 之后以 Always-depth 绘制；`Polyline` + `Erase Polyline Yes/No`、自由点串；**矢量出图按页面背景 flood**（普通遮罩在几何之后按 draw order，`inverted` 为页面环 + 边界环的多环 even-odd 补集，SVG `fill-rule="evenodd"`、PDF `f*`，单环输出与旧版逐字节一致）；已有遮罩**沿边界可拾取**，`SELECTALL`/`QSELECT TYPE WIPEOUT`/`ERASE`/`MOVE`/`HIDEOBJECTS` 走通用实体路径 | **全局范围**：`FRAME` 本身（图像/xref/PDF 边框显示模型不存在）、遮罩选择/悬停高亮（渲染器只解析 GPU pick key，引擎报 `flags.unresolved`）、遮罩顶点 grip 拖拽、`inverted` 仅导入/显示/出图、跨图纸视口窗口不裁剪（`representation.viewport_clip_partial`）；自交按 even-odd 如实填充（只拒零净面积）；无真实 GPU/像素验收（Linux 编译 + 契约测试） |
-| `TEXTMASK` | 部分实现 | 偏移因子（默认 0.35）、`Wipeout` 遮罩、文本+遮罩会话 `GROUP`、重跑替换旧遮罩、`TEXTUNMASK` 按组优先；一条事务/一步撤销 | **`3dface`/`Solid` 遮罩类型未实现**（无对应实体）；`GROUP` 为会话存储（DWG 不落关联记录） |
+| `TEXTMASK` | 部分实现 | 偏移因子（默认 0.35）、`Wipeout` 遮罩、文本+遮罩的**会话私有配对**（不是文档 `GROUP`）、重跑替换旧遮罩、`TEXTUNMASK` 按配对优先；一条事务/一步撤销 | **`3dface`/`Solid` 遮罩类型未实现**（无对应实体）；文本/遮罩配对为会话存储（DWG 不落关联记录） |
 | `TXT2MTXT` | 完整实现 | `COMBINE`/`SEPARATE`、`ORDER TOPDOWN/SELECT`、`WRAP`（`wrap_width`）、`UNIFORM <factor>`（0.25–4.0，写入 MTEXT `TextLineSpacing` 且样式 `Exactly`）、源对象在同一事务删除 | `UNIFORM` 之外没有 Settings 对话框（全局范围）；导入的越界 factor 仍渲染（存储契约只要求正且有限）；行距仍以 `1.2×factor×行高` 近似，不是字体真实垂直度量 |
 
 ## Wave 26 边界更新（2026-11-12）
@@ -2384,7 +2384,7 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 | 命令 | 状态 | 当前行为 | 剩余边界 |
 | --- | --- | --- | --- |
 | `CLASSICINSERT` | **完整实现** | chrome 面板列出真实块定义（名称/成员数/基点）；Insert 走既有 `INSERT` 点位+名称流程 | 无块元数据的定义不可插入；无直接 payload 插入路径 |
-| `CLASSICGROUP` | 部分实现 | chrome 面板列出会话 `EntityGroups`/成员数/成员引用 | “按组选择成员”仅禁用提示（无宿主替换选择路径）；会话组不是 DWG 对象 |
+| `CLASSICGROUP` | 部分实现 | chrome 面板列出文档持久编组（`tables/groups.json`）/成员数/成员实体 id | 面板无 create/delete/rename/add/remove 控件；“按组选择成员”仅禁用提示（无宿主替换选择路径） |
 | `CLASSICIMAGE` | 部分实现 | chrome 面板只读列出 IMAGE 实体（id/空间/file key/pixels/可见/clip 摘要） | attach/clip/adjust 是独立命令；面板不写库 |
 | `REDEFINE` | **完整实现** | 重新启用被 `UNDEFINE` 禁用的内建命令；essential 双向拒绝 | 会话状态；不持久化 DWG |
 | `UNDEFINE` | **完整实现** | 会话内禁用内建命令；`command.undefined: <NAME>`；别名指向禁用目标亦禁用 | 会话状态；不持久化 DWG |

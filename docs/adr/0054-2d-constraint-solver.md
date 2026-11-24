@@ -84,7 +84,7 @@ ADR-0043 D14 当时写的是“不做约束求解器”。现在两个前提变�
 - 求解前校验、求解后一次事务/一次 revision/一步撤销；失败/冲突时不写库、不升修订、不入历史、
   不发布 `ChangeSet`。
 
-### D4 — 持久化：新约束表 + `FORMAT_MINOR` 15
+### D4 — 持久化：新约束表 + `FORMAT_MINOR` 16
 
 - 在 `.ymodel` 新增 `tables/constraints.json`（约束行：id、kind、实体/子元素引用、工作平面、
   驱动/参考、表达式、状态），不把约束塞进 `params` 或 `bim` 表。
@@ -142,7 +142,7 @@ ADR-0043 D14 当时写的是“不做约束求解器”。现在两个前提变�
    + 尺寸；欠/过约束诊断。无 UI。
 2. **P1 命令/事务**：`GEOMCONSTRAINT`/`DIMCONSTRAINT`/`DELCONSTRAINT`/`DC*` 的 typed 路径、
    参数表达式、一次事务/一步撤销；`CONSTRAINTBAR`/`CONSTRAINTSETTINGS` 会话路径。
-3. **P2 持久化/DXF**：`tables/constraints.json`、minor 15、acadrust 节点映射、导入/导出拒绝码。
+3. **P2 持久化/DXF**：`tables/constraints.json`、minor 16、acadrust 节点映射、导入/导出拒绝码。
 4. **P3 UI**：Parametric 面板、约束栏/图标、选择与编辑；`autocad-structure` 只移除真实完成的
    pending 面板。
 5. **P4 自动约束**：声明的规则子集；未覆盖规则按名报告。
