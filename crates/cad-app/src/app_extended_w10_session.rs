@@ -27,24 +27,7 @@ impl Application {
         ext: ExtendedCommandId,
     ) -> CadResult<CommandOutcome> {
         match ext {
-            ExtendedCommandId::DashUnits => {
-                require_none_payload(command, "-UNITS")?;
-                Ok(report_outcome(vec![
-                    diagnostic(
-                        "units.report",
-                        "-UNITS: coordinates and distances are displayed in drawing units with 4 \
-                         decimal places; angles are displayed in degrees; no per-drawing unit \
-                         table exists"
-                            .into(),
-                    ),
-                    diagnostic(
-                        "units.dialog_not_implemented",
-                        "-UNITS: the Units dialog and its precision/insertion-scale/direction \
-                         controls are NOT IMPLEMENTED"
-                            .into(),
-                    ),
-                ]))
-            }
+            ExtendedCommandId::DashUnits => self.units_command(session, command, "-UNITS"),
             ExtendedCommandId::LineWeight | ExtendedCommandId::DashLineWeight => {
                 let name = ext.selector();
                 require_none_payload(command, name)?;

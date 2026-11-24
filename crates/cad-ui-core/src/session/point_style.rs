@@ -168,7 +168,13 @@ impl CadSession {
             | MREDO_SELECTOR
             | MULTIPLE_SELECTOR
             | SYSVARMONITOR_SELECTOR
-            | JULIAN_SELECTOR => self.utility_argument(selector, argument, text),
+            | JULIAN_SELECTOR
+            | super::commands::DWGPROPS_SELECTOR
+            | super::commands::UNITS_SELECTOR
+            | super::commands::DASH_UNITS_SELECTOR
+            | super::sysvdlg_dialog::SYSVDLG_SELECTOR => {
+                self.utility_argument(selector, argument, text)
+            }
             // The 2026-11-07 draw/modify batch typed forms.
             DONUT_SELECTOR | SOLID_SELECTOR | HELIX_SELECTOR | MLINE_SELECTOR
             | MLSTYLE_SELECTOR | TREX_SELECTOR | MPEDIT_SELECTOR | DRAWORDER_SELECTOR => {

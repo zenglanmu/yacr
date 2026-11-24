@@ -19,10 +19,11 @@ use cad_host::{CadSettingKey, CadSettingValue};
 use super::commands::{
     invalid_mredo_argument_reason, invalid_multiple_argument_reason, invalid_purge_argument_reason,
     invalid_rename_argument_reason, invalid_setvar_value_reason,
-    invalid_sysvarmonitor_argument_reason, parse_mredo_argument, parse_multiple_argument,
-    parse_purge_argument, parse_rename_argument, parse_setvar_argument, parse_sysvar_toggle,
-    parse_sysvarmonitor_argument, JULIAN_SELECTOR, MREDO_SELECTOR, MULTIPLE_SELECTOR,
-    PURGE_SELECTOR, RENAME_SELECTOR, SETVAR_SELECTOR, SYSVARMONITOR_SELECTOR,
+    invalid_sysvarmonitor_argument_reason, parse_dwgprops_argument, parse_mredo_argument,
+    parse_multiple_argument, parse_purge_argument, parse_rename_argument, parse_setvar_argument,
+    parse_sysvar_toggle, parse_sysvarmonitor_argument, parse_units_argument, DwgPropsArgumentError,
+    DASH_UNITS_SELECTOR, DWGPROPS_SELECTOR, JULIAN_SELECTOR, MREDO_SELECTOR, MULTIPLE_SELECTOR,
+    PURGE_SELECTOR, RENAME_SELECTOR, SETVAR_SELECTOR, SYSVARMONITOR_SELECTOR, UNITS_SELECTOR,
 };
 use super::shell_settings::parse_display_mask;
 use super::CadSession;
@@ -86,6 +87,9 @@ impl CadSession {
             MULTIPLE_SELECTOR => self.multiple_argument(argument, text),
             SYSVARMONITOR_SELECTOR => self.sysvarmonitor_argument(argument, text),
             JULIAN_SELECTOR => self.julian_argument(argument, text),
+            DWGPROPS_SELECTOR => self.dwgprops_argument(argument, text),
+            UNITS_SELECTOR | DASH_UNITS_SELECTOR => self.units_argument(selector, argument, text),
+            super::sysvdlg_dialog::SYSVDLG_SELECTOR => self.sysvdlg_argument(argument, text),
             _ => self.refuse_argument(format!("unsupported utility selector: {selector}")),
         }
     }
@@ -167,6 +171,52 @@ impl CadSession {
             CommandId::Extended(cad_app::ExtendedCommandId::JulianDate),
             CommandPayload::JulianDate(argument.trim().to_string()),
         )
+    }
+
+    /// `UNITS <unit> <precision>` / `-UNITS`: one document-unit write through
+    /// the ordinary extended command. The bare selectors are reports.
+    fn units_argument(
+        &self,
+        selector: &'static str,
+        argument: &str,
+        text: &str,
+    ) -> Result<(), String> {
+        let Some(units) = parse_units_argument(argument) else {
+            return self.refuse_argument(format!(
+                "units.invalid_argument: '{text}' needs `<unit> <precision>` where <unit> is \
+                 drawing, mm, cm, m, in or ft and <precision> is 0 to 8; nothing was written"
+            ));
+        };
+        let id = if selector == DASH_UNITS_SELECTOR {
+            cad_app::ExtendedCommandId::DashUnits
+        } else {
+            cad_app::ExtendedCommandId::Units
+        };
+        self.dispatch_typed_argument(
+            selector,
+            CommandId::Extended(id),
+            CommandPayload::Units(units),
+        )
+    }
+
+    /// `DWGPROPS <field> <text>` / `CUSTOM <name> <text>`: one summary-metadata
+    /// write. The bare selector is the report and never reaches here.
+    fn dwgprops_argument(&self, argument: &str, text: &str) -> Result<(), String> {
+        match parse_dwgprops_argument(argument) {
+            Ok(action) => self.dispatch_typed_argument(
+                DWGPROPS_SELECTOR,
+                CommandId::Extended(cad_app::ExtendedCommandId::DwgProps),
+                CommandPayload::DwgProps(action),
+            ),
+            Err(DwgPropsArgumentError::UnknownField(field)) => self.refuse_argument(format!(
+                "dwgprops.unknown_field: '{field}' is not TITLE, AUTHOR, SUBJECT, KEYWORDS, \
+                 COMMENTS or CUSTOM; '{text}' changed nothing"
+            )),
+            Err(DwgPropsArgumentError::Malformed) => self.refuse_argument(format!(
+                "dwgprops.invalid_argument: '{text}' needs `<field> <text>` (quoted for spaces; \
+                 a quoted empty token clears) or `CUSTOM <name> <text>`"
+            )),
+        }
     }
 
     /// `SETVAR <name>` (report) or `SETVAR <name> <value>` (write through the

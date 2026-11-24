@@ -260,6 +260,12 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             "SYSVARMONITOR",
             // `JULIAN <date>`: the calendar-to-Julian report form.
             "JULIAN",
+            // Document summary/unit writes and the system-variable dialog line
+            // (2026-11-24).
+            "DWGPROPS",
+            "UNITS",
+            "-UNITS",
+            "SYSVDLG",
             // The annotation-scale table's typed writes (2026-11-16).
             "SCALELISTEDIT",
             "-SCALELISTEDIT",
@@ -324,6 +330,8 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             "VPORTS",
             "VPCLIP",
             "VPSCALE",
+            // `VPSYNC [<master>]` (2026-11-24): the optional 0-based master
+            // viewport index.
             "VPSYNC",
             "LAYVPI",
             // `LAYFRZ VP [<index>,...]` (2026-11-24): the per-viewport freeze

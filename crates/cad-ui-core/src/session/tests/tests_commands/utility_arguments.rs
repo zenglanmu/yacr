@@ -236,3 +236,66 @@ fn julian_typed_date_routes_to_the_report_and_refuses_impossible_dates() {
         );
     }
 }
+
+#[test]
+fn dwgprops_typed_lines_write_summary_metadata_and_name_unknown_fields() {
+    let session = fresh_session();
+    let before = drawing(&session).revision();
+    session
+        .command("DWGPROPS TITLE \"Pump station\"")
+        .expect("TITLE write");
+    session
+        .command("DWGPROPS AUTHOR A. Drafter")
+        .expect("unquoted spaces join the one value");
+    session
+        .command("DWGPROPS CUSTOM \"Project\" \"North\"")
+        .expect("CUSTOM write");
+    let after = drawing(&session);
+    assert!(after.revision() > before);
+    assert_eq!(
+        after.document_metadata().title.as_deref(),
+        Some("Pump station")
+    );
+    assert_eq!(
+        after.document_metadata().author.as_deref(),
+        Some("A. Drafter")
+    );
+    assert_eq!(
+        after
+            .document_metadata()
+            .custom
+            .get("Project")
+            .map(String::as_str),
+        Some("North")
+    );
+    // A quoted empty token clears; a bare field does not silently clear.
+    session.command("DWGPROPS TITLE \"\"").expect("clear");
+    assert!(drawing(&session).document_metadata().title.is_none());
+    let error = session.command("DWGPROPS TITLE").unwrap_err();
+    assert!(error.contains("dwgprops.invalid_argument"), "{error}");
+    let error = session.command("DWGPROPS PRICE 3").unwrap_err();
+    assert!(error.contains("dwgprops.unknown_field"), "{error}");
+}
+
+#[test]
+fn units_typed_lines_write_the_document_unit_and_refuse_bad_arguments() {
+    let session = fresh_session();
+    session.command("UNITS mm 2").expect("UNITS write");
+    {
+        let controller = session.core.controller.borrow();
+        let units = &controller.application.workspace.documents[&controller.document_id].units;
+        assert_eq!(units.display, cad_domain::Unit::Millimeter);
+        assert_eq!(units.decimal_places, 2);
+    }
+    session.command("-UNITS m 4").expect("-UNITS write");
+    {
+        let controller = session.core.controller.borrow();
+        let units = &controller.application.workspace.documents[&controller.document_id].units;
+        assert_eq!(units.display, cad_domain::Unit::Meter);
+        assert_eq!(units.decimal_places, 4);
+    }
+    let error = session.command("UNITS mm 9").unwrap_err();
+    assert!(error.contains("units.invalid_argument"), "{error}");
+    let error = session.command("UNITS parsec 2").unwrap_err();
+    assert!(error.contains("units.invalid_argument"), "{error}");
+}

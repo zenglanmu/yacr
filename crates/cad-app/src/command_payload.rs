@@ -23,6 +23,9 @@ mod text_payloads;
 mod clip;
 pub use clip::ClipCommand;
 
+mod document_admin;
+pub use document_admin::*;
+
 mod payload_extra;
 pub use payload_extra::*;
 
@@ -70,7 +73,6 @@ pub enum CommandPayload {
     /// A non-finite corner is `zoom.window.invalid_rect` and a rectangle with no
     /// extent on either axis is `zoom.window.degenerate_rect` — both are
     /// `InvalidInput` before any camera change, never a clamped fit.
-    ///
     /// **2D orthographic only**: a 3D observation refuses by name
     /// (`zoom.window.requires_2d`); view-only, no write/revision/history/generation.
     ZoomWindow {
@@ -824,9 +826,12 @@ pub enum CommandPayload {
     SetVar(String),
     /// `JULIAN <date>`: one calendar date; `cad-app` validates it and refuses impossible dates.
     JulianDate(String),
+    DwgProps(DwgPropsCommand),
+    Units(UnitsCommand),
+    SysVarDialog(SysVarDialogCommand),
     /// `SYSVARMONITOR ADD|REMOVE|LIST <name>`: one session-only monitor action
-    /// over a bounded set of modelled `SETVAR` names; `LIST` compares against the
-    /// last snapshot and reports a change. There is no background notification.
+    /// over the modelled `SETVAR` names; `LIST` compares against the last
+    /// snapshot. There is no background notification.
     SysVarMonitor(SysVarMonitorAction),
     /// `SPACETRANS <distance>`: one model/paper distance conversion.
     ///

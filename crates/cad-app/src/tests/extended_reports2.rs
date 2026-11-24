@@ -133,7 +133,7 @@ fn sysvarmonitor_refuses_an_unknown_variable_by_name() {
 }
 
 #[test]
-fn sysvdlg_lists_every_exposed_variable_and_marks_the_rest_not_tracked() {
+fn sysvar_dialog_lists_every_exposed_variable_and_marks_the_rest_not_tracked() {
     let (mut app, mut session) = application_with_document();
     let before = revision(&app);
     let outcome = execute(&mut app, &mut session, ExtendedCommandId::SysVarDialog)
@@ -171,7 +171,247 @@ fn sysvdlg_lists_every_exposed_variable_and_marks_the_rest_not_tracked() {
         .contains("not tracked"));
     assert!(diagnostic(&outcome, "sysvdlg.dialog_not_implemented")
         .message
-        .contains("no system-variable dialog"));
+        .contains("no interactive dialog"));
+    assert_eq!(revision(&app), before);
+}
+
+#[test]
+fn sysvar_dialog_reads_one_variable_and_refuses_an_unknown_name() {
+    let (mut app, mut session) = application_with_document();
+    let before = revision(&app);
+    let read = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::Extended(ExtendedCommandId::SysVarDialog),
+                CommandPayload::SysVarDialog(SysVarDialogCommand::Read("pdmode".into())),
+            ),
+        )
+        .expect("SYSVDLG reads one modelled variable");
+    assert!(diagnostic(&read, "sysvdlg.value")
+        .message
+        .contains("PDMODE = 0"));
+    assert_eq!(revision(&app), before);
+
+    let error = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::Extended(ExtendedCommandId::SysVarDialog),
+                CommandPayload::SysVarDialog(SysVarDialogCommand::Read("PLOTSTYLE".into())),
+            ),
+        )
+        .expect_err("an unmodelled name is refused by name");
+    assert!(
+        error.to_string().contains("sysvdlg.unknown_variable"),
+        "{error}"
+    );
+}
+
+#[test]
+fn sysvar_dialog_applies_header_and_session_values() {
+    let (mut app, mut session) = application_with_document();
+    let before = revision(&app);
+    let outcome = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::Extended(ExtendedCommandId::SysVarDialog),
+                CommandPayload::SysVarDialog(SysVarDialogCommand::Apply(vec![
+                    SysVarAssignment {
+                        name: "PDMODE".into(),
+                        value: "3".into(),
+                    },
+                    SysVarAssignment {
+                        name: "PDSIZE".into(),
+                        value: "2.5".into(),
+                    },
+                    SysVarAssignment {
+                        name: "SNAPUNIT".into(),
+                        value: "25".into(),
+                    },
+                    SysVarAssignment {
+                        name: "GRID".into(),
+                        value: "OFF".into(),
+                    },
+                ])),
+            ),
+        )
+        .expect("a mixed apply is admitted");
+    assert!(outcome.changes.is_some());
+    assert_eq!(revision(&app).0, before.0 + 1, "one header revision");
+    let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
+    assert_eq!(drawing.point_display_mode(), 3);
+    assert_eq!(drawing.point_display_size(), 2.5);
+    assert_eq!(session.snap_spacing(), 25.0);
+    assert!(!session.grid_enabled());
+    assert_eq!(
+        outcome
+            .diagnostics
+            .iter()
+            .filter(|row| row.code == "sysvdlg.applied")
+            .count(),
+        4
+    );
+    assert!(diagnostic(&outcome, "sysvdlg.no_history")
+        .message
+        .contains("no undo step"));
+    assert!(!app.can_undo(&DocumentId(1)));
+}
+
+#[test]
+fn sysvar_dialog_restores_header_values_in_one_revision() {
+    let (mut app, mut session) = application_with_document();
+    let before = revision(&app);
+    let outcome = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::Extended(ExtendedCommandId::SysVarDialog),
+                CommandPayload::SysVarDialog(SysVarDialogCommand::Apply(vec![
+                    SysVarAssignment {
+                        name: "PDMODE".into(),
+                        value: "35".into(),
+                    },
+                    SysVarAssignment {
+                        name: "PDSIZE".into(),
+                        value: "-3".into(),
+                    },
+                    SysVarAssignment {
+                        name: "LTSCALE".into(),
+                        value: "2.5".into(),
+                    },
+                    SysVarAssignment {
+                        name: "INSBASE".into(),
+                        value: "1,2,3".into(),
+                    },
+                    SysVarAssignment {
+                        name: "LIMMIN".into(),
+                        value: "0,0".into(),
+                    },
+                    SysVarAssignment {
+                        name: "LIMMAX".into(),
+                        value: "420,297".into(),
+                    },
+                ])),
+            ),
+        )
+        .expect("a header restore is admitted");
+    assert!(outcome.changes.is_some());
+    assert_eq!(
+        revision(&app).0,
+        before.0 + 1,
+        "all header values land in one revision"
+    );
+    let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
+    assert_eq!(drawing.point_display_mode(), 35);
+    assert_eq!(drawing.point_display_size(), -3.0);
+    assert_eq!(drawing.linetype_scale(), 2.5);
+    assert_eq!(
+        drawing.insertion_base().map(|p| (p.x, p.y, p.z)),
+        Some((1.0, 2.0, 3.0))
+    );
+    assert_eq!(drawing.limits_min(), Some([0.0, 0.0]));
+    assert_eq!(drawing.limits_max(), Some([420.0, 297.0]));
+    assert!(!app.can_undo(&DocumentId(1)));
+}
+
+#[test]
+fn sysvar_dialog_rejects_the_whole_apply_before_any_write() {
+    let (mut app, mut session) = application_with_document();
+    let before = revision(&app);
+    for assignments in [
+        vec![SysVarAssignment {
+            name: "NOT_A_VAR".into(),
+            value: "1".into(),
+        }],
+        vec![
+            SysVarAssignment {
+                name: "PDMODE".into(),
+                value: "1".into(),
+            },
+            SysVarAssignment {
+                name: "PDMODE".into(),
+                value: "2".into(),
+            },
+        ],
+        vec![
+            SysVarAssignment {
+                name: "PDMODE".into(),
+                value: "1".into(),
+            },
+            SysVarAssignment {
+                name: "LTSCALE".into(),
+                value: "0".into(),
+            },
+        ],
+    ] {
+        let error = app
+            .execute(
+                &mut session,
+                command(
+                    CommandId::Extended(ExtendedCommandId::SysVarDialog),
+                    CommandPayload::SysVarDialog(SysVarDialogCommand::Apply(assignments)),
+                ),
+            )
+            .expect_err("a bad apply is refused as a whole");
+        assert!(error.to_string().contains("sysvdlg."), "{error}");
+        assert_eq!(revision(&app), before, "nothing was written");
+        assert_eq!(
+            app.workspace.documents[&DocumentId(1)]
+                .drawing
+                .point_display_mode(),
+            0
+        );
+    }
+}
+
+#[test]
+fn sysvar_dialog_refuses_a_viewer_apply_and_model_space_cvport() {
+    let (mut app, mut session) = application_with_document();
+    let before = revision(&app);
+    let cvport = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::Extended(ExtendedCommandId::SysVarDialog),
+                CommandPayload::SysVarDialog(SysVarDialogCommand::Apply(vec![
+                    SysVarAssignment {
+                        name: "PDMODE".into(),
+                        value: "1".into(),
+                    },
+                    SysVarAssignment {
+                        name: "CVPORT".into(),
+                        value: "1".into(),
+                    },
+                ])),
+            ),
+        )
+        .expect_err("CVPORT in model space is refused before the PDMODE write");
+    assert!(
+        cvport.to_string().contains("sysvdlg.cvport_requires_paper"),
+        "{cvport}"
+    );
+    assert_eq!(revision(&app), before);
+    assert_eq!(
+        app.workspace.documents[&DocumentId(1)]
+            .drawing
+            .point_display_mode(),
+        0
+    );
+
+    session.switch_mode(AppMode::Viewer).unwrap();
+    let viewer = app.execute(
+        &mut session,
+        command(
+            CommandId::Extended(ExtendedCommandId::SysVarDialog),
+            CommandPayload::SysVarDialog(SysVarDialogCommand::Apply(vec![SysVarAssignment {
+                name: "PDMODE".into(),
+                value: "1".into(),
+            }])),
+        ),
+    );
+    assert!(viewer.is_err(), "Viewer may not apply variables");
     assert_eq!(revision(&app), before);
 }
 
@@ -251,9 +491,30 @@ fn acadinfo_reports_real_product_and_document_counts_only() {
     );
     assert!(row.message.contains("revision"), "{}", row.message);
     assert!(row.message.contains("entities"), "{}", row.message);
+    assert!(
+        row.message.contains(std::env::consts::OS),
+        "the real target OS is reported: {}",
+        row.message
+    );
+    assert!(
+        row.message.contains(std::env::consts::ARCH),
+        "the real target architecture is reported: {}",
+        row.message
+    );
+    // The report reads the live document header, not a constant.
+    assert!(
+        row.message
+            .contains("units drawing units (3 decimal place(s))"),
+        "{}",
+        row.message
+    );
     assert!(diagnostic(&outcome, "acadinfo.not_collected")
         .message
         .contains("not collected"));
+    // The one non-global gap is named: no information file is written.
+    assert!(diagnostic(&outcome, "acadinfo.file_not_written")
+        .message
+        .contains("writes no file"));
     assert_eq!(revision(&app), before);
 }
 

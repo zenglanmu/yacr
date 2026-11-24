@@ -71,8 +71,7 @@ mod scale_arguments;
 mod select_entities;
 mod select_filter;
 mod settings;
-// The 2026-11-12 SHAPE/MINSERT/ADDSELECTED typed dispatch (sibling of
-// `draw2_arguments`; the grammar lives in `commands::shape_block`).
+// SHAPE/MINSERT/ADDSELECTED typed dispatch (grammar in `commands::shape_block`).
 mod shape_block_arguments;
 mod shell_settings;
 mod snap_unit;
@@ -80,6 +79,7 @@ mod snapshot;
 mod space;
 mod status;
 mod status_view;
+mod sysvdlg_dialog;
 mod table_export;
 mod text_batch;
 mod text_commands;

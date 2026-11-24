@@ -80,6 +80,8 @@ mod app_extended_reports2;
 mod app_extended_session2;
 // The session-only SYSVARMONITOR watch set.
 mod app_extended_sysvar;
+mod app_extended_sysvar_dialog;
+pub use app_extended_sysvar::{modelled_system_variable, ModelledValue, MODELLED_SYSTEM_VARIABLES};
 // The Wave 3 extended-command handlers (reports/session and refusals).
 mod app_extended_refusals3;
 mod app_extended_reports3;
@@ -510,27 +512,28 @@ pub use command_payload::{
     AttributeEditScope, AttributeOrderCommand, AttributeSyncCommand, CenterArm, CenterEditPayload,
     CenterLineCommand, CenterMarkCommand, ChangePropertiesRequest, ClipCommand, CommandPayload,
     DashLayerOps, DimEditCommand, DimJogLineCommand, DimOverrideCommand, DimStyleCommand,
-    DimTextEditCommand, DimensionBatchPayload, DimensionChainCommand, EntityPropertyWrite,
-    FilterExpression, FilterLogic, FilterRequest, GripStretchCommand, GroupCommand,
-    GroupEditCommand, HatchDrawOrder, HatchEditOption, HatchOriginCommand, ImageAdjustCommand,
-    ImageAttachCommand, ImageClipCommand, JoinMode, JoinOptions, JustifyTextCommand,
-    LayerStateCommand, LeaderCommand, LinetypeCommand, MInsertCommand, MLeaderAlignCommand,
-    MLeaderAlignMode, MLeaderAttachment, MLeaderContentSpec, MLeaderEditAction, MLeaderEditCommand,
-    MLeaderLineOverrideField, MatchPropSettings, MeasureGeomOption, MirrorOptions, MlEditCommand,
-    MlEditMode, MocoroCommand, NamedObjectKind, OffsetGapType, OffsetLayer, OffsetMode,
-    OffsetOptions, OrdinateAxis, OrdinateDimensionCommand, ParamOp, PatternFileText,
-    PeditEditCommand, PeditEditOption, PeditOption, PeditVertexAction, PeditVertexCommand,
-    PlanCircle, PlanLength, PurgeTarget, QDimCommand, QDimMode, QDimSnap, QSelectRequest,
-    RadialDimensionCommand, RefCloseOption, RefSetOption, RenameCommand, RevCloudStyle,
-    RevisionCloudMode, RevisionCloudOptions, RotatedLinearDimensionCommand, SelectSimilarSettings,
-    SelectionApply, SelectionOperator, SelectionPredicate, SelectionProperty, SelectionScope,
-    SelectionToolPayload, SetByLayerSettings, ShapeCommand, SolidPrimitiveCommand,
-    StretchPolygonCommand, StyleTableCommand, StyleTableKind, StyleTableOp, SysVarMonitorAction,
-    TCircleCommand, TCircleSizeMode, TCountCommand, TableCreateCommand, TableEditCommand,
-    TextAlignAxis, TextAlignCommand, TextAlignEdge, TextAlignSpacing, TextAlignSpacingCommand,
-    TextBoundaryShape, TextCaseMode, TextFitCommand, TextMaskKind, TextMaskOptions, TextOrder,
-    TextScaleCommand, ToleranceCommand, TwoLineCommand, Txt2MTextOptions, UtilityPayload,
-    VPointInput, ViewCommand, WipeoutPayload, XClipCommand,
+    DimTextEditCommand, DimensionBatchPayload, DimensionChainCommand, DwgPropsCommand,
+    EntityPropertyWrite, FilterExpression, FilterLogic, FilterRequest, GripStretchCommand,
+    GroupCommand, GroupEditCommand, HatchDrawOrder, HatchEditOption, HatchOriginCommand,
+    ImageAdjustCommand, ImageAttachCommand, ImageClipCommand, JoinMode, JoinOptions,
+    JustifyTextCommand, LayerStateCommand, LeaderCommand, LinetypeCommand, MInsertCommand,
+    MLeaderAlignCommand, MLeaderAlignMode, MLeaderAttachment, MLeaderContentSpec,
+    MLeaderEditAction, MLeaderEditCommand, MLeaderLineOverrideField, MatchPropSettings,
+    MeasureGeomOption, MirrorOptions, MlEditCommand, MlEditMode, MocoroCommand, NamedObjectKind,
+    OffsetGapType, OffsetLayer, OffsetMode, OffsetOptions, OrdinateAxis, OrdinateDimensionCommand,
+    ParamOp, PatternFileText, PeditEditCommand, PeditEditOption, PeditOption, PeditVertexAction,
+    PeditVertexCommand, PlanCircle, PlanLength, PurgeTarget, QDimCommand, QDimMode, QDimSnap,
+    QSelectRequest, RadialDimensionCommand, RefCloseOption, RefSetOption, RenameCommand,
+    RevCloudStyle, RevisionCloudMode, RevisionCloudOptions, RotatedLinearDimensionCommand,
+    SelectSimilarSettings, SelectionApply, SelectionOperator, SelectionPredicate,
+    SelectionProperty, SelectionScope, SelectionToolPayload, SetByLayerSettings, ShapeCommand,
+    SolidPrimitiveCommand, StretchPolygonCommand, StyleTableCommand, StyleTableKind, StyleTableOp,
+    SysVarAssignment, SysVarDialogCommand, SysVarMonitorAction, TCircleCommand, TCircleSizeMode,
+    TCountCommand, TableCreateCommand, TableEditCommand, TextAlignAxis, TextAlignCommand,
+    TextAlignEdge, TextAlignSpacing, TextAlignSpacingCommand, TextBoundaryShape, TextCaseMode,
+    TextFitCommand, TextMaskKind, TextMaskOptions, TextOrder, TextScaleCommand, ToleranceCommand,
+    TwoLineCommand, Txt2MTextOptions, UnitsCommand, UtilityPayload, VPointInput, ViewCommand,
+    WipeoutPayload, XClipCommand,
 };
 
 pub use app_audit::AuditRequest;

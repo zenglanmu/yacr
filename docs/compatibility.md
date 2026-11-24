@@ -757,11 +757,11 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | FINDMATCH | **完整实现（2026-11-24）**：翻转会话 `find_match_case`（默认 OFF），`-FIND`/`FIND` 的**报告与替换共用**该标志：ON 按精确字节（区分大小写），OFF 按 ASCII 不区分大小写；覆盖 MTEXT（按投影文本）、单行 TEXT、MULTILEADER 与表格单元格；Viewer-legal，无库写/修订/历史 | 比较是字面子串：无正则、无 Unicode 折叠/排序规则（ASCII 大小写是声明的唯一折叠）；无 GUI/像素证据 |
 | REVCLOUDPROPERTIES | **只读报告 v1（2026-11-09）**：报告会话弧长令牌（默认 15），`revcloud.properties`；Viewer-legal | `REVCLOUDPROPERTIES <length>` 设置形式 **NOT IMPLEMENTED**；`REVCLOUD` 不读取该令牌 | 只读，无写 |
 | SYSVARMONITOR | **会话监视集（2026-11-12）**：`ADD`/`REMOVE`/`LIST [<name>]`；`LIST`/裸命令对比上次快照，变化报 `sysvarmonitor.changed`，并报 `sysvarmonitor.value`/`.summary`；Viewer-legal | 仅在被查询时检测变化，没有后台通知；闭集之外的变量不建模也不杜撰 | 只有会话状态，无写 |
-| SYSVDLG | **只读报告（2026-11-12）**：列出全部已建模变量当前值（`sysvdlg.value`/`.summary`）+ `sysvdlg.not_tracked` + `sysvdlg.dialog_not_implemented`；Viewer-legal | 本构建无系统变量对话框：不能编辑/保存/恢复，单值读取请用 `SETVAR <name>` | 只读，无写 |
+| SYSVDLG | **完整实现（2026-11-24）**：裸命令报告全部已建模变量（`sysvdlg.value`/`.summary`/`.not_tracked`）；`SYSVDLG <name>` 读取单值、`<name> <value>` 编辑、`SAVE|RESTORE <file.json>` 保存/恢复版本化 `yacr.sysvar` JSON（宿主 named-file 桥；多条 header 值经 `apply_header_values` 一条 revision）；未建模变量按名字拒绝，文件未知变量/重复名/非法值在写入前整体拒绝；Viewer 可报告/读取但拒绝编辑/保存/恢复 | 无交互对话框（ADR 全局范围）；**不是 AutoCAD `.svf`**（自有 JSON 格式，目标扩展名必须 `.json`）；保存省略无值变量，恢复不清空；只有 15 个已建模变量 | 编辑/恢复写 header 或会话状态；header 写一条 revision、无 undo patch；`SAVE` 写宿主文件 |
 | VTOPTIONS | **只读报告 v1（2026-11-09）**：`vtoptions.not_tracked` 明说视图过渡设置未建模（代码串按 Wave 2 契约原样保留）；Viewer-legal | 不报告也不杜撰平滑/时长/缩放平移过渡选项 | 只读，无写 |
 | ALIASEDIT | **完整实现（2026-11-24）**：`ADD <alias> <target>`/`REMOVE <alias>`/`LIST`/bare；运行时别名先于静态表解析并遮蔽内建，仅删除运行时行；`ADD`/`REMOVE` 经宿主 `preference.json` 根键 `commandAliases` 持久化并在新会话恢复；写入失败按 `aliasedit.not_persisted` 回滚；目标失效/冲突的持久行启动时按名丢弃并记诊断 | 无交互对话框（ADR 全局范围）；不解析 `acad.pgp` 文件 | 写宿主偏好（不是绘图）；`LIST`/裸命令只读 |
 | WHOHAS | **只读报告 v1（2026-11-09）**：`whohas.single_document`；Viewer-legal | 单文档构建：无网络查询，无法列出其他用户、其他打开文档或文件锁 | 只读，无写 |
-| ACADINFO | **只读报告 v1（2026-11-09）**：产品版本（`CARGO_PKG_VERSION`）+ debug/release 构建配置 + 文档修订/实体数（`acadinfo.report`）；`acadinfo.not_collected` 明说许可证/硬件/模块数据不收集；Viewer-legal | 不写文件、不导出安装信息；没有的数据一律不杜撰 | 只读，无写 |
+| ACADINFO | **部分实现（只读报告，2026-11-24 扩充）**：产品版本 + debug/release 构建配置 + 真实目标 OS/架构 + 文档修订/实体数/单位/精度/应用域（`acadinfo.report`）；`acadinfo.not_collected` 明说许可证/硬件/模块枚举不收集（全局范围）；`acadinfo.file_not_written` 明说本构建不创建信息文件；Viewer-legal | **缺口**：AutoCAD 命令创建信息文件，本 crate 无宿主文件 sink，不写文件；许可证/硬件/模块枚举属全局范围 | 只读，无写 |
 | PTYPE | **只读报告 v1（2026-11-09）**：报告 `$PDMODE`/`$PDSIZE`（`ptype.report`）；Viewer-legal | 写入仍只走现有 `PDMODE`/`PDSIZE`；PTYPE 对话框形式 **NOT IMPLEMENTED** | 只读，无写 |
 | SCALELISTEDIT | 完整实现 | 真实 `ACAD_SCALELIST`：只读报告（行、活动 `CANNOSCALE`、首个图纸布局页面）+ `ADD`/`RENAME`/`DELETE` 写（各一条记录/一次修订，Viewer 拒绝写）；`RENAME` 级联 `CANNOSCALE` 与全部注释性覆盖；`DELETE` 按名字引用拒绝（`scalelistedit.in_use` 报两处计数，并说明视口/打印比例是变换不是名字引用）；导出回写并有往返测试 | `RESET`（无权威默认比例模板）与模态对话框未实现；无撤销步（`scalelistedit.no_history`）；含 `"` 的比例名无法由命令行键入（拒绝而非静默删引号），表/改名/删除/导出仍可处理该行 |
 | HYPERLINKOPTIONS | **具名拒绝 v1（2026-11-09）**：`CadError::Unsupported` / `hyperlinkoptions.unsupported: this build has no hyperlink storage model`；不写库/不升修订/不入历史，Viewer-legal | 无超链接存储模型：不保存、不显示任何超链接 | 拒绝，无写 |
@@ -1709,7 +1709,7 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 | `DWGLOG` | **部分实现（会话令牌）**：翻转会话 `dwglog` 令牌（默认 **OFF**）；`dwglog.toggled`；无事务/修订/历史 | 本构建**不写日志文件**，也不写图；没有日志消费者 |
 | `LOGFILEON` | **部分实现（会话令牌）**：把同一 `dwglog` 令牌置 **ON**；`logfileon.toggled` | 不写日志文件 |
 | `LOGFILEOFF` | **部分实现（会话令牌）**：把同一 `dwglog` 令牌置 **OFF**；`logfileoff.toggled` | 不写日志文件 |
-| `DWGPROPS` | **部分实现（只读）**：`dwgprops.report` 报告文档 id、修订号、实体数 | 标题/作者/主题/关键字/自定义特性**未建模**（`dwgprops.metadata_not_tracked`），不杜撰 |
+| `DWGPROPS` | **完整实现（2026-11-24）**：报告文档 id/修订号/实体数 + `title`/`author`/`subject`/`keywords`/`comments`/自定义属性（`dwgprops.field`/`.custom`/`.summary`/`.empty`）；`DWGPROPS <field> <text>` 与 `CUSTOM <name> <text>` 写入 `document.json` → `variables.metadata`（空值清除，一条 revision/header-only `ChangeSet`/无 undo patch）；`.ymodel` 快照往返有契约；Viewer 可报告但拒绝写入 | 无 Drawing Properties 对话框（全局范围）；DXF/DWG 导出器不携带摘要信息（连接器边界，不杜撰）；自定义属性上限 256/名称 255 字符/值 4096 字符 | 写 `document.json`，无元素/表格行 |
 | `DWFFORMAT` | **部分实现（只读能力报告）**：`dwfformat.not_supported` 说明本构建不导出 DWF/DWFx，并指向 `PLOT` 的 SVG/PDF | 不是错误；没有默认格式设置，不写任何文件 |
 | `EXPORTPDF` | **部分实现（只读能力报告）**：`exportpdf.use_plot` 说明 PDF 导出由宿主经 `PLOT`（平台保存对话框）负责 | 不是错误；本命令自身不写 PDF，`cad-app` 不重实现宿主文件 I/O |
 | `SAVEALL` | **部分实现（具名拒绝）**：`saveall.single_document: this build has one document; use SAVE` | 不写库/不升修订/不入历史 |
@@ -1799,7 +1799,7 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 | `-BLOCK` / `-INSERT` | **已实现（别名）**：调用唯一 `BLOCK` / `INSERT` 处理器 | 同一事务/撤销；无第二套实现 |
 | `-BOUNDARY` / `-HATCH` / `-HATCHEDIT` / `EXOFFSET` | 别名（各自父命令同一处理器） | `-BOUNDARY` 与 `EXOFFSET` **完整实现**（与已完成的 `BOUNDARY`/`OFFSET` 完全一致，含边界集/岛屿检测与全部偏移种类）；`-HATCHEDIT` **完整实现**（与 `HATCHEDIT` 一致，含 `ORIGIN`/`PATTERNFILE`）；`-HATCH` **完整实现**（与 `HATCH` 同一支持域；关联性/预览属全局范围） |
 | `DIM` | **部分实现（只读路由报告）**：`dim.available` 列出已实现 `DIM*` 选择子；`dim.router_only` | 不创建标注；无交互式类型提示 |
-| `UNITS` | **部分实现（只读报告）**：`units.report`（图纸单位 4 位小数、角度用度）；`units.dialog_not_implemented` | 无 UNITS 对话框/逐图纸单位表；不写入 |
+| `UNITS` | **部分实现（2026-11-24 真实写入）**：裸命令读取实时 `Document.units`（单位/精度，不再是写死的 4 位）；`UNITS <unit> <precision>` 写声明单位与线性小数位（一条 header revision、header-only `ChangeSet`、无 undo patch）；Viewer 拒绝写 | 角度格式/精度/方向/基准角、长度 *format* 表（Scientific/Engineering/Architectural/Fractional）、`$INSUNITS` 插入比例语义与 UNITS 对话框未建模（`units.not_implemented`） | 写 `document.json` |
 | `ARCTEXT` | **部分实现（具名拒绝）**：`arctext.unsupported: text along an arc is not modeled; no combined arc+text payload` | 不写库/不升修订/不入历史 |
 | `MLEADERALIGN` | **部分实现（具名拒绝）**：`mleaderalign.unsupported: no multileader alignment model` | 同上 |
 | `MLEADEREDIT` | 完整实现 | `ADD <x> <y>` / `REMOVE <index>`（可清空一个根；整条最后一条 `mleaderedit.last_line`）+ `PATHTYPE <i> LINE\|SPLINE\|INVISIBLE`（组 `170`+`93` bit1）、`ARROWSIZE <i> <size>`（组 `40`+bit16）、`BYSTYLE <i> PATH\|ARROW`（清位并从样式重盖）；全部经唯一 MULTILEADER 写入器往返；一条事务/一步撤销 | 逐线颜色/线型/线宽与自定义箭头块句柄无可用语义模型，按名拒绝；无逐顶点 setter（顶点由 `ADD`/`MLEADERALIGN` 改） |
@@ -1824,7 +1824,7 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 | `-SCALELISTEDIT` | **部分实现（只读报告）**：真实 `ACAD_SCALELIST` 条目 | 创建/编辑/删除/排序比例未实现 |
 | `LWEIGHT` / `-LWEIGHT` | **部分实现（只读报告）**：会话线宽显示令牌（默认 ON） | 渲染器不消费该标志；LWEIGHT 对话框未实现 |
 | `COLOR` / `-COLOR` | **完整实现**：`<0..=256>` / `BYLAYER` / `BYNAME` / `BYBLOCK` 写会话当前颜色（`color.set`，无库写、无撤销），裸命令报告（`color.report`，默认 256=ByLayer）；**新实体由创建漏斗写入该 ACI**（`256` 行逐字节不变，`0` = ByBlock 符号值，`1..=255` 经 `property_value::rgb_for_aci` 解析），撤销随实体行一起回退 | **全局范围**：无调色板/Select Color 对话框（`src/components/ColorChooser.tsx` 是实体属性选择器，不是会话令牌）；无颜色名表（只接受 ACI 与三个符号词）；`CELTSCALE` 等颜色相关变量不在范围 |
-| `-UNITS` | **部分实现（只读报告）**：固定单位显示规则 | Units 对话框/逐图纸单位表未实现 |
+| `-UNITS` | **部分实现（2026-11-24 真实写入）**：与 `UNITS` 同一实现臂；裸命令报告实时单位，`-UNITS <unit> <precision>` 写声明单位与线性小数位（一条 header revision） | 角度格式/精度/方向/长度 *format* 表/`$INSUNITS`/Units 对话框未建模 | 写 `document.json` |
 | `COPYHIST` | **部分实现（只读报告）**：`copyhist.not_tracked` | 会话不存命令历史文本；不复制 |
 | `HELP` / `CLASSICINSERT` / `CLASSICGROUP` | **部分实现（具名拒绝）**：`help.unsupported` / `classicinsert.unsupported` / `classicgroup.unsupported` | 不写库/不升修订/不入历史 |
 | `FILETAB` / `FILETABCLOSE` / `HIDEPALETTES` / `SHOWPALETTES` / `RIBBONCLOSE` / `GOTOSTART` | **部分实现（具名拒绝）**：窗口/选项板/功能区/开始页 chrome 由宿主负责 | 同上 |
@@ -1903,8 +1903,8 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 | --- | --- | --- |
 | `PAGESETUP` | **完整实现**：裸命令只读报告每个布局的入库 `PLOTSETTINGS`（纸张/旋转/比例/出图类型/provenance）；typed 形式写入 Authored 记录，未知布局/空纸名/非正尺寸/非正比例在写前按名拒绝，一条事务/一步撤销。 | 绘图仪/CTB/STB 属 ADR 全局范围；报告形式无写 |
 | `-PAGESETUP` | **完整实现**：同一报告与 typed 写入的命令行拼写。 | 绘图仪/CTB/STB 属 ADR 全局范围；报告形式无写 |
-| `PSETUPIN` | **部分实现**：具名拒绝（`psetupin.unsupported`）：从其他图纸导入页面设置未实现。 | 不写库/不升修订/不入历史（报告类只读） |
-| `-PSETUPIN` | 完整实现 | `PAGESETUPIN` 的命令行拼写：同一实现臂（`page_setup_write`），一次 revision 复制源记录的纸张/尺寸/比例/旋转 | 跨文件导入（`PSETUPIN` 的文件形式）未建模；无对话框 |
+| `PSETUPIN` | **部分实现（2026-11-24 更正）**：从**同一图纸**的源布局复制已存 `Authored` `PLOTSETTINGS` 到目标布局，一条事务/一步撤销；无源记录按 `psetupin.no_source` 拒绝，不合成 A4 | **缺口**：跨文件导入未实现——宿主 named-file 桥只能读字节，`cad-app` 没有从 DWG/DXF/DWT 或源文档快照提取页面设置的路径；无文件对话框 |
+| `-PSETUPIN` | **部分实现（2026-11-24 从完整降回）**：`PSETUPIN` 的命令行拼写，同一实现臂（`page_setup_write`），一次 revision 复制**同一图纸内**源布局已存 `PLOTSETTINGS` | **缺口**：跨文件导入未实现（同 `PSETUPIN`）；无文件对话框 |
 | `PLOTSTYLE` | **部分实现**：具名拒绝（`plotstyle.unsupported`）：命名打印样式未实现（无 CTB/STB 表）。 | 不写库/不升修订/不入历史（报告类只读） |
 | `-PLOTSTYLE` | **部分实现**：具名拒绝（`-plotstyle.unsupported`）：打印样式列表的命令行拼写。 | 不写库/不升修订/不入历史（报告类只读） |
 | `CONVERTPSTYLES` | **部分实现**：具名拒绝（`convertpstyles.unsupported`）：打印样式转换未实现（无 CTB/STB 模型）。 | 不写库/不升修订/不入历史（报告类只读） |
@@ -2286,7 +2286,7 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 | `VPCLIP RECT` | 对活动布局第一个视口应用矩形裁剪，一步撤销 | 无视口选择；多边形裁剪未实现 |
 | `VPSCALE` | 设置活动布局第一个视口比例（对角线 `1/factor`，保留模型锚点），一步撤销 | 无视口选择 |
 | `PAGESETUP` / `-PAGESETUP` | **完整实现**：裸命令只读报告；typed 形式写入 Authored `PLOTSETTINGS`（纸张/比例/旋转），非法布局/纸名/尺寸/比例在写前按名拒绝，一步撤销 | 绘图仪/CTB/STB 属 ADR 全局范围 |
-| `PSETUPIN` / `-PSETUPIN` | 同图纸内复制已存 `PLOTSETTINGS` 到目标布局，一步撤销 | 跨文件导入未实现；无源记录拒绝 |
+| `PSETUPIN` / `-PSETUPIN` | 同图纸内复制已存 `PLOTSETTINGS` 到目标布局，一步撤销（两条都保持部分实现） | 跨文件导入未实现（无源文档页面设置提取路径）；无源记录拒绝；无文件对话框 |
 | `MVIEW` | 活动图纸空间创建矩形视口，一步撤销 | 无多边形/非矩形；无视口选择 |
 | `VPMAX` / `VPMIN` | 会话标记（不变） | 仅第一个视口 |
 | `MVSETUP` | 仍为具名拒绝 | 无视口组模型 |
@@ -2376,7 +2376,7 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 | `CLASSICXREF` | 部分实现 | 只读 xref 报告 + chrome 面板（真实 `cad_status.references`） | attach/detach/reload 仍按名拒绝；面板不写库 |
 | `PMTOGGLE` | **完整实现** | 切换选项板可见性（与 HIDEPALETTES/SHOWPALETTES 同状态） | chrome 本地选择子，不进入 `cad_command` |
 | `SYSVARMONITOR` | 部分实现 | ADD/REMOVE/LIST + 查询时快照变化检测 | 无后台通知；会话状态不持久化；仅 SETVAR 闭集变量 |
-| `SYSVDLG` | 部分实现 | 只读报告所有已暴露变量 + `sysvdlg.not_tracked` | 无编辑/保存/恢复对话框 |
+| `SYSVDLG` | 完整实现 | 报告 + `<name>` 读取 + `<name> <value>` 编辑 + `SAVE|RESTORE <file.json>`（版本化 JSON）；未建模变量按名拒绝 | 无交互对话框（全局范围）；不是 `.svf`；无值变量保存时省略；仅 15 个已建模变量 |
 | `SPACETRANS` | **完整实现** | `SPACETRANS <distance>` 模型↔图纸换算并报告方向/因子 | 活动视口 = VPMAX 视口否则 index 0；无逐视口选择 |
 
 ### Wave 26 续（2026-11-12，classic 面板 / 命令词表控制）
