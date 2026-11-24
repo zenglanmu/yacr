@@ -892,7 +892,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `TXT2MTXT` | 完整实现 | 选中 Text/MText 排序合并为一个 `AcDbMText`（含 `UNIFORM` 行距），同时删除来源（一条事务/一步撤销） | Settings 对话框与分栏未实现（全局范围）；保留原字符串转义 |
 | `HATCHGENERATEBOUNDARY` | 完整实现 | 每个选中 HATCH（模型空间或图纸边界）的每个 loop 生成一条同层/同空间、非关联的闭合 LWPOLYLINE（保留 bulge、含内岛）；图纸布局边界走既有 layout 实体写入路径；一条事务/一步撤销 | 无关联性（AutoCAD 亦为非关联）；无交互选项提示 |
 | `GRADIENT` | 完整实现 | 当前选择为闭合边界（整实体 Circle/完整 Ellipse/闭合 Polyline/LINE+ARC 边链），复用 HATCH 创建路径并强制渐变填充（会话 kind/角度/双色 ACI，默认线性 0°、ACI 1→5；测试钉住 SPHERICAL/45°/ACI 3→7 落到存储的 `AcDbHatch`）；一个 `AcDbHatch`、一条事务/一步撤销；边界实体保留 | 全局范围：无渐变预览、无 `-GRADIENT` 选项提示、无 .pat/关联性；非 `+Z` 平面/非闭合按名拒绝 |
-| `HATCHEDIT` | 部分实现 | 恰好一个直接可寻址的模型空间 HATCH；`ANGLE`/`SCALE`/`SOLID`/`GRADIENT` 等既有选项；`ADDBOUNDARIES`/`REMOVEBOUNDARIES` 现在真实：一个选中 hatch + 其余选中闭合实体为边界，重建 loop 集，一条事务/一步撤销 | 无交互对话框；`Origin` 无字段、`Associate`/`Annotative` 无模型、Boundary draw order 拒绝；证据只有契约测试 |
+| `HATCHEDIT` | **完整实现** | 多目标；`Style`/`PatternType`/`PATTERN`/`PATTERNFILE`/`ORIGIN`/`Angle`/`Scale`/`Solid`/`Gradient`/`Color`/`Transparency`/`Layer`/`DrawOrder`/`Recreate Boundary`/`Separate`/`Add|Remove Boundaries`；一条事务/一步撤销 | 全局范围：`Associate`/`Disassociate`/`Annotative`、`DRAWORDER BOUNDARY`；无交互对话框；证据只有契约测试 |
 | `HATCHTOBACK` | 完整实现 | 把所有 HATCH 的 draw order 排到其所在 `SpaceId` 范围内的所有非 HATCH 对象之后（模型空间、各图纸布局、各块定义逐范围规划后一次写入），保留相对顺序；一条事务/一步撤销 | 无 AutoCAD 独立的 Draw Order 表（沿用实体存储的 `draw_order`）；块定义重排对全部块参照生效（模型固有）；无 Draw Order 对话框 |
 | `WIPEOUT` | 部分实现 | 开放多边形捕获（≥3 点、`+Z` 平面）生成一个 `AcDbWipeout`（`Mask{inverted:false}`）；`Frames ON/OFF/DISPLAY` 真实（显示/出图分离） | 无 `FRAME` 覆盖、无 Polyline/Erase Polyline 选项、无自交拒绝、无既有 wipeout 拾取 |
 | `POLYGON CIRCUMSCRIBED` | 部分实现 | 独立选择子：中心 + 切圆上一点，用 `R=r/cos(π/n)`、顶点在 `θ±π/n` 生成闭合外切正多边形 | `POLYGON` 的 `Edge` 分支、数值半径的捕捉旋转规则仍未实现 |

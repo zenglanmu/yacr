@@ -26,8 +26,8 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **243** |
-| 部分实现（有写明的界） | **736** |
+| 完整实现 | **244** |
+| 部分实现（有写明的界） | **735** |
 | **已实现合计（完整 + 部分）** | **979** |
 | 未实现 | **2** |
 
@@ -256,7 +256,7 @@
 
 > **这不是验收，是当前排期与口径。** 本轮目标是把命令从 `部分实现`/具名拒绝推进到支持域内
 > **没有剩余可写缺口**的 `完整实现`；不放宽为“改状态不实现”，也不把 ADR 全局范围缺口算作
-> 单命令完成。当前清单 **243 完整 / 736 部分 / 2 未实现**，只有真正合并且契约测试通过的
+> 单命令完成。当前清单 **244 完整 / 735 部分 / 2 未实现**，只有真正合并且契约测试通过的
 > 命令才改状态。
 
 | 批次 | 范围 | 状态 |
@@ -271,7 +271,7 @@
 | M2 块属性 | ADR-0055：ATTDEF/ATTRIB 模型、minor 14、DXF/渲染/命令/面板 | **已合并**（+13 complete；ATTIN/ATTOUT/ATTEXT/EATTEXT 文件 lane 仍 partial） |
 | M3 约束 | ADR-0054：有界二维几何/尺寸约束求解器、minor 15、DXF 节点 | ADR 已接受；P0 未开始，命令仍 partial |
 | M4 动作录制器 | ADR-0056：ACTRECORD/ACTSTOP/ACTUSERINPUT/ACTUSERMESSAGE/ACTMANAGER | **已合并**（+7 complete + Manage 面板；无真实文件对话框/GUI 证据） |
-| M1h 填充/底图/视口 | `HATCH`/`-HATCH` 支持域闭合（关联性/预览为全局范围）、`IMAGEATTACH` 旋转 + 图纸布局、`VPSYNC` 可选主视口 | **已合并**（+4 complete；`HATCHEDIT` 仅 `ORIGIN` 已并入的既有状态，本轮未改状态） |
+| M1h 填充/底图/视口 | `HATCH`/`-HATCH` 支持域闭合（关联性/预览为全局范围）、`IMAGEATTACH` 旋转 + 图纸布局、`VPSYNC` 可选主视口、`HATCHEDIT` 索引对账 | **已合并**（+5 complete；`HATCHEDIT` 的 `ORIGIN`/`PATTERNFILE` 早已实现，索引 stale 本次修正） |
 | M5 其他面板 | 发布/传递/标准/CUI/点云/PDF 底图 | 分析完成；多数是 `L`/架构级缺口，按 ADR/子系统逐个评估 |
 
 **已明确的诚实缺口**：`ARCHIVE`、`STANDARDS`、`CHECKSTANDARDS`、全部 `CUI*`、`CUSTOMIZE` 仍是
@@ -750,7 +750,7 @@
 | `GROUP` | 部分实现 | 会话内组表（上限 64、名字大小写不敏感）；裸命令/`LIST` 只读、`CREATE` 从选择集建组、`DELETE` 只移除名字；不写 DWG group 对象/修订/历史/事务 |
 | `GROUPEDIT` | 部分实现 | `ADD`/`REMOVE` 从选择集或键入实体 id 增删、`RENAME`（允许仅改大小写）；单次会话变更；不写实体/数据库 |
 | `HATCH` | 完整实现 | 整实体闭合边界（`Circle`/完整 `Ellipse`/闭合 `Polyline`）+ `LINE`/`ARC` 边链；**`HATCH PATTERN <name>` 与 `HATCH PATTERNFILE <path.pat> [<name>]`**（文件优先→内置回退；无名的文件须恰好一个图案；组 76 = 2/1）；solid/user/predefined/gradient 四种会话填充与角度/比例/`HPDOUBLE`/样式；hatch 写入边界所在空间（模型空间走共享漏斗、图纸布局走布局自身 draw-order；块定义/混合空间按名拒绝）；空边界 `hatch.selection`、未知/缺名/文件读失败逐条具名拒绝。**全局范围**：创建期关联性（`HatchGeometry` 只存派生环，无边界句柄/反应器）、实时预览与图案选择对话框 |
-|  `HATCHEDIT` | 部分实现 | 多目标；`Style`/`PatternType`（含 **CUSTOM 76=2**）/**`PATTERN <内置图案名>`**（现有 `.pat` 库；任意用户 `.pat` 文件需宿主 I/O）/`Angle`/`Scale`/`Solid`/`Gradient`/`Color`/`Transparency`/`Layer`/`DrawOrder`/`Recreate Boundary`/`Separate`/**Add-Remove Boundaries**；`Origin`/`Associate`/`Annotative` 未建模 |
+| `HATCHEDIT` | 完整实现 | 多目标；`Style`/`PatternType`（含 **CUSTOM 76=2**）/`PATTERN <内置图案名>`/`PATTERNFILE <path.pat> [<name>]`/`ORIGIN <x> <y>`/`Angle`/`Scale`/`Solid`/`Gradient`/`Color`/`Transparency`/`Layer`/`DrawOrder`/`Recreate Boundary`/`Separate`/`Add-Remove Boundaries`；一条事务/一步撤销；`Associate`/`Disassociate`/`Annotative`/`DRAWORDER BOUNDARY` 属全局范围按名拒绝 |
 | `HATCHGENERATEBOUNDARY` | 完整实现 | 预选择 hatch（模型空间或图纸布局）；每个 loop 一条非关联闭合多段线（同层同空间、保留 bulge、含内岛）；源 hatch 保留；无关联性 |
 | `HATCHSETBOUNDARY` | 完整实现 | 恰好一个 hatch + 一条闭合 Polyline/Circle/**完整 Ellipse**（整椭圆采样为单个 64 点环、无 bulge），共面性校验；部分椭圆按 `hatchsetboundary.open_ellipse` 拒绝且不开事务；用 `HatchGeometry::new` 重建、丢弃旧种子 |
 | `HATCHSETORIGIN` | 完整实现 | 绝对图案原点：以首个定义行的合成基点为锚（`absolute_pattern_origin()`）写入 `P − 合成基点`，变换后的行列/角度/比例全部参与；无定义行图案保留收窄的 `missing_field`；一条事务/一步撤销 |
