@@ -119,10 +119,11 @@ impl Application {
     /// `ALIASEDIT`: read-only list of the canonical alias table.
     ///
     /// The table is `crate::command_aliases::COMMAND_ALIASES` — the same rows the
-    /// router normalizes and the docs gate checks. Runtime alias editing is
-    /// **session state** (`CadSession`'s `ALIASEDIT ADD|REMOVE|LIST` command-line
-    /// forms); this payload path has no session view, so it stays a read of the
-    /// build table and says so.
+    /// router normalizes and the docs gate checks. Runtime rows are the live
+    /// session's validated set (`CadSession`'s `ALIASEDIT ADD|REMOVE|LIST`
+    /// command-line forms, persisted through the host's root `commandAliases`
+    /// preference); this payload path has no session view, so it stays a read of
+    /// the build table and says so.
     fn alias_report(&self, command: &Command) -> CadResult<CommandOutcome> {
         require_none_payload(command, "ALIASEDIT")?;
         let _drawing = document_drawing(self, command)?;
@@ -137,10 +138,10 @@ impl Application {
         diagnostics.push(diagnostic(
             "aliasedit.summary",
             format!(
-                "ALIASEDIT: {} alias row(s) from the build's canonical table; creating, modifying \
-                 or deleting aliases is NOT IMPLEMENTED on this payload path — the live session's \
-                 command line provides the session-only `ALIASEDIT ADD|REMOVE|LIST` forms and \
-                 there is no acad.pgp file",
+                "ALIASEDIT: {} alias row(s) from the build's canonical table; runtime rows added \
+                 with the command-line `ALIASEDIT ADD|REMOVE` are persisted through the host's \
+                 root commandAliases preference and are not part of this build table (there is no \
+                 acad.pgp file)",
                 aliases.len()
             ),
         ));

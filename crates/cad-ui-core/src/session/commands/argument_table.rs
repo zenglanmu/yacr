@@ -89,6 +89,9 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     RENAME_SELECTOR,
     SETVAR_SELECTOR,
     SYSVARMONITOR_SELECTOR,
+    // `JULIAN <date>`: the calendar-to-Julian day form of the read-only report;
+    // a bare `JULIAN` keeps payload `None` (the current UTC instant).
+    JULIAN_SELECTOR,
     // `SCALELISTEDIT` / `-SCALELISTEDIT`: the annotation-scale table's typed
     // writes (`ADD`/`RENAME`/`DELETE`) and the `?` report spelling.
     SCALELIST_SELECTOR,

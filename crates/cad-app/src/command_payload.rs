@@ -822,13 +822,11 @@ pub enum CommandPayload {
     /// `MLEADERSTYLE`); see [`StyleTableCommand`].
     StyleTable(StyleTableCommand),
     SetVar(String),
-    /// `SYSVARMONITOR ADD|REMOVE|LIST <name>`: one session-only monitor action.
-    ///
-    /// The monitor holds a bounded set of **modelled** `SETVAR` names plus the
-    /// value seen at the last query. `LIST` compares each watched value with
-    /// that snapshot and reports a change; nothing is written to the drawing.
-    /// There is no background notification: a change is reported only when the
-    /// monitor is queried.
+    /// `JULIAN <date>`: one calendar date; `cad-app` validates it and refuses impossible dates.
+    JulianDate(String),
+    /// `SYSVARMONITOR ADD|REMOVE|LIST <name>`: one session-only monitor action
+    /// over a bounded set of modelled `SETVAR` names; `LIST` compares against the
+    /// last snapshot and reports a change. There is no background notification.
     SysVarMonitor(SysVarMonitorAction),
     /// `SPACETRANS <distance>`: one model/paper distance conversion.
     ///

@@ -327,11 +327,9 @@ impl CadSession {
         core.open_configured_drawing()?;
         Ok(Self::wrap(core))
     }
-    /// Wrap an already-built host core: the one place the session's own
-    /// bookkeeping fields are initialised (shared by [`CadSession::new`] and
-    /// [`CadSession::from_bytes`], so the two entries cannot drift apart).
+    /// Wrap an already-built host core: the one place the session bookkeeping is initialised.
     fn wrap(core: HostCore) -> Self {
-        Self {
+        let session = Self {
             core,
             error: RefCell::new(None),
             resource_error: RefCell::new(None),
@@ -344,7 +342,9 @@ impl CadSession {
             overrides: RefCell::new(CommandOverrides::default()),
             action_recorder: RefCell::new(action_recorder::ActionRecorderState::default()),
             api_outcomes: RefCell::new(Vec::new()),
-        }
+        };
+        session.seed_persisted_aliases();
+        session
     }
     /// The host-owned render session the GPU lane attaches and draws through.
     pub fn render_session(&self) -> RenderSessionHandle {

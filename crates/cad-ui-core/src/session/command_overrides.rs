@@ -27,9 +27,12 @@
 //!   **before** the static tables, so an added alias shadows a built-in selector
 //!   of the same spelling and overrides a shipped `acad.pgp` abbreviation when it
 //!   reuses one. `REMOVE` only ever removes runtime rows: a shipped alias cannot
-//!   be deleted. Every row is session-only; no `acad.pgp` file is read or
-//!   written, and `LIST` inspects the live session (the pre-existing `cad-app`
-//!   `AliasEdit` report remains the build-table read for the payload path).
+//!   be deleted. No `acad.pgp` file is read or written; `ADD`/`REMOVE` persist
+//!   the validated runtime set through the host's root `commandAliases`
+//!   preference (restored by the next session, with a failed write refused as
+//!   `aliasedit.not_persisted`), and `LIST` inspects the live session (the
+//!   pre-existing `cad-app` `AliasEdit` report remains the build-table read for
+//!   the payload path).
 //!
 //! # Essential commands
 //!
@@ -47,9 +50,11 @@
 //!   host/test through [`CadSession::runtime_command_aliases`], but this lane
 //!   adds no command-window row rendering (the log is text-free). The observable
 //!   effect is the resolution behaviour itself.
-//! * Overrides are per session. Opening another drawing in the same session keeps
-//!   them (they are vocabulary, not document state); a new session starts from
-//!   the build's static tables.
+//! * `UNDEFINE`/`REDEFINE` overrides are per session. Opening another drawing in
+//!   the same session keeps them (they are vocabulary, not document state); a
+//!   new session starts from the build's static tables. `ALIASEDIT` rows are the
+//!   exception: their validated set is durable host preference and is restored
+//!   in a new session.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -180,6 +185,30 @@ impl CommandOverrides {
             .collect()
     }
 
+    /// The same rows as owned strings, for the durable preference write.
+    pub(crate) fn owned_rows(&self) -> Vec<(String, String)> {
+        self.alias_rows()
+            .into_iter()
+            .map(|(alias, target)| (alias, target.to_string()))
+            .collect()
+    }
+
+    /// Seed the runtime alias table from the durable preference document.
+    ///
+    /// Each row goes through the ordinary [`Self::add_alias`] validation, so a
+    /// row whose target disappeared (or that now collides with a shipped alias)
+    /// is dropped **by name** and returned to the caller for a startup
+    /// diagnostic; nothing is guessed on its behalf.
+    pub(crate) fn install_aliases(&mut self, rows: &[(String, String)]) -> Vec<String> {
+        let mut rejected = Vec::new();
+        for (alias, target) in rows {
+            if let Err(reason) = self.add_alias(alias, target) {
+                rejected.push(reason);
+            }
+        }
+        rejected
+    }
+
     /// Every disabled canonical selector, in stable order.
     pub(crate) fn undefined_rows(&self) -> Vec<&'static str> {
         self.disabled.iter().copied().collect()
@@ -294,30 +323,39 @@ impl CadSession {
                 if alias.is_empty() || target.is_empty() {
                     return self.refuse_argument(malformed_reason(text));
                 }
-                let reason = {
-                    let mut overrides = self.overrides.borrow_mut();
-                    overrides.add_alias(alias, target).err()
-                };
-                match reason {
-                    Some(reason) => self.refuse_argument(reason),
-                    None => self.note_vocabulary_command(ALIASEDIT_SELECTOR),
-                }
+                self.apply_alias_change(|overrides| overrides.add_alias(alias, target).map(|_| ()))
             }
             "REMOVE" => {
                 let alias = rest.trim();
                 if alias.is_empty() || alias.split_whitespace().count() != 1 {
                     return self.refuse_argument(malformed_reason(text));
                 }
-                let reason = {
-                    let mut overrides = self.overrides.borrow_mut();
-                    overrides.remove_alias(alias).err()
-                };
-                match reason {
-                    Some(reason) => self.refuse_argument(reason),
-                    None => self.note_vocabulary_command(ALIASEDIT_SELECTOR),
-                }
+                self.apply_alias_change(|overrides| overrides.remove_alias(alias))
             }
             _ => self.refuse_argument(malformed_reason(text)),
+        }
+    }
+
+    /// Apply one `ALIASEDIT ADD|REMOVE` change to a **clone**, persist it, and
+    /// commit only after the durable write succeeded.
+    ///
+    /// A carrier with no durable preference path (or a failing write) keeps the
+    /// previous table and returns the stable `aliasedit.not_persisted` refusal;
+    /// the command is never just an in-memory mutation.
+    fn apply_alias_change(
+        &self,
+        change: impl FnOnce(&mut CommandOverrides) -> Result<(), String>,
+    ) -> Result<(), String> {
+        let mut next = self.overrides.borrow().clone();
+        if let Err(reason) = change(&mut next) {
+            return self.refuse_argument(reason);
+        }
+        match self.core.replace_command_aliases(&next.owned_rows()) {
+            Ok(()) => {
+                *self.overrides.borrow_mut() = next;
+                self.note_vocabulary_command(ALIASEDIT_SELECTOR)
+            }
+            Err(error) => self.refuse_argument(format!("aliasedit.not_persisted: {error}")),
         }
     }
 
@@ -343,10 +381,24 @@ impl CadSession {
         self.refuse_argument(format!("command.undefined: {name}"))
     }
 
+    /// Seed the durable runtime aliases through the same validated path the
+    /// typed `ALIASEDIT ADD` uses.
+    ///
+    /// A row whose target is gone (or collides with a shipped alias) is dropped
+    /// **by name** with a startup diagnostic, never silently kept.
+    pub(crate) fn seed_persisted_aliases(&self) {
+        let persisted = self.core.command_aliases();
+        for reason in self.overrides.borrow_mut().install_aliases(&persisted) {
+            self.core
+                .note_startup_diagnostic(format!("runtime alias dropped: {reason}"));
+        }
+    }
+
     /// The runtime `ALIASEDIT ADD` rows, for hosts and contract tests.
     ///
-    /// Session-only state: nothing here is persisted, and a new session starts
-    /// from the build's static [`COMMAND_ALIASES`] table.
+    /// The rows are the validated live set; `ALIASEDIT ADD`/`REMOVE` write the
+    /// same set through the host's durable preference document, so a new session
+    /// restores it (a `LIST`/bare command remains read-only).
     pub fn runtime_command_aliases(&self) -> Vec<(String, String)> {
         self.overrides
             .borrow()

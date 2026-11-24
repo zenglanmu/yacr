@@ -26,8 +26,8 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **237** |
-| 部分实现（有写明的界） | **742** |
+| 完整实现 | **243** |
+| 部分实现（有写明的界） | **736** |
 | **已实现合计（完整 + 部分）** | **979** |
 | 未实现 | **2** |
 
@@ -51,6 +51,8 @@
 > 实现状态计数，也没有运行/像素证据（`autocad-structure` 契约测试锁定接线）。
 
 > **2026-11-24 增补（严格 2D 收口）**：`TEXTALIGN`（`SETSPACING`/`CURRENTVERTICAL`/`CURRENTHORIZONTAL`）、`TCIRCLE`（`SLOT`/`OFFSET`/`CONSTANT`）、`DONUT`（填充圆盘/环）、`HATCHGENERATEBOUNDARY`（图纸布局 hatch）、`ADDSELECTED`（ARC/POLYLINE/INSERT）、`GETSEL`（COLOR/LINETYPE/SPACE）、`MEASUREGEOM VOLUME`（单一体精确 body 路径）、`CENTERMARK`（可配置臂长）、`CENTERLINE`（延伸/间隙）九个命令按严格口径升为**完整实现**；`CENTERMARK`/`CENTERLINE` 的产出是普通 `LINE`（非关联为声明边界，与 `DIMCENTER` 同类）。计入 **213 完整 + 766 部分 / 979 已实现**；窗口/GPU/像素/真机证据仍 NOT VERIFIED。
+
+> **2026-11-24 增补（严格报告收口）**：`BCOUNT` 扩到**整图**（模型空间 + 各图纸布局）与选择集作用域，块定义内嵌套参照按名报告不计数（AutoCAD 同限），Select objects 交互提示属 ADR 全局范围；`DBLIST` 列出块定义成员与全部三个已建模空间，XDATA/扩展字典/字典/代理对象不保留并按名报告；`JULIAN` 新增 `JULIAN <YYYY-MM-DD>`（也接受 `YYYY/MM/DD`，可跟 `[T ]HH:MM[:SS]`）日历转儒略日形式，非法日期按 `julian.invalid_date` 拒绝；`PAGESETUP`/`-PAGESETUP` 的 typed 写入与拒绝契约补齐后晋升（唯一残留绘图仪/CTB/STB 属 ADR 全局范围）。`ALIASEDIT` 的 `ADD`/`REMOVE` 补上宿主 `preference.json` 根键 `commandAliases` 持久化（跨会话恢复；写入失败按 `aliasedit.not_persisted` 回滚；失效/冲突的持久行启动时按名丢弃并记诊断）后晋升；`SYSVARMONITOR`（无后台通知、不持久化）仍有真实缺口，保持**部分实现**。计入 **243 完整 + 736 部分 / 979 已实现**；证据仅 Linux Rust 契约，GUI/GPU/像素/真机 NOT VERIFIED。
 
 ## 下一批 100 条命令实施计划与进度（2026-11-07）
 
@@ -332,7 +334,7 @@
 | `-MTEXT` | 部分实现 | `MTEXT` 创建工具的别名（同一两角 + 终端文本捕获）；无第二实现 |
 | `-OBJECTSCALE` | 部分实现 | 具名拒绝（`-objectscale.unsupported`）：同一具名拒绝的命令行拼写。 |
 | `-OVERKILL` | 完整实现 | `OVERKILL` 的命令行拼写：同一语法、同一去重实现，同输入产出字节级相同结果；非法参数由共享语法拒绝且不记录 |
-| `-PAGESETUP` | 部分实现 | 裸命令只读报告；typed 形式写入 Authored PLOTSETTINGS（纸张/比例/旋转），一条事务/一步撤销。 |
+| `-PAGESETUP` | 完整实现 | 裸命令只读报告；typed 形式写入 Authored PLOTSETTINGS（纸张/比例/旋转），未知布局/空纸名/非正尺寸/非正比例在写前按名拒绝；一条事务/一步撤销；绘图仪/CTB/STB 属 ADR 全局范围。 |
 | `-PAN` | 完整实现 | `PAN` 的命令行拼写：同一相机移动实现，只改视图、不写库/不入撤销（按设计，非缺口） |
 | `-PARAMETERS` | 完整实现 | 命令行列/编辑器 `NEW|SET|RENAME|DELETE` 与表达式语法；读形式输出参数表；名字/引用/循环等错误按名拒绝；一条事务/一步撤销。 |
 | `-PARTIALOAD` | 部分实现 | 具名拒绝（`-partiaload.unsupported: no partial layer-index open/load model`）。 |
@@ -404,7 +406,7 @@
 | `ADCNAVIGATE` | 部分实现 | 具名拒绝（`adcnavigate.unsupported: this build has no DesignCenter content palette`）。 |
 | `ADDSELECTED` | 完整实现 | `ADDSELECTED <x> <y>` 按选中类型/属性新建一个实体（LINE/CIRCLE/ARC/POLYLINE/INSERT/POINT/TEXT/MTEXT），保留图层/颜色/线型/线宽/透明度；其余种类按名拒绝 |
 | `ADJUST` | 部分实现 | 具名拒绝（`adjust.unsupported: this build has no underlay/image fade-contrast-monochrome model`）。 |
-| `ALIASEDIT` | 部分实现 | `ADD <alias> <target>`/`REMOVE <alias>`/`LIST`/bare；运行时别名先于静态表解析（可遮蔽内建），仅删除运行时行；无交互对话框（声明），会话状态不持久化 |
+| `ALIASEDIT` | 完整实现 | `ADD <alias> <target>`/`REMOVE <alias>`/`LIST`/bare；运行时别名先于静态表解析（可遮蔽内建），仅删除运行时行；`ADD`/`REMOVE` 经宿主 `preference.json` 根键 `commandAliases` 持久化并在新会话恢复，写入失败按 `aliasedit.not_persisted` 回滚；目标失效/冲突的持久行在启动时按名丢弃并记诊断；无交互对话框（ADR 全局范围） |
 | `ALIGN` | 已实现 | 1 对点移动、2 对点平移+旋转+可选均匀缩放、3 对点平面**刚性**（旋转+平移，不缩放）；退化/非共面/非全等/镜像按名拒绝；3 对点的 3D 平面旋转属全局范围 |
 | `ALIGNSPACE` | 完整实现 | **八位小数**的键入形式 `ALIGNSPACE <model_ax> <model_ay> <paper_ax> <paper_ay> <model_bx> <model_by> <paper_bx> <paper_by>`（两对模型↔图纸点，处理器需要两对才能推出比例；编一个 1:1 是造假），构造与载荷相同的 `Points`；比例/平移写入 `model_to_paper`，一条事务/一步撤销；Work-only、需图纸空间、退化点对/无视口按名拒绝；旋转仍按 `alignspace.rotation_ignored` 声明（无字段可存） |
 | `AMECONVERT` | 部分实现 | 具名拒绝（`ameconvert.unsupported: this build has no AME solid model`）。 |
@@ -459,7 +461,7 @@
 | `BAUTHORPALETTECLOSE` | 部分实现 | 具名拒绝（`bauthorpaletteclose.unsupported`）：本构建无块编辑器。 |
 | `BCLOSE` | 部分实现 | 具名拒绝（`bclose.unsupported`）：本构建无块编辑器。 |
 | `BCONSTRUCTION` | 部分实现 | 具名拒绝（`bconstruction.unsupported`）：本构建无动态块构造几何。 |
-| `BCOUNT` | 部分实现 | 只读：统计整个模型空间的块参照实例数（按块名分组）；无 AutoCAD 的 Select objects 提示、不展开块成员、不统计图纸空间。 |
+| `BCOUNT` | 完整实现 | 只读：统计**整图**（模型空间 + 各图纸布局）顶层块参照实例数，按块名分组；选择集非空时只统计所选块参照（非块对象按名忽略）；块定义内嵌套参照按名报告不计数（与 AutoCAD 的 BCOUNT 限制一致）；无 Select objects 交互提示（ADR 全局范围）；无事务/修订/历史。 |
 | `BCPARAMETER` | 部分实现 | 具名拒绝（`bcparameter.unsupported`）：本构建无动态块参数模型。 |
 | `BCYCLEORDER` | 部分实现 | 具名拒绝（`bcycleorder.unsupported`）：本构建无动态块夹点模型。 |
 | `BDETECT` | 部分实现 | 具名拒绝（`bdetect.unsupported: this build has no object-detection model`）。 |
@@ -591,7 +593,7 @@
 | `DBCDEFINELLT` | 部分实现 | 具名拒绝（`dbcdefinellt.unsupported: this build has no dbConnect/external database model`）。 |
 | `DBCDEFINELT` | 部分实现 | 具名拒绝（`dbcdefinelt.unsupported: this build has no dbConnect/external database model`）。 |
 | `DBCONNECT` | 部分实现 | 具名拒绝（`dbconnect.unsupported: this build has no dbConnect/external database model`）。 |
-| `DBLIST` | 部分实现 | 只读列出所有顶层模型/图纸实体（id/type/layer/space/draw order）；块定义成员计数并跳过 |
+| `DBLIST` | 完整实现 | 只读列出模型空间、各图纸布局与各块定义内的全部实体（id/handle/type/layer/space/draw order）；块成员单独成行并标注 `Block(<name>)`；XDATA/扩展字典/字典/代理对象不保留并按名报告；无事务/修订/历史。 |
 | `DCALIGNED` | 部分实现 | 具名拒绝（`dcaligned.unsupported`）：本构建无尺寸约束模型。 |
 | `DCANGULAR` | 部分实现 | 具名拒绝（`dcangular.unsupported`）：本构建无尺寸约束模型。 |
 | `DCCONVERT` | 部分实现 | 具名拒绝（`dcconvert.unsupported`）：本构建无尺寸约束模型。 |
@@ -781,7 +783,7 @@
 | `ISOPLANE` | 部分实现 | 循环会话令牌 LEFT→TOP→RIGHT；无等轴测光标/捕捉变化。 |
 | `JOIN` | 完整实现 | 混合 LINE/ARC/多段线/SPLINE/椭圆弧精确焊接为有理 B 样条；SPLINE 源对象接受接触的 LINE/ARC/椭圆弧；**`JOIN CLOSE` 的混合 SPLINE 已实现**：`Spline` 新增 `closed` 标志（DXF 组 70 bit 1 往返；闭合样条按闭环出图/拾取），焊接后置位；链两端不重合按 `join.not_closed` 拒绝、空隙按 `join.not_contiguous` 拒绝，**不桥接**；已闭合对象作源按 `join.closed_object` 拒绝；一条事务/一步撤销 |
 | `JPGOUT` | 部分实现 | 具名拒绝（`jpgout.unsupported: raster JPEG export is not implemented; use PLOT for vector SVG/PDF`）。 |
-| `JULIAN` | 部分实现 | 只读：当前 UTC 时刻的儒略日（整数日 + 小数）；不解析日期参数。 |
+| `JULIAN` | 完整实现 | 只读：当前 UTC 时刻的儒略日（整数日 + 小数）；`JULIAN <YYYY-MM-DD>`（也接受 `YYYY/MM/DD`，可跟 `[T ]HH:MM[:SS]`）把日历时刻（UTC）转换为儒略日；非法/不存在的日期按 `julian.invalid_date` 拒绝，不 clamp。 |
 | `JUSTIFYTEXT` | 部分实现 | `JUSTIFYTEXT <H> <V>`（H∈LEFT/CENTER/RIGHT，V∈BASELINE/BOTTOM/MIDDLE/TOP）；只改 `h_align`/`v_align`，位置不动；非文字目标逐条 `justifytext.not_text` 跳过；空选择拒绝；`TJUST` 为同一实现 |
 | `LAYCUR` | 部分实现 | 预选择输入（不弹 Select objects）；把选中对象移到当前层；当前层缺失/目标层锁定显式拒绝；实体写入可撤销 |
 | `LAYDEL` | 完整实现 | 选择式（选中对象可是**模型空间或任一图纸布局**的顶层实体；块内成员/子元素按 `laydel.block_space` 拒绝）：删除选中对象所在层在**模型空间、每个图纸布局、每个块定义内**的全部实体（`cad-db` 单一 `entities` 表按 `layer` 过滤；块成员走 ERASE 同一删除路径，成员关系由显示状态还原），并剪除各图纸视口的该层 `layer_overrides` 键；当前层/`0` 层拒绝，锁定层的实体删除由数据库以 `layer.locked` 拒绝且不发布；实体补丁、布局补丁与层行一条事务/一步撤销，重做再次删除。会话层状态（`LAYERSTATE SAVE`）不重写，恢复悬空层仍按 `layerstate.dangling_layer` 拒绝。 |
@@ -917,7 +919,7 @@
 | `ORTHO` | 已实现 | — |
 | `OSNAP` | 已实现 | — |
 | `OVERKILL` | 已实现 | 容差（`0`=精确）、忽略 Color/Layer/Linetype/LTScale/Lineweight/Transparency、段优化与 `NOBREAK`、共线部分重叠/端到端合并、弧覆盖圆、重复段删除；保留最低 `(draw_order,id)`；一条事务/一步撤销 |
-| `PAGESETUP` | 部分实现 | 裸命令只读报告每个布局的入库 `PLOTSETTINGS`；`PAGESETUP <layout> <paper> <width> <height> [<num>:<den>] [0|90|180|270]` 写入 Authored 记录，一条事务/一步撤销；无绘图仪/CTB/STB。 |
+| `PAGESETUP` | 完整实现 | 裸命令只读报告每个布局的入库 `PLOTSETTINGS`；`PAGESETUP <layout> <paper> <width> <height> [<num>:<den>] [0|90|180|270]` 写入 Authored 记录，未知布局/空纸名/非正尺寸/非正比例在写前按名拒绝；一条事务/一步撤销；绘图仪/CTB/STB 属 ADR 全局范围。 |
 | `PAN` | 已实现 | — |
 | `PARAMETERS` | 完整实现 | chrome-local Parameters Manager 面板：列出用户参数，创建/重命名/删除、值/表达式编辑；一条事务/一步撤销；求解器驱动的二维约束参数未建模。 |
 | `PARAMETERSCLOSE` | 完整实现 | 幂等关闭 Parameters Manager 面板；再次关闭仍成功。 |
@@ -1309,7 +1311,7 @@
 | 43 | `ADCNAVIGATE` | 部分实现 | Loads a specified drawing file, folder, or network path in the DesignCenter Folders tab. | 具名拒绝（`adcnavigate.unsupported: this build has no DesignCenter content palette`）。 |
 | 44 | `ADDSELECTED` | 完整实现 | Creates a new object of the same type and general properties as a selected object, but with different geometric values. | `ADDSELECTED <x> <y>` 按选中类型/属性新建一个实体（LINE/CIRCLE/ARC/POLYLINE/INSERT/POINT/TEXT/MTEXT），保留图层/颜色/线型/线宽/透明度；其余种类按名拒绝 |
 | 45 | `ADJUST` | 部分实现 | Adjusts the fade, contrast and monochrome settings of the selected underlay (DWF, DWFx, PDF, or DGN), or image. | 具名拒绝（`adjust.unsupported: this build has no underlay/image fade-contrast-monochrome model`）。 |
-| 46 | `ALIASEDIT` | 部分实现 | Creates, modifies, and deletes AutoCAD command aliases. | `ADD <alias> <target>`/`REMOVE <alias>`/`LIST`/bare；运行时别名先于静态表解析（可遮蔽内建），仅删除运行时行；无交互对话框（声明），会话状态不持久化 |
+| 46 | `ALIASEDIT` | 完整实现 | Creates, modifies, and deletes AutoCAD command aliases. | `ADD <alias> <target>`/`REMOVE <alias>`/`LIST`/bare；运行时别名先于静态表解析（可遮蔽内建），仅删除运行时行；`ADD`/`REMOVE` 经宿主 `preference.json` 根键 `commandAliases` 持久化并在新会话恢复，写入失败按 `aliasedit.not_persisted` 回滚；目标失效/冲突的持久行在启动时按名丢弃并记诊断；无交互对话框（ADR 全局范围） |
 | 47 | `ALIGN` | 已实现 | Aligns objects with other objects in 2D and 3D. | 1 对点移动、2 对点平移+旋转+可选均匀缩放、3 对点平面**刚性**（旋转+平移，不缩放）；退化/非共面/非全等/镜像按名拒绝；3 对点的 3D 平面旋转属全局范围 |
 | 48 | `ALIGNSPACE` | 完整实现 | Adjusts the pan and zoom factor of a view in a layout viewport based on the alignment points specified in model space and paper space. | **八位小数**的键入形式 `ALIGNSPACE <model_ax> <model_ay> <paper_ax> <paper_ay> <model_bx> <model_by> <paper_bx> <paper_by>`（两对模型↔图纸点，处理器需要两对才能推出比例；编一个 1:1 是造假），构造与载荷相同的 `Points`；比例/平移写入 `model_to_paper`，一条事务/一步撤销；Work-only、需图纸空间、退化点对/无视口按名拒绝；旋转仍按 `alignspace.rotation_ignored` 声明（无字段可存） |
 | 49 | `AMECONVERT` | 部分实现 | Converts AME solid models to AutoCAD solid objects. | 具名拒绝（`ameconvert.unsupported: this build has no AME solid model`）。 |
@@ -1370,7 +1372,7 @@
 | 104 | `BAUTHORPALETTECLOSE` | 部分实现 | Closes the Block Authoring Palettes window in the Block Editor. | 具名拒绝（`bauthorpaletteclose.unsupported`）：本构建无块编辑器。 |
 | 105 | `BCLOSE` | 部分实现 | Closes the Block Editor. | 具名拒绝（`bclose.unsupported`）：无块编辑器。 |
 | 106 | `BCONSTRUCTION` | 部分实现 | Converts block geometry into construction geometry, which may be hidden or displayed. | 具名拒绝（`bconstruction.unsupported`）：本构建无动态块构造几何。 |
-| 107 | `BCOUNT` | 部分实现 | Creates a report of the number of instances of each block in a selection set or in the entire drawing. | 只读：统计整个模型空间的块参照实例数（按块名分组）；无 AutoCAD 的 Select objects 提示、不展开块成员、不统计图纸空间。 |
+| 107 | `BCOUNT` | 完整实现 | Creates a report of the number of instances of each block in a selection set or in the entire drawing. | 只读：统计**整图**（模型空间 + 各图纸布局）顶层块参照实例数，按块名分组；选择集非空时只统计所选块参照（非块对象按名忽略）；块定义内嵌套参照按名报告不计数（与 AutoCAD 的 BCOUNT 限制一致）；无 Select objects 交互提示（ADR 全局范围）；无事务/修订/历史。 |
 | 108 | `-BCPARAMETER` | 部分实现 | Applies constraint parameters to selected objects, or converts dimensional constraints to parameter constraints. | 具名拒绝（`-bcparameter.unsupported`）：本构建无动态块参数模型；命令行拼写。 |
 | 109 | `BCPARAMETER` | 部分实现 | Applies constraint parameters to selected objects, or converts dimensional constraints to parameter constraints. | 具名拒绝（`bcparameter.unsupported`）：本构建无动态块参数模型。 |
 | 110 | `BCYCLEORDER` | 部分实现 | Changes the cycling order of grips for a dynamic block reference. | 具名拒绝（`bcycleorder.unsupported`）：无动态块夹点模型。 |
@@ -1512,7 +1514,7 @@
 | 246 | `DBCDEFINELLT` | 部分实现 | Opens the Select a Database Object dialog box. | 具名拒绝（`dbcdefinellt.unsupported: this build has no dbConnect/external database model`）。 |
 | 247 | `DBCDEFINELT` | 部分实现 | Opens the Select Data Object Dialog Box (dbConnect Manager) | 具名拒绝（`dbcdefinelt.unsupported: this build has no dbConnect/external database model`）。 |
 | 248 | `DBCONNECT` | 部分实现 | Provides an interface to external database tables. | 具名拒绝（`dbconnect.unsupported: this build has no dbConnect/external database model`）。 |
-| 249 | `DBLIST` | 部分实现 | Lists database information for each object in the drawing. | 只读列出所有顶层模型/图纸实体（id/type/layer/space/draw order）；块定义成员计数并跳过 |
+| 249 | `DBLIST` | 完整实现 | Lists database information for each object in the drawing. | 只读列出模型空间、各图纸布局与各块定义内的全部实体（id/handle/type/layer/space/draw order）；块成员单独成行并标注 `Block(<name>)`；XDATA/扩展字典/字典/代理对象不保留并按名报告；无事务/修订/历史。 |
 | 250 | `DCALIGNED` | 部分实现 | Constrains the distance between two points on different objects. | 具名拒绝（`dcaligned.unsupported`）：本构建无尺寸约束模型。 |
 | 251 | `DCANGULAR` | 部分实现 | Constrains the angle between line or polyline segments, the angle swept out by an arc or a polyline arc segment, or the angle between three points on objects. | 具名拒绝（`dcangular.unsupported`）：本构建无尺寸约束模型。 |
 | 252 | `DCCONVERT` | 部分实现 | Converts associative dimensions to dimensional constraints. | 具名拒绝（`dcconvert.unsupported`）：本构建无尺寸约束模型。 |
@@ -1723,7 +1725,7 @@
 | 457 | `ISOPLANE` | 部分实现 | Specifies the current plane for 2D isometric drawing. | 循环会话令牌 LEFT→TOP→RIGHT；无等轴测光标/捕捉变化。 |
 | 458 | `JOIN` | 完整实现 | Joins the endpoints of linear and curved objects to create a single object. | 混合 LINE/ARC/多段线/SPLINE/椭圆弧精确焊接为有理 B 样条；`JOIN CLOSE` 的混合 SPLINE 置 `closed` 标志（DXF 70 bit 1 往返）；链端不重合/有间隙按名拒绝，不桥接；一条事务/一步撤销。 |
 | 459 | `JPGOUT` | 部分实现 | Saves selected objects to a file in JPEG file format. | 具名拒绝（`jpgout.unsupported: raster JPEG export is not implemented; use PLOT for vector SVG/PDF`）。 |
-| 460 | `JULIAN` | 部分实现 | Contains the DATE tool and several AutoCAD Julian date and calendar date conversion routines. | 只读：当前 UTC 时刻的儒略日（整数日 + 小数）；不解析日期参数。 |
+| 460 | `JULIAN` | 完整实现 | Contains the DATE tool and several AutoCAD Julian date and calendar date conversion routines. | 只读：当前 UTC 时刻的儒略日（整数日 + 小数）；`JULIAN <YYYY-MM-DD>`（也接受 `YYYY/MM/DD`，可跟 `[T ]HH:MM[:SS]`）把日历时刻（UTC）转换为儒略日；非法/不存在的日期按 `julian.invalid_date` 拒绝，不 clamp。 |
 | 461 | `JUSTIFYTEXT` | 部分实现 | Changes the justification point of selected text objects without changing their locations. | `JUSTIFYTEXT <H> <V>`（H∈LEFT/CENTER/RIGHT，V∈BASELINE/BOTTOM/MIDDLE/TOP）；只改 `h_align`/`v_align`，位置不动；非文字目标逐条 `justifytext.not_text` 跳过；空选择拒绝；`TJUST` 为同一实现 |
 | 462 | `LAYCUR` | 部分实现 | Changes the layer property of selected objects to the current layer. | 预选择输入（不弹 Select objects）；把选中对象移到当前层；当前层缺失/目标层锁定显式拒绝；实体写入可撤销 |
 | 463 | `-LAYDEL` | 完整实现 | At the Command prompt, deletes all objects on a layer and purges the layer. | `LAYDEL` 的命令行拼写，同一实现：模型空间/图纸布局/块定义内实体、各图纸视口 `layer_overrides` 键与层行，一条事务/一步撤销。 |
@@ -1872,8 +1874,8 @@
 | 606 | `OSNAP` | 已实现 | Sets running object snap modes. | — |
 | 607 | `-OVERKILL` | 完整实现 | Removes duplicate or overlapping lines, arcs, and polylines. Also, combines partially overlapping or contiguous ones. | `OVERKILL` 的命令行拼写：同一语法、同一去重实现，同输入产出字节级相同结果；非法参数由共享语法拒绝且不记录 |
 | 608 | `OVERKILL` | 已实现 | Removes duplicate or overlapping lines, arcs, and polylines. Also, combines those that are partially overlapping or contiguous. | 容差（`0`=精确）、忽略 Color/Layer/Linetype/LTScale/Lineweight/Transparency、段优化与 `NOBREAK`、共线部分重叠/端到端合并、弧覆盖圆、重复段删除；保留最低 `(draw_order,id)`；一条事务/一步撤销 |
-| 609 | `-PAGESETUP` | 部分实现 | Modifies the current page layout settings for the plotting device, paper size, plot scale, and several other settings in the command line. | 裸命令只读报告；typed 形式写入 Authored PLOTSETTINGS（纸张/比例/旋转），一条事务/一步撤销。 |
-| 610 | `PAGESETUP` | 部分实现 | Controls the page layout, plotting device, paper size, and other settings for each new layout. | 裸命令只读报告每个布局的入库 `PLOTSETTINGS`；`PAGESETUP <layout> <paper> <width> <height> [<num>:<den>] [0|90|180|270]` 写入 Authored 记录，一条事务/一步撤销；无绘图仪/CTB/STB。 |
+| 609 | `-PAGESETUP` | 完整实现 | Modifies the current page layout settings for the plotting device, paper size, plot scale, and several other settings in the command line. | 裸命令只读报告；typed 形式写入 Authored PLOTSETTINGS（纸张/比例/旋转），未知布局/空纸名/非正尺寸/非正比例在写前按名拒绝；一条事务/一步撤销；绘图仪/CTB/STB 属 ADR 全局范围。 |
+| 610 | `PAGESETUP` | 完整实现 | Controls the page layout, plotting device, paper size, and other settings for each new layout. | 裸命令只读报告每个布局的入库 `PLOTSETTINGS`；`PAGESETUP <layout> <paper> <width> <height> [<num>:<den>] [0|90|180|270]` 写入 Authored 记录，未知布局/空纸名/非正尺寸/非正比例在写前按名拒绝；一条事务/一步撤销；绘图仪/CTB/STB 属 ADR 全局范围。 |
 | 611 | `-PAN` | 完整实现 | Shifts the view by specifying up to two points to determine a distance and direction. | `PAN` 的命令行拼写：同一相机移动实现，只改视图、不写库/不入撤销（按设计，非缺口） |
 | 612 | `PAN` | 已实现 | Shifts the view without changing the viewing direction or magnification. | — |
 | 613 | `-PARAMETERS` | 完整实现 | Opens the Parameters Manager palette that includes all dimensional constraint parameters, reference parameters, and user variables in the current drawing. | 完整实现：命令行列/编辑器 `NEW|SET|RENAME|DELETE` 与表达式语法；读形式输出参数表；名字/引用/循环等错误按名拒绝；一条事务/一步撤销。 |

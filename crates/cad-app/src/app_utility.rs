@@ -479,25 +479,56 @@ impl Application {
         })
     }
 
-    /// `DBLIST`: list every top-level entity in the open document.
+    /// `DBLIST`: list every entity in the open document, with the space it
+    /// belongs to.
+    ///
+    /// The listing covers the documented spaces — model space, every paper-space
+    /// layout, and every block definition — so block members are rows of their
+    /// own (marked `Block(<name>)`) instead of a skipped count. Data this
+    /// database does not retain (XDATA, extension dictionaries, proxy objects)
+    /// is named, never silently omitted.
     fn dblist_report(&self, command: &Command) -> CadResult<CommandOutcome> {
         require_none_payload(command, "DBLIST")?;
         let drawing = document_drawing(self, command)?;
-        let mut rows: Vec<&cad_db::DbEntity> = Vec::new();
+        let mut rows: Vec<&cad_db::DbEntity> = drawing.entities().collect();
+        rows.sort_by_key(|entity| {
+            (
+                space_rank(&entity.space),
+                space_ordinal(&entity.space),
+                entity.draw_order,
+                entity.id.0,
+            )
+        });
+        let mut model = 0usize;
+        let mut paper = 0usize;
         let mut block_members = 0usize;
-        for entity in drawing.entities() {
-            if matches!(entity.space, SpaceId::Block(_)) {
-                block_members += 1;
-            } else {
-                rows.push(entity);
-            }
-        }
-        rows.sort_by_key(|entity| (space_rank(&entity.space), entity.draw_order, entity.id.0));
-        let mut diagnostics = Vec::with_capacity(rows.len() + 2);
+        let mut block_ids: std::collections::BTreeSet<BlockId> = std::collections::BTreeSet::new();
+        let mut diagnostics = Vec::with_capacity(rows.len() + 3);
         for entity in &rows {
+            let (code, space) = match &entity.space {
+                SpaceId::Model => {
+                    model += 1;
+                    ("dblist.object", "Model".to_string())
+                }
+                SpaceId::Paper(_) => {
+                    paper += 1;
+                    (
+                        "dblist.object",
+                        space_label_with_names(&drawing, &entity.space),
+                    )
+                }
+                SpaceId::Block(block) => {
+                    block_members += 1;
+                    block_ids.insert(*block);
+                    (
+                        "dblist.block_object",
+                        space_label_with_names(&drawing, &entity.space),
+                    )
+                }
+            };
             diagnostics.push(Diagnostic {
                 object: Some(ObjectId(entity.id.0)),
-                code: "dblist.object".into(),
+                code: code.into(),
                 message: format!(
                     "DBLIST id={} handle={} type={} layer={} space={} draw_order={}",
                     entity.id.0,
@@ -510,7 +541,7 @@ impl Application {
                         .unwrap_or("-"),
                     entity.object.type_key,
                     layer_label(&drawing, entity.layer),
-                    space_label(&entity.space),
+                    space,
                     entity.draw_order
                 ),
             });
@@ -519,21 +550,23 @@ impl Application {
             object: None,
             code: "dblist.summary".into(),
             message: format!(
-                "DBLIST: {} top-level entity(ies) in drawing revision {}",
+                "DBLIST: {} entity(ies) in drawing revision {} ({} model, {} paper-space, {} block \
+                 member(s) in {} definition(s))",
                 rows.len(),
-                drawing.revision().0
+                drawing.revision().0,
+                model,
+                paper,
+                block_members,
+                block_ids.len()
             ),
         });
-        if block_members > 0 {
-            diagnostics.push(Diagnostic {
-                object: None,
-                code: "dblist.scope".into(),
-                message: format!(
-                    "DBLIST: {block_members} block-definition member(s) are not top-level and were \
-                     not listed"
-                ),
-            });
-        }
+        diagnostics.push(Diagnostic {
+            object: None,
+            code: "dblist.not_modelled".into(),
+            message: "DBLIST: XDATA, extension dictionaries, dictionaries and proxy objects are \
+                      not retained by this database and are not listed"
+                .into(),
+        });
         Ok(CommandOutcome {
             objects: Vec::new(),
             changes: None,
@@ -628,11 +661,28 @@ fn space_rank(space: &SpaceId) -> u8 {
     }
 }
 
-fn space_label(space: &SpaceId) -> String {
+/// A stable ordering key inside one space class (layout id or block id).
+fn space_ordinal(space: &SpaceId) -> u128 {
+    match space {
+        SpaceId::Model => 0,
+        SpaceId::Paper(layout) => layout.0,
+        SpaceId::Block(block) => block.0,
+    }
+}
+
+/// The space's display label, resolving the layout/block table name when the
+/// row exists and naming the unresolved id when it does not.
+fn space_label_with_names(database: &cad_db::DrawingDatabase, space: &SpaceId) -> String {
     match space {
         SpaceId::Model => "Model".to_string(),
-        SpaceId::Paper(layout) => format!("Paper({})", layout.0),
-        SpaceId::Block(block) => format!("Block({})", block.0),
+        SpaceId::Paper(layout) => database
+            .layout(*layout)
+            .map(|row| format!("Paper({})", row.name))
+            .unwrap_or_else(|| format!("Paper(layout#{})", layout.0)),
+        SpaceId::Block(block) => database
+            .block_name(*block)
+            .map(|name| format!("Block({name})"))
+            .unwrap_or_else(|| format!("Block(block#{})", block.0)),
     }
 }
 

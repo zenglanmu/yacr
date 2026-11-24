@@ -217,8 +217,8 @@ fn aliasedit_lists_every_canonical_alias_row_without_editing() {
             && diagnostic.message.contains("PRINT -> PLOT")));
     let summary = diagnostic(&outcome, "aliasedit.summary");
     assert!(
-        summary.message.contains("NOT IMPLEMENTED"),
-        "editing is declared missing: {}",
+        summary.message.contains("root commandAliases preference"),
+        "the durable runtime rows are named: {}",
         summary.message
     );
     assert_eq!(revision(&app), before);

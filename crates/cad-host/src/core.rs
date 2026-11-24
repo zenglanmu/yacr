@@ -595,6 +595,13 @@ pub struct HostCore {
     /// unrelated setting change cannot drop it. One entry is recorded only after
     /// a **successful** open; a real clear drops the leaf.
     pub(crate) recent_files: Rc<RefCell<Vec<crate::recent::RecentEntry>>>,
+    /// The durable runtime command aliases (root `commandAliases` object).
+    ///
+    /// User vocabulary, not an Options setting: seeded from the preference
+    /// document at startup and re-emitted on every preference write so an
+    /// unrelated setting change cannot drop it. `ALIASEDIT ADD|REMOVE` is the only
+    /// writer; the session validates each row against the command table.
+    pub(crate) command_aliases: Rc<RefCell<std::collections::BTreeMap<String, String>>>,
     /// The bounded P3 request queue. Admission/identity/ordering live in the
     /// engine; the host only drives it through `dispatch_immediate`.
     pub(crate) queue: Rc<RequestQueue>,

@@ -177,6 +177,112 @@ fn pagesetup_payload_writes_one_revision_and_undo_restores_the_previous_row() {
 }
 
 #[test]
+fn pagesetup_dash_alias_writes_the_same_record_and_refuses_invalid_input() {
+    let (mut app, mut session) = fixture(&[(1, "Sheet1")], true);
+    let previous = drawing(&app).plot_settings(LayoutId(1)).cloned();
+    let start = revision(&app);
+
+    let outcome = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::Extended(ExtendedCommandId::DashPageSetup),
+                layout_payload(LayoutPayload::PageSetup {
+                    layout: "Sheet1".into(),
+                    paper: PaperSetup {
+                        name: "Letter".into(),
+                        width: 215.9,
+                        height: 279.4,
+                    },
+                    scale: Some((2.0, 1.0)),
+                    rotation: PlotRotation::None,
+                }),
+            ),
+        )
+        .expect("-PAGESETUP shares the typed write path");
+    assert_eq!(codes(&outcome), vec!["pagesetup.applied"]);
+    assert_eq!(revision(&app), Revision(start.0 + 1), "one revision");
+    assert_eq!(
+        drawing(&app)
+            .plot_settings(LayoutId(1))
+            .unwrap()
+            .paper_size_name,
+        "Letter"
+    );
+    undo(&mut app, &mut session);
+    assert_eq!(drawing(&app).plot_settings(LayoutId(1)).cloned(), previous);
+
+    // Every refusal is named and writes nothing: no revision, no undo step and
+    // the stored row is untouched.
+    let start = revision(&app);
+    for (payload, expected) in [
+        (
+            LayoutPayload::PageSetup {
+                layout: "Missing".into(),
+                paper: PaperSetup {
+                    name: "A4".into(),
+                    width: 210.0,
+                    height: 297.0,
+                },
+                scale: None,
+                rotation: PlotRotation::None,
+            },
+            "layout.unknown",
+        ),
+        (
+            LayoutPayload::PageSetup {
+                layout: "Sheet1".into(),
+                paper: PaperSetup {
+                    name: " ".into(),
+                    width: 210.0,
+                    height: 297.0,
+                },
+                scale: None,
+                rotation: PlotRotation::None,
+            },
+            "pagesetup.invalid_paper",
+        ),
+        (
+            LayoutPayload::PageSetup {
+                layout: "Sheet1".into(),
+                paper: PaperSetup {
+                    name: "A4".into(),
+                    width: 0.0,
+                    height: 297.0,
+                },
+                scale: None,
+                rotation: PlotRotation::None,
+            },
+            "pagesetup.invalid_paper",
+        ),
+        (
+            LayoutPayload::PageSetup {
+                layout: "Sheet1".into(),
+                paper: PaperSetup {
+                    name: "A4".into(),
+                    width: 210.0,
+                    height: 297.0,
+                },
+                scale: Some((0.0, 1.0)),
+                rotation: PlotRotation::None,
+            },
+            "pagesetup.invalid_scale",
+        ),
+    ] {
+        let error = refusal(app.execute(
+            &mut session,
+            command(
+                CommandId::Extended(ExtendedCommandId::PageSetup),
+                layout_payload(payload),
+            ),
+        ));
+        assert!(error.contains(expected), "expected {expected}, got {error}");
+    }
+    assert_eq!(revision(&app), start, "refusals write nothing");
+    assert!(!app.can_undo(&DOC), "refusals add no undo step");
+}
+
+#[test]
 fn psetupin_copies_a_stored_record_and_refuses_a_source_without_one() {
     let (mut app, mut session) = fixture(&[(1, "Sheet1"), (2, "Sheet2")], true);
     let source = drawing(&app).plot_settings(LayoutId(1)).cloned().unwrap();

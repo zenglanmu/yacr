@@ -365,3 +365,97 @@ fn control_selectors_are_static_admitted_and_carry_no_command_id() {
         ]
     );
 }
+
+/// A config store that keeps the last persisted preference text, shared by
+/// several sessions; `fail` makes the next write fail explicitly.
+struct PersistingConfig {
+    preference: RefCell<String>,
+    fail: std::cell::Cell<bool>,
+}
+
+impl PersistingConfig {
+    fn new() -> Rc<Self> {
+        Rc::new(Self {
+            preference: RefCell::new("{}".into()),
+            fail: std::cell::Cell::new(false),
+        })
+    }
+}
+
+impl ConfigStore for PersistingConfig {
+    fn load_config(&self) -> ConfigLoad {
+        ConfigLoad::Absent
+    }
+
+    fn load_preference(&self) -> ConfigLoad {
+        ConfigLoad::Text {
+            path: "/test/preference.json".into(),
+            text: self.preference.borrow().clone(),
+        }
+    }
+
+    fn persist_preference(&self, text: &str) -> CadResult<()> {
+        if self.fail.get() {
+            return Err(CadError::Unsupported("the disk is full".into()));
+        }
+        *self.preference.borrow_mut() = text.to_string();
+        Ok(())
+    }
+}
+
+#[test]
+fn aliasedit_persists_runtime_aliases_across_sessions_and_a_clear_drops_the_leaf() {
+    let config = PersistingConfig::new();
+    let first = session_with_config(config.clone());
+    first
+        .command("ALIASEDIT ADD QQ FIT")
+        .expect("the durable write succeeds");
+    let text = config.preference.borrow().clone();
+    let document: serde_json::Value = serde_json::from_str(&text).expect("preference JSON");
+    assert_eq!(document["commandAliases"]["QQ"], "FIT");
+    assert_eq!(
+        first.runtime_command_aliases(),
+        vec![("QQ".to_string(), "FIT".to_string())]
+    );
+
+    // A fresh session over the same durable document restores the alias and
+    // resolves it before any typed `ADD`.
+    let second = session_with_config(config.clone());
+    assert_eq!(
+        second.runtime_command_aliases(),
+        vec![("QQ".to_string(), "FIT".to_string())]
+    );
+    second.command("QQ").expect("the restored alias resolves");
+
+    second
+        .command("ALIASEDIT REMOVE QQ")
+        .expect("the durable removal succeeds");
+    let document: serde_json::Value =
+        serde_json::from_str(&config.preference.borrow()).expect("preference JSON");
+    assert!(
+        document.get("commandAliases").is_none(),
+        "an empty set drops the leaf: {document}"
+    );
+    let third = session_with_config(config);
+    assert!(third.runtime_command_aliases().is_empty());
+}
+
+#[test]
+fn aliasedit_refuses_and_rolls_back_when_persistence_fails() {
+    let config = PersistingConfig::new();
+    let session = session_with_config(config.clone());
+    config.fail.set(true);
+    let error = session.command("ALIASEDIT ADD QQ FIT").unwrap_err();
+    assert!(
+        error.contains("aliasedit.not_persisted"),
+        "the durable failure is a named refusal: {error}"
+    );
+    assert!(
+        session.runtime_command_aliases().is_empty(),
+        "the unpersisted row was rolled back"
+    );
+    assert_eq!(
+        session.snapshot(None, None, 0).error.as_deref(),
+        Some(error.as_str())
+    );
+}

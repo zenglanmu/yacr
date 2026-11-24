@@ -642,13 +642,92 @@ fn dblist_lists_top_level_entities_without_writing() {
         .iter()
         .find(|diagnostic| diagnostic.code == "dblist.summary")
         .expect("summary");
+    assert!(summary.message.contains("1 entity"), "{}", summary.message);
     assert!(
-        summary.message.contains("1 top-level"),
+        summary.message.contains("1 model"),
+        "the space split is reported: {}",
+        summary.message
+    );
+    assert!(
+        outcome
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "dblist.not_modelled"
+                && diagnostic.message.contains("XDATA")),
+        "unretained data is named"
+    );
+    assert_eq!(revision(&app), before);
+    assert!(!app.can_undo(&DocumentId(1)));
+}
+
+#[test]
+fn dblist_lists_block_definition_members_as_their_own_rows() {
+    let (mut app, mut session) = application_with_document();
+    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
+    builder
+        .insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+    let mut member = entity(10, LayerId(0));
+    member.space = SpaceId::Block(BlockId(2));
+    builder.insert_entity(member).unwrap();
+    builder
+        .insert_block(BlockDefinition {
+            id: BlockId(2),
+            entities: vec![EntityId(10)],
+            dynamic_visibility: None,
+        })
+        .unwrap();
+    builder
+        .set_block_metadata(
+            BlockId(2),
+            "TABLE",
+            cad_domain::Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        )
+        .unwrap();
+    app.workspace
+        .documents
+        .get_mut(&DocumentId(1))
+        .unwrap()
+        .drawing = Arc::new(builder.finish().unwrap());
+    let before = revision(&app);
+    let outcome = app
+        .execute(
+            &mut session,
+            command(CommandId::DbList, CommandPayload::None),
+        )
+        .expect("DBLIST is read-only");
+    let member_rows: Vec<&Diagnostic> = outcome
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "dblist.block_object")
+        .collect();
+    assert_eq!(member_rows.len(), 1, "the block member is a listed row");
+    assert!(
+        member_rows[0].message.contains("space=Block(TABLE)"),
+        "{}",
+        member_rows[0].message
+    );
+    let summary = outcome
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "dblist.summary")
+        .expect("summary");
+    assert!(
+        summary
+            .message
+            .contains("1 block member(s) in 1 definition"),
         "{}",
         summary.message
     );
     assert_eq!(revision(&app), before);
-    assert!(!app.can_undo(&DocumentId(1)));
 }
 
 #[test]
