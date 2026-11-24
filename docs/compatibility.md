@@ -2511,9 +2511,9 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 | 命令 | 结果 | 明示未实现 / 证据边界 |
 | --- | --- | --- |
 | `OPENFROMWEBMOBILE` | **部分实现（具名拒绝）**：`openfromwebmobile.unsupported: no Autodesk Account (web/mobile) file-exchange model` | 不写库/不升修订/不入历史 |
-| `-PARAMETERS` | **部分实现（具名拒绝）**：`-parameters.unsupported: no dynamic-block parameter/lookup model; the Parameters Manager palette is not implemented` | 不写库/不升修订/不入历史 |
-| `PARAMETERS` | **部分实现（具名拒绝）**：`parameters.unsupported: no dynamic-block parameter/lookup model; the Parameters Manager palette is not implemented` | 不写库/不升修订/不入历史 |
-| `PARAMETERSCLOSE` | **部分实现（具名拒绝）**：`parametersclose.unsupported: no dynamic-block parameter/lookup model; the Parameters Manager palette is not implemented` | 不写库/不升修订/不入历史 |
+| `-PARAMETERS` | **完整实现**：命令行列/编辑器 `NEW|SET|RENAME|DELETE` + 表达式语法；读形式输出参数表；一条事务/一步撤销 | 表达式语法没有函数调用；求解器驱动的约束参数未建模 |
+| `PARAMETERS` | **完整实现**：chrome-local Parameters Manager 面板（列表、创建/重命名/删除、值/表达式编辑；一条事务/一步撤销） | 求解器驱动的二维约束参数未建模；面板像属性面板一样在无 palettes 的载体上不挂载，但 `-PARAMETERS` 仍可用 |
+| `PARAMETERSCLOSE` | **完整实现**：幂等关闭 Parameters Manager 面板 | 再次关闭仍成功 |
 | `-PARTIALOAD` | **部分实现（具名拒绝）**：`-partiaload.unsupported: no partial layer-index open/load model` | 不写库/不升修订/不入历史 |
 | `PASTEASHYPERLINK` | **部分实现（具名拒绝）**：`pasteashyperlink.unsupported: no hyperlink storage model` | 不写库/不升修订/不入历史 |
 | `PSOUT` | **部分实现（具名拒绝）**：`psout.unsupported: PostScript output is not implemented; use PLOT for SVG/PDF` | 不写库/不升修订/不入历史 |

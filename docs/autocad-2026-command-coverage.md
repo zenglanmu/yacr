@@ -26,8 +26,8 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **198** |
-| 部分实现（有写明的界） | **781** |
+| 完整实现 | **201** |
+| 部分实现（有写明的界） | **778** |
 | **已实现合计（完整 + 部分）** | **979** |
 | 未实现 | **2** |
 
@@ -329,7 +329,7 @@
 | `-OVERKILL` | 完整实现 | `OVERKILL` 的命令行拼写：同一语法、同一去重实现，同输入产出字节级相同结果；非法参数由共享语法拒绝且不记录 |
 | `-PAGESETUP` | 部分实现 | 裸命令只读报告；typed 形式写入 Authored PLOTSETTINGS（纸张/比例/旋转），一条事务/一步撤销。 |
 | `-PAN` | 完整实现 | `PAN` 的命令行拼写：同一相机移动实现，只改视图、不写库/不入撤销（按设计，非缺口） |
-| `-PARAMETERS` | 部分实现 | 具名拒绝（`-parameters.unsupported: no dynamic-block parameter/lookup model; the Parameters Manager palette is not implemented`）。 |
+| `-PARAMETERS` | 完整实现 | 命令行列/编辑器 `NEW|SET|RENAME|DELETE` 与表达式语法；读形式输出参数表；名字/引用/循环等错误按名拒绝；一条事务/一步撤销。 |
 | `-PARTIALOAD` | 部分实现 | 具名拒绝（`-partiaload.unsupported: no partial layer-index open/load model`）。 |
 | `-PDFATTACH` | 部分实现 | 具名拒绝（`-pdfattach.unsupported: PDF underlays are not implemented`）。 |
 | `-PDFIMPORT` | 部分实现 | 具名拒绝（`-pdfimport.unsupported: PDF geometry import is not implemented`）。 |
@@ -914,8 +914,8 @@
 | `OVERKILL` | 已实现 | 容差（`0`=精确）、忽略 Color/Layer/Linetype/LTScale/Lineweight/Transparency、段优化与 `NOBREAK`、共线部分重叠/端到端合并、弧覆盖圆、重复段删除；保留最低 `(draw_order,id)`；一条事务/一步撤销 |
 | `PAGESETUP` | 部分实现 | 裸命令只读报告每个布局的入库 `PLOTSETTINGS`；`PAGESETUP <layout> <paper> <width> <height> [<num>:<den>] [0|90|180|270]` 写入 Authored 记录，一条事务/一步撤销；无绘图仪/CTB/STB。 |
 | `PAN` | 已实现 | — |
-| `PARAMETERS` | 部分实现 | 具名拒绝（`parameters.unsupported: no dynamic-block parameter/lookup model; the Parameters Manager palette is not implemented`）。 |
-| `PARAMETERSCLOSE` | 部分实现 | 具名拒绝（`parametersclose.unsupported: no dynamic-block parameter/lookup model; the Parameters Manager palette is not implemented`）。 |
+| `PARAMETERS` | 完整实现 | chrome-local Parameters Manager 面板：列出用户参数，创建/重命名/删除、值/表达式编辑；一条事务/一步撤销；求解器驱动的二维约束参数未建模。 |
+| `PARAMETERSCLOSE` | 完整实现 | 幂等关闭 Parameters Manager 面板；再次关闭仍成功。 |
 | `PARTIALOAD` | 部分实现 | 具名拒绝（`partiaload.unsupported: no partial layer-index open/load model`）。 |
 | `PARTIALOPEN` | 部分实现 | 具名拒绝（`partialopen.unsupported: no partial layer-index open/load model`）。 |
 | `PASTEASHYPERLINK` | 部分实现 | 具名拒绝（`pasteashyperlink.unsupported: no hyperlink storage model`）。 |
@@ -1871,9 +1871,9 @@
 | 610 | `PAGESETUP` | 部分实现 | Controls the page layout, plotting device, paper size, and other settings for each new layout. | 裸命令只读报告每个布局的入库 `PLOTSETTINGS`；`PAGESETUP <layout> <paper> <width> <height> [<num>:<den>] [0|90|180|270]` 写入 Authored 记录，一条事务/一步撤销；无绘图仪/CTB/STB。 |
 | 611 | `-PAN` | 完整实现 | Shifts the view by specifying up to two points to determine a distance and direction. | `PAN` 的命令行拼写：同一相机移动实现，只改视图、不写库/不入撤销（按设计，非缺口） |
 | 612 | `PAN` | 已实现 | Shifts the view without changing the viewing direction or magnification. | — |
-| 613 | `-PARAMETERS` | 部分实现 | Opens the Parameters Manager palette that includes all dimensional constraint parameters, reference parameters, and user variables in the current drawing. | 具名拒绝（`-parameters.unsupported: no dynamic-block parameter/lookup model; the Parameters Manager palette is not implemented`）。 |
-| 614 | `PARAMETERS` | 部分实现 | Opens the Parameters Manager palette that includes all dimensional constraint parameters, reference parameters, and user variables in the current drawing. | 具名拒绝（`parameters.unsupported: no dynamic-block parameter/lookup model; the Parameters Manager palette is not implemented`）。 |
-| 615 | `PARAMETERSCLOSE` | 部分实现 | Closes the Parameters Manager palette. | 具名拒绝（`parametersclose.unsupported: no dynamic-block parameter/lookup model; the Parameters Manager palette is not implemented`）。 |
+| 613 | `-PARAMETERS` | 完整实现 | Opens the Parameters Manager palette that includes all dimensional constraint parameters, reference parameters, and user variables in the current drawing. | 完整实现：命令行列/编辑器 `NEW|SET|RENAME|DELETE` 与表达式语法；读形式输出参数表；名字/引用/循环等错误按名拒绝；一条事务/一步撤销。 |
+| 614 | `PARAMETERS` | 完整实现 | Opens the Parameters Manager palette that includes all dimensional constraint parameters, reference parameters, and user variables in the current drawing. | 完整实现：chrome-local Parameters Manager 面板：列出用户参数，创建/重命名/删除、值/表达式编辑；一条事务/一步撤销；求解器驱动的二维约束参数未建模。 |
+| 615 | `PARAMETERSCLOSE` | 完整实现 | Closes the Parameters Manager palette. | 完整实现：幂等关闭 Parameters Manager 面板；再次关闭仍成功。 |
 | 616 | `-PARTIALOAD` | 部分实现 | Loads additional geometry into a partially opened drawing from the command line. | 具名拒绝（`-partiaload.unsupported: no partial layer-index open/load model`）。 |
 | 617 | `PARTIALOAD` | 部分实现 | Loads additional geometry into a partially opened drawing. | 具名拒绝（`partiaload.unsupported: no partial layer-index open/load model`）。 |
 | 618 | `PARTIALOPEN` | 部分实现 | Loads geometry and named objects from a selected view or layer into a drawing. | 具名拒绝（`partialopen.unsupported: no partial layer-index open/load model`）。 |
