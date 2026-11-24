@@ -79,7 +79,7 @@ fn block_app_with(base: Point3, standard: Option<MLeaderStyle>) -> (Application,
 
 /// The common fixture: `Door` with a zero base point and the pinned `Standard`
 /// style row.
-fn block_app() -> (Application, SessionState) {
+pub(super) fn block_app() -> (Application, SessionState) {
     block_app_with(p3(0.0, 0.0, 0.0), None)
 }
 
@@ -102,7 +102,7 @@ fn request(content: Option<MLeaderContentSpec>, text: &str) -> CommandPayload {
     }
 }
 
-fn the_leader(app: &Application) -> MultiLeaderGeometry {
+pub(super) fn the_leader(app: &Application) -> MultiLeaderGeometry {
     let document = &app.workspace.documents[&DocumentId(1)];
     document
         .drawing
@@ -140,7 +140,7 @@ fn export_bytes(app: &Application) -> Vec<u8> {
 }
 
 /// Export model space as DXF text and re-import it.
-fn round_trip(app: &Application) -> MultiLeaderGeometry {
+pub(super) fn round_trip(app: &Application) -> MultiLeaderGeometry {
     let (bytes, report) = export(&ExportRequest {
         database: &app.workspace.documents[&DocumentId(1)].drawing,
         document_id: DocumentId(1),

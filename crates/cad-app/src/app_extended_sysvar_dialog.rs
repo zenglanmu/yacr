@@ -159,6 +159,9 @@ impl Application {
         if let Some(enabled) = parsed.fs_mode {
             session.drafting_extras.set_fs_mode(enabled);
         }
+        if let Some(enabled) = parsed.explode_mode {
+            session.set_explode_mode(enabled);
+        }
 
         let mut rows: Vec<Diagnostic> = assignments
             .iter()
@@ -270,6 +273,7 @@ struct ParsedAssignments {
     cvport: Option<usize>,
     elev: Option<f64>,
     fs_mode: Option<bool>,
+    explode_mode: Option<bool>,
 }
 
 impl ParsedAssignments {
@@ -384,6 +388,14 @@ impl ParsedAssignments {
                 "ELEV" => parsed.elev = Some(finite(&name, value, "one finite height")?),
                 "FSMODE" => {
                     parsed.fs_mode = Some(
+                        parse_bool(value)
+                            .ok_or_else(|| invalid_value(&name, value, "ON, OFF, 1 or 0"))?,
+                    )
+                }
+                // `EXPLMODE`/`EXPMODE` is the same session switch `EXPLODE MODE`
+                // writes; a restore must not trip the closed-set guard.
+                "EXPLMODE" | "EXPMODE" => {
+                    parsed.explode_mode = Some(
                         parse_bool(value)
                             .ok_or_else(|| invalid_value(&name, value, "ON, OFF, 1 or 0"))?,
                     )

@@ -122,22 +122,37 @@ impl Application {
         Ok(report_outcome(rows))
     }
 
-    /// `LAYERSTATESAVE`: route a `LayerState` payload to the one session store.
+    /// `LAYERSTATESAVE`: the command-line form of the New Layer State dialog.
+    ///
+    /// It only ever *saves* (or lists) through the one session layer-state store,
+    /// so `Save` and `List` forward to [`Self::layer_state`] and every refusal,
+    /// the 32-entry cap and the same-name replacement rule are exactly
+    /// `LAYERSTATE`'s. `RESTORE`/`DELETE` are other commands' options and are
+    /// refused here by name instead of being silently accepted. A bare selector
+    /// still reports the missing dialog (`layerstatesave.needs_name`) and writes
+    /// nothing.
     fn layer_state_save(
         &mut self,
         session: &mut SessionState,
         command: &Command,
     ) -> CadResult<CommandOutcome> {
-        if matches!(command.payload, CommandPayload::LayerState(_)) {
-            self.layer_state(session, command)
-        } else {
-            Ok(report_outcome(vec![diagnostic(
+        match &command.payload {
+            CommandPayload::LayerState(LayerStateCommand::Save(_) | LayerStateCommand::List) => {
+                self.layer_state(session, command)
+            }
+            CommandPayload::LayerState(other) => Err(CadError::InvalidInput(format!(
+                "layerstatesave.option: LAYERSTATESAVE only saves the current layer state or \
+                 lists the saved names; {other:?} is LAYERSTATE's own option, so nothing was \
+                 written"
+            ))),
+            _ => Ok(report_outcome(vec![diagnostic(
                 "layerstatesave.needs_name",
-                "LAYERSTATESAVE: the New Layer State dialog is NOT IMPLEMENTED; supply a \
-                 `LAYERSTATE SAVE <name>` line instead, which stores the snapshot in the \
-                 session layer-state table"
+                "LAYERSTATESAVE: the New Layer State dialog is NOT IMPLEMENTED; type \
+                 `LAYERSTATESAVE <name>` to store the snapshot in the session layer-state table \
+                 (the same store and rules as `LAYERSTATE SAVE <name>`), or `LAYERSTATESAVE ?` to \
+                 list the saved names"
                     .into(),
-            )]))
+            )])),
         }
     }
 

@@ -283,3 +283,112 @@ fn layerstate_list_delete_and_the_bounded_cap() {
     );
     assert!(states.resolve(&format!("STATE{LAYER_STATE_CAP}")).is_some());
 }
+
+// ---------------------------------------------------------------------------
+// `LAYERSTATESAVE`: the dialog spelling's typed form (2026-11-24)
+// ---------------------------------------------------------------------------
+
+fn layerstatesave(
+    app: &mut Application,
+    session: &mut SessionState,
+    payload: CommandPayload,
+) -> CadResult<CommandOutcome> {
+    execute(
+        app,
+        session,
+        CommandId::Extended(crate::ExtendedCommandId::LayerStateSave),
+        payload,
+    )
+}
+
+#[test]
+fn layerstatesave_saves_and_lists_through_the_one_layerstate_store() {
+    let (mut app, mut session) = app_with(layers(), vec![line(1, LayerId(3), 0.0)]);
+    session.active_layer = LayerId(3);
+    session.layer_overrides.set(LayerId(5), false);
+    let before = state(&app);
+
+    let outcome = layerstatesave(
+        &mut app,
+        &mut session,
+        CommandPayload::LayerState(LayerStateCommand::Save("Plan A".into())),
+    )
+    .expect("LAYERSTATESAVE <name> saves");
+    // Exactly `LAYERSTATE SAVE`'s report and store: one implementation.
+    assert_eq!(diagnostic_codes(&outcome), vec!["layerstate.saved"]);
+    assert!(outcome.changes.is_none(), "session state only");
+    let saved = session
+        .layer_states
+        .resolve("plan a")
+        .expect("the name is stored case-insensitively");
+    assert_eq!(saved.active_layer, LayerId(3));
+    assert_eq!(saved.attributes.len(), 3);
+    assert_eq!(state(&app), before, "no drawing write, no revision bump");
+    assert_eq!(undo_depth(&app), 0);
+
+    let outcome = layerstatesave(
+        &mut app,
+        &mut session,
+        CommandPayload::LayerState(LayerStateCommand::List),
+    )
+    .expect("LAYERSTATESAVE ? lists");
+    assert_eq!(diagnostic_codes(&outcome), vec!["layerstate.list"]);
+    assert!(outcome.diagnostics[0].message.contains("Plan A"));
+    assert_eq!(state(&app), before);
+
+    // A duplicate name replaces the same snapshot (the store's rule), it is not
+    // a refusal and it does not grow the store.
+    let outcome = layerstatesave(
+        &mut app,
+        &mut session,
+        CommandPayload::LayerState(LayerStateCommand::Save("plan a".into())),
+    )
+    .expect("a duplicate name replaces");
+    assert_eq!(diagnostic_codes(&outcome), vec!["layerstate.saved"]);
+    assert!(outcome.diagnostics[0].message.contains("replaced"));
+    assert_eq!(session.layer_states.len(), 1);
+    assert_eq!(state(&app), before);
+    assert_eq!(undo_depth(&app), 0);
+}
+
+#[test]
+fn layerstatesave_refuses_restore_delete_and_empty_payloads_without_writing() {
+    let (mut app, mut session) = app_with(layers(), vec![line(1, LayerId(3), 0.0)]);
+    layerstatesave(
+        &mut app,
+        &mut session,
+        CommandPayload::LayerState(LayerStateCommand::Save("Keep".into())),
+    )
+    .expect("seed one state");
+    let before = state(&app);
+    let undo = undo_depth(&app);
+
+    for (payload, expected) in [
+        (
+            LayerStateCommand::Restore("Keep".into()),
+            "layerstatesave.option:",
+        ),
+        (
+            LayerStateCommand::Delete("Keep".into()),
+            "layerstatesave.option:",
+        ),
+    ] {
+        let error = layerstatesave(&mut app, &mut session, CommandPayload::LayerState(payload))
+            .expect_err("RESTORE/DELETE are LAYERSTATE's own options");
+        assert!(refusal(error).starts_with(expected));
+        assert_eq!(state(&app), before, "nothing was written");
+        assert_eq!(undo_depth(&app), undo, "no undo step");
+        assert_eq!(session.layer_states.len(), 1, "the store is untouched");
+    }
+
+    // The bare selector keeps the named missing-dialog report and writes nothing.
+    let outcome = layerstatesave(&mut app, &mut session, CommandPayload::None)
+        .expect("the bare form is the named report");
+    assert!(outcome
+        .diagnostics
+        .iter()
+        .any(|row| row.code == "layerstatesave.needs_name"));
+    assert_eq!(state(&app), before);
+    assert_eq!(undo_depth(&app), undo);
+    assert_eq!(session.layer_states.len(), 1);
+}

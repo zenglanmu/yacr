@@ -63,12 +63,18 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     DASH_ARRAY_SELECTOR,
     ARRAYCLASSIC_SELECTOR,
     MEASUREGEOM_SELECTOR,
+    // `PYRAMID [INSCRIBED|CIRCUMSCRIBED] <sides> <cx> <cy> <radius> <height>`:
+    // the one typed 3D-primitive line (its polygon base is the `POLYGON` ring).
+    PYRAMID_SELECTOR,
     JUSTIFYTEXT_SELECTOR,
     TSCALE_SELECTOR,
     TEXTALIGN_SELECTOR,
     TCOUNT_SELECTOR,
     TCIRCLE_SELECTOR,
     LAYERSTATE_SELECTOR,
+    // `LAYERSTATESAVE [<name>|?]`: the command-line form of the New Layer State
+    // dialog, routed to the same session store (no second write path).
+    LAYERSTATESAVE_SELECTOR,
     LAYWALK_SELECTOR,
     LTSCALE_SELECTOR,
     LAYERPMODE_SELECTOR,

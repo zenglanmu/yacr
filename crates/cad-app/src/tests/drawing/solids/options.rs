@@ -823,3 +823,165 @@ fn a_plan_construction_commits_one_body_in_one_undo_step() {
     assert_eq!(entity_count(&app), 0);
     assert!(!app.can_undo(&DocumentId(1)));
 }
+
+// ---- PYRAMID: the typed regular n-gon base ------------------------------
+
+#[test]
+fn pyramid_polygon_base_is_the_polygon_ring_at_the_session_elevation() {
+    // Inscribed: the first vertex lies on +X at exactly the typed radius, so the
+    // seam receives that radius and rotation 0.
+    assert_eq!(
+        spec_at_elev(
+            ExtendedCommandId::Pyramid,
+            SolidPrimitiveCommand::PyramidPolygon {
+                base: [2.0, 3.0],
+                radius: 5.0,
+                sides: 6,
+                circumscribed: false,
+                height: 8.0,
+            },
+            7.0,
+        ),
+        PrimitiveSpec::PyramidNgon {
+            base_center: p(2.0, 3.0, 7.0),
+            radius: 5.0,
+            sides: 6,
+            rotation: 0.0,
+            height: 8.0,
+        },
+        "ELEV sets the base plane; the inscribed ring's vertex radius is the typed one"
+    );
+
+    // A triangle is the smallest base: the ring is still the POLYGON one.
+    let spec = spec_of(
+        ExtendedCommandId::Pyramid,
+        SolidPrimitiveCommand::PyramidPolygon {
+            base: [0.0, 0.0],
+            radius: 2.0,
+            sides: 3,
+            circumscribed: false,
+            height: 1.0,
+        },
+    );
+    assert!(
+        matches!(
+            spec,
+            PrimitiveSpec::PyramidNgon {
+                radius,
+                sides: 3,
+                rotation,
+                ..
+            } if (radius - 2.0).abs() < 1e-12 && rotation.abs() < 1e-12
+        ),
+        "{spec:?}"
+    );
+}
+
+#[test]
+fn pyramid_polygon_circumscribed_uses_the_polygon_tangent_ring() {
+    // The typed radius is the tangent circle; the ring's vertex radius is
+    // `r / cos(π/n)` and the first vertex is half a step clockwise of +X —
+    // exactly `POLYGON CIRCUMSCRIBED`'s construction.
+    let spec = spec_of(
+        ExtendedCommandId::Pyramid,
+        SolidPrimitiveCommand::PyramidPolygon {
+            base: [1.0, -1.0],
+            radius: 5.0,
+            sides: 6,
+            circumscribed: true,
+            height: 4.0,
+        },
+    );
+    let PrimitiveSpec::PyramidNgon {
+        base_center,
+        radius,
+        sides,
+        rotation,
+        height,
+    } = spec
+    else {
+        panic!("an n-gon pyramid spec, got {spec:?}");
+    };
+    assert_eq!(base_center, p(1.0, -1.0, 0.0));
+    assert_eq!(sides, 6);
+    assert_eq!(height, 4.0);
+    let expected_radius = 5.0 / (std::f64::consts::PI / 6.0).cos();
+    assert!(
+        (radius - expected_radius).abs() < 1e-12,
+        "vertex radius {radius} vs {expected_radius}"
+    );
+    assert!(
+        (rotation + std::f64::consts::PI / 6.0).abs() < 1e-12,
+        "the first vertex is half a step clockwise of +X, got {rotation}"
+    );
+}
+
+#[test]
+fn pyramid_polygon_refuses_out_of_range_input_before_the_modeler() {
+    let cases = [
+        (
+            SolidPrimitiveCommand::PyramidPolygon {
+                base: [0.0, 0.0],
+                radius: 1.0,
+                sides: 2,
+                circumscribed: false,
+                height: 1.0,
+            },
+            "pyramid.sides:",
+        ),
+        (
+            SolidPrimitiveCommand::PyramidPolygon {
+                base: [0.0, 0.0],
+                radius: 1.0,
+                sides: 1025,
+                circumscribed: false,
+                height: 1.0,
+            },
+            "pyramid.sides:",
+        ),
+        (
+            SolidPrimitiveCommand::PyramidPolygon {
+                base: [0.0, 0.0],
+                radius: 0.0,
+                sides: 4,
+                circumscribed: false,
+                height: 1.0,
+            },
+            "pyramid.radius:",
+        ),
+        (
+            SolidPrimitiveCommand::PyramidPolygon {
+                base: [f64::NAN, 0.0],
+                radius: 1.0,
+                sides: 4,
+                circumscribed: false,
+                height: 1.0,
+            },
+            "pyramid.invalid_point:",
+        ),
+        (
+            SolidPrimitiveCommand::PyramidPolygon {
+                base: [0.0, 0.0],
+                radius: 1.0,
+                sides: 4,
+                circumscribed: false,
+                height: 0.0,
+            },
+            "pyramid.degenerate_extent:",
+        ),
+    ];
+    for (input, expected) in cases {
+        let (mut app, mut session, specs) = app_with_modeler(Answer::Body);
+        let before = revision(&app);
+        let error = run(&mut app, &mut session, ExtendedCommandId::Pyramid, input)
+            .expect_err("an out-of-range polygon base is refused");
+        let CadError::InvalidInput(text) = error else {
+            panic!("a degenerate construction is InvalidInput");
+        };
+        assert!(text.starts_with(expected), "{text}");
+        assert!(specs.lock().unwrap().is_empty(), "no modeler call");
+        assert_eq!(revision(&app), before);
+        assert!(!app.can_undo(&DocumentId(1)));
+        assert_eq!(entity_count(&app), 0);
+    }
+}

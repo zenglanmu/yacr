@@ -782,11 +782,13 @@ pub enum ExtendedCommandId {
     /// `WEDGE`: creates one exact `Body3d` from two base corners and a height
     /// point, or from the same `Center`/`Cube`/`Length` set as `BOX` (Work-only).
     Wedge,
-    /// `PYRAMID`: creates one exact square-base `Body3d` from two base corners
-    /// and an apex (Work-only). AutoCAD's `Edge`/`Sides`/`Top radius`
-    /// constructions need a regular n-gon (possibly truncated) base the modeler
-    /// seam does not expose; they are refused as `solid.option_not_supported`,
-    /// so this command stays partial.
+    /// `PYRAMID`: creates one exact `Body3d` from two base corners and an apex,
+    /// or from the typed regular n-gon base
+    /// (`PYRAMID [INSCRIBED|CIRCUMSCRIBED] <sides> <cx> <cy> <radius> <height>`,
+    /// Work-only). The n-gon ring reuses the `POLYGON` construction math and the
+    /// seam's `PyramidNgon` spec. AutoCAD's `Edge` (interactive pick) and
+    /// `Top radius` truncation are not modelled (no truncated seam spec), so the
+    /// command stays partial.
     Pyramid,
     /// `POLYSOLID`: 3D solid primitives are not implemented.
     PolySolid,

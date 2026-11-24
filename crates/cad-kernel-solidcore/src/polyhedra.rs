@@ -1,18 +1,19 @@
 //! Exact planar B-rep data for the polyhedral primitives.
 //!
 //! `solidcore` has constructors for the cylinder, sphere, cone and torus but
-//! **none for the wedge**, and its pyramid takes a square base only. Those three
-//! families are therefore authored here as exact neutral B-rep data: every face
-//! is a plane, every boundary curve a straight line, so the body lifts to a
-//! kernel record without loss (and the modeler lifts it once to prove the kernel
-//! accepts it before handing it out).
+//! **none for the wedge**, and its pyramid takes a square base only, so the
+//! wedge and every pyramid (square or regular `n`-gon base) are authored here as
+//! exact neutral B-rep data: every face is a plane, every boundary curve a
+//! straight line, so the body lifts to a kernel record without loss (and the
+//! modeler lifts it once to prove the kernel accepts it before handing it out).
 //!
 //! Every face is wound counter-clockwise seen from outside the material, which is
 //! what makes the record's shell normals point out of the material and the
 //! resulting solid volume positive. Face ids are sequential in authoring order.
 //!
 //! Volumes are the closed forms the unit tests assert against: `l·w·h` (box),
-//! `l·w·h/2` (wedge, a right triangular prism), `s²·h/3` (pyramid).
+//! `l·w·h/2` (wedge, a right triangular prism), `s²·h/3` (square pyramid) and
+//! `(n/2)·r²·sin(2π/n)·h/3` (regular `n`-gon pyramid).
 
 use cad_domain::{BrepCurve, BrepData, BrepFace, BrepLoop, BrepShell, BrepSurface, Point3};
 
@@ -192,6 +193,45 @@ pub fn pyramid_brep(base_center: Point3, side: f64, height: f64) -> BrepData {
     body(&cycles, &corners)
 }
 
+/// A regular `sides`-gon pyramid: the base ring centred on `base_center` in the
+/// plane `z = base_center.z` with vertex radius `radius`, its first vertex at
+/// `rotation` radians about `+Z`, and the apex `height` above the centre.
+///
+/// `sides == 4` with `rotation = π/4` and `radius = side / √2` is exactly
+/// [`pyramid_brep`]'s square base, rotated so its vertices sit at the corners;
+/// the ring order matches the `POLYGON` command's own construction.
+///
+/// Volume `(n / 2) · r² · sin(2π/n) · height / 3`.
+pub fn pyramid_ngon_brep(
+    base_center: Point3,
+    radius: f64,
+    sides: u32,
+    rotation: f64,
+    height: f64,
+) -> BrepData {
+    let n = sides as usize;
+    let step = std::f64::consts::TAU / f64::from(sides);
+    let mut corners = Vec::with_capacity(n + 1);
+    for index in 0..n {
+        let angle = rotation + step * index as f64;
+        let (sin, cos) = angle.sin_cos();
+        corners.push(p(
+            base_center.x + radius * cos,
+            base_center.y + radius * sin,
+            base_center.z,
+        ));
+    }
+    corners.push(p(base_center.x, base_center.y, base_center.z + height));
+    // Outward: the base's reversed ring (-Z), then one triangle per side.
+    let mut cycles: Vec<Vec<usize>> = Vec::with_capacity(n + 1);
+    cycles.push((0..n).rev().collect());
+    for index in 0..n {
+        cycles.push(vec![index, (index + 1) % n, n]);
+    }
+    let refs: Vec<&[usize]> = cycles.iter().map(Vec::as_slice).collect();
+    body(&refs, &corners)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -238,6 +278,45 @@ mod tests {
         // 5 faces (1 base + 4 triangles), 8 edges, 5 vertices.
         assert_eq!(counts(&brep), (5, 8, 5));
         assert!((volume(&brep) - 4.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn an_ngon_pyramid_has_the_closed_form_volume_and_ring_counts() {
+        // A regular hexagon of vertex radius 2: area = 3/2 · √3 · r².
+        let sides = 6u32;
+        let radius = 2.0;
+        let height = 3.0;
+        let brep = pyramid_ngon_brep(p(1.0, -2.0, 0.5), radius, sides, 0.0, height);
+        // n side triangles + 1 base face, 2n edges, n + 1 vertices.
+        assert_eq!(counts(&brep), (7, 12, 7));
+        let side = std::f64::consts::TAU / f64::from(sides);
+        let expected = 0.5 * f64::from(sides) * radius * radius * side.sin() * height / 3.0;
+        assert!((volume(&brep) - expected).abs() < 1e-9);
+        // Every base vertex really sits `radius` from the centre in the base plane.
+        for corner in &brep.shells[0].faces[0].loops[0].edges {
+            let cad_domain::BrepCurve::Line { start, .. } = corner else {
+                panic!("the authored base is straight-edged");
+            };
+            let dx = start.x - 1.0;
+            let dy = start.y + 2.0;
+            assert!((dx.hypot(dy) - radius).abs() < 1e-9);
+            assert!((start.z - 0.5).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn a_four_sided_ngon_pyramid_is_the_rotated_square_pyramid() {
+        // Sides 4 at rotation π/4 with vertex radius side/√2 places the corners
+        // exactly where `pyramid_brep` does, so the volumes must agree.
+        let square = pyramid_brep(p(0.0, 0.0, 0.0), 2.0, 3.0);
+        let ngon = pyramid_ngon_brep(
+            p(0.0, 0.0, 0.0),
+            2.0 / 2.0_f64.sqrt(),
+            4,
+            std::f64::consts::FRAC_PI_4,
+            3.0,
+        );
+        assert!((volume(&ngon) - volume(&square)).abs() < 1e-9);
     }
 
     #[test]

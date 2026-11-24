@@ -84,27 +84,33 @@
 //! funnel. The legacy AutoCAD `LEADER`/`QLEADER` entity is therefore **mapped to
 //! `MULTILEADER`**; no `AcDbLeader` entity is produced by this build.
 //!
-//! Payload is [`crate::AnnotationBatchPayload::Leader`] `{ arrow, landing, text }`.
-//! The typed grammar is
-//! `QLEADER <arrow x,y> <landing x,y> <text>` (or the `LEADER` spelling); the
-//! text is the whole trimmed remainder and must satisfy the shared `TEXT` rules
-//! (at most [`crate::MAX_TOOL_TEXT_CHARS`] characters). An empty remainder
-//! creates a **content-less** leader (arrow, leader line and dogleg only).
-//! Points are flattened to the `+Z` work plane (`z = 0`), exactly like the other
-//! typed point forms.
+//! Payload is [`crate::AnnotationBatchPayload::Leader`]
+//! `{ arrow, landing, text, content, arrowhead, max_points }`. The typed
+//! grammar is
+//! `QLEADER [CONTENT MTEXT|BLOCK <name>|TOLERANCE] [ARROW ON|OFF] [MAXPOINTS <n>]
+//! <arrow x,y> <landing x,y> [text]` (or the `LEADER` spelling, which takes the
+//! `CONTENT` prefix but not QLEADER's own settings); the text is the whole
+//! trimmed remainder and must satisfy the shared `TEXT` rules (at most
+//! [`crate::MAX_TOOL_TEXT_CHARS`] characters). An empty remainder creates a
+//! **content-less** leader (arrow, leader line and dogleg only), and
+//! `CONTENT BLOCK` requires it empty like `MLEADER`. Points are flattened to the
+//! `+Z` work plane (`z = 0`), exactly like the other typed point forms.
 //!
 //! Refusals happen before the transaction opens: `qleader.payload` /
 //! `leader.payload`, the two coordinate-pair grammars (an unparsable pair is
-//! refused by the session before IPC), and every refusal the MLEADER creation
-//! path already names (`tool.text_too_long`, `mleader.style_missing`, a non-finite
-//! point, a landing point too close to the dogleg, a missing active layer). One
-//! entity / one transaction / one undo step. Work-only.
+//! refused by the session before IPC), `qleader.invalid_max_points` (below the
+//! creation's two vertices) and `mleader.option_max_points` (above them), plus
+//! every refusal the MLEADER creation path already names (`tool.text_too_long`,
+//! `mleader.style_missing`, `mleader.block_missing`,
+//! `mleader.block_text_unexpected`, a non-finite point, a landing point too close
+//! to the dogleg, a missing active layer). One entity / one transaction / one
+//! undo step. Work-only.
 //!
-//! `QLEADER`/`LEADER` always create the **text** content kind (MText, or a
-//! content-less leader for an empty text) because their payload has no `CONTENT`
-//! field; the block and tolerance kinds are reached through `MLEADER CONTENT …`
-//! ([`crate::app_drawing::mleader`]), which writes the same `MULTILEADER` entity
-//! (entity `172` `1`/`2`/`3`, style `170`).
+//! The four annotation kinds are the shared `MLEADER` ones (`172` `0`/`1`/`2`/`3`,
+//! style `170`), so block/tolerance leaders write and round-trip exactly like
+//! `MLEADER CONTENT …`. `ARROW OFF` is the created line's own arrowhead override
+//! (`LEADER_LINE 40 = 0` plus the per-line bit `16`). Only `Copy an object`
+//! annotation has no representable content kind and stays unimplemented.
 //!
 //! # `TEXTFIT`
 //!

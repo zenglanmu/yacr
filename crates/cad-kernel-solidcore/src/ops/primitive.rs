@@ -51,6 +51,19 @@ pub(crate) fn create(spec: &PrimitiveSpec) -> CadResult<SolidOutcome> {
             length,
             height,
         } => authored(polyhedra::pyramid_brep(base_center, length, height)),
+        PrimitiveSpec::PyramidNgon {
+            base_center,
+            radius,
+            sides,
+            rotation,
+            height,
+        } => authored(polyhedra::pyramid_ngon_brep(
+            base_center,
+            radius,
+            sides,
+            rotation,
+            height,
+        )),
         PrimitiveSpec::Cylinder {
             origin,
             radius,

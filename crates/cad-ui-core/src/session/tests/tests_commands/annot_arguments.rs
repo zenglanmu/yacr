@@ -6,7 +6,7 @@
 use super::super::super::*;
 use cad_app::{
     CenterArm, CenterLineCommand, CenterMarkCommand, GroupCommand, GroupEditCommand, LeaderCommand,
-    TextFitCommand,
+    MLeaderContentSpec, TextFitCommand,
 };
 
 use crate::session::annot_arguments::{
@@ -193,22 +193,68 @@ fn leader_grammar_is_two_pairs_and_bounded_text() {
                 z: 0.0
             },
             text: "Hello world".into(),
+            content: None,
+            arrowhead: None,
+            max_points: None,
         }
     );
     assert_eq!(
         parse_leader_argument("1,2 3,4 Note").map(|leader| leader.text),
         Some("Note".into())
     );
+    // An empty text is the content-less leader, not a grammar error.
+    for empty in ["1,2 3,4", "1,2 3,4   "] {
+        let parsed = parse_qleader_argument(empty).expect("content-less leader");
+        assert!(parsed.text.is_empty(), "{empty:?}");
+    }
     for bad in [
         "",
         "1,2",
-        "1,2 3,4",
-        "1,2 3,4   ",
         "1 2 3,4 text",
         "1,2,3 3,4 text",
+        "CONTENT 1,2 3,4",
+        "CONTENT BLOCK 1,2 3,4",
+        "CONTENT BLOCK WALLS WALLS 1,2 3,4",
+        "CONTENT NOPE 1,2 3,4 text",
+        "ARROW MAYBE 1,2 3,4 text",
+        "MAXPOINTS x 1,2 3,4 text",
     ] {
         assert_eq!(parse_qleader_argument(bad), None, "{bad:?}");
     }
+}
+
+#[test]
+fn leader_grammar_takes_the_shared_content_and_the_qleader_options() {
+    let parsed = parse_qleader_argument("CONTENT BLOCK WALLS 1,2 3,4").expect("block content");
+    assert_eq!(
+        parsed.content,
+        Some(MLeaderContentSpec::Block("WALLS".into()))
+    );
+    assert!(parsed.text.is_empty(), "block content takes no text");
+
+    let parsed = parse_qleader_argument("CONTENT TOLERANCE ARROW OFF MAXPOINTS 2 1,2 3,4 |a|b|c")
+        .expect("tolerance + arrow off");
+    assert_eq!(parsed.content, Some(MLeaderContentSpec::Tolerance));
+    assert_eq!(parsed.arrowhead, Some(false));
+    assert_eq!(parsed.max_points, Some(2));
+    assert_eq!(parsed.text, "|a|b|c");
+
+    let parsed = parse_qleader_argument("ARROW ON 1,2 3,4 Note").expect("arrow on");
+    assert_eq!(parsed.arrowhead, Some(true));
+    assert_eq!(parsed.max_points, None);
+
+    // LEADER takes the content prefix but not QLEADER's own settings.
+    let parsed = parse_leader_argument("CONTENT MTEXT 1,2 3,4 Note").expect("LEADER content");
+    assert_eq!(parsed.content, Some(MLeaderContentSpec::MText));
+    assert_eq!(parsed.arrowhead, None);
+    assert_eq!(parsed.max_points, None);
+    assert_eq!(parse_leader_argument("ARROW OFF 1,2 3,4 Note"), None);
+    assert_eq!(parse_leader_argument("MAXPOINTS 2 1,2 3,4 Note"), None);
+    // A repeated option is outside the grammar and never silently merged.
+    assert_eq!(
+        parse_qleader_argument("ARROW ON ARROW OFF 1,2 3,4 Note"),
+        None
+    );
 }
 
 #[test]

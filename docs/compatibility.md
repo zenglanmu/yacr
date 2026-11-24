@@ -1058,7 +1058,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `GROUP` / `-GROUP` | **完整实现** | 文档持久编组表 `tables/groups.json`（minor 17；行序列号/名字/描述/DXF selectable/有序成员实体 id，上限 64、名字大小写不敏感）；裸命令/`LIST` 只读、`CREATE` 从选择集建组、`DELETE` 只移除名字；一条事务/一步撤销，`ChangeScope.tables = {Groups}`；DXF/DWG 按 `AcDbGroup` 导入导出（名字经 `ACAD_GROUP` 字典），描述/selectable 保留 | 未写出的成员（v1 图纸空间延后）按 `export.group_member_not_written` 具名报告；含空格的组名用双引号寻址（如 `UNGROUP "My Group"`） |
 | `UNGROUP` | **完整实现** | `UNGROUP <name>` 移除一个持久编组行，保留全部实体；未知组名拒绝；一条事务/一步撤销 | 不写实体几何 |
 | `GROUPEDIT` | **完整实现** | `<name> ADD|REMOVE|RENAME <arg>`；成员来自当前选择集或键入实体 id；`RENAME` 允许仅改大小写；持久表一条事务/一步撤销 | 不写实体几何；无组选择对话框 |
-| `QLEADER` / `LEADER` | 部分实现 | `<arrow x,y> <landing x,y> <文本>` 创建**一个** `MULTILEADER`（旧实体映射为 MULTILEADER）；一条事务/一步撤销 | 无 QLEADER 设置对话框、引线样式、注释类型、多引线段/附着选项 |
+| `QLEADER` / `LEADER` | 部分实现 | `[CONTENT MTEXT\|BLOCK <name>\|TOLERANCE]`（QLEADER 另 `[ARROW ON\|OFF] [MAXPOINTS <n>]`）`<arrow x,y> <landing x,y> [文本]` 创建**一个** `MULTILEADER`（旧实体映射为 MULTILEADER）；块/公差内容与 `MLEADER` 同一创建路径与 DXF 往返，`ARROW OFF` 是逐线 `LEADER_LINE 40 = 0` + 覆盖位 16，`MAXPOINTS 2` 合法而 `> 2`/`< 2` 分别按 `mleader.option_max_points`/`qleader.invalid_max_points` 拒绝且不写；一条事务/一步撤销 | 注释 `Copy an object` 未实现（MULTILEADER 内容类型仅 text/none/block/tolerance，无法表达）；无 QLEADER 设置对话框、箭头块选择、样条-直线提示、注释比例提示（全局范围） |
 | `TEXTFIT` | 部分实现 | `<目标宽度>` 仅按 `height = target / char_count` 改字形高度 | 真实宽度拉伸/压缩 NOT IMPLEMENTED；坏宽度、空选择、非文字、空文本具名拒绝 |
 | `HATCHSETBOUNDARY` | 完整实现 | 恰好一个 hatch + 一条闭合 Polyline/整圆/**完整 Ellipse**（整椭圆采样为单个 64 点环、无 bulge），共面性校验；`HatchGeometry::new` 重建并丢弃旧种子；一条事务/一步撤销 | 部分椭圆 `hatchsetboundary.open_ellipse` 拒绝且不开事务；无交互边界选择、无关联边界、无椭圆弧/块内边界 |
 | `HATCHSETORIGIN` | 完整实现 | `<x> <y>` 绝对图案原点：锚为首个定义行的合成基点（`absolute_pattern_origin()`），写入位移 `P − 锚`，行列/角度/比例参与；一条事务/一步撤销 | 无定义行的图案无法定位 → 收窄的 `hatchsetorigin.missing_field`；非有限位移 `unrepresentable`；非模型空间 hatch 不可寻址 |
@@ -1819,7 +1819,7 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 | 命令 | 结果 | 明示未实现 / 证据边界 |
 | --- | --- | --- |
 | `-LAYER` | **部分实现（只读报告）**：真实图层表（名称/可见/off/frozen/locked/当前层） | 图层增删改名/开关/冻结/锁定写形式未实现；不写库 |
-| `LAYERSTATESAVE` | **部分实现（载荷路由）**：`LayerState` 载荷转交既有 `LAYERSTATE` 会话存储 | 无收录对话框；无载荷只报告；会话状态不持久化 |
+| `LAYERSTATESAVE` | **部分实现**：`LAYERSTATESAVE <name>` 与 `?` 经同一 `LayerStateSave` 路由落到**同一**会话层状态存储（与 `LAYERSTATE SAVE`/`LIST` 相同的 32 上限、同名替换与空名语法拒绝）；`RESTORE`/`DELETE` 载荷按 `layerstatesave.option` 拒绝；裸命令报告 `layerstatesave.needs_name`；无库写/修订/历史 | 无收录对话框；**DWG 命名层状态表持久化未实现**（存储按设计是会话状态） |
 | `NEWVIEW` | **完整实现** | typed `NEWVIEW <name>` 保存当前显示；`NEWVIEW WINDOW <name> <x1> <y1> <x2> <y2>` 按世界矩形取景并保存（复用 `ZOOM WINDOW` 的 `framing_rect`/`plan_camera`，不改当前相机）；两者写入 `tables/views.json`，一条事务/一步撤销；Viewer 下写形式按 `PermissionDenied` 拒绝 | 无 NEWVIEW 对话框/缩略图（构建级全局范围）；窗口形式仅 2D 正交（`newview.window.requires_2d`）；无参数只报告 `newview.needs_name` |
 | `-SCALELISTEDIT` | **部分实现（只读报告）**：真实 `ACAD_SCALELIST` 条目 | 创建/编辑/删除/排序比例未实现 |
 | `LWEIGHT` / `-LWEIGHT` | **部分实现（只读报告）**：会话线宽显示令牌（默认 ON） | 渲染器不消费该标志；LWEIGHT 对话框未实现 |
@@ -1963,7 +1963,7 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 | `SPHERE` | **完整实现**：显式两点 + typed `Diameter`/`2P`（`2P` 保留自身 z）；一条事务/一步撤销 | 交互提示/布尔属 ADR 全局范围；无模型器载体 `unsupported-runtime: solid-modeler`；证据仅 Linux 契约，GPU/像素 NOT VERIFIED |
 | `TORUS` | **完整实现**：显式三点 + typed plan ring `Radius`/`Diameter`/`2P` + tube `Radius`/`Diameter`/`2P`；plan 基面取会话 `ELEV`；次半径须小于主半径；一条事务/一步撤销 | 交互提示/布尔属 ADR 全局范围；无模型器载体 `unsupported-runtime: solid-modeler`；证据仅 Linux 契约，GPU/像素 NOT VERIFIED |
 | `WEDGE` | **完整实现**：显式三点 + typed `Cube`/`Center`+corner/`Center`+`Length`/`Length`；plan 基面取会话 `ELEV`；高面固定在最小 x 一侧；一条事务/一步撤销 | 交互提示/布尔属 ADR 全局范围；无模型器载体 `unsupported-runtime: solid-modeler`；证据仅 Linux 契约，GPU/像素 NOT VERIFIED |
-| `PYRAMID` | **部分实现**：显式三点（正方形底面对角点、顶点）创建 `AcDb3dSolid` 实体（`Body3d{Solid,Exact}` + 显示网格/边线）；底面须为正方形且两点共面（`pyramid.base_not_coplanar`），顶点须在底面中心正上方 | **未实现**：交互式尺寸提示、布尔运算（C2）；错误载荷 `InvalidInput`（`pyramid.requires_*_points`/`pyramid.degenerate_extent`）；无模型器载体 `unsupported-runtime: solid-modeler`；证据仅 Linux 契约（真实 solidcore），GPU/像素 NOT VERIFIED |
+| `PYRAMID` | **部分实现**：显式三点（正方形底面对角点、顶点）与 typed 正则 n 边形底（`PYRAMID [INSCRIBED\|CIRCUMSCRIBED] <sides> <cx> <cy> <radius> <height>`；顶点环复用 `POLYGON`/`POLYGON CIRCUMSCRIBED` 同一构造数学，`ELEV` 定底面 z）创建同一 `AcDb3dSolid`（`Body3d{Solid,Exact}` + 显示网格/边线）；一条事务/一步撤销；写前具名拒绝 `pyramid.sides`/`pyramid.radius`/`pyramid.invalid_point`/`pyramid.degenerate_extent`/`pyramid.invalid_base`/`pyramid.base_not_coplanar` | **未实现**：`Top radius` 截断（modeler seam 无 truncated spec）、`Edge` 与已有多边形作底（交互拾取）、交互式尺寸提示、布尔运算（C2）；无模型器载体 `unsupported-runtime: solid-modeler`；证据仅 Linux 契约（真实 solidcore 的 n 边形体 + DXF 往返），GPU/像素/真机 NOT VERIFIED |
 | `POLYSOLID` | **部分实现（具名拒绝）**：`polysolid.unsupported: 3D solid primitives are not implemented` | 不写库/不升修订/不入历史 |
 | `EXTRUDE` | **部分实现（具名拒绝）**：`extrude.unsupported: 3D extrusion is not implemented` | 不写库/不升修订/不入历史 |
 | `REVOLVE` | **部分实现（具名拒绝）**：`revolve.unsupported: 3D revolution is not implemented` | 不写库/不升修订/不入历史 |

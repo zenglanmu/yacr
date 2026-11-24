@@ -224,6 +224,9 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             "JOIN",
             "OFFSET",
             "MIRROR",
+            // `EXPLODE MODE 0|1` (`EXPLMODE`), present in the table on the base
+            // commit but missing from this golden list (pre-existing drift).
+            "EXPLODE",
             "CHAMFER",
             "FILLET",
             "HATCHEDIT",
@@ -235,12 +238,15 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             "-ARRAY",
             "ARRAYCLASSIC",
             "MEASUREGEOM",
+            // The one typed 3D-primitive line (2026-11-24).
+            "PYRAMID",
             "JUSTIFYTEXT",
             "TSCALE",
             "TEXTALIGN",
             "TCOUNT",
             "TCIRCLE",
             "LAYERSTATE",
+            "LAYERSTATESAVE",
             "LAYWALK",
             "LTSCALE",
             "LAYERPMODE",
@@ -266,6 +272,9 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             "UNITS",
             "-UNITS",
             "SYSVDLG",
+            // `ACADINFO <file.json>`, in the table on the base commit but missing
+            // from this golden list (pre-existing drift).
+            "ACADINFO",
             // The annotation-scale table's typed writes (2026-11-16).
             "SCALELISTEDIT",
             "-SCALELISTEDIT",

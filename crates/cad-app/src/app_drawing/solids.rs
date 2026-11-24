@@ -69,7 +69,7 @@
 //! | `SPHERE` | `Diameter` | `SphereDiameter { center, diameter }` |
 //! | `SPHERE` | `2P` (3D) | `SphereTwoPoint { first, second }` |
 //! | `TORUS` | any ring + tube | `TorusPlan { ring, tube }` |
-//! | `PYRAMID` | `Points` only | `Edge`/`Sides`/`Top radius` need an n-gon/truncated seam primitive that does not exist — refused by name, PYRAMID stays partial |
+//! | `PYRAMID` | `Points`, `PyramidPolygon` | the explicit square-base form and the typed regular n-gon base (reusing the `POLYGON` ring math) are written; `Edge` (interactive pick) and `Top radius` (a truncated seam spec that does not exist) stay absent, so PYRAMID remains partial |
 //!
 //! Every point must be finite (`<kind>.non_finite_point`). Non-positive or
 //! non-finite extents are `<kind>.degenerate_extent`; a non-square pyramid base

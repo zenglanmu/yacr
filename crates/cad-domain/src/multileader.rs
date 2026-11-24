@@ -374,6 +374,7 @@ pub const CREATED_TEXT_ATTACHMENT_POINT: i16 = 2;
 /// | vertical attachment | [`MLeaderText::left_attachment`] | entity `173` / `CONTEXT_DATA 174` |
 /// | horizontal attachment | [`MLeaderText::attachment_point`] | entity `179` / `CONTEXT_DATA 171` |
 /// | text angle type | [`MLeaderStyleValues::text_angle_type`] | entity `174` (mask `0x2000`) |
+/// | arrowhead on/off | [`MLeaderLine::arrowhead_size`] | `LEADER_LINE 40` (line override bit `16`) |
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct MLeaderCreateOptions {
     /// The root's own dogleg/landing length (`LEADER 40`); `None` uses the
@@ -395,6 +396,10 @@ pub struct MLeaderCreateOptions {
     /// the resolved style's value. A mode that differs from the style sets the
     /// `0x2000` override bit, so the entity value is the one a reload resolves.
     pub text_angle: Option<MLeaderTextAngle>,
+    /// The created **leader line's** arrowhead (`LEADER_LINE 40` + override
+    /// [`MLeaderLine::ARROWHEAD_SIZE`]); `None` inherits the style's size,
+    /// `Some(false)` is `QLEADER`'s `ARROW OFF` (size `0` + the override bit).
+    pub arrowhead: Option<bool>,
 }
 
 /// The parts accepted by [`MultiLeaderGeometry::from_import`].

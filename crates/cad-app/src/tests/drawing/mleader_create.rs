@@ -537,6 +537,9 @@ fn qleader_and_leader_inherit_the_shared_option_plan() {
                 arrow: p3(0.0, 0.0, 0.0),
                 landing: p3(10.0, 2.0, 0.0),
                 text: "Note".into(),
+                content: None,
+                arrowhead: None,
+                max_points: None,
             }))),
         )
         .unwrap_or_else(|error| panic!("{command_id:?} creates a leader: {error:?}"));
@@ -581,7 +584,7 @@ fn leader_option_plan_names_the_point_limit_and_the_vertex_carrier() {
     // size to the pinned default), so an arrowhead-off style is named, not drawn.
     let row = MLeaderStyle::standard_metric(MLeaderStyleId(0));
     let resolution = row.resolved("Standard".into(), StyleId(0), None);
-    let options = plan_leader_options(&row, &resolution).expect("the pinned row plans");
+    let options = plan_leader_options(&row, &resolution, None).expect("the pinned row plans");
     assert_eq!(options.path, MLeaderPathType::StraightLineSegments);
     assert_eq!(options.max_points, MAX_CREATED_LEADER_POINTS);
     assert!(options.arrowhead);
@@ -593,17 +596,22 @@ fn leader_option_plan_names_the_point_limit_and_the_vertex_carrier() {
     let mut off = row.clone();
     off.arrowhead_size = 0.0;
     let resolution = off.resolved("Standard".into(), StyleId(0), None);
-    let error = plan_leader_options(&off, &resolution).unwrap_err();
+    let error = plan_leader_options(&off, &resolution, None).unwrap_err();
     assert!(
         matches!(error, CadError::Unsupported(ref message)
             if message.contains("mleader.option_arrowhead_off")),
         "{error:?}"
     );
+    // ...but an explicit `ARROW OFF` request is representable on that same row:
+    // the created line stores size 0 with the per-line override bit.
+    let options = plan_leader_options(&off, &resolution, Some(false))
+        .expect("ARROW OFF plans on an arrowhead-off style");
+    assert!(!options.arrowhead);
     // An invisible leader path has no line at all and stays a named refusal.
     let mut invisible = row.clone();
     invisible.path_type = MLeaderPathType::Invisible;
     let resolution = invisible.resolved("Standard".into(), StyleId(0), None);
-    let error = plan_leader_options(&invisible, &resolution).unwrap_err();
+    let error = plan_leader_options(&invisible, &resolution, None).unwrap_err();
     assert!(
         matches!(error, CadError::Unsupported(ref message)
             if message.contains("mleader.path_type")),
@@ -614,7 +622,8 @@ fn leader_option_plan_names_the_point_limit_and_the_vertex_carrier() {
     let mut none = row.clone();
     none.content_type = MLeaderStyle::CONTENT_NONE;
     let resolution = none.resolved("Standard".into(), StyleId(0), None);
-    let options = plan_leader_options(&none, &resolution).expect("a content-less style plans");
+    let options =
+        plan_leader_options(&none, &resolution, None).expect("a content-less style plans");
     assert_eq!(options.style_content, MLeaderContentKind::None);
 }
 
@@ -629,7 +638,8 @@ fn a_block_or_tolerance_style_row_is_no_longer_a_refusal() {
         let mut standard = MLeaderStyle::standard_metric(MLeaderStyleId(0));
         standard.content_type = content;
         let resolution = standard.resolved("Standard".into(), StyleId(0), None);
-        let options = plan_leader_options(&standard, &resolution).expect("every stored kind plans");
+        let options =
+            plan_leader_options(&standard, &resolution, None).expect("every stored kind plans");
         assert_eq!(
             options.style_content,
             MLeaderContentKind::from_dxf(content).expect("a stored code"),
@@ -640,7 +650,7 @@ fn a_block_or_tolerance_style_row_is_no_longer_a_refusal() {
     let mut unknown = MLeaderStyle::standard_metric(MLeaderStyleId(0));
     unknown.content_type = 9;
     let resolution = unknown.resolved("Standard".into(), StyleId(0), None);
-    let error = plan_leader_options(&unknown, &resolution).unwrap_err();
+    let error = plan_leader_options(&unknown, &resolution, None).unwrap_err();
     assert!(
         matches!(error, CadError::Unsupported(ref message)
             if message.contains("mleader.content_unsupported")),

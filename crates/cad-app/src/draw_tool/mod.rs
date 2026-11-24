@@ -861,7 +861,9 @@ pub use geometry::{
     polygon_vertices, spline_control_points, ArcParameters, EllipseParameters,
     DEFAULT_POLYGON_SIDES, MAX_POLYGON_SIDES, MIN_POLYGON_SIDES,
 };
-pub(crate) use geometry::{mirror_transform, rotation_transform, scale_transform};
+pub(crate) use geometry::{
+    mirror_transform, polygon_radius_floor, rotation_transform, scale_transform,
+};
 
 #[cfg(test)]
 mod tests;

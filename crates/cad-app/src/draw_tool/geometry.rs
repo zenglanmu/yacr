@@ -349,6 +349,13 @@ pub const DEFAULT_POLYGON_SIDES: u32 = 4;
 /// so an exactly-degenerate click is refused while any real radius is accepted.
 const MIN_POLYGON_RADIUS: f64 = 1e-12;
 
+/// The smallest radius the POLYGON construction accepts, for the sibling
+/// constructions that reuse its ring (the `PYRAMID` polygon base) so they refuse
+/// the same degenerate radius with their own named reason before calling it.
+pub(crate) fn polygon_radius_floor() -> f64 {
+    MIN_POLYGON_RADIUS
+}
+
 /// The `n` vertices of a regular polygon **inscribed in a circle**, in order.
 ///
 /// ADR 0015 decision A: POLYGON is AutoCAD's default **inscribed** construction.

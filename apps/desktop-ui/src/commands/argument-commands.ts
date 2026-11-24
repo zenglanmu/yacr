@@ -24,6 +24,9 @@ import {
   isClipArgument, isPositiveDecimal, isSignedDecimal, isXclipArgument, tokens,
 } from './argument-clip-grammar.ts';
 import {
+  isLayerStateSaveArgument, isLeaderArgument, isPyramidArgument,
+} from './argument-3d-and-leader-grammar.ts';
+import {
   isMLeaderAlignArgument, isMLeaderEditArgument, isMlEditArgument, isToleranceArgument,
 } from './argument-mleader-grammar.ts';
 import {
@@ -293,6 +296,7 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
   REVCLOUDPROPERTIES: Object.freeze({ parse: isPositiveDecimal }),
   UNDEFINE: Object.freeze({ parse: isOneName }),
   REDEFINE: Object.freeze({ parse: isOneName }),
+  LAYERSTATESAVE: Object.freeze({ parse: isLayerStateSaveArgument }),
   LAYERSTATE: Object.freeze({
     parse: (argument: string) => {
       const parts = argument.trim().split(/\s+/).filter(part => part.length > 0);
@@ -649,8 +653,9 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
   '-GROUP': Object.freeze({ parse: isGroupArgument }),
   UNGROUP: Object.freeze({ parse: isOneName }),
   GROUPEDIT: Object.freeze({ parse: isGroupEditArgument }),
-  QLEADER: Object.freeze({ parse: isLeaderArgument }),
-  LEADER: Object.freeze({ parse: isLeaderArgument }),
+  PYRAMID: Object.freeze({ parse: isPyramidArgument }),
+  QLEADER: Object.freeze({ parse: (argument: string) => isLeaderArgument(argument, true) }),
+  LEADER: Object.freeze({ parse: (argument: string) => isLeaderArgument(argument, false) }),
   TEXTFIT: Object.freeze({ parse: (argument: string) => isSignedDecimal(argument.trim()) }),
   HATCHSETORIGIN: Object.freeze({
     parse: (argument: string) => {
@@ -863,12 +868,7 @@ function isGroupEditArgument(argument: string): boolean {
   return parts.slice(2).every(part => /^\d+(,\d+)*$/.test(part));
 }
 
-/** `QLEADER`/`LEADER`: `<arrow x,y> <landing x,y> <text...>`. */
-function isLeaderArgument(argument: string): boolean {
-  const parts = tokens(argument);
-  return parts.length >= 3
-    && isCoordinatePair(parts[0]) && isCoordinatePair(parts[1]);
-}
+
 
 /**
  * `PAGESETUP`/`-PAGESETUP`: `<layout> <paper> <width> <height> [<num>:<den>]

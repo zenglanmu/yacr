@@ -16,6 +16,14 @@ use cad_app::{
 /// AutoCAD's `LAYERSTATE <option>`: the bounded named layer-state store.
 pub const LAYERSTATE_SELECTOR: &str = "LAYERSTATE";
 
+/// AutoCAD's `LAYERSTATESAVE [<name>|?]`: the command-line spelling of the
+/// New Layer State dialog, routed to the same session store as
+/// [`LAYERSTATE_SELECTOR`]'s `SAVE`/`LIST`.
+///
+/// The dialog itself is a declared global-scope gap; this selector is the typed
+/// form that actually saves (or lists) the snapshot, so no second store exists.
+pub const LAYERSTATESAVE_SELECTOR: &str = "LAYERSTATESAVE";
+
 /// AutoCAD's `LAYWALK <names>`: show only the named layers plus the current one.
 pub const LAYWALK_SELECTOR: &str = "LAYWALK";
 
@@ -328,6 +336,26 @@ pub fn parse_layerstate_argument(argument: &str) -> Option<LayerStateOption> {
     }
 }
 
+/// Parse the argument of a `LAYERSTATESAVE` selector:
+/// `?` (list every saved name) or `<name>` (save the current layers under it).
+///
+/// The name is the whole trimmed remainder, exactly like
+/// [`parse_layerstate_argument`]'s `SAVE <name>` (so it may contain spaces); an
+/// empty name cannot reach this parser — the session's argument splitter refuses
+/// a blank argument and keeps the bare selector, whose report is
+/// `layerstatesave.needs_name`. `?` with trailing text is outside the grammar and
+/// is refused, never treated as a name.
+pub fn parse_layerstatesave_argument(argument: &str) -> Option<LayerStateOption> {
+    let text = argument.trim();
+    if text == "?" {
+        return Some(LayerStateOption::List);
+    }
+    if text.starts_with('?') {
+        return None;
+    }
+    (!text.is_empty()).then(|| LayerStateOption::Save(text.to_string()))
+}
+
 /// Parse the argument of a `LAYWALK` selector: comma-separated layer names.
 ///
 /// Surrounding whitespace is trimmed from every name; an empty list, an empty
@@ -440,6 +468,16 @@ pub fn invalid_layerstate_argument_reason(text: &str) -> String {
     format!(
         "unsupported CAD command: {} (LAYERSTATE needs SAVE <name>, RESTORE <name>, LIST or \
          DELETE <name>)",
+        text.trim()
+    )
+}
+
+/// The stable rejection reason for a `LAYERSTATESAVE` argument outside the
+/// grammar.
+pub fn invalid_layerstatesave_argument_reason(text: &str) -> String {
+    format!(
+        "unsupported CAD command: {} (LAYERSTATESAVE needs `<name>` to save the current layer \
+         state, or `?` to list the saved names)",
         text.trim()
     )
 }

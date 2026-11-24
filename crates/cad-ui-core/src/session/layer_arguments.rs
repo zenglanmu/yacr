@@ -17,7 +17,10 @@ use cad_app::{
     SelectionToolPayload,
 };
 
-use super::commands::{parse_dash_layer_argument, DASH_LAYER_SELECTOR};
+use super::commands::{
+    invalid_layerstatesave_argument_reason, parse_dash_layer_argument,
+    parse_layerstatesave_argument, DASH_LAYER_SELECTOR, LAYERSTATESAVE_SELECTOR,
+};
 use super::diagnostics::cad_error_text;
 use super::{
     invalid_dash_layer_argument_reason, invalid_layerpmode_argument_reason,
@@ -43,6 +46,31 @@ impl CadSession {
         self.dispatch_typed_argument(
             LAYERSTATE_SELECTOR,
             CommandId::LayerState,
+            CommandPayload::LayerState(payload),
+        )
+    }
+
+    /// Apply one typed `LAYERSTATESAVE [<name>|?]` line.
+    ///
+    /// The dialog spelling is a thin route to the **same** session layer-state
+    /// store as `LAYERSTATE SAVE`/`LIST` (`CommandId::Extended(LayerStateSave)`);
+    /// no second store, no drawing write and no persistence. A bare
+    /// `LAYERSTATESAVE` never reaches here: it keeps the missing-dialog report.
+    pub(super) fn layerstatesave_argument(&self, argument: &str, text: &str) -> Result<(), String> {
+        let Some(option) = parse_layerstatesave_argument(argument) else {
+            return self.refuse_argument(invalid_layerstatesave_argument_reason(text));
+        };
+        let payload = match option {
+            super::LayerStateOption::Save(name) => LayerStateCommand::Save(name),
+            super::LayerStateOption::List => LayerStateCommand::List,
+            // The grammar above can only produce these two variants.
+            super::LayerStateOption::Restore(_) | super::LayerStateOption::Delete(_) => {
+                return self.refuse_argument(invalid_layerstatesave_argument_reason(text))
+            }
+        };
+        self.dispatch_typed_argument(
+            LAYERSTATESAVE_SELECTOR,
+            CommandId::Extended(ExtendedCommandId::LayerStateSave),
             CommandPayload::LayerState(payload),
         )
     }

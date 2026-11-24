@@ -194,6 +194,9 @@ fn leader_payload(arrow: Point3, landing: Point3, text: &str) -> CommandPayload 
         arrow,
         landing,
         text: text.to_string(),
+        content: None,
+        arrowhead: None,
+        max_points: None,
     }))
 }
 
