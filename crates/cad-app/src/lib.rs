@@ -533,7 +533,7 @@ pub use command_payload::{
     TextAlignEdge, TextAlignSpacing, TextAlignSpacingCommand, TextBoundaryShape, TextCaseMode,
     TextFitCommand, TextMaskKind, TextMaskOptions, TextOrder, TextScaleCommand, ToleranceCommand,
     TwoLineCommand, Txt2MTextOptions, UnitsCommand, UtilityPayload, VPointInput, ViewCommand,
-    WipeoutPayload, XClipCommand,
+    WipeoutPayload, XClipCommand, XPlodeSettings,
 };
 
 pub use app_audit::AuditRequest;

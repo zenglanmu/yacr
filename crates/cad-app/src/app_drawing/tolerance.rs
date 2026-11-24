@@ -41,9 +41,29 @@
 //! * `tolerance.text_too_long` — more than the shared
 //!   [`MAX_TOOL_TEXT_CHARS`] characters;
 //! * `tolerance.text_control` — a control character (including a line break);
+//! * `tolerance.gdt_symbol` — the DXF GDT-font notation (`{\Fgdt;…}`); this
+//!   build has no GDT symbol-font interpreter, so it refuses instead of drawing
+//!   the escape literally;
+//! * `tolerance.multiline` — the DXF `^J` multi-row separator; this command
+//!   builds one single-row frame;
+//! * `tolerance.dxf_separator` — the DXF `%%v` cell separator; the typed command
+//!   uses `|`, and treating a DXF string as one literal cell would be wrong;
 //! * `tolerance.cell_empty` — an empty compartment between `|` separators;
 //! * `tolerance.cells` — more than [`MAX_TOLERANCE_CELLS`] compartments;
 //! * `tolerance.height` — the session text height is not finite/positive.
+//!
+//! ## Why this stays a declared partial (not a promotion)
+//!
+//! The decomposition itself is a faithful drawing, but the **cell grammar** is
+//! not the full feature-control-frame grammar: AutoCAD's dialog has two
+//! tolerance slots, three datum slots, a projected-zone height and a datum
+//! identifier, and the source text uses GDT symbol font escapes and `%%v`
+//! separators. This command supports one single-row frame of up to six plain-text
+//! `|`-separated cells and refuses the DXF notation by name. The composite
+//! `AcDbFcf` entity class is also not modelled (declared representation choice),
+//! but the grammar/limit gap above is real, so the command remains **partial**
+//! until a GDT symbol grammar (or a documented plain-text equivalent) is
+//! implemented.
 
 use super::*;
 use crate::draw_tool::ToolParameter;
@@ -102,6 +122,27 @@ impl Application {
                 "text_control",
                 "the frame text must not contain control characters (including line breaks); \
                  compartments are separated by `|`",
+            ));
+        }
+        if payload.text.contains("{\\Fgdt;") {
+            return Err(invalid(
+                "gdt_symbol",
+                "the DXF GDT-font notation (`{\\Fgdt;…}`) is not rendered by this build; type the \
+                 symbol as plain text instead",
+            ));
+        }
+        if payload.text.contains("^J") {
+            return Err(invalid(
+                "multiline",
+                "the DXF `^J` multi-row separator is not supported: TOLERANCE builds one \
+                 single-row feature-control frame",
+            ));
+        }
+        if payload.text.contains("%%v") {
+            return Err(invalid(
+                "dxf_separator",
+                "the DXF `%%v` cell separator is not accepted: the typed frame uses `|` between \
+                 compartments",
             ));
         }
         let cells: Vec<&str> = payload.text.split('|').collect();

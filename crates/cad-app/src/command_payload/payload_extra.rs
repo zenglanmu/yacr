@@ -3,6 +3,7 @@
 
 use cad_domain::{CadError, CadResult, LayerId, Point3, SelectionRef};
 
+use super::xplode::XPlodeSettings;
 use crate::grips::GripId;
 
 mod dash_layer;
@@ -564,6 +565,9 @@ pub enum SelectionToolPayload {
     /// already-boxed channel because [`crate::CommandPayload`] is at its
     /// code-size ceiling.
     ChangeProperties(ChangePropertiesRequest),
+    /// `XPLODE` typed controls (see [`XPlodeSettings`]). Rides the same boxed
+    /// selection channel as `CHPROP`/`CHANGE`.
+    XPlode(XPlodeSettings),
 }
 
 /// A property QSELECT/FILTER can compare.

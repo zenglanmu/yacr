@@ -240,7 +240,7 @@ impl Application {
 /// The grammar and its reason stay the same (`property.invalid_value` becomes
 /// `chprop.invalid_value`), so a caller sees which command refused while the
 /// value rule has exactly one authority.
-fn prefixed_property_error(prefix: &str, error: CadError) -> CadError {
+pub(super) fn prefixed_property_error(prefix: &str, error: CadError) -> CadError {
     let recode = |message: String| match message.strip_prefix("property.") {
         Some(rest) => format!("{prefix}.{rest}"),
         None => format!("{prefix}.property: {message}"),

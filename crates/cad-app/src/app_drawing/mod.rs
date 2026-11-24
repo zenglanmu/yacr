@@ -82,6 +82,8 @@ mod elevation;
 mod extend_spline;
 // The 2026-11-07 extras batch write paths (SKETCH/TRACE/MOCORO/LINETYPE).
 mod explode;
+// `XPLODE`: EXPLODE's one-level block decomposition plus the documented
+// property / `Inherit from parent block` / attribute-definition handling.
 mod extras_batch;
 mod find_text;
 mod find_xref;
@@ -96,6 +98,7 @@ mod hatch_edit_pattern_file;
 mod hatch_edit_pattern_name;
 mod hatch_internal_point;
 mod hatch_parameters;
+pub(crate) mod xplode;
 // The AutoCAD `.pat` pattern library (HATCH predefined/custom definitions).
 mod hatch_pattern;
 mod hatch_stitch;

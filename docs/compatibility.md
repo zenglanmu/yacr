@@ -1643,7 +1643,7 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 | `-COPYTOLAYER` | **部分实现**：与 `COPYTOLAYER` 相同的实现，命令行拼写；一条事务/一步撤销 | 同上 |
 | `CDORDER` | **部分实现**：按颜色索引升序重写选中（空选择 = 全部模型空间）实体的存储绘制顺序；保留候选占用的原 draw-order 槽位；一条事务/一步撤销 | 无对话框；ByBlock=0、非调色板真彩=256、缺层属性=7 是声明排序规则 |
 | `FLATTEN` | **部分实现**：`LINE`/`POLYLINE`/`CIRCLE`/`ARC`/`ELLIPSE`/`POINT`/`SPLINE` 的 z 改写为 0；新增 `TEXT`/`SHAPE`/`MASK`/已平行世界 XY 的 `IMAGE`/`COMPOUND` 与**竖直 `INSERT`**（只移动插入点 z 与属性文字 z，块定义不改；成员非平或放置倾斜按名拒绝）；一条事务/一步撤销 | Express 的投影语义简化为 z=0；`MESH`/`Body3d`、派生显示缓存的 `DIMENSION`/`HATCH`/`MULTILEADER`/`TABLE`、非 XY 平面 `IMAGE` 按名拒绝 |
-| `XPLODE` | **部分实现**：复用既有 `EXPLODE` 路径分解选中 `INSERT`；一条事务/一步撤销 | 属性/特性控制 **NOT IMPLEMENTED**（`xplode.attributes_not_implemented`） |
+| `XPLODE` | **完整实现**：块参照的一级 EXPLODE 分解 + `All`/`Color`/`LAyer`/`LType`/`LWeight`/`Inherit from parent block`/`Explode` 控制；`layer`/`color`/`linetype`/`lineweight` 经 `plan_entity` 写入每个子实体，`Inherit` 把 layer 0 与 `ByBlock` 按参照/参照图层解析；块属性值丢弃并由块定义 `ATTDEF` 作为普通实体产出（`BURST` 保值）；一条事务/一步撤销 | 仅块参照（与 `BURST` 相同的一级块范围）；`transparency`/`ltscale`/thickness/material/plot style 按名拒绝；`Inherit` 与显式属性列表互斥；`Individually` 交互提示不提供（全局交互范围）；非均匀放置/冻结层/XREF 按名拒绝 |
 | `BTRIM` | **部分实现**：首个选中 `INSERT` 的成员几何为边界，其余选中实体复用既有 TRIM 规划器修剪（拾取点为曲线中点）；一条事务/一步撤销 | 无交互式边界提示；不可规划的目标按名拒绝 |
 | `BEXTEND` | **部分实现**：同上，复用既有 EXTEND 规划器（拾取点为曲线终点）；一条事务/一步撤销 | 无交互式边界提示；不可规划的目标按名拒绝 |
 | `CHANGE` | **部分实现**：与 `CHPROP` 相同的 typed 属性列表（`layer`/`color`/`linetype`/`lineweight`/`transparency`，与 `SETENTITYPROPERTY` 共用语法与 `plan_entity` 应用器），模型与图纸空间直取实体；一条事务/一步撤销 | AutoCAD 的 change-point 分支（移动点/文字）与交互式特性提示未实现；未建模属性按名拒绝 |
@@ -2372,7 +2372,7 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 | `MLEADERALIGN` | 部分实现 | LEFT/RIGHT/CENTER + 等距纵排；箭头锚定，其余平移 | 无 distribute/column 选项；有保留断点的引线拒绝 |
 | `MLEADEREDIT` | 部分实现 | ADD 根 0 一条线 / REMOVE 一条（不可清空） | 无逐线覆盖/箭头编辑；不可见路径样式拒绝 |
 | `MLEADERCOLLECT` | 部分实现 | ≥2 条合并为一条（根/线拼接、文本 `\P`、首样式/平面、根落点重定向），删除源 | 样式/覆盖掩码/平面必须一致；无堆叠文本/分栏/关联性 |
-| `TOLERANCE` | 部分实现 | `TOLERANCE <x> <y> <text>` 生成边框+分隔线+每格 TEXT | 独立实体非 `AcDbFcf`；轴对齐；格宽/行高为估计；≤6 格 |
+| `TOLERANCE` | 部分实现 | `TOLERANCE <x> <y> <text>` 生成边框+分隔线+每格 TEXT | 独立实体非 `AcDbFcf`；轴对齐；格宽/行高为估计；≤6 格；**单元格语法缺口**：未实现对话框的槽位语义（两个公差槽、三个基准槽、投影高度、基准标识）与 GDT 符号字体、`%%v`、`^J`（`tolerance.gdt_symbol`/`tolerance.multiline`/`tolerance.dxf_separator` 具名拒绝） |
 | `CLASSICXREF` | 部分实现 | 只读 xref 报告 + chrome 面板（真实 `cad_status.references`） | attach/detach/reload 仍按名拒绝；面板不写库 |
 | `PMTOGGLE` | **完整实现** | 切换选项板可见性（与 HIDEPALETTES/SHOWPALETTES 同状态） | chrome 本地选择子，不进入 `cad_command` |
 | `SYSVARMONITOR` | 部分实现 | ADD/REMOVE/LIST + 查询时快照变化检测 | 无后台通知；会话状态不持久化；仅 SETVAR 闭集变量 |
