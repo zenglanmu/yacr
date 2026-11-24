@@ -785,3 +785,5 @@ fn viewer_mode_refuses_all_four_commands() {
         assert!(!session.refedit.is_active());
     }
 }
+
+mod writeback;

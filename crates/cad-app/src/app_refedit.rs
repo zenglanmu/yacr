@@ -35,14 +35,24 @@
 //!   `refedit.active`.
 //! * Only **visible** members are extracted (the `NCOPY`/`EXPLODE` rule); a
 //!   member hidden by an active dynamic-visibility state has no clone and is left
-//!   untouched by a save.
+//!   untouched by a save, exactly as the descriptor names it. If a removed member
+//!   leaves the block, it is pruned from the descriptor too (member-id keys never
+//!   dangle); an added member is ungoverned and therefore always visible.
 //! * **No reference fade / no reference lock**: this build has no such display
 //!   concept, so other host objects stay visible and selectable during a session.
 //!   `REFSET ADD` is the explicit way to pull one into the working set.
-//! * Members are edited only along their clones' **geometry**; a clone's layer /
-//!   draw order are not written back to the member. A nested INSERT member keeps
-//!   its own block reference and gets the inverse placement composed onto its
-//!   transform, exactly like the extraction composes the forward one.
+//! * `SAVE` writes each member's inverse-transformed **geometry**, its **layer**,
+//!   its **draw order** and any changed **render attributes** (color / linetype /
+//!   lineweight / transparency) back. Draw order is planned per scope: a clone's
+//!   model-space order only permutes the member slots it already occupies, so an
+//!   untouched member never moves and a hidden (governed) member keeps its slot.
+//!   The member's block/visibility membership always stays the block's, never the
+//!   clone's.
+//! * A nested INSERT member keeps its own block reference: extraction composes
+//!   the source placement onto its transform and save composes the exact inverse
+//!   back, so one nested level is preserved as a reference (it is never opened).
+//!   A *block-instance-member selection* (opening a nested reference) is the
+//!   named `refedit.nested` refusal, never a silent top-level pick.
 //! * Only the 2D geometry kinds `cad_db::transform_geometry` can represent under
 //!   a similarity are extractable; anything else is `refedit.clone_failed`
 //!   **before** any write (all-or-nothing).
@@ -59,10 +69,12 @@
 //! | --- | --- |
 //! | `refedit.active` | a session is already active |
 //! | `refedit.selection` | not exactly one directly addressable model-space entity |
+//! | `refedit.nested` | the selected object is a block-instance member (a nested reference) |
 //! | `refedit.not_insert` | the selected entity is not an `INSERT` |
 //! | `refedit.non_uniform` | the placement is mirrored, non-uniform, degenerate or non-finite |
 //! | `refedit.block_missing` | the INSERT names a block this drawing does not have |
 //! | `refedit.clone_failed` | a member cannot be represented under the similarity |
+//! | `refedit.order_exhausted` | the planned block draw order would overflow `i64` |
 //! | `refedit.no_session` | `REFSET`/`REFCLOSE` with no active session |
 //! | `refedit.selection_empty` | `REFSET` with an empty selection |
 //! | `refset.invalid_option` | `REFSET` with a non-option payload |
@@ -178,16 +190,28 @@ impl Application {
             ));
         }
         let reference = refs[0].clone();
-        if reference.document != document_id
-            || !reference.instance.0.is_empty()
-            || reference.sub_element.is_some()
-        {
+        if !reference.instance.0.is_empty() {
+            // A block-instance member is a *nested* reference: this session
+            // edits exactly one top-level block reference (nesting is preserved
+            // as a member, never opened). Refuse by name instead of silently
+            // treating it as a top-level pick.
+            return Err(invalid(
+                "refedit",
+                "nested",
+                format!(
+                    "entity {} is a block-instance member (nesting depth {}); REFEDIT opens one \
+                     top-level model-space INSERT and preserves nested references as members",
+                    reference.entity.0,
+                    reference.instance.0.len()
+                ),
+            ));
+        }
+        if reference.document != document_id || reference.sub_element.is_some() {
             return Err(invalid(
                 "refedit",
                 "selection",
                 format!(
-                    "entity {} is not a directly addressable model-space object (block-instance \
-                     member or sub-element)",
+                    "entity {} is not a directly addressable model-space object (sub-element)",
                     reference.entity.0
                 ),
             ));
