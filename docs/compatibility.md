@@ -1652,7 +1652,7 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 | `SPLINEDIT` | **部分实现（具名拒绝）**：`splinedit.unsupported: this build has no NURBS edit surface` | 同上 |
 | `MLEDIT` | **部分实现（具名拒绝）**：`mlinedit.unsupported: this build has no MLINE join/cap edit model` | 同上 |
 | `-MLEDIT` | **部分实现（具名拒绝）**：`-mlinedit.unsupported: this build has no MLINE join/cap edit model` | 同上 |
-| `BURST` | **部分实现（具名拒绝）**：`burst.unsupported: this build has no block-attribute model to preserve` | 同上 |
+| `BURST` | **完整实现**：一级 EXPLODE + 属性值转 TEXT（含常量）；一条事务/一步撤销 | 无对话框；导入的非均匀/镜像引用仍按名报告 |
 | `CLIP` | **完整实现**：`RECT`（目标自身裁剪空间）/`POLY`（仅光栅图像，凸且不自交）/`ON`/`OFF`/`DELETE`，分派到既有 `IMAGECLIP`/`XCLIP` 写路径，一条事务/一步撤销 | 块参照的多边形裁剪按名拒绝（`clip.polygon_block_not_renderable`，表示层只画矩形块裁剪）；旋转/倾斜参照沿用 `xclip.rotation_not_renderable`/`xclip.non_xy_plane`；图像 ON/OFF 无字段；PDF/DGN/DWF 底图未建模 |
 | `CLIPIT` | **完整实现**：预选择 1 个图像目标 + 闭合边界（`LINE`/`ARC`/`LWPOLYLINE`，复用 JOIN 链与 `VPCLIP` 多边形校验），一条事务/一步撤销 | 块参照目标按名拒绝（`clipit.polygon_block_not_renderable`，用 `CLIP RECT`）；开放/自交/退化/非凸/多目标/无边界具名拒绝；圆弧边界为 32 弦近似 |
 | `REGION` | **部分实现（具名拒绝）**：`region.unsupported: this build has no Region geometry model` | 同上 |
@@ -1667,28 +1667,28 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 
 | 命令 | 结果 | 明示未实现 / 证据边界 |
 | --- | --- | --- |
-| `ATTDISP` | **部分实现（会话令牌）**：翻转会话 `attdisp` 令牌（默认 **ON**）；`attdisp.toggled`；无事务/修订/历史 | 本构建**无块属性模型**，因此不渲染（也不隐藏）任何属性；没有渲染器消费者 |
-| `BATTMAN` | **部分实现（只读）**：`battman.entry` 逐块定义 + `battman.summary`（复用 `drawing.blocks()`） | 块属性**未建模**（`battman.attributes_not_modeled`）；不是属性管理器对话框 |
-| `BATTORDER` | **部分实现（只读）**：`battorder.entry` 逐块定义 + `battorder.summary` | 属性显示顺序**未建模**（`battorder.attributes_not_modeled`）；不重排任何内容 |
+| `ATTDISP` | **完整实现**：Normal/On/Off 显示模式；实例展开按定义顺序绘制值（constant 恒显），不写库/不升修订；出图用 Normal | 无 GPU/像素证据；斜体角度导入导出但绘制仍直立（具名诊断） |
+| `BATTMAN` | **完整实现**：完整块属性管理器报告（定义/值/顺序/stale） | 无对话框/面板选择器（ADR 全局范围） |
+| `BATTORDER` | **完整实现**：写属性定义顺序并显式重写到引用；裸命令报告 | 无对话框 |
 | `XREF` | **部分实现（只读）**：读取 `drawing.external_references()` 导入期溯源，`xref.entry`/`xref.summary`（名称/状态/原始与解析路径/深度/overlay/块） | 无附着/卸载/重载/绑定/编辑；空映射报告 0 行，不虚构；浏览器仍按导入期 `browser-unavailable` 状态显示 |
 | `-XREF` | **部分实现（只读）**：同一报告，使用 `-xref.entry`/`-xref.summary` 诊断码 | 同上；命令行拼写不能附着/卸载/重载/绑定 |
 | `EXTERNALREFERENCES` | **部分实现（只读）**：同一报告，`externalreferences.entry`/`.summary` | 本构建**无 External References 选项板**（`externalreferences.palette_not_implemented`）；不打开任何 UI |
 | `EXTERNALREFERENCESCLOSE` | **部分实现（具名 no-op）**：`externalreferences.close_not_implemented`，不改变任何状态 | 没有选项板可关闭 |
-| `ATTDEF` | **部分实现（具名拒绝）**：`attdef.unsupported: this build has no block-attribute model` | 不写库/不升修订/不入历史 |
-| `-ATTDEF` | **部分实现（具名拒绝）**：`-attdef.unsupported: this build has no block-attribute model` | 同上 |
-| `ATTEDIT` | **部分实现（具名拒绝）**：`attedit.unsupported: this build has no block-attribute model` | 同上 |
-| `-ATTEDIT` | **部分实现（具名拒绝）**：`-attedit.unsupported: this build has no block-attribute model` | 同上 |
-| `ATTIPEDIT` | **部分实现（具名拒绝）**：`attipedit.unsupported: this build has no block-attribute model` | 同上 |
+| `ATTDEF` | **完整实现**：在块定义中创建属性定义（tag/prompt/default/flags/order/text placement）；裸命令列出定义 | 无属性对话框（ADR 全局范围）；真实 DWG 往返 NOT RUN |
+| `-ATTDEF` | **完整实现**：`ATTDEF` 的命令行拼写，同一实现 | 同上 |
+| `ATTEDIT` | **完整实现**：单选 INSERT 的属性值编辑；tag 大小写不敏感，constant/unknown/locked 按名拒绝 | 无属性对话框；不处理嵌套实例成员 |
+| `-ATTEDIT` | **完整实现**：`ATTEDIT` 的命令行拼写，作用于该块全部 INSERT | 同上 |
+| `ATTIPEDIT` | **完整实现**：单选 INSERT 的值编辑 | 无对话框 |
 | `ATTIN` | **部分实现（具名拒绝）**：`attin.unsupported: this build has no block-attribute model` | 同上 |
 | `ATTOUT` | **部分实现（具名拒绝）**：`attout.unsupported: this build has no block-attribute model` | 同上 |
 | `ATTEXT` | **部分实现（具名拒绝）**：`attext.unsupported: this build has no block-attribute model` | 同上 |
 | `-ATTEXT` | **部分实现（具名拒绝）**：`-attext.unsupported: this build has no block-attribute model` | 同上 |
-| `EATTEDIT` | **部分实现（具名拒绝）**：`eattedit.unsupported: this build has no block-attribute model` | 同上 |
+| `EATTEDIT` | **完整实现**：多选 INSERT 的值 + 块局部位置/字高/旋转编辑；一条事务/一步撤销 | Enhanced Attribute Editor 对话框属全局范围 |
 | `EATTEXT` | **部分实现（具名拒绝）**：`eatttext.unsupported: this build has no block-attribute model` | 同上（原因串按历史拼写 `eatttext`，与选择子 `EATTEXT` 一致地稳定） |
 | `-EATTEXT` | **部分实现（具名拒绝）**：`-eatttext.unsupported: this build has no block-attribute model` | 同上 |
-| `ATTREDEF` | **部分实现（具名拒绝）**：`attredef.unsupported: this build has no block-attribute model` | 同上 |
-| `ATTSYNC` | **部分实现（具名拒绝）**：`attsync.unsupported: this build has no block-attribute model` | 同上 |
-| `GATTE` | **部分实现（具名拒绝）**：`gatte.unsupported: this build has no block-attribute model` | 同上 |
+| `ATTREDEF` | **完整实现**：重定义块属性并显式重写所有引用值；一条事务/一步撤销 | 无交互对话框；真实 DWG 往返 NOT RUN |
+| `ATTSYNC` | **完整实现**：把块定义属性同步到所有引用（显式写值）；裸命令报告/同步选择 | 无对话框 |
+| `GATTE` | **完整实现**：按块名全局修改所有引用值；一条事务/一步撤销 | 无对话框 |
 | `XDATA` | **部分实现（具名拒绝）**：`xdata.unsupported: this database does not retain entity XDATA` | 同上 |
 | `XBIND` | **部分实现（具名拒绝）**：`xbind.unsupported: this build has no xref bind/insert model` | 同上 |
 | `-XBIND` | **部分实现（具名拒绝）**：`-xbind.unsupported: this build has no xref bind/insert model` | 同上 |

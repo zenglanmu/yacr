@@ -26,8 +26,8 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **224** |
-| 部分实现（有写明的界） | **755** |
+| 完整实现 | **237** |
+| 部分实现（有写明的界） | **742** |
 | **已实现合计（完整 + 部分）** | **979** |
 | 未实现 | **2** |
 
@@ -252,7 +252,7 @@
 
 > **这不是验收，是当前排期与口径。** 本轮目标是把命令从 `部分实现`/具名拒绝推进到支持域内
 > **没有剩余可写缺口**的 `完整实现`；不放宽为“改状态不实现”，也不把 ADR 全局范围缺口算作
-> 单命令完成。当前清单 **224 完整 / 755 部分 / 2 未实现**，只有真正合并且契约测试通过的
+> 单命令完成。当前清单 **237 完整 / 742 部分 / 2 未实现**，只有真正合并且契约测试通过的
 > 命令才改状态。
 
 | 批次 | 范围 | 状态 |
@@ -263,7 +263,7 @@
 | M1d 参数管理器 | `PARAMETERS`/`-PARAMETERS`/`PARAMETERSCLOSE` + Parametric→Manage 面板 | **已合并**（+3 complete + 面板） |
 | M1e 全局范围核对 | `-PURGE`（别名无独有缺口）、`DIMDISASSOCIATE`/`DIMREGEN`/`DIMREASSOCIATE`（关联性属全局范围） | **已合并**（+4 complete）；`DIMREASSOC`/`DIMROTATED`/`BLOCK?`/`LAYERPMODE`/`LAYCUR`/`LAYMCUR`/`LAYMCH`/`BTRIM`/`BEXTEND`/`NCOPY`/`CDORDER`/`MOCORO` 仍 partial（各有真实缺口，见各行） |
 | M1f 2D 小缺口 | `TEXTALIGN`/`TCIRCLE`/`DONUT`/`HATCHGENERATEBOUNDARY`/`ADDSELECTED`/`GETSEL`/`MEASUREGEOM`/`CENTERMARK`/`CENTERLINE` | **已合并**（+9 complete；CENTERMARK/CENTERLINE 的普通 LINE 非关联模型是声明边界） |
-| M2 块属性 | ADR-0055：ATTDEF/ATTRIB 模型、minor 14、DXF/渲染/命令/面板 | 模型/schema **已合并**；connector/renderer 与命令 lane 进行中 |
+| M2 块属性 | ADR-0055：ATTDEF/ATTRIB 模型、minor 14、DXF/渲染/命令/面板 | **已合并**（+13 complete；ATTIN/ATTOUT/ATTEXT/EATTEXT 文件 lane 仍 partial） |
 | M3 约束 | ADR-0054：有界二维几何/尺寸约束求解器、minor 15、DXF 节点 | ADR 已接受；P0 未开始，命令仍 partial |
 | M4 动作录制器 | ADR-0056：ACTRECORD/ACTSTOP/ACTUSERINPUT/ACTUSERMESSAGE/ACTMANAGER | **已合并**（+7 complete + Manage 面板；无真实文件对话框/GUI 证据） |
 | M5 其他面板 | 发布/传递/标准/CUI/点云/PDF 底图 | 分析完成；多数是 `L`/架构级缺口，按 ADR/子系统逐个评估 |
@@ -286,8 +286,8 @@
 | `-ARCHIVE` | 部分实现 | 具名拒绝（`-archive.unsupported`）：本构建无图纸集归档打包模型；命令行拼写。 |
 | `-ARRAY` | 部分实现 | `ARRAY` 的命令行拼写，同一实现与边界（含 `RECT`/`POLAR`） |
 | `-ATTACH` | 部分实现 | 具名拒绝（`-attach.unsupported`）：不附着外部参照或底图；命令行拼写。 |
-| `-ATTDEF` | 部分实现 | 具名拒绝（`-attdef.unsupported`）：本构建无块属性模型；命令行拼写。 |
-| `-ATTEDIT` | 部分实现 | 具名拒绝（`-attedit.unsupported`）：本构建无块属性模型；命令行拼写。 |
+| `-ATTDEF` | 完整实现 | `ATTDEF` 的命令行拼写，同一实现。 |
+| `-ATTEDIT` | 完整实现 | `ATTEDIT` 的命令行拼写，作用于该块全部 INSERT。 |
 | `-ATTEXT` | 部分实现 | 具名拒绝（`-attext.unsupported`）：本构建无块属性模型；命令行拼写。 |
 | `-BCPARAMETER` | 部分实现 | 具名拒绝（`-bcparameter.unsupported`）：本构建无动态块参数模型；命令行拼写。 |
 | `-BEDIT` | 部分实现 | 具名拒绝（`-bedit.unsupported`）：本构建无块编辑器；命令行拼写。 |
@@ -435,15 +435,15 @@
 | `ASSISTANTOPEN` | 部分实现 | 具名拒绝（`assistantopen.unsupported: this build has no Autodesk Assistant model`）。 |
 | `ATTACH` | 部分实现 | 具名拒绝（`attach.unsupported`）：不附着外部参照或底图。 |
 | `ATTACHURL` | 部分实现 | 具名拒绝（`attachurl.unsupported: this build has no hyperlink storage model`）。 |
-| `ATTDEF` | 部分实现 | 具名拒绝（`attdef.unsupported`）：本构建无块属性模型。 |
-| `ATTDISP` | 部分实现 | 会话令牌（默认开）：翻转 `attdisp`；无块属性模型，不渲染属性、不写图。 |
-| `ATTEDIT` | 部分实现 | 具名拒绝（`attedit.unsupported`）：本构建无块属性模型。 |
+| `ATTDEF` | 完整实现 | 定义作为块成员创建（tag/prompt/default/flags/order/text placement）；裸命令为报告；一条事务/一步撤销。 |
+| `ATTDISP` | 完整实现 | Normal/On/Off 显示模式；值由实例展开绘制（constant 恒显），不写库/不升修订；出图用 Normal。 |
+| `ATTEDIT` | 完整实现 | 单选 INSERT 的属性值编辑；tag 大小写不敏感，constant/unknown/locked 按名拒绝；一条事务。 |
 | `ATTEXT` | 部分实现 | 具名拒绝（`attext.unsupported`）：本构建无块属性模型。 |
 | `ATTIN` | 部分实现 | 具名拒绝（`attin.unsupported`）：本构建无块属性模型。 |
-| `ATTIPEDIT` | 部分实现 | 具名拒绝（`attipedit.unsupported`）：本构建无块属性模型。 |
+| `ATTIPEDIT` | 完整实现 | 单选 INSERT 的值编辑。 |
 | `ATTOUT` | 部分实现 | 具名拒绝（`attout.unsupported`）：本构建无块属性模型。 |
-| `ATTREDEF` | 部分实现 | 具名拒绝（`attredef.unsupported`）：本构建无块属性模型。 |
-| `ATTSYNC` | 部分实现 | 具名拒绝（`attsync.unsupported`）：本构建无块属性模型。 |
+| `ATTREDEF` | 完整实现 | 重定义块属性并显式重写所有引用值；一条事务/一步撤销。 |
+| `ATTSYNC` | 完整实现 | 把块定义属性同步到所有引用（显式写值）；裸命令报告/同步选择。 |
 | `AUDIT` | 已实现 | `Fix any errors detected? [Yes/No]`（默认 No）+ 分段报告（头变量/块定义/Pass 1/2/`Total errors found N fixed M`）；只修复 `validate_entity` 可证明可修复的行（ObjectId 归一、非法 TEXT wrap→None），一条事务；修复不可撤销（`audit.repairs_not_undoable`）；`AUDITCTL` 属宿主文件 I/O 全局 |
 | `AUTOCONSTRAIN` | 部分实现 | 具名拒绝（`autoconstrain.unsupported`）：本构建无几何约束模型。 |
 | `AUTOPUBLISH` | 部分实现 | 具名拒绝（`autopublish.unsupported`）：本构建无自动发布模型。 |
@@ -453,8 +453,8 @@
 | `BACTIONTOOL` | 部分实现 | 具名拒绝（`bactiontool.unsupported`）：本构建无动态块动作模型。 |
 | `BASE` | 完整实现 | `BASE` 报告已存基点，`BASE <x> <y> [<z>]` 写 `$INSBASE`（一条记录/一次修订）并导出回写；`SETVAR INSBASE` 可读；Work-only；无撤销步（`base.no_history`） |
 | `BASSOCIATE` | 部分实现 | 具名拒绝（`bassociate.unsupported`）：本构建无动态块动作模型。 |
-| `BATTMAN` | 部分实现 | 只读：块定义与成员数（`battman.entry`/`battman.summary`）；块属性未建模（`battman.attributes_not_modeled`）。 |
-| `BATTORDER` | 部分实现 | 只读：块定义列表（`battorder.entry`/`battorder.summary`）；属性顺序未建模（`battorder.attributes_not_modeled`）。 |
+| `BATTMAN` | 完整实现 | 完整块属性管理器报告（定义/值/顺序/stale）；无对话框（全局范围）。 |
+| `BATTORDER` | 完整实现 | 写属性定义顺序并显式重写到引用；裸命令报告。 |
 | `BAUTHORPALETTE` | 部分实现 | 具名拒绝（`bauthorpalette.unsupported`）：本构建无块编辑器。 |
 | `BAUTHORPALETTECLOSE` | 部分实现 | 具名拒绝（`bauthorpaletteclose.unsupported`）：本构建无块编辑器。 |
 | `BCLOSE` | 部分实现 | 具名拒绝（`bclose.unsupported`）：本构建无块编辑器。 |
@@ -494,7 +494,7 @@
 | `BTABLE` | 部分实现 | 具名拒绝（`btable.unsupported`）：本构建无动态块查找表。 |
 | `BTESTBLOCK` | 部分实现 | 具名拒绝（`btestblock.unsupported`）：本构建无块编辑器。 |
 | `BTRIM` | 部分实现 | 真实编辑：首个选中 INSERT 成员为边界，其余选中对象复用 TRIM 规划器修剪；一条事务/一步撤销；无交互边界提示。 |
-| `BURST` | 部分实现 | 具名拒绝（`burst.unsupported`）：无块属性模型可保留。 |
+| `BURST` | 完整实现 | 一级 EXPLODE + 值转 TEXT（含常量）；一条事务/一步撤销。 |
 | `BVHIDE` | 部分实现 | 具名拒绝（`bvhide.unsupported`）：本构建无按可见性状态隐藏实体的 API。 |
 | `BVSHOW` | 部分实现 | 具名拒绝（`bvshow.unsupported`）：本构建无按可见性状态显示实体的 API。 |
 | `BVSTATE` | 部分实现 | 只读：每个选中 INSERT 的活动动态块可见性状态（`bvstate.report`）；无 INSERT 报 `bvstate.no_selection`，无状态报 `bvstate.not_set`；不设置状态。 |
@@ -667,7 +667,7 @@
 | `DWGLOG` | 部分实现 | 会话令牌（默认关）：翻转 `dwglog`；无日志文件、不写图/不升修订。 |
 | `DWGPROPS` | 部分实现 | 只读：文档 id/修订/实体数（`dwgprops.report`）；标题/作者/自定义特性未建模（`dwgprops.metadata_not_tracked`）。 |
 | `DXBIN` | 部分实现 | 具名拒绝（`dxbin.unsupported: DXB import is not implemented`）。 |
-| `EATTEDIT` | 部分实现 | 具名拒绝（`eattedit.unsupported`）：本构建无块属性模型。 |
+| `EATTEDIT` | 完整实现 | 多选 INSERT 的值 + 块局部位置/字高/旋转编辑；dialog 属 ADR 全局范围。 |
 | `EATTEXT` | 部分实现 | 具名拒绝（`eatttext.unsupported`）：本构建无块属性模型。 |
 | `EDGE` | 部分实现 | 具名拒绝（`edge.unsupported: no 3D face-edge visibility model`）。 |
 | `EDGESURF` | 部分实现 | 具名拒绝（`edgesurf.unsupported: 3D mesh surfaces are not modeled`）。 |
@@ -710,7 +710,7 @@
 | `FREESPOT` | 部分实现 | 具名拒绝（`freespot.unsupported: 3D light objects are not modeled`）。 |
 | `FREEWEB` | 部分实现 | 具名拒绝（`freeweb.unsupported: 3D light objects are not modeled`）。 |
 | `FS` | 完整实现 | Express 工具、仅命令行（无功能区按钮）；取当前唯一选择为种子，把接触的可见模型空间对象并入选择。**`FSMODE=ON` 走传递相切链**（每类几何解析切线，样条用精确 NURBS 导数），`OFF` 与旧直接接触逐字节一致；`fs.chain_nontangent`/`fs.chain_ambiguous`/`fs.chain_bound`（上限 64，不截断）全部在选择变更**之前**拒绝；成功时 `fs.mode` 报告模式/实体数/接触数 | **仍部分实现**：`FSMODE ON| Express 工具、仅命令行；取当前唯一选择为种子并入接触的可见模型空间对象。**`FSMODE=ON` 走传递相切链**（解析切线，样条用精确 NURBS 导数），`OFF` 与旧直接接触逐字节一致；`fs.chain_nontangent`/`.chain_ambiguous`/`.chain_bound`（上限 64，不截断）全部在选择变更前拒绝；**`FSMODE` 是真实命令**（`ON|OFF|1|0`，裸形式报告）且 `SETVAR FSMODE` 可读写；`fs.mode` 报告模式/实体数/接触数 |
-| `GATTE` | 部分实现 | 具名拒绝（`gatte.unsupported`）：本构建无块属性模型。 |
+| `GATTE` | 完整实现 | 按块名全局改所有引用值。 |
 | `GCCOINCIDENT` | 部分实现 | 具名拒绝（`gccoincident.unsupported: this build has no geometric-constraint model`）。 |
 | `GCCOLLINEAR` | 部分实现 | 具名拒绝（`gccollinear.unsupported: this build has no geometric-constraint model`）。 |
 | `GCCONCENTRIC` | 部分实现 | 具名拒绝（`gcconcentric.unsupported: this build has no geometric-constraint model`）。 |
@@ -1343,18 +1343,18 @@
 | 77 | `-ATTACH` | 部分实现 | From the Command prompt, inserts references to external files such as other drawings, raster images, point clouds, coordination models, and underlays. | 具名拒绝（`-attach.unsupported`）：不附着外部参照或底图。 |
 | 78 | `ATTACH` | 部分实现 | Inserts references to external files such as other drawings, raster images, point clouds, coordination models, and underlays. | 具名拒绝（`attach.unsupported`）：不附着外部参照或底图。 |
 | 79 | `ATTACHURL` | 部分实现 | Attaches hyperlinks to objects or areas in a drawing. | 具名拒绝（`attachurl.unsupported: this build has no hyperlink storage model`）。 |
-| 80 | `-ATTDEF` | 部分实现 | At the Command prompt, creates an attribute definition for storing data in a block. | 具名拒绝（`-attdef.unsupported`）：本构建无块属性模型。 |
-| 81 | `ATTDEF` | 部分实现 | Creates an attribute definition for storing data in a block. | 具名拒绝（`attdef.unsupported`）：本构建无块属性模型。 |
-| 82 | `ATTDISP` | 部分实现 | Controls the visibility overrides for all block attributes in a drawing. | 会话令牌（默认开）：翻转 `attdisp`；无块属性模型，不渲染属性、不写图、不升修订。 |
-| 83 | `-ATTEDIT` | 部分实现 | At the Command prompt, changes attribute information in a block. | 具名拒绝（`-attedit.unsupported`）：本构建无块属性模型。 |
-| 84 | `ATTEDIT` | 部分实现 | Changes attribute information in a block. | 具名拒绝（`attedit.unsupported`）：本构建无块属性模型。 |
+| 80 | `-ATTDEF` | 完整实现 | At the Command prompt, creates an attribute definition for storing data in a block. | 完整实现：`ATTDEF` 的命令行拼写，同一实现。 |
+| 81 | `ATTDEF` | 完整实现 | Creates an attribute definition for storing data in a block. | 完整实现：定义作为块成员创建（tag/prompt/default/flags/order/text placement）；裸命令为报告；一条事务/一步撤销。 |
+| 82 | `ATTDISP` | 完整实现 | Controls the visibility overrides for all block attributes in a drawing. | 完整实现：Normal/On/Off 显示模式；值由实例展开绘制（constant 恒显），不写库/不升修订；出图用 Normal。 |
+| 83 | `-ATTEDIT` | 完整实现 | At the Command prompt, changes attribute information in a block. | 完整实现：`ATTEDIT` 的命令行拼写，作用于该块全部 INSERT。 |
+| 84 | `ATTEDIT` | 完整实现 | Changes attribute information in a block. | 完整实现：单选 INSERT 的属性值编辑；tag 大小写不敏感，constant/unknown/locked 按名拒绝；一条事务。 |
 | 85 | `-ATTEXT` | 部分实现 | From the Command prompt, extracts attribute data, informational text associated with a block, into a file. | 具名拒绝（`-attext.unsupported`）：本构建无块属性模型。 |
 | 86 | `ATTEXT` | 部分实现 | Extracts attribute data, informational text associated with a block, into a file. | 具名拒绝（`attext.unsupported`）：本构建无块属性模型。 |
 | 87 | `ATTIN` | 部分实现 | Imports block attribute values from an external, tab-delimited ASCII file. | 具名拒绝（`attin.unsupported`）：本构建无块属性模型。 |
-| 88 | `ATTIPEDIT` | 部分实现 | Changes the textual content of an attribute within a block. | 具名拒绝（`attipedit.unsupported`）：本构建无块属性模型。 |
+| 88 | `ATTIPEDIT` | 完整实现 | Changes the textual content of an attribute within a block. | 完整实现：单选 INSERT 的值编辑。 |
 | 89 | `ATTOUT` | 部分实现 | Exports block attribute values to an external file in tab-delimited ASCII format. | 具名拒绝（`attout.unsupported`）：本构建无块属性模型。 |
-| 90 | `ATTREDEF` | 部分实现 | Redefines a block and updates associated attributes. | 具名拒绝（`attredef.unsupported`）：本构建无块属性模型。 |
-| 91 | `ATTSYNC` | 部分实现 | Applies attribute changes in a block definition to all block references. | 具名拒绝（`attsync.unsupported`）：本构建无块属性模型。 |
+| 90 | `ATTREDEF` | 完整实现 | Redefines a block and updates associated attributes. | 完整实现：重定义块属性并显式重写所有引用值；一条事务/一步撤销。 |
+| 91 | `ATTSYNC` | 完整实现 | Applies attribute changes in a block definition to all block references. | 完整实现：把块定义属性同步到所有引用（显式写值）；裸命令报告/同步选择。 |
 | 92 | `AUDIT` | 已实现 | Evaluates the integrity of a drawing and corrects some errors. | `Fix any errors detected? [Yes/No]`（默认 No）+ 分段报告（头变量/块定义/Pass 1/2/`Total errors found N fixed M`）；只修复 `validate_entity` 可证明可修复的行（ObjectId 归一、非法 TEXT wrap→None），一条事务；修复不可撤销（`audit.repairs_not_undoable`）；`AUDITCTL` 属宿主文件 I/O 全局 |
 | 93 | `AUTOCONSTRAIN` | 部分实现 | Applies geometric constraints to a selection set of objects based on orientation of the objects relative to one another. | 具名拒绝（`autoconstrain.unsupported`）：本构建无几何约束模型。 |
 | 94 | `AUTOPUBLISH` | 部分实现 | Publishes drawings to DWF, DWFx, or PDF files automatically to a specified location. | 具名拒绝（`autopublish.unsupported`）：本构建无自动发布模型。 |
@@ -1364,8 +1364,8 @@
 | 98 | `BACTIONTOOL` | 部分实现 | Adds an action to a dynamic block definition. | 具名拒绝（`bactiontool.unsupported`）：本构建无动态块动作模型。 |
 | 99 | `BASE` | 完整实现 | Sets the insertion base point for the current drawing. | `BASE` 报告已存基点，`BASE <x> <y> [<z>]` 写 `$INSBASE`（一条记录/一次修订）并导出回写；`SETVAR INSBASE` 可读；Work-only；无撤销步（`base.no_history`） |
 | 100 | `BASSOCIATE` | 部分实现 | Associates an action with a parameter in a dynamic block definition. | 具名拒绝（`bassociate.unsupported`）：本构建无动态块动作模型。 |
-| 101 | `BATTMAN` | 部分实现 | Manages the attributes for a selected block definition. | 只读：列出块定义与成员数（复用 `drawing.blocks()`；`battman.entry`/`battman.summary`）；块属性未建模（`battman.attributes_not_modeled`）。 |
-| 102 | `BATTORDER` | 部分实现 | Specifies the order of attributes for a block. | 只读：列出块定义（`battorder.entry`/`battorder.summary`）；属性显示顺序未建模（`battorder.attributes_not_modeled`）。 |
+| 101 | `BATTMAN` | 完整实现 | Manages the attributes for a selected block definition. | 完整实现：完整块属性管理器报告（定义/值/顺序/stale）；无对话框（全局范围）。 |
+| 102 | `BATTORDER` | 完整实现 | Specifies the order of attributes for a block. | 完整实现：写属性定义顺序并显式重写到引用；裸命令报告。 |
 | 103 | `BAUTHORPALETTE` | 部分实现 | Opens the Block Authoring Palettes window in the Block Editor. | 具名拒绝（`bauthorpalette.unsupported`）：本构建无块编辑器。 |
 | 104 | `BAUTHORPALETTECLOSE` | 部分实现 | Closes the Block Authoring Palettes window in the Block Editor. | 具名拒绝（`bauthorpaletteclose.unsupported`）：本构建无块编辑器。 |
 | 105 | `BCLOSE` | 部分实现 | Closes the Block Editor. | 具名拒绝（`bclose.unsupported`）：无块编辑器。 |
@@ -1410,7 +1410,7 @@
 | 144 | `BTABLE` | 部分实现 | Stores variations of a block in the Block Properties Table. | 具名拒绝（`btable.unsupported`）：本构建无动态块查找表。 |
 | 145 | `BTESTBLOCK` | 部分实现 | Displays a window within the Block Editor to test a dynamic block. | 具名拒绝（`btestblock.unsupported`）：无块编辑器。 |
 | 146 | `BTRIM` | 部分实现 | Trim objects to blocks. | 真实编辑：首个选中 INSERT 成员为边界，其余选中对象复用 TRIM 规划器修剪；一条事务/一步撤销；无交互边界提示。 |
-| 147 | `BURST` | 部分实现 | Explodes selected blocks, preserving the block layer and converting attribute values to text objects. | 具名拒绝（`burst.unsupported`）：无块属性模型可保留。 |
+| 147 | `BURST` | 完整实现 | Explodes selected blocks, preserving the block layer and converting attribute values to text objects. | 完整实现：一级 EXPLODE + 值转 TEXT（含常量）；一条事务/一步撤销。 |
 | 148 | `BVHIDE` | 部分实现 | Makes objects invisible in the current visibility state or all visibility states in a dynamic block definition. | 具名拒绝（`bvhide.unsupported`）：本构建无按可见性状态隐藏实体的 API。 |
 | 149 | `BVSHOW` | 部分实现 | Makes objects visible in the current visibility state or all visibility states in a dynamic block definition. | 具名拒绝（`bvshow.unsupported`）：本构建无按可见性状态显示实体的 API。 |
 | 150 | `-BVSTATE` | 部分实现 | At the command prompt, creates, sets, or deletes a visibility state in a dynamic block. | 只读：同 `BVSTATE`，使用 `-bvstate.*` 诊断码；无 INSERT 报 `-bvstate.no_selection`，无状态报 `-bvstate.not_set`；不设置状态。 |
@@ -1594,7 +1594,7 @@
 | 328 | `DWGLOG` | 部分实现 | Creates and maintains an individual log file for each drawing file as it is accessed. | 会话令牌（默认关）：翻转 `dwglog`；无日志文件、不写图/不升修订。 |
 | 329 | `DWGPROPS` | 部分实现 | Sets and displays the file properties of the current drawing. | 只读：文档 id/修订/实体数（`dwgprops.report`）；标题/作者/自定义特性未建模（`dwgprops.metadata_not_tracked`）。 |
 | 330 | `DXBIN` | 部分实现 | Imports an AutoCAD DXB (drawing interchange binary) file. | 具名拒绝（`dxbin.unsupported: DXB import is not implemented`）。 |
-| 331 | `EATTEDIT` | 部分实现 | Edits attributes in a block reference. | 具名拒绝（`eattedit.unsupported`）：本构建无块属性模型。 |
+| 331 | `EATTEDIT` | 完整实现 | Edits attributes in a block reference. | 完整实现：多选 INSERT 的值 + 块局部位置/字高/旋转编辑；dialog 属 ADR 全局范围。 |
 | 332 | `-EATTEXT` | 部分实现 | From the Command line, extracts data as specified in an existing attribute extraction template (BLK) file or data extraction (DXE or DXEX) file. | 具名拒绝（`-eatttext.unsupported`）：本构建无块属性模型。 |
 | 333 | `EATTEXT` | 部分实现 | Exports block attribute information to a table or to an external file. | 具名拒绝（`eatttext.unsupported`）：本构建无块属性模型。 |
 | 334 | `EDGE` | 部分实现 | Changes the visibility of 3D face edges. | 具名拒绝（`edge.unsupported: no 3D face-edge visibility model`）。 |
@@ -1641,7 +1641,7 @@
 | 375 | `FREESPOT` | 部分实现 | Creates a free spotlight which is a spotlight without a specified target. | 具名拒绝（`freespot.unsupported: 3D light objects are not modeled`）。 |
 | 376 | `FREEWEB` | 部分实现 | Creates a free web light which is a web light without a specified target. | 具名拒绝（`freeweb.unsupported: 3D light objects are not modeled`）。 |
 | 377 | `FS` | 完整实现 | Creates a selection set of all objects that touch the selected object. | Express 工具、仅命令行（无功能区按钮）；取当前唯一选择为种子，把接触的可见模型空间对象并入选择。**`FSMODE=ON` 走传递相切链**（每类几何解析切线，样条用精确 NURBS 导数），`OFF` 与旧直接接触逐字节一致；`fs.chain_nontangent`/`fs.chain_ambiguous`/`fs.chain_bound`（上限 64，不截断）全部在选择变更**之前**拒绝；成功时 `fs.mode` 报告模式/实体数/接触数 | **仍部分实现**：`FSMODE ON| Express 工具、仅命令行；取当前唯一选择为种子并入接触的可见模型空间对象。**`FSMODE=ON` 走传递相切链**（解析切线，样条用精确 NURBS 导数），`OFF` 与旧直接接触逐字节一致；`fs.chain_nontangent`/`.chain_ambiguous`/`.chain_bound`（上限 64，不截断）全部在选择变更前拒绝；**`FSMODE` 是真实命令**（`ON|OFF|1|0`，裸形式报告）且 `SETVAR FSMODE` 可读写；`fs.mode` 报告模式/实体数/接触数 |
-| 378 | `GATTE` | 部分实现 | Globally changes attribute values for all instances of a specified block. | 具名拒绝（`gatte.unsupported`）：本构建无块属性模型。 |
+| 378 | `GATTE` | 完整实现 | Globally changes attribute values for all instances of a specified block. | 完整实现：按块名全局改所有引用值。 |
 | 379 | `GCCOINCIDENT` | 部分实现 | Constrains two points together or a point to a curve (or an extension of a curve). | 具名拒绝（`gccoincident.unsupported: this build has no geometric-constraint model`）。 |
 | 380 | `GCCOLLINEAR` | 部分实现 | Causes two or more line segments to lie along the same line. | 具名拒绝（`gccollinear.unsupported: this build has no geometric-constraint model`）。 |
 | 381 | `GCCONCENTRIC` | 部分实现 | Constrains two arcs, circles, or ellipses to the same center point. | 具名拒绝（`gcconcentric.unsupported: this build has no geometric-constraint model`）。 |
