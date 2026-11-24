@@ -178,6 +178,7 @@ fn multi_space_app(overrides: [Vec<(LayerId, bool)>; 2]) -> (Application, Sessio
             geometry: SemanticGeometry::Insert {
                 block: BlockId(0),
                 transform: Transform3::identity(),
+                attributes: Vec::new(),
             },
             ..line(4, LayerId(5), 20.0)
         })
