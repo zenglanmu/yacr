@@ -1,9 +1,11 @@
 //! `LAYMCH` (AutoCAD 2026): move the selection to the first pick's layer.
 //!
 //! Declared pre-selection semantics: the first selected entity's stored layer is
-//! the destination, every other selected model-space entity is moved there in one
+//! the destination, every other selected top-level drawing-space entity (model
+//! or paper space, including a top-level `INSERT`) is moved there in one
 //! transaction / one undo step. Refusals: empty selection, a single-object
-//! selection, a payload, and a foreign/instance/sub-element/paper-space ref.
+//! selection, a payload, a foreign/instance/sub-element ref, and a
+//! block-definition member.
 
 use super::*;
 
@@ -157,4 +159,54 @@ fn laymch_reports_a_noop_when_everything_is_already_on_the_destination() {
     assert_eq!(state(&app), before, "no transaction, no undo entry");
     assert!(outcome.changes.is_none());
     assert_eq!(diagnostic_codes(&outcome), vec!["laymch.unchanged"]);
+}
+
+#[test]
+fn laymch_moves_paper_space_and_insert_objects_onto_the_first_picks_layer() {
+    let (mut app, mut session) = multi_space_app([Vec::new(), Vec::new()]);
+    // Entity 1 (model, WALLS) names the destination; 2 (paper) and 4 (a
+    // top-level INSERT) are moved, and the block member 6 stays untouched.
+    select(&mut app, &mut session, &[1, 2, 4]);
+    let before = state(&app);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::LayMCh,
+        CommandPayload::None,
+    )
+    .expect("LAYMCH moves paper-space and INSERT objects");
+
+    assert_eq!(entity_layer(&app, 1), LayerId(3), "the destination");
+    assert_eq!(entity_layer(&app, 2), LayerId(3), "the paper entity moved");
+    assert_eq!(entity_layer(&app, 4), LayerId(3), "the INSERT itself moved");
+    assert_eq!(
+        entity_layer(&app, 6),
+        LayerId(0),
+        "the block member is untouched"
+    );
+    assert_eq!(
+        revision(&app),
+        Revision(before.0 .0 + 1),
+        "one revision bump"
+    );
+    assert_eq!(undo_depth(&app), before.1 + 1, "one undo step");
+    assert_eq!(outcome.objects.len(), 2, "only the two moved objects");
+    assert_eq!(diagnostic_codes(&outcome), vec!["laymch.applied"]);
+}
+
+#[test]
+fn laymch_refuses_a_block_definition_member_by_name() {
+    let (mut app, mut session) = multi_space_app([Vec::new(), Vec::new()]);
+    session.selection = SelectionSet::from_refs([ref_of(1), ref_of(5)]);
+    let before = state(&app);
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::LayMCh,
+        CommandPayload::None,
+    )
+    .expect_err("a block-definition member has no top-level identity");
+    assert!(refusal(error).starts_with("laymch.block_space:"));
+    assert_untouched(&app, before);
+    assert_eq!(entity_layer(&app, 1), LayerId(3), "nothing moved");
 }

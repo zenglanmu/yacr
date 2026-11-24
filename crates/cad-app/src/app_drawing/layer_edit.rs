@@ -334,7 +334,7 @@ impl Application {
             _ => self.publish_layer_table(document_id, candidate)?,
         }
         if !previous_attributes.is_empty() {
-            session.push_layer_previous_snapshot(previous_attributes);
+            session.push_layer_previous_snapshot(previous_attributes, drawing.layer_pmode());
         }
         Ok(outcome)
     }

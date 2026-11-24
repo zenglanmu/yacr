@@ -20,11 +20,14 @@
 //! from a selection:
 //!
 //! * commands that **write entity rows** (`LAYCUR`) need a directly
-//!   addressable model-space identity, so they keep
-//!   [`ensure_model_space_addressable`]: a ref from another document, a
-//!   block-instance member or a sub-element, an unresolvable entity, and a
-//!   paper-space or block-definition entity are refused by name
-//!   (`<command>.not_addressable`).
+//!   addressable top-level drawing-space identity, so they keep
+//!   [`ensure_drawing_space_addressable`]: a ref from another document, a
+//!   block-instance member or a sub-element, an unresolvable entity are refused
+//!   by name (`<command>.not_addressable`), and a block-definition member is
+//!   refused as `<command>.block_space` (there is no in-place block-editing
+//!   session). Model-space **and paper-space** entities are accepted, including a
+//!   top-level `INSERT` in either space — only its own `layer` moves, never a
+//!   member.
 //! * commands that only **write a layer row** (`LAYLCK`, `LAYULK`, `LAYFRZ`)
 //!   need nothing more than the layer the pick names, so they use
 //!   [`layer_named_by`]: `cad-db` keeps model-space entities, every paper
@@ -65,8 +68,13 @@
 //! ## `LAYCUR`
 //!
 //! "Changes the layer property of selected objects to the current layer." Sets
-//! every selected entity's `layer` to `SessionState::active_layer`. The active
-//! layer must exist in the drawing (`laycur.active_layer_missing`). Entities
+//! every selected **top-level** entity's `layer` to `SessionState::active_layer`
+//! — in model space or any paper-space layout, including a top-level `INSERT`
+//! (only the reference's own layer moves). Nested block members, block-definition
+//! members and sub-elements are refused by name (`laycur.not_addressable` /
+//! `laycur.block_space`), because there is no in-place block-editing session.
+//! The active layer must exist in the drawing (`laycur.active_layer_missing`).
+//! Entities
 //! already on it are not staged; when the whole batch is already there the
 //! command opens no transaction and reports `laycur.unchanged`. Success is
 //! `laycur.applied` with the layer name and the entity count. Work-only.
@@ -74,9 +82,12 @@
 //! ## `LAYM C U R`
 //!
 //! "Sets the current layer to that of a selected object." Uses the **first**
-//! selected entity's stored layer (`laymcur.first_pick` names the extra picks
-//! when more than one object is selected) and resolves the row
-//! (`laymcur.unknown_layer` when it is absent). It then reuses the one
+//! selected entity's layer (`laymcur.first_pick` names the extra picks when more
+//! than one object is selected) and resolves the row (`laymcur.unknown_layer`
+//! when it is absent). The layer is named through any drawing space —
+//! model-space or paper-space object, block-definition member, or a nested pick's
+//! effective layer (`layer_named_by`, the same rule `LAYLCK`/`LAYFRZ` use),
+//! because the command only reads it. It then reuses the one
 //! current-layer rule, [`Application::ensure_layer_can_be_current`], so a
 //! locked/frozen/off layer is refused with the existing
 //! `layer.current_locked` / `layer.current_frozen` / `layer.current_off` codes
@@ -252,6 +263,72 @@ pub(super) fn ensure_model_space_addressable(
     Ok(())
 }
 
+/// Refuse a selected ref that is not a directly addressable **top-level drawing
+/// space** entity (model space or a paper-space layout).
+///
+/// This is the entity-layer-write preflight (`LAYCUR`, `LAYMCH`): unlike
+/// [`ensure_model_space_addressable`] it accepts paper-space objects, because a
+/// layout entity is an ordinary row whose `layer` field can move in the same
+/// `entities` table. A top-level `INSERT` in either space is accepted too — only
+/// its own layer moves, never a member.
+///
+/// Refused by name: another document's ref, a block-instance member or
+/// sub-element (`not_addressable`; a nested pick has no writable identity, and
+/// changing a block definition is not this command's semantics), an unresolvable
+/// entity, and a **block-definition member** (`block_space`: there is no
+/// in-place block-editing session here, so rewriting the definition would affect
+/// every instance behind the user's back).
+pub(super) fn ensure_drawing_space_addressable(
+    drawing: &DrawingDatabase,
+    command: &Command,
+    reference: &SelectionRef,
+    prefix: &str,
+) -> CadResult<()> {
+    if reference.document != command.document {
+        return Err(invalid(
+            prefix,
+            "not_addressable",
+            format!(
+                "the selected ref for entity {} belongs to another document",
+                reference.entity.0
+            ),
+        ));
+    }
+    if !reference.instance.0.is_empty() || reference.sub_element.is_some() {
+        return Err(unsupported(
+            prefix,
+            "not_addressable",
+            format!(
+                "entity {} is referenced through a block instance or a sub-element and has no \
+                 directly addressable identity",
+                reference.entity.0
+            ),
+        ));
+    }
+    let Some(entity) = drawing.entity(reference.entity) else {
+        return Err(invalid(
+            prefix,
+            "not_addressable",
+            format!(
+                "entity {} does not exist in this drawing",
+                reference.entity.0
+            ),
+        ));
+    };
+    match entity.space {
+        SpaceId::Model | SpaceId::Paper(_) => Ok(()),
+        SpaceId::Block(_) => Err(unsupported(
+            prefix,
+            "block_space",
+            format!(
+                "entity {} belongs to a block definition; this command edits top-level model-space \
+                 and paper-space objects and there is no in-place block editing session",
+                reference.entity.0
+            ),
+        )),
+    }
+}
+
 /// Take the selection snapshot and refuse an empty one.
 pub(super) fn selection_snapshot(
     session: &SessionState,
@@ -263,7 +340,7 @@ pub(super) fn selection_snapshot(
         return Err(invalid(
             prefix,
             "selection",
-            format!("{label} needs at least one selected model-space object"),
+            format!("{label} needs at least one selected object"),
         ));
     }
     Ok(references)
@@ -652,7 +729,7 @@ impl Application {
                 merge_key: None,
             },
         )?;
-        session.push_layer_previous_snapshot(previous_attributes);
+        session.push_layer_previous_snapshot(previous_attributes, drawing.layer_pmode());
         Ok(CommandOutcome {
             objects: Vec::new(),
             changes: Some(Arc::new(changes)),

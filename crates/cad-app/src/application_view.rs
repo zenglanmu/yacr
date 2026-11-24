@@ -141,7 +141,7 @@ impl Application {
         // no phantom `LAYERP` step. The snapshot goes in before the assignment so
         // `LAYERP` restores the state the user was looking at.
         if updated != session.layer_overrides {
-            session.push_layer_override_snapshot();
+            session.push_layer_override_snapshot(drawing.layer_pmode());
             session.layer_overrides = updated;
         }
         Ok(CommandOutcome::none())

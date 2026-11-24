@@ -115,24 +115,98 @@ fn laymcur_refuses_a_locked_frozen_or_off_first_layer() {
 }
 
 #[test]
-fn laymcur_refuses_non_addressable_refs() {
-    let (mut app, mut session) = app_with(
-        vec![(LayerId(0), "0", LayerAttributes::default())],
-        vec![line(1, LayerId(0), 0.0)],
-    );
-    let instance = SelectionRef {
-        instance: InstancePath(vec![EntityId(1)]),
+fn laymcur_accepts_paper_space_top_level_inserts_and_nested_picks() {
+    let (mut app, mut session) = multi_space_app([Vec::new(), Vec::new()]);
+
+    // A paper-space object names its stored layer.
+    select(&mut app, &mut session, &[2]);
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::LayMCur,
+        CommandPayload::None,
+    )
+    .expect("LAYMCUR reads a paper-space object");
+    assert_eq!(session.active_layer, LayerId(5));
+
+    // A top-level INSERT names its own layer.
+    select(&mut app, &mut session, &[4]);
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::LayMCur,
+        CommandPayload::None,
+    )
+    .expect("LAYMCUR reads a top-level INSERT");
+    assert_eq!(session.active_layer, LayerId(5));
+
+    // A nested pick names the member's effective layer: a member on WALLS keeps
+    // WALLS, and a member on layer 0 resolves to the INSERT's layer (DOORS).
+    select_refs(&mut app, &mut session, vec![nested_ref(4, 5)]);
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::LayMCur,
+        CommandPayload::None,
+    )
+    .expect("LAYMCUR reads a nested pick");
+    assert_eq!(session.active_layer, LayerId(3));
+
+    select_refs(&mut app, &mut session, vec![nested_ref(4, 6)]);
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::LayMCur,
+        CommandPayload::None,
+    )
+    .expect("a layer-0 member resolves to the INSERT layer");
+    assert_eq!(session.active_layer, LayerId(5));
+
+    // A block-definition member addressed directly names its stored layer.
+    session.selection = SelectionSet::from_refs([ref_of(5)]);
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::LayMCur,
+        CommandPayload::None,
+    )
+    .expect("LAYMCUR reads a block-definition member");
+    assert_eq!(session.active_layer, LayerId(3));
+}
+
+#[test]
+fn laymcur_refuses_sub_elements_and_unresolvable_paths() {
+    let (mut app, mut session) = multi_space_app([Vec::new(), Vec::new()]);
+    let before = state(&app);
+
+    let sub_element = SelectionRef {
+        sub_element: Some(SubElementId {
+            source_key: "face".into(),
+            topology_revision: Revision(0),
+        }),
         ..ref_of(1)
     };
-    session.selection = SelectionSet::from_refs([instance]);
-    let before = state(&app);
+    session.selection = SelectionSet::from_refs([sub_element]);
     let error = execute(
         &mut app,
         &mut session,
         CommandId::LayMCur,
         CommandPayload::None,
     )
-    .expect_err("a block-instance member is refused");
+    .expect_err("a sub-element has no whole-object layer");
     assert!(refusal(error).starts_with("laymcur.not_addressable:"));
+    assert_eq!(session.active_layer, LayerId(0), "the session is untouched");
+    assert_untouched(&app, before);
+
+    session.selection = SelectionSet::from_refs([nested_ref(999, 5)]);
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::LayMCur,
+        CommandPayload::None,
+    )
+    .expect_err("an unresolvable instance path is refused");
+    assert!(refusal(error).starts_with("laymcur.not_addressable:"));
+    assert_eq!(session.active_layer, LayerId(0));
     assert_untouched(&app, before);
 }

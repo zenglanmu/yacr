@@ -26,8 +26,8 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **282** |
-| 部分实现（有写明的界） | **697** |
+| 完整实现 | **287** |
+| 部分实现（有写明的界） | **692** |
 | **已实现合计（完整 + 部分）** | **979** |
 | 未实现 | **2** |
 
@@ -42,6 +42,8 @@
 > **2026-11-24 增补（命名视图持久化）**：`VIEW`/`-VIEW`/`VIEWGO` 三个官方名字按严格口径升为**完整实现**。命名视图从会话内存迁入文档表 `tables/views.json`（`.ymodel` minor **18**，位于块属性 14、`Text.mirrored` 15、二维约束 16、GROUP 17 之后；本批不改写任何既有档位），行内保存相机、2D/3D 模式、切回 2D 的相机、工作平面与活动空间；`VIEW SAVE`/`DELETE` 是一条事务/一步撤销，恢复仍只应用会话相机/空间。DXF/DWG 的 `VIEW` 表经 acadrust 导入导出：源只存世界高度，正交比例按 `height/1000` 显式转换并逐行报告 `import/export.view_camera_approximated`，无布局名的 paper-space 行按 `import.view_paper_space_unresolved` 跳过。`NEWVIEW` 与 `VIEWBACK`/`VIEWFORWARD` 的后续补全见上一条“命名视图补全”。该批计入 **274 完整 + 705 部分 / 979 已实现**；证据仅 Linux Rust 契约，GUI/GPU/像素/真机 NOT VERIFIED。
 
 > **2026-11-24 增补（严格读收口：时间戳/UNITS 读数）**：`document.json` → `variables.document_times` 新增可选的持久化创建/最后更新时间（Unix 秒；未保存或旧档不写键，逐字节兼容）。`SAVE` 的 `.ymodel` 写路径做**一次**时钟读取：快照编码与该次写入相同的实例，写入成功后 live 文档才记录它（失败不推进时间）；打开时由 `cad-db` 读回。`TIME`/`EDITTIME` 报告真实存储值，未保存/旧档按 `time.not_stored`/`edittime.not_stored` 明说；elapsed command time/elapsed timer/活跃编辑时长与本地时区仍具名 NOT TRACKED，因此两者**不晋升**，继续部分实现。`UNITS`/`-UNITS`：存储的 `units_display`（长度格式、角度格式/精度/基准角/旋向）与 `Document.units.decimal_places` 现在真正驱动状态栏坐标、命令窗口回显/日志与测量诊断的排版（Rust 单一 `UnitsDisplay::format_length/format_angle`，React `cad_status.units` + 同一镜像 helper），不再是固定 4 位；`$INSUNITS` 插入缩放与 UNITS 对话框仍是**全局范围**（命令报告按名声明）⇒ 两者按严格口径晋升**完整实现**。计入 **282 完整 + 697 部分 / 979 已实现**；证据仅 Linux Rust/前端契约，GUI/GPU/像素/真机 NOT VERIFIED。
+
+> **2026-11-24 增补（图层选择收口：`LAYCUR` / `LAYMCH` / `-LAYMCH` / `LAYMCUR` / `LAYERPMODE`）**：`LAYCUR`/`LAYMCH` 的实体层写入从「仅模型空间」扩到**模型空间与任一图纸布局的顶层对象**（含顶层 `INSERT`，只改参照自身的 `layer`，块成员不动）；嵌套块成员/块定义成员/子图元仍按名拒绝（无 in-place 块编辑会话，改块定义会影响所有实例）。`LAYMCUR` 改用与 `LAYLCK`/`LAYFRZ` 相同的 `layer_named_by` 规则，接受图纸空间、块定义成员与嵌套拾取的有效层。`LAYERPMODE` 按 AutoCAD 的「存于图纸」语义落到文档头 `document.json` → `variables.layer_pmode`：默认 ON 不写键（旧档逐字节不变），`OFF` 写入 false，一条 header-only revision、无撤销；`LAYERP` 快照推送直接读该文档值，不再有会话副本。五个官方名字因此晋升**完整实现**（`-LAYMCH` 是 `LAYMCH` 的同一实现）。合计 **287 完整 + 692 部分 / 979 已实现**；证据仅 Linux Rust 契约（`laycur`/`laymch`/`laymcur`/`layerpmode`/`layerstate` + 快照往返），GUI/GPU/像素/真机 NOT VERIFIED。
 
 ## 状态口径
 
@@ -287,7 +289,7 @@
 
 > **这不是验收，是当前排期与口径。** 本轮目标是把命令从 `部分实现`/具名拒绝推进到支持域内
 > **没有剩余可写缺口**的 `完整实现`；不放宽为“改状态不实现”，也不把 ADR 全局范围缺口算作
-> 单命令完成。当前清单 **282 完整 / 697 部分 / 2 未实现**，只有真正合并且契约测试通过的
+> 单命令完成。当前清单 **287 完整 / 692 部分 / 2 未实现**，只有真正合并且契约测试通过的
 > 命令才改状态。
 
 | 批次 | 范围 | 状态 |
@@ -296,7 +298,7 @@
 | M1b 3D 图元 | `BOX`/`CONE`/`CYLINDER`/`SPHERE`/`TORUS`/`WEDGE` 的 typed 选项与 `ELEV`；`PYRAMID` 的 typed 正则 n 边形底（复用 `POLYGON` 顶点数学 + 既有 authored B-rep） | **已合并** 6/7；`PYRAMID` 仍 partial：`Top radius` 截断（seam 无 truncated spec）与 `Edge`/已有多边形作底（交互拾取） |
 | M1c 3D 运算 | `UNION`/`SUBTRACT`/`INTERSECT` 提交前单壳校验、`XEDGES`、`3DORBIT`/`3DPAN` | **已合并**（+6 complete；`3DZOOM` 仍 partial） |
 | M1d 参数管理器 | `PARAMETERS`/`-PARAMETERS`/`PARAMETERSCLOSE` + Parametric→Manage 面板 | **已合并**（+3 complete + 面板） |
-| M1e 全局范围核对 | `-PURGE`（别名无独有缺口）、`DIMDISASSOCIATE`/`DIMREGEN`/`DIMREASSOCIATE`（关联性属全局范围） | **已合并**（+4 complete）；`DIMREASSOC`/`BLOCK?`/`LAYERPMODE`/`LAYCUR`/`LAYMCUR`/`LAYMCH`/`NCOPY`/`MOCORO` 仍 partial（各有真实缺口，见各行；`DIMROTATED`/`BTRIM`/`BEXTEND`/`CDORDER` 已在 2026-11-24 严格收口 V 晋升） |
+| M1e 全局范围核对 | `-PURGE`（别名无独有缺口）、`DIMDISASSOCIATE`/`DIMREGEN`/`DIMREASSOCIATE`（关联性属全局范围） | **已合并**（+4 complete）；`DIMREASSOC`/`BLOCK?`/`NCOPY`/`MOCORO` 仍 partial（各有真实缺口，见各行；`LAYERPMODE`/`LAYCUR`/`LAYMCH`/`LAYMCUR` 已在 2026-11-24 图层选择收口晋升；`DIMROTATED`/`BTRIM`/`BEXTEND`/`CDORDER` 已在 2026-11-24 严格收口 V 晋升） |
 | M1f 2D 小缺口 | `TEXTALIGN`/`TCIRCLE`/`DONUT`/`HATCHGENERATEBOUNDARY`/`ADDSELECTED`/`GETSEL`/`MEASUREGEOM`/`CENTERMARK`/`CENTERLINE` | **已合并**（+9 complete；CENTERMARK/CENTERLINE 的普通 LINE 非关联模型是声明边界） |
 | M1g 2D 严格收口 II | `CHPROP`（typed 属性列表）、`BREAKATPOINT`（CIRCLE/整椭圆/椭圆弧/开放 SPLINE/闭合 LWPOLYLINE）；`CHANGE`/`FLATTEN` 扩写但仍有具名缺口 | **已合并**（+2 complete；`CHANGE` 的 change-point 与 `FLATTEN` 的 3D/派生显示缺口见各行） |
 | M2 块属性 | ADR-0055：ATTDEF/ATTRIB 模型、minor 14、DXF/渲染/命令/面板 | **已合并**（+13 complete；ATTIN/ATTOUT/ATTEXT/EATTEXT 文件 lane 仍 partial） |
@@ -314,6 +316,7 @@
 | M1q 编组持久化 | `tables/groups.json`（minor 17）、`GROUP`/`-GROUP`/`UNGROUP`/`GROUPEDIT` 写入与撤销、DXF/DWG `AcDbGroup` 往返 | **已合并**（+4 complete；`CLASSICGROUP` 面板仍只读，保持 partial） |
 | M1r 命名视图持久化 | `tables/views.json`（minor 18）、`VIEW`/`-VIEW`/`VIEWGO`/`NEWVIEW` 保存/删除/恢复/撤销、DXF/DWG `VIEW` 表往返、pan/orbit 导航历史 | **已合并**（+4 complete；`VIEWBACK`/`VIEWFORWARD` 仍 partial） |
 | M1s 2D 收口 V | `CDORDER` 逐绘制顺序范围重排、`BTRIM`/`BEXTEND` 复用 TRIM/EXTEND 目标派发、`DIMROTATED` 文字覆盖 + 对象选择形式 | **已合并**（+4 complete；交互提示仍属全局范围） |
+| M1t 图层选择收口 | `LAYCUR`/`LAYMCH`/`-LAYMCH`/`LAYMCUR` 支持模型空间与图纸布局的顶层对象（含顶层 INSERT）；`LAYERPMODE` 改为文档头设置并持久化（只有 OFF 写入 `document.json`，旧档逐字节不变） | **已合并**（+5 complete；嵌套块成员/块定义成员/子图元仍按名拒绝，交互 Select objects 属全局范围） |
 | M5 其他面板 | 发布/传递/标准/CUI/点云/PDF 底图 | 分析完成；多数是 `L`/架构级缺口，按 ADR/子系统逐个评估 |
 
 **已明确的诚实缺口**：`ARCHIVE`、`STANDARDS`、`CHECKSTANDARDS`、全部 `CUI*`、`CUSTOMIZE` 仍是
@@ -370,7 +373,7 @@
 | `-INTERFERE` | 部分实现 | 具名拒绝（`-interfere.unsupported: 3D solids are not modeled, so interference has nothing to compute`）。 |
 | `-LAYDEL` | 完整实现 | `LAYDEL` 的命令行拼写，同一实现：全部空间实体 + 各图纸视口 `layer_overrides` 剪除 + 层行，一条事务/一步撤销。 |
 | `-LAYER` | 已实现 | 裸命令/`? [pattern]` 为只读图层表报告（名称/可见/off/frozen/locked/当前层，`layer.entry`；`*`/`?` 通配符过滤，无匹配报 `layer.no_match`）；写形式一行一个选项（大小写不敏感）：`NEW/N`、`MAKE/M`、`SET/S`、`RENAME/R`、`DELETE/D`、`ON`/`OFF`、`FREEZE/F`/`THAW/T`、`LOCK/LO`/`UNLOCK/U`、`COLOR/C`（ACI 数字/七个标准色名/`aci:N`/`#RRGGBB`/`rgb:…`）、`LTYPE/L`、`LWEIGHT/LW`、`PLOT/P Y/N`；名单逗号分隔，含空格的值/名称可用双引号；整行原子（先解析全部名称与值再发布候选库），一条事务/一步撤销（多行 patch 同一 `DrawingUndoRecord`），无变化为 `layer.unchanged` 且不升修订；`MAKE`/`SET` 复用当前层规则（locked/frozen/off 先拒绝），`OFF`/`FREEZE` 对当前层按 `layer.current_*` 拒绝；写形式经 Work-only `SetLayerProperty` 载体，Viewer 拒绝。逐选项交互重提示属全局范围。 |
-| `-LAYMCH` | 部分实现 | `LAYMCH` 的别名，同一实现 |
+| `-LAYMCH` | 完整实现 | `LAYMCH` 的别名，同一实现：第一个选中对象的层为目标，其余顶层对象（模型/图纸空间，含顶层 INSERT）移入；一条事务/一步撤销 |
 | `-LAYMRG` | 完整实现 | `LAYMRG` 的命令行拼写，同一实现：实体重写 + 源层行删除 + 各图纸视口该层覆盖键剪除，一条事务/一步撤销。 |
 | `-LINETYPE` | 完整实现 | `LIST`/`SET <name>`；**`CREATE <name> <dash>,<gap>,… [DESCRIPTION <text>]`**（名称按共享命名语法、重复大小写不敏感 `linetype.exists`、`Continuous` 保留、图案按 DXF 组 49 元素校验：正=划、负=空、有限、至少一段可见划 `linetype.bad_pattern`）与 **`DELETE <name>`**（在用 `linetype.in_use` 报出引用者、`linetype.continuous_undeletable`）真写线型表，一条事务/一步撤销；导出写全部行、导入可重建，创建行有往返测试；`-LINETYPE` 同选择子/同解析器/同处理器；`DESCRIPTION` 带文本按 `linetype.description_not_modelled` 拒绝（行无描述列） |
 | `-LWEIGHT` | 部分实现 | 同一线宽显示报告的命令行拼写。 |
@@ -831,20 +834,20 @@
 | `JPGOUT` | 部分实现 | 具名拒绝（`jpgout.unsupported: raster JPEG export is not implemented; use PLOT for vector SVG/PDF`）。 |
 | `JULIAN` | 完整实现 | 只读：当前 UTC 时刻的儒略日（整数日 + 小数）；`JULIAN <YYYY-MM-DD>`（也接受 `YYYY/MM/DD`，可跟 `[T ]HH:MM[:SS]`）把日历时刻（UTC）转换为儒略日；非法/不存在的日期按 `julian.invalid_date` 拒绝，不 clamp。 |
 | `JUSTIFYTEXT` | 部分实现 | `JUSTIFYTEXT <H> <V>`（H∈LEFT/CENTER/RIGHT，V∈BASELINE/BOTTOM/MIDDLE/TOP）；只改 `h_align`/`v_align`，位置不动；非文字目标逐条 `justifytext.not_text` 跳过；空选择拒绝；`TJUST` 为同一实现 |
-| `LAYCUR` | 部分实现 | 预选择输入（不弹 Select objects）；把选中对象移到当前层；当前层缺失/目标层锁定显式拒绝；实体写入可撤销 |
+| `LAYCUR` | 完整实现 | 预选择输入（不弹 Select objects）；把每个选中顶层对象（模型空间或任一图纸布局，含顶层 INSERT）移到当前层；嵌套块成员/块定义成员/子图元按名拒绝；当前层缺失/目标层锁定显式拒绝；一条事务/一步撤销 |
 | `LAYDEL` | 完整实现 | 选择式（选中对象可是**模型空间或任一图纸布局**的顶层实体；块内成员/子元素按 `laydel.block_space` 拒绝）：删除选中对象所在层在**模型空间、每个图纸布局、每个块定义内**的全部实体（`cad-db` 单一 `entities` 表按 `layer` 过滤；块成员走 ERASE 同一删除路径，成员关系由显示状态还原），并剪除各图纸视口的该层 `layer_overrides` 键；当前层/`0` 层拒绝，锁定层的实体删除由数据库以 `layer.locked` 拒绝且不发布；实体补丁、布局补丁与层行一条事务/一步撤销，重做再次删除。会话层状态（`LAYERSTATE SAVE`）不重写，恢复悬空层仍按 `layerstate.dangling_layer` 拒绝。 |
 | `LAYER` | 已实现 | chrome 本地选择子：打开图层面板 |
 | `LAYERCLOSE` | 已实现 | chrome 本地选择子：关闭图层面板（面板关闭按钮走同一命令） |
 | `LAYERP` | 完整实现 | 有界 **16** 步快照环（仅真实改动前压栈）：会话覆盖 + 层表属性（`off`/`frozen`/`locked`/colour/linetype/lineweight/transparency/plottable）的改动前状态；属性经 `LayerPatch` 一条事务/一步撤销恢复，纯覆盖步不写库、不升 revision；重命名/删除/新增层不恢复（与官方一致）；不持久化（会话级，与 AutoCAD 一致） |
 | `LAYERPALETTE` | 部分实现 | 具名拒绝（`layerpalette.unsupported`）：无独立图层调色板，请用 `LAYER`。 |
-| `LAYERPMODE` | 部分实现 | `ON\ |
+| `LAYERPMODE` | 完整实现 | `ON\|OFF`；文档头设置（AutoCAD 亦存入图纸），`OFF` 时任何图层设置变更（覆盖或层表属性）都不推 `LAYERP` 快照；默认 ON、只有 OFF 写入 `document.json` → `variables.layer_pmode`（旧档逐字节不变）；一条 header-only revision、无撤销；裸命令报告当前值 |
 | `LAYERSTATE` | 部分实现 | `LAYERSTATE SAVE\|RESTORE\|LIST\|DELETE <name>`；会话内最多 32 个命名状态；RESTORE 的多行图层属性写入经 `LayerPatch` 一条事务/一步撤销；无 DWG 命名层状态表持久化 |
 | `LAYERSTATESAVE` | 部分实现 | `LAYERSTATESAVE <name>` / `?` 经同一 `LayerStateSave` 路由落到**同一**会话层状态存储（与 `LAYERSTATE SAVE`/`LIST` 相同的 32 上限、同名替换与空名语法拒绝；无库写/修订/历史）；裸命令仍报告缺少 New Layer State 对话框（`layerstatesave.needs_name`），`RESTORE`/`DELETE` 载荷按 `layerstatesave.option` 拒绝。仍缺：对话框本身与 DWG 命名层状态表持久化（会话状态，设计如此）。 |
 | `LAYFRZ` | 完整实现 | 跨模型空间/图纸空间/块成员选择；bare 冻结绘图级 `frozen`，`LAYFRZ VP [idx,…]`（或 `VIEWPORTS`）写每视口 `layer_overrides`（Vpfreeze）；当前层在目标视口包含 `CVPORT` 时拒绝；一条事务/一步撤销；交互对话框属 ADR 全局范围。 |
 | `LAYISO` | 已实现 | — |
 | `LAYLCK` | 完整实现 | 跨模型空间/图纸空间/块成员选择（嵌套按有效层解析，含当前层）；只改 `locked`；一条事务/一步撤销；交互对话框属 ADR 全局范围。 |
-| `LAYMCH` | 部分实现 | 选择式：第一个选中对象的图层为目标，其余移入（一条事务/一步撤销）；空选择/<2 目标/非模型空间/块实例按名拒绝；无交互 Select objects |
-| `LAYMCUR` | 部分实现 | 预选择输入（不弹 Select objects）；取第一个选中对象的图层并用既有的锁定/冻结/关闭当前层拒绝；仅会话状态 |
+| `LAYMCH` | 完整实现 | 选择式：第一个选中对象的图层为目标，其余顶层对象（模型空间/图纸布局，含顶层 INSERT）移入（一条事务/一步撤销）；空选择/<2 对象/嵌套块成员/块定义成员/子图元按名拒绝；无交互 Select objects |
+| `LAYMCUR` | 完整实现 | 预选择输入（不弹 Select objects）；取第一个选中对象的层（模型/图纸空间、块定义成员或嵌套拾取的有效层）并用既有的锁定/冻结/关闭当前层拒绝；仅会话状态 |
 | `LAYMRG` | 完整实现 | 选择式：选中对象的层合并到当前层（重写模型/图纸/块内实体 + 删除源层行 + 剪除各图纸视口该层 `layer_overrides` 键），实体补丁 + 布局补丁 + 层行一条事务/一步撤销，重做再次合并；当前层/`0` 层不能作源（与 AutoCAD 一致），**声明的偏离**：目标固定为当前层、无交互 source/target 提示，目标可以是 `0` 层（AutoCAD 是否拒绝未查证）；会话 `LAYERSTATE` 不重写，恢复悬空层仍按 `layerstate.dangling_layer` 拒绝 |
 | `LAYOFF` | 已实现 | — |
 | `LAYON` | 已实现 | — |
@@ -1773,7 +1776,7 @@
 | 459 | `JPGOUT` | 部分实现 | Saves selected objects to a file in JPEG file format. | 具名拒绝（`jpgout.unsupported: raster JPEG export is not implemented; use PLOT for vector SVG/PDF`）。 |
 | 460 | `JULIAN` | 完整实现 | Contains the DATE tool and several AutoCAD Julian date and calendar date conversion routines. | 只读：当前 UTC 时刻的儒略日（整数日 + 小数）；`JULIAN <YYYY-MM-DD>`（也接受 `YYYY/MM/DD`，可跟 `[T ]HH:MM[:SS]`）把日历时刻（UTC）转换为儒略日；非法/不存在的日期按 `julian.invalid_date` 拒绝，不 clamp。 |
 | 461 | `JUSTIFYTEXT` | 部分实现 | Changes the justification point of selected text objects without changing their locations. | `JUSTIFYTEXT <H> <V>`（H∈LEFT/CENTER/RIGHT，V∈BASELINE/BOTTOM/MIDDLE/TOP）；只改 `h_align`/`v_align`，位置不动；非文字目标逐条 `justifytext.not_text` 跳过；空选择拒绝；`TJUST` 为同一实现 |
-| 462 | `LAYCUR` | 部分实现 | Changes the layer property of selected objects to the current layer. | 预选择输入（不弹 Select objects）；把选中对象移到当前层；当前层缺失/目标层锁定显式拒绝；实体写入可撤销 |
+| 462 | `LAYCUR` | 完整实现 | Changes the layer property of selected objects to the current layer. | 预选择输入（不弹 Select objects）；把每个选中顶层对象（模型空间或任一图纸布局，含顶层 INSERT）移到当前层；嵌套块成员/块定义成员/子图元按名拒绝；当前层缺失/目标层锁定显式拒绝；一条事务/一步撤销 |
 | 463 | `-LAYDEL` | 完整实现 | At the Command prompt, deletes all objects on a layer and purges the layer. | `LAYDEL` 的命令行拼写，同一实现：模型空间/图纸布局/块定义内实体、各图纸视口 `layer_overrides` 键与层行，一条事务/一步撤销。 |
 | 464 | `LAYDEL` | 完整实现 | Deletes all objects on a layer and purges the layer. | 选择式（模型空间或任一图纸布局的顶层实体均可作为输入；块内成员/子元素按 `laydel.block_space` 拒绝）：删除选中对象所在层在模型空间、每个图纸布局与每个块定义内的全部实体（单一 `entities` 表按 `layer` 过滤；块成员删除走 ERASE 同一路径），并剪除各图纸视口的该层 `layer_overrides` 键；当前层/`0` 层拒绝，锁定层由数据库以 `layer.locked` 拒绝且不发布；实体补丁、布局补丁与层行一条事务/一步撤销，重做再次删除。会话层状态不重写。 |
 | 465 | `-LAYER` | 已实现 | Manages layers and layer properties. | 裸命令/`? [pattern]` 为只读图层表报告（名称/可见/off/frozen/locked/当前层，`layer.entry`；`*`/`?` 通配符过滤，无匹配报 `layer.no_match`）；写形式一行一个选项（大小写不敏感）：`NEW/N`、`MAKE/M`、`SET/S`、`RENAME/R`、`DELETE/D`、`ON`/`OFF`、`FREEZE/F`/`THAW/T`、`LOCK/LO`/`UNLOCK/U`、`COLOR/C`（ACI 数字/七个标准色名/`aci:N`/`#RRGGBB`/`rgb:…`）、`LTYPE/L`、`LWEIGHT/LW`、`PLOT/P Y/N`；名单逗号分隔，含空格的值/名称可用双引号；整行原子、一条事务/一步撤销；`MAKE`/`SET` 与 `OFF`/`FREEZE` 复用当前层可见性规则；写形式经 Work-only `SetLayerProperty` 载体，Viewer 拒绝。逐选项交互重提示属全局范围。 |
@@ -1781,15 +1784,15 @@
 | 467 | `LAYERCLOSE` | 已实现 | Closes the Layer Properties Manager. | chrome 本地选择子：关闭图层面板（面板关闭按钮走同一命令） |
 | 468 | `LAYERP` | 完整实现 | Undoes the last change or set of changes made to layer settings. | 有界 16 步快照环（仅真实改动前压栈）：会话覆盖 + 层表属性（off/frozen/locked/colour/linetype/lineweight/transparency/plottable）；属性经 `LayerPatch` 一条事务/一步撤销恢复，纯覆盖步不写库；重命名/删除/新增层不恢复（与官方一致）；不持久化（会话级，与 AutoCAD 一致） |
 | 469 | `LAYERPALETTE` | 部分实现 | Opens the modeless Layer Properties Manager. | 具名拒绝（`layerpalette.unsupported`）：无独立图层调色板，请用 `LAYER`。 |
-| 470 | `LAYERPMODE` | 部分实现 | Turns on and off the tracking of changes made to layer settings for use by the LAYERP command. | `ON\|OFF`；会话标志，关闭后 `LAYERP` 不记录快照；默认 ON；裸命令报告当前值 |
+| 470 | `LAYERPMODE` | 完整实现 | Turns on and off the tracking of changes made to layer settings for use by the LAYERP command. | `ON\|OFF`；文档头设置（AutoCAD 亦存入图纸），关闭后 `LAYERP` 不记录快照但变更仍应用；默认 ON、只有 OFF 写入 `document.json` → `variables.layer_pmode`（旧档逐字节不变）；一条 header-only revision、无撤销；裸命令报告当前值 |
 | 471 | `LAYERSTATE` | 部分实现 | Saves, restores, and manages sets of layer settings that are called layer states. | `LAYERSTATE SAVE\|RESTORE\|LIST\|DELETE <name>`；会话内最多 32 个命名快照（层属性+当前层+覆盖）；RESTORE 的多行图层属性写入经 `LayerPatch` 一条事务/一步撤销；无 DWG 命名层状态表持久化 |
 | 472 | `LAYERSTATESAVE` | 部分实现 | Displays the New Layer State to Save dialog box, where you can provide a name and a description for a new layer state. | `LAYERSTATESAVE <name>` / `?` 经同一 `LayerStateSave` 路由落到同一会话层状态存储（与 `LAYERSTATE SAVE`/`LIST` 相同的 32 上限、同名替换与空名语法拒绝；无库写/修订/历史）；裸命令仍报告缺少对话框（`layerstatesave.needs_name`），`RESTORE`/`DELETE` 载荷按 `layerstatesave.option` 拒绝。仍缺：对话框与 DWG 命名层状态表持久化。 |
 | 473 | `LAYFRZ` | 完整实现 | Freezes the layer of selected objects. | 完整实现：跨模型空间/图纸空间/块成员选择；bare 冻结绘图级 `frozen`，`LAYFRZ VP [idx,…]`（或 `VIEWPORTS`）写每视口 `layer_overrides`（Vpfreeze）；当前层在目标视口包含 `CVPORT` 时拒绝；一条事务/一步撤销；交互对话框属 ADR 全局范围。 |
 | 474 | `LAYISO` | 已实现 | Hides or locks all layers except those of the selected objects. | — |
 | 475 | `LAYLCK` | 完整实现 | Locks the layer of a selected object. | 完整实现：跨模型空间/图纸空间/块成员选择（嵌套按有效层解析，含当前层）；只改 `locked`；一条事务/一步撤销；交互对话框属 ADR 全局范围。 |
-| 476 | `-LAYMCH` | 部分实现 | Changes the layer of a selected object to match the layer of a selected object. | `LAYMCH` 的别名，同一实现 |
-| 477 | `LAYMCH` | 部分实现 | Changes the layer of a selected object to match the destination layer. | 选择式：第一个选中对象的图层为目标，其余移入（一条事务/一步撤销）；空选择/<2 目标/非模型空间/块实例按名拒绝；无交互 Select objects |
-| 478 | `LAYMCUR` | 部分实现 | Sets the current layer to that of a selected object. | 预选择输入（不弹 Select objects）；取第一个选中对象的图层并用既有的锁定/冻结/关闭当前层拒绝；仅会话状态 |
+| 476 | `-LAYMCH` | 完整实现 | Changes the layer of a selected object to match the layer of a selected object. | `LAYMCH` 的别名，同一实现：第一个选中对象的层为目标，其余顶层对象（模型/图纸空间，含顶层 INSERT）移入；一条事务/一步撤销 |
+| 477 | `LAYMCH` | 完整实现 | Changes the layer of a selected object to match the destination layer. | 选择式：第一个选中对象的图层为目标，其余顶层对象（模型空间/图纸布局，含顶层 INSERT）移入（一条事务/一步撤销）；空选择/<2 对象/嵌套块成员/块定义成员/子图元按名拒绝；无交互 Select objects |
+| 478 | `LAYMCUR` | 完整实现 | Sets the current layer to that of a selected object. | 预选择输入（不弹 Select objects）；取第一个选中对象的层（模型/图纸空间、块定义成员或嵌套拾取的有效层）并用既有的锁定/冻结/关闭当前层拒绝；仅会话状态 |
 | 479 | `-LAYMRG` | 完整实现 | At the Command prompt, merges selected layers into a target layer. | `LAYMRG` 的命令行拼写，同一实现：实体重写 + 源层行删除 + 各图纸视口该层覆盖键剪除，一条事务/一步撤销。 |
 | 480 | `LAYMRG` | 完整实现 | Merges selected layers into a target layer, removing them from the drawing. | 选择式：选中对象的层合并到当前层（重写模型/图纸/块内实体 + 删除源层行 + 剪除各图纸视口该层覆盖键），实体/布局/层行一条事务/一步撤销；当前层与 `0` 层不能作源；目标固定为当前层（声明的偏离）。 |
 | 481 | `LAYOFF` | 已实现 | Turns off the layer of a selected object. | — |

@@ -34,6 +34,7 @@ mod header_values;
 mod layer_edit;
 mod layer_inherit;
 mod layer_patch;
+mod layer_pmode;
 mod layout_edit;
 mod linetype_edit;
 mod linetype_scale;
@@ -262,6 +263,12 @@ pub struct DrawingDatabase {
     /// the base-angle/clockwise direction. Defaults for every document that never
     /// edited them; written by [`DrawingDatabase::set_units_display`].
     pub(crate) units_display: UnitsDisplay,
+    /// Document-level `LAYERPMODE` gate: whether layer-setting changes record
+    /// `LAYERP` snapshots. `true` is AutoCAD's default and the value every
+    /// pre-`LAYERPMODE` document decodes to; written by
+    /// [`DrawingDatabase::set_layer_pmode`] and serialized only when `false`
+    /// (`document.json` → `variables.layer_pmode`).
+    pub(crate) layer_pmode: bool,
     /// Persisted create/update instants (`TIME`/`EDITTIME` sources). Default
     /// (`None`/`None`) for a document that never stored one; the save path
     /// stamps it without raising a revision.

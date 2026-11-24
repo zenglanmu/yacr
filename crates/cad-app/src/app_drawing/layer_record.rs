@@ -107,7 +107,7 @@ impl Application {
             &format!("layer-{reason}"),
             patches,
         )?;
-        session.push_layer_previous_snapshot(previous_attributes);
+        session.push_layer_previous_snapshot(previous_attributes, drawing.layer_pmode());
         Ok((Some(Arc::new(changeset)), changed))
     }
 

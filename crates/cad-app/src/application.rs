@@ -167,7 +167,12 @@ impl Application {
                 // Drop temporary overrides; the drawing's layer flags remain the
                 // authority (F03). A change is one `LAYERP` step pushed before the clear.
                 if !session.layer_overrides.is_empty() {
-                    session.push_layer_override_snapshot();
+                    let tracking = self
+                        .workspace
+                        .documents
+                        .get(&session.document)
+                        .is_none_or(|document| document.drawing.layer_pmode());
+                    session.push_layer_override_snapshot(tracking);
                     session.layer_overrides.clear();
                 }
                 Ok(CommandOutcome::none())

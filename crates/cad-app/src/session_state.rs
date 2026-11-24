@@ -71,7 +71,8 @@ pub struct SessionState {
     /// Bounded history of layer-state snapshots for `LAYERP`
     /// ([`crate::layer_history`]): session overrides plus pre-change layer attributes; session only.
     pub layer_history: LayerOverrideHistory,
-    /// Named layer states (`LAYERSTATE`) plus the `LAYERPMODE` gate.
+    /// Named layer states (`LAYERSTATE`), session only. The `LAYERPMODE` gate is
+    /// a document header value, not part of this store.
     pub layer_states: LayerStates,
     /// Session-only named views (`VIEW` / `VIEWGO`), at most 32.
     pub view_states: ViewStates,

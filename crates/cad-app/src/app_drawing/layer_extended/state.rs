@@ -215,7 +215,8 @@ impl Application {
                 // the snapshot holds the pre-restore set); a restore that only
                 // changes the active layer pushes nothing.
                 if changed > 0 || snapshot.overrides != session.layer_overrides {
-                    session.push_layer_previous_snapshot(previous_attributes);
+                    session
+                        .push_layer_previous_snapshot(previous_attributes, drawing.layer_pmode());
                 }
                 session.active_layer = snapshot.active_layer;
                 session.layer_overrides = snapshot.overrides.clone();
@@ -246,25 +247,32 @@ impl Application {
         }
     }
 
-    /// `LAYERPMODE [ON|OFF]`: gate `LAYERP` snapshot recording.
+    /// `LAYERPMODE [ON|OFF]`: the document's `LAYERP` snapshot gate.
     ///
-    /// Bare `LAYERPMODE` (`CommandPayload::None`) reports the current setting and
-    /// changes nothing. `ON` is the default and preserves the existing behaviour;
-    /// `OFF` suppresses the snapshot push in
-    /// [`SessionState::push_layer_override_snapshot`] without changing which
-    /// override is applied.
+    /// AutoCAD saves `LAYERPMODE` **in the drawing**, so the gate is a document
+    /// header value ([`cad_db::DrawingDatabase::layer_pmode`]) rather than a
+    /// session flag: `ON` (the default) records one `LAYERP` step per real layer
+    /// setting change and `OFF` suppresses only that recording, not the change
+    /// itself. Bare `LAYERPMODE` reports the stored value and writes nothing.
+    ///
+    /// `OFF` is written to `document.json` → `variables.layer_pmode` (one header
+    /// revision, header-only `ChangeSet`, no undo step); the key is absent for the
+    /// default `ON`, so an old archive stays byte-identical. Writing the stored
+    /// value is a named no-op (`layerpmode.unchanged`) and raises no revision.
     pub(super) fn layer_pmode(
         &mut self,
-        session: &mut SessionState,
+        _session: &mut SessionState,
         command: &Command,
     ) -> CadResult<CommandOutcome> {
+        let document_id = command.document;
+        let enabled_now = self
+            .workspace
+            .documents
+            .get(&document_id)
+            .is_none_or(|document| document.drawing.layer_pmode());
         match &command.payload {
             CommandPayload::None => {
-                let state = if session.layer_states.snapshot_enabled() {
-                    "ON"
-                } else {
-                    "OFF"
-                };
+                let state = if enabled_now { "ON" } else { "OFF" };
                 Ok(CommandOutcome {
                     objects: Vec::new(),
                     changes: None,
@@ -278,15 +286,42 @@ impl Application {
                 })
             }
             CommandPayload::LayerPmode(enabled) => {
-                session.layer_states.set_snapshot_enabled(*enabled);
+                if *enabled == enabled_now {
+                    return Ok(CommandOutcome {
+                        objects: Vec::new(),
+                        changes: None,
+                        diagnostics: vec![Diagnostic {
+                            object: None,
+                            code: "layerpmode.unchanged".into(),
+                            message: format!(
+                                "LAYERPMODE is already {}; nothing was written",
+                                if enabled_now { "ON" } else { "OFF" }
+                            ),
+                        }],
+                        measurement: None,
+                        point_report: None,
+                    });
+                }
+                let transaction = next_transaction_id();
+                let document = self
+                    .workspace
+                    .documents
+                    .get_mut(&document_id)
+                    .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+                let changeset = Arc::make_mut(&mut document.drawing).set_layer_pmode(
+                    *enabled,
+                    transaction,
+                    "layerpmode changed",
+                )?;
                 Ok(CommandOutcome {
                     objects: Vec::new(),
-                    changes: None,
+                    changes: Some(Arc::new(changeset)),
                     diagnostics: vec![Diagnostic {
                         object: None,
                         code: "layerpmode.applied".into(),
                         message: format!(
-                            "LAYERPMODE is now {}: layer overrides {} record LAYERP snapshots",
+                            "LAYERPMODE is now {}: layer settings {} record LAYERP snapshots \
+                             (saved in the drawing as one header revision, no undo step)",
                             if *enabled { "ON" } else { "OFF" },
                             if *enabled { "will" } else { "will not" }
                         ),

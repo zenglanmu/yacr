@@ -1,4 +1,4 @@
-//! Bounded named layer-state storage (`LAYERSTATE`) and the `LAYERPMODE` gate.
+//! Bounded named layer-state storage (`LAYERSTATE`).
 //!
 //! A named layer state is a **session snapshot**: for every layer row it records
 //! that row's [`LayerAttributes`], plus the session's active layer id and its
@@ -21,11 +21,11 @@
 //!
 //! ## `LAYERPMODE`
 //!
-//! [`LayerStates::snapshot_enabled`] is the session flag behind `LAYERPMODE`.
-//! `ON` (the default) preserves the existing behaviour: every real layer-override
-//! mutation records one `LAYERP` step. `OFF` suppresses those snapshots without
-//! changing which overrides are applied. The flag gates
-//! [`crate::SessionState::push_layer_override_snapshot`], the single push site.
+//! The `LAYERP` recording gate is **not** session state here: AutoCAD saves
+//! `LAYERPMODE` in the drawing, so this build stores it in the document header
+//! ([`cad_db::DrawingDatabase::layer_pmode`]) and writes it only when Off. The
+//! snapshot push reads that document value at each mutation, so a loaded drawing
+//! restores the gate without a second session copy.
 //!
 //! ## Restore writes record one undo step
 //!
@@ -60,26 +60,16 @@ pub struct NamedLayerState {
     pub overrides: LayerOverrideSet,
 }
 
-/// The bounded named-layer-state store plus the `LAYERPMODE` gate.
+/// The bounded named-layer-state store.
 ///
 /// A plain value type: no database, no history, no I/O, no persistence.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct LayerStates {
     snapshots: VecDeque<NamedLayerState>,
-    snapshot_enabled: bool,
-}
-
-impl Default for LayerStates {
-    fn default() -> Self {
-        Self {
-            snapshots: VecDeque::new(),
-            snapshot_enabled: true,
-        }
-    }
 }
 
 impl LayerStates {
-    /// An empty store with `LAYERPMODE ON` (the preserved default behaviour).
+    /// An empty store.
     pub fn new() -> Self {
         Self::default()
     }
@@ -97,16 +87,6 @@ impl LayerStates {
     /// Whether no snapshot is retained.
     pub fn is_empty(&self) -> bool {
         self.snapshots.is_empty()
-    }
-
-    /// Whether layer-override mutations record `LAYERP` snapshots (`LAYERPMODE`).
-    pub fn snapshot_enabled(&self) -> bool {
-        self.snapshot_enabled
-    }
-
-    /// Set the `LAYERPMODE` gate. Session state only; no drawing write.
-    pub fn set_snapshot_enabled(&mut self, enabled: bool) {
-        self.snapshot_enabled = enabled;
     }
 
     /// The retained snapshots in save order, oldest first (for reports/tests).

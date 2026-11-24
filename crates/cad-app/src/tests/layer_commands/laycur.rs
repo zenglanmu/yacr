@@ -134,7 +134,7 @@ fn laycur_refuses_moving_entities_onto_a_locked_layer() {
 }
 
 #[test]
-fn laycur_refuses_foreign_instance_and_non_model_refs() {
+fn laycur_refuses_foreign_and_nested_refs() {
     let (mut app, mut session) = app_with(
         vec![
             (LayerId(0), "0", LayerAttributes::default()),
@@ -174,42 +174,46 @@ fn laycur_refuses_foreign_instance_and_non_model_refs() {
     .expect_err("a block-instance member is refused");
     assert!(refusal(error).starts_with("laycur.not_addressable:"));
     assert_untouched(&app, before);
+}
 
-    let paper = DbEntity {
-        space: SpaceId::Paper(LayoutId(1)),
-        ..line(1, LayerId(0), 0.0)
-    };
-    app.workspace
-        .documents
-        .get_mut(&DocumentId(1))
-        .unwrap()
-        .drawing = Arc::new({
-        let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
-        builder
-            .insert_layer(Layer {
-                id: LayerId(0),
-                name: "0".into(),
-                visible: true,
-            })
-            .unwrap();
-        builder
-            .insert_layer(Layer {
-                id: LayerId(3),
-                name: "WALLS".into(),
-                visible: true,
-            })
-            .unwrap();
-        builder
-            .insert_layout(Layout {
-                id: LayoutId(1),
-                name: "Sheet1".into(),
-                viewports: Vec::new(),
-            })
-            .unwrap();
-        builder.insert_entity(paper).unwrap();
-        builder.finish().unwrap()
-    });
-    session.selection = SelectionSet::from_refs([ref_of(1)]);
+#[test]
+fn laycur_moves_paper_space_entities_and_top_level_inserts() {
+    let (mut app, mut session) = multi_space_app([Vec::new(), Vec::new()]);
+    // Entities 2 (paper space) and 4 (a top-level INSERT) are both ordinary
+    // top-level rows; only their own `layer` may move.
+    session.active_layer = LayerId(3);
+    select(&mut app, &mut session, &[2, 4]);
+    let before = state(&app);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::LayCur,
+        CommandPayload::None,
+    )
+    .expect("LAYCUR moves paper-space and INSERT objects");
+
+    assert_eq!(entity_layer(&app, 2), LayerId(3), "the paper entity moved");
+    assert_eq!(entity_layer(&app, 4), LayerId(3), "the INSERT itself moved");
+    assert_eq!(
+        entity_layer(&app, 6),
+        LayerId(0),
+        "the block member is untouched"
+    );
+    assert_eq!(
+        revision(&app),
+        Revision(before.0 .0 + 1),
+        "one revision bump"
+    );
+    assert_eq!(undo_depth(&app), before.1 + 1, "one undo step");
+    assert_eq!(outcome.objects.len(), 2);
+    assert_eq!(diagnostic_codes(&outcome), vec!["laycur.applied"]);
+}
+
+#[test]
+fn laycur_refuses_a_block_definition_member_by_name() {
+    let (mut app, mut session) = multi_space_app([Vec::new(), Vec::new()]);
+    session.active_layer = LayerId(3);
+    session.selection = SelectionSet::from_refs([ref_of(5)]);
     let before = state(&app);
     let error = execute(
         &mut app,
@@ -217,7 +221,8 @@ fn laycur_refuses_foreign_instance_and_non_model_refs() {
         CommandId::LayCur,
         CommandPayload::None,
     )
-    .expect_err("a paper-space entity is refused");
-    assert!(refusal(error).starts_with("laycur.not_addressable:"));
+    .expect_err("a block-definition member has no top-level identity");
+    assert!(refusal(error).starts_with("laycur.block_space:"));
     assert_untouched(&app, before);
+    assert_eq!(entity_layer(&app, 5), LayerId(3), "nothing was rewritten");
 }

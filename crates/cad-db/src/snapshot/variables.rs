@@ -24,6 +24,7 @@
 //!                         comments?, custom?: {name: value}}
 //! units_display           absent | {length_format, angle_format,
 //!                         angle_precision, angle_base_degrees, angle_clockwise}
+//! layer_pmode             absent | bool  (absent = On)
 //! document_times          absent | {created_at, updated_at} (Unix seconds)
 //! ```
 //!
@@ -36,6 +37,10 @@
 //! `units_display` is the same opt-in shape: absent (or `null`) means the
 //! documented `UnitsDisplay::default` values, and it is written only when a
 //! setting differs from that default. The block carries all five fields.
+//!
+//! `layer_pmode` follows the same opt-in rule: On is the default, so only an
+//! explicit Off writes the key (`false`). An absent key (or `null`) decodes to
+//! On, and an old archive stays byte-identical.
 //!
 //! `document_times` is opt-in for a different reason: an unsaved or
 //! pre-timestamp document has no real instant to write, so the key is absent
@@ -120,6 +125,11 @@ pub(crate) fn encode_with_times(
             "units_display".to_string(),
             encode_units_display(&db.units_display),
         );
+    }
+    // `LAYERPMODE` is On by default; only Off is stored, so a default document
+    // keeps the pre-gate header bytes.
+    if !db.layer_pmode {
+        map.insert("layer_pmode".to_string(), Value::Bool(false));
     }
     // The save instants are written only once a real durable save has stamped
     // them. An old archive therefore has no key at all.
@@ -229,6 +239,7 @@ pub(crate) fn apply_to(
     let active = reader.take_active_annotation_scale("active_annotation_scale", db)?;
     let metadata = reader.take_document_metadata("metadata")?;
     let units_display = reader.take_units_display("units_display")?;
+    let layer_pmode = reader.take_bool_or("layer_pmode", true)?;
     let document_times = reader.take_document_times("document_times")?;
     reader.finish()?;
 
@@ -242,6 +253,7 @@ pub(crate) fn apply_to(
     db.active_annotation_scale = active;
     db.document_metadata = metadata;
     db.units_display = units_display;
+    db.layer_pmode = layer_pmode;
     db.document_times = document_times;
 
     // `DrawingDatabase::invalidate_bounds_cache` is `pub(super)` to the
@@ -323,6 +335,16 @@ impl Reader {
             Value::Null => Ok(None),
             Value::String(text) => Ok(Some(text)),
             _ => Err(self.error(format!("{variable}: expected a string or null"))),
+        }
+    }
+
+    /// Read a boolean variable, falling back to `default` when the key is absent
+    /// (or present as `null`); a present non-boolean is refused.
+    fn take_bool_or(&mut self, variable: &str, default: bool) -> Result<bool, SnapshotError> {
+        match self.map.remove(variable) {
+            None | Some(Value::Null) => Ok(default),
+            Some(Value::Bool(value)) => Ok(value),
+            Some(_) => Err(self.error(format!("{variable}: expected a boolean"))),
         }
     }
 
