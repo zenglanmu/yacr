@@ -74,7 +74,12 @@ impl CadSession {
         let Some((property, value)) = parse_property_filter(argument) else {
             return self.refuse_argument(invalid_filter_argument_reason(text, selector));
         };
-        if selector == GETSEL_SELECTOR && !matches!(property.as_str(), "TYPE" | "LAYER") {
+        if selector == GETSEL_SELECTOR
+            && !matches!(
+                property.as_str(),
+                "TYPE" | "LAYER" | "COLOR" | "LINETYPE" | "SPACE"
+            )
+        {
             return self.refuse_argument(invalid_getsel_argument_reason(text));
         }
         let (id, mode) = match selector {

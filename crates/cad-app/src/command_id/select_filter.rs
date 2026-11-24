@@ -56,8 +56,8 @@
 //! and (for include) an empty selection; `FILTER` adds nothing. `FILTER` on an
 //! empty current selection is valid (append to empty).
 //!
-//! `GETSEL` accepts only `LAYER` and `TYPE` (the AutoCAD form); every other
-//! property is a named refusal there.
+//! `GETSEL` accepts `LAYER`, `TYPE`, `COLOR`, `LINETYPE` and `SPACE`; every
+//! richer `QSELECT`/`FILTER` property is a named refusal there.
 //!
 //! ## `SSX` (Express-Tool selection-set builder)
 //!
