@@ -15,12 +15,15 @@
 //! | --- | --- |
 //! | `LINE` | `start = position`, `end = position + (end − start)` (the source's own direction and length) |
 //! | `CIRCLE` | `center = position`, same normal and radius |
+//! | `ARC` | `center = position`, same normal, radius, start angle and sweep |
+//! | `POLYLINE` | every vertex translated so the first vertex lands on `position`; bulges, closed flag and width preserved |
+//! | `INSERT` | the source placement transform with its translation replaced by `position`; same block, rotation/scale and attribute values |
 //! | `POINT` | the typed position |
 //! | `TEXT` / `MTEXT` | insertion `position`; text, style, height, rotation, font, alignment and wrap width are all preserved |
 //!
-//! Every other kind needs richer input than one point (an ARC's sweep, a
-//! POLYLINE's vertex list, an INSERT's block name, …), so it is the named
-//! `addselected.unsupported` refusal rather than a silently wrong entity.
+//! Every other kind needs richer input than one point (an ELLIPSE's axes, a
+//! SPLINE's knots, …), so it is the named `addselected.unsupported` refusal
+//! rather than a silently wrong entity.
 //!
 //! Refusals: `addselected.payload`, `addselected.no_selection`,
 //! `addselected.multiple`, `addselected.not_addressable` (another document, a
@@ -139,6 +142,74 @@ impl Application {
                 radius: *radius,
             },
             SemanticGeometry::Point(_) => SemanticGeometry::Point(position),
+            SemanticGeometry::Arc {
+                normal,
+                radius,
+                start,
+                sweep,
+                ..
+            } => SemanticGeometry::Arc {
+                center: position,
+                normal: *normal,
+                radius: *radius,
+                start: *start,
+                sweep: *sweep,
+            },
+            SemanticGeometry::Polyline {
+                bulges,
+                points,
+                closed,
+                width,
+            } => {
+                let Some(first) = points.first() else {
+                    return Err(unsupported(
+                        "addselected.unsupported",
+                        "the selected POLYLINE has no vertices to anchor the copy",
+                    ));
+                };
+                let delta = Point3 {
+                    x: position.x - first.x,
+                    y: position.y - first.y,
+                    z: position.z - first.z,
+                };
+                if ![delta.x, delta.y, delta.z]
+                    .iter()
+                    .all(|value| value.is_finite())
+                {
+                    return Err(unsupported(
+                        "addselected.unsupported",
+                        "the selected POLYLINE has non-finite vertices",
+                    ));
+                }
+                SemanticGeometry::Polyline {
+                    bulges: bulges.clone(),
+                    points: points
+                        .iter()
+                        .map(|point| Point3 {
+                            x: point.x + delta.x,
+                            y: point.y + delta.y,
+                            z: point.z + delta.z,
+                        })
+                        .collect(),
+                    closed: *closed,
+                    width: *width,
+                }
+            }
+            SemanticGeometry::Insert {
+                block,
+                transform,
+                attributes,
+            } => {
+                let mut placed = *transform;
+                placed.matrix[0][3] = position.x;
+                placed.matrix[1][3] = position.y;
+                placed.matrix[2][3] = position.z;
+                SemanticGeometry::Insert {
+                    block: *block,
+                    transform: placed,
+                    attributes: attributes.clone(),
+                }
+            }
             SemanticGeometry::Text {
                 text,
                 style,
@@ -170,8 +241,8 @@ impl Application {
                 return Err(unsupported(
                     "addselected.unsupported",
                     format!(
-                        "ADDSELECTED supports point-anchored LINE/CIRCLE/POINT/TEXT; {} needs \
-                         richer input than one point",
+                        "ADDSELECTED supports LINE/CIRCLE/ARC/POLYLINE/INSERT/POINT/TEXT; {} needs \
+                         input this one-point form does not model",
                         geometry_kind(other)
                     ),
                 ));

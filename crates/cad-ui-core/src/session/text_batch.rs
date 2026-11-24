@@ -23,9 +23,9 @@
 //! so they are not in this module or in `ARGUMENT_SELECTORS`.
 
 use cad_app::{
-    CommandId, CommandPayload, JustifyTextCommand, TCircleCommand, TCountCommand, TextAlignAxis,
-    TextAlignCommand, TextAlignEdge, TextAlignSpacing, TextAlignSpacingCommand, TextBoundaryShape,
-    TextScaleCommand,
+    CommandId, CommandPayload, JustifyTextCommand, TCircleCommand, TCircleSizeMode, TCountCommand,
+    TextAlignAxis, TextAlignCommand, TextAlignEdge, TextAlignSpacing, TextAlignSpacingCommand,
+    TextBoundaryShape, TextScaleCommand,
 };
 use cad_domain::{TextAlignH, TextAlignV};
 
@@ -124,27 +124,53 @@ pub fn parse_textalign_argument(argument: &str) -> Option<TextAlignEdge> {
 /// Parse `TEXTALIGN <spacing option>`.
 ///
 /// * `DISTRIBUTE` (the default axis is Y) or `DISTRIBUTE X` / `DISTRIBUTE Y`;
-/// * `SETSPACING`, `CURRENTVERTICAL`, `CURRENTHORIZONTAL` — parsed so the host
-///   can answer with its own stable refusal code (they write nothing).
+/// * `SETSPACING [<distance> [X|Y]]` — the distance is a non-negative decimal
+///   and the axis defaults to Y;
+/// * `CURRENTVERTICAL`, `CURRENTHORIZONTAL` — whole-selection alignment using
+///   each text's own stored justification.
 ///
+/// A bare `SETSPACING` parses to `distance: None` so the application can answer
+/// with `textalign.set_spacing_needs_value` rather than inventing a distance.
 /// Any other shape is `None` and becomes the stable invalid-argument refusal.
 pub fn parse_textalign_spacing_argument(argument: &str) -> Option<TextAlignSpacing> {
     let tokens: Vec<&str> = argument.split_whitespace().collect();
+    if tokens.is_empty() {
+        return None;
+    }
     if tokens.len() == 1 {
         return match tokens[0].to_ascii_uppercase().as_str() {
             "DISTRIBUTE" => Some(TextAlignSpacing::Distribute(TextAlignAxis::Y)),
-            "SETSPACING" => Some(TextAlignSpacing::SetSpacing),
+            "SETSPACING" => Some(TextAlignSpacing::SetSpacing {
+                distance: None,
+                axis: TextAlignAxis::Y,
+            }),
             "CURRENTVERTICAL" => Some(TextAlignSpacing::CurrentVertical),
             "CURRENTHORIZONTAL" => Some(TextAlignSpacing::CurrentHorizontal),
             _ => None,
         };
     }
-    if tokens.len() == 2 && tokens[0].eq_ignore_ascii_case("DISTRIBUTE") {
+    if tokens[0].eq_ignore_ascii_case("DISTRIBUTE") && tokens.len() == 2 {
         return match tokens[1].to_ascii_uppercase().as_str() {
             "X" => Some(TextAlignSpacing::Distribute(TextAlignAxis::X)),
             "Y" => Some(TextAlignSpacing::Distribute(TextAlignAxis::Y)),
             _ => None,
         };
+    }
+    if tokens[0].eq_ignore_ascii_case("SETSPACING") && tokens.len() <= 3 {
+        let distance = super::commands::parse_signed_decimal(tokens[1])?;
+        if !distance.is_finite() || distance < 0.0 {
+            return None;
+        }
+        let axis = match tokens.get(2) {
+            None => TextAlignAxis::Y,
+            Some(token) if token.eq_ignore_ascii_case("X") => TextAlignAxis::X,
+            Some(token) if token.eq_ignore_ascii_case("Y") => TextAlignAxis::Y,
+            Some(_) => return None,
+        };
+        return Some(TextAlignSpacing::SetSpacing {
+            distance: Some(distance),
+            axis,
+        });
     }
     None
 }
@@ -179,16 +205,59 @@ pub fn parse_tcount_argument(argument: &str) -> Option<TCountCommand> {
     })
 }
 
-/// Parse `TCIRCLE <shape>`: exactly `CIRCLE` or `RECTANGLE`.
-pub fn parse_tcircle_argument(argument: &str) -> Option<TextBoundaryShape> {
-    let key = argument.trim();
-    if key.eq_ignore_ascii_case("CIRCLE") {
-        Some(TextBoundaryShape::Circle)
-    } else if key.eq_ignore_ascii_case("RECTANGLE") {
-        Some(TextBoundaryShape::Rectangle)
-    } else {
-        None
+/// Parse `TCIRCLE <shape> [OFFSET <factor>] [VARIABLE|CONSTANT [BOTH|WIDTH|HEIGHT]]`.
+///
+/// The shape is `CIRCLE`, `SLOT` or `RECTANGLE`. The offset factor defaults to
+/// **0.35** (AutoCAD's initial value) and must be finite and non-negative. The
+/// size mode defaults to `Variable`; `CONSTANT` alone means `BOTH`. Any other
+/// shape, a repeated option or an unknown token is `None`.
+pub fn parse_tcircle_argument(argument: &str) -> Option<TCircleCommand> {
+    let mut tokens = argument.split_whitespace();
+    let shape = match tokens.next()?.to_ascii_uppercase().as_str() {
+        "CIRCLE" => TextBoundaryShape::Circle,
+        "SLOT" => TextBoundaryShape::Slot,
+        "RECTANGLE" => TextBoundaryShape::Rectangle,
+        _ => return None,
+    };
+    let mut offset_factor = 0.35f64;
+    let mut offset_seen = false;
+    let mut size_mode = TCircleSizeMode::Variable;
+    let mut size_seen = false;
+    while let Some(token) = tokens.next() {
+        match token.to_ascii_uppercase().as_str() {
+            "OFFSET" if !offset_seen => {
+                let value = super::commands::parse_signed_decimal(tokens.next()?)?;
+                if !value.is_finite() || value < 0.0 {
+                    return None;
+                }
+                offset_factor = value;
+                offset_seen = true;
+            }
+            "VARIABLE" if !size_seen => {
+                size_mode = TCircleSizeMode::Variable;
+                size_seen = true;
+            }
+            "CONSTANT" if !size_seen => {
+                let mode = match tokens.next() {
+                    None => TCircleSizeMode::ConstantBoth,
+                    Some(word) => match word.to_ascii_uppercase().as_str() {
+                        "BOTH" => TCircleSizeMode::ConstantBoth,
+                        "WIDTH" => TCircleSizeMode::ConstantWidth,
+                        "HEIGHT" => TCircleSizeMode::ConstantHeight,
+                        _ => return None,
+                    },
+                };
+                size_mode = mode;
+                size_seen = true;
+            }
+            _ => return None,
+        }
     }
+    Some(TCircleCommand {
+        shape,
+        offset_factor,
+        size_mode,
+    })
 }
 
 /// Stable refusal for a `JUSTIFYTEXT` argument outside the grammar.
@@ -230,7 +299,8 @@ pub fn invalid_tcount_argument_reason(text: &str) -> String {
 /// Stable refusal for a `TCIRCLE` argument outside the grammar.
 pub fn invalid_tcircle_argument_reason(text: &str) -> String {
     format!(
-        "unsupported CAD command: {} (TCIRCLE needs CIRCLE or RECTANGLE)",
+        "unsupported CAD command: {} (TCIRCLE needs CIRCLE|SLOT|RECTANGLE, optionally \
+         `OFFSET <factor>` and `VARIABLE|CONSTANT [BOTH|WIDTH|HEIGHT]`)",
         text.trim()
     )
 }
@@ -307,13 +377,13 @@ impl CadSession {
     }
 
     fn tcircle_argument(&self, argument: &str, text: &str) -> Result<(), String> {
-        let Some(shape) = super::parse_tcircle_argument(argument) else {
+        let Some(request) = super::parse_tcircle_argument(argument) else {
             return self.refuse_argument(super::invalid_tcircle_argument_reason(text));
         };
         self.text_batch_dispatch(
             TCIRCLE_SELECTOR,
             CommandId::TextCircle,
-            CommandPayload::TextCircle(TCircleCommand { shape }),
+            CommandPayload::TextCircle(request),
         )
     }
 

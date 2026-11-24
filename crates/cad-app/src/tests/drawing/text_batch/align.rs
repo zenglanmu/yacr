@@ -1,7 +1,9 @@
 //! `TEXTALIGN` contract tests for **all fifteen** alignment modes this build
 //! models: `LEFT`/`RIGHT`/`CENTER` (horizontal), `TOP`/`MIDDLE`/`BOTTOM`
 //! (vertical) and the nine combined AutoCAD 2026 modes (`TOPLEFT` … `BOTTOMRIGHT`),
-//! plus `DISTRIBUTE [X|Y]` gap distribution and the three named spacing refusals.
+//! plus `DISTRIBUTE [X|Y]` gap distribution, `SETSPACING <distance> [X|Y]`
+//! fixed-gap spacing and the `CURRENTVERTICAL`/`CURRENTHORIZONTAL`
+//! own-justification alignment.
 //!
 //! Every case pins the declared estimated extents (width = height × character
 //! count, height = height, anchored by the stored alignment, rotation ignored),
@@ -10,8 +12,7 @@
 //!
 //! AutoCAD's interactive base-object + second-point alignment vector is not
 //! modelled: the union box is the deterministic non-interactive substitute.
-//! `SETSPACING`/`CURRENTVERTICAL`/`CURRENTHORIZONTAL` are parsed and refused by
-//! name (never faked); `OBLIQUE` is not in the grammar at all.
+//! `OBLIQUE` is not in the grammar at all.
 
 use super::*;
 
@@ -550,33 +551,186 @@ fn textalign_distribute_refuses_two_targets_and_reports_already_even_as_unchange
 }
 
 #[test]
-fn textalign_spacing_options_outside_distribute_refuse_by_name_and_write_nothing() {
-    for (spacing, code) in [
-        (
-            TextAlignSpacing::SetSpacing,
-            "textalign.set_spacing_unsupported",
+fn textalign_setspacing_places_extents_at_a_fixed_gap() {
+    // Reading order top-to-bottom: 3, 2, 1. Entity 3 stays; each later extent's
+    // top lands 3 units below the previous extent's bottom.
+    let (mut app, mut session) = three_texts();
+    let before = revision(&app);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::TextAlignEdges,
+        CommandPayload::TextAlignSpacing(TextAlignSpacingCommand {
+            spacing: TextAlignSpacing::SetSpacing {
+                distance: Some(3.0),
+                axis: TextAlignAxis::Y,
+            },
+        }),
+    )
+    .expect("TEXTALIGN SETSPACING 3 Y");
+    assert_position(&app, 3, 20.0, 20.0);
+    assert_position(&app, 2, 10.0, 15.0);
+    assert_position(&app, 1, 0.0, 10.0);
+    assert_eq!(outcome.objects.len(), 2, "only later extents moved");
+    assert_eq!(revision(&app).0, before.0 + 1, "one transaction");
+    assert_eq!(undo_depth(&app), 1);
+
+    // Horizontal spacing walks left-to-right; entity 1 stays.
+    let (mut app, mut session) = three_texts();
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::TextAlignEdges,
+        CommandPayload::TextAlignSpacing(TextAlignSpacingCommand {
+            spacing: TextAlignSpacing::SetSpacing {
+                distance: Some(3.0),
+                axis: TextAlignAxis::X,
+            },
+        }),
+    )
+    .expect("TEXTALIGN SETSPACING 3 X");
+    assert_position(&app, 1, 0.0, 0.0);
+    assert_position(&app, 2, 7.0, 10.0);
+    assert_position(&app, 3, 18.0, 20.0);
+}
+
+#[test]
+fn textalign_current_options_use_each_texts_own_justification() {
+    // Mixed vertical justification: 1 is Top, 2 is Middle, 3 is Baseline.
+    let (mut app, mut session) = app_with(vec![
+        text_entity(
+            1,
+            "ab",
+            p3(0.0, 0.0, 0.0),
+            2.0,
+            TextAlignH::Left,
+            TextAlignV::Top,
+            0,
+            "AcDbText",
         ),
-        (
-            TextAlignSpacing::CurrentVertical,
-            "textalign.current_vertical_unsupported",
+        text_entity(
+            2,
+            "abcd",
+            p3(10.0, 10.0, 0.0),
+            2.0,
+            TextAlignH::Left,
+            TextAlignV::Middle,
+            1,
+            "AcDbText",
         ),
-        (
-            TextAlignSpacing::CurrentHorizontal,
-            "textalign.current_horizontal_unsupported",
+        text_entity(
+            3,
+            "abc",
+            p3(20.0, 20.0, 0.0),
+            2.0,
+            TextAlignH::Left,
+            TextAlignV::Baseline,
+            2,
+            "AcDbText",
         ),
-    ] {
-        let (mut app, mut session) = three_texts();
-        let before = revision(&app);
-        let error = execute(
-            &mut app,
-            &mut session,
-            CommandId::TextAlignEdges,
-            CommandPayload::TextAlignSpacing(TextAlignSpacingCommand { spacing }),
-        )
-        .expect_err("the spacing option is refused");
-        assert_invalid(error, code);
-        assert_eq!(revision(&app), before, "{code}: writes nothing");
-        assert_eq!(undo_depth(&app), 0, "{code}: no undo entry");
-        assert_position(&app, 1, 0.0, 0.0);
-    }
+    ]);
+    select(&mut session, &[1, 2, 3]);
+    let before = revision(&app);
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::TextAlignEdges,
+        CommandPayload::TextAlignSpacing(TextAlignSpacingCommand {
+            spacing: TextAlignSpacing::CurrentVertical,
+        }),
+    )
+    .expect("TEXTALIGN CURRENTVERTICAL");
+    // The first text's Top edge is y = 0. Entity 2's Middle anchor (10) moves to
+    // 0 (position y 0); entity 3's Baseline anchor (20) moves to 0 too.
+    assert_position(&app, 1, 0.0, 0.0);
+    assert_position(&app, 2, 10.0, 0.0);
+    assert_position(&app, 3, 20.0, 0.0);
+    assert_eq!(revision(&app).0, before.0 + 1);
+    assert_eq!(undo_depth(&app), 1);
+
+    // Mixed horizontal justification: 1 Left, 2 Center, 3 Right.
+    let (mut app, mut session) = app_with(vec![
+        text_entity(
+            1,
+            "ab",
+            p3(0.0, 0.0, 0.0),
+            2.0,
+            TextAlignH::Left,
+            TextAlignV::Baseline,
+            0,
+            "AcDbText",
+        ),
+        text_entity(
+            2,
+            "abcd",
+            p3(10.0, 10.0, 0.0),
+            2.0,
+            TextAlignH::Center,
+            TextAlignV::Baseline,
+            1,
+            "AcDbText",
+        ),
+        text_entity(
+            3,
+            "abc",
+            p3(20.0, 20.0, 0.0),
+            2.0,
+            TextAlignH::Right,
+            TextAlignV::Baseline,
+            2,
+            "AcDbText",
+        ),
+    ]);
+    select(&mut session, &[1, 2, 3]);
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::TextAlignEdges,
+        CommandPayload::TextAlignSpacing(TextAlignSpacingCommand {
+            spacing: TextAlignSpacing::CurrentHorizontal,
+        }),
+    )
+    .expect("TEXTALIGN CURRENTHORIZONTAL");
+    // The first text's Left edge is x = 0; the others' own anchors move to it.
+    assert_position(&app, 1, 0.0, 0.0);
+    assert_position(&app, 2, 0.0, 10.0);
+    assert_position(&app, 3, 0.0, 20.0);
+}
+
+#[test]
+fn textalign_setspacing_without_a_distance_and_negative_spacing_write_nothing() {
+    let (mut app, mut session) = three_texts();
+    let before = revision(&app);
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::TextAlignEdges,
+        CommandPayload::TextAlignSpacing(TextAlignSpacingCommand {
+            spacing: TextAlignSpacing::SetSpacing {
+                distance: None,
+                axis: TextAlignAxis::Y,
+            },
+        }),
+    )
+    .expect_err("a bare SETSPACING has no distance");
+    assert_invalid(error, "textalign.set_spacing_needs_value");
+    assert_eq!(revision(&app), before);
+    assert_eq!(undo_depth(&app), 0);
+
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::TextAlignEdges,
+        CommandPayload::TextAlignSpacing(TextAlignSpacingCommand {
+            spacing: TextAlignSpacing::SetSpacing {
+                distance: Some(-1.0),
+                axis: TextAlignAxis::Y,
+            },
+        }),
+    )
+    .expect_err("a negative spacing is refused");
+    assert_invalid(error, "textalign.invalid_spacing");
+    assert_eq!(revision(&app), before);
+    assert_eq!(undo_depth(&app), 0);
+    assert_position(&app, 1, 0.0, 0.0);
 }

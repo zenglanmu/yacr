@@ -88,13 +88,23 @@ fn filter_grammar_is_property_plus_trimmed_value() {
         parse_property_filter("linetype my-dash"),
         Some(("LINETYPE".into(), "my-dash".into()))
     );
+    assert_eq!(
+        parse_property_filter("SPACE Model"),
+        Some(("SPACE".into(), "Model".into()))
+    );
     for refused in ["", "TYPE", "WEIGHT 2", "TYPE   ", "COLOR\t"] {
         assert_eq!(parse_property_filter(refused), None, "{refused:?}");
     }
     let reason = invalid_filter_argument_reason("QSELECT WEIGHT 2", "QSELECT");
-    assert!(reason.contains("TYPE|LAYER|COLOR|LINETYPE"), "{reason}");
-    let reason = invalid_getsel_argument_reason("GETSEL COLOR aci:1");
-    assert!(reason.contains("LAYER|TYPE"), "{reason}");
+    assert!(
+        reason.contains("TYPE|LAYER|COLOR|LINETYPE|SPACE"),
+        "{reason}"
+    );
+    let reason = invalid_getsel_argument_reason("GETSEL TEXT hello");
+    assert!(
+        reason.contains("TYPE|LAYER|COLOR|LINETYPE|SPACE"),
+        "{reason}"
+    );
 }
 
 #[test]
@@ -158,6 +168,9 @@ fn well_formed_lines_reach_the_application_and_refusals_stay_local() {
         "QSELECT TYPE LINE",
         "FILTER LAYER WALLS",
         "GETSEL TYPE CIRCLE",
+        "GETSEL COLOR ByLayer",
+        "GETSEL LINETYPE ByLayer",
+        "GETSEL SPACE Model",
         "FIND hello => hi",
         "-FIND hello",
         "UNISOLATEOBJECTS",
@@ -176,11 +189,11 @@ fn well_formed_lines_reach_the_application_and_refusals_stay_local() {
     // Locally invalid arguments never reach the host.
     let error = session.command("QSELECT WEIGHT 2").unwrap_err();
     assert!(
-        error.contains("TYPE|LAYER|COLOR|LINETYPE"),
+        error.contains("TYPE|LAYER|COLOR|LINETYPE|SPACE"),
         "local grammar refusal: {error}"
     );
-    let error = session.command("GETSEL COLOR aci:1").unwrap_err();
-    assert!(error.contains("LAYER|TYPE"), "{error}");
+    let error = session.command("GETSEL TEXT hello").unwrap_err();
+    assert!(error.contains("TYPE|LAYER|COLOR|LINETYPE|SPACE"), "{error}");
     let error = session.command("-FIND a => b").unwrap_err();
     assert!(error.contains("never replaces"), "{error}");
 }

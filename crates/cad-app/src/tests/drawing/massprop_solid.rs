@@ -694,3 +694,96 @@ fn massprop_refuses_while_a_solid_boolean_runs() {
     release.store(true, Ordering::SeqCst);
     app.abort_solid_boolean();
 }
+
+// ---------------------------------------------------------------------------
+// MEASUREGEOM VOLUME (single exact body path)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn measuregeom_volume_reports_the_single_exact_body() {
+    let (mut app, mut session) = app_with_bodies(vec![exact_box(BODY_A)]);
+    with_modeler(&mut app, Answer::Mass);
+    select_refs(&mut app, &mut session, vec![body_ref(BODY_A, None)]);
+    let revision_before = revision(&app);
+    let undo_before = app.can_undo(&DocumentId(1));
+    let outcome = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::MeasureGeom,
+                CommandPayload::MeasureGeom(MeasureGeomOption::Volume),
+            ),
+        )
+        .expect("VOLUME reports the exact body");
+    let report = outcome
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "measuregeom.volume")
+        .expect("the VOLUME report");
+    assert!(report.message.contains("volume=1.000000"), "{report:?}");
+    assert!(
+        report.message.contains("surface_area=6.000000"),
+        "{report:?}"
+    );
+    assert_eq!(revision(&app), revision_before, "read-only");
+    assert_eq!(app.can_undo(&DocumentId(1)), undo_before, "no undo entry");
+}
+
+#[test]
+fn measuregeom_volume_refuses_multi_body_non_body_and_unavailable_kernel_by_name() {
+    let (mut app, mut session) = app_with_bodies(vec![exact_box(BODY_A), exact_box(BODY_B)]);
+    with_modeler(&mut app, Answer::Mass);
+    select_refs(
+        &mut app,
+        &mut session,
+        vec![body_ref(BODY_A, None), body_ref(BODY_B, None)],
+    );
+    let error = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::MeasureGeom,
+                CommandPayload::MeasureGeom(MeasureGeomOption::Volume),
+            ),
+        )
+        .expect_err("two bodies are refused");
+    assert!(
+        format!("{error:?}").contains("measuregeom.volume.multiple"),
+        "{error:?}"
+    );
+
+    let (mut app, mut session) = app_with_bodies(vec![circle_entity(CIRCLE_A)]);
+    with_modeler(&mut app, Answer::Mass);
+    select_refs(&mut app, &mut session, vec![body_ref(CIRCLE_A, None)]);
+    let error = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::MeasureGeom,
+                CommandPayload::MeasureGeom(MeasureGeomOption::Volume),
+            ),
+        )
+        .expect_err("a circle is not a body");
+    assert!(
+        format!("{error:?}").contains("measuregeom.volume.unsupported"),
+        "{error:?}"
+    );
+
+    let (mut app, mut session) = app_with_bodies(vec![exact_box(BODY_A)]);
+    select_refs(&mut app, &mut session, vec![body_ref(BODY_A, None)]);
+    let error = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::MeasureGeom,
+                CommandPayload::MeasureGeom(MeasureGeomOption::Volume),
+            ),
+        )
+        .expect_err("no kernel is installed");
+    assert!(
+        format!("{error:?}").contains("massprop.body_modeler_unavailable"),
+        "{error:?}"
+    );
+    assert_eq!(revision(&app), Revision(0), "refusals write nothing");
+    assert!(!app.can_undo(&DocumentId(1)));
+}

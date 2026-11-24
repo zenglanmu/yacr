@@ -12,8 +12,10 @@
 //!   direct command-layer call is refused by name (`measuregeom.invalid_payload`)
 //!   instead of starting a tool from the wrong layer;
 //! * `RADIUS` is a real read-only report of exactly one selected `ARC`/`CIRCLE`;
-//! * `VOLUME` is the stable `measuregeom.volume_unsupported` refusal: there is no
-//!   3D-solid/volume model in this build, so no number is invented.
+//! * `VOLUME` is a real read-only report of exactly one selected exact 3D solid
+//!   body through the same `mass_prop_bodies` / `integrate_body` path `MASSPROP`
+//!   uses (one body only; multi-body and non-body selections are named
+//!   refusals).
 
 use super::*;
 
@@ -22,8 +24,7 @@ impl Application {
     ///
     /// The four tool options (`DISTANCE`/`ANGLE`/`AREA`/`POLYLINE`) never travel
     /// this far: the session turns them into the existing `BeginMeasurement`
-    /// requests. `RADIUS` is the read-only report and `VOLUME` the explicit
-    /// not-implemented refusal. Full contract:
+    /// requests. `RADIUS` and `VOLUME` are the read-only reports. Full contract:
     /// [`crate::command_id::measuregeom`].
     pub(crate) fn measure_geom(
         &mut self,
@@ -34,11 +35,9 @@ impl Application {
             CommandPayload::MeasureGeom(MeasureGeomOption::Radius) => {
                 self.measure_geom_radius(session, command)
             }
-            CommandPayload::MeasureGeom(MeasureGeomOption::Volume) => Err(CadError::Unsupported(
-                "measuregeom.volume_unsupported: MEASUREGEOM VOLUME is not implemented (this build \
-                 has no 3D-solid or volume model); no value is reported"
-                    .into(),
-            )),
+            CommandPayload::MeasureGeom(MeasureGeomOption::Volume) => {
+                self.measure_geom_volume(session, command)
+            }
             CommandPayload::MeasureGeom(
                 option @ (MeasureGeomOption::Distance
                 | MeasureGeomOption::Angle
@@ -56,7 +55,8 @@ impl Application {
             )),
             _ => Err(CadError::InvalidInput(
                 "measuregeom.invalid_payload: MEASUREGEOM takes its option as a \
-                 CommandPayload::MeasureGeom value".into(),
+                 CommandPayload::MeasureGeom value"
+                    .into(),
             )),
         }
     }
@@ -199,6 +199,85 @@ impl Application {
                      circumference={circumference:.6}{extra}",
                     entity.id.0,
                     format_point(center),
+                ),
+            }],
+            measurement: None,
+            point_report: None,
+        })
+    }
+
+    /// `MEASUREGEOM VOLUME`: report the one selected exact 3D solid body's
+    /// volume through the **same** `mass_prop_bodies` / `integrate_body` path
+    /// `MASSPROP` uses. A non-body selection, a second body or a body without an
+    /// exact B-rep is refused **by name** before any report is built.
+    fn measure_geom_volume(
+        &mut self,
+        session: &mut SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        let references = session.selection.refs().to_vec();
+        if references.is_empty() {
+            return Err(CadError::InvalidInput(
+                "measuregeom.volume.selection_empty: MEASUREGEOM VOLUME needs exactly one selected \
+                 exact 3D solid body"
+                    .into(),
+            ));
+        }
+        let routed = super::body::route(self, command.document, &references)?;
+        if !routed.regions.is_empty() {
+            let kinds: Vec<&str> = routed
+                .regions
+                .iter()
+                .map(|entity| geometry_kind(&entity.geometry))
+                .collect();
+            return Err(CadError::Unsupported(format!(
+                "measuregeom.volume.unsupported: MEASUREGEOM VOLUME measures an exact 3D solid \
+                 body only; the selection contains {} non-body object(s) ({})",
+                routed.regions.len(),
+                kinds.join(", ")
+            )));
+        }
+        if routed.bodies.len() != 1 {
+            return Err(CadError::Unsupported(format!(
+                "measuregeom.volume.multiple: MEASUREGEOM VOLUME measures one exact 3D solid body, \
+                 got {} distinct body entity/entities",
+                routed.bodies.len()
+            )));
+        }
+        let entity = routed.bodies[0];
+        let brep = super::body::validate_body_brep(entity)?;
+        if self.solid_boolean_running() {
+            return Err(CadError::Unsupported(format!(
+                "{}: a solid boolean is running; wait for it to settle",
+                super::body::REASON_KERNEL_BUSY
+            )));
+        }
+        let Some(modeler) = self.solid_modeler.clone() else {
+            return Err(CadError::Unsupported(format!(
+                "{}: no exact B-rep kernel in this carrier; the selected 3D solid body is not \
+                 measured and its display mesh is never substituted",
+                super::body::REASON_BODY_MODELER_UNAVAILABLE
+            )));
+        };
+        let stamp = TaskStamp::new(command.document, session.generation);
+        let mass = super::body::integrate_body(modeler.as_ref(), &stamp, entity, brep)?;
+        Ok(CommandOutcome {
+            objects: Vec::new(),
+            changes: None,
+            diagnostics: vec![Diagnostic {
+                object: Some(ObjectId(entity.id.0)),
+                code: "measuregeom.volume".into(),
+                message: format!(
+                    "MEASUREGEOM VOLUME: entity {} (3D solid {}, layer {}) volume={:.6} \
+                     surface_area={:.6} centroid={} density={:.6} mass={:.6}",
+                    entity.id.0,
+                    entity.object.type_key,
+                    entity.layer.0,
+                    mass.volume,
+                    mass.surface_area,
+                    format_point(mass.centroid),
+                    mass.density,
+                    mass.volume * mass.density,
                 ),
             }],
             measurement: None,

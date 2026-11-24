@@ -215,6 +215,92 @@ fn select(session: &mut SessionState, ids: &[u128]) {
 // ---------------------------------------------------------------------------
 
 #[test]
+fn hatch_generate_boundary_accepts_a_paper_layout_hatch() {
+    let paper_hatch = entity(
+        1,
+        LayerId(5),
+        SpaceId::Paper(LayoutId(1)),
+        hatch_geometry(
+            vec![straight_ring(&[
+                [0.0, 0.0],
+                [4.0, 0.0],
+                [4.0, 2.0],
+                [0.0, 2.0],
+            ])],
+            0.0,
+        ),
+        7,
+    );
+    let model_line = entity(
+        2,
+        LayerId(0),
+        SpaceId::Model,
+        SemanticGeometry::Line {
+            start: p3(0.0, 0.0, 0.0),
+            end: p3(1.0, 0.0, 0.0),
+        },
+        3,
+    );
+    let (mut app, mut session) = build(vec![paper_hatch, model_line], AppMode::Work);
+    select(&mut session, &[1]);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::HatchGenerateBoundary,
+        CommandPayload::None,
+    )
+    .expect("a paper-layout hatch is a valid target");
+    assert_eq!(outcome.objects.len(), 1);
+    let created = drawing_entity(&app, outcome.objects[0].0);
+    assert_eq!(created.space, SpaceId::Paper(LayoutId(1)), "same layout");
+    assert_eq!(created.layer, LayerId(5), "same layer");
+    assert_eq!(
+        created.draw_order, 8,
+        "the next order in the paper sequence, not the model sequence"
+    );
+    assert_eq!(undo_depth(&app), 1);
+}
+
+#[test]
+fn hatch_generate_boundary_keeps_a_block_definition_hatch_refused() {
+    let mut entities = vec![entity(
+        1,
+        LayerId(5),
+        SpaceId::Block(BlockId(9)),
+        hatch_geometry(
+            vec![straight_ring(&[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]])],
+            0.0,
+        ),
+        0,
+    )];
+    entities.push(entity(
+        2,
+        LayerId(0),
+        SpaceId::Model,
+        SemanticGeometry::Line {
+            start: p3(0.0, 0.0, 0.0),
+            end: p3(1.0, 0.0, 0.0),
+        },
+        0,
+    ));
+    let (mut app, mut session) = build_with_blocks(entities, vec![(9, vec![1])], AppMode::Work);
+    select(&mut session, &[1]);
+    let before = revision(&app);
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::HatchGenerateBoundary,
+        CommandPayload::None,
+    )
+    .expect_err("a block-definition hatch has no layout write path");
+    assert!(error
+        .to_string()
+        .contains("hatchgenerateboundary.not_addressable"));
+    assert_eq!(revision(&app), before);
+    assert_eq!(undo_depth(&app), 0);
+}
+
+#[test]
 fn hatch_generate_boundary_writes_one_closed_polyline_per_loop_on_the_hatch_layer() {
     let mut entities = vec![hatch_fixture()];
     entities.push(entity(

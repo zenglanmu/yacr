@@ -196,6 +196,11 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     LEADER_SELECTOR,
     TEXTFIT_SELECTOR,
     HATCHSETORIGIN_SELECTOR,
+    // `CENTERMARK [ARM <distance>|<factor>x]` and `CENTERLINE [EXTENSION
+    // <distance>] [GAP <distance>]`: the typed options of the two associative
+    // centre commands; the bare selectors keep their default geometry.
+    crate::session::annot_arguments::CENTERMARK_SELECTOR,
+    crate::session::annot_arguments::CENTERLINE_SELECTOR,
     // The 2026-11-07 extras batch typed forms. `SKETCH`/`MSTRETCH` have payload
     // paths only; `REGEN3` takes no argument.
     PAN_SELECTOR,

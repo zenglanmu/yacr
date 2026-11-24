@@ -27,7 +27,7 @@ pub(super) fn legacy_predicate(
     }
     let Some(property) = SelectionProperty::parse(property) else {
         let accepted = if id == CommandId::GetSelection {
-            "LAYER or TYPE"
+            "TYPE, LAYER, COLOR, LINETYPE or SPACE"
         } else {
             "TYPE, LAYER, COLOR, LINETYPE, LINEWEIGHT, LINETYPESCALE, TRANSPARENCY, SPACE, \
              TEXT or NAME"
@@ -37,10 +37,18 @@ pub(super) fn legacy_predicate(
         )));
     };
     if id == CommandId::GetSelection
-        && !matches!(property, SelectionProperty::Layer | SelectionProperty::Type)
+        && !matches!(
+            property,
+            SelectionProperty::Type
+                | SelectionProperty::Layer
+                | SelectionProperty::Color
+                | SelectionProperty::Linetype
+                | SelectionProperty::Space
+        )
     {
         return Err(CadError::InvalidInput(
-            "getsel.unknown_property: GETSEL accepts LAYER or TYPE only".into(),
+            "getsel.unknown_property: GETSEL accepts TYPE, LAYER, COLOR, LINETYPE or SPACE only"
+                .into(),
         ));
     }
     Ok(SelectionPredicate {

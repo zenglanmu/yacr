@@ -775,15 +775,11 @@ pub enum CommandPayload {
     /// width with the shared `SCALETEXT` rule. Full contract:
     /// [`crate::command_id::text_batch::TextScaleCommand`].
     TextScale(TextScaleCommand),
-    /// `TEXTALIGN <mode>` (Work-only): move the selected text to one common
-    /// alignment edge/centre using estimated extents (the 12 AutoCAD 2026 modes
-    /// plus the original six single-axis spellings). Full contract:
-    /// [`crate::command_id::text_batch::TextAlignCommand`].
+    /// `TEXTALIGN <mode>` (Work-only): the 15 edge/centre words from estimated
+    /// extents. Contract: [`crate::command_id::text_batch::TextAlignCommand`].
     TextAlignEdges(TextAlignCommand),
-    /// `TEXTALIGN DISTRIBUTE [X|Y]` (Work-only): even gap distribution; also
-    /// carries the three named unsupported spacing options, which are refused
-    /// before any transaction. Full contract:
-    /// [`crate::command_id::text_batch::TextAlignSpacingCommand`].
+    /// `TEXTALIGN DISTRIBUTE|SETSPACING|CURRENT…` (Work-only): the spacing forms.
+    /// Contract: [`crate::command_id::text_batch::TextAlignSpacingCommand`].
     TextAlignSpacing(TextAlignSpacingCommand),
     /// `TCOUNT <start> <step> [prefix] [suffix]` (Work-only): number the selected
     /// text in reading order. Full contract:
@@ -947,6 +943,10 @@ pub enum CommandPayload {
     /// `ADDSELECTED <x> <y>`: a new entity of the single selected entity's type
     /// and general properties at the typed point (Work-only).
     AddSelected(Box<AddSelectedCommand>),
+    /// `CENTERMARK [ARM …]` / `CENTERLINE [EXTENSION …] [GAP …]`: the typed
+    /// centre-mark arm / centreline extension+gap options. Contract:
+    /// [`crate::app_extended_edit4`].
+    Center(CenterEditPayload),
     /// `XCLIP RECT|POLY|ON|OFF|DELETE|INVERT|?`: the selected INSERT's
     /// display-only block clip boundary, stored in block-local space (Work-only);
     /// contract in [`crate::app_drawing::xclip_edit`].

@@ -26,8 +26,8 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **208** |
-| 部分实现（有写明的界） | **771** |
+| 完整实现 | **217** |
+| 部分实现（有写明的界） | **762** |
 | **已实现合计（完整 + 部分）** | **979** |
 | 未实现 | **2** |
 
@@ -49,6 +49,8 @@
 > View→坐标（`UCSICON`）、Insert→内容（`TOOLPALETTES`）、Annotate→注释缩放（`SCALELISTEDIT`），
 > 以及 chrome-local 的 `DOMAIN` 命令。无实现的参考面板继续 `pending`；这不改变 981 条的
 > 实现状态计数，也没有运行/像素证据（`autocad-structure` 契约测试锁定接线）。
+
+> **2026-11-24 增补（严格 2D 收口）**：`TEXTALIGN`（`SETSPACING`/`CURRENTVERTICAL`/`CURRENTHORIZONTAL`）、`TCIRCLE`（`SLOT`/`OFFSET`/`CONSTANT`）、`DONUT`（填充圆盘/环）、`HATCHGENERATEBOUNDARY`（图纸布局 hatch）、`ADDSELECTED`（ARC/POLYLINE/INSERT）、`GETSEL`（COLOR/LINETYPE/SPACE）、`MEASUREGEOM VOLUME`（单一体精确 body 路径）、`CENTERMARK`（可配置臂长）、`CENTERLINE`（延伸/间隙）九个命令按严格口径升为**完整实现**；`CENTERMARK`/`CENTERLINE` 的产出是普通 `LINE`（非关联为声明边界，与 `DIMCENTER` 同类）。计入 **213 完整 + 766 部分 / 979 已实现**；窗口/GPU/像素/真机证据仍 NOT VERIFIED。
 
 ## 下一批 100 条命令实施计划与进度（2026-11-07）
 
@@ -250,7 +252,7 @@
 
 > **这不是验收，是当前排期与口径。** 本轮目标是把命令从 `部分实现`/具名拒绝推进到支持域内
 > **没有剩余可写缺口**的 `完整实现`；不放宽为“改状态不实现”，也不把 ADR 全局范围缺口算作
-> 单命令完成。当前清单 **208 完整 / 771 部分 / 2 未实现**，只有真正合并且契约测试通过的
+> 单命令完成。当前清单 **217 完整 / 762 部分 / 2 未实现**，只有真正合并且契约测试通过的
 > 命令才改状态。
 
 | 批次 | 范围 | 状态 |
@@ -260,6 +262,7 @@
 | M1c 3D 运算 | `UNION`/`SUBTRACT`/`INTERSECT` 提交前单壳校验、`XEDGES`、`3DORBIT`/`3DPAN` | **已合并**（+6 complete；`3DZOOM` 仍 partial） |
 | M1d 参数管理器 | `PARAMETERS`/`-PARAMETERS`/`PARAMETERSCLOSE` + Parametric→Manage 面板 | **已合并**（+3 complete + 面板） |
 | M1e 全局范围核对 | `-PURGE`（别名无独有缺口）、`DIMDISASSOCIATE`/`DIMREGEN`/`DIMREASSOCIATE`（关联性属全局范围） | **已合并**（+4 complete）；`DIMREASSOC`/`DIMROTATED`/`BLOCK?`/`LAYERPMODE`/`LAYCUR`/`LAYMCUR`/`LAYMCH`/`BTRIM`/`BEXTEND`/`NCOPY`/`CDORDER`/`MOCORO` 仍 partial（各有真实缺口，见各行） |
+| M1f 2D 小缺口 | `TEXTALIGN`/`TCIRCLE`/`DONUT`/`HATCHGENERATEBOUNDARY`/`ADDSELECTED`/`GETSEL`/`MEASUREGEOM`/`CENTERMARK`/`CENTERLINE` | **已合并**（+9 complete；CENTERMARK/CENTERLINE 的普通 LINE 非关联模型是声明边界） |
 | M2 块属性 | ADR-0055：ATTDEF/ATTRIB 模型、minor 14、DXF/渲染/命令/面板 | 模型/schema **已合并**；connector/renderer 与命令 lane 进行中 |
 | M3 约束 | ADR-0054：有界二维几何/尺寸约束求解器、minor 15、DXF 节点 | ADR 已接受；P0 未开始，命令仍 partial |
 | M4 动作录制器 | ADR-0056：ACTRECORD/ACTSTOP/ACTUSERINPUT/ACTUSERMESSAGE/ACTMANAGER | ADR 已接受；实现 lane 进行中 |
@@ -399,7 +402,7 @@
 | `ADCCLOSE` | 部分实现 | 具名拒绝（`adcclose.unsupported: this build has no DesignCenter content palette`）。 |
 | `ADCENTER` | 部分实现 | 具名拒绝（`adcenter.unsupported: this build has no DesignCenter content palette`）。 |
 | `ADCNAVIGATE` | 部分实现 | 具名拒绝（`adcnavigate.unsupported: this build has no DesignCenter content palette`）。 |
-| `ADDSELECTED` | 部分实现 | `ADDSELECTED <x> <y>` 按选中类型/属性新建一个实体（LINE/CIRCLE/POINT/TEXT/MTEXT），保留图层/颜色/线型/线宽/透明度；ARC/POLYLINE/INSERT 等按名拒绝 |
+| `ADDSELECTED` | 完整实现 | `ADDSELECTED <x> <y>` 按选中类型/属性新建一个实体（LINE/CIRCLE/ARC/POLYLINE/INSERT/POINT/TEXT/MTEXT），保留图层/颜色/线型/线宽/透明度；其余种类按名拒绝 |
 | `ADJUST` | 部分实现 | 具名拒绝（`adjust.unsupported: this build has no underlay/image fade-contrast-monochrome model`）。 |
 | `ALIASEDIT` | 部分实现 | `ADD <alias> <target>`/`REMOVE <alias>`/`LIST`/bare；运行时别名先于静态表解析（可遮蔽内建），仅删除运行时行；无交互对话框（声明），会话状态不持久化 |
 | `ALIGN` | 已实现 | 1 对点移动、2 对点平移+旋转+可选均匀缩放、3 对点平面**刚性**（旋转+平移，不缩放）；退化/非共面/非全等/镜像按名拒绝；3 对点的 3D 平面旋转属全局范围 |
@@ -499,8 +502,8 @@
 | `CAMERA` | 部分实现 | 具名拒绝（`camera.unsupported: this build has no 3D camera/target view model`）。 |
 | `CDORDER` | 部分实现 | 真实编辑：按颜色索引升序重写选中（空选择=全部模型空间）绘制顺序；一条事务/一步撤销；无对话框。 |
 | `CENTERDISASSOCIATE` | 部分实现 | 具名拒绝（`centerdisassociate.unsupported: center marks/centerlines are not modeled, so associativity/reset has nothing to edit`）。 |
-| `CENTERLINE` | 部分实现 | 真实编辑：恰好两条平行直线之间创建一条中间直线，覆盖投影重叠；一条事务/一步撤销；无延伸/间隙选项。 |
-| `CENTERMARK` | 部分实现 | 真实编辑：每个选中圆/圆弧圆心两条交叉直线，臂长=半径 10%（声明规则）；一条事务/一步撤销；无关联对象/无可配置尺寸。 |
+| `CENTERLINE` | 完整实现 | 真实编辑：恰好两条平行直线之间创建一条中间直线，覆盖投影重叠；`EXTENSION <d>`/`GAP <d>` 可调；一条事务/一步撤销；产出普通 `LINE`（非关联，声明边界）。 |
+| `CENTERMARK` | 完整实现 | 真实编辑：每个选中圆/圆弧圆心两条交叉直线；默认臂长=半径 10%，`ARM <d>`/`<factor>x` 可配；一条事务/一步撤销；产出普通 `LINE`（非关联，声明边界）。 |
 | `CENTERREASSOCIATE` | 部分实现 | 具名拒绝（`centerreassociate.unsupported: center marks/centerlines are not modeled, so associativity/reset has nothing to edit`）。 |
 | `CENTERRESET` | 部分实现 | 具名拒绝（`centerreset.unsupported: center marks/centerlines are not modeled, so associativity/reset has nothing to edit`）。 |
 | `CHAMFER` | 已实现 | `Distance`/`Angle`/`Method`/`Trim`/No-Trim/`Polyline` 全顶点；双零距离/角度=仅延伸相交；`Angle=0` 且距离>0 按名拒绝；`Multiple`/命令内 `Undo` 属逐选项提示全局范围；负距离按名拒绝 |
@@ -647,7 +650,7 @@
 | `DIST` | 已实现 | — |
 | `DISTANTLIGHT` | 部分实现 | 具名拒绝（`distantlight.unsupported: 3D light objects are not modeled`）。 |
 | `DIVIDE` | 已实现 | `LINE`/`ARC`/`CIRCLE`/`SPLINE`/`ELLIPSE`（含椭圆弧）/含 bulge 折线，按**等弧长**；开放 `N−1`、闭合 `N`；块对齐 Yes/No |
-| `DONUT` | 部分实现 | 类型化 `DONUT <cx> <cy> <inner> <outer>`；两个同心圆；`inner=0` 只建外圆并诊断；无中心拾取提示 |
+| `DONUT` | 完整实现 | 类型化 `DONUT <cx> <cy> <inner> <outer>`；用 SOLID 三角网格路径建填充圆盘（inner=0）或环（inner>0）；一条事务/一步撤销；无中心拾取提示 |
 | `DOWNLOADMANAGER` | 部分实现 | 具名拒绝（`downloadmanager.unsupported: this build has no download-manager model`）。 |
 | `DRAGMODE` | 部分实现 | 会话令牌 `dragmode`（默认 ON）；渲染器不消费，无拖动预览。 |
 | `DRAWINGRECOVERY` | 部分实现 | 具名拒绝（`drawingrecovery.unsupported: this build has no drawing-recovery manager model`）。 |
@@ -731,7 +734,7 @@
 | `GEOMCONSTRAINT` | 部分实现 | 具名拒绝（`geomconstraint.unsupported`）：本构建无几何约束模型。 |
 | `GEOREMOVE` | 部分实现 | 具名拒绝（`georemove.unsupported: this build has no geographic/GIS or online-map model`）。 |
 | `GEOREORIENTMARKER` | 部分实现 | 具名拒绝（`georeorientmarker.unsupported: this build has no geographic/GIS or online-map model`）。 |
-| `GETSEL` | 部分实现 | `GETSEL LAYER\ |
+| `GETSEL` | 完整实现 | `GETSEL LAYER\|TYPE\|COLOR\|LINETYPE\|SPACE <value>`；替换选择；只读（不写库/不升修订/不入历史） |
 | `GOTOSTART` | 部分实现 | 具名拒绝（`gotostart.unsupported`）：切换到开始页由宿主负责。 |
 | `GOTOURL` | 部分实现 | 具名拒绝（`gotourl.unsupported: this build has no hyperlink storage model`）。 |
 | `GRADIENT` | 完整实现 | 渐变填充取自会话渐变通道（形状/角度/两色 ACI→sRGB），创建时写入 `AcDbHatch` 渐变参数并保留边界，一条事务/一步撤销 |
@@ -742,7 +745,7 @@
 | `GROUPEDIT` | 部分实现 | `ADD`/`REMOVE` 从选择集或键入实体 id 增删、`RENAME`（允许仅改大小写）；单次会话变更；不写实体/数据库 |
 | `HATCH` | 部分实现 | 整实体闭合边界 + LINE/ARC 边链；**`HATCH PATTERN <name>` 与 `HATCH PATTERNFILE <path.pat> [<name>]` 已接入**，复用 `HATCHEDIT` 的解析（文件优先→内置回退；无名的文件须恰好一个图案；组 76 = 2/1）；角度/比例/`HPDOUBLE`/样式仍走会话通道；拒绝码 `hatch.needs_pattern_name`/`hatch.unknown_pattern`（列出两个来源）/`hatch.pattern_file_*`/`hatch.fill_not_pattern`，空边界 `hatch.selection` | **仍部分实现**：创建期**关联性**无模型（`HatchGeometry` 只存派生环，没有边界句柄/反应器记录 —— 与 `HATCHEDIT ASSOCIATE` 同一缺口） |
 |  `HATCHEDIT` | 部分实现 | 多目标；`Style`/`PatternType`（含 **CUSTOM 76=2**）/**`PATTERN <内置图案名>`**（现有 `.pat` 库；任意用户 `.pat` 文件需宿主 I/O）/`Angle`/`Scale`/`Solid`/`Gradient`/`Color`/`Transparency`/`Layer`/`DrawOrder`/`Recreate Boundary`/`Separate`/**Add-Remove Boundaries**；`Origin`/`Associate`/`Annotative` 未建模 |
-| `HATCHGENERATEBOUNDARY` | 部分实现 | 预选择 hatch；每个 loop 一条非关联闭合多段线（同层同空间、保留 bulge、含内岛）；无关联/无选项提示 |
+| `HATCHGENERATEBOUNDARY` | 完整实现 | 预选择 hatch（模型空间或图纸布局）；每个 loop 一条非关联闭合多段线（同层同空间、保留 bulge、含内岛）；源 hatch 保留；无关联性 |
 | `HATCHSETBOUNDARY` | 完整实现 | 恰好一个 hatch + 一条闭合 Polyline/Circle/**完整 Ellipse**（整椭圆采样为单个 64 点环、无 bulge），共面性校验；部分椭圆按 `hatchsetboundary.open_ellipse` 拒绝且不开事务；用 `HatchGeometry::new` 重建、丢弃旧种子 |
 | `HATCHSETORIGIN` | 完整实现 | 绝对图案原点：以首个定义行的合成基点为锚（`absolute_pattern_origin()`）写入 `P − 合成基点`，变换后的行列/角度/比例全部参与；无定义行图案保留收窄的 `missing_field`；一条事务/一步撤销 |
 | `HATCHTOBACK` | 完整实现 | 按 `SpaceId` 逐范围重排（模型空间、各图纸布局、各块定义）：先规划后写入，保持相对次序，i64 下溢按范围拒绝；一条事务/一步撤销 |
@@ -841,7 +844,7 @@
 | `MATERIALMAP` | 部分实现 | 具名拒绝（`materialmap.unsupported: this build has no material/texture model`）。 |
 | `MATERIALS` | 部分实现 | 具名拒绝（`materials.unsupported: this build has no material/texture model`）。 |
 | `MATERIALSCLOSE` | 部分实现 | 具名拒绝（`materialsclose.unsupported: this build has no material/texture model`）。 |
-| `MEASUREGEOM` | 部分实现 | DISTANCE/ANGLE/AREA/POLYLINE 复用工具；**RADIUS 完成弧长/扫掠角/弦长/圆面积**；`VOLUME` 无 3D 体积模型，按名拒绝 |
+| `MEASUREGEOM` | 完整实现 | DISTANCE/ANGLE/AREA/POLYLINE 复用工具；RADIUS 完成弧长/扫掠角/弦长/圆面积；VOLUME 走单一体精确 MASSPROP body 路径（多体/非实体按名拒绝） |
 | `MENU` | 部分实现 | 具名拒绝（`menu.unsupported`）：本构建无菜单文件模型，界面固定。 |
 | `MESH` | 部分实现 | 具名拒绝（`mesh.unsupported: free-form mesh creation is not implemented`）。 |
 | `MESHCAP` | 部分实现 | 具名拒绝（`meshcap.unsupported: mesh capping is not implemented`）。 |
@@ -1125,10 +1128,10 @@
 | `TARGETPOINT` | 部分实现 | 具名拒绝（`targetpoint.unsupported: no 3D light model`）。 |
 | `TASKBAR` | 部分实现 | 具名拒绝（`taskbar.unsupported`）：应用窗口装饰由宿主负责。 |
 | `TCASE` | 部分实现 | Express 工具、选择式：只改 Text/MText 的可见字符大小写；裸命令默认 Title，键入 `TCASE UPPER/LOWER/TITLE/SENTENCE/TOGGLE`（或 `U/L/T/S/G`）；MTEXT 格式转义逐字保留；属性/标注文字未建模（`tcase.not_reset`）；MULTILEADER 走 `with_text` |
-| `TCIRCLE` | 部分实现 | `TCIRCLE CIRCLE\ |
+| `TCIRCLE` | 完整实现 | `TCIRCLE CIRCLE\|SLOT\|RECTANGLE [OFFSET <factor>] [VARIABLE\|CONSTANT [BOTH\|WIDTH\|HEIGHT]]`；估算文字外框 + 0.35 默认偏移因子；在文字图层建 Circle / 闭合 Polyline（slot 半圆端）；保留文字；无关联性 |
 | `TCOUNT` | 部分实现 | `TCOUNT <start> <step> [prefix] [suffix]`；按上→下/左→右顺序把每个选中 Text/MText 替换为 `prefix+编号+suffix`；`step` 必须 >0；AutoCAD 的逐项前缀/后缀对话框模式未实现 |
 | `TEXT` | 已实现 | — |
-|  `TEXTALIGN` | 部分实现 | 15 个对齐拼写（6 个单轴 + 9 个组合，`TEXTALIGN TOPLEFT` 等）按选择并集包围盒在两轴对齐；`DISTRIBUTE [X|Y]` 按阅读序等间隙分布（首尾固定、≥3 个目标，`textalign.distribute_needs_three`）；`SETSPACING`/`CURRENTVERTICAL`/`CURRENTHORIZONTAL` 解析后具名拒绝；只移动参照点，不改内容/字高/旋转/对齐；一条事务/一步撤销；宽高仍为估算值。 |
+|  `TEXTALIGN` | 完整实现 | 15 个对齐拼写按并集包围盒两轴对齐；DISTRIBUTE [X|Y] 按阅读序等间隙（首尾固定、≥3）；SETSPACING <d> [X|Y] 固定间距（首固定）；CURRENTVERTICAL/CURRENTHORIZONTAL 按各自 justification 对齐；只移动参照点，不改内容/字高/旋转/对齐；一条事务/一步撤销；宽高仍为估算值 |
 | `TEXTEDIT` | 部分实现 | 整串替换；无光标级编辑、不解析 MTEXT 标记 |
 |  `TEXTFIT` | 部分实现 | 真实：改存储宽度因子（DXF group 41），字高/位置/justification/旋转/内容/样式不变；因子 = `target_width / 批量估算宽度`（`height × 字符数`，含对齐），逐实体输出 `textfit.estimated_width` 诊断；空字符串/非正目标具名拒绝；一条事务/一步撤销。MTEXT 导出无 group 41 通道（报告导出缺口）；ATTRIB/ATTDEF/RTEXT/表格/标注派生文字仍为 1.0。 |
 | `TEXTMASK` | 部分实现 | 偏移（默认 0.35）/Wipeout 遮罩/`*TEXTMASK-*` 会话组/重跑替换/组上限/有限边界守卫；`3dface`/`solid` 遮罩类型无实体模型，按名拒绝 |
@@ -1304,7 +1307,7 @@
 | 41 | `ADCCLOSE` | 部分实现 | Closes DesignCenter. | 具名拒绝（`adcclose.unsupported: this build has no DesignCenter content palette`）。 |
 | 42 | `ADCENTER` | 部分实现 | Manages and inserts content such as blocks, xrefs, and hatch patterns. | 具名拒绝（`adcenter.unsupported: this build has no DesignCenter content palette`）。 |
 | 43 | `ADCNAVIGATE` | 部分实现 | Loads a specified drawing file, folder, or network path in the DesignCenter Folders tab. | 具名拒绝（`adcnavigate.unsupported: this build has no DesignCenter content palette`）。 |
-| 44 | `ADDSELECTED` | 部分实现 | Creates a new object of the same type and general properties as a selected object, but with different geometric values. | `ADDSELECTED <x> <y>` 按选中类型/属性新建一个实体（LINE/CIRCLE/POINT/TEXT/MTEXT），保留图层/颜色/线型/线宽/透明度；ARC/POLYLINE/INSERT 等按名拒绝 |
+| 44 | `ADDSELECTED` | 完整实现 | Creates a new object of the same type and general properties as a selected object, but with different geometric values. | `ADDSELECTED <x> <y>` 按选中类型/属性新建一个实体（LINE/CIRCLE/ARC/POLYLINE/INSERT/POINT/TEXT/MTEXT），保留图层/颜色/线型/线宽/透明度；其余种类按名拒绝 |
 | 45 | `ADJUST` | 部分实现 | Adjusts the fade, contrast and monochrome settings of the selected underlay (DWF, DWFx, PDF, or DGN), or image. | 具名拒绝（`adjust.unsupported: this build has no underlay/image fade-contrast-monochrome model`）。 |
 | 46 | `ALIASEDIT` | 部分实现 | Creates, modifies, and deletes AutoCAD command aliases. | `ADD <alias> <target>`/`REMOVE <alias>`/`LIST`/bare；运行时别名先于静态表解析（可遮蔽内建），仅删除运行时行；无交互对话框（声明），会话状态不持久化 |
 | 47 | `ALIGN` | 已实现 | Aligns objects with other objects in 2D and 3D. | 1 对点移动、2 对点平移+旋转+可选均匀缩放、3 对点平面**刚性**（旋转+平移，不缩放）；退化/非共面/非全等/镜像按名拒绝；3 对点的 3D 平面旋转属全局范围 |
@@ -1416,8 +1419,8 @@
 | 153 | `CAMERA` | 部分实现 | Sets a camera and target location to create and save a 3D perspective view of objects. | 具名拒绝（`camera.unsupported: this build has no 3D camera/target view model`）。 |
 | 154 | `CDORDER` | 部分实现 | Arranges the drawing order of selected objects by their color number. | 真实编辑：按颜色索引升序重写选中（空选择=全部模型空间）绘制顺序；一条事务/一步撤销；无对话框。 |
 | 155 | `CENTERDISASSOCIATE` | 部分实现 | Removes associativity of center marks or centerlines from objects they define. | 具名拒绝（`centerdisassociate.unsupported: center marks/centerlines are not modeled, so associativity/reset has nothing to edit`）。 |
-| 156 | `CENTERLINE` | 部分实现 | Creates centerline geometry associated with selected lines and linear polyline segments. | 真实编辑：恰好两条平行直线之间创建一条中间直线，覆盖投影重叠；一条事务/一步撤销；无延伸/间隙选项。 |
-| 157 | `CENTERMARK` | 部分实现 | Creates an associative, cross-shaped mark at the center of a selected circle or arc. | 真实编辑：每个选中圆/圆弧圆心两条交叉直线，臂长=半径 10%（声明规则）；一条事务/一步撤销；无关联对象/无可配置尺寸。 |
+| 156 | `CENTERLINE` | 完整实现 | Creates centerline geometry associated with selected lines and linear polyline segments. | 恰好两条平行直线之间创建一条中间直线，覆盖投影重叠；`EXTENSION <d>`/`GAP <d>` 可调；一条事务/一步撤销；产出普通 `LINE`（非关联，声明边界）。 |
+| 157 | `CENTERMARK` | 完整实现 | Creates an associative, cross-shaped mark at the center of a selected circle or arc. | 每个选中圆/圆弧圆心两条交叉直线；默认臂长=半径 10%，`ARM <d>`/`<factor>x` 可配；一条事务/一步撤销；产出普通 `LINE`（非关联，声明边界）。 |
 | 158 | `CENTERREASSOCIATE` | 部分实现 | Associates or reassociates a center mark or centerline object to selected objects. | 具名拒绝（`centerreassociate.unsupported: center marks/centerlines are not modeled, so associativity/reset has nothing to edit`）。 |
 | 159 | `CENTERRESET` | 部分实现 | Resets the centerlines to the current value specified in the CENTEREXE system variable. | 具名拒绝（`centerreset.unsupported: center marks/centerlines are not modeled, so associativity/reset has nothing to edit`）。 |
 | 160 | `CHAMFER` | 已实现 | Bevels or chamfers the edges of two 2D objects or the adjacent faces of a 3D solid. | `Distance`/`Angle`/`Method`/`Trim`/No-Trim/`Polyline` 全顶点；双零距离/角度=仅延伸相交；`Angle=0` 且距离>0 按名拒绝；`Multiple`/命令内 `Undo` 属逐选项提示全局范围；负距离按名拒绝 |
@@ -1573,7 +1576,7 @@
 | 310 | `DIST` | 已实现 | Measures the distance and angle between two points. | — |
 | 311 | `DISTANTLIGHT` | 部分实现 | Creates a distant light. | 具名拒绝（`distantlight.unsupported: 3D light objects are not modeled`）。 |
 | 312 | `DIVIDE` | 已实现 | Creates evenly spaced point objects or blocks along the length or perimeter of an object. | `LINE`/`ARC`/`CIRCLE`/`SPLINE`/`ELLIPSE`（含椭圆弧）/含 bulge 折线，按**等弧长**；开放 `N−1`、闭合 `N`；块对齐 Yes/No |
-| 313 | `DONUT` | 部分实现 | Creates a filled circle or a wide ring. | 类型化 `DONUT <cx> <cy> <inner> <outer>`；两个同心圆；`inner=0` 只建外圆并诊断；无中心拾取提示 |
+| 313 | `DONUT` | 完整实现 | Creates a filled circle or a wide ring. | 类型化 `DONUT <cx> <cy> <inner> <outer>`；用 SOLID 三角网格路径建填充圆盘（inner=0）或环（inner>0）；一条事务/一步撤销；无中心拾取提示 |
 | 314 | `DOWNLOADMANAGER` | 部分实现 | Reports the status of the of the current download. | 具名拒绝（`downloadmanager.unsupported: this build has no download-manager model`）。 |
 | 315 | `DRAGMODE` | 部分实现 | Controls the way dragged objects are displayed. | 会话令牌 `dragmode`（默认 ON）；渲染器不消费，无拖动预览。 |
 | 316 | `DRAWINGRECOVERY` | 部分实现 | Displays a list of drawing files that can be recovered after a program or system failure. | 具名拒绝（`drawingrecovery.unsupported: this build has no drawing-recovery manager model`）。 |
@@ -1662,7 +1665,7 @@
 | 399 | `GEOMCONSTRAINT` | 部分实现 | Applies or persists geometric relationships between objects or points on objects. | 具名拒绝（`geomconstraint.unsupported`）：本构建无几何约束模型。 |
 | 400 | `GEOREMOVE` | 部分实现 | Removes all geographic location information from the drawing file. | 具名拒绝（`georemove.unsupported: this build has no geographic/GIS or online-map model`）。 |
 | 401 | `GEOREORIENTMARKER` | 部分实现 | Changes the north direction and position of the geographic marker in model space, without changing its latitude and longitude. | 具名拒绝（`georeorientmarker.unsupported: this build has no geographic/GIS or online-map model`）。 |
-| 402 | `GETSEL` | 部分实现 | Creates a selection set of objects based on layer and object type filters. | `GETSEL LAYER\|TYPE <name>`；替换选择 |
+| 402 | `GETSEL` | 完整实现 | Creates a selection set of objects based on layer and object type filters. | `GETSEL LAYER\|TYPE\|COLOR\|LINETYPE\|SPACE <value>`；替换选择；只读（不写库/不升修订/不入历史） |
 | 403 | `GOTOSTART` | 部分实现 | Switches from the current drawing to the Start tab. | 具名拒绝（`gotostart.unsupported`）：切换到开始页由宿主负责。 |
 | 404 | `GOTOURL` | 部分实现 | Opens the file or web page associated with the hyperlink attached to an object. | 具名拒绝（`gotourl.unsupported: this build has no hyperlink storage model`）。 |
 | 405 | `GRADIENT` | 完整实现 | Fills an enclosed area or selected objects with a gradient fill. | 渐变填充取自会话渐变通道（形状/角度/两色 ACI→sRGB），创建时写入 `AcDbHatch` 渐变参数并保留边界，一条事务/一步撤销 |
@@ -1677,7 +1680,7 @@
 | 414 | `HATCH` | 部分实现 | Fills an enclosed area or selected objects with a hatch pattern, solid fill, or gradient fill. | 整实体闭合边界 + LINE/ARC 边链；**`HATCH PATTERN <name>` 与 `HATCH PATTERNFILE <path.pat> [<name>]` 已接入**，复用 `HATCHEDIT` 的解析（文件优先→内置回退；无名的文件须恰好一个图案；组 76 = 2/1）；角度/比例/`HPDOUBLE`/样式仍走会话通道；拒绝码 `hatch.needs_pattern_name`/`hatch.unknown_pattern`（列出两个来源）/`hatch.pattern_file_*`/`hatch.fill_not_pattern`，空边界 `hatch.selection` | **仍部分实现**：创建期**关联性**无模型（`HatchGeometry` 只存派生环，没有边界句柄/反应器记录 —— 与 `HATCHEDIT ASSOCIATE` 同一缺口） |
 | 415 | `-HATCHEDIT` | 完整实现 | From the Command prompt, modifies existing hatches or fills. | `HATCHEDIT` 的命令行拼写：同一解析器与同一处理器（含 `ORIGIN` 与 `PATTERNFILE`；全局范围的 `Associate`/`Annotative`/`DRAWORDER BOUNDARY` 同样按名拒绝） |
 |  416 | `HATCHEDIT` | 完整实现 | Modifies an existing hatch or fill. | 多目标；`Style`/`PatternType`/`PATTERN <内置图案名>`/`PATTERNFILE <path.pat> [<name>]`（经宿主文件桥读取用户 `.pat`，单图案/文件优先/内置回退，组 76 = 2 Custom；读取失败逐条具名拒绝）/`ORIGIN <x> <y>`（图案相位原点，导入导出按 pattern 行往返）/`Angle`/`Scale`/`Solid`/`Gradient`/`Color`/`Transparency`/`Layer`/`DrawOrder`/`Recreate Boundary`/`Separate Hatches`/`Add**/**Remove Boundaries`，一条事务/一步撤销。**全局范围**：`Associate`/`Disassociate`/`Annotative`（无关联/反应器模型）、`DRAWORDER BOUNDARY`（无边界实体 id，属于同一反应器模型）、逐 loop 原点、交互对话框 |
-| 417 | `HATCHGENERATEBOUNDARY` | 部分实现 | Creates a non-associated polyline around a selected hatch. | 预选择输入（不弹 Select objects 选项）；每个 hatch loop 生成一条同层同空间的非关联闭合多段线（含内岛、保留 bulge）；源 hatch 保留；无关联性 |
+| 417 | `HATCHGENERATEBOUNDARY` | 完整实现 | Creates a non-associated polyline around a selected hatch. | 预选择 hatch（模型空间或图纸布局）；每个 loop 一条非关联闭合多段线（同层同空间、保留 bulge、含内岛）；源 hatch 保留；无关联性 |
 | 418 | `HATCHSETBOUNDARY` | 完整实现 | Redefines a selected hatch or fill to conform to a different closed boundary. | 恰好一个 hatch + 一条闭合 Polyline/Circle/**完整 Ellipse**（整椭圆采样为单个 64 点环、无 bulge），共面性校验；部分椭圆按 `hatchsetboundary.open_ellipse` 拒绝且不开事务；用 `HatchGeometry::new` 重建、丢弃旧种子 |
 | 419 | `HATCHSETORIGIN` | 完整实现 | Controls the starting location of hatch pattern generation for a selected hatch. | 绝对原点：`d = P − families()[0].base`（行列经角度/比例合成后参与），一条事务/一步撤销；无定义行的图案按 `hatchsetorigin.missing_field` 拒绝，非有限位移 `unrepresentable` |
 | 420 | `HATCHTOBACK` | 完整实现 | Sets the draw order for all hatches in the drawing to be behind all other objects. | 逐 `SpaceId` 范围（模型空间、各图纸布局、各块定义）：连续放到该范围最低非 hatch draw order 之下并保持相对次序，i64 下溢按范围拒绝，拒绝时不写任何范围；一次事务/一步撤销 |
@@ -1792,7 +1795,7 @@
 | 529 | `MATERIALS` | 部分实现 | Opens the Materials Browser. | 具名拒绝（`materials.unsupported: this build has no material/texture model`）。 |
 | 530 | `MATERIALSCLOSE` | 部分实现 | Closes the Materials Browser. | 具名拒绝（`materialsclose.unsupported: this build has no material/texture model`）。 |
 | 531 | `MEASURE` | 未实现（同名不同义） | Creates point objects or blocks at measured intervals along the length or perimeter of an object. | 本项目 MEASURE 是测量入口（默认 DIST），不是沿对象放置点/块；**不计入覆盖** |
-| 532 | `MEASUREGEOM` | 部分实现 | Measures the distance, radius, angle, area, and volume of selected objects, a sequence of points, or dynamically. | **v1（2026-11-07）选项路由**：`MEASUREGEOM DISTANCE\|ANGLE\|AREA\|POLYLINE` 复用既有 `DIST`/`MEASUREANGLE`/`AREA`/`MEASUREPOLYLINE` 工具（同一交互请求，无第二测量引擎）；`RADIUS` 只读报告所选单个 `ARC`/`CIRCLE` 的圆心/半径/直径/圆周长（圆弧另报弧长）。裸名 `measuregeom.needs_option`，未知选项按名拒绝。**未实现**：`VOLUME`（本构建无 3D 实体/体积模型，显式 `measuregeom.volume_unsupported`，不编造数值）；AutoCAD 的其它选项/动态测量未接线。 |
+| 532 | `MEASUREGEOM` | 完整实现 | Measures the distance, radius, angle, area, and volume of selected objects, a sequence of points, or dynamically. | `MEASUREGEOM DISTANCE\|ANGLE\|AREA\|POLYLINE` 复用既有工具；`RADIUS` 报告单个 ARC/CIRCLE；`VOLUME` 走单一体精确 MASSPROP body 路径（多体/非实体按名拒绝）；裸名/未知选项按名拒绝；只读 |
 | 533 | `MENU` | 部分实现 | Obsolete. Loads a customization file. | 具名拒绝（`menu.unsupported`）：本构建无菜单文件模型，界面固定。 |
 | 534 | `MESH` | 部分实现 | Creates a 3D mesh primitive object such as a box, cone, cylinder, pyramid, sphere, wedge, or torus. | 具名拒绝（`mesh.unsupported: free-form mesh creation is not implemented`）。 |
 | 535 | `MESHCAP` | 部分实现 | Creates a mesh face that connects open edges. | 具名拒绝（`meshcap.unsupported: mesh capping is not implemented`）。 |
@@ -2112,10 +2115,10 @@
 | 849 | `TARGETPOINT` | 部分实现 | Creates a target point light. | 具名拒绝（`targetpoint.unsupported: no 3D light model`）。 |
 | 850 | `TASKBAR` | 部分实现 | Controls the Peek/Preview behavior of the application's button in the Windows taskbar when multiple drawings are open. | 具名拒绝（`taskbar.unsupported`）：应用窗口装饰由宿主负责。 |
 | 851 | `TCASE` | 部分实现 | Changes the case of selected text, mtext, attributes, and dimension text. | 选择式；只处理 Text/MText（MULTILEADER 走 with_text）；裸命令默认 Title，键入 `TCASE UPPER/LOWER/TITLE/SENTENCE/TOGGLE` 或 `U/L/T/S/G`；MTEXT 格式转义逐字保留；属性/标注文字未建模（`tcase.not_reset`） |
-| 852 | `TCIRCLE` | 部分实现 | Creates a circle, a slot, or a rectangle around each selected text or mtext object. | `TCIRCLE CIRCLE\|RECTANGLE`；用**估算**文字外框（宽 = `height × 字符数`、高 = `height`、忽略旋转）在文字所在图层建 `Circle` 或闭合 `Polyline`；保留文字；无关联性 |
+| 852 | `TCIRCLE` | 完整实现 | Creates a circle, a slot, or a rectangle around each selected text or mtext object. | `TCIRCLE CIRCLE\|SLOT\|RECTANGLE [OFFSET <factor>] [VARIABLE\|CONSTANT [BOTH\|WIDTH\|HEIGHT]]`；估算文字外框 + 0.35 默认偏移因子；在文字所在图层建 Circle / 闭合 Polyline（slot 半圆端）；保留文字；无关联性 |
 | 853 | `TCOUNT` | 部分实现 | Adds sequential numbering to text and mtext objects as a prefix, suffix, or replacement text. | `TCOUNT <start> <step> [prefix] [suffix]`；按上→下/左→右顺序把每个选中 Text/MText 替换为 `prefix+编号+suffix`；`step` 必须 >0；AutoCAD 的逐项前缀/后缀对话框模式未实现 |
 | 854 | `TEXT` | 已实现 | Creates a single-line text object. | — |
-|  855 | `TEXTALIGN` | 部分实现 | Aligns multiple text objects vertically, horizontally, or obliquely. | 15 个对齐拼写（6 个单轴 + 9 个组合，`TEXTALIGN TOPLEFT` 等）按选择并集包围盒在两轴对齐；`DISTRIBUTE [X|Y]` 按阅读序等间隙分布（首尾固定、≥3 个目标，`textalign.distribute_needs_three`）；`SETSPACING`/`CURRENTVERTICAL`/`CURRENTHORIZONTAL` 解析后具名拒绝；只移动参照点，不改内容/字高/旋转/对齐；一条事务/一步撤销；宽高仍为估算值。 |
+|  855 | `TEXTALIGN` | 完整实现 | Aligns multiple text objects vertically, horizontally, or obliquely. | 15 个对齐拼写按并集包围盒两轴对齐；`DISTRIBUTE [X\|Y]` 按阅读序等间隙（首尾固定、≥3）；`SETSPACING <d> [X\|Y]` 固定间距（首固定）；`CURRENTVERTICAL`/`CURRENTHORIZONTAL` 按各自 justification 对齐；只移动参照点；一条事务/一步撤销；宽高仍为估算值 |
 | 856 | `TEXTEDIT` | 部分实现 | Edits a selected multiline or single-line text object, or the text in a dimension object. | 整串替换；无光标级编辑、不解析 MTEXT 标记 |
 |  857 | `TEXTFIT` | 部分实现 | Expands or compresses the width of text objects based on new starting and ending points. | 真实：改存储宽度因子（DXF group 41），字高/位置/justification/旋转/内容/样式不变；因子 = `target_width / 批量估算宽度`（`height × 字符数`，含对齐），逐实体输出 `textfit.estimated_width` 诊断；空字符串/非正目标具名拒绝；一条事务/一步撤销。MTEXT 导出无 group 41 通道（报告导出缺口）；ATTRIB/ATTDEF/RTEXT/表格/标注派生文字仍为 1.0。 |
 | 858 | `TEXTMASK` | 部分实现 | Creates a blank area behind selected text or mtext objects. | 偏移（默认 0.35）/Wipeout 遮罩/`*TEXTMASK-*` 会话组/重跑替换/组上限/有限边界守卫；`3dface`/`solid` 遮罩类型无实体模型，按名拒绝 |

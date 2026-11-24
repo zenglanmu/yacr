@@ -407,7 +407,7 @@ fn filter_adds_and_refuses_empty_value() {
 }
 
 #[test]
-fn getsel_accepts_layer_and_type_only() {
+fn getsel_accepts_layer_type_color_linetype_and_space() {
     let (mut app, mut session) = filter_app();
     run(
         &mut app,
@@ -418,11 +418,54 @@ fn getsel_accepts_layer_and_type_only() {
     .unwrap();
     assert_eq!(ids(&session), vec![LINE_RED, CIRCLE]);
 
-    let error = run(
+    run(
+        &mut app,
+        &mut session,
+        CommandId::GetSelection,
+        filter("TYPE", "LINE", SelectionMode::Replace),
+    )
+    .unwrap();
+    assert_eq!(ids(&session), vec![LINE_RED, LINE_PLAIN]);
+
+    run(
         &mut app,
         &mut session,
         CommandId::GetSelection,
         filter("COLOR", "aci:1", SelectionMode::Replace),
+    )
+    .unwrap();
+    assert_eq!(ids(&session), vec![LINE_RED]);
+
+    run(
+        &mut app,
+        &mut session,
+        CommandId::GetSelection,
+        filter("LINETYPE", "ByLayer", SelectionMode::Replace),
+    )
+    .unwrap();
+    assert_eq!(
+        ids(&session),
+        vec![LINE_RED, LINE_PLAIN, CIRCLE, TEXT, MTEXT, LEADER]
+    );
+
+    run(
+        &mut app,
+        &mut session,
+        CommandId::GetSelection,
+        filter("SPACE", "Model", SelectionMode::Replace),
+    )
+    .unwrap();
+    assert_eq!(
+        ids(&session),
+        vec![LINE_RED, LINE_PLAIN, CIRCLE, TEXT, MTEXT, LEADER]
+    );
+
+    // A richer QSELECT/FILTER property is still refused by name.
+    let error = run(
+        &mut app,
+        &mut session,
+        CommandId::GetSelection,
+        filter("TEXT", "hello", SelectionMode::Replace),
     )
     .unwrap_err();
     assert!(

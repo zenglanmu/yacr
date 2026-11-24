@@ -1,19 +1,23 @@
 //! Typed-argument and vocabulary contracts for the 2026-11-07 annotation/group
 //! batch (`GROUP`/`-GROUP`, `UNGROUP`, `GROUPEDIT`, `QLEADER`, `LEADER`,
-//! `TEXTFIT`, `HATCHSETORIGIN`, and the argument-free `HATCHSETBOUNDARY` /
-//! `XDLIST`).
+//! `TEXTFIT`, `HATCHSETORIGIN`, `CENTERMARK`/`CENTERLINE`, and the argument-free
+//! `HATCHSETBOUNDARY` / `XDLIST`).
 
 use super::super::super::*;
-use cad_app::{GroupCommand, GroupEditCommand, LeaderCommand, TextFitCommand};
+use cad_app::{
+    CenterArm, CenterLineCommand, CenterMarkCommand, GroupCommand, GroupEditCommand, LeaderCommand,
+    TextFitCommand,
+};
 
 use crate::session::annot_arguments::{
-    GROUPEDIT_SELECTOR, GROUP_SELECTOR, HATCHSETORIGIN_SELECTOR, LEADER_SELECTOR, QLEADER_SELECTOR,
-    TEXTFIT_SELECTOR, UNGROUP_SELECTOR,
+    CENTERLINE_SELECTOR, CENTERMARK_SELECTOR, GROUPEDIT_SELECTOR, GROUP_SELECTOR,
+    HATCHSETORIGIN_SELECTOR, LEADER_SELECTOR, QLEADER_SELECTOR, TEXTFIT_SELECTOR, UNGROUP_SELECTOR,
 };
 use crate::session::commands::ARGUMENT_SELECTORS;
 use crate::session::{
-    parse_group_argument, parse_groupedit_argument, parse_hatchsetorigin_argument,
-    parse_leader_argument, parse_qleader_argument, parse_textfit_argument, parse_ungroup_argument,
+    parse_centerline_argument, parse_centermark_argument, parse_group_argument,
+    parse_groupedit_argument, parse_hatchsetorigin_argument, parse_leader_argument,
+    parse_qleader_argument, parse_textfit_argument, parse_ungroup_argument,
 };
 
 #[test]
@@ -26,6 +30,8 @@ fn every_annot_argument_selector_is_admitted() {
         LEADER_SELECTOR,
         TEXTFIT_SELECTOR,
         HATCHSETORIGIN_SELECTOR,
+        CENTERMARK_SELECTOR,
+        CENTERLINE_SELECTOR,
     ] {
         assert!(
             ARGUMENT_SELECTORS.contains(&selector),
@@ -205,4 +211,54 @@ fn hatchsetorigin_grammar_is_two_decimals() {
     for bad in ["", "1", "1 2 3", "x 2"] {
         assert_eq!(parse_hatchsetorigin_argument(bad), None, "{bad:?}");
     }
+}
+
+#[test]
+fn centermark_grammar_is_an_absolute_arm_or_a_radius_factor() {
+    assert_eq!(
+        parse_centermark_argument("ARM 5"),
+        Some(CenterMarkCommand {
+            arm: Some(CenterArm::Absolute(5.0)),
+        })
+    );
+    assert_eq!(
+        parse_centermark_argument("0.1x"),
+        Some(CenterMarkCommand {
+            arm: Some(CenterArm::Factor(0.1)),
+        })
+    );
+    for bad in ["", "0", "-1", "0x", "ARM", "ARM 5 6", "auto"] {
+        assert_eq!(parse_centermark_argument(bad), None, "{bad:?}");
+    }
+    assert_eq!(
+        typed_command_argument("CENTERMARK 0.1x"),
+        Some(("CENTERMARK", "0.1x"))
+    );
+    assert_eq!(typed_command_argument("CENTERMARK"), None);
+}
+
+#[test]
+fn centerline_grammar_is_extension_and_gap() {
+    assert_eq!(
+        parse_centerline_argument("EXTENSION 2 GAP 0.5"),
+        Some(CenterLineCommand {
+            extension: 2.0,
+            gap: 0.5,
+        })
+    );
+    assert_eq!(
+        parse_centerline_argument("GAP 1"),
+        Some(CenterLineCommand {
+            extension: 0.0,
+            gap: 1.0,
+        })
+    );
+    for bad in ["", "EXTENSION", "EXTENSION -1", "GAP 1 GAP 2", "OFFSET 1"] {
+        assert_eq!(parse_centerline_argument(bad), None, "{bad:?}");
+    }
+    assert_eq!(
+        typed_command_argument("CENTERLINE EXTENSION 2"),
+        Some(("CENTERLINE", "EXTENSION 2"))
+    );
+    assert_eq!(typed_command_argument("CENTERLINE"), None);
 }

@@ -21,8 +21,8 @@
 use cad_app::{CommandId, CommandPayload, ExtendedCommandId};
 
 use super::annot_arguments::{
-    GROUPEDIT_SELECTOR, GROUP_SELECTOR, HATCHSETORIGIN_SELECTOR, LEADER_SELECTOR, QLEADER_SELECTOR,
-    TEXTFIT_SELECTOR, UNGROUP_SELECTOR,
+    CENTERLINE_SELECTOR, CENTERMARK_SELECTOR, GROUPEDIT_SELECTOR, GROUP_SELECTOR,
+    HATCHSETORIGIN_SELECTOR, LEADER_SELECTOR, QLEADER_SELECTOR, TEXTFIT_SELECTOR, UNGROUP_SELECTOR,
 };
 use super::commands::{
     parse_color_argument, parse_cvport_argument, parse_elev_argument, parse_fsmode_argument,
@@ -241,7 +241,9 @@ impl CadSession {
             | QLEADER_SELECTOR
             | LEADER_SELECTOR
             | TEXTFIT_SELECTOR
-            | HATCHSETORIGIN_SELECTOR => self.annot_argument(selector, argument, text),
+            | HATCHSETORIGIN_SELECTOR
+            | CENTERMARK_SELECTOR
+            | CENTERLINE_SELECTOR => self.annot_argument(selector, argument, text),
             // The 2026-11-07 extras batch typed forms (`-PAN` normalizes to
             // `PAN` before this dispatch, `-LINETYPE` to `LINETYPE`). `COLOR` and
             // its `-COLOR` prompt spelling are the session current-colour token.

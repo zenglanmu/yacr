@@ -3,7 +3,7 @@
 
 use super::shared::*;
 use super::*;
-use crate::command_payload::{TextMaskKind, TextMaskOptions, UtilityPayload};
+use crate::command_payload::{TCircleSizeMode, TextMaskKind, TextMaskOptions, UtilityPayload};
 
 /// The group-name prefix `TEXTMASK` uses for its text/mask pairs.
 const TEXTMASK_GROUP_PREFIX: &str = "*TEXTMASK-";
@@ -51,7 +51,7 @@ fn allocate_textmask_names(
 }
 
 impl Application {
-    /// `TCIRCLE CIRCLE|RECTANGLE`: draw an estimated-bounds boundary per text.
+    /// `TCIRCLE CIRCLE|SLOT|RECTANGLE`: draw a distance-offset boundary per text.
     pub(crate) fn text_circle(
         &mut self,
         session: &SessionState,
@@ -60,10 +60,19 @@ impl Application {
         let CommandPayload::TextCircle(request) = &command.payload else {
             return Err(refusal(
                 "tcircle.invalid_payload",
-                "TCIRCLE needs a TextCircle { shape } payload \
-                 (type `TCIRCLE CIRCLE|RECTANGLE`)",
+                "TCIRCLE needs a TextCircle { shape, offset_factor, size_mode } payload \
+                 (type `TCIRCLE CIRCLE|SLOT|RECTANGLE [OFFSET <factor>]`)",
             ));
         };
+        if !request.offset_factor.is_finite() || request.offset_factor < 0.0 {
+            return Err(refusal(
+                "tcircle.invalid_offset",
+                format!(
+                    "the TCIRCLE offset factor must be finite and non-negative, got {}",
+                    request.offset_factor
+                ),
+            ));
+        }
         let references = session.selection.refs().to_vec();
         if references.is_empty() {
             return Err(refusal(
@@ -80,33 +89,67 @@ impl Application {
             .drawing
             .as_ref()
             .clone();
-        let mut sources = Vec::with_capacity(references.len());
+        let mut sources: Vec<(DbEntity, EstimatedTextBounds)> =
+            Vec::with_capacity(references.len());
         let mut seen = std::collections::BTreeSet::new();
         for reference in &references {
             let entity = resolve_model_entity(&candidate, document_id, reference, "tcircle")?;
             require_text("tcircle", &entity)?;
             if seen.insert(entity.id) {
-                sources.push(entity);
+                let bounds = estimate_text_bounds(&entity, "tcircle")?;
+                sources.push((entity, bounds));
             }
         }
+        // Constant modes use the largest selected text's dimension(s) for every
+        // boundary in this run; Variable uses each text's own estimated size.
+        let max_width = sources
+            .iter()
+            .map(|(_, bounds)| bounds.width())
+            .fold(f64::NEG_INFINITY, f64::max);
+        let max_height = sources
+            .iter()
+            .map(|(_, bounds)| bounds.height())
+            .fold(f64::NEG_INFINITY, f64::max);
         // Build every boundary before opening the transaction.
         let mut base_order = next_model_draw_order(&candidate);
         let mut entities = Vec::with_capacity(sources.len());
-        for source in &sources {
-            let bounds = estimate_text_bounds(source, "tcircle")?;
+        for (source, bounds) in &sources {
+            let (base_width, base_height, pad_reference) = match request.size_mode {
+                TCircleSizeMode::Variable => (bounds.width(), bounds.height(), bounds.height()),
+                TCircleSizeMode::ConstantBoth => (max_width, max_height, max_height),
+                TCircleSizeMode::ConstantWidth => (max_width, bounds.height(), max_height),
+                TCircleSizeMode::ConstantHeight => (bounds.width(), max_height, max_height),
+            };
+            let pad = request.offset_factor * pad_reference;
+            let width = base_width + 2.0 * pad;
+            let height = base_height + 2.0 * pad;
+            if !pad.is_finite() || !width.is_finite() || !height.is_finite() {
+                return Err(refusal(
+                    "tcircle.degenerate",
+                    format!("the offset bounds of text {} are not finite", source.id.0),
+                ));
+            }
+            if matches!(
+                request.shape,
+                TextBoundaryShape::Slot | TextBoundaryShape::Rectangle
+            ) && (width <= 0.0 || height <= 0.0)
+            {
+                return Err(refusal(
+                    "tcircle.degenerate",
+                    format!("the offset bounds of text {} enclose no area", source.id.0),
+                ));
+            }
+            let (cx, cy) = bounds.center();
+            let box_ = EstimatedTextBounds {
+                min_x: cx - width * 0.5,
+                min_y: cy - height * 0.5,
+                max_x: cx + width * 0.5,
+                max_y: cy + height * 0.5,
+                z: bounds.z,
+            };
             let geometry = match request.shape {
                 TextBoundaryShape::Circle => {
-                    let radius = 0.5 * bounds.width().hypot(bounds.height());
-                    if !radius.is_finite() || radius <= 0.0 {
-                        return Err(refusal(
-                            "tcircle.degenerate",
-                            format!(
-                                "the estimated bounds of text {} have no positive radius",
-                                source.id.0
-                            ),
-                        ));
-                    }
-                    let (cx, cy) = bounds.center();
+                    let radius = 0.5 * width.hypot(height);
                     SemanticGeometry::Circle {
                         center: Point3 {
                             x: cx,
@@ -121,17 +164,17 @@ impl Application {
                         radius,
                     }
                 }
-                TextBoundaryShape::Rectangle => {
-                    if bounds.width() <= 0.0 || bounds.height() <= 0.0 {
-                        return Err(refusal(
-                            "tcircle.degenerate",
-                            format!(
-                                "the estimated bounds of text {} enclose no area",
-                                source.id.0
-                            ),
-                        ));
+                TextBoundaryShape::Slot => {
+                    let points = box_.corners();
+                    SemanticGeometry::Polyline {
+                        bulges: vec![0.0, 1.0, 0.0, 1.0],
+                        points,
+                        closed: true,
+                        width: 0.0,
                     }
-                    let points = bounds.corners();
+                }
+                TextBoundaryShape::Rectangle => {
+                    let points = box_.corners();
                     SemanticGeometry::Polyline {
                         bulges: vec![0.0; points.len()],
                         points,
@@ -172,9 +215,17 @@ impl Application {
                 object: None,
                 code: "drawing.tcircle".into(),
                 message: format!(
-                    "TCIRCLE {:?}: drew {} boundary entities on the source layers from the \
-                     estimated text bounds; the text is retained",
-                    request.shape, count
+                    "TCIRCLE {:?} ({} size, offset factor {}): drew {} boundary entities on the \
+                     source layers from the estimated text bounds; the text is retained",
+                    request.shape,
+                    match request.size_mode {
+                        TCircleSizeMode::Variable => "variable",
+                        TCircleSizeMode::ConstantBoth => "constant both",
+                        TCircleSizeMode::ConstantWidth => "constant width",
+                        TCircleSizeMode::ConstantHeight => "constant height",
+                    },
+                    request.offset_factor,
+                    count
                 ),
             }],
             measurement: None,

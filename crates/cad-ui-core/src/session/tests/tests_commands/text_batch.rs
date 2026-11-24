@@ -142,7 +142,7 @@ fn textalign_accepts_the_fifteen_alignment_words() {
 }
 
 #[test]
-fn textalign_parses_distribute_and_the_named_spacing_refusals() {
+fn textalign_parses_distribute_setspacing_and_current_modes() {
     use cad_app::{TextAlignAxis, TextAlignSpacing};
 
     assert_eq!(
@@ -160,7 +160,24 @@ fn textalign_parses_distribute_and_the_named_spacing_refusals() {
     );
     assert_eq!(
         parse_textalign_spacing_argument("SETSPACING"),
-        Some(TextAlignSpacing::SetSpacing)
+        Some(TextAlignSpacing::SetSpacing {
+            distance: None,
+            axis: TextAlignAxis::Y,
+        })
+    );
+    assert_eq!(
+        parse_textalign_spacing_argument("SETSPACING 2.5"),
+        Some(TextAlignSpacing::SetSpacing {
+            distance: Some(2.5),
+            axis: TextAlignAxis::Y,
+        })
+    );
+    assert_eq!(
+        parse_textalign_spacing_argument("setspacing 0 x"),
+        Some(TextAlignSpacing::SetSpacing {
+            distance: Some(0.0),
+            axis: TextAlignAxis::X,
+        })
     );
     assert_eq!(
         parse_textalign_spacing_argument("currentvertical"),
@@ -175,6 +192,8 @@ fn textalign_parses_distribute_and_the_named_spacing_refusals() {
         "DISTRIBUTE Z",
         "DISTRIBUTE X Y",
         "SET SPACING",
+        "SETSPACING -1",
+        "SETSPACING 1 Z",
         "DISTRIBUT",
     ] {
         assert_eq!(
@@ -186,6 +205,10 @@ fn textalign_parses_distribute_and_the_named_spacing_refusals() {
     assert_eq!(
         typed_command_argument("TEXTALIGN DISTRIBUTE X"),
         Some(("TEXTALIGN", "DISTRIBUTE X"))
+    );
+    assert_eq!(
+        typed_command_argument("TEXTALIGN SETSPACING 2.5 X"),
+        Some(("TEXTALIGN", "SETSPACING 2.5 X"))
     );
 }
 
@@ -221,18 +244,39 @@ fn tcount_parses_the_run_and_its_affixes() {
 }
 
 #[test]
-fn tcircle_accepts_only_the_two_boundary_words() {
-    use cad_app::TextBoundaryShape;
+fn tcircle_accepts_shapes_offset_and_size_modes() {
+    use cad_app::{TCircleSizeMode, TextBoundaryShape};
 
     assert_eq!(
-        parse_tcircle_argument("CIRCLE"),
-        Some(TextBoundaryShape::Circle)
+        parse_tcircle_argument("CIRCLE").map(|request| (request.shape, request.offset_factor)),
+        Some((TextBoundaryShape::Circle, 0.35))
     );
     assert_eq!(
-        parse_tcircle_argument("rectangle"),
+        parse_tcircle_argument("rectangle").map(|request| request.shape),
         Some(TextBoundaryShape::Rectangle)
     );
-    for refused in ["", "C", "RECT", "CIRCLE RECTANGLE"] {
+    let slot = parse_tcircle_argument("SLOT OFFSET 0.5 CONSTANT WIDTH").expect("slot options");
+    assert_eq!(slot.shape, TextBoundaryShape::Slot);
+    assert_eq!(slot.offset_factor, 0.5);
+    assert_eq!(slot.size_mode, TCircleSizeMode::ConstantWidth);
+    assert_eq!(
+        parse_tcircle_argument("circle constant").map(|request| request.size_mode),
+        Some(TCircleSizeMode::ConstantBoth)
+    );
+    assert_eq!(
+        parse_tcircle_argument("circle variable").map(|request| request.size_mode),
+        Some(TCircleSizeMode::Variable)
+    );
+    for refused in [
+        "",
+        "C",
+        "RECT",
+        "CIRCLE RECTANGLE",
+        "CIRCLE OFFSET",
+        "CIRCLE OFFSET -1",
+        "CIRCLE CONSTANT DIAGONAL",
+        "CIRCLE OFFSET 1 OFFSET 2",
+    ] {
         assert_eq!(parse_tcircle_argument(refused), None, "{refused:?}");
     }
     assert_eq!(
@@ -242,7 +286,7 @@ fn tcircle_accepts_only_the_two_boundary_words() {
     assert_eq!(typed_command_argument("TCIRCLE"), None);
     assert!(CommandId::TextCircle.requires_work_mode());
     let reason = invalid_tcircle_argument_reason("TCIRCLE C");
-    assert!(reason.contains("CIRCLE or RECTANGLE"), "{reason}");
+    assert!(reason.contains("CIRCLE|SLOT|RECTANGLE"), "{reason}");
 }
 
 #[test]

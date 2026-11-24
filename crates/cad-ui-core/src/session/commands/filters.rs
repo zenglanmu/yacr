@@ -7,10 +7,10 @@
 //! re-parses the property/value so a caller cannot bypass a refusal.
 //!
 //! * `QSELECT <PROPERTY> <VALUE>` / `FILTER <PROPERTY> <VALUE>` /
-//!   `GETSEL <PROPERTY> <VALUE>`: the property is `TYPE`, `LAYER`, `COLOR` or
-//!   `LINETYPE` (ASCII case-insensitive) and the value is the trimmed remainder
-//!   (spaces allowed, must be non-empty). `GETSEL` accepts only `TYPE`/`LAYER`;
-//!   the application names the refusal for the other two.
+//!   `GETSEL <PROPERTY> <VALUE>`: the property is `TYPE`, `LAYER`, `COLOR`,
+//!   `LINETYPE` or `SPACE` (ASCII case-insensitive) and the value is the trimmed
+//!   remainder (spaces allowed, must be non-empty). `GETSEL` accepts those five
+//!   and refuses every richer QSELECT/FILTER property by name.
 //! * `FIND <needle>` and `FIND <needle> => <replacement>`: the `=>` marker is the
 //!   only split; the needle may not be empty. `-FIND <needle>` is the same
 //!   report-only selector and refuses a `=>` replacement.
@@ -22,7 +22,7 @@
 pub const QSELECT_SELECTOR: &str = "QSELECT";
 /// `FILTER <PROPERTY> <VALUE>`: add the filter match to the selection.
 pub const FILTER_SELECTOR: &str = "FILTER";
-/// `GETSEL <LAYER|TYPE> <name>`: replace the selection (AutoCAD's form).
+/// `GETSEL <LAYER|TYPE|COLOR|LINETYPE|SPACE> <name>`: replace the selection.
 pub const GETSEL_SELECTOR: &str = "GETSEL";
 /// `FIND <needle> [=> <replacement>]`: report, or replace in one transaction.
 pub const FIND_SELECTOR: &str = "FIND";
@@ -157,8 +157,11 @@ pub fn parse_property_filter(argument: &str) -> Option<(String, String)> {
         return None;
     }
     let property = property.to_ascii_uppercase();
-    matches!(property.as_str(), "TYPE" | "LAYER" | "COLOR" | "LINETYPE")
-        .then(|| (property, value.to_string()))
+    matches!(
+        property.as_str(),
+        "TYPE" | "LAYER" | "COLOR" | "LINETYPE" | "SPACE"
+    )
+    .then(|| (property, value.to_string()))
 }
 
 /// Parse the `FIND` argument: `<needle>` or `<needle> => <replacement>`.
@@ -184,7 +187,8 @@ pub fn parse_find_argument(argument: &str) -> Option<(String, Option<String>)> {
 /// The stable refusal for a filter argument outside the grammar.
 pub fn invalid_filter_argument_reason(text: &str, selector: &str) -> String {
     format!(
-        "unsupported CAD command: {} ({selector} needs `<TYPE|LAYER|COLOR|LINETYPE> <value>`)",
+        "unsupported CAD command: {} ({selector} needs \
+         `<TYPE|LAYER|COLOR|LINETYPE|SPACE> <value>`)",
         text.trim()
     )
 }
@@ -192,7 +196,8 @@ pub fn invalid_filter_argument_reason(text: &str, selector: &str) -> String {
 /// The stable refusal for a `GETSEL` property outside its narrower grammar.
 pub fn invalid_getsel_argument_reason(text: &str) -> String {
     format!(
-        "unsupported CAD command: {} (GETSEL needs `<LAYER|TYPE> <value>`)",
+        "unsupported CAD command: {} (GETSEL needs \
+         `<TYPE|LAYER|COLOR|LINETYPE|SPACE> <value>`)",
         text.trim()
     )
 }

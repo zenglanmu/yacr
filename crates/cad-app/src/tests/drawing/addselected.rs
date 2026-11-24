@@ -3,8 +3,8 @@
 //! The command creates one new entity of the single selected entity's type and
 //! general properties (layer, stored `type_key`, colour/linetype/lineweight/
 //! transparency) at the typed point, in one transaction / one undo step.
-//! Point-anchored `LINE`/`CIRCLE`/`POINT`/`TEXT` are supported; every other kind
-//! is the named `addselected.unsupported` refusal.
+//! Point-anchored `LINE`/`CIRCLE`/`ARC`/`POLYLINE`/`INSERT`/`POINT`/`TEXT` are
+//! supported; every other kind is the named `addselected.unsupported` refusal.
 
 use super::*;
 use crate::command_payload::AddSelectedCommand;
@@ -29,6 +29,13 @@ fn addselected_app(geometry: SemanticGeometry, space: SpaceId) -> (Application, 
         })
         .unwrap();
     }
+    // A block definition for the INSERT-copy fixture (empty is a valid block).
+    b.insert_block(cad_db::BlockDefinition {
+        id: cad_domain::BlockId(3),
+        entities: Vec::new(),
+        dynamic_visibility: None,
+    })
+    .unwrap();
     let source = DbEntity {
         object: DbObject {
             id: ObjectId(1),
@@ -250,6 +257,133 @@ fn addselected_copies_a_circle_point_and_text_geometry() {
 }
 
 #[test]
+fn addselected_copies_arc_polyline_and_insert_geometry() {
+    // ARC: the centre is the anchor; radius/angles/normal are preserved.
+    let (mut app, mut session) = addselected_app(
+        SemanticGeometry::Arc {
+            center: p3(0.0, 0.0, 0.0),
+            normal: p3(0.0, 0.0, 1.0),
+            radius: 2.0,
+            start: 0.25,
+            sweep: 1.5,
+        },
+        SpaceId::Model,
+    );
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::Extended(ExtendedCommandId::AddSelected),
+        add_selected(p3(5.0, 5.0, 0.0)),
+    )
+    .expect("arc copy");
+    match &drawing(&app)
+        .entity(EntityId(outcome.objects[0].0))
+        .unwrap()
+        .geometry
+    {
+        SemanticGeometry::Arc {
+            center,
+            normal,
+            radius,
+            start,
+            sweep,
+        } => {
+            assert_eq!(*center, p3(5.0, 5.0, 0.0));
+            assert_eq!(*normal, p3(0.0, 0.0, 1.0));
+            assert_eq!((*radius, *start, *sweep), (2.0, 0.25, 1.5));
+        }
+        other => panic!("expected an ARC, got {other:?}"),
+    }
+
+    // POLYLINE: every vertex moves so the first lands on the typed point.
+    let (mut app, mut session) = addselected_app(
+        SemanticGeometry::Polyline {
+            bulges: vec![0.0, 0.5, 0.0],
+            points: vec![p3(0.0, 0.0, 0.0), p3(2.0, 0.0, 0.0), p3(2.0, 1.0, 0.0)],
+            closed: false,
+            width: 0.3,
+        },
+        SpaceId::Model,
+    );
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::Extended(ExtendedCommandId::AddSelected),
+        add_selected(p3(10.0, 10.0, 0.0)),
+    )
+    .expect("polyline copy");
+    match &drawing(&app)
+        .entity(EntityId(outcome.objects[0].0))
+        .unwrap()
+        .geometry
+    {
+        SemanticGeometry::Polyline {
+            bulges,
+            points,
+            closed,
+            width,
+        } => {
+            assert_eq!(
+                points,
+                &vec![
+                    p3(10.0, 10.0, 0.0),
+                    p3(12.0, 10.0, 0.0),
+                    p3(12.0, 11.0, 0.0)
+                ]
+            );
+            assert_eq!(bulges, &vec![0.0, 0.5, 0.0]);
+            assert!(!closed);
+            assert_eq!(*width, 0.3);
+        }
+        other => panic!("expected a POLYLINE, got {other:?}"),
+    }
+
+    // INSERT: same block/linear part/attributes, new translation.
+    let transform = cad_domain::Transform3 {
+        matrix: [
+            [0.0, -2.0, 0.0, 100.0],
+            [2.0, 0.0, 0.0, 200.0],
+            [0.0, 0.0, 2.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+    };
+    let (mut app, mut session) = addselected_app(
+        SemanticGeometry::Insert {
+            block: cad_domain::BlockId(3),
+            transform,
+            attributes: Vec::new(),
+        },
+        SpaceId::Model,
+    );
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::Extended(ExtendedCommandId::AddSelected),
+        add_selected(p3(5.0, 6.0, 7.0)),
+    )
+    .expect("insert copy");
+    match &drawing(&app)
+        .entity(EntityId(outcome.objects[0].0))
+        .unwrap()
+        .geometry
+    {
+        SemanticGeometry::Insert {
+            block,
+            transform,
+            attributes,
+        } => {
+            assert_eq!(*block, cad_domain::BlockId(3));
+            assert!(attributes.is_empty());
+            assert_eq!(transform.matrix[0][3], 5.0);
+            assert_eq!(transform.matrix[1][3], 6.0);
+            assert_eq!(transform.matrix[2][3], 7.0);
+            assert_eq!(transform.matrix[0][1], -2.0, "the rotation/scale is kept");
+        }
+        other => panic!("expected an INSERT, got {other:?}"),
+    }
+}
+
+#[test]
 fn addselected_refuses_richer_types_and_bad_input_without_writing() {
     let expect_refusal =
         |app: &mut Application, session: &mut SessionState, payload: CommandPayload, code: &str| {
@@ -266,14 +400,15 @@ fn addselected_refuses_richer_types_and_bad_input_without_writing() {
             assert!(!app.can_undo(&DocumentId(1)), "{code} records no history");
         };
 
-    // ARC needs a sweep and is not point-anchored.
+    // ELLIPSE needs its axes; it is not derivable from one anchor point.
     let (mut app, mut session) = addselected_app(
-        SemanticGeometry::Arc {
+        SemanticGeometry::Ellipse {
             center: p3(0.0, 0.0, 0.0),
             normal: p3(0.0, 0.0, 1.0),
-            radius: 2.0,
+            major_axis: p3(2.0, 0.0, 0.0),
+            ratio: 0.5,
             start: 0.0,
-            sweep: 1.0,
+            sweep: std::f64::consts::TAU,
         },
         SpaceId::Model,
     );

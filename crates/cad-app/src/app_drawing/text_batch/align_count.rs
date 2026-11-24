@@ -107,6 +107,11 @@ impl Application {
 
     /// `TEXTALIGN DISTRIBUTE [X|Y]`: equal gaps between consecutive estimated
     /// extents; the first and last extents stay fixed.
+    ///
+    /// `SETSPACING [<distance> [X|Y]]` lays the extents out at a fixed gap with
+    /// only the first extent fixed, `CURRENTVERTICAL`/`CURRENTHORIZONTAL` align
+    /// every text by its own stored justification against the first target's
+    /// corresponding edge/centre.
     fn text_align_spacing(
         &mut self,
         session: &SessionState,
@@ -115,26 +120,21 @@ impl Application {
     ) -> CadResult<CommandOutcome> {
         let axis = match spacing {
             TextAlignSpacing::Distribute(axis) => axis,
-            TextAlignSpacing::SetSpacing => {
-                return Err(refusal(
-                    "textalign.set_spacing_unsupported",
-                    "TEXTALIGN SETSPACING needs a numeric spacing value and per-object \
-                     bases; only `TEXTALIGN DISTRIBUTE [X|Y]` is implemented",
-                ));
+            TextAlignSpacing::SetSpacing { distance, axis } => {
+                let Some(distance) = distance else {
+                    return Err(refusal(
+                        "textalign.set_spacing_needs_value",
+                        "TEXTALIGN SETSPACING needs a numeric spacing value \
+                         (`TEXTALIGN SETSPACING <distance> [X|Y]`); nothing was written",
+                    ));
+                };
+                return self.text_align_set_spacing(session, command, distance, axis);
             }
             TextAlignSpacing::CurrentVertical => {
-                return Err(refusal(
-                    "textalign.current_vertical_unsupported",
-                    "TEXTALIGN CURRENTVERTICAL is not implemented; only `TEXTALIGN DISTRIBUTE \
-                     [X|Y]` is implemented",
-                ));
+                return self.text_align_current(session, command, TextAlignAxis::Y);
             }
             TextAlignSpacing::CurrentHorizontal => {
-                return Err(refusal(
-                    "textalign.current_horizontal_unsupported",
-                    "TEXTALIGN CURRENTHORIZONTAL is not implemented; only `TEXTALIGN DISTRIBUTE \
-                     [X|Y]` is implemented",
-                ));
+                return self.text_align_current(session, command, TextAlignAxis::X);
             }
         };
         let document_id = command.document;
@@ -148,27 +148,7 @@ impl Application {
                 ),
             ));
         }
-        let mut order: Vec<usize> = (0..targets.len()).collect();
-        match axis {
-            TextAlignAxis::Y => order.sort_by(|&left, &right| {
-                let (left_entity, left_bounds) = &targets[left];
-                let (right_entity, right_bounds) = &targets[right];
-                right_bounds
-                    .max_y
-                    .total_cmp(&left_bounds.max_y)
-                    .then_with(|| left_bounds.min_x.total_cmp(&right_bounds.min_x))
-                    .then_with(|| left_entity.id.0.cmp(&right_entity.id.0))
-            }),
-            TextAlignAxis::X => order.sort_by(|&left, &right| {
-                let (left_entity, left_bounds) = &targets[left];
-                let (right_entity, right_bounds) = &targets[right];
-                left_bounds
-                    .min_x
-                    .total_cmp(&right_bounds.min_x)
-                    .then_with(|| right_bounds.max_y.total_cmp(&left_bounds.max_y))
-                    .then_with(|| left_entity.id.0.cmp(&right_entity.id.0))
-            }),
-        }
+        let order = reading_order(&targets, axis);
         let count = targets.len();
         // Free span: first leading edge to last trailing edge, minus every
         // extent. `count - 1` gaps, hence one gap per interval.
@@ -253,6 +233,174 @@ impl Application {
                      gaps ({} targets, estimated bounds, first and last fixed)",
                     planned.len(),
                     count
+                ),
+            }],
+            measurement: None,
+            point_report: None,
+        })
+    }
+
+    /// `TEXTALIGN SETSPACING <distance> [X|Y]`: fixed gap between consecutive
+    /// estimated extents, first extent fixed, every later extent moved.
+    fn text_align_set_spacing(
+        &mut self,
+        session: &SessionState,
+        command: &Command,
+        distance: f64,
+        axis: TextAlignAxis,
+    ) -> CadResult<CommandOutcome> {
+        if !distance.is_finite() || distance < 0.0 {
+            return Err(refusal(
+                "textalign.invalid_spacing",
+                format!(
+                    "TEXTALIGN SETSPACING needs a finite, non-negative distance, got {distance}"
+                ),
+            ));
+        }
+        let document_id = command.document;
+        let (candidate, targets) = self.text_align_targets(session, document_id, "textalign")?;
+        if targets.len() < 2 {
+            return Err(refusal(
+                "textalign.needs_two",
+                format!(
+                    "TEXTALIGN SETSPACING needs at least two Text/MText targets, got {}",
+                    targets.len()
+                ),
+            ));
+        }
+        let order = reading_order(&targets, axis);
+        let mut previous_edge = match axis {
+            TextAlignAxis::Y => targets[order[0]].1.min_y,
+            TextAlignAxis::X => targets[order[0]].1.max_x,
+        };
+        let mut planned: Vec<(DbEntity, DbEntity)> = Vec::new();
+        for &index in order.iter().skip(1) {
+            let (source, bounds) = &targets[index];
+            let (current, target) = match axis {
+                TextAlignAxis::Y => (bounds.max_y, previous_edge - distance),
+                TextAlignAxis::X => (bounds.min_x, previous_edge + distance),
+            };
+            let mut after = source.clone();
+            let shifted = shift_text(
+                &mut after,
+                current,
+                target,
+                if axis == TextAlignAxis::Y { 1.0 } else { 0.0 },
+            );
+            let moved_bounds = shift_bounds(*bounds, target - current, axis);
+            if shifted {
+                planned.push((source.clone(), after));
+            }
+            previous_edge = match axis {
+                TextAlignAxis::Y => moved_bounds.min_y,
+                TextAlignAxis::X => moved_bounds.max_x,
+            };
+        }
+        if planned.is_empty() {
+            return Ok(unchanged_outcome(
+                "textalign.unchanged",
+                format!(
+                    "TEXTALIGN SETSPACING {axis:?} {distance}: every extent already sits at that \
+                     spacing; nothing was written"
+                ),
+                Vec::new(),
+            ));
+        }
+        let moved = planned.len();
+        let (objects, change_set) = commit_text_updates(
+            self,
+            document_id,
+            candidate,
+            &planned,
+            "text align",
+            "text align",
+        )?;
+        Ok(CommandOutcome {
+            objects,
+            changes: Some(change_set),
+            diagnostics: vec![Diagnostic {
+                object: None,
+                code: "drawing.textalign".into(),
+                message: format!(
+                    "TEXTALIGN SETSPACING {axis:?} {distance}: placed {moved} text entities at a \
+                     fixed gap from the previous extent (first target fixed, estimated bounds)"
+                ),
+            }],
+            measurement: None,
+            point_report: None,
+        })
+    }
+
+    /// `TEXTALIGN CURRENTVERTICAL|CURRENTHORIZONTAL`: align every text by its own
+    /// stored justification against the first target's matching edge/centre.
+    fn text_align_current(
+        &mut self,
+        session: &SessionState,
+        command: &Command,
+        axis: TextAlignAxis,
+    ) -> CadResult<CommandOutcome> {
+        let document_id = command.document;
+        let (candidate, targets) = self.text_align_targets(session, document_id, "textalign")?;
+        if targets.len() < 2 {
+            return Err(refusal(
+                "textalign.needs_two",
+                format!(
+                    "TEXTALIGN {} needs at least two Text/MText targets, got {}",
+                    current_mode_name(axis),
+                    targets.len()
+                ),
+            ));
+        }
+        let reference_line = match axis {
+            TextAlignAxis::Y => vertical_anchor(&targets[0].0, &targets[0].1)?,
+            TextAlignAxis::X => horizontal_anchor(&targets[0].0, &targets[0].1)?,
+        };
+        let mut planned: Vec<(DbEntity, DbEntity)> = Vec::new();
+        for (source, bounds) in targets.iter().skip(1) {
+            let current = match axis {
+                TextAlignAxis::Y => vertical_anchor(source, bounds)?,
+                TextAlignAxis::X => horizontal_anchor(source, bounds)?,
+            };
+            let mut after = source.clone();
+            if shift_text(
+                &mut after,
+                current,
+                reference_line,
+                if axis == TextAlignAxis::Y { 1.0 } else { 0.0 },
+            ) {
+                planned.push((source.clone(), after));
+            }
+        }
+        if planned.is_empty() {
+            return Ok(unchanged_outcome(
+                "textalign.unchanged",
+                format!(
+                    "TEXTALIGN {}: every target already shares the reference justification line; \
+                     nothing was written",
+                    current_mode_name(axis)
+                ),
+                Vec::new(),
+            ));
+        }
+        let moved = planned.len();
+        let (objects, change_set) = commit_text_updates(
+            self,
+            document_id,
+            candidate,
+            &planned,
+            "text align",
+            "text align",
+        )?;
+        Ok(CommandOutcome {
+            objects,
+            changes: Some(change_set),
+            diagnostics: vec![Diagnostic {
+                object: None,
+                code: "drawing.textalign".into(),
+                message: format!(
+                    "TEXTALIGN {}: aligned {moved} text entities by their own stored \
+                     justification to the first target's line (estimated bounds)",
+                    current_mode_name(axis)
                 ),
             }],
             measurement: None,
@@ -416,6 +564,91 @@ impl Application {
             measurement: None,
             point_report: None,
         })
+    }
+}
+
+/// The deterministic reading order DISTRIBUTE and SETSPACING share: top-to-
+/// bottom (then left-to-right) for Y, left-to-right (then top-to-bottom) for X;
+/// ties break on the entity id so selection order never matters.
+fn reading_order(targets: &[(DbEntity, EstimatedTextBounds)], axis: TextAlignAxis) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..targets.len()).collect();
+    match axis {
+        TextAlignAxis::Y => order.sort_by(|&left, &right| {
+            let (left_entity, left_bounds) = &targets[left];
+            let (right_entity, right_bounds) = &targets[right];
+            right_bounds
+                .max_y
+                .total_cmp(&left_bounds.max_y)
+                .then_with(|| left_bounds.min_x.total_cmp(&right_bounds.min_x))
+                .then_with(|| left_entity.id.0.cmp(&right_entity.id.0))
+        }),
+        TextAlignAxis::X => order.sort_by(|&left, &right| {
+            let (left_entity, left_bounds) = &targets[left];
+            let (right_entity, right_bounds) = &targets[right];
+            left_bounds
+                .min_x
+                .total_cmp(&right_bounds.min_x)
+                .then_with(|| right_bounds.max_y.total_cmp(&left_bounds.max_y))
+                .then_with(|| left_entity.id.0.cmp(&right_entity.id.0))
+        }),
+    }
+    order
+}
+
+/// Shift one estimated box by `delta` on `axis` (0 = X, 1 = Y).
+fn shift_bounds(
+    bounds: EstimatedTextBounds,
+    delta: f64,
+    axis: TextAlignAxis,
+) -> EstimatedTextBounds {
+    match axis {
+        TextAlignAxis::X => EstimatedTextBounds {
+            min_x: bounds.min_x + delta,
+            max_x: bounds.max_x + delta,
+            ..bounds
+        },
+        TextAlignAxis::Y => EstimatedTextBounds {
+            min_y: bounds.min_y + delta,
+            max_y: bounds.max_y + delta,
+            ..bounds
+        },
+    }
+}
+
+/// The vertical line a text's own stored justification pins: `Top` → the top
+/// edge, `Middle` → the centre, `Baseline`/`Bottom` → the bottom edge.
+fn vertical_anchor(entity: &DbEntity, bounds: &EstimatedTextBounds) -> CadResult<f64> {
+    let SemanticGeometry::Text { v_align, .. } = &entity.geometry else {
+        return Err(CadError::Invariant(
+            "TEXTALIGN lost its text target while reading its vertical justification".into(),
+        ));
+    };
+    Ok(match v_align {
+        TextAlignV::Top => bounds.max_y,
+        TextAlignV::Middle => bounds.center().1,
+        TextAlignV::Baseline | TextAlignV::Bottom => bounds.min_y,
+    })
+}
+
+/// The horizontal line a text's own stored justification pins: `Left` → the
+/// left edge, `Center` → the centre, `Right` → the right edge.
+fn horizontal_anchor(entity: &DbEntity, bounds: &EstimatedTextBounds) -> CadResult<f64> {
+    let SemanticGeometry::Text { h_align, .. } = &entity.geometry else {
+        return Err(CadError::Invariant(
+            "TEXTALIGN lost its text target while reading its horizontal justification".into(),
+        ));
+    };
+    Ok(match h_align {
+        TextAlignH::Left => bounds.min_x,
+        TextAlignH::Center => bounds.center().0,
+        TextAlignH::Right => bounds.max_x,
+    })
+}
+
+fn current_mode_name(axis: TextAlignAxis) -> &'static str {
+    match axis {
+        TextAlignAxis::Y => "CURRENTVERTICAL",
+        TextAlignAxis::X => "CURRENTHORIZONTAL",
     }
 }
 

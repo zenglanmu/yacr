@@ -90,6 +90,15 @@ fn run(
     )
 }
 
+fn run_payload(
+    app: &mut Application,
+    session: &mut SessionState,
+    ext: ExtendedCommandId,
+    payload: CommandPayload,
+) -> CadResult<CommandOutcome> {
+    app.execute(session, command(CommandId::Extended(ext), payload))
+}
+
 fn build(entities: Vec<DbEntity>, blocks: Vec<BlockDefinition>) -> (Application, SessionState) {
     let (mut app, session) = application_with_document();
     let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
@@ -234,6 +243,212 @@ fn centerline_refuses_non_parallel_lines_by_name() {
     select(&mut session, &[1, 2]);
     let error = run(&mut app, &mut session, ExtendedCommandId::CenterLine).unwrap_err();
     assert!(error.to_string().contains("centerline.not_parallel"));
+    assert_eq!(revision(&app), before);
+    assert_eq!(undo_depth(&app), 0);
+}
+
+#[test]
+fn centermark_arm_and_centerline_extension_gap_options_apply() {
+    // CENTERMARK with an absolute arm.
+    let (mut app, mut session) = build(
+        vec![part(
+            1,
+            SemanticGeometry::Circle {
+                center: p3(2.0, 3.0, 0.0),
+                normal: p3(0.0, 0.0, 1.0),
+                radius: 10.0,
+            },
+            LayerId(0),
+            SpaceId::Model,
+            "AcDbCircle",
+            0,
+        )],
+        Vec::new(),
+    );
+    select(&mut session, &[1]);
+    let outcome = run_payload(
+        &mut app,
+        &mut session,
+        ExtendedCommandId::CenterMark,
+        CommandPayload::Center(crate::CenterEditPayload::Mark(crate::CenterMarkCommand {
+            arm: Some(crate::CenterArm::Absolute(3.0)),
+        })),
+    )
+    .unwrap();
+    let lines: Vec<_> = outcome
+        .objects
+        .iter()
+        .map(|object| {
+            drawing_of(&app)
+                .entity(EntityId(object.0))
+                .unwrap()
+                .geometry
+                .clone()
+        })
+        .collect();
+    assert!(lines.contains(&line(p3(-1.0, 3.0, 0.0), p3(5.0, 3.0, 0.0))));
+    assert!(lines.contains(&line(p3(2.0, 0.0, 0.0), p3(2.0, 6.0, 0.0))));
+
+    // CENTERMARK with a radius factor.
+    let (mut app, mut session) = build(
+        vec![part(
+            1,
+            SemanticGeometry::Circle {
+                center: p3(0.0, 0.0, 0.0),
+                normal: p3(0.0, 0.0, 1.0),
+                radius: 10.0,
+            },
+            LayerId(0),
+            SpaceId::Model,
+            "AcDbCircle",
+            0,
+        )],
+        Vec::new(),
+    );
+    select(&mut session, &[1]);
+    let outcome = run_payload(
+        &mut app,
+        &mut session,
+        ExtendedCommandId::CenterMark,
+        CommandPayload::Center(crate::CenterEditPayload::Mark(crate::CenterMarkCommand {
+            arm: Some(crate::CenterArm::Factor(0.25)),
+        })),
+    )
+    .unwrap();
+    let lines: Vec<_> = outcome
+        .objects
+        .iter()
+        .map(|object| {
+            drawing_of(&app)
+                .entity(EntityId(object.0))
+                .unwrap()
+                .geometry
+                .clone()
+        })
+        .collect();
+    assert!(lines.contains(&line(p3(-2.5, 0.0, 0.0), p3(2.5, 0.0, 0.0))));
+
+    // CENTERLINE EXTENSION 1 GAP 0.5: the overlap (2,8) grows by 0.5 at each end.
+    let (mut app, mut session) = build(
+        vec![
+            part(
+                1,
+                line(p3(0.0, 0.0, 0.0), p3(10.0, 0.0, 0.0)),
+                LayerId(0),
+                SpaceId::Model,
+                "AcDbLine",
+                0,
+            ),
+            part(
+                2,
+                line(p3(2.0, 4.0, 0.0), p3(8.0, 4.0, 0.0)),
+                LayerId(0),
+                SpaceId::Model,
+                "AcDbLine",
+                1,
+            ),
+        ],
+        Vec::new(),
+    );
+    select(&mut session, &[1, 2]);
+    let outcome = run_payload(
+        &mut app,
+        &mut session,
+        ExtendedCommandId::CenterLine,
+        CommandPayload::Center(crate::CenterEditPayload::Line(crate::CenterLineCommand {
+            extension: 1.0,
+            gap: 0.5,
+        })),
+    )
+    .unwrap();
+    let created = drawing_of(&app)
+        .entity(EntityId(outcome.objects[0].0))
+        .unwrap();
+    assert_eq!(created.geometry, line(p3(1.5, 2.0, 0.0), p3(8.5, 2.0, 0.0)));
+}
+
+#[test]
+fn centermark_and_centerline_refuse_bad_options_without_writing() {
+    let (mut app, mut session) = build(
+        vec![part(
+            1,
+            SemanticGeometry::Circle {
+                center: p3(0.0, 0.0, 0.0),
+                normal: p3(0.0, 0.0, 1.0),
+                radius: 10.0,
+            },
+            LayerId(0),
+            SpaceId::Model,
+            "AcDbCircle",
+            0,
+        )],
+        Vec::new(),
+    );
+    let before = revision(&app);
+    select(&mut session, &[1]);
+    let error = run_payload(
+        &mut app,
+        &mut session,
+        ExtendedCommandId::CenterMark,
+        CommandPayload::Center(crate::CenterEditPayload::Mark(crate::CenterMarkCommand {
+            arm: Some(crate::CenterArm::Absolute(0.0)),
+        })),
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("centermark.invalid_arm"));
+    assert_eq!(revision(&app), before);
+    assert_eq!(undo_depth(&app), 0);
+
+    // A CENTERLINE payload on CENTERMARK is refused by name.
+    let error = run_payload(
+        &mut app,
+        &mut session,
+        ExtendedCommandId::CenterMark,
+        CommandPayload::Center(crate::CenterEditPayload::Line(crate::CenterLineCommand {
+            extension: 1.0,
+            gap: 0.0,
+        })),
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("centermark.payload"));
+    assert_eq!(revision(&app), before);
+    assert_eq!(undo_depth(&app), 0);
+
+    // A gap larger than the maintained span is degenerate.
+    let (mut app, mut session) = build(
+        vec![
+            part(
+                1,
+                line(p3(0.0, 0.0, 0.0), p3(10.0, 0.0, 0.0)),
+                LayerId(0),
+                SpaceId::Model,
+                "AcDbLine",
+                0,
+            ),
+            part(
+                2,
+                line(p3(2.0, 4.0, 0.0), p3(8.0, 4.0, 0.0)),
+                LayerId(0),
+                SpaceId::Model,
+                "AcDbLine",
+                1,
+            ),
+        ],
+        Vec::new(),
+    );
+    let before = revision(&app);
+    select(&mut session, &[1, 2]);
+    let error = run_payload(
+        &mut app,
+        &mut session,
+        ExtendedCommandId::CenterLine,
+        CommandPayload::Center(crate::CenterEditPayload::Line(crate::CenterLineCommand {
+            extension: 0.0,
+            gap: 5.0,
+        })),
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("centerline.degenerate"));
     assert_eq!(revision(&app), before);
     assert_eq!(undo_depth(&app), 0);
 }

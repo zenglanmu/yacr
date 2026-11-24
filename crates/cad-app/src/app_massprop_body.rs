@@ -177,37 +177,7 @@ impl Application {
         // a missing kernel is never blamed for a body that has nothing to lift.
         let mut breps = Vec::with_capacity(entities.len());
         for entity in entities.iter().copied() {
-            let SemanticGeometry::Body3d(body) = &entity.geometry else {
-                return Err(CadError::Invariant(format!(
-                    "massprop.body_missing_route: entity {} is not a 3D body",
-                    entity.id.0
-                )));
-            };
-            if body.kind != BodyKind::Solid {
-                return Err(CadError::Unsupported(format!(
-                    "{}: entity {} ({}) is a {:?} body, not a closed solid; its display mesh is \
-                     never measured as a solid",
-                    REASON_BODY_NOT_SOLID, entity.id.0, entity.object.type_key, body.kind
-                )));
-            }
-            let brep = match &body.exact {
-                BodyExact::Exact(brep) if !brep.is_empty() => brep.as_ref(),
-                BodyExact::Exact(_) => {
-                    return Err(CadError::Unsupported(format!(
-                        "{}: entity {} ({}) has an empty exact B-rep; its display mesh is never \
-                         measured as the solid's volume",
-                        REASON_BODY_NOT_EXACT, entity.id.0, entity.object.type_key
-                    )))
-                }
-                BodyExact::Unavailable { reason } => {
-                    return Err(CadError::Unsupported(format!(
-                        "{}: entity {} ({}) has no exact B-rep ({reason}); its display mesh is \
-                         never measured as the solid's volume",
-                        REASON_BODY_NOT_EXACT, entity.id.0, entity.object.type_key
-                    )))
-                }
-            };
-            breps.push(brep);
+            breps.push(validate_body_brep(entity)?);
         }
 
         // One process-global kernel mutex is shared with the boolean worker: a
@@ -234,58 +204,7 @@ impl Application {
         let stamp = TaskStamp::new(command.document, session.generation);
         let mut diagnostics = Vec::with_capacity(entities.len());
         for (entity, brep) in entities.iter().copied().zip(&breps) {
-            let request = SolidRequest {
-                stamp: stamp.clone(),
-                operation: SolidOperation::MassProperties {
-                    brep,
-                    density: MASSPROP_DENSITY,
-                },
-            };
-            let result = execute_solid(modeler.as_ref(), &request, &|| false)?;
-            let mass = match result.outcome {
-                SolidOutcome::Success(SolidProduct::Mass(mass)) => mass,
-                SolidOutcome::Success(SolidProduct::Body { .. }) => {
-                    return Err(CadError::Invariant(format!(
-                        "massprop.unexpected_body: the modeler answered entity {}'s \
-                         mass-properties request with a body",
-                        entity.id.0
-                    )))
-                }
-                SolidOutcome::Unsupported { reason } => {
-                    return Err(CadError::Unsupported(format!(
-                        "{}: {}: {}",
-                        REASON_BODY_NOT_LIFTABLE, reason.code, reason.detail
-                    )))
-                }
-                SolidOutcome::Failed {
-                    diagnostics: kernel,
-                } => {
-                    return Err(CadError::Unsupported(format!(
-                        "{}: {}",
-                        REASON_BODY_KERNEL_FAILED,
-                        kernel
-                            .first()
-                            .map(|diagnostic| format!(
-                                "{}: {}",
-                                diagnostic.code, diagnostic.message
-                            ))
-                            .unwrap_or_else(|| "the kernel produced no mass properties".into())
-                    )))
-                }
-            };
-            // A reflected/inside-out B-rep integrates to a negative enclosed
-            // volume; no mass property is meaningful, so this is named rather
-            // than printed as a negative solid.
-            if !mass.volume.is_finite() || mass.volume <= 0.0 {
-                return Err(CadError::Unsupported(format!(
-                    "{}: entity {} ({}) encloses volume {} (not finite and positive); no mass \
-                     properties are reported",
-                    REASON_BODY_NOT_POSITIVE_VOLUME,
-                    entity.id.0,
-                    entity.object.type_key,
-                    mass.volume
-                )));
-            }
+            let mass = integrate_body(modeler.as_ref(), &stamp, entity, brep)?;
             diagnostics.push(Diagnostic {
                 object: Some(ObjectId(entity.id.0)),
                 code: "massprop.object".into(),
@@ -301,6 +220,103 @@ impl Application {
             point_report: None,
         })
     }
+}
+
+/// The exact B-rep of one `Body3d`, or the same named refusals `MASSPROP` uses.
+///
+/// Shared with `MEASUREGEOM VOLUME` so the single exact-body path cannot drift
+/// from the `MASSPROP` body path: both reject a non-solid topology, a missing
+/// B-rep and an empty B-rep with the stable `massprop.body_*` code.
+pub(super) fn validate_body_brep(
+    entity: &cad_db::DbEntity,
+) -> CadResult<&cad_kernel_adapter::BrepData> {
+    let SemanticGeometry::Body3d(body) = &entity.geometry else {
+        return Err(CadError::Invariant(format!(
+            "massprop.body_missing_route: entity {} is not a 3D body",
+            entity.id.0
+        )));
+    };
+    if body.kind != BodyKind::Solid {
+        return Err(CadError::Unsupported(format!(
+            "{}: entity {} ({}) is a {:?} body, not a closed solid; its display mesh is never \
+             measured as a solid",
+            REASON_BODY_NOT_SOLID, entity.id.0, entity.object.type_key, body.kind
+        )));
+    }
+    match &body.exact {
+        BodyExact::Exact(brep) if !brep.is_empty() => Ok(brep.as_ref()),
+        BodyExact::Exact(_) => Err(CadError::Unsupported(format!(
+            "{}: entity {} ({}) has an empty exact B-rep; its display mesh is never measured as \
+             the solid's volume",
+            REASON_BODY_NOT_EXACT, entity.id.0, entity.object.type_key
+        ))),
+        BodyExact::Unavailable { reason } => Err(CadError::Unsupported(format!(
+            "{}: entity {} ({}) has no exact B-rep ({reason}); its display mesh is never measured \
+             as the solid's volume",
+            REASON_BODY_NOT_EXACT, entity.id.0, entity.object.type_key
+        ))),
+    }
+}
+
+/// Integrate one exact B-rep through the injected modeler.
+///
+/// The caller owns the kernel-busy/modeler checks (so `MASSPROP` validates the
+/// whole selection before touching the kernel); this function only performs the
+/// synchronous read and maps the outcome to the shared `massprop.body_*`
+/// refusals.
+pub(super) fn integrate_body(
+    modeler: &dyn cad_kernel_adapter::SolidModeler,
+    stamp: &TaskStamp,
+    entity: &cad_db::DbEntity,
+    brep: &cad_kernel_adapter::BrepData,
+) -> CadResult<SolidMassProperties> {
+    let request = SolidRequest {
+        stamp: stamp.clone(),
+        operation: SolidOperation::MassProperties {
+            brep,
+            density: MASSPROP_DENSITY,
+        },
+    };
+    let result = execute_solid(modeler, &request, &|| false)?;
+    let mass = match result.outcome {
+        SolidOutcome::Success(SolidProduct::Mass(mass)) => mass,
+        SolidOutcome::Success(SolidProduct::Body { .. }) => {
+            return Err(CadError::Invariant(format!(
+                "massprop.unexpected_body: the modeler answered entity {}'s mass-properties \
+                 request with a body",
+                entity.id.0
+            )))
+        }
+        SolidOutcome::Unsupported { reason } => {
+            return Err(CadError::Unsupported(format!(
+                "{}: {}: {}",
+                REASON_BODY_NOT_LIFTABLE, reason.code, reason.detail
+            )))
+        }
+        SolidOutcome::Failed {
+            diagnostics: kernel,
+        } => {
+            return Err(CadError::Unsupported(format!(
+                "{}: {}",
+                REASON_BODY_KERNEL_FAILED,
+                kernel
+                    .first()
+                    .map(|diagnostic| format!("{}: {}", diagnostic.code, diagnostic.message))
+                    .unwrap_or_else(|| "the kernel produced no mass properties".into())
+            )))
+        }
+    };
+    // A reflected/inside-out B-rep integrates to a negative enclosed volume; no
+    // mass property is meaningful, so this is named rather than printed as a
+    // negative solid.
+    if !mass.volume.is_finite() || mass.volume <= 0.0 {
+        return Err(CadError::Unsupported(format!(
+            "{}: entity {} ({}) encloses volume {} (not finite and positive); no mass properties \
+             are reported",
+            REASON_BODY_NOT_POSITIVE_VOLUME, entity.id.0, entity.object.type_key, mass.volume
+        )));
+    }
+    Ok(mass)
 }
 
 /// One body's `massprop.object` line.

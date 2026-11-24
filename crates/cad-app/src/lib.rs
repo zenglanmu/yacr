@@ -502,7 +502,8 @@ pub use layout_payload::{LayoutPayload, PaperSetup, UnavailableWizardStep, Wizar
 pub use ml_style::{MultilineStyle, MultilineStyleStore, MULTILINE_STYLE_CAP};
 
 pub use command_payload::{
-    AddSelectedCommand, AngularDimensionInput, AnnotationBatchPayload, ClipCommand, CommandPayload,
+    AddSelectedCommand, AngularDimensionInput, AnnotationBatchPayload, CenterArm,
+    CenterEditPayload, CenterLineCommand, CenterMarkCommand, ClipCommand, CommandPayload,
     DashLayerOps, DimEditCommand, DimJogLineCommand, DimOverrideCommand, DimStyleCommand,
     DimTextEditCommand, DimensionBatchPayload, DimensionChainCommand, FilterExpression,
     FilterLogic, FilterRequest, GripStretchCommand, GroupCommand, GroupEditCommand, HatchDrawOrder,
@@ -519,11 +520,11 @@ pub use command_payload::{
     SelectSimilarSettings, SelectionApply, SelectionOperator, SelectionPredicate,
     SelectionProperty, SelectionScope, SelectionToolPayload, SetByLayerSettings, ShapeCommand,
     SolidPrimitiveCommand, StretchPolygonCommand, StyleTableCommand, StyleTableKind, StyleTableOp,
-    SysVarMonitorAction, TCircleCommand, TCountCommand, TableCreateCommand, TableEditCommand,
-    TextAlignAxis, TextAlignCommand, TextAlignEdge, TextAlignSpacing, TextAlignSpacingCommand,
-    TextBoundaryShape, TextCaseMode, TextFitCommand, TextMaskKind, TextMaskOptions, TextOrder,
-    TextScaleCommand, ToleranceCommand, TwoLineCommand, Txt2MTextOptions, UtilityPayload,
-    VPointInput, ViewCommand, WipeoutPayload, XClipCommand,
+    SysVarMonitorAction, TCircleCommand, TCircleSizeMode, TCountCommand, TableCreateCommand,
+    TableEditCommand, TextAlignAxis, TextAlignCommand, TextAlignEdge, TextAlignSpacing,
+    TextAlignSpacingCommand, TextBoundaryShape, TextCaseMode, TextFitCommand, TextMaskKind,
+    TextMaskOptions, TextOrder, TextScaleCommand, ToleranceCommand, TwoLineCommand,
+    Txt2MTextOptions, UtilityPayload, VPointInput, ViewCommand, WipeoutPayload, XClipCommand,
 };
 
 pub use app_audit::AuditRequest;

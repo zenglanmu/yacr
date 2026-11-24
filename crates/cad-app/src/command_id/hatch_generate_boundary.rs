@@ -9,8 +9,8 @@
 //! Payload is [`crate::CommandPayload::None`]: the current selection is the whole
 //! input, exactly like `AREA OBJECT`. At least one selected entity is required
 //! (`hatchgenerateboundary.selection`); every selected ref must be a **directly
-//! addressable model-space** entity — a block-instance member, a sub-element, a
-//! missing ref or another document's ref is
+//! addressable model-space or paper-layout** entity — a block-definition member,
+//! a sub-element, a missing ref or another document's ref is
 //! `hatchgenerateboundary.not_addressable`. A selected entity of any other
 //! geometry kind is `hatchgenerateboundary.not_hatch` (the kind is named). Every
 //! check runs before the transaction is opened, so a refusal writes nothing,
@@ -30,9 +30,10 @@
 //! * the polyline is `closed == true` and the **repeated last point** is dropped
 //!   (with the trailing degenerate bulge when the source stored one bulge per
 //!   vertex) — the stored closed ring never carries a duplicate vertex;
-//! * the new entity keeps the source hatch's **layer and space**; the boundary
-//!   is a snapshot, never an associative boundary. If the source is a layout
-//!   hatch this command still refuses it (model-space input only).
+//! * the new entity keeps the source hatch's **layer and space** (a layout hatch
+//!   produces a layout boundary through the same `insert_entity` path the layout
+//!   commands use), and its draw order is the next one in that space's own
+//!   sequence; the boundary is a snapshot, never an associative boundary.
 //!
 //! All polylines from all selected hatches are inserted in **one** transaction /
 //! one undo step. The source hatches are retained. The success diagnostic is

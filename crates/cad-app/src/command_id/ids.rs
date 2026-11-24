@@ -610,7 +610,7 @@ pub enum CommandId {
     /// `MULTIPLE [command]`: arm the session repeat flag. This host has no command repeat loop, so the flag is modelled and the actual repetition is
     /// reported as `multiple.repeat_not_implemented`, never faked.
     Multiple,
-    /// `DONUT` (Work-only): two concentric circles. Contract: [`crate::command_id::draw2::DonutCommand`].
+    /// `DONUT` (Work-only): one filled disk/annulus mesh. Contract: [`crate::command_id::draw2::DonutCommand`].
     Donut,
     /// `SOLID` (Work-only): one filled triangle/quad face as a two-triangle `Mesh`. Contract: [`crate::command_id::draw2::SolidCommand`].
     Solid,

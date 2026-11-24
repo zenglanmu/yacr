@@ -652,82 +652,6 @@ fn tcount_refuses_a_non_positive_step() {
     assert_eq!(undo_depth(&app), 0);
 }
 
-// --- TCIRCLE -----------------------------------------------------------------
-
-#[test]
-fn tcircle_draws_a_circle_on_the_text_layer_and_keeps_the_text() {
-    let (mut app, mut session) = app_with(vec![simple_text(1, "abcd", p3(0.0, 0.0, 0.0), 5)]);
-    select(&mut session, &[1]);
-    let before_count = entity_count(&app);
-
-    execute(
-        &mut app,
-        &mut session,
-        CommandId::TextCircle,
-        CommandPayload::TextCircle(TCircleCommand {
-            shape: TextBoundaryShape::Circle,
-        }),
-    )
-    .expect("TCIRCLE CIRCLE");
-
-    assert_eq!(entity_count(&app), before_count + 1);
-    let circle = find_by_type(&app, "AcDbCircle").expect("a circle boundary");
-    assert_eq!(circle.layer, LayerId(7), "the text's layer");
-    let SemanticGeometry::Circle {
-        center,
-        radius,
-        normal,
-    } = &circle.geometry
-    else {
-        panic!("expected a Circle");
-    };
-    // Estimated bounds (0,0)-(8,2): centre (4,1), radius half the diagonal.
-    assert!(near(center.x, 4.0) && near(center.y, 1.0));
-    assert!(near(*radius, 0.5 * 8.0_f64.hypot(2.0)));
-    assert!(near(normal.z, 1.0));
-    assert!(entity(&app, 1).is_some(), "the text is retained");
-    assert_eq!(undo_depth(&app), 1);
-
-    execute(
-        &mut app,
-        &mut session,
-        CommandId::Undo,
-        CommandPayload::None,
-    )
-    .expect("undo");
-    assert!(find_by_type(&app, "AcDbCircle").is_none());
-    assert_eq!(entity_count(&app), before_count);
-}
-
-#[test]
-fn tcircle_rectangle_is_a_closed_four_vertex_polyline() {
-    let (mut app, mut session) = app_with(vec![simple_text(1, "abcd", p3(0.0, 0.0, 0.0), 0)]);
-    select(&mut session, &[1]);
-    execute(
-        &mut app,
-        &mut session,
-        CommandId::TextCircle,
-        CommandPayload::TextCircle(TCircleCommand {
-            shape: TextBoundaryShape::Rectangle,
-        }),
-    )
-    .expect("TCIRCLE RECTANGLE");
-    let boundary = find_by_type(&app, "AcDbPolyline").expect("a polyline boundary");
-    let SemanticGeometry::Polyline {
-        points,
-        bulges,
-        closed,
-        ..
-    } = &boundary.geometry
-    else {
-        panic!("expected a Polyline");
-    };
-    assert_eq!(points.len(), 4);
-    assert_eq!(bulges.len(), 4);
-    assert!(*closed);
-    assert!(near(points[2].x, 8.0) && near(points[2].y, 2.0));
-}
-
 // --- TEXTMASK / TEXTUNMASK ---------------------------------------------------
 
 #[test]
@@ -991,3 +915,4 @@ fn the_batch_is_work_only_and_has_no_second_path() {
 // limit.
 mod align;
 mod mask;
+mod tcircle;

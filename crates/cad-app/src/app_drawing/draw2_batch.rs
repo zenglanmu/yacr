@@ -29,7 +29,12 @@ fn refusal(code: &str, detail: impl std::fmt::Display) -> CadError {
 }
 
 impl Application {
-    /// `DONUT`: two concentric circles on the active layer, one transaction.
+    /// `DONUT`: one filled annular (inner > 0) or disk (inner == 0) face on the
+    /// active layer, one transaction.
+    ///
+    /// The filled face is the **same triangle-mesh representation `SOLID` uses**
+    /// (`AcDbSolid`), not a pair of concentric circles: the disk is a triangle fan
+    /// and the ring is a triangle strip between the outer and inner rings.
     pub(crate) fn donut(
         &mut self,
         session: &SessionState,
@@ -72,36 +77,24 @@ impl Application {
                 format!("DONUT needs outer > inner, got inner {inner}, outer {outer}"),
             ));
         }
-        let normal = Point3 {
-            x: 0.0,
-            y: 0.0,
-            z: 1.0,
-        };
-        // `inner == 0` has no representable second circle (a zero-radius circle
-        // is rejected by the database). Store the outer ring and say so.
         let zero_inner = *inner == 0.0;
-        let mut geometries = vec![SemanticGeometry::Circle {
-            center: *center,
-            normal,
-            radius: *outer,
-        }];
-        if !zero_inner {
-            geometries.push(SemanticGeometry::Circle {
-                center: *center,
-                normal,
-                radius: *inner,
-            });
-        }
-        let mut outcome = self.commit_new_entities(session, command, geometries, "create donut")?;
-        if zero_inner {
-            outcome.diagnostics.push(Diagnostic {
-                object: outcome.objects.first().copied(),
-                code: "donut.inner_zero".into(),
-                message: "DONUT: inner radius 0 has no representable second circle; only the \
-                          outer circle was stored (the filled donut form is not representable)"
-                    .into(),
-            });
-        }
+        let mesh = donut_mesh(*center, *inner, *outer);
+        let mut outcome = self.commit_new_entity_typed(
+            session,
+            command,
+            SemanticGeometry::Mesh(mesh),
+            "AcDbSolid",
+            "create donut",
+        )?;
+        outcome.diagnostics.push(Diagnostic {
+            object: outcome.objects.first().copied(),
+            code: "drawing.donut".into(),
+            message: format!(
+                "DONUT: stored one filled {} as triangle-mesh geometry (the SOLID path); \
+                 outer radius {outer}, inner radius {inner}",
+                if zero_inner { "disk" } else { "annulus" }
+            ),
+        });
         Ok(outcome)
     }
 
@@ -415,6 +408,74 @@ fn solid_mesh(points: &[Point3]) -> CadResult<Mesh> {
     };
     let normals = cad_geometry::compute_vertex_normals(&mesh);
     Ok(Mesh { normals, ..mesh })
+}
+
+/// Segments per full circle in the filled DONUT mesh.
+const DONUT_SEGMENTS: usize = 64;
+
+/// The filled face of a DONUT: a triangle fan for a disk (`inner == 0`) or a
+/// triangle strip between the outer and inner rings for an annulus.
+///
+/// Both rings wind counter-clockwise in XY, so every triangle's normal points
+/// `+Z` (the same convention `solid_mesh` produces), and the vertex normals are
+/// the shared computed ones.
+fn donut_mesh(center: Point3, inner: f64, outer: f64) -> Mesh {
+    let mut vertices = Vec::with_capacity(2 * DONUT_SEGMENTS + 1);
+    let mut triangles = Vec::with_capacity(2 * DONUT_SEGMENTS);
+    if inner == 0.0 {
+        vertices.push(center);
+        for index in 0..DONUT_SEGMENTS {
+            let angle = std::f64::consts::TAU * index as f64 / DONUT_SEGMENTS as f64;
+            vertices.push(Point3 {
+                x: center.x + outer * angle.cos(),
+                y: center.y + outer * angle.sin(),
+                z: center.z,
+            });
+        }
+        for index in 0..DONUT_SEGMENTS {
+            let next = (index + 1) % DONUT_SEGMENTS;
+            triangles.push([0, index as u32 + 1, next as u32 + 1]);
+        }
+    } else {
+        for index in 0..DONUT_SEGMENTS {
+            let angle = std::f64::consts::TAU * index as f64 / DONUT_SEGMENTS as f64;
+            vertices.push(Point3 {
+                x: center.x + outer * angle.cos(),
+                y: center.y + outer * angle.sin(),
+                z: center.z,
+            });
+        }
+        for index in 0..DONUT_SEGMENTS {
+            let angle = std::f64::consts::TAU * index as f64 / DONUT_SEGMENTS as f64;
+            vertices.push(Point3 {
+                x: center.x + inner * angle.cos(),
+                y: center.y + inner * angle.sin(),
+                z: center.z,
+            });
+        }
+        let n = DONUT_SEGMENTS as u32;
+        for index in 0..n {
+            let next = (index + 1) % n;
+            let outer_current = index;
+            let outer_next = next;
+            let inner_current = n + index;
+            let inner_next = n + next;
+            triangles.push([outer_current, outer_next, inner_next]);
+            triangles.push([outer_current, inner_next, inner_current]);
+        }
+    }
+    let mesh = Mesh {
+        vertices,
+        triangles,
+        normals: Vec::new(),
+        face_sources: Vec::new(),
+        colors: Vec::new(),
+        uvs: Vec::new(),
+        texture: None,
+        pbr: None,
+    };
+    let normals = cad_geometry::compute_vertex_normals(&mesh);
+    Mesh { normals, ..mesh }
 }
 
 /// Whether the two diagonals of a quadrilateral cross (a bow-tie).

@@ -55,8 +55,9 @@ the affected contracts where it matters.
 | `TJUST <H> <V>` | alias | same | `COMMAND_ALIASES` row; same `CommandId`, same grammar, same write path — no second implementation |
 | `TSCALE <factor>` | implemented | selection + positive decimal | delegates to the one `scaled_text` rule `SCALETEXT` uses (height + MTEXT `wrap_width`); a `1.0` factor is `tscale.unchanged` with no transaction; non-text selection refuses the whole command |
 | `TEXTALIGN LEFT\|RIGHT\|CENTER\|TOP\|MIDDLE\|BOTTOM` | implemented | selection (≥ 2 text objects) + edge word | shifts only the affected axis to the extreme/centre of the **estimated** union box; `< 2` targets is `textalign.needs_two`; non-text refuses the whole command; rotation ignored |
+| `TEXTALIGN DISTRIBUTE [X\|Y]` / `SETSPACING <distance> [X\|Y]` / `CURRENTVERTICAL` / `CURRENTHORIZONTAL` | implemented | selection (≥ 2/≥ 3) + option | `DISTRIBUTE` equalises gaps with the first/last fixed (≥ 3); `SETSPACING` puts every extent after the first at a fixed gap; `CURRENT*` aligns each text by its own stored justification to the first target's line; one transaction / one undo step |
 | `TCOUNT <start> <step> [prefix] [suffix]` | implemented | selection + 2–4 tokens | deterministic order top-to-bottom (descending Y) then left-to-right (ascending X), stable; `step` must be > 0 (`tcount.invalid_step`); no AutoCAD dialog modes |
-| `TCIRCLE CIRCLE\|RECTANGLE` | implemented | selection + shape word | `CIRCLE` = real `Circle` at the estimated centre with radius = half the box diagonal; `RECTANGLE` = closed 4-vertex straight polyline; drawn on the **text's layer**, text retained; no associativity |
+| `TCIRCLE CIRCLE\|SLOT\|RECTANGLE [OFFSET <factor>] [VARIABLE\|CONSTANT [BOTH\|WIDTH\|HEIGHT]]` | implemented | selection + shape/option words | `CIRCLE` = real `Circle` at the expanded estimated centre with radius = half the diagonal; `SLOT` = closed 4-vertex polyline with bulges `[0,1,0,1]`; `RECTANGLE` = closed 4-vertex straight polyline; offset factor defaults to 0.35 and constant modes use the largest selected text size; drawn on the **text's layer**, text retained; no associativity |
 | `TEXTMASK` | implemented | selection only | one independent `SemanticGeometry::Mask { inverted: false }` (`AcDbWipeout`) per text from the estimated rectangle, on the text's layer, `draw_order = text.draw_order − 1` (saturating); no association model |
 | `TEXTUNMASK` | implemented (heuristic) | selection of text and/or masks | deletes **selected** masks only: a selected mask is deleted when every boundary vertex lies inside the estimated bounds of a selected text; with no text selected, every selected mask is deleted; text-only selection is `textunmask.unchanged`; provenance cannot be proven |
 | `MTEDIT` | alias | current single selection | `COMMAND_ALIASES` row onto `TEXTEDIT`; starts the existing pick tool; **no second edit path** |
@@ -70,14 +71,15 @@ the affected contracts where it matters.
 - `TSCALE`: no base point, no position change, no uniform transform — it is the
   glyph-height scaler, exactly like `SCALETEXT` (which is not `SCALE`).
 - `TEXTALIGN`: no interactive "specify base alignment point" prompt and no
-  glyph-accurate alignment; the box is the declared estimate and rotation is
-  ignored.
+  glyph-accurate alignment; `SETSPACING <distance> [X|Y]` and the
+  `CURRENTVERTICAL`/`CURRENTHORIZONTAL` own-justification forms are implemented;
+  the box is the declared estimate and rotation is ignored.
 - `TCOUNT`: AutoCAD's dialog modes are **NOT IMPLEMENTED** — no per-item
   prefix/suffix editing, no "Find & replace", no "Select objects" prompt inside
   the command, no number padding/leading zeros, no decimal numbering.
-- `TCIRCLE`: AutoCAD's `TCircle` dialog (style/offset, Object/Multiple modes) is
-  **NOT IMPLEMENTED**; there is no associativity and no update when the text
-  moves.
+- `TCIRCLE`: AutoCAD's interactive `Object`/`Multiple` prompts are **NOT
+  IMPLEMENTED** (the typed `OFFSET`/`CONSTANT` forms are); there is no
+  associativity and no update when the text moves.
 - `TEXTMASK`: no text frame/background association, no frames/display-not-plot
   options, and no "mask the text automatically when created" behaviour.
 - `TEXTUNMASK`: cannot prove a mask came from `TEXTMASK`; unselected masks are
