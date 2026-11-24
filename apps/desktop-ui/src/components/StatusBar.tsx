@@ -11,7 +11,7 @@
 // position and rendered label must not move while the pointer travels.
 import React, { useSyncExternalStore } from 'react';
 import { Icon } from '../icons.tsx';
-import { Button, Toggle } from './primitives.tsx';
+import { Button, IconButton, Toggle } from './primitives.tsx';
 import { ParameterChoices, ParameterFlag, ParameterGridChoices, ParameterStepper, ParameterSwatch } from './ParameterControls.tsx';
 import { useI18n, useShell } from '../context.ts';
 import type { CadImportProgress } from '../cad/cad-status.ts';
@@ -20,7 +20,8 @@ import { toolLabelKey } from '../commands/commands.ts';
 import { palettesOffered } from '../cad/surface.ts';
 import { OPTIONS_KEYS } from '../options/options.ts';
 import { volatileStatusStore } from '../cad/status-cadence.ts';
-import { dispatchGrid, dispatchGridSnap, dispatchHoverPreview, dispatchObjectSnap, dispatchOrtho, gridSnapToggle, gridToggle, hoverPreviewToggle, objectSnapToggle, orthoToggle, snapKindLabelKey, toolStepPromptKey } from '../cad/cad.ts';
+import { dispatchGrid, dispatchGridSnap, dispatchHoverPreview, dispatchObjectSnap, dispatchOrtho, gridSnapToggle, gridToggle, hoverPreviewToggle, objectSnapToggle, orthoToggle, snapKindLabelKey, toolStepPromptKey, traySettingsOn } from '../cad/cad.ts';
+import { openTraySettings } from '../chrome/surfaces.ts';
 import { importProgressView } from '../cad/cad-status.ts';
 import { statusBannerText } from '../host/notice.ts';
 import { toolParameterViews } from '../tools/tool-parameters.ts';
@@ -99,6 +100,10 @@ export function StatusBar() {
   // host constrains the next point entry from the previous point; it is not grid
   // snap (F9) and never moves a point in Z.
   const ortho = orthoToggle(shell.status, shell.canCommand('ORTHO'));
+  // The status-bar tray is the host's `TRAYSETTINGS` session flag
+  // (`cad_status.traySettings`), never a local mirror: an older host that omits
+  // the field keeps the historical behaviour (tray shown).
+  const trayVisible = traySettingsOn(shell.status);
   // The current object-snap candidate kind (ADR 0014 A.7) is real host state
   // (`status.snapKind`). Without a candidate the key is null, so nothing extra
   // is rendered — never a placeholder chip.
@@ -256,59 +261,79 @@ export function StatusBar() {
       ) : null}
 
       <div className="statusbar__group statusbar__group--end">
-        {/* The gear opens the real Options window (the same host-owned popup the
-            File ribbon entry and the typed `OPTIONS` selector open). */}
-        <Button
-          className="statusbar__workspace"
-          variant="ghost"
-          size="sm"
-          icon="settings"
-          iconSize={13}
-          title={`${t(OPTIONS_KEYS.title)} (OPTIONS)`}
-          onClick={shell.openOptionsPopup}
-        >
-          {t(OPTIONS_KEYS.title)}
-        </Button>
-        <Toggle
-          label={t('status.command_line')}
-          on={shell.commandLineOpen}
-          title={`${t('status.command_line')} (Ctrl+9)`}
-          onClick={() => shell.setCommandLineOpen(!shell.commandLineOpen)}
-        />
-        <Toggle
-          label={t('status.clean_screen')}
-          on={shell.cleanScreen}
-          title={`${t('status.clean_screen')} (Ctrl+0)`}
-          onClick={() => shell.setCleanScreen(!shell.cleanScreen)}
-        />
-        {/* A `dom-canvas` carrier has no host-side document state for these two
-            palettes to project, so their toggles are not offered at all — an
-            absent toggle, never a chip that opens an empty panel. The carrier rule
-            is the shared `palettesOffered` helper (the palette windows behind these
-            chips ask the same one). Any other carrier (and an older chrome state
-            without the flag) keeps them. */}
-        {palettesOffered(shell) ? (
+        {/* The tray's icon/notification cluster. `TRAYSETTINGS` (the session flag
+            this group reads through `cad_status.traySettings`) shows or hides it;
+            every hidden control keeps a typed spelling (OPTIONS, COMMANDLINE,
+            CLEANSCREENON/OFF, the palette words), so turning the tray off never
+            strands an action. */}
+        {trayVisible ? (
           <>
+            {/* The gear opens the real Options window (the same host-owned popup the
+                File ribbon entry and the typed `OPTIONS` selector open). */}
+            <Button
+              className="statusbar__workspace"
+              variant="ghost"
+              size="sm"
+              icon="settings"
+              iconSize={13}
+              title={`${t(OPTIONS_KEYS.title)} (OPTIONS)`}
+              onClick={shell.openOptionsPopup}
+            >
+              {t(OPTIONS_KEYS.title)}
+            </Button>
             <Toggle
-              label={t('properties.panel')}
-              on={shell.propertiesOpen}
-              title={t('properties.panel')}
-              onClick={() => shell.setPropertiesOpen(!shell.propertiesOpen)}
+              label={t('status.command_line')}
+              on={shell.commandLineOpen}
+              title={`${t('status.command_line')} (Ctrl+9)`}
+              onClick={() => shell.setCommandLineOpen(!shell.commandLineOpen)}
             />
             <Toggle
-              label={t('fileinfo.title')}
-              on={shell.fileInfoOpen}
-              title={t('fileinfo.title')}
-              onClick={() => shell.setFileInfoOpen(!shell.fileInfoOpen)}
+              label={t('status.clean_screen')}
+              on={shell.cleanScreen}
+              title={`${t('status.clean_screen')} (Ctrl+0)`}
+              onClick={() => shell.setCleanScreen(!shell.cleanScreen)}
             />
-            <Toggle
-              label={t('diagnostics.title')}
-              on={shell.diagnosticsOpen}
-              title={t('diagnostics.title')}
-              onClick={() => shell.setDiagnosticsOpen(!shell.diagnosticsOpen)}
-            />
+            {/* A `dom-canvas` carrier has no host-side document state for these two
+                palettes to project, so their toggles are not offered at all — an
+                absent toggle, never a chip that opens an empty panel. The carrier rule
+                is the shared `palettesOffered` helper (the palette windows behind these
+                chips ask the same one). Any other carrier (and an older chrome state
+                without the flag) keeps them. */}
+            {palettesOffered(shell) ? (
+              <>
+                <Toggle
+                  label={t('properties.panel')}
+                  on={shell.propertiesOpen}
+                  title={t('properties.panel')}
+                  onClick={() => shell.setPropertiesOpen(!shell.propertiesOpen)}
+                />
+                <Toggle
+                  label={t('fileinfo.title')}
+                  on={shell.fileInfoOpen}
+                  title={t('fileinfo.title')}
+                  onClick={() => shell.setFileInfoOpen(!shell.fileInfoOpen)}
+                />
+                <Toggle
+                  label={t('diagnostics.title')}
+                  on={shell.diagnosticsOpen}
+                  title={t('diagnostics.title')}
+                  onClick={() => shell.setDiagnosticsOpen(!shell.diagnosticsOpen)}
+                />
+              </>
+            ) : null}
           </>
         ) : null}
+        {/* The tray's own settings entry stays visible while the tray is hidden —
+            it is the way back, and the typed word opens the same surface. */}
+        <IconButton
+          className="statusbar__tray-settings"
+          icon="more"
+          size="sm"
+          iconSize={13}
+          label={t('tray.title')}
+          title={`${t('tray.title')} (TRAYSETTINGS)`}
+          onClick={openTraySettings}
+        />
       </div>
     </div>
   );

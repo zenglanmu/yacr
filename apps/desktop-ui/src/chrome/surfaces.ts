@@ -46,6 +46,13 @@ export interface ChromeSurfaceState {
   readonly toolPalettesFocus: number;
   /** The Performance Analyzer float (`PERFANALYZER`); non-modal. */
   readonly performanceAnalyzer: boolean;
+  /**
+   * The Tray Settings surface (`TRAYSETTINGS`); non-modal.
+   *
+   * Its one checkbox is the session tray flag, so the surface is opened by the
+   * typed word / status-bar entry but resized by no local state of its own.
+   */
+  readonly traySettings: boolean;
 }
 
 const CLOSED: ChromeSurfaceState = Object.freeze({
@@ -59,6 +66,7 @@ const CLOSED: ChromeSurfaceState = Object.freeze({
   toolPalettes: false,
   toolPalettesFocus: 0,
   performanceAnalyzer: false,
+  traySettings: false,
 });
 
 let state: ChromeSurfaceState = CLOSED;
@@ -196,6 +204,22 @@ export function openPerformanceAnalyzer(): void {
 export function closePerformanceAnalyzer(): void {
   if (!state.performanceAnalyzer) return;
   publish({ ...state, performanceAnalyzer: false });
+}
+
+/**
+ * Open the Tray Settings surface.
+ *
+ * It floats over the drawing (no backdrop) and owns exactly one control — the
+ * session `TRAYSETTINGS` flag — so opening it never changes anything.
+ */
+export function openTraySettings(): void {
+  publish({ ...CLOSED, traySettings: true, quickViewRevision: state.quickViewRevision });
+}
+
+/** Close the Tray Settings surface; already closed is a success. */
+export function closeTraySettings(): void {
+  if (!state.traySettings) return;
+  publish({ ...state, traySettings: false });
 }
 
 /** Reset the store. Contract tests call this between cases. */

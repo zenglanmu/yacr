@@ -3485,6 +3485,64 @@ button, input, select { font: inherit; color: inherit; }
   border-radius: 0 0 var(--radius) var(--radius);
 }
 
+/* The Tray Settings surface (`components/TraySettings.tsx`): the same floating
+   panel as the workspace selector, one switch. */
+.tray-panel__row { display: flex; padding: 6px 12px 8px; }
+.tray-panel__contents {
+  margin: 0; padding: 0 12px 10px;
+  color: var(--text-dim); font-size: 11px; line-height: 1.45;
+}
+
+/* The text screen (`components/TextScreen.tsx`): the session command history as
+   a read-only text window over the drawing. It sits above the canvas and the
+   docked chrome (z 45) but below the floating palettes (50) and the modal
+   overlay (60), so an open dialog still owns the screen. */
+.text-screen {
+  position: fixed;
+  inset: 44px 16px 58px;
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--chrome-2);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  box-shadow: 0 24px 60px rgba(var(--shadow-rgb), .5);
+  animation: rise var(--t-med) both;
+}
+.text-screen__head {
+  display: flex; align-items: center; gap: 8px;
+  min-height: 32px; padding: 0 8px 0 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--chrome-3);
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+.text-screen__title {
+  display: inline-flex; align-items: center; gap: 7px;
+  margin-right: auto; font-size: 12px; font-weight: 600; color: var(--text);
+}
+.text-screen__title .icon { color: var(--accent-text); }
+.text-screen__body {
+  flex: 1 1 auto; min-height: 0; margin: 0;
+  padding: 10px 14px;
+  overflow: auto;
+  font-family: var(--font-mono); font-size: 12px; line-height: 1.5;
+  color: var(--text); white-space: pre-wrap; word-break: break-word;
+}
+.text-screen__body:focus-visible { outline: 1px solid var(--focus); outline-offset: -2px; }
+.text-screen__empty {
+  margin: 0; padding: 18px 14px;
+  color: var(--text-dim); font-size: 12px;
+}
+.text-screen__foot {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--line);
+  background: var(--chrome-3);
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+.text-screen__hint { margin-right: auto; color: var(--text-dim); font-size: 11px; }
+
 /* QuickCalc: a non-modal float (see `components/QuickCalcDialog.tsx`).
    It paints above the palette layer (z 10) and the other floating chrome
    (`.quick-view` / `.workspace-panel` are 50) and below the modal

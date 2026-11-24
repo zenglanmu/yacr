@@ -61,6 +61,17 @@ export const LAYERCLOSE_COMMAND = 'LAYERCLOSE';
 /** The typed word that opens the existing Options dialog (Drafting settings). */
 export const DSETTINGS_COMMAND = 'DSETTINGS';
 
+/**
+ * The typed word that opens the Tray Settings surface.
+ *
+ * Unlike the rows in [`CHROME_COMMANDS`], this word is **also** a real router
+ * selector: the surface's checkbox dispatches `TRAYSETTINGS` through the router
+ * (a programmatic line, `fromInput === false`), and the command toggles the
+ * session flag. Only the *typed* word is answered by the chrome, so the word is
+ * deliberately not listed as an exclusively-local selector.
+ */
+export const TRAYSETTINGS_COMMAND = 'TRAYSETTINGS';
+
 /** The typed word that opens the existing properties palette. */
 export const QUICKPROPERTIES_COMMAND = 'QUICKPROPERTIES';
 
@@ -199,6 +210,11 @@ export function isLayerCloseCommand(text: unknown): boolean {
 /** Whether typed text is the bare `DSETTINGS` selector. */
 export function isDSettingsCommand(text: unknown): boolean {
   return normalized(text) === DSETTINGS_COMMAND;
+}
+
+/** Whether typed text is the bare `TRAYSETTINGS` selector. */
+export function isTraySettingsCommand(text: unknown): boolean {
+  return normalized(text) === TRAYSETTINGS_COMMAND;
 }
 
 /** Whether typed text is the bare `QUICKPROPERTIES` selector. */

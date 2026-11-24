@@ -20,6 +20,8 @@ import {
   closeWorkspaceSettings,
 } from '../chrome/surfaces.ts';
 import { QuickViewPanel } from './QuickViewPanel.tsx';
+import { TextScreen } from './TextScreen.tsx';
+import { TraySettingsSurface } from './TraySettings.tsx';
 import { ClassicXrefPanel } from './ClassicXrefPanel.tsx';
 import { ClassicInsertPanel } from './ClassicInsertPanel.tsx';
 import { ClassicGroupPanel } from './ClassicGroupPanel.tsx';
@@ -77,6 +79,10 @@ export function ChromeSurfaces() {
           onClose={closeWorkspaceSettings}
         />
       ) : null}
+      {state.traySettings ? <TraySettingsSurface /> : null}
+      {/* The text screen is opened by the **host** session flag, not by this
+          store: one window, both spellings, and the close path is `GRAPHSCR`. */}
+      <TextScreen />
     </>
   );
 }

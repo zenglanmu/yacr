@@ -19,9 +19,12 @@ import { CAPABILITY_GATES, DOCUMENT_SCOPED_COMMANDS } from '../src/commands/gati
 import { HOST_NAMES, readCatalog, readModule } from './helpers.ts';
 
 const BATCH = [
-  // Session tokens (no renderer consumer).
-  'DRAGMODE', 'APERTURE', 'ISOPLANE', 'HIGHLIGHTNEW', 'TRAYSETTINGS', 'TEXTSCR',
-  'GRAPHSCR', 'FINDINCLUDE', 'FINDMATCH', 'REVCLOUDPROPERTIES',
+  // Session tokens with no renderer/chrome consumer left.
+  'DRAGMODE', 'APERTURE', 'ISOPLANE', 'HIGHLIGHTNEW', 'FINDINCLUDE',
+  'REVCLOUDPROPERTIES',
+  // TEXTSCR/GRAPHSCR/FINDMATCH are wired to real consumers (the text-screen
+  // surface and the FIND matcher) and are checked separately below.
+  'TEXTSCR', 'GRAPHSCR', 'FINDMATCH',
   // Read-only reports.
   'SYSVARMONITOR', 'SYSVDLG', 'VTOPTIONS', 'ALIASEDIT', 'WHOHAS', 'ACADINFO',
   'PTYPE', 'SCALELISTEDIT',
@@ -86,12 +89,40 @@ test('the Wave 2 hints state the honest boundary and never promise an effect', a
       assert.match(english, /rectangular paper-space viewport/i, `${id} hint: ${english}`);
       continue;
     }
+    if (id === 'TEXTSCR' || id === 'GRAPHSCR') {
+      assert.match(english, /text screen/i, `${id} hint names its surface: ${english}`);
+      continue;
+    }
+    if (id === 'FINDMATCH') {
+      assert.match(english, /case-sensitive/i, `${id} hint names the matching mode: ${english}`);
+      continue;
+    }
     assert.match(
       english,
       /read-only|session token|never|named refusal|NOT IMPLEMENTED/i,
       `${id} hint must state its boundary: ${english}`,
     );
   }
+});
+
+test('TRAYSETTINGS owns a real chrome surface and is not document-scoped', async () => {
+  const zh = await readCatalog('zh-CN');
+  const en = await readCatalog('en');
+  const rows = COMMAND_CATALOG.filter(command => command.id === 'TRAYSETTINGS');
+  assert.equal(rows.length, 1, 'TRAYSETTINGS must appear exactly once');
+  for (const catalog of [zh, en]) {
+    assert.ok(catalog[rows[0].labelKey].length > 0);
+    assert.ok(catalog[`${rows[0].labelKey}.hint`].length > 20);
+  }
+  // The typed word opens the chrome's Tray Settings surface; the programmatic
+  // form toggles the session flag. Neither needs a drawing, so the start page
+  // must not disable it.
+  assert.equal(HOST_NAMES.includes('TRAYSETTINGS'), true);
+  assert.equal(DOCUMENT_SCOPED_COMMANDS.includes('TRAYSETTINGS'), false);
+  assert.equal(CAPABILITY_GATES.TRAYSETTINGS, undefined);
+  assert.deepEqual(admitCommandText('TRAYSETTINGS', { status: NO_DOC }), {
+    kind: 'admitted', command: 'TRAYSETTINGS', reasonKey: null,
+  });
 });
 
 test('the Wave 2 names are advertised by the host vocabulary and admitted with a drawing', () => {
