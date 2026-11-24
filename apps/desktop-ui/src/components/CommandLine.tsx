@@ -83,14 +83,15 @@ export function CommandLine() {
   // immutable and replaced only when a line is appended, so its identity is its
   // signature.
   const logEntries = shell.status?.commandLog ?? [];
+  const units = shell.status?.units ?? null;
+  const unitsSignature = units === null ? '' : JSON.stringify(units);
   const logSignature = logEntries.length > 0
     ? `${logEntries.length}:${logEntries[logEntries.length - 1]?.sequence}`
     : '';
   const windowRows = useMemo(
-    () => commandWindowRows(shell.historyEntries, logEntries, t),
-    // `logEntries` is covered by `logSignature`; listing it would re-fold on
-    // every poll that carried the very same log.
-    [logSignature, shell.historyEntries, t],
+    () => commandWindowRows(shell.historyEntries, logEntries, t, units),
+    // `logEntries`/`units` are covered by their signatures; see `TextScreen.tsx`.
+    [logSignature, unitsSignature, shell.historyEntries, t],
   );
   // The rows, not the log: a refetch that changes nothing must not touch the
   // scroll position, and a new command must move the view only when the user is

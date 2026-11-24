@@ -540,6 +540,7 @@ mod tests {
             performance: None,
             theme: "dark".into(),
             view: None,
+            units: None,
             navigation: crate::session::CadNavigation::default(),
             pending_prompt: None,
         }

@@ -11,6 +11,7 @@
 
 import { parseSelection } from './selection-wire.ts';
 import { parseOrbitCapability } from './host-profile.ts';
+import { parseCadUnits } from './units-format.ts';
 import { parseCadNavigation } from './navigation.ts';
 import type { CadNavigationSettings } from './navigation.ts';
 import type { Translator } from '../i18n.ts';
@@ -62,8 +63,6 @@ export interface CadViewOrientation {
   readonly target: WorldPoint;
   readonly up: WorldPoint;
 }
-
-
 
 /** The closed set of editing-control machine keys a selection row may carry. */
 export type CadSelectionRowKind = 'text' | 'number' | 'enum' | 'bool';
@@ -467,6 +466,7 @@ export interface CadStatus {
    * zero: the panel renders an em dash for each missing value.
    */
   readonly performance?: CadPerformance | null;
+  /** Stored `UNITS` readout settings, or `null`/absent. */ readonly units?: ReturnType<typeof parseCadUnits>;
 }
 
 /** The open drawing's layout tabs; an older host's omission is an empty list. */
@@ -760,6 +760,7 @@ export function parseCadStatus(value: unknown): CadStatus {
   if (status.documentReady !== undefined && typeof status.documentReady !== 'boolean') {
     throw Error('CAD_STATUS_INVALID');
   }
+  parseCadUnits(status.units);
   // The selection block is always present; a malformed one is rejected outright.
   parseSelection(status.selection);
   // Idle hover preview is optional for older hosts, but a present flag must be a

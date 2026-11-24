@@ -522,7 +522,7 @@ test('cursor-changed drives only the leaf stores, never the shell, carrier or pu
   const end = hook.indexOf("if (frame.type === 'vendor-pending')", start);
   assert.ok(end > start, 'the branch precedes the vendor handler');
   const branch = hook.slice(start, end);
-  assert.match(branch, /publishVolatile\(frame\.cursorWorld, frame\.frameCount, !document\.hidden, frame\.view\)/);
+  assert.match(branch, /publishVolatile\(frame\.cursorWorld, undefined, frame\.frameCount, !document\.hidden, frame\.view\)/);
   assert.ok(branch.includes('return;'), 'the branch returns before the pump check');
   for (const forbidden of ['setStatus(', 'observeCarrier', 'connect(', 'pump(']) {
     assert.ok(!branch.includes(forbidden), `cursor-changed must not call ${forbidden}`);
@@ -538,7 +538,7 @@ test('cursor-changed drives only the leaf stores, never the shell, carrier or pu
   const helperEnd = hook.indexOf('const setStatus', helperStart);
   assert.ok(helperStart > 0 && helperEnd > helperStart, 'one shared volatile publisher');
   const helper = hook.slice(helperStart, helperEnd);
-  assert.ok(helper.includes('live.current.setCursor(cursorWorld)'));
+  assert.ok(helper.includes('live.current.setCursor(cursorWorld, units)'));
   assert.ok(helper.includes('sampler.sample(frameCount, performance.now(), active)'));
   assert.ok(helper.includes('staleTimer = setTimeout(resetFps, 5000)'));
   assert.ok(helper.includes('if (active)'), 'the timer is armed only while visible/healthy');

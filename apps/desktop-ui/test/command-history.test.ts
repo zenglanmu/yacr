@@ -146,7 +146,7 @@ test('both presentations render the one log and mark refusals as red rows', asyn
   // echo. The in-flow echo strip is gone, and so is the clear control: the host's
   // command log has no clear call, so a button here would leave the host's rows on
   // screen while emptying the typed ones — a control that lies.
-  assert.ok(desktop.includes('commandWindowRows(shell.historyEntries, logEntries, t)'));
+  assert.ok(desktop.includes('commandWindowRows(shell.historyEntries, logEntries, t, units)'));
   assert.equal(desktop.includes('className="commandlog"'), false, 'the fixed echo strip is gone');
   assert.equal(desktop.includes('shell.clearHistory'), false, 'no clear control over a host-owned log');
   // Mobile: the capped sheet of the same log.
