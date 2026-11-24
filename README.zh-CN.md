@@ -114,9 +114,10 @@ cargo build -p cad-cli-tools --release --locked
 
 - 不是生产级，DWG 兼容性没有针对语料验证过；各类实体保真度不一。
 - `.ymodel` 是原生格式。DWG 来源的图纸回写 DWG 仍是实验性的；其它导入来源存为 DXF。
-- 实体建模是有界能力：七种图元（BOX、CYLINDER、CONE、SPHERE、TORUS、WEDGE、PYRAMID）与
-  UNION/SUBTRACT/INTERSECT 在精确内核上可用（结果须为单壳）；拉伸、旋转、放样、扫掠、特征历史
-  与三维装配按名拒绝。ACIS 实体只按子集做剖分显示。
+- 实体建模是有界能力（仅在编入实体模型器的载体上）：七种图元（BOX、CYLINDER、CONE、SPHERE、
+  TORUS、WEDGE、PYRAMID）与 UNION/SUBTRACT/INTERSECT 在精确内核上可用（结果须为单壳）；拉伸、
+  旋转、放样、扫掠、特征历史与三维装配按名拒绝，没有模型器的载体也按名拒绝。ACIS 实体只按子集
+  做剖分显示。
 - Revit 是包围盒预览、没有真实边，也不可测量；SketchUp 是带贴图与真实显示边的三角面预览，
   存储边支持端点/中点吸附与测量（无面类吸附、无面积/体积）。SketchUp 导出会写出这些自由边，
   但曲线/弧身份与逐边属性会被扁平化，且所有实体合并成一个 SketchUp geometry run。

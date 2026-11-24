@@ -139,11 +139,12 @@ cargo build -p cad-cli-tools --release --locked
   entity fidelity varies.
 - `.ymodel` is the native format. Writing a DWG-sourced drawing back to DWG is
   experimental; other imported sources save as DXF.
-- Solid modelling is bounded: seven primitives (BOX, CYLINDER, CONE, SPHERE,
-  TORUS, WEDGE, PYRAMID) and UNION/SUBTRACT/INTERSECT run on the exact kernel
-  for single-shell results; extrusion, revolution, loft, sweep, feature history
-  and 3D assemblies are refused by name. ACIS entities are displayed from a
-  subset tessellation.
+- Solid modelling is bounded where the solid modeler is compiled in: seven
+  primitives (BOX, CYLINDER, CONE, SPHERE, TORUS, WEDGE, PYRAMID) and
+  UNION/SUBTRACT/INTERSECT run on the exact kernel for single-shell results;
+  extrusion, revolution, loft, sweep, feature history and 3D assemblies are
+  refused by name, and carriers without the modeler reject the commands by name
+  too. ACIS entities are displayed from a subset tessellation.
 - Revit previews carry BIM metadata (element bodies are bounding boxes on older
   releases, with more decoded geometry on newer ones) and have no real edge data:
   the visible boundaries are a derived display overlay, so Revit previews are not
