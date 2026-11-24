@@ -337,7 +337,10 @@ impl HostCore {
             // preview are already cleared, so a failure leaves no stale band.
             return self.finish_box_gesture(gesture, modifiers);
         }
-        if was_navigating && matches!(self.controller.borrow().session.tool, ToolState::Panning) {
+        // A release that ends any navigation (2D pan or 3D orbit) closes the
+        // continuous view-history run. `cancel_tool` is a no-op for the idle tool
+        // used by 3D orbit, but it clears the open navigation step for both.
+        if was_navigating {
             self.controller.borrow_mut().cancel_tool()?;
             self.full_dirty.set(true);
         }
@@ -741,7 +744,7 @@ impl HostCore {
     }
 
     /// The active viewport's recorded `ZOOM PREVIOUS` depth (`0` without one).
-    fn view_zoom_history_len(&self) -> usize {
+    pub(super) fn view_zoom_history_len(&self) -> usize {
         let c = self.controller.borrow();
         c.application
             .workspace

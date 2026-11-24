@@ -503,8 +503,20 @@ impl HostCore {
                     scope = DirtyScope::Full;
                 }
                 self.cursor_logical.set(Some(point));
+                let history_before = self.view_zoom_history_len();
                 if delta_logical != [0.0, 0.0] {
                     self.pan_by_logical_delta(delta_logical)?;
+                }
+                // A pinch is continuous multi-touch navigation with no
+                // begin/end signal: it must not fill the view history with one
+                // step per frame. Drop the step the pan half just recorded (the
+                // zoom half drops its own inside `zoom_continuously`).
+                if self.view_zoom_history_len() > history_before {
+                    let mut c = self.controller.borrow_mut();
+                    let id = c.viewport_id;
+                    if let Some(viewport) = c.application.workspace.viewports.get_mut(&id) {
+                        viewport.discard_last_view_snapshot();
+                    }
                 }
                 if scale != 1.0 {
                     self.zoom_continuously(scale, point)?;
