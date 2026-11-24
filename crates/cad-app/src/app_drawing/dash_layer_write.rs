@@ -40,7 +40,7 @@ use super::layer_record::layer_row;
 use super::{layer_edit, *};
 use crate::command_payload::DashLayerOps;
 use crate::layer_property::LayerPropertyValue;
-use cad_db::ChangeScope;
+use cad_db::{ChangeScope, LayerAttributes};
 
 impl Application {
     /// Apply one typed `-LAYER <option> …` write line.
@@ -374,6 +374,18 @@ impl Application {
 
         // Publish the already-validated candidate with every patch this line
         // produced as **one** undo step, or nothing at all when no row changed.
+        // The `LAYERP` half is computed from the patches: only rows that still
+        // exist after the line and whose attributes really changed have a
+        // meaningful before state (a created row has none, a deleted row must not
+        // be resurrected by `LAYERP`).
+        let previous_attributes: BTreeMap<LayerId, LayerAttributes> = patches
+            .iter()
+            .filter(|patch| candidate.layer(patch.id).is_some())
+            .filter_map(|patch| {
+                let before = patch.before.as_ref()?.attributes.clone();
+                (before != candidate.layer_attributes(patch.id)).then_some((patch.id, before))
+            })
+            .collect();
         let changes = if patches.is_empty() {
             None
         } else {
@@ -389,6 +401,9 @@ impl Application {
             self.publish_layer_record(document_id, candidate, transaction, "-LAYER", patches)?;
             Some(Arc::new(changes))
         };
+        if !previous_attributes.is_empty() {
+            session.push_layer_previous_snapshot(previous_attributes);
+        }
 
         // Session state after the publish: the drawing is authoritative and no
         // refusal can be pending any more. Deleted rows never keep a temporary

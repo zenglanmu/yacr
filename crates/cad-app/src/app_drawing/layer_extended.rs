@@ -27,12 +27,14 @@
 //!   (model, paper, block member — one `entities` table).
 //! * `LAYERSTATE RESTORE` applies stored attributes with `set_layer_attributes`
 //!   (one revision bump per changed layer) and records all changed rows as one
-//!   layer-patch undo step. The restored active layer and override set are
-//!   session state and are not part of history.
+//!   layer-patch undo step; the same rows are pushed as one `LAYERP` step before
+//!   the session overrides are replaced. The restored active layer and override
+//!   set are session state and are not part of history.
 //! * `LTSCALE` writes the drawing header (`$LTSCALE`): one revision bump, **no**
 //!   undo entry (there is no header-variable patch kind).
 //! * `LAYERPMODE` and `LAYWALK` are session state only: no database write, no
-//!   revision bump, no history.
+//!   revision bump, no history. `LAYWALK` takes layer names or the same
+//!   `*`/`?` name filters `-LAYER ?` uses.
 
 mod state;
 
@@ -551,6 +553,12 @@ impl Application {
 
     /// `LAYWALK <name>[,<name>...]`: show only the named layers plus the active layer.
     ///
+    /// Each entry is either a layer **name** (exact first, then a unique
+    /// case-insensitive match) or a layer-name **filter** — the same anchored
+    /// `*`/`?`, case-insensitive AutoCAD wildcard `-LAYER ? <pattern>` uses. A
+    /// filter matching no layer refuses the whole command
+    /// (`layers.walk.unknown_filter`), so a typo never silently walks nothing.
+    ///
     /// Overrides only: the drawing layer table, its revision and `cad-history` are
     /// untouched. The hides go through the same validated atomic batch as `LAYISO`
     /// (`hide_layers_atomically`), so a refusal changes nothing. `LAYUNISO` /
@@ -585,12 +593,40 @@ impl Application {
 
         let mut keep: BTreeSet<LayerId> = BTreeSet::new();
         keep.insert(session.active_layer);
+        let mut filters = 0usize;
         for name in names {
-            let id = resolve_layer(drawing.as_ref(), name.trim()).map_err(|error| {
+            let entry = name.trim();
+            if entry.is_empty() {
+                return Err(invalid(
+                    "layers.walk",
+                    "needs_argument",
+                    "LAYWALK entries must not be empty",
+                ));
+            }
+            if entry.contains('*') || entry.contains('?') {
+                filters += 1;
+                let matched: Vec<LayerId> = drawing
+                    .layers()
+                    .filter(|layer| {
+                        crate::app_extended_w10_layer::layer_name_matches(entry, &layer.name)
+                    })
+                    .map(|layer| layer.id)
+                    .collect();
+                if matched.is_empty() {
+                    return Err(invalid(
+                        "layers.walk",
+                        "unknown_filter",
+                        format!("no drawing layer name matches the filter '{entry}'"),
+                    ));
+                }
+                keep.extend(matched);
+                continue;
+            }
+            let id = resolve_layer(drawing.as_ref(), entry).map_err(|error| {
                 invalid(
                     "layers.walk",
                     "unknown_layer",
-                    format!("cannot resolve layer '{}': {error}", name.trim()),
+                    format!("cannot resolve layer '{entry}': {error}"),
                 )
             })?;
             keep.insert(id);
@@ -619,13 +655,23 @@ impl Application {
             object: None,
             code: "layers.walk.applied".into(),
             message: format!(
-                "LAYWALK: {} named layer(s) plus the current layer {} kept visible, {} hidden \
+                "LAYWALK: {} name(s)/filter(s) plus the current layer {} kept visible, {} hidden \
                  (session overrides only; LAYUNISO/RESTORELAYERS clears it)",
                 names.len(),
                 session.active_layer.0,
                 hide.len()
             ),
         });
+        if filters > 0 {
+            outcome.diagnostics.push(Diagnostic {
+                object: None,
+                code: "layers.walk.filters".into(),
+                message: format!(
+                    "LAYWALK: {filters} wildcard filter(s) expanded to {} kept layer(s)",
+                    keep.len()
+                ),
+            });
+        }
         Ok(outcome)
     }
 }

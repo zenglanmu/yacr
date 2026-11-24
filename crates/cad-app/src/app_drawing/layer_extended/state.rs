@@ -166,10 +166,12 @@ impl Application {
                 let before_revision = drawing.revision();
                 let mut candidate = drawing.as_ref().clone();
                 let mut patches = Vec::new();
+                let mut previous_attributes = BTreeMap::new();
                 let mut scope = ChangeScope::default();
                 for (layer, attributes) in &snapshot.attributes {
                     if drawing.layer_attributes(*layer) != *attributes {
                         let before = layer_row(drawing.as_ref(), *layer);
+                        previous_attributes.insert(*layer, drawing.layer_attributes(*layer));
                         let write = candidate.set_layer_attributes(
                             *layer,
                             attributes.clone(),
@@ -208,7 +210,13 @@ impl Application {
                 // Session half: the saved active layer and override set replace the
                 // current ones. This is session state, not a layer-table patch, so
                 // undo restores the attributes but not the active-layer/override
-                // choice; no `LAYERP` snapshot is pushed.
+                // choice. The attribute rows and the override set are still one
+                // `LAYERP` step (pushed before the session override replacement so
+                // the snapshot holds the pre-restore set); a restore that only
+                // changes the active layer pushes nothing.
+                if changed > 0 || snapshot.overrides != session.layer_overrides {
+                    session.push_layer_previous_snapshot(previous_attributes);
+                }
                 session.active_layer = snapshot.active_layer;
                 session.layer_overrides = snapshot.overrides.clone();
                 Ok(CommandOutcome {

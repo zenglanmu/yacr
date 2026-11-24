@@ -928,10 +928,10 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `LAYMCH` / `-LAYMCH` | 部分实现 | 选择式：第一个选中对象的图层为目标，其余对象移入该层（一条事务/一步撤销）；目标层锁定由 `cad-db` 拒绝 | 无 AutoCAD 的交互 `Select objects`；空选择、<2 个对象、非模型空间/块实例/子图元、任何 payload 按名拒绝 |
 | `LAYMRG` / `-LAYMRG` | 完整实现 | 选择式：把选中对象所在层上的所有实体（模型/图纸/块内）重写到当前层，删除源层行并剪除各图纸视口该层 `layer_overrides` 键；实体/布局/层行一条事务/一步撤销（重做再次合并） | 声明的偏离：目标固定为当前层、无交互 source/target 提示，目标可以是 `0` 层；当前层与 `0` 层不能作源；会话 `LAYERSTATE` 不重写 |
 | `LAYDEL` / `-LAYDEL` | 完整实现 | 选择式（模型空间或任一图纸布局的顶层实体；块内成员/子元素拒绝）：删除选中对象所在层在模型空间、每个图纸布局与每个块定义内的**全部**实体，剪除各图纸视口的该层 `layer_overrides` 键，再删除层行；实体/布局/层行一条事务/一步撤销 | 当前层/`0` 层拒绝；锁定层的实体删除由数据库以 `layer.locked` 拒绝且不发布（不是静默成功） |
-| `LAYERSTATE` | 部分实现 | `LAYERSTATE SAVE/RESTORE/LIST/DELETE <name>`；会话内最多 32 个命名快照（逐层属性 + 当前层 + 覆盖），恢复通过 `set_layer_attributes` | 无 DWG 持久化、无 `.las` 文件、无图层状态管理器对话框；恢复是多行 revision 提升且**不可撤销**；未知/悬挂层与保存时隐藏的当前层拒绝 |
-| `LAYERPMODE` | 部分实现 | `LAYERPMODE ON\|OFF`；会话标志，`OFF` 时覆盖变更不推 `LAYERP` 快照；裸命令报告当前值 | 无 `LAYERPMODE` 持久化；不改变已应用的覆盖 |
+| `LAYERSTATE` | 部分实现 | `LAYERSTATE SAVE/RESTORE/LIST/DELETE <name>`；会话内最多 32 个命名快照（逐层属性 + 当前层 + 覆盖），恢复经 `set_layer_attributes`，**多行写入仍是一条事务/一步撤销** | 无 DWG 命名层状态表持久化、无 `.las` 文件、无图层状态管理器对话框；未知/悬挂层与保存时隐藏的当前层拒绝；活动层/覆盖选择是会话状态，不进入该撤销步 |
+| `LAYERPMODE` | 部分实现 | `LAYERPMODE ON\|OFF`；会话标志，`OFF` 时任何图层设置变更（覆盖或层表属性）都不推 `LAYERP` 快照；裸命令报告当前值 | 无 `LAYERPMODE` 持久化；不改变已应用的变更 |
 | `LTSCALE` | 完整实现 | 一个正有限小数；写数据库 `$LTSCALE`（一次 revision、无撤销/历史）；DXF/DWG 头经 `header.linetype_scale` 写出，SAVE→OPEN 往返（导出测试断言 group 40 与往返） | 无 `CELTSCALE`/`PSLTSCALE`/`MSLTSCALE` 联动（属全局变量族）；DWG 分支仍是实验性 `DwgWriter`，非 vendor 验证 |
-| `LAYWALK` | 部分实现 | 逗号分隔层名；只显示命名层 + 当前层，走与 `LAYISO` 相同的会话覆盖原子路径 | 仅覆盖、不写库；未知/空列表拒绝；由 `LAYUNISO`/`RESTORELAYERS` 清除，计一次 `LAYERP` 快照 |
+| `LAYWALK` | 完整实现 | 逗号分隔层名或层名通配过滤（`*`/`?`，与 `-LAYER ?` 同一大小写不敏感规则）；只显示命名/匹配层 + 当前层，走与 `LAYISO` 相同的会话覆盖原子路径 | 仅会话覆盖、不写库；未知/空列表/零匹配过滤拒绝；由 `LAYUNISO`/`RESTORELAYERS` 清除，计一次 `LAYERP` 快照；对话框与逐对象 walk 属交互 chrome |
 
 #### 2026-11-07 选择/过滤/查找/可见性批次（10 条）
 
@@ -1457,10 +1457,14 @@ AutoCAD 的 0＝关闭拾取框/选择预览未建模，故拒绝 0)
 不进历史**。全部图层都已在 keep 集 ⇒ `layers.isolate.noop` 且不产生覆盖抖动；空选择拒绝
 （否则会把所有层藏掉，画布上无从恢复）。`LAYUNISO` 与 `LAYON` 解析到**既有** `RESTORELAYERS`
 （清空全部覆盖）。**`LAYERP`（2026-10-27 起）不再是别名**：它有独立 `CommandId::LayerPrevious`，恢复**上一次**
-覆盖状态——会话内保留**有界**（上限 **16** 条）的快照环，仅在覆盖**真的改变**前压栈（`ToggleLayer` /
-`SETLAYERS` 及其派生 `LAYISO`/`LAYOFF` / `RESTORELAYERS`），no-op 与 `LAYERP` 自身**不压栈**；
-历史空 ⇒ `layers.previous.empty` 且不改状态；**不写 DWG、不升 revision、不进历史、不持久化**
-（无 `LAYRSTATE`/`LAYRDO`）。`DELETELAYER` 的覆盖清理**刻意**不是一步 `LAYERP` 状态。`LAYISO`/`LAYUNISO` 在 Viewer 模式**可用**（视图操作，不是实体写）。
+图层状态——会话内保留**有界**（上限 **16** 条）的快照环，仅在真实改动前压栈。快照同时记录**会话覆盖**与
+**层表属性的改动前行**（`off`/`frozen`/`locked`/colour/linetype/lineweight/transparency/plottable）；
+覆盖改动来自 `ToggleLayer` / `SETLAYERS` 及其派生 `LAYISO`/`LAYOFF` / `RESTORELAYERS`，属性改动来自
+`LAYFRZ`/`LAYLCK`/`LAYULK`/`LAYTHW`/`SETLAYERPROPERTY`/`-LAYER` 属性写与 `LAYERSTATE RESTORE`。
+属性恢复经 `LayerPatch` **一条事务/一步撤销**（撤销/重做对称）；**纯覆盖步仍不写 DWG、不升 revision、
+不进历史**。no-op 与 `LAYERP` 自身**不压栈**；历史空 ⇒ `layers.previous.empty` 且不改状态；快照命名的层行
+已被删除 ⇒ `layers.previous.dangling_layer` 且**不写任何东西**、快照保留。快照**不持久化**（会话级）。
+`DELETELAYER` 的覆盖清理**刻意**不是一步 `LAYERP` 状态。`LAYISO`/`LAYUNISO` 在 Viewer 模式**可用**（视图操作，不是实体写）。
 
 **2026-10-26 新增 `LAYOFF` / `LAYON`**：`LAYOFF`（新 `CommandId`，payload-free，Viewer 可用）把当前
 **选择所在图层**全部关闭（会话覆盖），**当前层除外**（与其他写路径的 `layer.current_off` 合同一致）；

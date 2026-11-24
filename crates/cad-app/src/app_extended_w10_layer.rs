@@ -183,7 +183,10 @@ fn document_drawing<'a>(app: &'a Application, command: &Command) -> CadResult<&'
 /// `?` exactly one character, case-insensitive. No other metacharacter is
 /// special, and the match is anchored at both ends (the whole name must match),
 /// which is the only rule this report needs.
-fn layer_name_matches(pattern: &str, name: &str) -> bool {
+///
+/// `LAYWALK` reuses the same rule for its typed filter entries, so one wildcard
+/// grammar serves every layer-name filter in the build.
+pub(crate) fn layer_name_matches(pattern: &str, name: &str) -> bool {
     let pattern: Vec<char> = pattern.to_lowercase().chars().collect();
     let name: Vec<char> = name.to_lowercase().chars().collect();
     let (mut pi, mut ni) = (0usize, 0usize);

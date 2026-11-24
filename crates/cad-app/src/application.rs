@@ -158,51 +158,9 @@ impl Application {
                 }
                 Ok(CommandOutcome::none())
             }
-            // `LAYERP`: pop the newest layer-override snapshot and apply it (it
+            // `LAYERP`: pop the newest layer-state snapshot and apply it (it
             // never pushes); an empty history is a named no-op.
-            CommandId::LayerPrevious => {
-                // `LAYERP` takes no input at all: a caller that supplies one is
-                // refused rather than silently ignored (the selection is not its
-                // input either).
-                if !matches!(command.payload, CommandPayload::None) {
-                    return Err(CadError::InvalidInput(
-                        "layers.previous.invalid_payload: LAYERP takes no payload".into(),
-                    ));
-                }
-                match session.layer_history.pop() {
-                    Some(snapshot) => {
-                        let restored = snapshot.len();
-                        session.layer_overrides = snapshot;
-                        Ok(CommandOutcome {
-                            objects: Vec::new(),
-                            changes: None,
-                            diagnostics: vec![Diagnostic {
-                                object: None,
-                                code: "layers.previous".into(),
-                                message: format!(
-                                    "LAYERP: restored the previous layer state ({restored} \
-                                     temporary override(s); session state only)"
-                                ),
-                            }],
-                            measurement: None,
-                            point_report: None,
-                        })
-                    }
-                    None => Ok(CommandOutcome {
-                        objects: Vec::new(),
-                        changes: None,
-                        diagnostics: vec![Diagnostic {
-                            object: None,
-                            code: "layers.previous.empty".into(),
-                            message: "LAYERP: there is no previous layer state to restore in this \
-                                      session; nothing changed"
-                                .into(),
-                        }],
-                        measurement: None,
-                        point_report: None,
-                    }),
-                }
-            }
+            CommandId::LayerPrevious => self.layer_previous(session, &command),
             // LAYISO is a **session view** operation (temporary overrides only: no
             // revision bump, no history entry, no database write), so it is
             // dispatched here beside the other layer-view commands rather than

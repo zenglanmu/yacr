@@ -109,3 +109,31 @@ fn laywalk_reports_a_noop_when_every_layer_is_already_kept() {
     assert!(session.layer_overrides.is_empty());
     assert_eq!(diagnostic_codes(&outcome), vec!["layers.walk.noop"]);
 }
+
+#[test]
+fn laywalk_expands_wildcard_filters_with_the_layer_name_rule() {
+    let (mut app, mut session) = app_with(layers(), Vec::new());
+    // `W*` keeps WALLS; `?OORS` keeps DOORS; ROOF and 0 hide (0 is not current
+    // here? it is the active layer, so 0 is always kept).
+    let outcome = walk(&mut app, &mut session, &["W*", "?OORS"]).expect("LAYWALK filters");
+    assert_eq!(session.active_layer, LayerId(0));
+    assert_eq!(session.layer_overrides.get(LayerId(3)), None);
+    assert_eq!(session.layer_overrides.get(LayerId(5)), None);
+    assert_eq!(session.layer_overrides.get(LayerId(6)), Some(false));
+    assert_eq!(
+        session.layer_overrides.get(LayerId(0)),
+        None,
+        "the active layer is always kept"
+    );
+    assert!(diagnostic_codes(&outcome).contains(&"layers.walk.filters"));
+}
+
+#[test]
+fn laywalk_refuses_a_filter_that_matches_no_layer_without_writing() {
+    let (mut app, mut session) = app_with(layers(), Vec::new());
+    let before = state(&app);
+    let error = walk(&mut app, &mut session, &["Z*"]).expect_err("no match");
+    assert!(refusal(error).starts_with("layers.walk.unknown_filter:"));
+    assert_untouched(&app, before);
+    assert!(session.layer_overrides.is_empty());
+}

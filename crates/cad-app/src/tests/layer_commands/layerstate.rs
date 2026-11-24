@@ -173,6 +173,64 @@ fn layerstate_refuses_restoring_a_snapshot_whose_layer_is_gone() {
 }
 
 #[test]
+fn layerstate_restore_writes_every_changed_row_as_one_undo_step() {
+    let (mut app, mut session) = app_with(layers(), vec![line(1, LayerId(3), 0.0)]);
+    save(&mut app, &mut session, "Plan A").expect("SAVE");
+
+    for (layer, key, value) in [("WALLS", "locked", "true"), ("DOORS", "color", "aci:4")] {
+        execute(
+            &mut app,
+            &mut session,
+            CommandId::SetLayerProperty,
+            CommandPayload::SetLayerProperty {
+                layer: layer.into(),
+                key: key.into(),
+                value: value.into(),
+            },
+        )
+        .expect("write an attribute after the save");
+    }
+    let before = state(&app);
+    restore(&mut app, &mut session, "Plan A").expect("RESTORE");
+    assert!(!layer_attributes(&app, LayerId(3)).locked);
+    assert_eq!(
+        layer_attributes(&app, LayerId(5)).color,
+        LayerAttributes::default().color
+    );
+    assert_eq!(
+        undo_depth(&app),
+        before.1 + 1,
+        "two changed rows are still one undo step"
+    );
+
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .expect("one undo");
+    assert!(layer_attributes(&app, LayerId(3)).locked);
+    assert_ne!(
+        layer_attributes(&app, LayerId(5)).color,
+        LayerAttributes::default().color
+    );
+
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Redo,
+        CommandPayload::None,
+    )
+    .expect("one redo");
+    assert!(!layer_attributes(&app, LayerId(3)).locked);
+    assert_eq!(
+        layer_attributes(&app, LayerId(5)).color,
+        LayerAttributes::default().color
+    );
+}
+
+#[test]
 fn layerstate_list_delete_and_the_bounded_cap() {
     let (mut app, mut session) = app_with(layers(), Vec::new());
     let outcome = execute(

@@ -83,8 +83,8 @@ pub struct SessionState {
     /// criterion). Session editor state only: it is never written to the
     /// drawing, and applying it only replaces [`Self::selection`].
     pub ssx_filter: crate::ssx::SsxFilter,
-    /// Bounded history of layer-override snapshots for `LAYERP`
-    /// ([`crate::layer_history`]): session view state only, never persisted.
+    /// Bounded history of layer-state snapshots for `LAYERP`
+    /// ([`crate::layer_history`]): session overrides plus pre-change layer attributes; session only.
     pub layer_history: LayerOverrideHistory,
     /// Named layer states (`LAYERSTATE`) plus the `LAYERPMODE` gate.
     pub layer_states: LayerStates,

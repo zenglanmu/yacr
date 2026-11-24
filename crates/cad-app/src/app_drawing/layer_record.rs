@@ -11,6 +11,8 @@
 //! Kept beside `layer_commands` rather than inside it so that file stays inside
 //! the project's code-size limit.
 
+use std::collections::BTreeMap;
+
 use super::*;
 use cad_db::{ChangeScope, LayerAttributes};
 
@@ -38,8 +40,13 @@ impl Application {
     /// revision does not move for them and they record no patch. Nothing is
     /// published when no row changes. A successful write reports one combined
     /// revision span and the changed-row count.
+    ///
+    /// The pre-change attributes of every changed row are also pushed as one
+    /// `LAYERP` snapshot (after the publish succeeds), so the same batch is one
+    /// layer-previous step. An unchanged batch pushes nothing.
     pub(super) fn write_layer_flags(
         &mut self,
+        session: &mut SessionState,
         document_id: DocumentId,
         layers: &[LayerId],
         reason: &str,
@@ -57,6 +64,9 @@ impl Application {
         let transaction = next_transaction_id();
         let mut changed = 0;
         let mut patches = Vec::new();
+        // The `LAYERP` half: the pre-change attributes of the rows this batch
+        // really rewrites, captured from the authoritative drawing.
+        let mut previous_attributes: BTreeMap<LayerId, LayerAttributes> = BTreeMap::new();
         // Every real `set_layer_attributes` call reports its own dirty scope; the
         // published change set spans all of those revision bumps, so it has to
         // union them (a layer row is not an entity, so `changes` stays empty).
@@ -65,6 +75,7 @@ impl Application {
             let before_row = layer_row(drawing.as_ref(), *id);
             let mut attributes = candidate.layer_attributes(*id);
             if mutate(&mut attributes) {
+                previous_attributes.insert(*id, candidate.layer_attributes(*id));
                 let write = candidate.set_layer_attributes(*id, attributes, transaction, reason)?;
                 scope.merge(&write.scope);
                 changed += 1;
@@ -96,6 +107,7 @@ impl Application {
             &format!("layer-{reason}"),
             patches,
         )?;
+        session.push_layer_previous_snapshot(previous_attributes);
         Ok((Some(Arc::new(changeset)), changed))
     }
 
