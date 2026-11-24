@@ -849,3 +849,121 @@ fn the_other_pedit_options_keep_the_uniform_width() {
     };
     assert_eq!(width, 1.5, "REVERSE preserves the uniform width");
 }
+
+// --- Edit vertex WIDTH (per-vertex start/end pair) ---------------------------
+
+#[test]
+fn edit_vertex_width_writes_the_representable_single_segment_pair_and_refuses_taper() {
+    // `open_two_vertices` has exactly one segment: its per-vertex start/end
+    // pair is the polyline's constant width, so a uniform pair is exact.
+    let (mut app, mut session) = build(vec![ent(1, open_two_vertices(), 0)], AppMode::Work);
+    select(&mut session, &[1]);
+    let rev = revision(&app);
+
+    // A taper is not modeled: named refusal, nothing written.
+    let error = pedit_edit(
+        &mut app,
+        &mut session,
+        vertex_action(PeditVertexAction::Width {
+            segment: 0,
+            start_width: 2.0,
+            end_width: 3.0,
+        }),
+    )
+    .unwrap_err();
+    assert_unsupported(error, "pedit.vertex_width_unsupported");
+    // A bad index / negative width is invalid input, not a capability gap.
+    let error = pedit_edit(
+        &mut app,
+        &mut session,
+        vertex_action(PeditVertexAction::Width {
+            segment: 1,
+            start_width: 2.0,
+            end_width: 2.0,
+        }),
+    )
+    .unwrap_err();
+    assert_invalid(error, "pedit.vertex_out_of_range");
+    let error = pedit_edit(
+        &mut app,
+        &mut session,
+        vertex_action(PeditVertexAction::Width {
+            segment: 0,
+            start_width: -1.0,
+            end_width: -1.0,
+        }),
+    )
+    .unwrap_err();
+    assert_invalid(error, "pedit.vertex_width_invalid");
+    assert_wrote_nothing(&app, rev);
+
+    // start == end is representable: it writes the uniform width in one
+    // transaction / one undo step (the display path consumes this field).
+    let outcome = pedit_edit(
+        &mut app,
+        &mut session,
+        vertex_action(PeditVertexAction::Width {
+            segment: 0,
+            start_width: 2.0,
+            end_width: 2.0,
+        }),
+    )
+    .expect("a uniform per-vertex pair on a single segment is representable");
+    assert_eq!(outcome.diagnostics[0].code, "pedit.applied");
+    let SemanticGeometry::Polyline { width, .. } = geometry(&app, 1) else {
+        panic!("the entity stays a polyline");
+    };
+    assert_eq!(width, 2.0, "the per-vertex pair becomes the uniform width");
+    assert_ne!(revision(&app), rev);
+    assert_eq!(undo_depth(&app), 1);
+
+    // A repeated write is a named no-op with no new revision/undo entry.
+    let rev = revision(&app);
+    let outcome = pedit_edit(
+        &mut app,
+        &mut session,
+        vertex_action(PeditVertexAction::Width {
+            segment: 0,
+            start_width: 2.0,
+            end_width: 2.0,
+        }),
+    )
+    .expect("the same width is a no-op");
+    assert!(outcome.changes.is_none());
+    assert_eq!(outcome.diagnostics[0].code, "pedit.vertex_width_unchanged");
+    assert_eq!(revision(&app), rev);
+    assert_eq!(undo_depth(&app), 1);
+
+    // UNDO restores the hairline width.
+    app.execute(&mut session, command(CommandId::Undo, CommandPayload::None))
+        .unwrap();
+    let SemanticGeometry::Polyline { width, .. } = geometry(&app, 1) else {
+        panic!("the entity stays a polyline");
+    };
+    assert_eq!(width, 0.0);
+    assert_eq!(undo_depth(&app), 0);
+}
+
+#[test]
+fn edit_vertex_width_refuses_a_per_segment_write_on_a_multi_segment_polyline() {
+    // Two segments: setting just one would differ from the other's uniform
+    // width, which the single stored width cannot describe.
+    let (mut app, mut session) = build(vec![ent(1, open_bulged(), 0)], AppMode::Work);
+    select(&mut session, &[1]);
+    let rev = revision(&app);
+    let error = pedit_edit(
+        &mut app,
+        &mut session,
+        vertex_action(PeditVertexAction::Width {
+            segment: 0,
+            start_width: 2.0,
+            end_width: 2.0,
+        }),
+    )
+    .unwrap_err();
+    let message = error.to_string();
+    assert_unsupported(error, "pedit.vertex_width_unsupported");
+    assert!(message.contains("2 segments"), "{message}");
+    assert_wrote_nothing(&app, rev);
+    assert_eq!(geometry(&app, 1), open_bulged());
+}

@@ -840,7 +840,7 @@ fn edit_vertex_refuses_out_of_range_and_off_curve_requests_by_name() {
 }
 
 #[test]
-fn edit_vertex_tangent_and_width_are_named_capability_refusals() {
+fn edit_vertex_tangent_and_bare_width_are_named_capability_refusals() {
     let (mut app, mut session) = build(vec![ent(1, open_bulged(), 0)], AppMode::Work);
     select(&mut session, &[1]);
     let rev = revision(&app);
@@ -858,10 +858,10 @@ fn edit_vertex_tangent_and_width_are_named_capability_refusals() {
     let error = pedit_edit(
         &mut app,
         &mut session,
-        vertex_action(PeditVertexAction::Width),
+        vertex_action(PeditVertexAction::WidthNeedsArguments),
     )
     .unwrap_err();
-    assert_unsupported(error, "pedit.vertex_width_unsupported");
+    assert_invalid(error, "pedit.vertex_width_needs_args");
     assert_wrote_nothing(&app, rev);
     assert_eq!(geometry(&app, 1), open_bulged());
 }

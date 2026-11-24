@@ -625,7 +625,10 @@ fn mpedit_closes_every_selected_polyline_and_skips_the_line() {
         &mut app,
         &mut session,
         CommandId::Mpedit,
-        Draw2Payload::Mpedit(PeditOption::Close),
+        Draw2Payload::Mpedit(PeditEditCommand {
+            option: PeditEditOption::Close,
+            convert: false,
+        }),
     )
     .unwrap();
     assert_eq!(outcome.objects.len(), 2);

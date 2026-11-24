@@ -722,7 +722,8 @@ pub enum PeditEditOption {
     Join,
     /// `WIDTH <w>`: set the **uniform** polyline width (centred on the
     /// vertices; `0` = hairline) on every selected polyline, in one
-    /// transaction. Full contract: [`crate::command_id::pedit`].
+    /// transaction. The `Edit vertex` start/end form is
+    /// [`PeditVertexAction::Width`]. Full contract: [`crate::command_id::pedit`].
     Width(f64),
     /// `EDIT` / `E` with no sub-menu action: named refusal. The sub-menu itself
     /// is the [`PeditVertexCommand`] form (`PEDIT EDIT NEXT|PREVIOUS|INSERT|
@@ -743,7 +744,8 @@ pub enum PeditEditOption {
     /// `DECURVE` / `D`: remove fit/spline data and restore the straight frame.
     Decurve,
     /// `LTYPE GEN ON|OFF`: named capability refusal (no `plinegen` flag in the
-    /// entity model).
+    /// entity model). Shared by `PEDIT` and `MPEDIT`, so a batch gets the same
+    /// reason.
     LtypeGen { enabled: bool },
     /// `REVERSE` / `R`: reverse vertex order and bulges.
     Reverse,
@@ -760,9 +762,11 @@ pub enum PeditEditOption {
 /// explicitly** — one action per command line, applied to the stored vertex
 /// list in one transaction. Indices are 0-based into the stored vertex array.
 ///
-/// `Tangent` and `Width` act on data this build does not model (a stored fit
-/// tangent, a per-segment width); they are stable named refusals and write
-/// nothing, exactly like `PEDIT WIDTH`.
+/// `Tangent` acts on data this build does not model (a stored fit tangent) and
+/// is a stable named refusal. `Width` accepts the per-vertex start/end pair
+/// (DXF groups 40/41); the domain stores one **uniform** width, so only the
+/// pair's representable case (`start == end` on a single-segment polyline) is
+/// written, and any taper is refused by name.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PeditVertexAction {
     /// `NEXT <from>`: report the vertex after `from` (wraps on a closed ring).
@@ -784,8 +788,22 @@ pub enum PeditVertexAction {
     /// `TANGENT <vertex> <degrees>`: named capability refusal (no stored
     /// fit-tangent field on a polyline).
     Tangent { vertex: usize, angle_degrees: f64 },
-    /// `WIDTH`: named capability refusal (no per-segment width field).
-    Width,
+    /// `WIDTH <segment> <start> <end>`: the per-vertex start/end widths of one
+    /// segment (DXF groups 40/41).
+    ///
+    /// The domain stores a single uniform width, so the only exact write is a
+    /// `start == end` pair on a polyline with that one segment: the pair **is**
+    /// the constant width. A taper (`start != end`) or a per-segment width that
+    /// would differ from the other segments is refused by name
+    /// (`pedit.vertex_width_unsupported`), never averaged or flattened.
+    Width {
+        segment: usize,
+        start_width: f64,
+        end_width: f64,
+    },
+    /// `WIDTH` with no arguments: names the required `<segment> <start> <end>`
+    /// typed form (this build has no interactive vertex marker prompt).
+    WidthNeedsArguments,
 }
 
 /// The typed `PEDIT Edit vertex` request (see [`PeditVertexAction`]).

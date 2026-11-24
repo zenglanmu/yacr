@@ -198,7 +198,8 @@ fn parse_pedit_option(tokens: &[&str]) -> Option<PeditEditOption> {
 
 /// Parse the sub-menu of `PEDIT EDIT`: `NEXT|PREVIOUS <i>`,
 /// `INSERT|MOVE <i> <x> <y> [z]`, `STRAIGHTEN <first> <last>`,
-/// `TANGENT <i> <degrees>` and `WIDTH`.
+/// `TANGENT <i> <degrees>` and `WIDTH <segment> <start> <end>` (a bare
+/// `WIDTH` is admitted and refused by name: the typed form needs the pair).
 ///
 /// Every index is a 0-based vertex/segment index; coordinates are drawing units.
 /// A malformed sub-menu returns `None` (the caller's stable refusal), never a
@@ -245,7 +246,12 @@ fn parse_pedit_vertex(tokens: &[&str]) -> Option<PeditVertexAction> {
             vertex: index(args[0])?,
             angle_degrees: super::parse_signed_decimal(args[1])?,
         }),
-        "WIDTH" | "W" if args.is_empty() => Some(PeditVertexAction::Width),
+        "WIDTH" | "W" if args.is_empty() => Some(PeditVertexAction::WidthNeedsArguments),
+        "WIDTH" | "W" if args.len() == 3 => Some(PeditVertexAction::Width {
+            segment: index(args[0])?,
+            start_width: super::parse_signed_decimal(args[1])?,
+            end_width: super::parse_signed_decimal(args[2])?,
+        }),
         _ => None,
     }
 }

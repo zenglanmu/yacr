@@ -7,10 +7,11 @@
 //!
 //! Full contracts: `crate::command_id::draw2` (re-exported from `cad-app`).
 
-use cad_app::{CommandPayload, Draw2Payload, DrawOrderMode, MlStyleCommand, PeditOption, TrexMode};
+use cad_app::{CommandPayload, Draw2Payload, DrawOrderMode, MlStyleCommand, TrexMode};
 use cad_domain::{Point3, SelectionRef};
 
 use super::arguments::{parse_positive_decimal, parse_signed_decimal};
+use super::modify::parse_pedit_edit_argument;
 
 pub const DONUT_SELECTOR: &str = "DONUT";
 pub const SOLID_SELECTOR: &str = "SOLID";
@@ -367,19 +368,16 @@ pub fn parse_trex_argument(argument: &str) -> Option<Draw2Payload> {
     None
 }
 
-/// `MPEDIT CLOSE|OPEN|REVERSE` (the same option subset as `PEDIT`).
+/// `MPEDIT <PEDIT option>`: the full `PEDIT` option line, applied to every
+/// selected polyline.
+///
+/// The grammar is exactly [`parse_pedit_edit_argument`]'s (`CLOSE`/`OPEN`/
+/// `REVERSE`, plus `JOIN`, `WIDTH <w>`, `FIT`, `SPLINE [0-99]`, `DECURVE`,
+/// `LTYPE [GEN|ON|OFF]`, `UNDO`, with the optional `PEDITACCEPT` prefix). The
+/// batch planner owns `CLOSE`/`OPEN`/`REVERSE`; every other option delegates to
+/// the shared `PEDIT` executor, so no second option grammar exists here.
 pub fn parse_mpedit_argument(argument: &str) -> Option<Draw2Payload> {
-    let key = argument.trim();
-    let option = if key.eq_ignore_ascii_case("CLOSE") || key.eq_ignore_ascii_case("C") {
-        PeditOption::Close
-    } else if key.eq_ignore_ascii_case("OPEN") || key.eq_ignore_ascii_case("O") {
-        PeditOption::Open
-    } else if key.eq_ignore_ascii_case("REVERSE") || key.eq_ignore_ascii_case("R") {
-        PeditOption::Reverse
-    } else {
-        return None;
-    };
-    Some(Draw2Payload::Mpedit(option))
+    parse_pedit_edit_argument(argument.trim()).map(Draw2Payload::Mpedit)
 }
 
 /// `DRAWORDER FRONT|BACK|ABOVE|BELOW`.
