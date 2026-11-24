@@ -26,8 +26,8 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **201** |
-| 部分实现（有写明的界） | **778** |
+| 完整实现 | **204** |
+| 部分实现（有写明的界） | **775** |
 | **已实现合计（完整 + 部分）** | **979** |
 | 未实现 | **2** |
 
@@ -787,9 +787,9 @@
 | `LAYERPMODE` | 部分实现 | `ON\ |
 | `LAYERSTATE` | 部分实现 | `LAYERSTATE SAVE\|RESTORE\|LIST\|DELETE <name>`；会话内最多 32 个命名状态；RESTORE 的图层属性写入一条事务/一步撤销；不持久化 DWG |
 | `LAYERSTATESAVE` | 部分实现 | 带 `LayerState` 载荷时转交既有 `LAYERSTATE` 会话存储；无载荷只报告缺少 New Layer State 对话框（`layerstatesave.needs_name`）。 |
-| `LAYFRZ` | 部分实现 | 预选择输入（不弹 Select objects）；仅 Entity 选择，无 Settings/Viewports/Block 选项；v1 在全部视口冻结；当前层整命令拒绝；图层表写入一条事务/一步撤销 |
+| `LAYFRZ` | 完整实现 | 跨模型空间/图纸空间/块成员选择；bare 冻结绘图级 `frozen`，`LAYFRZ VP [idx,…]`（或 `VIEWPORTS`）写每视口 `layer_overrides`（Vpfreeze）；当前层在目标视口包含 `CVPORT` 时拒绝；一条事务/一步撤销；交互对话框属 ADR 全局范围。 |
 | `LAYISO` | 已实现 | — |
-| `LAYLCK` | 部分实现 | 预选择输入（不弹 Select objects）；锁定选中对象所在的不同图层（含当前层）；图层表写入一条事务/一步撤销 |
+| `LAYLCK` | 完整实现 | 跨模型空间/图纸空间/块成员选择（嵌套按有效层解析，含当前层）；只改 `locked`；一条事务/一步撤销；交互对话框属 ADR 全局范围。 |
 | `LAYMCH` | 部分实现 | 选择式：第一个选中对象的图层为目标，其余移入（一条事务/一步撤销）；空选择/<2 目标/非模型空间/块实例按名拒绝；无交互 Select objects |
 | `LAYMCUR` | 部分实现 | 预选择输入（不弹 Select objects）；取第一个选中对象的图层并用既有的锁定/冻结/关闭当前层拒绝；仅会话状态 |
 | `LAYMRG` | 完整实现 | 选择式：选中对象的层合并到当前层（重写模型/图纸/块内实体 + 删除源层行 + 剪除各图纸视口该层 `layer_overrides` 键），实体补丁 + 布局补丁 + 层行一条事务/一步撤销，重做再次合并；当前层/`0` 层不能作源（与 AutoCAD 一致），**声明的偏离**：目标固定为当前层、无交互 source/target 提示，目标可以是 `0` 层（AutoCAD 是否拒绝未查证）；会话 `LAYERSTATE` 不重写，恢复悬空层仍按 `layerstate.dangling_layer` 拒绝 |
@@ -800,7 +800,7 @@
 | `LAYOUTWIZARD` | 完整实现 | `LAYOUTWIZARD <name> [<paper> <width> <height>] [ARRANGE <Single|TwoVertical|TwoHorizontal|ThreeVertical|ThreeHorizontal|Four>] [PLOTDEVICE|PLOTSTYLE|TITLEBLOCK <name>]`：创建布局 + 应用 Authored 纸张 + 按该纸张生成等分格视口（复用 `VPORTS` 的 `grid_viewports_on_sheet`），布局行/视口/页面设置同一条 `LayoutPatch`/一步撤销；未知排列/未知键/重复键/缺值逐条具名拒绝且不写；打印设备、打印样式表与标题栏按请求逐条 `layoutwizard.*_not_implemented`（明说未应用），交互式向导提示属全局范围 |
 | `LAYTHW` | 完整实现 | 无选择输入（载荷即拒绝）；解冻全部图层——绘图级 `frozen` 标志与**每个图纸布局、每个视口**的冻结覆盖（`PaperViewport.layer_overrides` 中值为 `true` 的项；显式 `false` 覆盖、视口裁剪/矩阵与 `frozen_in_new_viewport` 保留）一次清除；层补丁 + 布局补丁同一事务/一步撤销，重做再次清除 |
 | `LAYTRANS` | 部分实现 | 具名拒绝（`laytrans.unsupported`）：图层转换标准未实现。 |
-| `LAYULK` | 部分实现 | 预选择输入（不弹 Select objects）；解锁选中对象所在的不同图层；图层表写入一条事务/一步撤销 |
+| `LAYULK` | 完整实现 | 跨模型空间/图纸空间/块成员选择（嵌套按有效层解析）；只改 `locked`；一条事务/一步撤销；交互对话框属 ADR 全局范围。 |
 | `LAYUNISO` | 已实现 | — |
 | `LAYVPI` | 完整实现 | 无索引时冻结所选图层于**除 `CVPORT` 当前视口之外的全部视口**（AutoCAD 语义），显式索引形式优先；当前视口是唯一视口时按 `layvpi.no_other_viewport` 拒绝而非「全视口冻结」；图层表写入一条事务/一步撤销 |
 | `LAYWALK` | 部分实现 | 逗号分隔层名；只显示命名层+当前层（会话覆盖，同 LAYISO 原子路径）；未知/空拒绝 |
@@ -1731,9 +1731,9 @@
 | 470 | `LAYERPMODE` | 部分实现 | Turns on and off the tracking of changes made to layer settings for use by the LAYERP command. | `ON\|OFF`；会话标志，关闭后 `LAYERP` 不记录快照；默认 ON；裸命令报告当前值 |
 | 471 | `LAYERSTATE` | 部分实现 | Saves, restores, and manages sets of layer settings that are called layer states. | `LAYERSTATE SAVE\|RESTORE\|LIST\|DELETE <name>`；会话内最多 32 个命名快照（层属性+当前层+覆盖）；RESTORE 的图层属性写入一条事务/一步撤销；无 DWG 持久化 |
 | 472 | `LAYERSTATESAVE` | 部分实现 | Displays the New Layer State to Save dialog box, where you can provide a name and a description for a new layer state. | 带 `LayerState` 载荷时转交既有 `LAYERSTATE` 会话存储；无载荷只报告缺少 New Layer State 对话框（`layerstatesave.needs_name`）。 |
-| 473 | `LAYFRZ` | 部分实现 | Freezes the layer of selected objects. | 预选择输入（不弹 Select objects）；仅 Entity 选择，无 Settings/Viewports/Block 选项；v1 在全部视口冻结；当前层整命令拒绝；图层表写入一条事务/一步撤销 |
+| 473 | `LAYFRZ` | 完整实现 | Freezes the layer of selected objects. | 完整实现：跨模型空间/图纸空间/块成员选择；bare 冻结绘图级 `frozen`，`LAYFRZ VP [idx,…]`（或 `VIEWPORTS`）写每视口 `layer_overrides`（Vpfreeze）；当前层在目标视口包含 `CVPORT` 时拒绝；一条事务/一步撤销；交互对话框属 ADR 全局范围。 |
 | 474 | `LAYISO` | 已实现 | Hides or locks all layers except those of the selected objects. | — |
-| 475 | `LAYLCK` | 部分实现 | Locks the layer of a selected object. | 预选择输入（不弹 Select objects）；锁定选中对象所在的不同图层（含当前层）；图层表写入一条事务/一步撤销 |
+| 475 | `LAYLCK` | 完整实现 | Locks the layer of a selected object. | 完整实现：跨模型空间/图纸空间/块成员选择（嵌套按有效层解析，含当前层）；只改 `locked`；一条事务/一步撤销；交互对话框属 ADR 全局范围。 |
 | 476 | `-LAYMCH` | 部分实现 | Changes the layer of a selected object to match the layer of a selected object. | `LAYMCH` 的别名，同一实现 |
 | 477 | `LAYMCH` | 部分实现 | Changes the layer of a selected object to match the destination layer. | 选择式：第一个选中对象的图层为目标，其余移入（一条事务/一步撤销）；空选择/<2 目标/非模型空间/块实例按名拒绝；无交互 Select objects |
 | 478 | `LAYMCUR` | 部分实现 | Sets the current layer to that of a selected object. | 预选择输入（不弹 Select objects）；取第一个选中对象的图层并用既有的锁定/冻结/关闭当前层拒绝；仅会话状态 |
@@ -1746,7 +1746,7 @@
 | 485 | `LAYOUTWIZARD` | 完整实现 | Creates a new layout tab and specifies page and plot settings. | 创建布局 + Authored 纸张 + 等分格视口排列（复用 `VPORTS` 网格助手），一条 `LayoutPatch`/一步撤销；未知排列/键具名拒绝；打印设备/打印样式/标题栏按请求逐条明说未实现，交互提示属全局范围。 |
 | 486 | `LAYTHW` | 完整实现 | Thaws all layers in the drawing. | 无选择输入（载荷即拒绝）；解冻全部图层：绘图级 `frozen` 标志 + 每个图纸布局/视口的冻结覆盖（保留显式 `false` 覆盖、视口裁剪/矩阵与 `frozen_in_new_viewport`）；层补丁 + 布局补丁一条事务/一步撤销。 |
 | 487 | `LAYTRANS` | 部分实现 | Translates the layers in the current drawing to specified layer standards. | 具名拒绝（`laytrans.unsupported`）：图层转换标准未实现。 |
-| 488 | `LAYULK` | 部分实现 | Unlocks the layer of a selected object. | 预选择输入（不弹 Select objects）；解锁选中对象所在的不同图层；图层表写入一条事务/一步撤销 |
+| 488 | `LAYULK` | 完整实现 | Unlocks the layer of a selected object. | 完整实现：跨模型空间/图纸空间/块成员选择（嵌套按有效层解析）；只改 `locked`；一条事务/一步撤销；交互对话框属 ADR 全局范围。 |
 | 489 | `LAYUNISO` | 已实现 | Restores all layers that were hidden or locked with the LAYISO command. | — |
 | 490 | `LAYVPI` | 完整实现 | Freezes selected layers in all layout viewports except the current viewport. | 无索引 = 除 `CVPORT` 当前视口外的全部视口；显式索引优先；唯一视口即当前视口时 `layvpi.no_other_viewport`；一条事务/一步撤销 |
 | 491 | `LAYWALK` | 部分实现 | Displays objects on selected layers and hides objects on all other layers. | 逗号分隔层名；只显示命名层+当前层（会话覆盖，同 LAYISO 原子路径）；未知/空拒绝 |

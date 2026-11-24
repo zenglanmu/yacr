@@ -878,7 +878,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | 命令 | 状态 | 结果 | 显式未实现 / 有意偏离 |
 |---|---|---|---|
 | `LAYCUR` / `LAYM C U R` | 部分实现 | LAYCUR 把每个选中模型空间实体移到会话当前层（一条事务/一步撤销）；LAYMCUR 以**第一个**选中实体的层为当前层（仅会话状态，复用既有的 locked/frozen/off 拒绝） | 无交互 Select objects；块实例成员/图纸空间/子图元按名拒绝；多选时 LAYMCUR 只用第一个（`laymcur.first_pick` 诊断） |
-| `LAYFRZ` / `LAYLCK` / `LAYULK` | 部分实现 | 按选中实体所在层写 `LayerAttributes.frozen/locked`；每个改动行一个 `LayerPatch`、单事务 ⇒ **一步撤销**（多行时每行一次 revision 提升） | 无 Settings/Viewports/Block Selection 选项；LAYFRZ 对所有视口生效且拒绝当前层 |
+| `LAYFRZ` / `LAYLCK` / `LAYULK` | **完整实现** | 跨模型空间/图纸空间/块成员选择（嵌套按有效层解析）；写 `LayerAttributes.frozen/locked`；`LAYFRZ VP [idx,…]` 写每视口 `layer_overrides`；单事务 ⇒ 一步撤销 | 交互对话框属 ADR 全局范围；`LAYFRZ` 的 Viewports 形式在目标视口包含 `CVPORT` 时拒绝当前层；`frozen_in_new_viewport` 不由 `LAYFRZ` 写 |
 | `SETBYLAYER` | 实现 | 恢复颜色/线型/线宽/**透明度**为随层；`Include blocks` 递归块成员的显示状态；一条事务/一步撤销 | 材质/命名打印样式未建模（全局范围）；锁定图层拒绝；无交互 ByBlock 询问（全局对话框范围） |
 | `REVERSE` | 部分实现 | 反转选中 LINE / LWPOLYLINE（含 bulge 与闭合映射）/ SPLINE（控制点+节点镜像）方向，一条事务/一步撤销 | 仅当前选择；无 helix/3D；其它种类按名拒绝 |
 | `OOPS` | 完整实现 | 恢复**最近一次 ERASE 的整批**实体，并覆盖 `BLOCK` 移出的整批行（定义保留成员、OOPS 放回独立副本）；新 id；一条事务/一步撤销；重复执行是具名空操作 `oops.already_restored`，**撤销该恢复会让快照重新可用** | `WBLOCK` 本构建无删除路径（声明）；`CUTCLIP/CUTBASE` 不记录快照 |
@@ -2262,8 +2262,8 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 | --- | --- | --- |
 | `LAYDEL` / `-LAYDEL` | 删除全部空间（模型/图纸布局/块定义）的该层实体 + 各图纸视口该层覆盖键 + 层行，实体/布局/层行同一记录/一步撤销 | 当前层/`0` 层拒绝；锁定层由数据库拒绝 |
 | `LAYMRG` / `-LAYMRG` | 重写实体 + 删除源层 + 剪除视口覆盖键，同一记录/一步撤销 | 当前层/0 层不能作源；目标固定为当前层（声明的偏离） |
-| `LAYFRZ` | 冻结选中对象所在层，一步撤销 | 无 Settings/Viewports/Block 选项；当前层拒绝 |
-| `LAYLCK` / `LAYULK` | 锁定/解锁选中对象所在层，一步撤销 | 预选择输入；无 Settings |
+| `LAYFRZ` | **完整实现**：绘图级冻结 + `VP [idx,…]` 逐视口冻结，跨空间/块成员选择，一步撤销 | 交互对话框全局范围；当前层仅在目标视口含 `CVPORT` 时拒绝 |
+| `LAYLCK` / `LAYULK` | **完整实现**：跨空间/块成员选择，锁定/解锁所在层，一步撤销 | 交互对话框全局范围 |
 | `LAYTHW` | 解冻全部层：绘图级标志 + 每个图纸布局/视口的冻结覆盖，层补丁 + 布局补丁一步撤销 | 保留 `frozen_in_new_viewport` 与显式 `false` 覆盖（不是冻结） |
 | `RENAME` / `-RENAME` | 六种 kind 真实重命名（含 `LINETYPE` 与引用级联），一步撤销 | 无对话框；创建/删除线型仍不支持 |
 | `LAYERSTATE RESTORE` | 恢复的图层属性写入一步撤销 | 状态仍为会话内、不持久化 DWG |
