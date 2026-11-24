@@ -26,8 +26,8 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **244** |
-| 部分实现（有写明的界） | **735** |
+| 完整实现 | **248** |
+| 部分实现（有写明的界） | **731** |
 | **已实现合计（完整 + 部分）** | **979** |
 | 未实现 | **2** |
 
@@ -256,7 +256,7 @@
 
 > **这不是验收，是当前排期与口径。** 本轮目标是把命令从 `部分实现`/具名拒绝推进到支持域内
 > **没有剩余可写缺口**的 `完整实现`；不放宽为“改状态不实现”，也不把 ADR 全局范围缺口算作
-> 单命令完成。当前清单 **244 完整 / 735 部分 / 2 未实现**，只有真正合并且契约测试通过的
+> 单命令完成。当前清单 **248 完整 / 731 部分 / 2 未实现**，只有真正合并且契约测试通过的
 > 命令才改状态。
 
 | 批次 | 范围 | 状态 |
@@ -272,6 +272,7 @@
 | M3 约束 | ADR-0054：有界二维几何/尺寸约束求解器、minor 15、DXF 节点 | ADR 已接受；P0 未开始，命令仍 partial |
 | M4 动作录制器 | ADR-0056：ACTRECORD/ACTSTOP/ACTUSERINPUT/ACTUSERMESSAGE/ACTMANAGER | **已合并**（+7 complete + Manage 面板；无真实文件对话框/GUI 证据） |
 | M1h 填充/底图/视口 | `HATCH`/`-HATCH` 支持域闭合（关联性/预览为全局范围）、`IMAGEATTACH` 旋转 + 图纸布局、`VPSYNC` 可选主视口、`HATCHEDIT` 索引对账 | **已合并**（+5 complete；`HATCHEDIT` 的 `ORIGIN`/`PATTERNFILE` 早已实现，索引 stale 本次修正） |
+| M1i 文本屏幕/托盘/查找大小写 | `TEXTSCR`/`GRAPHSCR` 接共享 chrome 文本屏幕（`cad_status.textScreen`，正文复用命令行历史同一折叠与序列化，无第二套历史）；`TRAYSETTINGS` 接状态栏托盘与托盘设置面（`cad_status.traySettings`，唯一开关即该会话旗标；无状态栏载体按名拒绝）；`FINDMATCH` 接入 `-FIND`/`FIND` 同一匹配器（ON 区分大小写，覆盖 MTEXT/单行 TEXT/MULTILEADER/表格单元格） | **已合并**（+4 complete；无 GUI/像素/真机证据） |
 | M5 其他面板 | 发布/传递/标准/CUI/点云/PDF 底图 | 分析完成；多数是 `L`/架构级缺口，按 ADR/子系统逐个评估 |
 
 **已明确的诚实缺口**：`ARCHIVE`、`STANDARDS`、`CHECKSTANDARDS`、全部 `CUI*`、`CUSTOMIZE` 仍是
@@ -314,7 +315,7 @@
 | `-EATTEXT` | 部分实现 | 具名拒绝（`-eatttext.unsupported`）：本构建无块属性模型；命令行拼写。 |
 | `-ETRANSMIT` | 部分实现 | 具名拒绝（`-etransmit.unsupported`）：本构建无 eTransmit/zip 打包模型；命令行拼写。 |
 | `-EXPORT` | 部分实现 | 具名拒绝（`-export.unsupported`）：请用 PLOT/EXPORT；本构建只有一条矢量导出路径；命令行拼写。 |
-| `-FIND` | 完整实现 | `-FIND <needle>`：与 `FIND` 同一遍历与匹配实现（模型空间 + 全部图纸布局，ASCII 不区分大小写子串，按画出来的文本）；只报告、不写库 |
+| `-FIND` | 完整实现 | `-FIND <needle>`：与 `FIND` 同一遍历与匹配实现（模型空间 + 全部图纸布局，按画出来的文本）；比较方式读取会话 `FINDMATCH`（默认 OFF = ASCII 不区分大小写，ON = 区分大小写）；只报告、不写库 |
 | `-GRAPHICSCONFIG` | 部分实现 | 具名拒绝（`-graphicsconfig.unsupported: renderer/graphics configuration is owned by the host`）。 |
 | `-GROUP` | 部分实现 | `GROUP` 的别名（同一 `CommandId`/会话组表路径）；无 DWG group 对象/修订/历史 |
 | `-HATCH` | 完整实现 | `HATCH` 的命令行拼写：同一解析器/处理器与同一支持域（整实体闭合边界 + LINE/ARC 边链；solid/user/predefined/gradient 与 `PATTERN`/`PATTERNFILE`）；hatch 写入边界所在空间（模型空间或同一图纸布局，`hatch.block_space`/`hatch.mixed_space` 按名拒绝）；创建期关联性与实时预览属全局范围 |
@@ -708,9 +709,9 @@
 | `FILLET` | 完整实现 | `Radius`/`Trim`/`Polyline`、平行线自动半径；`R>0` 覆盖 **LINE/ARC/CIRCLE/ELLIPSE(+椭圆弧)/SPLINE** 的任意两两组合（SPLINE 用精确 `sub_curve` 修剪，椭圆/样条数值相切解 + 交替投影抛光）；`R=0` 是**全部 10 种平面对**的尖角（含 CIRCLE↔CIRCLE 用 TRIM 的两交点 CIRCLE→ARC 规则把两个圆都切成拾取侧弧、圆弧/椭圆/样条按自身区间修剪、LINE 可延伸到角点）；被修剪对象保持 id/图层/空间/draw order，一条事务/一步撤销；相切/不相交/非共面/非平面逐条具名拒绝。命令内 `Multiple`、`Undo` 与多解循环属全局交互范围 |
 | `FILLETEDGE` | 部分实现 | 具名拒绝（`filletedge.unsupported: no 3D edge fillet model`）。 |
 | `FILTER` | 部分实现 | `AND`/`OR`/`XOR`/`NOT` 递归逻辑树（括号、元数校验）、相对运算符、已建模属性集；只读；**分类/自定义特性未建模**；**命名 `.nfl` 过滤器未实现** |
-| `FIND` | 完整实现 | `FIND <needle> [=> <replacement>]`：**整图遍历**（模型空间 + 每个图纸布局，按空间分组报告），跨空间替换**一条事务/一步撤销**，拒绝时哪里都不写；**所有文字通道按「画出来的文本」匹配**（MTEXT/带文字 MULTILEADER/`AcDbText`（含导入成 `Text` 的 ATTRIB/ATTDEF）/表格单元格，经同一投影与转义往返）；块定义内命中按**只读通道**具名列出（`block definitions, read-only (edit with BEDIT)`），FIND 不改块定义 |
+| `FIND` | 完整实现 | `FIND <needle> [=> <replacement>]`：**整图遍历**（模型空间 + 每个图纸布局，按空间分组报告），跨空间替换**一条事务/一步撤销**，拒绝时哪里都不写；**所有文字通道按「画出来的文本」匹配**（MTEXT/带文字 MULTILEADER/`AcDbText`（含导入成 `Text` 的 ATTRIB/ATTDEF）/表格单元格，经同一投影与转义往返）；块定义内命中按**只读通道**具名列出（`block definitions, read-only (edit with BEDIT)`），FIND 不改块定义；比较方式读取会话 `FINDMATCH`（默认 OFF = ASCII 不区分大小写，ON = 区分大小写） |
 | `FINDINCLUDE` | 部分实现 | 会话令牌（默认 ON）；跨块/外部参照文字搜索未实现。 |
-| `FINDMATCH` | 部分实现 | 会话令牌（默认 OFF）；已实现的 -FIND/FIND 恒按 ASCII 不区分大小写比较。 |
+| `FINDMATCH` | 完整实现 | 切换会话 `find_match_case`（默认 OFF）；`-FIND`/`FIND` 的报告与替换共用该标志：ON 按精确字节（区分大小写），OFF 按 ASCII 不区分大小写；覆盖 MTEXT/单行 TEXT/MULTILEADER/表格单元格。 |
 | `FLATSHOT` | 部分实现 | 具名拒绝（`flatshot.unsupported: 3D solids are not modeled, so there is nothing to flatten`）。 |
 | `FLATTEN` | 部分实现 | 真实编辑：LINE/POLYLINE/CIRCLE/ARC/ELLIPSE/POINT/SPLINE、TEXT/SHAPE/MASK/XY 平面 IMAGE/COMPOUND，以及竖直 INSERT（只改插入点 z 与属性文字 z，不编辑块定义；成员非平/放置倾斜按名拒绝）的 z 置 0；一条事务/一步撤销；MESH/Body3d/派生显示的 DIMENSION/HATCH/MULTILEADER/TABLE 按名拒绝（Express 投影行为简化为 z=0）。 |
 | `FREESPOT` | 部分实现 | 具名拒绝（`freespot.unsupported: 3D light objects are not modeled`）。 |
@@ -745,7 +746,7 @@
 | `GOTOURL` | 部分实现 | 具名拒绝（`gotourl.unsupported: this build has no hyperlink storage model`）。 |
 | `GRADIENT` | 完整实现 | 渐变填充取自会话渐变通道（形状/角度/两色 ACI→sRGB），创建时写入 `AcDbHatch` 渐变参数并保留边界，一条事务/一步撤销 |
 | `GRAPHICSCONFIG` | 部分实现 | 具名拒绝（`graphicsconfig.unsupported: renderer/graphics configuration is owned by the host`）。 |
-| `GRAPHSCR` | 部分实现 | 置会话 `text_screen`=false；无文本屏幕窗口可隐藏。 |
+| `GRAPHSCR` | 完整实现 | 清除会话文本屏幕旗标（`cad_status.textScreen`）；共享 chrome 的文本屏幕窗口随之关闭并返回图形。 |
 | `GRID` | 已实现 | — |
 | `GROUP` | 部分实现 | 会话内组表（上限 64、名字大小写不敏感）；裸命令/`LIST` 只读、`CREATE` 从选择集建组、`DELETE` 只移除名字；不写 DWG group 对象/修订/历史/事务 |
 | `GROUPEDIT` | 部分实现 | `ADD`/`REMOVE` 从选择集或键入实体 id 增删、`RENAME`（允许仅改大小写）；单次会话变更；不写实体/数据库 |
@@ -1141,7 +1142,7 @@
 | `TEXTEDIT` | 部分实现 | 整串替换；无光标级编辑、不解析 MTEXT 标记 |
 |  `TEXTFIT` | 部分实现 | 真实：改存储宽度因子（DXF group 41），字高/位置/justification/旋转/内容/样式不变；因子 = `target_width / 批量估算宽度`（`height × 字符数`，含对齐），逐实体输出 `textfit.estimated_width` 诊断；空字符串/非正目标具名拒绝；一条事务/一步撤销。MTEXT 导出无 group 41 通道（报告导出缺口）；ATTRIB/ATTDEF/RTEXT/表格/标注派生文字仍为 1.0。 |
 | `TEXTMASK` | 部分实现 | 偏移（默认 0.35）/Wipeout 遮罩/`*TEXTMASK-*` 会话组/重跑替换/组上限/有限边界守卫；`3dface`/`solid` 遮罩类型无实体模型，按名拒绝 |
-| `TEXTSCR` | 部分实现 | 置会话 `text_screen`=true；无文本屏幕窗口、不显示提示历史。 |
+| `TEXTSCR` | 完整实现 | 置会话文本屏幕旗标（`cad_status.textScreen`）；共享 chrome 的文本屏幕窗口显示**同一**命令行历史（`commandWindowRows` + `commandWindowText`，无第二套历史模型）；无历史通道时显式说明而非空窗。 |
 | `TEXTTOFRONT` | 完整实现 | 选择式；按 `SpaceId` 逐范围把 Text/MultiLeader/Dimension 上移到该范围所有非合格对象之前（保持相对顺序，`texttofront.unchanged` 不建事务，耗尽 `texttofront.order_exhausted`）；其它选中对象逐条 `texttofront.skipped` | 载荷无「全图文字」选项（声明）；无 Draw Order 对话框 |
 | `TEXTUNMASK` | 部分实现 | 组优先删除 + 估计外框启发；清理已擦除文字留下的陈旧组；未分组遮罩来源不可证明（声明）；无匹配为具名无操作成功 |
 | `TFRAMES` | 部分实现 | 会话令牌 `tframes`；不改变图像/外部参照边框可见性。 |
@@ -1163,7 +1164,7 @@
 | `TRACEPALETTEOPEN` | 部分实现 | 具名拒绝（`tracepaletteopen.unsupported: no collaboration trace model`）。 |
 | `TRACEVIEW` | 部分实现 | 具名拒绝（`traceview.unsupported: no collaboration trace model`）。 |
 | `TRANSPARENCY` | 部分实现 | 具名拒绝（`transparency.unsupported`）：未建模图像透明度。 |
-| `TRAYSETTINGS` | 部分实现 | 会话令牌（默认 ON）；无状态栏托盘 UI。 |
+| `TRAYSETTINGS` | 完整实现 | 翻转会话 `traysettings`（默认 ON）；状态栏托盘（右侧图标/通知簇）跟随该旗标显示/隐藏，托盘设置面的唯一开关即该旗标；紧凑布局无状态栏/托盘时键入按名拒绝；不模拟 AutoCAD 托盘图标清单。 |
 | `TREESTAT` | 部分实现 | 显式 `treestat.not_tracked`；不造假计数 |
 | `TREX` | 部分实现 | `TREX TRIM\ |
 | `TRIM` | 部分实现 | 目标是 `LINE`/`ARC`/`CIRCLE`/`SPLINE`/`ELLIPSE`（含椭圆弧）/`LWPOLYLINE`（开放/闭合，bulge 保留为精确子弧）/**`HATCH`（单边界环，保留窗口沿直线切边闭合，保留 id/图层/空间/绘制顺序/显示状态/平面/样式/填充/种子/图案原点）**；拾取投影所在的段保留（本项目 TRIM 语义，见 `docs/drawing-edit.md` §3）；边界折线/样条采样。**按名拒绝**：`INSERT`（块参照只存摆放，成员是共享定义的行，切开等于改写所有实例 —— `trim.target_insert`）、`MESH`/`OPAQUE`/`COMPOUND`、HATCH 多环（`trim.hatch_nested_loops`）/曲线切边（`trim.hatch_cut_not_closable`）/倾斜含弧环（`trim.hatch_nonplanar_loop`） |
@@ -1638,10 +1639,10 @@
 | 366 | `FILLET` | 完整实现 | Rounds or fillets the edges of two 2D objects or the adjacent faces of a 3D solid. | `R>0`：LINE/ARC/CIRCLE/ELLIPSE/SPLINE 任意两两组合（SPLINE 精确子曲线修剪），插入一段相切 ARC；`R=0`：全部平面对（含 CIRCLE↔CIRCLE 双圆→拾取侧弧）只修剪不插入；一条事务/一步撤销；`Multiple`/`Undo`/多解循环属全局交互范围。 |
 | 367 | `FILLETEDGE` | 部分实现 | Rounds and fillets the edges of solid objects. | 具名拒绝（`filletedge.unsupported: no 3D edge fillet model`）。 |
 | 368 | `FILTER` | 部分实现 | Creates a list of requirements that an object must meet to be included in a selection set. | `AND`/`OR`/`XOR`/`NOT` 递归逻辑树（括号、元数校验）、相对运算符、已建模属性集；只读；**分类/自定义特性未建模**；**命名 `.nfl` 过滤器未实现** |
-| 369 | `-FIND` | 完整实现 | Searches for the text that you specify in the entire drawing, the current space or layout, or selected objects. | `-FIND <needle>`：与 `FIND` 同一实现（整图：模型空间 + 全部图纸布局；ASCII 不区分大小写；按画出来的文本匹配），只报告不写库 |
-| 370 | `FIND` | 完整实现 | Finds the text that you specify, and can optionally replace it with other text. | `FIND <needle> [=> <replacement>]`；遍历模型空间与全部图纸布局并分组报告；跨空间替换一条事务/一步撤销，拒绝时任何空间都不写；MTEXT/`AcDbText`/表格单元格均按投影（画出来的文本）匹配与替换，含 `\P`/`%%d`/`\S`/`^I` 语义；块定义命中只读具名 |
+| 369 | `-FIND` | 完整实现 | Searches for the text that you specify in the entire drawing, the current space or layout, or selected objects. | `-FIND <needle>`：与 `FIND` 同一实现（整图：模型空间 + 全部图纸布局；按画出来的文本匹配）；比较方式读取会话 `FINDMATCH`（默认 OFF = ASCII 不区分大小写，ON = 区分大小写）；只报告不写库 |
+| 370 | `FIND` | 完整实现 | Finds the text that you specify, and can optionally replace it with other text. | `FIND <needle> [=> <replacement>]`；遍历模型空间与全部图纸布局并分组报告；跨空间替换一条事务/一步撤销，拒绝时任何空间都不写；MTEXT/`AcDbText`/表格单元格均按投影（画出来的文本）匹配与替换，含 `\P`/`%%d`/`\S`/`^I` 语义；块定义命中只读具名；比较方式读取会话 `FINDMATCH`（OFF 默认 ASCII 不区分大小写 / ON 区分大小写） |
 | 371 | `FINDINCLUDE` | 部分实现 | Controls the types of text objects included in a search when using the -FIND command. | 会话令牌（默认 ON）；跨块/外部参照文字搜索未实现。 |
-| 372 | `FINDMATCH` | 部分实现 | Controls how the entered text string is compared with text in objects when using the -FIND command. | 会话令牌（默认 OFF）；已实现的 -FIND/FIND 恒按 ASCII 不区分大小写比较。 |
+| 372 | `FINDMATCH` | 完整实现 | Controls how the entered text string is compared with text in objects when using the -FIND command. | 切换会话 `find_match_case`（默认 OFF）；`-FIND`/`FIND` 的报告与替换共用该标志：ON 精确字节（区分大小写），OFF ASCII 不区分大小写；覆盖 MTEXT/单行 TEXT/MULTILEADER/表格单元格。 |
 | 373 | `FLATSHOT` | 部分实现 | Creates a 2D representation of all 3D objects based on the current view. | 具名拒绝（`flatshot.unsupported: 3D solids are not modeled, so there is nothing to flatten`）。 |
 | 374 | `FLATTEN` | 部分实现 | Converts 3D geometry to a projected 2D representation. | 真实编辑：LINE/POLYLINE/CIRCLE/ARC/ELLIPSE/POINT/SPLINE、TEXT/SHAPE/MASK/XY 平面 IMAGE/COMPOUND，以及竖直 INSERT（只改插入点 z 与属性文字 z，不编辑块定义；成员非平/放置倾斜按名拒绝）的 z 置 0；一条事务/一步撤销；MESH/Body3d/派生显示的 DIMENSION/HATCH/MULTILEADER/TABLE 按名拒绝（Express 投影行为简化为 z=0）。 |
 | 375 | `FREESPOT` | 部分实现 | Creates a free spotlight which is a spotlight without a specified target. | 具名拒绝（`freespot.unsupported: 3D light objects are not modeled`）。 |
@@ -1677,7 +1678,7 @@
 | 405 | `GRADIENT` | 完整实现 | Fills an enclosed area or selected objects with a gradient fill. | 渐变填充取自会话渐变通道（形状/角度/两色 ACI→sRGB），创建时写入 `AcDbHatch` 渐变参数并保留边界，一条事务/一步撤销 |
 | 406 | `-GRAPHICSCONFIG` | 部分实现 | Sets hardware acceleration on or off and provides access to display performance options on the command line. | 具名拒绝（`-graphicsconfig.unsupported: renderer/graphics configuration is owned by the host`）。 |
 | 407 | `GRAPHICSCONFIG` | 部分实现 | Sets hardware acceleration on or off and provides access to display performance options. | 具名拒绝（`graphicsconfig.unsupported: renderer/graphics configuration is owned by the host`）。 |
-| 408 | `GRAPHSCR` | 部分实现 | Causes the text window to display behind the application window. | 置会话 `text_screen`=false；无文本屏幕窗口可隐藏。 |
+| 408 | `GRAPHSCR` | 完整实现 | Causes the text window to display behind the application window. | 清除会话文本屏幕旗标（`cad_status.textScreen`）；共享 chrome 的文本屏幕窗口随即关闭并返回图形。 |
 | 409 | `GRID` | 已实现 | Displays a grid pattern in the current viewport. | — |
 | 410 | `-GROUP` | 部分实现 | Creates and manages saved sets of objects called groups. | `GROUP` 的别名（同一 `CommandId`/会话组表路径）；无 DWG group 对象/修订/历史 |
 | 411 | `GROUP` | 部分实现 | Creates and manages saved sets of objects called groups. | 会话内组表（上限 64、名字大小写不敏感）；裸命令/`LIST` 只读、`CREATE` 从选择集建组、`DELETE` 只移除名字；不写 DWG group 对象/修订/历史/事务 |
@@ -2128,7 +2129,7 @@
 | 856 | `TEXTEDIT` | 部分实现 | Edits a selected multiline or single-line text object, or the text in a dimension object. | 整串替换；无光标级编辑、不解析 MTEXT 标记 |
 |  857 | `TEXTFIT` | 部分实现 | Expands or compresses the width of text objects based on new starting and ending points. | 真实：改存储宽度因子（DXF group 41），字高/位置/justification/旋转/内容/样式不变；因子 = `target_width / 批量估算宽度`（`height × 字符数`，含对齐），逐实体输出 `textfit.estimated_width` 诊断；空字符串/非正目标具名拒绝；一条事务/一步撤销。MTEXT 导出无 group 41 通道（报告导出缺口）；ATTRIB/ATTDEF/RTEXT/表格/标注派生文字仍为 1.0。 |
 | 858 | `TEXTMASK` | 部分实现 | Creates a blank area behind selected text or mtext objects. | 偏移（默认 0.35）/Wipeout 遮罩/`*TEXTMASK-*` 会话组/重跑替换/组上限/有限边界守卫；`3dface`/`solid` 遮罩类型无实体模型，按名拒绝 |
-| 859 | `TEXTSCR` | 部分实现 | Opens a text window that displays a history of prompts and command line entries for the current session. | 置会话 `text_screen`=true；无文本屏幕窗口、不显示提示历史。 |
+| 859 | `TEXTSCR` | 完整实现 | Opens a text window that displays a history of prompts and command line entries for the current session. | 置会话文本屏幕旗标（`cad_status.textScreen`）；共享 chrome 的文本屏幕窗口显示同一命令行历史（`commandWindowRows` + `commandWindowText`，无第二套历史模型），关闭经 `GRAPHSCR` 回写旗标。 |
 | 860 | `TEXTTOFRONT` | 完整实现 | Brings text, leaders, and dimensions in front of all other objects in the drawing. | 以**当前选择**为输入；按 `SpaceId` 逐范围（模型空间、各图纸布局、各块定义）上移到该范围非合格对象之前，范围内相对顺序保持，`texttofront.unchanged` 不建事务；其它选中对象 `texttofront.skipped` | 载荷无「全图文字」选项；无 Draw Order 对话框 |
 | 861 | `TEXTUNMASK` | 部分实现 | Removes the mask from selected text or mtext that were masked with TEXTMASK. | 组优先删除 + 估计外框启发；清理已擦除文字留下的陈旧组；未分组遮罩来源不可证明（声明）；无匹配为具名无操作成功 |
 | 862 | `TFRAMES` | 部分实现 | Toggles the display of frames for all wipeout and image objects. | 会话令牌 `tframes`；不改变图像/外部参照边框可见性。 |
@@ -2153,7 +2154,7 @@
 | 881 | `TRACEPALETTEOPEN` | 部分实现 | Opens the Trace palette where you can view and manage traces in the current drawing. | 具名拒绝（`tracepaletteopen.unsupported: no collaboration trace model`）。 |
 | 882 | `TRACEVIEW` | 部分实现 | Changes the active trace to view mode so you can edit the parent drawing while the trace is still visible. | 具名拒绝（`traceview.unsupported: no collaboration trace model`）。 |
 | 883 | `TRANSPARENCY` | 部分实现 | Controls whether background pixels in an image are transparent or opaque. | 具名拒绝（`transparency.unsupported`）：未建模图像透明度。 |
-| 884 | `TRAYSETTINGS` | 部分实现 | Controls the display of icons and notifications in the status bar tray. | 会话令牌（默认 ON）；无状态栏托盘 UI。 |
+| 884 | `TRAYSETTINGS` | 完整实现 | Controls the display of icons and notifications in the status bar tray. | 翻转会话 `traysettings`（默认 ON）；状态栏托盘（本构建的右侧图标/通知簇）跟随该旗标显示/隐藏，托盘设置面的唯一开关即该旗标；紧凑布局无状态栏/托盘时键入按名拒绝；不模拟 AutoCAD 托盘图标清单。 |
 | 885 | `TREESTAT` | 部分实现 | Displays information about the drawing's current spatial index. | 显式 `treestat.not_tracked`；不造假计数 |
 | 886 | `TREX` | 部分实现 | Combines the TRIM and EXTEND commands. | `TREX TRIM\|EXTEND`；选择集为边界，复用 `plan_trim`/`plan_extend`；无边界提示 |
 | 887 | `TRIM` | 部分实现 | Trims objects to meet the edges of other objects. | 目标是 `LINE`/`ARC`/`CIRCLE`/`SPLINE`/`ELLIPSE`（含椭圆弧）/`LWPOLYLINE`（开放/闭合，bulge 保留为精确子弧）/**`HATCH`（单边界环，保留窗口沿直线切边闭合，保留 id/图层/空间/绘制顺序/显示状态/平面/样式/填充/种子/图案原点）**；拾取投影所在的段保留（本项目 TRIM 语义，见 `docs/drawing-edit.md` §3）；边界折线/样条采样。**按名拒绝**：`INSERT`（块参照只存摆放，成员是共享定义的行，切开等于改写所有实例 —— `trim.target_insert`）、`MESH`/`OPAQUE`/`COMPOUND`、HATCH 多环（`trim.hatch_nested_loops`）/曲线切边（`trim.hatch_cut_not_closable`）/倾斜含弧环（`trim.hatch_nonplanar_loop`） |
