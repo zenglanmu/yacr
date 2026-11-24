@@ -246,6 +246,27 @@
 - P4 **部分推进**（2026-11-15）：`LAYDEL`/`-LAYDEL` 补齐**图纸布局与块定义内实体**（`cad-db` 单一 `entities` 表按 `layer` 过滤）并剪除各图纸视口的该层 `layer_overrides` 键，实体补丁 + 布局补丁 + 层行一条事务/一步撤销 ⇒ 两条晋升为**完整实现**；`laydel.layer_in_use` 拒码随之删除。同一轮 `LAYTHW` 补齐**每个图纸布局/视口的冻结覆盖**（`layer_overrides` 中 `true` 项清除；显式 `false` 覆盖、视口裁剪/矩阵与 `frozen_in_new_viewport` 保留），层补丁 + 布局补丁一条事务/一步撤销 ⇒ 也晋升为**完整实现**（旧文档「本构建无视口模型」的借口经测试证伪：旧实现下 2 个新测试确实失败）。同一轮 `RENAME`/`-RENAME` 补齐 **`LINETYPE` kind**：改名在 `cad-db` 的单次校验写入内把层属性/实体属性的引用一并级联（一次 revision、一次 `ChangeSet`），撤销/重做对称 ⇒ 两条晋升为**完整实现**；`Continuous` 不可改名、创建/删除线型仍不支持。同一轮 `LAYMRG`/`-LAYMRG` 补上**各图纸视口 `layer_overrides` 的源层键剪除**（此前会留下指向已删层的死键，且 `layout_patches` 硬编码为空），与实体/层行同一条记录 ⇒ 两条晋升为**完整实现**（交互 Settings 属全局范围；目标固定为当前层是声明的偏离）。仍保留 `LAYFRZ`/`LAYLCK`/`LAYULK` 的界（视口级冻结标记 + 嵌套/xref 拾取），故 P4 未整体完成。
 - P5 **部分完成**（2026-11-10）：`cad-db` 布局/视口写 API + `LayoutPatch` 已落地；`LAYOUT` 的 `NEW/RENAME/DELETE`、`LAYOUTMERGE`（升为**已实现**）、`LAYOUTWIZARD` 的布局创建、`VPORTS`/`-VPORTS`、`VPCLIP RECT`、`VPSCALE`、`PAGESETUP`/`-PAGESETUP`、`PSETUPIN`/`-PSETUPIN`、`MVIEW`、`LAYOUTWIZARD` 纸张已真实写入并一条事务/一步撤销。`CLIP`/`CLIPIT` 2026-11-15 从具名拒绝改为真实命令（两条晋升为**完整实现**）；`STRETCH` 的多边形/lasso 交互捕获接线（晋升为**完整实现**）；`JOIN` 为 `Spline` 增加 `closed` 标志（DXF 70 bit 1 往返 + 闭环出图）并让 `JOIN CLOSE` 的混合 SPLINE 真正闭合（晋升为**完整实现**）。`LAYOUTWIZARD` 2026-11-15 补齐**等分格视口排列**（`ARRANGE`，复用 `VPORTS` 的网格助手并铺在本次 Authored 纸张上）⇒ 晋升为**完整实现**（打印设备/打印样式/标题栏与交互提示属全局范围，逐条具名报告）。仍保留 `MVSETUP`、跨文件页面设置、视口选择与多边形裁剪边界；`VPMAX`/`VPMIN` 仍是会话标记。每批落地后更新本表、总计与 `docs/compatibility.md`，并单独提交。
 
+## 严格完整 wave（2026-11-24 起，进行中）
+
+> **这不是验收，是当前排期与口径。** 本轮目标是把命令从 `部分实现`/具名拒绝推进到支持域内
+> **没有剩余可写缺口**的 `完整实现`；不放宽为“改状态不实现”，也不把 ADR 全局范围缺口算作
+> 单命令完成。当前清单仍是 **186 完整 / 793 部分 / 2 未实现**，只有真正合并且契约测试通过的
+> 命令才改状态。
+
+| 批次 | 范围 | 状态 |
+| --- | --- | --- |
+| M1a 图层/视口 | `LAYLCK`/`LAYULK`/`LAYFRZ`（跨空间选择 + `Vpfreeze`）、`VPMAX`/`VPMIN` 文档对账 | 实现中；`VPMAX`/`VPMIN` 已对账为 complete |
+| M1b 3D 图元 | `BOX`/`CONE`/`CYLINDER`/`SPHERE`/`TORUS`/`WEDGE`/`PYRAMID` 选项与 `ELEV` | 实现中 |
+| M1c 3D 运算 | `UNION`/`SUBTRACT`/`INTERSECT` 提交前单壳校验、`XEDGES`、`3DORBIT`/`3DPAN` | 实现中 |
+| M1d 参数管理器 | `PARAMETERS`/`-PARAMETERS`/`PARAMETERSCLOSE` + Parametric→Manage 面板 | 实现中 |
+| M2 块属性 | ADR-0055：ATTDEF/ATTRIB 模型、minor 14、DXF/渲染/命令/面板 | 模型/schema 实现中；命令仍 partial |
+| M3 约束 | ADR-0054：有界二维几何/尺寸约束求解器、minor 15、DXF 节点 | ADR 已接受；实现未开始，命令仍 partial |
+| M4 其他面板 | 发布/传递/标准/CUI/动作录制器/点云/PDF 底图 | 分析完成；多数是 `L`/架构级缺口，按 ADR/子系统逐个评估 |
+
+**已明确的诚实缺口**：`ARCHIVE`、`STANDARDS`、`CHECKSTANDARDS`、全部 `CUI*`、`CUSTOMIZE` 仍是
+架构级未建模（sheet set / DWS / CUIx），不得靠改状态凑数；点云/PDF 内容与约束求解器属于新子系统，
+需要各自的 ADR/模型后才能进入 complete。
+
 ## 已实现 / 部分实现命令索引（按字母序）
 
 > 本索引覆盖官方清单里所有当前为「已实现」或「部分实现」的名字（含 `-` 别名）；
