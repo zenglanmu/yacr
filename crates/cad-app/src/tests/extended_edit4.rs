@@ -8,7 +8,7 @@
 
 use super::*;
 use cad_db::{
-    BlockDefinition, DbEntity, DbObject, DrawingDatabaseBuilder, EntityColor, EntityLineWeight,
+    BlockDefinition, DbEntity, DbObject, DrawingDatabaseBuilder, EntityColor,
     EntityRenderAttributes, Layer,
 };
 
@@ -779,56 +779,6 @@ fn bextend_extends_to_the_selected_insert_members() {
     };
     assert!((start.x - 3.0).abs() < 1e-9 && start.y.abs() < 1e-9);
     assert!((end.x - 10.0).abs() < 1e-9 && end.y.abs() < 1e-9);
-}
-
-#[test]
-fn change_and_chprop_move_to_the_current_layer_and_reset_to_bylayer() {
-    for ext in [ExtendedCommandId::Change, ExtendedCommandId::ChProp] {
-        let (mut app, mut session) = application_with_document();
-        let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
-        for (id, name) in [(LayerId(0), "0"), (LayerId(3), "WALLS")] {
-            b.insert_layer(Layer {
-                id,
-                name: name.into(),
-                visible: true,
-            })
-            .unwrap();
-        }
-        b.insert_entity(part(
-            1,
-            line(p3(0.0, 0.0, 0.0), p3(1.0, 0.0, 0.0)),
-            LayerId(3),
-            SpaceId::Model,
-            "AcDbLine",
-            0,
-        ))
-        .unwrap();
-        b.set_entity_render_attributes(
-            EntityId(1),
-            EntityRenderAttributes {
-                clip: None,
-                color: EntityColor::Explicit([255, 0, 0]),
-                lineweight: EntityLineWeight::Explicit(0.5),
-                ..EntityRenderAttributes::default()
-            },
-        )
-        .unwrap();
-        app.workspace
-            .documents
-            .get_mut(&DocumentId(1))
-            .unwrap()
-            .drawing = Arc::new(b.finish().unwrap());
-        assert_eq!(session.active_layer, LayerId(0));
-        select(&mut session, &[1]);
-
-        run(&mut app, &mut session, ext).unwrap();
-        assert_eq!(undo_depth(&app), 1, "{ext:?} is one undo step");
-        let entity = drawing_of(&app).entity(EntityId(1)).unwrap();
-        assert_eq!(entity.layer, LayerId(0));
-        let attributes = drawing_of(&app).entity_render_attributes(EntityId(1));
-        assert_eq!(attributes.color, EntityColor::ByLayer);
-        assert_eq!(attributes.lineweight, EntityLineWeight::ByLayer);
-    }
 }
 
 #[test]

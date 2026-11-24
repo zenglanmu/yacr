@@ -223,11 +223,11 @@ pub enum CommandPayload {
     ///
     /// `target` is the ref resolved at pick time and `point` is the second click.
     /// The point is **projected** onto the target (AutoCAD's own behaviour for a
-    /// click that is not exactly on the curve). LINE, ARC and an open LWPOLYLINE
-    /// are supported; a CIRCLE/closed polyline, a SPLINE and every other kind are
-    /// named refusals. The source stays the first piece and the second piece is a
-    /// fresh id — one transaction / one undo step. Full contract:
-    /// [`crate::command_id::break_at_point`].
+    /// click that is not exactly on the curve). Supported: LINE, ARC, CIRCLE,
+    /// ELLIPSE (full or arc), open SPLINE and LWPOLYLINE (open = two pieces,
+    /// closed = one opened loop); every other kind is a named refusal. The source
+    /// stays the first piece and a second piece is a fresh id — one transaction /
+    /// one undo step. Full contract: [`crate::command_id::break_at_point`].
     BreakAtPoint {
         target: SelectionRef,
         point: Point3,

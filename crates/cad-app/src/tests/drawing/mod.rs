@@ -382,6 +382,9 @@ mod addselected;
 mod minsert;
 mod modify_batch;
 mod modify_extra;
+// Extended BREAKATPOINT curve kinds (2026-11-24 strict lane): CIRCLE, ELLIPSE,
+// open SPLINE and closed LWPOLYLINE, plus the remaining named refusals.
+mod break_at_point_extra;
 mod shape;
 // OVERKILL (Delete Duplicate Objects) contract tests.
 mod mtext;
