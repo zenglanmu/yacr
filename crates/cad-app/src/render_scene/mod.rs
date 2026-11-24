@@ -33,6 +33,8 @@ use retire::{
 };
 pub use settings::DisplaySettings;
 #[cfg(test)]
+mod attribute_edit_tests;
+#[cfg(test)]
 mod display_mode_tests;
 mod update;
 #[cfg(test)]

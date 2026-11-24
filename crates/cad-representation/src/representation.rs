@@ -172,6 +172,37 @@ impl DisplayRepresentation {
     }
 }
 
+/// The `ATTDISP` display state for block-attribute values (ADR-0055 M2).
+///
+/// The value is a **display** setting, not drawing data: it changes which
+/// attribute text fragments the representation provider emits and nothing else.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum AttributeDisplay {
+    /// `ATTDISP NORMAL` (the default): visible values draw; `invisible` values
+    /// do not; a `constant` definition draws regardless.
+    #[default]
+    Normal,
+    /// `ATTDISP ON`: every value draws, including `invisible` ones.
+    On,
+    /// `ATTDISP OFF`: every non-constant value is hidden. A `constant`
+    /// definition still draws (its value is fixed at definition time).
+    Off,
+}
+
+impl AttributeDisplay {
+    /// Whether a value with `flags` is drawn in this mode.
+    pub fn shows(self, flags: cad_domain::AttributeFlags) -> bool {
+        if flags.constant {
+            return true;
+        }
+        match self {
+            AttributeDisplay::On => true,
+            AttributeDisplay::Normal => !flags.invisible,
+            AttributeDisplay::Off => false,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct RepresentationContext {
     pub document: DocumentId,
@@ -239,6 +270,13 @@ pub struct RepresentationContext {
     /// history entry or `ChangeSet`, and this build claims no redraw-speed
     /// benefit from it.
     pub qtext: bool,
+    /// How block-attribute values are displayed (`ATTDISP`, ADR-0055 M2).
+    ///
+    /// A **constant** definition draws its value in every mode; a non-constant
+    /// value follows this token: `Normal` hides an `invisible` value, `On` shows
+    /// every value, `Off` hides every non-constant value. This is a display
+    /// mode: no database write, revision, history entry or `ChangeSet`.
+    pub attdisp: AttributeDisplay,
     /// `VIEWRES`: a **ceiling** on chord segments per curve, or `None` for the
     /// build's own [`TessellationParams`] default.
     ///
@@ -303,6 +341,9 @@ impl RepresentationContext {
             // areas on, quick text off.
             fill: true,
             qtext: false,
+            // `ATTDISP` starts at Normal: visible values draw, invisible ones do
+            // not (a constant definition still draws in every mode).
+            attdisp: AttributeDisplay::Normal,
             // `None` keeps the build's own tessellation budget, so a caller
             // that never received a `VIEWRES` value builds exactly the scene it
             // built before the token was consumed.
@@ -374,6 +415,16 @@ impl RepresentationContext {
     /// `QTEXT` token straight through.
     pub fn with_qtext(mut self, enabled: bool) -> Self {
         self.qtext = enabled;
+        self
+    }
+
+    /// Set the `ATTDISP` display state for block-attribute values.
+    ///
+    /// The default is [`AttributeDisplay::Normal`]; a caller passes the session
+    /// token straight through. The plot path always uses `Normal`, so a screen
+    /// `ATTDISP OFF` cannot hide plotted attribute text.
+    pub fn with_attdisp(mut self, mode: AttributeDisplay) -> Self {
+        self.attdisp = mode;
         self
     }
 

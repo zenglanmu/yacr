@@ -37,6 +37,13 @@ pub struct DisplaySettings {
     pub fill: bool,
     /// Draw text as a placeholder rectangle (`QTEXT ON`).
     pub qtext: bool,
+    /// How block-attribute values draw (`ATTDISP`).
+    ///
+    /// A session display token: `Normal` (the default) hides `invisible` values,
+    /// `On` shows every value, `Off` hides every non-constant value. A constant
+    /// definition draws in every mode. It is part of `SceneVersion`, so a flip
+    /// rebuilds the base; it never writes `cad-db`.
+    pub attdisp: cad_representation::AttributeDisplay,
     /// `VIEWRES` chord-segment ceiling per curve; `None` = build default.
     pub curve_segments: Option<usize>,
     /// Draw 3D bodies as edge segments only (`VSCURRENT WIREFRAME`).
@@ -56,6 +63,7 @@ impl Default for DisplaySettings {
             // pre-token scene.
             fill: true,
             qtext: false,
+            attdisp: cad_representation::AttributeDisplay::Normal,
             curve_segments: None,
             // The session visual style starts at `SHADED` (this build's
             // deliberate divergence from AutoCAD's 2D-wireframe initial value),
@@ -75,6 +83,7 @@ impl DisplaySettings {
             .with_wipeout_frames(self.wipeout_frames)
             .with_fill(self.fill)
             .with_qtext(self.qtext)
+            .with_attdisp(self.attdisp)
             .with_curve_segments(self.curve_segments)
             .with_body_wireframe(self.body_wireframe)
     }
@@ -115,6 +124,15 @@ impl CadSceneController {
     /// rectangle, so the flip rebuilds the base; it never writes `cad-db`.
     pub fn set_qtext(&mut self, enabled: bool) -> bool {
         self.set_display_setting(|settings| settings.qtext = enabled)
+    }
+
+    /// Set the session `ATTDISP` state for block-attribute values.
+    ///
+    /// A change rebuilds the base (it is part of [`SceneVersion`]) and never
+    /// writes `cad-db`. The plot path resolves its own `Normal`, so a screen
+    /// `ATTDISP OFF` cannot hide plotted attribute text.
+    pub fn set_attdisp(&mut self, mode: cad_representation::AttributeDisplay) -> bool {
+        self.set_display_setting(|settings| settings.attdisp = mode)
     }
 
     /// Set the session `VIEWRES` chord-segment ceiling. Returns whether the
