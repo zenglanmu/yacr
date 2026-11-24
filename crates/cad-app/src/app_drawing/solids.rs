@@ -24,12 +24,26 @@
 //! refusal happens before any staging, so the drawing, its revision and history
 //! stay untouched and the operands survive.
 //!
-//! # Point contract (this build; no interactive prompt yet)
+//! # Construction contract (typed payloads; no interactive prompt yet)
 //!
 //! AutoCAD prompts for the dimensions interactively. This carrier has no such
-//! prompt in C1, so every command takes its points explicitly and the arity is
-//! enforced (a wrong count is an `InvalidInput` with a stable
-//! `<kind>.requires_{two,three}_points` code, never a silent truncation):
+//! prompt in C1 (the prompt capture is a declared ADR global-scope carve-out),
+//! so every construction is one typed payload and the arity/option rules are
+//! enforced here. Two payload shapes are accepted:
+//!
+//! * [`CommandPayload::Points`] — the **explicit 3D** form below. Every point
+//!   keeps its own z, so the session `ELEV` token never translates it (AutoCAD
+//!   behaves the same when all three coordinates are typed).
+//! * [`CommandPayload::Solid`] — the AutoCAD option constructions
+//!   (`Cube`/`Center`/`Length`, `Diameter`, `2P`, `Top radius`, …). Their base
+//!   points are **plan** `[x, y]` coordinates and the base plane's z is the
+//!   session `ELEV` token, exactly like a plan pick — except `Center` with a
+//!   corner and `SPHERE 2P`, whose AutoCAD prompts are 3D and which keep their
+//!   own z. This is the consumer of `ELEV` for explicit 3D solids; see
+//!   [`super::solid_spec`] for the full per-kind grammar and the declared limits
+//!   (positive extents only, `+Z` axes, no `3P`/`Ttr`/`Elliptical` base).
+//!
+//! The explicit 3D form (unchanged from C1):
 //!
 //! | command | points | meaning |
 //! |---|---|---|
@@ -41,10 +55,28 @@
 //! | `SPHERE` | 2 | centre, radius point; `radius = |p1 - p0|` (3D) `> 0` |
 //! | `TORUS` | 3 | centre `c`, major point `m`, minor point `n`; `major = |m - c|` xy `> 0`; `minor = |n - m|` (3D) `> 0`; `minor < major` |
 //!
+//! AutoCAD's option constructions (the [`CommandPayload::Solid`] form):
+//!
+//! | command | construction | payload |
+//! |---|---|---|
+//! | `BOX`/`WEDGE` | `Cube` | `Cube { corner, edge }` |
+//! | `BOX`/`WEDGE` | `Center` + corner | `CenterPoints { center, corner }` (centred on `center`; the corner's mirror image is the opposite corner) |
+//! | `BOX`/`WEDGE` | `Center` + `Cube` | `CenterCube { center, edge }` (centred on all axes) |
+//! | `BOX`/`WEDGE` | `Center` + `Length` | `CenterLengths { center, length, width, height }` |
+//! | `BOX`/`WEDGE` | `Length` | `Length { corner, length, width, height }` |
+//! | `CYLINDER` | any base + height | `CylinderPlan { base, height }` |
+//! | `CONE` | any base + `Top radius` + height | `ConePlan { base, top_radius, height }` |
+//! | `SPHERE` | `Diameter` | `SphereDiameter { center, diameter }` |
+//! | `SPHERE` | `2P` (3D) | `SphereTwoPoint { first, second }` |
+//! | `TORUS` | any ring + tube | `TorusPlan { ring, tube }` |
+//! | `PYRAMID` | `Points` only | `Edge`/`Sides`/`Top radius` need an n-gon/truncated seam primitive that does not exist — refused by name, PYRAMID stays partial |
+//!
 //! Every point must be finite (`<kind>.non_finite_point`). Non-positive or
 //! non-finite extents are `<kind>.degenerate_extent`; a non-square pyramid base
 //! or an off-centre apex is `<kind>.invalid_base`; a cone whose top radius equals
-//! its base radius is `cone.equal_radii` (that is a `CYLINDER`).
+//! its base radius is `cone.equal_radii` (that is a `CYLINDER`); a construction
+//! the kind does not take is `solid.option_not_supported`. Every refusal happens
+//! before the modeler call and before any staging, so it writes nothing.
 //!
 //! # Carrier capability
 //!
@@ -87,10 +119,11 @@
 
 use super::*;
 use crate::app_utility::require_none_payload;
+use crate::command_payload::SolidPrimitiveCommand;
 use crate::tasks::{SolidBooleanOperand, SolidBooleanPlan};
 use cad_kernel_adapter::{
-    execute_solid, BooleanOp, PrimitiveKind, PrimitiveSpec, SolidExchange, SolidOperation,
-    SolidOutcome, SolidProduct, SolidRequest, TessellationBudget, TessellationOutcome,
+    execute_solid, BooleanOp, PrimitiveKind, SolidExchange, SolidOperation, SolidOutcome,
+    SolidProduct, SolidRequest, TessellationBudget, TessellationOutcome,
 };
 
 /// The stable refusal a carrier without a modeler reports.
@@ -141,17 +174,27 @@ impl Application {
         command: &Command,
         kind: PrimitiveKind,
     ) -> CadResult<CommandOutcome> {
-        let CommandPayload::Points(points) = &command.payload else {
-            return Err(CadError::InvalidInput(format!(
-                "{}.requires_points: {} takes an explicit Points([..]) payload (no interactive \
-                 prompt in this build)",
-                kind.as_str(),
-                kind.as_str().to_ascii_uppercase()
-            )));
+        // Both accepted shapes describe the same input type; the explicit points
+        // form is the pre-existing contract and is mapped onto the same typed
+        // value, so there is exactly one spec path and one set of refusals.
+        let input = match &command.payload {
+            CommandPayload::Points(points) => SolidPrimitiveCommand::Points(points.clone()),
+            CommandPayload::Solid(input) => input.clone(),
+            _ => {
+                return Err(CadError::InvalidInput(format!(
+                    "{}.requires_points: {} takes an explicit Points([..]) or Solid(..) payload \
+                     (no interactive prompt in this build)",
+                    kind.as_str(),
+                    kind.as_str().to_ascii_uppercase()
+                )))
+            }
         };
-        // Point mapping and validation run before any modeler call: a bad payload
-        // is an input error, never an `Unsupported`/`Failed` kernel answer.
-        let spec = primitive_spec(kind, points)?;
+        // Construction mapping and validation run before any modeler call: a bad
+        // payload is an input error, never an `Unsupported`/`Failed` kernel answer.
+        // Plan-form constructions take their base z from the session `ELEV`
+        // token here; the create funnel's `Body3d` exemption then leaves the
+        // already-placed body alone (no double translation).
+        let spec = solid_spec::solid_primitive_spec(kind, &input, session.drafting_extras.elev())?;
 
         // Both sides of the seam share one kernel mutex: a synchronous create
         // issued while a boolean worker owns it would block the command thread.
@@ -543,235 +586,4 @@ pub(crate) fn kernel_failure_message(diagnostics: &[Diagnostic]) -> String {
         .first()
         .map(|diagnostic| diagnostic.message.clone())
         .unwrap_or_else(|| "the kernel produced no body".to_string())
-}
-
-/// Map the explicit point payload onto the seam's [`PrimitiveSpec`].
-///
-/// All arity, finiteness and extent rules of the module table are enforced here,
-/// so `PrimitiveSpec::validate` (and the kernel) never sees a bad payload.
-fn primitive_spec(kind: PrimitiveKind, points: &[Point3]) -> CadResult<PrimitiveSpec> {
-    match kind {
-        PrimitiveKind::Box => {
-            require_arity(kind, points, 2)?;
-            let (p0, p1) = (points[0], points[1]);
-            require_finite(kind, &[p0, p1])?;
-            let (low, high) = (min_point(p0, p1), max_point(p0, p1));
-            Ok(PrimitiveSpec::Box {
-                origin: low,
-                length: require_extent(kind, "dx (|p1.x - p0.x|)", high.x - low.x)?,
-                width: require_extent(kind, "dy (|p1.y - p0.y|)", high.y - low.y)?,
-                height: require_extent(kind, "dz (|p1.z - p0.z|)", high.z - low.z)?,
-            })
-        }
-        PrimitiveKind::Wedge => {
-            require_arity(kind, points, 3)?;
-            let (p0, p1, p2) = (points[0], points[1], points[2]);
-            require_finite(kind, &[p0, p1, p2])?;
-            let dx = (p1.x - p0.x).abs();
-            let dy = (p1.y - p0.y).abs();
-            let length = require_extent(kind, "dx (|p1.x - p0.x|)", dx)?;
-            let width = require_extent(kind, "dy (|p1.y - p0.y|)", dy)?;
-            // The base must be one plane: a base built from two different z
-            // values has no single `height` and no kernel wedge to match it.
-            let scale = length.max(width).max(1.0);
-            if (p0.z - p1.z).abs() > 1e-9 * scale {
-                return Err(CadError::InvalidInput(format!(
-                    "wedge.base_not_coplanar: the two base corners must share z, got {} and {}",
-                    p0.z, p1.z
-                )));
-            }
-            // The tall face is at the **minimum-x** corner (`x = origin.x`), the
-            // `polyhedra::wedge_brep` convention; reversing p0/p1 cannot move it.
-            let origin = Point3 {
-                x: p0.x.min(p1.x),
-                y: p0.y.min(p1.y),
-                z: p0.z.min(p1.z),
-            };
-            Ok(PrimitiveSpec::Wedge {
-                origin,
-                length,
-                width,
-                height: require_extent(kind, "height (p2.z - base z)", p2.z - origin.z)?,
-            })
-        }
-        PrimitiveKind::Pyramid => {
-            require_arity(kind, points, 3)?;
-            let (p0, p1, apex) = (points[0], points[1], points[2]);
-            require_finite(kind, &[p0, p1, apex])?;
-            let dx = (p1.x - p0.x).abs();
-            let dy = (p1.y - p0.y).abs();
-            let length = require_extent(kind, "dx (|p1.x - p0.x|)", dx)?;
-            let width = require_extent(kind, "dy (|p1.y - p0.y|)", dy)?;
-            // A rectangular base would need a different apex rule than the seam's
-            // square-base `Pyramid`; refuse rather than silently square it.
-            let scale = length.max(width).max(1.0);
-            if (dx - dy).abs() > 1e-9 * scale {
-                return Err(CadError::InvalidInput(format!(
-                    "pyramid.invalid_base: the base must be square, got {dx} x {dy}"
-                )));
-            }
-            // The base is one horizontal plane (`z = p0.z = p1.z`), exactly like
-            // WEDGE: a tilted base has no single height, and silently taking the
-            // lower z would drop the other corner's z.
-            if (p0.z - p1.z).abs() > 1e-9 * scale {
-                return Err(CadError::InvalidInput(format!(
-                    "pyramid.base_not_coplanar: the two base corners must share z, got {} and {}",
-                    p0.z, p1.z
-                )));
-            }
-            let base_z = p0.z.min(p1.z);
-            let centre = Point3 {
-                x: (p0.x + p1.x) / 2.0,
-                y: (p0.y + p1.y) / 2.0,
-                z: base_z,
-            };
-            let off_centre = ((apex.x - centre.x).powi(2) + (apex.y - centre.y).powi(2)).sqrt();
-            if off_centre > 1e-9 * scale {
-                return Err(CadError::InvalidInput(format!(
-                    "pyramid.invalid_base: the apex must be over the base centre, it is \
-                     {off_centre} away in xy"
-                )));
-            }
-            Ok(PrimitiveSpec::Pyramid {
-                base_center: centre,
-                length,
-                height: require_extent(kind, "height (apex.z - base z)", apex.z - base_z)?,
-            })
-        }
-        PrimitiveKind::Cylinder => {
-            require_arity(kind, points, 3)?;
-            let (centre, radius_point, top) = (points[0], points[1], points[2]);
-            require_finite(kind, &[centre, radius_point, top])?;
-            Ok(PrimitiveSpec::Cylinder {
-                origin: centre,
-                radius: require_extent(
-                    kind,
-                    "radius (|r - c| in xy)",
-                    planar_distance(centre, radius_point),
-                )?,
-                height: require_extent(kind, "height (t.z - c.z)", top.z - centre.z)?,
-            })
-        }
-        PrimitiveKind::Sphere => {
-            require_arity(kind, points, 2)?;
-            let (centre, radius_point) = (points[0], points[1]);
-            require_finite(kind, &[centre, radius_point])?;
-            Ok(PrimitiveSpec::Sphere {
-                origin: centre,
-                radius: require_extent(kind, "radius (|p1 - p0|)", distance(centre, radius_point))?,
-            })
-        }
-        PrimitiveKind::Cone => {
-            require_arity(kind, points, 3)?;
-            let (centre, radius_point, top) = (points[0], points[1], points[2]);
-            require_finite(kind, &[centre, radius_point, top])?;
-            let radius_bottom = require_extent(
-                kind,
-                "radius_bottom (|r - c| in xy)",
-                planar_distance(centre, radius_point),
-            )?;
-            // `0` is the seam's full-cone apex; any other value is a frustum top.
-            let radius_top = planar_distance(centre, top);
-            if !radius_top.is_finite() {
-                return Err(CadError::InvalidInput(
-                    "cone.degenerate_extent: radius_top must be finite".into(),
-                ));
-            }
-            // The upstream cone constructor refuses a zero slope: equal radii
-            // are a cylinder, and this build says so instead of surfacing a
-            // kernel failure.
-            if (radius_top - radius_bottom).abs() <= 1e-12 * radius_bottom.max(1.0) {
-                return Err(CadError::InvalidInput(format!(
-                    "cone.equal_radii: radius_top {radius_top} equals radius_bottom \
-                     {radius_bottom}; use CYLINDER for a straight tube"
-                )));
-            }
-            Ok(PrimitiveSpec::Cone {
-                origin: centre,
-                radius_bottom,
-                radius_top,
-                height: require_extent(kind, "height (t.z - c.z)", top.z - centre.z)?,
-            })
-        }
-        PrimitiveKind::Torus => {
-            require_arity(kind, points, 3)?;
-            let (centre, major_point, minor_point) = (points[0], points[1], points[2]);
-            require_finite(kind, &[centre, major_point, minor_point])?;
-            let major = require_extent(
-                kind,
-                "major_radius (|m - c| in xy)",
-                planar_distance(centre, major_point),
-            )?;
-            let minor = require_extent(
-                kind,
-                "minor_radius (|n - m|)",
-                distance(major_point, minor_point),
-            )?;
-            if minor >= major {
-                return Err(CadError::InvalidInput(format!(
-                    "torus.degenerate_extent: the minor radius {minor} must be smaller than the \
-                     major radius {major}"
-                )));
-            }
-            Ok(PrimitiveSpec::Torus {
-                origin: centre,
-                major_radius: major,
-                minor_radius: minor,
-            })
-        }
-    }
-}
-
-/// Enforce the explicit point count of one primitive family.
-fn require_arity(kind: PrimitiveKind, points: &[Point3], expected: usize) -> CadResult<()> {
-    if points.len() == expected {
-        return Ok(());
-    }
-    let word = if expected == 2 { "two" } else { "three" };
-    Err(CadError::InvalidInput(format!(
-        "{}.requires_{word}_points: {} takes exactly {expected} point(s), got {}",
-        kind.as_str(),
-        kind.as_str().to_ascii_uppercase(),
-        points.len()
-    )))
-}
-
-fn require_finite(kind: PrimitiveKind, points: &[Point3]) -> CadResult<()> {
-    if points.iter().all(|point| is_finite_point(*point)) {
-        return Ok(());
-    }
-    Err(CadError::InvalidInput(format!(
-        "{}.non_finite_point: every point must have finite x, y and z",
-        kind.as_str()
-    )))
-}
-
-fn require_extent(kind: PrimitiveKind, name: &str, value: f64) -> CadResult<f64> {
-    if value.is_finite() && value > 0.0 {
-        return Ok(value);
-    }
-    Err(CadError::InvalidInput(format!(
-        "{}.degenerate_extent: {name} must be finite and positive, got {value}",
-        kind.as_str()
-    )))
-}
-
-fn planar_distance(a: Point3, b: Point3) -> f64 {
-    ((b.x - a.x).powi(2) + (b.y - a.y).powi(2)).sqrt()
-}
-
-fn min_point(a: Point3, b: Point3) -> Point3 {
-    Point3 {
-        x: a.x.min(b.x),
-        y: a.y.min(b.y),
-        z: a.z.min(b.z),
-    }
-}
-
-fn max_point(a: Point3, b: Point3) -> Point3 {
-    Point3 {
-        x: a.x.max(b.x),
-        y: a.y.max(b.y),
-        z: a.z.max(b.z),
-    }
 }

@@ -4,10 +4,8 @@
 //! item is re-exported by [`crate`] under its original name, so the public paths
 //! (`cad_app::CommandPayload`, `cad_app::TwoLineCommand`, …) are unchanged.
 //!
-//! A payload describes the **input** of exactly one [`crate::CommandId`]; it never
-//! carries behaviour. The command layer validates it and either performs the
-//! documented write in one transaction or refuses explicitly (see each variant's
-//! documentation).
+//! A payload describes the **input** of exactly one [`crate::CommandId`] and never
+//! carries behaviour: the command layer validates it, then writes or refuses.
 
 use cad_domain::{
     LayerId, MLeaderTextAngle, Point3, SelectionRef, SemanticGeometry, SpaceId, TextAlignH,
@@ -996,4 +994,6 @@ pub enum CommandPayload {
         body: SelectionRef,
         seed: Point3,
     },
+    /// 3D primitive option construction; see [`SolidPrimitiveCommand`].
+    Solid(SolidPrimitiveCommand),
 }

@@ -178,6 +178,9 @@ pub(crate) mod solids;
 // `XEDGES`: copy the selected bodies' stored display edges into LINE rows (one
 // transaction / one undo step; no second geometry kernel).
 mod xedges;
+// The typed-construction half of those seven commands: payload → `PrimitiveSpec`
+// with every arity/finiteness/option refusal (split out of `solids`).
+pub(crate) mod solid_spec;
 // The 2026-11-12 block/copy writes: `MINSERT` (block array) and `ADDSELECTED`.
 mod addselected;
 mod minsert;

@@ -26,6 +26,10 @@ pub use xclip::*;
 mod utility;
 pub use utility::*;
 
+/// The typed construction inputs of the seven 3D primitive commands.
+mod solid;
+pub use solid::*;
+
 /// The first OFFSET prompt: a fixed offset distance, or `Through` (the pick
 /// point defines the distance, so the offset passes through it).
 ///
