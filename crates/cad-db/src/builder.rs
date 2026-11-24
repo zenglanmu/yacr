@@ -77,6 +77,7 @@ impl DrawingDatabaseBuilder {
                 active_annotation_scale: None,
                 document_metadata: crate::DocumentMetadata::default(),
                 units_display: crate::UnitsDisplay::default(),
+                layer_pmode: true,
                 document_times: crate::DocumentTimes::default(),
                 code_page: None,
                 next_entity_id: 1,
