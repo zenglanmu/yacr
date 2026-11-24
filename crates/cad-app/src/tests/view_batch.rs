@@ -493,6 +493,134 @@ fn vpoint_words_and_vectors_set_a_direction_without_touching_the_model() {
 }
 
 #[test]
+fn newview_window_stores_a_framed_view_without_moving_the_camera() {
+    let (mut app, mut session) = app_with_extent_and_second_viewport();
+    let before = revision(&app);
+    let camera = viewport(&app, 1).camera;
+
+    let outcome = run_view(
+        &mut app,
+        &mut session,
+        ViewCommand::Window {
+            name: "Window View".into(),
+            first: Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            second: Point3 {
+                x: 400.0,
+                y: 300.0,
+                z: 0.0,
+            },
+        },
+    );
+    assert_eq!(codes(&outcome), ["view.saved_window"]);
+    assert_eq!(
+        viewport(&app, 1).camera,
+        camera,
+        "NEWVIEW defines a view; it does not move the display"
+    );
+    assert_eq!(revision(&app).0, before.0 + 1, "one table revision");
+    assert!(app.can_undo(&DocumentId(1)));
+
+    let stored = app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .named_views()
+        .resolve("window view")
+        .expect("the window view is stored");
+    assert_eq!(stored.camera.target.x, 200.0);
+    assert_eq!(stored.camera.target.y, 150.0);
+    match stored.camera.projection {
+        cad_domain::ViewProjection::Orthographic { scale } => {
+            assert!((scale - 0.5).abs() < 1e-12, "scale {scale} != 0.5");
+        }
+        other => panic!("a plan window is orthographic, got {other:?}"),
+    }
+    assert!(!stored.is_3d);
+
+    // The stored view restores like any other named view.
+    let saved_camera = camera;
+    zoom_by(&mut app, &mut session, 2.0);
+    assert_ne!(viewport(&app, 1).camera, saved_camera);
+    let outcome = view_go(&mut app, &mut session, "Window View");
+    assert_eq!(codes(&outcome), ["view.restored"]);
+    let restored = viewport(&app, 1).camera;
+    assert_eq!(restored.target.x, 200.0);
+    assert_eq!(restored.target.y, 150.0);
+}
+
+#[test]
+fn newview_window_refuses_3d_and_degenerate_rectangles_without_writing() {
+    let (mut app, mut session) = app_with_extent_and_second_viewport();
+    run_view(&mut app, &mut session, ViewCommand::Save("Anchor".into()));
+    let before = revision(&app);
+
+    let error = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::View,
+                CommandPayload::View(ViewCommand::Window {
+                    name: "Degenerate".into(),
+                    first: Point3 {
+                        x: 1.0,
+                        y: 1.0,
+                        z: 0.0,
+                    },
+                    second: Point3 {
+                        x: 1.0,
+                        y: 1.0,
+                        z: 0.0,
+                    },
+                }),
+            ),
+        )
+        .unwrap_err();
+    assert!(format!("{error:?}").contains("newview.window.degenerate_rect"));
+    assert_eq!(revision(&app), before);
+    assert!(app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .named_views()
+        .resolve("Degenerate")
+        .is_none());
+
+    // Enter the 3D observation; a window is a plan-only construct.
+    app.execute(
+        &mut session,
+        command(
+            CommandId::VPoint,
+            CommandPayload::VPoint(VPointInput::Standard(StandardView::Front)),
+        ),
+    )
+    .unwrap();
+    let before = revision(&app);
+    let error = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::View,
+                CommandPayload::View(ViewCommand::Window {
+                    name: "ThreeD".into(),
+                    first: Point3 {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                    second: Point3 {
+                        x: 100.0,
+                        y: 100.0,
+                        z: 0.0,
+                    },
+                }),
+            ),
+        )
+        .unwrap_err();
+    assert!(format!("{error:?}").contains("newview.window.requires_2d"));
+    assert_eq!(revision(&app), before);
+}
+
+#[test]
 fn view_save_and_delete_are_work_only_while_restore_and_list_stay_viewer_legal() {
     let (mut app, mut session) = app_with_extent_and_second_viewport();
     run_view(&mut app, &mut session, ViewCommand::Save("A".into()));
@@ -516,6 +644,30 @@ fn view_save_and_delete_are_work_only_while_restore_and_list_stay_viewer_legal()
         .named_views()
         .resolve("B")
         .is_none());
+
+    let error = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::View,
+                CommandPayload::View(ViewCommand::Window {
+                    name: "W".into(),
+                    first: Point3 {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                    second: Point3 {
+                        x: 10.0,
+                        y: 10.0,
+                        z: 0.0,
+                    },
+                }),
+            ),
+        )
+        .unwrap_err();
+    assert!(matches!(error, CadError::PermissionDenied));
+    assert_eq!(revision(&app), before);
 
     let outcome = run_view(&mut app, &mut session, ViewCommand::List);
     assert_eq!(codes(&outcome), ["view.list"]);
