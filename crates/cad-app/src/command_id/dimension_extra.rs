@@ -42,11 +42,27 @@
 //! Every refusal happens before any write: no transaction, no revision bump and
 //! no history entry. Creation is **non-associative** (no `ACAD_DIMASSOC`).
 //!
+//! ## Text override and object selection
+//!
+//! The payload also models the two other documented forms:
+//!
+//! * `text_override: Option<String>` — the same entity field `DIMEDIT TEXT`
+//!   writes (`<>` = the measurement), validated like DIMEDIT before any write
+//!   (`dimrotated.bad_text` for empty/whitespace or more than
+//!   [`crate::MAX_TOOL_TEXT_CHARS`] characters).
+//! * [`crate::RotatedLinearDimensionCommand::Object`] — AutoCAD's "select
+//!   object" form: the selected entity supplies both extension-line origins. An
+//!   open LINE/ARC/elliptical ARC/SPLINE/LWPOLYLINE uses its two endpoints; a
+//!   CIRCLE or full ELLIPSE uses the two extent points along the dimension-line
+//!   direction (a tilted conic is `dimrotated.object_off_plane`); every other
+//!   kind is `dimrotated.object_unsupported`. The dimension-line location stays
+//!   an explicit pick.
+//!
 //! ## NOT IMPLEMENTED
 //!
-//! The interactive `Specify angle of dimension line` prompt, the object-selection
-//! variant (pick a line/object to derive the origins), a `Text`/`Mtext` override,
-//! associativity (`DIMASSOC=2`) and 3D/work-plane creation. Work-only.
+//! The interactive `Specify angle of dimension line` and `Select object` prompts
+//! (global interaction scope), associativity (`DIMASSOC=2`) and 3D/work-plane
+//! creation. Work-only.
 //!
 //! # `DIMSPACE` (AutoCAD 2026)
 //!

@@ -896,7 +896,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | `HATCHTOBACK` | 完整实现 | 把所有 HATCH 的 draw order 排到其所在 `SpaceId` 范围内的所有非 HATCH 对象之后（模型空间、各图纸布局、各块定义逐范围规划后一次写入），保留相对顺序；一条事务/一步撤销 | 无 AutoCAD 独立的 Draw Order 表（沿用实体存储的 `draw_order`）；块定义重排对全部块参照生效（模型固有）；无 Draw Order 对话框 |
 | `WIPEOUT` | 部分实现 | 开放多边形捕获（≥3 点、`+Z` 平面）生成一个 `AcDbWipeout`（`Mask{inverted:false}`）；`Frames ON/OFF/DISPLAY` 真实（显示/出图分离） | 无 `FRAME` 覆盖、无 Polyline/Erase Polyline 选项、无自交拒绝、无既有 wipeout 拾取 |
 | `POLYGON CIRCUMSCRIBED` | 部分实现 | 独立选择子：中心 + 切圆上一点，用 `R=r/cos(π/n)`、顶点在 `θ±π/n` 生成闭合外切正多边形 | `POLYGON` 的 `Edge` 分支、数值半径的捕捉旋转规则仍未实现 |
-| `DIMROTATED` | 部分实现 | 三次拾取（两原点 + 尺寸线位置）+ 会话 `dimRotation` 角度，复用 `DimensionKind::Linear{rotation}` 合成一个非关联尺寸 | 无 AutoCAD 的选项子提示；非 `+Z` 平面/退化输入按名拒绝 |
+| `DIMROTATED` | **完整实现** | 三次拾取（两原点 + 尺寸线位置）**或对象选择形式**（开放 LINE/ARC/椭圆弧/SPLINE/LWPOLYLINE 取两端点；CIRCLE/整椭圆取尺寸线方向的两个极值点，倾斜平面按名拒绝）+ 会话 `dimRotation` 角度 + **可选文字覆盖**（与 `DIMEDIT TEXT` 同一实体字段与 `dimrotated.bad_text` 校验）；复用 `DimensionKind::Linear{rotation}` 合成一个非关联尺寸，一条事务/一步撤销 | 交互角度/对象提示属全局交互范围；非 `+Z` 平面/退化输入按名拒绝；关联性未建模（与 `DIMLINEAR` 相同全局范围） |
 | `DIMSPACE` | 实现 | 首个线性/对齐/角度标注为基准；显式间距（`0` = 对齐）或 Auto = **2 × 基准样式文字高度**；角度标注按同心弧半径步进；一条事务/一步撤销 | 模型空间；关联重排未实现（全局范围）；径向/坐标/混合类型按名拒绝 |
 | `PEDIT` | 部分实现 | 全选项行（CLOSE/OPEN/JOIN/FIT/SPLINE/DECURVE/REVERSE/UNDO + LINE/ARC/SPLINE 转换）；`WIDTH <w>` 对多选写统一宽度；`EDIT WIDTH <seg> <start> <end>` 只写可表示的单段 `start==end`；一条事务/一步撤销 | 逐段锥形宽度（DXF 40/41）、`Ltype gen`（`plinegen`）未建模，按名拒绝；无交互选项提示；裸 `PEDIT` 或未知参数按名拒绝 |
 | `BOUNDARY` / `-BOUNDARY` | 完整实现 | 一个内部点 → 每个发现的闭合环一条闭合非关联多段线；边界仅整实体圆/完整椭圆/闭合多段线、同 `+Z` 平面；**`Boundary set`**（载荷携带）用命名实体子集替换全图发现，空集/非候选按名拒绝**绝不放宽**；**`Island detection`** 开启时外层+每个内层各写一条折线并以 `boundary.islands` 明说孔洞关系只存在于该诊断，关闭时只写外层并逐条具名跳过；一条事务/一步撤销 | 无 region / 对象类型选择（本构建无 region 模型，载荷也无该字段）；`BO`/`BPOLY` 无别名；选项为载荷携带（无交互提示环） |
@@ -1641,11 +1641,11 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 | `NCOPY` | **部分实现**：选中 `INSERT` 的可见成员几何按世界变换复制到模型空间（新顶层实体）；一条事务/一步撤销 | 无嵌套选择界面；非 INSERT 按名拒绝 |
 | `COPYTOLAYER` | **部分实现**：首个选中实体的图层为目标；其余选中顶层模型空间实体以新 id 复制到该层，原实体不变；一条事务/一步撤销 | 无图层提示；块成员/图纸空间按名拒绝 |
 | `-COPYTOLAYER` | **部分实现**：与 `COPYTOLAYER` 相同的实现，命令行拼写；一条事务/一步撤销 | 同上 |
-| `CDORDER` | **部分实现**：按颜色索引升序重写选中（空选择 = 全部模型空间）实体的存储绘制顺序；保留候选占用的原 draw-order 槽位；一条事务/一步撤销 | 无对话框；ByBlock=0、非调色板真彩=256、缺层属性=7 是声明排序规则 |
+| `CDORDER` | **完整实现**：按颜色索引升序、**逐绘制顺序范围**（模型空间、每个图纸布局、每个块定义，与 `HATCHTOBACK`/`DRAWORDER` 同一范围模型）重写存储绘制顺序；空选择 = 全图所有范围，选择只动所选行所在范围；保留候选占用的原 draw-order 槽位；一条事务/一步撤销 | 无对话框（全局范围）；ByBlock=0、非调色板真彩=256、缺层属性=7 是声明排序规则 |
 | `FLATTEN` | **部分实现**：`LINE`/`POLYLINE`/`CIRCLE`/`ARC`/`ELLIPSE`/`POINT`/`SPLINE` 的 z 改写为 0；新增 `TEXT`/`SHAPE`/`MASK`/已平行世界 XY 的 `IMAGE`/`COMPOUND` 与**竖直 `INSERT`**（只移动插入点 z 与属性文字 z，块定义不改；成员非平或放置倾斜按名拒绝）；一条事务/一步撤销 | Express 的投影语义简化为 z=0；`MESH`/`Body3d`、派生显示缓存的 `DIMENSION`/`HATCH`/`MULTILEADER`/`TABLE`、非 XY 平面 `IMAGE` 按名拒绝 |
 | `XPLODE` | **完整实现**：块参照的一级 EXPLODE 分解 + `All`/`Color`/`LAyer`/`LType`/`LWeight`/`Inherit from parent block`/`Explode` 控制；`layer`/`color`/`linetype`/`lineweight` 经 `plan_entity` 写入每个子实体，`Inherit` 把 layer 0 与 `ByBlock` 按参照/参照图层解析；块属性值丢弃并由块定义 `ATTDEF` 作为普通实体产出（`BURST` 保值）；一条事务/一步撤销 | 仅块参照（与 `BURST` 相同的一级块范围）；`transparency`/`ltscale`/thickness/material/plot style 按名拒绝；`Inherit` 与显式属性列表互斥；`Individually` 交互提示不提供（全局交互范围）；非均匀放置/冻结层/XREF 按名拒绝 |
-| `BTRIM` | **部分实现**：首个选中 `INSERT` 的成员几何为边界，其余选中实体复用既有 TRIM 规划器修剪（拾取点为曲线中点）；一条事务/一步撤销 | 无交互式边界提示；不可规划的目标按名拒绝 |
-| `BEXTEND` | **部分实现**：同上，复用既有 EXTEND 规划器（拾取点为曲线终点）；一条事务/一步撤销 | 无交互式边界提示；不可规划的目标按名拒绝 |
+| `BTRIM` | **完整实现**：首个选中 `INSERT` 的成员几何为边界；目标集与独立 `TRIM` 完全一致（LINE/ARC/CIRCLE/ELLIPSE/椭圆弧/LWPOLYLINE/SPLINE/HATCH，经同一条 `plan_trim_target` 派发），拾取点为曲线或 HATCH loop 的弧长中点；一条事务/一步撤销 | 无交互式边界提示（全局交互范围）；不可规划的目标按名拒绝且不写 |
+| `BEXTEND` | **完整实现**：同上（首个 `INSERT` 成员为边界）；目标集与独立 `EXTEND` 完全一致（LINE/ARC/椭圆弧/开放 SPLINE，经同一条 `plan_extend_target` 派发；闭合/多段线目标按名拒绝），拾取点为曲线终点；一条事务/一步撤销 | 无交互式边界提示（全局交互范围）；不可规划的目标按名拒绝且不写 |
 | `CHANGE` | **部分实现**：与 `CHPROP` 相同的 typed 属性列表（`layer`/`color`/`linetype`/`lineweight`/`transparency`，与 `SETENTITYPROPERTY` 共用语法与 `plan_entity` 应用器），模型与图纸空间直取实体；一条事务/一步撤销 | AutoCAD 的 change-point 分支（移动点/文字）与交互式特性提示未实现；未建模属性按名拒绝 |
 | `CHPROP` | **完整实现**：typed 属性列表（`layer`/`color`/`linetype`/`lineweight`/`transparency`），与 `SETENTITYPROPERTY` 共用 `PropertyValue` 语法与 `plan_entity` 应用器；模型与图纸空间直取实体；一条事务/一步撤销 | 未建模属性（`text`、thickness、material、plot style、linetype scale）按名拒绝（`chprop.unsupported_property`）；无交互式属性提示（全局交互范围） |
 | `BSCALE` | **部分实现（具名拒绝）**：`bscale.unsupported: BSCALE needs a factor and an insertion reference; use SCALE on the selected insert` | 不写库/不升修订/不入历史 |

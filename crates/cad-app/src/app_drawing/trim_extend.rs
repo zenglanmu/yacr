@@ -1,8 +1,5 @@
-use super::extend_spline::plan_extend_spline;
 use super::trim_boundary::{collect_boundaries, BoundarySet};
-use super::trim_curves::{cut_tolerance, plan_extend, plan_trim, TargetCurve, TrimPlan};
-use super::trim_hatch::plan_trim_hatch;
-use super::trim_polyline::plan_trim_polyline;
+use super::trim_curves::{cut_tolerance, TargetCurve, TrimPlan};
 use super::*;
 use crate::command_payload::{OffsetGapType, OffsetLayer, OffsetMode, OffsetOptions};
 
@@ -169,72 +166,18 @@ impl Application {
             ));
         }
 
-        // A POLYLINE is a chain, not one parameterised curve: its plan can keep
-        // more than one remainder, so it goes through the shared polyline model
-        // instead of `TargetCurve`. Every other supported target keeps exactly the
-        // single-curve plan it had.
-        let (plan, notes, label) = match &target_entity.geometry {
-            SemanticGeometry::Polyline {
-                points,
-                bulges,
-                closed,
-                width,
-            } => {
-                let mut resolution = plan_trim_polyline(
-                    points,
-                    bulges,
-                    *closed,
-                    *pick_point,
-                    &boundaries,
-                    &policy,
-                    tol,
-                )
-                // A plan-level refusal (degenerate target, no intersection, a pick
-                // outside the target, a non-planar bulge) is invalid *input*, not
-                // an unsupported geometry, so it maps to the same surface as
-                // EXTEND; the one capability gap (closed-SPLINE containment) stays
-                // `Unsupported`.
-                .map_err(|reason| reason.into_cad_error())?;
-                // TRIM keeps the clicked piece of the same entity, so it keeps
-                // the polyline's uniform width (the shared curve model emits a
-                // centreline-only geometry).
-                if let TrimPlan::Replace(geometry) = &mut resolution.plan {
-                    if let SemanticGeometry::Polyline { width: kept, .. } = &mut **geometry {
-                        *kept = *width;
-                    }
-                }
-                (
-                    resolution.plan,
-                    resolution.notes,
-                    if *closed {
-                        "closed polyline"
-                    } else {
-                        "polyline"
-                    },
-                )
-            }
-            // A HATCH has no parameterised source curve, but its boundary loop is a
-            // closed polyline in the hatch plane: the shared polyline planner
-            // resolves the kept window and the hatch is rebuilt from it.
-            SemanticGeometry::Hatch(hatch) => {
-                let resolution =
-                    plan_trim_hatch(hatch.as_ref(), *pick_point, &boundaries, &policy, tol)
-                        .map_err(|reason| reason.into_cad_error())?;
-                (resolution.plan, resolution.notes, "hatch")
-            }
-            other => {
-                let curve = TargetCurve::new_trim_extend(
-                    other,
-                    "TRIM",
-                    "a LINE, ARC, CIRCLE, ELLIPSE, SPLINE or LWPOLYLINE",
-                )?;
-                let resolution = match plan_trim(&curve, *pick_point, &boundaries, &policy, tol) {
-                    Ok(resolution) => resolution,
-                    Err(reason) => return Err(reason.into_cad_error()),
-                };
-                (resolution.plan, resolution.notes, curve.label())
-            }
-        };
+        // A POLYLINE is a chain, not one parameterised curve, and a HATCH has no
+        // parameterised source curve at all (its loop is the target): both go
+        // through the shared `plan_trim_target` dispatch, exactly like every other
+        // supported kind. That is the one target policy BTRIM also uses, so the
+        // two commands cannot drift.
+        let TargetPlan { plan, notes, label } = plan_trim_target(
+            &target_entity.geometry,
+            *pick_point,
+            &boundaries,
+            &policy,
+            tol,
+        )?;
         // Capture the display state a full delete will prune, so undo restores it.
         let target_state = document.drawing.entity_display_state(target_entity.id);
 
@@ -416,20 +359,21 @@ impl Application {
 
         // A SPLINE target has its own continuation rule (end-tangent ray), so it is
         // planned by `extend_spline`; every other kind keeps the shared
-        // parameter-window plan.
-        let resolution = match &curve {
-            TargetCurve::Spline(spline) => {
-                plan_extend_spline(spline, *pick_point, &boundaries, &policy, tol)
-                    .map_err(|reason| reason.into_cad_error())?
-            }
-            _ => match plan_extend(&curve, *pick_point, &boundaries, &policy, tol) {
-                Ok(resolution) => resolution,
-                Err(reason) => return Err(CadError::InvalidInput(reason)),
-            },
+        // parameter-window plan. The dispatch is the shared `plan_extend_target`,
+        // so BEXTEND cannot drift from it.
+        let TargetPlan { plan, notes, label } = plan_extend_target(
+            &target_entity.geometry,
+            *pick_point,
+            &boundaries,
+            &policy,
+            tol,
+        )?;
+        let TrimPlan::Replace(geometry) = plan else {
+            return Err(CadError::Invariant(
+                "EXTEND resolved to a delete plan; the shared planner never deletes".into(),
+            ));
         };
-        // Cuts the engine could only approximate are reported, never hidden.
-        let notes = resolution.notes;
-        let geometry = resolution.geometry;
+        let geometry = *geometry;
 
         let transaction = next_transaction_id();
         let mut candidate = document.drawing.as_ref().clone();
@@ -468,10 +412,7 @@ impl Application {
         let mut diagnostics = vec![Diagnostic {
             object: Some(ObjectId(target_id.0)),
             code: "drawing.extend".into(),
-            message: format!(
-                "EXTEND: {} extended to the nearest boundary ahead",
-                curve.label()
-            ),
+            message: format!("EXTEND: {label} extended to the nearest boundary ahead"),
         }];
         diagnostics.extend(notes.into_iter().map(|message| Diagnostic {
             object: Some(ObjectId(target_id.0)),
@@ -884,83 +825,4 @@ impl Application {
         document.drawing = Arc::new(candidate);
         Ok(())
     }
-}
-
-/// The named TRIM **target** gaps: the kinds the shared planners cannot
-/// parameterise are refused with a kind-specific `trim.target_<kind>` reason
-/// instead of the constructor's generic "not supported" string.
-///
-/// `None` means "this is a target kind TRIM models" (LINE, ARC, CIRCLE, ELLIPSE,
-/// SPLINE, LWPOLYLINE and — through its boundary loop — HATCH), so the caller
-/// proceeds to the matching planner. Every arm here is a **capability gap**, not
-/// bad input: the caller has already resolved the entity, and the refusal writes
-/// nothing.
-fn trim_target_gap(geometry: &SemanticGeometry) -> Option<CadError> {
-    let reason = match geometry {
-        SemanticGeometry::Insert { .. } => {
-            "trim.target_insert: TRIM cannot trim an INSERT target (AcDbBlockReference). A \
-             reference stores only a placement plus its dynamic parameters; its members are rows \
-             of the shared block definition, and this build has no per-instance geometry override. \
-             Cutting a member would therefore either rewrite the definition (changing every \
-             insertion of that block, nested ones included) or require a new definition plus a \
-             per-instance replacement — neither is a TRIM of this reference. Only directly \
-             addressable LINE, ARC, CIRCLE, ELLIPSE, LWPOLYLINE, SPLINE or HATCH targets are \
-             supported; nothing was written"
-        }
-        SemanticGeometry::Mesh(_) => {
-            "trim.target_mesh: TRIM cannot trim a MESH target: a 3D face has no modeled 2D curve \
-             parameterisation; only LINE, ARC, CIRCLE, ELLIPSE, LWPOLYLINE or SPLINE targets are \
-             supported"
-        }
-        SemanticGeometry::Opaque { .. } => {
-            "trim.target_opaque: TRIM cannot trim opaque/proxy geometry: it has no semantic form \
-             to cut; only LINE, ARC, CIRCLE, ELLIPSE, LWPOLYLINE or SPLINE targets are supported"
-        }
-        SemanticGeometry::Compound(_) => {
-            "trim.target_compound: TRIM cannot trim a Compound target: it has no single \
-             owner-level curve to cut; only LINE, ARC, CIRCLE, ELLIPSE, LWPOLYLINE or SPLINE \
-             targets are supported"
-        }
-        _ => return None,
-    };
-    Some(CadError::Unsupported(reason.into()))
-}
-
-/// The named EXTEND **target** gaps (see [`trim_target_gap`]); an open SPLINE is a
-/// supported target (its own tangent rule lives in `super::extend_spline`), and a
-/// CIRCLE/full ELLIPSE is refused by the closed-target rule instead.
-fn extend_target_gap(geometry: &SemanticGeometry) -> Option<CadError> {
-    let reason = match geometry {
-        SemanticGeometry::Insert { .. } => {
-            "extend.target_insert: EXTEND cannot extend an INSERT target (AcDbBlockReference): a \
-             block reference stores a placement, not an open curve with ends; only LINE, ARC \
-             and elliptical-arc targets are supported"
-        }
-        SemanticGeometry::Hatch(_) => {
-            "extend.target_hatch: EXTEND cannot extend a HATCH target: a hatch's display is \
-             derived from its boundary loops and fill, so there is no source curve with ends; \
-             only LINE, ARC and elliptical-arc targets are supported"
-        }
-        SemanticGeometry::Polyline { .. } => {
-            "extend.target_polyline: EXTEND cannot extend a POLYLINE target: each end of a \
-             multi-segment target would need its own continuation rule and no polyline \
-             continuation policy is modeled, so nothing is extrapolated; only LINE, ARC and \
-             elliptical-arc targets are supported"
-        }
-        SemanticGeometry::Mesh(_) => {
-            "extend.target_mesh: EXTEND cannot extend a MESH target: a 3D face has no modeled 2D \
-             curve parameterisation; only LINE, ARC and elliptical-arc targets are supported"
-        }
-        SemanticGeometry::Opaque { .. } => {
-            "extend.target_opaque: EXTEND cannot extend opaque/proxy geometry: it has no \
-             semantic form to extend; only LINE, ARC and elliptical-arc targets are supported"
-        }
-        SemanticGeometry::Compound(_) => {
-            "extend.target_compound: EXTEND cannot extend a Compound target: it has no single \
-             owner-level curve with ends; only LINE, ARC and elliptical-arc targets are \
-             supported"
-        }
-        _ => return None,
-    };
-    Some(CadError::Unsupported(reason.into()))
 }

@@ -19,21 +19,42 @@ pub struct TwoLineCommand {
     pub pick_second: Point3,
 }
 
-/// The input of a DIMROTATED command (AutoCAD 2026): the two extension-line
-/// origins, the dimension-line location and the **rotation** of the dimension
-/// line in radians (about `+Z`).
+/// The input of a DIMROTATED command (AutoCAD 2026), in its two documented forms.
 ///
-/// Boxed inside [`crate::CommandPayload::RotatedLinearDimension`] so the command enum
-/// stays small. `rotation` is already a radian value: the session parameter
+/// Boxed inside [`crate::CommandPayload::RotatedLinearDimension`] so the command
+/// enum stays small. `rotation` is already a radian value: the session parameter
 /// [`crate::draw_tool::ToolParameter::DimRotation`] carries **degrees** and the
 /// host converts it exactly once when it builds this payload. Any finite angle is
 /// legal — a negative angle is a rotation in the other direction, not an error,
 /// and no normalisation is applied.
-pub struct RotatedLinearDimensionCommand {
-    pub first: Point3,
-    pub second: Point3,
-    pub location: Point3,
-    pub rotation: f64,
+///
+/// `text_override` is the dimension text override DIMEDIT already models (stored
+/// on the entity, `<>` = the measurement); `None` lets the synthesis place the
+/// measured text. The override is validated by the command exactly like
+/// `DIMEDIT TEXT` (non-empty after trimming, at most
+/// [`crate::draw_tool::MAX_TOOL_TEXT_CHARS`] characters) before anything is
+/// written.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RotatedLinearDimensionCommand {
+    /// The three-pick form: two extension-line origins plus the dimension-line
+    /// location.
+    Points {
+        first: Point3,
+        second: Point3,
+        location: Point3,
+        rotation: f64,
+        text_override: Option<String>,
+    },
+    /// The object-selection form: the selected entity supplies **both**
+    /// extension-line origins (its two endpoints, or — for a CIRCLE/full ELLIPSE
+    /// — the two extent points along the dimension-line direction), and the
+    /// dimension-line location is still an explicit pick.
+    Object {
+        target: SelectionRef,
+        location: Point3,
+        rotation: f64,
+        text_override: Option<String>,
+    },
 }
 
 /// The input of a DIMRADIUS/DIMDIAMETER command (ADR 0017 decision C, P5d): the

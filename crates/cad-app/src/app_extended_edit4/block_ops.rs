@@ -235,23 +235,28 @@ impl Application {
         let mut changes = Vec::new();
         let diagnostics = Vec::new();
         for target in &entities[1..] {
-            let curve = TargetCurve::new(&target.geometry, label, "a LINE, ARC, CIRCLE or SPLINE")
-                .map_err(|error| match error {
-                    CadError::Unsupported(message) | CadError::InvalidInput(message) => {
-                        unsupported(prefix, "target", message)
-                    }
-                    other => other,
-                })?;
-            let resolution = if ext == ExtendedCommandId::BTrim {
-                plan_trim(&curve, curve.point_at(0.5), &boundaries, &policy, tol)
-                    .map(|resolution| resolution.plan)
-                    .map_err(|reason| invalid(prefix, "no_cut", plan_reason(reason)))?
+            // The pick channel: TRIM/BEXTEND have no interactive pick, so the
+            // target's own curve supplies one deterministic point — the arc-length
+            // midpoint for a TRIM (the point a user would click to select the
+            // object, exactly like `EXTRIM`), the far end for an EXTEND (the end
+            // the planner would grow from an end pick).
+            let pick = if ext == ExtendedCommandId::BTrim {
+                trim_pick(&target.geometry, prefix)?
             } else {
-                plan_extend(&curve, curve.point_at(1.0), &boundaries, &policy, tol)
-                    .map(|resolution| TrimPlan::Replace(Box::new(resolution.geometry)))
-                    .map_err(|reason| invalid(prefix, "no_boundary", reason))?
+                extend_pick(&target.geometry, prefix)?
             };
-            match resolution {
+            let plan = if ext == ExtendedCommandId::BTrim {
+                plan_trim_target(&target.geometry, pick, &boundaries, &policy, tol)
+            } else {
+                plan_extend_target(&target.geometry, pick, &boundaries, &policy, tol)
+            }
+            .map_err(|error| match error {
+                CadError::Unsupported(message) | CadError::InvalidInput(message) => {
+                    unsupported(prefix, "target", message)
+                }
+                other => other,
+            })?;
+            match plan.plan {
                 TrimPlan::Replace(geometry) => {
                     changes.push(CurveChange::Replace(target.clone(), *geometry))
                 }
@@ -261,24 +266,112 @@ impl Application {
                 )),
             }
         }
+        let standalone = if ext == ExtendedCommandId::BTrim {
+            "TRIM"
+        } else {
+            "EXTEND"
+        };
         let mut outcome = self.commit_curve_changes(document_id, changes, diagnostics, prefix)?;
         outcome.diagnostics.push(Diagnostic {
             object: None,
-            code: format!("{prefix}.partial"),
+            code: format!("{prefix}.applied"),
             message: format!(
-                "{label}: synthetic boundary from the selected INSERT members; no interactive \
-                 boundary prompt"
+                "{label}: the boundary is the selected INSERT's member geometry and every target \
+                 goes through the same planner and target set as the standalone {standalone} \
+                 command; no interactive boundary prompt (global scope)"
             ),
         });
         Ok(outcome)
     }
 }
 
-/// The message inside a plan-level refusal (the variant is preserved at the
-/// planner boundary, so this only names the reason for the command diagnostic).
-fn plan_reason(reason: PlanRefusal) -> String {
-    match reason {
-        PlanRefusal::Invalid(message) | PlanRefusal::Unsupported(message) => message,
+/// The deterministic TRIM pick for one block-boundary target.
+///
+/// The target kinds are exactly `TRIM`'s own (the shared planner names any other
+/// kind), so this only computes the pick: the arc-length midpoint of an
+/// LWPOLYLINE, the midpoint of a HATCH boundary loop, or the parameter midpoint
+/// of the single-curve targets.
+fn trim_pick(geometry: &SemanticGeometry, prefix: &str) -> CadResult<Point3> {
+    if let Some(error) = trim_target_gap(geometry) {
+        return Err(map_target_error(prefix, error));
+    }
+    match geometry {
+        SemanticGeometry::Polyline {
+            points,
+            bulges,
+            closed,
+            ..
+        } => Ok(best_effort_midpoint(points, bulges, *closed)),
+        SemanticGeometry::Hatch(hatch) => Ok(hatch_pick(hatch)),
+        other => TargetCurve::new_trim_extend(
+            other,
+            "BTRIM",
+            "a LINE, ARC, CIRCLE, ELLIPSE, SPLINE or LWPOLYLINE",
+        )
+        .map(|curve| curve.point_at(0.5))
+        .map_err(|error| map_target_error(prefix, error)),
+    }
+}
+
+/// The deterministic EXTEND pick for one block-boundary target.
+///
+/// The target kinds are exactly `EXTEND`'s own (the shared planner refuses a
+/// closed target and names every kind it cannot extend); the pick is the target's
+/// far end, the point an end pick would project onto.
+fn extend_pick(geometry: &SemanticGeometry, prefix: &str) -> CadResult<Point3> {
+    if let Some(error) = extend_target_gap(geometry) {
+        return Err(map_target_error(prefix, error));
+    }
+    TargetCurve::new_trim_extend(
+        geometry,
+        "BEXTEND",
+        "a LINE, ARC, ELLIPSE, CIRCLE or SPLINE",
+    )
+    .map(|curve| curve.point_at(1.0))
+    .map_err(|error| map_target_error(prefix, error))
+}
+
+/// The arc-length midpoint of a stored polyline, or its first vertex when the
+/// polyline is degenerate (the shared planner then names the real refusal, e.g.
+/// `trim.polyline_degenerate`; a placeholder pick is never used to decide a valid
+/// trim because a valid polyline always has a midpoint).
+fn best_effort_midpoint(points: &[Point3], bulges: &[f64], closed: bool) -> Point3 {
+    polyline_midpoint(points, bulges, closed)
+        .ok()
+        .or_else(|| points.first().copied())
+        .unwrap_or(Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        })
+}
+
+/// The midpoint of a HATCH boundary loop, or its first world vertex when the loop
+/// is degenerate; the hatch planner owns the named refusal either way.
+fn hatch_pick(hatch: &cad_domain::HatchGeometry) -> Point3 {
+    let plane = hatch.plane();
+    let Some(loop_) = hatch.loops().first() else {
+        return Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
+    };
+    let points: Vec<Point3> = loop_
+        .points
+        .iter()
+        .map(|point| plane.to_world(*point))
+        .collect();
+    best_effort_midpoint(&points, &loop_.bulges, true)
+}
+
+/// Prefix a shared-planner target refusal with the command name, keeping the
+/// planner's own stable reason string as the detail.
+fn map_target_error(prefix: &str, error: CadError) -> CadError {
+    match error {
+        CadError::Unsupported(message) => unsupported(prefix, "target", message),
+        CadError::InvalidInput(message) => invalid(prefix, "target", message),
+        other => other,
     }
 }
 

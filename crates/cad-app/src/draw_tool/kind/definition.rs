@@ -405,9 +405,16 @@ pub enum DrawToolKind {
     /// definition through the shared synthesis and owns every refusal (non-plan
     /// triple, coincident origins, zero measurement).
     ///
-    /// Declared subset (NOT IMPLEMENTED): the interactive "Specify angle of
-    /// dimension line" prompt (the angle is the session parameter chip, not a
-    /// capture step), the object-selection variant, a text override and
+    /// The command layer's payload also carries DIMROTATED's two other documented
+    /// input forms: an optional **text override** (the same entity field
+    /// `DIMEDIT TEXT` writes, validated before any write) and the
+    /// **object-selection** form, where the selected open curve supplies both
+    /// extension-line origins (CIRCLE/full ELLIPSE use their extent points along
+    /// the dimension-line direction).
+    ///
+    /// Declared subset (NOT IMPLEMENTED / global interaction scope): the
+    /// interactive "Specify angle of dimension line" and "Select object" prompts
+    /// (the angle is the session parameter chip, not a capture step), and
     /// associativity.
     DimRotated,
     /// DIMRADIUS: a radius dimension whose **only** entry point is an entity

@@ -548,11 +548,12 @@ impl HostController {
                 (
                     crate::CommandId::DimRotated,
                     crate::CommandPayload::RotatedLinearDimension(Box::new(
-                        crate::RotatedLinearDimensionCommand {
+                        crate::RotatedLinearDimensionCommand::Points {
                             first,
                             second,
                             location,
                             rotation: degrees.to_radians(),
+                            text_override: None,
                         },
                     )),
                 )
