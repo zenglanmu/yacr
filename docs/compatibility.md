@@ -2504,9 +2504,10 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 | `PASTESPEC` | **部分实现（具名拒绝）**：`pastespec.unsupported: clipboard special-paste (OLE/format selection) is not modeled; use PASTECLIP or PASTEBLOCK` | 不写库/不升修订/不入历史 |
 ## Wave 28 边界更新（2026-11-12，官方名收尾：39 条具名拒绝）
 
-> 以下 39 个名字只提供诚实命令路径（`CadError::Unsupported` + 稳定原因串），不是可用功能。
-> 官方 981 条至此**没有未实现的可用命令名**；仅 `MEASURE`/`TRACE` 因同名不同义不计入。
-> 全部 Viewer-legal：不写库、不升修订、不入历史。
+> 以下 39 个名字**在 Wave 28 时**只提供诚实命令路径（`CadError::Unsupported` + 稳定原因串），不是可用功能；
+> 其中 `REFEDIT` 族已在 2026-11-12 升级为真实实现、2026-11-24 严格收口（见本节之后的
+> 「REFEDIT / REFSET / REFCLOSE」小节），其余仍是具名拒绝。官方 981 条至此**没有未实现的可用命令名**；
+> 仅 `MEASURE`/`TRACE` 因同名不同义不计入。全部 Viewer-legal：不写库、不升修订、不入历史。
 
 | 命令 | 结果 | 明示未实现 / 证据边界 |
 | --- | --- | --- |
@@ -2520,10 +2521,10 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 | `QUICKCUI` | **部分实现（具名拒绝）**：`quickcui.unsupported: no CUI (menu-customization) model` | 不写库/不升修订/不入历史 |
 | `REDIR` | **部分实现（具名拒绝）**：`redir.unsupported: no xref/image path-redirection model` | 不写库/不升修订/不入历史 |
 | `REDIRMODE` | **部分实现（具名拒绝）**：`redirmode.unsupported: no xref/image path-redirection model` | 不写库/不升修订/不入历史 |
-| `REFCLOSE` | **部分实现（具名拒绝）**：`refclose.unsupported: no in-place block/xref editing session` | 不写库/不升修订/不入历史 |
-| `-REFEDIT` | **部分实现（具名拒绝）**：`-refedit.unsupported: no in-place block/xref editing session` | 不写库/不升修订/不入历史 |
-| `REFEDIT` | **部分实现（具名拒绝）**：`refedit.unsupported: no in-place block/xref editing session` | 不写库/不升修订/不入历史 |
-| `REFSET` | **部分实现（具名拒绝）**：`refset.unsupported: no in-place block/xref editing session` | 不写库/不升修订/不入历史 |
+| `REFCLOSE` | **完整实现**（2026-11-24 严格收口；Wave 28 时曾为 `refclose.unsupported`） | 见后文「REFEDIT / REFSET / REFCLOSE」小节 |
+| `-REFEDIT` | **完整实现**（2026-11-24 严格收口；Wave 28 时曾为 `-refedit.unsupported`） | 见后文「REFEDIT / REFSET / REFCLOSE」小节 |
+| `REFEDIT` | **完整实现**（2026-11-24 严格收口；Wave 28 时曾为 `refedit.unsupported`） | 见后文「REFEDIT / REFSET / REFCLOSE」小节 |
+| `REFSET` | **完整实现**（2026-11-24 严格收口；Wave 28 时曾为 `refset.unsupported`） | 见后文「REFEDIT / REFSET / REFCLOSE」小节 |
 | `REPURLS` | **部分实现（具名拒绝）**：`repurls.unsupported: no hyperlink storage model` | 不写库/不升修订/不入历史 |
 | `RESUME` | **部分实现（具名拒绝）**：`resume.unsupported: no script-file engine` | 不写库/不升修订/不入历史 |
 | `RSCRIPT` | **部分实现（具名拒绝）**：`rscript.unsupported: no script-file engine` | 不写库/不升修订/不入历史 |
@@ -2554,13 +2555,13 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 | 命令 | 状态 | 当前行为 | 剩余边界 |
 | --- | --- | --- | --- |
 | `HATCHEDIT` | 部分实现 | 新增 `PATTERN <name>`：按名称从现有 `.pat` 库替换图案填充，保留 hatch 的 angle/scale/double，一条事务/一步撤销 | 任意用户 `.pat` 图案文件需宿主文件 I/O；未知名/缺名/实心/渐变分别 `hatchedit.unknown_pattern`/`needs_pattern_name`/`pattern_requires_pattern`；无交互对话框 |
-### 2026-11-12 REFEDIT / REFSET / REFCLOSE（有界 in-place 块参照编辑）
+### 2026-11-12 REFEDIT / REFSET / REFCLOSE（有界 in-place 块参照编辑；2026-11-24 严格收口）
 
 | 命令 | 状态 | 当前行为 | 剩余边界 |
 | --- | --- | --- | --- |
-| `REFEDIT`/`-REFEDIT` | 部分实现 | 仅接受一个直接可寻址、相似变换（均匀缩放+旋转+平移、非镜像）的模型空间 INSERT；把**可见**块成员按 INSERT 变换克隆到模型空间（一条事务），源 INSERT 进入会话隐藏集；选择变为克隆。`refedit.selection`/`not_insert`/`non_uniform`/`active`/`block_missing` 等具名拒绝 | 无参照淡显/锁定（其他宿主对象仍可选）；隐藏的动态可见性成员不提取、不修改；只在应用层阻止 QSAVE；会话状态不可撤销（撤销删光克隆会清理会话并恢复源可见性） |
-| `REFSET` | 部分实现 | `ADD|REMOVE`（裸=ADD）把当前选择加入/移出工作集；会话状态、不写图；`refedit.no_session`/`selection_empty` 拒绝；自引用块实例拒绝 | 无交互拾取提示；ADD 的宿主对象在 SAVE 时是**移动**进块（同 id），不是复制 |
-| `REFCLOSE` | 部分实现 | `SAVE` 逆变换把工作集写回块定义（成员更新/新增/移出删除）并删除克隆，`DISCARD` 删除克隆且块定义不变；一条事务/一步撤销；`refclose.needs_option` 拒绝裸命令 | 成员图层/绘图次序不回写（仅几何）；嵌套参照只支持一个层级；无参照文件回写（本构建无 xref 编辑） |
+| `REFEDIT`/`-REFEDIT` | **完整实现** | 仅接受一个直接可寻址、相似变换（均匀缩放+旋转+平移、非镜像）的模型空间 INSERT；把**可见**块成员按 INSERT 变换克隆到模型空间（一条事务），源 INSERT 进入会话隐藏集；选择变为克隆。`refedit.selection`/`nested`/`not_insert`/`non_uniform`/`active`/`block_missing`/`clone_failed`/`order_exhausted` 等具名拒绝；嵌套 INSERT 成员按引用保留（合成放置/逆变换写回），嵌套实例选择 `refedit.nested` 拒绝 | 全局范围：参照淡显/锁定显示概念（其他宿主对象仍可选，REFSET 是显式选择）、交互拾取提示/对话框、外部参照编辑子系统（本构建无 xref 编辑会话）。隐藏的动态可见性成员不提取、不改写且描述符保留；只在应用层阻止 QSAVE（`refedit.save_blocked`）；会话状态不可撤销（撤销删光克隆会清理会话并恢复源可见性） |
+| `REFSET` | **完整实现** | `ADD|REMOVE`（裸=ADD）把当前选择加入/移出工作集；会话状态、不写图/不升修订/不入历史；`refedit.no_session`/`selection_empty`/`nested` 拒绝；自引用块实例拒绝；重复 ADD/REMOVE 是计数为 0 的空操作 | 交互拾取提示属全局范围；ADD 的宿主对象在 SAVE 时是**移入**块（同 id），REMOVE 在 SAVE 时删除原成员、模型空间副本保留——这是 AutoCAD 的 ADD 语义，不是缺口 |
+| `REFCLOSE` | **完整实现** | `SAVE` 逆变换把工作集写回块定义：成员几何、**图层**（取克隆）、**绘图次序**（克隆相对序在既有成员槽位上置换）、变更的**渲染属性**；新增宿主对象移入块、移出成员删除并从动态可见性描述符剪除其 id；删除克隆，一条事务/一步撤销。`DISCARD` 删除克隆且块定义不变；`refclose.needs_option` 拒绝裸命令 | 交互式 Save/Discard 提示属全局范围；外部参照编辑子系统未建模（构建级范围）；无参照文件回写（本构建无 xref 编辑） |
 ### 2026-11-12 TEXTALIGN 15 模式 + DISTRIBUTE
 
 | 命令 | 状态 | 当前行为 | 剩余边界 |

@@ -26,8 +26,8 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **244** |
-| 部分实现（有写明的界） | **735** |
+| 完整实现 | **248** |
+| 部分实现（有写明的界） | **731** |
 | **已实现合计（完整 + 部分）** | **979** |
 | 未实现 | **2** |
 
@@ -54,6 +54,8 @@
 
 > **2026-11-24 增补（严格 2D 收口 II，`CHPROP`/`BREAKATPOINT`）**：`CHPROP` 与 `BREAKATPOINT` 按严格口径升为**完整实现**。`CHPROP` 从「移到当前层 + 重置 ByLayer」改为**typed 属性列表**（`layer`/`color`/`linetype`/`lineweight`/`transparency`，与 `SETENTITYPROPERTY` 共用 `PropertyValue` 语法与 `plan_entity` 应用器），模型空间与图纸空间直取实体、一条事务/一步撤销，未建模属性（`text`/thickness/material/plot style/linetype scale）**按名拒绝**；`CHANGE` 用同一属性写路径，但 AutoCAD 的 change-point 分支仍未实现，保持部分。`BREAKATPOINT` 从 LINE/ARC/开放 LWPOLYLINE 扩到 CIRCLE、整椭圆/椭圆弧、开放 SPLINE 与闭合 LWPOLYLINE：开放曲线拆两段，闭合环在断点开成单段整圈弧（单点无法留下两段非退化片段）；闭合 SPLINE（需旋转节点域）与其它非曲线种类**按名拒绝**。`FLATTEN` 扩到竖直 INSERT（只移动插入点 z 与属性文字 z，块定义不改；成员非平或放置倾斜按名拒绝）以及 TEXT/SHAPE/MASK/XY 平面 IMAGE/COMPOUND，`MESH`/`Body3d`/派生显示的 DIMENSION/HATCH/MULTILEADER/TABLE 仍按名拒绝，故保持部分。
 >
+> **2026-11-24 增补（严格 2D 收口 III，参照编辑族）**：`REFEDIT`、`-REFEDIT`、`REFSET` 与 `REFCLOSE` 按严格口径升为**完整实现**。`REFCLOSE SAVE` 不再只回写几何：成员的**图层**取克隆、**绘图次序**由克隆在模型空间的相对序在既有成员槽位上置换（未编辑成员与隐藏成员不动，宿主对象的模型空间次序不直接抄进块）、变更的**渲染属性**（颜色/线型/线宽/透明度）随同一次显示写入回写，成员自身不会继承克隆的块/可见性归属；`REFSET ADD` 的宿主对象在 `SAVE` 时仍是**移入**（同 id），`REMOVE` 仍在 `SAVE` 时删除原成员、模型空间副本保留，二者都只是会话状态；嵌套 INSERT 成员按引用保留（提取合成放置、写回合成逆变换），嵌套实例选择是稳定 `refedit.nested` 拒绝；动态可见性下隐藏成员不提取且描述符保留，`REFSET REMOVE` 删除受控成员时把其 id 从 `member_entities` 与各状态中剪除（不留悬空 id）。仅剩参照淡显/锁定显示概念、交互拾取/`Save/Discard` 提示与外部参照编辑子系统（本构建无 xref 会话）等构建级全局范围。计入 **248 完整 + 731 部分 / 979 已实现**；无 GUI/GPU/像素/真机证据。
+
 > **2026-11-24 增补（严格 2D 收口续）**：`HATCH`/`-HATCH` 的支持域（`Circle`/完整 `Ellipse`/闭合 `Polyline`/`LINE`+`ARC` 边链；solid/user-defined/predefined/gradient 四种会话填充与 `PATTERN`/`PATTERNFILE` 两种命令名通道）已无剩余拒绝路径，契约测试逐组合证明——仅剩创建期**关联性**与实时预览/对话框，二者都是构建级全局范围。`IMAGEATTACH` 新增可选的 `[<rotation_deg>]`（绕 `+Z` 逆时针、烘进 `u`/`v` 基）与**活动图纸布局**目标（走布局自身 draw-order 的实体写入路径；`Block` 定义 `imageattach.block_space`、失效布局 `imageattach.unknown_layout` 按名拒绝）。`VPSYNC` 新增可选的**0 基**主视口索引（`VPSYNC [<master>]`，默认 `0`；越界 `vpsync.master_out_of_range`、不 clamp、一条事务/一步撤销）。`HATCH`、`-HATCH`、`IMAGEATTACH`、`VPSYNC` 四个官方名字晋升为**完整实现**；与上一批合计计入 **243 完整 + 736 部分 / 979 已实现**；无 GUI/GPU/像素/真机证据。
 
 ## 下一批 100 条命令实施计划与进度（2026-11-07）
@@ -256,7 +258,7 @@
 
 > **这不是验收，是当前排期与口径。** 本轮目标是把命令从 `部分实现`/具名拒绝推进到支持域内
 > **没有剩余可写缺口**的 `完整实现`；不放宽为“改状态不实现”，也不把 ADR 全局范围缺口算作
-> 单命令完成。当前清单 **244 完整 / 735 部分 / 2 未实现**，只有真正合并且契约测试通过的
+> 单命令完成。当前清单 **248 完整 / 731 部分 / 2 未实现**，只有真正合并且契约测试通过的
 > 命令才改状态。
 
 | 批次 | 范围 | 状态 |
@@ -272,6 +274,7 @@
 | M3 约束 | ADR-0054：有界二维几何/尺寸约束求解器、minor 15、DXF 节点 | ADR 已接受；P0 未开始，命令仍 partial |
 | M4 动作录制器 | ADR-0056：ACTRECORD/ACTSTOP/ACTUSERINPUT/ACTUSERMESSAGE/ACTMANAGER | **已合并**（+7 complete + Manage 面板；无真实文件对话框/GUI 证据） |
 | M1h 填充/底图/视口 | `HATCH`/`-HATCH` 支持域闭合（关联性/预览为全局范围）、`IMAGEATTACH` 旋转 + 图纸布局、`VPSYNC` 可选主视口、`HATCHEDIT` 索引对账 | **已合并**（+5 complete；`HATCHEDIT` 的 `ORIGIN`/`PATTERNFILE` 早已实现，索引 stale 本次修正） |
+| M1i 参照编辑族 | `REFEDIT`/`-REFEDIT`/`REFSET`/`REFCLOSE` 的成员图层/绘图次序/渲染属性回写、动态可见性成员保留与描述符剪除、嵌套引用保留 + 嵌套实例具名拒绝 | **已合并**（+4 complete） |
 | M5 其他面板 | 发布/传递/标准/CUI/点云/PDF 底图 | 分析完成；多数是 `L`/架构级缺口，按 ADR/子系统逐个评估 |
 
 **已明确的诚实缺口**：`ARCHIVE`、`STANDARDS`、`CHECKSTANDARDS`、全部 `CUI*`、`CUSTOMIZE` 仍是
@@ -353,7 +356,7 @@
 | `-PSETUPIN` | 完整实现 | `PAGESETUPIN` 的命令行拼写：同一实现臂（`page_setup_write`），一次 revision 复制源记录的纸张/尺寸/比例/旋转 |
 | `-PUBLISH` | 部分实现 | 具名拒绝（`-publish.unsupported`）：本构建无批量发布模型；命令行拼写。 |
 | `-PURGE` | 完整实现 | `PURGE` 的命令行拼写：别名规范化到同一 `CommandId::Purge` 与同一处理器（裸命令/`Layer`/`Block`/`Style`/`Linetype`），无别名独有缺口 |
-|  `-REFEDIT` | 部分实现 | 真实：`REFEDIT`/`-REFEDIT` 仅接受一个相似变换模型空间 INSERT，把可见块成员按 INSERT 变换克隆到模型空间（一条事务），源 INSERT 走会话隐藏；`REFSET ADD|REMOVE` 只改会话工作集；`REFCLOSE SAVE` 逆变换写回块定义（成员更新/新增/删除与克隆删除，一条事务/一步撤销），`DISCARD` 删除克隆、块定义不变。仅提取可见成员；无参照淡显/锁定（其他宿主对象仍可选，REFSET 是显式选择）；成员图层/绘图次序不回写；QSAVE 应用层拒绝（`refedit.save_blocked`）。 |
+|  `-REFEDIT` | 完整实现 | 真实：`REFEDIT`/`-REFEDIT` 仅接受一个直接可寻址的相似变换（均匀缩放 > 0 + 旋转 + 平移、非镜像）模型空间 INSERT，把可见块成员按 INSERT 变换克隆到模型空间（一条事务），源 INSERT 走会话隐藏；`REFSET ADD|REMOVE`（裸 = ADD）只改会话工作集；`REFCLOSE SAVE` 逆变换写回成员几何、**图层**（取克隆）与**绘图次序**（按克隆相对序在既有成员槽位上置换，未编辑成员不动）以及变更的渲染属性，新增宿主对象移入块、移出成员删除并把其 id 从动态可见性描述符剪除，一条事务/一步撤销；`DISCARD` 删除克隆、块定义不变。嵌套 INSERT 成员按引用保留（提取合成放置、写回合成逆变换），嵌套实例选择按 `refedit.nested` 拒绝；隐藏的动态可见性成员不提取、不改写且描述符保留。全局范围：参照淡显/锁定显示概念、交互拾取提示/对话框、外部参照编辑子系统（本构建无 xref 编辑会话）、会话状态不可撤销（撤销删光克隆会清理会话）；QSAVE 应用层拒绝（`refedit.save_blocked`）。 |
 | `-RENAME` | 完整实现 | `RENAME` 的命令行拼写，同一实现：六种 kind 真实重命名，含 `LINETYPE` 与其引用级联，一条表补丁/一步撤销。 |
 | `-RENDER` | 部分实现 | 具名拒绝（`-render.unsupported: no render engine; only the 2D viewport renderer exists`）。 |
 | `-SCALELISTEDIT` | 完整实现 | `SCALELISTEDIT` 的命令行拼写：同一解析器与同一处理器（读写同一 `ACAD_SCALELIST` 表，旧 `write_unsupported` 已移除） |
@@ -1010,9 +1013,9 @@
 | `REDO` | 已实现 | — |
 | `REDRAW` | 部分实现 | 当前视口刷新（session generation）；不改相机、不写库、不进 `ZOOM PREVIOUS` |
 | `REDRAWALL` | 部分实现 | 所有视口刷新；同 REDRAW 的只读边界 |
-|  `REFCLOSE` | 部分实现 | 真实：`REFCLOSE SAVE|DISCARD`（裸命令 `refclose.needs_option`）；SAVE 逆变换写回块定义并删除克隆（一条事务/一步撤销），DISCARD 删除克隆且块定义不变。 |
-|  `REFEDIT` | 部分实现 | 真实：`REFEDIT`/`-REFEDIT` 仅接受一个相似变换模型空间 INSERT，把可见块成员按 INSERT 变换克隆到模型空间（一条事务），源 INSERT 走会话隐藏；`REFSET ADD|REMOVE` 只改会话工作集；`REFCLOSE SAVE` 逆变换写回块定义（成员更新/新增/删除与克隆删除，一条事务/一步撤销），`DISCARD` 删除克隆、块定义不变。仅提取可见成员；无参照淡显/锁定（其他宿主对象仍可选，REFSET 是显式选择）；成员图层/绘图次序不回写；QSAVE 应用层拒绝（`refedit.save_blocked`）。 |
-|  `REFSET` | 部分实现 | 真实：`REFSET ADD|REMOVE`（裸命令=ADD）把当前选择加入/移出 in-place 块编辑工作集；会话状态，不写图；无活动会话 `refedit.no_session`、空选择 `refedit.selection_empty`；自引用实例拒绝。 |
+|  `REFCLOSE` | 完整实现 | 真实：`REFCLOSE SAVE|DISCARD`（裸命令 `refclose.needs_option`，交互式 Save/Discard 提示属全局范围）；SAVE 逆变换写回成员几何、图层、绘图次序与变更的渲染属性，新增宿主对象移入块、移出成员删除并从动态可见性描述符剪除其 id，克隆全部删除，一条事务/一步撤销；DISCARD 只删除克隆且块定义不变；无活动会话 `refedit.no_session`。外部参照编辑子系统未建模属构建级范围。 |
+|  `REFEDIT` | 完整实现 | 真实：`REFEDIT`/`-REFEDIT` 仅接受一个直接可寻址的相似变换（均匀缩放 > 0 + 旋转 + 平移、非镜像）模型空间 INSERT，把可见块成员按 INSERT 变换克隆到模型空间（一条事务），源 INSERT 走会话隐藏；`REFSET ADD|REMOVE`（裸 = ADD）只改会话工作集；`REFCLOSE SAVE` 逆变换写回成员几何、**图层**（取克隆）与**绘图次序**（按克隆相对序在既有成员槽位上置换，未编辑成员不动）以及变更的渲染属性，新增宿主对象移入块、移出成员删除并把其 id 从动态可见性描述符剪除，一条事务/一步撤销；`DISCARD` 删除克隆、块定义不变。嵌套 INSERT 成员按引用保留（提取合成放置、写回合成逆变换），嵌套实例选择按 `refedit.nested` 拒绝；隐藏的动态可见性成员不提取、不改写且描述符保留。全局范围：参照淡显/锁定显示概念、交互拾取提示/对话框、外部参照编辑子系统（本构建无 xref 编辑会话）、会话状态不可撤销（撤销删光克隆会清理会话）；QSAVE 应用层拒绝（`refedit.save_blocked`）。 |
+|  `REFSET` | 完整实现 | 真实：`REFSET ADD|REMOVE`（裸命令=ADD；无活动会话 `refedit.no_session`、空选择 `refedit.selection_empty`、嵌套实例 `refedit.nested`、自引用实例 `refedit.selection`）把当前选择加入/移出 in-place 块编辑工作集；会话状态，不写图/不升修订/不入历史；ADD 在 SAVE 时把宿主对象（同 id）**移入**块，REMOVE 在 SAVE 时删除原成员而模型空间副本保留；重复 ADD/REMOVE 是对应计数为 0 的空操作。交互拾取提示属全局范围。 |
 | `REGEN` | 部分实现 | 推进当前视口 regeneration stamp，重建派生显示缓存；不写库 |
 | `REGEN3` | 部分实现 | `REGEN` 的别名（同一 `CommandId`/路径），无第二套实现；不修复 3D 实体显示异常 |
 | `REGENALL` | 部分实现 | 所有视口 regeneration；不写库 |
@@ -1987,10 +1990,10 @@
 | 715 | `REDO` | 已实现 | Reverses the effects of previous UNDO or U command. | — |
 | 716 | `REDRAW` | 部分实现 | Refreshes the display in the current viewport. | 当前视口刷新（session generation）；不改相机、不写库、不进 `ZOOM PREVIOUS` |
 | 717 | `REDRAWALL` | 部分实现 | Refreshes the display in all viewports. | 所有视口刷新；同 REDRAW 的只读边界 |
-|  718 | `REFCLOSE` | 部分实现 | Saves back or discards changes made during in-place editing of a reference, either an xref or a block definition. | 真实：`REFCLOSE SAVE|DISCARD`（裸命令 `refclose.needs_option`）；SAVE 逆变换写回块定义并删除克隆（一条事务/一步撤销），DISCARD 删除克隆且块定义不变。 |
-|  719 | `-REFEDIT` | 部分实现 | Edits an xref or a block definition directly within the current drawing. | 真实：`REFEDIT`/`-REFEDIT` 仅接受一个相似变换模型空间 INSERT，把可见块成员按 INSERT 变换克隆到模型空间（一条事务），源 INSERT 走会话隐藏；`REFSET ADD|REMOVE` 只改会话工作集；`REFCLOSE SAVE` 逆变换写回块定义（成员更新/新增/删除与克隆删除，一条事务/一步撤销），`DISCARD` 删除克隆、块定义不变。仅提取可见成员；无参照淡显/锁定（其他宿主对象仍可选，REFSET 是显式选择）；成员图层/绘图次序不回写；QSAVE 应用层拒绝（`refedit.save_blocked`）。 |
-|  720 | `REFEDIT` | 部分实现 | Edits an xref or a block definition directly within the current drawing. | 真实：`REFEDIT`/`-REFEDIT` 仅接受一个相似变换模型空间 INSERT，把可见块成员按 INSERT 变换克隆到模型空间（一条事务），源 INSERT 走会话隐藏；`REFSET ADD|REMOVE` 只改会话工作集；`REFCLOSE SAVE` 逆变换写回块定义（成员更新/新增/删除与克隆删除，一条事务/一步撤销），`DISCARD` 删除克隆、块定义不变。仅提取可见成员；无参照淡显/锁定（其他宿主对象仍可选，REFSET 是显式选择）；成员图层/绘图次序不回写；QSAVE 应用层拒绝（`refedit.save_blocked`）。 |
-|  721 | `REFSET` | 部分实现 | Adds or removes objects from a working set during in-place editing of a reference, either an xref or a block definition. | 真实：`REFSET ADD|REMOVE`（裸命令=ADD）把当前选择加入/移出 in-place 块编辑工作集；会话状态，不写图；无活动会话 `refedit.no_session`、空选择 `refedit.selection_empty`；自引用实例拒绝。 |
+|  718 | `REFCLOSE` | 完整实现 | Saves back or discards changes made during in-place editing of a reference, either an xref or a block definition. | 真实：`REFCLOSE SAVE|DISCARD`（裸命令 `refclose.needs_option`，交互式 Save/Discard 提示属全局范围）；SAVE 逆变换写回成员几何、图层、绘图次序与变更的渲染属性，新增宿主对象移入块、移出成员删除并从动态可见性描述符剪除其 id，克隆全部删除，一条事务/一步撤销；DISCARD 只删除克隆且块定义不变；无活动会话 `refedit.no_session`。外部参照编辑子系统未建模属构建级范围。 |
+|  719 | `-REFEDIT` | 完整实现 | Edits an xref or a block definition directly within the current drawing. | 真实：`REFEDIT`/`-REFEDIT` 仅接受一个直接可寻址的相似变换（均匀缩放 > 0 + 旋转 + 平移、非镜像）模型空间 INSERT，把可见块成员按 INSERT 变换克隆到模型空间（一条事务），源 INSERT 走会话隐藏；`REFSET ADD|REMOVE`（裸 = ADD）只改会话工作集；`REFCLOSE SAVE` 逆变换写回成员几何、**图层**（取克隆）与**绘图次序**（按克隆相对序在既有成员槽位上置换，未编辑成员不动）以及变更的渲染属性，新增宿主对象移入块、移出成员删除并把其 id 从动态可见性描述符剪除，一条事务/一步撤销；`DISCARD` 删除克隆、块定义不变。嵌套 INSERT 成员按引用保留（提取合成放置、写回合成逆变换），嵌套实例选择按 `refedit.nested` 拒绝；隐藏的动态可见性成员不提取、不改写且描述符保留。全局范围：参照淡显/锁定显示概念、交互拾取提示/对话框、外部参照编辑子系统（本构建无 xref 编辑会话）、会话状态不可撤销（撤销删光克隆会清理会话）；QSAVE 应用层拒绝（`refedit.save_blocked`）。 |
+|  720 | `REFEDIT` | 完整实现 | Edits an xref or a block definition directly within the current drawing. | 真实：`REFEDIT`/`-REFEDIT` 仅接受一个直接可寻址的相似变换（均匀缩放 > 0 + 旋转 + 平移、非镜像）模型空间 INSERT，把可见块成员按 INSERT 变换克隆到模型空间（一条事务），源 INSERT 走会话隐藏；`REFSET ADD|REMOVE`（裸 = ADD）只改会话工作集；`REFCLOSE SAVE` 逆变换写回成员几何、**图层**（取克隆）与**绘图次序**（按克隆相对序在既有成员槽位上置换，未编辑成员不动）以及变更的渲染属性，新增宿主对象移入块、移出成员删除并把其 id 从动态可见性描述符剪除，一条事务/一步撤销；`DISCARD` 删除克隆、块定义不变。嵌套 INSERT 成员按引用保留（提取合成放置、写回合成逆变换），嵌套实例选择按 `refedit.nested` 拒绝；隐藏的动态可见性成员不提取、不改写且描述符保留。全局范围：参照淡显/锁定显示概念、交互拾取提示/对话框、外部参照编辑子系统（本构建无 xref 编辑会话）、会话状态不可撤销（撤销删光克隆会清理会话）；QSAVE 应用层拒绝（`refedit.save_blocked`）。 |
+|  721 | `REFSET` | 完整实现 | Adds or removes objects from a working set during in-place editing of a reference, either an xref or a block definition. | 真实：`REFSET ADD|REMOVE`（裸命令=ADD；无活动会话 `refedit.no_session`、空选择 `refedit.selection_empty`、嵌套实例 `refedit.nested`、自引用实例 `refedit.selection`）把当前选择加入/移出 in-place 块编辑工作集；会话状态，不写图/不升修订/不入历史；ADD 在 SAVE 时把宿主对象（同 id）**移入**块，REMOVE 在 SAVE 时删除原成员而模型空间副本保留；重复 ADD/REMOVE 是对应计数为 0 的空操作。交互拾取提示属全局范围。 |
 | 722 | `REGEN` | 部分实现 | Regenerates the drawing from within the current viewport. | 推进当前视口 regeneration stamp，重建派生显示缓存；不写库 |
 | 723 | `REGEN3` | 部分实现 | Regenerates the views in a drawing to repair anomalies in the display of 3D solids and surfaces. | `REGEN` 的别名（同一 `CommandId`/路径），无第二套实现；不修复 3D 实体显示异常 |
 | 724 | `REGENALL` | 部分实现 | Regenerates the entire drawing and refreshes all viewports. | 所有视口 regeneration；不写库 |
