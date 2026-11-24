@@ -24,17 +24,17 @@ BUILD_CHANGELOG = ROOT / "scripts" / "build-landing-changelog.py"
 CHANGELOG = LANDING / "changelog.json"
 HEADERS = LANDING / "_headers"
 
-RELEASE = "v0.1.17"
-GITHUB_BASE = "https://github.com/zenglanmu/yacr/releases/download/v0.1.17/"
-# `None` is a deliberate value, not a placeholder: v0.1.17 was published without
+RELEASE = "v0.1.18"
+GITHUB_BASE = "https://github.com/zenglanmu/yacr/releases/download/v0.1.18/"
+# `None` is a deliberate value, not a placeholder: v0.1.18 was published without
 # an R2 mirror, so the committed manifest falls back to the GitHub Release URLs.
 # After `upload-r2-downloads.sh` runs, set this to the CDN base it wrote.
 CDN_BASE = None
 KNOWN_ASSETS = {
-    "linux": ("yacr-0.1.17-linux-x86_64.flatpak", 126880720),
-    "windows": ("yacr-0.1.17-windows-x86_64.zip", 118168854),
-    "macos": ("yacr-0.1.17-macos-universal.tar.gz", 172026366),
-    "android": ("app-universal-release.apk", 127321948),
+    "linux": ("yacr-0.1.18-linux-x86_64.flatpak", 127133432),
+    "windows": ("yacr-0.1.18-windows-x86_64.zip", 119148020),
+    "macos": ("yacr-0.1.18-macos-universal.tar.gz", 173812144),
+    "android": ("app-universal-release.apk", 128526172),
 }
 
 # The page shows five genuine product screenshots (one hero plate plus a
@@ -272,9 +272,9 @@ def check_index(text: str, errors: list[str]) -> None:
         "725K",
         "979",
         "981",
-        "185",
-        "794",
-        "794 partial, 2 not implemented",
+        "289",
+        "690",
+        "690 partial, 2 not implemented",
         "Rust",
         "React",
         "Tauri",

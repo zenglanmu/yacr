@@ -32,6 +32,10 @@ and one React interface runs on Linux, Windows, macOS, Android and the web.
   RECTANGLE, POLYGON, text, leaders, tables, hatch; move, copy, rotate, scale,
   mirror, trim, extend, break, offset, fillet, chamfer, array, block references,
   layer and property writes — every edit through a database transaction with undo.
+- **Keep the drawing organized.** Block attributes are real block members with
+  editable values that travel to DXF/DWG; named groups and named views persist in
+  the document, layer states restore visibility, and the action recorder captures
+  command sequences into replayable macros.
 - **Inspect a drawing.** Entity selection and highlight, layer hide/show/search,
   properties, model space and layout switching, raster images, hatch gradients,
   real font shaping for TEXT/MTEXT.
@@ -50,7 +54,7 @@ Vendor drawings are not silently dropped either: Tianzheng and similar custom
 entities display from their public proxy-graphics cache records.
 
 **Command coverage.** 979 of 981 AutoCAD command names have an implementation
-path — 185 complete, 794 partial — and an unsupported option is refused by name
+path — 289 complete, 690 partial — and an unsupported option is refused by name
 rather than quietly doing something else.
 
 ## Screenshots
@@ -135,8 +139,11 @@ cargo build -p cad-cli-tools --release --locked
   entity fidelity varies.
 - `.ymodel` is the native format. Writing a DWG-sourced drawing back to DWG is
   experimental; other imported sources save as DXF.
-- 3D solid modelling is not implemented (refused explicitly); ACIS entities are
-  displayed from a subset tessellation.
+- Solid modelling is bounded: seven primitives (BOX, CYLINDER, CONE, SPHERE,
+  TORUS, WEDGE, PYRAMID) and UNION/SUBTRACT/INTERSECT run on the exact kernel
+  for single-shell results; extrusion, revolution, loft, sweep, feature history
+  and 3D assemblies are refused by name. ACIS entities are displayed from a
+  subset tessellation.
 - Revit previews carry BIM metadata (element bodies are bounding boxes on older
   releases, with more decoded geometry on newer ones) and have no real edge data:
   the visible boundaries are a derived display overlay, so Revit previews are not

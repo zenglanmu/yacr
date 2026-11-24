@@ -128,7 +128,7 @@
               </a>
               <a class="btn btn--ghost" href="#download">
                 <span class="lang--zh">下载</span><span class="lang--en" lang="en">Download</span>
-                <span data-release-version>v0.1.17</span>
+                <span data-release-version>v0.1.18</span>
                 <span class="ext" aria-hidden="true">↓</span>
               </a>
               <a class="btn btn--text" href="https://github.com/zenglanmu/yacr" target="_blank" rel="noopener">
@@ -662,8 +662,8 @@
             </div>
             <h3><span class="lang--zh">二维绘制与编辑</span><span class="lang--en" lang="en">Draw and edit in 2D</span></h3>
             <p>
-              <span class="lang--zh">直线、多段线、圆、圆弧、椭圆、样条、文字、引线、表格与填充；移动、复制、旋转、修剪、延伸、偏移、圆角、阵列与块参照。每次编辑都走数据库事务，带撤销。</span>
-              <span class="lang--en" lang="en">Line, polyline, circle, arc, ellipse, spline, text, leaders, tables and hatch; move, copy, rotate, trim, extend, offset, fillet, array and block references. Every edit runs through a database transaction with undo.</span>
+              <span class="lang--zh">直线、多段线、圆、圆弧、椭圆、样条、文字、引线、表格与填充；移动、复制、旋转、修剪、延伸、偏移、圆角、阵列与块参照。块属性、编组与命名视图随文档保存，动作录制器把命令序列录成可回放的宏。每次编辑都走数据库事务，带撤销。</span>
+              <span class="lang--en" lang="en">Line, polyline, circle, arc, ellipse, spline, text, leaders, tables and hatch; move, copy, rotate, trim, extend, offset, fillet, array and block references. Block attributes, named groups and named views persist with the document, and the action recorder turns command sequences into replayable macros. Every edit runs through a database transaction with undo.</span>
             </p>
             <div class="chips" aria-hidden="true"><span>2D</span><span>EDIT</span><span>TRANSACTION</span><span>UNDO</span></div>
           </article>
@@ -675,8 +675,8 @@
             </div>
             <h3><span class="lang--zh">测量</span><span class="lang--en" lang="en">Measurement</span></h3>
             <p>
-              <span class="lang--zh">距离、多段线长度、角度、多边形面积；每个结果都带着它来自的单位、精度与几何来源。</span>
-              <span class="lang--en" lang="en">Distance, polyline length, angle and polygon area, each with the unit, precision and geometry source it came from.</span>
+              <span class="lang--zh">距离、多段线长度、角度、多边形面积与实体体积；每个结果都带着它来自的单位、精度与几何来源。</span>
+              <span class="lang--en" lang="en">Distance, polyline length, angle, polygon area and solid volume, each with the unit, precision and geometry source it came from.</span>
             </p>
             <div class="chips" aria-hidden="true"><span>DISTANCE</span><span>AREA</span><span>ANGLE</span></div>
           </article>
@@ -701,8 +701,8 @@
             </div>
             <h3><span class="lang--zh">命令覆盖</span><span class="lang--en" lang="en">Command coverage</span></h3>
             <p>
-              <span class="lang--zh">979 条有实现路径（185 完整 + 794 部分），其余 2 条按同名不同义不计入（MEASURE / TRACE）。未支持的选项按名拒绝，不静默成功。</span>
-              <span class="lang--en" lang="en">979 commands have an implementation path (185 complete + 794 partial); the other 2 are counted as same-name-different-meaning (MEASURE, TRACE). Unsupported options are rejected by name, never silently accepted.</span>
+              <span class="lang--zh">979 条有实现路径（289 完整 + 690 部分），其余 2 条按同名不同义不计入（MEASURE / TRACE）。未支持的选项按名拒绝，不静默成功。</span>
+              <span class="lang--en" lang="en">979 commands have an implementation path (289 complete + 690 partial); the other 2 are counted as same-name-different-meaning (MEASURE, TRACE). Unsupported options are rejected by name, never silently accepted.</span>
             </p>
             <div class="coverage">
               <div class="coverage-top">
@@ -712,12 +712,12 @@
                   <span class="lang--zh">清单计数 · 非兼容率</span><span class="lang--en" lang="en">list count · not compatibility</span>
                 </span>
               </div>
-              <div class="coverage-bar" role="img" data-aria-zh="981 条命令：185 条完整、794 条部分、2 条未实现（同名不同义）" data-aria-en="981 commands: 185 complete, 794 partial, 2 not implemented (same name, different meaning)">
+              <div class="coverage-bar" role="img" data-aria-zh="981 条命令：289 条完整、690 条部分、2 条未实现（同名不同义）" data-aria-en="981 commands: 289 complete, 690 partial, 2 not implemented (same name, different meaning)">
                 <span class="seg seg--full"></span><span class="seg seg--partial"></span><span class="seg seg--none"></span>
               </div>
               <ul class="coverage-legend">
-                <li><span class="swatch swatch--full" aria-hidden="true"></span><strong>185</strong><span class="lang--zh">完整</span><span class="lang--en" lang="en">complete</span></li>
-                <li><span class="swatch swatch--partial" aria-hidden="true"></span><strong>794</strong><span class="lang--zh">部分</span><span class="lang--en" lang="en">partial</span></li>
+                <li><span class="swatch swatch--full" aria-hidden="true"></span><strong>289</strong><span class="lang--zh">完整</span><span class="lang--en" lang="en">complete</span></li>
+                <li><span class="swatch swatch--partial" aria-hidden="true"></span><strong>690</strong><span class="lang--zh">部分</span><span class="lang--en" lang="en">partial</span></li>
                 <li><span class="swatch swatch--none" aria-hidden="true"></span><strong>2</strong><span class="lang--zh">未实现</span><span class="lang--en" lang="en">not implemented</span></li>
               </ul>
             </div>
@@ -959,17 +959,17 @@
               <span class="release-kicker-sep" aria-hidden="true">/</span>
               <span class="lang--zh">最新版本</span><span class="lang--en" lang="en">latest version</span>
             </p>
-            <p class="release-version" data-release-version>v0.1.17</p>
+            <p class="release-version" data-release-version>v0.1.18</p>
             <p class="release-sub">
               <span class="release-sub-label"><span class="lang--zh">发布于</span><span class="lang--en" lang="en">Released</span></span>
-              <time data-release-date datetime="2026-11-17">2026-11-17</time>
+              <time data-release-date datetime="2026-11-24">2026-11-24</time>
               <span class="release-dot" aria-hidden="true">/</span>
               <span><span data-release-assets>4</span> <span class="lang--zh">个产物</span><span class="lang--en" lang="en">assets</span></span>
               <span class="release-dot" aria-hidden="true">/</span>
-              <span data-release-total>≈ 519.2 MiB</span>
+              <span data-release-total>≈ 523.2 MiB</span>
             </p>
             <div class="release-actions">
-              <a class="btn btn--primary" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.17/yacr-0.1.17-linux-x86_64.flatpak" target="_blank" rel="noopener" data-download="linux">
+              <a class="btn btn--primary" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.18/yacr-0.1.18-linux-x86_64.flatpak" target="_blank" rel="noopener" data-download="linux">
                 <span class="lang--zh">下载 Linux Flatpak</span><span class="lang--en" lang="en">Get the Linux Flatpak</span>
                 <span class="cdn-badge" hidden><span class="lang--zh">Cloudflare 镜像</span><span class="lang--en" lang="en">Cloudflare mirror</span></span>
               </a>
@@ -977,7 +977,7 @@
                 <span class="lang--zh">所有平台</span><span class="lang--en" lang="en">All platforms</span>
                 <span class="ext" aria-hidden="true">↓</span>
               </a>
-              <a class="btn btn--text" href="https://github.com/zenglanmu/yacr/releases/tag/v0.1.17" target="_blank" rel="noopener" data-release-url>
+              <a class="btn btn--text" href="https://github.com/zenglanmu/yacr/releases/tag/v0.1.18" target="_blank" rel="noopener" data-release-url>
                 GitHub Release <span class="ext" aria-hidden="true">↗</span>
               </a>
             </div>
@@ -1014,7 +1014,7 @@
         </div>
 
         <div class="release-meta reveal">
-          <span>RELEASE / <span data-release-version>v0.1.17</span></span>
+          <span>RELEASE / <span data-release-version>v0.1.18</span></span>
           <span><span data-release-assets>4</span> ASSETS</span>
           <span>SHA-256</span>
           <span>SIGNING.txt</span>
@@ -1034,8 +1034,8 @@
                 <span class="dl-sign dl-sign--ok"><span class="lang--zh">GPG 可选</span><span class="lang--en" lang="en">GPG optional</span></span>
               </div>
             </div>
-            <p class="dl-file"><code data-file-for="linux">yacr-0.1.17-linux-x86_64.flatpak</code></p>
-            <p class="dl-size" data-size-for="linux"><strong>126,880,720</strong> <span>bytes · ≈ 121.0 MiB</span></p>
+            <p class="dl-file"><code data-file-for="linux">yacr-0.1.18-linux-x86_64.flatpak</code></p>
+            <p class="dl-size" data-size-for="linux"><strong>127,133,432</strong> <span>bytes · ≈ 121.2 MiB</span></p>
             <dl class="dl-specs">
               <div>
                 <dt>REQUIRES</dt>
@@ -1051,19 +1051,19 @@
               </div>
             </dl>
             <div class="dl-actions">
-              <a class="btn btn--download" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.17/yacr-0.1.17-linux-x86_64.flatpak" target="_blank" rel="noopener" data-download="linux">
+              <a class="btn btn--download" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.18/yacr-0.1.18-linux-x86_64.flatpak" target="_blank" rel="noopener" data-download="linux">
                 <span class="lang--zh">下载 Flatpak</span><span class="lang--en" lang="en">Download Flatpak</span>
                 <span class="cdn-badge" hidden><span class="lang--zh">Cloudflare 镜像</span><span class="lang--en" lang="en">Cloudflare mirror</span></span>
               </a>
               <div class="dl-links">
-                <a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.17/yacr-0.1.17-linux-x86_64.flatpak" target="_blank" rel="noopener" data-github="linux">GitHub <span class="ext" aria-hidden="true">↗</span></a>
-                <a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.17/yacr-0.1.17-linux-x86_64.flatpak.sha256" target="_blank" rel="noopener" data-sha="linux">SHA-256 <span class="ext" aria-hidden="true">↗</span></a>
+                <a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.18/yacr-0.1.18-linux-x86_64.flatpak" target="_blank" rel="noopener" data-github="linux">GitHub <span class="ext" aria-hidden="true">↗</span></a>
+                <a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.18/yacr-0.1.18-linux-x86_64.flatpak.sha256" target="_blank" rel="noopener" data-sha="linux">SHA-256 <span class="ext" aria-hidden="true">↗</span></a>
               </div>
             </div>
             <div class="cmd-stack">
               <div class="cmd">
-                <code data-cmd-file="linux" data-cmd-template="flatpak install --user {file}">flatpak install --user yacr-0.1.17-linux-x86_64.flatpak</code>
-                <button class="copy-btn" type="button" data-copy="flatpak install --user yacr-0.1.17-linux-x86_64.flatpak" data-aria-zh="复制 Flatpak 安装命令" data-aria-en="Copy the Flatpak install command" data-copied-zh="已复制" data-copied-en="Copied">
+                <code data-cmd-file="linux" data-cmd-template="flatpak install --user {file}">flatpak install --user yacr-0.1.18-linux-x86_64.flatpak</code>
+                <button class="copy-btn" type="button" data-copy="flatpak install --user yacr-0.1.18-linux-x86_64.flatpak" data-aria-zh="复制 Flatpak 安装命令" data-aria-en="Copy the Flatpak install command" data-copied-zh="已复制" data-copied-en="Copied">
                   <span class="copy-label"><span class="lang--zh">复制</span><span class="lang--en" lang="en">Copy</span></span>
                 </button>
               </div>
@@ -1088,8 +1088,8 @@
                 <span class="dl-sign dl-sign--warn"><span class="lang--zh">未签名</span><span class="lang--en" lang="en">Unsigned</span></span>
               </div>
             </div>
-            <p class="dl-file"><code data-file-for="windows">yacr-0.1.17-windows-x86_64.zip</code></p>
-            <p class="dl-size" data-size-for="windows"><strong>118,168,854</strong> <span>bytes · ≈ 112.7 MiB</span></p>
+            <p class="dl-file"><code data-file-for="windows">yacr-0.1.18-windows-x86_64.zip</code></p>
+            <p class="dl-size" data-size-for="windows"><strong>119,148,020</strong> <span>bytes · ≈ 113.6 MiB</span></p>
             <dl class="dl-specs">
               <div>
                 <dt>REQUIRES</dt>
@@ -1105,19 +1105,19 @@
               </div>
             </dl>
             <div class="dl-actions">
-              <a class="btn btn--download" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.17/yacr-0.1.17-windows-x86_64.zip" target="_blank" rel="noopener" data-download="windows">
+              <a class="btn btn--download" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.18/yacr-0.1.18-windows-x86_64.zip" target="_blank" rel="noopener" data-download="windows">
                 <span class="lang--zh">下载 ZIP</span><span class="lang--en" lang="en">Download ZIP</span>
                 <span class="cdn-badge" hidden><span class="lang--zh">Cloudflare 镜像</span><span class="lang--en" lang="en">Cloudflare mirror</span></span>
               </a>
               <div class="dl-links">
-                <a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.17/yacr-0.1.17-windows-x86_64.zip" target="_blank" rel="noopener" data-github="windows">GitHub <span class="ext" aria-hidden="true">↗</span></a>
-                <a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.17/yacr-0.1.17-windows-x86_64.zip.sha256" target="_blank" rel="noopener" data-sha="windows">SHA-256 <span class="ext" aria-hidden="true">↗</span></a>
+                <a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.18/yacr-0.1.18-windows-x86_64.zip" target="_blank" rel="noopener" data-github="windows">GitHub <span class="ext" aria-hidden="true">↗</span></a>
+                <a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.18/yacr-0.1.18-windows-x86_64.zip.sha256" target="_blank" rel="noopener" data-sha="windows">SHA-256 <span class="ext" aria-hidden="true">↗</span></a>
               </div>
             </div>
             <div class="cmd-stack">
               <div class="cmd">
-                <code data-cmd-file="windows" data-cmd-template="Expand-Archive {file} -DestinationPath yacr">Expand-Archive yacr-0.1.17-windows-x86_64.zip -DestinationPath yacr</code>
-                <button class="copy-btn" type="button" data-copy="Expand-Archive yacr-0.1.17-windows-x86_64.zip -DestinationPath yacr" data-aria-zh="复制解压命令" data-aria-en="Copy the unzip command" data-copied-zh="已复制" data-copied-en="Copied">
+                <code data-cmd-file="windows" data-cmd-template="Expand-Archive {file} -DestinationPath yacr">Expand-Archive yacr-0.1.18-windows-x86_64.zip -DestinationPath yacr</code>
+                <button class="copy-btn" type="button" data-copy="Expand-Archive yacr-0.1.18-windows-x86_64.zip -DestinationPath yacr" data-aria-zh="复制解压命令" data-aria-en="Copy the unzip command" data-copied-zh="已复制" data-copied-en="Copied">
                   <span class="copy-label"><span class="lang--zh">复制</span><span class="lang--en" lang="en">Copy</span></span>
                 </button>
               </div>
@@ -1142,8 +1142,8 @@
                 <span class="dl-sign dl-sign--warn"><span class="lang--zh">ad-hoc · 未公证</span><span class="lang--en" lang="en">Ad-hoc · not notarized</span></span>
               </div>
             </div>
-            <p class="dl-file"><code data-file-for="macos">yacr-0.1.17-macos-universal.tar.gz</code></p>
-            <p class="dl-size" data-size-for="macos"><strong>172,026,366</strong> <span>bytes · ≈ 164.1 MiB</span></p>
+            <p class="dl-file"><code data-file-for="macos">yacr-0.1.18-macos-universal.tar.gz</code></p>
+            <p class="dl-size" data-size-for="macos"><strong>173,812,144</strong> <span>bytes · ≈ 165.8 MiB</span></p>
             <dl class="dl-specs">
               <div>
                 <dt>REQUIRES</dt>
@@ -1159,19 +1159,19 @@
               </div>
             </dl>
             <div class="dl-actions">
-              <a class="btn btn--download" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.17/yacr-0.1.17-macos-universal.tar.gz" target="_blank" rel="noopener" data-download="macos">
+              <a class="btn btn--download" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.18/yacr-0.1.18-macos-universal.tar.gz" target="_blank" rel="noopener" data-download="macos">
                 <span class="lang--zh">下载 TAR.GZ</span><span class="lang--en" lang="en">Download TAR.GZ</span>
                 <span class="cdn-badge" hidden><span class="lang--zh">Cloudflare 镜像</span><span class="lang--en" lang="en">Cloudflare mirror</span></span>
               </a>
               <div class="dl-links">
-                <a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.17/yacr-0.1.17-macos-universal.tar.gz" target="_blank" rel="noopener" data-github="macos">GitHub <span class="ext" aria-hidden="true">↗</span></a>
-                <a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.17/yacr-0.1.17-macos-universal.tar.gz.sha256" target="_blank" rel="noopener" data-sha="macos">SHA-256 <span class="ext" aria-hidden="true">↗</span></a>
+                <a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.18/yacr-0.1.18-macos-universal.tar.gz" target="_blank" rel="noopener" data-github="macos">GitHub <span class="ext" aria-hidden="true">↗</span></a>
+                <a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.18/yacr-0.1.18-macos-universal.tar.gz.sha256" target="_blank" rel="noopener" data-sha="macos">SHA-256 <span class="ext" aria-hidden="true">↗</span></a>
               </div>
             </div>
             <div class="cmd-stack">
               <div class="cmd">
-                <code data-cmd-file="macos" data-cmd-template="tar -xzf {file}">tar -xzf yacr-0.1.17-macos-universal.tar.gz</code>
-                <button class="copy-btn" type="button" data-copy="tar -xzf yacr-0.1.17-macos-universal.tar.gz" data-aria-zh="复制解压命令" data-aria-en="Copy the extract command" data-copied-zh="已复制" data-copied-en="Copied">
+                <code data-cmd-file="macos" data-cmd-template="tar -xzf {file}">tar -xzf yacr-0.1.18-macos-universal.tar.gz</code>
+                <button class="copy-btn" type="button" data-copy="tar -xzf yacr-0.1.18-macos-universal.tar.gz" data-aria-zh="复制解压命令" data-aria-en="Copy the extract command" data-copied-zh="已复制" data-copied-en="Copied">
                   <span class="copy-label"><span class="lang--zh">复制</span><span class="lang--en" lang="en">Copy</span></span>
                 </button>
               </div>
@@ -1197,7 +1197,7 @@
               </div>
             </div>
             <p class="dl-file"><code data-file-for="android">app-universal-release.apk</code></p>
-            <p class="dl-size" data-size-for="android"><strong>127,321,948</strong> <span>bytes · ≈ 121.4 MiB</span></p>
+            <p class="dl-size" data-size-for="android"><strong>128,526,172</strong> <span>bytes · ≈ 122.6 MiB</span></p>
             <dl class="dl-specs">
               <div>
                 <dt>REQUIRES</dt>
@@ -1217,13 +1217,13 @@
               </div>
             </dl>
             <div class="dl-actions">
-              <a class="btn btn--download" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.17/app-universal-release.apk" target="_blank" rel="noopener" data-download="android">
+              <a class="btn btn--download" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.18/app-universal-release.apk" target="_blank" rel="noopener" data-download="android">
                 <span class="lang--zh">下载 APK</span><span class="lang--en" lang="en">Download APK</span>
                 <span class="cdn-badge" hidden><span class="lang--zh">Cloudflare 镜像</span><span class="lang--en" lang="en">Cloudflare mirror</span></span>
               </a>
               <div class="dl-links">
-                <a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.17/app-universal-release.apk" target="_blank" rel="noopener" data-github="android">GitHub <span class="ext" aria-hidden="true">↗</span></a>
-                <a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.17/app-universal-release.apk.sha256" target="_blank" rel="noopener" data-sha="android">SHA-256 <span class="ext" aria-hidden="true">↗</span></a>
+                <a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.18/app-universal-release.apk" target="_blank" rel="noopener" data-github="android">GitHub <span class="ext" aria-hidden="true">↗</span></a>
+                <a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.18/app-universal-release.apk.sha256" target="_blank" rel="noopener" data-sha="android">SHA-256 <span class="ext" aria-hidden="true">↗</span></a>
               </div>
             </div>
             <div class="cmd-stack">
@@ -1248,14 +1248,14 @@
             </p>
             <div class="cmd-stack">
               <div class="cmd">
-                <code data-cmd-file="linux" data-cmd-template="sha256sum -c {file}.sha256">sha256sum -c yacr-0.1.17-linux-x86_64.flatpak.sha256</code>
-                <button class="copy-btn" type="button" data-copy="sha256sum -c yacr-0.1.17-linux-x86_64.flatpak.sha256" data-aria-zh="复制 Linux 校验命令" data-aria-en="Copy the Linux checksum command" data-copied-zh="已复制" data-copied-en="Copied">
+                <code data-cmd-file="linux" data-cmd-template="sha256sum -c {file}.sha256">sha256sum -c yacr-0.1.18-linux-x86_64.flatpak.sha256</code>
+                <button class="copy-btn" type="button" data-copy="sha256sum -c yacr-0.1.18-linux-x86_64.flatpak.sha256" data-aria-zh="复制 Linux 校验命令" data-aria-en="Copy the Linux checksum command" data-copied-zh="已复制" data-copied-en="Copied">
                   <span class="copy-label"><span class="lang--zh">复制</span><span class="lang--en" lang="en">Copy</span></span>
                 </button>
               </div>
               <div class="cmd">
-                <code data-cmd-file="windows" data-cmd-template="Get-FileHash .\{file} -Algorithm SHA256">Get-FileHash .\yacr-0.1.17-windows-x86_64.zip -Algorithm SHA256</code>
-                <button class="copy-btn" type="button" data-copy="Get-FileHash .\yacr-0.1.17-windows-x86_64.zip -Algorithm SHA256" data-aria-zh="复制 Windows 校验命令" data-aria-en="Copy the Windows checksum command" data-copied-zh="已复制" data-copied-en="Copied">
+                <code data-cmd-file="windows" data-cmd-template="Get-FileHash .\{file} -Algorithm SHA256">Get-FileHash .\yacr-0.1.18-windows-x86_64.zip -Algorithm SHA256</code>
+                <button class="copy-btn" type="button" data-copy="Get-FileHash .\yacr-0.1.18-windows-x86_64.zip -Algorithm SHA256" data-aria-zh="复制 Windows 校验命令" data-aria-en="Copy the Windows checksum command" data-copied-zh="已复制" data-copied-en="Copied">
                   <span class="copy-label"><span class="lang--zh">复制</span><span class="lang--en" lang="en">Copy</span></span>
                 </button>
               </div>
@@ -1263,16 +1263,16 @@
             <div class="dl-hash">
               <p class="dl-hash-label">LINUX FLATPAK · SHA-256</p>
               <div class="dl-hash-row">
-                <code data-sha-for="linux">7238357643524003f3f1802ccc27c75442bb7ac520b901c6dca23144022b574a</code>
-                <button class="copy-btn" type="button" data-copy="7238357643524003f3f1802ccc27c75442bb7ac520b901c6dca23144022b574a" data-aria-zh="复制 Linux SHA-256" data-aria-en="Copy the Linux SHA-256" data-copied-zh="已复制" data-copied-en="Copied">
+                <code data-sha-for="linux">c8df041f2179501c39ad1c6c9a46555b5084337c4e76b6bd9d718d65f27095cf</code>
+                <button class="copy-btn" type="button" data-copy="c8df041f2179501c39ad1c6c9a46555b5084337c4e76b6bd9d718d65f27095cf" data-aria-zh="复制 Linux SHA-256" data-aria-en="Copy the Linux SHA-256" data-copied-zh="已复制" data-copied-en="Copied">
                   <span class="copy-label"><span class="lang--zh">复制</span><span class="lang--en" lang="en">Copy</span></span>
                 </button>
               </div>
             </div>
             <ul class="dl-verify-links">
-              <li><a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.17/SIGNING.txt" target="_blank" rel="noopener" data-github-file="SIGNING.txt">SIGNING.txt <span class="ext" aria-hidden="true">↗</span></a></li>
-              <li><a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.17/yacr-0.1.17-linux-x86_64.flatpak.gpg" target="_blank" rel="noopener" data-github="linux" data-github-suffix=".gpg">.flatpak.gpg <span class="ext" aria-hidden="true">↗</span></a></li>
-              <li><a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/tag/v0.1.17" target="_blank" rel="noopener" data-release-url>GitHub Release <span class="ext" aria-hidden="true">↗</span></a></li>
+              <li><a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.18/SIGNING.txt" target="_blank" rel="noopener" data-github-file="SIGNING.txt">SIGNING.txt <span class="ext" aria-hidden="true">↗</span></a></li>
+              <li><a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/download/v0.1.18/yacr-0.1.18-linux-x86_64.flatpak.gpg" target="_blank" rel="noopener" data-github="linux" data-github-suffix=".gpg">.flatpak.gpg <span class="ext" aria-hidden="true">↗</span></a></li>
+              <li><a class="dl-link" href="https://github.com/zenglanmu/yacr/releases/tag/v0.1.18" target="_blank" rel="noopener" data-release-url>GitHub Release <span class="ext" aria-hidden="true">↗</span></a></li>
             </ul>
             <p class="dl-hash-label dl-sign-matrix-label">SIGNING STATUS</p>
             <ul class="dl-sign-matrix">
@@ -1428,8 +1428,8 @@
               </summary>
               <div class="faq-a">
                 <p>
-                  <span class="lang--zh">它是命令清单的计数：981 条命令中 979 条有实现路径（185 完整 + 794 部分），其余 2 条（MEASURE / TRACE）按同名不同义不计入。它不是 AutoCAD 兼容率；未支持的选项会按名称拒绝，不会静默成功。</span>
-                  <span class="lang--en" lang="en">It is a count of the command list: of 981 commands, 979 have an implementation path (185 complete + 794 partial); the other 2 (MEASURE, TRACE) are counted as same-name-different-meaning. It is not an AutoCAD compatibility rate. Unsupported options are rejected by name, never silently accepted.</span>
+                  <span class="lang--zh">它是命令清单的计数：981 条命令中 979 条有实现路径（289 完整 + 690 部分），其余 2 条（MEASURE / TRACE）按同名不同义不计入。它不是 AutoCAD 兼容率；未支持的选项会按名称拒绝，不会静默成功。</span>
+                  <span class="lang--en" lang="en">It is a count of the command list: of 981 commands, 979 have an implementation path (289 complete + 690 partial); the other 2 (MEASURE, TRACE) are counted as same-name-different-meaning. It is not an AutoCAD compatibility rate. Unsupported options are rejected by name, never silently accepted.</span>
                 </p>
               </div>
             </details>
