@@ -104,6 +104,14 @@ fn named_view_round_trips_through_the_session() {
     session
         .command("VIEW SAVE Start")
         .expect("VIEW SAVE is admitted");
+    {
+        let c = session.core.controller.borrow();
+        assert!(
+            c.application.can_undo(&c.document_id),
+            "VIEW SAVE writes the persisted view table as one undo step"
+        );
+        assert!(!c.application.can_redo(&c.document_id));
+    }
     session.command("ZOOM 2").expect("ZOOM 2 is admitted");
     assert_ne!(camera(&session), saved);
 
@@ -111,7 +119,17 @@ fn named_view_round_trips_through_the_session() {
         .command("VIEWGO start")
         .expect("VIEWGO resolves names case-insensitively");
     assert_eq!(camera(&session), saved);
-    assert_no_history(&session);
+    {
+        let c = session.core.controller.borrow();
+        assert!(
+            c.application.can_undo(&c.document_id),
+            "the save step is still the only retained write"
+        );
+        assert!(
+            !c.application.can_redo(&c.document_id),
+            "VIEW RESTORE records no new step"
+        );
+    }
 
     session.command("ZOOM 3").expect("ZOOM 3 is admitted");
     // The `-VIEW` alias reaches the same restore path.
@@ -119,7 +137,10 @@ fn named_view_round_trips_through_the_session() {
         .command("-VIEW RESTORE Start")
         .expect("-VIEW is the same command");
     assert_eq!(camera(&session), saved);
-    assert_no_history(&session);
+    {
+        let c = session.core.controller.borrow();
+        assert!(!c.application.can_redo(&c.document_id));
+    }
 }
 
 #[test]

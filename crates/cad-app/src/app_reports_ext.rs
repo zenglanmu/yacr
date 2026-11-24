@@ -456,7 +456,7 @@ pub(crate) fn status_extended(
             session.hidden_entities.len(),
             session.layer_overrides.len(),
             session.groups.len(),
-            session.view_states.len()
+            drawing.named_views().len()
         ),
     ));
     diagnostics

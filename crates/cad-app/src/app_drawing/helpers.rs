@@ -672,6 +672,19 @@ pub(crate) fn apply_drawing_patches(
     step: &cad_history::DrawingHistoryStep,
     forward: bool,
 ) -> CadResult<ChangeSet> {
+    // A named-view step is replayed through the view-table write path: undo
+    // passes the swapped `before`/`after` sides and the table write is one
+    // revision. The record's entity/table batches are refused with a view step
+    // by `DrawingHistoryStep::validate`, so this branch cannot drop them.
+    if !step.view_patches.is_empty() {
+        return super::view_replay::replay_view_patches(
+            drawing,
+            transaction,
+            reason,
+            step,
+            forward,
+        );
+    }
     // A parametric step is replayed through the same merged write path the edit
     // used: the parameter rows and the binding rows are swapped (redo takes the
     // stored `before`/`after`, undo swaps them) and `apply_parametric_update`

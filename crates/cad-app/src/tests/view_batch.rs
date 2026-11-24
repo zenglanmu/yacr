@@ -1,12 +1,13 @@
 //! `REDRAW` / `REGEN` / `VIEW` / `VIEWGO` / `VIEWBACK` / `VIEWFORWARD` /
-//! `VPOINT`: the 2026-11-07 view batch.
+//! `VPOINT`: the 2026-11-07 view batch plus persisted named views (2026-11-24).
 //!
-//! The contract pinned here is that every one is session view state only: the
-//! drawing revision, entity count and undo/redo availability never move. Named
-//! views round-trip camera + mode + work plane + active space, unknown names are
-//! explicit refusals, back/forward order is stack-exact and an empty stack is a
-//! named no-op, and a zero/non-finite `VPOINT` is refused before any camera
-//! change.
+//! `REDRAW`/`REGEN` stay session stamps; `VIEW`/`VIEWGO` now write
+//! `tables/views.json` (one revision/undo step) and restore camera + mode + work
+//! plane + active space; `VIEWBACK`/`VIEWFORWARD` remain per-viewport navigation
+//! history (pan/wheel/orbit are not recorded, and forward is a separate stack).
+//! Unknown names are explicit refusals, back/forward order is stack-exact, an
+//! empty stack is a named no-op, and a zero/non-finite `VPOINT` is refused before
+//! any camera change.
 
 use super::*;
 
@@ -184,6 +185,12 @@ fn named_view_save_restore_round_trips_camera_mode_plane_and_space() {
     let saved_camera = viewport(&app, 1).camera;
 
     run_view(&mut app, &mut session, ViewCommand::Save("Plan A".into()));
+    assert_eq!(
+        revision(&app).0,
+        before.0 + 1,
+        "VIEW SAVE is one document revision"
+    );
+    assert!(app.can_undo(&DocumentId(1)), "the table write is undoable");
     zoom_by(&mut app, &mut session, 2.0);
     assert_ne!(viewport(&app, 1).camera, saved_camera);
 
@@ -195,9 +202,8 @@ fn named_view_save_restore_round_trips_camera_mode_plane_and_space() {
         saved_camera,
         "VIEWGO restores the exact camera"
     );
-    assert_view_only(&app, before);
-
-    // `VIEW RESTORE` is the same path.
+    // A restore moves session view state only: no additional revision/undo.
+    let after_save = revision(&app);
     zoom_by(&mut app, &mut session, 3.0);
     let outcome = run_view(
         &mut app,
@@ -206,7 +212,7 @@ fn named_view_save_restore_round_trips_camera_mode_plane_and_space() {
     );
     assert_eq!(codes(&outcome), ["view.restored"]);
     assert_eq!(viewport(&app, 1).camera, saved_camera);
-    assert_view_only(&app, before);
+    assert_eq!(revision(&app), after_save, "VIEW RESTORE writes nothing");
 }
 
 #[test]
@@ -241,29 +247,85 @@ fn named_view_unknown_name_and_delete_are_explicit() {
     run_view(&mut app, &mut session, ViewCommand::Save("Keep".into()));
     let outcome = run_view(&mut app, &mut session, ViewCommand::Delete("keep".into()));
     assert_eq!(codes(&outcome), ["view.deleted"]);
-    assert!(session.view_states.is_empty());
+    assert!(app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .named_views()
+        .is_empty());
 
     let outcome = run_view(&mut app, &mut session, ViewCommand::List);
     assert_eq!(codes(&outcome), ["view.list"]);
 }
 
 #[test]
-fn named_view_store_is_bounded_to_32_and_drops_the_oldest() {
+fn named_view_store_is_bounded_to_32_and_refuses_the_33rd_without_eviction() {
     let (mut app, mut session) = app_with_extent_and_second_viewport();
-    for index in 0..33 {
+    for index in 0..32 {
         run_view(
             &mut app,
             &mut session,
             ViewCommand::Save(format!("VIEW{index}")),
         );
     }
-    assert_eq!(session.view_states.len(), 32);
-    assert_eq!(session.view_states.cap(), 32);
+    let error = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::View,
+                CommandPayload::View(ViewCommand::Save("VIEW32".into())),
+            ),
+        )
+        .unwrap_err();
+    assert!(format!("{error:?}").contains("view.cap_exceeded"));
+    let views = app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .named_views();
+    assert_eq!(views.len(), 32);
     assert!(
-        session.view_states.resolve("VIEW0").is_none(),
-        "the oldest name is dropped when full"
+        views.resolve("VIEW0").is_some(),
+        "no existing view is evicted"
     );
-    assert!(session.view_states.resolve("VIEW32").is_some());
+    assert!(views.resolve("VIEW32").is_none());
+}
+
+#[test]
+fn named_view_save_and_delete_are_one_undo_step_each() {
+    let (mut app, mut session) = app_with_extent_and_second_viewport();
+    run_view(&mut app, &mut session, ViewCommand::Save("A".into()));
+    assert!(app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .named_views()
+        .resolve("A")
+        .is_some());
+
+    run(&mut app, &mut session, CommandId::Undo);
+    assert!(app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .named_views()
+        .resolve("A")
+        .is_none());
+    assert!(app.can_redo(&DocumentId(1)));
+
+    run(&mut app, &mut session, CommandId::Redo);
+    assert!(app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .named_views()
+        .resolve("A")
+        .is_some());
+
+    run_view(&mut app, &mut session, ViewCommand::Delete("A".into()));
+    assert!(app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .named_views()
+        .is_empty());
+    run(&mut app, &mut session, CommandId::Undo);
+    assert!(
+        app.workspace.documents[&DocumentId(1)]
+            .drawing
+            .named_views()
+            .resolve("A")
+            .is_some(),
+        "undo restores a deleted view"
+    );
 }
 
 #[test]
@@ -428,6 +490,54 @@ fn vpoint_words_and_vectors_set_a_direction_without_touching_the_model() {
     assert_eq!(viewport(&app, 1).camera, camera_before);
     assert_eq!(viewport(&app, 1).zoom_history_len(), history_before);
     assert_view_only(&app, before);
+}
+
+#[test]
+fn view_save_and_delete_are_work_only_while_restore_and_list_stay_viewer_legal() {
+    let (mut app, mut session) = app_with_extent_and_second_viewport();
+    run_view(&mut app, &mut session, ViewCommand::Save("A".into()));
+    let before = revision(&app);
+    let camera = viewport(&app, 1).camera;
+
+    session.switch_mode(AppMode::Viewer).unwrap();
+    let error = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::View,
+                CommandPayload::View(ViewCommand::Save("B".into())),
+            ),
+        )
+        .unwrap_err();
+    assert!(matches!(error, CadError::PermissionDenied));
+    assert_eq!(revision(&app), before, "a refused save writes nothing");
+    assert!(app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .named_views()
+        .resolve("B")
+        .is_none());
+
+    let outcome = run_view(&mut app, &mut session, ViewCommand::List);
+    assert_eq!(codes(&outcome), ["view.list"]);
+    let outcome = run_view(&mut app, &mut session, ViewCommand::Restore("A".into()));
+    assert_eq!(codes(&outcome), ["view.restored"]);
+    assert_eq!(viewport(&app, 1).camera, camera);
+
+    let error = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::View,
+                CommandPayload::View(ViewCommand::Delete("A".into())),
+            ),
+        )
+        .unwrap_err();
+    assert!(matches!(error, CadError::PermissionDenied));
+    assert!(app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .named_views()
+        .resolve("A")
+        .is_some());
 }
 
 #[test]
