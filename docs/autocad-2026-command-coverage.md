@@ -250,18 +250,19 @@
 
 > **这不是验收，是当前排期与口径。** 本轮目标是把命令从 `部分实现`/具名拒绝推进到支持域内
 > **没有剩余可写缺口**的 `完整实现`；不放宽为“改状态不实现”，也不把 ADR 全局范围缺口算作
-> 单命令完成。当前清单仍是 **186 完整 / 793 部分 / 2 未实现**，只有真正合并且契约测试通过的
+> 单命令完成。当前清单 **204 完整 / 775 部分 / 2 未实现**，只有真正合并且契约测试通过的
 > 命令才改状态。
 
 | 批次 | 范围 | 状态 |
 | --- | --- | --- |
-| M1a 图层/视口 | `LAYLCK`/`LAYULK`/`LAYFRZ`（跨空间选择 + `Vpfreeze`）、`VPMAX`/`VPMIN` 文档对账 | 实现中；`VPMAX`/`VPMIN` 已对账为 complete |
-| M1b 3D 图元 | `BOX`/`CONE`/`CYLINDER`/`SPHERE`/`TORUS`/`WEDGE`/`PYRAMID` 选项与 `ELEV` | 实现中 |
-| M1c 3D 运算 | `UNION`/`SUBTRACT`/`INTERSECT` 提交前单壳校验、`XEDGES`、`3DORBIT`/`3DPAN` | 实现中 |
-| M1d 参数管理器 | `PARAMETERS`/`-PARAMETERS`/`PARAMETERSCLOSE` + Parametric→Manage 面板 | 实现中 |
-| M2 块属性 | ADR-0055：ATTDEF/ATTRIB 模型、minor 14、DXF/渲染/命令/面板 | 模型/schema 实现中；命令仍 partial |
-| M3 约束 | ADR-0054：有界二维几何/尺寸约束求解器、minor 15、DXF 节点 | ADR 已接受；实现未开始，命令仍 partial |
-| M4 其他面板 | 发布/传递/标准/CUI/动作录制器/点云/PDF 底图 | 分析完成；多数是 `L`/架构级缺口，按 ADR/子系统逐个评估 |
+| M1a 图层/视口 | `LAYLCK`/`LAYULK`/`LAYFRZ`（跨空间选择 + `Vpfreeze`）、`VPMAX`/`VPMIN` 文档对账 | **已合并**（+4 complete） |
+| M1b 3D 图元 | `BOX`/`CONE`/`CYLINDER`/`SPHERE`/`TORUS`/`WEDGE` 的 typed 选项与 `ELEV` | **已合并** 6/7；`PYRAMID` 因 modeler 只有方形底仍 partial |
+| M1c 3D 运算 | `UNION`/`SUBTRACT`/`INTERSECT` 提交前单壳校验、`XEDGES`、`3DORBIT`/`3DPAN` | **已合并**（+6 complete；`3DZOOM` 仍 partial） |
+| M1d 参数管理器 | `PARAMETERS`/`-PARAMETERS`/`PARAMETERSCLOSE` + Parametric→Manage 面板 | **已合并**（+3 complete + 面板） |
+| M2 块属性 | ADR-0055：ATTDEF/ATTRIB 模型、minor 14、DXF/渲染/命令/面板 | 模型/schema **已合并**；connector/renderer 与命令 lane 进行中 |
+| M3 约束 | ADR-0054：有界二维几何/尺寸约束求解器、minor 15、DXF 节点 | ADR 已接受；P0 未开始，命令仍 partial |
+| M4 动作录制器 | ADR-0056：ACTRECORD/ACTSTOP/ACTUSERINPUT/ACTUSERMESSAGE/ACTMANAGER | ADR 已接受；实现 lane 进行中 |
+| M5 其他面板 | 发布/传递/标准/CUI/点云/PDF 底图 | 分析完成；多数是 `L`/架构级缺口，按 ADR/子系统逐个评估 |
 
 **已明确的诚实缺口**：`ARCHIVE`、`STANDARDS`、`CHECKSTANDARDS`、全部 `CUI*`、`CUSTOMIZE` 仍是
 架构级未建模（sheet set / DWS / CUIx），不得靠改状态凑数；点云/PDF 内容与约束求解器属于新子系统，
