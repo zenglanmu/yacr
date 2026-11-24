@@ -25,6 +25,10 @@ export const SHELL_ACTIONS = Object.freeze({
   // Toggles the properties palette window. Like OPTIONS it is chrome-local:
   // `PROPERTIES` has no Rust command, so the ribbon must not send `cad_command`.
   properties: 'properties',
+  // Opens the Parameters Manager panel (Parametric > Manage). Chrome-local like
+  // the BIM panel: the surface reads `cad_param_list`, and the panel's edits use
+  // the `-PARAMETERS` command-line form.
+  parameters: 'parameters',
 });
 
 /** The shell actions that toggle a desktop palette window. */

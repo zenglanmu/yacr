@@ -16,6 +16,7 @@ import {
   PROPERTIESCLOSE_COMMAND,
 } from './chrome-commands.ts';
 import { DOMAIN_COMMAND } from '../domains/domains.ts';
+import { PARAMETERS_CLOSE_COMMAND, PARAMETERS_COMMAND } from '../params/params.ts';
 
 /** The `cad_status` slice the admission rules read (all fields are the host's). */
 export interface CommandStatusView {
@@ -943,4 +944,9 @@ export const LOCAL_CHROME_COMMANDS: readonly string[] = Object.freeze([
   // `cad_set_application_domain` (or previews with no document). No router word
   // is involved, so it is admitted without the host vocabulary.
   DOMAIN_COMMAND,
+  // `PARAMETERS` opens the chrome-owned Parameters Manager panel and
+  // `PARAMETERSCLOSE` closes it (idempotent). Neither is a router word; the
+  // panel's writes are the dashed `-PARAMETERS` command, which *is* a router
+  // selector and is admitted through the loaded host vocabulary like any other.
+  PARAMETERS_COMMAND, PARAMETERS_CLOSE_COMMAND,
 ]);

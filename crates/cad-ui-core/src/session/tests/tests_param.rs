@@ -181,7 +181,7 @@ fn the_request_kind_is_the_documented_spelling() {
 use cad_app::{CommandId, RefusalId};
 use cad_domain::param::{BinaryOp, ParamConst};
 
-use crate::session::{
+use super::super::commands::{
     parse_dash_parameters_argument, parse_expression, DashParametersOps, ParamTarget,
     ARGUMENT_SELECTORS, DASH_PARAMETERS_SELECTOR,
 };

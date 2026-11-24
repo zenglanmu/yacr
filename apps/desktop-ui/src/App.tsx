@@ -52,9 +52,9 @@ import { useLayoutMode } from './layout/use-layout-mode.ts';
 import { createShortcutRunner } from './layout/shell-shortcuts.ts';
 import { openOptionsDialog } from './options/open-options.ts';
 import { useLocalSelectors } from './commands/local-selectors.ts';
-import { openBimPanel } from './bim/panel.ts';
 import { setSelectedProperty } from './properties/properties.ts';
 import { textEditOpenError } from './popup/popup-textedit.ts';
+import { PANEL_ACTIONS } from './chrome/panel-actions.ts';
 import { useWorkspaceSnapshot, useChromeSurfaceState } from './chrome/use-chrome-store.ts';
 import { appliedWorkspace } from './chrome/workspaces.ts';
 import { DEFAULT_CHROME_VISIBILITY, paletteChrome, withFileTabs, withRibbon } from './chrome/visibility.ts';
@@ -907,7 +907,7 @@ function Shell() {
       else if (action === 'cleanScreen') setCleanScreen(value => !value);
       else if (action === 'commandLine') setCommandLineOpen(value => !value);
       else if (action === 'properties') openProperties();
-      else if (action === 'bim') openBimPanel();
+      else if (PANEL_ACTIONS[action]) PANEL_ACTIONS[action]();
       else if (action === 'language') setLocale(value => (value === 'zh-CN' ? 'en' : 'zh-CN'));
       // Dialogs are in-DOM overlays (ADR 0021 D1/D2). The host still owns the
       // modal gate and admission; `existing: true` means the same dialog is

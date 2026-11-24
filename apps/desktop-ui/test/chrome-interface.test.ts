@@ -90,6 +90,7 @@ const WAVE = [
   'WORKSPACE', 'WSSAVE', 'WSSETTINGS',
   'QCCLOSE', 'UPDATETHUMBSNOW', 'TOOLBAR', '-TOOLBAR',
   'TOOLPALETTES', 'TOOLPALETTESCLOSE', 'TPNAVIGATE', 'PERFANALYZER', 'PERFANALYZERCLOSE',
+  'PARAMETERS', 'PARAMETERSCLOSE',
 ];
 
 // `TPNAVIGATE` is the second declared argument-taking row (`-TOOLBAR` is the
@@ -112,7 +113,7 @@ async function iconNames() {
 }
 
 test('the selector table is append-only and every row matches its documented word or argument', () => {
-  assert.equal(CHROME_COMMANDS.length, 38);
+  assert.equal(CHROME_COMMANDS.length, 40);
   assert.deepEqual([...CHROME_COMMAND_NAMES], [
     'ABOUT', 'CLEANSCREENON', 'CLEANSCREENOFF', 'PROPERTIESCLOSE', 'LAYERCLOSE', 'DSETTINGS',
     'QUICKPROPERTIES', 'CLASSICLAYER', 'COMMANDLINE', 'COMMANDLINEHIDE',
@@ -123,6 +124,7 @@ test('the selector table is append-only and every row matches its documented wor
     'WORKSPACE', 'WSSAVE', 'WSSETTINGS',
     'QCCLOSE', 'UPDATETHUMBSNOW', 'TOOLBAR', '-TOOLBAR',
     'TOOLPALETTES', 'TOOLPALETTESCLOSE', 'TPNAVIGATE', 'PERFANALYZER', 'PERFANALYZERCLOSE',
+    'PARAMETERS', 'PARAMETERSCLOSE',
   ]);
   for (const name of EXACT_WORD_WAVE) {
     const row = CHROME_COMMANDS.find(selector => selector.name === name);

@@ -184,6 +184,9 @@ export function splitCommandText(text: unknown): SplitCommandText {
  *   with a `DESCRIPTION` is a content tail (the description is stored). The
  *   `SET`/`DELETE` tails are names the host matches, so they keep the shared
  *   normal form.
+ * * `-PARAMETERS …`: the whole tail is data. Parameter names are compared
+ *   **exactly** by the parameter table and an expression may reference a
+ *   name, so upper-casing it would address a different (or no) row.
  */
 const CASE_PRESERVING_ARGUMENTS: Readonly<Record<string, (argument: string) => boolean>> = Object.freeze({
   IMAGEATTACH: () => true,
@@ -192,6 +195,7 @@ const CASE_PRESERVING_ARGUMENTS: Readonly<Record<string, (argument: string) => b
   TABLEEXPORT: () => true,
   LINETYPE: linetypeCreateCarriesDescription,
   '-LINETYPE': linetypeCreateCarriesDescription,
+  '-PARAMETERS': () => true,
 });
 
 /**

@@ -43,11 +43,16 @@ test('the panel is one Home ribbon entry, and it survives a palette-less carrier
 });
 
 test('App dispatches the shell action to the panel store, not to a router command', async () => {
+  // The panel entries live in `chrome/panel-actions.ts` (App is at the code
+  // gate); App consults that table, and the table names the store directly.
+  const actions = await readModule('chrome/panel-actions.ts');
   const app = await readModule('App.tsx');
-  assert.match(app, /import \{ openBimPanel \} from '\.\/bim\/panel\.ts';/);
-  assert.match(app, /action === 'bim'\) openBimPanel\(\)/);
+  assert.match(actions, /import \{ openBimPanel \} from '\.\.\/bim\/panel\.ts';/);
+  assert.match(actions, /bim: openBimPanel/);
+  assert.match(app, /import \{ PANEL_ACTIONS \} from '\.\/chrome\/panel-actions\.ts';/);
+  assert.match(app, /else if \(PANEL_ACTIONS\[action\]\) PANEL_ACTIONS\[action\]\(\);/);
   // The action is chrome-local: nothing about it rides `cad_command`.
-  assert.doesNotMatch(app, /action === 'bim'\)[^\n]*runCommand/);
+  assert.doesNotMatch(app, /PANEL_ACTIONS[^\n]*runCommand/);
 });
 
 test('Workspace mounts one panel per layout: palette window on desktop, sheet on compact', async () => {

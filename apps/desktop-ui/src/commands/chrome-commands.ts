@@ -1,3 +1,13 @@
+// The Parameters Manager's two words are owned by its own pure module (they are
+// also the panel store's contract); this table reuses them rather than keeping a
+// second spelling that could drift.
+import {
+  isParametersCloseCommand,
+  isParametersCommand,
+  PARAMETERS_CLOSE_COMMAND,
+  PARAMETERS_COMMAND,
+} from '../params/params.ts';
+
 // Chrome-local command-line selectors that reach no router command.
 //
 // The command line answers these words itself: typing one opens a chrome-owned
@@ -431,6 +441,10 @@ export const CHROME_COMMANDS: readonly ChromeCommandSelector[] = Object.freeze([
   { name: TPNAVIGATE_COMMAND, matches: isToolPalettesNavigateCommand },
   { name: PERFANALYZER_COMMAND, matches: isPerfAnalyzerCommand },
   { name: PERFANALYZERCLOSE_COMMAND, matches: isPerfAnalyzerCloseCommand },
+  // The Parameters Manager panel and its idempotent close word. Appended last:
+  // no shipped row moves.
+  { name: PARAMETERS_COMMAND, matches: isParametersCommand },
+  { name: PARAMETERS_CLOSE_COMMAND, matches: isParametersCloseCommand },
 ]);
 
 /** The bare names of [`CHROME_COMMANDS`], for exhaustive admission tests. */

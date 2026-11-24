@@ -832,6 +832,11 @@ export const HOST_NAMES = [
   // typed grammar in `ARGUMENT_COMMANDS`. This mirror stands in for the loaded
   // `cad_commands` vocabulary and never proves the host advertises it.
   'IBL',
+  // `-PARAMETERS` (ADR-0043 D9): the command-line Parameter Manager. The bare
+  // `PARAMETERS`/`PARAMETERSCLOSE` words are chrome-local and are intentionally
+  // absent from the router vocabulary; the dashed one is a real canonical
+  // selector whose typed forms `ARGUMENT_COMMANDS['-PARAMETERS']` admits.
+  '-PARAMETERS',
   // Full-word aliases.
   'EXPORT', 'PRINT', 'SAVEAS', 'QSAVE', 'ZOOM EXTENTS', 'ENTER', 'DBA', 'DCO',
   // AutoCAD's default `acad.pgp` abbreviations, restricted to implemented
