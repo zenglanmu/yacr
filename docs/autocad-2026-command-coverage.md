@@ -26,8 +26,8 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **250** |
-| 部分实现（有写明的界） | **729** |
+| 完整实现 | **251** |
+| 部分实现（有写明的界） | **728** |
 | **已实现合计（完整 + 部分）** | **979** |
 | 未实现 | **2** |
 
@@ -55,6 +55,8 @@
 > **2026-11-24 增补（严格 2D 收口 II，`CHPROP`/`BREAKATPOINT`）**：`CHPROP` 与 `BREAKATPOINT` 按严格口径升为**完整实现**。`CHPROP` 从「移到当前层 + 重置 ByLayer」改为**typed 属性列表**（`layer`/`color`/`linetype`/`lineweight`/`transparency`，与 `SETENTITYPROPERTY` 共用 `PropertyValue` 语法与 `plan_entity` 应用器），模型空间与图纸空间直取实体、一条事务/一步撤销，未建模属性（`text`/thickness/material/plot style/linetype scale）**按名拒绝**；`CHANGE` 用同一属性写路径，但 AutoCAD 的 change-point 分支仍未实现，保持部分。`BREAKATPOINT` 从 LINE/ARC/开放 LWPOLYLINE 扩到 CIRCLE、整椭圆/椭圆弧、开放 SPLINE 与闭合 LWPOLYLINE：开放曲线拆两段，闭合环在断点开成单段整圈弧（单点无法留下两段非退化片段）；闭合 SPLINE（需旋转节点域）与其它非曲线种类**按名拒绝**。`FLATTEN` 扩到竖直 INSERT（只移动插入点 z 与属性文字 z，块定义不改；成员非平或放置倾斜按名拒绝）以及 TEXT/SHAPE/MASK/XY 平面 IMAGE/COMPOUND，`MESH`/`Body3d`/派生显示的 DIMENSION/HATCH/MULTILEADER/TABLE 仍按名拒绝，故保持部分。
 >
 > **2026-11-24 增补（严格 2D 收口续）**：`HATCH`/`-HATCH` 的支持域（`Circle`/完整 `Ellipse`/闭合 `Polyline`/`LINE`+`ARC` 边链；solid/user-defined/predefined/gradient 四种会话填充与 `PATTERN`/`PATTERNFILE` 两种命令名通道）已无剩余拒绝路径，契约测试逐组合证明——仅剩创建期**关联性**与实时预览/对话框，二者都是构建级全局范围。`IMAGEATTACH` 新增可选的 `[<rotation_deg>]`（绕 `+Z` 逆时针、烘进 `u`/`v` 基）与**活动图纸布局**目标（走布局自身 draw-order 的实体写入路径；`Block` 定义 `imageattach.block_space`、失效布局 `imageattach.unknown_layout` 按名拒绝）。`VPSYNC` 新增可选的**0 基**主视口索引（`VPSYNC [<master>]`，默认 `0`；越界 `vpsync.master_out_of_range`、不 clamp、一条事务/一步撤销）。`HATCH`、`-HATCH`、`IMAGEATTACH`、`VPSYNC` 四个官方名字晋升为**完整实现**。
+>
+> **2026-11-24 增补（严格收口 III：元数据/系统变量/单位/安装信息/页面设置）**：`DWGPROPS` 从只读报告扩成真实文档摘要（`title`/`author`/`subject`/`keywords`/`comments` + 自定义属性；一条命令一次 revision、header-only `ChangeSet`、无 undo patch；空值清除；值有长度/NUL 界；`document.json` → `variables.metadata` 只在非空时写出，旧档逐字节不变），并补一条 `.ymodel` 快照往返契约后晋升**完整实现**（无对话框属全局范围；DXF/DWG 导出器不携带摘要信息，属连接器边界）。`SYSVDLG` 新增 `<name>` 读取、`<name> <value>` 编辑、`SAVE|RESTORE <file.json>`（版本化 `yacr.sysvar` JSON，宿主 named-file 桥；不是 AutoCAD `.svf`；未建模变量按名字拒绝；文件未知变量/重复名/非法值在写入前整体拒绝；多条 header 值经 `apply_header_values` 落在同一 revision）后晋升**完整实现**（无交互对话框属全局范围；无值变量在保存时省略，恢复不清空）。`UNITS`/`-UNITS` 现在真实写入声明单位与线性小数位（`Document.units` 一条 header revision，无 undo patch），并读取实时值而不是写死的「4 位小数」；角度格式/精度/方向与长度 *format* 表未建模，保持**部分实现**。`ACADINFO` 报告扩到真实目标 OS/架构、文档单位/精度与应用域，并显式报告「不写信息文件」；许可证/硬件/模块枚举属全局范围，保持**部分实现**。`PSETUPIN`/`-PSETUPIN` 更正为「同图纸内复制已存 `PLOTSETTINGS`」的真实边界；跨文件导入没有可用的源文档页面设置提取路径（宿主文件桥只能读字节，`cad-app` 无 DWG/DXF/DWT 页面设置读取），因此两者都保持**部分实现**（`-PSETUPIN` 从完整降回部分，原状态过度声明）。计入 **251 完整 + 728 部分 / 979 已实现**；仅 Linux 契约测试，GUI/GPU/像素/真机 NOT VERIFIED。
 >
 > **2026-11-24 增补（严格报告收口）**：`BCOUNT` 扩到**整图**（模型空间 + 各图纸布局）与选择集作用域，块定义内嵌套参照按名报告不计数（AutoCAD 同限），Select objects 交互提示属 ADR 全局范围；`DBLIST` 列出块定义成员与全部三个已建模空间，XDATA/扩展字典/字典/代理对象不保留并按名报告；`JULIAN` 新增 `JULIAN <YYYY-MM-DD>`（也接受 `YYYY/MM/DD`，可跟 `[T ]HH:MM[:SS]`）日历转儒略日形式，非法日期按 `julian.invalid_date` 拒绝；`PAGESETUP`/`-PAGESETUP` 的 typed 写入与拒绝契约补齐后晋升（唯一残留绘图仪/CTB/STB 属 ADR 全局范围）。`ALIASEDIT` 的 `ADD`/`REMOVE` 补上宿主 `preference.json` 根键 `commandAliases` 持久化（跨会话恢复；写入失败按 `aliasedit.not_persisted` 回滚；失效/冲突的持久行启动时按名丢弃并记诊断）后晋升；`SYSVARMONITOR`（无后台通知、不持久化）仍有真实缺口，保持**部分实现**。三批合计计入 **250 完整 + 729 部分 / 979 已实现**；证据仅 Linux Rust 契约，GUI/GPU/像素/真机 NOT VERIFIED。
 
@@ -258,7 +260,7 @@
 
 > **这不是验收，是当前排期与口径。** 本轮目标是把命令从 `部分实现`/具名拒绝推进到支持域内
 > **没有剩余可写缺口**的 `完整实现`；不放宽为“改状态不实现”，也不把 ADR 全局范围缺口算作
-> 单命令完成。当前清单 **250 完整 / 729 部分 / 2 未实现**，只有真正合并且契约测试通过的
+> 单命令完成。当前清单 **251 完整 / 728 部分 / 2 未实现**，只有真正合并且契约测试通过的
 > 命令才改状态。
 
 | 批次 | 范围 | 状态 |
@@ -275,6 +277,7 @@
 | M4 动作录制器 | ADR-0056：ACTRECORD/ACTSTOP/ACTUSERINPUT/ACTUSERMESSAGE/ACTMANAGER | **已合并**（+7 complete + Manage 面板；无真实文件对话框/GUI 证据） |
 | M1h 填充/底图/视口 | `HATCH`/`-HATCH` 支持域闭合（关联性/预览为全局范围）、`IMAGEATTACH` 旋转 + 图纸布局、`VPSYNC` 可选主视口、`HATCHEDIT` 索引对账 | **已合并**（+5 complete；`HATCHEDIT` 的 `ORIGIN`/`PATTERNFILE` 早已实现，索引 stale 本次修正） |
 | M1i 报告/会话 | `BCOUNT`（整图/选择集）、`DBLIST`（块成员+三空间）、`JULIAN <date>`、`ALIASEDIT` 持久化、`PAGESETUP`/`-PAGESETUP` | **已合并**（+6 complete；`SYSVARMONITOR` 因无后台通知/持久化仍 partial） |
+| M1j 元数据/系统变量/单位/信息/页面设置 | `DWGPROPS` 摘要元数据、`SYSVDLG` 编辑/保存/恢复、`UNITS`/`-UNITS` 单位/精度写入、`ACADINFO` 真实配置、`PSETUPIN`/`-PSETUPIN` 边界对账 | **已合并**（+2 complete：`DWGPROPS`、`SYSVDLG`；`-PSETUPIN` 从完整降回 partial：跨文件未实现；`UNITS`/`-UNITS`/`ACADINFO` 仍 partial，缺口见各行） |
 | M5 其他面板 | 发布/传递/标准/CUI/点云/PDF 底图 | 分析完成；多数是 `L`/架构级缺口，按 ADR/子系统逐个评估 |
 
 **已明确的诚实缺口**：`ARCHIVE`、`STANDARDS`、`CHECKSTANDARDS`、全部 `CUI*`、`CUSTOMIZE` 仍是
@@ -353,7 +356,7 @@
 | `-PLOTSTYLE` | 部分实现 | 具名拒绝（`-plotstyle.unsupported`）：打印样式列表的命令行拼写。 |
 | `-POINTCLOUDATTACH` | 部分实现 | 具名拒绝（`-pointcloudattach.unsupported: no point-cloud attachment/crop/style model`）。 |
 | `-POINTCLOUDMANAGER` | 部分实现 | 具名拒绝（`-pointcloudmanager.unsupported: no point-cloud attachment/crop/style model`）。 |
-| `-PSETUPIN` | 完整实现 | `PAGESETUPIN` 的命令行拼写：同一实现臂（`page_setup_write`），一次 revision 复制源记录的纸张/尺寸/比例/旋转 |
+| `-PSETUPIN` | 部分实现 | `PSETUPIN` 的命令行拼写：同一实现臂（`page_setup_write`），一次 revision 复制**同一图纸内**源布局已存 `PLOTSETTINGS` 的纸张/尺寸/比例/旋转；跨文件导入未实现（无源文档页面设置提取路径） |
 | `-PUBLISH` | 部分实现 | 具名拒绝（`-publish.unsupported`）：本构建无批量发布模型；命令行拼写。 |
 | `-PURGE` | 完整实现 | `PURGE` 的命令行拼写：别名规范化到同一 `CommandId::Purge` 与同一处理器（裸命令/`Layer`/`Block`/`Style`/`Linetype`），无别名独有缺口 |
 |  `-REFEDIT` | 部分实现 | 真实：`REFEDIT`/`-REFEDIT` 仅接受一个相似变换模型空间 INSERT，把可见块成员按 INSERT 变换克隆到模型空间（一条事务），源 INSERT 走会话隐藏；`REFSET ADD|REMOVE` 只改会话工作集；`REFCLOSE SAVE` 逆变换写回块定义（成员更新/新增/删除与克隆删除，一条事务/一步撤销），`DISCARD` 删除克隆、块定义不变。仅提取可见成员；无参照淡显/锁定（其他宿主对象仍可选，REFSET 是显式选择）；成员图层/绘图次序不回写；QSAVE 应用层拒绝（`refedit.save_blocked`）。 |
@@ -364,7 +367,7 @@
 | `-SHAREVIEW` | 部分实现 | 具名拒绝（`-shareview.unsupported: no Autodesk cloud sharing/view model`）。 |
 | `-STYLE` | 已实现 | `STYLE` 的命令行拼写，同一 grammar/写入路径与边界 |
 | `-TABLE` | 部分实现 | 真实创建（与 `TABLE` 同实现）：`-TABLE <rows> <cols> <col_width> <row_height> <x> <y>`，+X/+Z、空单元格/Standard、一条事务/一步撤销；无对话框。
-| `-UNITS` | 部分实现 | 只读报告固定单位显示规则（`-units.*` 诊断码）；Units 对话框/逐图纸单位表未实现。 |
+| `-UNITS` | 部分实现 | 裸命令读取实时 `Document.units` 并报告；`-UNITS <unit> <precision>` 写声明单位与线性小数位（一条 header revision、无 undo patch）；角度格式/精度/方向、长度 *format* 表与 Units 对话框未建模。 |
 | `-VIEW` | 部分实现 | `VIEW` 的别名，同一实现 |
 | `-VISUALSTYLES` | 部分实现 | 具名拒绝（`-visualstyles.unsupported: no visual-style/3D display model; VSCURRENT owns the 2D display token`）。 |
 | `-VPORTS` | 部分实现 | `VPORTS` 的别名，同一实现（显式网格 + 对称标准配置）；同一边界 |
@@ -397,7 +400,7 @@
 | `3DWALK` | 部分实现 | 具名拒绝（`3dwalk.unsupported: no 3D walk navigation`）。 |
 | `3DZOOM` | 部分实现 | 具名拒绝（`3dzoom.unsupported: no perspective 3D zoom navigation`）。 |
 | `ABOUT` | 已实现 | chrome 本地选择子：打开 About 对话框（与 File > About 同一路径） |
-| `ACADINFO` | 部分实现 | 只读：产品版本/构建配置 + 文档修订/实体数；许可证/硬件/模块数据不收集。 |
+| `ACADINFO` | 部分实现 | 只读：产品版本/构建配置 + 目标 OS/架构 + 文档修订/实体数/单位/应用域；许可证/硬件/模块枚举不收集（全局范围），不创建信息文件（`acadinfo.file_not_written`）。 |
 | `ACISIN` | 部分实现 | 具名拒绝（`acisin.unsupported: ACIS (SAT) import is not implemented`）。 |
 | `ACISOUT` | 部分实现 | 具名拒绝（`acisout.unsupported: ACIS (SAT) export is not implemented`）。 |
 | `ACTBASEPOINT` | 部分实现 | 具名拒绝（`actbasepoint.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)`）。 |
@@ -674,7 +677,7 @@
 | `DWFLAYERS` | 部分实现 | 具名拒绝（`dwflayers.unsupported: this build has no DWF/DWFx underlay or export model`）。 |
 | `DWGCONVERT` | 部分实现 | 具名拒绝（`dwgconvert.unsupported: batch DWG conversion is not implemented`）。 |
 | `DWGLOG` | 部分实现 | 会话令牌（默认关）：翻转 `dwglog`；无日志文件、不写图/不升修订。 |
-| `DWGPROPS` | 部分实现 | 只读：文档 id/修订/实体数（`dwgprops.report`）；标题/作者/自定义特性未建模（`dwgprops.metadata_not_tracked`）。 |
+| `DWGPROPS` | 完整实现 | 报告文档 id/修订/实体数 + 标题/作者/主题/关键字/注释/自定义属性；`DWGPROPS <field> <text>` / `CUSTOM <name> <text>` 写 `document.json` → `variables.metadata`，空值清除，一条 revision / header-only `ChangeSet` / 无 undo patch；`.ymodel` 快照往返有契约；无对话框（全局范围），DXF/DWG 导出器不携带摘要信息。 |
 | `DXBIN` | 部分实现 | 具名拒绝（`dxbin.unsupported: DXB import is not implemented`）。 |
 | `EATTEDIT` | 完整实现 | 多选 INSERT 的值 + 块局部位置/字高/旋转编辑；dialog 属 ADR 全局范围。 |
 | `EATTEXT` | 部分实现 | 具名拒绝（`eatttext.unsupported`）：本构建无块属性模型。 |
@@ -980,7 +983,7 @@
 | `PROPERTIESCLOSE` | 已实现 | chrome 本地选择子：关闭特性面板（面板关闭按钮走同一命令） |
 | `PROPULATE` | 部分实现 | 具名拒绝（`propulate.unsupported`）：本构建无特性传播模型。 |
 | `PSBSCALE` | 完整实现 | 同一 paper/model 因子作用于块参照与 **`MULTILEADER`/`TABLE` 文本**（标注文字高 + 宽度边界 + 样式快照高度，使蒙版/非蒙版读法不分歧；根/引线/箭头/平面与列宽/行高/合并/边框不动）；独立 `TEXT` 按 `psbscale.not_block` 拒绝；一条事务/一步撤销 |
-| `PSETUPIN` | 部分实现 | 从同一图纸的源布局复制已存 `PLOTSETTINGS` 到目标布局，一条事务/一步撤销；跨文件/无源记录拒绝。 |
+| `PSETUPIN` | 部分实现 | 从**同一图纸**的源布局复制已存 `PLOTSETTINGS` 到目标布局，一条事务/一步撤销；无源记录按名拒绝；跨文件导入未实现（无源文档页面设置提取路径）。 |
 | `PSOUT` | 部分实现 | 具名拒绝（`psout.unsupported: PostScript output is not implemented; use PLOT for SVG/PDF`）。 |
 | `PSPACE` | 完整实现 | 复用同一 `switch_space_command` 路径，不写库/不升修订/不入历史、不动 `CVPORT` 标记；无图纸布局 `pspace.no_layout`；**已在图纸空间时是 `pspace.noop`**（保留活动布局与相机，位级不变） |
 | `PSTSCALE` | 完整实现 | 同一因子作用于 `TEXT`/`MTEXT`（高度 + MTEXT wrap 宽度）与 **`MULTILEADER`/`TABLE` 文本**（含样式快照高度）；块参照按 `pstscale.not_text` 拒绝；退化存储长度 `*.degenerate`、非法结果 `*.invalid_result`；一条事务/一步撤销 |
@@ -1126,7 +1129,7 @@
 | `SURFUNTRIM` | 部分实现 | 具名拒绝（`surfuntrim.unsupported: surface untrimming is not implemented`）。 |
 | `SWEEP` | 部分实现 | 具名拒绝（`sweep.unsupported: 3D sweep is not implemented`）。 |
 | `SYSVARMONITOR` | 部分实现 | `ADD/REMOVE <name>`、`LIST [<name>]`、bare=LIST；会话监视集 + 查询时快照变化检测；无后台通知、不持久化；仅 SETVAR 闭集变量 |
-| `SYSVDLG` | 部分实现 | 只读报告所有已暴露的会话变量当前值 + `sysvdlg.not_tracked`；无编辑/保存/恢复对话框 |
+| `SYSVDLG` | 完整实现 | 裸命令报告所有已建模变量；`SYSVDLG <name>` 读取单值、`<name> <value>` 编辑、`SAVE|RESTORE <file.json>` 保存/恢复版本化 `yacr.sysvar` 文件（宿主 named-file 桥；不是 `.svf`）；未建模变量按名字拒绝，文件未知变量/重复名/非法值在写入前整体拒绝，多条 header 值一条 revision；无对话框（全局范围） |
 | `SYSWINDOWS` | 部分实现 | 具名拒绝（`syswindows.unsupported`）：应用窗口布局由宿主负责。 |
 | `TABLE` | 部分实现 | 创建面不变（`TABLE <rows> <cols> <col_width> <row_height> <x> <y>`，Standard、+X/+Z，一条事务/一步撤销），诊断改为指向 `TABLEDIT`/`TABLEDIT MERGE| 创建 `TABLE <rows> <cols> <col_width> <row_height> <x> <y>`（Standard、+X/Z，一条事务/一步撤销）；导入模型可 MOVE/ROTATE/SCALE、拾取/显示、FIND 逐格、真实 DXF 导出；逐格**对齐/旋转**已建模并可写（`TABLEDIT FORMAT`）；**逐格颜色/填充/边框线宽仍按名拒绝** —— DXF 有组且旧写入器还会发中性值，但本构建显示模型是「每实体一色、无填充区域」，存了就会静默消失 | 创建 `TABLE <rows> <cols> <col_width> <row_height> <x> <y>`（Standard、+X/Z，一条事务/一步撤销）；导入模型可 MOVE/ROTATE/SCALE、拾取/显示、FIND 逐格、真实 DXF 导出；逐格**对齐（组 170）/文字旋转（组 145）/文字颜色（组 64）/背景填充（组 63+283，填充四边形）**、**逐边边框颜色（65–69）与线宽（275–279，DXF 1/100 mm）**都能存储、绘制、导出并可由 `TABLEDIT FORMAT`/`BORDERCOLOR`/`LINEWEIGHT`/`TABLESTYLE [ROW k]`/`MATCHCELL` 编辑 | 创建 `TABLE <rows> <cols> <col_width> <row_height> <x> <y>`；导入模型可 MOVE/ROTATE/SCALE、拾取/显示、FIND 逐格、真实 DXF 导出；逐格**对齐（170）/文字旋转（145）/文字颜色（64）/背景填充（63+283）/逐边边框颜色（65–69）与线宽（275–279）**、**逐格边距（`TABLECONTENT` 的 171+301 MARGIN+四个 40）**与**逐边双线间距（GRIDFORMAT 91+40）**都能存储、绘制、导出并由 `TABLEDIT FORMAT`/`BORDERCOLOR`/`LINEWEIGHT`/`TABLESTYLE [ROW k]`/`MATCHCELL` 编辑；未设置时文件与几何逐字节不变 | **按名拒绝**：逐边框**线型**（组是 LTYPE 句柄而域内无绘图级 LTYPE 表、实体写入器不发逐格线型、`expand.rs` 会用实体线型覆盖片段线型 —— 三重阻塞，存了也画不出）；`TABLEDIT FORMAT BORDER <单边>`（FORMAT 无逐边作用域，接受会静默扩成四边）；**仍未做**：边框线宽渲染器只画 1px、块单元格/`FIELD` 内容、`TABLECONTENT` 名称/描述、表样式 `annotative`、逐行边距（该写器无组）；互操作注意：边距/间距/名称描述挂在 `TABLECONTENT` 对象上，忽略它的读者只看到旧网格 |
 | `TABLEDIT` | 完整实现 | 文本编辑不变，新增 `TABLEDIT MERGE <row> <col> <height> <width>`、`TABLEDIT UNMERGE <row> <col>`、`TABLEDIT STYLE <name>`；合并保留被覆盖单元格自身文本（诊断明示，绝不拼接），越界/覆盖锚点/重叠/未合并逐条具名拒绝；一条事务/一步撤销 |
@@ -1182,7 +1185,7 @@
 | `UNGROUP` | 部分实现 | 仅移除一个组名并保留全部实体；未知组名拒绝；不写实体/数据库 |
 | `UNION` | 完整实现 | 后台布尔（C2）：选中 ≥2 个平面或曲面 `AcDb3dSolid` 实体，worker 折叠后一条事务/一步撤销替换为一个实体；曲面操作数参与内核布尔（`nurbs.faces`；无 box / 无精确 pcurve 仍按名拒绝）；无模型器按 `unsupported-runtime: solid-modeler` 拒绝；操作数被编辑则 `Stale`（状态 `solid.boolean_stale`，图纸不变）；布尔运行期间图元创建按 `solid.boolean_busy` 拒绝；布尔结果在提交前校验为单个连通非空壳，多壳/空壳按 `solid.boolean_result_not_single_shell` 拒绝且不写库/不升修订/不退操作数。 |
 | `UNISOLATEOBJECTS` | 部分实现 | 清空会话隐藏集；无数据库写/撤销 |
-| `UNITS` | 部分实现 | 只读报告（`units.report`/`units.dialog_not_implemented`）：图纸单位 4 位小数、角度用度；UNITS 对话框与逐图纸单位表未实现。 |
+| `UNITS` | 部分实现 | 裸命令读取实时 `Document.units`；`UNITS <unit> <precision>` 写声明单位与线性小数位（一条 header revision、无 undo patch）；角度格式/精度/方向、长度 *format* 表与 UNITS 对话框未建模。 |
 | `UPDATEFIELD` | 部分实现 | 具名拒绝（`updatefield.unsupported`）：未建模字段。 |
 | `VBAIDE` | 部分实现 | 具名拒绝（`vbaide.unsupported: no VBA IDE model`）。 |
 | `VBALOAD` | 部分实现 | 具名拒绝（`vbaload.unsupported: no VBA loader model`）。 |
@@ -1300,7 +1303,7 @@
 | 25 | `3DWALK` | 部分实现 | Changes the 3D view in a drawing interactively to create the appearance of walking through the model. | 具名拒绝（`3dwalk.unsupported: no 3D walk navigation`）。 |
 | 26 | `3DZOOM` | 部分实现 | Zooms in and out in a perspective view. | 具名拒绝（`3dzoom.unsupported: no perspective 3D zoom navigation`）。 |
 | 27 | `ABOUT` | 已实现 | Displays information about your product. | chrome 本地选择子：打开 About 对话框（与 File > About 同一路径） |
-| 28 | `ACADINFO` | 部分实现 | Creates a file that stores information about your AutoCAD installation and current setup. | 只读：产品版本/构建配置 + 文档修订/实体数；许可证/硬件/模块数据不收集。 |
+| 28 | `ACADINFO` | 部分实现 | Creates a file that stores information about your AutoCAD installation and current setup. | 只读：产品版本/构建配置 + 目标 OS/架构 + 文档修订/实体数/单位/应用域；许可证/硬件/模块枚举不收集（全局范围），不创建信息文件（`acadinfo.file_not_written`）。 |
 | 29 | `ACISIN` | 部分实现 | Imports an ACIS (SAT) file and creates 3D solid, body, or region objects. | 具名拒绝（`acisin.unsupported: ACIS (SAT) import is not implemented`）。 |
 | 30 | `ACISOUT` | 部分实现 | Exports 3D solid, region, or body objects to an ACIS file. | 具名拒绝（`acisout.unsupported: ACIS (SAT) export is not implemented`）。 |
 | 31 | `ACTBASEPOINT` | 部分实现 | Inserts a base point or base point prompt in an action macro. | 具名拒绝（`actbasepoint.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)`）。 |
@@ -1601,7 +1604,7 @@
 | 326 | `DWFLAYERS` | 部分实现 | Controls the display of layers in a DWF or DWFx underlay. | 具名拒绝（`dwflayers.unsupported: this build has no DWF/DWFx underlay or export model`）。 |
 | 327 | `DWGCONVERT` | 部分实现 | Converts drawing format version for selected drawing files. | 具名拒绝（`dwgconvert.unsupported: batch DWG conversion is not implemented`）。 |
 | 328 | `DWGLOG` | 部分实现 | Creates and maintains an individual log file for each drawing file as it is accessed. | 会话令牌（默认关）：翻转 `dwglog`；无日志文件、不写图/不升修订。 |
-| 329 | `DWGPROPS` | 部分实现 | Sets and displays the file properties of the current drawing. | 只读：文档 id/修订/实体数（`dwgprops.report`）；标题/作者/自定义特性未建模（`dwgprops.metadata_not_tracked`）。 |
+| 329 | `DWGPROPS` | 完整实现 | Sets and displays the file properties of the current drawing. | 报告文档 id/修订/实体数 + 标题/作者/主题/关键字/注释/自定义属性；`DWGPROPS <field> <text>` / `CUSTOM <name> <text>` 写 `document.json` → `variables.metadata`，空值清除，一条 revision / header-only `ChangeSet` / 无 undo patch；`.ymodel` 快照往返有契约；无对话框（全局范围），DXF/DWG 导出器不携带摘要信息。 |
 | 330 | `DXBIN` | 部分实现 | Imports an AutoCAD DXB (drawing interchange binary) file. | 具名拒绝（`dxbin.unsupported: DXB import is not implemented`）。 |
 | 331 | `EATTEDIT` | 完整实现 | Edits attributes in a block reference. | 完整实现：多选 INSERT 的值 + 块局部位置/字高/旋转编辑；dialog 属 ADR 全局范围。 |
 | 332 | `-EATTEXT` | 部分实现 | From the Command line, extracts data as specified in an existing attribute extraction template (BLK) file or data extraction (DXE or DXEX) file. | 具名拒绝（`-eatttext.unsupported`）：本构建无块属性模型。 |
@@ -1947,8 +1950,8 @@
 | 672 | `PROPERTIESCLOSE` | 已实现 | Closes the Properties palette. | chrome 本地选择子：关闭特性面板（面板关闭按钮走同一命令） |
 | 673 | `PROPULATE` | 部分实现 | Update, list, or clear Drawing Properties data. | 具名拒绝（`propulate.unsupported`）：本构建无特性传播模型。 |
 | 674 | `PSBSCALE` | 完整实现 | Specifies or updates the scale of block objects relative to paper space. | 同一 paper/model 因子作用于块参照与 **`MULTILEADER`/`TABLE` 文本**（标注文字高 + 宽度边界 + 样式快照高度，使蒙版/非蒙版读法不分歧；根/引线/箭头/平面与列宽/行高/合并/边框不动）；独立 `TEXT` 按 `psbscale.not_block` 拒绝；一条事务/一步撤销 |
-| 675 | `-PSETUPIN` | 完整实现 | Imports a user-defined page setup into a new drawing layout using the command line. | `PAGESETUPIN` 的命令行拼写：同一实现臂（`page_setup_write`），一次 revision 复制源记录的纸张/尺寸/比例/旋转 |
-| 676 | `PSETUPIN` | 部分实现 | Imports a user-defined page setup into a new drawing layout. | 从同一图纸的源布局复制已存 `PLOTSETTINGS` 到目标布局，一条事务/一步撤销；跨文件/无源记录拒绝。 |
+| 675 | `-PSETUPIN` | 部分实现 | Imports a user-defined page setup into a new drawing layout using the command line. | `PSETUPIN` 的命令行拼写：同一实现臂（`page_setup_write`），一次 revision 复制**同一图纸内**源布局已存 `PLOTSETTINGS` 的纸张/尺寸/比例/旋转；跨文件导入未实现（无源文档页面设置提取路径） |
+| 676 | `PSETUPIN` | 部分实现 | Imports a user-defined page setup into a new drawing layout. | 从**同一图纸**的源布局复制已存 `PLOTSETTINGS` 到目标布局，一条事务/一步撤销；无源记录按名拒绝；跨文件导入未实现（无源文档页面设置提取路径）。 |
 | 677 | `PSOUT` | 部分实现 | Creates a PostScript file from DWG file. | 具名拒绝（`psout.unsupported: PostScript output is not implemented; use PLOT for SVG/PDF`）。 |
 | 678 | `PSPACE` | 完整实现 | In a layout, switches from model space in a layout viewport to paper space. | 复用同一 `switch_space_command` 路径，不写库/不升修订/不入历史、不动 `CVPORT` 标记；无图纸布局 `pspace.no_layout`；**已在图纸空间时是 `pspace.noop`**（保留活动布局与相机，位级不变） |
 | 679 | `PSTSCALE` | 完整实现 | Specifies or updates the scale of text objects relative to paper space. | 同一因子作用于 `TEXT`/`MTEXT`（高度 + MTEXT wrap 宽度）与 **`MULTILEADER`/`TABLE` 文本**（含样式快照高度）；块参照按 `pstscale.not_text` 拒绝；退化存储长度 `*.degenerate`、非法结果 `*.invalid_result`；一条事务/一步撤销 |
@@ -2112,7 +2115,7 @@
 | 837 | `SURFUNTRIM` | 部分实现 | Replaces surface areas removed by the SURFTRIM command. | 具名拒绝（`surfuntrim.unsupported: surface untrimming is not implemented`）。 |
 | 838 | `SWEEP` | 部分实现 | Creates a 3D solid or 3D surface by sweeping a 2D object or subobject along an open or closed path. | 具名拒绝（`sweep.unsupported: 3D sweep is not implemented`）。 |
 | 839 | `SYSVARMONITOR` | 部分实现 | Monitors a list of system variables and sends notifications when there are changes to any one in the list. | `ADD/REMOVE <name>`、`LIST [<name>]`、bare=LIST；会话监视集 + 查询时快照变化检测；无后台通知、不持久化；仅 SETVAR 闭集变量 |
-| 840 | `SYSVDLG` | 部分实现 | Allows you to view, edit, save, and restore system variable settings. | 只读报告所有已暴露的会话变量当前值 + `sysvdlg.not_tracked`；无编辑/保存/恢复对话框 |
+| 840 | `SYSVDLG` | 完整实现 | Allows you to view, edit, save, and restore system variable settings. | 裸命令报告所有已建模变量；`SYSVDLG <name>` 读取单值、`<name> <value>` 编辑、`SAVE|RESTORE <file.json>` 保存/恢复版本化 `yacr.sysvar` 文件（宿主 named-file 桥；不是 `.svf`）；未建模变量按名字拒绝，文件未知变量/重复名/非法值在写入前整体拒绝，多条 header 值一条 revision；无对话框（全局范围） |
 | 841 | `SYSWINDOWS` | 部分实现 | Arranges windows and icons when the application window is shared with external applications. | 具名拒绝（`syswindows.unsupported`）：应用窗口布局由宿主负责。 |
 | 842 | `-TABLE` | 部分实现 | Creates an empty table object. | `TABLE` 的命令行拼写；同一真实创建实现。
 | 843 | `TABLE` | 部分实现 | 创建面不变（`TABLE <rows> <cols> <col_width> <row_height> <x> <y>`，Standard、+X/+Z，一条事务/一步撤销），诊断改为指向 `TABLEDIT`/`TABLEDIT MERGE| 创建 `TABLE <rows> <cols> <col_width> <row_height> <x> <y>`（Standard、+X/Z，一条事务/一步撤销）；导入模型可 MOVE/ROTATE/SCALE、拾取/显示、FIND 逐格、真实 DXF 导出；逐格**对齐/旋转**已建模并可写（`TABLEDIT FORMAT`）；**逐格颜色/填充/边框线宽仍按名拒绝** —— DXF 有组且旧写入器还会发中性值，但本构建显示模型是「每实体一色、无填充区域」，存了就会静默消失 | 创建 `TABLE <rows> <cols> <col_width> <row_height> <x> <y>`（Standard、+X/Z，一条事务/一步撤销）；导入模型可 MOVE/ROTATE/SCALE、拾取/显示、FIND 逐格、真实 DXF 导出；逐格**对齐（组 170）/文字旋转（组 145）/文字颜色（组 64）/背景填充（组 63+283，填充四边形）**、**逐边边框颜色（65–69）与线宽（275–279，DXF 1/100 mm）**都能存储、绘制、导出并可由 `TABLEDIT FORMAT`/`BORDERCOLOR`/`LINEWEIGHT`/`TABLESTYLE [ROW k]`/`MATCHCELL` 编辑 | 创建 `TABLE <rows> <cols> <col_width> <row_height> <x> <y>`；导入模型可 MOVE/ROTATE/SCALE、拾取/显示、FIND 逐格、真实 DXF 导出；逐格**对齐（170）/文字旋转（145）/文字颜色（64）/背景填充（63+283）/逐边边框颜色（65–69）与线宽（275–279）**、**逐格边距（`TABLECONTENT` 的 171+301 MARGIN+四个 40）**与**逐边双线间距（GRIDFORMAT 91+40）**都能存储、绘制、导出并由 `TABLEDIT FORMAT`/`BORDERCOLOR`/`LINEWEIGHT`/`TABLESTYLE [ROW k]`/`MATCHCELL` 编辑；未设置时文件与几何逐字节不变 | **按名拒绝**：逐边框**线型**（组是 LTYPE 句柄而域内无绘图级 LTYPE 表、实体写入器不发逐格线型、`expand.rs` 会用实体线型覆盖片段线型 —— 三重阻塞，存了也画不出）；`TABLEDIT FORMAT BORDER <单边>`（FORMAT 无逐边作用域，接受会静默扩成四边）；**仍未做**：边框线宽渲染器只画 1px、块单元格/`FIELD` 内容、`TABLECONTENT` 名称/描述、表样式 `annotative`、逐行边距（该写器无组）；互操作注意：边距/间距/名称描述挂在 `TABLECONTENT` 对象上，忽略它的读者只看到旧网格 |
@@ -2173,8 +2176,8 @@
 | 898 | `UNGROUP` | 部分实现 | Disassociates the objects from a group. | 仅移除一个组名并保留全部实体；未知组名拒绝；不写实体/数据库 |
 | 899 | `UNION` | 完整实现 | Combines two or more 3D solids, surfaces, or 2D regions into a single, composite 3D solid, surface, or region. | 后台布尔（C2）：选中 ≥2 个平面或曲面 `AcDb3dSolid` 实体，worker 折叠后一条事务/一步撤销替换为一个实体；曲面操作数参与内核布尔（`nurbs.faces`；无 box / 无精确 pcurve 仍按名拒绝）；无模型器按 `unsupported-runtime: solid-modeler` 拒绝；操作数被编辑则 `Stale`（状态 `solid.boolean_stale`，图纸不变）；布尔运行期间图元创建按 `solid.boolean_busy` 拒绝；布尔结果在提交前校验为单个连通非空壳，多壳/空壳按 `solid.boolean_result_not_single_shell` 拒绝且不写库/不升修订/不退操作数。 |
 | 900 | `UNISOLATEOBJECTS` | 部分实现 | Displays objects previously hidden with the ISOLATEOBJECTS or HIDEOBJECTS command. | 清空会话隐藏集；无数据库写/撤销 |
-| 901 | `-UNITS` | 部分实现 | Controls the precision and display formats for coordinates, distances, and angles. | 只读报告固定单位显示规则（`-units.*` 诊断码）；Units 对话框/逐图纸单位表未实现。 |
-| 902 | `UNITS` | 部分实现 | Controls the precision and display formats for coordinates, distances, and angles. | 只读报告（`units.report`/`units.dialog_not_implemented`）：图纸单位 4 位小数、角度用度；UNITS 对话框与逐图纸单位表未实现。 |
+| 901 | `-UNITS` | 部分实现 | Controls the precision and display formats for coordinates, distances, and angles. | 裸命令读取实时 `Document.units` 并报告；`-UNITS <unit> <precision>` 写声明单位与线性小数位（一条 header revision、无 undo patch）；角度格式/精度/方向、长度 *format* 表与 Units 对话框未建模。 |
+| 902 | `UNITS` | 部分实现 | Controls the precision and display formats for coordinates, distances, and angles. | 裸命令读取实时 `Document.units`；`UNITS <unit> <precision>` 写声明单位与线性小数位（一条 header revision、无 undo patch）；角度格式/精度/方向、长度 *format* 表与 UNITS 对话框未建模。 |
 | 903 | `UPDATEFIELD` | 部分实现 | Updates fields in selected objects. | 具名拒绝（`updatefield.unsupported`）：未建模字段。 |
 | 904 | `UPDATETHUMBSNOW` | 已实现 | Manually updates thumbnail previews for named views, drawings, and layouts. | 立即刷新 Quick View 预览卡（重算预览状态并显示瞬时“已更新”；不做文件写） |
 | 905 | `VBAIDE` | 部分实现 | Displays the Visual Basic Editor. | 具名拒绝（`vbaide.unsupported: no VBA IDE model`）。 |
