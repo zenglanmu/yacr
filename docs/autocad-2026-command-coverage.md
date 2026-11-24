@@ -26,8 +26,8 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **217** |
-| 部分实现（有写明的界） | **762** |
+| 完整实现 | **224** |
+| 部分实现（有写明的界） | **755** |
 | **已实现合计（完整 + 部分）** | **979** |
 | 未实现 | **2** |
 
@@ -252,7 +252,7 @@
 
 > **这不是验收，是当前排期与口径。** 本轮目标是把命令从 `部分实现`/具名拒绝推进到支持域内
 > **没有剩余可写缺口**的 `完整实现`；不放宽为“改状态不实现”，也不把 ADR 全局范围缺口算作
-> 单命令完成。当前清单 **217 完整 / 762 部分 / 2 未实现**，只有真正合并且契约测试通过的
+> 单命令完成。当前清单 **224 完整 / 755 部分 / 2 未实现**，只有真正合并且契约测试通过的
 > 命令才改状态。
 
 | 批次 | 范围 | 状态 |
@@ -265,7 +265,7 @@
 | M1f 2D 小缺口 | `TEXTALIGN`/`TCIRCLE`/`DONUT`/`HATCHGENERATEBOUNDARY`/`ADDSELECTED`/`GETSEL`/`MEASUREGEOM`/`CENTERMARK`/`CENTERLINE` | **已合并**（+9 complete；CENTERMARK/CENTERLINE 的普通 LINE 非关联模型是声明边界） |
 | M2 块属性 | ADR-0055：ATTDEF/ATTRIB 模型、minor 14、DXF/渲染/命令/面板 | 模型/schema **已合并**；connector/renderer 与命令 lane 进行中 |
 | M3 约束 | ADR-0054：有界二维几何/尺寸约束求解器、minor 15、DXF 节点 | ADR 已接受；P0 未开始，命令仍 partial |
-| M4 动作录制器 | ADR-0056：ACTRECORD/ACTSTOP/ACTUSERINPUT/ACTUSERMESSAGE/ACTMANAGER | ADR 已接受；实现 lane 进行中 |
+| M4 动作录制器 | ADR-0056：ACTRECORD/ACTSTOP/ACTUSERINPUT/ACTUSERMESSAGE/ACTMANAGER | **已合并**（+7 complete + Manage 面板；无真实文件对话框/GUI 证据） |
 | M5 其他面板 | 发布/传递/标准/CUI/点云/PDF 底图 | 分析完成；多数是 `L`/架构级缺口，按 ADR/子系统逐个评估 |
 
 **已明确的诚实缺口**：`ARCHIVE`、`STANDARDS`、`CHECKSTANDARDS`、全部 `CUI*`、`CUSTOMIZE` 仍是
@@ -281,8 +281,8 @@
 | Command | 状态 | 说明 |
 | --- | --- | --- |
 | `-3DOSNAP` | 部分实现 | 具名拒绝（`-3dosnap.unsupported: no 3D object-snap model`）。 |
-| `-ACTSTOP` | 部分实现 | 具名拒绝（`-actstop.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)`）。 |
-| `-ACTUSERMESSAGE` | 部分实现 | 具名拒绝（`-actusermessage.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)`）。 |
+| `-ACTSTOP` | 完整实现 | `ACTSTOP` 的命令行拼写，同一实现与文件桥拒绝。 |
+| `-ACTUSERMESSAGE` | 完整实现 | `ACTUSERMESSAGE` 的命令行拼写，同一实现。 |
 | `-ARCHIVE` | 部分实现 | 具名拒绝（`-archive.unsupported`）：本构建无图纸集归档打包模型；命令行拼写。 |
 | `-ARRAY` | 部分实现 | `ARRAY` 的命令行拼写，同一实现与边界（含 `RECT`/`POLAR`） |
 | `-ATTACH` | 部分实现 | 具名拒绝（`-attach.unsupported`）：不附着外部参照或底图；命令行拼写。 |
@@ -394,11 +394,11 @@
 | `ACTBASEPOINT` | 部分实现 | 具名拒绝（`actbasepoint.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)`）。 |
 | `ACTIVITYINSIGHTSCLOSE` | 部分实现 | 具名拒绝（`activityinsightsclose.unsupported: this build has no Activity Insights data model`）。 |
 | `ACTIVITYINSIGHTSOPEN` | 部分实现 | 具名拒绝（`activityinsightsopen.unsupported: this build has no Activity Insights data model`）。 |
-| `ACTMANAGER` | 部分实现 | 具名拒绝（`actmanager.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)`）。 |
-| `ACTRECORD` | 部分实现 | 具名拒绝（`actrecord.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)`）。 |
-| `ACTSTOP` | 部分实现 | 具名拒绝（`actstop.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)`）。 |
-| `ACTUSERINPUT` | 部分实现 | 具名拒绝（`actuserinput.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)`）。 |
-| `ACTUSERMESSAGE` | 部分实现 | 具名拒绝（`actusermessage.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)`）。 |
+| `ACTMANAGER` | 完整实现 | Manage→Action Recorder 面板 + `LIST/PLAY/DELETE/CONTINUE`；回放逐步经正常命令漏斗，失败报步骤号；`DELETE` 只删会话条目、不删磁盘文件。 |
+| `ACTRECORD` | 完整实现 | 开始会话宏录制，只捕获成功执行的非控制命令（规范化选择子 + 保留原拼写参数）；typed 目标路径经宿主文件桥；无文件桥按 `unsupported-runtime: action-recorder` 拒绝。 |
+| `ACTSTOP` | 完整实现 | 停止录制并把版本化 JSON 宏写到目标路径；无文件桥/写失败按名拒绝；会话条目保留。 |
+| `ACTUSERINPUT` | 完整实现 | 记录一个“等待用户输入”步骤；回放在此暂停，等待 `ACTMANAGER CONTINUE`。 |
+| `ACTUSERMESSAGE` | 完整实现 | 记录消息步骤；回放按步骤显示/暂停；不执行任意脚本。 |
 | `ADCCLOSE` | 部分实现 | 具名拒绝（`adcclose.unsupported: this build has no DesignCenter content palette`）。 |
 | `ADCENTER` | 部分实现 | 具名拒绝（`adcenter.unsupported: this build has no DesignCenter content palette`）。 |
 | `ADCNAVIGATE` | 部分实现 | 具名拒绝（`adcnavigate.unsupported: this build has no DesignCenter content palette`）。 |
@@ -1297,13 +1297,13 @@
 | 31 | `ACTBASEPOINT` | 部分实现 | Inserts a base point or base point prompt in an action macro. | 具名拒绝（`actbasepoint.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)`）。 |
 | 32 | `ACTIVITYINSIGHTSCLOSE` | 部分实现 | Closes the Activity Insights palette which displays activities for the current drawing. | 具名拒绝（`activityinsightsclose.unsupported: this build has no Activity Insights data model`）。 |
 | 33 | `ACTIVITYINSIGHTSOPEN` | 部分实现 | Opens the Activity Insights palette to view activities for the current drawing. | 具名拒绝（`activityinsightsopen.unsupported: this build has no Activity Insights data model`）。 |
-| 34 | `ACTMANAGER` | 部分实现 | Manages action macro files. | 具名拒绝（`actmanager.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)`）。 |
-| 35 | `ACTRECORD` | 部分实现 | Starts the recording an action macro. | 具名拒绝（`actrecord.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)`）。 |
-| 36 | `-ACTSTOP` | 部分实现 | Stops the Action Recorder and, from the command line, provides the option of saving the recorded actions to an action macro file | 具名拒绝（`-actstop.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)`）。 |
-| 37 | `ACTSTOP` | 部分实现 | Stops the Action Recorder and provides the option of saving the recorded actions to an action macro file. | 具名拒绝（`actstop.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)`）。 |
-| 38 | `ACTUSERINPUT` | 部分实现 | Pauses for user input in an action macro. | 具名拒绝（`actuserinput.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)`）。 |
-| 39 | `-ACTUSERMESSAGE` | 部分实现 | From the command line, inserts a user message into an action macro. | 具名拒绝（`-actusermessage.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)`）。 |
-| 40 | `ACTUSERMESSAGE` | 部分实现 | Inserts a user message into an action macro. | 具名拒绝（`actusermessage.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)`）。 |
+| 34 | `ACTMANAGER` | 完整实现 | Manages action macro files. | 完整实现：Manage→Action Recorder 面板 + `LIST/PLAY/DELETE/CONTINUE`；回放逐步经正常命令漏斗，失败报步骤号；`DELETE` 只删会话条目、不删磁盘文件。 |
+| 35 | `ACTRECORD` | 完整实现 | Starts the recording an action macro. | 完整实现：开始会话宏录制，只捕获成功执行的非控制命令（规范化选择子 + 保留原拼写参数）；typed 目标路径经宿主文件桥；无文件桥按 `unsupported-runtime: action-recorder` 拒绝。 |
+| 36 | `-ACTSTOP` | 完整实现 | Stops the Action Recorder and, from the command line, provides the option of saving the recorded actions to an action macro file | 完整实现：`ACTSTOP` 的命令行拼写，同一实现与文件桥拒绝。 |
+| 37 | `ACTSTOP` | 完整实现 | Stops the Action Recorder and provides the option of saving the recorded actions to an action macro file. | 完整实现：停止录制并把版本化 JSON 宏写到目标路径；无文件桥/写失败按名拒绝；会话条目保留。 |
+| 38 | `ACTUSERINPUT` | 完整实现 | Pauses for user input in an action macro. | 完整实现：记录一个“等待用户输入”步骤；回放在此暂停，等待 `ACTMANAGER CONTINUE`。 |
+| 39 | `-ACTUSERMESSAGE` | 完整实现 | From the command line, inserts a user message into an action macro. | 完整实现：`ACTUSERMESSAGE` 的命令行拼写，同一实现。 |
+| 40 | `ACTUSERMESSAGE` | 完整实现 | Inserts a user message into an action macro. | 完整实现：记录消息步骤；回放按步骤显示/暂停；不执行任意脚本。 |
 | 41 | `ADCCLOSE` | 部分实现 | Closes DesignCenter. | 具名拒绝（`adcclose.unsupported: this build has no DesignCenter content palette`）。 |
 | 42 | `ADCENTER` | 部分实现 | Manages and inserts content such as blocks, xrefs, and hatch patterns. | 具名拒绝（`adcenter.unsupported: this build has no DesignCenter content palette`）。 |
 | 43 | `ADCNAVIGATE` | 部分实现 | Loads a specified drawing file, folder, or network path in the DesignCenter Folders tab. | 具名拒绝（`adcnavigate.unsupported: this build has no DesignCenter content palette`）。 |

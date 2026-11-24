@@ -2056,13 +2056,13 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 | `ACTBASEPOINT` | **部分实现（具名拒绝）**：`actbasepoint.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)` | 不写库/不升修订/不入历史 |
 | `ACTIVITYINSIGHTSCLOSE` | **部分实现（具名拒绝）**：`activityinsightsclose.unsupported: this build has no Activity Insights data model` | 不写库/不升修订/不入历史 |
 | `ACTIVITYINSIGHTSOPEN` | **部分实现（具名拒绝）**：`activityinsightsopen.unsupported: this build has no Activity Insights data model` | 不写库/不升修订/不入历史 |
-| `ACTMANAGER` | **部分实现（具名拒绝）**：`actmanager.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)` | 不写库/不升修订/不入历史 |
-| `ACTRECORD` | **部分实现（具名拒绝）**：`actrecord.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)` | 不写库/不升修订/不入历史 |
-| `-ACTSTOP` | **部分实现（具名拒绝）**：`-actstop.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)` | 不写库/不升修订/不入历史 |
-| `ACTSTOP` | **部分实现（具名拒绝）**：`actstop.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)` | 不写库/不升修订/不入历史 |
-| `ACTUSERINPUT` | **部分实现（具名拒绝）**：`actuserinput.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)` | 不写库/不升修订/不入历史 |
-| `-ACTUSERMESSAGE` | **部分实现（具名拒绝）**：`-actusermessage.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)` | 不写库/不升修订/不入历史 |
-| `ACTUSERMESSAGE` | **部分实现（具名拒绝）**：`actusermessage.unsupported: action-recorder macros are not modeled (no recorder state, file, or playback)` | 不写库/不升修订/不入历史 |
+| `ACTMANAGER` | **完整实现**：Manage→Action Recorder 面板 + `LIST/PLAY/DELETE/CONTINUE`；回放逐步经正常命令漏斗，失败报步骤号 | `DELETE` 只删会话条目、不删磁盘文件；无真实文件对话框/GUI 证据 |
+| `ACTRECORD` | **完整实现**：开始会话宏录制，只捕获成功执行的非控制命令；typed 目标路径经宿主文件桥 | 无文件桥/写失败按 `unsupported-runtime: action-recorder` 拒绝；无 GUI/文件对话框证据 |
+| `-ACTSTOP` | **完整实现**：`ACTSTOP` 的命令行拼写，同一实现 | 同上 |
+| `ACTSTOP` | **完整实现**：停止录制并写版本化 JSON 宏 | 无文件桥/写失败按名拒绝；`ACTMANAGER DELETE` 不删磁盘文件 |
+| `ACTUSERINPUT` | **完整实现**：记录输入暂停步骤，回放等待 `ACTMANAGER CONTINUE` | 回放输入仍是用户动作，不伪造指针事件 |
+| `-ACTUSERMESSAGE` | **完整实现**：`ACTUSERMESSAGE` 的命令行拼写，同一实现 | 同上 |
+| `ACTUSERMESSAGE` | **完整实现**：记录消息步骤并由回放显示/暂停 | 不执行任意脚本 |
 | `ADCCLOSE` | **部分实现（具名拒绝）**：`adcclose.unsupported: this build has no DesignCenter content palette` | 不写库/不升修订/不入历史 |
 | `ADCENTER` | **部分实现（具名拒绝）**：`adcenter.unsupported: this build has no DesignCenter content palette` | 不写库/不升修订/不入历史 |
 | `ADCNAVIGATE` | **部分实现（具名拒绝）**：`adcnavigate.unsupported: this build has no DesignCenter content palette` | 不写库/不升修订/不入历史 |
