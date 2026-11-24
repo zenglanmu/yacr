@@ -26,8 +26,8 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **274** |
-| 部分实现（有写明的界） | **705** |
+| 完整实现 | **278** |
+| 部分实现（有写明的界） | **701** |
 | **已实现合计（完整 + 部分）** | **979** |
 | 未实现 | **2** |
 
@@ -77,6 +77,7 @@
 > **2026-11-24 增补（严格编组持久化，`GROUP`/`-GROUP`/`UNGROUP`/`GROUPEDIT`）**：编组不再只存在于会话，`cad-db` 新增持久表 `tables/groups.json`（行序列号、名字、描述、DXF selectable 标志、有序成员实体 id），`FORMAT_MINOR` **17**（14 = 块属性、15 = `Text.mirrored`、16 = 二维约束；不改旧档号）。`GROUP`/`-GROUP`/`UNGROUP`/`GROUPEDIT` 的 create/delete/rename/add/remove/list 全部走 `DrawingDatabase::apply_group_changes`：一条事务、一次 revision、一步撤销，`ChangeScope.tables = {Groups}`；名字大小写不敏感与 64 上限拒绝保留。DXF/DWG 按 `AcDbGroup` 导入/导出，名字经 `ACAD_GROUP` 字典往返，描述/selectable 保留；未写出的成员（v1 图纸空间延后）按 `export.group_member_not_written` 具名报告，组本身不丢。上述批次合计计入 **271 完整 + 708 部分 / 979 已实现**；`CLASSICGROUP` 面板仍只读（列出持久编组与成员 id，无面板内 create/delete/rename/add/remove 控件，按组替换选择无宿主通道），保持部分实现。证据仅 Linux Rust 契约（cad-app/cad-db/cad-store-zip/cad-connector-acadrust），GUI/GPU/像素/真机 NOT VERIFIED。
 >
 > **2026-11-24 增补（严格命名视图持久化，`VIEW`/`-VIEW`/`VIEWGO`）**：命名视图不再只存在于会话，`cad-db` 新增 `tables/views.json`（minor 18），`VIEW SAVE`/`DELETE` 一条 revision/一步撤销，`VIEW RESTORE`/`VIEWGO` 应用相机/模式/工作平面/空间；DXF/DWG `VIEW` 表导入导出已接线（相机表达有损并逐行报告）。`NEWVIEW` 仍缺窗口/名称提示，`VIEWBACK`/`VIEWFORWARD` 仍缺 pan/wheel/orbit 记录，保持部分。上述批次合计计入 **274 完整 + 705 部分 / 979 已实现**。
+> **2026-11-24 增补（严格 2D 收口 V：`CDORDER`/`BTRIM`/`BEXTEND`/`DIMROTATED`）**：四个命令按严格口径升为**完整实现**。`CDORDER` 不再只重排模型空间：按**绘制顺序范围**（`SpaceId`：模型空间、每个图纸布局、每个块定义，与 `HATCHTOBACK`/`DRAWORDER` 同一范围模型）逐范围按颜色索引升序重排，空选择=全图所有范围、选择只动所选行所在的范围，保留候选占用的槽位，一条事务/一步撤销。`BTRIM`/`BEXTEND` 改用**与独立 `TRIM`/`EXTEND` 同一条目标派发**（`plan_trim_target`/`plan_extend_target`）：`BTRIM` 支持 LINE/ARC/CIRCLE/ELLIPSE（含椭圆弧）/开放或闭合 LWPOLYLINE/SPLINE/HATCH（HATCH 经 loop、LWPOLYLINE 经共享链模型），`BEXTEND` 支持 LINE/ARC/椭圆弧/开放 SPLINE；无交互拾取时 TRIM 侧取曲线（或 HATCH loop）的弧长中点、EXTEND 侧取终点；首个选中 INSERT 的成员几何仍是边界；一条事务/一步撤销，不可规划的目标按名拒绝且不写。`DIMROTATED` 补上**文字覆盖**（与 `DIMEDIT TEXT` 同一实体字段和校验，`dimrotated.bad_text`）与**对象选择形式**（开放 LINE/ARC/椭圆弧/SPLINE/LWPOLYLINE 取两端点，CIRCLE/整椭圆取尺寸线方向的两个极值点并拒绝倾斜平面），交互角度/对象提示属全局交互范围；仍为非关联。计入 **278 完整 + 701 部分 / 979 已实现**；证据仅 Linux Rust 契约，GUI/GPU/像素/真机 NOT VERIFIED。
 
 ## 下一批 100 条命令实施计划与进度（2026-11-07）
 
@@ -288,7 +289,7 @@
 | M1b 3D 图元 | `BOX`/`CONE`/`CYLINDER`/`SPHERE`/`TORUS`/`WEDGE` 的 typed 选项与 `ELEV` | **已合并** 6/7；`PYRAMID` 因 modeler 只有方形底仍 partial |
 | M1c 3D 运算 | `UNION`/`SUBTRACT`/`INTERSECT` 提交前单壳校验、`XEDGES`、`3DORBIT`/`3DPAN` | **已合并**（+6 complete；`3DZOOM` 仍 partial） |
 | M1d 参数管理器 | `PARAMETERS`/`-PARAMETERS`/`PARAMETERSCLOSE` + Parametric→Manage 面板 | **已合并**（+3 complete + 面板） |
-| M1e 全局范围核对 | `-PURGE`（别名无独有缺口）、`DIMDISASSOCIATE`/`DIMREGEN`/`DIMREASSOCIATE`（关联性属全局范围） | **已合并**（+4 complete）；`DIMREASSOC`/`DIMROTATED`/`BLOCK?`/`LAYERPMODE`/`LAYCUR`/`LAYMCUR`/`LAYMCH`/`BTRIM`/`BEXTEND`/`NCOPY`/`CDORDER`/`MOCORO` 仍 partial（各有真实缺口，见各行） |
+| M1e 全局范围核对 | `-PURGE`（别名无独有缺口）、`DIMDISASSOCIATE`/`DIMREGEN`/`DIMREASSOCIATE`（关联性属全局范围） | **已合并**（+4 complete）；`DIMREASSOC`/`BLOCK?`/`LAYERPMODE`/`LAYCUR`/`LAYMCUR`/`LAYMCH`/`NCOPY`/`MOCORO` 仍 partial（各有真实缺口，见各行；`DIMROTATED`/`BTRIM`/`BEXTEND`/`CDORDER` 已在 2026-11-24 严格收口 V 晋升） |
 | M1f 2D 小缺口 | `TEXTALIGN`/`TCIRCLE`/`DONUT`/`HATCHGENERATEBOUNDARY`/`ADDSELECTED`/`GETSEL`/`MEASUREGEOM`/`CENTERMARK`/`CENTERLINE` | **已合并**（+9 complete；CENTERMARK/CENTERLINE 的普通 LINE 非关联模型是声明边界） |
 | M1g 2D 严格收口 II | `CHPROP`（typed 属性列表）、`BREAKATPOINT`（CIRCLE/整椭圆/椭圆弧/开放 SPLINE/闭合 LWPOLYLINE）；`CHANGE`/`FLATTEN` 扩写但仍有具名缺口 | **已合并**（+2 complete；`CHANGE` 的 change-point 与 `FLATTEN` 的 3D/派生显示缺口见各行） |
 | M2 块属性 | ADR-0055：ATTDEF/ATTRIB 模型、minor 14、DXF/渲染/命令/面板 | **已合并**（+13 complete；ATTIN/ATTOUT/ATTEXT/EATTEXT 文件 lane 仍 partial） |
@@ -504,7 +505,7 @@
 | `BDETECT` | 部分实现 | 具名拒绝（`bdetect.unsupported: this build has no object-detection model`）。 |
 | `BEDIT` | 部分实现 | 具名拒绝（`bedit.unsupported`）：本构建无块编辑器。 |
 | `BESETTINGS` | 部分实现 | 具名拒绝（`besettings.unsupported`）：本构建无块编辑器。 |
-| `BEXTEND` | 部分实现 | 真实编辑：首个选中 INSERT 成员为边界，其余选中对象复用 EXTEND 规划器延伸；一条事务/一步撤销；无交互边界提示。 |
+| `BEXTEND` | 已实现 | 真实编辑：首个选中 INSERT 成员为边界；其余选中对象走与 `EXTEND` 同一条目标派发（LINE/ARC/椭圆弧/开放 SPLINE，闭合/多段线目标按名拒绝），拾取点为曲线终点；一条事务/一步撤销；无交互边界提示（全局范围）。 |
 | `BGRIPSET` | 部分实现 | 具名拒绝（`bgripset.unsupported`）：本构建无动态块参数模型。 |
 | `BLEND` | 部分实现 | 真实编辑：两条开放 `LINE`/`ARC`/`LWPOLYLINE` 最近端点之间一条三次 `SPLINE`；内部控制点沿源切线取间隙 1/3（声明规则）；无曲线连续性选项。 |
 | `BLOCK` | 已实现 | — |
@@ -532,14 +533,14 @@
 | `BSEARCH` | 部分实现 | 具名拒绝（`bsearch.unsupported: this build has no convert-to-block search model`）。 |
 | `BTABLE` | 部分实现 | 具名拒绝（`btable.unsupported`）：本构建无动态块查找表。 |
 | `BTESTBLOCK` | 部分实现 | 具名拒绝（`btestblock.unsupported`）：本构建无块编辑器。 |
-| `BTRIM` | 部分实现 | 真实编辑：首个选中 INSERT 成员为边界，其余选中对象复用 TRIM 规划器修剪；一条事务/一步撤销；无交互边界提示。 |
+| `BTRIM` | 已实现 | 真实编辑：首个选中 INSERT 成员为边界；其余选中对象走与 `TRIM` 同一条目标派发（LINE/ARC/CIRCLE/ELLIPSE/椭圆弧/LWPOLYLINE/SPLINE/HATCH），拾取点为曲线或 HATCH loop 的弧长中点；一条事务/一步撤销；无交互边界提示（全局范围）。 |
 | `BURST` | 完整实现 | 一级 EXPLODE + 值转 TEXT（含常量）；一条事务/一步撤销。 |
 | `BVHIDE` | 部分实现 | 具名拒绝（`bvhide.unsupported`）：本构建无按可见性状态隐藏实体的 API。 |
 | `BVSHOW` | 部分实现 | 具名拒绝（`bvshow.unsupported`）：本构建无按可见性状态显示实体的 API。 |
 | `BVSTATE` | 部分实现 | 只读：每个选中 INSERT 的活动动态块可见性状态（`bvstate.report`）；无 INSERT 报 `bvstate.no_selection`，无状态报 `bvstate.not_set`；不设置状态。 |
 | `CAL` | 部分实现 | 具名拒绝（`cal.unsupported`）：未实现表达式求值器；不写图。 |
 | `CAMERA` | 部分实现 | 具名拒绝（`camera.unsupported: this build has no 3D camera/target view model`）。 |
-| `CDORDER` | 部分实现 | 真实编辑：按颜色索引升序重写选中（空选择=全部模型空间）绘制顺序；一条事务/一步撤销；无对话框。 |
+| `CDORDER` | 已实现 | 真实编辑：按颜色索引升序、**逐绘制顺序范围**（模型空间、各图纸布局、各块定义）重写存储绘制顺序；空选择=全图所有范围，选择只动所在范围；保留候选占用的槽位；一条事务/一步撤销；无对话框（全局范围）。 |
 | `CENTERDISASSOCIATE` | 部分实现 | 具名拒绝（`centerdisassociate.unsupported: center marks/centerlines are not modeled, so associativity/reset has nothing to edit`）。 |
 | `CENTERLINE` | 完整实现 | 真实编辑：恰好两条平行直线之间创建一条中间直线，覆盖投影重叠；`EXTENSION <d>`/`GAP <d>` 可调；一条事务/一步撤销；产出普通 `LINE`（非关联，声明边界）。 |
 | `CENTERMARK` | 完整实现 | 真实编辑：每个选中圆/圆弧圆心两条交叉直线；默认臂长=半径 10%，`ARM <d>`/`<factor>x` 可配；一条事务/一步撤销；产出普通 `LINE`（非关联，声明边界）。 |
@@ -682,7 +683,7 @@
 | `DIMREASSOC` | 部分实现 | Express Tool「恢复被覆盖/修改的标注文字到测量值」未实现：当前返回非关联 no-op（`dimreassoc.non_associative`）且不改变状态；标注文字覆盖（DIMEDIT 组 1）已建模，因此这是真实可写缺口，不是关联性全局范围 |
 | `DIMREASSOCIATE` | 完整实现 | payload-free；本构建标注全部非关联（关联性属 ADR 全局范围），`dimreassociate.non_associative` 且不改变任何状态；无对象/点关联可建立即该命令语义的全部 |
 | `DIMREGEN` | 完整实现 | payload-free；本构建标注全部非关联（关联性属 ADR 全局范围），`dimregen.non_associative` 且不改变任何状态；无关联标注可重算即该命令语义的全部 |
-| `DIMROTATED` | 部分实现 | 三点拾取（两尺寸界线原点 + 尺寸线位置）；尺寸线角度来自会话 `dimRotation` 参数（度，任意有限值，不回绕/不归一化）；无交互角度提示、无对象选择/文字覆盖/关联 |
+| `DIMROTATED` | 已实现 | 三点拾取（两原点 + 尺寸线位置）+ 会话 `dimRotation`（度，任意有限值，不回绕/不归一化）+ 可选文字覆盖（与 `DIMEDIT TEXT` 同一字段/校验）+ 对象选择形式（开放 LINE/ARC/椭圆弧/SPLINE/LWPOLYLINE 取端点；CIRCLE/整椭圆取尺寸线方向两个极值点）；非关联；一条事务/一步撤销；交互角度/对象提示属全局范围 |
 | `DIMSPACE` | 已实现 | 首个线性/对齐/角度标注为基准；显式间距（`0` = 对齐）或 Auto = **2 × 基准样式文字高度**；角度标注按同心弧半径步进；模型空间；关联重排属全局范围 |
 | `DIMSTYLE` | 完整实现 | `LIST`/`CURRENT` 报告存储行；`SET <name>` 写会话当前样式（只影响**新**建标注）、`NEW <name>`（以**存储的** `Standard` 或指定基准为模板）、`RENAME`、`DELETE`、`MODIFY <var> <value>` 都真写样式表（`apply_dim_style_change`，一条记录/一次修订；重拼写为权威空操作；`Standard` 不可删）；被已存标注快照引用的行不可改名（`dimstyle.in_use`）；**非追溯**（ADR-0017）：既有标注保留解析快照并在诊断中说明；行内没有的字段按名拒绝；SAVE→OPEN 往返有测试 |
 | `DIMTEDIT` | 完整实现 | `MOVE`/`LEFT`/`RIGHT`/`CENTER`/`HOME`/`ANGLE`（`ROTATE`→`ANGLE`）；Left/Right/Center 移动锚点并设置字形级 `h_align`，**角标注按已绘制弧的起/终/中角锚定、坐标标注按引线特征端/引线端/中点锚定**（全部标注类型覆盖）；Angle 固定文字中心、`0` 复位；`OBLIQUE <deg>` 可键入并按 `dimtedit.oblique_unsupported` 具名拒绝（字形倾斜无字段 = 全局范围）；一条事务/一步撤销 | 唯一残留：角标注的显示是导入图片（无弧子图）时按 `dimtedit.justify_unsupported` 拒绝且不写 |
@@ -1417,7 +1418,7 @@
 | 112 | `-BEDIT` | 部分实现 | Opens the block definition in the Block Editor from the Command prompt. | 具名拒绝（`-bedit.unsupported`）：同一拒绝的命令行拼写。 |
 | 113 | `BEDIT` | 部分实现 | Opens the block definition in the Block Editor. | 具名拒绝（`bedit.unsupported`）：无块编辑器。 |
 | 114 | `BESETTINGS` | 部分实现 | Displays the Block Editor Settings dialog box. | 具名拒绝（`besettings.unsupported`）：无块编辑器。 |
-| 115 | `BEXTEND` | 部分实现 | Extends objects to blocks. | 真实编辑：首个选中 INSERT 成员为边界，其余选中对象复用 EXTEND 规划器延伸；一条事务/一步撤销；无交互边界提示。 |
+| 115 | `BEXTEND` | 已实现 | Extends objects to blocks. | 首个选中 INSERT 成员为边界；其余目标走 `EXTEND` 同一条目标派发（LINE/ARC/椭圆弧/开放 SPLINE）；一条事务/一步撤销；无交互边界提示（全局范围）。 |
 | 116 | `BGRIPSET` | 部分实现 | Creates, deletes, or resets grips associated with a parameter. | 具名拒绝（`bgripset.unsupported`）：无动态块参数模型。 |
 | 117 | `BLEND` | 部分实现 | Creates a spline in the gap between two selected lines or curves. | 真实编辑：两条开放 `LINE`/`ARC`/`LWPOLYLINE` 最近端点之间一条三次 `SPLINE`；内部控制点沿源切线取间隙 1/3（声明规则）；无曲线连续性选项。 |
 | 118 | `-BLOCK` | 已实现 | At the Command prompt, creates a block definition from selected objects. | `BLOCK` 的命令行拼写；同一实现/写入路径。 |
@@ -1448,7 +1449,7 @@
 | 143 | `BSEARCH` | 部分实现 | Displays the Convert dialog box, which provides options to convert selected entities and identical instances into blocks. | 具名拒绝（`bsearch.unsupported: this build has no convert-to-block search model`）。 |
 | 144 | `BTABLE` | 部分实现 | Stores variations of a block in the Block Properties Table. | 具名拒绝（`btable.unsupported`）：本构建无动态块查找表。 |
 | 145 | `BTESTBLOCK` | 部分实现 | Displays a window within the Block Editor to test a dynamic block. | 具名拒绝（`btestblock.unsupported`）：无块编辑器。 |
-| 146 | `BTRIM` | 部分实现 | Trim objects to blocks. | 真实编辑：首个选中 INSERT 成员为边界，其余选中对象复用 TRIM 规划器修剪；一条事务/一步撤销；无交互边界提示。 |
+| 146 | `BTRIM` | 已实现 | Trim objects to blocks. | 首个选中 INSERT 成员为边界；其余目标走 `TRIM` 同一条目标派发（含 LWPOLYLINE/SPLINE/HATCH/椭圆）；一条事务/一步撤销；无交互边界提示（全局范围）。 |
 | 147 | `BURST` | 完整实现 | Explodes selected blocks, preserving the block layer and converting attribute values to text objects. | 完整实现：一级 EXPLODE + 值转 TEXT（含常量）；一条事务/一步撤销。 |
 | 148 | `BVHIDE` | 部分实现 | Makes objects invisible in the current visibility state or all visibility states in a dynamic block definition. | 具名拒绝（`bvhide.unsupported`）：本构建无按可见性状态隐藏实体的 API。 |
 | 149 | `BVSHOW` | 部分实现 | Makes objects visible in the current visibility state or all visibility states in a dynamic block definition. | 具名拒绝（`bvshow.unsupported`）：本构建无按可见性状态显示实体的 API。 |
@@ -1456,7 +1457,7 @@
 | 151 | `BVSTATE` | 部分实现 | Creates, sets, or deletes a visibility state in a dynamic block. | 只读：每个选中 INSERT 的活动动态块可见性状态（`bvstate.report`）；无 INSERT 报 `bvstate.no_selection`，无状态报 `bvstate.not_set`；不设置状态/不写库/不升修订。 |
 | 152 | `CAL` | 部分实现 | Evaluates mathematical and geometric expressions at the Command prompt or within a command. | 具名拒绝（`cal.unsupported`）：未实现表达式求值器；不写图。 |
 | 153 | `CAMERA` | 部分实现 | Sets a camera and target location to create and save a 3D perspective view of objects. | 具名拒绝（`camera.unsupported: this build has no 3D camera/target view model`）。 |
-| 154 | `CDORDER` | 部分实现 | Arranges the drawing order of selected objects by their color number. | 真实编辑：按颜色索引升序重写选中（空选择=全部模型空间）绘制顺序；一条事务/一步撤销；无对话框。 |
+| 154 | `CDORDER` | 已实现 | Arranges the drawing order of selected objects by their color number. | 按颜色索引升序、逐绘制顺序范围（模型空间/各图纸布局/各块定义）重排；空选择=全图；一条事务/一步撤销；无对话框（全局范围）。 |
 | 155 | `CENTERDISASSOCIATE` | 部分实现 | Removes associativity of center marks or centerlines from objects they define. | 具名拒绝（`centerdisassociate.unsupported: center marks/centerlines are not modeled, so associativity/reset has nothing to edit`）。 |
 | 156 | `CENTERLINE` | 完整实现 | Creates centerline geometry associated with selected lines and linear polyline segments. | 恰好两条平行直线之间创建一条中间直线，覆盖投影重叠；`EXTENSION <d>`/`GAP <d>` 可调；一条事务/一步撤销；产出普通 `LINE`（非关联，声明边界）。 |
 | 157 | `CENTERMARK` | 完整实现 | Creates an associative, cross-shaped mark at the center of a selected circle or arc. | 每个选中圆/圆弧圆心两条交叉直线；默认臂长=半径 10%，`ARM <d>`/`<factor>x` 可配；一条事务/一步撤销；产出普通 `LINE`（非关联，声明边界）。 |
@@ -1607,7 +1608,7 @@
 | 302 | `DIMREASSOC` | 部分实现 | Restores the measured value to overridden or modified dimension text. | Express Tool「恢复被覆盖/修改的标注文字到测量值」未实现：返回非关联 no-op（`dimreassoc.non_associative`）；标注文字覆盖（DIMEDIT 组 1）已建模 ⇒ 真实可写缺口，不属于关联性全局范围 |
 | 303 | `DIMREASSOCIATE` | 完整实现 | Associates or reassociates selected dimensions to objects or points on objects. | payload-free；本构建标注全部非关联（关联性属 ADR 全局范围），`dimreassociate.non_associative` 且不改变任何状态；无对象/点关联可建立即该命令语义的全部 |
 | 304 | `DIMREGEN` | 完整实现 | Updates the locations of all associative dimensions. | payload-free；本构建标注全部非关联（关联性属 ADR 全局范围），`dimregen.non_associative` 且不改变任何状态；无关联标注可重算即该命令语义的全部 |
-| 305 | `DIMROTATED` | 部分实现 | Creates a rotated linear dimension. | 三点拾取（两尺寸界线原点 + 尺寸线位置）；角度为会话 `dimRotation` 参数（度，任意有限值，不回绕/不归一化）；无交互角度提示、无对象选择/文字覆盖/关联 |
+| 305 | `DIMROTATED` | 已实现 | Creates a rotated linear dimension. | 三点拾取或对象选择 + 会话 `dimRotation` 角度 + 可选文字覆盖；非关联；一条事务/一步撤销；交互角度/对象提示属全局范围 |
 | 306 | `DIMSPACE` | 已实现 | Adjusts the spacing between linear dimensions or angular dimensions. | 首个线性/对齐/角度标注为基准；显式间距（`0` = 对齐）或 Auto = **2 × 基准样式文字高度**；角度标注按同心弧半径步进；模型空间；关联重排属全局范围 |
 | 307 | `-DIMSTYLE` | 完整实现 | At the Command prompt, creates and modifies dimension styles. | `DIMSTYLE` 的命令行拼写：同一解析器与同一处理器，七个选项（`LIST`/`CURRENT`/`SET`/`NEW`/`MODIFY`/`RENAME`/`DELETE`）逐项测试证明无第二条路径 |
 | 308 | `DIMSTYLE` | 完整实现 | Creates and modifies dimension styles. | `LIST`/`CURRENT` 报告存储行；`SET <name>` 写会话当前样式（只影响**新**建标注）、`NEW <name>`（以**存储的** `Standard` 或指定基准为模板）、`RENAME`、`DELETE`、`MODIFY <var> <value>` 都真写样式表（`apply_dim_style_change`，一条记录/一次修订；重拼写为权威空操作；`Standard` 不可删）；被已存标注快照引用的行不可改名（`dimstyle.in_use`）；**非追溯**（ADR-0017）：既有标注保留解析快照并在诊断中说明；行内没有的字段按名拒绝；SAVE→OPEN 往返有测试 |
