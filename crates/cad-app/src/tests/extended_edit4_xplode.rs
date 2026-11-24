@@ -382,7 +382,15 @@ fn xplode_drops_values_and_emits_the_block_definitions() {
         Vec::new(),
     );
     select(&mut session, &[1]);
-    let outcome = xplode(&mut app, &mut session, None).expect("default XPLODE is admitted");
+    let outcome = xplode(
+        &mut app,
+        &mut session,
+        Some(XPlodeSettings {
+            inherit_from_parent: false,
+            properties: vec![property("layer", "WALLS"), property("color", "aci:1")],
+        }),
+    )
+    .expect("XPLODE with controls is admitted");
 
     assert_eq!(undo_depth(&app), 1);
     assert!(outcome
@@ -391,14 +399,25 @@ fn xplode_drops_values_and_emits_the_block_definitions() {
         .any(|diagnostic| diagnostic.code == "xplode.attributes_reverted"));
     let entities = drawing_of(&app).model_space();
     assert_eq!(entities.len(), 2, "the LINE and the ATTDEF were produced");
-    let definition = entities
+    let definition_entity = entities
         .iter()
-        .find_map(|entity| match &entity.geometry {
-            SemanticGeometry::AttributeDefinition(definition) => Some(definition.clone()),
-            _ => None,
-        })
+        .find(|entity| matches!(&entity.geometry, SemanticGeometry::AttributeDefinition(_)))
         .expect("the block definition's ATTDEF is emitted");
+    let SemanticGeometry::AttributeDefinition(definition) = &definition_entity.geometry else {
+        unreachable!("the find above selected an ATTDEF");
+    };
     assert_eq!(definition.default_value, "DEFAULT");
+    assert_eq!(
+        definition_entity.layer,
+        LayerId(3),
+        "the property controls reach the emitted ATTDEF too"
+    );
+    assert_eq!(
+        drawing_of(&app)
+            .entity_render_attributes(definition_entity.id)
+            .color,
+        EntityColor::Explicit([255, 0, 0])
+    );
     assert!(
         !entities.iter().any(|entity| matches!(
             &entity.geometry,
