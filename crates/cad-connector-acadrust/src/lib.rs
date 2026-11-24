@@ -32,6 +32,7 @@ use std::time::Instant;
 #[cfg(target_arch = "wasm32")]
 use web_time::Instant;
 
+mod groups;
 mod solid;
 pub use solid::{
     acis_exchange, acis_raw_payload, sab_to_brep, sat_to_brep, solid_exchange_from_entity,
@@ -327,6 +328,14 @@ struct ImporterBuilder<'a> {
     /// rows the host drawing already declared. A later splice reuses the row
     /// (VISRETAIN-like host override) instead of duplicating or overwriting it.
     xref_layer_names: HashMap<String, LayerId>,
+    /// Source entity handle -> imported entity id.
+    ///
+    /// Used by the `OBJECTS`-section group reader: `AcDbGroup` names entities by
+    /// their source handles, so the group table is resolved only after every
+    /// entity has an id. Block-member handles are included (a source group may
+    /// name one), and a handle that was not imported is reported rather than
+    /// silently dropped from the group.
+    entity_by_handle: HashMap<u64, EntityId>,
     /// Materialised member ids of each host block, used when an xref block's
     /// definition is replaced with the merged member list.
     block_entities: HashMap<BlockId, Vec<EntityId>>,

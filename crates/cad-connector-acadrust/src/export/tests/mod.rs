@@ -28,6 +28,7 @@ mod dimension;
 mod dimension_radial;
 mod dwg;
 mod entities;
+mod groups;
 mod hatch;
 mod header_points_scales;
 mod insert_blocks;

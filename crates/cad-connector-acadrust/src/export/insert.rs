@@ -445,11 +445,12 @@ pub(super) fn ensure_block_written(
             ctx,
             acc,
             stack,
+            None,
         ) {
             failure = Some(error);
             break;
         }
-        for mut member_entity in acc.entities.split_off(start) {
+        for (_, mut member_entity) in acc.entities.split_off(start) {
             // An emitted member normally has no owner yet (it is a plain
             // geometric record). A writer that already placed its own output —
             // the DIMENSION content-block children, for example — keeps that

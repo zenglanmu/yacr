@@ -25,7 +25,16 @@ pub(crate) struct WrittenBlock {
 
 /// Mutable output accumulated while mapping.
 pub(crate) struct ExportAccumulator {
-    pub entities: Vec<EntityType>,
+    /// Mapped output entities plus the source entity they came from.
+    ///
+    /// The source is `Some` only for a top-level emitted entity; a block member
+    /// or dimension content child emitted while expanding another record is
+    /// `None`, because no group can address it by a top-level handle. The pair is
+    /// what lets the exporter link a written handle back to a persisted group
+    /// member.
+    pub entities: Vec<(Option<EntityId>, EntityType)>,
+    /// Source entity of the record currently being emitted.
+    pub source: Option<EntityId>,
     pub counts: ExportCounts,
     pub entries: Vec<ExportDiagnostic>,
     pub notes: Vec<ExportDiagnostic>,
@@ -67,6 +76,7 @@ impl ExportAccumulator {
     pub(crate) fn new() -> Self {
         ExportAccumulator {
             entities: Vec::new(),
+            source: None,
             counts: ExportCounts::default(),
             entries: Vec::new(),
             notes: Vec::new(),
@@ -218,7 +228,7 @@ impl ExportAccumulator {
         if matches!(entity, EntityType::Solid3D(_)) {
             self.written_solid3d = true;
         }
-        self.entities.push(entity);
+        self.entities.push((self.source, entity));
         Ok(())
     }
 }

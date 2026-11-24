@@ -77,6 +77,7 @@ impl<'a> ImporterBuilder<'a> {
             next_layer: 0,
             xref_layer_names: HashMap::new(),
             block_entities: HashMap::new(),
+            entity_by_handle: HashMap::new(),
         }
     }
 
@@ -130,6 +131,9 @@ impl<'a> ImporterBuilder<'a> {
             Some(self.entity_total_expected()),
         ));
         self.read_entities()?;
+        // Groups live in the OBJECTS section and name entities by source handle,
+        // so they are read after every host entity has an imported id.
+        self.read_groups()?;
         self.check_cancelled()?;
         self.progress.report(ImportProgress::at(
             ImportPhase::Resolving,
