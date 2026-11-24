@@ -11,8 +11,9 @@
 
 use super::*;
 use cad_db::{
-    DbEntity, DbObject, DrawingDatabaseBuilder, EntityColor, EntityLineType, EntityLineWeight,
-    EntityRenderAttributes, EntityTransparency, Layer, LayerAttributes, Layout, LinetypePattern,
+    BlockDefinition, DbEntity, DbObject, DrawingDatabaseBuilder, EntityColor, EntityLineType,
+    EntityLineWeight, EntityRenderAttributes, EntityTransparency, Layer, LayerAttributes, Layout,
+    LinetypePattern,
 };
 
 fn line(id: u128, layer: LayerId, y: f64) -> DbEntity {
@@ -104,6 +105,98 @@ fn ref_of(entity: u128) -> SelectionRef {
     }
 }
 
+/// A **nested pick**: `member` inside the block displayed by `insert`, exactly
+/// the ref shape the picker records for a block member.
+fn nested_ref(insert: u128, member: u128) -> SelectionRef {
+    SelectionRef {
+        instance: InstancePath(vec![EntityId(insert)]),
+        ..ref_of(member)
+    }
+}
+
+/// A drawing whose selection layers have members in **every** space, so a
+/// layer-table command can be pinned against the paper-space and block-member
+/// picks the real machine exposed.
+///
+/// Layers `0`/`WALLS`/`DOORS`; layout `Sheet1` with **two** viewports, each
+/// seeded with one of `overrides`; block `0` holding entities 5 (on `WALLS`) and
+/// 6 (on layer `0`, so it is displayed on its `INSERT`'s layer). Entities: 1 in
+/// model space on `WALLS`, 2 in paper space on `DOORS`, 3 in model space on
+/// `DOORS` (the control), 4 = the model `INSERT` of block `0` on `DOORS`.
+fn multi_space_app(overrides: [Vec<(LayerId, bool)>; 2]) -> (Application, SessionState) {
+    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
+    for (id, name) in [
+        (LayerId(0), "0"),
+        (LayerId(3), "WALLS"),
+        (LayerId(5), "DOORS"),
+    ] {
+        builder
+            .insert_layer(Layer {
+                id,
+                name: name.into(),
+                visible: true,
+            })
+            .unwrap();
+    }
+    builder
+        .insert_layout(Layout {
+            id: LayoutId(1),
+            name: "Sheet1".into(),
+            viewports: overrides
+                .into_iter()
+                .map(|overrides| cad_db::PaperViewport {
+                    clip: vec![
+                        point(0.0, 0.0),
+                        point(100.0, 0.0),
+                        point(100.0, 50.0),
+                        point(0.0, 50.0),
+                    ],
+                    model_to_paper: Transform3::scale(100.0),
+                    completeness: Completeness::Complete,
+                    layer_overrides: overrides.into_iter().collect(),
+                })
+                .collect(),
+        })
+        .unwrap();
+    builder
+        .insert_block(BlockDefinition {
+            id: BlockId(0),
+            entities: vec![EntityId(5), EntityId(6)],
+            dynamic_visibility: None,
+        })
+        .unwrap();
+    builder.insert_entity(line(1, LayerId(3), 0.0)).unwrap();
+    builder
+        .insert_entity(DbEntity {
+            space: SpaceId::Paper(LayoutId(1)),
+            ..line(2, LayerId(5), 5.0)
+        })
+        .unwrap();
+    builder.insert_entity(line(3, LayerId(5), 10.0)).unwrap();
+    builder
+        .insert_entity(DbEntity {
+            geometry: SemanticGeometry::Insert {
+                block: BlockId(0),
+                transform: Transform3::identity(),
+            },
+            ..line(4, LayerId(5), 20.0)
+        })
+        .unwrap();
+    builder
+        .insert_entity(DbEntity {
+            space: SpaceId::Block(BlockId(0)),
+            ..line(5, LayerId(3), 8.0)
+        })
+        .unwrap();
+    builder
+        .insert_entity(DbEntity {
+            space: SpaceId::Block(BlockId(0)),
+            ..line(6, LayerId(0), 9.0)
+        })
+        .unwrap();
+    app_with_database(builder.finish().unwrap())
+}
+
 fn execute(
     app: &mut Application,
     session: &mut SessionState,
@@ -121,6 +214,33 @@ fn select(app: &mut Application, session: &mut SessionState, entities: &[u128]) 
         CommandPayload::Selection(entities.iter().copied().map(ref_of).collect()),
     )
     .unwrap();
+}
+
+/// Replace the selection with refs that cannot be spelled as a bare entity id
+/// (a nested pick carries its `InstancePath`).
+fn select_refs(app: &mut Application, session: &mut SessionState, refs: Vec<SelectionRef>) {
+    execute(
+        app,
+        session,
+        CommandId::Select,
+        CommandPayload::Selection(refs),
+    )
+    .unwrap();
+}
+
+/// One paper viewport's per-layer override map.
+fn viewport_overrides(
+    app: &Application,
+    layout: LayoutId,
+    index: usize,
+) -> std::collections::BTreeMap<LayerId, bool> {
+    app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .layout(layout)
+        .expect("the layout must exist")
+        .viewports[index]
+        .layer_overrides
+        .clone()
 }
 
 fn revision(app: &Application) -> Revision {
