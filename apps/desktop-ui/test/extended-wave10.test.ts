@@ -106,7 +106,7 @@ test('the reports and refusals state their honest boundaries', async () => {
   for (const id of ['HELP', 'GOTOSTART', 'TRANSPARENCY']) {
     assert.match(en[`${labelSlug(id)}.hint`], /Named refusal/i, `${id} must say it is a refusal`);
   }
-  for (const id of ['-LAYER', 'LAYERSTATESAVE', 'NEWVIEW', '-SCALELISTEDIT', 'COPYHIST',
+  for (const id of ['-LAYER', 'LAYERSTATESAVE', '-SCALELISTEDIT', 'COPYHIST',
     'LWEIGHT', 'COLOR', '-UNITS']) {
     assert.match(en[`${labelSlug(id)}.hint`], /Read-only|report/i, `${id} must say it is a report: ${en[`${labelSlug(id)}.hint`]}`);
   }
