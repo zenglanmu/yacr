@@ -516,10 +516,12 @@ fn the_manifest_pins_the_document_and_the_import_baseline() {
     );
     assert_eq!(
         cad_domain::ymodel::FORMAT_MINOR,
-        14,
+        17,
         "ADR-0043: P1 expressions/configurations moved the tier to 9, P2 features to 10 and \
          P3 relations to 11; ADR-0030 D7 vendor semantics moved it to 12; ADR-0053 D2 \
-         application_domain moved it to 13; ADR-0055 block attributes moved it to 14"
+         application_domain moved it to 13; ADR-0055 block attributes moved it to 14; 15 is \
+         `Text.mirrored`, 16 is the 2D constraint table (ADR-0054) and persisted groups moved \
+         it to 17"
     );
 
     let loaded = read_archive(&bytes).expect("read");

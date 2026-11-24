@@ -26,6 +26,7 @@ pub(crate) mod build;
 pub(crate) mod configurations;
 pub(crate) mod elements;
 pub(crate) mod features;
+pub(crate) mod groups;
 pub(crate) mod parameters;
 pub(crate) mod relations;
 pub(crate) mod relations_in_context;
@@ -196,6 +197,9 @@ pub const fn table_entry(kind: TableKind) -> &'static str {
         // Host-owned vendor semantics (ADR-0030 D7). Written only when the
         // document really has vendor rows; minor-12 tier.
         TableKind::Vendor => "tables/vendor.json",
+        // Persisted entity groups. Written only when the table holds rows, so a
+        // document without groups keeps the minor its other content earns.
+        TableKind::Groups => "tables/groups.json",
     }
 }
 
@@ -402,6 +406,16 @@ impl DocumentSnapshot {
     ///
     /// An empty `attributes` array is never written (the writer omits the key),
     /// so a present array is always evidence of at least one value.
+    /// Whether this document carries persisted entity groups.
+    ///
+    /// True when the group table is present, even an empty one: the writer emits
+    /// the entry whenever the snapshot holds it and a pre-minor-16 reader refuses
+    /// a table path it does not model. The store asks this instead of naming the
+    /// table path (the same split as [`Self::has_bim`]).
+    pub fn has_groups(&self) -> bool {
+        self.tables.get(TableKind::Groups).is_some()
+    }
+
     pub fn has_block_attributes(&self) -> bool {
         self.shards
             .iter()

@@ -39,6 +39,7 @@ use super::bim;
 use super::configurations;
 use super::elements;
 use super::features;
+use super::groups;
 use super::parameters;
 use super::relations;
 use super::relations_in_context;
@@ -133,6 +134,12 @@ impl DrawingDatabase {
                 relations_in_context::encode_relations_in_context(self)?,
             );
         }
+        // Persisted entity groups are written only when they hold rows, the same
+        // rule as the other side tables. A document without groups keeps its
+        // lower minor; a document with them is minor 17.
+        if !self.groups.is_empty() {
+            tables.set(TableKind::Groups, groups::encode_groups(self)?);
+        }
         Ok(DocumentSnapshot {
             header,
             revision,
@@ -192,6 +199,9 @@ impl DrawingDatabase {
         let configs = configurations::decode_configurations(&snapshot.tables, &parameters)?;
         let features = features::decode_features(&snapshot.tables)?;
         let relations = relations_in_context::decode_relations_in_context(&snapshot.tables)?;
+        // Group rows are decoded before the element loop; member existence is
+        // checked by the builder's `finish()` gate, where every entity exists.
+        let group_rows = groups::decode_groups(&snapshot.tables)?;
         if !parameters.is_empty() {
             checked(
                 builder.set_parameters(parameters),
@@ -214,6 +224,12 @@ impl DrawingDatabase {
             checked(
                 builder.set_relations(relations),
                 table_entry(TableKind::Relations),
+            )?;
+        }
+        if !group_rows.is_empty() {
+            checked(
+                builder.set_groups(group_rows),
+                table_entry(TableKind::Groups),
             )?;
         }
 

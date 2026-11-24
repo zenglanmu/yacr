@@ -20,7 +20,7 @@ use super::*;
 use cad_db::{
     BimValue, ChangeScope, DocumentSnapshot, DrawingDatabase, FormatVersion, ManifestSummary,
 };
-use cad_domain::ymodel::{shard_of, ModelKey, FORMAT_MINOR};
+use cad_domain::ymodel::{shard_of, ModelKey};
 use cad_domain::{EntityId, Revision};
 use cad_platform::{ArchiveBytes, ArchiveError, ArchiveWrite, DocumentArchive, LoadedArchive};
 use std::path::Path;
@@ -142,11 +142,9 @@ impl DocumentArchive for BimEditArchive {
     }
 
     fn write(&self, request: &ArchiveWrite<'_>) -> Result<ArchiveBytes, ArchiveError> {
-        let minor = if request.snapshot.has_bim() {
-            FORMAT_MINOR
-        } else {
-            4
-        };
+        // The BIM tier is 7; `FORMAT_MINOR` is now the top format constant
+        // (16, groups), not the tier this document earns.
+        let minor = if request.snapshot.has_bim() { 7 } else { 4 };
         self.writes
             .lock()
             .unwrap()
@@ -344,7 +342,7 @@ fn a_bim_property_edit_survives_a_second_save() {
         writes[1].1
     );
     assert!(writes[1].0.has_bim(), "save 2 still hands over BIM data");
-    assert_eq!(writes[1].2, FORMAT_MINOR, "the BIM tier is preserved");
+    assert_eq!(writes[1].2, 7, "the BIM tier is preserved");
     assert!(!bytes.is_empty() && !second.is_empty());
 
     // Reopen the second save: the edited value and the BIM block are there.

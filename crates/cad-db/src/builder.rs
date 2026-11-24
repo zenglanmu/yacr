@@ -95,6 +95,7 @@ impl DrawingDatabaseBuilder {
                 bim_elements: BTreeMap::new(),
                 bim_definitions: crate::bim::BimDefinitions::new(),
                 bim_relations: crate::bim::BimRelations::new(),
+                groups: BTreeMap::new(),
                 parameters: cad_domain::param::ParamTable::new(),
                 param_configs: cad_domain::param::ParamConfigTable::new(),
                 active_configuration: None,
@@ -897,6 +898,9 @@ impl DrawingDatabaseBuilder {
             self.errors.push(error.to_string());
         }
         if let Err(error) = crate::drawing::param_build::validate_all(&self.database) {
+            self.errors.push(error.to_string());
+        }
+        if let Err(error) = crate::drawing::validate_groups(&self.database) {
             self.errors.push(error.to_string());
         }
         if !self.errors.is_empty() {

@@ -146,7 +146,16 @@ pub const FORMAT_WRITE: u32 = 2;
 /// empty, so an ordinary drawing and a minor-13 archive keep their minor; a
 /// minor-13 reader refuses a document that really carries attributes rather than
 /// dropping them.
-pub const FORMAT_MINOR: u32 = 14;
+///
+/// `15` is `cad:Text.mirrored` (MIRROR lane) and `16` is the bounded 2D
+/// constraint table (ADR-0054); neither is written by this build.
+///
+/// `17` adds persisted entity groups (`tables/groups.json`): a named, ordered
+/// member set with a table-local sequence identity, a description and the
+/// DXF selectable flag. The table is written only when the document holds a
+/// group, so an ordinary drawing keeps its lower minor; a pre-16 reader refuses
+/// an unknown table path rather than dropping the group rows.
+pub const FORMAT_MINOR: u32 = 17;
 
 /// Stable failure markers.
 ///

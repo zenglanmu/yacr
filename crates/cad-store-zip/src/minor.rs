@@ -9,6 +9,7 @@
 //!
 //! | the document has | minor | what a minor-4 reader misses |
 //! |---|---|---|
+//! | persisted entity groups (`tables/groups.json`) | `17` | the whole group table |
 //! | block attributes (ADR-0055) | `14` | `cad:AttributeDefinition`, `cad:Insert.attributes` |
 //! | host-owned vendor semantics (ADR-0030 D7) | `12` | `tables/vendor.json` |
 //! | in-context relations (ADR-0043 P3) | `11` | `tables/relations.json` |
@@ -78,8 +79,19 @@ pub(crate) const FORMAT_MINOR_APPLICATION_DOMAIN: u32 = 13;
 /// `14`, not `13`.
 pub(crate) const FORMAT_MINOR_BLOCK_ATTRIBUTES: u32 = 14;
 
+/// Persisted entity groups (`tables/groups.json`).
+///
+/// `15` is `cad:Text.mirrored` (MIRROR lane) and `16` is the bounded 2D
+/// constraint table (ADR-0054); neither is written by this build. Groups
+/// therefore take the next free tier, `17`, rather than renumbering an existing
+/// or reserved slot.
+pub(crate) const FORMAT_MINOR_GROUPS: u32 = 17;
+
 // The chain is a compile-time fact, not a convention: a future tier inserted in
-// the middle cannot silently leave the constants out of order.
+// the middle cannot silently leave the constants out of order. `15` (mirrored
+// text) and `16` (constraints) are taken by other lanes, so the top tier is
+// checked by an explicit offset instead of a `+ 1` chain.
+const _: () = assert!(FORMAT_MINOR_GROUPS == FORMAT_MINOR_BLOCK_ATTRIBUTES + 3);
 const _: () = assert!(FORMAT_MINOR_APPLICATION_DOMAIN + 1 == FORMAT_MINOR_BLOCK_ATTRIBUTES);
 const _: () = assert!(FORMAT_MINOR_VENDOR + 1 == FORMAT_MINOR_APPLICATION_DOMAIN);
 const _: () = assert!(FORMAT_MINOR_RELATIONS + 1 == FORMAT_MINOR_VENDOR);
@@ -99,8 +111,15 @@ const _: () = assert!(FORMAT_MINOR_PLAIN + 1 == FORMAT_MINOR_RESOURCES);
 /// tier here is about archive entries and the header flag, both of which the
 /// store already models.
 pub(crate) fn document_minor(snapshot: &DocumentSnapshot) -> u32 {
-    // Block attributes are the newest tier and can coexist with any other
-    // feature (including a named interface domain), so they decide first: a
+    // Groups are the newest tier and can coexist with every other feature
+    // (including block attributes and a named interface domain), so they decide
+    // first: a pre-16 reader refuses an unknown table path rather than dropping
+    // the group rows.
+    if snapshot.has_groups() {
+        return FORMAT_MINOR_GROUPS;
+    }
+    // Block attributes are the next newest tier and can coexist with any other
+    // feature (including a named interface domain), so they decide next: a
     // minor-13 reader would refuse the `cad:AttributeDefinition` class or the
     // insert `attributes` array, and a domain-bearing document would otherwise
     // be stamped 13 and lose them on the reader side.
@@ -163,10 +182,8 @@ mod tests {
     /// The top tier is the format constant, not an independent number.
     #[test]
     fn the_top_tier_is_the_format_minor() {
-        assert_eq!(
-            FORMAT_MINOR_BLOCK_ATTRIBUTES,
-            cad_domain::ymodel::FORMAT_MINOR
-        );
+        assert_eq!(FORMAT_MINOR_GROUPS, cad_domain::ymodel::FORMAT_MINOR);
+        assert_eq!(FORMAT_MINOR_GROUPS, FORMAT_MINOR_BLOCK_ATTRIBUTES + 3);
         assert_eq!(
             FORMAT_MINOR_BLOCK_ATTRIBUTES,
             FORMAT_MINOR_APPLICATION_DOMAIN + 1
