@@ -128,6 +128,11 @@ impl CadSession {
     }
 
     /// `MULTIPLE <command>`: resolve the target against the command vocabulary.
+    ///
+    /// The name is resolved to the one admitted [`CommandId`] *before* dispatch,
+    /// so the application never stores a string it cannot map. Whether the
+    /// command actually starts a repeatable capture is the application's check
+    /// (`multiple.not_repeatable`), which runs without arming.
     fn multiple_argument(&self, argument: &str, text: &str) -> Result<(), String> {
         let Some(name) = parse_multiple_argument(argument) else {
             return self.refuse_argument(invalid_multiple_argument_reason(text));
@@ -137,10 +142,18 @@ impl CadSession {
                 "multiple.unknown_command: '{name}' maps to no admitted CAD command"
             ));
         };
+        let Some(command) = super::commands::normalize_command(canonical) else {
+            return self.refuse_argument(format!(
+                "multiple.unknown_command: '{name}' maps to no admitted CAD command"
+            ));
+        };
         self.dispatch_typed_argument(
             MULTIPLE_SELECTOR,
             CommandId::Multiple,
-            CommandPayload::Multiple(Some(canonical.to_string())),
+            CommandPayload::Multiple(Some(cad_app::MultipleTarget {
+                selector: canonical.to_string(),
+                command,
+            })),
         )
     }
 

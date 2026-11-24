@@ -19,6 +19,7 @@ mod domain;
 mod draw_pick;
 mod explode;
 mod mtext;
+mod multiple;
 mod ortho;
 mod polygon;
 mod properties;

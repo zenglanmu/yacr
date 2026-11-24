@@ -607,8 +607,9 @@ pub enum CommandId {
     TreeStat,
     /// `MREDO [n]`: apply up to `n` existing redo records (default 1). One history move per step; refuses an empty redo stack. Work-only.
     MRedo,
-    /// `MULTIPLE [command]`: arm the session repeat flag. This host has no command repeat loop, so the flag is modelled and the actual repetition is
-    /// reported as `multiple.repeat_not_implemented`, never faked.
+    /// `MULTIPLE [command]`: arm the bounded capture repeat loop. The armed interactive draw/edit command repeats
+    /// through the one confirm funnel until `Esc`/`CANCEL`, a failed re-start or the `MULTIPLE_MAX_REPEATS` guard; a
+    /// one-shot command is refused by name without arming.
     Multiple,
     /// `DONUT` (Work-only): one filled disk/annulus mesh. Contract: [`crate::command_id::draw2::DonutCommand`].
     Donut,

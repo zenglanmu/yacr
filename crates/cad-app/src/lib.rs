@@ -259,8 +259,8 @@ mod session_state;
 
 pub use session_state::{
     BackendChoice, ChamferMethod, ClipboardEntry, IsoPlane, LayoutViewportRef, ModifyOptions,
-    MultipleRepeat, PbrEnvironment, RefEditActive, RefEditMember, RefEditSession, SessionState,
-    ViewExtras, VisualStyleToken, WipeoutFrames,
+    MultipleRepeat, MultipleTarget, PbrEnvironment, RefEditActive, RefEditMember, RefEditSession,
+    SessionState, ViewExtras, VisualStyleToken, WipeoutFrames, MULTIPLE_MAX_REPEATS,
 };
 
 #[cfg(test)]

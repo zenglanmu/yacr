@@ -27,6 +27,7 @@ mod draw_create;
 mod draw_intent_map;
 mod draw_pick;
 mod export_options;
+mod multiple;
 mod open_import;
 mod properties;
 mod render_edit;
@@ -255,14 +256,14 @@ impl HostController {
         Ok(())
     }
 
-    /// Cancel an active tool without executing a drawing command.
-    pub fn cancel_tool(&mut self) -> CadResult<()> {
-        self.session.cancel_tool()
-    }
-
     /// Confirm a captured draw through the ordinary command/transaction path.
     /// The capture is cleared only after execution succeeds.
+    ///
+    /// A successful confirm also advances an armed `MULTIPLE` loop
+    /// ([`Self::continue_multiple`]): the same capture is opened again until
+    /// `Esc`/`CANCEL`, a failed re-start or the repetition guard.
     pub fn confirm_draw(&mut self) -> CadResult<CommandOutcome> {
+        let kind = self.session.draw_kind();
         let intent = self.session.draw_intent()?;
         let selection = self
             .session
@@ -270,8 +271,13 @@ impl HostController {
             .ok_or_else(|| CadError::InvalidInput("no drawing tool is active".into()))?
             .to_vec();
         let command = self.command_for_draw_intent(intent, &selection)?;
-        let outcome = self.execute(command)?;
+        let mut outcome = self.execute(command)?;
         self.session.complete_tool();
+        if let Some(kind) = kind {
+            if let Some(diagnostic) = self.continue_multiple(kind) {
+                outcome.diagnostics.push(diagnostic);
+            }
+        }
         Ok(outcome)
     }
 
@@ -279,6 +285,7 @@ impl HostController {
     /// parsing can fail before a command is entered; an executed command failure
     /// is retained in the returned trace and leaves the capture untouched.
     pub fn confirm_draw_traced(&mut self) -> CadResult<crate::TracedCommandOutcome> {
+        let kind = self.session.draw_kind();
         let intent = self.session.draw_intent()?;
         let selection = self
             .session
@@ -289,6 +296,13 @@ impl HostController {
         let traced = self.execute_traced(command)?;
         if traced.result.is_ok() {
             self.session.complete_tool();
+            if let Some(kind) = kind {
+                if let Some(diagnostic) = self.continue_multiple(kind) {
+                    // The traced outcome is an immutable `Arc`; the named repeat
+                    // boundary surfaces through the host's status line instead.
+                    self.last_status = diagnostic.message;
+                }
+            }
         }
         Ok(traced)
     }

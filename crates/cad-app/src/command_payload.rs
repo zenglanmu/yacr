@@ -836,7 +836,12 @@ pub enum CommandPayload {
     /// by name; the conversion never guesses a scale.
     SpaceTrans(f64),
     MRedo(u32),
-    Multiple(Option<String>),
+    /// `MULTIPLE [command]`: the session repeat arm. `None` (bare `MULTIPLE`)
+    /// repeats the next interactive draw/edit capture command; `Some(target)`
+    /// names one admitted capture command resolved by the command vocabulary
+    /// ([`crate::MultipleTarget`]). A target that does not start such a capture
+    /// is refused by name when dispatched.
+    Multiple(Option<crate::MultipleTarget>),
     /// The 2026-11-07 draw/modify batch; contracts in `command_id::draw2`.
     Draw2(Box<crate::Draw2Payload>),
     /// `VIEW`/`VIEWGO`/`VPOINT`; contracts in [`crate::app_view`].

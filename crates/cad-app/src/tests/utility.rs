@@ -821,7 +821,7 @@ fn mredo_applies_each_requested_step_and_refuses_an_empty_stack() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn multiple_arms_the_session_flag_and_reports_the_missing_repeat_loop() {
+fn multiple_arms_the_session_flag_and_names_the_repeat_loop() {
     let (mut app, mut session) = app_with_purge_fixture();
     let outcome = execute(
         &mut app,
@@ -837,21 +837,92 @@ fn multiple_arms_the_session_flag_and_reports_the_missing_repeat_loop() {
     let codes = codes(&outcome);
     assert!(codes.contains(&"multiple.armed"), "{codes:?}");
     assert!(
-        codes.contains(&"multiple.repeat_not_implemented"),
-        "{codes:?}"
+        !codes.contains(&"multiple.repeat_not_implemented"),
+        "the repeat loop exists now: {codes:?}"
     );
 
     execute(
         &mut app,
         &mut session,
         CommandId::Multiple,
-        CommandPayload::Multiple(Some("LINE".into())),
+        CommandPayload::Multiple(Some(MultipleTarget {
+            selector: "LINE".into(),
+            command: CommandId::CreateLine,
+        })),
     )
     .expect("MULTIPLE LINE arms");
     assert_eq!(
         session.multiple_target(),
-        Some(&MultipleRepeat::Command("LINE".into()))
+        Some(&MultipleRepeat::Command(CommandId::CreateLine))
     );
+    assert!(session.multiple_repeats_command(CommandId::CreateLine));
+    assert!(!session.multiple_repeats_command(CommandId::CreateCircle));
     session.clear_multiple();
     assert!(session.multiple_target().is_none());
+    assert_eq!(session.multiple_repeat_count(), 0);
+}
+
+/// A one-shot command is refused **without arming**: the previous arm survives
+/// and nothing is written.
+#[test]
+fn multiple_refuses_a_non_capture_command_without_arming() {
+    let (mut app, mut session) = app_with_purge_fixture();
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Multiple,
+        CommandPayload::None,
+    )
+    .expect("MULTIPLE arms the next command");
+    let before = app.workspace.documents[&DocumentId(1)].drawing.revision();
+
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::Multiple,
+        CommandPayload::Multiple(Some(MultipleTarget {
+            selector: "PURGE".into(),
+            command: CommandId::Purge,
+        })),
+    )
+    .expect_err("PURGE is not a repeatable capture");
+    assert!(
+        error.to_string().contains("multiple.not_repeatable"),
+        "{error}"
+    );
+    assert_eq!(
+        session.multiple_target(),
+        Some(&MultipleRepeat::NextCommand),
+        "a refused target leaves the previous arm unchanged"
+    );
+    assert_eq!(
+        app.workspace.documents[&DocumentId(1)].drawing.revision(),
+        before,
+        "arming/refusing writes nothing"
+    );
+    assert_eq!(session.multiple_repeat_count(), 0);
+}
+
+/// The guard stops a client that never cancels instead of spinning forever.
+#[test]
+fn multiple_repeat_guard_is_bounded_and_clears_the_arm() {
+    let (mut app, mut session) = app_with_purge_fixture();
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Multiple,
+        CommandPayload::Multiple(Some(MultipleTarget {
+            selector: "LINE".into(),
+            command: CommandId::CreateLine,
+        })),
+    )
+    .expect("MULTIPLE LINE arms");
+    for _ in 0..crate::MULTIPLE_MAX_REPEATS {
+        assert!(session.note_multiple_repeat());
+    }
+    assert!(
+        !session.note_multiple_repeat(),
+        "the guard refuses past the cap"
+    );
+    assert_eq!(session.multiple_repeat_count(), crate::MULTIPLE_MAX_REPEATS);
 }
