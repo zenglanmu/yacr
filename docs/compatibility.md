@@ -877,7 +877,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 
 | 命令 | 状态 | 结果 | 显式未实现 / 有意偏离 |
 |---|---|---|---|
-| `LAYCUR` / `LAYM C U R` | 部分实现 | LAYCUR 把每个选中模型空间实体移到会话当前层（一条事务/一步撤销）；LAYMCUR 以**第一个**选中实体的层为当前层（仅会话状态，复用既有的 locked/frozen/off 拒绝） | 无交互 Select objects；块实例成员/图纸空间/子图元按名拒绝；多选时 LAYMCUR 只用第一个（`laymcur.first_pick` 诊断） |
+| `LAYCUR` / `LAYM C U R` | **完整实现** | LAYCUR 把每个选中**顶层**实体（模型空间或任一图纸布局，含顶层 `INSERT`；只移动参照自身的层，块成员不动）移到会话当前层（一条事务/一步撤销）；LAYMCUR 以**第一个**选中对象的层为当前层（模型/图纸空间、块定义成员或嵌套拾取的有效层，复用既有的 locked/frozen/off 拒绝；仅会话状态） | 交互 `Select objects` 属 ADR 全局范围；嵌套块成员/块定义成员/子图元按名拒绝（无 in-place 块编辑会话，改块定义会影响所有实例）；多选时 LAYMCUR 只用第一个（`laymcur.first_pick` 诊断） |
 | `LAYFRZ` / `LAYLCK` / `LAYULK` | **完整实现** | 跨模型空间/图纸空间/块成员选择（嵌套按有效层解析）；写 `LayerAttributes.frozen/locked`；`LAYFRZ VP [idx,…]` 写每视口 `layer_overrides`；单事务 ⇒ 一步撤销 | 交互对话框属 ADR 全局范围；`LAYFRZ` 的 Viewports 形式在目标视口包含 `CVPORT` 时拒绝当前层；`frozen_in_new_viewport` 不由 `LAYFRZ` 写 |
 | `SETBYLAYER` | 实现 | 恢复颜色/线型/线宽/**透明度**为随层；`Include blocks` 递归块成员的显示状态；一条事务/一步撤销 | 材质/命名打印样式未建模（全局范围）；锁定图层拒绝；无交互 ByBlock 询问（全局对话框范围） |
 | `REVERSE` | 部分实现 | 反转选中 LINE / LWPOLYLINE（含 bulge 与闭合映射）/ SPLINE（控制点+节点镜像）方向，一条事务/一步撤销 | 仅当前选择；无 helix/3D；其它种类按名拒绝 |
@@ -925,11 +925,11 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | 命令 | 状态 | 结果 | 显式未实现 / 有意偏离 |
 |---|---|---|---|
 | `-LAYER` | 实现（2026-11-11） | 裸命令/`?` 仍是只读图层表报告；写形式一行一个选项：`NEW\|N`、`MAKE\|M`、`SET\|S`、`RENAME\|R`、`DELETE\|D`、`ON`/`OFF`、`FREEZE\|F`/`THAW\|T`、`LOCK\|LO`/`UNLOCK\|U`、`COLOR\|C`（ACI 数字/七个标准色名/`aci:N`/`#RRGGBB`/`rgb:…`）、`LTYPE\|L`、`LWEIGHT\|LW`、`PLOT\|P`；名单逗号分隔，含空格的值/名称可加双引号；整行原子、一条事务/一步撤销（多行 patch 同一 `DrawingUndoRecord`）；写形式经 Work-only `SetLayerProperty` 载体，Viewer 拒绝，裸报告 Viewer-legal | 逐选项交互重提示属全局范围；多行 patch 仍按 `cad-db` 的 setter 规则每改一行升一次 revision；当前层选择/删除回落是会话状态，不进入层表撤销步；`?` 支持 `*`/`?` 通配符过滤，无匹配报 `layer.no_match` |
-| `LAYMCH` / `-LAYMCH` | 部分实现 | 选择式：第一个选中对象的图层为目标，其余对象移入该层（一条事务/一步撤销）；目标层锁定由 `cad-db` 拒绝 | 无 AutoCAD 的交互 `Select objects`；空选择、<2 个对象、非模型空间/块实例/子图元、任何 payload 按名拒绝 |
+| `LAYMCH` / `-LAYMCH` | **完整实现** | 选择式：第一个选中对象的图层为目标，其余顶层对象（模型空间或图纸布局，含顶层 `INSERT`）移入该层（一条事务/一步撤销）；目标层锁定由 `cad-db` 拒绝 | AutoCAD 的交互 `Select objects` 属全局范围；空选择、<2 个对象、嵌套块成员、块定义成员、子图元、任何 payload 按名拒绝 |
 | `LAYMRG` / `-LAYMRG` | 完整实现 | 选择式：把选中对象所在层上的所有实体（模型/图纸/块内）重写到当前层，删除源层行并剪除各图纸视口该层 `layer_overrides` 键；实体/布局/层行一条事务/一步撤销（重做再次合并） | 声明的偏离：目标固定为当前层、无交互 source/target 提示，目标可以是 `0` 层；当前层与 `0` 层不能作源；会话 `LAYERSTATE` 不重写 |
 | `LAYDEL` / `-LAYDEL` | 完整实现 | 选择式（模型空间或任一图纸布局的顶层实体；块内成员/子元素拒绝）：删除选中对象所在层在模型空间、每个图纸布局与每个块定义内的**全部**实体，剪除各图纸视口的该层 `layer_overrides` 键，再删除层行；实体/布局/层行一条事务/一步撤销 | 当前层/`0` 层拒绝；锁定层的实体删除由数据库以 `layer.locked` 拒绝且不发布（不是静默成功） |
 | `LAYERSTATE` | 部分实现 | `LAYERSTATE SAVE/RESTORE/LIST/DELETE <name>`；会话内最多 32 个命名快照（逐层属性 + 当前层 + 覆盖），恢复经 `set_layer_attributes`，**多行写入仍是一条事务/一步撤销** | 无 DWG 命名层状态表持久化、无 `.las` 文件、无图层状态管理器对话框；未知/悬挂层与保存时隐藏的当前层拒绝；活动层/覆盖选择是会话状态，不进入该撤销步 |
-| `LAYERPMODE` | 部分实现 | `LAYERPMODE ON\|OFF`；会话标志，`OFF` 时任何图层设置变更（覆盖或层表属性）都不推 `LAYERP` 快照；裸命令报告当前值 | 无 `LAYERPMODE` 持久化；不改变已应用的变更 |
+| `LAYERPMODE` | **完整实现** | `LAYERPMODE ON\|OFF`；AutoCAD 存在图纸里，故写入文档头 `document.json` → `variables.layer_pmode`（默认 ON 不写键，旧档逐字节不变；只有 OFF 写 `false`），`OFF` 时任何图层设置变更（覆盖或层表属性）都不推 `LAYERP` 快照；一条 header-only revision、无 undo（`cad-history` 无 header patch）；裸命令报告存储值 | 不改变已应用的变更；交互对话框/状态栏指示不属于命令本身（全局范围） |
 | `LTSCALE` | 完整实现 | 一个正有限小数；写数据库 `$LTSCALE`（一次 revision、无撤销/历史）；DXF/DWG 头经 `header.linetype_scale` 写出，SAVE→OPEN 往返（导出测试断言 group 40 与往返） | 无 `CELTSCALE`/`PSLTSCALE`/`MSLTSCALE` 联动（属全局变量族）；DWG 分支仍是实验性 `DwgWriter`，非 vendor 验证 |
 | `LAYWALK` | 完整实现 | 逗号分隔层名或层名通配过滤（`*`/`?`，与 `-LAYER ?` 同一大小写不敏感规则）；只显示命名/匹配层 + 当前层，走与 `LAYISO` 相同的会话覆盖原子路径 | 仅会话覆盖、不写库；未知/空列表/零匹配过滤拒绝；由 `LAYUNISO`/`RESTORELAYERS` 清除，计一次 `LAYERP` 快照；对话框与逐对象 walk 属交互 chrome |
 
