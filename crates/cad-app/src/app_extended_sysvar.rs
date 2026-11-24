@@ -54,7 +54,7 @@ use crate::app_utility::document_drawing;
 /// report order. `SETVAR`, `SYSVDLG` and the `SYSVARMONITOR` watch set read
 /// exactly this list, so a report can never advertise a variable the router does
 /// not model.
-pub(crate) const MODELLED_SYSTEM_VARIABLES: [&str; 15] = [
+pub const MODELLED_SYSTEM_VARIABLES: [&str; 15] = [
     "PDMODE",
     "PDSIZE",
     "SNAPUNIT",
@@ -80,7 +80,7 @@ pub(crate) const MODELLED_SYSTEM_VARIABLES: [&str; 15] = [
 
 /// What a modelled variable reads as right now.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ModelledValue {
+pub enum ModelledValue {
     /// The current value and its kind word (`integer`, `real`, `boolean`,
     /// `point`).
     Value(String, &'static str),
@@ -91,7 +91,7 @@ pub(crate) enum ModelledValue {
 
 /// Read one modelled system variable, or `None` when the name is outside
 /// [`MODELLED_SYSTEM_VARIABLES`].
-pub(crate) fn modelled_system_variable(
+pub fn modelled_system_variable(
     drawing: &cad_db::DrawingDatabase,
     session: &SessionState,
     name: &str,

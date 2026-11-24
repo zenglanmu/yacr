@@ -27,7 +27,7 @@ fn execute(
 }
 
 #[test]
-fn units_reports_the_fixed_display_rule_without_writing() {
+fn units_reports_the_live_document_header_without_writing() {
     let (mut app, mut session) = application_with_document();
     let before = revision(&app);
     let outcome =
@@ -38,13 +38,142 @@ fn units_reports_the_fixed_display_rule_without_writing() {
         .iter()
         .find(|row| row.code == "units.report")
         .expect("UNITS reports the display rule");
-    assert!(report.message.contains("4 decimal places"));
+    // The hand-built document uses `UnitContext::drawing_units()`: drawing
+    // units, 3 decimal places. The report must read that value, not a fixed 4.
+    assert!(
+        report
+            .message
+            .contains("drawing units with 3 decimal place"),
+        "{}",
+        report.message
+    );
+    let gap = outcome
+        .diagnostics
+        .iter()
+        .find(|row| row.code == "units.not_implemented")
+        .expect("UNITS names the unmodeled angle/format settings");
+    assert!(gap.message.contains("angular"), "{}", gap.message);
+    assert!(gap.message.contains("length *format*"), "{}", gap.message);
+    assert_eq!(revision(&app), before);
+    assert!(!app.can_undo(&DocumentId(1)));
+}
+
+#[test]
+fn units_writes_the_declared_unit_and_precision_in_one_header_revision() {
+    let (mut app, mut session) = application_with_document();
+    let before = revision(&app);
+    let outcome = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::Extended(ExtendedCommandId::Units),
+                CommandPayload::Units(UnitsCommand {
+                    unit: cad_domain::Unit::Millimeter,
+                    decimal_places: 2,
+                }),
+            ),
+        )
+        .expect("UNITS writes the declared unit");
+    assert!(outcome.changes.is_some());
+    assert_eq!(revision(&app).0, before.0 + 1);
+    let units = &app.workspace.documents[&DocumentId(1)].units;
+    assert_eq!(units.source, cad_domain::Unit::Millimeter);
+    assert_eq!(units.display, cad_domain::Unit::Millimeter);
+    assert_eq!(units.display_per_source, Some(1.0));
+    assert_eq!(units.decimal_places, 2);
     assert!(outcome
         .diagnostics
         .iter()
-        .any(|row| row.code == "units.dialog_not_implemented"));
+        .any(|row| row.code == "units.set" && row.message.contains("2 decimal place")));
+    assert!(outcome
+        .diagnostics
+        .iter()
+        .any(|row| row.code == "units.not_implemented"));
+    assert!(
+        !app.can_undo(&DocumentId(1)),
+        "header settings have no undo patch kind"
+    );
+
+    // `-UNITS` is the same write path, not a second implementation.
+    let dash = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::Extended(ExtendedCommandId::DashUnits),
+                CommandPayload::Units(UnitsCommand {
+                    unit: cad_domain::Unit::Meter,
+                    decimal_places: 4,
+                }),
+            ),
+        )
+        .expect("-UNITS writes the declared unit");
+    assert!(dash.changes.is_some());
+    assert_eq!(
+        app.workspace.documents[&DocumentId(1)].units.display,
+        cad_domain::Unit::Meter
+    );
+
+    // Re-applying the same setting is a no-op with no revision.
+    let after = revision(&app);
+    let stable = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::Extended(ExtendedCommandId::Units),
+                CommandPayload::Units(UnitsCommand {
+                    unit: cad_domain::Unit::Meter,
+                    decimal_places: 4,
+                }),
+            ),
+        )
+        .expect("an identical unit write is admitted");
+    assert!(stable.changes.is_none());
+    assert_eq!(revision(&app), after);
+    assert!(stable
+        .diagnostics
+        .iter()
+        .any(|row| row.code == "units.unchanged"));
+}
+
+#[test]
+fn units_refuses_an_out_of_range_precision_and_a_viewer_write() {
+    let (mut app, mut session) = application_with_document();
+    let before = revision(&app);
+    let error = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::Extended(ExtendedCommandId::Units),
+                CommandPayload::Units(UnitsCommand {
+                    unit: cad_domain::Unit::Millimeter,
+                    decimal_places: 9,
+                }),
+            ),
+        )
+        .expect_err("a precision above 8 is refused");
+    assert!(
+        error.to_string().contains("units.invalid_precision"),
+        "{error}"
+    );
     assert_eq!(revision(&app), before);
-    assert!(!app.can_undo(&DocumentId(1)));
+
+    session.switch_mode(AppMode::Viewer).unwrap();
+    let viewer = app.execute(
+        &mut session,
+        command(
+            CommandId::Extended(ExtendedCommandId::Units),
+            CommandPayload::Units(UnitsCommand {
+                unit: cad_domain::Unit::Millimeter,
+                decimal_places: 2,
+            }),
+        ),
+    );
+    assert!(viewer.is_err(), "Viewer may not declare the drawing units");
+    assert_eq!(revision(&app), before);
+    assert_eq!(
+        app.workspace.documents[&DocumentId(1)].units,
+        cad_domain::UnitContext::drawing_units()
+    );
 }
 
 #[test]

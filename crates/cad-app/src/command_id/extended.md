@@ -30,13 +30,14 @@
 //!   no renderer consumer; the two read-only forms (`APERTURE`,
 //!   `REVCLOUDPROPERTIES`) report their token and name their setter as NOT
 //!   IMPLEMENTED.
-//! * **Read-only reports** (`SYSVARMONITOR`, `SYSVDLG`, `VTOPTIONS`,
-//!   `ALIASEDIT`, `WHOHAS`, `ACADINFO`, `PTYPE`, `SCALELISTEDIT`): pure reads of
-//!   data this build really has; anything absent is a named `not_tracked`
-//!   diagnostic, never an invented value. `SCALELISTEDIT`/`-SCALELISTEDIT` also
-//!   carry the annotation-scale table's writes (`ADD`/`RENAME`/`DELETE`, one
-//!   revision each, Work-only), so their report no longer claims the table cannot
-//!   be edited.
+//! * **Reports and bounded writes** (`SYSVARMONITOR`, `SYSVDLG`, `VTOPTIONS`,
+//!   `ALIASEDIT`, `WHOHAS`, `ACADINFO`, `PTYPE`, `SCALELISTEDIT`): the bare forms
+//!   are reads of data this build really has; anything absent is a named
+//!   `not_tracked` diagnostic, never an invented value. `SYSVDLG` also carries
+//!   the modelled-set read/edit and session settings-file forms
+//!   (`app_extended_sysvar_dialog`), `SCALELISTEDIT`/`-SCALELISTEDIT` carry the
+//!   annotation-scale table's writes (`ADD`/`RENAME`/`DELETE`, one revision each,
+//!   Work-only), so their reports no longer claim the data cannot be edited.
 //! * **Named refusals** (`HYPERLINKOPTIONS`, `INPUTSEARCHOPTIONS`,
 //!   `-INPUTSEARCHOPTIONS`, `SIGVALIDATE`, `VIEWPLOTDETAILS`): `CadError::
 //!   Unsupported` with a stable reason string, because the feature has no storage
@@ -103,9 +104,11 @@
 //! * **Session tokens** (`DWGLOG`, `LOGFILEON`, `LOGFILEOFF`): one `dwglog`
 //!   flag (default OFF) in [`crate::session_state::DraftingExtras`]. This build
 //!   writes no log file, so the handler reports the token and says exactly that.
-//! * **Read-only reports** (`DWGPROPS`, `DWFFORMAT`, `EXPORTPDF`): document
-//!   id/revision/entity counts, and two honest capability reports that name the
-//!   absent export path instead of pretending to export. None is an error.
+//! * **Reports and bounded writes** (`DWGPROPS`, `DWFFORMAT`, `EXPORTPDF`):
+//!   `DWGPROPS` reports identity plus the stored summary metadata and writes one
+//!   field in one header revision (`app_extended_file6`); `DWFFORMAT` and
+//!   `EXPORTPDF` are honest capability reports that name the absent export path
+//!   instead of pretending to export. None is an error.
 //! * **Named refusals** (`SAVEALL` through `AUTOPUBLISH`): no multi-document
 //!   model, no reopen-to-source path, no plotter/plot-style/export-settings
 //!   model, no plot preview/stamp, no batch publish/eTransmit/archive packaging.

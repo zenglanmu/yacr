@@ -1,15 +1,17 @@
 //! Wave 2 read-only reports for the extended command batch.
 //!
-//! `SYSVDLG`, `VTOPTIONS`, `ALIASEDIT`, `WHOHAS`, `ACADINFO`, `PTYPE` and
-//! `SCALELISTEDIT` open no transaction, bump no revision, record no
-//! `cad-history` entry and publish no `ChangeSet`, so all seven are Viewer-legal.
-//! (`SYSVARMONITOR` grew a real session watch set and lives in
-//! `app_extended_sysvar`.)
+//! `VTOPTIONS`, `ALIASEDIT`, `WHOHAS`, `ACADINFO`, `PTYPE` and `SCALELISTEDIT`
+//! open no transaction, bump no revision, record no `cad-history` entry and
+//! publish no `ChangeSet`, so their bare forms are Viewer-legal. `SYSVDLG`'s
+//! bare report is Viewer-legal too, but its typed edit/restore forms write
+//! through `app_extended_sysvar_dialog`; `SYSVARMONITOR` grew a real session
+//! watch set and lives in `app_extended_sysvar`.
 //!
 //! Each report reads only data this build really has:
 //!
 //! * the `SETVAR` closed set (`PDMODE`, `PDSIZE`, `SNAPUNIT`, `LTSCALE`, `GRID`,
-//!   `SNAP`, `ORTHO`, `TEXTSIZE`) through the same reader `SETVAR` uses;
+//!   `SNAP`, `ORTHO`, `TEXTSIZE`) through the same reader `SETVAR` uses
+//!   (`SYSVDLG`);
 //! * the canonical `COMMAND_ALIASES` table (`ALIASEDIT`);
 //! * product/version/build constants and the document revision/entity counts
 //!   (`ACADINFO`);
@@ -20,9 +22,6 @@
 //! `dialog_not_implemented`/`single_document` diagnostic. No value is invented.
 
 use super::*;
-use crate::app_extended_sysvar::{
-    modelled_system_variable, ModelledValue, MODELLED_SYSTEM_VARIABLES,
-};
 use crate::app_reports_ext::{diagnostic, report_outcome};
 use crate::app_utility::{document_drawing, require_none_payload};
 
@@ -49,59 +48,6 @@ impl Application {
                 "not a Wave 2 report: {other:?}"
             ))),
         }
-    }
-
-    /// `SYSVDLG`: one row per modelled system variable plus the honest gap.
-    ///
-    /// The report reads the same closed set `SETVAR` does. Anything outside it is
-    /// named `sysvdlg.not_tracked`; this build has no settings dialog, so nothing
-    /// can be edited, saved or restored.
-    fn system_variable_dialog(
-        &self,
-        session: &SessionState,
-        command: &Command,
-    ) -> CadResult<CommandOutcome> {
-        require_none_payload(command, "SYSVDLG")?;
-        let drawing = document_drawing(self, command)?;
-        let mut diagnostics = Vec::with_capacity(MODELLED_SYSTEM_VARIABLES.len() + 3);
-        for name in MODELLED_SYSTEM_VARIABLES {
-            // The list is exactly the reader's closed set, so a miss is a build
-            // bug; a modelled name that simply has no value right now is
-            // reported as such, never filled with a default.
-            let value = modelled_system_variable(&drawing, session, name)
-                .expect("MODELLED_SYSTEM_VARIABLES is exactly the reader's closed set");
-            match value {
-                ModelledValue::Value(value, kind) => diagnostics.push(diagnostic(
-                    "sysvdlg.value",
-                    format!("SYSVDLG {name} = {value} ({kind})"),
-                )),
-                ModelledValue::Absent(reason) => {
-                    diagnostics.push(diagnostic("sysvdlg.not_stored", reason))
-                }
-            }
-        }
-        diagnostics.push(diagnostic(
-            "sysvdlg.summary",
-            format!(
-                "SYSVDLG: {} modelled system variable(s) reported with live values; variables \
-                 outside the SETVAR closed set are not modeled and were not invented",
-                MODELLED_SYSTEM_VARIABLES.len()
-            ),
-        ));
-        diagnostics.push(diagnostic(
-            "sysvdlg.not_tracked",
-            "SYSVDLG: every other AutoCAD system variable is not tracked by this build — there is \
-             no per-variable table to enumerate, and the write-only shell settings \
-             (NAVVCUBEDISPLAY, DISPLAYVIEWCUBEIN2D, DISPLAYVIEWCUBEIN3D) have no readable value"
-                .into(),
-        ));
-        diagnostics.push(diagnostic(
-            "sysvdlg.dialog_not_implemented",
-            "SYSVDLG: this build has no system-variable dialog, so there is no edit/save/restore \
-             surface; use `SETVAR <name>` to read one modelled value"
-                .into(),
-        ));
-        Ok(report_outcome(diagnostics))
     }
 
     /// `VTOPTIONS`: view-transition settings are not modeled.
@@ -168,28 +114,50 @@ impl Application {
     /// collected rather than fabricated.
     fn acad_info_report(&self, command: &Command) -> CadResult<CommandOutcome> {
         require_none_payload(command, "ACADINFO")?;
-        let drawing = document_drawing(self, command)?;
+        let document = self
+            .workspace
+            .documents
+            .get(&command.document)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+        let drawing = &document.drawing;
         let profile = if cfg!(debug_assertions) {
             "debug"
         } else {
             "release"
         };
+        let domain = drawing
+            .application_domain()
+            .map(|domain| domain.as_str())
+            .unwrap_or("none");
         Ok(report_outcome(vec![
             diagnostic(
                 "acadinfo.report",
                 format!(
-                    "ACADINFO: product yacr (cad-app) version {} build {profile}; document {} \
-                     revision {} entities {}",
+                    "ACADINFO: product yacr (cad-app) version {} build {profile}; target {} {}; \
+                     document {} revision {} entities {}; units {} ({} decimal place(s)); \
+                     application domain {domain}",
                     env!("CARGO_PKG_VERSION"),
+                    std::env::consts::OS,
+                    std::env::consts::ARCH,
                     command.document.0,
                     drawing.revision().0,
-                    drawing.entity_count()
+                    drawing.entity_count(),
+                    document.units.label(),
+                    document.units.decimal_places
                 ),
             ),
             diagnostic(
                 "acadinfo.not_collected",
                 "ACADINFO: licence, hardware and installed-module data are not collected by this \
                  build and are not reported"
+                    .into(),
+            ),
+            diagnostic(
+                "acadinfo.file_not_written",
+                "ACADINFO: the AutoCAD command creates an information file; this crate has no \
+                 host file sink and writes no file, so the same facts are reported in the command \
+                 log instead (a host-owned save path is the remaining step, not a fabricated \
+                 file)"
                     .into(),
             ),
         ]))

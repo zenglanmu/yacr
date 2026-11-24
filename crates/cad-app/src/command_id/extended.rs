@@ -61,7 +61,13 @@ pub enum ExtendedCommandId {
     // -- Wave 2: read-only reports (app_extended_reports2) -------------------
     /// `SYSVARMONITOR`: add/remove/list the session watch set.
     SysVarMonitor,
-    /// `SYSVDLG`: the same closed set, plus dialog_not_implemented.
+    /// `SYSVDLG`: report/read/edit the modelled system-variable closed set.
+    ///
+    /// The bare form is the report; `CommandPayload::SysVarDialog(Read)` reads
+    /// one name; `Apply` validates a whole assignment list before one header
+    /// revision and the session setters. `SAVE`/`RESTORE` are the session's
+    /// named-file forms (`cad-ui-core`), not a dialog. Contract:
+    /// [`crate::app_extended_sysvar_dialog`].
     SysVarDialog,
     /// `VTOPTIONS`: view-transition settings are not tracked.
     ViewTransitionOptions,
@@ -330,7 +336,11 @@ pub enum ExtendedCommandId {
     LogFileOn,
     /// `LOGFILEOFF`: set the session drawing-log token OFF.
     LogFileOff,
-    /// `DWGPROPS`: read-only document/entity report plus the metadata gap.
+    /// `DWGPROPS`: document summary report and the `document.json` metadata write.
+    ///
+    /// The bare form reports identity plus every stored summary field/custom
+    /// property; `CommandPayload::DwgProps` writes one field in one header
+    /// revision. Contract: [`crate::app_extended_file6`].
     DwgProps,
     /// `DWFFORMAT`: report that DWF is not an export format here.
     DwfFormat,

@@ -97,7 +97,7 @@ fn logfileon_and_logfileoff_set_the_same_token_with_their_own_codes() {
 }
 
 #[test]
-fn dwgprops_reports_document_identity_and_names_the_metadata_gap() {
+fn dwgprops_reports_document_identity_and_an_empty_summary() {
     let (mut app, mut session) = application_with_document();
     let before = revision(&app);
     let outcome =
@@ -107,11 +107,238 @@ fn dwgprops_reports_document_identity_and_names_the_metadata_gap() {
     assert!(report.message.contains("document 1"), "{}", report.message);
     assert!(report.message.contains("revision 0"), "{}", report.message);
     assert!(report.message.contains("entities 0"), "{}", report.message);
-    assert!(diagnostic(&outcome, "dwgprops.metadata_not_tracked")
+    // Empty metadata is named with the real write grammar, never invented.
+    assert!(diagnostic(&outcome, "dwgprops.empty")
         .message
-        .contains("NOT MODELED"));
+        .contains("DWGPROPS TITLE"));
     assert_eq!(revision(&app), before);
     assert!(!app.can_undo(&DocumentId(1)));
+}
+
+#[test]
+fn dwgprops_writes_summary_fields_in_one_header_revision_and_reports_them() {
+    let (mut app, mut session) = application_with_document();
+    let before = revision(&app);
+    for (field, value) in [
+        (cad_db::DocumentMetadataField::Title, "Pump station"),
+        (cad_db::DocumentMetadataField::Author, "A. Drafter"),
+        (cad_db::DocumentMetadataField::Keywords, "pump, station"),
+    ] {
+        let outcome = app
+            .execute(
+                &mut session,
+                command(
+                    CommandId::Extended(ExtendedCommandId::DwgProps),
+                    CommandPayload::DwgProps(DwgPropsCommand::SetField {
+                        field,
+                        value: value.into(),
+                    }),
+                ),
+            )
+            .expect("a summary field writes");
+        assert!(outcome.changes.is_some());
+        assert!(diagnostic(&outcome, "dwgprops.set").message.contains(value));
+        assert!(diagnostic(&outcome, "dwgprops.no_history")
+            .message
+            .contains("NO undo step"));
+    }
+    let custom = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::Extended(ExtendedCommandId::DwgProps),
+                CommandPayload::DwgProps(DwgPropsCommand::SetCustom {
+                    name: "Project".into(),
+                    value: "North".into(),
+                }),
+            ),
+        )
+        .expect("a custom property writes");
+    assert!(diagnostic(&custom, "dwgprops.set")
+        .message
+        .contains("Project"));
+    assert_eq!(
+        revision(&app).0,
+        before.0 + 4,
+        "each write is exactly one header revision"
+    );
+    assert!(
+        !app.can_undo(&DocumentId(1)),
+        "document metadata has no undo patch kind"
+    );
+
+    let report =
+        execute(&mut app, &mut session, ExtendedCommandId::DwgProps).expect("DWGPROPS is admitted");
+    assert!(diagnostic(&report, "dwgprops.field")
+        .message
+        .contains("Pump station"));
+    assert!(diagnostic(&report, "dwgprops.custom")
+        .message
+        .contains("Project"));
+    assert!(diagnostic(&report, "dwgprops.summary")
+        .message
+        .contains("4 metadata value(s)"));
+
+    // The same write is an authoritative no-op: no revision, no change set.
+    let stable = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::Extended(ExtendedCommandId::DwgProps),
+                CommandPayload::DwgProps(DwgPropsCommand::SetField {
+                    field: cad_db::DocumentMetadataField::Title,
+                    value: "Pump station".into(),
+                }),
+            ),
+        )
+        .expect("an identical write is admitted");
+    assert!(stable.changes.is_none());
+    assert!(diagnostic(&stable, "dwgprops.unchanged")
+        .message
+        .contains("no revision"));
+    assert_eq!(revision(&app).0, before.0 + 4);
+}
+
+#[test]
+fn dwgprops_clears_a_named_field_and_a_custom_property() {
+    let (mut app, mut session) = application_with_document();
+    app.execute(
+        &mut session,
+        command(
+            CommandId::Extended(ExtendedCommandId::DwgProps),
+            CommandPayload::DwgProps(DwgPropsCommand::SetField {
+                field: cad_db::DocumentMetadataField::Title,
+                value: "Temporary".into(),
+            }),
+        ),
+    )
+    .unwrap();
+    app.execute(
+        &mut session,
+        command(
+            CommandId::Extended(ExtendedCommandId::DwgProps),
+            CommandPayload::DwgProps(DwgPropsCommand::SetCustom {
+                name: "Temp".into(),
+                value: "1".into(),
+            }),
+        ),
+    )
+    .unwrap();
+    let cleared = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::Extended(ExtendedCommandId::DwgProps),
+                CommandPayload::DwgProps(DwgPropsCommand::SetField {
+                    field: cad_db::DocumentMetadataField::Title,
+                    value: String::new(),
+                }),
+            ),
+        )
+        .unwrap();
+    assert!(diagnostic(&cleared, "dwgprops.cleared")
+        .message
+        .contains("title"));
+    let custom = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::Extended(ExtendedCommandId::DwgProps),
+                CommandPayload::DwgProps(DwgPropsCommand::SetCustom {
+                    name: "Temp".into(),
+                    value: String::new(),
+                }),
+            ),
+        )
+        .unwrap();
+    assert!(diagnostic(&custom, "dwgprops.cleared")
+        .message
+        .contains("removed"));
+    let metadata = app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .document_metadata();
+    assert!(metadata.is_empty());
+}
+
+#[test]
+fn dwgprops_metadata_round_trips_through_the_document_header() {
+    let (mut app, mut session) = application_with_document();
+    let expected = cad_db::DocumentMetadata {
+        title: Some("Pump station".into()),
+        author: Some("A. Drafter".into()),
+        custom: [("Project".to_string(), "North".to_string())]
+            .into_iter()
+            .collect(),
+        ..Default::default()
+    };
+    for (field, value) in [
+        (cad_db::DocumentMetadataField::Title, "Pump station"),
+        (cad_db::DocumentMetadataField::Author, "A. Drafter"),
+    ] {
+        app.execute(
+            &mut session,
+            command(
+                CommandId::Extended(ExtendedCommandId::DwgProps),
+                CommandPayload::DwgProps(DwgPropsCommand::SetField {
+                    field,
+                    value: value.into(),
+                }),
+            ),
+        )
+        .unwrap();
+    }
+    app.execute(
+        &mut session,
+        command(
+            CommandId::Extended(ExtendedCommandId::DwgProps),
+            CommandPayload::DwgProps(DwgPropsCommand::SetCustom {
+                name: "Project".into(),
+                value: "North".into(),
+            }),
+        ),
+    )
+    .unwrap();
+    let document = &app.workspace.documents[&DocumentId(1)];
+    assert_eq!(document.drawing.document_metadata(), &expected);
+    let snapshot = document
+        .drawing
+        .snapshot(
+            document.units.clone(),
+            document.identity.clone(),
+            document.resource_keys.clone(),
+            document.drawing.revision(),
+        )
+        .expect("the header encodes");
+    let loaded = cad_db::DrawingDatabase::from_snapshot(&snapshot).expect("the header decodes");
+    assert_eq!(loaded.document_metadata(), &expected);
+}
+
+#[test]
+fn dwgprops_refuses_a_write_in_viewer_mode_and_a_malformed_payload() {
+    let (mut app, mut session) = application_with_document();
+    session.switch_mode(AppMode::Viewer).unwrap();
+    let before = revision(&app);
+    let refused = app.execute(
+        &mut session,
+        command(
+            CommandId::Extended(ExtendedCommandId::DwgProps),
+            CommandPayload::DwgProps(DwgPropsCommand::SetField {
+                field: cad_db::DocumentMetadataField::Title,
+                value: "Nope".into(),
+            }),
+        ),
+    );
+    assert!(refused.is_err(), "Viewer metadata writes are refused");
+    assert_eq!(revision(&app), before);
+    let malformed = app.execute(
+        &mut session,
+        command(
+            CommandId::Extended(ExtendedCommandId::DwgProps),
+            CommandPayload::Points(vec![point(1.0, 2.0)]),
+        ),
+    );
+    assert!(malformed.is_err(), "DWGPROPS rejects another payload");
+    assert_eq!(revision(&app), before);
 }
 
 #[test]
