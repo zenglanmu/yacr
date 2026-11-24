@@ -739,6 +739,16 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("CONVERTPOLY", CommandId::Extended(ExtendedCommandId::ConvertPoly)), ("CONVERT", CommandId::Extended(ExtendedCommandId::ConvertGeneric)),
     ("TABLE", CommandId::Extended(ExtendedCommandId::TableCreate)), ("-TABLE", CommandId::Extended(ExtendedCommandId::DashTable)),
     ("TABLEDIT", CommandId::Extended(ExtendedCommandId::TableEdit)), ("TABLEEXPORT", CommandId::Extended(ExtendedCommandId::TableExport)),
+    // ADR-0056: the action recorder's seven real command-line names (the
+    // session owns their state/file/playback; the application entries refuse
+    // only the text-less IPC forms).
+    ("ACTRECORD", CommandId::Extended(ExtendedCommandId::ActRecord)),
+    ("ACTSTOP", CommandId::Extended(ExtendedCommandId::ActStop)),
+    ("-ACTSTOP", CommandId::Extended(ExtendedCommandId::DashActStop)),
+    ("ACTUSERINPUT", CommandId::Extended(ExtendedCommandId::ActUserInput)),
+    ("ACTUSERMESSAGE", CommandId::Extended(ExtendedCommandId::ActUserMessage)),
+    ("-ACTUSERMESSAGE", CommandId::Extended(ExtendedCommandId::DashActUserMessage)),
+    ("ACTMANAGER", CommandId::Extended(ExtendedCommandId::ActManager)),
     ("TABLESTYLE", CommandId::Extended(ExtendedCommandId::TableStyleList)), ("TINSERT", CommandId::Extended(ExtendedCommandId::TableInsert)),
     ("MATCHCELL", CommandId::Extended(ExtendedCommandId::MatchCell)), ("FIELD", CommandId::Extended(ExtendedCommandId::Field)),
     ("RTEXT", CommandId::Extended(ExtendedCommandId::RText)), ("RTEDIT", CommandId::Extended(ExtendedCommandId::RTextEdit)),

@@ -296,6 +296,22 @@ impl CadSession {
             | super::commands::REVCLOUDPROPERTIES_SELECTOR
             | super::commands::SPACETRANS_SELECTOR => self.paper_argument(selector, argument, text),
 
+            // The ADR-0056 action-recorder lines. `CadSession::command` already
+            // intercepts them before this dispatch; this arm keeps a direct
+            // `argument_command` call total instead of hitting the debug assert.
+            super::action_recorder::ACTRECORD_SELECTOR
+            | super::action_recorder::ACTSTOP_SELECTOR
+            | super::action_recorder::DASH_ACTSTOP_SELECTOR
+            | super::action_recorder::ACTUSERINPUT_SELECTOR
+            | super::action_recorder::ACTUSERMESSAGE_SELECTOR
+            | super::action_recorder::DASH_ACTUSERMESSAGE_SELECTOR
+            | super::action_recorder::ACTMANAGER_SELECTOR => {
+                match self.action_recorder_command(text) {
+                    Some(outcome) => outcome,
+                    None => self.refuse_argument(super::unsupported_command_reason(text)),
+                }
+            }
+
             // The session-only vocabulary controls. `CadSession::command`
             // intercepts them before this dispatch, so this arm only keeps the
             // typed path total (a direct `argument_command` call is still

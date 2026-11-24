@@ -11,6 +11,9 @@ use cad_app::cad_query::bim::BimSummary;
 use cad_app::cad_query::{QueryPage, QueryRequest};
 use cad_domain::{DatabaseId, DocumentId, RequestId, Revision};
 
+use crate::action_recorder::{
+    ActionMacroSummary, ActionRecorderSnapshot, ACTION_RECORDER_UNSUPPORTED,
+};
 use crate::bim::{query_response, BimQueryResponse};
 use crate::param::{ParamListResponse, ParamListRow, PARAM_LIST_KIND, PARAM_LIST_UNSUPPORTED};
 
@@ -169,4 +172,42 @@ fn no_seam_refuses_a_parameter_list_with_its_own_marker() {
     assert_eq!(error, PARAM_LIST_UNSUPPORTED);
     assert_eq!(error, "unsupported-runtime: paramList");
     assert_ne!(error, BIM_UNSUPPORTED, "BIM's word is not a parameter word");
+}
+
+#[test]
+fn the_action_recorder_kind_round_trips_and_has_its_own_no_seam_word() {
+    use crate::host_read::ACTION_RECORDER_KIND;
+    let request = HostReadRequest::ActionRecorder;
+    assert_eq!(request.kind(), ACTION_RECORDER_KIND);
+    assert_eq!(ACTION_RECORDER_KIND, "actionRecorder");
+    let value = serde_json::to_value(&request).expect("serialize");
+    assert_eq!(value, serde_json::json!({ "kind": ACTION_RECORDER_KIND }));
+    let decoded: HostReadRequest = serde_json::from_value(value).expect("decode");
+    assert_eq!(decoded, request);
+
+    let answer = HostReadAnswer::ActionRecorder(ActionRecorderSnapshot {
+        recording: None,
+        macros: vec![ActionMacroSummary {
+            name: "door".into(),
+            path: Some("/tmp/door.actm.json".into()),
+            steps: 2,
+        }],
+        last_macro: Some("door".into()),
+        playback: None,
+        last_error: None,
+    });
+    let value = serde_json::to_value(&answer).expect("serialize");
+    assert_eq!(value["kind"], ACTION_RECORDER_KIND);
+    assert_eq!(value["macros"][0]["steps"], 2);
+    assert_eq!(value["lastMacro"], "door");
+    let decoded: HostReadAnswer = serde_json::from_value(value).expect("decode");
+    assert_eq!(decoded, answer);
+
+    let error = HostReadSeam::default()
+        .read(&HostReadRequest::ActionRecorder)
+        .expect_err("no seam installed");
+    assert_eq!(error, ACTION_RECORDER_UNSUPPORTED);
+    assert_eq!(error, "unsupported-runtime: action-recorder");
+    assert_ne!(error, BIM_UNSUPPORTED);
+    assert_ne!(error, PARAM_LIST_UNSUPPORTED);
 }

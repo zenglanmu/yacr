@@ -1,7 +1,8 @@
 //! Contract for the data-driven named refusals: 197 + 91 Wave 27 + 39 Wave 28
 //! minus the four graduated in-place block-edit names, minus `XCLIP` (now a real
 //! display clip), minus `XEDGES` (now a real display-edge extraction), minus
-//! `PARAMETERS`/`-PARAMETERS`/`PARAMETERSCLOSE` (now the Parameter Manager) = 318.
+//! `PARAMETERS`/`-PARAMETERS`/`PARAMETERSCLOSE` (now the Parameter Manager), minus
+//! the seven ADR-0056 action-recorder names = 311.
 //!
 //! Every selector in [`RefusalId::ALL`] must reach its stable
 //! `<selector>.unsupported: ...` reason, write nothing, bump no revision,
@@ -20,9 +21,9 @@ fn every_wave17_refusal_refuses_with_its_stable_reason() {
     let before = revision(&app);
     assert_eq!(
         RefusalId::ALL.len(),
-        318,
+        311,
         "197 existing + 91 Wave 27 + 39 Wave 28 - 4 in-place refedit - 3 Parameter Manager - \
-         XCLIP - XEDGES = 318 named refusals"
+         XCLIP - XEDGES - 7 action-recorder = 311 named refusals"
     );
     for &name in RefusalId::ALL {
         let ext = ExtendedCommandId::Refusal(name);

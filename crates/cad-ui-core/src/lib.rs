@@ -12,6 +12,7 @@
 //! `wgpu`, no `tauri`/`gtk`/`gdk`/`ashpd`, no platform bindings (`web-sys`,
 //! `android-activity`, `jni`, `ndk`). The whole crate is UI-framework-free.
 
+pub mod action_recorder;
 pub mod bim;
 pub mod host_read;
 pub mod i18n;
@@ -23,6 +24,13 @@ pub mod protocol;
 pub mod session;
 pub mod shell;
 
+pub use action_recorder::{
+    decode_action_macro, encode_action_macro, is_recorder_control_name, validate_action_macro,
+    ActionMacro, ActionMacroSummary, ActionPlaybackSnapshot, ActionRecorderSnapshot,
+    ActionRecordingSnapshot, MacroCodecError, MacroStep, ACTION_MACRO_FORMAT,
+    ACTION_MACRO_MAX_STEPS, ACTION_MACRO_MAX_TEXT, ACTION_MACRO_VERSION,
+    ACTION_RECORDER_UNSUPPORTED, RECORDER_CONTROL_NAMES,
+};
 pub use bim::{
     query_response, BimEvidenceWire, BimFacetCountWire, BimFilterWire, BimObjectWire, BimOpWire,
     BimPropertyCountWire, BimPropertyFilterWire, BimQueryRequest, BimQueryResponse, BimRowWire,
@@ -30,8 +38,8 @@ pub use bim::{
     BIM_UNSUPPORTED, BIM_UNSUPPORTED_VALUE,
 };
 pub use host_read::{
-    HostReadAnswer, HostReadHost, HostReadRequest, HostReadSeam, HostReads, BIM_QUERY_KIND,
-    HOST_READ_UNKNOWN_KIND,
+    HostReadAnswer, HostReadHost, HostReadRequest, HostReadSeam, HostReads, ACTION_RECORDER_KIND,
+    BIM_QUERY_KIND, HOST_READ_UNKNOWN_KIND,
 };
 pub use param::{ParamListResponse, ParamListRow, PARAM_LIST_KIND, PARAM_LIST_UNSUPPORTED};
 

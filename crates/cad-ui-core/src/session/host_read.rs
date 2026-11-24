@@ -21,6 +21,7 @@
 
 use std::sync::Arc;
 
+use crate::action_recorder::ActionRecorderSnapshot;
 use crate::bim::{BimFilterWire, BimQueryRequest, BimQueryResponse};
 use crate::host_read::{
     HostReadAnswer, HostReadHost, HostReadRequest, HostReadSeam, HostReads, HOST_READ_UNKNOWN_KIND,
@@ -45,6 +46,9 @@ impl CadSession {
                 &BimQueryRequest::new(filter.clone(), *offset, *limit),
             )?)),
             HostReadRequest::ParamList => Ok(HostReadAnswer::ParamList(self.param_list()?)),
+            HostReadRequest::ActionRecorder => {
+                Ok(HostReadAnswer::ActionRecorder(self.action_recorder()?))
+            }
         }
     }
 }
@@ -86,8 +90,8 @@ pub fn bim_query(
         limit,
     })? {
         HostReadAnswer::BimQuery(response) => Ok(response),
-        HostReadAnswer::ParamList(_) => Err(format!(
-            "{HOST_READ_UNKNOWN_KIND}: the host answered a parameter list to a BIM query"
+        HostReadAnswer::ParamList(_) | HostReadAnswer::ActionRecorder(_) => Err(format!(
+            "{HOST_READ_UNKNOWN_KIND}: the host answered a different kind to a BIM query"
         )),
     }
 }
@@ -101,8 +105,23 @@ pub fn bim_query(
 pub fn param_list(reads: &dyn HostReads) -> Result<ParamListResponse, String> {
     match reads.host_read(&HostReadRequest::ParamList)? {
         HostReadAnswer::ParamList(response) => Ok(response),
-        HostReadAnswer::BimQuery(_) => Err(format!(
-            "{HOST_READ_UNKNOWN_KIND}: the host answered a BIM query to a parameter list"
+        HostReadAnswer::BimQuery(_) | HostReadAnswer::ActionRecorder(_) => Err(format!(
+            "{HOST_READ_UNKNOWN_KIND}: the host answered a different kind to a parameter list"
+        )),
+    }
+}
+
+/// `cad_action_recorder`: the session's recorder state and visible macros
+/// (ADR-0056).
+///
+/// One request-carrying read over the shared seam; the session's handler is
+/// [`CadSession::action_recorder`]. A carrier without a file bridge answers its
+/// own `unsupported-runtime: action-recorder` refusal, never an empty list.
+pub fn action_recorder(reads: &dyn HostReads) -> Result<ActionRecorderSnapshot, String> {
+    match reads.host_read(&HostReadRequest::ActionRecorder)? {
+        HostReadAnswer::ActionRecorder(response) => Ok(response),
+        HostReadAnswer::BimQuery(_) | HostReadAnswer::ParamList(_) => Err(format!(
+            "{HOST_READ_UNKNOWN_KIND}: the host answered a different kind to an action-recorder read"
         )),
     }
 }

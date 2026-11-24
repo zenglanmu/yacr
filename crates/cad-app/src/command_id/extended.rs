@@ -930,6 +930,25 @@ pub enum ExtendedCommandId {
     /// Contract: `crate::app_drawing::xclip_edit`.
     Xclip,
 
+    // ADR-0056 (2026-11-24): the action recorder's seven command-line names.
+    // Their state, macro file and playback live in `cad-ui-core`'s session
+    // (`session::action_recorder`); the application entries below only refuse
+    // the typed-payload/IPC forms that carry no command-line text.
+    /// `ACTRECORD [<name-or-path>]`: start recording successful typed commands.
+    ActRecord,
+    /// `ACTSTOP [<path.json>]`: stop and write the recorded macro.
+    ActStop,
+    /// `-ACTSTOP [<path.json>]`: the command-line spelling of `ACTSTOP`.
+    DashActStop,
+    /// `ACTUSERINPUT [<message>]`: record an input-pause step.
+    ActUserInput,
+    /// `ACTUSERMESSAGE <text>`: record a user-message step.
+    ActUserMessage,
+    /// `-ACTUSERMESSAGE <text>`: the command-line spelling of `ACTUSERMESSAGE`.
+    DashActUserMessage,
+    /// `ACTMANAGER [LIST|PLAY <name>|DELETE <name>|CONTINUE]`: manage macros.
+    ActManager,
+
     // Waves 17-24: 197 named refusals (action macros, palettes, OLE/hyperlinks,
     // LISP, lights/materials/constraints, data extraction, DWF/DGN underlays,
     // markup, GIS, compare, sheet sets). The selectors, reasons and variant set

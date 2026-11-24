@@ -1,7 +1,7 @@
-//! The Wave 17-24 + Wave 27 + Wave 28 named-refusal vocabulary rows (318 rows:
+//! The Wave 17-24 + Wave 27 + Wave 28 named-refusal vocabulary rows (311 rows:
 //! 197 existing + 91 Wave 27 + 39 Wave 28 − 4 in-place refedit names − 3
 //! Parameter Manager names − `XCLIP` (now a real display clip) − `XEDGES` (now
-//! a real display-edge extraction).
+//! a real display-edge extraction) − the seven ADR-0056 action-recorder names.
 //!
 //! Kept in a sibling table (not `COMMAND_TABLE`) so `commands.rs` stays inside
 //! the 1000-line code gate. `normalize_command`, `canonical_command_name`,
@@ -15,13 +15,6 @@ pub const REFUSAL_TABLE: &[(&str, CommandId)] = &[
     ("ACTBASEPOINT", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Actbasepoint))),
     ("ACTIVITYINSIGHTSCLOSE", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Activityinsightsclose))),
     ("ACTIVITYINSIGHTSOPEN", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Activityinsightsopen))),
-    ("ACTMANAGER", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Actmanager))),
-    ("ACTRECORD", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Actrecord))),
-    ("-ACTSTOP", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::DashActstop))),
-    ("ACTSTOP", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Actstop))),
-    ("ACTUSERINPUT", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Actuserinput))),
-    ("-ACTUSERMESSAGE", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::DashActusermessage))),
-    ("ACTUSERMESSAGE", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Actusermessage))),
     ("ADCCLOSE", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Adcclose))),
     ("ADCENTER", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Adcenter))),
     ("ADCNAVIGATE", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Adcnavigate))),

@@ -412,6 +412,13 @@ impl ExtendedCommandId {
             Self::DgnAdjust => "DGNADJUST",
             Self::Shp2Blk => "SHP2BLK",
             Self::Xclip => "XCLIP",
+            Self::ActRecord => "ACTRECORD",
+            Self::ActStop => "ACTSTOP",
+            Self::DashActStop => "-ACTSTOP",
+            Self::ActUserInput => "ACTUSERINPUT",
+            Self::ActUserMessage => "ACTUSERMESSAGE",
+            Self::DashActUserMessage => "-ACTUSERMESSAGE",
+            Self::ActManager => "ACTMANAGER",
             Self::Refusal(name) => name.selector(),
         }
     }
@@ -820,6 +827,13 @@ impl ExtendedCommandId {
         Self::DgnAdjust,
         Self::Shp2Blk,
         Self::Xclip,
+        Self::ActRecord,
+        Self::ActStop,
+        Self::DashActStop,
+        Self::ActUserInput,
+        Self::ActUserMessage,
+        Self::DashActUserMessage,
+        Self::ActManager,
     ];
 }
 
