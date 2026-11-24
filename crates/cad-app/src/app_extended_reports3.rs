@@ -4,11 +4,14 @@
 //! `switch_space_command` path `MODEL`/`SPACE` already own — there is no second
 //! space authority. `STYLE`, `-STYLE`, `MLEADERSTYLE` and `BLOCK?` are read-only
 //! reports over tables this build really stores; a missing table is named, never
-//! invented. `DIMREASSOC`/`DIMREASSOCIATE` mirror `DIMREGEN`'s contract: this
-//! build's dimensions are non-associative, so they are explicit no-ops.
+//! invented. `DIMREASSOC` is a real entity write (restore the measured dimension
+//! text; see `app_drawing::dimension_reassoc`), while `DIMREASSOCIATE` keeps
+//! `DIMREGEN`'s contract: this build's dimensions are non-associative, so it is
+//! an explicit no-op.
 //!
-//! None of these opens a transaction, bumps the revision, records a
-//! `cad-history` entry or publishes a `ChangeSet`; all eight are Viewer-legal.
+//! Apart from `DIMREASSOC`, none of these opens a transaction, bumps the
+//! revision, records a `cad-history` entry or publishes a `ChangeSet`; all of
+//! them are Viewer-legal except the Work-only `DIMREASSOC`.
 
 use super::*;
 use crate::app_reports_ext::{diagnostic, report_outcome};
@@ -33,9 +36,7 @@ impl Application {
             }
             ExtendedCommandId::MLeaderStyleList => self.mleader_style_report(session, command),
             ExtendedCommandId::BlockList => self.block_list_report(command),
-            ExtendedCommandId::DimReassoc => {
-                self.non_associative_report(command, "DIMREASSOC", "dimreassoc.non_associative")
-            }
+            ExtendedCommandId::DimReassoc => self.dim_reassoc(session, command),
             ExtendedCommandId::DimReassociate => self.non_associative_report(
                 command,
                 "DIMREASSOCIATE",
@@ -255,10 +256,8 @@ impl Application {
         Ok(report_outcome(diagnostics))
     }
 
-    /// `DIMREASSOC` / `DIMREASSOCIATE`: the non-associative no-op report.
-    ///
-    /// Mirrors `DIMREGEN`: every dimension already has no association, so there
-    /// is nothing to restore or associate and nothing changes.
+    /// `DIMREASSOCIATE`: the non-associative no-op report (its own code; the
+    /// text-restoring `DIMREASSOC` is a real write and is not an alias of it).
     fn non_associative_report(
         &self,
         command: &Command,

@@ -26,14 +26,16 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **287** |
-| 部分实现（有写明的界） | **692** |
+| 完整实现 | **289** |
+| 部分实现（有写明的界） | **690** |
 | **已实现合计（完整 + 部分）** | **979** |
 | 未实现 | **2** |
 
 > **禁止的读法**：上述百分比/计数只是本清单的逐条计数，**不是**「AutoCAD 兼容率」。
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
 > 显式 `Unsupported`/`InvalidInput`。
+
+> **2026-11-24 增补（严格收口 B7a：`PYRAMID` 截断 + `DIMREASSOC` 恢复测量值）**：`PYRAMID` 补上 AutoCAD 的 `Top radius` 截断：typed 行扩为 `PYRAMID [INSCRIBED|CIRCUMSCRIBED] <sides> <cx> <cy> <radius> <height> [<top_radius>]`，modeler seam 新增 `PrimitiveSpec::PyramidNgonFrustum`，顶/底两环复用同一 `ngon_ring` 构造（同一个 authored 平面 B-rep 路径，侧面是顶点形式同一平面内的梯形），仍是同一 `AcDb3dSolid`（一条事务/一步撤销；DXF/DWG 导出路径不变）。`top_radius` 须有限且严格落在 `(0, radius)`：`0` 是 AutoCAD 提示的默认顶点形式并映射到既有 `PyramidNgon`，等于底半径是直棱柱按 `pyramid.equal_radii` 拒绝，越界/负值/非有限按 `pyramid.top_radius` 拒绝，全部写前发生。`DIMREASSOC` 从非关联 no-op 变成真实写：对预选中的每个带文字覆盖（`DIMEDIT TEXT` 同一实体字段）的标注清除覆盖、恢复测量值，逐实体报告 `dimreassoc.restored`，无覆盖者报 `dimreassoc.no_override` 且不写，非标注选择按 `dimreassoc.not_dimension` 在写入前拒绝整批；一条事务/一步撤销，无可写时不建事务（`dimreassoc.unchanged`）。`DIMREASSOCIATE` 保持独立的非关联 no-op（不是 `DIMREASSOC` 的别名）。两者按严格口径晋升**完整实现**：`PYRAMID` 仅剩 `Edge` 拾取与已有多边形作底（交互提示属 ADR 全局范围），`DIMREASSOC` 的源对象关联（`DIMASSOC`）与 `DIMREASSOCIATE` 同为全局范围。计入 **284 完整 + 695 部分 / 979 已实现**；证据仅 Linux Rust 契约（含真实 solidcore 的截断 n 边形体与 DXF 往返），GUI/GPU/像素/真机 NOT RUN。
 
 > **2026-11-24 增补（严格三命令收口：`PYRAMID` / `LAYERSTATESAVE` / `LEADER`+`QLEADER`）**：`PYRAMID` 新增 typed 正则 n 边形底（`PYRAMID [INSCRIBED|CIRCUMSCRIBED] <sides> <cx> <cy> <radius> <height>`），顶点环直接复用 `POLYGON`/`POLYGON CIRCUMSCRIBED` 的同一构造数学，经 modeler seam 新增的 `PrimitiveSpec::PyramidNgon` 走既有的 authored 平面 B-rep 写出，仍是同一 `AcDb3dSolid`（一条事务/一步撤销；`pyramid.sides`/`pyramid.radius`/`pyramid.invalid_point`/`pyramid.degenerate_extent` 写前拒绝）。`LAYERSTATESAVE` 新增 `<name>`/`?` 命令行形式，经同一 `LayerStateSave` 路由落到既有会话层状态存储（32 上限/同名替换/空名由语法拒绝不变；无库写、无修订、无历史）。`LEADER`/`QLEADER` 的 typed 形式补上 `CONTENT MTEXT|BLOCK <name>|TOLERANCE`（与 `MLEADER` 同一创建路径与 DXF 往返，文本可为空），`QLEADER` 另补 `ARROW ON|OFF`（逐线 `LEADER_LINE 40` + 覆盖位 16，往返）与 `MAXPOINTS`（`> 2` 按 `mleader.option_max_points`、`< 2` 按 `qleader.invalid_max_points` 拒绝且不写）。三者均**不晋升**：`PYRAMID` 仍缺 `Top radius` 截断（seam 无 truncated spec）与 `Edge`/已有多边形作底（交互拾取），`LAYERSTATESAVE` 仍缺对话框与 DWG 命名层状态表，`LEADER`/`QLEADER` 仍缺注释 `Copy an object`（MULTILEADER 只有 text/none/block/tolerance，无法表达）。故合计仍为 **282 完整 + 697 部分 / 979 已实现**；证据仅 Linux Rust 契约（含真实 solidcore 的 n 边形体与 DXF 往返），GUI/GPU/像素/真机 NOT VERIFIED。
 
@@ -289,16 +291,16 @@
 
 > **这不是验收，是当前排期与口径。** 本轮目标是把命令从 `部分实现`/具名拒绝推进到支持域内
 > **没有剩余可写缺口**的 `完整实现`；不放宽为“改状态不实现”，也不把 ADR 全局范围缺口算作
-> 单命令完成。当前清单 **287 完整 / 692 部分 / 2 未实现**，只有真正合并且契约测试通过的
+> 单命令完成。当前清单 **289 完整 / 690 部分 / 2 未实现**，只有真正合并且契约测试通过的
 > 命令才改状态。
 
 | 批次 | 范围 | 状态 |
 | --- | --- | --- |
 | M1a 图层/视口 | `LAYLCK`/`LAYULK`/`LAYFRZ`（跨空间选择 + `Vpfreeze`）、`VPMAX`/`VPMIN` 文档对账 | **已合并**（+4 complete） |
-| M1b 3D 图元 | `BOX`/`CONE`/`CYLINDER`/`SPHERE`/`TORUS`/`WEDGE` 的 typed 选项与 `ELEV`；`PYRAMID` 的 typed 正则 n 边形底（复用 `POLYGON` 顶点数学 + 既有 authored B-rep） | **已合并** 6/7；`PYRAMID` 仍 partial：`Top radius` 截断（seam 无 truncated spec）与 `Edge`/已有多边形作底（交互拾取） |
+| M1b 3D 图元 | `BOX`/`CONE`/`CYLINDER`/`SPHERE`/`TORUS`/`WEDGE` 的 typed 选项与 `ELEV`；`PYRAMID` 的 typed 正则 n 边形底（复用 `POLYGON` 顶点数学 + 既有 authored B-rep），2026-11-24 B7a 补上 `Top radius` 截断（`PyramidNgonFrustum`，同一 `ngon_ring` + 同一 authored 平面 B-rep） | **已完成** 7/7；`PYRAMID` 已晋升完整实现，剩余 `Edge`/已有多边形作底属交互提示（ADR 全局范围） |
 | M1c 3D 运算 | `UNION`/`SUBTRACT`/`INTERSECT` 提交前单壳校验、`XEDGES`、`3DORBIT`/`3DPAN` | **已合并**（+6 complete；`3DZOOM` 仍 partial） |
 | M1d 参数管理器 | `PARAMETERS`/`-PARAMETERS`/`PARAMETERSCLOSE` + Parametric→Manage 面板 | **已合并**（+3 complete + 面板） |
-| M1e 全局范围核对 | `-PURGE`（别名无独有缺口）、`DIMDISASSOCIATE`/`DIMREGEN`/`DIMREASSOCIATE`（关联性属全局范围） | **已合并**（+4 complete）；`DIMREASSOC`/`BLOCK?`/`NCOPY`/`MOCORO` 仍 partial（各有真实缺口，见各行；`LAYERPMODE`/`LAYCUR`/`LAYMCH`/`LAYMCUR` 已在 2026-11-24 图层选择收口晋升；`DIMROTATED`/`BTRIM`/`BEXTEND`/`CDORDER` 已在 2026-11-24 严格收口 V 晋升） |
+| M1e 全局范围核对 | `-PURGE`（别名无独有缺口）、`DIMDISASSOCIATE`/`DIMREGEN`/`DIMREASSOCIATE`（关联性属全局范围）；`DIMREASSOC` 的文字恢复补成真实写后也晋升 | **已合并**（+5 complete：`-PURGE`、`DIMDISASSOCIATE`、`DIMREGEN`、`DIMREASSOCIATE`、`DIMREASSOC`）；`BLOCK?`/`NCOPY`/`MOCORO` 仍 partial（各有真实缺口，见各行；`LAYERPMODE`/`LAYCUR`/`LAYMCH`/`LAYMCUR` 已在 2026-11-24 图层选择收口晋升；`DIMROTATED`/`BTRIM`/`BEXTEND`/`CDORDER` 已在 2026-11-24 严格收口 V 晋升） |
 | M1f 2D 小缺口 | `TEXTALIGN`/`TCIRCLE`/`DONUT`/`HATCHGENERATEBOUNDARY`/`ADDSELECTED`/`GETSEL`/`MEASUREGEOM`/`CENTERMARK`/`CENTERLINE` | **已合并**（+9 complete；CENTERMARK/CENTERLINE 的普通 LINE 非关联模型是声明边界） |
 | M1g 2D 严格收口 II | `CHPROP`（typed 属性列表）、`BREAKATPOINT`（CIRCLE/整椭圆/椭圆弧/开放 SPLINE/闭合 LWPOLYLINE）；`CHANGE`/`FLATTEN` 扩写但仍有具名缺口 | **已合并**（+2 complete；`CHANGE` 的 change-point 与 `FLATTEN` 的 3D/派生显示缺口见各行） |
 | M2 块属性 | ADR-0055：ATTDEF/ATTRIB 模型、minor 14、DXF/渲染/命令/面板 | **已合并**（+13 complete；ATTIN/ATTOUT/ATTEXT/EATTEXT 文件 lane 仍 partial） |
@@ -317,6 +319,7 @@
 | M1r 命名视图持久化 | `tables/views.json`（minor 18）、`VIEW`/`-VIEW`/`VIEWGO`/`NEWVIEW` 保存/删除/恢复/撤销、DXF/DWG `VIEW` 表往返、pan/orbit 导航历史 | **已合并**（+4 complete；`VIEWBACK`/`VIEWFORWARD` 仍 partial） |
 | M1s 2D 收口 V | `CDORDER` 逐绘制顺序范围重排、`BTRIM`/`BEXTEND` 复用 TRIM/EXTEND 目标派发、`DIMROTATED` 文字覆盖 + 对象选择形式 | **已合并**（+4 complete；交互提示仍属全局范围） |
 | M1t 图层选择收口 | `LAYCUR`/`LAYMCH`/`-LAYMCH`/`LAYMCUR` 支持模型空间与图纸布局的顶层对象（含顶层 INSERT）；`LAYERPMODE` 改为文档头设置并持久化（只有 OFF 写入 `document.json`，旧档逐字节不变） | **已合并**（+5 complete；嵌套块成员/块定义成员/子图元仍按名拒绝，交互 Select objects 属全局范围） |
+| M1u 严格收口 B7a | `PYRAMID` 的 `Top radius` 截断（`PyramidNgonFrustum` + 同一 `ngon_ring`/authored 平面 B-rep，`0`=顶点、等半径 `pyramid.equal_radii`、越界 `pyramid.top_radius`）；`DIMREASSOC` 恢复被覆盖的标注文字到测量值（预选、逐实体报告、无覆盖不写、非标注写前拒绝、一条事务/一步撤销） | **已合并**（+2 complete；`PYRAMID` 剩余 `Edge`/已有多边形作底与 `DIMREASSOC` 的源对象关联同为 ADR 全局范围） |
 | M5 其他面板 | 发布/传递/标准/CUI/点云/PDF 底图 | 分析完成；多数是 `L`/架构级缺口，按 ADR/子系统逐个评估 |
 
 **已明确的诚实缺口**：`ARCHIVE`、`STANDARDS`、`CHECKSTANDARDS`、全部 `CUI*`、`CUSTOMIZE` 仍是
@@ -691,7 +694,7 @@
 | `DIMORDINATE` | 已实现 | — |
 | `DIMOVERRIDE` | 部分实现 | 闭集的实体快照变量（新增 `DIMTXSTY <name>`，按 `resolve_dim_style` 精确→大小写不敏感解析，未知名 `dimoverride.bad_value` 绝不静默回退 Standard，导出可往返）；未知/仅表/坏值/未实现值分别具名拒绝；一条事务/一步撤销 | `DIMCLRD/RE/RT`（标注显示无逐图元颜色）、`DIMJUST/DIMATFIT/DIMTIX/DIMTOFL/DIMTIH/DIMTOH`（无文字适配模型）、`DIMDLE`/`DIMSCALE`（无快照槽）、`DIMCONTINUEMODE`（图纸级）按名拒绝 |
 | `DIMRADIUS` | 已实现 | — |
-| `DIMREASSOC` | 部分实现 | Express Tool「恢复被覆盖/修改的标注文字到测量值」未实现：当前返回非关联 no-op（`dimreassoc.non_associative`）且不改变状态；标注文字覆盖（DIMEDIT 组 1）已建模，因此这是真实可写缺口，不是关联性全局范围 |
+| `DIMREASSOC` | 完整实现 | 真实写（2026-11-24）：对预选中的每个带文字覆盖的标注清除覆盖（与 `DIMEDIT TEXT` 同一实体字段）以恢复测量值，逐实体 `dimreassoc.restored`；无覆盖者报 `dimreassoc.no_override` 且不写；非标注选择按 `dimreassoc.not_dimension` 在写入前拒绝整批；一条事务/一步撤销，无可写时不建事务（`dimreassoc.unchanged`）；Work-only（Viewer 拒绝）。关联性（`DIMASSOC`）与 `DIMREASSOCIATE` 同为 ADR 全局范围，不是该命令的独立缺口 |
 | `DIMREASSOCIATE` | 完整实现 | payload-free；本构建标注全部非关联（关联性属 ADR 全局范围），`dimreassociate.non_associative` 且不改变任何状态；无对象/点关联可建立即该命令语义的全部 |
 | `DIMREGEN` | 完整实现 | payload-free；本构建标注全部非关联（关联性属 ADR 全局范围），`dimregen.non_associative` 且不改变任何状态；无关联标注可重算即该命令语义的全部 |
 | `DIMROTATED` | 已实现 | 三点拾取（两原点 + 尺寸线位置）+ 会话 `dimRotation`（度，任意有限值，不回绕/不归一化）+ 可选文字覆盖（与 `DIMEDIT TEXT` 同一字段/校验）+ 对象选择形式（开放 LINE/ARC/椭圆弧/SPLINE/LWPOLYLINE 取端点；CIRCLE/整椭圆取尺寸线方向两个极值点）；非关联；一条事务/一步撤销；交互角度/对象提示属全局范围 |
@@ -1032,7 +1035,7 @@
 | `PURGEAECDATA` | 部分实现 | 只读能力报告：本构建不导入/建模 AEC 对象，无 AEC 数据可清理（`purgeaecdata.no_aec_model`）；不写库。 |
 | `PUSHTODOCSCLOSE` | 部分实现 | 具名拒绝（`pushtodocsclose.unsupported: no Autodesk Docs connector model`）。 |
 | `PUSHTODOCSOPEN` | 部分实现 | 具名拒绝（`pushtodocsopen.unsupported: no Autodesk Docs connector model`）。 |
-| `PYRAMID` | 部分实现 | 显式三点（正方形底面对角点/顶点）与 typed 正则 n 边形底（`PYRAMID [INSCRIBED\|CIRCUMSCRIBED] <sides> <cx> <cy> <radius> <height>`，复用 `POLYGON` 顶点数学）→ 同一 `AcDb3dSolid`（`Body3d{Solid,Exact}` + 显示网格/边线）；`ELEV` 决定底面 z；`pyramid.sides`/`pyramid.radius`/`pyramid.invalid_point`/`pyramid.degenerate_extent` 与正方形底的 `pyramid.invalid_base`/`pyramid.base_not_coplanar` 写前拒绝；一条事务/一步撤销。仍缺：`Top radius` 截断（seam 无 truncated spec）、`Edge` 与已有多边形作底（交互拾取）；交互提示/布尔属全局范围/其它命令。 |
+| `PYRAMID` | 完整实现 | 显式三点（正方形底面对角点/顶点）与 typed 正则 n 边形底（`PYRAMID [INSCRIBED\|CIRCUMSCRIBED] <sides> <cx> <cy> <radius> <height> [<top_radius>]`，复用 `POLYGON` 顶点数学）→ 同一 `AcDb3dSolid`（`Body3d{Solid,Exact}` + 显示网格/边线）；`ELEV` 决定底面 z；`top_radius` 截断经 seam 的 `PyramidNgonFrustum` 走出同一 authored 平面 B-rep（两环同一 `ngon_ring`，侧面梯形），`0`=顶点、等于底半径按 `pyramid.equal_radii`、越界/负/非有限按 `pyramid.top_radius` 写前拒绝；另有 `pyramid.sides`/`pyramid.radius`/`pyramid.invalid_point`/`pyramid.degenerate_extent` 与正方形底的 `pyramid.invalid_base`/`pyramid.base_not_coplanar`；一条事务/一步撤销。剩余 `Edge` 拾取与已有多边形作底属交互提示（ADR 全局范围）；布尔属其它命令。 |
 | `QDIM` | 已实现 | `Continuous`/`Staggered`/`Baseline`/`Ordinate`/`Radius`/`Diameter` + `Datum Point`/`Edit`/`Settings`；Staggered 步长 = `DIMDLI`（声明）；Ordinate 基准默认 `(0,0,0)`；不支持项逐条 `qdim.skipped`；一条事务/一步撤销；角度不是 QDIM 模式 |
 | `QLATTACH` | 部分实现 | 具名拒绝（`qlattach.unsupported`）：本构建无 QLEADER 注释附着模型。 |
 | `QLATTACHSET` | 部分实现 | 具名拒绝（`qlattachset.unsupported`）：本构建无 QLEADER 注释附着模型。 |
@@ -1616,7 +1619,7 @@
 | 299 | `DIMORDINATE` | 已实现 | Creates ordinate dimensions. | — |
 | 300 | `DIMOVERRIDE` | 部分实现 | Controls overrides of system variables used in selected dimensions. | 闭集的实体快照变量；未知变量/仅表变量/坏值/未实现值分别具名拒绝；一条事务/一步撤销；不改样式表 |
 | 301 | `DIMRADIUS` | 已实现 | Creates a radius dimension for a circle or an arc. | — |
-| 302 | `DIMREASSOC` | 部分实现 | Restores the measured value to overridden or modified dimension text. | Express Tool「恢复被覆盖/修改的标注文字到测量值」未实现：返回非关联 no-op（`dimreassoc.non_associative`）；标注文字覆盖（DIMEDIT 组 1）已建模 ⇒ 真实可写缺口，不属于关联性全局范围 |
+| 302 | `DIMREASSOC` | 完整实现 | Restores the measured value to overridden or modified dimension text. | 真实写：预选中带文字覆盖的标注清除覆盖（`DIMEDIT` 组 1 同一字段）恢复测量值，`dimreassoc.restored` 逐实体报告；无覆盖者 `dimreassoc.no_override` 不写；非标注 `dimreassoc.not_dimension` 写入前拒绝整批；一条事务/一步撤销，无可写时不建事务；Work-only。关联性属 ADR 全局范围 |
 | 303 | `DIMREASSOCIATE` | 完整实现 | Associates or reassociates selected dimensions to objects or points on objects. | payload-free；本构建标注全部非关联（关联性属 ADR 全局范围），`dimreassociate.non_associative` 且不改变任何状态；无对象/点关联可建立即该命令语义的全部 |
 | 304 | `DIMREGEN` | 完整实现 | Updates the locations of all associative dimensions. | payload-free；本构建标注全部非关联（关联性属 ADR 全局范围），`dimregen.non_associative` 且不改变任何状态；无关联标注可重算即该命令语义的全部 |
 | 305 | `DIMROTATED` | 已实现 | Creates a rotated linear dimension. | 三点拾取或对象选择 + 会话 `dimRotation` 角度 + 可选文字覆盖；非关联；一条事务/一步撤销；交互角度/对象提示属全局范围 |
@@ -2002,7 +2005,7 @@
 | 685 | `PURGEAECDATA` | 部分实现 | Removes the invisible AEC data (AutoCAD Architecture and AutoCAD Civil 3D custom objects) in the drawing at the Command prompt. | 只读能力报告：本构建不导入/建模 AEC 对象，无 AEC 数据可清理（`purgeaecdata.no_aec_model`）；不写库。 |
 | 686 | `PUSHTODOCSCLOSE` | 部分实现 | Closes the Push to Autodesk Docs palette. | 具名拒绝（`pushtodocsclose.unsupported: no Autodesk Docs connector model`）。 |
 | 687 | `PUSHTODOCSOPEN` | 部分实现 | Opens the Push to Autodesk Docs palette where you can select AutoCAD layouts to upload as PDFs to Autodesk Docs. | 具名拒绝（`pushtodocsopen.unsupported: no Autodesk Docs connector model`）。 |
-| 688 | `PYRAMID` | 部分实现 | Creates a 3D solid pyramid. | 显式三点与 typed 正则 n 边形底（`PYRAMID [INSCRIBED\|CIRCUMSCRIBED] <sides> <cx> <cy> <radius> <height>`，复用 `POLYGON` 顶点数学）→ 同一 `AcDb3dSolid`；`ELEV` 定底面 z；写前具名拒绝（`pyramid.sides`/`radius`/`invalid_point`/`degenerate_extent`/`invalid_base`/`base_not_coplanar`）；一条事务/一步撤销。仍缺：`Top radius` 截断（seam 无 truncated spec）、`Edge`/已有多边形作底（交互拾取）；布尔是其它命令。 |
+| 688 | `PYRAMID` | 完整实现 | Creates a 3D solid pyramid. | 显式三点与 typed 正则 n 边形底（`PYRAMID [INSCRIBED\|CIRCUMSCRIBED] <sides> <cx> <cy> <radius> <height> [<top_radius>]`，复用 `POLYGON` 顶点数学）→ 同一 `AcDb3dSolid`；`ELEV` 定底面 z；`top_radius` 截断经 `PyramidNgonFrustum` 走出同一 authored 平面 B-rep（两环同一构造，侧面梯形），`0`=顶点、等于底半径 `pyramid.equal_radii`、越界/负/非有限 `pyramid.top_radius`；一条事务/一步撤销。`Edge`/已有多边形作底是交互提示（ADR 全局范围）；布尔是其它命令。 |
 | 689 | `QCCLOSE` | 已实现 | Closes the QuickCalc calculator. | 关闭 QUICKCALC 浮窗（幂等成功） |
 | 690 | `QDIM` | 已实现 | Creates a series of dimensions quickly from selected objects. | `Continuous`/`Staggered`/`Baseline`/`Ordinate`/`Radius`/`Diameter` + `Datum Point`/`Edit`/`Settings`；Staggered 步长 = `DIMDLI`（声明）；Ordinate 基准默认 `(0,0,0)`；不支持项逐条 `qdim.skipped`；一条事务/一步撤销；角度不是 QDIM 模式 |
 | 691 | `QLATTACH` | 部分实现 | Attaches a leader line to an mtext, tolerance, or block reference object. | 具名拒绝（`qlattach.unsupported`）：无 QLEADER 注释附着模型。 |

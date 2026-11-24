@@ -782,7 +782,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
 | -STYLE | **只读报告 v1（2026-11-09）**：与 `STYLE` 同一列表，使用 `-style.entry` + `-style.summary`；本构建的**独立选择子**（不是别名）；Viewer-legal | 编辑文字样式 NOT IMPLEMENTED | 只读，无写 |
 | MLEADERSTYLE | **只读报告 v1（2026-11-09）**：列出 `drawing.mleader_styles()`（名称/content type/字高/箭头/文字样式，`mleaderstyle.entry` + `mleaderstyle.summary`）；Viewer-legal | 创建、修改或设当前样式 NOT IMPLEMENTED；没有样式对话框 | 只读，无写 |
 | BLOCK? | **只读报告 v1（2026-11-09）**：列出 `drawing.blocks()` 每个块定义的名称与成员数（`block.entry` + `block.summary`）；Viewer-legal | 只读列表，不是块编辑器；不列嵌套/xref/XDATA | 只读，无写 |
-| DIMREASSOC | **部分实现**：`dimreassoc.non_associative`；不写库/不升修订/不入历史，Viewer-legal | Express Tool「恢复被覆盖/修改的标注文字到测量值」未实现：标注文字覆盖（`DIMEDIT` 组 1）已建模，本命令却不恢复测量值 ⇒ **真实可写缺口**，不是关联性全局范围 | no-op，无写 |
+| DIMREASSOC | **完整实现（2026-11-24）**：真实写；对预选中的每个带文字覆盖的标注清除覆盖（与 `DIMEDIT TEXT` 同一实体字段）以恢复测量值，`dimreassoc.restored` 逐实体报告；无覆盖者 `dimreassoc.no_override` 且不写；非标注选择 `dimreassoc.not_dimension` 在写入前拒绝整批；一条事务/一步撤销，无可写时不建事务（`dimreassoc.unchanged`）；Work-only | 无交互 Select objects（预选即输入）；源对象关联（`DIMASSOC`）与 `DIMREASSOCIATE` 同为 ADR 全局范围；`DIMREASSOCIATE` 仍是独立 no-op，不是别名 | 写实体行（文字覆盖清除），一条事务/一步撤销 |
 | DIMREASSOCIATE | **完整实现（2026-11-24）**：`dimreassociate.non_associative`；关联性属 ADR 全局范围（本构建标注全部非关联），无对象/点关联可建立即该命令语义的全部；不写库/不升修订/不入历史，Viewer-legal | 无交互 Select objects；关联性（`DIMASSOC=2`）属全局范围，不是该命令的独立缺口 | no-op，无写 |
 | DIMJOGGED | **具名拒绝 v1（2026-11-09）**：`dimjogged.unsupported: the dimension domain stores no jog field`；Viewer-legal | 标注域不存储折弯字段：不创建折弯标注 | 拒绝，无写 |
 | DIMINSPECT | **具名拒绝 v1（2026-11-09）**：`diminspect.unsupported: the dimension domain stores no inspection data`；Viewer-legal | 标注域不存储检验数据 | 拒绝，无写 |
@@ -1944,7 +1944,9 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 > `face_sources` 由 `BrepTessellator` 写入 `brep:face:<shell>/<face>`、`VSCURRENT` 成为真实会话级
 > 3D body 视觉样式（默认 SHADED）。**仍未实现**：AutoCAD 的交互式尺寸提示、圆角/抽壳、曲面**面显示**
 > （P2.1c）与 `SURFACE` 家族（P2.2）；曲面 lift/曲面布尔自 **P2.1b（2026-11-17）** 起已可用，倒角
-> 自 P2.0 起可用。**代码事实**：只有 Linux 的 **`native-below`**（原生 Wayland）
+> 自 P2.0 起可用。**2026-11-24 严格收口 B7a**：`PYRAMID` 的 `Top radius` 截断经
+> `PrimitiveSpec::PyramidNgonFrustum`（同一 `ngon_ring`/同一 authored 平面 B-rep）接线，`PYRAMID`
+> 晋升完整实现；剩余 `Edge`/已有多边形作底与交互式尺寸提示仍属 ADR 全局范围。**代码事实**：只有 Linux 的 **`native-below`**（原生 Wayland）
 > 会话注入模型器；Linux `dom-canvas`（X11/XWayland，其 CAD 会话在 WebView 里是 wasm）、Web、
 > Windows、macOS、Android **不注入**，七条图元命令与三条布尔命令都按
 > `unsupported-runtime: solid-modeler` 具名拒绝；无模型器的载体上 `MASSPROP` 对 body 按
@@ -1963,7 +1965,7 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 | `SPHERE` | **完整实现**：显式两点 + typed `Diameter`/`2P`（`2P` 保留自身 z）；一条事务/一步撤销 | 交互提示/布尔属 ADR 全局范围；无模型器载体 `unsupported-runtime: solid-modeler`；证据仅 Linux 契约，GPU/像素 NOT VERIFIED |
 | `TORUS` | **完整实现**：显式三点 + typed plan ring `Radius`/`Diameter`/`2P` + tube `Radius`/`Diameter`/`2P`；plan 基面取会话 `ELEV`；次半径须小于主半径；一条事务/一步撤销 | 交互提示/布尔属 ADR 全局范围；无模型器载体 `unsupported-runtime: solid-modeler`；证据仅 Linux 契约，GPU/像素 NOT VERIFIED |
 | `WEDGE` | **完整实现**：显式三点 + typed `Cube`/`Center`+corner/`Center`+`Length`/`Length`；plan 基面取会话 `ELEV`；高面固定在最小 x 一侧；一条事务/一步撤销 | 交互提示/布尔属 ADR 全局范围；无模型器载体 `unsupported-runtime: solid-modeler`；证据仅 Linux 契约，GPU/像素 NOT VERIFIED |
-| `PYRAMID` | **部分实现**：显式三点（正方形底面对角点、顶点）与 typed 正则 n 边形底（`PYRAMID [INSCRIBED\|CIRCUMSCRIBED] <sides> <cx> <cy> <radius> <height>`；顶点环复用 `POLYGON`/`POLYGON CIRCUMSCRIBED` 同一构造数学，`ELEV` 定底面 z）创建同一 `AcDb3dSolid`（`Body3d{Solid,Exact}` + 显示网格/边线）；一条事务/一步撤销；写前具名拒绝 `pyramid.sides`/`pyramid.radius`/`pyramid.invalid_point`/`pyramid.degenerate_extent`/`pyramid.invalid_base`/`pyramid.base_not_coplanar` | **未实现**：`Top radius` 截断（modeler seam 无 truncated spec）、`Edge` 与已有多边形作底（交互拾取）、交互式尺寸提示、布尔运算（C2）；无模型器载体 `unsupported-runtime: solid-modeler`；证据仅 Linux 契约（真实 solidcore 的 n 边形体 + DXF 往返），GPU/像素/真机 NOT VERIFIED |
+| `PYRAMID` | **完整实现（2026-11-24）**：显式三点（正方形底面对角点、顶点）与 typed 正则 n 边形底（`PYRAMID [INSCRIBED\|CIRCUMSCRIBED] <sides> <cx> <cy> <radius> <height> [<top_radius>]`；顶点环复用 `POLYGON`/`POLYGON CIRCUMSCRIBED` 同一构造数学，`ELEV` 定底面 z）创建同一 `AcDb3dSolid`（`Body3d{Solid,Exact}` + 显示网格/边线）；`Top radius` 截断经 seam 的 `PrimitiveSpec::PyramidNgonFrustum` 走出同一 authored 平面 B-rep（顶/底两环同一 `ngon_ring`，侧面为梯形）；一条事务/一步撤销；写前具名拒绝 `pyramid.sides`/`pyramid.radius`/`pyramid.invalid_point`/`pyramid.degenerate_extent`/`pyramid.invalid_base`/`pyramid.base_not_coplanar`，以及 `0`=顶点、等于底半径 `pyramid.equal_radii`、越界/负/非有限 `pyramid.top_radius` | **全局范围（不是本命令缺口）**：`Edge` 与已有多边形作底是交互提示、交互式尺寸提示；布尔运算属其它命令。无模型器载体 `unsupported-runtime: solid-modeler`；证据仅 Linux 契约（真实 solidcore 的 n 边形/截断 n 边形体 + DXF 往返），GPU/像素/真机 NOT VERIFIED |
 | `POLYSOLID` | **部分实现（具名拒绝）**：`polysolid.unsupported: 3D solid primitives are not implemented` | 不写库/不升修订/不入历史 |
 | `EXTRUDE` | **部分实现（具名拒绝）**：`extrude.unsupported: 3D extrusion is not implemented` | 不写库/不升修订/不入历史 |
 | `REVOLVE` | **部分实现（具名拒绝）**：`revolve.unsupported: 3D revolution is not implemented` | 不写库/不升修订/不入历史 |

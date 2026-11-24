@@ -50,9 +50,11 @@ mod dimension;
 mod dimension_angular;
 mod dimension_chain;
 mod dimension_edit;
+// `DIMREASSOC`: restore the measured value by clearing the text override.
 mod dimension_ordinate;
 mod dimension_override;
 mod dimension_qdim;
+mod dimension_reassoc;
 mod dimension_rotated;
 mod dimension_space;
 mod dimension_style;

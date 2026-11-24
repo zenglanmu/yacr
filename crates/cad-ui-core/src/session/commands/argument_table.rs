@@ -63,7 +63,7 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     DASH_ARRAY_SELECTOR,
     ARRAYCLASSIC_SELECTOR,
     MEASUREGEOM_SELECTOR,
-    // `PYRAMID [INSCRIBED|CIRCUMSCRIBED] <sides> <cx> <cy> <radius> <height>`:
+    // `PYRAMID [INSCRIBED|CIRCUMSCRIBED] <sides> <cx> <cy> <radius> <height> [<top_radius>]`:
     // the one typed 3D-primitive line (its polygon base is the `POLYGON` ring).
     PYRAMID_SELECTOR,
     JUSTIFYTEXT_SELECTOR,

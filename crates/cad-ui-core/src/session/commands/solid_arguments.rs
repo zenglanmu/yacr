@@ -9,7 +9,7 @@
 //! the `POLYGON` command's own:
 //!
 //! ```text
-//! PYRAMID [INSCRIBED|I|CIRCUMSCRIBED|C] <sides> <cx> <cy> <radius> <height>
+//! PYRAMID [INSCRIBED|I|CIRCUMSCRIBED|C] <sides> <cx> <cy> <radius> <height> [<top_radius>]
 //! ```
 //!
 //! * the optional word is the same inscribed/circumscribed choice `POLYGON` and
@@ -17,28 +17,34 @@
 //! * `<sides>` is an ASCII integer (the command layer owns the `3..=1024` bound
 //!   and refuses an out-of-range count with `pyramid.sides`);
 //! * `<cx> <cy>` is the base centre on the plan (its z is the session `ELEV`),
-//!   `<radius>` the base radius and `<height>` the pyramid height.
+//!   `<radius>` the base radius, `<height>` the pyramid height and the trailing
+//!   optional `<top_radius>` AutoCAD's `Top radius` truncation (`0` is the
+//!   documented apex; the command layer owns the `(0, radius)` bound).
 //!
 //! The parser only decides whether the line is inside that grammar; the
 //! application validates the values and owns every refusal, so a malformed line
 //! is `pyramid.argument` and an out-of-range one is the named
-//! `pyramid.sides` / `pyramid.radius` / `pyramid.degenerate_extent`. A bare
-//! `PYRAMID` never reaches here and keeps its "needs points" refusal.
+//! `pyramid.sides` / `pyramid.radius` / `pyramid.top_radius` /
+//! `pyramid.equal_radii` / `pyramid.degenerate_extent`. A bare `PYRAMID` never
+//! reaches here and keeps its "needs points" refusal.
 
 use cad_app::{CommandId, CommandPayload, ExtendedCommandId, SolidPrimitiveCommand};
 
 use crate::session::CadSession;
 
-/// `PYRAMID [INSCRIBED|CIRCUMSCRIBED] <sides> <cx> <cy> <radius> <height>`.
+/// `PYRAMID [INSCRIBED|CIRCUMSCRIBED] <sides> <cx> <cy> <radius> <height> [<top_radius>]`.
 pub const PYRAMID_SELECTOR: &str = "PYRAMID";
 
 /// Parse the typed polygon-base `PYRAMID` line.
 ///
 /// Returns `None` for anything outside the grammar: a missing or extra token, a
 /// non-integer side count (a fractional/decimal count is refused rather than
-/// rounded), and any non-decimal coordinate, radius or height. The
-/// inscribed/circumscribed word may be `INSCRIBED`/`I` or `CIRCUMSCRIBED`/`C`
-/// (case-insensitive); every other leading word is outside the grammar.
+/// rounded), and any non-decimal coordinate, radius, height or top radius. The
+/// optional trailing top radius is the truncation field; the command layer
+/// decides whether the value is the apex (`0`) or an out-of-range refusal.
+/// The inscribed/circumscribed word may be `INSCRIBED`/`I` or
+/// `CIRCUMSCRIBED`/`C` (case-insensitive); every other leading word is outside
+/// the grammar.
 pub fn parse_pyramid_argument(argument: &str) -> Option<SolidPrimitiveCommand> {
     let mut tokens = argument.split_whitespace();
     let first = tokens.next()?;
@@ -58,6 +64,10 @@ pub fn parse_pyramid_argument(argument: &str) -> Option<SolidPrimitiveCommand> {
     for slot in &mut values {
         *slot = super::arguments::parse_signed_decimal(tokens.next()?)?;
     }
+    let top_radius = match tokens.next() {
+        Some(token) => Some(super::arguments::parse_signed_decimal(token)?),
+        None => None,
+    };
     if tokens.next().is_some() {
         return None;
     }
@@ -67,6 +77,7 @@ pub fn parse_pyramid_argument(argument: &str) -> Option<SolidPrimitiveCommand> {
         sides,
         circumscribed,
         height: values[3],
+        top_radius,
     })
 }
 
@@ -74,7 +85,7 @@ pub fn parse_pyramid_argument(argument: &str) -> Option<SolidPrimitiveCommand> {
 pub fn invalid_pyramid_argument_reason(text: &str) -> String {
     format!(
         "unsupported CAD command: {} (PYRAMID takes `[INSCRIBED|CIRCUMSCRIBED] <sides> <cx> <cy> \
-         <radius> <height>` or a `Solid`/`Points` payload; nothing was written)",
+         <radius> <height> [<top_radius>]` or a `Solid`/`Points` payload; nothing was written)",
         text.trim()
     )
 }

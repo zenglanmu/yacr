@@ -146,9 +146,10 @@ pub enum ExtendedCommandId {
     MLeaderStyleList,
     /// `BLOCK?`: read-only list of block definitions and their member counts.
     BlockList,
-    /// `DIMREASSOC`: non-associative no-op report.
+    /// `DIMREASSOC`: restores the measured value to overridden dimension text
+    /// (clears the stored text override on the selected dimensions; Work-only).
     DimReassoc,
-    /// `DIMREASSOCIATE`: the same no-op report under its own code.
+    /// `DIMREASSOCIATE`: the non-associative no-op report under its own code.
     DimReassociate,
 
     // -- Wave 3: named refusals (app_extended_refusals3) ---------------------
@@ -784,11 +785,13 @@ pub enum ExtendedCommandId {
     Wedge,
     /// `PYRAMID`: creates one exact `Body3d` from two base corners and an apex,
     /// or from the typed regular n-gon base
-    /// (`PYRAMID [INSCRIBED|CIRCUMSCRIBED] <sides> <cx> <cy> <radius> <height>`,
-    /// Work-only). The n-gon ring reuses the `POLYGON` construction math and the
-    /// seam's `PyramidNgon` spec. AutoCAD's `Edge` (interactive pick) and
-    /// `Top radius` truncation are not modelled (no truncated seam spec), so the
-    /// command stays partial.
+    /// (`PYRAMID [INSCRIBED|CIRCUMSCRIBED] <sides> <cx> <cy> <radius> <height>
+    /// [<top_radius>]`, Work-only). The n-gon ring reuses the `POLYGON`
+    /// construction math and the seam's `PyramidNgon` spec; a non-zero
+    /// `top_radius` smaller than the base radius builds the truncated body through
+    /// the same authored planar B-rep (`PyramidNgonFrustum`). AutoCAD's `Edge`
+    /// (interactive pick) and base-from-existing-polygon prompts are interactive
+    /// (ADR global scope).
     Pyramid,
     /// `POLYSOLID`: 3D solid primitives are not implemented.
     PolySolid,

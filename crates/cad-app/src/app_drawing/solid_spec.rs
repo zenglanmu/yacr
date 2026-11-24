@@ -34,10 +34,9 @@
 //!   **not** modelled, because the modeler seam has no oriented-axis or
 //!   elliptical primitive. `PYRAMID`'s regular `n`-gon base is modelled
 //!   ([`SolidPrimitiveCommand::PyramidPolygon`], reusing the `POLYGON` ring
-//!   math); its `Edge` base pick and `Top radius` truncation are not — the
-//!   former is an interactive-prompt branch, the latter has no truncated
-//!   pyramid spec in the seam, so both are refused by absence rather than
-//!   approximated.
+//!   math) together with its `Top radius` truncation; its `Edge` base pick and
+//!   the base-from-an-existing-polygon prompt are interactive-prompt branches
+//!   (ADR global scope) and are refused by absence rather than approximated.
 
 use super::*;
 use crate::command_payload::{PlanCircle, PlanLength, SolidPrimitiveCommand};
@@ -210,8 +209,14 @@ fn wedge_points(points: &[Point3]) -> CadResult<(Point3, f64, f64, f64)> {
 /// ([`crate::draw_tool::polygon_vertices`] /
 /// [`crate::draw_tool::circumscribed_polygon_vertices`]) to place the ring, then
 /// passes the ring's own vertex radius and first-vertex angle to the modeler
-/// seam, so the base vertices are exactly what `POLYGON` would draw. The
-/// truncation (`Top radius`) has no seam spec and is refused by absence.
+/// seam, so the base vertices are exactly what `POLYGON` would draw.
+///
+/// The optional `top_radius` is AutoCAD's `Top radius` truncation: the top ring
+/// is the same construction at the scaled vertex radius, so the body is one
+/// authored planar B-rep (the side faces share the apex form's planes). `0` is
+/// the prompt's documented default apex and maps to the apex spec; a value equal
+/// to the base radius is a straight prism and is refused by name
+/// (`pyramid.equal_radii`), and a larger one is `pyramid.top_radius`.
 fn pyramid_spec(input: &SolidPrimitiveCommand, elevation: f64) -> CadResult<PrimitiveSpec> {
     let kind = PrimitiveKind::Pyramid;
     if let SolidPrimitiveCommand::PyramidPolygon {
@@ -220,6 +225,7 @@ fn pyramid_spec(input: &SolidPrimitiveCommand, elevation: f64) -> CadResult<Prim
         sides,
         circumscribed,
         height,
+        top_radius,
     } = input
     {
         let [x, y] = *base;
@@ -262,12 +268,60 @@ fn pyramid_spec(input: &SolidPrimitiveCommand, elevation: f64) -> CadResult<Prim
         })?;
         let vertex_radius = planar_distance(centre, first);
         let rotation = (first.y - centre.y).atan2(first.x - centre.x);
-        return Ok(PrimitiveSpec::PyramidNgon {
-            base_center: centre,
-            radius: vertex_radius,
-            sides: *sides,
-            rotation,
-            height: require_extent(kind, "height", *height)?,
+        let height = require_extent(kind, "height", *height)?;
+        // AutoCAD's `Top radius`: `0` is the documented default apex, a value
+        // strictly inside `(0, radius)` truncates, and a value at/above the base
+        // radius has no top ring this command can draw (a straight prism is not
+        // a pyramid). The top ring is the *same* construction scaled by the
+        // typed radii ratio, so an inscribed/circumscribed base keeps its ring
+        // kind on both ends.
+        let top_vertex_radius = match *top_radius {
+            None => None,
+            Some(top) if !top.is_finite() => {
+                return Err(CadError::InvalidInput(format!(
+                    "pyramid.top_radius: the top radius must be finite, got {top}"
+                )))
+            }
+            Some(0.0) => None,
+            Some(top) if top < 0.0 => {
+                return Err(CadError::InvalidInput(format!(
+                    "pyramid.top_radius: the top radius must be positive (0 is the apex), got \
+                     {top}"
+                )))
+            }
+            Some(top) => {
+                if (top - radius).abs() <= 1e-12 * radius.max(1.0) {
+                    return Err(CadError::InvalidInput(format!(
+                        "pyramid.equal_radii: the top radius {top} equals the base radius \
+                         {radius}; that is a straight prism, not a pyramid (use EXTRUDE or \
+                         POLYSOLID)"
+                    )));
+                }
+                if top > *radius {
+                    return Err(CadError::InvalidInput(format!(
+                        "pyramid.top_radius: the top radius {top} must be smaller than the base \
+                         radius {radius}"
+                    )));
+                }
+                Some(vertex_radius * (top / radius))
+            }
+        };
+        return Ok(match top_vertex_radius {
+            None => PrimitiveSpec::PyramidNgon {
+                base_center: centre,
+                radius: vertex_radius,
+                sides: *sides,
+                rotation,
+                height,
+            },
+            Some(top_radius) => PrimitiveSpec::PyramidNgonFrustum {
+                base_center: centre,
+                radius: vertex_radius,
+                top_radius,
+                sides: *sides,
+                rotation,
+                height,
+            },
         });
     }
     let SolidPrimitiveCommand::Points(points) = input else {

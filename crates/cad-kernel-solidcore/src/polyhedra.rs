@@ -2,18 +2,20 @@
 //!
 //! `solidcore` has constructors for the cylinder, sphere, cone and torus but
 //! **none for the wedge**, and its pyramid takes a square base only, so the
-//! wedge and every pyramid (square or regular `n`-gon base) are authored here as
-//! exact neutral B-rep data: every face is a plane, every boundary curve a
-//! straight line, so the body lifts to a kernel record without loss (and the
-//! modeler lifts it once to prove the kernel accepts it before handing it out).
+//! wedge and every pyramid (square, regular `n`-gon, and the truncated `n`-gon)
+//! are authored here as exact neutral B-rep data: every face is a plane, every
+//! boundary curve a straight line, so the body lifts to a kernel record without
+//! loss (and the modeler lifts it once to prove the kernel accepts it before
+//! handing it out).
 //!
 //! Every face is wound counter-clockwise seen from outside the material, which is
 //! what makes the record's shell normals point out of the material and the
 //! resulting solid volume positive. Face ids are sequential in authoring order.
 //!
 //! Volumes are the closed forms the unit tests assert against: `l·w·h` (box),
-//! `l·w·h/2` (wedge, a right triangular prism), `s²·h/3` (square pyramid) and
-//! `(n/2)·r²·sin(2π/n)·h/3` (regular `n`-gon pyramid).
+//! `l·w·h/2` (wedge, a right triangular prism), `s²·h/3` (square pyramid),
+//! `(n/2)·r²·sin(2π/n)·h/3` (regular `n`-gon pyramid) and
+//! `(n/2)·sin(2π/n)·h·(r² + r·r_top + r_top²)/3` (truncated `n`-gon pyramid).
 
 use cad_domain::{BrepCurve, BrepData, BrepFace, BrepLoop, BrepShell, BrepSurface, Point3};
 
@@ -210,17 +212,7 @@ pub fn pyramid_ngon_brep(
     height: f64,
 ) -> BrepData {
     let n = sides as usize;
-    let step = std::f64::consts::TAU / f64::from(sides);
-    let mut corners = Vec::with_capacity(n + 1);
-    for index in 0..n {
-        let angle = rotation + step * index as f64;
-        let (sin, cos) = angle.sin_cos();
-        corners.push(p(
-            base_center.x + radius * cos,
-            base_center.y + radius * sin,
-            base_center.z,
-        ));
-    }
+    let mut corners = ngon_ring(base_center, radius, sides, rotation);
     corners.push(p(base_center.x, base_center.y, base_center.z + height));
     // Outward: the base's reversed ring (-Z), then one triangle per side.
     let mut cycles: Vec<Vec<usize>> = Vec::with_capacity(n + 1);
@@ -230,6 +222,55 @@ pub fn pyramid_ngon_brep(
     }
     let refs: Vec<&[usize]> = cycles.iter().map(Vec::as_slice).collect();
     body(&refs, &corners)
+}
+
+/// A regular `sides`-gon **truncated** pyramid: the same bottom ring as
+/// [`pyramid_ngon_brep`] and a parallel top ring of vertex radius `top_radius`,
+/// `height` above it, at the same `rotation` and vertex count.
+///
+/// Every side face is a planar trapezoid in exactly the plane the apex form's
+/// side triangle lies in, so this is the same authored planar B-rep path: no
+/// curved surface and no second construction.
+///
+/// Volume `(n / 2) · sin(2π/n) · height · (r² + r·r_top + r_top²) / 3`.
+pub fn pyramid_ngon_frustum_brep(
+    base_center: Point3,
+    radius: f64,
+    top_radius: f64,
+    sides: u32,
+    rotation: f64,
+    height: f64,
+) -> BrepData {
+    let n = sides as usize;
+    let bottom = ngon_ring(base_center, radius, sides, rotation);
+    let top_center = p(base_center.x, base_center.y, base_center.z + height);
+    let top = ngon_ring(top_center, top_radius, sides, rotation);
+    let mut corners = Vec::with_capacity(2 * n);
+    corners.extend_from_slice(&bottom);
+    corners.extend_from_slice(&top);
+    // Outward: the bottom's reversed ring (-Z), the top ring (+Z), then one
+    // trapezoid per side, wound like the apex form's triangle.
+    let mut cycles: Vec<Vec<usize>> = Vec::with_capacity(n + 2);
+    cycles.push((0..n).rev().collect());
+    cycles.push((n..2 * n).collect());
+    for index in 0..n {
+        let next = (index + 1) % n;
+        cycles.push(vec![index, next, n + next, n + index]);
+    }
+    let refs: Vec<&[usize]> = cycles.iter().map(Vec::as_slice).collect();
+    body(&refs, &corners)
+}
+
+/// One regular `sides`-gon ring of vertex radius `radius`, centred on `center`
+/// in the plane `z = center.z`, first vertex at `rotation` about `+Z`.
+fn ngon_ring(center: Point3, radius: f64, sides: u32, rotation: f64) -> Vec<Point3> {
+    let step = std::f64::consts::TAU / f64::from(sides);
+    (0..sides as usize)
+        .map(|index| {
+            let (sin, cos) = (rotation + step * index as f64).sin_cos();
+            p(center.x + radius * cos, center.y + radius * sin, center.z)
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -302,6 +343,62 @@ mod tests {
             assert!((dx.hypot(dy) - radius).abs() < 1e-9);
             assert!((start.z - 0.5).abs() < 1e-12);
         }
+    }
+
+    #[test]
+    fn an_ngon_frustum_has_the_closed_form_volume_and_two_rings() {
+        // The same hexagon of vertex radius 2 truncated to a top radius of 1:
+        // n trapezoids + 2 rings, 3n edges, 2n vertices.
+        let sides = 6u32;
+        let (radius, top_radius, height) = (2.0, 1.0, 3.0);
+        let brep =
+            pyramid_ngon_frustum_brep(p(1.0, -2.0, 0.5), radius, top_radius, sides, 0.0, height);
+        assert_eq!(counts(&brep), (8, 18, 12));
+        let step = std::f64::consts::TAU / f64::from(sides);
+        let expected = 0.5
+            * f64::from(sides)
+            * step.sin()
+            * height
+            * (radius * radius + radius * top_radius + top_radius * top_radius)
+            / 3.0;
+        assert!((volume(&brep) - expected).abs() < 1e-9);
+        // The top ring is parallel, concentric and `height` above the base.
+        let top = &brep.shells[0].faces[1];
+        let BrepSurface::Plane { origin, normal, .. } = &top.surface else {
+            panic!("the authored top is a plane");
+        };
+        assert!((origin.z - 3.5).abs() < 1e-12);
+        assert!(normal.z > 0.0);
+        for edge in &top.loops[0].edges {
+            let cad_domain::BrepCurve::Line { start, .. } = edge else {
+                panic!("the authored top is straight-edged");
+            };
+            let dx = start.x - 1.0;
+            let dy = start.y + 2.0;
+            assert!((dx.hypot(dy) - top_radius).abs() < 1e-9);
+            assert!((start.z - 3.5).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn a_four_sided_ngon_frustum_is_the_truncated_square_pyramid() {
+        // Sides 4 at rotation π/4 with vertex radius side/√2 is the rotated
+        // square base; the same scale applies to both rings, so the truncated
+        // square pyramid's volume follows the closed form of the four-sided ring.
+        let sides = 4u32;
+        let (radius, top_radius, height) = (2.0 / 2.0_f64.sqrt(), 1.0 / 2.0_f64.sqrt(), 3.0);
+        let brep = pyramid_ngon_frustum_brep(
+            p(0.0, 0.0, 0.0),
+            radius,
+            top_radius,
+            sides,
+            std::f64::consts::FRAC_PI_4,
+            height,
+        );
+        // The square base has side 2 and the square top side 1; the frustum of a
+        // pyramid with those parallel bases is h/3·(4 + 1 + 2) = 3·7/3 = 7.
+        assert_eq!(brep.face_count(), 6, "4 sides + 2 rings");
+        assert!((volume(&brep) - 7.0).abs() < 1e-9);
     }
 
     #[test]

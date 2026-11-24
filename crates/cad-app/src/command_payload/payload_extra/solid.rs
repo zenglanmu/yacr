@@ -40,8 +40,8 @@
 //! `PYRAMID`, whose *base* is a whole construction (side count + centre + radius +
 //! inscribed/circumscribed) rather than a single field, so the session admits it
 //! as the typed command line `PYRAMID [INSCRIBED|CIRCUMSCRIBED] <sides> <cx> <cy>
-//! <radius> <height>` and dispatches this payload — still no second command id
-//! and no second write path.
+//! <radius> <height> [<top_radius>]` and dispatches this payload — still no
+//! second command id and no second write path.
 
 use cad_domain::Point3;
 
@@ -90,9 +90,8 @@ pub enum PlanLength {
 /// other corner, `Cube` or `Length`; height), so they share these variants.
 /// `PYRAMID` takes [`Self::Points`] (the explicit square-base form) and
 /// [`Self::PyramidPolygon`] (the typed regular n-gon base, AutoCAD's `Sides` +
-/// `Inscribed`/`Circumscribed` construction); its `Top radius` truncation is not
-/// modelled because the modeler seam has no truncated pyramid spec — it is
-/// refused by absence, never folded into a full pyramid.
+/// `Inscribed`/`Circumscribed` construction, with the optional `Top radius`
+/// truncation); every other solid variant is refused by name.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SolidPrimitiveCommand {
     /// The explicit 3D form: every point is the caller's (arity per kind).
@@ -151,7 +150,7 @@ pub enum SolidPrimitiveCommand {
     /// `TORUS`: a plan ring plus its tube.
     TorusPlan { ring: PlanCircle, tube: PlanLength },
     /// `PYRAMID`'s **regular n-gon base** construction:
-    /// `PYRAMID [CIRCUMSCRIBED] <sides> <cx> <cy> <radius> <height>`.
+    /// `PYRAMID [CIRCUMSCRIBED] <sides> <cx> <cy> <radius> <height> [<top_radius>]`.
     ///
     /// `base` is the plan centre (its z is the session `ELEV`), `radius` is the
     /// typed base radius and `circumscribed` selects which circle it names —
@@ -164,13 +163,20 @@ pub enum SolidPrimitiveCommand {
     ///
     /// The apex stays over the centre; the result is the same exact
     /// `Body3d { kind: Solid }` / `AcDb3dSolid` the explicit point form creates.
-    /// AutoCAD's `Top radius` (truncated pyramid) is **not** modelled: the seam
-    /// has no truncated spec, so it is absent rather than silently squared.
+    ///
+    /// `top_radius` is AutoCAD's `Top radius` truncation: `None` (and `Some(0.0)`,
+    /// the prompt's documented default) is the apex pyramid, while a value
+    /// strictly inside `(0, radius)` builds the truncated body — the same ring
+    /// construction at a smaller vertex radius, so the top is concentric and
+    /// parallel. `Some(radius)` is a straight prism and is refused by name
+    /// (`pyramid.equal_radii`); a larger value is `pyramid.top_radius`. Neither is
+    /// silently squared or folded into a full pyramid.
     PyramidPolygon {
         base: [f64; 2],
         radius: f64,
         sides: u32,
         circumscribed: bool,
         height: f64,
+        top_radius: Option<f64>,
     },
 }
