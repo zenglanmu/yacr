@@ -8,7 +8,7 @@
 use cad_domain::{TextAlignH, TextAlignV};
 
 pub use crate::command_id::text_batch::{
-    TextAlignAxis, TextAlignEdge, TextAlignSpacing, TextBoundaryShape,
+    TCircleSizeMode, TextAlignAxis, TextAlignEdge, TextAlignSpacing, TextBoundaryShape,
 };
 
 /// `JUSTIFYTEXT` / `TJUST`: the requested alignment pair. Both fields are
@@ -34,8 +34,8 @@ pub struct TextAlignCommand {
 }
 
 /// `TEXTALIGN DISTRIBUTE [X|Y]` / the named spacing options: the spacing mode
-/// the selected texts are laid out with (only `Distribute` writes).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// the selected texts are laid out with.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TextAlignSpacingCommand {
     pub spacing: TextAlignSpacing,
 }
@@ -53,8 +53,11 @@ pub struct TCountCommand {
     pub suffix: String,
 }
 
-/// `TCIRCLE`: which closed boundary is drawn around each text.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// `TCIRCLE`: which closed boundary is drawn around each text, the distance
+/// offset factor (default 0.35) and the variable/constant size mode.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TCircleCommand {
     pub shape: TextBoundaryShape,
+    pub offset_factor: f64,
+    pub size_mode: TCircleSizeMode,
 }

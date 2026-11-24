@@ -436,10 +436,46 @@ pub struct MInsertCommand {
 /// The input of an `ADDSELECTED <x> <y>` command.
 ///
 /// `position` is the new entity's placement point: the LINE start point, the
-/// CIRCLE centre, the POINT position or the TEXT insertion point. The command
-/// reads the one selected entity for the type and general properties, so the
-/// selection is not part of the payload.
+/// CIRCLE/ARC centre, the POINT position, the TEXT insertion point, the
+/// POLYLINE first vertex or the INSERT insertion point. The command reads the
+/// one selected entity for the type and general properties, so the selection is
+/// not part of the payload.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AddSelectedCommand {
     pub position: Point3,
+}
+
+/// The center-mark arm size typed on `CENTERMARK`.
+///
+/// AutoCAD's `CENTERCROSSSIZE` accepts an absolute length or a factor of the
+/// circle/arc radius (`0.1x`); the typed line admits the same two spellings.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CenterArm {
+    /// An absolute arm length in drawing units.
+    Absolute(f64),
+    /// A factor of the source circle/arc radius (`0.1x` = 10% of the radius).
+    Factor(f64),
+}
+
+/// `CENTERMARK [ARM <distance>|<factor>x]`: the optional arm size; `None` keeps
+/// the declared 10% of the source radius.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CenterMarkCommand {
+    pub arm: Option<CenterArm>,
+}
+
+/// `CENTERLINE [EXTENSION <distance>] [GAP <distance>]`: how far the midway
+/// line runs past the projected overlap (`extension`) and how far it is inset
+/// from that overlap at both ends (`gap`). Both default to `0.0`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CenterLineCommand {
+    pub extension: f64,
+    pub gap: f64,
+}
+
+/// The typed option of `CENTERMARK` / `CENTERLINE`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CenterEditPayload {
+    Mark(CenterMarkCommand),
+    Line(CenterLineCommand),
 }

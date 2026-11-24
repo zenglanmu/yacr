@@ -145,13 +145,18 @@ pub enum TextAlignAxis {
 
 /// The `TEXTALIGN` spacing options.
 ///
-/// `Distribute` is implemented. `SetSpacing` / `CurrentVertical` /
-/// `CurrentHorizontal` are **accepted by the typed grammar and refused by the
-/// application** with their own stable codes (never a silent default).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// `Distribute`, `SetSpacing` (with a distance), `CurrentVertical` and
+/// `CurrentHorizontal` all write. A bare `SETSPACING` (no distance) is
+/// **accepted by the typed grammar and refused by the application** with
+/// `textalign.set_spacing_needs_value` (never an invented default).
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TextAlignSpacing {
     Distribute(TextAlignAxis),
-    SetSpacing,
+    /// `SETSPACING [<distance> [X|Y]]`; `None` is a bare `SETSPACING`.
+    SetSpacing {
+        distance: Option<f64>,
+        axis: TextAlignAxis,
+    },
     CurrentVertical,
     CurrentHorizontal,
 }
@@ -210,14 +215,13 @@ pub enum TextAlignSpacing {
 /// One transaction / one undo step. Work-only.
 pub struct TextAlignCommand;
 
-/// `TEXTALIGN DISTRIBUTE [X|Y]`: even **gap** spacing along one axis.
+/// `TEXTALIGN DISTRIBUTE [X|Y]` / `SETSPACING <distance> [X|Y]` /
+/// `CURRENTVERTICAL` / `CURRENTHORIZONTAL`: the non-edge spacing forms.
 ///
-/// Payload is [`crate::CommandPayload::TextAlignSpacing`] carrying
-/// [`TextAlignSpacing::Distribute`]. The typed grammar is `DISTRIBUTE` (Y by
-/// default) or `DISTRIBUTE X` / `DISTRIBUTE Y`; the axis word is optional and
-/// case-insensitive.
+/// Payload is [`crate::CommandPayload::TextAlignSpacing`] carrying one
+/// [`TextAlignSpacing`] value.
 ///
-/// ## Rule (gap-based, estimated extents)
+/// ## `DISTRIBUTE [X|Y]` (gap-based, estimated extents)
 ///
 /// * The selection is read in **reading order**: for `Y`, top-to-bottom
 ///   (descending `max_y`) then left-to-right (ascending `min_x`); for `X`,
@@ -235,33 +239,36 @@ pub struct TextAlignCommand;
 /// * An overlapping selection can yield a negative gap (the interiors overlap by
 ///   the same amount); the rule is still deterministic.
 ///
+/// ## `SETSPACING <distance> [X|Y]`
+///
+/// The same reading order, but only the **first** extent stays fixed and every
+/// later extent is placed so the gap from the previous extent's trailing edge is
+/// exactly `<distance>` (Y default). `distance` must be finite and non-negative;
+/// a bare `SETSPACING` is `textalign.set_spacing_needs_value`, never an invented
+/// value.
+///
+/// ## `CURRENTVERTICAL` / `CURRENTHORIZONTAL`
+///
+/// The first target's own stored justification defines one reference line
+/// (`Top`/`Middle`/`Baseline|Bottom` for Y; `Left`/`Center`/`Right` for X).
+/// Every later target is shifted on that axis so **its own** justification
+/// anchor lands on the reference line; the other axis never moves.
+///
 /// ## Refusals
 ///
 /// * `textalign.needs_selection` — empty selection;
-/// * `textalign.distribute_needs_three` — fewer than **three** Text/MText
-///   targets (with two there is no interior text to distribute);
+/// * `textalign.distribute_needs_three` — fewer than **three** targets for
+///   `DISTRIBUTE`;
+/// * `textalign.needs_two` / `textalign.set_spacing_needs_value` /
+///   `textalign.invalid_spacing` — the `SETSPACING` and `CURRENT…` forms;
 /// * `textalign.degenerate` — a non-finite/non-positive stored height or a
 ///   non-finite gap;
 /// * `textalign.not_addressable` / `textalign.target_missing` — as above;
 /// * a non-text selection refuses the whole command (`Unsupported`);
-/// * `textalign.unchanged` — already evenly spaced; no transaction.
+/// * `textalign.unchanged` — no write is needed; no transaction.
 ///
 /// One transaction / one undo step. Work-only.
 pub struct TextAlignSpacingCommand;
-
-/// The three named spacing refusals of `TEXTALIGN` (documented, never faked).
-///
-/// The typed grammar admits `SETSPACING`, `CURRENTVERTICAL` and
-/// `CURRENTHORIZONTAL` so the host can answer with its own stable code:
-///
-/// * `textalign.set_spacing_unsupported` — `TEXTALIGN SETSPACING` needs a
-///   numeric spacing value and a per-object base it does not model;
-/// * `textalign.current_vertical_unsupported` — `CURRENTVERTICAL`;
-/// * `textalign.current_horizontal_unsupported` — `CURRENTHORIZONTAL`.
-///
-/// Every one writes nothing (no revision bump, no undo entry). Only `DISTRIBUTE`
-/// is implemented.
-pub struct TextAlignUnsupportedSpacingCommand;
 
 /// `TCOUNT <start> <step> [prefix] [suffix]`: replace each selected Text/MText
 /// string with `<prefix><number><suffix>`.
@@ -299,43 +306,67 @@ pub struct TextAlignUnsupportedSpacingCommand;
 /// all replacements are staged in one transaction / one undo step. Work-only.
 pub struct TCountCommand;
 
-/// The two boundary shapes `TCIRCLE CIRCLE|RECTANGLE` accepts.
+/// The three boundary shapes `TCIRCLE` accepts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TextBoundaryShape {
     Circle,
+    /// A stadium/slot: a rectangle with semicircular ends (`bulge = 1`).
+    Slot,
     Rectangle,
 }
 
-/// `TCIRCLE CIRCLE|RECTANGLE`: draw a **closed boundary** around the estimated
-/// bounds of every selected Text/MText, keeping the text.
+/// The `TCIRCLE` constant/variable size mode.
+///
+/// `Variable` (the default) uses each text's own estimated size. The three
+/// `Constant*` modes take the matching dimension from the **largest** selected
+/// text so every boundary on one run has that dimension (AutoCAD's `Constant`
+/// prompt with its `Width`/`Height`/`Both` answer).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TCircleSizeMode {
+    Variable,
+    ConstantBoth,
+    ConstantWidth,
+    ConstantHeight,
+}
+
+/// `TCIRCLE CIRCLE|SLOT|RECTANGLE`: draw a **closed boundary** around the
+/// estimated bounds of every selected Text/MText, keeping the text.
 ///
 /// Payload is [`crate::CommandPayload::TextCircle`]. A bare `TCIRCLE` is
-/// `tcircle.needs_argument`; any other word is refused by the session parser.
+/// `tcircle.needs_argument`; any other shape/option is refused by the session
+/// parser. The typed grammar is
+/// `TCIRCLE <shape> [OFFSET <factor>] [VARIABLE|CONSTANT [BOTH|WIDTH|HEIGHT]]`;
+/// the offset factor defaults to **0.35** and the size mode to `Variable`.
 ///
 /// ## Geometry (estimated)
 ///
-/// * `CIRCLE` — one `SemanticGeometry::Circle` centred on the **estimated bounds
+/// * The estimated text box is expanded by `offset_factor × height` on every
+///   side (the same factor rule TEXTMASK uses); the height reference is the
+///   text's own height in `Variable` and the largest selected height in a
+///   `Constant*` mode.
+/// * `CIRCLE` — one `SemanticGeometry::Circle` centred on the **expanded bounds
 ///   centre** with `radius = half the box diagonal`
 ///   (`0.5 × hypot(width, height)`), normal `+Z`;
-/// * `RECTANGLE` — one closed four-vertex straight-segment
-///   `SemanticGeometry::Polyline` on the four estimated box corners
-///   (`(min_x,min_y) → (max_x,min_y) → (max_x,max_y) → (min_x,max_y)`).
+/// * `SLOT` — one closed four-vertex `SemanticGeometry::Polyline` on the
+///   expanded box corners with bulges `[0, 1, 0, 1]` (semicircular ends);
+/// * `RECTANGLE` — one closed four-vertex straight-segment `Polyline` on the
+///   four expanded box corners.
 ///
-/// Both are drawn on the **text's own layer** and in the text's space (model
-/// space only), at the model-space draw order above the current maximum. The
-/// source text is **retained** — this is not a conversion and there is no
-/// associativity: moving/deleting the text later does not update the boundary.
-/// AutoCAD's dialog (style/offset, "Object"/"Multiple" modes) is **NOT
-/// IMPLEMENTED**.
+/// `ConstantBoth`/`ConstantWidth`/`ConstantHeight` take the width and/or height
+/// from the **largest** selected text so every boundary in one run shares it.
+/// Every boundary is drawn on the **text's own layer** in model space at the
+/// next global draw order. The source text is **retained** — no associativity:
+/// moving/deleting the text later does not update the boundary. AutoCAD's
+/// interactive `Object`/`Multiple` prompts are **NOT IMPLEMENTED**.
 ///
 /// ## Refusals
 ///
 /// `tcircle.needs_selection`, `tcircle.invalid_payload`,
-/// `tcircle.not_addressable`, `tcircle.target_missing`, `tcircle.degenerate`
-/// (a stored height that is non-finite/non-positive, or an estimate with no
-/// positive radius/extent), and the whole-command `Unsupported` for a non-text
-/// target. One transaction / one undo step inserts **all** boundaries; a
-/// refusal inserts none. Work-only.
+/// `tcircle.invalid_offset`, `tcircle.not_addressable`, `tcircle.target_missing`,
+/// `tcircle.degenerate` (a stored height that is non-finite/non-positive, or an
+/// estimate with no positive radius/extent), and the whole-command `Unsupported`
+/// for a non-text target. One transaction / one undo step inserts **all**
+/// boundaries; a refusal inserts none. Work-only.
 pub struct TCircleCommand;
 
 /// `TEXTMASK`: insert an `AcDbWipeout` mask behind every selected Text/MText.
