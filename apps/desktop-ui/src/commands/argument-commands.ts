@@ -14,6 +14,7 @@
 import { isHatchEditArgument } from './argument-hatchedit.ts';
 import { isColorArgument } from './argument-color-grammar.ts';
 import { EXPORT_ARGUMENT_SPEC } from './argument-export-grammar.ts';
+import { NEWVIEW_ARGUMENT_SPEC } from './argument-newview-grammar.ts';
 import {
   isApertureArgument,
   isPtypeArgument,
@@ -807,6 +808,9 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
   '-PARAMETERS': Object.freeze({ parse: isDashParametersArgument }),
   ...ATTRIBUTE_ARGUMENT_COMMANDS,
   ...ACTION_RECORDER_ARGUMENT_COMMANDS,
+  // `NEWVIEW <name>` / `NEWVIEW WINDOW <name> <x1> <y1> <x2> <y2>`: the typed
+  // named-view form. Appended last so no shipped row moves.
+  NEWVIEW: NEWVIEW_ARGUMENT_SPEC,
 });
 /** `DIMSTYLE`/`-DIMSTYLE`: `LIST`, `CURRENT` or `SET <name>` (name may have spaces). */
 function isDimStyleArgument(argument: string): boolean {

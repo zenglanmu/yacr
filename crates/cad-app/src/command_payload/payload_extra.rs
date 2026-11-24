@@ -13,6 +13,7 @@ mod image;
 mod param;
 mod qdim_payload;
 mod table;
+mod view_payload;
 mod xclip;
 
 pub use dash_layer::*;
@@ -22,6 +23,7 @@ pub use image::*;
 pub use param::*;
 pub use qdim_payload::*;
 pub use table::*;
+pub use view_payload::*;
 pub use xclip::*;
 
 mod utility;
@@ -213,23 +215,6 @@ pub enum LayerStateCommand {
     /// Report the saved names; writes nothing.
     List,
     /// Drop one saved snapshot.
-    Delete(String),
-}
-
-/// The option of a typed `VIEW <option>` / `-VIEW <option>` line:
-/// `SAVE <name>`, `RESTORE <name>`, `LIST` or `DELETE <name>`.
-///
-/// The store is session only (bounded to 32 case-insensitively unique names);
-/// nothing here is written to the DWG. The grammar lives in `cad-ui-core`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ViewCommand {
-    /// Capture the current camera, 2D/3D mode, work plane and active space.
-    Save(String),
-    /// Apply a saved view (the same path as `VIEWGO`).
-    Restore(String),
-    /// Report the saved names; writes nothing.
-    List,
-    /// Drop one saved view.
     Delete(String),
 }
 

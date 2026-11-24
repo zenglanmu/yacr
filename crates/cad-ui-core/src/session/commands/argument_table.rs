@@ -160,6 +160,9 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     VIEW_SELECTOR,
     VIEWGO_SELECTOR,
     VPOINT_SELECTOR,
+    // `NEWVIEW <name>` / `NEWVIEW WINDOW <name> <x1> <y1> <x2> <y2>`: the typed
+    // form of the extended command; a bare NEWVIEW keeps its report.
+    NEWVIEW_SELECTOR,
     // `CVPORT <n>`: the session current-viewport marker of the active paper
     // layout (one-based position; the bare selector reports it).
     CVPORT_SELECTOR,

@@ -117,3 +117,14 @@ pub fn target_viewport(
         ))),
     }
 }
+
+/// The session-only "maximized layout viewport" marker (`VPMAX` / `VPMIN`).
+///
+/// `index` is the zero-based viewport index inside the layout. The command layer
+/// uses index `0` because this build has no per-viewport selection model; the
+/// marker is a display hint for a host, never drawing data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LayoutViewportRef {
+    pub layout: LayoutId,
+    pub index: usize,
+}

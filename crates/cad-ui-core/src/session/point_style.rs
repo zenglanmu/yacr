@@ -220,6 +220,7 @@ impl CadSession {
             // the same arm.
             super::commands::VIEW_SELECTOR => self.view_state_argument(argument, text),
             super::commands::VIEWGO_SELECTOR => self.view_go_argument(argument, text),
+            super::commands::NEWVIEW_SELECTOR => self.newview_argument(argument, text),
             super::commands::VPOINT_SELECTOR => self.vpoint_argument(argument, text),
             // The 2026-11-07 layout/viewport batch typed forms, including the
             // real `PAGESETUP`/`PSETUPIN` page-setup writes. Each dash spelling

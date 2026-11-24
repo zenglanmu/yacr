@@ -116,6 +116,20 @@ impl Application {
         if session.document != command.document {
             return Err(CadError::StaleResult);
         }
+        // A continuous pan/orbit run keeps one view-history step until a
+        // different command arrives. Any other command closes the run, so
+        // VIEWBACK/VIEWFORWARD and discrete zoom/standard views start from a
+        // clean boundary.
+        if !matches!(command.id, CommandId::Pan | CommandId::Orbit)
+            && !matches!(
+                command.id,
+                CommandId::Extended(
+                    crate::ExtendedCommandId::ThreeDPan | crate::ExtendedCommandId::ThreeDOrbit
+                )
+            )
+        {
+            session.end_navigation_step();
+        }
         if let Some(outcome) = self.dispatch_extended(session, &command)? {
             return Ok(outcome);
         }
@@ -358,7 +372,7 @@ impl Application {
                 viewport.work_plane = xy_work_plane(0.0);
                 Ok(CommandOutcome::none())
             }
-            CommandId::Pan => self.pan(&command),
+            CommandId::Pan => self.pan(session, &command),
             CommandId::Zoom => self.zoom(session, &command),
             // The bounded 2D in-place block-reference edit: REFEDIT/-REFEDIT
             // extract one INSERT's members, REFSET edits the working set and
@@ -443,7 +457,7 @@ impl Application {
                 }
             }
             CommandId::Switch2d3d => self.switch_2d3d(session, &command),
-            CommandId::Orbit => self.orbit(&command),
+            CommandId::Orbit => self.orbit(session, &command),
             CommandId::SetMode => match command.payload {
                 CommandPayload::Mode(mode) => {
                     // The session cancels an unconfirmed tool on switch; this is

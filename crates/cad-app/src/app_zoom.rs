@@ -177,7 +177,7 @@ impl Application {
 
     /// The 2D plan camera centred on `centre` with `scale`, keeping the given
     /// eye height (a plan fit never changes how far above the plane the eye sits).
-    fn plan_camera(centre: [f64; 2], scale: f64, eye_z: f64) -> Camera {
+    pub(crate) fn plan_camera(centre: [f64; 2], scale: f64, eye_z: f64) -> Camera {
         Camera {
             eye: Point3 {
                 x: centre[0],

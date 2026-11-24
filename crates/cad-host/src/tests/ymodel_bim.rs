@@ -139,11 +139,7 @@ fn stand_in_document_minor(snapshot: &DocumentSnapshot) -> u32 {
         return FORMAT_MINOR_RELATIONS;
     }
     // The 2D-constraint / group tiers (16/17) are not produced by this host and
-    // the relations tier keeps its own literal below.
-    const FORMAT_MINOR_RELATIONS: u32 = 11;
-    if snapshot.has_relations() {
-        return FORMAT_MINOR_RELATIONS;
-    }
+    // the relations tier keeps its own literal above.
     const FORMAT_MINOR_FEATURES: u32 = 10;
     if snapshot.has_features() {
         return FORMAT_MINOR_FEATURES;

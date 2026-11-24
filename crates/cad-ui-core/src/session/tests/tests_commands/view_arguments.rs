@@ -153,6 +153,74 @@ fn unknown_named_view_is_refused_by_name() {
 }
 
 #[test]
+fn newview_grammar_accepts_a_name_and_a_window() {
+    assert_eq!(
+        parse_newview_argument("Plan A"),
+        Some(NewViewArgument::Current("Plan A".into()))
+    );
+    assert_eq!(
+        parse_newview_argument("window Plan B 0 0 400 300"),
+        Some(NewViewArgument::Window {
+            name: "Plan B".into(),
+            rect: [0.0, 0.0, 400.0, 300.0],
+        })
+    );
+    // The name may have spaces; the four trailing tokens are the rectangle.
+    assert_eq!(
+        parse_newview_argument("WINDOW Level 2 Plan -10 -20 30 40"),
+        Some(NewViewArgument::Window {
+            name: "Level 2 Plan".into(),
+            rect: [-10.0, -20.0, 30.0, 40.0],
+        })
+    );
+    for refused in [
+        "",
+        "WINDOW",
+        "WINDOW A",
+        "WINDOW A 1 2 3",
+        "WINDOW A 1 2 3 x",
+    ] {
+        assert_eq!(parse_newview_argument(refused), None, "{refused:?}");
+    }
+    assert_eq!(
+        typed_command_argument("NEWVIEW Window Plan B 0 0 400 300"),
+        Some(("NEWVIEW", "Window Plan B 0 0 400 300"))
+    );
+}
+
+#[test]
+fn newview_window_and_current_forms_store_named_views() {
+    let session = fresh_session();
+    session
+        .command("NEWVIEW Current")
+        .expect("the current-view form is admitted");
+    {
+        let c = session.core.controller.borrow();
+        assert!(c.application.can_undo(&c.document_id));
+        assert!(c.application.workspace.documents[&c.document_id]
+            .drawing
+            .named_views()
+            .resolve("Current")
+            .is_some());
+    }
+
+    session
+        .command("NEWVIEW Window Win 0 0 400 300")
+        .expect("the window form is admitted");
+    let c = session.core.controller.borrow();
+    let stored = c.application.workspace.documents[&c.document_id]
+        .drawing
+        .named_views()
+        .resolve("Win")
+        .expect("the window view is stored");
+    assert_eq!(stored.camera.target.x, 200.0);
+    assert_eq!(stored.camera.target.y, 150.0);
+
+    let error = session.command("NEWVIEW WINDOW Bad 0 0").unwrap_err();
+    assert!(error.contains("NEWVIEW needs"), "{error}");
+}
+
+#[test]
 fn viewback_and_viewforward_empty_stacks_are_named_no_ops() {
     let session = fresh_session();
     // A fresh session has an empty view history on its viewport: both are named

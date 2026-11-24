@@ -2090,7 +2090,7 @@
   "draw.kind.layerstatesave": "Save layer state",
   "draw.kind.layerstatesave.hint": "Routes a LayerState payload to the one session layer-state store; without a name it reports the missing dialog.",
   "draw.kind.newview": "New named view",
-  "draw.kind.newview.hint": "Routes a View payload to the one session named-view store; without a name it reports the missing prompt.",
+  "draw.kind.newview.hint": "Saves a named view from the current display (`NEWVIEW <name>`), or from a rectangular window (`NEWVIEW WINDOW <name> <x1> <y1> <x2> <y2>`); without a name it reports the missing typed form.",
   "draw.kind.dashscalelistedit": "Scale-list report",
   "draw.kind.dashscalelistedit.hint": "Read-only report of the drawing's real scale table; creating/editing scales is not implemented.",
   "draw.kind.lweight": "Lineweight display report",

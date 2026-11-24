@@ -130,7 +130,10 @@ impl Application {
         // Work-only without losing the read forms, so the write options refuse
         // explicitly in Viewer instead of performing a hidden document write.
         if session.app_mode() == AppMode::Viewer
-            && matches!(option, ViewCommand::Save(_) | ViewCommand::Delete(_))
+            && matches!(
+                option,
+                ViewCommand::Save(_) | ViewCommand::Delete(_) | ViewCommand::Window { .. }
+            )
         {
             return Err(CadError::PermissionDenied);
         }
@@ -143,38 +146,30 @@ impl Application {
                     .get(&command.viewport)
                     .ok_or_else(|| CadError::InvalidInput("unknown viewport".into()))?;
                 let view = ViewSnapshot::capture(viewport);
-                let named = crate::view_persist::named_view_from_snapshot(
-                    name.clone(),
-                    &view,
-                    session.active_space.clone(),
-                );
-                let planning = self
-                    .workspace
-                    .documents
-                    .get(&command.document)
-                    .ok_or_else(|| CadError::InvalidInput("document not open".into()))?
-                    .drawing
-                    .plan_save_named_view(named)?;
-                let Some(planned) = planning else {
-                    return Ok(view_outcome(
-                        "view.unchanged",
-                        format!(
-                            "VIEW SAVE: the current camera is already stored as `{name}`; \
-                             nothing was written"
-                        ),
-                    ));
-                };
-                let replaced = planned.replaced;
-                let patch = planned.patch;
-                self.write_named_view(command.document, patch, &format!("VIEW SAVE {name}"))?;
-                let count = self.drawing(command.document)?.named_views().len();
-                Ok(view_outcome(
+                self.persist_named_view(
+                    session,
+                    command,
+                    &name,
+                    view,
                     "view.saved",
-                    format!(
-                        "VIEW SAVE: {} named view `{name}` ({count} saved view(s) in the drawing)",
-                        if replaced { "replaced" } else { "created" },
-                    ),
-                ))
+                    &format!("VIEW SAVE {name}"),
+                )
+            }
+            ViewCommand::Window {
+                name,
+                first,
+                second,
+            } => {
+                let name = checked_view_name(name)?;
+                let view = self.window_view_snapshot(command, *first, *second)?;
+                self.persist_named_view(
+                    session,
+                    command,
+                    &name,
+                    view,
+                    "view.saved_window",
+                    &format!("NEWVIEW WINDOW {name}"),
+                )
             }
             ViewCommand::Restore(name) => self.restore_named_view(session, command, name),
             ViewCommand::List => {
@@ -215,6 +210,104 @@ impl Application {
                 ))
             }
         }
+    }
+
+    /// Build the view a `NEWVIEW WINDOW` rectangle defines.
+    ///
+    /// The rectangle is two world-space corners on the current 2D plan. The
+    /// existing `ZOOM WINDOW` mapping (`framing_rect` + `plan_camera`, margin
+    /// [`WINDOW_MARGIN`]) is reused so there is no second framing rule; the
+    /// current camera is **not** moved, because NEWVIEW defines a view.
+    fn window_view_snapshot(
+        &self,
+        command: &Command,
+        first: Point3,
+        second: Point3,
+    ) -> CadResult<ViewSnapshot> {
+        for (label, point) in [("first", first), ("second", second)] {
+            if !camera::is_finite_point(point) {
+                return Err(CadError::InvalidInput(format!(
+                    "newview.window.degenerate_rect: the {label} corner is not finite"
+                )));
+            }
+        }
+        let viewport = self
+            .workspace
+            .viewports
+            .get(&command.viewport)
+            .ok_or_else(|| CadError::InvalidInput("unknown viewport".into()))?;
+        if viewport.view_mode.kind() != ProjectionKind::TwoD
+            || !viewport.camera.projection.is_orthographic()
+        {
+            return Err(CadError::InvalidInput(
+                "newview.window.requires_2d: a rectangular view window is only defined in the 2D \
+                 plan view; switch back to 2D first"
+                    .into(),
+            ));
+        }
+        let min = Point3 {
+            x: first.x.min(second.x),
+            y: first.y.min(second.y),
+            z: first.z,
+        };
+        let max = Point3 {
+            x: first.x.max(second.x),
+            y: first.y.max(second.y),
+            z: first.z,
+        };
+        if max.x <= min.x || max.y <= min.y {
+            return Err(CadError::InvalidInput(
+                "newview.window.degenerate_rect: the view window must have an extent on both axes"
+                    .into(),
+            ));
+        }
+        let (centre, scale) = Self::framing_rect(min, max, viewport.logical_size, WINDOW_MARGIN);
+        let framed = Self::plan_camera(centre, scale, viewport.camera.eye.z);
+        Ok(ViewSnapshot {
+            camera: framed,
+            view_mode: ViewMode2d3d::TwoD { saved: framed },
+            work_plane: viewport.work_plane,
+        })
+    }
+
+    /// Plan and commit one named-view row, then report the result.
+    fn persist_named_view(
+        &mut self,
+        session: &SessionState,
+        command: &Command,
+        name: &str,
+        view: ViewSnapshot,
+        code: &str,
+        label: &str,
+    ) -> CadResult<CommandOutcome> {
+        let named = crate::view_persist::named_view_from_snapshot(
+            name.to_string(),
+            &view,
+            session.active_space.clone(),
+        );
+        let planning = self
+            .workspace
+            .documents
+            .get(&command.document)
+            .ok_or_else(|| CadError::InvalidInput("document not open".into()))?
+            .drawing
+            .plan_save_named_view(named)?;
+        let Some(planned) = planning else {
+            return Ok(view_outcome(
+                "view.unchanged",
+                format!("`{name}` already stores this exact view; nothing was written"),
+            ));
+        };
+        let replaced = planned.replaced;
+        self.write_named_view(command.document, planned.patch, label)?;
+        let count = self.drawing(command.document)?.named_views().len();
+        Ok(view_outcome(
+            code,
+            format!(
+                "{} named view `{name}` ({count} saved view(s) in the drawing)",
+                if replaced { "replaced" } else { "created" },
+            ),
+        ))
     }
 
     /// Commit one named-view table patch and record it as one undo step.

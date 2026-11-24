@@ -906,6 +906,10 @@ pub use acadinfo_file::*;
 mod document_units;
 pub use document_units::*;
 
+// The typed `NEWVIEW` window/current grammar, split out for the code-size gate.
+mod newview;
+pub use newview::*;
+
 // ADR-0055 M3: the typed block-attribute command lines.
 mod attribute;
 pub(crate) use arguments::{parse_positive_decimal, parse_signed_decimal};

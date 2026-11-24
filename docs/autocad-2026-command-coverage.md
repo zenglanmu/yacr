@@ -26,8 +26,8 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **279** |
-| 部分实现（有写明的界） | **700** |
+| 完整实现 | **280** |
+| 部分实现（有写明的界） | **699** |
 | **已实现合计（完整 + 部分）** | **979** |
 | 未实现 | **2** |
 
@@ -35,7 +35,9 @@
 > 同名命令的选项、提示顺序、系统变量副作用基本没有逐条对照；`部分实现` 的界之外一律
 > 显式 `Unsupported`/`InvalidInput`。
 
-> **2026-11-24 增补（命名视图持久化）**：`VIEW`/`-VIEW`/`VIEWGO` 三个官方名字按严格口径升为**完整实现**。命名视图从会话内存迁入文档表 `tables/views.json`（`.ymodel` minor **18**，位于块属性 14、`Text.mirrored` 15、二维约束 16、GROUP 17 之后；本批不改写任何既有档位），行内保存相机、2D/3D 模式、切回 2D 的相机、工作平面与活动空间；`VIEW SAVE`/`DELETE` 是一条事务/一步撤销，恢复仍只应用会话相机/空间。DXF/DWG 的 `VIEW` 表经 acadrust 导入导出：源只存世界高度，正交比例按 `height/1000` 显式转换并逐行报告 `import/export.view_camera_approximated`，无布局名的 paper-space 行按 `import.view_paper_space_unresolved` 跳过。`NEWVIEW` 仍**部分实现**（无窗口/名称提示，无矩形窗口定义），`VIEWBACK`/`VIEWFORWARD` 仍**部分实现**（pan/滚轮/orbit 不入栈，前者另有前进栈声明偏离）。计入 **261 完整 + 718 部分 / 979 已实现**；证据仅 Linux Rust 契约，GUI/GPU/像素/真机 NOT VERIFIED。
+> **2026-11-24 增补（命名视图补全）**：`NEWVIEW` 按严格口径升为**完整实现**：新增 typed `NEWVIEW <name>`（保存当前显示）与 `NEWVIEW WINDOW <name> <x1> <y1> <x2> <y2>`（按世界矩形取景并保存，复用 `ZOOM WINDOW` 的 `framing_rect`/`plan_camera`，不改当前相机），两者都写入 `tables/views.json`，一条事务/一步撤销；无参数仍报告 `newview.needs_name`，对话框属构建级全局范围。`VIEWBACK`/`VIEWFORWARD` 现把 pan/orbit 连续手势按每次手势记入同一个每视口历史（首个命令记录，后续合并；指针抬起/`cancel_tool` 结束；离散命令开启新段），`VIEWFORWARD` 与 `ZOOM PREVIOUS` 共用同一后退/前进历史，不再有独立引擎；二者仍**部分实现**，剩余缺口是：ViewCube 的 `cad_orbit` 拖拽没有结束信号（连续两次拖拽之间若无其它命令会合并），以及 pinch 多点手势没有起止边界、按连续导航不记录。该批计入 **280 完整 + 699 部分 / 979 已实现**；无 GUI/GPU/像素/真机证据。
+
+> **2026-11-24 增补（命名视图持久化）**：`VIEW`/`-VIEW`/`VIEWGO` 三个官方名字按严格口径升为**完整实现**。命名视图从会话内存迁入文档表 `tables/views.json`（`.ymodel` minor **18**，位于块属性 14、`Text.mirrored` 15、二维约束 16、GROUP 17 之后；本批不改写任何既有档位），行内保存相机、2D/3D 模式、切回 2D 的相机、工作平面与活动空间；`VIEW SAVE`/`DELETE` 是一条事务/一步撤销，恢复仍只应用会话相机/空间。DXF/DWG 的 `VIEW` 表经 acadrust 导入导出：源只存世界高度，正交比例按 `height/1000` 显式转换并逐行报告 `import/export.view_camera_approximated`，无布局名的 paper-space 行按 `import.view_paper_space_unresolved` 跳过。`NEWVIEW` 与 `VIEWBACK`/`VIEWFORWARD` 的后续补全见上一条“命名视图补全”。该批计入 **274 完整 + 705 部分 / 979 已实现**；证据仅 Linux Rust 契约，GUI/GPU/像素/真机 NOT VERIFIED。
 
 ## 状态口径
 
@@ -75,8 +77,6 @@
 > **2026-11-24 增补（严格 2D 收口 IV，`XPLODE`）**：`XPLODE` 按严格口径升为**完整实现**。在既有 EXPLODE 一级块分解之上补齐 AutoCAD 的 `All/Color/LAyer/LType/LWeight/Inherit from parent block/Explode` 控制：`layer`/`color`/`linetype`/`lineweight` 经与 `CHPROP`/`SETENTITYPROPERTY` 共用的 `plan_entity` 属性应用器写入每个子实体；`Inherit` 把块成员 layer 0 归到参照图层，并把 `ByBlock` 颜色/线型/线宽/透明度按参照的实际值（显式或参照图层的表行）解析；块属性值按 AutoCAD 的 XPLODE/EXPLODE 行为丢弃，块定义的 `ATTDEF` 作为普通实体产出（`BURST` 才是保值命令），成功诊断报告丢弃数量。块参照是唯一输入域（与 `BURST` 相同的一级块范围）；`transparency`/`ltscale`/`thickness`/`material`/plot style 按名拒绝，`Inherit` 与显式属性列表互斥；非均匀放置/冻结层/XREF 按名拒绝；`Individually` 交互提示不提供（全局交互范围）。一条事务/一步撤销。`TOLERANCE` **不晋升**：其分解本身是声明式表示，但单元格语法仍是 `|` 分隔的 ≤6 个纯文本格，未实现 AutoCAD 对话框的槽位语义（两个公差槽、三个基准槽、投影高度、基准标识）与 GDT 符号字体、`%%v`、`^J` 语法（新增 `tolerance.gdt_symbol`/`tolerance.multiline`/`tolerance.dxf_separator` 具名拒绝），故保持部分。上述批次合计计入 **267 完整 + 712 部分 / 979 已实现**；证据仅 Linux Rust 契约，GUI/GPU/像素/真机 NOT VERIFIED。
 
 > **2026-11-24 增补（严格编组持久化，`GROUP`/`-GROUP`/`UNGROUP`/`GROUPEDIT`）**：编组不再只存在于会话，`cad-db` 新增持久表 `tables/groups.json`（行序列号、名字、描述、DXF selectable 标志、有序成员实体 id），`FORMAT_MINOR` **17**（14 = 块属性、15 = `Text.mirrored`、16 = 二维约束；不改旧档号）。`GROUP`/`-GROUP`/`UNGROUP`/`GROUPEDIT` 的 create/delete/rename/add/remove/list 全部走 `DrawingDatabase::apply_group_changes`：一条事务、一次 revision、一步撤销，`ChangeScope.tables = {Groups}`；名字大小写不敏感与 64 上限拒绝保留。DXF/DWG 按 `AcDbGroup` 导入/导出，名字经 `ACAD_GROUP` 字典往返，描述/selectable 保留；未写出的成员（v1 图纸空间延后）按 `export.group_member_not_written` 具名报告，组本身不丢。上述批次合计计入 **271 完整 + 708 部分 / 979 已实现**；`CLASSICGROUP` 面板仍只读（列出持久编组与成员 id，无面板内 create/delete/rename/add/remove 控件，按组替换选择无宿主通道），保持部分实现。证据仅 Linux Rust 契约（cad-app/cad-db/cad-store-zip/cad-connector-acadrust），GUI/GPU/像素/真机 NOT VERIFIED。
->
-> **2026-11-24 增补（严格命名视图持久化，`VIEW`/`-VIEW`/`VIEWGO`）**：命名视图不再只存在于会话，`cad-db` 新增 `tables/views.json`（minor 18），`VIEW SAVE`/`DELETE` 一条 revision/一步撤销，`VIEW RESTORE`/`VIEWGO` 应用相机/模式/工作平面/空间；DXF/DWG `VIEW` 表导入导出已接线（相机表达有损并逐行报告）。`NEWVIEW` 仍缺窗口/名称提示，`VIEWBACK`/`VIEWFORWARD` 仍缺 pan/wheel/orbit 记录，保持部分。
 >
 > **2026-11-24 增补（严格单位/信息文件收口）**：`UNITS`/`-UNITS` 在既有 `<unit> <precision>` 之外补齐 Units 对话框里可存放的文档级设置：长度 *format*（`LENGTH scientific|decimal|engineering|architectural|fractional`）、角度格式/精度（`ANGLE decimal|dms|gradians|radians|surveyors <0..=8>`）与方向/基准角/旋向（`ANGLE DIRECTION east|north|west|south|other [<degrees>] [CW|CCW]`）。设置写入 `document.json` → `variables.units_display`（仅非默认值写出，旧档逐字节不变），与声明单位同命令时只升 **一条 revision / header-only `ChangeSet` / 无 undo patch**；空补丁、越界精度与非有限基准角在写入前按名拒绝。两者仍为**部分实现**：设置已落库并报告，但坐标/测量读数仍用固定小数位、尚未按存储的长度/角度格式重排，`$INSUNITS` 插入缩放语义与 UNITS 对话框（宿主 UI）未建模。`ACADINFO` 新增 `ACADINFO <file.json>`，经宿主 named-file 桥写出 **版本化 `yacr.acadinfo` v1 JSON**（产品/版本/构建/目标 OS/架构 + 文档 id/修订/实体数/单位/精度/应用域；`notCollected` 明列许可证/硬件/模块），非 `.json` 目标与无文件 sink 的宿主按 `acadinfo.*` 拒绝，裸命令报告同一快照 ⇒ 晋升**完整实现**（许可证/硬件/模块枚举属全局范围；不写任何时间戳）。`TIME`/`EDITTIME` **不晋升**：`document.json` 没有创建/更新时间字段，新增字段属新持久化 schema 且每次 revision 都需要写路径时钟，本轮不发明值，两者继续显式 `time.not_tracked`/`edittime.not_tracked`。
 >
@@ -283,7 +283,7 @@
 
 > **这不是验收，是当前排期与口径。** 本轮目标是把命令从 `部分实现`/具名拒绝推进到支持域内
 > **没有剩余可写缺口**的 `完整实现`；不放宽为“改状态不实现”，也不把 ADR 全局范围缺口算作
-> 单命令完成。当前清单 **279 完整 / 700 部分 / 2 未实现**，只有真正合并且契约测试通过的
+> 单命令完成。当前清单 **280 完整 / 699 部分 / 2 未实现**，只有真正合并且契约测试通过的
 > 命令才改状态。
 
 | 批次 | 范围 | 状态 |
@@ -308,7 +308,7 @@
 | M1o 镜像/分解 | `MIRROR` 的 `MIRRTEXT=1`（`Text.mirrored` + DXF 71 bit2/MTEXT normal）与 `EXPLODE` 的 `EXPLMODE` 会话通道 | **已合并**（+2 complete；`Text.mirrored` 占 minor 15） |
 | M1p XPLODE 属性控制 | `XPLODE` 的 `All`/`Color`/`LAyer`/`LType`/`LWeight`/`Inherit from parent block`/`Explode` typed 控制、属性值回退为块定义 `ATTDEF`、非均匀/冻结层/XREF 具名拒绝；`TOLERANCE` 单元格语法缺口保持 partial | **已合并**（+1 complete） |
 | M1q 编组持久化 | `tables/groups.json`（minor 17）、`GROUP`/`-GROUP`/`UNGROUP`/`GROUPEDIT` 写入与撤销、DXF/DWG `AcDbGroup` 往返 | **已合并**（+4 complete；`CLASSICGROUP` 面板仍只读，保持 partial） |
-| M1r 命名视图持久化 | `tables/views.json`（minor 18）、`VIEW`/`-VIEW`/`VIEWGO` 保存/删除/恢复/撤销、DXF/DWG `VIEW` 表往返 | **已合并**（+3 complete；`NEWVIEW`/`VIEWBACK`/`VIEWFORWARD` 仍 partial） |
+| M1r 命名视图持久化 | `tables/views.json`（minor 18）、`VIEW`/`-VIEW`/`VIEWGO`/`NEWVIEW` 保存/删除/恢复/撤销、DXF/DWG `VIEW` 表往返、pan/orbit 导航历史 | **已合并**（+4 complete；`VIEWBACK`/`VIEWFORWARD` 仍 partial） |
 | M1s 2D 收口 V | `CDORDER` 逐绘制顺序范围重排、`BTRIM`/`BEXTEND` 复用 TRIM/EXTEND 目标派发、`DIMROTATED` 文字覆盖 + 对象选择形式 | **已合并**（+4 complete；交互提示仍属全局范围） |
 | M5 其他面板 | 发布/传递/标准/CUI/点云/PDF 底图 | 分析完成；多数是 `L`/架构级缺口，按 ADR/子系统逐个评估 |
 
@@ -943,7 +943,7 @@
 | `NEW` | 已实现 | — |
 | `NEWSHEETSET` | 部分实现 | 具名拒绝（`newsheetset.unsupported: this build has no sheet-set model`）。 |
 | `NEWSHOT` | 部分实现 | 具名拒绝（`newshot.unsupported: this build has no ShowMotion named-view/motion model`）。 |
-| `NEWVIEW` | 部分实现 | 带 `View` 载荷时转交持久化命名视图表（`tables/views.json`）；无载荷只报告缺少窗口/名称提示（`newview.needs_name`）；无矩形窗口定义形式 |
+| `NEWVIEW` | 完整实现 | typed `NEWVIEW <name>` 保存当前显示；`NEWVIEW WINDOW <name> <x1> <y1> <x2> <y2>` 按世界矩形取景并保存（复用 `ZOOM WINDOW` 的 `framing_rect`/`plan_camera`，不改当前相机）；两者都写入 `tables/views.json`，一条事务/一步撤销；无参数报告 `newview.needs_name`；窗口形式仅 2D 正交（`newview.window.requires_2d`）；Viewer 下写形式按 `PermissionDenied` 拒绝；无对话框/缩略图（全局范围） |
 | `OBJECTSCALE` | 部分实现 | 具名拒绝（`objectscale.unsupported`）：本构建无注释性对象模型。 |
 | `OFFSET` | 已实现 | `Through`/`Erase`/`Layer`/`Multiple`(单步)/固定距离；椭圆与椭圆弧→**样条**；`OFFSETGAPTYPE` Sharp/Fillet/Chamfer（含闭合环全部 wrap 角）；闭合环自交拒绝；开放折线远端自交未检查（AutoCAD 未文档化） |
 | `OFFSETEDGE` | 部分实现 | 具名拒绝（`offsetedge.unsupported: no 3D face/edge offset model`）。 |
@@ -1227,13 +1227,13 @@
 | `VBASTMT` | 部分实现 | 具名拒绝（`vbastmt.unsupported: no VBA runtime/IDE`）。 |
 | `VBAUNLOAD` | 部分实现 | 具名拒绝（`vbaunload.unsupported: no VBA runtime`）。 |
 | `VIEW` | 完整实现 | `SAVE/RESTORE/LIST/DELETE <name>`；命名视图持久化到文档 `tables/views.json`（minor 18：相机 + 2D/3D 模式 + 保存的 2D 相机 + 工作平面 + 活动空间），上限 32，第 33 个按 `view.cap_exceeded` 拒绝且不驱逐；`SAVE`/`DELETE` 一条事务/一步撤销；DXF/DWG `VIEW` 表经 acadrust 导入导出，世界高度↔像素比例转换按行报告 |
-| `VIEWBACK` | 部分实现 | 复用每视口 `ZOOM PREVIOUS` 栈；空栈为 `view.back.empty` no-op；pan/滚轮/orbit 不入栈 |
+| `VIEWBACK` | 部分实现 | 复用每视口后退栈；pan/orbit 连续手势按一次手势记入（首个命令记录、后续合并；指针抬起/`cancel_tool` 结束；离散命令开启新段）；空栈为 `view.back.empty` no-op；剩余缺口：ViewCube `cad_orbit` 拖拽没有结束信号（两次拖拽间无其它命令会合并），pinch 无起止边界、按连续导航不记录 |
 | `VIEWBASE` | 部分实现 | 具名拒绝（`viewbase.unsupported: no 3D model-to-drawing base/detail/section view model`）。 |
 | `VIEWCOMPONENT` | 部分实现 | 具名拒绝（`viewcomponent.unsupported: no 3D model-to-drawing base/detail/section view model`）。 |
 | `VIEWDETAIL` | 部分实现 | 具名拒绝（`viewdetail.unsupported: no 3D model-to-drawing base/detail/section view model`）。 |
 | `VIEWDETAILSTYLE` | 部分实现 | 具名拒绝（`viewdetailstyle.unsupported: no 3D model-to-drawing base/detail/section view model`）。 |
 | `VIEWEDIT` | 部分实现 | 具名拒绝（`viewedit.unsupported: no 3D model-to-drawing base/detail/section view model`）。 |
-| `VIEWFORWARD` | 部分实现 | 新的每视口前进栈（上限 16）；空栈 no-op；文档化偏离（与 ZOOM PREVIOUS 不共用历史；pan/滚轮/orbit 不入栈） |
+| `VIEWFORWARD` | 部分实现 | 与 `ZOOM PREVIOUS`/`VIEWBACK` 共用同一后退/前进历史（前进栈上限 16）；空栈 no-op；不再有“独立引擎”偏离；剩余缺口同 `VIEWBACK`（ViewCube 拖拽无结束信号、pinch 连续手势不记录） |
 | `VIEWGO` | 完整实现 | 与 `VIEW RESTORE` 同一持久化恢复路径；未知名称按 `view.unknown` 拒绝 |
 | `VIEWPLAY` | 部分实现 | 具名拒绝（`viewplay.unsupported: no named-view animation model`）。 |
 | `VIEWPLOTDETAILS` | 部分实现 | 具名拒绝（`viewplotdetails.unsupported`）：无打印详细信息模型。 |
@@ -1896,7 +1896,7 @@
 | 586 | `NEW` | 已实现 | Starts a new drawing. | — |
 | 587 | `NEWSHEETSET` | 部分实现 | Creates a new sheet set data file that manages drawing layouts, file paths, and project data. | 具名拒绝（`newsheetset.unsupported: this build has no sheet-set model`）。 |
 | 588 | `NEWSHOT` | 部分实现 | Creates a named view with motion that is played back when viewed with ShowMotion. | 具名拒绝（`newshot.unsupported: this build has no ShowMotion named-view/motion model`）。 |
-| 589 | `NEWVIEW` | 部分实现 | Saves a new, named view from the display in the current viewport, or by defining a rectangular window. | 带 `View` 载荷时转交持久化命名视图表（`tables/views.json`）；无载荷只报告缺少窗口/名称提示（`newview.needs_name`）；无矩形窗口定义形式。 |
+| 589 | `NEWVIEW` | 完整实现 | Saves a new, named view from the display in the current viewport, or by defining a rectangular window. | typed `NEWVIEW <name>` / `NEWVIEW WINDOW <name> <x1> <y1> <x2> <y2>`；写入 `tables/views.json`，一条事务/一步撤销；窗口仅 2D 正交；无对话框/缩略图（全局范围）。 |
 | 590 | `-OBJECTSCALE` | 部分实现 | From the Command prompt, adds or deletes supported scales for annotative objects. | 具名拒绝（`-objectscale.unsupported`）：同一拒绝的命令行拼写。 |
 | 591 | `OBJECTSCALE` | 部分实现 | Adds or deletes supported scales for annotative objects. | 具名拒绝（`objectscale.unsupported`）：无注释性对象模型。 |
 | 592 | `OFFSET` | 已实现 | Creates concentric circles, parallel lines, and parallel curves. | `Through`/`Erase`/`Layer`/`Multiple`(单步)/固定距离；椭圆与椭圆弧→**样条**；`OFFSETGAPTYPE` Sharp/Fillet/Chamfer（含闭合环全部 wrap 角）；闭合环自交拒绝；开放折线远端自交未检查（AutoCAD 未文档化） |
@@ -2221,13 +2221,13 @@
 | 911 | `VBAUNLOAD` | 部分实现 | Unloads a global VBA project. | 具名拒绝（`vbaunload.unsupported: no VBA runtime`）。 |
 | 912 | `-VIEW` | 完整实现 | Saves and restores named model space views, layout views, and preset views from the Command prompt. | `VIEW` 的别名，同一实现与同一持久化表 |
 | 913 | `VIEW` | 完整实现 | Saves and restores named model space views, layout views, and preset views. | `SAVE/RESTORE/LIST/DELETE <name>`；持久化 `tables/views.json`（minor 18：相机+模式+保存的 2D 相机+工作平面+空间），上限 32（第 33 个按 `view.cap_exceeded` 拒绝）；SAVE/DELETE 一条事务/一步撤销；DXF/DWG 表达有损且逐行报告 |
-| 914 | `VIEWBACK` | 部分实现 | Restores sequential views backward after changing the view. | 复用每视口 `ZOOM PREVIOUS` 栈；空栈为 `view.back.empty` no-op；pan/滚轮/orbit 不入栈（声明偏离） |
+| 914 | `VIEWBACK` | 部分实现 | Restores sequential views backward after changing the view. | 复用每视口后退栈；pan/orbit 连续手势按一次手势记入（首个命令记录、后续合并；指针抬起/`cancel_tool` 结束）；空栈为 `view.back.empty` no-op；剩余缺口：ViewCube 拖拽无结束信号、pinch 连续手势不记录 |
 | 915 | `VIEWBASE` | 部分实现 | Creates a base view from model space or Autodesk Inventor models. | 具名拒绝（`viewbase.unsupported: no 3D model-to-drawing base/detail/section view model`）。 |
 | 916 | `VIEWCOMPONENT` | 部分实现 | Selects components from a model documentation drawing view for editing. | 具名拒绝（`viewcomponent.unsupported: no 3D model-to-drawing base/detail/section view model`）。 |
 | 917 | `VIEWDETAIL` | 部分实现 | Creates a detail view of a portion of a model documentation drawing view. | 具名拒绝（`viewdetail.unsupported: no 3D model-to-drawing base/detail/section view model`）。 |
 | 918 | `VIEWDETAILSTYLE` | 部分实现 | Creates and modifies detail view styles. | 具名拒绝（`viewdetailstyle.unsupported: no 3D model-to-drawing base/detail/section view model`）。 |
 | 919 | `VIEWEDIT` | 部分实现 | Edits an existing model documentation drawing view. | 具名拒绝（`viewedit.unsupported: no 3D model-to-drawing base/detail/section view model`）。 |
-| 920 | `VIEWFORWARD` | 部分实现 | Restores sequential views forward after displaying a previous view with VIEWBACK or Zoom Previous. | 新的每视口前进栈（上限 16）；空栈 no-op；**声明偏离**：不与 ZOOM PREVIOUS 共用历史，pan/滚轮/orbit 不入栈 |
+| 920 | `VIEWFORWARD` | 部分实现 | Restores sequential views forward after displaying a previous view with VIEWBACK or Zoom Previous. | 与 `ZOOM PREVIOUS`/`VIEWBACK` 共用同一后退/前进历史（前进栈上限 16）；空栈 no-op；不再有独立引擎偏离；剩余缺口同 `VIEWBACK` |
 | 921 | `VIEWGO` | 完整实现 | Restores a named view. | 与 `VIEW RESTORE` 同一持久化路径；未知名称按 `view.unknown` 拒绝 |
 | 922 | `VIEWPLAY` | 部分实现 | Plays the animation associated to a named view. | 具名拒绝（`viewplay.unsupported: no named-view animation model`）。 |
 | 923 | `VIEWPLOTDETAILS` | 部分实现 | Displays information about completed plot and publish jobs. | 具名拒绝（`viewplotdetails.unsupported`）：无打印详细信息模型。 |
@@ -2508,7 +2508,7 @@
 | OFFSET `ELLIPSE` | **已实现（2026-11-16）** | 等距偏移曲线不是椭圆，需要新偏移曲线类型或显式折线近似 |
 | 布局/视口 post-import 写 API | **L** | `LAYOUT` 写形式、`VPORTS`/`VPCLIP`/`VPSCALE`/`LAYVPI` 目前是稳定具名拒绝；`VPMAX`/`VPMIN` 只是会话标记 |
 | xdata 模型 | **L** | `XDLIST` 只读并报告 `xdlist.not_retained`；域不保留 xdata |
-| 命名视图持久化 | **已实现（2026-11-24，minor 18）** | `VIEW`/`-VIEW`/`VIEWGO` 写入 `tables/views.json`（相机/模式/保存的 2D 相机/工作平面/空间），跨保存/打开保留；DXF/DWG 表达有损并逐行报告。`NEWVIEW`/`VIEWBACK`/`VIEWFORWARD` 仍 partial |
+| 命名视图持久化 | **已实现（2026-11-24，minor 18）** | `VIEW`/`-VIEW`/`VIEWGO`/`NEWVIEW`（含 `WINDOW` 形式）写入 `tables/views.json`（相机/模式/保存的 2D 相机/工作平面/空间），跨保存/打开保留；DXF/DWG 表达有损并逐行报告。`VIEWBACK`/`VIEWFORWARD` 仍 partial（ViewCube 拖拽无结束信号、pinch 不记录） |
 | 系统剪贴板 | **L** | 现为应用内剪贴板；不跨应用、替换文档即清空 |
 | DWG 精确往返 | **L** | `EXPORT` 选 `.dwg` 的实验性导出有损/不完整（上游 `DwgWriter`），仅合成 self-roundtrip 证据 |
 | `VIEWRES`/`VSCURRENT` 渲染器接线 | **S** | 目前只写会话 token；tessellation/visual-style 效果 NOT IMPLEMENTED / NOT pixel-verified |

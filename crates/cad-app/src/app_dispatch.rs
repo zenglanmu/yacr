@@ -474,8 +474,8 @@ impl Application {
             // Wave 11 aliases: `3DORBIT`/`3DPAN` are the **same** camera handlers
             // as `ORBIT`/`PAN` (typed payloads, identical refusals); there is no
             // interactive 3D navigation controller in this build.
-            ExtendedCommandId::ThreeDOrbit => self.orbit(command)?,
-            ExtendedCommandId::ThreeDPan => self.pan(command)?,
+            ExtendedCommandId::ThreeDOrbit => self.orbit(session, command)?,
+            ExtendedCommandId::ThreeDPan => self.pan(session, command)?,
             // Wave 14: stable named refusals.
             ExtendedCommandId::PolySolid
             | ExtendedCommandId::Extrude

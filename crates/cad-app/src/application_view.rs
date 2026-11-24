@@ -6,6 +6,8 @@
 
 use super::*;
 
+use crate::session_state::NavigationStepKind;
+
 /// Whether a conic's plane normal is vertical (parallel to ±Z) within the
 /// format's tolerance, so the curve lies in an XY-parallel plane.
 ///
@@ -199,7 +201,11 @@ impl Application {
     /// Requires an `Orbit { yaw, pitch }` payload; the camera must be in 3D mode
     /// so an accidental orbit never disturbs the exact 2D view. The near-plane
     /// guard lives in [`Camera::orbit`].
-    pub(crate) fn orbit(&mut self, command: &Command) -> CadResult<CommandOutcome> {
+    pub(crate) fn orbit(
+        &mut self,
+        session: &mut SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
         let CommandPayload::Orbit { yaw, pitch } = command.payload else {
             return Err(CadError::InvalidInput(
                 "Orbit needs a { yaw, pitch } payload in radians".into(),
@@ -211,7 +217,17 @@ impl Application {
                 "Orbit is only defined in the three-dimensional view".into(),
             ));
         }
-        viewport.camera.orbit(yaw, pitch)?;
+        if yaw == 0.0 && pitch == 0.0 {
+            return Ok(CommandOutcome::none());
+        }
+        // Validate the rotation on a copy first: a refused orbit must not leave
+        // a phantom `ZOOM PREVIOUS` step.
+        let mut candidate = viewport.camera;
+        candidate.orbit(yaw, pitch)?;
+        if session.begin_navigation_step(NavigationStepKind::Orbit) {
+            viewport.push_view_snapshot();
+        }
+        viewport.camera = candidate;
         Ok(CommandOutcome {
             objects: Vec::new(),
             changes: None,
@@ -335,10 +351,10 @@ impl Application {
 
     /// Record the viewport's current view as one `ZOOM PREVIOUS` step.
     ///
-    /// Called **before** each discrete view change (FIT, a zoom factor,
-    /// `ZOOM WINDOW`, `STANDARDVIEW`, `SWITCH2D3D`, `PROJECTION`, `RESETVIEW`);
-    /// see [`crate::zoom_history`] for the push rule and for why continuous
-    /// navigation never records a step.
+    /// Called **before** each recorded view change (FIT, a zoom factor/window,
+    /// `STANDARDVIEW`, `SWITCH2D3D`, `PROJECTION`, `RESETVIEW`, and the first
+    /// command of a continuous pan/orbit run); see [`crate::zoom_history`] for
+    /// the push and merge rules.
     pub(crate) fn push_view_snapshot(&mut self, viewport_id: &ViewportId) -> CadResult<()> {
         let viewport = self
             .workspace
@@ -365,7 +381,11 @@ impl Application {
     /// Only the eye and target move; the projection and the orbit frame are
     /// preserved. The 2D plan pan is the special case where `eye` and `target`
     /// share an `x/y`, so this works unchanged in 3D.
-    pub(crate) fn pan(&mut self, command: &Command) -> CadResult<CommandOutcome> {
+    pub(crate) fn pan(
+        &mut self,
+        session: &mut SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
         let CommandPayload::Points(points) = &command.payload else {
             return Err(CadError::InvalidInput(
                 "Pan needs a world-space delta point".into(),
@@ -378,6 +398,15 @@ impl Application {
             return Err(CadError::InvalidInput("Pan delta must be finite".into()));
         }
         let viewport = self.viewport_mut(command)?;
+        if delta.x == 0.0 && delta.y == 0.0 {
+            return Ok(CommandOutcome::none());
+        }
+        // One continuous pan run is one `ZOOM PREVIOUS` step (pointer moves pass
+        // through here one per event). The zero delta above is a no-op and never
+        // records a step.
+        if session.begin_navigation_step(NavigationStepKind::Pan) {
+            viewport.push_view_snapshot();
+        }
         // The delta is a screen-plane world offset; shift both eye and target so
         // the view direction and distance are unchanged (audit F02 large coords).
         let shift = Point3 {
