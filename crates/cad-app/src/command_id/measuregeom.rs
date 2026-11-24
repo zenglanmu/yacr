@@ -19,7 +19,7 @@
 //! | `MEASUREGEOM AREA` | `AREA` | `BeginMeasurement(Area)` |
 //! | `MEASUREGEOM POLYLINE` | `MEASUREPOLYLINE` | `BeginMeasurement(PolylineLength)` |
 //! | `MEASUREGEOM RADIUS` | this command, `Radius` payload | a `measuregeom.radius` diagnostic |
-//! | `MEASUREGEOM VOLUME` | this command, `Volume` payload | explicit `Unsupported` |
+//! | `MEASUREGEOM VOLUME` | this command, `Volume` payload | a `measuregeom.volume` diagnostic for one exact 3D solid body |
 //!
 //! The first four start *the same* interaction request and selector the base
 //! command uses (`DIST`/`MEASUREANGLE`/`AREA`/`MEASUREPOLYLINE`), so the capture,
@@ -55,12 +55,24 @@
 //! No transaction, `ChangeSet`, history entry or revision bump: `RADIUS` is a
 //! report, exactly like `AREA OBJECT`. Viewer and Work both allow it.
 //!
-//! ## `VOLUME` and everything else not implemented
+//! ## `VOLUME` (read-only)
 //!
-//! `MEASUREGEOM VOLUME` is [`crate::CadError::Unsupported`] with the stable
-//! `measuregeom.volume_unsupported` code: this build has no 3D-solid/volume
-//! model, so no number is fabricated. AutoCAD's further `MEASUREGEOM` options
-//! (options from the full product outside the six named above, dynamic
-//! measurement, multi-point sequences beyond the existing tools) are not
-//! implemented and are not admitted by the grammar; the router never maps an
-//! unknown word onto a guess.
+//! The current selection must resolve to **exactly one** exact 3D solid
+//! [`cad_domain::Body3d`] (payload [`crate::MeasureGeomOption::Volume`]). The
+//! report is produced by the **same** `MASSPROP` body path
+//! (`mass_prop_bodies` / `integrate_body`), never a second volume formula: a
+//! body without an exact B-rep, a non-solid topology or a kernel that cannot
+//! lift the B-rep is the shared `massprop.body_*` refusal. Selecting more than
+//! one distinct body is `measuregeom.volume.multiple`; selecting any non-body
+//! object is `measuregeom.volume.unsupported` (the kinds are named); an empty
+//! selection is `measuregeom.volume.selection_empty`.
+//!
+//! No transaction, `ChangeSet`, history entry or revision bump: `VOLUME` is a
+//! report. Viewer and Work both allow it.
+//!
+//! ## Everything else not implemented
+//!
+//! AutoCAD's further `MEASUREGEOM` options (options from the full product
+//! outside the six named above, dynamic measurement, multi-point sequences
+//! beyond the existing tools) are not implemented and are not admitted by the
+//! grammar; the router never maps an unknown word onto a guess.

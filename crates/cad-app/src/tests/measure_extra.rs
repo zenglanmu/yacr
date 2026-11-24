@@ -494,7 +494,9 @@ fn measuregeom_radius_refuses_empty_multiple_and_wrong_kinds() {
 }
 
 #[test]
-fn measuregeom_volume_is_an_explicit_unsupported_and_bare_needs_option() {
+fn measuregeom_volume_without_a_body_and_bare_options_are_named_refusals() {
+    // The volume measurement itself is exercised against the fake exact-body
+    // kernel in `drawing::massprop_solid`; here the empty selection is pinned.
     let (mut app, mut session) = app_with_objects();
     let volume = execute(
         &mut app,
@@ -502,9 +504,9 @@ fn measuregeom_volume_is_an_explicit_unsupported_and_bare_needs_option() {
         CommandId::MeasureGeom,
         CommandPayload::MeasureGeom(MeasureGeomOption::Volume),
     )
-    .expect_err("VOLUME is not implemented");
+    .expect_err("an empty selection is refused");
     assert!(
-        format!("{volume:?}").contains("measuregeom.volume_unsupported"),
+        format!("{volume:?}").contains("measuregeom.volume.selection_empty"),
         "{volume:?}"
     );
 
