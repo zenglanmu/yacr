@@ -56,10 +56,18 @@ impl Application {
             .clone();
         let mut ids = Vec::with_capacity(refs.len());
         for reference in &refs {
-            if reference.document != document_id
-                || !reference.instance.0.is_empty()
-                || reference.sub_element.is_some()
-            {
+            if !reference.instance.0.is_empty() {
+                return Err(invalid(
+                    "refedit",
+                    "nested",
+                    format!(
+                        "entity {} is a block-instance member; the working set holds only \
+                         directly addressable model-space objects",
+                        reference.entity.0
+                    ),
+                ));
+            }
+            if reference.document != document_id || reference.sub_element.is_some() {
                 return Err(invalid(
                     "refedit",
                     "selection",
