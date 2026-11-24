@@ -23,6 +23,9 @@ import {
   isClipArgument, isPositiveDecimal, isSignedDecimal, isXclipArgument, tokens,
 } from './argument-clip-grammar.ts';
 import {
+  isLayerStateSaveArgument, isLeaderArgument, isPyramidArgument,
+} from './argument-3d-and-leader-grammar.ts';
+import {
   isMLeaderAlignArgument, isMLeaderEditArgument, isMlEditArgument, isToleranceArgument,
 } from './argument-mleader-grammar.ts';
 import {
@@ -861,71 +864,7 @@ function isGroupEditArgument(argument: string): boolean {
   return parts.slice(2).every(part => /^\d+(,\d+)*$/.test(part));
 }
 
-/** `PYRAMID [INSCRIBED|I|CIRCUMSCRIBED|C] <sides> <cx> <cy> <radius> <height>`. */
-function isPyramidArgument(argument: string): boolean {
-  const parts = tokens(argument);
-  const first = (parts[0] ?? '').toUpperCase();
-  const offset = ['INSCRIBED', 'I', 'CIRCUMSCRIBED', 'C'].includes(first) ? 1 : 0;
-  const values = parts.slice(offset);
-  return values.length === 5
-    && /^[0-9]+$/.test(values[0])
-    && values.slice(1).every(isSignedDecimal);
-}
 
-/** `LAYERSTATESAVE [<name>|?]`: `?` alone is the list spelling, anything else a name. */
-function isLayerStateSaveArgument(argument: string): boolean {
-  const text = argument.trim();
-  if (text.length === 0) return false;
-  return text === '?' || !text.startsWith('?');
-}
-
-/**
- * `QLEADER`/`LEADER`: the shared `CONTENT MTEXT|BLOCK <name>|TOLERANCE` prefix,
- * `QLEADER`'s own `ARROW ON|OFF`/`MAXPOINTS <n>`, then two `x,y` pairs and an
- * optional (possibly empty) text tail.
- *
- * The text tail is free content, so it is not inspected here; the host owns every
- * semantic refusal (`mleader.*`, `qleader.invalid_max_points`).
- */
-function isLeaderArgument(argument: string, qleader: boolean): boolean {
-  const parts = tokens(argument);
-  let index = 0;
-  let content = false;
-  let arrow = false;
-  let maxPoints = false;
-  while (index < parts.length) {
-    const word = (parts[index] ?? '').toUpperCase();
-    if (word === 'CONTENT') {
-      if (content) return false;
-      content = true;
-      const kind = (parts[index + 1] ?? '').toUpperCase();
-      if (kind === 'BLOCK') {
-        if (parts.length <= index + 2) return false;
-        index += 3;
-      } else if (kind === 'MTEXT' || kind === 'TOLERANCE') {
-        index += 2;
-      } else {
-        return false;
-      }
-    } else if (qleader && word === 'ARROW') {
-      if (arrow) return false;
-      const value = (parts[index + 1] ?? '').toUpperCase();
-      if (value !== 'ON' && value !== 'OFF') return false;
-      arrow = true;
-      index += 2;
-    } else if (qleader && word === 'MAXPOINTS') {
-      if (maxPoints) return false;
-      if (!/^[0-9]+$/.test(parts[index + 1] ?? '')) return false;
-      maxPoints = true;
-      index += 2;
-    } else {
-      break;
-    }
-  }
-  const coordinates = parts.slice(index);
-  return coordinates.length >= 2
-    && isCoordinatePair(coordinates[0]) && isCoordinatePair(coordinates[1]);
-}
 
 /**
  * `PAGESETUP`/`-PAGESETUP`: `<layout> <paper> <width> <height> [<num>:<den>]
