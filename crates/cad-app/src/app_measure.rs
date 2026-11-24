@@ -226,22 +226,18 @@ impl Application {
             unit: crate::point_report::unit_symbol(&document.units).map(str::to_string),
             logical_pixel_distance: snap.as_ref().map(|snap| snap.logical_pixel_distance),
         };
+        let display = document.drawing.units_display();
+        let precision = document.units.decimal_places;
+        let x = display.format_length(report.position.x, precision);
+        let y = display.format_length(report.position.y, precision);
+        let z = display.format_length(report.position.z, precision);
         let message = match report.snap {
             Some(kind) => format!(
-                "ID: {:.6}, {:.6}, {:.6} ({} snap, {})",
-                report.position.x,
-                report.position.y,
-                report.position.z,
+                "ID: {x}, {y}, {z} ({} snap, {})",
                 kind.as_str(),
                 report.space.as_str()
             ),
-            None => format!(
-                "ID: {:.6}, {:.6}, {:.6} ({})",
-                report.position.x,
-                report.position.y,
-                report.position.z,
-                report.space.as_str()
-            ),
+            None => format!("ID: {x}, {y}, {z} ({})", report.space.as_str()),
         };
         Ok(CommandOutcome {
             objects: Vec::new(),
@@ -346,13 +342,23 @@ impl Application {
             precision,
         };
         let record = self.measurement.measure(&request)?;
+        let value = match record.algorithm {
+            MeasurementAlgorithm::Angle3Points => document
+                .drawing
+                .units_display()
+                .format_angle(record.value, false),
+            _ => document
+                .drawing
+                .units_display()
+                .format_length(record.value, document.units.decimal_places),
+        };
         Ok(CommandOutcome {
             objects: Vec::new(),
             changes: None,
             diagnostics: vec![Diagnostic {
                 object: None,
                 code: "measure.result".into(),
-                message: format!("{:?}: {:.6}", record.algorithm, record.value),
+                message: format!("{:?}: {value}", record.algorithm),
             }],
             measurement: Some(record),
             point_report: None,

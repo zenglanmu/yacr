@@ -6,6 +6,7 @@
 
 use super::*;
 use crate::selection::model_ref;
+use std::sync::Arc;
 
 use cad_db::{BlockDefinition, DbEntity, DbObject, DrawingDatabaseBuilder, Layer, Layout};
 
@@ -377,17 +378,53 @@ fn edittime_reports_clock_and_names_the_untracked_sources() {
     assert!(report(&outcome, "edittime.report")
         .message
         .contains("revision"));
+    assert!(outcome
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "edittime.not_stored"));
     let untracked = outcome
         .diagnostics
         .iter()
         .filter(|diagnostic| diagnostic.code == "edittime.not_tracked")
         .count();
-    assert_eq!(
-        untracked, 2,
-        "creation/edit time and uptime are not tracked"
-    );
+    assert_eq!(untracked, 1, "active editing time/uptime is not tracked");
     assert_eq!(revision(&app), before);
     assert!(!app.can_undo(&DocumentId(1)));
+}
+
+#[test]
+fn edittime_reports_the_stored_creation_and_update_instants() {
+    let (mut app, mut session) = app_with_blocks();
+    let drawing = Arc::make_mut(
+        &mut app
+            .workspace
+            .documents
+            .get_mut(&DocumentId(1))
+            .unwrap()
+            .drawing,
+    );
+    drawing.record_document_saved_at(1_700_000_000);
+    let outcome =
+        execute(&mut app, &mut session, ExtendedCommandId::EditTime).expect("EDITTIME is admitted");
+    let creation = report(&outcome, "edittime.creation");
+    assert!(
+        creation.message.contains("2023-11-14T22:13:20Z"),
+        "{}",
+        creation.message
+    );
+    let updated = report(&outcome, "edittime.last_updated");
+    assert!(
+        updated.message.contains("2023-11-14T22:13:20Z"),
+        "{}",
+        updated.message
+    );
+    assert!(
+        !outcome
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "edittime.not_stored"),
+        "both stored instants are reported"
+    );
 }
 
 #[test]
@@ -501,22 +538,23 @@ fn time_names_every_untracked_field_and_reports_only_real_values() {
         report(&outcome, "time.tracked").message.contains("tracked"),
         "the report names what it can measure"
     );
-    // The clock is real; creation/last update/elapsed command/elapsed timer are
-    // each named `time.not_tracked` rather than printed as a made-up value.
+    // The clock is real; an unsaved document names both missing instants rather
+    // than printing an epoch.
     assert!(report(&outcome, "time.utc").message.contains("current UTC"));
+    let not_stored = outcome
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "time.not_stored")
+        .count();
+    assert_eq!(not_stored, 2, "creation and last-update are not stored yet");
     let untracked: Vec<&str> = outcome
         .diagnostics
         .iter()
         .filter(|diagnostic| diagnostic.code == "time.not_tracked")
         .map(|diagnostic| diagnostic.message.as_str())
         .collect();
-    assert_eq!(untracked.len(), 4, "{untracked:?}");
-    for field in [
-        "creation time",
-        "last-update time",
-        "elapsed command time",
-        "elapsed timer",
-    ] {
+    assert_eq!(untracked.len(), 2, "{untracked:?}");
+    for field in ["elapsed command time", "elapsed timer"] {
         assert!(
             untracked.iter().any(|message| message.contains(field)),
             "missing {field}: {untracked:?}"
@@ -530,4 +568,42 @@ fn time_names_every_untracked_field_and_reports_only_real_values() {
         .contains("local-time"));
     assert_eq!(revision(&app), before);
     assert!(!app.can_undo(&DocumentId(1)));
+}
+
+#[test]
+fn time_reports_the_stored_creation_and_update_instants() {
+    let (mut app, mut session) = app_with_blocks();
+    let drawing = Arc::make_mut(
+        &mut app
+            .workspace
+            .documents
+            .get_mut(&DocumentId(1))
+            .unwrap()
+            .drawing,
+    );
+    // A first save, then a later one: creation stays, update moves.
+    drawing.record_document_saved_at(1_700_000_000);
+    drawing.record_document_saved_at(1_700_000_100);
+    let outcome = app
+        .execute(&mut session, command(CommandId::Time, CommandPayload::None))
+        .expect("TIME is admitted");
+    let creation = report(&outcome, "time.creation");
+    assert!(
+        creation.message.contains("2023-11-14T22:13:20Z"),
+        "{}",
+        creation.message
+    );
+    let updated = report(&outcome, "time.last_updated");
+    assert!(
+        updated.message.contains("2023-11-14T22:15:00Z"),
+        "{}",
+        updated.message
+    );
+    assert!(
+        !outcome
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "time.not_stored"),
+        "both stored instants are reported"
+    );
 }

@@ -23,6 +23,19 @@ use super::*;
 pub const MAX_EXPORT_RECORDS: usize = 32;
 
 impl HostController {
+    /// The document's unit context plus its stored `UNITS` display settings.
+    ///
+    /// The unit context lives on the document slot and the display block on the
+    /// database header, so the two are read together here and never re-derived.
+    /// `None` without a document.
+    pub fn document_units(&self) -> Option<(cad_domain::UnitContext, cad_db::UnitsDisplay)> {
+        self.application
+            .workspace
+            .documents
+            .get(&self.document_id)
+            .map(|document| (document.units.clone(), *document.drawing.units_display()))
+    }
+
     /// Encode the current document as a [`DocumentSnapshot`].
     ///
     /// The unit context, identity and resource keys come from the document slot
@@ -33,6 +46,20 @@ impl HostController {
     /// A missing document is an explicit failure: there is nothing to encode and
     /// an empty snapshot would be a fabricated document.
     pub fn snapshot_document(&self) -> CadResult<cad_db::DocumentSnapshot> {
+        self.snapshot_document_at(None)
+    }
+
+    /// Encode the current document, stamping one durable save instant.
+    ///
+    /// The save path calls this with the one clock read of the write: the bytes
+    /// it encodes become the archive, and only after the write is durable does it
+    /// call [`HostController::record_document_saved_at`] with the same instant.
+    /// Nothing is mutated here, so a failed write leaves the live document's
+    /// reported timestamps untouched.
+    pub fn snapshot_document_at(
+        &self,
+        saved_at: Option<u64>,
+    ) -> CadResult<cad_db::DocumentSnapshot> {
         let document = self
             .application
             .workspace
@@ -41,11 +68,12 @@ impl HostController {
             .ok_or_else(|| CadError::InvalidInput("no document is open".into()))?;
         let mut snapshot = document
             .drawing
-            .snapshot(
+            .snapshot_at(
                 document.units.clone(),
                 document.identity.clone(),
                 document.resource_keys.clone(),
                 document.drawing.revision(),
+                saved_at,
             )
             // A marker, not prose: callers match on `ymodel.*` (D13).
             .map_err(|error| {
@@ -325,6 +353,23 @@ impl HostController {
             document.persistence.foreign_entries = foreign_entries;
         }
         self.dirty_scope = cad_db::ChangeScope::default();
+    }
+
+    /// Record the save instant the durable write carried.
+    ///
+    /// Called only after the archive bytes are on disk, with the same instant
+    /// the snapshot was encoded with, so the live `TIME`/`EDITTIME` report and
+    /// the archive cannot disagree. Persistence metadata only: no revision, no
+    /// `ChangeSet`, no undo step and no dirty scope.
+    pub fn record_document_saved_at(&mut self, saved_at: u64) {
+        if let Some(document) = self
+            .application
+            .workspace
+            .documents
+            .get_mut(&self.document_id)
+        {
+            Arc::make_mut(&mut document.drawing).record_document_saved_at(saved_at);
+        }
     }
 
     /// Retain the bytes just committed to the document's own file.
