@@ -24,9 +24,11 @@ mod attributes;
 mod bim;
 mod block_edit;
 mod bounds;
+mod document_metadata;
 mod edit;
 mod header_geometry;
 mod header_meta;
+mod header_values;
 mod layer_edit;
 mod layer_inherit;
 mod layer_patch;
@@ -48,6 +50,8 @@ mod test_support;
 pub use self::bim::BimPatch;
 pub use access::{EntityDisplayState, VisibilityMembership, VisibilityStateMembership};
 pub use block_edit::{BlockPatch, BlockRow};
+pub use document_metadata::{DocumentMetadata, DocumentMetadataField};
+pub use header_values::HeaderValuesPatch;
 pub use layer_edit::{DEFAULT_LAYER_NAME, ILLEGAL_LAYER_NAME_CHARS};
 pub use layer_inherit::LayerScope;
 pub use layer_patch::{LayerPatch, LayerRow};
@@ -240,6 +244,10 @@ pub struct DrawingDatabase {
     pub(crate) mleader_style_ids_by_name: BTreeMap<String, MLeaderStyleId>,
     /// Drawing-global active annotation scale (`CANNOSCALE`), when set.
     pub(crate) active_annotation_scale: Option<ActiveAnnotationScale>,
+    /// Document-level summary metadata (`DWGPROPS`): title/author/subject/
+    /// keywords/comments plus custom properties. Empty for every document that
+    /// stores none; written by [`DrawingDatabase::set_document_metadata`].
+    pub(crate) document_metadata: DocumentMetadata,
     /// The source drawing's declared text code page (`$DWGCODEPAGE` /
     /// `DOCUMENT.header.code_page`), exactly as the reader reported it.
     ///

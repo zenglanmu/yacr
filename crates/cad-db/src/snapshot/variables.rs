@@ -20,7 +20,15 @@
 //! limits_max              null | [x,y]   $LIMMAX
 //! code_page               null | string  $DWGCODEPAGE, raw
 //! active_annotation_scale null | {name, value, named, scale}
+//! metadata                absent | {title?, author?, subject?, keywords?,
+//!                         comments?, custom?: {name: value}}
 //! ```
+//!
+//! `metadata` is the `DWGPROPS` summary block. It is **absent** when nothing is
+//! stored, so a document with no metadata writes exactly the pre-metadata
+//! header; it needs no format bump. Fields inside the block are optional
+//! (absent = `None`), and `custom` is a string→string object. Unknown keys are
+//! refused, like every other header variable.
 //!
 //! Every `f64` goes through [`cad_domain::ymodel::json`], so a legacy non-finite
 //! `$PDSIZE` survives bit-exactly as `{"$f64":"nan"}` instead of forcing the
@@ -43,7 +51,7 @@ use cad_domain::{Point3, ScaleId};
 use serde_json::{Map, Value};
 
 use super::SnapshotError;
-use crate::drawing::DrawingDatabase;
+use crate::drawing::{DocumentMetadata, DrawingDatabase};
 use crate::tables::{ActiveAnnotationScale, Scale};
 
 /// The header variable object, exactly as stored in `document.json`.
@@ -80,7 +88,38 @@ pub(crate) fn encode(db: &DrawingDatabase) -> Result<Value, SnapshotError> {
             .as_ref()
             .map_or(Value::Null, |active| encode_active(db, active)),
     );
+    // DWGPROPS metadata: only a document that stores some writes the key, so
+    // every other archive stays byte-identical to a pre-metadata header.
+    if !db.document_metadata.is_empty() {
+        map.insert("metadata".to_string(), encode_metadata(db));
+    }
     Ok(Value::Object(map))
+}
+
+/// The `DWGPROPS` summary/metadata block.
+fn encode_metadata(db: &DrawingDatabase) -> Value {
+    let metadata = &db.document_metadata;
+    let mut map = Map::new();
+    for (key, value) in [
+        ("title", &metadata.title),
+        ("author", &metadata.author),
+        ("subject", &metadata.subject),
+        ("keywords", &metadata.keywords),
+        ("comments", &metadata.comments),
+    ] {
+        if let Some(value) = value {
+            map.insert(key.to_string(), Value::from(value.as_str()));
+        }
+    }
+    if !metadata.custom.is_empty() {
+        let custom = metadata
+            .custom
+            .iter()
+            .map(|(name, value)| (name.clone(), Value::from(value.as_str())))
+            .collect();
+        map.insert("custom".to_string(), Value::Object(custom));
+    }
+    Value::Object(map)
 }
 
 /// One active annotation scale plus the Scale row its name resolves to.
@@ -129,6 +168,7 @@ pub(crate) fn apply_to(
     let limits_max = reader.opt_f64x2("limits_max")?;
     let code_page = reader.opt_string("code_page")?;
     let active = reader.take_active_annotation_scale("active_annotation_scale", db)?;
+    let metadata = reader.take_document_metadata("metadata")?;
     reader.finish()?;
 
     db.linetype_scale = linetype_scale;
@@ -139,6 +179,7 @@ pub(crate) fn apply_to(
     db.limits_max = limits_max;
     db.code_page = code_page;
     db.active_annotation_scale = active;
+    db.document_metadata = metadata;
 
     // `DrawingDatabase::invalidate_bounds_cache` is `pub(super)` to the
     // `drawing` module, so a sibling module cannot call it. Replacing the memo
@@ -264,6 +305,70 @@ impl Reader {
             Value::String(text) => Ok(text),
             _ => Err(self.error(format!("{field}: expected a string"))),
         }
+    }
+
+    /// Read a string field only when the key is present; a present `null` is
+    /// the same as absent (a tolerant read of a hand-written archive), while a
+    /// present non-string is refused.
+    fn opt_string_if_present(&mut self, field: &str) -> Result<Option<String>, SnapshotError> {
+        match self.map.remove(field) {
+            None | Some(Value::Null) => Ok(None),
+            Some(Value::String(text)) => Ok(Some(text)),
+            Some(_) => Err(self.error(format!("{field}: expected a string"))),
+        }
+    }
+
+    /// Read the `DWGPROPS` metadata block. A missing key is "no metadata"; a
+    /// present `null` is treated the same way. Inside the block every field is
+    /// optional and `custom` must be a string→string object.
+    fn take_document_metadata(
+        &mut self,
+        variable: &str,
+    ) -> Result<DocumentMetadata, SnapshotError> {
+        let Some(value) = self.map.remove(variable) else {
+            return Ok(DocumentMetadata::default());
+        };
+        if value.is_null() {
+            return Ok(DocumentMetadata::default());
+        }
+        let context = format!("{} {variable}", self.context);
+        let mut reader = Reader::new(&value, &context)?;
+        let metadata = DocumentMetadata {
+            title: reader.opt_string_if_present("title")?,
+            author: reader.opt_string_if_present("author")?,
+            subject: reader.opt_string_if_present("subject")?,
+            keywords: reader.opt_string_if_present("keywords")?,
+            comments: reader.opt_string_if_present("comments")?,
+            custom: reader.take_custom("custom")?,
+        };
+        reader.finish()?;
+        Ok(metadata)
+    }
+
+    fn take_custom(
+        &mut self,
+        field: &str,
+    ) -> Result<std::collections::BTreeMap<String, String>, SnapshotError> {
+        let Some(value) = self.map.remove(field) else {
+            return Ok(std::collections::BTreeMap::new());
+        };
+        if value.is_null() {
+            return Ok(std::collections::BTreeMap::new());
+        }
+        let Value::Object(map) = value else {
+            return Err(self.error(format!("{field}: expected an object")));
+        };
+        let mut custom = std::collections::BTreeMap::new();
+        for (name, value) in map {
+            if name.is_empty() {
+                return Err(self.error(format!("{field}: a property name is empty")));
+            }
+            let Value::String(text) = value else {
+                return Err(self.error(format!("{field}.{name}: expected a string value")));
+            };
+            custom.insert(name, text);
+        }
+        Ok(custom)
     }
 }
 
