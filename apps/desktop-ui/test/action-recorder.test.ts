@@ -23,6 +23,7 @@ import {
   recordStopCommand,
 } from '../src/recorder/recorder.ts';
 import { createRecorderStore } from '../src/recorder/recorder-store.ts';
+import { localSelectorFor } from '../src/commands/local-selectors.ts';
 
 const noWait = async () => {};
 type Call = [string, Record<string, unknown> | undefined];
@@ -205,6 +206,13 @@ test('the Manage ribbon panel is real, chrome-local and has no file picker', asy
   const component = await readModule('components/ActionRecorderPanel.tsx');
   assert.doesNotMatch(component, /type="file"/, 'no file picker exists');
   assert.doesNotMatch(component, /showOpenFilePicker|showSaveFilePicker/);
+});
+
+test('bare ACTMANAGER opens the panel; its options stay host commands', () => {
+  assert.deepEqual(localSelectorFor('ACTMANAGER', 'desktop'), { kind: 'recorder' });
+  assert.deepEqual(localSelectorFor('  actmanager  ', 'desktop'), { kind: 'recorder' });
+  assert.equal(localSelectorFor('ACTMANAGER LIST', 'desktop'), null);
+  assert.equal(localSelectorFor('ACTMANAGER PLAY door', 'desktop'), null);
 });
 
 test('the seven names are real catalog rows, not refusal rows, and are localized', async () => {

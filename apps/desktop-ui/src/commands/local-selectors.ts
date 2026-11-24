@@ -33,6 +33,8 @@ import { DOCKED_PANEL_REFUSAL_KEY, dockedPaletteOpenable } from '../layout/layou
 import { isLayersCommand } from '../layers/layers.ts';
 import { isParametersCloseCommand, isParametersCommand } from '../params/params.ts';
 import { closeParamsPanel, openParamsPanel } from '../params/panel.ts';
+import { openRecorderPanel } from '../recorder/panel.ts';
+import { isActionManagerOpenCommand } from '../recorder/recorder.ts';
 import { isOptionsCommand } from '../options/options.ts';
 import { isPropertiesCommand } from '../properties/properties.ts';
 import { isResourcesCommand } from '../references/references.ts';
@@ -93,6 +95,8 @@ export type LocalSelectorResult =
   | { readonly kind: 'parameters' }
   /** Close the Parameters Manager panel; already closed is a success. */
   | { readonly kind: 'parametersClose' }
+  /** Open the Action Recorder panel (`ACTMANAGER`). */
+  | { readonly kind: 'recorder' }
   | { readonly kind: 'layers' }
   | { readonly kind: 'fonts' }
   | { readonly kind: 'about' }
@@ -224,6 +228,9 @@ export function localSelectorFor(text: string, layout: LayoutMode): LocalSelecto
   // performs are the dashed `-PARAMETERS` router command, never these words.
   if (isParametersCommand(text)) return { kind: 'parameters' };
   if (isParametersCloseCommand(text)) return { kind: 'parametersClose' };
+  // `ACTMANAGER` opens the recorder panel; its LIST/PLAY/DELETE/CONTINUE forms
+  // are the host command line and fall through to the router.
+  if (isActionManagerOpenCommand(text)) return { kind: 'recorder' };
   if (isLayersCommand(text)) {
     return dockedPaletteOpenable(layout)
       ? { kind: 'layers' }
@@ -388,6 +395,7 @@ export function useLocalSelectors(host: LocalSelectorHost): (text: string, fromI
       case 'layers': openLayers(); break;
       case 'parameters': openParamsPanel(); break;
       case 'parametersClose': closeParamsPanel(); break;
+      case 'recorder': openRecorderPanel(); break;
       case 'fonts': openFonts(); break;
       case 'about': openAbout(); break;
       case 'cleanScreen': setCleanScreen(result.value); break;

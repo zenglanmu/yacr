@@ -152,6 +152,14 @@ export function isJsonDestination(path: string): boolean {
   return /\.json$/i.test(path.trim());
 }
 
+/** The bare word that opens the chrome-local panel; `ACTMANAGER LIST` stays host-side. */
+export const ACTION_MANAGER_COMMAND = 'ACTMANAGER';
+
+/** Whether typed text is the bare `ACTMANAGER` (the panel open word). */
+export function isActionManagerOpenCommand(text: unknown): boolean {
+  return String(text ?? '').trim().toUpperCase() === ACTION_MANAGER_COMMAND;
+}
+
 /** `ACTMANAGER PLAY <name>`. */
 export function recordPlayCommand(name: string): string {
   return `ACTMANAGER PLAY ${name}`;
