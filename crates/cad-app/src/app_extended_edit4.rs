@@ -88,15 +88,34 @@ impl Application {
 
     /// `CENTERMARK`: two crossing LINEs at each selected CIRCLE/ARC centre.
     ///
-    /// **Declared rule**: each arm is 10% of the source radius, so the mark is
-    /// `0.2 × radius` across. There is no associative CENTERMARK object and no
-    /// configurable arm size (both are reported as partial).
+    /// The arm defaults to **10% of the source radius** (the previously fixed
+    /// rule). The typed `CENTERMARK ARM <distance>` / `CENTERMARK <factor>x`
+    /// option overrides it with an absolute length or a radius factor.
     fn center_mark(
         &mut self,
         session: &SessionState,
         command: &Command,
     ) -> CadResult<CommandOutcome> {
-        require_none_payload(command, "CENTERMARK")?;
+        let options = match &command.payload {
+            CommandPayload::None => crate::CenterMarkCommand { arm: None },
+            CommandPayload::Center(center) => match center {
+                crate::CenterEditPayload::Mark(options) => *options,
+                crate::CenterEditPayload::Line(_) => {
+                    return Err(invalid(
+                        "centermark",
+                        "payload",
+                        "CENTERMARK received the CENTERLINE option payload",
+                    ))
+                }
+            },
+            _ => {
+                return Err(invalid(
+                    "centermark",
+                    "payload",
+                    "CENTERMARK takes no payload or its typed arm option",
+                ))
+            }
+        };
         let document_id = command.document;
         let drawing = self
             .workspace
@@ -131,7 +150,22 @@ impl Application {
                     format!("entity {} has a non-positive radius", entity.id.0),
                 ));
             }
-            let arm = radius * 0.10;
+            let arm = match options.arm {
+                None => radius * 0.10,
+                Some(crate::CenterArm::Absolute(value)) => value,
+                Some(crate::CenterArm::Factor(factor)) => radius * factor,
+            };
+            if !arm.is_finite() || arm <= 0.0 {
+                return Err(invalid(
+                    "centermark",
+                    "invalid_arm",
+                    format!(
+                        "entity {} would get the degenerate centre-mark arm {arm}; \
+                         CENTERMARK needs a positive finite arm",
+                        entity.id.0
+                    ),
+                ));
+            }
             geometries.push(SemanticGeometry::Line {
                 start: Point3 {
                     x: center.x - arm,
@@ -160,10 +194,19 @@ impl Application {
         let mut outcome = self.commit_new_entities(session, command, geometries, "centermark")?;
         outcome.diagnostics.push(Diagnostic {
             object: None,
-            code: "centermark.partial".into(),
-            message: "CENTERMARK: arm length is 10% of the source radius; no associative \
-                      CENTERMARK object and no configurable size (NOT IMPLEMENTED)"
-                .into(),
+            code: "centermark.applied".into(),
+            message: match options.arm {
+                None => "CENTERMARK: arm length is 10% of the source radius (the declared \
+                          default; pass `CENTERMARK ARM <distance>` or `CENTERMARK <factor>x` \
+                          to override)"
+                    .into(),
+                Some(crate::CenterArm::Absolute(value)) => {
+                    format!("CENTERMARK: arm length {value} drawing units")
+                }
+                Some(crate::CenterArm::Factor(factor)) => {
+                    format!("CENTERMARK: arm length is {factor} x the source radius")
+                }
+            },
         });
         Ok(outcome)
     }
@@ -171,13 +214,51 @@ impl Application {
     /// `CENTERLINE`: one midway LINE between two parallel selected LINEs.
     ///
     /// The new line spans the overlap of the two lines' projections onto their
-    /// common direction; non-parallel or mixed selections are refused by name.
+    /// common direction, extended beyond both ends by `EXTENSION` and inset from
+    /// both ends by `GAP`. Non-parallel or mixed selections are refused by name.
     fn center_line(
         &mut self,
         session: &SessionState,
         command: &Command,
     ) -> CadResult<CommandOutcome> {
-        require_none_payload(command, "CENTERLINE")?;
+        let options = match &command.payload {
+            CommandPayload::None => crate::CenterLineCommand {
+                extension: 0.0,
+                gap: 0.0,
+            },
+            CommandPayload::Center(center) => match center {
+                crate::CenterEditPayload::Line(options) => *options,
+                crate::CenterEditPayload::Mark(_) => {
+                    return Err(invalid(
+                        "centerline",
+                        "payload",
+                        "CENTERLINE received the CENTERMARK option payload",
+                    ))
+                }
+            },
+            _ => {
+                return Err(invalid(
+                    "centerline",
+                    "payload",
+                    "CENTERLINE takes no payload or its typed extension/gap options",
+                ))
+            }
+        };
+        if !options.extension.is_finite()
+            || !options.gap.is_finite()
+            || options.extension < 0.0
+            || options.gap < 0.0
+        {
+            return Err(invalid(
+                "centerline",
+                "invalid_option",
+                format!(
+                    "CENTERLINE extension and gap must be finite and non-negative, got \
+                     extension {} gap {}",
+                    options.extension, options.gap
+                ),
+            ));
+        }
         let document_id = command.document;
         let drawing = self
             .workspace
@@ -209,14 +290,17 @@ impl Application {
                     "CENTERLINE supports exactly two LINEs; mixed or non-LINE selection refused",
                 )),
             };
-        let line = midway_parallel_line(a, b)?;
+        let mut line = midway_parallel_line(a, b)?;
+        extend_centerline(&mut line, options.extension, options.gap)?;
         let mut outcome = self.commit_new_entities(session, command, vec![line], "centerline")?;
         outcome.diagnostics.push(Diagnostic {
             object: None,
-            code: "centerline.partial".into(),
-            message: "CENTERLINE: one midway LINE across the projection overlap; no extension or \
-                      gap options (NOT IMPLEMENTED)"
-                .into(),
+            code: "centerline.applied".into(),
+            message: format!(
+                "CENTERLINE: one midway LINE across the projection overlap with extension {} \
+                 and gap {}",
+                options.extension, options.gap
+            ),
         });
         Ok(outcome)
     }
@@ -809,6 +893,50 @@ fn point_add(a: Point3, b: Point3) -> Point3 {
         y: a.y + b.y,
         z: a.z + b.z,
     }
+}
+
+/// Apply `CENTERLINE`'s `EXTENSION` (outward) and `GAP` (inward) to the midway
+/// line: both ends move by `extension - gap` along the line direction, so the
+/// span grows by `2 × (extension - gap)`.
+fn extend_centerline(line: &mut SemanticGeometry, extension: f64, gap: f64) -> CadResult<()> {
+    let SemanticGeometry::Line { start, end } = line else {
+        return Err(CadError::Invariant(
+            "CENTERLINE lost its midway LINE before the option adjustment".into(),
+        ));
+    };
+    let direction = sub(*end, *start);
+    let span = length(direction);
+    if span <= PARALLEL_TOLERANCE {
+        return Err(invalid(
+            "centerline",
+            "degenerate",
+            "the midway centreline has zero length",
+        ));
+    }
+    let net = extension - gap;
+    if !net.is_finite() {
+        return Err(invalid(
+            "centerline",
+            "invalid_option",
+            "the CENTERLINE extension becomes non-finite",
+        ));
+    }
+    let step = scale(scale(direction, 1.0 / span), net);
+    let new_start = sub(*start, step);
+    let new_end = point_add(*end, step);
+    // Both ends move outward by `net`, so the signed span is `span + 2*net`.
+    // A negative or zero result means the gap consumed (and would invert) the
+    // line; refusing here avoids storing a backwards LINE.
+    if span + 2.0 * net <= PARALLEL_TOLERANCE {
+        return Err(invalid(
+            "centerline",
+            "degenerate",
+            "the CENTERLINE gap consumes the whole maintained span",
+        ));
+    }
+    *start = new_start;
+    *end = new_end;
+    Ok(())
 }
 
 /// The colour index used by `CDORDER` (0 = ByBlock, 256 = non-palette true

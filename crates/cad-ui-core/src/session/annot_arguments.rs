@@ -19,12 +19,19 @@
 //! the whole trimmed remainder and may contain spaces.
 
 use cad_app::{
-    AnnotationBatchPayload, CommandId, CommandPayload, GroupCommand, GroupEditCommand,
+    AnnotationBatchPayload, CenterArm, CenterEditPayload, CenterLineCommand, CenterMarkCommand,
+    CommandId, CommandPayload, ExtendedCommandId, GroupCommand, GroupEditCommand,
     HatchOriginCommand, LeaderCommand, TextFitCommand,
 };
 
 use super::diagnostics::cad_error_text;
 use super::CadSession;
+
+/// `CENTERMARK [ARM <distance>|<factor>x]`: the associative centre mark.
+pub const CENTERMARK_SELECTOR: &str = "CENTERMARK";
+
+/// `CENTERLINE [EXTENSION <distance>] [GAP <distance>]`: the midway centreline.
+pub const CENTERLINE_SELECTOR: &str = "CENTERLINE";
 
 /// `GROUP CREATE <name>|LIST|DELETE <name>`: the session-only group store.
 pub const GROUP_SELECTOR: &str = "GROUP";
@@ -196,6 +203,88 @@ fn parse_point(token: &str) -> Option<cad_domain::Point3> {
     })
 }
 
+/// Parse `CENTERMARK [ARM] <distance>|<factor>x`.
+///
+/// The optional `ARM` keyword is accepted (`CENTERMARK ARM 5`); the value is a
+/// positive finite decimal, optionally suffixed with `x` to mean a factor of the
+/// source radius (`CENTERMARK 0.1x`). Anything else is `None`.
+pub fn parse_centermark_argument(argument: &str) -> Option<CenterMarkCommand> {
+    let mut tokens: Vec<&str> = argument.split_whitespace().collect();
+    if tokens.len() == 2 && tokens[0].eq_ignore_ascii_case("ARM") {
+        tokens.remove(0);
+    }
+    if tokens.len() != 1 {
+        return None;
+    }
+    let token = tokens[0];
+    let (body, factor) = match token.strip_suffix(['x', 'X']) {
+        Some(body) => (body, true),
+        None => (token, false),
+    };
+    let value = super::commands::parse_signed_decimal(body)?;
+    if !value.is_finite() || value <= 0.0 {
+        return None;
+    }
+    Some(CenterMarkCommand {
+        arm: Some(if factor {
+            CenterArm::Factor(value)
+        } else {
+            CenterArm::Absolute(value)
+        }),
+    })
+}
+
+/// Parse `CENTERLINE [EXTENSION <distance>] [GAP <distance>]`.
+///
+/// The two keywords may appear in either order, at most once each, and each
+/// takes a finite non-negative decimal. A bare `CENTERLINE` never reaches here
+/// (it is the name-only default); an empty or unknown line is `None`.
+pub fn parse_centerline_argument(argument: &str) -> Option<CenterLineCommand> {
+    let tokens: Vec<&str> = argument.split_whitespace().collect();
+    if tokens.is_empty() || tokens.len() % 2 != 0 {
+        return None;
+    }
+    let mut extension: Option<f64> = None;
+    let mut gap: Option<f64> = None;
+    for pair in tokens.chunks_exact(2) {
+        let value = super::commands::parse_signed_decimal(pair[1])?;
+        if !value.is_finite() || value < 0.0 {
+            return None;
+        }
+        let slot = if pair[0].eq_ignore_ascii_case("EXTENSION") {
+            &mut extension
+        } else if pair[0].eq_ignore_ascii_case("GAP") {
+            &mut gap
+        } else {
+            return None;
+        };
+        if slot.replace(value).is_some() {
+            return None;
+        }
+    }
+    Some(CenterLineCommand {
+        extension: extension.unwrap_or(0.0),
+        gap: gap.unwrap_or(0.0),
+    })
+}
+
+/// Stable refusal for a `CENTERMARK`/`CENTERLINE` argument outside the grammar.
+pub fn invalid_center_argument_reason(selector: &str, text: &str) -> String {
+    if selector == CENTERMARK_SELECTOR {
+        format!(
+            "unsupported CAD command: {} (CENTERMARK needs one positive arm length or a \
+             `<factor>x` radius factor, e.g. `CENTERMARK 5` or `CENTERMARK 0.1x`)",
+            text.trim()
+        )
+    } else {
+        format!(
+            "unsupported CAD command: {} (CENTERLINE accepts `EXTENSION <distance>` and \
+             `GAP <distance>` in either order, e.g. `CENTERLINE EXTENSION 2 GAP 0.5`)",
+            text.trim()
+        )
+    }
+}
+
 impl CadSession {
     /// Dispatch one admitted annotation-batch argument line.
     pub(super) fn annot_argument(
@@ -204,6 +293,26 @@ impl CadSession {
         argument: &str,
         text: &str,
     ) -> Result<(), String> {
+        if selector == CENTERMARK_SELECTOR || selector == CENTERLINE_SELECTOR {
+            let (id, payload) = if selector == CENTERMARK_SELECTOR {
+                let Some(parsed) = parse_centermark_argument(argument) else {
+                    return self.refuse_argument(invalid_center_argument_reason(selector, text));
+                };
+                (
+                    CommandId::Extended(ExtendedCommandId::CenterMark),
+                    CenterEditPayload::Mark(parsed),
+                )
+            } else {
+                let Some(parsed) = parse_centerline_argument(argument) else {
+                    return self.refuse_argument(invalid_center_argument_reason(selector, text));
+                };
+                (
+                    CommandId::Extended(ExtendedCommandId::CenterLine),
+                    CenterEditPayload::Line(parsed),
+                )
+            };
+            return self.dispatch_typed_argument(selector, id, CommandPayload::Center(payload));
+        }
         let (id, payload) = match selector {
             GROUP_SELECTOR => (
                 CommandId::Group,
