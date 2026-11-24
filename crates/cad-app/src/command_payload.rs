@@ -17,24 +17,17 @@ use crate::{
 
 mod text_batch;
 pub use text_batch::*;
-
-mod text_payloads;
-
 mod clip;
+mod text_payloads;
 pub use clip::ClipCommand;
-
 mod document_admin;
 pub use document_admin::*;
-
 mod payload_extra;
 pub use payload_extra::*;
-
 mod attribute;
 pub use attribute::*;
-
 mod basic;
 pub use basic::*;
-
 mod style_tables;
 pub use style_tables::*;
 mod refedit_options;

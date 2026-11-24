@@ -78,7 +78,7 @@ impl Application {
         // all-or-nothing, exactly like EXPLODE.
         let mut produced: Vec<Produced> = Vec::new();
         for source in &sources {
-            explode_source(&candidate, source, &mut produced)?;
+            explode_source(&candidate, source, true, &mut produced)?;
         }
         if produced.is_empty() {
             return Err(CadError::InvalidInput(
