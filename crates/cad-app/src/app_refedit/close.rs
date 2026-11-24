@@ -193,6 +193,19 @@ impl Application {
         let mut written: BTreeMap<EntityId, EntityId> = BTreeMap::new();
         for (&clone_id, &original) in &active.clone_of {
             if active.working.contains(&clone_id) && candidate.entity(clone_id).is_some() {
+                // A member the host removed while the session was active cannot
+                // be written back: refuse by name before the draw-order plan or
+                // any row is built.
+                if candidate.entity(original).is_none() {
+                    return Err(invalid(
+                        "refedit",
+                        "clone_failed",
+                        format!(
+                            "block member {} of block {} is no longer in the database",
+                            original.0, active.block.0
+                        ),
+                    ));
+                }
                 written.insert(original, clone_id);
             }
         }

@@ -589,3 +589,83 @@ fn refset_add_and_remove_are_session_state_only_and_add_is_a_move_on_save() {
         "the host geometry is untouched"
     );
 }
+
+#[test]
+fn refclose_save_refuses_an_exhausted_draw_order_before_writing() {
+    // Member 100 sits at the top of the i64 order range; appending an added
+    // object cannot be represented, so the whole save must refuse and leave the
+    // session (and the drawing) untouched.
+    let (mut app, mut session) = build(
+        vec![
+            part(
+                100,
+                line(p3(0.0, 0.0, 0.0), p3(1.0, 0.0, 0.0)),
+                LayerId(0),
+                SpaceId::Block(BlockId(1)),
+                "AcDbLine",
+                i64::MAX,
+            ),
+            part(
+                1,
+                insert(1, placement()),
+                LayerId(0),
+                SpaceId::Model,
+                "AcDbBlockReference",
+                0,
+            ),
+            part(
+                2,
+                line(p3(10.0, 10.0, 0.0), p3(11.0, 10.0, 0.0)),
+                LayerId(0),
+                SpaceId::Model,
+                "AcDbLine",
+                1,
+            ),
+        ],
+        vec![BlockDefinition {
+            id: BlockId(1),
+            entities: vec![EntityId(100)],
+            dynamic_visibility: None,
+        }],
+    );
+    let clones = begin(&mut app, &mut session);
+    select(&mut session, &[2]);
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::RefSet,
+        CommandPayload::None,
+    )
+    .expect("the host line joins the working set");
+    let revision_before_save = revision(&app);
+    let undo_before_save = undo_depth(&app);
+
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::RefClose,
+        CommandPayload::RefClose(RefCloseOption::Save),
+    )
+    .unwrap_err();
+    assert!(
+        error.to_string().contains("refedit.order_exhausted"),
+        "{error}"
+    );
+    assert_eq!(revision(&app), revision_before_save, "nothing is written");
+    assert_eq!(undo_depth(&app), undo_before_save, "no history entry");
+    assert!(session.refedit.is_active(), "the session stays open");
+    assert!(
+        !session.hidden_entities.is_empty(),
+        "the source stays hidden"
+    );
+    let drawing = drawing_of(&app);
+    assert_eq!(
+        drawing.block(BlockId(1)).unwrap().entities,
+        vec![EntityId(100)]
+    );
+    assert!(drawing.entity(EntityId(2)).is_some(), "the host line stays");
+    assert!(
+        drawing.entity(EntityId(clones[0])).is_some(),
+        "the clone is not deleted by a refused save"
+    );
+}
