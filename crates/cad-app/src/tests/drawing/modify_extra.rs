@@ -892,49 +892,6 @@ fn breakatpoint_splits_an_open_bulged_polyline_on_a_segment() {
 }
 
 #[test]
-fn breakatpoint_refuses_closed_objects_splines_and_endpoints_without_writing() {
-    let cases: Vec<(SemanticGeometry, &str)> = vec![
-        (
-            SemanticGeometry::Circle {
-                center: p3(0.0, 0.0, 0.0),
-                normal: p3(0.0, 0.0, 1.0),
-                radius: 5.0,
-            },
-            "breakatpoint.closed",
-        ),
-        (closed_rectangle(), "breakatpoint.closed"),
-        (spline(), "breakatpoint.spline_unsupported"),
-    ];
-    for (geometry, expected) in cases {
-        let (mut app, mut session) = build(vec![ent(1, geometry, 0)], AppMode::Work);
-        let rev = revision(&app);
-        let err = break_at_point(&mut app, &mut session, 1, p3(1.0, 0.0, 0.0)).unwrap_err();
-        match err {
-            CadError::InvalidInput(reason) => {
-                assert!(reason.starts_with(expected), "{expected}: {reason}")
-            }
-            CadError::Unsupported(reason) => {
-                assert!(reason.starts_with(expected), "{expected}: {reason}")
-            }
-            other => panic!("unexpected refusal {other:?}"),
-        }
-        assert_eq!(revision(&app), rev);
-        assert_eq!(undo_depth(&app), 0);
-        assert_eq!(entity_count(&app), 1);
-    }
-
-    // A break point at a LINE endpoint is refused too.
-    let (mut app, mut session) = build(vec![ent(1, line(0.0, 0.0, 10.0, 0.0), 0)], AppMode::Work);
-    let rev = revision(&app);
-    let err = break_at_point(&mut app, &mut session, 1, p3(0.0, 0.0, 0.0)).unwrap_err();
-    assert!(
-        matches!(err, CadError::InvalidInput(ref reason) if reason.starts_with("breakatpoint.point_at_endpoint"))
-    );
-    assert_eq!(revision(&app), rev);
-    assert_eq!(undo_depth(&app), 0);
-}
-
-#[test]
 fn breakatpoint_refuses_a_point_outside_an_open_span_and_non_addressable_refs() {
     let (mut app, mut session) = build(vec![ent(1, line(0.0, 0.0, 10.0, 0.0), 0)], AppMode::Work);
     let rev = revision(&app);

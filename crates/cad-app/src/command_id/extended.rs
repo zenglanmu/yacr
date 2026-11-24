@@ -198,7 +198,8 @@ pub enum ExtendedCommandId {
     DashCopyToLayer,
     /// `CDORDER`: rewrite the selection's draw order by colour index.
     CDOrder,
-    /// `FLATTEN`: set the supported selected geometry's z to 0.
+    /// `FLATTEN`: set the supported selected geometry's z (and an upright
+    /// INSERT's insertion z) to 0; 3D/derived-display kinds are refused by name.
     Flatten,
     /// `XPLODE`: EXPLODE INSERTs and report that their attribute values are not
     /// converted (`BURST` is the converting command).
@@ -207,9 +208,11 @@ pub enum ExtendedCommandId {
     BTrim,
     /// `BEXTEND`: extend the selection to the first selected INSERT's members.
     BExtend,
-    /// `CHANGE`: move the selection to the current layer and reset to ByLayer.
+    /// `CHANGE`: apply a typed property list (layer/colour/linetype/lineweight/
+    /// transparency) to the selection; the interactive change-point prompt is
+    /// not implemented.
     Change,
-    /// `CHPROP`: the same reset under its own selector.
+    /// `CHPROP`: the same typed property write under its own selector.
     ChProp,
 
     // -- Wave 4: named refusals (app_extended_refusals4) --------------------

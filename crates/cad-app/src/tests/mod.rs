@@ -220,6 +220,9 @@ mod extended_refusals3;
 mod extended_reports3;
 // The 2026-11-09 Wave 4 extended-command contracts.
 mod extended_edit4;
+// The typed-property (CHPROP/CHANGE) and extended FLATTEN contracts, split out
+// of `extended_edit4` for the 1000-line code gate.
+mod extended_edit4_properties;
 mod extended_refusals4;
 
 mod extended_attrs5;

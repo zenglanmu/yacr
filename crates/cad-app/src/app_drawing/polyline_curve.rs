@@ -559,6 +559,36 @@ impl PolylineCurve {
         Ok((self.sub_curve(0.0, u)?, self.sub_curve(u, n)?))
     }
 
+    /// Open a **closed** polyline at the projection of `point` (BREAKATPOINT).
+    ///
+    /// The result is one open polyline that starts and ends at the break point
+    /// and keeps every segment (and bulge) of the loop: a single point cannot
+    /// leave two non-degenerate pieces of a closed loop, so the honest result is
+    /// the loop with its seam moved to that point. An **open** polyline is
+    /// refused here; the caller uses [`Self::split_at_point`] for those.
+    pub(super) fn open_at_point(&self, point: Point3, tol: f64) -> CadResult<SemanticGeometry> {
+        if !self.closed {
+            return Err(polyline_refusal(
+                self.prefix,
+                "not_closed",
+                "opening a polyline at one point needs a closed polyline",
+            ));
+        }
+        let n = self.segment_count() as f64;
+        let Some(u) = self.project_param(point, tol)? else {
+            return Err(polyline_refusal(
+                self.prefix,
+                "projection_failed",
+                "the point has no projection onto the polyline",
+            ));
+        };
+        let total = self.total_length().max(tol);
+        let param_tol = (tol / total).max(1e-12);
+        // A projection onto the seam is the same opening as the stored start.
+        let u = if u >= n - param_tol { 0.0 } else { u };
+        self.sub_curve(u, u + n)
+    }
+
     /// Insert one vertex on segment `segment` at its local parameter `t`,
     /// **without changing the curve's shape** (`PEDIT Edit vertex` → `Insert`).
     ///

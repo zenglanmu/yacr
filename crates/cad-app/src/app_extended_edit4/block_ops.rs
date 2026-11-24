@@ -88,7 +88,7 @@ impl Application {
 
         let mut planned: Vec<(DbEntity, SemanticGeometry)> = Vec::new();
         for entity in entities {
-            let geometry = flatten_geometry(&entity.geometry)?;
+            let geometry = flatten_geometry(&drawing, &entity.geometry, &mut Vec::new())?;
             if geometry == entity.geometry {
                 continue;
             }
@@ -153,7 +153,9 @@ impl Application {
                 code: "flatten.applied".into(),
                 message: format!(
                     "FLATTEN: set z = 0 on {count} entity/entities (Express-tool behaviour \
-                     reduced to z = 0)"
+                     reduced to z = 0); INSERT references move their insertion z to 0 without \
+                     editing the block definition, and a reference whose members are not already \
+                     flat is refused by name"
                 ),
             }],
             measurement: None,
@@ -343,7 +345,21 @@ fn insert_member_geometry(
 }
 
 /// Rewrite one supported geometry's z coordinate to 0.
-fn flatten_geometry(geometry: &SemanticGeometry) -> CadResult<SemanticGeometry> {
+///
+/// The representable 2D cases are the analytic 2D primitives plus the
+/// annotations whose placement is a single world point (`TEXT`, `SHAPE`), the
+/// world-space `MASK` polygon, an `IMAGE` already parallel to world XY, a
+/// `COMPOUND` whose members all flatten, and an upright `INSERT` whose block
+/// members are already flat (only its insertion z and its attribute text z
+/// move; the block definition is never edited). Anything whose flat form would
+/// need projected/derived geometry (`Dimension`/`Hatch`/`MultiLeader`/`Table`
+/// display caches) or that is genuinely 3D (`MESH`, `Body3d`, opaque proxies) is
+/// refused **by name** — never faked into a half-flat entity.
+fn flatten_geometry(
+    drawing: &DrawingDatabase,
+    geometry: &SemanticGeometry,
+    visiting: &mut Vec<BlockId>,
+) -> CadResult<SemanticGeometry> {
     let flat = |point: Point3| Point3 {
         x: point.x,
         y: point.y,
@@ -428,18 +444,85 @@ fn flatten_geometry(geometry: &SemanticGeometry) -> CadResult<SemanticGeometry> 
             // Flattening maps the control polygon, so it keeps the closedness.
             closed: *closed,
         }),
+        SemanticGeometry::Text { .. } => {
+            let mut out = geometry.clone();
+            if let SemanticGeometry::Text { position, .. } = &mut out {
+                *position = flat(*position);
+            }
+            Ok(out)
+        }
+        SemanticGeometry::Shape { .. } => {
+            let mut out = geometry.clone();
+            if let SemanticGeometry::Shape { position, .. } = &mut out {
+                *position = flat(*position);
+            }
+            Ok(out)
+        }
+        SemanticGeometry::Mask { .. } => {
+            let mut out = geometry.clone();
+            if let SemanticGeometry::Mask { boundary, .. } = &mut out {
+                for point in boundary.iter_mut() {
+                    *point = flat(*point);
+                }
+            }
+            Ok(out)
+        }
+        SemanticGeometry::Image { u, v, .. } => {
+            // Only an image already parallel to world XY has a z-only flat form;
+            // tilting `u`/`v` would be a projection, which this command does not
+            // invent.
+            if u.z.abs() > FLAT_TOLERANCE || v.z.abs() > FLAT_TOLERANCE {
+                return Err(unsupported(
+                    "flatten",
+                    "unsupported",
+                    "the IMAGE plane is not parallel to world XY; flattening it would need a                      projection, which is not implemented",
+                ));
+            }
+            let mut out = geometry.clone();
+            if let SemanticGeometry::Image { origin, u, v, .. } = &mut out {
+                *origin = flat(*origin);
+                u.z = 0.0;
+                v.z = 0.0;
+            }
+            Ok(out)
+        }
+        SemanticGeometry::Compound(members) => {
+            let flattened = members
+                .iter()
+                .map(|member| flatten_geometry(drawing, member, visiting))
+                .collect::<CadResult<Vec<_>>>()?;
+            Ok(SemanticGeometry::Compound(flattened))
+        }
+        SemanticGeometry::Insert {
+            block,
+            transform,
+            attributes,
+        } => flatten_insert(drawing, *block, transform, attributes, visiting),
         SemanticGeometry::Mesh(_) => Err(unsupported(
             "flatten",
             "unsupported",
             "MESH geometry is 3D and cannot be flattened to z = 0",
         )),
-        SemanticGeometry::Insert { .. } => Err(unsupported(
+        SemanticGeometry::Body3d(_) => Err(unsupported(
             "flatten",
             "unsupported",
-            "INSERT references are refused by name; flatten the block members instead",
+            "3D body geometry is not a 2D case; FLATTEN does not project B-rep solids",
         )),
-        // A table's plane frame has no z-flatten model: refusing by name is
-        // honest instead of dropping the frame's normal and text placement.
+        SemanticGeometry::Dimension(_) => Err(unsupported(
+            "flatten",
+            "unsupported",
+            "AcDbDimension's display cache is derived; this build has no dimension rebuild that would keep the annotation correct after a z rewrite",
+        )),
+        SemanticGeometry::Hatch(_) => Err(unsupported(
+            "flatten",
+            "unsupported",
+            "AcDbHatch's fill/pattern display is derived in the hatch plane; this build has no hatch rebuild after a z rewrite",
+        )),
+        SemanticGeometry::MultiLeader(_) => Err(unsupported(
+            "flatten",
+            "unsupported",
+            "MULTILEADER's leader/text display is derived from its plane frame; this build has no multileader rebuild after a z rewrite",
+        )),
         SemanticGeometry::Table(_) => Err(unsupported(
             "flatten",
             "unsupported",
@@ -451,6 +534,121 @@ fn flatten_geometry(geometry: &SemanticGeometry) -> CadResult<SemanticGeometry> 
             format!("{} is not a flattenable 2D geometry", class_name(other)),
         )),
     }
+}
+
+/// Flatten an INSERT reference: zero its insertion z and its attribute text z.
+///
+/// The block definition's own members are **not** edited (they can be shared by
+/// every reference). The reference is therefore only flattenable when its
+/// placement keeps the block's XY plane parallel to world XY and every visible
+/// member is already flat; otherwise the command refuses by name instead of
+/// leaving a half-flat reference behind.
+fn flatten_insert(
+    drawing: &DrawingDatabase,
+    block: BlockId,
+    transform: &Transform3,
+    attributes: &[cad_domain::AttributeValue],
+    visiting: &mut Vec<BlockId>,
+) -> CadResult<SemanticGeometry> {
+    let m = &transform.matrix;
+    let near_zero = |value: f64| value.abs() <= FLAT_TOLERANCE;
+    if !near_zero(m[2][0]) || !near_zero(m[2][1]) || !near_zero(m[0][2]) || !near_zero(m[1][2]) {
+        return Err(unsupported(
+            "flatten",
+            "unsupported",
+            "the INSERT is rotated out of the world XY plane; only an upright placement has a z-only flat form",
+        ));
+    }
+    if !m[2][2].is_finite() || near_zero(m[2][2]) {
+        return Err(unsupported(
+            "flatten",
+            "unsupported",
+            "the INSERT's z scale is zero or non-finite; its placement cannot be flattened",
+        ));
+    }
+    if !insert_members_flat(drawing, block, visiting)? {
+        return Err(unsupported(
+            "flatten",
+            "unsupported",
+            format!(
+                "block {block:?} has visible member geometry away from z = 0; the block \
+                 definition is never edited, so the reference would stay non-flat"
+            ),
+        ));
+    }
+    let mut transform = *transform;
+    transform.matrix[2][3] = 0.0;
+    let mut flattened_attributes = Vec::with_capacity(attributes.len());
+    for value in attributes {
+        let mut value = value.clone();
+        value.text.position.z = 0.0;
+        flattened_attributes.push(value);
+    }
+    Ok(SemanticGeometry::Insert {
+        block,
+        transform,
+        attributes: flattened_attributes,
+    })
+}
+
+/// Whether every visible member of `block` is already at z = 0 (recursively,
+/// with a cycle guard). A member kind FLATTEN cannot express is a named refusal
+/// rather than "not flat".
+fn insert_members_flat(
+    drawing: &DrawingDatabase,
+    block: BlockId,
+    visiting: &mut Vec<BlockId>,
+) -> CadResult<bool> {
+    if visiting.contains(&block) {
+        return Err(unsupported(
+            "flatten",
+            "unsupported",
+            format!("block {block:?} is recursive; there is no finite flattening"),
+        ));
+    }
+    let definition = drawing.block(block).ok_or_else(|| {
+        unsupported(
+            "flatten",
+            "unsupported",
+            format!("block {block:?} is not in the database"),
+        )
+    })?;
+    let members = match drawing.block_visible_entities(block) {
+        Some(visible) => visible,
+        None => definition.entities.clone(),
+    };
+    visiting.push(block);
+    let result = (|| {
+        for member in members {
+            let child = drawing.entity(member).ok_or_else(|| {
+                unsupported(
+                    "flatten",
+                    "unsupported",
+                    format!("block member {} is not in the database", member.0),
+                )
+            })?;
+            let flattened = flatten_geometry(drawing, &child.geometry, visiting).map_err(
+                |error| match error {
+                    CadError::Unsupported(message) => unsupported(
+                        "flatten",
+                        "unsupported",
+                        format!(
+                            "block member {} ({}) cannot be flattened: {message}",
+                            member.0,
+                            class_name(&child.geometry)
+                        ),
+                    ),
+                    other => other,
+                },
+            )?;
+            if flattened != child.geometry {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    })();
+    visiting.pop();
+    result
 }
 
 fn flatten_normal(normal: &Point3, kind: &str) -> CadResult<Point3> {

@@ -16,8 +16,10 @@
 //!   convert attribute values (`BURST` is the converting path).
 //! * `BTRIM` / `BEXTEND` reuse `plan_trim` / `plan_extend` with the first
 //!   selected INSERT's member geometry as the boundary.
-//! * `CHANGE` / `CHPROP` reuse the property-write planner (`plan_entity`) to
-//!   move to the current layer and reset colour/linetype/lineweight to ByLayer.
+//! * `CHANGE` / `CHPROP` apply a **typed property list** (layer, colour,
+//!   linetype, lineweight, transparency) through the same `plan_entity` /
+//!   `PropertyValue` surface `SETENTITYPROPERTY` uses; unsupported property names
+//!   are refused by name. `property_ops` owns the handler.
 //!
 //! Every refusal happens **before** the transaction opens: nothing is written
 //! and no history entry appears. A successful write is exactly one transaction
@@ -28,12 +30,13 @@ use crate::app_drawing::{
     class_name, collect_boundaries, cut_tolerance, next_transaction_id, plan_entity, plan_extend,
     plan_trim, BoundarySet, CurveChange, PlanRefusal, TargetCurve, TrimPlan,
 };
-use crate::property_value::{aci_for_rgb, LinetypeTarget, PropertyValue};
-use cad_db::{transform_geometry, DbEntity, EntityColor, EntityLineWeight};
+use crate::property_value::aci_for_rgb;
+use cad_db::{transform_geometry, DbEntity, EntityColor};
 use cad_geometry::{cross, dot, length, scale, sub};
 use cad_history::{drawing_patch, DrawingPatch, DrawingUndoRecord};
 
 mod block_ops;
+mod property_ops;
 
 const INSERT_SIMILARITY_TOLERANCE: f64 = 1e-9;
 const PARALLEL_TOLERANCE: f64 = 1e-9;
@@ -76,7 +79,7 @@ impl Application {
                 self.block_trim_extend(session, command, ext)
             }
             ExtendedCommandId::Change | ExtendedCommandId::ChProp => {
-                self.change_to_current_layer(session, command, ext.selector())
+                self.change_properties(session, command, ext)
             }
             other => Err(invalid(
                 "extended4",
@@ -526,138 +529,6 @@ impl Application {
                 .into(),
         });
         Ok(outcome)
-    }
-
-    /// `CHANGE` / `CHPROP`: move to the current layer and reset the three
-    /// modelled display overrides to ByLayer.
-    fn change_to_current_layer(
-        &mut self,
-        session: &SessionState,
-        command: &Command,
-        selector: &str,
-    ) -> CadResult<CommandOutcome> {
-        let prefix = if selector == "CHPROP" {
-            "chprop"
-        } else {
-            "change"
-        };
-        require_none_payload(command, selector)?;
-        let document_id = command.document;
-        let drawing = self
-            .workspace
-            .documents
-            .get(&document_id)
-            .ok_or_else(|| invalid(prefix, "not_addressable", "document not open"))?
-            .drawing
-            .clone();
-        let target_layer = session.active_layer;
-        if drawing.layer(target_layer).is_none() {
-            return Err(invalid(
-                prefix,
-                "layer_missing",
-                format!("current layer {} does not exist", target_layer.0),
-            ));
-        }
-        let entities = resolve_direct(session, &drawing, command, prefix, true)?;
-
-        let targets = [
-            PropertyValue::Layer(target_layer),
-            PropertyValue::Color(EntityColor::ByLayer),
-            PropertyValue::Linetype(LinetypeTarget::ByLayer),
-            PropertyValue::Lineweight(EntityLineWeight::ByLayer),
-        ];
-        let refs: Vec<&PropertyValue> = targets.iter().collect();
-        let mut staged_changes = Vec::new();
-        for before in entities {
-            if let Some(change) = plan_entity(&drawing, before, &refs) {
-                staged_changes.push(change);
-            }
-        }
-        if staged_changes.is_empty() {
-            return Ok(CommandOutcome {
-                objects: Vec::new(),
-                changes: None,
-                diagnostics: vec![Diagnostic {
-                    object: None,
-                    code: format!("{prefix}.unchanged"),
-                    message: format!(
-                        "{selector}: every selected entity is already on the current layer with \
-                         colour/linetype/lineweight ByLayer"
-                    ),
-                }],
-                measurement: None,
-                point_report: None,
-            });
-        }
-
-        let mut candidate = drawing.as_ref().clone();
-        let transaction = next_transaction_id();
-        let change_set = {
-            let mut staged = candidate.begin_drawing_transaction(prefix, transaction)?;
-            for change in &staged_changes {
-                if change.after != change.before {
-                    staged.update_entity(change.after.clone())?;
-                }
-                if let Some(attributes) = &change.after_attributes {
-                    staged.update_entity_display(change.id, attributes.clone())?;
-                }
-            }
-            staged.commit()?
-        };
-        for change in &mut staged_changes {
-            change.after = candidate
-                .entity(change.id)
-                .cloned()
-                .ok_or_else(|| CadError::Invariant(format!("{selector}: entity vanished")))?;
-            if change.after_attributes.is_some() {
-                change.after_attributes = Some(candidate.entity_render_attributes(change.id));
-            }
-        }
-        let patches: Vec<_> = staged_changes
-            .iter()
-            .map(|change| DrawingPatch {
-                id: change.id,
-                before: Some(change.before.clone()),
-                after: Some(change.after.clone()),
-                before_state: Some(drawing.entity_display_state(change.id)),
-                after_state: Some(candidate.entity_display_state(change.id)),
-            })
-            .collect();
-        let objects: Vec<ObjectId> = staged_changes
-            .iter()
-            .map(|change| ObjectId(change.id.0))
-            .collect();
-        let count = objects.len();
-        self.publish_candidate(
-            document_id,
-            candidate,
-            DrawingUndoRecord {
-                transaction: change_set.transaction,
-                label: prefix.into(),
-                patches,
-                block_patches: Vec::new(),
-                layer_patches: Vec::new(),
-                style_patches: Vec::new(),
-                dim_style_patches: Vec::new(),
-                mleader_style_patches: Vec::new(),
-                layout_patches: Vec::new(),
-                merge_key: None,
-            },
-        )?;
-        Ok(CommandOutcome {
-            objects,
-            changes: Some(Arc::new(change_set)),
-            diagnostics: vec![Diagnostic {
-                object: None,
-                code: format!("{prefix}.applied"),
-                message: format!(
-                    "{selector}: moved {count} entity/entities to the current layer and reset \
-                     colour/linetype/lineweight to ByLayer"
-                ),
-            }],
-            measurement: None,
-            point_report: None,
-        })
     }
 
     /// Insert a batch of new model-space entities in one transaction / undo step.

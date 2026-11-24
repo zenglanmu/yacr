@@ -483,9 +483,35 @@ pub struct SetByLayerSettings {
     pub include_blocks: bool,
 }
 
-/// Typed payloads of the selection-based commands and of three commands that
+/// One typed property write of `CHPROP` / `CHANGE`.
+///
+/// `key` is one of [`crate::property_value::SUPPORTED_KEYS`] (`layer`, `color`,
+/// `linetype`, `lineweight`, `transparency`) and `value` follows that key's
+/// grammar exactly like [`crate::CommandPayload::EntityProperty`]. A key outside
+/// that set is refused **by name** (`chprop.unsupported_property`) instead of
+/// being ignored: `text` has its own `TEXTEDIT` path, and thickness, material
+/// and plot style are not modelled at all.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EntityPropertyWrite {
+    pub key: String,
+    pub value: String,
+}
+
+/// `CHPROP` / `CHANGE` typed property list.
+///
+/// The whole list is resolved against the drawing's tables **before** anything
+/// is staged and then applied to every selected entity in one transaction / one
+/// undo step. An empty list is a named refusal (`*.no_properties`), not a
+/// silent no-op: this build has no interactive property prompt, so a caller
+/// that names no property asked for nothing to happen.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ChangePropertiesRequest {
+    pub properties: Vec<EntityPropertyWrite>,
+}
+
+/// Typed payloads of the selection-based commands and of the commands that
 /// share this already-boxed channel because [`crate::CommandPayload`] is at its
-/// code-size ceiling (`OVERKILL`, `SSX`, `AUDIT`).
+/// code-size ceiling (`OVERKILL`, `SSX`, `AUDIT`, `CHPROP`/`CHANGE`).
 ///
 /// Each command accepts only its own arm and refuses any other, so the union can
 /// never make one command read another's settings. The older
@@ -533,6 +559,11 @@ pub enum SelectionToolPayload {
     /// `LAYVPI` / `LAYTHW` already read and write — so there is no second
     /// per-viewport model.
     LayFrzViewports(Vec<usize>),
+    /// `CHPROP` / `CHANGE` typed property list (see
+    /// [`ChangePropertiesRequest`]). Not a selection *tool*: it rides this
+    /// already-boxed channel because [`crate::CommandPayload`] is at its
+    /// code-size ceiling.
+    ChangeProperties(ChangePropertiesRequest),
 }
 
 /// A property QSELECT/FILTER can compare.

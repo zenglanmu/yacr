@@ -756,14 +756,15 @@ pub enum DrawToolKind {
     /// The first click is the entity pick (it is *not* also a break point — that
     /// is the difference from [`Self::Break`]); the second click is the break
     /// point and may lie off the object, because it is projected onto it.
-    /// Supported targets: LINE, ARC and an **open** LWPOLYLINE. A CIRCLE or a
-    /// closed polyline is `breakatpoint.closed`; a SPLINE is
-    /// `breakatpoint.spline_unsupported`; every other kind is
-    /// `breakatpoint.unsupported` — all named refusals that change nothing.
+    /// Supported targets: LINE, ARC, CIRCLE, ELLIPSE (full or arc), open SPLINE
+    /// and LWPOLYLINE. An open curve becomes two pieces; a closed loop (CIRCLE,
+    /// closed LWPOLYLINE, full ELLIPSE) becomes **one** opened full-turn piece at
+    /// the break point. A closed SPLINE and every non-curve kind are named
+    /// refusals that change nothing.
     ///
-    /// The source entity is retained as the first piece and one fresh-id entity
-    /// is inserted as the second piece, in one transaction / one undo step.
-    /// Work-only.
+    /// The source entity is retained as the first piece and, when there really is
+    /// a second piece, one fresh-id entity is inserted, in one transaction / one
+    /// undo step. Work-only.
     BreakAtPoint,
     /// DIVIDE: place POINT marks at equal arc-length divisions of the **one**
     /// pre-selected curve (2026-11-01).
