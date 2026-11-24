@@ -394,10 +394,11 @@ export const HOST_NAMES = [
   'BSCALE', 'MINSERT', 'BLOCKREPLACE', 'BREPLACE', '-BREPLACE', 'SPLINEDIT',
   'MLEDIT', '-MLEDIT', 'BURST', 'CLIP', 'CLIPIT', 'REGION', 'ADDSELECTED',
   'WBLOCK', '-WBLOCK', 'BSAVE', 'BSAVEAS', 'CHSPACE',
-  // The 2026-11-09 Wave 5 batch: the ATTDISP token, six read-only attribute/xref
-  // reports and twenty-three named refusals. All thirty are canonical selectors
-  // of their own; `-XREF`, `-ATTDEF`, `-ATTEDIT`, `-ATTEXT`, `-EATTEXT`,
-  // `-XBIND` and `-ATTACH` are not aliases.
+  // The 2026-11-09 Wave 5 batch, updated by ADR-0055 M3: the ATTDISP display
+  // setting, the real in-drawing attribute commands, the read-only xref reports
+  // and the remaining file-lane refusals. All are canonical selectors of their
+  // own; `-XREF`, `-ATTDEF`, `-ATTEDIT`, `-ATTEXT`, `-EATTEXT`, `-XBIND` and
+  // `-ATTACH` are not aliases.
   'ATTDISP', 'BATTMAN', 'BATTORDER', 'XREF', '-XREF', 'EXTERNALREFERENCES',
   'EXTERNALREFERENCESCLOSE', 'ATTDEF', '-ATTDEF', 'ATTEDIT', '-ATTEDIT',
   'ATTIPEDIT', 'ATTIN', 'ATTOUT', 'ATTEXT', '-ATTEXT', 'EATTEDIT', 'EATTEXT',

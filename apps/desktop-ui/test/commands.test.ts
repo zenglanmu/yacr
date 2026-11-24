@@ -81,7 +81,7 @@ test('the grid-snap affordance is a real admitted toggle next to GRID and ORTHO'
   const view = RIBBON_TABS.find(tab => tab.id === 'view');
   const display = view.panels.find(panel => panel.id === 'display');
   assert.ok(display, 'the View tab must keep its display panel');
-  assert.deepEqual(display.items.map(item => item.id), ['GRID', 'SNAP', 'ORTHO']);
+  assert.deepEqual(display.items.map(item => item.id), ['GRID', 'SNAP', 'ORTHO', 'ATTDISP']);
   const visualize = view.panels.find(panel => panel.id === 'view3d');
   assert.ok(visualize.items.some(item => item.id === 'IBL'), 'IBL stays in View > Visualize');
   const snap = display.items.find(item => item.id === 'SNAP');

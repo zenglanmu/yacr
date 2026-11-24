@@ -800,10 +800,11 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'BSAVEAS', labelKey: 'draw.kind.bsaveas', icon: 'save', group: 'file' },
   { id: 'CHSPACE', labelKey: 'draw.kind.chspace', icon: 'layers', group: 'modify' },
 
-  // The 2026-11-09 Wave 5 batch: the attribute and external-reference surfaces.
-  // ATTDISP is a session token; BATTMAN/BATTORDER/XREF/-XREF/
-  // EXTERNALREFERENCES(/CLOSE) are read-only reports; the rest are stable named
-  // refusals. Appended last so no shipped row moves.
+  // The 2026-11-09 Wave 5 batch, updated by ADR-0055 M3: ATTDISP is the
+  // session attribute-display setting; BATTMAN/BATTORDER report/rewrite
+  // attributes and the XREF family stays read-only; the in-drawing attribute
+  // commands are real writes, while the file lanes (ATTIN/ATTOUT/ATTEXT/
+  // EATTEXT) remain named refusals. Appended last so no shipped row moves.
   { id: 'ATTDISP', labelKey: 'draw.kind.attdisp', icon: 'properties', group: 'view' },
   { id: 'BATTMAN', labelKey: 'draw.kind.battman', icon: 'properties', group: 'properties' },
   { id: 'BATTORDER', labelKey: 'draw.kind.battorder', icon: 'properties', group: 'properties' },

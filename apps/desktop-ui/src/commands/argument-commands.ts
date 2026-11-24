@@ -31,6 +31,7 @@ import {
   isTableExportArgument, splitQuotedTokens,
 } from './argument-extras-grammar.ts';
 import { isAddSelectedArgument, isAliasEditArgument, isMvSetupArgument } from './argument-record-grammar.ts';
+import { ATTRIBUTE_ARGUMENT_COMMANDS } from './argument-attribute-grammar.ts';
 import { isSsxArgument } from './argument-selection-grammar.ts';
 
 /** The parser for the one typed-argument form a selector accepts. */
@@ -804,9 +805,8 @@ export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.
   }),
   // `EXPORT <format>`: the typed format token (grammar in `argument-export-grammar.ts`).
   EXPORT: EXPORT_ARGUMENT_SPEC,
-  '-PARAMETERS': Object.freeze({ parse: isDashParametersArgument }),
+  '-PARAMETERS': Object.freeze({ parse: isDashParametersArgument }), ...ATTRIBUTE_ARGUMENT_COMMANDS,
 });
-
 /** `DIMSTYLE`/`-DIMSTYLE`: `LIST`, `CURRENT` or `SET <name>` (name may have spaces). */
 function isDimStyleArgument(argument: string): boolean {
   const parts = tokens(argument);

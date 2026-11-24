@@ -196,6 +196,18 @@ const CASE_PRESERVING_ARGUMENTS: Readonly<Record<string, (argument: string) => b
   LINETYPE: linetypeCreateCarriesDescription,
   '-LINETYPE': linetypeCreateCarriesDescription,
   '-PARAMETERS': () => true,
+  // ADR-0055 M3: attribute tags/values/prompts are user text. The selector is
+  // upper-cased, the tail keeps the typed spelling byte for byte.
+  ATTDEF: () => true,
+  '-ATTDEF': () => true,
+  ATTREDEF: () => true,
+  ATTEDIT: () => true,
+  '-ATTEDIT': () => true,
+  ATTIPEDIT: () => true,
+  GATTE: () => true,
+  EATTEDIT: () => true,
+  ATTSYNC: () => true,
+  BATTORDER: () => true,
 });
 
 /**

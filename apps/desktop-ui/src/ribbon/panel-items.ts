@@ -166,6 +166,14 @@ export const INSERT_BLOCK_PANEL = panel('block', 'ribbon.panel.block', [
 
 export const INSERT_BLOCK_DEFINITION_PANEL = panel('block_definition', 'ribbon.panel.block_definition', [
   { id: 'BLOCK', labelKey: 'draw.kind.blockdefine', icon: 'copy', command: 'BLOCK', large: true },
+  // ADR-0055 M3: block attributes are now a real model. Each button dispatches
+  // its canonical selector: the bare form is the report (ATTDEF/BATTORDER) or
+  // the selection-driven sync (ATTSYNC), and the typed command line performs the
+  // write. No fake dialog button is offered.
+  { id: 'ATTDEF', labelKey: 'draw.kind.attdef', icon: 'properties', command: 'ATTDEF' },
+  { id: 'ATTSYNC', labelKey: 'draw.kind.attsync', icon: 'properties', command: 'ATTSYNC' },
+  { id: 'BATTMAN', labelKey: 'draw.kind.battman', icon: 'properties', command: 'BATTMAN' },
+  { id: 'BATTORDER', labelKey: 'draw.kind.battorder', icon: 'properties', command: 'BATTORDER' },
 ]);
 
 export const INSERT_REFERENCE_PANEL = panel('reference', 'ribbon.panel.reference', [
@@ -265,6 +273,9 @@ export const VIEW_DISPLAY_PANEL = panel('display', 'ribbon.panel.display', [
   { id: 'GRID', labelKey: 'overlay.grid', icon: 'grid', command: 'GRID' },
   { id: 'SNAP', labelKey: 'status.toggle.snap', icon: 'snap', command: 'SNAP' },
   { id: 'ORTHO', labelKey: 'status.toggle.ortho', icon: 'angle', command: 'ORTHO' },
+  // ADR-0055 D6: ATTDISP is a session display setting (Normal/On/Off). The bare
+  // button toggles Normal/Off; the typed line sets all three modes.
+  { id: 'ATTDISP', labelKey: 'draw.kind.attdisp', icon: 'eye', command: 'ATTDISP', hintKey: 'draw.kind.attdisp.hint' },
 ]);
 
 export const VIEW_PALETTES_PANEL = panel('palettes', 'ribbon.panel.palettes', [
