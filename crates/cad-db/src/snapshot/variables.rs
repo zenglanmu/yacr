@@ -24,6 +24,7 @@
 //!                         comments?, custom?: {name: value}}
 //! units_display           absent | {length_format, angle_format,
 //!                         angle_precision, angle_base_degrees, angle_clockwise}
+//! document_times          absent | {created_at, updated_at} (Unix seconds)
 //! ```
 //!
 //! `metadata` is the `DWGPROPS` summary block. It is **absent** when nothing is
@@ -35,6 +36,11 @@
 //! `units_display` is the same opt-in shape: absent (or `null`) means the
 //! documented `UnitsDisplay::default` values, and it is written only when a
 //! setting differs from that default. The block carries all five fields.
+//!
+//! `document_times` is opt-in for a different reason: an unsaved or
+//! pre-timestamp document has no real instant to write, so the key is absent
+//! until the first durable save stamps it. Both fields are optional inside the
+//! block; an absent field is `None`, never an epoch.
 //!
 //! Every `f64` goes through [`cad_domain::ymodel::json`], so a legacy non-finite
 //! `$PDSIZE` survives bit-exactly as `{"$f64":"nan"}` instead of forcing the
@@ -60,8 +66,16 @@ use super::SnapshotError;
 use crate::drawing::{DocumentMetadata, DrawingDatabase};
 use crate::tables::{ActiveAnnotationScale, Scale};
 
-/// The header variable object, exactly as stored in `document.json`.
-pub(crate) fn encode(db: &DrawingDatabase) -> Result<Value, SnapshotError> {
+/// Encode the header variables, overriding the persisted save instants.
+///
+/// The save path supplies the one clock read of a durable write here so the
+/// encoded bytes and the in-memory record agree, without mutating the database
+/// before the write succeeds. `times` already carries the effective values (see
+/// [`crate::DocumentTimes::with_saved_at`]).
+pub(crate) fn encode_with_times(
+    db: &DrawingDatabase,
+    times: crate::DocumentTimes,
+) -> Result<Value, SnapshotError> {
     let mut map = Map::new();
     map.insert("linetype_scale".to_string(), encode_f64(db.linetype_scale));
     map.insert(
@@ -106,6 +120,11 @@ pub(crate) fn encode(db: &DrawingDatabase) -> Result<Value, SnapshotError> {
             "units_display".to_string(),
             encode_units_display(&db.units_display),
         );
+    }
+    // The save instants are written only once a real durable save has stamped
+    // them. An old archive therefore has no key at all.
+    if let Some(value) = times.to_json_value() {
+        map.insert("document_times".to_string(), value);
     }
     Ok(Value::Object(map))
 }
@@ -210,6 +229,7 @@ pub(crate) fn apply_to(
     let active = reader.take_active_annotation_scale("active_annotation_scale", db)?;
     let metadata = reader.take_document_metadata("metadata")?;
     let units_display = reader.take_units_display("units_display")?;
+    let document_times = reader.take_document_times("document_times")?;
     reader.finish()?;
 
     db.linetype_scale = linetype_scale;
@@ -222,6 +242,7 @@ pub(crate) fn apply_to(
     db.active_annotation_scale = active;
     db.document_metadata = metadata;
     db.units_display = units_display;
+    db.document_times = document_times;
 
     // `DrawingDatabase::invalidate_bounds_cache` is `pub(super)` to the
     // `drawing` module, so a sibling module cannot call it. Replacing the memo
@@ -439,6 +460,18 @@ impl Reader {
         units.validate().map_err(|error| reader.error(error))?;
         reader.finish()?;
         Ok(units)
+    }
+
+    /// Read the persisted create/update instants. A missing key (or `null`) is
+    /// "not stored"; a present block is decoded by its own strict reader.
+    fn take_document_times(
+        &mut self,
+        variable: &str,
+    ) -> Result<crate::DocumentTimes, SnapshotError> {
+        let Some(value) = self.map.remove(variable) else {
+            return Ok(crate::DocumentTimes::default());
+        };
+        crate::DocumentTimes::from_json_value(&value)
     }
 
     fn take_custom(

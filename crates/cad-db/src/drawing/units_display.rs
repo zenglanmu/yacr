@@ -16,13 +16,14 @@
 //!
 //! # Remaining boundary
 //!
-//! The settings are stored and reported. The coordinate/measurement readouts
-//! still format with fixed decimals (`cad-app` measurement records carry the
-//! declared unit and `UnitContext::decimal_places`; the React status/log use
-//! their own fixed counts), so the stored formats do not yet change every
-//! on-screen number. That display wiring and AutoCAD's `$INSUNITS` insertion
-//! scaling (`INSERT` across drawings) are not modelled here and are named by the
-//! command's report instead of being silently implied.
+//! The settings are stored, reported and consumed by the readouts: the
+//! status-bar coordinate, the command-window echo/log and the measurement
+//! diagnostics all format through [`UnitsDisplay::format_length`] /
+//! [`UnitsDisplay::format_angle`] (the React readouts receive the same values on
+//! `cad_status.units` and use one mirrored helper). AutoCAD's `$INSUNITS`
+//! insertion scaling (`INSERT` across drawings) and the host Units dialog are
+//! not modelled here and are named by the command's report instead of being
+//! silently implied.
 
 use cad_domain::*;
 
@@ -158,6 +159,61 @@ pub struct UnitsDisplay {
 }
 
 impl UnitsDisplay {
+    /// Format one length in the document's stored format and precision.
+    ///
+    /// `precision` is the document's linear decimal-place count
+    /// (`UnitContext::decimal_places`); the Units dialog stores it with the
+    /// declared unit rather than here. Engineering and architectural formats
+    /// read the value as **inches** (AutoCAD's convention for those formats); a
+    /// non-finite value is printed as itself rather than fabricated as zero.
+    ///
+    /// The precision is capped at [`UNITS_MAX_PRECISION`] for allocation safety;
+    /// the write path already refuses anything larger, so no stored value is
+    /// silently narrowed.
+    pub fn format_length(&self, value: f64, precision: u8) -> String {
+        if !value.is_finite() {
+            return format!("{value}");
+        }
+        let value = if value == 0.0 { 0.0 } else { value };
+        let precision = usize::from(precision.min(UNITS_MAX_PRECISION));
+        match self.length_format {
+            LengthFormat::Scientific => scientific(value, precision),
+            LengthFormat::Decimal => format!("{value:.precision$}"),
+            LengthFormat::Engineering => engineering(value, precision),
+            LengthFormat::Architectural => architectural(value, precision),
+            LengthFormat::Fractional => fractional(value, precision),
+        }
+    }
+
+    /// Format one angle in degrees.
+    ///
+    /// `absolute` applies `ANGBASE`/`ANGDIR` first (an absolute bearing) and
+    /// normalises it into `[0, 360)`. A **relative** angle (a measured angle
+    /// between two vectors) keeps its sign and magnitude: the base direction and
+    /// rotation sense describe where zero points, not how large a turn is.
+    pub fn format_angle(&self, degrees: f64, absolute: bool) -> String {
+        if !degrees.is_finite() {
+            return format!("{degrees}");
+        }
+        let precision = usize::from(self.angle_precision.min(UNITS_MAX_PRECISION));
+        let value = if absolute {
+            let mut value = degrees - self.angle_base_degrees;
+            if self.angle_clockwise {
+                value = -value;
+            }
+            value.rem_euclid(360.0)
+        } else {
+            degrees
+        };
+        match self.angle_format {
+            AngleFormat::DecimalDegrees => format!("{value:.precision$}°"),
+            AngleFormat::DegreesMinutesSeconds => dms(value, precision),
+            AngleFormat::Gradians => format!("{:.precision$}g", value * 10.0 / 9.0),
+            AngleFormat::Radians => format!("{:.precision$}r", value.to_radians()),
+            AngleFormat::SurveyorsUnits => surveyors(value, precision),
+        }
+    }
+
     /// Refuse an out-of-range precision or a non-finite base angle.
     ///
     /// A refusal happens before the database is touched; nothing is clamped.
@@ -252,5 +308,192 @@ impl DrawingDatabase {
             changes: Vec::new(),
             scope,
         })
+    }
+}
+
+/// One scientific-notation length (`1.2345E+01`).
+fn scientific(value: f64, precision: usize) -> String {
+    if value == 0.0 {
+        return format!("0.{}E+00", "0".repeat(precision));
+    }
+    let text = format!("{value:.*e}", precision);
+    let (mantissa, exponent) = text.split_once('e').unwrap_or((text.as_str(), "0"));
+    let exponent: i32 = exponent.parse().unwrap_or(0);
+    let sign = if exponent < 0 { '-' } else { '+' };
+    format!("{mantissa}E{sign}{:02}", exponent.unsigned_abs())
+}
+
+/// Feet-and-decimal-inches (`1'-0.3450"`), reading the value as inches.
+fn engineering(value: f64, precision: usize) -> String {
+    let sign = if value < 0.0 { "-" } else { "" };
+    let scale = 10u128.pow(precision as u32);
+    let total = (value.abs() * scale as f64).round() as u128;
+    let whole_inches = total / scale;
+    let fraction = total % scale;
+    let feet = whole_inches / 12;
+    let inches = whole_inches % 12;
+    if precision == 0 {
+        format!("{sign}{feet}'-{inches}\"")
+    } else {
+        format!(
+            "{sign}{feet}'-{inches}.{fraction:0precision$}\"",
+            precision = precision
+        )
+    }
+}
+
+/// Feet-and-fractional-inches (`1'-0 3/8"`), reading the value as inches.
+fn architectural(value: f64, precision: usize) -> String {
+    let sign = if value < 0.0 { "-" } else { "" };
+    let denominator = 1u128 << precision;
+    let per_foot = 12 * denominator;
+    let total = (value.abs() * denominator as f64).round() as u128;
+    let feet = total / per_foot;
+    let remainder = total % per_foot;
+    let inches = remainder / denominator;
+    let numerator = remainder % denominator;
+    if numerator == 0 {
+        return format!("{sign}{feet}'-{inches}\"");
+    }
+    let divisor = gcd(numerator, denominator);
+    format!(
+        "{sign}{feet}'-{inches} {}/{}\"",
+        numerator / divisor,
+        denominator / divisor
+    )
+}
+
+/// A fractional length without feet (`12 3/8`).
+fn fractional(value: f64, precision: usize) -> String {
+    let sign = if value < 0.0 { "-" } else { "" };
+    let denominator = 1u128 << precision;
+    let total = (value.abs() * denominator as f64).round() as u128;
+    let whole = total / denominator;
+    let numerator = total % denominator;
+    if numerator == 0 {
+        return format!("{sign}{whole}");
+    }
+    let divisor = gcd(numerator, denominator);
+    format!(
+        "{sign}{whole} {}/{}",
+        numerator / divisor,
+        denominator / divisor
+    )
+}
+
+/// An angle as degrees/minutes/seconds (`45d0'0"`).
+fn dms(value: f64, precision: usize) -> String {
+    let sign = if value < 0.0 { "-" } else { "" };
+    let (degrees, minutes, seconds) = dms_parts(value.abs(), precision);
+    format!("{sign}{degrees}d{minutes}'{seconds}\"")
+}
+
+/// The surveyor's bearing form (`N 45d0'0" E`).
+fn surveyors(value: f64, precision: usize) -> String {
+    let angle = value.rem_euclid(360.0);
+    let (prefix, inner, suffix) = if angle <= 90.0 {
+        ("N", angle, "E")
+    } else if angle <= 180.0 {
+        ("S", 180.0 - angle, "E")
+    } else if angle <= 270.0 {
+        ("S", angle - 180.0, "W")
+    } else {
+        ("N", 360.0 - angle, "W")
+    };
+    let (degrees, minutes, seconds) = dms_parts(inner, precision);
+    format!("{prefix} {degrees}d{minutes}'{seconds}\" {suffix}")
+}
+
+/// Split an absolute angle into rounded degree/minute/second components.
+fn dms_parts(value: f64, precision: usize) -> (u128, u128, String) {
+    let scale = 10u128.pow(precision as u32);
+    let total = (value * 3600.0 * scale as f64).round() as u128;
+    let seconds_per_minute = 60 * scale;
+    let degree = total / (60 * seconds_per_minute);
+    let remainder = total % (60 * seconds_per_minute);
+    let minutes = remainder / seconds_per_minute;
+    let seconds_units = remainder % seconds_per_minute;
+    let seconds_whole = seconds_units / scale;
+    let seconds = if precision == 0 {
+        format!("{seconds_whole}")
+    } else {
+        format!(
+            "{seconds_whole}.{fraction:0precision$}",
+            fraction = seconds_units % scale,
+            precision = precision
+        )
+    };
+    (degree, minutes, seconds)
+}
+
+/// Greatest common divisor for reducing a fraction.
+fn gcd(mut left: u128, mut right: u128) -> u128 {
+    while right != 0 {
+        let remainder = left % right;
+        left = right;
+        right = remainder;
+    }
+    left.max(1)
+}
+
+#[cfg(test)]
+mod format_tests {
+    use super::*;
+
+    fn display(length: LengthFormat, angle: AngleFormat, precision: u8) -> UnitsDisplay {
+        UnitsDisplay {
+            length_format: length,
+            angle_format: angle,
+            angle_precision: precision,
+            angle_base_degrees: 0.0,
+            angle_clockwise: false,
+        }
+    }
+
+    #[test]
+    fn every_length_format_uses_the_stored_form() {
+        let decimal = display(LengthFormat::Decimal, AngleFormat::DecimalDegrees, 4);
+        assert_eq!(decimal.format_length(12.345, 2), "12.35");
+        let scientific = display(LengthFormat::Scientific, AngleFormat::DecimalDegrees, 4);
+        assert_eq!(scientific.format_length(12.345, 4), "1.2345E+01");
+        let engineering = display(LengthFormat::Engineering, AngleFormat::DecimalDegrees, 4);
+        assert_eq!(engineering.format_length(12.345, 4), "1'-0.3450\"");
+        let architectural = display(LengthFormat::Architectural, AngleFormat::DecimalDegrees, 4);
+        assert_eq!(architectural.format_length(12.375, 3), "1'-0 3/8\"");
+        let fractional = display(LengthFormat::Fractional, AngleFormat::DecimalDegrees, 4);
+        assert_eq!(fractional.format_length(12.375, 3), "12 3/8");
+    }
+
+    #[test]
+    fn length_precision_and_negative_zero_are_exact() {
+        let display = display(LengthFormat::Decimal, AngleFormat::DecimalDegrees, 4);
+        assert_eq!(display.format_length(-0.0, 4), "0.0000");
+        assert_eq!(display.format_length(-1.5, 2), "-1.50");
+    }
+
+    #[test]
+    fn every_angle_format_uses_the_stored_form_and_precision() {
+        let decimal = display(LengthFormat::Decimal, AngleFormat::DecimalDegrees, 2);
+        assert_eq!(decimal.format_angle(45.0, false), "45.00°");
+        let dms = display(LengthFormat::Decimal, AngleFormat::DegreesMinutesSeconds, 0);
+        assert_eq!(dms.format_angle(45.5, false), "45d30'0\"");
+        let gradians = display(LengthFormat::Decimal, AngleFormat::Gradians, 2);
+        assert_eq!(gradians.format_angle(45.0, false), "50.00g");
+        let radians = display(LengthFormat::Decimal, AngleFormat::Radians, 4);
+        assert_eq!(radians.format_angle(180.0, false), "3.1416r");
+        let surveyors = display(LengthFormat::Decimal, AngleFormat::SurveyorsUnits, 0);
+        assert_eq!(surveyors.format_angle(45.0, true), "N 45d0'0\" E");
+        assert_eq!(surveyors.format_angle(135.0, true), "S 45d0'0\" E");
+    }
+
+    #[test]
+    fn absolute_angles_apply_the_base_angle_and_clockwise_direction() {
+        let mut display = display(LengthFormat::Decimal, AngleFormat::DecimalDegrees, 2);
+        display.angle_base_degrees = 90.0;
+        assert_eq!(display.format_angle(90.0, true), "0.00°");
+        display.angle_clockwise = true;
+        assert_eq!(display.format_angle(0.0, true), "90.00°");
+        // A relative angle is not a bearing: base/direction do not apply.
+        assert_eq!(display.format_angle(0.0, false), "0.00°");
     }
 }

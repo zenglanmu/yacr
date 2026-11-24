@@ -69,6 +69,25 @@ impl DrawingDatabase {
         resource_keys: Vec<String>,
         revision: Revision,
     ) -> Result<DocumentSnapshot, SnapshotError> {
+        self.snapshot_at(units, identity, resource_keys, revision, None)
+    }
+
+    /// Encode the document, stamping the save instants the caller supplies.
+    ///
+    /// `saved_at` is the one clock read of a durable write: when it is `Some`,
+    /// the encoded `document_times` carries `created_at` (preserved or, on the
+    /// first save, this instant) and `updated_at = saved_at`. The database is not
+    /// mutated; `cad-host` records the same instant only after the write is
+    /// durable. A `None` (pre-epoch clock) leaves the stored values untouched.
+    pub fn snapshot_at(
+        &self,
+        units: UnitContext,
+        identity: DocumentIdentity,
+        resource_keys: Vec<String>,
+        revision: Revision,
+        saved_at: Option<u64>,
+    ) -> Result<DocumentSnapshot, SnapshotError> {
+        let times = self.document_times.with_saved_at(saved_at);
         let header = DocumentHeader {
             database: self.id,
             units,
@@ -77,7 +96,7 @@ impl DrawingDatabase {
             embed_resources: self.embed_resources,
             application_domain: self.application_domain,
             next: self.id_counters(),
-            variables: variables::encode(self)?,
+            variables: variables::encode_with_times(self, times)?,
         };
         // `tables::encode` writes the row tables; the resource mapping lives in
         // its own codec (`snapshot/resources.rs`) for the file-size gate and is
@@ -772,6 +791,51 @@ mod tests {
     fn snapshot_of(db: &DrawingDatabase, revision: Revision) -> DocumentSnapshot {
         db.snapshot(units(), identity(), resource_keys(), revision)
             .expect("snapshot")
+    }
+
+    #[test]
+    fn document_times_round_trip_and_a_pre_timestamp_archive_stays_absent() {
+        let mut db = fixture();
+        let old = snapshot_of(&db, Revision(7));
+        assert!(
+            !old.header
+                .variables
+                .as_object()
+                .expect("variables object")
+                .contains_key("document_times"),
+            "an unsaved document writes no timestamp key"
+        );
+        let loaded = DrawingDatabase::from_snapshot(&old).expect("old header hydrates");
+        assert_eq!(loaded.document_times(), crate::DocumentTimes::default());
+
+        // One save stamps both; a later save only moves `updated_at`.
+        db.record_document_saved_at(100);
+        let stamped = db
+            .snapshot_at(units(), identity(), resource_keys(), Revision(7), Some(250))
+            .expect("stamped snapshot");
+        let variables = stamped
+            .header
+            .variables
+            .as_object()
+            .expect("variables object");
+        assert_eq!(
+            variables["document_times"],
+            serde_json::json!({"created_at": 100, "updated_at": 250})
+        );
+        let reloaded = DrawingDatabase::from_snapshot(&stamped).expect("hydrate stamped");
+        assert_eq!(
+            reloaded.document_times(),
+            crate::DocumentTimes {
+                created_at: Some(100),
+                updated_at: Some(250),
+            }
+        );
+        // A snapshot without a new save instant keeps the stored values.
+        let fixed = snapshot_of(&reloaded, Revision(7));
+        assert_eq!(
+            fixed.header.variables["document_times"],
+            variables["document_times"]
+        );
     }
 
     #[test]
