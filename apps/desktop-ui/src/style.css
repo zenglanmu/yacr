@@ -644,7 +644,10 @@ button, input, select { font: inherit; color: inherit; }
 .ribbon-button:disabled { color: var(--text-disabled); cursor: not-allowed; }
 .ribbon-panel__group.is-small .ribbon-button:disabled { color: var(--text-disabled); }
 .ribbon-button__label { font-size: 11px; text-align: center; white-space: nowrap; }
-.ribbon-panel__group.is-small .ribbon-button__label { font-size: 11.5px; }
+/* The reference ribbon's small rows are icon-only: the label lives in the
+   tooltip and the accessible name (`aria-label`), not in a wide text column.
+   Showing every small label is what made one panel 1500px wide at 1600px. */
+.ribbon-panel__group.is-small .ribbon-button__label { display: none; }
 .ribbon-item__caret {
   width: 14px; align-self: center;
   border: 0; background: transparent; color: var(--text-muted); cursor: pointer;

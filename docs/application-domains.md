@@ -18,7 +18,7 @@
 | 每域主题持久化 `ui.theme.<domain>` | **未实现**（阶段 2） | — |
 | `DOMAIN` 命令 / 文档属性入口 | **未实现**（阶段 2；解析函数已就绪并有测试） | `domainFromArgument` |
 | 官方手册结构 fixture | 实现（结构转录；文件内注明 File 为扩展 tab） | 同上 |
-| golden 截图 lane | **未实现/未运行**（阶段 2） | — |
+| 自有 golden 截图 | 实现（本地）：4 域 1600×1000，脚本 `scripts/ui-golden.cjs`，基线 `apps/desktop-ui/test/golden/ui/` | 两次本地运行 0.000% diff；软件 Chromium，layout-only；CI 未接线 |
 
 ## 不变式
 
@@ -33,7 +33,7 @@
 
 ## 阶段 2 计划（未开始）
 
-- 自有 golden 截图 lane（headless Chromium + SwiftShader；结构 fixture 已就位）。
+- 把 `scripts/ui-golden.cjs` 接入 CI（需要固定 Chromium + 字体包，当前 build 需要网络）。
 - 每域默认停靠布局（BIM：属性+项目浏览器；concept：左工具栏+右托盘；mechanical：
   CommandManager+FeatureManager），隐藏是默认值、会话内可重开。
 - `DOMAIN` 命令（裸命令开切换器、`DOMAIN <id>` 直接设置）与文档属性行。

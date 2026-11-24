@@ -71,7 +71,7 @@ schema 扩展，需要再次升 minor。缺失值由内容保守派生：有 BIM
 `cad2d` 的功能区已按 D7 重排：顶层 tab 为 文件（扩展）/常用/插入/注释/参数化/视图/管理/输出/
 附加模块，取消自造“绘图/测量”顶层 tab；面板顺序转录进 `apps/desktop-ui/test/fixtures/autocad-2024-drafting.json`
 并由结构契约测试锁定。参数化/插入 Data/视口/坐标等未接线面板以 `pending` 显示提示，不放可点假按钮。
-golden 截图 lane、`DOMAIN` 命令入口、每域主题持久化仍未实现（见 `docs/application-domains.md`）。
+自有 golden 截图（4 域、1600×1000、软件 Chromium、两次 0.000% diff）已落地在 `scripts/ui-golden.cjs` + `apps/desktop-ui/test/golden/ui/`，但 **CI 未接线**；`DOMAIN` 命令入口、每域主题持久化仍未实现（见 `docs/application-domains.md`）。
 
 ## 后果
 

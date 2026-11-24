@@ -136,7 +136,8 @@ export function RibbonButton({ icon, label, hint, disabled, active, pressed, onC
       type="button"
       className={['ribbon-button', active || (toggle && pressed) ? 'is-active' : '', disabled ? 'is-disabled' : ''].filter(Boolean).join(' ')}
       disabled={disabled}
-      title={hint}
+      title={hint ?? label}
+      aria-label={label}
       aria-pressed={toggle ? pressed : undefined}
       aria-disabled={disabled || undefined}
       onClick={disabled ? undefined : onClick}
