@@ -755,7 +755,8 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("THICKEN", CommandId::Extended(ExtendedCommandId::Thicken)), ("PRESSPULL", CommandId::Extended(ExtendedCommandId::PressPull)),
     ("IMPRINT", CommandId::Extended(ExtendedCommandId::Imprint)), ("OFFSETEDGE", CommandId::Extended(ExtendedCommandId::OffsetEdge)),
     ("CHAMFEREDGE", CommandId::Extended(ExtendedCommandId::ChamferEdge)), ("FILLETEDGE", CommandId::Extended(ExtendedCommandId::FilletEdge)),
-    ("EDGE", CommandId::Extended(ExtendedCommandId::Edge)), ("MIRROR3D", CommandId::Extended(ExtendedCommandId::Mirror3D)),
+    ("EDGE", CommandId::Extended(ExtendedCommandId::Edge)), ("XEDGES", CommandId::Extended(ExtendedCommandId::Xedges)),
+    ("MIRROR3D", CommandId::Extended(ExtendedCommandId::Mirror3D)),
     ("ROTATE3D", CommandId::Extended(ExtendedCommandId::Rotate3D)),
 
     // Wave 15 (2026-11-09): stable named refusals.

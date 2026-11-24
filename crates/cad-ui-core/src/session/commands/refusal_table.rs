@@ -1,7 +1,7 @@
-//! The Wave 17-24 + Wave 27 + Wave 28 named-refusal vocabulary rows (322 rows:
+//! The Wave 17-24 + Wave 27 + Wave 28 named-refusal vocabulary rows (321 rows:
 //! 197 existing + 91 Wave 27 + 39 Wave 28 − 4 graduated to real commands
 //! (`REFEDIT`, `-REFEDIT`, `REFSET`, `REFCLOSE`) − `XCLIP` (now a real display
-//! clip).
+//! clip) − `XEDGES` (now a real display-edge extraction).
 //!
 //! Kept in a sibling table (not `COMMAND_TABLE`) so `commands.rs` stays inside
 //! the 1000-line code gate. `normalize_command`, `canonical_command_name`,
@@ -219,7 +219,6 @@ pub const REFUSAL_TABLE: &[(&str, CommandId)] = &[
     ("TABSURF", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Tabsurf))),
     ("REVSURF", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Revsurf))),
     ("RULESURF", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Rulesurf))),
-    ("XEDGES", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Xedges))),
     ("SECTION", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Section))),
     ("SECTIONPLANE", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Sectionplane))),
     ("SECTIONPLANEJOG", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Sectionplanejog))),

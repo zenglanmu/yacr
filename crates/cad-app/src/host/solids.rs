@@ -94,6 +94,17 @@ impl HostController {
         if plan.document != self.document_id {
             return Err(CadError::StaleResult);
         }
+        // Last representability gate before any staging: the worker already
+        // refuses a multi-shell/void result, and re-checking here keeps the
+        // commit seam honest even if a future caller hands it a body directly.
+        let exact = body.exact_brep().ok_or_else(|| {
+            CadError::Invariant(
+                "solid.boolean_result_not_exact: the boolean worker returned a body without \
+                 exact geometry"
+                    .into(),
+            )
+        })?;
+        crate::app_drawing::solids::validate_boolean_result(exact)?;
         let (candidate, operands, display_states, change_set, new_id, entity) = {
             let document = self
                 .application

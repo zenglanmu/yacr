@@ -492,6 +492,41 @@ fn a_carrier_without_a_modeler_refuses_every_boolean_before_it_starts() {
 }
 
 #[test]
+fn a_multi_shell_or_empty_boolean_result_is_refused_by_name() {
+    use crate::app_drawing::solids::{validate_boolean_result, BOOLEAN_RESULT_NOT_SINGLE_SHELL};
+
+    // One closed shell is the representable shape.
+    validate_boolean_result(&unit_box()).expect("a unit box is one connected shell");
+
+    // Two shells = a multi-lump body (a disjoint UNION). This build cannot store
+    // it faithfully, so the gate refuses before the host can stage anything.
+    let mut multi = unit_box();
+    let mut second = multi.shells[0].clone();
+    second.id = 1;
+    multi.shells.push(second);
+    let error = validate_boolean_result(&multi).expect_err("two shells are refused");
+    match error {
+        CadError::Unsupported(reason) => {
+            assert!(
+                reason.starts_with(BOOLEAN_RESULT_NOT_SINGLE_SHELL),
+                "{reason}"
+            );
+            assert!(reason.contains("2 shell(s)"), "{reason}");
+            assert!(reason.contains("nothing was written"), "{reason}");
+        }
+        other => panic!("a representability refusal is Unsupported, got {other:?}"),
+    }
+
+    // A shell with no faces is not a body either.
+    let mut empty = unit_box();
+    empty.shells[0].faces.clear();
+    let error = validate_boolean_result(&empty).expect_err("an empty shell is refused");
+    assert!(
+        matches!(error, CadError::Unsupported(ref reason) if reason.starts_with(BOOLEAN_RESULT_NOT_SINGLE_SHELL))
+    );
+}
+
+#[test]
 fn a_boolean_takes_no_payload() {
     let (mut app, mut session, ops) = app_with_modeler();
     let first = create_box(&mut app, &mut session);

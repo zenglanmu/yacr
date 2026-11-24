@@ -1,8 +1,9 @@
-//! The Wave 17-24 + Wave 27 + Wave 28 named-refusal registry (322 AutoCAD 2026
+//! The Wave 17-24 + Wave 27 + Wave 28 named-refusal registry (321 AutoCAD 2026
 //! names: 197 existing + 91 Wave 27 + 39 Wave 28 − 4 graduated to real
 //! commands: `REFEDIT`, `-REFEDIT`, `REFSET` and `REFCLOSE` are now the bounded
 //! in-place block-edit session in [`crate::app_refedit`]; `XCLIP` also graduated
-//! to a real display-only block-reference clip).
+//! to a real display-only block-reference clip, and `XEDGES` to the real
+//! display-edge extraction in `cad_app::app_drawing::xedges`).
 //!
 //! Every name in this batch describes a feature with no model or API in this
 //! build: action macros, palettes, OLE/hyperlinks, LISP, 3D lights/materials/
@@ -25,7 +26,8 @@
 macro_rules! refusal_names {
     ($($variant:ident => $name:literal => $reason:literal),+ $(,)?) => {
         /// One named-refusal command (197 existing + 91 Wave 27 + 39 Wave 28 − 4
-        /// graduated to real commands − `XCLIP` graduated to a real display clip = 322).
+        /// graduated to real commands − `XCLIP` graduated to a real display clip
+        /// − `XEDGES` graduated to real display-edge extraction = 321).
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         pub enum RefusalId {
             $($variant),+
@@ -258,7 +260,6 @@ refusal_names! {
     Tabsurf => "TABSURF" => "tabsurf.unsupported: no 3D surface (NURBS) model",
     Revsurf => "REVSURF" => "revsurf.unsupported: no 3D surface (NURBS) model",
     Rulesurf => "RULESURF" => "rulesurf.unsupported: no 3D surface (NURBS) model",
-    Xedges => "XEDGES" => "xedges.unsupported: no 3D solid/surface wireframe extraction model",
     Section => "SECTION" => "section.unsupported: no 3D section-plane model",
     Sectionplane => "SECTIONPLANE" => "sectionplane.unsupported: no 3D section-plane model",
     Sectionplanejog => "SECTIONPLANEJOG" => "sectionplanejog.unsupported: no 3D section-plane model",

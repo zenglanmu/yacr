@@ -409,6 +409,8 @@ mod spline;
 mod stretch;
 mod stretch_curves;
 mod stretch_insert;
+// `XEDGES`: the stored display-edge extraction (one transaction / one undo).
+mod xedges;
 // The move-only 2D kinds (HATCH / IMAGE / MASK / TABLE / ELLIPSE), split out of
 // `stretch` so both files stay inside the code-size limit.
 mod stretch_kinds;

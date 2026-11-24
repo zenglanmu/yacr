@@ -1,8 +1,10 @@
 // The 2026-11-09 Wave 11 batch: twenty-five 3D/mesh/surface names.
 //
 // 3D is deliberately lower priority. Every name is advertised so the command
-// line can complete it, admitted only with an open drawing, and answered by a
-// stable named refusal in Rust. This suite pins the chrome surface only.
+// line can complete it and admitted only with an open drawing. Twenty-three are
+// answered by a stable named refusal in Rust; `3DORBIT`/`3DPAN` are real aliases
+// of the ORBIT/PAN camera handlers (same typed payloads, same refusals). This
+// suite pins the chrome surface only.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { COMMAND_CATALOG } from '../src/commands/catalog.ts';
@@ -18,6 +20,9 @@ const BATCH = [
   '-3DOSNAP', '3DOSNAP', '3DPAN', '3DPOLY', '3DPRINT', '3DPRINTSERVICE',
   '3DROTATE', '3DSCALE', '3DSWIVEL', '3DWALK', '3DZOOM',
 ];
+
+// The two names that graduated from a named refusal to a real camera alias.
+const CAMERA_ALIASES = ['3DORBIT', '3DPAN'];
 
 const DOC = { documentLabel: 'drawing.dwg', loading: false };
 const NO_DOC = { documentLabel: null, loading: false };
@@ -51,7 +56,15 @@ test('every Wave 11 command is catalogued once with real keys', async () => {
     assert.equal(HOST_NAMES.includes(id), true, id);
     assert.equal(DOCUMENT_SCOPED_COMMANDS.includes(id), true, id);
     assert.equal(CAPABILITY_GATES[id], undefined, id);
-    assert.match(en[`${labelSlug(id)}.hint`], /Named refusal/i, `${id} must be a named refusal`);
+    const hint = en[`${labelSlug(id)}.hint`];
+    if (CAMERA_ALIASES.includes(id)) {
+      // The graduated pair is a real camera alias, so the hint names its target
+      // instead of claiming a missing feature.
+      assert.match(hint, /ORBIT|PAN/, `${id} must name its alias target`);
+      assert.doesNotMatch(hint, /Named refusal/i, `${id} is a real alias`);
+    } else {
+      assert.match(hint, /Named refusal/i, `${id} must be a named refusal`);
+    }
   }
 });
 

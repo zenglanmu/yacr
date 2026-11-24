@@ -1,11 +1,15 @@
 //! Wave 11 **named refusals** for the 3D/mesh/surface surface.
 //!
-//! 3D is deliberately lower priority than 2D in this build. These twenty-five
-//! AutoCAD 2026 names describe a 3D navigation, gizmo, mesh, 3DFACE, clipping or
-//! print/export model that this build does not have. Each is admitted by the
-//! vocabulary and refused with `CadError::Unsupported` carrying a **stable**
-//! reason; nothing is written, no revision is bumped and no `cad-history` entry
-//! is recorded, so every name stays Viewer-legal.
+//! 3D is deliberately lower priority than 2D in this build. These twenty-three
+//! AutoCAD 2026 names describe a 3D gizmo, mesh, 3DFACE, clipping or print/export
+//! model that this build does not have. Each is admitted by the vocabulary and
+//! refused with `CadError::Unsupported` carrying a **stable** reason; nothing is
+//! written, no revision is bumped and no `cad-history` entry is recorded, so
+//! every name stays Viewer-legal.
+//!
+//! `3DORBIT` and `3DPAN` are deliberately **not** here: they are real aliases of
+//! the `ORBIT`/`PAN` camera handlers (same typed payloads, same refusals), not
+//! missing features, so they dispatch before this module is reached.
 //!
 //! A caller payload is refused first with `require_none_payload`, so a malformed
 //! request never reaches the feature-specific reason.
@@ -49,13 +53,9 @@ fn reason(ext: ExtendedCommandId) -> String {
         ExtendedCommandId::ThreeDForbit => "3dforbit.unsupported: no free 3D orbit controller",
         ExtendedCommandId::ThreeDMesh => "3dmesh.unsupported: no free-form mesh creation model",
         ExtendedCommandId::ThreeDMove => "3dmove.unsupported: no 3D move gizmo",
-        ExtendedCommandId::ThreeDOrbit => {
-            "3dorbit.unsupported: no interactive 3D orbit controller; use ORBIT"
-        }
         ExtendedCommandId::ThreeDOrbitCtr => "3dorbitctr.unsupported: no 3D orbit-center model",
         ExtendedCommandId::Dash3DOsnap => "-3dosnap.unsupported: no 3D object-snap model",
         ExtendedCommandId::ThreeDObjectSnap => "3dosnap.unsupported: no 3D object-snap model",
-        ExtendedCommandId::ThreeDPan => "3dpan.unsupported: no 3D pan navigation",
         ExtendedCommandId::ThreeDPoly => "3dpoly.unsupported: no 3D polyline entity model",
         ExtendedCommandId::ThreeDPrint => "3dprint.unsupported: no 3D print model",
         ExtendedCommandId::ThreeDPrintService => {
