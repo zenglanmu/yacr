@@ -317,6 +317,7 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             "VIEW",
             "VIEWGO",
             "VPOINT",
+            "NEWVIEW",
             "CVPORT",
             // The session tokens and the two payload-only commands that gained a
             // typed form: `ELEV` (create-funnel elevation), `FSMODE` (the `FS`
