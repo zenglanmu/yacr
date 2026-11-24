@@ -175,6 +175,9 @@ mod shape;
 // real exact `Body3d` through the injected `SolidModeler`; phase C2 adds the
 // background `UNION`/`SUBTRACT`/`INTERSECT` job (`tasks::solid`).
 pub(crate) mod solids;
+// The typed-construction half of those seven commands: payload → `PrimitiveSpec`
+// with every arity/finiteness/option refusal (split out of `solids`).
+pub(crate) mod solid_spec;
 // The 2026-11-12 block/copy writes: `MINSERT` (block array) and `ADDSELECTED`.
 mod addselected;
 mod minsert;

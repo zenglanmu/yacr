@@ -54,9 +54,14 @@
 //! elevation is not applied inside `insert_new_entities` itself: the copy path
 //! reaches it too.
 //!
-//! A `Body3d` is exempt for a different reason: it is an explicitly placed 3D
-//! object (the solid primitive commands take full 3D points), so its own Z is
-//! the author's intent and `ELEV` never translates it.
+//! A `Body3d` is exempt **here** for a different reason: the solid primitive
+//! commands resolve their own base plane before the funnel. The explicit 3D
+//! points form carries the author's own z, so nothing may translate it; the
+//! AutoCAD option constructions (`BOX CUBE`, `CYLINDER DIAMETER`, …) are plan
+//! inputs whose base z is the session `ELEV` token, applied once by
+//! [`crate::app_drawing::solid_spec`] when the body is built. Translating the
+//! finished `Body3d` would therefore double-apply `ELEV` to the plan forms, so
+//! the exemption is the correct rule for both solid shapes.
 //!
 //! # Refusals
 //!

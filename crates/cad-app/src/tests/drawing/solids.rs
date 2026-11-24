@@ -16,6 +16,11 @@ use cad_kernel_adapter::{
 };
 use std::sync::{Arc, Mutex};
 
+// The typed option constructions (`Cube`/`Center`/`Length`, `Diameter`, `2P`,
+// `Top radius`) and the `ELEV` plan rule; split out to stay inside the
+// code-size gate.
+mod options;
+
 // ---- the fake modeler -----------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

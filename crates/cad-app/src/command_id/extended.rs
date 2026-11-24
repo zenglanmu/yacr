@@ -732,19 +732,34 @@ pub enum ExtendedCommandId {
 
     // Wave 14: the seven primitive families create exact bodies (ADR-0036
     // phase C1, Work-only); the rest are stable named refusals (Viewer-legal).
-    /// `BOX`: creates one exact `Body3d` from two opposite corners (Work-only).
+    /// `BOX`: creates one exact `Body3d` from two opposite 3D corners, or from
+    /// AutoCAD's `Center`/`Cube`/`Length` constructions (payload
+    /// [`crate::CommandPayload::Solid`]; plan points take their base z from the
+    /// session `ELEV`) (Work-only).
     Box,
-    /// `CONE`: creates one exact `Body3d` from base centre, radius and top point.
+    /// `CONE`: creates one exact `Body3d` from a base centre, radius and top
+    /// point, or from a plan base circle (`Diameter`/`2P`/radius) plus the
+    /// `Top radius` frustum field and a height (Work-only).
     Cone,
-    /// `CYLINDER`: creates one exact `Body3d` from base centre, radius and top.
+    /// `CYLINDER`: creates one exact `Body3d` from base centre, radius and top,
+    /// or from a plan base circle (`Diameter`/`2P`/radius) plus a height
+    /// (Work-only).
     Cylinder,
-    /// `SPHERE`: creates one exact `Body3d` from centre and radius point.
+    /// `SPHERE`: creates one exact `Body3d` from centre and radius point, a plan
+    /// centre plus `Diameter`, or `2P` (two 3D diameter endpoints) (Work-only).
     Sphere,
-    /// `TORUS`: creates one exact `Body3d` from centre, major and minor point.
+    /// `TORUS`: creates one exact `Body3d` from centre, major and minor point,
+    /// or from a plan ring (`Diameter`/`2P`/radius) plus a tube radius,
+    /// tube `Diameter` or tube `2Point` (Work-only).
     Torus,
-    /// `WEDGE`: creates one exact `Body3d` from two base corners and a height point.
+    /// `WEDGE`: creates one exact `Body3d` from two base corners and a height
+    /// point, or from the same `Center`/`Cube`/`Length` set as `BOX` (Work-only).
     Wedge,
-    /// `PYRAMID`: creates one exact square-base `Body3d` from two base corners and an apex.
+    /// `PYRAMID`: creates one exact square-base `Body3d` from two base corners
+    /// and an apex (Work-only). AutoCAD's `Edge`/`Sides`/`Top radius`
+    /// constructions need a regular n-gon (possibly truncated) base the modeler
+    /// seam does not expose; they are refused as `solid.option_not_supported`,
+    /// so this command stays partial.
     Pyramid,
     /// `POLYSOLID`: 3D solid primitives are not implemented.
     PolySolid,
