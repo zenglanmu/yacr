@@ -26,8 +26,8 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **261** |
-| 部分实现（有写明的界） | **718** |
+| 完整实现 | **264** |
+| 部分实现（有写明的界） | **715** |
 | **已实现合计（完整 + 部分）** | **979** |
 | 未实现 | **2** |
 
@@ -50,7 +50,7 @@
 > 以及 chrome-local 的 `DOMAIN` 命令。无实现的参考面板继续 `pending`；这不改变 981 条的
 > 实现状态计数，也没有运行/像素证据（`autocad-structure` 契约测试锁定接线）。
 
-> **2026-11-24 增补（严格会话令牌收口：`FINDINCLUDE`/`MULTIPLE`/`TFRAMES`）**：`FINDINCLUDE` 不再是死设置——会话令牌 `find_include` 直接决定 `-FIND`/`FIND` 的块通道：ON 搜索块定义与已加载外部参照物化出的块（按 `external reference 'NAME'` 命名），OFF 只搜模型空间/图纸布局并在报告写明排除；未加载或无块的参照无论令牌如何都按名与状态（`missing` 等）列为未搜索来源。`MULTIPLE` 的重复循环接到唯一捕获确认漏斗：每次成功确认后重开同一绘图/编辑捕获（`multiple.repeated`），`Esc`/`CANCEL` 停止，重开失败 `multiple.repeat_failed`，512 次守卫 `multiple.repeat_limit`；一次性/测量命令无捕获可重开，按名 `multiple.not_repeatable` 拒绝且不武装。`TFRAMES` 经 `DisplaySettings::frames_visible` 到达派生批次：ON 显示光栅图像边框（并按 `WIPEOUTFRAME` 显示遮罩边框），OFF 同时隐藏两者而 WIPEOUT 仍遮罩、图像仍绘制纹理；外部参照边框未建模（xref 是展开块几何），按名声明。三者均为会话状态，无库写/修订/历史。`HIGHLIGHTNEW` 仍为**部分实现**：渲染器只有选中/悬停/隐藏三个 in-stream 位，新对象高亮需要新增第四位与各管线着色（或新增绘制通道），本轮不加，标志不消费。计入 **261 完整 + 718 部分 / 979 已实现**；证据仅 Linux Rust 契约，GUI/GPU/像素/真机 NOT VERIFIED。
+> **2026-11-24 增补（严格会话令牌收口：`FINDINCLUDE`/`MULTIPLE`/`TFRAMES`）**：`FINDINCLUDE` 不再是死设置——会话令牌 `find_include` 直接决定 `-FIND`/`FIND` 的块通道：ON 搜索块定义与已加载外部参照物化出的块（按 `external reference 'NAME'` 命名），OFF 只搜模型空间/图纸布局并在报告写明排除；未加载或无块的参照无论令牌如何都按名与状态（`missing` 等）列为未搜索来源。`MULTIPLE` 的重复循环接到唯一捕获确认漏斗：每次成功确认后重开同一绘图/编辑捕获（`multiple.repeated`），`Esc`/`CANCEL` 停止，重开失败 `multiple.repeat_failed`，512 次守卫 `multiple.repeat_limit`；一次性/测量命令无捕获可重开，按名 `multiple.not_repeatable` 拒绝且不武装。`TFRAMES` 经 `DisplaySettings::frames_visible` 到达派生批次：ON 显示光栅图像边框（并按 `WIPEOUTFRAME` 显示遮罩边框），OFF 同时隐藏两者而 WIPEOUT 仍遮罩、图像仍绘制纹理；外部参照边框未建模（xref 是展开块几何），按名声明。三者均为会话状态，无库写/修订/历史。`HIGHLIGHTNEW` 仍为**部分实现**：渲染器只有选中/悬停/隐藏三个 in-stream 位，新对象高亮需要新增第四位与各管线着色（或新增绘制通道），本轮不加，标志不消费。计入 **264 完整 + 715 部分 / 979 已实现**；证据仅 Linux Rust 契约，GUI/GPU/像素/真机 NOT VERIFIED。
 
 > **2026-11-24 增补（严格 2D 收口）**：`TEXTALIGN`（`SETSPACING`/`CURRENTVERTICAL`/`CURRENTHORIZONTAL`）、`TCIRCLE`（`SLOT`/`OFFSET`/`CONSTANT`）、`DONUT`（填充圆盘/环）、`HATCHGENERATEBOUNDARY`（图纸布局 hatch）、`ADDSELECTED`（ARC/POLYLINE/INSERT）、`GETSEL`（COLOR/LINETYPE/SPACE）、`MEASUREGEOM VOLUME`（单一体精确 body 路径）、`CENTERMARK`（可配置臂长）、`CENTERLINE`（延伸/间隙）九个命令按严格口径升为**完整实现**；`CENTERMARK`/`CENTERLINE` 的产出是普通 `LINE`（非关联为声明边界，与 `DIMCENTER` 同类）。计入 **213 完整 + 766 部分 / 979 已实现**；窗口/GPU/像素/真机证据仍 NOT VERIFIED。
 
@@ -64,7 +64,7 @@
 
 > **2026-11-24 增补（严格图层状态收口，`LAYERP`/`LAYWALK`）**：`LAYERP` 的快照不再是“仅覆盖”：每次真实图层设置改动前记录**会话覆盖 + 层表属性的改动前行**（`off`/`frozen`/`locked`/colour/linetype/lineweight/transparency/plottable），恢复经与其它图层写相同的 `LayerPatch` 路径，**一条事务/一步撤销**；纯覆盖步仍不写库/不升 revision，16 步上界与“仅真实改动前压栈”不变，`LAYERSTATE RESTORE` 的多行写入也计为一步。`LAYWALK` 的 typed 输入补齐**层名通配过滤**（`*`/`?`，复用 `-LAYER ?` 的同一大小写不敏感规则；零匹配按 `layers.walk.unknown_filter` 拒绝且不写任何覆盖），对话框/逐对象 walk 属交互 chrome。`LAYERSTATE` 仍是**部分实现**：会话内 32 个命名快照、RESTORE 多行一条事务/一步撤销，但没有 DWG 命名层状态表持久化（不新增表）。两者晋升后计入 **252 完整 + 727 部分 / 979 已实现**；证据仅 Linux Rust 契约（`layerp`/`layerstate`/`laywalk`），GUI/GPU/像素/真机 NOT VERIFIED。
 
-> **2026-11-24 增补（严格收口 III：元数据/系统变量/单位/安装信息/页面设置）**：`DWGPROPS` 从只读报告扩成真实文档摘要（`title`/`author`/`subject`/`keywords`/`comments` + 自定义属性；一条命令一次 revision、header-only `ChangeSet`、无 undo patch；空值清除；值有长度/NUL 界；`document.json` → `variables.metadata` 只在非空时写出，旧档逐字节不变），并补一条 `.ymodel` 快照往返契约后晋升**完整实现**（无对话框属全局范围；DXF/DWG 导出器不携带摘要信息，属连接器边界）。`SYSVDLG` 新增 `<name>` 读取、`<name> <value>` 编辑、`SAVE|RESTORE <file.json>`（版本化 `yacr.sysvar` JSON，宿主 named-file 桥；不是 AutoCAD `.svf`；未建模变量按名字拒绝；文件未知变量/重复名/非法值在写入前整体拒绝；多条 header 值经 `apply_header_values` 落在同一 revision）后晋升**完整实现**（无交互对话框属全局范围；无值变量在保存时省略，恢复不清空）。`UNITS`/`-UNITS` 现在真实写入声明单位与线性小数位（`Document.units` 一条 header revision，无 undo patch），并读取实时值而不是写死的「4 位小数」；角度格式/精度/方向与长度 *format* 表未建模，保持**部分实现**。`ACADINFO` 报告扩到真实目标 OS/架构、文档单位/精度与应用域，并显式报告「不写信息文件」；许可证/硬件/模块枚举属全局范围，保持**部分实现**。`PSETUPIN`/`-PSETUPIN` 更正为「同图纸内复制已存 `PLOTSETTINGS`」的真实边界；跨文件导入没有可用的源文档页面设置提取路径（宿主文件桥只能读字节，`cad-app` 无 DWG/DXF/DWT 页面设置读取），因此两者都保持**部分实现**（`-PSETUPIN` 从完整降回部分，原状态过度声明）。上述批次合计计入 **261 完整 + 718 部分 / 979 已实现**；仅 Linux 契约测试，GUI/GPU/像素/真机 NOT VERIFIED。
+> **2026-11-24 增补（严格收口 III：元数据/系统变量/单位/安装信息/页面设置）**：`DWGPROPS` 从只读报告扩成真实文档摘要（`title`/`author`/`subject`/`keywords`/`comments` + 自定义属性；一条命令一次 revision、header-only `ChangeSet`、无 undo patch；空值清除；值有长度/NUL 界；`document.json` → `variables.metadata` 只在非空时写出，旧档逐字节不变），并补一条 `.ymodel` 快照往返契约后晋升**完整实现**（无对话框属全局范围；DXF/DWG 导出器不携带摘要信息，属连接器边界）。`SYSVDLG` 新增 `<name>` 读取、`<name> <value>` 编辑、`SAVE|RESTORE <file.json>`（版本化 `yacr.sysvar` JSON，宿主 named-file 桥；不是 AutoCAD `.svf`；未建模变量按名字拒绝；文件未知变量/重复名/非法值在写入前整体拒绝；多条 header 值经 `apply_header_values` 落在同一 revision）后晋升**完整实现**（无交互对话框属全局范围；无值变量在保存时省略，恢复不清空）。`UNITS`/`-UNITS` 现在真实写入声明单位与线性小数位（`Document.units` 一条 header revision，无 undo patch），并读取实时值而不是写死的「4 位小数」；角度格式/精度/方向与长度 *format* 表未建模，保持**部分实现**。`ACADINFO` 报告扩到真实目标 OS/架构、文档单位/精度与应用域，并显式报告「不写信息文件」；许可证/硬件/模块枚举属全局范围，保持**部分实现**。`PSETUPIN`/`-PSETUPIN` 更正为「同图纸内复制已存 `PLOTSETTINGS`」的真实边界；跨文件导入没有可用的源文档页面设置提取路径（宿主文件桥只能读字节，`cad-app` 无 DWG/DXF/DWT 页面设置读取），因此两者都保持**部分实现**（`-PSETUPIN` 从完整降回部分，原状态过度声明）。上述批次合计计入 **264 完整 + 715 部分 / 979 已实现**；仅 Linux 契约测试，GUI/GPU/像素/真机 NOT VERIFIED。
 >
 > **2026-11-24 增补（严格报告收口）**：`BCOUNT` 扩到**整图**（模型空间 + 各图纸布局）与选择集作用域，块定义内嵌套参照按名报告不计数（AutoCAD 同限），Select objects 交互提示属 ADR 全局范围；`DBLIST` 列出块定义成员与全部三个已建模空间，XDATA/扩展字典/字典/代理对象不保留并按名报告；`JULIAN` 新增 `JULIAN <YYYY-MM-DD>`（也接受 `YYYY/MM/DD`，可跟 `[T ]HH:MM[:SS]`）日历转儒略日形式，非法日期按 `julian.invalid_date` 拒绝；`PAGESETUP`/`-PAGESETUP` 的 typed 写入与拒绝契约补齐后晋升（唯一残留绘图仪/CTB/STB 属 ADR 全局范围）。`ALIASEDIT` 的 `ADD`/`REMOVE` 补上宿主 `preference.json` 根键 `commandAliases` 持久化（跨会话恢复；写入失败按 `aliasedit.not_persisted` 回滚；失效/冲突的持久行启动时按名丢弃并记诊断）后晋升；`SYSVARMONITOR`（无后台通知、不持久化）仍有真实缺口，保持**部分实现**。三批合计计入 **250 完整 + 729 部分 / 979 已实现**；证据仅 Linux Rust 契约，GUI/GPU/像素/真机 NOT VERIFIED。
 
@@ -268,7 +268,7 @@
 
 > **这不是验收，是当前排期与口径。** 本轮目标是把命令从 `部分实现`/具名拒绝推进到支持域内
 > **没有剩余可写缺口**的 `完整实现`；不放宽为“改状态不实现”，也不把 ADR 全局范围缺口算作
-> 单命令完成。当前清单 **261 完整 / 718 部分 / 2 未实现**，只有真正合并且契约测试通过的
+> 单命令完成。当前清单 **264 完整 / 715 部分 / 2 未实现**，只有真正合并且契约测试通过的
 > 命令才改状态。
 
 | 批次 | 范围 | 状态 |
@@ -289,6 +289,7 @@
 | M1k 文本屏幕/托盘/查找大小写 | `TEXTSCR`/`GRAPHSCR` 接共享 chrome 文本屏幕（`cad_status.textScreen`，正文复用命令行历史同一折叠与序列化，无第二套历史）；`TRAYSETTINGS` 接状态栏托盘与托盘设置面（`cad_status.traySettings`，唯一开关即该会话旗标；无状态栏载体按名拒绝）；`FINDMATCH` 接入 `-FIND`/`FIND` 同一匹配器（ON 区分大小写，覆盖 MTEXT/单行 TEXT/MULTILEADER/表格单元格） | **已合并**（+4 complete；无 GUI/像素/真机证据） |
 | M1l 图层历史/漫游 | `LAYP` 恢复层属性 + 覆盖的快照（一次 LayerPatch/一步撤销）、`LAYWALK` 通配符过滤 | **已合并**（+2 complete；`LAYERSTATE` 因无 DWG 命名状态表仍 partial） |
 | M1m 元数据/系统变量/单位/信息/页面设置 | `DWGPROPS` 摘要元数据、`SYSVDLG` 编辑/保存/恢复、`UNITS`/`-UNITS` 单位/精度写入、`ACADINFO` 真实配置、`PSETUPIN`/`-PSETUPIN` 边界对账 | **已合并**（+2 complete：`DWGPROPS`、`SYSVDLG`；`-PSETUPIN` 从完整降回 partial：跨文件未实现；`UNITS`/`-UNITS`/`ACADINFO` 仍 partial，缺口见各行） |
+| M1n 查找/重复/边框 | `FINDINCLUDE` 块/xref 通道、`MULTIPLE` 捕获重复、`TFRAMES` 图像/遮罩边框开关 | **已合并**（+3 complete；`HIGHLIGHTNEW` 因渲染器无第四标志位仍 partial） |
 | M5 其他面板 | 发布/传递/标准/CUI/点云/PDF 底图 | 分析完成；多数是 `L`/架构级缺口，按 ADR/子系统逐个评估 |
 
 **已明确的诚实缺口**：`ARCHIVE`、`STANDARDS`、`CHECKSTANDARDS`、全部 `CUI*`、`CUSTOMIZE` 仍是
@@ -726,7 +727,7 @@
 | `FILLETEDGE` | 部分实现 | 具名拒绝（`filletedge.unsupported: no 3D edge fillet model`）。 |
 | `FILTER` | 部分实现 | `AND`/`OR`/`XOR`/`NOT` 递归逻辑树（括号、元数校验）、相对运算符、已建模属性集；只读；**分类/自定义特性未建模**；**命名 `.nfl` 过滤器未实现** |
 | `FIND` | 完整实现 | `FIND <needle> [=> <replacement>]`：**整图遍历**（模型空间 + 每个图纸布局，按空间分组报告），跨空间替换**一条事务/一步撤销**，拒绝时哪里都不写；**所有文字通道按「画出来的文本」匹配**（MTEXT/带文字 MULTILEADER/`AcDbText`（含导入成 `Text` 的 ATTRIB/ATTDEF）/表格单元格，经同一投影与转义往返）；块定义内命中按**只读通道**具名列出（`block definitions, read-only (edit with BEDIT)`），FIND 不改块定义；比较方式读取会话 `FINDMATCH`（默认 OFF = ASCII 不区分大小写，ON = 区分大小写） |
-| `FINDINCLUDE` | 完整实现 | **完整实现（2026-11-24）**：会话令牌 `find_include`（默认 ON）是 `-FIND`/`FIND` 的块通道开关：ON 搜索块定义与已加载外部参照物化出的块（按 `external reference 'NAME'` 命名），OFF 只搜索模型空间与各图纸布局并在报告写明 `excluded by FINDINCLUDE OFF`；未加载/无块的参照始终按名与状态（`missing` 等）列为未搜索来源；无库写/修订/历史，Viewer-legal。 |
+| `FINDINCLUDE` | 完整实现 | 会话令牌 `find_include`（默认 ON）是 `-FIND`/`FIND` 的块通道开关：ON 搜索块定义与已加载外部参照物化出的块（按 `external reference 'NAME'` 命名），OFF 只搜索模型空间与各图纸布局并在报告写明 `excluded by FINDINCLUDE OFF`；未加载/无块的参照始终按名与状态（`missing` 等）列为未搜索来源；无库写/修订/历史，Viewer-legal。 |
 | `FINDMATCH` | 完整实现 | 切换会话 `find_match_case`（默认 OFF）；`-FIND`/`FIND` 的报告与替换共用该标志：ON 按精确字节（区分大小写），OFF 按 ASCII 不区分大小写；覆盖 MTEXT/单行 TEXT/MULTILEADER/表格单元格。 |
 | `FLATSHOT` | 部分实现 | 具名拒绝（`flatshot.unsupported: 3D solids are not modeled, so there is nothing to flatten`）。 |
 | `FLATTEN` | 部分实现 | 真实编辑：LINE/POLYLINE/CIRCLE/ARC/ELLIPSE/POINT/SPLINE、TEXT/SHAPE/MASK/XY 平面 IMAGE/COMPOUND，以及竖直 INSERT（只改插入点 z 与属性文字 z，不编辑块定义；成员非平/放置倾斜按名拒绝）的 z 置 0；一条事务/一步撤销；MESH/Body3d/派生显示的 DIMENSION/HATCH/MULTILEADER/TABLE 按名拒绝（Express 投影行为简化为 z=0）。 |
@@ -1161,7 +1162,7 @@
 | `TEXTSCR` | 完整实现 | 置会话文本屏幕旗标（`cad_status.textScreen`）；共享 chrome 的文本屏幕窗口显示**同一**命令行历史（`commandWindowRows` + `commandWindowText`，无第二套历史模型）；无历史通道时显式说明而非空窗。 |
 | `TEXTTOFRONT` | 完整实现 | 选择式；按 `SpaceId` 逐范围把 Text/MultiLeader/Dimension 上移到该范围所有非合格对象之前（保持相对顺序，`texttofront.unchanged` 不建事务，耗尽 `texttofront.order_exhausted`）；其它选中对象逐条 `texttofront.skipped` | 载荷无「全图文字」选项（声明）；无 Draw Order 对话框 |
 | `TEXTUNMASK` | 部分实现 | 组优先删除 + 估计外框启发；清理已擦除文字留下的陈旧组；未分组遮罩来源不可证明（声明）；无匹配为具名无操作成功 |
-| `TFRAMES` | 完整实现 | **完整实现（2026-11-24）**：会话令牌 `tframes`（默认 ON）经 `DisplaySettings::frames_visible` 到达派生批次：ON 显示光栅图像边框，并按 `WIPEOUTFRAME` 显示遮罩边框；OFF 同时隐藏两者（WIPEOUT 仍遮罩、图像仍绘制纹理）；外部参照边框未建模（xref 是展开的块几何），命令按名声明；无库写/修订/历史，出图不跟随（出图各自解析边框）。 |
+| `TFRAMES` | 完整实现 | 会话令牌 `tframes`（默认 ON）经 `DisplaySettings::frames_visible` 到达派生批次：ON 显示光栅图像边框，并按 `WIPEOUTFRAME` 显示遮罩边框；OFF 同时隐藏两者（WIPEOUT 仍遮罩、图像仍绘制纹理）；外部参照边框未建模（xref 是展开的块几何），命令按名声明；无库写/修订/历史，出图不跟随（出图各自解析边框）。 |
 | `THICKEN` | 部分实现 | 具名拒绝（`thicken.unsupported: no surface-to-solid model`）。 |
 | `TIFOUT` | 部分实现 | 具名拒绝（`tifout.unsupported: raster TIFF export is not implemented; use PLOT for vector SVG/PDF`）。 |
 | `TIME` | 部分实现 | 真实 UTC/文档/修订/计数 + 4 个显式 `time.not_tracked`（创建、最后更新、命令耗时、计时器）；未跟踪值不杜撰 |
