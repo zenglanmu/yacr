@@ -174,7 +174,7 @@ use super::*;
 
 use super::layer_record::layer_row;
 use crate::SelectionToolPayload;
-use cad_db::ChangeScope;
+use cad_db::{ChangeScope, LayerAttributes};
 
 /// A named, non-capability refusal (`<command>.<code>: <detail>`).
 pub(super) fn invalid(prefix: &str, code: &str, detail: impl std::fmt::Display) -> CadError {
@@ -507,7 +507,7 @@ impl Application {
         }
 
         let (changes, count) =
-            self.write_layer_flags(document_id, &layers, "layfrz", |attributes| {
+            self.write_layer_flags(session, document_id, &layers, "layfrz", |attributes| {
                 if attributes.frozen {
                     false
                 } else {
@@ -550,7 +550,7 @@ impl Application {
     /// viewport of every layout.
     fn laythw(
         &mut self,
-        _session: &mut SessionState,
+        session: &mut SessionState,
         command: &Command,
     ) -> CadResult<CommandOutcome> {
         if !matches!(command.payload, CommandPayload::None) {
@@ -582,6 +582,10 @@ impl Application {
         let mut candidate = drawing.clone();
         let transaction = next_transaction_id();
         let mut layer_patches = Vec::new();
+        // The `LAYERP` half: the pre-change attributes of the rows that were
+        // actually frozen at drawing level. Per-viewport VP-freeze is layout
+        // state, not a layer-table attribute, so it is not in this snapshot.
+        let mut previous_attributes: BTreeMap<LayerId, LayerAttributes> = BTreeMap::new();
         // The published change set spans the layer **and** layout writes; its
         // dirty scope must union both (neither is an entity change).
         let mut scope = ChangeScope::default();
@@ -591,6 +595,7 @@ impl Application {
             if !attributes.frozen {
                 continue;
             }
+            previous_attributes.insert(*id, attributes.clone());
             attributes.frozen = false;
             // `frozen_in_new_viewport` is not a viewport model; it stays.
             let write = candidate.set_layer_attributes(*id, attributes, transaction, "laythw")?;
@@ -647,6 +652,7 @@ impl Application {
                 merge_key: None,
             },
         )?;
+        session.push_layer_previous_snapshot(previous_attributes);
         Ok(CommandOutcome {
             objects: Vec::new(),
             changes: Some(Arc::new(changes)),
@@ -700,7 +706,7 @@ impl Application {
         }
 
         let (changes, count) =
-            self.write_layer_flags(document_id, &layers, prefix, |attributes| {
+            self.write_layer_flags(session, document_id, &layers, prefix, |attributes| {
                 if attributes.locked == locked {
                     false
                 } else {

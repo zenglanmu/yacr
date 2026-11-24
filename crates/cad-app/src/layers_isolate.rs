@@ -44,10 +44,12 @@
 //!
 //! `LAYERP` is **not** an alias of it (2026-10-27): it is its own command
 //! ([`CommandId::LayerPrevious`]) that pops the newest snapshot of the session's
-//! bounded layer-override history ([`crate::layer_history`]), so it restores the
+//! bounded layer-state history ([`crate::layer_history`]), so it restores the
 //! *previous* state (the formerly isolated state) instead of clearing everything.
 //! Its push sites are the same batch this module publishes through, so `LAYISO`
-//! and `LAYOFF` are one `LAYERP` step each.
+//! and `LAYOFF` are one `LAYERP` step each; a snapshot also carries the layer-table
+//! attributes of a real `LAYFRZ`/`LAYLCK`/`-LAYER`/`LAYTHW`/`LAYERSTATE RESTORE`
+//! write, which `LAYERP` restores in one undo step.
 
 use std::collections::BTreeMap;
 

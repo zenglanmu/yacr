@@ -117,6 +117,7 @@ mod clip_edit;
 // both layer modules stay inside the code-size limit.
 mod dash_layer_write;
 mod layer_extended;
+mod layer_previous;
 mod layer_record;
 mod layout_record;
 mod lengthen;

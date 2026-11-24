@@ -198,7 +198,7 @@ pub use input::{
     DiagnosticsDrawer, EscapeAction, InputOutcome, InputPolicy, KeyAction, LoadingState,
     PointerPhase, PointerUpdate, StatusModel, ToolStatus, ViewMetrics, DRAG_THRESHOLD_LOGICAL_PX,
 };
-pub use layer_history::{LayerOverrideHistory, LAYER_OVERRIDE_HISTORY_CAP};
+pub use layer_history::{LayerOverrideHistory, LayerPreviousState, LAYER_OVERRIDE_HISTORY_CAP};
 pub use layer_states::{LayerStates, NamedLayerState, LAYER_STATE_CAP};
 pub use measure_tool::{MeasurementPreview, MeasurementTool, MeasurementToolKind};
 pub use ortho::{ortho_constrain, ortho_constrain_point};

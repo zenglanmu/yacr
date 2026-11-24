@@ -108,6 +108,9 @@ impl Application {
         let transaction = next_transaction_id();
         // One record per command: label plus the exact before/after row(s).
         let mut pending: Option<(&'static str, Vec<cad_db::LayerPatch>)> = None;
+        // The `LAYERP` half: the pre-change attributes of the row this command
+        // really rewrites (empty for create/rename/delete).
+        let mut previous_attributes = std::collections::BTreeMap::new();
 
         let outcome = match &command.payload {
             CommandPayload::CreateLayer(name) => {
@@ -263,7 +266,8 @@ impl Application {
                 // no second copy of this policy.
                 ensure_current_layer_stays_visible(session, id, &name, &parsed)?;
                 let before = layer_row(drawing.as_ref(), id);
-                let mut attributes = drawing.layer_attributes(id);
+                let stored_attributes = drawing.layer_attributes(id);
+                let mut attributes = stored_attributes.clone();
                 crate::layer_property::apply(&mut attributes, parsed);
                 // The database recomputes `visible` from the new `off`/`frozen`
                 // pair inside this one call, so the invariant is never published
@@ -279,6 +283,7 @@ impl Application {
                 // claiming a change, and no undo entry is recorded.
                 let changed = changeset.before != changeset.after;
                 if changed {
+                    previous_attributes.insert(id, stored_attributes);
                     pending = Some((
                         "set layer property",
                         vec![cad_history::layer_patch(
@@ -327,6 +332,9 @@ impl Application {
                 self.publish_layer_record(document_id, candidate, transaction, label, patches)?;
             }
             _ => self.publish_layer_table(document_id, candidate)?,
+        }
+        if !previous_attributes.is_empty() {
+            session.push_layer_previous_snapshot(previous_attributes);
         }
         Ok(outcome)
     }

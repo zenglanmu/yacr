@@ -26,8 +26,8 @@
 | 指标 | 数量 |
 | --- | ---: |
 | 官方命令总数 | **981** |
-| 完整实现 | **258** |
-| 部分实现（有写明的界） | **721** |
+| 完整实现 | **260** |
+| 部分实现（有写明的界） | **719** |
 | **已实现合计（完整 + 部分）** | **979** |
 | 未实现 | **2** |
 
@@ -59,6 +59,8 @@
 > **2026-11-24 增补（严格 2D 收口续）**：`HATCH`/`-HATCH` 的支持域（`Circle`/完整 `Ellipse`/闭合 `Polyline`/`LINE`+`ARC` 边链；solid/user-defined/predefined/gradient 四种会话填充与 `PATTERN`/`PATTERNFILE` 两种命令名通道）已无剩余拒绝路径，契约测试逐组合证明——仅剩创建期**关联性**与实时预览/对话框，二者都是构建级全局范围。`IMAGEATTACH` 新增可选的 `[<rotation_deg>]`（绕 `+Z` 逆时针、烘进 `u`/`v` 基）与**活动图纸布局**目标（走布局自身 draw-order 的实体写入路径；`Block` 定义 `imageattach.block_space`、失效布局 `imageattach.unknown_layout` 按名拒绝）。`VPSYNC` 新增可选的**0 基**主视口索引（`VPSYNC [<master>]`，默认 `0`；越界 `vpsync.master_out_of_range`、不 clamp、一条事务/一步撤销）。`HATCH`、`-HATCH`、`IMAGEATTACH`、`VPSYNC` 四个官方名字晋升为**完整实现**。
 >
 > **2026-11-24 增补（严格报告收口）**：`BCOUNT` 扩到**整图**（模型空间 + 各图纸布局）与选择集作用域，块定义内嵌套参照按名报告不计数（AutoCAD 同限），Select objects 交互提示属 ADR 全局范围；`DBLIST` 列出块定义成员与全部三个已建模空间，XDATA/扩展字典/字典/代理对象不保留并按名报告；`JULIAN` 新增 `JULIAN <YYYY-MM-DD>`（也接受 `YYYY/MM/DD`，可跟 `[T ]HH:MM[:SS]`）日历转儒略日形式，非法日期按 `julian.invalid_date` 拒绝；`PAGESETUP`/`-PAGESETUP` 的 typed 写入与拒绝契约补齐后晋升（唯一残留绘图仪/CTB/STB 属 ADR 全局范围）。`ALIASEDIT` 的 `ADD`/`REMOVE` 补上宿主 `preference.json` 根键 `commandAliases` 持久化（跨会话恢复；写入失败按 `aliasedit.not_persisted` 回滚；失效/冲突的持久行启动时按名丢弃并记诊断）后晋升；`SYSVARMONITOR`（无后台通知、不持久化）仍有真实缺口，保持**部分实现**。四批合计计入 **254 完整 + 725 部分 / 979 已实现**；证据仅 Linux Rust 契约，GUI/GPU/像素/真机 NOT VERIFIED。
+
+> **2026-11-24 增补（严格图层状态收口，`LAYERP`/`LAYWALK`）**：`LAYERP` 的快照不再是“仅覆盖”：每次真实图层设置改动前记录**会话覆盖 + 层表属性的改动前行**（`off`/`frozen`/`locked`/colour/linetype/lineweight/transparency/plottable），恢复经与其它图层写相同的 `LayerPatch` 路径，**一条事务/一步撤销**；纯覆盖步仍不写库/不升 revision，16 步上界与“仅真实改动前压栈”不变，`LAYERSTATE RESTORE` 的多行写入也计为一步。`LAYWALK` 的 typed 输入补齐**层名通配过滤**（`*`/`?`，复用 `-LAYER ?` 的同一大小写不敏感规则；零匹配按 `layers.walk.unknown_filter` 拒绝且不写任何覆盖），对话框/逐对象 walk 属交互 chrome。`LAYERSTATE` 仍是**部分实现**：会话内 32 个命名快照、RESTORE 多行一条事务/一步撤销，但没有 DWG 命名层状态表持久化（不新增表）。两者晋升后计入 **252 完整 + 727 部分 / 979 已实现**；证据仅 Linux Rust 契约（`layerp`/`layerstate`/`laywalk`），GUI/GPU/像素/真机 NOT VERIFIED。
 
 ## 下一批 100 条命令实施计划与进度（2026-11-07）
 
@@ -260,7 +262,7 @@
 
 > **这不是验收，是当前排期与口径。** 本轮目标是把命令从 `部分实现`/具名拒绝推进到支持域内
 > **没有剩余可写缺口**的 `完整实现`；不放宽为“改状态不实现”，也不把 ADR 全局范围缺口算作
-> 单命令完成。当前清单 **258 完整 / 721 部分 / 2 未实现**，只有真正合并且契约测试通过的
+> 单命令完成。当前清单 **260 完整 / 719 部分 / 2 未实现**，只有真正合并且契约测试通过的
 > 命令才改状态。
 
 | 批次 | 范围 | 状态 |
@@ -279,6 +281,7 @@
 | M1i 报告/会话 | `BCOUNT`（整图/选择集）、`DBLIST`（块成员+三空间）、`JULIAN <date>`、`ALIASEDIT` 持久化、`PAGESETUP`/`-PAGESETUP` | **已合并**（+6 complete；`SYSVARMONITOR` 因无后台通知/持久化仍 partial） |
 | M1j 参照编辑族 | `REFEDIT`/`-REFEDIT`/`REFSET`/`REFCLOSE` 的成员图层/绘图次序/渲染属性回写、动态可见性成员保留与描述符剪除、嵌套引用保留 + 嵌套实例具名拒绝 | **已合并**（+4 complete） |
 | M1k 文本屏幕/托盘/查找大小写 | `TEXTSCR`/`GRAPHSCR` 接共享 chrome 文本屏幕（`cad_status.textScreen`，正文复用命令行历史同一折叠与序列化，无第二套历史）；`TRAYSETTINGS` 接状态栏托盘与托盘设置面（`cad_status.traySettings`，唯一开关即该会话旗标；无状态栏载体按名拒绝）；`FINDMATCH` 接入 `-FIND`/`FIND` 同一匹配器（ON 区分大小写，覆盖 MTEXT/单行 TEXT/MULTILEADER/表格单元格） | **已合并**（+4 complete；无 GUI/像素/真机证据） |
+| M1l 图层历史/漫游 | `LAYP` 恢复层属性 + 覆盖的快照（一次 LayerPatch/一步撤销）、`LAYWALK` 通配符过滤 | **已合并**（+2 complete；`LAYERSTATE` 因无 DWG 命名状态表仍 partial） |
 | M5 其他面板 | 发布/传递/标准/CUI/点云/PDF 底图 | 分析完成；多数是 `L`/架构级缺口，按 ADR/子系统逐个评估 |
 
 **已明确的诚实缺口**：`ARCHIVE`、`STANDARDS`、`CHECKSTANDARDS`、全部 `CUI*`、`CUSTOMIZE` 仍是
@@ -800,10 +803,10 @@
 | `LAYDEL` | 完整实现 | 选择式（选中对象可是**模型空间或任一图纸布局**的顶层实体；块内成员/子元素按 `laydel.block_space` 拒绝）：删除选中对象所在层在**模型空间、每个图纸布局、每个块定义内**的全部实体（`cad-db` 单一 `entities` 表按 `layer` 过滤；块成员走 ERASE 同一删除路径，成员关系由显示状态还原），并剪除各图纸视口的该层 `layer_overrides` 键；当前层/`0` 层拒绝，锁定层的实体删除由数据库以 `layer.locked` 拒绝且不发布；实体补丁、布局补丁与层行一条事务/一步撤销，重做再次删除。会话层状态（`LAYERSTATE SAVE`）不重写，恢复悬空层仍按 `layerstate.dangling_layer` 拒绝。 |
 | `LAYER` | 已实现 | chrome 本地选择子：打开图层面板 |
 | `LAYERCLOSE` | 已实现 | chrome 本地选择子：关闭图层面板（面板关闭按钮走同一命令） |
-| `LAYERP` | 部分实现 | 会话内有界 16 步；不持久化 |
+| `LAYERP` | 完整实现 | 有界 **16** 步快照环（仅真实改动前压栈）：会话覆盖 + 层表属性（`off`/`frozen`/`locked`/colour/linetype/lineweight/transparency/plottable）的改动前状态；属性经 `LayerPatch` 一条事务/一步撤销恢复，纯覆盖步不写库、不升 revision；重命名/删除/新增层不恢复（与官方一致）；不持久化（会话级，与 AutoCAD 一致） |
 | `LAYERPALETTE` | 部分实现 | 具名拒绝（`layerpalette.unsupported`）：无独立图层调色板，请用 `LAYER`。 |
 | `LAYERPMODE` | 部分实现 | `ON\ |
-| `LAYERSTATE` | 部分实现 | `LAYERSTATE SAVE\|RESTORE\|LIST\|DELETE <name>`；会话内最多 32 个命名状态；RESTORE 的图层属性写入一条事务/一步撤销；不持久化 DWG |
+| `LAYERSTATE` | 部分实现 | `LAYERSTATE SAVE\|RESTORE\|LIST\|DELETE <name>`；会话内最多 32 个命名状态；RESTORE 的多行图层属性写入经 `LayerPatch` 一条事务/一步撤销；无 DWG 命名层状态表持久化 |
 | `LAYERSTATESAVE` | 部分实现 | 带 `LayerState` 载荷时转交既有 `LAYERSTATE` 会话存储；无载荷只报告缺少 New Layer State 对话框（`layerstatesave.needs_name`）。 |
 | `LAYFRZ` | 完整实现 | 跨模型空间/图纸空间/块成员选择；bare 冻结绘图级 `frozen`，`LAYFRZ VP [idx,…]`（或 `VIEWPORTS`）写每视口 `layer_overrides`（Vpfreeze）；当前层在目标视口包含 `CVPORT` 时拒绝；一条事务/一步撤销；交互对话框属 ADR 全局范围。 |
 | `LAYISO` | 已实现 | — |
@@ -821,7 +824,7 @@
 | `LAYULK` | 完整实现 | 跨模型空间/图纸空间/块成员选择（嵌套按有效层解析）；只改 `locked`；一条事务/一步撤销；交互对话框属 ADR 全局范围。 |
 | `LAYUNISO` | 已实现 | — |
 | `LAYVPI` | 完整实现 | 无索引时冻结所选图层于**除 `CVPORT` 当前视口之外的全部视口**（AutoCAD 语义），显式索引形式优先；当前视口是唯一视口时按 `layvpi.no_other_viewport` 拒绝而非「全视口冻结」；图层表写入一条事务/一步撤销 |
-| `LAYWALK` | 部分实现 | 逗号分隔层名；只显示命名层+当前层（会话覆盖，同 LAYISO 原子路径）；未知/空拒绝 |
+| `LAYWALK` | 完整实现 | 逗号分隔层名或层名通配过滤（`*`/`?`，与 `-LAYER ?` 同一规则、大小写不敏感）；保持命名/匹配层 + 当前层，其余走会话覆盖（同 LAYISO 原子路径）；未知名/空列表/零匹配过滤拒绝；对话框与逐对象 walk 属交互 chrome |
 | `LEADER` | 部分实现 | 同一共享引线计划（创建单个 MULTILEADER）；无引线样式对话框/块/公差注释 |
 | `LENGTHEN` | 完整实现 | `DE`/`PER`/`TOT` 从**靠近拾取点**的端点改长度；`DY` 拖一端；`LINE`/`ARC`/开放多段线/椭圆弧/开放样条；闭合对象拒绝。开放样条**缩短**是精确子曲线；**延长**按声明的**端点切线直尾**策略（沿单位端切线追加一个钳制节点段，`degree+1` 个共线等距控制点，尾长恰为增量；原曲线在其节点域上逐点不变），接缝只保证 C0/G1、曲率不延续；闭合/未钳制/切线退化/非正增量/结果非法逐条具名拒绝；一条事务/一步撤销 |
 | `LIGHT` | 部分实现 | 具名拒绝（`light.unsupported: 3D light objects are not modeled`）。 |
@@ -1744,10 +1747,10 @@
 | 465 | `-LAYER` | 已实现 | Manages layers and layer properties. | 裸命令/`? [pattern]` 为只读图层表报告（名称/可见/off/frozen/locked/当前层，`layer.entry`；`*`/`?` 通配符过滤，无匹配报 `layer.no_match`）；写形式一行一个选项（大小写不敏感）：`NEW/N`、`MAKE/M`、`SET/S`、`RENAME/R`、`DELETE/D`、`ON`/`OFF`、`FREEZE/F`/`THAW/T`、`LOCK/LO`/`UNLOCK/U`、`COLOR/C`（ACI 数字/七个标准色名/`aci:N`/`#RRGGBB`/`rgb:…`）、`LTYPE/L`、`LWEIGHT/LW`、`PLOT/P Y/N`；名单逗号分隔，含空格的值/名称可用双引号；整行原子、一条事务/一步撤销；`MAKE`/`SET` 与 `OFF`/`FREEZE` 复用当前层可见性规则；写形式经 Work-only `SetLayerProperty` 载体，Viewer 拒绝。逐选项交互重提示属全局范围。 |
 | 466 | `LAYER` | 已实现 | Manages layers and layer properties. | chrome 本地选择子：打开图层面板 |
 | 467 | `LAYERCLOSE` | 已实现 | Closes the Layer Properties Manager. | chrome 本地选择子：关闭图层面板（面板关闭按钮走同一命令） |
-| 468 | `LAYERP` | 部分实现 | Undoes the last change or set of changes made to layer settings. | 会话内有界 16 步；不持久化 |
+| 468 | `LAYERP` | 完整实现 | Undoes the last change or set of changes made to layer settings. | 有界 16 步快照环（仅真实改动前压栈）：会话覆盖 + 层表属性（off/frozen/locked/colour/linetype/lineweight/transparency/plottable）；属性经 `LayerPatch` 一条事务/一步撤销恢复，纯覆盖步不写库；重命名/删除/新增层不恢复（与官方一致）；不持久化（会话级，与 AutoCAD 一致） |
 | 469 | `LAYERPALETTE` | 部分实现 | Opens the modeless Layer Properties Manager. | 具名拒绝（`layerpalette.unsupported`）：无独立图层调色板，请用 `LAYER`。 |
 | 470 | `LAYERPMODE` | 部分实现 | Turns on and off the tracking of changes made to layer settings for use by the LAYERP command. | `ON\|OFF`；会话标志，关闭后 `LAYERP` 不记录快照；默认 ON；裸命令报告当前值 |
-| 471 | `LAYERSTATE` | 部分实现 | Saves, restores, and manages sets of layer settings that are called layer states. | `LAYERSTATE SAVE\|RESTORE\|LIST\|DELETE <name>`；会话内最多 32 个命名快照（层属性+当前层+覆盖）；RESTORE 的图层属性写入一条事务/一步撤销；无 DWG 持久化 |
+| 471 | `LAYERSTATE` | 部分实现 | Saves, restores, and manages sets of layer settings that are called layer states. | `LAYERSTATE SAVE\|RESTORE\|LIST\|DELETE <name>`；会话内最多 32 个命名快照（层属性+当前层+覆盖）；RESTORE 的多行图层属性写入经 `LayerPatch` 一条事务/一步撤销；无 DWG 命名层状态表持久化 |
 | 472 | `LAYERSTATESAVE` | 部分实现 | Displays the New Layer State to Save dialog box, where you can provide a name and a description for a new layer state. | 带 `LayerState` 载荷时转交既有 `LAYERSTATE` 会话存储；无载荷只报告缺少 New Layer State 对话框（`layerstatesave.needs_name`）。 |
 | 473 | `LAYFRZ` | 完整实现 | Freezes the layer of selected objects. | 完整实现：跨模型空间/图纸空间/块成员选择；bare 冻结绘图级 `frozen`，`LAYFRZ VP [idx,…]`（或 `VIEWPORTS`）写每视口 `layer_overrides`（Vpfreeze）；当前层在目标视口包含 `CVPORT` 时拒绝；一条事务/一步撤销；交互对话框属 ADR 全局范围。 |
 | 474 | `LAYISO` | 已实现 | Hides or locks all layers except those of the selected objects. | — |
@@ -1767,7 +1770,7 @@
 | 488 | `LAYULK` | 完整实现 | Unlocks the layer of a selected object. | 完整实现：跨模型空间/图纸空间/块成员选择（嵌套按有效层解析）；只改 `locked`；一条事务/一步撤销；交互对话框属 ADR 全局范围。 |
 | 489 | `LAYUNISO` | 已实现 | Restores all layers that were hidden or locked with the LAYISO command. | — |
 | 490 | `LAYVPI` | 完整实现 | Freezes selected layers in all layout viewports except the current viewport. | 无索引 = 除 `CVPORT` 当前视口外的全部视口；显式索引优先；唯一视口即当前视口时 `layvpi.no_other_viewport`；一条事务/一步撤销 |
-| 491 | `LAYWALK` | 部分实现 | Displays objects on selected layers and hides objects on all other layers. | 逗号分隔层名；只显示命名层+当前层（会话覆盖，同 LAYISO 原子路径）；未知/空拒绝 |
+| 491 | `LAYWALK` | 完整实现 | Displays objects on selected layers and hides objects on all other layers. | 逗号分隔层名或层名通配过滤（`*`/`?`，与 `-LAYER ?` 同一规则、大小写不敏感）；保持命名/匹配层 + 当前层（会话覆盖，同 LAYISO 原子路径）；未知名/空/零匹配拒绝；对话框与逐对象 walk 属交互 chrome |
 | 492 | `LEADER` | 部分实现 | Creates a line that connects annotation to a feature. | 同一共享引线计划（创建单个 MULTILEADER）；无引线样式对话框/块/公差注释 |
 | 493 | `LENGTHEN` | 完整实现 | Changes the length of objects and the included angle of arcs. | `DE`/`PER`/`TOT`/`DY`；`LINE`/`ARC`/开放多段线/椭圆弧/开放样条；开放样条缩短精确、延长为声明的端点切线直尾（增量精确，接缝 C0/G1，曲率不延续）；闭合/未钳制/退化/非正增量具名拒绝；一条事务/一步撤销。 |
 | 494 | `LIGHT` | 部分实现 | Creates a light. | 具名拒绝（`light.unsupported: 3D light objects are not modeled`）。 |
@@ -2410,7 +2413,7 @@
 | `LAYISO` | 实现 | 会话级显隐覆盖；keep = **所选实体图层 ∪ 当前层**（**我们的规则**）；**不写 DWG、不升 revision、不进历史** |
 | `LAYOFF` | 实现 | 关闭选择所在图层，当前层除外；同样只是会话覆盖 |
 | `LAYON` | 实现 | `RESTORELAYERS` 的**别名**（清空全部会话覆盖），不新增 `CommandId` |
-| `LAYERP` | 部分 | 会话内**有界 16 步**快照环（仅真实改动前压栈）；**不持久化**，无 `LAYRSTATE`/`LAYRDO` |
+| `LAYERP` | 实现 | 会话内**有界 16 步**快照环（仅真实改动前压栈）：**会话覆盖 + 层表属性**（off/frozen/locked/colour/linetype/lineweight/transparency/plottable）；属性经 `LayerPatch` 一条事务/一步撤销恢复，纯覆盖步不写库；重命名/删除/新增层不恢复（与官方一致）；**不持久化**（会话级） |
 | `GRID` | 实现 | **仅显示栅格**开关（另需 `view.overlays.grid` 偏好为真才绘制）；不移动任何点 |
 | `SNAP` | 实现 | 会话级**栅格捕捉**（F9，二维：X/Y 量化，`z` 原样）；默认间距 **10.0 图形单位**是**我们的选择** |
 | `OSNAP` | 实现 | 对象捕捉开关；候选生成/最佳候选规则见 `crates/cad-host`（不在本文范围） |

@@ -32,8 +32,10 @@
 //! `RESTORE` writes the layer **table** through
 //! [`cad_db::DrawingDatabase::set_layer_attributes`] (one revision bump per
 //! changed row) and records every changed before/after row as one layer-patch
-//! undo step. The restored active layer and override set are session state and
-//! are not part of history.
+//! undo step. The same changed rows are pushed as one `LAYERP` snapshot (with
+//! the pre-restore override set) before the session half is replaced. The
+//! restored active layer and override set are session state and are not part of
+//! history.
 
 use std::collections::{BTreeMap, VecDeque};
 
