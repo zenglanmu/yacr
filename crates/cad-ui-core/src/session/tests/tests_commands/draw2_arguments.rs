@@ -128,9 +128,33 @@ fn mlstyle_trex_mpedit_and_draworder_words() {
 
     assert_eq!(
         parse_mpedit_argument("c"),
-        Some(Draw2Payload::Mpedit(cad_app::PeditOption::Close))
+        Some(Draw2Payload::Mpedit(cad_app::PeditEditCommand {
+            option: cad_app::PeditEditOption::Close,
+            convert: false,
+        }))
     );
-    assert_eq!(parse_mpedit_argument("JOIN"), None);
+    assert_eq!(
+        parse_mpedit_argument("WIDTH 2.5"),
+        Some(Draw2Payload::Mpedit(cad_app::PeditEditCommand {
+            option: cad_app::PeditEditOption::Width(2.5),
+            convert: false,
+        }))
+    );
+    assert_eq!(
+        parse_mpedit_argument("LTYPE GEN"),
+        Some(Draw2Payload::Mpedit(cad_app::PeditEditCommand {
+            option: cad_app::PeditEditOption::LtypeGen { enabled: true },
+            convert: false,
+        }))
+    );
+    assert_eq!(
+        parse_mpedit_argument("JOIN"),
+        Some(Draw2Payload::Mpedit(cad_app::PeditEditCommand {
+            option: cad_app::PeditEditOption::Join,
+            convert: false,
+        }))
+    );
+    assert_eq!(parse_mpedit_argument("NOPE"), None);
 
     for (word, mode) in [
         ("FRONT", DrawOrderMode::Front),

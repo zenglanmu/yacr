@@ -123,8 +123,11 @@ fn select(app: &mut Application, session: &mut SessionState, ids: &[u128]) {
     let _ = app;
 }
 
-fn mpedit_payload(option: PeditOption) -> CommandPayload {
-    CommandPayload::Draw2(Box::new(Draw2Payload::Mpedit(option)))
+fn mpedit_payload(option: PeditEditOption) -> CommandPayload {
+    CommandPayload::Draw2(Box::new(Draw2Payload::Mpedit(PeditEditCommand {
+        option,
+        convert: false,
+    })))
 }
 
 fn pedit_edit(option: PeditEditOption, convert: bool) -> CommandPayload {
@@ -155,7 +158,7 @@ fn mpedit_applies_close_open_reverse_to_every_selection_in_one_undo_step() {
         &mut app,
         &mut session,
         CommandId::Mpedit,
-        mpedit_payload(PeditOption::Close),
+        mpedit_payload(PeditEditOption::Close),
     )
     .expect("MPEDIT CLOSE batches the selection");
     assert_eq!(revision(&app).0, before.0 + 1, "one revision bump");
@@ -283,7 +286,7 @@ fn mpedit_without_convert_skips_non_polylines_and_writes_nothing() {
         &mut app,
         &mut session,
         CommandId::Mpedit,
-        mpedit_payload(PeditOption::Reverse),
+        mpedit_payload(PeditEditOption::Reverse),
     )
     .expect("no convertible object is a named no-op, not an error");
     assert_eq!(revision(&app), before, "nothing was written");
@@ -366,6 +369,127 @@ fn mpedit_delegates_pedit_planners_and_keeps_their_selection_rules() {
     .unwrap_err();
     assert!(error.to_string().contains("mpedit.payload"), "{error}");
     assert_eq!(revision(&app), before);
+}
+
+#[test]
+fn mpedit_width_writes_the_uniform_width_to_every_selection_in_one_undo_step() {
+    let (mut app, mut session) = build(
+        vec![
+            ent(
+                1,
+                open_polyline(vec![(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)]),
+                0,
+            ),
+            ent(2, closed_square(3.0), 1),
+        ],
+        AppMode::Work,
+    );
+    select(&mut app, &mut session, &[1, 2]);
+    let before = revision(&app);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::Mpedit,
+        mpedit_payload(PeditEditOption::Width(1.25)),
+    )
+    .expect("MPEDIT WIDTH writes the uniform width to both polylines");
+    assert_eq!(revision(&app).0, before.0 + 1, "one revision bump");
+    assert_eq!(undo_depth(&app), 1, "one undo step");
+    assert_eq!(outcome.objects.len(), 2);
+    for id in [1u128, 2] {
+        let SemanticGeometry::Polyline { width, .. } = geometry(&app, id) else {
+            panic!("entity {id} must stay a polyline");
+        };
+        assert_eq!(width, 1.25, "entity {id} got the typed width");
+    }
+    assert!(
+        outcome
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "pedit.applied"),
+        "the shared PEDIT WIDTH write is reported"
+    );
+
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Undo,
+        CommandPayload::None,
+    )
+    .unwrap();
+    for id in [1u128, 2] {
+        let SemanticGeometry::Polyline { width, .. } = geometry(&app, id) else {
+            panic!("undone entity {id} is the original polyline");
+        };
+        assert_eq!(width, 0.0, "UNDO restores the hairline width");
+    }
+    assert_eq!(undo_depth(&app), 0);
+}
+
+#[test]
+fn mpedit_ltype_gen_and_heterogeneous_width_keep_the_shared_pedit_refusals() {
+    // `LTYPE GEN` delegates to PEDIT, which has no linetype-generation flag:
+    // a named refusal that writes nothing, for the whole batch.
+    let (mut app, mut session) = build(
+        vec![
+            ent(
+                1,
+                open_polyline(vec![(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)]),
+                0,
+            ),
+            ent(2, closed_square(3.0), 1),
+        ],
+        AppMode::Work,
+    );
+    select(&mut app, &mut session, &[1, 2]);
+    let before = revision(&app);
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::Mpedit,
+        mpedit_payload(PeditEditOption::LtypeGen { enabled: true }),
+    )
+    .unwrap_err();
+    assert!(
+        error.to_string().contains("pedit.ltype_gen_unsupported"),
+        "{error}"
+    );
+    assert_eq!(revision(&app), before, "nothing was written");
+    assert_eq!(undo_depth(&app), 0);
+
+    // A heterogeneous WIDTH batch is PEDIT's named refusal, not a partial
+    // write of the polylines that happen to qualify.
+    let (mut app, mut session) = build(
+        vec![
+            ent(
+                1,
+                open_polyline(vec![(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)]),
+                0,
+            ),
+            ent(2, line(10.0, 0.0, 12.0, 0.0), 1),
+        ],
+        AppMode::Work,
+    );
+    select(&mut app, &mut session, &[1, 2]);
+    let before = revision(&app);
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::Mpedit,
+        mpedit_payload(PeditEditOption::Width(2.0)),
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("pedit.not_polyline"), "{error}");
+    assert_eq!(
+        revision(&app),
+        before,
+        "the polyline was not partially edited"
+    );
+    assert_eq!(undo_depth(&app), 0);
+    let SemanticGeometry::Polyline { width, .. } = geometry(&app, 1) else {
+        panic!("the polyline is untouched");
+    };
+    assert_eq!(width, 0.0);
 }
 
 #[test]

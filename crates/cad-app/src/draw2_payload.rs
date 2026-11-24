@@ -9,9 +9,10 @@
 
 use cad_domain::{Point3, SelectionRef};
 
-// The real `PeditOption` lives in `command_payload`; imported here so the
-// MPEDIT payload shares the exact type PEDIT uses.
-use crate::PeditOption;
+// The real PEDIT types live in `command_payload`; imported here so the MPEDIT
+// payload shares the exact option type PEDIT uses (including the `MPEDIT`
+// `WIDTH`/`LTYPE GEN` forms that delegate to PEDIT).
+use crate::PeditEditCommand;
 
 /// One payload of the 2026-11-07 draw/modify batch.
 #[derive(Debug, Clone, PartialEq)]
@@ -50,7 +51,11 @@ pub enum Draw2Payload {
         targets: Vec<SelectionRef>,
     },
     /// `MPEDIT`: one PEDIT option applied to every selected LWPOLYLINE.
-    Mpedit(PeditOption),
+    ///
+    /// `CLOSE`/`OPEN`/`REVERSE` run the batch planner; every other PEDIT option
+    /// (including `WIDTH <w>` and `LTYPE GEN`) goes through the same shared
+    /// `PEDIT` executor and keeps its selection rules and named refusals.
+    Mpedit(PeditEditCommand),
     /// `DRAWORDER`: the draw-order operation over the current selection.
     DrawOrder(DrawOrderMode),
 }

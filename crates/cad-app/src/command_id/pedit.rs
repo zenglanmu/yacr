@@ -67,8 +67,11 @@
 //! key, layer, space, draw order, points, bulges and closed flag.
 //!
 //! A negative or non-finite value is `pedit.width_invalid` and writes nothing.
-//! Per-vertex start/end width **taper** (AutoCAD's `Edit vertex` `WIDTH`
-//! sub-option) is a different model and stays a named capability refusal
+//! The `Edit vertex` `WIDTH <seg> <start> <end>` sub-option supplies the
+//! per-vertex start/end pair: the representable case is `start == end` on a
+//! **single-segment** polyline, where the pair is exactly the stored uniform
+//! width. A real taper (`start != end`) or a per-segment width that would differ
+//! from the other segments is refused by name
 //! (`pedit.vertex_width_unsupported`); a uniform `WIDTH` never fabricates a
 //! taper.
 //!
@@ -84,17 +87,11 @@
 //!
 //! ## NOT IMPLEMENTED (named, not implied)
 //!
-//! * `Join` — no polyline join in this build (the separate `JOIN` command has
-//!   its own LINE/ARC subset).
 //! * `Halfwidth` and per-segment start/end **taper** — the entity model stores
-//!   one uniform width (`WIDTH` above); the `Edit vertex` `WIDTH` sub-option
-//!   stays `pedit.vertex_width_unsupported`, and there is no thickness model
-//!   either.
-//! * `Fit`, `Spline`, `Decurve` — no fit/spline conversion for polylines.
-//!   `FIT` keeps the uniform width; `SPLINE` stores an `AcDbSpline`, which has no
-//!   width field, so a later `DECURVE` restores the frame at width `0` (declared
-//!   divergence, not a silent width edit).
-//! * `Ltype gen` — no linetype-generation flag in the entity model.
+//!   one uniform width (`WIDTH` above). `Edit vertex WIDTH` writes only the
+//!   `start == end` single-segment case; a real taper stays
+//!   `pedit.vertex_width_unsupported`, and there is no thickness model either.
+//! * `Ltype gen` — no linetype-generation (`plinegen`) flag in the entity model.
 //! * `Undo` — the session `UNDO` command is the undo authority; `PEDIT`'s
 //!   in-command option stack is not modelled.
 //! * `Multiple` — the selection is exactly one polyline and there is no

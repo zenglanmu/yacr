@@ -421,11 +421,14 @@ impl Application {
     /// turn into one?" conversion for a batch.
     ///
     /// Every other PEDIT option (`JOIN`, `FIT`, `SPLINE`, `DECURVE`, `WIDTH`,
-    /// `LTYPE GEN`, `UNDO`) delegates to [`Self::pedit`] and therefore keeps
-    /// exactly PEDIT's single-object planners, selection rules and refusals: a
+    /// `LTYPE GEN`, `UNDO`) delegates to [`Self::pedit_request`] and therefore
+    /// keeps exactly PEDIT's planners, selection rules and refusals: a
     /// heterogeneous batch has no defined meaning for them, so a mismatch is a
-    /// named refusal from `pedit`, never a silent partial edit. Objects that need
-    /// no change are reported one by one (`mpedit.unchanged`) and write nothing.
+    /// named refusal from `pedit`, never a silent partial edit. That includes
+    /// `MPEDIT WIDTH <w>` (the multi-selection uniform-width write) and
+    /// `MPEDIT LTYPE GEN` (the shared named refusal while the entity model has
+    /// no linetype-generation flag). Objects that need no change are reported
+    /// one by one (`mpedit.unchanged`) and write nothing.
     pub(crate) fn mpedit(
         &mut self,
         session: &SessionState,
@@ -433,18 +436,11 @@ impl Application {
     ) -> CadResult<CommandOutcome> {
         let request = match &command.payload {
             CommandPayload::Draw2(payload) => match **payload {
-                Draw2Payload::Mpedit(option) => PeditEditCommand {
-                    option: match option {
-                        PeditOption::Close => PeditEditOption::Close,
-                        PeditOption::Open => PeditEditOption::Open,
-                        PeditOption::Reverse => PeditEditOption::Reverse,
-                    },
-                    convert: false,
-                },
+                Draw2Payload::Mpedit(request) => request,
                 _ => {
                     return Err(refusal(
                         "mpedit.payload",
-                        "MPEDIT needs a Draw2::Mpedit(PeditOption) or PeditEdit payload",
+                        "MPEDIT needs a Draw2::Mpedit(PeditEditCommand) or PeditEdit payload",
                     ));
                 }
             },
@@ -452,7 +448,7 @@ impl Application {
             _ => {
                 return Err(refusal(
                     "mpedit.payload",
-                    "MPEDIT needs a Draw2::Mpedit(PeditOption) or PeditEdit payload",
+                    "MPEDIT needs a Draw2::Mpedit(PeditEditCommand) or PeditEdit payload",
                 ));
             }
         };
@@ -462,7 +458,7 @@ impl Application {
         ) {
             // `JOIN`/`FIT`/`SPLINE`/`DECURVE`/`WIDTH`/`LTYPE GEN`/`UNDO` are
             // PEDIT's own plans; reuse them verbatim (one transaction there).
-            return self.pedit(session, command);
+            return self.pedit_request(session, command, request);
         }
         let refs = session.selection.refs();
         if refs.is_empty() {

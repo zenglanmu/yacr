@@ -101,7 +101,17 @@ fn pedit_full_option_line_routes_the_edit_payload() {
         (
             "EDIT WIDTH",
             PeditEditOption::Vertex(PeditVertexCommand {
-                action: PeditVertexAction::Width,
+                action: PeditVertexAction::WidthNeedsArguments,
+            }),
+        ),
+        (
+            "EDIT WIDTH 0 2 2",
+            PeditEditOption::Vertex(PeditVertexCommand {
+                action: PeditVertexAction::Width {
+                    segment: 0,
+                    start_width: 2.0,
+                    end_width: 2.0,
+                },
             }),
         ),
         ("FIT", PeditEditOption::Fit),

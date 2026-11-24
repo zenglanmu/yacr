@@ -18,7 +18,8 @@ use super::*;
 /// | `INSERT` | one vertex on the named segment at the typed point's projection; the curve's shape is preserved exactly |
 /// | `MOVE` | the named vertex's coordinates; the segment bulges are kept |
 /// | `STRAIGHTEN` | the vertices strictly between the two marks are removed and the merged segment is straight |
-/// | `TANGENT` / `WIDTH` | named capability refusal (no stored fit tangent / segment width) |
+/// | `WIDTH` | the representable per-vertex start/end pair: `start == end` on a single-segment polyline writes the uniform width |
+/// | `TANGENT` / tapering `WIDTH` | named capability refusal (no stored fit tangent / per-segment taper) |
 ///
 /// A `NEXT`/`PREVIOUS` report is a named no-op (`pedit.vertex_report`): no
 /// transaction, no revision bump, no undo entry.
@@ -226,10 +227,80 @@ pub(super) fn plan_vertex(
                  is a named capability gap",
             ))
         }
-        PeditVertexAction::Width => Err(unsupported(
-            "vertex_width_unsupported",
-            "this build stores one uniform polyline width; the per-vertex start/end taper modeled \
-             by PEDIT EDIT WIDTH is not represented, so the action is a named capability gap",
+        PeditVertexAction::Width {
+            segment,
+            start_width,
+            end_width,
+        } => {
+            if segment >= segments {
+                return Err(invalid(
+                    "vertex_out_of_range",
+                    format!(
+                        "PEDIT EDIT WIDTH needs a segment index in 0..{segments}, got {segment}"
+                    ),
+                ));
+            }
+            if !start_width.is_finite()
+                || !end_width.is_finite()
+                || start_width < 0.0
+                || end_width < 0.0
+            {
+                return Err(invalid(
+                    "vertex_width_invalid",
+                    "PEDIT EDIT WIDTH needs finite non-negative start/end widths",
+                ));
+            }
+            if (start_width - end_width).abs() > 1e-12 {
+                return Err(unsupported(
+                    "vertex_width_unsupported",
+                    format!(
+                        "PEDIT EDIT WIDTH {segment} {start_width} {end_width}: a tapering \
+                         start/end width pair is not represented (this build stores one uniform \
+                         polyline width)"
+                    ),
+                ));
+            }
+            // A per-segment width is only exact when the polyline has exactly
+            // that one segment: the pair then equals the polyline's constant
+            // width. With more than one segment the other segments would keep
+            // the uniform width, which the single stored value cannot describe.
+            if segments != 1 {
+                return Err(unsupported(
+                    "vertex_width_unsupported",
+                    format!(
+                        "PEDIT EDIT WIDTH {segment} {start_width} {end_width}: this polyline has \
+                         {segments} segments; setting one segment's width while the others keep \
+                         the uniform width is not represented (one width per polyline, no \
+                         per-segment taper)"
+                    ),
+                ));
+            }
+            if (width - start_width).abs() <= 1e-12 {
+                return Ok(Plan::Noop {
+                    code: "pedit.vertex_width_unchanged",
+                    message: format!(
+                        "PEDIT EDIT WIDTH: the single segment already has width {start_width}; \
+                         nothing was written"
+                    ),
+                });
+            }
+            Ok(Plan::Write {
+                geometry: Box::new(SemanticGeometry::Polyline {
+                    points,
+                    bulges,
+                    closed,
+                    width: start_width,
+                }),
+                label: format!(
+                    "Edit vertex WIDTH (single segment {segment} = uniform width {start_width})"
+                ),
+                deleted: Vec::new(),
+            })
+        }
+        PeditVertexAction::WidthNeedsArguments => Err(invalid(
+            "vertex_width_needs_args",
+            "PEDIT EDIT WIDTH needs `<segment> <start> <end>`; this build has no interactive \
+             vertex marker prompt",
         )),
     }
 }

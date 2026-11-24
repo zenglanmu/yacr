@@ -247,8 +247,14 @@ pub struct ExtrimCommand;
 ///
 /// # Input
 ///
-/// `MPEDIT CLOSE|OPEN|REVERSE` over the current selection
-/// ([`crate::Draw2Payload::Mpedit`]). The option subset is exactly `PEDIT`'s.
+/// `MPEDIT <PEDIT option>` over the current selection
+/// ([`crate::Draw2Payload::Mpedit`]). The grammar is exactly the full `PEDIT`
+/// option line. `CLOSE`/`OPEN`/`REVERSE` run the batch planner; `JOIN`, `FIT`,
+/// `SPLINE`, `DECURVE`, `WIDTH <w>`, `LTYPE GEN` and `UNDO` delegate to the
+/// shared `PEDIT` executor, so their selection rules and named refusals are
+/// PEDIT's (`MPEDIT WIDTH` is the multi-selection uniform-width write;
+/// `LTYPE GEN` is the shared `pedit.ltype_gen_unsupported` refusal because the
+/// entity model has no `plinegen` flag).
 ///
 /// # Write
 ///
@@ -257,7 +263,9 @@ pub struct ExtrimCommand;
 /// per-entity `mpedit.skipped` diagnostics and do not fail the command; a
 /// polyline already in the requested state is reported as
 /// `mpedit.unchanged` and not staged. With no eligible polyline the command is
-/// an `mpedit.nothing_changed` no-op (no transaction, no undo entry).
+/// an `mpedit.nothing_changed` no-op (no transaction, no undo entry). Delegated
+/// options keep PEDIT's whole-batch refusal instead of a partial write (for
+/// example a heterogeneous `WIDTH` batch refuses the non-polyline by name).
 ///
 /// All work is done before the transaction opens, so a refusal changes nothing.
 ///

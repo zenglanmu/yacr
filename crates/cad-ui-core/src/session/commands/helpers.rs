@@ -97,14 +97,16 @@ pub const PDSIZE_SELECTOR: &str = "PDSIZE";
 ///
 /// AutoCAD's `PEDIT` shows an option prompt after the polyline pick; this build
 /// has no in-command option prompt, so the option is typed on the same command
-/// line. The grammar ([`parse_pedit_argument`]) is `CLOSE`/`C`, `OPEN`/`O` and
-/// `REVERSE`/`R`, case-insensitive. The current selection (exactly one
-/// model-space LWPOLYLINE) is still the whole input, so there is no second IPC.
-/// A bare `PEDIT` is admitted by name and refused by the application with
+/// line. The legacy three (`CLOSE`/`C`, `OPEN`/`O`, `REVERSE`/`R`) keep
+/// [`parse_pedit_argument`]; the full line ([`parse_pedit_edit_argument`]) adds
+/// `JOIN`, `WIDTH <w>`, `EDIT <sub-menu>`, `FIT`, `SPLINE [0-99]`, `DECURVE`,
+/// `LTYPE [GEN|ON|OFF]`, `UNDO` and the `CONVERT Y|N` prefix. The current
+/// selection is still the whole input, so there is no second IPC. A bare
+/// `PEDIT` is admitted by name and refused by the application with
 /// `pedit.needs_option`; an unknown argument is refused before IPC with
-/// [`invalid_pedit_argument_reason`]. `Join`, `Width`/`Halfwidth`, `Fit`,
-/// `Spline`, `Decurve`, `Ltype gen`, `Undo`, `Multiple`, `Edit vertex` and the
-/// `PEDITACCEPT` conversion prompt are NOT IMPLEMENTED.
+/// [`invalid_pedit_edit_argument_reason`]. `LTYPE GEN` is a shared named
+/// refusal (no `plinegen` flag); per-vertex width writes only its representable
+/// single-segment `start == end` case.
 pub const PEDIT_SELECTOR: &str = "PEDIT";
 /// The `HATCHEDIT <option>` selector: the typed v1 hatch-edit surface (AutoCAD
 /// 2026).

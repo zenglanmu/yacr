@@ -20,6 +20,7 @@
 //! | `EDIT INSERT <seg> <x> <y> [z]` | one polyline | one vertex inserted on the named segment; the curve's shape is preserved exactly |
 //! | `EDIT MOVE <i> <x> <y> [z]` | one polyline | the named vertex moves; segment bulges are kept |
 //! | `EDIT STRAIGHTEN <first> <last>` | one polyline | the interior vertices are removed and the merged segment is straight |
+//! | `EDIT WIDTH <seg> <start> <end>` | one single-segment polyline | the representable per-vertex pair (`start == end`) as the uniform width |
 //! | `UNDO` | no selection needed | applies the document undo step |
 //!
 //! ## `FIT`
@@ -106,10 +107,14 @@
 //!   the +Z plane of a bulged polyline is refused;
 //! * `STRAIGHTEN <first> <last>` removes the vertices strictly between the two
 //!   and makes `first → last` straight;
-//! * `TANGENT` and `WIDTH` report on data this build does not model (a stored fit
-//!   tangent, a per-segment width) and are stable named refusals; `WIDTH`
-//!   writes the polyline's **uniform** width, while the `Edit vertex` `WIDTH`
-//!   action (per-segment taper) stays refused because that model is absent.
+//! * `TANGENT` reports on data this build does not model (a stored fit
+//!   tangent) and is a stable named refusal. `WIDTH <seg> <start> <end>` writes
+//!   the per-vertex pair only in its representable case: a `start == end` pair
+//!   on a **single-segment** polyline, where the pair is exactly the stored
+//!   uniform width. A taper (`start != end`) or a per-segment width that would
+//!   differ from the other segments stays a named refusal
+//!   (`pedit.vertex_width_unsupported`) because the entity model stores one
+//!   width per polyline, never a taper.
 //!
 //! ## `PEDITACCEPT` conversion
 //!
@@ -133,16 +138,18 @@
 //! `pedit.vertex_out_of_range`, `pedit.vertex_invalid_point`,
 //! `pedit.vertex_projection_failed`, `pedit.vertex_insert_off_segment`,
 //! `pedit.vertex_coincident`, `pedit.vertex_range`, `pedit.vertex_plane`,
-//! `pedit.vertex_tangent_unsupported`, `pedit.vertex_width_unsupported`,
-//! `pedit.undo_empty`, plus the `pedit.join.*` chain refusals. `LTYPE GEN` and
-//! the vertex `TANGENT`/`WIDTH` actions remain capability gaps (`plinegen`,
-//! per-vertex fit tangent and per-vertex start/end taper are not modelled); the
-//! command-level `WIDTH` writes the uniform width the entity model now stores.
+//! `pedit.vertex_tangent_unsupported`, `pedit.vertex_width_invalid`,
+//! `pedit.vertex_width_needs_args`, `pedit.vertex_width_unsupported`,
+//! `pedit.undo_empty`, plus the `pedit.join.*` chain refusals. `LTYPE GEN`
+//! (`plinegen`) and the vertex `TANGENT` (stored fit tangent) remain capability
+//! gaps. Per-vertex start/end width is written only where it collapses to the
+//! stored uniform width; a real taper is refused by name, never averaged.
 //!
 //! Every real change is **one transaction / one undo step**. A named no-op
 //! (`pedit.already_closed`, `pedit.already_open`, `pedit.already_decurved`,
-//! `pedit.width_unchanged`, `pedit.vertex_report`, `pedit.vertex_unchanged`,
-//! `pedit.vertex_already_straight`) opens no transaction and bumps no revision.
+//! `pedit.width_unchanged`, `pedit.vertex_width_unchanged`, `pedit.vertex_report`,
+//! `pedit.vertex_unchanged`, `pedit.vertex_already_straight`) opens no
+//! transaction and bumps no revision.
 
 use super::join::{join_tolerance, PolylinePiece};
 use super::polyline_curve::PolylineCurve;
@@ -330,11 +337,35 @@ impl Application {
                 ));
             }
         };
+        self.pedit_request(session, command, request)
+    }
 
+    /// Execute one already-resolved `PEDIT` option.
+    ///
+    /// This is the one option executor `PEDIT` and `MPEDIT` share: `MPEDIT`
+    /// resolves its selected lines to the same [`PeditEditCommand`] and calls
+    /// this method verbatim, so the planners, selection rules, refusals and the
+    /// one-transaction write are never duplicated between the two commands.
+    pub(crate) fn pedit_request(
+        &mut self,
+        session: &SessionState,
+        command: &Command,
+        request: PeditEditCommand,
+    ) -> CadResult<CommandOutcome> {
         // `UNDO` is the document undo step; it needs no selection and writes no
         // transaction of its own.
         if matches!(request.option, PeditEditOption::Undo) {
             return self.pedit_undo(command);
+        }
+
+        // `LTYPE GEN` is a capability gap independent of the selection: the
+        // entity model has no linetype-generation flag, so it is refused by name
+        // before any selection rule (a batch via MPEDIT gets the same reason).
+        if matches!(request.option, PeditEditOption::LtypeGen { .. }) {
+            return Err(unsupported(
+                "ltype_gen_unsupported",
+                "this build's entity model has no linetype-generation (`plinegen`) flag",
+            ));
         }
 
         let references = session.selection.refs().to_vec();
@@ -458,10 +489,7 @@ impl Application {
                 unreachable!("WIDTH is handled before the single-entity plan")
             }
             PeditEditOption::LtypeGen { .. } => {
-                return Err(unsupported(
-                    "ltype_gen_unsupported",
-                    "this build's entity model has no linetype-generation (`plinegen`) flag",
-                ));
+                unreachable!("LTYPE GEN is refused before the single-entity plan")
             }
             PeditEditOption::EditVertex => {
                 return Err(unsupported(
