@@ -331,6 +331,9 @@ impl Application {
                 self.extended_w10_refusals(session, command, ext)?
             }
             // Wave 11: stable named refusals for 3D/mesh/surface commands.
+            // 3DORBIT/3DPAN are no longer refusals: they are real selectors that
+            // dispatch to the existing ORBIT/PAN camera handlers below (one
+            // navigation engine, not a second one).
             ExtendedCommandId::ThreeDAlign
             | ExtendedCommandId::ThreeDArray
             | ExtendedCommandId::ThreeDClip
@@ -343,11 +346,9 @@ impl Application {
             | ExtendedCommandId::ThreeDForbit
             | ExtendedCommandId::ThreeDMesh
             | ExtendedCommandId::ThreeDMove
-            | ExtendedCommandId::ThreeDOrbit
             | ExtendedCommandId::ThreeDOrbitCtr
             | ExtendedCommandId::Dash3DOsnap
             | ExtendedCommandId::ThreeDObjectSnap
-            | ExtendedCommandId::ThreeDPan
             | ExtendedCommandId::ThreeDPoly
             | ExtendedCommandId::ThreeDPrint
             | ExtendedCommandId::ThreeDPrintService
@@ -452,6 +453,14 @@ impl Application {
             // solid in place (one transaction / one undo step). The host builds
             // the body+seed payload from the one-pick capture.
             ExtendedCommandId::ChamferEdge => self.chamfer_solid_edge(session, command)?,
+            // `XEDGES` extracts the selected bodies' stored display edges as
+            // LINE rows (one transaction / one undo step; the body stays).
+            ExtendedCommandId::Xedges => self.extract_body_edges(session, command)?,
+            // Wave 11 aliases: `3DORBIT`/`3DPAN` are the **same** camera handlers
+            // as `ORBIT`/`PAN` (typed payloads, identical refusals); there is no
+            // interactive 3D navigation controller in this build.
+            ExtendedCommandId::ThreeDOrbit => self.orbit(command)?,
+            ExtendedCommandId::ThreeDPan => self.pan(command)?,
             // Wave 14: stable named refusals.
             ExtendedCommandId::PolySolid
             | ExtendedCommandId::Extrude

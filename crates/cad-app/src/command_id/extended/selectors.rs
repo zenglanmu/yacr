@@ -357,6 +357,7 @@ impl ExtendedCommandId {
             Self::ChamferEdge => "CHAMFEREDGE",
             Self::FilletEdge => "FILLETEDGE",
             Self::Edge => "EDGE",
+            Self::Xedges => "XEDGES",
             Self::Mirror3D => "MIRROR3D",
             Self::Rotate3D => "ROTATE3D",
             Self::SurfBlend => "SURFBLEND",
@@ -764,6 +765,7 @@ impl ExtendedCommandId {
         Self::ChamferEdge,
         Self::FilletEdge,
         Self::Edge,
+        Self::Xedges,
         Self::Mirror3D,
         Self::Rotate3D,
         Self::SurfBlend,
@@ -935,6 +937,9 @@ impl ExtendedCommandId {
                 // ADR-0036: CHAMFEREDGE rewrites one exact body in place (one
                 // transaction / one undo step), so it is a drawing write too.
                 | Self::ChamferEdge
+                // XEDGES inserts one LINE per stored display-edge segment (one
+                // transaction / one undo step), so it is a drawing write.
+                | Self::Xedges
         )
     }
 }

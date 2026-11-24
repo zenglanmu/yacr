@@ -1,13 +1,14 @@
-//! Wave 11 named-refusal contracts: the 3D/mesh/surface surface.
+//! Wave 11 contracts: the 3D/mesh/surface surface.
 //!
-//! 3D is deliberately lower priority. Every name is admitted by the vocabulary
-//! and refused with `CadError::Unsupported` carrying a stable reason; nothing is
-//! written, no revision is bumped and no history entry appears. All are
-//! Viewer-legal.
+//! 3D is deliberately lower priority. Twenty-three names are admitted by the
+//! vocabulary and refused with `CadError::Unsupported` carrying a stable reason;
+//! nothing is written, no revision is bumped and no history entry appears. All
+//! are Viewer-legal. `3DORBIT`/`3DPAN` are **not** refusals: they are real
+//! aliases of the `ORBIT`/`PAN` camera handlers, pinned by the alias test below.
 
 use super::*;
 
-const REFUSALS: [(ExtendedCommandId, &str); 25] = [
+const REFUSALS: [(ExtendedCommandId, &str); 23] = [
     (
         ExtendedCommandId::ThreeDAlign,
         "3dalign.unsupported: 3D alignment is not modeled; use the 2D ALIGN path",
@@ -57,10 +58,6 @@ const REFUSALS: [(ExtendedCommandId, &str); 25] = [
         "3dmove.unsupported: no 3D move gizmo",
     ),
     (
-        ExtendedCommandId::ThreeDOrbit,
-        "3dorbit.unsupported: no interactive 3D orbit controller; use ORBIT",
-    ),
-    (
         ExtendedCommandId::ThreeDOrbitCtr,
         "3dorbitctr.unsupported: no 3D orbit-center model",
     ),
@@ -71,10 +68,6 @@ const REFUSALS: [(ExtendedCommandId, &str); 25] = [
     (
         ExtendedCommandId::ThreeDObjectSnap,
         "3dosnap.unsupported: no 3D object-snap model",
-    ),
-    (
-        ExtendedCommandId::ThreeDPan,
-        "3dpan.unsupported: no 3D pan navigation",
     ),
     (
         ExtendedCommandId::ThreeDPoly,
@@ -153,4 +146,113 @@ fn every_wave11_refusal_stays_viewer_legal() {
             .expect_err("the feature is still missing");
         assert!(matches!(error, CadError::Unsupported(_)));
     }
+}
+
+fn camera(app: &Application) -> Camera {
+    app.workspace.viewports[&ViewportId(1)].camera
+}
+
+#[test]
+fn three_d_orbit_and_three_d_pan_are_aliases_of_orbit_and_pan() {
+    // 1. The bare forms refuse exactly like the canonical commands: no payload
+    //    message is invented for the alias.
+    let (mut canonical, mut canonical_session) = application_with_document();
+    let (mut aliased, mut aliased_session) = application_with_document();
+    let orbit_error = canonical
+        .execute(
+            &mut canonical_session,
+            command(CommandId::Orbit, CommandPayload::None),
+        )
+        .unwrap_err();
+    let alias_error = aliased
+        .execute(
+            &mut aliased_session,
+            command(
+                CommandId::Extended(ExtendedCommandId::ThreeDOrbit),
+                CommandPayload::None,
+            ),
+        )
+        .unwrap_err();
+    assert_eq!(alias_error, orbit_error, "3DORBIT is ORBIT, not a new path");
+
+    let pan_error = canonical
+        .execute(
+            &mut canonical_session,
+            command(CommandId::Pan, CommandPayload::None),
+        )
+        .unwrap_err();
+    let alias_pan_error = aliased
+        .execute(
+            &mut aliased_session,
+            command(
+                CommandId::Extended(ExtendedCommandId::ThreeDPan),
+                CommandPayload::None,
+            ),
+        )
+        .unwrap_err();
+    assert_eq!(alias_pan_error, pan_error, "3DPAN is PAN, not a new path");
+
+    // 2. The same typed payloads produce the same camera. `Switch2d3d` is the
+    //    shared 3D transition, so each app starts from the same observation.
+    for (app, session) in [
+        (&mut canonical, &mut canonical_session),
+        (&mut aliased, &mut aliased_session),
+    ] {
+        app.execute(
+            session,
+            command(CommandId::Switch2d3d, CommandPayload::None),
+        )
+        .expect("a 3D observation");
+    }
+    canonical
+        .execute(
+            &mut canonical_session,
+            command(
+                CommandId::Orbit,
+                CommandPayload::Orbit {
+                    yaw: 0.3,
+                    pitch: 0.2,
+                },
+            ),
+        )
+        .expect("ORBIT");
+    aliased
+        .execute(
+            &mut aliased_session,
+            command(
+                CommandId::Extended(ExtendedCommandId::ThreeDOrbit),
+                CommandPayload::Orbit {
+                    yaw: 0.3,
+                    pitch: 0.2,
+                },
+            ),
+        )
+        .expect("3DORBIT");
+    assert_eq!(camera(&aliased), camera(&canonical), "same orbit result");
+
+    let delta = Point3 {
+        x: 2.0,
+        y: -1.0,
+        z: 0.0,
+    };
+    canonical
+        .execute(
+            &mut canonical_session,
+            command(CommandId::Pan, CommandPayload::Points(vec![delta])),
+        )
+        .expect("PAN");
+    aliased
+        .execute(
+            &mut aliased_session,
+            command(
+                CommandId::Extended(ExtendedCommandId::ThreeDPan),
+                CommandPayload::Points(vec![delta]),
+            ),
+        )
+        .expect("3DPAN");
+    assert_eq!(camera(&aliased), camera(&canonical), "same pan result");
+
+    // 3. Both aliases are view-only selectors, so neither becomes Work-only.
+    assert!(!ExtendedCommandId::ThreeDOrbit.requires_work_mode());
+    assert!(!ExtendedCommandId::ThreeDPan.requires_work_mode());
 }

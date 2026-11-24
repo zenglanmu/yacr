@@ -589,7 +589,10 @@ pub enum ExtendedCommandId {
     ThreeDMesh,
     /// `3DMOVE`: 3D move: no 3D move gizmo.
     ThreeDMove,
-    /// `3DORBIT`: 3D orbit: no interactive orbit controller; use ORBIT for the implemented camera path.
+    /// `3DORBIT`: **alias of `ORBIT`**: dispatches to the same typed
+    /// `{yaw, pitch}` camera handler (no second orbit engine). The bare form is
+    /// the same payload refusal `ORBIT` gives; there is still no interactive
+    /// mouse orbit controller.
     ThreeDOrbit,
     /// `3DORBITCTR`: 3D orbit center: no orbit-center model.
     ThreeDOrbitCtr,
@@ -597,7 +600,9 @@ pub enum ExtendedCommandId {
     Dash3DOsnap,
     /// `3DOSNAP`: 3D object snap: no 3D object-snap model.
     ThreeDObjectSnap,
-    /// `3DPAN`: 3D pan: no 3D pan navigation is implemented.
+    /// `3DPAN`: **alias of `PAN`**: dispatches to the same world-space camera
+    /// delta handler (a 2D plan pan is its z-0 special case, so the handler
+    /// already works in 3D). No second navigation engine.
     ThreeDPan,
     /// `3DPOLY`: 3D polyline: no 3D polyline entity model.
     ThreeDPoly,
@@ -782,6 +787,10 @@ pub enum ExtendedCommandId {
     FilletEdge,
     /// `EDGE`: no 3D face-edge visibility model.
     Edge,
+    /// `XEDGES`: extracts the stored display edges of the selected bodies as
+    /// real `AcDbLine` rows (Work-only; one transaction / one undo step).
+    /// `EDGE` above remains the unrelated (unimplemented) visibility model.
+    Xedges,
     /// `MIRROR3D`: no 3D mirror-plane model.
     Mirror3D,
     /// `ROTATE3D`: no 3D rotate-axis model.

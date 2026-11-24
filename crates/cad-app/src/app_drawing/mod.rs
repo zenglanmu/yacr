@@ -175,6 +175,9 @@ mod shape;
 // real exact `Body3d` through the injected `SolidModeler`; phase C2 adds the
 // background `UNION`/`SUBTRACT`/`INTERSECT` job (`tasks::solid`).
 pub(crate) mod solids;
+// `XEDGES`: copy the selected bodies' stored display edges into LINE rows (one
+// transaction / one undo step; no second geometry kernel).
+mod xedges;
 // The 2026-11-12 block/copy writes: `MINSERT` (block array) and `ADDSELECTED`.
 mod addselected;
 mod minsert;
