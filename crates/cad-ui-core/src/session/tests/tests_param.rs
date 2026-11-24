@@ -220,6 +220,11 @@ fn plain_param_session() -> CadSession {
 fn the_parameter_manager_names_are_real_commands_or_chrome_only() {
     assert_eq!(normalize_command("-PARAMETERS"), Some(CommandId::ParamList));
     assert!(ARGUMENT_SELECTORS.contains(&DASH_PARAMETERS_SELECTOR));
+    // The read the panel uses is one registry row on both transports.
+    assert!(
+        crate::session::SHARED_WIRE_COMMAND_NAMES.contains(&"cad_param_list"),
+        "cad_param_list must be a shared host-read wire row"
+    );
     // `PARAMETERS`/`PARAMETERSCLOSE` are chrome-local: the panel and its close
     // word never reach the router, exactly like `PROPERTIES`/`PROPERTIESCLOSE`.
     assert_eq!(normalize_command("PARAMETERS"), None);
@@ -450,10 +455,28 @@ fn typed_parameter_writes_refuse_by_name_and_change_nothing() {
         .expect_err("bad grammar");
     assert!(error.contains("unsupported CAD command"), "got {error}");
 
+    // A duplicate **rename** target is the same atomic refusal as a duplicate
+    // create: the table's insert validates the whole batch before it commits.
+    session
+        .command("-PARAMETERS NEW q length 3")
+        .expect("create q");
+    let error = session
+        .command("-PARAMETERS RENAME r q")
+        .expect_err("duplicate rename");
+    assert!(error.contains("param.duplicate_name"), "got {error}");
+
     let list = session.param_list().expect("list");
-    assert_eq!(list.total, 1, "every refusal wrote nothing");
-    assert_eq!(list.rows[0].name, "r");
-    assert_eq!(list.rows[0].value, 2.0);
+    assert_eq!(list.total, 2, "every refusal wrote nothing");
+    let rows: Vec<(&str, f64)> = list
+        .rows
+        .iter()
+        .map(|row| (row.name.as_str(), row.value))
+        .collect();
+    assert_eq!(
+        rows,
+        vec![("r", 2.0), ("q", 3.0)],
+        "the rename did not write"
+    );
 }
 
 #[test]
