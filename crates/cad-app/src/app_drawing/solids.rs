@@ -69,12 +69,14 @@
 //! | `SPHERE` | `Diameter` | `SphereDiameter { center, diameter }` |
 //! | `SPHERE` | `2P` (3D) | `SphereTwoPoint { first, second }` |
 //! | `TORUS` | any ring + tube | `TorusPlan { ring, tube }` |
-//! | `PYRAMID` | `Points`, `PyramidPolygon` | the explicit square-base form and the typed regular n-gon base (reusing the `POLYGON` ring math) are written; `Edge` (interactive pick) and `Top radius` (a truncated seam spec that does not exist) stay absent, so PYRAMID remains partial |
+//! | `PYRAMID` | `Points`, `PyramidPolygon` | the explicit square-base form and the typed regular n-gon base (reusing the `POLYGON` ring math, plus the optional `Top radius` truncation — the same authored planar B-rep with a smaller parallel top ring) are written; `Edge` (interactive pick) and base-from-existing-polygon stay absent as interactive-prompt (ADR global-scope) branches |
 //!
 //! Every point must be finite (`<kind>.non_finite_point`). Non-positive or
 //! non-finite extents are `<kind>.degenerate_extent`; a non-square pyramid base
 //! or an off-centre apex is `<kind>.invalid_base`; a cone whose top radius equals
-//! its base radius is `cone.equal_radii` (that is a `CYLINDER`); a construction
+//! its base radius is `cone.equal_radii` (that is a `CYLINDER`), and a pyramid
+//! whose top radius equals its base radius is `pyramid.equal_radii` (that is a
+//! straight prism); a construction
 //! the kind does not take is `solid.option_not_supported`. Every refusal happens
 //! before the modeler call and before any staging, so it writes nothing.
 //!

@@ -1,7 +1,7 @@
 // The typed command lines that became reachable when the host added them:
-// `PYRAMID [INSCRIBED|CIRCUMSCRIBED] <sides> <cx> <cy> <radius> <height>`,
-// `LAYERSTATESAVE [<name>|?]` and the extended `QLEADER`/`LEADER` grammars
-// (`CONTENT …`, and `QLEADER`'s `ARROW`/`MAXPOINTS`).
+// `PYRAMID [INSCRIBED|CIRCUMSCRIBED] <sides> <cx> <cy> <radius> <height>
+// [<top_radius>]`, `LAYERSTATESAVE [<name>|?]` and the extended `QLEADER`/
+// `LEADER` grammars (`CONTENT …`, and `QLEADER`'s `ARROW`/`MAXPOINTS`).
 //
 // The chrome predicates are **token shapes only**; the host owns every semantic
 // refusal (`pyramid.sides`, `pyramid.radius`, `mleader.option_max_points`,
@@ -38,25 +38,28 @@ function parses(selector: string, argument: string): boolean {
   return spec.parse(argument);
 }
 
-test('pyramid accepts the optional ring choice and exactly five numbers', () => {
+test('pyramid accepts the optional ring choice, five numbers and an optional top radius', () => {
   for (const line of [
     '6 0 0 5 10',
     'INSCRIBED 6 0 0 5 10',
     'I 4 -1 2.5 3 -4',
     'CIRCUMSCRIBED 5 1 2 3 4',
     'C 3 0 0 1 1',
+    '6 0 0 5 10 2',
+    'c 4 0 0 2 3 1',
   ]) {
     assert.equal(parses('PYRAMID', line), true, line);
   }
   for (const line of [
     '',
     '6 0 0 5',
-    '6 0 0 5 10 11',
+    '6 0 0 5 10 1 2',
     '4.0 0 0 5 10',
     '-4 0 0 5 10',
     '6 nan 0 5 10',
     'SIDES 6 0 0 5 10',
     '6 0 0 5 10 extra',
+    '6 0 0 5 10 nan',
   ]) {
     assert.equal(parses('PYRAMID', line), false, line);
   }
@@ -102,6 +105,7 @@ test('the three typed lines are admitted and forwarded whole', () => {
   for (const [typed, wire] of [
     ['pyramid 6 0 0 5 10', 'PYRAMID 6 0 0 5 10'],
     ['pyramid circumscribed 4 1 1 2 3', 'PYRAMID CIRCUMSCRIBED 4 1 1 2 3'],
+    ['pyramid 6 0 0 5 10 2', 'PYRAMID 6 0 0 5 10 2'],
     ['layerstatesave plan a', 'LAYERSTATESAVE PLAN A'],
     ['layerstatesave ?', 'LAYERSTATESAVE ?'],
     ['qleader content block door 1,2 3,4', 'QLEADER CONTENT BLOCK DOOR 1,2 3,4'],

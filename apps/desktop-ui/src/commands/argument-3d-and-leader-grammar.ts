@@ -13,13 +13,13 @@ function isCoordinatePair(text: string): boolean {
   return parts.length === 2 && parts.every(isSignedDecimal);
 }
 
-/** `PYRAMID [INSCRIBED|I|CIRCUMSCRIBED|C] <sides> <cx> <cy> <radius> <height>`. */
+/** `PYRAMID [INSCRIBED|I|CIRCUMSCRIBED|C] <sides> <cx> <cy> <radius> <height> [<top_radius>]`. */
 export function isPyramidArgument(argument: string): boolean {
   const parts = tokens(argument);
   const first = (parts[0] ?? '').toUpperCase();
   const offset = ['INSCRIBED', 'I', 'CIRCUMSCRIBED', 'C'].includes(first) ? 1 : 0;
   const values = parts.slice(offset);
-  return values.length === 5
+  return (values.length === 5 || values.length === 6)
     && /^[0-9]+$/.test(values[0])
     && values.slice(1).every(isSignedDecimal);
 }

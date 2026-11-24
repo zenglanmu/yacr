@@ -20,6 +20,8 @@ use std::sync::{Arc, Mutex};
 // `Top radius`) and the `ELEV` plan rule; split out to stay inside the
 // code-size gate.
 mod options;
+// `PYRAMID`'s typed regular n-gon base and its `Top radius` truncation.
+mod pyramid;
 
 // ---- the fake modeler -----------------------------------------------------
 

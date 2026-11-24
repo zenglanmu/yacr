@@ -17,7 +17,8 @@ pub enum PrimitiveKind {
     Box,
     /// `WEDGE`: a right triangular prism.
     Wedge,
-    /// `PYRAMID`: a square or regular n-gon base tapering to a point.
+    /// `PYRAMID`: a square or regular n-gon base tapering to a point, or a
+    /// truncated pyramid whose top is a smaller parallel ring.
     Pyramid,
     /// `CYLINDER`.
     Cylinder,
@@ -87,6 +88,28 @@ pub enum PrimitiveSpec {
         rotation: f64,
         height: f64,
     },
+    /// A **truncated** regular `sides`-gon pyramid (AutoCAD's `Top radius`
+    /// construction): two parallel, concentric rings in the planes
+    /// `z = base_center.z` and `z = base_center.z + height`, both at the same
+    /// `rotation`, the bottom one with vertex radius `radius` and the top one
+    /// with the strictly smaller vertex radius `top_radius`.
+    ///
+    /// Both radii are **vertex (circumscribed-circle) radii** of the same ring
+    /// construction [`PrimitiveSpec::PyramidNgon`] uses, so the command layer's
+    /// inscribed/circumscribed choice scales both rings identically. This is a
+    /// single authored planar B-rep: the side faces are trapezoids in exactly the
+    /// planes the apex form's side triangles lie in, never a second geometry
+    /// path. `top_radius == radius` is a straight prism, which this seam has no
+    /// primitive for and the command refuses by name; `top_radius == 0` is the
+    /// apex form and belongs to [`PrimitiveSpec::PyramidNgon`].
+    PyramidNgonFrustum {
+        base_center: Point3,
+        radius: f64,
+        top_radius: f64,
+        sides: u32,
+        rotation: f64,
+        height: f64,
+    },
     Cylinder {
         origin: Point3,
         radius: f64,
@@ -118,6 +141,7 @@ impl PrimitiveSpec {
             PrimitiveSpec::Wedge { .. } => PrimitiveKind::Wedge,
             PrimitiveSpec::Pyramid { .. } => PrimitiveKind::Pyramid,
             PrimitiveSpec::PyramidNgon { .. } => PrimitiveKind::Pyramid,
+            PrimitiveSpec::PyramidNgonFrustum { .. } => PrimitiveKind::Pyramid,
             PrimitiveSpec::Cylinder { .. } => PrimitiveKind::Cylinder,
             PrimitiveSpec::Sphere { .. } => PrimitiveKind::Sphere,
             PrimitiveSpec::Cone { .. } => PrimitiveKind::Cone,
@@ -128,7 +152,9 @@ impl PrimitiveSpec {
     /// Reject non-finite or out-of-range dimensions and non-finite anchors.
     ///
     /// Every length/radius must be finite and strictly positive (`Cone::radius_top`
-    /// may be exactly zero for an apex). A non-finite origin/base centre is a bad
+    /// may be exactly zero for an apex, while `PyramidNgonFrustum::top_radius` must
+    /// be strictly inside `(0, radius)` because `0` *is* the apex form). A
+    /// non-finite origin/base centre is a bad
     /// input, not an unsupported operation. Degenerate-but-finite combinations
     /// that a kernel must judge (for example a torus whose minor radius exceeds
     /// its major radius) are left to the kernel: it reports
@@ -168,21 +194,30 @@ impl PrimitiveSpec {
                 rotation,
                 height,
             } => {
-                require_finite_point("base_center", base_center)?;
-                require_positive("radius", radius)?;
-                if !(MIN_PYRAMID_NGON_SIDES..=MAX_PYRAMID_NGON_SIDES).contains(&sides) {
+                require_ngon_ring(base_center, radius, sides, rotation)?;
+                require_positive("height", height)
+            }
+            PrimitiveSpec::PyramidNgonFrustum {
+                base_center,
+                radius,
+                top_radius,
+                sides,
+                rotation,
+                height,
+            } => {
+                require_ngon_ring(base_center, radius, sides, rotation)?;
+                // Both rings are vertex radii of the same construction, so the
+                // truncated body exists only strictly between the apex (`0`) and
+                // the straight prism (`radius`). `0` is the apex form and must be
+                // sent as `PyramidNgon`; a value at or above the base radius has
+                // no top ring this spec can draw.
+                if !top_radius.is_finite() || top_radius <= 0.0 || top_radius >= radius {
                     return Err(SolidInputError {
                         code: codes::SOLID_INVALID_DIMENSION,
                         message: format!(
-                            "sides must be between {MIN_PYRAMID_NGON_SIDES} and \
-                             {MAX_PYRAMID_NGON_SIDES}, got {sides}"
+                            "top_radius must be finite and strictly between 0 and the base \
+                             radius {radius}, got {top_radius}"
                         ),
-                    });
-                }
-                if !rotation.is_finite() {
-                    return Err(SolidInputError {
-                        code: codes::SOLID_INVALID_DIMENSION,
-                        message: format!("rotation must be finite, got {rotation}"),
                     });
                 }
                 require_positive("height", height)
@@ -475,6 +510,35 @@ fn require_positive(name: &str, value: f64) -> Result<(), SolidInputError> {
         return Err(SolidInputError {
             code: codes::SOLID_INVALID_DIMENSION,
             message: format!("{name} must be finite and positive, got {value}"),
+        });
+    }
+    Ok(())
+}
+
+/// The shared ring rules every regular n-gon pyramid form obeys: a finite
+/// base centre, a positive vertex radius, a side count inside the `POLYGON`
+/// ceiling and a finite first-vertex angle.
+fn require_ngon_ring(
+    base_center: Point3,
+    radius: f64,
+    sides: u32,
+    rotation: f64,
+) -> Result<(), SolidInputError> {
+    require_finite_point("base_center", base_center)?;
+    require_positive("radius", radius)?;
+    if !(MIN_PYRAMID_NGON_SIDES..=MAX_PYRAMID_NGON_SIDES).contains(&sides) {
+        return Err(SolidInputError {
+            code: codes::SOLID_INVALID_DIMENSION,
+            message: format!(
+                "sides must be between {MIN_PYRAMID_NGON_SIDES} and \
+                 {MAX_PYRAMID_NGON_SIDES}, got {sides}"
+            ),
+        });
+    }
+    if !rotation.is_finite() {
+        return Err(SolidInputError {
+            code: codes::SOLID_INVALID_DIMENSION,
+            message: format!("rotation must be finite, got {rotation}"),
         });
     }
     Ok(())

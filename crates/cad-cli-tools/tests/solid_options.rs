@@ -256,6 +256,7 @@ fn pyramid_polygon_base_commits_the_ngon_body_through_the_real_modeler() {
             sides: 6,
             circumscribed: false,
             height: 3.0,
+            top_radius: None,
         },
     );
     let root_three = 3.0_f64.sqrt();
@@ -272,4 +273,65 @@ fn pyramid_polygon_base_commits_the_ngon_body_through_the_real_modeler() {
             "{axis}: {actual} vs {expected}"
         );
     }
+}
+
+#[test]
+fn pyramid_polygon_top_radius_commits_the_truncated_ngon_through_the_real_modeler() {
+    // The same hexagon truncated to a top vertex radius of 1: the widest ring is
+    // still the base (`x ± 2`, `y ± √3`) and the body now ends on a flat top at
+    // `z = base + 3`. This proves the second ring lifts through the real modeler
+    // as one authored planar B-rep (the trapezoid sides), not a second path.
+    let mut controller = modeler_controller();
+    set_elev(&mut controller, 1.0);
+    let (min, max) = run_bounds(
+        &mut controller,
+        ExtendedCommandId::Pyramid,
+        cad_app::SolidPrimitiveCommand::PyramidPolygon {
+            base: [0.0, 0.0],
+            radius: 2.0,
+            sides: 6,
+            circumscribed: false,
+            height: 3.0,
+            top_radius: Some(1.0),
+        },
+    );
+    let root_three = 3.0_f64.sqrt();
+    for (actual, expected, axis) in [
+        (min.x, -2.0, "min x"),
+        (min.y, -root_three, "min y"),
+        (min.z, 1.0, "min z"),
+        (max.x, 2.0, "max x"),
+        (max.y, root_three, "max y"),
+        (max.z, 4.0, "max z"),
+    ] {
+        assert!(
+            (actual - expected).abs() < 1e-9,
+            "{axis}: {actual} vs {expected}"
+        );
+    }
+    // The flat top is real: facets exist at the top plane, not just at the apex
+    // vertex. A frustum's top cap is a full ring at `z = 4`, so several vertices
+    // sit there; the apex form would have exactly one.
+    let entity = controller.application.workspace.documents[&controller.document_id]
+        .drawing
+        .entities()
+        .find(|entity| {
+            matches!(entity.geometry, SemanticGeometry::Body3d(_))
+                && entity.object.type_key == "AcDb3dSolid"
+        })
+        .expect("the committed truncated body");
+    let SemanticGeometry::Body3d(body) = &entity.geometry else {
+        panic!("a Body3d row");
+    };
+    let top_vertices = body
+        .display
+        .mesh
+        .vertices
+        .iter()
+        .filter(|vertex| (vertex.z - 4.0).abs() < 1e-9)
+        .count();
+    assert!(
+        top_vertices >= 6,
+        "the top ring has its own vertices on the top plane, got {top_vertices}"
+    );
 }
