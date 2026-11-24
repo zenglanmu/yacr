@@ -86,7 +86,8 @@ impl Application {
             | ExtendedCommandId::PstScale
             | ExtendedCommandId::MvSetup
             | ExtendedCommandId::ChSpace => self.extended_paper_write(session, command, ext)?,
-            // Wave 3 reports/session: two space switches plus read-only reports.
+            // Wave 3 reports/session: two space switches, the read-only reports,
+            // and DIMREASSOC (a real Work-only dimension-text write).
             ExtendedCommandId::Mspace
             | ExtendedCommandId::Pspace
             | ExtendedCommandId::TextStyle
