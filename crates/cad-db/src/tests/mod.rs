@@ -41,6 +41,7 @@ mod table_validation;
 mod text_transform;
 mod textures;
 mod validate_geometry;
+mod views;
 mod visibility;
 mod xref;
 

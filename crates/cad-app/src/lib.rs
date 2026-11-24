@@ -144,6 +144,7 @@ mod layer_history;
 mod layer_states;
 mod persistence;
 mod space;
+mod view_persist;
 pub mod view_states;
 
 pub use api::{

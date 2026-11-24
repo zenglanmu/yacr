@@ -168,6 +168,33 @@ fn newview_routes_the_owning_payload_and_reports_without_it() {
 }
 
 #[test]
+fn newview_routes_a_view_save_payload_to_the_persisted_table() {
+    let (mut app, mut session) = application_with_document();
+    let before = revision(&app);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        ExtendedCommandId::NewView,
+        CommandPayload::View(ViewCommand::Save("NV".into())),
+    )
+    .expect("NEWVIEW routes the owning payload");
+    assert!(row(&outcome, "view.saved")
+        .message
+        .contains("saved view(s) in the drawing"));
+    assert_eq!(
+        app.workspace.documents[&DocumentId(1)].drawing.revision().0,
+        before.0 + 1,
+        "the view table write is one revision"
+    );
+    assert!(app.can_undo(&DocumentId(1)));
+    assert!(app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .named_views()
+        .resolve("nv")
+        .is_some());
+}
+
+#[test]
 fn dash_scalelistedit_reports_the_real_scale_table() {
     let (mut app, mut session) = application_with_document();
     let before = revision(&app);

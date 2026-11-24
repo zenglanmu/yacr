@@ -105,6 +105,7 @@ mod hatch_stitch;
 mod hatch_utilities;
 mod helpers;
 mod image_edit;
+mod view_replay;
 // The `FS` contact passes: the `FSMODE=OFF` direct pass and the `FSMODE=ON`
 // tangent chain (`inquiry` keeps the command shell).
 mod fs_chain;

@@ -1,10 +1,10 @@
-//! The bounded, session-only named-view store behind `VIEW` / `VIEWGO`.
+//! The bounded **session-only** view slot behind `VPMAX`/`VPMIN`.
 //!
-//! A named view is **session state**: the viewport camera, the 2D/3D
-//! observation mode, the plan work plane and the active drawing space. It is
-//! deliberately not a DWG object: this build has no named-view table in
-//! `cad-db`, so nothing here is written to the drawing and nothing survives a
-//! session rebuild.
+//! Named views are document data now (`tables/views.json`, `cad_domain::view`)
+//! and are written by `VIEW SAVE`/`DELETE`. This store is deliberately only the
+//! transient pre-maximize snapshot: `VPMAX` records the viewport/space it is
+//! about to replace and `VPMIN` consumes it. It never reaches the drawing and
+//! never appears in `VIEW LIST`.
 //!
 //! ## Bounds and names
 //!

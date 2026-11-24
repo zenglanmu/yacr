@@ -42,6 +42,7 @@ mod report_limits;
 mod solid;
 mod text_mirror;
 mod texture;
+mod views;
 mod writer;
 mod xref;
 

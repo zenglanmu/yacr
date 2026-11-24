@@ -125,6 +125,15 @@ impl Application {
                 "VIEW needs SAVE <name>, RESTORE <name>, LIST or DELETE <name>".into(),
             ));
         };
+        // VIEW itself is Viewer-legal for RESTORE/LIST (session view state), but
+        // SAVE/DELETE write `tables/views.json`. The whole selector cannot be
+        // Work-only without losing the read forms, so the write options refuse
+        // explicitly in Viewer instead of performing a hidden document write.
+        if session.app_mode() == AppMode::Viewer
+            && matches!(option, ViewCommand::Save(_) | ViewCommand::Delete(_))
+        {
+            return Err(CadError::PermissionDenied);
+        }
         match option {
             ViewCommand::Save(name) => {
                 let name = checked_view_name(name)?;
@@ -134,27 +143,49 @@ impl Application {
                     .get(&command.viewport)
                     .ok_or_else(|| CadError::InvalidInput("unknown viewport".into()))?;
                 let view = ViewSnapshot::capture(viewport);
-                let replaced = session
-                    .view_states
-                    .save(&name, view, session.active_space.clone());
+                let named = crate::view_persist::named_view_from_snapshot(
+                    name.clone(),
+                    &view,
+                    session.active_space.clone(),
+                );
+                let planning = self
+                    .workspace
+                    .documents
+                    .get(&command.document)
+                    .ok_or_else(|| CadError::InvalidInput("document not open".into()))?
+                    .drawing
+                    .plan_save_named_view(named)?;
+                let Some(planned) = planning else {
+                    return Ok(view_outcome(
+                        "view.unchanged",
+                        format!(
+                            "VIEW SAVE: the current camera is already stored as `{name}`; \
+                             nothing was written"
+                        ),
+                    ));
+                };
+                let replaced = planned.replaced;
+                let patch = planned.patch;
+                self.write_named_view(command.document, patch, &format!("VIEW SAVE {name}"))?;
+                let count = self.drawing(command.document)?.named_views().len();
                 Ok(view_outcome(
                     "view.saved",
                     format!(
-                        "VIEW SAVE: {} named view `{name}` ({} saved view(s); session state only)",
+                        "VIEW SAVE: {} named view `{name}` ({count} saved view(s) in the drawing)",
                         if replaced { "replaced" } else { "created" },
-                        session.view_states.len()
                     ),
                 ))
             }
             ViewCommand::Restore(name) => self.restore_named_view(session, command, name),
             ViewCommand::List => {
-                let names: Vec<&str> = session
-                    .view_states
+                let drawing = self.drawing(command.document)?;
+                let names: Vec<&str> = drawing
+                    .named_views()
                     .views()
                     .map(|view| view.name.as_str())
                     .collect();
                 let message = if names.is_empty() {
-                    "VIEW LIST: no named views are saved in this session".to_string()
+                    "VIEW LIST: no named views are saved in this drawing".to_string()
                 } else {
                     format!(
                         "VIEW LIST: {} named view(s): {}",
@@ -166,19 +197,79 @@ impl Application {
             }
             ViewCommand::Delete(name) => {
                 let name = checked_view_name(name)?;
-                if !session.view_states.remove(&name) {
-                    return Err(unknown_view(&name));
-                }
+                let planned = self
+                    .drawing(command.document)?
+                    .plan_delete_named_view(&name)?;
+                self.write_named_view(
+                    command.document,
+                    planned.patch,
+                    &format!("VIEW DELETE {name}"),
+                )?;
+                let count = self.drawing(command.document)?.named_views().len();
                 Ok(view_outcome(
                     "view.deleted",
                     format!(
-                        "VIEW DELETE: removed named view `{name}` ({} saved view(s); session state \
-                         only)",
-                        session.view_states.len()
+                        "VIEW DELETE: removed named view `{name}` ({count} saved view(s) in the \
+                         drawing)"
                     ),
                 ))
             }
         }
+    }
+
+    /// Commit one named-view table patch and record it as one undo step.
+    ///
+    /// The table write is one revision tied to the same transaction as the
+    /// history record. If the record is refused (a pending undo step), the table
+    /// write is reverted so a failed command never leaves a half-applied edit.
+    fn write_named_view(
+        &mut self,
+        document: DocumentId,
+        patch: cad_db::ViewPatch,
+        label: &str,
+    ) -> CadResult<()> {
+        let transaction = crate::app_drawing::next_transaction_id();
+        let changes = {
+            let document = self
+                .workspace
+                .documents
+                .get_mut(&document)
+                .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+            Arc::make_mut(&mut document.drawing).apply_named_view_patches(
+                std::slice::from_ref(&patch),
+                transaction,
+                label,
+            )?
+        };
+        debug_assert!(changes.scope.tables.contains(&cad_db::TableKind::Views));
+        let record =
+            cad_history::DrawingUndoRecord::entity_only(transaction, label.to_string(), Vec::new());
+        if let Err(error) = self
+            .history
+            .entry(document)
+            .or_default()
+            .record_drawing_with_views(record, vec![patch.clone()])
+        {
+            // Put the row back: the write above already succeeded, and a refused
+            // history record must not leave a table edit the user cannot undo.
+            let inverse = cad_db::ViewPatch {
+                name: patch.name,
+                before: patch.after,
+                after: patch.before,
+            };
+            let document = self
+                .workspace
+                .documents
+                .get_mut(&document)
+                .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+            Arc::make_mut(&mut document.drawing).apply_named_view_patches(
+                std::slice::from_ref(&inverse),
+                crate::app_drawing::next_transaction_id(),
+                "VIEW rollback",
+            )?;
+            return Err(error);
+        }
+        Ok(())
     }
 
     /// `VIEWGO <name>`: the same restore path as `VIEW RESTORE`.
@@ -363,9 +454,15 @@ impl Application {
         name: &str,
     ) -> CadResult<CommandOutcome> {
         let name = checked_view_name(name)?;
-        let Some(saved) = session.view_states.resolve(&name).cloned() else {
+        let Some(saved) = self
+            .drawing(command.document)?
+            .named_views()
+            .resolve(&name)
+            .cloned()
+        else {
             return Err(unknown_view(&name));
         };
+        let snapshot = ViewSnapshot::from_named_view(&saved)?;
         // A saved paper space must still be drawable in the current drawing.
         let drawing = &self
             .workspace
@@ -380,15 +477,18 @@ impl Application {
             .get(&command.viewport)
             .ok_or_else(|| CadError::InvalidInput("unknown viewport".into()))?;
         let changed =
-            ViewSnapshot::capture(viewport) != saved.view || session.active_space != saved.space;
+            ViewSnapshot::capture(viewport) != snapshot || session.active_space != saved.space;
         if changed {
             self.push_view_snapshot(&command.viewport)?;
         }
         session.active_space = saved.space;
-        saved.view.restore(self.viewport_mut(command)?);
+        snapshot.restore(self.viewport_mut(command)?);
         Ok(view_outcome(
             "view.restored",
-            format!("VIEW RESTORE: applied named view `{name}` (session view state only)"),
+            format!(
+                "VIEW RESTORE: applied named view `{name}` from the drawing (camera, mode, work \
+                 plane and space)"
+            ),
         ))
     }
 }

@@ -131,6 +131,15 @@ impl DocumentArchive for BimArchive {
 /// blocks or the definition table, this projection drops to 4/5 and the test
 /// fails, which is the regression the contract is about.
 fn stand_in_document_minor(snapshot: &DocumentSnapshot) -> u32 {
+    if snapshot.has_named_views() {
+        return FORMAT_MINOR;
+    }
+    const FORMAT_MINOR_RELATIONS: u32 = 11;
+    if snapshot.has_relations() {
+        return FORMAT_MINOR_RELATIONS;
+    }
+    // The 2D-constraint / group tiers (16/17) are not produced by this host and
+    // the relations tier keeps its own literal below.
     const FORMAT_MINOR_RELATIONS: u32 = 11;
     if snapshot.has_relations() {
         return FORMAT_MINOR_RELATIONS;

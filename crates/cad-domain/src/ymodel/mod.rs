@@ -156,10 +156,13 @@ pub const FORMAT_WRITE: u32 = 2;
 ///
 /// `17` adds persisted entity groups (`tables/groups.json`): a named, ordered
 /// member set with a table-local sequence identity, a description and the
-/// DXF selectable flag. The table is written only when the document holds a
-/// group, so an ordinary drawing keeps its lower minor; a pre-17 reader refuses
-/// an unknown table path rather than dropping the group rows.
-pub const FORMAT_MINOR: u32 = 17;
+/// DXF selectable flag.
+///
+/// `18` adds persisted named views (`tables/views.json`): the camera, 2D/3D
+/// mode, work plane and active space of every saved view. A document without a
+/// row keeps the lower tier; a reader below `18` refuses the table path instead
+/// of dropping the views.
+pub const FORMAT_MINOR: u32 = 18;
 
 /// Stable failure markers.
 ///

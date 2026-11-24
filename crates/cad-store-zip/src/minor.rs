@@ -9,6 +9,7 @@
 //!
 //! | the document has | minor | what a minor-4 reader misses |
 //! |---|---|---|
+//! | persisted named views (`tables/views.json`) | `18` | the `VIEW` table |
 //! | persisted entity groups (`tables/groups.json`) | `17` | the whole group table |
 //! | block attributes (ADR-0055) | `14` | `cad:AttributeDefinition`, `cad:Insert.attributes` |
 //! | host-owned vendor semantics (ADR-0030 D7) | `12` | `tables/vendor.json` |
@@ -19,6 +20,10 @@
 //! | BIM data (elements, definitions or **relations**) | `7` | the element `bim` block, `tables/bim-definitions.json`, `tables/bim-relations.json` |
 //! | only bundled resources | `5` | `resources/<kind>/<key>`, `tables/resources.json`, the flag |
 //! | neither | `4` | — |
+//!
+//! `15` (`cad:Text.mirrored`), `16` (2D constraints) and `17` (GROUP
+//! persistence) are reserved tiers owned by other lanes; this build does not
+//! produce them, and named views take the next free tier, `18`.
 //!
 //! `6` is the **read-only legacy** BIM tier: this build opens a minor-6 archive
 //! (the writer that produced it had no relation table), but a resave stamps `7`.
@@ -80,23 +85,21 @@ pub(crate) const FORMAT_MINOR_APPLICATION_DOMAIN: u32 = 13;
 pub(crate) const FORMAT_MINOR_BLOCK_ATTRIBUTES: u32 = 14;
 
 /// A document that carries the `cad:Text.mirrored` glyph flag (minor 15).
-///
-/// The flag is element-payload data, so this tier coexists with every other
-/// feature and decides before the block-attribute tier: a document with both is
-/// written at `15` (a minor-14 reader would refuse the unknown `cad:Text` key).
 pub(crate) const FORMAT_MINOR_TEXT_MIRROR: u32 = 15;
 
-/// Persisted entity groups (`tables/groups.json`).
-///
-/// `16` is the bounded 2D constraint table (ADR-0054), not written by this build
-/// yet. Groups therefore take the next free tier, `17`.
+/// Persisted entity groups (`tables/groups.json`); `16` is reserved for
+/// ADR-0054 constraints.
 pub(crate) const FORMAT_MINOR_GROUPS: u32 = 17;
+
+/// A document that persists named views (`tables/views.json`).
+pub(crate) const FORMAT_MINOR_NAMED_VIEWS: u32 = 18;
 
 // The chain is a compile-time fact, not a convention: a future tier inserted in
 // the middle cannot silently leave the constants out of order. `16` (constraints)
-// is reserved by another lane, so the top tier is checked by an explicit offset.
+// is reserved by another lane, so the top tiers are checked by explicit offsets.
 const _: () = assert!(FORMAT_MINOR_BLOCK_ATTRIBUTES + 1 == FORMAT_MINOR_TEXT_MIRROR);
 const _: () = assert!(FORMAT_MINOR_GROUPS == FORMAT_MINOR_BLOCK_ATTRIBUTES + 3);
+const _: () = assert!(FORMAT_MINOR_NAMED_VIEWS == FORMAT_MINOR_BLOCK_ATTRIBUTES + 4);
 const _: () = assert!(FORMAT_MINOR_APPLICATION_DOMAIN + 1 == FORMAT_MINOR_BLOCK_ATTRIBUTES);
 const _: () = assert!(FORMAT_MINOR_VENDOR + 1 == FORMAT_MINOR_APPLICATION_DOMAIN);
 const _: () = assert!(FORMAT_MINOR_RELATIONS + 1 == FORMAT_MINOR_VENDOR);
@@ -116,6 +119,12 @@ const _: () = assert!(FORMAT_MINOR_PLAIN + 1 == FORMAT_MINOR_RESOURCES);
 /// tier here is about archive entries and the header flag, both of which the
 /// store already models.
 pub(crate) fn document_minor(snapshot: &DocumentSnapshot) -> u32 {
+    // Named views are the newest tier and can coexist with any other feature, so
+    // they decide first: a minor-17 reader refuses the `tables/views.json` path
+    // (`unsupported_minor`) rather than dropping the user's saved views.
+    if snapshot.has_named_views() {
+        return FORMAT_MINOR_NAMED_VIEWS;
+    }
     // Groups are the newest tier and can coexist with every other feature
     // (including block attributes and a named interface domain), so they decide
     // first: a pre-17 reader refuses an unknown table path rather than dropping
@@ -194,7 +203,8 @@ mod tests {
     /// The top tier is the format constant, not an independent number.
     #[test]
     fn the_top_tier_is_the_format_minor() {
-        assert_eq!(FORMAT_MINOR_GROUPS, cad_domain::ymodel::FORMAT_MINOR);
+        assert_eq!(FORMAT_MINOR_NAMED_VIEWS, cad_domain::ymodel::FORMAT_MINOR);
+        assert_eq!(FORMAT_MINOR_NAMED_VIEWS, FORMAT_MINOR_BLOCK_ATTRIBUTES + 4);
         assert_eq!(FORMAT_MINOR_GROUPS, FORMAT_MINOR_BLOCK_ATTRIBUTES + 3);
         assert_eq!(FORMAT_MINOR_TEXT_MIRROR, FORMAT_MINOR_BLOCK_ATTRIBUTES + 1);
         assert_eq!(

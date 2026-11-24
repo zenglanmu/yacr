@@ -8,11 +8,10 @@ use cad_db::{DbEntity, EntityDisplayState};
 use cad_domain::*;
 use std::collections::{HashSet, VecDeque};
 
+mod bytes;
 mod group_patch_bytes;
 mod param_bytes;
 mod record_bytes;
-
-use param_bytes::{expr_bytes, param_row_bytes};
 
 /// A reversible change to one drawing entity (spec F-EDIT).
 ///
@@ -405,11 +404,9 @@ pub struct DrawingHistoryStep {
     /// Reversible element slot-binding rows committed with the parameter rows.
     pub param_binding_patches: Vec<cad_db::ParamBindingPatch>,
     /// Reversible persisted-group rows (create/delete/rename/member edits).
-    ///
-    /// Applied by their own one-revision database path
-    /// (`apply_group_changes`), so a step carrying them has an empty record and
-    /// no linetype/BIM/parameter batch.
     pub group_patches: Vec<cad_db::GroupPatch>,
+    /// Reversible named-view rows (`tables/views.json`).
+    pub view_patches: Vec<cad_db::ViewPatch>,
 }
 
 impl DrawingHistoryStep {
@@ -431,15 +428,17 @@ impl DrawingHistoryStep {
     /// one-revision reason, and a merge key cannot coalesce a row.
     fn validate(&self) -> CadResult<()> {
         let parametric = !self.param_patches.is_empty() || !self.param_binding_patches.is_empty();
+        let view_step = !self.view_patches.is_empty();
         if self.record.is_empty()
             && self.linetype_patches.is_empty()
             && self.bim_patches.is_empty()
             && self.group_patches.is_empty()
             && !parametric
+            && !view_step
         {
             return Err(CadError::InvalidInput(
                 "a drawing undo step needs at least one entity, block, layer, layout, style, \
-                 linetype, BIM or parameter row"
+                 linetype, BIM, parameter or named-view row"
                     .into(),
             ));
         }
@@ -575,87 +574,40 @@ impl DrawingHistoryStep {
                 ));
             }
         }
+        if view_step {
+            // A named-view step is one `apply_named_view_patches` revision, so it
+            // cannot carry a record batch or another exclusive patch family.
+            if !self.record.is_empty()
+                || !self.linetype_patches.is_empty()
+                || !self.bim_patches.is_empty()
+                || parametric
+            {
+                return Err(CadError::InvalidInput(
+                    "a drawing undo step with named-view patches cannot also carry other rows"
+                        .into(),
+                ));
+            }
+            if self.record.merge_key.is_some() {
+                return Err(CadError::InvalidInput(
+                    "a drawing undo record with named-view patches cannot be merged".into(),
+                ));
+            }
+            let mut view_names = HashSet::new();
+            for patch in &self.view_patches {
+                if !view_names.insert(patch.name.to_ascii_lowercase()) {
+                    return Err(CadError::InvalidInput(
+                        "a drawing undo step cannot contain duplicate named-view names".into(),
+                    ));
+                }
+                if patch.before.is_none() && patch.after.is_none() {
+                    return Err(CadError::InvalidInput(
+                        "a named-view patch needs a before or after row".into(),
+                    ));
+                }
+            }
+        }
         Ok(())
     }
-
-    pub fn approx_bytes(&self) -> usize {
-        let mut bytes = self.record.approx_bytes();
-        for patch in &self.linetype_patches {
-            bytes += std::mem::size_of::<cad_db::LinetypePatch>();
-            for row in patch.before.iter().chain(patch.after.iter()) {
-                bytes += std::mem::size_of::<cad_db::LineType>() + row.name.len();
-                bytes += row.pattern.elements.len() * std::mem::size_of::<f64>();
-            }
-        }
-        for patch in &self.bim_patches {
-            bytes += std::mem::size_of::<cad_db::BimPatch>();
-            // Both sides are retained, so both are counted: a property edit
-            // keeps the pre-edit pset alongside its replacement.
-            bytes += bim_element_bytes(&patch.before) + bim_element_bytes(&patch.after);
-        }
-        for patch in &self.param_patches {
-            bytes += std::mem::size_of::<cad_db::ParamPatch>();
-            for row in patch.before.iter().chain(patch.after.iter()) {
-                bytes += param_row_bytes(row);
-            }
-        }
-        bytes += group_patch_bytes::group_patch_bytes(&self.group_patches);
-        for patch in &self.param_binding_patches {
-            bytes += std::mem::size_of::<cad_db::ParamBindingPatch>();
-            for bindings in patch.before.iter().chain(patch.after.iter()) {
-                bytes += std::mem::size_of::<cad_domain::param::ParamBindings>();
-                for (slot, expr) in bindings.entries() {
-                    bytes += slot.len() + expr_bytes(expr);
-                }
-            }
-        }
-        bytes
-    }
-}
-
-/// Estimated retained bytes of one element's BIM data.
-///
-/// The fixed-size value alone would under-count badly: nearly all of a `bim`
-/// block is strings (source provenance, pset/property names, `Text` values and
-/// each `Real`'s IFC type/unit), and it is exactly those that a pset edit grows.
-/// Without them a step could hold an arbitrarily large pset and still report a
-/// few hundred bytes, bypassing the history budget.
-fn bim_element_bytes(element: &cad_db::BimElement) -> usize {
-    let mut bytes = std::mem::size_of::<cad_db::BimElement>();
-    bytes += element.source.connector.len();
-    for text in [
-        element.category.as_deref(),
-        element.name.as_deref(),
-        element.source.document_id.as_deref(),
-        element.source.id.as_deref(),
-        element.source.native_id.as_deref(),
-        element.level.as_deref(),
-        element.element_type.as_deref(),
-        element.material.as_deref(),
-    ]
-    .into_iter()
-    .flatten()
-    {
-        bytes += text.len();
-    }
-    for set in &element.psets {
-        bytes += std::mem::size_of::<cad_db::BimPropertySet>() + set.name.len();
-        for property in &set.properties {
-            bytes += std::mem::size_of::<cad_db::BimProperty>() + property.name.len();
-            match &property.value {
-                // Empty `Text` is legal, so only its length is counted.
-                cad_db::BimValue::Text(text) => bytes += text.len(),
-                cad_db::BimValue::Real { ifc_type, unit, .. } => {
-                    bytes += ifc_type.as_deref().map_or(0, str::len);
-                    bytes += unit.as_deref().map_or(0, str::len);
-                }
-                cad_db::BimValue::Integer(_)
-                | cad_db::BimValue::Bool(_)
-                | cad_db::BimValue::Null => {}
-            }
-        }
-    }
-    bytes
 }
 
 /// Undo/redo stacks with an approximate budget on retained undo entries.
@@ -726,6 +678,7 @@ impl History {
             Vec::new(),
             Vec::new(),
             Vec::new(),
+            Vec::new(),
         )
     }
 
@@ -743,6 +696,7 @@ impl History {
         self.record_drawing_step(
             record,
             linetype_patches,
+            Vec::new(),
             Vec::new(),
             Vec::new(),
             Vec::new(),
@@ -767,6 +721,7 @@ impl History {
             record,
             Vec::new(),
             bim_patches,
+            Vec::new(),
             Vec::new(),
             Vec::new(),
             Vec::new(),
@@ -797,15 +752,11 @@ impl History {
             param_patches,
             param_binding_patches,
             Vec::new(),
+            Vec::new(),
         )
     }
 
     /// Record a committed group edit plus the rows it wrote.
-    ///
-    /// The patches are carried beside the record like the linetype/BIM batches,
-    /// count toward "this step records something", and are applied by
-    /// [`cad_db::DrawingDatabase::apply_group_changes`] as one revision. The
-    /// record must be empty (see `DrawingHistoryStep::validate`).
     pub fn record_drawing_with_groups(
         &mut self,
         record: DrawingUndoRecord,
@@ -818,6 +769,24 @@ impl History {
             Vec::new(),
             Vec::new(),
             group_patches,
+            Vec::new(),
+        )
+    }
+
+    /// Record a committed named-view table write (`VIEW SAVE`/`DELETE`).
+    pub fn record_drawing_with_views(
+        &mut self,
+        record: DrawingUndoRecord,
+        view_patches: Vec<cad_db::ViewPatch>,
+    ) -> CadResult<()> {
+        self.record_drawing_step(
+            record,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            view_patches,
         )
     }
 
@@ -829,6 +798,7 @@ impl History {
         param_patches: Vec<cad_db::ParamPatch>,
         param_binding_patches: Vec<cad_db::ParamBindingPatch>,
         group_patches: Vec<cad_db::GroupPatch>,
+        view_patches: Vec<cad_db::ViewPatch>,
     ) -> CadResult<()> {
         self.ensure_no_pending_drawing()?;
         let mut step = DrawingHistoryStep {
@@ -838,6 +808,7 @@ impl History {
             param_patches,
             param_binding_patches,
             group_patches,
+            view_patches,
         };
         step.validate()?;
         if let Some(key) = step.record.merge_key.clone() {

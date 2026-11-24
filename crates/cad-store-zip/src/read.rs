@@ -450,6 +450,9 @@ const TABLE_ENTRIES: [(TableKind, &str); 21] = [
     // Persisted entity groups. Opaque rows: the snapshot codec owns the row
     // shape and its member-identity rules.
     (TableKind::Groups, "tables/groups.json"),
+    // Persisted named views (minor 18). Opaque rows like the other side tables:
+    // `cad-db`'s snapshot codec owns the row shape and its strictness.
+    (TableKind::Views, "tables/views.json"),
 ];
 
 /// The table kind one entry path holds, if this build models it.
@@ -859,6 +862,7 @@ mod tests {
             TableKind::Relations,
             TableKind::Vendor,
             TableKind::Groups,
+            TableKind::Views,
         ];
         let mut paths = std::collections::BTreeSet::new();
         for kind in kinds {
@@ -887,6 +891,7 @@ mod tests {
                 TableKind::Relations => "Relations",
                 TableKind::Vendor => "Vendor",
                 TableKind::Groups => "Groups",
+                TableKind::Views => "Views",
             };
             assert_eq!(name, format!("{kind:?}"));
             let path = table_entry(kind);
