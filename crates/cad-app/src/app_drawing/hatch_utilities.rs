@@ -26,17 +26,22 @@ impl Application {
     /// hatch, in one transaction.
     ///
     /// The selection is the whole input (`CommandPayload::None`). Every ref must
-    /// be a directly addressable **model-space** `SemanticGeometry::Hatch`;
-    /// anything else is refused by name before a write. Each loop is mapped from
-    /// the hatch's own OCS 2D frame through [`HatchPlane::to_world`] — the same
-    /// arbitrary-axis projection the fill/display uses — and stored as an
-    /// `AcDbPolyline` with the loop's bulges and the closed flag. A repeated last
-    /// point is dropped (with the degenerate closing bulge when the source
+    /// be a directly addressable `SemanticGeometry::Hatch` in **model space or a
+    /// paper layout**; a block-definition member, a sub-element, a missing ref or
+    /// another document's ref is refused by name before a write. Each loop is
+    /// mapped from the hatch's own OCS 2D frame through [`HatchPlane::to_world`]
+    /// — the same arbitrary-axis projection the fill/display uses — and stored as
+    /// an `AcDbPolyline` with the loop's bulges and the closed flag. A repeated
+    /// last point is dropped (with the degenerate closing bulge when the source
     /// carried one) before the world mapping.
     ///
-    /// The boundary polylines inherit the source hatch's layer and space. They are
-    /// a snapshot, not an associative boundary: editing the hatch afterwards does
-    /// not update them.
+    /// The boundary polylines inherit the source hatch's layer **and space** (a
+    /// paper-layout hatch produces paper-layout boundaries through the same
+    /// `insert_entity` path layouts already use), and the draw order is the next
+    /// one in that space's own sequence. They are a snapshot, not an associative
+    /// boundary: editing the hatch afterwards does not update them, and
+    /// associativity remains a global (run-wide) declaration rather than a
+    /// per-object record.
     pub(crate) fn hatch_generate_boundary(
         &mut self,
         session: &SessionState,
@@ -83,11 +88,15 @@ impl Application {
             let source = drawing.entity(reference.entity).cloned().ok_or_else(|| {
                 not_addressable(reference.entity, "it does not exist in this drawing")
             })?;
-            if source.space != SpaceId::Model {
-                return Err(not_addressable(
-                    reference.entity,
-                    "it is not in model space",
-                ));
+            match &source.space {
+                SpaceId::Model | SpaceId::Paper(_) => {}
+                SpaceId::Block(_) => {
+                    return Err(not_addressable(
+                        reference.entity,
+                        "it is inside a block definition; the boundary is written for model \
+                         space or a paper layout only",
+                    ))
+                }
             }
             let SemanticGeometry::Hatch(hatch) = &source.geometry else {
                 return Err(refusal(
@@ -114,18 +123,21 @@ impl Application {
         }
         let loop_count = planned.len();
 
-        // 2. One draw-order run after the highest model-space row, exactly like the
-        //    shared create funnel (`model_space()`'s filter, not a new ordering).
-        let base_order = drawing
-            .entities()
-            .filter(|entity| entity.space == SpaceId::Model)
-            .map(|entity| entity.draw_order)
-            .max()
-            .map(|order| order.saturating_add(1))
-            .unwrap_or(0);
+        // 2. One draw-order run after the highest row **of the same space**,
+        //    exactly like the shared create funnel groups model/layout/block
+        //    sequences (a new paper boundary does not inherit a model order).
+        let mut next_orders: std::collections::BTreeMap<DrawOrderScope, i64> =
+            std::collections::BTreeMap::new();
+        for entity in drawing.entities() {
+            let scope = DrawOrderScope::of(&entity.space);
+            let entry = next_orders.entry(scope).or_insert(0);
+            *entry = (*entry).max(entity.draw_order.saturating_add(1));
+        }
         let mut entities = Vec::with_capacity(planned.len());
-        for (index, (layer, space, geometry)) in planned.into_iter().enumerate() {
+        for (layer, space, geometry) in planned.into_iter() {
             let entity_id = drawing.allocate_entity_id();
+            let scope = DrawOrderScope::of(&space);
+            let order = next_orders.entry(scope).or_insert(0);
             entities.push(DbEntity {
                 object: cad_db::DbObject {
                     id: ObjectId(entity_id.0),
@@ -137,8 +149,9 @@ impl Application {
                 layer,
                 space,
                 geometry,
-                draw_order: base_order + index as i64,
+                draw_order: *order,
             });
+            *order = order.saturating_add(1);
         }
 
         // 3. One transaction / one undo step; the hatches themselves are untouched.
