@@ -25,8 +25,12 @@ dark/light。有文档时切换写文档（`cad_set_application_domain`，一个
 阶段 3：`concept` 接线为 SketchUp 式菜单栏 + 左工具栏 + 右托盘（`menu`/`toolbar`/`tray` 槽），
 官方单键表与 Measurements 框；阶段 4：`bim` 接线为 Revit 式域 ribbon（`ribbon` 槽）+右侧属性/
 浏览托盘，无命令行；同阶段新增 typed `cad_set_view`（绝对相机或宿主拟合的 overview/plan/
-立面）与 BIM“视图”面板 6 个拟合预设（ADR-0059）。未实现的参考工具保持显式 disabled/pending；
-`mechanical` 仍是唯一占位并回退 `cad2d`。所有域共用一棵 React 树与共享准入，视觉/真机/非 Linux 运行仍 **NOT VERIFIED**。详见
+立面）与 BIM“视图”面板 6 个拟合预设（ADR-0059）。阶段 5：`mechanical` 接线为 SolidWorks 式
+CommandManager ribbon + 左侧 FeatureManager/PropertyManager 托盘（无命令行）；其设计树读新增的
+`cad_mechanical_tree`（`mechanicalTree` host read，特征按求值顺序且标 `schema_only`，实体标
+`ready`/`unavailable`，1024 行上限）。四个已知域均已接线，只有未知 token 回退 `cad2d`；未实现的
+参考工具保持显式 disabled/pending。所有域共用一棵 React 树与共享准入，视觉/真机/非 Linux 运行仍
+**NOT VERIFIED**。详见
 `docs/application-domains.md` 与 [ADR-0053](adr/0053-application-domains.md)。
 
 ## 实体能力（读取 / 语义 / 绘制 / 拾取 / 测量）

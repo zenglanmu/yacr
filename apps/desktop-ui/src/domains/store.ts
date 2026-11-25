@@ -70,11 +70,12 @@ export function currentDomain(
 /**
  * The profile the chrome actually renders.
  *
- * A known domain whose native interface is not wired in this build
- * (`placeholder: true`) falls back to the drafting profile — the most complete
- * interface. The document keeps its own domain/value; this is presentation only,
- * and `DomainSurface` shows a notice naming the requested domain. An unknown
- * token already normalises to drafting inside [`currentDomain`].
+ * A profile that says `placeholder: true` (the mechanism a future token uses;
+ * no shipped profile sets it today) falls back to the drafting profile — the
+ * most complete interface. The document keeps its own domain/value; this is
+ * presentation only, and `DomainSurface` shows a notice naming the requested
+ * domain. An unknown token already normalises to drafting inside
+ * [`currentDomain`].
  */
 export function renderedDomain(
   status: { readonly applicationDomain?: unknown; readonly documentLabel?: unknown } | null | undefined,

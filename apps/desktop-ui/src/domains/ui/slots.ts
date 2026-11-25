@@ -40,6 +40,7 @@ export type TrayPanelKind =
   | 'scenes'
   | 'instructor'
   | 'bimQuery'
+  | 'mechanicalTree'
   | 'pending';
 
 /** One tray panel, in vertical order. */

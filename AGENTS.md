@@ -249,11 +249,12 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
   数据命令走 Tauri/native；`dom-canvas` 走 wasm adapter。Android 是 `native-below`，不要按
   `__YACR_RUNTIME__=android` 把 CAD 命令送到 wasm。
 - 应用域（ADR-0053）：`application_domain` 是**文档属性**（`document.json`，minor 13），profile 在
-  `src/domains/`（纯数据 + store + `domains/ui/` 数据槽）。`cad2d`、`bim`、`concept` 已接线；
-  `bim` 是 Revit 式域 ribbon（`ribbon` 槽）+左侧属性/浏览托盘且无命令行，`concept` 是菜单栏+左工具栏+
-  右托盘，`cad2d` 是 ribbon+命令行。`mechanical` 及未知 token
-  **回退到 `cad2d` 界面**（`renderedDomain()`），画面顶部提示条命名请求的域，文档域值与数据不变；
-  不得把参考软件的原生工具摆成可点假按钮。插件公开面是 `@yacr/plugin-api` 的
+  `src/domains/`（纯数据 + store + `domains/ui/` 数据槽）。`cad2d`、`bim`、`concept`、`mechanical`
+  均已接线：`bim` 是 Revit 式域 ribbon（`ribbon` 槽）+左侧属性/浏览托盘且无命令行，`concept` 是
+  菜单栏+左工具栏+右托盘，`mechanical` 是 SolidWorks 式域 ribbon + 左侧 FeatureManager/
+  PropertyManager 托盘且无命令行（数值走状态栏工具参数），`cad2d` 是 ribbon+命令行。只有**未知
+  token** 回退到 `cad2d` 界面（`renderedDomain()`），画面顶部提示条命名该 token，文档域值与数据
+  不变；不得把参考软件的原生工具摆成可点假按钮。插件公开面是 `@yacr/plugin-api` 的
   `api.ui.register`（声明式贡献 + 字面标签 + `deactivate` 自动卸载，client-local 无描述符行）；
   宿主侧落到 `registerPluginUi` 同一合并路径，命令仍过共享准入。
   有文档时切域写文档（`cad_set_application_domain`），无文档只预览；命令可用性

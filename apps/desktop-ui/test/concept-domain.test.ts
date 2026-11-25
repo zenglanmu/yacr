@@ -130,7 +130,7 @@ test('every label, title and pending sentence resolves in both catalogs', async 
   }
 });
 
-test('the concept profile is wired and mechanical stays the only placeholder', () => {
+test('the concept profile is wired and no profile is a placeholder', () => {
   assert.deepEqual(
     {
       ribbon: DOMAIN_PROFILES.concept.ribbon,
@@ -140,7 +140,7 @@ test('the concept profile is wired and mechanical stays the only placeholder', (
     },
     { ribbon: true, surface: 'menu', commandLine: false, placeholder: false },
   );
-  assert.equal(DOMAIN_PROFILES.mechanical.placeholder, true);
+  assert.equal(DOMAIN_PROFILES.mechanical.placeholder, false);
 });
 
 test('the shortcut table is the official one, including F=Offset and O=Orbit', async () => {

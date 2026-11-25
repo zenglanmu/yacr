@@ -18,6 +18,7 @@ pub mod host_read;
 pub mod i18n;
 pub mod launch;
 pub mod layout;
+pub mod mechanical;
 pub mod param;
 pub mod popup;
 pub mod protocol;
@@ -40,6 +41,9 @@ pub use bim::{
 pub use host_read::{
     HostReadAnswer, HostReadHost, HostReadRequest, HostReadSeam, HostReads, ACTION_RECORDER_KIND,
     BIM_QUERY_KIND, HOST_READ_UNKNOWN_KIND,
+};
+pub use mechanical::{
+    MechanicalTreeResponse, MechanicalTreeRow, MECHANICAL_TREE_KIND, MECHANICAL_TREE_UNSUPPORTED,
 };
 pub use param::{ParamListResponse, ParamListRow, PARAM_LIST_KIND, PARAM_LIST_UNSUPPORTED};
 

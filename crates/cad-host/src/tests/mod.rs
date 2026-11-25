@@ -37,6 +37,7 @@ mod grips;
 mod hover;
 mod id_point_echo;
 mod inset_canvas;
+mod mechanical;
 mod named_file;
 mod navigation;
 mod ortho;

@@ -9,9 +9,8 @@
 // `cad2d` renders the drafting ribbon exactly as before; `bim` renders a
 // Revit-style ribbon band from the `ribbon` slot; `concept` renders a
 // SketchUp-style menubar/tool column/tray from the same slot registry;
-// `mechanical` remains an **explicit placeholder** whose native interface is not
-// wired, so its chrome falls back to the drafting profile (the most complete
-// one) while a notice names the requested domain. No commands are added by a
+// `mechanical` renders a SolidWorks-style CommandManager ribbon and a left
+// FeatureManager / PropertyManager tray. No commands are added by a
 // profile; enablement stays a document-capability fact (ADR-0053 D5).
 
 import type { Invoke } from '../host/invoke.ts';
@@ -95,7 +94,12 @@ export const DOMAIN_PROFILES: Readonly<Record<DomainId, DomainProfile>> = Object
   // tray. It has no command line: its value entry is the Measurements surface
   // in the status bar, as in the reference application.
   concept: profile('concept', true, false, false, 'menu', 'right'),
-  mechanical: profile('mechanical', false, false, true),
+  // Mechanical is wired as a SolidWorks-style CommandManager ribbon plus a
+  // left-hand FeatureManager / PropertyManager tray, because SolidWorks docks
+  // both on the left. It has no command line: typed values enter through the
+  // status bar's tool-parameter controls (the same host-projected parameters),
+  // as in the reference's PropertyManager fields.
+  mechanical: profile('mechanical', true, false, false, 'domain-ribbon', 'left'),
 });
 
 /** A `cad_status.applicationDomain` value, but only for a known token. */

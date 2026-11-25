@@ -63,6 +63,7 @@ mod document_archive;
 mod domain;
 mod fonts;
 mod input;
+mod mechanical;
 mod open;
 mod orbit_sensitivity;
 mod p4;
@@ -85,6 +86,7 @@ pub use command_log::{
     CommandLogEntry, CommandLogKind, CommandLogMeasurement, CommandLogPoint, COMMAND_LOG_CAPACITY,
 };
 pub(crate) use document_archive::sha256_hex;
+pub use mechanical::{MechanicalTree, MechanicalTreeRow, MECHANICAL_TREE_MAX_ROWS};
 pub use open::PathOpenOutcome;
 pub use param::{ParamList, ParamListRow};
 pub use recent::{

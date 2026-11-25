@@ -15,6 +15,9 @@ use crate::action_recorder::{
     ActionMacroSummary, ActionRecorderSnapshot, ACTION_RECORDER_UNSUPPORTED,
 };
 use crate::bim::{query_response, BimQueryResponse};
+use crate::mechanical::{
+    MechanicalTreeResponse, MechanicalTreeRow, MECHANICAL_TREE_KIND, MECHANICAL_TREE_UNSUPPORTED,
+};
 use crate::param::{ParamListResponse, ParamListRow, PARAM_LIST_KIND, PARAM_LIST_UNSUPPORTED};
 
 fn bim_request(offset: usize, limit: usize) -> HostReadRequest {
@@ -208,6 +211,60 @@ fn the_action_recorder_kind_round_trips_and_has_its_own_no_seam_word() {
         .expect_err("no seam installed");
     assert_eq!(error, ACTION_RECORDER_UNSUPPORTED);
     assert_eq!(error, "unsupported-runtime: action-recorder");
+    assert_ne!(error, BIM_UNSUPPORTED);
+    assert_ne!(error, PARAM_LIST_UNSUPPORTED);
+}
+
+#[test]
+fn the_mechanical_tree_kind_round_trips_and_has_its_own_no_seam_word() {
+    let request = HostReadRequest::MechanicalTree;
+    assert_eq!(request.kind(), MECHANICAL_TREE_KIND);
+    assert_eq!(MECHANICAL_TREE_KIND, "mechanicalTree");
+    let value = serde_json::to_value(&request).expect("serialize");
+    assert_eq!(value, serde_json::json!({ "kind": MECHANICAL_TREE_KIND }));
+    let decoded: HostReadRequest = serde_json::from_value(value).expect("decode");
+    assert_eq!(decoded, request);
+
+    let answer = HostReadAnswer::MechanicalTree(MechanicalTreeResponse {
+        revision: 4,
+        rows: vec![
+            MechanicalTreeRow {
+                kind: "feature".into(),
+                id: 7,
+                token: "extrude".into(),
+                status: "schema_only".into(),
+                order: Some(0),
+                inputs: 1,
+                parameters: 2,
+            },
+            MechanicalTreeRow {
+                kind: "body".into(),
+                id: 9,
+                token: "solid".into(),
+                status: "ready".into(),
+                order: None,
+                inputs: 0,
+                parameters: 0,
+            },
+        ],
+        total: 2,
+        truncated: false,
+    });
+    let value = serde_json::to_value(&answer).expect("serialize");
+    assert_eq!(value["kind"], MECHANICAL_TREE_KIND);
+    assert_eq!(value["rows"][0]["status"], "schema_only");
+    assert_eq!(value["rows"][0]["order"], 0);
+    assert_eq!(value["rows"][1]["order"], serde_json::Value::Null);
+    assert_eq!(value["rows"][1]["token"], "solid");
+    assert_eq!(value["truncated"], false);
+    let decoded: HostReadAnswer = serde_json::from_value(value).expect("decode");
+    assert_eq!(decoded, answer);
+
+    let error = HostReadSeam::default()
+        .read(&HostReadRequest::MechanicalTree)
+        .expect_err("no seam installed");
+    assert_eq!(error, MECHANICAL_TREE_UNSUPPORTED);
+    assert_eq!(error, "unsupported-runtime: mechanicalTree");
     assert_ne!(error, BIM_UNSUPPORTED);
     assert_ne!(error, PARAM_LIST_UNSUPPORTED);
 }

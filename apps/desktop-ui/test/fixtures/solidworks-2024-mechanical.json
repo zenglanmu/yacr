@@ -1,0 +1,89 @@
+{
+  "note": "Preliminary mechanical-domain structure. SolidWorks' CommandManager is contextual; this fixture pins the fixed subset this build models (tabs/panels/tray/pending set), not the whole reference product.",
+  "ribbonOrder": [
+    "mechanical.file",
+    "mechanical.sketch",
+    "mechanical.features",
+    "mechanical.assembly",
+    "mechanical.drawing",
+    "mechanical.evaluate",
+    "mechanical.view",
+    "mechanical.options"
+  ],
+  "tabs": {
+    "mechanical.file": [
+      "mechanical.file.actions",
+      "domain"
+    ],
+    "mechanical.sketch": [
+      "mechanical.sketch.draw",
+      "mechanical.sketch.modify",
+      "mechanical.sketch.relations"
+    ],
+    "mechanical.features": [
+      "mechanical.feature.base",
+      "mechanical.feature.cut",
+      "mechanical.feature.fillet",
+      "mechanical.feature.pattern",
+      "mechanical.feature.reference"
+    ],
+    "mechanical.assembly": [
+      "mechanical.assembly.components",
+      "mechanical.assembly.mates",
+      "mechanical.assembly.move"
+    ],
+    "mechanical.drawing": [
+      "mechanical.drawing.views",
+      "mechanical.drawing.annotate"
+    ],
+    "mechanical.evaluate": [
+      "mechanical.evaluate.mass",
+      "mechanical.evaluate.measure",
+      "mechanical.evaluate.check"
+    ],
+    "mechanical.view": [
+      "mechanical.view.display",
+      "mechanical.view.standard",
+      "mechanical.view.window"
+    ],
+    "mechanical.options": [
+      "mechanical.options.app",
+      "mechanical.options.references",
+      "mechanical.options.inquiry"
+    ]
+  },
+  "tray": [
+    "mechanical.tree",
+    "mechanical.properties",
+    "mechanical.configurations",
+    "mechanical.instructor"
+  ],
+  "pendingTools": [
+    "mechanical.slot",
+    "mechanical.smart_dimension",
+    "mechanical.add_relation",
+    "mechanical.pierce",
+    "mechanical.revolve",
+    "mechanical.sweep",
+    "mechanical.loft",
+    "mechanical.thicken",
+    "mechanical.extrude_cut",
+    "mechanical.filletedge",
+    "mechanical.mirror3d",
+    "mechanical.datum_plane",
+    "mechanical.datum_axis",
+    "mechanical.insert_component",
+    "mechanical.new_part",
+    "mechanical.mate",
+    "mechanical.interference",
+    "mechanical.explode",
+    "mechanical.model_view",
+    "mechanical.projected_view",
+    "mechanical.standard_3_view",
+    "mechanical.section_props",
+    "mechanical.interference_check",
+    "mechanical.draft_check",
+    "mechanical.material",
+    "mechanical.appearance"
+  ]
+}

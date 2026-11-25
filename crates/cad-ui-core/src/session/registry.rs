@@ -167,6 +167,12 @@ macro_rules! cad_wire_registry {
             // fields) over the same seam as the BIM query; a carrier with no lane
             // answers its own `unsupported-runtime: paramList` refusal.
             @row(shared, reads, NoArgs, cad_param_list, { }, $crate::param::ParamListResponse, { $crate::session::host_read::param_list(reads) })
+            // The mechanical FeatureManager tree (ADR-0053 mechanical stage): the
+            // mechanical profile's left tray reads it. One request-carrying read
+            // (`kind: "mechanicalTree"`, no fields) over the same seam; a carrier
+            // with no lane answers its own `unsupported-runtime: mechanicalTree`
+            // refusal. Not a drawing command: absent from `cad_commands`.
+            @row(shared, reads, NoArgs, cad_mechanical_tree, { }, $crate::mechanical::MechanicalTreeResponse, { $crate::session::host_read::mechanical_tree(reads) })
             // The action-recorder state (ADR-0056): one request-carrying read
             // (`kind: "actionRecorder"`, no fields) over the same seam. A
             // carrier with no named-file bridge answers its own

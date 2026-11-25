@@ -1,11 +1,12 @@
 // The domain fallback notice.
 //
 // A file can report a domain whose **native interface** is not wired in this
-// build: the remaining placeholder (`mechanical`) and, defensively, a token this
-// build does not know (the host schema rejects those on open, but an older/newer
-// host may still send one). The chrome then renders the default
-// drafting interface — the most complete one — instead of hiding the ribbon and
-// command line behind a dead end.
+// build or, defensively, a token this build does not know (the host schema
+// rejects those on open, but an older/newer host may still send one). The chrome
+// then renders the default drafting interface — the most complete one — instead
+// of hiding the ribbon and command line behind a dead end. Today every known
+// token (`cad2d`/`bim`/`concept`/`mechanical`) is wired, so the notice is the
+// unknown-token path; `placeholder` stays the mechanism a future token reuses.
 //
 // That fallback is **presentation only**: the document, its `application_domain`
 // value and its data are unchanged. This notice is the disclosure that keeps the

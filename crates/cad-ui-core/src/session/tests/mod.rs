@@ -26,6 +26,7 @@ mod tests_hatch_arguments;
 mod tests_hover;
 mod tests_input;
 mod tests_layers;
+mod tests_mechanical;
 mod tests_native_pinch;
 mod tests_param;
 mod tests_polyline_width;

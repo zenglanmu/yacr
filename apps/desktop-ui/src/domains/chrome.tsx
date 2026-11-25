@@ -22,6 +22,7 @@ import { useDomainUi } from './ui/use-ui-layout.ts';
 // Side-effects: each wired profile registers its own slot data.
 import './bim/register.ts';
 import './concept/register.ts';
+import './mechanical/register.ts';
 
 /** The ribbon band or menubar, only when the current profile draws one. */
 export function DomainRibbon() {

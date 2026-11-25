@@ -49,6 +49,7 @@ mod layers;
 mod layout_arguments;
 mod layout_tabs;
 mod measuregeom;
+mod mechanical;
 mod mleader_arguments;
 mod open_progress;
 mod paper_commands;
@@ -101,18 +102,6 @@ use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::sync::Arc;
 // Names referenced only by intra-doc links in this module.
-use self::diagnostics::{
-    cad_error_text, camera_status, request_error_text, resource_diagnostic_text,
-    resource_keys_error, status_error,
-};
-#[allow(unused_imports)]
-use self::input::{cancel_target, plan_input, CancelTarget, PointerPress};
-use self::status::{assemble_status, cad_tool, document_capabilities};
-#[allow(unused_imports)]
-use cad_app::interaction::{InteractionRequest, SelectionMode};
-#[allow(unused_imports)]
-use cad_app::CommandId;
-
 pub use self::admission::{
     admit_layer_write, admit_orbit, admit_selected_property, admit_selected_text, admit_set_view,
     admit_setting, admit_standard_view, admit_tool_parameter, admit_tool_text, check_set_view,
@@ -178,6 +167,10 @@ pub use self::commands::{
     SHELL_SETTING_SELECTORS, SNAPUNIT_SELECTOR, SPACE_SELECTOR, UNDEFINE_SELECTOR, VIEWGO_SELECTOR,
     VIEW_SELECTOR, VPOINT_SELECTOR, ZOOM_IN_FACTOR, ZOOM_OUT_FACTOR, ZOOM_STEP_SELECTORS,
 };
+use self::diagnostics::{
+    cad_error_text, camera_status, request_error_text, resource_diagnostic_text,
+    resource_keys_error, status_error,
+};
 pub use self::directory_pick::{
     pick_directory_failed, PICK_DIRECTORY_BUSY, PICK_DIRECTORY_COMMAND, PICK_DIRECTORY_LOST,
     UNSUPPORTED_PICK_DIRECTORY,
@@ -199,6 +192,8 @@ pub use self::hatchedit::{
     invalid_hatchedit_argument_reason, needs_pattern_name_reason, parse_hatchedit_argument,
     unknown_pattern_reason, HatchEditArgumentError,
 };
+#[allow(unused_imports)]
+use self::input::{cancel_target, plan_input, CancelTarget, PointerPress};
 pub use self::input::{native_pinch_input, NativePinch, PinchViewport};
 pub use self::layers::{CadLayer, CadLayerColor, CadLayerWrite, CadLayers};
 pub use self::open_progress::{
@@ -225,6 +220,7 @@ pub use self::settings::{
     CadSettingKey, CadSettingValue, CadSettings, SETTINGS_INVALID_PLOT_FORMAT,
     SETTINGS_INVALID_VALUE, SETTINGS_UNKNOWN_KEY,
 };
+use self::status::{assemble_status, cad_tool, document_capabilities};
 pub use self::status::{
     unsupported_status, CadActiveSpace, CadBlockStatus, CadCamera, CadGroupMember, CadGroupStatus,
     CadImageClipStatus, CadImageStatus, CadImportProgress, CadLayoutTab, CadNavigation, CadPopup,
@@ -246,6 +242,10 @@ pub use self::ymodel_resources::{
     CadYmodelResource, CadYmodelResources, EMBED_RESOURCES_COMMAND, UNSUPPORTED_EMBED_RESOURCES,
     UNSUPPORTED_YMODEL, YMODEL_PREVIEW_COMMAND,
 };
+#[allow(unused_imports)]
+use cad_app::interaction::{InteractionRequest, SelectionMode};
+#[allow(unused_imports)]
+use cad_app::CommandId;
 
 /// Completions drained per poll. The queue's absolute capacity is 256, so this
 /// always frees every outstanding completion (no quota leak).

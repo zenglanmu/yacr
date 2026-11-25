@@ -4,7 +4,7 @@
 > [`docs/domain-ui-slots.md`](domain-ui-slots.md)。本文件记录**当前实现状态**与证据边界；
 > 平台/载体结论以 `docs/compatibility.md` 与 AGENTS 平台表为准。
 
-## 当前状态（2026-11-25，阶段 1–4）
+## 当前状态（2026-11-25，阶段 1–5）
 
 | 能力 | 状态 | 证据 |
 |---|---|---|
@@ -20,7 +20,8 @@
 | `concept` 参考结构 | 实现（阶段 3）：顶部菜单栏（File/Edit/View/Camera/Draw/Tools/Window/Extensions/Help）、左侧 Large Tool Set、右侧默认托盘（Window → Default tray 可隐藏/恢复）；真实命令走统一入口，未实现工具显式 pending 并给出稳定理由 | `test/concept-domain.test.ts` + `test/fixtures/sketchup-2024-concept.json`；视觉/真机 **NOT RUN** |
 | `concept` 操作逻辑 | 实现：Space=Select（取消活动工具）、官方单键 L/R/C/A/M/Q/S/F/T/O/H/Z/E/P/B/G、Shift+Z=FIT；状态栏 Measurements 复用宿主真实 `tool.params`，LINE 已支持输入长度/角度，RECTANG 宽/高，CIRCLE 半径，ROTATE 角度，MOVE 距离，SCALE 比例（0 为未设置，LINE 角度仅在长度为正时生效），其余无参数的工具显示真实步骤提示而不是假输入框。推拉、跟随、剖面、相机、材质、场景、推断/吸附锁定等宿主未实现的能力仍是具名拒绝/显式 pending | `concept-domain.test.ts` + `tests_typed_dimensions` + `docs/shortcuts.md` §3；宿主运行 **NOT VERIFIED** |
 | 域/插件 UI 插槽 | 实现（客户端）：`domains/ui/` 的 `ribbon`/`menu`/`toolbar`/`tray` 槽、域注册与插件增量 patch（功能区/菜单/工具组/托盘可扩展，命令仍过共享准入）。公开插件面 `@yacr/plugin-api` 的 `api.ui.register` 已发布：声明式贡献、字面标签、`deactivate` 自动卸载、client-local 无描述符行 | `concept-domain.test.ts` + `plugin-api/ui.test.ts` + 插件包 `test/ui.test.ts`；视觉 **NOT RUN** |
-| SolidWorks | 显式占位：**回退到 `cad2d` 界面**（功能区+命令行），顶部提示条命名请求的域；文档域值与数据不变 | `domains.ts` profile 标记 + `renderedDomain` / `DomainSurface` 契约 |
+| `mechanical` 参考结构 | 实现（阶段 5，初步）：SolidWorks 式域 ribbon（**文件** / 草图 / 特征 / 装配体 / 工程图 / 评估 / 视图 / 选项），**左侧** FeatureManager 设计树（读宿主 `cad_mechanical_tree` 投影）、PropertyManager、ConfigurationManager（pending）、操作提示托盘；无命令行，数值入口是状态栏真实工具参数 | `test/mechanical-domain.test.ts` + `test/fixtures/solidworks-2024-mechanical.json`；视觉/真机 **NOT RUN** |
+| FeatureManager 树读取 `cad_mechanical_tree`（`mechanicalTree` host read） | 实现：按 `tables/features.json` 的求值顺序投影特征（`schema_only`，无求值器），其后按实体 id 投影 `Body3d`（`ready` / `unavailable`）；页大小上限 1024，`total` 与 `truncated` 如实报告；无文档返回空树 | `cad-host` 投影契约 + `host_read` 往返/无 seam 拒绝 + 前端解析契约；真实窗口 **NOT VERIFIED** |
 | 每域主题持久化 `ui.theme.<domain>` | **未实现**（阶段 2） | — |
 | `DOMAIN` 命令 / 文档属性入口 | 实现：裸 `DOMAIN` 打开切换器；`DOMAIN <id>` 有文档时写 `cad_set_application_domain`，无文档时只预览；参考名只做输入别名；未知 token 按 `domain.unknown` 具名拒绝。三个 profile 把同一行放在 **File**（共享 `ribbon/domain-entry.ts` 的 `DOMAIN_PANEL`：`cad2d` 文件页、`bim` 文件页、`concept` 文件菜单），与导航坞 app 图标共用 store | `domains.test.ts` + `commands.test.ts`；文件信息面板显示只读域行 |
 | 域行（文件信息） | 实现：有文档时显示中性域名（tooltip 给参考软件名），无文档留空 | `FileInfoPalette` 契约；视觉 **NOT RUN** |
@@ -32,10 +33,9 @@
 1. **域是文档属性**：切换写 `document.json`（一个 revision、`ChangeScope.header`），不转换数据。
 2. **profile 只决定表现**：命令可用性仍由文档能力 ∩ 构建能力决定；缺能力 disabled + 稳定
    reason，不隐藏、不空成功。
-3. **占位不撒谎**：未接线的已知域（`mechanical`）与其原生工具不冒充：界面回退到
-   最成熟的 `cad2d`，并在画面上方提示“请求的域尚未接线，当前显示二维绘图界面”；文档域值与数据
-   不变。未知 token 同样回退并在提示中给出原始 token。已接线域（`bim`/`concept`）只把真实命令
-   做成可点项，未实现工具是带稳定理由的 disabled 行，不是空成功。
+3. **占位不撒谎**：四个已知域（`cad2d`/`bim`/`concept`/`mechanical`）均已接线，不再有已知域
+   回退；未实现工具是带稳定理由的 disabled/pending 行，不是空成功。未知 token（旧/新宿主）仍
+   回退到最成熟的 `cad2d`，并在画面上方提示中给出原始 token；文档域值与数据不变。
 4. **中性 token**：文件名与命令只使用 `cad2d|bim|concept|mechanical`；参考软件名只出现在
    tooltip/内部文档。
 5. **无文档只预览**：欢迎页切换不写盘、不改 `NEW` 默认。
@@ -108,6 +108,35 @@
 - **未实现**：Revit 的上下文 “修改” 选项卡（选择时出现）不建模，通用编辑命令放在“建筑→修改”面板；
   视图/图纸树/视图样板、族编辑器、工作共享与 BIM 构件内核仍未实现。
 
+## 阶段 5 已落地（2026-11-25，mechanical 初步）
+
+- **布局**：`mechanical` 的 profile 是 `ribbon: true`、`surface: 'domain-ribbon'`、
+  `commandLine: false`、`placeholder: false`、`traySide: 'left'`。顶部 `DomainRibbonBand`
+  渲染域注册的 `ribbon` 槽；左侧 `DomainTray` 承载 FeatureManager / PropertyManager /
+  ConfigurationManager（pending）/ 操作提示。命令行不渲染；数值入口是状态栏的工具参数控件
+  （`status.tool.params`），对应参考软件的 PropertyManager 数值字段，不是第二套输入框。
+- **结构**：SolidWorks 的 CommandManager 是**上下文相关**的，而本构建没有文档类型模型，因此
+  `domains/mechanical/ribbon.ts` 固定一个**初步子集**（文件 / 草图 / 特征 / 装配体 / 工程图 /
+  评估 / 视图 / 选项），由 `test/fixtures/solidworks-2024-mechanical.json` 锁定；它**不是**整个
+  参考产品的完整转录，也不复制图标/截图/手册正文。第一个选项卡是带 accent 的 **文件**，面板内含
+  `NEW/OPEN/SAVE/EXPORT/PLOT/CLOSE`、Options 与共享 `domain` 面板（应用域切换器）。
+- **真实命令**：草图（LINE/RECTANG/CIRCLE/ARC/POLYGON/ELLIPSE/SPLINE/PLINE/XLINE、TRIM/EXTEND/
+  OFFSET/MIRROR/MOVE/ROTATE/SCALE/COPY/ERASE）、特征（EXTRUDE、SUBTRACT/UNION/INTERSECT、
+  PRESSPULL、CHAMFEREDGE、ARRAYRECT/ARRAYPOLAR、HATCH）、工程图注释（DIMLINEAR/DIMALIGNED/
+  DIMRADIUS、TEXT/MTEXT、QLEADER、VPORTS）、评估（MASSPROP、DIST/AREA/MEASUREGEOM）、视图
+  （标准视图、VSCURRENT、PROJECTION、GRID、ORBIT/PAN/ZOOM/FIT/VIEWBACK/SWITCH2D3D）、选项
+  （Options/Parameters/Properties/File info、LAYER、DIMSTYLE、STATUS/AUDIT/PURGE）全部走
+  `runItem` → 共享准入；不新增派发通路。
+- **原子读取 API**：新增 `cad_mechanical_tree`（`kind: "mechanicalTree"`，无参数）host read。
+  `cad-host` 的投影只读 `tables/features.json` 与 `Body3d` 行，不评估特征、不重算网格、不复制
+  B-rep；特征行状态固定为 `schema_only`（P2 只有 schema，`evaluate_feature` 仍是
+  `rel.not_implemented`），实体行报 `ready`/`unavailable` 与拓扑 token。结果按 1024 行截断并显式
+  返回 `total`/`truncated`；无 seam 的载体按 `unsupported-runtime: mechanicalTree` 具名拒绝。
+- **诚实边界**：旋转/扫描/放样/抽壳/孔/阵列特征、拉伸切除、3D 圆角边、3D 镜像、基准面/轴、
+  草图约束/智能尺寸、装配体零部件与配合、爆炸视图、工程图视图、材质/外观都没有内核，保持
+  `RibbonPendingItem`（`mechanical.pending.*`）；ConfigurationManager 没有创建/切换 UI，保持
+  pending 面板。`MASSPROP` 仍只测闭合平面区域，不是体积/质量属性——其 hint 原文保留该边界。
+
 ## 后续阶段
 
 - 把 `scripts/ui-golden.cjs` 接入 CI（需要固定 Chromium + 字体包，当前 build 需要网络）。
@@ -122,14 +151,19 @@
   推断/吸附锁定与推拉/跟随是更大的内核工作，需要先做内核 spike。
 - 其余参考面板（参数化、数据/链接、CAD 标准、动作录制器、自定义、发送、第三方应用）
   仍无对应命令实现，继续显式 pending；后续按 rewrite 指令逐条落地后再接线。
+- `mechanical` 的后续：ConfigurationManager 的创建/切换界面、特征求值（ADR-0043 P2 仍只有
+  schema）、装配体零部件/配合、工程图视图、材质/外观；这些在实现前保持 pending，不得用
+  `cad_mechanical_tree` 的 `schema_only` 行冒充几何。
 
 ## 验证命令
 
 ```bash
 cargo test -p cad-domain -p cad-db -p cad-app -p cad-ui-core --lib --locked
+cargo test -p cad-host mechanical --locked
+cargo test -p cad-desktop-shell --test wire_goldens the_registered_command_set_equals_the_pre_migration_set --locked
 cargo check -p app-web --target wasm32-unknown-unknown --locked
 (cd apps/desktop-ui && npm test)
-(cd apps/desktop-ui && node --test test/bim-domain.test.ts test/concept-domain.test.ts)
+(cd apps/desktop-ui && node --test test/bim-domain.test.ts test/concept-domain.test.ts test/mechanical-domain.test.ts)
 python3 scripts/check-i18n.py && python3 scripts/check-file-size.py
 ```
 

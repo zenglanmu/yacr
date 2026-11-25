@@ -95,9 +95,9 @@ token 以 `domain.unknown` 具名拒绝；文件信息面板显示只读域行�
 - 操作逻辑：`ConceptShortcuts` 是唯一调用点；Space=Select（活动工具时发 `CANCEL`），
   官方单键 + `Shift+Z`=FIT，输入框/弹窗/文本步/夹点期间让出键盘。状态栏为 concept 渲染
   Measurements 框，复用宿主真实 `tool.params`；无参数时显示真实步骤提示，不伪造可输入值。
-- **未接线域回退**（用户指令，2026-11-25；阶段 4 起 `bim` 已接线，只剩 `mechanical` 与未知 token）：`bim`/`mechanical`（以及本版本不认识的 token）
-  不再隐藏功能区与命令行，而是回退到 `cad2d` 这一最成熟界面；`DomainSurface` 顶部提示条命名
-  请求的域，文档的 `application_domain` 与数据不变。`renderedDomain()` 是唯一回退判定，
+- **未接线域回退**（用户指令，2026-11-25；阶段 5 起四个已知域全部接线，回退只剩未知 token）：
+  未接线的已知域与不认识的 token 不再隐藏功能区与命令行，而是回退到 `cad2d` 这一最成熟界面；
+  `DomainSurface` 顶部提示条命名请求的域/token，文档的 `application_domain` 与数据不变。`renderedDomain()` 是唯一回退判定，
   ribbon/命令行/`data-domain` 主题都读它；`currentDomain()` 仍保留请求值用于提示与切换器。
 - **仍未实现/未验证**：推拉、跟随、剖面、位置相机/漫游/环视、材质、场景/阴影/雾/照片匹配、
   推断锁定与吸附锁定；这些保持稳定拒绝或显式 pending。真实窗口/GPU/像素、Windows/macOS/
@@ -129,6 +129,28 @@ token 以 `domain.unknown` 具名拒绝；文件信息面板显示只读域行�
 - **未实现/未验证**：BIM 构件内核、视图/图纸树、族编辑器、工作共享；真实窗口/GPU/像素与
   Windows/macOS/Android/Web 运行结论一律 **NOT VERIFIED**。`bim.png` golden 基线早于本界面，
   需重新生成（NOT RUN）。
+
+## 实施更新（2026-11-25，阶段 5：mechanical 初步）
+
+- `mechanical` 不再是占位：profile 为 `ribbon: true`、`surface: 'domain-ribbon'`、
+  `commandLine: false`、`placeholder: false`、`traySide: 'left'`。顶部不再挂载 AutoCAD ribbon；
+  `DomainRibbonBand` 渲染域注册的固定初步子集（文件 / 草图 / 特征 / 装配体 / 工程图 / 评估 /
+  视图 / 选项），左侧 `DomainTray` 渲染 FeatureManager 设计树 / PropertyManager /
+  ConfigurationManager（pending）/ 操作提示。命令行不渲染。
+- SolidWorks 的 CommandManager 是上下文相关的，本构建没有文档类型模型，因此
+  `test/fixtures/solidworks-2024-mechanical.json` 只锁定**本构建建模的固定子集**，不声称完整
+  转录参考产品；图标自绘、文案自有。
+- 新增一个**原子只读 API**：`cad_mechanical_tree`（host read `kind: "mechanicalTree"`，无参数）。
+  `cad-host::HostCore::mechanical_tree` 只读 `tables/features.json`（按 `order`）与 `Body3d` 行，
+  不评估特征、不重算网格、不复制 B-rep；特征行状态 `schema_only`（P2 无求值器，
+  `evaluate_feature` 仍为 `rel.not_implemented`），实体行 `ready`/`unavailable`；答案按
+  `MECHANICAL_TREE_MAX_ROWS = 1024` 截断并返回真实 `total`/`truncated`。无文档为空树，无 seam 的
+  载体按 `unsupported-runtime: mechanicalTree` 具名拒绝。
+- 真实命令仍是草图/实体/注释/评估/视图/选项里的既有 payload-free 命令，走同一 `runItem` 准入；
+  旋转/扫描/放样/抽壳/孔/阵列特征、拉伸切除、3D 圆角/镜像、基准面/轴、草图约束、装配体配合、
+  工程图视图、材质等无内核工具保持 `RibbonPendingItem`，不摆可点假按钮。
+- **未实现/未验证**：ConfigurationManager 创建/切换界面、特征求值、装配体、工程图、材质；真实
+  窗口/GPU/像素与 Windows/macOS/Android/Web 运行结论一律 **NOT VERIFIED**。
 
 ## 后果
 

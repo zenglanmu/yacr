@@ -40,6 +40,7 @@ import { mobileRibbonDomId, mobileRibbonSections, mobileRibbonSectionsFor, mobil
 import { currentDomain } from '../domains/store.ts';
 import { CONCEPT_TOOLBAR } from '../domains/concept/toolbar.ts';
 import { BIM_RIBBON_TABS } from '../domains/bim/ribbon.ts';
+import { MECHANICAL_RIBBON_TABS } from '../domains/mechanical/ribbon.ts';
 import { layoutTabsView, layoutUnsupportedTitle } from '../layout/layout-tabs.ts';
 
 /** The drawer's DOM id: the floating menu button's `aria-controls` names it. */
@@ -187,18 +188,20 @@ export function MobileRibbonDrawer({ open, onClose }: MobileRibbonDrawerProps) {
   const drawerRef = useRef<HTMLDivElement | null>(null);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   // The compact layout is the same React tree but not a second definition: the
-  // concept profile folds its registered tool groups, and the BIM profile its
-  // registered ribbon panels, into this drawer instead of the drafting tab model,
-  // so a phone never shows AutoCAD tools over a SketchUp- or Revit-domain
-  // document. BIM has no tab chips here: every registered panel is folded in
-  // panel order, which is the honest compact reduction of a ribbon whose tabs
-  // the phone cannot show side by side.
+  // concept profile folds its registered tool groups, and the BIM and mechanical
+  // profiles their registered ribbon panels, into this drawer instead of the
+  // drafting tab model, so a phone never shows AutoCAD tools over a SketchUp-,
+  // Revit- or SolidWorks-domain document. The ribbon profiles have no tab chips
+  // here: every registered panel is folded in panel order, which is the honest
+  // compact reduction of a ribbon whose tabs the phone cannot show side by side.
   const domain = currentDomain(shell.status);
   const concept = domain === 'concept';
   const bim = domain === 'bim';
+  const mechanical = domain === 'mechanical';
   const conceptTab: RibbonTab = { id: 'concept', labelKey: 'domain.name.concept', panels: [] };
   const bimTab: RibbonTab = { id: 'bim', labelKey: 'domain.name.bim', panels: [] };
-  const tab = concept ? conceptTab : bim ? bimTab : ribbonTab(shell.ribbonTab);
+  const mechanicalTab: RibbonTab = { id: 'mechanical', labelKey: 'domain.name.mechanical', panels: [] };
+  const tab = concept ? conceptTab : bim ? bimTab : mechanical ? mechanicalTab : ribbonTab(shell.ribbonTab);
   // The compact chrome keeps one control (the floating menu button), so the open
   // drawing's name lives here: the same label the old top strip carried, one
   // ellipsized line, with the full name in `title` for a truncated one. On the
@@ -220,13 +223,20 @@ export function MobileRibbonDrawer({ open, onClose }: MobileRibbonDrawerProps) {
         panels: entry.panels,
       }, false));
     }
+    if (mechanical) {
+      return MECHANICAL_RIBBON_TABS.flatMap(entry => mobileRibbonSectionsFor({
+        id: `mechanical.mobile.${entry.id}`,
+        labelKey: entry.labelKey,
+        panels: entry.panels,
+      }, false));
+    }
     if (!concept) return mobileRibbonSections(shell.ribbonTab, false);
     return CONCEPT_TOOLBAR.flatMap(group => mobileRibbonSectionsFor({
       id: `concept.mobile.${group.id}`,
       labelKey: 'domain.name.concept',
       panels: [group],
     }, false));
-  }, [bim, concept, shell.ribbonTab]);
+  }, [bim, concept, mechanical, shell.ribbonTab]);
 
   // Escape closes the drawer and nothing else: the shell's global handler is
   // left alone (it also clears history/diagnostics on Escape, which is harmless

@@ -24,8 +24,8 @@
 //!
 //! # Adding a request kind
 //!
-//! Today [`HostReadRequest`] has three variants: `bimQuery`, `paramList` and
-//! `actionRecorder`. Each
+//! Today [`HostReadRequest`] has four variants: `bimQuery`, `paramList`,
+//! `mechanicalTree` and `actionRecorder`. Each
 //! `kind` is spelled once, in its module's constant (`BIM_QUERY_KIND`,
 //! `PARAM_LIST_KIND`); the serialized tag and the decoder read that constant, and
 //! a test pins them together.
@@ -54,6 +54,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::action_recorder::{ActionRecorderSnapshot, ACTION_RECORDER_UNSUPPORTED};
 use crate::bim::{BimFilterWire, BimQueryResponse, BIM_DEFAULT_LIMIT, BIM_UNSUPPORTED};
+use crate::mechanical::{
+    MechanicalTreeResponse, MECHANICAL_TREE_KIND, MECHANICAL_TREE_UNSUPPORTED,
+};
 use crate::param::{ParamListResponse, PARAM_LIST_KIND, PARAM_LIST_UNSUPPORTED};
 
 /// The wire spelling of the BIM request kind.
@@ -93,6 +96,9 @@ pub enum HostReadRequest {
     /// `kind: "paramList"` — the document-level parameter list under the active
     /// configuration (ADR-0043 P1). No fields.
     ParamList,
+    /// `kind: "mechanicalTree"` — the mechanical profile's bounded FeatureManager
+    /// tree (features in evaluation order, then bodies). No fields.
+    MechanicalTree,
     /// `kind: "actionRecorder"` — the session's recorder state and its visible
     /// macros (ADR-0056). No fields.
     ActionRecorder,
@@ -104,6 +110,7 @@ impl HostReadRequest {
         match self {
             Self::BimQuery { .. } => BIM_QUERY_KIND,
             Self::ParamList => PARAM_LIST_KIND,
+            Self::MechanicalTree => MECHANICAL_TREE_KIND,
             Self::ActionRecorder => ACTION_RECORDER_KIND,
         }
     }
@@ -122,6 +129,8 @@ pub enum HostReadAnswer {
     BimQuery(BimQueryResponse),
     /// `kind: "paramList"` — the document-level parameter list.
     ParamList(ParamListResponse),
+    /// `kind: "mechanicalTree"` — the bounded FeatureManager tree.
+    MechanicalTree(MechanicalTreeResponse),
     /// `kind: "actionRecorder"` — the recorder state and visible macros.
     ActionRecorder(ActionRecorderSnapshot),
 }
@@ -148,6 +157,11 @@ impl Serialize for HostReadRequest {
             Self::ParamList => {
                 let mut state = serializer.serialize_struct("HostReadRequest", 1)?;
                 state.serialize_field("kind", PARAM_LIST_KIND)?;
+                state.end()
+            }
+            Self::MechanicalTree => {
+                let mut state = serializer.serialize_struct("HostReadRequest", 1)?;
+                state.serialize_field("kind", MECHANICAL_TREE_KIND)?;
                 state.end()
             }
             Self::ActionRecorder => {
@@ -191,10 +205,11 @@ impl<'de> Deserialize<'de> for HostReadRequest {
                 })
             }
             PARAM_LIST_KIND => Ok(Self::ParamList),
+            MECHANICAL_TREE_KIND => Ok(Self::MechanicalTree),
             ACTION_RECORDER_KIND => Ok(Self::ActionRecorder),
             other => Err(serde::de::Error::custom(format!(
                 "{HOST_READ_UNKNOWN_KIND}: `kind` {other:?} is not one of [{BIM_QUERY_KIND:?}, \
-                 {PARAM_LIST_KIND:?}, {ACTION_RECORDER_KIND:?}]"
+                 {PARAM_LIST_KIND:?}, {MECHANICAL_TREE_KIND:?}, {ACTION_RECORDER_KIND:?}]"
             ))),
         }
     }
@@ -261,6 +276,7 @@ pub fn no_seam_refusal(request: &HostReadRequest) -> String {
     match request {
         HostReadRequest::BimQuery { .. } => BIM_UNSUPPORTED.to_string(),
         HostReadRequest::ParamList => PARAM_LIST_UNSUPPORTED.to_string(),
+        HostReadRequest::MechanicalTree => MECHANICAL_TREE_UNSUPPORTED.to_string(),
         HostReadRequest::ActionRecorder => ACTION_RECORDER_UNSUPPORTED.to_string(),
     }
 }

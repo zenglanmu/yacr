@@ -136,7 +136,7 @@ test('every label, title and pending sentence resolves in both catalogs', async 
   }
 });
 
-test('the BIM profile is wired as a domain ribbon and mechanical stays the only placeholder', () => {
+test('the BIM profile is wired as a domain ribbon and no profile is a placeholder', () => {
   assert.deepEqual(
     {
       ribbon: DOMAIN_PROFILES.bim.ribbon,
@@ -147,7 +147,7 @@ test('the BIM profile is wired as a domain ribbon and mechanical stays the only 
     { ribbon: true, surface: 'domain-ribbon', commandLine: false, placeholder: false },
   );
   assert.equal(DOMAIN_PROFILES.bim.traySide, 'left', 'Revit docks its palettes on the left');
-  assert.equal(DOMAIN_PROFILES.mechanical.placeholder, true);
+  assert.equal(DOMAIN_PROFILES.mechanical.placeholder, false);
 });
 
 test('the registry stores the registered BIM ribbon and a patch appends panels', () => {

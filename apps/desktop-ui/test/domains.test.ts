@@ -34,6 +34,7 @@ import { RIBBON_TABS } from '../src/ribbon/ribbon-model.ts';
 import { SHELL_ACTIONS } from '../src/ribbon/actions.ts';
 import { BIM_RIBBON_TABS } from '../src/domains/bim/ribbon.ts';
 import { CONCEPT_MENUS } from '../src/domains/concept/menus.ts';
+import { MECHANICAL_RIBBON_TABS } from '../src/domains/mechanical/ribbon.ts';
 
 test('a status token is read verbatim and anything else stays drafting', () => {
   for (const id of DOMAIN_IDS) assert.equal(normalizeDomain(id), id);
@@ -45,7 +46,7 @@ test('a status token is read verbatim and anything else stays drafting', () => {
   assert.equal(domainOf(null), DEFAULT_DOMAIN);
 });
 
-test('drafting, BIM and concept are wired; mechanical stays an explicit placeholder', () => {
+test('all four domains are wired profiles; none is a placeholder', () => {
   assert.deepEqual([...DOMAIN_IDS], ['cad2d', 'bim', 'concept', 'mechanical']);
   for (const id of DOMAIN_IDS) assert.equal(DOMAIN_PROFILES[id].id, id);
   assert.deepEqual(
@@ -84,12 +85,21 @@ test('drafting, BIM and concept are wired; mechanical stays an explicit placehol
     { ribbon: true, surface: 'domain-ribbon', commandLine: false, placeholder: false },
   );
   assert.equal(DOMAIN_PROFILES.bim.traySide, 'left');
-  for (const id of ['mechanical']) {
-    const profile = DOMAIN_PROFILES[id];
-    assert.equal(profile.ribbon, false, `${id} must not show the drafting ribbon`);
-    assert.equal(profile.surface, 'ribbon');
-    assert.equal(profile.commandLine, false, `${id} must not show the drafting command line`);
-    assert.equal(profile.placeholder, true);
+  // Mechanical is a SolidWorks-style CommandManager ribbon plus a left-hand
+  // FeatureManager/PropertyManager tray, and no command line (values enter
+  // through the status bar's tool-parameter controls, as in the reference).
+  assert.deepEqual(
+    {
+      ribbon: DOMAIN_PROFILES.mechanical.ribbon,
+      surface: DOMAIN_PROFILES.mechanical.surface,
+      commandLine: DOMAIN_PROFILES.mechanical.commandLine,
+      placeholder: DOMAIN_PROFILES.mechanical.placeholder,
+    },
+    { ribbon: true, surface: 'domain-ribbon', commandLine: false, placeholder: false },
+  );
+  assert.equal(DOMAIN_PROFILES.mechanical.traySide, 'left', 'SolidWorks docks its tree on the left');
+  for (const id of DOMAIN_IDS) {
+    assert.equal(DOMAIN_PROFILES[id].placeholder, false, `${id} must be a wired profile`);
   }
   assert.equal(domainProfile({ applicationDomain: 'bim' }).id, 'bim');
 });
@@ -121,25 +131,25 @@ test('the DOMAIN word opens the switcher or carries one domain token', () => {
   assert.equal(domainCommand(null), null);
 });
 
-test('an unwired or unknown domain falls back to the drafting interface', () => {
+test('every known domain renders its own profile; an unknown token falls back', () => {
   resetDomainStore();
-  // BIM and concept are wired: the chrome renders their own profiles.
-  assert.equal(renderedDomain({ documentLabel: 'a.rvt', applicationDomain: 'bim' }), 'bim');
-  assert.equal(renderedDomain({ documentLabel: 'a.skp', applicationDomain: 'concept' }), 'concept');
-  // Known but not wired: mechanical is a placeholder, so the chrome renders the
-  // default (drafting) interface while the document keeps its value.
-  assert.equal(renderedDomain({ documentLabel: 'a.sldprt', applicationDomain: 'mechanical' }), 'cad2d');
+  for (const id of DOMAIN_IDS) {
+    assert.equal(
+      renderedDomain({ documentLabel: `a.${id}`, applicationDomain: id }),
+      id,
+      `${id} is wired and renders itself`,
+    );
+  }
   // Unknown token: normalise to drafting and name the token for the notice.
   assert.equal(unknownDomainToken({ applicationDomain: 'manufacturing' }), 'manufacturing');
   assert.equal(unknownDomainToken({ applicationDomain: 'bim' }), null);
   assert.equal(unknownDomainToken({}), null);
   assert.equal(renderedDomain({ documentLabel: 'a.x', applicationDomain: 'manufacturing' }), 'cad2d');
-  // A no-document preview of a wired domain renders its own profile; a preview
-  // of the remaining placeholder still falls back.
-  previewDomain('bim');
-  assert.equal(renderedDomain(null), 'bim');
-  previewDomain('mechanical');
-  assert.equal(renderedDomain(null), 'cad2d');
+  // A no-document preview of any wired domain renders its own profile.
+  for (const id of DOMAIN_IDS) {
+    previewDomain(id);
+    assert.equal(renderedDomain(null), id);
+  }
   clearPreviewDomain();
 });
 
@@ -227,6 +237,7 @@ test('every profile puts the domain switcher under File, one row each', () => {
     { name: 'cad2d', tabs: RIBBON_TABS },
     { name: 'bim', tabs: BIM_RIBBON_TABS },
     { name: 'concept', tabs: CONCEPT_MENUS },
+    { name: 'mechanical', tabs: MECHANICAL_RIBBON_TABS },
   ];
   for (const { name, tabs } of profiles) {
     const file = tabs.find(tab => tab.panels.some(panel => panel.id === 'domain'));

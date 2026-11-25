@@ -3,8 +3,9 @@
 //! [`CadSession::host_read`] is the one place a host — native or wasm — turns a
 //! [`HostReadRequest`] into a [`HostReadAnswer`] on the thread that owns the
 //! `!Send` document. Today the kinds are a BIM query (backend rules in
-//! `cad_query::bim`) and the document-level parameter list (ADR-0043 P1); this
-//! module only routes, never filters or counts.
+//! `cad_query::bim`), the document-level parameter list (ADR-0043 P1), the
+//! mechanical FeatureManager tree and the action-recorder state; this module only
+//! routes, never filters or counts.
 //!
 //! Desktop carriers do not call the session directly: the registry row goes
 //! through [`HostReads`], which [`super::wire::QueueReads`] forwards to the host's
@@ -26,6 +27,7 @@ use crate::bim::{BimFilterWire, BimQueryRequest, BimQueryResponse};
 use crate::host_read::{
     HostReadAnswer, HostReadHost, HostReadRequest, HostReadSeam, HostReads, HOST_READ_UNKNOWN_KIND,
 };
+use crate::mechanical::MechanicalTreeResponse;
 use crate::param::ParamListResponse;
 
 use super::wire::QueueReads;
@@ -46,6 +48,9 @@ impl CadSession {
                 &BimQueryRequest::new(filter.clone(), *offset, *limit),
             )?)),
             HostReadRequest::ParamList => Ok(HostReadAnswer::ParamList(self.param_list()?)),
+            HostReadRequest::MechanicalTree => {
+                Ok(HostReadAnswer::MechanicalTree(self.mechanical_tree()?))
+            }
             HostReadRequest::ActionRecorder => {
                 Ok(HostReadAnswer::ActionRecorder(self.action_recorder()?))
             }
@@ -90,7 +95,9 @@ pub fn bim_query(
         limit,
     })? {
         HostReadAnswer::BimQuery(response) => Ok(response),
-        HostReadAnswer::ParamList(_) | HostReadAnswer::ActionRecorder(_) => Err(format!(
+        HostReadAnswer::ParamList(_)
+        | HostReadAnswer::MechanicalTree(_)
+        | HostReadAnswer::ActionRecorder(_) => Err(format!(
             "{HOST_READ_UNKNOWN_KIND}: the host answered a different kind to a BIM query"
         )),
     }
@@ -105,7 +112,9 @@ pub fn bim_query(
 pub fn param_list(reads: &dyn HostReads) -> Result<ParamListResponse, String> {
     match reads.host_read(&HostReadRequest::ParamList)? {
         HostReadAnswer::ParamList(response) => Ok(response),
-        HostReadAnswer::BimQuery(_) | HostReadAnswer::ActionRecorder(_) => Err(format!(
+        HostReadAnswer::BimQuery(_)
+        | HostReadAnswer::MechanicalTree(_)
+        | HostReadAnswer::ActionRecorder(_) => Err(format!(
             "{HOST_READ_UNKNOWN_KIND}: the host answered a different kind to a parameter list"
         )),
     }
@@ -120,8 +129,28 @@ pub fn param_list(reads: &dyn HostReads) -> Result<ParamListResponse, String> {
 pub fn action_recorder(reads: &dyn HostReads) -> Result<ActionRecorderSnapshot, String> {
     match reads.host_read(&HostReadRequest::ActionRecorder)? {
         HostReadAnswer::ActionRecorder(response) => Ok(response),
-        HostReadAnswer::BimQuery(_) | HostReadAnswer::ParamList(_) => Err(format!(
+        HostReadAnswer::BimQuery(_)
+        | HostReadAnswer::ParamList(_)
+        | HostReadAnswer::MechanicalTree(_) => Err(format!(
             "{HOST_READ_UNKNOWN_KIND}: the host answered a different kind to an action-recorder read"
+        )),
+    }
+}
+
+/// `cad_mechanical_tree`: the mechanical profile's bounded FeatureManager tree.
+///
+/// One request-carrying read over the shared seam; the session's handler is
+/// [`CadSession::mechanical_tree`]. A carrier without a tree lane answers its own
+/// `unsupported-runtime: mechanicalTree` refusal, never an empty tree. A host
+/// that answers a different kind is a transport fault and is refused by the same
+/// marker as an unknown request kind.
+pub fn mechanical_tree(reads: &dyn HostReads) -> Result<MechanicalTreeResponse, String> {
+    match reads.host_read(&HostReadRequest::MechanicalTree)? {
+        HostReadAnswer::MechanicalTree(response) => Ok(response),
+        HostReadAnswer::BimQuery(_)
+        | HostReadAnswer::ParamList(_)
+        | HostReadAnswer::ActionRecorder(_) => Err(format!(
+            "{HOST_READ_UNKNOWN_KIND}: the host answered a different kind to a mechanical tree"
         )),
     }
 }

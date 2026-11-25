@@ -13,11 +13,14 @@
 //   * Styles hosts the one real appearance switch (the host theme);
 //   * Tags opens the existing Tags/Layers palette (`LAYER`), which owns the
 //     list and the writes;
+//   * the mechanical tree reads the host's `cad_mechanical_tree` projection
+//     (features then bodies) and never derives geometry itself;
 //   * Instructor names the active tool and its real next step;
 //   * `pending` names the missing panel instead of drawing an empty one.
-import React, { useSyncExternalStore, useState } from 'react';
+import React, { useEffect, useRef, useSyncExternalStore, useState } from 'react';
 import { useI18n, useShell } from '../../context.ts';
 import { Icon } from '../../icons.tsx';
+import { invoke } from '../../host/invoke.ts';
 import { blocksOf } from '../../cad/cad-status.ts';
 import { toolLabelKey } from '../../commands/commands.ts';
 import { toolStepPromptKey } from '../../cad/cad.ts';
@@ -26,6 +29,8 @@ import { ThemeToggle } from '../../components/ThemeToggle.tsx';
 import { BIM_ACTION } from '../../ribbon/bim-panel.ts';
 import { currentDomain, domainStoreSnapshot, subscribeDomainStore, toggleTray } from '../store.ts';
 import { useDomainUi } from './use-ui-layout.ts';
+import { bodyKindKey, featureOperationKey, mechanicalStatusKey, readMechanicalTree } from '../mechanical/tree.ts';
+import type { MechanicalTreeAnswer } from '../mechanical/tree.ts';
 import type { TrayPanel } from './slots.ts';
 
 function EntityInfoBody() {
@@ -132,6 +137,101 @@ function BimQueryBody() {
   );
 }
 
+/** One tree read's state; `tree` is kept across a failed refresh so the last
+ * good projection stays visible (never silently blanked). */
+type TreeState =
+  | { readonly phase: 'ready'; readonly tree: MechanicalTreeAnswer | null; readonly reason: '' }
+  | { readonly phase: 'loading'; readonly tree: MechanicalTreeAnswer | null; readonly reason: '' }
+  | { readonly phase: 'error'; readonly tree: MechanicalTreeAnswer | null; readonly reason: string };
+
+/**
+ * The FeatureManager design tree.
+ *
+ * It reads the host's `cad_mechanical_tree` projection — never the drawing
+ * itself. A row is labelled from the catalog when the build knows its token and
+ * shown raw otherwise; a feature's `schema_only` status is the honest statement
+ * that this build stores feature definitions but has no evaluator (ADR-0043 P2).
+ * The read refreshes when the document changes, when the entity count changes
+ * and after each command, plus the explicit refresh button.
+ */
+function MechanicalTreeBody() {
+  const { t } = useI18n();
+  const shell = useShell();
+  const documentLabel = shell.status?.documentLabel ?? null;
+  const entityCount = shell.status?.entityCount ?? null;
+  const commandCount = shell.status?.commandLog?.length ?? 0;
+  const [nonce, setNonce] = useState(0);
+  const [state, setState] = useState<TreeState>({ phase: 'ready', tree: null, reason: '' });
+  // A tree belongs to one document: a refresh keeps the last good projection,
+  // but another document must not show the previous one's rows while loading.
+  const labelRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const sameDocument = labelRef.current === documentLabel;
+    labelRef.current = documentLabel;
+    if (documentLabel === null) {
+      setState({ phase: 'ready', tree: null, reason: '' });
+      return undefined;
+    }
+    let live = true;
+    setState(previous => ({
+      phase: 'loading',
+      tree: sameDocument ? previous.tree : null,
+      reason: '',
+    }));
+    readMechanicalTree(invoke).then(tree => {
+      if (live) setState({ phase: 'ready', tree, reason: '' });
+    }).catch((error: unknown) => {
+      if (!live) return;
+      const reason = error instanceof Error ? error.message : String(error);
+      setState(previous => ({ phase: 'error', tree: previous.tree, reason }));
+    });
+    return () => { live = false; };
+  }, [documentLabel, entityCount, commandCount, nonce]);
+
+  if (documentLabel === null) {
+    return <p className="concept-panel__hint">{t('mechanical.tree.empty')}</p>;
+  }
+
+  const tree = state.tree;
+  const rows = tree?.rows ?? [];
+  return (
+    <>
+      <div className="concept-panel__styles">
+        <button type="button" className="concept-panel__action" onClick={() => setNonce(value => value + 1)}>
+          {t('mechanical.tree.refresh')}
+        </button>
+      </div>
+      {state.phase === 'error' ? (
+        <p className="concept-panel__hint" role="alert">{t('mechanical.tree.error', { reason: state.reason })}</p>
+      ) : null}
+      {rows.length === 0 ? (
+        <p className="concept-panel__hint">
+          {state.phase === 'loading' ? t('mechanical.tree.loading') : t('mechanical.tree.no_rows')}
+        </p>
+      ) : (
+        <ul className="concept-rows">
+          {rows.map(row => {
+            const labelKey = row.kind === 'feature' ? featureOperationKey(row.token) : row.kind === 'body' ? bodyKindKey(row.token) : null;
+            const statusKey = mechanicalStatusKey(row.status);
+            return (
+              <li key={`${row.kind}:${row.id}`}>
+                <span className="concept-rows__label">{labelKey === null ? row.token : t(labelKey)}</span>
+                <span className="concept-rows__value" title={statusKey === null ? row.status : undefined}>
+                  {statusKey === null ? row.status : t(statusKey)}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {tree !== null && tree.total > rows.length ? (
+        <p className="concept-panel__hint">{t('mechanical.tree.truncated', { shown: rows.length, total: tree.total })}</p>
+      ) : null}
+    </>
+  );
+}
+
 function PendingBody({ panel }: { readonly panel: TrayPanel }) {
   const { t } = useI18n();
   return <p className="concept-panel__hint">{panel.pendingText ?? t(panel.pendingKey ?? 'concept.pending.panel')}</p>;
@@ -145,6 +245,7 @@ function Body({ panel }: { readonly panel: TrayPanel }) {
     case 'tags': return <TagsBody />;
     case 'instructor': return <InstructorBody />;
     case 'bimQuery': return <BimQueryBody />;
+    case 'mechanicalTree': return <MechanicalTreeBody />;
     case 'scenes':
     case 'pending':
     default: return <PendingBody panel={panel} />;
