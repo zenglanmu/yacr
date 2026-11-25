@@ -22,6 +22,7 @@ import { toolLabelKey } from '../../commands/commands.ts';
 import { toolStepPromptKey } from '../../cad/cad.ts';
 import { propertyRowLabel } from '../../properties/property-labels.ts';
 import { ThemeToggle } from '../../components/ThemeToggle.tsx';
+import { BIM_ACTION } from '../../ribbon/bim-panel.ts';
 import { currentDomain } from '../store.ts';
 import { useDomainUi } from './use-ui-layout.ts';
 import type { TrayPanel } from './slots.ts';
@@ -117,6 +118,19 @@ function InstructorBody() {
   );
 }
 
+function BimQueryBody() {
+  const { t } = useI18n();
+  const shell = useShell();
+  return (
+    <>
+      <p className="concept-panel__hint">{t('bim.tray.query_hint')}</p>
+      <button type="button" className="concept-panel__action" onClick={() => shell.runAction(BIM_ACTION)}>
+        {t('bim.panel')}
+      </button>
+    </>
+  );
+}
+
 function PendingBody({ panel }: { readonly panel: TrayPanel }) {
   const { t } = useI18n();
   return <p className="concept-panel__hint">{panel.pendingText ?? t(panel.pendingKey ?? 'concept.pending.panel')}</p>;
@@ -129,6 +143,7 @@ function Body({ panel }: { readonly panel: TrayPanel }) {
     case 'styles': return <StylesBody />;
     case 'tags': return <TagsBody />;
     case 'instructor': return <InstructorBody />;
+    case 'bimQuery': return <BimQueryBody />;
     case 'scenes':
     case 'pending':
     default: return <PendingBody panel={panel} />;
@@ -162,7 +177,7 @@ export function DomainTray() {
   const layout = useDomainUi(domain);
   if (!layout.tray || layout.tray.length === 0) return null;
   return (
-    <aside className="concept-tray" aria-label={t('concept.tray.title')}>
+    <aside className="concept-tray" aria-label={t('domain.tray_label')}>
       {layout.tray.map(panel => <Section key={panel.id} panel={panel} />)}
     </aside>
   );

@@ -258,7 +258,7 @@ interface PanelProps {
   readonly setOpenMenu: (id: string | null) => void;
 }
 
-function Panel({ panel, openMenu, setOpenMenu }: PanelProps) {
+export function RibbonPanelView({ panel, openMenu, setOpenMenu }: PanelProps) {
   const { t } = useI18n();
   const shell = useShell();
   // Palette entries are offered only where the palettes exist. On a `dom-canvas`
@@ -312,7 +312,7 @@ function Panel({ panel, openMenu, setOpenMenu }: PanelProps) {
  * reader paging the strip; one `requestAnimationFrame` re-measure catches the
  * late layout (web fonts, panel titles) that a synchronous read misses.
  */
-function useRibbonOverflow(panelsRef: React.RefObject<HTMLDivElement | null>, resetKey: string) {
+export function useRibbonOverflow(panelsRef: React.RefObject<HTMLDivElement | null>, resetKey: string) {
   const [state, setState] = useState<OverflowState>(NO_OVERFLOW);
   useEffect(() => {
     const node = panelsRef.current;
@@ -349,7 +349,7 @@ function useRibbonOverflow(panelsRef: React.RefObject<HTMLDivElement | null>, re
 }
 
 /** Page the panel strip one screen-ish step toward `direction`. */
-function pageRibbon(node: HTMLDivElement | null, direction: string) {
+export function pageRibbon(node: HTMLDivElement | null, direction: string) {
   if (!node) return;
   const left = ribbonScrollTarget(node, direction);
   // Smooth paging keeps the reader oriented; the assignment is the plain
@@ -369,7 +369,7 @@ function pageRibbon(node: HTMLDivElement | null, direction: string) {
  * `ribbonCueReserve`, which takes that width out of the scroller — so it can
  * never sit on top of a live item.
  */
-function OverflowCue({ side, onPage }: { readonly side: 'start' | 'end'; readonly onPage: () => void }) {
+export function OverflowCue({ side, onPage }: { readonly side: 'start' | 'end'; readonly onPage: () => void }) {
   const { t } = useI18n();
   const label = t(side === 'start' ? 'ribbon.scroll_left' : 'ribbon.scroll_right');
   return (
@@ -459,7 +459,7 @@ export function Ribbon() {
         >
           <div className="ribbon__panels" role="tabpanel" aria-label={tabLabel(t, tab)} ref={panelsRef}>
             {offeredPanels(tab.panels, shell.palettesAvailable).map(panel => (
-              <Panel key={panel.id} panel={panel} openMenu={openMenu} setOpenMenu={setOpenMenu} />
+              <RibbonPanelView key={panel.id} panel={panel} openMenu={openMenu} setOpenMenu={setOpenMenu} />
             ))}
           </div>
           {/* No fade: the reserve already leaves the cue standing on clean band,

@@ -6,12 +6,13 @@
 // becomes a guessed profile: a status that carries anything else reads as the
 // drafting profile, which is also the document-less default.
 //
-// `cad2d` renders the drafting ribbon exactly as before; `concept` renders a
-// SketchUp-style menubar/tool column/tray from the domain UI slot registry;
-// `bim` and `mechanical` remain **explicit placeholders** whose native interface
-// is not wired, so their chrome falls back to the drafting profile (the most
-// complete one) while a notice names the requested domain. No commands are
-// added by a profile; enablement stays a document-capability fact (ADR-0053 D5).
+// `cad2d` renders the drafting ribbon exactly as before; `bim` renders a
+// Revit-style ribbon band from the `ribbon` slot; `concept` renders a
+// SketchUp-style menubar/tool column/tray from the same slot registry;
+// `mechanical` remains an **explicit placeholder** whose native interface is not
+// wired, so its chrome falls back to the drafting profile (the most complete
+// one) while a notice names the requested domain. No commands are added by a
+// profile; enablement stays a document-capability fact (ADR-0053 D5).
 
 import type { Invoke } from '../host/invoke.ts';
 
@@ -39,10 +40,11 @@ export interface DomainProfile {
   /** Whether this profile draws the top chrome band (ribbon or menubar). */
   readonly ribbon: boolean;
   /**
-   * The top band's renderer: the drafting ribbon, or a real menu bar whose
-   * model/layout comes from the domain/plugin slot registry.
+   * The top band's renderer: the built-in drafting ribbon, the domain/plugin
+   * `ribbon` slot (tabs + panels), or a real menu bar whose model/layout comes
+   * from the same registry.
    */
-  readonly surface: 'ribbon' | 'menu';
+  readonly surface: 'ribbon' | 'menu' | 'domain-ribbon';
   /** Whether the typing command line is part of the profile. */
   readonly commandLine: boolean;
   /**
@@ -58,7 +60,7 @@ const profile = (
   ribbon: boolean,
   commandLine: boolean,
   placeholder: boolean,
-  surface: 'ribbon' | 'menu' = 'ribbon',
+  surface: 'ribbon' | 'menu' | 'domain-ribbon' = 'ribbon',
 ): DomainProfile => Object.freeze({
   id,
   labelKey: `domain.name.${id}`,
@@ -72,7 +74,10 @@ const profile = (
 /** The four profiles, frozen by token. */
 export const DOMAIN_PROFILES: Readonly<Record<DomainId, DomainProfile>> = Object.freeze({
   cad2d: profile('cad2d', true, true, false, 'ribbon'),
-  bim: profile('bim', false, false, true),
+  // BIM is wired as a Revit-style ribbon band plus a right-hand properties /
+  // browser tray. It has no command line: like Revit, the value entry points are
+  // the ribbon and the panel fields, not a typed prompt.
+  bim: profile('bim', true, false, false, 'domain-ribbon'),
   // Concept is wired as a SketchUp-style menubar + left tool column + right
   // tray. It has no command line: its value entry is the Measurements surface
   // in the status bar, as in the reference application.

@@ -39,6 +39,7 @@ import type { RibbonItem, RibbonTab } from '../ribbon/ribbon-model.ts';
 import { mobileRibbonDomId, mobileRibbonSections, mobileRibbonSectionsFor, mobileRibbonTabs, panelRefusalKey, sharedRefusal } from '../layout/mobile-ribbon.ts';
 import { currentDomain } from '../domains/store.ts';
 import { CONCEPT_TOOLBAR } from '../domains/concept/toolbar.ts';
+import { BIM_RIBBON_TABS } from '../domains/bim/ribbon.ts';
 import { layoutTabsView, layoutUnsupportedTitle } from '../layout/layout-tabs.ts';
 
 /** The drawer's DOM id: the floating menu button's `aria-controls` names it. */
@@ -186,12 +187,18 @@ export function MobileRibbonDrawer({ open, onClose }: MobileRibbonDrawerProps) {
   const drawerRef = useRef<HTMLDivElement | null>(null);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   // The compact layout is the same React tree but not a second definition: the
-  // concept profile folds its registered tool groups into this drawer instead of
-  // the drafting tab model, so a phone never shows AutoCAD tools over a
-  // SketchUp-domain document.
-  const concept = currentDomain(shell.status) === 'concept';
+  // concept profile folds its registered tool groups, and the BIM profile its
+  // registered ribbon panels, into this drawer instead of the drafting tab model,
+  // so a phone never shows AutoCAD tools over a SketchUp- or Revit-domain
+  // document. BIM has no tab chips here: every registered panel is folded in
+  // panel order, which is the honest compact reduction of a ribbon whose tabs
+  // the phone cannot show side by side.
+  const domain = currentDomain(shell.status);
+  const concept = domain === 'concept';
+  const bim = domain === 'bim';
   const conceptTab: RibbonTab = { id: 'concept', labelKey: 'domain.name.concept', panels: [] };
-  const tab = concept ? conceptTab : ribbonTab(shell.ribbonTab);
+  const bimTab: RibbonTab = { id: 'bim', labelKey: 'domain.name.bim', panels: [] };
+  const tab = concept ? conceptTab : bim ? bimTab : ribbonTab(shell.ribbonTab);
   // The compact chrome keeps one control (the floating menu button), so the open
   // drawing's name lives here: the same label the old top strip carried, one
   // ellipsized line, with the full name in `title` for a truncated one. On the
@@ -206,13 +213,20 @@ export function MobileRibbonDrawer({ open, onClose }: MobileRibbonDrawerProps) {
   // drops their toggles with the panels — the same carrier rule a `dom-canvas`
   // host uses, and the reason no button here can open a surface that is hidden.
   const sections = useMemo(() => {
+    if (bim) {
+      return BIM_RIBBON_TABS.flatMap(entry => mobileRibbonSectionsFor({
+        id: `bim.mobile.${entry.id}`,
+        labelKey: entry.labelKey,
+        panels: entry.panels,
+      }, false));
+    }
     if (!concept) return mobileRibbonSections(shell.ribbonTab, false);
     return CONCEPT_TOOLBAR.flatMap(group => mobileRibbonSectionsFor({
       id: `concept.mobile.${group.id}`,
       labelKey: 'domain.name.concept',
       panels: [group],
     }, false));
-  }, [concept, shell.ribbonTab]);
+  }, [bim, concept, shell.ribbonTab]);
 
   // Escape closes the drawer and nothing else: the shell's global handler is
   // left alone (it also clears history/diagnostics on Escape, which is harmless
@@ -318,7 +332,7 @@ export function MobileRibbonDrawer({ open, onClose }: MobileRibbonDrawerProps) {
             </span>
           ))}
         </div>
-        {mobileRibbonTabs().length > 0 && !concept ? (
+        {mobileRibbonTabs().length > 0 && !concept && !bim ? (
         <div className="mobile-drawer__tabs" role="tablist" aria-label={t('ribbon.tabs_label')}>
           {mobileRibbonTabs().map(entry => (
             <button

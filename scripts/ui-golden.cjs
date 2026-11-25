@@ -36,8 +36,8 @@ const BASELINE_DIR = join(ROOT, 'apps', 'desktop-ui', 'test', 'golden', 'ui');
 const VIEWPORT = { width: 1600, height: 1000 };
 const DOMAINS = [
   { id: 'cad2d', row: 0, label: '2D drafting (AutoCAD profile)' },
-  { id: 'bim', row: 1, label: 'BIM placeholder' },
-  { id: 'concept', row: 2, label: 'Concept placeholder' },
+  { id: 'bim', row: 1, label: 'BIM ribbon (Revit profile)' },
+  { id: 'concept', row: 2, label: 'Concept domain (SketchUp profile)' },
   { id: 'mechanical', row: 3, label: 'Mechanical placeholder' },
 ];
 // A pixel is "different" when any channel moves more than this. Anti-aliasing

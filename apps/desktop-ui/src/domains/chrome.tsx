@@ -6,8 +6,9 @@
 // region takes no space and the host's CAD partition rect is unaffected.
 //
 // A `surface: 'menu'` profile (`concept`) renders the slot model's menubar in
-// the same top row. That keeps the app's region order unchanged while the band's
-// renderer is chosen by the profile.
+// the same top row; `surface: 'domain-ribbon'` (`bim`) renders the registered
+// ribbon tabs through the same band geometry. That keeps the app's region order
+// unchanged while the band's renderer is chosen by the profile.
 import React from 'react';
 import { useShell } from '../context.ts';
 import { DOMAIN_PROFILES } from './domains.ts';
@@ -16,7 +17,10 @@ import { CommandLine } from '../components/CommandLine.tsx';
 import { Ribbon } from '../components/Ribbon.tsx';
 import { MobileCommandSurface } from '../components/MobileCommandSurface.tsx';
 import { DomainMenuBar } from './ui/DomainMenuBar.tsx';
-// Side-effect: the concept profile registers its menus, tool groups and tray.
+import { DomainRibbonBand } from './ui/DomainRibbonBand.tsx';
+import { useDomainUi } from './ui/use-ui-layout.ts';
+// Side-effects: each wired profile registers its own slot data.
+import './bim/register.ts';
 import './concept/register.ts';
 
 /** The ribbon band or menubar, only when the current profile draws one. */
@@ -25,8 +29,13 @@ export function DomainRibbon() {
   // `renderedDomain` includes the document-less preview and sends an unwired
   // profile back to drafting, so the whole top region matches the rendered
   // interface (the fallback notice names the requested domain).
-  const profile = DOMAIN_PROFILES[renderedDomain(shell.status)];
+  const domain = renderedDomain(shell.status);
+  const profile = DOMAIN_PROFILES[domain];
+  const layout = useDomainUi(domain);
   if (profile.surface === 'menu') return <DomainMenuBar />;
+  if (profile.surface === 'domain-ribbon') {
+    return layout.ribbon && layout.ribbon.length > 0 ? <DomainRibbonBand tabs={layout.ribbon} /> : null;
+  }
   if (!profile.ribbon) return null;
   return <Ribbon />;
 }

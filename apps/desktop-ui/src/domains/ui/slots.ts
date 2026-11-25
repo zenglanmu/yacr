@@ -4,6 +4,7 @@
 // The React tree has one shape, but the chrome above the drawing is assembled
 // from **named slots** rather than hard-wired regions:
 //
+//   * `ribbon`    the top ribbon band (`bim`'s Revit-style tabs and panels);
 //   * `menu`      the top menu bar (the drafting profile's ribbon collapses to
 //                 the same renderer; `concept` uses it as a real menubar);
 //   * `toolbar`   the left tool column (`concept`'s Large Tool Set);
@@ -21,7 +22,7 @@ import type { RibbonPanel, RibbonTab } from '../../ribbon/ribbon-model.ts';
 import type { DomainId } from '../domains.ts';
 
 /** The slots a domain (or plugin) can fill today. */
-export type DomainSlot = 'menu' | 'toolbar' | 'tray';
+export type DomainSlot = 'ribbon' | 'menu' | 'toolbar' | 'tray';
 
 /**
  * A default-tray panel.
@@ -38,6 +39,7 @@ export type TrayPanelKind =
   | 'tags'
   | 'scenes'
   | 'instructor'
+  | 'bimQuery'
   | 'pending';
 
 /** One tray panel, in vertical order. */
@@ -55,6 +57,12 @@ export interface TrayPanel {
 
 /** One domain's UI contribution. Every slot is optional. */
 export interface DomainUiLayout {
+  /**
+   * Top ribbon tabs (`RibbonTab` = one tab + its panels). Rendered as a real
+   * band by `DomainRibbonBand`; this is the Revit-style surface, distinct from
+   * `menu` (a dropdown menubar).
+   */
+  readonly ribbon?: readonly RibbonTab[];
   /** Top-level menus (`RibbonTab` = one trigger + its sections). */
   readonly menu?: readonly RibbonTab[];
   /** Left tool groups (`RibbonPanel` = one titled group of items). */

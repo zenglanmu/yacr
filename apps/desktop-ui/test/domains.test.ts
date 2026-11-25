@@ -37,7 +37,7 @@ test('a status token is read verbatim and anything else stays drafting', () => {
   assert.equal(domainOf(null), DEFAULT_DOMAIN);
 });
 
-test('drafting and concept are wired; bim and mechanical stay explicit placeholders', () => {
+test('drafting, BIM and concept are wired; mechanical stays an explicit placeholder', () => {
   assert.deepEqual([...DOMAIN_IDS], ['cad2d', 'bim', 'concept', 'mechanical']);
   for (const id of DOMAIN_IDS) assert.equal(DOMAIN_PROFILES[id].id, id);
   assert.deepEqual(
@@ -60,7 +60,18 @@ test('drafting and concept are wired; bim and mechanical stay explicit placehold
     },
     { ribbon: true, surface: 'menu', commandLine: false, placeholder: false },
   );
-  for (const id of ['bim', 'mechanical']) {
+  // BIM is a Revit-style ribbon band from the domain `ribbon` slot plus its
+  // right-hand tray; it is not the drafting ribbon and has no command line.
+  assert.deepEqual(
+    {
+      ribbon: DOMAIN_PROFILES.bim.ribbon,
+      surface: DOMAIN_PROFILES.bim.surface,
+      commandLine: DOMAIN_PROFILES.bim.commandLine,
+      placeholder: DOMAIN_PROFILES.bim.placeholder,
+    },
+    { ribbon: true, surface: 'domain-ribbon', commandLine: false, placeholder: false },
+  );
+  for (const id of ['mechanical']) {
     const profile = DOMAIN_PROFILES[id];
     assert.equal(profile.ribbon, false, `${id} must not show the drafting ribbon`);
     assert.equal(profile.surface, 'ribbon');
@@ -99,18 +110,22 @@ test('the DOMAIN word opens the switcher or carries one domain token', () => {
 
 test('an unwired or unknown domain falls back to the drafting interface', () => {
   resetDomainStore();
-  // Known but not wired: the profile is a placeholder, so the chrome renders the
-  // default (drafting) interface while the document keeps its value.
-  assert.equal(renderedDomain({ documentLabel: 'a.rvt', applicationDomain: 'bim' }), 'cad2d');
-  assert.equal(renderedDomain({ documentLabel: 'a.sldprt', applicationDomain: 'mechanical' }), 'cad2d');
+  // BIM and concept are wired: the chrome renders their own profiles.
+  assert.equal(renderedDomain({ documentLabel: 'a.rvt', applicationDomain: 'bim' }), 'bim');
   assert.equal(renderedDomain({ documentLabel: 'a.skp', applicationDomain: 'concept' }), 'concept');
+  // Known but not wired: mechanical is a placeholder, so the chrome renders the
+  // default (drafting) interface while the document keeps its value.
+  assert.equal(renderedDomain({ documentLabel: 'a.sldprt', applicationDomain: 'mechanical' }), 'cad2d');
   // Unknown token: normalise to drafting and name the token for the notice.
   assert.equal(unknownDomainToken({ applicationDomain: 'manufacturing' }), 'manufacturing');
   assert.equal(unknownDomainToken({ applicationDomain: 'bim' }), null);
   assert.equal(unknownDomainToken({}), null);
   assert.equal(renderedDomain({ documentLabel: 'a.x', applicationDomain: 'manufacturing' }), 'cad2d');
-  // A no-document preview of a placeholder also falls back.
+  // A no-document preview of a wired domain renders its own profile; a preview
+  // of the remaining placeholder still falls back.
   previewDomain('bim');
+  assert.equal(renderedDomain(null), 'bim');
+  previewDomain('mechanical');
   assert.equal(renderedDomain(null), 'cad2d');
   clearPreviewDomain();
 });

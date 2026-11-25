@@ -100,7 +100,7 @@ function validTrayPanel(value: unknown): value is TrayPanel {
   if (!nonEmpty(value['id']) || !nonEmpty(value['titleKey'])) return false;
   const kind = value['kind'];
   if (typeof kind !== 'string') return false;
-  const kinds = ['entityInfo', 'components', 'styles', 'tags', 'scenes', 'instructor', 'pending'];
+  const kinds = ['entityInfo', 'components', 'styles', 'tags', 'scenes', 'instructor', 'bimQuery', 'pending'];
   if (!kinds.includes(kind)) return false;
   if (value['title'] !== undefined && !nonEmpty(value['title'])) return false;
   if (value['pendingText'] !== undefined && !nonEmpty(value['pendingText'])) return false;
@@ -111,6 +111,9 @@ function validTrayPanel(value: unknown): value is TrayPanel {
 
 function validateLayout(value: unknown, label: string): DomainUiLayout {
   if (!isRecord(value)) fail(`${label} must be an object`);
+  if (value['ribbon'] !== undefined) {
+    if (!Array.isArray(value['ribbon']) || !value['ribbon'].every(validTab)) fail(`${label}.ribbon`);
+  }
   if (value['menu'] !== undefined) {
     if (!Array.isArray(value['menu']) || !value['menu'].every(validTab)) fail(`${label}.menu`);
   }
@@ -162,7 +165,7 @@ export function registerPluginUi(patch: DomainUiPatch): void {
   if (PATCHES.has(patch.id)) fail(`duplicate patch: ${patch.id}`);
   if (patch.domain !== '*' && !isKnownDomain(patch.domain)) fail(`patch.domain: ${String(patch.domain)}`);
   validateLayout(patch, `patch ${patch.id}`);
-  if (patch.menu === undefined && patch.toolbar === undefined && patch.tray === undefined) {
+  if (patch.ribbon === undefined && patch.menu === undefined && patch.toolbar === undefined && patch.tray === undefined) {
     fail(`patch ${patch.id} contributes no slot`);
   }
   PATCHES.set(patch.id, { ...patch, ...(patch.menu ? { menu: [...patch.menu] } : {}) });
@@ -230,16 +233,19 @@ function mergeTray(base: readonly TrayPanel[], patch: readonly TrayPanel[]): Tra
  */
 export function uiLayoutFor(domain: DomainId): DomainUiLayout {
   const base = DOMAINS.get(domain) ?? {};
+  let ribbon = base.ribbon ? [...base.ribbon] : undefined;
   let menu = base.menu ? [...base.menu] : undefined;
   let toolbar = base.toolbar ? [...base.toolbar] : undefined;
   let tray = base.tray ? [...base.tray] : undefined;
   for (const patch of PATCHES.values()) {
     if (patch.domain !== '*' && patch.domain !== domain) continue;
+    if (patch.ribbon) ribbon = mergeTabs(ribbon ?? [], patch.ribbon);
     if (patch.menu) menu = mergeTabs(menu ?? [], patch.menu);
     if (patch.toolbar) toolbar = mergePanels(toolbar ?? [], patch.toolbar);
     if (patch.tray) tray = mergeTray(tray ?? [], patch.tray);
   }
   return Object.freeze({
+    ...(ribbon ? { ribbon: freezeTabs(ribbon) } : {}),
     ...(menu ? { menu: freezeTabs(menu) } : {}),
     ...(toolbar ? { toolbar: freezePanels(toolbar) } : {}),
     ...(tray ? { tray: Object.freeze([...tray]) } : {}),

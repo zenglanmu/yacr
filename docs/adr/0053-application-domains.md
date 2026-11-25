@@ -95,7 +95,7 @@ token 以 `domain.unknown` 具名拒绝；文件信息面板显示只读域行�
 - 操作逻辑：`ConceptShortcuts` 是唯一调用点；Space=Select（活动工具时发 `CANCEL`），
   官方单键 + `Shift+Z`=FIT，输入框/弹窗/文本步/夹点期间让出键盘。状态栏为 concept 渲染
   Measurements 框，复用宿主真实 `tool.params`；无参数时显示真实步骤提示，不伪造可输入值。
-- **未接线域回退**（用户指令，2026-11-25）：`bim`/`mechanical`（以及本版本不认识的 token）
+- **未接线域回退**（用户指令，2026-11-25；阶段 4 起 `bim` 已接线，只剩 `mechanical` 与未知 token）：`bim`/`mechanical`（以及本版本不认识的 token）
   不再隐藏功能区与命令行，而是回退到 `cad2d` 这一最成熟界面；`DomainSurface` 顶部提示条命名
   请求的域，文档的 `application_domain` 与数据不变。`renderedDomain()` 是唯一回退判定，
   ribbon/命令行/`data-domain` 主题都读它；`currentDomain()` 仍保留请求值用于提示与切换器。
@@ -104,6 +104,28 @@ token 以 `domain.unknown` 具名拒绝；文件信息面板显示只读域行�
   Android/Web 运行结论一律 **NOT VERIFIED**；concept 的紧凑抽屉只折入工具组（无第二套菜单/托盘）。
   插件 `ui.register` 已发布；仍未实现的是插件自定义托盘 body、插件自带 locale 切换，以及
   移动端抽屉读取 `uiLayoutFor`。
+
+## 实施更新（2026-11-25，阶段 4：bim 初步）
+
+- `bim` 不再是占位：profile 为 `ribbon: true`、`surface: 'domain-ribbon'`、`commandLine: false`、
+  `placeholder: false`。顶部不再挂载 AutoCAD ribbon；`DomainRibbonBand` 渲染域注册的 `ribbon` 槽，
+  右侧 `DomainTray` 渲染属性 / 项目浏览器 / 可见性 / BIM 浏览 / 明细表 / 操作提示。命令行不渲染。
+- 槽模型从三个扩为四个：`ribbon`（`RibbonTab[]`，top ribbon band）、`menu`、`toolbar`、`tray`。
+  `ribbon` 与 `menu` 数据形状相同但渲染器不同；`cad2d` 继续使用内建 `Ribbon`，不读取槽，
+  因此插件对 `domain: '*'` 的 patch **不能**替换制图功能区。
+- 结构按 Revit 2024 转录到 `apps/desktop-ui/test/fixtures/revit-2024-bim.json`：9 个选项卡
+  （建筑/结构/插入/注释/分析/体量和场地/协作/视图/管理）及其面板顺序。只转录结构，图标自绘，
+  不复制参考软件资源、截图或手册正文。
+- 命令接线仍按 D5：通用编辑/标注/文字/导入/链接/实体/视图导航/管理/BIM 浏览等真实命令走
+  `runItem` → `shell.canCommand` → `cad_command`/`runAction`；墙体、门窗、楼板、屋顶、楼梯、
+  梁柱支撑、基础、钢筋、房间、空间、标高/轴网、地形、工作共享、复制/监视等无内核的 Revit 工具
+  是 `RibbonPendingItem`（`bim.pending.kernel`）。项目浏览器与 Revit 式明细表没有数据源，
+  保持 pending 面板；Revit 的上下文“修改”选项卡不建模。
+- 托盘只有一个槽且在右侧；Revit 的左侧停靠是位置近似，面板顺序与含义按参考，不声称停靠一致。
+  紧凑布局把已注册的 BIM 面板折入现有 `MobileRibbonDrawer`。
+- **未实现/未验证**：BIM 构件内核、视图/图纸树、族编辑器、工作共享；真实窗口/GPU/像素与
+  Windows/macOS/Android/Web 运行结论一律 **NOT VERIFIED**。`bim.png` golden 基线早于本界面，
+  需重新生成（NOT RUN）。
 
 ## 后果
 

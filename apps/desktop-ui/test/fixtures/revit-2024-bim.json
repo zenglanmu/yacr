@@ -1,0 +1,120 @@
+{
+  "ribbonOrder": [
+    "bim.architecture",
+    "bim.structure",
+    "bim.insert",
+    "bim.annotate",
+    "bim.analyze",
+    "bim.massing",
+    "bim.collaborate",
+    "bim.view",
+    "bim.manage"
+  ],
+  "tabs": {
+    "bim.architecture": [
+      "bim.build",
+      "bim.rooms",
+      "bim.datum",
+      "bim.modify"
+    ],
+    "bim.structure": [
+      "bim.framing",
+      "bim.foundation",
+      "bim.reinforcement",
+      "bim.connections"
+    ],
+    "bim.insert": [
+      "bim.link",
+      "bim.import",
+      "bim.family",
+      "bim.library"
+    ],
+    "bim.annotate": [
+      "bim.dimension",
+      "bim.text",
+      "bim.tag",
+      "bim.detail"
+    ],
+    "bim.analyze": [
+      "bim.schedules",
+      "bim.measure",
+      "bim.spaces"
+    ],
+    "bim.massing": [
+      "bim.massing",
+      "bim.site"
+    ],
+    "bim.collaborate": [
+      "bim.coordination",
+      "bim.worksharing",
+      "bim.link_models"
+    ],
+    "bim.view": [
+      "bim.graphics",
+      "bim.navigate",
+      "bim.standard_views",
+      "bim.windows"
+    ],
+    "bim.manage": [
+      "bim.parameters",
+      "bim.project",
+      "bim.settings",
+      "bim.inquiry"
+    ]
+  },
+  "tray": [
+    "bim.properties",
+    "bim.project_browser",
+    "bim.visibility",
+    "bim.browse",
+    "bim.schedule_view",
+    "bim.instructor"
+  ],
+  "pendingTools": [
+    "bim.area",
+    "bim.beam",
+    "bim.brace",
+    "bim.building_pad",
+    "bim.ceiling",
+    "bim.column",
+    "bim.connection",
+    "bim.coordination_review",
+    "bim.copy_monitor",
+    "bim.cover",
+    "bim.door",
+    "bim.floor",
+    "bim.grid",
+    "bim.isolated_foundation",
+    "bim.level",
+    "bim.link_ifc",
+    "bim.link_ifc_model",
+    "bim.link_revit",
+    "bim.link_revit_model",
+    "bim.load_family",
+    "bim.load_family_type",
+    "bim.mass_insitu",
+    "bim.material_tag",
+    "bim.modify_connection",
+    "bim.pile_foundation",
+    "bim.ramp",
+    "bim.rebar",
+    "bim.rebar_set",
+    "bim.reference_plane",
+    "bim.reload_latest",
+    "bim.roof",
+    "bim.room",
+    "bim.schedule",
+    "bim.site_split",
+    "bim.space",
+    "bim.stair",
+    "bim.sync",
+    "bim.tag",
+    "bim.toposurface",
+    "bim.truss",
+    "bim.wall",
+    "bim.wall_foundation",
+    "bim.window",
+    "bim.worksets",
+    "bim.zone"
+  ]
+}

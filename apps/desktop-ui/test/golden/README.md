@@ -7,7 +7,11 @@ the four application-domain shells at 1600×1000 CSS px (`apps/desktop-ui` built
 - software Chromium (`chrome-headless-shell`, no GPU), not GPU/pixel/performance
   acceptance;
 - the reference applications' manual screenshots are **not** stored here (copyright);
-  the structural transcription lives in `apps/desktop-ui/test/fixtures/autocad-2024-drafting.json`;
+  the structural transcriptions live in `apps/desktop-ui/test/fixtures/`
+  (`autocad-2024-drafting.json`, `revit-2024-bim.json`, `sketchup-2024-concept.json`);
+- **`bim.png` and `concept.png` are stale**: they predate the wired BIM ribbon and
+  concept domain. Regenerating them needs the browser/font toolchain; that run is
+  **NOT DONE**;
 - a diff means "the rendered chrome changed", not "the app is broken".
 
 Update / verify:

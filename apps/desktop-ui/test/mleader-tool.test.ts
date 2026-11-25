@@ -269,6 +269,9 @@ test('the text step keeps its generic semantics for MLEADER — no special case'
   assert.deepEqual(owners, [
     'argument-commands.ts', 'argument-mleader-grammar.ts',
     'cad.ts', 'catalog-extended.ts', 'catalog.ts', 'gating.ts', 'icons.tsx', 'panel-items.ts',
+    // The BIM domain ribbon lists the generic MLEADER/QLEADER commands in its
+    // annotation panel; it is a listing, not a leader-specific code path.
+    'ribbon.ts',
   ]);
 });
 

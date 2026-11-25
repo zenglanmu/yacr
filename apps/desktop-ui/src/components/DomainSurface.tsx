@@ -1,9 +1,9 @@
 // The domain fallback notice.
 //
 // A file can report a domain whose **native interface** is not wired in this
-// build: the two remaining placeholders (`bim`, `mechanical`) and, defensively,
-// a token this build does not know (the host schema rejects those on open, but
-// an older/newer host may still send one). The chrome then renders the default
+// build: the remaining placeholder (`mechanical`) and, defensively, a token this
+// build does not know (the host schema rejects those on open, but an older/newer
+// host may still send one). The chrome then renders the default
 // drafting interface — the most complete one — instead of hiding the ribbon and
 // command line behind a dead end.
 //

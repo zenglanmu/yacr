@@ -4,16 +4,21 @@
 > [`docs/application-domains.md`](application-domains.md)。本文件只描述**实现契约**，
 > 不重复平台证据表。
 
-## 1. 三个槽
+## 1. 四个槽
 
-`apps/desktop-ui/src/domains/ui/` 把域界面拆成三个**数据槽**。React 树只有一棵，槽只决定
+`apps/desktop-ui/src/domains/ui/` 把域界面拆成四个**数据槽**。React 树只有一棵，槽只决定
 “这一块渲染什么”，不 fork 组件、不新增第二套 UI。
 
 | 槽 | 数据 | 渲染位置 |
 |---|---|---|
+| `ribbon` | `RibbonTab[]`（一个 tab = 一个 ribbon 选项卡） | 顶部 `DomainRibbonBand`（`bim`） |
 | `menu` | `RibbonTab[]`（一个 tab = 一个顶层菜单） | 顶部 `DomainMenuBar`（`concept`）或折叠 ribbon 的菜单栏（`cad2d`） |
 | `toolbar` | `RibbonPanel[]`（一个 panel = 一个工具组） | 左侧 `DomainToolbar`（`concept` 的 Large Tool Set） |
-| `tray` | `TrayPanel[]`（内置 body 的声明式面板） | 右侧 `DomainTray`（`concept` 的默认托盘） |
+| `tray` | `TrayPanel[]`（内置 body 的声明式面板） | 右侧 `DomainTray`（`concept` 的默认托盘、`bim` 的属性/浏览托盘） |
+
+`ribbon` 与 `menu` 的数据形状相同（都是 `RibbonTab[]`），但渲染器不同：`ribbon` 是保留
+92px 面板带的真实功能区，`menu` 是下拉菜单栏。`cad2d` 的 profile 用内建 `Ribbon`，不读取槽；
+只有 `surface: 'domain-ribbon'` 的域才从槽渲染。
 
 槽不引入新的派发通路：每个可点项仍是 `RibbonItem`，经
 `itemEnabled` / `unavailable` / `runItem` → `shell.canCommand` → `cad_command` 或
@@ -23,6 +28,11 @@
 
 ```ts
 import { registerDomainUi } from '../domains/ui/registry.ts';
+
+registerDomainUi('bim', {
+  ribbon: BIM_RIBBON_TABS,
+  tray: BIM_TRAY,
+});
 
 registerDomainUi('concept', {
   menu: CONCEPT_MENUS,
@@ -83,7 +93,7 @@ api.ui.register({
 ## 4. 验证
 
 ```bash
-(cd apps/desktop-ui && node --test test/concept-domain.test.ts)
+(cd apps/desktop-ui && node --test test/bim-domain.test.ts test/concept-domain.test.ts)
 (cd apps/desktop-ui && npm test)   # tsc + 全部前端契约
 python3 scripts/check-i18n.py
 python3 scripts/check-file-size.py
