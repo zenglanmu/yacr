@@ -147,6 +147,9 @@ fn every_extended_variant_has_one_table_row_and_normalizes() {
                 | ExtendedCommandId::AttSync
                 | ExtendedCommandId::BattOrder
                 | ExtendedCommandId::Burst
+                // DIMREASSOC clears a dimension text override (a drawing
+                // write); DIMREASSOCIATE stays a payload-free report.
+                | ExtendedCommandId::DimReassoc
         );
         assert_eq!(
             variant.requires_work_mode(),

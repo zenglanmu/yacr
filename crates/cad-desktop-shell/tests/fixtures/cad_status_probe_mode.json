@@ -63,7 +63,9 @@
   "snapGridEnabled": false,
   "snapKind": null,
   "snapSpacing": 10.0,
+  "textScreen": false,
   "theme": "dark",
   "tool": null,
+  "traySettings": true,
   "view": null
 }

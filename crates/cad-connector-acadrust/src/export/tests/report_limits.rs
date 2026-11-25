@@ -58,6 +58,10 @@ fn committed_fixtures_report_their_expected_losses() {
                 "export.dropped.unreferenced_block",
                 "export.note.style_resolved",
                 "export.note.units_missing",
+                // The fixture carries a VIEW table; the named-view export writes
+                // DXF's world-space height and reports that convention (see
+                // `export/views.rs`).
+                "export.view_camera_approximated",
             ],
         ),
     ];

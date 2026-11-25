@@ -281,38 +281,34 @@ fn a_wheel_notch_is_continuous_navigation_and_records_no_previous_step() {
 }
 
 #[test]
-fn a_pan_records_no_previous_step_either() {
+fn a_pan_records_one_previous_step_per_run() {
     let core = core();
     let steps_before = zoom_steps(&core);
     let camera_before = session_camera(&core);
-    // A middle-button drag is the pan gesture (a primary drag boxes).
-    let mut request = pointer_request(
-        &core,
-        cad_app::interaction::PointerPhase::Down,
-        [400.0, 300.0],
+    // A middle-button drag is the pan gesture (a primary drag boxes). Every
+    // move is one PAN command; the run records the pre-pan view once and the
+    // remaining moves merge into that same step.
+    let middle = |phase, position| {
+        let mut request = pointer_request(&core, phase, position);
+        if let InteractionRequest::Pointer { button, .. } = &mut request {
+            *button = Some(PointerButton::Middle);
+        }
+        dispatch_pointer(&core, request);
+    };
+    middle(cad_app::interaction::PointerPhase::Down, [400.0, 300.0]);
+    middle(cad_app::interaction::PointerPhase::Move, [460.0, 350.0]);
+    assert_eq!(
+        zoom_steps(&core),
+        steps_before + 1,
+        "the first PAN of a run records the pre-run view"
     );
-    if let InteractionRequest::Pointer { button, .. } = &mut request {
-        *button = Some(PointerButton::Middle);
-    }
-    dispatch_pointer(&core, request);
-    let mut request = pointer_request(
-        &core,
-        cad_app::interaction::PointerPhase::Move,
-        [500.0, 380.0],
+    middle(cad_app::interaction::PointerPhase::Move, [500.0, 380.0]);
+    assert_eq!(
+        zoom_steps(&core),
+        steps_before + 1,
+        "later moves of the same run merge into one step"
     );
-    if let InteractionRequest::Pointer { button, .. } = &mut request {
-        *button = Some(PointerButton::Middle);
-    }
-    dispatch_pointer(&core, request);
-    let mut request = pointer_request(
-        &core,
-        cad_app::interaction::PointerPhase::Up,
-        [500.0, 380.0],
-    );
-    if let InteractionRequest::Pointer { button, .. } = &mut request {
-        *button = Some(PointerButton::Middle);
-    }
-    dispatch_pointer(&core, request);
+    middle(cad_app::interaction::PointerPhase::Up, [500.0, 380.0]);
 
     assert_ne!(
         session_camera(&core),
@@ -321,7 +317,7 @@ fn a_pan_records_no_previous_step_either() {
     );
     assert_eq!(
         zoom_steps(&core),
-        steps_before,
-        "a pan is continuous navigation: it records no ZOOM PREVIOUS step"
+        steps_before + 1,
+        "one continuous pan run is one ZOOM PREVIOUS step"
     );
 }

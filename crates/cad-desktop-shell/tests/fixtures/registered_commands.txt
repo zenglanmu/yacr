@@ -1,3 +1,4 @@
+cad_action_recorder
 cad_api_call
 cad_api_poll
 cad_api_status
@@ -16,6 +17,7 @@ cad_open_popup
 cad_open_recent
 cad_open_recovery
 cad_orbit
+cad_param_list
 cad_pick_directory
 cad_recent_files
 cad_recovery_files

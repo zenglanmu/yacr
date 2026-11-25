@@ -328,8 +328,29 @@ fn a_document_without_the_flag_collects_nothing_and_does_not_move_the_revision()
 
     let writes = archive.writes();
     assert_eq!(writes.len(), 1);
+    // The durable save stamps persistence metadata (`document_times`) into the
+    // header before encoding; that is the save path's clock, not the resource
+    // collector. Everything else must be byte-for-byte the pre-save snapshot.
+    let mut written = writes[0].clone();
+    let mut expected = before.clone();
+    assert!(
+        written
+            .header
+            .variables
+            .get("document_times")
+            .is_some_and(|value| !value.is_null()),
+        "a durable save stamps document_times"
+    );
     assert_eq!(
-        writes[0], before,
+        expected.header.variables.get("document_times"),
+        None,
+        "the pre-save snapshot stores no instants"
+    );
+    if let Some(map) = written.header.variables.as_object_mut() {
+        map.remove("document_times");
+    }
+    assert_eq!(
+        written, expected,
         "the snapshot the store encodes is byte-for-byte the pre-feature one"
     );
     assert!(writes[0].resources.is_empty(), "no payloads were added");
