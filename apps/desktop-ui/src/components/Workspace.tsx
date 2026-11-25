@@ -51,6 +51,9 @@ import { closeParamsPanel } from '../params/panel.ts';
 import { useParamsPanelOpen } from '../params/use-params-panel.ts';
 import { closeRecorderPanel } from '../recorder/panel.ts';
 import { useRecorderPanelOpen } from '../recorder/use-recorder-panel.ts';
+import { DomainToolbar } from '../domains/ui/DomainToolbar.tsx';
+import { DomainTray } from '../domains/ui/DomainTray.tsx';
+import { ConceptShortcuts } from '../domains/concept/ConceptShortcuts.tsx';
 
 export function Workspace() {
   const { t } = useI18n();
@@ -120,11 +123,18 @@ export function Workspace() {
   // and every other value stay `native-below`, i.e. the compositing this tree has
   // always used, with no extra node in the partition.
   const domCanvas = surfaceModeFromShell(shell) === SURFACE_MODE_DOM_CANVAS;
+  // Slots are the profile's authority, not a hard-coded domain check: a domain
+  // that registers a `toolbar`/`tray` slot gets the column, and a profile that
+  // registers none (drafting, the placeholders) renders nothing. The compact
+  // layout keeps the one-drawer model for now (`MobileRibbonDrawer` folds the
+  // concept tool groups); the desktop columns are the reference carrier.
+  const slotsDesktop = !shell.mobile;
   return (
     <div className="region region--workspace workspace app-region">
       <div className={['workspace__left', leftOpen ? 'is-open' : ''].filter(Boolean).join(' ')}>
         {showStart ? <StartPanel /> : null}
       </div>
+      {slotsDesktop ? <DomainToolbar /> : null}
       <div className="workspace__canvas">
         {/* dom-canvas only: the in-DOM pixel carrier. It fills exactly the rect
             the host reports for `.native-input`, paints underneath it (later
@@ -207,6 +217,7 @@ export function Workspace() {
           ) : null}
         </div>
       </div>
+      {slotsDesktop ? <DomainTray /> : null}
       {/* The compact BIM sheet: the same panel as a bottom sheet, because the
           compact layout hides `.palette-layer`. Its backdrop is a real button
           (a press closes the sheet) and the panel owns Escape while focused. */}
@@ -230,6 +241,7 @@ export function Workspace() {
           <ActionRecorderPanel variant="floating" />
         </div>
       ) : null}
+      <ConceptShortcuts />
       <NavigationDock />
       <PluginNoticeHost />
       <HostNoticeHost />

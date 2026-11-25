@@ -79,6 +79,31 @@ token 以 `domain.unknown` 具名拒绝；文件信息面板显示只读域行�
 软件 Chromium、两次 0.000% diff）已落地在 `scripts/ui-golden.cjs` + `apps/desktop-ui/test/golden/ui/`，
 但 **CI 未接线**；每域主题持久化仍未实现（见 `docs/application-domains.md`）。
 
+## 实施更新（2026-11-25，阶段 3：concept）
+
+- `concept` 不再是占位：profile 为 `ribbon: true`、`surface: 'menu'`、`commandLine: false`、
+  `placeholder: false`。顶部区域由 `DomainMenuBar` 渲染，不再挂载 AutoCAD ribbon；命令行不渲染。
+- 新增**域/插件 UI 插槽**（`apps/desktop-ui/src/domains/ui/`）：`menu`（`RibbonTab[]`）、
+  `toolbar`（`RibbonPanel[]`，左列）、`tray`（声明式 `TrayPanel[]`，右列）。域用
+  `registerDomainUi` 注册；插件用 `registerPluginUi({domain:'*'|id,...})` 增量扩展菜单/工具组/
+  托盘，命令仍走 `runItem` → `shell.canCommand` → `cad_command`/`runAction`。插件面在
+  `apps/desktop-ui/src/plugins/ui.ts`；`cad-plugin-api` 的 `ui.register` **尚未**发布，不得把
+  它写进已发布能力表。
+- 结构按官方 Help 转录到 `apps/desktop-ui/test/fixtures/sketchup-2024-concept.json`：
+  9 个顶层菜单、8 个工具栏分组、托盘面板顺序、官方默认单键表。未实现工具用 `pendingKey`
+  的 disabled 行表示（`RibbonPendingItem`），不摆假按钮。
+- 操作逻辑：`ConceptShortcuts` 是唯一调用点；Space=Select（活动工具时发 `CANCEL`），
+  官方单键 + `Shift+Z`=FIT，输入框/弹窗/文本步/夹点期间让出键盘。状态栏为 concept 渲染
+  Measurements 框，复用宿主真实 `tool.params`；无参数时显示真实步骤提示，不伪造可输入值。
+- **未接线域回退**（用户指令，2026-11-25）：`bim`/`mechanical`（以及本版本不认识的 token）
+  不再隐藏功能区与命令行，而是回退到 `cad2d` 这一最成熟界面；`DomainSurface` 顶部提示条命名
+  请求的域，文档的 `application_domain` 与数据不变。`renderedDomain()` 是唯一回退判定，
+  ribbon/命令行/`data-domain` 主题都读它；`currentDomain()` 仍保留请求值用于提示与切换器。
+- **仍未实现/未验证**：推拉、跟随、剖面、位置相机/漫游/环视、材质、场景/阴影/雾/照片匹配、
+  推断锁定与吸附锁定；这些保持稳定拒绝或显式 pending。真实窗口/GPU/像素、Windows/macOS/
+  Android/Web 运行结论一律 **NOT VERIFIED**；concept 的紧凑抽屉只折入工具组（无第二套菜单/托盘），
+  `ui.register` 公共插件命名空间是后续阶段。
+
 ## 后果
 
 - 新增 minor 13；minor ≤ 12 归档照常可读，带域的 13 归档被旧构建按 `unsupported_minor` 拒绝。

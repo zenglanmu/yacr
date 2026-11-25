@@ -249,11 +249,14 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
   数据命令走 Tauri/native；`dom-canvas` 走 wasm adapter。Android 是 `native-below`，不要按
   `__YACR_RUNTIME__=android` 把 CAD 命令送到 wasm。
 - 应用域（ADR-0053）：`application_domain` 是**文档属性**（`document.json`，minor 13），profile 在
-  `src/domains/`（纯数据 + store）；`cad2d` 唯一完整，其余三域显式占位（隐藏功能区/命令行，不摆
-  可点假按钮）。有文档时切域写文档（`cad_set_application_domain`），无文档只预览；命令可用性仍由
-  文档能力决定，profile 只决定摆放与主题（`html[data-domain]`）。`DOMAIN` 是 **chrome-local**：
-  裸命令开切换器、`DOMAIN <id>` 写文档或预览（无 router 命令）；`cad2d` 的参考面板只接线已实现
-  命令（视口/坐标/内容/注释缩放），无实现的参考面板保持 `pending`。
+  `src/domains/`（纯数据 + store + `domains/ui/` 数据槽）。`cad2d` 与 `concept` 已接线；
+  `concept` 是菜单栏+左工具栏+右托盘，`cad2d` 是 ribbon+命令行。`bim`/`mechanical` 及未知 token
+  **回退到 `cad2d` 界面**（`renderedDomain()`），画面顶部提示条命名请求的域，文档域值与数据不变；
+  不得把参考软件的原生工具摆成可点假按钮。插件通过 `registerPluginUi` 增量扩展 menu/toolbar/tray，
+  命令仍过共享准入。有文档时切域写文档（`cad_set_application_domain`），无文档只预览；命令可用性
+  仍由文档能力决定，profile 只决定摆放与主题（`html[data-domain]` 取 `renderedDomain`）。
+  `DOMAIN` 是 **chrome-local**：裸命令开切换器、`DOMAIN <id>` 写文档或预览（无 router 命令）；
+  `cad2d` 的参考面板只接线已实现命令（视口/坐标/内容/注释缩放），无实现的参考面板保持 `pending`。
 - 移动端不是第二套 UI：同一 React 树，只按宽度切换。单源是
   `src/layout/layout-mode.ts` 的 `MOBILE_MAX_WIDTH = 1024`（含端点）。
 - 三份产物**不得互相覆盖**：桌面 `apps/desktop-ui/dist`、Web `apps/app-web/dist-ui`、

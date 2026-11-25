@@ -26,6 +26,7 @@ import {
   currentDomain,
   domainStoreSnapshot,
   previewDomain,
+  renderedDomain,
   setSwitcherOpen,
   subscribeDomainStore,
   toggleSwitcher,
@@ -42,13 +43,16 @@ export function DomainSwitcher() {
   const shell = useShell();
   const store = useSyncExternalStore(subscribeDomainStore, domainStoreSnapshot);
   const current = currentDomain(shell.status);
+  const rendered = renderedDomain(shell.status);
   const [failure, setFailure] = useState('');
 
   // The attribute is written before paint so a domain change and its colours land
-  // together; the default (no attribute) is the drafting profile.
+  // together. A profile whose native interface is not wired falls back to the
+  // drafting theme (and the drafting chrome), so the attribute is the **rendered**
+  // domain, not the requested one.
   useEffect(() => {
-    applyDomainAttribute(current);
-  }, [current]);
+    applyDomainAttribute(rendered);
+  }, [rendered]);
 
   // A document reports its own domain: the document-less preview must not linger
   // into the next welcome page.

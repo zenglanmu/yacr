@@ -55,6 +55,8 @@ interface UnavailableItem {
   readonly labelKey: string;
   readonly command?: string;
   readonly standardView?: string;
+  /** The item's own "not wired" sentence; it wins over every generic reason. */
+  readonly pendingKey?: string;
 }
 
 /**
@@ -65,6 +67,12 @@ interface UnavailableItem {
  * uses, including the standard-view IPC that never rides `cad_command`.
  */
 export function runItem(shell: ShellValue, item: RibbonItem) {
+  // The Select state is chrome-wide, not a domain file: a tool is cancelled by
+  // the same `CANCEL` Escape sends; with no tool the pointer is already Select.
+  if (item.action === 'select') {
+    if (shell.status?.tool) void shell.submitCommand('CANCEL');
+    return;
+  }
   if (item.action) return shell.runAction(item.action);
   // A standard view carries a payload, so it never rides the name-only command
   // funnel: the shell sends it on `cad_standard_view` through its own typed
@@ -86,6 +94,10 @@ export function runItem(shell: ShellValue, item: RibbonItem) {
  * visible text under the disabled cell instead of a tooltip.
  */
 export function unavailable(t: Translator, item: UnavailableItem, shell: ShellValue) {
+  // A domain/plugin item that deliberately has no dispatch token names its own
+  // missing capability. It is checked before the generic branches because it
+  // has neither a command nor a standard view to ask about.
+  if (item.pendingKey !== undefined) return t(item.pendingKey);
   if (item.standardView) {
     return t(standardViewUnavailableReasonKey(shell, item.standardView), { command: t(item.labelKey) });
   }

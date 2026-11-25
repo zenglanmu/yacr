@@ -38,6 +38,13 @@ interface RibbonItemBase {
   readonly activeKey?: CadStatusFlagKey;
   /** The item's own popover (a small caret); its entries are items too. */
   readonly variants?: readonly RibbonItem[];
+  /**
+   * A stable catalog sentence for an item this build **cannot** run (no
+   * dispatch token). It is the honest "not wired" state: the item is labelled
+   * and disabled, never a fake button, and the sentence names the missing
+   * capability instead of the generic refusal. A live item ignores it.
+   */
+  readonly pendingKey?: string;
 }
 
 /** One item's dispatch token: exactly one of the three families. */
@@ -65,13 +72,28 @@ export interface RibbonActionItem extends RibbonItemBase {
 }
 
 /**
+ * A labelled item this build deliberately does not wire.
+ *
+ * It carries **no** dispatch token, so `itemEnabled` is false and running it is
+ * a no-op; `pendingKey` supplies the refusal sentence. This is the shape a
+ * domain/plugin uses to keep a reference application's tool in place without
+ * pretending it exists.
+ */
+export interface RibbonPendingItem extends RibbonItemBase {
+  readonly command?: never;
+  readonly standardView?: never;
+  readonly action?: never;
+  readonly pendingKey: string;
+}
+
+/**
  * One ribbon button.
  *
  * The three dispatch tokens are a union rather than three optional fields: an
  * item that carried two of them would have no defined order, and `Ribbon.jsx`'s
  * dispatch checks one family at a time.
  */
-export type RibbonItem = RibbonCommandItem | RibbonStandardViewItem | RibbonActionItem;
+export type RibbonItem = RibbonCommandItem | RibbonStandardViewItem | RibbonActionItem | RibbonPendingItem;
 
 /** One panel of a tab. */
 export interface RibbonPanel {

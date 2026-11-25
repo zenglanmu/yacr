@@ -3,7 +3,7 @@
 // on. Pure Node tests — no DOM, no React.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readCatalog, readCss } from './helpers.ts';
+import { readCatalog, readCss, readModule } from './helpers.ts';
 import {
   DEFAULT_DOMAIN,
   DOMAIN_IDS,
@@ -13,6 +13,7 @@ import {
   domainOf,
   domainProfile,
   normalizeDomain,
+  unknownDomainToken,
   writeDomain,
 } from '../src/domains/domains.ts';
 import {
@@ -20,6 +21,7 @@ import {
   currentDomain,
   domainStoreSnapshot,
   previewDomain,
+  renderedDomain,
   resetDomainStore,
   setSwitcherOpen,
   toggleSwitcher,
@@ -35,16 +37,33 @@ test('a status token is read verbatim and anything else stays drafting', () => {
   assert.equal(domainOf(null), DEFAULT_DOMAIN);
 });
 
-test('only drafting is wired; the other three are explicit placeholders', () => {
+test('drafting and concept are wired; bim and mechanical stay explicit placeholders', () => {
   assert.deepEqual([...DOMAIN_IDS], ['cad2d', 'bim', 'concept', 'mechanical']);
   for (const id of DOMAIN_IDS) assert.equal(DOMAIN_PROFILES[id].id, id);
   assert.deepEqual(
-    { ribbon: DOMAIN_PROFILES.cad2d.ribbon, commandLine: DOMAIN_PROFILES.cad2d.commandLine, placeholder: DOMAIN_PROFILES.cad2d.placeholder },
-    { ribbon: true, commandLine: true, placeholder: false },
+    {
+      ribbon: DOMAIN_PROFILES.cad2d.ribbon,
+      surface: DOMAIN_PROFILES.cad2d.surface,
+      commandLine: DOMAIN_PROFILES.cad2d.commandLine,
+      placeholder: DOMAIN_PROFILES.cad2d.placeholder,
+    },
+    { ribbon: true, surface: 'ribbon', commandLine: true, placeholder: false },
   );
-  for (const id of ['bim', 'concept', 'mechanical']) {
+  // Concept is a SketchUp-style menubar + tool column + tray, not a ribbon and
+  // not a command-line profile; its value entry is the Measurements surface.
+  assert.deepEqual(
+    {
+      ribbon: DOMAIN_PROFILES.concept.ribbon,
+      surface: DOMAIN_PROFILES.concept.surface,
+      commandLine: DOMAIN_PROFILES.concept.commandLine,
+      placeholder: DOMAIN_PROFILES.concept.placeholder,
+    },
+    { ribbon: true, surface: 'menu', commandLine: false, placeholder: false },
+  );
+  for (const id of ['bim', 'mechanical']) {
     const profile = DOMAIN_PROFILES[id];
     assert.equal(profile.ribbon, false, `${id} must not show the drafting ribbon`);
+    assert.equal(profile.surface, 'ribbon');
     assert.equal(profile.commandLine, false, `${id} must not show the drafting command line`);
     assert.equal(profile.placeholder, true);
   }
@@ -76,6 +95,24 @@ test('the DOMAIN word opens the switcher or carries one domain token', () => {
   assert.equal(domainCommand('DOMAINS revit'), null);
   assert.equal(domainCommand(''), null);
   assert.equal(domainCommand(null), null);
+});
+
+test('an unwired or unknown domain falls back to the drafting interface', () => {
+  resetDomainStore();
+  // Known but not wired: the profile is a placeholder, so the chrome renders the
+  // default (drafting) interface while the document keeps its value.
+  assert.equal(renderedDomain({ documentLabel: 'a.rvt', applicationDomain: 'bim' }), 'cad2d');
+  assert.equal(renderedDomain({ documentLabel: 'a.sldprt', applicationDomain: 'mechanical' }), 'cad2d');
+  assert.equal(renderedDomain({ documentLabel: 'a.skp', applicationDomain: 'concept' }), 'concept');
+  // Unknown token: normalise to drafting and name the token for the notice.
+  assert.equal(unknownDomainToken({ applicationDomain: 'manufacturing' }), 'manufacturing');
+  assert.equal(unknownDomainToken({ applicationDomain: 'bim' }), null);
+  assert.equal(unknownDomainToken({}), null);
+  assert.equal(renderedDomain({ documentLabel: 'a.x', applicationDomain: 'manufacturing' }), 'cad2d');
+  // A no-document preview of a placeholder also falls back.
+  previewDomain('bim');
+  assert.equal(renderedDomain(null), 'cad2d');
+  clearPreviewDomain();
 });
 
 test('a document wins over the session preview', () => {
@@ -115,7 +152,17 @@ test('the write seam reports acceptance and the host refusal verbatim', async ()
   assert.deepEqual(rejected, { kind: 'failed', code: 'domain.unknown: revit' });
 });
 
-test('the stylesheet keys a token block on every placeholder domain', async () => {
+test('the chrome regions and theme read the rendered (fallback) domain', async () => {
+  const chrome = await readModule('domains/chrome.tsx');
+  assert.ok(chrome.includes('renderedDomain(shell.status)'), 'ribbon/command line must use the fallback');
+  const switcher = await readModule('components/DomainSwitcher.tsx');
+  assert.ok(switcher.includes('applyDomainAttribute(rendered)'), 'the theme follows the rendered domain');
+  const surface = await readModule('components/DomainSurface.tsx');
+  assert.ok(surface.includes("'domain.fallback_title'"), 'the fallback is disclosed, not silent');
+  assert.ok(surface.includes('unknownDomainToken'), 'an unknown token is named');
+});
+
+test('the stylesheet keys a token block on every non-drafting domain', async () => {
   const css = await readCss();
   for (const id of ['bim', 'concept', 'mechanical']) {
     assert.match(css, new RegExp(`\\[data-domain="${id}"\\]`), `${id} needs a token block`);
@@ -137,6 +184,10 @@ test('every domain string the chrome renders exists in both catalogs', async () 
     'domain.placeholder_tag',
     'domain.placeholder_title',
     'domain.placeholder_body',
+    'domain.fallback_title',
+    'domain.fallback_body',
+    'domain.fallback_unknown',
+    'domain.fallback_dismiss',
     'domain.return',
     'domain.switch_failed',
     'domain.unknown',

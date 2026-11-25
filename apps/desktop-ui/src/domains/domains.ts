@@ -6,11 +6,12 @@
 // becomes a guessed profile: a status that carries anything else reads as the
 // drafting profile, which is also the document-less default.
 //
-// Pass 1 renders the drafting profile exactly as before and the other three as
-// **explicit placeholders**: their chrome region (ribbon, command line) is not
-// drawn and a card names the missing profile, instead of showing AutoCAD tools
-// over a BIM document. No commands are added by a profile; enablement stays a
-// document-capability fact (ADR-0053 D5).
+// `cad2d` renders the drafting ribbon exactly as before; `concept` renders a
+// SketchUp-style menubar/tool column/tray from the domain UI slot registry;
+// `bim` and `mechanical` remain **explicit placeholders** whose native interface
+// is not wired, so their chrome falls back to the drafting profile (the most
+// complete one) while a notice names the requested domain. No commands are
+// added by a profile; enablement stays a document-capability fact (ADR-0053 D5).
 
 import type { Invoke } from '../host/invoke.ts';
 
@@ -25,7 +26,7 @@ export const DOMAIN_IDS: readonly DomainId[] = Object.freeze([
   'mechanical',
 ]);
 
-/** The domain-less default: drafting, the only fully wired profile. */
+/** The domain-less default: drafting (the reference `cad2d` profile). */
 export const DEFAULT_DOMAIN: DomainId = 'cad2d';
 
 /** One presentation profile. */
@@ -35,8 +36,13 @@ export interface DomainProfile {
   readonly labelKey: string;
   /** The catalog key of the reference application (tooltip/docs only). */
   readonly referenceKey: string;
-  /** Whether this profile draws the ribbon band. */
+  /** Whether this profile draws the top chrome band (ribbon or menubar). */
   readonly ribbon: boolean;
+  /**
+   * The top band's renderer: the drafting ribbon, or a real menu bar whose
+   * model/layout comes from the domain/plugin slot registry.
+   */
+  readonly surface: 'ribbon' | 'menu';
   /** Whether the typing command line is part of the profile. */
   readonly commandLine: boolean;
   /**
@@ -52,20 +58,25 @@ const profile = (
   ribbon: boolean,
   commandLine: boolean,
   placeholder: boolean,
+  surface: 'ribbon' | 'menu' = 'ribbon',
 ): DomainProfile => Object.freeze({
   id,
   labelKey: `domain.name.${id}`,
   referenceKey: `domain.reference.${id}`,
   ribbon,
+  surface,
   commandLine,
   placeholder,
 });
 
 /** The four profiles, frozen by token. */
 export const DOMAIN_PROFILES: Readonly<Record<DomainId, DomainProfile>> = Object.freeze({
-  cad2d: profile('cad2d', true, true, false),
+  cad2d: profile('cad2d', true, true, false, 'ribbon'),
   bim: profile('bim', false, false, true),
-  concept: profile('concept', false, false, true),
+  // Concept is wired as a SketchUp-style menubar + left tool column + right
+  // tray. It has no command line: its value entry is the Measurements surface
+  // in the status bar, as in the reference application.
+  concept: profile('concept', true, false, false, 'menu'),
   mechanical: profile('mechanical', false, false, true),
 });
 
@@ -74,6 +85,21 @@ export function normalizeDomain(value: unknown): DomainId | null {
   return typeof value === 'string' && (DOMAIN_IDS as readonly string[]).includes(value)
     ? value as DomainId
     : null;
+}
+
+/**
+ * The raw `cad_status.applicationDomain` token when this build does not know it.
+ *
+ * The host schema rejects unknown tokens on open (ADR-0053 D2), so this is the
+ * defensive path for a newer/older host: the chrome still falls back to drafting,
+ * but it can **name** the token instead of pretending the file declared nothing.
+ */
+export function unknownDomainToken(
+  status: { readonly applicationDomain?: unknown } | null | undefined,
+): string | null {
+  const value = status?.applicationDomain;
+  if (typeof value !== 'string' || value.trim().length === 0) return null;
+  return normalizeDomain(value) === null ? value : null;
 }
 
 /**

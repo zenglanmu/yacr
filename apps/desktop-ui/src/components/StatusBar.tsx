@@ -22,6 +22,7 @@ import { OPTIONS_KEYS } from '../options/options.ts';
 import { volatileStatusStore } from '../cad/status-cadence.ts';
 import { dispatchGrid, dispatchGridSnap, dispatchHoverPreview, dispatchObjectSnap, dispatchOrtho, gridSnapToggle, gridToggle, hoverPreviewToggle, objectSnapToggle, orthoToggle, snapKindLabelKey, toolStepPromptKey, traySettingsOn } from '../cad/cad.ts';
 import { openTraySettings } from '../chrome/surfaces.ts';
+import { currentDomain } from '../domains/store.ts';
 import { importProgressView } from '../cad/cad-status.ts';
 import { statusBannerText } from '../host/notice.ts';
 import { toolParameterViews } from '../tools/tool-parameters.ts';
@@ -117,6 +118,18 @@ export function StatusBar() {
   // remounts it: a half-typed draft can never follow the user to another tool
   // that owns the same parameter key (TEXT and MTEXT share `textHeight`).
   const toolParameters = toolParameterViews(shell.status, shell.canCommand, shell.toolParameterPending as ToolParameterPending | null);
+  // The concept profile's value entry is SketchUp's Measurements box, not a
+  // command line. The controls are the same host-projected tool parameters; a
+  // tool the host exposes no parameter for shows its real next-step prompt
+  // instead of an input that would accept a value the host cannot use.
+  const concept = currentDomain(shell.status) === 'concept';
+  const parameterControls = toolParameters.map(view => {
+    if (view.kind === 'flag') return <ParameterFlag key={`${tool?.key}:${view.key}`} view={view} onToggle={shell.toggleToolParameter} />;
+    if (view.choiceLayout === 'grid') return <ParameterGridChoices key={`${tool?.key}:${view.key}`} view={view} onChoose={shell.stepToolParameter} />;
+    if (view.choices) return <ParameterChoices key={`${tool?.key}:${view.key}`} view={view} onChoose={shell.stepToolParameter} />;
+    if (view.swatch) return <ParameterSwatch key={`${tool?.key}:${view.key}`} view={view} onChoose={shell.stepToolParameter} />;
+    return <ParameterStepper key={`${tool?.key}:${view.key}`} view={view} onStep={shell.stepToolParameter} />;
+  });
   // Announce only the phase here (rare changes); the steadily-incrementing
   // count/bytes stay in the document-tab bar, so a polite live region never
   // chatters on every tick.
@@ -223,23 +236,26 @@ export function StatusBar() {
           `overflow-x` reveals the rest instead of clipping it. Each control keeps
           its own 20px height and its own label, so the strip still reads as one
           line. */}
-      <div className={toolParameters.length > 0 ? 'statusbar__params' : 'statusbar__params is-empty'}>
-        {toolParameters.map(view => {
-          if (view.kind === 'flag') return <ParameterFlag key={`${tool?.key}:${view.key}`} view={view} onToggle={shell.toggleToolParameter} />;
-          // A named set whose codes are a position (MTEXT's nine attachment
-          // codes) opens the same names as a 3×3 grid from one chip: nine
-          // segments with readable names would not fit the strip.
-          if (view.choiceLayout === 'grid') return <ParameterGridChoices key={`${tool?.key}:${view.key}`} view={view} onChoose={shell.stepToolParameter} />;
-          // A closed set with catalog names (HATCH's predefined pattern, its gradient
-          // kind) renders the same row as a named chooser instead of a stepper: the
-          // wire value is still the integer code, but the user picks a name.
-          if (view.choices) return <ParameterChoices key={`${tool?.key}:${view.key}`} view={view} onChoose={shell.stepToolParameter} />;
-          // A colour row (HATCH's two gradient stops) is the same numeric row shown as
-          // a swatch: the integer ACI index still travels the one parameter channel.
-          if (view.swatch) return <ParameterSwatch key={`${tool?.key}:${view.key}`} view={view} onChoose={shell.stepToolParameter} />;
-          return <ParameterStepper key={`${tool?.key}:${view.key}`} view={view} onStep={shell.stepToolParameter} />;
-        })}
-      </div>
+      {concept ? (
+        <output className="concept-measurements" aria-label={t('concept.measurements')}>
+          <span className="concept-measurements__label">{t('concept.measurements')}</span>
+          <span className="concept-measurements__body">
+            {parameterControls.length > 0
+              ? parameterControls
+              : (
+                <span className="concept-measurements__hint">
+                  {tool
+                    ? t(toolStepKey ?? 'concept.measurements.prompt')
+                    : t('concept.measurements.idle')}
+                </span>
+              )}
+          </span>
+        </output>
+      ) : (
+        <div className={toolParameters.length > 0 ? 'statusbar__params' : 'statusbar__params is-empty'}>
+          {parameterControls}
+        </div>
+      )}
 
       <span className="statusbar__spacer" />
 

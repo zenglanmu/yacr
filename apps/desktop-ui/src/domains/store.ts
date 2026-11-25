@@ -12,7 +12,7 @@
 // `useSyncExternalStore`. Every function is a pure state transition over frozen
 // values, which is what the Node contract tests exercise without a DOM.
 
-import { domainOf } from './domains.ts';
+import { DEFAULT_DOMAIN, DOMAIN_PROFILES, domainOf } from './domains.ts';
 import type { DomainId } from './domains.ts';
 
 /** The observable value. */
@@ -58,6 +58,22 @@ export function currentDomain(
 ): DomainId {
   if (status?.documentLabel) return domainOf(status);
   return snapshot.preview ?? domainOf(status);
+}
+
+/**
+ * The profile the chrome actually renders.
+ *
+ * A known domain whose native interface is not wired in this build
+ * (`placeholder: true`) falls back to the drafting profile — the most complete
+ * interface. The document keeps its own domain/value; this is presentation only,
+ * and `DomainSurface` shows a notice naming the requested domain. An unknown
+ * token already normalises to drafting inside [`currentDomain`].
+ */
+export function renderedDomain(
+  status: { readonly applicationDomain?: unknown; readonly documentLabel?: unknown } | null | undefined,
+): DomainId {
+  const requested = currentDomain(status);
+  return DOMAIN_PROFILES[requested].placeholder ? DEFAULT_DOMAIN : requested;
 }
 
 /** Choose a preview profile (no document only; the caller decides when). */

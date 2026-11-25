@@ -3797,3 +3797,152 @@ button, input, select { font: inherit; color: inherit; }
 .params__hint { margin: 0; color: var(--text-muted); font-size: 11px; line-height: 1.4; }
 .params__notice { margin: 0; color: var(--danger); font-size: 11.5px; line-height: 1.4; }
 .params__danger { color: var(--danger); }
+
+/* Concept domain: SketchUp-style chrome (ADR-0053 stage 3) --------------- */
+/* The top row is a real menubar, not a collapsed ribbon: the trigger row is the
+   same 26px height, so the host's partition rect is unchanged. */
+.domain-menubar { background: var(--chrome); border-bottom: 1px solid var(--line); }
+
+/* The Large Tool Set column. It is a real flex column, so the CAD partition
+   starts beside it; the host samples `.native-input` after layout and resizes
+   its surface once. Icon-only cells keep the reference's compact column. */
+.concept-toolbar {
+  flex: 0 0 78px;
+  width: 78px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 5px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--chrome-2);
+  border-right: 1px solid var(--line);
+}
+.concept-toolgroup {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.concept-toolgroup:last-child { border-bottom: 0; padding-bottom: 0; }
+.concept-toolgrid {
+  display: grid;
+  grid-template-columns: repeat(2, 31px);
+  gap: 2px;
+  justify-content: center;
+}
+.concept-tool {
+  width: 31px;
+  height: 31px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.concept-tool:hover:not(.is-disabled) { background: var(--hover); color: var(--text); }
+.concept-tool.is-active {
+  background: var(--on);
+  border-color: var(--on);
+  color: var(--on-text);
+}
+.concept-tool.is-disabled { opacity: .42; cursor: default; }
+.concept-tool:focus-visible { outline: 2px solid var(--focus); outline-offset: -1px; }
+
+/* The default tray. Like the tool column it is a real flex column, not a
+   floating palette: the reference docks it on the right, and the shell's CAD
+   partition follows the reduced `.workspace__canvas` width. */
+.concept-tray {
+  /* The navigation dock is an absolute overlay on the window's right edge. The
+     tray reserves that column as padding so its content never sits under the
+     rail; the padding is the same opaque chrome, so it reads as one surface. */
+  flex: 0 0 calc(286px + var(--navrail-w));
+  width: calc(286px + var(--navrail-w));
+  padding-right: var(--navrail-w);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--chrome);
+  border-left: 1px solid var(--line);
+}
+.concept-tray__section { border-bottom: 1px solid var(--line-soft); }
+.concept-tray__summary {
+  display: flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 10px;
+  color: var(--text);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: .2px;
+  cursor: pointer;
+  user-select: none;
+}
+.concept-tray__summary:hover { background: var(--hover); }
+.concept-tray__summary:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.concept-tray__body { padding: 2px 10px 10px; }
+.concept-panel__hint {
+  margin: 0 0 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.concept-panel__name { margin: 0 0 4px; font-weight: 600; }
+.concept-panel__action {
+  min-height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--field);
+  color: var(--text);
+  cursor: pointer;
+}
+.concept-panel__action:hover:not(:disabled) { background: var(--hover); }
+.concept-panel__action:disabled { color: var(--text-disabled); cursor: default; }
+.concept-panel__styles { display: flex; flex-direction: column; gap: 6px; }
+.concept-rows { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.concept-rows li {
+  display: grid;
+  grid-template-columns: minmax(72px, 40%) 1fr;
+  gap: 6px;
+  min-height: 22px;
+  align-items: center;
+  border-bottom: 1px solid var(--line-soft);
+}
+.concept-rows__label { color: var(--text-muted); font-size: 11px; }
+.concept-rows__value {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The Measurements box: the concept profile's value entry in the status bar.
+   It is the same host-projected parameter controls, framed the way the
+   reference frames its one value field; no free-form input is added. */
+.concept-measurements {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 190px;
+  max-width: 44vw;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--field);
+  overflow-x: auto;
+}
+.concept-measurements__label {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-size: 10.5px;
+  letter-spacing: .3px;
+  text-transform: uppercase;
+}
+.concept-measurements__body { display: flex; align-items: center; gap: 6px; }
+.concept-measurements__hint { color: var(--text-muted); font-size: 11px; white-space: nowrap; }

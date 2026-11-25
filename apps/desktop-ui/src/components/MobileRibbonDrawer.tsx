@@ -35,8 +35,10 @@ import { useI18n, useShell } from '../context.ts';
 import type { ShellValue } from '../context.ts';
 import type { Translator } from '../i18n.ts';
 import { ribbonTab } from '../ribbon/ribbon-model.ts';
-import type { RibbonItem } from '../ribbon/ribbon-model.ts';
-import { mobileRibbonDomId, mobileRibbonSections, mobileRibbonTabs, panelRefusalKey, sharedRefusal } from '../layout/mobile-ribbon.ts';
+import type { RibbonItem, RibbonTab } from '../ribbon/ribbon-model.ts';
+import { mobileRibbonDomId, mobileRibbonSections, mobileRibbonSectionsFor, mobileRibbonTabs, panelRefusalKey, sharedRefusal } from '../layout/mobile-ribbon.ts';
+import { currentDomain } from '../domains/store.ts';
+import { CONCEPT_TOOLBAR } from '../domains/concept/toolbar.ts';
 import { layoutTabsView, layoutUnsupportedTitle } from '../layout/layout-tabs.ts';
 
 /** The drawer's DOM id: the floating menu button's `aria-controls` names it. */
@@ -183,7 +185,13 @@ export function MobileRibbonDrawer({ open, onClose }: MobileRibbonDrawerProps) {
   const shell = useShell();
   const drawerRef = useRef<HTMLDivElement | null>(null);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
-  const tab = ribbonTab(shell.ribbonTab);
+  // The compact layout is the same React tree but not a second definition: the
+  // concept profile folds its registered tool groups into this drawer instead of
+  // the drafting tab model, so a phone never shows AutoCAD tools over a
+  // SketchUp-domain document.
+  const concept = currentDomain(shell.status) === 'concept';
+  const conceptTab: RibbonTab = { id: 'concept', labelKey: 'domain.name.concept', panels: [] };
+  const tab = concept ? conceptTab : ribbonTab(shell.ribbonTab);
   // The compact chrome keeps one control (the floating menu button), so the open
   // drawing's name lives here: the same label the old top strip carried, one
   // ellipsized line, with the full name in `title` for a truncated one. On the
@@ -197,7 +205,14 @@ export function MobileRibbonDrawer({ open, onClose }: MobileRibbonDrawerProps) {
   // `false`: the compact layout never renders the desktop palettes, so the drawer
   // drops their toggles with the panels — the same carrier rule a `dom-canvas`
   // host uses, and the reason no button here can open a surface that is hidden.
-  const sections = useMemo(() => mobileRibbonSections(shell.ribbonTab, false), [shell.ribbonTab]);
+  const sections = useMemo(() => {
+    if (!concept) return mobileRibbonSections(shell.ribbonTab, false);
+    return CONCEPT_TOOLBAR.flatMap(group => mobileRibbonSectionsFor({
+      id: `concept.mobile.${group.id}`,
+      labelKey: 'domain.name.concept',
+      panels: [group],
+    }, false));
+  }, [concept, shell.ribbonTab]);
 
   // Escape closes the drawer and nothing else: the shell's global handler is
   // left alone (it also clears history/diagnostics on Escape, which is harmless
@@ -303,6 +318,7 @@ export function MobileRibbonDrawer({ open, onClose }: MobileRibbonDrawerProps) {
             </span>
           ))}
         </div>
+        {mobileRibbonTabs().length > 0 && !concept ? (
         <div className="mobile-drawer__tabs" role="tablist" aria-label={t('ribbon.tabs_label')}>
           {mobileRibbonTabs().map(entry => (
             <button
@@ -321,6 +337,7 @@ export function MobileRibbonDrawer({ open, onClose }: MobileRibbonDrawerProps) {
             </button>
           ))}
         </div>
+        ) : null}
         <div className="mobile-drawer__body" role="tabpanel" aria-label={t(tab.labelKey)}>
           {sections.map(section => {
             const note = sectionRefusal(shell, t, section.items);

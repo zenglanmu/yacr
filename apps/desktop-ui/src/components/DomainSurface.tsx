@@ -1,38 +1,47 @@
-// The placeholder domain card (ADR-0053 D8).
+// The domain fallback notice.
 //
-// The three non-drafting profiles are explicit placeholders in this build: their
-// ribbon and command line are not drawn (a BIM document must not show AutoCAD
-// draw tools), and this card says exactly what is missing instead of imitating the
-// reference application. It never disables or hides the geometry: the document is
-// still the same database and the file commands remain on the start/title chrome.
-import React from 'react';
+// A file can report a domain whose **native interface** is not wired in this
+// build: the two remaining placeholders (`bim`, `mechanical`) and, defensively,
+// a token this build does not know (the host schema rejects those on open, but
+// an older/newer host may still send one). The chrome then renders the default
+// drafting interface — the most complete one — instead of hiding the ribbon and
+// command line behind a dead end.
+//
+// That fallback is **presentation only**: the document, its `application_domain`
+// value and its data are unchanged. This notice is the disclosure that keeps the
+// fallback honest; it is a small top banner (not a modal and not a second UI),
+// and hiding it changes no state on the wire.
+import React, { useEffect, useState } from 'react';
 import { useI18n, useShell } from '../context.ts';
-import { invoke } from '../host/invoke.ts';
-import { DOMAIN_PROFILES, writeDomain } from '../domains/domains.ts';
-import { currentDomain, previewDomain } from '../domains/store.ts';
+import { DOMAIN_PROFILES, unknownDomainToken } from '../domains/domains.ts';
+import { currentDomain } from '../domains/store.ts';
 
 export function DomainSurface() {
   const { t } = useI18n();
   const shell = useShell();
-  const domain = currentDomain(shell.status);
-  const profile = DOMAIN_PROFILES[domain];
-  if (!profile.placeholder) return null;
-  const back = () => {
-    if (!shell.documentLabel) {
-      previewDomain('cad2d');
-      return;
-    }
-    void writeDomain(invoke, 'cad2d');
-  };
+  const requested = currentDomain(shell.status);
+  const profile = DOMAIN_PROFILES[requested];
+  const unknown = unknownDomainToken(shell.status);
+  const fallback = unknown !== null || profile.placeholder;
+  const [hidden, setHidden] = useState(false);
+
+  // A different requested domain (or a different document) is a new fact: show
+  // the notice again instead of carrying one document's dismissal to the next.
+  useEffect(() => { setHidden(false); }, [requested, unknown, shell.documentLabel]);
+
+  if (!fallback || hidden) return null;
+  const name = unknown ?? t(profile.labelKey);
   return (
     <div className="domain-surface" role="note">
-      <p className="domain-surface__title">
-        {t('domain.placeholder_title', { domain: t(profile.labelKey) })}
+      <p className="domain-surface__title">{t('domain.fallback_title', { domain: name })}</p>
+      {unknown !== null ? null : <p className="domain-surface__reference">{t(profile.referenceKey)}</p>}
+      <p className="domain-surface__body">
+        {unknown !== null
+          ? t('domain.fallback_unknown', { domain: unknown })
+          : t('domain.fallback_body')}
       </p>
-      <p className="domain-surface__reference">{t(profile.referenceKey)}</p>
-      <p className="domain-surface__body">{t('domain.placeholder_body')}</p>
-      <button type="button" className="domain-surface__action" onClick={back}>
-        {t('domain.return')}
+      <button type="button" className="domain-surface__action" onClick={() => setHidden(true)}>
+        {t('domain.fallback_dismiss')}
       </button>
     </div>
   );

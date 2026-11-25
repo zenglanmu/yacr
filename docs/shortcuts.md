@@ -335,6 +335,20 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 | `Enter` | **仅当工具有效且焦点不在输入框**：确认（发 `CONFIRM`）；否则交给输入控件/命令行 | `toolCommandForKey` |
 | `Esc` | 有活动工具或夹点拖拽时发 `CANCEL`；否则关闭历史/诊断面板、让聚焦输入框失焦（**不清除选择**） | `App.tsx` + `toolCommandForKey` |
 
+**`concept` 域（SketchUp 参考）的固定键位（2026-11-25）**：只在渲染
+`application_domain = concept` 时生效，表在 `apps/desktop-ui/src/domains/concept/shortcuts.ts`，
+唯一调用点是 `ConceptShortcuts`（`Workspace` 挂载）。它仍走 `shell.canCommand` + `submitCommand`
+同一入口；输入框、弹窗、工具终态文本步（`awaiting_text`）与夹点拖拽期间全部让给原所有者。
+
+| 键 | 动作 |
+|---|---|
+| `Space` | Select 状态：有活动工具时发 `CANCEL`（与 Esc 同义），无工具时已是空闲指针 |
+| `E` / `L` / `R` / `C` / `A` | `ERASE` / `LINE` / `RECTANG` / `CIRCLE` / `ARC` |
+| `M` / `Q` / `S` / `F` | `MOVE` / `ROTATE` / `SCALE` / `OFFSET`（官方表把 Offset 放在 F，O 是 Orbit） |
+| `P` / `B` / `G` | `PRESSPULL` / `MATERIALS` / `BLOCK`（前两者当前是稳定的宿主拒绝） |
+| `T` / `O` / `H` / `Z` | `DIST` / `ORBIT` / `PAN` / `ZOOMIN`（宿主没有连续的 `ZOOM` 工具） |
+| `Shift+Z` | `FIT`（Zoom Extents） |
+
 **加速器表的三条规则（`commands/accelerators.ts`，一个调用点）**
 
 - **表是纯函数**：`acceleratorCommand(event, context)` 只做「键 → 命令名」，不含 DOM/React/dispatch；

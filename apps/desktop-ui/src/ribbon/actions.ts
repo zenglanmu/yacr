@@ -33,6 +33,13 @@ export const SHELL_ACTIONS = Object.freeze({
   // the panel reads `cad_action_recorder` and sends `ACTRECORD`/`ACTSTOP`/
   // `ACTMANAGER` through `cad_command`; there is no payload-free panel command.
   actionRecorder: 'actionRecorder',
+  /**
+   * The idle pointer (SketchUp's Select). It is not a router command: with a
+   * tool active it sends the same `CANCEL` Escape sends, and with no tool it is
+   * already the state. `runItem` handles it before the shell-action table so
+   * every surface (band, menu, tray, compact drawer) shares one behaviour.
+   */
+  select: 'select',
 });
 
 /** The shell actions that toggle a desktop palette window. */

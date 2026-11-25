@@ -361,8 +361,10 @@ test('the menubar dispatches only through the band\'s own funnel', async () => {
   assert.ok(!source.includes('canCommand('), 'admission must not be re-derived locally');
   assert.ok(!source.includes('DOCUMENT_SCOPED_COMMANDS'), 'document gating belongs to `unavailable`');
   assert.ok(!source.includes('panelLauncherCommand'), 'the band launcher has no menu equivalent');
-  // The same model, one trigger per tab.
-  assert.ok(source.includes('RIBBON_TABS.map'), 'the triggers are the model\'s tabs');
+  // The same model, one trigger per tab. The component defaults to `RIBBON_TABS`
+  // and a domain may pass its own menu model (the concept profile does).
+  assert.ok(source.includes('tabs = RIBBON_TABS'), 'the drafting model stays the default');
+  assert.ok(source.includes('tabs.map'), 'the triggers are the model\'s tabs');
   assert.ok(source.includes('ribbonMenuEntriesFor('), 'the menus come from the shared projection');
 });
 

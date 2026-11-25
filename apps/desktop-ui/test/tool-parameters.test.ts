@@ -531,7 +531,7 @@ test('the status bar renders the group from status and never mirrors it locally'
   // loose context field so the pure view can type it.
   assert.match(statusbar, /toolParameterViews\(shell\.status, shell\.canCommand, shell\.toolParameterPending(?:\s+as\s+[^)]+)?\)/);
   // Only parameters with a real projected value render: the map yields the views.
-  assert.ok(statusbar.includes('{toolParameters.map(view =>'));
+  assert.ok(statusbar.includes('toolParameters.map(view =>'));
   assert.ok(statusbar.includes("view.kind === 'flag'"));
   // The rendered number is the host value; a step dispatches the effective target
   // through the parameter key.

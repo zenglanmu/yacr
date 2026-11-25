@@ -51,7 +51,7 @@ import { useI18n, useShell } from '../context.ts';
 import type { ShellValue } from '../context.ts';
 import type { Translator } from '../i18n.ts';
 import { RIBBON_TABS } from '../ribbon/ribbon-model.ts';
-import type { RibbonItem } from '../ribbon/ribbon-model.ts';
+import type { RibbonItem, RibbonTab } from '../ribbon/ribbon-model.ts';
 import { ribbonMenuEntriesFor, panelStartsGroup, placeRibbonMenuLevel, ribbonMenuFlyoutAnchor, ribbonMenuMaxHeight, RIBBON_MENU_HOVER_OPEN_MS } from '../ribbon/ribbon-menu.ts';
 import type { RibbonMenuEntry, RibbonMenuRow } from '../ribbon/ribbon-menu.ts';
 import { edgeEnabledIndex, nextEnabledIndex } from '../commands/context-menu.ts';
@@ -145,8 +145,13 @@ function itemView(shell: ShellValue, row: RibbonMenuRow, depth: number, index: n
  * submenu-parent rows for the big panels. Every deeper level is just item rows:
  * a panel's items, or an item's variants.
  */
-function levelViews(shell: ShellValue, tabIndex: number, path: readonly number[]): RowView[][] {
-  const tab = RIBBON_TABS[tabIndex];
+function levelViews(
+  shell: ShellValue,
+  tabs: readonly RibbonTab[],
+  tabIndex: number,
+  path: readonly number[],
+): RowView[][] {
+  const tab = tabs[tabIndex];
   if (!tab) return [];
   const entries = ribbonMenuEntriesFor(tab, shell.palettesAvailable);
   const levels: RowView[][] = [tabViews(shell, entries, 0)];
@@ -277,16 +282,35 @@ function MenuSurface({ anchor, depth, label, activeId, rowsKey, maxHeight, takeF
 
 export interface RibbonMenuBarProps {
   /** Whether a menu is open, so the ribbon can lift its own stacking order. */
-  readonly onMenuOpenChange: (open: boolean) => void;
+  readonly onMenuOpenChange?: (open: boolean) => void;
+  /**
+   * The menus to render. Defaults to the drafting `RIBBON_TABS`; a domain
+   * profile (`concept`) passes its own transcription instead, so this component
+   * is one menu renderer rather than a second definition.
+   */
+  readonly tabs?: readonly RibbonTab[];
+  /**
+   * Whether to draw the expand affordance. It is the collapsed-ribbon control,
+   * so a domain whose top row is a real menu bar (not a collapsed band) hides
+   * it instead of offering an expand that has nothing to expand.
+   */
+  readonly showExpand?: boolean;
+  /** The catalog key of the menubar's accessible name. */
+  readonly labelKey?: string;
 }
 
-export function RibbonMenuBar({ onMenuOpenChange }: RibbonMenuBarProps) {
+export function RibbonMenuBar({
+  onMenuOpenChange,
+  tabs = RIBBON_TABS,
+  showExpand = true,
+  labelKey = 'ribbon.menubar_label',
+}: RibbonMenuBarProps) {
   const { t } = useI18n();
   const shell = useShell();
   const triggers = useRef<(HTMLButtonElement | null)[]>([]);
   const [state, setState] = useState<MenubarState | null>(null);
 
-  const levels = state ? levelViews(shell, state.tab, state.path) : [];
+  const levels = state ? levelViews(shell, tabs, state.tab, state.path) : [];
   // The keyboard listener is registered once per open state change; this ref is
   // how it reads the current rows without listing them in the effect deps (they
   // are rebuilt on every render, and re-registering per render would be churn).
@@ -298,8 +322,8 @@ export function RibbonMenuBar({ onMenuOpenChange }: RibbonMenuBarProps) {
   // siblings in the flex column.
   const open = state !== null;
   useEffect(() => {
-    onMenuOpenChange(open);
-    return open ? () => onMenuOpenChange(false) : undefined;
+    onMenuOpenChange?.(open);
+    return open ? () => onMenuOpenChange?.(false) : undefined;
   }, [open, onMenuOpenChange]);
 
   const focusTrigger = (tabIndex: number | null | undefined) => {
@@ -331,7 +355,9 @@ export function RibbonMenuBar({ onMenuOpenChange }: RibbonMenuBarProps) {
 
   const openTab = (tabIndex: number, node: Element | null, activateFirst: boolean) => {
     cancelHover();
-    const rows = tabViews(shell, ribbonMenuEntriesFor(RIBBON_TABS[tabIndex], shell.palettesAvailable), 0);
+    const tab = tabs[tabIndex];
+    if (!tab) return;
+    const rows = tabViews(shell, ribbonMenuEntriesFor(tab, shell.palettesAvailable), 0);
     setState({
       tab: tabIndex,
       anchors: [rectOf(node)],
@@ -573,12 +599,12 @@ export function RibbonMenuBar({ onMenuOpenChange }: RibbonMenuBarProps) {
     };
   }, [open]);
 
-  const activeTab = state ? RIBBON_TABS[state.tab] : undefined;
+  const activeTab = state ? tabs[state.tab] : undefined;
 
   return (
     <>
-      <div className="ribbon__menubar" role="menubar" aria-label={t('ribbon.menubar_label')}>
-        {RIBBON_TABS.map((entry, index) => {
+      <div className="ribbon__menubar" role="menubar" aria-label={t(labelKey)}>
+        {tabs.map((entry, index) => {
           const expanded = state?.tab === index;
           return (
             <button
@@ -607,7 +633,7 @@ export function RibbonMenuBar({ onMenuOpenChange }: RibbonMenuBarProps) {
                 if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
                   event.preventDefault();
                   const step = event.key === 'ArrowRight' ? 1 : -1;
-                  const next = (index + step + RIBBON_TABS.length) % RIBBON_TABS.length;
+                  const next = (index + step + tabs.length) % tabs.length;
                   focusTrigger(next);
                 }
               }}
@@ -617,19 +643,21 @@ export function RibbonMenuBar({ onMenuOpenChange }: RibbonMenuBarProps) {
           );
         })}
         <div className="ribbon-menubar__spacer" />
-        <IconButton
-          icon="chevronDown"
-          size="sm"
-          label={t('ribbon.expand')}
-          onClick={() => {
-            // Close first: the ribbon must not keep its menu stacking class once
-            // the band comes back.
-            cancelHover();
-            setState(null);
-            onMenuOpenChange(false);
-            shell.setRibbonCollapsed(false);
-          }}
-        />
+        {showExpand ? (
+          <IconButton
+            icon="chevronDown"
+            size="sm"
+            label={t('ribbon.expand')}
+            onClick={() => {
+              // Close first: the ribbon must not keep its menu stacking class once
+              // the band comes back.
+              cancelHover();
+              setState(null);
+              onMenuOpenChange?.(false);
+              shell.setRibbonCollapsed(false);
+            }}
+          />
+        ) : null}
       </div>
       {state && activeTab ? levels.map((rows, depth) => {
         const activeIndex = state.active[depth] ?? -1;

@@ -213,6 +213,8 @@ const P = {
   // A funnel: the property-filter disclosure. Three tapering rules, no fill.
   filter: <><path d="M4 6h16M7 12h10M10 18h4" /></>,
   properties: <><path d="M4 7h8M4 12h13M4 17h6" /><circle cx="17" cy="7" r="1.9" /><circle cx="15" cy="17" r="1.9" /></>,
+  // The idle pointer: an outlined arrow, the one glyph a Select state needs.
+  select: <><path d="M6 3.5 18.5 12 12 13.6 9 20z" /><path d="M12 13.6 17 19" /></>,
   selectAll: <><path d="M4 4h6M14 4h6M4 20h6M14 20h6M4 4v6M4 14v6M20 4v6M20 14v6" /><path d="M9 12.5l2.4 2.4L16 10" /></>,
   clearSelection: <><circle cx="12" cy="12" r="8" strokeDasharray="3 2" /><path d="M9 9l6 6M15 9l-6 6" /></>,
   diagnostics: <><path d="M3 12h3.5l2-5.5L12 18l2-7 1.5 1H21" /></>,
