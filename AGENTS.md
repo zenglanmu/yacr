@@ -345,3 +345,7 @@ tag 的 Release）；`web-deploy` 也只在该事件下把 `apps/app-web/dist-ui
 （部分历史条目已过期，以 workflow 与实际代码为准）、`docs/adr/`（0010、0017–0027）。
 `docs/linux-app.md`、`docs/verify-ui.md` 与旧宿主验证记录是历史材料，不得作为当前证据。
 发行说明按 `docs/release-notes/TEMPLATE.md` 写：只列用户可见变化，证据边界文末一句带过。
+**GitHub Release 的更新介绍必须是英文**：正文单独维护在 `docs/release-notes/en/<version>.md`
+（`build-landing-changelog.py` 只扫描 `docs/release-notes/` 顶层的 `v*.md`，`en/` 子目录不会
+进入落地页 changelog），`publish-release.yml` 的 `notes_file` 指向该英文文件；
+`docs/release-notes/<version>.md` 仍是落地页使用的中英双语源，两份内容必须一致。
