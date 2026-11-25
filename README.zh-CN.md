@@ -23,6 +23,9 @@
 - **其余格式也能进来看。** OBJ、STL、PLY、OFF、STEP（AP203/214/242）、glTF/GLB、IFC
   （2X3/4/4X3）作为可显示可拾取的网格导入；Revit 工程（`.rvt`/`.rte`）给包围盒预览，
   SketchUp 模型（`.skp`）给带贴图与真实显示边的三角面预览。
+- **选一套工作界面。** 四个应用域——二维绘图、建筑信息模型、概念建模、机械设计——各有自己的
+  界面与主题。域是文档属性，由导入来源推导（DWG/DXF/DGN、IFC/RVT、SKP、STEP），可用
+  `DOMAIN` 切换；四者共用同一棵 React 树与同一个 `cad-db`。
 - **2D 绘制与编辑。** LINE、POLYLINE、CIRCLE、ARC、ELLIPSE、SPLINE、POINT、RECTANGLE、
   POLYGON，文字、引线、表格、填充；移动、复制、旋转、缩放、镜像、修剪、延伸、打断、偏移、
   圆角、倒角、阵列、块参照，以及图层与属性写入——每一次编辑都走数据库事务，带撤销。
@@ -52,7 +55,7 @@
 | ![glTF 头盔](docs/images/readme/02-gltf-helmet.png)<br/>**glTF / PBR** — DamagedHelmet，真实贴图与材质通道 | ![STEP](docs/images/readme/03-step-3d.png)<br/>**STEP** — 装配体按实体 3D 导入 |
 | ![SketchUp](docs/images/readme/06-skp-preview.png)<br/>**SketchUp** — 房间、门窗与带贴图地面，三角面预览 | ![RVT](docs/images/readme/07-rvt-preview.png)<br/>**Revit** — 直接开的 `.rvt` 样本建筑预览 |
 
-## 两个决定产品形态的选择
+## 三个决定产品形态的选择
 
 ### 一个 Rust 核心，一套 React 界面，五种载体
 
@@ -64,6 +67,29 @@
 Windows、macOS、Android 上由 native 会话持有 `cad-db`，WebView 是覆盖在原生 CAD 表面上的
 透明层；X11/XWayland 与 Web 上由 wasm 会话持有，CAD 画在 DOM `<canvas>` 里。没有第二套界面，
 也没有第二份文档状态——更没有静默回退：某个载体不具备的能力，按名字显式拒绝。
+
+### 四个应用域，一棵 React 树
+
+Revit 工程不是制图问题，SketchUp 模型也不是机械零件。yacr 把它建模成文档级的**应用域**，
+而不是发布四个应用：
+
+- **`cad2d`**——AutoCAD 参考的制图功能区加命令行：文件、常用、插入、注释、参数化、视图、
+  管理、输出、附加模块。
+- **`bim`**——Revit 参考的功能区与左侧托盘：属性、项目浏览器、可见性、BIM 浏览、明细表；
+  没有命令行。BIM 视图面板的 6 个预设走 typed `cad_set_view`。
+- **`concept`**——SketchUp 参考的菜单栏、左侧工具集与右侧默认托盘。Space 选择、官方单键表、
+  Measurements 显示真实工具参数；`EXTRUDE` 与单面 `PRESSPULL` 走精确内核。
+- **`mechanical`**——SolidWorks 参考的固定初步子集功能区与左侧 FeatureManager /
+  PropertyManager；没有命令行，数值入口在状态栏。设计树是只读的宿主投影，不是重建的 B-rep。
+
+域是**文档属性**（`.ymodel` minor 13），由导入来源推导（DWG/DXF/DGN → 制图，IFC/RVT → BIM，
+SKP → 概念，STEP → 机械）。切换只改文档头——一个 revision，不转换数据；`DOMAIN` 打开切换器，
+无文档时只预览界面。profile 只决定布局与主题：命令可用性仍由文档能力决定，内核没有实现的工具
+保持 disabled 并给出稳定理由，不变成可点假按钮；未知 token 回退到最成熟的 `cad2d` 并在画面上方
+提示原始 token。
+
+选项卡与菜单顺序按参考手册转录为契约 fixture；图标与文案是 yacr 自己的，不是任何商业产品的
+像素克隆。四个域共用同一个 React 包与同一个 `cad-db`——没有第二套界面，也没有第二份文档状态。
 
 ### `.ymodel` — 自己的文档格式
 
@@ -113,6 +139,9 @@ cargo build -p cad-cli-tools --release --locked
 ## 已知限制
 
 - 不是生产级，DWG 兼容性没有针对语料验证过；各类实体保真度不一。
+- 四个应用域共用 React 树，但 BIM、概念与机械 profile 是结构转录且有界：BIM 构件内核、
+  视图/图纸与族编辑器、特征求值、装配体、工程图视图、材质尚未实现，对应工具显式 pending。
+  只有 Linux 宿主有运行证据；Windows/macOS/Android/Web 的域行为 **NOT VERIFIED**。
 - `.ymodel` 是原生格式。DWG 来源的图纸回写 DWG 仍是实验性的；其它导入来源存为 DXF。
 - 实体建模是有界能力（仅在编入实体模型器的载体上）：七种图元（BOX、CYLINDER、CONE、SPHERE、
   TORUS、WEDGE、PYRAMID）与 UNION/SUBTRACT/INTERSECT 在精确内核上可用（结果须为单壳）；拉伸、

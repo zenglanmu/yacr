@@ -149,7 +149,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "app-android"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "android_logger",
  "cad-db",
@@ -172,7 +172,7 @@ dependencies = [
 
 [[package]]
 name = "app-linux"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "ashpd",
  "cad-app",
@@ -205,7 +205,7 @@ dependencies = [
 
 [[package]]
 name = "app-macos"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "cad-app",
  "cad-db",
@@ -229,7 +229,7 @@ dependencies = [
 
 [[package]]
 name = "app-web"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "cad-app",
  "cad-db",
@@ -254,7 +254,7 @@ dependencies = [
 
 [[package]]
 name = "app-windows"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "cad-app",
  "cad-db",
@@ -691,7 +691,7 @@ dependencies = [
 
 [[package]]
 name = "cad-app"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "cad-connector-acadrust",
  "cad-connector-core",
@@ -723,7 +723,7 @@ dependencies = [
 
 [[package]]
 name = "cad-cli-tools"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "cad-app",
  "cad-connector-acadrust",
@@ -745,7 +745,7 @@ dependencies = [
 
 [[package]]
 name = "cad-connector-acadrust"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "acadrust",
  "cad-connector-core",
@@ -767,7 +767,7 @@ dependencies = [
 
 [[package]]
 name = "cad-connector-core"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "cad-db",
  "cad-domain",
@@ -777,7 +777,7 @@ dependencies = [
 
 [[package]]
 name = "cad-connector-dgn"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "cad-connector-core",
  "cad-db",
@@ -789,7 +789,7 @@ dependencies = [
 
 [[package]]
 name = "cad-connector-gltf"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "base64 0.22.1",
  "cad-connector-core",
@@ -802,7 +802,7 @@ dependencies = [
 
 [[package]]
 name = "cad-connector-ifc"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "cad-connector-core",
  "cad-connector-step",
@@ -818,7 +818,7 @@ dependencies = [
 
 [[package]]
 name = "cad-connector-mesh"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "cad-connector-core",
  "cad-db",
@@ -830,7 +830,7 @@ dependencies = [
 
 [[package]]
 name = "cad-connector-rvt"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "cad-connector-core",
  "cad-db",
@@ -844,7 +844,7 @@ dependencies = [
 
 [[package]]
 name = "cad-connector-skp"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "cad-connector-core",
  "cad-db",
@@ -856,7 +856,7 @@ dependencies = [
 
 [[package]]
 name = "cad-connector-step"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "cad-connector-core",
  "cad-db",
@@ -869,7 +869,7 @@ dependencies = [
 
 [[package]]
 name = "cad-db"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "cad-domain",
  "serde",
@@ -878,7 +878,7 @@ dependencies = [
 
 [[package]]
 name = "cad-dependencies"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "cad-db",
  "cad-domain",
@@ -886,7 +886,7 @@ dependencies = [
 
 [[package]]
 name = "cad-desktop-shell"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "cad-app",
  "cad-platform",
@@ -898,7 +898,7 @@ dependencies = [
 
 [[package]]
 name = "cad-diagnostics"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "cad-domain",
  "serde_json",
@@ -906,7 +906,7 @@ dependencies = [
 
 [[package]]
 name = "cad-domain"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "serde",
  "serde_json",
@@ -914,7 +914,7 @@ dependencies = [
 
 [[package]]
 name = "cad-engine"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "cad-app",
  "cad-db",
@@ -927,7 +927,7 @@ dependencies = [
 
 [[package]]
 name = "cad-geometry"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "cad-domain",
  "thiserror 2.0.21",
@@ -935,7 +935,7 @@ dependencies = [
 
 [[package]]
 name = "cad-history"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "cad-db",
  "cad-domain",
@@ -943,7 +943,7 @@ dependencies = [
 
 [[package]]
 name = "cad-host"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "cad-app",
  "cad-db",
@@ -962,7 +962,7 @@ dependencies = [
 
 [[package]]
 name = "cad-kernel-adapter"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "cad-domain",
  "cad-geometry",
@@ -970,7 +970,7 @@ dependencies = [
 
 [[package]]
 name = "cad-kernel-solidcore"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "cad-domain",
  "cad-kernel-adapter",
@@ -983,7 +983,7 @@ dependencies = [
 
 [[package]]
 name = "cad-measure"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "cad-db",
  "cad-domain",
@@ -993,7 +993,7 @@ dependencies = [
 
 [[package]]
 name = "cad-platform"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "cad-db",
  "cad-domain",
@@ -1004,7 +1004,7 @@ dependencies = [
 
 [[package]]
 name = "cad-proxy"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "cad-domain",
  "glam 0.34.3",
@@ -1012,7 +1012,7 @@ dependencies = [
 
 [[package]]
 name = "cad-query"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "cad-db",
  "cad-dependencies",
@@ -1021,7 +1021,7 @@ dependencies = [
 
 [[package]]
 name = "cad-render-wgpu"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "ash",
  "bytemuck",
@@ -1046,7 +1046,7 @@ dependencies = [
 
 [[package]]
 name = "cad-representation"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "cad-db",
  "cad-domain",
@@ -1061,7 +1061,7 @@ dependencies = [
 
 [[package]]
 name = "cad-resources"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "cad-domain",
  "png",
@@ -1071,7 +1071,7 @@ dependencies = [
 
 [[package]]
 name = "cad-scene"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "cad-db",
  "cad-dependencies",
@@ -1084,7 +1084,7 @@ dependencies = [
 
 [[package]]
 name = "cad-spatial"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "cad-domain",
  "cad-geometry",
@@ -1093,7 +1093,7 @@ dependencies = [
 
 [[package]]
 name = "cad-store-zip"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "cad-db",
  "cad-domain",
@@ -1106,7 +1106,7 @@ dependencies = [
 
 [[package]]
 name = "cad-ui-core"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "cad-app",
  "cad-db",

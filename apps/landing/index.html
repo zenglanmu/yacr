@@ -71,8 +71,9 @@
       </button>
 
       <nav class="site-nav" id="site-nav" data-aria-zh="主导航" data-aria-en="Primary navigation">
-        <a class="nav-link" href="#features" data-nav="features"><span class="lang--zh">功能</span><span class="lang--en" lang="en">Features</span></a>
         <a class="nav-link" href="#architecture" data-nav="architecture"><span class="lang--zh">架构</span><span class="lang--en" lang="en">Architecture</span></a>
+        <a class="nav-link" href="#domains" data-nav="domains"><span class="lang--zh">应用域</span><span class="lang--en" lang="en">Domains</span></a>
+        <a class="nav-link" href="#features" data-nav="features"><span class="lang--zh">功能</span><span class="lang--en" lang="en">Features</span></a>
         <a class="nav-link" href="#platforms" data-nav="platforms"><span class="lang--zh">平台</span><span class="lang--en" lang="en">Platforms</span></a>
         <a class="nav-link" href="#download" data-nav="download"><span class="lang--zh">下载</span><span class="lang--en" lang="en">Download</span></a>
         <a class="nav-link" href="#changelog" data-nav="changelog"><span class="lang--zh">更新日志</span><span class="lang--en" lang="en">Changelog</span></a>
@@ -614,10 +615,127 @@
       </div>
     </section>
 
+    <section class="section section--domains" id="domains" aria-labelledby="domains-title">
+      <div class="wrap">
+        <header class="section-head reveal">
+          <p class="section-index"><span class="idx">02</span><span class="rule" aria-hidden="true"></span><span class="lang--zh">应用域</span><span class="lang--en" lang="en">Application domains</span></p>
+          <h2 class="display" id="domains-title">
+            <span class="lang--zh">四套工作界面，<br>同一个文档内核。</span>
+            <span class="lang--en" lang="en">Four working surfaces.<br>One document core.</span>
+          </h2>
+          <p class="lead">
+            <span class="lang--zh">从 Revit 来的工程不是制图问题，SketchUp 模型也不是机械零件。yacr 用文档级的<strong>应用域</strong>决定界面：导入来源推导出域，域写入 <code>document.json</code>，同一棵 React 树按它渲染对应的功能区、菜单、托盘与主题。</span>
+            <span class="lang--en" lang="en">A Revit project is not a drafting problem and a SketchUp model is not a mechanical part. yacr uses a document-level <strong>application domain</strong> to choose the chrome: the import source derives the domain, the domain is written to <code>document.json</code>, and the same React tree renders the matching ribbon, menu, tray and theme.</span>
+          </p>
+        </header>
+
+        <div class="domain-flow reveal" role="list" data-aria-zh="应用域数据流：导入来源推导文档域，文档域选择界面 profile，界面 profile 只决定布局与主题" data-aria-en="Application-domain flow: the import source derives the document domain, the document domain selects the UI profile, and the profile only decides layout and theme">
+          <div class="domain-flow-node" role="listitem">
+            <span class="domain-flow-tag">01 / SOURCE</span>
+            <strong><span class="lang--zh">导入来源</span><span class="lang--en" lang="en">Import source</span></strong>
+            <span class="domain-flow-text">DWG · DXF · DGN / IFC · RVT / SKP / STEP</span>
+          </div>
+          <div class="domain-flow-arrow" aria-hidden="true"></div>
+          <div class="domain-flow-node" role="listitem">
+            <span class="domain-flow-tag">02 / DOCUMENT</span>
+            <strong><code>application_domain</code></strong>
+            <span class="domain-flow-text"><span class="lang--zh"><code>document.json</code> · 一个 revision · 不转换数据</span><span class="lang--en" lang="en"><code>document.json</code> · one revision · no data conversion</span></span>
+          </div>
+          <div class="domain-flow-arrow" aria-hidden="true"></div>
+          <div class="domain-flow-node" role="listitem">
+            <span class="domain-flow-tag">03 / PROFILE</span>
+            <strong><span class="lang--zh">界面 profile</span><span class="lang--en" lang="en">UI profile</span></strong>
+            <span class="domain-flow-text"><span class="lang--zh">布局 + 主题；命令可用性仍由文档能力决定</span><span class="lang--en" lang="en">Layout + theme only; command availability still follows the document</span></span>
+          </div>
+        </div>
+
+        <ul class="domain-grid">
+          <li class="domain-card domain-card--cad2d reveal">
+            <div class="domain-card-head">
+              <span class="domain-token">cad2d</span>
+              <span class="domain-badge"><span class="lang--zh">完整界面</span><span class="lang--en" lang="en">full interface</span></span>
+            </div>
+            <h3><span class="lang--zh">二维绘图</span><span class="lang--en" lang="en">2D drafting</span></h3>
+            <p class="domain-ref">AutoCAD-referenced ribbon · command line</p>
+            <p>
+              <span class="lang--zh">文件、常用、插入、注释、参数化、视图、管理、输出、附加模块。制图命令、命令行、属性与视口都在这条最成熟的界面上；打开 DWG/DXF/DGN 默认落在这里。</span>
+              <span class="lang--en" lang="en">File, Home, Insert, Annotate, Parametric, View, Manage, Output, Add-ins. Drafting commands, the command line, properties and viewports live on this most complete surface; DWG/DXF/DGN open here by default.</span>
+            </p>
+            <div class="domain-chips" aria-hidden="true"><span>RIBBON</span><span>COMMAND LINE</span><span>CAD2D</span></div>
+          </li>
+
+          <li class="domain-card domain-card--bim reveal reveal--d1">
+            <div class="domain-card-head">
+              <span class="domain-token">bim</span>
+              <span class="domain-badge domain-badge--warn"><span class="lang--zh">初步</span><span class="lang--en" lang="en">initial</span></span>
+            </div>
+            <h3><span class="lang--zh">建筑信息模型</span><span class="lang--en" lang="en">BIM</span></h3>
+            <p class="domain-ref">Revit-referenced ribbon · left tray</p>
+            <p>
+              <span class="lang--zh">建筑/结构/插入/注释/分析/体量和场地/协作/视图/管理九个选项卡，左侧属性、项目浏览器、可见性、BIM 浏览与明细表；没有命令行。BIM 视图的 6 个预设走 typed <code>cad_set_view</code>。</span>
+              <span class="lang--en" lang="en">Nine tabs (Architecture, Structure, Insert, Annotate, Analyze, Massing &amp; Site, Collaborate, View, Manage) with a left tray for properties, project browser, visibility, BIM browse and schedules; no command line. Six view presets go through typed <code>cad_set_view</code>.</span>
+            </p>
+            <div class="domain-chips" aria-hidden="true"><span>IFC / RVT</span><span>NO CMDLINE</span><span>PENDING KERNEL</span></div>
+          </li>
+
+          <li class="domain-card domain-card--concept reveal reveal--d2">
+            <div class="domain-card-head">
+              <span class="domain-token">concept</span>
+              <span class="domain-badge"><span class="lang--zh">初步</span><span class="lang--en" lang="en">initial</span></span>
+            </div>
+            <h3><span class="lang--zh">概念建模</span><span class="lang--en" lang="en">Concept modelling</span></h3>
+            <p class="domain-ref">SketchUp-referenced menus · tool set · tray</p>
+            <p>
+              <span class="lang--zh">菜单栏、左侧 Large Tool Set 与右侧默认托盘。Space 选择、官方单键表、状态栏 Measurements 读取真实工具参数；<code>EXTRUDE</code> 与单面 <code>PRESSPULL</code> 走精确内核，跟随、场景、阴影与材质仍是 pending。</span>
+              <span class="lang--en" lang="en">Menu bar, left Large Tool Set and right default tray. Space selects, the official single-key table works, and Measurements reads real tool parameters; <code>EXTRUDE</code> and one-face <code>PRESSPULL</code> run on the exact kernel, while follow-me, scenes, shadows and materials stay pending.</span>
+            </p>
+            <div class="domain-chips" aria-hidden="true"><span>SKP</span><span>SINGLE-KEY</span><span>MEASUREMENTS</span></div>
+          </li>
+
+          <li class="domain-card domain-card--mechanical reveal reveal--d3">
+            <div class="domain-card-head">
+              <span class="domain-token">mechanical</span>
+              <span class="domain-badge domain-badge--warn"><span class="lang--zh">初步</span><span class="lang--en" lang="en">initial</span></span>
+            </div>
+            <h3><span class="lang--zh">机械设计</span><span class="lang--en" lang="en">Mechanical</span></h3>
+            <p class="domain-ref">SolidWorks-referenced ribbon · FeatureManager</p>
+            <p>
+              <span class="lang--zh">固定的初步子集（文件/草图/特征/装配体/工程图/评估/视图/选项）与左侧 FeatureManager、PropertyManager；没有命令行，数值入口在状态栏。设计树是只读的 <code>cad_mechanical_tree</code> 投影：特征尚未求值，不冒充重建几何。</span>
+              <span class="lang--en" lang="en">A fixed initial subset (File, Sketch, Features, Assembly, Drawing, Evaluate, View, Options) with a left FeatureManager and PropertyManager; no command line, numeric entry in the status bar. The tree is a read-only <code>cad_mechanical_tree</code> projection: features are not evaluated and it does not pretend to rebuild geometry.</span>
+            </p>
+            <div class="domain-chips" aria-hidden="true"><span>STEP</span><span>FEATURE TREE</span><span>SCHEMA ONLY</span></div>
+          </li>
+        </ul>
+
+        <div class="ownership domain-notes reveal">
+          <div class="ownership-cell">
+            <span class="tag">DOCUMENT PROPERTY</span>
+            <p class="ownership-mode"><code>application_domain</code> · .ymodel minor 13</p>
+            <p class="ownership-text">
+              <span class="lang--zh">切换域只改文档头（一个 revision），不转换任何数据。裸 <code>DOMAIN</code> 打开切换器，<code>DOMAIN &lt;id&gt;</code> 有文档时写文档、无文档只预览。</span>
+              <span class="lang--en" lang="en">Switching changes only the document header (one revision) and converts no data. Bare <code>DOMAIN</code> opens the switcher; <code>DOMAIN &lt;id&gt;</code> writes the document when one is open and only previews otherwise.</span>
+            </p>
+          </div>
+          <div class="ownership-cell">
+            <span class="tag tag--cyan">ONE REACT TREE</span>
+            <p class="ownership-mode"><code>apps/desktop-ui/src/domains/</code></p>
+            <p class="ownership-text">
+              <span class="lang--zh">四个域共用同一套组件与同一个 <code>cad-db</code>；插件通过 <code>api.ui.register</code> 声明式扩展菜单、工具组与托盘。参考软件只贡献结构，图标与文案自有。</span>
+              <span class="lang--en" lang="en">All four domains share the same components and one <code>cad-db</code>; plugins extend menus, tool groups and trays declaratively through <code>api.ui.register</code>. Reference products contribute structure only; icons and copy are yacr's own.</span>
+            </p>
+          </div>
+          <p class="ownership-note">
+            <span class="lang--zh"><strong>没有假按钮。</strong>内核没有实现的工具保持 disabled/pending 并给出稳定原因；未知域回退到 <code>cad2d</code>，画面上方提示原始 token，文档数据不变。BIM/概念/机械的真实窗口、GPU 与像素结论仍集中在 Linux 的有界证据，其它载体 <strong>NOT VERIFIED</strong>。</span>
+            <span class="lang--en" lang="en"><strong>No fake buttons.</strong> Tools the kernel does not implement stay disabled/pending with a stable reason; an unknown domain falls back to <code>cad2d</code> with a notice naming the requested token, and document data is untouched. Real-window, GPU and pixel conclusions for BIM/concept/mechanical remain bounded Linux evidence; other carriers are <strong>NOT VERIFIED</strong>.</span>
+          </p>
+        </div>
+      </div>
+    </section>
+
     <section class="section section--features" id="features" aria-labelledby="features-title">
       <div class="wrap">
         <header class="section-head reveal">
-          <p class="section-index"><span class="idx">02</span><span class="rule" aria-hidden="true"></span><span class="lang--zh">功能</span><span class="lang--en" lang="en">Capabilities</span></p>
+          <p class="section-index"><span class="idx">03</span><span class="rule" aria-hidden="true"></span><span class="lang--zh">功能</span><span class="lang--en" lang="en">Capabilities</span></p>
           <h2 class="display" id="features-title">
             <span class="lang--zh">打开你手上的图纸，<br>看清、量准、改对。</span>
             <span class="lang--en" lang="en">Open your drawings.<br>See, measure, edit.</span>
@@ -701,8 +819,8 @@
             </div>
             <h3><span class="lang--zh">命令覆盖</span><span class="lang--en" lang="en">Command coverage</span></h3>
             <p>
-              <span class="lang--zh">979 条有实现路径（185 完整 + 794 部分），其余 2 条按同名不同义不计入（MEASURE / TRACE）。未支持的选项按名拒绝，不静默成功。</span>
-              <span class="lang--en" lang="en">979 commands have an implementation path (185 complete + 794 partial); the other 2 are counted as same-name-different-meaning (MEASURE, TRACE). Unsupported options are rejected by name, never silently accepted.</span>
+              <span class="lang--zh">979 条有实现路径（289 完整 + 690 部分），其余 2 条按同名不同义不计入（MEASURE / TRACE）。未支持的选项按名拒绝，不静默成功。</span>
+              <span class="lang--en" lang="en">979 commands have an implementation path (289 complete + 690 partial); the other 2 are counted as same-name-different-meaning (MEASURE, TRACE). Unsupported options are rejected by name, never silently accepted.</span>
             </p>
             <div class="coverage">
               <div class="coverage-top">
@@ -712,12 +830,12 @@
                   <span class="lang--zh">清单计数 · 非兼容率</span><span class="lang--en" lang="en">list count · not compatibility</span>
                 </span>
               </div>
-              <div class="coverage-bar" role="img" data-aria-zh="981 条命令：185 条完整、794 条部分、2 条未实现（同名不同义）" data-aria-en="981 commands: 185 complete, 794 partial, 2 not implemented (same name, different meaning)">
+              <div class="coverage-bar" role="img" data-aria-zh="981 条命令：289 条完整、690 条部分、2 条未实现（同名不同义）" data-aria-en="981 commands: 289 complete, 690 partial, 2 not implemented (same name, different meaning)">
                 <span class="seg seg--full"></span><span class="seg seg--partial"></span><span class="seg seg--none"></span>
               </div>
               <ul class="coverage-legend">
-                <li><span class="swatch swatch--full" aria-hidden="true"></span><strong>185</strong><span class="lang--zh">完整</span><span class="lang--en" lang="en">complete</span></li>
-                <li><span class="swatch swatch--partial" aria-hidden="true"></span><strong>794</strong><span class="lang--zh">部分</span><span class="lang--en" lang="en">partial</span></li>
+                <li><span class="swatch swatch--full" aria-hidden="true"></span><strong>289</strong><span class="lang--zh">完整</span><span class="lang--en" lang="en">complete</span></li>
+                <li><span class="swatch swatch--partial" aria-hidden="true"></span><strong>690</strong><span class="lang--zh">部分</span><span class="lang--en" lang="en">partial</span></li>
                 <li><span class="swatch swatch--none" aria-hidden="true"></span><strong>2</strong><span class="lang--zh">未实现</span><span class="lang--en" lang="en">not implemented</span></li>
               </ul>
             </div>
@@ -795,7 +913,7 @@
     <section class="section section--flow" id="workflow" aria-labelledby="workflow-title">
       <div class="wrap">
         <header class="section-head reveal">
-          <p class="section-index"><span class="idx">03</span><span class="rule" aria-hidden="true"></span><span class="lang--zh">工作流</span><span class="lang--en" lang="en">Workflow</span></p>
+          <p class="section-index"><span class="idx">04</span><span class="rule" aria-hidden="true"></span><span class="lang--zh">工作流</span><span class="lang--en" lang="en">Workflow</span></p>
           <h2 class="display" id="workflow-title">
             <span class="lang--zh">从打开到出图，四步。</span>
             <span class="lang--en" lang="en">From open to output, in four moves.</span>
@@ -850,7 +968,7 @@
     <section class="section section--platforms" id="platforms" aria-labelledby="platforms-title">
       <div class="wrap">
         <header class="section-head reveal">
-          <p class="section-index"><span class="idx">04</span><span class="rule" aria-hidden="true"></span><span class="lang--zh">平台</span><span class="lang--en" lang="en">Platforms</span></p>
+          <p class="section-index"><span class="idx">05</span><span class="rule" aria-hidden="true"></span><span class="lang--zh">平台</span><span class="lang--en" lang="en">Platforms</span></p>
           <h2 class="display" id="platforms-title">
             <span class="lang--zh">一个核心，五种载体。</span>
             <span class="lang--en" lang="en">One core. Five surfaces.</span>
@@ -944,7 +1062,7 @@
     <section class="section section--download" id="download" aria-labelledby="download-title">
       <div class="wrap">
         <header class="section-head section-head--download reveal">
-          <p class="section-index"><span class="idx">05</span><span class="rule" aria-hidden="true"></span><span class="lang--zh">下载</span><span class="lang--en" lang="en">Download</span></p>
+          <p class="section-index"><span class="idx">06</span><span class="rule" aria-hidden="true"></span><span class="lang--zh">下载</span><span class="lang--en" lang="en">Download</span></p>
           <h2 class="display" id="download-title">
             <span class="lang--zh">下载最新构建。</span>
             <span class="lang--en" lang="en">Get the latest build.</span>
@@ -1294,7 +1412,7 @@
     <section class="section section--changelog" id="changelog" aria-labelledby="changelog-title">
       <div class="wrap">
         <header class="section-head reveal">
-          <p class="section-index"><span class="idx">06</span><span class="rule" aria-hidden="true"></span><span class="lang--zh">更新日志</span><span class="lang--en" lang="en">Changelog</span></p>
+          <p class="section-index"><span class="idx">07</span><span class="rule" aria-hidden="true"></span><span class="lang--zh">更新日志</span><span class="lang--en" lang="en">Changelog</span></p>
           <h2 class="display" id="changelog-title">
             <span class="lang--zh">每一版，改了什么。</span>
             <span class="lang--en" lang="en">What changed, release by release.</span>
@@ -1353,7 +1471,7 @@
       <div class="wrap">
         <div class="faq-layout">
           <header class="faq-head reveal">
-            <p class="section-index"><span class="idx">07</span><span class="rule" aria-hidden="true"></span><span class="lang--zh">常见问题</span><span class="lang--en" lang="en">FAQ</span></p>
+            <p class="section-index"><span class="idx">08</span><span class="rule" aria-hidden="true"></span><span class="lang--zh">常见问题</span><span class="lang--en" lang="en">FAQ</span></p>
             <h2 class="display" id="faq-title">
               <span class="lang--zh">几个直接的问题。</span>
               <span class="lang--en" lang="en">Straight answers.</span>
@@ -1428,8 +1546,8 @@
               </summary>
               <div class="faq-a">
                 <p>
-                  <span class="lang--zh">它是命令清单的计数：981 条命令中 979 条有实现路径（185 完整 + 794 部分），其余 2 条（MEASURE / TRACE）按同名不同义不计入。它不是 AutoCAD 兼容率；未支持的选项会按名称拒绝，不会静默成功。</span>
-                  <span class="lang--en" lang="en">It is a count of the command list: of 981 commands, 979 have an implementation path (185 complete + 794 partial); the other 2 (MEASURE, TRACE) are counted as same-name-different-meaning. It is not an AutoCAD compatibility rate. Unsupported options are rejected by name, never silently accepted.</span>
+                  <span class="lang--zh">它是命令清单的计数：981 条命令中 979 条有实现路径（289 完整 + 690 部分），其余 2 条（MEASURE / TRACE）按同名不同义不计入。它不是 AutoCAD 兼容率；未支持的选项会按名称拒绝，不会静默成功。</span>
+                  <span class="lang--en" lang="en">It is a count of the command list: of 981 commands, 979 have an implementation path (289 complete + 690 partial); the other 2 (MEASURE, TRACE) are counted as same-name-different-meaning. It is not an AutoCAD compatibility rate. Unsupported options are rejected by name, never silently accepted.</span>
                 </p>
               </div>
             </details>
